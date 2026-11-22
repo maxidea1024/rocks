@@ -227,7 +227,7 @@ public:
         out = ::new (storage) PosixFileHandle(handle);
         return {};
     }
-    FileStatus Exists(const char* path, usize bytes, bool& exists) noexcept override {
+    FileStatus FileExists(const char* path, usize bytes, bool& exists) noexcept override {
         NativePath native;
         auto valid = native.Initialize(path, bytes);
         if (!valid) {

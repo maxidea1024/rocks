@@ -52,7 +52,7 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 플랫폼 파일 I/O는 `Platform/File.h`의 `FileSystem`·`FileHandle` 인터페이스와 소유형 `File`, Windows/macOS 물리 backend로 초기 구현하였다. `File::Open(path, mode)`는 물리 파일 시스템을 사용하며 `File::Open(system, path, mode)`는 지정한 파일 시스템을 사용한다. 두 편의 overload의 경로는 NUL로 끝나는 UTF-8이며 첫 NUL 이후를 읽지 않는다. embedded NUL을 검증해야 하는 입력은 파일 시스템과 길이를 명시하는 overload를 사용한다. 파일 열기·닫기·부분 읽기/쓰기·seek·크기·파일 존재 여부·삭제를 제공한다. `Read`/`Write`는 한 호출의 부분 전송량과 오류를 함께 반환하며 읽기 0바이트 성공은 EOF다. `ReadExact`/`WriteAll`은 전체 요청 중 같은 `File`의 위치를 직렬화하고 EOF·진행 없음·부분 실패를 구분한다. 독립된 `File` 간의 파일 내용·위치 일관성은 보장하지 않는다. `FileSystem`의 직접 호출자는 핸들의 직렬화·닫기·소멸과 backend 수명을 관리한다.
 
-현재 물리 구현은 UTF-8 범위의 유효성과 embedded NUL을 확인하고 Windows에서 UTF-16으로 변환한다. Windows 장치 namespace·확장 경로 및 레거시 DOS 장치 이름은 거부하지만 `FILE_TYPE_DISK` 검사만으로 모든 링크·재분석 대상이 일반 파일임을 보장하지 않는다. macOS 구현은 열린 대상의 일반 파일 여부를 검사한다. `Exists`의 결과는 이후 접근까지 유지되거나 보안 경계를 제공하지 않는다. `CreateAlways`는 이후 오류가 반환되어도 기존 파일이 잘렸을 수 있다. `Close` 실패 시 이전 native 핸들로 재시도하지 않으며 OS의 실제 자원 회수는 보장하지 않는다.
+현재 물리 구현은 UTF-8 범위의 유효성과 embedded NUL을 확인하고 Windows에서 UTF-16으로 변환한다. Windows 장치 namespace·확장 경로 및 레거시 DOS 장치 이름은 거부하지만 `FILE_TYPE_DISK` 검사만으로 모든 링크·재분석 대상이 일반 파일임을 보장하지 않는다. macOS 구현은 열린 대상의 일반 파일 여부를 검사한다. `FileExists`·`DirectoryExists`의 결과는 이후 접근까지 유지되거나 보안 경계를 제공하지 않는다. `CreateAlways`는 이후 오류가 반환되어도 기존 파일이 잘렸을 수 있다. `Close` 실패 시 이전 native 핸들로 재시도하지 않으며 OS의 실제 자원 회수는 보장하지 않는다.
 
 파일 시스템의 인터페이스는 wrapper 구현을 허용하지만, wrapper 체인 관리자와 `ReadAt`·`Flush`·`Truncate`·메모리 매핑 파일 기능은 아직 구현되지 않았다. 디렉터리·Stat·Copy/Move와 기본 경로는 아래 "디렉터리·파일 정보·기본 경로" 절을 따른다. wrapper의 구성·교체·동시 호출·종료, 부분 I/O와 OS 권한·오류의 규약을 후속 단계에서 검증한다. 기존 Windows 독립 테스트에서는 실제 심볼릭 링크 생성이 **SKIP**되었다. 이후 개발자 모드를 활성화하고 별도 재검증하여 유효한 파일 링크와 대상이 삭제된 링크의 판정을 확인했다. macOS 실기기와 실제 OS close 실패 주입도 미검증이다.
 
@@ -79,11 +79,15 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 ## 디렉터리·파일 정보·기본 경로 (2026-11-11 1차 구현)
 
+2026-11-23: 존재 확인 `Exists`를 `FileExists`로 개명하고 `DirectoryExists`를 더했다(UE 5.8 `IPlatformFile`과 같은 두 함수 — 이름이 모호해 디렉터리에도 참일 것으로 오해한 일이 있었다, 사용자 지시). 하위호환 이름은 두지 않는다.
+
 `FileSystem`에 `Stat`·`MakeDirectory`·`DeleteDirectory`·`EnumerateDirectory`·`Move`·`Copy`를 가상 함수로 추가했다. 기본 구현은 `Unsupported`이므로 기존 wrapper는 그대로 컴파일되고 지원하는 연산만 재정의한다. 이름은 Windows SDK 매크로(`CreateDirectory`·`RemoveDirectory`·`CopyFile`·`MoveFile`)와 겹치지 않게 정했다(UE는 매크로를 숨기는 방식을 쓴다).
 
 | 연산 | 계약 | Windows | POSIX(macOS 미빌드·Android) |
 |---|---|---|---|
 | `Stat` | link를 따라간 대상의 종류·크기·수정 시각, `isLink`는 경로 자체가 link인지. 시각은 0001-01-01 UTC 기준 100ns tick이며 9999-12-31 이후·0001-01-01 이전은 0. 대상 없는 link는 NotFound, 끝 구분자는 OS 규칙 | `OPEN_REPARSE_POINT` handle의 `FileAttributeTagInfo`(이름 대체 reparse tag만 link) + backup semantics handle의 `GetFileInformationByHandle` | `lstat` + `stat`, `st_mtimespec`/`st_mtim` |
+| `FileExists`(순수 가상) | link를 따라간 대상이 일반 파일이면 참, 디렉터리·없음(대상 없는 link 포함)은 거짓(UE 5.8 `IPlatformFile::FileExists` — `WindowsPlatformFile.cpp`의 FILE_ATTRIBUTE_DIRECTORY 거짓) | `CreateFileW`(BACKUP_SEMANTICS) 후 속성 | `stat` + `S_ISREG` |
+| `DirectoryExists` | link를 따라간 대상이 디렉터리면 참, 파일·없음은 거짓(UE `DirectoryExists`). 기본 구현은 `Stat`으로 판정한다(Stat이 없는 wrapper는 Unsupported) | `Stat` | `Stat` |
 | `MakeDirectory` | 한 단계, 이미 있으면 AlreadyExists | `CreateDirectoryW` | `mkdir(0700)` |
 | `DeleteDirectory` | 빈 디렉터리만, 비었지 않으면 DirectoryNotEmpty, 파일이면 WrongType, 디렉터리 link는 link만 | `RemoveDirectoryW` | `lstat` 후 `unlink`/`rmdir` |
 | `EnumerateDirectory` | 직접 자식, "."·".." 제외, 순서 없음, link를 따라가지 않은 항목 정보, visitor가 false면 중단 | `FindFirstFileExW`(large fetch) | `opendir`/`readdir` + `fstatat(AT_SYMLINK_NOFOLLOW)` |

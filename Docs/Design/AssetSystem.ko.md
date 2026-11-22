@@ -18,7 +18,7 @@
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
 | A2 | AssetDatabase(7.1절, 하위 단계 A2a–A2f): `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크, 각 단계의 13절 명령 | 인덱스·이동·동시 쓰기 시험(하위 단계마다 A1과 같은 완료 조건 넷) |
 | A3 | AssetNugget(9.1절, 하위 단계 A3a–A3c — Rockpile 레코드 계약): 키(공통 머리·세대·SCC)·Record(`.rnug` v2)·`NuggetFileSystemBackend`·`NuggetCache`(Memory 계층·세션 고정·소비 입력 대조)·일괄·비동기 요청, `NuggetRockpileBackend`는 계약 | 적중·무효화·손상·동시 기록·GC 시험 |
-| A4 | AssetCooker | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
+| A4 | AssetCooker(10.2절 — 하위 단계 A4a–A4e) | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
 | A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
 | A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고 | 14절 결과 기록 |
 
@@ -388,7 +388,7 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
     - 조회: ID, 경로(LogicalPath 키), 디렉터리(마운트 또는 논리 경로 아래 — 바로 아래만 또는 재귀), 대표 타입(정확 일치 또는 TypeRegistry로 파생 포함 — 미등록 id는 정확 일치), 태그(키·값 일치, 목록 값은 원소마다), 정방향 의존(종류 묶음), 역방향 참조자(종류 묶음). 결과는 경로 키 순이다.
     - 명령(13절): `asset-list [--under=<path>]`(경로·AssetId·대표 타입 id 한 줄씩), `asset-index-verify`(진단 줄, 있으면 종료 1). 타입 이름 필터(`--type`)와 `asset-info`의 속성 출력은 commandlet이 타입을 등록해야 해서 A2c(`asset-new`·`asset-set`과 함께)로 미룬다.
 14. **A2b 구현에서 정한 것**(2026-11-21, 시험·리뷰 중에 정했다):
-    - 디렉터리 존재: `FileSystem::Exists`는 일반 파일만 참이라(디렉터리는 거짓) Content 존재 확인에 쓰지 않는다 — 실제 디스크 시험이 이것을 잡았다. 열거 결과로 판단한다: 없는 디렉터리(Content가 없거나 검색 중 지워진 하위 디렉터리)는 빈 디렉터리다. Content 자신의 열거 실패(Content가 파일이면 WrongType 대응 오류 포함)는 `Rebuild`의 그 파일 오류이고, 하위 디렉터리의 열거 실패(권한 거부·검색 중 파일로 바뀜)는 그 디렉터리 이름으로 진단 None과 원본 오류를 남기고 그 디렉터리만 뺀다(파일 IO 실패와 같은 규칙). 실패한 `Rebuild`는 색인을 비운다(앞 결과를 남기지 않는다).
+    - 디렉터리 존재: `FileSystem::FileExists`는 일반 파일만 참이라(디렉터리는 거짓 — 디렉터리는 `DirectoryExists`) Content 존재 확인에 쓰지 않는다 — 실제 디스크 시험이 이것을 잡았다. 열거 결과로 판단한다: 없는 디렉터리(Content가 없거나 검색 중 지워진 하위 디렉터리)는 빈 디렉터리다. Content 자신의 열거 실패(Content가 파일이면 WrongType 대응 오류 포함)는 `Rebuild`의 그 파일 오류이고, 하위 디렉터리의 열거 실패(권한 거부·검색 중 파일로 바뀜)는 그 디렉터리 이름으로 진단 None과 원본 오류를 남기고 그 디렉터리만 뺀다(파일 IO 실패와 같은 규칙). 실패한 `Rebuild`는 색인을 비운다(앞 결과를 남기지 않는다).
     - 파일 하나의 실패는 그 파일만 빼고 계속한다: 열거와 열기 사이에 사라진 파일은 `MissingFile`, 그 밖의 열기·읽기 IO 실패는 진단 None과 원본 오류(쿠킹 로더 10.1절과 같은 규칙), 일반 파일이 아닌 항목(장치 등)은 무시한다. 확장자뿐인 이름(`.rasset` — 배치는 "패키지 파일 아님"으로 보지만 확장자 검사는 통과한다)은 하위 디렉터리의 같은 이름(`Dir/.rasset` → 끝 '/')과 같게 `InvalidPath`(EmptyComponent)다. 유효한 UTF-8이 아닌 OS 이름(POSIX 열거는 byte 그대로 준다)은 논리 경로도, 그 이름으로 다시 열 경로(String은 UTF-8만)도 만들 수 없어 디렉터리·패키지 파일이면 `InvalidPath`(InvalidComponent — 이름 규칙의 잘못된 UTF-8과 같은 사유)로 진단하고 내려가지 않는다(그 밖의 파일은 무시). 할당 실패만 `Rebuild` 오류다.
     - 진단의 이름(`fileName`·`related`)은 표시 이름이다: 한 줄·유효한 UTF-8이고 서로 다른 OS 이름이 같은 표시 이름이 되지 않게 역슬래시·제어 문자(0x00–0x1f·0x7f)와, 이름이 유효한 UTF-8이 아니면 0x80 이상 byte를 16진(역슬래시 x 두 자리)으로 적는다(역슬래시를 그대로 두면 글자 그대로 "\xff"인 이름과 0xFF byte 이름이 같아진다 — 재리뷰 지적). 항목의 `fileName`은 OS 이름 그대로다(색인되는 이름은 논리 경로 규칙상 역슬래시·제어 문자가 없다). 진단 줄은 표시 이름을 그대로 쓴다.
     - 정렬·조회: Core `algo::Sort`(O(n log n), 안정 정렬 아님)와 `algo::LowerBound`를 쓴다(처음 구현의 삽입 정렬은 색인 10만 항목에서 비교 수십억 번이라 리뷰가 바꾸게 했다). 비교는 전순서다: 항목은 OS 상대 이름이 파일마다 다르고, 진단은 한 이름에 코드마다 하나뿐이며(경로·패키지·Tags 진단은 서로 배타, 같은 id·경로 진단은 각각 하나), id 순은 같은 id를 경로 순 위치로 가른다. Tags 쓰기도 같은 정렬 뒤 이웃 비교로 같은 쌍을 거부한다.
@@ -756,7 +756,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - 이동이 AlreadyExists였는데 판정 때 항목이 없으면(GC·손상 삭제) 한 번 더 이동하고, 그것도 실패하면 `Dropped`(Busy)다. 이동의 다른 실패(delete-pending 이름의 AccessDenied 등)·디렉터리 만들기·쓰기·Flush·Close 실패는 `Dropped`(그 오류)이고 tmp를 지운다.
   - 기존 항목을 읽을 수 없으면(IO 오류·할당 실패) 손상으로 보지 않는다 — Get은 `Miss`(그 오류), Put은 `Dropped`(그 오류)이고 지우지 않는다. 손상(InvalidArgument)만 지운다.
   - GC는 루트의 16진 두 글자 디렉터리(link 아님) 안의 `<그 두 글자로 시작하는 64자 소문자 16진>.rnug` 일반 파일(link 아님)만 본다. 지우지 못한 항목은 `skipped`이고 남은 합에서 빼지 않는다. tmp 정리는 지난 `.tmp` 일반 파일만이다(디렉터리·다른 이름·잠금 파일은 둔다).
-  - `FileSystem::Exists`는 디렉터리에 거짓이다(UE `FileExists`와 같다 — 시험은 디렉터리를 Stat으로 본다. A3 뒤 `FileExists`·`DirectoryExists`로 바꾼다 — 사용자 지시 2026-11-22).
+  - `FileSystem::Exists`는 디렉터리에 거짓이다(UE `FileExists`와 같다 — 시험은 디렉터리를 Stat으로 본다). A3 뒤 `FileExists`·`DirectoryExists`로 바꿨다(사용자 지시 2026-11-22, PlatformLayer 문서 2026-11-23).
   - 리뷰 반영(필수 하나·권장 넷): 키별 잠금 파일을 tmp 정리가 try-lock 뒤 지우던 것을 고정 256개 shard 잠금(지우지 않음)으로 바꿨다(FileLock 계약 — POSIX에서 상호 배제가 깨졌다, 처음 설계의 "try-lock 뒤에만 지운다"는 틀렸다). Exists 확인을 고정 버퍼 흘려 읽기로(`VerifyNuggetValue`), 잠금 대기 상한 주입, 값 선택 중복 거부·이진 검색.
   - 남는 경합: 잠금 밖 경로(Get의 손상 삭제 + 다른 Put의 no-replace 이동)가 잠금 안 재판정과 `Replace` 사이에 끼면 새 정상 항목을 다른 정상 값으로 덮을 수 있다. 결과는 정상 값끼리의 교체이고(digest가 다르면 다른 세션에 `DigestChanged`) 틀린 적중은 아니다 — 모든 쓰기를 잠그지 않는 대가로 받아들인다(no-replace 이동이 동시 쓰기의 기본 경로).
 
@@ -781,11 +781,29 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - 열기 전 Get·Put은 통계에 세지 않는다(계약 위반). off·Store 없음·캐시 없음 Put은 `Dropped`로 센다.
   - 리뷰 반영(권장 넷): failed에서 한도 위반(CapacityExceeded)·일시 경합(Busy)을 뺐다(`IsFailure`), Memory 복사를 잠금 밖으로(공유 버퍼), `localPath`의 Windows 현재 드라이브 루트·드라이브 상대 거부(처음 구현은 PlatformBase에 상대 판정을 새로 더했으나 Core `Path::Root`가 이미 있어 되돌렸다), 고정 표 크기 기록.
 
+- A3c2 구현 세부(2026-11-22 착수 — 권장안으로 확정, 결정 12를 구체화):
+  - 파일 `NuggetRequest.h`. 항목 `NuggetGetItem{bucket, key, values, policy}`·`NuggetPutItem{bucket, key, values(Array<NuggetValue> — Start가 옮겨 간다), inputs, meta, policy}`. Start가 bucket·값 선택 목록·inputs·meta를 복사하고 Put 값 버퍼는 옮긴다(호출자 항목 배열은 Start 뒤 바로 놓아도 된다).
+  - `NuggetGetRequest`·`NuggetPutRequest`(호출자 소유·이동·복사 금지 — 결과 slot을 객체 안에 둔다): `Start(cache, items, scheduler)`, `RequestCancel()`, `Handle()`(완료 handle — 의존·Wait용), `Results()`(handle 완료 뒤 항목 순서 그대로, 시작 전 StaleHandle·완료 전 Busy), `Outcome()`(required 캐시에서 failed 항목이 있으면 DependencyFailed — 결정 10 "required면 그 요청 결과가 오류", 아니면 성공 — 결과와 같은 시점 규칙). 진행 중 Start는 Busy, 빈 항목 목록은 바로 완료다. 완료 뒤 같은 객체로 다시 Start할 수 있다.
+  - 완료 handle은 `WorkerTaskEvent`다: 남은 수를 (항목 수 + 1)로 두고 항목이 끝날 때마다 원자적으로 줄이며 Start가 제출을 마친 뒤 1을 줄인다 — 0이 되는 쪽이 캐시 진행 중 목록에서 빼고 Trigger한다(maxDependencies(16)에 묶이지 않는다, 제출 중에 완료되지 않는다). 항목마다 worker 작업 하나. 제출 실패(CapacityExceeded·ShuttingDown 등)는 그 항목과 뒤 항목을 `Dropped`(그 오류, 실패 아님)로 끝내고 이미 낸 항목은 끝까지 간다 — Start는 성공한다. 이벤트 만들기·결과 slot·입력 복사의 실패는 Start 실패(그 오류 — 아무것도 내지 않았다, 옮긴 Put 값은 항목에 남는다).
+  - 항목 작업의 capture는 ticket(요청·순번)을 쥔다. scheduler가 body를 실행하지 않고 capture를 정리하면(scheduler Shutdown(Cancel)·의존 실패) ticket 소멸자가 그 항목을 `Cancelled`로 끝낸다 — 요청이 영영 완료되지 않는 일이 없다.
+  - 취소는 협력적이다: 항목 작업이 시작할 때 요청 취소·작업 취소를 보면 `Cancelled`(Get·Put 모두 — FileSystem Put은 아직 쓰지 않았다), 진행 중 Get·Put은 끝낸다(캐시 연산은 동기 IO 단위). FileSystem에서 `Unknown`은 생기지 않는다(9.1 결정 13).
+  - 대기 Put byte 상한 `NuggetPendingPutBytes`(1 GiB — `NuggetCacheLimits::pendingPutBytes`): Start가 Put 항목 값 byte 합을 캐시 원자 카운터에 예약하고, 넘으면 그 항목은 제출하지 않고 `Dropped`(CapacityExceeded, 실패 아님 — 메모리 보호), 항목이 끝나면(실행·취소 모두) 돌려준다.
+  - 수명: 소멸자는 진행 중이면 취소를 요청하고 완료를 기다린다. 같은 scheduler의 worker(다른 작업의 body·capture 정리 포함)에서 진행 중인 요청을 소멸하면 Fatal(기다리면 교착 — CompressionTask와 같은 규칙). 요청은 Start 때 캐시 진행 중 목록에 들어가고 마지막 항목이 뺀다.
+  - `NuggetCache::Shutdown(drainMs)`: 새 Start 거부(이후 Start는 모든 항목 `Cancelled`, handle 바로 완료) → 진행 중 Get 요청 취소 → Put 요청은 drainMs(단조 시계 기준 전체 기한)까지 완료를 기다림 → 남은 Put 요청 취소 → 모든 요청 완료까지 기다림. 동기 Get·Put도 Shutdown 뒤에는 `Cancelled`(통계 없음 — 계약 밖 호출이 아니라 종료 뒤 호출이다). 진행 중 요청이 있는데 캐시를 소멸하거나 진행 중 요청의 scheduler worker에서 Shutdown을 부르면 Fatal. 두 번째 Shutdown은 아무것도 하지 않는다.
+  - 시험: hook 파일 시스템이 열기에서 `ManualResetEvent`를 기다려 항목 작업을 붙잡는다(잠·시간 경합 없음 — 순서는 이벤트로만). Shutdown의 단계 사이는 시험 hook `NuggetCacheHooks`(지점 `AfterCancelGets`·`AfterDrain`)로 잇는다. Fatal은 자식 프로세스(`--process-probe`, `PrepareFatalTestProcess`)로 확인한다.
+- A3c2 상태: **구현** — 대조표 14.1.59절, coverage 14.1.60절. 구현에서 정한 것:
+  - 요청 항목은 캐시의 내부 Get·Put(종료 검사 없음)을 부른다 — Shutdown의 drain 동안 Put 항목이 끝나야 하므로(동기 Get·Put만 종료 뒤 Cancelled). 시작 전 취소는 요청이 본다.
+  - 완료 handle 상태는 Pending(진행 중)이거나 끝난 상태뿐이다(외부 이벤트). scheduler를 Shutdown(Cancel)으로 끝내면 완료 handle이 항목보다 먼저 Cancelled가 된다 — 그 scheduler의 요청은 scheduler Shutdown이 돌아온 뒤에 결과를 보거나 소멸한다(헤더 계약, 보통은 캐시 Shutdown을 먼저 부른다). 남은 항목은 worker가 capture를 정리할 때 ticket이 Cancelled로 끝내고 진행 중 목록에서 뺀다(캐시 Shutdown이 영영 기다리지 않는다).
+  - `IsCancelRequested()`(취소 요청 여부)를 공개하고, 시험 hook `NuggetRequestHooks::onCancel`(취소 요청 때 부름 — 진행 중 소멸 시험의 순서 gate)을 둔다.
+  - Shutdown의 drain·마지막 대기는 진행 중 목록의 조건 변수(요청이 빠질 때 알림)로 기다린다 — 완료 handle을 기다리지 않으므로 handle이 먼저 끝난 요청(scheduler Cancel·handle 직접 취소)이 목록에 남아도 바쁜 반복이 없다.
+  - 항목이 아직 진행 중 목록에 남은 요청의 다시 Start는 Busy다(완료 handle이 먼저 끝난 경우 — 옛 ticket이 새 무장 표를 읽지 않게).
+  - 리뷰 반영(권장 셋): 다시 Start 막기·계약(handle 직접 취소 금지 포함), 조건 변수 대기, 진행 중 소멸 시험의 폴링을 취소 hook으로.
+  - 시험 hook 파일 시스템은 여러 worker가 동시에 열어도 callback을 한 번만 부른다(꺼내기를 잠금 안에서 — 처음 구현은 두 worker가 함께 callback을 보고 한쪽이 null을 불러 간헐 크래시가 났다).
 
 ## 10. Cooker
 
 - `TargetProfile`(엔진 `Engine/Config/TargetProfiles/<id>.json` + 프로젝트 재정의): id, 그래픽 backend, 형식 지원 표(비압축, 블록 압축 지원 = 이번에는 없음), LOD 그룹 표(12.4.5절), bulk 정렬. 엔진 기본: `Windows`, `Android`(형식 표만, 그래픽 backend 후속). JSON은 리플렉션 공용 codec `ReflectionText`(struct 멤버 병합, Map은 선택 `MergeByKey` — ReflectionExtensions 10.4절)로 읽고, 프로젝트 재정의를 그룹 단위로 덮는 방식은 A4가 고른다.
-- `CookSettings`(`Config/CookSettings.json`): AlwaysCook·NeverCook(경로·디렉터리), PrimaryAsset 규칙(타입 → 디렉터리·bundle 목록), `CookSoftReferences`. 같은 codec으로 읽는다.
+- `CookSettings`(`Config/CookSettings.json`): AlwaysCook·NeverCook(경로·디렉터리), PrimaryAsset 규칙(타입 → 디렉터리), `CookSoftReferences`. 같은 codec으로 읽는다. bundle은 규칙이 아니라 PrimaryAsset의 Soft 참조 필드 지정자에서 온다(저장 때 색인 태그 — 10.2절 결정 9, 2026-11-23 교차 검증으로 고침).
 - 대상: 전체 쿠킹은 (AlwaysCook ∪ PrimaryAsset) → Hard 전이 ∪ (설정 시) Soft 전이. 부분 쿠킹은 (인자 경로) → Hard 전이 ∪ (설정 시) Soft 전이 ∪ 역방향 Build 폐포(원본 Texture2D를 고치면 그것을 묶는 Texture2DArray도 다시 쿠킹) ∪ 기존 매니페스트에서 cookKey가 달라진 항목. 부분 쿠킹은 에디터에서 사라진 에셋의 매니페스트 항목을 지우고, 그것을 하드 참조하는 남은 항목은 `MissingDependency`로 실패시킨다. 공통: EditorOnly 제외, NeverCook에 걸리면 `NeverCookReferenced`. 규칙에도 참조에도 없는 에셋은 쿠킹하지 않는다.
 - 처리: 타입별 `CookProcessor`(에셋 너겟 사용)가 에디터 객체 → 쿠킹 객체·bulk. 쿠킹 데이터는 같은 타입에서 EditorOnly 필드를 뺀 것이다(EditorOnly 필드는 런타임 바이너리에 있고 쿠킹 데이터에 기록·로드되지 않는다). 항목마다 **cookKey**를 계산한다. 지역 입력 = (에디터 패키지 콘텐츠 해시, 논리 경로(경로 힌트·디렉터리 기반 NeverCook·PrimaryAsset 판정이 바뀐다), 그 항목에 적용된 CookSettings 판정(PrimaryAsset·bundle), 처리기 build key들, 쿠커 버전, 쿠킹 패키지 formatVersion·섹션 schemaVersion 집합, 타입 스키마 버전 표 SHA-256, 패키지 export 구체 클래스별 (TypeId, 클래스 기본값 지문) 정렬 목록(A5 — base 기본값은 파생 레코드에 이미 들어 있다, RuntimeClassMetadata '클래스 기본값 결정'), 프로파일 출력 설정 SHA-256). 엔진 버전은 지역 입력이 아니다 — 쿠커 출력 의미가 바뀌면 쿠커 버전(엔진 버전과 독립된 정수)을 올린다([ReflectionFoundations](ReflectionFoundations.ko.md) 8.2절). 하드 참조 순환을 위해 SCC 단위로 계산한다: SCC key = SHA-256(구성원 지역 입력을 AssetId 순으로, SCC 밖 하드 의존 튜플 (구성원 AssetId, 의존 AssetId, 그 cookKey)의 정렬 목록), cookKey = SHA-256(SCC key, AssetId). 순환이 없어도 같은 식이다.
 - 출력: 쿠킹 루트 `<Project>/Saved/Cooked/<Profile>/` 아래 `CookedManifest.rman`과 `Packages/`. 패키지 파일 이름은 내용 주소(4.2절)라 게시된 파일을 덮어쓰지 않는다.
@@ -831,7 +849,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
    - bulkRawBytes: 패키지 BulkIndex rawBytes 합(10절 항목 표에 더한 칸). 로더(A1c)가 `PackageLoadOptions::maxBulkRawBytes`를 이 값으로 정한다(5.7절 11 — 패키지마다 정확한 해제 상한이라 손상된 rawBytes가 큰 할당을 요구하지 못한다). 8항 `CheckCookedPackage`가 같은지 본다. UE TOC의 청크 압축 해제 크기 표(`FIoOffsetAndLength`)에 대응한다.
    - flags: bit0 = PrimaryAsset(`CookedManifestFlags::PrimaryAsset`), 그 밖의 비트는 0.
    - bundles: PrimaryAsset 항목만 가진다(PrimaryAsset이 아니면 0개 — UE에서 bundle은 PrimaryAsset 데이터다). 이름은 `ValidateNameComponent`, 항목 안에서 byte 엄격 오름차순이고 caseless 키로도 중복이 없다.
-   - bundle 구성원(A1d 개정, 2026-11-20 사용자 결정 — UE `FAssetBundleData`의 bundle별 에셋 목록 대응): bundle마다 그 bundle을 로드할 때 함께 로드할 에셋 목록이다(계획 §24.2 "bundle은 의미별 dependency 집합"). 구성원은 AssetId 엄격 오름차순, null·자기 자신 금지, 그 항목의 런타임 의존 대상(Hard·Soft 어느 쪽이든)이어야 하고 매니페스트 항목이어야 한다(항목 사이 규칙 — 없으면 `CorruptPackage` Bundle 칸, related = 구성원). 상한 `CookedManifestMaxBundleMembers` = 65536(의존 상한과 같다). 구성원이 0개인 bundle도 쓸 수 있다(대표 에셋만 로드). Hard 대상 구성원은 어차피 함께 로드되지만 무해하므로 허용한다(쿠커가 필드의 bundle 지정만 보고 모으기 때문). 수집: 쿠커(A4)가 PrimaryAsset의 Soft 참조 필드에 붙은 bundle 지정자(리플렉션 `AssetBundles="…"` — UE `meta=(AssetBundles="…")` 대응, 계약)로 모으고, bundle 구성원은 `CookSoftReferences`와 무관하게 쿠킹한다(UE `ModifyCookReferences`와 같다 — 구성원은 매니페스트 항목이어야 하므로). 구조 판정(2): bundle 하나의 최소 byte는 이름 길이 칸 8 + 구성원 개수 칸 4이고, 구성원 개수는 `CookedManifestMaxBundleMembers` 이하이면서 남은 byte / 16 이하여야 한다(작은 파일이 큰 할당을 요구하지 못하게 — 3과 같은 규칙). 새 진단 칸 `BundleMemberCount`(개수 칸)·`BundleMember`(구성원 — 순서·null·자기 자신·의존 대상 아님·매니페스트에 없음, related = 구성원). 칸 규칙 순서: 항목 안에서는 의존 검증 뒤에 구성원이 의존 대상인지 보고, 매니페스트에 있는지는 항목 사이 규칙(6)에서 본다. 형식이 바뀌었으나 v1은 아직 배포 전이라 formatVersion은 1 그대로이고(하위 호환을 두지 않는다), 14.1.3 대조표와 golden byte를 다시 만든다.
+   - bundle 구성원(A1d 개정, 2026-11-20 사용자 결정 — UE `FAssetBundleData`의 bundle별 에셋 목록 대응): bundle마다 그 bundle을 로드할 때 함께 로드할 에셋 목록이다(계획 §24.2 "bundle은 의미별 dependency 집합"). 구성원은 AssetId 엄격 오름차순, null·자기 자신 금지, 그 항목의 런타임 의존 대상(Hard·Soft 어느 쪽이든)이어야 하고 매니페스트 항목이어야 한다(항목 사이 규칙 — 없으면 `CorruptPackage` Bundle 칸, related = 구성원). 상한 `CookedManifestMaxBundleMembers` = 65536(의존 상한과 같다). 구성원이 0개인 bundle도 쓸 수 있다(대표 에셋만 로드). Hard 대상 구성원은 어차피 함께 로드되지만 무해하므로 허용한다(쿠커가 필드의 bundle 지정만 보고 모으기 때문). 수집: PrimaryAsset의 Soft 참조 필드에 붙은 bundle 지정자(리플렉션 `AssetBundles="…"` — UE `meta=(AssetBundles="…")` 대응, 계약)를 저장 때 타입 hook Tags로 색인 태그에 남기고 쿠커(A4)가 그 태그를 읽어 모으며(10.2절 결정 9 — UE가 `FAssetBundleData`를 AssetRegistry 태그로 남기는 것과 같다), bundle 구성원은 `CookSoftReferences`와 무관하게 쿠킹한다(UE `ModifyCookReferences`와 같다 — 구성원은 매니페스트 항목이어야 하므로). 구조 판정(2): bundle 하나의 최소 byte는 이름 길이 칸 8 + 구성원 개수 칸 4이고, 구성원 개수는 `CookedManifestMaxBundleMembers` 이하이면서 남은 byte / 16 이하여야 한다(작은 파일이 큰 할당을 요구하지 못하게 — 3과 같은 규칙). 새 진단 칸 `BundleMemberCount`(개수 칸)·`BundleMember`(구성원 — 순서·null·자기 자신·의존 대상 아님·매니페스트에 없음, related = 구성원). 칸 규칙 순서: 항목 안에서는 의존 검증 뒤에 구성원이 의존 대상인지 보고, 매니페스트에 있는지는 항목 사이 규칙(6)에서 본다. 형식이 바뀌었으나 v1은 아직 배포 전이라 formatVersion은 1 그대로이고(하위 호환을 두지 않는다), 14.1.3 대조표와 golden byte를 다시 만든다.
    - dependencies: 런타임 의존(Hard·Soft — kind 값은 패키지 `PackageDependencyKind`의 1·2), (assetId, kind) 엄격 오름차순, assetId null·자기 자신 금지. 같은 대상에 Hard와 Soft가 함께 있을 수 있다(패키지 Dependencies와 같다).
 6. **항목 사이 규칙**: Hard 의존 대상은 매니페스트에 있어야 한다(쿠킹은 Hard 전이 폐포다 — 없으면 `CorruptPackage`, related = 대상). Soft 대상은 없어도 된다(`CookSoftReferences`가 꺼져 있으면 쿠킹하지 않는다). 순환(SCC)은 허용한다 — 로드 단위 계산은 로더(A1c)가 이 Hard 간선으로 한다.
 7. **writer**(`WriteCookedManifest`): 모델을 6까지 같은 규칙으로 검증한 뒤(위반은 쓰지 않고 `InvalidArgument` + 같은 진단 — reader가 거부할 byte를 쓰지 않는다) 결정적으로 직렬화한다. 출력이 `CookedManifestMaxFileBytes`(CRC 칸 포함 파일 전체)를 넘으면 `CapacityExceeded`(진단 None, out 그대로)다 — 처음 구현은 상한에서 CRC 4 byte를 한 번 더 빼 1 GiB − 4까지만 썼다. 상한을 인자로 받는 내부 함수(`package_detail::WriteCookedManifestWithLimit`)로 경계를 시험한다. 모델은 이미 정렬되어 있어야 한다(writer가 정렬하지 않는다 — 쿠커가 정렬해 넘기고, 순서 위반은 오류로 드러난다). 출력은 메모리 버퍼이고 게시(임시 파일·Flush·Replace)는 쿠커(A4) 몫이다(10절 게시 3).
@@ -850,6 +868,44 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 | dependencies Hard·Soft | `FFilePackageStoreEntry::ImportedPackages`·`FIoContainerHeaderSoftPackageReferences` |
 | primaryAsset·bundles | asset registry의 PrimaryAssetId·`FAssetBundleData` |
 | 파일 CRC32 | (TOC는 서명·해시로) — 서명은 Rocks `CookedManifest.rsig` |
+
+### 10.2 A4 구현 세부(2026-11-23 — 권장안으로 확정, 교차 검증 1회: 필수 4·권장 7 반영)
+
+10절을 구체화한다. 애매한 곳은 UE 5.8 Cook(`UCookOnTheFlyServer`·`FPackageData`·`UAssetManager` PrimaryAsset 규칙·`FAssetBundleData`·증분 쿠킹의 TargetDomain 키)을 따르고 이름은 Rocks식이다.
+
+1. **모듈** `Engine/Source/Developer/AssetCooker`(Developer — 에디터·도구만). 의존 `AssetDatabase`(색인·EditorPackageSet)·`AssetRuntime`(WritePackage·CookedManifest)·`AssetNugget`(키 writer·SCC 키·NuggetCache)·`ReflectionText`(설정 codec)·`ObjectRuntime`. 명령은 `AssetCommandlets`의 `asset-cook`.
+2. **TargetProfile**(리플렉션 struct): `id`(String — 파일 이름과 같아야 함), `graphicsBackend`(String — A4는 기록만), `bulkCodec`(enum None·Zstd, 기본 None — 10절), `bulkAlignment`(u32, 0이면 쿠킹 기본 4096). 텍스처 칸(형식 지원 표·LOD 그룹 — LOD 그룹 Map은 `MergeByKey`)은 A5가 더한다. 엔진 파일 `Engine/Config/TargetProfiles/<id>.json`(엔진 기본 `Windows`·`Android`) 위에 프로젝트 `Config/TargetProfiles/<id>.json`을 ReflectionText `ImportJson`으로 덮는다 — 의미는 codec 기본: struct는 재귀 멤버 병합, 배열은 통째 교체(10절의 "그룹 단위"를 이것으로 확정). 엔진 파일이 없는 id는 `InvalidSetting`(엔진 플랫폼 목록이 기준 — 프로젝트만의 프로파일은 받지 않는다). **프로파일 출력 설정 SHA-256** = 병합한 TargetProfile을 `NuggetKeyWriter`의 `WriteReflected`로 흘린 SHA-256(필드 이름·타입·값 — 칸을 더하면 바뀐다).
+3. **CookSettings**(리플렉션 struct, `Config/CookSettings.json`, 없으면 기본값): `alwaysCook`·`neverCook`(Array<String> — 논리 경로 `/Game/A/B` 또는 디렉터리 `/Game/A/`(끝 `/`)), `primaryAssets`(Array<`PrimaryAssetRule{type: 클래스 도구 이름, directories: Array<String>}`>), `cookSoftReferences`(bool, 기본 false). 경로는 LogicalPath 규칙으로 검증(위반 `InvalidSetting`). **CookSettings SHA-256**도 같은 방식. bundle은 규칙이 아니라 필드 지정자에서 온다(결정 9 — 10절 문장을 고친다).
+4. **대상 계산**(색인만 — 패키지를 열지 않는다, UE가 AssetRegistry로 쿠킹 대상을 세는 것과 같다):
+   - 뿌리: 전체 쿠킹은 alwaysCook이 가리키는 에셋(디렉터리는 재귀) ∪ PrimaryAsset(규칙 타입 또는 그 파생 타입이며 규칙 디렉터리 아래). 부분 쿠킹은 인자 경로(에셋·디렉터리).
+   - 폐포: Hard 의존(+ cookSoftReferences면 Soft) + bundle 구성원(결정 9 — 색인 태그, cookSoftReferences와 무관). EditorOnly·Build·ImportOwner 간선은 따라가지 않는다.
+   - NeverCook: 뿌리면 뺀다. alwaysCook과 NeverCook에 함께 걸리면 NeverCook이 이기고 경고 `NeverCookReferenced`(UE와 같은 우선순위). 다른 대상이 Hard로 참조하면 `NeverCookReferenced`(오류), Soft로 참조하면 진단 없이 빠지고 매니페스트 의존 목록에서도 뺀다(로드가 NotFound).
+   - EditorOnly 에셋(대표 타입이 EditorOnly 클래스)은 대상이 아니다. Hard로 참조하면 `NeverCookReferenced`와 같은 오류 규칙.
+   - 색인에 없는 Hard 의존은 `MissingDependency`(쿠킹 실패), Soft는 경고 `MissingDependency`(의존 목록에서 뺀다).
+   - 부분 쿠킹: 위에 역방향 Build 폐포(대상을 Build로 의존하는 에셋 — 색인 Referencers(Build), 전이)와 기존 매니페스트 항목 중 다시 쿠킹할 것(결정 8)을 더한다. 에디터에서 사라진 에셋의 매니페스트 항목은 빼고, 남은 항목이 그것을 Hard로 참조하면 `MissingDependency`.
+5. **키 계산**(패키지를 열지 않는다 — UE 증분 쿠킹 TargetDomain 키처럼 로드 없이 판정):
+   - **콘텐츠 해시** = 에디터 패키지 파일 전체 SHA-256(패키지 지문은 섹션 CRC32 표의 SHA라 충돌이 CRC 수준이어서 쓰지 않는다). 색인이 지연 계산해 항목과 색인 캐시에 둔다(`AssetIndex::ContentHash(id)` — 크기·수정 시각이 같으면 캐시 값, 다르면 다시 읽음 — 바뀐 파일만 다시 해시, 색인 캐시 형식 버전을 올린다).
+   - **처리기 build key** = 9절 너겟 키: 공통 머리(`WriteNuggetKeyHeader(writer, {처리기 id, 처리기 버전}, projectGeneration)`) + 처리기 설정 키(색인 정보만으로 — 기본 처리기는 없음, 설정이 패키지 안에 있으면 콘텐츠 해시가 이미 담는다) + Build 의존 튜플 (역할, AssetId, 그 의존의 build key). Build 그래프에 순환이 있을 수 있으므로 **Build SCC**로 계산한다(`NuggetSccKey` — 구성원 지역 키 = 공통 머리 + 설정 + 콘텐츠 해시, 외부 튜플 = Build 의존의 구성원 key; build key = `NuggetMemberKey`).
+   - **cookKey 지역 입력** = 공통 머리(`{CookerProcessorGuid, cookerVersion}`) + 콘텐츠 해시 + 논리 경로 키 + CookSettings 판정(PrimaryAsset 여부·bundle 이름과 구성원) + 처리기 build key + 쿠킹 패키지 formatVersion·섹션 schemaVersion 집합 + **타입 표 지문** + 프로파일 출력 설정 SHA-256. 클래스 기본값 지문 열은 A5가 더한다.
+   - **타입 표 지문** = 등록된 리플렉션 타입 전체의 (TypeId, 스키마 버전) 정렬 목록 SHA-256이다. Summary 타입 표는 export 클래스만 담아 필드 안 struct·enum·InstancedStruct 내용 타입의 스키마 변경을 놓치고, InstancedStruct 내용 타입은 실행 중에 정해져 스키마로 폐포를 셀 수 없다 — 그래서 보수적으로 전체 표를 쓴다(어느 타입의 버전이 바뀌어도 전체가 다시 쿠킹된다 — 안전 쪽, 범위를 줄이는 것은 저장된 타입 참조를 색인에 두는 후속).
+   - **cookKey** = Hard 그래프 SCC(대상 사이, Tarjan — AssetId 순 결정적): SCC key = `NuggetSccKey(구성원 {AssetId, 지역 키}, 외부 튜플 {구성원, "Hard", 의존, 의존 cookKey})`, cookKey = `NuggetMemberKey(SCC key, AssetId)`. 순서: Build SCC(build key) → Hard SCC 역위상(cookKey).
+6. **CookProcessor 표**: TypeId → `CookProcessor{id Guid, version u32, WriteSettingsKey(writer, 색인 항목)(선택 — 색인 정보만), Cook(context)}`. 대표 에셋 타입에서 상속 사슬을 따라 가장 가까운 등록 처리기 하나(AssetTypeHookTable과 같은 규칙). 기본 처리기(Asset 루트): 에디터 객체 그래프를 그대로 `WritePackage(kind=Cooked, profile 값, bulkCodec·bulkAlignment, bulkSource=에디터 패키지 store)`로 쓴다(EditorOnly 필드는 writer가 뺀다). 처리기는 `CookContext`로 NuggetCache·프로파일·진단 sink를 받는다(텍스처 처리기 A5가 너겟을 쓴다).
+7. **쿠킹 실행**: 대상을 Hard SCC 역위상(의존 먼저, 같은 깊이는 AssetId 순)으로 처리한다. 열린 패키지는 "남은 참조자 수"로 관리해 그것을 Hard로 의존하는 대상이 모두 쿠킹되면 닫는다(공통 의존을 대상마다 다시 열지 않는다 — 열기 횟수 ≤ 대상 수 + 의존 수, 시험이 카운터로 본다). 메모리 상한(`CookOpenPackageBytes`)을 넘으면 참조자가 남은 패키지도 닫고 나중에 다시 연다. 처리기는 메모리 sink에 쓰고 패키지 SHA-256·크기·bulk raw 합을 얻는다. 오류는 에셋별로 모아 끝까지 진행하고(보고서), 하나라도 있으면 게시하지 않는다(10절). 병렬은 후속(결정성은 정렬된 순회로 지킨다). 에디터 프로세스 안 쿠킹(서비스 API)은 dirty 패키지가 열려 있으면 `Busy`로 거부한다(쿠킹은 디스크 상태 — Commandlet에는 열린 패키지가 없다). 쿠킹은 에셋 DB 잠금을 쥔다.
+8. **부분 쿠킹 재사용**: 기존 매니페스트 항목은 cookKey가 같고 `Packages/`의 그 파일이 있으며 크기·SHA-256이 매니페스트와 같을 때만 재사용한다. 파일이 없거나 다르면 다시 쿠킹한다(사용자가 쿠킹 디렉터리를 일부 지운 경우 — 시나리오 27 손상된 게시 파일의 재게시).
+9. **bundle**: 리플렉션 지정자 `AssetBundles="a,b"`(Soft 참조 필드 — UE `meta=(AssetBundles=…)`)가 있는 PrimaryAsset은 **저장 때** 타입 hook Tags(A2c)로 bundle 구성원을 색인 태그에 남긴다(UE가 `FAssetBundleData`를 AssetRegistry 태그로 남기는 것과 같다). 쿠커는 태그만 읽는다(2차 열기 없음). MetaCompiler 지정자와 필드 메타는 리플렉션 쪽 요구다(ReflectionExtensions 문서에 적고 리플렉션 담당과 조정한다 — A4e).
+10. **게시**(10절 1–3 그대로): `<Project>/Saved/Cooked/<Profile>/.staging/<guid>.tmp` 기록·Flush → `Packages/<a>/<이름>`에 `Move(no-replace)` → 있으면 크기·SHA-256 대조(같으면 임시 삭제, 다르면 `CorruptEntry` 경고 + `Replace`) → 바뀐 디렉터리 안쪽부터 `SyncDirectory` → 매니페스트를 `.staging`에 쓰고 Flush → `Replace`. 전체 쿠킹은 그 뒤 새 매니페스트가 가리키지 않는 `Packages/` 파일을 지운다(못 지우면 경고). 부분 쿠킹은 기존 매니페스트와 병합(`CheckCookedManifestMerge` — 다르면 `IncompatibleCook`)하고 파일은 지우지 않는다. 기존 매니페스트가 없으면 부분 쿠킹은 전체 쿠킹과 같다.
+11. **보고서**: `Saved/Cooked/<Profile>/CookReport.json`(결정적 — 진단을 (assetId, 코드) 순), 도구 빌드 ID·엔진 버전(진단용 — 10절), 대상 수·재사용 수·쓴 byte. 명령은 사람이 읽는 줄도 낸다.
+12. **명령** `asset-cook --profile=<id> [<path>...] [--verify-nuggets[=local]] [--json]`: 경로가 없으면 전체 쿠킹. `--verify-nuggets`는 처리기가 너겟 적중을 쓰지 않고 다시 만들어 적중 결과와 byte를 대조한다(다르면 `NuggetMismatch` 오류 — A4e가 진단 코드를 등록, 9.1 결정 16). A4의 기본 처리기는 너겟을 쓰지 않아 verify는 늘 같다 — 실질 시험은 A5 텍스처 처리기 때다.
+
+하위 단계(각각 14절 완료 조건 넷):
+
+| 단계 | 범위 | 시험 |
+|---|---|---|
+| A4a | 모듈·TargetProfile·CookSettings(읽기·병합·검증·SHA-256)·엔진 기본 프로파일 파일 | 병합·거부·SHA 안정·칸 변경 시 SHA 변경 |
+| A4b | 대상 계산(전체·부분·NeverCook·AlwaysCook∩NeverCook·Missing·Soft 설정·EditorOnly·역방향 Build·사라진 항목)·색인 콘텐츠 해시(지연·캐시) | 그래프 경우마다 대상·진단, 해시 캐시 무효화 |
+| A4c | 키(build key Build SCC·cookKey Hard SCC·타입 표 지문)·CookProcessor 표·기본 처리기·쿠킹 실행(메모리, 열기 관리) | 순환 키(시나리오 28)·Build 원본만 바꾸면 배열 cookKey 바뀜·EditorOnly 필드 부재(11)·두 번 같은 byte(13)·원본 없이 쿠킹(2)·열기 횟수 |
+| A4d | 게시·전체 정리·부분 병합·재사용 조건·IncompatibleCook·CorruptEntry·실패 시 게시본 불변·보고서 | 시나리오 13·22·27 |
+| A4e | `asset-cook` 명령·`--verify-nuggets`(NuggetMismatch 등록)·bundle 지정자(리플렉션 조정)·저장 때 bundle 태그 | 명령 출력·verify(A4는 늘 같음)·bundle 구성원 |
 
 ## 11. 런타임 로딩과 수명(계획 §9.2 계약)
 
@@ -2830,6 +2886,34 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `Evict`·`Insert`·`Settle`의 `ROCKS_ASSERT` | 실패 | 불변식(A3c1 상태): 고정 보관 항목은 지우지 않는다(EvictKey가 건너뜀), 받아들인 적중의 Memory 항목은 같은 Record이고 고정 보관 항목에는 오지 않는다, 고정은 지우지 않으므로 Changed를 본 Put에는 고정이 있다 |
 | `NuggetSccValueId`의 `ROCKS_ASSERT` | 실패 | 호출자 결함(순번·부분 번호 범위)이다 — 계약으로 막는다 |
 | `Put`의 `Array<NuggetPutValue>` 선언 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록의 return 뒤 gap 영역이 그 줄에 붙는다. 다음 줄(같은 실행 흐름)도 실행된다 |
+
+#### 14.1.59 요구 대조표(A3c2 — 요청 객체·Shutdown)
+
+시험은 EngineTests `Engine/Source/Developer/AssetNugget/Tests/NuggetRequestTests.cpp`(`NuggetRequest_*` 11 — 실제 디스크·메모리 파일 시스템·hook 파일 시스템 gate·자식 프로세스)다. 시험 공용 도구는 `Tests/NuggetTestSupport.h`(hook 파일 시스템·gate).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 일괄 요청(9.1 결정 12) | Put 값 이동(항목은 Start 뒤 빈다)·inputs·meta 복사, 결과 항목 순서(Stored·Hit·Miss·값 선택·SkipData), Outcome 성공, Start 전 Results·Outcome StaleHandle·빈 handle, 빈 요청 바로 완료, 끝난 객체로 다시 Start, 겹친 두 요청(나중 요청이 먼저 끝남 — 목록 중간 해제) | `NuggetRequest_PutThenGet` |
+| 진행 중·취소 | 진행 중 다시 Start Busy(Get·Put), Results·Outcome Busy, 취소 두 번, 시작 안 한 항목 Cancelled·진행 중 항목은 끝냄(Get·Put) | `NuggetRequest_BusyAndCancel`·`NuggetRequest_PutThenGet` |
+| 대기 Put 상한 | 합이 넘는 항목·상한보다 큰 항목 Dropped(CapacityExceeded, 실패 아님), 상한 그대로 받음, 끝난·취소된·제출 실패한·진행 중 소멸된 항목의 예약 반환 | `NuggetRequest_PendingPutBytes`·`NuggetRequest_SubmitFailures`·`NuggetRequest_DestroyWhileRunning` |
+| 제출 실패 | scheduler 시작 전 Start 실패(값은 항목에 남음 — Get·Put), maxInFlight 초과 항목과 뒤 항목 Dropped(그 오류·실패 아님)·낸 항목은 끝까지(Get·Put) | `NuggetRequest_SubmitFailures` |
+| required(결정 10) | failed 항목(Put 쓰기 실패·Get 읽기 실패) → Outcome DependencyFailed, required 아니면 성공, 실패 아닌 Dropped는 required여도 성공 | `NuggetRequest_RequiredOutcome` |
+| Shutdown(결정 12) | 요청 없음(이후 Start 모두 Cancelled·바로 완료, 동기 Get·Put Cancelled, 두 번째 무시, IsShutDown), drain 0(진행 중 Put 끝냄·남은 Put·Get Cancelled), drain 1 ms 기한 초과(같음), drain 끝까지(Put 모두 끝냄·Get Cancelled), hook 두 지점, Shutdown이 돌아오면 모든 항목이 끝남 | `NuggetRequest_Shutdown` |
+| 버려진 항목 | scheduler Shutdown(Cancel)이 시작 안 한 항목의 body를 버리면 ticket이 Cancelled로 끝내고 목록에서 뺌(캐시 Shutdown이 바로 돌아옴) | `NuggetRequest_AbandonedItems` |
+| 완료 handle이 먼저 끝남 | handle 직접 취소(scheduler Cancel과 같은 상황) 뒤 항목이 목록에 남은 동안 다시 Start Busy(값은 항목에 남음), 캐시 Shutdown이 목록이 빌 때까지 기다림, 그 뒤 다시 Start | `NuggetRequest_RestartWhileSettling` |
+| 수명 | worker 아닌 스레드의 진행 중 소멸(취소 요청 → 완료 대기 — 취소 hook gate), Fatal 셋(같은 scheduler worker에서 진행 중 소멸·진행 중 요청의 worker에서 Shutdown·진행 중 요청이 있는 캐시 소멸 — 자식 프로세스 비정상 종료·문구) | `NuggetRequest_DestroyWhileRunning`·`NuggetRequest_Fatal` |
+| 할당 실패 | 요청 allocator: 결과 slot·입력 복사(bucket·값 선택·inputs·meta)·예약 표 실패는 Start 실패(OutOfMemory·값은 항목에 남음), 항목 capture 실패는 그 항목과 뒤 항목 Dropped(OutOfMemory), 실패 없는 결과는 기준과 같다(Get·Put) | `NuggetRequest_AllocationFailures` |
+| 조합(14 완료 조건 2) | 요청 종류(Get·Put) × 항목 경로(실행·시작 전 취소·제출 실패·상한 초과·capture 정리) × 종료(없음·drain 0·기한 초과·끝까지·scheduler Cancel) × 실패(IO·할당·Fatal) | 위 시험 |
+
+#### 14.1.60 Coverage(A3c2)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter Nugget -Sources Engine/Source/Developer/AssetNugget/Private` — `NuggetRequest.cpp` 줄 352/354·분기 125/126, `NuggetCache.cpp` 줄 828/834·분기 409/419(A3c1 몫 포함, 리뷰 반영 뒤).
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `NuggetRequest::WaitForCompletion`·`~NuggetCache`·`NuggetCache::Shutdown`의 `platform::Fatal` | 그 갈래 | 자식 프로세스(`NuggetRequest_Fatal`)에서 실행하고 문구까지 확인한다 — 부모 측정에는 자식의 profile이 합쳐지지 않는다 |
+| `ReservePutBytes`의 CAS 재시도 | 재시도 | 다른 스레드가 같은 순간 예약할 때만이다(경합 — 결정적으로 만들 수 없다). 재시도는 같은 판정을 다시 한다 |
+| `Shutdown`의 `Notify(AfterCancelGets)` 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록(Fatal 갈래 포함) 뒤 gap 영역이 그 줄에 붙는다. hook 두 지점은 시험이 확인한다 |
 
 ## 15. PNG 디코더 범위
 

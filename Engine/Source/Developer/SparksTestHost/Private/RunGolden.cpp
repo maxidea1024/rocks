@@ -1,6 +1,7 @@
 #include <Core/Math/MathUtility.h>
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Clock.h>
 #include <Platform/Memory.h>
 #include <SparksCompiler/Compilation.h>
 #include <SparksCompiler/Symbols.h>
@@ -1203,6 +1204,262 @@ Result<bool> CompileRevision(Allocator& allocator, const CaseInput& input, const
     return Result<bool>::Success(true);
 }
 
+// 폴더 사례 revision 하나다(SparksReload 6절 LC7c2b): 덮어쓴 파일·compilation과 묶음 모듈의 새
+// 실행 단위(session이 참조할 수 있어 사례 끝까지 보관한다).
+struct RunFolderRevision {
+    explicit RunFolderRevision(Allocator& allocator) noexcept
+        : sources(allocator), compilation(allocator, sources), files(allocator), units(allocator) {
+    }
+
+    SourceSet sources;
+    Compilation compilation;
+    Array<CaseFile> files;
+    Array<UniquePtr<RunUnit>> units;
+};
+
+// 모듈 경로 글자다(없으면 빈 글자).
+StringView RunModulePath(const BytecodeModule& module) noexcept {
+    return module.path == NoBytecodeIndex ? StringView() : module.String(module.path);
+}
+
+// 폴더 revision을 컴파일한다: 사례 파일에 revision 파일을 같은 경로로 덮어 다시 컴파일하고, 묶음
+// (원문이 바뀐 모듈 ∪ 재컴파일 범위 ∪ 그것을 함수 import하는 모듈의 전이 폐포)의 모듈만 새
+// revision으로 링크한 뒤 그 import를 묶음 밖 지금 모듈에 잇는다. pairs는 묶음 쌍, next는 적용 뒤
+// 실행 단위 표다(codes와 같은 순서). 진단·거부는 false와 why, 할당 실패는 Result 실패다.
+Result<bool> CompileFolderRevision(Allocator& allocator, const CaseInput& input,
+                                   const CaseRevision& source, FakeHost& host,
+                                   const Compilation& before, Span<const RunCode> codes,
+                                   RunFolderRevision& revision, Array<VmReloadModule>& pairs,
+                                   Array<RunCode>& next, StringBuilderBase& why,
+                                   RunTimings& spent) noexcept {
+    uint64 mark = platform::MonotonicNanoseconds();
+    // 단계 시간을 spent의 칸에 더하고 다음 단계를 시작한다(LC7c3 측정).
+    auto lap = [&](uint64& slot) noexcept {
+        const uint64 now = platform::MonotonicNanoseconds();
+        slot += now - mark;
+        mark = now;
+    };
+    auto refuse = [&](StringView text) noexcept -> Result<bool> {
+        if (auto appended = why.TryAppendFormat("revision '{}' {}", source.version, text);
+            !appended) {
+            return Result<bool>::Failure(appended.Error());
+        }
+
+        return Result<bool>::Success(false);
+    };
+    // 덮어쓰기(같은 경로) — 모듈 추가·삭제는 다루지 않는다.
+    for (const CaseFile& file : input.files) {
+        StringView text = file.text;
+        for (const CaseFile& replaced : source.files) {
+            text = replaced.path == file.path ? replaced.text : text;
+        }
+
+        if (auto pushed = revision.files.TryPushBack(CaseFile{file.path, text}); !pushed) {
+            return Result<bool>::Failure(pushed.Error());
+        }
+    }
+
+    for (const CaseFile& replaced : source.files) {
+        bool known = false;
+        for (const CaseFile& file : input.files) {
+            known = known || file.path == replaced.path;
+        }
+
+        if (!known) {
+            return refuse("adds a file (adding or removing modules is not supported)");
+        }
+    }
+
+    DiagnosticList diagnostics(allocator);
+    for (const CaseFile& schema : input.schemas) {
+        auto id = revision.sources.TryAdd(schema.path, schema.text, diagnostics);
+        if (!id) {
+            return Result<bool>::Failure(id.Error());
+        }
+
+        if (auto added = revision.compilation.AddBindingSchema(id.Value()); !added) {
+            return Result<bool>::Failure(added.Error());
+        }
+    }
+
+    CaseInput overlay = input;
+    overlay.files = revision.files.View();
+    StringView layout;
+    auto added = AddFolderSources(allocator, overlay, revision.sources, diagnostics,
+                                  revision.compilation, layout);
+    if (!added) {
+        return Result<bool>::Failure(added.Error());
+    }
+
+    if (!added.Value()) {
+        return refuse(layout);
+    }
+
+    if (auto checked = revision.compilation.Check(diagnostics); !checked) {
+        return Result<bool>::Failure(checked.Error());
+    }
+
+    if (diagnostics.Count() != 0 || revision.compilation.ModuleCount() != codes.Size()) {
+        return refuse("has diagnostics or another module list");
+    }
+
+    lap(spent.compile);
+    // 새 compilation 모듈을 실행 단위(모듈 경로)로 맞춘다.
+    if (!next.TryAppend(codes)) {
+        return Result<bool>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (usize unit = 0; unit < codes.Size(); ++unit) {
+        next[unit].module = NoModule;
+        for (uint32 module = 0; module < revision.compilation.ModuleCount(); ++module) {
+            const BytecodeModule* bytecode = revision.compilation.ModuleBytecode(module);
+            if (bytecode != nullptr &&
+                RunModulePath(*bytecode) == RunModulePath(*codes[unit].code)) {
+                next[unit].module = module;
+            }
+        }
+
+        if (next[unit].module == NoModule) {
+            return refuse("has diagnostics or another module list");
+        }
+    }
+
+    // 묶음: 원문이 바뀐 모듈과 재컴파일 범위(SparksReload K10), 그것을 함수 import하는 모듈.
+    Array<uint8> bundle(allocator);
+    if (!bundle.TryResize(codes.Size())) {
+        return Result<bool>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (usize unit = 0; unit < codes.Size(); ++unit) {
+        const BytecodeModule& now = *revision.compilation.ModuleBytecode(next[unit].module);
+        bool changed = false;
+        for (usize at = 0; at < BytecodeHashBytes; ++at) {
+            changed = changed || now.contentHash[at] != codes[unit].code->contentHash[at];
+        }
+
+        bundle[unit] = changed ? 1 : 0;
+    }
+
+    Array<uint32> scopeModules(allocator);
+    Array<uint64> scopeFunctions(allocator);
+    if (auto scoped =
+            FindRecompileScope(before, revision.compilation, scopeModules, scopeFunctions);
+        !scoped) {
+        if (scoped.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(scoped.Error());
+        }
+
+        return refuse("has no recompile scope");
+    }
+
+    for (usize unit = 0; unit < codes.Size(); ++unit) {
+        for (const uint32 module : scopeModules) {
+            bundle[unit] |= module == next[unit].module ? 1 : 0;
+        }
+
+        for (const uint64 function : scopeFunctions) {
+            bundle[unit] |= uint32(function >> 32) == next[unit].module ? 1 : 0;
+        }
+    }
+
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (usize unit = 0; unit < codes.Size(); ++unit) {
+            const BytecodeModule& now = *revision.compilation.ModuleBytecode(next[unit].module);
+            for (usize ref = 0; bundle[unit] == 0 && ref < now.refs.Size(); ++ref) {
+                if (now.refs[ref].kind != BytecodeRefKind::ImportedFunction) {
+                    continue;
+                }
+
+                const StringView name = now.String(now.refs[ref].name);
+                for (usize other = 0; other < codes.Size(); ++other) {
+                    const StringView path = RunModulePath(*codes[other].code);
+                    if (bundle[other] != 0 && name.ByteCount() > path.ByteCount() &&
+                        name.StartsWith(path) && name.Data()[path.ByteCount()] == ':') {
+                        bundle[unit] = 1;
+                        grew = true;
+                    }
+                }
+            }
+        }
+    }
+
+    lap(spent.bundle);
+    // 묶음 모듈의 새 revision: `.sparkc` 왕복 → 링크 → import(묶음 밖은 지금 모듈).
+    Array<VmLinkedModule*> fresh(allocator);
+    Array<const VmLinkedModule*> targets(allocator);
+    for (usize unit = 0; unit < codes.Size(); ++unit) {
+        if (bundle[unit] == 0) {
+            if (auto pushed = targets.TryPushBack(codes[unit].link); !pushed) {
+                return Result<bool>::Failure(pushed.Error());
+            }
+
+            continue;
+        }
+
+        auto made = UniquePtr<RunUnit>::TryMake(allocator, allocator);
+        if (!made) {
+            return Result<bool>::Failure(made.Error());
+        }
+
+        if (auto pushed = revision.units.TryPushBack(Move(made.Value())); !pushed) {
+            return Result<bool>::Failure(pushed.Error());
+        }
+
+        RunUnit& created = *revision.units[revision.units.Size() - 1];
+        created.module = next[unit].module;
+        Array<uint8> bytes(allocator);
+        if (auto written =
+                WriteBytecodeFile(*revision.compilation.ModuleBytecode(created.module), bytes);
+            !written) {
+            return Result<bool>::Failure(written.Error());
+        }
+
+        BytecodeRejection rejection;
+        if (auto read = ReadBytecodeFile(bytes.View(), created.loaded, rejection); !read) {
+            if (read.Error() != ErrorCode::InvalidArgument) {
+                return Result<bool>::Failure(read.Error());
+            }
+
+            return refuse("was rejected by the bytecode reader");
+        }
+
+        StringBuilder<MessageInlineBytes> reason(allocator);
+        if (auto link = LinkModule(created.loaded, &host, created.linked, reason); !link) {
+            if (link.Error() != ErrorCode::InvalidArgument) {
+                return Result<bool>::Failure(link.Error());
+            }
+
+            return refuse("was not linked");
+        }
+
+        next[unit].code = &created.loaded;
+        next[unit].link = &created.linked;
+        VmReloadModule pair;
+        pair.old = codes[unit].link;
+        pair.fresh = &created.linked;
+        if (!pairs.TryPushBack(pair) || !fresh.TryPushBack(&created.linked)) {
+            return Result<bool>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    if (fresh.IsEmpty()) {
+        return refuse("changes no module");
+    }
+
+    StringBuilder<MessageInlineBytes> reason(allocator);
+    if (auto imported = LinkImports(fresh.View(), targets.View(), reason); !imported) {
+        if (imported.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(imported.Error());
+        }
+
+        return refuse("imports were not linked");
+    }
+
+    lap(spent.link);
+    return Result<bool>::Success(true);
+}
+
 Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                            const Compilation& compilation, uint32 mainModule, Report& report,
                            const RunInjection& injection, uint32& awaitsSeen,
@@ -1339,6 +1596,8 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
     // 있다). 지금 revision의 bytecode·링크·compilation은 아래 포인터가 가리킨다.
     Array<UniquePtr<RunRevision>> revisions(allocator);
     usize revisionsUsed = 0; // reload가 쓴 revision 원문 bit(쓰지 않은 원문은 사례 실패 — 오타)
+    Array<UniquePtr<RunFolderRevision>> folderRevisions(allocator); // 폴더 사례 revision
+    usize folderRevisionsUsed = 0;
     const Compilation* currentCompilation = &compilation;
     // 실행 단위는 session 하나다(SparksRuntime 2.2절 — 메서드 호출의 수신자는 session instance).
     VmSession session(allocator, &host);
@@ -1596,41 +1855,97 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                     return bad("'reload' takes 'keep' or 'cancel' after the version");
                 }
 
-                const CaseFile* source = nullptr;
-                for (usize at = 0; at < input.revisions.Size() && at < RunMaxRevisionFiles; ++at) {
-                    if (input.revisions[at].path == target) {
-                        source = &input.revisions[at];
-                        revisionsUsed |= usize(1) << at;
-                    }
-                }
-
-                if (input.folder) {
-                    return bad("'reload' is not supported in folder cases yet");
-                }
-
-                if (source == nullptr) {
-                    return bad("'reload' needs a <case>.<version>.spark file next to the case");
-                }
-
-                auto made = UniquePtr<RunRevision>::TryMake(allocator, allocator);
-                if (!made) {
-                    return Result<void>::Failure(made.Error());
-                }
-
-                // session이 참조할 수 있으므로 계획 전에 보관한다.
-                if (auto pushed = revisions.TryPushBack(Move(made.Value())); !pushed) {
-                    return pushed;
-                }
-
-                RunRevision& revision = *revisions[revisions.Size() - 1];
+                // 묶음 쌍과 적용 뒤 실행 단위 표(파일 사례는 쌍 하나 — 폴더 사례는 SparksReload 6절
+                // LC7c2b의 묶음).
+                Array<VmReloadModule> pairs(allocator);
+                Array<RunCode> next(allocator);
+                RunTimings spent; // 이 reload의 단계 시간(적용되면 input.timings에 더한다)
+                const uint64 started = platform::MonotonicNanoseconds();
+                const Compilation* nextCompilation = nullptr;
                 StringBuilder<MessageInlineBytes> why(allocator);
-                auto compiled = CompileRevision(allocator, input, *source, host, revision, why);
-                if (!compiled) {
-                    return Result<void>::Failure(compiled.Error());
-                }
+                if (!input.folder) {
+                    const CaseFile* source = nullptr;
+                    for (usize at = 0; at < input.revisions.Size() && at < RunMaxRevisionFiles;
+                         ++at) {
+                        if (input.revisions[at].path == target) {
+                            source = &input.revisions[at];
+                            revisionsUsed |= usize(1) << at;
+                        }
+                    }
 
-                if (!compiled.Value()) {
-                    return bad(why.View());
+                    if (source == nullptr) {
+                        return bad("'reload' needs a <case>.<version>.spark file next to the case");
+                    }
+
+                    auto made = UniquePtr<RunRevision>::TryMake(allocator, allocator);
+                    if (!made) {
+                        return Result<void>::Failure(made.Error());
+                    }
+
+                    // session이 참조할 수 있으므로 계획 전에 보관한다.
+                    if (auto pushed = revisions.TryPushBack(Move(made.Value())); !pushed) {
+                        return pushed;
+                    }
+
+                    RunRevision& revision = *revisions[revisions.Size() - 1];
+                    auto compiled = CompileRevision(allocator, input, *source, host, revision, why);
+                    spent.compile += platform::MonotonicNanoseconds() - started;
+                    if (!compiled) {
+                        return Result<void>::Failure(compiled.Error());
+                    }
+
+                    if (!compiled.Value()) {
+                        return bad(why.View());
+                    }
+
+                    VmReloadModule pair;
+                    pair.old = codes[0].link;
+                    pair.fresh = &revision.linked;
+                    RunCode changed;
+                    changed.code = &revision.module;
+                    changed.link = &revision.linked;
+                    changed.module = revision.main;
+                    if (!pairs.TryPushBack(pair) || !next.TryPushBack(changed)) {
+                        return Result<void>::Failure(ErrorCode::OutOfMemory);
+                    }
+
+                    nextCompilation = &revision.compilation;
+                } else {
+                    const CaseRevision* source = nullptr;
+                    for (usize at = 0;
+                         at < input.folderRevisions.Size() && at < RunMaxRevisionFiles; ++at) {
+                        if (input.folderRevisions[at].version == target) {
+                            source = &input.folderRevisions[at];
+                            folderRevisionsUsed |= usize(1) << at;
+                        }
+                    }
+
+                    if (source == nullptr) {
+                        return bad("'reload' needs a <case>.<version> folder next to the case");
+                    }
+
+                    auto made = UniquePtr<RunFolderRevision>::TryMake(allocator, allocator);
+                    if (!made) {
+                        return Result<void>::Failure(made.Error());
+                    }
+
+                    if (auto pushed = folderRevisions.TryPushBack(Move(made.Value())); !pushed) {
+                        return pushed;
+                    }
+
+                    RunFolderRevision& revision = *folderRevisions[folderRevisions.Size() - 1];
+                    auto compiled =
+                        CompileFolderRevision(allocator, input, *source, host, *currentCompilation,
+                                              codes.View(), revision, pairs, next, why, spent);
+                    if (!compiled) {
+                        return Result<void>::Failure(compiled.Error());
+                    }
+
+                    if (!compiled.Value()) {
+                        return bad(why.View());
+                    }
+
+                    nextCompilation = &revision.compilation;
                 }
 
                 // 판정 거부·적용 실패면 session이 그대로여야 한다(SparksReload K3·6절 G5 — 주입
@@ -1666,7 +1981,8 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 };
                 VmReloadPlan plan(allocator);
                 StringBuilder<MessageInlineBytes> reason(allocator);
-                auto planned = session.PlanReload(*codes[0].link, revision.linked,
+                const uint64 planning = platform::MonotonicNanoseconds();
+                auto planned = session.PlanReload(pairs.View(),
                                                   rest == "keep" ? VmReloadExecutions::Keep
                                                                  : VmReloadExecutions::Cancel,
                                                   plan, reason);
@@ -1687,7 +2003,19 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                         session.InjectReloadRollback();
                     }
 
+                    const uint64 applying = platform::MonotonicNanoseconds();
+                    spent.plan += applying - planning;
                     auto applied = session.ApplyReload(plan);
+                    spent.apply += platform::MonotonicNanoseconds() - applying;
+                    if (applied && input.timings != nullptr) {
+                        input.timings->compile += spent.compile;
+                        input.timings->bundle += spent.bundle;
+                        input.timings->link += spent.link;
+                        input.timings->plan += spent.plan;
+                        input.timings->apply += spent.apply;
+                        ++input.timings->reloads;
+                    }
+
                     if (applied && reloadsSeen <= RunMaxGateReloads) {
                         reloadsApplied |= uint64(1) << (reloadsSeen - 1);
                     }
@@ -1712,19 +2040,25 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                             return Result<void>::Failure(report.restartError);
                         }
 
-                        actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
+                        actual.Append("ok (");
+                        if (input.folder) {
+                            actual.AppendFormat("modules {}, ", report.modules);
+                        }
+
+                        actual.AppendFormat("instances {}, moved {}, defaulted {}, lost {}, "
                                             "removed {}, ",
                                             report.instances, report.moved, report.defaulted,
                                             report.lost, report.removed);
                         actual.AppendFormat("cancelled {}, restarted {}, previous {})",
                                             report.cancelled, report.restarted, report.previous);
-                        codes[0].code = &revision.module;
-                        codes[0].link = &revision.linked;
-                        codes[0].module = revision.main;
-                        links[0] = &revision.linked;
+                        for (usize at = 0; at < next.Size(); ++at) {
+                            codes[at] = next[at];
+                            links[at] = next[at].link;
+                        }
+
                         host.SetModules(links.View());
-                        currentCompilation = &revision.compilation;
-                        values.Rebind(revision.compilation);
+                        currentCompilation = nextCompilation;
+                        values.Rebind(*nextCompilation);
                         delivered = true;
                     }
                 }
@@ -2512,6 +2846,23 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
     // 사례 옆 revision 원문은 모두 `reload`가 써야 한다(이름 오타가 조용히 빠지지 않게).
     if (input.revisions.Size() > RunMaxRevisionFiles) {
         return fail(".run: too many revision files next to the case");
+    }
+
+    if (input.folderRevisions.Size() > RunMaxRevisionFiles) {
+        return fail(".run: too many revision folders next to the case");
+    }
+
+    for (usize at = 0; at < input.folderRevisions.Size(); ++at) {
+        if ((folderRevisionsUsed & (usize(1) << at)) == 0) {
+            StringBuilder<MessageInlineBytes> unused(allocator);
+            unused.AppendFormat(".run: revision folder '{}' is not used by any 'reload'",
+                                input.folderRevisions[at].version);
+            if (unused.HasFailed()) {
+                return Result<void>::Failure(unused.Status().Error());
+            }
+
+            return fail(unused.View());
+        }
     }
 
     for (usize at = 0; at < input.revisions.Size(); ++at) {

@@ -50,6 +50,7 @@ enum class VmReloadExecutions : uint8 {
 
 // reload 결과다(SparksReload K7). 필드 수는 (instance, 필드) 쌍의 수다.
 struct VmReloadReport {
+    uint32 modules = 0;   // 바꾼 모듈(묶음의 쌍 — SparksReload 6절 LC7c2b)
     uint32 classes = 0;   // 새 revision 클래스에 대응한 옛 클래스
     uint32 instances = 0; // 새 revision으로 옮긴 instance(기반 사슬에 그 모듈 클래스가 있다)
     uint32 moved = 0;     // 옛 값을 옮긴 필드
@@ -63,12 +64,17 @@ struct VmReloadReport {
     ErrorCode restartError = ErrorCode::None;
 };
 
-// PlanReload의 결과(클래스·필드·handler·함수 대응)다. ApplyReload가 소비한다.
+// reload 묶음의 한 쌍이다(SparksReload 6절 LC7c2b): session 모듈 old를 새 revision fresh로 바꾼다.
+struct VmReloadModule {
+    const VmLinkedModule* old = nullptr;
+    const VmLinkedModule* fresh = nullptr;
+};
+
+// PlanReload의 결과(쌍마다 클래스·필드·handler·함수 대응)다. ApplyReload가 소비한다.
 class VmReloadPlan final {
 public:
     explicit VmReloadPlan(Allocator& allocator) noexcept
-        : classMap_(allocator), fieldMap_(allocator), handlerMap_(allocator), changed_(allocator),
-          sources_(allocator), fate_(allocator) {
+        : allocator_(&allocator), entries_(allocator) {
     }
 
     VmReloadPlan(const VmReloadPlan&) = delete;
@@ -76,23 +82,34 @@ public:
 
     // 적용할 계획이 있는지다(PlanReload 성공 뒤 ApplyReload 전).
     bool Ready() const noexcept {
-        return fresh_ != nullptr;
+        return !entries_.IsEmpty();
     }
 
 private:
     friend class VmSession;
 
-    const VmLinkedModule* old_ = nullptr;
-    const VmLinkedModule* fresh_ = nullptr;
+    // 쌍 하나의 대응표다.
+    struct Entry {
+        explicit Entry(Allocator& allocator) noexcept
+            : classMap(allocator), fieldMap(allocator), handlerMap(allocator), changed(allocator),
+              sources(allocator), fate(allocator) {
+        }
+
+        const VmLinkedModule* old = nullptr;
+        const VmLinkedModule* fresh = nullptr;
+        uint32 classes = 0;
+        Array<uint32> classMap;   // 옛 클래스 → 새 클래스(없으면 NoIndex)
+        Array<uint32> fieldMap;   // 옛 classFields → 옮기는 새 classFields(손실·삭제는 NoIndex)
+        Array<uint32> handlerMap; // 옛 handler → 새 handler(없으면 NoIndex)
+        Array<uint8> changed;     // 옛 함수: 1이면 본문이 바뀌었거나 삭제됐다
+        Array<uint32> sources;    // 새 classFields → 원천 옛 classFields(새 필드는 NoIndex — 5절)
+        Array<uint8> fate;        // 옛 classFields: 삭제·옮김·손실(SparksReload 5절)
+    };
+
+    Allocator* allocator_;
+    Array<Entry> entries_;
     VmReloadExecutions executions_ = VmReloadExecutions::Cancel;
-    uint32 classes_ = 0;
-    uint64 serial_ = 0;        // 계획 때 session의 다음 instance 생성 번호(낡은 계획 판정)
-    Array<uint32> classMap_;   // 옛 클래스 → 새 클래스(없으면 NoIndex)
-    Array<uint32> fieldMap_;   // 옛 classFields → 옮기는 새 classFields(손실·삭제는 NoIndex)
-    Array<uint32> handlerMap_; // 옛 handler → 새 handler(없으면 NoIndex)
-    Array<uint8> changed_;     // 옛 함수: 1이면 본문이 바뀌었거나 삭제됐다
-    Array<uint32> sources_;    // 새 classFields → 원천 옛 classFields(새 필드는 NoIndex — 5절)
-    Array<uint8> fate_;        // 옛 classFields: 삭제·옮김·손실(SparksReload 5절)
+    uint64 serial_ = 0; // 계획 때 session의 다음 instance 생성 번호(낡은 계획 판정)
 };
 
 class ROCKS_SPARKSVM_API VmSession final {
@@ -297,6 +314,11 @@ public:
     Result<void> PlanReload(const VmLinkedModule& old, const VmLinkedModule& fresh,
                             VmReloadExecutions executions, VmReloadPlan& plan,
                             StringBuilderBase& reason) noexcept;
+    // 모듈 묶음 판(SparksReload 6절 LC7c2b): 모든 쌍을 한 계획으로(적용도 한 번 — all-or-nothing).
+    // 위 판정에 더해 old·fresh 중복, fresh가 묶음의 옛 revision을 import함, 묶음 밖 session 모듈이
+    // 묶음의 옛 revision을 import함(그 모듈도 묶음에 넣는다)이 판정 실패다.
+    Result<void> PlanReload(Span<const VmReloadModule> modules, VmReloadExecutions executions,
+                            VmReloadPlan& plan, StringBuilderBase& reason) noexcept;
 
     // 계획을 적용한다(실행 중이 아닌 reload 경계 — SparksReload K3·5절): 새 클래스 기본값 레코드와
     // instance마다 새 저장소(옮긴 값 — 쓴 필드만, 유지 자원은 그대로 — 과 새 기본값) 준비 → 저장소·
@@ -765,7 +787,10 @@ private:
     // link의 function이 필드 명령으로 참조하는 로컬 필드가 모두 계획의 새 revision까지 옮겨지는지다
     // (이전 revision 기록과 계획의 old → fresh 대응 — SparksReload 5절).
     bool FieldsReach(const VmLinkedModule& link, uint32 function,
-                     const VmReloadPlan& plan) const noexcept;
+                     const VmReloadPlan::Entry& entry) const noexcept;
+    // 쌍 하나의 대응표를 만든다(entry.old·fresh가 정해져 있다 — 판정 실패는 reason과
+    // InvalidArgument).
+    Result<void> PlanModule(VmReloadPlan::Entry& entry, StringBuilderBase& reason) noexcept;
     // link의 function이 같은 모듈 호출로 broken(link 함수 번호별 표지)인 함수를 부르는지다.
     bool CallsBroken(const VmLinkedModule& link, uint32 function,
                      Span<const uint8> broken) const noexcept;

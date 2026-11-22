@@ -1,6 +1,6 @@
 # 노드 그래프(NodeGraph) 설계
 
-기준일: 2026-11-22, 개정 3. 이 문서는 여러 전용 편집기(머티리얼·사운드·애니메이션·VFX·PCG 등)가 함께 쓰는 노드 그래프 체계를 정한다. 범위는 다음과 같다.
+기준일: 2026-11-23, 개정 5. 이 문서는 여러 전용 편집기(머티리얼·사운드·애니메이션·VFX·PCG 등)가 함께 쓰는 노드 그래프 체계를 정한다. 범위는 다음과 같다.
 
 - 그래프 데이터 모델과 도메인 schema 접점
 - 변경·undo·통지
@@ -20,7 +20,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 - `ED/` = `Engine/Source/Editor/`
 - `PL/` = `Engine/Plugins/`
 
-상태: **설계 초안**. 결정 GD1–GD25는 모두 권장안이다. 교차 검증 1회를 반영했다(필수 9·권장 14·참고 11, 17절).
+상태: **설계 초안, NG0 구현 완료(개정 5)**. 결정 GD1–GD25는 모두 권장안이다(GD21·GD23의 ObjectRuntime 의존은 개정 4에서 사용자 결정). 교차 검증 1회를 반영했다(필수 9·권장 14·참고 11, 17절).
 
 구현 단계는 NG0–NG8(14절)이다. 착수는 계획 순서(A0-B → A0-O → 리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르고, 이 문서 때문에 화면 단계를 앞당기지 않는다.
 
@@ -289,7 +289,7 @@ UAF(AnimNext)는 RigVM의 model·controller·view 구조를 그대로 상속한�
 - multi-user 동시 편집(계획 22.2절 P3 이후)
 
 **원칙.**
-1. 그래프 모델 모듈(`NodeGraph`)은 Object 층(ObjectRuntime)·위젯·장치에 의존하지 않는다. 창·GPU 없이 시험한다. 속성 해석(리플렉션 타입 조회)은 그 위 층이 한다(GD23).
+1. 그래프 모델 모듈(`NodeGraph`)은 객체(Object)·`ObjectHandle`·`TypeLease`·`InstancedStruct`·객체 Registry를 쓰지 않고, 위젯·장치에 의존하지 않는다. 문서 타입은 리플렉션 struct이고 그 생성 codec이 ObjectRuntime 헤더를 쓰므로 ObjectRuntime 모듈에는 의존한다(개정 4, 사용자 결정). 창·GPU 없이 시험한다. 속성 해석(리플렉션 타입 조회)은 그 위 층이 한다(GD23).
 2. 화면은 모델을 바꾸지 않는다. 바꿀 때는 EditorBackend 명령을 낸다(계획 22.1절).
 3. 의미 데이터와 배치 데이터를 섞지 않는다.
 4. 같은 입력은 같은 결과를 낸다. Guid 발급·저장 순서·텍스트 출력을 결정적으로 만든다. 시험은 시간·경쟁에 기대지 않는다.
@@ -350,9 +350,9 @@ UAF(AnimNext)는 RigVM의 model·controller·view 구조를 그대로 상속한�
 | GD18 | 주석 상자 소속 | 주석 상자 안 노드 목록을 저장하지 않는다. 상자 drag 시작 때 기하로 계산해 이동 patch에 넣는다 | UE `NodesUnderComment`를 선택 때 갱신 | 저장 데이터가 기하와 어긋나지 않는다 |
 | GD19 | 진단 | `GraphDiagnostic{AssetId, GraphId, NodeId, PinKey(선택), 심각도, 코드, 메시지}`. 도메인 검증·컴파일러가 내고 화면은 그대로 표시한다. 노드에 오류 필드를 저장하지 않는다 | UE 노드 필드 `ErrorType`·`ErrorMsg` | 머티리얼 시스템 5.4절의 `(AssetId, NodeId, PinKey, 코드, 메시지)`에 GraphId를 더했다. 진단은 컴파일 결과이고 문서 상태가 아니다 |
 | GD20 | 실행 흐름·비주얼 스크립팅 | 공통 층은 핀 종류(데이터·흐름·구조)만 구분하고 실행하지 않는다. 범용 gameplay 노드(객체 생성·RPC·게임 이벤트 조합)를 등록하지 않는다. Sparks 시각 편집은 LD2대로 보류하고, 만들게 되면 Sparks 코드를 생성한다 | Blueprint형 그래프 VM | 계획 14.5·22.2·24.3절, LevelScript LD1·LD2 |
-| GD21 | 모듈 배치 | `NodeGraph`(Engine Runtime, Core·MetaSchema·Serialization만), `NodeGraphTools`(Engine Developer, 텍스트·commandlet), `GraphView`(Engine Editor, 새 모듈). 11.1절 | 모델을 Editor 계층에 둠, 화면을 EditorFramework 안에 둠 | MaterialSchema(Runtime, 의존 Core·MetaSchema·Serialization — 머티리얼 시스템 3.2절)가 NodeGraph에 의존하므로 Developer 이상에 둘 수 없다. 의존을 MaterialSchema와 같게 맞췄다. 화면은 UE 공통 부분만 약 29,000줄이라 EditorFramework와 나눈다 |
+| GD21 | 모듈 배치 | `NodeGraph`(Engine Runtime, ObjectRuntime·CoreTypeBindings — 리플렉션 codec과 `Vec2`·`LinearColor` 미러), `NodeGraphTools`(Engine Developer, 텍스트·commandlet), `GraphView`(Engine Editor, 새 모듈). 11.1절 | 모델을 Editor 계층에 둠, 화면을 EditorFramework 안에 둠, 문서를 평범한 C++ 타입 + 자체 Record codec으로 두고 Binds 미러를 따로 둠(개정 4에서 버림 — codec이 두 벌이고 Binds 정책 예외가 필요하다) | MaterialSchema(Runtime, 머티리얼 시스템 3.2절)가 NodeGraph에 의존하므로 Developer 이상에 둘 수 없다. 리플렉션 struct의 생성 codec이 ObjectRuntime 헤더(`Object/GeneratedFieldCodec.h` 등)를 쓰므로 문서를 리플렉션 struct로 두면 ObjectRuntime 의존은 피할 수 없다. UE도 MetaSound 문서를 USTRUCT로 둔다(CoreUObject 의존). 화면은 UE 공통 부분만 약 29,000줄이라 EditorFramework와 나눈다 |
 | GD22 | 자동화 | 공통 명령을 EditorBackend 명령 schema로 노출한다(계획 22.1절 외부 RPC). commandlet `graph-dump`·`graph-validate`·`graph-diff`를 둔다 | RigVM식 Python 한 줄 출력 | 계획 22.1절에 typed 명령·JSON RPC 계약이 이미 있다. 텍스트 dump는 golden 시험과 source control diff에 쓴다 |
-| GD23 | 속성 저장 | 노드 속성은 `PropertyRecord`, 즉 리플렉션 Record 바이트(InstancedStruct wire 형식: struct Guid + schema version + 내용)로 보관하고 patch에도 바이트로 기록한다. 해석(타입 조회·decode·텍스트화)은 도메인과 NodeGraphTools가 필요할 때 lease를 잠깐 잡고 한다 | 노드에 `InstancedStruct` 값으로 보관 | `InstancedStruct`는 ObjectRuntime에 있고 TypeLease를 쥔다(`ObjectRuntime/Public/Object/InstancedStruct.h:1–7`). 그러면 원칙 1이 깨지고, 노드 종류 해제가 열린 문서·undo 이력의 lease 때문에 막힌다. 미등록 struct decode는 거부·비움만 된다(리플렉션 확장 11절). 바이트 보관이면 세 문제가 함께 풀린다 |
+| GD23 | 속성 저장 | 노드 속성은 `PropertyRecord`, 즉 리플렉션 Record 바이트(InstancedStruct wire 형식: struct Guid + schema version + 내용)로 보관하고 patch에도 바이트로 기록한다. 해석(타입 조회·decode·텍스트화)은 도메인과 NodeGraphTools가 필요할 때 lease를 잠깐 잡고 한다 | 노드에 `InstancedStruct` 값으로 보관 | `InstancedStruct`는 TypeLease를 쥔다(`ObjectRuntime/Public/Object/InstancedStruct.h:1–7`). 노드에 넣으면 노드 종류 해제가 열린 문서·undo 이력의 lease 때문에 막힌다. 미등록 struct decode는 거부·비움만 된다(리플렉션 확장 11절). 바이트 보관이면 두 문제가 함께 풀린다 |
 | GD24 | 스레드 소유 | 문서는 소유 lane 하나(EditorBackend가 정한 에디터 lane)에서만 읽고 바꾼다. 다른 스레드의 RPC 명령은 그 lane에 게시한다. 컴파일러·검색 색인에는 불변 snapshot(문서 복사)을 넘긴다 | 잠금으로 여러 스레드 접근 | 계획 22.1절 thread affinity 검증, 머티리얼 시스템의 compiler snapshot(계획 14.6절)과 같다 |
 | GD25 | 하위 그래프 경계 | 공통 노드 종류 `GraphInput`·`GraphOutput`(하위 그래프 안, 속성에 경계 핀 목록)과 `CollapsedGraph`(부모 그래프, 속성에 GraphId, 핀은 하위 그래프 경계에서 유도) | 도메인마다 경계 노드 | 접기·펼치기(8.1절)를 공통 명령으로 하려면 경계가 공통이어야 한다. 도메인 함수 노드(머티리얼 함수 호출)는 다른 자산을 참조하므로 도메인 노드로 둔다 |
 
@@ -361,19 +361,28 @@ UAF(AnimNext)는 RigVM의 model·controller·view 구조를 그대로 상속한�
 ### 6.1 구조
 
 ```cpp
-// 이름은 초안이다. 리플렉션 struct로 저장한다. Object 포인터·TypeLease 없음.
+// 리플렉션 struct(ROCKS_STRUCT)로 저장한다. Object 포인터·ObjectHandle·TypeLease·InstancedStruct 없음(원칙 1).
 namespace rocks::nodegraph {
+
+using GraphId = Guid;   using NodeId = Guid;   using CommentId = Guid;
+using DomainId = Name;  using NodeTypeId = Name;   using PinKey = Name;   // 객체 Registry NamePool의 토큰
+using PinTypeId = uint32;                                                  // 도메인 타입 표 색인
+
+struct PropertyRecord {                 // 리플렉션 Record 바이트(GD23): 비어 있거나 Record 하나
+    Array<uint8> bytes;
+};
 
 struct GraphDocument {                  // 의미 데이터
     DomainId domain;                    // 도메인 schema 식별(예: "Material")
-    uint32 documentFormatVersion;       // 공통 형식 버전
+    uint32 documentFormatVersion;       // 공통 형식 버전(GraphDocumentFormatVersion)
     GraphId mainGraph;
     Array<Graph> graphs;                // GraphId 순 정렬(6.3절)
 };
 
 struct Graph {
     GraphId id;
-    GraphRole role;                     // Main, Collapsed, DomainDefined(도메인 정의 역할 번호)
+    GraphRole role;                     // Main, Collapsed, DomainDefined
+    uint32 domainRole;                  // DomainDefined일 때 도메인 정의 역할 번호, 그 밖에는 0
     Array<GraphNode> nodes;             // NodeId 순 정렬
     Array<GraphEdge> edges;             // 정규 순서(GI5)
 };
@@ -388,6 +397,9 @@ struct GraphNode {
     NodeEnableState enableState;        // Enabled·Disabled(6.5절)
 };
 
+struct PinValueEntry { PinKey pin; PropertyRecord value; };
+struct RetainedPin   { PinKey key; PinDirection direction; PinTypeId lastType; PropertyRecord value; };
+
 struct GraphEdge {
     NodeId fromNode; PinKey fromPin;
     NodeId toNode;   PinKey toPin;
@@ -395,18 +407,27 @@ struct GraphEdge {
 };
 
 struct GraphDocumentLayout {            // 배치 데이터(GD8), 도메인 자산이 별도 필드로 가진다
-    Array<GraphLayout> graphs;          // GraphId 순
+    Array<GraphLayout> graphs;          // GraphId 순, 문서 그래프와 1:1(GI6)
 };
 
 struct GraphLayout {
-    GraphId id;
-    Array<NodeLayout> nodes;            // NodeId 순: 위치(float, 캔버스 단위)·크기·접힘·고급 핀 표시·말풍선
-    Array<CommentBox> comments;         // id 순: 사각형·문구·색·글자 크기
-    Array<Bookmark> bookmarks;          // 북마크 이동(QuickJump) 번호 → 보기 위치
+    GraphId graph;
+    String title;                       // 하위 그래프 표시 이름(RenameGraph)
+    Array<NodeLayout> nodes;            // NodeId 순, 그래프 노드와 1:1(GI6)
+    Array<CommentBox> comments;         // id 순
+    Array<Bookmark> bookmarks;          // 번호 순, 번호 중복 없음
 };
+
+struct NodeLayout { NodeId node; Vec2 position; Vec2 size; bool collapsed; bool showAdvanced; String bubble; bool bubbleVisible; };
+struct CommentBox { CommentId id; Vec2 position; Vec2 size; String text; LinearColor color; uint32 fontSize; };
+struct Bookmark   { uint32 number; Vec2 viewCenter; float zoom; };
 
 }
 ```
+
+- **이름 키.** `DomainId`·`NodeTypeId`·`PinKey`는 객체 Registry NamePool의 토큰(리플렉션 Name 필드)이다. 같음은 토큰으로 비교한다. 토큰 값은 실행마다 다르므로 정규 순서와 의미 바이트는 원문으로 정한다. 순서는 Name 같음 규칙과 일치하게 "ASCII 소문자로 바꾼 base 바이트 → 번호"이고 None이 맨 앞이다. 그래서 정규화·검증·의미 바이트 함수는 NamePool을 받는다.
+- **배치 필드.** 위치·크기는 캔버스 단위 float(`Vec2`)이고 크기 0은 자동 크기다. 말풍선(`bubble`·`bubbleVisible`)은 UE `NodeComment`·`bCommentBubbleVisible`, 주석 상자의 색·글자 크기는 UE `CommentColor`(`FLinearColor`)·`FontSize`에 대응한다. 북마크는 UE QuickJump(번호 → 보기 위치·zoom)다.
+- **그래프 이름**(`title`)은 배치 데이터다. 하위 그래프는 GraphId로 식별하고 이름은 표시에만 쓰므로 의미 비교·컴파일에 넣지 않는다.
 
 - `PinValueEntry`는 `{PinKey, PropertyRecord}`다. 값 struct는 도메인 타입 표가 정한다. 자산 참조는 `AssetId`로 저장한다(그래서 [에셋 시스템](AssetSystem.ko.md) 6.2절 의존 종류로 보고된다).
 - 하위 그래프는 같은 문서 안에서만 참조한다. 다른 자산의 그래프(머티리얼 함수 등)는 도메인 노드 속성의 `AssetId`로 참조한다.
@@ -428,31 +449,34 @@ struct PinDescriptor {
     PinKey key;                 // 안정 키(Name)
     PinDirection direction;     // Input·Output
     PinKind kind;               // Data·Flow·Structural(GD20)
-    PinTypeId type;             // 도메인 타입 표 색인. wildcard면 Unresolved
-    uint16 maxEdges;            // 입력 기본 1, 출력 기본 무제한(표지 상수)
+    PinTypeId type;             // 도메인 타입 표 색인. wildcard면 UnresolvedPinType
+    uint16 maxEdges;            // 입력 기본 1, 출력 기본 무제한(UnlimitedEdges)
     bool ordered;               // 출력 핀만: 간선 순번이 의미 있음(GD4)
     bool advanced;              // 고급 표시 묶음
-    PinValuePolicy valuePolicy; // 기본값 편집 가능 여부·숨김
-    Text displayName;           // 표시 이름(키와 독립)
+    PinValuePolicy valuePolicy; // 기본값 편집 가능·읽기 전용·숨김
+    StringView displayName;     // 영어 표시 이름(키와 독립)
 };
 
 struct NodeTypeDescriptor {
     NodeTypeId type;
-    uint32 schemaVersion;
-    Guid propertiesStruct;                           // 속성 struct ID(Record schema)
+    uint32 schemaVersion;                            // 1 이상
+    Guid propertiesStruct;                           // 속성 struct ID(Record schema). 0이면 속성 없음
     Span<const PinDescriptor> staticPins;
-    DynamicPinsFn dynamicPins;                       // (속성 Record, 문서 읽기 view) → 추가 핀(선택)
-    MigrateFn migrate;                               // 옛 버전 → 현재(선택, GD13)
-    PassThroughPins passThrough;                     // 비활성 때 통과할 입력 → 출력 쌍(선택, 6.5절)
-    NodeMenuInfo menu;                               // 분류·키워드·도움말(UiToolkit UD14·UD16 규칙)
-    NodeCapabilities capabilities;                   // 복제·삭제 가능, 문서당 하나, 비활성 허용 등
+    DynamicPinsFn dynamicPins;                       // (노드, 문서 읽기 view) → 추가 핀(선택)
+    MigrateFn migrate;                               // 옛 버전 → 현재(선택, GD13 — NG3에서 더한다)
+    Span<const PassThroughPair> passThrough;         // 비활성 때 통과할 입력 → 출력 쌍(선택, 6.5절)
+    NodeMenuInfo menu;                               // 분류·키워드·도움말(영어 StringView)
+    NodeCapabilities capabilities;                   // 복제·삭제 가능, 문서당 하나, 비활성 허용(비트)
 };
 ```
 
 - 핀 목록 = `staticPins` + `dynamicPins(...)`. 같은 키가 두 번 나오면 등록·검증 오류다.
-- `dynamicPins`는 문서 읽기 view를 받는다. `CollapsedGraph`가 하위 그래프 경계에서 핀을 유도해야 하기 때문이다(GD25). 이때 의존 관계(노드 → 참조 그래프)를 등록하고, 참조 그래프의 경계 노드가 바뀌면 그 노드의 핀 cache를 무효화한다.
+- `dynamicPins`는 문서 읽기 view와 NamePool(동적 핀 키를 만든다)을 받는다. 동적 핀의 표시 이름은 핀 목록보다 오래 사는 data(서술 모듈 data 또는 노드 속성 바이트)를 가리킨다. `CollapsedGraph`가 하위 그래프 경계에서 핀을 유도해야 하기 때문이다(GD25). 이때 의존 관계(노드 → 참조 그래프)를 등록하고, 참조 그래프의 경계 노드가 바뀌면 그 노드의 핀 cache를 무효화한다.
 - 핀 목록 cache는 노드 단위다. 속성이 바뀌거나 등록된 의존 그래프가 바뀔 때만 무효화한다.
-- 표시 이름·도움말은 영어로 등록한다(런타임 메시지 규칙). 한도는 UiToolkit UD14·UD16의 상수를 쓴다.
+- 표시 이름·도움말은 영어로 등록한다(런타임 메시지 규칙). 한도는 UiToolkit UD14·UD16의 상수를 쓴다(화면 단계 NG5에서 검사). 지역화 `Text`로 바꾸는 것은 화면이 한다.
+- 서술의 `StringView`·`Span`이 가리키는 data는 서술을 등록한 모듈의 것이고, 등록 때 넘긴 module lease가 수명을 지킨다. 등록표는 핀·통과 쌍 배열을 소유 복사한다(계획 14.6절). 동적 핀의 표시 이름은 복사하지 않는다(위 `dynamicPins` 항목). NG1에서 핀 목록 cache를 두면 속성 변경 때 그 노드 cache를 함께 무효화하므로 dangling이 생기지 않는다.
+- 등록 검사는 정적 핀과 동적 핀에 같은 핀 규칙을 쓴다: 키가 None이 아님, `maxEdges` ≥ 1, 방향·종류·값 정책이 정의된 값, `ordered`는 출력 핀만, 타입은 `UnresolvedPinType`이거나 도메인 타입 표 색인. 동적 핀은 `CollectPins`가 검사하고 위반이면 `InvalidArgument`다.
+- **공통 노드 종류.** 등록표가 모든 도메인에 대해 직접 등록한다. NG0은 재경유 `Graph.Reroute`(입력 `In` 하나·`maxEdges` 1, 출력 `Out` 무제한, 둘 다 Data·`UnresolvedPinType`·값 정책 Hidden, 속성 없음)를 둔다. 재경유는 입력 기본값과 고아 핀을 두지 않는다(의미 바이트에서 접히면 사라지므로 — GI13·GI14가 거부한다). `Graph.Input`·`Graph.Output`·`Graph.Collapsed`(GD25)는 NG3에서 더한다. 도메인은 `Graph.` 접두 이름을 등록할 수 없다.
 
 ### 6.3 정규 순서와 불변식
 
@@ -477,6 +501,16 @@ struct NodeTypeDescriptor {
 | GI8 | 같은 PinKey가 현재 핀 목록과 고아 핀에 동시에 있지 않다 |
 | GI9 | 문서 안 NodeId·GraphId·주석 id는 서로 겹치지 않는다 |
 | GI10 | 재경유 사슬에 순환이 없다 |
+| GI11 | GraphId·NodeId·주석 id는 0이 아니다. 도메인·노드 종류·PinKey는 None이 아니다 |
+| GI12 | `documentFormatVersion`이 지원 범위다. `mainGraph`가 문서에 있고 역할이 Main이며, Main 역할 그래프는 그것 하나다. Main·Collapsed 그래프의 `domainRole`은 0이다 |
+| GI13 | 알려진 종류의 노드: `typeSchemaVersion`이 1 이상이고 서술 버전 이하다(낮으면 migration 대상 — NG3). 속성 Record의 schema가 서술의 `propertiesStruct`다(`propertiesStruct`가 0이면 속성이 비어 있다). `Disabled`면 서술에 비활성 허용이 있다. 재경유에는 고아 핀이 없다. 동적 핀을 계산할 수 있다(동적 핀 함수 오류·핀 규칙 위반이면 위반). 활성 상태·고아 핀 방향이 정의된 값이다 |
+| GI14 | 알려진 종류의 노드: 입력 기본값의 키는 현재 입력 핀이고, 그 핀의 값 정책이 Hidden이 아니며, 값 Record는 비어 있지 않다 |
+
+**알 수 없는 종류.** 등록되지 않은 종류의 노드(자리 노드, GD14)는 핀 목록이 없다. 그래서 그 노드 쪽 간선 끝의 GI2·GI3·GI5 순번·GI8 검사와 GI13·GI14를 하지 않는다. 그 밖(GI1·GI4·GI5 정렬·GI6·GI7·GI9·GI11)은 검사한다. 알려진 종류의 고아 핀 쪽 끝은 방향만 보고 `maxEdges`·순번은 보지 않는다(서술에서 사라진 핀이라 정보가 없다). 알 수 없는 종류의 고아 핀은 방향도 보지 않는다(그 노드의 핀 정보 전체를 모르므로). GI13을 어긴 알려진 종류의 노드(속성이 틀림, 동적 핀 계산 불가)도 핀 목록 모름으로 두고 알 수 없는 종류처럼 검사한다.
+
+**잘못된 토큰.** 구조가 잘못된 Name 토큰(`Name::IsValid`가 거짓)은 검사를 오류로 끝내지 않고 GI11 위반으로 보고한다. 정규화·의미 바이트는 그런 토큰을 `InvalidArgument`로 거부한다.
+
+**검사 결과.** 전체 검사는 위반을 모두 모아 돌려준다(목록 상한은 이름 있는 상수). 위반 하나는 (규칙, GraphId, NodeId, 관련 id, PinKey, 순번)이다. 진단 형식 `GraphDiagnostic`(GD19)으로의 변환은 도메인 검증과 함께 NG1에서 한다.
 
 순환 금지·타입 호환은 공통 불변식이 아니다. 도메인 schema의 연결 판정과 검증이 정한다. 순환을 허용하는 도메인(상태 기계 전이 등)이 있기 때문이다.
 
@@ -527,6 +561,10 @@ public:
     virtual bool BuildDropCommands(const DropContext&, GraphCommandList&) const { return false; }
 };
 
+// NG0은 Domain·PinTypes·NormalizeSemanticNode만 둔다. 나머지는 쓰는 단계에서 더한다
+// (CanConnect·Validate — NG1, CanPasteNode·AllowExternalEdgeReconnect — NG2, CreateDefaultNodes — NG1,
+// CollectMenuEntries·BuildDropCommands — NG5).
+
 enum class ConnectAction : uint8 {
     Deny, Make, MakeReplacingInput, MakeReplacingOutput, MakeReplacingBoth,
     MakeWithConversion,   // conversionNodeType 사용
@@ -539,7 +577,7 @@ struct ConnectVerdict {
 };
 ```
 
-- 등록은 `RegisterGraphSchema(const GraphSchema&, ModuleLease)`로 한다. 한 `DomainId`에 schema는 하나다.
+- 등록은 `NodeTypeRegistry::RegisterSchema(const GraphSchema&, ModuleLease)`로 한다. 한 `DomainId`에 schema는 하나다. 노드 종류 등록(`RegisterNodeType`)보다 먼저 한다(핀 타입 색인 검사에 타입 표가 필요하다).
 - `CanConnect`는 순환 검사를 포함할 수 있다. 공통 층은 순환 검사 도우미를 제공한다. 입력 쪽에서 출력 쪽으로 도달 가능한지를 재경유를 포함해 파생 인접 색인으로 본다. 비용은 도달 범위에 비례한다. 화면은 drag 동안 결과를 cache한다.
 - UE의 promotion(`MAKE_WITH_PROMOTION`, 연산자 노드 타입 승격)은 도메인이 wildcard 해석(GD10)으로 표현한다. 별도 판정 값을 두지 않는다. 파라미터 승격("Promote to Parameter")은 메뉴 항목의 명령 목록으로 만든다.
 - 메뉴 항목은 데이터다: `NodeMenuEntry{표시 이름, 분류 경로, 키워드, 도움말, 순위 가중치, 생성 명령 목록}`. 실행 함수 포인터를 두지 않는다. 항목을 고르면 그 명령 목록을 `GraphMutator`에 보낸다. 그래서 메뉴 항목도 headless로 시험한다.
@@ -631,6 +669,15 @@ struct ConnectVerdict {
 
 hash는 **migration을 거친 문서**로 계산한다. 쿠커는 저장 바이트를 읽은 뒤 메모리에서 같은 migration을 적용하고 hash를 계산한다. 그래서 에디터에서 연 문서와 쿠커의 너겟 키가 같다.
 
+**형식(의미 바이트 v1).** 정수는 little-endian 고정 폭이고 바이트열은 u64 길이 + 내용이다.
+- 머리: magic `RNGS`, 형식 번호 1, 도메인, `mainGraph`, 그래프 수. 문서 형식 버전(`documentFormatVersion`)은 쓰지 않는다. 형식 버전만 오른 문서는 hash가 같다.
+- 그래프마다(GraphId 순): id, 역할, `domainRole`, 재경유를 뺀 노드 수와 노드들(NodeId 순), 접은 간선 수와 간선들.
+- 간선 하나: 입력 NodeId, 입력 PinKey, 출력 NodeId, 출력 PinKey, 순번.
+- 입력 배열 순서와 무관하다. 그래프·노드·입력 기본값·고아 핀·간선을 모두 정규 순서로 정렬해 쓴다. schema가 노드 writer의 쓰기 오류를 무시하고 성공을 돌려줘도 writer가 첫 오류를 기억해 전체를 실패시킨다.
+- 노드: `NormalizeSemanticNode`가 노드 writer에 노드 하나를 정확히 한 번 쓴다. 기본은 (NodeId, 종류, `typeSchemaVersion`, 속성 바이트, 입력 기본값 (PinKey, 바이트) 목록, 활성 상태, 고아 핀 (PinKey, 방향, `lastType`, 바이트) 목록)이다. 도메인은 걸러낸 속성 바이트를 넘길 수 있다. 도메인 schema가 등록되지 않았으면 기본을 쓴다.
+- Name은 정규 원문(ASCII 소문자 base + 번호)으로 쓴다. 표시 대소문자만 바뀐 키는 의미 바이트를 바꾸지 않는다.
+- **접은 간선.** 재경유 사슬을 거슬러 원천(재경유가 아닌 노드의 출력 핀)을 찾아 (원천 → 대상)으로 쓴다. 순번은 사슬의 첫 간선(원천에서 나온 간선)의 순번이다. 원천이 없는 재경유에서 나온 간선은 쓰지 않는다. 재경유를 거쳐 같은 (출력, 입력) 쌍이 둘 이상 생기면 모두 쓴다(정규 순서, 같으면 순번 순). UE knot 접기와 같다.
+
 ### 8.5 Guid 발급
 
 `NodeId`·`GraphId`·주석 id는 `GraphIdSource`에서 받는다.
@@ -720,7 +767,7 @@ hash는 **migration을 거친 문서**로 계산한다. 쿠커는 저장 바이�
 
 | 모듈 | 계층 | 책임 | 의존 | 금지 |
 |---|---|---|---|---|
-| **NodeGraph** | Engine Runtime(`Engine/Source/Runtime/NodeGraph`) | 문서·배치 타입, 서술·schema 등록표, `GraphMutator`·patch·통지·bracket, 파생 색인, 불변식 검사, 의미 바이트, migration 실행, 순환 검사 도우미, 진단 형식, Guid 발급기 | Core·MetaSchema·Serialization | ObjectRuntime·UI·장치·도메인 모듈 |
+| **NodeGraph** | Engine Runtime(`Engine/Source/Runtime/NodeGraph`) | 문서·배치 타입, 서술·schema 등록표, `GraphMutator`·patch·통지·bracket, 파생 색인, 불변식 검사, 의미 바이트, migration 실행, 순환 검사 도우미, 진단 형식, Guid 발급기 | ObjectRuntime·CoreTypeBindings(Core·MetaSchema·Serialization 포함) | 객체·`ObjectHandle`·`TypeLease`·`InstancedStruct`·객체 Registry 사용, UI·장치·도메인 모듈 |
 | **NodeGraphTools** | Engine Developer(`Engine/Source/Developer/NodeGraphTools`) | 조각 JSON codec(리플렉션 텍스트 변환), `graph-dump`·`graph-validate`·`graph-diff` commandlet, 문서 diff 계산 | NodeGraph·ObjectRuntime·ReflectionText·Core | 도메인 모듈, Release 링크 |
 | **GraphView** | Engine Editor(`Engine/Source/Editor/GraphView`) | 11.2절 화면 | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자, GD16) | 도메인 모듈(GD17), Game·Client·Server 도달(BuildTargets BD20) |
 | 도메인 schema | 각 도메인(예: MaterialSchema) | `GraphSchema` 구현·서술 등록 | NodeGraph | — |
@@ -805,13 +852,13 @@ NodeGraph는 Runtime 계층이다. 그러나 게임이 쓰지 않으면 Release 
 | GT11 | 화면 CPU 시험 | 가짜 플랫폼(UiToolkit UT1)에서 hover·marquee·연결 drag·노드 drag·메뉴 검색·편집 명령 결합의 명령 결과, 통지 → 증분 갱신 대상 수 |
 | GT12 | 화면 픽셀 | UiToolkit UV6 방식 픽셀 비교(노드·핀·연결선·LOD 단계) |
 | GT13 | 성능 | 11.3절 측정, 노드 하나 변경의 갱신 비용이 크기와 무관함 |
-| GT14 | 정책 | NodeGraph의 ObjectRuntime·도메인 의존 0건, NodeGraphTools·GraphView의 도메인 의존 0건, GraphView의 Game·Client·Server 도달 0건(BuildTargets BD20) |
+| GT14 | 정책 | NodeGraph의 의존이 ObjectRuntime·CoreTypeBindings뿐이고 `InstancedStruct`·`TypeLease`·`ObjectHandle`·객체 Registry 헤더 include 0건(policy `nodegraph-boundary`), NodeGraphTools·GraphView의 도메인 의존 0건, GraphView의 Game·Client·Server 도달 0건(BuildTargets BD20) |
 
 ## 14. 단계
 
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
-| NG0 | 문서·배치 타입, 서술·등록표, 정규 순서, 불변식 검사, 의미 바이트 | MetaSchema·Serialization(구현됨) | GT1 중 구조 사례, GT9 바이트 부분, GT14 의존 |
+| NG0 | 문서·배치 타입, 서술·등록표, 정규 순서, 불변식 검사, 의미 바이트 — **구현**(2026-11-23) | ObjectRuntime 리플렉션·Serialization(구현됨) | GT1 중 구조 사례(GI1–GI14 규칙마다 양성·음성), GT9 바이트 부분, GT14 의존 |
 | NG1 | `GraphMutator`·공통 명령·patch·파생 색인·통지·bracket·Guid 발급기 | NG0 | GT1–GT4, GT6 |
 | NG2 | NodeGraphTools: 조각 JSON codec·붙여넣기·`graph-dump`·`graph-validate`·`graph-diff` | NG1, ReflectionText(구현됨) | GT5, GT10 |
 | NG3 | migration·고아 핀·자리 노드·등록 해제·하위 그래프 경계 노드 | NG1 | GT7·GT8, 접기·펼치기 왕복 |
@@ -820,6 +867,11 @@ NodeGraph는 Runtime 계층이다. 그러나 게임이 쓰지 않으면 Release 
 | NG6 | palette·주석·재경유·정렬·북마크·찾기·상하류 선택·2D 격자·성능 측정 | NG5, 공용 2D 격자(GR5) | GT11 전체, GT13 측정과 목표 확정 |
 | NG7 | diff 화면·overlay hook·하위 그래프 이동·접기·펼치기 화면 | NG6, NG3 | diff·접기 화면 시험, 머티리얼 MAT M4 "정상 제작 Gate" 그래프 부분 |
 | NG8 | 후속: 여러 노드 → 하나 migration, wildcard 해석 도우미, 런타임 그래프 생성(도메인 요구 시), 3-way merge(계획 22.4절 Linked 갱신) | 요구 시 | 각 항목 착수 때 이 문서 개정 |
+
+**NG0 구현 범위.**
+- 헤더(`Engine/Source/Runtime/NodeGraph/Public/NodeGraph/`): `GraphDocument.h`(문서·배치 리플렉션 타입), `NodeTypeDescriptor.h`(핀·노드 서술), `GraphSchema.h`(NG0 부분), `NodeTypeRegistry.h`(schema·서술 등록표, 핀 목록 계산), `GraphNameOrder.h`(Name 정규 순서), `GraphValidation.h`(정규화·전체 불변식 검사), `GraphSemantic.h`(의미 바이트·hash).
+- 등록표는 NG0에서 소유 lane 하나가 쓰는 단일 스레드 객체다. 해제 drain·`NodeTypesChanged`·여러 스레드 조회는 NG3에서 정한다.
+- 미루는 것: migration·`MigrateFn`(NG3), 경계 노드(NG3), `GraphMutator`·patch·통지·파생 색인·Guid 발급기(NG1), `GraphDiagnostic` 변환(NG1).
 
 머티리얼 쪽 연결은 다음과 같다(계획 14.5절 표의 그래프 편집 행).
 - MS1은 NG0–NG3을 쓴다.
@@ -888,4 +940,13 @@ GR1·GR2·GR3·GR5는 개정 3에서 반영했다. GR4는 오디오 문서를 �
     - B9 구현 완료 표기(1절), Runtime 배치 근거(GD21)
 
   리플렉션 개정 요청(개정 1의 GR3)은 GD23으로 필요 없어져 지우고, 요청 번호를 GR1–GR5로 다시 매겼다.
+- 개정 4(2026-11-22): NG0 착수 전 정리. 리플렉션 생성 codec이 ObjectRuntime 헤더를 써서 "리플렉션 struct로 저장"과 "ObjectRuntime 비의존"이 함께 성립하지 않는 것을 확인했고, 사용자 결정으로 문서 타입을 리플렉션 struct로 두고 NodeGraph가 ObjectRuntime에 의존하게 했다(원칙 1·GD21·GD23·11.1절·GT14). 객체·`TypeLease`·`InstancedStruct`는 계속 쓰지 않는다. 함께 정한 것: 이름 키의 NamePool 토큰과 원문 정렬 규칙, 배치 필드(`Vec2`·`LinearColor`, 그래프 이름은 배치), `domainRole`, 공통 노드 `Graph.Reroute`, 불변식 GI11–GI14와 알 수 없는 종류의 검사 범위, 의미 바이트 v1 형식과 재경유 접기의 순번 규칙, NG0의 `GraphSchema` 부분과 구현 범위(14절).
+- 개정 5(2026-11-23): NG0 구현을 반영했다. 모듈 `Engine/Source/Runtime/NodeGraph`(14절 NG0 구현 범위의 헤더), 시험 53개(규칙마다 양성·음성, 경계 사례, 의미 바이트 golden hash), policy `nodegraph-boundary`(GT14). 리뷰어 1명 교차 검증(필수 2·권장 7·참고 9)을 반영했다.
+  - 잘못된 Name 토큰은 검사를 오류로 끝내지 않고 GI11로 보고한다(6.3절).
+  - 동적 핀도 정적 핀과 같은 핀 규칙으로 검사하고, 동적 핀 계산 오류는 GI13으로 보고한다. 속성이 틀린 노드는 동적 핀을 계산하지 않는다(6.2·6.3절).
+  - 재경유 핀은 값 정책 Hidden이고, 재경유의 입력 기본값(GI14)·고아 핀(GI13)을 거부한다(6.2·6.3절).
+  - 의미 바이트는 입력 배열 순서와 무관하게 정규 순서로 쓰고, schema가 무시한 쓰기 오류도 실패로 돌려준다. 머리의 그래프 수와 간선 필드 순서를 적었다(8.4절).
+  - 동적 핀 표시 이름의 수명 규정을 하나로 맞추고, schema 등록 함수 이름을 코드(`RegisterSchema`)에 맞췄다(6.2·7절).
+  - 함께 고친 것: 시험 실행기의 시험 수 상한(4,096 → 이름 있는 상수 16,384, EngineTests가 4,142개로 넘었다), policy의 여러 줄 의존 목록·`DynamicModules` 검사.
+  - 남긴 것(NG1 이후): 핀·종류 조회의 선형 탐색(파생 색인과 함께), `MaxElements` 리터럴과 상수의 컴파일 시점 연결, `WriteSemanticBytes`의 바이트 복사 1회.
 - 개정 3(2026-11-22): 다른 문서 개정 요청 GR1·GR2·GR3·GR5를 해당 문서에 반영하고 15절에 상태 열을 더했다. GR4(오디오)는 미반영이다. GD16의 2D 격자 참조를 공간 색인 5.3절로 고쳤다.

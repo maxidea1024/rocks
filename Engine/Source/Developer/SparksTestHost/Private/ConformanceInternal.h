@@ -52,6 +52,12 @@ StringView LineAt(StringView text, usize& offset) noexcept;
 // 기대 진단 하나를 "    error S0412 [경로] [줄:열]\n"로 쓴다.
 Result<void> FormatExpected(StringBuilderBase& out, const ExpectedDiagnostic& expected) noexcept;
 
+// 폴더 사례의 파일(input.files)을 패키지·모듈로 compilation에 넣는다. 배치가 틀리면 reason에
+// 이유를 쓰고 false(CaseRunner.cpp — `.run` 폴더 revision도 쓴다).
+Result<bool> AddFolderSources(Allocator& allocator, const CaseInput& input, SourceSet& sources,
+                              DiagnosticList& diagnostics, Compilation& compilation,
+                              StringView& reason) noexcept;
+
 // `.run` 사례: 컴파일한 모듈을 `.sparkc` 왕복 뒤 VM으로 실행해 결과 줄을 비교한다(진단 없는
 // 파일 사례만). 다르면 report에 실패 항목을 더한다. Result 실패는 할당 실패뿐이다.
 Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,

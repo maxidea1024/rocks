@@ -311,7 +311,8 @@ Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, St
                            StringView sourceName, StringView folderName, StringView syntaxTreeName,
                            StringView namesName, StringView typesName, StringView irName,
                            StringView bytecodeName, StringView runName,
-                           Span<const StringView> revisionNames, Span<const CaseFile> schemas,
+                           Span<const StringView> revisionNames,
+                           Span<const StringView> revisionFolders, Span<const CaseFile> schemas,
                            Report& report) noexcept {
     Array<LoadedFile> loaded(allocator);
     // 0: .expect, 1: .spark 또는 없음, 2: .ast 또는 없음, 3: .names 또는 없음, 4: .types 또는 없음,
@@ -451,6 +452,57 @@ Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, St
     }
 
     input.revisions = revisions.View();
+    // 폴더 사례의 revision 폴더(`<사례>.<버전>/` — 바뀐 파일만, 배치 검사 없음).
+    Array<LoadedFile> revisionFolderFiles(allocator);
+    Array<usize> folderStarts(allocator);
+    for (const StringView& name : revisionFolders) {
+        if (auto pushed = folderStarts.TryPushBack(revisionFolderFiles.Size()); !pushed) {
+            return pushed;
+        }
+
+        auto full = Path::Combine(allocator, areaPath, name);
+        if (!full) {
+            return Result<void>::Failure(full.Error());
+        }
+
+        auto read = LoadFolderCase(allocator, files, full.Value().View(), "", 0, areaName, name,
+                                   revisionFolderFiles, report);
+        if (!read) {
+            return Result<void>::Failure(read.Error());
+        }
+
+        if (!read.Value()) {
+            return Result<void>::Success();
+        }
+    }
+
+    if (auto pushed = folderStarts.TryPushBack(revisionFolderFiles.Size()); !pushed) {
+        return pushed;
+    }
+
+    Array<CaseFile> revisionFolderCases(allocator);
+    for (const LoadedFile& file : revisionFolderFiles) {
+        if (auto pushed = revisionFolderCases.TryPushBack(
+                CaseFile{file.path.View(), StringView(file.bytes.Data(), file.bytes.Size())});
+            !pushed) {
+            return pushed;
+        }
+    }
+
+    Array<CaseRevision> folderRevisions(allocator);
+    for (usize at = 0; at < revisionFolders.Size(); ++at) {
+        const StringView name = revisionFolders[at];
+        CaseRevision revision;
+        revision.version =
+            StringView(name.Data() + stem.ByteCount() + 1, name.ByteCount() - stem.ByteCount() - 1);
+        revision.files = Span<const CaseFile>(revisionFolderCases.Data() + folderStarts[at],
+                                              folderStarts[at + 1] - folderStarts[at]);
+        if (auto pushed = folderRevisions.TryPushBack(revision); !pushed) {
+            return pushed;
+        }
+    }
+
+    input.folderRevisions = folderRevisions.View();
     input.hasRun = present[7];
     input.gateSweep = present[7]; // 저장소 corpus는 Gate G4 주입 행렬도 돈다(SparksRuntime 4절)
     input.run = textOf(runName);
@@ -480,22 +532,32 @@ bool HasStem(Span<const CaseItem> list, StringView stem) noexcept {
 
 bool SplitRevisionStem(StringView stem, StringView& base) noexcept;
 
-// stem이 reload revision 원문인지다: `.spark`만 있고(폴더·짝 파일 없음) `<사례>.<버전>`의 사례에
-// `.spark`·`.run`이 있다(목록 순서는 RunArea의 종류 번호 — 0 `.spark`, 1 폴더, 8 `.run`).
+// stem이 reload revision인지다: `.spark`만(파일 사례 revision) 또는 폴더만(폴더 사례 revision —
+// SparksReload 6절 LC7c2b) 있고 `<사례>.<버전>`의 사례에 같은 종류와 `.run`이 있다(목록 순서는
+// RunArea의 종류 번호 — 0 `.spark`, 1 폴더, 8 `.run`).
 bool IsRevisionStem(const Array<CaseItem>* lists, usize kinds, StringView stem) noexcept {
     StringView base;
-    if (!SplitRevisionStem(stem, base) || !HasStem(lists[0].View(), stem) ||
-        !HasStem(lists[0].View(), base) || !HasStem(lists[8].View(), base)) {
+    if (!SplitRevisionStem(stem, base) || !HasStem(lists[8].View(), base)) {
         return false;
     }
 
-    for (usize kind = 1; kind < kinds; ++kind) {
-        if (HasStem(lists[kind].View(), stem)) {
-            return false;
+    constexpr usize RevisionKinds[] = {0, 1};
+    for (const usize kind : RevisionKinds) {
+        if (!HasStem(lists[kind].View(), stem) || !HasStem(lists[kind].View(), base)) {
+            continue;
+        }
+
+        bool alone = true;
+        for (usize other = 0; other < kinds; ++other) {
+            alone = alone && (other == kind || !HasStem(lists[other].View(), stem));
+        }
+
+        if (alone) {
+            return true;
         }
     }
 
-    return true;
+    return false;
 }
 
 // stem이 `<사례>.<버전>`이면 사례 stem을 base에 두고 true다(버전에는 점이 없다).
@@ -700,10 +762,22 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
             }
         }
 
-        if (auto ran =
-                RunPairedCase(allocator, files, areaPath, areaName, stem, expectName, sourceName,
-                              folderName, syntaxTreeName, namesName, typesName, irName,
-                              bytecodeName, runName, revisionNames.View(), schemas, report);
+        Array<StringView> revisionFolders(allocator);
+        for (const CaseItem& candidate : lists[1]) {
+            StringView base;
+            if (SplitRevisionStem(candidate.stem, base) && base == stem &&
+                IsRevisionStem(lists, KindCount, candidate.stem)) {
+                if (auto pushed = revisionFolders.TryPushBack(items[candidate.item].name.View());
+                    !pushed) {
+                    return pushed;
+                }
+            }
+        }
+
+        if (auto ran = RunPairedCase(allocator, files, areaPath, areaName, stem, expectName,
+                                     sourceName, folderName, syntaxTreeName, namesName, typesName,
+                                     irName, bytecodeName, runName, revisionNames.View(),
+                                     revisionFolders.View(), schemas, report);
             !ran) {
             return ran;
         }
