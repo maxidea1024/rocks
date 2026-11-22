@@ -1,9 +1,0 @@
-{
-  "fileVersion": 1,
-  "engineVersion": "0.1",
-  "description": "Rocks Foundation game template: a minimal executable that uses Object and Reflection",
-  "modules": [
-    { "name": "SampleGame", "type": "Runtime", "loadingPhase": "Default" }
-  ],
-  "targetPlatforms": ["Windows", "MacOS"]
-}

@@ -2,6 +2,8 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Result.h>
+#include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 #include <SparksVm/Opcode.h>
 
@@ -22,6 +24,9 @@ enum class BytecodeBank : uint8 {
 };
 
 inline constexpr uint32 BytecodeBankCount = 3;
+
+// content·interface hash의 byte 수다(SHA-256).
+inline constexpr usize BytecodeHashBytes = 32;
 
 // 표 번호가 없음을 나타낸다.
 inline constexpr uint32 NoBytecodeIndex = NumericLimits<uint32>::Max();
@@ -44,10 +49,16 @@ enum class BytecodeRefKind : uint8 {
 
 const char* BytecodeRefKindName(BytecodeRefKind kind) noexcept;
 
+// 참조 표 항목이다. 이름은 표시 이름이며 다른 모듈의 Sparks 선언은 `<import 경로>:` 접두를 붙인다
+// (같은 이름의 두 모듈 선언을 구별한다 — LC4d가 안정 ID를 더한다).
 struct BytecodeRef {
     BytecodeRefKind kind = BytecodeRefKind::Function;
-    uint32 name = NoBytecodeIndex;   // 표시 이름(`Owner.Name`)의 문자열 번호
-    uint32 detail = NoBytecodeIndex; // 종류별 보조 번호(위 설명)
+    uint32 name = NoBytecodeIndex; // 표시 이름(`Owner.Name`)의 문자열 번호
+    // 종류별 보조 번호: Function은 함수 표 번호, Literal은 리터럴 글자의 문자열 번호, 타입 인자를
+    // 단 호출(`Find<Hp>`)은 첫 타입 인자의 Type 참조 번호.
+    uint32 detail = NoBytecodeIndex;
+    // Literal: 이름 지정 인자 표(문자열 번호 — `이름=bank글자;…`, 창에 놓는 순서), 없으면 NoIndex.
+    uint32 arguments = NoBytecodeIndex;
 };
 
 // 명령 단어 하나의 원문 위치다(분리 디버그 정보 — 1부터 센 줄·열).
@@ -80,6 +91,100 @@ struct BytecodeAwaitPoint {
     uint32 liveCount = 0;
 };
 
+// TYPE 구역(형식 버전 2 — SparksBytecode 5절)의 타입 종류다.
+enum class BytecodeTypeKind : uint8 {
+    Struct,
+    Enum
+};
+
+// 이 모듈이 참조하는 Sparks struct·enum의 배치다. struct 값 버퍼는 bank 묶음
+// 순(Scalar·Ref·Buf)이다.
+struct BytecodeType {
+    uint32 name = NoBytecodeIndex; // Type 참조와 같은 표시 이름의 문자열 번호
+    BytecodeTypeKind kind = BytecodeTypeKind::Struct;
+    uint32 firstField = 0;
+    uint32 fieldCount = 0;
+    uint16 slots[BytecodeBankCount] = {}; // struct의 bank별 slot 수
+};
+
+// struct 필드(enum은 case) 하나다. offset은 struct 내용의 절대 slot 위치다(enum은 0).
+struct BytecodeTypeField {
+    uint32 name = NoBytecodeIndex;
+    uint8 bank = 0;
+    uint8 slots = 0;
+    uint32 offset = 0;
+};
+
+// 수명·물리 hook 종류다(SL 5.1절 — 클래스당 종류마다 하나).
+enum class BytecodeHookKind : uint8 {
+    Awake,
+    Enable,
+    Start,
+    Tick,
+    FixedTick,
+    LateTick,
+    Disable,
+    Destroy,
+    TriggerEnter,
+    TriggerExit,
+    CollisionEnter,
+    CollisionExit,
+    Validate,
+    Count
+};
+
+const char* BytecodeHookKindName(BytecodeHookKind kind) noexcept;
+
+// handler의 재진입 정책이다(SL 6.1절 — await가 있는 handler만 표시).
+enum class BytecodeReentry : uint8 {
+    None,
+    SkipWhileBusy,
+    Restart
+};
+
+// CLASS 구역(형식 버전 3 — Docs/Design/SparksRuntime.ko.md 2.1절)의 클래스 하나다. 범위는 이
+// 클래스가 선언한 것만이다(기반 사슬은 session이 잇는다).
+struct BytecodeClass {
+    uint32 name = NoBytecodeIndex;
+    uint32 baseClass = NoBytecodeIndex; // 같은 모듈 기반 클래스 번호(앞선 클래스)
+    // 다른 모듈 Sparks 기반(`<경로>:Class`) 또는 엔진 기반 타입 이름의 문자열 번호.
+    uint32 baseName = NoBytecodeIndex;
+    uint32 firstField = 0; // classFields 범위(위치는 자기 bank 구역 안)
+    uint32 fieldCount = 0;
+    uint32 firstHook = 0;
+    uint32 hookCount = 0;
+    uint32 firstHandler = 0;
+    uint32 handlerCount = 0;
+    uint32 firstEvent = 0;
+    uint32 eventCount = 0;
+    uint16 slots[BytecodeBankCount] = {}; // 자기 필드의 bank별 slot 수
+    uint32 initializer = NoBytecodeIndex; // `<Class>.$init` 함수 번호
+};
+
+struct BytecodeHook {
+    BytecodeHookKind kind = BytecodeHookKind::Awake;
+    uint32 function = NoBytecodeIndex;
+};
+
+struct BytecodeHandler {
+    uint32 path = NoBytecodeIndex;  // 경로 글자(빈 글자는 자기 이벤트 — 표시용)
+    uint32 event = NoBytecodeIndex; // 이벤트 이름(표시용)
+    uint32 function = NoBytecodeIndex;
+    BytecodeReentry reentry = BytecodeReentry::None;
+    uint8 awaits = 0;
+    // 경로 참조(handlerPaths 범위 — 마디마다 Field·Context 참조, SparksRuntime 2.3절 R7). Changed는
+    // 마지막 마디가 감시 필드다.
+    uint32 firstPath = 0;
+    uint32 pathCount = 0;
+    // 이벤트 참조(Event — Changed와 풀지 못한 경로는 NoBytecodeIndex).
+    uint32 eventRef = NoBytecodeIndex;
+};
+
+struct BytecodeEvent {
+    uint32 name = NoBytecodeIndex;
+    uint32 arguments = NoBytecodeIndex; // 인자 서술자(피연산자 부분), 인자가 없으면 NoIndex
+};
+
 struct BytecodeFunction {
     uint32 name = NoBytecodeIndex; // 표시 이름의 문자열 번호
     uint32 firstWord = 0;
@@ -87,8 +192,13 @@ struct BytecodeFunction {
     // bank마다 할당한 레지스터 수(= 호출 창 base)와 frame 크기(할당 수 + 가장 큰 창, 256 이하).
     uint16 registers[BytecodeBankCount] = {};
     uint16 frame[BytecodeBankCount] = {};
-    // bank마다 매개변수 slot 수(this 포함 — 0번부터).
+    // bank마다 매개변수 slot 수(this 포함 — 0번부터). struct 메서드의 this는 Buf 0번이다.
     uint16 parameters[BytecodeBankCount] = {};
+    // 반환 값의 bank와 slot 수(값 없음은 slot 0). RETERR가 이 모양의 Result를 만든다.
+    uint8 returnBank = 0;
+    uint8 returnSlots = 0;
+    // 본문 hash(위치 주석을 뺀 IR 덤프의 SHA-256 — 재컴파일 범위, SparksBytecode 6.2절).
+    uint8 bodyHash[BytecodeHashBytes] = {};
     uint32 firstSwitch = 0;
     uint32 switchCount = 0;
     uint32 firstAwait = 0;
@@ -99,7 +209,9 @@ class BytecodeModule final {
 public:
     explicit BytecodeModule(Allocator& allocator) noexcept
         : scalars(allocator), stringBytes(allocator), stringOffsets(allocator),
-          stringLengths(allocator), refs(allocator), functions(allocator), words(allocator),
+          stringLengths(allocator), refs(allocator), types(allocator), typeFields(allocator),
+          classes(allocator), classFields(allocator), hooks(allocator), handlers(allocator),
+          handlerPaths(allocator), events(allocator), functions(allocator), words(allocator),
           locations(allocator), switches(allocator), cases(allocator), awaits(allocator),
           liveRanges(allocator) {
     }
@@ -111,11 +223,30 @@ public:
         return StringView(stringBytes.Data() + stringOffsets[index], stringLengths[index]);
     }
 
+    // 머리(`.sparkc` 5절): compiler version·모듈 import 경로(문자열 번호), 원문 content hash, 공개
+    // 선언의 interface hash(LC4d 전에는 0), manifest profile(0 core, 1 full).
+    uint32 compiler = NoBytecodeIndex;
+    uint32 path = NoBytecodeIndex;
+    uint8 contentHash[BytecodeHashBytes] = {};
+    uint8 interfaceHash[BytecodeHashBytes] = {};
+    uint8 profile = 0;
+
     Array<uint64> scalars;   // Scalar 상수(정수·double 비트·이름 id)
     Array<char> stringBytes; // 문자열 표(escape를 푼 UTF-8)
     Array<uint32> stringOffsets;
     Array<uint32> stringLengths;
     Array<BytecodeRef> refs;
+    // TYPE 구역(형식 버전 2): Type 참조의 보조 번호가 types 번호, StructField 참조의 보조 번호가
+    // typeFields 번호다.
+    Array<BytecodeType> types;
+    Array<BytecodeTypeField> typeFields;
+    // CLASS 구역(형식 버전 3): 클래스 필드의 위치는 자기 bank 구역 안이다.
+    Array<BytecodeClass> classes;
+    Array<BytecodeTypeField> classFields;
+    Array<BytecodeHook> hooks;
+    Array<BytecodeHandler> handlers;
+    Array<uint32> handlerPaths; // handler 경로 마디의 참조 번호
+    Array<BytecodeEvent> events;
     Array<BytecodeFunction> functions;
     Array<uint32> words;               // 모든 함수의 명령 단어(함수는 구간)
     Array<BytecodeLocation> locations; // words와 같은 번호
@@ -124,5 +255,11 @@ public:
     Array<BytecodeAwaitPoint> awaits;
     Array<BytecodeLiveRange> liveRanges;
 };
+
+// 모듈의 bytecode 덤프(Docs/Design/SparksBytecode.ko.md 4.6절 `.bc`)를 out에 붙인다:
+// 상수·문자열·참조 표, 함수마다 머리 줄(bank별 할당 수/frame 크기, 매개변수 slot 수)·await
+// 지점·switch 표·명령(주소, opcode 이름, 피연산자, 원문 위치). 결정적이다. 실패: out의 할당 실패는
+// 그 오류.
+Result<void> AppendBytecodeDump(StringBuilderBase& out, const BytecodeModule& module) noexcept;
 
 } // namespace rocks::sparks

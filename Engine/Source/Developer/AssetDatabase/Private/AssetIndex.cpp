@@ -19,6 +19,8 @@ namespace rocks {
 namespace {
 
 using asset_database_detail::AppendAll;
+using asset_database_detail::AssignDisplayName;
+using asset_database_detail::AssignDisplayNameAs;
 using asset_database_detail::IsContentRelativeName;
 using asset_database_detail::NameSet;
 
@@ -59,53 +61,6 @@ struct EnumerateContext {
     Array<ChildEntry>* children;
     ErrorCode error = ErrorCode::None;
 };
-
-// 진단의 표시 이름을 out에 쓴다(AssetIndexDiagnostic::fileName). 한 줄·유효한 UTF-8이고 서로 다른
-// OS 이름이 같은 표시 이름이 되지 않게 역슬래시·제어 문자(0x00–0x1f·0x7f)와, 이름이 유효한
-// UTF-8이 아니면 0x80 이상 byte를 16진(역슬래시 x 두 자리)으로 적는다. 나머지는 그대로다(유효한
-// UTF-8 이름의 비ASCII 문자 포함). 길이를 먼저 세어 버퍼를 한 번 잡고 채운다.
-Result<void> AssignDisplayNameAs(String& out, StringView raw, bool escapeHigh) noexcept {
-    constexpr uint8 FirstPrintable = 0x20;
-    constexpr uint8 Delete = 0x7f;
-    constexpr uint8 FirstNonAscii = 0x80;
-    constexpr usize EscapeBytes = 4;
-    constexpr char Digits[] = "0123456789abcdef";
-    constexpr uint32 NibbleBits = 4;
-    constexpr uint8 NibbleMask = 0x0f;
-    auto escaped = [&](uint8 value) noexcept {
-        return value < FirstPrintable || value == Delete || value == '\\' ||
-               (escapeHigh && value >= FirstNonAscii);
-    };
-    usize bytes = 0;
-    for (usize index = 0; index < raw.ByteCount(); ++index) {
-        bytes += escaped(static_cast<uint8>(raw.Data()[index])) ? EscapeBytes : 1;
-    }
-
-    Array<char> text(out.GetAllocator());
-    if (auto sized = text.TryResize(bytes); !sized) {
-        return sized;
-    }
-
-    usize at = 0;
-    for (usize index = 0; index < raw.ByteCount(); ++index) {
-        const uint8 value = static_cast<uint8>(raw.Data()[index]);
-        if (!escaped(value)) {
-            text[at++] = raw.Data()[index];
-            continue;
-        }
-
-        text[at++] = '\\';
-        text[at++] = 'x';
-        text[at++] = Digits[value >> NibbleBits];
-        text[at++] = Digits[value & NibbleMask];
-    }
-
-    return out.TryAssign(StringView(text.Data(), text.Size()));
-}
-
-Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
-    return AssignDisplayNameAs(out, raw, !raw.IsValidUtf8());
-}
 
 bool CollectChild(const platform::DirectoryEntry& entry, void* raw) noexcept {
     auto& context = *static_cast<EnumerateContext*>(raw);
@@ -180,7 +135,13 @@ Result<void> IndexImportRecord(Allocator& allocator, Span<const uint8> bytes,
         summary.importerId = record.importerId;
         summary.importerName = Move(record.importerName);
         summary.importerVersion = record.importerVersion;
-        summary.outputCount = record.outputs.Size();
+        if (auto reserved = summary.outputs.TryReserve(record.outputs.Size()); !reserved) {
+            return reserved;
+        }
+
+        for (const ImportOutput& output : record.outputs) {
+            (void)summary.outputs.TryPushBack(output.asset);
+        }
     }
 
     if (auto owner = CheckImportOwner(entry.id, checked, entry.dependencies.View()); !owner) {
@@ -661,8 +622,10 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
     entry.importRecord.owner = cached->importRecord.owner;
     entry.importRecord.importerId = cached->importRecord.importerId;
     entry.importRecord.importerVersion = cached->importRecord.importerVersion;
-    entry.importRecord.outputCount = cached->importRecord.outputCount;
-    Result<void> step = entry.path.TryAssign(path.Value().Text());
+    Result<void> step = entry.importRecord.outputs.TryAppend(cached->importRecord.outputs.View());
+    if (step) {
+        step = entry.path.TryAssign(path.Value().Text());
+    }
     if (step) {
         step = entry.key.TryAssign(path.Value().Key());
     }
@@ -708,9 +671,42 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
 
 Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
                                   const AssetIndexCache* cache, StringView start,
-                                  Array<AssetIndexEntry>& found,
+                                  StringView renameTo, Array<AssetIndexEntry>& found,
                                   Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
     const StringView content = layout_->ContentDirectory();
+    // 이름 바꾸기(renameTo — 7.1절 17 A2e2): start 아래 이름을 renameTo 아래 이름으로 색인하고
+    // 내용은 지금 이름(start 아래)에서 읽는다(이동 전에 준비한다). 이름 앞부분을 바꾼다.
+    auto named = [&](StringView relative, Array<char>& out) noexcept -> Result<void> {
+        out.Clear();
+        const StringView head = renameTo.IsEmpty() ? relative : renameTo;
+        const StringView tail =
+            renameTo.IsEmpty()
+                ? StringView()
+                : relative.SliceBytes(start.ByteCount(), relative.ByteCount() - start.ByteCount());
+        if (auto appended = out.TryAppend(Span<const char>(head.Data(), head.ByteCount()));
+            !appended) {
+            return appended;
+        }
+
+        return out.TryAppend(Span<const char>(tail.Data(), tail.ByteCount()));
+    };
+    // 이름 바꾸기면 읽을 경로(Content/relative)다.
+    auto readPathOf = [&](StringView relative, String& out) noexcept -> Result<void> {
+        out.Clear();
+        if (renameTo.IsEmpty()) {
+            return Result<void>::Success();
+        }
+
+        const StringView pieces[] = {content, "/", relative};
+        for (StringView piece : pieces) {
+            if (auto appended = out.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+
+        return Result<void>::Success();
+    };
+    Array<char> mapped(*allocator_);
     // 깊이 우선으로 디렉터리를 연다(Content 상대 경로 표 — 빈 문자열은 Content 자신). 패키지
     // 후보는 모아 두고 걷기가 끝난 뒤 읽는다(ReadCandidates — scheduler가 있으면 병렬).
     Array<String> pending(*allocator_);
@@ -736,10 +732,16 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
         const platform::FileStatus stat =
             files.Stat(full.View().Data(), full.View().ByteCount(), info);
         if (!stat) {
-            return stat.code == platform::FileCode::NotFound
-                       ? Result<void>::Success()
-                       : AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
-                                       start);
+            if (stat.code == platform::FileCode::NotFound) {
+                return Result<void>::Success();
+            }
+
+            if (auto renamed = named(start, mapped); !renamed) {
+                return renamed;
+            }
+
+            return AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
+                                 StringView(mapped.Data(), mapped.Size()));
         }
 
         if (info.isLink) {
@@ -747,8 +749,19 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
         }
 
         if (info.type == platform::FileType::File && start.EndsWith(EditorPackageExtension)) {
-            return IndexFile(files, editor, Move(first), StringView(), info.modifiedTicks, found,
-                             diagnostics);
+            String name(*allocator_);
+            if (auto renamed = named(start, mapped); !renamed) {
+                return renamed;
+            }
+
+            if (auto assigned = name.TryAssign(StringView(mapped.Data(), mapped.Size()));
+                !assigned) {
+                return assigned;
+            }
+
+            return IndexFile(files, editor, Move(name),
+                             renameTo.IsEmpty() ? StringView() : full.View(), info.modifiedTicks,
+                             found, diagnostics);
         }
 
         if (info.type != platform::FileType::Directory) {
@@ -788,8 +801,13 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                 return Result<void>::Failure(FileErrorCode(listed));
             }
 
-            if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::None,
-                                           FileErrorCode(listed), relativeDirectory.View());
+            if (auto renamed = named(relativeDirectory.View(), mapped); !renamed) {
+                return renamed;
+            }
+
+            if (auto added =
+                    AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(listed),
+                                  StringView(mapped.Data(), mapped.Size()));
                 !added) {
                 return added;
             }
@@ -837,10 +855,15 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                         }
                     }
 
-                    if (auto added =
-                            AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
-                                          ErrorCode::InvalidArgument,
-                                          StringView(rawRelative.Data(), rawRelative.Size()));
+                    if (auto renamed =
+                            named(StringView(rawRelative.Data(), rawRelative.Size()), mapped);
+                        !renamed) {
+                        return renamed;
+                    }
+
+                    if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
+                                                   ErrorCode::InvalidArgument,
+                                                   StringView(mapped.Data(), mapped.Size()));
                         !added) {
                         return added;
                     }
@@ -867,7 +890,20 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
             }
 
             ScanCandidate candidate(*allocator_);
-            candidate.relative = Move(relative);
+            if (auto read = readPathOf(relative.View(), candidate.readPath); !read) {
+                return read;
+            }
+
+            if (auto renamed = named(relative.View(), mapped); !renamed) {
+                return renamed;
+            }
+
+            if (auto assigned =
+                    candidate.relative.TryAssign(StringView(mapped.Data(), mapped.Size()));
+                !assigned) {
+                return assigned;
+            }
+
             candidate.modifiedTicks = child.info.modifiedTicks;
             if (auto pushed = candidates.TryPushBack(Move(candidate)); !pushed) {
                 return pushed;
@@ -910,8 +946,9 @@ Result<void> AssetIndex::ReadCandidates(platform::FileSystem& files,
                 }
             }
 
-            if (auto indexed = IndexFile(files, editor, Move(candidate.relative), StringView(),
-                                         candidate.modifiedTicks, slot.found, slot.diagnostics);
+            if (auto indexed =
+                    IndexFile(files, editor, Move(candidate.relative), candidate.readPath.View(),
+                              candidate.modifiedTicks, slot.found, slot.diagnostics);
                 !indexed) {
                 return indexed.Error();
             }
@@ -970,7 +1007,9 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadO
     editor.expectedKind = PackageKind::Editor;
     // 색인은 형식 판정만 한다(타입 축은 열기가 — 캐시 키에 타입 버전이 없다, 7.1절 16).
     editor.types = nullptr;
-    if (auto scanned = ScanTree(files, editor, cache, StringView(), found, diagnostics); !scanned) {
+    if (auto scanned =
+            ScanTree(files, editor, cache, StringView(), StringView(), found, diagnostics);
+        !scanned) {
         return scanned;
     }
 
@@ -1149,6 +1188,18 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
         }
     }
 
+    for (const AssetIndexMove& move : paths.moves) {
+        if (!IsContentRelativeName(move.from) || !IsContentRelativeName(move.to)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    for (StringView name : paths.removed) {
+        if (!IsContentRelativeName(name)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     const bool normalizes = paths.normalizesNames;
     // 정규화 키의 임시 저장소다(정규화하지 않으면 이름을 그대로 쓴다 — 항목마다 복사하지 않는다).
     String scratch(*allocator_);
@@ -1212,6 +1263,92 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
         }
     }
 
+    // 이름 바꾸기의 두 이름과 지우는 이름(빼기 — 그 이름과 그 아래)과 표시 이름이다. 같은 키가
+    // 아니면 이름 바꾸기의 두 이름은 서로의 아래일 수 없다(디렉터리를 자기 안으로·자기 위로
+    // 옮기기).
+    NameSet moved(*allocator_);
+    auto dropName = [&](StringView name) noexcept -> Result<void> {
+        auto key = CompareKey(name, normalizes, scratch);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (auto added = moved.Add(key.Value()); !added) {
+            return added;
+        }
+
+        String display(*allocator_);
+        String escaped(*allocator_);
+        if (auto assigned = AssignDisplayNameAs(display, name, false); !assigned) {
+            return assigned;
+        }
+
+        if (auto assigned = AssignDisplayNameAs(escaped, name, true); !assigned) {
+            return assigned;
+        }
+
+        const String* shownNames[] = {&display, &escaped};
+        for (const String* shown : shownNames) {
+            if (auto shownKey = CompareKey(shown->View(), normalizes, scratch); !shownKey) {
+                return Result<void>::Failure(shownKey.Error());
+            } else if (auto added = treeDisplays.Add(shownKey.Value()); !added) {
+                return added;
+            }
+        }
+
+        return Result<void>::Success();
+    };
+    for (const AssetIndexMove& move : paths.moves) {
+        String fromKey(*allocator_);
+        auto from = CompareKey(move.from, normalizes, scratch);
+        if (!from) {
+            return Result<void>::Failure(from.Error());
+        }
+
+        if (auto assigned = fromKey.TryAssign(from.Value()); !assigned) {
+            return assigned;
+        }
+
+        auto to = CompareKey(move.to, normalizes, scratch);
+        if (!to) {
+            return Result<void>::Failure(to.Error());
+        }
+
+        NameSet one(*allocator_);
+        if (auto added = one.Add(fromKey.View()); !added) {
+            return added;
+        }
+
+        one.Finish();
+        if (fromKey.View() != to.Value() && one.Covers(to.Value())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        NameSet other(*allocator_);
+        if (auto added = other.Add(to.Value()); !added) {
+            return added;
+        }
+
+        other.Finish();
+        if (fromKey.View() != to.Value() && other.Covers(fromKey.View())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StringView names[] = {move.from, move.to};
+        for (StringView name : names) {
+            if (auto dropped = dropName(name); !dropped) {
+                return dropped;
+            }
+        }
+    }
+
+    for (StringView name : paths.removed) {
+        if (auto dropped = dropName(name); !dropped) {
+            return dropped;
+        }
+    }
+
+    moved.Finish();
     treeDisplays.Finish();
 
     // 파일을 키 순으로 묶는다(같은 키는 한 번 — 처음 철자로 읽는다). 하위 트리가 덮는 파일은 읽지
@@ -1295,8 +1432,17 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
     refreshed.Finish();
     refreshedDisplays.Finish();
     for (StringView root : roots) {
-        if (auto scanned =
-                ScanTree(files, editor, nullptr, root, plan.added_, plan.fileDiagnostics_);
+        if (auto scanned = ScanTree(files, editor, nullptr, root, StringView(), plan.added_,
+                                    plan.fileDiagnostics_);
+            !scanned) {
+            return scanned;
+        }
+    }
+
+    // 이름 바꾸기: 지금 from의 내용을 to 이름으로 읽는다(이동 전 준비).
+    for (const AssetIndexMove& move : paths.moves) {
+        if (auto scanned = ScanTree(files, editor, nullptr, move.from, move.to, plan.added_,
+                                    plan.fileDiagnostics_);
             !scanned) {
             return scanned;
         }
@@ -1322,7 +1468,8 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
             return Result<void>::Failure(key.Error());
         }
 
-        if (!refreshed.Contains(key.Value()) && !trees.Covers(key.Value())) {
+        if (!refreshed.Contains(key.Value()) && !trees.Covers(key.Value()) &&
+            !moved.Covers(key.Value())) {
             (void)entryPlaces.TryPushBack(&entry);
         }
     }
@@ -1503,6 +1650,131 @@ Result<void> AssetIndex::Referencers(AssetId id, uint32 kinds,
     return Result<void>::Success();
 }
 
+namespace {
+
+// ImportRecord를 읽지 못한 진단인지다(칸 ImportRecord — 색인 IndexImportRecord의
+// UnsupportedVersion· CorruptPackage, 패키지 판정의 그 섹션 손상).
+bool IsUnreadableRecord(const AssetIndexDiagnostic& diagnostic) noexcept {
+    return diagnostic.section == static_cast<uint32>(PackageSectionKind::ImportRecord);
+}
+
+bool ContainsId(Span<const AssetId> sorted, AssetId id) noexcept {
+    const usize at = algo::LowerBound(sorted, id, [](AssetId left, AssetId right) noexcept {
+        return CompareId(left, right) < 0;
+    });
+    return at < sorted.Size() && CompareId(sorted[at], id) == 0;
+}
+
+} // namespace
+
+Result<void> AssetIndex::MakeOrphanFacts(OrphanFacts& facts) const noexcept {
+    for (const AssetIndexDiagnostic& diagnostic : diagnostics_) {
+        if (diagnostic.asset.IsNull()) {
+            facts.unidentified = true;
+            continue;
+        }
+
+        if (auto pushed = facts.seen.TryPushBack(diagnostic.asset); !pushed) {
+            return pushed;
+        }
+
+        if (IsUnreadableRecord(diagnostic)) {
+            if (auto pushed = facts.unreadableRecords.TryPushBack(diagnostic.asset); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    auto less = [](AssetId left, AssetId right) noexcept { return CompareId(left, right) < 0; };
+    facts.seen.Sort(less);
+    facts.unreadableRecords.Sort(less);
+    return Result<void>::Success();
+}
+
+AssetOrphanReason AssetIndex::OrphanReasonWith(const AssetIndexEntry& entry,
+                                               const OrphanFacts* facts) const noexcept {
+    const AssetIndexImportSummary& record = entry.importRecord;
+    if (!record.present || record.owner == entry.id) {
+        return AssetOrphanReason::None;
+    }
+
+    const AssetId ownerId = record.owner;
+    // 진단 사실(표가 없으면 진단을 훑는다).
+    bool unidentified = false;
+    bool seen = false;
+    bool unreadableRecord = false;
+    if (facts != nullptr) {
+        unidentified = facts->unidentified;
+        seen = ContainsId(facts->seen.View(), ownerId);
+        unreadableRecord = ContainsId(facts->unreadableRecords.View(), ownerId);
+    } else {
+        for (const AssetIndexDiagnostic& diagnostic : diagnostics_) {
+            unidentified = unidentified || diagnostic.asset.IsNull();
+            const bool owner = diagnostic.asset == ownerId;
+            seen = seen || owner;
+            unreadableRecord = unreadableRecord || (owner && IsUnreadableRecord(diagnostic));
+        }
+    }
+
+    // owner 항목(같은 id 범위 — byId_는 id 순)이다.
+    const usize low =
+        algo::LowerBound(byId_.View(), ownerId, [&](usize index, AssetId key) noexcept {
+            return CompareId(entries_[index].id, key) < 0;
+        });
+    usize high = low;
+    bool anyOwned = false;
+    for (; high < byId_.Size() && CompareId(entries_[byId_[high]].id, ownerId) == 0; ++high) {
+        const AssetIndexEntry& owner = entries_[byId_[high]];
+        if (!owner.importRecord.present || !(owner.importRecord.owner == owner.id)) {
+            continue;
+        }
+
+        anyOwned = true;
+        for (AssetId output : owner.importRecord.outputs) {
+            if (output == entry.id) {
+                return AssetOrphanReason::None;
+            }
+        }
+    }
+
+    if (high == low) {
+        // owner가 색인에 없다 — 읽지 못한 패키지가 owner일 수 있으면 확정하지 않는다.
+        return unidentified || seen ? AssetOrphanReason::Undetermined
+                                    : AssetOrphanReason::OwnerMissing;
+    }
+
+    // owner 쪽 기록을 읽지 못했으면(그 기록이 이 출력을 적었을 수 있다) 확정하지 않는다.
+    if (unreadableRecord) {
+        return AssetOrphanReason::Undetermined;
+    }
+
+    return anyOwned ? AssetOrphanReason::NotListed : AssetOrphanReason::OwnerNotImporter;
+}
+
+AssetOrphanReason AssetIndex::OrphanReason(const AssetIndexEntry& entry) const noexcept {
+    return OrphanReasonWith(entry, nullptr);
+}
+
+Result<void> AssetIndex::Orphans(Array<const AssetIndexEntry*>& out) const noexcept {
+    OrphanFacts facts(*allocator_);
+    if (auto made = MakeOrphanFacts(facts); !made) {
+        return made;
+    }
+
+    for (const AssetIndexEntry& entry : entries_) {
+        const AssetOrphanReason reason = OrphanReasonWith(entry, &facts);
+        if (reason == AssetOrphanReason::None || reason == AssetOrphanReason::Undetermined) {
+            continue;
+        }
+
+        if (auto pushed = out.TryPushBack(&entry); !pushed) {
+            return pushed;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> AssetIndex::Verify(TypeRegistry* types,
                                 Array<AssetIndexDiagnostic>& out) const noexcept {
     for (const AssetIndexEntry& entry : entries_) {
@@ -1552,6 +1824,30 @@ Result<void> AssetIndex::Verify(TypeRegistry* types,
             out[out.Size() - 1].asset = entry.id;
             out[out.Size() - 1].relatedAsset = dependency.asset;
         }
+    }
+
+    // 고아 출력(경고 — 7.1절 17 A2e4, 판정할 수 없는 것은 뺀다).
+    OrphanFacts facts(*allocator_);
+    if (auto made = MakeOrphanFacts(facts); !made) {
+        return made;
+    }
+
+    for (const AssetIndexEntry& entry : entries_) {
+        const AssetOrphanReason reason = OrphanReasonWith(entry, &facts);
+        if (reason == AssetOrphanReason::None || reason == AssetOrphanReason::Undetermined) {
+            continue;
+        }
+
+        if (auto added = AddDiagnostic(out, AssetDiagnosticCode::OrphanedOutput,
+                                       ErrorCode::NotFound, entry.fileName.View());
+            !added) {
+            return added;
+        }
+
+        AssetIndexDiagnostic& orphan = out[out.Size() - 1];
+        orphan.asset = entry.id;
+        orphan.relatedAsset = entry.importRecord.owner;
+        orphan.detail = static_cast<uint64>(reason);
     }
 
     return Result<void>::Success();
@@ -1605,6 +1901,16 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
     case AssetDiagnosticCode::TypeMismatch:
         return line.TryAppendFormat("dependency {} has a different representative type\n",
                                     diagnostic.relatedAsset);
+    case AssetDiagnosticCode::OrphanedOutput: {
+        const StringView why =
+            diagnostic.detail == static_cast<uint64>(AssetOrphanReason::OwnerMissing)
+                ? StringView("is not in the index")
+            : diagnostic.detail == static_cast<uint64>(AssetOrphanReason::OwnerNotImporter)
+                ? StringView("has no import record of its own")
+                : StringView("does not list this output");
+        return line.TryAppendFormat("warning the owning import {} {}\n", diagnostic.relatedAsset,
+                                    why);
+    }
     default:
         return line.TryAppendFormat("package check failed (section {}, detail {}, {})\n",
                                     diagnostic.section, diagnostic.detail,

@@ -8,7 +8,7 @@ internal static class IdentityCommands
     {
         if (args.Length == 0)
         {
-            throw new ArgumentException("Expected ids add, rename, retire, move, verify, verify-set or merge-check.");
+            throw new ArgumentException("Expected ids add, rename, retire, move, reissue, verify, verify-set or merge-check.");
         }
 
         var options = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -71,6 +71,15 @@ internal static class IdentityCommands
                         return 0;
                     });
                     Console.WriteLine($"Registered {types.Length} types and {fields.Length} fields in {path}.");
+                    return 0;
+                }
+            case "reissue":
+                {
+                    // 템플릿에서 만든 새 프로젝트의 명세를 새 ID로 다시 쓴다(Docs/Design/ProjectFiles.ko.md 11.4절, new-project가 부른다).
+                    Allow("manifest");
+                    string path = ManifestPath(One("manifest"));
+                    int count = StableIdManifest.Update(path, false, manifest => manifest.Reissue());
+                    Console.WriteLine($"Reissued {count} IDs in {path} (aliases and retired entries removed).");
                     return 0;
                 }
             case "rename":

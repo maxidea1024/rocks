@@ -12,6 +12,7 @@
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/PackageManifest.h>
 #include <SparksCompiler/Source.h>
+#include <SparksVm/Bytecode.h>
 #include <SparksCompiler/Symbols.h>
 #include <SparksCompiler/SyntaxTree.h>
 
@@ -62,11 +63,20 @@ struct ImportResolution {
     uint32 target = NoModule;
 };
 
+// 발급 대기 ID 하나다(SparksBytecode 6.1절): manifest에 없는 선언의 kind·이름 키와, `@formerly`로
+// 이은 옛 이름 키(rename — 없으면 빈 글자). 발급은 이 목록을 받는 도구가 한다.
+struct PendingId {
+    StringView kind;
+    StringView name;
+    StringView formerName;
+};
+
 namespace detail {
 class CompilationChecker;
 class FlowAnalyzer;
 class IrBuilder;
 class IrWriter;
+class BytecodeEncoder;
 class NameBinder;
 class TypeChecker;
 } // namespace detail
@@ -90,6 +100,10 @@ public:
     // 구분, `Combat/Score.spark`)이며 규칙 검사는 Check가 한다(S1108). 실패: 없는 package, 같은
     // 패키지에 같은 path를 두 번, Check 뒤면 InvalidArgument, 할당 실패.
     Result<uint32> AddModule(uint32 package, SourceId source, StringView path) noexcept;
+
+    // package의 안정 ID manifest(`<패키지>.rocksids.json`, SparksBytecode 6.1절)를 더한다. 패키지
+    // 하나에 하나다. 실패: 없는 package, 이미 더함, Check 뒤면 InvalidArgument.
+    Result<void> AddIdManifest(uint32 package, SourceId id) noexcept;
 
     // Check가 검사할 마지막 단계를 정한다(기본 CompilationStage::All). 뒤 단계의 결과 접근은 빈
     // 결과다(예: Syntax면 ModuleImports가 비고 NodeSymbol이 NoSymbol). 실패: Check 뒤면
@@ -216,11 +230,27 @@ public:
     // 않은 컴파일은 InvalidArgument, 할당 실패는 그 오류.
     Result<void> AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept;
 
+    // 발급 대기 ID다(Rules 단계 이상 — 모듈·선언 순). 결과는 컴파일이 살아 있는 동안 유효하다.
+    uint32 PendingIdCount() const noexcept {
+        return static_cast<uint32>(pendingIds_.Size());
+    }
+
+    PendingId PendingIdAt(uint32 index) const noexcept;
+
+    // 모듈의 bytecode(Docs/Design/SparksBytecode.ko.md 4절)다. Codegen 단계까지 검사했고 진단이
+    // 없는 컴파일에서만 있다(아니면 nullptr). 컴파일이 살아 있는 동안 유효하다.
+    const BytecodeModule* ModuleBytecode(uint32 module) const noexcept;
+
+    // 모듈의 bytecode 덤프(`.bc` — AppendBytecodeDump)를 out에 붙인다. 실패: bytecode가 없으면
+    // InvalidArgument, 할당 실패는 그 오류.
+    Result<void> AppendBytecodeDump(StringBuilderBase& out, uint32 module) const noexcept;
+
 private:
     friend class detail::CompilationChecker;
     friend class detail::FlowAnalyzer;
     friend class detail::IrBuilder;
     friend class detail::IrWriter;
+    friend class detail::BytecodeEncoder;
     friend class detail::NameBinder;
     friend class detail::TypeChecker;
 
@@ -280,10 +310,22 @@ private:
         bool valid = false;
     };
 
+    struct PackageIdManifest {
+        SourceId source;
+        bool present = false;
+    };
+
     struct PackageEntry {
         PackageManifest manifest;
         SourceId source;
         bool valid = false;
+        PackageIdManifest ids;
+    };
+
+    struct PendingIdRef {
+        uint8 kind = 0;
+        TextRef name;
+        TextRef former;
     };
 
     struct ModuleEntry {
@@ -332,8 +374,22 @@ private:
     Array<uint32> sortedCount_;
     // 모듈마다 IR 덤프 글자(text_ 안 — Codegen 단계에서 내린 모듈만)다.
     Array<TextRef> irDumps_;
+    // 모듈마다 bytecode(Codegen 단계에서 내린 컴파일만 — 모듈 번호와 같은 순서).
+    Array<BytecodeModule> bytecode_;
+    // 모듈마다 내림·인코딩·verifier를 모두 마쳤는지다(S1150 등으로 멈춘 모듈은 0 — 덤프·bytecode
+    // 없음).
+    Array<uint8> lowered_;
+    Array<PendingIdRef> pendingIds_;
     CompilationStage lastStage_ = CompilationStage::All;
     bool checked_ = false;
 };
+
+// 재컴파일 범위(Docs/Design/SparksBytecode.ko.md 6.2절)다. before·after의 모듈을 (패키지 이름,
+// import 경로)로 맞춰, interface hash가 바뀐(또는 새) 모듈과 그것을 전이적으로 import하는 after의
+// 모듈 번호를 modules에(번호 순), interface가 같은 모듈에서 body hash가 바뀐(또는 새) 함수를 (모듈
+// << 32 | 함수 표 번호)로 functions에 붙인다. 실패: after에 내리지 못한 모듈(진단·Codegen 전)이
+// 있으면 InvalidArgument, 할당 실패는 그 오류.
+Result<void> FindRecompileScope(const Compilation& before, const Compilation& after,
+                                Array<uint32>& modules, Array<uint64>& functions) noexcept;
 
 } // namespace rocks::sparks

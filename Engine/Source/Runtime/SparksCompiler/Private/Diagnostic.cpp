@@ -99,6 +99,7 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::RecursiveStruct, "recursive-struct"},
     {DiagnosticCode::InitializerTooDeep, "initializer-too-deep"},
     {DiagnosticCode::ObjectFieldNeedsOptional, "object-field-needs-optional"},
+    {DiagnosticCode::StructDefaultCycle, "struct-default-cycle"},
     {DiagnosticCode::IntegerDivision, "integer-division"},
     {DiagnosticCode::FloatToIntConversion, "float-to-int-conversion"},
     {DiagnosticCode::ConstantOverflow, "constant-overflow"},
@@ -156,6 +157,10 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::NotReplicable, "not-replicable"},
     {DiagnosticCode::NetWriteOutsideAuthority, "net-write-outside-authority"},
     {DiagnosticCode::RpcCall, "rpc-call"},
+    {DiagnosticCode::DataIdLost, "data-id-lost"},
+    {DiagnosticCode::InvalidIdManifest, "invalid-id-manifest"},
+    {DiagnosticCode::IdNameReserved, "id-name-reserved"},
+    {DiagnosticCode::IdClaimedTwice, "id-claimed-twice"},
     {DiagnosticCode::ManifestSyntax, "manifest-syntax"},
     {DiagnosticCode::UnknownManifestKey, "unknown-manifest-key"},
     {DiagnosticCode::MissingManifestKey, "missing-manifest-key"},
@@ -170,6 +175,7 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::DuplicatePackage, "duplicate-package"},
     {DiagnosticCode::FullProfileOnly, "full-profile-only"},
     {DiagnosticCode::InvalidBindingSchema, "invalid-binding-schema"},
+    {DiagnosticCode::FunctionTooLarge, "function-too-large"},
 };
 
 constexpr bool CodeTableIsSorted() noexcept {

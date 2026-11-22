@@ -717,6 +717,27 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
             }
         }
     }
+    // 코드 생성이 handler 경로 참조(SparksRuntime 2.3절 — R7)를 낼 수 있게 이벤트와 안쪽 필드
+    // 심볼을 기록한다(첫 마디는 이름 해석이 이미 기록했다).
+    if (!changed && event != NoSymbol) {
+        binder_.SetNodeSymbol(context.module, last, event);
+    }
+
+    if (changed && count == 3 && tree.Node(segments[1]).kind == SyntaxKind::Name) {
+        const uint32 owner = c.NodeSymbol(context.module, first);
+        const uint32 ownerType = owner == NoSymbol ? NoType
+                                 : c.symbols_[owner].kind == SymbolKind::Field
+                                     ? FieldType(owner)
+                                     : c.symbols_[owner].type;
+        const uint32 inner =
+            ownerType == NoType
+                ? NoSymbol
+                : FindMember(NonOptional(ownerType), TokenText(context.module, segments[1]));
+        if (inner != NoSymbol) {
+            binder_.SetNodeSymbol(context.module, segments[1], inner);
+        }
+    }
+
     CheckReentrancy(context, handler, !changed,
                     ContainsAwait(context.module, tree.Child(handler, 4)), path);
 }

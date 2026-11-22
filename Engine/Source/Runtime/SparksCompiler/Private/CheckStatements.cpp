@@ -1,5 +1,6 @@
 #include "CompilationChecker.h"
 #include "LanguageNames.h"
+#include "StringLiteralReader.h"
 #include "TypeChecker.h"
 
 // 선언 초기값과 본문의 문장이다(Docs/Design/SparksLanguage.ko.md 3.10절): 지역 선언의 타입,
@@ -13,95 +14,6 @@ namespace {
 constexpr uint8 NotInferred = 0;
 constexpr uint8 Inferring = 1;
 constexpr uint8 Inferred = 2;
-
-// 문자열 리터럴 원문(`"..."`·`@"..."`)을 해석한 byte를 하나씩 내는 읽개다(3.10절 switch — escape를
-// 푼 값으로 비교한다). 어휘 분석이 원문을 검사했으므로 escape는 올바르다고 본다.
-class StringLiteralReader final {
-public:
-    explicit StringLiteralReader(StringView text) noexcept : text_(text) {
-        verbatim_ = text_.ByteCount() >= 2 && text_.Data()[0] == '@';
-        at_ = verbatim_ ? 2 : 1;
-        end_ = text_.ByteCount() > 0 ? text_.ByteCount() - 1 : 0; // 닫는 따옴표 앞
-    }
-
-    // 다음 byte를 out에 두고 true, 끝이면 false다.
-    bool Next(uint8& out) noexcept {
-        if (pendingAt_ < pendingCount_) {
-            out = pending_[pendingAt_++];
-            return true;
-        }
-
-        if (at_ >= end_) {
-            return false;
-        }
-
-        const char c = text_.Data()[at_];
-        if (verbatim_) {
-            at_ += c == '"' ? 2 : 1; // `""`는 `"`
-            out = static_cast<uint8>(c);
-            return true;
-        }
-
-        if (c != '\\' || at_ + 1 >= end_) {
-            ++at_;
-            out = static_cast<uint8>(c);
-            return true;
-        }
-
-        const char escape = text_.Data()[at_ + 1];
-        at_ += 2;
-        if (escape != 'u') {
-            out = static_cast<uint8>(escape == 'n' ? '\n' : escape == 't' ? '\t' : escape);
-            return true;
-        }
-
-        // `\u{X}`: 16진수 code point를 UTF-8로.
-        uint32 code = 0;
-        at_ += 1; // `{`
-        while (at_ < end_ && text_.Data()[at_] != '}') {
-            const char digit = text_.Data()[at_++];
-            code = code * 16 + static_cast<uint32>(digit <= '9'   ? digit - '0'
-                                                   : digit <= 'F' ? digit - 'A' + 10
-                                                                  : digit - 'a' + 10);
-        }
-
-        at_ += 1; // `}`
-        pendingAt_ = 0;
-        if (code < 0x80) {
-            pendingCount_ = 1;
-            pending_[0] = static_cast<uint8>(code);
-        } else if (code < 0x800) {
-            pendingCount_ = 2;
-            pending_[0] = static_cast<uint8>(0xC0 | (code >> 6));
-            pending_[1] = static_cast<uint8>(0x80 | (code & 0x3F));
-        } else if (code < 0x10000) {
-            pendingCount_ = 3;
-            pending_[0] = static_cast<uint8>(0xE0 | (code >> 12));
-            pending_[1] = static_cast<uint8>(0x80 | ((code >> 6) & 0x3F));
-            pending_[2] = static_cast<uint8>(0x80 | (code & 0x3F));
-        } else {
-            pendingCount_ = 4;
-            pending_[0] = static_cast<uint8>(0xF0 | (code >> 18));
-            pending_[1] = static_cast<uint8>(0x80 | ((code >> 12) & 0x3F));
-            pending_[2] = static_cast<uint8>(0x80 | ((code >> 6) & 0x3F));
-            pending_[3] = static_cast<uint8>(0x80 | (code & 0x3F));
-        }
-
-        out = pending_[pendingAt_++];
-        return true;
-    }
-
-private:
-    static constexpr usize MaxUtf8Bytes = 4;
-
-    StringView text_;
-    bool verbatim_ = false;
-    usize at_ = 0;
-    usize end_ = 0;
-    uint8 pending_[MaxUtf8Bytes] = {};
-    usize pendingAt_ = 0;
-    usize pendingCount_ = 0;
-};
 
 bool SameStringLiteral(StringView left, StringView right) noexcept {
     StringLiteralReader a(left);
@@ -222,6 +134,10 @@ void TypeChecker::Run() noexcept {
         AnalyzeStructs(true);
     }
 
+    if (binder_.error_ == ErrorCode::None) {
+        CheckDefaultCycles();
+    }
+
     if (flow_ && binder_.error_ == ErrorCode::None) {
         CheckConstCycles(); // 3.11절 S0511
     }
@@ -235,6 +151,11 @@ void TypeChecker::Run() noexcept {
         CheckResourceWaits();  // 3.14절 S0905(실제로 정지하는 await)
         CheckAcquireReturns(); // 3.14절 schema `acquire`
         CheckHeldEvents();     // 3.14절 schema 이벤트 인자
+    }
+
+    // 안정 ID(LC4d): 이름 키를 manifest와 맞추고 사라진 데이터 연결 ID를 알린다(S1005).
+    if (rules_ && binder_.error_ == ErrorCode::None) {
+        CheckStableIds();
     }
 
     // typed IR(LC4a): 진단이 없는 컴파일만 내린다(타입·심볼이 모두 정해져 있다).

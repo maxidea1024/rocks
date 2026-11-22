@@ -113,9 +113,9 @@ internal static class EngineVersionTests
         EngineVersion version = EngineVersion.Read(path);
         string canonical = $"{{ \"MajorVersion\": {version.Major}, \"MinorVersion\": {version.Minor}, \"PatchVersion\": {version.Patch} }}\n";
         Check(File.ReadAllText(path) == canonical, $"{EngineVersion.RelativePath} must be the one-line canonical form:\n{canonical}");
-        ProjectDescriptor template = DescriptorReader.ReadProject(Path.Combine(repository, "Templates", "Game", "Foundation", "Game.rocksproject"));
+        ProjectDescriptor template = DescriptorReader.ReadProject(Path.Combine(repository, "Templates", "Game", "Foundation", "FoundationTemplate.rocksproject"));
         Check(version.CanLinkProject(template.EngineVersion.Major, template.EngineVersion.Minor),
-            $"Templates/Game/Foundation/Game.rocksproject engineVersion {template.EngineVersion} must equal the major.minor of " +
+            $"Templates/Game/Foundation/FoundationTemplate.rocksproject engineVersion {template.EngineVersion} must equal the major.minor of " +
             $"{EngineVersion.RelativePath} ({version})");
     }
 

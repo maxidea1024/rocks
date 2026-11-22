@@ -104,6 +104,7 @@ struct BodyContext {
 class FlowAnalyzer;
 class IrBuilder;
 class IrWriter;
+class BytecodeEncoder;
 class TypeChecker;
 
 class NameBinder final {
@@ -116,6 +117,7 @@ private:
     friend class FlowAnalyzer;
     friend class IrBuilder;
     friend class IrWriter;
+    friend class BytecodeEncoder;
     friend class TypeChecker;
 
     // ---- 공통(BindSetup.cpp) ----

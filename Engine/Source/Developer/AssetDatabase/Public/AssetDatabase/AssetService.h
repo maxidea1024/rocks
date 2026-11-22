@@ -1,7 +1,10 @@
 #pragma once
 
 #include <AssetDatabase/AssetDatabaseLock.h>
+#include <AssetDatabase/AssetAliasTable.h>
+#include <AssetDatabase/AssetClock.h>
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/AssetTextResolver.h>
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ProjectLayout.h>
 #include <ReflectionText/TextAssignments.h>
@@ -40,6 +43,11 @@ struct AssetServiceConfig {
     // 색인 검색의 파일 읽기를 나눌 scheduler다(7.1절 16 A2d2 — null이면 직렬). 있으면
     // packages.files와 서비스 allocator가 동시 호출을 받아야 한다(AssetIndex 생성자 계약).
     WorkerScheduler* scheduler = nullptr;
+    // 별칭의 만든 시각·prune 판정 시계(null이면 시스템 시계 — 시험은 수동 시계), 새 별칭의 만료
+    // 일수, prune의 텍스트 검색 상한이다(7.1절 17 A2e1).
+    AssetClock* clock = nullptr;
+    uint32 aliasDays = AssetAliasDefaultDays;
+    AssetAliasSearchLimits aliasSearch{};
 };
 
 // asset-info 출력 선택이다(13절).
@@ -49,6 +57,51 @@ struct AssetInfoOptions {
     // 보고용 전체 출력(Report 용도 — Transient만 뺀다)이다(기본은 Edit 용도 — asset-set에 그대로
     // 넣을 수 있다).
     bool all = false;
+};
+
+// asset-move 결과다(7.1절 17 A2e2).
+struct AssetMoveResult {
+    // 옮긴 패키지 수(파일이 있는 것과 저장하지 않은 새 패키지)와 더한 별칭 수다.
+    usize packages = 0;
+    usize aliases = 0;
+};
+
+// asset-delete 결과다(7.1절 17 A2e3).
+struct AssetDeleteResult {
+    explicit AssetDeleteResult(Allocator& allocator) noexcept
+        : path(allocator), referencerPaths(allocator), referencerIds(allocator) {
+    }
+
+    // 지운(거부면 고른) 패키지 id와 논리 경로, 지운 별칭 수다.
+    AssetId id{};
+    String path;
+    usize aliases = 0;
+    // 디스크 참조자(색인 — 경로 키 순, 자신 제외)의 경로·id 사본이다(거부·force 모두 — 색인이
+    // 바뀌어도 유효).
+    Array<String> referencerPaths;
+    Array<AssetId> referencerIds;
+};
+
+// asset-fix-duplicate-id 결과다(7.1절 17 A2e4b): 고친 경로·옛 id·새 id, 옛 id를 쓰는 남은 항목의
+// 경로들(다른 패키지의 옛 id 참조는 그쪽을 가리킨다 — 실패해도 고른 대상은 채운다).
+struct AssetFixIdResult {
+    explicit AssetFixIdResult(Allocator& allocator) noexcept
+        : path(allocator), remaining(allocator) {
+    }
+
+    String path;
+    AssetId oldId{};
+    AssetId newId{};
+    Array<String> remaining;
+};
+
+// asset-duplicate 결과다(7.1절 17 A2e3b): 사본 id와 정규화한 논리 경로.
+struct AssetDuplicateResult {
+    explicit AssetDuplicateResult(Allocator& allocator) noexcept : path(allocator) {
+    }
+
+    AssetId id{};
+    String path;
 };
 
 class AssetService {
@@ -133,7 +186,111 @@ public:
     // 보고 한다). 오류: Initialize 전 InvalidArgument, WriteAssetIndexCache의 오류.
     Result<void> FlushCache(const AssetDatabaseLock& lock) noexcept;
 
+    // asset-move <path|디렉터리> <새 path>: 패키지 하나·저장하지 않은 새 패키지·논리 디렉터리를 새
+    // 경로로 옮긴다(7.1절 17 A2e2 — ID·참조는 그대로, 옮긴 패키지마다 옛 경로 별칭,
+    // 대소문자·정규화만 바꾸는 이름 변경은 별칭 없음). 순서: 검사 → 집합 경로 표·색인 갱신 준비 →
+    // 열린 패키지 Detach → 별칭 쓰기 → 대상 부모 디렉터리 → OS 이동 한 번(디렉터리도 — 디스크에
+    // 없으면 건너뜀) → 확정. OS 이동이 실패하면 별칭 표를 되돌린다(되돌리지 못하면 경고
+    // AliasNotRestored). 별칭 쓰기의 NotDurable은 경고 NotDurable이다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath /
+    // InvalidArgument, 원본이 없음 NotFound(진단 None), 원본 경로 키 둘 DuplicatePath /
+    // AlreadyExists, 대상이 원본 아래 InvalidArgument, 대상이 차 있음(색인·파일·디렉터리·새 패키지·
+    // 다른 에셋의 별칭) DuplicatePath / AlreadyExists, 새 경로 규칙 위반(길이) InvalidPath, 별칭
+    // 표의 오류(Aliases·Write), Detach·디렉터리 만들기·OS 이동의 IO(진단 None과 그 오류), 할당 실패
+    // — 모두 패키지 파일·색인·집합 그대로(Detach는 되돌리지 않는다 — 메모리 bulk는 동작이 같다).
+    Result<void> Move(const AssetDatabaseLock& lock, StringView source, StringView target,
+                      AssetMoveResult& result, Array<EditorWarning>* warnings = nullptr,
+                      AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-delete <path|AssetId> [--force]: 패키지 하나를 지운다(7.1절 17 A2e3). 대상은 지금
+    // 이름이다(별칭으로 풀지 않는다). 색인 항목이면 파일을 지우고, 저장하지 않은 새 패키지면
+    // 집합에서 닫기만 한다. 순서: 검사 → 색인 갱신 준비(removed) → 대상을 가리키는 별칭 지우기
+    // 쓰기 → 집합에서 닫기(Discard — 저장하지 않은 편집을 버린다) → 파일 지우기 → 색인 확정.
+    // 닫기·지우기가 실패하면 별칭 표를 되돌린다(되돌리지 못하면 경고 AliasNotRestored — 지우기
+    // 실패면 패키지는 이미 닫혔고 파일·색인은 그대로다). 지운 별칭마다 경고 AliasRemoved, 별칭
+    // 쓰기의 NotDurable은 경고 NotDurable이다. result는 실패해도 고른 대상과 디스크 참조자를
+    // 담는다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 대상 텍스트 형식 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 같은 id 파일 둘 DuplicateAssetId / AlreadyExists, 디스크 참조자가 있고 force가 아님
+    // ReferencedBy / InvalidArgument(related = 첫 참조자), 다른 열린 패키지가 메모리에서 참조함
+    // ReferencedBy / Busy(force여도), 별칭 표의 오류(Aliases·Write), 색인 준비·닫기·파일 지우기의
+    // 오류(진단 None과 그 오류), 할당 실패.
+    Result<void> Delete(const AssetDatabaseLock& lock, StringView target, bool force,
+                        AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
+                        AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-orphans-delete <path>: 고아 출력(7.1절 17 A2e4 — AssetIndex::OrphanReason)만 지운다.
+    // 경로는 지금 이름이다(별칭으로 풀지 않는다). 고아면 Delete(lock, path, force = false)와 같다
+    // (참조자가 있으면 거부 — 강제는 asset-delete --force).
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 고아가 아님 InvalidArgument(진단 None), Delete의 오류.
+    Result<void> DeleteOrphan(const AssetDatabaseLock& lock, StringView path,
+                              AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
+                              AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-fix-duplicate-id <path>: 같은 id 파일 둘 이상 가운데 path의 파일을 새 id로 다시 쓴다
+    // (7.1절 17 A2e4b — EditorPackageSet::FixDuplicateId). 경로는 지금 이름이다(별칭으로 풀지
+    // 않는다). 고아가 생기면 경고 OrphanedOutput.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 같은 id가 아님 InvalidArgument(진단 None·asset), id 발급 실패, FixDuplicateId의 오류, 할당
+    // 실패.
+    Result<void> FixDuplicateId(const AssetDatabaseLock& lock, StringView path,
+                                AssetFixIdResult& result, Array<EditorWarning>* warnings = nullptr,
+                                AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-duplicate <path|AssetId> <새 path>: 원본을 열고(열기와 같다 — 별칭을 따른다) 그 메모리
+    // 상태를 새 id로 새 경로에 쓴다(7.1절 17 A2e3b — EditorPackageSet::Duplicate). 대상 경로가
+    // 어느 에셋의 별칭이든 점유다(새 에셋에는 별칭이 없다). 사본은 열지 않는다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 대상 경로 규칙 InvalidPath /
+    // InvalidArgument, 별칭 표의 오류, 대상이 별칭 DuplicatePath / AlreadyExists(related = 별칭
+    // 대상), 원본 열기의 오류(OpenTarget), id 발급 실패(진단 None), EditorPackageSet::Duplicate의
+    // 오류, 할당 실패.
+    Result<void> Duplicate(const AssetDatabaseLock& lock, StringView source, StringView target,
+                           AssetDuplicateResult& result, Array<EditorWarning>* warnings = nullptr,
+                           AssetDiagnostic* failure = nullptr) noexcept;
+
+    // 별칭 표다(처음 부를 때 packages.files에서 읽는다 — 7.1절 17 A2e1, 실패하면 다음 호출이 다시
+    // 읽는다). 오류(failure 진단): Initialize 전 InvalidArgument, AssetAliasTable::Load의 오류.
+    Result<AssetAliasTable*> Aliases(AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-alias-remove <옛 path>: 그 경로 키의 별칭을 지워 쓴다. notDurable은 교체 뒤 동기화를
+    // 확인하지 못했는지다. 오류(failure 진단): Aliases의 오류, 경로 규칙 위반 InvalidPath /
+    // InvalidArgument, 별칭이 없으면 NotFound(진단 None), AssetAliasTable::Write의 오류.
+    Result<void> AliasRemove(const AssetDatabaseLock& lock, StringView path, bool& notDurable,
+                             AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-alias-prune: 지금 시각(config.clock)으로 만료 항목 가운데 Config 텍스트에서 쓰이지 않은
+    // 것을 지운다(AssetAliasTable::Prune). 오류: Aliases의 오류, Prune의 오류.
+    Result<void> AliasPrune(const AssetDatabaseLock& lock, AssetAliasPruneReport& report,
+                            AssetDiagnostic* failure = nullptr) noexcept;
+
 private:
+    // path의 별칭 대상 id다(경고 AliasResolved — 별칭 표 읽기 실패는 failure 진단). 오류: 별칭이
+    // 없으면 NotFound, Aliases의 오류, 할당 실패.
+    Result<AssetId> ResolveAliasPath(const LogicalPath& path, Array<EditorWarning>* warnings,
+                                     AssetDiagnostic* failure) noexcept;
+
+    // 해석기에 주는 별칭 길이다(서비스의 지연 적재 별칭 표).
+    class AliasLookup final : public AssetAliasResolver {
+    public:
+        explicit AliasLookup(AssetService& service) noexcept : service_(&service) {
+        }
+
+        Result<AssetId> ResolveAlias(const LogicalPath& path,
+                                     Array<EditorWarning>* warnings) noexcept override;
+
+    private:
+        AssetService* service_;
+    };
+
     // `<path|AssetId>`의 패키지를 열고(열린 패키지면 그대로) 대표 에셋을 준다. id에 패키지 id를
     // 둔다.
     Result<ObjectHandle> OpenTarget(StringView target, AssetId& id, Array<EditorWarning>* warnings,
@@ -151,6 +308,12 @@ private:
     platform::FileSystem* files_;
     platform::FileSystem* cacheFiles_;
     bool useCache_;
+    AssetAliasTable aliases_;
+    AliasLookup aliasLookup_;
+    SystemAssetClock systemClock_;
+    AssetClock* clock_;
+    uint32 aliasDays_;
+    AssetAliasSearchLimits aliasSearch_;
     bool initialized_ = false;
 };
 

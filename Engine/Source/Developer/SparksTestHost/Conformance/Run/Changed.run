@@ -1,0 +1,64 @@
+# Changed (SL 5.3, SparksRuntime 2.3): the slot is reserved at the first write of a fragment (order
+# against emit), cancelled when the end value equals the start value, never for initializers, Awake,
+# Enable, Disable or inactive instances; a path source change reconnects and delivers once.
+new #1 Meter -> ok (9 steps)
+new #2 Watcher -> ok (3 steps)
+hook #2 Enable -> ok (0 steps)
+Watcher.Watch(#2, #1) -> void (3 steps)
+  log info "level"
+  log info "name"
+  log info "items"
+  log info "zero"
+  deliver #2 Watcher.on Target.Level.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Name.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Items.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Zero.Changed -> ok (4 steps)
+hook #1 Enable -> ok (7 steps)
+  log info "ping 1"
+  log info "seen 1"
+  deliver #2 Watcher.on Target.Ping -> ok (11 steps)
+  deliver #2 Watcher.on Seen.Changed -> ok (9 steps)
+fields #1 -> Meter(Level: 5, Name: "a", Items: [], Zero: 0)
+Meter.Mix(#1) -> void (9 steps)
+  log info "level"
+  log info "ping 2"
+  log info "seen 3"
+  deliver #2 Watcher.on Target.Level.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Ping -> ok (11 steps)
+  deliver #2 Watcher.on Seen.Changed -> ok (9 steps)
+Meter.Same(#1) -> void (5 steps)
+Meter.Back(#1) -> void (9 steps)
+Meter.Rename(#1) -> void (3 steps)
+  log info "name"
+  deliver #2 Watcher.on Target.Name.Changed -> ok (4 steps)
+Meter.Push(#1) -> void (10 steps)
+  log info "items"
+  deliver #2 Watcher.on Target.Items.Changed -> ok (4 steps)
+Meter.Negative(#1) -> void (3 steps)
+  log info "zero"
+  deliver #2 Watcher.on Target.Zero.Changed -> ok (4 steps)
+Meter.Negative(#1) -> void (3 steps)
+hook #1 Disable -> ok (0 steps)
+Meter.Mix(#1) -> void (9 steps)
+  log info "ping 2"
+  log info "seen 5"
+  deliver #2 Watcher.on Target.Ping -> ok (11 steps)
+  deliver #2 Watcher.on Seen.Changed -> ok (9 steps)
+hook #1 Enable -> ok (7 steps)
+  log info "ping 1"
+  log info "seen 6"
+  deliver #2 Watcher.on Target.Ping -> ok (11 steps)
+  deliver #2 Watcher.on Seen.Changed -> ok (9 steps)
+Watcher.Clear(#2) -> void (3 steps)
+  log info "level"
+  log info "name"
+  log info "items"
+  log info "zero"
+  deliver #2 Watcher.on Target.Level.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Name.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Items.Changed -> ok (4 steps)
+  deliver #2 Watcher.on Target.Zero.Changed -> ok (4 steps)
+Meter.Mix(#1) -> void (9 steps)
+fields #2 -> Watcher(Target: none, Seen: 6)
+detach #2 -> ok
+detach #1 -> ok

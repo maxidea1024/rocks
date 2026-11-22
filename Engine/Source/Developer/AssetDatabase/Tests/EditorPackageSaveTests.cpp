@@ -1096,7 +1096,8 @@ TEST(EditorPackageSave_ImportRecordPreserved) {
         REQUIRE(env.Ready());
         Sources sources(env.allocator);
         REQUIRE(MakeSources(env, sources));
-        const ImportSourceInput recordSources[] = {{"source", "", "Base.png", Sha256Digest{}, 1}};
+        const ImportSourceInput recordSources[] = {
+            {"source", "Raw", "Base.png", Sha256Digest{}, 1}};
         const ImportOutputInput recordOutputs[] = {{"", FixedId(BaseId), IdOf<BaseGameAsset>()}};
         ImportRecordInput input;
         input.owner = FixedId(owned ? BaseId : DerivedId);

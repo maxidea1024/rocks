@@ -1,0 +1,34 @@
+# Engine objects through the fake host (SparksVm 6.3): `Class.Method(#this, ...)` receivers, handles `#n`,
+# Sparks class fields live in session instances (defaults from $init — SparksRuntime 2.2), natives are recorded as `host` lines.
+Mover.Place(#1, #2, (1.0, 2.0, 3.0)) -> (1, 2, 3) (7 steps)
+Mover.Place(#1, #2, (4.0, 5.0, 6.0)) -> (4, 5, 6) (7 steps)
+Mover.Count(#1) -> 2 (5 steps)
+  host Actor.CountAll() -> 0
+Mover.Remember(#1, #3, "a") -> "start+a" (11 steps)
+Mover.Remember(#1, #3, "b") -> "start+a+b" (11 steps)
+Mover.Same(#1, #3) -> true (3 steps)
+Mover.Same(#1, #2) -> false (3 steps)
+Mover.Same(#1, none) -> false (3 steps)
+Mover.HasTarget(#1) -> true (10 steps)
+Mover.Remove(#1, #3) -> true (6 steps)
+  host Actor.RequestDestroy(#3) -> void
+Mover.HasTarget(#1) -> false (5 steps)
+Mover.Same(#1, none) -> true (3 steps)
+Mover.Loop(#1, #4) -> false (29 steps)
+  host AudioSystem.StartLoop(#6, #4) -> #7
+  host LoopHandle.Pause(#7) -> void
+  host LoopHandle.IsPlaying(#7) -> false
+Mover.Holder(#1) -> #8 (2 steps)
+Mover.Holder(#1) -> #8 (2 steps)
+Mover.Home(#1) -> false (6 steps)
+Mover.Count(#5) -> 0 (5 steps)
+  host Actor.CountAll() -> 0
+Loud.Speak(#31) -> "LOUD" (2 steps)
+Talker.Talk(#30, #31) -> "LOUD" (6 steps)
+Talker.Talk(#30, #32) -> "base" (6 steps)
+Talker.IsPawn(#30, #2) -> false (5 steps)
+Talker.IsPawn(#30, #33) -> false (5 steps)
+Talker.Echo(#30, #34) -> #34 (1 steps)
+Talker.IsPawn(#30, #34) -> true (10 steps)
+Talker.Named(#30) -> "Game.Home" (6 steps)
+Talker.Spawned(#30) -> 5 (10 steps)

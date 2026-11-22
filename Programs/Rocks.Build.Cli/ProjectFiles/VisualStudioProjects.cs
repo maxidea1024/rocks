@@ -22,7 +22,13 @@ internal sealed record ProjectFilesTarget(string Name, string TargetType, IReadO
 /// </summary>
 internal sealed record ProjectFilesInput(string Root, string ProjectFilesDirectory, string SolutionPath, IntelliSenseModel Model,
     IReadOnlyDictionary<string, ProjectFilesTarget> Targets, IReadOnlyList<string> Configurations, bool Android,
-    ProjectFilesToolchain Toolchain, IReadOnlyList<string> CSharpProjects);
+    ProjectFilesToolchain Toolchain, IReadOnlyList<string> CSharpProjects, ProjectFilesGame? Game = null);
+
+/// <summary>
+/// 게임 모드 입력이다(Docs/Design/ProjectFiles.ko.md 10.4절). ProjectFile은 <c>.rocksproject</c> 절대 경로, Sdk는 연결한 설치 SDK, HeaderProject는
+/// SDK 헤더만 담는 탐색용 프로젝트 이름(<see cref="IdeModelLayout.HeaderProject"/>와 같다)이다.
+/// </summary>
+internal sealed record ProjectFilesGame(string ProjectFile, string Sdk, string HeaderProject);
 
 /// <summary>
 /// 모델을 Visual Studio 파일(.vcxproj·.filters·.slnx·props·정의 헤더 사본)로 렌더링한다(Docs/Design/ProjectFiles.ko.md 6·7·8절).
@@ -85,10 +91,17 @@ internal static class VisualStudioProjects
         return files;
     }
 
-    /// <summary>프로젝트 파일 경로다: 엔진 프로젝트는 프로젝트 파일 디렉터리, 타깃 프로젝트는 그 아래 Programs.</summary>
-    public static string ProjectPath(ProjectFilesInput input, IdeProject project) => project.Engine
+    /// <summary>
+    /// 프로젝트 파일 경로다: 주 프로젝트(엔진·게임)와 게임 모드의 SDK 헤더 프로젝트는 프로젝트 파일 디렉터리, 타깃 프로젝트는 그 아래 Programs.
+    /// </summary>
+    public static string ProjectPath(ProjectFilesInput input, IdeProject project) => AtRoot(input, project)
         ? Path.Combine(input.ProjectFilesDirectory, project.Name + ".vcxproj")
         : Path.Combine(input.ProjectFilesDirectory, "Programs", project.Name + ".vcxproj");
+
+    private static bool AtRoot(ProjectFilesInput input, IdeProject project) => project.Engine || IsHeaderProject(input, project);
+
+    // 게임 모드의 SDK 헤더 프로젝트인가(빌드하지 않는다).
+    private static bool IsHeaderProject(ProjectFilesInput input, IdeProject project) => input.Game is not null && project.Name == input.Game.HeaderProject;
 
     /// <summary>이름 기반 UUID v5(RFC 9562, SHA-1)다.</summary>
     public static Guid NameGuid(Guid space, string name)
@@ -123,12 +136,19 @@ internal static class VisualStudioProjects
             <Project>
               <PropertyGroup>
                 <RocksRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory){up}'))</RocksRoot>
-                <RocksProjectFiles>$(MSBuildThisFileDirectory)</RocksProjectFiles>
+                <RocksProjectFiles>$(MSBuildThisFileDirectory)</RocksProjectFiles>{GameProperties(input)}
               </PropertyGroup>
             </Project>
 
             """;
     }
+
+    // 게임 모드의 공통 속성이다: 연결한 SDK(끝 구분자 포함)와 .rocksproject 경로(NMake 명령이 쓴다).
+    private static string GameProperties(ProjectFilesInput input) => input.Game is null ? "" : $"""
+
+            <RocksSdkRoot>{Xml(Escape(Path.TrimEndingDirectorySeparator(Path.GetFullPath(input.Game.Sdk)) + Path.DirectorySeparatorChar))}</RocksSdkRoot>
+            <RocksProjectFile>{Xml(Escape(Path.GetFullPath(input.Game.ProjectFile)))}</RocksProjectFile>
+        """;
 
     /// <summary>
     /// 두 도구 모음 props의 내용(UTF-8, CRLF)이다. 생성과 빌드의 낡음 검사(9절)가 같은 렌더링을 쓴다 — 도구 모음이 바뀌면 지문이 바뀐다.
@@ -197,7 +217,7 @@ internal static class VisualStudioProjects
         text.AppendLine($"    <RootNamespace>{Xml(project.Name)}</RootNamespace>");
         text.AppendLine("    <MinimumVisualStudioVersion>18.0</MinimumVisualStudioVersion>");
         text.AppendLine("  </PropertyGroup>");
-        string up = project.Engine ? "" : "..\\";
+        string up = AtRoot(input, project) ? "" : "..\\";
         text.AppendLine($"  <Import Project=\"{up}{CommonProps}\" />");
         text.AppendLine($"  <Import Project=\"{up}{ToolchainProps}\" />");
         text.AppendLine("  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.Default.props\" />");
@@ -215,10 +235,36 @@ internal static class VisualStudioProjects
             string arguments = $"-Target {target.Name} -Configuration {row.Configuration.Configuration} -Platform {row.Platform}" +
                 (row.Platform == WindowsPlatform ? " -Compiler \"$(RocksCompiler)\"" : "");
             string? executable = row.Platform == WindowsPlatform ? target.Executables.GetValueOrDefault(row.Configuration.Configuration) : null;
+            bool headerOnly = IsHeaderProject(input, project);
+            if (headerOnly)
+            {
+                executable = null;
+            }
+
             text.AppendLine($"  <PropertyGroup Condition=\"'$(Configuration)|$(Platform)'=='{Xml(row.Name)}|{ProjectPlatform}'\">");
             foreach ((string property, string action) in new[] { ("NMakeBuildCommandLine", "Build"), ("NMakeReBuildCommandLine", "Rebuild"), ("NMakeCleanCommandLine", "Clean") })
             {
-                text.AppendLine($"    <{property}>{Xml($"\"$(RocksRoot)Build\\IdeBuild.bat\" -Action {action} {arguments}")}</{property}>");
+                // 게임 모드: 연결한 SDK의 IdeBuild로 그 SDK CLI를 부른다(10.4절). SDK 헤더 프로젝트는 빌드할 것이 없다.
+                string command = headerOnly ? "@rem Nothing to build."
+                    : input.Game is not null
+                    ? $"\"$(RocksSdkRoot)Build\\IdeBuild.bat\" -Action {action} -Project \"$(RocksProjectFile)\" -Sdk \"$(RocksSdkRoot).\" -Target {target.Name} " +
+                        $"-Configuration {row.Configuration.Configuration} -Compiler \"$(RocksCompiler)\""
+                    : $"\"$(RocksRoot)Build\\IdeBuild.bat\" -Action {action} {arguments}";
+                text.AppendLine($"    <{property}>{Xml(command)}</{property}>");
+            }
+
+            // 파일 하나 컴파일(Ctrl+F7, 7.4절): Windows 행만, SDK 헤더 프로젝트는 빼고. $(SelectedFiles)는 -WorkingDir 기준으로 푼다. 명령은
+            // 속성이 아니라 NMakeCompile item 메타데이터다 — Microsoft.MakeFile.targets가 %(NMakeCompile.NMakeCompileFileCommandLine)만 읽는다
+            // (속성으로 두면 MSB8005 경고만 내고 아무것도 실행하지 않는다, UE VCProject.cs도 ItemDefinitionGroup에 둔다).
+            string? compileCommand = null;
+            if (!headerOnly && row.Platform == WindowsPlatform)
+            {
+                string files = "-WorkingDir \"$(MSBuildProjectDirectory)\" -Files \"$(SelectedFiles)\"";
+                string compile = input.Game is not null
+                    ? $"\"$(RocksSdkRoot)Build\\IdeBuild.bat\" -Action Compile {files} -Project \"$(RocksProjectFile)\" -Sdk \"$(RocksSdkRoot).\" " +
+                        $"-Target {target.Name} -Configuration {row.Configuration.Configuration} -Compiler \"$(RocksCompiler)\""
+                    : $"\"$(RocksRoot)Build\\IdeBuild.bat\" -Action Compile {files} {arguments}";
+                compileCommand = compile;
             }
 
             text.AppendLine($"    <NMakeOutput>{(executable is null ? "" : Xml(Msb(input.Root, executable)))}</NMakeOutput>");
@@ -241,6 +287,15 @@ internal static class VisualStudioProjects
             }
 
             text.AppendLine("  </PropertyGroup>");
+            if (compileCommand is not null)
+            {
+                text.AppendLine($"  <ItemDefinitionGroup Condition=\"'$(Configuration)|$(Platform)'=='{Xml(row.Name)}|{ProjectPlatform}'\">");
+                text.AppendLine("    <NMakeCompile>");
+                text.AppendLine($"      <NMakeCompileFileCommandLine>{Xml(compileCommand)}</NMakeCompileFileCommandLine>");
+                text.AppendLine("    </NMakeCompile>");
+                text.AppendLine("  </ItemDefinitionGroup>");
+            }
+
             if (defaultBundle >= 0)
             {
                 // 가장 많은 파일이 쓰는 묶음이 ClCompile 기본값이다(8.3절). 항목 메타데이터는 기본값을 바꾸므로 다른 묶음은 네 값을 모두 단다.
@@ -363,10 +418,18 @@ internal static class VisualStudioProjects
         string solutionDirectory = Path.GetDirectoryName(input.SolutionPath)!;
         foreach (IdeProject project in input.Model.Projects)
         {
-            SolutionFolderModel folder = model.AddFolder(project.Engine ? "/Engine/" : "/Programs/");
+            // 게임 모드: 게임 프로젝트는 폴더 없이 첫 항목, SDK 헤더 프로젝트는 /Rocks/, 하위 디렉터리 타깃은 /Programs/(10.4절).
+            SolutionFolderModel? folder = input.Game is not null && project.Engine ? null
+                : model.AddFolder(IsHeaderProject(input, project) ? "/Rocks/" : project.Engine ? "/Engine/" : "/Programs/");
             SolutionProjectModel entry = model.AddProject(Path.GetRelativePath(solutionDirectory, ProjectPath(input, project)).Replace('\\', '/'), null, folder);
             entry.Id = ProjectGuid(input.Root, ProjectPath(input, project));
             entry.AddProjectConfigurationRule(new ConfigurationRule(BuildDimension.Platform, "*", "*", ProjectPlatform));
+            if (IsHeaderProject(input, project))
+            {
+                // 솔루션 빌드에서 뺀다(헤더 탐색용).
+                entry.AddProjectConfigurationRule(new ConfigurationRule(BuildDimension.Build, "*", "*", "false"));
+            }
+
             foreach (var buildType in buildTypes)
             {
                 foreach (string platform in Platforms(input))

@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-22, 개정 16. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-22, 개정 17. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -493,7 +493,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD2 | 매크로 `ROCKS_WITH_EDITOR`·`ROCKS_WITH_EDITOR_DATA`·`ROCKS_WITH_SERVER_CODE`·`ROCKS_WITH_CLIENT_CODE`를 모든 모듈에 0·1로 정의한다. 타깃 안에서 같은 값을 강제하고, 기본값 없이 `Base/Compiler.h`가 검사한다. `ROCKS_WITH_EDITOR=1`이면 `ROCKS_WITH_EDITOR_DATA=1`이다. 서버·클라이언트 코드 값은 타깃 종류로만 정한다 | 권장안 |
 | BD3 | 타깃 종류 매크로(UE `UE_GAME`·`UE_EDITOR`·`IS_PROGRAM` 등)는 두지 않는다. 실행 중 분기는 `build::Description().targetType`, 컴파일 분기는 BD2 매크로로 한다 | 권장안 |
 | BD4 | 모듈 type은 Runtime·Developer·Editor·ServerOnly·ClientOnly다. 게임·플러그인 모듈은 기술자 type으로 거르고, 엔진 모듈은 `SourceModuleRules.ModuleType`(기본은 Group 폴더)으로 도달 검사만 한다. SDK manifest에 type을 싣는다 | 권장안 |
-| BD5 | 설치 SDK는 매크로 조합마다 엔진 라이브러리 변형을 싣는다(key는 조합). 1차는 Game 조합만이며 게임의 Game 타깃과 기본 Program 타깃을 빌드할 수 있다. 없는 조합은 오류이고, 변형을 더하면 `ManifestVersion`을 올린다. Editor 변형은 key에 링크 방식(`Modular`)을 더하고 Rocks Studio 실행 파일과 엔진 모듈 공유 라이브러리를 싣는다(3.8절) | 권장안 |
+| BD5 | 설치 SDK는 매크로 조합마다 엔진 라이브러리 변형을 싣는다(key는 조합). 1차는 Game 조합만이며 게임의 Game 타깃과 기본 Program 타깃을 빌드할 수 있다. 없는 조합은 오류이고, 변형을 더하면 `ManifestVersion`을 올린다. Editor 변형은 key에 링크 방식(`Modular`)을 더하고 Rocks Studio 실행 파일과 엔진 모듈 공유 라이브러리를 싣는다(3.8절). 빌드 구성(Debug·Development·Release)은 이 변형 축과 직교하는 별도 축이다: SDK 하나가 여러 구성을 `Configurations/<구성>/`에 싣고(manifest 14, [Visual Studio 프로젝트 파일](ProjectFiles.ko.md) 10.3절), 변형이 생기면 `Configurations/<구성>/<변형>/`으로 넓힌다 | 권장안 |
 | BD6 | 리플렉션 선언은 전처리 조건 블록 밖에만 쓴다. 예외는 `#if ROCKS_WITH_EDITOR_DATA` 안의 `ROCKS_PROPERTY`와 `#if ROCKS_WITH_EDITOR` 안의 `ROCKS_FUNCTION`뿐이고, 둘 다 `EditorOnly`와 양방향으로 일치해야 한다. 타입 선언은 블록 안에 둘 수 없다. 판정은 메타 컴파일러의 어휘 스캔(정확한 조건 철자 두 개만 허용)이다. 에디터·게임 두 조합의 AST 비교를 보강 검사로 두고, descriptor·안정 ID는 합집합, 생성 코드는 조건부다. `ROCKS_WITH_EDITOR_DATA=0` 빌드는 `EditorOnly` FieldId 목록으로 에디터 패키지의 그 값을 건너뛴다 | 권장안 |
 | BD7 | `Dependencies`·`RequiredModules`를 `PublicDependencies`·`PrivateDependencies`로 바꾼다(호환 이름 없음) | 권장안 |
 | BD8 | 메타 컴파일러의 모듈 범위(import·include 순서·생성 헤더 해석·전파 define)는 컴파일 환경에 보이는 모듈과 같다 | 권장안 |
@@ -647,3 +647,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 14 | 2026-11-21 | BS8d와 ML4를 한 묶음으로(사용자 결정): Modular에서 모듈 표·빌드 정보가 풀리지 않는 문제, 순서 BS8d1(빌드 기반·manifest 쓰기) → ML4a(manifest 적재) → ML4b(실행 파일 연결) → BS8d2(export) → BS8d3(진단) → BS8d4(남은 키) → BS8d5(검사 체인). BS8 완료 기준은 ML4와 함께 채운다. 버린 안: 실행 파일 표 export·OS 기호 조회 |
 | 15 | 2026-11-21 | BS8d1 구현 세부: Modular 빌드 정보 TU를 Core 공유 라이브러리에(`ROCKS_CORE_API`), 모듈 표 TU 대신 manifest(`.modules.json` — 행 배열·크기·`buildId` 재사용), `ROCKS_MODULE_SHARED_LIBRARY`와 export 진입점 `RocksModuleEntry`·강제 참조, Modular 거부를 Launch 기준으로 좁힘 |
 | 16 | 2026-11-22 | ML4b 빌드 쪽 세부: Launch에 닿는 Modular 실행 파일의 모듈은 호스트 공유 라이브러리, 실행 파일은 생성 진입 TU + Launch import만, manifest schema 3·행 키 `host`, Launch 거부를 풀고 Launch 없는 Modular 실행 파일을 거부([모듈 로더](ModuleLoader.ko.md) 3.14절) |
+| 17 | 2026-11-22 | BD5에 빌드 구성 축을 적었다: SDK 변형(매크로 조합 × 링크 방식)과 직교하며, SDK 하나가 여러 구성을 `Configurations/<구성>/`에 싣는다(manifest 14, [Visual Studio 프로젝트 파일](ProjectFiles.ko.md) 10.3절 PJ4) |

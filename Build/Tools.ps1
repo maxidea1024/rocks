@@ -123,13 +123,13 @@ function Get-RocksToolInputs {
             continue
         }
 
-        foreach ($file in Get-ChildItem -LiteralPath ([System.IO.Path]::GetDirectoryName($project)) -Recurse -File) {
+        foreach ($file in Get-ChildItem -LiteralPath ([System.IO.Path]::GetDirectoryName($project)) -Recurse -File -Force) {
             Add-File $file.FullName
         }
     }
 
     foreach ($tree in @('Core/Source', 'Engine/Source', 'Engine/Plugins', 'Programs')) {
-        foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root $tree) -Recurse -File -Include '*.Build.cs', '*.Target.cs' -ErrorAction SilentlyContinue) {
+        foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root $tree) -Recurse -File -Force -Include '*.Build.cs', '*.Target.cs' -ErrorAction SilentlyContinue) {
             if ([System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/') -notmatch '^Programs/Rocks\.') {
                 Add-File $file.FullName
             }
@@ -149,7 +149,7 @@ function Get-RocksToolInputs {
 # Content SHA-256 of a file, reusing the recorded hash when the size and both times match the record (the same rule as the incremental
 # store's large output check); otherwise the file is hashed again.
 function Get-RocksFileHash([string] $path, $memo, $next) {
-    $item = Get-Item -LiteralPath $path
+    $item = Get-Item -LiteralPath $path -Force
     $key = "$($item.Length)|$($item.LastWriteTimeUtc.Ticks)|$($item.CreationTimeUtc.Ticks)"
     $relative = [System.IO.Path]::GetRelativePath($script:RocksRoot, $path).Replace('\', '/')
     $recorded = if ($null -ne $memo) { $memo.PSObject.Properties[$relative] } else { $null }
@@ -181,7 +181,7 @@ function Get-RocksToolState($memo) {
             continue
         }
 
-        foreach ($dll in Get-ChildItem -LiteralPath $full -File -Filter '*.dll' | Sort-Object Name) {
+        foreach ($dll in Get-ChildItem -LiteralPath $full -File -Force -Filter '*.dll' | Sort-Object Name) {
             [void] $outputs.Append($directory).Append('/').Append($dll.Name).Append("`t").Append((Get-RocksFileHash $dll.FullName $memo $next)).Append("`n")
         }
     }
@@ -227,8 +227,20 @@ function Update-RocksTools {
 
     # The input fingerprint and its memo are the ones taken before the build: an input changed while the build ran then differs next time
     # and builds again. Only the output hashes come from after the build.
+    # The memo keeps the input entries from before the build and the output DLL entries from after it.
     $after = Get-RocksToolState $state.Files
-    $record = [ordered]@{ fingerprint = $state.Fingerprint; outputs = $after.Outputs; files = $state.Files }
+    $files = [ordered]@{}
+    foreach ($entry in $after.Files.GetEnumerator()) {
+        $files[$entry.Key] = $entry.Value
+    }
+
+    foreach ($entry in $state.Files.GetEnumerator()) {
+        if (-not ($script:RocksToolOutputs | Where-Object { $entry.Key.StartsWith("$_/", [System.StringComparison]::Ordinal) })) {
+            $files[$entry.Key] = $entry.Value
+        }
+    }
+
+    $record = [ordered]@{ fingerprint = $state.Fingerprint; outputs = $after.Outputs; files = $files }
     New-Item -ItemType Directory -Force -Path (Split-Path $script:RocksToolsStamp) | Out-Null
     ($record | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $script:RocksToolsStamp -Encoding utf8NoBOM
 }

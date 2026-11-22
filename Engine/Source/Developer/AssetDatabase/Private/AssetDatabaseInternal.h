@@ -8,6 +8,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/File.h>
 
 // AssetDatabase 모듈 안에서 함께 쓰는 도우미다(Docs/Design/AssetSystem.ko.md 7.1절).
 namespace rocks::asset_database_detail {
@@ -121,6 +122,54 @@ inline bool IsContentRelativeName(StringView name) noexcept {
     return true;
 }
 
+// 진단·보고의 표시 이름을 out에 쓴다(AssetIndexDiagnostic::fileName·별칭 prune의 파일 이름). 한
+// 줄·유효한 UTF-8이고 서로 다른 OS 이름이 같은 표시 이름이 되지 않게 역슬래시·제어
+// 문자(0x00–0x1f·0x7f)와, 이름이 유효한 UTF-8이 아니면 0x80 이상 byte를 16진(역슬래시 x 두
+// 자리)으로 적는다. 나머지는 그대로다(유효한 UTF-8 이름의 비ASCII 문자 포함). 길이를 먼저 세어
+// 버퍼를 한 번 잡고 채운다.
+inline Result<void> AssignDisplayNameAs(String& out, StringView raw, bool escapeHigh) noexcept {
+    constexpr uint8 FirstPrintable = 0x20;
+    constexpr uint8 Delete = 0x7f;
+    constexpr uint8 FirstNonAscii = 0x80;
+    constexpr usize EscapeBytes = 4;
+    constexpr char Digits[] = "0123456789abcdef";
+    constexpr uint32 NibbleBits = 4;
+    constexpr uint8 NibbleMask = 0x0f;
+    auto escaped = [&](uint8 value) noexcept {
+        return value < FirstPrintable || value == Delete || value == '\\' ||
+               (escapeHigh && value >= FirstNonAscii);
+    };
+    usize bytes = 0;
+    for (usize index = 0; index < raw.ByteCount(); ++index) {
+        bytes += escaped(static_cast<uint8>(raw.Data()[index])) ? EscapeBytes : 1;
+    }
+
+    Array<char> text(out.GetAllocator());
+    if (auto sized = text.TryResize(bytes); !sized) {
+        return sized;
+    }
+
+    usize at = 0;
+    for (usize index = 0; index < raw.ByteCount(); ++index) {
+        const uint8 value = static_cast<uint8>(raw.Data()[index]);
+        if (!escaped(value)) {
+            text[at++] = raw.Data()[index];
+            continue;
+        }
+
+        text[at++] = '\\';
+        text[at++] = 'x';
+        text[at++] = Digits[value >> NibbleBits];
+        text[at++] = Digits[value & NibbleMask];
+    }
+
+    return out.TryAssign(StringView(text.Data(), text.Size()));
+}
+
+inline Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
+    return AssignDisplayNameAs(out, raw, !raw.IsValidUtf8());
+}
+
 // 비교 키 집합이다(Add로 모으고 Finish가 정렬·중복 제거한 뒤 찾는다 — RefreshPaths·감시의 이름
 // 대조, O(log n) 찾기).
 class NameSet {
@@ -194,5 +243,49 @@ public:
 private:
     Array<String> keys_;
 };
+
+// key가 base와 같거나 그 아래인지다(구성 요소 경계 '/' — 논리 경로 키·Content 상대 이름 공용).
+inline bool IsSameOrUnder(StringView key, StringView base) noexcept {
+    if (key == base) {
+        return true;
+    }
+
+    return key.ByteCount() > base.ByteCount() &&
+           key.StartsWith(base, StringComparison::CaseSensitive) &&
+           key.Data()[base.ByteCount()] == '/';
+}
+
+// text(구성 요소를 '/'로 이은 이름)에서 앞 components개 구성 요소를 뺀 나머지다(앞 '/' 포함 —
+// 없으면 빈 문자열). 논리 경로 텍스트의 앞부분(마운트·디렉터리)을 바꿀 때 쓴다(키와 텍스트의 byte
+// 수가 달라 구성 요소 수로 자른다).
+inline StringView AfterComponents(StringView text, usize components) noexcept {
+    usize seen = 0;
+    for (usize at = 0; at < text.ByteCount(); ++at) {
+        if (text.Data()[at] == '/' && at != 0) {
+            ++seen;
+            if (seen == components) {
+                return StringView(text.Data() + at, text.ByteCount() - at);
+            }
+        }
+    }
+
+    return StringView();
+}
+
+// 논리 경로 텍스트의 구성 요소 수다(앞 '/' 다음부터 '/'로 나눈 것 — "/Game/A"는 2).
+inline usize LogicalComponents(StringView text) noexcept {
+    usize count = 0;
+    for (usize at = 0; at < text.ByteCount(); ++at) {
+        count += text.Data()[at] == '/' ? 1 : 0;
+    }
+
+    return count;
+}
+
+// path(절대 OS 경로)의 파일 전체를 bytes에 읽는다. 없으면 existed 거짓·빈 bytes로 성공한다. 크기가
+// limit보다 크면 tooLarge 참으로 성공한다(읽지 않는다). 오류: 열기·크기·읽기 IO 오류(원본 오류 코드
+// — 크기를 잰 뒤 줄었으면 EndOfFile), 할당 실패. 별칭 표·원본 루트 표·임포트 원본 읽기가 쓴다.
+Result<void> ReadWhole(platform::FileSystem& files, StringView path, uint64 limit,
+                       Array<uint8>& bytes, bool& existed, bool& tooLarge) noexcept;
 
 } // namespace rocks::asset_database_detail

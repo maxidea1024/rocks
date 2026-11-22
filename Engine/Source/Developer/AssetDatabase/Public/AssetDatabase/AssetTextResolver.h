@@ -13,6 +13,18 @@
 // 객체 경로 `Body.Socket`). 객체 경로가 없으면 대표 에셋이다. null은 codec이 `none`으로 처리한다.
 namespace rocks {
 
+// 색인에 없는 논리 경로를 별칭으로 푸는 길이다(7.1절 17 A2e1 — AssetService가 준다, 별칭 표는
+// 필요할 때 읽는다). ResolveAlias는 path의 별칭 대상 id를 주고 warnings가 있으면 경고
+// AliasResolved를 붙인다. 오류: 별칭이 없으면 NotFound, 별칭 표 읽기의 오류, 할당 실패.
+class AssetAliasResolver {
+public:
+    virtual Result<AssetId> ResolveAlias(const LogicalPath& path,
+                                         Array<EditorWarning>* warnings) noexcept = 0;
+
+protected:
+    ~AssetAliasResolver() = default;
+};
+
 class AssetTextResolver final : public reflection_text::TextReferenceResolver {
 public:
     // set·index는 빌린다(resolver가 쓰이는 동안 살아 있어야 한다 — index는 set의 설정과 같은
@@ -27,6 +39,11 @@ public:
     // 아직 공개 전이라 찾을 수 없다).
     void SetWeakScope(AssetId package) noexcept {
         weakScope_ = package;
+    }
+
+    // 색인에 없는 논리 경로를 풀 별칭 길이다(null이면 별칭을 보지 않는다 — 빌린다).
+    void SetAliases(AssetAliasResolver* aliases) noexcept {
+        aliases_ = aliases;
     }
 
     // text를 kind의 값으로 푼다.
@@ -67,6 +84,7 @@ private:
     const AssetIndex* index_;
     Array<EditorWarning>* warnings_;
     AssetId weakScope_{};
+    AssetAliasResolver* aliases_ = nullptr;
 };
 
 } // namespace rocks

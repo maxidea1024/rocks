@@ -38,17 +38,38 @@ inline constexpr uint32 AllDependencyKinds = DependencyKindBit(PackageDependency
 
 // 색인 항목의 ImportRecord 요약이다(7.1절 15 — A2c2a). present는 ImportRecord를 읽었는지다(섹션이
 // 없거나 다른 스키마·더 새 버전·형식 위반이면 거짓 — 뒤 둘은 진단이 남는다). 참조 기록은 owner만
-// 의미가 있다(owner ≠ 항목 id). outputCount는 소유 기록의 출력 수다.
+// 의미가 있다(owner ≠ 항목 id). outputs는 소유 기록의 출력 AssetId 목록이다(기록의 outputKey
+// byte 순 — 고아 판정, 7.1절 17 A2e4).
 struct AssetIndexImportSummary {
-    explicit AssetIndexImportSummary(Allocator& allocator) noexcept : importerName(allocator) {
+    explicit AssetIndexImportSummary(Allocator& allocator) noexcept
+        : importerName(allocator), outputs(allocator) {
     }
+
+    AssetIndexImportSummary(AssetIndexImportSummary&&) noexcept = default;
+    AssetIndexImportSummary& operator=(AssetIndexImportSummary&&) noexcept = default;
 
     bool present = false;
     AssetId owner{};
     Guid importerId{};
     String importerName;
     uint32 importerVersion = 0;
-    usize outputCount = 0;
+    Array<AssetId> outputs;
+};
+
+// 고아 출력의 사유다(AssetIndexDiagnostic::detail — 7.1절 17 A2e4). 고아 = 참조 기록(owner ≠
+// 자신)인데 owner 쪽이 이 출력을 소유하지 않는 항목.
+enum class AssetOrphanReason : uint32 {
+    None,
+    // owner가 색인에 없다.
+    OwnerMissing,
+    // owner 항목에 기록이 없거나 소유 기록이 아니다.
+    OwnerNotImporter,
+    // owner 소유 기록의 outputs에 이 항목이 없다.
+    NotListed,
+    // 판정할 수 없다(고아가 아니다 — 목록·경고·지우기 대상이 아니다): owner의 ImportRecord를 읽지
+    // 못했거나(더 새 스키마·형식 위반 — 그 진단이 있다), owner가 색인에 없는데 그 id의 진단(읽지
+    // 못한 패키지)이나 id를 모르는 진단(손상·이름 규칙·열거 실패·사라진 파일)이 있다.
+    Undetermined
 };
 
 // 색인 항목 하나다(패키지 하나).
@@ -112,6 +133,13 @@ struct AssetIndexDiagnostic {
 class AssetIndex;
 class AssetIndexCache;
 
+// 이름 바꾸기 하나다(RefreshPaths — 7.1절 17 A2e2). from(Content 상대 — 패키지 파일 또는
+// 디렉터리)의 지금 내용을 to 이름으로 색인한다(OS 이동 전에 준비하고 이동 뒤에 확정한다).
+struct AssetIndexMove {
+    StringView from;
+    StringView to;
+};
+
 // 여러 파일·하위 트리를 한 번에 다시 읽는 입력이다(AssetIndex::RefreshPaths — 7.1절 16 A2d3).
 // 이름은 모두 Content 상대 이름 규칙(유효한 UTF-8, 구분자 '/', 앞뒤 '/'·빈 구성 요소·"."·".."
 // 없음)을 따른다. 같은 이름이 여러 번 나와도 되고 하위 트리 안의 파일·하위 트리는 그 트리가 덮는다.
@@ -136,6 +164,14 @@ struct AssetIndexRefreshPaths {
     // 않는다. 하위 트리가 덮는 파일은 미루지 않는다.
     Span<const bool> mayDefer;
     Array<usize>* deferred = nullptr;
+    // 이름 바꾸기다: from과 to 이름 자신과 그 아래의 항목·진단을 빼고, 지금 from에 있는 것(파일이면
+    // 그 파일, 디렉터리면 그 아래 — 하위 트리 검색과 같은 규칙)을 to 아래 이름으로 읽어 더한다.
+    // 이름 규칙은 같고, from과 to가 같은 키가 아니면 서로의 아래일 수 없다(InvalidArgument).
+    // 대소문자만 다른 이름(같은 키)도 받는다.
+    Span<const AssetIndexMove> moves;
+    // 뺄 이름이다: 그 이름 자신과 그 아래의 항목·진단을 읽지 않고 뺀다(삭제 — 지우기 전에 준비하고
+    // 지운 뒤 확정한다, 7.1절 17 A2e3). 이름 규칙은 moves와 같다.
+    Span<const StringView> removed;
     // 이름 정규화 파일 시스템인지다(참이면 이름 대조를 NFC로 한다 — macOS 이벤트 이름이 열거
     // 이름과 다른 정규형이어도 같은 파일로 본다).
     bool normalizesNames = FileSystemNormalizesNames;
@@ -300,14 +336,42 @@ public:
     Result<void> Referencers(AssetId id, uint32 kinds,
                              Array<const AssetIndexEntry*>& out) const noexcept;
 
+    // 고아 출력 항목을 경로 키 순으로 out에 붙인다(7.1절 17 A2e4 — OrphanReason이 OwnerMissing·
+    // OwnerNotImporter·NotListed인 것, Undetermined는 뺀다). 항목 포인터는 색인이 바뀌기 전까지
+    // 유효하다. 오류: 할당 실패.
+    Result<void> Orphans(Array<const AssetIndexEntry*>& out) const noexcept;
+    // entry(이 색인의 항목)의 고아 사유다(참조 기록이 아니면 None). owner 항목(같은 id 둘 이상이면
+    // 그 모두) 가운데 하나라도 entry를 적으면 None이다. 그 밖에 읽지 못한 기록·패키지가 있어
+    // owner를 확정할 수 없으면 Undetermined, owner가 없으면 OwnerMissing, 소유 기록이 하나라도
+    // 있으면 NotListed, 없으면 OwnerNotImporter다. 할당하지 않는다(진단을 한 번 훑는다 — 여러
+    // 항목은 Orphans가 표를 한 번 만든다).
+    AssetOrphanReason OrphanReason(const AssetIndexEntry& entry) const noexcept;
+
     // 의존 대조 진단을 out에 붙인다(7.1절 13·14): 색인에 없는 Hard·Soft 의존 MissingDependency.
     // types가 있으면 Hard 의존의 대상 대표 타입이 expectedType도 그 파생도 아닐 때 TypeMismatch다
     // (로드와 같은 판정 — 미등록 타입·클래스 아닌 id도 TypeMismatch). types가 없으면 파생 여부를 알
     // 수 없어 형식은 대조하지 않는다. 오류: 할당 실패, TypeRegistry 판정의 그 밖의 오류
-    // (ShuttingDown 등).
+    // (ShuttingDown 등). 고아 출력마다 OrphanedOutput(경고 — relatedAsset = owner, detail =
+    // AssetOrphanReason)도 붙인다(7.1절 17 A2e4).
     Result<void> Verify(TypeRegistry* types, Array<AssetIndexDiagnostic>& out) const noexcept;
 
 private:
+    // 고아 판정의 진단 사실이다(Orphans·Verify가 한 번 만든다): 진단에 나온 id(정렬),
+    // ImportRecord를 읽지 못한 id(정렬), id를 모르는 진단이 있는지.
+    struct OrphanFacts {
+        explicit OrphanFacts(Allocator& allocator) noexcept
+            : seen(allocator), unreadableRecords(allocator) {
+        }
+
+        Array<AssetId> seen;
+        Array<AssetId> unreadableRecords;
+        bool unidentified = false;
+    };
+    Result<void> MakeOrphanFacts(OrphanFacts& facts) const noexcept;
+    // facts가 null이면 진단을 직접 훑는다.
+    AssetOrphanReason OrphanReasonWith(const AssetIndexEntry& entry,
+                                       const OrphanFacts* facts) const noexcept;
+
     Result<void> IndexFile(platform::FileSystem& files, const PackageReadOptions& editor,
                            String&& relative, StringView readPath, int64 modifiedTicks,
                            Array<AssetIndexEntry>& found,
@@ -319,10 +383,13 @@ private:
                              Array<AssetIndexEntry>& found) const noexcept;
     // 걷기가 모은 패키지 후보다(Content 상대 이름과 열거한 수정 시각).
     struct ScanCandidate {
-        explicit ScanCandidate(Allocator& allocator) noexcept : relative(allocator) {
+        explicit ScanCandidate(Allocator& allocator) noexcept
+            : relative(allocator), readPath(allocator) {
         }
 
         String relative;
+        // 이름 바꾸기면 내용을 읽을 경로(Content의 지금 이름)다 — 비면 Content/relative.
+        String readPath;
         int64 modifiedTicks = 0;
     };
 
@@ -338,8 +405,10 @@ private:
 
     // start(Content 상대 — 빈 문자열은 Content)부터 깊이 우선으로 걸어 found·diagnostics에 더한다
     // (Rebuild·RefreshPaths 공용). Content 자신의 열거 실패만 오류다.
+    // renameTo가 비지 않으면 start 아래 이름을 renameTo 아래 이름으로 색인한다(내용은 지금 이름에서
+    // 읽는다 — 이동 전 준비, 캐시는 쓰지 않는다).
     Result<void> ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
-                          const AssetIndexCache* cache, StringView start,
+                          const AssetIndexCache* cache, StringView start, StringView renameTo,
                           Array<AssetIndexEntry>& found,
                           Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
     // 후보를 읽어(캐시 재사용 또는 부분 읽기 — scheduler가 있으면 병렬) 후보 순서대로 더한다.
@@ -379,5 +448,10 @@ private:
 //   if (auto appended = AppendAssetIndexDiagnosticLine(line, diagnostic); !appended) { ... }
 Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
                                             const AssetIndexDiagnostic& diagnostic) noexcept;
+
+// 경고 진단인지다(OrphanedOutput — 명령의 종료 코드는 경고 아닌 진단만 본다, 13절).
+inline bool AssetIndexDiagnosticIsWarning(const AssetIndexDiagnostic& diagnostic) noexcept {
+    return diagnostic.code == AssetDiagnosticCode::OrphanedOutput;
+}
 
 } // namespace rocks

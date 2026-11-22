@@ -31,6 +31,12 @@ internal static class IdePlanTests
             Model(request, root);
             pass("IntelliSense model: ownership ties and names, files outside definition directories, folded values verified, copies, order independence");
         }
+
+        // 파일 하나 컴파일은 모든 호스트에서 돈다(macOS는 clang 드라이버의 -o 치환을 실제로 시험한다).
+        ObjectArguments();
+        await SingleFileAsync(request, root);
+        pass("single-file compile: object arguments (/Fo, -o), list parsing, logical command per file, module ordinal, spaces and Korean names, " +
+            "response file, unplanned source and header rejected, compiler failure exit code, incremental record untouched");
     }
 
     private static void Classification()
@@ -309,9 +315,138 @@ internal static class IdePlanTests
         IdeCompile stray = raw with { Arguments = [.. raw.Arguments, @"/FIC:\stray.h"] };
         Throws<ArgumentException>(() => IntelliSenseModel.Values(stray, named[0].Plan, (_, _) => "x"), "neither a definitions header", "stray forced include");
 
+        // 게임 배치(Docs/Design/ProjectFiles.ko.md 10.4절): 루트에 정의된 타깃(Alpha)이 주 프로젝트 Game의 구성이고, 파일은 가장 가까운 정의
+        // 디렉터리로 간다(루트면 Game). 헤더 루트(여기서는 Engine) 아래 헤더는 헤더 전용 프로젝트로 간다. 엔진 루트는 쓰지 않는다.
+        List<IdeTargetPlan> gamePlans = [.. named.Select(plan => plan.Target == "Alpha" ? plan with { DefinitionDirectory = fixture, DefinitionName = "Game" } : plan)];
+        IntelliSenseModel gameModel = IntelliSenseModel.Create(gamePlans, fixture, projectFiles, [], "Development", new IdeModelLayout("Game", "RocksSdk", engine));
+        IdeProject main = Project(gameModel, "Game");
+        IdeProject headerOnly = Project(gameModel, "RocksSdk");
+        Check(main.Engine && main.Configurations.Select(configuration => configuration.Key).SequenceEqual(["Alpha|Debug", "Alpha|Development"]) &&
+            Names(main).SequenceEqual(["Lib.cpp", "Raw.c", "Helper.cpp"]) && main.Headers.Select(Path.GetFileName).SequenceEqual(["Helper.h"]),
+            "game layout main project: " + string.Join(",", Names(main)) + " / " + string.Join(",", main.Headers.Select(Path.GetFileName)));
+        Check(!headerOnly.Engine && headerOnly.Sources.Count == 0 && headerOnly.Headers.Select(Path.GetFileName).SequenceEqual(["Lib.h"]) &&
+            headerOnly.Configurations.SequenceEqual(main.Configurations), "game layout header project");
+        Check(Names(Project(gameModel, "Gamma")).SequenceEqual(["Both.cpp", "Main.cpp"]) && !gameModel.Projects.Any(project => project.Name == "Alpha") &&
+            gameModel.Projects.All(project => project.Name != IntelliSenseModel.EngineProjectName), "game layout target projects");
+        Check(IntelliSenseModel.Verify(gameModel, gamePlans, projectFiles).Count == 0, "game layout model verification");
+
+        // UE 배치: <루트>/Source에 정의한 타깃도 주 프로젝트다(같은 이름의 하위 프로젝트를 따로 만들지 않는다).
+        string source = Path.Combine(fixture, "Source");
+        List<IdeTargetPlan> sourcePlans = [.. named.Select(plan => plan.Target == "Alpha" ? plan with { DefinitionDirectory = source, DefinitionName = "Alpha" } : plan)];
+        IntelliSenseModel sourceModel = IntelliSenseModel.Create(sourcePlans, fixture, projectFiles, [], "Development", new IdeModelLayout("Alpha", "RocksSdk", engine));
+        Check(sourceModel.Projects.Count(project => project.Name == "Alpha") == 1 && Project(sourceModel, "Alpha").Engine &&
+            Project(sourceModel, "Alpha").Configurations.Select(configuration => configuration.Key).SequenceEqual(["Alpha|Debug", "Alpha|Development"]),
+            "a target defined in <root>/Source is the main project");
+        // 주 타깃이 없으면 RocksSdk는 첫 타깃(Game 종류가 없으므로 ordinal 첫째)의 구성이다.
+        IntelliSenseModel rootless = IntelliSenseModel.Create(named, fixture, projectFiles, [], "Development", new IdeModelLayout("Game", "RocksSdk", engine));
+        Check(Project(rootless, "RocksSdk").Configurations.Select(configuration => configuration.Key).SequenceEqual(["Alpha|Debug", "Alpha|Development"]),
+            "without a main target the SDK header project takes the first target's configurations");
+        // 주 프로젝트 밖 타깃이 주·헤더 프로젝트 이름을 가지면 경로가 겹치므로 오류다.
+        Throws<ArgumentException>(() => IntelliSenseModel.Create(named, fixture, projectFiles, [], "Development", new IdeModelLayout("Gamma", "RocksSdk", engine)),
+            "has the name of the game project", "subdirectory target named like the game");
+        Throws<ArgumentException>(() => IntelliSenseModel.Create(named, fixture, projectFiles, [], "Development", new IdeModelLayout("Game", "beta", engine)),
+            "has the name of the SDK header project", "subdirectory target named like the SDK header project");
+
         // 엔진 루트에 같은 종류 타깃 둘이면 구성 이름이 겹친다.
         Throws<ArgumentException>(() => IntelliSenseModel.Create([named[0] with { DefinitionDirectory = engine }, named[1] with { DefinitionDirectory = engine }],
             fixture, projectFiles, engineRoots, "Development"), "share the configuration names", "engine project configuration collision");
+    }
+
+    // object 경로 인자 규칙(Docs/Design/ProjectFiles.ko.md 7.4·9절): clang-cl /Fo<경로>, clang 드라이버 -o <경로>.
+    private static void ObjectArguments()
+    {
+        Check(CompileObjectArguments.Without(["/c", "/FoC:\\out\\a.obj", "a.cpp"]).SequenceEqual(["/c", "a.cpp"]) &&
+            CompileObjectArguments.Without(["-c", "-o", "/out/a.o", "a.cpp"]).SequenceEqual(["-c", "a.cpp"]), "object arguments are removed (/Fo, -o <path>)");
+        Check(CompileObjectArguments.With(["/c", "/FoC:\\out\\a.obj", "a.cpp"], "C:\\x.obj").SequenceEqual(["/c", "/FoC:\\x.obj", "a.cpp"]) &&
+            CompileObjectArguments.With(["-c", "-o", "/out/a.o", "a.cpp"], "/x.o").SequenceEqual(["-c", "-o", "/x.o", "a.cpp"]), "object arguments are replaced");
+        Throws<InvalidOperationException>(() => CompileObjectArguments.With(["-c", "a.cpp"], "x"), "names no object path", "command without an object path");
+        string root = Path.GetFullPath(Path.GetTempPath());
+        Check(SingleFileCompile.ParseList(" a.cpp ; ;" + Path.Combine(root, "b c.cpp") + ";", root)
+            .SequenceEqual([Path.Combine(root, "a.cpp"), Path.Combine(root, "b c.cpp")]), "file list parsing: trimmed, empty entries skipped, relative to the root");
+    }
+
+    // 파일 하나 컴파일을 실제 컴파일러로: 여러 파일(공백·한글 이름), 두 모듈이 함께 컴파일하는 소스는 모듈 이름 ordinal 첫째, response file 강제,
+    // 계획에 없는 소스·헤더 거부, 컴파일 실패 종료 코드, 증분 기록 없음.
+    private static async Task SingleFileAsync(NativeBuildRequest request, string root)
+    {
+        string fixture = Path.Combine(root, "single-file 한글");
+        string source = Directory.CreateDirectory(Path.Combine(fixture, "Source")).FullName;
+        string spaced = Path.Combine(source, "With Space.cpp");
+        string korean = Path.Combine(source, "한글 소스.cpp");
+        string shared = Path.Combine(source, "Shared.cpp");
+        string broken = Path.Combine(source, "Broken.cpp");
+        string main = Path.Combine(source, "Main.cpp");
+        File.WriteAllText(main, "int main() { return 0; }" + Environment.NewLine);
+        File.WriteAllText(spaced, "int Spaced() noexcept { return 1; }\n");
+        File.WriteAllText(korean, "int Korean() noexcept { return 2; }\n");
+        File.WriteAllText(shared, "int Shared() noexcept { return SHARED_VALUE; }\n");
+        File.WriteAllText(broken, "int Broken() noexcept { return missing_name; }\n");
+        string output = Path.Combine(fixture, "out");
+        NativeBuildRequest single = request with
+        {
+            RootDirectory = fixture,
+            OutputDirectory = output,
+            Modules =
+            [
+                new() { Name = "Beta", Sources = [shared], PrivateDefines = ["SHARED_VALUE=2"] },
+                new() { Name = "Alpha", Sources = [spaced, korean, shared, broken], PrivateDefines = ["SHARED_VALUE=1"] },
+                new() { Name = "App", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["Alpha", "Beta"] }
+            ],
+            Targets = ["App"]
+        };
+        IReadOnlyList<SingleFileResult> results = await SingleFileCompile.RunAsync(single, [spaced, korean, shared], CancellationToken.None);
+        Check(results.Count == 3 && results.All(result => result.Process.ExitCode == 0 && File.Exists(result.Object)),
+            "single-file compile of three sources: " + string.Join(" | ", results.Select(result => result.Process.StdErr)));
+        // 정의는 강제 include하는 정의 헤더에 들어가므로 모듈 이름으로 확인한다.
+        Check(results[2].Module == "Alpha",
+            "a source compiled by two modules uses the module name ordinal first (Alpha)");
+        Check(results.Select(result => result.Object).Distinct().Count() == 3 && results.All(result =>
+            File.Exists(Path.ChangeExtension(result.Object, ".json"))), "one object and record per source");
+        Check(!File.Exists(Path.Combine(output, "native-cache.json")) && !File.Exists(Path.Combine(output, "action-report.json")),
+            "single-file compile writes no incremental record or report");
+
+        // response file 강제: 같은 결과이고 .rsp가 남는다.
+        IReadOnlyList<SingleFileResult> viaFile = await SingleFileCompile.RunAsync(single with { ResponseFiles = ResponseFileMode.Always }, [spaced],
+            CancellationToken.None);
+        Check(viaFile[0].Process.ExitCode == 0 && File.Exists(Path.ChangeExtension(viaFile[0].Object, ".rsp")), "single-file compile through a response file");
+
+        // 컴파일 실패는 결과의 종료 코드로 돌아온다(다음 파일은 계속한다).
+        IReadOnlyList<SingleFileResult> failed = await SingleFileCompile.RunAsync(single, [broken, spaced], CancellationToken.None);
+        Check(failed[0].Process.ExitCode != 0 && failed[1].Process.ExitCode == 0, "a compiler failure is reported per file and the next file still compiles");
+
+        // 원본이 없어진 기록은 다음 실행이 지운다. Windows는 대소문자가 다른 경로도 같은 object 이름이다(디스크 철자로 해시).
+        string orphan = Path.Combine(output, SingleFileCompile.DirectoryName, "0000000000000000");
+        File.WriteAllText(orphan + ".json", "{ \"source\": \"" + Path.Combine(source, "Gone.cpp").Replace("\\", "\\\\") + "\" }");
+        File.WriteAllText(orphan + (request.Toolchain.Platform == NativePlatform.Windows ? ".obj" : ".o"), "x");
+        await SingleFileCompile.RunAsync(single, [spaced], CancellationToken.None);
+        Check(!File.Exists(orphan + ".json") && !File.Exists(orphan + ".obj") && !File.Exists(orphan + ".o"), "records of removed sources are cleaned up");
+        if (OperatingSystem.IsWindows())
+        {
+            Check(SingleFileCompile.ObjectPath(single, spaced.ToUpperInvariant()) == SingleFileCompile.ObjectPath(single, spaced),
+                "a differently cased path names the same object");
+        }
+
+        // 계획에 없는 소스·헤더는 아무것도 컴파일하기 전에 거부한다. 다른 타깃 안내를 붙인다.
+        string unplanned = Path.Combine(source, "Unplanned.cpp");
+        File.WriteAllText(unplanned, "int Unplanned() noexcept { return 0; }\n");
+        await ThrowsAsync<ArgumentException>(() => SingleFileCompile.RunAsync(single, [unplanned], CancellationToken.None, _ => ["Other"]),
+            "it is compiled by Other", "unplanned source");
+        await ThrowsAsync<ArgumentException>(() => SingleFileCompile.RunAsync(single, [Path.Combine(source, "Header.h")], CancellationToken.None),
+            "is a header", "header");
+    }
+
+    private static async Task ThrowsAsync<T>(Func<Task> action, string fragment, string what) where T : Exception
+    {
+        try
+        {
+            await action();
+        }
+        catch (T error) when (error.Message.Contains(fragment, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("Expected an exception for " + what + " containing: " + fragment);
     }
 
     private static void Throws<T>(Action action, string fragment, string what) where T : Exception

@@ -2,29 +2,41 @@
 # runs this script.
 #
 #   IdeBuild.ps1 -Action Build|Rebuild|Clean -Target <target> -Configuration <configuration> [-Platform Windows|Android] [-Compiler <clang-cl>]
+#   IdeBuild.ps1 -Action Compile -WorkingDir <project directory> -Files <selected files> ... (Ctrl+F7, section 7.4)
 #
-# -Project and -Sdk are the game project form of the generated game solution; they are declared so that the call binds and reports that
-# game projects are not supported by this version of the script.
+# Compile splits -Files on ';', resolves each entry against -WorkingDir (Visual Studio passes $(SelectedFiles) relative to the project
+# file) and compiles only those sources with their logical commands (build --files / game --files).
+#
+#   IdeBuild.ps1 -Action Build|Rebuild|Clean -Project <game.rocksproject> -Sdk <installed SDK> -Target <target> -Configuration <configuration>
+#                [-Compiler <clang-cl>]
+#
+# The -Project form is the game solution (Docs/Design/ProjectFiles.ko.md section 10.4). It runs only from an installed SDK (rocks-sdk.json
+# next to Build/), with the SDK's own build CLI: Build = game, Clean = clean --project, Rebuild = both.
 #
 # The whole call runs under the IDE build lock (Build/Tools.ps1): a solution build runs its projects one at a time, like UE -WaitMutex, and
 # the tools are prepared (built only when their inputs changed) inside the same lock, so no build overwrites a tool another build runs.
 # -Compiler is the clang-cl the project files were generated with; Visual Studio rewrites PATH before NMake, so the build does not search it.
 param(
-    [Parameter(Mandatory)][ValidateSet('Build', 'Rebuild', 'Clean')][string] $Action,
+    [Parameter(Mandatory)][ValidateSet('Build', 'Rebuild', 'Clean', 'Compile')][string] $Action,
     [Parameter(Mandatory)][string] $Target,
     [Parameter(Mandatory)][string] $Configuration,
     [ValidateSet('Windows', 'Android')][string] $Platform = 'Windows',
     [string] $Compiler,
     [string] $Project,
-    [string] $Sdk
+    [string] $Sdk,
+    [string] $WorkingDir,
+    [string] $Files
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Tools.ps1')
-if ($script:RocksSdk -or $Project -or $Sdk) {
-    # Game project files and their NMake commands come with the game solution generator; an SDK only ships these scripts for it.
-    [Console]::Out.WriteLine("error RB0002: $([System.IO.Path]::GetFileName($PSCommandPath)) does not support game projects yet; use Rocks.Build.Cli game.")
+$game = [bool] ($Project -or $Sdk)
+if ($game -ne $script:RocksSdk -or ($game -and -not ($Project -and $Sdk))) {
+    # Games always build with an installed SDK; an engine working copy builds its own targets only.
+    $reason = if ($script:RocksSdk) { 'an installed SDK builds game projects only (-Project and -Sdk)' }
+              else { 'game projects build with the IdeBuild.ps1 of their installed SDK, not of an engine working copy' }
+    [Console]::Out.WriteLine("error RB0002: $reason.")
     exit 1
 }
 
@@ -40,11 +52,23 @@ foreach ($name in @('INCLUDE', 'EXTERNAL_INCLUDE', 'LIB', 'LIBPATH')) {
 $env:ROCKS_IDE_BUILD = '1'
 $root = $script:RocksRoot
 $cli = $script:RocksCli
-$common = @('--root', $root, '--target', $Target, '--configuration', $Configuration)
+$common = @(if ($game) {
+    @('--project', [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Project)), '--target', $Target, '--configuration', $Configuration)
+}
+else {
+    @('--root', $root, '--target', $Target, '--configuration', $Configuration)
+})
+
+# @(...) keeps a one-element result an array (a bare string would splat as characters).
+$buildCommand = @(if ($game) { 'game', '--sdk', [System.IO.Path]::GetFullPath($Sdk) } else { 'build' })
 # The compiler choice only matters to the build; clean computes the same output path without it. (PowerShell names are case-insensitive,
 # so this must not be called $compiler.)
 $compilerArguments = @()
 if ($Platform -eq 'Android') {
+    if ($game) {
+        throw 'Game projects build for Windows only (the installed SDK has no Android libraries).'
+    }
+
     if ($Compiler) {
         throw 'Android builds take no -Compiler (the NDK clang is found with --android-ndk or ANDROID_NDK_HOME).'
     }
@@ -67,13 +91,24 @@ function Invoke-RocksIdeAction {
     }
 
     $result = 0
+    if ($Action -eq 'Compile') {
+        if (-not $WorkingDir -or -not $Files) {
+            [Console]::Out.WriteLine('error RB0002: -Action Compile needs -WorkingDir and -Files (select a source file).')
+            return 1
+        }
+
+        $selected = @($Files -split ';' | Where-Object { $_.Trim() } | ForEach-Object { [System.IO.Path]::GetFullPath($_.Trim(), $WorkingDir) }) -join ';'
+        & dotnet $cli @buildCommand @common @compilerArguments --files $selected | Out-Host
+        return [int] $LASTEXITCODE
+    }
+
     if ($Action -eq 'Clean' -or $Action -eq 'Rebuild') {
         & dotnet $cli clean @common | Out-Host
         $result = $LASTEXITCODE
     }
 
     if ($result -eq 0 -and ($Action -eq 'Build' -or $Action -eq 'Rebuild')) {
-        & dotnet $cli build @common @compilerArguments | Out-Host
+        & dotnet $cli @buildCommand @common @compilerArguments | Out-Host
         $result = $LASTEXITCODE
     }
 

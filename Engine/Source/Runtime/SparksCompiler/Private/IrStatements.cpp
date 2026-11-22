@@ -283,9 +283,20 @@ uint32 IrBuilder::EvaluatePath(uint32 node, Array<PathStep>& path, bool readLeaf
 
         const uint32 read = NewValue(type);
         Add(IrOp::GetElement, read, step.object, step.key, 0, node);
-        return type != NoType && checker_.IsOptional(type)
-                   ? Unwrap(read, checker_.NonOptional(type), node)
-                   : read;
+        if (type == NoType || !checker_.IsOptional(type)) {
+            return read;
+        }
+
+        // 쓰기 경로의 원소는 있어야 한다: 없으면 FAULT 3(IndexOutOfRange — SparksBytecode 3.1a절).
+        const uint32 present = NewValue(checker_.boolType_);
+        Add(IrOp::IsSome, present, read, NoIrRegister, 0, node);
+        const uint32 found = NewBlock();
+        const uint32 missing = NewBlock();
+        Add(IrOp::Branch, found, present, missing, 0, node);
+        StartBlock(missing);
+        Add(IrOp::Fault, NoIrRegister, NoIrRegister, NoIrRegister, IrFaultMissingElement, node);
+        StartBlock(found);
+        return Unwrap(read, checker_.NonOptional(type), node);
     }
 
     // 경로가 아닌 값(호출 결과·`this`·문맥 이름): 한 번 평가하고 다시 쓰지 않는다.
@@ -499,13 +510,13 @@ void IrBuilder::LowerFor(uint32 node) noexcept {
                 Add(IrOp::GetEntry, b, source, index, 0, second, IrEntryValue);
             }
         } else if (second != NoNode) {
-            // Array 이름 둘: (번호, 원소).
+            // Array 이름 둘: (번호, 원소). 번호 자리의 원소는 있으므로 `T?`가 아닌 GETVAL이다.
             MoveValue(a, index, node);
             if (b != NoIrRegister) {
-                Add(IrOp::GetElement, b, source, index, 0, second);
+                Add(IrOp::GetEntry, b, source, index, 0, second, IrEntryValue);
             }
         } else if (a != NoIrRegister) {
-            Add(IrOp::GetElement, a, source, index, 0, first);
+            Add(IrOp::GetEntry, a, source, index, 0, first, IrEntryValue);
         }
     }
 

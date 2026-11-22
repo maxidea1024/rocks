@@ -30,8 +30,9 @@
 //     SparksPackage.json5만 둔다. 진단 경로는 사례 폴더 기준 경로다.
 // 사례는 선택으로 <사례>.names(이름 해석 golden, AppendNameDump — 폴더 사례는 모듈마다
 // "== <경로>" 줄과 덤프를 경로 순으로 이은 것)·<사례>.types(식 타입,
-// AppendTypeDump)·<사례>.ir(typed IR, AppendIrDump — 진단 없는 사례만)도 같은 모양으로 둔다. 짝이
-// 맞지 않거나(`.spark`·폴더 없는
+// AppendTypeDump)·<사례>.ir(typed IR, AppendIrDump — 진단 없는 사례만)·<사례>.bc(bytecode)·
+// <사례>.run(VM 실행 golden — 파일 사례의 최상위 함수 호출과 결과, SparksVm 7절)도 같은 모양으로
+// 둔다. 짝이 맞지 않거나(`.spark`·폴더 없는
 // `.expect`·`.ast`·`.names`, `.expect` 없는 사례, 폴더 사례 옆의 `.ast`)
 // 낯선 파일이 있으면 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
 //
@@ -154,6 +155,10 @@ struct CaseInput {
     StringView types;             // `.types` 내용(hasTypes일 때만)
     bool hasIr = false;           // `.ir`가 있는지(typed IR golden, AppendIrDump)
     StringView ir;                // `.ir` 내용(hasIr일 때만)
+    bool hasBytecode = false;     // `.bc`가 있는지(bytecode golden, AppendBytecodeDump)
+    StringView bytecode;          // `.bc` 내용(hasBytecode일 때만)
+    bool hasRun = false;          // `.run`이 있는지(실행 golden — Docs/Design/SparksVm.ko.md 7절)
+    StringView run;               // `.run` 내용(hasRun일 때만)
     bool hasNames = false;        // `.names`가 있는지
     StringView names;             // `.names` 내용(hasNames일 때만)
 };

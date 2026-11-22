@@ -17,8 +17,8 @@ internal static class StableIdMergeValidator
         Dictionary<string, StableIdEntry> ourIds = ById(ours);
         Dictionary<string, StableIdEntry> theirIds = ById(theirs);
         Dictionary<string, StableIdEntry> mergedIds = ById(merged);
-        Dictionary<string, List<StableIdEntry>> ourFields = FieldsByOwner(ours);
-        Dictionary<string, List<StableIdEntry>> theirFields = FieldsByOwner(theirs);
+        Dictionary<string, List<StableIdEntry>> ourFields = MembersByOwner(ours);
+        Dictionary<string, List<StableIdEntry>> theirFields = MembersByOwner(theirs);
 
         Preserve(ancestor, ours, baseIds, ourIds, "ancestor -> ours");
         Preserve(ancestor, theirs, baseIds, theirIds, "ancestor -> theirs");
@@ -67,13 +67,13 @@ internal static class StableIdMergeValidator
                 {
                     failures.Add($"rename conflicts with retirement for {left.Kind} ID {id}");
                 }
-                // 한쪽에서 타입을 은퇴하는 동안 다른 쪽이 그 타입의 필드를 만들거나 바꿨다면
-                // 새 필드까지 은퇴시켜 병합하는 것은 조용한 데이터 손실이다.
+                // 한쪽에서 타입을 은퇴하는 동안 다른 쪽이 그 타입의 멤버(field·subobject·function·rpc·
+                // enumCase)를 만들거나 바꿨다면 새 멤버까지 은퇴시켜 병합하는 것은 조용한 데이터 손실이다.
                 if (left.Kind == "type" && !prior.Retired &&
-                    ((left.Retired && HasFieldChanges(id, theirFields, baseIds)) ||
-                     (right.Retired && HasFieldChanges(id, ourFields, baseIds))))
+                    ((left.Retired && HasMemberChanges(id, theirFields, baseIds)) ||
+                     (right.Retired && HasMemberChanges(id, ourFields, baseIds))))
                 {
-                    failures.Add($"type retirement conflicts with field changes for type ID {id}");
+                    failures.Add($"type retirement conflicts with member changes for type ID {id}");
                 }
 
                 if (mergedIds.TryGetValue(id, out StableIdEntry? result))
@@ -132,15 +132,15 @@ internal static class StableIdMergeValidator
                     failures.Add($"{edge}: retired ID {id} was reused");
                 }
 
-                if (old.Kind == "field" && next.Kind == "field")
+                if (StableIdManifest.IsMember(old.Kind) && StableIdManifest.IsMember(next.Kind))
                 {
-                    string oldOwner = Owner(old.Name);
-                    string newOwner = Owner(next.Name);
+                    string oldOwner = StableIdManifest.Owner(old.Name);
+                    string newOwner = StableIdManifest.Owner(next.Name);
                     if (!oldNames.TryGetValue(("type", oldOwner), out string? oldOwnerId) ||
                         !newNames.TryGetValue(("type", newOwner), out string? newOwnerId) ||
                         !StringComparer.Ordinal.Equals(oldOwnerId, newOwnerId))
                     {
-                        failures.Add($"{edge}: field ID {id} changed or lost its owning type");
+                        failures.Add($"{edge}: {next.Kind} ID {id} changed or lost its owning type");
                     }
                 }
 
@@ -175,15 +175,15 @@ internal static class StableIdMergeValidator
 
     private static IEnumerable<string> Names(StableIdEntry entry) => entry.Aliases.Prepend(entry.Name);
 
-    private static Dictionary<string, List<StableIdEntry>> FieldsByOwner(StableIdManifest manifest)
+    private static Dictionary<string, List<StableIdEntry>> MembersByOwner(StableIdManifest manifest)
     {
         var names = ByName(manifest);
         var result = new Dictionary<string, List<StableIdEntry>>(StringComparer.Ordinal);
-        foreach (StableIdEntry field in manifest.Entries.Where(entry => entry.Kind == "field"))
+        foreach (StableIdEntry field in manifest.Entries.Where(entry => StableIdManifest.IsMember(entry.Kind)))
         {
-            if (!names.TryGetValue(("type", Owner(field.Name)), out string? typeId))
+            if (!names.TryGetValue(("type", StableIdManifest.Owner(field.Name)), out string? typeId))
             {
-                throw new InvalidDataException($"field {field.Name} has no owner");
+                throw new InvalidDataException($"{field.Kind} {field.Name} has no owner");
             }
 
             if (!result.TryGetValue(typeId, out List<StableIdEntry>? fields))
@@ -197,7 +197,7 @@ internal static class StableIdMergeValidator
         return result;
     }
 
-    private static bool HasFieldChanges(string ownerId, Dictionary<string, List<StableIdEntry>> fields,
+    private static bool HasMemberChanges(string ownerId, Dictionary<string, List<StableIdEntry>> fields,
         Dictionary<string, StableIdEntry> ancestor)
     {
         if (!fields.TryGetValue(ownerId, out List<StableIdEntry>? owned))
@@ -216,11 +216,5 @@ internal static class StableIdMergeValidator
         }
 
         return false;
-    }
-
-    private static string Owner(string name)
-    {
-        int separator = name.LastIndexOf("::", StringComparison.Ordinal);
-        return separator < 0 ? "" : name[..separator];
     }
 }

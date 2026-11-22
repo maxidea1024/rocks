@@ -1,4 +1,5 @@
 #include <SparksCompiler/Compilation.h>
+#include <SparksVm/BytecodeFile.h>
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/PackageManifest.h>
 #include <SparksCompiler/SyntaxTree.h>
@@ -10,14 +11,7 @@
 
 namespace rocks::sparks::conformance {
 
-namespace {
-
-// 두 텍스트의 첫 다른 줄(1부터)과 그 줄의 내용이다. 같으면 line은 0이다.
-struct LineDifference {
-    usize line = 0;
-    StringView expected;
-    StringView actual;
-};
+namespace detail {
 
 StringView LineAt(StringView text, usize& offset) noexcept {
     const usize begin = offset;
@@ -55,6 +49,13 @@ LineDifference FindLineDifference(StringView expected, StringView actual) noexce
     difference.line = line;
     return difference;
 }
+
+} // namespace detail
+
+namespace {
+
+using detail::FindLineDifference;
+using detail::LineDifference;
 
 // 구문 트리 golden을 비교하고 다르면 실패 항목을 더한다.
 Result<void> CompareSyntaxTree(Allocator& allocator, const CaseInput& input,
@@ -100,32 +101,41 @@ Result<void> CompareSyntaxTree(Allocator& allocator, const CaseInput& input,
 enum class DumpKind : uint8 {
     Names,
     Types,
-    Ir
+    Ir,
+    Bytecode
 };
 
-// 덤프 golden(`.names`·`.types`·`.ir`)을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그 모듈의
-// 덤프, 폴더 사례는 분석한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은 것이다(13.1절).
+// 덤프 golden(`.names`·`.types`·`.ir`·`.bc`)을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그
+// 모듈의 덤프, 폴더 사례는 분석한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은
+// 것이다(13.1절).
 Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const SourceSet& sources,
                          const Compilation& compilation, uint32 mainModule, CompilationStage stage,
                          DumpKind kind, Report& report) noexcept {
     StringBuilder<detail::MessageInlineBytes> message(allocator);
     StringBuilder<detail::MessageInlineBytes> dump(allocator);
     const bool types = kind == DumpKind::Types;
-    const StringView expected = kind == DumpKind::Ir ? input.ir : types ? input.types : input.names;
-    const StringView label = kind == DumpKind::Ir ? StringView(".ir")
-                             : types              ? StringView(".types")
-                                                  : StringView(".names");
-    const StringView noun = kind == DumpKind::Ir ? StringView("ir")
-                            : types              ? StringView("types")
-                                                 : StringView("names");
+    const bool lowered = kind == DumpKind::Ir || kind == DumpKind::Bytecode;
+    const StringView expected = kind == DumpKind::Ir         ? input.ir
+                                : kind == DumpKind::Bytecode ? input.bytecode
+                                : types                      ? input.types
+                                                             : input.names;
+    const StringView label = kind == DumpKind::Ir         ? StringView(".ir")
+                             : kind == DumpKind::Bytecode ? StringView(".bc")
+                             : types                      ? StringView(".types")
+                                                          : StringView(".names");
+    const StringView noun = kind == DumpKind::Ir         ? StringView("ir")
+                            : kind == DumpKind::Bytecode ? StringView("bytecode")
+                            : types                      ? StringView("types")
+                                                         : StringView("names");
     auto append = [&](StringBuilderBase& out, uint32 module) noexcept {
-        return kind == DumpKind::Ir ? compilation.AppendIrDump(out, module)
-               : types              ? compilation.AppendTypeDump(out, module)
-                                    : compilation.AppendNameDump(out, module);
+        return kind == DumpKind::Ir         ? compilation.AppendIrDump(out, module)
+               : kind == DumpKind::Bytecode ? compilation.AppendBytecodeDump(out, module)
+               : types                      ? compilation.AppendTypeDump(out, module)
+                                            : compilation.AppendNameDump(out, module);
     };
-    const CompilationStage needed = kind == DumpKind::Ir ? CompilationStage::Codegen
-                                    : types              ? CompilationStage::Types
-                                                         : CompilationStage::Names;
+    const CompilationStage needed = lowered ? CompilationStage::Codegen
+                                    : types ? CompilationStage::Types
+                                            : CompilationStage::Names;
     bool resolved = stage >= needed;
     if (resolved && !input.folder) {
         auto dumped = append(dump, mainModule);
@@ -173,9 +183,9 @@ Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const Sou
     if (!resolved) {
         if (auto formatted = message.TryAppendFormat(
                 "{}: has a {} file but the module was not {}", input.name, label,
-                kind == DumpKind::Ir ? StringView("lowered to IR (it has diagnostics)")
-                : types              ? StringView("type-checked")
-                                     : StringView("name-resolved"));
+                lowered ? StringView("lowered to IR (it has diagnostics)")
+                : types ? StringView("type-checked")
+                        : StringView("name-resolved"));
             !formatted) {
             return formatted;
         }
@@ -201,6 +211,78 @@ Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const Sou
     }
 
     return report.TryAddFailure(message.View());
+}
+
+// `.bc` 사례의 `.sparkc` 왕복이다(Docs/Design/SparksBytecode.ko.md 5절): 모듈마다 쓰고 읽은 모듈의
+// 덤프가 컴파일 직후 덤프와 byte 단위로 같아야 하고, 다시 쓴 파일도 같아야 한다.
+Result<void> CheckBytecodeRoundTrip(Allocator& allocator, const CaseInput& input,
+                                    const Compilation& compilation, Report& report) noexcept {
+    for (uint32 module = 0; module < compilation.ModuleCount(); ++module) {
+        const BytecodeModule* bytecode = compilation.ModuleBytecode(module);
+        if (bytecode == nullptr) {
+            continue;
+        }
+
+        Array<uint8> file(allocator);
+        if (auto written = WriteBytecodeFile(*bytecode, file); !written) {
+            return written;
+        }
+
+        BytecodeModule loaded(allocator);
+        BytecodeRejection rejection;
+        StringBuilder<detail::MessageInlineBytes> message(allocator);
+        if (auto read = ReadBytecodeFile(file.View(), loaded, rejection); !read) {
+            if (read.Error() != ErrorCode::InvalidArgument) {
+                return read;
+            }
+
+            if (auto formatted = message.TryAppendFormat(
+                    "{}: .sparkc of module {} was rejected ({}, function {}, address {})",
+                    input.name, module, BytecodeLoadErrorName(rejection.error), rejection.function,
+                    rejection.address);
+                !formatted) {
+                return formatted;
+            }
+
+            return report.TryAddFailure(message.View());
+        }
+
+        StringBuilder<detail::MessageInlineBytes> before(allocator);
+        StringBuilder<detail::MessageInlineBytes> after(allocator);
+        Array<uint8> again(allocator);
+        if (auto dumped = AppendBytecodeDump(before, *bytecode); !dumped) {
+            return dumped;
+        }
+
+        if (auto dumped = AppendBytecodeDump(after, loaded); !dumped) {
+            return dumped;
+        }
+
+        if (auto written = WriteBytecodeFile(loaded, again); !written) {
+            return written;
+        }
+
+        const bool sameFile =
+            again.Size() == file.Size() &&
+            StringView::CompareBytes(
+                StringView(reinterpret_cast<const char*>(file.Data()), file.Size()),
+                StringView(reinterpret_cast<const char*>(again.Data()), again.Size())) == 0;
+        if (before.View() == after.View() && sameFile) {
+            continue;
+        }
+
+        if (auto formatted = message.TryAppendFormat(
+                "{}: .sparkc round trip of module {} differs (dump {}, file {})", input.name,
+                module, before.View() == after.View() ? "same" : "differs",
+                sameFile ? "same" : "differs");
+            !formatted) {
+            return formatted;
+        }
+
+        return report.TryAddFailure(message.View());
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> AddCaseFailure(Allocator& allocator, Report& report, StringView caseName,
@@ -423,6 +505,27 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
                                         expectation.Stage(), DumpKind::Ir, report);
             !compared) {
             return compared;
+        }
+    }
+
+    if (input.hasBytecode) {
+        if (auto compared = CompareDump(allocator, input, sources, compilation, mainModule,
+                                        expectation.Stage(), DumpKind::Bytecode, report);
+            !compared) {
+            return compared;
+        }
+
+        if (auto checked = CheckBytecodeRoundTrip(allocator, input, compilation, report);
+            !checked) {
+            return checked;
+        }
+    }
+
+    if (input.hasRun) {
+        if (auto checked =
+                detail::CheckRunGolden(allocator, input, compilation, mainModule, report);
+            !checked) {
+            return checked;
         }
     }
 

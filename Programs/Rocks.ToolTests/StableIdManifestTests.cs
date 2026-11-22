@@ -6,6 +6,33 @@ internal static class StableIdManifestTests
 {
     public static void Register(TestSuite suite)
     {
+        // ids reissue(Docs/Design/ProjectFiles.ko.md 11.4절): 활성 항목은 새 ID, aliases는 비우고, 은퇴 항목은 지운다. Sparks kind(경로 이름의
+        // 멤버)도 같은 규칙이다.
+        suite.Add("StableIds.ReissueForNewProject", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            string path = temporary.FilePath("identity.json");
+            string[] before = StableIdManifest.Update(path, true, manifest =>
+            {
+                string type = manifest.Register("type", "sample::Character");
+                string field = manifest.Register("field", "sample::Character::health");
+                string retired = manifest.Register("type", "sample::Old");
+                string sparks = manifest.Register("type", "Game/Doors/Door.Door");
+                string handler = manifest.Register("function", "Game/Doors/Door.Door.on(Owner.Damaged)");
+                manifest.Rename("field", "sample::Character::health", "sample::Character::hitpoints");
+                manifest.Retire("type", "sample::Old");
+                return new[] { type, field, retired, sparks, handler };
+            });
+            int reissued = StableIdManifest.Update(path, false, manifest => manifest.Reissue());
+            StableIdManifest read = StableIdManifest.Load(path);
+            Verify.Equal(4, reissued, "active entries reissued");
+            Verify.That(read.Entries.Count == 4 && read.Entries.All(entry => !entry.Retired && entry.Aliases.Count == 0), "aliases and retired entries removed");
+            Verify.That(read.Entries.All(entry => !before.Contains(entry.Id)) && read.Entries.Select(entry => entry.Id).Distinct().Count() == 4,
+                "every ID is new and unique");
+            Verify.That(read.Resolve("field", "sample::Character::hitpoints") is not null && read.Resolve("function", "Game/Doors/Door.Door.on(Owner.Damaged)") is not null,
+                "names are kept, Sparks member kinds included");
+        });
+
         suite.Add("StableIds.RegistrationRenameRetireAndReadOnlyBuild", () =>
         {
             using TemporaryDirectory temporary = new();
@@ -51,6 +78,63 @@ internal static class StableIdManifestTests
             Verify.Throws<InvalidDataException>(() => read.Resolve("type", "sample::Player"));
             Verify.Throws<InvalidDataException>(() => read.Resolve("field", "sample::Player::hitpoints"));
             Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, manifest => manifest.Register("type", "sample::Character")));
+        });
+
+        suite.Add("StableIds.SparksNamesAndKinds", () =>
+        {
+            // Sparks 컴파일러가 두 번째 발급자로 쓰는 이름 키와 kind(Docs/Design/SparksBytecode.ko.md 6.1절, SE-R8).
+            using TemporaryDirectory temporary = new();
+            string path = temporary.FilePath("Game.rocksids.json");
+            string[] ids = StableIdManifest.Update(path, true, manifest => new[]
+            {
+                manifest.Register("type", "Game/Doors/Door.Door"),
+                manifest.Register("field", "Game/Doors/Door.Door.Open"),
+                manifest.Register("subobject", "Game/Doors/Door.Door.Mesh"),
+                manifest.Register("function", "Game/Doors/Door.Door.on(Owner.Damaged)"),
+                manifest.Register("function", "Game/Doors/Door.Door.on(this.Pinged)"),
+                manifest.Register("rpc", "Game/Doors/Door.Door.RequestOpen"),
+                manifest.Register("type", "Game/Doors/Door.Side"),
+                manifest.Register("enumCase", "Game/Doors/Door.Side.Left"),
+                manifest.Register("type", "my-pack/Main.Thing"),
+            });
+            StableIdManifest read = StableIdManifest.Load(path);
+            Verify.Equal(ids[3], read.Resolve("function", "Game/Doors/Door.Door.on(Owner.Damaged)"), "handler key");
+            Verify.Equal(ids[7], read.Resolve("enumCase", "Game/Doors/Door.Side.Left"), "enum case key");
+
+            // type 이름을 바꾸면 모든 멤버 kind가 따라온다.
+            StableIdManifest.Update(path, false, manifest =>
+            {
+                manifest.Rename("type", "Game/Doors/Door.Door", "Game/Doors/Door.Gate");
+                return 0;
+            });
+            read = StableIdManifest.Load(path);
+            Verify.Equal(ids[1], read.Resolve("field", "Game/Doors/Door.Gate.Open"), "field follows type");
+            Verify.Equal(ids[2], read.Resolve("subobject", "Game/Doors/Door.Gate.Mesh"), "subobject follows type");
+            Verify.Equal(ids[3], read.Resolve("function", "Game/Doors/Door.Gate.on(Owner.Damaged)"), "handler follows type");
+            Verify.Equal(ids[5], read.Resolve("rpc", "Game/Doors/Door.Gate.RequestOpen"), "rpc follows type");
+
+            // 잘못된 이름: 멤버 없는 멤버 kind, 멤버 있는 type, 주인 없는 멤버, handler가 아닌 kind의 on(...), 빈 조각,
+            // 패키지 없는 경로, 식별자가 아닌 선언.
+            string[] rejected =
+            [
+                "field|Game/Doors/Door.Gate",
+                "type|Game/Doors/Door.Gate.Open",
+                "field|Game/Doors/Door.Missing.Open",
+                "field|Game/Doors/Door.Gate.on(Owner.Damaged)",
+                "type|Game//Door.Gate",
+                "type|Door.Gate",
+                "type|Game/Doors/Door.1Gate",
+                "function|Game/Doors/Door.Gate.on()",
+                "subobject|sample::Type::member",
+            ];
+            foreach (string item in rejected)
+            {
+                string[] parts = item.Split('|');
+                Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, manifest => manifest.Register(parts[0], parts[1])));
+            }
+
+            // 같은 이름 키를 다른 kind로 쓰는 것은 다른 항목이다(kind가 이름 공간이다).
+            StableIdManifest.Update(path, false, manifest => manifest.Register("function", "Game/Doors/Door.Gate.RequestOpen"));
         });
 
         suite.Add("StableIds.FailedMutationsPreserveOriginalBytes", () =>

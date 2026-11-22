@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Core/Text/Json.h>
+
 #include "NameBinder.h"
 
 // 타입 검사(LC2c)다(Docs/Design/SparksLanguage.ko.md 3.10절, S0326·S04xx·S05xx·S0109). 이름 해석
@@ -43,6 +45,22 @@ struct ConstantValue {
     bool boolean = false;
     uint32 symbol = NoSymbol; // Enum: case 심볼
     StringView text;          // String: 리터럴 원문(따옴표·`@` 포함 — 값은 DecodeStringLiteral)
+};
+
+// ID manifest 이름의 역할이다(활성 항목의 현재 이름·alias, 은퇴 항목의 이름·alias).
+enum class ManifestNameRole : uint8 {
+    Current,
+    Alias,
+    Retired
+};
+
+// ID manifest 항목의 이름(또는 alias) 하나다(CheckStableIds.cpp — kind는 manifest kind 번호).
+struct ManifestIdName {
+    uint8 kind = 0;
+    ManifestNameRole role = ManifestNameRole::Current;
+    StringView name;
+    uint32 entry = 0;
+    JsonPosition position; // manifest 안의 그 글자(S1006 위치)
 };
 
 // 기대 타입이 앞선 오류로 정해지지 않은 자리의 표지다(Check·Coerce의 expected·type 인자로만 쓴다).
@@ -97,6 +115,7 @@ struct CheckContext {
 class FlowAnalyzer;
 class IrBuilder;
 class IrWriter;
+class BytecodeEncoder;
 
 class TypeChecker final {
 public:
@@ -108,6 +127,7 @@ private:
     friend class FlowAnalyzer;
     friend class IrBuilder;
     friend class IrWriter;
+    friend class BytecodeEncoder;
 
     // 노드 대표 토큰의 글자다(연산자·멤버 이름·리터럴).
     StringView TokenText(uint32 module, uint32 node) const noexcept;
@@ -288,8 +308,27 @@ private:
     void CheckAcquireReturns() noexcept;
     void CheckHeldEvents() noexcept;
 
+    // ---- 안정 ID(CheckStableIds.cpp, SparksBytecode 6.1절 — Rules 단계) ----
+    void CheckStableIds() noexcept;
+    // interface 구현 함수(상속한 구현·엔진 interface 포함)를 marks(심볼 번호)에 표시한다.
+    void MarkInterfaceImplementations(Array<uint8>& marks) noexcept;
+    void CheckPackageIds(uint32 package, Span<const uint8> unstable,
+                         Span<const uint8> implementations) noexcept;
+    // 이름 키의 모듈을 이 컴파일에서 판정했는지다(진단이 난 모듈의 항목은 S1005로 보지 않는다).
+    // byPath는 그 패키지 모듈 번호를 경로 순으로 둔 것이다.
+    bool JudgedModule(uint32 package, StringView name, Span<const uint8> unstable,
+                      Span<const uint32> byPath) const noexcept;
+    // manifest를 읽어 모든 항목의 이름·alias(역할 표시)를 (kind, 이름) 순으로 names에 둔다. 형식
+    // 오류(중복 이름·ID, 다른 패키지 이름, 주인 없는 멤버 포함)면 S1006을 내고 false.
+    bool ReadIdManifest(uint32 package, JsonDocument& document,
+                        Array<ManifestIdName>& names) noexcept;
+    bool AddPendingId(uint8 kind, StringView name, StringView former) noexcept;
+
     // ---- typed IR 내림(IrDump.cpp, LC4 — Codegen 단계, 진단 없는 컴파일에서만) ----
     void LowerProgram() noexcept;
+    // 모듈 interface의 정규 텍스트(SparksBytecode 6.2절 — interface hash의 입력)다.
+    void AppendInterfaceText(StringBuilderBase& out, uint32 module) noexcept;
+    void AppendInterfaceType(StringBuilderBase& out, uint32 module, uint32 type) noexcept;
     void LowerModule(uint32 module) noexcept;
     // 획득한 지역 자원 뒤의 정지하는 await(S0905 — 효과 분석 뒤).
     void CheckResourceWaits() noexcept;
@@ -349,6 +388,9 @@ private:
     // cycles=false: 표기한 필드만으로 기본값을 정한다(검사 전). cycles=true: 추론한 필드까지 넣어
     // 순환을 알린다(검사 뒤).
     void AnalyzeStructs(bool cycles) noexcept;
+    // struct 필드 초기값이 생성하는 struct를 따라 자기 자신으로 돌아오는 생성을 알린다(S0429 —
+    // 기본값이 끝없이 커진다, CheckStructs.cpp).
+    void CheckDefaultCycles() noexcept;
     // 필드·const 초기값을 이름 의존 순서대로 미리 정한다(재귀 깊이를 쓰지 않게 — S0427 앞 단계).
     void PrepareInitializers() noexcept;
     // 초기값 깊이를 하나 들어간다. 상한을 넘으면 S0427을 내고 false(그 초기값은 해석하지 못함).

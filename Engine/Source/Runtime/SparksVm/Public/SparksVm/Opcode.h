@@ -16,7 +16,7 @@
 namespace rocks::sparks {
 
 // `.sparkc`·bytecode 형식 버전이다(opcode 번호·명령 모양·표 배치가 바뀌면 올린다).
-inline constexpr uint32 BytecodeFormatVersion = 1;
+inline constexpr uint32 BytecodeFormatVersion = 3; // 2: TYPE 구역(LC5b3), 3: CLASS 구역(LC6a)
 
 // bank 하나의 레지스터 수 상한이다(8비트 피연산자 — D3).
 inline constexpr uint32 MaxBankRegisters = 256;
@@ -42,7 +42,7 @@ enum class Opcode : uint8 {
     LoadStr,
     LoadNullR,
     LoadNullB,
-    // 정수 산술(타입별 — 범위 밖은 IntegerOverflow, 0 나눗셈은 DivisionByZero)
+    // 정수 산술(타입별 — 범위 밖은 IntegerOverflow, 0 나눗셈은 DivideByZero, DIV·MOD는 내림 방식)
     AddI8,
     AddI16,
     AddI32,
@@ -98,6 +98,10 @@ enum class Opcode : uint8 {
     MulF64,
     DivF64,
     NegF64,
+    // 수학 타입 합성(UE와 같은 순서 — quat은 FQuat::operator*, mat4는 FMatrix::operator*). A·B·C는
+    // 묶음의 첫 레지스터(quat 4·mat4 16 slot)
+    MulQ,
+    MulM,
     // 논리·비교
     Not,
     EqI,
@@ -112,12 +116,16 @@ enum class Opcode : uint8 {
     LeF,
     EqStr,
     NeStr,
+    LtStr, // UTF-8 byte 순
+    LeStr,
     EqR,
     NeR,
     EqB,
     NeB,
-    EqN, // + EXTRA(slot 수)
-    NeN, // + EXTRA(slot 수)
+    EqN,  // + EXTRA(slot 수)
+    NeN,  // + EXTRA(slot 수)
+    EqNF, // 실수 묶음(성분 F32·F64와 있음 표지) — 성분은 실수 비교(-0.0 == 0.0, NaN != NaN)
+    NeNF,
     // 변환
     Conv,  // C = (원래 종류 << 4) | 목적 종류(ScalarKind)
     ToStr, // + EXTRA(표시 종류 << 16 | enum 타입 참조)
@@ -128,6 +136,11 @@ enum class Opcode : uint8 {
     Brf,
     Switch,
     Ret,
+    RetErrS,  // Scalar Result A..A+B의 오류를 이 함수의 Result로 반환
+    RetErrB,  // Buf Result A의 오류를 이 함수의 Result로 반환
+    EndExecS, // Result가 아닌 함수·handler의 `try` 실패: 현재 실행을 끝내고 Scalar Result A..A+B의
+              // 오류를 기록
+    EndExecB, // 같은 것의 Buf Result A
     // optional
     IsSomeR,
     IsSomeB,
@@ -159,10 +172,10 @@ enum class Opcode : uint8 {
     CallRpc,
     Emit,
     // 대기·Result
-    Await,   // + EXTRA(결과 bank << 8 | slot 수)
-    AwaitEv, // + EXTRA(이벤트 참조)
-    TryS,
-    TryB,
+    Await,  // + EXTRA(결과 bank << 8 | slot 수)
+    WaitEv, // A ← 발행자 B의 이벤트 대기 handle + EXTRA(이벤트 참조 — SparksRuntime 2.5절)
+    TryS,   // A ← Result B..B+C의 값, 오류면 EXTRA(부호 있는 거리)로 분기
+    TryB,   // A ← Buf Result B의 값(C = 값 bank << 5 | slot 수), 오류면 EXTRA 거리로 분기
     // 생성
     NewS,
     NewC,
@@ -179,6 +192,9 @@ enum class Opcode : uint8 {
     Release,
     Fault,
     Extra,
+    // 하위 실행 호출(CALL과 같은 창 — 반환·정지하면 하위 대기 handle을 Ref 창 0번에, SparksRuntime
+    // 2.5절). 번호를 앞 명령들 뒤에 두어 기존 번호를 바꾸지 않는다.
+    CallW,
     Count
 };
 
@@ -261,6 +277,31 @@ constexpr int32 DecodeSBx(uint32 word) noexcept {
 constexpr uint32 DecodeAx(uint32 word) noexcept {
     return (word >> 8) & MaxAx;
 }
+
+// EXTRA의 Ax를 부호 있는 24비트 거리로 읽는다(TRY의 실패 분기).
+constexpr int32 DecodeSAx(uint32 word) noexcept {
+    const uint32 ax = DecodeAx(word);
+    return (ax & 0x800000) != 0 ? static_cast<int32>(ax | 0xFF000000u) : static_cast<int32>(ax);
+}
+
+// EXTRA 컨테이너 표지(GETE·SETE·GETKEY·GETVAL·APPEND·PUT)다: 값 bank·slot 수와 key bank·slot 수.
+constexpr uint32 EncodeContainerMarker(uint32 valueBank, uint32 valueSlots, uint32 keyBank,
+                                       uint32 keySlots) noexcept {
+    return (valueSlots & 0x1F) | ((valueBank & 0x3) << 5) | ((keySlots & 0x1F) << 8) |
+           ((keyBank & 0x3) << 13);
+}
+
+// TOSTR의 표시 종류다: 0–15는 ScalarKind, 그 위는 수학 타입(성분 double 묶음).
+enum class DisplayKind : uint8 {
+    Vec2 = 16,
+    Vec3,
+    Vec4,
+    Quat,
+    Rotator,
+    Color,
+    Transform,
+    Mat4
+};
 
 // Scalar 값의 해석이다(CONV의 C·TOSTR 표시 종류·덤프). 번호는 형식에 묶인다.
 enum class ScalarKind : uint8 {

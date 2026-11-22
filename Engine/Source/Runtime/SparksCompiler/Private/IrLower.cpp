@@ -13,6 +13,10 @@ namespace rocks::sparks::detail {
 
 bool IrBuilder::Build() noexcept {
     const SyntaxNode& entry = tree_->Node(function_.node);
+    if (entry.kind == SyntaxKind::Class) {
+        return BuildInitializer();
+    }
+
     const bool handler = entry.kind == SyntaxKind::Handler;
     const uint32 block = tree_->Child(function_.node, handler ? 4 : 5);
     if (function_.symbol != NoSymbol) {
@@ -70,6 +74,47 @@ bool IrBuilder::Build() noexcept {
                 instruction.span = closing;
             }
         }
+    }
+
+    return !Failed();
+}
+
+bool IrBuilder::BuildInitializer() noexcept {
+    // this(class)와 자기 필드의 초기값(SparksRuntime 2.1절 — 기반 클래스의 필드는 기반의 $init이
+    // 쓴다). 위치는 필드 선언이다.
+    const uint32 owner = function_.owner;
+    this_ = NewValue(checker_.TypeOfSymbol(owner), "this");
+    function_.self = this_;
+    StartBlock(NewBlock());
+    const uint32 members = tree_->Child(function_.node, 4);
+    for (const uint32 member :
+         members == NoNode ? Span<const uint32>() : tree_->Children(members)) {
+        if (tree_->Node(member).kind != SyntaxKind::Field) {
+            continue;
+        }
+
+        const uint32 field = c_.NodeSymbol(module_, tree_->Child(member, 2));
+        if (field == NoSymbol) {
+            continue;
+        }
+
+        const uint32 value = LowerFieldDefault(field, member);
+        if (value != NoIrRegister) {
+            Add(IrOp::SetField, this_, value, NoIrRegister, field, member);
+        }
+    }
+
+    LowerReturn(NoNode, NoNode);
+    // 반환의 위치는 class 본문의 닫는 `}`다.
+    const SourceSpan body = tree_->Node(function_.node).span;
+    const SourceSpan closing{body.end > body.begin ? body.end - 1 : body.begin, body.end};
+    for (usize index = function_.instructions.Size(); index > 0; --index) {
+        IrInstruction& instruction = function_.instructions[index - 1];
+        if (instruction.span.begin != 0 || instruction.span.end != 0) {
+            break;
+        }
+
+        instruction.span = closing;
     }
 
     return !Failed();
@@ -193,7 +238,11 @@ bool IrBuilder::EvaluateBinaryConstant(uint32 node, ConstantValue& value) noexce
         } else if (b == 0 || (a == NumericLimits<int64>::Min() && b == -1)) {
             return false;
         } else if (op == "%") {
+            // 내림 방식(SL 3.3절 — 검사기의 RemainderConstant·VM과 같다).
             result = a % b;
+            if (result != 0 && ((result < 0) != (b < 0))) {
+                result += b;
+            }
         } else if (a % b == 0) {
             result = a / b;
         } else {
@@ -590,6 +639,13 @@ uint32 IrBuilder::LowerBinaryStep(uint32 node, uint32 left, uint32 expected) noe
                                             : IrCompare::Equal;
         // 묶음 비교(slot 수 extra). null과의 비교는 있음 표지·handle로 한다.
         Add(IrOp::Compare, result, left, right, SlotCount(left), node, static_cast<uint8>(kind));
+        return result;
+    }
+
+    // quat·mat4의 `*`는 성분별이 아니라 합성이다(UE FQuat·FMatrix 곱) — 묶음 명령 하나.
+    if (op == "*" &&
+        (checker_.IsLanguage(resultType, "quat") || checker_.IsLanguage(resultType, "mat4"))) {
+        Add(IrOp::Binary, result, left, right, 0, node, static_cast<uint8>(IrArith::Compose));
         return result;
     }
 

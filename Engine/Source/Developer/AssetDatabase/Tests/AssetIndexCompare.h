@@ -20,8 +20,14 @@ inline bool SameEntry(const AssetIndexEntry& left, const AssetIndexEntry& right)
         !(left.importRecord.importerId == right.importRecord.importerId) ||
         left.importRecord.importerName.View() != right.importRecord.importerName.View() ||
         left.importRecord.importerVersion != right.importRecord.importerVersion ||
-        left.importRecord.outputCount != right.importRecord.outputCount) {
+        left.importRecord.outputs.Size() != right.importRecord.outputs.Size()) {
         return false;
+    }
+
+    for (usize index = 0; index < left.importRecord.outputs.Size(); ++index) {
+        if (!(left.importRecord.outputs[index] == right.importRecord.outputs[index])) {
+            return false;
+        }
     }
 
     for (usize index = 0; index < left.dependencies.Size(); ++index) {

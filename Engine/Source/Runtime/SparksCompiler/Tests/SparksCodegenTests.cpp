@@ -160,7 +160,8 @@ bool LowerProgram(Allocator& allocator, StringView program, StringBuilderBase& d
         return false;
     }
 
-    return static_cast<bool>(fixture.compilation.AppendIrDump(dump, module));
+    return fixture.compilation.AppendIrDump(dump, module) &&
+           fixture.compilation.AppendBytecodeDump(dump, module);
 }
 
 } // namespace
@@ -262,6 +263,222 @@ TEST(SparksCodegen_DeepChainsStayWithinTheStack) {
     CHECK(dump.View().StartsWith("function F("));
 }
 
+TEST(SparksCodegen_FunctionTooLargeS1150) {
+    // 동시에 살아 있는 Scalar 값이 256 slot을 넘는 함수는 S1150이다(위치는 함수 이름). 같은 수의
+    // 값이 차례로 죽으면(앞 값을 다 쓴 뒤 다음 값) 레지스터를 다시 써 통과한다.
+    SystemAllocator allocator;
+    constexpr uint32 Values = 300;
+    StringBuilder<32768> wide(allocator);
+    wide.Append("fn Wide(x: int): int {\n");
+    for (uint32 index = 0; index < Values; ++index) {
+        wide.AppendFormat("    let a{} = x + {};\n", index, index);
+    }
+
+    wide.Append("    return a0");
+    for (uint32 index = 1; index < Values; ++index) {
+        wide.AppendFormat(" + a{}", index);
+    }
+
+    wide.Append(";\n}\n");
+    REQUIRE(!wide.HasFailed());
+    Fixture fixture(allocator);
+    const uint32 game = fixture.Package("Game");
+    fixture.Module(game, "Game", "Main.spark", wide.View());
+    REQUIRE(fixture.compilation.Check(fixture.diagnostics));
+    fixture.diagnostics.Sort(fixture.sources);
+    REQUIRE(fixture.diagnostics.Count() == 1);
+    const Diagnostic& diagnostic = fixture.diagnostics[0];
+    CHECK(diagnostic.Code() == DiagnosticCode::FunctionTooLarge);
+    const SourceLocation at =
+        fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
+    CHECK(at.line == 1);
+    CHECK(at.column == 4);
+    CHECK(diagnostic.Message() == StringView("The function is too large to compile."));
+    CHECK(fixture.compilation.ModuleBytecode(0) == nullptr ||
+          fixture.compilation.ModuleBytecode(0)->functions.Size() <= 1);
+
+    // 같은 수의 값이 차례로 죽으면 통과한다(값 300개가 몇 개의 레지스터를 돌려 쓴다).
+    StringBuilder<32768> narrow(allocator);
+    narrow.Append("fn Narrow(x: int): int {\n    var total = 0;\n");
+    for (uint32 index = 0; index < Values; ++index) {
+        narrow.AppendFormat("    let b{} = x + {};\n    total += b{};\n", index, index, index);
+    }
+
+    narrow.Append("    return total;\n}\n");
+    REQUIRE(!narrow.HasFailed());
+    Fixture second(allocator);
+    const uint32 package = second.Package("Game");
+    const uint32 module = second.Module(package, "Game", "Main.spark", narrow.View());
+    REQUIRE(second.Check());
+    CHECK(second.diagnostics.Count() == 0);
+    const BytecodeModule* bytecode = second.compilation.ModuleBytecode(module);
+    REQUIRE(bytecode != nullptr);
+    REQUIRE(bytecode->functions.Size() == 1);
+    CHECK(bytecode->functions[0].registers[0] < 8);
+}
+
+namespace {
+
+// 두 모듈(Util과 그것을 import하는 Main) 패키지를 컴파일한다.
+bool CompilePair(Fixture& fixture, StringView util, StringView main) noexcept {
+    const uint32 game = fixture.Package("Game");
+    fixture.Module(game, "Game", "Util.spark", util);
+    fixture.Module(game, "Game", "Main.spark", main);
+    return fixture.Check() && fixture.diagnostics.Count() == 0;
+}
+
+constexpr StringView Util = "fn Helper(): int {\n    return 1;\n}\n";
+constexpr StringView Main = "import Util;\n\nfn Use(): int {\n    return Helper() + 1;\n}\n";
+
+} // namespace
+
+TEST(SparksCodegen_RecompileScope) {
+    SystemAllocator allocator;
+    Fixture before(allocator);
+    REQUIRE(CompilePair(before, Util, Main));
+    auto scope = [&](StringView util, StringView main, Array<uint32>& modules,
+                     Array<uint64>& functions) noexcept {
+        Fixture after(allocator);
+        return CompilePair(after, util, main) &&
+               static_cast<bool>(
+                   FindRecompileScope(before.compilation, after.compilation, modules, functions));
+    };
+    {
+        // 같은 입력: 아무것도 다시 하지 않는다(hash가 결정적이다).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope(Util, Main, modules, functions));
+        CHECK(modules.IsEmpty());
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // 줄만 옮긴 본문: body hash는 위치를 넣지 않으므로 같다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("\n\nfn Helper(): int {\n    return 1;\n}\n", Main, modules, functions));
+        CHECK(modules.IsEmpty());
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // 본문만 바뀜: interface는 같고 Util.Helper만 다시 내린다(모듈 0 — 더한 순서).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Helper(): int {\n    return 2;\n}\n", Main, modules, functions));
+        CHECK(modules.IsEmpty());
+        REQUIRE(functions.Size() == 1);
+        CHECK(functions[0] == ((uint64(0) << 32) | 0));
+    }
+    {
+        // interface가 바뀜(공개 함수 추가): Util과 그것을 import하는 Main을 다시 검사한다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(
+            scope("fn Helper(): int {\n    return 1;\n}\n\nfn Extra(): int {\n    return 3;\n}\n",
+                  Main, modules, functions));
+        REQUIRE(modules.Size() == 2);
+        CHECK(modules[0] == 0);
+        CHECK(modules[1] == 1);
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // 진단이 있는 컴파일은 범위를 정할 수 없다.
+        Fixture after(allocator);
+        const uint32 game = after.Package("Game");
+        after.Module(game, "Game", "Util.spark", "fn Helper(): int {\n    return true;\n}\n");
+        after.Module(game, "Game", "Main.spark", Main);
+        REQUIRE(after.compilation.Check(after.diagnostics));
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        CHECK(
+            FindRecompileScope(before.compilation, after.compilation, modules, functions).Error() ==
+            ErrorCode::InvalidArgument);
+    }
+}
+
+namespace {
+
+// 세 모듈(A, A를 import하는 B, B를 import하는 C) 패키지를 schema와 함께 컴파일한다.
+bool CompileChain(Fixture& fixture, StringView a, StringView b, StringView c) noexcept {
+    if (!fixture.Schema(EngineSchema)) {
+        return false;
+    }
+
+    const uint32 game = fixture.Package("Game");
+    fixture.Module(game, "Game", "A.spark", a);
+    fixture.Module(game, "Game", "B.spark", b);
+    fixture.Module(game, "Game", "C.spark", c);
+    return fixture.Check() && fixture.diagnostics.Count() == 0;
+}
+
+constexpr StringView ChainA = "fn Label(): string {\n    return \"a    ; 1:1\";\n}\n\n"
+                              "class Box : ScriptableComponent {\n    var Size = 1+1;\n}\n";
+constexpr StringView ChainB = "import A;\n\nfn Twice(): string {\n    return Label();\n}\n";
+constexpr StringView ChainC = "import B;\n\nfn Use(): string {\n    return Twice();\n}\n\n"
+                              "class Door : ScriptableComponent {\n"
+                              "    on Owner.Destroyed() {\n    }\n}\n";
+
+} // namespace
+
+TEST(SparksCodegen_RecompileScopeEdges) {
+    SystemAllocator allocator;
+    Fixture before(allocator);
+    REQUIRE(CompileChain(before, ChainA, ChainB, ChainC));
+    auto scope = [&](StringView a, StringView b, StringView c, Array<uint32>& modules,
+                     Array<uint64>& functions) noexcept {
+        Fixture after(allocator);
+        return CompileChain(after, a, b, c) &&
+               static_cast<bool>(
+                   FindRecompileScope(before.compilation, after.compilation, modules, functions));
+    };
+    {
+        // 문자열 안의 `    ; 1:1`은 위치 주석이 아니다: 그 글자만 바뀌어도 body hash가 바뀐다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Label(): string {\n    return \"a    ; 2:2\";\n}\n\n"
+                      "class Box : ScriptableComponent {\n    var Size = 1+1;\n}\n",
+                      ChainB, ChainC, modules, functions));
+        CHECK(modules.IsEmpty());
+        REQUIRE(functions.Size() == 1);
+        CHECK(functions[0] == ((uint64(0) << 32) | 0));
+    }
+    {
+        // 초기값의 공백만 바뀌면 interface가 같다(토큰 정규화).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Label(): string {\n    return \"a    ; 1:1\";\n}\n\n"
+                      "class Box : ScriptableComponent {\n    var Size = 1 + /* two */ 1;\n}\n",
+                      ChainB, ChainC, modules, functions));
+        CHECK(modules.IsEmpty());
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // interface 변경은 import 전이 폐포(A → B → C)를 다시 검사하고, 그 모듈의 함수는 따로
+        // 내리지 않는다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Label(): string {\n    return \"b\";\n}\n\n"
+                      "class Box : ScriptableComponent {\n    var Size = 3;\n}\n",
+                      ChainB, ChainC, modules, functions));
+        REQUIRE(modules.Size() == 3);
+        CHECK(modules[0] == 0);
+        CHECK(modules[1] == 1);
+        CHECK(modules[2] == 2);
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // handler를 지우면(interface에 없다) 그 모듈을 다시 검사한다(reload가 옛 구독을 버리게).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope(ChainA, ChainB,
+                      "import B;\n\nfn Use(): string {\n    return Twice();\n}\n\n"
+                      "class Door : ScriptableComponent {\n}\n",
+                      modules, functions));
+        REQUIRE(modules.Size() == 1);
+        CHECK(modules[0] == 2);
+        CHECK(functions.IsEmpty());
+    }
+}
+
 TEST(SparksCodegen_AllocationFailureEverywhere) {
     SystemAllocator backing;
     uint64 checkAttempts = 0;
@@ -287,9 +504,11 @@ TEST(SparksCodegen_AllocationFailureEverywhere) {
                 checkAttempts = attempts;
                 REQUIRE(fixture.diagnostics.Count() == 0);
                 REQUIRE(fixture.compilation.AppendIrDump(clean, module));
+                REQUIRE(fixture.compilation.AppendBytecodeDump(clean, module));
             } else if (checked) {
                 StringBuilder<16384> text(backing);
                 REQUIRE(fixture.compilation.AppendIrDump(text, module));
+                REQUIRE(fixture.compilation.AppendBytecodeDump(text, module));
                 CHECK(text.View() == clean.View());
             } else {
                 ++failures;

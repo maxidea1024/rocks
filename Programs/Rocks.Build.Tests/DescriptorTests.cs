@@ -20,9 +20,9 @@ internal static class DescriptorTests
         if (repository is not null)
         {
             ProjectDescriptor template = DescriptorReader.ReadProject(
-                Path.Combine(repository, "Templates", "Game", "Foundation", "Game.rocksproject"));
-            Check(template.Modules.Count == 1 && template.Modules[0].Name == "SampleGame",
-                "template project must declare the SampleGame module");
+                Path.Combine(repository, "Templates", "Game", "Foundation", "FoundationTemplate.rocksproject"));
+            Check(template.Modules.Count == 1 && template.Modules[0].Name == "FoundationTemplate",
+                "template project must declare the FoundationTemplate module");
         }
     }
 

@@ -54,6 +54,8 @@ internal static class ProjectFilesStaleness
         }
 
         string reason = state.Fingerprints.ContainsKey(key) ? "files or settings changed" : "the target is not in the project files";
+        // 늘 MSBuild 경고 형식이다(Visual Studio 오류 목록·터미널 모두). 저장소 Directory.Build.rsp의 -warnAsError가 이 경고를 오류로 바꾸지 않게
+        // 같은 파일에 -warnNotAsError:RPF0001을 둔다(9절).
         return $"warning {WarningCode}: Visual Studio project files are out of date for {target.Name} {configuration} ({reason}). Run GenerateProjectFiles.bat.";
     }
 

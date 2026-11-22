@@ -80,7 +80,8 @@ Result<void> AssetTypeHookContext::CallBaseTags(AssetTagSink& sink) const noexce
         return Result<void>::Success();
     }
 
-    const AssetTypeHookContext next{registry, access, object, entry.Value()->type, table, types};
+    const AssetTypeHookContext next{registry, access, object, entry.Value()->type,
+                                    table,    types,  asset};
     return entry.Value()->hooks.tags(next, sink);
 }
 
@@ -95,7 +96,8 @@ AssetTypeHookContext::CallBaseBuildDependencies(AssetDependencySink& sink) const
         return Result<void>::Success();
     }
 
-    const AssetTypeHookContext next{registry, access, object, entry.Value()->type, table, types};
+    const AssetTypeHookContext next{registry, access, object, entry.Value()->type,
+                                    table,    types,  asset};
     return entry.Value()->hooks.buildDependencies(next, sink);
 }
 
@@ -197,7 +199,8 @@ Result<const AssetTypeHookTable::Entry*> AssetTypeHookTable::Find(TypeId start, 
 
 Result<void> AssetTypeHookTable::CollectTags(ObjectRegistry& registry,
                                              const ObjectAccessContext& access, ObjectHandle object,
-                                             TypeId type, AssetTagSink& sink) const noexcept {
+                                             TypeId type, AssetId asset,
+                                             AssetTagSink& sink) const noexcept {
     auto entry = Find(type, true, false);
     if (!entry) {
         return Result<void>::Failure(entry.Error());
@@ -207,14 +210,14 @@ Result<void> AssetTypeHookTable::CollectTags(ObjectRegistry& registry,
         return Result<void>::Success();
     }
 
-    const AssetTypeHookContext context{registry, access, object, entry.Value()->type,
-                                       *this,    *types_};
+    const AssetTypeHookContext context{registry, access,  object, entry.Value()->type,
+                                       *this,    *types_, asset};
     return entry.Value()->hooks.tags(context, sink);
 }
 
 Result<void> AssetTypeHookTable::CollectBuildDependencies(
     ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, TypeId type,
-    AssetDependencySink& sink) const noexcept {
+    AssetId asset, AssetDependencySink& sink) const noexcept {
     auto entry = Find(type, false, false);
     if (!entry) {
         return Result<void>::Failure(entry.Error());
@@ -224,8 +227,8 @@ Result<void> AssetTypeHookTable::CollectBuildDependencies(
         return Result<void>::Success();
     }
 
-    const AssetTypeHookContext context{registry, access, object, entry.Value()->type,
-                                       *this,    *types_};
+    const AssetTypeHookContext context{registry, access,  object, entry.Value()->type,
+                                       *this,    *types_, asset};
     return entry.Value()->hooks.buildDependencies(context, sink);
 }
 

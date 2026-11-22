@@ -1,0 +1,6 @@
+# Language-owned Clock names come from the TYPE section; engine enum names, engine structs (SpawnParams) and TagSet() (the empty null value) go through the fake host (SparksVm 6.5).
+ClockName(Game) -> "Game" (4 steps)
+ClockName(UI) -> "UI" (4 steps)
+ChannelName(Visibility) -> "Visibility" (4 steps)
+Tags() -> 1 (3 steps)
+Params() -> 1 (8 steps)

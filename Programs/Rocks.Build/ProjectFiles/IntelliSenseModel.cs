@@ -42,8 +42,15 @@ public sealed record IdeBundle(int Number, IReadOnlyDictionary<string, IntelliSe
 public sealed record IdeSourceFile(string Path, int? Bundle, IReadOnlyDictionary<string, IdeChoice?> Choices);
 
 /// <summary>
-/// 생성할 프로젝트 하나다. Engine이면 엔진 프로젝트(엔진 루트 아래 정의된 타깃이 구성)다. DefaultBundle은 가장 많은 파일이 쓰는 묶음이다
-/// (ItemDefinitionGroup 기본값으로 쓴다, 8.3절. 동률이면 번호가 작은 것).
+/// 게임 모드 배치다(Docs/Design/ProjectFiles.ko.md 10.4절). MainProject는 정의 디렉터리가 루트 또는 <c>&lt;루트&gt;/Source</c>인 타깃(UE 기본 배치)을
+/// 구성으로 갖는 주 프로젝트(게임) 이름이고, HeaderProject는 HeaderRoot(설치 SDK) 아래 헤더만 담는 탐색용 프로젝트 이름이다.
+/// </summary>
+public sealed record IdeModelLayout(string MainProject, string HeaderProject, string HeaderRoot);
+
+/// <summary>
+/// 생성할 프로젝트 하나다. Engine이면 주 프로젝트다: 엔진 모드는 엔진 루트 아래 정의된 타깃, 게임 모드는 게임 루트·<c>Source/</c>에 정의된
+/// 타깃이 구성이다. 게임 모드의 헤더 전용 프로젝트(<see cref="IdeModelLayout.HeaderProject"/>)는 Engine이 아니고 소스가 없다. DefaultBundle은
+/// 가장 많은 파일이 쓰는 묶음이다(ItemDefinitionGroup 기본값으로 쓴다, 8.3절. 동률이면 번호가 작은 것).
 /// </summary>
 public sealed record IdeProject(string Name, bool Engine, IReadOnlyList<IdeProjectConfiguration> Configurations,
     IReadOnlyList<IdeSourceFile> Sources, IReadOnlyList<string> Headers, IReadOnlyList<IdeBundle> Bundles, int? DefaultBundle);
@@ -85,14 +92,22 @@ public sealed record IntelliSenseModel(IReadOnlyList<IdeProject> Projects, IRead
     /// </summary>
     /// <exception cref="ArgumentException">미분류 인자(<see cref="IntelliSenseArguments"/>), 정의 헤더도 PCH 헤더도 아닌 강제 include,
     /// 엔진 프로젝트 구성 충돌.</exception>
+    /// <remarks>
+    /// <paramref name="layout"/>이 있으면 게임 모드다: 정의 디렉터리가 <paramref name="root"/>와 같은 타깃이 주 프로젝트
+    /// (<see cref="IdeModelLayout.MainProject"/>)의 구성이다(<c>&lt;루트&gt;/Source</c>에 정의된 타깃도 — UE 배치). 파일 소유는 엔진 루트 대신 가장 가까운
+    /// 정의 디렉터리로 정한다(주 타깃이면 주 프로젝트). <see cref="IdeModelLayout.HeaderRoot"/> 아래 헤더는 헤더 전용 프로젝트로 간다.
+    /// 주 프로젝트 밖 타깃의 이름이 주·헤더 프로젝트 이름과 같으면 오류다. engineRoots는 쓰지 않는다.
+    /// </remarks>
     public static IntelliSenseModel Create(IReadOnlyList<IdeTargetPlan> plans, string root, string projectFilesDirectory,
-        IReadOnlyList<string> engineRoots, string baseConfiguration)
+        IReadOnlyList<string> engineRoots, string baseConfiguration, IdeModelLayout? layout = null)
     {
         root = Path.GetFullPath(root);
         string definitionsDirectory = Path.Combine(Path.GetFullPath(projectFilesDirectory), DefinitionsDirectoryName);
         var copies = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var notices = new SortedSet<string>(StringComparer.Ordinal);
-        bool UnderEngine(string path) => engineRoots.Any(engineRoot => DirectoryPathOf(path, engineRoot));
+        string mainName = layout?.MainProject ?? EngineProjectName;
+        bool UnderEngine(string path) => layout is null && engineRoots.Any(engineRoot => DirectoryPathOf(path, engineRoot));
+        bool UnderHeaderRoot(string path) => layout is not null && DirectoryPathOf(path, layout.HeaderRoot);
 
         // 구성 순서는 처음 나온 순서가 아니라 NativeConfiguration 순서다(계획 목록 순서와 무관하게).
         string[] configurations = [.. plans.Select(plan => plan.Configuration).Distinct(StringComparer.Ordinal)
@@ -103,7 +118,18 @@ public sealed record IntelliSenseModel(IReadOnlyList<IdeProject> Projects, IRead
         var definitionOf = targets.ToDictionary(target => target, target => Path.GetFullPath(First(target).DefinitionDirectory), StringComparer.Ordinal);
         var typeOf = targets.ToDictionary(target => target, target => First(target).TargetType, StringComparer.Ordinal);
         var definitionNameOf = targets.ToDictionary(target => target, target => First(target).DefinitionName, StringComparer.Ordinal);
-        string[] engineTargets = [.. targets.Where(target => UnderEngine(definitionOf[target]))];
+        string[] mainDirectories = [Path.TrimEndingDirectorySeparator(root), Path.Combine(Path.TrimEndingDirectorySeparator(root), "Source")];
+        string[] engineTargets = layout is null
+            ? [.. targets.Where(target => UnderEngine(definitionOf[target]))]
+            : [.. targets.Where(target => mainDirectories.Contains(Path.TrimEndingDirectorySeparator(definitionOf[target]), NativeToolchains.PathComparer))];
+        if (layout is not null && targets.FirstOrDefault(target => !engineTargets.Contains(target) &&
+            (string.Equals(target, layout.MainProject, StringComparison.OrdinalIgnoreCase) || string.Equals(target, layout.HeaderProject, StringComparison.OrdinalIgnoreCase)))
+            is string clash)
+        {
+            throw new ArgumentException($"Target {clash} is defined in {definitionOf[clash]} and has the name of the {(string.Equals(clash, layout.HeaderProject,
+                StringComparison.OrdinalIgnoreCase) ? "SDK header" : "game")} project; rename the target or define it in the game root or its Source directory.");
+        }
+
         foreach (var group in engineTargets.GroupBy(target => typeOf[target], StringComparer.Ordinal).Where(group => group.Count() > 1))
         {
             throw new ArgumentException($"Targets {string.Join(", ", group)} of type {group.Key} are defined under the engine roots and would share " +
@@ -174,11 +200,23 @@ public sealed record IntelliSenseModel(IReadOnlyList<IdeProject> Projects, IRead
                 return EngineProjectName;
             }
 
-            string[] candidates = [.. targets.Where(target => !engineTargets.Contains(target) && DirectoryPathOf(path, definitionOf[target]))];
+            // 헤더 전용 프로젝트는 헤더만 받는다(설치 SDK의 소스는 컴파일되지 않는다).
+            if (!source && UnderHeaderRoot(path))
+            {
+                return layout!.HeaderProject;
+            }
+
+            // 게임 모드는 루트 타깃도 후보다(가장 가까운 정의 디렉터리가 루트면 주 프로젝트).
+            string[] candidates = [.. targets.Where(target => (layout is not null || !engineTargets.Contains(target)) && DirectoryPathOf(path, definitionOf[target]))];
             if (candidates.Length != 0)
             {
                 int deepest = candidates.Max(target => definitionOf[target].Length);
                 string[] closest = [.. candidates.Where(target => definitionOf[target].Length == deepest)];
+                if (closest.Any(engineTargets.Contains))
+                {
+                    return mainName;
+                }
+
                 return closest.FirstOrDefault(target => definitionNameOf[target] == target)
                     ?? (source ? closest.FirstOrDefault(target => Compiles(target, baseConfiguration, path)) : null)
                     ?? closest[0];
@@ -191,8 +229,8 @@ public sealed record IntelliSenseModel(IReadOnlyList<IdeProject> Projects, IRead
                     Compiles(target, baseConfiguration, path))
                 : sourceDirectoryOwner.GetValueOrDefault(Path.GetDirectoryName(path)!);
             notices.Add($"{directory} is under no target definition directory; its {(source ? "sources" : "headers")} are listed in " +
-                $"{program ?? EngineProjectName}.");
-            return program ?? EngineProjectName;
+                $"{program ?? mainName}.");
+            return program ?? mainName;
         }
 
         var sourcesOf = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -231,12 +269,19 @@ public sealed record IntelliSenseModel(IReadOnlyList<IdeProject> Projects, IRead
         }
 
         var projects = new List<IdeProject>();
-        string[] projectNames = [.. (engineTargets.Length != 0 || sourcesOf.ContainsKey(EngineProjectName) || headersOf.ContainsKey(EngineProjectName)
-            ? new[] { EngineProjectName } : []), .. targets.Where(target => !engineTargets.Contains(target))];
+        string[] projectNames = [.. (engineTargets.Length != 0 || sourcesOf.ContainsKey(mainName) || headersOf.ContainsKey(mainName)
+            ? new[] { mainName } : []), .. (layout is not null && headersOf.ContainsKey(layout.HeaderProject) ? new[] { layout.HeaderProject } : []),
+            .. targets.Where(target => !engineTargets.Contains(target))];
+        // 헤더 전용 프로젝트의 구성은 주 프로젝트의 Game 종류 타깃(없으면 ordinal 첫 루트 타깃) 구성이다(솔루션 구성과 이름이 같다).
+        // 주 타깃이 없으면 전체 중 첫 Game 종류 타깃(없으면 첫 타깃)이다(Docs/Design/ProjectFiles.ko.md 10.4절).
+        string[] headerPool = engineTargets.Length != 0 ? engineTargets : targets;
+        string[] headerTargets = headerPool.Where(target => typeOf[target] == "Game").Take(1).DefaultIfEmpty(headerPool.FirstOrDefault())
+            .OfType<string>().ToArray();
         foreach (string name in projectNames)
         {
-            bool engine = name == EngineProjectName;
-            IdeProjectConfiguration[] projectConfigurations = [.. (engine ? engineTargets : [name])
+            bool engine = name == mainName;
+            bool headerOnly = layout is not null && name == layout.HeaderProject;
+            IdeProjectConfiguration[] projectConfigurations = [.. (engine ? engineTargets : headerOnly ? headerTargets : [name])
                 .SelectMany(target => configurations.Where(configuration => planOf.ContainsKey(target + "|" + configuration))
                     .Select(configuration => new IdeProjectConfiguration(target, configuration)))];
             var rows = new List<(string Path, SortedDictionary<string, IdeChoice?> Choices, SortedDictionary<string, IntelliSenseValues?> Values, string? Key)>();
