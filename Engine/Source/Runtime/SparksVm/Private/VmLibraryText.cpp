@@ -169,7 +169,10 @@ VmFaultKind StringSplit(T& call) noexcept {
     const StringView separator = Text(call, 1);
     uint64 pieces = 0;
     if (separator.IsEmpty()) {
-        for (usize at = 0; at < text.ByteCount(); ++at) {
+        // 채우는 규칙과 같게 센다: 첫 byte는 늘 조각을 시작한다(continuation byte로 시작하는 host
+        // 문자열도 조각 하나 — 리뷰 A4).
+        pieces = text.IsEmpty() ? 0 : 1;
+        for (usize at = 1; at < text.ByteCount(); ++at) {
             pieces += VmContinuation(text.Data()[at]) ? 0 : 1;
         }
     } else {
@@ -391,26 +394,26 @@ VmFaultKind LanguageAssert(T& call) noexcept {
 }
 
 constexpr VmLibraryEntry VmTextTable[] = {
-    {"string.Length", StringLength},
-    {"string.CharCount", StringCharCount},
-    {"string.Contains", StringContains},
-    {"string.StartsWith", StringStartsWith},
-    {"string.EndsWith", StringEndsWith},
-    {"string.Find", StringFind},
-    {"string.Slice", StringSlice},
-    {"string.Split", StringSplit},
-    {"string.Trim", StringTrim},
-    {"string.ToUpperAscii", StringUpper},
-    {"string.ToLowerAscii", StringLower},
-    {"Format.Fixed", FormatFixed},
-    {"Format.Padded", FormatPadded},
-    {"Parse.Int", ParseInt},
-    {"Parse.Float", ParseFloat},
-    {"Log.Info", LogInfo},
-    {"Log.Warning", LogWarning},
-    {"Log.Error", LogError},
-    {"Log.Debug", LogDebug},
-    {"Assert", LanguageAssert},
+    {"string.Length", "s>i64", StringLength},
+    {"string.CharCount", "s>i64", StringCharCount},
+    {"string.Contains", "s,s>b", StringContains},
+    {"string.StartsWith", "s,s>b", StringStartsWith},
+    {"string.EndsWith", "s,s>b", StringEndsWith},
+    {"string.Find", "s,s>?<i64>", StringFind},
+    {"string.Slice", "s,i64,i64>s", StringSlice},
+    {"string.Split", "s,s>A<s>", StringSplit},
+    {"string.Trim", "s>s", StringTrim},
+    {"string.ToUpperAscii", "s>s", StringUpper},
+    {"string.ToLowerAscii", "s>s", StringLower},
+    {"Format.Fixed", "F,i64>s", FormatFixed},
+    {"Format.Padded", "i64,i64>s", FormatPadded},
+    {"Parse.Int", "s>?<i64>", ParseInt},
+    {"Parse.Float", "s>?<F>", ParseFloat},
+    {"Log.Info", "s>void", LogInfo},
+    {"Log.Warning", "s>void", LogWarning},
+    {"Log.Error", "s>void", LogError},
+    {"Log.Debug", "s>void", LogDebug},
+    {"Assert", "b,s>void", LanguageAssert},
 };
 
 } // namespace

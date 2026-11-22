@@ -324,7 +324,8 @@ public static class InstalledSdk
         try
         {
             var result = await BuildGameCoreAsync(options, requireVerified, toolchainRecord, cancellationToken);
-            status = result == 0 ? "PASS" : "FAIL";
+            // 파일 하나 컴파일은 빌드가 아니므로 PASS가 아니다(Docs/Design/ProjectFiles.ko.md 7.4절).
+            status = options.ContainsKey(SingleFileCommand.Option) ? (result == 0 ? "SINGLE-FILE" : "FAIL") : result == 0 ? "PASS" : "FAIL";
             return result;
         }
         catch (Exception error)
@@ -491,7 +492,7 @@ public static class InstalledSdk
     }
 
     // manifest 최상위 Version 칸의 값이다. 객체가 아니거나 칸이 없거나 정수가 아니면 null이다(버전 불일치로 알린다).
-    private static int? ManifestVersionOf(string manifestText)
+    internal static int? ManifestVersionOf(string manifestText)
     {
         using JsonDocument document = JsonDocument.Parse(manifestText);
         return document.RootElement.ValueKind == JsonValueKind.Object &&

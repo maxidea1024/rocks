@@ -685,7 +685,7 @@ fn Size(items: Set<int>): int {
     };
     const Bad bad[] = {
         {"Add\n", "Run/Case.spark: .run line 1: expected '<function>(<arguments>)'"},
-        {"\nNope(1)\n", "Run/Case.spark: .run line 2: no top-level function 'Nope'"},
+        {"\nNope(1)\n", "Run/Case.spark: .run line 2: no top-level function or method 'Nope'"},
         {"Add(1)\n", "Run/Case.spark: .run line 1: too few arguments"},
         {"Add(1, 2, 3)\n", "Run/Case.spark: .run line 1: too many arguments"},
         {"Add(x, 1)\n",
@@ -815,6 +815,101 @@ TEST(SparksConformance_RunGoldenAllocationFailure) {
                                         failure.ByteCount() - at - marker.ByteCount());
                 CHECK(actual.StartsWith("Mix(\"b,a,b\") -> \"1.224\" ("));
                 CHECK(actual.EndsWith("  log info \"mixed true\"\n"));
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                // 실패를 삼킨 경로는 결과가 같아야 한다(거짓 실패 없음).
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
+TEST(SparksConformance_RunGoldenAllocationFailureWithHost) {
+    // 언어 함수(문자열·컨테이너·서식·로그)를 부르는 사례를 모든 할당 실패 자리에서 돌린다: 실패는
+    // OutOfMemory로 돌아오고(보고에 거짓 실패를 남기지 않는다) 새는 할당이 없다.
+    SystemAllocator backing;
+    // 가짜 host 경로(링크·수신자 객체·필드 보관 버퍼·native 기록)의 할당 실패: 보관 버퍼가 어느
+    // 출구에서도 놓이고(LC5d1 리뷰 B5), 수신자 할당 실패는 OutOfMemory다(B6).
+    constexpr StringView Source = R"(class Keeper : ScriptableComponent {
+    var Names: Array<string> = [];
+
+    fn Keep(actor: Actor, name: string): int {
+        Names.Add(name);
+        actor.Location = actor.GetForwardVector();
+        return Names.Count + Actor.CountAll();
+    }
+}
+)";
+    constexpr StringView Golden = "Keeper.Keep(#1, #2, \"x\") -> 1 (0 steps)\n";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object",
+     "fields": [{"name": "Location", "type": "vec3", "access": "readWrite", "computed": true}],
+     "functions": [
+       {"name": "GetForwardVector", "id": "5a7e0000000000000000000000000203", "returns": "vec3"},
+       {"name": "CountAll", "id": "5a7e0000000000000000000000000206", "returns": "int", "static": true}]},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Keeper.spark";
+            input.schemas = schemas;
+            input.source = Source;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                // 첫 바퀴는 실제 결과(명령 수 포함)를 얻는다 — 이후 바퀴의 기대값이다.
+                REQUIRE(ran);
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.StartsWith("Keeper.Keep(#1, #2, \"x\") -> 1 ("));
+                CHECK(actual.EndsWith(
+                    "  host Actor.GetForwardVector(#2) -> 0\n  host Actor.CountAll() -> 0\n"));
                 REQUIRE(expected.TryAppend(actual));
                 attempts = used;
             } else if (!ran) {

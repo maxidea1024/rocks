@@ -25,10 +25,21 @@ public static class SingleFileCompile
     // 헤더로 보는 확장자다(헤더 단독 컴파일은 PublicHeaderChecks가 맡는다).
     private static readonly string[] HeaderExtensions = [".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp"];
 
-    /// <summary>소스의 object 경로다(<c>&lt;출력&gt;/SingleFile/&lt;저장소 기준 경로 해시&gt;.obj</c>, macOS·Android는 <c>.o</c>).</summary>
+    /// <summary>
+    /// <c>;</c>로 나눈 경로 목록을 읽는다(<c>--files</c> 값). 빈 항목은 건너뛰고, 상대 경로는 <paramref name="root"/>(엔진 <c>--root</c>, 게임
+    /// <c>--project</c>)로 푼다.
+    /// </summary>
+    public static string[] ParseList(string list, string root) =>
+        [.. list.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(path => Path.GetFullPath(path, root))];
+
+    /// <summary>
+    /// 소스의 object 경로다(<c>&lt;출력&gt;/SingleFile/&lt;저장소 기준 경로 해시&gt;.obj</c>, macOS·Android는 <c>.o</c>). 해시는 디스크 철자의 경로다 —
+    /// Visual Studio가 같은 파일을 다른 대소문자로 넘겨도 같은 object다.
+    /// </summary>
     public static string ObjectPath(NativeBuildRequest request, string source)
     {
-        string relative = Path.GetRelativePath(Path.GetFullPath(request.RootDirectory), Path.GetFullPath(source)).Replace('\\', '/');
+        string relative = Path.GetRelativePath(PathSpelling.OnDisk(Path.GetFullPath(request.RootDirectory)), PathSpelling.OnDisk(Path.GetFullPath(source)))
+            .Replace('\\', '/');
         string name = Hashing.Sha256Text(relative)[..NameHashLength];
         return Path.Combine(Path.GetFullPath(request.OutputDirectory), DirectoryName,
             name + (request.Toolchain.Platform == NativePlatform.Windows ? ".obj" : ".o"));
@@ -38,8 +49,10 @@ public static class SingleFileCompile
     /// 고른 소스를 차례로 컴파일한다. 헤더이거나 이 요청이 컴파일하지 않는 소스가 있으면 아무것도 컴파일하기 전에
     /// <see cref="ArgumentException"/>이다. 컴파일러가 실패해도 다음 소스를 계속하고 결과에 담는다.
     /// </summary>
+    /// <param name="compiledBy">이 요청이 컴파일하지 않는 소스를 컴파일하는 다른 타깃 이름이다(오류 안내용, 없으면 null). 원천은 1단계(이
+    /// 타깃)뿐이다(7.4절).</param>
     public static async Task<IReadOnlyList<SingleFileResult>> RunAsync(NativeBuildRequest request, IReadOnlyList<string> sources,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Func<string, IReadOnlyList<string>>? compiledBy = null)
     {
         if (sources.Count == 0)
         {
@@ -48,19 +61,26 @@ public static class SingleFileCompile
 
         IdePlan plan = IdePlanner.Plan(request);
         var selected = new List<(string Source, IdeCompile Compile)>();
-        foreach (string source in sources.Select(Path.GetFullPath))
+        foreach (string source in sources.Select(path => PathSpelling.OnDisk(Path.GetFullPath(path))))
         {
             if (HeaderExtensions.Contains(Path.GetExtension(source), StringComparer.OrdinalIgnoreCase))
             {
                 throw new ArgumentException($"{source} is a header; compile a source file (PublicHeaderChecks compiles headers on their own).");
             }
 
-            IdeCompile compile = plan.Compiles.Where(value => NativeToolchains.PathComparer.Equals(Path.GetFullPath(value.Source), source))
-                .OrderBy(value => value.Module, StringComparer.Ordinal).FirstOrDefault()
-                ?? throw new ArgumentException($"{source} is not compiled by this target and configuration.");
+            IdeCompile? compile = plan.Compiles.Where(value => NativeToolchains.PathComparer.Equals(Path.GetFullPath(value.Source), source))
+                .OrderBy(value => value.Module, StringComparer.Ordinal).FirstOrDefault();
+            if (compile is null)
+            {
+                IReadOnlyList<string> others = compiledBy?.Invoke(source) ?? [];
+                throw new ArgumentException($"{source} is not compiled by this target and configuration" + (others.Count == 0 ? "."
+                    : $"; it is compiled by {string.Join(", ", others)} — compile it from that project."));
+            }
+
             selected.Add((source, compile));
         }
 
+        RemoveOrphans(request);
         var results = new List<SingleFileResult>();
         foreach ((string source, IdeCompile compile) in selected)
         {
@@ -86,11 +106,11 @@ public static class SingleFileCompile
                 arguments
             }, new JsonSerializerOptions { WriteIndented = true }) + "\n");
             IReadOnlyList<string> processArguments = arguments;
-            if (NativeCommandLine.ExceedsHostLimit(plan.Compiler, arguments))
+            ResponseFileQuoting quoting = request.Toolchain.Platform == NativePlatform.Windows ? ResponseFileQuoting.Windows : ResponseFileQuoting.Gnu;
+            if (NativeCommandLine.ResponseFileSyntax(request.ResponseFiles, quoting, plan.Compiler, arguments) is not null)
             {
                 string responseFile = Path.ChangeExtension(objectPath, ".rsp");
-                File.WriteAllBytes(responseFile, ResponseFile.Encode(arguments,
-                    request.Toolchain.Platform == NativePlatform.Windows ? ResponseFileQuoting.Windows : ResponseFileQuoting.Gnu));
+                File.WriteAllBytes(responseFile, ResponseFile.Encode(arguments, quoting));
                 processArguments = ["@" + responseFile];
             }
 
@@ -100,5 +120,36 @@ public static class SingleFileCompile
         }
 
         return results;
+    }
+
+    // 원본이 없어진 기록(.json)과 그 object·response file을 지운다.
+    private static void RemoveOrphans(NativeBuildRequest request)
+    {
+        string directory = Path.Combine(Path.GetFullPath(request.OutputDirectory), DirectoryName);
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (string record in Directory.GetFiles(directory, "*.json"))
+        {
+            string? source = null;
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(record));
+                source = document.RootElement.GetProperty("source").GetString();
+            }
+            catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException)
+            {
+            }
+
+            if (source is null || !File.Exists(source))
+            {
+                foreach (string path in new[] { record, Path.ChangeExtension(record, ".obj"), Path.ChangeExtension(record, ".o"), Path.ChangeExtension(record, ".rsp") })
+                {
+                    File.Delete(path);
+                }
+            }
+        }
     }
 }

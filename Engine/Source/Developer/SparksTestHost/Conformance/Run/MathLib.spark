@@ -130,3 +130,19 @@ fn Place(t: Transform, v: vec3): string {
 fn Matrix(t: Transform, v: vec3): vec3 {
     return t.ToMatrix().TransformPosition(v);
 }
+
+fn AbsShort(a: int16): int16 {
+    return Math.Abs(a);
+}
+
+fn DivWide(a: uint64, b: uint64): uint64 {
+    return Math.Div(a, b);
+}
+
+fn MaxWide(a: uint64, b: uint64): uint64 {
+    return Math.Max(a, b);
+}
+
+fn ClampSingle(x: float32, lo: float32, hi: float32): float32 {
+    return Math.Clamp(x, lo, hi);
+}

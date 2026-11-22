@@ -7,6 +7,7 @@
 #include <Core/Result.h>
 #include <SparksVm/Bytecode.h>
 #include <SparksVm/VmBuffer.h>
+#include <SparksVm/VmHost.h>
 
 // Sparks VM의 실행 문맥이다(Docs/Design/SparksVm.ko.md 2–5절, LC5a·LC5b). verifier를 통과한 모듈의
 // 함수 하나를 부르고, 결과(반환 값·fault·실행 끝)와 쓴 명령어 수를 돌려준다. 실행 문맥은 bank마다
@@ -125,9 +126,10 @@ public:
     // 한다(platform::RunWithDeterministicFloatingPoint). buffers는 빌려 준다(호출이 참조를 더하고
     // host의 참조는 그대로다 — null은 null 값). module은 verifier를 통과해야
     // 한다(ReadBytecodeFile·VerifyBytecode — 통과하지 않은 모듈은 정의되지 않은 동작). 이전 호출의
-    // 반환 버퍼는 먼저 놓는다. 실패: function이 범위 밖이거나 인자 slot 수가 다르면
-    // InvalidArgument, stack·버퍼 할당 실패는 OutOfMemory(그때 실행 중이던 버퍼는 모두 놓는다).
-    Result<VmCallResult> Call(const BytecodeModule& module, uint32 function,
+    // 반환 버퍼는 먼저 놓는다. 실패: function이 범위 밖이거나 인자 slot 수가 다르거나 import를 아직
+    // 풀지 않았으면(LinkImports) InvalidArgument, stack·버퍼 할당 실패는 OutOfMemory(그때 실행
+    // 중이던 버퍼는 모두 놓는다).
+    Result<VmCallResult> Call(const VmLinkedModule& linked, uint32 function,
                               Span<const uint64> scalars, Span<const uint64> refs,
                               Span<VmBuffer* const> buffers,
                               const VmLimits& limits = VmLimits()) noexcept;
@@ -161,6 +163,13 @@ public:
     // 정규형은 Call의 Scalar 인자와 같은 호출자 책임이다.
     Result<VmBuffer*> NewContainer(VmBufferKind kind, uint32 marker,
                                    Span<const uint64> elements) noexcept;
+
+    // 참조 하나를 더한다(host가 버퍼를 보관할 때 — 6.2절). null이면 아무것도 하지 않는다.
+    void Retain(VmBuffer* buffer) noexcept {
+        if (buffer != nullptr) {
+            ++buffer->references;
+        }
+    }
 
     // 참조 하나를 놓는다(0이면 해제 — 원소의 버퍼도). null이면 아무것도 하지 않는다.
     void Release(VmBuffer* buffer) noexcept;
@@ -203,6 +212,7 @@ private:
     };
 
     struct Frame {
+        const VmLinkedModule* link = nullptr; // 이 frame 함수의 모듈(6.5절)
         uint32 function = 0;
         uint32 pc = 0; // 이 frame으로 돌아왔을 때 실행할 명령의 모듈 단어 번호
         uint32 base[BytecodeBankCount] = {};
@@ -222,7 +232,8 @@ private:
         VmBuffer** b = nullptr;
     };
 
-    Result<void> PushFrame(uint32 function, const uint32 (&base)[BytecodeBankCount]) noexcept;
+    Result<void> PushFrame(const VmLinkedModule& linked, uint32 function,
+                           const uint32 (&base)[BytecodeBankCount]) noexcept;
     Result<VmCallResult> Run(const VmLimits& limits) noexcept;
     Result<VmCallResult> MakeFault(VmFaultKind kind, uint32 word, uint64 steps) noexcept;
     // 실행 중 Buf stack을 모두 놓고 frame을 비운다(fault·실행 끝·할당 실패).
@@ -252,16 +263,17 @@ private:
     // 언어 함수 참조 ref를 창 window로 부른다(VmLibrary.cpp — SparksVm 6a절).
     VmFaultKind CallLanguage(uint32 ref, const Banks& window, uint64 budget,
                              ErrorCode& error) noexcept;
+    // host 명령(GETF·SETF·GETCTX·CALLN·NEWLIT — VmHostCalls.cpp, SparksVm 6.2절)을 실행한다.
+    VmFaultKind CallHost(Opcode op, uint32 word, uint32 extra, const Banks& banks,
+                         ErrorCode& error) noexcept;
+    // handle이 0이 아니고 host가 살아 있다고 답하는지다(SL 4.1절).
+    bool Alive(uint64 handle) noexcept;
     // 오류 코드 code의 Buf Result(값 없음)를 만든다.
     Allocation MakeErrorResult(uint64 code, uint64 budget) noexcept;
-    void Retain(VmBuffer* buffer) noexcept {
-        if (buffer != nullptr) {
-            ++buffer->references;
-        }
-    }
 
     Allocator* allocator_;
     const BytecodeModule* module_ = nullptr;
+    const VmLinkedModule* link_ = nullptr;
     // bank별 레지스터 stack이다. Buf slot은 null이 아니면 참조 하나를 가진다.
     Array<uint64> scalars_;
     Array<uint64> refs_;
@@ -272,8 +284,6 @@ private:
     uint64 liveBuffers_ = 0;
     uint64 liveBytes_ = 0;
     // 언어 함수 묶음(참조 번호별 — VmLibrary가 배치를 정한다)과 그 모듈, Random·로그 상태.
-    Array<uint64> bindings_;
-    const BytecodeModule* boundModule_ = nullptr;
     RandomStream random_{0};
     Array<LogEntry> logs_;
     uint32 droppedLogs_ = 0;

@@ -27,16 +27,17 @@ t14 = "Game.Door"
 t15 = "Tag"
 t16 = "hi"
 t17 = "Optional"
-t18 = "Actor.Location"
-t19 = "sparks 0.4.0"
-t20 = "Main"
+t18 = ">v3"
+t19 = "Actor.Location"
+t20 = "sparks 0.4.0"
+t21 = "Main"
 ref0 = type Array<int>
 ref1 = type Map<string, int>
 ref2 = type Pair type0
 ref3 = struct-field Pair.First field0
 ref4 = struct-field Pair.Second field1
 ref5 = literal Tag "Game.Door"
-ref6 = field Actor.Location
+ref6 = field Actor.Location args ">v3"
 type0 = struct Pair s2 r0 b0
   field0 First s0 x1
   field1 Second s1 x1

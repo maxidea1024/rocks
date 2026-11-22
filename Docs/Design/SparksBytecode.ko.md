@@ -137,7 +137,7 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | | `GETSF.S/R/B` `SETSF.S/R/B` + EXTRA | struct 값(Buf)의 필드 읽기·쓰기(COW) |
 | | `GETCTX` A Bx | Ref A ← 문맥 이름 표[Bx](`World`·`Time`…) |
 | 컨테이너 | `GETE` `SETE` `LEN` `GETKEY` `GETVAL` + EXTRA(key bank·원소 bank·원소 slot 수) | `GETE`는 `T?`를 돌려준다(SL §3.10 인덱스) |
-| 호출 | `CALL` Bx(모듈 함수 표 — 사용자 함수), `CALLV` Bx(open·interface — 실행 중 대상 결정), `CALLN` Bx(import 표의 native 함수), `CALLL` Bx(언어 함수 — 부록 B 번호), `CALLRPC` Bx | 창 base는 함수 표의 bank별 할당 수(`registers`)다. 대기를 만드는 함수의 결과는 Ref 창 0번의 대기 handle. `CALL.MUT`(값을 바꾸는 언어 메서드)는 수신자를 창 0번에서 돌려받고 같은 bank의 결과는 그 다음 자리에서 받는다 |
+| 호출 | `CALL` Bx(모듈 함수 표 — 사용자 함수), `CALLV` Bx(open·interface — 실행 중 대상 결정), `CALLN` Bx(import 표의 native 함수), `CALLL` Bx(언어 함수 — 부록 B 번호), `CALLRPC` Bx | 창 base는 함수 표의 bank별 할당 수(`registers`)다. 대기를 만드는 함수의 결과는 Ref 창 0번의 대기 handle. `CALL.MUT`(값을 바꾸는 언어 메서드)는 수신자를 창 0번에서 돌려받고 같은 bank의 결과는 그 다음 자리에서 받는다. Buf 수신자는 창으로 옮긴다(창에 복사한 뒤 원래 레지스터를 `LOADNULL.B`, 돌려받은 뒤 창 0번을 `LOADNULL.B`) — 참조가 하나여야 COW가 호출마다 복제하지 않는다 |
 | 이벤트 | `EMIT` Bx(이벤트 표) | 대상은 Ref 창 0번(자기 객체면 this), 인자는 그 뒤 |
 | 대기 | `AWAIT` A B + EXTRA(결과 bank·slot 수) | 대기 handle B로 정지, 재개하면 결과를 A에. 블록 끝 명령이며 재개는 다음 명령 |
 | | `AWAITEV` B + EXTRA(이벤트 번호) | 발행자 B의 이벤트를 기다린다 |

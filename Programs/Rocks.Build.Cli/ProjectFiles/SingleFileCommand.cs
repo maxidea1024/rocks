@@ -1,3 +1,5 @@
+using Rocks.Build.Rules;
+
 namespace Rocks.Build.Cli;
 
 /// <summary>
@@ -9,14 +11,12 @@ internal static class SingleFileCommand
     /// <summary>옵션 이름이다(값은 <c>;</c>로 나눈 소스 경로).</summary>
     public const string Option = "files";
 
-    /// <summary>경로 목록을 읽는다. 빈 항목은 건너뛰고, 상대 경로는 기준 디렉터리(엔진 <c>--root</c>, 게임 <c>--project</c>)로 푼다.</summary>
-    internal static string[] Parse(string list, string root) =>
-        [.. list.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(path => Path.GetFullPath(path, root))];
-
     /// <summary>파일 하나 컴파일을 돌리고 컴파일러 출력을 낸다. 모두 성공하면 0, 하나라도 실패하면 1이다.</summary>
-    public static async Task<int> RunAsync(NativeBuildRequest request, string list, string root, CancellationToken cancellationToken)
+    public static async Task<int> RunAsync(NativeBuildRequest request, string list, string root, CancellationToken cancellationToken,
+        Func<string, IReadOnlyList<string>>? compiledBy = null)
     {
-        IReadOnlyList<SingleFileResult> results = await SingleFileCompile.RunAsync(request, Parse(list, root), cancellationToken);
+        IReadOnlyList<SingleFileResult> results = await SingleFileCompile.RunAsync(request, SingleFileCompile.ParseList(list, root), cancellationToken,
+            compiledBy);
         foreach (SingleFileResult result in results)
         {
             Console.Write(result.Process.StdOut);
@@ -28,4 +28,44 @@ internal static class SingleFileCommand
 
         return results.All(result => result.Process.ExitCode == 0) ? 0 : 1;
     }
+
+    /// <summary>
+    /// 엔진 저장소에서 같은 구성으로 그 소스를 컴파일하는 다른 타깃 이름이다(1단계 원천만 컴파일하므로 오류 안내에 쓴다). 다른 타깃마다 IDE 계획을
+    /// 세운다(쓰기 없음) — 실패할 때만 부른다.
+    /// </summary>
+    internal static Func<string, IReadOnlyList<string>> EngineTargets(string root, string rulesPath, string current, NativeToolchain toolchain,
+        NativeConfiguration configuration, EngineVersion engineVersion) => source =>
+    {
+        string platformName = OperatingSystem.IsWindows() ? "windows" : "macos";
+        var listing = new BuildContext(root, EnginePlanning.DefaultOutput(root, platformName, current, configuration), toolchain.Platform,
+            toolchain.Architecture, configuration);
+        var found = new List<string>();
+        foreach (TargetRules target in RuleLoader.LoadAll(rulesPath, listing).Targets.OrderBy(target => target.Name, StringComparer.Ordinal))
+        {
+            if (string.Equals(target.Name, current, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                string output = EnginePlanning.DefaultOutput(root, platformName, target.Name, configuration);
+                var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
+                LoadedRules rules = RuleLoader.Load(rulesPath, target.Name, context);
+                EngineLayout layout = EnginePlanning.Layout(rules, context, root, toolchain, configuration, createDirectories: false);
+                IdePlan plan = IdePlanner.Plan(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output, layout.Metadata.Modules,
+                    layout.BuildRoots, engineVersion, 1));
+                if (plan.Compiles.Any(compile => string.Equals(Path.GetFullPath(compile.Source), source, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+                {
+                    found.Add(target.Name);
+                }
+            }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException)
+            {
+                // 이 구성에서 계획할 수 없는 타깃(플랫폼·플러그인 조건)은 안내에서 뺀다.
+            }
+        }
+
+        return found;
+    };
 }

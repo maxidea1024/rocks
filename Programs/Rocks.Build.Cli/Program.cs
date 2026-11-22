@@ -51,7 +51,7 @@ namespace Rocks.Build.Cli
             if (args.Length == 0)
             {
                 throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, sdk-register, sdk-unregister, associate, new-project, " +
-                    "unity-profile, or projectfiles command.");
+                    "shell-register, shell-unregister, unity-profile, or projectfiles command.");
             }
 
             if (args[0] == UnityProfileCommand.Name)
@@ -83,6 +83,8 @@ namespace Rocks.Build.Cli
                 SdkCommands.Register => new HashSet<string>(["sdk"], StringComparer.Ordinal),
                 SdkCommands.Unregister => new HashSet<string>(["sdk", "id"], StringComparer.Ordinal),
                 SdkCommands.Associate => new HashSet<string>(["project", "sdk", "id", "version"], StringComparer.Ordinal),
+                // .rocksproject 탐색기 메뉴(Docs/Design/ProjectFiles.ko.md 12절).
+                "shell-register" or "shell-unregister" => new HashSet<string>(StringComparer.Ordinal),
                 // 템플릿에서 새 게임 프로젝트를 만든다(Docs/Design/ProjectFiles.ko.md 11.5절).
                 NewProjectCommand.Name => new HashSet<string>(["template", "name", "destination", "sdk", "projectfiles", "compiler"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
@@ -116,6 +118,12 @@ namespace Rocks.Build.Cli
                 return registered != 0 || args[0] != SdkCommands.Associate || !OperatingSystem.IsWindows()
                     ? registered
                     : await GameProjectFiles.RegenerateAsync(options["project"], cancellationToken);
+            }
+
+            if (args[0] is "shell-register" or "shell-unregister")
+            {
+                return OperatingSystem.IsWindows() ? ShellRegistration.Run(args[0], SdkRegistries.Default())
+                    : throw new ArgumentException($"'{args[0]}' registers the Windows Explorer menu and runs on Windows hosts only.");
             }
 
             if (args[0] == NewProjectCommand.Name)
@@ -299,7 +307,8 @@ namespace Rocks.Build.Cli
                 if (options.TryGetValue(SingleFileCommand.Option, out string? files))
                 {
                     int compiled = await SingleFileCommand.RunAsync(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output,
-                        plan.Modules, buildRoots, engineVersion, Jobs(options)), files, root, cancellationToken);
+                        plan.Modules, buildRoots, engineVersion, Jobs(options)), files, root, cancellationToken,
+                        SingleFileCommand.EngineTargets(root, rulesPath, targetName, toolchain, configuration, engineVersion));
                     await evidence.FinishAsync("Single-file compile: no build was run.");
                     return compiled;
                 }

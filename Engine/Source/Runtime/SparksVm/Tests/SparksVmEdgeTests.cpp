@@ -53,7 +53,7 @@ Outcome Convert(ScalarKind from, ScalarKind to, uint64 value) noexcept {
 
     VmExecution execution(allocator);
     const uint64 arguments[] = {value};
-    return Run(execution, assembler.module, 0, Span<const uint64>(arguments, 1));
+    return Run(execution, assembler.Linked(), 0, Span<const uint64>(arguments, 1));
 }
 
 uint64 FloatBits(float value) noexcept {
@@ -82,15 +82,15 @@ TEST(SparksVmEdge_NestedFrames) {
     VmExecution execution(allocator);
     const uint64 zero[] = {0};
     const uint64 one[] = {1};
-    CHECK(Returns(Run(execution, assembler.module, outer, Span<const uint64>(zero, 1)), 127));
-    auto faulted = execution.Call(assembler.module, outer, Span<const uint64>(one, 1), {}, {});
+    CHECK(Returns(Run(execution, assembler.Linked(), outer, Span<const uint64>(zero, 1)), 127));
+    auto faulted = execution.Call(assembler.Linked(), outer, Span<const uint64>(one, 1), {}, {});
     REQUIRE(faulted);
     CHECK(faulted.Value().fault.kind == VmFaultKind::IntegerOverflow);
     CHECK(faulted.Value().fault.function == add); // callee의 자리다
     CHECK(faulted.Value().fault.address == 1);
     CHECK(faulted.Value().steps == 4);
     const uint64 code[] = {5};
-    const Outcome ended = Run(execution, assembler.module, ender, Span<const uint64>(code, 1));
+    const Outcome ended = Run(execution, assembler.Linked(), ender, Span<const uint64>(code, 1));
     CHECK(ended.outcome == VmOutcome::Ended);
     CHECK(ended.value == 5);
     CHECK(ended.steps == 3);
@@ -123,7 +123,7 @@ TEST(SparksVmEdge_NewFramesStartZeroed) {
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
     const uint64 argument[] = {9};
-    CHECK(Returns(Run(execution, assembler.module, main, Span<const uint64>(argument, 1)), 0));
+    CHECK(Returns(Run(execution, assembler.Linked(), main, Span<const uint64>(argument, 1)), 0));
 }
 
 TEST(SparksVmEdge_TryMovesOverlappingTuples) {
@@ -147,12 +147,12 @@ TEST(SparksVmEdge_TryMovesOverlappingTuples) {
         REQUIRE(Verify(assembler));
         VmExecution execution(allocator);
         const uint64 ok[] = {0, Bits(1.0), Bits(2.0), Bits(3.0)};
-        CHECK(Returns(Run(execution, assembler.module, 0, Span<const uint64>(ok, 4)), Bits(1.0)));
+        CHECK(Returns(Run(execution, assembler.Linked(), 0, Span<const uint64>(ok, 4)), Bits(1.0)));
         REQUIRE(execution.ReturnedSlots().Size() == 3);
         CHECK(execution.ReturnedSlots()[1] == Bits(2.0));
         CHECK(execution.ReturnedSlots()[2] == Bits(3.0));
         const uint64 failed[] = {3, Bits(1.0), Bits(2.0), Bits(3.0)};
-        CHECK(Returns(Run(execution, assembler.module, 0, Span<const uint64>(failed, 4)), 3));
+        CHECK(Returns(Run(execution, assembler.Linked(), 0, Span<const uint64>(failed, 4)), 3));
     }
 }
 
@@ -182,7 +182,7 @@ TEST(SparksVmEdge_SwitchCases) {
     VmExecution execution(allocator);
     auto pick = [&](uint64 value) noexcept {
         const uint64 argument[] = {value};
-        return Run(execution, assembler.module, 0, Span<const uint64>(argument, 1));
+        return Run(execution, assembler.Linked(), 0, Span<const uint64>(argument, 1));
     };
     CHECK(Returns(pick(uint64(1) << 63), 1));
     CHECK(Returns(pick(Signed(-1)), 2));
@@ -259,7 +259,7 @@ TEST(SparksVmEdge_TupleFloatComparisons) {
 
         VmExecution execution(allocator);
         const uint64 arguments[] = {left[0], left[1], left[2], right[0], right[1], right[2]};
-        return Run(execution, assembler.module, 0, Span<const uint64>(arguments, 6));
+        return Run(execution, assembler.Linked(), 0, Span<const uint64>(arguments, 6));
     };
     const uint64 nan = 0x7FF8000000000000ull;
     const uint64 a[] = {1, Bits(0.0), Bits(2.0)};
@@ -322,7 +322,7 @@ TEST(SparksVmEdge_CompositeProductOrder) {
     const Quaternion<double> reversed = x * z;
     const uint64 quats[] = {Bits(z.x), Bits(z.y), Bits(z.z), Bits(z.w),
                             Bits(x.x), Bits(x.y), Bits(x.z), Bits(x.w)};
-    REQUIRE(Returns(Run(execution, assembler.module, 0, Span<const uint64>(quats, 8)),
+    REQUIRE(Returns(Run(execution, assembler.Linked(), 0, Span<const uint64>(quats, 8)),
                     Bits(expected.x)));
     const double got[] = {expected.x, expected.y, expected.z, expected.w};
     const double other[] = {reversed.x, reversed.y, reversed.z, reversed.w};
@@ -344,7 +344,7 @@ TEST(SparksVmEdge_CompositeProductOrder) {
         matrices[16 + index] = Bits(right.m[index]);
     }
 
-    REQUIRE(Returns(Run(execution, assembler.module, 1, Span<const uint64>(matrices, 32)),
+    REQUIRE(Returns(Run(execution, assembler.Linked(), 1, Span<const uint64>(matrices, 32)),
                     Bits(product.m[0])));
     differs = false;
     for (uint32 index = 0; index < 16; ++index) {
@@ -371,7 +371,7 @@ TEST(SparksVmEdge_BudgetInsideCallee) {
     // 예산이 CALL에서 끝난다: CALL은 실행하지 않고 그 자리의 fault다.
     limits.instructions = 1;
     auto atCall =
-        execution.Call(assembler.module, caller, Span<const uint64>(argument, 1), {}, {}, limits);
+        execution.Call(assembler.Linked(), caller, Span<const uint64>(argument, 1), {}, {}, limits);
     REQUIRE(atCall);
     CHECK(atCall.Value().fault.function == caller);
     CHECK(atCall.Value().fault.address == 1);
@@ -379,13 +379,13 @@ TEST(SparksVmEdge_BudgetInsideCallee) {
     // callee 안에서 끝난다: 자리는 callee다.
     limits.instructions = 3;
     auto inside =
-        execution.Call(assembler.module, caller, Span<const uint64>(argument, 1), {}, {}, limits);
+        execution.Call(assembler.Linked(), caller, Span<const uint64>(argument, 1), {}, {}, limits);
     REQUIRE(inside);
     CHECK(inside.Value().fault.kind == VmFaultKind::BudgetExceeded);
     CHECK(inside.Value().fault.function == callee);
     CHECK(inside.Value().fault.address == 1);
     limits.instructions = 6;
-    CHECK(Returns(Run(execution, assembler.module, caller, Span<const uint64>(argument, 1),
+    CHECK(Returns(Run(execution, assembler.Linked(), caller, Span<const uint64>(argument, 1),
                       Span<const uint64>(), limits),
                   1));
 }
@@ -403,10 +403,11 @@ TEST(SparksVmEdge_ReuseAfterAllocationFailure) {
     VmExecution execution(allocator);
     const uint64 argument[] = {4};
     allocator.FailOnAttempt(1);
-    auto failed = execution.Call(assembler.module, caller, Span<const uint64>(argument, 1), {}, {});
+    auto failed =
+        execution.Call(assembler.Linked(), caller, Span<const uint64>(argument, 1), {}, {});
     CHECK(!failed);
     allocator.DisableFailure();
-    CHECK(Returns(Run(execution, assembler.module, caller, Span<const uint64>(argument, 1)), 4));
+    CHECK(Returns(Run(execution, assembler.Linked(), caller, Span<const uint64>(argument, 1)), 4));
 }
 
 } // namespace sparks_vm_edge_tests_file

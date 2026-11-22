@@ -62,3 +62,7 @@ fn Checked(n: int): int {
     Assert(n > 0, "n must be positive");
     return n;
 }
+
+fn Pieces(s: string): Array<string> {
+    return s.Split("");
+}

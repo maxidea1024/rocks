@@ -96,7 +96,7 @@ TEST(SparksVmContainer_GrowthAndCopyOnWrite) {
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
     for (uint32 function = 0; function < 2; ++function) {
-        const Outcome outcome = Run(execution, assembler.module, function, Span<const uint64>());
+        const Outcome outcome = Run(execution, assembler.Linked(), function, Span<const uint64>());
         REQUIRE(outcome.outcome == VmOutcome::Returned);
         const VmBuffer* array = execution.ReturnedBuffers()[0];
         REQUIRE(array != nullptr);
@@ -119,7 +119,7 @@ TEST(SparksVmContainer_NestedBuffersAreShared) {
     const uint32 nested = BuildNested(assembler);
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    REQUIRE(Run(execution, assembler.module, nested, Span<const uint64>()).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), nested, Span<const uint64>()).outcome ==
             VmOutcome::Returned);
     const VmBuffer* map = execution.ReturnedBuffers()[0];
     REQUIRE(map != nullptr && map->kind == VmBufferKind::Map);
@@ -155,7 +155,7 @@ TEST(SparksVmContainer_BudgetOnGrowth) {
     VmExecution execution(allocator);
     VmLimits limits;
     limits.memoryBytes = 160; // 빈 배열과 용량 4까지, 8로 늘리는 할당에서 넘는다
-    auto called = execution.Call(assembler.module, 0, Span<const uint64>(), {}, {}, limits);
+    auto called = execution.Call(assembler.Linked(), 0, Span<const uint64>(), {}, {}, limits);
     REQUIRE(called);
     CHECK(called.Value().fault.kind == VmFaultKind::BudgetExceeded);
     CHECK(called.Value().fault.address > 0);
@@ -216,14 +216,14 @@ TEST(SparksVmContainer_EntriesAndMismatchedKinds) {
     VmExecution execution(allocator);
     const uint64 zero[] = {0};
     const uint64 one[] = {1};
-    CHECK(Returns(Run(execution, assembler.module, 0, Span<const uint64>(zero, 1)), 7));
-    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>(one, 1)),
+    CHECK(Returns(Run(execution, assembler.Linked(), 0, Span<const uint64>(zero, 1)), 7));
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, Span<const uint64>(one, 1)),
                  VmFaultKind::IndexOutOfRange));
-    CHECK(Faults(Run(execution, assembler.module, 1, Span<const uint64>(zero, 1)),
+    CHECK(Faults(Run(execution, assembler.Linked(), 1, Span<const uint64>(zero, 1)),
                  VmFaultKind::ContractViolation));
-    CHECK(Faults(Run(execution, assembler.module, 2, Span<const uint64>(zero, 1)),
+    CHECK(Faults(Run(execution, assembler.Linked(), 2, Span<const uint64>(zero, 1)),
                  VmFaultKind::ContractViolation));
-    CHECK(Returns(Run(execution, assembler.module, 3, Span<const uint64>(zero, 1)), 0));
+    CHECK(Returns(Run(execution, assembler.Linked(), 3, Span<const uint64>(zero, 1)), 0));
     REQUIRE(execution.ReturnedSlots().Size() == 3);
     CHECK(execution.ReturnedSlots()[1] == 0);
     CHECK(execution.ReturnedSlots()[2] == 0);
@@ -266,9 +266,9 @@ TEST(SparksVmContainer_LayoutMismatchAndValueReplacement) {
     assembler.End();
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>()),
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, Span<const uint64>()),
                  VmFaultKind::ContractViolation));
-    REQUIRE(Run(execution, assembler.module, 1, Span<const uint64>()).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), 1, Span<const uint64>()).outcome ==
             VmOutcome::Returned);
     const VmBuffer* result = execution.ReturnedBuffers()[0];
     REQUIRE(result != nullptr && result->count == 1);
@@ -307,10 +307,10 @@ TEST(SparksVmContainer_CallTakesPreviousReturn) {
     auto text = execution.NewString("kept");
     REQUIRE(text);
     VmBuffer* const first[] = {text.Value()};
-    REQUIRE(execution.Call(assembler.module, 0, {}, {}, Span<VmBuffer* const>(first, 1)));
+    REQUIRE(execution.Call(assembler.Linked(), 0, {}, {}, Span<VmBuffer* const>(first, 1)));
     execution.Release(text.Value()); // 이제 반환만 참조를 가진다
     for (uint32 round = 0; round < 3; ++round) {
-        auto again = execution.Call(assembler.module, 0, {}, {}, execution.ReturnedBuffers());
+        auto again = execution.Call(assembler.Linked(), 0, {}, {}, execution.ReturnedBuffers());
         REQUIRE(again);
         CHECK(VmStringOf(execution.ReturnedBuffers()[0]) == "kept");
     }
@@ -338,7 +338,7 @@ TEST(SparksVmContainer_AllocationFailureEverywhere) {
                 }
 
                 auto called =
-                    execution.Call(assembler.module, function, Span<const uint64>(), {}, {});
+                    execution.Call(assembler.Linked(), function, Span<const uint64>(), {}, {});
                 const uint64 used = allocator.Attempts();
                 allocator.DisableFailure();
                 if (failAt == 0) {

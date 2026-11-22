@@ -34,6 +34,7 @@ internal static class IdeScriptsTests
         }
 
         await CleanBoundariesAsync(repository);
+        await SingleFileRejectionsAsync(repository);
         await SetupSelfTestAsync(repository);
         await SdkScriptsAsync(repository);
         await LockOrderAsync(repository);
@@ -249,6 +250,27 @@ internal static class IdeScriptsTests
 
         await Cli("projectfiles", "--root", repository);
         Require(!Stale(await Cli(Build())), "project files are stale after removing the probe and regenerating");
+    }
+
+    // --files는 build 전용이고 --plan-only on과 함께 쓰지 않는다(출력을 만들기 전에 거부, Docs/Design/ProjectFiles.ko.md 7.4절).
+    private static async Task SingleFileRejectionsAsync(string repository)
+    {
+        string cli = Path.Combine(repository, "out", "dotnet", "bin", "Rocks.Build.Cli", "Debug", "net10.0", "Rocks.Build.Cli.dll");
+        string source = Path.Combine(repository, "Programs", SmallTarget, "Private", "Main.cpp");
+        foreach ((string[] arguments, string expected) in new (string[], string)[]
+                 {
+                     (["test", "--root", repository, "--target", SmallTarget, "--files", source], "with 'build' only"),
+                     (["build", "--root", repository, "--target", SmallTarget, "--files", source, "--plan-only", "on"], "with 'build' only"),
+                     (["sdk", "--root", repository, "--target", "Engine", "--files", source, "--destination", Path.Combine(repository, "out", "never-sdk")],
+                         "--files")
+                 })
+        {
+            var result = await ProcessRunner.RunAsync(new("dotnet", [cli, .. arguments], repository));
+            Require(result.ExitCode != 0 && (result.StdOut + result.StdErr).Contains(expected, StringComparison.Ordinal),
+                $"{arguments[0]} accepted --files: " + result.StdOut + result.StdErr);
+        }
+
+        Require(!Directory.Exists(Path.Combine(repository, "out", "never-sdk")), "a rejected sdk --files wrote a destination");
     }
 
     // 설치 마법사 셀프 테스트를 CI와 같은 -Command 호출과 -File 호출로, PowerShell 7과 Windows PowerShell 5.1 모두에서 돌린다. -Command는 스크립트를

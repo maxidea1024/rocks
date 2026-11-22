@@ -62,7 +62,7 @@ TEST(SparksVmStruct_FieldsAndCopyOnWrite) {
     const uint32 function = BuildPair(assembler, type);
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    REQUIRE(Run(execution, assembler.module, function, Span<const uint64>()).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), function, Span<const uint64>()).outcome ==
             VmOutcome::Returned);
     const VmBuffer* pair = execution.ReturnedBuffers()[0];
     REQUIRE(pair != nullptr && pair->kind == VmBufferKind::Struct);
@@ -152,26 +152,26 @@ TEST(SparksVmStruct_BufferResults) {
         const VmBuffer* result = execution.ReturnedBuffers()[0];
         return result == nullptr ? NumericLimits<uint64>::Max() : Payload(result)[0];
     };
-    REQUIRE(Run(execution, assembler.module, produce, Span<const uint64>(ok, 1)).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), produce, Span<const uint64>(ok, 1)).outcome ==
             VmOutcome::Returned);
     CHECK(code() == 0);
-    REQUIRE(Run(execution, assembler.module, produce, Span<const uint64>(bad, 1)).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), produce, Span<const uint64>(bad, 1)).outcome ==
             VmOutcome::Returned);
     CHECK(code() == 3); // case 2 + 1
-    REQUIRE(Run(execution, assembler.module, chain, Span<const uint64>(ok, 1)).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), chain, Span<const uint64>(ok, 1)).outcome ==
             VmOutcome::Returned);
     CHECK(code() == 0);
     CHECK(VmStringOf(reinterpret_cast<const VmBuffer*>(
               static_cast<usize>(Payload(execution.ReturnedBuffers()[0])[1]))) == "v");
-    REQUIRE(Run(execution, assembler.module, chain, Span<const uint64>(bad, 1)).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), chain, Span<const uint64>(bad, 1)).outcome ==
             VmOutcome::Returned);
     CHECK(code() == 3);
-    CHECK(Returns(Run(execution, assembler.module, narrow, Span<const uint64>(bad, 1)), 3));
+    CHECK(Returns(Run(execution, assembler.Linked(), narrow, Span<const uint64>(bad, 1)), 3));
     CHECK(execution.ReturnedSlots()[1] == 0);
-    REQUIRE(Run(execution, assembler.module, grow, Span<const uint64>(bad, 1)).outcome ==
+    REQUIRE(Run(execution, assembler.Linked(), grow, Span<const uint64>(bad, 1)).outcome ==
             VmOutcome::Returned);
     CHECK(code() == 2);
-    const Outcome stopped = Run(execution, assembler.module, stop, Span<const uint64>(bad, 1));
+    const Outcome stopped = Run(execution, assembler.Linked(), stop, Span<const uint64>(bad, 1));
     CHECK(stopped.outcome == VmOutcome::Ended);
     CHECK(stopped.value == 3);
     execution.ReleaseReturned();
@@ -261,9 +261,9 @@ TEST(SparksVmStruct_MismatchedFieldsAndPlaceholders) {
     assembler.End();
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>()),
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, Span<const uint64>()),
                  VmFaultKind::ContractViolation));
-    CHECK(Faults(Run(execution, assembler.module, 1, Span<const uint64>()),
+    CHECK(Faults(Run(execution, assembler.Linked(), 1, Span<const uint64>()),
                  VmFaultKind::ContractViolation));
     CHECK(execution.LiveBuffers() == 0);
 }
@@ -285,7 +285,8 @@ TEST(SparksVmStruct_AllocationFailureEverywhere) {
                 allocator.FailOnAttempt(failAt);
             }
 
-            auto called = execution.Call(assembler.module, function, Span<const uint64>(), {}, {});
+            auto called =
+                execution.Call(assembler.Linked(), function, Span<const uint64>(), {}, {});
             const uint64 used = allocator.Attempts();
             allocator.DisableFailure();
             if (failAt == 0) {
