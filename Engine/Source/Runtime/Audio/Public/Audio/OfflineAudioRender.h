@@ -21,7 +21,7 @@
 //   (void)renderer.Value().Render(Span<float>(output), 4);  // 4블록
 namespace rocks::audio {
 
-class OfflineAudioRender {
+class ROCKS_AUDIO_API OfflineAudioRender {
 public:
     // 믹서를 만든다(AudioMixer::TryCreate와 같은 오류).
     [[nodiscard]] static Result<OfflineAudioRender> TryCreate(const AudioMixerConfig& config,

@@ -36,7 +36,7 @@ public:
 };
 
 // 메모리 byte의 범위 읽기다(bytes는 reader보다 오래 살아야 한다).
-class NuggetMemoryReader final : public NuggetRangeReader {
+class ROCKS_ASSETNUGGET_API NuggetMemoryReader final : public NuggetRangeReader {
 public:
     explicit NuggetMemoryReader(Span<const uint8> bytes) noexcept : bytes_(bytes) {
     }
@@ -80,15 +80,17 @@ struct NuggetFilePlan {
 // 쓰기 계획을 만든다(값 저장 byte를 해시하고 조각 해시 표를 만든다 — 값 byte는 복사하지 않는다).
 // values는 ValueId 오름차순이어야 한다. 오류: 정규 형식 위반(bucket·순서·한도·Identity의 크기
 // 불일치 등) InvalidArgument, Record 1 MiB 초과 CapacityExceeded, 할당 실패.
-Result<NuggetFilePlan> PlanNuggetFile(Allocator& allocator, StringView bucket,
-                                      const Sha256Digest& key, Span<const NuggetStoredValue> values,
-                                      Span<const NuggetInput> inputs,
-                                      Span<const uint8> meta) noexcept;
+ROCKS_ASSETNUGGET_API Result<NuggetFilePlan> PlanNuggetFile(Allocator& allocator, StringView bucket,
+                                                            const Sha256Digest& key,
+                                                            Span<const NuggetStoredValue> values,
+                                                            Span<const NuggetInput> inputs,
+                                                            Span<const uint8> meta) noexcept;
 
 // 계획대로 파일 byte를 out 끝에 붙인다(values는 계획을 만든 값과 같아야 한다 — 크기가 다르면
 // InvalidArgument). 할당 실패는 OutOfMemory(out은 정해지지 않는다).
-Result<void> AppendNuggetFile(const NuggetFilePlan& plan, Span<const NuggetStoredValue> values,
-                              Array<uint8>& out) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> AppendNuggetFile(const NuggetFilePlan& plan,
+                                                    Span<const NuggetStoredValue> values,
+                                                    Array<uint8>& out) noexcept;
 
 // 연 파일이다: Record, 논리 digest, 값마다 파일 안 위치와 조각 해시 표(없으면 빈 배열).
 struct NuggetFileView {
@@ -106,25 +108,30 @@ struct NuggetFileView {
 // 크기 = 부분 합, 조각 해시 표마다 크기(⌈storedSize / 1 MiB⌉ × 32)와 ChunkTableHash를 검증한다(값
 // byte는 읽지 않는다). 오류: 손상(형식·해시·크기) InvalidArgument, 다른 파일 버전·더 새 Record
 // schema 버전 Unsupported(손상이 아니다 — 지우지 않는다), 읽기 IO 오류, 할당 실패.
-Result<NuggetFileView> OpenNuggetFile(Allocator& allocator, NuggetRangeReader& reader) noexcept;
+ROCKS_ASSETNUGGET_API Result<NuggetFileView> OpenNuggetFile(Allocator& allocator,
+                                                            NuggetRangeReader& reader) noexcept;
 
 // index번째 값의 저장 byte를 out 끝에 붙이고 ContentHash를 검증한다. 오류: index 범위 밖
 // InvalidArgument, 해시 불일치 InvalidArgument(out은 정해지지 않는다), 읽기 IO 오류, 할당 실패.
-Result<void> ReadNuggetValue(const NuggetFileView& view, NuggetRangeReader& reader, usize index,
-                             Array<uint8>& out) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> ReadNuggetValue(const NuggetFileView& view,
+                                                   NuggetRangeReader& reader, usize index,
+                                                   Array<uint8>& out) noexcept;
 
 // index번째 값의 저장 byte를 buffer 크기씩 흘려 읽어 ContentHash만 검증한다(값을 메모리에 올리지
 // 않는다 — 값 하나는 NuggetValueMaxBytes까지 크다). 예: 같은 digest 기존 항목의 Exists 판정.
 // buffer는 비어 있지 않아야 하고 내용은 호출 뒤 정해지지 않는다. 오류: index 범위 밖·빈 buffer
 // InvalidArgument, 해시 불일치 InvalidArgument, 읽기 IO 오류. 할당하지 않는다.
-Result<void> VerifyNuggetValue(const NuggetFileView& view, NuggetRangeReader& reader, usize index,
-                               Span<uint8> buffer) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> VerifyNuggetValue(const NuggetFileView& view,
+                                                     NuggetRangeReader& reader, usize index,
+                                                     Span<uint8> buffer) noexcept;
 
 // 저장 byte를 원본으로 풀어 out 끝에 붙이고 RawHash·rawSize를 검증한다(Identity는 복사, Rcbk는 블록
 // 컨테이너 해제와 IndexHash 검증). 행은 먼저 IsValidNuggetValueRow로 본다(검증되지 않은 행도
 // 받는다). 오류: 정규 형식이 아닌 행·손상 InvalidArgument, Codec은 Unsupported(계약 — 그 코덱
 // 없음), 할당 실패.
-Result<void> DecodeNuggetValue(Allocator& allocator, const NuggetValueRow& row,
-                               Span<const uint8> stored, Array<uint8>& out) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> DecodeNuggetValue(Allocator& allocator,
+                                                     const NuggetValueRow& row,
+                                                     Span<const uint8> stored,
+                                                     Array<uint8>& out) noexcept;
 
 } // namespace rocks

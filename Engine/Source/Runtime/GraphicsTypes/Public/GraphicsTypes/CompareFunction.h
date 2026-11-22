@@ -38,7 +38,7 @@ constexpr bool IsValidCompareFunction(CompareFunction function) noexcept {
 
 // 진단·도구용 이름이다(열거자 이름, 범위 밖은 "Unknown"). Parse는 대소문자를 무시하며 모르는
 // 이름은 InvalidArgument다.
-const char* CompareFunctionName(CompareFunction function) noexcept;
-Result<CompareFunction> ParseCompareFunction(StringView name) noexcept;
+ROCKS_GRAPHICSTYPES_API const char* CompareFunctionName(CompareFunction function) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<CompareFunction> ParseCompareFunction(StringView name) noexcept;
 
 } // namespace rocks::graphics

@@ -23,7 +23,7 @@ inline constexpr uint32 NuggetSccMaxParts = 1u << NuggetSccPartBits;
 inline constexpr usize NuggetSccMemberBytes = 16;
 
 // 값 번호다. member < NuggetSccMaxMembers, part < NuggetSccMaxParts(넘으면 assert — 호출자 결함).
-uint32 NuggetSccValueId(uint32 member, uint32 part) noexcept;
+ROCKS_ASSETNUGGET_API uint32 NuggetSccValueId(uint32 member, uint32 part) noexcept;
 
 // 값 번호의 구성원 순번이다.
 constexpr uint32 NuggetSccMemberOf(uint32 valueId) noexcept {
@@ -32,10 +32,12 @@ constexpr uint32 NuggetSccMemberOf(uint32 valueId) noexcept {
 
 // 구성원 목록을 meta로 쓴다(meta를 비우고 채운다). 오류: 빈 목록·null·중복 InvalidArgument,
 // NuggetSccMaxMembers 초과 CapacityExceeded, 할당 실패.
-Result<void> WriteNuggetSccMeta(Span<const AssetId> members, Array<uint8>& meta) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> WriteNuggetSccMeta(Span<const AssetId> members,
+                                                      Array<uint8>& meta) noexcept;
 
 // meta에서 asset의 순번을 찾는다. 오류: 크기가 16 byte의 배수가 아니거나 구성원이 상한을 넘음
 // InvalidArgument, 없으면 NotFound.
-Result<uint32> FindNuggetSccMember(Span<const uint8> meta, AssetId asset) noexcept;
+ROCKS_ASSETNUGGET_API Result<uint32> FindNuggetSccMember(Span<const uint8> meta,
+                                                         AssetId asset) noexcept;
 
 } // namespace rocks

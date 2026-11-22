@@ -118,7 +118,7 @@ struct NuggetCacheStats {
     uint64 pinnedKeys = 0;
 };
 
-class NuggetCache {
+class ROCKS_ASSETNUGGET_API NuggetCache {
 public:
     // files·clock은 캐시보다 오래 살아야 한다.
     NuggetCache(Allocator& allocator, platform::FileSystem& files, NuggetClock& clock,

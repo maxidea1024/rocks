@@ -45,7 +45,7 @@ protected:
 };
 
 // platform::DirectoryWatcher로 만든 원천이다.
-class PlatformAssetChangeSource final : public AssetChangeSource {
+class ROCKS_ASSETDATABASE_API PlatformAssetChangeSource final : public AssetChangeSource {
 public:
     Result<void> Open(StringView root) noexcept override;
     Result<void> Poll(platform::DirectoryChangeVisitor visitor, void* context) noexcept override;
@@ -59,7 +59,7 @@ private:
     platform::DirectoryWatcher watcher_;
 };
 
-class AssetIndexWatch {
+class ROCKS_ASSETDATABASE_API AssetIndexWatch {
 public:
     // index·files·source·clock은 감시보다 오래 산다. options는 복사한다(customVersions 같은 span이
     // 가리키는 것은 호출자가 살려 둔다).

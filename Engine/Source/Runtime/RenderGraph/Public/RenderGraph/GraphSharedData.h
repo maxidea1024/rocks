@@ -19,7 +19,7 @@ struct GraphSharedDataType;
 namespace detail {
 
 // 등록 타입마다 프로세스 안 번호를 하나 준다(그 타입의 Index를 처음 부를 때, 스레드 안전).
-uint32 AllocateGraphSharedDataIndex() noexcept;
+ROCKS_RENDERGRAPH_API uint32 AllocateGraphSharedDataIndex() noexcept;
 
 } // namespace detail
 
@@ -67,7 +67,7 @@ uint32 AllocateGraphSharedDataIndex() noexcept;
 //   const ShadowSetup* shadows = graph.SharedData().Require<ShadowSetup>();
 //
 // 스레드: 그래프와 같은 스레드(렌더 lane) 전용이다.
-class GraphSharedData {
+class ROCKS_RENDERGRAPH_API GraphSharedData {
 public:
     GraphSharedData(const GraphSharedData&) = delete;
     GraphSharedData& operator=(const GraphSharedData&) = delete;
@@ -134,7 +134,7 @@ struct GraphViewKey {
 };
 
 // GraphViewTable의 형식 지운 저장소다(값은 자명하게 복사되는 byte로 그래프 프레임 arena에 둔다).
-class GraphViewTableStorage {
+class ROCKS_RENDERGRAPH_API GraphViewTableStorage {
 public:
     GraphViewTableStorage(const GraphViewTableStorage&) = delete;
     GraphViewTableStorage& operator=(const GraphViewTableStorage&) = delete;

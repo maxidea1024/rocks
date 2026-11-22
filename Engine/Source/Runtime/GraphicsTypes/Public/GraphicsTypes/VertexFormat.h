@@ -81,19 +81,19 @@ enum class VertexShaderType : uint8 {
 };
 
 // 형식의 byte 크기다. 모르는 값은 0이다.
-uint32 VertexFormatSize(VertexFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API uint32 VertexFormatSize(VertexFormat format) noexcept;
 
 // 형식의 성분 수(1–4)다. 모르는 값은 0이다.
-uint32 VertexFormatComponents(VertexFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API uint32 VertexFormatComponents(VertexFormat format) noexcept;
 
 // 형식의 셰이더 타입 계열이다. 모르는 값은 Float다(IsValidVertexFormat으로 먼저 확인한다).
-VertexShaderType VertexFormatShaderType(VertexFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API VertexShaderType VertexFormatShaderType(VertexFormat format) noexcept;
 
 // 정규화 정수 형식(snorm·unorm·10:10:10:2)인지다.
-bool IsNormalizedVertexFormat(VertexFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API bool IsNormalizedVertexFormat(VertexFormat format) noexcept;
 
 // 번호표 안의 값인지다.
-bool IsValidVertexFormat(VertexFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API bool IsValidVertexFormat(VertexFormat format) noexcept;
 
 // 고정 번호다(바이너리 직렬화).
 constexpr uint32 VertexFormatNumber(VertexFormat format) noexcept {
@@ -101,15 +101,15 @@ constexpr uint32 VertexFormatNumber(VertexFormat format) noexcept {
 }
 
 // 번호의 형식이다. 실패: 번호표 밖 InvalidArgument.
-Result<VertexFormat> VertexFormatFromNumber(uint32 number) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<VertexFormat> VertexFormatFromNumber(uint32 number) noexcept;
 
 // "Byte4Snorm" 같은 안정 이름이다(텍스트·JSON 직렬화). 모르는 값은 "Unknown"이다.
-const char* VertexFormatName(VertexFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API const char* VertexFormatName(VertexFormat format) noexcept;
 
 // 안정 이름의 형식이다(대소문자 구분). 실패: 모르는 이름 NotFound.
-Result<VertexFormat> ParseVertexFormatName(StringView name) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<VertexFormat> ParseVertexFormatName(StringView name) noexcept;
 
 // 셰이더 타입 계열 이름("float"·"int"·"uint")이다(진단 문자열).
-const char* VertexShaderTypeName(VertexShaderType type) noexcept;
+ROCKS_GRAPHICSTYPES_API const char* VertexShaderTypeName(VertexShaderType type) noexcept;
 
 } // namespace rocks::graphics

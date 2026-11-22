@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/TypeKey.h>
 #include <Config/CVarBuilder.h>
 
 // 콘솔 명령이다(Docs/Design/CVarSystem.ko.md 4.2·13·15절 — CVR6, UE FAutoConsoleCommand 대응).
@@ -36,10 +37,6 @@ inline constexpr usize MaxCommandArguments = 8;
 
 namespace detail {
 
-// 명령 대상 타입의 표지다(타입마다 주소가 하나 — BindCommand가 기록하고 Target<T>가 확인한다).
-template <class T>
-inline constexpr char TargetTypeTag = 0;
-
 // 명령 대상을 묶을 때와 다른 타입으로 꺼냈다(Fatal).
 [[noreturn]] ROCKS_CONFIG_API void FatalTargetType(StringView command) noexcept;
 
@@ -69,7 +66,7 @@ public:
     // Fatal이다(잘못된 형 변환을 조용히 넘기지 않는다).
     template <class T>
     T* Target() const noexcept {
-        if (target_ != nullptr && targetType_ != &detail::TargetTypeTag<T>) {
+        if (target_ != nullptr && targetType_ != TypeKeyOf<T>()) {
             detail::FatalTargetType(command_);
         }
 

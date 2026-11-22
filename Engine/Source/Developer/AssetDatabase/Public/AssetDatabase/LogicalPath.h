@@ -60,10 +60,10 @@ struct LogicalPathFailure {
 };
 
 // 사유 이름이다(예: TooLong → "TooLong" — 진단·로그용, 정적 수명). 모르는 값은 "Unknown"이다.
-const char* LogicalPathErrorName(LogicalPathError error) noexcept;
+ROCKS_ASSETDATABASE_API const char* LogicalPathErrorName(LogicalPathError error) noexcept;
 
 // 검증·정규화한 논리 경로다. 값 타입이고 문자열은 allocator가 가진다.
-class LogicalPath {
+class ROCKS_ASSETDATABASE_API LogicalPath {
 public:
     LogicalPath(LogicalPath&&) noexcept = default;
     LogicalPath& operator=(LogicalPath&&) noexcept = default;
@@ -101,8 +101,8 @@ private:
     // 검증한 경로다). 옮겨 간 값은 비어 있고 접근자는 빈 view를 준다.
     explicit LogicalPath(Allocator& allocator) noexcept;
 
-    friend Result<LogicalPath> ParseLogicalPath(Allocator&, StringView,
-                                                LogicalPathFailure*) noexcept;
+    friend ROCKS_ASSETDATABASE_API Result<LogicalPath>
+    ParseLogicalPath(Allocator&, StringView, LogicalPathFailure*) noexcept;
 
     String text_;
     String key_;
@@ -111,7 +111,8 @@ private:
 
 // text를 규칙대로 검사·정규화한다. 오류: 규칙 위반 InvalidArgument(failure에 사유), 할당 실패는 그
 // 오류(failure는 None).
-Result<LogicalPath> ParseLogicalPath(Allocator& allocator, StringView text,
-                                     LogicalPathFailure* failure = nullptr) noexcept;
+ROCKS_ASSETDATABASE_API Result<LogicalPath>
+ParseLogicalPath(Allocator& allocator, StringView text,
+                 LogicalPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

@@ -33,7 +33,7 @@ inline constexpr double MaxFrameRatio = 100.0;
 // 한계다.
 inline constexpr uint32 MaxRatioInterpFrames = 1u << 20;
 
-class LinearResampler {
+class ROCKS_AUDIO_API LinearResampler {
 public:
     // channels는 1–MaxOutputChannels, frameRatio는 유한하고 [MinFrameRatio, MaxFrameRatio]여야
     // 한다. 밖이면 InvalidArgument. 위치는 0, 직전 frame은 0이다.

@@ -112,7 +112,7 @@ private:
     uint64 serial_ = 0; // 계획 때 session의 다음 instance 생성 번호(낡은 계획 판정)
 };
 
-class VmSession final {
+class ROCKS_SPARKSVM_API VmSession final {
 public:
     VmSession(Allocator& allocator, VmHost* host) noexcept;
     // 남은 instance를 모두 Detach한다(CloseSession — 실행 문맥 ledger가 0이 된다).

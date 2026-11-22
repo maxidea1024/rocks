@@ -72,8 +72,9 @@ struct DependencyUse {
 // EditorOnly다. soft 계열도 같다(Soft·EditorOnly). 두 계열이 모두 EditorOnly면 EditorOnly 항목
 // 하나다. required는 그 항목의 종류를 정한 쓰임들의 OR이다. self(자기 에셋)는 넣지 않는다. 결과는
 // (assetId, kind) 순이며 out에 붙인다(expectedType은 0 — writer가 Hard에 나중에 채운다).
-Result<void> MergeDependencyUses(Allocator& scratch, Span<const DependencyUse> uses, AssetId self,
-                                 Array<PackageDependencyEntry>& out) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+MergeDependencyUses(Allocator& scratch, Span<const DependencyUse> uses, AssetId self,
+                    Array<PackageDependencyEntry>& out) noexcept;
 
 // 빈 BulkDataRef(bulkId 0)는 rawBytes 0·SHA-256 0이어야 한다(AS 5.7절 14 — writer는 저장을,
 // 로드는 Objects 손상으로 거부한다).
@@ -114,9 +115,11 @@ bool Utf8ByteLess(StringView left, StringView right) noexcept;
 // WriteCookedManifest의 본문이다(AS 10.1절 7). maxFileBytes는 출력 파일(CRC 칸 포함) byte 상한이고
 // 넘으면 CapacityExceeded(진단 None, out 그대로)다. 공개 함수는 CookedManifestMaxFileBytes를 넘긴다
 // — 시험이 1 GiB 모델 없이 상한 경계를 보도록 상한을 인자로 받는다.
-Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedManifest& manifest,
-                                          uint64 maxFileBytes, Array<uint8>& out,
-                                          AssetDiagnostic* failure) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void> WriteCookedManifestWithLimit(Allocator& allocator,
+                                                                 const CookedManifest& manifest,
+                                                                 uint64 maxFileBytes,
+                                                                 Array<uint8>& out,
+                                                                 AssetDiagnostic* failure) noexcept;
 
 // (assetId, kind) 정렬 비교다.
 inline bool DependencyLess(const PackageDependencyEntry& left,

@@ -1482,6 +1482,12 @@ struct StageRecorder final : public EngineLoopHooks, public EngineClient {
     }
 };
 
+// 단계 이름의 내용이 같은가다. 이름 상수(inline constexpr char[])는 Modular에서 실행 이미지마다
+// 사본이라 주소가 다르므로 내용을 비교한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8e).
+bool SameStage(const char* actual, const char* expected) noexcept {
+    return actual != nullptr && strcmp(actual, expected) == 0;
+}
+
 void RequestExitFromOtherThread(void* engine) noexcept {
     static_cast<Engine*>(engine)->RequestExit();
 }
@@ -1526,14 +1532,14 @@ TEST(Engine_MarksRunStagesForCrashRecords) {
         config.client = &recorder;
         Engine engine(allocator);
         REQUIRE(engine.Initialize(config));
-        CHECK(recorder.atStart == EngineStageInitialize);
-        CHECK(platform::CurrentRunStage() == EngineStageReady);
+        CHECK(SameStage(recorder.atStart, EngineStageInitialize));
+        CHECK(SameStage(platform::CurrentRunStage(), EngineStageReady));
         CHECK(platform::CurrentRunPhase() == platform::RunPhase::Running);
         REQUIRE(engine.Run());
-        CHECK(recorder.inFrame == EngineStageRun);
+        CHECK(SameStage(recorder.inFrame, EngineStageRun));
         REQUIRE(engine.Shutdown());
-        CHECK(recorder.inShutdown == EngineStageShutdown);
-        CHECK(platform::CurrentRunStage() == EngineStageStopped);
+        CHECK(SameStage(recorder.inShutdown, EngineStageShutdown));
+        CHECK(SameStage(platform::CurrentRunStage(), EngineStageStopped));
         CHECK(platform::CurrentRunPhase() == platform::RunPhase::Shutdown);
     }
 

@@ -44,7 +44,7 @@ concept RenderTransferable = RenderTransferRegistered<T> && !IsReferenceV<T> && 
 namespace detail {
 
 // 스키마에 Object 참조·WeakObjectRef 필드가 없으면 true다(중첩 struct 안은 보지 않는다).
-bool SchemaHasNoObjectReferences(const TypeSchema& schema) noexcept;
+ROCKS_RENDERBASE_API bool SchemaHasNoObjectReferences(const TypeSchema& schema) noexcept;
 
 } // namespace detail
 

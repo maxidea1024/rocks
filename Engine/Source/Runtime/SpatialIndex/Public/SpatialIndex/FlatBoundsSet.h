@@ -130,8 +130,8 @@ struct FlatPagePlane {
 
 // 평면을 타일 원점 origin, page 반경 radius의 page로 옮기고 δ를 계산한다(6.2절 식). 시험이 초과
 // 띠를 판정할 때도 이 함수의 δ를 쓴다.
-FlatPagePlane PreparePagePlane(const Plane<double>& plane, const Vec3d& origin,
-                               float radius) noexcept;
+ROCKS_SPATIALINDEX_API FlatPagePlane PreparePagePlane(const Plane<double>& plane,
+                                                      const Vec3d& origin, float radius) noexcept;
 
 } // namespace detail
 
@@ -194,7 +194,7 @@ FlatPagePlane PreparePagePlane(const Plane<double>& plane, const Vec3d& origin,
 //           return QueryControl::Continue;
 //       });
 //   }
-class FlatBoundsSet {
+class ROCKS_SPATIALINDEX_API FlatBoundsSet {
 public:
     // 설정을 검사하고 빈 집합을 만든다. 저장소는 첫 변경에서 잡는다. 오류(InvalidArgument):
     // FlatBoundsConfig의 범위 위반.
@@ -350,7 +350,7 @@ private:
 
 // 읽기 단계의 질의 창구다. FlatBoundsReadScope에서만 얻으며 그 범위가 살아 있는 동안만 쓴다. 복사해
 // 여러 스레드에 넘겨도 된다.
-class FlatBoundsReader {
+class ROCKS_SPATIALINDEX_API FlatBoundsReader {
 public:
     FlatBoundsReader(const FlatBoundsReader&) noexcept = default;
     FlatBoundsReader& operator=(const FlatBoundsReader&) noexcept = default;

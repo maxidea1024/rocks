@@ -62,7 +62,7 @@ protected:
 //   불린다.
 // - 소멸 전에 StopWatcher와 Close를 부른다(소멸자가 대신하지만 관찰 스레드 Join이 끝나지 않을 수
 //   있으므로 모든 제출이 끝난 뒤에 소멸시킨다).
-class FenceTimeline {
+class ROCKS_GRAPHICS_API FenceTimeline {
 public:
     FenceTimeline(Allocator& allocator, uint64 deviceEpoch, QueueKind queue) noexcept;
     ~FenceTimeline() noexcept;
@@ -164,7 +164,7 @@ private:
 // compute queue가 없는 장치(D3D11·OpenGL ES)의 Device::QueueWait다. graphics 지점끼리만 받고 할
 // 일이 없다(같은 queue는 제출 순서). 실패: AsyncCompute 쪽 Unsupported, 그 밖은
 // timeline.IsComplete의 인자 오류(WrongContext·InvalidArgument·Destroyed).
-Result<void> SingleQueueWait(const FenceTimeline& timeline, QueueKind queue,
-                             GpuFencePoint point) noexcept;
+ROCKS_GRAPHICS_API Result<void> SingleQueueWait(const FenceTimeline& timeline, QueueKind queue,
+                                                GpuFencePoint point) noexcept;
 
 } // namespace rocks::graphics

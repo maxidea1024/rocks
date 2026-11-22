@@ -87,6 +87,10 @@ public abstract class TestsModule : ModuleRules
 
     protected abstract string ExecutableName { get; }
 
+    // Whether the engine layer runner also runs the PluginTestModules tests (and links those plugin modules). The Modular engine runner does not:
+    // Modular targets cannot enable plugins until the plugin binary manifest (Docs/Design/ModuleLoader.ko.md ML5, BuildTargets.ko.md BD41).
+    protected virtual bool PluginTests => Layer == TestLayer.Engine;
+
     public override NativeModuleInput Configure(BuildContext context)
     {
         const string support = "Core/Source/Developer/TestSupport";
@@ -103,7 +107,11 @@ public abstract class TestsModule : ModuleRules
         {
             directories.AddRange(EngineTestModules.Select(module => $"Engine/Source/{module}/Tests")
                 .Where(directory => Directory.Exists(context.PathInRoot(directory))));
-            directories.AddRange(PluginTestModules.Select(module => $"{PluginSourceDirectory(module)}/{PluginModuleName(module)}/Tests"));
+            if (PluginTests)
+            {
+                directories.AddRange(PluginTestModules.Select(module => $"{PluginSourceDirectory(module)}/{PluginModuleName(module)}/Tests"));
+            }
+
             directories.Add("Programs/FoundationTests/Engine");
         }
 
@@ -117,7 +125,7 @@ public abstract class TestsModule : ModuleRules
             TestLayer.Core => ["Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules],
             TestLayer.Foundation => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules],
             _ => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules,
-                .. EngineTestDependencies, .. PluginTestModules.Select(PluginModuleName)]
+                .. EngineTestDependencies, .. (PluginTests ? PluginTestModules.Select(PluginModuleName).ToArray() : Array.Empty<string>())]
         };
 
         // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
@@ -141,7 +149,7 @@ public abstract class TestsModule : ModuleRules
             // nested working copies do not enter the include inventory).
             PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public"),
                 .. (Layer == TestLayer.Engine ? [context.PathInRoot("Engine/Source/Runtime")] : Array.Empty<string>()),
-                .. (Layer == TestLayer.Engine ? PluginTestModules.Select(module => context.PathInRoot(PluginSourceDirectory(module))).ToArray() : Array.Empty<string>()),
+                .. (PluginTests ? PluginTestModules.Select(module => context.PathInRoot(PluginSourceDirectory(module))).ToArray() : Array.Empty<string>()),
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
             // FOUNDATION_TEST_RUNNER_LAYER picks the runner name in Private/Main.cpp (0 Core, 1 Foundation, 2 Engine).
             PrivateDefines = ["ROCKS_TESTING=1", $"FOUNDATION_TEST_RUNNER_LAYER={(int)Layer}",
@@ -173,4 +181,15 @@ public sealed class EngineTests : TestsModule
     protected override TestLayer Layer => TestLayer.Engine;
 
     protected override string ExecutableName => "EngineTests";
+}
+
+// Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources without the engine plugin tests (Docs/Design/BuildTargets.ko.md
+// section 3.8 BS8e).
+public sealed class EngineModularTests : TestsModule
+{
+    protected override TestLayer Layer => TestLayer.Engine;
+
+    protected override string ExecutableName => "EngineModularTests";
+
+    protected override bool PluginTests => false;
 }

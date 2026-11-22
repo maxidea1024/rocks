@@ -53,7 +53,7 @@ struct RenderNotice {
 //   for (const RenderNotice& notice : notices) { ... }
 //
 // 스레드: 모든 함수가 스레드 안전이다. 넣기가 할당에 실패하면 그 통지를 버리고 Dropped를 올린다.
-class RenderNotices {
+class ROCKS_RENDERBASE_API RenderNotices {
 public:
     explicit RenderNotices(Allocator& allocator) noexcept;
 
@@ -84,7 +84,7 @@ private:
 // 사용 예:
 //   auto pixels = RenderBlob::TryCopy(allocator, Span<const uint8>(data, size));
 //   lane.PostResource(TextureUpload{handle, desc, Move(pixels.Value())}, &CreateTextureOnLane);
-class RenderBlob {
+class ROCKS_RENDERBASE_API RenderBlob {
 public:
     RenderBlob() noexcept = default;
     RenderBlob(RenderBlob&& other) noexcept;

@@ -35,7 +35,7 @@ protected:
 // - 빈 slot이 없으면(앞 프레임들이 아직 회수 전) Allocate는 기다리지 않고 Busy다.
 // - 회수한 결과는 내부 목록에 쌓이며, 목록을 늘리지 못하면 그 결과를 버리고 Dropped를 올린다.
 // - 스레드 안전하지 않다. backend가 장치 소유 스레드(와 자기 잠금) 안에서 쓴다.
-class TimestampRing {
+class ROCKS_GRAPHICS_API TimestampRing {
 public:
     explicit TimestampRing(Allocator& allocator) noexcept;
 

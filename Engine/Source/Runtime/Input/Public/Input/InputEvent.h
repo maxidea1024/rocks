@@ -123,7 +123,7 @@ struct InputEvent {
 //   queue.Clear();
 //
 // 스레드: 동기화하지 않는다. 게임 스레드(창 메시지 펌프 스레드)에서만 쓴다.
-class InputQueue {
+class ROCKS_INPUT_API InputQueue {
 public:
     explicit InputQueue(Allocator& allocator) noexcept : events_(allocator) {
     }

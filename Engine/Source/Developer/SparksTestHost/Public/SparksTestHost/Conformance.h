@@ -91,8 +91,8 @@ public:
     }
 
 private:
-    friend Result<bool> TryParseExpectation(StringView text, Expectation& out,
-                                            String& problem) noexcept;
+    friend ROCKS_SPARKSTESTHOST_API Result<bool>
+    TryParseExpectation(StringView text, Expectation& out, String& problem) noexcept;
 
     Array<ExpectedDiagnostic> diagnostics_;
     CompilationStage stage_ = CompilationStage::All;
@@ -102,7 +102,8 @@ private:
 // `.expect` 원문을 해석한다. 형식이 틀리면 false를 돌려주고 problem에 이유(영어 한 문장)를 쓴다.
 // out은 호출 전 내용을 버리고 새로 채운다(실패하면 내용은 정해지지 않는다). out의 경로는 text를
 // 가리킨다. Result 실패는 할당 실패뿐이다.
-Result<bool> TryParseExpectation(StringView text, Expectation& out, String& problem) noexcept;
+ROCKS_SPARKSTESTHOST_API Result<bool> TryParseExpectation(StringView text, Expectation& out,
+                                                          String& problem) noexcept;
 
 // 실행 결과다. 실패 항목은 "사례 이름: 이유" 형태의 영어 문장이며, 진단이 다르면 실제 진단 출력을
 // 뒤에 붙인다.
@@ -182,14 +183,16 @@ struct CaseInput {
 // 사례 하나를 실행한다. 기대와 다르면 report에 실패 항목을 더한다(한 사례에 진단·구문 트리 실패가
 // 각각 하나씩 있을 수 있다). 폴더 사례의 파일 배치는 RunCorpus가 검사한 것으로 보며, 맞지 않으면
 // 실패 항목이다. Result 실패는 할당 실패뿐이다.
-Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& report) noexcept;
+ROCKS_SPARKSTESTHOST_API Result<void> RunCase(Allocator& allocator, const CaseInput& input,
+                                              Report& report) noexcept;
 
 // corpus 폴더 전체를 실행한다. 영역과 사례는 이름의 byte 순으로 돈다(결과가 결정적이다).
 // schemaDirectory의 `*.sparkbind.json`을 모든 사례와 함께 컴파일한다(비어 있으면 schema 없음).
 // 실패: corpus·schema 폴더를 열거할 수 없으면 NotFound(없음) 또는 InvalidArgument(그 밖의 파일
 // 오류), 할당 실패는 그 오류.
-Result<void> RunCorpus(Allocator& allocator, platform::FileSystem& files,
-                       StringView corpusDirectory, StringView schemaDirectory,
-                       Report& report) noexcept;
+ROCKS_SPARKSTESTHOST_API Result<void> RunCorpus(Allocator& allocator, platform::FileSystem& files,
+                                                StringView corpusDirectory,
+                                                StringView schemaDirectory,
+                                                Report& report) noexcept;
 
 } // namespace rocks::sparks::conformance
