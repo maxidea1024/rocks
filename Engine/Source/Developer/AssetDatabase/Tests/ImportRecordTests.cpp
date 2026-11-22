@@ -66,7 +66,7 @@ Array<uint8> MakeOptions(Allocator& allocator) noexcept {
 struct WriteScene {
     explicit WriteScene(Allocator& allocator) noexcept : options(MakeOptions(allocator)) {
         sources[0] = {"source", "Raw", "Textures/Rock.png", Digest(1), 4096};
-        sources[1] = {"px", "", "Cube/px.png", Digest(2), 17};
+        sources[1] = {"px", "", "/Cube/px.png", Digest(2), 17};
         outputs[0] = {"mat", OutputAsset(5), MaterialType};
         outputs[1] = {"", Self, TextureType};
         input.owner = Self;
@@ -229,7 +229,7 @@ struct RawScene {
         top.SetU32(ImportRecordImporterVersionField, 3);
         CHECK(sources.TryPushBack(
             SourceItem(allocator, "source", "Raw", "Textures/Rock.png", 1, 4096)));
-        CHECK(sources.TryPushBack(SourceItem(allocator, "px", "", "Cube/px.png", 2, 17)));
+        CHECK(sources.TryPushBack(SourceItem(allocator, "px", "", "/Cube/px.png", 2, 17)));
         CHECK(outputs.TryPushBack(OutputItem(allocator, "", Self, TextureType)));
         CHECK(outputs.TryPushBack(OutputItem(allocator, "mat", OutputAsset(5), MaterialType)));
     }
@@ -313,7 +313,7 @@ TEST(ImportRecord_RoundTripAndLayout) {
         CHECK(record.sources[0].bytes == 4096);
         CHECK(SameText(record.sources[1].role, "px"));
         CHECK(record.sources[1].root.IsEmpty());
-        CHECK(SameText(record.sources[1].relativePath, "Cube/px.png"));
+        CHECK(SameText(record.sources[1].relativePath, "/Cube/px.png"));
         CHECK(record.sources[1].sha256 == Digest(2));
         CHECK(record.sources[1].bytes == 17);
         CHECK(record.options.Size() == scene.options.Size() &&
@@ -385,7 +385,7 @@ TEST(ImportRecord_BoundaryValues) {
         scene.input.importerName = Repeated(MaxImporterNameBytes);
         scene.sources[0] = {Repeated(MaxImportRoleBytes), Repeated(MaxImportRootBytes),
                             Repeated(MaxImportRelativePathBytes), Digest(3), 0};
-        scene.sources[1] = {"x", "", ".hidden/.a/.../a./b", Digest(4), ~uint64{0}};
+        scene.sources[1] = {"x", "", "C:/.hidden/.a/.../a./b", Digest(4), ~uint64{0}};
         scene.outputs[0] = {Repeated(MaxImportOutputKeyBytes), OutputAsset(9), MaterialType};
         auto written = WriteImportRecord(allocator, Self, scene.input);
         REQUIRE(written);
@@ -396,7 +396,7 @@ TEST(ImportRecord_BoundaryValues) {
         CHECK(read.Value().sources[0].root.ByteCount() == MaxImportRootBytes);
         CHECK(read.Value().sources[0].relativePath.ByteCount() == MaxImportRelativePathBytes);
         CHECK(read.Value().sources[0].bytes == 0);
-        CHECK(SameText(read.Value().sources[1].relativePath, ".hidden/.a/.../a./b"));
+        CHECK(SameText(read.Value().sources[1].relativePath, "C:/.hidden/.a/.../a./b"));
         CHECK(read.Value().sources[1].bytes == ~uint64{0});
         CHECK(read.Value().outputs[1].outputKey.ByteCount() == MaxImportOutputKeyBytes);
     }
@@ -410,7 +410,7 @@ TEST(ImportRecord_BoundaryValues) {
         for (usize index = 0; index < MaxImportSources; ++index) {
             const int count =
                 snprintf(roles[index], sizeof(roles[index]), "r%u", static_cast<unsigned>(index));
-            sources[index] = {StringView(roles[index], static_cast<usize>(count)), "", "a",
+            sources[index] = {StringView(roles[index], static_cast<usize>(count)), "R", "a",
                               Digest(static_cast<uint8>(index)), index};
         }
 
@@ -665,7 +665,7 @@ AssetId Break(WriteScene& scene, WriteBreak kind) noexcept {
 TEST(ImportRecord_WriteRejects) {
     SystemAllocator allocator;
     for (usize index = 0; index <= MaxImportSources; ++index) {
-        ManySources[index] = {"r", "", "a", Digest(0), 0};
+        ManySources[index] = {"r", "R", "a", Digest(0), 0};
     }
 
     for (usize index = 0; index <= MaxImportOutputs; ++index) {
@@ -912,7 +912,7 @@ Array<uint8> BuildBroken(RawScene& scene, ReadBreak kind) noexcept {
             char role[8];
             const int count = snprintf(role, sizeof(role), "r%u", static_cast<unsigned>(index));
             CHECK(scene.sources.TryPushBack(SourceItem(
-                scene.allocator, StringView(role, static_cast<usize>(count)), "", "a", 0, 0)));
+                scene.allocator, StringView(role, static_cast<usize>(count)), "R", "a", 0, 0)));
         }
 
         break;

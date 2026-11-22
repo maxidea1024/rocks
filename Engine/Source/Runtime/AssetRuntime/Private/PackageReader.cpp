@@ -910,6 +910,22 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "ReferencedBy";
     case AssetDiagnosticCode::OrphanedOutput:
         return "OrphanedOutput";
+    case AssetDiagnosticCode::MissingSource:
+        return "MissingSource";
+    case AssetDiagnosticCode::SourceChanged:
+        return "SourceChanged";
+    case AssetDiagnosticCode::InvalidSource:
+        return "InvalidSource";
+    case AssetDiagnosticCode::UnsupportedSourceFormat:
+        return "UnsupportedSourceFormat";
+    case AssetDiagnosticCode::AbsoluteSourcePath:
+        return "AbsoluteSourcePath";
+    case AssetDiagnosticCode::ImporterOutdated:
+        return "ImporterOutdated";
+    case AssetDiagnosticCode::InvalidImportOption:
+        return "InvalidImportOption";
+    case AssetDiagnosticCode::UnknownProperty:
+        return "UnknownProperty";
     }
 
     return "Unknown";

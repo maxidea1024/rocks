@@ -60,12 +60,8 @@ bool ImportValidRoot(StringView root) noexcept {
     return true;
 }
 
-// `/`로 나눈 상대 경로다: 빈 성분(앞·뒤·연속 `/`), `.`·`..` 성분, `\`를 거부한다.
-bool ImportValidRelativePath(StringView path) noexcept {
-    if (!ImportValidText(path, 1, MaxImportRelativePathBytes)) {
-        return false;
-    }
-
+// `/`로 나눈 성분들이다: 빈 성분(앞·뒤·연속 `/`), `.`·`..` 성분, `\`를 거부한다.
+bool ImportValidComponents(StringView path) noexcept {
     const char* data = path.Data();
     usize start = 0;
     for (usize index = 0; index <= path.ByteCount(); ++index) {
@@ -87,9 +83,55 @@ bool ImportValidRelativePath(StringView path) noexcept {
     return true;
 }
 
+// 원본 경로다(4.5절, 7.1절 18): 루트가 있으면 그 아래 상대 경로, 빈 루트면 `/` 구분 절대 경로 —
+// POSIX `/a`, UNC `//server/share/a`, 드라이브 `C:/a`(기록은 호스트와 무관한 문법만 본다). 뒤는
+// 같은 성분 규칙이다.
+bool ImportValidSourcePath(StringView root, StringView path) noexcept {
+    if (!ImportValidText(path, 1, MaxImportRelativePathBytes)) {
+        return false;
+    }
+
+    if (!root.IsEmpty()) {
+        return ImportValidComponents(path);
+    }
+
+    const char* data = path.Data();
+    const usize bytes = path.ByteCount();
+    constexpr usize DrivePrefixBytes = 3;
+    constexpr usize UncPrefixBytes = 2;
+    usize prefix = 0;
+    if (bytes > DrivePrefixBytes && data[1] == ':' && data[2] == '/' &&
+        ((data[0] >= 'A' && data[0] <= 'Z') || (data[0] >= 'a' && data[0] <= 'z'))) {
+        prefix = DrivePrefixBytes;
+    } else if (bytes > UncPrefixBytes && data[0] == '/' && data[1] == '/') {
+        prefix = UncPrefixBytes;
+    } else if (bytes > 1 && data[0] == '/') {
+        prefix = 1;
+    } else {
+        return false;
+    }
+
+    const StringView rest(data + prefix, bytes - prefix);
+    if (!ImportValidComponents(rest)) {
+        return false;
+    }
+
+    // UNC는 서버·공유 다음에 성분이 하나 이상 있어야 한다.
+    if (prefix == UncPrefixBytes) {
+        usize separators = 0;
+        for (usize index = 0; index < rest.ByteCount(); ++index) {
+            separators += rest.Data()[index] == '/' ? 1 : 0;
+        }
+
+        return separators >= UncPrefixBytes;
+    }
+
+    return true;
+}
+
 bool ImportValidSource(StringView role, StringView root, StringView path) noexcept {
     return ImportValidText(role, 1, MaxImportRoleBytes) && ImportValidRoot(root) &&
-           ImportValidRelativePath(path);
+           ImportValidSourcePath(root, path);
 }
 
 bool ImportValidOutput(StringView key, AssetId asset, TypeId type) noexcept {
@@ -471,6 +513,10 @@ Result<void> ImportReadOutputs(Allocator& allocator, AssetId self, const RecordR
 }
 
 } // namespace
+
+bool IsValidImportSourceLocation(StringView root, StringView relativePath) noexcept {
+    return ImportValidRoot(root) && ImportValidSourcePath(root, relativePath);
+}
 
 Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
                                        const ImportRecordInput& input) noexcept {

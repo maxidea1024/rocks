@@ -153,13 +153,19 @@ struct ImportRecord {
     }
 };
 
+// 원본 위치(root·relativePath)가 기록 규칙에 맞는지다(쓰기·읽기와 같은 판정 — AS 4.5절, 7.1절
+// 15·18): root는 0–MaxImportRootBytes byte·`/`·`\` 없음, root가 있으면 relativePath는 `/` 구분 상대
+// 경로, 비면 `/` 구분 절대 경로(POSIX `/a`·UNC `//server/share/a`·드라이브 `X:/a`).
+// AssetSourceRoots가 기록을 풀기 전에 쓴다.
+bool IsValidImportSourceLocation(StringView root, StringView relativePath) noexcept;
+
 // self 패키지의 ImportRecord byte를 쓴다(PackageWriteOptions::importRecord에 넘긴다). outputs는
 // outputKey byte 순으로 정렬해 쓰고 sources는 준 순서대로 쓴다.
 // 오류: self·owner가 null이거나 스펙 규칙(AS 7.1절 15 — 소유 기록: importerId·importerName 있음,
 // 원본 1–256개·role 유일, 출력 1–1024개·outputKey 유일·asset 유일·null 아님·type null 아님·self
-// 포함, 문자열 상한·UTF-8·NUL 없음, relativePath 상대 경로 형태, root에 `/`·`\` 없음, options는
-// Record envelope. 참조 기록: importerId null·이름 빈 값·버전 0·원본·옵션·출력 없음)을 어기면
-// InvalidArgument, 전체가 Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
+// 포함, 문자열 상한·UTF-8·NUL 없음, relativePath 형태(IsValidImportSourceLocation), root에 `/`·`\`
+// 없음, options는 Record envelope. 참조 기록: importerId null·이름 빈 값·버전 0·원본·옵션·출력
+// 없음)을 어기면 InvalidArgument, 전체가 Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
 Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
                                        const ImportRecordInput& input) noexcept;
 

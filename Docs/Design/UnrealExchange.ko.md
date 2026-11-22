@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-22, 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-22, 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -130,6 +130,30 @@ layer의 감마 공간(`GetGammaSpace(Layer)` — Texture.h:400)은 `gammaSpace`
 ### 4.4 설정
 
 UTexture·차원별 클래스의 저장 프로퍼티를 이름 그대로 `settings`에 쓴다. Rocks 텍스처 설정은 UE 5.8 이름과 1:1 대조표가 이미 있다(AssetSystem 12.4절). 임포트는 그 표로 옮기고, 표에서 "후속"인 설정이 기본값이 아니면 `UnsupportedSetting` 경고를 낸다. `Texture2DArray`의 `SourceTextures`·`VolumeTexture`의 `Source2DTexture` 같은 에셋 참조는 의존으로 기록한다.
+
+### 4.5 구현에서 정한 점(UX2a)
+
+UX2a(UE 쪽 텍스처 추출, `FRocksTextureExtractor`) 중 4절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **`data` 스키마.** `data`는 `{ "source": … }` 하나다. `source`는 다음 키를 이 순서로 갖는다.
+
+   | 키 | 내용 |
+   |---|---|
+   | `format` | 층 0 원본 형식(4.2절 표 왼쪽 이름에서 `TSF_`를 뗀 것: `G8`·`BGRA8`·`BGRE8`·`RGBA16`·`RGBA16F`·`G16`·`RGBA32F`·`R16F`·`R32F`) |
+   | `compression` | 원본 보관 형식(`None`·`PNG`·`JPEG`·`UEJPEG`·`UEDELTA` — `TSCF_`를 뗀 것). 정보용이다. 픽셀은 언제나 푼 값이다 |
+   | `lossyOrigin` | `JPEG`·`UEJPEG`이면 `"jpeg"`, 아니면 `null`(4.3절) |
+   | `longLat` | `IsLongLatCubemap()`(4.1절) |
+   | `numLayers`·`numBlocks` | 층·블록 수(4.1절 — 둘 이상이면 Rocks 임포트가 `UnsupportedSourceLayout`) |
+   | `layers` | 층마다 `{ "format", "gammaSpace" }`(`gammaSpace`는 `Linear`·`Pow22`·`sRGB` — 4.2절 `GetGammaSpace(Layer)`) |
+   | `blocks` | 블록마다 `{ "blockX", "blockY", "sizeX", "sizeY", "numSlices", "numMips", "mips": [ { "sizeX", "sizeY", "numSlices", "pixels": [층마다 blob 참조] } ] }` |
+
+   mip 크기는 `FTextureSource::FMipData::GetMipDataWithInfo`의 `FImageInfo`를 그대로 적는다(볼륨은 mip마다 깊이가 줄고 배열·큐브는 slice 수가 그대로다 — `GetMippedNumSlices`). 원본이 없으면(`Source.IsValid()` 거짓) `source`는 `null`이고 error 진단 `NoSourceData`다(4.1절). 층 형식이 위 9종이 아니면 `null`과 `UnsupportedSourceFormat`, mip 사슬을 풀지 못하면 `null`과 `SourceReadFailed`다(모두 error, 에셋 수준 — 내보내기는 계속한다).
+2. **blob 배치.** mip 하나·층 하나 = blob 하나다(4.1절 (block, layer, mip)). 바이트는 `GetMipData(nullptr)`로 한 번 푼 사슬의 그 mip view를 그대로 쓴다(slice 순서, 행 우선, 패딩 없음). 배치는 `G8` u8×1, `BGRA8`·`BGRE8` u8×4(UE 저장 순서 B·G·R·A/E 그대로 — 교환·해제는 Rocks 임포트, 4.2절), `RGBA16` u16×4, `RGBA16F` f16×4, `G16` u16×1, `RGBA32F` f32×4, `R16F` f16×1, `R32F` f32×1이고 `count`는 texel 수(sizeX × sizeY × numSlices)다.
+3. **`settings`.** 텍스처 객체의 UPROPERTY 덤프 전체다(4.4절, 11.5·11.7절 13번 규칙). `Source` 프로퍼티(FTextureSource의 UPROPERTY — 크기·형식·블록 표·Id)는 `data`와 겹치므로 뺀다. 덤프가 모은 참조(`CompositeTexture`·`SourceTextures`·`Source2DTexture` 등)는 의존 목록에 합친다(11.7절 4번). enum 값은 UE C++ 값 이름 그대로다(`TA_Wrap`·`TC_Default`·`TEXTUREGROUP_World` — `GetNameStringByValue`). 접두를 떼는 것은 Rocks 임포트의 대조표(AssetSystem 12.4절 — Rocks 이름은 접두를 뗀다)가 한다.
+4. **손실 원본.** 플러그인은 거부하지 않는다. 푼 픽셀을 쓰고 `lossyOrigin`과 info 진단 `LossyOrigin`을 남긴다. 거부·허용(`LossySource`·`--allow-lossy-origin`)은 Rocks 임포트(UX2b)가 한다. UE 5.8 엔진 콘텐츠에도 있다(`/Engine/EngineMaterials/T_Grid_Crosses` G8 JPEG, `/Engine/EditorMaterials/Dataflow/T_CheckerBoard` BGRA8 JPEG).
+5. **로드.** 범위 안 텍스처는 본문을 위해 로드한다(`FSoftObjectPath::TryLoad`). 로드하지 못하면 error 진단 `LoadFailed`이고 본문은 빈 객체다. blob 쓰기 실패(디스크·크기 불일치)는 내보내기 전체 실패다.
+6. **본문 조립.** 의존·진단이 본문 추출 결과에 따라 바뀌므로 본문(`settings`·`data`)을 먼저 조각으로 만들고(`FRocksJsonWriter` 기준 깊이 1, `FinishFragment`) 에셋 JSON에 그대로 끼운다(`RawValue`). 그래서 bytes는 한 writer로 쓴 것과 같다.
+7. **자기 시험.** `RocksExport.TextureExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 텍스처 8개(BGRA8 PNG, G8 JPEG, RGBA16F, BGRE8 UE Delta 큐브, BGRA8 큐브·볼륨·2D 배열, R32F 볼륨)를 내보내고, blob마다 `FTextureSource::GetMipData(Out, Block, Layer, Mip)`(LockMip을 거치는 다른 경로)로 꺼낸 원본과 SHA-256·`bytes`·blob 파일 내용·`count`·`layout`을 대조한다. `settings`에 `Source`가 없고 `SRGB`·`CompressionSettings`가 있는지, `format`·`lossyOrigin`·`longLat`·블록·층 수도 본다. 결정성은 `ExportDeterminism`(정육면체 닫힘에 텍스처 2개가 든다)이 본다. 수동 검증(2026-11-22): 엔진 텍스처 15개와 시험 프로젝트에 임포트한 16비트 PNG 2개(G16·RGBA16 — 엔진 콘텐츠에 없다)를 닫힘과 함께 내보낸 묶음(에셋 20개, 원본 형식 G8·BGRA8·BGRE8·G16·RGBA16·RGBA16F·RGBA32F·R32F, 보관 형식 None·PNG·JPEG·UEDELTA, 2D·큐브(위도경도 포함)·2D 배열·볼륨)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, Rocks 리더(`UnrealExchange_ExternalBundle`)가 blob 전부의 크기·SHA-256을 확인해 20개 모두 Ready였다. R16F 원본과 TextureCubeArray는 엔진 콘텐츠에 없어 확인하지 못했다.
 
 ## 5. 정적 메시
 
@@ -441,7 +465,7 @@ UX1b 구현(`Extras/UnrealExport/RocksExport/` — 플러그인 골격·commandl
 14. **원자적 쓰기.** 모든 파일을 `<출력>.staging`에 쓰고, `bundle.json`을 마지막에 쓴 뒤 기존 출력을 `<출력>.previous`로 옮기고 staging을 출력 이름으로 바꾼 다음 옛것을 지운다. 출력 이름에는 언제나 완성된 묶음만 있다. 기존 출력이 묶음(`bundle.json` 있음)도 빈 디렉터리도 아니면 덮지 않고 실패한다(오타로 다른 디렉터리를 지우지 않게). 실패·중단이면 staging을 지우고 출력은 그대로다. blob은 한 번의 내보내기 안에서 같은 hex를 한 번만 쓰고, 고정 배치는 `bytes` = 원소 크기 × components × count를 쓰기 전에 확인한다(10.4절 11번과 같은 규칙).
 15. **commandlet 인자.** `-Closure`와 `-NoClosure`를 함께 주면 실패다. `-BakeMaterials`·`-BakeSize`는 굽기 단계(UX6) 전이라 실패로 거부한다(조용히 무시하지 않는다). `-SelfTest`는 자기 시험만 돌린다. 그 밖의 스위치는 엔진 스위치(`-unattended` 등)라 보지 않는다. 종료 코드는 성공 0, 실패 1이다(`UseCommandletResultAsExitCode`).
 16. **에디터 메뉴.** 2절 상위 클래스 메뉴 8개에 동적 항목 "Export to Rocks..."를 단다. 옵션 대화상자는 지금 출력 디렉터리 선택(`IDesktopPlatform::OpenDirectoryDialog`)뿐이고 닫힘은 켠다. 굽기 같은 옵션은 그 단계에서 더한다. AssetRegistry가 검색 중이면 끝날 때까지 기다린다. 결과는 메시지 대화상자로 알린다.
-17. **자기 시험(12.2절).** commandlet `-SelfTest`와 UE Automation `RocksExport.*` 6개(`Sha256`·`NumberFormat`·`JsonWriter`·`PropertyDump`·`BundleWriter`·`ExportDeterminism`)가 같은 함수를 부른다. SHA-256은 FIPS 180-4 예제 4개와 백만 `a`, 1 byte씩·997 byte 조각·블록 경계 길이(55·56·63·64·65·119·120)의 분할 일치다. 숫자 서식은 표기 16개(printf 기대값), 비유한값, 결정적 비트 패턴 2만 개의 왕복(`std::from_chars`로 다시 읽어 비트 비교), 독일어 로캘에서의 같은 표기다. 덤프는 시험 구조체의 기대 JSON 전체 비교·참조 수집과 엔진 에셋(정육면체 메시·기본 머티리얼) 두 번 덤프의 일치·UE 파서 읽기다. writer는 blob 경로·중복·크기 검사, 교체·중단·묶음 아닌 디렉터리 보호다. 결정성은 `/Engine/BasicShapes/Cube`를 두 번 내보내 `createdUtc` 줄 말고 bytes가 같은지와 형식(키·정렬·파일 대응)이다. `prepared` 추출이 원본 설정을 바꾸지 않는지는 UX3에서 더한다.
+17. **자기 시험(12.2절).** commandlet `-SelfTest`와 UE Automation `RocksExport.*` 6개(`Sha256`·`NumberFormat`·`JsonWriter`·`PropertyDump`·`BundleWriter`·`ExportDeterminism`)가 같은 함수를 부른다. SHA-256은 FIPS 180-4 예제 4개와 백만 `a`, 1 byte씩·997 byte 조각·블록 경계 길이(55·56·63·64·65·119·120)의 분할 일치다. 숫자 서식은 표기 16개(printf 기대값), 비유한값, 결정적 비트 패턴 2만 개의 왕복(`std::from_chars`로 다시 읽어 비트 비교), 독일어 로캘에서의 같은 표기다. 덤프는 시험 구조체의 기대 JSON 전체 비교·참조 수집과 엔진 에셋(정육면체 메시·기본 머티리얼) 두 번 덤프의 일치·UE 파서 읽기다. writer는 blob 경로·중복·크기 검사, 교체·중단·묶음 아닌 디렉터리 보호다. 결정성은 `/Engine/BasicShapes/Cube`를 두 번 내보내 `createdUtc` 줄 말고 bytes가 같은지와 형식(키·정렬·파일 대응)이다. `prepared` 추출이 원본 설정을 바꾸지 않는지는 UX3a에서 더한다.
 18. **Rocks 쪽 왕복 확인.** EngineTests에 선택 시험 `UnrealExchange_ExternalBundle`(`Tests/ExchangeExternalBundleTests.cpp`)을 둔다. 환경 변수 `ROCKS_UNREAL_EXCHANGE_BUNDLE`이 묶음 디렉터리를 가리키면 리더로 읽고 임포트 순서를 계산해 결과를 출력하며, 묶음 수준 오류 없음·오류 진단 없음·범위 안 에셋 Ready·범위 밖 Unsupported·실패한 저장 단위 없음을 확인한다. 변수가 없으면 SKIP을 출력하고 통과한다(기본 CI 불변). 환경 변수 읽기는 TestSupport `test::ReadEnvironmentVariable`(Win64 `GetEnvironmentVariableW`, POSIX `getenv`)이다.
 19. **빌드 환경.** `RunUAT BuildPlugin -TargetPlatforms=Win64`는 경고 없이 빌드된다. 확인한 PC에서 UBT는 VS 2026의 MSVC(폴더 14.50.35717, 컴파일러 14.50.35740 — `Windows_SDK.json`의 금지 구간 14.50.0–14.50.35722 밖, 선호 범위 안)와 Windows SDK 10.0.22621.0을 골랐다. 사용자 전역 UBT 설정(`%APPDATA%\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml`)에 UE 5.8이 모르는 값(`VisualStudio2019`)이 있으면 UBT가 설정 읽기에서 멈춘다. 그 PC에서는 빌드 프로세스에만 `USERPROFILE`·`APPDATA`·`LOCALAPPDATA`를 작업 폴더로 바꿔 그 파일을 보지 않게 했다(파일은 다른 UE 버전용이라 고치지 않았다).
 
@@ -474,19 +498,21 @@ UX1b 구현(`Extras/UnrealExport/RocksExport/` — 플러그인 골격·commandl
 
 ## 14. 단계
 
-ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다.
+ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터").
 
 | 단계 | 쪽 | 내용 | 선행 |
 |---|---|---|---|
 | UX1a | Rocks | 묶음 형식 v1 리더·검증(JSON 스키마·blob SHA-256·크기), 경로 대응·이름 보정, 위상 정렬(SCC), 손으로 만든 묶음 fixture와 변조 시험 — 에셋 DB에 쓰지 않는 부분. **구현**(2026-11-21, 10.4절) | MA1(원본 메시 형태 확인용), 엔진 플러그인 빌드 지원(BuildTargets 3.6절) |
 | UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후). **구현**(2026-11-22, 11.7절) | UX1a, UE 5.8 Launcher 설치판(C:) |
 | UX1c | Rocks | 임포트 프레임워크 연결, 기존 에셋 조회 `ExchangeExistingAssets`(태그 `UnrealExchange.ObjectPath`) 구현, `--only` 닫힘, Commandlet 명령 `asset-import-unreal` 등록 | UX1b, A2f(AssetDatabase 임포트 프레임워크) |
-| UX2 | 둘 다 | 텍스처 추출·임포트(4절) | UX1b(추출), UX1c·A5(임포트) |
-| UX3 | 둘 다 | 정적 메시 추출(`source`·`prepared`·생성 LOD·충돌)·임포트 | UX1b(추출), UX1c·MeshAnimationAssets MA2b–MA3 |
-| UX4 | 둘 다 | 머티리얼·인스턴스·함수·컬렉션 추출, 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번 | UX2, MaterialSystem MS3·MS6 |
+| UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다 | UX1b |
+| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 `LossySource`·`--allow-lossy-origin`, 4.4절 설정 대조) | UX2a, UX1c, A5 |
+| UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다 | UX1b |
+| UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3 |
+| UX4 | 둘 다 | 머티리얼·인스턴스·함수·컬렉션 추출, 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번 | UX2b, MaterialSystem MS3·MS6 |
 | UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4 |
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4 |
-| UX7 | 둘 다 | 스켈레톤·스킨 메시(6절, 생성 LOD 복원 포함) | UX3, MA4b–MA5 |
+| UX7 | 둘 다 | 스켈레톤·스킨 메시(6절, 생성 LOD 복원 포함) | UX3b, MA4b–MA5 |
 | UX8 | 둘 다 | 애니메이션 클립(7절) | UX7, MA6 |
 
 ## 15. 결정 사항
@@ -511,7 +537,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | 항목 | 확인 시점 |
 |---|---|
 | UE가 같은 이름 파라미터 노드의 기본값이 다를 때 쓰는 값 | UX4 |
-| 정적 메시 정점 버퍼 생성의 퇴화·용접 임계값 상수 값(Rocks 상수로 옮김) | MA2·UX3 |
+| 정적 메시 정점 버퍼 생성의 퇴화·용접 임계값 상수 값(Rocks 상수로 옮김) | MA2·UX3b |
 
 ## 17. 개정 이력
 
@@ -524,6 +550,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 7(2026-11-21): UX1a 플러그인 Private coverage를 줄 93.96%·분기 91.36%에서 100%·100%로 올렸다. 닿을 수 있는 오류 분기는 실패 주입 시험을 더했고 실패할 수 없는 결과 검사는 구조를 바꿔 없앴다(10.4절 끝 문단).
 - 개정 8(2026-11-22): UX1b를 UE 쪽(플러그인 골격·writer·리더 왕복 검증)과 UX1c(Rocks 임포트 연결·기존 에셋 조회·Commandlet 명령)로 나눴다. UX2 이후 추출 쪽은 Rocks 임포트보다 먼저 할 수 있다고 적었다. UE 설치판 받음(2026-11-22).
 - 개정 9(2026-11-22): UX1b를 구현했다(`Extras/UnrealExport/RocksExport/` — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘·redirector, 에셋 JSON 공통부, 자기 시험). 구현에서 정한 점을 11.7절에 적었다: UX1b 의존 목록은 AssetRegistry 패키지 의존(3.5절에 더함), 범위 밖 선택·클래스 대응, 에셋 여럿인 패키지는 내보내지 않음(형식 v1 한계), 원자적 쓰기, 덤프 세부, 플러그인 진단 코드, `engineCommit`은 changelist. 모듈 의존은 쓰는 단계에서 더한다(11.1절). 엔진 콘텐츠(`/Engine/BasicShapes/...`)와 redirector가 있는 시험 콘텐츠를 내보내 Rocks 리더(EngineTests 선택 시험 `UnrealExchange_ExternalBundle`)로 읽었다.
+- 개정 10(2026-11-22): UX2·UX3을 UE 쪽 추출(UX2a·UX3a, 선행 UX1b)과 Rocks 쪽 임포트(UX2b·UX3b)로 나눴다(사용자 지시 "진행 가능한거부터"). UX4·UX7 선행을 임포트 단계로 고쳤다. UX2a(텍스처 추출)를 구현하고 정한 점을 4.5절에 적었다: `data.source` 스키마, mip·층별 blob 배치, `settings` 덤프에서 `Source` 제외, 손실 원본은 표시만, 본문 조각 조립.
 
 ## 18. 교차 검증 기록(개정 2)
 

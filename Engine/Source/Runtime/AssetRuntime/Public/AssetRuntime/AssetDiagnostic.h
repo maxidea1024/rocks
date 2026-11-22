@@ -96,7 +96,22 @@ enum class AssetDiagnosticCode : uint16 {
     // InvalidArgument, 열린 패키지의 메모리 참조 — Busy, related = 첫 참조자).
     ReferencedBy,
     // 고아 출력(7.1절 17 — A2e4, 경고): 참조 기록의 owner가 이 출력을 소유하지 않는다.
-    OrphanedOutput
+    OrphanedOutput,
+    // 임포트 원본(AssetSystem.ko.md 4.5·4.6절, 7.1절 18 — A2f): 원본 파일·루트가
+    // 없음(MissingSource), 원본 내용이 기록과 다름(SourceChanged — 상태), 원본·원본 루트 표를
+    // 읽거나 해석하지 못함 (InvalidSource), 원본 형식을 받는 임포터가
+    // 없음(UnsupportedSourceFormat), 원본이 어느 루트 아래도 아니라 절대 경로로
+    // 기록함(AbsoluteSourcePath — 경고).
+    MissingSource,
+    SourceChanged,
+    InvalidSource,
+    UnsupportedSourceFormat,
+    AbsoluteSourcePath,
+    // 임포트·설정(4.6절, 7.1절 18 — A2f): 등록 임포터가 기록보다 새 버전(ImporterOutdated — 상태),
+    // 임포트 옵션 값·역할이 잘못됨(InvalidImportOption), 옵션도 설정도 아닌 이름(UnknownProperty).
+    ImporterOutdated,
+    InvalidImportOption,
+    UnknownProperty
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

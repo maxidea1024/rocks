@@ -1,5 +1,5 @@
-#include "AssetEditCommandlet.h"
-#include "AssetCommandletSupport.h"
+#include <AssetCommandlets/AssetEditCommandlet.h>
+#include <AssetCommandlets/AssetCommandletSupport.h>
 
 #include <Core/Containers/Array.h>
 #include <ReflectionText/TextAssignments.h>

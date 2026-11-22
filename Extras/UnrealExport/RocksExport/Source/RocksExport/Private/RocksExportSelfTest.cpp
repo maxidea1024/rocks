@@ -1,6 +1,7 @@
 #include "RocksExportSelfTest.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Engine/Texture.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -12,6 +13,7 @@
 #include "RocksJsonWriter.h"
 #include "RocksPropertyDumper.h"
 #include "RocksSha256.h"
+#include "RocksTextureExtractor.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -525,6 +527,99 @@ void RocksExportSelfTest::RunExportDeterminism(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunTextureExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	// 형식·차원이 다른 엔진 텍스처다(BGRA8 PNG, G8 JPEG, RGBA16F, BGRE8 UE Delta 큐브, BGRA8 큐브·볼륨·배열, R32F 볼륨).
+	static const TCHAR* const Textures[] = {
+		TEXT("/Engine/EngineMaterials/T_Default_Material_Grid_M.T_Default_Material_Grid_M"),
+		TEXT("/Engine/EngineMaterials/T_Grid_Crosses.T_Grid_Crosses"),
+		TEXT("/Engine/EngineMaterials/DefaultBloomKernel.DefaultBloomKernel"),
+		TEXT("/Engine/EditorMaterials/AssetViewer/T_GreyAmbient.T_GreyAmbient"),
+		TEXT("/Engine/EngineResources/DefaultTextureCube.DefaultTextureCube"),
+		TEXT("/Engine/EngineResources/DefaultVolumeTexture.DefaultVolumeTexture"),
+		TEXT("/Engine/EngineMaterials/WeightMapArrayPlaceholderTexture.WeightMapArrayPlaceholderTexture"),
+		TEXT("/Engine/EngineMaterials/Substrate/Volume/SubstrateSimpleVolumeLUT3D.SubstrateSimpleVolumeLUT3D"),
+	};
+
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	const FString Root = SelfTestDirectory() / TEXT("Texture");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Textures.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	for (const TCHAR* Path : Textures)
+	{
+		Options.Selections.Add(Path);
+	}
+
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("texture export: %s"), *Result.Error));
+	for (const TCHAR* Path : Textures)
+	{
+		UTexture* Texture = LoadObject<UTexture>(nullptr, Path);
+		const FString Package = FSoftObjectPath(Path).GetLongPackageName();
+		TArray<uint8> Json;
+		const TSharedPtr<FJsonObject> Asset = Texture != nullptr && LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(Package), Json) ? ParseJson(Json) : nullptr;
+		Expect(Errors, Asset.IsValid(), FString::Printf(TEXT("%s: no texture JSON"), Path));
+		if (!Asset.IsValid())
+		{
+			continue;
+		}
+
+		const TSharedPtr<FJsonObject> Settings = Asset->GetObjectField(TEXT("settings"));
+		Expect(Errors, !Settings->HasField(TEXT("Source")) && Settings->HasField(TEXT("SRGB")) && Settings->HasField(TEXT("CompressionSettings")),
+			FString::Printf(TEXT("%s: settings dump"), Path));
+
+		FTextureSource& Source = Texture->Source;
+		const TSharedPtr<FJsonObject> Data = Asset->GetObjectField(TEXT("data"))->GetObjectField(TEXT("source"));
+		FString FormatName;
+		FString Layout;
+		uint32 Components = 0;
+		Expect(Errors, FRocksTextureExtractor::DescribeSourceFormat(Source.GetFormat(0), FormatName, Layout, Components) && Data->GetStringField(TEXT("format")) == FormatName,
+			FString::Printf(TEXT("%s: source format"), Path));
+		const bool bLossy = Source.GetSourceCompression() == TSCF_JPEG || Source.GetSourceCompression() == TSCF_UEJPEG;
+		Expect(Errors, Data->TryGetField(TEXT("lossyOrigin")).IsValid() && bLossy == !Data->TryGetField(TEXT("lossyOrigin"))->IsNull(), FString::Printf(TEXT("%s: lossyOrigin"), Path));
+		Expect(Errors, Data->GetBoolField(TEXT("longLat")) == Source.IsLongLatCubemap(), FString::Printf(TEXT("%s: longLat"), Path));
+
+		const TArray<TSharedPtr<FJsonValue>>& Blocks = Data->GetArrayField(TEXT("blocks"));
+		Expect(Errors, Blocks.Num() == Source.GetNumBlocks(), FString::Printf(TEXT("%s: block count"), Path));
+		int32 Compared = 0;
+		for (int32 BlockIndex = 0; BlockIndex < Blocks.Num(); ++BlockIndex)
+		{
+			const TArray<TSharedPtr<FJsonValue>>& Mips = Blocks[BlockIndex]->AsObject()->GetArrayField(TEXT("mips"));
+			for (int32 Mip = 0; Mip < Mips.Num(); ++Mip)
+			{
+				const TSharedPtr<FJsonObject> MipObject = Mips[Mip]->AsObject();
+				const uint64 Texels = uint64(MipObject->GetNumberField(TEXT("sizeX"))) * uint64(MipObject->GetNumberField(TEXT("sizeY"))) * uint64(MipObject->GetNumberField(TEXT("numSlices")));
+				const TArray<TSharedPtr<FJsonValue>>& Pixels = MipObject->GetArrayField(TEXT("pixels"));
+				Expect(Errors, Pixels.Num() == Source.GetNumLayers(), FString::Printf(TEXT("%s: layer count"), Path));
+				for (int32 Layer = 0; Layer < Pixels.Num(); ++Layer)
+				{
+					// 원본 대조: LockMip을 거치는 다른 경로로 같은 mip을 꺼내 SHA-256·크기·blob 파일 내용을 비교한다.
+					const TSharedPtr<FJsonObject> Blob = Pixels[Layer]->AsObject();
+					TArray64<uint8> Expected;
+					TArray<uint8> Written;
+					const FString Hex = Blob->GetStringField(TEXT("blob"));
+					const bool bRead = Source.GetMipData(Expected, BlockIndex, Layer, Mip) && LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Hex), Written);
+					const bool bSame = bRead && Hex == FRocksSha256::HashHex(Expected.GetData(), Expected.Num())
+						&& uint64(Blob->GetNumberField(TEXT("bytes"))) == uint64(Expected.Num()) && int64(Written.Num()) == Expected.Num()
+						&& FMemory::Memcmp(Written.GetData(), Expected.GetData(), Written.Num()) == 0
+						&& uint64(Blob->GetNumberField(TEXT("count"))) == Texels && Blob->GetStringField(TEXT("layout")) == Layout;
+					Expect(Errors, bSame, FString::Printf(TEXT("%s: block %d mip %d layer %d differs from the texture source"), Path, BlockIndex, Mip, Layer));
+					++Compared;
+				}
+			}
+		}
+
+		Expect(Errors, Compared > 0, FString::Printf(TEXT("%s: no mip compared"), Path));
+	}
+
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -533,5 +628,6 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunPropertyDump(Errors);
 	RunBundleWriter(Errors);
 	RunExportDeterminism(Errors);
+	RunTextureExtraction(Errors);
 	return Errors.IsEmpty();
 }

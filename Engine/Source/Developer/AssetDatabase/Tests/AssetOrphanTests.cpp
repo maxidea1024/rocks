@@ -63,7 +63,7 @@ Array<uint8> WritePackage(AssetEnv& env, uint64 id, uint64 owner,
     const PackageDependencyEntry owners[] = {
         {FixedId(owner), PackageDependencyKind::ImportOwner, TypeId{}, false}};
     if (owner != 0) {
-        const ImportSourceInput sources[] = {{"source", "", "Source.png", Sha256Digest{}, 1}};
+        const ImportSourceInput sources[] = {{"source", "Raw", "Source.png", Sha256Digest{}, 1}};
         ImportOutputInput produced[4];
         const char* const keys[] = {"", "a", "b", "c"};
         ImportRecordInput input;

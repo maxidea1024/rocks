@@ -428,7 +428,7 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - ImportRecord 스키마 writer·parser(5.4절)는 AssetDatabase(`ImportRecord.h`)에 두고 열기·색인이 ImportOwner 대조(7.1절 7 — 위반은 열기 `CorruptPackage`)에 쓴다. 색인 항목에 ImportRecord 요약(importer id·이름·버전, 출력 수, 소유자 id)을 더한다(7.1절 11, A2b가 미룬 것).
       - 읽기 전용(더 새 버전) 패키지는 열리지만 저장·복제·ID 수정은 `NewerVersion` / `Unsupported`(4.4절).
       - **null import의 바탕**(A2c2a 착수 때 정함): 그래프 2b의 `ApplyFields`가 null handle import를 "미해결"로 받아 그 참조를 null로 쓴다(ObjectFoundations 5.4절 — 확인을 건너뛴다). `InstantiatePackages`는 `PackageInstantiateOptions{resolver, imports = Strict | NullMissing, unresolved}`를 받는 겹판을 두고, NullMissing은 Strict가 MissingDependency·TypeMismatch로 실패하던 해석(대상 패키지 없음, 대표 에셋 없음, Hard 의존 대표 타입이 expectedType의 파생이 아님, 객체 없음, 객체 타입이 선언 타입의 파생이 아님)을 null import + `PackageUnresolvedImport{package, target, import, code, error}` 기록으로 바꾼다. 에셋 전체가 풀리지 않으면 그 에셋의 첫 import에 한 번 적고 나머지 import도 null이다. outer import가 null이면 그 아래 import도 미해결(MissingDependency)이다. resolver의 다른 오류·잘못된 handle·타입 조회 실패는 Strict와 같다. 버린 대안: 누락 대상 자리에 자리표시 패키지(UE `FLinkerPlaceholder`처럼)를 만들어 id를 보존 — 같은 id의 실제 패키지가 형식만 다를 때(TypeMismatch) 두 패키지가 같은 id를 갖게 되고, 추상 타입은 만들 수 없다. id 보존은 "미해결 import가 있으면 저장 거부"(A2c2a 위)로 한다.
-      - **ImportRecord 배치**(5.4절의 논리 필드, 스키마 버전 1): Record(`ImportRecordSchema` = Guid{0x52494d5052454344, 1}){ 1 importerId Guid, 2 importerName String(1–256 byte), 3 importerVersion U32, 4 sources RecordList[ Record(`ImportSourceSchema` = {…, 2}){ 1 role String(1–64), 2 root String(0–256 — 원본 루트 이름, 빈 값은 루트 없음), 3 relativePath String(1–1024), 4 sha256 Bytes(32), 5 bytes U64 } ], 5 options Record(임포터 스키마 — 없을 수 있다), 6 outputs RecordList[ Record(`ImportOutputSchema` = {…, 3}){ 1 outputKey String(0–64 — 빈 값은 주 출력), 2 assetId Guid, 3 typeId Guid } ], 7 ownerAssetId Guid }. 필드 id는 Guid{0, n}이다. 문자열·byte 필드의 payload는 다른 패키지 Record처럼 길이 접두 없는 내용 byte다(TLV 길이가 길이다). 규칙(위반은 InvalidArgument): ownerAssetId는 null이 아니다. 문자열은 유효 UTF-8에 NUL이 없다. 소유 기록(owner = 자기 패키지 id)은 importerId가 null이 아니고 importerName이 있으며 sources가 1–256개(role 유일 — 순서는 쓴 그대로)이고 outputs는 1–1024개로 outputKey byte 순 엄격 오름차순(writer가 정렬한다)·assetId 유일·null 아님·typeId null 아님·자기 id를 포함한다. relativePath는 `/`로 나눈 상대 경로다(앞·뒤 `/`, 빈 성분, `.`·`..` 성분, `\` 금지 — 원본 루트 밖을 가리키지 못한다). root는 `/`·`\`를 갖지 않는다. options는 Record envelope 검사(ReadRecordHeader)를 통과해야 하고 비면 필드를 쓰지 않는다. 참조 기록(owner ≠ 자기)은 importerId null·importerName 빈 값·importerVersion 0이고 sources·options·outputs 필드가 없다. 빈 목록 필드·모르는 필드·wire가 다른 필드는 InvalidArgument다(정규형 하나). 다른 스키마 Guid나 지원 범위 밖 버전은 Unsupported다. writer·parser는 AssetDatabase `ImportRecord.h`에 둔다(`WriteImportRecord`·`ReadImportRecord` — AssetRuntime은 스키마를 모른다, 7.1절 7).
+      - **ImportRecord 배치**(5.4절의 논리 필드, 스키마 버전 1): Record(`ImportRecordSchema` = Guid{0x52494d5052454344, 1}){ 1 importerId Guid, 2 importerName String(1–256 byte), 3 importerVersion U32, 4 sources RecordList[ Record(`ImportSourceSchema` = {…, 2}){ 1 role String(1–64), 2 root String(0–256 — 원본 루트 이름, 빈 값은 루트 없음), 3 relativePath String(1–1024), 4 sha256 Bytes(32), 5 bytes U64 } ], 5 options Record(임포터 스키마 — 없을 수 있다), 6 outputs RecordList[ Record(`ImportOutputSchema` = {…, 3}){ 1 outputKey String(0–64 — 빈 값은 주 출력), 2 assetId Guid, 3 typeId Guid } ], 7 ownerAssetId Guid }. 필드 id는 Guid{0, n}이다. 문자열·byte 필드의 payload는 다른 패키지 Record처럼 길이 접두 없는 내용 byte다(TLV 길이가 길이다). 규칙(위반은 InvalidArgument): ownerAssetId는 null이 아니다. 문자열은 유효 UTF-8에 NUL이 없다. 소유 기록(owner = 자기 패키지 id)은 importerId가 null이 아니고 importerName이 있으며 sources가 1–256개(role 유일 — 순서는 쓴 그대로)이고 outputs는 1–1024개로 outputKey byte 순 엄격 오름차순(writer가 정렬한다)·assetId 유일·null 아님·typeId null 아님·자기 id를 포함한다. relativePath는 `/`로 나눈 상대 경로다(앞·뒤 `/`, 빈 성분, `.`·`..` 성분, `\` 금지 — 원본 루트 밖을 가리키지 못한다). 루트가 비면(어느 원본 루트 아래도 아닌 원본 — 4.5절) relativePath는 `/` 구분 절대 경로다: POSIX `/a`, UNC `//server/share/a`(서버·공유 뒤 성분 하나 이상), 드라이브 `X:/a`(뒤는 같은 성분 규칙 — 기록은 호스트와 무관한 문법만 본다, A2f1a에서 고쳤다: 처음 규칙은 빈 루트에도 상대 경로를 요구해 POSIX 절대 경로를 기록할 수 없었다). root는 `/`·`\`를 갖지 않는다. options는 Record envelope 검사(ReadRecordHeader)를 통과해야 하고 비면 필드를 쓰지 않는다. 참조 기록(owner ≠ 자기)은 importerId null·importerName 빈 값·importerVersion 0이고 sources·options·outputs 필드가 없다. 빈 목록 필드·모르는 필드·wire가 다른 필드는 InvalidArgument다(정규형 하나). 다른 스키마 Guid나 지원 범위 밖 버전은 Unsupported다. writer·parser는 AssetDatabase `ImportRecord.h`에 둔다(`WriteImportRecord`·`ReadImportRecord` — AssetRuntime은 스키마를 모른다, 7.1절 7).
       - **ImportOwner 대조**(7.1절 7): 읽은 ImportRecord가 참조 기록이면 Dependencies에 그 owner의 ImportOwner 항목이 정확히 하나, 소유 기록이거나 ImportRecord가 없으면 ImportOwner 항목이 없어야 한다(`CheckImportOwner`). 다른 스키마·더 새 버전 ImportRecord는 참조 기록인지 알 수 없으므로 대조하지 않는다. 위반은 `CorruptPackage`(칸 Dependencies). 열기는 그 패키지를 열지 않고(대상이 의존이면 null + 경고), 색인은 진단을 남기고 그대로 색인한다(조회는 되게 — 고칠 수 있게).
       - 색인 항목의 ImportRecord 요약 `AssetIndexImportSummary{present, importerId, importerName, importerVersion, outputCount, owner}`. 색인은 ImportRecord를 Tags처럼 읽는다: 다른 스키마·더 새 버전은 `UnsupportedVersion` 진단(요약 없음), 형식 위반은 `CorruptPackage` 진단(칸 ImportRecord, 요약 없음) — 둘 다 항목은 색인한다. 한 파일에 같은 코드 진단이 둘 이상 생길 수 있으므로(깨진 Tags + 손상 ImportRecord 등) 진단 정렬은 파일 이름 → 코드 → 칸이다.
       - **`EditorPackageSet` 구현에서 정한 것**:
@@ -608,6 +608,7 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 임포트 상태 `AssetService::ImportStatus(path, out)` — 원본마다 current·`SourceChanged`(byte 수가 다르면 읽지 않고 곧바로, 같으면 SHA-256 비교 — 원본 시각은 VCS 체크아웃에서 믿을 수 없고 5.4절 스키마에 없으므로 기록하지 않는다)·`MissingSource`, 임포터 `ImporterOutdated`(등록 버전 > 기록 버전 — 자동 재임포트 없음, 16.1절)·`UnsupportedSourceFormat`(등록 없음). `asset-info`가 기록이 있는 패키지면 `import.importer=<이름> <기록 버전>`·`import.source.<역할>=<root>:<relative> <상태>` 줄을 덧붙인다(Edit 형식의 끝 — Report·JSON은 `import` 객체).
       - 명령 `asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설정…]`: 출력 `asset-reimport: <path> <id>` + 새 출력 줄, 경고 줄.
     - 시험: C++ 서비스 시험이 시험 임포터(AssetTestFixtures — 원본 텍스트 `value=<n>`·`bulk=<hex>`·`outputs=<key>:<type>,…` → TestAsset, 옵션 struct `TestImportOptions{scale, failAt}`, 역할 둘 변형, 기본 확장자 없는 변형)로 모든 흐름·실패·할당 실패를 확인하고, EngineTests가 명령 함수를 프로세스 안에서 부른다(위).
+    - A2f1a 상태: **구현** — 대조표 14.1.45절, coverage 14.1.46절. 구현에서 정한 것: 진단 여덟 개는 `OrphanedOutput` 뒤에 더했다. 표 파일·원본 읽기는 별칭 표의 `ReadWhole`을 모듈 공용(`WholeFileRead.cpp`)으로 옮겨 같이 쓴다. 루트 수 상한은 JSON 노드 상한이 막는다(넘으면 TooManyNodes → CapacityExceeded). 성분 수는 정규화한 `/` 경로의 빈 아닌 성분을 센다(드라이브 `C:`도 하나 — 상대 비교만 쓴다). `ReadImportSource`는 byte 상한 인자를 받는다(여러 원본은 남은 합계 예산을 준다). 원본 위치 검사는 `IsValidImportSourceLocation`(ImportRecord와 같은 판정)이다. 임포터 표의 옵션 struct 조회는 `AcquireValueType(…, Struct)`이고 종류 불일치(TypeMismatch)는 InvalidArgument로 돌려준다. 원본 위치 규칙을 고쳤다(빈 루트 = 절대 경로 — 5.7절 ImportRecord 배치 참고). 주 출력 타입의 속성 이름이 예약 이름과 같으면(예: 시험 TestAsset의 `source`) 그 설정은 `asset-import`가 아닌 `asset-set`으로 넣는다(한계 — 예약 이름은 명령 문법이 먼저 쓴다). 리뷰 반영(권장 넷): 루트 이름은 byte 그대로 기록·비교하므로 대소문자만 다른 두 이름(기본 `Project`와 겹치는 `project` 포함)을 InvalidArgument로 거부한다. Windows 장치 이름공간 경로(`\\?\C:\…`·`\\?\UNC\…`·`\\.\…`)는 Core `Path`가 Unsupported로 거부한다(루트 표·기록 위치 — UNC로 잘못 기록하지 않는다, 벗겨 쓰지 않는다: 그 형태는 사용자가 원본 경로로 줄 까닭이 없다). 기록 규칙이 `\`를 금지하므로 POSIX에서 이름에 `\`가 든 원본(`a\b.png`)은 기록할 수 없다(한계 — InvalidArgument). 원본 역할 문자 규칙은 지금 임포터 표(`[A-Za-z0-9_.]`)가 ImportRecord(길이·UTF-8만)보다 좁다 — A2f1b가 `--source.<역할>` 대조(대소문자 구분, byte 일치)를 정할 때 한 곳(ImportRecord 쪽 공개 판정)으로 모은다.
     - 버린 대안: 임포터가 패키지를 직접 만들고 저장(원자성·점유·기록 규칙이 임포터마다 흩어진다 — 문맥이 출력을 준다), 옵션을 객체(UE ImportUI `UObject`)로(공개 전 객체가 패키지에 들지 않는 일회 값이라 struct 값 대입으로 충분), 옵션 접두사 `--options.<필드>=`(13절 문법이 바뀌고 UE 명령행 관례와 다르다 — 등록 때 이름 충돌을 막는다), 확장자 경합 우선순위(UE `ImportPriority` — 결과가 등록 순서에 달린다), 타입이 바뀐 출력을 같은 id 새 객체로 바꾸기(위), 재임포트가 참조 기록 출력에서 owner를 따라가기(무엇이 바뀌는지 숨긴다 — 명시 거부), 명령 성공 경로 시험을 A5로 미루기(지금 닿는 코드를 미구현 사유로 남긴다 — 교차 검증 필수 4), 시험 전용 Commandlet 실행 파일(타깃이 하나 더 생긴다 — 프로세스 안 호출이 작다).
 
 ## 8. 동시성
@@ -2450,6 +2451,44 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `RunAssetFixDuplicateIdCommand` 경고 줄·결과 줄 서식·쓰기 실패 | 실패 | 14.1.36과 같다 |
 
 리뷰: 충족(필수 없음). 권장 넷을 반영했다 — 이번 열기가 연 의존이 열린 채 남음과 묶음 계산의 고정점 반복(참조자 닫힘 `CloseGroup` → 열기 전 기록 밖을 닫는 `CloseOpened`, 시험에서 닫힘·그대로 단언), 중간 Discard 실패 뒤 남은 참조의 상태(주석·7.1-17), 남은 같은 id가 둘 이상일 때의 결과 줄(still shared by).
+
+#### 14.1.45 요구 대조표(A2f1a — 임포트 기반)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetImportFoundationTests.cpp`(6개), 기존 시험의 빈 루트 원본을 규칙에 맞게 고친 것(`ImportRecord_*`·`AssetIndex_ImportRecords`·`AssetIndexCache_*`·`AssetOrphan_*`·`EditorPackage*`·`AssetDuplicate_*`·`AssetFixId_*` — 루트 `Raw`나 절대 경로), `AssetPackage_DiagnosticNames`(마지막 코드 UnknownProperty), Foundation `StringViewSliceBytesBorrowsTheRange`·`StringViewSliceBytesOutOfRangeIsFatal`(자식 프로세스)이다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 루트 표 읽기(4.5절, 7.1-18) | 파일 없음 → Project 하나(프로젝트 루트), 상대·`.`·끝 `/`·`..`·절대(OS 구분자) 정규화, 이름 byte 순 정렬, Project 없으면 더함·있으면 덮어씀, 빈 roots, 다시 읽으면 바꿈 | `AssetSourceRoots_Load` |
+| 루트 표 거부(7.1-18) | 대소문자만 다른 두 이름(`Art`·`ART`, `project`와 기본 Project), 장치 이름공간 경로 Unsupported(Windows), JSON 문법(줄·열)·최상위 배열·빈 객체·다른 키·키 둘·roots 배열·값 숫자·빈 값·이름 규칙(빈·`-`·`{`·`:`·`[`·`` ` ``·`@`·`/`·257 byte, 256 byte·`My_Root9` 받음)·중복 키, Windows 드라이브 상대·현재 드라이브 루트, 루트 위로 벗어나는 `..`, 루트 256개 받음·257개 CapacityExceeded, 파일 1 MiB 초과 CapacityExceeded, 읽기 IO(진단 None), 진단 없이도, 할당 실패(진단 None·빈 표) — 모두 실패하면 빈 표 | `AssetSourceRoots_RejectsUntrustedInput` |
+| 기록 위치(4.5절, 7.1-18) | 가장 긴 접두(Deep > Art), 성분 경계(SourceArtX), 대소문자 무시(원래 철자 유지), `.`·`..`, 루트 자신은 위 루트 아래, 드라이브 루트(끝 `/`), 연속 `/`로 시작하는 루트(UNC·POSIX 축약), 밖의 절대 경로(absolute)·UNC(Windows), 드라이브 상대·현재 드라이브 루트·상대·빈·NUL·루트뿐인 경로 InvalidArgument, 장치 이름공간(`\\?\C:\…`·`\\?\UNC\…`) Unsupported(Windows), 기록 1024 byte 받음·1025 CapacityExceeded, 할당 실패 | `AssetSourceRoots_LocateAndResolve` |
+| 풀기(4.5절, 7.1-18) | 루트 + 상대, 빈 루트 + 절대, 드라이브 루트는 `/`를 겹치지 않음, 모르는 루트 NotFound, `..`·빈 루트 상대·루트 이름 `/` InvalidArgument, 할당 실패 | `AssetSourceRoots_LocateAndResolve` |
+| 원본 읽기(7.1-18) | 내용·SHA-256, 빈 파일, 상한과 같은 크기 받음·초과 InvalidSource / CapacityExceeded, 없음 MissingSource / NotFound, 읽기 IO InvalidSource / 그 오류, 할당 실패(진단 None) | `AssetImportSource_Read` |
+| 원본 위치 규칙(5.7절 ImportRecord 배치, 7.1-18) | 루트 있음: 상대(드라이브 모양도 상대 성분), `/` 시작 거부. 빈 루트: POSIX·UNC(서버·공유 뒤 성분)·드라이브(대소문자) 받음, `//server/share`·`//server`·숫자·`[`·`{` 드라이브·드라이브 상대·`C:/`·`/`·상대·`..`·`//`·끝 `/`·`\`·빈 거부, 루트에 `/` 거부 | `ImportRecord_SourceLocations` |
+| 임포터 표(7.1-18) | 등록·찾기(id, 이름 대소문자 무시 — 숫자·밑줄, 확장자 대소문자 무시), 기본 확장자 없는 임포터(이름으로만), 같은 id·이름(대소문자만 다름)·기본 확장자 AlreadyExists, 겹치지 않는 확장자, 이동·Release·이동 대입·빈 토큰 대입·토큰 소멸이 해제 | `AssetImporterTable_RegisterAndFind` |
+| 임포터 규칙(7.1-18) | null id, 이름(빈·`-`·공백·`{`·`:`·`[`·`` ` ``·`.`·257 byte, 256 byte 받음), 확장자(대문자·빈·`.`·중복·`_`·`:`·`{`·`/`·17 byte, 32개 받음·33개 거부), 역할(중복·빈·`/`·`-`, 257개 거부), 주 출력(없음 NotFound·struct·에셋 아닌 클래스·추상 Asset InvalidArgument), 옵션(없음 NotFound·클래스 InvalidArgument·주 출력 속성과 도구 이름 충돌(대소문자만 다름)·예약 이름 `source`), 할당 실패 | `AssetImporterTable_RegisterAndFind` |
+| 진단 등록(4.6절, 7.1-18) | 여덟 코드 이름·유일·Unknown 경계 | `AssetPackage_DiagnosticNames` |
+| Core `StringView::SliceBytes`(CoreDetailedSpec T01) | 앞·가운데·끝·빈·전체, 원본 storage 빌림, 빈 원본 (0, 0), constexpr, 범위 밖(offset·count·overflow) Fatal | Foundation 두 시험 |
+| 조합(14 완료 조건 2) | 루트 모양(상대·절대·드라이브 루트·UNC·`..`) × 경로 모양(아래·경계·대소문자·밖·루트 자신·상대·NUL) × 연산(읽기·기록·풀기·원본 읽기) × 실패(형식·상한·IO·할당), 임포터 정보 칸마다 위반 × 표 상태(빈·찬) | 위 시험 |
+
+#### 14.1.46 Coverage(A2f1a)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetSourceRoots,AssetImportSource,ImportRecord,AssetImporterTable,AssetAlias -Sources Engine/Source/Developer/AssetDatabase/Private`.
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `ImportRecord.cpp`(원본 위치 규칙 포함) | 모두 닿음 | 모두 닿음 |
+| `AssetImporter.cpp` | 모두 닿음 | 모두 닿음 |
+| `AssetSourceRoots.cpp` | 호스트 전용 3줄 제외 모두 | 호스트 전용 제외 모두 |
+| `WholeFileRead.cpp`(옮긴 `ReadWhole`) | 크기 조회 실패 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `NormalizeAbsolute`의 `PosixRoot` 갈래, Windows가 아닌 호스트의 마무리(`/` 바꾸기 없음) | Windows 호스트에서 | 호스트 문법 갈래다 — POSIX 호스트(Linux·macOS CI)는 이 갈래만 돈다(Windows 갈래가 닿지 않는다). switch case 표시는 llvm-cov의 case 분기 형식(False 0) |
+| `ReadWhole` 크기 조회 실패 | 실패 | 열린 핸들의 크기 조회만 실패시킬 수 없다(메모리 파일 시스템에 그 고장 주입이 없다 — 별칭 표 A2e1과 같은 줄을 옮겼다) |
+
+처음 구현의 주 출력 종류 검사(`Kind() != Class`)는 `Acquire`가 클래스만 주므로 닿을 수 없어 지웠다.
 
 ## 15. PNG 디코더 범위
 

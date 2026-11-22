@@ -929,7 +929,7 @@ Array<uint8> MakeRecordPackage(AssetEnv& env, usize index) noexcept {
     }
 
     Array<uint8> record(env.allocator);
-    const ImportSourceInput sources[] = {{"source", "", "Rock.png", Sha256Digest{}, 3}};
+    const ImportSourceInput sources[] = {{"source", "Raw", "Rock.png", Sha256Digest{}, 3}};
     const ImportOutputInput outputs[] = {{"", id, IdOf<TestAsset>()},
                                          {"extra", FixedId(RecordFirstId + 90), IdOf<TestAsset>()}};
     ImportRecordInput input;

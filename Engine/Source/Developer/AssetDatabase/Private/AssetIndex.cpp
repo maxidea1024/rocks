@@ -679,10 +679,10 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
     auto named = [&](StringView relative, Array<char>& out) noexcept -> Result<void> {
         out.Clear();
         const StringView head = renameTo.IsEmpty() ? relative : renameTo;
-        const StringView tail = renameTo.IsEmpty()
-                                    ? StringView()
-                                    : StringView(relative.Data() + start.ByteCount(),
-                                                 relative.ByteCount() - start.ByteCount());
+        const StringView tail =
+            renameTo.IsEmpty()
+                ? StringView()
+                : relative.SliceBytes(start.ByteCount(), relative.ByteCount() - start.ByteCount());
         if (auto appended = out.TryAppend(Span<const char>(head.Data(), head.ByteCount()));
             !appended) {
             return appended;

@@ -89,7 +89,7 @@ struct CacheScene {
         }
 
         auto tags = WritePackageTags(env.allocator, TaggedTags);
-        const ImportSourceInput sourcesIn[] = {{"source", "", "Tagged.png", Sha256Digest{}, 1}};
+        const ImportSourceInput sourcesIn[] = {{"source", "Raw", "Tagged.png", Sha256Digest{}, 1}};
         const ImportOutputInput outputs[] = {{"", FixedId(TaggedId), IdOf<TestAsset>()}};
         ImportRecordInput input;
         input.owner = FixedId(TaggedId);

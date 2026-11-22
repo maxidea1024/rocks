@@ -69,7 +69,8 @@ struct ShapeScene {
         Array<uint8> record(env.allocator);
         const PackageDependencyEntry owner[] = {
             {FixedId(DerivedId), PackageDependencyKind::ImportOwner, TypeId{}, false}};
-        const ImportSourceInput recordSources[] = {{"source", "", "Base.png", Sha256Digest{}, 1}};
+        const ImportSourceInput recordSources[] = {
+            {"source", "Raw", "Base.png", Sha256Digest{}, 1}};
         const ImportOutputInput recordOutputs[] = {{"", FixedId(BaseId), IdOf<BaseGameAsset>()}};
         ImportRecordInput recordInput;
         Span<const uint8> bytes = sources.base.View();

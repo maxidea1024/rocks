@@ -8,6 +8,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/File.h>
 
 // AssetDatabase 모듈 안에서 함께 쓰는 도우미다(Docs/Design/AssetSystem.ko.md 7.1절).
 namespace rocks::asset_database_detail {
@@ -280,5 +281,11 @@ inline usize LogicalComponents(StringView text) noexcept {
 
     return count;
 }
+
+// path(절대 OS 경로)의 파일 전체를 bytes에 읽는다. 없으면 existed 거짓·빈 bytes로 성공한다. 크기가
+// limit보다 크면 tooLarge 참으로 성공한다(읽지 않는다). 오류: 열기·크기·읽기 IO 오류(원본 오류 코드
+// — 크기를 잰 뒤 줄었으면 EndOfFile), 할당 실패. 별칭 표·원본 루트 표·임포트 원본 읽기가 쓴다.
+Result<void> ReadWhole(platform::FileSystem& files, StringView path, uint64 limit,
+                       Array<uint8>& bytes, bool& existed, bool& tooLarge) noexcept;
 
 } // namespace rocks::asset_database_detail

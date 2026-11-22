@@ -65,9 +65,17 @@ void FRocksPropertyDumper::ExcludeStruct(const UScriptStruct* Struct)
 	}
 }
 
+void FRocksPropertyDumper::ExcludeProperty(const FProperty* Property)
+{
+	if (Property != nullptr)
+	{
+		ExcludedProperties.Add(Property);
+	}
+}
+
 bool FRocksPropertyDumper::ShouldSkip(const FProperty* Property) const
 {
-	if (Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated))
+	if (Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated) || ExcludedProperties.Contains(Property))
 	{
 		return true;
 	}

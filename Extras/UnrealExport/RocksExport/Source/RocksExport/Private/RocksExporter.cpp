@@ -4,11 +4,14 @@
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Engine/Texture.h"
 #include "Misc/EngineVersion.h"
+#include "RocksAssetBody.h"
 #include "RocksBundleWriter.h"
 #include "RocksExportClosure.h"
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
+#include "RocksTextureExtractor.h"
 
 namespace RocksExporterPrivate
 {
@@ -41,6 +44,74 @@ namespace RocksExporterPrivate
 		bool bRetain = true;
 		GConfig->GetBool(TEXT("TextureImporter"), TEXT("RetainJpegFormat"), bRetain, GEditorIni);
 		return bRetain;
+	}
+
+	// 덤프가 모은 참조를 의존 목록에 합친다(11.7절 4번 — 합집합, 둘 다면 Hard). AssetRegistry가 모르는 객체(에셋이
+	// 아닌 것)와 objectPath 문법을 어기는 경로는 넣지 않는다.
+	static void MergeReferences(FRocksExportAsset& Asset, const TArray<FRocksPropertyDumper::FReference>& References)
+	{
+		IAssetRegistry& Registry = IAssetRegistry::GetChecked();
+		bool bAdded = false;
+		for (const FRocksPropertyDumper::FReference& Reference : References)
+		{
+			if (Reference.Path == Asset.ObjectPath)
+			{
+				continue;
+			}
+
+			FRocksExportDependency* Existing = Asset.Dependencies.FindByPredicate([&Reference](const FRocksExportDependency& Dependency)
+				{
+					return Dependency.ObjectPath == Reference.Path;
+				});
+			if (Existing != nullptr)
+			{
+				Existing->bHard = Existing->bHard || Reference.bHard;
+				continue;
+			}
+
+			const FAssetData Target = Registry.GetAssetByObjectPath(FSoftObjectPath(Reference.Path));
+			if (!Target.IsValid() || !RocksIsValidExchangeObjectPath(Reference.Path))
+			{
+				continue;
+			}
+
+			bool bInScope = false;
+			Asset.Dependencies.Add({Reference.Path, RocksExchangeClassNameOfAsset(Target, bInScope), Reference.bHard});
+			bAdded = true;
+		}
+
+		if (bAdded)
+		{
+			Asset.Dependencies.Sort([](const FRocksExportDependency& Left, const FRocksExportDependency& Right)
+				{
+					return FRocksJsonWriter::CompareUtf8(Left.ObjectPath, Right.ObjectPath) < 0;
+				});
+		}
+	}
+
+	// 범위 안 종류의 본문을 만든다(UX2a 텍스처). 로드 실패는 에셋 수준 error 진단이다. blob 쓰기 실패만 false다.
+	static bool ExtractBody(FRocksExportAsset& Asset, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody, FString& OutError)
+	{
+		if (!Asset.bInScope || !FRocksTextureExtractor::IsTextureClass(Asset.ClassName))
+		{
+			return true;
+		}
+
+		UTexture* Texture = Cast<UTexture>(FSoftObjectPath(Asset.ObjectPath).TryLoad());
+		if (Texture == nullptr)
+		{
+			Asset.Diagnostics.Add({TEXT("LoadFailed"), RocksExport::SeverityError, TEXT("the asset could not be loaded as a texture")});
+			return true;
+		}
+
+		if (!FRocksTextureExtractor::Extract(*Texture, Bundle, OutBody, OutError))
+		{
+			return false;
+		}
+
+		MergeReferences(Asset, OutBody.References);
+		Asset.Diagnostics.Append(OutBody.Diagnostics);
+		return true;
 	}
 
 	// ISO 8601 UTC 초 단위 표기(예: 2026-11-22T09:30:00Z)다.
@@ -121,7 +192,7 @@ TArray<uint8> FRocksExporter::MakeBundleJson(const TArray<FRocksExportAsset>& As
 	return Writer.Finish();
 }
 
-TArray<uint8> FRocksExporter::MakeAssetJson(const FRocksExportAsset& Asset)
+TArray<uint8> FRocksExporter::MakeAssetJson(const FRocksExportAsset& Asset, const FRocksAssetBody& Body)
 {
 	FRocksJsonWriter Writer;
 	Writer.BeginObject();
@@ -164,13 +235,23 @@ TArray<uint8> FRocksExporter::MakeAssetJson(const FRocksExportAsset& Asset)
 
 	Writer.EndArray();
 
-	// 종류별 본문(4–8절)은 UX2 이후 단계가 채운다.
-	Writer.Key(TEXT("settings"));
-	Writer.BeginObject();
-	Writer.EndObject();
-	Writer.Key(TEXT("data"));
-	Writer.BeginObject();
-	Writer.EndObject();
+	// 종류별 본문(4–8절)이다. 추출기가 없는 종류는 빈 객체다.
+	const auto WritePart = [&Writer](const TCHAR* Key, const TArray<uint8>& Fragment)
+	{
+		Writer.Key(Key);
+		if (Fragment.IsEmpty())
+		{
+			Writer.BeginObject();
+			Writer.EndObject();
+		}
+		else
+		{
+			Writer.RawValue(Fragment);
+		}
+	};
+
+	WritePart(TEXT("settings"), Body.Settings);
+	WritePart(TEXT("data"), Body.Data);
 	Writer.EndObject();
 	return Writer.Finish();
 }
@@ -223,9 +304,16 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 		return false;
 	}
 
-	for (const FRocksExportAsset& Asset : Closure.GetAssets())
+	TArray<FRocksExportAsset> Assets = Closure.GetAssets();
+	for (FRocksExportAsset& Asset : Assets)
 	{
-		if (!Bundle.WriteAssetFile(Asset.PackageName.ToString(), MakeAssetJson(Asset), OutResult.Error))
+		FRocksAssetBody Body;
+		if (!RocksExporterPrivate::ExtractBody(Asset, Bundle, Body, OutResult.Error))
+		{
+			return false;
+		}
+
+		if (!Bundle.WriteAssetFile(Asset.PackageName.ToString(), MakeAssetJson(Asset, Body), OutResult.Error))
 		{
 			return false;
 		}
@@ -245,7 +333,7 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 		}
 	}
 
-	const TArray<uint8> BundleJson = MakeBundleJson(Closure.GetAssets(), Closure.GetRedirects(), RocksExporterPrivate::UtcNow());
+	const TArray<uint8> BundleJson = MakeBundleJson(Assets, Closure.GetRedirects(), RocksExporterPrivate::UtcNow());
 	if (!Bundle.Commit(BundleJson, OutResult.Error))
 	{
 		return false;

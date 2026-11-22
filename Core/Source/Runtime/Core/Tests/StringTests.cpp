@@ -3,14 +3,48 @@
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
+#include <Platform/Process.h>
+#include <TestSupport/HostFailure.h>
+#include <TestSupport/ProcessProbe.h>
+#include <string.h>
 
 using namespace rocks;
+namespace rocks::test {
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
+} // namespace rocks::test
+
 namespace string_tests_file {
 
 namespace {
 
 constexpr char Korean[] = "\xED\x95\x9C\xEA\xB8\x80";
 constexpr char Emoji[] = "\xF0\x9F\x8E\xAE";
+
+// 범위 밖 SliceBytes의 자식 쪽이다(Fatal이면 돌아오지 않는다 — 돌아오면 0으로 부모가 실패로 본다).
+int SliceBytesProbe(int argc, const char* const* argv) noexcept {
+    rocks::test::PrepareFatalTestProcess();
+    if (argc < 4) {
+        return 20;
+    }
+
+    const StringView value("abc");
+    const char* scenario = argv[3];
+    if (strcmp(scenario, "offset") == 0) {
+        (void)value.SliceBytes(4, 0);
+    } else if (strcmp(scenario, "count") == 0) {
+        (void)value.SliceBytes(1, 3);
+    } else if (strcmp(scenario, "overflow") == 0) {
+        (void)value.SliceBytes(2, ~usize{0});
+    } else {
+        return 21;
+    }
+
+    return 0;
+}
+
+const bool SliceBytesProbeRegistered =
+    rocks::test::RegisterProcessProbe("string-slice", &SliceBytesProbe);
 
 // 단계별 실패가 중첩 Result/String 소유권을 빠져나갈 때도 모두 해제되는지 검사한다.
 Result<void> RunStringLifecycle(Allocator& allocator) noexcept {
@@ -222,6 +256,52 @@ TEST(StringRejectsMalformedUtf8WithoutMutation) {
         CHECK(allocator.Stats().totalAllocations == allocations);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 검증하지 않는 byte 부분 view: 앞·가운데·끝·빈 view·전체, 원본 storage를 빌린다, 빈 원본의
+// (0, 0). 범위를 넘으면 Fatal이다(자식 프로세스에서 확인 — SliceBytesProbe).
+TEST(StringViewSliceBytesBorrowsTheRange) {
+    const StringView value("Art/Rock.png");
+    CHECK(value.SliceBytes(0, 3) == StringView("Art"));
+    CHECK(value.SliceBytes(4, 4) == StringView("Rock"));
+    CHECK(value.SliceBytes(9, 3) == StringView("png"));
+    CHECK(value.SliceBytes(12, 0).IsEmpty() && value.SliceBytes(3, 0).IsEmpty());
+    CHECK(value.SliceBytes(0, value.ByteCount()) == value);
+    CHECK(value.SliceBytes(4, 4).Data() == value.Data() + 4);
+    CHECK(StringView().SliceBytes(0, 0).IsEmpty());
+    static_assert(StringView("abc").SliceBytes(1, 1) == StringView("b"));
+}
+
+TEST(StringViewSliceBytesOutOfRangeIsFatal) {
+    if (!rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+
+    REQUIRE(SliceBytesProbeRegistered);
+    const char* const scenarios[] = {"offset", "count", "overflow"};
+    for (const char* scenario : scenarios) {
+        char executable[4096];
+        usize executableBytes = 0;
+        REQUIRE(platform::GetExecutablePath(executable, sizeof(executable), executableBytes));
+        const platform::ProcessArgument arguments[] = {
+            {"--process-probe", 15}, {"string-slice", 12}, {scenario, strlen(scenario)}};
+        platform::ProcessStartInfo info;
+        info.executable = executable;
+        info.executableBytes = executableBytes;
+        info.arguments = arguments;
+        info.argumentCount = 3;
+        info.output = platform::ProcessStreamMode::Null;
+        info.error = platform::ProcessStreamMode::Pipe;
+        char error[4096] = {};
+        platform::ProcessRunOptions options;
+        options.error = error;
+        options.errorCapacity = sizeof(error) - 1;
+        const platform::ProcessRunResult run = platform::RunProcess(info, options);
+        REQUIRE(run.status && !run.timedOut);
+        error[run.errorBytes < sizeof(error) ? run.errorBytes : sizeof(error) - 1] = '\0';
+        CHECK(run.exit.kind != platform::ProcessExitKind::Exited || run.exit.code != 0);
+        CHECK(strstr(error, "StringView::SliceBytes range is out of bounds") != nullptr);
+    }
 }
 
 TEST(StringViewSlicesRequireWholeInputAndScalarBoundaries) {
