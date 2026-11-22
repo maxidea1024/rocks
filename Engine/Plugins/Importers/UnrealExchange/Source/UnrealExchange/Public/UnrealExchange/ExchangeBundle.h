@@ -62,6 +62,10 @@ bool IsExchangeTextureClass(ExchangeClass type) noexcept;
 // 참이다.
 bool IsExchangeMaterialFamily(ExchangeClass type) noexcept;
 
+// 묶음·기존 에셋에 없는 Hard 대상을 엔진 기본값으로 비워 둘 수 있는 클래스(텍스처 5종·Material·
+// MaterialInstanceConstant)면 참이다(9.3절 — 그 밖의 대상은 MissingDependency).
+bool IsExchangeReplaceableTarget(ExchangeClass type) noexcept;
+
 // blob 배치다(3.3절). 앞 7개는 고정 크기 원소, 뒤 3개는 가변 길이 배치(MeshAnimationAssets
 // 3.4.1절)다.
 enum class ExchangeBlobLayout : uint8 {

@@ -11,6 +11,7 @@
 #include <Platform/File.h>
 #include <TraceAnalysis/TraceModel.h>
 #include <TraceAnalysis/TraceReport.h>
+#include <UnrealExchange/ExchangeCommand.h>
 
 #include <stdio.h>
 
@@ -167,6 +168,8 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
+    // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
+    UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);
     CommandletRegistry registry;
     auto registered = registry.Register(
@@ -246,6 +249,13 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
 
     registered = registry.Register({"asset-import", "Import a source file into a new asset.",
                                     &RunAssetImportCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered =
+        registry.Register({AssetImportUnrealName, "Import an Unreal exchange bundle as assets.",
+                           &RunAssetImportUnrealCommand, &unrealContext});
     if (!registered) {
         return 1;
     }

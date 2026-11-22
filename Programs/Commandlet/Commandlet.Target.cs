@@ -10,8 +10,8 @@ public sealed class CommandletTarget : TargetRules
 
     public override IReadOnlyList<string> Modules => ["RocksCommandlet"];
 
-    // Engine plugins linked into the commandlet (Docs/Design/BuildTargets.ko.md section 3.9): UnrealExchange (asset-import-unreal, its command
-    // registration comes with stage UX1b).
+    // Engine plugins linked into the commandlet (Docs/Design/BuildTargets.ko.md section 3.9): UnrealExchange (the asset-import-unreal command,
+    // Docs/Design/UnrealExchange.ko.md section 10.5).
     public override IReadOnlyList<PluginReference> Plugins => [new("UnrealExchange", true)];
 
     public override bool CheckPublicHeaders => true;

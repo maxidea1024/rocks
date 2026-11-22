@@ -479,7 +479,8 @@ TEST(UnrealExchange_PlanEdgeCases) {
         ExchangeImportPlan plan(allocator);
         REQUIRE(PlanExchangeImport(bundle, {}, plan, diagnostics));
         const ExchangeImportUnit& cycle = plan.Units()[plan.UnitOf(0)];
-        CHECK(cycle.memberCount == 3 && cycle.state == ExchangeUnitState::Ready);
+        CHECK(cycle.memberCount == 3 && cycle.state == ExchangeUnitState::Failed &&
+              cycle.failure == AssetDiagnosticCode::UnsupportedCycle);
         CHECK(plan.Units()[plan.UnitOf(3)].failure == AssetDiagnosticCode::CorruptBundle);
         CHECK(plan.Units()[plan.UnitOf(4)].failure == AssetDiagnosticCode::UnrealPathCollision);
         CHECK(plan.Units()[plan.UnitOf(5)].failure == AssetDiagnosticCode::CorruptBundle);
