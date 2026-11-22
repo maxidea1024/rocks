@@ -529,7 +529,7 @@ void RunS7(const char* test, const char* formatId, Span<const StringView> option
     REQUIRE(rocksFound && directFound);
     const StringView rocksLocation(rocksFile, rocksBytes);
     const StringView directLocation(directFile, directBytes);
-    printf("[S7] %s error location: Rocks %.*s:%u, DXC %.*s:%u\n", formatId,
+    printf("[S7] %s diagnostic position: Rocks %.*s:%u, DXC %.*s:%u\n", formatId,
            static_cast<int>(rocksBytes), rocksFile, rocksLine, static_cast<int>(directBytes),
            directFile, directLine);
     CHECK(rocksLocation == directLocation && rocksLine == directLine);
