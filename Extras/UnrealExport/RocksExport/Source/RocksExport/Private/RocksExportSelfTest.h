@@ -36,6 +36,10 @@ namespace RocksExportSelfTest
 	// LOD 0 스킨 가중치 영향 수를 원본과 대조하고 추출 전후 덤프가 같은지 본다.
 	void RunSkeletalExtraction(TArray<FString>& Errors);
 
+	// 애니메이션 추출(7.1절): 튜토리얼 걷기 클립을 내보내 비율·프레임·키 수, 본 트랙 이름·순서, 회전 blob을 데이터
+	// 모델 값과 대조하고, settings에 데이터 모델이 없고 추출 전후 덤프가 같은지 본다.
+	void RunAnimationExtraction(TArray<FString>& Errors);
+
 	// 위 전부를 돌린다. 모두 통과하면 true다.
 	bool RunAll(TArray<FString>& Errors);
 }
