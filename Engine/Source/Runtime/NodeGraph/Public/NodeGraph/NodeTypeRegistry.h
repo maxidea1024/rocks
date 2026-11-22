@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Containers/HashMap.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
@@ -151,11 +152,19 @@ private:
                                     const NodeTypeDescriptor& descriptor) const noexcept;
     Result<NodeTypeRegistrationId> AddNodeType(Name domain, const NodeTypeDescriptor& descriptor,
                                                ModuleLease lease) noexcept;
+    const RegisteredNodeType* LookupNodeType(Name domain, Name type) const noexcept;
+    void RebuildTypeLookup() noexcept;
+    void AddTypeLookup(Name domain, Name type, uint32 index) noexcept;
 
     Allocator& allocator_;
     NamePool& names_;
     Array<SchemaEntry> schemas_;
     Array<NodeTypeEntry> nodeTypes_;
+    // (도메인, 종류) 토큰 hash → nodeTypes_ 색인이다. 빗나가거나 충돌하면 선형 탐색으로
+    // 찾는다(정확성은 표와 무관하다).
+    HashMap<uint64, uint32> typeLookup_;
+    // 표가 모든 종류를 담고 충돌이 없는가(참이면 빗나간 조회는 없음이다).
+    bool typeLookupComplete_ = true;
     Name rerouteType_;
     Name reroutePinIn_;
     Name reroutePinOut_;

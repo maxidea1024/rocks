@@ -19,6 +19,8 @@ namespace {
 constexpr usize U32Bytes = 4;
 constexpr usize U64Bytes = 8;
 constexpr usize GuidBytes = 16;
+// WriteRaw trace의 16진 줄 하나에 담는 byte 수다.
+constexpr usize RawTraceLineBytes = 32;
 
 // NaN 단일화 값이다(quiet NaN, 부호 0 — 9.1절 결정 2).
 constexpr uint32 CanonicalNan32 = 0x7fc00000u;
@@ -313,6 +315,22 @@ void NuggetKeyWriter::WriteRaw(Span<const uint8> encoded) noexcept {
         FixedStringBuilder line{Span<char>(text)};
         (void)line.TryAppendFormat("raw {}", encoded.Size());
         Note(line.View());
+        // 내용도 남긴다(손으로 정렬해 흘린 Map·Set의 키 불일치를 trace로 찾게 — 16진 줄마다
+        // RawTraceLineBytes byte).
+        constexpr char Digits[] = "0123456789abcdef";
+        char hex[2 + RawTraceLineBytes * 2] = {' ', ' '};
+        for (usize offset = 0; offset < encoded.Size(); offset += RawTraceLineBytes) {
+            const usize count = encoded.Size() - offset < RawTraceLineBytes
+                                    ? encoded.Size() - offset
+                                    : RawTraceLineBytes;
+            for (usize index = 0; index < count; ++index) {
+                const uint8 value = encoded[offset + index];
+                hex[2 + index * 2] = Digits[value >> 4];
+                hex[2 + index * 2 + 1] = Digits[value & 0x0f];
+            }
+
+            Note(StringView(hex, 2 + count * 2));
+        }
     }
 
     Emit(encoded);

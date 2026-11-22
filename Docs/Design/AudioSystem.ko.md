@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 13(3.25절 WAV·AIFF 원본 디코드). 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 18(3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입). 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -373,7 +373,7 @@ CVar(이름은 [CVar](CVarSystem.ko.md) 규칙 — 소문자 점 구분):
 | `flac` | FLAC | libFLAC | sndfile |
 | `ogg` | Ogg Vorbis | libvorbis + libogg | sndfile |
 | `opus` | Ogg Opus | libopus + libopusfile + libogg | sndfile |
-| `mp3` | MPEG-1/2 Layer III | minimp3 | sndfile |
+| `mp3` | MPEG-1/2/2.5 Layer III | minimp3 | sndfile |
 
 UE는 WAV가 아니면 libsndfile로 WAV로 바꾼 뒤 WAV 경로로 임포트하고, 16비트가 아닌 WAV도 16비트로 바꾼다. 원본 bulk(`RawData`)에는 그 **16비트 교차 WAV byte(헤더 포함)**를 저장한다(`Source/Editor/AudioEditor/Private/Factories/SoundFactory.cpp:200–225, 395–415, 652, 667`). Rocks는 디코드한 PCM을 저장하고 원본 파일 byte를 보관하지 않는 점은 같지만, 정밀도와 배치는 다르다(AD12, 7절).
 - 원본 bulk = 디코드한 PCM, 채널 비교차(planar), 헤더 없음(형식은 `SoundClip` 필드). 저장 형식: 8비트(부호 없는) → int16 변환, 16비트 → int16, 24비트 → int24 packed, 32비트 정수·32/64비트 float·손실 디코드 결과 → float32. UE처럼 16비트로 줄이지 않는다. 24비트·float 원본의 정밀도를 쿠킹까지 유지하기 위해서다.
@@ -1087,7 +1087,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 | 임의 접근 | 서로 다른 0 아닌 스테레오에서 블록 경계·블록 안 시작(블록 1 이상 포함)의 디코드가 처음부터 디코드한 결과의 같은 구간과 같음 |
 | 음성 | 계수 색인 7, 짧은 블록, payload 크기 불일치, 범위 밖 frame(`startFrame > totalFrames` 포함), 넘침 경계의 frame 수 |
 
-### 3.25 AU4 앞당김 — 원본 디코드 라이브러리: WAV·AIFF(개정 13)
+### 3.25 AU4 앞당김 — 원본 디코드 라이브러리: WAV·AIFF(개정 13, 14)
 
 `SoundClipImporter`(A2f `AssetImporter`)와 `SoundClip` 에셋은 AU3(`EngineAudio`)의 `SoundClip` 타입 뒤에 붙인다. 이번 범위는 `AudioTools`의 원본 디코드 함수다. 파일 byte를 받아 planar PCM과 메타데이터를 낸다. ThirdParty 디코더(FLAC·Vorbis·Opus·MP3)는 같은 결과 형식으로 이어서 더한다.
 
@@ -1099,7 +1099,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
   - `sourceCodec`: `Pcm`·`Flac`·`Vorbis`·`Opus`·`Mp3`
   - `pcm`: planar float32. 채널 하나가 frame 수만큼 이어지고 채널이 차례로 이어진다.
   - `loops`: `smpl` loop 목록 `{start, end(포함하지 않음)}`
-  - `cues`: `cue ` 위치 목록 `{id, frame, name}`. name은 `LIST adtl labl`이고 UTF-8 그대로 둔다.
+  - `cues`: `cue ` 위치 목록 `{id, frame, name}`. name은 `LIST adtl labl`이고 UTF-8 그대로 둔다. 유효하지 않은 UTF-8이면 빈 이름이다. 같은 id의 cue가 여럿이면 모두 같은 이름을 받는다.
   - `ignoredChunks`: 모르는 chunk 수. 임포터의 `IgnoredSourceChunks` 경고에 쓴다.
 - float32 변환:
   - 8비트(부호 없음): (v − 128) / 128
@@ -1108,8 +1108,10 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
   - 32비트 정수: v / 2147483648(double로 계산한 뒤 float로)
   - float64: float로 반올림
   - 24비트 이하 정수는 float32로 손실 없이 표현되므로, 3.10.1절 bulk 저장 형식(int16·int24)으로 정확히 되돌릴 수 있다.
+  - float 원본(32·64)의 NaN·무한대, float32로 바꾸면 넘치는 float64는 `InvalidArgument`다. 믹서까지 비유한 값이 가지 않게 임포트에서 막는다(UE는 그대로 받는다).
+- 디코더는 시작할 때 결과를 비우고, 실패하면 다시 비운다. 부분 결과(PCM 할당 뒤 실패한 경우 포함)를 남기지 않는다.
 - 오류 코드:
-  - `InvalidSource`에 대응: `ErrorCode::InvalidArgument`(chunk 경계·크기·길이 불일치)
+  - `InvalidSource`에 대응: `ErrorCode::InvalidArgument`(필수 chunk 없음·크기·길이 불일치, float 비유한 표본)
   - `UnsupportedSourceFormat`에 대응: `ErrorCode::Unsupported`(모르는 부호화, 9채널 이상, rate가 [8000, 192000] 밖)
   - PCM 상한 `MaxSoundClipPcmBytes`(2 GiB) 초과: `ErrorCode::CapacityExceeded`
   - 할당 실패: `OutOfMemory`
@@ -1118,19 +1120,22 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 #### 3.25.2 WAV(`DecodeWav`, UE `FWaveModInfo::ReadWaveInfo` — `Engine/Private/Audio.cpp`)
 
 - RIFF(LE)·RIFX(BE) `WAVE`다. chunk는 짝수 byte로 맞춘다(홀수 크기 뒤 pad 1 byte).
-  - chunk가 파일 끝을 넘거나, RIFF 크기가 파일보다 크면 `InvalidArgument`다.
-  - RIFF 크기가 파일보다 작으면 그 크기까지만 읽는다.
+  - RIFF 크기는 파일 끝으로 자른다. 스트리밍 기록기가 남긴 `0xFFFFFFFF`나 끝 pad 누락도 받는다(UE와 같다). RIFF 크기가 파일보다 작으면 그 크기까지만 읽는다.
+  - `data`가 끝을 넘으면 끝까지로 잘라 받는다(UE와 같다). 다른 chunk가 끝을 넘으면 거기서 멈추고 `ignoredChunks`에 센다. 그때까지 `fmt `·`data`가 없으면 `InvalidArgument`다.
 - `fmt `(16·18·40 byte)는 다음을 받는다.
   - `WAVE_FORMAT_PCM`(1): 8·16·24·32비트
   - `IEEE_FLOAT`(3): 32·64비트
-  - `EXTENSIBLE`(0xFFFE): SubFormat GUID가 PCM이나 IEEE_FLOAT이고, validBits ≤ bitsPerSample
+  - `EXTENSIBLE`(0xFFFE): SubFormat GUID가 PCM이나 IEEE_FLOAT이고, validBits ≤ bitsPerSample. fmt가 40 byte보다 짧으면 `InvalidArgument`, 모르는 GUID는 `Unsupported`다.
+    - GUID `{0000tttt-0000-0010-8000-00AA00389B71}`의 Data1(u32)·Data2·Data3(u16)은 파일 끝 방향으로 읽고 Data4 8 byte는 그대로 비교한다. RIFX는 Data1·2·3이 BE다(libsndfile이 그렇게 쓴다).
+    - validBits < bitsPerSample이어도 컨테이너 bit 수로 읽는다(아래 bit는 0이다).
   - `blockAlign = channels × bits/8`이어야 한다(아니면 `InvalidArgument`).
   - 그 밖의 부호화(ADPCM·µ-law 등)는 `Unsupported`다(UE도 거부).
 - `data`: 크기가 blockAlign의 배수가 아니면 남는 byte를 버린다(UE와 같다).
   - `fmt `보다 먼저 와도 된다.
   - 둘 중 하나가 없거나 frame이 0이면 `InvalidArgument`다.
-- `smpl`: loop마다 `{start, end}`다. 파일 값의 end는 포함 위치라 +1로 바꾼다. frame 범위를 넘으면 그 loop를 버리고 셈에 넣지 않는다.
-- `cue `: `{id, sampleOffset}`. `LIST`/`adtl`의 `labl`(`{id, 문자열}`)로 이름을 붙인다. 끝의 NUL은 뗀다.
+- `smpl`: loop마다 `{start, end}`다. 파일 값의 end는 포함 위치라 +1로 바꾼다. end가 frame 수를 넘으면 그 loop를 버리고 셈에 넣지 않는다. 반복 방식(`dwType` — 정방향·왕복·역방향)은 보지 않는다(UE도 보지 않는다).
+- `cue `: `{id, dwPosition}`. 위치는 `dwPosition`이다(UE `Audio.cpp`와 같다. `dwSampleOffset`은 보지 않는다). frame 수보다 크면 버린다. `LIST`/`adtl`의 `labl`(`{id, 문자열}`)로 이름을 붙인다. 첫 NUL부터 뒤는 떼고, NUL이 없으면 본문 전체가 이름이다.
+- `smpl`·`cue `의 개수 필드가 본문보다 크면 본문에 있는 것까지만 읽는다. `labl`이 `LIST` 끝을 넘으면 거기서 멈추고 센다. 메타데이터 오류는 PCM을 막지 않는다.
 - 모르는 chunk(`fact`·`bext`·`id3 ` 등 포함)는 건너뛰고 `ignoredChunks`를 센다. 같은 chunk가 둘 이상이면 첫 것을 쓴다.
 
 #### 3.25.3 AIFF·AIFF-C(`DecodeAiff`)
@@ -1138,19 +1143,213 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 - `FORM`(BE), `AIFF`·`AIFC`다.
   - `COMM`: channels, frames, bits, rate(80비트 IEEE extended → 정수 rate. 소수가 있거나 범위 밖이면 `Unsupported`)
   - AIFC면 압축 type을 받는다: `NONE`(BE 정수), `sowt`(LE 정수), `fl32`·`FL32`(BE float32). 그 밖은 `Unsupported`다.
-  - `SSND`: offset·blockSize 머리 뒤 PCM이다. 길이가 frames × channels × bytes보다 짧으면 `InvalidArgument`다.
-- 정수 bits는 8·16·24·32이고 8비트는 부호 있음이다(WAV와 다르다).
+  - `SSND`: offset·blockSize 머리 뒤 offset byte를 건너뛴 곳부터 PCM이다. 길이가 frames × channels × bytes보다 짧으면 `InvalidArgument`다.
+  - FORM 크기와 끝을 넘는 `SSND`는 WAV처럼 파일 끝으로 자른다. 다른 chunk가 끝을 넘으면 멈추고 센다.
+  - PCM 상한은 `COMM`의 frame 수로 `SSND`를 보기 전에 판정한다. WAV는 `data` 크기로 frame 수를 얻으므로 상한을 넘으려면 512 MiB 넘는 입력이 든다 — 파일 경로 시험은 AIFF로 한다.
+- 정수 bits는 1–32다. 표본은 왼쪽 맞춤 ceil(bits/8) byte다(규격). 아래 bit는 0이므로 컨테이너 크기(8·16·24·32비트)로 읽는다. 12비트는 `Int16`, 20비트는 `Int24`로 보고한다.
+- 8비트는 부호 있음이다(WAV와 다르다). 저장 형식은 `Int16`으로 보고한다 — 넓혀도 손실이 없다.
 - `MARK`·`INST` loop는 지금 읽지 않는다. 모르는 chunk로 센다(필요해지면 더한다).
 
 #### 3.25.4 시험
 
 | 대상 | 확인 |
 |---|---|
-| WAV 부호화 | 8·16·24·32비트 정수, float32·64, EXTENSIBLE(PCM·float GUID), RIFX, 1·2·8채널: 표본 값 정확 일치(손으로 만든 byte) |
-| WAV chunk | 홀수 크기 pad, `fmt `·`data` 순서, 중복 chunk, `smpl` loop(+1 변환·범위 밖 버림), `cue `·`labl` 이름, 모르는 chunk 계수 |
-| AIFF | `NONE`·`sowt`·`fl32`, 80비트 rate(44100·48000·22050), 8비트 부호 |
-| 음성 | 잘린 chunk, RIFF 크기 초과, blockAlign 불일치, 압축 WAV `Unsupported`, 9채널, rate 범위 밖, 빈 data, AIFF 짧은 SSND |
-| 상한 | `MaxSoundClipPcmBytes`를 넘는 머리 → `CapacityExceeded`(할당 전) |
+| WAV 부호화 | 8·16·24·32비트 정수, float32·64, fmt 18 byte, EXTENSIBLE(PCM·float GUID, RIFF·RIFX), RIFX 16·24비트·float32, 1·2·8채널: 표본 값 정확 일치(손으로 만든 byte) |
+| WAV chunk | RIFF·RIFX 각각: 홀수 크기 pad, `fmt `·`data` 순서, 중복 `fmt `·`data`, `smpl` loop(+1 변환·end = frame 수 받음·넘으면 버림·개수 필드 초과), `cue `(dwPosition·frame 수와 같음·개수 필드 초과)·`labl` 이름(NUL 뒤 뗌·NUL 없음·잘못된 UTF-8), 모르는 chunk 계수 |
+| 잘린 파일 | RIFF 크기 0xFFFFFFFF, 끝을 넘는 `data` 자름, `data` 뒤 넘치는 메타 chunk 멈춤·계수, `LIST` 안 넘치는 `labl` |
+| AIFF | `NONE`·`sowt`·`fl32`·`FL32`, 80비트 rate(44100·48000·22050), 8비트 부호(`Int16`), 24·32비트, 12·20비트 왼쪽 맞춤, 스테레오, SSND offset ≠ 0, 끝을 넘는 SSND |
+| 음성 | blockAlign 불일치, 압축 WAV `Unsupported`, 12비트 PCM·16비트 float WAV, EXTENSIBLE 짧은 fmt·모르는 GUID·validBits > bits, float NaN·±무한대·float64 넘침, 9채널, rate 범위 밖, 빈 data, fmt 잘림, AIFF 모르는 압축·소수 rate·rate 4000·9채널·33비트·짧은 SSND·SSND offset 초과·SSND 없음·frame 0·형식 id |
+| 상한 | `MaxSoundClipPcmBytes`를 넘는 크기 → `CapacityExceeded`(할당 전, AIFF는 `COMM`만으로) |
+| 실패 시 비움 | 앞서 채운 결과에 NaN WAV·짧은 AIFF를 디코드하면 frame·loop·cue·계수가 모두 0 |
+
+### 3.26 AU4 앞당김 — MP3 원본 디코드(개정 15, 16)
+
+3.25절과 같은 결과 형식(`DecodedSourceAudio`)으로 MP3를 디코드한다. ThirdParty `Minimp3`(AD13)를 처음 반입한다.
+
+#### 3.26.1 ThirdParty `Minimp3`(`Engine/Source/ThirdParty/Minimp3`)
+
+- lieff/minimp3 master `afb604c06bc8`(2021-11-30, CC0-1.0). 릴리스·서명이 없어 commit archive SHA-256으로 고정한다. 반입 파일은 `minimp3.h`·`minimp3_ex.h`·`LICENSE`다. 수정 없음.
+- `Minimp3Glue.c`가 구현을 한 번 컴파일한다(`MINIMP3_IMPLEMENTATION`, `MINIMP3_FLOAT_OUTPUT`, `MINIMP3_NO_STDIO`, `MINIMP3_ONLY_MP3`). `MINIMP3_ONLY_MP3`는 Layer I·II 디코더를 빼 공격면을 줄인다(어차피 거부한다). `minimp3_ex.h`의 static tag 함수를 Rocks 이름으로 내보낸다.
+  - `RocksMinimp3SkipTags`: 앞 ID3v2, 끝 ID3v1·APEv2를 건너뛴다. 빈 입력은 그 전에 `InvalidArgument`로 돌려준다(NULL끼리 빼기 방지).
+  - `RocksMinimp3CheckVbrTag`: Xing/Info(LAME) tag를 읽는다. upstream은 tag 필드(TOC 100 byte 포함, side info 뒤 약 120 byte)를 읽은 뒤에야 frame 크기를 보므로, frame을 0으로 채운 버퍼(free-format 상한 2304 + 512 byte)에 복사해 넘긴다. 상한보다 큰 frame은 tag 없음으로 본다.
+  - `minimp3_ex`의 load·ex 함수(malloc·realloc 사용)는 부르지 않는다. frame마다 `mp3dec_decode_frame`을 부른다.
+  - 한 번에 넘기는 byte 수는 `INT_MAX / 2`까지다. 인자가 int이고 upstream frame 탐색이 `i + 2*k` 같은 int 덧셈을 하므로, 2 GiB 넘는 입력에서 overflow를 막는다.
+- 경고 0: clang C17 `-Wall -Wextra -Wpedantic -Werror`, clang-cl `/W4 /WX`(`/Od`·`/O2`)에서 억제 없이 컴파일된다.
+- SIMD는 빌드 때 고른다(x86-64 SSE2, ARM64 NEON). 런타임 CPU 탐지가 없어 디코드 결과가 아키텍처마다 고정이다(3.10.1절 결정성).
+- `AudioTools`만 Private 의존으로 링크한다(헤더는 이 모듈 밖으로 나가지 않는다).
+
+#### 3.26.2 `DecodeMp3`
+
+- 받는 것: MPEG-1·2·2.5 Layer III. Layer I·II는 `Unsupported`다(minimp3는 디코드하지만 `.mp3` 원본은 Layer III만 받는다. `.mp2`는 범위 밖).
+- 순서:
+  1. tag 건너뛰기: ID3v2·ID3v1·APEv2
+  2. 1차 훑기(`pcm = NULL`, 머리만 읽음): 채널·rate·layer와 채널당 표본 수 합을 센다.
+     - 채널·rate가 중간에 바뀌면 `Unsupported`다. 한 `SoundClip`은 형식이 하나다(UE도 libsndfile 변환에서 한 형식으로 받는다).
+     - 첫 frame에 Xing/Info tag가 있으면 그 frame은 길이에 넣지 않고 디코드하지 않는다(무음 frame이다. minimp3_ex와 같다). 그 뒤 decoder를 비워, 디코드 단계(새 decoder)와 같은 방식(frame 탐색)으로 다음 frame을 연다.
+     - frame당 채널 표본 수(MPEG-1 1152, MPEG-2·2.5 576)를 첫 frame에서 기억한다. rate가 고정이라 stream 안에서 같다.
+     - frame이 하나도 없으면 `InvalidArgument`, rate·채널 범위 밖이면 `Unsupported`다.
+     - 표본 수 합으로 PCM 상한을 디코드 전에 판정한다(`CapacityExceeded`).
+  3. 디코드: 교차 float로 받은 뒤 planar로 옮긴다. 1차 훑기 합만큼 미리 잡는다.
+     - frame마다 layer·채널·rate가 1차 값과 같은지 다시 본다. 디코드 단계는 깨진 side info 뒤 frame을 다시 찾으므로(`mp3d_find_frame`: 뒤 머리 최대 10개 연쇄) 1차 훑기(다음 머리 하나)와 다른 frame을 볼 수 있다. 다르면 원본 손상으로 `InvalidArgument`다.
+     - main data가 깨지거나 bit reservoir가 모자라 표본을 내지 못한 frame은 frame당 표본 수만큼 무음을 넣어 길이를 지킨다.
+  4. gapless(minimp3_ex `mp3dec_load`와 같은 규칙): LAME tag에 frame 수가 있으면
+     - delay = encoder delay + 디코더 지연 529, padding = encoder padding − 529(음수면 0)
+     - 길이 = min(디코드 − delay, tag frame 수 × frame당 표본 수 − delay − padding). 앞 delay는 언제나 자른다.
+     - 그래서 frame 수가 원본 길이와 같다. 잘린 파일은 앞만 자르고 끝은 남기고(tag 길이보다 짧다), tag 길이 뒤에 frame이 더 붙은 파일은 tag 길이에서 끊는다.
+     - frame 수가 없는 tag(Xing flags에 frame 수 없음)나 LAME 확장이 없는 tag(delay·padding 0)는 tag frame만 빼고 자르지 않는다. tag가 없으면 자르지 않는다(frame 수 × frame당 표본 수).
+     - 자른 뒤 0 frame이면 `InvalidArgument`다.
+- 결과: `sampleFormat = Lossy`, `sourceCodec = Mp3`, loop·cue 없음. 실패하면 결과를 비운다(3.25.1절과 같다).
+- 시작 부분 bit reservoir가 비어 첫 frame이 표본을 못 내는 일은 처음부터 디코드하면 생기지 않는다. 생기면 위 무음 규칙을 따른다.
+- 한계:
+  - 깨진 side info 뒤 재동기화로 디코드 단계가 frame을 건너뛰면 1차 훑기보다 짧아질 수 있다(1차 훑기에서 재현할 수 없다).
+  - encoder padding이 529보다 작으면 원본보다 그 차이만큼 길다(padding을 0으로 본다. minimp3_ex와 같다).
+  - 메모리 정점은 교차 임시 버퍼와 planar 결과를 합쳐 PCM 상한의 두 배(4 GiB)까지다. 도구 전용이라 받는다.
+  - stack은 약 40 KB(frame 버퍼 9 KB, `mp3dec_t` 6.7 KB, minimp3 scratch 16 KB)를 쓴다. 임포트 worker stack은 이보다 커야 한다.
+
+#### 3.26.3 시험
+
+입력은 `Tests/Mp3TestFixtures.h`의 byte 배열이다. 만든 방법:
+
+- `Mp3MonoLame`: `ffmpeg -f lavfi -i sine=frequency=440:sample_rate=44100:duration=0.25 -c:a pcm_s16le sine44.wav`, `lame -b 128 --tt Rocks --add-id3v2 sine44.wav`(LAME 4.0). 11 frame × 1152 − delay 576 − padding 1071 = 11025.
+- `Mp3StereoNoTag`: `ffmpeg … sine 44100 Hz 0.1 s, pan=stereo|c0=c0|c1=-1*c0, -c:a libmp3lame -b:a 128k -write_xing 0 -id3v2_version 0`
+- `Mp2Layer2`: `ffmpeg … -c:a mp2 -b:a 64k -f mp2`
+- `Mp3MonoNoTag`: `ffmpeg … sine 44100 Hz 0.05 s, -c:a libmp3lame -b:a 128k -write_xing 0 -id3v2_version 0`(채널 변경 시험용)
+- `Mp3Mpeg2Mono16k`·`Mp3Mpeg2Mono22k`: libmp3lame 24 kbps tag 없는 16000 Hz·22050 Hz 0.3 s. rate 변경 시험은 둘을 이어 붙인다.
+- APEv2 건너뛰기는 따로 시험하지 않는다. 끝의 tag byte는 건너뛰지 않아도 frame이 아닌 byte로 무시된다.
+- ffmpeg(9.1)가 쓰는 LAME tag는 delay가 529 모자라다(ffmpeg 자신도 디코드 결과가 529 표본 어긋난다). 그래서 gapless 기준 파일은 LAME CLI로 만든다.
+
+| 대상 | 확인 |
+|---|---|
+| gapless | `Mp3MonoLame`: ID3v2·ID3v1 건너뜀, tag frame 제외, frame 수 = 11025, 원본 sine과 정렬(SNR ≥ 15 dB. 529 어긋나면 0 dB 아래) |
+| 잘린 파일 | tag frame + audio frame 6개로 자름: 6 × 1152 − 1105(앞만 자르고 끝은 남김) |
+| tag 변형 | padding < 529(0으로 봄, 앞만 자름), LAME 확장 없음(자르지 않음), frame 수 flag 없음(−1, 자르지 않음) — 모두 tag frame은 뺌 |
+| tag 없음 | `Mp3StereoNoTag`: 2채널, 5 × 1152 frame, 오른쪽 = −왼쪽. `Mp3Mpeg2Mono16k`: MPEG-2 16000 Hz, 11 × 576 frame |
+| 무음 채움 | `Mp3StereoNoTag` 세 번째 frame의 main_data_begin을 511로: 길이 5 × 1152 유지, 그 frame 자리는 0 |
+| 고정값 | `Mp3MonoLame` 디코드 결과 float bit의 SHA-256 — x86-64 고정값(Debug·Release 같음). ARM64(NEON) 고정값은 macOS 기기에서 잰 뒤 넣는다(그때까지는 두 번 디코드가 같은지만 본다) |
+| 거부 | Layer II, rate 변경(16000 → 22050), 채널 변경(stereo → mono) `Unsupported`. 빈 입력·0 byte·ID3v2만·머리 4 byte `InvalidArgument`. 실패 시 비움(코덱·형식도 처음 값) |
+| 상한 | MPEG-2.5 8 kHz 8 kbps mono frame(72 byte)을 상한 + 1 frame만큼(약 67 MB) 이어 붙임: 1차 훑기만으로 `CapacityExceeded` |
+| 견고성 | 앞부분 길이 37 byte 간격 전부(받으면 길이 ≤ 원본), byte 8개 무작위 교체 200회(멈춤·범위 밖 읽기 없음, 받으면 표본 유한) |
+
+### 3.27 AU4 앞당김 — FLAC 원본 디코드(개정 17, 18)
+
+3.25절과 같은 결과 형식으로 FLAC을 디코드한다. ThirdParty `Flac`(libFLAC, AD13)을 반입한다.
+
+#### 3.27.1 ThirdParty `Flac`(`Engine/Source/ThirdParty/Flac`)
+
+- libFLAC 1.5.0(BSD-3-Clause, `COPYING.Xiph`). 공식 릴리스 tarball이고, GitHub 릴리스와 downloads.xiph.org 두 곳의 SHA-256이 같다.
+- 반입 범위는 stream decoder에 필요한 35개 파일이다: 공개 decoder 헤더, share compat 헤더, decoder 원본과 private 헤더, Windows UTF-8 파일 wrapper, 라이선스. encoder·Ogg FLAC·SIMD intrinsics·도구·시험·문서는 들이지 않는다.
+- `config.h` 없이 빌드한다. configure 결과는 manifest define이다.
+  - little endian(모든 Rocks 대상), 64비트 bit reader word
+  - Ogg FLAC 없음(`FLAC__HAS_OGG=0`)
+  - x86·NEON intrinsics 없음, `FLAC__NO_ASM`
+  - 무손실이고 decoder가 정수만 쓰므로 디코드 결과가 모든 아키텍처에서 같다.
+- glue:
+  - `FlacFormat.c`: `PACKAGE_VERSION`(version 문자열)을 정의하고 `format.c`를 컴파일한다.
+  - `FlacWindowsFileIo.c`: Windows에서만 `src/share/win_utf8_io/win_utf8_io.c`를 컴파일한다. 플랫폼 선택은 manifest `platformDefines`(Windows: `ROCKS_FLAC_WIN_UTF8_IO=1`)에 두고 glue는 그 매크로만 본다(엔진 소유 소스는 native backend 밖에서 OS 매크로로 분기하지 않는다). `compat.h`가 Windows에서 `flac_fopen`을 그 파일의 `fopen_utf8`로 바꾸고, file 기반 init 함수가 이를 참조한다. 그 파일은 `windows.h`의 `malloc` 선언에 기대는데 Rocks 빌드는 `WIN32_LEAN_AND_MEAN`이라 `<stdlib.h>`를 먼저 include한다.
+- 경고 0을 위한 수정(`Rocks.patch`, manifest `modifications`). Microsoft CRT가 deprecated로 표시한 호출 두 곳이다. `_CRT_SECURE_NO_WARNINGS`는 쓰지 않는다([컴파일러 진단](CompilerDiagnostics.ko.md)).
+  - `stream_decoder.c`: `file_length_callback_`의 `fileno`를 Windows에서 `_fileno`로(같은 파일의 stdin 경로가 이미 그렇게 한다).
+  - `win_utf8_io.c`: `_wfopen`을 `_wfsopen(…, _SH_DENYNO)`로. 공유 방식이 같다.
+- 원본에 있는 진단 지시문(`format.c`·`lpc.c`의 MSVC `#pragma warning`, `compat.h`의 `#pragma message`)은 `pragmaDirectives`에 기록한다(byte 그대로인 파일이다).
+- `AudioTools`만 Private 의존으로 링크한다. libFLAC 내부 할당은 malloc이다(도구 전용이라 받는다).
+- Debug(NDEBUG 없음)에서는 libFLAC이 손상 입력에 stderr로 진단 문장을 쓰고 `FLAC__ASSERT`가 CRT assert가 된다. upstream 동작이고 도구 전용이라 받는다(manifest notes).
+- Linux 도구 빌드가 생기면 glibc `-std=c17`에서 `fileno`가 숨겨지므로 `_POSIX_C_SOURCE=200809L` platform define이 필요하다.
+
+#### 3.27.2 `DecodeFlac`
+
+- 메모리에서 stream callback으로 디코드한다(`FLAC__stream_decoder_init_stream`, read·eof만 주고 seek·tell·length는 주지 않는다). file 기반 init 함수는 부르지 않는다.
+- STREAMINFO:
+  - 없거나 채널 0·bit 수가 4–32 밖이면 `InvalidArgument`
+  - 9채널 이상·rate가 [8000, 192000] 밖이면 `Unsupported`
+  - STREAMINFO가 둘이면 `InvalidArgument`다(libFLAC은 뒤 값을 쓰므로 모호하다).
+  - 길이(total samples)를 알면 디코드 전에 PCM 상한을 판정하고 교차 버퍼를 미리 잡는다. 미리 잡는 양은 16M 표본(64 MiB)까지다. STREAMINFO 길이는 CRC가 없는 숫자 하나라, 손상·조작된 작은 파일이 큰 버퍼를 잡지 않게 한다. 나머지는 쌓으며 늘린다. 길이를 모르면(파이프로 쓴 파일, 0) 쌓는 동안 상한을 본다.
+- frame마다 채널·bit 수·rate가 STREAMINFO와 같아야 한다. 다르면 `Unsupported`다(한 `SoundClip`은 형식이 하나다).
+- frame이 이어져야 한다: frame 머리의 시작 표본 번호가 지금까지 디코드한 frame 수와 같아야 한다(다르면 `InvalidArgument`).
+- 오류 callback:
+  - `LOST_SYNC`는 표시만 한다. 그 뒤 audio가 오면 `InvalidArgument`다. libFLAC은 frame 안 손상(subframe 머리 bit, wasted bits, predictor order, residual 해석 오류)도 CRC 비교 전에 `LOST_SYNC`로 보고하고, 빠진 구간을 무음 frame으로 채워 길이를 맞추기 때문이다(그 뒤의 `MISSING_FRAME`은 이미 오류를 보냈다는 이유로 나가지 않는다). 마지막 frame 뒤 쓰레기(끝의 ID3v1 등)는 뒤따르는 audio가 없으므로 받는다.
+  - 그 밖(`FRAME_CRC_MISMATCH`·`BAD_HEADER`·`UNPARSEABLE_STREAM`·`BAD_METADATA`·`OUT_OF_BOUNDS`·`MISSING_FRAME`)은 `InvalidArgument`다. libFLAC은 이때 무음을 넣고 계속하지만, 무손실 원본을 조용히 바꿔 임포트하지 않는다(MP3는 손실 원본이라 무음 채움으로 길이를 지키는 것과 다르다).
+- MD5 확인을 켠다. STREAMINFO MD5가 0이 아니면 `FLAC__stream_decoder_finish`가 디코드 결과와 맞춰 보고, 다르면 `InvalidArgument`다.
+- 길이를 알면 디코드한 frame 수가 같아야 한다(잘린 파일 `InvalidArgument`). 더 길어도 `InvalidArgument`다.
+- 앞 ID3v2는 libFLAC이 건너뛴다.
+- init 실패는 할당 실패면 `OutOfMemory`, 그 밖(내부 오류)은 `InvalidArgument`다.
+- 변환: 정수 표본 / 2^(bits−1). 저장 형식은 bit 수로 정한다: 16 이하 `Int16`(8비트 이하도 넓혀 보고), 24 이하 `Int24`, 그 위 `Int32`. 12·20비트 같은 값도 float32에서 정확하고, 넓힌 저장 형식으로 정확히 되돌릴 수 있다.
+- loop·cue는 읽지 않는다(`CUESHEET`·foreign `smpl` 메타데이터는 필요해지면 더한다). `ignoredChunks`는 0이다.
+- 결과: `sourceCodec = Flac`. 실패하면 결과를 비운다.
+- 한계:
+  - 무결성 수단은 frame CRC(머리 CRC-8, frame CRC-16), STREAMINFO 길이, MD5뿐이다. 길이·MD5가 모두 0인 파일(파이프로 쓴 파일)은 frame 경계에서 잘리면 오류 없이 짧게 받는다(마지막 frame 중간에서 잘리면 그 frame은 libFLAC이 버린다).
+  - ID3v2 바로 뒤가 `fLaC`가 아니면(선언 크기 뒤 padding, ID3v2.4 footer) libFLAC 1.5.0이 메타데이터를 찾지 못해 `InvalidArgument`다(`find_metadata_`가 ID3 건너뛰기 뒤 상태를 되돌리지 않는다. upstream 동작). ID3 없이 `fLaC` 앞에 쓰레기가 있는 파일은 받는다(첫 frame 앞의 `LOST_SYNC`는 표시하지 않는다).
+  - 첫 frame의 시작 표본 번호가 0이 아닌 stream(라이브 stream을 잘라낸 파일)은 frame 연속 검사로 `InvalidArgument`다.
+  - 끝의 ID3v2·APEv2 binary(그림 등)에 `FF F8`·`FF F9`가 있으면 frame 머리로 해석하다 CRC-8 불일치(`BAD_HEADER`)로 거부된다. 드문 경우라 받는다.
+  - 메모리 정점은 교차 임시 버퍼와 planar 결과를 합친 값이다. 길이를 모르면 Array가 늘어나는 순간 옛 버퍼와 새 버퍼가 함께 있어 PCM 상한의 약 2.4배까지 갈 수 있다(MP3도 같은 구조).
+
+#### 3.27.3 시험
+
+입력은 `Tests/FlacTestFixtures.h`의 byte 배열이다. 만드는 방법:
+
+- 정수 패턴 x = frame × 2654435761 + channel × 40503(mod 2^32)의 위 bits를 부호 있는 값으로 쓴 WAV(16비트 stereo 44100 Hz 1000 frame, 24비트 mono 96000 Hz 600 frame, 16비트 mono 48000 Hz 500 frame)
+- `ffmpeg -fflags +bitexact -flags:a +bitexact -i s16.wav -c:a flac -frame_size 256 s16.flac`(24비트도 같다), 길이·MD5 없는 판은 `-c:a flac -frame_size 128 -f flac -`로 파이프에 쓴다
+- 생성기가 frame 머리 CRC-8로 frame 시작과 첫 subframe 머리 위치를 확인해 `<이름>FrameOffsets`·`<이름>SubframeOffsets`로 적는다(손상 시험이 쓴다)
+- 무손실이라 시험이 같은 식으로 기대값을 만든다
+
+| 대상 | 확인 |
+|---|---|
+| 정확 일치 | 16비트 stereo(`Int16`, 4 frame), 24비트 mono(`Int24`, 3 frame), 파이프로 쓴 16비트 mono(길이·MD5 0, 4 frame): 표본 전부 패턴과 같음 |
+| tag | 앞 ID3v2·끝 ID3v1(128 byte)을 붙여도 받고 결과가 같음 |
+| 거부 | FLAC 아님·빈 입력·`fLaC`만 `InvalidArgument`. audio byte 하나 바꿈(CRC 불일치) `InvalidArgument`. 길이를 아는 파일의 끝 100 byte를 자름 `InvalidArgument`. STREAMINFO rate 4000 Hz `Unsupported`. 실패 시 비움 |
+| STREAMINFO | MD5만 바꿈(finish 실패) `InvalidArgument`. MD5 0 + 마지막 frame 제거(길이 불일치) `InvalidArgument`. MD5 0 + 길이 500(길이 초과) `InvalidArgument`. 길이 36 bit 최대값 `CapacityExceeded`(디코드 전). bit 수 24로(frame과 형식 불일치) `Unsupported` |
+| 손상 은폐 | 파이프 파일 가운데 frame의 subframe 머리 bit를 켬(`LOST_SYNC` + libFLAC 무음 채움) `InvalidArgument` |
+| 한계 | 파이프 파일을 frame 경계에서 자르면 짧게 받고 앞부분은 패턴과 같음 |
+| 견고성 | 길이를 모르는 파일의 앞부분 41 byte 간격 전부(받으면 패턴의 앞부분과 같음), audio 영역 byte 4개 무작위 교체 200회(멈춤·범위 밖 읽기 없음, 받으면 표본 유한) |
+
+ffmpeg flac 파일은 메타데이터 뒤에 8 KiB PADDING이 있어 손상 시험은 파일 끝쪽 2 KiB(audio frame)만 바꾼다.
+
+### 3.28 AU4 앞당김 — Ogg Vorbis 원본 디코드(개정 18)
+
+3.25절과 같은 결과 형식으로 Ogg Vorbis를 디코드한다. ThirdParty `Ogg`(libogg)·`Vorbis`(libvorbis + vorbisfile, AD13)를 반입한다. `Ogg`는 Opus 파일 디코드(opusfile)도 쓴다.
+
+#### 3.28.1 ThirdParty `Ogg`·`Vorbis`
+
+- libogg 1.3.6, libvorbis 1.3.7(둘 다 BSD-3-Clause). 공식 릴리스 tarball이고 downloads.xiph.org의 SHA256SUMS와 SHA-256이 같다.
+- `Ogg`: `bitwise.c`·`framing.c`와 헤더, `COPYING`. `os_types.h`가 Windows(MSVC·clang-cl)와 macOS에서 정수 형식을 스스로 정의하므로 configure가 만드는 `config_types.h`는 들이지 않는다.
+- `Vorbis`: libvorbis·vorbisfile 원본에서 encoder 설정(`vorbisenc.c`와 mode·codebook 표)을 뺀 것. `block.c`가 공용 dsp 설정에서 분석 쪽(`psy.c`·`envelope.c`·`bitrate.c`)을 참조하므로 그 파일들은 컴파일한다.
+  - libvorbis가 `ogg/ogg.h`를 include하므로 `Vorbis.Build.cs`가 `Ogg` include 경로를 더한다(ThirdParty 모듈 사이 의존이 없어 규칙 `Configure`를 덮어쓴다). 소비 모듈은 `Vorbis`·`Ogg`를 이 순서로 링크한다(왼쪽부터 푸는 정적 링커 대비).
+  - include 경로는 `include`만 내보낸다. `lib` 안 헤더는 같은 폴더 따옴표 include라 경로가 필요 없고, `os.h`·`misc.h` 같은 흔한 이름이 소비 모듈로 새지 않는다.
+  - `lookup.c`는 들이지만 컴파일하지 않는다(`FLOAT_LOOKUP`·`INT_LOOKUP`이 없으면 정의가 없다).
+- Linux 도구 빌드가 생기면: `Ogg`에 `config_types.h`, `Vorbis`에 `HAVE_ALLOCA_H`(glibc `-std=c17`은 `alloca`를 선언하지 않는다)가 필요하다.
+  - 소비 define `OV_EXCLUDE_STATIC_CALLBACKS`(라이브러리 자체 guard): `vorbisfile.h`가 include하는 C++ 단위마다 쓰지 않는 stdio callback 함수를 넣지 않게 한다.
+- 경고 0을 위한 수정(`Vorbis/Rocks.patch`, manifest `modifications`):
+  - `info.c`: comment 문자열을 `strcpy`·`strcat` 대신 길이를 아는 `memcpy`로 만든다(CRT deprecated). 결과 문자열은 같다.
+  - `floor1.c`: encoder floor 맞춤(`fit_line`)에서 더하기만 하고 읽지 않는 지역 합 `y2b`를 지운다(`-Wunused-but-set-variable`).
+  - `vorbisfile.c`: Windows `ov_fopen`의 `fopen`을 `_fsopen(…, _SH_DENYNO)`로(CRT deprecated, 공유 방식 같음), `host_is_big_endian`에 `(void)` 원형(`-Wstrict-prototypes`), `ov_read_filter`의 `fpu`를 쓴 것으로 표시(ARM64에서 `os.h`의 반올림 매크로가 비어 `-Wunused-variable`).
+- Vorbis 디코드는 SIMD·런타임 CPU 분기가 없는 float 계산이라 아키텍처·컴파일 설정마다 결과가 고정이다(3.10.1절).
+
+#### 3.28.2 `DecodeVorbis`
+
+- 디코드 전에 page 구조를 확인한다(`OggValidation`, Opus 파일 디코드도 쓴다). vorbisfile은 CRC가 틀린 page를 건너뛰고, link 끝 page나 다음 link의 BOS page가 빠져도(BOS가 빠지면 그 link를 다중화된 다른 stream으로 보고 통째로 건너뛴다) 오류 없이 짧게 디코드하기 때문이다.
+  - 원본 전체를 64 KiB씩 libogg sync에 넣어 `ogg_sync_pageseek`로 page를 나눈다. 건너뛴 byte(앞뒤 쓰레기, CRC 불일치)와 끝의 덜 찬 page는 `InvalidArgument`다.
+  - logical stream마다 BOS page로 시작하고 page 번호가 이어지며 EOS page로 끝나야 한다(빠진 page·잘림은 `InvalidArgument`).
+  - stream은 차례로 이어져야 한다. 한 stream이 열린 채 다른 BOS가 오면(다중화) `Unsupported`, 이미 나온 serial이 다시 오면(`cat a.ogg a.ogg`) 규격 위반이라 `InvalidArgument`다.
+- vorbisfile을 read callback만 주어 순차(non-seekable)로 연다(`ov_open_callbacks`, seek·tell·close 없음).
+  - link마다 audio page가 하나(EOS page)뿐인 연결 파일을 seekable로 열면 vorbisfile 1.3.7이 첫 link를 통째로 건너뛴다(시험 파일로 확인. 여러 page짜리 link는 seekable로도 모두 나온다). 순차 모드에서는 어느 경우도 모든 link가 나온다. 순차 모드라 `ov_pcm_total`로 길이를 미리 알 수 없다.
+- 첫 link 형식: 채널 0·정보 없음 `InvalidArgument`, 9채널 이상·rate 범위 밖 `Unsupported`.
+- `ov_read_float`로 읽어 교차 버퍼에 쌓으며 PCM 상한을 본다(`CapacityExceeded`). 끝에 planar로 옮긴다.
+  - 읽을 때마다 지금 link의 채널·rate가 첫 link와 같은지 본다. 다르면 `Unsupported`다.
+  - `OV_HOLE`: 순차 모드의 vorbisfile은 link 경계를 지날 때도 한 번 돌려준다(`_fetch_headers` 뒤 이미 넣은 마지막 header page를 다시 넣어 page 번호가 어긋난다. 규격에 맞는 stream에서는 결정적이다). 표시만 하고, 다음 읽기가 새 link에서 나오면 경계로 본다. 같은 link에서 나오거나 바로 stream이 끝나면 page 손상·누락이라 `InvalidArgument`다. 연이은 `OV_HOLE`과 그 밖 음수도 `InvalidArgument`다. 손실 원본이지만 Ogg page에 CRC가 있어 손상을 정확히 알므로 메우지 않고 거부한다(MP3의 무음 채움과 다르다).
+  - 비유한 표본(손상된 setup·packet)은 `InvalidArgument`다.
+- 길이는 granule 기준이다. vorbisfile이 마지막 page granule로 끝을 자르므로 frame 수가 원본 길이와 같다.
+- 결과: `sampleFormat = Lossy`, `sourceCodec = Vorbis`, loop·cue 없음(`LOOPSTART` 같은 comment는 읽지 않는다. UE도 읽지 않는다). 실패하면 결과를 비운다.
+- 한계: 메모리 정점은 FLAC과 같다. Ogg page CRC·번호·BOS·EOS로 손상·누락·잘림을 모두 잡으므로 page 단위 무결성 한계는 없다.
+
+#### 3.28.3 시험
+
+입력은 `Tests/VorbisTestFixtures.h`의 byte 배열이다(`<이름>PageOffsets`는 page 시작 위치). ffmpeg lavfi sine·pink noise(`anoisesrc`, 여러 page가 나오게)를 s16le로 받아 libvorbis 1.3.7 reference 인코더로 만들었다(`examples/encoder_example.c`와 같은 흐름: `vorbis_encode_init_vbr`, header를 따로 flush, serial 1001–1004). ffmpeg libvorbis 인코더는 쓰지 않는다: ffmpeg 9.1 Ogg muxer는 header와 audio를 한 page에 섞고, ffmpeg 디코드는 끝을 128 표본 덜 낸다.
+
+| 대상 | 확인 |
+|---|---|
+| 길이·정렬 | stereo 44100 Hz: frame 수 = 마지막 granule 11025, 원본 sine과 정렬(SNR ≥ 20 dB), 오른쪽 = −왼쪽. mono 22050 Hz 2205 frame |
+| 연결 stream | 같은 형식 link 둘(4410 + 2205 = 6615), audio page가 둘씩인 잡음 link 둘(33075 + 22050, link 경계 `OV_HOLE`을 지남). rate가 다른 link·채널이 다른 link `Unsupported` |
+| page 무결성 | 첫 link 가운데 audio page·첫 link EOS page·둘째 link BOS page 한 byte 손상, page 중간 잘림, page 경계 잘림(EOS 없음), page 하나 누락, 같은 serial 재연결, 앞·뒤 쓰레기: 모두 `InvalidArgument`. 다중화(두 BOS가 연달아): `Unsupported` |
+| 거부 | Ogg 아님·빈 입력·첫 page 머리만 `InvalidArgument`. audio page 한 byte 손상 `InvalidArgument`. 실패 시 비움 |
+| 견고성 | 앞부분 43 byte 간격 전부(받으면 길이 ≤ 원본), byte 4개 무작위 교체 200회(멈춤·범위 밖 읽기 없음, 받으면 표본 유한) |
 
 ## 4. 결정 요약
 

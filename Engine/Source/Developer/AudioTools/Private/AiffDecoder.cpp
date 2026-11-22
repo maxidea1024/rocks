@@ -6,7 +6,9 @@ using namespace sourcedetail;
 
 namespace {
 
-// FORM chunk 머리(id·크기·형식) 크기다.
+// FORM chunk 머리: id(4)·크기(4)·형식 id(4)다.
+constexpr uint32 FormSizeOffset = 4;
+constexpr uint32 FormTypeOffset = 8;
 constexpr uint32 FormHeaderBytes = 12;
 
 // COMM chunk: AIFF 18 byte(채널 2, frame 4, bits 2, rate 10), AIFC는 압축 type 4 byte가 더 있다.
@@ -25,8 +27,15 @@ constexpr int32 ExtendedExponentBias = 16383;
 constexpr int32 ExtendedMantissaBits = 63;
 constexpr uint16 ExtendedSignBit = 0x8000;
 constexpr uint16 ExtendedExponentMask = 0x7FFF;
+constexpr uint32 ExtendedMantissaOffset = 2;
 constexpr uint32 MantissaBytes = 8;
 constexpr uint32 BitsPerU64 = 64;
+
+// 받는 정수 bit 수 범위와 float bit 수다. 정수는 1–32 bit를 왼쪽 맞춤 ceil(bits/8) byte로 둔다(AIFF
+// 규격).
+constexpr uint32 MinIntegerBits = 1;
+constexpr uint32 MaxIntegerBits = 32;
+constexpr uint32 FloatBits = 32;
 
 // 80비트 extended rate를 정수 Hz로 바꾼다. 소수가 있거나 음수·0·너무 크면 false다.
 bool ReadExtendedRate(const uint8* bytes, uint32& rate) noexcept {
@@ -37,7 +46,7 @@ bool ReadExtendedRate(const uint8* bytes, uint32& rate) noexcept {
 
     uint64 mantissa = 0;
     for (uint32 index = 0; index < MantissaBytes; ++index) {
-        mantissa = (mantissa << BitsPerByte) | bytes[2 + index];
+        mantissa = (mantissa << BitsPerByte) | bytes[ExtendedMantissaOffset + index];
     }
 
     const int32 exponent =
@@ -58,21 +67,18 @@ bool ReadExtendedRate(const uint8* bytes, uint32& rate) noexcept {
     return true;
 }
 
-} // namespace
-
-Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcept {
-    out.Reset();
+Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noexcept {
     const uint8* bytes = file.Data();
     if (file.Size() < FormHeaderBytes || !IsTag(bytes, "FORM") ||
-        !(IsTag(bytes + 8, "AIFF") || IsTag(bytes + 8, "AIFC"))) {
+        !(IsTag(bytes + FormTypeOffset, "AIFF") || IsTag(bytes + FormTypeOffset, "AIFC"))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const bool compressed = IsTag(bytes + 8, "AIFC");
-    const uint64 formEnd = static_cast<uint64>(ReadU32(bytes + 4, true)) + ChunkHeaderBytes;
-    if (formEnd > file.Size()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+    const bool compressed = IsTag(bytes + FormTypeOffset, "AIFC");
+    // FORM 크기는 파일 끝으로 자른다(WAV와 같다).
+    const uint64 declaredEnd =
+        static_cast<uint64>(ReadU32(bytes + FormSizeOffset, true)) + ChunkHeaderBytes;
+    const usize formEnd = declaredEnd < file.Size() ? static_cast<usize>(declaredEnd) : file.Size();
 
     usize commOffset = 0;
     usize commSize = 0;
@@ -83,17 +89,25 @@ Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcep
     usize offset = FormHeaderBytes;
     while (offset + ChunkHeaderBytes <= formEnd) {
         const uint8* header = bytes + offset;
-        const usize size = ReadU32(header + 4, true);
+        usize size = ReadU32(header + ChunkSizeOffset, true);
         const usize body = offset + ChunkHeaderBytes;
+        const bool isSsnd = IsTag(header, "SSND");
         if (size > formEnd - body) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            // 끝을 넘는 SSND는 끝까지로 잘라 받고(아래 길이 검사가 frame 수와 맞춘다), 다른 chunk면
+            // 멈추고 센다.
+            if (!isSsnd) {
+                out.CountIgnoredChunk();
+                break;
+            }
+
+            size = formEnd - body;
         }
 
         if (IsTag(header, "COMM") && !hasComm) {
             commOffset = body;
             commSize = size;
             hasComm = true;
-        } else if (IsTag(header, "SSND") && !hasSsnd) {
+        } else if (isSsnd && !hasSsnd) {
             ssndOffset = body;
             ssndSize = size;
             hasSsnd = true;
@@ -105,8 +119,7 @@ Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcep
         offset = body + PaddedSize(size);
     }
 
-    if (!hasComm || !hasSsnd || commSize < (compressed ? CommCompressionBytes : CommBytes) ||
-        ssndSize < SsndHeaderBytes) {
+    if (!hasComm || commSize < (compressed ? CommCompressionBytes : CommBytes)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -134,8 +147,8 @@ Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcep
     }
 
     const bool validBits = encoding == SampleEncoding::Float
-                               ? bits == 32
-                               : (bits == 8 || bits == 16 || bits == 24 || bits == 32);
+                               ? bits == FloatBits
+                               : (bits >= MinIntegerBits && bits <= MaxIntegerBits);
     if (!validBits) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
@@ -149,9 +162,18 @@ Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcep
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    // 상한은 COMM의 frame 수로 SSND를 보기 전에 판정한다 — 큰 파일을 끝까지 읽지 않고 거절한다.
+    if (ExceedsPcmLimit(channels, frames)) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    if (!hasSsnd || ssndSize < SsndHeaderBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     // SSND: offset·blockSize 머리 뒤 offset byte를 건너뛴 곳부터 PCM이다.
     const uint32 dataOffset = ReadU32(bytes + ssndOffset, true);
-    const uint32 bytesPerSample = bits / BitsPerByte;
+    const uint32 bytesPerSample = (bits + BitsPerByte - 1) / BitsPerByte;
     const uint64 needed = frames * channels * bytesPerSample;
     if (dataOffset > ssndSize - SsndHeaderBytes ||
         needed > ssndSize - SsndHeaderBytes - dataOffset) {
@@ -164,9 +186,25 @@ Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcep
         return Result<void>::Failure(pcm.Error());
     }
 
-    DeinterleaveToFloat(bytes + ssndOffset + SsndHeaderBytes + dataOffset, channels, frames,
-                        bytesPerSample, encoding, bigEndian, pcm.Value());
+    if (!DeinterleaveToFloat(bytes + ssndOffset + SsndHeaderBytes + dataOffset, channels, frames,
+                             bytesPerSample, encoding, bigEndian, pcm.Value())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     return Result<void>::Success();
+}
+
+} // namespace
+
+Result<void> DecodeAiff(Span<const uint8> file, DecodedSourceAudio& out) noexcept {
+    out.Reset();
+    Result<void> decoded = DecodeAiffInto(file, out);
+    // 실패하면 부분 결과를 남기지 않는다.
+    if (!decoded) {
+        out.Reset();
+    }
+
+    return decoded;
 }
 
 } // namespace rocks::audio

@@ -68,6 +68,14 @@ const char* ExchangeIssueName(ExchangeIssue issue) noexcept {
         return "NotRegularFile";
     case ExchangeIssue::ExporterError:
         return "ExporterError";
+    case ExchangeIssue::AmbiguousExisting:
+        return "AmbiguousExisting";
+    case ExchangeIssue::HardCycle:
+        return "HardCycle";
+    case ExchangeIssue::NoKindImporter:
+        return "NoKindImporter";
+    case ExchangeIssue::PathTaken:
+        return "PathTaken";
     }
 
     return "Unknown";

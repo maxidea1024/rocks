@@ -1,5 +1,6 @@
 #include "SourceAudioInternal.h"
 
+#include <Core/Math/MathUtility.h>
 #include <Core/Move.h>
 #include <Platform/Memory.h>
 
@@ -69,13 +70,14 @@ SourceSampleFormat FormatOf(uint32 bytesPerSample, SampleEncoding encoding) noex
                                                 : SourceSampleFormat::Float32;
     }
 
+    // 부호 있는 8비트(AIFF)는 UInt8이 아니라 Int16으로 보고한다 — 저장 형식은 넓혀도 손실이 없다.
     switch (bytesPerSample) {
-    case 1:
+    case Int8Bytes:
         return encoding == SampleEncoding::UnsignedInt ? SourceSampleFormat::UInt8
                                                        : SourceSampleFormat::Int16;
-    case 2:
+    case Int16Bytes:
         return SourceSampleFormat::Int16;
-    case 3:
+    case Int24Bytes:
         return SourceSampleFormat::Int24;
     default:
         return SourceSampleFormat::Int32;
@@ -88,9 +90,9 @@ float ConvertSample(const uint8* bytes, uint32 bytesPerSample, SampleEncoding en
                     bool bigEndian) noexcept {
     if (encoding == SampleEncoding::Float) {
         if (bytesPerSample == sizeof(double)) {
-            const uint64 high = ReadU32(bytes + (bigEndian ? 0 : 4), bigEndian);
-            const uint64 low = ReadU32(bytes + (bigEndian ? 4 : 0), bigEndian);
-            return static_cast<float>(platform::BitCast<double>((high << 32) | low));
+            const uint64 high = ReadU32(bytes + (bigEndian ? 0 : Int32Bytes), bigEndian);
+            const uint64 low = ReadU32(bytes + (bigEndian ? Int32Bytes : 0), bigEndian);
+            return static_cast<float>(platform::BitCast<double>((high << BitsPerWord) | low));
         }
 
         return platform::BitCast<float>(ReadU32(bytes, bigEndian));
@@ -104,14 +106,14 @@ float ConvertSample(const uint8* bytes, uint32 bytesPerSample, SampleEncoding en
     }
 
     // 부호 확장: 상위 bit를 맞춘 뒤 산술 시프트한다.
-    const int32 shift = static_cast<int32>(32 - bits);
+    const int32 shift = static_cast<int32>(BitsPerWord - bits);
     const int32 value = static_cast<int32>(raw << shift) >> shift;
     double scale = Int32Scale;
-    if (bits == 8) {
+    if (bytesPerSample == Int8Bytes) {
         scale = Int8Scale;
-    } else if (bits == 16) {
+    } else if (bytesPerSample == Int16Bytes) {
         scale = Int16Scale;
-    } else if (bits == 24) {
+    } else if (bytesPerSample == Int24Bytes) {
         scale = Int24Scale;
     }
 
@@ -120,17 +122,25 @@ float ConvertSample(const uint8* bytes, uint32 bytesPerSample, SampleEncoding en
 
 } // namespace
 
-void DeinterleaveToFloat(const uint8* data, uint32 channels, uint64 frames, uint32 bytesPerSample,
+bool DeinterleaveToFloat(const uint8* data, uint32 channels, uint64 frames, uint32 bytesPerSample,
                          SampleEncoding encoding, bool bigEndian, float* planar) noexcept {
     const usize frameBytes = static_cast<usize>(channels) * bytesPerSample;
     for (uint64 frame = 0; frame < frames; ++frame) {
         const uint8* frameData = data + static_cast<usize>(frame) * frameBytes;
         for (uint32 channel = 0; channel < channels; ++channel) {
-            planar[static_cast<usize>(channel) * frames + frame] =
+            const float sample =
                 ConvertSample(frameData + static_cast<usize>(channel) * bytesPerSample,
                               bytesPerSample, encoding, bigEndian);
+            // 정수 표본은 늘 유한하다. float 원본의 NaN·무한대는 믹서까지 가지 않게 여기서 막는다.
+            if (encoding == SampleEncoding::Float && !math::IsFinite(sample)) {
+                return false;
+            }
+
+            planar[static_cast<usize>(channel) * frames + frame] = sample;
         }
     }
+
+    return true;
 }
 
 } // namespace sourcedetail

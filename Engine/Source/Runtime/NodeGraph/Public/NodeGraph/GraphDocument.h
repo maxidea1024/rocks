@@ -56,6 +56,9 @@ inline constexpr uint32 GraphDocumentFormatVersion = 1;
 // PropertyRecord::bytes의 MaxElements와 맞춘다.
 inline constexpr uint32 MaxPropertyRecordBytes = 1048576;
 
+// 그래프 하나의 최대 노드 수다(Graph::nodes의 리플렉션 기본 상한 65,536과 같다).
+inline constexpr uint32 MaxGraphNodes = 65536;
+
 // 그래프 하나의 최대 간선 수다. Graph::edges의 MaxElements와 맞춘다(노드는 리플렉션 기본 상한
 // 65,536).
 inline constexpr uint32 MaxGraphEdges = 262144;

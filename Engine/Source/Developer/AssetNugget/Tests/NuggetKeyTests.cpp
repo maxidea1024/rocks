@@ -324,8 +324,25 @@ TEST(NuggetKey_TraceLines) {
         "none\nbool true\nbool false\nu32 7\nu64 8\ni64 -9\nf32 0x3f800000\n"
         "f64 0x8000000000000000\nguid 00000000-0000-0001-0000-000000000002\n"
         "digest 0000000000000000000000000000000000000000000000000000000000000000\n"
-        "string\ns\nbytes 3\nlist 1\nmap 2\nset 3\nfield\nf\nstruct\nend\nraw 3\n";
+        "string\ns\nbytes 3\nlist 1\nmap 2\nset 3\nfield\nf\nstruct\nend\nraw 3\n  010203\n";
     CHECK(trace.text.View() == expected);
+    // raw 내용은 32 byte씩 16진 줄로 남는다(손으로 정렬한 Map·Set 진단).
+    {
+        LineTrace lines(allocator);
+        NuggetKeyWriter longRaw;
+        longRaw.SetTrace(&lines);
+        uint8 bytes[40];
+        for (usize index = 0; index < sizeof(bytes); ++index) {
+            bytes[index] = static_cast<uint8>(index * 7);
+        }
+
+        longRaw.WriteRaw(bytes);
+        longRaw.WriteRaw(Span<const uint8>());
+        REQUIRE(longRaw.Finish());
+        CHECK(lines.text.View() ==
+              "raw 40\n  00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9\n"
+              "  e0e7eef5fc030a11\nraw 0\n");
+    }
 
     // 오류 뒤에는 줄을 남기지 않는다.
     LineTrace after(allocator);

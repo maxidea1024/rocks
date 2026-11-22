@@ -17,8 +17,18 @@ inline constexpr int32 UnsignedByteBias = 128;
 // byte 수별 bit 수다.
 inline constexpr uint32 BitsPerByte = 8;
 
+// 32비트 word의 bit 수다(64비트 값의 상위 word 시프트·부호 확장).
+inline constexpr uint32 BitsPerWord = 32;
+
+// 받는 정수 표본 byte 수다.
+inline constexpr uint32 Int8Bytes = 1;
+inline constexpr uint32 Int16Bytes = 2;
+inline constexpr uint32 Int24Bytes = 3;
+inline constexpr uint32 Int32Bytes = 4;
+
 // RIFF·IFF chunk 머리(id 4 + 크기 4) 크기다.
 inline constexpr uint32 ChunkHeaderBytes = 8;
+inline constexpr uint32 ChunkSizeOffset = 4;
 
 // chunk 본문은 짝수 byte로 맞춘다(홀수 크기 뒤 pad 1 byte).
 inline usize PaddedSize(usize size) noexcept {
@@ -37,11 +47,11 @@ inline uint32 ReadUnsigned(const uint8* bytes, uint32 count, bool bigEndian) noe
 }
 
 inline uint16 ReadU16(const uint8* bytes, bool bigEndian) noexcept {
-    return static_cast<uint16>(ReadUnsigned(bytes, 2, bigEndian));
+    return static_cast<uint16>(ReadUnsigned(bytes, Int16Bytes, bigEndian));
 }
 
 inline uint32 ReadU32(const uint8* bytes, bool bigEndian) noexcept {
-    return ReadUnsigned(bytes, 4, bigEndian);
+    return ReadUnsigned(bytes, Int32Bytes, bigEndian);
 }
 
 // chunk id(4 byte)가 tag와 같은지 본다.
@@ -58,7 +68,8 @@ enum class SampleEncoding : uint8 {
 };
 
 // 교차 표본 byte를 planar float로 바꾼다. bytesPerSample은 1·2·3·4(정수) 또는 4·8(float)이다.
-void DeinterleaveToFloat(const uint8* data, uint32 channels, uint64 frames, uint32 bytesPerSample,
+// float 표본이 NaN·무한대이거나 float32 범위를 넘으면 false다(InvalidArgument로 옮긴다).
+bool DeinterleaveToFloat(const uint8* data, uint32 channels, uint64 frames, uint32 bytesPerSample,
                          SampleEncoding encoding, bool bigEndian, float* planar) noexcept;
 
 // 표본 형식(SourceSampleFormat)이다.

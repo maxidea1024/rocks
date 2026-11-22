@@ -25,6 +25,7 @@
 //                  version으로 오류 경로를 고른다: TestDynamic*Version 상수(실패·키 중복·타입 범위
 //                  밖· 핀 수 초과), 그 밖은 InvalidArgument.
 //   Test.Toggle    입력 In·출력 Out(Float), 비활성 허용, 통과 In → Out.
+//   Test.Convert   입력 In·출력 Out(wildcard). 연결 판정 Convert의 변환 노드.
 namespace rocks::nodegraph_test {
 
 using namespace rocks::nodegraph;
@@ -78,6 +79,19 @@ enum class TestNormalize : uint8 {
     IgnoreFailure
 };
 
+// 시험 schema의 연결 판정 방식이다.
+enum class TestConnect : uint8 {
+    // GraphSchema 기본 판정.
+    Default,
+    Deny,
+    // 늘 Make(입력 상한 검사를 시험한다).
+    AlwaysMake,
+    ReplaceOutput,
+    ReplaceBoth,
+    // conversionType으로 MakeWithConversion.
+    Convert
+};
+
 class TestSchema final : public GraphSchema {
 public:
     Name Domain() const noexcept override {
@@ -113,9 +127,37 @@ public:
         return writer.WriteNode(node);
     }
 
+    ConnectVerdict CanConnect(const GraphReadView& view,
+                              const ConnectQuery& query) const noexcept override {
+        ConnectVerdict verdict;
+        switch (connect) {
+        case TestConnect::Default:
+            return GraphSchema::CanConnect(view, query);
+        case TestConnect::Deny:
+            return verdict;
+        case TestConnect::AlwaysMake:
+            verdict.action = ConnectAction::Make;
+            return verdict;
+        case TestConnect::ReplaceOutput:
+            verdict.action = ConnectAction::MakeReplacingOutput;
+            return verdict;
+        case TestConnect::ReplaceBoth:
+            verdict.action = ConnectAction::MakeReplacingBoth;
+            return verdict;
+        case TestConnect::Convert:
+            verdict.action = ConnectAction::MakeWithConversion;
+            verdict.conversionNodeType = conversionType;
+            return verdict;
+        }
+
+        return verdict;
+    }
+
     Name domain;
     PinTypeTable table{Span<const PinTypeInfo>(TestPinTypeInfos, TestPinTypeCount)};
     TestNormalize mode = TestNormalize::Default;
+    TestConnect connect = TestConnect::Default;
+    Name conversionType;
     // IgnoreFailure가 넘기는 바이트다(시험이 MaxPropertyRecordBytes보다 크게 채운다).
     Span<const uint8> oversized;
 };
@@ -238,6 +280,7 @@ struct TestEnv {
         typeDynamic = Intern("Test.Dynamic");
         typeToggle = Intern("Test.Toggle");
         typeUnknown = Intern("Test.Missing");
+        typeConvert = Intern("Test.Convert");
         pinA = Intern("A");
         pinB = Intern("B");
         pinResult = Intern("Result");
@@ -310,8 +353,14 @@ struct TestEnv {
         toggle.passThrough = togglePass;
         toggle.capabilities = DefaultNodeCapabilities | NodeCapabilities::AllowDisable;
 
+        const PinDescriptor convertPins[] = {InputPin(pinIn, UnresolvedPinType, "In"),
+                                             OutputPin(pinOut, UnresolvedPinType, "Out")};
+        NodeTypeDescriptor convert;
+        convert.type = typeConvert;
+        convert.staticPins = convertPins;
+
         return Register(add) && Register(param) && Register(sequence) && Register(multi) &&
-               Register(dynamic) && Register(toggle);
+               Register(dynamic) && Register(toggle) && Register(convert);
     }
 
     SystemAllocator allocator;
@@ -329,6 +378,7 @@ struct TestEnv {
     Name typeDynamic;
     Name typeToggle;
     Name typeUnknown;
+    Name typeConvert;
     Name reroute;
     Name pinA;
     Name pinB;
