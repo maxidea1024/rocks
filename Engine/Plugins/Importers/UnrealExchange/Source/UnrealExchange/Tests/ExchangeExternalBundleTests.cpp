@@ -26,7 +26,9 @@
 // 판정(MergeBoneHierarchy)과 LOD 기록의 MeshSource 적재· 검증(본 수)·BuildSkinnedMeshLod를 통과해야
 // 한다(6.3절 — UX7a). 클립은 MA6a ClipSource로 적재해
 // ValidateClipSource, 키 시간 샘플링, 원본·두 배 비율 BuildClipPlayback과 쿠킹 샘플링을 통과해야
-// 한다(7.1절 — UX8a).
+// 한다(7.1절 — UX8a). 머티리얼 계열은 번역(UX4b) 전이라 기록 구조의 불변식만 본다: 노드 이름
+// 유일, 연결 대상 노드·출력 번호 존재, mask 형식, 함수 호출·인스턴스 부모·모든 objectPath 참조가
+// dependencies에 있음, 머티리얼 출력 핀 이름 유일, resolved 항목 형식(8.6절 — UX4a).
 using namespace rocks;
 using namespace rocks::exchange_test;
 namespace exchange_external_bundle_tests_file {
@@ -995,6 +997,248 @@ usize CheckSkeletalAssets(const ExchangeBundle& bundle, ExchangeDiagnostics& dia
     return checked;
 }
 
+// 머티리얼 기록 하나의 확인 결과다. issue는 처음 어긋난 불변식이다(통과하면 nullptr).
+struct MaterialCheck {
+    usize nodes = 0;
+    usize links = 0;
+    const char* issue = nullptr;
+
+    void Fail(const char* what) noexcept {
+        if (issue == nullptr) {
+            issue = what;
+        }
+    }
+};
+
+bool HasDependency(const ExchangeAsset& asset, StringView objectPath) noexcept {
+    for (const ExchangeDependency& dependency : asset.dependencies) {
+        if (dependency.objectPath == objectPath) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// value 아래 { "objectPath" } 참조(11.5절)가 모두 dependencies에 있는지 본다.
+void CheckReferences(const ExchangeAsset& asset, JsonValue value, MaterialCheck& check) noexcept {
+    if (value.IsArray()) {
+        for (usize index = 0; index < value.Size(); ++index) {
+            CheckReferences(asset, value.At(index), check);
+        }
+
+        return;
+    }
+
+    if (!value.IsObject()) {
+        return;
+    }
+
+    const JsonValue path = value.Find("objectPath");
+    if (value.Size() == 1 && path.IsString() && !HasDependency(asset, path.GetString())) {
+        check.Fail("reference missing from dependencies");
+    }
+
+    for (usize index = 0; index < value.Size(); ++index) {
+        CheckReferences(asset, value.ValueAt(index), check);
+    }
+}
+
+// mask는 null 또는 0·1 넷이다.
+bool IsMask(JsonValue mask) noexcept {
+    if (mask.IsNull()) {
+        return true;
+    }
+
+    if (!mask.IsArray() || mask.Size() != 4) {
+        return false;
+    }
+
+    for (usize index = 0; index < mask.Size(); ++index) {
+        auto bit = mask.At(index).TryGetUInt64();
+        if (!bit || bit.Value() > 1) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 이름이 name인 노드다. 없으면 무효 값이다.
+JsonValue FindNode(JsonValue nodes, StringView name) noexcept {
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        const JsonValue node = nodes.At(index);
+        if (node.Find("name").IsString() && node.Find("name").GetString() == name) {
+            return node;
+        }
+    }
+
+    return {};
+}
+
+// 연결(from)은 null 또는 { node: 있는 노드 이름, output: 그 노드 outputs 범위 안 번호 }다.
+void CheckLink(JsonValue nodes, JsonValue from, MaterialCheck& check) noexcept {
+    if (from.IsNull()) {
+        return;
+    }
+
+    const JsonValue name = from.Find("node");
+    auto output = from.Find("output").TryGetUInt64();
+    const JsonValue target = name.IsString() ? FindNode(nodes, name.GetString()) : JsonValue();
+    if (!target.IsValid() || !output || output.Value() >= target.Find("outputs").Size()) {
+        check.Fail("link to a missing node or output");
+        return;
+    }
+
+    ++check.links;
+}
+
+// 그래프 노드 배열(8.1절, 8.6절)을 확인한다.
+void CheckGraph(const ExchangeAsset& asset, JsonValue nodes, MaterialCheck& check) noexcept {
+    if (!nodes.IsArray()) {
+        check.Fail("nodes is not an array");
+        return;
+    }
+
+    check.nodes = nodes.Size();
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        const JsonValue node = nodes.At(index);
+        const JsonValue name = node.Find("name");
+        const JsonValue position = node.Find("position");
+        const JsonValue inputs = node.Find("inputs");
+        const JsonValue outputs = node.Find("outputs");
+        if (!name.IsString() || name.GetString().IsEmpty() || !node.Find("guid").IsString() ||
+            !node.Find("class").IsString() || !position.IsArray() || position.Size() != 2 ||
+            !inputs.IsArray() || !outputs.IsArray() || !node.Find("properties").IsObject()) {
+            check.Fail("node shape");
+            continue;
+        }
+
+        for (usize other = 0; other < index; ++other) {
+            if (nodes.At(other).Find("name").IsString() &&
+                nodes.At(other).Find("name").GetString() == name.GetString()) {
+                check.Fail("duplicate node name");
+            }
+        }
+
+        for (usize slot = 0; slot < inputs.Size(); ++slot) {
+            const JsonValue input = inputs.At(slot);
+            if (!input.Find("name").IsString() || !IsMask(input.Find("mask"))) {
+                check.Fail("input shape");
+            }
+
+            CheckLink(nodes, input.Find("from"), check);
+        }
+
+        for (usize slot = 0; slot < outputs.Size(); ++slot) {
+            if (!outputs.At(slot).Find("name").IsString() ||
+                !IsMask(outputs.At(slot).Find("mask"))) {
+                check.Fail("output shape");
+            }
+        }
+
+        // 함수 호출은 함수를 dependencies로 가져야 한다(번역이 함수 그래프를 펼친다).
+        const JsonValue function = node.Find("properties").Find("MaterialFunction");
+        if (node.Find("class").GetString() == "MaterialExpressionMaterialFunctionCall" &&
+            !function.IsNull() &&
+            !(function.Find("objectPath").IsString() &&
+              HasDependency(asset, function.Find("objectPath").GetString()))) {
+            check.Fail("function call without dependency");
+        }
+    }
+}
+
+// 머티리얼 출력 핀 배열을 확인한다(이름 유일, 연결 또는 상수 키).
+void CheckMaterialOutputs(JsonValue nodes, JsonValue pins, MaterialCheck& check) noexcept {
+    if (!pins.IsArray() || pins.Size() == 0) {
+        check.Fail("material outputs missing");
+        return;
+    }
+
+    for (usize index = 0; index < pins.Size(); ++index) {
+        const JsonValue pin = pins.At(index);
+        const JsonValue name = pin.Find("name");
+        if (!name.IsString() || !IsMask(pin.Find("mask")) || !pin.Find("constant").IsValid()) {
+            check.Fail("material output shape");
+            continue;
+        }
+
+        for (usize other = 0; other < index; ++other) {
+            if (pins.At(other).Find("name").IsString() &&
+                pins.At(other).Find("name").GetString() == name.GetString()) {
+                check.Fail("duplicate material output");
+            }
+        }
+
+        CheckLink(nodes, pin.Find("from"), check);
+    }
+}
+
+// 인스턴스의 부모와 resolved 항목(8.2절)을 확인한다.
+void CheckInstance(const ExchangeAsset& asset, MaterialCheck& check) noexcept {
+    const JsonValue parent = asset.settings.Find("Parent");
+    if (!parent.IsValid() ||
+        (!parent.IsNull() && !(parent.Find("objectPath").IsString() &&
+                               HasDependency(asset, parent.Find("objectPath").GetString())))) {
+        check.Fail("parent missing from dependencies");
+    }
+
+    const JsonValue resolved = asset.data.Find("resolved");
+    if (!resolved.IsArray()) {
+        check.Fail("resolved is not an array");
+        return;
+    }
+
+    for (usize index = 0; index < resolved.Size(); ++index) {
+        const JsonValue entry = resolved.At(index);
+        const JsonValue name = entry.Find("parameter").Find("Name");
+        if (!name.IsString() || name.GetString().IsEmpty() || !entry.Find("type").IsString() ||
+            !entry.Find("value").IsValid()) {
+            check.Fail("resolved entry shape");
+        }
+    }
+}
+
+// 머티리얼 계열 Ready 기록을 확인한다(8.6절 — UX4a). 확인한 기록 수다.
+usize CheckMaterials(const ExchangeBundle& bundle) noexcept {
+    usize checked = 0;
+    for (usize index = 0; index < bundle.Assets().Size(); ++index) {
+        const ExchangeAsset& asset = bundle.Assets()[index];
+        const ExchangeClass type = asset.exchangeClass;
+        if (asset.state != ExchangeAssetState::Ready ||
+            (type != ExchangeClass::Material && type != ExchangeClass::MaterialFunction &&
+             type != ExchangeClass::MaterialInstanceConstant &&
+             type != ExchangeClass::MaterialFunctionInstance &&
+             type != ExchangeClass::MaterialParameterCollection)) {
+            continue;
+        }
+
+        MaterialCheck check;
+        const JsonValue nodes = asset.data.Find("nodes");
+        if (type == ExchangeClass::Material || type == ExchangeClass::MaterialFunction) {
+            CheckGraph(asset, nodes, check);
+        }
+
+        if (type == ExchangeClass::Material) {
+            CheckMaterialOutputs(nodes, asset.data.Find("outputs"), check);
+        }
+
+        if (type == ExchangeClass::MaterialInstanceConstant) {
+            CheckInstance(asset, check);
+        }
+
+        CheckReferences(asset, asset.settings, check);
+        CheckReferences(asset, asset.data, check);
+        printf("  material [%zu] %s %.*s: %zu nodes, %zu links %s\n", index,
+               ExchangeClassName(type), PrintLength(asset.objectPath), asset.objectPath.Data(),
+               check.nodes, check.links, check.issue != nullptr ? check.issue : "");
+        CHECK(check.issue == nullptr);
+        ++checked;
+    }
+
+    return checked;
+}
+
 TEST(UnrealExchange_ExternalBundle) {
     SystemAllocator allocator;
     StringBuilder<512> directory(allocator);
@@ -1063,6 +1307,7 @@ TEST(UnrealExchange_ExternalBundle) {
     printf("Mesh records: %zu checked\n", meshRecords);
     printf("Skinned mesh records and clip builds: %zu checked\n",
            CheckSkeletalAssets(bundle, diagnostics));
+    printf("Material records: %zu checked\n", CheckMaterials(bundle));
 }
 
 } // namespace exchange_external_bundle_tests_file

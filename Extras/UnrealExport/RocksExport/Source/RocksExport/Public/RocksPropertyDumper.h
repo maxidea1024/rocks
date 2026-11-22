@@ -58,11 +58,19 @@ public:
 	// 모은 참조다(경로 UTF-8 byte 순, 경로마다 하나 — Hard·Soft 둘 다면 Hard).
 	TArray<FReference> GetReferences() const;
 
+	// 프로퍼티 값 하나(Value는 그 값의 주소)를 위 규칙으로 쓴다.
+	void DumpValue(const FProperty* Property, const void* Value, FRocksJsonWriter& Writer);
+
+	// 객체 참조 하나를 위 규칙으로 쓴다(하위 객체 펼침·참조 수집 포함).
+	void DumpObjectReference(const UObject* Object, FRocksJsonWriter& Writer);
+
+	// Object를 이미 펼친 하위 객체로 표시한다. 다른 곳에서 따로 쓰는 하위 객체(머티리얼 그래프 노드 — 8.6절)를 참조
+	// 자리에서 다시 펼치지 않고 { "subobject" }로만 쓰게 한다.
+	void MarkExpanded(const UObject* Object);
+
 private:
 	bool ShouldSkip(const FProperty* Property) const;
 	void DumpProperty(const FProperty* Property, const void* ContainerData, FRocksJsonWriter& Writer);
-	void DumpValue(const FProperty* Property, const void* Value, FRocksJsonWriter& Writer);
-	void DumpObjectReference(const UObject* Object, FRocksJsonWriter& Writer);
 	void DumpSoftReference(const FSoftObjectPath& Path, FRocksJsonWriter& Writer);
 	void AddReference(const FSoftObjectPath& Path, bool bHard);
 	TArray<uint8> SortKey(const FProperty* Property, const void* Value);

@@ -40,6 +40,12 @@ namespace RocksExportSelfTest
 	// 모델 값과 대조하고, settings에 데이터 모델이 없고 추출 전후 덤프가 같은지 본다.
 	void RunAnimationExtraction(TArray<FString>& Errors);
 
+	// 머티리얼 추출(8.6절): 엔진 머티리얼(함수 호출·이름 있는 reroute·파라미터)·인스턴스 사슬·컬렉션 참조 머티리얼을
+	// 내보내 노드 수·이름·연결(입력과 출력 핀)을 UE 그래프와 대조하고, settings에 노드·핀이 펼쳐지지 않았는지, 함수·
+	// 컬렉션·부모 참조가 dependencies에 있는지, resolved가 GetAllParametersOfType 결과와 같은지, 추출 전후 덤프가
+	// 같은지 본다.
+	void RunMaterialExtraction(TArray<FString>& Errors);
+
 	// 위 전부를 돌린다. 모두 통과하면 true다.
 	bool RunAll(TArray<FString>& Errors);
 }
