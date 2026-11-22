@@ -3,6 +3,7 @@
 #include <Platform/Memory.h>
 #include <Platform/Path.h>
 #include <Platform/Process.h>
+#include <Platform/StandardStream.h>
 #include <Platform/Thread.h>
 #include <TestSupport/DynamicLibraryFixture.h>
 #include <TestSupport/ProcessProbe.h>
@@ -46,6 +47,34 @@ int EchoArguments(int argc, const char* const* argv) noexcept {
     }
 
     return 0;
+}
+
+// PlatformBase 표준 스트림 API(Platform/StandardStream.h)로 입력을 출력에 그대로 옮기고, 끝나면
+// 오류 스트림에 "done"을 쓴다(SparksTools T2 — SE-B7 시험).
+int PlatformCat() noexcept {
+    static char chunk[16 * 1024];
+    for (;;) {
+        const FileTransfer read = platform::ReadStandardInput(chunk, sizeof(chunk));
+        if (read.status.code == FileCode::EndOfFile) {
+            break;
+        }
+
+        if (!read.status || read.bytes == 0) {
+            return 97;
+        }
+
+        const FileTransfer written =
+            platform::WriteStandardStream(platform::StandardStream::Output, chunk, read.bytes);
+        if (!written.status || written.bytes != read.bytes) {
+            return 98;
+        }
+    }
+
+    const char done[] = "done";
+    return platform::WriteStandardStream(platform::StandardStream::Error, done, sizeof(done) - 1)
+                   .status
+               ? 0
+               : 99;
 }
 
 int Cat() noexcept {
@@ -220,6 +249,10 @@ int RunProcessProbe(int argc, const char* const* argv) noexcept {
 
     if (Equal(mode, "cat")) {
         return Cat();
+    }
+
+    if (Equal(mode, "platform-cat")) {
+        return PlatformCat();
     }
 
     if (Equal(mode, "flood") && argc == 4) {
