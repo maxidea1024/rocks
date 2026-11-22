@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-23, 개정 24(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-23, 개정 25(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -737,6 +737,16 @@ SH1 출력은 SH2 정규화(재배치·리플렉션·GLES 재작성) 전의 형�
 - S7 도구: `ShaderToolLoader`에 `CompileWithDxc`(IDxcCompiler3 + include handler, Windows 구현만, 다른 호스트는 `UnsupportedHost`)를 더했다. 도구를 여는 워커 자리 모듈이라 정책 `shader-tool-binary-load` 안이고, SH1c 형식 모듈이 다시 쓸 수 있다. 시험은 시험 runner(`Programs/FoundationTests/Engine/ShaderPreprocessDxcTests.cpp`)에 둔다 — 모듈 `Tests` 폴더(`Developer/ShaderCompiler/Tests`)는 도구 열기 허용 위치가 아니다. (나)는 주 파일에서 `Platform.rsh`와 엔트리를 include하고 `-I .`를 준다: DXC(clang)는 Windows에서 `/Engine/…`를 절대 경로로 보지 않아 포함한 파일 기준 후보(`.\Plugin\S7\Engine\…`)만 찾기 때문이다. handler는 `.\`·`\`·`/./`를 가상 경로로 바꾸고 트리에 없는 후보를 거절한다. 버린 대안: 형식 모듈(SH1c)을 앞당겨 DXIL 경로를 만드는 것(단계 범위 밖), 시험 runner에 Windows 전용 폴더를 더하는 것(정책 `platform-boundary` 예외가 늘어난다).
 - 한계(후속): Windows는 대소문자만 다른 가상 경로로 같은 파일을 연다. 폐포와 `#pragma once`는 철자가 다르면 다른 파일로 보고, 대소문자를 가리는 macOS에서는 그 철자가 실패한다(디렉터리 열거로 철자를 확인하는 것이 후속이다). 지원하지 않는 확장(GNU 이름 붙은 가변 인자 `args...`·`#warning`·`#line` 입력은 오류, `__VA_OPT__`·`_Pragma`·`, ## __VA_ARGS__` 쉼표 삼키기는 C 표준대로 처리하거나 그대로 남긴다). 컴파일러 진단의 줄은 원문과 같지만 열은 공백 정규화 때문에 다를 수 있다.
 
+**SH1b 구현 메모(개정 25, 2026-11-23).** SC1의 공용 모듈 분리, SC9 옵션, 10절 job 키·Record 값 표·너겟 위치, 정책 `shader-worker-isolation`을 구현했다.
+
+- 모듈: `Developer/ShaderCompilerCommon`을 만들고 `ShaderFormatDefinition`(헤더·구현·시험)을 동작 불변으로 옮겼다(include `<ShaderCompilerCommon/ShaderFormatDefinition.h>`, API `ROCKS_SHADERCOMPILERCOMMON_API`). `ShaderCompiler`는 `ShaderCompilerCommon`·`AssetNugget`·`HostConfig`에 의존하고 리플렉션 헤더 `ShaderCompileOptions.h`를 가진다(identity 명세 `ShaderCompiler.rocksids.json`). 키를 계산하는 쪽은 `RegisterShaderCompilerTypes`로 타입을 등록한 TypeRegistry와 ObjectRegistry를 `ShaderKeyReflection`으로 준다(AssetCooker `CookConfigContext`와 같은 방식).
+- 옵션: `ShaderCompileOptions`(`hlsl2021`·`optimization` `O0`–`O3`·`debugSymbols`·`matrixLayout` `Row`). 이름=값 파서는 손으로 쓴다(ReflectionText 대입 파서는 필드 경로·컨테이너용이라 중복·SH1 미지원 값 같은 job 생성 오류를 따로 내기 어렵다). 이름은 필드 이름 그대로, 값은 `true`·`false`와 열거자 이름이며 공백을 받지 않는다. `debugSymbols=true`는 파서와 키 계산 모두 `Unsupported`다.
+- 키: `BuildShaderJobKey(input, trace)` = 공통 머리(`ShaderJobProcessor` Guid 둘) + `WriteShaderJobKeyBody`(2–7행). 2–7행 함수를 따로 내놓아 시험이 머리의 결정적 수학 버전·툴체인 지문을 고정값으로 쓰는 기록 경로(리터럴 키 golden)를 만든다. 도구 설정 byte는 `hasDigest`인 Runtime·Redist·Tool 파일 SHA만 잇는다. 저장소 도구에 이 호스트 파일이 없으면(예: macOS의 FXC) 키도 `UnsupportedCapability`다. system 도구 지문은 `ShaderSystemToolFingerprint`(이름·버전 줄·`metal`·`metallib` SHA)로 받고, 형식 정의의 system 도구 이름과 맞는 지문이 없으면 `UnsupportedCapability`다(SH1c 도구 조회가 채운다). 입력은 snapshot의 digest만 받으므로 키 함수는 디스크를 읽지 않는다.
+- 값: `ShaderNuggetValue`(Code 0·BindingLayout 1·GlesCopyTable 2·DebugSymbols 3)와 `ShaderJobValues`(번호별 byte + 있음 비트 — 빈 값도 있는 값이다). `MoveShaderValuesToNugget`은 Code 없는 job을 거부하고(실패 job 비게시), `MoveShaderValuesFromNugget`은 Code가 없으면 `NotFound`, 모르는 번호·중복·오름차순 아님은 `InvalidArgument`(둘 다 손상 — 다시 컴파일)다.
+- 위치: `ResolveShaderNuggetRoot`(프로젝트 루트, 없으면 `FindEngineDirectory`의 `Engine`)와 `OpenShaderNuggetCache`(`ReadNuggetCacheSettings` → `NuggetCache::Open`). 저장소 `.gitignore`에 `/Engine/Intermediate/`를 더했다.
+- 정책: `shader-tool-table` 허용에 `Developer/ShaderCompilerCommon`·`Developer/ShaderWorker`, `shader-tool-binary-load` 허용에 `Developer/ShaderWorker`를 더했다. `shader-worker-isolation`은 워커 쪽(`Programs/ShaderCompileWorker`·`Developer/ShaderWorker`·`Developer/ShaderFormat*`)의 규칙이 `ShaderCompiler`·`AssetNugget`을 이름으로 참조하거나 소스가 `<ShaderCompiler/…>`·`<AssetNugget/…>`를 include하면 실패다(`ShaderCompilerCommon`은 허용). 지금 `ShaderFormatVulkan`(Graphics·ShaderToolLoader·SpirvReflect 의존)은 통과한다.
+- 한계: 리플렉션 문맥을 호출자가 준다(관리자 SH1d가 세션마다 한 벌 만든다). SPIRV-Reflect 항목(2행 끝)은 SH2에서 더한다.
+
 ## 12. P6a·P14·P6b 형식 정의·셰이더 타입·TargetProfile·쿠킹 매니페스트
 
 엔진 컴파일 프로필은 형식 정의와 함께 P6a(12.1절)가, TargetProfile 필드는 A4가 쓰는 프로필 파일에 P6b(12.3절)가 더한다.
@@ -980,3 +990,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 교차 검증 1회(필수 11·권장 16) 반영: 결정 번호를 측정과 구분(SC), 키 golden은 실행 중 지문으로, 전체 Record 조회, 진단을 Record에서 뺌(값 표 0–3), D3D11 대체 경로는 FXC 컴파일 오류만, 입력 머리에 툴체인 지문(`BadToolchain`), system 도구 조회를 키 계산 앞으로, 내장 매크로 조건 거부와 `ROCKS_SHADER_MODEL_*`, 인터페이스 이름 `ShaderFormatBackend`, 워커 채널 스레드(P1 스레드 계약), 옵션은 `ShaderCompileOptions` 리플렉션 기록, 도구 role·Apple 지문 규칙, snapshot byte, 엔진 프로필 한정, `ShaderStageBits`, `WaitForProcessExit`를 PlatformBase로 옮김, 작업 디렉터리 정리, 동반 타깃 구성, 스파이크 삭제 순서, BOM·CRLF, 예약 정의, `Platform.rsh` 강제 include, `Generated` 범위, 출력 이름.
   - 16절: SH1 행에 하위 단계 참조.
 - 개정 24(2026-11-23): SH1a 구현 메모(11.1절 — 구조, 상대 include 접기·`Shared` 범위·재정의 오류·`true`·출력 공백과 `#line` 기준·한도 묶음·`ROCKS_SPIRV`, S7 도구 `CompileWithDxc`와 시험 위치, 대소문자 한계)와 측정 S7 결과(5.4절: DXIL·SPIR-V byte 동일, 오류 위치 동일).
+- 개정 25(2026-11-23): SH1b 구현 메모(11.1절 — `ShaderCompilerCommon` 분리, 옵션 파서, 키 2–7행 함수와 system 도구 지문 입력, 값 표 도우미, 너겟 위치, 정책 `shader-worker-isolation`).
