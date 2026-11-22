@@ -62,6 +62,19 @@ public:
             BytecodeLocation{static_cast<uint32>(module.words.Size()), 1}));
     }
 
+    // 지금 함수의 await 지점(함수 안 주소 — AWAIT·AWAITEV 명령)을 await 표에 더한다.
+    void Await(uint32 address) noexcept {
+        BytecodeFunction& function = module.functions[module.functions.Size() - 1];
+        if (function.awaitCount == 0) {
+            function.firstAwait = static_cast<uint32>(module.awaits.Size());
+        }
+
+        BytecodeAwaitPoint point;
+        point.address = address;
+        CHECK(module.awaits.TryPushBack(point));
+        ++function.awaitCount;
+    }
+
     void End() noexcept {
         BytecodeFunction& function = module.functions[module.functions.Size() - 1];
         function.wordCount = static_cast<uint32>(module.words.Size()) - function.firstWord;

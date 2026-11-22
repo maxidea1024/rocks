@@ -262,7 +262,7 @@ constexpr OpcodeInfo OpcodeInfos[] = {
      OperandBank::None},
     {Opcode::Await, "AWAIT", OperandForm::AB, true, OperandBank::None, OperandBank::Ref,
      OperandBank::None},
-    {Opcode::AwaitEv, "AWAITEV", OperandForm::A, true, OperandBank::Ref, OperandBank::None,
+    {Opcode::WaitEv, "WAITEV", OperandForm::AB, true, OperandBank::Ref, OperandBank::Ref,
      OperandBank::None},
     {Opcode::TryS, "TRY.S", OperandForm::ABC, true, OperandBank::Scalar, OperandBank::Scalar,
      OperandBank::None},
@@ -295,6 +295,8 @@ constexpr OpcodeInfo OpcodeInfos[] = {
     {Opcode::Fault, "FAULT", OperandForm::Ax, false, OperandBank::None, OperandBank::None,
      OperandBank::None},
     {Opcode::Extra, "EXTRA", OperandForm::Ax, false, OperandBank::None, OperandBank::None,
+     OperandBank::None},
+    {Opcode::CallW, "CALLW", OperandForm::Bx, false, OperandBank::None, OperandBank::None,
      OperandBank::None},
 };
 

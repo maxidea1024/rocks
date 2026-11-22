@@ -324,6 +324,16 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
         }
 
         const uint32 valueNode = tree_->Child(arguments[index], 1);
+        // 이벤트 인자(`Race(Play(seq), Skip.Triggered)` — SL 6.1절 SD41)는 이벤트 대기 handle이다.
+        if (const uint32 eventWait = LowerEventWait(valueNode); eventWait != NoIrRegister) {
+            if (auto pushed = values.TryPushBack(eventWait); !pushed) {
+                Fail(pushed.Error());
+                return NoIrRegister;
+            }
+
+            continue;
+        }
+
         const uint32 argumentType = c_.ExpressionType(module_, valueNode);
         // 자리표시·제네릭 매개변수는 실제 타입을 쓴다(검사기가 인자 식의 타입을 기록했다).
         const bool concrete =
@@ -341,10 +351,30 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
 
     // 대기를 만드는 호출(`async fn`, `await void` 함수 — Delay·NextTick·All·Race)의 결과는 대기
     // handle이다(await가 정지하고 결과를 받는다).
-    const bool wait = signature != NoSignature && c_.signatures_[signature].isAsync;
+    const bool wait = signature != NoSignature && c_.signatures_[signature].isAsync &&
+                      !(node == directAwaitCall_ && IsDirectAwaitCallee(callee));
     const uint32 result = wait ? NewWait() : NewValue(type);
     const uint32 operands = AddOperands(values.View());
-    Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+    // Sparks async 함수를 대기 값으로 쓰는 호출(`All(F(), G())` — 하위 실행은 LC6c2): 지금은 함수를
+    // 부르고 대기 자리를 null로 둔다(묶음·AWAIT가 ContractViolation으로 확정적으로 멈춘다 — 반환
+    // 창의 남은 값을 대기로 읽지 않게, LC6c1 리뷰 S4).
+    const bool virtualCall = entry.kind == SymbolKind::InterfaceMethod ||
+                             (entry.flags & (SymbolFlags::Open | SymbolFlags::Override)) != 0;
+    if (wait && IsDirectAwaitCallee(callee) && !virtualCall) {
+        // 하위 실행(CALLW — SparksRuntime 2.5절): 결과는 하위 대기 handle이다.
+        Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node,
+            IrCallChild);
+    } else if (wait && IsDirectAwaitCallee(callee)) {
+        // 가상 async 호출의 하위 실행은 아직 없다: 부르고 대기 자리를 null로 둔다(묶음이
+        // ContractViolation으로 확정적으로 멈춘다 — 반환 창의 값을 대기로 읽지 않게).
+        const uint32 returns = c_.signatures_[signature].returnType;
+        const uint32 discarded = NewValue(returns == NoType ? checker_.voidType_ : returns);
+        Add(IrOp::Call, discarded, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+        LoadNone(result, node);
+    } else {
+        Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+    }
+
     // 명시한 타입 인자(`Find<Lamp>()`·`LoadAll<T>(...)`)는 호출의 타입 인자 목록으로 둔다(실행 중
     // native 호출이 받는다).
     const uint32 calleeNode = tree_->Child(node, 0);
@@ -727,26 +757,54 @@ uint32 IrBuilder::LowerAwait(uint32 node, uint32 operandNode) noexcept {
     }
 
     const uint32 resultType = AwaitResultType(operandNode);
-    const uint32 operandSymbol = c_.NodeSymbol(module_, operandNode);
-    const SyntaxKind operandKind =
-        operandNode == NoNode ? SyntaxKind::Error : tree_->Node(operandNode).kind;
-    const bool event =
-        operandSymbol != NoSymbol &&
-        (operandKind == SyntaxKind::Member || operandKind == SyntaxKind::Identifier) &&
-        (c_.symbols_[operandSymbol].kind == SymbolKind::Event ||
-         c_.symbols_[operandSymbol].kind == SymbolKind::EngineEvent ||
-         c_.symbols_[operandSymbol].kind == SymbolKind::LanguageEvent);
-    // 이벤트의 발행자: `x.E`면 x, 이름만 쓴 `E`면 자기 객체다.
-    const uint32 source = !event ? Lower(operandNode, c_.ExpressionType(module_, operandNode))
-                          : operandKind == SyntaxKind::Member
-                              ? Lower(tree_->Child(operandNode, 0), NoType)
-                              : this_;
+    // `await F()`(Sparks async 함수)는 정지 지점이 아니다: 호출이 값을 직접 낸다.
+    if (operandNode != NoNode && tree_->Node(operandNode).kind == SyntaxKind::Call &&
+        IsDirectAwaitCallee(c_.NodeSymbol(module_, tree_->Child(operandNode, 0)))) {
+        const uint32 outer = directAwaitCall_;
+        directAwaitCall_ = operandNode;
+        const uint32 value = Lower(operandNode, resultType);
+        directAwaitCall_ = outer;
+        return value;
+    }
+
+    // 이벤트(`await X.E`)는 이벤트 대기 handle을 만들어 기다린다(WAITEV + AWAIT — 2.5절).
+    uint32 source = LowerEventWait(operandNode);
+    if (source == NoIrRegister) {
+        source = Lower(operandNode, c_.ExpressionType(module_, operandNode));
+    }
+
     const uint32 result = NewValue(resultType);
     const uint32 resume = NewBlock();
-    Add(IrOp::Await, result, source, resume, event ? operandSymbol : 0, node,
-        event ? IrAwaitEvent : IrAwaitValue);
+    Add(IrOp::Await, result, source, resume, 0, node, IrAwaitValue);
     StartBlock(resume);
     return result;
+}
+
+uint32 IrBuilder::LowerEventWait(uint32 node) noexcept {
+    // 이벤트 식(`x.E`·이름만 쓴 `E`)이면 발행자의 이벤트 대기 handle, 아니면 NoIrRegister.
+    while (node != NoNode && tree_->Node(node).kind == SyntaxKind::Parenthesized) {
+        node = tree_->Child(node, 0);
+    }
+
+    if (node == NoNode) {
+        return NoIrRegister;
+    }
+
+    const SyntaxKind kind = tree_->Node(node).kind;
+    const uint32 symbol = c_.NodeSymbol(module_, node);
+    if (symbol == NoSymbol || (kind != SyntaxKind::Member && kind != SyntaxKind::Identifier) ||
+        (c_.symbols_[symbol].kind != SymbolKind::Event &&
+         c_.symbols_[symbol].kind != SymbolKind::EngineEvent &&
+         c_.symbols_[symbol].kind != SymbolKind::LanguageEvent)) {
+        return NoIrRegister;
+    }
+
+    // 발행자: `x.E`면 x, 이름만 쓴 `E`면 자기 객체다.
+    const uint32 publisher =
+        kind == SyntaxKind::Member ? Lower(tree_->Child(node, 0), NoType) : this_;
+    const uint32 wait = NewWait();
+    Add(IrOp::WaitEvent, wait, publisher, NoIrRegister, symbol, node);
+    return wait;
 }
 
 uint32 IrBuilder::LowerChainedAwait(uint32 node, uint32 call) noexcept {
@@ -777,12 +835,23 @@ uint32 IrBuilder::LowerChainedAwait(uint32 node, uint32 call) noexcept {
     Add(IrOp::Branch, present, some, absent, 0, node);
     StartBlock(present);
     const uint32 receiverType = checker_.NonOptional(function_.registers[receiver].type);
-    const uint32 wait = EmitCall(call, callee, Unwrap(receiver, receiverType, node), arguments,
-                                 NoType, IrCallDirect);
-    const uint32 awaited = NewValue(inner);
-    const uint32 resume = NewBlock();
-    Add(IrOp::Await, awaited, wait, resume, 0, node, IrAwaitValue);
-    StartBlock(resume);
+    uint32 awaited = NoIrRegister;
+    if (IsDirectAwaitCallee(callee)) {
+        // Sparks async 함수: 호출이 값을 직접 낸다(정지는 호출된 함수 안에서 — 2.4절).
+        const uint32 outer = directAwaitCall_;
+        directAwaitCall_ = call;
+        awaited = EmitCall(call, callee, Unwrap(receiver, receiverType, node), arguments, inner,
+                           IrCallDirect);
+        directAwaitCall_ = outer;
+    } else {
+        const uint32 wait = EmitCall(call, callee, Unwrap(receiver, receiverType, node), arguments,
+                                     NoType, IrCallDirect);
+        awaited = NewValue(inner);
+        const uint32 resume = NewBlock();
+        Add(IrOp::Await, awaited, wait, resume, 0, node, IrAwaitValue);
+        StartBlock(resume);
+    }
+
     MoveValue(result, Coerce(awaited, resultType, node), node);
     Add(IrOp::Jump, done, NoIrRegister, NoIrRegister, 0, node);
     StartBlock(absent);
@@ -806,6 +875,17 @@ bool IrBuilder::InStartupHook() const noexcept {
 
     const StringView name = checker_.TokenText(function_.module, tree.Child(path, 0));
     return name == "Awake" || name == "Enable" || name == "Start";
+}
+
+bool IrBuilder::IsDirectAwaitCallee(uint32 callee) const noexcept {
+    if (callee == NoSymbol) {
+        return false;
+    }
+
+    const Symbol& entry = c_.symbols_[callee];
+    return (entry.kind == SymbolKind::Function || entry.kind == SymbolKind::Method ||
+            entry.kind == SymbolKind::InterfaceMethod) &&
+           entry.signature != NoSignature && c_.signatures_[entry.signature].isAsync;
 }
 
 uint32 IrBuilder::AwaitResultType(uint32 operandNode) noexcept {

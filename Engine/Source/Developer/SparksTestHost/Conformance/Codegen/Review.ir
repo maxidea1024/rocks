@@ -44,49 +44,46 @@ function Hp.Hold()
   r3: SoundAsset
   r4: LoopHandle?
   r5 siren: LoopHandle?
-  r6: wait
-  s7..s8: Result<int> [Flag I64]
-  s9: int [I64]
-  s10 n: int [I64]
-  s11: float [F64]
-  s12: Clock [Enum]
-  r13: wait
-  s14: bool [Bool]
-  r15: LoopHandle
-  s16..s17: Result<int> [Flag I64]
+  s6..s7: Result<int> [Flag I64]
+  s8: int [I64]
+  s9 n: int [I64]
+  s10: float [F64]
+  s11: Clock [Enum]
+  r12: wait
+  s13: bool [Bool]
+  r14: LoopHandle
+  s15..s16: Result<int> [Flag I64]
 L0:
     r1 = GETF World    ; 30:21
     r2 = GETF r1.World.Audio    ; 30:21
     r3 = GETF r0.Hp.Cue    ; 30:43
     r4 = CALL AudioSystem.StartLoop(r2, r3)    ; 30:21
     r5 = MOVE r4    ; 30:9
-    r6 = CALL Hp.Fetch(r0)    ; 31:27
-    s7 = AWAIT r6 -> L1    ; 31:17
+    s6 = CALL Hp.Fetch(r0)    ; 31:27
+    s8 = TRY s6 -> L1 else L2    ; 31:17
 L1:
-    s9 = TRY s7 -> L2 else L3    ; 31:17
+    s9 = MOVE s8    ; 31:9
+    s10 = LOADFLOAT 1    ; 32:21
+    s11 = LOADINT 0    ; 32:26
+    r12 = CALL Delay(s10, s11)    ; 32:15
+    AWAIT r12 -> L3    ; 32:9
 L2:
-    s10 = MOVE s9    ; 31:9
-    s11 = LOADFLOAT 1    ; 32:21
-    s12 = LOADINT 0    ; 32:26
-    r13 = CALL Delay(s11, s12)    ; 32:15
-    AWAIT r13 -> L4    ; 32:9
-L3:
     RELEASE r5    ; 31:17
-    RETURN.ERROR s7    ; 31:17
+    RETURN.ERROR s6    ; 31:17
+L3:
+    s13 = ISSOME r5    ; 33:9
+    BRANCH s13, L4, L5    ; 33:9
 L4:
-    s14 = ISSOME r5    ; 33:9
-    BRANCH s14, L5, L6    ; 33:9
+    r14 = MOVE r5    ; 33:9
+    CALL LoopHandle.Pause(r14)    ; 33:9
+    JUMP L6    ; 33:9
 L5:
-    r15 = MOVE r5    ; 33:9
-    CALL LoopHandle.Pause(r15)    ; 33:9
-    JUMP L7    ; 33:9
+    JUMP L6    ; 33:9
 L6:
-    JUMP L7    ; 33:9
-L7:
-    s16 = LOADINT 0    ; 34:9
-    s17 = MOVE s10    ; 34:9
+    s15 = LOADINT 0    ; 34:9
+    s16 = MOVE s9    ; 34:9
     RELEASE r5    ; 34:9
-    RETURN s16    ; 34:9
+    RETURN s15    ; 34:9
 
 function Hp.Equal(s1)
   r0 this: Hp
@@ -161,46 +158,43 @@ function Hp.Chain(r1)
   s2..s3: int? [Flag I64]
   s4: bool [Bool]
   r5: Hp
-  r6: wait
-  s7: int [I64]
-  s8..s9: int? [Flag I64]
-  s10..s11 n: int? [Flag I64]
-  s12: int [I64]
-  s13: bool [Bool]
+  s6: int [I64]
+  s7..s8: int? [Flag I64]
+  s9..s10 n: int? [Flag I64]
+  s11: int [I64]
+  s12: bool [Bool]
+  s13: int [I64]
   s14: int [I64]
-  s15: int [I64]
 L0:
     s4 = ISSOME r1    ; 46:17
     BRANCH s4, L1, L2    ; 46:17
 L1:
     r5 = MOVE r1    ; 46:17
-    r6 = CALL Hp.Compute(r5)    ; 46:23
-    s7 = AWAIT r6 -> L4    ; 46:17
+    s6 = CALL Hp.Compute(r5)    ; 46:23
+    s7 = LOADINT 1    ; 46:17
+    s8 = MOVE s6    ; 46:17
+    s2 = MOVE s7    ; 46:17
+    s3 = MOVE s8    ; 46:17
+    JUMP L3    ; 46:17
 L2:
     s2 = LOADINT 0    ; 46:17
     s3 = LOADINT 0    ; 46:17
     JUMP L3    ; 46:17
 L3:
-    s10 = MOVE s2    ; 46:9
-    s11 = MOVE s3    ; 46:9
-    s13 = ISSOME s10    ; 47:16
-    BRANCH s13, L5, L6    ; 47:16
+    s9 = MOVE s2    ; 46:9
+    s10 = MOVE s3    ; 46:9
+    s12 = ISSOME s9    ; 47:16
+    BRANCH s12, L4, L5    ; 47:16
 L4:
-    s8 = LOADINT 1    ; 46:17
-    s9 = MOVE s7    ; 46:17
-    s2 = MOVE s8    ; 46:17
-    s3 = MOVE s9    ; 46:17
-    JUMP L3    ; 46:17
+    s13 = MOVE s10    ; 47:16
+    s11 = MOVE s13    ; 47:16
+    JUMP L6    ; 47:16
 L5:
-    s14 = MOVE s11    ; 47:16
-    s12 = MOVE s14    ; 47:16
-    JUMP L7    ; 47:16
+    s14 = LOADINT 0    ; 47:21
+    s11 = MOVE s14    ; 47:16
+    JUMP L6    ; 47:16
 L6:
-    s15 = LOADINT 0    ; 47:21
-    s12 = MOVE s15    ; 47:16
-    JUMP L7    ; 47:16
-L7:
-    RETURN s12    ; 47:9
+    RETURN s11    ; 47:9
 
 function Hp.Paths()
   r0 this: Hp
@@ -305,12 +299,13 @@ handler Hp.on Owner.Damaged(s1)
   r8: LoopHandle
   s9: float [F64]
   s10: bool [Bool]
-  r11: LoopHandle?
-  s12: bool [Bool]
-  r13: LoopHandle
-  r14: Actor
-  r15: Hp?
-  r16 first: Hp?
+  r11: wait
+  r12: LoopHandle?
+  s13: bool [Bool]
+  r14: LoopHandle
+  r15: Actor
+  r16: Hp?
+  r17 first: Hp?
 L0:
     r2 = GETF World    ; 72:24
     r3 = GETF r2.World.Audio    ; 72:24
@@ -325,22 +320,23 @@ L1:
     s10 = GT s1, s9    ; 73:17
     BRANCH s10, L3, L4    ; 73:17
 L2:
-    r14 = GETF r0.Component.Owner    ; 81:21
-    r15 = CALL Actor.Find<Hp>(r14)    ; 81:21
-    r16 = MOVE r15    ; 81:9
+    r15 = GETF r0.Component.Owner    ; 81:21
+    r16 = CALL Actor.Find<Hp>(r15)    ; 81:21
+    r17 = MOVE r16    ; 81:9
     RETURN    ; 83:5
 L3:
     RELEASE r7    ; 74:17
     RETURN    ; 74:17
 L4:
-    AWAIT r0.Hp.Opened -> L5    ; 77:13
+    r11 = WAITEV r0.Hp.Opened    ; 77:19
+    AWAIT r11 -> L5    ; 77:13
 L5:
-    r11 = MOVE r7    ; 78:13
-    s12 = ISSOME r11    ; 78:13
-    BRANCH s12, L6, L7    ; 78:13
+    r12 = MOVE r7    ; 78:13
+    s13 = ISSOME r12    ; 78:13
+    BRANCH s13, L6, L7    ; 78:13
 L6:
-    r13 = MOVE r11    ; 78:13
-    CALL LoopHandle.Pause(r13)    ; 78:13
+    r14 = MOVE r12    ; 78:13
+    CALL LoopHandle.Pause(r14)    ; 78:13
     JUMP L8    ; 78:13
 L7:
     JUMP L8    ; 78:13

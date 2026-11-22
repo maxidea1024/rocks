@@ -29,28 +29,29 @@ t18 = ">w"
 t19 = "NextTick"
 t20 = ">?<x>"
 t21 = "Beacon.Target"
-t22 = "Actor.Destroyed"
-t23 = "x>void"
+t22 = "x>void"
+t23 = "Actor.Destroyed"
 t24 = "LoopHandle.Pause"
 t25 = "Beacon.Ping"
-t26 = "Actor.Pinged"
-t27 = "Beacon"
-t28 = "Actor"
-t29 = "Cue"
-t30 = "Target"
-t31 = "this"
-t32 = "Pinged"
-t33 = "sparks 0.4.0"
-t34 = "Main"
+t26 = "x,i64>void"
+t27 = "Actor.Pinged"
+t28 = "Beacon"
+t29 = "Actor"
+t30 = "Cue"
+t31 = "Target"
+t32 = "this"
+t33 = "Pinged"
+t34 = "sparks 0.4.0"
+t35 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Beacon.Cue args ">x"
 ref3 = native AudioSystem.StartLoop args "x,x>?<x>"
 ref4 = language NextTick args ">w"
 ref5 = field Beacon.Target args ">?<x>"
-ref6 = event Actor.Destroyed
+ref6 = event Actor.Destroyed args "x>void"
 ref7 = native LoopHandle.Pause args "x>void"
-ref8 = event Actor.Pinged
+ref8 = event Actor.Pinged args "x,i64>void"
 class0 = Beacon : Actor s0 r2 b0
   field Cue r0 x1
   field Target r1 x1
@@ -173,9 +174,9 @@ function Sum  scalar=10/10 ref=0/0 buf=3/3 params=0/0/2 returns sx1
   0052  RET  s0 x1    ; 74:5
 
 function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0 returns sx0
-  body 252bccd8a499b73f6374af72128070492e2376d1e58ee27640bcc00a10045bcf
+  body e0c1666837e60881d607f5287a9e4c9ce33723a47db194efb4362d49fe38f71d
   await 0022  live r0..r1
-  await 0028  live r1
+  await 0030  live r1
   0000  GETCTX  r1, ref0    ; 83:19
   0001  GETF.R  r1, r1, ref1    ; 83:19
   0003  GETF.R  r2, r0, ref2    ; 83:41
@@ -197,19 +198,20 @@ function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0 returns 
   0022  AWAIT  -, r2    ; 85:9
   0024  GETF.R  r2, r0, ref5    ; 86:27
   0026  ISSOME.R  s1, r2    ; 86:13
-  0027  BRF  s1, 0031    ; 86:13
-  0028  AWAITEV  r2, ref6    ; 87:13
-  0030  JMP  0034    ; 87:13
-  0031  ISSOME.R  s1, r1    ; 90:9
-  0032  BRT  s1, 0035    ; 90:9
-  0033  JMP  0039    ; 90:9
-  0034  JMP  0031    ; 86:9
-  0035  MOV.R  r2, r1    ; 90:9
-  0036  MOV.R  r4, r2    ; 90:9
-  0037  CALLN  ref7    ; 90:9
-  0038  JMP  0039    ; 90:9
-  0039  RELEASE  r1    ; 82:32
-  0040  RET  -    ; 92:5
+  0027  BRF  s1, 0033    ; 86:13
+  0028  WAITEV  r2, r2, ref6    ; 87:19
+  0030  AWAIT  -, r2    ; 87:13
+  0032  JMP  0036    ; 87:13
+  0033  ISSOME.R  s1, r1    ; 90:9
+  0034  BRT  s1, 0037    ; 90:9
+  0035  JMP  0041    ; 90:9
+  0036  JMP  0033    ; 86:9
+  0037  MOV.R  r2, r1    ; 90:9
+  0038  MOV.R  r4, r2    ; 90:9
+  0039  CALLN  ref7    ; 90:9
+  0040  JMP  0041    ; 90:9
+  0041  RELEASE  r1    ; 82:32
+  0042  RET  -    ; 92:5
 
 function Beacon.Ping  scalar=1/2 ref=2/3 buf=0/0 params=0/2/0 returns sx0
   body 12404951a9deb3d23cdff23082da7cbdc4ddbb5aaf1f4cedc6867c515b88e216

@@ -739,7 +739,8 @@ public:
                   ref.kind == BytecodeRefKind::NativeFunction ||
                   ref.kind == BytecodeRefKind::ImportedFunction ||
                   ref.kind == BytecodeRefKind::VirtualFunction ||
-                  ref.kind == BytecodeRefKind::Field || ref.kind == BytecodeRefKind::StructField) &&
+                  ref.kind == BytecodeRefKind::Event || ref.kind == BytecodeRefKind::Field ||
+                  ref.kind == BytecodeRefKind::StructField) &&
                  ref.arguments < strings);
             // 같은 모듈 함수 참조는 함수 표 번호가 있어야 한다(CALL이 그 함수로 간다).
             const bool functionOk =
@@ -969,6 +970,7 @@ private:
         const BytecodeRefKind kind = module_.refs[index].kind;
         switch (op) {
         case Opcode::Call:
+        case Opcode::CallW:
             return kind == BytecodeRefKind::Function || kind == BytecodeRefKind::ImportedFunction;
         case Opcode::CallV:
             return kind == BytecodeRefKind::VirtualFunction;
@@ -1064,9 +1066,7 @@ private:
         for (uint32 index = function.firstAwait; index < function.firstAwait + function.awaitCount;
              ++index) {
             const BytecodeAwaitPoint& point = module_.awaits[index];
-            if (!target(point.address) ||
-                (DecodeOpcode(words[point.address]) != Opcode::Await &&
-                 DecodeOpcode(words[point.address]) != Opcode::AwaitEv) ||
+            if (!target(point.address) || DecodeOpcode(words[point.address]) != Opcode::Await ||
                 IsAwaited(point.address)) {
                 return Reject(BytecodeLoadError::BadBranch, point.address);
             }
@@ -1092,7 +1092,7 @@ private:
             }
 
             // 정지 명령은 모두 await 표에 있어야 한다(정지 중 보존할 레지스터).
-            if ((info.op == Opcode::Await || info.op == Opcode::AwaitEv) && !IsAwaited(address)) {
+            if (info.op == Opcode::Await && !IsAwaited(address)) {
                 return Reject(BytecodeLoadError::BadBranch, address);
             }
 
@@ -1266,6 +1266,7 @@ private:
                    : !Ref(bx, BytecodeRefKind::Type) ? BytecodeLoadError::BadReference
                                                      : BytecodeLoadError::None;
         case Opcode::Call:
+        case Opcode::CallW:
         case Opcode::CallV:
         case Opcode::CallN:
         case Opcode::CallL:
@@ -1369,8 +1370,8 @@ private:
 
             return BytecodeLoadError::None;
         }
-        case Opcode::AwaitEv:
-            return !Tuple(R, a, 1)                    ? BytecodeLoadError::BadRegister
+        case Opcode::WaitEv:
+            return !Tuple(R, a, 1) || !Tuple(R, b, 1) ? BytecodeLoadError::BadRegister
                    : !Ref(ax, BytecodeRefKind::Event) ? BytecodeLoadError::BadReference
                                                       : BytecodeLoadError::None;
         case Opcode::Cast:

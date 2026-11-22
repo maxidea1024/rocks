@@ -402,6 +402,7 @@ private:
             Assign(i.a);
             out_.Append(i.sub == IrCallRpc        ? "CALL.RPC "
                         : i.sub == IrCallMutating ? "CALL.MUT "
+                        : i.sub == IrCallChild    ? "CALL.CHILD "
                                                   : "CALL ");
             SymbolName(i.extra);
             if (i.types != NoIrRegister) {
@@ -435,12 +436,14 @@ private:
             Assign(i.a);
             out_.Append("AWAIT ");
             Register(i.b);
-            if (i.sub == IrAwaitEvent) {
-                out_.Append(".");
-                SymbolName(i.extra);
-            }
-
             out_.AppendFormat(" -> L{}", i.c);
+            break;
+        case IrOp::WaitEvent:
+            Assign(i.a);
+            out_.Append("WAITEV ");
+            Register(i.b);
+            out_.Append(".");
+            SymbolName(i.extra);
             break;
         case IrOp::Try:
             Assign(i.a);

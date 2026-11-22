@@ -1,0 +1,226 @@
+class Timer : ScriptableComponent {
+    var Trail = "";
+    var Ticks = 0;
+    event Go(n: int);
+
+    async fn Wait(seconds: float) {
+        Trail = "${Trail}w";
+        await Delay(seconds, Clock.Game);
+        Trail = "${Trail}d";
+        Log.Info("waited ${seconds}");
+    }
+
+    async fn Twice(): int {
+        await Wait(0.5);
+        await NextTick();
+        Ticks += 1;
+        return Ticks;
+    }
+
+    async fn Both() {
+        await All(NextTick(), Delay(1.0, Clock.Game));
+        Log.Info("both");
+    }
+
+    async fn First() {
+        await Race(Delay(5.0, Clock.Game), NextTick());
+        Log.Info("first");
+    }
+
+    async fn Fixed() {
+        await NextFixedTick();
+        Log.Info("fixed");
+    }
+
+    async fn Count(n: int) {
+        var i = 0;
+        while (i < n) {
+            await NextTick();
+            i += 1;
+            Log.Info("count ${i}");
+        }
+    }
+
+    async fn Late(): int {
+        await Delay(0.0, Clock.UI);
+        return Ticks * 10;
+    }
+
+    fn Fire(n: int) {
+        emit Go(n);
+    }
+
+    async fn Value(): int {
+        let v = await Late();
+        Log.Info("late ${v}");
+        return v + 1;
+    }
+
+    async fn Nested() {
+        await Race(All(Delay(3600.0, Clock.Game), NextTick()), NextTick());
+        Log.Info("nested");
+    }
+
+    async fn Clocks() {
+        await Race(Delay(1.0, Clock.UI), Delay(1.0, Clock.Game));
+        Log.Info("clocks");
+    }
+
+    async fn Negative() {
+        await Delay(-1.0, Clock.Game);
+        Log.Info("negative");
+    }
+
+    async fn Loop() {
+        while (true) {
+            await NextTick();
+            Ticks += 1;
+        }
+    }
+
+    async fn Emitting() {
+        await NextTick();
+        emit Go(7);
+    }
+
+    async fn Holding() {
+        let text = "held ${Ticks}";
+        await NextTick();
+        Log.Info(text);
+    }
+
+    async fn Faulting() {
+        await NextTick();
+        Assert(false, "after await");
+    }
+
+    async fn Child() {
+        await NextTick();
+        Log.Info("child");
+    }
+
+    async fn Group() {
+        await All(Child(), NextTick());
+        Log.Info("group");
+    }
+
+    async fn WaitGo() {
+        await Go;
+        Log.Info("got go");
+    }
+
+    async fn WaitOther(other: Timer) {
+        await other.Go;
+        Log.Info("other go");
+    }
+
+    async fn RaceOther(other: Timer) {
+        await Race(other.Go, Delay(1.0, Clock.Game));
+        Log.Info("race other");
+    }
+
+    async fn AllOther(other: Timer) {
+        await All(other.Go, NextTick());
+        Log.Info("all other");
+    }
+
+    async fn Quick() {
+        if (Ticks > 1000) {
+            await NextTick();
+        }
+
+        Log.Info("quick");
+    }
+
+    async fn Bad() {
+        await NextTick();
+        Assert(false, "child fault");
+    }
+
+    async fn Pair() {
+        await All(Quick(), Child());
+        Log.Info("pair");
+    }
+
+    async fn FaultGroup() {
+        await All(Bad(), Delay(5.0, Clock.Game));
+        Log.Info("unreachable");
+    }
+
+    async fn RaceChild() {
+        await Race(Child(), NextTick());
+        Log.Info("race child");
+    }
+
+    async fn Middle() {
+        await All(Child(), NextTick());
+        Log.Info("middle");
+    }
+
+    async fn Deep() {
+        await All(Middle(), Delay(0.05, Clock.Game));
+        Log.Info("deep");
+    }
+
+    async fn GameWait() {
+        await Delay(0.2, Clock.Game);
+        Log.Info("game");
+    }
+
+    async fn UiWait() {
+        await Delay(0.2, Clock.UI);
+        Log.Info("ui");
+    }
+
+    async fn TickWait() {
+        await NextTick();
+        Log.Info("tick");
+    }
+}
+
+class Waiter : ScriptableComponent {
+    var Source: Timer?;
+    var Got = 0;
+
+    fn Watch(target: Timer) {
+        Source = target;
+    }
+
+    @skipWhileBusy
+    on Source.Go(n: int) {
+        await Delay(0.25, Clock.Game);
+        Got += n;
+        Log.Info("go ${n}");
+    }
+}
+
+class Restarter : ScriptableComponent {
+    var Source: Timer?;
+    var Got = 0;
+
+    fn Watch(target: Timer) {
+        Source = target;
+    }
+
+    @restart
+    on Source.Go(n: int) {
+        await Delay(0.25, Clock.Game);
+        Got += n;
+        Log.Info("restart go ${n}");
+    }
+}
+
+class Crowd : ScriptableComponent {
+    var Sources: Array<Timer> = [];
+
+    fn Join(source: Timer) {
+        Sources.Add(source);
+    }
+
+    @skipWhileBusy
+    on Sources.Go(source: Timer, n: int) {
+        let ticks = source.Ticks;
+        await Delay(0.25, Clock.Game);
+        Log.Info("crowd ${n} ${ticks}");
+    }
+}

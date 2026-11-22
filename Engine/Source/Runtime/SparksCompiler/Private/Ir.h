@@ -77,8 +77,8 @@ enum class IrOp : uint8 {
     GetEntry,     // a := 컨테이너 b의 c번째 항목(sub IrEntryKey면 key, IrEntryValue면 값)
     Call,         // a := 함수 extra(목록 — 수신자가 있으면 첫 인자). sub IrCallRpc면 RPC 송신
     Emit,         // 이벤트 extra를 대상 a(this면 NoIrRegister)에 발행(목록이 인자)
-    Await,        // 정지: 대기 b(sub IrAwaitEvent면 발행자 b·이벤트 extra), 재개하면 a := 결과,
-                  // block c로
+    Await,        // 정지: 대기 b, 재개하면 a := 결과, block c로
+    WaitEvent,    // a := 발행자 b의 이벤트 extra 대기 handle(SparksRuntime 2.5절)
     Try,          // Result b가 성공이면 a := 값, block extra로. 실패면 block c로(끝 명령)
     New,          // a := 생성 extra(목록 — sub로 해석: IrNewStruct는 (필드, 값) 쌍, IrNewLiteral은
                   // (이름 글자 번호, 값) 쌍, IrNewCollection은 원소·(key, 값), IrNewResult*는 값)
@@ -94,6 +94,8 @@ enum class IrOp : uint8 {
 inline constexpr uint8 IrCallDirect = 0;
 inline constexpr uint8 IrCallRpc = 1;
 inline constexpr uint8 IrCallMutating = 2; // 수신자 묶음(첫 인자)을 호출이 바꾼다(in/out)
+// void async 함수를 대기 값으로 부른다(`All`·`Race` 인자 — 하위 실행, 결과는 대기 handle).
+inline constexpr uint8 IrCallChild = 3;
 inline constexpr uint8 IrNewStruct = 0;
 inline constexpr uint8 IrNewLiteral = 1;
 inline constexpr uint8 IrNewCollection = 2;
@@ -102,7 +104,6 @@ inline constexpr uint8 IrNewResultError = 4;
 inline constexpr uint8 IrConvertValue = 0;
 inline constexpr uint8 IrConvertCast = 1;
 inline constexpr uint8 IrAwaitValue = 0;
-inline constexpr uint8 IrAwaitEvent = 1;
 inline constexpr uint8 IrStringConstant = 0;
 inline constexpr uint8 IrStringPiece = 1;
 inline constexpr uint8 IrEntryKey = 0;

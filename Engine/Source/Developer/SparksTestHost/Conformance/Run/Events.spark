@@ -1,0 +1,75 @@
+class Speaker : ScriptableComponent {
+    var Volume = 1;
+    event Spoke(word: int);
+    event Echo(left: int);
+
+    fn Say(word: int) {
+        emit Spoke(word);
+        Log.Info("said ${word}");
+    }
+
+    fn Louder() {
+        Volume += 1;
+    }
+
+    fn Quiet() {
+        Volume = Volume;
+    }
+
+    fn Bounce(left: int) {
+        emit Echo(left);
+    }
+
+    on Owner.Damaged(amount: float) {
+        Log.Info("speaker hurt ${amount}");
+    }
+
+    fn Holder(): Actor {
+        return Owner;
+    }
+}
+
+class Listener : ScriptableComponent {
+    var Source: Speaker?;
+    var Crowd: Array<Speaker> = [];
+    var Heard = 0;
+    var Count = 0;
+
+    fn Watch(target: Speaker) {
+        Source = target;
+    }
+
+    fn Join(member: Speaker) {
+        Crowd.Add(member);
+    }
+
+    on Source.Spoke(word: int) {
+        Heard += word;
+        Log.Info("heard ${word}");
+    }
+
+    on Source.Volume.Changed() {
+        Log.Info("volume changed");
+    }
+
+    on Crowd.Spoke(member: Speaker, word: int) {
+        Log.Info("crowd ${word} ${member.Volume}");
+    }
+
+    on Count.Changed() {
+        Log.Info("count changed");
+    }
+
+    fn Bump() {
+        Count += 1;
+        Count -= 1;
+    }
+
+    fn Step() {
+        Count += 1;
+    }
+
+    on Source.Echo(left: int) {
+        Source?.Bounce(left + 1);
+    }
+}

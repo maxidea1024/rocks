@@ -150,6 +150,7 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
     out.imports_.Clear();
     out.shapes_.Clear();
     out.localFields_.Clear();
+    out.keys_.Clear();
     out.importsLinked_ = false;
     out.linked_ = false;
     ++out.generation_;
@@ -176,6 +177,47 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
 
     for (usize ref = 0; ref < count; ++ref) {
         out.localFields_[ref] = VmLinkedModule::LocalField();
+    }
+
+    if (auto resized = out.keys_.TryResize(count); !resized) {
+        return resized;
+    }
+
+    // Event·Field 참조의 정규 key: `<경로>:Name`이면 그 경로, 이 모듈 클래스의 선언이면 이 모듈
+    // 경로, 그 밖(엔진 선언)은 빈 경로다.
+    const StringView ownPath = TextOf(module, module.path);
+    for (uint32 ref = 0; ref < count; ++ref) {
+        const BytecodeRef& entry = module.refs[ref];
+        out.keys_[ref] = VmEventKey();
+        if (entry.kind != BytecodeRefKind::Event && entry.kind != BytecodeRefKind::Field) {
+            continue;
+        }
+
+        const StringView name = module.String(entry.name);
+        usize colon = name.ByteCount();
+        for (usize at = 0; at < name.ByteCount() && colon == name.ByteCount(); ++at) {
+            colon = name.Data()[at] == ':' ? at : colon;
+        }
+
+        if (colon < name.ByteCount()) {
+            out.keys_[ref].path = StringView(name.Data(), colon);
+            out.keys_[ref].name = StringView(name.Data() + colon + 1, name.ByteCount() - colon - 1);
+            continue;
+        }
+
+        usize dot = name.ByteCount();
+        for (usize at = 0; at < name.ByteCount() && dot == name.ByteCount(); ++at) {
+            dot = name.Data()[at] == '.' ? at : dot;
+        }
+
+        const StringView owner(name.Data(), dot < name.ByteCount() ? dot : 0);
+        bool local = false;
+        for (const BytecodeClass& candidate : module.classes) {
+            local = local || module.String(candidate.name) == owner;
+        }
+
+        out.keys_[ref].path = local ? ownPath : StringView();
+        out.keys_[ref].name = name;
     }
 
     bool imports = false;
@@ -216,9 +258,11 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             continue;
         }
 
-        // import·가상 함수의 서술자 모양(6.5절 — 대상 함수와 대조).
+        // import·가상 함수·이벤트의 서술자 모양(6.5절 — 대상 함수와 대조, 이벤트는 EMIT 창과
+        // handler 인자 — SparksRuntime 2.3절).
         if (entry.kind == BytecodeRefKind::ImportedFunction ||
-            entry.kind == BytecodeRefKind::VirtualFunction) {
+            entry.kind == BytecodeRefKind::VirtualFunction ||
+            (entry.kind == BytecodeRefKind::Event && entry.arguments != NoBytecodeIndex)) {
             detail::VmSignature signature;
             if (entry.arguments == NoBytecodeIndex ||
                 !detail::VmParseSignature(module.String(entry.arguments), signature)) {
@@ -387,9 +431,9 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
                 }
             }
 
-            // CALLN·CALLV: 서술자의 피연산자·결과가 창에 들어가야 한다(LC5d1 리뷰 B4 — host가 창
-            // 밖을 쓰지 않게 VM이 먼저 막는다).
-            if (op == Opcode::CallN || op == Opcode::CallV) {
+            // CALLN·CALLV·EMIT: 서술자의 피연산자·결과가 창에 들어가야 한다(LC5d1 리뷰 B4 — host가
+            // 창 밖을 쓰지 않게 VM이 먼저 막는다).
+            if (op == Opcode::CallN || op == Opcode::CallV || op == Opcode::Emit) {
                 const BytecodeRef& entry = module.refs[DecodeBx(word)];
                 detail::VmSignature signature;
                 if (entry.arguments == NoBytecodeIndex ||
@@ -539,7 +583,7 @@ Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase&
             for (uint32 address = 0; address < function.wordCount; ++address) {
                 const uint32 word = module.words[function.firstWord + address];
                 const Opcode op = DecodeOpcode(word);
-                if (op == Opcode::Call &&
+                if ((op == Opcode::Call || op == Opcode::CallW) &&
                     module.refs[DecodeBx(word)].kind == BytecodeRefKind::ImportedFunction) {
                     const VmLinkedModule::Import& import = linked->imports_[DecodeBx(word)];
                     const BytecodeFunction& called =

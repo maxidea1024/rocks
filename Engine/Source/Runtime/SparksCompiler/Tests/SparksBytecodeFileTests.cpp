@@ -62,6 +62,14 @@ class Door : ScriptableComponent {
         let n = try await Fetch();
         return n;
     }
+
+    async fn Pulse() {
+        await NextTick();
+    }
+
+    async fn Both() {
+        await All(Pulse(), Opened);
+    }
 }
 
 fn Twice(x: int): int {
@@ -226,7 +234,7 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     const Opcode needed[] = {Opcode::LoadK,  Opcode::LoadStr, Opcode::Jmp,  Opcode::ToStr,
                              Opcode::Switch, Opcode::GetE,    Opcode::SetE, Opcode::GetSFS,
                              Opcode::TryS,   Opcode::Await,   Opcode::Conv, Opcode::Call,
-                             Opcode::Ret};
+                             Opcode::Ret,    Opcode::WaitEv,  Opcode::CallW};
     for (const Opcode op : needed) {
         REQUIRE(find(op) < original.words.Size());
     }
@@ -309,6 +317,28 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     CHECK(patch(Opcode::Ret, [&](uint32 w) noexcept {
               return abc(w, DecodeA(w), DecodeB(w) + 1, DecodeC(w));
           }) == BytecodeLoadError::BadOperand);
+    // WAITEV(SparksRuntime 2.5절): 이벤트가 아닌 참조, frame 밖 레지스터. CALLW: 함수가 아닌 참조.
+    uint32 notEvent = 0;
+    while (notEvent < original.refs.Size() &&
+           original.refs[notEvent].kind == BytecodeRefKind::Event) {
+        ++notEvent;
+    }
+
+    REQUIRE(notEvent < original.refs.Size());
+    CHECK(patchExtra(Opcode::WaitEv, notEvent) == BytecodeLoadError::BadReference);
+    CHECK(patch(Opcode::WaitEv, [&](uint32 w) noexcept { return abc(w, 255, DecodeB(w), 0); }) ==
+          BytecodeLoadError::BadRegister);
+    uint32 notFunction = 0;
+    while (notFunction < original.refs.Size() &&
+           (original.refs[notFunction].kind == BytecodeRefKind::Function ||
+            original.refs[notFunction].kind == BytecodeRefKind::ImportedFunction)) {
+        ++notFunction;
+    }
+
+    REQUIRE(notFunction < original.refs.Size());
+    CHECK(patch(Opcode::CallW, [&](uint32) noexcept {
+              return EncodeABx(Opcode::CallW, 0, notFunction);
+          }) == BytecodeLoadError::BadReference);
     // await 표에서 빠진 AWAIT, 같은 주소의 await 항목 둘.
     const uint32 awaiting = functionOf(find(Opcode::Await));
     CHECK(verify([&](BytecodeModule& m) noexcept { m.functions[awaiting].awaitCount = 0; }) ==

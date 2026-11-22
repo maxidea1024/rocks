@@ -37,12 +37,13 @@ internal static class IdeScriptsTests
         await SingleFileRejectionsAsync(repository);
         await SetupSelfTestAsync(repository);
         await SdkScriptsAsync(repository);
+        await RootScriptAsync(repository);
         await LockOrderAsync(repository);
         await ToolInputsAsync(repository);
         await NMakeCommandsAsync(repository);
         await StalenessAsync(repository);
         Console.WriteLine("PASS IDE scripts: clean boundaries, setup self test (-Command and -File, pwsh and 5.1), SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
-            "terminal no-op, failure exit codes, RPF0001, compile one file");
+            "terminal no-op, failure exit codes, RPF0001, compile one file, root GenerateProjectFiles.ps1");
     }
 
     private static async Task CleanBoundariesAsync(string repository)
@@ -331,6 +332,38 @@ internal static class IdeScriptsTests
         finally
         {
             Directory.Delete(sdk, recursive: true);
+        }
+    }
+
+    // 루트 GenerateProjectFiles.ps1(12절): 인자를 그대로 Build/GenerateProjectFiles.ps1에 넘기고 그 종료 코드를 돌려주며, Windows PowerShell 5.1은
+    // 거부한다. 실제 생성 대신 인자를 출력하고 7로 끝나는 가짜 Build 스크립트를 두어 전달만 확인한다(공백·괄호·작은따옴표가 든 경로).
+    private static async Task RootScriptAsync(string repository)
+    {
+        string root = Directory.CreateTempSubdirectory("rocks-root-script-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Build"));
+            string script = Path.Combine(root, "GenerateProjectFiles.ps1");
+            File.Copy(Path.Combine(repository, "GenerateProjectFiles.ps1"), script);
+            File.WriteAllText(Path.Combine(root, "Build", "GenerateProjectFiles.ps1"),
+                "param([string] $Compiler, [string] $Project, [string] $Sdk)\n" +
+                "[Console]::Out.WriteLine(\"compiler=<$Compiler> project=<$Project> sdk=<$Sdk> bound=$($PSBoundParameters.Count)\")\n" +
+                "exit 7\n");
+            string project = Path.Combine(root, "My Game (1)'s", "Game.rocksproject");
+            var forwarded = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+                "-Project", project, "-Sdk", "C:/sdk dir", "-Compiler", "clang-cl.exe"], root));
+            Require(forwarded.ExitCode == 7 && forwarded.StdOut.Contains($"compiler=<clang-cl.exe> project=<{project}> sdk=<C:/sdk dir> bound=3",
+                StringComparison.Ordinal), "root GenerateProjectFiles.ps1 forwarding: " + forwarded.ExitCode + " " + forwarded.StdOut + forwarded.StdErr);
+            var bare = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], root));
+            Require(bare.ExitCode == 7 && bare.StdOut.Contains("compiler=<> project=<> sdk=<> bound=0", StringComparison.Ordinal),
+                "root GenerateProjectFiles.ps1 without arguments: " + bare.ExitCode + " " + bare.StdOut + bare.StdErr);
+            var legacy = await ProcessRunner.RunAsync(new("powershell", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], root));
+            Require(legacy.ExitCode != 0 && !(legacy.StdOut + legacy.StdErr).Contains("compiler=<", StringComparison.Ordinal),
+                "root GenerateProjectFiles.ps1 under Windows PowerShell 5.1: " + legacy.ExitCode + " " + legacy.StdOut + legacy.StdErr);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 

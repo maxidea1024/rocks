@@ -79,48 +79,42 @@ L2:
 
 function Mover.Run()
   r0 this: Mover
-  r1: wait
-  s2..s3: Result<int> [Flag I64]
-  s4: int [I64]
-  s5 n: int [I64]
+  s1..s2: Result<int> [Flag I64]
+  s3: int [I64]
+  s4 n: int [I64]
+  s5: Result<void> [Flag]
   r6: wait
-  s7: Result<void> [Flag]
-  r8: wait
-  s9: float [F64]
-  s10: Clock [Enum]
-  r11: wait
-  r12: wait
-  s13: int [I64]
-  s14: int [I64]
-  s15..s16: Result<int> [Flag I64]
+  s7: float [F64]
+  s8: Clock [Enum]
+  r9: wait
+  r10: wait
+  s11: int [I64]
+  s12: int [I64]
+  s13..s14: Result<int> [Flag I64]
 L0:
-    r1 = CALL Mover.Fetch(r0)    ; 33:27
-    s2 = AWAIT r1 -> L1    ; 33:17
+    s1 = CALL Mover.Fetch(r0)    ; 33:27
+    s3 = TRY s1 -> L1 else L2    ; 33:17
 L1:
-    s4 = TRY s2 -> L2 else L3    ; 33:17
+    s4 = MOVE s3    ; 33:9
+    s5 = CALL Mover.Check(r0, s4)    ; 34:19
+    TRY s5 -> L3 else L4    ; 34:9
 L2:
-    s5 = MOVE s4    ; 33:9
-    r6 = CALL Mover.Check(r0, s5)    ; 34:19
-    s7 = AWAIT r6 -> L4    ; 34:9
+    RETURN.ERROR s1    ; 33:17
 L3:
-    RETURN.ERROR s2    ; 33:17
+    r6 = CALL NextTick()    ; 35:19
+    s7 = LOADFLOAT 0.5    ; 35:37
+    s8 = LOADINT 0    ; 35:42
+    r9 = CALL Delay(s7, s8)    ; 35:31
+    r10 = CALL All(r6, r9)    ; 35:15
+    AWAIT r10 -> L5    ; 35:9
 L4:
-    TRY s7 -> L5 else L6    ; 34:9
+    RETURN.ERROR s5    ; 34:9
 L5:
-    r8 = CALL NextTick()    ; 35:19
-    s9 = LOADFLOAT 0.5    ; 35:37
-    s10 = LOADINT 0    ; 35:42
-    r11 = CALL Delay(s9, s10)    ; 35:31
-    r12 = CALL All(r8, r11)    ; 35:15
-    AWAIT r12 -> L7    ; 35:9
-L6:
-    RETURN.ERROR s7    ; 34:9
-L7:
-    s13 = LOADINT 1    ; 36:20
-    s14 = ADD.I64 s5, s13    ; 36:16
-    s15 = LOADINT 0    ; 36:9
-    s16 = MOVE s14    ; 36:9
-    RETURN s15    ; 36:9
+    s11 = LOADINT 1    ; 36:20
+    s12 = ADD.I64 s4, s11    ; 36:16
+    s13 = LOADINT 0    ; 36:9
+    s14 = MOVE s12    ; 36:9
+    RETURN s13    ; 36:9
 
 handler Mover.on Owner.Damaged(s1)
   r0 this: Mover

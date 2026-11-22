@@ -69,8 +69,12 @@ const char* VmFaultKindName(VmFaultKind kind) noexcept;
 enum class VmOutcome : uint8 {
     Returned, // RET — 값은 ReturnedSlots
     Faulted,  // fault — VmCallResult::fault
-    Ended     // ENDEXEC — Result가 아닌 함수·handler의 `try` 실패(fault가 아니다, SL 8.4절)
+    Ended,    // ENDEXEC — Result가 아닌 함수·handler의 `try` 실패(fault가 아니다, SL 8.4절)
+    Suspended // AWAIT — 실행이 session에 정지했다(SparksRuntime 2.4절 — wait·suspension)
 };
+
+// 대기 handle의 표지 비트다(SparksRuntime 2.4절 — host 객체 handle은 이 비트를 쓰지 않는다).
+inline constexpr uint64 VmWaitTag = uint64(1) << 63;
 
 // fault의 자리다. address는 함수 안 명령 주소, location은 그 명령의 원문 위치(디버그 정보가 없으면
 // 0:0)다.
@@ -109,7 +113,9 @@ struct VmCallResult {
     VmFault fault;        // Faulted일 때
     uint64 errorCode = 0; // Ended일 때: ENDEXEC.S의 오류 코드(`Error` case 번호 + 1)
     uint64 steps =
-        0; // 실행한 명령 수(fault를 낸 명령은 세지만 예산 초과로 막힌 명령은 세지 않는다)
+        0;           // 실행한 명령 수(fault를 낸 명령은 세지만 예산 초과로 막힌 명령은 세지 않는다)
+    uint64 wait = 0; // Suspended일 때: 기다리는 대기 handle
+    uint32 suspension = NoBytecodeIndex; // Suspended일 때: session의 정지 실행 번호
 };
 
 class VmSession;
@@ -216,13 +222,17 @@ private:
         uint32 length = 0;
     };
 
+public:
+    // frame 하나다(session의 정지 실행이 보관한다 — SparksRuntime 2.4절).
     struct Frame {
         const VmLinkedModule* link = nullptr; // 이 frame 함수의 모듈(6.5절)
         uint32 function = 0;
         uint32 pc = 0; // 이 frame으로 돌아왔을 때 실행할 명령의 모듈 단어 번호
         uint32 base[BytecodeBankCount] = {};
+        bool child = false; // CALLW가 만든 하위 실행 경계(SparksRuntime 2.5절)
     };
 
+private:
     // 새 버퍼 할당의 결과다: 버퍼, 또는 예산·상한 fault(BudgetExceeded), 또는 할당자 실패.
     struct Allocation {
         VmBuffer* buffer = nullptr;
@@ -237,6 +247,8 @@ private:
         VmBuffer** b = nullptr;
     };
 
+    // 정지했던 실행(frame·레지스터를 session이 되돌려 놓았다)을 이어 간다(SparksRuntime 2.4절).
+    Result<VmCallResult> Continue(const VmLimits& limits) noexcept;
     Result<void> PushFrame(const VmLinkedModule& linked, uint32 function,
                            const uint32 (&base)[BytecodeBankCount]) noexcept;
     Result<VmCallResult> Run(const VmLimits& limits) noexcept;
@@ -271,6 +283,8 @@ private:
     // host 명령(GETF·SETF·GETCTX·CALLN·NEWLIT — VmHostCalls.cpp, SparksVm 6.2절)을 실행한다.
     VmFaultKind CallHost(Opcode op, uint32 word, uint32 extra, const Banks& banks,
                          ErrorCode& error) noexcept;
+    // EMIT(SparksRuntime 2.3절)을 session 발행 큐에 넣는다.
+    VmFaultKind EmitEvent(uint32 word, const Banks& banks, ErrorCode& error) noexcept;
     // handle이 0이 아니고 host가 살아 있다고 답하는지다(SL 4.1절).
     bool Alive(uint64 handle) noexcept;
     // CALLV(6.5절)의 대상을 host에 묻는다. native 대상이면 여기서 부르고 target.native가 참이다.

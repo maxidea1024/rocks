@@ -21,7 +21,7 @@ dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engin
 
 Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [설계](../Docs/Design/ProjectFiles.ko.md)):
 
-- 만들기: 루트의 `GenerateProjectFiles.bat`(탐색기에서 실행해도 된다, 실패하면 멈춘다)이나 `pwsh Build/GenerateProjectFiles.ps1`. 도구를 필요할 때만 빌드한 뒤 루트 `Rocks.slnx`와 `out/ProjectFiles/`를 쓰고 바뀐 파일만 다시 쓴다. 저장소 쪽 리플렉션 생성 헤더가 아직 없으면 어느 타깃을 한 번 빌드하라고 알린다.
+- 만들기: 루트의 `GenerateProjectFiles.bat`(탐색기에서 실행해도 된다, 실패하면 멈춘다)이나 PowerShell 7의 `./GenerateProjectFiles.ps1`(같은 인자, `Build/GenerateProjectFiles.ps1`에 넘긴다). 도구를 필요할 때만 빌드한 뒤 루트 `Rocks.slnx`와 `out/ProjectFiles/`를 쓰고 바뀐 파일만 다시 쓴다. 저장소 쪽 리플렉션 생성 헤더가 아직 없으면 어느 타깃을 한 번 빌드하라고 알린다.
 - 요구: Visual Studio 2026, 구성 요소 "C++ Clang tools for Windows"(`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset` — IntelliSense가 ClangCL 모드로 돈다), PowerShell 7(`pwsh`).
 - Visual Studio의 빌드·다시 빌드·정리는 `Build/IdeBuild.bat`를 거쳐 `Rocks.Build.Cli build`·`clean`을 부른다. 생성할 때의 clang-cl을 그대로 쓰므로 IDE 빌드 뒤 같은 구성의 `Rocks.proj` 빌드는 0 action이다. 솔루션 빌드는 저장소마다 잠금 하나로 프로젝트를 하나씩 빌드한다.
 - 파일 하나 컴파일(Ctrl+F7)은 `build --files <경로>`(게임은 `game --files`)를 부른다: 메타 생성을 맞춘 뒤 그 소스의 논리 명령(IntelliSense와 같은 명령)을 `<출력>/SingleFile/<해시>.obj`로 돌리고, 평소 object·증분 기록은 건드리지 않는다. 헤더는 고를 수 없다.

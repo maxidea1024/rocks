@@ -312,6 +312,7 @@ uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 ty
     if (arguments == NoBytecodeIndex &&
         (kind == BytecodeRefKind::NativeFunction || kind == BytecodeRefKind::Field ||
          kind == BytecodeRefKind::ImportedFunction || kind == BytecodeRefKind::VirtualFunction ||
+         kind == BytecodeRefKind::Event ||
          (kind == BytecodeRefKind::StructField && detail == NoBytecodeIndex))) {
         arguments = HostDescriptor(kind, symbol);
     }
@@ -324,7 +325,31 @@ uint32 BytecodeEncoder::HostDescriptor(BytecodeRefKind kind, uint32 symbol) noex
     // 객체 제약이라 `x`다(AppendDescriptor).
     StringBuilder<128> descriptor(checker_.allocator_);
     const Symbol& entry = c_.symbols_[symbol];
-    if (kind == BytecodeRefKind::Field || kind == BytecodeRefKind::StructField) {
+    if (kind == BytecodeRefKind::Event) {
+        // 이벤트: 발행자 `x` 다음 인자(EMIT 창과 같은 순 — SparksRuntime 2.3절), 결과 없음.
+        descriptor.Append("x");
+        if (entry.signature != NoSignature) {
+            const Signature& signature = c_.signatures_[entry.signature];
+            for (uint32 index = 0; index < signature.parameterCount; ++index) {
+                descriptor.Append(",");
+                AppendDescriptor(descriptor,
+                                 c_.signatureParameters_[signature.firstParameter + index]);
+            }
+        } else if (entry.module < c_.trees_.Size() && entry.node != NoNode) {
+            const SyntaxTree& tree = c_.trees_[entry.module];
+            const uint32 parameters = tree.Child(entry.node, 3);
+            for (const uint32 parameter :
+                 parameters == NoNode ? Span<const uint32>() : tree.Children(parameters)) {
+                if (tree.Node(parameter).kind == SyntaxKind::Parameter) {
+                    descriptor.Append(",");
+                    AppendDescriptor(descriptor,
+                                     c_.NodeType(entry.module, tree.Child(parameter, 1)));
+                }
+            }
+        }
+
+        descriptor.Append(">void");
+    } else if (kind == BytecodeRefKind::Field || kind == BytecodeRefKind::StructField) {
         descriptor.Append(">");
         // Sparks 필드는 초기값 추론이 있을 수 있고, 엔진 필드는 schema 타입이 심볼에 있다.
         AppendDescriptor(descriptor,
@@ -777,6 +802,10 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
     case IrOp::Await:
         useOne(i.b);
         defTuple(i.a);
+        break;
+    case IrOp::WaitEvent:
+        useOne(i.b);
+        defOne(i.a);
         break;
     case IrOp::Try:
         useTuple(i.b);
@@ -1549,17 +1578,16 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         Word(EncodeABx(Opcode::Emit, 0, Bx(SymbolRef(BytecodeRefKind::Event, i.extra))), span);
         return;
     }
+    case IrOp::WaitEvent:
+        Word(EncodeABC(Opcode::WaitEv, Phys(i.a), Phys(i.b), 0), span);
+        Word(EncodeAx(Opcode::Extra, SymbolRef(BytecodeRefKind::Event, i.extra)), span);
+        return;
     case IrOp::Await: {
         const uint32 address = static_cast<uint32>(out_.words.Size()) - firstWord_;
-        if (i.sub == IrAwaitEvent) {
-            Word(EncodeABC(Opcode::AwaitEv, Phys(i.b), 0, 0), span);
-            Word(EncodeAx(Opcode::Extra, SymbolRef(BytecodeRefKind::Event, i.extra)), span);
-        } else {
-            const uint32 slots = i.a == NoIrRegister ? 0 : f.registers[TupleFirst(i.a)].slots;
-            const uint32 bank = i.a == NoIrRegister ? 0 : BankOf(i.a);
-            Word(EncodeABC(Opcode::Await, Phys(i.a), Phys(i.b), 0), span);
-            Word(EncodeAx(Opcode::Extra, (bank << 8) | slots), span);
-        }
+        const uint32 slots = i.a == NoIrRegister ? 0 : f.registers[TupleFirst(i.a)].slots;
+        const uint32 bank = i.a == NoIrRegister ? 0 : BankOf(i.a);
+        Word(EncodeABC(Opcode::Await, Phys(i.a), Phys(i.b), 0), span);
+        Word(EncodeAx(Opcode::Extra, (bank << 8) | slots), span);
 
         // 정지 지점의 선형 위치: 이 명령의 쓰기 위치(2k + 1)까지 살아 있는 것이 보존 대상이다.
         const uint32 block = order_[layoutIndex];
@@ -1768,6 +1796,11 @@ void BytecodeEncoder::EncodeCall(const IrInstruction& i) noexcept {
                                                  calleeKind == SymbolKind::LanguageField ||
                                                  calleeKind == SymbolKind::PreludeValue);
     uint32 ref = language ? 0 : Bx(CallRef(i.extra, i.sub, i.types, op));
+    // 하위 실행 호출(SparksRuntime 2.5절): 같은 창 규칙의 CALLW.
+    if (i.sub == IrCallChild && op == Opcode::Call) {
+        op = Opcode::CallW;
+    }
+
     if (language) {
         op = Opcode::CallL;
         // 언어 함수: 피연산자(수신자 먼저)와 결과의 서술자를 리터럴 인자 자리에 싣는다(SparksVm

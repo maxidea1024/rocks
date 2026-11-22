@@ -276,6 +276,31 @@ TEST(SparksVm_BudgetsAndDepth) {
     CHECK(Faults(Run(execution, assembler.Linked(), 1, argument), VmFaultKind::BudgetExceeded));
 }
 
+// AWAIT는 session 밖 실행에서 대기 handle이든 아니든 ContractViolation이다(SparksRuntime 2.4절 —
+// 컴파일된 코드는 session으로만 기다린다, 안전장치).
+TEST(SparksVm_AwaitOutsideSession) {
+    SystemAllocator allocator;
+    Assembler assembler(allocator);
+    Shape shape;
+    shape.registers[1] = 1;
+    shape.frame[1] = 1;
+    shape.parameters[1] = 1;
+    assembler.Begin("Wait", shape);
+    assembler.Emit(EncodeABC(Opcode::Await, 0, 0, 0));
+    assembler.Emit(EncodeAx(Opcode::Extra, 0));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
+    assembler.Await(0);
+    assembler.End();
+    REQUIRE(assembler.Verified());
+    VmExecution execution(allocator);
+    const uint64 tagged[] = {VmWaitTag | 1};
+    const uint64 plain[] = {1};
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, {}, Span<const uint64>(tagged, 1)),
+                 VmFaultKind::ContractViolation));
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, {}, Span<const uint64>(plain, 1)),
+                 VmFaultKind::ContractViolation));
+}
+
 TEST(SparksVm_CallerErrors) {
     SystemAllocator allocator;
     Assembler assembler(allocator);

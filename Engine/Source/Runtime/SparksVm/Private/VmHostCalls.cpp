@@ -73,6 +73,21 @@ VmFaultKind VmExecution::ResolveVirtualCall(uint32 ref, const Banks& banks, VmVi
     return fault;
 }
 
+VmFaultKind VmExecution::EmitEvent(uint32 word, const Banks& banks, ErrorCode& error) noexcept {
+    // EMIT Bx: 창 Ref 0번이 발행자, 인자는 그 뒤(모양은 이벤트 서술자 — 링크가 창을 대조했다).
+    const uint32 ref = DecodeBx(word);
+    const VmLinkedModule::Shape& shape = link_->shapes_[ref];
+    if (session_ == nullptr || !shape.valid) {
+        return VmFaultKind::ContractViolation;
+    }
+
+    const BytecodeFunction& current = module_->functions[frames_[frames_.Size() - 1].function];
+    return session_->EnqueueFromScript(
+        *link_, ref, Span<const uint64>(banks.s + current.registers[0], shape.parameters[0]),
+        Span<const uint64>(banks.r + current.registers[1], shape.parameters[1]),
+        Span<VmBuffer* const>(banks.b + current.registers[2], shape.parameters[2]), error);
+}
+
 VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Banks& banks,
                                   ErrorCode& error) noexcept {
     VmHost* host = link_->host_;
@@ -124,9 +139,21 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
         if (local.classIndex != NoBytecodeIndex) {
             uint64* values = nullptr;
             VmBuffer** buffers = nullptr;
-            if (session_ == nullptr || !session_->FieldSlots(object, *link_, local.classIndex, bank,
-                                                             local.offset, c, values, buffers)) {
+            uint32 instance = NoBytecodeIndex;
+            uint32 where = 0;
+            if (session_ == nullptr ||
+                !session_->FieldSlots(object, *link_, local.classIndex, bank, local.offset, c,
+                                      values, buffers, instance, where)) {
                 return VmFaultKind::ContractViolation;
+            }
+
+            // 쓰기 전에 조각의 시작 값을 기록한다(Changed — SparksRuntime 2.3절).
+            if (!get) {
+                const VmFaultKind noted =
+                    session_->NoteWrite(instance, *link_, DecodeAx(extra), bank, where, c, error);
+                if (noted != VmFaultKind::None || error != ErrorCode::None) {
+                    return noted;
+                }
             }
 
             const uint32 at = get ? a : bb;
