@@ -6,7 +6,7 @@ new #1 Door -> ok (0 steps)
 hook #1 Enable -> ok (0 steps)
 hook #1 Start -> suspended (8 steps)
   host load 0:0 -> #2
-reload v2 -> ok (instances 1, moved 2, defaulted 0, lost 0, removed 0, cancelled 1, restarted 1, previous 0)
+reload v2 -> ok (instances 1, moved 0, defaulted 2, lost 0, removed 0, cancelled 1, restarted 1, previous 0)
   host release #2
   host load 0:0 -> #3
   hook #1 Start -> suspended (8 steps)

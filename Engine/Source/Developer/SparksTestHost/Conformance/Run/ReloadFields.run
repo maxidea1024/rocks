@@ -1,0 +1,75 @@
+# Hot reload R2 (SparksReload LC7b): fields move by name or @formerly when the type and shape text
+# match; a written field keeps its value, an unwritten one takes the new default (writes in Enable
+# count); a changed type, struct layout or enum case list loses the value; removed and changed held
+# fields stop their resources; handler connections keep their order and new `on` handlers go last; an
+# execution that uses a removed field is cancelled even with keep.
+new #1 Lamp -> ok (23 steps)
+new #2 Lamp -> ok (23 steps)
+new #3 Lamp -> ok (23 steps)
+new #4 Plain -> ok (3 steps)
+hook #1 Enable -> ok (27 steps)
+  host AudioSystem.StartLoop(#6, none) -> #7
+  host AudioSystem.StartLoop(#6, none) -> #8
+  host AudioSystem.StartLoop(#6, none) -> #9
+hook #2 Enable -> ok (27 steps)
+  host AudioSystem.StartLoop(#6, none) -> #10
+  host AudioSystem.StartLoop(#6, none) -> #11
+  host AudioSystem.StartLoop(#6, none) -> #12
+hook #3 Enable -> ok (27 steps)
+  host AudioSystem.StartLoop(#6, none) -> #13
+  host AudioSystem.StartLoop(#6, none) -> #14
+  host AudioSystem.StartLoop(#6, none) -> #15
+Lamp.Watch(#2, #1) -> void (5 steps)
+Lamp.Watch(#3, #1) -> void (5 steps)
+Lamp.Bump(#2) -> void (26 steps)
+Plain.Touch(#4) -> void (3 steps)
+Lamp.Fire(#1, 1) -> void (7 steps)
+  log info "peer ping v1 1"
+  log info "peer ping v1 1"
+  log info "peer pong v1 1"
+  log info "peer pong v1 1"
+  deliver #2 Lamp.on Peer.Ping -> ok (8 steps)
+  deliver #3 Lamp.on Peer.Ping -> ok (8 steps)
+  deliver #2 Lamp.on Peer.Pong -> ok (8 steps)
+  deliver #3 Lamp.on Peer.Pong -> ok (8 steps)
+Lamp.UseOld(#2) -> suspended (7 steps)
+Lamp.UseCount(#2) -> suspended (7 steps)
+fields #2 -> Lamp(Cue: none, Count: 1, Spare: 5, Label: "lit", Old: 3, Kind: 9, Moniker: "renamed", Info: Stats(Level: 3), State: Busy, Items: [2], Hum: #10, Drop: #11, Swap: #12, Peer: #1, Mate: #1, Ready: 4)
+fields #3 -> Lamp(Cue: none, Count: 0, Spare: 5, Label: "lamp", Old: 3, Kind: 1, Moniker: "m", Info: Stats(Level: 1), State: Idle, Items: [], Hum: #13, Drop: #14, Swap: #15, Peer: #1, Mate: #1, Ready: 4)
+reload v2 keep -> ok (instances 4, moved 15, defaulted 19, lost 12, removed 6, cancelled 1, restarted 0, previous 1)
+  host release #9
+  host release #8
+  host release #12
+  host release #11
+  host release #15
+  host release #14
+fields #2 -> Lamp(Cue: none, Count: 1, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #10, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
+fields #3 -> Lamp(Cue: none, Count: 100, Spare: 7, Label: "lamp", Kind: "k", Title: "t", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [], Hum: #13, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
+fields #4 -> Plain(Value: 2)
+Lamp.Fire(#1, 2) -> void (7 steps)
+  log info "peer ping v2 2"
+  log info "peer ping v2 2"
+  log info "mate ping v2 2"
+  log info "mate ping v2 2"
+  deliver #2 Lamp.on Peer.Ping -> ok (8 steps)
+  deliver #3 Lamp.on Peer.Ping -> ok (8 steps)
+  deliver #2 Lamp.on Mate.Ping -> ok (8 steps)
+  deliver #3 Lamp.on Mate.Ping -> ok (8 steps)
+advance 1.0 -> ok (0 suspended)
+  resume #2 Lamp.UseCount -> ok (13 steps)
+  log info "count 11"
+fields #2 -> Lamp(Cue: none, Count: 11, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #10, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
+Lamp.Bump(#3) -> void (5 steps)
+# a path whose source field changed type is resolved again: the Mate connections go away
+reload v3 -> ok (instances 4, moved 14, defaulted 29, lost 3, removed 0, cancelled 0, restarted 0, previous 0)
+Lamp.Fire(#1, 3) -> void (7 steps)
+  log info "peer ping v3 3"
+  log info "peer ping v3 3"
+  deliver #2 Lamp.on Peer.Ping -> ok (8 steps)
+  deliver #3 Lamp.on Peer.Ping -> ok (8 steps)
+detach #2 -> ok
+  host release #10
+detach #3 -> ok
+  host release #13
+close -> ok (ledger 0 buffers)
+  host release #7

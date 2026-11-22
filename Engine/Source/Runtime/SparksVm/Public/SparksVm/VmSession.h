@@ -39,6 +39,9 @@ struct VmSessionBudgets {
     uint32 executionsPerInstance = 256; // 정지 실행(동시 실행·대기)
 };
 
+// instance 쓰기 bit 단어 하나의 bit 수다(SparksReload K5 — slot별 "spawn 뒤 쓰기 있음").
+inline constexpr usize VmWrittenWordBits = 64;
+
 // reload의 정지 실행 처리다(Docs/Design/SparksReload.ko.md K6 — SL 12.4절 `ReloadExecutions`).
 enum class VmReloadExecutions : uint8 {
     Keep,  // 정지 실행은 이전 revision 코드로 끝까지 간다
@@ -64,7 +67,8 @@ struct VmReloadReport {
 class VmReloadPlan final {
 public:
     explicit VmReloadPlan(Allocator& allocator) noexcept
-        : classMap_(allocator), fieldMap_(allocator), handlerMap_(allocator), changed_(allocator) {
+        : classMap_(allocator), fieldMap_(allocator), handlerMap_(allocator), changed_(allocator),
+          sources_(allocator), fate_(allocator) {
     }
 
     VmReloadPlan(const VmReloadPlan&) = delete;
@@ -84,9 +88,11 @@ private:
     uint32 classes_ = 0;
     uint64 serial_ = 0;        // 계획 때 session의 다음 instance 생성 번호(낡은 계획 판정)
     Array<uint32> classMap_;   // 옛 클래스 → 새 클래스(없으면 NoIndex)
-    Array<uint32> fieldMap_;   // 옛 classFields → 새 classFields(없으면 NoIndex)
+    Array<uint32> fieldMap_;   // 옛 classFields → 옮기는 새 classFields(손실·삭제는 NoIndex)
     Array<uint32> handlerMap_; // 옛 handler → 새 handler(없으면 NoIndex)
     Array<uint8> changed_;     // 옛 함수: 1이면 본문이 바뀌었거나 삭제됐다
+    Array<uint32> sources_;    // 새 classFields → 원천 옛 classFields(새 필드는 NoIndex — 5절)
+    Array<uint8> fate_;        // 옛 classFields: 삭제·옮김·손실(SparksReload 5절)
 };
 
 class VmSession final {
@@ -279,9 +285,9 @@ public:
     static constexpr uint32 MaxRevisions = 8; // 모듈별 살아 있는 revision(SL 12.4절)
 
     // session 모듈 old를 fresh(같은 모듈 경로의 새 revision — 새 VmLinkedModule이고 session의
-    // host로 링크·import 풀기에 성공했다)로 바꾸는 계획을 세운다. session은 바뀌지 않는다. 판정
-    // 실패(instance가 있는 클래스의 삭제·기반 변경 — R3 필요, R1에서 필드 배치·handler 목록 변경,
-    // fresh가 아직 참조되는 이전 revision 객체)와
+    // host로 링크·import 풀기에 성공했다)로 바꾸는 계획을 세운다(클래스·필드·handler·함수 대응 —
+    // SparksReload 5절). session은 바뀌지 않는다. 판정 실패(instance가 있는 클래스의 삭제·기반
+    // 변경 — R3 필요, fresh가 아직 참조되는 이전 revision 객체)와
     // 잘못된 인자는 reason에 이유(영어 한 문장)를 쓰고 InvalidArgument, 할당 실패는 OutOfMemory다.
     // 사용 예:
     //   VmReloadPlan plan(allocator);
@@ -292,12 +298,15 @@ public:
                             VmReloadExecutions executions, VmReloadPlan& plan,
                             StringBuilderBase& reason) noexcept;
 
-    // 계획을 적용한다(실행 중이 아닌 reload 경계 — SparksReload K3): 취소할 실행 취소 → instance·
-    // 연결·큐 항목을 새 revision으로 → session 모듈 목록 교체(그 모듈의 Tick 중지 해제) → 취소된
-    // Start 다시 부르기(적용 기록 `hook` 전달). 할당은 바꾸기 전에 모두 마친다: OutOfMemory면
-    // session은 그대로다(Start 다시 부르기의 할당 실패는 보고의 restartError — reload는 적용됐다).
-    // 계획 뒤 instance가 생겼거나 다른 reload로 old가 바뀌었거나 실행 중이면 InvalidArgument. 옛
-    // revision은 References가 false가 될 때까지 host가 보관한다(Keep 실행·큐 항목이 쓴다).
+    // 계획을 적용한다(실행 중이 아닌 reload 경계 — SparksReload K3·5절): 새 클래스 기본값 레코드와
+    // instance마다 새 저장소(옮긴 값 — 쓴 필드만, 유지 자원은 그대로 — 과 새 기본값) 준비 → 저장소·
+    // session 모듈·연결 교체 → 활성 instance 연결 다시 풀기(남는 발행자는 순서 유지, 새 `on`은 끝)
+    // → 확정: 옮기지 않은 유지 자원 필드 멈춤, Tick 중지 해제, 실행 취소(정책·삭제 handler·옮기지
+    // 못한 필드 참조), 큐 항목 교체, 취소된 Start 다시 부르기(적용 기록 `hook` 전달). OutOfMemory면
+    // session은 그대로다(연결 다시 풀기의 실패도 되돌린다 — Start 다시 부르기의 할당 실패만 보고의
+    // restartError). 새 `$init`이 fault면(기본값 레코드 재합성 실패), 계획 뒤 instance가 생겼거나
+    // 다른 reload로 old가 바뀌었거나 실행 중이면 InvalidArgument(session 그대로). 옛 revision은
+    // References가 false가 될 때까지 host가 보관한다(Keep 실행·큐 항목이 쓴다).
     Result<VmReloadReport> ApplyReload(VmReloadPlan& plan) noexcept;
 
     // session이 linked를 아직 참조하는지다(지금 모듈, instance, 연결, 큐 항목, 정지 실행의 frame,
@@ -574,7 +583,7 @@ private:
 
     struct Instance {
         explicit Instance(Allocator& allocator) noexcept
-            : scalars(allocator), refs(allocator), buffers(allocator) {
+            : scalars(allocator), refs(allocator), buffers(allocator), written(allocator) {
         }
 
         uint64 handle = 0;
@@ -597,6 +606,8 @@ private:
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
+        // slot별 "spawn 뒤 쓰기 있음" bit(Scalar·Refs·Buf 순으로 이은 번호 — SparksReload K5).
+        Array<uint64> written;
     };
 
     // instance의 클래스 사슬(파생 → 기반)을 모은다. 반환은 사슬 길이(MaxBaseDepth 이하).
@@ -735,6 +746,35 @@ private:
     // 이전 revision 필드(module·classIndex·bank·offset)를 다음 revision 위치로 한 단계 옮긴다.
     bool TranslateField(const VmLinkedModule*& module, uint32& classIndex, uint32 bank,
                         uint32 slots, uint32& offset) const noexcept;
+    // 대응표 하나(module → successor)로 한 단계 옮긴다(옮기는 필드만 — 손실·삭제는 false).
+    bool TranslateStep(const VmLinkedModule* successor, Span<const uint32> classMap,
+                       Span<const uint32> fieldMap, const VmLinkedModule*& module,
+                       uint32& classIndex, uint32 bank, uint32 slots,
+                       uint32& offset) const noexcept;
+    // link의 function이 필드 명령으로 참조하는 로컬 필드가 모두 계획의 새 revision까지 옮겨지는지다
+    // (이전 revision 기록과 계획의 old → fresh 대응 — SparksReload 5절).
+    bool FieldsReach(const VmLinkedModule& link, uint32 function,
+                     const VmReloadPlan& plan) const noexcept;
+    // reload 기본값 계산 중인 클래스 저장소다(SparksReload 5절 — 그 동안만 module이 있다).
+    struct Staging {
+        const VmLinkedModule* module = nullptr;
+        uint32 classIndex = NoBytecodeIndex;
+        uint64* scalars = nullptr;
+        uint64* refs = nullptr;
+        VmBuffer** buffers = nullptr;
+        uint32 sizes[BytecodeBankCount] = {};
+    };
+
+    Staging staging_;
+    // (module, classIndex)의 필드 명령이 기본값 계산 저장소를 쓰는지다(host 생존 검사 없음).
+    bool IsStaging(const VmLinkedModule& module, uint32 classIndex) const noexcept {
+        return staging_.module == &module && staging_.classIndex == classIndex;
+    }
+
+    // 필드 쓰기(SETF)가 instance 저장소 at부터 slots를 썼다: 쓰기 bit를 표시한다(`$init` 밖 —
+    // SparksReload K5).
+    void MarkWritten(uint32 instance, uint32 bank, uint32 at, uint32 slots) noexcept;
+    bool initializing_ = false; // CreateInstance의 `$init`(쓰기 bit를 표시하지 않는다)
     // link를 직접 참조하는 것이 있는지다(번역 경로 제외).
     bool Uses(const VmLinkedModule* link) const noexcept;
     void PruneRetired() noexcept;

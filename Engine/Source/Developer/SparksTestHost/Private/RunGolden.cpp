@@ -1458,28 +1458,34 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                     actual.AppendFormat("rejected ({})", reason.View());
                 } else {
                     auto applied = session.ApplyReload(plan);
-                    if (!applied) {
+                    if (!applied && applied.Error() != ErrorCode::InvalidArgument) {
                         return Result<void>::Failure(applied.Error());
                     }
 
-                    const VmReloadReport& report = applied.Value();
-                    if (report.restartError != ErrorCode::None) {
-                        return Result<void>::Failure(report.restartError);
-                    }
+                    // 적용 거부(새 `$init` fault — 기본값 레코드 재합성 실패, SparksReload 5절)는
+                    // session이 그대로다.
+                    if (!applied) {
+                        actual.Append("apply failed (InvalidArgument)");
+                    } else {
+                        const VmReloadReport& report = applied.Value();
+                        if (report.restartError != ErrorCode::None) {
+                            return Result<void>::Failure(report.restartError);
+                        }
 
-                    actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
-                                        "removed {}, ",
-                                        report.instances, report.moved, report.defaulted,
-                                        report.lost, report.removed);
-                    actual.AppendFormat("cancelled {}, restarted {}, previous {})",
-                                        report.cancelled, report.restarted, report.previous);
-                    host.SetModule(&revision.linked);
-                    code = &revision.module;
-                    current = &revision.linked;
-                    currentCompilation = &revision.compilation;
-                    currentMain = revision.main;
-                    values.Rebind(revision.compilation);
-                    delivered = true;
+                        actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
+                                            "removed {}, ",
+                                            report.instances, report.moved, report.defaulted,
+                                            report.lost, report.removed);
+                        actual.AppendFormat("cancelled {}, restarted {}, previous {})",
+                                            report.cancelled, report.restarted, report.previous);
+                        host.SetModule(&revision.linked);
+                        code = &revision.module;
+                        current = &revision.linked;
+                        currentCompilation = &revision.compilation;
+                        currentMain = revision.main;
+                        values.Rebind(revision.compilation);
+                        delivered = true;
+                    }
                 }
             } else if (verb == "budget") {
                 // 예산 거부 집계(SparksRuntime 2.6절 — LC6d4).

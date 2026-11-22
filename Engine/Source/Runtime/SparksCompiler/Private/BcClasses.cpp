@@ -69,6 +69,85 @@ void BytecodeEncoder::AppendFieldType(StringBuilderBase& out, uint32 type) noexc
     }
 }
 
+void BytecodeEncoder::AppendFieldShape(StringBuilderBase& out, uint32 type,
+                                       Array<uint32>& open) noexcept {
+    // 타입 표기와 같되 Sparks struct·enum 이름 뒤에 `{…}`로 선언 순 필드(`이름:형태`)·case를
+    // 펼친다(형식 v6 — SparksReload 5절). 같은 경로에서 이미 펼친 타입은 이름만(순환). checker가
+    // 표를 늘릴 수 있어 항목은 복사해 쓴다.
+    if (type == NoType || type >= c_.types_.Size()) {
+        out.Append("?");
+        return;
+    }
+
+    const TypeEntry entry = c_.types_[type];
+    const Symbol symbol = c_.symbols_[entry.symbol];
+    Qualify(out, entry.symbol);
+    if (symbol.kind == SymbolKind::BuiltinType) {
+        const StringView canonical = LanguageNames()[symbol.index].canonical;
+        out.Append(canonical.IsEmpty() ? symbol.name : canonical);
+    } else {
+        out.Append(symbol.name);
+    }
+
+    bool seen = false;
+    for (const uint32 active : open) {
+        seen = seen || active == entry.symbol;
+    }
+
+    if ((symbol.kind == SymbolKind::Struct || symbol.kind == SymbolKind::Enum) && !seen) {
+        if (!open.TryPushBack(entry.symbol)) {
+            Fail(ErrorCode::OutOfMemory);
+            return;
+        }
+
+        out.Append("{");
+        const SyntaxTree& tree = c_.trees_[symbol.module];
+        const uint32 members = tree.Child(symbol.node, 3);
+        bool first = true;
+        if (members != NoNode && tree.Node(members).kind == SyntaxKind::List) {
+            for (const uint32 member : tree.Children(members)) {
+                const SyntaxKind kind = tree.Node(member).kind;
+                if (kind != SyntaxKind::Field && kind != SyntaxKind::EnumCase) {
+                    continue;
+                }
+
+                const uint32 memberSymbol = c_.NodeSymbol(symbol.module, tree.Child(member, 2));
+                if (memberSymbol == NoSymbol) {
+                    continue;
+                }
+
+                out.Append(first ? "" : ",");
+                first = false;
+                out.Append(c_.symbols_[memberSymbol].name);
+                if (kind == SyntaxKind::Field) {
+                    out.Append(":");
+                    AppendFieldShape(out, checker_.FieldType(memberSymbol), open);
+                }
+            }
+        }
+
+        out.Append("}");
+        static_cast<void>(open.TryResize(open.Size() - 1));
+    }
+
+    if (entry.argumentCount != 0) {
+        out.Append("<");
+        for (uint32 index = 0; index < entry.argumentCount; ++index) {
+            if (index != 0) {
+                out.Append(", ");
+            }
+
+            AppendFieldShape(out, c_.typeArguments_[entry.firstArgument + index], open);
+        }
+
+        out.Append(">");
+    }
+
+    if (entry.optional) {
+        out.Append("?");
+    }
+}
+
 bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
     const SyntaxTree& tree = c_.trees_[module_];
     const uint32 root = tree.Root();
@@ -174,6 +253,16 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
                 }
 
                 field.type = AddString(descriptor.View());
+                // 형식 v6(SparksReload 5절): struct 배치·enum case를 펼친 형태 표기.
+                StringBuilder<64> shape(checker_.allocator_);
+                Array<uint32> open(checker_.allocator_);
+                AppendFieldShape(shape, checker_.FieldType(memberSymbol), open);
+                if (shape.HasFailed()) {
+                    Fail(shape.Status().Error());
+                    return NoBytecodeIndex;
+                }
+
+                field.shape = AddString(shape.View());
                 const StringView former = checker_.FormerName(module_, member, formerScratch);
                 field.formerName = former.IsEmpty() ? NoBytecodeIndex : AddString(former);
                 stored.slots[bank] = static_cast<uint16>(stored.slots[bank] + layout.slots);

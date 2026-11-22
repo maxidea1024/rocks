@@ -1,0 +1,84 @@
+enum Mode {
+    Idle,
+    Busy
+}
+
+struct Stats {
+    var Level: int = 1;
+}
+
+class Lamp : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    var Count = 0;
+    var Spare = 5;
+    var Label = "lamp";
+    var Old = 3;
+    var Kind = 1;
+    var Moniker = "m";
+    var Info = Stats();
+    var State = Mode.Idle;
+    var Items: Array<int> = [];
+    var Hum: LoopHandle?;
+    var Drop: LoopHandle?;
+    var Swap: LoopHandle?;
+    var Peer: Lamp?;
+    var Mate: Lamp?;
+    var Ready = 0;
+    event Ping(n: int);
+    event Pong(n: int);
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+        Drop = World.Audio.StartLoop(Cue);
+        Swap = World.Audio.StartLoop(Cue);
+        Ready = 4;
+    }
+
+    fn Bump() {
+        Count += 1;
+        Label = "lit";
+        Moniker = "renamed";
+        Kind = 9;
+        Info.Level = 3;
+        State = Mode.Busy;
+        Items.Add(2);
+    }
+
+    fn Watch(target: Lamp) {
+        Peer = target;
+        Mate = target;
+    }
+
+    fn Fire(n: int) {
+        emit Ping(n);
+        emit Pong(n);
+    }
+
+    on Peer.Ping(n: int) {
+        Log.Info("peer ping v1 ${n}");
+    }
+
+    on Peer.Pong(n: int) {
+        Log.Info("peer pong v1 ${n}");
+    }
+
+    async fn UseOld() {
+        await Delay(1.0, Clock.Game);
+        Old += 1;
+        Log.Info("old ${Old}");
+    }
+
+    async fn UseCount() {
+        await Delay(1.0, Clock.Game);
+        Count += 10;
+        Log.Info("count ${Count}");
+    }
+}
+
+class Plain : ScriptableComponent {
+    var Value = 1;
+
+    fn Touch() {
+        Value = 2;
+    }
+}
