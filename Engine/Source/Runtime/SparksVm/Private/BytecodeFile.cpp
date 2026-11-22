@@ -26,7 +26,8 @@ constexpr usize TypeBytes = 4 + 1 + 4 + 4 + 2 * BytecodeBankCount;
 constexpr usize TypeFieldBytes = 4 + 1 + 1 + 4;
 constexpr usize ClassBytes = 4 * 11 + 2 * BytecodeBankCount + 4;
 constexpr usize HookBytes = 1 + 4;
-constexpr usize HandlerBytes = 4 + 4 + 4 + 1 + 1;
+constexpr usize HandlerBytes = 4 + 4 + 4 + 1 + 1 + 4 + 4 + 4;
+constexpr usize HandlerPathBytes = 4;
 constexpr usize EventBytes = 4 + 4;
 constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4;
 constexpr usize WordBytes = 4;
@@ -199,6 +200,14 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU32LE(handler.function);
             writer.WriteU8(static_cast<uint8>(handler.reentry));
             writer.WriteU8(handler.awaits);
+            writer.WriteU32LE(handler.firstPath);
+            writer.WriteU32LE(handler.pathCount);
+            writer.WriteU32LE(handler.eventRef);
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(module.handlerPaths.Size()));
+        for (const uint32 ref : module.handlerPaths) {
+            writer.WriteU32LE(ref);
         }
 
         writer.WriteU32LE(static_cast<uint32>(module.events.Size()));
@@ -558,6 +567,17 @@ private:
 
             handler.reentry = static_cast<BytecodeReentry>(reentry);
             handler.awaits = reader.ReadU8();
+            handler.firstPath = reader.ReadU32LE();
+            handler.pathCount = reader.ReadU32LE();
+            handler.eventRef = reader.ReadU32LE();
+        }
+
+        if (!Count(reader, HandlerPathBytes, count) || !Resize(out_.handlerPaths, count)) {
+            return Failure();
+        }
+
+        for (uint32& ref : out_.handlerPaths) {
+            ref = reader.ReadU32LE();
         }
 
         if (!Count(reader, EventBytes, count) || !Resize(out_.events, count)) {
@@ -811,11 +831,28 @@ public:
                 }
             }
 
+            // 클래스 이름은 모듈 안에서 하나다(로컬 필드 묶음·기반 찾기가 첫 일치를 고르지 않게).
+            for (uint32 before = 0; before < index; ++before) {
+                if (module_.String(module_.classes[before].name) == module_.String(entry.name)) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+            }
+
+            // 필드는 선언 순으로 bank마다 빈틈없이 놓이고, bank별 합이 클래스 slot 수다(LC6a 리뷰
+            // S3 — 필드 없는 큰 slot 수로 instance 저장소를 부풀리지 못한다).
+            uint32 running[BytecodeBankCount] = {};
             for (uint32 at = entry.firstField; at < entry.firstField + entry.fieldCount; ++at) {
                 const BytecodeTypeField& field = module_.classFields[at];
                 if (field.name >= strings || field.bank >= BytecodeBankCount || field.slots == 0 ||
-                    (field.bank != 0 && field.slots != 1) ||
-                    usize(field.offset) + field.slots > entry.slots[field.bank]) {
+                    (field.bank != 0 && field.slots != 1) || field.offset != running[field.bank]) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+
+                running[field.bank] += field.slots;
+            }
+
+            for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                if (running[bank] != entry.slots[bank]) {
                     return Reject(BytecodeLoadError::BadTable);
                 }
             }
@@ -828,6 +865,43 @@ public:
                     return Reject(BytecodeLoadError::BadTable);
                 }
 
+                // hook 함수 모양(SL 5.1절): this(Ref) + 종류별 인자(최대), 반환 없음.
+                const BytecodeFunction& function = module_.functions[hook.function];
+                uint16 expected[BytecodeBankCount] = {0, 1, 0};
+                switch (hook.kind) {
+                case BytecodeHookKind::Tick:
+                case BytecodeHookKind::FixedTick:
+                case BytecodeHookKind::LateTick:
+                    expected[0] = 1; // dt
+                    break;
+                case BytecodeHookKind::TriggerEnter:
+                case BytecodeHookKind::TriggerExit:
+                    expected[1] = 3; // other, trigger
+                    break;
+                case BytecodeHookKind::CollisionEnter:
+                case BytecodeHookKind::CollisionExit:
+                    expected[1] = 2; // other
+                    expected[2] = 1; // hit(엔진 struct)
+                    break;
+                default:
+                    break;
+                }
+
+                // 인자는 앞에서부터 필요한 만큼만 선언할 수 있다(this는 늘 있다).
+                for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                    if (function.parameters[bank] > expected[bank]) {
+                        return Reject(BytecodeLoadError::BadTable);
+                    }
+                }
+
+                if (function.parameters[1] == 0) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+
+                if (function.returnSlots != 0) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+
                 seen |= bit;
             }
 
@@ -835,8 +909,24 @@ public:
                  ++at) {
                 const BytecodeHandler& handler = module_.handlers[at];
                 if (handler.path >= strings || handler.event >= strings ||
-                    handler.function >= module_.functions.Size() || handler.awaits > 1) {
+                    handler.function >= module_.functions.Size() || handler.awaits > 1 ||
+                    (handler.reentry != BytecodeReentry::None && handler.awaits == 0) ||
+                    usize(handler.firstPath) + handler.pathCount > module_.handlerPaths.Size() ||
+                    (handler.eventRef != NoBytecodeIndex &&
+                     (handler.eventRef >= module_.refs.Size() ||
+                      module_.refs[handler.eventRef].kind != BytecodeRefKind::Event))) {
                     return Reject(BytecodeLoadError::BadTable);
+                }
+
+                // 경로 마디는 필드·문맥 참조다.
+                for (uint32 step = handler.firstPath; step < handler.firstPath + handler.pathCount;
+                     ++step) {
+                    const uint32 ref = module_.handlerPaths[step];
+                    if (ref >= module_.refs.Size() ||
+                        (module_.refs[ref].kind != BytecodeRefKind::Field &&
+                         module_.refs[ref].kind != BytecodeRefKind::Context)) {
+                        return Reject(BytecodeLoadError::BadTable);
+                    }
                 }
             }
 

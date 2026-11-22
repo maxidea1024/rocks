@@ -1,7 +1,7 @@
 # Session instances (SparksRuntime 2.2): `$init` defaults base first, lifecycle hooks accumulate base first,
 # a hook fault stops the chain, fields live in the session until detach.
-new #1 Derived -> ok (5 steps)
-fields #1 -> Derived(Trail: "", Count: 0, Seen: [], Limit: 2, Label: "derived")
+new #1 Derived -> ok (17 steps)
+fields #1 -> Derived(Trail: "", Count: 0, Seen: [], Spin: (0, 0, 0, 1), Limit: 2, Label: "derived")
 hook #1 Awake -> ok (7 steps)
 hook #1 Enable -> ok (23 steps)
 hook #1 Tick(0.5) -> ok (32 steps)
@@ -10,15 +10,19 @@ hook #1 Tick(0.5) -> ok (32 steps)
 hook #1 Tick(0.25) -> ok (32 steps)
   log info "base tick 0.25"
   log info "derived tick 2 0.25"
-fields #1 -> Derived(Trail: "AEe", Count: 2, Seen: ["enable"], Limit: 2, Label: "derived")
-hook #1 Tick(0.125) -> fault AssertFailed at 34:9 (19 steps)
+fields #1 -> Derived(Trail: "AEe", Count: 2, Seen: ["enable"], Spin: (0, 0, 0, 1), Limit: 2, Label: "derived")
+hook #1 Tick(0.125) -> fault AssertFailed at 39:9 (19 steps)
   log info "base tick 0.125"
   log error "too many ticks"
+hook #1 LateTick(0.5) -> ok (15 steps)
+  log info "derived late tick 0.5"
+hook #1 LateTick(2.0) -> fault AssertFailed at 26:9 (6 steps)
+  log error "base late tick too slow"
 hook #1 Disable -> ok (7 steps)
 hook #1 Destroy -> ok (7 steps)
 hook #1 Start -> ok (0 steps)
-fields #1 -> Derived(Trail: "AEeDX", Count: 3, Seen: ["enable"], Limit: 2, Label: "derived")
+fields #1 -> Derived(Trail: "AEeDX", Count: 3, Seen: ["enable"], Spin: (0, 0, 0, 1), Limit: 2, Label: "derived")
 detach #1 -> ok
-new #2 Base -> ok (7 steps)
+new #2 Base -> ok (12 steps)
 hook #2 Enable -> ok (16 steps)
-fields #2 -> Base(Trail: "E", Count: 0, Seen: ["enable"])
+fields #2 -> Base(Trail: "E", Count: 0, Seen: ["enable"], Spin: (0, 0, 0, 1))

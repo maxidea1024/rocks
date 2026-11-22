@@ -12,6 +12,9 @@ constexpr uint32 VmSessionMaxBaseDepth = 64;
 // handle이 이 표에 없다는 표지다.
 constexpr uint32 VmNoInstance = NoBytecodeIndex;
 
+// hook·메서드 Ref 인자(this 포함)의 상한이다(frame bank 상한과 같다).
+constexpr usize VmSessionMaxRefArguments = 256;
+
 } // namespace
 
 VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
@@ -29,9 +32,17 @@ Result<void> VmSession::AddModule(const VmLinkedModule& linked) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    const BytecodeModule& added = linked.Module();
     for (const VmLinkedModule* existing : modules_) {
         if (existing == &linked) {
             return Result<void>::Success();
+        }
+
+        // 같은 경로의 다른 모듈은 거부한다(LC6a 리뷰 S4).
+        const BytecodeModule& other = existing->Module();
+        if (added.path != NoBytecodeIndex && other.path != NoBytecodeIndex &&
+            added.String(added.path) == other.String(other.path)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
 
@@ -172,8 +183,18 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         value = nullptr;
     }
 
-    const uint32 number = static_cast<uint32>(instances_.Size());
-    if (auto pushed = instances_.TryPushBack(static_cast<Instance&&>(instance)); !pushed) {
+    // Detach된 번호를 다시 쓴다(LC6a 리뷰 B3 — spawn·despawn 반복에도 표가 자라지 않는다).
+    uint32 number = static_cast<uint32>(instances_.Size());
+    for (uint32 at = 0; at < instances_.Size(); ++at) {
+        if (!instances_[at].attached) {
+            number = at;
+            break;
+        }
+    }
+
+    if (number < instances_.Size()) {
+        instances_[number] = static_cast<Instance&&>(instance);
+    } else if (auto pushed = instances_.TryPushBack(static_cast<Instance&&>(instance)); !pushed) {
         return Result<uint32>::Failure(pushed.Error());
     }
 
@@ -202,6 +223,17 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         currentClass = baseClass;
     }
 
+    // 사슬의 모든 `$init` 기록·명령 수를 모은다(LC6a 리뷰 B4 — RunHook과 같은 규칙).
+    execution_.logs_.Clear();
+    execution_.logText_.Clear();
+    execution_.droppedLogs_ = 0;
+    execution_.keepLogs_ = true;
+    struct KeepLogs {
+        VmExecution& execution;
+        ~KeepLogs() noexcept {
+            execution.keepLogs_ = false;
+        }
+    } keepLogs{execution_};
     for (uint32 at = depth; at > 0; --at) {
         const BytecodeClass& link = chainModules[at - 1]->Module().classes[chainClasses[at - 1]];
         if (link.initializer == NoBytecodeIndex) {
@@ -216,7 +248,9 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
             return Result<uint32>::Failure(called.Error());
         }
 
+        const uint64 steps = init.steps + called.Value().steps;
         init = called.Value();
+        init.steps = steps;
         execution_.ReleaseReturned();
         if (init.outcome != VmOutcome::Returned) {
             Detach(number);
@@ -228,8 +262,8 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
 }
 
 Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
-                                        Span<const uint64> scalars,
-                                        Span<const uint64> refs) noexcept {
+                                        Span<const uint64> scalars, Span<const uint64> refs,
+                                        Span<VmBuffer* const> buffers) noexcept {
     if (instance >= instances_.Size() || !instances_[instance].attached) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
@@ -267,8 +301,8 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
         }
     } keepLogs{execution_};
     // this(Ref 0번) 뒤에 hook 인자 Ref를 둔다.
-    uint64 refArguments[VmSessionMaxBaseDepth] = {};
-    if (refs.Size() + 1 > VmSessionMaxBaseDepth) {
+    uint64 refArguments[VmSessionMaxRefArguments] = {};
+    if (refs.Size() + 1 > VmSessionMaxRefArguments) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -287,7 +321,7 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
 
             auto called =
                 execution_.Call(*chainModules[at - 1], bytecode.hooks[hook].function, scalars,
-                                Span<const uint64>(refArguments, refs.Size() + 1), {});
+                                Span<const uint64>(refArguments, refs.Size() + 1), buffers);
             if (!called) {
                 return called;
             }
@@ -309,11 +343,11 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
                                      Span<const uint64> scalars, Span<const uint64> refs,
                                      Span<VmBuffer* const> buffers) noexcept {
     if (instance >= instances_.Size() || !instances_[instance].attached ||
-        refs.Size() + 1 > VmSessionMaxBaseDepth) {
+        refs.Size() + 1 > VmSessionMaxRefArguments) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
-    uint64 refArguments[VmSessionMaxBaseDepth] = {};
+    uint64 refArguments[VmSessionMaxRefArguments] = {};
     refArguments[0] = instances_[instance].handle;
     for (usize at = 0; at < refs.Size(); ++at) {
         refArguments[at + 1] = refs[at];
@@ -339,9 +373,9 @@ void VmSession::Detach(uint32 instance) noexcept {
     ReleaseFields(entry);
     static_cast<void>(byHandle_.Erase(entry.handle));
     entry.attached = false;
-    entry.scalars.Clear();
-    entry.refs.Clear();
-    entry.buffers.Clear();
+    entry.scalars.Empty();
+    entry.refs.Empty();
+    entry.buffers.Empty();
 }
 
 void VmSession::DetachAll() noexcept {
@@ -411,7 +445,7 @@ bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 c
     }
 
     uint32 start[BytecodeBankCount] = {};
-    if (!related || !RegionStart(module, classIndex, start)) {
+    if (bank >= BytecodeBankCount || !related || !RegionStart(module, classIndex, start)) {
         return false;
     }
 

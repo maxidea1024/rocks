@@ -287,6 +287,9 @@ private:
     VmSession* session_ = nullptr;
     // 참이면 Call이 로그 기록을 지우지 않는다(session의 hook 사슬이 여러 호출의 기록을 모은다).
     bool keepLogs_ = false;
+    // Call이 실행 중이다(host 콜백 안에서 같은 실행 문맥을 다시 부르면 바깥 frame·레지스터가 무효가
+    // 된다 — 그런 Call은 InvalidArgument, LC6a 리뷰 S2).
+    bool running_ = false;
     // bank별 레지스터 stack이다. Buf slot은 null이 아니면 참조 하나를 가진다.
     Array<uint64> scalars_;
     Array<uint64> refs_;

@@ -62,7 +62,7 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
                                        Span<const uint64> scalars, Span<const uint64> refs,
                                        Span<VmBuffer* const> buffers,
                                        const VmLimits& limits) noexcept {
-    if (!linked.Linked() || !linked.ImportsLinked()) {
+    if (running_ || !linked.Linked() || !linked.ImportsLinked()) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -131,12 +131,14 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
         Result<VmCallResult> result;
     };
     RunJob job{this, &limits, Result<VmCallResult>::Failure(ErrorCode::InvalidArgument)};
+    running_ = true;
     platform::RunWithDeterministicFloatingPoint(
         [](void* context) noexcept {
             RunJob& run = *static_cast<RunJob*>(context);
             run.result = run.self->Run(*run.limits);
         },
         &job);
+    running_ = false;
     return static_cast<Result<VmCallResult>&&>(job.result);
 }
 

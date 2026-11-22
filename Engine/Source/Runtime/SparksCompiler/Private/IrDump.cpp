@@ -605,8 +605,17 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
                 const uint32 field = c.NodeSymbol(module, tree.Child(member, 2));
                 const uint32 type = field == NoSymbol ? NoType : FieldType(field);
                 const IrLayout layout = IrBuilder::Layout(*this, type);
+                // 0 값이 0·null이 아닌 타입(SL 3.2절): non-null Buf(문자열·컨테이너·struct)와
+                // 단위값 수학 타입(quat·mat4·Transform — LC6a 리뷰 B1). LowerZero와 같은 판정이다.
+                const uint32 symbol = type == NoType ? NoSymbol : SymbolOf(NonOptional(type));
+                const StringView name = symbol == NoSymbol ? StringView() : c.symbols_[symbol].name;
+                const bool identity = symbol != NoSymbol &&
+                                      (c.symbols_[symbol].kind == SymbolKind::BuiltinType ||
+                                       c.symbols_[symbol].kind == SymbolKind::PreludeType) &&
+                                      (name == "quat" || name == "mat4" || name == "Transform");
                 initializes = initializes || tree.Child(member, 4) != NoNode ||
-                              (type != NoType && !IsOptional(type) && layout.bank == IrBank::Buf);
+                              (type != NoType && !IsOptional(type) &&
+                               (layout.bank == IrBank::Buf || identity));
             }
 
             if (initializes) {

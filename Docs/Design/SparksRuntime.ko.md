@@ -42,6 +42,9 @@
 - **필드 로컬 묶음(R2):** 링크는 Field 참조 이름의 주인이 같은 모듈 CLASS 구역의 클래스면 host에 묻지 않고 (클래스, 필드)로 묶는다. 실행 중 `GETF`·`SETF`는 실행 문맥의 session에서 handle의 instance를 찾아 저장소를 직접 쓴다. instance가 아니거나 session 밖이면 `ContractViolation`이다. 클래스 구역의 시작은 bank마다 기반 사슬(같은 모듈 기반, `<경로>:Class` 기반은 session 모듈에서 찾음, 엔진 기반에서 멈춤)의 slot 합이다 — 파생 클래스와 무관하게 같은 위치다.
 - **`.run`(LC5 corpus)의 메서드 호출:** `Class.Method(#this, …)`는 `#this`에 그 클래스 instance가 없으면 먼저 `CreateInstance`(기본값 적용)하고 session으로 부른다. 가짜 host의 Sparks 필드 흉내(LC5d1)는 없앤다.
 
+- **LC6a 리뷰 반영(2026-11-22):** 실행 문맥은 재진입하지 않는다 — Call 실행 중(host 콜백 안)에 같은 실행 문맥의 Call·`CreateInstance`·`RunHook`은 InvalidArgument다(spawn native가 instance를 만드는 경로는 LC6d의 지연 큐가 맡는다). Detach는 저장소까지 놓고 그 번호를 뒤의 `CreateInstance`가 다시 쓴다(host는 번호가 아니라 handle로 instance를 가리킨다). `CreateInstance`의 결과 명령 수·로그는 `$init` 사슬 전체다. 같은 경로의 다른 모듈은 `AddModule`이 거부한다. verifier는 클래스 필드의 밀집 배치(선언 순, bank별 합 = 클래스 slot 수)·모듈 안 클래스 이름 하나·hook 함수 모양(종류별 인자 최대 — 앞에서부터 필요한 만큼, this 필수, 반환 없음)·재진입 표시는 await handler만을 본다. 0 값이 단위값인 수학 타입(quat·mat4·Transform) 필드도 `$init`이 쓴다. `RunHook`은 Buf 인자(Collision의 `hit`)를 받는다.
+- **알려진 한계(LC6a):** 다른 모듈 Sparks 클래스의 필드 참조(`<경로>:Base.Field` — 다른 모듈 기반에서 상속한 필드)는 아직 로컬로 묶지 않는다(host로 간다 — LinkImports 단계에서 session 모듈의 CLASS로 묶는 것은 LC6b 이후). 필드 접근은 명령마다 handle 색인·기반 사슬을 다시 찾는다(instance에 사슬 시작 위치 cache는 측정 뒤). `.run` 실행기는 instance가 붙어 있는 동안 줄마다의 ledger 0 검사를 하지 않고 사례 끝에 모두 Detach한 뒤 본다. 자기 이벤트의 handler는 `on this.Event`(actor 클래스 — 경로 참조 0개)이고 이름 하나짜리 `on X`는 hook 전용이다(SL §5.1).
+
 ### 2.3 발행·전달(LC6b)
 
 - **handler 경로의 참조(R7):** CLASS의 handler 항목은 경로 글자 대신 경로 필드 참조 목록(`Field` 참조 번호 — 경로 마디마다 하나, 자기 이벤트는 0개)을 가진다. `Changed`는 마지막 마디가 감시 필드다(`on State.Changed` → 경로 `[State]`, 발행자는 그 필드를 가진 객체 = self). 그 밖의 이벤트는 경로 끝 객체가 발행자다(`on Owner.Damaged` → `[Component.Owner]`, `on Opened` → `[]` = self). 링크가 참조를 묶으므로 실행 중 이름으로 필드를 찾지 않는다(엔진 필드 `Owner`는 host 묶음).
