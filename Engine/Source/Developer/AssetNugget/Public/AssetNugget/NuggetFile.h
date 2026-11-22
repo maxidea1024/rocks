@@ -121,8 +121,9 @@ ROCKS_ASSETNUGGET_API Result<void> ReadNuggetValue(const NuggetFileView& view,
 // 않는다 — 값 하나는 NuggetValueMaxBytes까지 크다). 예: 같은 digest 기존 항목의 Exists 판정.
 // buffer는 비어 있지 않아야 하고 내용은 호출 뒤 정해지지 않는다. 오류: index 범위 밖·빈 buffer
 // InvalidArgument, 해시 불일치 InvalidArgument, 읽기 IO 오류. 할당하지 않는다.
-Result<void> VerifyNuggetValue(const NuggetFileView& view, NuggetRangeReader& reader, usize index,
-                               Span<uint8> buffer) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> VerifyNuggetValue(const NuggetFileView& view,
+                                                     NuggetRangeReader& reader, usize index,
+                                                     Span<uint8> buffer) noexcept;
 
 // 저장 byte를 원본으로 풀어 out 끝에 붙이고 RawHash·rawSize를 검증한다(Identity는 복사, Rcbk는 블록
 // 컨테이너 해제와 IndexHash 검증). 행은 먼저 IsValidNuggetValueRow로 본다(검증되지 않은 행도

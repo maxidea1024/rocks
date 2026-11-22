@@ -80,7 +80,7 @@ public:
 
 private:
     SharedPtr<const uint8> owner_;
-    const uint8* tag_ = nullptr;
+    const void* tag_ = nullptr;
     uint64 generation_ = 0;
 };
 

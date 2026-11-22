@@ -46,9 +46,9 @@ public static partial class PolicyChecks
     // 타입 키를 두는 한 곳이다(Core/TypeKey.h — 선언한 export 키가 없는 타입의 inline 표지).
     private const string TypeKeyHeader = "Core/Source/Runtime/Core/Public/Core/TypeKey.h";
 
-    // 변수 템플릿 선언이다: template <...> inline [constexpr|constinit] [const] 타입 이름 = | { | ;
+    // 변수 템플릿 선언이다: template <...> inline [constexpr|constinit] [const] 타입(여러 낱말 — unsigned char) 이름 = | { | ;
     private static readonly Regex VariableTemplateDeclaration = new(
-        @"\btemplate\s*<[^;{}()]*>\s*inline\s+(?:constexpr\s+|constinit\s+)?(?:const\s+)?[\w:]+\s+(?<name>\w+)\s*(?:=|\{|;)",
+        @"\btemplate\s*<[^;{}()]*>\s*inline\s+(?:constexpr\s+|constinit\s+)?(?:const\s+)?(?:[\w:]+\s+)+?(?<name>\w+)\s*(?:=|\{|;)",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
 
     /// <summary>
@@ -74,7 +74,9 @@ public static partial class PolicyChecks
             foreach (Match match in VariableTemplateDeclaration.Matches(code))
             {
                 string name = match.Groups["name"].Value;
-                if (!Regex.IsMatch(code, @"&\s*(?:[\w:]+::)?" + Regex.Escape(name) + @"\s*<", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10)))
+                // 단항 주소 연산자만 본다: 앞이 대입·비교·괄호·쉼표·중괄호·세미콜론·조건 기호이거나 return이다(`X<T> && Y`의 &&나 이항 &는 아니다).
+                if (!Regex.IsMatch(code, @"(?:[=(,{;?:!]|\breturn)\s*&\s*(?:[\w:]+::)?" + Regex.Escape(name) + @"\s*<", RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(10)))
                 {
                     continue;
                 }

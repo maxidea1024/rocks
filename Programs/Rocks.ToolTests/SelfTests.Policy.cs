@@ -1023,7 +1023,8 @@ internal static partial class SelfTests
             temporary.Write("Core/Source/Runtime/Probe/Private/ProbeTag.h", "#pragma once\ntemplate <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
             temporary.Write("Core/Source/Runtime/Probe/Tests/ProbeTests.cpp", "template <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
             temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Value.h",
-                "#pragma once\ntemplate <class T>\ninline constexpr bool IsProbeV = false;\nbool b = IsProbeV<int> && true;\n// &Tag<int> in a comment\n");
+                "#pragma once\ntemplate <class T>\ninline constexpr bool IsProbeV = false;\nbool b = IsProbeV<int> && true;\n" +
+                "template <class T>\ninline constexpr bool IsOtherV = true;\nbool c = true &&IsOtherV<int>;\n// &Tag<int> in a comment\n");
             temporary.Write("Core/Source/ThirdParty/Fake/Public/Fake.h", "#pragma once\ntemplate <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
             Verify.That(Check().Count == 0, "allowed uses were rejected: " + string.Join(", ", Check()));
             // 위반: constexpr·const 없는 표지, detail:: 한정 주소, 엔진 플러그인 모듈의 공개 헤더.

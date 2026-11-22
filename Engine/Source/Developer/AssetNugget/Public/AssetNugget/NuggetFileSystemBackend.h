@@ -45,7 +45,7 @@ public:
 };
 
 // 벽시계다(DateTime::UtcNow).
-class NuggetSystemClock final : public NuggetClock {
+class ROCKS_ASSETNUGGET_API NuggetSystemClock final : public NuggetClock {
 public:
     int64 NowTicks() noexcept override;
 };
@@ -150,7 +150,7 @@ inline constexpr uint32 NuggetStoreBlockSizeLog2 = 16;
 inline constexpr int64 NuggetTemporaryLifetimeTicks = 24ll * 60 * 60 * platform::FileTicksPerSecond;
 inline constexpr uint32 NuggetReplaceLockMs = 5000;
 
-class NuggetFileSystemBackend {
+class ROCKS_ASSETNUGGET_API NuggetFileSystemBackend {
 public:
     // root는 물리 경로다(shard 잠금 `tmp/<k0k1>.lock` — FileLock). files·clock은 backend보다 오래
     // 살아야 한다.
