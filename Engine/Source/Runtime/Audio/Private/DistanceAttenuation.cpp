@@ -1,5 +1,6 @@
 #include <Audio/DistanceAttenuation.h>
 
+#include <Audio/Decibels.h>
 #include <Core/Math/MathUtility.h>
 #include <Platform/PlatformMath.h>
 
@@ -13,15 +14,8 @@ namespace {
 constexpr float LogarithmicScale = 0.5f;
 constexpr float InverseNumerator = 0.02f;
 
-// dB → 선형 배율(10^(dB/20))의 분모다.
-constexpr float DecibelsPerAmplitudeDecade = 20.0f;
-
 bool IsNonNegativeFinite(float value) noexcept {
     return math::IsFinite(value) && value >= 0.0f;
-}
-
-float DecibelsToLinear(float decibels) noexcept {
-    return PlatformMath::Pow(10.0f, decibels / DecibelsPerAmplitudeDecade);
 }
 
 } // namespace

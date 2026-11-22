@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-22, 개정 5(DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게). 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-22, 개정 7(DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약). 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -650,7 +650,7 @@ Master
 
 ### 3.20 AU1 구현 세부 — DSP1(개정 3)
 
-AU1을 둘로 나눈다. DSP1은 스레드·큐 없이 버퍼를 받는 순수 DSP와 형식 타입이고, DSP2(dynamics·biquad EQ·plate 리버브)와 Inline 믹서가 뒤따른다. 모두 `Audio` 모듈(`Engine/Source/Runtime/Audio`, `EngineModuleRules`, 유니티 빌드, 의존 Core)이고 이름공간은 `rocks::audio`다. 시험은 모듈 `Tests/`에 두고 EngineTests(`FoundationTests.Build.cs`의 `EngineTestModules`)에 등록한다. 모든 처리 함수는 `noexcept`이고 할당하지 않는다(할당은 생성 `TryCreate`에서만).
+AU1을 셋으로 나눈다. DSP1은 스레드·큐 없이 버퍼를 받는 순수 DSP와 형식 타입이고, DSP2(dynamics 처리기 — 3.21절)와 Inline 믹서가 뒤따른다. biquad EQ·plate 리버브는 효과 표(3.14절)대로 AU7이다(개정 6에서 바로잡음 — 개정 3–5는 DSP2에 넣었지만 AU1 마스터 경로가 쓰는 효과는 limiter뿐이다). 모두 `Audio` 모듈(`Engine/Source/Runtime/Audio`, `EngineModuleRules`, 유니티 빌드, 의존 Core)이고 이름공간은 `rocks::audio`다. 시험은 모듈 `Tests/`에 두고 EngineTests(`FoundationTests.Build.cs`의 `EngineTestModules`)에 등록한다. 모든 처리 함수는 `noexcept`이고 할당하지 않는다(할당은 생성 `TryCreate`에서만).
 
 #### 3.20.1 형식(`Audio/AudioFormat.h`)
 
@@ -713,6 +713,63 @@ UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/At
 | 리샘플러 | r = 1 항등, r = 0.5·2·0.75·44.1/48 위치·값, 블록 분할 불변, 소비 0 호출(r = 0.01, 1 frame씩), 블록 사이 비율 재설정 분할 불변, 비율 보간, 입력 부족 음성, 범위 밖 비율 음성(유한·비유한) |
 | 패너 | 방위각 사분면(0·45·90·135·180·225·270·315°)과 UE 경계 결함 자리(정왼쪽·정후면·수직), 정면·후면 1/√2, 5.1·7.1 한 바퀴 equal-power, 정오른쪽 R = 1, 리스너 180° 회전 대칭, 5.1 쌍 선택, 비공간화 비율, 센터 전용, equal-power 합 1 |
 | 거리 감쇠 | 모델마다 0·내부 반경·중간·falloff·falloff 밖 값(double 기준값 대조), falloff < 1, NaturalSound 세 모드, Custom 음성 |
+
+### 3.21 AU1 구현 세부 — DSP2 dynamics(개정 6)
+
+UE `Audio::FDynamicsProcessor`(`Source/Runtime/SignalProcessing/Private/DynamicsProcessor.cpp`)와 `FInlineEnvelopeFollower`·`FAttackRelease`(`Public/DSP/EnvelopeFollower.h`, `Private/EnvelopeFollower.cpp`)에 해당한다. 마스터 limiter(3.6절 4단계)가 AU1에서 쓰고, AU7 compressor 효과가 같은 처리기를 쓴다. 헤더는 `Audio/DynamicsProcessor.h`, 클래스는 `DynamicsProcessor`다. UE의 블록 경로(`ProcessAudioDeinterleaveInternal`)를 따른다. UE frame 경로(`ProcessAudioFrame`)는 dB 하한(−160 dB)과 0 dB 판정이 달라 따르지 않는다.
+
+#### 3.21.1 설정(`DynamicsSettings`, 기본값은 UE 생성자 값)
+
+| 필드 | 기본 | 범위(밖이면 `InvalidArgument`) |
+|---|---|---|
+| `mode` | `Compressor` | `Compressor`·`Limiter`·`Expander`·`Gate`·`UpwardsCompressor` |
+| `peakMode` | `Peak` | `Peak`·`MeanSquared`·`RootMeanSquared`(UE `TruePeak`은 envelope follower가 받지 않으므로 없음) |
+| `linkMode` | `Disabled` | `Disabled`·`Average`·`Peak` |
+| `lookaheadMs` | 10 | [0, `MaxLookaheadMs` = 100] |
+| `attackMs`·`releaseMs` | 20·1000 | 0 이상 유한(0이면 계수 0 = 즉시) |
+| `thresholdDb` | −6 | 유한 |
+| `ratio` | 1 | 유한하고 `MinDynamicsRatio` = 1e-8 이상(UE는 `SMALL_NUMBER`로 올림, Rocks는 거부 — 더 작으면 1/ratio가 넘쳐 이득이 NaN) |
+| `kneeBandwidthDb` | 10(half-knee 5) | 0 이상 유한 |
+| `inputGainDb`·`outputGainDb` | 0·0 | [−96, 96] dB(`MaxDynamicsGainDb`, UE는 제한 없음 — 약 770 dB 넘으면 선형값이 inf) |
+| `analogMode` | true | |
+| `analysisWindowMs` | 5 | 0보다 큰 유한(MeanSquared·RootMeanSquared 전용) |
+
+UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요해 AU7에서 더한다. 지금 key는 입력 자신이고 key gain도 없다.
+
+#### 3.21.2 식
+
+- 엔벌로프 계수: `coef = exp(−1000·T/(ms·fs))`, T = analog 1.00239343(RC 63.2%) / digital 4.60517019(= ln 100, 99%). ms = 0이면 0. 평균 제곱 창: `α = exp(−1000/(fs·windowMs))`, `β = 1 − α`.
+- 정규화: Peak `|x|`, MeanSquared `a = β·x² + α·a`, RootMeanSquared `√a`(같은 a).
+- 추종: `diff = v − s`; `v ≤ s`면 `v = attack·diff + s`, 아니면 `v = release·diff + s`.
+- key = 입력 × input gain. 채널마다 엔벌로프를 낸 뒤 link: Average는 채널 평균, Peak는 최대, Disabled는 채널별.
+- dB 변환: `20·log10(max(v, 10^(−96/20)))`(UE `ArrayMagnitudeToDecibelInPlace(…, −96)`).
+- 기울기: Compressor·UpwardsCompressor `1 − 1/ratio`, Limiter 1, Expander `1/ratio − 1`, Gate −1.
+- knee: `x0 = threshold − half`, `x1 = min(threshold + half, 0)`, y0 = 0, y1 = 기울기. 분모 절댓값이 1e-8보다 작으면 1e-8. 처리 구간은 `half ≥ 0`이고 `x0 < level < threshold + half`이다(UpwardsCompressor는 UE 식 그대로 `level < x0`와 `level > threshold + half`를 함께 요구해 사실상 거짓). 구간 안 기울기는 `(level − x1)/(x0 − x1)·y0 + (level − x0)/(x1 − x0)·y1`이다.
+- 이득 dB = 기울기 × (threshold − level). UpwardsCompressor는 [0, 36 dB]로 자른다(`UpwardsCompressionMaxGain`). 그 밖은 dB가 −1e-8보다 크면 선형 1, 아니면 `10^(dB/20)`.
+- 출력: 채널 c = lookahead 지연(`ceil(lookaheadMs·fs/1000)` frame)을 거친 입력 × 이득[c % 이득 채널 수] × output gain × input gain.
+
+#### 3.21.3 수명·실시간 계약
+
+- `TryCreate(sampleRate, channels, settings, Allocator&)`: 지연 링(채널마다 `ceil(100·fs/1000)` + 1 frame — 지연 0–최대를 모두 담는다)과 엔벌로프 scratch(채널 × `MaxBlockFrames`)를 한 번에 할당한다. 할당 실패는 `OutOfMemory`다.
+- `SetSettings(settings) -> Result<void>`: 검사한 뒤 계수를 다시 계산한다. 할당하지 않는다. lookahead 길이를 바꾸면 읽기 위치만 옮긴다(UE `SetDelayLengthSamples`처럼 링에 남은 이력을 그대로 쓴다). 엔벌로프·평균 제곱 상태는 유지한다.
+- `Process(PlanarView)`: 제자리 처리, `noexcept`, 할당 없음. 채널 수는 생성 때 값과 같아야 한다(assert). frame 수에는 제한이 없고 `MaxBlockFrames`씩 나눠 처리한다(scratch 크기). 기본 생성·이동된 빈 처리기는 아무것도 하지 않는다.
+- 비유한 입력: key 계산에서 비유한 표본은 0으로 본다. UE는 거르지 않아 inf 한 표본이 엔벌로프를 NaN에 영구히 가둔다(`v ≤ s`가 늘 거짓). 출력 쪽 비유한 값은 그대로 지나가고 마스터 끝의 NaN·Inf 정리(3.6절 4단계)가 0으로 바꾼다.
+- denormal: 무음 꼬리에서 엔벌로프·평균 제곱이 비정규 값에 머문다. UE는 렌더 스레드에 `FScopedFTZFloatMode`를 건다(`AudioMixer.cpp:930`). Rocks도 AudioRT·Inline 렌더 진입에서 FTZ·DAZ를 켠다(Inline 믹서 단계 계약, `Platform/FloatingPointEnvironment.h`). DSP 함수 자체는 FTZ를 가정하지 않고 결과만 그 환경에서 같다.
+- `Reset()`: 엔벌로프·평균 제곱·지연 링을 0으로 지운다.
+- 블록 분할 불변: 상태가 표본 순서로만 진행하므로 블록을 어떻게 나눠도 출력이 bit 단위로 같다(시험).
+- `GainForLevelDb(levelDb)`: 정적 곡선(이득 선형값)이다. 시험·진단용이다.
+
+#### 3.21.4 시험(DSP2)
+
+| 대상 | 확인 |
+|---|---|
+| 정적 곡선 | 다섯 모드 × knee 0·10 dB × threshold −20·−2 dB(knee 위 점 0 dB clamp) × 여러 level을 double 기준값(3.21.2 식)과 대조, UpwardsCompressor 36 dB 상한, 임계 아래 이득 정확히 1 |
+| 엔벌로프 | 계수 식(analog·digital), 계단 응답(digital 어택 시간에 99%, analog 63.2%), 릴리스 하강 경로, MeanSquared·RootMeanSquared 과도 구간(`x²(1 − α^k)`)과 수렴값, 비유한 입력 뒤 회복 |
+| lookahead | 임펄스 지연 = `ceil(ms·fs/1000)`(100 ms는 다음 블록), 0 ms는 지연 없음, 실행 중 길이 줄이기·늘리기 |
+| limiter | 어택·lookahead 0의 Peak limiter 출력이 임계 이하, 임계 아래 신호는 그대로(이득 1) |
+| link | 스테레오 한쪽만 클 때 Disabled·Average·Peak 이득 |
+| 블록 분할 불변 | 무작위 입력·무작위 블록 크기, `MaxBlockFrames`보다 큰 블록, Reset(RootMeanSquared 상태 포함) |
+| 음성 | 생성 인자, 설정 범위(모든 필드), 할당 실패 N회 |
 
 ## 4. 결정 요약
 
@@ -822,6 +879,8 @@ UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/At
 | Android | OpenSL ES만 | AAudio 우선(miniaudio), 없으면 OpenSL ES | AAudio가 현재 권장 API |
 | 실행 판정 | `FApp::CanEverRenderAudio` 정적 지역 변수 | `RunTraits` 값 | AppInfo 설계(명령줄 고정 시점 명시) |
 | 오류 | `check`·로그 | `Result`, 원래 OS 오류 코드 보존 | Rocks 원칙 |
+| dynamics 계수·지연 계산 | float(`FMath::Exp`, `CeilToInt(ms·fs/1000.0f)`) | double 계산 뒤 float(계수 ulp 차이, 정수 경계에서 지연 1 frame 차이 가능 — 예: 0.020833334 ms에서 UE 1, Rocks 2) | 결정적 기준값 대조 |
+| dynamics 비유한 key | 거르지 않음(엔벌로프가 NaN에 갇힘) | 0으로 봄, ratio < 1e-8·gain ±96 dB 밖 거부 | 마스터 limiter 무력화 방지 |
 | 런타임 리샘플러 위치 | 16.16 고정소수점(`RuntimeResampler.cpp:17`) | 32.32 고정소수점(3.20.5절) | 비율·위치 정밀도(16.16은 비율 오차 2^-17), 블록 분할과 무관한 bit 동일 출력(결정적 시험) |
 | 방위각 경계 | 정왼쪽(x = 0·y < 0) 90°, 정후면(x < 0·y = 0) 0°, 수직(수평 성분 0) 90°(경계 결함) | 270°·180°·0°(atan2와 같음, 수직은 정면) | 결함 수정, 다른 방향은 같음 |
 | 5.1 서라운드 쌍 | 장치 마스크(Windows 기본 BL·BR 210°·150°) | SL·SR 250°·110° 고정, 장치 마스크 대응은 AU9 | ITU-R BS.775 배치, 내부 순서 고정(3.3절) |
@@ -874,3 +933,5 @@ UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/At
 - 개정 3(2026-11-22): 3.20절 AU1 구현 세부(DSP1 — 형식·planar 버퍼·gain ramp·1극 필터·선형 리샘플러·패너·거리 감쇠, UE 5.8 식 대조)를 더했다. 3.13.2절 패닝을 UE `Get3DChannelMap`의 방위각 각도 비율 방식으로 고쳤다(개정 2까지의 right 축 투영 식은 UE와 결과가 달랐다).
 - 개정 4(2026-11-22): DSP1 구현을 반영했다. 리샘플러 위치·비율은 블록 분할 불변을 위해 32.32 고정소수점이다(double 누적 버림). 소비 규칙은 ceil(다음 위치)이다. 정왼쪽 방위각은 UE 경계 결함(90°)을 따르지 않고 270°다. HPF fc ≥ fs/2는 a0 = 1이다. `Custom` 감쇠는 `Unsupported`다. 시험 등록 위치는 EngineTests다.
 - 개정 5(2026-11-22): DSP1 리뷰 반영. 필수 — HPF fc ≥ fs/2의 a0 = 1(극 −1, 상태 발산)을 UE처럼 fs/2 − 1 Hz clamp로 고쳤다. 권장 — HPF bypass를 UE와 같은 20 Hz(+ KINDA_SMALL)로, 리샘플러 비율 범위를 UE와 같은 [0.01, 100]으로 맞췄다. 7절의 UE 리샘플러 서술(16.16 고정소수점)·방위각 경계 차이(정후면·수직)·5.1 서라운드 쌍 선택을 기록했다. gain ramp 목표 유한 계약, `VoiceCenterChannelVolume`은 AU3, 시험 표를 보강했다.
+- 개정 6(2026-11-22): 3.21절 AU1 DSP2 dynamics 처리기(UE `FDynamicsProcessor` 블록 경로 대응 — 설정·식·실시간 계약·시험)를 더했다. 3.20절의 DSP2 범위를 효과 표(3.14절)에 맞춰 dynamics로 줄였다(biquad EQ·plate 리버브는 AU7).
+- 개정 7(2026-11-22): DSP2 리뷰 반영. 권장 — 비유한 key를 0으로 보고(UE는 엔벌로프가 NaN에 갇힘), ratio 하한 1e-8·input/output gain ±96 dB를 두고, denormal은 AudioRT·Inline 렌더 진입의 FTZ·DAZ로 정했다(Inline 믹서 계약). 참고 — 큰 블록 분할 처리, 빈 처리기 no-op, 링 크기 문구(+1), UE float 계산 차이(7절), 시험(릴리스·평균 제곱 과도·knee clamp·lookahead 늘리기·Reset 평균 제곱·설정 전 필드)을 보강했다.
