@@ -149,6 +149,7 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
     out.languages_.Clear();
     out.imports_.Clear();
     out.shapes_.Clear();
+    out.localFields_.Clear();
     out.importsLinked_ = false;
     out.linked_ = false;
     ++out.generation_;
@@ -167,6 +168,14 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
 
     if (auto resized = out.shapes_.TryResize(count); !resized) {
         return resized;
+    }
+
+    if (auto resized = out.localFields_.TryResize(count); !resized) {
+        return resized;
+    }
+
+    for (usize ref = 0; ref < count; ++ref) {
+        out.localFields_[ref] = VmLinkedModule::LocalField();
     }
 
     bool imports = false;
@@ -232,6 +241,47 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
         if (entry.kind == BytecodeRefKind::ImportedFunction) {
             imports = true; // LinkImports가 푼다(6.5절)
             continue;
+        }
+
+        // 같은 모듈 Sparks 클래스 필드(`Class.Field`)는 로컬로 묶는다(SparksRuntime 2.2절).
+        if (entry.kind == BytecodeRefKind::Field) {
+            const StringView name = module.String(entry.name);
+            usize dot = name.ByteCount();
+            for (usize at = 0; at < name.ByteCount(); ++at) {
+                dot = name.Data()[at] == '.' ? at : dot;
+            }
+
+            const StringView owner(name.Data(), dot < name.ByteCount() ? dot : 0);
+            const StringView member =
+                dot < name.ByteCount()
+                    ? StringView(name.Data() + dot + 1, name.ByteCount() - dot - 1)
+                    : StringView();
+            bool local = false;
+            for (uint32 index = 0; index < module.classes.Size() && !local; ++index) {
+                const BytecodeClass& entryClass = module.classes[index];
+                if (module.String(entryClass.name) != owner) {
+                    continue;
+                }
+
+                for (uint32 at = entryClass.firstField;
+                     at < entryClass.firstField + entryClass.fieldCount; ++at) {
+                    const BytecodeTypeField& field = module.classFields[at];
+                    if (module.String(field.name) == member) {
+                        VmLinkedModule::LocalField& bound = out.localFields_[ref];
+                        bound.classIndex = index;
+                        bound.bank = field.bank;
+                        bound.slots = field.slots;
+                        bound.offset = field.offset;
+                        out.hosts_[ref].bank = field.bank;
+                        out.hosts_[ref].slots = field.slots;
+                        local = true;
+                    }
+                }
+            }
+
+            if (local) {
+                continue;
+            }
         }
 
         if (!HostBound(entry)) {

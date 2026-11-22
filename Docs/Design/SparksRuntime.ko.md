@@ -8,7 +8,7 @@
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| LC6a session·instance·hook | `VmSession`(실행 단위 — SL §9.1 소유 범위), bytecode 형식 v3의 CLASS 구역(클래스 필드 배치·기본값 생성 함수·hook 표·handler 표·이벤트 표), instance 생성(필드 저장소는 session — Sparks 클래스 필드의 `GETF`·`SETF`는 VM이 직접), 수명 hook 실행(Awake·Enable·Start·Tick 계열·Disable·Destroy — 기반 먼저 누적), Detach, 스크립트 단계 열기·닫기 | `.scenario` golden(아래 §6)의 hook 순서·필드 값 |
+| LC6a session·instance·hook | `VmSession`(실행 단위 — SL §9.1 소유 범위), bytecode 형식 v3의 CLASS 구역(클래스 필드 배치·기본값 생성 함수·hook 표·handler 표·이벤트 표), instance 생성(필드 저장소는 session — Sparks 클래스 필드의 `GETF`·`SETF`는 VM이 직접), 수명 hook 실행(Awake·Enable·Start·Tick 계열·Disable·Destroy — 기반 먼저 누적), Detach | `.run` instance 지시 golden(§4)의 hook 순서·필드 값 |
 | LC6b 발행·전달 | `emit`·발행 큐(FIFO)·연결 표(slot·generation)·`on 경로.이벤트` 연결(자기 필드·객체 필드·배열 원천·native 이벤트는 host 2차)·Changed(조각 값 기준)·연쇄 깊이 상한 16·전달 상한·이월 재검증 | 전달 순서 golden, CascadeLimit·BudgetExceeded 시험 |
 | LC6c async 실행 | 실행 조각과 정지(`AWAIT`·`AWAITEV` — frame 보관), 대기(`Delay`·`NextTick`·`NextFixedTick`·이벤트·`All`·`Race`), 재개 큐(순서 key — SL §6.1), 취소(await 지점), 재진입 정책(`@skipWhileBusy`·`@restart`), Execution 트리·EndExec, Start 준비 대기 | 재개 순서·취소 golden |
 | LC6d 자원·지연·격리 | 유지 자원(획득 → 해제 → 저장, 실행·instance 범위 해제), 로드 요청 handle(host 2차), 활성 전환·파괴 지연 큐(적용 루프 64회), fault 위치별 처리와 격리(SL §8.3 표), 예산(instance·session — SL §9.3), CloseSession(ledger 0) | 누수 0 시험, 격리·예산 시험 |
@@ -32,6 +32,16 @@
 - **초기화 함수(R6):** 컴파일러가 클래스마다 `<Class>.$init`(this 하나, 반환 없음)을 만든다. 본문은 그 클래스가 선언한 필드의 초기값(SL §3.2 — 초기값 식, 없으면 0 값 중 slot 0·null로 충분하지 않은 것: 문자열 `""`·빈 컨테이너·struct 기본값·단위 quat 등)을 선언 순으로 자기 필드에 쓴다. 초기값이 모두 0·null인 클래스는 함수가 없다. session은 instance를 만들 때 기반 사슬의 초기화 함수를 기반 먼저 부른다(이 실행은 Changed를 내지 않는다 — SL §5.3 "초기값").
 - **verifier:** 클래스·필드·hook·handler·이벤트 범위가 표 안, 기반 클래스 번호가 앞선 클래스(순환 없음), 필드 배치(bank 0–2, Ref·Buf 1 slot, 위치가 자기 slot 수 안), hook 종류 중복 없음, 함수 번호가 함수 표 안, 초기화 함수의 매개변수 모양(Ref 1).
 
+### 2.2 VmSession API(LC6a)
+
+- `VmSession(allocator, host)` — 실행 문맥 하나(`Execution()`)와 instance 표를 가진다. `AddModule(linked)`는 session 모듈 목록에 더한다(같은 host로 링크한 모듈만 — 다른 모듈 기반 클래스·필드를 찾는 범위).
+- `CreateInstance(handle, module, class)` — handle(host 객체, 살아 있어야 함)에 instance를 붙인다: 필드 저장소를 기반 사슬 전체 크기로 0·null로 만들고 기반 먼저 `$init`을 부른다(Changed 없음). 같은 handle에 두 번 붙이면 InvalidArgument. 초기화 fault는 instance를 만들지 않고 그 fault를 돌려준다(LC6d가 spawn 실패로 잇는다).
+- `RunHook(instance, kind, scalars, refs)` — 그 종류의 hook을 기반 사슬 순(기반 먼저 — SL §5.1 누적)으로 부른다. 첫 fault에서 멈추고 그 결과를 돌려준다(격리는 LC6d).
+- `Call(instance, module, function, …)` — 메서드를 this = instance handle로 부른다(`.run`의 `Class.Method(#this, …)`).
+- `Detach(instance)` — 필드 버퍼를 놓고 표에서 뺀다(handle 색인도). 소멸자는 남은 instance를 모두 Detach한다(CloseSession — ledger 0).
+- **필드 로컬 묶음(R2):** 링크는 Field 참조 이름의 주인이 같은 모듈 CLASS 구역의 클래스면 host에 묻지 않고 (클래스, 필드)로 묶는다. 실행 중 `GETF`·`SETF`는 실행 문맥의 session에서 handle의 instance를 찾아 저장소를 직접 쓴다. instance가 아니거나 session 밖이면 `ContractViolation`이다. 클래스 구역의 시작은 bank마다 기반 사슬(같은 모듈 기반, `<경로>:Class` 기반은 session 모듈에서 찾음, 엔진 기반에서 멈춤)의 slot 합이다 — 파생 클래스와 무관하게 같은 위치다.
+- **`.run`(LC5 corpus)의 메서드 호출:** `Class.Method(#this, …)`는 `#this`에 그 클래스 instance가 없으면 먼저 `CreateInstance`(기본값 적용)하고 session으로 부른다. 가짜 host의 Sparks 필드 흉내(LC5d1)는 없앤다.
+
 ## 3. 순서
 
 - **스크립트 단계(SL §5.4):** host가 `OpenPhase(kind)`로 열고, 그 단계의 실행 조각(hook·handler·재개)을 VM이 돌린 뒤 발행 큐를 비우고(연쇄 상한·전달 상한), 활성 전환 적용 → 파괴 적용 요청을 host에 넘기고(적용 루프 64회), `ClosePhase`로 닫는다. 단계 밖의 실행은 없다(엔진이 연 진입도 단계 하나를 연다).
@@ -40,7 +50,7 @@
 
 ## 4. 시험
 
-- `.scenario` golden(LC6a부터): 사례 소스(클래스들)와 시나리오 줄(`spawn Door #1`, `enable #1`, `phase Tick`, `emit #1.Opened(#2)`, `advance 0.5`, `destroy #1` …)을 가짜 host가 해석해 실행하고, hook·handler 실행 순서·필드 값·host 호출·fault를 기록한 줄과 비교한다(`.run`과 같은 다시 쓰기 흐름). 형식은 LC6a에서 확정해 §6에 적는다.
+- **실행 golden은 `.run`을 넓힌다(LC6a 확정 — 별도 `.scenario` 형식을 두지 않는다):** 소문자 지시 줄이 instance를 다룬다 — `new #1 Door`(가짜 host 객체 #1에 Door instance를 붙이고 `$init`), `hook #1 Enable`·`hook #1 Tick(0.5)`·`hook #1 TriggerEnter(#2, #3)`(기반 먼저 누적 실행 — 인자는 실수·`#n`), `fields #1`(기반 사슬 전체 필드 표기 `Door(Open: true, …)`), `detach #1`. 결과는 `-> ok (N steps)`·`-> fault <종류> at 줄:열 (N steps)`·필드 표기이고 log·host 줄이 뒤따른다(함수 호출 줄과 같은 다시 쓰기). LC6b 이후 `phase`·`emit`·`advance` 지시를 같은 방식으로 더한다.
 - 모든 단계는 할당 실패 전수 시험과 ledger 0(CloseSession 뒤)을 본다.
 
 ## 5. 결정(권장안 — 2026-11-22 확정)

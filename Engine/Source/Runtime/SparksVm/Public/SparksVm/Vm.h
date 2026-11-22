@@ -112,6 +112,8 @@ struct VmCallResult {
         0; // 실행한 명령 수(fault를 낸 명령은 세지만 예산 초과로 막힌 명령은 세지 않는다)
 };
 
+class VmSession;
+
 class VmExecution final {
 public:
     explicit VmExecution(Allocator& allocator) noexcept;
@@ -206,6 +208,7 @@ public:
 
 private:
     friend class detail::VmLibrary;
+    friend class VmSession;
 
     struct LogEntry {
         VmLogLevel level = VmLogLevel::Info;
@@ -280,6 +283,10 @@ private:
     Allocator* allocator_;
     const BytecodeModule* module_ = nullptr;
     const VmLinkedModule* link_ = nullptr;
+    // 이 실행 문맥을 가진 session(없으면 로컬 필드 명령은 ContractViolation — SparksRuntime 2.2절).
+    VmSession* session_ = nullptr;
+    // 참이면 Call이 로그 기록을 지우지 않는다(session의 hook 사슬이 여러 호출의 기록을 모은다).
+    bool keepLogs_ = false;
     // bank별 레지스터 stack이다. Buf slot은 null이 아니면 참조 하나를 가진다.
     Array<uint64> scalars_;
     Array<uint64> refs_;

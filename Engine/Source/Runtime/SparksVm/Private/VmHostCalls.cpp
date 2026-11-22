@@ -1,6 +1,7 @@
 #include <SparksVm/Opcode.h>
 #include <SparksVm/Vm.h>
 #include <SparksVm/VmHost.h>
+#include <SparksVm/VmSession.h>
 
 // host 명령(GETF·SETF·GETCTX·CALLN·NEWLIT)의 실행이다(Docs/Design/SparksVm.ko.md 6.2절, LC5d1).
 // 창을 VmHostCall로 만들어 링크한 host를 부른다.
@@ -116,6 +117,38 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
         const uint64 object = get ? banks.r[bb] : banks.r[a];
         if (!Alive(object)) {
             return VmFaultKind::ContractViolation; // 꺼낸 참조에만 낸다(6.2절)
+        }
+
+        // 같은 모듈 Sparks 클래스 필드: session instance 저장소(SparksRuntime 2.2절).
+        const VmLinkedModule::LocalField& local = link_->localFields_[DecodeAx(extra)];
+        if (local.classIndex != NoBytecodeIndex) {
+            uint64* values = nullptr;
+            VmBuffer** buffers = nullptr;
+            if (session_ == nullptr || !session_->FieldSlots(object, *link_, local.classIndex, bank,
+                                                             local.offset, c, values, buffers)) {
+                return VmFaultKind::ContractViolation;
+            }
+
+            const uint32 at = get ? a : bb;
+            for (uint32 slot = 0; slot < c; ++slot) {
+                if (bank == static_cast<uint32>(BytecodeBank::Buf)) {
+                    VmBuffer*& from = get ? buffers[slot] : banks.b[at + slot];
+                    VmBuffer*& to = get ? banks.b[at + slot] : buffers[slot];
+                    Retain(from);
+                    VmBuffer* previous = to;
+                    to = from;
+                    Release(previous);
+                } else {
+                    uint64* registers = bank == 0 ? banks.s : banks.r;
+                    if (get) {
+                        registers[at + slot] = values[slot];
+                    } else {
+                        values[slot] = registers[at + slot];
+                    }
+                }
+            }
+
+            return VmFaultKind::None;
         }
 
         call.binding_ = link_->hosts_[DecodeAx(extra)].id;

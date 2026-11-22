@@ -152,7 +152,7 @@ class VmLinkedModule final {
 public:
     explicit VmLinkedModule(Allocator& allocator) noexcept
         : hosts_(allocator), languageIndex_(allocator), languages_(allocator), imports_(allocator),
-          shapes_(allocator) {
+          shapes_(allocator), localFields_(allocator) {
     }
 
     VmLinkedModule(const VmLinkedModule&) = delete;
@@ -183,6 +183,7 @@ public:
 
 private:
     friend class VmExecution;
+    friend class VmSession;
     friend Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModule& out,
                                    StringBuilderBase& reason) noexcept;
     friend Result<void> LinkImports(Span<VmLinkedModule* const> modules,
@@ -194,6 +195,14 @@ private:
         const VmLinkedModule* module = nullptr;
         uint32 function = NoBytecodeIndex;
         uint64 generation = 0;
+    };
+
+    // 같은 모듈 Sparks 클래스 필드 참조의 로컬 묶음이다(SparksRuntime 2.2절 — host에 묻지 않는다).
+    struct LocalField {
+        uint32 classIndex = NoBytecodeIndex; // NoIndex면 로컬 필드가 아니다
+        uint8 bank = 0;
+        uint8 slots = 0;
+        uint32 offset = 0; // 클래스 구역 안 위치
     };
 
     // ImportedFunction·VirtualFunction 참조 서술자의 함수 모양(bank별 매개변수 slot 수와 반환 —
@@ -214,6 +223,7 @@ private:
     Array<uint64> languages_;
     Array<Import> imports_;
     Array<Shape> shapes_;
+    Array<LocalField> localFields_;
     bool importsLinked_ = false;
     bool linked_ = false;
     uint64 generation_ = 0; // LinkModule마다 바뀐다(이 객체를 가리키는 import의 무효화)

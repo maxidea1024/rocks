@@ -1,0 +1,41 @@
+open class Base : ScriptableComponent {
+    var Trail = "";
+    var Count = 0;
+    var Seen: Array<string> = [];
+
+    on Awake() {
+        Trail = "${Trail}A";
+    }
+
+    on Enable() {
+        Trail = "${Trail}E";
+        Seen.Add("enable");
+    }
+
+    on Tick(dt: float) {
+        Count += 1;
+        Log.Info("base tick ${dt}");
+    }
+
+    on Disable() {
+        Trail = "${Trail}D";
+    }
+}
+
+class Derived : Base {
+    var Limit = 2;
+    var Label = "derived";
+
+    on Enable() {
+        Trail = "${Trail}e";
+    }
+
+    on Tick(dt: float) {
+        Assert(Count <= Limit, "too many ticks");
+        Log.Info("derived tick ${Count} ${dt}");
+    }
+
+    on Destroy() {
+        Trail = "${Trail}X";
+    }
+}

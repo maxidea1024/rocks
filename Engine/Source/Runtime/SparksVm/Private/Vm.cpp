@@ -87,9 +87,11 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
     }
 
     Unwind();
-    logs_.Clear();
-    logText_.Clear();
-    droppedLogs_ = 0;
+    if (!keepLogs_) {
+        logs_.Clear();
+        logText_.Clear();
+        droppedLogs_ = 0;
+    }
     random_.Seed(limits.randomSeed);
     module_ = &module;
     link_ = &linked;
