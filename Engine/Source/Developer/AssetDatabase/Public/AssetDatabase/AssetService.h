@@ -82,6 +82,19 @@ struct AssetDeleteResult {
     Array<AssetId> referencerIds;
 };
 
+// asset-fix-duplicate-id 결과다(7.1절 17 A2e4b): 고친 경로·옛 id·새 id, 옛 id를 쓰는 남은 항목의
+// 경로들(다른 패키지의 옛 id 참조는 그쪽을 가리킨다 — 실패해도 고른 대상은 채운다).
+struct AssetFixIdResult {
+    explicit AssetFixIdResult(Allocator& allocator) noexcept
+        : path(allocator), remaining(allocator) {
+    }
+
+    String path;
+    AssetId oldId{};
+    AssetId newId{};
+    Array<String> remaining;
+};
+
 // asset-duplicate 결과다(7.1절 17 A2e3b): 사본 id와 정규화한 논리 경로.
 struct AssetDuplicateResult {
     explicit AssetDuplicateResult(Allocator& allocator) noexcept : path(allocator) {
@@ -219,6 +232,18 @@ public:
     Result<void> DeleteOrphan(const AssetDatabaseLock& lock, StringView path,
                               AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
                               AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-fix-duplicate-id <path>: 같은 id 파일 둘 이상 가운데 path의 파일을 새 id로 다시 쓴다
+    // (7.1절 17 A2e4b — EditorPackageSet::FixDuplicateId). 경로는 지금 이름이다(별칭으로 풀지
+    // 않는다). 고아가 생기면 경고 OrphanedOutput.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 같은 id가 아님 InvalidArgument(진단 None·asset), id 발급 실패, FixDuplicateId의 오류, 할당
+    // 실패.
+    Result<void> FixDuplicateId(const AssetDatabaseLock& lock, StringView path,
+                                AssetFixIdResult& result, Array<EditorWarning>* warnings = nullptr,
+                                AssetDiagnostic* failure = nullptr) noexcept;
 
     // asset-duplicate <path|AssetId> <새 path>: 원본을 열고(열기와 같다 — 별칭을 따른다) 그 메모리
     // 상태를 새 id로 새 경로에 쓴다(7.1절 17 A2e3b — EditorPackageSet::Duplicate). 대상 경로가

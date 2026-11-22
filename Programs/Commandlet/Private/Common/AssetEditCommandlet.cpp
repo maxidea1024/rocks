@@ -21,6 +21,7 @@ constexpr StringView MoveName = "asset-move";
 constexpr StringView DeleteName = "asset-delete";
 constexpr StringView OrphansDeleteName = "asset-orphans-delete";
 constexpr StringView DuplicateName = "asset-duplicate";
+constexpr StringView FixIdName = "asset-fix-duplicate-id";
 
 constexpr StringView NewUsage =
     "usage: asset-new <Type> <path> [<property>=<value>...] [--unset=<paths>] [--erase=<paths>]\n"
@@ -68,6 +69,14 @@ constexpr StringView OrphansDeleteUsage =
     "  Delete an orphaned import output (see asset-orphans-list). Anything else is refused.\n"
     "  Packages that reference it block the delete (use asset-delete --force). Prints\n"
     "  'deleted <path> <AssetId>'. Takes the project write lock.\n";
+
+constexpr StringView FixIdUsage =
+    "usage: asset-fix-duplicate-id <path> [--project=<dir>] [--wait=<seconds>]\n"
+    "  Give the package at <path> a new AssetId when another package file has the same id (for\n"
+    "  example after a copy made outside the tools). The file is rewritten in place; references\n"
+    "  to the old id from other packages keep pointing at the remaining file. An import output\n"
+    "  that loses its owner is reported as OrphanedOutput. Prints '<path> <old id> -> <new id>'.\n"
+    "  Takes the project write lock.\n";
 
 constexpr StringView DuplicateUsage =
     "usage: asset-duplicate <path|AssetId> <new path> [--project=<dir>] [--wait=<seconds>]\n"
@@ -244,11 +253,11 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
 // 편집 경고 이름이다(EditorWarningKind 순서).
 const char* WarningName(EditorWarningKind kind) noexcept {
     constexpr const char* Names[] = {
-        "ExcludedDependency", "UnresolvedImport",   "DroppedUnresolvedImport", "NotDurable",
-        "OrphanNotDeleted",   "AliasResolved",      "AliasTableUnreadable",    "AliasNotRestored",
-        "AliasRemoved",       "ImportRecordDropped"};
+        "ExcludedDependency", "UnresolvedImport",    "DroppedUnresolvedImport", "NotDurable",
+        "OrphanNotDeleted",   "AliasResolved",       "AliasTableUnreadable",    "AliasNotRestored",
+        "AliasRemoved",       "ImportRecordDropped", "OrphanedOutput"};
     static_assert(sizeof(Names) / sizeof(Names[0]) ==
-                      static_cast<usize>(EditorWarningKind::ImportRecordDropped) + 1,
+                      static_cast<usize>(EditorWarningKind::OrphanedOutput) + 1,
                   "every editor warning needs a name");
     return Names[static_cast<usize>(kind)];
 }
@@ -603,6 +612,64 @@ Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
 Result<int32> RunAssetOrphansDeleteCommand(void* context, Span<const StringView> args,
                                            CommandletOutput& output) noexcept {
     return RunDelete(context, args, output, true);
+}
+
+Result<int32> RunAssetFixDuplicateIdCommand(void* context, Span<const StringView> args,
+                                            CommandletOutput& output) noexcept {
+    const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
+    Allocator& allocator = *command.allocator;
+    EditArgs parsed(allocator);
+    EditGrammar grammar;
+    bool done = false;
+    auto usage = CheckUsage(output, ParseEdit(args, grammar, parsed), parsed, FixIdUsage, done);
+    if (done) {
+        return usage;
+    }
+
+    EditSession session(allocator, *command.modules);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!OpenSession(output, allocator, FixIdName, parsed.project, parsed.wait, true, session,
+                     failure)) {
+        return failure;
+    }
+
+    AssetDiagnostic diagnostic;
+    AssetFixIdResult result(allocator);
+    auto fixed = session.service->FixDuplicateId(session.lock, parsed.positional[0], result,
+                                                 &session.warnings, &diagnostic);
+    if (auto warned = WriteWarnings(output, allocator, FixIdName, session.warnings); !warned) {
+        return warned;
+    }
+
+    if (!fixed) {
+        return WriteFailure(output, allocator, FixIdName, parsed.positional[0], session.diagnostics,
+                            diagnostic, fixed.Error());
+    }
+
+    StringBuilder<LineBytes> line(allocator);
+    if (auto formatted = line.TryAppendFormat("{}: {} {} -> {}\n", FixIdName, result.path.View(),
+                                              result.oldId, result.newId);
+        !formatted) {
+        return Result<int32>::Failure(formatted.Error());
+    }
+
+    // 남은 것이 하나면 옛 id 참조는 그쪽으로 풀리고, 둘 이상이면 아직 같은 id다(다시 고친다).
+    const StringView remainingFormat = result.remaining.Size() == 1
+                                           ? StringView("{}: references to {} resolve to {}\n")
+                                           : StringView("{}: {} is still shared by {}\n");
+    for (const String& remaining : result.remaining) {
+        if (auto formatted =
+                line.TryAppendFormat(remainingFormat, FixIdName, result.oldId, remaining.View());
+            !formatted) {
+            return Result<int32>::Failure(formatted.Error());
+        }
+    }
+
+    if (auto written = Write(output, CommandletStream::Output, line.View(), 0); !written) {
+        return written;
+    }
+
+    return FlushCache(output, allocator, FixIdName, session);
 }
 
 Result<int32> RunAssetDuplicateCommand(void* context, Span<const StringView> args,

@@ -54,10 +54,9 @@ internal static class ProjectFilesStaleness
         }
 
         string reason = state.Fingerprints.ContainsKey(key) ? "files or settings changed" : "the target is not in the project files";
-        // Visual Studio 빌드(IdeBuild.ps1이 ROCKS_IDE_BUILD=1을 준다)에서는 오류 목록에 나오도록 MSBuild 경고 형식, 터미널에서는 경고 형식이 아닌 note다.
-        // 저장소의 Directory.Build.rsp가 -warnAsError라 Rocks.proj Exec가 경고 형식을 오류로 바꿔 터미널 빌드를 실패시켰다(9절).
-        string category = Environment.GetEnvironmentVariable("ROCKS_IDE_BUILD") == "1" ? "warning" : "note";
-        return $"{category} {WarningCode}: Visual Studio project files are out of date for {target.Name} {configuration} ({reason}). Run GenerateProjectFiles.bat.";
+        // 늘 MSBuild 경고 형식이다(Visual Studio 오류 목록·터미널 모두). 저장소 Directory.Build.rsp의 -warnAsError가 이 경고를 오류로 바꾸지 않게
+        // 같은 파일에 -warnNotAsError:RPF0001을 둔다(9절).
+        return $"warning {WarningCode}: Visual Studio project files are out of date for {target.Name} {configuration} ({reason}). Run GenerateProjectFiles.bat.";
     }
 
     /// <summary>

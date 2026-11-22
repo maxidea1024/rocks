@@ -862,6 +862,82 @@ Result<void> AssetService::DeleteOrphan(const AssetDatabaseLock& lock, StringVie
     return Delete(lock, parsed.Value().Text(), false, result, warnings, failure);
 }
 
+Result<void> AssetService::FixDuplicateId(const AssetDatabaseLock& lock, StringView path,
+                                          AssetFixIdResult& result, Array<EditorWarning>* warnings,
+                                          AssetDiagnostic* failure) noexcept {
+    result.path.Clear();
+    result.oldId = AssetId{};
+    result.newId = AssetId{};
+    result.remaining.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto parsed = ParseLogicalPath(*allocator_, path);
+    if (!parsed) {
+        return FailAsset<void>(failure,
+                               parsed.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               parsed.Error());
+    }
+
+    auto entry = index_.FindByPath(parsed.Value());
+    if (!entry) {
+        return FailAsset<void>(failure,
+                               entry.Error() == ErrorCode::AlreadyExists
+                                   ? AssetDiagnosticCode::DuplicatePath
+                                   : AssetDiagnosticCode::None,
+                               entry.Error());
+    }
+
+    const AssetId oldId = entry.Value()->id;
+    result.oldId = oldId;
+    if (auto assigned = result.path.TryAssign(entry.Value()->path.View()); !assigned) {
+        return assigned;
+    }
+
+    if (!entry.Value()->duplicateId) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument,
+                               oldId);
+    }
+
+    // 옛 id를 쓰는 남은 항목(경로 키 순)과 고칠 파일 이름 사본(쓰기 뒤 항목이 바뀐다).
+    for (usize index = 0; index < index_.Count(); ++index) {
+        const AssetIndexEntry& other = index_.At(index);
+        if (!(other.id == oldId) || &other == entry.Value()) {
+            continue;
+        }
+
+        String remaining(*allocator_);
+        if (auto assigned = remaining.TryAssign(other.path.View()); !assigned) {
+            return assigned;
+        }
+
+        if (auto pushed = result.remaining.TryPushBack(rocks::Move(remaining)); !pushed) {
+            return pushed;
+        }
+    }
+
+    String fileName(*allocator_);
+    if (auto assigned = fileName.TryAssign(entry.Value()->fileName.View()); !assigned) {
+        return assigned;
+    }
+
+    auto made = AssetId::TryNew();
+    if (!made) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, made.Error(), oldId);
+    }
+
+    if (auto fixed = set_.FixDuplicateId(fileName.View(), made.Value(), lock, warnings, failure);
+        !fixed) {
+        return fixed;
+    }
+
+    result.newId = made.Value();
+    return Result<void>::Success();
+}
+
 Result<void> AssetService::Duplicate(const AssetDatabaseLock& lock, StringView source,
                                      StringView target, AssetDuplicateResult& result,
                                      Array<EditorWarning>* warnings,
