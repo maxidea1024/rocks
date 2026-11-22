@@ -64,7 +64,9 @@ enum class ExchangeIssue : uint8 {
     DepthLimit,       // 단위 깊이가 UnrealImportMaxDepth 초과(UnsupportedCycle)
     MissingTarget,    // 묶음·기존 에셋에 없는 Hard 대상(text = 대상 objectPath)
     FailedDependency, // Hard 대상 에셋이 실패함(MissingDependency, related = 대상 에셋)
-    FailedMember      // 같은 저장 단위의 다른 에셋이 실패함(MissingDependency, related = 그 에셋)
+    FailedMember,     // 같은 저장 단위의 다른 에셋이 실패함(MissingDependency, related = 그 에셋)
+    NotRegularFile,   // 일반 파일이 아님(디렉터리·장치·FIFO·link, text = 묶음 안 상대 경로)
+    ExporterError     // 플러그인이 error 진단을 냄(InvalidSource, text = 그 진단 code)
 };
 
 // 세부 규칙 이름이다(예: BlobHash → "BlobHash"). 모르는 값은 "Unknown"이다. 정적 수명이다.

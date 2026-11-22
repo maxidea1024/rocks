@@ -1,0 +1,127 @@
+{
+  "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.SK_Column_Skeleton",
+  "class": "Skeleton",
+  "ueClass": "/Script/Engine.Skeleton",
+  "dependencies": [
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column",
+      "class": "SkeletalMesh",
+      "kind": "soft"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "BoneTree": [
+      {
+        "TranslationRetargetingMode": "Animation"
+      },
+      {
+        "TranslationRetargetingMode": "Animation"
+      }
+    ],
+    "PreviewForwardAxis": "Y",
+    "VirtualBoneGuid": {
+      "A": 0,
+      "B": 0,
+      "C": 0,
+      "D": 0
+    },
+    "VirtualBones": [],
+    "CompatibleSkeletons": [],
+    "bUseRetargetModesFromCompatibleSkeleton": false,
+    "Sockets": [],
+    "BlendProfiles": [],
+    "SlotGroups": [],
+    "PreviewSkeletalMesh": {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column"
+    },
+    "AdditionalPreviewSkeletalMeshes": null,
+    "AnimationNotifies": [],
+    "PreviewAttachedAssetContainer": {
+      "AttachedObjects": []
+    },
+    "AssetUserData": [
+      {
+        "subobject": "AnimCurveMetaData_0",
+        "class": "/Script/Engine.AnimCurveMetaData",
+        "properties": {
+          "CurveMetaData": [
+            {
+              "key": "Bulge",
+              "value": {
+                "LinkedBones": [],
+                "MaxLOD": 255,
+                "Type": {
+                  "bMaterial": false,
+                  "bMorphtarget": true
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "AssetUserDataEditorOnly": []
+  },
+  "data": {
+    "bones": [
+      {
+        "name": "Root",
+        "exportName": "Root",
+        "parent": -1,
+        "pose": {
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "retargetMode": "Animation"
+      },
+      {
+        "name": "Tip",
+        "exportName": "Tip",
+        "parent": 0,
+        "pose": {
+          "translation": [
+            0,
+            0,
+            100
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "retargetMode": "Animation"
+      }
+    ],
+    "curves": [
+      {
+        "name": "Bulge",
+        "isMaterial": false,
+        "isMorphTarget": true,
+        "linkedBones": [],
+        "maxLod": 255
+      }
+    ]
+  }
+}

@@ -8,7 +8,7 @@ namespace Rocks.MetaCompiler;
 // 선언은 imported(의존 모듈 descriptor)에 같은 이름·같은 헤더 파일로 있어야 한다(RMC2003).
 // resolveHeader는 descriptor의 header 철자를 이번 include 검색 순서로 찾은 정규 경로다(없으면 null).
 internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableIdManifest? manifest,
-    IReadOnlyDictionary<string, ClassModel> imported, Func<string, string?> resolveHeader, bool requireGeneratedBody = false)
+    IReadOnlyDictionary<string, ClassModel> imported, Func<string, string?> resolveHeader, bool requireGeneratedBody = false, string moduleName = "")
 {
     // ROCKS_GENERATED_BODY()가 남기는 자기 타입 표지 멤버의 이름이다(Meta/Annotations.h와 같다).
     private const string ReflectedSelfMarker = "rocksReflectedSelf";
@@ -844,6 +844,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     Version = classSpec?.Version ?? structSpec!.Version,
                     Base = isStruct ? "" : TypeSpelling(bases[0]),
                     Abstract = abstractType || (classSpec?.Abstract ?? false),
+                    Exported = !isStruct && DeclaresClassExport(node, qualified),
                     WorldOnly = classSpec?.WorldOnly ?? false,
                     Transient = classSpec?.Transient ?? false,
                     Deprecated = classSpec?.Deprecated ?? false,

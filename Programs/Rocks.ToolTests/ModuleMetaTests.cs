@@ -10,7 +10,7 @@ namespace Rocks.ToolTests;
 internal static partial class ModuleMetaTests
 {
     private const string Parent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
-        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
+        "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
 
     private const string Value = "#pragma once\n#include <Lower/Parent.h>\n#include <Object/ObjectRefs.h>\nnamespace probe {\n" +
         "ROCKS_CLASS()\nstruct Value : public Parent {\nROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n};\n}\n";
@@ -41,13 +41,13 @@ internal static partial class ModuleMetaTests
         "ROCKS_STRUCT()\nstruct Link {\nROCKS_PROPERTY() rocks::ObjectRef<Parent> target;\nROCKS_PROPERTY() Point at;\n};\n" +
         "ROCKS_STRUCT()\nstruct WorldBits {\nROCKS_NATIVE() Lease lease;\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
         "ROCKS_STRUCT()\nstruct Outer {\nROCKS_PROPERTY() WorldBits inner;\n};\n" +
-        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() Point origin;\n};\n}\n";
+        "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() Point origin;\n};\n}\n";
 
     // B4c: CoreTypeBindings로 생성하는 Lower다(Vec3·Vec3d Binds 미러와 Parent).
     private const string BindsParent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n#include <Core/Math/Vector3.h>\nnamespace probe {\n" +
         "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {\nROCKS_PROPERTY() float x = 0;\nROCKS_PROPERTY() float y = 0;\nROCKS_PROPERTY() float z = 0;\n};\n" +
         "ROCKS_STRUCT(Binds = \"rocks::Vec3d\")\nstruct Vec3dBinding {\nROCKS_PROPERTY() double x = 0;\nROCKS_PROPERTY() double y = 0;\nROCKS_PROPERTY() double z = 0;\n};\n" +
-        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
+        "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
 
     // Binds를 받는 유일한 모듈 이름이다(StructRules.BindingModule).
     private const string BindingsModule = "CoreTypeBindings";
@@ -57,7 +57,7 @@ internal static partial class ModuleMetaTests
         "ROCKS_STRUCT()\nstruct Chain1 {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
         string.Concat(Enumerable.Range(2, 15).Select(level => $"ROCKS_STRUCT()\nstruct Chain{level} {{\nROCKS_PROPERTY() Chain{level - 1} inner;\n}};\n")) +
         "ROCKS_STRUCT()\nstruct Top {\nROCKS_PROPERTY() rocks::uint16 x = 0;\n};\n" +
-        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
+        "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
 
     // Upper의 다른 헤더 struct다(import struct를 멤버로 담는다).
     private const string Shape = "#pragma once\n#include <Lower/Parent.h>\nnamespace probe {\n" +
@@ -76,7 +76,7 @@ internal static partial class ModuleMetaTests
         "#include <Object/StructRefArray.h>\nnamespace probe {\n" +
         "ROCKS_STRUCT()\nstruct Group {\nexplicit Group(rocks::Allocator& allocator) noexcept : slots(allocator), plains(allocator) {}\n" +
         "ROCKS_PROPERTY() rocks::StructRefArray<SA> slots;\nROCKS_PROPERTY() rocks::Array<Plain> plains;\n};\n" +
-        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+        "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\n" +
         "explicit Parent(rocks::Allocator& allocator) noexcept : slots(allocator), modes(allocator), plains(allocator), links(allocator) {}\n" +
         "ROCKS_PROPERTY() rocks::StructRefArray<SA> slots;\nROCKS_PROPERTY() rocks::Array<EA> modes;\nROCKS_PROPERTY(MaxElements = 7) rocks::Array<Plain> plains;\n" +
         "ROCKS_PROPERTY() rocks::ObjectRefArray<Parent> links;\n};\n}\n";
@@ -132,6 +132,9 @@ internal static partial class ModuleMetaTests
     // Lower(Parent)와 Upper(Value·Leaf public, Detail private) 두 모듈의 원본·명세·생성 루트다.
     private sealed class Layout : IDisposable
     {
+        // 시험 모듈 API 매크로의 값이다(없으면 빈 값 — Monolithic). Modular 메타 단계처럼 실제 export 철자로 펼칠 때 채운다(BS8d3).
+        public Dictionary<string, string> ApiValues { get; } = new(StringComparer.Ordinal);
+
         private readonly TemporaryDirectory temporary = new();
         private readonly Options options;
         private readonly IReadOnlyDictionary<string, string?> environment;
@@ -224,10 +227,23 @@ internal static partial class ModuleMetaTests
                 dependencies.SelectMany(dependency => new[] { Source($"{dependency}/Public"), Generated(dependency, "Public") }).ToList());
         }
 
-        // module은 생성할 모듈 이름이다(원본·명세는 Lower 것을 쓴다). extra는 그대로 덧붙인다.
+        // module은 생성할 모듈 이름이다(원본·명세는 Lower 것을 쓴다). extra는 그대로 덧붙인다. 원본의 모듈 API 매크로(ROCKS_<M>_API)는 생성할
+        // 모듈의 것으로 바꿔 쓴다(BS8d3 — 매크로는 그 클래스 모듈의 것이어야 한다). retargetApiMacro가 false면 그대로 둔다(RMC2007 시험).
         public Task<ProcessResult> RunLowerAsync(bool privateParent = false, IReadOnlyList<(string Header, string Include)>? extraInputs = null,
-            string? descriptor = null, string module = "Lower", IReadOnlyList<string>? extra = null)
+            string? descriptor = null, string module = "Lower", IReadOnlyList<string>? extra = null, bool retargetApiMacro = true)
         {
+            string ownMacro = "ROCKS_" + module.ToUpperInvariant() + "_API";
+            foreach (string header in retargetApiMacro ? Directory.EnumerateFiles(Source("Lower/Public"), "*.h", SearchOption.AllDirectories) : [])
+            {
+                string text = File.ReadAllText(header);
+                string retargeted = System.Text.RegularExpressions.Regex.Replace(text, @"\bROCKS_[A-Z0-9]+_API\b", ownMacro,
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
+                if (retargeted != text)
+                {
+                    File.WriteAllText(header, retargeted);
+                }
+            }
+
             List<string> arguments = ["--module", module, "--input", Source("Lower/Public/Lower/Parent.h"), "--include", "Lower/Parent.h"];
             foreach ((string header, string include) in extraInputs ?? [])
             {
@@ -348,6 +364,17 @@ internal static partial class ModuleMetaTests
             foreach (string argument in options.ClangArguments)
             {
                 arguments.Add("--clang-arg=" + argument);
+            }
+
+            // 시험 모듈 헤더가 쓰는 모듈 API 매크로(ROCKS_LOWER_API 등 — BS8d3 상속 export)는 빌드가 정의 헤더로 넣지 않으므로 빈 값으로
+            // 정의한다(Monolithic과 같다).
+            foreach (string macro in Directory.EnumerateFiles(temporary.Root, "*.h", SearchOption.AllDirectories)
+                .SelectMany(file => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file), @"\bROCKS_[A-Z0-9]+_API\b",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10)).Select(match => match.Value))
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
+                .Where(macro => !options.ClangArguments.Any(argument => argument.StartsWith("-D" + macro + "=", StringComparison.Ordinal))))
+            {
+                arguments.Add("--clang-arg=-D" + macro + "=" + ApiValues.GetValueOrDefault(macro, ""));
             }
 
             return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: MetaTests.ProbeTimeout));

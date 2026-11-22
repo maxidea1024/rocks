@@ -9,6 +9,9 @@ namespace Rocks.MetaCompiler;
 // schema 1만 받는다. 쓰기는 결정적이다(타입 이름 순, 필드는 생성 순서, 고정 서식, LF).
 internal static class ModuleDescriptor
 {
+    // descriptor 형식 판이다. 2: 클래스 flags에 Exported(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3). 다른 판은 다시 만들어야 한다.
+    private const int DescriptorSchema = 2;
+
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
     private static readonly string[] TypeKeys =
@@ -37,7 +40,7 @@ internal static class ModuleDescriptor
         using (Utf8JsonWriter json = new(stream, new JsonWriterOptions { Indented = true, NewLine = "\n", Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             json.WriteStartObject();
-            json.WriteNumber("schema", 1);
+            json.WriteNumber("schema", DescriptorSchema);
             json.WriteString("module", module);
             json.WriteStartArray("types");
             foreach (ClassModel type in types.OrderBy(type => type.Name, StringComparer.Ordinal))
@@ -78,6 +81,12 @@ internal static class ModuleDescriptor
                 if (type.Deprecated)
                 {
                     json.WriteStringValue("Deprecated");
+                }
+
+                // 클래스 전체 export(BS8d3) — 다른 모듈의 파생 클래스가 이 클래스를 상속할 수 있다.
+                if (type.Exported)
+                {
+                    json.WriteStringValue("Exported");
                 }
 
                 json.WriteEndArray();
@@ -315,7 +324,7 @@ internal static class ModuleDescriptor
         using JsonDocument document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 16, AllowDuplicateProperties = false });
         JsonElement root = document.RootElement;
         RequireKeys(root, ["schema", "module", "types"], Invalid);
-        if (!root.GetProperty("schema").TryGetInt32(out int schema) || schema != 1)
+        if (!root.GetProperty("schema").TryGetInt32(out int schema) || schema != DescriptorSchema)
         {
             throw Invalid("unsupported schema");
         }
@@ -381,7 +390,7 @@ internal static class ModuleDescriptor
             // struct는 선언 플래그 Atomic과 생성 형질, 클래스는 Abstract·WorldOnly만 받는다(struct 전용 Atomic이 클래스에
             // 있거나 클래스 플래그가 struct에 있으면 모르는 플래그다).
             bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray"
-                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated";
+                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "Exported";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -426,6 +435,7 @@ internal static class ModuleDescriptor
                 WorldOnly = flags.Contains("WorldOnly"),
                 Transient = flags.Contains("Transient"),
                 Deprecated = flags.Contains("Deprecated"),
+                Exported = flags.Contains("Exported"),
                 Header = header,
                 Private = isPrivate,
                 Imported = true,

@@ -30,7 +30,8 @@ enum class FileFault : uint8 {
     Read,     // 읽기 실패
     Short,    // 크기를 실제보다 1 크게 알림(읽는 중 파일이 줄어든 경우)
     HugeSize, // 크기를 UnrealExchangeMaxJsonBytes + 1로 알림(내용 없이 상한 시험)
-    ReadLate  // 첫 읽기는 성공하고 그다음 읽기부터 실패(조각 경계 뒤의 읽기 실패)
+    ReadLate, // 첫 읽기는 성공하고 그다음 읽기부터 실패(조각 경계 뒤의 읽기 실패)
+    Stat      // 정보 조회(Stat) 실패
 };
 
 inline constexpr platform::FileStatus FaultStatus{platform::FileCode::SystemError, 0};
@@ -121,6 +122,20 @@ public:
         return static_cast<bool>(found->TryAppend(bytes));
     }
 
+    // path 항목의 종류·link 여부를 바꾼다(일반 파일이 아닌 항목 시험 — 10.4절 19번). 없으면
+    // false다.
+    bool SetKind(StringView path, platform::FileType type, bool isLink) noexcept {
+        for (Entry& entry : entries_) {
+            if (entry.path.View() == path) {
+                entry.type = type;
+                entry.isLink = isLink;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     bool PutText(StringView path, StringView text) noexcept {
         return Put(
             path, Span<const uint8>(reinterpret_cast<const uint8*>(text.Data()), text.ByteCount()));
@@ -200,6 +215,25 @@ public:
         return {platform::FileCode::Busy, 0};
     }
 
+    platform::FileStatus Stat(const char* path, usize pathBytes,
+                              platform::FileInfo& info) noexcept override {
+        const StringView name(path, pathBytes);
+        if (!faultPath.View().IsEmpty() && name == faultPath.View() && fault == FileFault::Stat) {
+            return FaultStatus;
+        }
+
+        for (const Entry& entry : entries_) {
+            if (entry.path.View() == name) {
+                info.type = entry.type;
+                info.isLink = entry.isLink;
+                info.size = entry.type == platform::FileType::File ? entry.bytes.Size() : 0;
+                return {};
+            }
+        }
+
+        return {platform::FileCode::NotFound, 0};
+    }
+
     platform::FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept override {
         exists = Find(StringView(path, pathBytes)) != nullptr;
         return {};
@@ -228,6 +262,8 @@ private:
 
         String path;
         Array<uint8> bytes;
+        platform::FileType type = platform::FileType::File;
+        bool isLink = false;
     };
 
     Allocator* allocator_;

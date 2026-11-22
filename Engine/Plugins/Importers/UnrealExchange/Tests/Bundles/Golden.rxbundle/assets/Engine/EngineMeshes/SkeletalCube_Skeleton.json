@@ -1,0 +1,107 @@
+{
+  "objectPath": "/Engine/EngineMeshes/SkeletalCube_Skeleton.SkeletalCube_Skeleton",
+  "class": "Skeleton",
+  "ueClass": "/Script/Engine.Skeleton",
+  "dependencies": [
+    {
+      "objectPath": "/Engine/EngineMeshes/SkeletalCube.SkeletalCube",
+      "class": "SkeletalMesh",
+      "kind": "soft"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "BoneTree": [
+      {
+        "TranslationRetargetingMode": "Animation"
+      },
+      {
+        "TranslationRetargetingMode": "Animation"
+      }
+    ],
+    "PreviewForwardAxis": "Y",
+    "VirtualBoneGuid": {
+      "A": 0,
+      "B": 0,
+      "C": 0,
+      "D": 0
+    },
+    "VirtualBones": [],
+    "CompatibleSkeletons": [],
+    "bUseRetargetModesFromCompatibleSkeleton": false,
+    "Sockets": [],
+    "BlendProfiles": [],
+    "SlotGroups": [],
+    "PreviewSkeletalMesh": {
+      "objectPath": "/Engine/EngineMeshes/SkeletalCube.SkeletalCube"
+    },
+    "AdditionalPreviewSkeletalMeshes": null,
+    "AnimationNotifies": [],
+    "PreviewAttachedAssetContainer": {
+      "AttachedObjects": []
+    },
+    "AssetUserData": [
+      {
+        "subobject": "AnimCurveMetaData_0",
+        "class": "/Script/Engine.AnimCurveMetaData",
+        "properties": {
+          "CurveMetaData": []
+        }
+      }
+    ],
+    "AssetUserDataEditorOnly": []
+  },
+  "data": {
+    "bones": [
+      {
+        "name": "Bone01",
+        "exportName": "Bone01",
+        "parent": -1,
+        "pose": {
+          "translation": [
+            0,
+            -6.2554472712861298e-09,
+            0
+          ],
+          "rotation": [
+            0.49950793385505676,
+            0.50049149990081787,
+            0.50049155950546265,
+            -0.49950790405273438
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "retargetMode": "Animation"
+      },
+      {
+        "name": "Bone02",
+        "exportName": "Bone02",
+        "parent": 0,
+        "pose": {
+          "translation": [
+            14.325963973999023,
+            4.2526094148342963e-06,
+            1.8836911408470769e-07
+          ],
+          "rotation": [
+            -4.7364848918731036e-16,
+            2.5257924849130667e-18,
+            -5.7783403062394711e-11,
+            -0.99999994039535522
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "retargetMode": "Animation"
+      }
+    ],
+    "curves": []
+  }
+}

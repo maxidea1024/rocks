@@ -48,6 +48,11 @@ struct BlobCheckFailure {
 
 // directory 아래 relative를 `/`로 이어 out 뒤에 붙인다(directory가 비었거나 `/`·`\`로 끝나면
 // 구분자를 더하지 않는다). out은 새 builder여야 한다(실패하면 일부만 붙어 있을 수 있다).
+// path(묶음 안 파일의 전체 경로)가 link가 아닌 일반 파일인지 본다(10.4절 19번 — 장치·FIFO는
+// 열기·읽기가 막힐 수 있고 link는 묶음 밖을 가리킬 수 있다). 아니면 false, Stat 실패는 그 상태다.
+platform::FileStatus CheckRegularFile(platform::FileSystem& files, const char* path,
+                                      usize pathBytes, bool& regular) noexcept;
+
 Result<void> AppendBundlePath(StringView directory, StringView relative,
                               StringBuilderBase& out) noexcept;
 

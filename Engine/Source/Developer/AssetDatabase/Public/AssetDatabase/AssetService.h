@@ -3,6 +3,7 @@
 #include <AssetDatabase/AssetDatabaseLock.h>
 #include <AssetDatabase/AssetAliasTable.h>
 #include <AssetDatabase/AssetClock.h>
+#include <AssetDatabase/AssetImporter.h>
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetDatabase/AssetTextResolver.h>
 #include <AssetDatabase/EditorPackageSet.h>
@@ -48,6 +49,39 @@ struct AssetServiceConfig {
     AssetClock* clock = nullptr;
     uint32 aliasDays = AssetAliasDefaultDays;
     AssetAliasSearchLimits aliasSearch{};
+    // 임포터 표다(7.1절 18 A2f — null이면 임포트는 UnsupportedSourceFormat / Unsupported). 표는
+    // 서비스보다 오래 살아야 한다.
+    AssetImporterTable* importers = nullptr;
+};
+
+// 임포트 원본 입력이다: 역할(원본 하나면 DefaultImportSourceRole)과 절대 OS 경로.
+struct AssetImportSourceInput {
+    StringView role{};
+    StringView path{};
+};
+
+// 임포트 출력 하나다(주 출력 말고 — 임포터가 Output을 부른 순서).
+struct AssetImportOutput {
+    explicit AssetImportOutput(Allocator& allocator) noexcept : key(allocator), path(allocator) {
+    }
+
+    AssetImportOutput(AssetImportOutput&&) noexcept = default;
+    AssetImportOutput& operator=(AssetImportOutput&&) noexcept = default;
+
+    String key;
+    String path;
+    AssetId id{};
+};
+
+// asset-import 결과다(7.1절 18 A2f1b): 주 출력 id·경로와 다른 출력들.
+struct AssetImportResult {
+    explicit AssetImportResult(Allocator& allocator) noexcept
+        : path(allocator), outputs(allocator) {
+    }
+
+    AssetId id{};
+    String path;
+    Array<AssetImportOutput> outputs;
 };
 
 // asset-info 출력 선택이다(13절).
@@ -233,6 +267,60 @@ public:
                               AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
                               AssetDiagnostic* failure = nullptr) noexcept;
 
+    // asset-import <path> <source>… [--importer=<이름>] [설정…](7.1절 18 A2f1b): sources를 읽어
+    // 임포터(importer 이름 — 비면 첫 원본 확장자의 기본, 원본이 여럿이면 모든 원본 확장자의 기본이
+    // 같아야 한다)로 출력을 만들고 ImportRecord와 함께 저장한다. assignments는 첫 이름이 옵션
+    // struct 필드면 옵션(ImportRecord options), 아니면 주 출력의 설정(임포트 뒤 대입)이다. 저장은
+    // 다른 출력(참조 기록·ImportOwner) 먼저, 주 출력(소유 기록) 마지막이다. 저장 전 실패면 아무것도
+    // 쓰지 않고, 중간 저장 실패면 이번에 쓴 출력 파일을 지운다(못 지우면 경고 OrphanNotDeleted).
+    // 경고: ImportWarning(AbsoluteSourcePath·임포터 경고)·NotDurable·OrphanNotDeleted. 만든
+    // 패키지는 성공하면 열린 채, 실패하면 닫는다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님·원본 없음 InvalidArgument, 경로 규칙 InvalidPath,
+    // 별칭·점유 DuplicatePath / AlreadyExists, 임포터 없음(이름·확장자·표 없음)·원본 확장자의
+    // 기본이 다름 UnsupportedSourceFormat / NotFound·Unsupported, 역할이 임포터 roles와 다름·옵션
+    // 대입 오류 InvalidImportOption / InvalidArgument, 원본 루트 표·원본 위치(상대 경로 등)·읽기
+    // 오류 InvalidSource / 그 오류, 원본 없음 MissingSource / NotFound, 원본 합 상한 InvalidSource
+    // / CapacityExceeded, 옵션도 설정도 아닌 이름 UnknownProperty / InvalidArgument(detail = 대입
+    // 번호), 임포터 실패(Fail로 남긴 진단 또는 None), 주 출력을 만들지 않음 InvalidArgument, 설정
+    // 대입 오류 InvalidArgument(진단 None — diagnostics), 기록 쓰기·저장의 오류, 할당 실패.
+    //
+    // 사용 예:
+    //   const AssetImportSourceInput sources[] = {{DefaultImportSourceRole, "C:/Art/Rock.png"}};
+    //   AssetImportResult result(allocator);
+    //   auto imported = service.Import(lock, "/Game/Rock", sources, {}, assignments, diagnostics,
+    //                                  result, &warnings, &failure);
+    Result<void> Import(const AssetDatabaseLock& lock, StringView path,
+                        Span<const AssetImportSourceInput> sources, StringView importer,
+                        Span<const reflection_text::TextAssignment> assignments,
+                        reflection_text::TextDiagnostics& diagnostics, AssetImportResult& result,
+                        Array<EditorWarning>* warnings = nullptr,
+                        AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설정…](7.1절 18 A2f2a):
+    // path(지금 이름 — 별칭으로 풀지 않는다)의 소유 기록대로 원본을 다시 읽어 기록의 임포터로
+    // 출력을 제자리 갱신한다. overrides는 원본 바꾸기다(역할이 빈 하나 = `--source=` — 기록 원본이
+    // 하나일 때만, 아니면 기록에 있는 역할). 옵션은 기록 Record에 명시 대입만 더한다. 기록 출력은
+    // AssetId로 찾는다(이동해도 따라간다 — 색인에 없으면 그 key는 새 출력). 임포터가 청하지 않은
+    // 기존 출력은 경고 OrphanedOutput. 저장·되돌리기·경고는 Import와 같다(이미 저장한 기존 출력은
+    // 실패해도 새 내용으로 남는다 — 같은 재임포트를 다시 하면 수렴한다).
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath, 없음
+    // NotFound(진단 None), 같은 경로 키 둘 DuplicatePath, 같은 id 둘 DuplicateAssetId(주 출력·출력
+    // — asset), 읽기 전용 NewerVersion / Unsupported, 기록 없음·참조 기록(related = owner)·출력의
+    // 기록이 이 owner의 참조 기록이 아님(asset·related) InvalidArgument, 주 출력·출력이 열려 있음
+    // Busy(asset), 임포터 없음 UnsupportedSourceFormat / Unsupported, 기록 임포터 버전이 더 새
+    // NewerVersion / Unsupported, 기록 역할이 임포터 roles와 다름·모르는 바꾸기 역할·`--source=`의
+    // 원본 수·옵션 기록 형식 InvalidImportOption, 모르는 원본 루트 MissingSource(detail = 원본
+    // 번호), Import의 원본·대입·임포터·출력(타입이 다른 기존 출력 TypeMismatch / InvalidArgument)·
+    // 저장 오류, 할당 실패.
+    Result<void> Reimport(const AssetDatabaseLock& lock, StringView path,
+                          Span<const AssetImportSourceInput> overrides,
+                          Span<const reflection_text::TextAssignment> assignments,
+                          reflection_text::TextDiagnostics& diagnostics, AssetImportResult& result,
+                          Array<EditorWarning>* warnings = nullptr,
+                          AssetDiagnostic* failure = nullptr) noexcept;
+
     // asset-fix-duplicate-id <path>: 같은 id 파일 둘 이상 가운데 path의 파일을 새 id로 다시 쓴다
     // (7.1절 17 A2e4b — EditorPackageSet::FixDuplicateId). 경로는 지금 이름이다(별칭으로 풀지
     // 않는다). 고아가 생기면 경고 OrphanedOutput.
@@ -295,6 +383,11 @@ private:
     // 둔다.
     Result<ObjectHandle> OpenTarget(StringView target, AssetId& id, Array<EditorWarning>* warnings,
                                     AssetDiagnostic* failure) noexcept;
+    // 새 임포트·재임포트가 같이 쓰는 실행이다(AssetServiceImport.cpp — 원본 읽기·옵션·임포터·설정·
+    // 저장·되돌리기).
+    struct ImportRun;
+    Result<void> RunImport(ImportRun& run) noexcept;
+
     // 타입 도구 이름의 클래스 lease다(에셋 클래스만이면 requireAsset).
     Result<TypeLease> FindClass(StringView name, bool requireAsset,
                                 AssetDiagnostic* failure) noexcept;
@@ -314,6 +407,7 @@ private:
     AssetClock* clock_;
     uint32 aliasDays_;
     AssetAliasSearchLimits aliasSearch_;
+    AssetImporterTable* importers_;
     bool initialized_ = false;
 };
 

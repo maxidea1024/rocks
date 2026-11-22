@@ -276,6 +276,20 @@ internal static class ModularManifestTests
             }
         }
 
+        // export 수 진단(BS8d3): Windows Modular 빌드는 모듈별 export 수 한 줄을 남기고, 문턱 이상인 모듈을 따로 알린다.
+        if (request.Toolchain.Platform == NativePlatform.Windows)
+        {
+            string? exports = built.Notices.SingleOrDefault(notice => notice.StartsWith("Modular exports: ", StringComparison.Ordinal));
+            Check(exports is not null && exports.Contains("Core ", StringComparison.Ordinal) && exports.Contains("Launch ", StringComparison.Ordinal),
+                "a Windows Modular build reports the export count of each shared library: " + string.Join(" | ", built.Notices));
+            int coreExports = ModularExports.CountPeExports(Shared("Core"));
+            Check(coreExports > 0 && exports!.Contains("Core " + coreExports, StringComparison.Ordinal), "the Core export count matches its PE export table");
+            IReadOnlyList<string> warned = ModularExports.Diagnose(new Dictionary<string, int> { ["Core"] = coreExports, ["Lib"] = 1 }, coreExports);
+            Check(warned.Count == 2 && warned[1].StartsWith("Module Core exports " + coreExports, StringComparison.Ordinal),
+                "a module at the warning threshold gets its own line: " + string.Join(" | ", warned));
+            Check(ModularExports.Diagnose(new Dictionary<string, int>()).Count == 0, "no shared libraries, no diagnostic");
+        }
+
         pass("modular manifest: build information in the Core shared library, an exported entry point per shared library, no module table TU, " +
             "a launcher executable importing only Launch and a host shared library");
 

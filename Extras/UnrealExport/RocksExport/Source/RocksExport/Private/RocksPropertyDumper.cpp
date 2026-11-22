@@ -3,13 +3,25 @@
 #include "RocksJsonWriter.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPtr.h"
+#include "UObject/AnsiStrProperty.h"
+#include "UObject/PropertyOptional.h"
 #include "UObject/TextProperty.h"
+#include "UObject/Utf8StrProperty.h"
 #include "UObject/UnrealType.h"
 
 namespace RocksPropertyDumperPrivate
 {
 	// 기본 제외 구조체다(머티리얼 입력 핀 — 8.1절 inputs로 옮기므로 properties에서 뺀다).
 	static const TCHAR* const ExpressionInputStruct = TEXT("/Script/Engine.ExpressionInput");
+
+	// 교환 형식이 뜻을 정한 키다(3.3절 blob 참조, 11.5절 객체 참조). 같은 이름의 프로퍼티는 EscapePrefix를 붙여 쓴다.
+	static const TCHAR* const ReservedKeys[] = {
+		TEXT("blob"),
+		TEXT("objectPath"),
+		TEXT("subobject"),
+	};
+
+	static const TCHAR* const EscapePrefix = TEXT("@");
 
 	// 참조로 모으지 않는 패키지 접두다(네이티브 클래스·CDO, 메모리 패키지).
 	static const TCHAR* const NonAssetPrefixes[] = {
@@ -130,7 +142,17 @@ void FRocksPropertyDumper::DumpProperty(const FProperty* Property, const void* C
 		return;
 	}
 
-	Writer.Key(Property->GetName());
+	FString Key = Property->GetName();
+	for (const TCHAR* Reserved : RocksPropertyDumperPrivate::ReservedKeys)
+	{
+		if (Key.Equals(Reserved, ESearchCase::CaseSensitive))
+		{
+			Key = RocksPropertyDumperPrivate::EscapePrefix + Key;
+			break;
+		}
+	}
+
+	Writer.Key(Key);
 	if (Property->ArrayDim == 1)
 	{
 		DumpValue(Property, Property->ContainerPtrToValuePtr<void>(ContainerData), Writer);
@@ -166,7 +188,7 @@ void FRocksPropertyDumper::AddReference(const FSoftObjectPath& Path, bool bHard)
 	bStoredHard = bStoredHard || bHard;
 }
 
-void FRocksPropertyDumper::DumpObjectReference(const UObject* Object, FRocksJsonWriter& Writer)
+void FRocksPropertyDumper::DumpObjectReference(const UObject* Object, FRocksJsonWriter& Writer, bool bHard)
 {
 	if (Object == nullptr)
 	{
@@ -201,7 +223,7 @@ void FRocksPropertyDumper::DumpObjectReference(const UObject* Object, FRocksJson
 	Writer.EndObject();
 	if (Object->GetOutermost() != GetTransientPackage())
 	{
-		AddReference(FSoftObjectPath(Object), true);
+		AddReference(FSoftObjectPath(Object), bHard);
 	}
 }
 
@@ -284,6 +306,32 @@ void FRocksPropertyDumper::DumpValue(const FProperty* Property, const void* Valu
 		return;
 	}
 
+	if (const FUtf8StrProperty* Utf8Property = CastField<FUtf8StrProperty>(Property))
+	{
+		const FUtf8String& Text = Utf8Property->GetPropertyValue(Value);
+		Writer.String(FString(Text.Len(), *Text));
+		return;
+	}
+
+	if (const FAnsiStrProperty* AnsiProperty = CastField<FAnsiStrProperty>(Property))
+	{
+		const FAnsiString& Text = AnsiProperty->GetPropertyValue(Value);
+		Writer.String(FString(Text.Len(), *Text));
+		return;
+	}
+
+	if (const FOptionalProperty* OptionalProperty = CastField<FOptionalProperty>(Property))
+	{
+		if (!OptionalProperty->IsSet(Value))
+		{
+			Writer.Null();
+			return;
+		}
+
+		DumpValue(OptionalProperty->GetValueProperty(), OptionalProperty->GetValuePointerForRead(Value), Writer);
+		return;
+	}
+
 	if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
 	{
 		Writer.String(NameProperty->GetPropertyValue(Value).ToString());
@@ -307,7 +355,9 @@ void FRocksPropertyDumper::DumpValue(const FProperty* Property, const void* Valu
 
 	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 	{
-		DumpObjectReference(ObjectProperty->GetObjectPropertyValue(Value), Writer);
+		// weak·lazy 참조는 UE가 대상을 함께 로드하지 않으므로 Soft다.
+		const bool bWeak = Property->IsA<FWeakObjectProperty>() || Property->IsA<FLazyObjectProperty>();
+		DumpObjectReference(ObjectProperty->GetObjectPropertyValue(Value), Writer, !bWeak);
 		return;
 	}
 

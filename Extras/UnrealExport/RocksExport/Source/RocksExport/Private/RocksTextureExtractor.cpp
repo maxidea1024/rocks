@@ -112,6 +112,28 @@ namespace RocksTextureExtractorPrivate
 			return true;
 		}
 
+		// 모든 mip이 있고 크기가 그 mip 정보와 맞는지 쓰기 전에 본다. 어긋나면 이 에셋만 실패다(4.5절 9번).
+		for (int32 BlockIndex = 0; BlockIndex < Source.GetNumBlocks(); ++BlockIndex)
+		{
+			FTextureSourceBlock Block;
+			Source.GetBlock(BlockIndex, Block);
+			for (int32 Mip = 0; Mip < Block.NumMips; ++Mip)
+			{
+				for (int32 Layer = 0; Layer < NumLayers; ++Layer)
+				{
+					FImageInfo Info;
+					const FSharedBuffer Pixels = Mips.GetMipDataWithInfo(BlockIndex, Layer, Mip, Info);
+					if (Pixels.IsNull() || int64(Pixels.GetSize()) != Info.GetImageSizeBytes())
+					{
+						Body.Diagnostics.Add({TEXT("SourceReadFailed"), RocksExport::SeverityError,
+							FString::Printf(TEXT("mip %d of block %d layer %d is missing from the decompressed source or has the wrong size"), Mip, BlockIndex, Layer)});
+						Writer.Null();
+						return true;
+					}
+				}
+			}
+		}
+
 		const ETextureSourceCompressionFormat Compression = Source.GetSourceCompression();
 		Writer.BeginObject();
 		Writer.Key(TEXT("format"));
@@ -178,13 +200,8 @@ namespace RocksTextureExtractorPrivate
 				for (int32 Layer = 0; Layer < NumLayers; ++Layer)
 				{
 					FImageInfo Info;
+					// 위에서 확인했다.
 					const FSharedBuffer Pixels = Mips.GetMipDataWithInfo(BlockIndex, Layer, Mip, Info);
-					if (Pixels.IsNull() || int64(Pixels.GetSize()) != Info.GetImageSizeBytes())
-					{
-						OutError = FString::Printf(TEXT("%s: mip %d of block %d layer %d is missing from the decompressed source"), *Texture.GetPathName(), Mip, BlockIndex, Layer);
-						return false;
-					}
-
 					if (Layer == 0)
 					{
 						Writer.Key(TEXT("sizeX"));

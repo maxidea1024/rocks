@@ -77,7 +77,7 @@ AssetImporterTable::AssetImporterTable(Allocator& allocator, TypeRegistry& types
     : types_(&types), importers_(allocator) {
 }
 
-Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info) noexcept {
+Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& entry) noexcept {
     auto invalid = []() noexcept { return Result<void>::Failure(ErrorCode::InvalidArgument); };
     if (info.id == Guid{} || !IsToken(info.name, MaxImporterNameBytes, true, false) ||
         info.extensions.Size() > MaxImporterExtensions || info.roles.Size() > MaxImportSources ||
@@ -116,6 +116,7 @@ Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info) noexcep
     }
 
     if (info.optionsType == TypeId{}) {
+        entry.output = rocks::Move(output.Value());
         return Result<void>::Success();
     }
 
@@ -140,18 +141,22 @@ Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info) noexcep
         }
     }
 
+    entry.output = rocks::Move(output.Value());
+    entry.options = rocks::Move(options.Value());
     return Result<void>::Success();
 }
 
 Result<AssetImporterRegistration> AssetImporterTable::Register(AssetImporter& importer) noexcept {
     using Out = Result<AssetImporterRegistration>;
     const AssetImporterInfo& info = importer.Info();
-    if (auto valid = Validate(info); !valid) {
+    Entry entry;
+    entry.importer = &importer;
+    if (auto valid = Validate(info, entry); !valid) {
         return Out::Failure(valid.Error());
     }
 
-    for (AssetImporter* other : importers_) {
-        const AssetImporterInfo& existing = other->Info();
+    for (const Entry& other : importers_) {
+        const AssetImporterInfo& existing = other.importer->Info();
         if (existing.id == info.id || EqualsIgnoringAsciiCase(existing.name, info.name)) {
             return Out::Failure(ErrorCode::AlreadyExists);
         }
@@ -165,7 +170,7 @@ Result<AssetImporterRegistration> AssetImporterTable::Register(AssetImporter& im
         }
     }
 
-    if (auto pushed = importers_.TryPushBack(&importer); !pushed) {
+    if (auto pushed = importers_.TryPushBack(rocks::Move(entry)); !pushed) {
         return Out::Failure(pushed.Error());
     }
 
@@ -176,9 +181,9 @@ Result<AssetImporterRegistration> AssetImporterTable::Register(AssetImporter& im
 }
 
 AssetImporter* AssetImporterTable::FindById(Guid id) const noexcept {
-    for (AssetImporter* importer : importers_) {
-        if (importer->Info().id == id) {
-            return importer;
+    for (const Entry& entry : importers_) {
+        if (entry.importer->Info().id == id) {
+            return entry.importer;
         }
     }
 
@@ -186,9 +191,9 @@ AssetImporter* AssetImporterTable::FindById(Guid id) const noexcept {
 }
 
 AssetImporter* AssetImporterTable::FindByName(StringView name) const noexcept {
-    for (AssetImporter* importer : importers_) {
-        if (EqualsIgnoringAsciiCase(importer->Info().name, name)) {
-            return importer;
+    for (const Entry& entry : importers_) {
+        if (EqualsIgnoringAsciiCase(entry.importer->Info().name, name)) {
+            return entry.importer;
         }
     }
 
@@ -196,10 +201,10 @@ AssetImporter* AssetImporterTable::FindByName(StringView name) const noexcept {
 }
 
 AssetImporter* AssetImporterTable::FindByExtension(StringView extension) const noexcept {
-    for (AssetImporter* importer : importers_) {
-        for (StringView own : importer->Info().extensions) {
+    for (const Entry& entry : importers_) {
+        for (StringView own : entry.importer->Info().extensions) {
             if (EqualsIgnoringAsciiCase(own, extension)) {
-                return importer;
+                return entry.importer;
             }
         }
     }
@@ -207,10 +212,31 @@ AssetImporter* AssetImporterTable::FindByExtension(StringView extension) const n
     return nullptr;
 }
 
+const AssetImporterTable::Entry*
+AssetImporterTable::EntryOf(const AssetImporter& importer) const noexcept {
+    for (const Entry& entry : importers_) {
+        if (entry.importer == &importer) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+const TypeLease* AssetImporterTable::OutputType(const AssetImporter& importer) const noexcept {
+    const Entry* entry = EntryOf(importer);
+    return entry != nullptr ? &entry->output : nullptr;
+}
+
+const TypeLease* AssetImporterTable::OptionsType(const AssetImporter& importer) const noexcept {
+    const Entry* entry = EntryOf(importer);
+    return entry != nullptr && entry->options.IsValid() ? &entry->options : nullptr;
+}
+
 void AssetImporterTable::Remove(AssetImporter* importer) noexcept {
     // 토큰이 가리키는 임포터는 반드시 표에 있다(등록만 토큰을 만들고 해제는 한 번이다).
     usize index = 0;
-    while (importers_[index] != importer) {
+    while (importers_[index].importer != importer) {
         ++index;
     }
 

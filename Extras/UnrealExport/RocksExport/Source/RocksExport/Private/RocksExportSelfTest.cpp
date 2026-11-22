@@ -13,6 +13,7 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "MeshDescription.h"
 #include "SkeletalMeshAttributes.h"
+#include "StaticMeshAttributes.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -368,6 +369,9 @@ void RocksExportSelfTest::RunPropertyDump(TArray<FString>& Errors)
 	Value.Weights.Add(TEXT("Beta"), 3);
 	Value.Reference = Cube;
 	Value.SoftReference = TSoftObjectPtr<UObject>(FSoftObjectPath(SpherePath));
+	Value.WeakReference = LoadObject<UObject>(nullptr, SpherePath);
+	Value.Maybe = 0.25f;
+	Value.Utf8Text = FUtf8String(TEXT("u8"));
 
 	FRocksPropertyDumper Dumper(nullptr);
 	FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
@@ -380,7 +384,8 @@ void RocksExportSelfTest::RunPropertyDump(TArray<FString>& Errors)
 		TEXT("\"Weights\":[{\"key\":\"Beta\",\"value\":3},{\"key\":\"alpha\",\"value\":2},{\"key\":\"zeta\",\"value\":1}],")
 		TEXT("\"Offset\":{\"X\":1,\"Y\":2.5,\"Z\":-3},\"Inner\":{\"Value\":4},")
 		TEXT("\"Reference\":{\"objectPath\":\"/Engine/BasicShapes/Cube.Cube\"},")
-		TEXT("\"SoftReference\":{\"objectPath\":\"/Engine/BasicShapes/Sphere.Sphere\"},\"Fixed\":[5,6]}");
+		TEXT("\"SoftReference\":{\"objectPath\":\"/Engine/BasicShapes/Sphere.Sphere\"},\"Fixed\":[5,6],")
+		TEXT("\"@blob\":1,\"WeakReference\":{\"objectPath\":\"/Engine/BasicShapes/Sphere.Sphere\"},\"Maybe\":0.25,\"Nothing\":null,\"Utf8Text\":\"u8\"}");
 	Expect(Errors, Dumped == Expected, FString::Printf(TEXT("property dump:\n%s\nexpected:\n%s"), *Dumped, *Expected));
 
 	const TArray<FRocksPropertyDumper::FReference> References = Dumper.GetReferences();
@@ -476,6 +481,17 @@ void RocksExportSelfTest::RunBundleWriter(TArray<FString>& Errors)
 	}
 
 	Expect(Errors, Files.FileExists(*(Foreign / TEXT("keep.txt"))), TEXT("non-bundle directory was modified"));
+
+	// 묶음 모양이 아닌 옛 staging 디렉터리는 지우지 않고 거부한다(11.7절 25번).
+	const FString Staging = Output + TEXT(".staging");
+	FFileHelper::SaveStringToFile(TEXT("keep"), *(Staging / TEXT("notes.txt")));
+	{
+		FRocksBundleWriter Bundle;
+		FString Failure;
+		Expect(Errors, !Bundle.Begin(Output, Failure), TEXT("foreign staging directory removed"));
+	}
+
+	Expect(Errors, Files.FileExists(*(Staging / TEXT("notes.txt"))), TEXT("foreign staging directory was modified"));
 	Files.DeleteDirectory(*Root, false, true);
 }
 
@@ -1127,6 +1143,161 @@ void RocksExportSelfTest::RunMaterialExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunMeshWriterEdgeCases(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	const auto HasCode = [](const TArray<FRocksExportDiagnostic>& Diagnostics, const TCHAR* Code)
+	{
+		return Diagnostics.ContainsByPredicate([Code](const FRocksExportDiagnostic& Item) { return Item.Code == Code; });
+	};
+
+	const auto FindAttribute = [](const FRocksMeshSourceRecord& Record, ERocksMeshElement Element, const TCHAR* Name)
+	{
+		return Record.Attributes.FindByPredicate([Element, Name](const FRocksMeshAttribute& Item) { return Item.Element == Element && Item.Name == Name; });
+	};
+
+	const auto ReadU32 = [](const TArray64<uint8>& Bytes, int64 Offset)
+	{
+		uint32 Value = 0;
+		FMemory::Memcpy(&Value, Bytes.GetData() + Offset, sizeof(Value));
+		return Value;
+	};
+
+	// 1. 퇴화 다각형: 둘레 0-1-1-2(정점 1이 이웃)와 삼각형 0-2-3. UE는 자기 변 (1, 1)을 만든다.
+	{
+		FMeshDescription Mesh;
+		FStaticMeshAttributes Attributes(Mesh);
+		Attributes.Register();
+		TArray<FVertexID> Vertices;
+		for (const FVector3f& Position : {FVector3f(0, 0, 0), FVector3f(1, 0, 0), FVector3f(1, 1, 0), FVector3f(0, 1, 0)})
+		{
+			const FVertexID Vertex = Mesh.CreateVertex();
+			Attributes.GetVertexPositions()[Vertex] = Position;
+			Vertices.Add(Vertex);
+		}
+
+		const FPolygonGroupID Group = Mesh.CreatePolygonGroup();
+		TArray<FVertexInstanceID> Quad;
+		for (const int32 Index : {0, 1, 1, 2})
+		{
+			Quad.Add(Mesh.CreateVertexInstance(Vertices[Index]));
+		}
+
+		TArray<FVertexInstanceID> Triangle;
+		for (const int32 Index : {0, 2, 3})
+		{
+			Triangle.Add(Mesh.CreateVertexInstance(Vertices[Index]));
+		}
+
+		Mesh.CreatePolygon(Group, Quad);
+		Mesh.CreatePolygon(Group, Triangle);
+		const int32 UeEdges = Mesh.Edges().Num();
+		FRocksMeshSourceRecord Record;
+		TArray<FRocksExportDiagnostic> Diagnostics;
+		FString Problem;
+		const bool bWritten = FRocksMeshDescriptionWriter::FromMeshDescription(Mesh, Record, Diagnostics, Problem);
+		bool bNoSelfEdge = true;
+		for (uint32 Edge = 0; bWritten && Edge < Record.EdgeCount; ++Edge)
+		{
+			bNoSelfEdge = bNoSelfEdge && Record.EdgeVertices[Edge * 2] != Record.EdgeVertices[Edge * 2 + 1];
+		}
+
+		const FRocksMeshAttribute* Hard = bWritten ? FindAttribute(Record, ERocksMeshElement::Edge, TEXT("IsHard")) : nullptr;
+		TArray<uint32> Perimeter;
+		for (uint32 At = bWritten ? Record.PolygonStarts[0] : 0; bWritten && At < Record.PolygonStarts[1]; ++At)
+		{
+			Perimeter.Add(Record.PolygonCorners[At]);
+		}
+
+		TArray<uint32> Expected;
+		for (const FVertexInstanceID Corner : Quad)
+		{
+			Expected.Add(uint32(Corner.GetValue()));
+		}
+
+		Perimeter.Sort();
+		Expected.Sort();
+		Expect(Errors, bWritten && Record.EdgeCount == uint32(UeEdges - 1) && bNoSelfEdge && Hard != nullptr && Hard->Bytes.Num() == int64(Record.EdgeCount)
+			&& HasCode(Diagnostics, TEXT("DegenerateEdgesDropped")) && Perimeter == Expected,
+			FString::Printf(TEXT("degenerate polygon record (%s)"), *Problem));
+	}
+
+	// 2. 정점 영향 12개 초과: 본 0..13에 가중치 14..1(UE float 가중치는 0–1이라 1/100로 준다). 상위 12개(본 0..11)만
+	// 남고 합이 65535다.
+	{
+		static constexpr int32 SourceInfluences = 12;
+		static constexpr int32 GivenInfluences = 14;
+		static constexpr uint32 WeightTotal = 65535;
+		static constexpr float WeightScale = 0.01f;
+		FMeshDescription Mesh;
+		FSkeletalMeshAttributes Attributes(Mesh);
+		Attributes.Register();
+		const FVertexID Vertex = Mesh.CreateVertex();
+		TArray<UE::AnimationCore::FBoneWeight> Weights;
+		for (int32 Bone = 0; Bone < GivenInfluences; ++Bone)
+		{
+			Weights.Add(UE::AnimationCore::FBoneWeight(FBoneIndexType(Bone), float(GivenInfluences - Bone) * WeightScale));
+		}
+
+		UE::AnimationCore::FBoneWeightsSettings Settings;
+		Settings.SetMaxWeightCount(GivenInfluences);
+		Attributes.GetVertexSkinWeights().Set(Vertex, Weights, Settings);
+		FRocksMeshSourceRecord Record;
+		TArray<FRocksExportDiagnostic> Diagnostics;
+		FString Problem;
+		const bool bWritten = FRocksMeshDescriptionWriter::FromMeshDescription(Mesh, Record, Diagnostics, Problem);
+		const FRocksMeshAttribute* Skin = bWritten ? FindAttribute(Record, ERocksMeshElement::Vertex, TEXT("SkinWeights")) : nullptr;
+		const int64 Table = 2 * int64(sizeof(uint32));
+		bool bTrimmed = Skin != nullptr && Skin->Bytes.Num() == Table + SourceInfluences * 4 && ReadU32(Skin->Bytes, 0) == 0 && ReadU32(Skin->Bytes, 4) == SourceInfluences;
+		uint32 Sum = 0;
+		for (int32 Slot = 0; bTrimmed && Slot < SourceInfluences; ++Slot)
+		{
+			const uint8* Pair = Skin->Bytes.GetData() + Table + Slot * 4;
+			const uint16 Bone = uint16(Pair[0] | (Pair[1] << 8));
+			Sum += uint32(Pair[2] | (Pair[3] << 8));
+			bTrimmed = Bone == uint16(Slot);
+		}
+
+		Expect(Errors, bTrimmed && Sum == WeightTotal && HasCode(Diagnostics, TEXT("TooManyInfluences")), FString::Printf(TEXT("influence trimming (%s)"), *Problem));
+	}
+
+	// 3. 정점 0개 메시: 수는 모두 0이고 위치 속성은 빈 값이다.
+	{
+		FMeshDescription Mesh;
+		FStaticMeshAttributes(Mesh).Register();
+		FRocksMeshSourceRecord Record;
+		TArray<FRocksExportDiagnostic> Diagnostics;
+		FString Problem;
+		const bool bWritten = FRocksMeshDescriptionWriter::FromMeshDescription(Mesh, Record, Diagnostics, Problem);
+		const FRocksMeshAttribute* Position = bWritten ? FindAttribute(Record, ERocksMeshElement::Vertex, TEXT("Position")) : nullptr;
+		Expect(Errors, bWritten && Record.VertexCount == 0 && Record.CornerCount == 0 && Record.EdgeCount == 0 && Record.PolygonCount == 0 && Position != nullptr
+			&& Position->Bytes.IsEmpty(), FString::Printf(TEXT("empty mesh record (%s)"), *Problem));
+	}
+
+	// 4. 다채널 Name 속성: 다각형 묶음 2개에 채널 2개. 값은 채널 우선(채널 0의 묶음 0·1, 채널 1의 묶음 0·1)이다.
+	{
+		static constexpr int32 NameChannels = 2;
+		FMeshDescription Mesh;
+		FStaticMeshAttributes(Mesh).Register();
+		const FPolygonGroupID First = Mesh.CreatePolygonGroup();
+		const FPolygonGroupID Second = Mesh.CreatePolygonGroup();
+		Mesh.PolygonGroupAttributes().RegisterAttribute<FName>(TEXT("Tags"), NameChannels, NAME_None);
+		TPolygonGroupAttributesRef<FName> Tags = Mesh.PolygonGroupAttributes().GetAttributesRef<FName>(TEXT("Tags"));
+		Tags.Set(First, 0, TEXT("A"));
+		Tags.Set(Second, 0, TEXT("Bc"));
+		Tags.Set(First, 1, TEXT("D"));
+		FRocksMeshSourceRecord Record;
+		TArray<FRocksExportDiagnostic> Diagnostics;
+		FString Problem;
+		const bool bWritten = FRocksMeshDescriptionWriter::FromMeshDescription(Mesh, Record, Diagnostics, Problem);
+		const FRocksMeshAttribute* Attribute = bWritten ? FindAttribute(Record, ERocksMeshElement::PolygonGroup, TEXT("Tags")) : nullptr;
+		static const uint8 ExpectedBytes[] = {1, 0, 0, 0, 'A', 2, 0, 0, 0, 'B', 'c', 1, 0, 0, 0, 'D', 0, 0, 0, 0};
+		Expect(Errors, Attribute != nullptr && Attribute->Type == ERocksMeshValueType::Name && Attribute->Channels == NameChannels
+			&& Attribute->Bytes == TArray64<uint8>(ExpectedBytes, UE_ARRAY_COUNT(ExpectedBytes)), FString::Printf(TEXT("multi-channel name attribute (%s)"), *Problem));
+	}
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -1140,5 +1311,6 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunSkeletalExtraction(Errors);
 	RunAnimationExtraction(Errors);
 	RunMaterialExtraction(Errors);
+	RunMeshWriterEdgeCases(Errors);
 	return Errors.IsEmpty();
 }

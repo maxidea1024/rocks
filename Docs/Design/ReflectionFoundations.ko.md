@@ -53,7 +53,7 @@
 의존 모듈이 상속 필드를 펼치고 참조·값 형식을 해석하는 데 필요한 것을 모두 담는다(설계 5.6절의 "타입 ID·base·필드 ID/종류/플래그"만으로는 상속 필드 thunk를 만들 수 없다).
 
 ```json
-{ "schema": 1, "module": "ReflectionTestFixtures",
+{ "schema": 2, "module": "ReflectionTestFixtures",
   "types": [
     { "kind": "class", "name": "rocks::reflection_fixture::Base", "id": "<32 hex>", "version": 1,
       "flags": ["Abstract"], "base": "rocks::Object",
@@ -70,7 +70,7 @@
 - 클래스 `fields`는 상속 포함 전체(정렬 순서 그대로)이고 각 필드에 선언 owner를 적는다. 생성 thunk는 `&::<owner>::<name>`을 쓰며 private 기반 필드는 owner의 `ROCKS_GENERATED_BODY`(모든 `GeneratedType` 특수화에 friend)로 접근한다 — 모듈 경계와 무관하다.
 - struct의 `flags`는 선언 플래그 `Atomic`(리플렉션 B9b2 — [RX](ReflectionExtensions.ko.md) 1.8·3.1절, 쓰기 순서는 형질보다 앞)과 `ContainsStrongReference`·`RequiresWorldOnlyOwner`(생성 형질, 4.6절)·`ContainsReferenceArray`(B5, 5.6절), `binds`는 Binds 실제 타입의 Clang 정규 철자(없으면 빈 문자열)다.
 - 클래스·struct의 `toolName`은 실효 타입 도구 이름이다(리플렉션 B9d2 — 지정하지 않았으면 한정하지 않은 C++ 이름, [RX](ReflectionExtensions.ko.md) 5.2절). 읽기는 형식을 검사한다(RMC1000).
-- 읽기는 모르는 속성을 거부하고 schema 1만 받는다. 출력은 결정적이다(이름 순, 고정 서식, LF).
+- 읽기는 모르는 속성을 거부하고 현재 schema(2 — 클래스 flags의 `Exported`, [빌드 타깃](BuildTargets.ko.md) 3.8절 BS8d3)만 받는다. 출력은 결정적이다(이름 순, 고정 서식, LF).
 
 ### 1.5 import와 파서의 수집 범위
 

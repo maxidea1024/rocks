@@ -46,7 +46,7 @@ namespace rocks {
 // - World 장부 밖 객체(HasWorld()가 거짓 — 그래프 로드 등)의 계층 API(AttachTo·Detach)는
 //   InvalidArgument다. 상대 Transform 설정·월드 행렬 계산은 부모가 없으므로 된다.
 ROCKS_CLASS()
-class SceneComponent : public Component {
+class ROCKS_WORLD_API SceneComponent : public Component {
     ROCKS_GENERATED_BODY()
 
 public:

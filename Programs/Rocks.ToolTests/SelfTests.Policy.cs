@@ -1019,6 +1019,15 @@ internal static partial class SelfTests
                 ("Core/Source/Runtime/Probe/Private/Probe.cpp", 1), ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
             ];
             Verify.That(Check().SetEquals(expected), "module API macro misuse: " + string.Join(", ", Check()));
+            // 필수 클래스 export(BS8d3): 루트 클래스 선언부에 자기 모듈 매크로가 없으면 오류, 있으면 통과.
+            const string root = "Core/Source/Runtime/Probe/Public/Probe/Root.h";
+            temporary.Write(root, "#pragma once\nclass Root {};\n");
+            var missing = PolicyChecks.ModuleApiMacros(temporary.Root, [exported], [(root, "Root")]);
+            Verify.That(missing.Any(failure => failure.Path == root && failure.Message.Contains("class ROCKS_PROBE_API Root", StringComparison.Ordinal)),
+                "a required class export without the macro was accepted");
+            temporary.Write(root, "#pragma once\nclass ROCKS_PROBE_API Root {};\n");
+            Verify.That(!PolicyChecks.ModuleApiMacros(temporary.Root, [exported], [(root, "Root")]).Any(failure => failure.Path == root),
+                "an exported required class was rejected");
         });
         // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다. MSVC
         // 런타임 헤더 <vcruntime_new.h>는 Base/PlacementNew.h만 include한다.

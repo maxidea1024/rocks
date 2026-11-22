@@ -1,5 +1,7 @@
 #pragma once
 
+#include <AssetDatabase/AssetTextResolver.h>
+#include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ProjectLayout.h>
 #include <Core/Algorithms.h>
 #include <Core/Containers/Array.h>
@@ -9,6 +11,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/File.h>
+#include <ReflectionText/TextCodecOptions.h>
 
 // AssetDatabase 모듈 안에서 함께 쓰는 도우미다(Docs/Design/AssetSystem.ko.md 7.1절).
 namespace rocks::asset_database_detail {
@@ -280,6 +283,16 @@ inline usize LogicalComponents(StringView text) noexcept {
     }
 
     return count;
+}
+
+// 대입 codec 옵션이다(Edit 용도, 참조는 resolver, Name은 집합 Registry의 pool — asset-new·set·
+// import가 같이 쓴다).
+inline reflection_text::TextCodecOptions CodecOptions(EditorPackageSet& set,
+                                                      AssetTextResolver& resolver) noexcept {
+    reflection_text::TextCodecOptions options;
+    options.resolver = &resolver;
+    options.names = set.Registry().Names();
+    return options;
 }
 
 // path(절대 OS 경로)의 파일 전체를 bytes에 읽는다. 없으면 existed 거짓·빈 bytes로 성공한다. 크기가

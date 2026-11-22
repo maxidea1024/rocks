@@ -77,14 +77,23 @@ namespace RocksSkeletalMeshExtractorPrivate
 		}
 		else
 		{
+			// 원본이 있다는데 사본을 얻지 못하면 error다(5.4절 6번과 같은 규칙 — 6.3절 9번).
+			if (bHasSource)
+			{
+				Body.Diagnostics.Add({TEXT("MeshSourceUnavailable"), RocksExport::SeverityError,
+					FString::Printf(TEXT("LOD %d source: the mesh description could not be read"), Lod)});
+			}
+
 			Writer.Null();
 		}
 
-		// 원본이 없는 LOD는 UE가 만든 LOD다(SkeletalMesh.h GetMeshDescription이 nullptr — 6.2절).
+		// UE가 만든 LOD다: 원본이 없거나(SkeletalMesh.h GetMeshDescription이 nullptr) 원본에 축소를 적용한다
+		// (inline reduction — SkeletalMesh.cpp IsReductionActive). 그때 렌더 기준은 LOD 모델이므로 baked로 쓴다(6.3절 10번).
+		const bool bGenerated = !bHasSource || Mesh.IsReductionActive(Lod);
 		Writer.Key(TEXT("generated"));
-		Writer.Bool(!bHasSource);
+		Writer.Bool(bGenerated);
 		Writer.Key(TEXT("baked"));
-		if (bHasSource)
+		if (!bGenerated)
 		{
 			Writer.Null();
 		}

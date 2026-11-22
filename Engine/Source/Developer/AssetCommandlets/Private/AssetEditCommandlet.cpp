@@ -3,6 +3,9 @@
 
 #include <Core/Containers/Array.h>
 #include <ReflectionText/TextAssignments.h>
+#include <Core/FileError.h>
+#include <Core/Text/Path.h>
+#include <Platform/File.h>
 
 // asset-new·asset-set·asset-info 명령 구현이다(Docs/Design/AssetSystem.ko.md 13절, 7.1절 15
 // A2c3b). 대입 해석·저장·출력은 AssetService가 맡고 여기서는 인수·타입 등록·잠금·출력만 다룬다.
@@ -22,6 +25,8 @@ constexpr StringView DeleteName = "asset-delete";
 constexpr StringView OrphansDeleteName = "asset-orphans-delete";
 constexpr StringView DuplicateName = "asset-duplicate";
 constexpr StringView FixIdName = "asset-fix-duplicate-id";
+constexpr StringView ImportName = "asset-import";
+constexpr StringView ReimportName = "asset-reimport";
 
 constexpr StringView NewUsage =
     "usage: asset-new <Type> <path> [<property>=<value>...] [--unset=<paths>] [--erase=<paths>]\n"
@@ -69,6 +74,33 @@ constexpr StringView OrphansDeleteUsage =
     "  Delete an orphaned import output (see asset-orphans-list). Anything else is refused.\n"
     "  Packages that reference it block the delete (use asset-delete --force). Prints\n"
     "  'deleted <path> <AssetId>'. Takes the project write lock.\n";
+
+constexpr StringView ImportUsage =
+    "usage: asset-import <path> <source> [--importer=<name>] [--<setting>=<value>...]\n"
+    "       asset-import <path> --source.<role>=<file>... [--importer=<name>] "
+    "[--<setting>=<value>...]\n"
+    "       [--unset=<paths>] [--erase=<paths>] [--project=<dir>] [--wait=<seconds>]\n"
+    "  Import a source file into a new asset at <path>. The importer is the default one for the\n"
+    "  source file extension unless --importer names one. An importer with several sources takes\n"
+    "  one --source.<role>= per role. A setting whose first name is an import option field goes "
+    "to\n"
+    "  the import record (a reimport uses it again); any other setting is a property of the new\n"
+    "  asset. Additional outputs are saved at <path>_<key>. Prints '<path> <AssetId>' and one\n"
+    "  'output <key> <path> <AssetId>' line per additional output. Takes the project write lock.\n";
+
+constexpr StringView ReimportUsage =
+    "usage: asset-reimport <path> [--source=<file> | --source.<role>=<file>...] "
+    "[--<setting>=<value>...]\n"
+    "       [--unset=<paths>] [--erase=<paths>] [--project=<dir>] [--wait=<seconds>]\n"
+    "  Import the recorded source files of the asset at <path> again with its recorded importer "
+    "and\n"
+    "  options, updating the outputs in place (references to them stay valid). --source replaces\n"
+    "  the only source, --source.<role> one source of several. Settings change the recorded "
+    "import\n"
+    "  options or the asset properties as in asset-import. A recorded output the importer no "
+    "longer\n"
+    "  makes is reported as OrphanedOutput. Prints '<path> <AssetId>' and one\n"
+    "  'output <key> <path> <AssetId>' line per additional output. Takes the project write lock.\n";
 
 constexpr StringView FixIdUsage =
     "usage: asset-fix-duplicate-id <path> [--project=<dir>] [--wait=<seconds>]\n"
@@ -255,7 +287,7 @@ const char* WarningName(EditorWarningKind kind) noexcept {
     constexpr const char* Names[] = {
         "ExcludedDependency", "UnresolvedImport",    "DroppedUnresolvedImport", "NotDurable",
         "OrphanNotDeleted",   "AliasResolved",       "AliasTableUnreadable",    "AliasNotRestored",
-        "AliasRemoved",       "ImportRecordDropped", "OrphanedOutput"};
+        "AliasRemoved",       "ImportRecordDropped", "ImportWarning",           "OrphanedOutput"};
     static_assert(sizeof(Names) / sizeof(Names[0]) ==
                       static_cast<usize>(EditorWarningKind::OrphanedOutput) + 1,
                   "every editor warning needs a name");
@@ -396,7 +428,7 @@ Result<int32> RunAssetNewCommand(void* context, Span<const StringView> args,
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, NewName, parsed.project, parsed.wait, true, session,
                      failure)) {
@@ -467,7 +499,7 @@ Result<int32> RunAssetSetCommand(void* context, Span<const StringView> args,
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, SetName, parsed.project, parsed.wait, true, session,
                      failure)) {
@@ -503,7 +535,7 @@ Result<int32> RunAssetMoveCommand(void* context, Span<const StringView> args,
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, MoveName, parsed.project, parsed.wait, true, session,
                      failure)) {
@@ -555,7 +587,7 @@ Result<int32> RunDelete(void* context, Span<const StringView> args, CommandletOu
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, name, parsed.project, parsed.wait, true, session,
                      failure)) {
@@ -614,6 +646,269 @@ Result<int32> RunAssetOrphansDeleteCommand(void* context, Span<const StringView>
     return RunDelete(context, args, output, true);
 }
 
+// asset-import의 인자다.
+struct ImportArgs {
+    explicit ImportArgs(Allocator& allocator) noexcept
+        : positional(allocator), sources(allocator), assignments(allocator) {
+    }
+
+    StringView project;
+    StringView wait;
+    StringView importer;
+    bool help = false;
+    Array<StringView> positional;
+    Array<AssetImportSourceInput> sources;
+    Array<TextAssignment> assignments;
+};
+
+// `--<name>=<value>`의 name이 명령 예약 이름인지다(이 단계가 받지 않는 예약 이름은 사용법 오류 —
+// A5가 `--cube` 등을 받는다).
+bool IsReservedImportName(StringView name) noexcept {
+    for (StringView reserved : ImportReservedNames) {
+        if (EqualsIgnoringAsciiCase(name, reserved)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// asset-import·asset-reimport 인자를 읽는다(reimport면 위치 인자는 path 하나, `--source=`를 받고
+// `--importer=`를 받지 않는다). 사용법 위반은 false다.
+bool ParseImport(Span<const StringView> args, bool reimport, ImportArgs& out) noexcept {
+    if (args.Size() == 1 && args[0] == "--help") {
+        out.help = true;
+        return true;
+    }
+
+    constexpr StringView SourcePrefix = "--source.";
+    for (StringView argument : args) {
+        if (!argument.StartsWith("--", StringComparison::CaseSensitive)) {
+            if (argument.IsEmpty() || out.positional.Size() == (reimport ? 1u : 2u) ||
+                !out.positional.TryPushBack(argument)) {
+                return false;
+            }
+
+            continue;
+        }
+
+        // 원본 하나 바꾸기(재임포트 — 역할이 빈 원본으로 둔다).
+        constexpr StringView SingleSource = "--source=";
+        if (reimport && argument.StartsWith(SingleSource, StringComparison::CaseSensitive)) {
+            const StringView value = argument.SliceBytes(
+                SingleSource.ByteCount(), argument.ByteCount() - SingleSource.ByteCount());
+            if (value.IsEmpty() || !out.sources.IsEmpty() ||
+                !out.sources.TryPushBack(AssetImportSourceInput{{}, value})) {
+                return false;
+            }
+
+            continue;
+        }
+
+        StringView* const slots[] = {&out.project, &out.wait, &out.importer};
+        const StringView names[] = {"--project=", "--wait=", "--importer="};
+        bool matched = false;
+        for (usize index = 0; index < (reimport ? 2u : 3u) && !matched; ++index) {
+            if (argument.StartsWith(names[index], StringComparison::CaseSensitive)) {
+                const StringView value = argument.SliceBytes(
+                    names[index].ByteCount(), argument.ByteCount() - names[index].ByteCount());
+                if (!slots[index]->IsEmpty() || value.IsEmpty()) {
+                    return false;
+                }
+
+                *slots[index] = value;
+                matched = true;
+            }
+        }
+
+        if (matched) {
+            continue;
+        }
+
+        if (argument.StartsWith(SourcePrefix, StringComparison::CaseSensitive)) {
+            const StringView rest = argument.SliceBytes(
+                SourcePrefix.ByteCount(), argument.ByteCount() - SourcePrefix.ByteCount());
+            usize equals = IndexNone;
+            for (usize index = 0; index < rest.ByteCount() && equals == IndexNone; ++index) {
+                equals = rest.Data()[index] == '=' ? index : IndexNone;
+            }
+
+            if (equals == IndexNone || equals == 0 || equals + 1 == rest.ByteCount()) {
+                return false;
+            }
+
+            const AssetImportSourceInput source{
+                rest.SliceBytes(0, equals),
+                rest.SliceBytes(equals + 1, rest.ByteCount() - equals - 1)};
+            for (const AssetImportSourceInput& other : out.sources) {
+                if (other.role == source.role || other.role.IsEmpty()) {
+                    return false;
+                }
+            }
+
+            if (!out.sources.TryPushBack(source)) {
+                return false;
+            }
+
+            continue;
+        }
+
+        constexpr StringView Unset = "--unset=";
+        constexpr StringView Erase = "--erase=";
+        const bool unset = argument.StartsWith(Unset, StringComparison::CaseSensitive);
+        const bool erase = argument.StartsWith(Erase, StringComparison::CaseSensitive);
+        if (unset || erase) {
+            const usize prefix = unset ? Unset.ByteCount() : Erase.ByteCount();
+            if (!AppendPathList(argument.SliceBytes(prefix, argument.ByteCount() - prefix),
+                                unset ? AssignmentKind::Unset : AssignmentKind::Erase,
+                                out.assignments)) {
+                return false;
+            }
+
+            continue;
+        }
+
+        // `--<경로>=<값>` 설정(예약 이름은 받지 않는다).
+        TextAssignment assignment;
+        const StringView text = argument.SliceBytes(2, argument.ByteCount() - 2);
+        if (!MakeTextAssignment(text, static_cast<uint32>(out.assignments.Size()), assignment) ||
+            assignment.path.IsEmpty() || IsReservedImportName(assignment.path) ||
+            !out.assignments.TryPushBack(assignment)) {
+            return false;
+        }
+    }
+
+    // 재임포트: path 하나(원본 바꾸기는 선택).
+    if (reimport) {
+        return out.positional.Size() == 1;
+    }
+
+    // path는 하나, 원본은 위치 인자 하나 또는 --source.<역할>= 하나 이상(섞지 않는다).
+    if (out.positional.IsEmpty() || (out.positional.Size() == 2) == !out.sources.IsEmpty()) {
+        return false;
+    }
+
+    if (out.positional.Size() == 2) {
+        return static_cast<bool>(out.sources.TryPushBack(
+            AssetImportSourceInput{DefaultImportSourceRole, out.positional[1]}));
+    }
+
+    return true;
+}
+
+// asset-import·asset-reimport의 실행이다.
+Result<int32> RunImportCommand(void* context, Span<const StringView> args, CommandletOutput& output,
+                               bool reimport) noexcept {
+    const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
+    Allocator& allocator = *command.allocator;
+    const StringView name = reimport ? ReimportName : ImportName;
+    const StringView usage = reimport ? ReimportUsage : ImportUsage;
+    ImportArgs parsed(allocator);
+    const bool valid = ParseImport(args, reimport, parsed);
+    if (parsed.help) {
+        return Write(output, CommandletStream::Output, usage, 0);
+    }
+
+    if (!valid) {
+        return Write(output, CommandletStream::Error, usage, 2);
+    }
+
+    // 상대 원본 경로는 현재 작업 디렉터리 기준이다(ProjectLayout과 같다).
+    Array<String> absolute(allocator);
+    if (auto reserved = absolute.TryReserve(parsed.sources.Size()); !reserved) {
+        return Result<int32>::Failure(reserved.Error());
+    }
+
+    for (AssetImportSourceInput& source : parsed.sources) {
+        auto kind = Path::Root(source.path);
+        if (!kind || kind.Value() != PathRoot::Relative) {
+            continue;
+        }
+
+        Array<char> working(allocator);
+        if (auto sized = working.TryResize(MaxNativePathBytes() + 1); !sized) {
+            return Result<int32>::Failure(sized.Error());
+        }
+
+        usize bytes = 0;
+        if (auto got = platform::GetStandardDirectory(platform::StandardDirectory::Working,
+                                                      working.Data(), working.Size(), bytes);
+            !got) {
+            return Fail(output, allocator, name, 1, "{}: {}: cannot read the working directory",
+                        ErrorCodeName(FileErrorCode(got)), source.path);
+        }
+
+        auto made = Path::MakeAbsolute(allocator, StringView(working.Data(), bytes), source.path);
+        if (!made) {
+            if (made.Error() == ErrorCode::OutOfMemory) {
+                return Result<int32>::Failure(made.Error());
+            }
+
+            return Fail(output, allocator, name, 1, "InvalidSource: {}: {}", source.path,
+                        ErrorCodeName(made.Error()));
+        }
+
+        (void)absolute.TryPushBack(rocks::Move(made.Value()));
+        source.path = absolute[absolute.Size() - 1].View();
+    }
+
+    EditSession session(command);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!OpenSession(output, allocator, name, parsed.project, parsed.wait, true, session,
+                     failure)) {
+        return failure;
+    }
+
+    AssetDiagnostic diagnostic;
+    AssetImportResult result(allocator);
+    auto imported =
+        reimport
+            ? session.service->Reimport(session.lock, parsed.positional[0], parsed.sources.View(),
+                                        parsed.assignments.View(), session.diagnostics, result,
+                                        &session.warnings, &diagnostic)
+            : session.service->Import(session.lock, parsed.positional[0], parsed.sources.View(),
+                                      parsed.importer, parsed.assignments.View(),
+                                      session.diagnostics, result, &session.warnings, &diagnostic);
+    if (auto warned = WriteWarnings(output, allocator, name, session.warnings); !warned) {
+        return warned;
+    }
+
+    if (!imported) {
+        return WriteFailure(output, allocator, name, parsed.positional[0], session.diagnostics,
+                            diagnostic, imported.Error());
+    }
+
+    StringBuilder<LineBytes> line(allocator);
+    if (auto formatted = line.TryAppendFormat("{}: {} {}\n", name, result.path.View(), result.id);
+        !formatted) {
+        return Result<int32>::Failure(formatted.Error());
+    }
+
+    for (const AssetImportOutput& one : result.outputs) {
+        if (auto formatted = line.TryAppendFormat("{}: output {} {} {}\n", name, one.key.View(),
+                                                  one.path.View(), one.id);
+            !formatted) {
+            return Result<int32>::Failure(formatted.Error());
+        }
+    }
+
+    if (auto written = Write(output, CommandletStream::Output, line.View(), 0); !written) {
+        return written;
+    }
+
+    return FlushCache(output, allocator, name, session);
+}
+
+Result<int32> RunAssetImportCommand(void* context, Span<const StringView> args,
+                                    CommandletOutput& output) noexcept {
+    return RunImportCommand(context, args, output, false);
+}
+
+Result<int32> RunAssetReimportCommand(void* context, Span<const StringView> args,
+                                      CommandletOutput& output) noexcept {
+    return RunImportCommand(context, args, output, true);
+}
+
 Result<int32> RunAssetFixDuplicateIdCommand(void* context, Span<const StringView> args,
                                             CommandletOutput& output) noexcept {
     const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
@@ -626,7 +921,7 @@ Result<int32> RunAssetFixDuplicateIdCommand(void* context, Span<const StringView
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, FixIdName, parsed.project, parsed.wait, true, session,
                      failure)) {
@@ -685,7 +980,7 @@ Result<int32> RunAssetDuplicateCommand(void* context, Span<const StringView> arg
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, DuplicateName, parsed.project, parsed.wait, true, session,
                      failure)) {
@@ -732,7 +1027,7 @@ Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,
         return usage;
     }
 
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, InfoName, parsed.project, parsed.wait, false, session,
                      failure)) {

@@ -143,6 +143,16 @@ bool FRocksAnimSequenceExtractor::Extract(UAnimSequence& Sequence, FRocksBundleW
 	{
 		TArray<FTransform> Keys;
 		Model->GetBoneTrackTransforms(TrackName, Keys);
+
+		// 성분 blob의 count는 키 수 또는 1이다(7절). 키가 없거나 키 수가 데이터 모델 키 수와 다른 트랙은 그 규칙으로
+		// 담을 수 없으므로 빼고 알린다(7.1절 9번).
+		if (Keys.IsEmpty() || Keys.Num() != Model->GetNumberOfKeys())
+		{
+			OutBody.Diagnostics.Add({TEXT("BoneTrackKeyMismatch"), RocksExport::SeverityWarning,
+				FString::Printf(TEXT("bone track %s has %d keys, the clip has %d; the track is left out"), *TrackName.ToString(), Keys.Num(), Model->GetNumberOfKeys())});
+			continue;
+		}
+
 		TArray<float> Translation;
 		TArray<float> Rotation;
 		TArray<float> Scale;

@@ -10,7 +10,7 @@
 namespace rocks::reflection_fixture {
 
 ROCKS_CLASS()
-struct Base : Object {
+struct ROCKS_REFLECTIONTESTFIXTURES_API Base : Object {
     ROCKS_GENERATED_BODY()
 
     ROCKS_PROPERTY() Guid key {};

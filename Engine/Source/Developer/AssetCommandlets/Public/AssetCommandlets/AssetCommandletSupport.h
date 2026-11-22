@@ -61,10 +61,22 @@ bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView comm
 // NewerVersion).
 PackageReadOptions IndexReadOptions() noexcept;
 
-// 에셋 명령의 문맥이다(commandlet_host::Run이 건다): 작업 메모리와 Launch의 프로세스 모듈 로더.
+// 세션의 임포터 등록이다(7.1절 18 A2f1b — 타입 등록 뒤·서비스 만들기 전에 부른다): table(세션
+// TypeRegistry에 묶인 표)에 임포터를 등록하고 토큰을 tokens에 둔다(세션이 서비스 뒤에 해제한다).
+// 실패하면 그 오류로 명령이 실패한다. 제품은 실제 임포터를(A5 텍스처), 시험은 시험 임포터를 준다.
+struct AssetImporterSetup {
+    Result<void> (*registerImporters)(void* state, AssetImporterTable& table,
+                                      Array<AssetImporterRegistration>& tokens) noexcept = nullptr;
+    void* state = nullptr;
+};
+
+// 에셋 명령의 문맥이다(commandlet_host::Run이 건다): 작업 메모리와 Launch의 프로세스 모듈 로더,
+// 에셋 타입 모듈 이름(비면 AssetTypeModule — 시험은 fixture 모듈), 임포터 등록.
 struct AssetCommandContext {
     Allocator* allocator = nullptr;
     ModuleLoader* modules = nullptr;
+    StringView typeModule{};
+    AssetImporterSetup importers{};
 };
 
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3b, ModuleLoader
@@ -72,7 +84,8 @@ struct AssetCommandContext {
 // 타입 등록기를 붙인다. Name pool도 둔다. 소멸이 등록기를 떼고 Registry·pool을 닫는다.
 class AssetCommandTypes {
 public:
-    AssetCommandTypes(Allocator& allocator, ModuleLoader& modules) noexcept;
+    // module은 시작할 에셋 타입 모듈이다(비면 AssetTypeModule).
+    AssetCommandTypes(Allocator& allocator, ModuleLoader& modules, StringView module = {}) noexcept;
     ~AssetCommandTypes() noexcept;
     AssetCommandTypes(const AssetCommandTypes&) = delete;
     AssetCommandTypes& operator=(const AssetCommandTypes&) = delete;
@@ -89,8 +102,14 @@ public:
         return names_;
     }
 
+    // 시작하는 에셋 타입 모듈 이름이다(실패 줄이 쓴다).
+    StringView Module() const noexcept {
+        return module_;
+    }
+
 private:
     ModuleLoader* modules_;
+    StringView module_;
     TypeRegistry types_;
     ModuleTypeRegistrations registrations_;
     NamePool names_;
@@ -138,16 +157,23 @@ private:
 };
 
 struct EditSession {
-    EditSession(Allocator& allocator, ModuleLoader& modules) noexcept
-        : layout(allocator), scan(allocator), types(allocator, modules),
-          hooks(allocator, types.Types()), warnings(allocator), diagnostics(allocator) {
+    explicit EditSession(const AssetCommandContext& command) noexcept
+        : context(&command), layout(*command.allocator), scan(*command.allocator),
+          types(*command.allocator, *command.modules, command.typeModule),
+          hooks(*command.allocator, types.Types()), importers(*command.allocator, types.Types()),
+          importerTokens(*command.allocator), warnings(*command.allocator),
+          diagnostics(*command.allocator) {
     }
 
+    const AssetCommandContext* context;
     ProjectLayout layout;
     // 서비스(색인)보다 먼저 만들고 나중에 없앤다(서비스가 빌린다).
     ScanScheduler scan;
     AssetCommandTypes types;
     AssetTypeHookTable hooks;
+    // 임포터 표와 등록 토큰이다(토큰이 표보다, 서비스가 둘보다 먼저 사라진다).
+    AssetImporterTable importers;
+    Array<AssetImporterRegistration> importerTokens;
     UniquePtr<AssetService> service;
     AssetDatabaseLock lock;
     Array<EditorWarning> warnings;

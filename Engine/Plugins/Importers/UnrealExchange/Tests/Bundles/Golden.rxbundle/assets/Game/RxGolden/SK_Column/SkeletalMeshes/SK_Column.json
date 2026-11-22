@@ -1,0 +1,551 @@
+{
+  "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column",
+  "class": "SkeletalMesh",
+  "ueClass": "/Script/Engine.SkeletalMesh",
+  "dependencies": [
+    {
+      "objectPath": "/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+      "class": "Material",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_PhysicsAsset.SK_Column_PhysicsAsset",
+      "class": "PhysicsAsset",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.SK_Column_Skeleton",
+      "class": "Skeleton",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "SourceModels": [
+      {
+        "TriangleCount": 16,
+        "VertexCount": 12,
+        "Bounds": {
+          "Origin": {
+            "X": 0,
+            "Y": 0,
+            "Z": 100
+          },
+          "BoxExtent": {
+            "X": 10,
+            "Y": 10,
+            "Z": 100
+          },
+          "SphereRadius": 100.99504938362078
+        },
+        "CachedSkinWeightProfileNames": [],
+        "CachedMorphTargetNames": [
+          "Bulge"
+        ],
+        "CachedHasVertexColors": true,
+        "CachedVertexColorGuid": {
+          "A": -402652056,
+          "B": -402652056,
+          "C": -402652056,
+          "D": -402652056
+        },
+        "MeshDescriptionBulkData": {
+          "subobject": "SkeletalMeshDescriptionBulkData_0",
+          "class": "/Script/Engine.SkeletalMeshDescriptionBulkData",
+          "properties": {}
+        },
+        "ScreenSize": {
+          "Default": 1,
+          "PerPlatform": []
+        },
+        "LODHysteresis": 0.0199999996,
+        "LODMaterialMap": [],
+        "BuildSettings": {
+          "bRecomputeNormals": false,
+          "bRecomputeTangents": true,
+          "bUseMikkTSpace": true,
+          "bComputeWeightedNormals": false,
+          "bRemoveDegenerates": false,
+          "bUseHighPrecisionTangentBasis": false,
+          "bUseHighPrecisionSkinWeights": false,
+          "bUseFullPrecisionUVs": false,
+          "bUseBackwardsCompatibleF16TruncUVs": false,
+          "bOptimizeForInstancing": false,
+          "ThresholdPosition": 1.99999995e-05,
+          "ThresholdTangentNormal": 1.99999995e-05,
+          "ThresholdUV": 0.0009765625,
+          "MorphThresholdPosition": 0.0149999997,
+          "BoneInfluenceLimit": 0
+        },
+        "ReductionSettings": {
+          "TerminationCriterion": "SMTC_NumOfTriangles",
+          "NumOfTrianglesPercentage": 1,
+          "NumOfVertPercentage": 1,
+          "MaxNumOfTriangles": 4,
+          "MaxNumOfVerts": 6,
+          "MaxNumOfTrianglesPercentage": 4294967295,
+          "MaxNumOfVertsPercentage": 4294967295,
+          "MaxDeviationPercentage": 0,
+          "ReductionMethod": "SMOT_NumOfTriangles",
+          "SilhouetteImportance": "SMOI_Normal",
+          "TextureImportance": "SMOI_Normal",
+          "ShadingImportance": "SMOI_Normal",
+          "SkinningImportance": "SMOI_Normal",
+          "bRemapMorphTargets": false,
+          "bRecalcNormals": true,
+          "WeldingThreshold": 0.100000001,
+          "NormalsThreshold": 60,
+          "MaxBonesPerVertex": 4,
+          "bEnforceBoneBoundaries": false,
+          "bMergeCoincidentVertBones": true,
+          "VolumeImportance": 1,
+          "bLockEdges": false,
+          "bLockColorBounaries": false,
+          "bImproveTrianglesForCloth": true,
+          "BaseLOD": 0
+        },
+        "BonesToRemove": [],
+        "BonesToPrioritize": [],
+        "SectionsToPrioritize": [],
+        "WeightOfPrioritization": 1,
+        "BakePose": null,
+        "BakePoseOverride": null,
+        "SourceImportFilename": "",
+        "SkinCacheUsage": "Auto",
+        "MorphTargetPositionErrorTolerance": 20,
+        "ImportedMorphTargetSourceFilename": [],
+        "VertexAttributes": [],
+        "bHasBeenSimplified": false,
+        "bHasPerLODVertexColors": false,
+        "bAllowCPUAccess": false,
+        "bBuildHalfEdgeBuffers": false,
+        "bAllowMeshDeformer": true,
+        "bSupportUniformlyDistributedSampling": false,
+        "bImportWithBaseMesh": true
+      }
+    ],
+    "Skeleton": {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.SK_Column_Skeleton"
+    },
+    "PositiveBoundsExtension": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "NegativeBoundsExtension": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "SkelMirrorTable": [],
+    "NaniteSettings": {
+      "bEnabled": false,
+      "bExplicitTangents": false,
+      "bLerpUVs": true,
+      "bSeparable": false,
+      "bVoxelNDF": true,
+      "bVoxelOpacity": false,
+      "ShapePreservation": "None",
+      "PositionPrecision": -2147483648,
+      "NormalPrecision": -1,
+      "TangentPrecision": -1,
+      "BoneWeightPrecision": -1,
+      "TargetMinimumResidencyInKB": 0,
+      "KeepPercentTriangles": 1,
+      "TrimRelativeError": 0,
+      "GenerateFallback": "PlatformDefault",
+      "FallbackTarget": "Auto",
+      "FallbackPercentTriangles": 1,
+      "FallbackRelativeError": 1,
+      "MaxEdgeLengthFactor": 0,
+      "NumRays": 64,
+      "VoxelLevel": 0,
+      "RayBackUp": 0,
+      "DisplacementUVChannel": 0,
+      "DisplacementMaps": [],
+      "NaniteAssemblyData": {
+        "Parts": [],
+        "Nodes": []
+      }
+    },
+    "MinQualityLevelLOD": {
+      "Default": 0,
+      "PerQuality": []
+    },
+    "MinLod": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "DisableBelowMinLodStripping": {
+      "Default": false,
+      "PerPlatform": []
+    },
+    "bOverrideLODStreamingSettings": false,
+    "bSupportLODStreaming": {
+      "Default": false,
+      "PerPlatform": []
+    },
+    "MaxNumStreamedLODs": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "MaxNumOptionalLODs": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "LODSettings": null,
+    "DefaultAnimatingRig": null,
+    "SkelMirrorAxis": "None",
+    "SkelMirrorFlipAxis": "None",
+    "bHasVertexColors": true,
+    "bEnablePerPolyCollision": false,
+    "VertexColorGuid": {
+      "A": 2031267894,
+      "B": 2031267894,
+      "C": 2031267894,
+      "D": 2031267894
+    },
+    "PhysicsAsset": {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_PhysicsAsset.SK_Column_PhysicsAsset"
+    },
+    "ShadowPhysicsAsset": null,
+    "NodeMappingData": [],
+    "AssetImportData": {
+      "subobject": "InterchangeAssetImportData_0",
+      "class": "/Script/InterchangeEngine.InterchangeAssetImportData",
+      "properties": {
+        "SceneImportAsset": null,
+        "NodeUniqueID": "Factory_\\\\Scene\\SK_Column_scene_0\\SK_Column_node_2Factory_\\Scene\\SK_Column_scene_0\\SK_Column_joint_0",
+        "SourceData": {}
+      }
+    },
+    "ThumbnailInfo": null,
+    "bHasCustomDefaultEditorCamera": false,
+    "DefaultEditorCameraLocation": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "DefaultEditorCameraRotation": {
+      "Pitch": 0,
+      "Yaw": 0,
+      "Roll": 0
+    },
+    "DefaultEditorCameraLookAt": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "DefaultEditorCameraOrthoZoom": 0,
+    "PreviewAttachedAssetContainer": {
+      "AttachedObjects": []
+    },
+    "bSupportRayTracing": true,
+    "RayTracingMinLOD": 0,
+    "ClothLODBiasMode": "MappingsToSameLOD",
+    "MorphTargets": [
+      {
+        "subobject": "Bulge",
+        "class": "/Script/Engine.MorphTarget",
+        "properties": {
+          "BaseSkelMesh": {
+            "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column"
+          }
+        }
+      }
+    ],
+    "FloorOffset": 0,
+    "BoneDrawSize": 1,
+    "PostProcessAnimBlueprint": null,
+    "PostProcessAnimBPLODThreshold": -1,
+    "MeshClothingAssets": [],
+    "SamplingInfo": {
+      "Regions": [],
+      "BuiltData": {
+        "WholeMeshBuiltData": [
+          {}
+        ],
+        "RegionBuiltData": []
+      }
+    },
+    "AssetUserData": [],
+    "AssetUserDataEditorOnly": [],
+    "Sockets": [],
+    "SkinWeightProfiles": [],
+    "DefaultMeshDeformer": null,
+    "TargetMeshDeformers": null,
+    "OverlayMaterial": null,
+    "OverlayMaterialMaxDrawDistance": 0,
+    "ForwardAxis": "Y",
+    "NumCinematicMipLevels": 0,
+    "NoRefStreamingLODBias": {
+      "Default": -1,
+      "PerQuality": []
+    },
+    "NeverStream": false,
+    "bGlobalForceMipLevelsToBeResident": false
+  },
+  "data": {
+    "bones": [
+      {
+        "name": "Root",
+        "exportName": "Root",
+        "parent": -1,
+        "pose": {
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      {
+        "name": "Tip",
+        "exportName": "Tip",
+        "parent": 0,
+        "pose": {
+          "translation": [
+            0,
+            0,
+            100
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    ],
+    "lods": [
+      {
+        "hasSource": true,
+        "source": {
+          "counts": {
+            "vertices": 12,
+            "corners": 48,
+            "edges": 28,
+            "polygons": 16,
+            "triangles": 16,
+            "polygonGroups": 1
+          },
+          "topology": [
+            {
+              "blob": "291c2c6b53cc12f0d15d7a3361ea6dc7b2784a7745f8a866765e0e3df0f22950",
+              "bytes": 192,
+              "layout": "u32",
+              "components": 1,
+              "count": 48
+            },
+            {
+              "blob": "755bd1c87a886e885ac2b39b32d228e12453a682a92436b4e18b0562423cc0e1",
+              "bytes": 224,
+              "layout": "u32",
+              "components": 2,
+              "count": 28
+            },
+            {
+              "blob": "b9e30c742be6e04c7f503c71d9737c1cbdde2520b6dcab7f8d93dae0f5d7e4c1",
+              "bytes": 68,
+              "layout": "u32",
+              "components": 1,
+              "count": 17
+            },
+            {
+              "blob": "80fc1615f9fb52112da4a5b41f0221f733d159c4a413f5f31a6d87f9d2f62d56",
+              "bytes": 192,
+              "layout": "u32",
+              "components": 1,
+              "count": 48
+            },
+            {
+              "blob": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+              "bytes": 64,
+              "layout": "u32",
+              "components": 1,
+              "count": 16
+            },
+            {
+              "blob": "80fc1615f9fb52112da4a5b41f0221f733d159c4a413f5f31a6d87f9d2f62d56",
+              "bytes": 192,
+              "layout": "u32",
+              "components": 3,
+              "count": 16
+            },
+            {
+              "blob": "5d85718ec594b982c252d0279e5966ffca33a5eaf2a455038d3ab331fde70cea",
+              "bytes": 64,
+              "layout": "u32",
+              "components": 1,
+              "count": 16
+            }
+          ],
+          "attributes": [
+            {
+              "element": "Vertex",
+              "name": "Morph-Bulge",
+              "type": "SparseVec3",
+              "channels": 1,
+              "data": {
+                "blob": "8d9dbc881ea0b5640a7f27e12523c7fef76d1d0587667318a7a9e6da3bf2b910",
+                "bytes": 68,
+                "layout": "sparseVec3",
+                "components": 1,
+                "count": 12
+              }
+            },
+            {
+              "element": "Vertex",
+              "name": "Position",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "8705bed91e5f2dc0017f3afca7ec0775f3d3377a3b192885592573b94a64829e",
+                "bytes": 144,
+                "layout": "f32",
+                "components": 3,
+                "count": 12
+              }
+            },
+            {
+              "element": "Vertex",
+              "name": "SkinWeights",
+              "type": "BoneInfluences",
+              "channels": 1,
+              "data": {
+                "blob": "429d18764f96c9ddcfc1e48d2a59220cdd81ec7decc2e115b2b702375c24c32e",
+                "bytes": 116,
+                "layout": "boneInfluences",
+                "components": 1,
+                "count": 12
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "BinormalSign",
+              "type": "Float",
+              "channels": 1,
+              "data": {
+                "blob": "a0e0a99094ef1251987881c0c4684415a2b0596942a658fdd0cf27144ad8779f",
+                "bytes": 192,
+                "layout": "f32",
+                "components": 1,
+                "count": 48
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Color",
+              "type": "Vec4",
+              "channels": 1,
+              "data": {
+                "blob": "5ce183e97a10e7aeeeecc15c49c055053961896c1d5d514d6e4c59dfd0544310",
+                "bytes": 768,
+                "layout": "f32",
+                "components": 4,
+                "count": 48
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Normal",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "9c6e47a28c4ba4f4bc463870ef3e13ad72d7d22e39825984f042ec0c847e6d04",
+                "bytes": 576,
+                "layout": "f32",
+                "components": 3,
+                "count": 48
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Tangent",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "ae7872a119d1275934c59023ae31afeabac9175a6e9aa3eac9864aa2a7fe6245",
+                "bytes": 576,
+                "layout": "f32",
+                "components": 3,
+                "count": 48
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "TexCoord",
+              "type": "Vec2",
+              "channels": 1,
+              "data": {
+                "blob": "62861ae66fdc25f55d32e25839655c2aac33bd67e467bf316e1bd4afa2b6c3e2",
+                "bytes": 384,
+                "layout": "f32",
+                "components": 2,
+                "count": 48
+              }
+            },
+            {
+              "element": "Edge",
+              "name": "IsHard",
+              "type": "Bool",
+              "channels": 1,
+              "data": {
+                "blob": "3addfb141cd7c9c4c6543a82191a3707ac29c7a041217782e61d4d91c691aee8",
+                "bytes": 28,
+                "layout": "u8",
+                "components": 1,
+                "count": 28
+              }
+            },
+            {
+              "element": "Polygon",
+              "name": "PartName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "07b2e5c71edc4b99f31bc4c17d64f84f6a6a894b75387b9faf46419e0671708e",
+                "bytes": 208,
+                "layout": "names",
+                "components": 1,
+                "count": 16
+              }
+            },
+            {
+              "element": "PolygonGroup",
+              "name": "MaterialSlotName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "332860140f110cf4269facf2cf64a18af345fa3b07697e7d4d3d70691f2f1dcb",
+                "bytes": 6,
+                "layout": "names",
+                "components": 1,
+                "count": 1
+              }
+            }
+          ]
+        },
+        "generated": false,
+        "baked": null
+      }
+    ]
+  }
+}
