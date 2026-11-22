@@ -23,6 +23,11 @@ namespace RocksMeshDescriptionWriterPrivate
 	static constexpr uint32 EdgeWords = 2;
 	static constexpr uint32 TriangleWords = 3;
 
+	// 원본 정점당 영향 상한(Rocks MeshMaxSourceInfluences = UE MAX_TOTAL_INFLUENCES)과 가중치 합(Rocks
+	// BoneWeightTotal = UE 16비트 가중치 합 — MeshAnimationAssets 3.2절)이다.
+	static constexpr int32 MaxSourceInfluences = 12;
+	static constexpr uint32 BoneWeightTotal = 65535;
+
 	struct FMapping
 	{
 		ERocksMeshElement Element;
@@ -230,15 +235,16 @@ namespace RocksMeshDescriptionWriterPrivate
 		Out.Append(Text.GetData(), Text.Num());
 	}
 
+	// 채널 우선으로 값을 붙인다. Ids가 비어 있지 않으면 기록 요소 i = UE 요소 Ids[i]다(빼낸 요소가 있을 때 — 자기 변).
 	template <typename IDType, typename ValueType>
-	static void AppendChannels(const TAttributesSet<IDType>& Set, FName Name, int32 Count, int32 Channels, TArray64<uint8>& Out)
+	static void AppendChannels(const TAttributesSet<IDType>& Set, FName Name, int32 Count, TConstArrayView<int32> Ids, int32 Channels, TArray64<uint8>& Out)
 	{
 		const auto Values = Set.template GetAttributesRef<ValueType>(Name);
 		for (int32 Channel = 0; Channel < Channels; ++Channel)
 		{
 			for (int32 Index = 0; Index < Count; ++Index)
 			{
-				AppendValue(Out, Values.Get(IDType(Index), Channel));
+				AppendValue(Out, Values.Get(IDType(Ids.IsEmpty() ? Index : Ids[Index]), Channel));
 			}
 		}
 	}
@@ -256,9 +262,10 @@ namespace RocksMeshDescriptionWriterPrivate
 		return nullptr;
 	}
 
-	// 요소 하나의 속성 집합을 기록에 옮긴다(3.2절 대응·보존 규칙).
+	// 요소 하나의 속성 집합을 기록에 옮긴다(3.2절 대응·보존 규칙). Ids는 AppendChannels와 같다.
 	template <typename IDType>
-	static void CollectAttributes(const TAttributesSet<IDType>& Set, ERocksMeshElement Element, int32 Count, FRocksMeshSourceRecord& Record, TArray<FRocksExportDiagnostic>& Diagnostics)
+	static void CollectAttributes(const TAttributesSet<IDType>& Set, ERocksMeshElement Element, int32 Count, TConstArrayView<int32> Ids, FRocksMeshSourceRecord& Record,
+		TArray<FRocksExportDiagnostic>& Diagnostics)
 	{
 		TArray<FName> Names;
 		Set.GetAttributeNames(Names);
@@ -354,25 +361,25 @@ namespace RocksMeshDescriptionWriterPrivate
 			switch (Type)
 			{
 			case ERocksMeshValueType::Float:
-				AppendChannels<IDType, float>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, float>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			case ERocksMeshValueType::Vec2:
-				AppendChannels<IDType, FVector2f>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, FVector2f>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			case ERocksMeshValueType::Vec3:
-				AppendChannels<IDType, FVector3f>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, FVector3f>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			case ERocksMeshValueType::Vec4:
-				AppendChannels<IDType, FVector4f>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, FVector4f>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			case ERocksMeshValueType::UInt32:
-				AppendChannels<IDType, int32>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, int32>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			case ERocksMeshValueType::Bool:
-				AppendChannels<IDType, bool>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, bool>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			default:
-				AppendChannels<IDType, FName>(Set, UeName, Count, Channels, Attribute.Bytes);
+				AppendChannels<IDType, FName>(Set, UeName, Count, Ids, Channels, Attribute.Bytes);
 				break;
 			}
 		}
@@ -431,8 +438,45 @@ namespace RocksMeshDescriptionWriterPrivate
 		}
 	}
 
+	// 정점 하나의 영향을 원본 상한(12)으로 줄인다. MA1 값 정리(NormalizeBoneWeights)·MA5a 영향 줄이기와 같은 규칙이다:
+	// 가중치 내림차순(같으면 본 번호 오름차순)으로 상한까지 남기고, 남은 합으로 비례 배분(내림)해 합을 BoneWeightTotal로
+	// 맞추며 잔차는 가장 큰 영향(정렬 첫 칸)에 더한다. 줄였으면 true다. 남은 합이 0이면 줄이기만 한다(Rocks 검증이 판정).
+	static bool TrimInfluences(TArray<TPair<uint16, uint16>>& Influences)
+	{
+		if (Influences.Num() <= MaxSourceInfluences)
+		{
+			return false;
+		}
+
+		Influences.StableSort([](const TPair<uint16, uint16>& Left, const TPair<uint16, uint16>& Right)
+			{
+				return Left.Value != Right.Value ? Left.Value > Right.Value : Left.Key < Right.Key;
+			});
+		Influences.SetNum(MaxSourceInfluences);
+		uint64 Sum = 0;
+		for (const TPair<uint16, uint16>& Influence : Influences)
+		{
+			Sum += Influence.Value;
+		}
+
+		if (Sum == 0)
+		{
+			return true;
+		}
+
+		uint64 Assigned = 0;
+		for (TPair<uint16, uint16>& Influence : Influences)
+		{
+			Influence.Value = uint16(uint64(Influence.Value) * BoneWeightTotal / Sum);
+			Assigned += Influence.Value;
+		}
+
+		Influences[0].Value = uint16(Influences[0].Value + (BoneWeightTotal - Assigned));
+		return true;
+	}
+
 	// 스킨 메시 설명의 가중치·morph 속성을 Rocks 배치로 옮긴다(정적 메시 설명에는 없다).
-	static void CollectSkeletalAttributes(const FMeshDescription& Mesh, FRocksMeshSourceRecord& Record)
+	static void CollectSkeletalAttributes(const FMeshDescription& Mesh, FRocksMeshSourceRecord& Record, TArray<FRocksExportDiagnostic>& Diagnostics)
 	{
 		const FSkeletalMeshAttributesShared Attributes(Mesh);
 		TArray<FName> Names;
@@ -449,12 +493,22 @@ namespace RocksMeshDescriptionWriterPrivate
 			const FSkinWeightsVertexAttributesConstRef Weights = Attributes.GetVertexSkinWeightsFromAttributeName(Name);
 			TArray<TArray<TPair<uint16, uint16>>> PerVertex;
 			PerVertex.SetNum(int32(Record.VertexCount));
+			int32 Trimmed = 0;
 			for (int32 Vertex = 0; Vertex < int32(Record.VertexCount); ++Vertex)
 			{
 				for (const UE::AnimationCore::FBoneWeight Weight : Weights.Get(FVertexID(Vertex)))
 				{
 					PerVertex[Vertex].Add(TPair<uint16, uint16>(uint16(Weight.GetBoneIndex()), Weight.GetRawWeight()));
 				}
+
+				Trimmed += TrimInfluences(PerVertex[Vertex]) ? 1 : 0;
+			}
+
+			if (Trimmed > 0)
+			{
+				Diagnostics.Add({TEXT("TooManyInfluences"), RocksExport::SeverityWarning,
+					FString::Printf(TEXT("%s: %d vertices had more than %d influences; the strongest %d were kept and renormalized"), *Name.ToString(), Trimmed,
+						MaxSourceInfluences, MaxSourceInfluences)});
 			}
 
 			FRocksMeshAttribute& Attribute = Record.Attributes.AddDefaulted_GetRef();
@@ -526,6 +580,73 @@ namespace RocksMeshDescriptionWriterPrivate
 		return Attribute;
 	}
 
+	// 다각형의 삼각형 중 같은 정점을 두 번 쓰는 것이 있는가다(정점이 이웃한 퇴화 다각형 — 자기 변이 생긴다).
+	static bool IsDegeneratePolygon(const FMeshDescription& Mesh, FPolygonID Polygon)
+	{
+		for (const FTriangleID Triangle : Mesh.GetPolygonTriangles(Polygon))
+		{
+			const TArrayView<const FVertexInstanceID> Corners = Mesh.GetTriangleVertexInstances(Triangle);
+			const FVertexID A = Mesh.GetVertexInstanceVertex(Corners[0]);
+			const FVertexID B = Mesh.GetVertexInstanceVertex(Corners[1]);
+			const FVertexID C = Mesh.GetVertexInstanceVertex(Corners[2]);
+			if (A == B || B == C || A == C)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// 퇴화 다각형의 둘레 코너다. UE GetPolygonVertexInstances는 정점 변으로 둘레를 다시 잇다가 자기 변에서 assert하므로
+	// (MeshDescription.cpp — 둘레 변 재정렬), 코너(vertex instance) 변으로 잇는다: 삼각형의 방향 있는 코너 변 중 반대
+	// 방향이 없는 것이 둘레이고, 첫 삼각형의 둘레 변 시작 코너부터 따라간다. 둘레가 고리 하나가 아니면 false다(5.4절 9번).
+	static bool DegeneratePerimeter(const FMeshDescription& Mesh, FPolygonID Polygon, TArray<FVertexInstanceID>& OutCorners)
+	{
+		TArray<TPair<FVertexInstanceID, FVertexInstanceID>> Sides;
+		for (const FTriangleID Triangle : Mesh.GetPolygonTriangles(Polygon))
+		{
+			const TArrayView<const FVertexInstanceID> Corners = Mesh.GetTriangleVertexInstances(Triangle);
+			for (int32 Side = 0; Side < int32(TriangleWords); ++Side)
+			{
+				Sides.Add(TPair<FVertexInstanceID, FVertexInstanceID>(Corners[Side], Corners[(Side + 1) % int32(TriangleWords)]));
+			}
+		}
+
+		TMap<FVertexInstanceID, FVertexInstanceID> Next;
+		FVertexInstanceID Start = INDEX_NONE;
+		for (const TPair<FVertexInstanceID, FVertexInstanceID>& Side : Sides)
+		{
+			const bool bInner = Sides.ContainsByPredicate([&Side](const TPair<FVertexInstanceID, FVertexInstanceID>& Other)
+				{
+					return Other.Key == Side.Value && Other.Value == Side.Key;
+				});
+			if (bInner)
+			{
+				continue;
+			}
+
+			if (Next.Contains(Side.Key))
+			{
+				return false;
+			}
+
+			Next.Add(Side.Key, Side.Value);
+			Start = Start == INDEX_NONE ? Side.Key : Start;
+		}
+
+		OutCorners.Reset();
+		FVertexInstanceID Corner = Start;
+		while (Corner != INDEX_NONE && OutCorners.Num() < Next.Num())
+		{
+			OutCorners.Add(Corner);
+			const FVertexInstanceID* Following = Next.Find(Corner);
+			Corner = Following != nullptr ? *Following : FVertexInstanceID(INDEX_NONE);
+		}
+
+		return OutCorners.Num() == Next.Num() && OutCorners.Num() >= int32(TriangleWords) && Corner == Start;
+	}
+
 	static bool WriteWords(const TArray<uint32>& Words, uint32 Components, uint64 Count, FRocksBundleWriter& Bundle, FRocksJsonWriter& Writer, FString& OutError)
 	{
 		FRocksBlobRef Ref;
@@ -568,7 +689,6 @@ bool FRocksMeshDescriptionWriter::FromMeshDescription(const FMeshDescription& Me
 	FRocksMeshSourceRecord Record;
 	Record.VertexCount = uint32(Mesh.Vertices().Num());
 	Record.CornerCount = uint32(Mesh.VertexInstances().Num());
-	Record.EdgeCount = uint32(Mesh.Edges().Num());
 	Record.PolygonCount = uint32(Mesh.Polygons().Num());
 	Record.TriangleCount = uint32(Mesh.Triangles().Num());
 	Record.PolygonGroupCount = uint32(Mesh.PolygonGroups().Num());
@@ -578,20 +698,56 @@ bool FRocksMeshDescriptionWriter::FromMeshDescription(const FMeshDescription& Me
 		Record.CornerVertices.Add(uint32(Mesh.GetVertexInstanceVertex(FVertexInstanceID(int32(Corner))).GetValue()));
 	}
 
-	// 변은 작은 정점 번호를 먼저 쓴다(MeshAnimationAssets 3.1절).
-	for (uint32 Edge = 0; Edge < Record.EdgeCount; ++Edge)
+	// 변은 작은 정점 번호를 먼저 쓴다(MeshAnimationAssets 3.1절). 같은 정점을 잇는 자기 변은 뺀다: UE는 같은 정점이
+	// 이웃한 퇴화 다각형에도 변을 만들지만(MeshDescription.cpp CreatePolygon_Internal) Rocks 변 목록은 그것을 받지
+	// 않고(EdgeSameVertex) 둘레의 퇴화 변은 변 없이 허용한다(3.1절). 남은 변은 UE 순서대로 다시 번호를 매기고 변
+	// 속성도 같은 표(KeptEdges)로 옮긴다(5.4절 9번).
+	TArray<int32> KeptEdges;
+	for (int32 Edge = 0; Edge < Mesh.Edges().Num(); ++Edge)
 	{
-		const uint32 First = uint32(Mesh.GetEdgeVertex(FEdgeID(int32(Edge)), 0).GetValue());
-		const uint32 Second = uint32(Mesh.GetEdgeVertex(FEdgeID(int32(Edge)), 1).GetValue());
+		const uint32 First = uint32(Mesh.GetEdgeVertex(FEdgeID(Edge), 0).GetValue());
+		const uint32 Second = uint32(Mesh.GetEdgeVertex(FEdgeID(Edge), 1).GetValue());
+		if (First == Second)
+		{
+			continue;
+		}
+
+		KeptEdges.Add(Edge);
 		Record.EdgeVertices.Add(FMath::Min(First, Second));
 		Record.EdgeVertices.Add(FMath::Max(First, Second));
 	}
 
+	Record.EdgeCount = uint32(KeptEdges.Num());
+	const int32 DroppedEdges = Mesh.Edges().Num() - KeptEdges.Num();
+	if (DroppedEdges > 0)
+	{
+		OutDiagnostics.Add({TEXT("DegenerateEdgesDropped"), RocksExport::SeverityInfo,
+			FString::Printf(TEXT("%d edges join a vertex to itself (degenerate polygons) and were left out"), DroppedEdges)});
+	}
+	else
+	{
+		KeptEdges.Reset();
+	}
+
 	Record.PolygonStarts.Add(0);
+	TArray<FVertexInstanceID> Perimeter;
 	for (uint32 Polygon = 0; Polygon < Record.PolygonCount; ++Polygon)
 	{
 		const FPolygonID PolygonID(static_cast<int32>(Polygon));
-		for (const FVertexInstanceID Corner : Mesh.GetPolygonVertexInstances(PolygonID))
+		if (IsDegeneratePolygon(Mesh, PolygonID))
+		{
+			if (!DegeneratePerimeter(Mesh, PolygonID, Perimeter))
+			{
+				OutError = FString::Printf(TEXT("degenerate polygon %u has no single perimeter"), Polygon);
+				return false;
+			}
+		}
+		else
+		{
+			Perimeter = Mesh.GetPolygonVertexInstances(PolygonID);
+		}
+
+		for (const FVertexInstanceID Corner : Perimeter)
 		{
 			Record.PolygonCorners.Add(uint32(Corner.GetValue()));
 		}
@@ -611,13 +767,13 @@ bool FRocksMeshDescriptionWriter::FromMeshDescription(const FMeshDescription& Me
 		Record.TrianglePolygons.Add(uint32(Mesh.GetTrianglePolygon(TriangleID).GetValue()));
 	}
 
-	CollectAttributes(Mesh.VertexAttributes(), ERocksMeshElement::Vertex, int32(Record.VertexCount), Record, OutDiagnostics);
-	CollectAttributes(Mesh.VertexInstanceAttributes(), ERocksMeshElement::Corner, int32(Record.CornerCount), Record, OutDiagnostics);
-	CollectAttributes(Mesh.EdgeAttributes(), ERocksMeshElement::Edge, int32(Record.EdgeCount), Record, OutDiagnostics);
-	CollectAttributes(Mesh.PolygonAttributes(), ERocksMeshElement::Polygon, int32(Record.PolygonCount), Record, OutDiagnostics);
-	CollectAttributes(Mesh.TriangleAttributes(), ERocksMeshElement::Triangle, int32(Record.TriangleCount), Record, OutDiagnostics);
-	CollectAttributes(Mesh.PolygonGroupAttributes(), ERocksMeshElement::PolygonGroup, int32(Record.PolygonGroupCount), Record, OutDiagnostics);
-	CollectSkeletalAttributes(Mesh, Record);
+	CollectAttributes(Mesh.VertexAttributes(), ERocksMeshElement::Vertex, int32(Record.VertexCount), {}, Record, OutDiagnostics);
+	CollectAttributes(Mesh.VertexInstanceAttributes(), ERocksMeshElement::Corner, int32(Record.CornerCount), {}, Record, OutDiagnostics);
+	CollectAttributes(Mesh.EdgeAttributes(), ERocksMeshElement::Edge, int32(Record.EdgeCount), KeptEdges, Record, OutDiagnostics);
+	CollectAttributes(Mesh.PolygonAttributes(), ERocksMeshElement::Polygon, int32(Record.PolygonCount), {}, Record, OutDiagnostics);
+	CollectAttributes(Mesh.TriangleAttributes(), ERocksMeshElement::Triangle, int32(Record.TriangleCount), {}, Record, OutDiagnostics);
+	CollectAttributes(Mesh.PolygonGroupAttributes(), ERocksMeshElement::PolygonGroup, int32(Record.PolygonGroupCount), {}, Record, OutDiagnostics);
+	CollectSkeletalAttributes(Mesh, Record, OutDiagnostics);
 	SortAttributes(Record);
 	OutRecord = MoveTemp(Record);
 	return true;
@@ -727,12 +883,23 @@ bool FRocksMeshDescriptionWriter::FromSkeletalLodModel(const FSkeletalMeshLODMod
 
 		FRocksBakedMesh::FMorph& Morph = Baked.Morphs.AddDefaulted_GetRef();
 		Morph.Name = Target->GetFName();
+		int32 OutOfRange = 0;
 		for (const FMorphTargetDelta& Delta : Target->GetMorphLODModels()[Lod].Vertices)
 		{
 			if (Delta.SourceIdx < uint32(Vertices.Num()))
 			{
 				Morph.Deltas.Add(Delta.SourceIdx, TPair<FVector3f, FVector3f>(Delta.PositionDelta, Delta.TangentZDelta));
 			}
+			else
+			{
+				++OutOfRange;
+			}
+		}
+
+		if (OutOfRange > 0)
+		{
+			OutDiagnostics.Add({TEXT("MorphDeltaOutOfRange"), RocksExport::SeverityWarning,
+				FString::Printf(TEXT("morph target %s LOD %d has %d deltas for vertices past the LOD model and they were left out"), *Target->GetName(), Lod, OutOfRange)});
 		}
 	}
 

@@ -572,6 +572,82 @@ TEST(UnrealExchange_AssetDocumentDetails) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 일반 파일이 아닌 항목(10.4절 19번): bundle.json이면 묶음 수준 NotRegularFile, 에셋 JSON이면 그
+// 에셋만 실패한다. link도 일반 파일로 보지 않는다.
+TEST(UnrealExchange_NotRegularFiles) {
+    SystemAllocator allocator;
+    {
+        MemoryFiles files(allocator);
+        REQUIRE(LoadFixture(allocator, files));
+        StringBuilder<256> path(allocator);
+        REQUIRE(FixtureFile("bundle.json", path));
+        REQUIRE(files.SetKind(path.View(), platform::FileType::Other, false));
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::InvalidArgument);
+        CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
+                          ExchangeIssue::NotRegularFile) == 1);
+        CHECK(files.opens == 0);
+    }
+
+    {
+        MemoryFiles files(allocator);
+        REQUIRE(LoadFixture(allocator, files));
+        StringBuilder<256> path(allocator);
+        REQUIRE(FixtureFile("assets/Game/Meshes/SM_Rock.json", path));
+        REQUIRE(files.SetKind(path.View(), platform::FileType::File, true));
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        REQUIRE(ReadFixture(files, bundle, diagnostics));
+        CHECK(bundle.Assets()[RockMeshAsset].state == ExchangeAssetState::Failed);
+        CHECK(bundle.Assets()[CollisionMeshAsset].state == ExchangeAssetState::Ready);
+        const ExchangeDiagnostic* error = FindAssetDiagnostic(diagnostics, RockMeshAsset);
+        REQUIRE(error != nullptr);
+        CHECK(error->issue == ExchangeIssue::NotRegularFile &&
+              error->error == ErrorCode::InvalidArgument);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 묶음 JSON 합 상한(10.4절 18번): 상한이 bundle.json 크기와 같으면 bundle.json은 읽고 에셋 JSON은
+// 모두 LimitExceeded로 실패한다. 상한이 그보다 작으면 묶음 읽기가 실패한다.
+TEST(UnrealExchange_BundleJsonBudget) {
+    SystemAllocator allocator;
+    MemoryFiles files(allocator);
+    REQUIRE(LoadFixture(allocator, files));
+    StringBuilder<256> path(allocator);
+    REQUIRE(FixtureFile("bundle.json", path));
+    const Array<uint8>* manifest = files.Find(path.View());
+    REQUIRE(manifest != nullptr);
+    ExchangeReadOptions options;
+    options.maxBundleJsonBytes = manifest->Size();
+    {
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        REQUIRE(ReadExchangeBundle(files, FixtureDirectory, options, bundle, diagnostics));
+        usize limited = 0;
+        for (usize index = 0; index < bundle.Assets().Size(); ++index) {
+            const ExchangeAsset& asset = bundle.Assets()[index];
+            if (asset.exchangeClass != ExchangeClass::Unsupported) {
+                CHECK(asset.state == ExchangeAssetState::Failed);
+                ++limited;
+            }
+        }
+
+        CHECK(limited != 0 && CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
+                                          ExchangeIssue::LimitExceeded) == limited);
+    }
+
+    options.maxBundleJsonBytes = manifest->Size() - 1;
+    {
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        CHECK(ReadExchangeBundle(files, FixtureDirectory, options, bundle, diagnostics).Error() ==
+              ErrorCode::CapacityExceeded);
+    }
+}
+
 // 파일 실패 하나와 기대 결과다.
 struct FaultCase {
     StringView file;
@@ -586,6 +662,7 @@ TEST(UnrealExchange_FileFaults) {
     const ErrorCode system = FileErrorCode(FaultStatus);
     const ErrorCode endOfFile = FileErrorCode({platform::FileCode::EndOfFile, 0});
     const FaultCase manifestCases[] = {
+        {"bundle.json", FileFault::Stat, ExchangeIssue::ReadFailed, system},
         {"bundle.json", FileFault::Open, ExchangeIssue::ReadFailed, system},
         {"bundle.json", FileFault::Size, ExchangeIssue::ReadFailed, system},
         {"bundle.json", FileFault::Read, ExchangeIssue::ReadFailed, system},
@@ -623,8 +700,8 @@ TEST(UnrealExchange_FileFaults) {
                           ExchangeIssue::ReadFailed) == 1);
     }
 
-    const FileFault assetFaults[] = {FileFault::Open, FileFault::Size, FileFault::Read,
-                                     FileFault::Short, FileFault::HugeSize};
+    const FileFault assetFaults[] = {FileFault::Stat, FileFault::Open,  FileFault::Size,
+                                     FileFault::Read, FileFault::Short, FileFault::HugeSize};
     for (const FileFault fault : assetFaults) {
         MemoryFiles files(allocator);
         REQUIRE(LoadFixture(allocator, files));

@@ -156,6 +156,9 @@ struct ExchangeReadOptions {
     // 참이면 읽는 동안 모든 blob 파일의 크기·SHA-256·가변 배치를 확인한다(10.4절 12번). 거짓이면
     // 참조 형식만 보고 파일은 LoadExchangeBlob 때 확인한다.
     bool verifyBlobs = true;
+    // 묶음의 JSON 파일(bundle.json + 에셋 JSON) 크기 합 상한이다(10.4절 18번). 넘는 파일부터는 읽지
+    // 않는다(bundle.json이면 묶음 수준, 에셋 JSON이면 그 에셋 LimitExceeded). 시험이 줄여 쓴다.
+    uint64 maxBundleJsonBytes = UnrealExchangeMaxBundleJsonBytes;
 };
 
 // 읽은 묶음이다. ReadExchangeBundle이 채우고 그 뒤로 바뀌지 않으므로 여러 스레드가 const로 함께

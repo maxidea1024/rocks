@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-22, 개정 18. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-22, 개정 19. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -372,6 +372,19 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 한계: 시험 소스가 부르는 모듈 내부 기호와 `Private/` 시험의 모듈 내 링크는 BS8d5다. 모듈별 export 수 진단은 BS8d3이다.
 - 버린 안: 모든 기호 export(Windows `.def` 자동 생성·CMake `WINDOWS_EXPORT_ALL_SYMBOLS` 식 — UE 방식이 아니고 export 수 상한에 닿는다), 공개 헤더의 모든 클래스·함수에 일괄로 붙이기(쓰지 않는 API까지 ABI로 굳힌다), 측정용 `/FORCE:UNRESOLVED`를 빌드에 남기기(실행 중에야 터진다).
 
+**BS8d3 진단 세부(개정 19).**
+- **상속 export 진단(메타 컴파일러, 링크 방식과 무관하게 늘)**: 다른 모듈이 상속하는 리플렉션 클래스는 클래스 전체를 export해야 한다(BD27 — 파생 클래스가 기반의 생성자·소멸자·out-of-line 가상 함수를 링크한다).
+  - 판정: 메타 컴파일러가 리플렉션 클래스의 선언부 원문(Clang AST의 선언 범위 시작 — `class`·`struct` 키워드 — 부터 클래스 이름까지, 주석·문자열을 뺀 토큰)에 모듈 API 매크로 토큰(`ROCKS_<M>_API`)이 있는지 본다. Monolithic에서는 매크로가 빈 값이라 Clang AST에 export 속성이 없으므로 원문을 본다. 매크로는 그 클래스가 속한 모듈의 것이어야 한다 — 다른 모듈 이름의 매크로면 오류 RMC2007이다(Modular에서 import가 되어 정의가 export되지 않는다. 엔진 저장소는 정책 `module-api-macro`도 막지만 게임·SDK 사용자 모듈은 이 진단만 본다).
+  - 한계: 매크로가 펼친 클래스 선언(선언 자체가 매크로 안)은 원문이 매크로 호출 자리라 판정하지 못한다(Exported 아님으로 본다). 리플렉션 클래스는 `ROCKS_CLASS()` 표지 뒤에 손으로 선언하므로 지금은 없다.
+  - 기록: 모듈 descriptor(`<M>.rocksmeta.json`)의 클래스 `flags`에 `Exported`를 싣는다. 새 표지라 descriptor `schema`를 2로 올린다(옛 설치 SDK descriptor는 다시 만들라는 오류 — 하위호환을 두지 않는다).
+  - 검사: 파생 모듈의 리플렉션 클래스의 base가 import한(다른 모듈의) 리플렉션 클래스인데 그 기반이나 그 위 import 조상(`rocks::Object` 아래까지 — 파생 클래스가 기반 사슬 전체의 특수 멤버를 링크한다)에 `Exported`가 없으면 오류 RMC2002다(파생 클래스 위치, 기반 이름과 모듈, 고칠 방법 — 기반 선언에 `class ROCKS_<기반 모듈>_API`).
+  - 루트 `rocks::Object`는 리플렉션 타입이 아니어서 descriptor에 없다. 클래스 전체를 export하고(`class ROCKS_OBJECTRUNTIME_API Object`), 정책 `module-api-macro`가 그 선언을 필수로 본다.
+  - struct 상속(B9k)은 대상이 아니다: 리플렉션 struct는 가상 함수가 없고 기반의 특수 멤버는 보통 inline이다(out-of-line이 필요하면 BS8d2 규칙대로 링크 오류가 알린다).
+  - 지금 다른 모듈이 상속하는 리플렉션 클래스(저장소 전체 — EngineTests 폐포·게임 템플릿·플러그인·SDK 통합 시험): `Object`(ObjectRuntime ← AssetRuntime·World·시험 fixture), `Actor`·`SceneComponent`(World ← WorldTestFixtures, `SceneComponent`의 기반 `Component` 포함), `Asset`(AssetRuntime ← Animation·AssetTestFixtures), `reflection_fixture::Base`(ReflectionTestFixtures ← SDK 통합 시험의 게임 모듈 GameCore), 통합 시험의 게임 모듈 사이 `CoreThing`(GameCore ← SampleGame — 시험 문자열이 `ROCKS_GAMECORE_API`를 붙인다). 여기에 클래스 단위 매크로를 붙인다 — Engine 층의 첫 매크로다(Engine 층 나머지는 BS8d 뒤 Engine 층 Modular 확인 단계).
+  - `ScriptExtensible` 클래스(UI 툴킷 7.3절 (f))의 자기 모듈 검사는 그 지정자를 구현할 때 더한다.
+- **export 수 진단(빌드)**: Windows DLL 하나의 export 상한은 65535다(넘으면 링커가 오류). Modular Windows 빌드가 끝나면 공유 라이브러리마다 PE export 디렉터리의 함수 수를 읽어 빌드 출력에 모듈별 수를 한 줄로 남기고(`note: Modular exports: Core 4123, ...` — 큰 순서), 상한의 90%(올림 58982) 이상인 모듈은 따로 한 줄로 알린다(`ModularExports`). 세는 대상은 이번 계획이 공유 라이브러리로 링크한 모듈(`LinkTypes.CompilesAsSharedLibrary`)이고, 읽을 수 없는 파일은 그 모듈만 "읽지 못했다"는 줄로 남긴다(링크가 끝난 빌드를 진단 때문에 실패시키지 않는다)(상한에 닿기 전에 멤버 단위 export로 줄이라는 안내 — BD27 한계). macOS·Linux는 상한이 없어 세지 않는다.
+- 시험: 메타 컴파일러 시험 — 같은 모듈 base는 매크로 없이 통과, import base에 `Exported`가 없으면 RMC2002(키워드와 이름 사이 주석 속 매크로는 세지 않는다), 있으면 통과, 다른 모듈 매크로는 RMC2007, 매크로가 실제 export 철자로 펼쳐지는 경우(Modular 메타 단계와 같다)도 `Exported`, descriptor 왕복에 `Exported` 표지, schema 1 descriptor 거부. 빌드 시험 Modular fixture — export 수 줄과 경고 문턱(문턱 값을 낮춘 판정 함수로).
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
@@ -669,3 +682,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 16 | 2026-11-22 | ML4b 빌드 쪽 세부: Launch에 닿는 Modular 실행 파일의 모듈은 호스트 공유 라이브러리, 실행 파일은 생성 진입 TU + Launch import만, manifest schema 3·행 키 `host`, Launch 거부를 풀고 Launch 없는 Modular 실행 파일을 거부([모듈 로더](ModuleLoader.ko.md) 3.14절) |
 | 17 | 2026-11-22 | BD5에 빌드 구성 축을 적었다: SDK 변형(매크로 조합 × 링크 방식)과 직교하며, SDK 하나가 여러 구성을 `Configurations/<구성>/`에 싣는다(manifest 14, [Visual Studio 프로젝트 파일](ProjectFiles.ko.md) 10.3절 PJ4) |
 | 18 | 2026-11-22 | BS8d2 세부: Foundation 폐포 Modular 측정(미해결 기호 735 — 클래스 93·자유 함수 162·변수 2), 붙이는 규칙(클래스 단위 우선·선언마다·공개 헤더만·비공개 선언은 공개로 옮김), 링크 오류를 따라 붙임, 확인 타깃 `ModularCheck`(Modular 빌드·실행으로 ML4b Launch 성공 경로 확인) |
+| 19 | 2026-11-22 | BS8d3 세부: 상속 export 진단(선언부 원문의 API 매크로 → descriptor `Exported` 표지·schema 2, import base에 없으면 RMC2002, 루트 Object는 정책 필수), 다른 모듈이 상속하는 Object·Actor·SceneComponent·Asset 클래스 단위 export, Windows Modular export 수 진단(모듈별 줄·상한 90% 경고) |

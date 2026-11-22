@@ -78,7 +78,8 @@ internal static partial class MetaTests
                 arguments.Add(generator);
             }
 
-            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, input, include, module), "--compiler", compiler]);
+            // 실제 fixture 헤더는 그 모듈 이름으로 생성한다(클래스의 모듈 API 매크로가 그 모듈의 것이어야 한다 — BS8d3 RMC2007).
+            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, input, include, fixture ? "ReflectionTestFixtures" : module), "--compiler", compiler]);
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", fixture
                 ? Path.Combine(options.Root, "Core", "Source", "Developer", "ReflectionTestFixtures", "ReflectionTestFixtures.rocksids.json") : IdentityPath]);

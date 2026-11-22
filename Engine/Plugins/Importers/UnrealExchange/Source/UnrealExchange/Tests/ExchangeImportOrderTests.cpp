@@ -414,6 +414,41 @@ TEST(UnrealExchange_PlanDepthLimit) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 플러그인 error 진단(10.4절 20번): 그 에셋은 InvalidSource(ExporterError, text = 진단 code)로
+// 실패하고 Hard 의존자(인스턴스 → 머티리얼, 메시 → 인스턴스)는 FailedDependency로 실패한다.
+TEST(UnrealExchange_ExporterErrorFailsAsset) {
+    SystemAllocator allocator;
+    MemoryFiles files(allocator);
+    REQUIRE(LoadFixture(allocator, files));
+    StringBuilder<256> path(allocator);
+    REQUIRE(FixtureFile("assets/Game/Materials/M_Base.json", path));
+    REQUIRE(files.ReplaceOnce(path.View(), "\"diagnostics\": []",
+                              "\"diagnostics\": [{\"code\": \"MeshSourceUnavailable\", "
+                              "\"severity\": \"warning\", \"message\": \"w\"}, "
+                              "{\"code\": \"SourceReadFailed\", \"severity\": \"error\", "
+                              "\"message\": \"e\"}]"));
+    ExchangeBundle bundle(allocator);
+    ExchangeDiagnostics diagnostics(allocator);
+    REQUIRE(ReadExchangeBundle(files, FixtureDirectory, {}, bundle, diagnostics));
+    CHECK(bundle.Assets()[5].state == ExchangeAssetState::Failed);
+    CHECK(HasDiagnostic(diagnostics, AssetDiagnosticCode::InvalidSource,
+                        ExchangeIssue::ExporterError, 5));
+    bool named = false;
+    for (const ExchangeDiagnostic& item : diagnostics.Items()) {
+        named = named || (item.issue == ExchangeIssue::ExporterError &&
+                          item.text.View() == StringView("SourceReadFailed"));
+    }
+
+    CHECK(named);
+    diagnostics.Clear();
+    ExchangeImportPlan plan(allocator);
+    REQUIRE(PlanExchangeImport(bundle, {}, plan, diagnostics));
+    CHECK(UnitOfAsset(plan, 4).state == ExchangeUnitState::Failed &&
+          UnitOfAsset(plan, 4).failure == AssetDiagnosticCode::MissingDependency);
+    CHECK(HasDiagnostic(diagnostics, AssetDiagnosticCode::MissingDependency,
+                        ExchangeIssue::FailedDependency, 4, 5));
+}
+
 // 실패 전파: 읽기 실패 에셋의 단위는 CorruptBundle(새 진단 없음), 그것을 참조하는 단위는
 // MissingDependency. 단위 구성원의 경로 실패는 단위 전체를 실패시키고 나머지는 FailedMember다.
 TEST(UnrealExchange_PlanFailurePropagation) {

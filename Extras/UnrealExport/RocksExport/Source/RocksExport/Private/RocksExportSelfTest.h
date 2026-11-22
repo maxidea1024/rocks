@@ -46,6 +46,10 @@ namespace RocksExportSelfTest
 	// 같은지 본다.
 	void RunMaterialExtraction(TArray<FString>& Errors);
 
+	// 메시 기록 writer의 경계 사례(5.4절 9·11번, 6.3절 11번): 퇴화 다각형(자기 변을 빼고 변 속성을 같이 옮김, 둘레
+	// 복원), 정점 영향 12개 초과(상위 12개·재정규화·TooManyInfluences), 정점 0개 메시, 다채널 Name 속성.
+	void RunMeshWriterEdgeCases(TArray<FString>& Errors);
+
 	// 위 전부를 돌린다. 모두 통과하면 true다.
 	bool RunAll(TArray<FString>& Errors);
 }

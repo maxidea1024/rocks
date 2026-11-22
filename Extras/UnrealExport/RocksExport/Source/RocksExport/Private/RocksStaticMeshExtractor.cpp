@@ -28,6 +28,13 @@ namespace RocksStaticMeshExtractorPrivate
 		return FRocksMeshDescriptionWriter::Write(Record, Bundle, Writer, OutError);
 	}
 
+	// 원본이 있다는데 사본을 얻지 못한 LOD의 진단이다(5.4절 6번 — error, 그 기록은 null). baked로 대신하지 않는다(5.4절 10번).
+	static void ReportCloneFailure(int32 Lod, const TCHAR* What, FRocksAssetBody& Body)
+	{
+		Body.Diagnostics.Add({TEXT("MeshSourceUnavailable"), RocksExport::SeverityError,
+			FString::Printf(TEXT("LOD %d %s: the mesh description could not be read"), Lod, What)});
+	}
+
 	// LOD 하나의 data 항목을 쓴다(5.1–5.3절).
 	static bool WriteLod(UStaticMesh& Mesh, int32 Lod, FRocksBundleWriter& Bundle, FRocksJsonWriter& Writer, FRocksAssetBody& Body, FString& OutError)
 	{
@@ -48,6 +55,11 @@ namespace RocksStaticMeshExtractorPrivate
 		}
 		else
 		{
+			if (bHasSource)
+			{
+				ReportCloneFailure(Lod, TEXT("source"), Body);
+			}
+
 			Writer.Null();
 		}
 
@@ -69,6 +81,11 @@ namespace RocksStaticMeshExtractorPrivate
 		}
 		else
 		{
+			if (bHasSource)
+			{
+				ReportCloneFailure(Lod, TEXT("prepared"), Body);
+			}
+
 			Writer.Null();
 		}
 

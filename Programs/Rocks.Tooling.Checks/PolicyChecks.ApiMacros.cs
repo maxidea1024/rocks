@@ -20,6 +20,15 @@ public static partial class PolicyChecks
     ];
 
     /// <summary>
+    /// 클래스 전체를 export해야 하는 비리플렉션 클래스다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3). 리플렉션 클래스의 루트 rocks::Object는
+    /// 모든 모듈의 리플렉션 클래스가 상속하지만 리플렉션 타입이 아니어서 메타 컴파일러의 상속 export 진단(RMC2002)이 보지 못한다.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Path, string Class)> RequiredClassExports =
+    [
+        ("Core/Source/Runtime/ObjectRuntime/Public/Object/Object.h", "Object")
+    ];
+
+    /// <summary>
     /// 모듈 API 매크로의 쓰임을 검사한다(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2, 규칙 <c>module-api-macro</c>). 엔진 소유 모듈
     /// (<c>&lt;루트&gt;/Source/&lt;그룹&gt;/&lt;모듈&gt;/</c>, 서드파티 제외)과 엔진 플러그인 모듈의 소스·헤더에서:
     /// <list type="bullet">
@@ -30,10 +39,31 @@ public static partial class PolicyChecks
     /// </list>
     /// 주석·문자열·문자 리터럴은 보지 않는다. 사용 예: <c>PolicyChecks.ModuleApiMacros(root)</c>.
     /// </summary>
-    public static IReadOnlyList<CheckFailure> ModuleApiMacros(string root, IReadOnlyList<string>? exportedPrivateHeaders = null)
+    public static IReadOnlyList<CheckFailure> ModuleApiMacros(string root, IReadOnlyList<string>? exportedPrivateHeaders = null,
+        IReadOnlyList<(string Path, string Class)>? requiredClassExports = null)
     {
         exportedPrivateHeaders ??= ExportedPrivateHeaders;
+        requiredClassExports ??= RequiredClassExports;
         List<CheckFailure> failures = [];
+        // 필수 클래스 export: 그 모듈의 매크로가 클래스 선언부에 있어야 한다(파일이 없으면 검사할 저장소가 아니다 — 시험 루트).
+        foreach ((string required, string className) in requiredClassExports)
+        {
+            string path = Path.Combine(root, required);
+            if (!File.Exists(path) || ModuleFolderOf(required) is not (string owner, _))
+            {
+                continue;
+            }
+
+            string code = WithoutCommentsAndLiterals(File.ReadAllText(path, StrictUtf8));
+            string macro = "ROCKS_" + owner.ToUpperInvariant() + "_API";
+            if (!Regex.IsMatch(code, @"\bclass\s+" + macro + @"\s+" + Regex.Escape(className) + @"\b", RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(10)))
+            {
+                failures.Add(new(required, 1, ModuleApiMacroRule,
+                    $"class {className} must be exported as a whole (class {macro} {className}): every module's reflected classes derive from it"));
+            }
+        }
+
         foreach (string path in NativeSources(root, OwnedSourceRoots))
         {
             string relative = Relative(root, path);

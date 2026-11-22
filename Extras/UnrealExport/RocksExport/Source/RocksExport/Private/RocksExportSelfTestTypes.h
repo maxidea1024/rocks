@@ -81,6 +81,22 @@ struct FRocksSelfTestStruct
 	UPROPERTY()
 	int32 Fixed[2] = {5, 6};
 
+	// 예약 키(3.3절)와 같은 이름 — "@blob"으로 쓴다.
+	UPROPERTY()
+	int32 blob = 1;
+
+	UPROPERTY()
+	TWeakObjectPtr<UObject> WeakReference;
+
+	UPROPERTY()
+	TOptional<float> Maybe;
+
+	UPROPERTY()
+	TOptional<int32> Nothing;
+
+	UPROPERTY()
+	FUtf8String Utf8Text;
+
 	UPROPERTY(Transient)
 	int32 Scratch = 1;
 

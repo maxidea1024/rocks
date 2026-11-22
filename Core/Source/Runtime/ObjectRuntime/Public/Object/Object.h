@@ -25,7 +25,7 @@ enum class ObjectLifecycle : uint8 {
 // Registry가 식별자와 저장소를 소유하는 기반 타입. 직접 delete하지 않는다.
 // 복사·이동은 객체 정체성과 ObjectRef 소유자 검사를 우회하므로 금지한다.
 // 파생 타입의 정확한 소멸자는 RuntimeTypeOps를 통해 호출한다.
-class Object {
+class ROCKS_OBJECTRUNTIME_API Object {
 public:
     Object(const Object&) = delete;
     Object& operator=(const Object&) = delete;

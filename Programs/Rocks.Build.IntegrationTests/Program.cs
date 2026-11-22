@@ -572,7 +572,7 @@ try
         };
 
         ROCKS_CLASS()
-        struct CoreThing : rocks::reflection_fixture::Base {
+        struct ROCKS_GAMECORE_API CoreThing : rocks::reflection_fixture::Base {
             ROCKS_GENERATED_BODY()
 
             explicit CoreThing(rocks::Allocator& allocator) noexcept

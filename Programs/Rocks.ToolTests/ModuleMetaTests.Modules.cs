@@ -263,7 +263,7 @@ internal static partial class ModuleMetaTests
             layout.Write("Lower/Public/Lower/Target.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
                 "ROCKS_CLASS()\nstruct Target : public rocks::Object {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n");
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Lower/Target.h>\n#include <Object/ObjectRefs.h>\nnamespace probe {\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 value = 0;\n" +
+                "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 value = 0;\n" +
                 "ROCKS_PROPERTY() rocks::ObjectRef<Target> target;\n};\n}\n");
             layout.Manifest("Lower", ["probe::Target"], ["probe::Target::value", "probe::Parent::target"]);
             Verify.Equal(0, (await layout.RunLowerAsync(extraInputs: [("Lower/Target.h", "Lower/Target.h")])).ExitCode, "lower module");
@@ -357,7 +357,7 @@ internal static partial class ModuleMetaTests
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
                 "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Encoding/Sha256.h>\nnamespace probe {\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
+                "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "explicit Parent(rocks::Allocator& allocator) noexcept : icon(allocator), any(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::AssetId source;\nROCKS_PROPERTY() rocks::Sha256Digest hash;\n" +
                 "ROCKS_PROPERTY(Required) rocks::SoftObjectRef<Parent> icon;\nROCKS_PROPERTY() rocks::SoftObjectRef<> any;\n};\n}\n");
@@ -411,7 +411,7 @@ internal static partial class ModuleMetaTests
                 "#include <Core/Optional.h>\n#include <Core/Text/String.h>\nnamespace probe {\n" +
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
                 "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::Optional<rocks::String> note;\n};\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
+                "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::Optional<rocks::int32> count;\n" +
                 "ROCKS_PROPERTY() rocks::Optional<Mode> mode;\nROCKS_PROPERTY() rocks::Optional<Leaf> leaf;\n};\n}\n");
             layout.Manifest("Lower", ["probe::Mode", "probe::Leaf"], ["probe::Leaf::note", "probe::Parent::count", "probe::Parent::mode", "probe::Parent::leaf"]);
@@ -448,7 +448,7 @@ internal static partial class ModuleMetaTests
                 "#include <Core/Containers/OrderedMap.h>\n#include <Core/Containers/OrderedSet.h>\n#include <Core/Text/String.h>\nnamespace probe {\n" +
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
                 "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
+                "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "explicit Parent(rocks::Allocator& allocator) noexcept : leaves(allocator), modes(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY(MaxElements = 4) rocks::OrderedMap<Mode, Leaf> leaves;\n" +
                 "ROCKS_PROPERTY() rocks::OrderedSet<Mode> modes;\n};\n}\n");
@@ -519,6 +519,60 @@ internal static partial class ModuleMetaTests
         });
 
         // descriptor는 빌드 산출물이다. 모르는 속성, 잘못된 모듈 이름·헤더 철자·이름·버전은 생성 C++에 들어가기 전에 거부한다.
+        // 상속 export 진단(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3): 다른 모듈이 상속하는 기반은 선언부에 모듈 API 매크로가 있어야 하고
+        // descriptor flags의 Exported로 전해진다. 없으면 파생 모듈이 RMC2002, 같은 모듈 안의 상속은 매크로가 없어도 된다.
+        suite.Add("Meta.CrossModuleBaseMustBeExported", async () =>
+        {
+            using Layout layout = new(options, environment);
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module with an exported base");
+            using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower"))))
+            {
+                Verify.Equal(2, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 2");
+                Verify.That(Type(descriptor, "probe::Parent").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "Exported"),
+                    "the exported class carries the Exported flag");
+            }
+
+            ProcessResult upper = await layout.RunUpperAsync();
+            Verify.Equal(0, upper.ExitCode, "upper module derives from an exported base (same-module Leaf needs no macro): " + upper.StdErr);
+            using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper"))))
+            {
+                Verify.That(!Type(descriptor, "probe::Value").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "Exported"),
+                    "a class without the macro has no Exported flag");
+            }
+
+            // 기반에서 매크로를 빼면(키워드 앞 주석과 키워드·이름 사이 주석 속 언급은 세지 않는다) 파생 모듈이 RMC2002다.
+            foreach (string declaration in new[] { "// ROCKS_LOWER_API\nstruct Parent", "struct /* ROCKS_LOWER_API */ Parent" })
+            {
+                layout.Write("Lower/Public/Lower/Parent.h", Parent.Replace("struct ROCKS_LOWER_API Parent", declaration, StringComparison.Ordinal));
+                Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module without the export: " + declaration);
+                await Reject(layout.RunUpperAsync(), "RMC2002", "without a class-level export");
+            }
+
+            // 다른 모듈의 매크로로 export하면 그 클래스의 모듈이 RMC2007이다(Modular에서 import가 된다).
+            layout.Write("Lower/Public/Lower/Parent.h", Parent.Replace("struct ROCKS_LOWER_API Parent", "struct ROCKS_UPPER_API Parent",
+                StringComparison.Ordinal));
+            await Reject(layout.RunLowerAsync(retargetApiMacro: false), "RMC2007", "API macro of another module");
+
+            // Modular 메타 단계처럼 매크로가 실제 export 철자로 펼쳐져도(AST에 export 속성이 붙는다) Exported로 판정한다.
+            layout.Write("Lower/Public/Lower/Parent.h", Parent);
+            layout.ApiValues["ROCKS_LOWER_API"] = OperatingSystem.IsWindows() ? "__declspec(dllexport)" : "__attribute__((visibility(\"default\")))";
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module with the export spelling");
+            using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower"))))
+            {
+                Verify.That(Type(descriptor, "probe::Parent").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "Exported"),
+                    "the export spelling still carries the Exported flag");
+            }
+
+            layout.ApiValues.Clear();
+
+            // schema 1 descriptor(Exported 이전)는 거부한다.
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module again");
+            string mutated = layout.Generated("Mutated", "schema1.rocksmeta.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+            File.WriteAllText(mutated, File.ReadAllText(layout.Descriptor("Lower")).Replace("\"schema\": 2", "\"schema\": 1", StringComparison.Ordinal));
+            await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "schema");
+        });
+
         suite.Add("Meta.ModuleDescriptorIsReadStrictly", async () =>
         {
             using Layout layout = new(options, environment);

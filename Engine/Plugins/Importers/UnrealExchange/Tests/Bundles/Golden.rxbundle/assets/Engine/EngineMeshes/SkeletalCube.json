@@ -1,0 +1,507 @@
+{
+  "objectPath": "/Engine/EngineMeshes/SkeletalCube.SkeletalCube",
+  "class": "SkeletalMesh",
+  "ueClass": "/Script/Engine.SkeletalMesh",
+  "dependencies": [
+    {
+      "objectPath": "/Engine/EngineMeshes/SkeletalCube_Skeleton.SkeletalCube_Skeleton",
+      "class": "Skeleton",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "SourceModels": [
+      {
+        "TriangleCount": 12,
+        "VertexCount": 24,
+        "Bounds": {
+          "Origin": {
+            "X": 0,
+            "Y": 0,
+            "Z": 12.598424911499023
+          },
+          "BoxExtent": {
+            "X": 12.598424911499023,
+            "Y": 12.598424911499023,
+            "Z": 12.598424911499023
+          },
+          "SphereRadius": 21.821112042057745
+        },
+        "CachedSkinWeightProfileNames": [],
+        "CachedMorphTargetNames": [],
+        "CachedHasVertexColors": true,
+        "CachedVertexColorGuid": {
+          "A": -301989258,
+          "B": -301989258,
+          "C": -301989258,
+          "D": -301989258
+        },
+        "MeshDescriptionBulkData": {
+          "subobject": "SkeletalMeshDescriptionBulkData_0",
+          "class": "/Script/Engine.SkeletalMeshDescriptionBulkData",
+          "properties": {}
+        },
+        "ScreenSize": {
+          "Default": 1,
+          "PerPlatform": []
+        },
+        "LODHysteresis": 0.0199999996,
+        "LODMaterialMap": [],
+        "BuildSettings": {
+          "bRecomputeNormals": false,
+          "bRecomputeTangents": true,
+          "bUseMikkTSpace": true,
+          "bComputeWeightedNormals": false,
+          "bRemoveDegenerates": true,
+          "bUseHighPrecisionTangentBasis": false,
+          "bUseHighPrecisionSkinWeights": false,
+          "bUseFullPrecisionUVs": false,
+          "bUseBackwardsCompatibleF16TruncUVs": true,
+          "bOptimizeForInstancing": false,
+          "ThresholdPosition": 1.99999995e-05,
+          "ThresholdTangentNormal": 1.99999995e-05,
+          "ThresholdUV": 0.0009765625,
+          "MorphThresholdPosition": 0.0149999997,
+          "BoneInfluenceLimit": 0
+        },
+        "ReductionSettings": {
+          "TerminationCriterion": "SMTC_NumOfTriangles",
+          "NumOfTrianglesPercentage": 1,
+          "NumOfVertPercentage": 1,
+          "MaxNumOfTriangles": 4,
+          "MaxNumOfVerts": 6,
+          "MaxNumOfTrianglesPercentage": 4294967295,
+          "MaxNumOfVertsPercentage": 4294967295,
+          "MaxDeviationPercentage": 0.5,
+          "ReductionMethod": "SMOT_NumOfTriangles",
+          "SilhouetteImportance": "SMOI_Normal",
+          "TextureImportance": "SMOI_Normal",
+          "ShadingImportance": "SMOI_Normal",
+          "SkinningImportance": "SMOI_Normal",
+          "bRemapMorphTargets": false,
+          "bRecalcNormals": true,
+          "WeldingThreshold": 0.100000001,
+          "NormalsThreshold": 60,
+          "MaxBonesPerVertex": 4,
+          "bEnforceBoneBoundaries": false,
+          "bMergeCoincidentVertBones": true,
+          "VolumeImportance": 1,
+          "bLockEdges": false,
+          "bLockColorBounaries": false,
+          "bImproveTrianglesForCloth": true,
+          "BaseLOD": 0
+        },
+        "BonesToRemove": [],
+        "BonesToPrioritize": [],
+        "SectionsToPrioritize": [],
+        "WeightOfPrioritization": 1,
+        "BakePose": null,
+        "BakePoseOverride": null,
+        "SourceImportFilename": "",
+        "SkinCacheUsage": "Auto",
+        "MorphTargetPositionErrorTolerance": 20,
+        "ImportedMorphTargetSourceFilename": [],
+        "VertexAttributes": [],
+        "bHasBeenSimplified": false,
+        "bHasPerLODVertexColors": false,
+        "bAllowCPUAccess": false,
+        "bBuildHalfEdgeBuffers": false,
+        "bAllowMeshDeformer": true,
+        "bSupportUniformlyDistributedSampling": false,
+        "bImportWithBaseMesh": false
+      }
+    ],
+    "Skeleton": {
+      "objectPath": "/Engine/EngineMeshes/SkeletalCube_Skeleton.SkeletalCube_Skeleton"
+    },
+    "PositiveBoundsExtension": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "NegativeBoundsExtension": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "SkelMirrorTable": [],
+    "NaniteSettings": {
+      "bEnabled": false,
+      "bExplicitTangents": false,
+      "bLerpUVs": true,
+      "bSeparable": false,
+      "bVoxelNDF": true,
+      "bVoxelOpacity": false,
+      "ShapePreservation": "None",
+      "PositionPrecision": -2147483648,
+      "NormalPrecision": -1,
+      "TangentPrecision": -1,
+      "BoneWeightPrecision": -1,
+      "TargetMinimumResidencyInKB": 0,
+      "KeepPercentTriangles": 1,
+      "TrimRelativeError": 0,
+      "GenerateFallback": "PlatformDefault",
+      "FallbackTarget": "Auto",
+      "FallbackPercentTriangles": 1,
+      "FallbackRelativeError": 1,
+      "MaxEdgeLengthFactor": 0,
+      "NumRays": 64,
+      "VoxelLevel": 0,
+      "RayBackUp": 0,
+      "DisplacementUVChannel": 0,
+      "DisplacementMaps": [],
+      "NaniteAssemblyData": {
+        "Parts": [],
+        "Nodes": []
+      }
+    },
+    "MinQualityLevelLOD": {
+      "Default": 0,
+      "PerQuality": []
+    },
+    "MinLod": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "DisableBelowMinLodStripping": {
+      "Default": false,
+      "PerPlatform": []
+    },
+    "bOverrideLODStreamingSettings": false,
+    "bSupportLODStreaming": {
+      "Default": false,
+      "PerPlatform": []
+    },
+    "MaxNumStreamedLODs": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "MaxNumOptionalLODs": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "LODSettings": null,
+    "DefaultAnimatingRig": null,
+    "SkelMirrorAxis": "None",
+    "SkelMirrorFlipAxis": "None",
+    "bHasVertexColors": true,
+    "bEnablePerPolyCollision": false,
+    "VertexColorGuid": {
+      "A": -813129572,
+      "B": -813129572,
+      "C": -813129572,
+      "D": -813129572
+    },
+    "PhysicsAsset": null,
+    "ShadowPhysicsAsset": null,
+    "NodeMappingData": [],
+    "AssetImportData": {
+      "subobject": "AssetImportData_30",
+      "class": "/Script/Engine.AssetImportData",
+      "properties": {
+        "SourceData": {}
+      }
+    },
+    "ThumbnailInfo": {
+      "subobject": "SceneThumbnailInfo_3",
+      "class": "/Script/UnrealEd.SceneThumbnailInfo",
+      "properties": {
+        "OrbitPitch": -11.25,
+        "OrbitYaw": -157.5,
+        "OrbitZoom": 0
+      }
+    },
+    "bHasCustomDefaultEditorCamera": false,
+    "DefaultEditorCameraLocation": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "DefaultEditorCameraRotation": {
+      "Pitch": 0,
+      "Yaw": 0,
+      "Roll": 0
+    },
+    "DefaultEditorCameraLookAt": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "DefaultEditorCameraOrthoZoom": 0,
+    "PreviewAttachedAssetContainer": {
+      "AttachedObjects": []
+    },
+    "bSupportRayTracing": true,
+    "RayTracingMinLOD": 0,
+    "ClothLODBiasMode": "MappingsToSameLOD",
+    "MorphTargets": [],
+    "FloorOffset": 0,
+    "BoneDrawSize": 1,
+    "PostProcessAnimBlueprint": null,
+    "PostProcessAnimBPLODThreshold": -1,
+    "MeshClothingAssets": [],
+    "SamplingInfo": {
+      "Regions": [],
+      "BuiltData": {
+        "WholeMeshBuiltData": [
+          {}
+        ],
+        "RegionBuiltData": []
+      }
+    },
+    "AssetUserData": [],
+    "AssetUserDataEditorOnly": [],
+    "Sockets": [],
+    "SkinWeightProfiles": [],
+    "DefaultMeshDeformer": null,
+    "TargetMeshDeformers": null,
+    "OverlayMaterial": null,
+    "OverlayMaterialMaxDrawDistance": 0,
+    "ForwardAxis": "Y",
+    "NumCinematicMipLevels": 0,
+    "NoRefStreamingLODBias": {
+      "Default": -1,
+      "PerQuality": []
+    },
+    "NeverStream": false,
+    "bGlobalForceMipLevelsToBeResident": false
+  },
+  "data": {
+    "bones": [
+      {
+        "name": "Bone01",
+        "exportName": "Bone01",
+        "parent": -1,
+        "pose": {
+          "translation": [
+            0,
+            -6.2554472712861298e-09,
+            0
+          ],
+          "rotation": [
+            0.49950796762067667,
+            0.50049153373292465,
+            0.50049159333757343,
+            -0.49950793781835223
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      },
+      {
+        "name": "Bone02",
+        "exportName": "Bone02",
+        "parent": 0,
+        "pose": {
+          "translation": [
+            14.325963973999023,
+            4.2526094148342963e-06,
+            1.8836911408470769e-07
+          ],
+          "rotation": [
+            -4.7364851741896198e-16,
+            2.5257926354620394e-18,
+            -5.7783406506554132e-11,
+            -1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      }
+    ],
+    "lods": [
+      {
+        "hasSource": true,
+        "source": {
+          "counts": {
+            "vertices": 24,
+            "corners": 36,
+            "edges": 30,
+            "polygons": 12,
+            "triangles": 12,
+            "polygonGroups": 1
+          },
+          "topology": [
+            {
+              "blob": "1b58df36a97fc60caed796fedf1c8a92d757a79f63ce1d25ef6c1e8f467a5617",
+              "bytes": 144,
+              "layout": "u32",
+              "components": 1,
+              "count": 36
+            },
+            {
+              "blob": "f5401ac2db69add1b812510f1c687526130784e6755e78e982e97ae82d33a488",
+              "bytes": 240,
+              "layout": "u32",
+              "components": 2,
+              "count": 30
+            },
+            {
+              "blob": "eda2d91d8966dc41879d41cb7030aa00ee33f6883939f0400d1ac9537ca452ee",
+              "bytes": 52,
+              "layout": "u32",
+              "components": 1,
+              "count": 13
+            },
+            {
+              "blob": "44e5f14bc176ba6aa948af11a83772328b3298a0a937c9cc7c01560940074811",
+              "bytes": 144,
+              "layout": "u32",
+              "components": 1,
+              "count": 36
+            },
+            {
+              "blob": "17b0761f87b081d5cf10757ccc89f12be355c70e2e29df288b65b30710dcbcd1",
+              "bytes": 48,
+              "layout": "u32",
+              "components": 1,
+              "count": 12
+            },
+            {
+              "blob": "44e5f14bc176ba6aa948af11a83772328b3298a0a937c9cc7c01560940074811",
+              "bytes": 144,
+              "layout": "u32",
+              "components": 3,
+              "count": 12
+            },
+            {
+              "blob": "a4886fc88eadb553f0300776411b64c557a02e7a09f9df7da871fb2f9f4c8278",
+              "bytes": 48,
+              "layout": "u32",
+              "components": 1,
+              "count": 12
+            }
+          ],
+          "attributes": [
+            {
+              "element": "Vertex",
+              "name": "Position",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "7ed7a8aea91217e19a122c03278c60939b4fd8f45712bc529989af877ec3b3b5",
+                "bytes": 288,
+                "layout": "f32",
+                "components": 3,
+                "count": 24
+              }
+            },
+            {
+              "element": "Vertex",
+              "name": "SkinWeights",
+              "type": "BoneInfluences",
+              "channels": 1,
+              "data": {
+                "blob": "02289f71a40d96366e3053e0203240953a7dcf4b33c71f222a59164e8381cf48",
+                "bytes": 196,
+                "layout": "boneInfluences",
+                "components": 1,
+                "count": 24
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "BinormalSign",
+              "type": "Float",
+              "channels": 1,
+              "data": {
+                "blob": "a7942a89cf64580e599b37094919a9f0379c99dece7f1be35fdf2ac8bc58993e",
+                "bytes": 144,
+                "layout": "f32",
+                "components": 1,
+                "count": 36
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Color",
+              "type": "Vec4",
+              "channels": 1,
+              "data": {
+                "blob": "20e5ffaa4b145114cc781bef5b6de28aa3fdb5d639b9d387963443307a382c08",
+                "bytes": 576,
+                "layout": "f32",
+                "components": 4,
+                "count": 36
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Normal",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "02a6872080d928ba35362162d5c7731ea1abb970a01d62d15aedb49a5ea7b085",
+                "bytes": 432,
+                "layout": "f32",
+                "components": 3,
+                "count": 36
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Tangent",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "1f9020f0c3946e49e79b34ed22f41f81ecf5ef35b49cfecf70db8ae80fb5eaa6",
+                "bytes": 432,
+                "layout": "f32",
+                "components": 3,
+                "count": 36
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "TexCoord",
+              "type": "Vec2",
+              "channels": 1,
+              "data": {
+                "blob": "ea296a382d737b6cde23975fcbf3d861f9853ceaa4d26af5ab73b6d858a499cf",
+                "bytes": 288,
+                "layout": "f32",
+                "components": 2,
+                "count": 36
+              }
+            },
+            {
+              "element": "Edge",
+              "name": "IsHard",
+              "type": "Bool",
+              "channels": 1,
+              "data": {
+                "blob": "0679246d6c4216de0daa08e5523fb2674db2b6599c3b72ff946b488a15290b62",
+                "bytes": 30,
+                "layout": "u8",
+                "components": 1,
+                "count": 30
+              }
+            },
+            {
+              "element": "PolygonGroup",
+              "name": "MaterialSlotName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "a0bdad6875387404f68a33a3117939f82983bb16de017228addb2e4cb355e222",
+                "bytes": 16,
+                "layout": "names",
+                "components": 1,
+                "count": 1
+              }
+            }
+          ]
+        },
+        "generated": false,
+        "baked": null
+      }
+    ]
+  }
+}

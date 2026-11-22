@@ -98,6 +98,21 @@ int32 FRocksBundleWriter::LayoutElementBytes(const FString& Layout)
 	return -1;
 }
 
+// 지워도 되는 옛 staging·previous 디렉터리인가다: 맨 위 항목이 묶음 이름(bundle.json·assets·blobs)뿐이다(빈 디렉터리
+// 포함). 그 밖의 것이 있으면 사용자 디렉터리일 수 있으므로 지우지 않는다(11.7절 25번).
+static bool IsOwnBundleDirectory(const FString& Directory)
+{
+	bool bOwn = true;
+	IFileManager::Get().IterateDirectory(*Directory, [&bOwn](const TCHAR* Path, bool bIsDirectory)
+		{
+			const FString Name = FPaths::GetCleanFilename(Path);
+			const bool bKnown = bIsDirectory ? (Name == TEXT("assets") || Name == TEXT("blobs")) : Name == RocksBundleWriterPrivate::ManifestFile;
+			bOwn = bOwn && bKnown;
+			return bOwn;
+		});
+	return bOwn;
+}
+
 bool FRocksBundleWriter::Begin(const FString& OutputDirectory, FString& OutError)
 {
 	using namespace RocksBundleWriterPrivate;
@@ -125,6 +140,12 @@ bool FRocksBundleWriter::Begin(const FString& OutputDirectory, FString& OutError
 	}
 
 	Staging = Output + StagingSuffix;
+	if (Files.DirectoryExists(*Staging) && !IsOwnBundleDirectory(Staging))
+	{
+		OutError = FString::Printf(TEXT("staging directory %s holds files that are not part of an exchange bundle; refusing to remove it"), *Staging);
+		return false;
+	}
+
 	if (Files.DirectoryExists(*Staging) && !Files.DeleteDirectory(*Staging, false, true))
 	{
 		OutError = FString::Printf(TEXT("cannot remove stale staging directory %s"), *Staging);
@@ -236,6 +257,13 @@ bool FRocksBundleWriter::Commit(TConstArrayView<uint8> BundleJson, FString& OutE
 	IPlatformFile& Platform = FPlatformFileManager::Get().GetPlatformFile();
 	IFileManager& Files = IFileManager::Get();
 	const FString Previous = Output + PreviousSuffix;
+	if (Files.DirectoryExists(*Previous) && !IsOwnBundleDirectory(Previous))
+	{
+		OutError = FString::Printf(TEXT("directory %s holds files that are not part of an exchange bundle; refusing to remove it"), *Previous);
+		Abort();
+		return false;
+	}
+
 	if (Files.DirectoryExists(*Previous) && !Files.DeleteDirectory(*Previous, false, true))
 	{
 		OutError = FString::Printf(TEXT("cannot remove stale directory %s"), *Previous);

@@ -929,6 +929,20 @@ internal static partial class SchemaValidator
                 else
                 {
                     baseModel = imported[model.Base]; // import 타입의 Fields는 상속 포함 전체다
+                    // 다른 모듈의 기반과 그 위 조상(rocks::Object 아래까지)은 클래스 전체를 export해야 한다(BS8d3 — 파생 클래스가 기반 사슬의
+                    // 생성자·소멸자·out-of-line 가상 함수를 링크한다, Modular에서 export가 없으면 링크 오류). import 조상은 모두 descriptor에 있다.
+                    for (ClassModel? ancestor = baseModel; ancestor is not null;
+                         ancestor = ancestor.Base == "rocks::Object" ? null : imported.GetValueOrDefault(ancestor.Base))
+                    {
+                        if (!ancestor.Exported)
+                        {
+                            string macro = "ROCKS_" + ancestor.Module.ToUpperInvariant() + "_API";
+                            throw new MetadataException($"{model.Name}: base {ancestor.Name} is defined in module {ancestor.Module} without a class-level " +
+                                $"export, but a derived class in another module links its constructor, destructor and virtual functions", "RMC2002",
+                                $"Export the whole base class in its declaration: class {macro} {ancestor.Name.Split("::")[^1]} ... (Docs/Design/BuildTargets.ko.md section 3.8 BS8d3).")
+                                .At(model.Site);
+                        }
+                    }
                 }
 
                 inherited.AddRange(baseModel.Fields);
