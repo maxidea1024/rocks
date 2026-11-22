@@ -49,18 +49,23 @@ t37 = "Hp"
 t38 = "x>?<x>"
 t39 = "Actor.Find<Hp>"
 t40 = "Hp.Opened"
-t41 = "ScriptableComponent"
-t42 = "Shield"
-t43 = "Points"
-t44 = "Names"
-t45 = "Cue"
-t46 = "Hum"
-t47 = "Cursor"
-t48 = "Opened"
-t49 = "Owner"
-t50 = "Damaged"
-t51 = "sparks 0.4.0"
-t52 = "Main"
+t41 = "Hp.$init"
+t42 = "Array<vec3>"
+t43 = ">A<v3>"
+t44 = "Hp.Points"
+t45 = "Array<string>"
+t46 = "ScriptableComponent"
+t47 = "Shield"
+t48 = "Points"
+t49 = "Names"
+t50 = "Cue"
+t51 = "Hum"
+t52 = "Cursor"
+t53 = "Opened"
+t54 = "Owner"
+t55 = "Damaged"
+t56 = "sparks 0.4.0"
+t57 = "Main"
 ref0 = field Hp.Cursor args ">i64"
 ref1 = language NextTick args ">w"
 ref2 = context World
@@ -81,7 +86,10 @@ ref16 = field Component.Owner args ">x"
 ref17 = type Hp
 ref18 = native Actor.Find<Hp> type ref17 args "x>?<x>"
 ref19 = event Hp.Opened
-class0 = Hp : ScriptableComponent s3 r2 b2
+ref20 = type Array<vec3>
+ref21 = field Hp.Points args ">A<v3>"
+ref22 = type Array<string>
+class0 = Hp : ScriptableComponent s3 r2 b2 init Hp.$init
   field Shield s0 x2
   field Points b0 x1
   field Names b1 x1
@@ -311,3 +319,13 @@ function Hp.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0 returns sx
   0030  JMP  0031    ; 78:13
   0031  RELEASE  r1    ; 72:52
   0032  JMP  0015    ; 72:9
+
+function Hp.$init  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns sx0
+  body d5de9e5ed63fc49f474fbc6f7058f61714eaa7875bb08b39d566445dfeb27f0e
+  0000  NEWA  b0, ref20    ; 6:5
+  0001  SETF.B  r0, b0, ref21    ; 6:5
+  0003  NEWA  b0, ref22    ; 7:5
+  0004  SETF.B  r0, b0, ref11    ; 7:5
+  0006  LOADI  s0, 0    ; 10:5
+  0007  SETF.S  r0, s0, ref0    ; 10:5
+  0009  RET  -    ; 84:1

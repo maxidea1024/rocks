@@ -191,3 +191,11 @@ L8:
 L9:
     RELEASE r10    ; 42:26
     JUMP L1    ; 42:9
+
+function Mover.$init()
+  r0 this: Mover
+  s1: float [F64]
+L0:
+    s1 = LOADFLOAT 1    ; 13:5
+    SETF r0.Mover.Speed, s1    ; 13:5
+    RETURN    ; 56:1

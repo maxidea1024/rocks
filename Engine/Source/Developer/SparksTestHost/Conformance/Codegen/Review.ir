@@ -347,3 +347,17 @@ L7:
 L8:
     RELEASE r7    ; 72:52
     JUMP L2    ; 72:9
+
+function Hp.$init()
+  r0 this: Hp
+  b1: Array<vec3>
+  b2: Array<string>
+  s3: int [I64]
+L0:
+    b1 = NEW.COLLECTION Array()    ; 6:5
+    SETF r0.Hp.Points, b1    ; 6:5
+    b2 = NEW.COLLECTION Array()    ; 7:5
+    SETF r0.Hp.Names, b2    ; 7:5
+    s3 = LOADINT 0    ; 10:5
+    SETF r0.Hp.Cursor, s3    ; 10:5
+    RETURN    ; 84:1

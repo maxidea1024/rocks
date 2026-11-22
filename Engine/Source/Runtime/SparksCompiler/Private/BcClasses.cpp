@@ -161,6 +161,14 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
             ++stored.eventCount;
         }
 
+        // 초기화 함수: bodies의 class 노드 항목(함수 번호 = bodies 순번).
+        for (usize index = 0; index < bodies.Size(); ++index) {
+            if (static_cast<uint32>(bodies[index]) == node &&
+                static_cast<uint32>(bodies[index] >> 32) == symbol) {
+                stored.initializer = static_cast<uint32>(index);
+            }
+        }
+
         // hook·handler: 이 class의 handler 본문(함수 번호 = bodies 순번).
         stored.firstHook = static_cast<uint32>(out_.hooks.Size());
         stored.firstHandler = static_cast<uint32>(out_.handlers.Size());

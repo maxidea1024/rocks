@@ -761,8 +761,29 @@ public:
             }
         }
 
-        // CLASS 표(형식 버전 3 — SparksRuntime 2.1절): 범위, 기반은 앞선 클래스, 필드는 자기 bank
-        // 구역 안, hook 종류는 클래스 안에서 하나, 함수 번호, 초기화 함수는 this(Ref 1) 하나.
+        for (const BytecodeSwitchTable& table : module_.switches) {
+            if (usize(table.firstCase) + table.caseCount > module_.cases.Size()) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+        }
+
+        for (const BytecodeAwaitPoint& point : module_.awaits) {
+            if (usize(point.firstLive) + point.liveCount > module_.liveRanges.Size()) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+        }
+
+        for (uint32 index = 0; index < module_.functions.Size(); ++index) {
+            function_ = index;
+            if (const BytecodeRejection rejection = Function(module_.functions[index]);
+                rejection.error != BytecodeLoadError::None) {
+                return rejection;
+            }
+        }
+
+        // CLASS 표(형식 버전 3 — 함수 검사 뒤: 함수 표의 사유가 먼저다) — SparksRuntime 2.1절):
+        // 범위, 기반은 앞선 클래스, 필드는 자기 bank 구역 안, hook 종류는 클래스 안에서 하나, 함수
+        // 번호, 초기화 함수는 this(Ref 1) 하나.
         for (uint32 index = 0; index < module_.classes.Size(); ++index) {
             const BytecodeClass& entry = module_.classes[index];
             const bool ranges =
@@ -825,26 +846,6 @@ public:
                     (event.arguments != NoBytecodeIndex && event.arguments >= strings)) {
                     return Reject(BytecodeLoadError::BadTable);
                 }
-            }
-        }
-
-        for (const BytecodeSwitchTable& table : module_.switches) {
-            if (usize(table.firstCase) + table.caseCount > module_.cases.Size()) {
-                return Reject(BytecodeLoadError::BadTable);
-            }
-        }
-
-        for (const BytecodeAwaitPoint& point : module_.awaits) {
-            if (usize(point.firstLive) + point.liveCount > module_.liveRanges.Size()) {
-                return Reject(BytecodeLoadError::BadTable);
-            }
-        }
-
-        for (uint32 index = 0; index < module_.functions.Size(); ++index) {
-            function_ = index;
-            if (const BytecodeRejection rejection = Function(module_.functions[index]);
-                rejection.error != BytecodeLoadError::None) {
-                return rejection;
             }
         }
 

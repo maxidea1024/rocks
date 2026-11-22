@@ -47,21 +47,24 @@ t38 = "NextTick"
 t39 = "Door.Find"
 t40 = "Component.Owner"
 t41 = "Pawn"
-t42 = "Door"
-t43 = "ScriptableComponent"
-t44 = "Cue"
-t45 = "Open"
-t46 = "Info"
-t47 = "State"
-t48 = "Names"
-t49 = "Scores"
-t50 = "Hum"
-t51 = "Opened"
-t52 = "x"
-t53 = "Owner"
-t54 = "Damaged"
-t55 = "sparks 0.4.0"
-t56 = "Main"
+t42 = "Door.$init"
+t43 = "Array<string>"
+t44 = "Map<string, int>"
+t45 = "Door"
+t46 = "ScriptableComponent"
+t47 = "Cue"
+t48 = "Open"
+t49 = "Info"
+t50 = "State"
+t51 = "Names"
+t52 = "Scores"
+t53 = "Hum"
+t54 = "Opened"
+t55 = "x"
+t56 = "Owner"
+t57 = "Damaged"
+t58 = "sparks 0.4.0"
+t59 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Door.Cue args ">x"
@@ -79,10 +82,13 @@ ref13 = field Door.State args ">e"
 ref14 = language NextTick args ">w"
 ref15 = field Component.Owner args ">x"
 ref16 = type Pawn
+ref17 = type Stats type0
+ref18 = type Array<string>
+ref19 = type Map<string, int>
 type0 = struct Stats s4 r0 b0
   field0 Level s0 x1
   field1 Offset s1 x3
-class0 = Door : ScriptableComponent s2 r2 b3
+class0 = Door : ScriptableComponent s2 r2 b3 init Door.$init
   field Cue r0 x1
   field Open s0 x1
   field Info b0 x1
@@ -233,3 +239,19 @@ function Door.Find  scalar=1/1 ref=2/2 buf=0/0 params=0/1/0 returns rx1
   0006  RET  r1 x1    ; 86:9
   0007  LOADNULL.R  r1    ; 85:36
   0008  RET  r1 x1    ; 85:26
+
+function Door.$init  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns sx0
+  body 599a7a9b546c117da59a2923351bc5e72d546e0add8b377deab2015b0adda03c
+  0000  LOADI  s0, 0    ; 14:5
+  0001  SETF.S  r0, s0, ref11    ; 14:5
+  0003  LOADI  s0, 1    ; 15:5
+  0004  NEWS  b0, ref17    ; 15:5
+  0005  SETSF.S  b0, s0, ref6    ; 15:5
+  0007  SETF.B  r0, b0, ref5    ; 15:5
+  0009  LOADI  s0, 0    ; 16:5
+  0010  SETF.S  r0, s0, ref13    ; 16:5
+  0012  NEWA  b0, ref18    ; 17:5
+  0013  SETF.B  r0, b0, ref8    ; 17:5
+  0015  NEWM  b0, ref19    ; 18:5
+  0016  SETF.B  r0, b0, ref9    ; 18:5
+  0018  RET  -    ; 88:1
