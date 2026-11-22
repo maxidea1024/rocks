@@ -17,4 +17,16 @@ ShaderToolLoadStatus QueryDxcVersion(const DxcFunctions&, uint32& major, uint32&
     return status;
 }
 
+// DXC 컴파일은 Windows 구현만 있다(dxcapi.h를 Windows 헤더와 함께 include하는 Private/Win64).
+ShaderToolLoadStatus CompileWithDxc(const DxcFunctions&, const DxcCompileRequest&,
+                                    DxcCompileResult& result) noexcept {
+    result.object.Clear();
+    result.diagnostics.Clear();
+    result.compiled = false;
+    ShaderToolLoadStatus status;
+    status.code = ShaderToolLoadCode::UnsupportedHost;
+    status.tool = DxcToolName;
+    return status;
+}
+
 } // namespace rocks::shader
