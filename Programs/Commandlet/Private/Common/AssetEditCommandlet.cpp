@@ -19,6 +19,7 @@ constexpr StringView SetName = "asset-set";
 constexpr StringView InfoName = "asset-info";
 constexpr StringView MoveName = "asset-move";
 constexpr StringView DeleteName = "asset-delete";
+constexpr StringView OrphansDeleteName = "asset-orphans-delete";
 constexpr StringView DuplicateName = "asset-duplicate";
 
 constexpr StringView NewUsage =
@@ -61,6 +62,12 @@ constexpr StringView DeleteUsage =
     "  process that still references it blocks the delete even with --force. Aliases to the\n"
     "  deleted asset are removed. Prints 'deleted <path> <AssetId>'. Takes the project write\n"
     "  lock.\n";
+
+constexpr StringView OrphansDeleteUsage =
+    "usage: asset-orphans-delete <path> [--project=<dir>] [--wait=<seconds>]\n"
+    "  Delete an orphaned import output (see asset-orphans-list). Anything else is refused.\n"
+    "  Packages that reference it block the delete (use asset-delete --force). Prints\n"
+    "  'deleted <path> <AssetId>'. Takes the project write lock.\n";
 
 constexpr StringView DuplicateUsage =
     "usage: asset-duplicate <path|AssetId> <new path> [--project=<dir>] [--wait=<seconds>]\n"
@@ -521,53 +528,60 @@ Result<int32> RunAssetMoveCommand(void* context, Span<const StringView> args,
     return FlushCache(output, allocator, MoveName, session);
 }
 
-Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
-                                    CommandletOutput& output) noexcept {
+namespace {
+
+// asset-delete·asset-orphans-delete 공용이다(orphan이면 고아만 지운다 — --force 없음).
+Result<int32> RunDelete(void* context, Span<const StringView> args, CommandletOutput& output,
+                        bool orphan) noexcept {
     const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
     Allocator& allocator = *command.allocator;
+    const StringView name = orphan ? OrphansDeleteName : DeleteName;
     EditArgs parsed(allocator);
     EditGrammar grammar;
-    grammar.force = true;
+    grammar.force = !orphan;
     bool done = false;
-    auto usage = CheckUsage(output, ParseEdit(args, grammar, parsed), parsed, DeleteUsage, done);
+    auto usage = CheckUsage(output, ParseEdit(args, grammar, parsed), parsed,
+                            orphan ? OrphansDeleteUsage : DeleteUsage, done);
     if (done) {
         return usage;
     }
 
     EditSession session(allocator, *command.modules);
     Result<int32> failure = Result<int32>::Success(1);
-    if (!OpenSession(output, allocator, DeleteName, parsed.project, parsed.wait, true, session,
+    if (!OpenSession(output, allocator, name, parsed.project, parsed.wait, true, session,
                      failure)) {
         return failure;
     }
 
     AssetDiagnostic diagnostic;
     AssetDeleteResult result(allocator);
-    auto deleted = session.service->Delete(session.lock, parsed.positional[0], parsed.force, result,
-                                           &session.warnings, &diagnostic);
+    auto deleted = orphan
+                       ? session.service->DeleteOrphan(session.lock, parsed.positional[0], result,
+                                                       &session.warnings, &diagnostic)
+                       : session.service->Delete(session.lock, parsed.positional[0], parsed.force,
+                                                 result, &session.warnings, &diagnostic);
     // 디스크 참조자 줄(지웠으면 경고 — force, 아니면 실패의 근거).
     for (usize index = 0; index < result.referencerIds.Size(); ++index) {
-        auto written =
-            Fail(output, allocator, DeleteName, 0, "ReferencedBy: {}: {}{} references {}",
-                 result.referencerPaths[index].View(), deleted ? "warning " : "",
-                 result.referencerIds[index], result.path.View());
+        auto written = Fail(output, allocator, name, 0, "ReferencedBy: {}: {}{} references {}",
+                            result.referencerPaths[index].View(), deleted ? "warning " : "",
+                            result.referencerIds[index], result.path.View());
         if (!written) {
             return written;
         }
     }
 
-    if (auto warned = WriteWarnings(output, allocator, DeleteName, session.warnings); !warned) {
+    if (auto warned = WriteWarnings(output, allocator, name, session.warnings); !warned) {
         return warned;
     }
 
     if (!deleted) {
-        return WriteFailure(output, allocator, DeleteName, parsed.positional[0],
-                            session.diagnostics, diagnostic, deleted.Error());
+        return WriteFailure(output, allocator, name, parsed.positional[0], session.diagnostics,
+                            diagnostic, deleted.Error());
     }
 
     StringBuilder<LineBytes> line(allocator);
     if (auto formatted =
-            line.TryAppendFormat("{}: deleted {} {}\n", DeleteName, result.path.View(), result.id);
+            line.TryAppendFormat("{}: deleted {} {}\n", name, result.path.View(), result.id);
         !formatted) {
         return Result<int32>::Failure(formatted.Error());
     }
@@ -576,7 +590,19 @@ Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
         return written;
     }
 
-    return FlushCache(output, allocator, DeleteName, session);
+    return FlushCache(output, allocator, name, session);
+}
+
+} // namespace
+
+Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
+                                    CommandletOutput& output) noexcept {
+    return RunDelete(context, args, output, false);
+}
+
+Result<int32> RunAssetOrphansDeleteCommand(void* context, Span<const StringView> args,
+                                           CommandletOutput& output) noexcept {
+    return RunDelete(context, args, output, true);
 }
 
 Result<int32> RunAssetDuplicateCommand(void* context, Span<const StringView> args,

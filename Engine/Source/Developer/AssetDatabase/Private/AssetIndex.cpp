@@ -135,7 +135,13 @@ Result<void> IndexImportRecord(Allocator& allocator, Span<const uint8> bytes,
         summary.importerId = record.importerId;
         summary.importerName = Move(record.importerName);
         summary.importerVersion = record.importerVersion;
-        summary.outputCount = record.outputs.Size();
+        if (auto reserved = summary.outputs.TryReserve(record.outputs.Size()); !reserved) {
+            return reserved;
+        }
+
+        for (const ImportOutput& output : record.outputs) {
+            (void)summary.outputs.TryPushBack(output.asset);
+        }
     }
 
     if (auto owner = CheckImportOwner(entry.id, checked, entry.dependencies.View()); !owner) {
@@ -616,8 +622,10 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
     entry.importRecord.owner = cached->importRecord.owner;
     entry.importRecord.importerId = cached->importRecord.importerId;
     entry.importRecord.importerVersion = cached->importRecord.importerVersion;
-    entry.importRecord.outputCount = cached->importRecord.outputCount;
-    Result<void> step = entry.path.TryAssign(path.Value().Text());
+    Result<void> step = entry.importRecord.outputs.TryAppend(cached->importRecord.outputs.View());
+    if (step) {
+        step = entry.path.TryAssign(path.Value().Text());
+    }
     if (step) {
         step = entry.key.TryAssign(path.Value().Key());
     }
@@ -1642,6 +1650,131 @@ Result<void> AssetIndex::Referencers(AssetId id, uint32 kinds,
     return Result<void>::Success();
 }
 
+namespace {
+
+// ImportRecord를 읽지 못한 진단인지다(칸 ImportRecord — 색인 IndexImportRecord의
+// UnsupportedVersion· CorruptPackage, 패키지 판정의 그 섹션 손상).
+bool IsUnreadableRecord(const AssetIndexDiagnostic& diagnostic) noexcept {
+    return diagnostic.section == static_cast<uint32>(PackageSectionKind::ImportRecord);
+}
+
+bool ContainsId(Span<const AssetId> sorted, AssetId id) noexcept {
+    const usize at = algo::LowerBound(sorted, id, [](AssetId left, AssetId right) noexcept {
+        return CompareId(left, right) < 0;
+    });
+    return at < sorted.Size() && CompareId(sorted[at], id) == 0;
+}
+
+} // namespace
+
+Result<void> AssetIndex::MakeOrphanFacts(OrphanFacts& facts) const noexcept {
+    for (const AssetIndexDiagnostic& diagnostic : diagnostics_) {
+        if (diagnostic.asset.IsNull()) {
+            facts.unidentified = true;
+            continue;
+        }
+
+        if (auto pushed = facts.seen.TryPushBack(diagnostic.asset); !pushed) {
+            return pushed;
+        }
+
+        if (IsUnreadableRecord(diagnostic)) {
+            if (auto pushed = facts.unreadableRecords.TryPushBack(diagnostic.asset); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    auto less = [](AssetId left, AssetId right) noexcept { return CompareId(left, right) < 0; };
+    facts.seen.Sort(less);
+    facts.unreadableRecords.Sort(less);
+    return Result<void>::Success();
+}
+
+AssetOrphanReason AssetIndex::OrphanReasonWith(const AssetIndexEntry& entry,
+                                               const OrphanFacts* facts) const noexcept {
+    const AssetIndexImportSummary& record = entry.importRecord;
+    if (!record.present || record.owner == entry.id) {
+        return AssetOrphanReason::None;
+    }
+
+    const AssetId ownerId = record.owner;
+    // 진단 사실(표가 없으면 진단을 훑는다).
+    bool unidentified = false;
+    bool seen = false;
+    bool unreadableRecord = false;
+    if (facts != nullptr) {
+        unidentified = facts->unidentified;
+        seen = ContainsId(facts->seen.View(), ownerId);
+        unreadableRecord = ContainsId(facts->unreadableRecords.View(), ownerId);
+    } else {
+        for (const AssetIndexDiagnostic& diagnostic : diagnostics_) {
+            unidentified = unidentified || diagnostic.asset.IsNull();
+            const bool owner = diagnostic.asset == ownerId;
+            seen = seen || owner;
+            unreadableRecord = unreadableRecord || (owner && IsUnreadableRecord(diagnostic));
+        }
+    }
+
+    // owner 항목(같은 id 범위 — byId_는 id 순)이다.
+    const usize low =
+        algo::LowerBound(byId_.View(), ownerId, [&](usize index, AssetId key) noexcept {
+            return CompareId(entries_[index].id, key) < 0;
+        });
+    usize high = low;
+    bool anyOwned = false;
+    for (; high < byId_.Size() && CompareId(entries_[byId_[high]].id, ownerId) == 0; ++high) {
+        const AssetIndexEntry& owner = entries_[byId_[high]];
+        if (!owner.importRecord.present || !(owner.importRecord.owner == owner.id)) {
+            continue;
+        }
+
+        anyOwned = true;
+        for (AssetId output : owner.importRecord.outputs) {
+            if (output == entry.id) {
+                return AssetOrphanReason::None;
+            }
+        }
+    }
+
+    if (high == low) {
+        // owner가 색인에 없다 — 읽지 못한 패키지가 owner일 수 있으면 확정하지 않는다.
+        return unidentified || seen ? AssetOrphanReason::Undetermined
+                                    : AssetOrphanReason::OwnerMissing;
+    }
+
+    // owner 쪽 기록을 읽지 못했으면(그 기록이 이 출력을 적었을 수 있다) 확정하지 않는다.
+    if (unreadableRecord) {
+        return AssetOrphanReason::Undetermined;
+    }
+
+    return anyOwned ? AssetOrphanReason::NotListed : AssetOrphanReason::OwnerNotImporter;
+}
+
+AssetOrphanReason AssetIndex::OrphanReason(const AssetIndexEntry& entry) const noexcept {
+    return OrphanReasonWith(entry, nullptr);
+}
+
+Result<void> AssetIndex::Orphans(Array<const AssetIndexEntry*>& out) const noexcept {
+    OrphanFacts facts(*allocator_);
+    if (auto made = MakeOrphanFacts(facts); !made) {
+        return made;
+    }
+
+    for (const AssetIndexEntry& entry : entries_) {
+        const AssetOrphanReason reason = OrphanReasonWith(entry, &facts);
+        if (reason == AssetOrphanReason::None || reason == AssetOrphanReason::Undetermined) {
+            continue;
+        }
+
+        if (auto pushed = out.TryPushBack(&entry); !pushed) {
+            return pushed;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> AssetIndex::Verify(TypeRegistry* types,
                                 Array<AssetIndexDiagnostic>& out) const noexcept {
     for (const AssetIndexEntry& entry : entries_) {
@@ -1691,6 +1824,30 @@ Result<void> AssetIndex::Verify(TypeRegistry* types,
             out[out.Size() - 1].asset = entry.id;
             out[out.Size() - 1].relatedAsset = dependency.asset;
         }
+    }
+
+    // 고아 출력(경고 — 7.1절 17 A2e4, 판정할 수 없는 것은 뺀다).
+    OrphanFacts facts(*allocator_);
+    if (auto made = MakeOrphanFacts(facts); !made) {
+        return made;
+    }
+
+    for (const AssetIndexEntry& entry : entries_) {
+        const AssetOrphanReason reason = OrphanReasonWith(entry, &facts);
+        if (reason == AssetOrphanReason::None || reason == AssetOrphanReason::Undetermined) {
+            continue;
+        }
+
+        if (auto added = AddDiagnostic(out, AssetDiagnosticCode::OrphanedOutput,
+                                       ErrorCode::NotFound, entry.fileName.View());
+            !added) {
+            return added;
+        }
+
+        AssetIndexDiagnostic& orphan = out[out.Size() - 1];
+        orphan.asset = entry.id;
+        orphan.relatedAsset = entry.importRecord.owner;
+        orphan.detail = static_cast<uint64>(reason);
     }
 
     return Result<void>::Success();
@@ -1744,6 +1901,16 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
     case AssetDiagnosticCode::TypeMismatch:
         return line.TryAppendFormat("dependency {} has a different representative type\n",
                                     diagnostic.relatedAsset);
+    case AssetDiagnosticCode::OrphanedOutput: {
+        const StringView why =
+            diagnostic.detail == static_cast<uint64>(AssetOrphanReason::OwnerMissing)
+                ? StringView("is not in the index")
+            : diagnostic.detail == static_cast<uint64>(AssetOrphanReason::OwnerNotImporter)
+                ? StringView("has no import record of its own")
+                : StringView("does not list this output");
+        return line.TryAppendFormat("warning the owning import {} {}\n", diagnostic.relatedAsset,
+                                    why);
+    }
     default:
         return line.TryAppendFormat("package check failed (section {}, detail {}, {})\n",
                                     diagnostic.section, diagnostic.detail,

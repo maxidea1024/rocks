@@ -232,6 +232,11 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     if (!registered) {
         return 1;
     }
+    registered = registry.Register({"asset-orphans-delete", "Delete an orphaned import output.",
+                                    &RunAssetOrphansDeleteCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
     registered = registry.Register(
         {"asset-index-rebuild",
          "Rescan the project without the index cache, clean temporary files and rewrite the cache.",
@@ -242,6 +247,11 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     registered = registry.Register({"asset-index-verify",
                                     "Check the editor packages of the project and report problems.",
                                     &RunAssetIndexVerifyCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-orphans-list", "List the orphaned import outputs.",
+                                    &RunAssetOrphansListCommand, &allocator});
     if (!registered) {
         return 1;
     }

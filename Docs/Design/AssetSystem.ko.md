@@ -562,6 +562,15 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - `asset-fix-duplicate-id <path>`: 그 경로 항목이 색인에서 `duplicateId`여야 한다(아니면 InvalidArgument). 같은 id 패키지는 집합에 동시에 둘 수 없으므로(Registry가 id로 찾는다) 그 파일을 색인 대조 없이 여는 길(`EditorPackageSet::OpenForIdFix(fileName)` — 같은 id의 다른 파일이 집합에 열려 있으면 Busy, 그 파일이 dirty면 진단 줄이 먼저 저장하라고 알린다)로 열어 새 id로 같은 경로에 다시 쓰고(복제와 같은 writer 옵션, 소유 ImportRecord의 owner·outputs도 바꾼다) 닫는다. 다른 패키지의 그 id 참조는 남은 쪽을 가리킨다(출력에 적는다). 대상이 다른 임포트의 출력이면 소유자의 outputs가 옛 id를 가리키므로 고아가 된다(경고 `OrphanedOutput`).
       - 고아 출력: 색인 ImportRecord 요약에 outputs의 AssetId 목록을 더한다(캐시 형식 버전·판정 의미 버전을 올린다). 고아 = 참조 기록(owner ≠ 자신)인 항목 가운데 owner가 색인에 없거나, owner 항목의 기록이 없거나, owner 기록의 outputs에 자신이 없는 것. `AssetIndex::Orphans(out)`, `Verify`가 고아마다 `OrphanedOutput` 진단(경고)을 더한다 — `asset-index-verify`는 진단 줄을 쓰되 경고만이면 종료 0(13절 "경고만 있으면 0").
       - 명령 `asset-orphans-list`(잠금 없음 — `<path> <AssetId> owner <owner path|AssetId|missing>`), `asset-orphans-delete <path>`(잠금 — 고아가 아니면 InvalidArgument, 그 밖은 삭제와 같은 규칙, 참조자가 있으면 거부 — 강제는 asset-delete --force).
+      - 단계: A2e4a(고아 출력·명령 둘)와 A2e4b(`asset-fix-duplicate-id`)로 나눠 각각 리뷰한다.
+      - A2e4a 구현 세부(2026-11-22, 권장안으로 확정):
+        - 색인 요약: `AssetIndexImportSummary::outputs`(출력 AssetId 목록 — 기록의 outputKey byte 순, 참조 기록은 빈 목록)가 출력 수 칸을 대신한다. 캐시는 항목 칸이 바뀌므로 항목 스키마 버전을 올린다(`AssetIndexCacheSchemaVersion` 2 — 헤더 주석 규칙, 위 "형식·판정 의미 버전"은 이 스키마 버전을 뜻한다 — 판정 규칙은 바뀌지 않는다). 캐시의 출력 수는 `MaxImportOutputs`(1024)를 넘으면 그 캐시를 버린다(신뢰하지 않는 입력).
+        - 판정: 참조 기록(owner ≠ 자신)인 항목마다 owner 항목(같은 id 범위 — id 순 색인 `byId_`에서 이진 검색, 폴더를 통째로 복사해 모든 id가 겹쳐도 항목마다 그 범위만 본다)을 찾는다. 그 가운데 하나라도 자신을 적으면 고아가 아니다. 아니면 — 판정할 수 없음(`Undetermined` — 고아가 아니다: 목록·경고·지우기 대상이 아니다, A2e4a 리뷰 필수): owner가 색인에 없는데 그 id의 진단(읽지 못한 패키지 — 헤더 id는 읽었다)이나 id를 모르는 진단(손상·이름 규칙·열거 실패·사라진 파일)이 하나라도 있을 때(읽지 못한 파일이 owner일 수 있다), owner 항목은 있는데 그 id의 ImportRecord를 읽지 못했을 때(칸 ImportRecord 진단 — 더 새 스키마·형식 위반, 그 기록이 자신을 적었을 수 있다). 그 밖에 owner가 없으면 사유 1(OwnerMissing), 소유 기록이 하나라도 있으면 사유 3(NotListed), 없으면 사유 2(OwnerNotImporter). 진단은 그 파일이 캐시에 들어가지 않아 늘 지금 상태다(7.1절 16). `AssetIndex::Orphans(out)`(경로 키 순 — 진단 id 표를 한 번 만든다)와 `OrphanReason(entry)`(진단을 한 번 훑는다 — 할당 없음). 처음 구현은 읽지 못한 기록·패키지를 고아로 단정해 `asset-orphans-delete`가 정상 출력을 지울 수 있었고(동료의 더 새 임포터 기록 등), 같은 id owner를 찾으려 항목 전체를 훑어 O(n²)이 될 수 있었다.
+        - 진단: `AssetDiagnosticCode::OrphanedOutput`(경고 — asset = 고아, relatedAsset = owner, detail = 사유). `Verify`가 고아마다 더한다. 줄은 `OrphanedOutput: Content/<파일>: warning the owning import <id> is not in the index` / `… has no import record of its own` / `… does not list this output`. `AssetIndexDiagnosticIsWarning`이 경고 종류를 정하고 `asset-index-verify`는 경고 아닌 진단이 있을 때만 종료 1이다(요약의 진단 수는 경고 포함).
+        - 서비스 `AssetService::DeleteOrphan(lock, path, result, warnings, failure)`: 경로(별칭으로 풀지 않는다)의 색인 항목이 고아가 아니면 InvalidArgument(진단 `OrphanedOutput`이 아닌 None — 고아가 아닌 것은 진단이 없다, 같은 경로 키 둘은 DuplicatePath, 없음은 NotFound), 고아면 `Delete(lock, path, force = false)`와 같다(디스크·메모리 참조자가 있으면 거부 — 강제는 `asset-delete --force`).
+        - 명령: `asset-orphans-list`(잠금 없음 — 표준 출력에 경로 키 순으로 `<path> <AssetId> owner <owner path|AssetId|missing>`, owner가 색인에 하나면 그 경로, 같은 id 둘 이상이면 AssetId, 없으면 missing, 요약 없음), `asset-orphans-delete <path>`(잠금 — 출력은 asset-delete와 같다).
+        - 기존 시험 fixture의 영향: 색인 시험의 Hero는 색인에 없는 owner(ImportOwnerId)를 가리키는 참조 기록이라 이제 고아다 — 의존 대조 시험은 Verify 결과에서 고아 경고를 떼어 그 수를 따로 단언한다(`TakeOrphans`). 명령 시험 fixture(`AssetIndexCommandletFixtures.h`)에 고아 출력 둘(Orphan 2311 — owner 2312 없음, HeroOrphan 2313 — 기록 없는 Hero가 owner)을 더했다(기존 배열은 그대로).
+        - 상태: **구현** — 대조표 14.1.41절, coverage 14.1.42절.
     - 시험 기반: 메모리 파일 시스템에 Move(파일·디렉터리, `replaceExisting` 거짓, 대소문자만 바꾸는 이름 변경 = 같은 노드, 하위 노드 경로 바꾸기)와 n번째 Move·Delete 실패·오류 종류 주입(Busy·AccessDenied·AlreadyExists)을 더한다. 실제 디스크 시험 하나: 읽지 않은 bulk가 있는 열린 패키지를 가진 디렉터리를 이동(Windows는 안에 열린 핸들이 있는 디렉터리 이름을 바꾸지 못한다 — Detach가 캐시 핸들을 모두 닫는지 본다).
     - 버린 대안: UE처럼 필요할 때만 별칭(Rocks는 텍스트 참조를 고칠 수 없으므로 늘 만든다), 이동 뒤 별칭 쓰기(실패하면 별칭을 더할 명령이 없어 텍스트 참조가 조용히 깨진다 — 교차 검증 필수), 에셋마다 디렉터리 이동(중간 상태가 남는다), 강제 삭제가 디스크 참조자를 null로 고쳐 쓰기(사용자가 모르는 많은 파일을 바꾼다 — UE도 디스크는 건드리지 않는다), 강제 삭제가 열린 참조자를 null·dirty로(UE 방식 — 사용자가 저장하면 조용히 참조를 잃는다, Busy로 먼저 알린다), 복제를 파일 byte 복사 + id 바꾸기로(저장하지 않은 편집을 잃는다), 별칭 점유를 `EditorPackageSet`에(라이브러리가 사용자 데이터 파일을 알게 된다), 별칭 파일 JSON5(도구가 다시 쓰는 파일은 엄격 JSON).
 
@@ -2331,6 +2340,41 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 리뷰: 1차 미충족(필수 하나 — 소유 기록 복제가 형제 출력까지 사본 기록에 남겨 사본이 남의 출력의 소유를 주장했다, 원본 자신의 출력만 남기게 고쳤다). 권장 셋 반영: hook 문맥에 저장할 id(`AssetTypeHookContext::asset`), 빠진 조합(struct·원소 안 DuplicateTransient — fixture `DuplicableSlot`, Detach 뒤 원본, `AddUnsaved` bulk), 복제도 고아 임시 파일 정리.
 
 시험이 찾은 것: (1) 서비스의 `<path|AssetId>` 열기가 저장하지 않은 새 패키지를 경로로 찾지 못했다(Info·Set·Duplicate 공통) — 같은 경로 키의 새 패키지를 준다. (2) 실제 디스크 시험이 다음 Open 뒤의 `EditorPackageInfo` 포인터를 다시 써 크래시했다(시험 결함 — API 계약대로 다시 찾는다).
+
+#### 14.1.41 요구 대조표(A2e4a — 고아 출력)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetOrphanTests.cpp`(3개), 기존 색인·캐시 시험의 갱신(`AssetIndex_*` 넷 — 고아 경고를 떼고 단언, `AssetIndexCache_RejectsUntrustedInput` — 출력 목록 형식·상한, `AssetIndex_CommandletFixtureBytes` — 고아 fixture 둘)과 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-orphans-*·verify 경고" 항목 20개(Windows 전용 2개)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 판정 불가(7.1-17 A2e4a 리뷰) | owner 기록 읽지 못함(다른 스키마 UnsupportedVersion·형식 위반 CorruptPackage — 칸 ImportRecord), owner 패키지 읽지 못함(헤더 id가 있는 손상 — 칸이 ImportRecord가 아님), id를 모르는 진단(손상 파일)이 있을 때의 없는 owner — 모두 Undetermined·목록·경고 없음·DeleteOrphan 거부, 판정 사실 표의 할당 실패, 손상 파일을 지우면 OwnerMissing으로 바뀜 | `AssetOrphan_Undetermined` |
+| 판정(7.1-17 A2e4a) | 소유 기록이 적은 출력 아님, 적지 않음 NotListed, owner 없음 OwnerMissing, owner가 기록 없음·참조 기록 OwnerNotImporter, 같은 id owner 둘 — 하나라도 적으면 아님·소유 기록 있고 적지 않으면 NotListed·기록 없으면 OwnerNotImporter, 기록 없는 항목·소유 기록 항목·같은 id 항목 자신은 아님 | `AssetOrphan_Judgement` |
+| 목록·진단(7.1-17 A2e4a, 13) | Orphans 경로 키 순, Verify 고아마다 경고(asset·relatedAsset·detail·NotFound), 줄 셋(is not in the index·has no import record of its own·does not list this output), 경고 판정(고아만), Orphans·Verify 할당 실패 | `AssetOrphan_Judgement` |
+| 캐시(7.1-16, 7.1-17 A2e4a) | 출력 목록 왕복(캐시 재사용 색인이 새 검색과 같음), 출력 수 상한 초과 캐시 버림, 스키마 버전 2 | `AssetOrphan_Judgement`, `AssetIndexCache_RejectsUntrustedInput` |
+| 기존 색인 시험(7.1-13·14) | 고아 경고를 뗀 나머지 의존 대조 그대로, 고아 수(id를 모르는 진단이 없는 장면은 Hero 하나, 손상·이름 규칙 진단이 있는 장면은 판정 불가라 0) | `AssetIndex_DiskScanAndQueries`·`AssetIndex_Diagnostics`·`AssetIndex_VerifyTypes`·`AssetIndex_AllocationFailures` |
+| 서비스 DeleteOrphan(7.1-17 A2e4a) | Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath, 없음 NotFound, 같은 경로 키 둘 DuplicatePath, 고아 아님 InvalidArgument(진단 None·asset), 참조자가 있는 고아 ReferencedBy(related·목록), 고아 지우기(색인이 새 검색과 같음), 긴 경로 해석·지우기의 할당 실패, 같은 서비스에서 owner를 지운 뒤(force — 출력이 ImportOwner로 참조) 그 출력이 곧바로 고아로 지워짐 | `AssetOrphan_ServiceDelete` |
+| 명령(13, 7.1-17 A2e4a) | 목록 줄(경로 키 순·owner 경로·missing·같은 id owner는 AssetId), 경고만인 verify 종료 0과 요약, 오류와 경고가 섞인 verify 종료 1, 고아 아님 거부 줄, 고아 지우기 줄·다시 목록, 없는 고아 NotFound, Content가 파일이면 검색 실패, 잠금 Busy·잠금 없는 목록(Windows), 사용법 다섯·도움말 둘·프로젝트 없음 둘 | C# 20개 |
+| 조합(14 완료 조건 2) | 기록 상태(없음·소유·참조) × owner 상태(있음·없음·기록 없음·참조 기록·기록 읽지 못함·패키지 읽지 못함·같은 id 둘의 조합) × 다른 진단(없음·id를 모르는 진단) × 출력 목록(적음·적지 않음) × 연산(판정·목록·검증·지우기·캐시) | 위 시험 |
+
+#### 14.1.42 Coverage(A2e4a)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetOrphan,AssetIndex -Sources Engine/Source/Developer/AssetDatabase/Private`, 명령은 C# 시험 구동기.
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `AssetIndex::OrphanReason`·`OrphanReasonWith`·`MakeOrphanFacts`·`Orphans`·Verify 고아 진단·진단 줄, 요약 출력 목록(검색·캐시 재사용) | 모두 닿음 | 모두 닿음 |
+| `AssetIndexCache.cpp` 출력 목록 읽기·쓰기 | 모두 닿음 | 모두 닿음 |
+| `AssetService::DeleteOrphan` | 모두 닿음 | 모두 닿음 |
+| `RunAssetOrphansListCommand`·verify 종료 코드·`RunDelete`(asset-delete·asset-orphans-delete 공용) | 할당·출력 실패 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `RunAssetOrphansListCommand` 캐시 적재·Orphans·줄 서식 할당 실패, 검색의 할당 실패 | 실패 | 프로세스 시험은 명령 allocator에 실패를 주입할 수 없다(14.1.26과 같다 — 같은 경로는 C++ 할당 실패 시험이 돈다) |
+| 목록·verify·지우기 줄 쓰기 실패 | 실패 | 14.1.36과 같다 |
+
+리뷰: 1차 미충족(필수 둘 — 판정할 수 없는 경우를 고아로 단정, 같은 id owner 찾기의 O(n²)). `Undetermined`와 id 범위 이진 검색으로 고쳤고, 권장(같은 서비스에서 owner를 지운 뒤 출력 판정 — 시험, `TakeOrphans` 뒤 빈 줄)도 반영했다. 판정 불가는 목록에 나오지 않으므로 `unknown` 표기는 두지 않는다. 기록을 읽지 못한 진단 판정은 칸(ImportRecord)만 본다 — 그 칸의 진단은 UnsupportedVersion·CorruptPackage뿐이라 코드 대조는 닿을 수 없는 분기였다.
 
 ## 15. PNG 디코더 범위
 

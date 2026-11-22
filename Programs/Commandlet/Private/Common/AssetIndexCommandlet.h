@@ -17,6 +17,8 @@ namespace rocks::commandlet_host {
 Result<int32> RunAssetListCommand(void* context, Span<const StringView> args,
                                   CommandletOutput& output) noexcept;
 
+Result<int32> RunAssetOrphansListCommand(void* context, Span<const StringView> args,
+                                         CommandletOutput& output) noexcept;
 Result<int32> RunAssetIndexVerifyCommand(void* context, Span<const StringView> args,
                                          CommandletOutput& output) noexcept;
 // asset-index-rebuild [--project=<dir>] [--wait=<seconds>] — 쓰기 잠금을 잡고 캐시 없이 다시

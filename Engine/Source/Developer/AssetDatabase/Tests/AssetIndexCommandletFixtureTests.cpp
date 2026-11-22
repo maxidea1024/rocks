@@ -1,6 +1,7 @@
 #include "../../../Runtime/AssetRuntime/Tests/AssetFixtureValues.h"
 #include "AssetIndexCommandletFixtures.h"
 
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Platform/File.h>
 #include <stdio.h>
@@ -12,7 +13,9 @@
 // 다르면 새 헤더 내용을 현재 디렉터리의 AssetIndexCommandletFixtures.h.new에 쓰고 실패한다(그
 // 파일로 헤더를 바꾼다). 장면: Hero(2300, TestAsset — Hard → Base, Soft → 2309 "Sub", 태그
 // Kind=Hero), Base(2301, BaseGameAsset), 같은 id의 DerivedGameAsset 대표(형식 대조용), Newer(2310,
-// 엔진 99.0.0 저장 — 명령 엔진보다 새 패키지). 엔진 0.1.0 저장(명령 엔진 버전 이하).
+// 엔진 99.0.0 저장 — 명령 엔진보다 새 패키지), 고아 출력 둘(A2e4 — Orphan(2311)은 색인에 없는
+// owner 2312, HeroOrphan(2313)은 기록이 없는 Hero를 owner로 가리키는 참조 기록). 엔진 0.1.0
+// 저장(명령 엔진 버전 이하).
 using namespace rocks;
 namespace asset_index_commandlet_fixture_tests_file {
 
@@ -24,6 +27,9 @@ constexpr uint64 HeroId = 2300;
 constexpr uint64 BaseId = 2301;
 constexpr uint64 MissingSoftId = 2309;
 constexpr uint64 NewerId = 2310;
+constexpr uint64 OrphanId = 2311;
+constexpr uint64 MissingOwnerId = 2312;
+constexpr uint64 HeroOrphanId = 2313;
 constexpr EngineVersion FixtureEngineVersion{0, 1, 0};
 constexpr EngineVersion NewerEngineVersion{99, 0, 0};
 // 배열 한 줄의 byte 수다(clang-format 100열 안).
@@ -33,13 +39,16 @@ const PackageTagInput HeroTags[] = {{"Kind", "Hero"}};
 
 struct Fixtures {
     explicit Fixtures(Allocator& allocator) noexcept
-        : hero(allocator), base(allocator), baseAsDerived(allocator), newer(allocator) {
+        : hero(allocator), base(allocator), baseAsDerived(allocator), newer(allocator),
+          orphan(allocator), heroOrphan(allocator) {
     }
 
     Array<uint8> hero;
     Array<uint8> base;
     Array<uint8> baseAsDerived;
     Array<uint8> newer;
+    Array<uint8> orphan;
+    Array<uint8> heroOrphan;
 };
 
 template <class T>
@@ -58,6 +67,29 @@ PackageWriteOptions FixtureOptions(EngineVersion version) noexcept {
     PackageWriteOptions options = EditorOptions();
     options.engineVersion = version;
     return options;
+}
+
+// id 패키지(TestAsset)를 owner를 가리키는 참조 기록 + ImportOwner 의존으로 쓴다.
+Array<uint8> WriteOutput(AssetEnv& env, uint64 id, uint64 owner) noexcept {
+    ObjectRegistry& registry = *env.source;
+    RootRef<Package> package;
+    if (MakeRepresentative<TestAsset>(registry, id, package).IsNull()) {
+        return Array<uint8>(env.allocator);
+    }
+
+    ImportRecordInput input;
+    input.owner = FixedId(owner);
+    auto record = WriteImportRecord(env.allocator, FixedId(id), input);
+    if (!record) {
+        return Array<uint8>(env.allocator);
+    }
+
+    const PackageDependencyEntry owners[] = {
+        {FixedId(owner), PackageDependencyKind::ImportOwner, TypeId{}, false}};
+    PackageWriteOptions options = FixtureOptions(FixtureEngineVersion);
+    options.importRecord = record.Value().View();
+    options.extraDependencies = owners;
+    return Write(env.allocator, registry, package.Handle(), options);
 }
 
 bool MakeFixtures(AssetEnv& env, Fixtures& out) noexcept {
@@ -95,8 +127,10 @@ bool MakeFixtures(AssetEnv& env, Fixtures& out) noexcept {
 
     out.baseAsDerived = Write(env.allocator, variants, derivedPackage.Handle(),
                               FixtureOptions(FixtureEngineVersion));
+    out.orphan = WriteOutput(env, OrphanId, MissingOwnerId);
+    out.heroOrphan = WriteOutput(env, HeroOrphanId, HeroId);
     return !out.hero.IsEmpty() && !out.base.IsEmpty() && !out.newer.IsEmpty() &&
-           !out.baseAsDerived.IsEmpty();
+           !out.baseAsDerived.IsEmpty() && !out.orphan.IsEmpty() && !out.heroOrphan.IsEmpty();
 }
 
 bool Same(Span<const uint8> expected, const Array<uint8>& actual) noexcept {
@@ -133,7 +167,9 @@ TEST(AssetIndex_CommandletFixtureBytes) {
         Same(asset_index_fixtures::CommandletHeroPackage, fixtures.hero) &&
         Same(asset_index_fixtures::CommandletBasePackage, fixtures.base) &&
         Same(asset_index_fixtures::CommandletBaseAsDerivedPackage, fixtures.baseAsDerived) &&
-        Same(asset_index_fixtures::CommandletNewerPackage, fixtures.newer);
+        Same(asset_index_fixtures::CommandletNewerPackage, fixtures.newer) &&
+        Same(asset_index_fixtures::CommandletOrphanPackage, fixtures.orphan) &&
+        Same(asset_index_fixtures::CommandletHeroOrphanPackage, fixtures.heroOrphan);
     if (!same) {
         String text(env.allocator);
         REQUIRE(AppendArray(text, "CommandletHeroPackage", fixtures.hero));
@@ -143,6 +179,10 @@ TEST(AssetIndex_CommandletFixtureBytes) {
         REQUIRE(AppendArray(text, "CommandletBaseAsDerivedPackage", fixtures.baseAsDerived));
         REQUIRE(text.TryAppend("\n"));
         REQUIRE(AppendArray(text, "CommandletNewerPackage", fixtures.newer));
+        REQUIRE(text.TryAppend("\n"));
+        REQUIRE(AppendArray(text, "CommandletOrphanPackage", fixtures.orphan));
+        REQUIRE(text.TryAppend("\n"));
+        REQUIRE(AppendArray(text, "CommandletHeroOrphanPackage", fixtures.heroOrphan));
         platform::File file;
         REQUIRE(
             file.Open("AssetIndexCommandletFixtures.h.new", platform::FileOpenMode::CreateAlways));

@@ -209,6 +209,17 @@ public:
                         AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
                         AssetDiagnostic* failure = nullptr) noexcept;
 
+    // asset-orphans-delete <path>: 고아 출력(7.1절 17 A2e4 — AssetIndex::OrphanReason)만 지운다.
+    // 경로는 지금 이름이다(별칭으로 풀지 않는다). 고아면 Delete(lock, path, force = false)와 같다
+    // (참조자가 있으면 거부 — 강제는 asset-delete --force).
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 고아가 아님 InvalidArgument(진단 None), Delete의 오류.
+    Result<void> DeleteOrphan(const AssetDatabaseLock& lock, StringView path,
+                              AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
+                              AssetDiagnostic* failure = nullptr) noexcept;
+
     // asset-duplicate <path|AssetId> <새 path>: 원본을 열고(열기와 같다 — 별칭을 따른다) 그 메모리
     // 상태를 새 id로 새 경로에 쓴다(7.1절 17 A2e3b — EditorPackageSet::Duplicate). 대상 경로가
     // 어느 에셋의 별칭이든 점유다(새 에셋에는 별칭이 없다). 사본은 열지 않는다.

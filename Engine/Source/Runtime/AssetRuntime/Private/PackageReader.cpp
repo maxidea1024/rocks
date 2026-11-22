@@ -908,6 +908,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "CorruptAliasTable";
     case AssetDiagnosticCode::ReferencedBy:
         return "ReferencedBy";
+    case AssetDiagnosticCode::OrphanedOutput:
+        return "OrphanedOutput";
     }
 
     return "Unknown";
