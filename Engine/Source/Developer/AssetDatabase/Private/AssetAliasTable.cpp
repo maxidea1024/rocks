@@ -75,44 +75,6 @@ bool HasExactKeys(JsonValue object, Span<const StringView> keys) noexcept {
     return true;
 }
 
-// path(Config 루트 기준 절대 경로)를 읽는다. 없으면 existed 거짓·빈 bytes.
-Result<void> ReadWhole(platform::FileSystem& files, StringView path, uint64 limit,
-                       Array<uint8>& bytes, bool& existed, bool& tooLarge) noexcept {
-    existed = false;
-    tooLarge = false;
-    platform::File file;
-    if (auto opened =
-            file.Open(files, path.Data(), path.ByteCount(), platform::FileOpenMode::ReadExisting);
-        !opened) {
-        return opened.code == platform::FileCode::NotFound
-                   ? Result<void>::Success()
-                   : Result<void>::Failure(FileErrorCode(opened));
-    }
-
-    existed = true;
-    uint64 size = 0;
-    if (auto sized = file.Size(size); !sized) {
-        return Result<void>::Failure(FileErrorCode(sized));
-    }
-
-    if (size > limit) {
-        tooLarge = true;
-        return Result<void>::Success();
-    }
-
-    if (auto resized = bytes.TryResize(static_cast<usize>(size)); !resized) {
-        return resized;
-    }
-
-    // 크기를 잰 뒤 줄었으면 EndOfFile — IO 오류로 보고 다시 시도하게 한다(쓰는 중인 파일).
-    const platform::FileTransfer read = file.ReadExact(bytes.Data(), bytes.Size());
-    if (!read.status) {
-        return Result<void>::Failure(FileErrorCode(read.status));
-    }
-
-    return Result<void>::Success();
-}
-
 bool ByKey(const AssetAlias& left, const AssetAlias& right) noexcept {
     return StringView::CompareBytes(left.key.View(), right.key.View()) < 0;
 }
@@ -292,7 +254,8 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
     Array<uint8> bytes(*allocator_);
     bool existed = false;
     bool tooLarge = false;
-    if (auto read = ReadWhole(files, path.View(), MaxAssetAliasFileBytes, bytes, existed, tooLarge);
+    if (auto read = asset_database_detail::ReadWhole(files, path.View(), MaxAssetAliasFileBytes,
+                                                     bytes, existed, tooLarge);
         !read) {
         return read.Error() == ErrorCode::OutOfMemory ? Result<void>::Failure(read.Error())
                                                       : FailIo<void>(failure, read.Error());
@@ -499,7 +462,8 @@ Result<bool> AssetAliasTable::Unchanged(platform::FileSystem& files) const noexc
     Array<uint8> bytes(*allocator_);
     bool existed = false;
     bool tooLarge = false;
-    if (auto read = ReadWhole(files, path.View(), MaxAssetAliasFileBytes, bytes, existed, tooLarge);
+    if (auto read = asset_database_detail::ReadWhole(files, path.View(), MaxAssetAliasFileBytes,
+                                                     bytes, existed, tooLarge);
         !read) {
         return Result<bool>::Failure(read.Error());
     }
@@ -874,8 +838,9 @@ Result<void> AssetAliasTable::Prune(platform::FileSystem& files, const AssetData
             Array<uint8> bytes(*allocator_);
             bool existed = false;
             bool tooLarge = false;
-            if (auto read = ReadWhole(files, StringView(full.Data(), full.Size()),
-                                      limits.maxFileBytes, bytes, existed, tooLarge);
+            if (auto read =
+                    asset_database_detail::ReadWhole(files, StringView(full.Data(), full.Size()),
+                                                     limits.maxFileBytes, bytes, existed, tooLarge);
                 !read) {
                 return read.Error() == ErrorCode::OutOfMemory ? Result<void>::Failure(read.Error())
                                                               : FailIo<void>(failure, read.Error());

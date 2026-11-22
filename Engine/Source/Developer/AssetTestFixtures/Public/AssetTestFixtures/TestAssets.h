@@ -128,4 +128,31 @@ struct TestHookAsset final : Asset {
     ROCKS_PROPERTY() ObjectRef<TestAsset> typed;
 };
 
+// 시험 임포터의 옵션이다(AssetSystem.ko.md 7.1절 18 — A2f): scale은 값 배율, failAt은 0이 아니면
+// 시험 임포터가 그 단계에서 실패한다.
+ROCKS_STRUCT()
+struct TestImportOptions {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 scale = 1;
+    ROCKS_PROPERTY() int32 failAt = 0;
+};
+
+// 주 출력(TestAsset)의 속성 이름과 겹치는 옵션이다(도구 이름 Value — value와 대소문자만 다르다,
+// 등록 거부 시험).
+ROCKS_STRUCT()
+struct CollidingImportOptions {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY(Name = "Value") int32 conflicting = 0;
+};
+
+// 명령 예약 이름과 겹치는 옵션이다(등록 거부 시험).
+ROCKS_STRUCT()
+struct ReservedImportOptions {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 source = 0;
+};
+
 } // namespace rocks::asset_fixture

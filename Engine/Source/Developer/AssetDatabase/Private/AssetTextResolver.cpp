@@ -21,7 +21,7 @@ bool SplitReference(StringView text, StringView& head, StringView& objectPath) n
     for (usize index = 0; index < text.ByteCount(); ++index) {
         if (text.Data()[index] == ObjectPathSeparator) {
             head = StringView(text.Data(), index);
-            objectPath = StringView(text.Data() + index + 1, text.ByteCount() - index - 1);
+            objectPath = text.SliceBytes(index + 1, text.ByteCount() - index - 1);
             return !objectPath.IsEmpty();
         }
     }
@@ -39,8 +39,7 @@ Result<void> ValidateObjectPath(StringView path, Allocator& scratch) noexcept {
             continue;
         }
 
-        if (auto valid =
-                ValidateNameComponent(StringView(path.Data() + start, index - start), scratch);
+        if (auto valid = ValidateNameComponent(path.SliceBytes(start, index - start), scratch);
             !valid) {
             return valid;
         }

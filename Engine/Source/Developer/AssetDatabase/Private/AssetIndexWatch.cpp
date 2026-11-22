@@ -32,7 +32,7 @@ StringView ValidPrefix(StringView path) noexcept {
             continue;
         }
 
-        if (!StringView(path.Data() + start, at - start).IsValidUtf8()) {
+        if (!path.SliceBytes(start, at - start).IsValidUtf8()) {
             break;
         }
 

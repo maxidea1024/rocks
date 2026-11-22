@@ -25,7 +25,7 @@ StringView ComponentAt(StringView text, usize begin) noexcept {
         ++end;
     }
 
-    return StringView(text.Data() + begin, end - begin);
+    return text.SliceBytes(begin, end - begin);
 }
 
 Result<LogicalPath> Fail(LogicalPathFailure* failure, LogicalPathError error, uint32 component = 0,
@@ -111,7 +111,7 @@ StringView LogicalPath::Relative() const noexcept {
         return StringView();
     }
 
-    return StringView(text.Data() + mountBytes_ + 1, text.ByteCount() - mountBytes_ - 1);
+    return text.SliceBytes(mountBytes_ + 1, text.ByteCount() - mountBytes_ - 1);
 }
 
 StringView LogicalPath::Name() const noexcept {
@@ -126,7 +126,7 @@ StringView LogicalPath::Name() const noexcept {
         --begin;
     }
 
-    return StringView(text.Data() + begin, text.ByteCount() - begin);
+    return text.SliceBytes(begin, text.ByteCount() - begin);
 }
 
 StringView LogicalPath::Directory() const noexcept {

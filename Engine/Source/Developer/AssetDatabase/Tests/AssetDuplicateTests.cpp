@@ -109,7 +109,7 @@ Result<PackageContents> ReadFile(AssetEnv& env, DuplicateScene& scene,
 // Leaf를 ImportRecord가 있는 모양으로 바꾼다: owned면 소유 기록(출력 Leaf·Base), 아니면 Base가
 // 소유한 출력의 참조 기록 + ImportOwner 의존.
 bool PutLeafRecord(AssetEnv& env, Sources& sources, DuplicateScene& scene, bool owned) noexcept {
-    const ImportSourceInput recordSources[] = {{"source", "", "Leaf.png", Sha256Digest{}, 1}};
+    const ImportSourceInput recordSources[] = {{"source", "Raw", "Leaf.png", Sha256Digest{}, 1}};
     const ImportOutputInput recordOutputs[] = {{"leaf", FixedId(LeafId), IdOf<TestAsset>()},
                                                {"extra", FixedId(BaseId), IdOf<BaseGameAsset>()}};
     const PackageDependencyEntry owner[] = {

@@ -45,6 +45,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::CollidingImportOptions::conflicting",
+      "id": "e5c26bc99abd419d8e25e36d19b55980",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::ComboAsset::fArray",
       "id": "f79bf74c5ccc450981e66b379686aac2",
       "aliases": [],
@@ -2565,6 +2572,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::ReservedImportOptions::source",
+      "id": "8cb1b6013bfb4c57b35df1a37e43c2ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::SimpleAsset::big",
       "id": "5bab38c0adc74bbeabcd589079124493",
       "aliases": [],
@@ -2735,6 +2749,20 @@
       "kind": "field",
       "name": "rocks::asset_fixture::TestHookAsset::typed",
       "id": "185dc68d22f74976b4b5909d61027314",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestImportOptions::failAt",
+      "id": "7bdac4816fbc473a85ff35b0640edf63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestImportOptions::scale",
+      "id": "d3d005b6f29e4890a1e89fddbff4d705",
       "aliases": [],
       "retired": false
     },
@@ -2924,6 +2952,13 @@
       "kind": "type",
       "name": "rocks::asset_fixture::BulkAsset",
       "id": "19f912214c2e464995265356b860685d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::CollidingImportOptions",
+      "id": "a6079a3a943349c6a4b4b47653d1ff68",
       "aliases": [],
       "retired": false
     },
@@ -3314,6 +3349,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::asset_fixture::ReservedImportOptions",
+      "id": "4554aa69fdd7466aa67cd6191bacec64",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::asset_fixture::SimpleAsset",
       "id": "f72e2f001bb440d09e6cd17e9f8c4a6f",
       "aliases": [],
@@ -3337,6 +3379,13 @@
       "kind": "type",
       "name": "rocks::asset_fixture::TestHookAsset",
       "id": "be5c6dbcf1a346efbd2e866fffb494ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestImportOptions",
+      "id": "88fd1b28e4324415a3564cd6d406276e",
       "aliases": [],
       "retired": false
     },

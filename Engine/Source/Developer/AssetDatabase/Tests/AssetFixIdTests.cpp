@@ -131,7 +131,7 @@ Result<PackageContents> ReadFile(AssetEnv& env, FixScene& scene, StringView rela
 // 아니면 owner의 참조 기록 + ImportOwner 의존.
 Array<uint8> WithRecord(AssetEnv& env, Sources& sources, usize slot, uint64 self, uint64 owner,
                         Span<const ImportOutputInput> outputs) noexcept {
-    const ImportSourceInput recordSources[] = {{"source", "", "Leaf.png", Sha256Digest{}, 1}};
+    const ImportSourceInput recordSources[] = {{"source", "Raw", "Leaf.png", Sha256Digest{}, 1}};
     const PackageDependencyEntry ownerDependency[] = {
         {FixedId(owner), PackageDependencyKind::ImportOwner, TypeId{}, false}};
     ImportRecordInput input;
