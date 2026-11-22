@@ -76,15 +76,16 @@ struct BoneHierarchy {
 // 오류: 위반은 failure->code InvalidSkeletonData, ErrorCode InvalidArgument(본 수만
 // CapacityExceeded) 이고 issue·index(본 번호)·related(중복이면 앞 본)가 위치다. role은
 // Skeleton이다. 할당 실패는 진단 코드 없이 그 오류다. 스레드: hierarchy를 읽기만 한다.
-Result<void> ValidateBoneHierarchy(const BoneHierarchy& hierarchy, Allocator& scratch,
-                                   SkeletonDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void>
+ValidateBoneHierarchy(const BoneHierarchy& hierarchy, Allocator& scratch,
+                      SkeletonDiagnostic* failure = nullptr) noexcept;
 
 // 기준 pose 회전을 단위 quaternion으로 정규화한다(6.1절 "저장 전에 정규화" — UE FQuat::Normalize:
 // 길이²가 BoneRotationMinimumLengthSquared 미만이면 단위 회전). 비유한 회전은 그대로 둔다(검증이
 // 거부한다). 바꾼 회전 수를 돌려준다(이미 길이² = 1이면 바꾸지 않는다).
-uint32 NormalizeBoneReferencePose(BoneHierarchy& hierarchy) noexcept;
+ROCKS_ANIMATION_API uint32 NormalizeBoneReferencePose(BoneHierarchy& hierarchy) noexcept;
 
 // name인 본의 번호다(Name 비교 규칙, 앞에서부터 첫 일치). 없으면 NoParentBone이다.
-int32 FindBoneIndex(const BoneHierarchy& hierarchy, Name name) noexcept;
+ROCKS_ANIMATION_API int32 FindBoneIndex(const BoneHierarchy& hierarchy, Name name) noexcept;
 
 } // namespace rocks

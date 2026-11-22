@@ -32,7 +32,7 @@ struct ClipTrack {
 // ClipSourceData에 그대로 있다.
 //
 // 수명: 할당기는 이 객체보다 오래 살아야 한다. 스레드: 동기화하지 않는다.
-struct ClipSource {
+struct ROCKS_ANIMATION_API ClipSource {
     explicit ClipSource(Allocator& allocator) noexcept : tracks(allocator) {
     }
 
@@ -63,7 +63,7 @@ struct ClipPlaybackTrack {
 // 쿠킹 재생 데이터 v1의 메모리 형태다(7.4절 — ClipPlaybackData의 tracks bulk를 푼 것).
 //
 // 수명: 할당기는 이 객체보다 오래 살아야 한다. 스레드: 동기화하지 않는다.
-struct ClipPlayback {
+struct ROCKS_ANIMATION_API ClipPlayback {
     explicit ClipPlayback(Allocator& allocator) noexcept
         : trackToBone(allocator), tracks(allocator), curves(allocator) {
     }
@@ -86,21 +86,22 @@ struct ClipPlayback {
 // 오류: 위반은 failure->code InvalidClipData, ErrorCode InvalidArgument(수 상한은
 // CapacityExceeded)와 issue·index(트랙)·related다. 이름 표 할당 실패는 진단 코드 없이 그 오류다.
 // 스레드: source를 읽기만 한다.
-Result<void> ValidateClipSource(const ClipSource& source, Allocator& scratch,
-                                ClipDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> ValidateClipSource(const ClipSource& source, Allocator& scratch,
+                                                    ClipDiagnostic* failure = nullptr) noexcept;
 
 // clip의 에디터 데이터를 본다(7.5절 11): 원본 머리(비율·프레임 수), 커브(이름·중복·키·변환 커브
 // 채널), 이벤트(시간·길이·확률·트랙·정렬), 동기 마커(이름·시간·트랙·정렬), rateScale,
 // basePoseFrame, 목표 frame rate. 본 트랙 bulk는 보지 않는다(LoadClipSource가 본다).
 //
 // 오류: 위반은 InvalidClipData·InvalidArgument와 issue·index다. 이름 표 할당 실패는 그 오류다.
-Result<void> ValidateAnimationClip(const AnimationClip& clip, Allocator& scratch,
-                                   ClipDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> ValidateAnimationClip(const AnimationClip& clip,
+                                                       Allocator& scratch,
+                                                       ClipDiagnostic* failure = nullptr) noexcept;
 
 // 이벤트를 (시간, track) 순으로, 동기 마커를 시간 순으로 안정 정렬한다(7.5절 11 — 저장 전에
 // 부른다).
-void SortClipEvents(AnimationClip& clip) noexcept;
-void SortClipSyncMarkers(AnimationClip& clip) noexcept;
+ROCKS_ANIMATION_API void SortClipEvents(AnimationClip& clip) noexcept;
+ROCKS_ANIMATION_API void SortClipSyncMarkers(AnimationClip& clip) noexcept;
 
 // source를 data의 frameRate·frameCount·boneTracks로 쓴다(7.5절 6): 먼저 ValidateClipSource로 보고,
 // 트랙을 이름 원문(ASCII 소문자로 접은 byte) 순으로 정렬하고, 모든 키가 bit 단위로 같은 성분은
@@ -109,8 +110,9 @@ void SortClipSyncMarkers(AnimationClip& clip) noexcept;
 //
 // 오류: 검증 실패는 그 진단, 이름 원문을 읽지 못하면(다른 pool·stale) 그 pool 오류, 할당 실패는 그
 // 오류다. 실패하면 data는 그대로다(bulk에 더한 entry는 남을 수 있다 — 참조가 없어 저장되지 않는다).
-Result<void> StoreClipSource(const ClipSource& source, MemoryBulkSource& bulk, NamePool& names,
-                             ClipSourceData& data, ClipDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> StoreClipSource(const ClipSource& source, MemoryBulkSource& bulk,
+                                                 NamePool& names, ClipSourceData& data,
+                                                 ClipDiagnostic* failure = nullptr) noexcept;
 
 // data의 본 트랙 bulk를 package에서 읽어 out을 다시 만든다. 배치(원소 크기·개수)·순서(이름 원문
 // 엄격 증가)·ValidateClipSource를 본다.
@@ -119,19 +121,22 @@ Result<void> StoreClipSource(const ClipSource& source, MemoryBulkSource& bulk, N
 // CorruptPackage(BulkUnreadable)와 Package::BulkBytes의 오류, 이름 원문을 못 읽으면 그 pool 오류,
 // 할당 실패는 그 오류다. 실패하면 out은 그대로다.
 // 스레드: package를 읽으므로 그 Registry 소유 스레드에서 부른다.
-Result<void> LoadClipSource(const ClipSourceData& data, const Package& package, NamePool& names,
-                            ClipSource& out, ClipDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> LoadClipSource(const ClipSourceData& data, const Package& package,
+                                                NamePool& names, ClipSource& out,
+                                                ClipDiagnostic* failure = nullptr) noexcept;
 
 // source 트랙 track의 seconds 시간 값이다(7.5절 8 — UE UAnimDataModel::Evaluate의 키 선택과
 // FTransform:: Blend). track은 범위 안이어야 하고 source는 ValidateClipSource를 통과한 것이어야
 // 한다.
-Transform3f SampleClipSource(const ClipSource& source, uint32 track, double seconds,
-                             ClipInterpolation interpolation) noexcept;
+ROCKS_ANIMATION_API Transform3f SampleClipSource(const ClipSource& source, uint32 track,
+                                                 double seconds,
+                                                 ClipInterpolation interpolation) noexcept;
 
 // 쿠킹 데이터 트랙 track의 seconds 시간 값이다(SampleClipSource와 같은 규칙, sampleRate·
 // sampleCount).
-Transform3f SampleClipPlayback(const ClipPlayback& playback, uint32 track, double seconds,
-                               ClipInterpolation interpolation) noexcept;
+ROCKS_ANIMATION_API Transform3f SampleClipPlayback(const ClipPlayback& playback, uint32 track,
+                                                   double seconds,
+                                                   ClipInterpolation interpolation) noexcept;
 
 // 쿠킹 변환 입력이다. 포인터·span이 가리키는 것은 BuildClipPlayback이 끝날 때까지 살아 있어야 한다.
 struct ClipBuildInput {
@@ -176,18 +181,21 @@ struct ClipBuildReport {
 //   ClipPlayback cooked(allocator);
 //   ClipBuildReport report(allocator);
 //   if (auto built = BuildClipPlayback(input, cooked, report, &failure); !built) { ... }
-Result<void> BuildClipPlayback(const ClipBuildInput& input, ClipPlayback& out,
-                               ClipBuildReport& report, ClipDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> BuildClipPlayback(const ClipBuildInput& input, ClipPlayback& out,
+                                                   ClipBuildReport& report,
+                                                   ClipDiagnostic* failure = nullptr) noexcept;
 
 // source 트랙 가운데 skeleton의 원본 본·가상 본에 없는 이름마다 UnknownBoneTrack 경고(index =
 // 트랙)를 warnings 뒤에 붙인다(임포트·쿠킹이 같이 쓴다 — 7.2절). 오류: 할당 실패.
-Result<void> FindUnknownBoneTracks(const ClipSource& source, const Skeleton& skeleton,
-                                   Array<ClipDiagnostic>& warnings) noexcept;
+ROCKS_ANIMATION_API Result<void> FindUnknownBoneTracks(const ClipSource& source,
+                                                       const Skeleton& skeleton,
+                                                       Array<ClipDiagnostic>& warnings) noexcept;
 
 // playback을 data로 쓴다(7.5절 10 — tracks bulk entry 하나). 오류: trackToBone 길이·sampleCount가
 // 트랙과 맞지 않으면 InvalidArgument, 할당 실패는 그 오류다. 실패하면 data는 그대로다.
-Result<void> StoreClipPlayback(const ClipPlayback& playback, MemoryBulkSource& bulk,
-                               ClipPlaybackData& data) noexcept;
+ROCKS_ANIMATION_API Result<void> StoreClipPlayback(const ClipPlayback& playback,
+                                                   MemoryBulkSource& bulk,
+                                                   ClipPlaybackData& data) noexcept;
 
 // data를 package에서 읽어 out을 다시 만든다(배치·길이·값 유한, sampleCount 1–ClipMaxFrames + 1,
 // 비율 ≤ ClipMaxFrameRate, trackToBone 길이 = 트랙 수를 본다). 오류: 위반은
@@ -198,7 +206,8 @@ Result<void> StoreClipPlayback(const ClipPlayback& playback, MemoryBulkSource& b
 //
 // 신뢰 범위: trackToBone의 본 번호(스켈레톤 본 수 미만·중복 없음)와 회전 키 정규화는 여기서 보지
 // 않는다 — 스켈레톤을 알아야 하므로 쿠킹 로드(MA6b)가 스켈레톤과 대조한 뒤에야 믿을 수 있다.
-Result<void> LoadClipPlayback(const ClipPlaybackData& data, const Package& package,
-                              ClipPlayback& out, ClipDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> LoadClipPlayback(const ClipPlaybackData& data,
+                                                  const Package& package, ClipPlayback& out,
+                                                  ClipDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

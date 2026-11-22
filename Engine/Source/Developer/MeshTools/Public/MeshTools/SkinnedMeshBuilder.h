@@ -112,13 +112,14 @@ struct SkinnedMeshBuildResult {
 //
 // 반환: 남긴 개수(1–limit)다. trimmed는 버린 영향이 있으면 true, missing은 영향이 없었으면 true다.
 // out은 MeshCookedInfluencesHigh칸 이상이어야 한다.
-uint32 ReduceBoneInfluences(Span<const BoneInfluence> source, uint32 limit, Span<BoneInfluence> out,
-                            bool& trimmed, bool& missing) noexcept;
+ROCKS_MESHTOOLS_API uint32 ReduceBoneInfluences(Span<const BoneInfluence> source, uint32 limit,
+                                                Span<BoneInfluence> out, bool& trimmed,
+                                                bool& missing) noexcept;
 
 // 합이 BoneWeightTotal인 영향(내림차순 정렬)을 8비트 합 SkinWeightTotal8로 바꾼다(6.5절 10):
 // (w × 255 + 32767) / 65535로 반올림한 뒤 잔차(255 − 합)를 첫 영향에 더하고 다시 정렬한다. 비어
 // 있으면 그대로다.
-void QuantizeSkinWeights8(Span<BoneInfluence> influences) noexcept;
+ROCKS_MESHTOOLS_API void QuantizeSkinWeights8(Span<BoneInfluence> influences) noexcept;
 
 // 원본 메시 LOD 하나를 스킨 렌더 데이터로 빌드한다(6.3·6.5절). 렌더 정점·index·섹션·bounds는
 // 5.2절 단계(스킨 임계값, 크기 1)이고, 거기에 영향·bone map·필요 본·inverse-bind·morph target을
@@ -153,7 +154,8 @@ void QuantizeSkinWeights8(Span<BoneInfluence> influences) noexcept;
 //
 // 인자: out은 성공하면 통째로 바뀐다. failure는 실패하면 채운다(성공하면 건드리지 않는다).
 // 스레드: input.source·input.bones를 읽기만 한다.
-Result<void> BuildSkinnedMeshLod(const SkinnedMeshBuildInput& input, SkinnedMeshBuildResult& out,
-                                 MeshDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESHTOOLS_API Result<void> BuildSkinnedMeshLod(const SkinnedMeshBuildInput& input,
+                                                     SkinnedMeshBuildResult& out,
+                                                     MeshDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks
