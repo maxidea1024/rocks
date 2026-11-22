@@ -46,7 +46,7 @@ VmSession::~VmSession() noexcept {
 }
 
 Result<void> VmSession::AddModule(const VmLinkedModule& linked) noexcept {
-    if (!linked.Linked() || linked.Host() != host_) {
+    if (execution_.running_ || !linked.Linked() || linked.Host() != host_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -210,6 +210,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         }
     }
 
+    instance.serial = nextSerial_++;
     if (number < instances_.Size()) {
         instances_[number] = static_cast<Instance&&>(instance);
     } else if (auto pushed = instances_.TryPushBack(static_cast<Instance&&>(instance)); !pushed) {
@@ -217,7 +218,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
     }
 
     if (auto inserted = byHandle_.Insert(handle, number); !inserted) {
-        Detach(number);
+        static_cast<void>(Detach(number));
         return Result<uint32>::Failure(inserted.Error());
     }
 
@@ -249,9 +250,10 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
     struct KeepLogs {
         VmSession& session;
         ~KeepLogs() noexcept {
+            // 시작 값 기록을 억제 중에 놓은 뒤 억제를 푼다(LC6b 리뷰 B1).
+            static_cast<void>(session.EndFragment());
             session.execution_.keepLogs_ = false;
             session.suppressChanged_ = false;
-            static_cast<void>(session.EndFragment()); // 시작 값 기록을 놓는다(억제 중)
         }
     } keepLogs{*this};
     for (uint32 at = depth; at > 0; --at) {
@@ -264,7 +266,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         auto called = execution_.Call(*chainModules[at - 1], link.initializer, {},
                                       Span<const uint64>(self, 1), {});
         if (!called) {
-            Detach(number);
+            static_cast<void>(Detach(number));
             return Result<uint32>::Failure(called.Error());
         }
 
@@ -273,7 +275,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         init.steps = steps;
         execution_.ReleaseReturned();
         if (init.outcome != VmOutcome::Returned) {
-            Detach(number);
+            static_cast<void>(Detach(number));
             return Result<uint32>::Success(VmNoInstance);
         }
     }
@@ -284,7 +286,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
 Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
                                         Span<const uint64> scalars, Span<const uint64> refs,
                                         Span<VmBuffer* const> buffers) noexcept {
-    if (instance >= instances_.Size() || !instances_[instance].attached) {
+    if (execution_.running_ || instance >= instances_.Size() || !instances_[instance].attached) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -363,6 +365,12 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
             execution_.ReleaseReturned();
             // 정지한 hook은 끝난 것으로 보고 사슬을 잇는다(재개는 Advance — SparksRuntime 2.4절).
             if (result.outcome != VmOutcome::Returned && result.outcome != VmOutcome::Suspended) {
+                // hook 쓰기의 기록을 억제 중에 정리한 뒤 전달은 억제 없이(LC6b 리뷰 B2).
+                if (auto ended = EndFragment(); !ended) {
+                    return Result<VmCallResult>::Failure(ended.Error());
+                }
+
+                suppressChanged_ = false;
                 if (auto drained = Drain(); !drained) {
                     return Result<VmCallResult>::Failure(drained.Error());
                 }
@@ -372,6 +380,11 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
         }
     }
 
+    if (auto ended = EndFragment(); !ended) {
+        return Result<VmCallResult>::Failure(ended.Error());
+    }
+
+    suppressChanged_ = false;
     if (kind == BytecodeHookKind::Enable) {
         instances_[instance].enabled = true;
         for (Connection& connection : connections_) {
@@ -393,7 +406,7 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
 Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& module, uint32 function,
                                      Span<const uint64> scalars, Span<const uint64> refs,
                                      Span<VmBuffer* const> buffers) noexcept {
-    if (instance >= instances_.Size() || !instances_[instance].attached ||
+    if (execution_.running_ || instance >= instances_.Size() || !instances_[instance].attached ||
         refs.Size() + 1 > VmSessionMaxRefArguments) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
@@ -456,13 +469,18 @@ void VmSession::ReleaseFields(Instance& instance) noexcept {
     }
 }
 
-void VmSession::Detach(uint32 instance) noexcept {
+Result<void> VmSession::Detach(uint32 instance) noexcept {
+    if (execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument); // 실행 중(LC6b 리뷰 B4)
+    }
+
     if (instance >= instances_.Size() || !instances_[instance].attached) {
-        return;
+        return Result<void>::Success();
     }
 
     Disconnect(instance);
     CancelExecutions(instance);
+    DropWrites(instance); // 번호 재사용 뒤 남은 기록이 새 instance에 닿지 않게(LC6b 리뷰 B3)
     Instance& entry = instances_[instance];
     ReleaseFields(entry);
     static_cast<void>(byHandle_.Erase(entry.handle));
@@ -470,11 +488,12 @@ void VmSession::Detach(uint32 instance) noexcept {
     entry.scalars.Empty();
     entry.refs.Empty();
     entry.buffers.Empty();
+    return Result<void>::Success();
 }
 
 void VmSession::DetachAll() noexcept {
     for (uint32 instance = 0; instance < instances_.Size(); ++instance) {
-        Detach(instance);
+        static_cast<void>(Detach(instance));
     }
 }
 

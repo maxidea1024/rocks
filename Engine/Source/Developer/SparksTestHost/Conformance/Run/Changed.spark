@@ -1,0 +1,77 @@
+class Meter : ScriptableComponent {
+    var Level = 0;
+    var Name = "a";
+    var Items: Array<int> = [];
+    var Zero = 0.0;
+    event Ping(n: int);
+
+    on Enable() {
+        Level = 5;
+        emit Ping(1);
+    }
+
+    fn Mix() {
+        Level += 1;
+        emit Ping(2);
+    }
+
+    fn Same() {
+        Level = Level;
+        Name = "a";
+    }
+
+    fn Back() {
+        Level += 1;
+        Level -= 1;
+    }
+
+    fn Rename() {
+        Name = "b";
+    }
+
+    fn Push() {
+        Items.Add(1);
+    }
+
+    fn Negative() {
+        Zero = -0.0;
+    }
+}
+
+class Watcher : ScriptableComponent {
+    var Target: Meter?;
+    var Seen = 0;
+
+    fn Watch(meter: Meter) {
+        Target = meter;
+    }
+
+    fn Clear() {
+        Target = null;
+    }
+
+    on Target.Ping(n: int) {
+        Seen += n;
+        Log.Info("ping ${n}");
+    }
+
+    on Target.Level.Changed() {
+        Log.Info("level");
+    }
+
+    on Target.Name.Changed() {
+        Log.Info("name");
+    }
+
+    on Target.Items.Changed() {
+        Log.Info("items");
+    }
+
+    on Target.Zero.Changed() {
+        Log.Info("zero");
+    }
+
+    on Seen.Changed() {
+        Log.Info("seen ${Seen}");
+    }
+}

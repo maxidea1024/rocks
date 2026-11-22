@@ -149,7 +149,11 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
 
             // 쓰기 전에 조각의 시작 값을 기록한다(Changed — SparksRuntime 2.3절).
             if (!get) {
-                session_->NoteWrite(instance, *link_, DecodeAx(extra), bank, where, c);
+                const VmFaultKind noted =
+                    session_->NoteWrite(instance, *link_, DecodeAx(extra), bank, where, c, error);
+                if (noted != VmFaultKind::None || error != ErrorCode::None) {
+                    return noted;
+                }
             }
 
             const uint32 at = get ? a : bb;

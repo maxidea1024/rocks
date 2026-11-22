@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 3(2026-11-22): LC6b 리뷰 반영 — Changed 자리를 첫 쓰기에서 확보(순서·fault), 비활성 instance 미발행, 경로 원천 변경 시 1회 전달, 다른 모듈 기반의 원천 대조를 key로, 진입마다 루트 초기화, 실행 중 재진입 계약, Detach의 쓰기 기록 정리(2.3절 "LC6b 리뷰 반영").
 - 개정 2(2026-11-22): LC6c를 LC6c1(정지·기본 대기·All/Race·시계·재개 순서·취소·재진입 — 구현)과 LC6c2(이벤트 대기·async 함수 호출의 대기 값·`paused`·Start 준비 대기)로 나눔. `await F()` 직접 호출 lowering, `.run` `advance`·`fixed`, 재개 전 실행 문맥 비우기(2.4절).
 
 ## 1. 하위 단계
@@ -56,6 +57,12 @@
 - **Changed(SL §5.3):** 조각 안에서 instance 필드를 처음 쓸 때 시작 값을 보관하고, 조각 끝에 끝 값과 다르면(Scalar 비트, 문자열 byte, 컨테이너·struct 원소별, 객체 동일성) Changed 항목을 넣는다(깊이 규칙 같음). Awake·Enable hook 안의 쓰기, 초기화, Disable·Destroy 문맥의 쓰기는 내지 않는다.
 - **단계:** `OpenPhase()` — 새 단계(단계당 전달 수 초기화 — 이월 항목 전달). 모든 진입(`RunHook`·`Call`·`Emit`·`OpenPhase`)은 끝에 큐를 비운다(단계를 닫는 별도 호출은 없다 — 활성 전환·파괴 적용은 LC6d가 더한다). `.run` 지시: `phase`(결과 `ok (N queued)`), `emit #n Class.Event(인자)`(host 진입 발행 — 깊이 1, Class가 그 모듈 클래스가 아니면 엔진 이벤트 key), 실행된 handler는 결과 줄 뒤 `  deliver #구독자 <함수> -> 결과 (N steps)` 줄이다.
 - **구현 세부(LC6b 확정):** key는 링크가 정한다(`VmEventKey` — 선언 모듈 경로와 `Class.Member`, 엔진 선언은 빈 경로). Changed 항목·연결의 key는 감시 필드의 key다(이벤트 key와 이름이 겹치지 않는다). 연결은 instance의 Enable hook 뒤에 기반 사슬의 handler 전부를 풀어 만들고, 활성 instance에서 경로 첫 마디 필드가 조각 안에서 바뀌면 그 필드를 원천으로 쓰는 handler를 다시 푼다(남는 발행자의 항목은 순번 유지). handler 인자는 선언한 만큼 bank마다 앞에서부터 넘긴다(배열 원천은 발행한 원소가 첫 Ref 인자). 반환값이 있는 메서드는 반환 slot·버퍼를 보관하고 전달한 뒤 실행 문맥의 반환 자리로 되돌린다. 이월 항목의 죽은 객체 인자는 지금 null로 넘긴다 — non-null 인자의 항목 폐기·보고는 인자 타입(서술자의 `?<x>`)을 대조하는 LC6d에서 한다.
+- **LC6b 리뷰 반영(개정 3):**
+  - **Changed 자리:** `SETF`(자기 모듈 Sparks 필드)가 조각에서 그 필드를 처음 쓸 때 큐에 Changed 항목을 넣어 자리를 확보한다(SL §5.3 — `Count = 1; emit E`는 Changed가 먼저). 큐 상한·연쇄 상한은 그 쓰기 명령의 fault(`BudgetExceeded`·`CascadeLimit`)이고 조용히 버리지 않는다. 조각 끝에 시작 값과 같으면 자리를 취소한다(항목의 발행자를 0으로 — 전달 때 건너뛴다). 자리는 활성 instance(Enable 반환 뒤·Disable 전)이고 억제 문맥(초기화·Awake·Enable·Disable·Destroy hook)이 아닐 때만 확보한다. 억제는 hook 사슬과 그 조각 끝 정리까지이고, 뒤따르는 전달(Enable 안의 `emit`을 받은 handler 등)은 억제하지 않는다.
+  - **경로 원천:** 바뀐 필드의 key를 경로 첫 마디(Field 참조)의 key와 대조해 instance 클래스 사슬(다른 모듈 기반 포함)의 handler를 다시 연결한다. `on A.B.Changed`(마디 둘 이상)는 다시 연결한 뒤 그 handler에만 한 번 전달하는 항목을 넣는다(A가 null이 된 경우 포함 — 전달 때 instance가 그대로 활성이고 생성 번호가 같아야 한다). 상한에 걸리면 이 한 번은 버린다(조각이 이미 끝나 fault를 낼 명령이 없다). 깊은 마디(`Target.Inner`의 Inner가 바뀜)는 다시 연결하지 않는다 — 원천 instance의 쓰기만 본다(한계).
+  - **진입 계약:** 실행 중(handler·hook의 native 호출 안)에 host가 부를 수 있는 진입은 `Emit`뿐이고 지금 조각의 깊이 + 1로 넣기만 한다. 그 밖의 진입(`CreateInstance`·`RunHook`·`Call`·`Detach`·`OpenPhase`·`Advance`·`FixedStep`·`AddModule`)은 실행 중이면 `InvalidArgument`다(활성 전환·파괴의 지연 적용은 LC6d). 진입마다 연쇄 루트·깊이를 새로 둔다(끊긴 진입의 루트를 잇지 않는다).
+  - **Detach:** 그 instance의 조각 쓰기 기록(시작 값 버퍼)을 놓고 확보한 Changed 자리를 취소한다(번호를 재사용한 새 instance에 닿지 않게). instance마다 생성 번호(serial)를 둔다.
+  - **남은 위험(LC6d 이후):** 큐 저장소는 큐를 다 비웠을 때만 앞으로 당긴다(과부하가 이어지면 자란다 — OpenPhase 압축), host `Emit`의 인자 수를 이벤트 모양과 대조하지 않는다(handler 선언보다 적으면 그 진입이 `InvalidArgument`), 전달 중 새로 생긴 연결도 같은 항목을 받는다(순번이 더 크면), 연결 찾기와 `NoteWrite`는 선형(발행자 색인은 측정 뒤), `VmValuesEqual`은 Map·Set을 삽입 순서로 비교한다.
 
 
 ### 2.4 async 실행(LC6c)

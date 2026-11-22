@@ -15,6 +15,10 @@
 //   auto instance = session.CreateInstance(handle, linked, classIndex, init);
 //   auto enabled = session.RunHook(instance.Value(), BytecodeHookKind::Enable, {}, {});
 //   session.Detach(instance.Value());
+//
+// 재진입: 실행 중(handler·hook의 native 호출 안)에 host가 부를 수 있는 진입은 Emit뿐이다(항목만
+// 넣고 전달은 바깥 진입이 한다). 그 밖의 진입은 실행 중이면 InvalidArgument다(LC6b 리뷰 B4 —
+// 활성 전환·파괴의 지연 적용은 LC6d).
 
 namespace rocks::sparks {
 
@@ -55,8 +59,9 @@ public:
                               Span<VmBuffer* const> buffers) noexcept;
 
     // 필드 버퍼와 저장소를 놓고 instance를 표에서 뺀다(번호는 뒤의 CreateInstance가 다시 쓸 수
-    // 있다).
-    void Detach(uint32 instance) noexcept;
+    // 있다). 연결·정지 실행·조각의 쓰기 기록·확보한 Changed 자리도 지운다. 실패: 실행 중이면
+    // InvalidArgument(없는 번호는 성공 — 할 일 없음).
+    Result<void> Detach(uint32 instance) noexcept;
 
     // 붙은 instance를 모두 Detach한다(CloseSession).
     void DetachAll() noexcept;
@@ -82,7 +87,9 @@ public:
     Result<void> OpenPhase() noexcept;
 
     // host 진입 발행이다(native 이벤트·시험): 발행자 handle과 key의 항목을 깊이 1로 넣고 전달한다.
-    // 인자는 Scalar·Ref·Buf별(Buf는 빌려 준다 — 항목이 참조를 더한다).
+    // 인자는 Scalar·Ref·Buf별(Buf는 빌려 준다 — 항목이 참조를 더한다). 실행 중(native 호출 안)이면
+    // 지금 조각의 깊이 + 1로 넣기만 한다(전달은 바깥 진입). key의 글자는 항목이 전달될 때까지(이월
+    // 포함) 살아 있어야 한다 — 링크한 모듈의 key나 host가 고정한 글자를 쓴다.
     Result<void> Emit(uint64 publisher, const VmEventKey& key, Span<const uint64> scalars,
                       Span<const uint64> refs, Span<VmBuffer* const> buffers) noexcept;
 
@@ -230,6 +237,13 @@ private:
         uint32 firstBuffer = 0;
         uint32 bufferCount = 0;
         bool carried = false;
+        // 경로 원천이 바뀐 `on A.B.Changed` handler 하나에만 전달하는 항목(SL 5.3절 — 다시 연결한
+        // 뒤 한 번 전달). target은 instance 번호, serial은 그 instance의 생성 번호(번호 재사용
+        // 구별).
+        uint32 target = NoBytecodeIndex;
+        uint64 targetSerial = 0;
+        const VmLinkedModule* targetModule = nullptr;
+        uint32 targetHandler = NoBytecodeIndex;
     };
 
     // 조각 안에서 처음 쓴 필드(Changed — SL 5.3절)다.
@@ -241,6 +255,9 @@ private:
         uint32 at = 0; // instance 저장소 위치
         uint32 slots = 0;
         uint32 firstValue = 0; // writeValues_ 구간(Scalar·Ref) 또는 writeBuffers_ 번호(Buf)
+        // 첫 쓰기에서 확보한 Changed 자리(SL 5.3절 — 활성 instance, 억제 문맥 밖).
+        bool reserved = false;
+        usize item = 0;
     };
 
     // EMIT(실행 중)이 부른다: 항목을 넣는다. 반환은 fault 종류.
@@ -251,11 +268,17 @@ private:
                         uint32 eventRef, uint32 depth, uint64 root, Span<const uint64> scalars,
                         Span<const uint64> refs, Span<VmBuffer* const> buffers,
                         ErrorCode& error) noexcept;
-    // 로컬 필드 쓰기를 기록한다(조각에서 처음이면 시작 값 보관).
-    void NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 fieldRef, uint32 bank,
-                   uint32 at, uint32 slots) noexcept;
-    // 조각 끝: Changed 확정, 원천 필드가 바뀐 연결 다시 풀기. 실패는 할당자 오류.
+    // 로컬 필드 쓰기를 기록한다(조각에서 처음이면 시작 값 보관과 Changed 자리 확보). 반환은 쓰기
+    // 명령의 fault(Changed 자리의 BudgetExceeded·CascadeLimit), 할당 실패는 error.
+    VmFaultKind NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 fieldRef,
+                          uint32 bank, uint32 at, uint32 slots, ErrorCode& error) noexcept;
+    // 조각 끝: Changed 자리 확정·취소, 원천 필드가 바뀐 연결 다시 풀기. 실패는 할당자 오류.
     Result<void> EndFragment() noexcept;
+    // instance의 쓰기 기록을 지운다(시작 값을 놓고 확보한 Changed 자리를 취소 — Detach).
+    void DropWrites(uint32 instance) noexcept;
+    // instance의 field key를 경로 첫 마디로 쓰는 handler 연결을 다시 풀고, `on A.B.Changed`면 한 번
+    // 전달할 항목을 넣는다(SL 5.3·5.5절).
+    Result<void> Reconnect(uint32 instance, const VmEventKey& field) noexcept;
     // 큐를 비운다(단계 전달 상한까지).
     Result<void> Drain() noexcept;
     // instance의 연결을 (다시) 푼다 — handler 하나(handler가 NoIndex면 전부).
@@ -278,11 +301,16 @@ private:
         uint32 classIndex = NoBytecodeIndex;
         bool attached = false;
         bool enabled = false; // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
+        uint64 serial = 0;    // 생성 번호(session 안에서 유일 — 번호 재사용 구별)
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
     };
 
+    // instance의 클래스 사슬(파생 → 기반)을 모은다. 반환은 사슬 길이(MaxBaseDepth 이하).
+    static constexpr uint32 MaxBaseDepth = 64;
+    uint32 Chain(uint32 instance, const VmLinkedModule* (&modules)[MaxBaseDepth],
+                 uint32 (&classes)[MaxBaseDepth]) const noexcept;
     // 기반 클래스(같은 모듈, 또는 `<경로>:Class` — session 모듈)를 찾는다. 엔진 기반·없음은 false.
     bool BaseOf(const VmLinkedModule& module, uint32 classIndex, const VmLinkedModule*& baseModule,
                 uint32& baseClass) const noexcept;
@@ -330,6 +358,7 @@ private:
     const VmLinkedModule* currentHandlerModule_ = nullptr;
     uint32 currentHandler_ = NoBytecodeIndex;
     uint64 skippedWhileBusy_ = 0;
+    uint64 nextSerial_ = 1;
 };
 
 } // namespace rocks::sparks

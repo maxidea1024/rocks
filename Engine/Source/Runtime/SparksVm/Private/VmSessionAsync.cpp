@@ -291,6 +291,8 @@ Result<void> VmSession::ResumeDone() noexcept {
         entry.buffers.Empty();
         entry.live = false;
         currentInstance_ = instance;
+        currentDepth_ = 0; // 재개는 새 조각(새 루트)이다
+        currentRoot_ = 0;
         auto continued = execution_.Continue(VmLimits());
         currentInstance_ = NoBytecodeIndex;
         currentPublisher_ = 0;
@@ -319,6 +321,10 @@ Result<void> VmSession::ResumeDone() noexcept {
 }
 
 Result<void> VmSession::Advance(double gameDelta, double uiDelta) noexcept {
+    if (execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     // 프레임 +1, 시계 진행, 가변 재개 단계: 기한이 된 Delay와 앞 프레임의 NextTick(SL 5.4·6.1절).
     BeginEntry();
     execution_.keepLogs_ = true;
@@ -345,6 +351,10 @@ Result<void> VmSession::Advance(double gameDelta, double uiDelta) noexcept {
 }
 
 Result<void> VmSession::FixedStep() noexcept {
+    if (execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     BeginEntry();
     execution_.keepLogs_ = true;
     ++fixedStep_;

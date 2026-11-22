@@ -4,6 +4,8 @@ new #2 Listener -> ok (7 steps)
 hook #1 Enable -> ok (0 steps)
 hook #2 Enable -> ok (0 steps)
 Listener.Watch(#2, #1) -> void (3 steps)
+  log info "volume changed"
+  deliver #2 Listener.on Source.Volume.Changed -> ok (4 steps)
 Speaker.Say(#1, 5) -> void (11 steps)
   log info "said 5"
   log info "heard 5"

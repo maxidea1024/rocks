@@ -1264,7 +1264,10 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                     }
 
                     if (verb == "detach") {
-                        session.Detach(instance);
+                        if (auto detached = session.Detach(instance); !detached) {
+                            return Result<void>::Failure(detached.Error());
+                        }
+
                         actual.Append("ok");
                     } else if (verb == "fields") {
                         // 기반 사슬(기반 먼저)의 필드: `Class(Field: 값, …)`.

@@ -87,6 +87,31 @@ void VmSession::BeginEntry() noexcept {
     execution_.logText_.Clear();
     execution_.droppedLogs_ = 0;
     deliveries_.Clear();
+    // 루트·깊이는 진입마다 새로(LC6b 리뷰 S6 — 끊긴 진입의 루트를 다음 진입이 잇지 않게).
+    currentDepth_ = 0;
+    currentRoot_ = 0;
+}
+
+uint32 VmSession::Chain(uint32 instance, const VmLinkedModule* (&modules)[MaxBaseDepth],
+                        uint32 (&classes)[MaxBaseDepth]) const noexcept {
+    uint32 depth = 0;
+    const VmLinkedModule* current = instances_[instance].module;
+    uint32 currentClass = instances_[instance].classIndex;
+    while (depth < MaxBaseDepth) {
+        modules[depth] = current;
+        classes[depth] = currentClass;
+        ++depth;
+        const VmLinkedModule* baseModule = nullptr;
+        uint32 baseClass = NoBytecodeIndex;
+        if (!BaseOf(*current, currentClass, baseModule, baseClass)) {
+            break;
+        }
+
+        current = baseModule;
+        currentClass = baseClass;
+    }
+
+    return depth;
 }
 
 void VmSession::ReleaseItem(Item& item) noexcept {
@@ -163,16 +188,42 @@ VmFaultKind VmSession::EnqueueFromScript(const VmLinkedModule& module, uint32 ev
                    scalars, Span<const uint64>(refs.Data() + 1, refs.Size() - 1), buffers, error);
 }
 
-void VmSession::NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 fieldRef,
-                          uint32 bank, uint32 at, uint32 slots) noexcept {
+VmFaultKind VmSession::NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 fieldRef,
+                                 uint32 bank, uint32 at, uint32 slots, ErrorCode& error) noexcept {
     for (const Write& write : writes_) {
         if (write.instance == instance && write.bank == bank && write.at == at) {
-            return; // 조각에서 처음 쓴 것만(시작 값)
+            return VmFaultKind::None; // 조각에서 처음 쓴 것만(시작 값)
         }
     }
 
-    Instance& entry = instances_[instance];
     Write write;
+    // Changed 자리를 첫 쓰기에서 확보한다(SL 5.3절 — 순서는 첫 쓰기 시점, 큐 상한·연쇄 상한은 이
+    // 쓰기의 fault). 활성 instance이고 억제 문맥(초기화·Awake·Enable·Disable·Destroy)이 아닐 때만.
+    if (!suppressChanged_ && instances_[instance].enabled) {
+        const uint64 root = currentRoot_ == 0 ? nextRoot_++ : currentRoot_;
+        currentRoot_ = root;
+        const VmFaultKind fault =
+            Enqueue(instances_[instance].handle, module.keys_[fieldRef], &module, NoBytecodeIndex,
+                    currentDepth_ + 1, root, Span<const uint64>(), Span<const uint64>(),
+                    Span<VmBuffer* const>(), error);
+        if (fault != VmFaultKind::None || error != ErrorCode::None) {
+            return fault;
+        }
+
+        write.reserved = true;
+        write.item = queue_.Size() - 1;
+    }
+
+    // 자리를 확보했으면 시작 값 기록 실패는 할당 오류다(자리를 취소한다).
+    auto unreserve = [&]() noexcept -> VmFaultKind {
+        if (write.reserved) {
+            queue_[write.item].publisher = 0;
+        }
+
+        error = ErrorCode::OutOfMemory;
+        return VmFaultKind::None;
+    };
+    Instance& entry = instances_[instance];
     write.instance = instance;
     write.module = &module;
     write.fieldRef = fieldRef;
@@ -183,7 +234,7 @@ void VmSession::NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 
         write.firstValue = static_cast<uint32>(writeBuffers_.Size());
         VmBuffer* start = entry.buffers[at];
         if (!writeBuffers_.TryPushBack(start)) {
-            return; // 기록 못 하면 Changed를 낼 수 없다(할당 실패 — 다음 조각에서 다시 기록)
+            return unreserve();
         }
 
         execution_.Retain(start);
@@ -191,7 +242,7 @@ void VmSession::NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 
         write.firstValue = static_cast<uint32>(writeValues_.Size());
         const Array<uint64>& values = bank == VmEventScalarBank ? entry.scalars : entry.refs;
         if (!writeValues_.TryAppend(Span<const uint64>(values.Data() + at, slots))) {
-            return;
+            return unreserve();
         }
     }
 
@@ -200,7 +251,91 @@ void VmSession::NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 
             execution_.Release(writeBuffers_[write.firstValue]);
             static_cast<void>(writeBuffers_.TryResize(write.firstValue));
         }
+
+        return unreserve();
     }
+
+    return VmFaultKind::None;
+}
+
+void VmSession::DropWrites(uint32 instance) noexcept {
+    usize kept = 0;
+    for (usize index = 0; index < writes_.Size(); ++index) {
+        const Write write = writes_[index];
+        if (write.instance != instance) {
+            writes_[kept++] = write;
+            continue;
+        }
+
+        if (write.bank == VmEventBufBank) {
+            execution_.Release(writeBuffers_[write.firstValue]);
+            writeBuffers_[write.firstValue] = nullptr;
+        }
+
+        if (write.reserved && write.item < queue_.Size()) {
+            queue_[write.item].publisher = 0;
+        }
+    }
+
+    static_cast<void>(writes_.TryResize(kept));
+}
+
+Result<void> VmSession::Reconnect(uint32 instance, const VmEventKey& field) noexcept {
+    // 쓴 필드를 경로 첫 마디로 쓰는 handler(instance 클래스 사슬 — 다른 모듈 기반 포함, key로
+    // 대조: LC6b 리뷰 S4)의 연결을 다시 푼다. `on A.B.Changed`는 다시 연결한 뒤 한 번 전달한다(SL
+    // 5.3절 — A가 null이 된 경우 포함, LC6b 리뷰 S3).
+    const VmLinkedModule* chainModules[MaxBaseDepth] = {};
+    uint32 chainClasses[MaxBaseDepth] = {};
+    const uint32 depth = Chain(instance, chainModules, chainClasses);
+    for (uint32 at = depth; at > 0; --at) {
+        const VmLinkedModule& module = *chainModules[at - 1];
+        const BytecodeModule& bytecode = module.Module();
+        const BytecodeClass& entry = bytecode.classes[chainClasses[at - 1]];
+        for (uint32 index = entry.firstHandler; index < entry.firstHandler + entry.handlerCount;
+             ++index) {
+            const BytecodeHandler& handler = bytecode.handlers[index];
+            if (handler.pathCount == 0) {
+                continue;
+            }
+
+            const uint32 ref = bytecode.handlerPaths[handler.firstPath];
+            if (bytecode.refs[ref].kind != BytecodeRefKind::Field ||
+                !(module.keys_[ref] == field)) {
+                continue;
+            }
+
+            if (auto connected = Connect(instance, &module, index); !connected) {
+                return connected;
+            }
+
+            const bool changed =
+                handler.eventRef == NoBytecodeIndex && bytecode.String(handler.event) == "Changed";
+            if (!changed || handler.pathCount < 2) {
+                continue;
+            }
+
+            ErrorCode error = ErrorCode::None;
+            const uint64 root = currentRoot_ == 0 ? nextRoot_++ : currentRoot_;
+            const VmFaultKind fault = Enqueue(
+                instances_[instance].handle, field, nullptr, NoBytecodeIndex, currentDepth_ + 1,
+                root, Span<const uint64>(), Span<const uint64>(), Span<VmBuffer* const>(), error);
+            if (error != ErrorCode::None) {
+                return Result<void>::Failure(error);
+            }
+
+            // 상한(큐·연쇄)에 걸리면 이 한 번은 버린다(조각은 이미 끝났다 — fault를 낼 명령이
+            // 없다).
+            if (fault == VmFaultKind::None) {
+                Item& item = queue_[queue_.Size() - 1];
+                item.target = instance;
+                item.targetSerial = instances_[instance].serial;
+                item.targetModule = &module;
+                item.targetHandler = index;
+            }
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> VmSession::EndFragment() noexcept {
@@ -231,34 +366,16 @@ Result<void> VmSession::EndFragment() noexcept {
             }
         }
 
-        if (!same && !suppressChanged_ && status) {
-            // key: 필드 key + `.Changed`(이름은 모듈 문자열과 붙여야 하므로 연결 쪽은 같은 규칙의
-            // 필드 key로 맞춘다 — Changed 연결의 key.name은 필드 이름, path는 필드 key 경로이고
-            // 전달 대조는 eventRef NoIndex로 Changed를 가린다).
-            VmEventKey key = write.module->keys_[write.fieldRef];
-            ErrorCode error = ErrorCode::None;
-            const uint64 root = currentRoot_ == 0 ? nextRoot_++ : currentRoot_;
-            const VmFaultKind fault =
-                Enqueue(entry.handle, key, write.module, NoBytecodeIndex, currentDepth_ + 1, root,
-                        Span<const uint64>(), Span<const uint64>(), Span<VmBuffer* const>(), error);
-            if (error != ErrorCode::None) {
-                status = Result<void>::Failure(error);
-            }
-
-            static_cast<void>(fault); // Changed의 연쇄 상한은 그 조각의 fault로 보고하지 않는다
+        // Changed 자리(첫 쓰기에서 확보 — SL 5.3절): 값이 같으면 취소한다. key는 필드 key이고 전달
+        // 대조는 eventRef NoIndex로 Changed를 가린다.
+        if (same && write.reserved && write.item < queue_.Size()) {
+            queue_[write.item].publisher = 0;
         }
 
         // 경로 원천 필드가 바뀌었으면 활성 instance의 그 handler 연결을 다시 푼다(SL 5.5절 — 그
         // 필드를 경로 첫 마디로 쓰는 handler, 원천이 처음 채워진 경우 포함).
         if (!same && status && entry.enabled) {
-            const BytecodeModule& bytecode = write.module->Module();
-            for (uint32 index = 0; index < bytecode.handlers.Size() && status; ++index) {
-                const BytecodeHandler& handler = bytecode.handlers[index];
-                if (handler.pathCount > 0 &&
-                    bytecode.handlerPaths[handler.firstPath] == write.fieldRef) {
-                    status = Connect(write.instance, write.module, index);
-                }
-            }
+            status = Reconnect(write.instance, write.module->keys_[write.fieldRef]);
         }
     }
 
@@ -372,25 +489,9 @@ Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
                                 uint32 onlyHandler) noexcept {
     // instance의 클래스 사슬(기반 먼저)의 handler마다 경로를 풀어 연결을 맞춘다: 남는 발행자의
     // 항목은 순번을 지키고, 사라진 것은 지우고, 새것은 끝에 더한다.
-    const VmLinkedModule* chainModules[64] = {};
-    uint32 chainClasses[64] = {};
-    uint32 depth = 0;
-    const VmLinkedModule* current = instances_[instance].module;
-    uint32 currentClass = instances_[instance].classIndex;
-    while (depth < 64) {
-        chainModules[depth] = current;
-        chainClasses[depth] = currentClass;
-        ++depth;
-        const VmLinkedModule* baseModule = nullptr;
-        uint32 baseClass = NoBytecodeIndex;
-        if (!BaseOf(*current, currentClass, baseModule, baseClass)) {
-            break;
-        }
-
-        current = baseModule;
-        currentClass = baseClass;
-    }
-
+    const VmLinkedModule* chainModules[MaxBaseDepth] = {};
+    uint32 chainClasses[MaxBaseDepth] = {};
+    const uint32 depth = Chain(instance, chainModules, chainClasses);
     Array<uint64> publishers(*allocator_);
     for (uint32 at = depth; at > 0; --at) {
         const VmLinkedModule& module = *chainModules[at - 1];
@@ -508,24 +609,41 @@ Result<void> VmSession::Drain() noexcept {
         ++deliveredInPhase_;
         // 연결 표를 순번대로(전달 중 바뀔 수 있으므로 번호로 다시 읽는다).
         uint64 lastOrder = 0;
+        bool targetDone = false;
         for (;;) {
-            usize chosen = connections_.Size();
-            for (usize at = 0; at < connections_.Size(); ++at) {
-                const Connection& connection = connections_[at];
-                if (connection.active && connection.order > lastOrder &&
-                    connection.publisher == item.publisher && connection.key == item.key &&
-                    (chosen == connections_.Size() ||
-                     connection.order < connections_[chosen].order)) {
-                    chosen = at;
+            Connection connection;
+            if (item.target != NoBytecodeIndex) {
+                // 한 handler에만(경로 원천 — SL 5.3절): 그 instance가 그대로 활성일 때 한 번.
+                if (targetDone || item.target >= instances_.Size() ||
+                    !instances_[item.target].attached || !instances_[item.target].enabled ||
+                    instances_[item.target].serial != item.targetSerial) {
+                    break;
                 }
+
+                targetDone = true;
+                connection.subscriber = item.target;
+                connection.module = item.targetModule;
+                connection.handler = item.targetHandler;
+            } else {
+                usize chosen = connections_.Size();
+                for (usize at = 0; at < connections_.Size(); ++at) {
+                    const Connection& connection = connections_[at];
+                    if (connection.active && connection.order > lastOrder &&
+                        connection.publisher == item.publisher && connection.key == item.key &&
+                        (chosen == connections_.Size() ||
+                         connection.order < connections_[chosen].order)) {
+                        chosen = at;
+                    }
+                }
+
+                if (chosen == connections_.Size()) {
+                    break;
+                }
+
+                connection = connections_[chosen];
+                lastOrder = connection.order;
             }
 
-            if (chosen == connections_.Size()) {
-                break;
-            }
-
-            const Connection connection = connections_[chosen];
-            lastOrder = connection.order;
             const BytecodeModule& bytecode = connection.module->Module();
             const BytecodeHandler& handler = bytecode.handlers[connection.handler];
             const BytecodeFunction& function = bytecode.functions[handler.function];
@@ -631,6 +749,10 @@ Result<void> VmSession::Drain() noexcept {
 }
 
 Result<void> VmSession::OpenPhase() noexcept {
+    if (execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     BeginEntry();
     execution_.keepLogs_ = true;
     deliveredInPhase_ = 0;
@@ -645,6 +767,18 @@ Result<void> VmSession::OpenPhase() noexcept {
 
 Result<void> VmSession::Emit(uint64 publisher, const VmEventKey& key, Span<const uint64> scalars,
                              Span<const uint64> refs, Span<VmBuffer* const> buffers) noexcept {
+    if (execution_.running_) {
+        // 실행 중(native 호출 안)의 발행: 넣기만 한다(LC6b 리뷰 B4 — 전달은 바깥 진입).
+        ErrorCode error = ErrorCode::None;
+        const uint64 root = currentRoot_ == 0 ? nextRoot_++ : currentRoot_;
+        currentRoot_ = root;
+        const VmFaultKind fault = Enqueue(publisher, key, nullptr, NoBytecodeIndex,
+                                          currentDepth_ + 1, root, scalars, refs, buffers, error);
+        return error != ErrorCode::None     ? Result<void>::Failure(error)
+               : fault != VmFaultKind::None ? Result<void>::Failure(ErrorCode::CapacityExceeded)
+                                            : Result<void>::Success();
+    }
+
     BeginEntry();
     execution_.keepLogs_ = true;
     ErrorCode error = ErrorCode::None;
