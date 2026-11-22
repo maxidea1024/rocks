@@ -5,7 +5,7 @@
 #include <Platform/Clock.h>
 #include <Platform/File.h>
 #include <Platform/Path.h>
-#include <ShaderCompiler/ShaderFormatDefinition.h>
+#include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
 #include <ShaderCompiler/ShaderPreprocessor.h>
 #include <ShaderCompiler/ShaderSourceTree.h>

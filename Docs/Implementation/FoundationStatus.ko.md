@@ -373,7 +373,7 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 
 - 형식 정의 `Engine/Config/ShaderFormats/<id>.json`: `D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`METAL_SM5`·`GLES31_ANDROID`·`GLES31_PC`, 자리만 둔 `VULKAN_ANDROID`·`METAL_IOS`. 도구 목록·HLSL 2021 기본값·컴파일 경로와 셰이더 모델·target env·ESSL·MSL 버전·바인딩 규약 버전·처리기 버전·상한·기능·장치 요구·생산 호스트를 담는다. SH0 측정(S2·S12·`ROCKS_IMAGE_FORMAT`)을 값으로 옮겼다.
 - 엔진 컴파일 프로필 `Engine-Windows.json`·`Engine-MacOS.json`(`{schema, id, host, formats}`).
-- 읽기 코드 `Developer/ShaderCompiler`(`ShaderCompiler/ShaderFormatDefinition.h`, Core JSON): 모르는 속성·어휘 밖 값 거부, 도구 이름을 도구 표(P4)와 대조, backend–처리기–경로 짝, 프로필 형식의 해석(없음·자리만 둔 형식·생산 호스트 아님), 프로필 공통 상한 `CommonLimits`, 형식 정의 SHA-256(파일 byte, job 키 3항). 오류는 JSON 경로와 줄을 돌려준다.
+- 읽기 코드 `Developer/ShaderCompiler`(`ShaderCompilerCommon/ShaderFormatDefinition.h`, Core JSON): 모르는 속성·어휘 밖 값 거부, 도구 이름을 도구 표(P4)와 대조, backend–처리기–경로 짝, 프로필 형식의 해석(없음·자리만 둔 형식·생산 호스트 아님), 프로필 공통 상한 `CommonLimits`, 형식 정의 SHA-256(파일 byte, job 키 3항). 오류는 JSON 경로와 줄을 돌려준다.
 - 남은 것: job 키 계산(P5), 공통 상한의 워커 검사, 런타임 의존 파일 복사(Agility SDK `redist`, P6b 또는 SH2), macOS 실행 시험.
 - 검증(Windows x64 clang-cl, Debug): EngineTests `ShaderFormat_*` 8건(저장소 정의 8·프로필 2 전체 읽기, 결정·측정 값, Windows 프로필 공통 상한, 음성 대조 40건), format·policy.
 

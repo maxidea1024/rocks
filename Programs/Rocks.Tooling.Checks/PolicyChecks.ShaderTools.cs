@@ -6,13 +6,14 @@ namespace Rocks.Tooling.Checks;
 // 셰이더 도구 참조 정책이다(Docs/Design/ShaderSystem.ko.md 9절 정책 검사). 도구 표 참조와 binary 로드를 따로 본다.
 public static partial class PolicyChecks
 {
-    // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 워커와 그 안의
-    // 형식 모듈, 워커 자리 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다), SH0 도구 스파이크
-    // (Programs/ShaderToolSpike, 워커가 생기기 전에 도구를 직접 여는 측정 프로그램).
+    // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 두 프로세스 공용
+    // 모듈(ShaderCompilerCommon — 형식 정의가 도구 이름을 표와 대조한다), 워커와 그 안의 형식 모듈, 워커 자리 모듈(ShaderToolLoader),
+    // 시험 runner(EngineTests가 표·로더 시험을 링크한다), SH0 도구 스파이크(Programs/ShaderToolSpike, 워커가 생기기 전에 도구를 직접
+    // 여는 측정 프로그램).
     private static readonly string[] ShaderToolTableUsers =
     [
-        "Engine/Source/Developer/ShaderToolTable/", "Engine/Source/Developer/ShaderCompiler/", "Engine/Source/Developer/ShaderToolLoader/",
-        "Programs/ShaderCompileWorker/", "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
+        "Engine/Source/Developer/ShaderToolTable/", "Engine/Source/Developer/ShaderCompiler/", "Engine/Source/Developer/ShaderCompilerCommon/",
+        "Engine/Source/Developer/ShaderToolLoader/", "Programs/ShaderCompileWorker/", "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
     ];
 
     // 도구 binary를 열어도 되는 곳이다: 워커와 그 안의 형식 모듈, 워커 자리 모듈, 시험 runner, SH0 도구 스파이크. 메인

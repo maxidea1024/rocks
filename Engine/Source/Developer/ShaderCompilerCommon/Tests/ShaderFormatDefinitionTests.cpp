@@ -1,7 +1,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/File.h>
-#include <ShaderCompiler/ShaderFormatDefinition.h>
+#include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
