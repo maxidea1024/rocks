@@ -1281,6 +1281,16 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
                 }
             }
 
+            // 임포터 태그(A2f3a)도 옮긴다(UE 복제가 AssetImportData를 그대로 옮기는 것과 같다).
+            Array<ImportTagInput> tags(allocator);
+            if (auto reserved = tags.TryReserve(old.tags.Size()); !reserved) {
+                return fail(AssetDiagnosticCode::None, reserved.Error());
+            }
+
+            for (const ImportTag& one : old.tags) {
+                (void)tags.TryPushBack(ImportTagInput{one.key.View(), one.value.View()});
+            }
+
             ImportRecordInput input;
             input.owner = newId;
             input.importerId = old.importerId;
@@ -1289,6 +1299,7 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
             input.sources = sources.View();
             input.options = old.options.View();
             input.outputs = outputs.View();
+            input.tags = tags.View();
             auto written = WriteImportRecord(allocator, newId, input);
             if (!written) {
                 return fail(AssetDiagnosticCode::None, written.Error());
@@ -1300,7 +1311,8 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
         }
     }
 
-    if (auto planned = PlanHookOutputs(info, newId, {}, plan, diagnostic); !planned) {
+    if (auto planned = PlanHookOutputs(info, newId, {}, record.View(), plan, diagnostic);
+        !planned) {
         return EditorFail<void>(failure, diagnostic);
     }
 
@@ -1474,6 +1486,16 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
                 }
             }
 
+            // 임포터 태그(A2f3a)도 옮긴다(같은 임포트의 기록이다 — id만 바뀐다).
+            Array<ImportTagInput> tags(allocator);
+            if (auto reserved = tags.TryReserve(old.tags.Size()); !reserved) {
+                return abandon(AssetDiagnosticCode::None, reserved.Error());
+            }
+
+            for (const ImportTag& one : old.tags) {
+                (void)tags.TryPushBack(ImportTagInput{one.key.View(), one.value.View()});
+            }
+
             ImportRecordInput input;
             input.owner = newId;
             input.importerId = old.importerId;
@@ -1482,6 +1504,7 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
             input.sources = sources.View();
             input.options = old.options.View();
             input.outputs = outputs.View();
+            input.tags = tags.View();
             auto written = WriteImportRecord(allocator, newId, input);
             if (!written) {
                 return abandon(AssetDiagnosticCode::None, written.Error());
@@ -1493,7 +1516,8 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
     }
 
     AssetDiagnostic diagnostic;
-    if (auto planned = PlanHookOutputs(info, newId, info.importOwner.View(), plan, diagnostic);
+    if (auto planned =
+            PlanHookOutputs(info, newId, info.importOwner.View(), recordBytes, plan, diagnostic);
         !planned) {
         (void)CloseOpened(before.View());
         return EditorFail<void>(failure, diagnostic);
@@ -1635,7 +1659,8 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
     }
 
     // extra 의존 = hook의 Build 의존 + 열 때 읽은 ImportOwner.
-    return PlanHookOutputs(info, info.id, info.importOwner.View(), plan, diagnostic);
+    return PlanHookOutputs(info, info.id, info.importOwner.View(), info.importRecord.View(), plan,
+                           diagnostic);
 }
 
 Result<void> EditorPackageSet::PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
@@ -1681,7 +1706,7 @@ Result<void> EditorPackageSet::PlanNewTarget(const LogicalPath& path, AssetId id
 
 Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
                                                Span<const PackageDependencyEntry> importOwner,
-                                               SavePlan& plan,
+                                               Span<const uint8> importRecord, SavePlan& plan,
                                                AssetDiagnostic& diagnostic) noexcept {
     Allocator& allocator = *allocator_;
     const AssetId id = info.id;
@@ -1715,6 +1740,20 @@ Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, As
         if (step) {
             step =
                 CollectAssetBundleTags(*registry_, access, representative.Value(), allocator, tags);
+        }
+
+        // 임포터 태그(A2f3a UXR8): 이번에 쓸 기록이 소유 기록이면 그 태그를 그대로 낸다(원천이
+        // 기록이라 임포터 모듈이 없는 프로젝트에서 다시 저장해도 남는다 — UE UAssetImportData).
+        if (step && !importRecord.IsEmpty()) {
+            auto record = ReadImportRecord(allocator, asset, importRecord);
+            step = record ? Result<void>::Success() : Result<void>::Failure(record.Error());
+            if (record && record.Value().OwnedBy(asset)) {
+                for (const ImportTag& tag : record.Value().tags) {
+                    if (step) {
+                        step = tags.Add(tag.key.View(), tag.value.View());
+                    }
+                }
+            }
         }
 
         if (step) {

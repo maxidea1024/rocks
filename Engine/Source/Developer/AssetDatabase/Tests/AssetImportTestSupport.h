@@ -16,7 +16,8 @@
 //   TestAsset·BaseGameAsset·DerivedGameAsset·Asset·TestPart) reference=<key>           주 출력
 //   TestAsset::hard = 그 출력 warn=<코드 번호>          Warn(그 코드, 7) nomain=1 주 출력을 만들지
 //   않는다 mainType=<타입>           주 출력을 그 타입으로 청한다(Output 규칙 시험) bulkForeign=1
-//   추가 출력이 아닌 객체에 AddBulk
+//   추가 출력이 아닌 객체에 AddBulk tags=<key>|<value>,… 임포터 태그(A2f3a — 값에 `,`·`|` 없음)
+//   keeptags=1 옛 기록 태그(PreviousTags)를 다시 더한다
 // 옵션 TestImportOptions{scale, failAt}: failAt 1이면 원본을 읽은 뒤 Fail(InvalidSource,
 // InvalidArgument, 5), 2면 주 출력을 만든 뒤 Failure(Busy)(진단 없이), 3이면 모든 출력 뒤 Fail.
 // 역할 변형(roles px·nx)은 두 원본의 value를 더한다.
@@ -224,6 +225,39 @@ public:
             }
         }
 
+        // 임포터 태그(A2f3a UXR8).
+        lastPreviousTags = context.PreviousTags().Size();
+        if (FindLine(first, "keeptags", option)) {
+            for (const ImportTag& tag : context.PreviousTags()) {
+                if (auto added = context.AddTag(tag.key.View(), tag.value.View()); !added) {
+                    return added;
+                }
+            }
+        }
+
+        if (FindLine(first, "tags", option)) {
+            usize start = 0;
+            for (usize index = 0; index <= option.ByteCount(); ++index) {
+                if (index < option.ByteCount() && option.Data()[index] != ',') {
+                    continue;
+                }
+
+                const StringView item = option.SliceBytes(start, index - start);
+                start = index + 1;
+                usize bar = 0;
+                while (bar < item.ByteCount() && item.Data()[bar] != '|') {
+                    ++bar;
+                }
+
+                const StringView value = bar < item.ByteCount()
+                                             ? item.SliceBytes(bar + 1, item.ByteCount() - bar - 1)
+                                             : StringView();
+                if (auto added = context.AddTag(item.SliceBytes(0, bar), value); !added) {
+                    return added;
+                }
+            }
+        }
+
         if (failAt == 3) {
             return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, 6);
         }
@@ -236,6 +270,8 @@ public:
     uint32 calls = 0;
     // 마지막으로 성공한 Import가 재임포트였는지다.
     bool lastReimport = false;
+    // 마지막 Import가 받은 옛 기록 태그 수다(A2f3a).
+    usize lastPreviousTags = 0;
 };
 
 inline AssetImporterInfo TestImporterInfo() noexcept {

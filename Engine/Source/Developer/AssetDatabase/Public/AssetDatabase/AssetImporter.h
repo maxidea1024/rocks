@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <AssetRuntime/BulkData.h>
 #include <Core/Containers/Array.h>
@@ -89,6 +90,15 @@ public:
     // 서비스 실패의 진단이 된다).
     virtual Result<void> Fail(AssetDiagnosticCode code, ErrorCode error,
                               uint64 detail = 0) noexcept = 0;
+    // 주 출력 기록에 임포터 태그 한 쌍을 더한다(Docs/Design/AssetSystem 7.1절 19 A2f3a UXR8 —
+    // 저장이 패키지 Tags로 낸다, 색인 항목 태그에 나온다). key는 `<Info().name>.`으로 시작한다
+    // (IsValidImportTag). 같은 쌍은 한 번만 남는다. 이번 기록에는 이번에 더한 것만
+    // 남는다(재임포트도 — 옛 값은 PreviousTags로 읽어 다시 더한다). 오류: 규칙 위반·MaxImportTags
+    // 초과 InvalidArgument, 할당 실패.
+    virtual Result<void> AddTag(StringView key, StringView value) noexcept = 0;
+    // 재임포트면 옛 소유 기록의 태그((key, value) byte 순), 새 임포트는 빈 목록이다. 수명은 Import
+    // 호출 동안이다.
+    virtual Span<const ImportTag> PreviousTags() const noexcept = 0;
 
 protected:
     ~AssetImportContext() = default;

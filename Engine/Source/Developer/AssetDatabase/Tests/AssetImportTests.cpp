@@ -264,6 +264,96 @@ TEST(AssetImport_NewAsset) {
     CHECK(Representative(service.Packages(), quiet.id)->value == 2);
 }
 
+// 임포터 태그(7.1절 19 A2f3a UXR8): 새 임포트의 AddTag가 소유 기록 필드 8과 패키지 Tags(색인 항목
+// 태그)에 남는다(같은 쌍은 한 번). 재임포트는 PreviousTags로 옛 태그를 보이고 이번에 더한 것만
+// 남긴다(다시 더하지 않으면 사라진다). 복제는 태그를 옮긴다. 규칙 위반 태그는 임포트 실패(아무것도
+// 쓰지 않음)다. 엔진 태그 이름공간 이름(`Bundle`)의 임포터는 등록할 수 없고, 역할에 `:`를 쓸 수
+// 있다(A2f3b — `blob:<sha256>`).
+TEST(AssetImport_ImporterTags) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-tags");
+    REQUIRE(scene.ready);
+    REQUIRE(scene.PutSource(RockSource, "value=1\ntags=TestImporter.Path|/Game/A,"
+                                        "TestImporter.Path|/Game/A,TestImporter.Former|x"));
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    AssetImportResult result(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/Tagged", inputs, {}, {}, diagnostics, result));
+    const auto tagCount = [&](AssetId id, StringView key, StringView value) noexcept {
+        auto entry = service.Index().FindById(id);
+        usize count = 0;
+        for (const PackageTag& tag :
+             entry ? entry.Value()->tags : Array<PackageTag>(env.allocator)) {
+            count +=
+                tag.key.View() == key && (value.IsEmpty() || tag.value.View() == value) ? 1 : 0;
+        }
+
+        return count;
+    };
+    CHECK(tagCount(result.id, "TestImporter.Path", "/Game/A") == 1 &&
+          tagCount(result.id, "TestImporter.Former", "x") == 1);
+    CHECK(service.Index().FindById(result.id).Value()->tags.Size() == 2);
+    auto read = ReadFile(env, scene, "Content/Tagged.rasset");
+    REQUIRE(read);
+    auto record = ReadImportRecord(env.allocator, result.id, read.Value().importRecord);
+    REQUIRE(record);
+    CHECK(record.Value().tags.Size() == 2 && scene.test.lastPreviousTags == 0);
+
+    // 재임포트: 옛 태그 둘을 보이고(keeptags) 새 태그를 더한다.
+    REQUIRE(scene.PutSource(RockSource, "value=2\nkeeptags=1\ntags=TestImporter.Former|y"));
+    AssetImportResult again(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/Tagged", {}, {}, diagnostics, again));
+    CHECK(scene.test.lastPreviousTags == 2 && scene.test.lastReimport);
+    CHECK(tagCount(result.id, "TestImporter.Former", "") == 2 &&
+          service.Index().FindById(result.id).Value()->tags.Size() == 3);
+
+    // 다시 더하지 않으면 사라진다.
+    REQUIRE(scene.PutSource(RockSource, "value=3"));
+    REQUIRE(service.Reimport(scene.lock, "/Game/Tagged", {}, {}, diagnostics, again));
+    CHECK(scene.test.lastPreviousTags == 3 &&
+          service.Index().FindById(result.id).Value()->tags.IsEmpty());
+
+    // 복제는 태그를 옮긴다.
+    REQUIRE(scene.PutSource(RockSource, "value=4\ntags=TestImporter.Path|/Game/C"));
+    REQUIRE(service.Reimport(scene.lock, "/Game/Tagged", {}, {}, diagnostics, again));
+    AssetDuplicateResult copy(env.allocator);
+    REQUIRE(service.Duplicate(scene.lock, "/Game/Tagged", "/Game/TaggedCopy", copy));
+    CHECK(tagCount(copy.id, "TestImporter.Path", "/Game/C") == 1);
+
+    // 규칙 위반 태그(접두가 다르다)는 임포트 실패이고 아무것도 쓰지 않는다.
+    REQUIRE(scene.PutSource("SourceArt/Bad.trock", "value=1\ntags=Other.A|1"));
+    const String bad = scene.Absolute(env.allocator, "SourceArt/Bad.trock");
+    const AssetImportSourceInput badInputs[] = {{DefaultImportSourceRole, bad.View()}};
+    AssetImportResult refused(env.allocator);
+    CHECK(service.Import(scene.lock, "/Game/BadTag", badInputs, {}, {}, diagnostics, refused)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(!scene.files.Has("Content/BadTag.rasset"));
+
+    // 등록: `Bundle` 이름(대소문자 무시)은 거부, 역할 `blob:abc`는 받는다.
+    AssetImporterInfo bundle = TestImporterInfo();
+    bundle.id = Guid{0x494d50540001ull, 9};
+    bundle.name = "bundle";
+    bundle.extensions = {};
+    TestImporter bundleImporter(bundle);
+    CHECK(scene.importers.Register(bundleImporter).Error() == ErrorCode::InvalidArgument);
+    static constexpr StringView BlobRoles[] = {"blob:abc"};
+    AssetImporterInfo blob = TestImporterInfo();
+    blob.id = Guid{0x494d50540001ull, 10};
+    blob.name = "BlobImporter";
+    blob.extensions = {};
+    blob.optionsType = TypeId{};
+    blob.roles = BlobRoles;
+    TestImporter blobImporter(blob);
+    auto registered = scene.importers.Register(blobImporter);
+    CHECK(registered);
+}
+
 // 추가 출력: Output 순서대로 `<path>_<key>`에 저장, 참조 기록(owner = 주 출력)·ImportOwner 의존,
 // 주 출력의 소유 기록 출력 목록(key 순 — 빈 key 먼저), 출력 사이 Hard 참조, 고아 없음, 경고(Warn)
 // ImportWarning(코드·detail·asset = 주 출력), AbsoluteSourcePath(Project를 다른 곳으로 — 원본은

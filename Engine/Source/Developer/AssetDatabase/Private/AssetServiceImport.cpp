@@ -161,10 +161,12 @@ public:
     ImportContext(Allocator& allocator, EditorPackageSet& set, TypeRegistry& types,
                   const AssetAliasTable& aliases, StringView path, const AssetImporterInfo& info,
                   Span<const AssetImportSource> sources, const void* options, AssetId mainId,
-                  Array<EditorWarning>* warnings, bool reimport) noexcept
+                  Array<EditorWarning>* warnings, bool reimport,
+                  Span<const ImportTag> previousTags) noexcept
         : allocator_(allocator), set_(set), types_(types), aliases_(aliases), path_(path),
           info_(info), sources_(sources), options_(options), mainId_(mainId), warnings_(warnings),
-          reimport_(reimport), access_(set.Access()), outputs_(allocator) {
+          reimport_(reimport), previousTags_(previousTags), access_(set.Access()),
+          outputs_(allocator), tags_(allocator) {
     }
 
     // 재임포트의 기존 출력 하나를 등록한다(아직 청하지 않음). 오류: 할당 실패.
@@ -353,8 +355,41 @@ public:
         return Result<void>::Failure(error);
     }
 
+    Result<void> AddTag(StringView key, StringView value) noexcept override {
+        if (!IsValidImportTag(info_.name, key, value)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (const ImportTag& tag : tags_) {
+            if (tag.key.View() == key && tag.value.View() == value) {
+                return Result<void>::Success();
+            }
+        }
+
+        if (tags_.Size() >= MaxImportTags) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        ImportTag tag(allocator_);
+        Result<void> step = tag.key.TryAssign(key);
+        if (step) {
+            step = tag.value.TryAssign(value);
+        }
+
+        return step ? tags_.TryPushBack(rocks::Move(tag)) : step;
+    }
+
+    Span<const ImportTag> PreviousTags() const noexcept override {
+        return previousTags_;
+    }
+
     Span<const MadeOutput> Outputs() const noexcept {
         return outputs_.View();
+    }
+
+    // 이번에 더한 임포터 태그다(더한 순서 — 기록 쓰기가 정렬한다).
+    Span<const ImportTag> Tags() const noexcept {
+        return tags_.View();
     }
 
     // 마지막 실패 진단이다(Output·Fail이 남긴 것 — 없으면 code None).
@@ -374,8 +409,10 @@ private:
     AssetId mainId_;
     Array<EditorWarning>* warnings_;
     bool reimport_;
+    Span<const ImportTag> previousTags_;
     ObjectAccessContext access_;
     Array<MadeOutput> outputs_;
+    Array<ImportTag> tags_;
     AssetDiagnostic failure_;
 };
 
@@ -457,6 +494,8 @@ struct AssetService::ImportRun {
     AssetDiagnostic* failure = nullptr;
     bool reimport = false;
     Span<const uint8> recordedOptions{};
+    // 재임포트의 옛 소유 기록 태그다(문맥 PreviousTags — A2f3a).
+    Span<const ImportTag> previousTags{};
     Array<Existing> existing;
 };
 
@@ -798,7 +837,7 @@ Result<void> AssetService::RunImport(ImportRun& run) noexcept {
     // 임포터 호출(실패하면 이번에 연 것을 닫는다 — 열린 id는 호출자가 적었다).
     ImportContext context(allocator, set_, *types_, *run.aliases, run.path->Text(), info,
                           contextSources.View(), options.Get(), run.mainId,
-                          warnings != nullptr ? &pending : nullptr, run.reimport);
+                          warnings != nullptr ? &pending : nullptr, run.reimport, run.previousTags);
     auto abandon = [&](const AssetDiagnostic& diagnostic) noexcept {
         (void)set_.CloseOpened(run.before);
         if (failure != nullptr) {
@@ -1035,8 +1074,22 @@ Result<void> AssetService::RunImport(ImportRun& run) noexcept {
         }
     }
 
+    // 임포터 태그(A2f3a)를 기록 입력으로 옮긴다(자리는 여기서 잡는다 — 실패하면 되돌린다).
+    Array<ImportTagInput> recordTags(allocator);
+    if (auto reserved = recordTags.TryReserve(context.Tags().Size()); !reserved) {
+        AssetDiagnostic diagnostic;
+        diagnostic.error = reserved.Error();
+        diagnostic.asset = run.mainId;
+        return rollback(diagnostic);
+    }
+
+    for (const ImportTag& tag : context.Tags()) {
+        (void)recordTags.TryPushBack(ImportTagInput{tag.key.View(), tag.value.View()});
+    }
+
     ImportRecordInput owned;
     owned.owner = run.mainId;
+    owned.tags = recordTags.View();
     owned.importerId = info.id;
     owned.importerName = info.name;
     owned.importerVersion = info.version;
@@ -1328,6 +1381,8 @@ Result<void> AssetService::Reimport(const AssetDatabaseLock& lock, StringView pa
 
     // 기존 출력을 연다(주 출력은 빈 key — 기록 key·타입, 경로는 지금 색인 경로).
     ImportRun run(allocator);
+    // 옛 소유 기록의 태그를 임포터에 보인다(record는 RunImport가 끝날 때까지 산다 — A2f3a).
+    run.previousTags = recorded.tags.View();
     if (auto reserved = run.existing.TryReserve(recorded.outputs.Size()); !reserved) {
         return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
     }

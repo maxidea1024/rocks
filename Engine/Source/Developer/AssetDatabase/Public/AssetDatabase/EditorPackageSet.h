@@ -472,9 +472,11 @@ private:
     Result<void> PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
                                AssetDiagnostic& diagnostic) noexcept;
     // 대표 에셋 타입 hook의 Tags·Build 의존과 importOwner를 plan에 모은다(asset은 저장할 id — hook
-    // 문맥에 준다).
+    // 문맥에 준다). Tags에는 bundle 태그(A4e2b)와, importRecord(이번에 쓸 기록 byte — self =
+    // asset)가 소유 기록이면 그 임포터 태그(A2f3a)도 더한다.
     Result<void> PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
-                                 Span<const PackageDependencyEntry> importOwner, SavePlan& plan,
+                                 Span<const PackageDependencyEntry> importOwner,
+                                 Span<const uint8> importRecord, SavePlan& plan,
                                  AssetDiagnostic& diagnostic) noexcept;
     // duplicate가 있으면 복제 모드다(원본 정보·저장소를 바꾸지 않는다).
     Result<void> WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
