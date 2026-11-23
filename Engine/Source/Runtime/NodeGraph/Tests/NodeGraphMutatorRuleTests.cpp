@@ -113,7 +113,8 @@ TEST(NodeGraph_RulePrunesRetainedPins) {
     CHECK(HasRetained(m.sample.Node(SampleAdd), env.pinGone));
 }
 
-// 새 핀 목록에 고아 핀과 같은 키가 생기면 거부한다(GI8 — 재결합은 NG3).
+// 새 핀 목록에 고아 핀과 같은 키가 같은 방향으로 생기면 재결합한다(GI8, 10.1절): 값은 입력
+// 기본값으로 돌아오고 고아 핀은 사라진다.
 TEST(NodeGraph_RuleRetainedShadowed) {
     TestEnv env;
     REQUIRE(env.ready);
@@ -128,7 +129,11 @@ TEST(NodeGraph_RuleRetainedShadowed) {
     REQUIRE(FillRecord(bytes, TestDynamicStruct, 3, 0));
     GraphCommandList grow(env.allocator);
     REQUIRE(grow.SetNodeProperties(SampleMain, SampleDynamic, bytes.View()));
-    CHECK(Rejects(m, grow, GraphCommandReason::RetainedShadowed));
+    REQUIRE(m.Run(grow));
+    const GraphNode& node = m.sample.Node(SampleDynamic);
+    CHECK(!HasRetained(node, env.Intern("Item_2")));
+    REQUIRE(node.inputDefaults.Size() == 1);
+    CHECK(node.inputDefaults[0].pin == env.Intern("Item_2"));
 }
 
 // 재경유 사슬 순환(GI10)과 재경유 자기 간선을 거부한다.

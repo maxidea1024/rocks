@@ -147,7 +147,7 @@ struct NodeTypeDescriptor {
 | GI10 | 재경유 사슬에 순환이 없다 |
 | GI11 | GraphId·NodeId·주석 id는 0이 아니다. 도메인·노드 종류·PinKey는 None이 아니다 |
 | GI12 | `documentFormatVersion`이 지원 범위다. `mainGraph`가 문서에 있고 역할이 Main이며, Main 역할 그래프는 그것 하나다. Main·Collapsed 그래프의 `domainRole`은 0이다 |
-| GI13 | 알려진 종류의 노드: `typeSchemaVersion`이 1 이상이고 서술 버전 이하다(낮으면 migration 대상 — NG3). 속성 Record의 schema가 서술의 `propertiesStruct`다(`propertiesStruct`가 0이면 속성이 비어 있다). `Disabled`면 서술에 비활성 허용이 있다. 재경유에는 고아 핀이 없다. 동적 핀을 계산할 수 있다(동적 핀 함수 오류·핀 규칙 위반이면 위반). 활성 상태·고아 핀 방향이 정의된 값이다 |
+| GI13 | 알려진 종류의 노드: `typeSchemaVersion`이 1 이상이고 서술 버전 이하다. 서술 버전보다 낮으면 migration 전 노드이고 이 행의 나머지 검사를 하지 않으며 핀 목록을 모르는 노드로 둔다(10.1절). 속성 Record의 schema가 서술의 `propertiesStruct`다(`propertiesStruct`가 0이면 속성이 비어 있다). `Disabled`면 서술에 비활성 허용이 있다. 재경유에는 고아 핀이 없다. 동적 핀을 계산할 수 있다(동적 핀 함수 오류·핀 규칙 위반이면 위반). 활성 상태·고아 핀 방향이 정의된 값이다 |
 | GI14 | 알려진 종류의 노드: 입력 기본값의 키는 현재 입력 핀이고, 그 핀의 값 정책이 Hidden이 아니며, 값 Record는 비어 있지 않다 |
 
 **알 수 없는 종류.** 등록되지 않은 종류의 노드(자리 노드, GD14)는 핀 목록이 없다. 그래서 그 노드 쪽 간선 끝의 GI2·GI3·GI5 순번·GI8 검사와 GI13·GI14를 하지 않는다. 그 밖(GI1·GI4·GI5 정렬·GI6·GI7·GI9·GI11)은 검사한다. 알려진 종류의 고아 핀 쪽 끝은 방향만 보고 `maxEdges`·순번은 보지 않는다(서술에서 사라진 핀이라 정보가 없다). 알 수 없는 종류의 고아 핀은 방향도 보지 않는다(그 노드의 핀 정보 전체를 모르므로). GI13을 어긴 알려진 종류의 노드(속성이 틀림, 동적 핀 계산 불가)도 핀 목록 모름으로 두고 알 수 없는 종류처럼 검사한다.

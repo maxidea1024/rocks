@@ -102,7 +102,7 @@ const PinDescriptor* PinList::Find(Name key) const noexcept {
 
 NodeTypeRegistry::NodeTypeRegistry(Allocator& allocator, NamePool& names) noexcept
     : allocator_(allocator), names_(names), schemas_(allocator), nodeTypes_(allocator),
-      typeLookup_(allocator) {
+      typeLookup_(allocator), listeners_(allocator) {
 }
 
 NodeTypeRegistry::~NodeTypeRegistry() noexcept = default;
@@ -207,7 +207,8 @@ NodeTypeRegistry::ValidateDescriptor(const GraphSchema* schema,
                                      const NodeTypeDescriptor& descriptor) const noexcept {
     if (!descriptor.type.IsValid() || descriptor.type.IsNone() || descriptor.schemaVersion == 0 ||
         descriptor.staticPins.Size() > MaxPinsPerNode ||
-        (static_cast<uint32>(descriptor.capabilities) & ~NodeCapabilityMask) != 0) {
+        (static_cast<uint32>(descriptor.capabilities) & ~NodeCapabilityMask) != 0 ||
+        (descriptor.schemaVersion > 1 && descriptor.migrate == nullptr)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -371,21 +372,84 @@ NodeTypeRegistry::RegisterNodeType(Name domain, const NodeTypeDescriptor& descri
         return Result<NodeTypeRegistrationId>::Failure(ErrorCode::AlreadyExists);
     }
 
-    return AddNodeType(domain, descriptor, Move(lease));
+    if (notifying_) {
+        return Result<NodeTypeRegistrationId>::Failure(ErrorCode::Busy);
+    }
+
+    auto added = AddNodeType(domain, descriptor, Move(lease));
+    if (added) {
+        NotifyListeners(NodeTypeKey{domain, descriptor.type});
+    }
+
+    return added;
 }
 
 Result<void> NodeTypeRegistry::UnregisterNodeType(NodeTypeRegistrationId id) noexcept {
+    if (notifying_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     for (usize index = 0; index < nodeTypes_.Size(); ++index) {
         // 공통 종류(도메인 None)는 해제할 수 없다.
         if (id.value != 0 && nodeTypes_[index].id.value == id.value &&
             !nodeTypes_[index].registered.domain.IsNone()) {
-            auto removed = nodeTypes_.TryRemoveAt(index);
+            // 조회에서 빼기 → 통지 → lease 놓기(10절). 항목을 꺼내 두어 통지가 끝날 때까지 서술
+            // 데이터와 lease가 살아 있게 한다.
+            NodeTypeEntry removed(Move(nodeTypes_[index]));
+            if (auto erased = nodeTypes_.TryRemoveAt(index); !erased) {
+                nodeTypes_[index] = Move(removed);
+                return erased;
+            }
+
             RebuildTypeLookup();
-            return removed;
+            NotifyListeners(
+                NodeTypeKey{removed.registered.domain, removed.registered.descriptor.type});
+            return Result<void>::Success();
         }
     }
 
     return Result<void>::Failure(ErrorCode::NotFound);
+}
+
+Result<void> NodeTypeRegistry::AddListener(NodeTypeRegistryListener& listener) noexcept {
+    for (NodeTypeRegistryListener* existing : listeners_) {
+        if (existing == &listener) {
+            return Result<void>::Failure(ErrorCode::AlreadyExists);
+        }
+    }
+
+    return listeners_.TryPushBack(&listener);
+}
+
+void NodeTypeRegistry::RemoveListener(NodeTypeRegistryListener& listener) noexcept {
+    for (usize index = 0; index < listeners_.Size(); ++index) {
+        if (listeners_[index] == &listener) {
+            // 콜백 중이면 자리만 비운다(반복 중 배열이 줄지 않게).
+            if (notifying_) {
+                listeners_[index] = nullptr;
+            } else {
+                static_cast<void>(listeners_.TryRemoveAt(index));
+            }
+
+            return;
+        }
+    }
+}
+
+void NodeTypeRegistry::NotifyListeners(NodeTypeKey key) noexcept {
+    notifying_ = true;
+    for (usize index = 0; index < listeners_.Size(); ++index) {
+        if (listeners_[index] != nullptr) {
+            listeners_[index]->OnNodeTypesChanged(Span<const NodeTypeKey>(&key, 1));
+        }
+    }
+
+    notifying_ = false;
+    for (usize index = listeners_.Size(); index > 0; --index) {
+        if (listeners_[index - 1] == nullptr) {
+            static_cast<void>(listeners_.TryRemoveAt(index - 1));
+        }
+    }
 }
 
 const GraphSchema* NodeTypeRegistry::FindSchema(Name domain) const noexcept {
@@ -412,6 +476,11 @@ Result<void> NodeTypeRegistry::CollectPins(const GraphDocument& document, const 
     out.Clear();
     const RegisteredNodeType* type = FindNodeType(document.domain, node.type);
     if (type == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    // 서술과 버전이 다른 노드(migration 전)는 핀 목록을 모른다(10.1절).
+    if (node.typeSchemaVersion != type->descriptor.schemaVersion) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 

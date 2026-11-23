@@ -196,7 +196,6 @@ enum class GraphCommandReason : uint8 {
     ConversionInvalid,
     NotOrdered,
     OrderMismatch,
-    PinsDropped,
     ValueHidden,
     ValueEmpty,
     DefaultMissing,
@@ -207,7 +206,8 @@ enum class GraphCommandReason : uint8 {
     RetainedMissing,
     // 명령 목록에 같은 노드 id가 두 번 있다.
     DuplicateNode,
-    // 새 핀 목록에 고아 핀과 같은 키가 생긴다(GI8 — 재결합은 NG3).
+    // 새 핀 목록에 고아 핀과 같은 키가 반대 방향으로 생긴다(GI8 — 같은 방향이면
+    // 재결합한다, 10.1절).
     RetainedShadowed,
     // 재경유 사슬에 순환이 생긴다(GI10).
     RerouteCycle,
@@ -220,7 +220,10 @@ enum class GraphCommandReason : uint8 {
     // 넣는 노드 데이터가 틀렸다(InsertNode): 입력 기본값 핀·고아 핀 키가 겹치거나 None이다, 고아 핀
     // 방향이 정의되지 않았다, 재경유 노드에 고아 핀이 있다, 목록 끝에 값도 간선도 없는 고아 핀이
     // 남았다(GI7).
-    NodeDataInvalid
+    NodeDataInvalid,
+    // migration 결과가 틀렸다: 버전을 올리지 않았다, 결과 종류·속성 schema가 틀렸다, 서로 다른 두
+    // 키를 같은 키로 재지정했다, 단계 상한을 넘었다(10.1절).
+    MigrationInvalid
 };
 
 ROCKS_NODEGRAPH_API const char* GraphCommandReasonName(GraphCommandReason reason) noexcept;

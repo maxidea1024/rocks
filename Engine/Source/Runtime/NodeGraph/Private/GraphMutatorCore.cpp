@@ -192,12 +192,57 @@ GraphMutatorCore::GraphMutatorCore(GraphDocument& document, GraphDocumentLayout&
                                    const NodeTypeRegistry& registry, GraphIdSource& ids,
                                    Allocator& allocator) noexcept
     : document_(document), layout_(layout), registry_(registry), ids_(ids), allocator_(allocator),
-      idIndex_(allocator), outgoing_(allocator), listeners_(allocator), pending_(allocator),
-      work_(allocator), interactionPatch_(allocator), interactionKeys_(allocator),
-      pinsA_(allocator), pinsB_(allocator), edgesA_(allocator), edgesB_(allocator) {
+      pendingRefresh_(allocator), idIndex_(allocator), outgoing_(allocator), listeners_(allocator),
+      pending_(allocator), work_(allocator), interactionPatch_(allocator),
+      interactionKeys_(allocator), pinsA_(allocator), pinsB_(allocator), edgesA_(allocator),
+      edgesB_(allocator) {
 }
 
 // ---- 초기화·조회 ----
+
+// 문서의 id 색인(그래프·노드·주석 id 정렬)과 나가는 간선 색인이다(Initialize·Reload).
+Result<void> GraphMutatorCore::BuildIndexes(const GraphDocument& document,
+                                            const GraphDocumentLayout& layout, Array<Guid>& ids,
+                                            Array<OutgoingEdge>& outgoing) const noexcept {
+    ids.Clear();
+    outgoing.Clear();
+    for (const Graph& graph : document.graphs) {
+        if (auto pushed = ids.TryPushBack(graph.id); !pushed) {
+            return pushed;
+        }
+
+        for (const GraphNode& node : graph.nodes) {
+            if (auto pushed = ids.TryPushBack(node.id); !pushed) {
+                return pushed;
+            }
+        }
+
+        for (const GraphEdge& edge : graph.edges) {
+            const OutgoingEdge entry{graph.id, edge.fromNode, edge.fromPin, edge.toNode,
+                                     edge.toPin};
+            if (auto pushed = outgoing.TryPushBack(entry); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    for (const GraphLayout& graph : layout.graphs) {
+        for (const CommentBox& comment : graph.comments) {
+            if (auto pushed = ids.TryPushBack(comment.id); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    algo::Sort(ids.View(), [](const Guid& left, const Guid& right) noexcept {
+        return CompareGuid(left, right) < 0;
+    });
+    algo::Sort(outgoing.View(), [](const OutgoingEdge& left, const OutgoingEdge& right) noexcept {
+        return CoreCompareOutgoing(left, right) < 0;
+    });
+
+    return Result<void>::Success();
+}
 
 Result<void> GraphMutatorCore::Initialize() noexcept {
     if (initialized_) {
@@ -210,42 +255,9 @@ Result<void> GraphMutatorCore::Initialize() noexcept {
         return valid;
     }
 
-    idIndex_.Clear();
-    outgoing_.Clear();
-    for (const Graph& graph : document_.graphs) {
-        if (auto pushed = idIndex_.TryPushBack(graph.id); !pushed) {
-            return pushed;
-        }
-
-        for (const GraphNode& node : graph.nodes) {
-            if (auto pushed = idIndex_.TryPushBack(node.id); !pushed) {
-                return pushed;
-            }
-        }
-
-        for (const GraphEdge& edge : graph.edges) {
-            const OutgoingEdge entry{graph.id, edge.fromNode, edge.fromPin, edge.toNode,
-                                     edge.toPin};
-            if (auto pushed = outgoing_.TryPushBack(entry); !pushed) {
-                return pushed;
-            }
-        }
+    if (auto built = BuildIndexes(document_, layout_, idIndex_, outgoing_); !built) {
+        return built;
     }
-
-    for (const GraphLayout& graph : layout_.graphs) {
-        for (const CommentBox& comment : graph.comments) {
-            if (auto pushed = idIndex_.TryPushBack(comment.id); !pushed) {
-                return pushed;
-            }
-        }
-    }
-
-    algo::Sort(idIndex_.View(), [](const Guid& left, const Guid& right) noexcept {
-        return CompareGuid(left, right) < 0;
-    });
-    algo::Sort(outgoing_.View(), [](const OutgoingEdge& left, const OutgoingEdge& right) noexcept {
-        return CoreCompareOutgoing(left, right) < 0;
-    });
 
     interactionPatch_.owner_ = this;
     revision_ = 0;
@@ -553,6 +565,17 @@ Result<void> GraphMutatorCore::ApplyTitleOp(GraphPatchOp& op, bool record) noexc
 
 Result<void> GraphMutatorCore::RecordNodeChanges(Guid graph, const GraphNode& before,
                                                  const GraphNode& after) noexcept {
+    // migration은 종류·버전을 바꾼다: 핀 목록이 바뀐 것으로 본다(10.1절).
+    const bool typeChanged =
+        !(before.type == after.type) || before.typeSchemaVersion != after.typeSchemaVersion;
+    if (typeChanged) {
+        if (auto recorded = Record(GraphChangeKind::NodePinsChanged, graph, after.id, Guid{},
+                                   Name(), Name(), 0);
+            !recorded) {
+            return recorded;
+        }
+    }
+
     if (!CoreSameBytes(before.properties.bytes, after.properties.bytes)) {
         if (auto recorded = Record(GraphChangeKind::NodePropertiesChanged, graph, after.id, Guid{},
                                    Name(), Name(), 0);
@@ -560,10 +583,11 @@ Result<void> GraphMutatorCore::RecordNodeChanges(Guid graph, const GraphNode& be
             return recorded;
         }
 
-        // 동적 핀이 있는 종류면 핀 목록이 달라졌는지 본다.
+        // 동적 핀이 있는 종류면 핀 목록이 달라졌는지 본다(종류·버전이 바뀐 경우는 아래에서).
         const RegisteredNodeType* type = registry_.FindNodeType(document_.domain, after.type);
         const Graph* owner = FindGraph(graph);
-        if (type != nullptr && type->descriptor.dynamicPins != nullptr && owner != nullptr) {
+        if (!typeChanged && type != nullptr && type->descriptor.dynamicPins != nullptr &&
+            owner != nullptr) {
             PinList oldPins(allocator_);
             PinList newPins(allocator_);
             auto oldCollected = registry_.CollectPins(document_, *owner, before, oldPins);
@@ -1071,6 +1095,7 @@ void GraphMutatorCore::Notify(GraphChangeCause cause, bool interactive) noexcept
 
     pending_.changes.Clear();
     pending_.semanticTouched = false;
+    ProcessPendingRefresh();
 }
 
 Result<void> GraphMutatorCore::CheckFullValidation() noexcept {
@@ -1089,6 +1114,10 @@ Result<GraphPatch> GraphMutatorCore::Execute(uint64 source, uint64 expectedRevis
                                              GraphCommandFailure* failure) noexcept {
     if (!initialized_) {
         return Result<GraphPatch>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (broken_) {
+        return Result<GraphPatch>::Failure(ErrorCode::DependencyFailed);
     }
 
     if (interaction_ && source != interactionSource_) {
@@ -1209,6 +1238,10 @@ Result<void> GraphMutatorCore::Undo(uint64 source, GraphPatch& patch) noexcept {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    if (broken_) {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+
     if (interaction_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
@@ -1237,6 +1270,10 @@ Result<void> GraphMutatorCore::Redo(uint64 source, GraphPatch& patch) noexcept {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    if (broken_) {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+
     if (interaction_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
@@ -1261,6 +1298,10 @@ Result<void> GraphMutatorCore::Redo(uint64 source, GraphPatch& patch) noexcept {
 Result<void> GraphMutatorCore::BeginInteraction(uint64 source) noexcept {
     if (!initialized_) {
         return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (broken_) {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 
     if (interaction_) {
@@ -1322,6 +1363,7 @@ Result<void> GraphMutatorCore::CancelInteraction(uint64 source) noexcept {
     interactionPatch_ = GraphPatch(allocator_);
     interactionPatch_.owner_ = this;
     interactionKeys_.Clear();
+    ProcessPendingRefresh();
     return Result<void>::Success();
 }
 
@@ -1413,6 +1455,22 @@ Result<void> GraphMutator::Undo(uint64 source, GraphPatch& patch) noexcept {
 
 Result<void> GraphMutator::Redo(uint64 source, GraphPatch& patch) noexcept {
     return core_.Get() != nullptr ? core_->Redo(source, patch)
+                                  : Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> GraphMutator::Migrate(uint64 source, GraphMigrationReport& report) noexcept {
+    return core_.Get() != nullptr ? core_->Migrate(source, report)
+                                  : Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> GraphMutator::RefreshNodeTypes(uint64 source, Span<const NodeTypeKey> keys) noexcept {
+    return core_.Get() != nullptr ? core_->RefreshNodeTypes(source, keys)
+                                  : Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> GraphMutator::Reload(uint64 source, GraphDocument&& document,
+                                  GraphDocumentLayout&& layout) noexcept {
+    return core_.Get() != nullptr ? core_->Reload(source, Move(document), Move(layout))
                                   : Result<void>::Failure(ErrorCode::Unsupported);
 }
 

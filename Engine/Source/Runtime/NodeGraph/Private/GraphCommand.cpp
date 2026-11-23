@@ -368,8 +368,6 @@ const char* GraphCommandReasonName(GraphCommandReason reason) noexcept {
         return "NotOrdered";
     case GraphCommandReason::OrderMismatch:
         return "OrderMismatch";
-    case GraphCommandReason::PinsDropped:
-        return "PinsDropped";
     case GraphCommandReason::ValueHidden:
         return "ValueHidden";
     case GraphCommandReason::ValueEmpty:
@@ -400,6 +398,8 @@ const char* GraphCommandReasonName(GraphCommandReason reason) noexcept {
         return "InvariantBroken";
     case GraphCommandReason::NodeDataInvalid:
         return "NodeDataInvalid";
+    case GraphCommandReason::MigrationInvalid:
+        return "MigrationInvalid";
     }
 
     return "Unknown";

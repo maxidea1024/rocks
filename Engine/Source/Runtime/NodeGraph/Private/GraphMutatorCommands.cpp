@@ -495,11 +495,11 @@ Result<void> GraphMutatorCore::Connect(const GraphCommand& command) noexcept {
     }
 
     if (!fromKnown.Value()) {
-        return Fail(GraphCommandReason::TypeUnknown, command.graph, edge.fromNode);
+        return Fail(UnknownReason(graph->nodes[fromIndex]), command.graph, edge.fromNode);
     }
 
     if (!toKnown.Value()) {
-        return Fail(GraphCommandReason::TypeUnknown, command.graph, edge.toNode);
+        return Fail(UnknownReason(graph->nodes[toIndex]), command.graph, edge.toNode);
     }
 
     const auto checkEnd = [this, &command](const GraphNode& node, const PinList& pins, Name key,
@@ -1186,7 +1186,7 @@ Result<void> GraphMutatorCore::ReorderEdges(const GraphCommand& command) noexcep
     }
 
     if (!known.Value()) {
-        return Fail(GraphCommandReason::TypeUnknown, command.graph, command.node);
+        return Fail(UnknownReason(graph->nodes[index]), command.graph, command.node);
     }
 
     const PinDescriptor* pin = pinsA_.Find(command.pin);
@@ -1273,6 +1273,10 @@ Result<void> GraphMutatorCore::SetNodeProperties(const GraphCommand& command) no
         return Fail(GraphCommandReason::TypeUnknown, command.graph, command.node);
     }
 
+    if (current.typeSchemaVersion != type->descriptor.schemaVersion) {
+        return Fail(GraphCommandReason::TypeVersion, command.graph, command.node);
+    }
+
     if (command.bytes.Size() > MaxPropertyRecordBytes) {
         return Fail(GraphCommandReason::ValueTooLarge, command.graph, command.node);
     }
@@ -1302,108 +1306,16 @@ Result<void> GraphMutatorCore::SetNodeProperties(const GraphCommand& command) no
         return copied;
     }
 
-    auto newPins = PinsOf(*graph, changed, pinsB_);
-    if (!newPins) {
-        if (newPins.Error() == ErrorCode::OutOfMemory) {
-            return Result<void>::Failure(newPins.Error());
-        }
-
-        return Fail(GraphCommandReason::PropertiesSchema, command.graph, command.node);
+    // 옛 핀 목록은 고아 핀의 마지막 타입에 쓴다. 사라지는 핀은 고아 핀으로, 같은 키·방향으로 다시
+    // 생긴 고아 핀은 재결합한다(10.1절 핀 재정리).
+    PinList oldPins(allocator_);
+    auto oldKnown = PinsOf(*graph, current, oldPins);
+    if (!oldKnown) {
+        return Result<void>::Failure(oldKnown.Error());
     }
 
-    // 새 핀 목록에 고아 핀과 같은 키가 생기면 거부한다(GI8 — 재결합은 NG3).
-    for (const RetainedPin& retained : current.retainedPins) {
-        if (pinsB_.Find(retained.key) != nullptr) {
-            return Fail(GraphCommandReason::RetainedShadowed, command.graph, command.node,
-                        retained.key);
-        }
-    }
-
-    // 사라지는 핀에 간선·입력 기본값이 있으면 거부한다(고아 처리는 NG3). 고아 핀 쪽 간선은
-    // 그대로다.
-    const auto pinKept = [this, &current](Name key, PinDirection direction) noexcept {
-        for (const RetainedPin& retained : current.retainedPins) {
-            if (retained.key == key) {
-                return true;
-            }
-        }
-
-        const PinDescriptor* pin = pinsB_.Find(key);
-        return pin != nullptr && pin->direction == direction;
-    };
-
-    edgesA_.Clear();
-    if (auto collected = CollectIncoming(*graph, command.node, Name(), edgesA_); !collected) {
-        return collected;
-    }
-
-    for (const GraphEdge& edge : edgesA_) {
-        if (!pinKept(edge.toPin, PinDirection::Input)) {
-            return Fail(GraphCommandReason::PinsDropped, command.graph, command.node, edge.toPin);
-        }
-    }
-
-    edgesB_.Clear();
-    if (auto collected = CollectOutgoing(*graph, command.node, Name(), edgesB_); !collected) {
-        return collected;
-    }
-
-    for (const GraphEdge& edge : edgesB_) {
-        if (!pinKept(edge.fromPin, PinDirection::Output)) {
-            return Fail(GraphCommandReason::PinsDropped, command.graph, command.node, edge.fromPin);
-        }
-    }
-
-    for (const PinValueEntry& entry : current.inputDefaults) {
-        const PinDescriptor* pin = pinsB_.Find(entry.pin);
-        if (pin == nullptr || pin->direction != PinDirection::Input ||
-            pin->valuePolicy == PinValuePolicy::Hidden) {
-            return Fail(GraphCommandReason::PinsDropped, command.graph, command.node, entry.pin);
-        }
-    }
-
-    // 입력 핀 간선 상한이 줄었으면 거부한다.
-    for (const PinDescriptor& pin : pinsB_.View()) {
-        if (pin.direction != PinDirection::Input || pin.maxEdges == UnlimitedEdges) {
-            continue;
-        }
-
-        usize count = 0;
-        for (const GraphEdge& edge : edgesA_) {
-            count += edge.toPin == pin.key ? 1 : 0;
-        }
-
-        if (count > pin.maxEdges) {
-            return Fail(GraphCommandReason::EdgeLimit, command.graph, command.node, pin.key);
-        }
-    }
-
-    Array<Name> outputs(allocator_);
-    for (const GraphEdge& edge : edgesB_) {
-        bool seen = false;
-        for (const Name& name : outputs) {
-            seen = seen || name == edge.fromPin;
-        }
-
-        if (!seen) {
-            if (auto pushed = outputs.TryPushBack(edge.fromPin); !pushed) {
-                return pushed;
-            }
-        }
-    }
-
-    if (auto replaced = ReplaceNode(command.graph, Move(changed)); !replaced) {
-        return replaced;
-    }
-
-    // ordered 여부가 바뀐 출력 핀의 순번을 맞춘다.
-    for (const Name& output : outputs) {
-        if (auto normalized = NormalizeOutputOrder(*graph, command.node, output); !normalized) {
-            return normalized;
-        }
-    }
-
-    return Result<void>::Success();
+    return ReconcileNode(*graph, Move(changed), Span<const PinKeyRename>(),
+                         oldKnown.Value() ? &oldPins : nullptr, nullptr);
 }
 
 Result<void> GraphMutatorCore::SetInputDefault(const GraphCommand& command) noexcept {
@@ -1423,7 +1335,7 @@ Result<void> GraphMutatorCore::SetInputDefault(const GraphCommand& command) noex
     }
 
     if (!known.Value()) {
-        return Fail(GraphCommandReason::TypeUnknown, command.graph, command.node);
+        return Fail(UnknownReason(graph->nodes[index]), command.graph, command.node);
     }
 
     const PinDescriptor* pin = pinsA_.Find(command.pin);
@@ -1543,6 +1455,10 @@ Result<void> GraphMutatorCore::SetEnableState(const GraphCommand& command) noexc
         const RegisteredNodeType* type = registry_.FindNodeType(document_.domain, current.type);
         if (type == nullptr) {
             return Fail(GraphCommandReason::TypeUnknown, command.graph, command.node);
+        }
+
+        if (current.typeSchemaVersion != type->descriptor.schemaVersion) {
+            return Fail(GraphCommandReason::TypeVersion, command.graph, command.node);
         }
 
         if (!HasCapability(type->descriptor.capabilities, NodeCapabilities::AllowDisable)) {
