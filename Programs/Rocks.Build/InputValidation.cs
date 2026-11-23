@@ -228,27 +228,12 @@ internal static class InputValidation
             throw new ArgumentException($"Target: unsupported target type {(int)request.Target.Type}.");
         }
 
-        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
-        foreach (NativeModuleInput module in request.Modules)
+        if (request.Modules.FirstOrDefault(module => !Enum.IsDefined(module.Type)) is { } unsupported)
         {
-            if (!Enum.IsDefined(module.Type))
-            {
-                throw new ArgumentException($"Module {module.Name}: unsupported module type {(int)module.Type}.");
-            }
-
-            byName.TryAdd(module.Name, module);
+            throw new ArgumentException($"Module {unsupported.Name}: unsupported module type {(int)unsupported.Type}.");
         }
 
-        HashSet<string> reached = LinkClosure.Reachable(request.Targets.Count == 0 ? byName.Keys : request.Targets, byName);
-        foreach (string name in reached.Order(StringComparer.Ordinal))
-        {
-            NativeModuleInput module = byName[name];
-            if (ModuleTypeRules.ExclusionReason(request.Target, request.Configuration, module.Type) is { } reason)
-            {
-                throw new ArgumentException($"Module {module.Name} has type {module.Type}, but the build reaches it: {reason} " +
-                    "(Docs/Design/BuildTargets section 3.3).");
-            }
-        }
+        ModuleTypeRules.ValidateReach(request.Target, request.Configuration, request.Modules, request.Targets);
     }
 
     // 링크 방식(Docs/Design/BuildTargets 3.8절 BD17). Modular는 Android(UE도 모바일에서 거부)와 Asan·Coverage·Release 구성에서 쓰지

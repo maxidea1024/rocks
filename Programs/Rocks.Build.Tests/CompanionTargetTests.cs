@@ -35,6 +35,8 @@ internal static class CompanionTargetTests
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker"], Link = NativeLinkType.Modular }, [worker], "modular target");
         // 동반 타깃은 주 타깃과 같은 매크로로 컴파일되므로 조합이 다르면 거부한다(Server 주 타깃의 ROCKS_WITH_CLIENT_CODE=0).
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker"], Declared = TargetType.Server }, [worker], "companion of a Server target");
+        // Game은 Program과 매크로 조합이 같아도 동반을 둘 수 없다(동반 Program의 Developer 모듈이 Release Game의 type 검사에 걸린다).
+        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker"], Declared = TargetType.Game }, [worker], "companion of a Game target");
     }
 
     private static void Rejects(TargetRules target, TargetRules[] others, string what)

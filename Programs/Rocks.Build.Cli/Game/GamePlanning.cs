@@ -125,6 +125,11 @@ internal static class GamePlanning
         // 같다). 메타데이터 생성도 같은 root 집합이다.
         modules = [.. moduleSet.LinkIntoPrimary(modules, rules.Target.Modules)];
         string[] targets = [.. rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
+        // type 사이 의존 규칙(BD25)은 타깃과 무관하게 모든 프로젝트 모듈(기술자 type, 거르기 전)과 SDK 모듈로 본다. 도달 검사는 메타 생성보다
+        // 먼저 한다(Docs/Design/BuildTargets 3.3절).
+        var projectNames = rules.Modules.Select(module => module.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ModuleTypeRules.ValidateDependencies([.. modules.Where(module => !projectNames.Contains(module.Name)), .. moduleSet.WithDescriptorTypes(rules.Modules)]);
+        ModuleTypeRules.ValidateReach(rules.Target.Kind, configuration, modules, targets);
         return new(moduleSet, MetadataLayout.Apply(context, modules, targets, createDirectories), targets);
     }
 

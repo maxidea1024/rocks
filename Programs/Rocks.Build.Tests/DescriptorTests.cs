@@ -15,6 +15,7 @@ internal static class DescriptorTests
         ResolvesEnabledPlugins(directory);
         DiscoversPluginFolders(directory);
         SelectsModulesForBuild(directory);
+        SelectsModulesByTargetKind(directory);
 
         // 저장소의 게임 템플릿 기술자도 형식에 맞아야 한다.
         if (repository is not null)
@@ -402,6 +403,66 @@ internal static class DescriptorTests
         Check(Names(storm.Apply([.. engineRules, EngineRule("Storm", "Plugins/Storm/Source/Storm", "Weather")], ["Engine"]))
             .SequenceEqual(["Core", "Engine", "Weather", "Storm"]), "a plugin module may use a declared dependency plugin");
         File.Delete(Path.Combine(plugins, "Storm", "Storm.rocksplugin"));
+    }
+
+    // 타깃 종류별 기술자 모듈 거르기다(Docs/Design/BuildTargets 3.3절 BS2b): ServerOnly·ClientOnly 읽기, Client·Server에서 빠지는 모듈과 이유,
+    // CompileWithEditor Program의 Editor 모듈, Program이 아닌 타깃의 enabledByDefault, 기술자 type이 모듈 입력에 실림.
+    private static void SelectsModulesByTargetKind(string directory)
+    {
+        string root = Path.Combine(directory, "kinds");
+        string projectFile = Write(root, "Game/Game.rocksproject", """
+            {
+              "fileVersion": 1, "engineVersion": "0.1",
+              "modules": [
+                { "name": "Game", "type": "Runtime" },
+                { "name": "GameServer", "type": "ServerOnly" },
+                { "name": "GameClient", "type": "ClientOnly" },
+                { "name": "GameEditor", "type": "Editor" }
+              ],
+              "targetPlatforms": ["Windows", "MacOS", "Android"]
+            }
+            """);
+        string plugins = Path.Combine(root, "Game", "Plugins");
+        Write(plugins, "Common/Common.rocksplugin", """
+            { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Common", "enabledByDefault": true,
+              "modules": [ { "name": "Common", "type": "Runtime" } ] }
+            """);
+        ProjectDescriptor project = DescriptorReader.ReadProject(projectFile);
+        IReadOnlyList<PluginDescriptor> available = PluginCatalog.Discover([plugins]);
+        Check(project.Modules.Select(module => module.Type).SequenceEqual([ModuleType.Runtime, ModuleType.ServerOnly, ModuleType.ClientOnly,
+            ModuleType.Editor]), "descriptor ServerOnly and ClientOnly types");
+
+        NativeModuleInput Rule(string name, params string[] dependencies) => new() { Name = name, PublicDependencies = dependencies };
+        NativeModuleInput[] rules = [Rule("Game"), Rule("GameServer", "Game"), Rule("GameClient", "Game"), Rule("GameEditor", "GameServer", "GameClient"),
+            Rule("Common")];
+        DescriptorModuleSet Set(TargetKind kind) => DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Target", []), available,
+            NativePlatform.Windows, NativeConfiguration.Development, kind);
+        string[] Names(IEnumerable<NativeModuleInput> modules) => modules.Select(module => module.Name).ToArray();
+
+        DescriptorModuleSet server = Set(new(TargetType.Server));
+        Check(Names(server.Apply(rules, ["GameServer"])).SequenceEqual(["Game", "GameServer", "Common"]), "a Server target includes ServerOnly modules");
+        ExpectFailure(() => server.Apply(rules, ["GameClient"]), "a Server target used a ClientOnly module", "ClientOnly modules are not built in Server targets");
+        DescriptorModuleSet client = Set(new(TargetType.Client));
+        Check(Names(client.Apply(rules, ["GameClient"])).SequenceEqual(["Game", "GameClient", "Common"]), "a Client target includes ClientOnly modules");
+        ExpectFailure(() => client.Apply(rules, ["GameServer"]), "a Client target used a ServerOnly module", "ServerOnly modules are not built in Client targets");
+        // Editor 모듈은 Editor 타깃과 CompileWithEditor Program에만 든다.
+        Check(Names(Set(new(TargetType.Program, CompileWithEditor: true)).Apply(rules, ["GameEditor"])).Contains("GameEditor"),
+            "a CompileWithEditor Program includes Editor modules");
+        ExpectFailure(() => Set(new(TargetType.Program)).Apply(rules, ["GameEditor"]), "a Program used an Editor module",
+            "Editor modules are not built in Program targets without CompileWithEditor");
+        Check(Names(Set(new(TargetType.Editor)).Apply(rules, ["GameEditor"])).SequenceEqual(["Game", "GameServer", "GameClient", "GameEditor", "Common"]),
+            "an Editor target includes every type");
+        // enabledByDefault는 Program이 아닌 모든 타깃에 켠다(BD34 — UE와 같다).
+        foreach (TargetType type in new[] { TargetType.Game, TargetType.Client, TargetType.Server, TargetType.Editor })
+        {
+            Check(Set(new(type)).EnabledPlugins.Select(plugin => plugin.Name).SequenceEqual(["Common"]), $"{type} enables enabledByDefault plugins");
+        }
+
+        Check(Set(new(TargetType.Program)).EnabledPlugins.Count == 0, "a Program target does not enable enabledByDefault plugins");
+        // 기술자 type이 모듈 입력에 실린다(Apply는 고른 모듈, WithDescriptorTypes는 거르기 전 모든 규칙 모듈).
+        Check(server.Apply(rules, ["GameServer"]).Single(module => module.Name == "GameServer").Type == ModuleType.ServerOnly &&
+            server.WithDescriptorTypes(rules).Select(module => module.Type).SequenceEqual([ModuleType.Runtime, ModuleType.ServerOnly, ModuleType.ClientOnly,
+                ModuleType.Editor, ModuleType.Runtime]), "descriptor types reach the module inputs");
     }
 
     // 설치 SDK 게임 빌드의 Game 타깃(타깃 참조 없음)이다.
