@@ -210,7 +210,7 @@ Result<bool> GraphEncodeContext::WriteUnsaveable(ArchiveWriter& out, ObjectHandl
         return Result<bool>::Success(false);
     }
 
-    uint32 flags = actual.Schema().flags & UnsaveableTypeFlags;
+    uint32 flags = actual.Schema().flags & unsaveableMask_;
     for (ObjectHandle current = target; flags == 0;) {
         auto outer = registry_.GetOuter(access_, current);
         if (!outer) {
@@ -231,14 +231,16 @@ Result<bool> GraphEncodeContext::WriteUnsaveable(ArchiveWriter& out, ObjectHandl
             return Result<bool>::Failure(type.Error());
         }
 
-        flags = type.Value().Schema().flags & UnsaveableTypeFlags;
+        flags = type.Value().Schema().flags & unsaveableMask_;
     }
 
     if (flags == 0) {
         return Result<bool>::Success(false);
     }
 
-    const int64 reason = (flags & static_cast<uint32>(TypeFlags::Transient)) != 0 ? 3 : 4;
+    const int64 reason = (flags & static_cast<uint32>(TypeFlags::Transient)) != 0    ? 3
+                         : (flags & static_cast<uint32>(TypeFlags::Deprecated)) != 0 ? 4
+                                                                                     : 5;
     if (auto reported = Report(FieldDiagnosticKind::ExternalReference, reason); !reported) {
         return Result<bool>::Failure(reported.Error());
     }
@@ -512,7 +514,7 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
         // 패키지 저장(Exclude)의 집합은 저장 불가 객체를 담지 않는다(호출자가 미리 거른다 — root
         // 포함, 리플렉션 B9h2).
         if (options.unsaveable == UnsaveablePolicy::Exclude &&
-            IsUnsaveableType(nodes[index].lease)) {
+            IsUnsaveableType(nodes[index].lease, options.unsaveableTypeFlags)) {
             return Output::Failure(ErrorCode::InvalidArgument);
         }
     }

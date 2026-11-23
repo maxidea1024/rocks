@@ -87,7 +87,8 @@ Result<void> Visitor::VisitField(const SchemaScope& scope, usize index, uint32 f
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    Result<void> visited = visitor.Field(detail::FieldToolName(*slot.field));
+    Result<void> visited =
+        visitor.Field(detail::FieldToolName(*slot.field), *slot.field, slot.flags);
     if (visited) {
         visited = VisitValue(slot);
     }

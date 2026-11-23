@@ -11,6 +11,8 @@
 #include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageTags.h>
+#include <AssetTestFixtures/BundleAssets.generated.h>
+#include <AssetTestFixtures/BundleAssets.h>
 #include <Core/FileError.h>
 #include <TestSupport/NFailAllocator.h>
 #include <stdio.h>
@@ -392,6 +394,47 @@ public:
 // 역시 아무것도 남지 않는다. 초기화가 같은 집합의 다른 패키지를 열어도(참조 해석) 새 패키지가
 // 집합에 들어간다. 초기화 안의 Create·Save는 Busy다(재진입 거부). 초기화 없는 만들기도 대표 에셋
 // Id()가 패키지 id다.
+// 저장은 타입 hook Tags 뒤에 bundle 태그(필드 지정자 AssetBundles — AS 10.2절 A4e2b)를 쓴다: 새
+// BundleAsset의 portrait({UI, Game})가 색인 항목에 `Bundle.UI`·`Bundle.Game` = 대상 AssetId로
+// 남고, 지정 없는 plain은 남지 않는다. bundle 대상이 없는 타입의 저장은 태그가 없다(다른 시험).
+TEST(EditorPackageSave_AssetBundleTags) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    SaveScene scene(env, sources);
+    REQUIRE(scene.ready);
+    EditorPackageSet& set = scene.set;
+    constexpr uint64 BundleId = 2860;
+    constexpr uint64 PortraitTarget = 2861;
+    constexpr uint64 PlainTarget = 2862;
+    auto path = ParseLogicalPath(env.allocator, "/Game/Bundles/Hero");
+    REQUIRE(path);
+    auto made = set.Create(path.Value(), GeneratedType<asset_fixture::BundleAsset>::Id(),
+                           FixedId(BundleId));
+    REQUIRE(made);
+    auto representative = set.Registry().FindChild(set.Access(), made.Value(), "");
+    REQUIRE(representative);
+    auto* bundle = Pointer<asset_fixture::BundleAsset>(set.Registry(), representative.Value());
+    REQUIRE(bundle != nullptr);
+    REQUIRE(bundle->portrait.TryAssign(FixedId(PortraitTarget), ""));
+    REQUIRE(bundle->plain.TryAssign(FixedId(PlainTarget), ""));
+    REQUIRE(set.Save(FixedId(BundleId), scene.lock, EditorSaveOptions{}));
+    auto entry = scene.project.index.FindById(FixedId(BundleId));
+    REQUIRE(entry);
+    char value[64] = {};
+    FixedStringBuilder portrait{Span<char>(value)};
+    REQUIRE(portrait.TryAppendFormat("{}", FixedId(PortraitTarget)));
+    usize ui = 0;
+    usize game = 0;
+    for (const PackageTag& tag : entry.Value()->tags) {
+        ui += tag.key.View() == "Bundle.UI" && tag.value.View() == portrait.View() ? 1 : 0;
+        game += tag.key.View() == "Bundle.Game" && tag.value.View() == portrait.View() ? 1 : 0;
+    }
+
+    CHECK(ui == 1 && game == 1 && entry.Value()->tags.Size() == 2);
+}
+
 TEST(EditorPackageSave_CreateInitializer) {
     AssetEnv env;
     REQUIRE(env.Ready());

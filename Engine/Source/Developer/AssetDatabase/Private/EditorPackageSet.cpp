@@ -1,5 +1,6 @@
 #include "AssetDatabaseInternal.h"
 
+#include <AssetDatabase/AssetBundleTags.h>
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetDatabase/LogicalPath.h>
@@ -1709,6 +1710,13 @@ Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, As
         AssetTagSink tags(allocator);
         Result<void> step = config_.hooks->CollectTags(*registry_, access, representative.Value(),
                                                        typeId, asset, tags);
+        // bundle 태그는 모든 에셋에 쓴다(필드 지정자 AssetBundles — PrimaryAsset 여부는 쿠킹
+        // 설정이 정하므로 저장 때 알 수 없다, AS 10.2절 A4e2b).
+        if (step) {
+            step =
+                CollectAssetBundleTags(*registry_, access, representative.Value(), allocator, tags);
+        }
+
         if (step) {
             step = config_.hooks->CollectBuildDependencies(
                 *registry_, access, representative.Value(), typeId, asset, dependencies);

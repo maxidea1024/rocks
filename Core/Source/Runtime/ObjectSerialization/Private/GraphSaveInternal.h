@@ -61,6 +61,7 @@ public:
           registry_(registry), access_(access), nodes_(nodes), budget_(budget),
           externalPolicy_(options.externals), writeNodeTable_(options.writeNodeTable),
           excludeUnsaveable_(options.unsaveable == UnsaveablePolicy::Exclude),
+          unsaveableMask_(options.unsaveableTypeFlags),
           packagePolicy_(registry.Policy().packageNativeType != nullptr),
           scratch_(allocator, budget), observation_(allocator, budget, false), locals_(allocator),
           expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
@@ -232,6 +233,8 @@ private:
     bool writeNodeTable_;
     // UnsaveablePolicy::Exclude인지다(리플렉션 B9h2).
     bool excludeUnsaveable_;
+    // 저장 불가 클래스 비트(ObjectGraphSaveOptions::unsaveableTypeFlags)다.
+    uint32 unsaveableMask_;
     bool packagePolicy_;
     BudgetAllocator scratch_;
     BudgetAllocator observation_;

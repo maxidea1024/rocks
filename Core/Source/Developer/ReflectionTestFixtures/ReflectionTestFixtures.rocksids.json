@@ -4040,6 +4040,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::EditorOnlyThing",
+      "id": "f7419fd98b7e4c3ba6d60cb3064b97bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::EnumFields",
       "id": "f84efdb19e974c0aa334ba161c400144",
       "aliases": [],

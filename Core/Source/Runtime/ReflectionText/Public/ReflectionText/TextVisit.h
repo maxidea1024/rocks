@@ -26,8 +26,11 @@ public:
     virtual Result<void> BeginStruct() noexcept = 0;
     virtual Result<void> EndStruct() noexcept = 0;
     // 필드 하나의 시작이다(실효 도구 이름 — ROCKS_PROPERTY(Name="…") 또는 C++ 이름). 뒤에 그
-    // 필드의 값 하나가 온다.
-    virtual Result<void> Field(StringView name) noexcept = 0;
+    // 필드의 값 하나가 온다. field는 그 필드의 스키마(이 호출 동안 유효 — bundle 목록 등 필드
+    // 메타), flags는 유효 필드 플래그다(바깥 필드에서 전파된 EditorOnly 등을 포함한 경로의
+    // 플래그 — 에셋 A4e2b bundle 태그 수집이 EditorOnly 경로를 거른다).
+    virtual Result<void> Field(StringView name, const FieldSchema& field,
+                               uint32 flags) noexcept = 0;
     // 단일 값이다(PathRead의 FieldValue 그대로 — enum은 정수, Text·참조도 FieldValue로). 값은 이
     // 호출 동안만 유효하다.
     virtual Result<void> Value(const FieldValue& value) noexcept = 0;

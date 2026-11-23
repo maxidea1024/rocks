@@ -972,7 +972,11 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     const AssetId sourceId = self.Value();
     const AssetId selfId = options.duplicateId.IsNull() ? sourceId : options.duplicateId;
 
-    // 1. export 집합(깊이 우선, 저장 불가 부분 트리 제외).
+    // 1. export 집합(깊이 우선, 저장 불가 부분 트리 제외 — 쿠킹은 EditorOnly 클래스도 저장 불가다,
+    // A4e2b).
+    const uint32 unsaveableMask =
+        UnsaveableTypeFlags |
+        (options.kind == PackageKind::Cooked ? static_cast<uint32>(TypeFlags::EditorOnly) : 0u);
     Array<ObjectHandle> inners(allocator);
     if (auto collected = registry.CollectInners(access, package, InnerOrder::DepthFirst, inners);
         !collected) {
@@ -1009,7 +1013,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         auto type = registry.AcquireType(access, inner);
         ROCKS_ASSERT(type.IsOk());
 
-        const bool excluded = parent.excluded || IsUnsaveableType(type.Value());
+        const bool excluded = parent.excluded || IsUnsaveableType(type.Value(), unsaveableMask);
         Frame frame{inner, 0, excluded};
         if (!excluded) {
             if (exports.Size() >= PackageMaxExports) {
@@ -1088,6 +1092,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     WriterHooks hooks(allocator, registry, access, package, selfId, sourceId);
     ObjectGraphSaveOptions save;
     save.unsaveable = UnsaveablePolicy::Exclude;
+    save.unsaveableTypeFlags = unsaveableMask;
     save.policy.rejectMissingRequired = true;
     save.policy.excludedFlags =
         (options.kind == PackageKind::Cooked ? PackageWriterEditorOnlyFlag : 0) |

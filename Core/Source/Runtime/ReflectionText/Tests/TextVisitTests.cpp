@@ -97,9 +97,13 @@ public:
         return Note("}");
     }
 
-    Result<void> Field(StringView name) noexcept override {
-        return Note("F:", name);
+    // 유효 플래그에 EditorOnly가 있으면 이름 앞에 "E"를 붙여 적는다(전파 확인 — 에셋 A4e2b).
+    Result<void> Field(StringView name, const FieldSchema& field, uint32 flags) noexcept override {
+        lastField = &field;
+        return Note(HasFlag(flags, FieldFlags::EditorOnly) ? "FE:" : "F:", name);
     }
+
+    const FieldSchema* lastField = nullptr;
 
     Result<void> Value(const FieldValue& value) noexcept override {
         return NoteValue("V:", value);

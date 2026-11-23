@@ -109,10 +109,11 @@ enum class UnsaveablePolicy : uint8 {
     Keep
 };
 
-// 클래스(상속 포함)가 Transient·Deprecated인 저장 불가 타입인지다(리플렉션 B9h2). A1 export 집합
-// 구성이 CollectInners 결과를 이것으로 거른다(저장 불가 객체의 부분 트리도 뺀다).
-inline bool IsUnsaveableType(const TypeLease& type) noexcept {
-    return (type.Schema().flags & UnsaveableTypeFlags) != 0;
+// 클래스(상속 포함)가 저장 불가 타입인지다(기본 mask는 Transient·Deprecated — 리플렉션 B9h2,
+// 쿠킹 쓰기는 EditorOnly를 더한다 — 에셋 A4e2b). A1 export 집합 구성이 CollectInners 결과를
+// 이것으로 거른다(저장 불가 객체의 부분 트리도 뺀다).
+inline bool IsUnsaveableType(const TypeLease& type, uint32 mask = UnsaveableTypeFlags) noexcept {
+    return (type.Schema().flags & mask) != 0;
 }
 
 // 저장 옵션이다. policy.rejectMissingRequired면 Required 참조 null을 RequiredMissing 진단 뒤
@@ -121,6 +122,11 @@ inline bool IsUnsaveableType(const TypeLease& type) noexcept {
 struct ObjectGraphSaveOptions {
     // 저장 불가 객체의 정책이다(기본 Exclude — 패키지 저장, UnsaveablePolicy).
     UnsaveablePolicy unsaveable = UnsaveablePolicy::Exclude;
+    // 저장 불가로 보는 클래스 비트다(기본 Transient·Deprecated). 쿠킹 패키지 쓰기는 EditorOnly를
+    // 더한다(에셋 A4e2b — UE SavePackage가 쿠킹 때 편집기 전용 객체를 빼는 것과 같다). 그 대상을
+    // 가리키는 참조의 ExternalReference 진단 value는 3 = Transient, 4 = Deprecated, 5 = EditorOnly
+    // 클래스다(여럿이면 앞의 것). Exclude일 때만 쓴다.
+    uint32 unsaveableTypeFlags = UnsaveableTypeFlags;
     ObjectGraphLimits limits;
     FieldEncodePolicy policy;
     FieldCodecHooks* hooks = nullptr;
