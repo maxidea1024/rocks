@@ -2,7 +2,7 @@
 # Offline build of the SPIRV-Tools C API shared library (macOS arm64). The Windows version is Build.ps1 in the same folder.
 # Builds the libspirv.h C API (spvValidate and the like, plus the optimizer C API) as a single libSPIRV-Tools-c.dylib (CMake wrapper SpirvToolsC.cmake; see
 # Build.ps1 for why). The upstream CMake generates grammar tables with Python 3 (PATH).
-# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem.ko.md section 8 progress).
+# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem section 8 progress).
 #
 # Usage: sh Engine/Source/ThirdParty/SpirvTools/Build/Build.sh [work directory] [archive output directory]
 # Requires: Xcode command line tools, CMake, Ninja, Python 3, git (to apply patches).

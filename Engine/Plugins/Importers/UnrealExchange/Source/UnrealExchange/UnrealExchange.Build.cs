@@ -5,7 +5,7 @@ using Rocks.Build.Rules;
 // Release game targets) and folder. It is disabled by default; the command-line tool (Commandlet) and EngineTests enable it.
 // Stage UX1a adds the bundle reader, path mapping and import order (section 10.4); stage UX1c adds the import plan, the existing asset
 // lookup, the kind importer table and the asset-import-unreal command (section 10.5). Asset kind importers come with stage UX2b and
-// later. Plugin modules may depend on engine modules, never the reverse (Docs/Design/BuildTargets.ko.md BD39).
+// later. Plugin modules may depend on engine modules, never the reverse (Docs/Design/BuildTargets BD39).
 public sealed class UnrealExchange : PluginModuleRules
 {
     protected override string ModuleName => "UnrealExchange";

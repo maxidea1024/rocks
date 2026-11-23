@@ -2,7 +2,7 @@ using Rocks.Tooling.Checks;
 
 namespace Rocks.ToolTests;
 
-// self 시험 중 엔진 플러그인 정책 검사다(Docs/Design/BuildTargets.ko.md 3.9절 BD37·BD42): 플러그인 모듈 규칙의 기반 클래스·위치, 플러그인
+// self 시험 중 엔진 플러그인 정책 검사다(Docs/Design/BuildTargets 3.9절 BD37·BD42): 플러그인 모듈 규칙의 기반 클래스·위치, 플러그인
 // 시험 폴더가 시험 소스로 분류되는지(CRT 실수 변환 검사로 확인).
 internal static partial class SelfTests
 {

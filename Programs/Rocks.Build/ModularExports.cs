@@ -3,7 +3,7 @@ using System.Reflection.PortableExecutable;
 namespace Rocks.Build;
 
 /// <summary>
-/// Modular Windows 공유 라이브러리의 export 수 진단이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3, BD27 한계). Windows DLL 하나의 export
+/// Modular Windows 공유 라이브러리의 export 수 진단이다(Docs/Design/BuildTargets 3.8절 BS8d3, BD27 한계). Windows DLL 하나의 export
 /// 상한은 65535이고 넘으면 링커가 오류를 낸다. 빌드가 끝나면 공유 라이브러리마다 PE export 디렉터리의 함수 수를 읽어 모듈별 수를 한 줄로
 /// 알리고, 상한의 90% 이상인 모듈은 경고한다(멤버 단위 export로 줄이라는 안내). macOS·Linux는 상한이 없어 세지 않는다.
 /// </summary>
@@ -60,7 +60,7 @@ public static class ModularExports
         foreach ((string module, int count) in ordered.Where(pair => pair.Value >= limit))
         {
             lines.Add($"Module {module} exports {count} symbols, at least {WarningPercent}% of the Windows DLL limit of {WindowsExportLimit}; " +
-                "export members instead of whole classes where possible (Docs/Design/BuildTargets.ko.md section 3.8 BD27)");
+                "export members instead of whole classes where possible (Docs/Design/BuildTargets section 3.8 BD27)");
         }
 
         foreach (string module in unreadable.Order(StringComparer.Ordinal))

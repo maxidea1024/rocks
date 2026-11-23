@@ -6,9 +6,10 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Platform/Process.h>
+#include <Platform/Sync.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 
-// 워커 채널이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC4·SC7). 워커 하나를 전용 채널 스레드가
+// 워커 채널이다(Docs/Design/ShaderSystem 11.1절 SC4·SC7). 워커 하나를 전용 채널 스레드가
 // 소유한다: P1 Process는 한 객체를 한 스레드만 다루고 다른 스레드에서 막힌 Read를 깨우는 취소가
 // 없으므로, 그 Process의 시작·쓰기·읽기·종료를 모두 채널 스레드가 한다. 다른 스레드는 Run으로
 // 묶음을 맡기고 결과를 기다린다(요청 큐).
@@ -75,6 +76,23 @@ struct ShaderWorkerBatchResult {
     uint32 workerProcessId = 0;
     // 워커가 알린 자식 PID(`child <pid>`, 시험 hook)다.
     Array<uint32> children;
+    // 받은 job 진행 줄(`job <seq> <index>`) 수다(잠정 완료 — 진행 보고 10.3절).
+    uint32 reportedJobs = 0;
+};
+
+// 묶음 하나의 job 진행 줄을 받는 곳이다(채널 스레드가 부른다 — 관리자의 잠정 완료 계수).
+struct ShaderWorkerProgress {
+    void (*job)(void* context, uint32 index) noexcept = nullptr;
+    void* context = nullptr;
+};
+
+// 맡긴 묶음 하나다(Post·Wait). 이동·복사하지 않는다. request·out·progress는 Wait가 돌아올 때까지
+// 살아 있어야 한다.
+struct ShaderWorkerTicket {
+    Span<const uint8> request;
+    ShaderWorkerBatchResult* out = nullptr;
+    ShaderWorkerProgress progress;
+    platform::ManualResetEvent done;
 };
 
 // 워커가 `held <seq>`를 썼을 때 고르는 동작이다(SC7 — 명시 gate).
@@ -109,6 +127,17 @@ public:
     // 요청 파일 byte(EncodeShaderWorkerRequest 결과)를 워커에 맡기고 결과를 기다린다. 여러 스레드가
     // 불러도 들어온 순서로 하나씩 처리한다. 시작 전이거나 닫혔으면 out.outcome이 ShutDown이다.
     void Run(Span<const uint8> request, ShaderWorkerBatchResult& out) noexcept;
+
+    // 묶음을 맡기고 바로 돌아온다(여러 채널에 나눠 동시에 돌린다 — 워커 풀). ticket.request·out을
+    // 채운 뒤 부르고 Wait로 끝을 기다린다. 시작 전이거나 닫혔으면 out.outcome을 ShutDown으로 두고
+    // 바로 끝낸다.
+    void Post(ShaderWorkerTicket& ticket) noexcept;
+
+    // Post한 묶음이 끝날 때까지 기다린다.
+    static void Wait(ShaderWorkerTicket& ticket) noexcept;
+
+    // 지금까지 띄운 워커 수다(재시작 포함 — 다른 스레드에서 불러도 된다).
+    uint32 WorkersStarted() const noexcept;
 
     // 새 묶음을 막고 남은 묶음을 끝낸 뒤 입력 pipe를 닫아 워커 종료를 기다리고 스레드를 회수한다.
     // 여러 번 불러도 된다.

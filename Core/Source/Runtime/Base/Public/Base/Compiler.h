@@ -137,7 +137,7 @@
     "Exactly one of ROCKS_BUILD_DEBUG, ROCKS_BUILD_DEVELOPMENT and ROCKS_BUILD_RELEASE must be 1 (set by Rocks.Build)."
 #endif
 
-// 링크 방식이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17, UE IS_MONOLITHIC). 빌드 시스템이 타깃
+// 링크 방식이다(Docs/Design/BuildTargets 3.8절 BD17, UE IS_MONOLITHIC). 빌드 시스템이 타깃
 // 하나에 한 값(1 Monolithic, 0 Modular)을 모든 번역 단위에 정의한다. 기본값이 없다(빠지면 컴파일
 // 오류).
 #if !defined(ROCKS_MONOLITHIC) || (ROCKS_MONOLITHIC != 0 && ROCKS_MONOLITHIC != 1)

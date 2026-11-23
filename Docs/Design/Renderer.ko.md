@@ -48,7 +48,7 @@
 | PathTracing | `RenderMode::PathTracing`은 래스터 pass를 건너뛰고 scene color를 누적 결과로 채운 뒤 같은 후처리로 보낸다 | UE도 base pass·조명·투명·안개를 건너뛰고 후처리로 넘긴다(`DSR:2284–2288, 3058, 3482, 4108–4119, 4241`). 12.3절 |
 | 단계당 텍스처(SRV) 상한 | 셰이더 원문은 모든 형식에 하나다. 상한은 **형식 정의**가 정한다: D3D12·Vulkan·Metal은 넓게, GLES·D3D11 SM5는 보장치 16. 렌더러 자원은 16 안에 둔다. 머티리얼 텍스처는 (pass, 퍼뮤테이션, 형식)마다 `형식 상한 − 렌더러 합계`이고, 넘는 머티리얼은 그 형식을 쿠킹할 때 명시 오류다(결정 RN13, 2026-11-18 사용자 결정으로 개정, 7.4절) | UE도 원문은 하나이고 플랫폼 상한을 컴파일 환경에 넣는다(`PLATFORM_MAX_SAMPLERS`, `EN/Private/ShaderCompiler/ShaderCompiler.cpp:3945–3946`). 샘플러 상한은 기본 16, `PCD3D_SM6` 32(`RHI/Private/DataDrivenShaderPlatformInfo.cpp:163`, `Engine/Config/Windows/DataDrivenPlatformInfo.ini:136`), OpenGL은 16 초과가 컴파일 오류다(`Engine/Source/Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`) |
 | 지원하지 않는 조합 | 몰래 낮추지 않는다. 지원표(13절)에 따른 공개 대체 또는 `Unsupported` | 계획 11.1절 "명시적인 fallback 또는 cook 오류", PixelFormat 1절 "대체 금지" |
-| 좌표·행렬 | UE 5.8과 같다: 왼손 +X 전방·+Y 오른쪽·+Z 위, cm, 행 벡터 `p·M`, 셰이더 `mul(v, M)`·행 우선, view +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면, 앞면 화면 반시계 | 사용자 결정, [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항, 계획 2.2절. 렌더러의 모든 깊이 비교·HZB·light grid Z·velocity가 이 규약 위에 있다(5.1절) |
+| 좌표·행렬 | UE 5.8과 같다: 왼손 +X 전방·+Y 오른쪽·+Z 위, cm, 행 벡터 `p·M`, 셰이더 `mul(v, M)`·행 우선, view +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면, 앞면 화면 반시계 | 사용자 결정, [셰이더 시스템](ShaderSystem/07-BindingConventions.ko.md) 7.2절 6·8항, 계획 2.2절. 렌더러의 모든 깊이 비교·HZB·light grid Z·velocity가 이 규약 위에 있다(5.1절) |
 
 ## 2. 용어 대응
 

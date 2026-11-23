@@ -12,7 +12,7 @@
 #include <Core/Time/FrameRate.h>
 
 // Binds 미러(CoreTypeBindings)가 리플렉션하는 Core 값 타입의
-// 목록이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4, UE TBaseStructure<FVector> 목록 —
+// 목록이다(Docs/Design/BuildTargets 3.8절 BS8d4, UE TBaseStructure<FVector> 목록 —
 // CoreUObject Class.h). 이 타입들은 Core에 있어 리플렉션 표지를 둘 수 없으므로, NativeTypeKey<T>가
 // 이 목록으로 "CoreTypeBindings 생성 헤더의 키를 써야 하는 타입"을 알아본다 — 생성 헤더 없이 키를
 // 쓰면 static_assert다(Modular에서 공유 라이브러리마다 다른 키가 생기는 것을 컴파일 때 막는다).

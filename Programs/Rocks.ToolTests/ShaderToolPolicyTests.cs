@@ -4,7 +4,7 @@ using Rocks.Tooling.Checks;
 
 namespace Rocks.ToolTests;
 
-// 셰이더 도구 정책(Docs/Design/ShaderSystem.ko.md 9절)의 저장소 실행과 음성 대조다: 도구 표 참조(shader-tool-table), binary 로드
+// 셰이더 도구 정책(Docs/Design/ShaderSystem 9절)의 저장소 실행과 음성 대조다: 도구 표 참조(shader-tool-table), binary 로드
 // (shader-tool-binary-load), 워커 격리(shader-worker-isolation, 11.1절 SC1), Release 배제(release-*).
 internal static class ShaderToolPolicyTests
 {
@@ -159,7 +159,7 @@ internal static class ShaderToolPolicyTests
         ReleaseExclusionResult stale = ReleaseExclusion.Apply([], [known]);
         Verify.That(stale.Failures.Count == 1 && stale.Failures[0].Rule == "release-exception-stale", "stale exception escaped");
 
-        // Developer 판정은 경로가 아니라 모듈 종류 칸이다(Docs/Design/BuildTargets.ko.md 3.9절 BD38). 플러그인 경로의 Developer 모듈은
+        // Developer 판정은 경로가 아니라 모듈 종류 칸이다(Docs/Design/BuildTargets 3.9절 BD38). 플러그인 경로의 Developer 모듈은
         // Source/Developer가 없어도 잡히고(음성 대조: 예전 경로 판정이 놓치던 모양), 종류가 Runtime이면 Source/Developer 경로라도 아니다.
         NativeModuleInput importer = new()
         {

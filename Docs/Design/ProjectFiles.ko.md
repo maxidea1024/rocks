@@ -757,7 +757,7 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 - `Build/README.md`: 이 스펙 링크(개정 1). PJ2에서 Visual Studio 절(생성·요구 구성 요소·clangd·`Rocks.proj` 잠금 한계), PJ3에서 게임 출력 경로·SDK 등록, PJ4에서 SDK 구성을 고친다.
 - `Programs/Rocks.Build/README.ko.md`: PJ0(IDE 계획 모드), PJ2(`clean`), PJ7(`--files`)을 구현할 때 갱신한다.
 - `Docs/Guides/RepositoryLayout.ko.md` 기술자 표: `engineAssociation`(PJ3).
-- [빌드 타깃](BuildTargets.ko.md) BD5: SDK 변형과 구성 축의 관계(10.3절)를 PJ4에서 적는다.
+- [빌드 타깃](BuildTargets/README.ko.md) BD5: SDK 변형과 구성 축의 관계(10.3절)를 PJ4에서 적는다.
 - `Docs/Implementation/ReflectionMetadata.ko.md`: `ids reissue`(PJ6).
 - `Docs/CodingStyle.md`: `build-file-english`에 루트 `GenerateProjectFiles.bat`(PJ2), 정책 `ide-invisible-macro`(PJ0).
 - `Templates/Game/Foundation/README.ko.md`: 출력 경로(PJ3), 개명·`new-project`(PJ6).

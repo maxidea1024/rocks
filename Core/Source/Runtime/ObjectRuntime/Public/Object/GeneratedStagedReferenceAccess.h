@@ -26,7 +26,7 @@ struct ReferenceArrayStage {
     }
 
     // 대상 타입 키는 NativeTypeKey<T>()다. 리플렉션 클래스의 키는 생성 .cpp가 정의해 상수식이
-    // 아니므로 처음 쓸 때 한 번 만든다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b).
+    // 아니므로 처음 쓸 때 한 번 만든다(Docs/Design/BuildTargets 3.8절 BS8b).
     static const ReferenceStageOps& Ops() noexcept {
         static const ReferenceStageOps ops{NativeTypeKey<T>(), nullptr, nullptr, &Publish,
                                            &PublishStaged};

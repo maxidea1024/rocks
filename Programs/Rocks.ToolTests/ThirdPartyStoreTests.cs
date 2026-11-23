@@ -9,7 +9,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.ToolTests;
 
 /// <summary>
-/// 미리 빌드한 바이너리 bootstrap(사용자 단위 내용 주소 저장소)의 시험이다(Docs/Design/ShaderSystem.ko.md 8절 2항 저장 위치).
+/// 미리 빌드한 바이너리 bootstrap(사용자 단위 내용 주소 저장소)의 시험이다(Docs/Design/ShaderSystem 8절 2항 저장 위치).
 /// 네트워크를 쓰지 않는다: archive는 미러 디렉터리나 주입한 받기 함수로 공급한다. 중단은 받기 함수가 일부만 쓰고 예외를
 /// 던지는 것과, 끊긴 이전 실행이 남긴 임시 디렉터리로 재현한다(시간·경쟁에 기대지 않는다).
 /// </summary>

@@ -66,7 +66,7 @@ internal static class CLanguageTests
         // 물리 action은 include 뒤, 번역 단위 인자 앞에 depfile 인자를 둔다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절).
         // 논리 명령(compile_commands.json·BuildInfo)에는 없다.
         string[] depfile = windows ? ["/clang:-MD", "/clang:-MF{DEPFILE}"] : ["-MD", "-MF", "{DEPFILE}"];
-        // 모듈 정의 헤더(이제 모든 C++ 모듈이 API 매크로를 받는다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8a)는 include 뒤에 강제
+        // 모듈 정의 헤더(이제 모든 C++ 모듈이 API 매크로를 받는다 — Docs/Design/BuildTargets 3.8절 BS8a)는 include 뒤에 강제
         // include한다.
         string definitions = ModuleDefinitions.PathOf(Path.GetFullPath(request.OutputDirectory, root), "Engine");
         string[] forced = windows ? ["/FI" + definitions] : ["-include", definitions];

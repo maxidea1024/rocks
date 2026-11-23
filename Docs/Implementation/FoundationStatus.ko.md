@@ -350,7 +350,7 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 
 ## 2026-11-16 PlatformBase 동적 라이브러리(셰이더 P10)
 
-셰이더 워커의 도구 로드와 Vulkan 로더의 선행 기반으로 `Platform/DynamicLibrary.h`를 추가했다(상세 계약·UE 5.8 대조: [플랫폼 계층](../Design/PlatformLayer.ko.md) "동적 라이브러리", 요구: [셰이더 시스템](../Design/ShaderSystem.ko.md) 5.3절 P10). 절대 경로만 받는 `Open`(Windows는 의존 DLL을 같은 디렉터리·System32에서만 찾는다), OS 공급 라이브러리를 이름으로 여는 `OpenSystem`, 심볼 표를 한꺼번에 찾고 실패하면 되돌리는 `Find`, 얻은 심볼 표를 세는 `DynamicLibraryLease`(남아 있으면 `Close`가 `Busy`, 소유자가 먼저 사라지면 마지막 lease가 내린다)를 제공한다. PlatformWindow의 XInput 직접 로드(`LoadLibraryExW`·`GetProcAddress`)를 `OpenSystem`·`Find`로 옮겼다.
+셰이더 워커의 도구 로드와 Vulkan 로더의 선행 기반으로 `Platform/DynamicLibrary.h`를 추가했다(상세 계약·UE 5.8 대조: [플랫폼 계층](../Design/PlatformLayer.ko.md) "동적 라이브러리", 요구: [셰이더 시스템](../Design/ShaderSystem/05-Prerequisites.ko.md) 5.3절 P10). 절대 경로만 받는 `Open`(Windows는 의존 DLL을 같은 디렉터리·System32에서만 찾는다), OS 공급 라이브러리를 이름으로 여는 `OpenSystem`, 심볼 표를 한꺼번에 찾고 실패하면 되돌리는 `Find`, 얻은 심볼 표를 세는 `DynamicLibraryLease`(남아 있으면 `Close`가 `Busy`, 소유자가 먼저 사라지면 마지막 lease가 내린다)를 제공한다. PlatformWindow의 XInput 직접 로드(`LoadLibraryExW`·`GetProcAddress`)를 `OpenSystem`·`Find`로 옮겼다.
 
 - 시험 라이브러리: Rocks.Build에 공유 라이브러리 모듈 종류를 더하지 않으므로 시험 지원 코드(`TestSupport/DynamicLibraryFixture.h`)가 실행 중에 데이터 전용 PE32+ DLL(export·import만, 코드 없음)을 직접 쓴다. macOS·Android 생성기는 후속이며 그 플랫폼에서는 의존·검색 시험이 SKIP이다.
 - 검증(Windows x64 clang-cl): 동적 라이브러리 시험 8건 — 인자 음성 대조, 파일·디렉터리·비라이브러리·없는 시스템 이름 오류, 심볼 조회·없는 심볼·표 되돌리기·lease 수·`Busy`·이동, 8 스레드 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`, 소유자 소멸 뒤 lease가 내림, MAX_PATH 경계 앞뒤(239–261)와 긴 경로(작업 디렉터리 길이와 무관하게 정확한 길이로 만든다), 그리고 음성 대조(의존 DLL을 현재 디렉터리에만·PATH에만 두면 `NotFound`이고 같은 자리에서 OS 기본 검색 대조군은 연다, 자식 probe에서 실행). Foundation Debug·Asan native 각 1820건 통과, Engine 대상 Debug 빌드(PlatformWindow XInput), 정책·형식 검사.
@@ -358,7 +358,7 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 
 ## 2026-11-17 셰이더 도구 표·도구 열기·Release 배제(셰이더 P4)
 
-셰이더 워커 선행 기반으로 도구 표와 도구 열기 계층, 정책 검사를 추가했다(요구·진척: [셰이더 시스템](../Design/ShaderSystem.ko.md) 5.3절 P4·9절). 브랜치 `feature/shader-tools`.
+셰이더 워커 선행 기반으로 도구 표와 도구 열기 계층, 정책 검사를 추가했다(요구·진척: [셰이더 시스템](../Design/ShaderSystem/05-Prerequisites.ko.md) 5.3절 P4·9절). 브랜치 `feature/shader-tools`.
 
 - 도구 표 `Developer/ShaderToolTable`: 규칙이 Engine 루트 `kind: binary` manifest에서 생성 TU를 만들고(Rocks.Tooling.Common `ShaderToolTableSource`) Rocks.Build가 `<out>/GeneratedSources/<모듈>/`에 써서 컴파일한다. 이를 위해 Rocks.Build에 `NativeModuleInput.GeneratedSources`(규칙이 만든 생성 번역 단위, BuildInfo와 같은 방식)를 더했다. 빌드 대상 호스트의 도구 이름·버전·저장소 디렉터리 이름·파일 SHA-256·크기·role만 담는다.
 - 도구 열기 `Developer/ShaderToolLoader`(워커 자리): 사용자 저장소 루트(bootstrap과 같은 위치), runtime 파일의 크기·SHA-256 대조 뒤 `DynamicLibrary::Open`, bootstrap 안내 오류(`NotBootstrapped`·`DigestMismatch`), DXC·FXC·SPIRV-Cross·SPIRV-Tools 함수 표와 네 도구 묶음 `ShaderToolSet`, DXC 버전 조회(Windows). `dxcapi.h`는 `Windows.h`·`Unknwn.h`·`objidl.h` 뒤에서 경고 0이다(빌드가 `WIN32_LEAN_AND_MEAN`을 정의한다).
@@ -369,7 +369,7 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 
 ## 2026-11-17 셰이더 형식 정의·엔진 컴파일 프로필(셰이더 P6a)
 
-셰이더 형식 정의와 엔진 컴파일 프로필을 추가했다(요구·진척: [셰이더 시스템](../Design/ShaderSystem.ko.md) 5.1절 P6a·12.1절). 같은 날 사용자가 결정 2(HLSL 2021: D3D12·Vulkan·Metal 켬, D3D11 끔)·3(D3D12 SM 6.6, Windows 10은 Agility SDK 재배포)·5(metallib은 Apple Metal Developer Tools가 있는 Windows에서도)·6(자체 전처리기)을 정했고 형식 정의 값에 반영했다. 브랜치 `feature/shader-tools`.
+셰이더 형식 정의와 엔진 컴파일 프로필을 추가했다(요구·진척: [셰이더 시스템](../Design/ShaderSystem/05-Prerequisites.ko.md) 5.1절 P6a·12.1절). 같은 날 사용자가 결정 2(HLSL 2021: D3D12·Vulkan·Metal 켬, D3D11 끔)·3(D3D12 SM 6.6, Windows 10은 Agility SDK 재배포)·5(metallib은 Apple Metal Developer Tools가 있는 Windows에서도)·6(자체 전처리기)을 정했고 형식 정의 값에 반영했다. 브랜치 `feature/shader-tools`.
 
 - 형식 정의 `Engine/Config/ShaderFormats/<id>.json`: `D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`METAL_SM5`·`GLES31_ANDROID`·`GLES31_PC`, 자리만 둔 `VULKAN_ANDROID`·`METAL_IOS`. 도구 목록·HLSL 2021 기본값·컴파일 경로와 셰이더 모델·target env·ESSL·MSL 버전·바인딩 규약 버전·처리기 버전·상한·기능·장치 요구·생산 호스트를 담는다. SH0 측정(S2·S12·`ROCKS_IMAGE_FORMAT`)을 값으로 옮겼다.
 - 엔진 컴파일 프로필 `Engine-Windows.json`·`Engine-MacOS.json`(`{schema, id, host, formats}`).

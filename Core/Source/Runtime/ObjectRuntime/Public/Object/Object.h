@@ -78,7 +78,7 @@ private:
 
 // 정확한 C++ 타입 비교용 키다. 직렬화하거나 ABI에 노출하지 않는다. Object의 nullptr 키는 기반 타입
 // 조회를 뜻한다. 상속 판정은 등록된 base 사슬을 따라 TypeLease::IsNativeA가 한다. 키는 소유 모듈에
-// 하나라 공유 라이브러리 사이에서도 같다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b·BS8d4).
+// 하나라 공유 라이브러리 사이에서도 같다(Docs/Design/BuildTargets 3.8절 BS8b·BS8d4).
 // - 리플렉션 class·struct·enum과 Binds 미러의 실제 Core 값 타입(BoundCoreValueV)은 생성 .cpp가
 //   정의한 저장소의 주소다(GeneratedType<T>::NativeKey — UE StaticStruct·TBaseStructure와 같은
 //   자리). 그래서 그 타입의 생성 헤더를 include한 번역 단위에서만 쓸 수 있다. class·struct·Binds

@@ -10,7 +10,7 @@ public static partial class PolicyChecks
     private static readonly Regex ModuleApiMacroToken = new(@"\bROCKS_([A-Z0-9]+)_API\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
 
     /// <summary>
-    /// 비공개 헤더지만 선언에 API 매크로를 붙이는 내부 헤더다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2 규칙 5의 예외). 둘이다:
+    /// 비공개 헤더지만 선언에 API 매크로를 붙이는 내부 헤더다(Docs/Design/BuildTargets 3.8절 BS8d2 규칙 5의 예외). 둘이다:
     /// <list type="bullet">
     /// <item>규칙 파일이 비공개 include 디렉터리로 다른 모듈에 일부러 보여 주는 헤더 — 다른 모듈이 링크한다(BS8d2 — AsyncCompression이 같은
     /// 코덱·블록 인코딩을 쓴다).</item>
@@ -51,7 +51,7 @@ public static partial class PolicyChecks
     ];
 
     /// <summary>
-    /// 클래스 전체를 export해야 하는 비리플렉션 클래스다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3). 리플렉션 클래스의 루트 rocks::Object는
+    /// 클래스 전체를 export해야 하는 비리플렉션 클래스다(Docs/Design/BuildTargets 3.8절 BS8d3). 리플렉션 클래스의 루트 rocks::Object는
     /// 모든 모듈의 리플렉션 클래스가 상속하지만 리플렉션 타입이 아니어서 메타 컴파일러의 상속 export 진단(RMC2002)이 보지 못한다.
     /// </summary>
     public static readonly IReadOnlyList<(string Path, string Class)> RequiredClassExports =
@@ -60,7 +60,7 @@ public static partial class PolicyChecks
     ];
 
     /// <summary>
-    /// 모듈 API 매크로의 쓰임을 검사한다(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2, 규칙 <c>module-api-macro</c>). 엔진 소유 모듈
+    /// 모듈 API 매크로의 쓰임을 검사한다(Docs/Design/BuildTargets 3.8절 BD27·BS8d2, 규칙 <c>module-api-macro</c>). 엔진 소유 모듈
     /// (<c>&lt;루트&gt;/Source/&lt;그룹&gt;/&lt;모듈&gt;/</c>, 서드파티 제외)과 엔진 플러그인 모듈의 소스·헤더에서:
     /// <list type="bullet">
     /// <item>다른 모듈 이름의 매크로(<c>ROCKS_&lt;다른 모듈&gt;_API</c>)를 쓰면 오류다 — 매크로는 그 선언을 정의하는 모듈의 것이어야 한다

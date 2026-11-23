@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 형식 정의·엔진 컴파일 프로필 읽기(Docs/Design/ShaderSystem.ko.md 12.1절)다. 모든 속성은 이름 표로
+// 형식 정의·엔진 컴파일 프로필 읽기(Docs/Design/ShaderSystem 12.1절)다. 모든 속성은 이름 표로
 // 허용 목록을 두고, 표 밖 속성·어휘는 오류로 보고한다(첫 오류에서 멈춘다).
 namespace rocks::shader {
 

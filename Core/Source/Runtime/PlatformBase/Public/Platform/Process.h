@@ -278,7 +278,7 @@ ROCKS_PLATFORMBASE_API bool IsProcessRunning(uint32 processId) noexcept;
 // poll). 끝났거나 이미 없으면 Signaled, 시간이 다하면 TimedOut, 열 수 없거나(권한 등) 이 플랫폼이
 // 지원하지 않으면 Failed다. 0은 Failed다. 끝났지만 회수되지 않은(zombie) POSIX 프로세스도 끝난
 // 것이다. 한계: PID로 여는 대기라 열기 전에 그 PID가 다른 프로세스에 재사용되면 그 프로세스를
-// 기다린다(PID를 받은 직후 부른다 — Docs/Design/ShaderSystem.ko.md 11.1절 SC7).
+// 기다린다(PID를 받은 직후 부른다 — Docs/Design/ShaderSystem 11.1절 SC7).
 //
 // 사용 예(손자 프로세스가 끝났는지):
 //   if (platform::WaitForProcessExit(childPid, 30'000) != platform::WaitResult::Signaled) { ... }

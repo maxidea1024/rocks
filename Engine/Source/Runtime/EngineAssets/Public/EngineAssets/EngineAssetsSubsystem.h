@@ -166,5 +166,5 @@ ROCKS_ENGINEASSETS_API EngineSubsystemType EngineAssetsSubsystemType() noexcept;
 } // namespace rocks
 
 // 다른 모듈(게임·시험)이 GetSubsystem<EngineAssetsSubsystem>()으로 찾으므로 모듈 사이에 같은 키를
-// export한다(World/Subsystem.h SubsystemKeyOf, Docs/Design/BuildTargets.ko.md 3.8절 BS8e).
+// export한다(World/Subsystem.h SubsystemKeyOf, Docs/Design/BuildTargets 3.8절 BS8e).
 ROCKS_DECLARE_NATIVE_TYPE_KEY(rocks::EngineAssetsSubsystem, ROCKS_ENGINEASSETS_API)

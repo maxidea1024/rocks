@@ -15,7 +15,7 @@ public sealed record DescribedModule(ModuleDescriptor Descriptor, string OwnerNa
 }
 
 /// <summary>
-/// 기술자 모듈 집합을 정하는 빌드의 주인이다(Docs/Design/BuildTargets.ko.md 3.9절). 설치 SDK 게임 빌드는 프로젝트 기술자(프로젝트 모듈,
+/// 기술자 모듈 집합을 정하는 빌드의 주인이다(Docs/Design/BuildTargets 3.9절). 설치 SDK 게임 빌드는 프로젝트 기술자(프로젝트 모듈,
 /// 프로젝트 참조와 타깃 참조를 합친 플러그인 참조, targetPlatforms)이고, 엔진 저장소 빌드는 프로젝트가 없이 타깃 규칙의 플러그인 참조만
 /// 가진다. 엔진 저장소의 Core·Engine 모듈은 기술자가 없으므로 대조하지 않는다.
 /// </summary>
@@ -263,7 +263,7 @@ public sealed class DescriptorModuleSet
 
     /// <summary>
     /// 켠 플러그인의 모듈(<see cref="IncludedPluginModules"/>)을 타깃의 주 실행 파일(targetModules[0])에 링크하도록 표시한다(Docs/Design/
-    /// BuildTargets.ko.md 3.9절 BD36, UE가 켠 플러그인 모듈을 LaunchModuleName의 주 binary에 넣는 것과 같다). 실행 파일이 직접 의존하지
+    /// Docs/Design/BuildTargets 3.9절 BD36, UE가 켠 플러그인 모듈을 LaunchModuleName의 주 binary에 넣는 것과 같다). 실행 파일이 직접 의존하지
     /// 않아도 링크되고 모듈 표에 기술자 단계의 보통 행으로 실린다. 부 실행 파일에는 넣지 않는다. 주 모듈이 실행 파일이 아닌 타깃(엔진
     /// 라이브러리 묶음 Engine)은 그대로 둔다(빌드 대상에만 더한다). modules는 <see cref="Apply"/>의 결과(게임 빌드는 SDK 모듈을 더한 것)다.
     /// </summary>
@@ -283,7 +283,7 @@ public sealed class DescriptorModuleSet
     }
 
     /// <summary>
-    /// 플러그인 모듈의 위치와 계층 의존을 검사한다(Docs/Design/BuildTargets.ko.md 3.9절 BD37·BD39). 타깃과 무관한 구조 규칙이라 모든 규칙
+    /// 플러그인 모듈의 위치와 계층 의존을 검사한다(Docs/Design/BuildTargets 3.9절 BD37·BD39). 타깃과 무관한 구조 규칙이라 모든 규칙
     /// 모듈(빠진 모듈 포함)을 본다. 의존은 링크 의존과 실행 중 적재(DynamicModules) 둘 다다.
     /// <list type="bullet">
     /// <item>엔진 저장소: 플러그인 모듈의 ModuleDirectory는 &lt;플러그인&gt;/Source/&lt;모듈&gt;이다(PluginModuleRules).</item>

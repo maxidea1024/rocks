@@ -52,7 +52,7 @@ public sealed record ModuleDescriptor(string Name, ModuleType Type, LoadingPhase
 public sealed record PluginReference(string Name, bool Enabled);
 
 /// <summary>
-/// 플러그인 참조를 적은 쪽이다(Docs/Design/BuildTargets.ko.md 3.9절). Label은 오류 문구의 주어("project", "target 'Commandlet'")이고,
+/// 플러그인 참조를 적은 쪽이다(Docs/Design/BuildTargets 3.9절). Label은 오류 문구의 주어("project", "target 'Commandlet'")이고,
 /// FilePath는 오류가 가리킬 기술자(타깃 규칙만이면 null)다.
 /// </summary>
 public sealed record PluginReferrer(string Label, string? FilePath)
@@ -65,7 +65,7 @@ public sealed record PluginReferrer(string Label, string? FilePath)
 }
 
 /// <summary>
-/// 타깃 규칙의 플러그인 참조(TargetRules.Plugins)를 다룬다(Docs/Design/BuildTargets.ko.md 3.9절 BD33).
+/// 타깃 규칙의 플러그인 참조(TargetRules.Plugins)를 다룬다(Docs/Design/BuildTargets 3.9절 BD33).
 /// </summary>
 public static class TargetPluginReferences
 {
@@ -564,7 +564,7 @@ public static class PluginCatalog
 
     /// <summary>
     /// 참조 목록(references — 프로젝트 기술자의 plugins, 타깃 규칙의 Plugins, 또는 둘을 합친 것)으로 켤 플러그인을 의존 순서(의존하는
-    /// 플러그인이 뒤)로 정한다(Docs/Design/BuildTargets.ko.md 3.9절).
+    /// 플러그인이 뒤)로 정한다(Docs/Design/BuildTargets 3.9절).
     /// 1) enabled: true로 적은 플러그인을 켠다. applyDefaults면 적지 않은 플러그인 중 enabledByDefault인 것도 켠다(Game 타깃 — Program
     ///    타깃은 명시한 것만, BD34). enabled: false로 적은 플러그인은 기본값과 관계없이 끈다.
     /// 2) 켠 플러그인의 의존 플러그인을 모두 켠다.

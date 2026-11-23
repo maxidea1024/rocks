@@ -33,7 +33,7 @@ struct StructElementOps {
     void (*construct)(void* memory, Allocator& allocator) noexcept = nullptr;
     void (*destroy)(void* memory) noexcept = nullptr;
     // 원소 타입의 native 키는 담지 않는다: 키는 생성 .cpp가 정의한
-    // 주소라(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4) 이 표를 인스턴스화하는 손으로 쓴
+    // 주소라(Docs/Design/BuildTargets 3.8절 BS8d4) 이 표를 인스턴스화하는 손으로 쓴
     // 헤더(StructRefArray 필드를 가진 클래스의 inline 생성자)가 원소 struct의 생성 헤더를
     // include해야 하게 된다. 원소를 지우는 호출자(RemoveElementAt· ClearElements — 그 번역 단위가
     // 생성 헤더를 본다)가 키를 넘긴다.

@@ -20,7 +20,7 @@ public sealed record LoadedRuleSet(IReadOnlyList<NativeModuleInput> Modules, IRe
 
 /// <summary>
 /// 규칙 어셈블리(Rocks.Engine.Rules 또는 게임 규칙)를 읽어 모든 모듈 규칙을 한 문맥으로 평가한다. 빌드 CLI와 정책 검사(Release 배제,
-/// Docs/Design/ShaderSystem.ko.md 9절)가 같은 평가를 쓴다. 사용 예:
+/// Docs/Design/ShaderSystem 9절)가 같은 평가를 쓴다. 사용 예:
 /// <code>
 /// var rules = RuleLoader.Load(rulesPath, "Sandbox", context);          // 빌드
 /// var all = RuleLoader.LoadAll(rulesPath, context);                    // 정책 검사
@@ -112,7 +112,7 @@ public static class RuleLoader
     /// <summary>
     /// 규칙 어셈블리의 모든 모듈 규칙을 평가하고 모든 타깃 규칙을 만든다. 규칙은 문맥(플랫폼·구성)마다 다시 평가해야 하므로 호출마다
     /// Configure를 다시 부른다(어셈블리는 한 번만 올라간다). Configure 전에 <see cref="BuildContext.PluginRoot"/>의 플러그인을 찾아
-    /// <see cref="BuildContext.Plugins"/>에 넣는다(Docs/Design/BuildTargets.ko.md 3.9절 BD32 — 켜지 않은 플러그인의 기술자도 검증한다).
+    /// <see cref="BuildContext.Plugins"/>에 넣는다(Docs/Design/BuildTargets 3.9절 BD32 — 켜지 않은 플러그인의 기술자도 검증한다).
     /// 평가한 모듈 규칙의 문맥은 결과에 실리지 않으므로 호출자가 플러그인 목록이 필요하면 <see cref="LoadedRuleSet.Plugins"/>를 쓴다.
     /// </summary>
     /// <exception cref="ArgumentException">규칙 생성·평가 실패, 같은 이름의 모듈·타깃.</exception>
@@ -137,7 +137,7 @@ public static class RuleLoader
             Descriptors.TargetPluginReferences.Validate(target.Name, target.Plugins);
         }
 
-        // 실행 파일의 플러그인 모듈은 빌드가 켠 플러그인에서 채운다(Docs/Design/BuildTargets.ko.md 3.9절 BD36). 규칙이 적으면 끈 플러그인도
+        // 실행 파일의 플러그인 모듈은 빌드가 켠 플러그인에서 채운다(Docs/Design/BuildTargets 3.9절 BD36). 규칙이 적으면 끈 플러그인도
         // 링크되므로 거부한다.
         if (modules.FirstOrDefault(module => module.PluginModules.Count != 0) is { } listed)
         {

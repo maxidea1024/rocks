@@ -4,7 +4,7 @@ using System.Text;
 namespace Rocks.Tooling.Common;
 
 /// <summary>
-/// 셰이더 도구 표의 생성 번역 단위를 만든다(Docs/Design/ShaderSystem.ko.md 9절). 입력은 Engine 루트(<see cref="ThirdPartyManifest.EngineThirdPartyRoot"/>)의
+/// 셰이더 도구 표의 생성 번역 단위를 만든다(Docs/Design/ShaderSystem 9절). 입력은 Engine 루트(<see cref="ThirdPartyManifest.EngineThirdPartyRoot"/>)의
 /// <c>kind: binary</c> manifest이고, 출력은 <c>Engine/Source/Developer/ShaderToolTable/Public/ShaderToolTable/ShaderToolTable.h</c>가 선언한
 /// <c>rocks::shader::ShaderToolHostKey</c>·<c>ShaderTools</c>의 정의다. 모듈 규칙(ShaderToolTable.Build.cs)이 이 텍스트를
 /// <c>NativeModuleInput.GeneratedSources</c>로 넘기고 빌드가 <c>&lt;out&gt;/GeneratedSources/ShaderToolTable/</c>에 쓴다(BuildInfo와 같은 방식).

@@ -4,7 +4,7 @@
 #include <ReflectionTestFixtures/ValidateFixture.h>
 
 // 시험 fixture의 관찰용 정적 저장소다. 공개 헤더에 쓰기 가능한 정적 저장소·thread_local을 두지
-// 않으므로 (Docs/Design/BuildTargets.ko.md 3.8절 BD29) 선언은 헤더에, 정의는 여기에 둔다.
+// 않으므로 (Docs/Design/BuildTargets 3.8절 BD29) 선언은 헤더에, 정의는 여기에 둔다.
 namespace rocks::reflection_fixture {
 
 uint32 ArrayOwner::constructed = 0;

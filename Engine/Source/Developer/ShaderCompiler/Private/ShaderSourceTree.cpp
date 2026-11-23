@@ -5,7 +5,7 @@
 #include <Core/Text/Path.h>
 #include <Platform/Memory.h>
 
-// 셰이더 소스 트리(Docs/Design/ShaderSystem.ko.md 11.1절 SC2)다. 규칙은 공개 헤더 주석을 따른다.
+// 셰이더 소스 트리(Docs/Design/ShaderSystem 11.1절 SC2)다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace source_tree_detail {

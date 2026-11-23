@@ -1,7 +1,7 @@
 using Rocks.Build;
 
 /// <summary>
-/// 모듈 의존의 공개 범위(Docs/Design/BuildTargets.ko.md 3.5절, BS0)를 계획(ActionGraph)으로 검사한다. 컴파일하지 않는다.
+/// 모듈 의존의 공개 범위(Docs/Design/BuildTargets 3.5절, BS0)를 계획(ActionGraph)으로 검사한다. 컴파일하지 않는다.
 /// <list type="bullet">
 /// <item>보임: 비공개 의존(Mid → Base)의 공개 include는 Mid에 보이지만 Mid의 소비자(OnlyMid)에게는 보이지 않는다. 공개 의존(Pub →
 /// Base)은 소비자(ThroughPub)에게도 보인다. 비공개 의존의 공개 의존(Mid → Base → Root)도 Mid에 보인다.</item>

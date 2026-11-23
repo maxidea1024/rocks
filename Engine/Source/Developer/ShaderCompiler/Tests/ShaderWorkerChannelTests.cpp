@@ -3,6 +3,7 @@
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <Platform/ProcessEntry.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
@@ -13,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 셰이더 워커 채널과 실제 ShaderCompileWorker 시험이다(Docs/Design/ShaderSystem.ko.md 11.1절
+// 셰이더 워커 채널과 실제 ShaderCompileWorker 시험이다(Docs/Design/ShaderSystem 11.1절
 // SC4–SC7, SH1c): 버전·처리기·도구 표·툴체인 불일치의 종료 코드와 진단, 도구 조회,
 // D3D12_SM6·VULKAN_SM5 컴파일 (도구 저장소가 없으면 그 부분만 SKIP), hook 없는 워커의 hook 거부,
 // 강제 종료 보고(held gate), Crash·Assert 보고와 다음 묶음 성공(대화상자 없음 — 시험이 끝난다),
@@ -34,7 +35,7 @@ using namespace rocks::shader_source_test;
 namespace {
 
 constexpr usize ChannelPathBytes = 4096;
-// 부모 probe가 스스로 끝나는 종료 코드다(정리 없이 _Exit).
+// 부모 probe가 스스로 끝나는 종료 코드다(정리 없이 끝냄 — ExitProcessWithoutTeardown).
 constexpr int ParentDiedExit = 3;
 constexpr int ProbeUsageExit = 2;
 // 프로세스 종료 기다림의 실패 판정 상한이다(정상 경로는 OS 대기로 바로 끝난다).
@@ -187,8 +188,9 @@ ShaderWorkerHeldAction TerminateHeld(void*, uint32, uint32, Span<const uint32>) 
 }
 
 // 부모 probe다: 워커를 --test-hooks로 띄워 SpawnChild(손자 = 이 실행 파일의 sleep probe)를 맡기고,
-// 워커·손자 PID를 표준 출력에 쓴 뒤 표준 입력의 한 줄을 기다려 정리 없이(_Exit) 끝난다.
-// argv: <exe> --process-probe shader-worker-parent <worker> <work-dir>
+// 워커·손자 PID를 표준 출력에 쓴 뒤 표준 입력의 한 줄을 기다려 정리
+// 없이(ExitProcessWithoutTeardown) 끝난다. argv: <exe> --process-probe shader-worker-parent
+// <worker> <work-dir>
 int ParentProbe(int argc, const char* const* argv) noexcept {
     constexpr int WorkerArgument = 3;
     constexpr int DirectoryArgument = 4;
@@ -273,7 +275,7 @@ int ParentProbe(int argc, const char* const* argv) noexcept {
     char gate = 0;
     (void)test::ReadStandardInput(&gate, 1);
     // 정리 없이 끝난다(Process 소멸자가 워커를 끝내지 않게 — 부모 비정상 종료 모사).
-    _Exit(ParentDiedExit);
+    platform::ExitProcessWithoutTeardown(ParentDiedExit);
 }
 
 const bool ParentProbeRegistered =
@@ -426,6 +428,8 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
     REQUIRE(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
     REQUIRE(test.result.response.jobs.Size() == 1);
     CHECK(test.result.response.jobs[0].status == ShaderWorkerJobStatus::ToolError);
+    // hook job은 진행 줄을 쓰지 않는다(SC4 — Compile job만).
+    CHECK(test.result.reportedJobs == 0);
 
     // 아직 처리기가 없는 형식(GLES)은 UnsupportedCapability다(도구와 무관).
     RequestBuilder gles;
@@ -435,6 +439,7 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
     REQUIRE(test.Run(gles));
     REQUIRE(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
     CHECK(test.result.response.jobs[0].status == ShaderWorkerJobStatus::UnsupportedCapability);
+    CHECK(test.result.reportedJobs == 1);
 
     if (!bootstrapped) {
         printf("[SKIP] ShaderWorkerChannel_QueriesToolsAndCompiles: shader tool store is not "
@@ -456,6 +461,8 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
     REQUIRE(test.Run(compile));
     REQUIRE(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
     REQUIRE(test.result.response.jobs.Size() == 4);
+    // 실패한 job도 끝난 job이라 진행 줄이 job마다 하나다(SC4).
+    CHECK(test.result.reportedJobs == 4);
     const ShaderWorkerJobResult& dxil = test.result.response.jobs[0];
     const ShaderWorkerJobResult& spirv = test.result.response.jobs[1];
     if (dxil.status != ShaderWorkerJobStatus::Success ||

@@ -22,7 +22,7 @@ struct StructLeaf {
     // v1 Record를 v2로 올린다(필드를 그대로 옮기고 버전만 올린다). 시험이 호출 수를 센다. 정의는
     // Private/StructFixture.cpp다 — 시험이 함수 주소를 생성 ops의 migrate와 비교하므로 Modular에서
     // 주소가 하나여야 한다(헤더 inline 정의는 공유 라이브러리마다 사본이 생긴다 —
-    // Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+    // Docs/Design/BuildTargets 3.8절 BS8d5).
     ROCKS_REFLECTIONTESTFIXTURES_API static Result<Array<uint8>>
     Migrate(Allocator& allocator, TypeId type, uint32 from, uint32 to,
             Span<const uint8> source) noexcept;

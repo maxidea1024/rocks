@@ -3,7 +3,7 @@ using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// Shader tool table module (Docs/Design/ShaderSystem.ko.md sections 3 and 9). A generated translation unit built from the Engine root <c>kind: binary</c> manifests
+/// Shader tool table module (Docs/Design/ShaderSystem sections 3 and 9). A generated translation unit built from the Engine root <c>kind: binary</c> manifests
 /// (<see cref="ShaderToolTableSource"/>) holds tool names, versions, store directory names, file SHA-256 and roles for the build target host. It holds
 /// metadata only and never opens files. The main process (Developer/ShaderCompiler) uses this table for job keys and workers use it to open tools. Only
 /// ShaderCompiler, workers, ShaderFormat modules and the worker stand-in module ShaderToolLoader may reference this module (policy check shader-tool-table).

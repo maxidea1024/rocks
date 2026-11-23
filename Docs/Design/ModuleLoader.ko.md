@@ -2,7 +2,7 @@
 
 기준일: 2026-11-23, 개정 11. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
-[빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
+[빌드 타깃 설계](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
 2. 모듈 시작은 의존 순서, 종료는 역순이다. 리플렉션 타입 등록은 모듈 시작에 묶는다.
 3. Rocks Studio는 프로젝트 기술자와 플러그인 활성 조건을 읽어 게임·플러그인 모듈을 실행 중에 적재한다.
@@ -12,7 +12,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/Source/` 기준이다. UE 이름은 대응표와 근거에만 적는다. hot reload·Live Coding(코드 다시 불러오기)은 범위 밖이다(9.2절).
 
-상태: **설계 초안**(결정 MD1–MD23, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML1(단계 실행·묶음·Launch 통합)은 crash-launch 병합 뒤 개정 5에서 3.11절로 정해 구현했고, 그 후속(호스트 서비스·서비스를 쓰는 `Startup` 등록)은 개정 6 3.12절이다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
+상태: **설계 초안**(결정 MD1–MD23, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML1(단계 실행·묶음·Launch 통합)은 crash-launch 병합 뒤 개정 5에서 3.11절로 정해 구현했고, 그 후속(호스트 서비스·서비스를 쓰는 `Startup` 등록)은 개정 6 3.12절이다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets/README.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
 
 ## 1. 현재 상태
 
@@ -91,7 +91,7 @@ public:
 - `PostLoadCallback`(UE hot reload·`LoadModuleWithCallback` 전용)과 `IsGameModule`(UE `QueryModule` 표시용)은 두지 않는다(9.1절).
 - **`ModuleStartContext`**: `Startup`이 받는 문맥이다. 전역 접근자 대신 이것으로 호스트 서비스를 얻는다.
   - `ModuleLoader& Loader()`, `LoadingPhase Phase()`, `ModuleLease Lease()`(이 모듈의 코드 수명 토큰, 3.6절).
-  - `HostServices& Services()`: Launch와 엔진 호스트가 단계마다 등록하는 서비스 표다(`ConfigContext`, `LogSystem`, `TraceSession` — 3.12절. `Engine`은 후속). `Find<T>()`로 찾고, 아직 등록되지 않은 서비스는 null이다. 서비스 형식 키는 공유 라이브러리마다 갈라지지 않게 서비스 형식을 가진 모듈의 cpp에 out-of-line으로 정의하고 export한다([빌드 타깃](BuildTargets.ko.md) BD28·BD29와 같은 규칙, 선언·정의 매크로 `ROCKS_DECLARE_HOST_SERVICE`·`ROCKS_DEFINE_HOST_SERVICE`).
+  - `HostServices& Services()`: Launch와 엔진 호스트가 단계마다 등록하는 서비스 표다(`ConfigContext`, `LogSystem`, `TraceSession` — 3.12절. `Engine`은 후속). `Find<T>()`로 찾고, 아직 등록되지 않은 서비스는 null이다. 서비스 형식 키는 공유 라이브러리마다 갈라지지 않게 서비스 형식을 가진 모듈의 cpp에 out-of-line으로 정의하고 export한다([빌드 타깃](BuildTargets/README.ko.md) BD28·BD29와 같은 규칙, 선언·정의 매크로 `ROCKS_DECLARE_HOST_SERVICE`·`ROCKS_DEFINE_HOST_SERVICE`).
 - **기본 구현**: `DefaultModuleImplementation`은 빈 구현이다. 시작할 일이 없는 모듈은 `ROCKS_IMPLEMENT_MODULE(DefaultModuleImplementation, Name)`을 쓴다.
 - **설정 등록 함수**: 수명 객체 클래스가 정적 함수 `static Result<void> RegisterSettings(ConfigContext&) noexcept`를 가지면 진입점 매크로가 이를 감지해 진입 기술에 싣는다(3.2절). 이 함수는 수명 객체 없이 부르며, 모듈의 CVar·설정 struct 등록만 한다(3.5절 설정 등록 시점).
   - 감지(개정 2 리뷰 반영): 이름이 있는지는 접근 권한·오버로드와 무관하게 이름 조회 모호성으로 본다(`Class`와 같은 이름의 데이터 멤버를 가진 기반을 함께 상속한 탐침에서 `&Probe::RegisterSettings`가 모호하면 `Class`에 그 이름이 있다. 이름 조회는 접근 검사보다 먼저다). 이름이 있는데 public 단일 정적 함수의 주소로 위 서명을 얻을 수 없으면(private·protected, 오버로드, 비정적, 다른 서명) `static_assert` 오류다. requires 식만 쓰면 private·오버로드 함수가 진단 없이 "없음"(null)이 되어 설정 등록이 조용히 빠졌다. `final` 클래스는 탐침이 상속할 수 없으므로 public 이름만 감지한다(한계: `final` 클래스의 private·오버로드 `RegisterSettings`는 감지하지 못한다). 진입 기술의 칸 형식은 `Result<void> (*)(config::ConfigContext&) noexcept`이고 Core는 `ConfigContext`를 전방 선언만 한다(개정 2). 불투명 포인터(`void*`)로 지우는 안은 형식 검사를 잃어 버렸다.
@@ -109,7 +109,7 @@ ROCKS_IMPLEMENT_MODULE(CurvesModule, Curves)
   - `ModuleEntry`: `entryVersion`(구조체 ABI 버전), `name`, `create`(수명 객체를 만드는 함수), `registerTypes`(이 모듈 자신의 타입만 등록하는 생성 함수, 리플렉션이 없으면 null — 3.6절. 해제는 모듈별 `ModuleRegistration`이 기록으로 되돌리므로 함수를 따로 두지 않는다 — 개정 3), `registerSettings`(3.1절, 없으면 null).
   - 기술은 상수 초기화다(전역 생성자 없음). 수명 객체는 로더가 시작할 때 `create`로 만든다(UE도 첫 적재 때 만든다).
 - **Monolithic**: 빌드가 실행 파일마다 모듈 표 TU를 만든다. 타깃에 들어간 모든 C++ 모듈의 `RocksModuleEntry_<Name>()`을 의존 순서로 나열하고, 모듈별 의존 이름·로딩 단계(3.3절)를 함께 싣는다. 이 표가 Monolithic의 manifest다. 표가 모든 진입 함수를 직접 참조하므로 정적 라이브러리에서 진입점 object가 빠지지 않고, `ROCKS_IMPLEMENT_MODULE`이 빠진 모듈은 링크 오류가 난다(UE `IMPLEMENT_MODULE_<Name>` 강제 참조와 같은 역할 — `ModuleManager.h:950, 968`).
-- **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 매크로가 같은 자리에 정의하는 export하지 않는 모듈별 C 기호 `RocksModuleEntryOf_<Name>`을 모듈 링크에 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다(export 이름은 의존 모듈의 import 라이브러리도 내므로 그 이름으로는 잡지 못한다 — [빌드 타깃](BuildTargets.ko.md) BS8d1).
+- **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 매크로가 같은 자리에 정의하는 export하지 않는 모듈별 C 기호 `RocksModuleEntryOf_<Name>`을 모듈 링크에 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다(export 이름은 의존 모듈의 import 라이브러리도 내므로 그 이름으로는 잡지 못한다 — [빌드 타깃](BuildTargets/README.ko.md) BS8d1).
 - 매크로 이름 인자가 빌드가 넣는 모듈 이름 정의(`ROCKS_MODULE_NAME`)와 다르면 `static_assert` 오류다(UE는 경고 — `ModuleManager.h:950`).
 - 한 모듈에 매크로가 둘이면 링크 오류(같은 기호 중복)다.
 - 시험 실행 파일·도구도 모듈 표를 가진다. 그래서 시험이 모듈 로더를 거쳐 모듈을 시작한다(ML0).
@@ -229,7 +229,7 @@ public:
 
 - **manifest 파일**: 빌드가 Modular 타깃마다 `<Target>[-<Platform>-<Configuration>].modules.json`을 공유 라이브러리와 같은 폴더에 쓴다(UE `<App>.modules` — `Programs/UnrealBuildTool/System/ModuleManifest.cs:77-89`). 키는 영어다.
   - `buildId`: `ModuleBuildId` 문자열.
-  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest, host }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
+  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest, host }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets/README.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
   - 모르는 키는 오류다(UE 파서도 거부한다 — `Runtime/Core/Private/Modules/ModuleManifest.cpp:101-229`).
   - manifest는 링크가 모두 성공한 뒤 원자적으로 쓴다(임시 파일 → 이름 바꾸기).
 - **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`. 엔진 저장소 빌드는 출력 폴더 안 `Plugins/<상대 경로>/Binaries/<Platform>/` — 3.15절 MD23). 로더는 이 폴더들의 manifest만 읽는다(실행 파일 manifest의 `plugins` 목록 — 3.15절). 폴더를 훑어 파일을 찾지 않는다.
@@ -240,7 +240,7 @@ public:
 - **실행 파일 링크(MD21)**: 계약 4(적재 실패의 report)를 지키려면 OS가 `main` 전에 싣는 라이브러리를 줄여야 한다. 그래서 Modular 실행 파일은 부트 모듈(3.9절)만 import한다. 실행 파일의 본문(`ROCKS_IMPLEMENT_APPLICATION`의 `run`)은 타깃의 **호스트 모듈**(예: Rocks Studio의 `StudioHost`)에 두고, 로더가 그 모듈을 적재해 부른다. 나머지 모든 모듈은 로더가 의존 순서로 적재한다.
   - 부트 모듈 공유 라이브러리가 없으면 OS가 `main` 전에 실패한다. 이 경우만 report 계약의 예외다(설치 무결성 문제). Monolithic에는 해당하지 않는다.
   - 모듈 공유 라이브러리 사이의 import는 그대로 둔다. 로더가 의존을 먼저 적재하므로, OS가 import를 해석할 때 이미 적재된 라이브러리를 쓴다.
-- **OS 적재와 탐색**: `platform::DynamicLibrary::Open`(절대 경로)을 쓴다. 의존을 먼저 적재하므로 OS가 다른 폴더를 뒤질 필요가 없다. 빌드는 같은 폴더 rpath만 넣는다([빌드 타깃](BuildTargets.ko.md) 3.8절). Linux는 이름 해석을 위해 공유 라이브러리마다 `-soname`을 파일 이름으로 넣는다. 이 문서는 다음을 선행으로 요구한다(ML0).
+- **OS 적재와 탐색**: `platform::DynamicLibrary::Open`(절대 경로)을 쓴다. 의존을 먼저 적재하므로 OS가 다른 폴더를 뒤질 필요가 없다. 빌드는 같은 폴더 rpath만 넣는다([빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절). Linux는 이름 해석을 위해 공유 라이브러리마다 `-soname`을 파일 이름으로 넣는다. 이 문서는 다음을 선행으로 요구한다(ML0).
   - POSIX `dlopen` 실패의 `dlerror` 문구를 report로 넘긴다. 지금 `nativeError`가 0이다.
   - Windows는 의존 DLL 누락(`ERROR_MOD_NOT_FOUND`)을 그대로 넘긴다(지금 동작).
   - ML0 구현(개정 2): `DynamicLibrary::Open`·`OpenSystem`에 선택 인자 `DynamicLibraryError*`를 더했다. 고정 길이 문구 칸(`MaxTextBytes`, 넘치면 UTF-8 경계에서 자르고 `truncated`)에 POSIX는 `dlerror` 문구를 담고(분류용 `stat`·`open`보다 먼저 받는다), Windows는 비워 둔다(`nativeError`가 원래 코드). 호출 시작에 비우므로 앞 실패의 문구가 남지 않는다. ML4 로더가 이 문구를 `ModuleLoadReport.message`에 옮긴다.
@@ -292,11 +292,11 @@ public:
 - UE `DynamicallyLoadedModuleNames`(링크하지 않고 실행 중에 적재하는 모듈)에 해당하는 모듈 규칙 `DynamicModules`를 둔다(MD11).
   - 빌드는 이 모듈을 타깃에 넣어 빌드하고 manifest에 싣지만, 소비 모듈에 링크하지 않는다(Modular). Monolithic에서는 정적 라이브러리를 실행 파일에 링크한다(UE와 같다).
   - 소비 모듈의 include 경로에는 들어가지 않는다. 쓰는 쪽은 `Find<T>(name)`으로 얻고, T(공개 interface)는 별도 모듈(링크 의존 가능)에 둔다.
-  - 의존 규칙: `DynamicModules` 관계에도 모듈 type 포함 규칙([빌드 타깃](BuildTargets.ko.md) BD25)을 적용한다. 순환 검사의 참조 사슬에는 넣지 않는다(링크 의존만의 순환은 거부 — 아래 ML3 세부). 단계 순서 검사(MD6)는 링크 의존이 아니므로 적용하지 않는다. 이런 모듈은 단계 실행 대상이 아니다(아래 "요청 시 적재 행").
-- 서드파티 도구 DLL(DXC 등)을 실행 중에 여는 경로는 모듈이 아니다. 지금처럼 `DynamicLibrary`로 직접 연다([빌드 타깃](BuildTargets.ko.md) 9.1절).
+  - 의존 규칙: `DynamicModules` 관계에도 모듈 type 포함 규칙([빌드 타깃](BuildTargets/README.ko.md) BD25)을 적용한다. 순환 검사의 참조 사슬에는 넣지 않는다(링크 의존만의 순환은 거부 — 아래 ML3 세부). 단계 순서 검사(MD6)는 링크 의존이 아니므로 적용하지 않는다. 이런 모듈은 단계 실행 대상이 아니다(아래 "요청 시 적재 행").
+- 서드파티 도구 DLL(DXC 등)을 실행 중에 여는 경로는 모듈이 아니다. 지금처럼 `DynamicLibrary`로 직접 연다([빌드 타깃](BuildTargets/09-OutOfScope.ko.md) 9.1절).
 - **ML3 구현 세부(개정 4)** — UE 근거는 UnrealBuildTool(`Programs/UnrealBuildTool/`) 기준이다.
   - 규칙: `NativeModuleInput.DynamicModules`(모듈 이름 목록)이고, 엔진 모듈 규칙(`SourceModuleRules`)은 `DynamicModules` 속성으로 채운다. 게임·플러그인 규칙은 `NativeModuleInput`을 직접 채운다. 기술자(`modules[]`)에는 두지 않는다(UE도 `ModuleRules.DynamicallyLoadedModuleNames`만 있다 — `Configuration/Rules/ModuleRules.cs:1416-1419`).
-  - **순환(MD11 개정)**: `DynamicModules` 관계는 순환 검사의 참조 사슬에 넣지 않는다. 링크 의존만으로 된 순환은 지금처럼 거부한다. 그래서 링크 의존을 거꾸로 닫는 관계(Engine이 `DynamicModules`로 둔 렌더러 모듈이 Engine에 링크 의존)를 허용한다. 엔진 계층(Core·`Engine/Source`) 모듈은 플러그인 모듈을 `DynamicModules`로도 둘 수 없다([빌드 타깃](BuildTargets.ko.md) 3.9절 BD39 — UE scope 검사와 같다). 켠 플러그인 모듈은 주 실행 파일에 링크되어 기술자 단계로 시작한다(BD36). UE도 같다 — 동적 적재 모듈을 만들 때 참조 사슬을 비운 채 시작하고(`Configuration/UEBuildModule.cs:1300-1301` "Dynamic loads aren't considered a reference chain"), UE의 대표적 쓰임(엔진이 렌더러·플랫폼 모듈을 실행 중에 적재하고 그 모듈이 엔진에 링크)이 바로 이 모양이다. 개정 3까지의 "순환 검사를 적용한다"를 따르면 이 쓰임이 막히므로 버렸다. 이 관계는 시작 순서를 만들지 않으므로(`Load`가 따라가지 않는다) 실행 중 순환 문제도 없다.
+  - **순환(MD11 개정)**: `DynamicModules` 관계는 순환 검사의 참조 사슬에 넣지 않는다. 링크 의존만으로 된 순환은 지금처럼 거부한다. 그래서 링크 의존을 거꾸로 닫는 관계(Engine이 `DynamicModules`로 둔 렌더러 모듈이 Engine에 링크 의존)를 허용한다. 엔진 계층(Core·`Engine/Source`) 모듈은 플러그인 모듈을 `DynamicModules`로도 둘 수 없다([빌드 타깃](BuildTargets/03-Design/03.09-EnginePlugins.ko.md) 3.9절 BD39 — UE scope 검사와 같다). 켠 플러그인 모듈은 주 실행 파일에 링크되어 기술자 단계로 시작한다(BD36). UE도 같다 — 동적 적재 모듈을 만들 때 참조 사슬을 비운 채 시작하고(`Configuration/UEBuildModule.cs:1300-1301` "Dynamic loads aren't considered a reference chain"), UE의 대표적 쓰임(엔진이 렌더러·플랫폼 모듈을 실행 중에 적재하고 그 모듈이 엔진에 링크)이 바로 이 모양이다. 개정 3까지의 "순환 검사를 적용한다"를 따르면 이 쓰임이 막히므로 버렸다. 이 관계는 시작 순서를 만들지 않으므로(`Load`가 따라가지 않는다) 실행 중 순환 문제도 없다.
   - 대신 거부하는 것(입력 오류): 같은 모듈을 `Dependencies`와 `DynamicModules`에 함께 둠(UE도 오류 — `Configuration/UEBuildModuleCPP.cs:369-374`), 자기 자신, 실행 파일 모듈, 모르는 이름, 모듈 이름과 대소문자만 다른 철자(MD17), 같은 이름 중복. 모듈 표를 만드는 빌드에서는 진입점 모듈이 아닌 모듈(header-only·서드파티·Core 아래·표 제공 모듈에 닿지 않는 모듈 — 표에 행이 없어 `Load(이름)`이 찾지 못한다)도 거부한다.
   - **type 포함 규칙(BD25)**: 빌드의 의존 검사를 `DynamicModules` 관계에도 똑같이 한다(UE도 범위·플러그인 검사에 동적 적재 모듈을 넣는다 — `Configuration/UEBuildTarget.cs:1567, 1625`). BD25의 type 쌍 표는 아직 구현 전(BS2)이고, 지금 있는 형태는 기술자 모듈의 제외 검사다(Editor 모듈·Release의 Developer 모듈·지원하지 않는 플랫폼 — 빠진 모듈을 쓰면 오류). 이 검사를 `DynamicModules`에도 하고, Release 배제 정책(BD20)의 도달 집합도 `DynamicModules`를 따라간다(Monolithic은 링크하므로). BS2가 type 쌍 규칙을 넣을 때 같은 관계 목록에 적용한다.
   - **Monolithic 링크**: 실행 파일은 자기 링크 폐포의 모든 모듈이 `DynamicModules`로 둔 모듈과 그 링크 폐포를 함께 링크한다(동적 모듈의 `DynamicModules`도 따라간다). UE도 Monolithic 실행 파일에 동적 적재 모듈을 넣는다(`Configuration/UEBuildTarget.cs:2809-2822` `GetAllDependencyModules(bIncludeDynamicallyLoaded: true, …)`). 링크 순서는 링크 폐포 뒤에 동적 모듈 쪽을 더한 것이다(정적 라이브러리 순서 — 의존하는 쪽이 앞).
@@ -323,12 +323,12 @@ public:
   - 도구 본문: 설정을 쓰는 도구는 `PostConfigInit`을 직접 부른다. 엔진을 만들지 않는 도구는 엔진 단계 모듈을 시작하지 않는다.
   - 종료: 본문 반환 → 프로세스 묶음 종료(도구 로그 정리 전) → 7·6단계 역순 정리 → 크래시 처리 제거.
 - **Rocks Studio(ML5)**: 실행할 때 프로젝트 경로를 받는다.
-  1. `.rocksproject`와 플러그인 활성 조건([빌드 타깃](BuildTargets.ko.md) 3.6절, 문맥: Editor 타깃·현재 플랫폼·현재 구성)으로 켤 플러그인을 정한다.
+  1. `.rocksproject`와 플러그인 활성 조건([빌드 타깃](BuildTargets/03-Design/03.06-PluginConditions.ko.md) 3.6절, 문맥: Editor 타깃·현재 플랫폼·현재 구성)으로 켤 플러그인을 정한다.
   2. 엔진·게임·켠 플러그인의 manifest를 읽고 `buildId`를 검사한다.
   3. 단계마다 엔진·게임·플러그인 모듈을 함께 의존 순서로 시작한다.
   4. 게임 모듈 적재 실패는 report와 함께 시작을 중단한다. 다시 빌드를 권하는 편집기 UI는 Rocks Studio 설계에서 정한다.
   - 빌드 시점에 이미 플러그인 조건을 해석해 게임 Editor 타깃을 만들었으므로, 실행 중 해석 결과와 빌드 결과가 다르면 `Incompatible`이다(게임 manifest에 빌드한 플러그인 목록을 싣고 대조한다).
-- **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 공유 라이브러리 하나에 한 벌만 두고(BD29 — 모든 시험이 든 호스트 모듈. BS8d5(빌드 타깃 개정 22 — 사용자 결정)가 시험을 호스트 하나에 두기로 해 Core로 옮기지 않는다 — 3.14절), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
+- **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets/README.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 공유 라이브러리 하나에 한 벌만 두고(BD29 — 모든 시험이 든 호스트 모듈. BS8d5(빌드 타깃 개정 22 — 사용자 결정)가 시험을 호스트 하나에 두기로 해 Core로 옮기지 않는다 — 3.14절), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
 
 ### 3.10 ML2 연결 — ML1 전(개정 3)
 
@@ -427,7 +427,7 @@ crash-launch(공통 실행 진입점 Launch) 병합 뒤 단계 실행·묶음·L
 ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·trace가 생긴 뒤에 시작하므로, 3.10절 끝에 넘긴 "서비스를 쓰는 `Startup` 등록"을 할 수 있게 됐다. 애매한 곳은 UE 5.8을 따랐다.
 
 **서비스 키를 Core로(MD18 보강).**
-- `HostServiceKey`·`HostServiceTraits`와 매크로 `ROCKS_DECLARE_HOST_SERVICE`·`ROCKS_DEFINE_HOST_SERVICE`를 Core `Core/Module/HostServiceKey.h`로 옮긴다. 선언 매크로는 BS8d4([빌드 타깃](BuildTargets.ko.md) 3.8절)부터 소유 모듈의 API 매크로를 둘째 인자로 받는다(`ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext, ROCKS_CONFIG_API)` — Modular에서 다른 모듈이 `Key()`를 링크한다). 서비스 표 `HostServices`는 그대로 ModuleLoader 모듈이다.
+- `HostServiceKey`·`HostServiceTraits`와 매크로 `ROCKS_DECLARE_HOST_SERVICE`·`ROCKS_DEFINE_HOST_SERVICE`를 Core `Core/Module/HostServiceKey.h`로 옮긴다. 선언 매크로는 BS8d4([빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절)부터 소유 모듈의 API 매크로를 둘째 인자로 받는다(`ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext, ROCKS_CONFIG_API)` — Modular에서 다른 모듈이 `Key()`를 링크한다). 서비스 표 `HostServices`는 그대로 ModuleLoader 모듈이다.
 - 이유: 서비스 형식의 키는 그 형식을 가진 모듈이 선언·정의한다(MD18). 그런데 `LogSystem`은 Core에 있고 Core는 ModuleLoader에 의존할 수 없다(ModuleLoader가 Core에 의존한다). 진입점 계약을 Core에 둔 것(개정 2)과 같은 이유다. 키 헤더는 Core 기본 형식만 쓴다.
 - 버린 안: 키를 ModuleLoader 모듈에 모아 정의(소유 모듈이 아닌 곳이 다른 모듈 형식을 알게 된다), Config·TraceCapture가 ModuleLoader에 의존(키 하나 때문에 의존이 는다).
 
@@ -511,7 +511,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 
 ### 3.15 ML5a 구현 세부 — 엔진 플러그인 Modular(개정 11)
 
-ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플러그인을 Modular로 링크하고 적재한다(플러그인 binaries 폴더·플러그인 manifest, 실행 파일 manifest의 플러그인 목록, manifest 사이 빌드 식별 대조). **ML5b**는 Rocks Studio가 프로젝트 기술자와 활성 조건으로 켤 플러그인을 정하고 빌드가 실은 목록과 대조한다(MD19 — [빌드 타깃](BuildTargets.ko.md) BS4·BS5와 함께). 나눈 까닭: 플러그인 manifest 기구는 활성 조건 해석과 독립이다. 그리고 지금 Engine 층 Modular 시험(빌드 타깃 BS8e `EngineModular`)은 플러그인 시험을 빼고 있어, Editor 전에 플러그인 모듈의 export 누락을 잡지 못한다.
+ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플러그인을 Modular로 링크하고 적재한다(플러그인 binaries 폴더·플러그인 manifest, 실행 파일 manifest의 플러그인 목록, manifest 사이 빌드 식별 대조). **ML5b**는 Rocks Studio가 프로젝트 기술자와 활성 조건으로 켤 플러그인을 정하고 빌드가 실은 목록과 대조한다(MD19 — [빌드 타깃](BuildTargets/README.ko.md) BS4·BS5와 함께). 나눈 까닭: 플러그인 manifest 기구는 활성 조건 해석과 독립이다. 그리고 지금 Engine 층 Modular 시험(빌드 타깃 BS8e `EngineModular`)은 플러그인 시험을 빼고 있어, Editor 전에 플러그인 모듈의 export 누락을 잡지 못한다.
 
 **플러그인 binaries 폴더(MD23).**
 - 켠 플러그인 모듈의 공유 라이브러리(와 디버그 정보)와 그 플러그인의 manifest는 `<출력>/Plugins/<플러그인 상대 경로>/Binaries/<Platform>/`에 둔다. 플러그인 상대 경로는 플러그인 루트(엔진 저장소는 `Engine/Plugins`) 기준 플러그인 폴더(예 `Importers/UnrealExchange`)이고, `<Platform>`은 플랫폼 폴더 이름(`Win64`·`Mac`·`Android` — 빌드 문맥 `PlatformDirectory`와 같은 표를 Rocks.Build 한 곳에 두고 둘 다 그것을 쓴다)이다. 엔진 모듈은 지금처럼 `<출력>/bin`이다. Windows import 라이브러리는 지금처럼 `<출력>/lib`이다.
@@ -519,7 +519,7 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 - 버린 안: 원본 트리의 `Engine/Plugins/<…>/Binaries`(UE 그대로) — Rocks 빌드 출력은 `out` 아래만이고(빌드 증거), 출력마다 구성·타깃이 달라 같은 플러그인 폴더를 출력 여럿이 함께 쓰면 manifest와 라이브러리가 겹친다. 엔진 라이브러리와 같은 `bin`에 두기 — 플러그인을 켜고 끄는 단위(MD12, ML5b의 Studio)는 폴더와 manifest여야 한다.
 - 모듈 공유 라이브러리의 최종 경로는 빌드의 경로 함수 하나가 정한다(링크 출력·manifest 크기·Windows export 수 진단·하니스가 모두 그것을 쓴다 — 지금 `bin`을 직접 붙이는 곳을 모은다). 링크 출력 폴더가 없으면 링크 전에 만든다.
 
-**호스트는 켠 플러그인 모듈을 링크하지 않는다.** Monolithic은 켠 플러그인 모듈을 주 실행 파일에 링크한다([빌드 타깃](BuildTargets.ko.md) BD36). Modular 호스트 모듈은 그 모듈을 링크하지 않고 manifest 행(기술자 단계의 보통 행)으로만 싣는다. 링크하면 호스트 라이브러리가 켠 플러그인 라이브러리를 모두 import해서, 플러그인을 켜고 끄는 단위(폴더와 manifest — ML5b·ML6)가 링크에서 이미 깨진다. 3.14절이 `DynamicModules`를 호스트 링크에서 뺀 것과 같은 까닭이다. 호스트가 직접 의존하는 플러그인 모듈(플러그인 시험을 담는 시험 호스트 → UnrealExchange)만 import로 남는다.
+**호스트는 켠 플러그인 모듈을 링크하지 않는다.** Monolithic은 켠 플러그인 모듈을 주 실행 파일에 링크한다([빌드 타깃](BuildTargets/README.ko.md) BD36). Modular 호스트 모듈은 그 모듈을 링크하지 않고 manifest 행(기술자 단계의 보통 행)으로만 싣는다. 링크하면 호스트 라이브러리가 켠 플러그인 라이브러리를 모두 import해서, 플러그인을 켜고 끄는 단위(폴더와 manifest — ML5b·ML6)가 링크에서 이미 깨진다. 3.14절이 `DynamicModules`를 호스트 링크에서 뺀 것과 같은 까닭이다. 호스트가 직접 의존하는 플러그인 모듈(플러그인 시험을 담는 시험 호스트 → UnrealExchange)만 import로 남는다.
 
 **플러그인 manifest와 실행 파일 manifest의 목록(schema 4).**
 - 플러그인마다 실행 파일 manifest와 같은 이름(`<Target>[-<Platform>-<Configuration>].modules.json`)의 manifest를 그 플러그인 binaries 폴더에 쓴다. 형식은 실행 파일 manifest와 같고, 행은 그 플러그인의 모듈만이며 `file`은 그 폴더 기준이다. `buildId`·`engineVersion`·`toolchainFingerprint`는 실행 파일 manifest와 같은 값이다(한 빌드다). 호스트 행이 없고 `plugins`는 빈 배열이다(아니면 로더가 거부한다 — 플러그인 manifest는 다른 manifest를 가리키지 않는다).
@@ -537,7 +537,7 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
    - macOS·Linux: 빌드가 rpath를 넣는다(아래). install name·soname `@rpath/<파일>`은 그대로다(dyld·ld.so가 이미 적재한 이미지를 그 이름으로 맞춘다).
 
 **빌드.**
-- Modular 타깃이 플러그인을 켜도 거부하지 않는다([빌드 타깃](BuildTargets.ko.md) BD41 개정). 플러그인 모듈(기술자의 `modules`에 있는 모듈 — 플러그인 모듈 규칙)은 공유 라이브러리를 자기 플러그인 binaries 폴더에 링크한다. 모듈 입력에 그 폴더를 정하는 칸(플러그인 상대 경로)을 더하고 기술자 모듈 처리가 채운다(규칙은 채우지 않는다).
+- Modular 타깃이 플러그인을 켜도 거부하지 않는다([빌드 타깃](BuildTargets/README.ko.md) BD41 개정). 플러그인 모듈(기술자의 `modules`에 있는 모듈 — 플러그인 모듈 규칙)은 공유 라이브러리를 자기 플러그인 binaries 폴더에 링크한다. 모듈 입력에 그 폴더를 정하는 칸(플러그인 상대 경로)을 더하고 기술자 모듈 처리가 채운다(규칙은 채우지 않는다).
 - rpath: 공유 라이브러리·실행 파일이 링크하는 공유 라이브러리가 자기와 다른 폴더에 있으면 그 폴더의 상대 경로(링크하는 바이너리 폴더 기준)를 rpath로 더한다(macOS `@loader_path/<상대 경로>`, Linux `$ORIGIN/<상대 경로>`). UE macOS 툴체인과 같다(`Programs/UnrealBuildTool/Platform/Mac/MacToolChain.cs:365` — 링크하는 라이브러리 폴더마다 `-rpath @loader_path/<상대 경로>`). 진입 스텁은 부트 모듈만 import하므로 그대로다.
 - manifest 쓰기: 플러그인 manifest를 먼저 쓰고 실행 파일 manifest를 마지막에 쓴다(각각 원자적 교체, 내용이 같으면 쓰지 않는다 — 실행 파일 manifest가 새 플러그인 manifest를 가리킨 뒤에야 바뀐다). `buildId` 재사용(MD13)은 실행 파일 manifest가 정하고 플러그인 manifest가 같은 값을 받는다.
 - 빌드 정보 ID(빌드 정보 생성 TU가 덮는 액션 범위)는 Modular 호스트도 Monolithic처럼 켠 플러그인 모듈을 포함한다(링크하지 않아도 그 코드가 바뀌면 ID가 바뀐다).
@@ -603,7 +603,7 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 | ML1 | 로딩 단계와 묶음: 기술자 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행의 요청 시 적재 표지와 `StartPhase`의 건너뜀(3.8절), 단계 순서 빌드 검사(MD6), 부트 모듈 단계 강제, `StartPhase`의 앞 단계 차례 실행, Launch 통합(crash-launch 병합 뒤), 엔진 호스트의 `PostConfigInit`·호스트 묶음 종료, `Engine::Initialize`·`Shutdown`의 엔진 묶음과 참조 수, 타입 등록기 여럿. 세부는 3.11절(개정 5) | Sandbox 엔진 호스트가 모든 단계를 지나 부트·종료한다. 한 프로세스에서 Engine을 차례로 여러 번 만드는 시험이 엔진 묶음을 매번 시작·종료한다. 단계별 시작·종료 순서 시험 |
 | ML2 | 타입 등록기(MD15)·모듈별 `ModuleRegistration`·모듈 자신의 타입만 등록하는 생성 함수, 실제 `ModuleLease`(MD16)와 생성 등록 함수의 lease 인자, 설정 등록(MD22, Monolithic), 기존 모듈별 등록 래퍼를 `Startup`·`RegisterSettings`로 옮기기, CVar·trace 채널 등록의 lease. ML1 전 연결과 ML1 뒤로 넘긴 것은 3.10절(개정 3) | 호스트 코드의 모듈별 명시 등록 호출이 HostSettings 설정 타입 외에 0. 늦은 단계 모듈의 CVar가 `ReportUnresolved` 경고 없이 설정 값을 받는 시험. 종료 뒤 남은 lease 진단 시험 |
 | ML3 | `DynamicModules`(MD11)와 Monolithic 링크 규칙, type 검사, 링크 의존만의 순환 거부(동적 관계는 참조 사슬 아님), 표에 행이 없는 모듈 거부 | 실행 중 적재 모듈을 `Load`·`Find<T>(name)`으로 쓰는 시험 |
-| ML4 | Modular 적재 — 선행: [빌드 타깃](BuildTargets.ko.md) BS8. manifest 쓰기·읽기(원자적 쓰기, 모르는 키 거부), `ModuleBuildId` 재사용·SDK manifest, 파일 크기 대조, export 진입점과 강제 참조, `Prepare`, 실행 파일의 부트 모듈 import와 호스트 모듈(MD21), Linux `-soname`, OS 적재·report, `Modular` FoundationTests를 로더로 실행 | `Modular` FoundationTests가 Windows·macOS에서 로더로 모듈을 적재해 통과한다. `buildId` 불일치·크기 불일치·의존 DLL 누락·진입점 없음·모르는 키의 report 시험. 증분 빌드에서 `buildId`가 바뀌지 않는 시험 |
+| ML4 | Modular 적재 — 선행: [빌드 타깃](BuildTargets/README.ko.md) BS8. manifest 쓰기·읽기(원자적 쓰기, 모르는 키 거부), `ModuleBuildId` 재사용·SDK manifest, 파일 크기 대조, export 진입점과 강제 참조, `Prepare`, 실행 파일의 부트 모듈 import와 호스트 모듈(MD21), Linux `-soname`, OS 적재·report, `Modular` FoundationTests를 로더로 실행 | `Modular` FoundationTests가 Windows·macOS에서 로더로 모듈을 적재해 통과한다. `buildId` 불일치·크기 불일치·의존 DLL 누락·진입점 없음·모르는 키의 report 시험. 증분 빌드에서 `buildId`가 바뀌지 않는 시험 |
 | ML5a | 엔진 플러그인 Modular(3.15절): 플러그인 binaries 폴더·플러그인 manifest(MD23), 실행 파일 manifest의 `plugins`(schema 4), manifest 사이 빌드 식별 대조, 합친 행의 의존 정렬, 빌드의 rpath | `EngineModular`가 UnrealExchange 플러그인을 Modular로 적재해 그 시험이 Windows·macOS에서 통과한다. 플러그인 manifest 불일치·없음·중복·순환의 report 시험 |
 | ML5b | Rocks Studio 적재 — BS4·BS5와 함께: 프로젝트 플러그인, 플러그인 조건 해석, 빌드 목록 대조(MD19) | 게임·플러그인 모듈이 있는 프로젝트를 Rocks Studio가 열고 닫는다 |
 | ML6 | 실행 중 해제(MD10)와 플러그인 끄기, 공유 라이브러리 지연 해제 | `Busy`(의존 모듈·살아 있는 인스턴스)·`Unsupported` 시험(아무것도 바뀌지 않음), 해제 뒤 다시 적재 시험(Modular), lease가 남은 경우의 지연 해제 시험 |
@@ -631,14 +631,14 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 ## 8. 다른 문서 개정
 
 이번 개정에서 함께 고친 문서:
-- [빌드 타깃](BuildTargets.ko.md): 3.8절 BD30과 9.2절의 "별도 스펙 모듈 로더"를 이 문서로 링크했다. BD30에 단계 관계(ML0–ML4는 BS5 전, ML5는 BS5와 함께)와 실행 파일 import 범위(MD21)를 적었다. 3.8절 Linux 링크 옵션에 `-soname`을, BS8에 빌드 정보 생성 TU의 Modular 정의 위치를 더했다.
+- [빌드 타깃](BuildTargets/README.ko.md): 3.8절 BD30과 9.2절의 "별도 스펙 모듈 로더"를 이 문서로 링크했다. BD30에 단계 관계(ML0–ML4는 BS5 전, ML5는 BS5와 함께)와 실행 파일 import 범위(MD21)를 적었다. 3.8절 Linux 링크 옵션에 `-soname`을, BS8에 빌드 정보 생성 TU의 Modular 정의 위치를 더했다.
 
 구현 때 고칠 문서:
 - [크래시 처리·실행](CrashHandlingAndLaunch.ko.md): 8.1절에 모듈 단계(로더 생성·`EarliestPossible`, 도구 로그 뒤), 8.2절에 프로세스 묶음 종료(도구 로그 정리 전)를 더했다(개정 5, ML1). 개정 10(ML4b)에서 그 문서 개정 12로 8.1절 7a에 Modular 진입(시동 크래시 수집·manifest 로더·호스트 앱 기술)을 적었다.
 - [CVar](CVarSystem.ko.md) "모듈 언로드 때 핸들 해제(결정 필요)": MD16·MD22로 답했다(등록은 `RegisterSettings`, 핸들이 모듈 lease를 잡고, 모듈 `Shutdown`이 해제한다 — 개정 5).
 - [저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크했다(개정 5).
 - [AppInfo·CommandLine](AppInfoCommandLine.ko.md) 11절: `BuildDescription`에 `ModuleBuildId`를 더한다(ML4).
-- [엔진 런타임](EngineRuntime.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기를 적었다(개정 5).
+- [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기를 적었다(개정 5).
 
 ## 9. 범위 밖과 채택하지 않은 UE 요소
 
@@ -649,17 +649,17 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 | `PostLoadCallback`, `LoadModuleWithCallback`, `UnloadOrAbandonModuleWithCallback`, `AbandonModule` | hot reload용이다(9.2절) |
 | `IsGameModule`, `IMPLEMENT_GAME_MODULE`, `IMPLEMENT_PRIMARY_GAME_MODULE` | 게임 모듈 표시와 게임 이름 등록이다. Rocks는 프로젝트 이름을 기술자·빌드 정보로 안다 |
 | `UE_MERGED_MODULES`(여러 모듈을 라이브러리 하나로) | 실험 기능이다. 지연 해제 방식만 3.7절에서 빌렸다 |
-| `PER_MODULE_BOILERPLATE`의 `operator new` 교체 | Rocks는 전역 `operator new`를 바꾸지 않는다([빌드 타깃](BuildTargets.ko.md) BD29) |
+| `PER_MODULE_BOILERPLATE`의 `operator new` 교체 | Rocks는 전역 `operator new`를 바꾸지 않는다([빌드 타깃](BuildTargets/README.ko.md) BD29) |
 | `-ModulesBootstrap=`(경로 캐시 직렬화) | 폴더를 훑지 않으므로 필요 없다 |
 | 시작 화면·로딩 화면 단계(`PostSplashScreen`·`PreEarlyLoadingScreen`·`PreLoadingScreen`) | 대응하는 시작 흐름이 생기면 다시 본다 |
-| `IsLoadedInCurrentConfiguration`(실행 중 host type 필터) | 빌드가 타깃에 들어갈 모듈을 이미 거른다([빌드 타깃](BuildTargets.ko.md) BD4·BD25). manifest에 있는 모듈은 그 타깃에서 쓸 수 있다 |
+| `IsLoadedInCurrentConfiguration`(실행 중 host type 필터) | 빌드가 타깃에 들어갈 모듈을 이미 거른다([빌드 타깃](BuildTargets/README.ko.md) BD4·BD25). manifest에 있는 모듈은 그 타깃에서 쓸 수 있다 |
 | 콘솔 명령 `Module Load/Unload/Reload` | 편집기 도구가 생기면 다시 본다 |
 
 ### 9.2 범위 밖
 
 - 코드 다시 불러오기(UE Live Coding·hot reload): Modular 적재(ML4)가 생긴 뒤 별도 스펙.
 - Rocks Studio의 다시 빌드 안내 UI: Rocks Studio 설계.
-- HostSettings와 엔진 레지스트리의 통합: [설정 시스템](ConfigSystem.ko.md)·[엔진 런타임](EngineRuntime.ko.md).
+- HostSettings와 엔진 레지스트리의 통합: [설정 시스템](ConfigSystem.ko.md)·[엔진 런타임](EngineRuntime/README.ko.md).
 - 플러그인 C 함수 표 ABI([전체 계획](EngineImplementationPlan.ko.md) 2426행 "versioned C function table"): 바이너리 배포 플러그인용이다. 이 문서는 같은 빌드 계열에서 나온 모듈만 다룬다(`ModuleBuildId` 일치).
 
 ## 10. 개정 이력
@@ -669,11 +669,11 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 | 11 | 2026-11-23 | ML5를 ML5a(엔진 플러그인 Modular)와 ML5b(Rocks Studio 적재)로 나눴다. ML5a 세부(3.15절): 플러그인 binaries 폴더 `<출력>/Plugins/<상대 경로>/Binaries/<Platform>/`(MD23), Modular 호스트는 켠 플러그인 모듈을 링크하지 않음, 플러그인 manifest, 실행 파일 manifest의 `plugins`·행 `order`(schema 4 — Monolithic 표 순서), manifest 사이 `buildId`·엔진 버전·툴체인 지문 대조, 로더 두 단계(해석 → 합치기), Windows는 manifest 순서로 import를 풀고(행 없는 공유 라이브러리는 부트 폐포 안이어야 함) macOS·Linux는 rpath, `EngineModular`가 플러그인 시험을 담음. 설계 리뷰(리뷰어 1명) 반영: 호스트 링크·순서 번호·로더 저장소·경로 모양·report 이름·`bin` 고정 경로·문서 불일치 |
 | 10 | 2026-11-22 | ML4b 구현 세부(3.14절): Modular 실행 파일은 빌드 생성 진입 스텁(Launch만 import), 실행 파일 모듈은 호스트 공유 라이브러리(MD21), 앱 기술 export(`RocksApplicationDescription`·창 변형), Launch Modular 진입(`RocksLaunchModularApplication` — 시동 할당자로 manifest 로더를 먼저 만듦), manifest 행 키 `executable`→`host`(schema 3, `executableEntry` 인자 제거, 호스트 행도 OS 적재), `FindHostSymbol`, `GeneratedModuleTable()`은 Monolithic에만, `HostSettingsOptions::modules` 필수, 시험 등록 머리, 입력 검사(Launch 거부 해제·Launch 없는 Modular 실행 파일 거부) |
 | 9 | 2026-11-21 | ML4a 구현 세부(3.13절): `TryCreateFromManifest`(manifest 엄격 해석·`Prepare`·report), 행 키 `executable`과 실행 파일 진입 함수, 표 저장소·라이브러리 수명, 시험 범위(성공 경로는 BS8d5) |
-| 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |
-| 7 | 2026-11-21 | [빌드 타깃](BuildTargets.ko.md) 3.9절(BD36·BD39)에 맞춰 3.8절 순환 항목의 "Engine이 `DynamicModules`로 둔 플러그인 모듈"을 지웠다. 엔진 계층 모듈은 플러그인 모듈을 동적 적재로도 참조하지 않고, 켠 플러그인 모듈은 주 실행 파일에 링크된다 |
+| 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets/README.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |
+| 7 | 2026-11-21 | [빌드 타깃](BuildTargets/03-Design/03.09-EnginePlugins.ko.md) 3.9절(BD36·BD39)에 맞춰 3.8절 순환 항목의 "Engine이 `DynamicModules`로 둔 플러그인 모듈"을 지웠다. 엔진 계층 모듈은 플러그인 모듈을 동적 적재로도 참조하지 않고, 켠 플러그인 모듈은 주 실행 파일에 링크된다 |
 | 6 | 2026-11-20 | ML1 후속(3.12절): 호스트 서비스 키·매크로를 Core `Core/Module/HostServiceKey.h`로 옮김(MD18 보강), `LogSystem`·`ConfigContext`·`TraceSession`을 서비스로 선언, Sandbox가 `PostConfigInit` 전에 등록·호스트 묶음 종료 뒤 뗌, RenderBase 모듈 `Startup`이 GPU trace 채널·형을 등록하고 `Shutdown`이 풂(첫 서비스 사용처). `Engine` 서비스·핸들 단위 CVar lease는 그대로 후속 |
 | 5 | 2026-11-20 | ML1 착수. 3.11절에 구현 세부를 정했다: `LoadingPhase`에 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행 `onRequest`(요청 시 적재 — 단계 실행이 건너뜀), 실행 파일 행은 `None`(UE Program 주 모듈)·시험 fixture 모듈 `None`, 빌드의 단계 순서 검사(MD6, 모듈 표 행 기준)와 부트 모듈 검사(새 표지 `ProvidesLaunch`의 링크 폐포는 `EarliestPossible`이어야 함), SDK manifest 11(`LoadingPhase`·`ProvidesLaunch`), `StartPhase`(앞 단계 차례 실행, 이미 돈 단계는 성공, 앞 묶음 단계·`None`은 Fatal, 실패는 그 단계를 멈춤)와 `ShutdownGroup`의 단계 되돌림, 엔진 묶음 참조 수(`StartEngineGroup`·`ShutdownEngineGroup`), 타입 등록기 여럿(Engine마다, 최대 4 — MD15 개정), Launch가 로더를 소유(`Launch.Modules` 단계, `ApplicationContext::Modules()`, 정리에서 프로세스 묶음 종료·lease 진단), Sandbox `PostConfigInit`·호스트 묶음 종료, Engine 대체 로더 제거(`EngineConfig::modules` 필수), 시험 runner의 `test::ProcessModules()`. 후속: 호스트 서비스 등록·서비스를 쓰는 `Startup` 등록·핸들 단위 CVar lease. 다른 문서(8절)를 함께 고쳤다 |
 | 4 | 2026-11-20 | ML3 구현. UE UnrealBuildTool 근거로 MD11을 고쳤다: `DynamicModules` 관계는 순환 검사의 참조 사슬에 넣지 않는다(UE "Dynamic loads aren't considered a reference chain" — 엔진이 동적 적재하는 모듈이 엔진에 링크하는 쓰임을 막지 않게). 대신 `Dependencies`와 겹침·자기 자신·실행 파일·모르는 이름·대소문자 철자를 거부한다. 3.8절에 ML3 구현 세부를 더했다: 규칙 속성, type 검사(BD25 구현 전에는 기술자 모듈 제외 검사와 Release 배제 도달 집합), Monolithic 링크와 링크 순서, include 경로 제외, 모듈 표의 동적 모듈 행 위치(실행 파일 행 앞, 행 의존은 링크 의존만), 빌드 대상·메타데이터 도달 집합, SDK manifest 10, 묶음 기록은 ML0 그대로, Modular는 ML4. 같은 날 리뷰 반영: 3.8절 옛 글머리·6절 ML3 행을 개정 MD11과 맞춤, 요청 시 적재 행 결정(UE `LoadModulesForPhase`는 기술자 목록만 돌므로 `DynamicModules`로만 닿는 행은 단계 실행 대상이 아니다 — 표지와 건너뜀은 ML1), 표에 행이 없는 모듈(header-only·서드파티·Core 아래·표 제공 모듈에 닿지 않음)과 중복 거부 |
 | 3 | 2026-11-19 | ML2 착수. ML1 전의 연결을 3.10절에 정했다: 모듈 생성 소스(리플렉션 생성 소스 5.5절)의 자기 타입 함수 `RegisterModuleOwnTypes`와 `ROCKS_MODULE_TYPES`로 진입 기술 `registerTypes`를 채움(소스 없는 메타데이터 모듈은 빌드 진입점 TU로 진입점 모듈이 됨), `unregisterTypes` 제거(`ModuleEntryVersion` 2), `ModuleTypeRegistrar`·`AttachTypeRegistrar`·`DetachTypeRegistrar`와 일반 구현 `ModuleTypeRegistrations`(ObjectRuntime), `EngineConfig::modules`와 Engine 대체 로더, `HostSettingsOptions::modules`·`ConfigContext::RetainModule`과 모듈 `RegisterSettings`, Sandbox의 프로세스 로더, `ModulesWithLeases` 진단. ML1 뒤로 넘긴 것: 서비스를 쓰는 `Startup` 등록(trace 채널·타입), 엔진 묶음 참조 수, 핸들 단위 CVar lease. 같은 날 리플렉션 생성 소스 작업(rocks-78, GS1)과 생성기·빌드 파일이 겹쳐 착수한 코드를 되돌리고, 생성 등록 함수를 그 구조(모듈 생성 소스 정의·모듈 생성 헤더는 선언만)에 맞춰 고쳐 적었다. 구현은 그 병합 뒤 재개한다. 2026-11-20 GS1 병합 뒤 재개하며 GS1 위 세부를 3.10절에 더했다: 진입점 판정이 리플렉션 생성 소스를 세고 SDK 표지 `ReflectionOnlyLibrary`를 없앰(SDK manifest 8), `ROCKS_MODULE_TYPES`를 `ReflectionSources`로 판정, 재귀 등록 함수는 그대로 두고 `RegisterModuleOwnTypes`를 모듈 생성 소스에 더함. 같은 날 구현하고 교차 검증을 반영했다: 3.4절 API 목록에 `Table`·`AcquireLease`·`ModulesWithLeases`·`AttachTypeRegistrar`·`DetachTypeRegistrar`·`TypeRegistrar`, 3.10절에 로더 조회 API, 상태 줄·3.2절 `ModuleEntryVersion` 2·MD2 진입 기술 칸(해제 제거) 정정, 이전 버전 SDK manifest는 엄격한 읽기 전에 버전부터 비교해 버전 불일치로 안내 |
 | 2 | 2026-11-19 | ML0 구현 반영. 진입점 계약을 Core(`Core/Module/ModuleImplementation.h`·`ModuleEntry.h`)로 옮겼다(`ModuleLoader`는 Core에 의존하므로 Core와 다른 모든 모듈이 매크로를 쓰려면 Core에 있어야 한다 — 3.1절). Core 아래 모듈(PlatformBase·DeterministicMath) 면제와 실행 파일 모듈 포함(3.1절), 진입 기술 칸 형식·매크로 이름 인자 펼침·식별자 이름 규칙·모듈 표 TU 형식·면제 모듈을 거치는 의존 대체·기술자 단계(3.2절), `TryCreate`·`State`·`LeaseCount`·`Services`, `Changed`를 `MulticastDelegate`로, `StartPhase`는 ML1·`Unload`는 ML6에 공개, 소멸 동작, report 고정 길이 칸(3.4절), 의존 철자 대소문자 검사(3.4절 MD17), `ShutdownGroup`의 안쪽 묶음 포함과 수명 객체 파괴(3.7절), `DynamicLibraryError`(3.5절), 빌드 표지 `ProvidesModuleTable`·`ThirdParty`·`LoadingPhase`와 SDK manifest 6(3.9절)을 적었다. 같은 날 서브에이전트 교차 검증을 반영했다: 종료 중 조회를 UE에 맞춤(모듈은 자기 `Shutdown` 직전에만 `ShuttingDown`), `Load` 진행 중(`Changed` 구독자 포함) `ShutdownGroup` Fatal, `RegisterSettings` 이름 감지를 접근 권한·오버로드와 무관하게(3.1절), 자동 종료 거부 모듈의 소멸 순서를 시작 역순으로, 실패 상태·`ShutdownGroup` 스레드 위반·부트 모듈 목록·ML0 행·1절 표·3.4절 코드 블록의 모순 정정 |
-| 1 | 2026-11-19 | 첫 초안. [빌드 타깃](BuildTargets.ko.md) BD30이 넘긴 모듈 로더를 UE 5.8 `IModuleInterface`·`FModuleManager`·`ELoadingPhase` 기준으로 정했다. 사용자 지시("애매하면 언리얼 방식")에 따라 UE 구조를 따르고, 전역 생성자 금지·`Result` 오류·명시 소유와 부딪히는 곳만 7절에 차이로 적었다. 서브에이전트 1개로 교차 검증해 반영했다: 종료를 프로세스·호스트·엔진 묶음별로(모듈 `Shutdown` 때 로그·설정이 살아 있게), 실행 중 해제의 검사 순서와 lease 역할 분리·지연 해제, 한 프로세스의 여러 Engine(엔진 묶음·참조 수, 앞 단계 차례 실행), 타입 등록 시점과 실패 처리, 설정 등록 시점(바이너리 준비 + `RegisterSettings`), Modular 실행 파일의 부트 모듈 import와 호스트 모듈, `ModuleBuildId` 재사용과 파일 크기 대조, `Find<T>(name)`과 서비스 형식 키, Launch 단계 위치, 모듈 자신의 타입만 등록하는 생성 함수, 부트 모듈 정의, 해제 report, `Failed` 재시도, 종료 중 이벤트 없음, lease 원자 수, Linux `-soname`, Modular 시험 등록, 인용 정정(UE 진입점 주 경로·같은 단계 재호출) |
+| 1 | 2026-11-19 | 첫 초안. [빌드 타깃](BuildTargets/README.ko.md) BD30이 넘긴 모듈 로더를 UE 5.8 `IModuleInterface`·`FModuleManager`·`ELoadingPhase` 기준으로 정했다. 사용자 지시("애매하면 언리얼 방식")에 따라 UE 구조를 따르고, 전역 생성자 금지·`Result` 오류·명시 소유와 부딪히는 곳만 7절에 차이로 적었다. 서브에이전트 1개로 교차 검증해 반영했다: 종료를 프로세스·호스트·엔진 묶음별로(모듈 `Shutdown` 때 로그·설정이 살아 있게), 실행 중 해제의 검사 순서와 lease 역할 분리·지연 해제, 한 프로세스의 여러 Engine(엔진 묶음·참조 수, 앞 단계 차례 실행), 타입 등록 시점과 실패 처리, 설정 등록 시점(바이너리 준비 + `RegisterSettings`), Modular 실행 파일의 부트 모듈 import와 호스트 모듈, `ModuleBuildId` 재사용과 파일 크기 대조, `Find<T>(name)`과 서비스 형식 키, Launch 단계 위치, 모듈 자신의 타입만 등록하는 생성 함수, 부트 모듈 정의, 해제 report, `Failed` 재시도, 종료 중 이벤트 없음, lease 원자 수, Linux `-soname`, Modular 시험 등록, 인용 정정(UE 진입점 주 경로·같은 단계 재호출) |

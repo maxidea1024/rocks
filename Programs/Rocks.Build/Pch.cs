@@ -37,7 +37,7 @@ public static class ModuleDefinitions
 
     /// <summary>
     /// 모듈 하나의 번역 단위가 받는 정의다: 모듈 public·private 정의, 의존 모듈(의존 순서)의 public 정의, 자기 모듈과 보이는 서드파티가
-    /// 아닌 모듈의 API 매크로(<see cref="LinkTypes.ApiDefine"/> — Docs/Design/BuildTargets.ko.md 3.8절 BD27), 진입점 모듈이면
+    /// 아닌 모듈의 API 매크로(<see cref="LinkTypes.ApiDefine"/> — Docs/Design/BuildTargets 3.8절 BD27), 진입점 모듈이면
     /// <c>ROCKS_MODULE_NAME=&lt;이름&gt;</c>·<c>ROCKS_MODULE_TYPES=0|1</c>·<c>ROCKS_MODULE_SHARED_LIBRARY=0|1</c>. 같은 이름에 다른 값이 있으면 <see cref="ArgumentException"/>이다.
     /// </summary>
     public static string[] Of(NativeModuleInput module, IEnumerable<NativeModuleInput> dependencies, bool entryModule,
@@ -168,7 +168,7 @@ internal static class PchBuild
         // 공유 정의는 제공 모듈의 public define과 그 전파분만 담는다. 소비 모듈의 추가 정의 헤더는 공유 정의에 없는 정의만 담고 PCH 뒤에
         // 강제 include한다. 같은 이름에 다른 값이 있으면 이 모듈은 공유 PCH를 쓰지 않는다(알림을 남기고 PCH 없이 진행한다).
         // 제공 모듈 공개 환경의 API 매크로는 소비자 관점(import, Monolithic이면 빈 값)으로 담는다 — PCH 헤더가 그 매크로를 쓴다. Modular에서
-        // 그 모듈 자신은 export라 값이 달라 아래 검사로 공유 PCH를 쓰지 않는다(Docs/Design/BuildTargets.ko.md 3.8절 BS8a).
+        // 그 모듈 자신은 export라 값이 달라 아래 검사로 공유 PCH를 쓰지 않는다(Docs/Design/BuildTargets 3.8절 BS8a).
         string[] shared = providerClosure.SelectMany(member => member.PublicDefines)
             .Concat(providerClosure.Where(member => !member.ThirdParty)
                 .Select(member => LinkTypes.ApiDefine(member, false, request.LinkType, request.Toolchain.Platform)))

@@ -14,7 +14,7 @@ internal sealed record EngineLayout(DescriptorModuleSet PluginSet, MetadataPlan 
 internal static class EnginePlanning
 {
     /// <summary>
-    /// 타깃이 켠 엔진 플러그인을 적용하고(Docs/Design/BuildTargets.ko.md 3.9절) 모듈 소유 메타데이터를 배치한다. createDirectories가
+    /// 타깃이 켠 엔진 플러그인을 적용하고(Docs/Design/BuildTargets 3.9절) 모듈 소유 메타데이터를 배치한다. createDirectories가
     /// false면 생성 include 디렉터리를 만들지 않는다(IDE 계획).
     /// </summary>
     public static EngineLayout Layout(LoadedRules rules, BuildContext context, string root, NativeToolchain toolchain,

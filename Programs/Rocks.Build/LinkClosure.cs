@@ -70,7 +70,7 @@ public static class LinkClosure
         }
 
         direct = order.Count;
-        // 실행 파일에 링크하는 켠 플러그인 모듈(Docs/Design/BuildTargets.ko.md 3.9절 BD36)은 링크 폐포 뒤, 동적 모듈 앞이다. 링크하므로
+        // 실행 파일에 링크하는 켠 플러그인 모듈(Docs/Design/BuildTargets 3.9절 BD36)은 링크 폐포 뒤, 동적 모듈 앞이다. 링크하므로
         // 요청 시 적재 행이 아니다.
         foreach (string plugin in rootModule.PluginModules)
         {

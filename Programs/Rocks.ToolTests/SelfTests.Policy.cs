@@ -992,7 +992,7 @@ internal static partial class SelfTests
                 temporary.Write(lookalike, "#pragma once\n");
             }
         });
-        // 공개 헤더 정적 저장소(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c): 엔진 소유 모듈의 Public/ 헤더(엔진 플러그인 모듈 포함)에는
+        // 공개 헤더 정적 저장소(Docs/Design/BuildTargets 3.8절 BD29·BS8c): 엔진 소유 모듈의 Public/ 헤더(엔진 플러그인 모듈 포함)에는
         // thread_local을 두지 않는다 — 정의뿐 아니라 extern 선언·static 데이터 멤버 선언도 거부한다.
         suite.Add("Policy.PublicHeaderRejectsThreadLocal", () =>
         {
@@ -1024,7 +1024,7 @@ internal static partial class SelfTests
             ];
             Verify.That(Check().SetEquals(expected), "thread_local in public headers: " + string.Join(", ", Check()));
         });
-        // 공개 헤더 타입 표지(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8e): 변수 템플릿의 주소를 타입 키로 쓰지 않는다(Core/TypeKey.h만 예외).
+        // 공개 헤더 타입 표지(Docs/Design/BuildTargets 3.8절 BD29·BS8e): 변수 템플릿의 주소를 타입 키로 쓰지 않는다(Core/TypeKey.h만 예외).
         suite.Add("Policy.PublicHeaderRejectsVariableTemplateTypeTags", () =>
         {
             using TemporaryDirectory temporary = new();
@@ -1059,7 +1059,7 @@ internal static partial class SelfTests
             ];
             Verify.That(Check().SetEquals(expected), "variable template type tags in public headers: " + string.Join(", ", Check()));
         });
-        // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2): 자기 모듈의 매크로만, 공개 헤더에만(허용한 내부 헤더 예외), 소스에는
+        // 모듈 API 매크로(Docs/Design/BuildTargets 3.8절 BD27·BS8d2): 자기 모듈의 매크로만, 공개 헤더에만(허용한 내부 헤더 예외), 소스에는
         // 쓰지 않는다.
         suite.Add("Policy.ModuleApiMacrosBelongToTheirModule", () =>
         {

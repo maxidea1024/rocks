@@ -13,7 +13,7 @@ namespace shader_nugget_tests_file {
 using namespace rocks::shader;
 using namespace rocks::shader_source_test;
 
-// 셰이더 Record 값 표·너겟 위치(Docs/Design/ShaderSystem.ko.md 10절)와 컴파일 옵션 파서(11.1절 SC9)
+// 셰이더 Record 값 표·너겟 위치(Docs/Design/ShaderSystem 10절)와 컴파일 옵션 파서(11.1절 SC9)
 // 시험이다. 너겟 시험은 임시 root에 fixture Config/AssetNuggets.json을 둔다(실제
 // Engine/Intermediate를 쓰지 않는다).
 namespace {
