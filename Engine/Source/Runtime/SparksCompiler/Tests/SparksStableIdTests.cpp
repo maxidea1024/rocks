@@ -203,7 +203,7 @@ class Door : ScriptableComponent {
         CHECK(diagnostic.Message() ==
               StringView("field 'Game/Doors/Door.Door.Open' is in the ID manifest but is no longer "
                          "declared."));
-        const SourceLocation at =
+        const sparks::SourceLocation at =
             fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
         CHECK(at.line == 8);
         CHECK(at.column == 28);
@@ -299,7 +299,7 @@ bool HasPending(const Fixture& fixture, StringView line) noexcept {
 }
 
 // 진단 index의 원문 위치(줄·열)다.
-SourceLocation LocationOf(const Fixture& fixture, usize index) noexcept {
+sparks::SourceLocation LocationOf(const Fixture& fixture, usize index) noexcept {
     const Diagnostic& diagnostic = fixture.diagnostics[index];
     return fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
 }

@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 22(3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외). 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 24(3.31절 리뷰 반영 — 끝 무음 덧붙이기로 끝 frame 보장, 블록 처리, 할당 전 PCM 상한, 위치 변환 Result, 겹침 거부, 시험 보강). 개정 23: 3.31절 AU5 앞당김 C2 — 쿠킹 리샘플러, ThirdParty SampleRate 반입. 개정 22: 3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외. 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -1571,6 +1571,61 @@ Result<void> WriteAudioPlatformData(const EncodedAudio& encoded, const AudioPlat
 | 표 | 등록 중복 `AlreadyExists`, 범위 밖 `InvalidArgument`, 없는 codec `NotFound`, factory 실패 전달, 내장 등록 둘 |
 | 디코더 계약 | out 채널 수 불일치·용량 부족 `InvalidArgument`, `Open`·`BeginChunk` 전 호출, 청크 끝 뒤 0, startCodecFrame 범위 밖 |
 | 인코더 | 비유한 입력 `InvalidArgument`, 채널 0·9, 채널 마스크 bit 수 불일치 |
+
+### 3.31 AU5 앞당김 — 코덱 계층 C2: 쿠킹 리샘플러(개정 23, 24)
+
+Opus 플랫폼 데이터는 48 kHz만 쓰므로(3.11.2절) 다른 rate 원본은 쿠킹 때 바꾼다. 런타임 리샘플러(3.20절 선형)와 달리 band-limited 고품질 필터를 쓴다.
+
+#### 3.31.1 ThirdParty `SampleRate`(`Engine/Source/ThirdParty/SampleRate`)
+
+- UE와 같은 라이브러리다: UE `ResampleWaveData`(`Runtime/Engine/Private/AudioDerivedData.cpp:1597`)는 `Audio::Resample`(`Runtime/AudioPlatformConfiguration/Private/AudioResampler.cpp`)로 libsamplerate `SRC_SINC_BEST_QUALITY`를 부른다.
+- libsamplerate 0.2.2(BSD-2-Clause). GitHub 릴리스 tarball이고, 릴리스의 분리 서명(`.sig`)이 libsndfile 관리자 키(David Seifert, 주 키 31D9 5CAB 6D80 D262 244A 1750 A476 20E8 01E4 7E95)로 확인된다.
+- 반입: `samplerate.h`, `src/` 원본(`samplerate.c`·`src_linear.c`·`src_sinc.c`·`src_zoh.c`)과 헤더(`common.h`·계수 표 셋), `COPYING`. 시험·예제·Octave 도구는 들이지 않는다.
+- `config.h` 없이 define으로 빌드한다: 세 sinc 변환기 켬, `HAVE_STDINT_H`·`HAVE_STDBOOL_H`·`HAVE_LRINT`·`HAVE_LRINTF`, little endian, `CPU_CLIPS_*` = 0. `PACKAGE`·`VERSION` 문자열은 glue `SampleRateVersion.c`가 정의하고 `samplerate.c`를 컴파일한다(FLAC `FlacFormat.c`와 같은 방식).
+- 수정 없음. 경고 0(clang C17 `-Wall -Wextra -Wpedantic`, clang-cl `/W4`)이다. 계수 표 헤더(`high_qual_coeffs.h`·`mid_qual_coeffs.h`)의 MSVC `#pragma warning(push/disable: 4305/pop)`은 byte 그대로인 원본 지시문이라 `pragmaDirectives`에 기록한다(지시문을 지운 사본도 경고 0 — `Native.ThirdPartyDirectivesHideNoWarnings`).
+- 결정성: sinc 경로는 계수 표와 사칙연산·`lrint`만 쓰고 libm 초월 함수를 부르지 않는다. 그래서 같은 입력이면 OS와 상관없이 같은 아키텍처에서 같은 byte다(`-ffp-contract=off`, 최적화가 연산 순서를 바꾸지 않는다). 전제: 부동소수점 반올림 모드가 기본(가장 가까운 값)이고 FTZ·DAZ가 꺼져 있다. 쿠킹은 AudioRT(FTZ를 켜는 실행 함수, 3.22절) 밖의 도구 스레드에서 돈다.
+- `AudioTools`만 Private 의존으로 링크한다. 내부 할당은 malloc이다(도구 전용).
+
+#### 3.31.2 `ResampleForCooking`(`AudioTools/CookResampler.h`)
+
+```cpp
+inline constexpr uint32 CookResamplerVersion = 1;   // libsamplerate 0.2.2 SRC_SINC_BEST_QUALITY — 너겟 키에 넣는다
+Result<uint64> CookResampledFrames(uint64 frames, uint32 sourceRate, uint32 targetRate) noexcept;      // round-half-even(frames × target / source), 0이면 1
+Result<uint64> CookResampledPosition(uint64 position, uint32 sourceRate, uint32 targetRate) noexcept;  // round-half-even(position × target / source)
+Result<void> ResampleForCooking(const PlanarConstView& in, uint32 sourceRate, uint32 targetRate, Allocator& allocator, DecodedAudioPcm& out) noexcept;
+```
+
+사용 예:
+
+```cpp
+DecodedAudioPcm resampled(allocator);
+if (auto result = ResampleForCooking(source.View(), 44100, 48000, allocator, resampled); !result) { return result; }
+auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Result<uint64>
+```
+
+- 출력 frame 수 = `CookResampledFrames`(가까운 정수, 동률은 짝수 — loop·cue 위치 변환과 같은 규칙, 3.11.2절). 0이 되면 1이다.
+- 위치·길이 변환은 rate가 [8000, 192000] 밖이거나 값이 2^32를 넘으면 `InvalidArgument`다(× rate가 64비트 안에 든다). `PlanarConstView::frameCount`가 `uint32`이므로 리샘플 입력은 이 범위 안이다.
+- 끝 frame: libsamplerate는 `end_of_input` 뒤 대략 floor(N × 비율) 근처에서 멈추고 그 경계가 채널 수에 따라 다르다. 그래서 입력 뒤에 0을 ceil(source / target) + 1 frame 명시적으로 붙여 넣는다. 원본 끝 뒤를 무음으로 보는 것이고, 출력 수보다 많이 나온 frame은 자른다. 모자라면(libsamplerate 동작이 바뀐 것) `Unsupported`다. 뒤를 0으로 채우는 방식은 버렸다 — 끝 frame이 원본과 상관없이 0이 된다.
+- 블록 처리: 입력을 4096 frame씩 교차 float 블록으로 만들어 `src_process`에 넣고(`src_new`/`src_delete`는 RAII), 출력 블록(4096 × 24 + 16 frame)을 바로 planar 결과로 옮긴다. libsamplerate의 frame·표본 수 칸(`long`·`int`, Windows 32비트)이 채널 수·길이와 상관없이 넘치지 않고, 원본 전체 교차 사본을 만들지 않는다. 진행이 없으면(입력도 출력도 0) `Unsupported`다.
+- 필터 지연은 libsamplerate가 맞춘다(출력 frame 0 = 원본 시각 0).
+- 같은 rate면 필터를 거치지 않고 그대로 복사한다.
+- loop 경계: 리샘플은 원본 전체를 한 번에 하고 loop 구간을 따로 감싸지 않는다. loop 끝 근처 표본은 loop 시작이 아니라 뒤 원본(끝이면 무음)을 보고 필터된다. UE `ResampleWaveData`도 같다. 경계 맞춤이 필요해지면 쿠킹 처리기(AU5 나머지)가 정한다.
+- 거부와 오류: 채널 9 이상이거나 `in`이 `out`의 기존 버퍼와 겹치면 `InvalidArgument`이고 `out`은 그대로 둔다(비우면 입력이 사라진다). 그 밖에는 `out`을 먼저 비우고, rate [8000, 192000] 밖·채널 0·frame 0·비유한 표본은 `InvalidArgument`, 결과 PCM이 `MaxSoundClipPcmBytes`(2 GiB, 원본 디코드 상한)를 넘으면 할당 전에 `CapacityExceeded`, 할당 실패는 `OutOfMemory`, libsamplerate 오류는 `Unsupported`(할당 실패 `SRC_ERR_MALLOC_FAILED`만 `OutOfMemory`)다. 실패하면 `out`을 비운다.
+- 결과는 `DecodedAudioPcm`(채널 수·rate·frame 수·planar float, 3.30.2절)을 그대로 쓴다.
+- loop 길이가 0이 되면 1 frame으로 둔다(3.11.2절)는 쿠킹 처리기(AU5 나머지)가 맡는다.
+
+#### 3.31.3 시험
+
+| 대상 | 확인 |
+|---|---|
+| 길이 | 8000·22050·32000·44100·96000·192000 → 48000과 48000 → 44100: 출력 frame 수 = round-half-even, 동률 경계(짝수로), 같은 rate 복사(byte 같음), 1 frame 입력(크게 내릴 때도 1 frame, 0 아님) |
+| 정렬·품질 | 1 kHz·2 kHz sine(채널별): 해석적 sine과 비교해 가장자리(출력 기준 256 × ceil(target / source) frame)를 뺀 구간 SNR ≥ 90 dB, 위상 정렬(출력 frame 0 = 시각 0), 4096 frame 블록 여러 개 |
+| 대역 제한 | 96000 → 48000에 30 kHz sine: 출력 에너지가 입력의 −80 dB 아래(앨리어싱 없음) |
+| 끝 frame | DC 입력(1·2·441·4095·4096·4097·10000 frame, 8000·44100·192000 → 48000, 채널 1–8)의 결과 = 뒤에 무음 2048 frame을 붙인 입력 결과의 앞부분(허용 오차 10^−6), 끝 frame 0 아님 |
+| 채널 경로 | libsamplerate 채널 수별 경로(1·2·4·6·그 밖): 같은 신호 2–8채널 결과 = 1채널 결과(허용 오차 10^−6) |
+| 거부 | rate 범위 밖·채널 0·채널 9·frame 0·비유한 표본 `InvalidArgument`(실패 뒤 out 빔), 겹침 `InvalidArgument`(out 그대로), 8000 → 192000 8채널 2,800,000 frame `CapacityExceeded`(할당 전) |
+| 결정성 | 같은 입력 두 번 같은 byte, golden SHA(정수로 만든 입력) — x86-64 값을 단언하고 ARM64는 두 번 같은지만 본다(사칙연산뿐이라 같을 것으로 보지만 macOS에서 잰 뒤 넣는다) |
+| 위치 변환 | `CookResampledPosition`·`CookResampledFrames` 경계값(0, 2^32, 동률)과 거부(rate 범위 밖, 2^32 초과) |
 
 ## 4. 결정 요약
 

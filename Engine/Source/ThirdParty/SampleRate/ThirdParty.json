@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "name": "SampleRate",
+  "version": "0.2.2",
+  "upstreamDirectory": "libsamplerate-0.2.2",
+  "globalState": false,
+  "source": {
+    "url": "https://github.com/libsndfile/libsamplerate/releases/download/0.2.2/libsamplerate-0.2.2.tar.xz",
+    "sha256": "3258da280511d24b49d6b08615bbe824d0cacc9842b0e4caf11c52cf2b043893",
+    "verification": "GitHub release tarball of the libsndfile project, downloaded on 2026-11-23. Its detached signature (libsamplerate-0.2.2.tar.xz.sig) verifies with the libsndfile maintainer key of David Seifert (signing subkey B8D5 315D A000 72C0 A860 889F CE36 E117 202E 3842, primary key 31D9 5CAB 6D80 D262 244A 1750 A476 20E8 01E4 7E95). Imported files are samplerate.h, the converter sources and coefficient tables in src/, and COPYING; tests, examples, Octave tools and build files are not imported."
+  },
+  "licenses": [
+    {
+      "spdx": "BSD-2-Clause",
+      "upstreamExpression": "COPYING (2-clause BSD)",
+      "file": "libsamplerate-0.2.2/COPYING",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "libsamplerate-0.2.2/src/src_linear.c",
+    "libsamplerate-0.2.2/src/src_sinc.c",
+    "libsamplerate-0.2.2/src/src_zoh.c",
+    "SampleRateVersion.c"
+  ],
+  "includeDirectories": [
+    "libsamplerate-0.2.2/include"
+  ],
+  "defines": [
+    "ENABLE_SINC_BEST_CONVERTER",
+    "ENABLE_SINC_MEDIUM_CONVERTER",
+    "ENABLE_SINC_FAST_CONVERTER",
+    "HAVE_STDINT_H=1",
+    "HAVE_STDBOOL_H=1",
+    "HAVE_LRINT=1",
+    "HAVE_LRINTF=1",
+    "CPU_IS_LITTLE_ENDIAN=1",
+    "CPU_IS_BIG_ENDIAN=0",
+    "CPU_CLIPS_POSITIVE=0",
+    "CPU_CLIPS_NEGATIVE=0"
+  ],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "libsamplerate-0.2.2/include/samplerate.h"
+  ],
+  "files": {
+    "COPYING": "2c1f76ce2effdddb425018405d5690c0b1ab4e6976e35296b0a6db65c5e1a55d",
+    "include/samplerate.h": "dfe5f4107782bcf6e9b8421a9e7c4772e19446a4c18727c73b22286d3fbb6626",
+    "src/common.h": "0826d52807152f5577ecb519c3df46f4453a9b7e55ad9b2880ff82a95977c3ca",
+    "src/fastest_coeffs.h": "60b342165e7be7c58efd9002163c07b65ece52994ee839dbe06908991ef1fb1b",
+    "src/high_qual_coeffs.h": "35d4bc6ed93cbd5a89510d7d7efda00116b5c28a25369c07288bc7d25a937df6",
+    "src/mid_qual_coeffs.h": "22b2b75ef0344f60787f19c3bfd594d47303c0fafe7e13d0e7517612b8963d7d",
+    "src/samplerate.c": "ecc11b6bec5bd8131a3dd510a7017a5b7b503573d9b49b7e02ee5c3c86568717",
+    "src/src_linear.c": "f04a3e79b7150f2f6e6ad2b05979d874e03bf567a682bbb6507c797d4ea8a972",
+    "src/src_sinc.c": "8e59137d758dae5027410af7f81010e7a9c33892070091866510f0f8b638237e",
+    "src/src_zoh.c": "c089678c9e6463896507a8d476fc4a33641c46fbe94aa8243acf725d4c203adb"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "src/fastest_coeffs.h",
+      "line": 19,
+      "text": "#pragma warning (push)"
+    },
+    {
+      "file": "src/fastest_coeffs.h",
+      "line": 20,
+      "text": "#pragma warning (disable: 4305)"
+    },
+    {
+      "file": "src/fastest_coeffs.h",
+      "line": 2497,
+      "text": "#pragma warning (pop)"
+    },
+    {
+      "file": "src/high_qual_coeffs.h",
+      "line": 19,
+      "text": "#pragma warning (push)"
+    },
+    {
+      "file": "src/high_qual_coeffs.h",
+      "line": 20,
+      "text": "#pragma warning (disable: 4305)"
+    },
+    {
+      "file": "src/high_qual_coeffs.h",
+      "line": 340272,
+      "text": "#pragma warning (pop)"
+    },
+    {
+      "file": "src/mid_qual_coeffs.h",
+      "line": 19,
+      "text": "#pragma warning (push)"
+    },
+    {
+      "file": "src/mid_qual_coeffs.h",
+      "line": 20,
+      "text": "#pragma warning (disable: 4305)"
+    },
+    {
+      "file": "src/mid_qual_coeffs.h",
+      "line": 22471,
+      "text": "#pragma warning (pop)"
+    }
+  ],
+  "notes": [
+    "Cook-time resampler for audio (Docs/Design/AudioSystem.ko.md section 3.31). UE uses the same library and converter (Runtime/AudioPlatformConfiguration/Private/AudioResampler.cpp, SRC_SINC_BEST_QUALITY). Developer only: AudioTools links it.",
+    "Built without config.h: the configure results are manifest defines. SampleRateVersion.c defines PACKAGE and VERSION (the version string literals) and compiles samplerate.c.",
+    "The sinc converter uses coefficient tables, arithmetic and lrint only (no transcendental libm calls), so results are fixed per architecture and compiler flags. Internal allocation uses malloc/calloc (tool only)."
+  ]
+}

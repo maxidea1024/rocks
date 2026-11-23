@@ -35,6 +35,7 @@ struct CommandArguments {
     DumpKind dump = DumpKind::None;
     StringView out; // build의 `--out`
     bool hasOut = false;
+    bool check = false; // fmt의 `--check`
 };
 
 // 명령 하나의 작업 공간과 그 컴파일이다.
@@ -58,8 +59,8 @@ struct CommandContext {
     Array<uint32> packages; // 작업 공간 패키지마다 compilation 패키지 번호
 };
 
-// 모듈 파일 번호(Workspace::Files 색인)를 진단 경로 byte 순으로 모은다. selectedOnly면 파일 인자로
-// 고른 모듈이 있을 때 그것만. 실패: 할당 실패.
+// 모듈 파일 번호(Workspace::Files 색인)를 진단 경로 byte 순으로 모은다. selectedOnly면 인자로 고른
+// 모듈(파일 인자 그 자신, 폴더 인자 아래)만. 실패: 할당 실패.
 Result<void> ModuleOrder(const Workspace& workspace, bool selectedOnly,
                          Array<usize>& order) noexcept;
 
@@ -75,5 +76,6 @@ int32 ReportProblem(CommandContext& context, StringView path, StringView message
 // 돌려준다.
 int32 RunBuild(CommandContext& context, StringBuilderBase& text) noexcept;
 int32 RunIds(CommandContext& context, StringBuilderBase& text) noexcept;
+int32 RunFmt(CommandContext& context, StringBuilderBase& text) noexcept;
 
 } // namespace rocks::sparks::tools::detail

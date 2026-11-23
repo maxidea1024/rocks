@@ -10,14 +10,9 @@ namespace detail {
 Result<void> ModuleOrder(const Workspace& workspace, bool selectedOnly,
                          Array<usize>& order) noexcept {
     const Span<const WorkspaceFile> files = workspace.Files();
-    bool selected = false;
-    for (const WorkspaceFile& file : files) {
-        selected = selected || (file.selected && selectedOnly);
-    }
-
     for (usize at = 0; at < files.Size(); ++at) {
         const WorkspaceFile& file = files[at];
-        if (file.kind == WorkspaceFileKind::Module && (!selected || file.selected)) {
+        if (file.kind == WorkspaceFileKind::Module && (!selectedOnly || file.selected)) {
             if (auto pushed = order.TryPushBack(at); !pushed) {
                 return pushed;
             }
@@ -66,11 +61,13 @@ commands:
   dump     print a dump of each module: --ast, --names, --types, --ir or --bytecode
   build    write each module's bytecode to --out <folder>/<package>/<module>.sparkc
   ids      issue the pending stable IDs into each package's .rocksids.json
+  fmt      rewrite each module in the official format (--check: only list the files that differ)
 options:
   --schema <folder>   engine binding schemas (*.sparkbind.json); may repeat
   --out <folder>      the output folder of 'build'
+  --check             'fmt' writes nothing and fails when a file is not formatted
 a path is a folder (every package below it, or the package it is in) or a .spark file (its package;
-dump prints that module only).
+dump and fmt use that module only).
 )";
 
 // 사용법 오류: 문장과 사용법을 오류 스트림에 쓴다.
@@ -92,7 +89,7 @@ bool Parse(Span<const StringView> input, CommandArguments& out, StringView& mess
     out.command = input[0];
     // 명령 이름을 먼저 본다(옵션 오류보다 앞 — `sparks frob --out o`는 알 수 없는 명령).
     if (out.command != "check" && out.command != "dump" && out.command != "build" &&
-        out.command != "ids") {
+        out.command != "ids" && out.command != "fmt") {
         message = "unknown command";
         return false;
     }
@@ -110,6 +107,17 @@ bool Parse(Span<const StringView> input, CommandArguments& out, StringView& mess
                 return false;
             }
 
+            continue;
+        }
+
+        if (argument == "--check") {
+            if (out.command != "fmt" || out.check) {
+                message = out.command != "fmt" ? "'--check' is only for 'fmt'"
+                                               : "'--check' is given twice";
+                return false;
+            }
+
+            out.check = true;
             continue;
         }
 
@@ -256,6 +264,17 @@ int32 RunCommand(Allocator& allocator, platform::FileSystem& files,
         }
 
         return ioFailure ? ExitError : ExitFailure;
+    }
+
+    // fmt는 컴파일하지 않는다(파일마다 구문만 — 8.3절).
+    if (parsed.command == "fmt") {
+        StringBuilder<OutputInlineBytes> text(allocator);
+        const int32 code = detail::RunFmt(context, text);
+        if (code == ExitError || text.HasFailed() || !output.WriteOutput(text.View())) {
+            return ExitError;
+        }
+
+        return code;
     }
 
     if (!context.workspace.AddTo(context.sources, context.compilation, context.diagnostics,

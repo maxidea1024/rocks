@@ -2,6 +2,8 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 6(2026-11-23): LC8c 구현·리뷰 반영(8.5절 — 주석 자리 규칙 보강, BOM 제거 확정, 인자 아래 모듈만 대상, 변형 corpus 시험).
+- 개정 5(2026-11-23): LC8c 설계(8절 — 서식 알고리즘·주석 수집·`fmt` 명령·시험). 3절 규칙을 구체화(이항 연산자 표에서 없는 `->` 삭제, 블록 안 enum case 줄, 이어지는 줄의 들여쓰기 단위).
 - 개정 4(2026-11-23): LC8b 구현·리뷰 반영(7.4절 — 컴파일러의 승계 판정 순서·은퇴/이미 이은 승계 진단, manifest의 모르는 키 S1006, 도구의 이름 겹침 검사·확인 실패 진단 출력, 결과 줄 정렬, 잠금 공유 모드 한계).
 - 개정 3(2026-11-23): LC8b 설계(7절 — build 쓰기 규칙, ids의 manifest 편집·검증·잠금, C# 직렬화와 byte 동일). T7·T8 개정.
 - 개정 2(2026-11-23): LC8a 구현(6절).
@@ -13,7 +15,7 @@
 |---|---|---|
 | LC8a 표준 입출력·작업 공간·check | PlatformBase 표준 스트림 API(SE-B7), `SparksTools`(Developer) 작업 공간 적재(패키지 폴더 찾기·schema 폴더·원문 읽기)와 명령 실행 라이브러리, 프로그램 `sparks`의 `check`·`dump` | 명령 시험(종료 코드·출력 golden), 작업 공간 적재의 할당 실패 전수, corpus 사례를 CLI로 돌린 진단이 conformance와 같음 — 완료(개정 2, 6절) |
 | LC8b build·ids | `build`(모듈마다 `.sparkc` — 출력 폴더), `ids`(발급 대기 안정 ID를 `.rocksids.json`에 GUID로 발급) | 출력 byte golden, manifest 왕복 시험 — 완료(개정 4, 7절) |
-| LC8c formatter·fmt | lexer의 주석 보존 모드, 공식 서식 규칙(3절)의 token 기반 formatter(SparksCompiler), `fmt`·`fmt --check` | corpus 전체에서 멱등(fmt(fmt(x)) = fmt(x))·token 열 보존, 서식 golden |
+| LC8c formatter·fmt | lexer의 주석 보존 모드, 공식 서식 규칙(3절)의 token 기반 formatter(SparksCompiler), `fmt`·`fmt --check` | corpus 전체에서 멱등(fmt(fmt(x)) = fmt(x))·token 열 보존, 서식 golden — 완료(개정 6, 8절) |
 | LC8d @test·test | `@test fn` 실행기(headless 가짜 host — 엔진 함수는 "엔진 필요" 실패), 결과를 진단 형식으로 | 실행기 시험(통과·Assert 실패·fault·엔진 필요) |
 | LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) |
 | LC8f 언어 서버 편집 | 자동완성(멤버·hook·attribute·리터럴·경로·Unity 이름 제시), hover, 정의 이동, 빠른 수정(SL §13 목록), 문서 서식 | 자동완성 후보 golden, prefix fuzz, 빠른 수정 golden |
@@ -38,12 +40,12 @@
 
 ## 3. 공식 서식(LC8c)
 
-- 들여쓰기 4 공백, 탭 없음. 줄 끝 공백 없음, 파일 끝 LF 하나. 줄 끝은 LF(CRLF는 LF로).
+- 들여쓰기 4 공백, 탭 없음. 줄 끝 공백 없음(주석·문서 주석 포함 — 문자열 값 안은 그대로), 파일 끝 LF 하나. 줄 끝은 LF(CRLF는 LF로). UTF-8 BOM은 지운다(정규형은 BOM 없는 UTF-8 — 편집기가 BOM으로 저장한 파일은 `fmt --check`가 다르다고 알린다).
 - 중괄호는 여는 줄 끝(`class X : Base {`, `fn F() {`, `if (c) {`), 닫는 중괄호는 자기 줄. `} else {` 한 줄. 빈 블록은 `{ }`가 아니라 `{\n}`(SL 예제와 같게).
 - 문장마다 한 줄. 선언·멤버 사이 빈 줄은 원문을 따르되 연속 빈 줄은 하나로, 블록 처음·끝의 빈 줄은 없앤다. 최상위 선언 사이는 빈 줄 하나(없으면 넣는다).
-- 이항 연산자·`=`·`:`(타입 표기 앞은 붙이고 뒤는 한 칸)·`->`·`??` 앞뒤 한 칸, `,` 뒤 한 칸, 괄호·대괄호 안쪽 공백 없음, 단항 연산자 붙임, `?.`·`.`·`?` 붙임, 키워드(`if`·`for`·`while`·`return` …) 뒤 한 칸.
+- 이항 연산자·`=`·`:`(타입 표기 앞은 붙이고 뒤는 한 칸)·`??` 앞뒤 한 칸, `,` 뒤 한 칸, 괄호·대괄호 안쪽 공백 없음, 단항 연산자 붙임, `?.`·`.`·`?` 붙임, 키워드(`if`·`for`·`while`·`return` …) 뒤 한 칸.
 - 주석: `//` 줄 주석은 앞 token과 한 칸(같은 줄) 또는 자기 줄(들여쓰기 맞춤), `/* */`는 위치 그대로 앞뒤 한 칸. 문서 주석 `///`는 선언 바로 위.
-- 줄 길이 제한·자동 줄바꿈은 하지 않는다(원문 줄바꿈을 존중 — 식 안의 줄바꿈은 들여쓰기만 다시 맞춘다: 이어지는 줄은 문장 들여쓰기 + 4). 자동 줄바꿈은 측정·사용자 의견 뒤(결정 T9 대안).
+- 줄 길이 제한·자동 줄바꿈은 하지 않는다(원문 줄바꿈을 존중 — 식 안의 줄바꿈은 들여쓰기만 다시 맞춘다: 이어지는 줄은 문장 들여쓰기 + 4, 괄호 안에서 줄을 바꾸면 그 괄호를 연 줄마다 + 4 — 8.2절). 자동 줄바꿈은 측정·사용자 의견 뒤(결정 T9 대안).
 
 ## 4. 결정
 
@@ -107,3 +109,42 @@
 - **build 오류 문장:** `--out`을 경로로 쓸 수 없음(`cannot use the output folder`), 모듈이 `.sparkc` 표 상한을 넘음, 교체 뒤 폴더 기록 실패(NotDurable — `the file was replaced, but the folder could not be flushed to the storage`, 새 내용은 이미 보인다)를 한 줄로 알린다(3). 할당 실패만 문장 없이 3이다.
 - **한계 — 잠금 공유 모드:** PlatformBase `File`은 Windows에서 언제나 읽기·쓰기·삭제 공유로 연다. 그래서 C#(`FileShare.None`)과 달리 `sparks ids`가 잡은 잠금은 다른 프로세스가 지울 수 있다. 사람이 쓰는 중인 잠금을 지우고 두 번째 실행이 잠금을 잡으면 첫 실행이 끝에서 그 잠금을 지울 수 있다(같은 원본에서 시작한 두 쓰기 중 하나의 발급을 잃는다 — 손상은 없다, 잠금 아래 비교가 원본 변경을 잡는다). POSIX에는 공유 모드가 없어 C#도 같은 한계다. 배타 열기 모드는 PlatformBase에 요구가 생기면 더한다.
 - **시험(7.3절 + 리뷰):** `SparksTools_BuildWritesModules`(NotDurable 포함), `SparksTools_IdsIssuesAndRenames`, `SparksTools_IdsSeveralPackages`(기존·새 manifest 섞임, `Game`·`GameX`, 인자 순서와 무관한 결과 순서), `SparksTools_IdsLockAndConcurrentChange`, `SparksTools_BuildIdsAllocationFailure`, `SparksTools_UsageErrors`(build 인자 4가지·알 수 없는 명령 우선), `SparksStableIds_CarriedMemberRetiredOrClaimed`(두 선언 순서), `SparksStableIds_InvalidManifestsS1006`(모르는 키·같은 키), C# `StableIds.SerializationMatchesSparksIds`. 수동 확인(2026-11-23 Windows): `SparksCli`의 `ids`(발급·재실행 `no pending IDs`), `build`(재실행 `wrote 0 of 2`), `--out` 없음(2).
+
+## 8. LC8c 설계(개정 5)
+
+### 8.1 API와 입력
+
+- `SparksCompiler/Formatter.h` — `Result<bool> FormatSource(const SourceSet&, SourceId, DiagnosticList&, StringBuilderBase& out)`: 원문 하나의 공식 서식을 out에 붙인다. 값 false는 어휘·구문 진단(S01xx·S02xx — `ParseFile`이 내는 것)이 있어 서식하지 않음이다(진단은 diagnostics에, out은 그대로). 의미 진단(이름·타입 등)은 보지 않는다(서식은 파일 하나의 구문만 쓴다).
+- **주석 수집:** lexer에 주석 범위 수집(`TokenizeWithComments` — 공개, 언어 서버도 쓴다)을 더한다. 일반 줄 주석(`//`, 문서 주석 `///`는 이미 토큰)과 닫힌 블록 주석의 범위를 원문 순서로 돌려준다. 컴파일 경로(`Tokenize`)는 그대로다(주석 배열을 만들지 않는다).
+- **구문 정보:** 토큰은 `ParseFile`의 트리 토큰을 쓴다. 트리에서 가린다: 타입 인자의 `<`·`>`(`Type`·`Identifier`·`Member` 노드의 타입 인자 목록 — 여는 `<`는 이름 토큰 다음, 닫는 `>`는 깊이를 세어 찾는다. 타입 인자를 닫는 `>=`는 트리 토큰에서 `=`로 바뀌어 있으므로 그 앞 한 글자 `>`를 닫는 토큰으로 되살린다), 단항 `!`·`-`(`Unary` 노드), attribute의 끝 토큰(`Attribute` 노드 범위의 끝), enum 본문의 `{`(`Enum` 노드).
+- **문자열:** 문자열 리터럴(`"`부터 닫는 `"`까지, 보간 포함)과 verbatim 문자열은 원문 그대로 하나의 단위다(보간 안은 서식하지 않는다 — 값 보존이 확실하다. 보간 서식은 요구 시).
+
+### 8.2 알고리즘(token 열 위 한 번 걷기)
+
+단위(토큰·문자열·주석)를 원문 순서로 걸으며 단위 사이에 줄바꿈 여부·빈 줄·공백만 정한다(token 글자는 그대로 — 줄 끝 CRLF는 LF, 주석의 줄 끝 공백은 지운다).
+
+- **줄바꿈:** 앞이 줄 주석이면 반드시. 주석이 원문에서 앞 단위와 같은 줄이면 그 줄에 둔다(뒤 주석). `{`·`,`·`;`·(`}` 뒤의) `else` 앞은 줄을 바꾸지 않는다(앞 줄에 붙인다). `;`·`{`·`}` 뒤, `}` 앞, 문서 주석 앞뒤는 반드시. 그 밖은 원문에 줄바꿈이 있을 때만.
+- **빈 줄:** 원문의 빈 줄은 하나로 줄이고, `{` 바로 뒤와 `}` 바로 앞은 없앤다. 최상위에서 선언(`;`·`}`로 끝난 것) 뒤에 다음 최상위 항목이 오면 빈 줄 하나를 넣는다(둘 다 `import`면 원문을 따른다 — 그 앞의 주석·문서 주석·attribute도 항목에 든다). 파일 처음의 빈 줄은 없애고 끝은 LF 하나.
+- **들여쓰기:** 열린 `{` 수 × 4 + 단계 × 4. 단계는 그 줄 앞에서 열려 아직 닫히지 않은 `(`·`[`를 연 줄의 수(같은 줄에서 연 여러 괄호는 하나), 그리고 문장이 괄호 밖에서 줄을 바꿔 이어지면 1을 더한다(경계 — `;`·`{`·`}`·문서 주석·attribute 끝·enum 본문의 `,` — 뒤의 줄은 이어지는 줄이 아니다). 닫는 `}`·`)`·`]`로 시작하는 줄은 그 줄에서 닫는 것을 빼고 센다. 자기 줄의 주석은 그 자리 다음 줄과 같은 들여쓰기다(닫는 괄호 조정 없음).
+- **공백(같은 줄):** 없음 — `,`·`;`·`)`·`]`·`.`·`?.`·`..<`·`:`·후위 `?`·타입 인자 `<`·`>` 앞, `(`·`[`·`.`·`?.`·`..<`·`@`·단항 연산자·타입 인자 `<` 뒤, 이름·`)`·`]`·`this`·문자열·타입 인자 `>` 뒤의 `(`(호출), 이름·`)`·`]`·`this`·문자열 뒤의 `[`(색인). 그 밖은 한 칸(키워드 뒤 `(`, 이항 연산자 앞뒤, `,`·`:`·`;` 뒤, `{` 앞, 주석 앞뒤).
+- **멱등:** 출력은 위 규칙의 고정점이다(다시 서식하면 같다 — 줄바꿈은 원문에 있던 것과 강제한 것만, 빈 줄은 0·1, 공백은 규칙만으로 정해진다).
+
+### 8.3 fmt 명령
+
+- `sparks fmt [--check] <경로>...` — 작업 공간(T3)의 모듈 원문 중 인자 아래 모듈(폴더 인자는 그 폴더 아래 — 패키지 안 하위 폴더면 그 아래만, 파일 인자는 그 파일, 섞어도 합집합)을 서식한다. `dump`도 같은 대상 규칙이다. 컴파일하지 않는다(패키지 manifest·schema 진단은 보지 않는다).
+- `fmt`: 서식이 다른 파일을 원자적으로 바꾼다(LC8b `ReplaceFile`). 출력 `formatted K of M files`. `--check`: 쓰지 않고 다른 파일마다 `<경로>: not formatted`, 출력 `K of M files need formatting`.
+- 어휘·구문 진단이 있는 파일은 진단을 쓰고 건드리지 않는다. 종료: 0(모두 서식됨·바꿈), 1(진단 있음, `--check`에서 다른 파일 있음), 2(사용법), 3(입출력·할당). `--check`는 `fmt`에만.
+
+### 8.4 시험(LC8c)
+
+- 서식 golden: `SparksCompiler/Tests/Formatting/<이름>.spark`(입력) → `<이름>.fmt`(기대 출력) — 규칙마다 사례(공백·연산자·타입 인자·`>=` 분리·단항·괄호 줄바꿈·이어지는 줄·블록·`} else`·빈 줄·최상위 빈 줄·주석 자리·문서 주석·attribute·enum·switch·문자열·verbatim·CRLF·탭).
+- corpus 전체: conformance의 모든 `.spark`(폴더 사례·revision 포함) 중 어휘·구문 진단 없는 것마다 멱등(fmt(fmt(x)) = fmt(x)), token 열 보존(토큰 글자 열이 같다 — `>=` 분리는 `>`·`=`로 맞춰 비교), 주석 글자 열 보존, 서식 결과도 진단 없음.
+- 구문 오류 파일은 false·out 그대로. 할당 실패 전수(FormatSource, fmt 명령).
+- `fmt` 명령 시험: 바꿈·같으면 쓰지 않음·`--check`(1)·구문 오류 파일(1, 그대로)·파일 인자.
+
+### 8.5 구현과 리뷰 반영(개정 6)
+
+- **파일:** `SparksCompiler` — `Public/Formatter.h`·`Private/Formatter.cpp`, `Lexer.h`의 `TokenizeWithComments`(공개 — 언어 서버도 쓴다). `SparksTools` — `Private/FmtCommand.cpp`, `Command.cpp`(`--check` — `fmt`에만, 한 번만), 작업 공간의 인자 선택(`WorkspaceFile::selected` — 폴더 인자 아래·파일 인자).
+- **주석 자리 규칙(리뷰 반영):** 줄 처음 블록 주석 뒤라도 `}`는 자기 줄로 간다. `}`와 `else` 사이에 블록 주석이 있어도 `} /* c */ else {` 한 줄이다(줄 주석이 있으면 줄을 바꾼다 — 바꿀 수 없다). `{` 뒤 첫 줄바꿈까지(같은 줄 뒤 주석이 있어도)와 문서 주석 뒤에는 빈 줄을 두지 않는다. 자기 줄에 오는 `{`(앞이 줄 주석)는 이어지는 줄 들여쓰기를 받지 않는다. 문서 주석도 줄 끝 공백을 지운다.
+- **한계:** `;`·`,` 앞의 줄 주석(`y() // c` 다음 줄 `;`)은 줄을 바꿀 수밖에 없어 `;`가 이어지는 줄로 들여쓰인다(멱등). 줄 처음 블록 주석 뒤의 `)`·`]`는 그 줄에 남는다. 보간 `${ }` 안은 서식하지 않는다. `fmt` 쓰기 실패는 그 자리에서 3으로 끝난다(앞에서 바꾼 파일은 남는다 — build와 같다).
+- **시험:** `SparksFormatter_Golden`(`Formatting/` 5사례 — Spacing·Blocks·Continuation·Comments·Edges), `SparksFormatter_CrlfTabsAndBlankEdges`(CRLF·탭·빈 파일·주석만·BOM), `SparksFormatter_SyntaxErrorsAreNotFormatted`, `SparksFormatter_CorpusIdempotentAndTokenPreserving`(conformance 전체), `SparksFormatter_CorpusVariantsIdempotentAndTokenPreserving`(corpus 원문마다 토큰 경계에 블록 주석·줄 주석을 끼우거나 모든 경계를 줄바꿈으로 바꾼 결정적 변형 셋 — 멱등·token 열·주석 열), `SparksFormatter_AllocationFailureEverywhere`(실패를 견딘 시도의 출력이 기준과 같음), `SparksTools_FmtRewritesAndChecks`·`SparksTools_FmtSelectsArgumentModules`·`SparksTools_FmtAllocationFailure`. 수동 확인(2026-11-23 Windows): `SparksCli fmt --check`(1)·`fmt`(0)·재검사(0).

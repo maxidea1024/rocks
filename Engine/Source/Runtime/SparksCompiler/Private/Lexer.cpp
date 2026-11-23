@@ -129,9 +129,9 @@ TokenKind KeywordKind(StringView text) noexcept {
 class Lexer final {
 public:
     Lexer(const SourceFile& file, SourceId id, DiagnosticList& diagnostics, Array<Token>& tokens,
-          Allocator& allocator) noexcept
+          Allocator& allocator, Array<SourceSpan>* comments = nullptr) noexcept
         : file_(file), text_(file.Text()), id_(id), diagnostics_(diagnostics), tokens_(tokens),
-          allocator_(allocator), modes_(allocator) {
+          allocator_(allocator), modes_(allocator), comments_(comments) {
         for (uint32& line : reportedLine_) {
             line = 0;
         }
@@ -304,7 +304,7 @@ private:
         const bool documentation = end - begin >= 3 && text_.Data()[begin + 2] == '/' &&
                                    (end - begin == 3 || text_.Data()[begin + 3] != '/');
         if (!documentation) {
-            return Result<void>::Success();
+            return Comment(begin, end);
         }
 
         usize documentEnd = end;
@@ -315,13 +315,27 @@ private:
         return Emit(TokenKind::DocComment, begin, documentEnd);
     }
 
+    // 주석 범위를 모은다(formatter — comments_가 있을 때만). 줄 주석 끝의 CR은 뺀다.
+    Result<void> Comment(usize begin, usize end) noexcept {
+        if (comments_ == nullptr) {
+            return Result<void>::Success();
+        }
+
+        if (end > begin && text_.Data()[end - 1] == '\r') {
+            --end;
+        }
+
+        return comments_->TryPushBack(
+            SourceSpan{static_cast<uint32>(begin), static_cast<uint32>(end)});
+    }
+
     Result<void> LexBlockComment() noexcept {
         const usize begin = offset_;
         usize cursor = begin + 2;
         while (cursor + 1 < text_.ByteCount()) {
             if (text_.Data()[cursor] == '*' && text_.Data()[cursor + 1] == '/') {
                 offset_ = cursor + 2;
-                return Result<void>::Success();
+                return Comment(begin, offset_);
             }
 
             ++cursor;
@@ -944,6 +958,7 @@ private:
     Array<Token>& tokens_;
     Allocator& allocator_;
     Array<Mode> modes_;
+    Array<SourceSpan>* comments_; // 주석 범위 수집(formatter) — 없으면 nullptr
     uint32 reportedLine_[LexicalCodeCount];
     usize offset_ = 0;
     bool finished_ = false;
@@ -1079,6 +1094,18 @@ Result<void> Tokenize(const SourceSet& sources, SourceId id, DiagnosticList& dia
     }
 
     Lexer lexer(file, id, diagnostics, tokens, tokens.GetAllocator());
+    return lexer.Run();
+}
+
+Result<void> TokenizeWithComments(const SourceSet& sources, SourceId id,
+                                  DiagnosticList& diagnostics, Array<Token>& tokens,
+                                  Array<SourceSpan>& comments) noexcept {
+    const SourceFile& file = sources.Get(id);
+    if (!file.IsUsable()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Lexer lexer(file, id, diagnostics, tokens, tokens.GetAllocator(), &comments);
     return lexer.Run();
 }
 
