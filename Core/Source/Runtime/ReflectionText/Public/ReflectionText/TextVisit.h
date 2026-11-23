@@ -58,8 +58,8 @@ public:
 // 대상의 소유 스레드에서 부른다.
 //
 // 오류: options.names가 대상 Registry의 pool과 다르면 InvalidArgument, 순회할 수 없는
-// 필드(접근기 없는 Opaque — options.skipFieldsWithoutText면 건너뛴다) Unsupported, 경로 연산의 오류, visitor가 돌려준 오류, 할당 실패.
-// 실패하면 visitor는 그 지점까지 받은 이벤트를 받은 상태다.
+// 필드(접근기 없는 Opaque — options.skipFieldsWithoutText면 건너뛴다) Unsupported, 경로 연산의
+// 오류, visitor가 돌려준 오류, 할당 실패. 실패하면 visitor는 그 지점까지 받은 이벤트를 받은 상태다.
 //
 // 사용 예(설정 struct 값의 키 기록):
 //   KeyVisitor visitor(writer);
