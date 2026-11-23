@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 2026-11-23 갱신: 3절 `Gameplay` 행 상태, 7.3절 Component 보강 예정 항목, 8절 Tick 단계의 UE 대응 결정(물리 결과 반영·skeletal mesh 물리 마무리 엔진 단계, [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR1·CR2·CR8a·CR26·CD11). 2026-11-22 갱신: 6절 종료 게이트([오디오 시스템](AudioSystem.ko.md) AD23). 2026-11-20 갱신: 4.6절 Level `levelScript` 필드·레벨 편입 순서·레벨 저장 검증, 7.2절 Level 파괴 순서와 LevelScript 파괴 규칙([레벨 스크립트](LevelScript.ko.md) LD4–LD8·LD16·LD17). 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정, GC 일정(STW 병렬 전체 수집 요청·주기, 회수 예산, 엔진 소유 GC scheduler — GC 설계 17절). 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-23 갱신: 2절 명칭에 PlayerState([컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) CR48), 3절 `Gameplay` 행 상태, 7.3절 Component 보강 예정 항목, 8절 Tick 단계의 UE 대응 결정(물리 결과 반영·skeletal mesh 물리 마무리 엔진 단계, [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR1·CR2·CR8a·CR26·CD11). 2026-11-22 갱신: 6절 종료 게이트([오디오 시스템](AudioSystem.ko.md) AD23). 2026-11-20 갱신: 4.6절 Level `levelScript` 필드·레벨 편입 순서·레벨 저장 검증, 7.2절 Level 파괴 순서와 LevelScript 파괴 규칙([레벨 스크립트](LevelScript.ko.md) LD4–LD8·LD16·LD17). 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정, GC 일정(STW 병렬 전체 수집 요청·주기, 회수 예산, 엔진 소유 GC scheduler — GC 설계 17절). 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -13,13 +13,13 @@
 | S4 | `PlatformWindow`(Win32 창·이벤트·키보드·마우스·XInput 게임패드)와 `Input`(프레임 입력 상태) | 창 닫기로 `RequestExit` 정상 종료, 헤드리스 입력 주입 테스트, Sandbox에서 마우스·키보드 반응 확인 |
 | S5 | `Graphics` 계약과 `D3D12Graphics`·`OpenGLGraphics`, Vulkan·Metal 자리 | 삼각형 렌더, D3D12 offscreen readback 검사 |
 | S6 | `AssetRuntime`·`AssetTools`(BMP 임포트)·텍스처 그리기 | BMP → 에셋 파일 → GPU 텍스처 → 화면의 사각형 |
-| S7–S14 | Tick 의존성 완성, Subsystem 의존성, Actor 수명 완성, GameInstance, GameDirector·GameState, Controller·Pawn, 초기화 흐름, 진단·문서 | 붙임 계획 24절의 14단계 시나리오와 Director 없는 World 시나리오 |
+| S7–S14 | Tick 의존성 완성, Subsystem 의존성, Actor 수명 완성, GameInstance, GameDirector·GameState·PlayerState, Controller·Pawn, 초기화 흐름, 진단·문서 | 붙임 계획 24절의 14단계 시나리오와 Director 없는 World 시나리오 |
 
 S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현이 없으므로 빌드·실행 검증을 하지 않는다.
 
 ## 2. 명칭
 
-- 게임 규칙 조율 객체는 **GameDirector**, 진행 상태는 **GameState**, 제어 주체는 **Controller/PlayerController**, 제어 대상은 **Pawn**, 월드 배치 객체는 **Actor**다. 기존 계획 20.4·20.5절의 MatchRules·MatchState·PlayerAgent·ControlledEntity·Entity 명칭은 이 이름으로 대체한다.
+- 게임 규칙 조율 객체는 **GameDirector**, 진행 상태는 **GameState**, 플레이어별 상태는 **PlayerState**, 제어 주체는 **Controller/PlayerController**, 제어 대상은 **Pawn**, 월드 배치 객체는 **Actor**다. 기존 계획 20.4·20.5절의 MatchRules·MatchState·PlayerAgent·ControlledEntity·Entity 명칭은 이 이름으로 대체한다. PlayerState는 계획 20.5절과 같은 이름이다(UE `APlayerState` 대응 — possession·재접속을 넘어 유지되는 플레이어 상태, 모든 참여자에게 복제).
 - 그래픽 장치 추상화는 **Graphics**(`rocks::graphics`)다. 타입에 접두사를 붙이지 않는다(`graphics::Device`, `graphics::SwapChain`). 기존 계획의 "RHI" 표기는 Graphics로 바꾼다.
 - 수명 hook은 계획 20.2절(2026-11-12 결정)을 따른다: `OnAwake`(Initialize), `OnEnable`, `OnStart`(BeginPlay), `OnTick`·`OnFixedTick`·`OnLateTick`, `OnDisable`, `OnDestroy`(EndPlay).
 - Tick phase는 `PrePhysics`, `Physics`, `PostPhysics`, `LateUpdate`, `PreRender`(실행 순서)다. `Physics` phase만 고정 스텝으로 실행한다.
@@ -44,7 +44,7 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `Engine` | ObjectRuntime, World | 엔진 상태 기계·메인 루프·WorldContext·EngineSubsystem | Gameplay·Graphics·창 참조 |
 | `World` | ObjectRuntime, CoreTypeBindings | World·Actor·Component·SceneComponent(WorldOnly 리플렉션 클래스 — 4.6절)·TickScheduler·WorldSubsystem | Engine·Graphics·Asset 참조 |
 | `WorldTestFixtures`(Developer) | World | World 타입을 상속한 리플렉션 시험 타입(SaveActor·SaveComponent)과 그 identity 명세. EngineTests만 의존 | 제품 링크 |
-| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·Controller·Pawn·LocalPlayer. 아직 없다(S10–S12). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR26) | Graphics 참조 |
+| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·PlayerState·Controller·Pawn·LocalPlayer. 아직 없다(S10–S12). PlayerState는 모듈식 게임플레이 `PlayerStateComponent`의 소유 클래스다([컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) CR48). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR26) | Graphics 참조 |
 | `AssetRuntime` | Serialization, Core | AssetId·에셋 파일 형식·AssetManager·TextureAsset | World·Graphics 참조 |
 | `AssetTools`(Developer) | AssetRuntime | BMP 임포터·에셋 파일 기록 | Shipping 링크 |
 | `RenderBase` | Graphics, Task, MetaSchema | 렌더 lane·프레임 slot·프레임 packet 전달·완료 통지·`RenderHandle` 예약([렌더 기반](RenderBase.ko.md) RB1) | ObjectRuntime·World 참조 |
