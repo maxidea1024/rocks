@@ -30,7 +30,7 @@ inline constexpr StringView AssetIndexCacheFileName = "AssetIndex.cache";
 inline constexpr uint32 AssetIndexCacheFormatVersion = 1;
 // 항목 스키마 버전(본문 항목의 칸)이다. AssetIndexEntry·요약 칸이 바뀌면 올린다.
 // 2: 요약의 출력 수가 출력 id 목록이 됐다(7.1절 17 A2e4).
-inline constexpr uint32 AssetIndexCacheSchemaVersion = 2;
+inline constexpr uint32 AssetIndexCacheSchemaVersion = 3;
 // 판정 의미 버전이다. 색인 판정 규칙(ReadPackageIndex·ImportRecord·Tags 파서·ImportOwner 대조·
 // 논리 경로 규칙)을 바꾸면 올린다 — 도구 빌드 ID는 키가 아니므로(7.1절 16).
 inline constexpr uint32 AssetIndexCacheSemanticVersion = 1;
@@ -75,6 +75,11 @@ struct AssetIndexCacheEntry {
     AssetId id{};
     TypeId type{};
     bool readOnly = false;
+    // 콘텐츠 해시와 그 Stat 값이다(AssetIndexEntry와 같은 뜻 — 쓰는 쪽이 Stat 대조로만 믿는다).
+    Sha256Digest contentHash{};
+    uint64 contentHashBytes = 0;
+    int64 contentHashTicks = 0;
+    bool hasContentHash = false;
     Array<PackageDependencyEntry> dependencies;
     Array<PackageTag> tags;
     AssetIndexImportSummary importRecord;

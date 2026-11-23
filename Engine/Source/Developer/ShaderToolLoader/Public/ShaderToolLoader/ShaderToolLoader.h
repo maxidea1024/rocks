@@ -1,7 +1,10 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
+#include <Core/Text/String.h>
+#include <Core/Text/StringView.h>
 #include <Core/Diagnostics/LogCategory.h>
 #include <Platform/DynamicLibrary.h>
 #include <ShaderToolTable/ShaderToolTable.h>
@@ -345,5 +348,56 @@ private:
 ROCKS_SHADERTOOLLOADER_API ShaderToolLoadStatus QueryDxcVersion(const DxcFunctions& functions,
                                                                 uint32& major,
                                                                 uint32& minor) noexcept;
+
+// DXC가 #include 파일을 찾을 때 부르는 원문 공급자다(IDxcIncludeHandler). name은 DXC가 요청한 파일
+// 이름(UTF-8)이며 DXC 표기 그대로다: 주 파일 이름이 상대 경로면 "./"가 붙고, 포함한 파일 디렉터리
+// 기준 후보는 '\'로 이어질 수 있다. 찾으면 true와 bytes(CompileWithDxc가 끝날 때까지 살아 있는
+// UTF-8 원문)를 둔다. false면 DXC는 그 후보가 없다고 보고 다음 검색 경로를 본다.
+struct DxcIncludeSource {
+    bool (*load)(void* context, StringView name, Span<const uint8>& bytes) noexcept = nullptr;
+    void* context = nullptr;
+};
+
+// DXC 컴파일 한 번의 입력이다. 모든 view는 호출 동안 살아 있어야 한다.
+struct DxcCompileRequest {
+    // UTF-8 원문이다.
+    StringView source;
+    // 주 파일 이름(진단 위치와 상대 include의 기준)이다. 비면 DXC 기본 이름이다.
+    StringView sourceName;
+    // DXC 명령 인자(UTF-8)다. 예: {"-E", "main", "-T", "cs_6_6", "-HV", "2021", "-DUSE_FOG=1"}.
+    Span<const StringView> arguments;
+    // null이면 #include를 찾지 못한다.
+    const DxcIncludeSource* includes = nullptr;
+};
+
+// DXC 컴파일 결과다. compiled가 false면 컴파일 오류이고 diagnostics에 DXC 진단(영어, 원문 그대로)이
+// 있다. 성공해도 경고가 diagnostics에 있을 수 있다.
+struct DxcCompileResult {
+    explicit DxcCompileResult(Allocator& allocator) noexcept
+        : object(allocator), diagnostics(allocator) {
+    }
+
+    Array<uint8> object;
+    String diagnostics;
+    bool compiled = false;
+};
+
+// DXC(IDxcCompiler3::Compile)로 request를 컴파일한다. 측정 S7(Docs/Design/ShaderSystem.ko.md 11.1절
+// SC3 — Rocks 전처리 결과와 DXC 직접 전처리의 DXIL 대조)과 형식 모듈이 쓴다. 결과는 먼저 비운다.
+// 반환: DXC가 돌았으면 Success(컴파일 오류는 result.compiled로 본다), 함수 표가 비었으면
+// WrongState, 인자가 UTF-8이 아니면 InvalidArgument, COM 호출 실패는 CallFailed(file.nativeError에
+// HRESULT), 메모리 부족은 CallFailed, Windows 밖은 UnsupportedHost다.
+//
+// 사용 예:
+//   const StringView arguments[] = {"-E", "main", "-T", "ps_6_6"};
+//   DxcCompileRequest request;
+//   request.source = text;
+//   request.sourceName = "/Engine/Private/Sample.rsf";
+//   request.arguments = arguments;
+//   DxcCompileResult result(allocator);
+//   if (auto ran = CompileWithDxc(tools.Dxc(), request, result); ran && result.compiled) { ... }
+ROCKS_SHADERTOOLLOADER_API ShaderToolLoadStatus CompileWithDxc(const DxcFunctions& functions,
+                                                               const DxcCompileRequest& request,
+                                                               DxcCompileResult& result) noexcept;
 
 } // namespace rocks::shader

@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "name": "OpusFile",
+  "version": "0.12",
+  "upstreamDirectory": "opusfile-0.12",
+  "globalState": false,
+  "source": {
+    "url": "https://downloads.xiph.org/releases/opus/opusfile-0.12.tar.gz",
+    "sha256": "118d8601c12dd6a44f52423e68ca9083cc9f2bfe72da7a8c1acb22a80ae3550b",
+    "verification": "Official Xiph.Org release tarball, downloaded on 2026-11-23; its SHA-256 matches downloads.xiph.org/releases/opus/SHA256SUMS.txt. Imported files are opusfile.h, the decoding sources without HTTP and certificate support (http.c, wincerts.c), and COPYING."
+  },
+  "licenses": [
+    {
+      "spdx": "BSD-3-Clause",
+      "upstreamExpression": "COPYING (Xiph.Org BSD-style license)",
+      "file": "opusfile-0.12/COPYING",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "opusfile-0.12/src/info.c",
+    "opusfile-0.12/src/internal.c",
+    "opusfile-0.12/src/opusfile.c",
+    "opusfile-0.12/src/stream.c"
+  ],
+  "includeDirectories": [
+    "opusfile-0.12/include"
+  ],
+  "defines": [
+    "OP_DISABLE_HTTP"
+  ],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "opusfile-0.12/include/opusfile.h"
+  ],
+  "files": {
+    "COPYING": "0267ae795ab744c4e0f9c45e249440fdf2e75dac8c804f36066b28649bf74aaf",
+    "include/opusfile.h": "fec33e1edcf905af91ed9f7bb8e5860235cc11ba5551fc2e28fc22ca951520d5",
+    "src/info.c": "070d4cea226077bfc2f521448a892565e5a04b1a6a8edfe0aeee8188ce6cfb08",
+    "src/internal.c": "652a194ee3666a42f879d5835a250ad077c76e0a6c67df1b8deeb240f1bf7e66",
+    "src/internal.h": "a482e1be28ea8d70a073ed75e262e9c2b31ff73abf620838e77676c82ff5ce1a",
+    "src/opusfile.c": "b8a28e7539ffb65b7fc3e0b4000279e262451f477137305eb2fde6499f93a573",
+    "src/stream.c": "36294c709a4e9d0c5e63c3a703ea794f5fba3ff5cb71fef7c65ff3e49f28b504"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "include/opusfile.h",
+      "line": 125,
+      "text": "#  pragma GCC visibility push(default)"
+    },
+    {
+      "file": "include/opusfile.h",
+      "line": 2157,
+      "text": "#  pragma GCC visibility pop"
+    },
+    {
+      "file": "src/internal.h",
+      "line": 55,
+      "text": "#  pragma GCC diagnostic ignored \"-Wparentheses\""
+    },
+    {
+      "file": "src/internal.h",
+      "line": 58,
+      "text": "#  pragma warning(disable:4554)"
+    },
+    {
+      "file": "src/internal.h",
+      "line": 60,
+      "text": "#  pragma warning(disable:4996)"
+    }
+  ],
+  "notes": [
+    "Ogg Opus file decoder for the audio importer (Docs/Design/AudioSystem.ko.md section 3.29). Developer only: AudioTools links it.",
+    "OpusFile.Build.cs adds the Ogg and Opus include directories, because opusfile.h includes ogg/ogg.h and opus_multistream.h; consumers link OpusFile, Opus and Ogg.",
+    "The UTF-8 file name conversion in stream.c (Windows op_fopen path) combines the fourth byte with & where | looks intended; the parentheses added by Rocks.patch keep the upstream behaviour. AudioTools opens memory streams only."
+  ],
+  "modifications": [
+    {
+      "file": "src/opusfile.c",
+      "upstreamSha256": "b75f36104b255e2d4ebf5173205fef49c3978da5da6d0782657beb094eeaba8b",
+      "reason": "Add parentheses around the subtractions under >> (-Wshift-op-parentheses, nine places); the C precedence and results are unchanged."
+    },
+    {
+      "file": "src/stream.c",
+      "upstreamSha256": "e0ad2567e53c92a3b68c697f76dda3ef123654834626faa45983b8c40161b1d2",
+      "reason": "Add parentheses around the & terms inside | (-Wbitwise-op-parentheses, three places; precedence and results unchanged); define WIN32_LEAN_AND_MEAN only when it is not defined yet, because the Rocks build defines it on the command line (-Wmacro-redefined); and replace the Microsoft CRT calls deprecated under -Wdeprecated-declarations, which the 4996 pragma of internal.h would otherwise hide (the directive probe compiles without it): _wfopen with _wfsopen(..., _SH_DENYNO) (same sharing), fdopen with _fdopen on Windows, and _wfreopen with _wfreopen_s (same reopen, without sharing). AudioTools opens memory streams only."
+    },
+    {
+      "file": "src/info.c",
+      "upstreamSha256": "d6cd9d8fdb7b09b4721992f6517b02adb8f0e653004406eb2dbf6a11af2c75ca",
+      "reason": "Add parentheses around && inside || (-Wlogical-op-parentheses, two places); the C precedence and results are unchanged."
+    }
+  ],
+  "patch": "Rocks.patch"
+}

@@ -1,12 +1,12 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-21, 개정 22(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-23, 개정 24(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md)·[엔진 런타임](EngineRuntime.ko.md)·[에셋 시스템](AssetSystem.ko.md)과 충돌하는 부분은 이 문서 기준으로 바꾸고 그 문서들도 같이 고친다(14절). 개정은 이 문서가 확정될 때 함께 하되, 에셋 시스템 단계(A0-G·A1·A3·A4)에 넣을 셰이더 요구는 그 단계 착수 전에 반영해야 한다(6절).
 
-상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음). 이 문서 전체는 아직 **설계**이며 P1만 구현되었다. 엔진 기반이 준비될 때까지 이 문서는 스펙으로만 두고 다른 선행 작업과 SH 단계는 구현하지 않는다(2026-11-13 사용자 지시). 착수 위치는 6절, 착수 전에 정할 것은 15절이다.
+상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음). 선행 작업 가운데 P1·P3·P4·P6a·P9·P10·P11과 SH0(Windows)이 구현되었고, SH1은 2026-11-23 사용자 지시로 착수한다(11.1절). 처음에는 엔진 기반이 준비될 때까지 스펙으로만 두었다(2026-11-13 사용자 지시). 착수 위치는 6절, 착수 전에 정할 것은 15절이다.
 
 ## 1. 결정
 
@@ -69,10 +69,12 @@ Engine/Config/ShaderFormats/<id>.json              형식 정의(12절)
 Engine/Config/TargetProfiles/<id>.json             graphicsBackends·shaderFormats(12절, 파일은 AssetSystem 10절)
 Engine/Source/ThirdParty/<Lib>/                    DXC·SPIRV-Cross·SPIRV-Tools·FXC(binary manifest·오프라인 빌드 스크립트), SPIRV-Reflect(C 원본), Vulkan-Headers(headers)(8절)
 Engine/Source/Runtime/ShaderCore                   셰이더 타입·퍼뮤테이션 ID·파라미터 메타데이터·셰이더 전용 정렬 타입·라이브러리 로드
-Engine/Source/Developer/ShaderCompiler             ShaderCompileManager·전처리기·키·에셋 너겟·워커 통신(메인 프로세스)
+Engine/Source/Developer/ShaderCompilerCommon       형식 정의 읽기·워커 메시지 형식·형식 컴파일 인터페이스(두 프로세스 공용, 11.1절)
+Engine/Source/Developer/ShaderCompiler             소스 트리·전처리기·job 키·에셋 너겟·컴파일 관리자·워커 풀(메인 프로세스)
+Engine/Source/Developer/ShaderWorker               워커 메시지 처리·도구 조회·형식 분배(워커 프로세스 본체, 시험 probe도 부른다)
 Engine/Source/Developer/ShaderToolTable            ThirdParty manifest에서 생성한 도구 표(이름·SHA-256, 메타데이터만, 9절)
 Engine/Source/Developer/ShaderFormat{D3D,Vulkan,Metal,OpenGL}   워커 안의 형식별 컴파일·재배치·리플렉션·GLES 재작성
-Programs/ShaderCompileWorker                       워커 프로세스
+Programs/ShaderCompileWorker                       워커 프로세스(ShaderWorker를 부르는 진입점)
 ```
 
 ShaderCore만 Runtime 계층에 두고(런타임이 쿠킹된 라이브러리를 연다), 컴파일러 쪽은 Developer·Programs에 둔다.
@@ -113,15 +115,15 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | A0-P | 파일 감시·원자적 교체·no-replace 이동·시각 설정 | AssetSystem A0-P | **구현**(macOS 미검증) | — | — | 5.2 |
 | B1–B8 | 리플렉션(`ROCKS_STRUCT`·identity·배열), B7 툴체인 지문 | ReflectionFoundations | **구현** | — | — | 5.2 |
 | A0-G | 형식·차원·swizzle·샘플러 확장 | AssetSystem A0-G | 미착수 | P11, SH2 | — | 5.2 G1–G3 |
-| A1 | AssetRuntime, `UnsupportedCapability`, 매니페스트 reader | AssetSystem A1 | 미착수 | P6b | A0-O | 5.2 |
-| A2 | `ProjectLayout` | AssetSystem A2 | 미착수 | P5, SH1 | A1 | 5.2 |
-| A3 | 에셋 너겟 | AssetSystem A3 | 미착수 | P5 | A2 | 5.2 N1–N3 |
+| A1 | AssetRuntime, `UnsupportedCapability`, 매니페스트 reader | AssetSystem A1 | **구현** | P6b | A0-O | 5.2 |
+| A2 | `ProjectLayout` | AssetSystem A2 | **구현**(A2a `AssetDatabase/ProjectLayout.h`) | P5, SH1 | A1 | 5.2 |
+| A3 | 에셋 너겟 | AssetSystem A3 | **구현**(2026-11-23, `Developer/AssetNugget`) | P5 | A2 | 5.2 N1–N3 |
 | A4 | Cooker·TargetProfile·쿠킹 매니페스트 | AssetSystem A4 | 미착수 | P6b | A3 | 5.2 K1–K3 |
 | P1 | 자식 프로세스·pipe | PlatformLayer | **구현** | SH1 | — | 5.3 |
 | P2 | 바인딩 규약(GLES 포함) | 이 문서 | 설계 | SH2 | — | 7절 |
 | P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | **구현**(Windows, Release 게시 완료. macOS 산출물 남음) | P4, P9, P12, SH0 | — | 8절 |
 | P4 | 도구 표 생성·binary 의존 정책·Release 배제 검사 | 이 문서 | **구현**(Windows. macOS 미검증, 알려진 Release 예외 2건은 SH2까지) | SH0, SH2 | P3, P10 | 9절 |
-| P5 | 셰이더 job 키 | 이 문서 | 설계 | SH1 | A2, A3, P6a | 10절 |
+| P5 | 셰이더 job 키 | 이 문서 | 설계(개정 23, A3 API에 맞춤) — 구현은 SH1b | SH1 | A2, A3, P6a | 10절 |
 | P6a | 형식 정의 스키마와 파일, 엔진 컴파일 프로필 | 이 문서 | **구현**(2026-11-17, Windows 시험) | P5, P14, P6b, SH1 | A0-C(JSON), 결정 2·3·5(결정됨) | 12.1절 |
 | P6b | TargetProfile 필드·매니페스트 v2·엔진 내장 셰이더 라이브러리 | 이 문서 | 설계 | SH2 | A1, A4, P6a, P14 | 12.3절 |
 | P7 | MetaCompiler 셰이더 파라미터 | 이 문서 | 설계 | SH3 | B1–B8 | 13절 |
@@ -154,7 +156,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
   - G3. SH2의 VulkanGraphics는 A0-G 범위(형식·차원·swizzle·샘플러)를 받아야 완료다.
 - **A1**: Core `ErrorCode::UnsupportedCapability`(AssetSystem 1절 A1에서 추가)를 만들 수 없는 셰이더 형식에도 쓴다. 쿠킹 매니페스트 reader는 v2의 "에셋이 아닌 산출물" 항목을 읽는다(P6b).
 - **A2**: `ProjectLayout`이 셰이더가 쓰는 위치를 준다. 엔진·프로젝트·플러그인의 `Shaders` 디렉터리(3절 가상 경로), 너겟 위치, 워커 작업 디렉터리 `<Project>/Intermediate/ShaderWorkers/`다. 프로젝트 없이 엔진만 쓸 때(Sandbox·엔진 내장 라이브러리)는 엔진 루트 아래 같은 이름을 쓴다. `ProjectLayout`은 AssetSystem에 이름만 있고 정의가 없다(1절 A2, 4.2절).
-- **A3**
+- **A3** — **반영됨**(AssetSystem 9.1절 결정 2·5·15, A3 구현 2026-11-23). 아래는 요구 원문이고 셰이더 쪽 대응은 10절(개정 23)이다: N1은 `WriteNuggetKeyHeader` 공통 머리와 `WriteNuggetEncoder` 목록, 키를 Record 키로 그대로 쓰는 규칙(결정 2 끝)으로, N2는 Record 값 표(ValueId 행)로, N3은 세대 Guid 둘(결정 4)·`.rnug` v2(결정 6)·일괄·비동기 요청(결정 12)·bucket `shader`(`NuggetBucketShader`)로 들어갔다.
   - N1. 에셋이 아닌 처리기도 공통 키 항목을 쓰게 한다. AssetSystem 9절 키 항목(번호는 이 문서 10절 표가 붙인 것) 가운데 1–5·8–9항(형식 버전, 처리기 Guid·버전 Guid, 외부 도구, 결정적 수학 버전, 툴체인 지문, 설정, 프로파일)은 공통 머리로 쓰고, 에셋 전용인 6·7·10항(TypeId·입력 bulk·의존 목록)은 처리기가 자기 입력으로 바꿔 쓸 수 있게 한다. 에셋이 아닌 처리기는 AssetId·Build 의존이 없으므로 SCC 식(구성원 key = SHA-256(SCC key, AssetId))을 쓰지 않고 키 = SHA-256(`BuildKey` 바이트)로 한다. 셰이더의 대응은 10절 표다.
   - N2. 값은 여러 부분(`.rnug` 부분 구조)이다: 바이트코드·정규화 바인딩 layout·GLES 복사 표·진단·디버그 심볼.
   - N3. Rockpile이 요구한 AssetSystem 9절 개정(`Rockpile.ko.md` 17절: 키의 에셋 너겟 세대 Guid 11.4절, `.rnug` v2 5.2절, 일괄·비동기 API 12.2절)이 A3에 반영되면 셰이더 키·값도 그대로 따른다. 셰이더 bucket은 `shader`다(`Rockpile.ko.md` 5.1절).
@@ -187,7 +189,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 - 의존: P3, P10. 막는 것: SH0(도구 표), SH2(Release 배제 판정).
 - 달성(2026-11-17, `feature/shader-tools`): 9절 진척.
 
-**P5 셰이더 job 키 — 설계(10절).** 의존: A2, A3(N1–N3), P6a, A0-C·B7(구현). 막는 것: SH1.
+**P5 셰이더 job 키 — 설계(10절, 개정 23에서 A3 API에 맞춤).** 의존: A2, A3(N1–N3), P6a, A0-C·B7(모두 구현). 막는 것: SH1. 구현은 SH1b다(11.1절).
 
 **P6a 형식 정의와 엔진 컴파일 프로필 — 구현(2026-11-17, 12.1절 진척).** 형식 정의 스키마와 `Engine/Config/ShaderFormats/<id>.json` 파일, 호스트별 엔진 컴파일 프로필(`Engine-<호스트>.json`)이다. job 키 3·9항이 형식 정의 SHA-256과 프로필을 쓰고 워커가 target env·ESSL 버전·상한을 읽으므로 P5·SH1 앞이다. 의존: A0-C JSON(구현), 결정 2·3·5.
 
@@ -268,7 +270,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | S4 | Vulkan 검증 레이어 공급, GPU 없는 CI의 소프트웨어 ICD | P9 | 로컬 결과(2026-11-17, VulkanGraphics 17절): 검증 레이어는 LunarG Vulkan SDK 1.4.363.0 설치로 공급했고 CI 공급 방식은 SH2 때 정한다. 소프트웨어 ICD는 lavapipe(Mesa 26.2.7 `mesa-dist-win`, `VK_ADD_DRIVER_FILES`)로 self-test 전체가 통과한다(calibrated timestamps의 QPC domain이 없어 calibration은 `Unsupported`). SwiftShader는 Windows 공식 바이너리가 없어 쓰지 않았다. CI 연결은 아직이다 |
 | S5 | D3D12·Vulkan·GLES 미리보기 픽셀 대조(행렬 옵션·앞면·Y 반전·루트 상수 대응) | 7.2절 6·8항 | C7 런타임 경로(2026-11-17, Windows, GTX 1060·WARP·NVIDIA OpenGL 4.5, Sandbox self-test `RunCullingChecks`). 행렬: D3D12(`D3DCompile` + `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`)·WARP·OpenGL(`transpose = GL_TRUE`) 모두에서 비균등 scale 뒤 이동한 비대칭 행렬의 사각형이 기대 영역(64칸 격자의 열 32–63·행 8–23)만 덮는다. 앞면: D3D12 `FrontCounterClockwise = TRUE`, OpenGL은 창(`GL_LOWER_LEFT`)·RenderTarget(`GL_UPPER_LEFT`) 모두 `glFrontFace(GL_CCW)`에서 화면 반시계가 앞면이다. None·Back·Front 컬, 음수 scale·거울 view 반전, 둘 다 음수일 때 원래대로가 세 장치에서 기대대로이고, 창 경로(`CopyPassTarget`)와 offscreen 경로의 이미지가 byte 단위로 같다. 창을 `GL_CW`로 둔 음성 대조는 창 경로 6건 불일치로 실패한다. 기존 self-test 픽셀 검사와 backend 간 대조도 그대로 통과한다(차이 0). Vulkan·GLES 미리보기·쿠킹 경로(DXC `-Zpr`)와 루트 상수 대응은 SH2에서 잰다 P11(2026-11-17): GLES 미리보기 런타임 경로(ES 3.2 profile·GL 4.3 core 두 context, 손으로 쓴 GLSL ES 3.20)에서 같은 검사가 통과하고 D3D12와 픽셀 차이 0이다. 창·RenderTarget 모두 `GL_UPPER_LEFT` + `GL_CCW`, 스왑체인은 offscreen에 그린 뒤 Y 반전 blit. 음성 대조: Y 반전을 빼면 창 경로 7건, `GL_CW`면 컬 검사 6건 불일치 |
 | S6 | 도구 빌드 컴파일러(clang-cl·MSVC)·빌드 시간·바이너리 크기 | 8절 4항 | P3 인용: Windows x64 도구는 Visual Studio C++ 도구(vcvarsall x64, MSVC, DLL 링커 버전 14.29)와 CMake·Ninja Release, 업스트림 빌드 설정으로 만들었다. 크기: `dxcompiler.dll` 21,943,296 B, `spirv-cross-c-shared.dll` 2,305,536 B, `SPIRV-Tools-c.dll` 3,644,416 B(PDB 별도). 빌드 시간은 P3에서 기록하지 않았고 clang-cl 비교와 macOS는 미측정 |
-| S7 | 자체 전처리 결과로 컴파일한 출력 = DXC 직접 전처리 출력(`#line` 포함) | 결정 6 구현의 정합성(SH1 완료 기준) | — |
+| S7 | 자체 전처리 결과로 컴파일한 출력 = DXC 직접 전처리 출력(`#line` 포함) | 결정 6 구현의 정합성(SH1 완료 기준) | SH1a(2026-11-23, Windows, DXC 1.9.2609, `ShaderPreprocessS7_*`): fixture(상대·절대 include, `#pragma once`·include guard, `##`·가변 인자·여러 줄 호출, `ROCKS_*` 조건·`defined`·`true`, `ROCKS_IMAGE_FORMAT`, `__LINE__`, 여러 줄 주석, job 정의)에서 (가) Rocks 전처리 결과 컴파일과 (나) DXC 직접 전처리 컴파일의 산출물이 byte 단위로 같다: `D3D12_SM6` `cs_6_6` DXIL 3,508 B, `VULKAN_SM5` `cs_6_0` SPIR-V 1,164 B. job 정의 값 하나만 바꾼 음성 대조는 다른 byte다. 일부러 넣은 오류의 첫 진단 위치는 두 방식 모두 `/Plugin/S7/Lib/Broken.rsh:4`다. `#if`의 내장 이름은 Rocks 쪽 오류다. macOS는 미측정(DXC 호출 구현이 Windows만 — 11.1절 SH1a 구현 메모) |
 | S8 | 워커 기동·DLL 로드 비용, SHA-256 처리량 | 11절 묶음 크기 | 측정값만(Release 스파이크 3회, i5-13600KF): `ShaderToolSet::Open` 82.5 ms 가운데 runtime 파일 31.3 MiB의 SHA-256 대조가 약 74 ms(Core SHA-256 423–426 MiB/s)이고 나머지 로드는 약 9 ms. 첫 DXIL 컴파일 5.6–6.4 ms(다음 3.6–3.7 ms), 첫 SPIR-V 3.6–4.3 ms(다음 2.9–3.1 ms), SPIRV-Cross ESSL 첫 0.34–0.36 ms(다음 0.07–0.10 ms), 첫 `spirv-val` 0.43–0.46 ms. Debug 빌드는 SHA-256 26–27 MiB/s, 열기 1.2 s. 워커 프로세스 기동은 워커가 없어 미측정 |
 | S9 | Apple `metal` 재배포 조건, Windows용 Metal Developer Tools(UE 5.8 기대 버전 5.3, `Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:724–725`) | 결정 5 | macOS 필요, 미측정 |
 | S10 | `d3dcompiler_47.dll` 재배포 조건과 고정 버전 | 8절 2항 FXC | 문서 조사(2026-11-20): Windows SDK 사용 조건 2.a "Distributable Code"가 가리키는 REDIST.TXT 목록(`learn.microsoft.com/legal/windows-sdk/redist`, 2024-10-21 갱신)에 `Redist\D3D\x64\d3dcompiler_47.dll`이 있다(x86과 `d3dcsx_47.dll`·`dxcompiler.dll`·`dxil.dll`도 같은 묶음). 조건: 고치지 않은 파일만, **Classic Windows(데스크톱) 응용과 함께만** 재배포하고 UWP 앱에는 넣지 않는다. 사용 조건의 배포 요건이 붙는다(프로그램에 상당한 주 기능을 더할 것, 배포자·최종 사용자가 이 조건 이상으로 보호하는 조건에 동의할 것, 자기 저작권 표시, Microsoft 면책, Microsoft OS 밖 플랫폼용 배포 금지, 저작권·상표 고지 변경 금지). 고정 버전: 저장소 manifest(`Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json`)의 SDK 10.0.22621.0 파일 버전 10.0.22621.2428(4,916,728 B, SHA-256 `af7b99be…`)이 이 기계 설치본과 크기·SHA가 같다. 같은 기계 System32 본은 10.0.26100.9974라 OS 빌드마다 다르다는 전제도 맞다. UE 5.8 동봉본은 10.0.19041.1(GitDependencies, `Engine/Build/Commit.gitdeps.xml:39300`)이다. 결론은 8절 2항 |
@@ -576,31 +578,46 @@ Rocks는 P10 동적 라이브러리 API로 **모든 도구를 절대 경로에�
 
 ## 10. P5 에셋 너겟과 셰이더 job 키
 
-AssetSystem A3(9절 설계)을 그대로 구현하고, 셰이더 job도 AssetSystem 9절의 **공통 키 규칙을 그대로 따른다**(2026-11-13 사용자 결정 10). 의존: A2 `ProjectLayout`(너겟 위치 `<Project>/Intermediate/AssetNuggets/`, AssetSystem 9절), A3(5.2절 N1–N3), B7(구현). 프로젝트 없이 엔진 셰이더만 컴파일할 때(Sandbox·self-test·엔진 내장 라이브러리)는 엔진 루트의 `Intermediate/AssetNuggets/`를 같은 설정 규칙으로 쓴다.
+AssetSystem A3(9.1절, 구현 `Engine/Source/Developer/AssetNugget`)을 그대로 쓰고, 셰이더 job도 AssetSystem 9절의 **공통 키 규칙을 그대로 따른다**(2026-11-13 사용자 결정 10). 개정 23(2026-11-23)에서 A3의 실제 API에 맞췄다. 의존: A2 `ProjectLayout`(구현), A3(5.2절 N1–N3, 반영됨), B7(구현).
 
-**job 키.** 메인 프로세스가 계산한다(도구를 열지 않으므로 형식별 값은 형식 정의와 도구 표에서 읽는다). 처리기 `BuildKey(KeyWriter&)`가 아래 순서·타입 태그로 기록한 바이트의 SHA-256이다. 셰이더 job에는 AssetId·Build 의존 순환이 없으므로 AssetSystem의 SCC 식을 거치지 않는다(5.2절 N1). 항목은 AssetSystem 9절 키 항목에 1:1로 대응한다(번호는 이 문서가 붙인 것이다).
+**너겟 위치와 설정.** 메인 프로세스가 `ReadNuggetCacheSettings(allocator, files, root, &failure)`로 `<root>/Config/AssetNuggets.json`(없으면 기본값)을 읽고 `NuggetCache::Open(settings, root)`로 연다. root는 프로젝트가 있으면 프로젝트 루트(`ProjectLayout::Root`)다. 프로젝트 없이 엔진 셰이더만 컴파일할 때(Sandbox·self-test·엔진 내장 라이브러리)는 root를 엔진 폴더(HostConfig `FindEngineDirectory`, 저장소의 `Engine`)로 준다. 그러면 같은 규칙으로 `Engine/Config/AssetNuggets.json`(선택)을 읽고 기본 위치가 `Engine/Intermediate/AssetNuggets/`가 된다(저장소 `.gitignore`에 `/Engine/Intermediate/`를 더한다). 설정 파일로 `localPath`를 절대 경로로 주면 프로젝트 사이·엔진과 공유할 수 있다(내용 주소라 안전하다). UE 엔진 DDC(`Engine/DerivedDataCache`)의 자리다. 키 공통 머리의 프로젝트 세대는 `NuggetCache::ProjectGeneration()`이다(엔진만 쓰면 기본 null Guid).
 
-| AssetSystem 9절 항목 | 셰이더 job |
-|---|---|
-| 1 `"RocksAssetNugget"` 형식 버전 | 같다 |
-| 2 처리기 Guid·처리기 버전 Guid | 셰이더 job 처리기 |
-| 3 외부 도구의 이름·버전·설정 | 형식 id와 형식 정의 파일(`Engine/Config/ShaderFormats/<id>.json`) SHA-256, **형식 정의가 선언한 모든 도구**의 도구 표 SHA-256 목록(정적 목록. 예: `D3D11_SM5`는 FXC 실패 뒤에야 DXC·SPIRV-Cross 경로를 타므로 메인 프로세스가 미리 알 수 없어 FXC·DXC·SPIRV-Cross·SPIRV-Tools를 모두 넣는다), SPIRV-Reflect 원본 manifest SHA-256, Apple 도구 지문(워커가 잰 값, 11절). 도구 빌드의 원본 태그·patch·컴파일러가 바뀌면 바이너리 SHA가 바뀐다 |
-| 4 결정적 수학 버전 | `rocks::deterministic::Version` |
-| 5 툴체인 지문 | `rocks::build::ToolchainFingerprint()`(메인 프로세스와 워커는 같은 빌드에서 나온다) |
-| 6 에셋 TypeId | 단계·엔트리 이름 |
-| 7 입력 bulk SHA-256 | 전처리 결과 SHA-256(가상 경로만 담긴 `#line`) |
-| 8 결과에 영향을 주는 설정 전체 | 컴파일 옵션(출력에 영향을 주는 정의·플래그의 정렬 목록, 기본값 포함), 파라미터 레이아웃 서명(P7 전에는 손으로 쓴 레이아웃 표의 SHA-256, 7.2절 5항. P7 뒤에는 13절) |
-| 9 대상 프로파일 id와 출력 설정 전체 | 같다. 개정 16까지 더하던 프로필 공통 상한 형식 SHA-256 목록은 개정 17에서 뺐다(7.2절 4항: 상한은 job 형식으로만 검사하고, 그 형식 정의 SHA-256은 3항에 있다). 프로젝트 프로필이 없는 컴파일(엔진 내장 라이브러리, Development 필요 시 컴파일)은 호스트별 엔진 컴파일 프로필(`Engine-Windows`·`Engine-MacOS`, 12.1절)을 쓴다 |
-| 10 의존 목록 | 없다. include 폐포는 전처리 결과에 들어 있다 |
+**job 키.** 메인 프로세스가 계산한다(도구를 열지 않으므로 형식별 값은 형식 정의와 도구 표에서, Apple 도구 지문은 워커 도구 조회(11절 3항, 11.1절 결정 SC11)에서 얻는다). `NuggetKeyWriter`(`AssetNugget/NuggetKey.h`)에 아래 순서로 기록하고 `Finish()`의 SHA-256이 키다. 셰이더 job에는 AssetId·Build 의존 순환이 없으므로 SCC 식(`NuggetSccKey`)을 거치지 않고 **이 키를 Record 키로 그대로 쓴다**(AssetSystem 9.1절 결정 2 끝, 5.2절 N1). 기록 순서와 번호 표는 고정이며 바꾸면 셰이더 job 처리기 버전 Guid를 바꾼다. 키에 넣는 byte는 **워커에 보내는 바로 그 byte**다: 형식 정의·프로필은 세션을 시작할 때 한 번 읽어 둔 snapshot의 byte로 SHA-256을 계산하고 같은 byte를 워커에 보낸다(디스크를 다시 읽지 않는다), 레이아웃 표는 메시지에 싣는 정규 인코딩 byte의 SHA-256이다.
 
-Rockpile 개정(키의 에셋 너겟 세대 Guid 등, 5.2절 N3)이 AssetSystem에 반영되면 같은 자리에 넣는다.
+| 순서 | `NuggetKeyWriter` 기록 | AssetSystem 9절 항목 |
+|---|---|---|
+| 1 | `WriteNuggetKeyHeader(writer, ShaderJobProcessor, projectGeneration)`: `"RocksAssetNugget"`·키 형식 버전·엔진 세대 Guid·프로젝트 세대 Guid·처리기 Guid·처리기 버전 Guid·`deterministic::Version`·`build::ToolchainFingerprint()`. `ShaderJobProcessor`는 셰이더 job 처리기 하나다(형식마다 나누지 않는다. 형식 쪽 출력 의미 변화는 형식 정의 `processor.version`이 3행 SHA로 키에 들어간다). 메인 프로세스의 지문이 워커의 지문과 같다는 것은 워커가 입력 머리로 확인한다(11.1절 결정 SC5·SC6) | 형식 버전, 세대 Guid 둘, 처리기 Guid·버전 Guid, 결정적 수학 버전, 툴체인 지문 |
+| 2 | `WriteList(n)` 뒤 도구마다 `WriteNuggetEncoder(name, version, settings)`. 순서는 형식 정의 `tools` 목록 순서(형식 정의 byte가 키에 들어가므로 순서도 고정이다). 저장소 도구: name·version은 도구 표 값, settings는 이 호스트 도구 표 파일 가운데 출력에 관여하는 role(`Runtime`·`Redist`·`Tool`)의 SHA-256(32 byte)을 표 순서로 이은 byte(`Symbols`·`Notice`는 넣지 않는다 — PDB·라이선스만 바뀌어도 모두 미적중이 되지 않게). `status: system` 도구(Apple `MetalToolchain`): version은 워커가 잰 `metal -v`의 버전 줄과 `Target:` 줄(경로가 든 `InstalledDir:` 등은 뺀다), settings는 도구 조회가 `xcrun --find`로 고정한 `metal`·`metallib` 실행 파일의 SHA-256을 이은 64 byte(11.1절 결정 SC11). SPIRV-Reflect(워커에 컴파일되는 C 원본)는 리플렉션을 쓰는 SH2부터 목록 끝에 name `SpirvReflect`·manifest 버전·manifest SHA-256으로 넣는다(SH1 출력은 리플렉션을 쓰지 않는다) | 외부 도구의 이름·버전·설정 |
+| 3 | `WriteString(formatId)`, `WriteDigest(형식 정의 byte의 SHA-256)` | 외부 도구 설정(형식 정의가 셰이더 모델·target env·경로·배포 대상·상한·처리기 버전을 가진다) |
+| 4 | `WriteU32(stage)` — 단계는 이미 있는 고정 값 `ShaderStageBits`의 한 비트(vertex 1·pixel 2·compute 4, 형식 정의 `stages` 어휘 `vertex`·`pixel`·`compute`와 1:1), `WriteString(entry)` | 에셋 TypeId 자리 |
+| 5 | `WriteDigest(전처리 결과 SHA-256)` — 가상 경로만 담긴 `#line`을 가진 원문이고 정의(`#define`)·`Platform.rsh`는 이미 펼쳐져 있다. 워커는 이 원문 밖의 정의를 컴파일러에 넘기지 않는다 | 입력 bulk SHA-256 |
+| 6 | `WriteReflected(writer, options)` — 컴파일 옵션 `ShaderCompileOptions`(`ROCKS_STRUCT`, 11.1절 결정 SC9)를 AssetSystem 9.1절 결정 2의 리플렉션 기록으로 쓴다(기본값 포함 전체, 필드 이름이 키와 trace에 들어간다). 그 뒤 파라미터 레이아웃 서명: P7 전에는 손으로 쓴 레이아웃 표(7.2절 5항)의 정규 인코딩 byte SHA-256을 `WriteDigest`, 레이아웃이 없는 job(SH1 시험·도구 원문)은 `WriteNone` | 결과에 영향을 주는 설정 전체 |
+| 7 | `WriteString(profileId)`, `WriteDigest(프로필 byte의 SHA-256)` — SH1은 호스트별 엔진 컴파일 프로필(`Engine-Windows`·`Engine-MacOS`, 12.1절)만 받는다. 프로젝트 TargetProfile(A4)은 엔진 파일과 프로젝트 재정의를 합친 결과를 `WriteReflected`로 쓰도록 P6b에서 바꾼다(파일 SHA로는 재정의 변경을 놓친다) | 대상 프로파일 id와 출력 설정 전체 |
+| — | 없다. include 폐포는 전처리 결과에 들어 있다 | 의존 목록 |
+
+**Record와 값(5.2절 N2).** bucket `shader`(`NuggetBucketShader`), namespace `rocks.nuggets`(고정), key = job 키. `inputs`는 비어 있다(다른 Record를 소비하지 않는다). `meta`는 비워 둔다. 값은 ValueId 오름차순의 부분이다:
+
+| ValueId | 이름(`ShaderNuggetValue`) | 내용 | 단계 |
+|---|---|---|---|
+| 0 | `Code` | 형식 산출물: DXIL·DXBC·SPIR-V byte, ESSL·MSL UTF-8 텍스트, metallib byte | SH1 |
+| 1 | `BindingLayout` | 정규화된 바인딩 layout(7.2절) | SH2 |
+| 2 | `GlesCopyTable` | GLES 바인딩 머리·상수 버퍼 복사 표(7.2절 4항) | SH2 |
+| 3 | `DebugSymbols` | 디버그 심볼(PDB·SPIR-V debug 등) | SH4 |
+
+- 진단은 Record에 넣지 않는다. 경고는 결정 7로 오류이므로 성공 job에는 진단이 없고, 진단 문자열은 작업 디렉터리·도구 버전 문구가 섞여 같은 키에서 digest를 흔들 수 있다(`Conflict`). 진단은 실패 job의 결과로만 돌려준다.
+- 실패한 job(컴파일 오류·도구 오류)은 게시하지 않는다. 같은 입력을 다시 컴파일하면 같은 진단이 나오고, 실패를 캐시하면 도구·환경 문제의 회복이 늦어진다.
+- 조회: 값 선택을 비워 Record 전체를 청한다(값을 골라 청하면 없는 값 때문에 `Miss`가 되고 다시 만든 Put이 `Exists`가 되는 고리가 생긴다 — A3 Get은 청한 값이 하나라도 없으면 `PartialRecord` 없이 `Miss`다). 정책은 `Default`(`PartialRecord` 없음). 적중했는데 값 0이 없으면 손상으로 보고 진단·통계를 남긴 뒤 다시 컴파일한다.
+- 컴파일 묶음은 `NuggetGetRequest`로 모든 job을 한 번에 조회하고, 미적중만 워커에 보내고, 결과를 `NuggetPutRequest`로 게시한다(AssetSystem 9.1절 결정 12). 요청을 시작하고 기다리는 것은 관리자의 조정 스레드이며 그 scheduler의 worker가 아니다(같은 scheduler worker에서 진행 중 요청을 기다리거나 소멸하면 교착·Fatal — `NuggetRequest.h` 계약). 필요 시 컴파일(11.1절 결정 SC12) 한 건은 동기 `NuggetCache::Get`·`Put`이다.
+- Put은 값 버퍼를 옮겨 간다(`NuggetPutRequest::Start`·`NuggetCache::Put`). 관리자는 호출자에게 돌려줄 값을 게시 전에 결과 쪽에 복사해 둔다.
+- 결과 처리: `Hit` → 값 0을 쓴다. `Miss`·`Corrupt`·`DigestChanged`·`Dropped` → 다시 컴파일해 게시한다(DigestChanged 뒤 다시 만든 Record는 캐시가 Memory에 고정 보관한다 — 결정 11). `Cancelled`(캐시 Shutdown) → 그 job은 취소로 끝난다. Put 결과 `Conflict`는 결정성 위반이라 진단과 통계(결정성 gate)를 남기고 이번 결과를 쓴다. 캐시 실패(`failed`)는 설정 `required`면 job 오류, 아니면 진단만이다(R-1).
 
 공통 규칙을 따른 결과:
 - 툴체인 지문에 대상 triple(아키텍처·OS·배포 대상)이 들어가므로 Windows x64와 macOS arm64는 같은 셰이더도 키가 다르다. 셰이더 너겟은 호스트 사이에 공유하지 않는다(계획 §2.5 "host가 다르면 우선 분리"와 같은 방향). 키가 달라도 결정성 규칙(아래)은 그대로 적용한다.
 - 한 호스트만 만들 수 있는 형식(Windows의 DXBC, 15절 결정 5의 metallib)은 다른 호스트에서 해당 형식 job이 `UnsupportedCapability`로 실패한다(계획 §27.9). 원격 워커(계획 §2.5 "macOS는 같은 action을 Windows worker에 전달", §27.7)가 생기면 그쪽으로 보낸다. 이때 키는 요청한 호스트의 것이다.
 - 프로파일의 출력 설정(텍스처 LOD 그룹, 셰이더 형식 목록 등)이 바뀌면 그 프로파일의 셰이더 키가 모두 바뀐다. 반대로 셰이더 형식 목록을 바꾸면 같은 프로파일의 텍스처 키도 바뀐다. 이것은 공통 규칙의 비용으로 받아들인다.
+- 엔진 세대 Guid(`EngineNuggetGeneration`)를 바꾸면 셰이더 키도 모두 바뀐다(오염 회수 — AssetSystem 9.1절 결정 4).
 
-Apple 도구 지문: `metal -v --target=…`의 버전·대상 문자열(UE도 이 출력을 해석한다, `MetalShaderFormat.cpp:575–660`, 호출 `:882–920`)과 `metal`·`metallib` 실행 파일의 SHA-256이다.
+Apple 도구 지문: `metal -v --target=…`의 버전 줄과 `Target:` 줄(UE도 이 출력을 해석한다, `MetalShaderFormat.cpp:575–660`, 호출 `:882–920`)과 도구 조회가 `xcrun --find`로 고정한 `metal`·`metallib` 실행 파일의 SHA-256이다. 배포 대상(`-mmacosx-version-min` 등)은 SDK 기본값에 기대지 않고 형식 정의에 명시한다.
 
 참고로 UE 5.8의 셰이더 job 키(BLAKE3)는 엔진을 빌드한 컴파일러·호스트를 넣지 않는다. 캐시 버전 GUID(`Runtime/RenderCore/Private/ShaderCompilerCore.cpp:5`), 형식 버전, 대상, 엔트리, 컴파일 환경, 전처리 결과, 루트 파라미터 레이아웃 서명, `PreferredShaderCodeFormat`·`bBindlessEnabled`·셰이더 파이프라인 여부·메타데이터 지시문 등을 넣는다(`ShaderCore.cpp:4612–4671`, `:4627`·`:4634`·`:4636`·`:4645–4652`). 형식 버전에 넣는 도구 버전 해시(DXC는 `dxcompiler.dll`·`dxil.dll` 이미지의 xxhash, ShaderConductor도 같은 방식)는 Windows가 아니면 상수라(`DXCWrapper.cpp:28–67, 109–116, 137–139`, `:64–66`), macOS에서 만드는 Metal·Vulkan·GL 형식은 도구가 바뀌어도 UE 키가 바뀌지 않는다(`Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:117,560`, `Developer/VulkanShaderFormat/Private/VulkanShaderFormat.cpp:65,117`, `ShaderFormatOpenGL.cpp:145`). Rocks는 모든 호스트에서 도구 SHA를 키에 넣고, 공통 규칙을 우선해 툴체인 지문도 넣는다.
 
@@ -613,8 +630,10 @@ Apple 도구 지문: `metal -v --target=…`의 버전·대상 문자열(UE도 �
 - **상수 접기.** DXC(LLVM)와 SPIRV-Tools 최적화기가 초월 함수 상수식을 호스트 libm으로 접으면, 같은 호스트 키 안에서도 CPU(예: UCRT의 FMA3 분기, [핵심 데이터 기반](CoreDataFoundations.ko.md))에 따라 바이트가 다를 수 있다. SH0에서 상수 초월 함수 fixture를 FMA3 유무와 OS 버전을 바꿔 비교한다(측정 S3). 다르면 결정성 규칙을 지킬 방법(도구 빌드 patch, 해당 최적화 끄기 등)을 정하기 전에는 그 형식을 공유 캐시에 올리지 않고, 방법은 사용자 결정으로 올린다.
 - **dxil 서명.** UE 5.8은 DXC 1.8.2403 기반 수정본을 쓰고 `dxil.dll`을 명시적으로 열며, 이 DLL이 없으면 서명되지 않은 DXIL이 조용히 나온다고 적는다(`DXCWrapper.cpp:100`, `:111–113`). DXC 1.8.2505부터는 외부 `dxil.dll`을 찾지 않고 내장 validator가 서명한다(업스트림 DXC `docs/ReleaseNotes.md`, 1.8.2502에서 validator hash 공개. UE 동봉본(1.8.2403)으로는 확인할 수 없어 측정 S1로 확인한다). Rocks는 DXC를 1.8.2505 이상으로 고정하고 `dxil.dll`을 쓰지 않는다. 결과 DXIL container 헤더의 hash digest가 0이거나 preview용 우회 값(`PreviewByPassHash`, 0x02×16, 업스트림 `include/dxc/DxilContainer/DxilContainer.h`)이면 job을 실패시킨다. macOS DXC에서도 서명되는지 SH0에서 실측하고(측정 S1), 서명되지 않으면 `D3D12_SM6`의 생산 호스트를 형식 정의에서 Windows로 고정한다.
 
-완료 기준: A3 시험(적중·무효화·손상·동시 기록·GC)에 더해 다음을 시험한다.
-- job 키의 입력별 무효화: 옵션, 형식 정의, 도구 SHA, 툴체인 지문, 결정적 수학 버전, 레이아웃 서명, 프로파일 출력 설정을 하나씩 바꾼다. 경로·시각·locale만 바꾸면 적중한다.
+완료 기준: A3 시험(적중·무효화·손상·동시 기록·GC — A3 구현에 있다)에 더해 다음을 시험한다(SH1b·SH1d).
+- job 키의 입력별 무효화: 옵션, 형식 정의, 도구 SHA, Apple 도구 지문, 툴체인 지문, 결정적 수학 버전, 세대 Guid 둘, 처리기 버전, 단계·엔트리, 전처리 결과, 레이아웃 서명, 프로파일 출력 설정을 하나씩 바꾼다. 경로·시각·locale·작업 디렉터리·옵션 기록 순서만 바꾸면 같은 키다.
+- 키 golden: `NuggetKeyTrace` 줄의 순서·태그·필드 이름이 고정 fixture와 같다. 호스트·빌드마다 다른 줄(공통 머리의 툴체인 지문·결정적 수학 버전, 도구 SHA)은 실행 중 값으로 기대값을 채운다(A3 `NuggetKeyTests`와 같은 방식). 리터럴 키 byte는 그 두 항목을 고정값으로 넣는 시험용 기록 경로에서만 비교한다.
+- 빈 캐시와 찬 캐시의 결과 byte가 같고, system 도구가 없는 형식의 찬 캐시는 워커를 띄우지 않는다(system 도구 형식은 키 계산에 도구 조회가 필요하다 — 결정 SC11).
 - 만들 수 없는 형식의 `UnsupportedCapability`(macOS의 DXBC).
 - 실수 출력·상수 접기 fixture.
 
@@ -627,15 +646,96 @@ UE 5.8의 방식(파일 기반):
 - 부모 PID로 부모 생존을 확인하고(`:460–469` macOS·Linux, `:483–507` Windows), 새 입력이 TimeToLive(기본 20초, 빌드 머신 600초, `ShaderCompiler.cpp:303–304`) 동안 없으면 끝난다.
 
 Rocks 규칙:
-1. **파일 기반**(UE와 같다). 작업 디렉터리는 `<Project>/Intermediate/ShaderWorkers/<부모 PID>/<워커 번호>/`이다(A2, 프로젝트가 없으면 엔진 루트). 메시지는 Core Record 기반 schema로 크기·정렬·endianness가 정의된 직렬화 메시지다(계획 §2.5 "프로세스/worker 경계에는 … 직렬화 메시지 또는 검증된 C ABI만 사용한다").
-2. **입력 머리.** 메시지 형식 버전, 형식별 ShaderFormat 처리기 버전 Guid 표, 도구 표 SHA. 워커는 자기 것과 다르면 정해진 종료 코드로 끝내고, 메인 프로세스는 "워커를 다시 빌드하라"는 진단을 낸다.
+1. **파일 기반**(UE와 같다). 작업 디렉터리는 `<root>/Intermediate/ShaderWorkers/<부모 PID>/<워커 번호>/`이다(root는 10절 너겟 root와 같다 — 프로젝트 루트 또는 엔진 폴더). 메시지는 Serialization Record TLV 기반 schema로 크기·정렬·endianness가 정의된 직렬화 메시지다(계획 §2.5 "프로세스/worker 경계에는 … 직렬화 메시지 또는 검증된 C ABI만 사용한다"). 메시지 본문은 파일로 주고받고, 짧은 제어 줄(묶음 번호·완료 알림)만 P1 pipe로 보낸다(11.1절 결정 SC4 — UE의 입력 파일 대기 polling 대신).
+2. **입력 머리.** 메시지 형식 버전, 형식별 처리기 버전 표(형식 정의 `processor.version`), 도구 표 SHA, 툴체인 지문·결정적 수학 버전(11.1절 결정 SC5). 워커는 자기 것과 다르면 정해진 종료 코드로 끝내고, 메인 프로세스는 "워커를 다시 빌드하라"는 진단을 낸다.
 3. **도구 조회.** 메인 프로세스는 세션마다 처음 한 번 워커에 도구 조회 요청을 보낸다. 워커는 저장소 도구의 SHA가 도구 표와 같은지와 Apple 도구 지문(`metal -v` 문자열, `metal`·`metallib` SHA-256)을 돌려준다. 메인 프로세스는 도구를 직접 실행하지 않고 이 값을 job 키 3항(10절)에 쓴다. 도구 조회 결과가 세션 중에 바뀌면(시스템 도구 갱신) 남은 job을 실패시키고 다시 조회한다.
 4. **job.** 키, 형식 id, 단계, 엔트리, 전처리된 원문(가상 경로 `#line`), 컴파일 옵션, 파라미터 레이아웃 표(7.2절 5항)다. 워커는 원본 파일 경로를 받지 않는다(10절 경로 누출 금지). 한 입력 파일에 job 여러 개를 묶으며, 묶음 크기(job 수·원문 바이트 상한)는 측정 S8로 정해 설정으로 둔다.
 5. **출력.** 임시 파일에 쓰고 no-replace `Move`(A0-P)로 출력 이름에 옮긴다. 입력 파일은 읽은 뒤 지운다. 디버그용으로 입력을 남기는 선택(UE `-KeepInput`)을 둔다.
 6. **부모 감시.** Windows는 P1 job object가 부모 비정상 종료 때 워커를 끝낸다. macOS는 프로세스 그룹이 부모 종료에 따라 끝나지 않으므로 워커가 입력 pipe EOF(P1 lifeline)로 부모 종료를 알고 끝난다. 끝나기 전에 자기가 띄운 자식(Apple `metal` 등, P1에서 자기 프로세스 그룹을 가진다)을 `Process::Close`로 끝낸다. 워커가 강제 종료되어 이 정리를 못 하면 남은 자식은 `RunProcess` 시간 제한으로 끝난다. PID 확인(`IsProcessRunning`)은 PID 재사용 때문에 보조로만 쓴다.
-7. **유휴 종료.** 새 입력이 TimeToLive(기본 20초, CI 600초, UE 값) 동안 없으면 끝난다.
+7. **유휴 종료.** UE는 워커가 TimeToLive(기본 20초, 빌드 머신 600초) 동안 새 입력이 없으면 스스로 끝난다. Rocks 워커에는 타이머가 없다: 관리자가 유휴 시간(같은 기본값, 설정)이 지난 워커의 입력 pipe를 닫고, 워커는 EOF를 받으면 끝난다(11.1절 결정 SC4).
 8. **캐시.** 워커는 너겟을 읽거나 쓰지 않는다(`Rockpile.ko.md` 4절. 계획 §27.7 개정은 Rockpile 17절에 있다). 메인 프로세스가 조회·게시한다.
 9. **실패.** 워커가 비정상 종료하면 그 묶음의 job을 종료 종류·코드와 함께 실패로 보고하고 다른 묶음은 계속한다.
+
+### 11.1 SH1 설계(개정 23, 2026-11-23)
+
+SH1은 사용자 지시("에셋 처리 끝나고 남은 것들 이어가자", 2026-11-23)로 착수한다. 범위는 16절 SH1 행이고, 결정은 권장안으로 확정했다(애매한 곳은 UE 5.8 `ShaderCompileWorker`·`ShaderPreprocessor`·`ShaderCompilerCommon`·RenderCore `ShaderCore`를 따랐다). 결정 번호는 SC1–SC14다(5.4절 측정 S1–S14와 구분한다. 측정은 늘 "측정 Sn"으로 적는다). 교차 검증 1회(필수 11·권장 16)를 반영했다.
+
+**UE 대응표**(이름은 Rocks식, UE 이름은 이 표에만 둔다).
+
+| Rocks | UE 5.8 |
+|---|---|
+| `ShaderSourceTree`(가상 경로 → 디렉터리 mount) | `AddShaderSourceDirectoryMapping`·`GShaderSourceDirectoryMappings`(`Runtime/RenderCore/Private/ShaderCore.cpp:4218–4250`), `CheckVirtualShaderFilePath`(`:1620–1670`) |
+| `PreprocessShader` | `PreprocessShader`(`Developer/ShaderPreprocessor/Private/ShaderPreprocessor.cpp`, stb_preprocess) |
+| `Platform.rsh` | `Engine/Shaders/Public/Platform.ush` |
+| `BuildShaderJobKey` | `FShaderCompileJob::GetInputHash`(`ShaderCore.cpp:4612–4671`) |
+| `ShaderCompileOptions` | `FShaderCompilerEnvironment`의 컴파일 플래그 부분 |
+| `ShaderCompileManager` | `FShaderCompilingManager`(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp`) |
+| `ShaderWorkerPool`·워커 채널 | `FShaderCompileThreadRunnable`(같은 파일) |
+| `ShaderFormatBackend`(형식 컴파일 인터페이스) | `IShaderFormat`(`Developer/TargetPlatform/Public/Interfaces/IShaderFormat.h`) |
+| `ShaderWorkerExit`(워커 종료 코드) | `FSCWErrorCode`(`Runtime/RenderCore/Internal/ShaderCompileWorkerUtil.h:11–30`) |
+| `ShaderCompilerCommon` 모듈 | `Developer/ShaderCompilerCommon`(형식 모듈 공용 도구) |
+| 동반 타깃(`CompanionTargets`) | 에디터 빌드가 ShaderCompileWorker를 함께 빌드(`Programs/UnrealBuildTool/ProjectFiles/VisualStudio/VCProject.cs:2254` `bEditorDependsOnShaderCompileWorker`) |
+
+결정:
+
+- **SC1 모듈.** 3절 표대로다. 의존 방향은 `ShaderCompileWorker`(프로그램) → `ShaderWorker` → `ShaderFormat*` → `ShaderCompilerCommon`이고 정적 링크다(동적 모듈 아님). `ShaderCompilerCommon`은 두 프로세스가 같이 쓰는 것만 가진다: 형식 정의 읽기(지금 `ShaderCompiler`에 있는 `ShaderFormatDefinition`을 동작 불변으로 옮긴다), 워커 메시지 형식·종료 코드, 형식 컴파일 인터페이스 `ShaderFormatBackend`(형식 정의의 `compiler` 칸 struct `ShaderFormatCompiler`와 이름이 겹치지 않게 한다). `ShaderCompiler`는 메인 프로세스 전용(소스 트리·전처리기·키·옵션·너겟·관리자·워커 풀)이고 AssetNugget에 의존한다. 워커 쪽(`ShaderWorker`·`ShaderFormat*`·`Programs/ShaderCompileWorker`)은 `ShaderCompiler`·`AssetNugget`에 의존하지 않는다(11절 8항을 모듈 의존으로 강제 — 정책 `shader-worker-isolation`). 정책 `shader-tool-table`·`shader-tool-binary-load`의 허용 목록에 `ShaderCompilerCommon`(도구 표만)·`ShaderWorker`(도구 열기)를 더한다. 기존 `ShaderFormatVulkan`은 Sandbox의 개발용 컴파일 훅(`graphics::ShaderSourceCompiler`, Graphics 의존)을 SH2까지 그대로 두고, 같은 모듈에 `VULKAN_SM5` `ShaderFormatBackend`를 더해 워커가 링크한다. 훅과 Graphics 의존은 SH2에서 쿠킹 경로가 생길 때 지운다.
+- **SC2 소스 트리와 가상 경로.** `ShaderSourceTree`가 가상 루트 → 실제 디렉터리 mount 표를 가진다. 루트는 `/Engine`(엔진 `Engine/Shaders`, 그 아래 `Public`·`Private`·`Shared`)·`/Plugin/<이름>`·`/Project`다. mount 규칙은 UE `AddShaderSourceDirectoryMapping`과 같다: 가상 디렉터리는 `/`로 시작하고 `/`로 끝나지 않으며 `.`이 없고 중복 mount는 거부, 실제 디렉터리는 있어야 하고(PlatformBase `DirectoryExists`) 그 아래 `Generated` 디렉터리가 있으면 거부한다(모든 mount — UE `ShaderCore.cpp:4245–4248`). `/<루트>/Generated/…`는 메모리 원문(생성 HLSL, SH3) 전용이다. 파일 이름 규칙은 3절(`.rsf`·`.rsh`, `Shared`만 `.h`)이고 경로 성분은 ASCII `[A-Za-z0-9_.-]`만(`..`·`.`·빈 성분·`\` 거부). 시험은 임시 fixture 디렉터리를 `/Plugin/<이름>`으로 mount한다.
+- **SC3 전처리기(결정 6).** `PreprocessShader(tree, entryPath, defines, out)` — C 전처리기 부분집합을 Rocks가 직접 구현한다(외부 라이브러리 금지 규칙과 결정 6).
+  - 입력 정규화: 파일 앞 UTF-8 BOM을 떼고 CRLF·CR을 LF로 바꾼 뒤 처리한다(include 폐포의 내용 SHA-256은 원래 파일 byte로 계산한다). UTF-8이 아니면 오류.
+  - 지원: 줄 이음(`\` + 줄바꿈), 주석 제거(문자열 안 제외), `#include "…"`(`/`로 시작하면 가상 절대 경로, 아니면 포함한 파일 디렉터리 기준 상대 — UE `ShaderPreprocessor.cpp:436–441`), `#pragma once`(정규화된 가상 경로 기준), `#define`·`#undef`(객체형·함수형, `#`·`##`, `__VA_ARGS__`), `#if`·`#ifdef`·`#ifndef`·`#elif`·`#else`·`#endif`(`defined`, 64-bit 정수 산술·비교·논리·삼항), `#error`(진단으로 실패), `#line` 출력, `__LINE__`·`__FILE__`(가상 경로). 그 밖의 `#pragma`(예: `pack_matrix`·`warning`)는 그대로 출력에 남긴다(컴파일러가 해석한다).
+  - 컴파일러 내장 매크로: Rocks가 먼저 전처리하므로 `__SHADER_TARGET_MAJOR`·`__SHADER_TARGET_MINOR`·`__SHADER_TARGET_STAGE`·`__HLSL_VERSION`·`__spirv__`·`__DXC_VERSION_*` 같은 이름이 `#if`에서 조용히 0이 된다. UE는 이 값을 직접 정의해 넣지만(`Developer/Windows/ShaderFormatD3D/Private/ShaderFormatD3D.cpp:196–201`) Rocks는 `D3D11_SM5`의 대체 경로처럼 전처리 뒤에 컴파일러가 정해지는 경우가 있어 값이 하나로 정해지지 않는다. 그래서 `#if`·`#ifdef`·`#ifndef`·`#elif`·`defined`에 `__`로 시작하는 이름(`__LINE__`·`__FILE__` 제외)이 나오면 위치와 함께 오류로 막고, 작성자는 SC10의 `ROCKS_*` 정의를 쓴다. 조건 밖 원문에 쓴 내장 이름은 그대로 남아 실제 컴파일러가 펼친다.
+  - 받지 않는 것: `#include <…>`, 절대 OS 경로 include, trigraph, `#include_next`, `__DATE__`·`__TIME__`(결정성). 만나면 위치와 함께 오류다.
+  - 출력: 원문 줄 구조를 유지하고 파일이 바뀌거나 줄이 건너뛸 때 `#line N "<가상 경로>"`를 낸다. 결과는 결정적이다(같은 입력 같은 byte, 줄 끝 `\n`, 탭·공백 보존). include 폐포(가상 경로·내용 SHA-256 목록, 정렬)를 함께 돌려준다(셰이더 맵 키, 3절).
+  - 한도: include 깊이 64, 매크로 전개 깊이 256, 파일 하나 16 MiB, 출력 64 MiB(이름 있는 상수). 넘으면 위치와 함께 오류.
+  - 정합성(측정 S7): fixture 원문을 (가) Rocks 전처리 결과로 DXC 컴파일, (나) DXC가 직접 원문을 전처리해 컴파일(include handler가 같은 가상 경로를 주고, SC10 정의를 `-D`로 같이 준다)해 DXIL byte가 같고, 일부러 넣은 오류의 진단 위치(가상 경로·줄)가 같은지 본다. 내장 매크로를 `#if`에 쓴 fixture는 Rocks 쪽 오류를 확인한다. 시험 runner(EngineTests)가 도구를 연다(9절 정책 허용).
+- **SC4 워커 통신과 워커 채널.** 메인 프로세스가 P1 `Process`로 워커를 띄운다: `ShaderCompileWorker --work-dir <dir> --parent-pid <pid> --worker <n> [--keep-input] [--test-hooks]`.
+  - 입력 pipe는 lifeline이자 제어 통로다. 관리자는 `input.<seq>` 파일을 임시 이름에 다 쓴 뒤 no-replace 이동으로 놓고 `<seq>\n` 한 줄을 쓴다. 워커는 그 줄을 읽어(blocking) 입력을 읽고 지우며(`--keep-input`이면 남긴다), 결과를 임시 파일에 쓴 뒤 `output.<seq>`로 옮기고 출력 pipe에 `done <seq>\n`을 쓴다. 관리자는 그 줄을 받은 뒤에만 출력을 읽는다. 파일 존재 polling이 없다(UE는 입력 파일을 기다리며 잔다). 입력 EOF면 워커는 자기 자식을 정리하고 끝난다(11절 6항).
+  - 출력 pipe(stdout)는 제어 줄 전용이다. 워커 로그는 작업 디렉터리의 `worker.log` 파일로 보내고 stderr는 `Null`로 둔다(읽지 않는 pipe가 차서 워커가 멈추는 교착을 막는다 — `Process.h`의 pipe 계약).
+  - **워커 채널**: P1 `Process`는 한 객체를 한 번에 한 스레드만 다루고 다른 스레드에서 막힌 Read를 깨우는 취소가 없다(`Process.h` 스레드 계약, 후속). 그래서 관리자는 워커마다 전용 채널 스레드를 두고 그 스레드가 그 `Process`의 시작·쓰기·읽기·종료를 모두 한다. 다른 스레드는 채널의 요청 큐로만 일을 준다. 진행 중 묶음은 취소하지 않고 끝을 기다린다(워커 강제 종료는 채널 스레드 자신이 한다 — SC7). 관리자 종료는 큐에 종료를 넣고, 채널 스레드가 진행 중 묶음 뒤 입력 pipe를 닫고 종료 코드를 회수한다. P1에 교차 스레드 깨우기가 생기면 진행 중 묶음 취소를 더한다.
+  - 작업 디렉터리: 관리자는 시작할 때 자기 `<PID>` 디렉터리를 비우고(PID 재사용으로 남은 `input.*`·`output.*`가 no-replace 이동을 막지 않게), 다른 `<PID>` 디렉터리 가운데 그 PID가 살아 있지 않은 것을 지운다(PID 재사용 때문에 살아 있다고 보인 것은 남긴다 — 보수적).
+- **SC5 메시지 형식.** 입력 파일 `{magic "RSWI", u32 메시지 버전, Record TLV}`, 출력 파일 `{magic "RSWO", u32 메시지 버전, Record TLV}`(little-endian). 입력 Record의 머리: 도구 표 SHA-256(도구 표 전체의 정규 인코딩 SHA), 형식별 처리기 버전 표(형식 id → 형식 정의의 `processor.version` 정수), 메인 프로세스의 `build::ToolchainFingerprint()`와 `deterministic::Version`. 본문: 요청 종류(`ToolQuery`·`Compile`), 쓰는 형식 정의 byte(형식 id별 — 키에 넣은 바로 그 snapshot byte, 워커가 같은 파서로 읽는다), job 목록(키, 형식 id, 단계, 엔트리, 전처리 원문, 옵션, 레이아웃 표 정규 byte). 출력 Record: job마다 상태(성공·컴파일 오류·도구 오류·`UnsupportedCapability`)·값 목록(10절 ValueId)·진단, `ToolQuery`면 도구별 확인 결과와 system 도구 지문. 크기 상한(입력·출력 파일 각 1 GiB, 이름 있는 상수)을 넘는 묶음은 만들지 않는다.
+- **SC6 종료 코드와 버전 불일치.** `ShaderWorkerExit`: `Success` 0, `GeneralFailure` 1, `BadMessageVersion` 2, `BadFormatVersion` 3, `BadToolTable` 4, `BadInputFile` 5, `CannotDeleteInput` 6, `CannotSaveOutput` 7, `BadArguments` 8, `OutOfMemory` 9, `BadToolchain` 10(UE `FSCWErrorCode` 대응 — 위 표. `BadToolchain`은 Rocks가 더한 것이다: 키 머리의 툴체인 지문은 메인 프로세스 값이므로 다른 컴파일러로 빌드된 오래된 워커를 여기서 잡는다). 메시지 버전·처리기 버전 표·도구 표 SHA·툴체인 지문·결정적 수학 버전이 워커 자기 것과 다르면 출력 없이 해당 코드로 끝나고, 관리자는 "ShaderCompileWorker를 다시 빌드하라"(버전·툴체인)·"도구 표가 다른 빌드다"(도구) 진단으로 그 묶음 job을 실패시킨다(11절 2항). 그 밖의 비정상 종료(코드 밖 값·강제 종료·충돌)는 종료 종류·코드와 함께 그 묶음 job만 실패로 보고하고 다른 묶음은 계속한다(11절 9항). 워커는 오류 대화상자를 띄우지 않는다(Launch 크래시 수집 설정, abort·assert 대화상자 억제 — 도구 probe 규칙과 같다).
+- **SC7 시험 hook과 프로세스 감시 시험.** `--test-hooks`로 띄운 워커만 시험 job 종류를 받는다: `Hold`(출력 pipe에 `held <seq>\n`을 쓰고 입력 pipe의 다음 줄까지 막힌다), `SpawnChild`(P1으로 지정 probe를 자식으로 띄우고 PID를 출력 pipe에 쓴 뒤 `Hold`), `Crash`(접근 위반), `Assert`(Fatal 경로). 모두 명시 gate다.
+  - 강제 종료: 관리자 채널에 시험 hook(함수)을 걸면 채널 스레드가 `held` 줄을 받았을 때 hook을 부르고, hook이 종료를 고르면 채널 스레드가 그 워커를 끝낸 뒤 보고를 확인한다(교차 스레드 Terminate가 없다 — SC4).
+  - 충돌·대화상자: `Crash`·`Assert` job의 묶음이 실패로 보고되고 다른 묶음은 성공하며, 대화상자 없이 끝나는지(시험이 시간 상한 안에 끝남) 본다.
+  - 부모 종료: 중간 부모 probe가 워커를 띄우고, 워커가 손자를 띄워 PID들을 알린다. 시험은 중간 부모에게 명령 줄을 보내 **스스로** 비정상 종료하게 하고(시험이 중간 부모 `Process`를 Terminate하면 Windows job object가 자손을 함께 죽여 시험이 저절로 통과하므로), 워커·손자의 종료를 기다린 뒤에야 중간 부모 `Process`를 닫는다.
+  - 기다림은 `WaitForProcessExit(pid, timeoutMs)`다. 같은 이름·시그니처가 지금 `TestSupport/HostFailure.h`에 Windows만 있다. 이것을 PlatformBase로 옮겨(Windows `OpenProcess(SYNCHRONIZE)`+대기, macOS `kqueue` `EVFILT_PROC`·`NOTE_EXIT`, Linux `pidfd_open`+`poll`) TestSupport가 부르게 한다(공용 유틸리티 중복 금지). sleep·polling이 없고 시간 상한은 실패 판정에만 쓴다. 한계: PID로 여는 대기라 그 사이 PID가 재사용되면 다른 프로세스를 기다린다(11절 6항과 같은 한계 — 시험은 PID를 받은 직후 기다림을 연다).
+- **SC8 단계.** 새 단계 enum을 만들지 않고 형식 정의의 `ShaderStageBits`(vertex 1·pixel 2·compute 4) 한 비트를 job 단계로 쓴다. 키·메시지·명령이 이 값과 형식 정의 어휘(`vertex`·`pixel`·`compute`)를 쓴다. Graphics `graphics::ShaderStage`(0부터)와의 대응은 SH2의 쿠킹 경로가 정한다.
+- **SC9 컴파일 옵션.** `ShaderCompileOptions`(`ROCKS_STRUCT`, `ShaderCompiler` 모듈): `hlsl2021`(bool, 기본은 형식 정의 `language.hlsl2021`), `optimization`(enum `O0`·`O1`·`O2`·`O3`, 기본 `O3`), `debugSymbols`(bool, 기본 false — SH1은 true를 `Unsupported`로 거부하고 SH4에서 값 3을 만들 때 연다), `matrixLayout`(enum, `Row` 하나 — 7.2절 6항 고정). 키에는 `WriteReflected`로 기본값 포함 전체가 들어간다(10절 6행). 명령·API가 같은 옵션을 두 번 주거나 모르는 이름·값이면 job 생성 오류다.
+- **SC10 전처리 정의와 `Platform.rsh`.** 메인 프로세스가 job마다 정의를 넣고 전처리한다: `ROCKS_FORMAT_<형식 id>` = 1, `ROCKS_BACKEND_<D3D12|D3D11|VULKAN|METAL|GLES>` = 1, `ROCKS_COMPILER_DXC` 또는 `ROCKS_COMPILER_FXC` = 1(형식 정의의 1차 경로), `ROCKS_SHADER_MODEL_MAJOR`·`ROCKS_SHADER_MODEL_MINOR`(형식 정의 `compiler.shaderModel` — 내장 `__SHADER_TARGET_*` 대신), `ROCKS_HLSL2021` = 0·1, `ROCKS_VERTEX_SHADER`·`ROCKS_PIXEL_SHADER`·`ROCKS_COMPUTE_SHADER` 중 하나 = 1, 그리고 job이 준 정의(퍼뮤테이션 — P14). job이 준 정의가 `ROCKS_`로 시작하거나 같은 이름이 두 번이면 job 생성 오류다. 정의는 이름순으로 원문 앞에 놓인 것처럼 적용하고, 전처리기가 엔트리 원문 앞에 `/Engine/Public/Platform.rsh`를 **강제로 include**한다(작성자가 쓰지 않는다 — UE 원문이 `Common.ush`로 `Platform.ush`를 끌어오는 자리를 고정한 것). SH1의 `Platform.rsh`는 이 정의에서 나오는 형식·컴파일러 매크로와 `ROCKS_IMAGE_FORMAT(f)` 전개(형식 정의 `compiler.imageFormat`, 5.4절 SH0 결과)만 가진다. 바인딩 매크로(`ROCKS_ROOT_CONSTANTS` 등)는 SH2다.
+  - `D3D11_SM5`의 경로: `hlsl2021`이 참이면 FXC를 건너뛰고 바로 DXC → SPIR-V → SPIRV-Cross HLSL 5.0 → FXC다(옵션으로 정해지므로 결정적). 거짓이면 FXC를 먼저 쓰고, FXC가 **컴파일 오류**(오류 blob이 있는 `E_FAIL`)를 낼 때만 대체 경로를 탄다. 그 밖의 FXC 실패(`E_OUTOFMEMORY`, 다른 HRESULT, 도구 내부 오류)는 도구 오류로 job 실패이고 게시하지 않는다(같은 키에서 다른 출력이 나오지 않게). 두 경로 모두 FXC 정의(`ROCKS_COMPILER_FXC`)로 전처리한 같은 원문을 쓴다.
+- **SC11 관리자와 워커 풀.** `ShaderCompileManager`가 job을 받아 전처리 → (system 도구 형식이 있으면) 도구 조회 → 키 계산 → 너겟 일괄 조회 → 미적중을 묶음으로 나눠 워커 채널에 보냄 → 결과 게시 순서로 돈다. 조정은 관리자의 조정 스레드가 하고(너겟 요청을 기다리는 스레드 — 10절), 워커 채널 스레드는 묶음 실행만 한다.
+  - 도구 조회(11절 3항): 세션에서 처음 컴파일을 보낼 때 워커 하나에 `ToolQuery`를 보내 저장소 도구 확인과 system 도구 지문을 얻는다. system 도구(Apple `MetalToolchain`)를 쓰는 형식이 job에 있으면 키를 계산하기 **전에** 한다(지문이 키 2행에 들어간다). 도구 조회에서 `metal`·`metallib`의 절대 경로를 `xcrun --find`로 한 번 고정하고 그 파일을 SHA-256한다.
+  - 워커 수는 설정(기본 `min(논리 코어 - 1, 8)`, 최소 1), 묶음 상한은 job 32개·원문 합 4 MiB(이름 있는 상수, 측정 S8: 워커 열기 비용이 Release 약 80 ms라 묶음으로 나눠 갚는다). 결과는 job 순서 그대로 돌려준다(워커 배정 순서와 무관).
+- **SC12 필요 시 컴파일.** Development 실행이 쿠킹된 셰이더에 없는 job을 만나면 관리자의 `CompileNow(job)`(동기, 한 건)을 부른다(UE의 개발 중 셰이더 컴파일과 같은 자리). SH1은 API·시험까지이고 런타임 연결은 SH2다(쿠킹된 라이브러리 경로와 함께). Release 실행 파일은 이 모듈에 닿지 않는다(9절 정책).
+- **SC13 명령.** Commandlet 호스트에 `shader-compile`을 둔다: `shader-compile [--project <dir>] [--profile <엔진 프로필 id>] [--format <id>]... [--define NAME=VALUE]... [--option NAME=VALUE]... [--out <dir>] <가상 경로>:<엔트리>:<vertex|pixel|compute>...`. SH1의 `--profile`은 엔진 컴파일 프로필만 받는다(기본 호스트 프로필). job마다 키(hex)·적중 여부·산출 파일을 출력하고, `--out`이 있으면 `<out>/<형식>/<이름>.<엔트리>.<단계>.<확장자>`에 값 0을 쓴다. `<이름>`은 가상 경로의 `/`를 `+`로 바꾼 것이다(`+`는 가상 경로 문자가 아니므로 이름이 겹치지 않는다 — SC2). 종료 코드 0은 전부 성공, 1은 job 실패가 있음, 2는 사용법 오류.
+- **SC14 동반 타깃.** 워커는 독립 프로그램 타깃 `ShaderCompileWorker`다. 이 실행 파일을 쓰는 타깃(Commandlet·Sandbox·EngineTests)이 같이 빌드하도록 Rocks.Build `TargetRules`에 `CompanionTargets`(함께 빌드해 같은 bin에 두는 프로그램 타깃 목록)를 더한다(UE 에디터 ↔ ShaderCompileWorker 대응, BuildTargets 문서에 함께 적는다). 구성은 요청한 타깃과 같다(UE는 에디터 구성과 관계없이 워커를 Development로 빌드하지만 — `VCProject.cs:2257` — Rocks는 구성을 하나 더 빌드하지 않는다. Debug 워커의 도구 열기 비용 약 1.2 s(측정 S8)는 받아들이고 시험은 워커를 적게 띄우게 짠다). 워커 실행 파일은 호출하는 실행 파일과 같은 폴더에서 찾는다. 시험 hook은 `--test-hooks`로만 켠다.
+
+하위 단계(각각 첫 검증 1회 뒤 engine-runtime에 병합):
+
+| 단계 | 범위 | 시험 |
+|---|---|---|
+| SH1a | `ShaderSourceTree`(SC2)·`PreprocessShader`(SC3)·`Engine/Shaders/Public/Platform.rsh`(SC10의 매크로 부분)·전처리 정의 조립(SC10) | 가상 경로·mount 음성 대조(`Generated`·문자·중복), BOM·CRLF, 지시문 하나씩·중첩·`#pragma once`·상대 include·매크로(`#`·`##`·가변 인자·재귀 금지)·조건식, 내장 매크로 조건 거부, 예약·중복 정의 거부, `#line`·`__FILE__`, 한도 경계, 결정성(같은 입력 같은 byte, 작업 디렉터리 무관), 측정 S7(DXC 대조 — 도구가 없으면 SKIP) |
+| SH1b | `ShaderCompilerCommon` 분리(형식 정의 동작 불변 이동)·`ShaderCompileOptions`(SC9)·`BuildShaderJobKey`(10절)·셰이더 Record 값 표·너겟 위치(10절)·정책 `shader-worker-isolation`과 허용 목록 갱신 | 키 입력별 무효화와 불변(10절 완료 기준), 키 golden(`NuggetKeyTrace`, 실행 중 지문으로 기대값), 임시 root의 fixture `Config/AssetNuggets.json`으로 설정·위치(실제 `Engine/Intermediate`를 쓰지 않는다), 값 표 왕복 |
+| SH1c | 워커 메시지(SC5)·종료 코드(SC6)·`ShaderWorker`·`Programs/ShaderCompileWorker`·`ShaderFormatBackend`·`D3D12_SM6`(DXC DXIL, 서명 검사)·`VULKAN_SM5`(DXC SPIR-V·`spirv-val`) 경로·도구 조회·워커 채널(SC4)·PlatformBase `WaitForProcessExit`(SC7)·시험 hook·동반 타깃(SC14) | 메시지 왕복·손상 거부, 버전·처리기·도구 표·툴체인 불일치 종료 코드와 진단, 도구 조회, 강제 종료 보고(gate), `Crash`·`Assert` 보고와 대화상자 없음, 부모 종료 시 워커와 손자 종료 |
+| SH1d | `ShaderCompileManager`·`ShaderWorkerPool`(SC11)·너겟 일괄 요청·`CompileNow`(SC12)·`shader-compile`(SC13) | 같은 입력 같은 byte(반복·워커 수·묶음 크기·작업 디렉터리 변경), 빈 캐시와 찬 캐시 결과 동일(system 도구 없는 형식의 찬 캐시는 워커 0개), 묶음 하나 실패가 다른 묶음에 번지지 않음, DigestChanged·Corrupt·값 0 없는 Record 재컴파일, `required` 오류, 명령 출력·종료 코드·출력 이름 |
+| SH1e | 나머지 경로: `ShaderFormatD3D`의 FXC(`D3D11_SM5`, SC10의 대체 경로 규칙)·`ShaderFormatOpenGL`(ESSL 320 — SH2 재작성 전 출력)·`ShaderFormatMetal`(MSL 2.4 + metallib, `MetalToolchain`이 없으면 `METAL_SM5` job 전체가 `UnsupportedCapability` — MSL만 내고 성공하지 않는다). SH0에 남은 macOS 측정(측정 S1·S3·S9)을 `shader-compile --out`으로 옮긴 뒤 `Programs/ShaderToolSpike`를 지운다(9절 진척의 약속) | 형식별 산출(원문·정의·옵션을 스파이크와 같게 맞춘 fixture에서 스파이크와 같은 byte), FXC 대체 경로(컴파일 오류만), macOS 밖 metallib `UnsupportedCapability`, 실수 출력·상수 접기 fixture(10절) |
+
+SH1 출력은 SH2 정규화(재배치·리플렉션·GLES 재작성) 전의 형식 산출물이다. SH2가 그 처리를 더할 때 형식 정의의 `processor.version`을 올리므로 SH1 너겟은 키가 달라져 다시 만들어진다.
+
+**SH1a 구현 메모(개정 24, 2026-11-23).** SC2·SC3·SC10을 구현했고 측정 S7을 쟀다(5.4절).
+
+- 구조: `ShaderCompiler` 공개 헤더 `ShaderSourceTree.h`(mount·가상 경로·읽기)·`ShaderPreprocessor.h`(`PreprocessShader`·`PreprocessedShader`·한도)·`ShaderPreprocessDefines.h`(`BuildShaderPreprocessDefines`·`ShaderDefineSet`). 전처리기는 기능별 파일이다: 텍스트(정규화·논리 줄·토큰), 매크로(정의·숨김 집합·전개), 식, 지시문·출력. 재귀 금지는 숨김 집합(Prosser, C 6.10.3.4)이고, 매크로 깊이는 숨김 집합 크기와 인자 미리 전개 중첩 둘 다로 센다. 소스 트리·전처리·정의 조립은 오류 코드 하나(`ShaderSourceError`)와 고정 버퍼 결과(`ShaderSourceStatus` — 가상 경로·줄·영어 세부)를 함께 쓴다. `Engine/Shaders/Public/Platform.rsh`가 생겼다.
+- 스펙이 정하지 않은 곳(UE 5.8 또는 권장안으로 정함):
+  - 상대 include의 `.`·`..`는 UE(`ShaderPreprocessor.cpp:436–441`, `CollapseRelativeDirectories`)처럼 포함한 파일 디렉터리에 붙여 접은 뒤 가상 경로 규칙을 적용한다(가상 루트 위로 나가면 오류). `/`로 시작하는 include는 접지 않고 그대로 검사한다.
+  - `Shared`(`.h`만) 규칙은 모든 루트의 `<루트>/Shared/`에 쓴다. 엔트리는 `.rsf`만 받는다.
+  - 다른 내용의 매크로 재정의는 오류(`MacroRedefined`)다. clang은 경고 뒤 바꾸지만 job 정의·플랫폼 정의가 조용히 바뀌는 것을 막는다. 같은 내용은 받는다.
+  - 조건식의 `true`·`false`는 1·0이다(C++ 규칙. DXC와 같음을 S7 fixture로 확인했다). 문자 리터럴은 조건에서 받지 않는다. 결정성 거부에 `__TIMESTAMP__`를 더했고, job 정의 이름의 `__` 접두도 예약으로 막는다.
+  - 출력 공백: 원문 토큰은 앞 공백을 그대로, 전개 토큰은 공백 하나를 두고, 붙이면 다른 토큰이 되는 자리에는 공백을 넣는다(clang `-E`의 붙임 방지와 같은 목적). 같은 파일에서 8줄 이하 건너뜀은 빈 줄, 넘거나 파일이 바뀌면 `#line`이다(clang `-E`와 같은 기준). `#line`은 토큰을 낼 때만 쓰므로 토큰이 없는 파일(지금의 `Platform.rsh`)은 출력에 이름이 나오지 않는다. 다른 `#pragma`는 펼치지 않고 그 줄 그대로 둔다.
+  - 한도는 `ShaderPreprocessLimits`(기본값이 SC3 상수)로 받는다. 시험이 파일·출력 경계를 작은 값으로 정확히 잰다. 출력 한도는 한 줄의 전개 중간 결과(`#if` 식처럼 출력하지 않는 전개)에도 쓴다.
+  - SC10 파생 매크로는 `Platform.rsh`가 만든다: `ROCKS_SPIRV`(Vulkan·Metal·GLES면 1, D3D면 0)와 `ROCKS_IMAGE_FORMAT(Format)`(SPIR-V면 `[[vk::image_format("Format")]]`, D3D면 빈 것). 형식 정의 읽기가 `imageFormat`을 경로와 묶으므로(D3D 경로 `Empty`, SPIR-V 경로 `VkImageFormat`) backend 정의에서 같은 값이 나온다. 그래서 SC10 정의 목록에 새 정의를 더하지 않았다. `Platform.rsh`는 backend·컴파일러·단계 정의가 하나씩인지 `#error`로 검사한다.
+- S7 도구: `ShaderToolLoader`에 `CompileWithDxc`(IDxcCompiler3 + include handler, Windows 구현만, 다른 호스트는 `UnsupportedHost`)를 더했다. 도구를 여는 워커 자리 모듈이라 정책 `shader-tool-binary-load` 안이고, SH1c 형식 모듈이 다시 쓸 수 있다. 시험은 시험 runner(`Programs/FoundationTests/Engine/ShaderPreprocessDxcTests.cpp`)에 둔다 — 모듈 `Tests` 폴더(`Developer/ShaderCompiler/Tests`)는 도구 열기 허용 위치가 아니다. (나)는 주 파일에서 `Platform.rsh`와 엔트리를 include하고 `-I .`를 준다: DXC(clang)는 Windows에서 `/Engine/…`를 절대 경로로 보지 않아 포함한 파일 기준 후보(`.\Plugin\S7\Engine\…`)만 찾기 때문이다. handler는 `.\`·`\`·`/./`를 가상 경로로 바꾸고 트리에 없는 후보를 거절한다. 버린 대안: 형식 모듈(SH1c)을 앞당겨 DXIL 경로를 만드는 것(단계 범위 밖), 시험 runner에 Windows 전용 폴더를 더하는 것(정책 `platform-boundary` 예외가 늘어난다).
+- 한계(후속): Windows는 대소문자만 다른 가상 경로로 같은 파일을 연다. 폐포와 `#pragma once`는 철자가 다르면 다른 파일로 보고, 대소문자를 가리는 macOS에서는 그 철자가 실패한다(디렉터리 열거로 철자를 확인하는 것이 후속이다). 지원하지 않는 확장(GNU 이름 붙은 가변 인자 `args...`·`#warning`·`#line` 입력은 오류, `__VA_OPT__`·`_Pragma`·`, ## __VA_ARGS__` 쉼표 삼키기는 C 표준대로 처리하거나 그대로 남긴다). 컴파일러 진단의 줄은 원문과 같지만 열은 공백 정규화 때문에 다를 수 있다.
 
 ## 12. P6a·P14·P6b 형식 정의·셰이더 타입·TargetProfile·쿠킹 매니페스트
 
@@ -776,7 +876,7 @@ Rocks 규칙:
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
 | SH0 | 도구 스파이크: 지금의 내장 샘플 셰이더(`Programs/Sandbox/Private/SampleRenderer.cpp`의 HLSL)를 DXIL·SPIR-V·DXBC·MSL·ESSL로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | P3·P4·P10 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함, S1), FXC 고정본 로드, 리플렉션 덤프, `ROCKS_IMAGE_FORMAT`의 DXC 지원 확인, S2·S3·S6·S8·S9·S10·S12(데스크톱)·S13·S14 측정. 남은 것(2026-11-20): macOS 부분(S1·S3 호스트 사이·S9)과 기계 하나로 못 재는 S2·S3·S12 일부(5.4절 끝) |
-| SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1, 11절)·두 층 키(P5)·에셋 너겟·`shader-compile` 명령·Development 필요 시 컴파일 | SH0·P1·P5(A2·A3·P6a)·결정 6 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고, 부모 종료 시 워커와 그 자식 종료, 형식 버전 불일치 진단, 도구 조회, 전처리 정합성(S7) |
+| SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1, 11절)·두 층 키(P5)·에셋 너겟·`shader-compile` 명령·Development 필요 시 컴파일. 설계·하위 단계 SH1a–SH1e: 11.1절(개정 23) | SH0·P1·P5(A2·A3·P6a)·결정 6 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고, 부모 종료 시 워커와 그 자식 종료, 형식 버전 불일치 진단, 도구 조회, 전처리 정합성(측정 S7) |
 | SH2 | 리플렉션 정규화·워커 규칙 검사(7.2절)·Graphics API(`ShaderCodeKind`·`CreateShader`·파이프라인 layout·root signature·래스터(컬링·앞면)와 깊이 상태)·셰이더 타입과 퍼뮤테이션(P14)·쿠킹된 라이브러리 로드(P6b)·VulkanGraphics 최소 구현(offscreen·내장 셰이더, P9)·OpenGLGraphics GLES 미리보기 전환(P11)·샘플 렌더러 원문·런타임 `D3DCompile`·GLSL 원문 제거(결정 9) | SH1·P2·P4·P6b·P9·P11·P14·A0-G·결정 2·3·4·5 | Sandbox self-test에서 D3D12·Vulkan·GLES 미리보기가 허용 오차 안 일치(Vulkan·GL은 CI에서 NOT RUN일 수 있다), A0-G 범위를 Vulkan이 받음(G3), 행렬 옵션·앞면 매핑 기록(S5), Release에 컴파일러 없음(P4), 7.3절 SH2 시험 |
 | SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험 | SH2·P7 | 7.3절 (a)·(f)를 생성 구조체로 |
 | SH4 | 감시 재컴파일(`DirectoryWatch`)·오류 위치·디버그 심볼·PSO 교체 | SH2 | 저장 후 10초 안 반영(계획 I5) |
@@ -873,3 +973,10 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - S13 → 7.2절 4항: GLES typed buffer 모양이 예상대로이고 typed buffer SRV는 결합 sampler 목록에 없으므로 워커가 따로 유닛을 매긴다. 읽고 쓰는 ES image는 `r32f`·`r32i`·`r32ui`만이라는 워커 검사를 더했다. Metal typed buffer는 `texture_buffer_native`로 낸다.
   - S14 → 7.2절 7항: 모든 형식의 변환을 확인했고 FXC `vs_5_0`이 받으므로 `D3D11_SM5`에 `vertexViewportLayerOutput`을 넣었다(형식 정의·시험, 12.1절). SPIR-V 확장은 그 기능을 요구한 셰이더에만 허용한다.
 - 개정 22(2026-11-21): 8절 2항 FXC의 bootstrap 원본을 버전 구분 없는 `Redist/D3D/x64`에서 버전별 `bin/10.0.22621.0/x64` 사본으로 바꿨다(SDK 10.0.26100 설치가 `Redist` 본을 덮어써 SHA 불일치). 버전별 사본은 REDIST 목록 밖이라 재배포 묶음은 `Redist` 본을 따로 고정한다. 설치 마법사·`.vsconfig`가 SDK 10.0.22621도 설치한다([설치 마법사](SetupWizard.ko.md)).
+- 개정 23(2026-11-23): P5를 A3 실제 API에 맞추고 SH1 설계를 더했다(사용자 지시 "에셋 처리 끝나고 남은 것들 이어가자").
+  - 10절: job 키를 `NuggetKeyWriter` 기록 순서로 다시 썼다(공통 머리 `WriteNuggetKeyHeader`, 도구는 `WriteNuggetEncoder` 목록, 키를 Record 키로 그대로). 너겟 위치(엔진만 쓸 때 root = 엔진 폴더), Record 값 표(ValueId 0–4), 실패 job 비게시, 일괄 요청과 결과 상태 처리, 완료 기준(세대·처리기·단계·엔트리 무효화, 키 golden, 빈·찬 캐시).
+  - 5.1·5.2절: A1–A3 구현 상태, N1–N3 반영 기록.
+  - 3절·11절·11.1절: 모듈(`ShaderCompilerCommon`·`ShaderWorker` 추가), 워커 pipe 제어 줄과 관리자 쪽 유휴 종료, SH1 결정 SC1–SC14와 하위 단계 SH1a–SH1e, UE 대응표.
+  - 교차 검증 1회(필수 11·권장 16) 반영: 결정 번호를 측정과 구분(SC), 키 golden은 실행 중 지문으로, 전체 Record 조회, 진단을 Record에서 뺌(값 표 0–3), D3D11 대체 경로는 FXC 컴파일 오류만, 입력 머리에 툴체인 지문(`BadToolchain`), system 도구 조회를 키 계산 앞으로, 내장 매크로 조건 거부와 `ROCKS_SHADER_MODEL_*`, 인터페이스 이름 `ShaderFormatBackend`, 워커 채널 스레드(P1 스레드 계약), 옵션은 `ShaderCompileOptions` 리플렉션 기록, 도구 role·Apple 지문 규칙, snapshot byte, 엔진 프로필 한정, `ShaderStageBits`, `WaitForProcessExit`를 PlatformBase로 옮김, 작업 디렉터리 정리, 동반 타깃 구성, 스파이크 삭제 순서, BOM·CRLF, 예약 정의, `Platform.rsh` 강제 include, `Generated` 범위, 출력 이름.
+  - 16절: SH1 행에 하위 단계 참조.
+- 개정 24(2026-11-23): SH1a 구현 메모(11.1절 — 구조, 상대 include 접기·`Shared` 범위·재정의 오류·`true`·출력 공백과 `#line` 기준·한도 묶음·`ROCKS_SPIRV`, S7 도구 `CompileWithDxc`와 시험 위치, 대소문자 한계)와 측정 S7 결과(5.4절: DXIL·SPIR-V byte 동일, 오류 위치 동일).

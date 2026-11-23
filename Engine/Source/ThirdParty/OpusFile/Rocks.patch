@@ -1,0 +1,190 @@
+diff --git a/src/info.c b/src/info.c
+index 000c74b..db95d6f 100644
+--- a/src/info.c
++++ b/src/info.c
+@@ -65,7 +65,7 @@ int opus_head_parse(OpusHead *_head,const unsigned char *_data,size_t _len){
+     int    ci;
+     if(head.channel_count<1||head.channel_count>8)return OP_EBADHEADER;
+     size=21+head.channel_count;
+-    if(_len<size||head.version<=1&&_len>size)return OP_EBADHEADER;
++    if(_len<size||(head.version<=1&&_len>size))return OP_EBADHEADER;
+     head.stream_count=_data[19];
+     if(head.stream_count<1)return OP_EBADHEADER;
+     head.coupled_count=_data[20];
+@@ -334,7 +334,7 @@ int opus_tags_set_binary_suffix(OpusTags *_tags,
+   unsigned char *binary_suffix_data;
+   int            ncomments;
+   int            ret;
+-  if(_len<0||_len>0&&(_data==NULL||!(_data[0]&1)))return OP_EINVAL;
++  if(_len<0||(_len>0&&(_data==NULL||!(_data[0]&1))))return OP_EINVAL;
+   ncomments=_tags->comments;
+   ret=op_tags_ensure_capacity(_tags,ncomments);
+   if(OP_UNLIKELY(ret<0))return ret;
+diff --git a/src/opusfile.c b/src/opusfile.c
+index 642c784..4caf692 100644
+--- a/src/opusfile.c
++++ b/src/opusfile.c
+@@ -238,7 +238,7 @@ static int op_add_serialno(const ogg_page *_og,
+   nserialnos=*_nserialnos;
+   cserialnos=*_cserialnos;
+   if(OP_UNLIKELY(nserialnos>=cserialnos)){
+-    if(OP_UNLIKELY(cserialnos>INT_MAX/(int)sizeof(*serialnos)-1>>1)){
++    if(OP_UNLIKELY(cserialnos>(INT_MAX/(int)sizeof(*serialnos)-1)>>1)){
+       return OP_EFAULT;
+     }
+     cserialnos=2*cserialnos+1;
+@@ -1137,7 +1137,7 @@ static int op_bisect_forward_serialno(OggOpusFile *_of,
+     serialnos=*_serialnos;
+     nserialnos=*_nserialnos;
+     if(OP_UNLIKELY(nlinks>=clinks)){
+-      if(OP_UNLIKELY(clinks>INT_MAX-1>>1))return OP_EFAULT;
++      if(OP_UNLIKELY(clinks>(INT_MAX-1)>>1))return OP_EFAULT;
+       clinks=2*clinks+1;
+       OP_ASSERT(nlinks<clinks);
+       links=(OggOpusLink *)_ogg_realloc(links,sizeof(*links)*clinks);
+@@ -1191,7 +1191,7 @@ static int op_bisect_forward_serialno(OggOpusFile *_of,
+     while(_searched<end_searched){
+       opus_int32 next_bias;
+       /*If we don't have a better estimate, use simple bisection.*/
+-      if(bisect==-1)bisect=_searched+(end_searched-_searched>>1);
++      if(bisect==-1)bisect=_searched+((end_searched-_searched)>>1);
+       /*If we're within OP_CHUNK_SIZE of the start, scan forward.*/
+       if(bisect-_searched<OP_CHUNK_SIZE)bisect=_searched;
+       /*Otherwise we're skipping data.
+@@ -1842,7 +1842,7 @@ static int op_get_link_from_serialno(const OggOpusFile *_of,int _cur_link,
+   do{
+     if(_page_offset>=links[_cur_link].offset)li_lo=_cur_link;
+     else li_hi=_cur_link;
+-    _cur_link=li_lo+(li_hi-li_lo>>1);
++    _cur_link=li_lo+((li_hi-li_lo)>>1);
+   }
+   while(li_hi-li_lo>1);
+   /*We've identified the link that should contain this page.
+@@ -2197,7 +2197,7 @@ static ogg_int64_t op_get_granulepos(const OggOpusFile *_of,
+   li_hi=nlinks;
+   do{
+     int li;
+-    li=li_lo+(li_hi-li_lo>>1);
++    li=li_lo+((li_hi-li_lo)>>1);
+     if(links[li].pcm_file_offset<=_pcm_offset)li_lo=li;
+     else li_hi=li;
+   }
+@@ -2333,7 +2333,7 @@ static int op_pcm_seek_page(OggOpusFile *_of,
+              first seek location gives better results, on average.*/
+           if(diff<0){
+             OP_ASSERT(offset>=begin);
+-            if(offset-begin>=end-begin>>1||diff>-OP_CUR_TIME_THRESH){
++            if(offset-begin>=(end-begin)>>1||diff>-OP_CUR_TIME_THRESH){
+               best=begin=offset;
+               best_gp=pcm_start=gp;
+               /*If we have buffered data from a continued packet, remember the
+@@ -2372,7 +2372,7 @@ static int op_pcm_seek_page(OggOpusFile *_of,
+             }
+             /*No such luck.
+               Check if we can cut off at least half the range, though.*/
+-            if(offset-begin<=end-begin>>1||diff<OP_CUR_TIME_THRESH){
++            if(offset-begin<=(end-begin)>>1||diff<OP_CUR_TIME_THRESH){
+               /*We really want the page start here, but this will do.*/
+               end=boundary=offset;
+               pcm_end=gp;
+@@ -2402,8 +2402,8 @@ static int op_pcm_seek_page(OggOpusFile *_of,
+       /*Update the interval size history.*/
+       d0=d1>>1;
+       d1=d2>>1;
+-      d2=end-begin>>1;
+-      if(force_bisect)bisect=begin+(end-begin>>1);
++      d2=(end-begin)>>1;
++      if(force_bisect)bisect=begin+((end-begin)>>1);
+       else{
+         ogg_int64_t diff2;
+         OP_ALWAYS_TRUE(!op_granpos_diff(&diff,_target_gp,pcm_start));
+diff --git a/src/stream.c b/src/stream.c
+index 6559e1d..889e58b 100644
+--- a/src/stream.c
++++ b/src/stream.c
+@@ -26,6 +26,8 @@
+ #include <string.h>
+ #if defined(_WIN32)
+ # include <io.h>
++/* Rocks modification (Engine/Source/ThirdParty/OpusFile/ThirdParty.json "modifications"): _wfsopen needs _SH_DENYNO. */
++# include <share.h>
+ #endif
+ 
+ typedef struct OpusMemStream OpusMemStream;
+@@ -162,7 +164,7 @@ static wchar_t *op_utf8_to_utf16(const char *_src){
+           if((c0&0xE0)==0xC0){
+             wchar_t w;
+             /*Start byte says this is a 2-byte sequence.*/
+-            w=(c0&0x1F)<<6|c1&0x3F;
++            w=(c0&0x1F)<<6|(c1&0x3F);
+             if(w>=0x80U){
+               /*This is a 2-byte sequence that is not overlong.*/
+               dst[di++]=w;
+@@ -179,7 +181,7 @@ static wchar_t *op_utf8_to_utf16(const char *_src){
+               if((c0&0xF0)==0xE0){
+                 wchar_t w;
+                 /*Start byte says this is a 3-byte sequence.*/
+-                w=(c0&0xF)<<12|(c1&0x3F)<<6|c2&0x3F;
++                w=(c0&0xF)<<12|(c1&0x3F)<<6|(c2&0x3F);
+                 if(w>=0x800U&&(w<0xD800||w>=0xE000)&&w<0xFFFE){
+                   /*This is a 3-byte sequence that is not overlong, not a
+                      UTF-16 surrogate pair value, and not a 'not a character'
+@@ -199,7 +201,7 @@ static wchar_t *op_utf8_to_utf16(const char *_src){
+                   if((c0&0xF8)==0xF0){
+                     opus_uint32 w;
+                     /*Start byte says this is a 4-byte sequence.*/
+-                    w=(c0&7)<<18|(c1&0x3F)<<12|(c2&0x3F)<<6&(c3&0x3F);
++                    w=(c0&7)<<18|(c1&0x3F)<<12|((c2&0x3F)<<6&(c3&0x3F));
+                     if(w>=0x10000U&&w<0x110000U){
+                       /*This is a 4-byte sequence that is not overlong and not
+                          greater than the largest valid Unicode code point.
+@@ -260,7 +262,11 @@ static const OpusFileCallbacks OP_UNSEEKABLE_FILE_CALLBACKS={
+   (op_close_func)fclose
+ };
+ 
+-# define WIN32_LEAN_AND_MEAN
++/* Rocks modification (Engine/Source/ThirdParty/OpusFile/ThirdParty.json "modifications"): the Rocks build already
++   defines WIN32_LEAN_AND_MEAN on the command line (-Wmacro-redefined). */
++# if !defined(WIN32_LEAN_AND_MEAN)
++#  define WIN32_LEAN_AND_MEAN
++# endif
+ # define WIN32_EXTRA_LEAN
+ # include <windows.h>
+ 
+@@ -293,7 +299,10 @@ void *op_fopen(OpusFileCallbacks *_cb,const char *_path,const char *_mode){
+     wmode=op_utf8_to_utf16(_mode);
+     if(wmode==NULL)errno=EINVAL;
+     else if(wpath==NULL)errno=ENOENT;
+-    else fp=_wfopen(wpath,wmode);
++    /* Rocks modification (Engine/Source/ThirdParty/OpusFile/ThirdParty.json "modifications"): the Microsoft CRT deprecates _wfopen
++       (-Wdeprecated-declarations, hidden by the 4996 pragma of internal.h until now); _wfsopen with _SH_DENYNO
++       opens with the same sharing. */
++    else fp=_wfsopen(wpath,wmode,_SH_DENYNO);
+     _ogg_free(wmode);
+     _ogg_free(wpath);
+   }
+@@ -304,7 +313,13 @@ void *op_fopen(OpusFileCallbacks *_cb,const char *_path,const char *_mode){
+ 
+ void *op_fdopen(OpusFileCallbacks *_cb,int _fd,const char *_mode){
+   FILE *fp;
++  /* Rocks modification (Engine/Source/ThirdParty/OpusFile/ThirdParty.json "modifications"): the Microsoft CRT deprecates the POSIX name
++     fdopen (-Wdeprecated-declarations); Windows uses _fdopen. */
++#if defined(_WIN32)
++  fp=_fdopen(_fd,_mode);
++#else
+   fp=fdopen(_fd,_mode);
++#endif
+   if(fp!=NULL)*_cb=*op_get_file_callbacks(fp);
+   return fp;
+ }
+@@ -323,7 +338,9 @@ void *op_freopen(OpusFileCallbacks *_cb,const char *_path,const char *_mode,
+     wmode=op_utf8_to_utf16(_mode);
+     if(wmode==NULL)errno=EINVAL;
+     else if(wpath==NULL)errno=ENOENT;
+-    else fp=_wfreopen(wpath,wmode,(FILE *)_stream);
++    /* Rocks modification (Engine/Source/ThirdParty/OpusFile/ThirdParty.json "modifications"): the Microsoft CRT deprecates _wfreopen
++       (-Wdeprecated-declarations); _wfreopen_s reopens the same way but without sharing. */
++    else if(_wfreopen_s(&fp,wpath,wmode,(FILE *)_stream)!=0)fp=NULL;
+     _ogg_free(wmode);
+     _ogg_free(wpath);
+   }

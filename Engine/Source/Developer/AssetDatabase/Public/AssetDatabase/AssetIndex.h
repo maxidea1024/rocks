@@ -97,6 +97,12 @@ struct AssetIndexEntry {
     Array<PackageTag> tags;
     AssetIndexImportSummary importRecord;
     bool readOnly = false;
+    // 파일 전체 SHA-256과 그것을 계산할 때의 크기·수정 시각이다(ContentHash가 지연 계산 —
+    // 10.2절 A4b, 색인 캐시가 보존한다).
+    Sha256Digest contentHash{};
+    uint64 contentHashBytes = 0;
+    int64 contentHashTicks = 0;
+    bool hasContentHash = false;
     // 같은 AssetId·같은 경로 키가 다른 파일에도 있다(조회에서 AlreadyExists — 7.1절 13).
     bool duplicateId = false;
     bool duplicatePath = false;
@@ -309,6 +315,17 @@ public:
     // 오류: 없으면 NotFound, 같은 id·경로가 둘 이상이면 AlreadyExists(어느 쪽인지 정할 수 없다).
     Result<const AssetIndexEntry*> FindById(AssetId id) const noexcept;
     Result<const AssetIndexEntry*> FindByPath(const LogicalPath& path) const noexcept;
+
+    // id 패키지 파일 전체의 SHA-256이다(쿠킹 cookKey의 콘텐츠 해시 — 10.2절 결정 5, A4b). 파일을
+    // Stat해 크기·수정 시각이 저장된 값과 같으면 저장된 해시, 아니면 64 KiB씩 흘려 읽어 계산하고
+    // 그 Stat 값과 함께 둔다(바뀐 파일만 다시 해시). 읽기 전후 Stat이 다르면 Busy(해시하는 동안
+    // 바뀜). 오류: 없음 NotFound, 같은 id 둘 이상 AlreadyExists, 파일 IO 오류(FileErrorCode),
+    // 할당 실패. 색인 소유 스레드 전용이다.
+    //
+    // 사용 예:
+    //   auto hash = index.ContentHash(files, asset);
+    //   if (hash) { writer.WriteDigest(hash.Value()); }
+    Result<Sha256Digest> ContentHash(platform::FileSystem& files, AssetId id) noexcept;
 
     // directory(마운트 "/Game" 또는 논리 경로) 아래 항목을 out에 붙인다(경로 키 순). recursive가
     // 거짓이면 바로 아래만이다. 오류: directory가 마운트도 논리 경로도 아니면 InvalidArgument, 할당
