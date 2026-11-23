@@ -50,21 +50,21 @@ enum class ExchangeClass : uint8 {
 };
 
 // 교환 클래스 이름이다(예: StaticMesh → "StaticMesh"). Unsupported·모르는 값은 "Unsupported"다.
-const char* ExchangeClassName(ExchangeClass type) noexcept;
+ROCKS_UNREALEXCHANGE_API const char* ExchangeClassName(ExchangeClass type) noexcept;
 
 // 이름에 맞는 교환 클래스다(대소문자 구분). 없으면 Unsupported다.
-ExchangeClass FindExchangeClass(StringView name) noexcept;
+ROCKS_UNREALEXCHANGE_API ExchangeClass FindExchangeClass(StringView name) noexcept;
 
 // 텍스처 5종이면 참이다.
-bool IsExchangeTextureClass(ExchangeClass type) noexcept;
+ROCKS_UNREALEXCHANGE_API bool IsExchangeTextureClass(ExchangeClass type) noexcept;
 
 // 머티리얼 계열(Material·MaterialInstanceConstant·MaterialFunction·MaterialFunctionInstance)이면
 // 참이다.
-bool IsExchangeMaterialFamily(ExchangeClass type) noexcept;
+ROCKS_UNREALEXCHANGE_API bool IsExchangeMaterialFamily(ExchangeClass type) noexcept;
 
 // 묶음·기존 에셋에 없는 Hard 대상을 엔진 기본값으로 비워 둘 수 있는 클래스(텍스처 5종·Material·
 // MaterialInstanceConstant)면 참이다(9.3절 — 그 밖의 대상은 MissingDependency).
-bool IsExchangeReplaceableTarget(ExchangeClass type) noexcept;
+ROCKS_UNREALEXCHANGE_API bool IsExchangeReplaceableTarget(ExchangeClass type) noexcept;
 
 // blob 배치다(3.3절). 앞 7개는 고정 크기 원소, 뒤 3개는 가변 길이 배치(MeshAnimationAssets
 // 3.4.1절)다.
@@ -82,10 +82,10 @@ enum class ExchangeBlobLayout : uint8 {
 };
 
 // 배치 이름이다(예: F32 → "f32", BoneInfluences → "boneInfluences"). 정적 수명이다.
-const char* ExchangeBlobLayoutName(ExchangeBlobLayout layout) noexcept;
+ROCKS_UNREALEXCHANGE_API const char* ExchangeBlobLayoutName(ExchangeBlobLayout layout) noexcept;
 
 // 고정 크기 원소의 byte 수다. 가변 길이 배치는 0이다.
-uint32 ExchangeBlobElementBytes(ExchangeBlobLayout layout) noexcept;
+ROCKS_UNREALEXCHANGE_API uint32 ExchangeBlobElementBytes(ExchangeBlobLayout layout) noexcept;
 
 // blob 참조 하나다(3.3절). 리더가 형식(hex·크기 곱·components)을 확인한 값이다.
 struct ExchangeBlobRef {
@@ -167,7 +167,7 @@ struct ExchangeReadOptions {
 
 // 읽은 묶음이다. ReadExchangeBundle이 채우고 그 뒤로 바뀌지 않으므로 여러 스레드가 const로 함께
 // 읽어도 된다. 읽기에 쓴 FileSystem은 묶음보다 오래 살아야 한다(LoadExchangeBlob이 쓴다).
-class ExchangeBundle {
+class ROCKS_UNREALEXCHANGE_API ExchangeBundle {
 public:
     explicit ExchangeBundle(Allocator& allocator) noexcept;
 
@@ -229,17 +229,20 @@ private:
 // 반환: 묶음 수준 오류(bundle.json 읽기 실패·손상·버전·정렬·상한, 10.4절 2번)는 실패이고 out은 빈
 // 상태다(CorruptBundle은 InvalidArgument·CapacityExceeded 또는 파일 오류, 버전은 Unsupported).
 // 에셋 수준 오류는 성공이고 그 에셋이 Failed다. 할당 실패는 진단 없이 그 오류다.
-Result<void> ReadExchangeBundle(platform::FileSystem& files, StringView directory,
-                                const ExchangeReadOptions& options, ExchangeBundle& out,
-                                ExchangeDiagnostics& diagnostics) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> ReadExchangeBundle(platform::FileSystem& files,
+                                                         StringView directory,
+                                                         const ExchangeReadOptions& options,
+                                                         ExchangeBundle& out,
+                                                         ExchangeDiagnostics& diagnostics) noexcept;
 
 // asset 번호 에셋의 blob 참조 하나를 out에 읽는다(out은 먼저 비운다). 크기·SHA-256·가변 배치를 다시
 // 확인한다(읽기와 임포트 사이에 파일이 바뀌어도 잡는다). 실패하면 diagnostics에 CorruptBundle(asset
 // 번호, 파일 Blob)을 더하고 InvalidArgument 또는 파일 오류를 돌려주며 out은 빈 상태다. 할당 실패는
 // 진단 없이 그 오류다. const 묶음을 여러 스레드가 함께 써도 된다(diagnostics·out은 호출마다 따로).
-Result<void> LoadExchangeBlob(const ExchangeBundle& bundle, uint32 asset,
-                              const ExchangeBlobRef& blob, Array<uint8>& out,
-                              ExchangeDiagnostics& diagnostics) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> LoadExchangeBlob(const ExchangeBundle& bundle, uint32 asset,
+                                                       const ExchangeBlobRef& blob,
+                                                       Array<uint8>& out,
+                                                       ExchangeDiagnostics& diagnostics) noexcept;
 
 // 교환 JSON의 실수 값을 읽는다(3.2절): JSON 숫자이거나 문자열 "nan"·"inf"·"-inf"다. 그 밖은
 // InvalidArgument다. 종류별 단계가 settings·data를 읽을 때 쓴다.
@@ -247,6 +250,6 @@ Result<void> LoadExchangeBlob(const ExchangeBundle& bundle, uint32 asset,
 // 사용 예:
 //   double roughness = 0.0;
 //   if (auto read = ReadExchangeNumber(settings.Find("Roughness"), roughness); !read) { ... }
-Result<void> ReadExchangeNumber(JsonValue value, double& out) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> ReadExchangeNumber(JsonValue value, double& out) noexcept;
 
 } // namespace rocks

@@ -91,7 +91,6 @@ public static class ModularExports
         }
 
         HashSet<string> entries = ModuleTables.EntryModules(modules);
-        string bin = Path.Combine(request.OutputDirectory, "bin");
         string target = request.TargetName ?? request.Targets[0];
         foreach (NativeModuleInput module in modules.Values)
         {
@@ -101,7 +100,9 @@ public static class ModularExports
                 continue;
             }
 
-            string path = Path.Combine(bin, LinkTypes.SharedLibraryFileName(target, module.Name, request.Toolchain.Platform, request.Configuration));
+            // 플러그인 모듈은 플러그인 binaries 폴더다(Docs/Design/ModuleLoader.ko.md 3.15절).
+            string path = Path.Combine(LinkTypes.SharedLibraryDirectory(request.OutputDirectory, module, request.Toolchain.Platform),
+                LinkTypes.SharedLibraryFileName(target, module.Name, request.Toolchain.Platform, request.Configuration));
             if (!File.Exists(path))
             {
                 continue;

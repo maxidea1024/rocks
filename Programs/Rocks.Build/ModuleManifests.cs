@@ -10,7 +10,9 @@ namespace Rocks.Build;
 /// Modular 타깃의 모듈 manifest(<c>&lt;Target&gt;[-&lt;Platform&gt;-&lt;Configuration&gt;].modules.json</c>)를 쓴다(Docs/Design/BuildTargets.ko.md
 /// 3.8절 BS8d1, Docs/Design/ModuleLoader.ko.md 3.5절). Monolithic 실행 파일의 모듈 표 TU와 같은 행(<see cref="ModuleTables.Rows"/>)을 파일
 /// 이름·크기와 함께 싣는다. 링크가 모두 성공하고 입력이 바뀌지 않은 빌드 끝에서만 쓴다(원자적 교체, 내용이 같으면 쓰지 않는다). 키는 영어이고
-/// 모듈 로더가 모르는 키를 거부한다(ML4a).
+/// 모듈 로더가 모르는 키를 거부한다(ML4a). 켠 플러그인의 모듈 행은 플러그인마다 그 플러그인 binaries 폴더의 같은 이름 manifest에 싣고,
+/// 실행 파일 manifest의 <c>plugins</c>가 그 manifest를 가리킨다(ModuleLoader 3.15절 ML5a). 행의 <c>order</c>는 Monolithic 모듈 표와 같은
+/// 행 순서 번호다(로더가 합친 행을 이 순서로 정렬한다).
 /// </summary>
 public static class ModuleManifests
 {
@@ -18,7 +20,7 @@ public static class ModuleManifests
     public const string FileSuffix = ".modules.json";
 
     /// <summary>manifest 형식 판이다. 키를 바꾸면 올리고 모듈 로더의 읽기도 함께 바꾼다.</summary>
-    public const int Schema = 3;
+    public const int Schema = 4;
 
     // buildId 길이(GUID 32자 소문자 16진)다.
     private const int BuildIdLength = 32;
@@ -66,30 +68,72 @@ public static class ModuleManifests
 
         string target = request.TargetName ?? executable;
         NativePlatform platform = request.Toolchain.Platform;
+        string fileName = FileName(target, platform, request.Configuration);
         string bin = Path.Combine(request.OutputDirectory, "bin");
-        string path = Path.Combine(bin, FileName(target, platform, request.Configuration));
+        string path = Path.Combine(bin, fileName);
         EngineVersion engineVersion = BuildInfoGenerator.RequireEngineVersion(request);
-        string version = $"{engineVersion.Major}.{engineVersion.Minor}.{engineVersion.Patch}";
-        string fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ToolchainFingerprint.CanonicalText(request.Toolchain))));
-        string buildId = RecycledBuildId(path, version, fingerprint) ?? Guid.NewGuid().ToString("N");
+        var header = new Header(RecycledBuildId(path, VersionText(engineVersion), Fingerprint(request)) ?? Guid.NewGuid().ToString("N"),
+            VersionText(engineVersion), Fingerprint(request));
 
+        // 행 순서 번호는 Monolithic 모듈 표 순서(켠 플러그인 모듈 포함)다. 행을 실행 파일 manifest와 플러그인 manifest로 나눈다.
+        (ModuleRow Row, int Order)[] rows = [.. ModuleTables.Rows(executable, modules, entries).Select((row, order) => (row, order))];
+        var plugins = new List<(string Name, string Manifest)>();
+        foreach (var group in rows.Where(value => modules[value.Row.Name].Plugin is not null)
+            .GroupBy(value => modules[value.Row.Name].Plugin!, EqualityComparer<ModulePlugin>.Default)
+            .OrderBy(group => group.Key.Name, StringComparer.Ordinal))
+        {
+            ModulePlugin plugin = group.Key;
+            string folder = LinkTypes.SharedLibraryDirectory(request.OutputDirectory, modules[group.First().Row.Name], platform);
+            // 플러그인 manifest를 먼저 쓴다 — 실행 파일 manifest가 새 플러그인 manifest를 가리킨 뒤에야 바뀐다.
+            AtomicFile.WriteIfChanged(Path.Combine(folder, fileName), Serialize(header, [.. group], folder, [], target, platform, request.Configuration));
+            plugins.Add((plugin.Name, "../Plugins/" + plugin.Directory + "/Binaries/" + LinkTypes.PlatformDirectory(platform) + "/" + fileName));
+        }
+
+        AtomicFile.WriteIfChanged(path, Serialize(header, [.. rows.Where(value => modules[value.Row.Name].Plugin is null)], bin, plugins, target,
+            platform, request.Configuration));
+        return path;
+    }
+
+    // manifest 사이에 같은 값인 머리 키다(한 빌드 — 로더가 대조한다).
+    private sealed record Header(string BuildId, string EngineVersion, string ToolchainFingerprint);
+
+    private static string VersionText(EngineVersion version) => $"{version.Major}.{version.Minor}.{version.Patch}";
+
+    private static string Fingerprint(NativeBuildRequest request) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ToolchainFingerprint.CanonicalText(request.Toolchain))));
+
+    // manifest 하나의 내용이다. folder는 행 파일(공유 라이브러리)이 있는 폴더(크기를 읽는다), plugins는 실행 파일 manifest의 플러그인 목록이다.
+    private static byte[] Serialize(Header header, IReadOnlyList<(ModuleRow Row, int Order)> rows, string folder,
+        IReadOnlyList<(string Name, string Manifest)> plugins, string target, NativePlatform platform, NativeConfiguration configuration)
+    {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
             writer.WriteNumber("schema", Schema);
-            writer.WriteString("buildId", buildId);
-            writer.WriteString("engineVersion", version);
-            writer.WriteString("toolchainFingerprint", fingerprint);
+            writer.WriteString("buildId", header.BuildId);
+            writer.WriteString("engineVersion", header.EngineVersion);
+            writer.WriteString("toolchainFingerprint", header.ToolchainFingerprint);
+            writer.WriteStartArray("plugins");
+            foreach ((string name, string manifest) in plugins)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", name);
+                writer.WriteString("manifest", manifest);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
             writer.WriteStartArray("modules");
-            foreach (ModuleRow row in ModuleTables.Rows(executable, modules, entries))
+            foreach ((ModuleRow row, int order) in rows)
             {
                 // 실행 파일 행도 호스트 공유 라이브러리다(Docs/Design/ModuleLoader.ko.md 3.14절 — 입력 검사가 Launch에 닿게 한다).
-                string file = LinkTypes.SharedLibraryFileName(target, row.Name, platform, request.Configuration);
+                string file = LinkTypes.SharedLibraryFileName(target, row.Name, platform, configuration);
                 writer.WriteStartObject();
                 writer.WriteString("name", row.Name);
+                writer.WriteNumber("order", order);
                 writer.WriteString("file", file);
-                writer.WriteNumber("size", new FileInfo(Path.Combine(bin, file)).Length);
+                writer.WriteNumber("size", new FileInfo(Path.Combine(folder, file)).Length);
                 writer.WriteStartArray("dependencies");
                 foreach (string dependency in row.Dependencies)
                 {
@@ -109,8 +153,7 @@ public static class ModuleManifests
         }
 
         stream.WriteByte((byte)'\n');
-        AtomicFile.WriteIfChanged(path, stream.ToArray());
-        return path;
+        return stream.ToArray();
     }
 
     // 이전 manifest의 buildId를 다시 쓸 수 있으면 그 값이다. 파일이 없거나, 읽을 수 없거나, 형식 판·엔진 버전·툴체인 지문이 다르거나,

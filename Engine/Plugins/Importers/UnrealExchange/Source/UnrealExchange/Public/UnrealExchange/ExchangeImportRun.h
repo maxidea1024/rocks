@@ -55,7 +55,7 @@ struct ExchangeKindRequest {
 
 // 교환 클래스 하나의 임포터다. 에셋을 만들거나 다시 임포트하고 그 AssetId를 돌려준다. 실패는 진단을
 // 더하고 오류를 돌려준다(그 에셋만 실패 — 할당 실패는 실행 전체를 멈춘다).
-class ExchangeKindImporter {
+class ROCKS_UNREALEXCHANGE_API ExchangeKindImporter {
 public:
     virtual ~ExchangeKindImporter() = default;
 
@@ -63,7 +63,7 @@ public:
 };
 
 // 교환 클래스마다 임포터 하나를 둔 표다(명령 하나 동안 — 임포터는 표보다 오래 산다).
-class ExchangeKindTable {
+class ROCKS_UNREALEXCHANGE_API ExchangeKindTable {
 public:
     // 오류: Unsupported 클래스 InvalidArgument, 이미 등록한 클래스 AlreadyExists.
     Result<void> Register(ExchangeClass type, ExchangeKindImporter& importer) noexcept;
@@ -100,7 +100,7 @@ struct ExchangeAssetOutcome {
 
 // 실행 결과다: 에셋마다 결과와 보고 순서(계획의 단위·구성원 순, 그 뒤 고른 범위 밖 에셋을 묶음
 // 순으로).
-class ExchangeImportResult {
+class ROCKS_UNREALEXCHANGE_API ExchangeImportResult {
 public:
     explicit ExchangeImportResult(Allocator& allocator) noexcept
         : outcomes_(allocator), order_(allocator) {
@@ -147,8 +147,8 @@ struct ExchangeRunInput {
 // PlannedReimport·Failed·Unsupported)만 채운다. 에셋 실패는 결과와 진단으로 알리고 성공한다.
 //
 // 반환: 할당 실패(진단 없이, out은 정해지지 않음). 실행 안 쓰기 오류는 그 에셋의 실패다.
-Result<void> RunExchangeImport(const ExchangeRunInput& input, bool dryRun,
-                               ExchangeImportResult& out,
-                               ExchangeDiagnostics& diagnostics) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> RunExchangeImport(const ExchangeRunInput& input, bool dryRun,
+                                                        ExchangeImportResult& out,
+                                                        ExchangeDiagnostics& diagnostics) noexcept;
 
 } // namespace rocks

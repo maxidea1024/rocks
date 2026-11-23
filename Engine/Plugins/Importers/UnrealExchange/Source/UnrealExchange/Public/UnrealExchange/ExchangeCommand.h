@@ -39,7 +39,8 @@ struct UnrealExchangeCommandContext {
 // 명령을 실행한다(context는 UnrealExchangeCommandContext). 종료 코드: 실패한 에셋이 없으면 0,
 // 있거나 묶음 읽기·계획·세션 열기가 실패하면 1, 사용법 오류 2. 반환 오류: 출력 쓰기 실패, 할당
 // 실패.
-Result<int32> RunAssetImportUnrealCommand(void* context, Span<const StringView> args,
-                                          CommandletOutput& output) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<int32>
+RunAssetImportUnrealCommand(void* context, Span<const StringView> args,
+                            CommandletOutput& output) noexcept;
 
 } // namespace rocks
