@@ -18,6 +18,4 @@ public sealed class ShaderCompiler : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ShaderCompilerCommon", "AssetNugget", "HostConfig", "PlatformBase", "Core"];
-
-    protected override IReadOnlyList<string> Metadata => ["ShaderCompiler/ShaderCompileOptions.h"];
 }
