@@ -44,9 +44,24 @@ using MapPopulate = Result<void> (*)(World& world, void* context) noexcept;
 struct MapDesc {
     StringView name;
     WorldKind kind = WorldKind::Game;
+    // 이 맵의 GameDirector 타입이다(비면 GameInstanceConfig::defaultDirectorType → GameDirector —
+    // 19.3절).
+    TypeId directorType;
+    // "?key=value?flag" 형식 옵션이다(GameDirector::InitGame·Options, FindMapOption).
+    StringView options;
     MapPopulate populate = nullptr;
     void* populateContext = nullptr;
 };
+
+// "?key=value?flag" 형식 맵 options에서 key의 값을 찾는다(UE UGameplayStatics::ParseOption — key는
+// ASCII 대소문자 무시). 찾으면 true이고 value는 options 안의 범위다("?flag"처럼 값이 없으면 빈
+// 값). 없으면 false이고 value는 그대로다.
+//
+// 사용 예:
+//   StringView start;
+//   if (FindMapOption("?start=North?rounds=3", "start", start)) { /* start == "North" */ }
+ROCKS_GAMEPLAY_API bool FindMapOption(StringView options, StringView key,
+                                      StringView& value) noexcept;
 
 namespace detail {
 

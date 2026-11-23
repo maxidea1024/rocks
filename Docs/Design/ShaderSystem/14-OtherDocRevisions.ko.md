@@ -34,3 +34,22 @@
 | CoreDataFoundations | 1.2절(:20) | ThirdParty `kind`는 `code`·`data` | `binary`·`headers`를 더한다(8절) |
 | 정책 검사(코드) | `PolicyChecks.cs` `PythonFreeMainPath`(:313–349) | `Programs`·`Build`·`.github`의 Python 호출 금지 | 오프라인 도구 빌드 workflow를 명시 제외(8절 4항, P3 구현 때) |
 | 코드(SH2 때) | `Engine/Source/Runtime/Graphics/Graphics.Build.cs:4–5`, `Programs/Sandbox/Sandbox.Build.cs:4·14`, `D3D12Graphics.Build.cs:21–22`, `DeviceTypes.h:14–15` | OpenGL·Vulkan·Metal 자리 설명, `d3dcompiler` 링크 | VulkanGraphics 의존 추가, OpenGL ES 설명, `d3dcompiler` 제거 |
+
+**개정 31·32(SH2 설계)가 요구하는 다른 문서 개정.** 이 문서는 고치지 않았다 — 각 문서를 맡은 세션이 해당 SH2 하위 단계 착수 전에 반영한다(16.1절 범위 충돌). 이 문서 안의 10절 7행·11.1절 SC10·SC13은 개정 32에서 직접 고쳤다.
+
+| 문서 | 고칠 곳 | 내용 |
+|---|---|---|
+| [에셋 시스템](../AssetSystem/10-Cooker.ko.md) | 10.2절 2·3·10·12항, 10.1절 | TargetProfile `graphicsBackend` → `graphicsBackends`·`shaderFormats`(Replace 병합, 12.3.1절 SSD10), CookSettings `cookDevelopmentShaders`, 비에셋 산출물 단계 훅과 `--engine`(SSD11), 매니페스트 v2 머리 순서·비에셋 산출물 표(SSD13), 라이브러리 게시·손상 코드(SSD12·SSD14) |
+| [에셋 시스템](../AssetSystem/11-RuntimeLoading.ko.md) | 11절 로더 시작 | 매니페스트 v2의 라이브러리 항목을 셰이더 집합에 넘김(SSD14), 엔진 전용 쿠킹 루트 |
+| [에셋 시스템](../AssetSystem/13-CommandLine.ko.md) | :25 `asset-cook` 문법 | `--engine`(SSD11) |
+| [렌더 기반](../RenderBase.ko.md) | 9.2절, SX7·SX14, GX1·GX3, R8 | 엔진 라이브러리는 프로젝트 쿠킹 산출물(SSD11), "형식마다 공급 경로 하나" 문구(개발 전용 항목은 공급자 실패 시 `Unsupported` 대체 — SSD16), "정적 등록으로 전체를 안다"(:861) → 모듈 수명 객체 등록(12.2.1절 SSD3), 완결성 검사에서 개발 전용 항목 제외·타입 집합 검사(SSD8·SSD3), 공급자 interface는 SH2e(SSD23), 메모리 라이브러리(SSD16), `DeviceCaps` 장치 요구 비트(SSD15), Graphics `CreateShader`·파이프라인 layout(16.1절 SSD18), RB4 SH2분 |
+| [렌더러](../Renderer.ko.md) | 13절 지원표 | PS 진단 버퍼 행(7.2절 12항 — PS만, D3D11·GLES no-op, Vulkan `fragmentStoresAndAtomics`) |
+| [엔진 셰이더](../EngineShaders/09-LimitsAndFollowups.ko.md) | SLR3·SLR12 | SLR3은 16.1절 SSD21(선택 하위 단계 SH2g, 자체 완료 기준), SLR12는 7.2절 12항(SSD22)으로 반영됨 |
+| [엔진 셰이더](../EngineShaders/07-CommonLibraryFirstScope.ko.md) | :21 `ShaderAssert.rsh` | VS·PS 판정을 `ROCKS_FEATURE_DEBUG_PIXEL_UAV`가 아니라 `ROCKS_DEBUG_BUFFER`(PS 개발 전용 퍼뮤테이션에서만 정의)로. VS는 늘 빈 매크로, CS는 일반 UAV 경로 |
+| [엔진 셰이더](../EngineShaders/06-Stages.ko.md) | SL0 행 "(C) 모든 엔진 컴파일 프로필 형식" | 엔진 컴파일 프로필 폐지(SSD24)에 따라 "호스트 플랫폼 TargetProfile(`Windows`·`MacOS`)의 `shaderFormats` 형식 + `GLES31_PC`"로 |
+| [VulkanGraphics](../VulkanGraphics.ko.md) | :131–133, :221 | 파이프라인 layout을 개발 컴파일 훅 리플렉션 대신 `ShaderBindingLayout`에서(SSD18), `PipelineDesc`의 HLSL 원문·`DeviceDesc::shaderCompiler` 제거 |
+| [OpenGL ES backend](../OpenGLESGraphics.ko.md) | :212 | SH2 항목에 바인딩 머리를 ShaderCore 형식(GLES 복사 표)으로 받는다는 것과 Release 제외 |
+| [엔진 런타임](../EngineRuntime/10-Graphics.ko.md) | 10.2절(D3D11) | D3D11의 쿠킹 DXBC 전환과 `D3DCompile` 제거를 SH5에서 SH2로(개정 32) |
+| [엔진 구현 계획](../EngineImplementationPlan.ko.md) | 9.6절 | 엔진 내장 셰이더 라이브러리를 만드는 단계(설치물 → 쿠킹, SSD11) |
+| [빌드 타깃](../BuildTargets/README.ko.md) | Commandlet 타깃 | 쿠커가 셰이더 타입 Runtime 모듈을 링크(SSD3), 프로젝트·플러그인 타입 쿠킹은 BS4 뒤 |
+| [모듈 로더](../ModuleLoader.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |

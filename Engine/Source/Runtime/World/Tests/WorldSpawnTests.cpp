@@ -421,4 +421,27 @@ TEST(WorldSpawn_ReadinessForComponentsAddedInStartAndPendingLifeSpan) {
     CHECK(TagsAre("Lm"));
     REQUIRE(idle.Shutdown());
 }
+
+// 19.2절: Spawn 순번은 Spawn마다 커지고(지연 Spawn 포함) 정리된 Actor는 StaleHandle이다. Level
+// 배열 순서(파괴가 끝 원소와 바꾼다)와 무관하다.
+TEST(WorldSpawn_SpawnOrderIncreasesAndOutlivesLevelReordering) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    const ObjectHandle first = fixture.Spawn('1');
+    auto deferred = world.SpawnActorDeferred<SpawnActor>();
+    const ObjectHandle third = fixture.Spawn('3');
+    REQUIRE(!first.IsNull() && deferred && !third.IsNull());
+    REQUIRE(world.FinishSpawning(deferred.Value()));
+    const uint64 a = world.GetSpawnOrder(first).Value();
+    const uint64 b = world.GetSpawnOrder(deferred.Value()).Value();
+    const uint64 c = world.GetSpawnOrder(third).Value();
+    CHECK(a < b && b < c);
+    REQUIRE(world.DestroyActor(first));
+    REQUIRE(fixture.Frame());
+    CHECK(world.GetSpawnOrder(first).Error() == ErrorCode::StaleHandle);
+    CHECK(world.GetSpawnOrder(third).Value() == c);
+    REQUIRE(world.Shutdown());
+}
 } // namespace world_spawn_tests_file
