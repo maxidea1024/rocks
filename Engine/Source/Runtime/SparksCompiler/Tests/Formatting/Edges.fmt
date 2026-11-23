@@ -1,0 +1,26 @@
+import A; // first
+// between imports
+import B;
+
+import C;
+
+/// Doc with trailing spaces
+fn F() { // opening note
+    x();
+    /* end */
+}
+
+fn G() // before brace
+{
+    if (a) {
+    } /* c */ else {
+    }
+    F(a // before comma
+        , b // before close
+    );
+    y() // before semicolon
+        ;
+    F(
+        a
+        /* closer note */ );
+}

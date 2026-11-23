@@ -30,4 +30,12 @@ ROCKS_SPARKSCOMPILER_API Result<void> Tokenize(const SourceSet& sources, SourceI
                                                DiagnosticList& diagnostics,
                                                Array<Token>& tokens) noexcept;
 
+// Tokenize와 같고, 일반 주석(`//` 줄 주석 — `///` 문서 주석은 토큰이다 — 과 닫힌 `/* */`)의 범위를
+// 원문 순서로 comments 끝에 붙인다(줄 주석 끝의 CR은 범위에서 뺀다). formatter·언어 서버가 쓴다
+// (Docs/Design/SparksTools.ko.md 8.1절). 실패는 Tokenize와 같다.
+ROCKS_SPARKSCOMPILER_API Result<void> TokenizeWithComments(const SourceSet& sources, SourceId id,
+                                                           DiagnosticList& diagnostics,
+                                                           Array<Token>& tokens,
+                                                           Array<SourceSpan>& comments) noexcept;
+
 } // namespace rocks::sparks
