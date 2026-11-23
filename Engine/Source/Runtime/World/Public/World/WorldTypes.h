@@ -35,6 +35,42 @@ enum class ComponentState : uint8 {
 };
 
 const char* ActorStateName(ActorState state) noexcept;
+
+// Actor·Component가 정리되는 이유다(UE EEndPlayReason — Docs/Design/EngineRuntime 17.2절 ERD13).
+// 정리를 시작한 쪽이 정하고, 파괴 대기 중에 더 큰 정리(Level·World)가 와도 먼저 정한 이유를
+// 유지한다.
+enum class EndPlayReason : uint8 {
+    // DestroyActor·DestroyComponent·LifeSpan 만료·우회 파괴 복구.
+    Destroyed,
+    // World 전환(GameInstance OpenWorld)으로 이전 World를 끝낸다.
+    LevelTransition,
+    // DestroyLevel(Level 내림·스트리밍 아웃).
+    RemovedFromWorld,
+    // 앱 종료로 World를 끝낸다.
+    Quit,
+    // Tryout 종료(UE EndPlayInEditor).
+    TryoutEnded
+};
+
+const char* EndPlayReasonName(EndPlayReason reason) noexcept;
+
+// World 종류다(UE EWorldType — Game·Editor·PIE·EditorPreview·GamePreview·Inactive, Preview가
+// EditorPreview·GamePreview를 합친다). Subsystem 생성 판정(16.3절 ERD9)과 GameDirector
+// 생성(19.3절)에 쓴다. Docs/Design/EngineRuntime 16.4절.
+enum class WorldKind : uint8 {
+    // 독립 실행·서버의 게임 World다.
+    Game,
+    // 편집 World다(BeginPlay하지 않는다 — BeginPlay는 InvalidArgument).
+    Editor,
+    // 편집 World를 복제해 실행하는 World다(UE PIE).
+    Tryout,
+    // 에셋 미리보기·썸네일 World다.
+    Preview,
+    // 적재됐지만 실행하지 않는 World다(BeginPlay는 InvalidArgument, Engine이 Tick하지 않는다).
+    Inactive
+};
+
+const char* WorldKindName(WorldKind kind) noexcept;
 const char* ComponentStateName(ComponentState state) noexcept;
 
 // World의 수명 단계다. 초기화와 게임플레이 시작을 분리한다(에디터·미리보기 World는 Initialized에서
@@ -45,6 +81,9 @@ enum class WorldState : uint8 {
     Initialized,
     // BeginPlay 이후. 준비된 Actor가 OnStart하고 Tick에 참여한다.
     Playing,
+    // EndPlay 진행 중. 모든 Actor를 정리하고 OnWorldEndPlay를 부른 뒤 Initialized로 돌아간다.
+    // Spawn은 되지만 OnStart는 하지 않는다(17.6절).
+    EndingPlay,
     // Shutdown 진행 중. 새 Spawn·Tick 등록을 ShuttingDown으로 거부한다.
     TearingDown,
     // Shutdown 완료. Registry가 닫혔다.

@@ -39,19 +39,46 @@ SubsystemKey SubsystemKeyOf() noexcept {
     return TypeKeyOf<T>();
 }
 
-// Subsystem 한 종류의 생성 정보다. name은 진단용 정적 문자열이다. dependencies 배열은 묶음이
-// 초기화를 마칠 때까지 살아 있어야 한다(보통 정적 배열).
+// 생성 여부 판정이다. owner는 묶음의 소유자(Engine·World·GameInstance·LocalPlayer)를 가리킨다.
+using SubsystemShouldCreate = bool (*)(const void* owner) noexcept;
+
+// Subsystem 한 종류의 생성 정보다. name은 진단용 정적 문자열이다. 배열은 묶음이 초기화를 마칠
+// 때까지 살아 있어야 한다(보통 정적 배열). Docs/Design/EngineRuntime 16.3절(ERD8·ERD9).
+// - dependencies: 필수 의존이다. 목록에 없는 키는 선언 오류(InvalidArgument)이고, 목록에 있지만
+//   생성되지 않은(shouldCreate 거짓·의존 누락) 의존이 있으면 이 Subsystem도 만들지 않는다(생략 —
+//   Skipped()에 남는다. UE는 의존자를 그래도 만든다 — 필수 의존이 언제나 있다는 계약을 지키려는
+//   차이).
+// - optionalDependencies: 있으면 순서만 맞춘다(목록에 없거나 생성되지 않아도 된다).
+// - shouldCreate: 거짓이면 만들지 않는다. 없으면 소유자의 기본 판정(World는 World 종류
+// — 16.4절)이다.
 template <class Base>
 struct SubsystemType {
     SubsystemKey key = nullptr;
     const char* name = "";
     Result<UniquePtr<Base>> (*create)(Allocator&) noexcept = nullptr;
     Span<const SubsystemKey> dependencies;
+    Span<const SubsystemKey> optionalDependencies;
+    SubsystemShouldCreate shouldCreate = nullptr;
+};
+
+// 생략된 Subsystem의 이유다(진단 — 오류가 아니다).
+enum class SubsystemSkipReason : uint8 {
+    // shouldCreate(또는 소유자 기본 판정)가 거짓이었다.
+    NotWanted,
+    // 필수 의존이 생성되지 않았다(missing이 그 의존 이름).
+    MissingDependency
+};
+
+struct SkippedSubsystem {
+    const char* name = "";
+    SubsystemSkipReason reason = SubsystemSkipReason::NotWanted;
+    const char* missing = "";
 };
 
 template <class Base, class T>
-SubsystemType<Base> MakeSubsystemType(const char* name,
-                                      Span<const SubsystemKey> dependencies = {}) noexcept {
+SubsystemType<Base> MakeSubsystemType(const char* name, Span<const SubsystemKey> dependencies = {},
+                                      Span<const SubsystemKey> optionalDependencies = {},
+                                      SubsystemShouldCreate shouldCreate = nullptr) noexcept {
     static_assert(IsBaseOfV<Base, T>);
     SubsystemType<Base> type;
     type.key = SubsystemKeyOf<T>();
@@ -64,6 +91,8 @@ SubsystemType<Base> MakeSubsystemType(const char* name,
         return Result<UniquePtr<Base>>::Success(UniquePtr<Base>(Move(created.Value())));
     };
     type.dependencies = dependencies;
+    type.optionalDependencies = optionalDependencies;
+    type.shouldCreate = shouldCreate;
     return type;
 }
 
@@ -73,26 +102,34 @@ template <class Base, class Owner>
 class SubsystemCollection {
 public:
     explicit SubsystemCollection(Allocator& allocator) noexcept
-        : allocator_(allocator), instances_(allocator), keys_(allocator) {
+        : allocator_(allocator), instances_(allocator), keys_(allocator), skipped_(allocator) {
     }
 
     SubsystemCollection(const SubsystemCollection&) = delete;
     SubsystemCollection& operator=(const SubsystemCollection&) = delete;
 
     ~SubsystemCollection() {
-        if (instances_.Size() != 0) {
+        if (instances_.Size() != 0 || initialized_) {
             platform::Fatal("SubsystemCollection destroyed before Deinitialize");
         }
     }
 
-    // 의존 순서대로 만들고 Initialize한다. 같은 키 중복, 목록에 없는 의존, 순환 의존은
-    // InvalidArgument이며 아무것도 만들지 않는다. 생성·초기화 실패는 그 오류를 반환하고 이미
-    // 초기화한 Subsystem을 역순으로 Deinitialize한 뒤 비운다. 이미 초기화된 묶음은 AlreadyExists다.
-    Result<void> Initialize(Span<const SubsystemType<Base>> types, Owner& owner) noexcept {
-        if (instances_.Size() != 0) {
+    // 의존 순서대로 만들고 Initialize한다. 같은 키 중복, 목록에 없는 필수 의존, 순환 의존(선택
+    // 의존 포함)은 InvalidArgument이며 아무것도 만들지 않는다. 생성하지 않기로 한 것과 필수 의존이
+    // 없는 것은 생략하고 Skipped()에 남긴다. 생성·초기화 실패는 그 오류를 반환하고 이미 초기화한
+    // Subsystem을 역순으로 Deinitialize한 뒤 비운다. 이미 초기화된 묶음은 AlreadyExists다.
+    // defaultShouldCreate는 type.shouldCreate가 없을 때의 소유자 기본 판정이다(없으면 생성).
+    // beforeRollback은 생성·초기화 실패로 이미 초기화한 것을 정리하기 직전에 부른다(소유자가 바깥
+    // 조회 창을 닫는 등 — 되돌림에서는 PreDeinitialize 없이 Deinitialize만 부른다).
+    Result<void> Initialize(Span<const SubsystemType<Base>> types, Owner& owner,
+                            bool (*defaultShouldCreate)(const Owner&) noexcept = nullptr,
+                            void (*beforeRollback)(Owner&) noexcept = nullptr) noexcept {
+        // 모두 생략돼 instances_가 비어도 두 번째 초기화는 거부한다.
+        if (initialized_) {
             return Result<void>::Failure(ErrorCode::AlreadyExists);
         }
 
+        skipped_.Clear();
         Array<uint32> order(allocator_);
         auto sorted = Sort(types, order);
         if (!sorted) {
@@ -107,11 +144,43 @@ public:
         if (!reserved) {
             return reserved;
         }
+        reserved = skipped_.TryReserve(types.Size());
+        if (!reserved) {
+            return reserved;
+        }
 
         for (uint32 index : order) {
             const SubsystemType<Base>& type = types[index];
+            const bool wanted = type.shouldCreate != nullptr     ? type.shouldCreate(&owner)
+                                : defaultShouldCreate != nullptr ? defaultShouldCreate(owner)
+                                                                 : true;
+            if (!wanted) {
+                auto noted = skipped_.TryPushBack(
+                    SkippedSubsystem{type.name, SubsystemSkipReason::NotWanted, ""});
+                (void)noted;
+                continue;
+            }
+
+            // 의존 순서로 처리하므로 필수 의존은 이미 만들어졌거나 생략됐다.
+            const char* missing = nullptr;
+            for (SubsystemKey dependency : type.dependencies) {
+                if (Find(dependency) == nullptr) {
+                    missing = NameOf(types, dependency);
+                    break;
+                }
+            }
+            if (missing != nullptr) {
+                auto noted = skipped_.TryPushBack(
+                    SkippedSubsystem{type.name, SubsystemSkipReason::MissingDependency, missing});
+                (void)noted;
+                continue;
+            }
+
             auto created = type.create(allocator_);
             if (!created) {
+                if (beforeRollback != nullptr) {
+                    beforeRollback(owner);
+                }
                 Deinitialize(owner);
                 return Result<void>::Failure(created.Error());
             }
@@ -121,6 +190,9 @@ public:
                 // 그 소멸자가 Initialize 중 얻은 의존에 접근할 수 있으므로 의존을 정리하기 전에
                 // 파괴한다.
                 created.Value().Reset();
+                if (beforeRollback != nullptr) {
+                    beforeRollback(owner);
+                }
                 Deinitialize(owner);
                 return initialized;
             }
@@ -131,11 +203,14 @@ public:
             (void)keyed;
         }
 
+        initialized_ = true;
         return Result<void>::Success();
     }
 
     // 초기화 역순으로 Deinitialize하고 파괴한다. 여러 번 호출해도 안전하다.
     void Deinitialize(Owner& owner) noexcept {
+        initialized_ = false;
+        skipped_.Clear();
         // 자기 Deinitialize 중에도 Get<자기 타입>이 동작하도록 정리한 뒤에 목록에서 뺀다.
         while (instances_.Size() != 0) {
             instances_[instances_.Size() - 1]->Deinitialize(owner);
@@ -150,13 +225,22 @@ public:
     // Deinitialize될 때까지 유효하다.
     template <class T>
     T* Get() const noexcept {
-        const SubsystemKey key = SubsystemKeyOf<T>();
+        return static_cast<T*>(Find(SubsystemKeyOf<T>()));
+    }
+
+    // 키로 찾는다(타입을 모르는 조회 — 바깥 계층 조회 창, 16.3절 ERD10). 없으면 nullptr이다.
+    Base* Find(SubsystemKey key) const noexcept {
         for (usize index = 0; index < keys_.Size(); ++index) {
             if (keys_[index] == key) {
-                return static_cast<T*>(instances_[index].Get());
+                return instances_[index].Get();
             }
         }
         return nullptr;
+    }
+
+    // 마지막 Initialize가 생략한 Subsystem이다(진단용, 다음 Initialize·Deinitialize까지 유효).
+    Span<const SkippedSubsystem> Skipped() const noexcept {
+        return Span<const SkippedSubsystem>(skipped_.Data(), skipped_.Size());
     }
 
     usize Count() const noexcept {
@@ -169,7 +253,17 @@ public:
     }
 
 private:
-    // 의존이 먼저 오도록 index 순서를 만든다(깊이 우선 후위 방문, 표시 0/1/2).
+    static const char* NameOf(Span<const SubsystemType<Base>> types, SubsystemKey key) noexcept {
+        for (const SubsystemType<Base>& type : types) {
+            if (type.key == key) {
+                return type.name;
+            }
+        }
+        return "";
+    }
+
+    // 의존이 먼저 오도록 index 순서를 만든다(깊이 우선 후위 방문, 표시 0/1/2). 선택 의존도 순서에
+    // 넣되, 목록에 없는 선택 의존은 건너뛴다.
     Result<void> Sort(Span<const SubsystemType<Base>> types, Array<uint32>& order) noexcept {
         Array<uint8> marks(allocator_);
         auto resized = marks.TryResize(types.Size());
@@ -210,20 +304,28 @@ private:
         }
 
         marks[index] = 1;
-        for (SubsystemKey dependency : types[index].dependencies) {
-            uint32 found = static_cast<uint32>(types.Size());
-            for (usize candidate = 0; candidate < types.Size(); ++candidate) {
-                if (types[candidate].key == dependency) {
-                    found = static_cast<uint32>(candidate);
-                    break;
+        for (uint32 pass = 0; pass < 2; ++pass) {
+            const bool optional = pass == 1;
+            const Span<const SubsystemKey> keys =
+                optional ? types[index].optionalDependencies : types[index].dependencies;
+            for (SubsystemKey dependency : keys) {
+                uint32 found = static_cast<uint32>(types.Size());
+                for (usize candidate = 0; candidate < types.Size(); ++candidate) {
+                    if (types[candidate].key == dependency) {
+                        found = static_cast<uint32>(candidate);
+                        break;
+                    }
                 }
-            }
-            if (found == types.Size()) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-            auto visited = Visit(types, found, marks, order, depth + 1);
-            if (!visited) {
-                return visited;
+                if (found == types.Size()) {
+                    if (optional) {
+                        continue;
+                    }
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+                auto visited = Visit(types, found, marks, order, depth + 1);
+                if (!visited) {
+                    return visited;
+                }
             }
         }
 
@@ -234,6 +336,8 @@ private:
     Allocator& allocator_;
     Array<UniquePtr<Base>> instances_;
     Array<SubsystemKey> keys_;
+    Array<SkippedSubsystem> skipped_;
+    bool initialized_ = false;
 };
 
 } // namespace rocks

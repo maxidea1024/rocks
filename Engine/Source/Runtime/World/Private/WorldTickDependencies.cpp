@@ -603,6 +603,23 @@ void World::ClearEngineStage(EngineStage stage) noexcept {
     }
 }
 
+void World::RunTickableSubsystems(const TickPhaseFrame& frame) noexcept {
+    TickContext context;
+    context.phase = TickPhase::LateUpdate;
+    context.unscaledDeltaSeconds = frame.unscaledDeltaSeconds;
+    context.frameIndex = frame.frameIndex;
+    context.paused = frame.paused;
+    for (WorldSubsystem* subsystem : tickables_) {
+        // pause 중에는 TickWhenPaused인 것만 unscaled delta로(TickScheduler pause 정책과 같다).
+        if (frame.paused && !subsystem->TickWhenPaused()) {
+            continue;
+        }
+
+        context.deltaSeconds = frame.paused ? frame.unscaledDeltaSeconds : frame.deltaSeconds;
+        subsystem->OnTick(*this, context);
+    }
+}
+
 Result<void> World::RunEngineStage(EngineStage stage, TickPhase phase,
                                    const TickPhaseFrame& frame) noexcept {
     const EngineStageSlot slot = engineStages_[static_cast<uint32>(stage)];
