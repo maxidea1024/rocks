@@ -199,17 +199,24 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
 
     // 2) 프레임워크 PreAwake(UE PreInitializeComponents) → Actor OnAwake. PreAwake 실패는 OnAwake
     //    실패와 같다.
-    auto awoke = With<Actor>(actor, [](Actor& value) noexcept -> Result<void> {
-        auto prepared = value.OnFrameworkPreAwake();
-        if (!prepared) {
-            return prepared;
-        }
-
-        return value.OnAwake();
-    });
+    auto prepared =
+        With<Actor>(actor, [](Actor& value) noexcept { return value.OnFrameworkPreAwake(); });
     record = FindActorRecord(actor);
     if (record == nullptr) {
         return finish(Result<void>::Failure(ErrorCode::Destroyed));
+    }
+
+    // PreAwake가 성공했으면 OnAwake가 실패해도 OnFrameworkEndPlay로 되돌릴 기회를 준다(PreAwake에서
+    // 만든 것 — GameDirector의 GameState 등).
+    record->frameworkAwake = prepared.IsOk();
+    Result<void> awoke =
+        prepared ? Result<void>::Success() : Result<void>::Failure(prepared.Error());
+    if (prepared) {
+        awoke = With<Actor>(actor, [](Actor& value) noexcept { return value.OnAwake(); });
+        record = FindActorRecord(actor);
+        if (record == nullptr) {
+            return finish(Result<void>::Failure(ErrorCode::Destroyed));
+        }
     }
 
     if (!awoke) {
@@ -311,7 +318,11 @@ Result<void> World::DestroyActorFor(ObjectHandle actor, EndPlayReason reason) no
             continue;
         }
 
-        auto marked = With<Component>(component, [this](Component& value) noexcept {
+        auto marked = With<Component>(component, [this, reason](Component& value) noexcept {
+            // 먼저 단독 파괴가 요청된 Component는 그 이유를 유지한다(17.2절).
+            if (value.state_ != ComponentState::PendingDestroy) {
+                value.endReason_ = reason;
+            }
             value.state_ = ComponentState::PendingDestroy;
             UnregisterTicks(value.ticks_);
         });
@@ -321,11 +332,11 @@ Result<void> World::DestroyActorFor(ObjectHandle actor, EndPlayReason reason) no
     return Result<void>::Success();
 }
 
-void World::DestroyAllActors() noexcept {
+void World::DestroyAllActors(EndPlayReason reason) noexcept {
     // 파괴 대기 표시는 hook을 부르지 않으므로 한 번의 순회로 충분하다(O(n)).
     for (const ActorRecord& record : actors_) {
         if (record.state != ActorState::PendingDestroy) {
-            auto destroyed = DestroyActor(record.handle);
+            auto destroyed = DestroyActorFor(record.handle, reason);
             (void)destroyed;
         }
     }

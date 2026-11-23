@@ -230,6 +230,7 @@ Result<void> World::DestroyComponent(ObjectHandle component) noexcept {
     }
 
     return With<Component>(component, [this](Component& value) noexcept {
+        value.endReason_ = EndPlayReason::Destroyed;
         value.state_ = ComponentState::PendingDestroy;
         UnregisterTicks(value.ticks_);
     });

@@ -94,8 +94,9 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
     }
 
     const EndPlayReason reason = record->endReason;
-    // 0) 프레임워크 EndPlay(UE Destroyed·EndPlay의 엔진 부분 — 17.8절). OnAwake가 성공한 Actor만.
-    if (record->awake) {
+    // 0) 프레임워크 EndPlay(UE Destroyed·EndPlay의 엔진 부분 — 17.8절). PreAwake가 성공한 Actor만.
+    if (record->frameworkAwake) {
+        record->frameworkAwake = false;
         auto ended = With<Actor>(
             actor, [reason](Actor& value) noexcept { value.OnFrameworkEndPlay(reason); });
         (void)ended;
@@ -135,8 +136,10 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
             return awake;
         });
         if (destroying && destroying.Value()) {
+            // Actor와 함께 정리되면 Actor 이유가 Component에 적혀 있다(먼저 단독 파괴된 것은 그
+            // 이유).
             auto called = With<Component>(
-                component, [reason](Component& value) noexcept { value.OnDestroy(reason); });
+                component, [](Component& value) noexcept { value.OnDestroy(value.endReason_); });
             (void)called;
         }
     }

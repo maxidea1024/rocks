@@ -468,7 +468,7 @@ Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     // 게임 진행 중이면 정리 이유로 먼저 끝낸다(Shutdown은 그다음 — 17.6절).
     auto ended = context.world->EndPlay(context.endReason);
     (void)ended;
-    auto finished = context.world->Shutdown();
+    auto finished = context.world->Shutdown(context.endReason);
     if (!finished) {
         // 외부가 Borrow·RootRef를 보유하고 있다. 지연 작업에서 다시 시도한다.
         context.pendingDestroy = true;

@@ -316,8 +316,9 @@ public:
 
     // 모든 Actor·Level을 정리하고 Subsystem·Registry를 닫는다. 여러 번 호출해도 안전하다(완료 후
     // Success). Tick·hook 안이면 Busy. 외부가 Borrow·RootRef를 보유해 회수할 수 없으면 그 오류이며
-    // TearingDown에 머문다(반환 후 다시 호출).
-    Result<void> Shutdown() noexcept;
+    // TearingDown에 머문다(반환 후 다시 호출). reason은 정리 이유다: Playing이면 EndPlay(reason)를
+    // 먼저 부르고, 남은 Actor(EndPlay 뒤 Spawn·Play하지 않은 World)도 이 이유로 정리한다.
+    Result<void> Shutdown(EndPlayReason reason = EndPlayReason::Quit) noexcept;
 
     // STW 병렬 전체 수집을 요청한다(일정 방식과 무관 — 레벨 전환·로딩 화면·메모리 압박). 요청은
     // 다음 GC 단계(Tick 끝)에서 소비된다: Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면
@@ -626,7 +627,7 @@ public:
     // EndPlay(Quit)를 먼저 부른다.
     Result<void> EndPlay(EndPlayReason reason) noexcept;
 
-    // BeginPlay의 시작을 위임한다(BeginPlay 전에만 — Initialized가 아니면 InvalidArgument).
+    // BeginPlay의 시작을 위임한다(BeginPlay 전에만 — Created·Initialized가 아니면 InvalidArgument).
     // null이면 위임을 없앤다(BeginPlay가 바로 DispatchBeginPlay — Director 없는 World, 21.4절).
     Result<void> SetBeginPlayDispatcher(BeginPlayDispatcher* dispatcher) noexcept;
 
@@ -674,6 +675,8 @@ private:
         ActorState state = ActorState::Constructed;
         // 정리 이유다(파괴 대기로 바꿀 때 정한다 — 17.2절).
         EndPlayReason endReason = EndPlayReason::Destroyed;
+        // OnFrameworkPreAwake가 성공했다(OnFrameworkEndPlay를 받는다 — OnAwake가 실패해도).
+        bool frameworkAwake = false;
         // Level 클러스터의 소속이다(Component도 같은 클러스터에 넣는다).
         bool clustered = false;
         bool awake = false;
@@ -736,7 +739,7 @@ private:
     void FinishLevelDestroys() noexcept;
     void ReleaseLevel(usize index) noexcept;
     // 모든 Actor를 파괴 대기로 만들고 정리한다(hook 포함). 종료·초기화 실패 경로에서 쓴다.
-    void DestroyAllActors() noexcept;
+    void DestroyAllActors(EndPlayReason reason) noexcept;
 
     // actor의 index번째 Component와 지금의 Component 수다. 순회는 count로 끝을 판정하고 null
     // component(로드된 목록의 null 원소)는 건너뛴다 — null을 끝 표지로 쓰지 않는다. hook이 목록을
@@ -882,6 +885,8 @@ private:
     BeginPlayDispatcher* beginPlayDispatcher_ = nullptr;
     bool dispatchingBeginPlay_ = false;
     bool beginPlayDispatched_ = false;
+    // EndPlay로 게임 진행을 끝냈다(다시 BeginPlay하지 않는다).
+    bool endedPlay_ = false;
     // IsTickable()이 참인 Subsystem이다(초기화 순서, Deinitialize 전에 비운다).
     Array<WorldSubsystem*> tickables_{allocator_};
     Span<const WorldSubsystemType> subsystemTypes_;

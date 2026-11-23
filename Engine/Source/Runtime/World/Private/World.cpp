@@ -220,7 +220,7 @@ Result<void> World::Initialize() noexcept {
 
     if (!initialized) {
         // 그동안 Spawn된 Actor와 Level을 정리하고 Created로 되돌린다.
-        DestroyAllActors();
+        DestroyAllActors(EndPlayReason::Quit);
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
         while (levels_.Size() != 0) {
@@ -270,9 +270,10 @@ void World::CloseOuterSubsystems(World& world) noexcept {
 }
 
 Result<void> World::BeginPlay() noexcept {
-    // 편집·비활성 World는 게임을 진행하지 않는다(16.4절).
+    // 편집·비활성 World는 게임을 진행하지 않는다(16.4절). EndPlay로 끝난 World는 다시 시작하지
+    // 않는다(UE도 EndPlay 뒤 World를 다시 BeginPlay하지 않는다 — 새 World를 만든다).
     if (state_ != WorldState::Initialized || kind_ == WorldKind::Editor ||
-        kind_ == WorldKind::Inactive) {
+        kind_ == WorldKind::Inactive || endedPlay_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -298,21 +299,34 @@ Result<void> World::BeginPlay() noexcept {
     beginPlayDispatched_ = false;
     auto started = beginPlayDispatcher_->StartPlay(*this);
     dispatchingBeginPlay_ = false;
+    if (beginPlayDispatched_) {
+        // 시작은 했다(Playing). StartPlay가 그 뒤 실패했으면 그 오류를 돌려주고, 정리는 EndPlay·
+        // Shutdown이 Playing 경로로 한다.
+        return started;
+    }
+
+    // 시작하지 못했다: OnWorldBeginPlay를 받은 Subsystem이 짝을 잃지 않게 OnWorldEndPlay(역순)로
+    // 되돌린다. World는 Initialized에 남고 다시 BeginPlay할 수 있다.
+    for (usize index = subsystems_.Count(); index > 0; --index) {
+        subsystems_.At(index - 1)->OnWorldEndPlay(*this);
+    }
+
     if (!started) {
         return started;
     }
 
-    if (!beginPlayDispatched_) {
-        LogContextScope context("World", Name());
-        Log::Error(LogWorld, "BeginPlay dispatcher returned without calling DispatchBeginPlay");
-        return Result<void>::Failure(ErrorCode::NotReady);
-    }
-
-    return Result<void>::Success();
+    LogContextScope context("World", Name());
+    Log::Error(LogWorld, "BeginPlay dispatch contract violated: StartPlay returned without calling "
+                         "DispatchBeginPlay");
+    return Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> World::DispatchBeginPlay() noexcept {
     if (!dispatchingBeginPlay_ || beginPlayDispatched_ || state_ != WorldState::Initialized) {
+        LogContextScope context("World", Name());
+        Log::Warning(LogWorld,
+                     "BeginPlay dispatch contract violated: DispatchBeginPlay called {Where}",
+                     beginPlayDispatched_ ? "twice" : "outside StartPlay");
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
@@ -353,8 +367,6 @@ Result<void> World::EndPlay(EndPlayReason reason) noexcept {
     }
 
     FlushDestroys();
-    pendingStart_.Clear();
-    pendingComponentStart_.Clear();
     {
         HookScope hooks(*this);
         for (usize index = subsystems_.Count(); index > 0; --index) {
@@ -362,8 +374,11 @@ Result<void> World::EndPlay(EndPlayReason reason) noexcept {
         }
     }
 
+    // OnWorldEndPlay가 요청한 파괴도 여기서 끝낸다. 정리 hook·OnWorldEndPlay가 Spawn한 Actor는 남아
+    // Initialized로 기다리다 Shutdown에서 정리된다(다시 BeginPlay하지 않으므로 시작하지 않는다).
+    FlushDestroys();
     outerOpen_ = false;
-    beginPlayDispatched_ = false;
+    endedPlay_ = true;
     state_ = WorldState::Initialized;
     return Result<void>::Success();
 }
@@ -460,7 +475,7 @@ Result<uint32> World::GetComponents(ObjectHandle actor, Span<ObjectHandle> out) 
     });
 }
 
-Result<void> World::Shutdown() noexcept {
+Result<void> World::Shutdown(EndPlayReason reason) noexcept {
     if (state_ == WorldState::Destroyed) {
         return Result<void>::Success();
     }
@@ -472,7 +487,7 @@ Result<void> World::Shutdown() noexcept {
     ObjectAccessScope scope(Access());
     // 게임 진행 중이면 먼저 끝낸다(OnWorldEndPlay는 EndPlay가 부른다).
     if (state_ == WorldState::Playing) {
-        auto ended = EndPlay(EndPlayReason::Quit);
+        auto ended = EndPlay(reason);
         if (!ended) {
             return ended;
         }
@@ -486,7 +501,8 @@ Result<void> World::Shutdown() noexcept {
         for (EngineStageSlot& stage : engineStages_) {
             stage = {};
         }
-        DestroyAllActors();
+        // 남은 Actor(EndPlay 뒤 Spawn·Play하지 않은 World)도 종료 이유로 정리한다.
+        DestroyAllActors(reason);
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
         tickables_.Clear();

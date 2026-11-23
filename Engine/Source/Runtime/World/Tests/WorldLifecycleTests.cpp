@@ -103,7 +103,8 @@ public:
 
     Result<void> OnAwake() noexcept override {
         Record("a.awake");
-        return Result<void>::Success();
+        return failAwake ? Result<void>::Failure(ErrorCode::DependencyFailed)
+                         : Result<void>::Success();
     }
 
     void OnEnable() noexcept override {
@@ -124,6 +125,7 @@ public:
 
     static inline bool failPre = false;
     static inline bool failPost = false;
+    static inline bool failAwake = false;
 
 protected:
     Result<void> OnFrameworkPreAwake() noexcept override {
@@ -145,6 +147,10 @@ protected:
 
 class EndPlaySubsystem final : public WorldSubsystem {
 public:
+    void OnWorldBeginPlay(World&) noexcept override {
+        Record("s.beginplay");
+    }
+
     void OnWorldEndPlay(World&) noexcept override {
         Record("s.endplay");
     }
@@ -260,6 +266,16 @@ TEST(WorldLifecycle_FrameworkAwakeFailures) {
                                 "a.destroy:Destroyed"};
     CHECK(EventsAre(post));
     FrameworkActor::failPost = false;
+
+    // PreAwake가 성공하고 OnAwake가 실패하면 OnDestroy는 없지만 OnFrameworkEndPlay는
+    // 받는다(PreAwake에서 만든 것을 되돌릴 자리).
+    FrameworkActor::failAwake = true;
+    ResetEvents();
+    CHECK(world.SpawnActor<FrameworkActor>().Error() == ErrorCode::DependencyFailed);
+    REQUIRE(world.Tick(1.0 / 60.0));
+    const char* const awake[] = {"fw.pre", "a.awake", "fw.end:Destroyed"};
+    CHECK(EventsAre(awake));
+    FrameworkActor::failAwake = false;
     REQUIRE(world.Shutdown());
 }
 
@@ -335,8 +351,9 @@ TEST(WorldLifecycle_WorldEndPlaySeparatesFromShutdown) {
         ResetEvents();
         REQUIRE(world.Shutdown());
         // EndPlay 뒤의 Shutdown은 OnWorldEndPlay를 다시 부르지 않는다. 남은 Actor는 Quit으로 정리.
-        const char* const shut[] = {"fw.end:Destroyed", "a.disable", "a.destroy:Destroyed",
-                                    "s.deinit"};
+        const char* const shut[] = {"fw.end:Quit", "a.disable", "a.destroy:Quit", "s.deinit"};
+        // 끝난 World는 다시 BeginPlay하지 않는다.
+        CHECK(world.BeginPlay().Error() == ErrorCode::InvalidArgument);
         CHECK(EventsAre(shut));
     }
     {
@@ -412,4 +429,53 @@ TEST(WorldLifecycle_BeginPlayDispatcherContract) {
     REQUIRE(world.Shutdown());
 }
 
+// 단독 파괴를 먼저 요청한 Component는 같은 프레임의 더 큰 정리(EndPlay)에서도 그 이유를 유지한다.
+TEST(WorldLifecycle_ComponentKeepsFirstReasonUnderOwnerCleanup) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto owner = world.SpawnActor<FrameworkActor>();
+    REQUIRE(owner);
+    auto component = world.AddComponent<ReasonComponent>(owner.Value());
+    REQUIRE(component);
+    REQUIRE(world.Tick(1.0 / 60.0));
+    REQUIRE(world.DestroyComponent(component.Value()));
+    ResetEvents();
+    REQUIRE(world.EndPlay(EndPlayReason::TryoutEnded));
+    const char* const ended[] = {
+        "fw.end:TryoutEnded",    "c.disable",   "a.disable", "c.destroy:Destroyed",
+        "a.destroy:TryoutEnded", "c.unregister"};
+    CHECK(EventsAre(ended));
+    REQUIRE(world.Shutdown());
+}
+
+// BeginPlay가 시작하지 못하면(dispatcher 실패·미호출) OnWorldBeginPlay를 받은 Subsystem에
+// OnWorldEndPlay로 짝을 맞추고 Initialized에 남는다. 다시 BeginPlay할 수 있다.
+TEST(WorldLifecycle_FailedBeginPlayPairsSubsystemHooks) {
+    const WorldSubsystemType types[] = {
+        MakeSubsystemType<WorldSubsystem, EndPlaySubsystem>("EndPlay")};
+    Fixture fixture(types);
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    TestDispatcher dispatcher;
+    dispatcher.mode = 1;
+    REQUIRE(world.SetBeginPlayDispatcher(&dispatcher));
+    ResetEvents();
+    CHECK(world.BeginPlay().Error() == ErrorCode::NotReady);
+    const char* const failed[] = {"s.beginplay", "d.start", "s.endplay"};
+    CHECK(EventsAre(failed));
+    CHECK(world.State() == WorldState::Initialized);
+    dispatcher.mode = 0;
+    ResetEvents();
+    REQUIRE(world.BeginPlay());
+    const char* const started[] = {"s.beginplay", "d.start", "d.after"};
+    CHECK(EventsAre(started));
+    ResetEvents();
+    REQUIRE(world.Shutdown());
+    const char* const shut[] = {"s.endplay", "s.deinit"};
+    CHECK(EventsAre(shut));
+}
 } // namespace world_lifecycle_tests_file
