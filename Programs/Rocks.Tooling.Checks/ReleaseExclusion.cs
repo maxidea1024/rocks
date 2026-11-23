@@ -95,8 +95,7 @@ public static class ReleaseExclusion
             }
 
             var targets = new List<(string Name, IReadOnlyList<string> Modules)>();
-            foreach (TargetRules target in rules.Targets.Where(target => target.Type is TargetType.Game or TargetType.Client or TargetType.Server &&
-                         RuleLoader.SupportsPlatform(target.Type, platform)))
+            foreach (TargetRules target in rules.Targets.Where(target => Evaluates(target.Type, platform)))
             {
                 // 켠 플러그인 모듈은 타깃이 참조하지 않아도 주 실행 파일에 링크된다(Docs/Design/BuildTargets 3.9절 BD36·BD38). 해석
                 // 오류(끈 플러그인·빠진 모듈 사용)도 이 타깃의 Release 빌드를 막으므로 정책 실패로 알린다.
@@ -119,6 +118,13 @@ public static class ReleaseExclusion
         ReleaseExclusionResult result = Apply(violations, KnownExceptions);
         return result with { Failures = [.. failures, .. result.Failures] };
     }
+
+    /// <summary>
+    /// 이 타깃 종류를 이 플랫폼의 Release로 평가하는가다(Docs/Design/BuildTargets 3.3절 BD20): 출시 타깃(Game·Client·Server)이고 그 종류가 이
+    /// 플랫폼에서 빌드된다(3.1절 표 — Server는 Android가 아니다). Editor·Program은 대상이 아니다.
+    /// </summary>
+    public static bool Evaluates(TargetType type, NativePlatform platform) =>
+        type is TargetType.Game or TargetType.Client or TargetType.Server && RuleLoader.SupportsPlatform(type, platform);
 
     /// <summary>
     /// 모듈 종류(<see cref="NativeModuleInput.Type"/>)가 Developer인 모듈 이름이다(Docs/Design/BuildTargets 3.9절 BD38). 엔진 모듈은

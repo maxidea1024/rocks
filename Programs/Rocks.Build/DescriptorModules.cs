@@ -242,10 +242,18 @@ public sealed class DescriptorModuleSet
 
         // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
         // 플러그인 모듈에는 플러그인 이름과 플러그인 루트 기준 폴더를 넣는다(Docs/Design/ModuleLoader.ko.md 3.15절 — Modular 공유 라이브러리 폴더).
+        // 모듈 type도 기술자 값이다(Docs/Design/BuildTargets 3.3절 — 게임 모듈 규칙은 type 칸을 쓰지 않는다).
         return included.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module)
-            ? rule with { LoadingPhase = module.Descriptor.LoadingPhase, Plugin = module.FromPlugin ? PluginOf(module) : null }
+            ? rule with { Type = module.Descriptor.Type, LoadingPhase = module.Descriptor.LoadingPhase, Plugin = module.FromPlugin ? PluginOf(module) : null }
             : rule).ToList();
     }
+
+    /// <summary>
+    /// 규칙 모듈 전부(거르기 전)에 기술자의 type을 넣은 목록이다(기술자가 없는 엔진 모듈은 그대로). 게임 계획이 type 사이 의존 규칙(BD25)을
+    /// 타깃과 무관하게 검사할 때 쓴다(<see cref="ModuleTypeRules.ValidateDependencies"/>).
+    /// </summary>
+    public IReadOnlyList<NativeModuleInput> WithDescriptorTypes(IReadOnlyList<NativeModuleInput> ruleModules) =>
+        [.. ruleModules.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module) ? rule with { Type = module.Descriptor.Type } : rule)];
 
     // 플러그인 모듈의 플러그인 이름과 플러그인 루트(엔진 저장소 Engine/Plugins, 프로젝트 Plugins) 기준 폴더(/ 구분)다.
     private ModulePlugin PluginOf(DescribedModule module)

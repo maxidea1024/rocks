@@ -37,6 +37,10 @@ internal static class TargetKindRulesTests
         Require(new Probe(TargetType.Program) { Editor = true }.Kind == new TargetKind(TargetType.Program, CompileWithEditor: true), "target kind");
         // 규칙 로드는 모든 타깃의 Program 속성만 보고, 플랫폼 표는 고른 타깃에만 한다(Load — 다른 플랫폼 전용 타깃이 있어도 이 타깃은 빌드한다).
         RuleLoader.ValidateTargetProperties(new Probe(TargetType.Server));
+        LoadedRuleSet set = new([new() { Name = "Probe", Sources = [] }],
+            [new Probe(TargetType.Editor) { Named = "Studio", Selected = ["Probe"] }, new Probe(TargetType.Game) { Named = "Game", Selected = ["Probe"] }]);
+        Require(RuleLoader.Select(set, "Game", NativePlatform.Android).Target.Name == "Game", "an Android Game build with an Editor target in the rule set");
+        Expect(true, () => RuleLoader.Select(set, "Studio", NativePlatform.Android), "an Android Editor build");
         Expect(true, () => RuleLoader.ValidateTargetProperties(new Probe(TargetType.Game) { Editor = true }), "property check on Game");
         Console.WriteLine("PASS target kinds: Program properties, platform table, Editor link type");
 
@@ -49,7 +53,7 @@ internal static class TargetKindRulesTests
             Module("Render", ModuleType.ClientOnly, "Base"), Module("Studio", ModuleType.Editor, "Tools", "Net", "Render"),
             new() { Name = "Tests", Kind = NativeModuleKind.Executable, Sources = [], PrivateDependencies = ["Tools", "Studio"] }
         ];
-        RuleLoader.ValidateModuleTypeDependencies(valid);
+        ModuleTypeRules.ValidateDependencies(valid);
         foreach ((string name, NativeModuleInput[] modules, string expected) in new (string, NativeModuleInput[], string)[]
                  {
                      ("Runtime -> Developer", [.. valid, Module("Game", ModuleType.Runtime, "Tools")], "Game (Runtime) -> Tools (Developer)"),
@@ -63,7 +67,7 @@ internal static class TargetKindRulesTests
         {
             try
             {
-                RuleLoader.ValidateModuleTypeDependencies(modules);
+                ModuleTypeRules.ValidateDependencies(modules);
                 Require(false, name + " was accepted");
             }
             catch (ArgumentException error)
@@ -105,9 +109,13 @@ internal static class TargetKindRulesTests
 
         public bool EditorData { get; init; }
 
-        public override string Name => "Probe";
+        public string Named { get; init; } = "Probe";
 
-        public override IReadOnlyList<string> Modules => [];
+        public IReadOnlyList<string> Selected { get; init; } = [];
+
+        public override string Name => Named;
+
+        public override IReadOnlyList<string> Modules => Selected;
 
         public override TargetType Type => type;
 
