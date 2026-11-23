@@ -101,6 +101,9 @@ struct TickStats {
     uint32 executedThisFrame = 0;
     // 아직 반영하지 않은 해제 수와 순서 재계산이 필요한 단계 수의 합이다.
     uint32 pendingChanges = 0;
+    // 실효 단계 재계산이 할당 실패로 미뤄진 누적 횟수다. 그 프레임은 이전 실효 단계로 실행하고 다음
+    // 프레임에 다시 계산한다.
+    uint32 phaseRecomputeFailures = 0;
 };
 
 namespace detail {
@@ -121,14 +124,15 @@ struct TickSchedulerTestAccess;
 // - 등록·해제·활성 변경·의존 변경은 언제든 호출할 수 있다. 실행 중(RunPhase 안) 변경의 반영 시점:
 //   해제·비활성화는 즉시(남은 실행에서 빠진다), 활성화는 즉시(이번 단계의 아직 실행 전 위치면
 //   이번에 실행된다), 새 등록·같은 단계 의존 변경·priority·interval 변경은 다음 단계 경계(Physics는
-//   다음 고정 스텝)부터다. 실효 단계가 바뀌는 변경(단계를 넘는 의존, SetPhase)은 다음 프레임의 첫
-//   RunPhase 전에 반영한다(단계 경계에서 옮기면 한 프레임에 두 번 실행되거나 빠질 수 있다).
+//   다음 고정 스텝)부터다. 실효 단계가 바뀌는 변경(단계를 넘는 의존, SetPhase)은 새 프레임의 첫
+//   RunPhase 전에 반영한다(단계 경계에서 옮기면 한 프레임에 두 번 실행되거나 빠질 수 있다). 새
+//   프레임은 TickPhaseFrame::frameIndex가 바뀐 것으로 안다(BeginFrame 호출 여부와 무관하다).
 // - 실행 중 해제는 할당하지 않는다(표시만 하고 단계 경계에서 지운다).
 // - 선행 의존은 단계와 무관하게 한 그래프에 둔다. 사이클(단계를 넘는 것 포함)을 만드는 의존 추가는
 //   추가 시점에 CycleDetected로 거부하며 상태를 바꾸지 않는다. 실효 단계는 max(요청 단계, 모든
 //   선행의 실효 단계)다(UE tick group demotion). 같은 실효 단계 안의 간선만 실행 순서를 정한다.
-//   Physics 단계(고정 스텝) 등록과 다른 단계 등록 사이 의존은 고정 스텝 횟수가 달라 InvalidArgument다.
-//   해제된 등록에 걸린 의존은 다음 순서 재계산 때 지운다.
+//   Physics 단계(고정 스텝) 등록과 다른 단계 등록 사이 의존은 고정 스텝 횟수가 달라
+//   InvalidArgument다. 해제된 등록에 걸린 의존은 다음 순서 재계산 때 지운다.
 // - 순서: 선행 의존을 지키는 범위에서 준비된 항목 중 (priority, 등록 순서)가 가장 작은 것부터
 // 실행한다
 //   (priority 최소 힙 위상 정렬). 의존으로 묶이지 않은 항목끼리는 항상 (priority, 등록 순서)를
@@ -175,12 +179,13 @@ public:
     // StaleHandle이다.
     Result<TickPhase> EffectivePhase(TickHandle handle) const noexcept;
 
-    // 프레임 시작에 호출한다. 실행 수 통계를 초기화하고, 다음 RunPhase가 이 프레임의 첫 단계임을
-    // 표시한다(실효 단계를 다시 계산할 수 있는 자리).
+    // 프레임 시작에 호출한다. 실행 수 통계를 초기화한다. 실효 단계 재계산 시점은 이 호출이 아니라
+    // frameIndex가 바뀐 첫 RunPhase다(hook 안에서 불러도 같은 프레임에 다시 계산하지 않는다).
     void BeginFrame() noexcept;
 
-    // 한 단계를 실행한다. 단계 시작 전에 보류 변경을 반영한다(프레임의 첫 RunPhase면 실효 단계도
-    // 다시 계산한다). 재진입(실행 중 RunPhase)은 Busy다. 순서 재계산에 필요한 할당이 실패하면
+    // 한 단계를 실행한다. 단계 시작 전에 보류 변경을 반영한다(새 frameIndex의 첫 RunPhase면 실효
+    // 단계도 다시 계산한다 — 그 할당이 실패하면 이전 실효 단계로 실행하고 phaseRecomputeFailures를
+    // 센다). 재진입(실행 중 RunPhase)은 Busy다. 순서 재계산에 필요한 할당이 실패하면
     // OutOfMemory이며 그 단계는 실행하지 않는다.
     Result<void> RunPhase(TickPhase phase, const TickPhaseFrame& frame,
                           TickExecutor& executor) noexcept;
@@ -193,7 +198,8 @@ public:
     TickStats Stats() const noexcept;
 
 private:
-    // 시험이 Reaches 방문 번호를 한 바퀴 끝 근처로 옮긴다(Private/TickSchedulerTestAccess.h).
+    // 시험이 Reaches 방문 번호를 한 바퀴 끝 근처로 옮기고 선행 목록 길이를 본다
+    // (Private/TickSchedulerTestAccess.h).
     friend struct detail::TickSchedulerTestAccess;
 
     struct Entry {
@@ -268,8 +274,10 @@ private:
     // 실효 단계가 요청 단계와 다른(늦춰진) 항목 수다. 0이면 선행 해제가 늦춤을 풀 일이 없다(마지막
     // 재계산 기준 — SetPhase 뒤 재계산 전에는 근사이며, 그때는 phasesDirty_가 이미 참이다).
     uint32 demoted_ = 0;
-    // 이번 프레임에 RunPhase가 한 번이라도 돌았다(BeginFrame이 지운다).
-    bool phaseRanThisFrame_ = false;
+    // 마지막 RunPhase의 frameIndex다(바뀌면 새 프레임 — 실효 단계 재계산 자리).
+    static constexpr uint64 NoFrame = NumericLimits<uint64>::Max();
+    uint64 lastFrameIndex_ = NoFrame;
+    uint32 recomputeFailures_ = 0;
     bool running_ = false;
     bool closed_ = false;
 };

@@ -260,6 +260,15 @@ Result<void> TickScheduler::AddPrerequisite(TickHandle dependent,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 해제된 선행 handle을 여기서도 지운다. 단계를 넘는 간선은 선행이 해제돼도 dependent의 단계가
+    // 재구성되지 않을 수 있어(재구성만 지우면) 선행을 붙였다 떼기를 반복할 때 목록이 계속 자란다.
+    for (usize index = after->prerequisites.Size(); index > 0; --index) {
+        const Entry* existing = entries_.Find(after->prerequisites[index - 1].slot);
+        if (existing == nullptr || existing->removed) {
+            auto pruned = after->prerequisites.TryRemoveAt(index - 1);
+            (void)pruned;
+        }
+    }
     for (const TickHandle& existing : after->prerequisites) {
         if (existing == prerequisite) {
             return Result<void>::Success();
@@ -355,15 +364,24 @@ Result<TickPhase> TickScheduler::EffectivePhase(TickHandle handle) const noexcep
 
 void TickScheduler::BeginFrame() noexcept {
     executedThisFrame_ = 0;
-    phaseRanThisFrame_ = false;
 }
 
 Result<void> TickScheduler::RecomputeEffectivePhases() noexcept {
-    // 1) 살아 있는 항목을 모은다(scratch_ 위치 = 지역 번호).
+    // 1) 살아 있는 항목을 모은다(scratch_ 위치 = 지역 번호). 해제된 선행 handle도 여기서
+    // 지운다(단계를
+    //    넘는 간선은 그 단계의 재구성이 지우지 못할 수 있다).
     scratch_.Clear();
     for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
-        if (iterator->removed) {
+        Entry& entry = *iterator;
+        if (entry.removed) {
             continue;
+        }
+        for (usize index = entry.prerequisites.Size(); index > 0; --index) {
+            const Entry* before = entries_.Find(entry.prerequisites[index - 1].slot);
+            if (before == nullptr || before->removed) {
+                auto pruned = entry.prerequisites.TryRemoveAt(index - 1);
+                (void)pruned;
+            }
         }
         auto pushed = scratch_.TryPushBack(TickHandle{iterator.Handle()});
         if (!pushed) {
@@ -389,7 +407,8 @@ Result<void> TickScheduler::RecomputeEffectivePhases() noexcept {
         value = 0;
     }
 
-    // 2) 단계와 무관한 전체 그래프의 진입 차수와 역방향(선행 → 의존) 인접 목록(CSR)이다. 지역 번호는
+    // 2) 단계와 무관한 전체 그래프의 진입 차수와 역방향(선행 → 의존) 인접 목록(CSR)이다. 지역
+    // 번호는
     //    칸 번호로 찾으므로 세대가 다른(해제 뒤 재사용된) 선행은 handle 비교로 거른다.
     uint32 edges = 0;
     for (usize index = 0; index < count; ++index) {
@@ -426,7 +445,8 @@ Result<void> TickScheduler::RecomputeEffectivePhases() noexcept {
         }
     }
 
-    // 3) 위상 순서로 실효 단계 = max(요청 단계, 선행의 실효 단계)를 계산한다(phaseScratch_ — 다 계산한
+    // 3) 위상 순서로 실효 단계 = max(요청 단계, 선행의 실효 단계)를 계산한다(phaseScratch_ — 다
+    // 계산한
     //    뒤 반영하므로 실패해도 상태가 바뀌지 않는다). 처리 순서는 결과에 영향이 없다(최댓값).
     heap_.Clear();
     for (usize index = 0; index < count; ++index) {
@@ -456,7 +476,8 @@ Result<void> TickScheduler::RecomputeEffectivePhases() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 4) 바뀐 항목을 옮긴다. Physics는 늦춤 대상이 아니다(Physics 등록과 다른 등록 사이 간선은 추가 때
+    // 4) 바뀐 항목을 옮긴다. Physics는 늦춤 대상이 아니다(Physics 등록과 다른 등록 사이 간선은 추가
+    // 때
     //    거부하므로 가변 등록의 결과가 Physics일 수 없지만, 그래도 PostPhysics로 민다 — UE도
     //    Start/EndPhysics를 건너뛴다).
     uint32 demoted = 0;
@@ -721,15 +742,15 @@ Result<void> TickScheduler::RunPhase(TickPhase phase, const TickPhaseFrame& fram
     }
 
     ApplyPendingRemovals();
-    // 실효 단계 이동은 프레임의 첫 단계 전에만 한다(이미 실행한 항목을 다른 단계로 옮기면 한
-    // 프레임에 두 번 실행될 수 있다).
-    if (!phaseRanThisFrame_ && phasesDirty_) {
-        auto recomputed = RecomputeEffectivePhases();
-        if (!recomputed) {
-            return recomputed;
+    // 실효 단계 이동은 새 프레임의 첫 단계 전에만 한다(이미 실행한 항목을 다른 단계로 옮기면 한
+    // 프레임에 두 번 실행될 수 있다). 할당이 실패하면 이전 실효 단계로 실행하고 다음 프레임에 다시
+    // 계산한다(실패해도 상태는 바뀌지 않는다 — 프레임 전체를 멈추지 않는다).
+    if (frame.frameIndex != lastFrameIndex_) {
+        lastFrameIndex_ = frame.frameIndex;
+        if (phasesDirty_ && !RecomputeEffectivePhases()) {
+            ++recomputeFailures_;
         }
     }
-    phaseRanThisFrame_ = true;
     if (dirty_[index]) {
         auto rebuilt = RebuildOrder(index);
         if (!rebuilt) {
@@ -801,6 +822,7 @@ TickStats TickScheduler::Stats() const noexcept {
 
     stats.executedThisFrame = executedThisFrame_;
     stats.pendingChanges = pendingRemovals_ + (phasesDirty_ ? 1u : 0u);
+    stats.phaseRecomputeFailures = recomputeFailures_;
     for (bool dirty : dirty_) {
         stats.pendingChanges += dirty ? 1u : 0u;
     }

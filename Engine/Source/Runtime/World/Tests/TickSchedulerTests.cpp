@@ -1,5 +1,6 @@
 #include <Base/InitializerList.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <World/Private/TickSchedulerTestAccess.h>
 #include <World/TickScheduler.h>
@@ -33,6 +34,10 @@ public:
             CHECK(handle.IsOk());
             registerOnRun = 255;
         }
+        if (action != nullptr && target.kind == actionOn) {
+            action(scheduler_, actionUser);
+            actionOn = 255;
+        }
     }
 
     void Reset() noexcept {
@@ -45,6 +50,10 @@ public:
     uint8 unregisterOnRun = 255;
     uint8 registerOnRun = 255;
     TickHandle victim;
+    // actionOn 대상이 실행될 때 한 번 부르는 동작이다(hook 안 변경 시험).
+    void (*action)(TickScheduler&, void*) = nullptr;
+    void* actionUser = nullptr;
+    uint8 actionOn = 255;
 
 private:
     TickScheduler& scheduler_;
@@ -394,14 +403,21 @@ struct FrameRecord {
     }
 };
 
-FrameRecord RunVariableFrame(TickScheduler& scheduler, RecordingExecutor& executor) noexcept {
+// 프레임 번호를 올려 가며 한 프레임을 실행한다. 실효 단계 재계산은 frameIndex가 바뀐 첫
+// RunPhase에서 일어난다(beginFrame이 거짓이면 BeginFrame을 부르지 않는 호출자를 흉내 낸다).
+FrameRecord RunVariableFrame(TickScheduler& scheduler, RecordingExecutor& executor,
+                             uint64& frameIndex, bool beginFrame = true) noexcept {
     FrameRecord record;
-    scheduler.BeginFrame();
+    if (beginFrame) {
+        scheduler.BeginFrame();
+    }
+    TickPhaseFrame frame = Frame();
+    frame.frameIndex = ++frameIndex;
     const TickPhase phases[] = {TickPhase::PrePhysics, TickPhase::PostPhysics,
                                 TickPhase::LateUpdate, TickPhase::PreRender};
     for (TickPhase phase : phases) {
         executor.Reset();
-        auto ran = scheduler.RunPhase(phase, Frame(), executor);
+        auto ran = scheduler.RunPhase(phase, frame, executor);
         CHECK(ran.IsOk());
         for (uint32 at = 0; at < executor.count && record.count < 64; ++at) {
             record.phase[record.count] = static_cast<uint8>(phase);
@@ -436,6 +452,7 @@ TEST(Tick_LaterPhasePrerequisiteDemotesDependent) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
     auto a = scheduler.Register(Make(1, TickPhase::PrePhysics));
     auto b = scheduler.Register(Make(2, TickPhase::PostPhysics, 10));
     REQUIRE(a && b);
@@ -444,12 +461,12 @@ TEST(Tick_LaterPhasePrerequisiteDemotesDependent) {
     CHECK(scheduler.EffectivePhase(a.Value()).Value() == TickPhase::PrePhysics);
 
     // 프레임의 첫 단계 전에 반영된다. a는 priority가 더 낮아도 b 뒤다.
-    CHECK(RunVariableFrame(scheduler, executor).Is({Post(2), Post(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Post(2), Post(1)}));
     CHECK(scheduler.EffectivePhase(a.Value()).Value() == TickPhase::PostPhysics);
 
     // 선행을 빼면 다음 프레임에 원래 단계로 돌아간다.
     REQUIRE(scheduler.RemovePrerequisite(a.Value(), b.Value()));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(1), Post(2)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1), Post(2)}));
     CHECK(scheduler.EffectivePhase(a.Value()).Value() == TickPhase::PrePhysics);
 }
 
@@ -458,19 +475,22 @@ TEST(Tick_DemotionAddedMidFrameAppliesNextFrame) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
     auto a = scheduler.Register(Make(1, TickPhase::PrePhysics));
     auto b = scheduler.Register(Make(2, TickPhase::PostPhysics));
     REQUIRE(a && b);
 
     scheduler.BeginFrame();
-    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    TickPhaseFrame same = Frame();
+    same.frameIndex = ++frame;
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, same, executor));
     CHECK(executor.count == 1 && executor.order[0] == 1);
     REQUIRE(scheduler.AddPrerequisite(a.Value(), b.Value()));
     executor.Reset();
-    REQUIRE(scheduler.RunPhase(TickPhase::PostPhysics, Frame(), executor));
+    REQUIRE(scheduler.RunPhase(TickPhase::PostPhysics, same, executor));
     CHECK(executor.count == 1 && executor.order[0] == 2);
 
-    CHECK(RunVariableFrame(scheduler, executor).Is({Post(2), Post(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Post(2), Post(1)}));
 }
 
 // 늦춤은 전이적이고, 단계를 넘는 간선도 순환 검사에 들어간다.
@@ -478,6 +498,7 @@ TEST(Tick_DemotionIsTransitiveAndCrossPhaseCyclesAreRejected) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
     auto a = scheduler.Register(Make(1, TickPhase::PrePhysics));
     auto b = scheduler.Register(Make(2, TickPhase::PostPhysics));
     auto c = scheduler.Register(Make(3, TickPhase::LateUpdate));
@@ -486,11 +507,11 @@ TEST(Tick_DemotionIsTransitiveAndCrossPhaseCyclesAreRejected) {
     REQUIRE(scheduler.AddPrerequisite(b.Value(), c.Value()));
     CHECK(scheduler.AddPrerequisite(c.Value(), a.Value()).Error() == ErrorCode::CycleDetected);
 
-    CHECK(RunVariableFrame(scheduler, executor).Is({Late(3), Late(2), Late(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Late(3), Late(2), Late(1)}));
 
     // 중간 선행을 해제하면 그 늦춤도 풀린다(다음 프레임).
     REQUIRE(scheduler.Unregister(b.Value()));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(1), Late(3)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1), Late(3)}));
 }
 
 // 선행이 더 이른 단계인 간선은 지우지 않는다. 선행이 나중에 늦은 단계로 옮겨지면 다시 쓰인다.
@@ -498,14 +519,15 @@ TEST(Tick_EarlierPhaseEdgeIsKeptForLaterPhaseChanges) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
     auto a = scheduler.Register(Make(1, TickPhase::PostPhysics));
     auto b = scheduler.Register(Make(2, TickPhase::PrePhysics));
     REQUIRE(a && b);
     REQUIRE(scheduler.AddPrerequisite(a.Value(), b.Value()));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(2), Post(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(2), Post(1)}));
 
     REQUIRE(scheduler.SetPhase(b.Value(), TickPhase::PreRender));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Render(2), Render(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Render(2), Render(1)}));
     CHECK(scheduler.EffectivePhase(a.Value()).Value() == TickPhase::PreRender);
 }
 
@@ -514,11 +536,12 @@ TEST(Tick_LateUpdateEntryCanBeDemotedToPreRender) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
     auto late = scheduler.Register(Make(1, TickPhase::LateUpdate));
     auto render = scheduler.Register(Make(2, TickPhase::PreRender));
     REQUIRE(late && render);
     REQUIRE(scheduler.AddPrerequisite(late.Value(), render.Value()));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Render(2), Render(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Render(2), Render(1)}));
 }
 
 // 고정 스텝(Physics) 등록과 가변 등록은 서로 의존할 수 없고, 단계 변경으로 종류를 바꿀 수도 없다.
@@ -547,25 +570,376 @@ TEST(Tick_PriorityAndIntervalChangesApplyAtNextBoundary) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
     auto a = scheduler.Register(Make(1, TickPhase::PrePhysics, 0));
     auto b = scheduler.Register(Make(2, TickPhase::PrePhysics, 1));
     REQUIRE(a && b);
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(1), Pre(2)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1), Pre(2)}));
     REQUIRE(scheduler.SetPriority(a.Value(), 5));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(2), Pre(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(2), Pre(1)}));
 
     // interval 변경은 누적을 0으로 되돌린다: 0.25초 간격, 0.1초 프레임이면 세 번째 프레임에 실행.
     REQUIRE(scheduler.SetInterval(b.Value(), 0.25));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(1)}));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(1)}));
-    CHECK(RunVariableFrame(scheduler, executor).Is({Pre(2), Pre(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(2), Pre(1)}));
     CHECK(scheduler.SetInterval(b.Value(), -1.0).Error() == ErrorCode::InvalidArgument);
 
     REQUIRE(scheduler.Unregister(a.Value()));
     CHECK(scheduler.SetPriority(a.Value(), 0).Error() == ErrorCode::StaleHandle);
-    CHECK(scheduler.SetPhase(a.Value(), TickPhase::PostPhysics).Error() ==
-          ErrorCode::StaleHandle);
+    CHECK(scheduler.SetPhase(a.Value(), TickPhase::PostPhysics).Error() == ErrorCode::StaleHandle);
     CHECK(scheduler.EffectivePhase(a.Value()).Error() == ErrorCode::StaleHandle);
+}
+
+// 단계를 넘는 선행을 붙였다 떼기를 반복해도 dependent의 선행 목록이 자라지 않는다(해제된 handle은
+// 다음 추가·재계산이 지운다).
+TEST(Tick_ReleasedCrossPhasePrerequisitesDoNotAccumulate) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
+    auto camera = scheduler.Register(Make(1, TickPhase::LateUpdate));
+    REQUIRE(camera);
+    for (uint32 round = 0; round < 64; ++round) {
+        auto projectile = scheduler.Register(Make(2, TickPhase::PostPhysics));
+        REQUIRE(projectile);
+        REQUIRE(scheduler.AddPrerequisite(camera.Value(), projectile.Value()));
+        REQUIRE(scheduler.Unregister(projectile.Value()));
+        CHECK(detail::TickSchedulerTestAccess::PrerequisiteCount(scheduler, camera.Value()) <= 1);
+        if (round % 8 == 0) {
+            RunVariableFrame(scheduler, executor, frame);
+        }
+    }
+    RunVariableFrame(scheduler, executor, frame);
+    CHECK(detail::TickSchedulerTestAccess::PrerequisiteCount(scheduler, camera.Value()) <= 1);
+}
+
+namespace {
+
+struct HookChange {
+    TickHandle dependent;
+    TickHandle prerequisite;
+    TickHandle phaseTarget;
+    TickHandle victim;
+};
+
+} // namespace
+
+// hook 안에서 실효 단계를 바꾸는 변경(단계를 넘는 의존·SetPhase·늦춤을 준 선행의 해제)을 해도 그
+// 프레임에 두 번 실행하거나 빠뜨리지 않고 다음 프레임에 반영된다.
+TEST(Tick_PhaseChangingCallsInsideHookApplyNextFrame) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
+    auto a = scheduler.Register(Make(1, TickPhase::PrePhysics));
+    auto b = scheduler.Register(Make(2, TickPhase::PostPhysics));
+    auto c = scheduler.Register(Make(3, TickPhase::PrePhysics, 1));
+    REQUIRE(a && b && c);
+
+    HookChange change{a.Value(), b.Value(), c.Value(), {}};
+    executor.actionUser = &change;
+    executor.actionOn = 1;
+    executor.action = [](TickScheduler& ticks, void* user) noexcept {
+        auto* hook = static_cast<HookChange*>(user);
+        CHECK(ticks.AddPrerequisite(hook->dependent, hook->prerequisite));
+        CHECK(ticks.SetPhase(hook->phaseTarget, TickPhase::PreRender));
+        // hook 안의 BeginFrame도 같은 프레임 재계산을 일으키지 않는다.
+        ticks.BeginFrame();
+    };
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1), Pre(3), Post(2)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Post(2), Post(1), Render(3)}));
+
+    // 늦춤을 준 선행(b)을 다른 항목(c)의 hook 안에서 해제한다(미룬 해제 경로).
+    change.victim = b.Value();
+    executor.actionOn = 3;
+    executor.action = [](TickScheduler& ticks, void* user) noexcept {
+        CHECK(ticks.Unregister(static_cast<HookChange*>(user)->victim));
+    };
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Post(2), Post(1), Render(3)}));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1), Render(3)}));
+}
+
+// 고정 스텝을 여러 번 도는 동안에는 실효 단계를 다시 계산하지 않는다(같은 frameIndex).
+TEST(Tick_NoRecomputeBetweenFixedSteps) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    auto fixed = scheduler.Register(Make(1, TickPhase::Physics));
+    auto early = scheduler.Register(Make(2, TickPhase::PrePhysics));
+    auto late = scheduler.Register(Make(3, TickPhase::PostPhysics));
+    REQUIRE(fixed && early && late);
+
+    HookChange change{early.Value(), late.Value(), {}, {}};
+    executor.actionUser = &change;
+    executor.actionOn = 1;
+    executor.action = [](TickScheduler& ticks, void* user) noexcept {
+        auto* hook = static_cast<HookChange*>(user);
+        CHECK(ticks.AddPrerequisite(hook->dependent, hook->prerequisite));
+    };
+
+    TickPhaseFrame step = Frame();
+    step.frameIndex = 1;
+    scheduler.BeginFrame();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, step, executor));
+    for (uint64 index = 0; index < 3; ++index) {
+        step.fixedStepIndex = index;
+        REQUIRE(scheduler.RunPhase(TickPhase::Physics, step, executor));
+        CHECK(scheduler.EffectivePhase(early.Value()).Value() == TickPhase::PrePhysics);
+    }
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PostPhysics, step, executor));
+    CHECK(executor.count == 1 && executor.order[0] == 3);
+
+    step.frameIndex = 2;
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, step, executor));
+    CHECK(executor.count == 0);
+    CHECK(scheduler.EffectivePhase(early.Value()).Value() == TickPhase::PostPhysics);
+}
+
+// BeginFrame을 부르지 않는 호출자도 frameIndex가 바뀌면 새 프레임으로 본다.
+TEST(Tick_NewFrameIsDetectedWithoutBeginFrame) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
+    auto a = scheduler.Register(Make(1, TickPhase::PrePhysics));
+    auto b = scheduler.Register(Make(2, TickPhase::PostPhysics));
+    REQUIRE(a && b);
+    REQUIRE(scheduler.AddPrerequisite(a.Value(), b.Value()));
+    CHECK(RunVariableFrame(scheduler, executor, frame, false).Is({Post(2), Post(1)}));
+}
+
+// 꺼진 선행도 늦춤은 유지한다(ERD4), 요청 단계를 실효 단계보다 이르게 바꿔도 늦춘 단계에 남는다,
+// 첫 실행 전 SetPhase 왕복은 아무것도 바꾸지 않는다.
+TEST(Tick_DemotionHoldsForDisabledPrerequisiteAndEarlierRequestedPhase) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
+    auto a = scheduler.Register(Make(1, TickPhase::PostPhysics));
+    auto b = scheduler.Register(Make(2, TickPhase::LateUpdate));
+    REQUIRE(a && b);
+    REQUIRE(scheduler.SetPhase(a.Value(), TickPhase::PreRender));
+    REQUIRE(scheduler.SetPhase(a.Value(), TickPhase::PostPhysics));
+    REQUIRE(scheduler.AddPrerequisite(a.Value(), b.Value()));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Late(2), Late(1)}));
+
+    REQUIRE(scheduler.SetEnabled(b.Value(), false));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Late(1)}));
+    CHECK(scheduler.EffectivePhase(a.Value()).Value() == TickPhase::LateUpdate);
+
+    REQUIRE(scheduler.SetPhase(a.Value(), TickPhase::PrePhysics));
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Late(1)}));
+}
+
+// 실효 단계 재계산의 할당이 실패하면 그 프레임은 이전 실효 단계로 실행하고 실패를 센 뒤, 다음
+// 프레임에 다시 계산한다(상태 불변, 프레임 전체가 멈추지 않는다).
+TEST(Tick_RecomputeAllocationFailureKeepsRunningAndRetries) {
+    SystemAllocator backing;
+    test::NFailAllocator allocator(backing);
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    uint64 frame = 0;
+    auto a = scheduler.Register(Make(1, TickPhase::PrePhysics));
+    auto b = scheduler.Register(Make(2, TickPhase::PostPhysics));
+    REQUIRE(a && b);
+    REQUIRE(scheduler.AddPrerequisite(a.Value(), b.Value()));
+
+    allocator.FailOnAttempt(1);
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Pre(1), Post(2)}));
+    CHECK(scheduler.Stats().phaseRecomputeFailures == 1);
+    CHECK(scheduler.EffectivePhase(a.Value()).Value() == TickPhase::PrePhysics);
+
+    allocator.DisableFailure();
+    CHECK(RunVariableFrame(scheduler, executor, frame).Is({Post(2), Post(1)}));
+    CHECK(scheduler.Stats().phaseRecomputeFailures == 1);
+}
+
+namespace {
+
+// 무작위 대조 시험의 기준 모형이다. 단계·priority·등록 순서·간선만 두고 매번 처음부터 계산한다.
+struct ModelEntry {
+    TickHandle handle;
+    uint8 id = 0;
+    TickPhase phase = TickPhase::PrePhysics;
+    int32 priority = 0;
+    uint32 sequence = 0;
+    bool alive = false;
+    Array<uint8> prerequisites;
+
+    explicit ModelEntry(Allocator& allocator) noexcept : prerequisites(allocator) {
+    }
+};
+
+struct Lcg {
+    uint64 state;
+
+    uint32 Next(uint32 bound) noexcept {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<uint32>(state >> 33) % bound;
+    }
+};
+
+constexpr uint32 ModelSize = 12;
+
+// 실효 단계: max(요청 단계, 선행 실효 단계)를 고정점까지 반복한다(그래프는 비순환).
+void ModelEffective(ModelEntry* entries, TickPhase* effective) noexcept {
+    for (uint32 at = 0; at < ModelSize; ++at) {
+        effective[at] = entries[at].phase;
+    }
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (uint32 at = 0; at < ModelSize; ++at) {
+            if (!entries[at].alive) {
+                continue;
+            }
+            for (uint8 before : entries[at].prerequisites) {
+                if (entries[before].alive && effective[before] > effective[at]) {
+                    effective[at] = effective[before];
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
+// 한 단계의 기대 순서: 같은 실효 단계 간선을 지키며 (priority, 등록 순서) 최소부터.
+FrameRecord ModelFrame(ModelEntry* entries) noexcept {
+    TickPhase effective[ModelSize];
+    ModelEffective(entries, effective);
+    FrameRecord record;
+    const TickPhase phases[] = {TickPhase::PrePhysics, TickPhase::PostPhysics,
+                                TickPhase::LateUpdate, TickPhase::PreRender};
+    for (TickPhase phase : phases) {
+        bool emitted[ModelSize] = {};
+        for (;;) {
+            int32 best = -1;
+            for (uint32 at = 0; at < ModelSize; ++at) {
+                if (!entries[at].alive || emitted[at] || effective[at] != phase) {
+                    continue;
+                }
+                bool ready = true;
+                for (uint8 before : entries[at].prerequisites) {
+                    if (entries[before].alive && effective[before] == phase && !emitted[before]) {
+                        ready = false;
+                    }
+                }
+                if (!ready) {
+                    continue;
+                }
+                if (best < 0 || entries[at].priority < entries[best].priority ||
+                    (entries[at].priority == entries[best].priority &&
+                     entries[at].sequence < entries[best].sequence)) {
+                    best = static_cast<int32>(at);
+                }
+            }
+            if (best < 0) {
+                break;
+            }
+            emitted[best] = true;
+            record.phase[record.count] = static_cast<uint8>(phase);
+            record.id[record.count] = entries[best].id;
+            ++record.count;
+        }
+    }
+    return record;
+}
+
+bool SameRecord(const FrameRecord& left, const FrameRecord& right) noexcept {
+    if (left.count != right.count) {
+        return false;
+    }
+    for (uint32 at = 0; at < left.count; ++at) {
+        if (left.phase[at] != right.phase[at] || left.id[at] != right.id[at]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+// 15.5절 완료 조건: 증분 경로(빠른 덧붙임·남은 칸·실효 단계 이동)의 실행 순서가 매 프레임 처음부터
+// 계산한 기준 모형과 같다. 무작위 연산(등록·해제·의존 추가/제거·단계·priority 변경)을 결정적
+// 씨앗으로.
+TEST(Tick_RandomOperationsMatchFromScratchModel) {
+    SystemAllocator allocator;
+    for (uint64 seed = 1; seed <= 8; ++seed) {
+        TickScheduler scheduler(allocator);
+        RecordingExecutor executor(scheduler);
+        uint64 frame = 0;
+        uint32 sequence = 0;
+        Lcg random{seed};
+        Array<ModelEntry> model(allocator);
+        for (uint32 at = 0; at < ModelSize; ++at) {
+            REQUIRE(model.TryEmplaceBack(allocator));
+            model[at].id = static_cast<uint8>(at + 1);
+        }
+        const TickPhase variable[] = {TickPhase::PrePhysics, TickPhase::PostPhysics,
+                                      TickPhase::LateUpdate, TickPhase::PreRender};
+        for (uint32 round = 0; round < 300; ++round) {
+            ModelEntry& entry = model[random.Next(ModelSize)];
+            const uint32 operation = random.Next(6);
+            if (!entry.alive) {
+                entry.phase = variable[random.Next(4)];
+                entry.priority = static_cast<int32>(random.Next(5)) - 2;
+                auto handle = scheduler.Register(Make(entry.id, entry.phase, entry.priority));
+                REQUIRE(handle);
+                entry.handle = handle.Value();
+                entry.sequence = ++sequence;
+                entry.prerequisites.Clear();
+                entry.alive = true;
+            } else if (operation == 0) {
+                REQUIRE(scheduler.Unregister(entry.handle));
+                entry.alive = false;
+                // 해제된 항목을 가리키던 모형 간선은 계산에서 빠진다(alive 검사).
+                for (ModelEntry& other : model) {
+                    for (usize at = other.prerequisites.Size(); at > 0; --at) {
+                        if (other.prerequisites[at - 1] == entry.id - 1) {
+                            REQUIRE(other.prerequisites.TryRemoveAt(at - 1));
+                        }
+                    }
+                }
+            } else if (operation <= 2) {
+                ModelEntry& before = model[random.Next(ModelSize)];
+                if (before.alive && &before != &entry) {
+                    auto added = scheduler.AddPrerequisite(entry.handle, before.handle);
+                    if (added) {
+                        bool present = false;
+                        for (uint8 existing : entry.prerequisites) {
+                            present = present || existing == before.id - 1;
+                        }
+                        if (!present) {
+                            REQUIRE(
+                                entry.prerequisites.TryPushBack(static_cast<uint8>(before.id - 1)));
+                        }
+                    } else {
+                        CHECK(added.Error() == ErrorCode::CycleDetected);
+                    }
+                }
+            } else if (operation == 3 && !entry.prerequisites.IsEmpty()) {
+                const uint8 before = entry.prerequisites[0];
+                REQUIRE(scheduler.RemovePrerequisite(entry.handle, model[before].handle));
+                REQUIRE(entry.prerequisites.TryRemoveAt(0));
+            } else if (operation == 4) {
+                entry.phase = variable[random.Next(4)];
+                REQUIRE(scheduler.SetPhase(entry.handle, entry.phase));
+            } else {
+                entry.priority = static_cast<int32>(random.Next(5)) - 2;
+                REQUIRE(scheduler.SetPriority(entry.handle, entry.priority));
+            }
+            if (random.Next(3) == 0) {
+                const FrameRecord actual = RunVariableFrame(scheduler, executor, frame);
+                const FrameRecord expected = ModelFrame(model.Data());
+                CHECK(SameRecord(actual, expected));
+                if (!SameRecord(actual, expected)) {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 } // namespace tick_scheduler_tests_file
