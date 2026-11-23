@@ -1121,6 +1121,13 @@ Result<GraphPatch> GraphMutatorCore::Execute(uint64 source, uint64 expectedRevis
         }
     }
 
+    if (auto retained = CheckInsertedRetainedPins(list); !retained) {
+        Revert(work_, work_.Size());
+        work_.Clear();
+        pending_.changes.Clear();
+        return Result<GraphPatch>::Failure(retained.Error());
+    }
+
     if (auto checked = CheckFullValidation(); !checked) {
         Revert(work_, work_.Size());
         work_.Clear();

@@ -153,7 +153,21 @@ public:
         return verdict;
     }
 
+    // 붙여넣기 판정(NG2c): deniedPasteType 종류의 노드는 거부한다.
+    PasteDecision CanPasteNode(const GraphReadView& view,
+                               const GraphNode& node) const noexcept override {
+        static_cast<void>(view);
+        return node.type == deniedPasteType ? PasteDecision::Deny : PasteDecision::Allow;
+    }
+
+    bool AllowExternalEdgeReconnect() const noexcept override {
+        return reconnectExternal;
+    }
+
     Name domain;
+    // 붙여넣기 판정 시험용이다(기본은 거부 없음·바깥 간선 끊기).
+    Name deniedPasteType;
+    bool reconnectExternal = false;
     PinTypeTable table{Span<const PinTypeInfo>(TestPinTypeInfos, TestPinTypeCount)};
     TestNormalize mode = TestNormalize::Default;
     TestConnect connect = TestConnect::Default;
