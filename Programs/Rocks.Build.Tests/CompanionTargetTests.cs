@@ -26,7 +26,7 @@ internal static class CompanionTargetTests
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Missing"] }, [worker], "unknown companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker", "Worker"] }, [worker], "duplicate companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["A"] }, [worker], "self companion");
-        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Game"] }, [new FixtureTarget("Game", ["G"]) { Kind = TargetType.Game }],
+        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Game"] }, [new FixtureTarget("Game", ["G"]) { Declared = TargetType.Game }],
             "game companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Shared"] },
             [new FixtureTarget("Shared", ["S"]) { Link = NativeLinkType.Modular }], "modular companion");
@@ -61,7 +61,7 @@ internal static class CompanionTargetTests
     {
         public IReadOnlyList<string> Companions { get; init; } = [];
 
-        public TargetType Kind { get; init; } = TargetType.Program;
+        public TargetType Declared { get; init; } = TargetType.Program;
 
         public NativeLinkType Link { get; init; } = NativeLinkType.Monolithic;
 
@@ -73,7 +73,7 @@ internal static class CompanionTargetTests
 
         public override IReadOnlyList<string> Modules => modules;
 
-        public override TargetType Type => Kind;
+        public override TargetType Type => Declared;
 
         public override NativeLinkType LinkType => Link;
 

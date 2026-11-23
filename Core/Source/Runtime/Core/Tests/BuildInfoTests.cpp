@@ -16,6 +16,13 @@ TEST(BuildInfo_InjectedValuesAreDistinctAndStable) {
     CHECK(build::ToolBuildId() == id);
 }
 
+// 시험 실행 파일은 Program 타깃이다(Docs/Design/BuildTargets 3.2절 BS2a). 빌드 정보 TU가 타깃
+// 종류를 주고 타깃 매크로와 맞는지 static_assert로 확인한다.
+TEST(BuildInfo_CurrentTargetTypeIsProgram) {
+    CHECK(build::CurrentTargetType() == build::TargetType::Program);
+    CHECK(ROCKS_WITH_SERVER_CODE == 1 && ROCKS_WITH_CLIENT_CODE == 1 && ROCKS_WITH_EDITOR == 0);
+}
+
 // 주입한 엔진 버전의 불변식이다. 기대 값(Build/Build.version과 같음)은 빌드 도구 시험이 생성 TU와
 // manifest로 확인하므로 여기서는 숫자를 적지 않는다(버전을 올려도 이 시험은 바뀌지 않는다).
 TEST(BuildInfo_InjectedEngineVersionIsAVersion) {

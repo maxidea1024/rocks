@@ -150,6 +150,12 @@ public static class MetadataRunner
                     arguments.Add("--clang-arg=" + argument);
                 }
 
+                // 타깃 매크로 넷(Docs/Design/BuildTargets 3.2절 BS2a)은 native compile과 같은 값이다(ActionGraph.TargetCompileArguments).
+                foreach (string define in target.Kind.Defines)
+                {
+                    arguments.Add("--clang-arg=-D" + define);
+                }
+
                 // 모듈 정의는 native compile과 같은 정의 헤더로 넘긴다(Docs/Design/UnityBuildPch.ko.md 8.2절 — AST와 compile의 정의가
                 // 갈라지지 않는다). 헤더는 여기서 쓰고, 빌드가 같은 내용을 다시 계산해 그대로 둔다.
                 string[] defines = ModuleDefinitions.Of(owner, dependencies, entryModules.Contains(owner.Name), target.LinkType, toolchain.Platform);

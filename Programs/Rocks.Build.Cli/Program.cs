@@ -254,6 +254,13 @@ namespace Rocks.Build.Cli
                 ? TestPrograms(rules, name => RuleLoader.Load(rulesPath, name, context).Target)
                 : [];
 
+            // 설치 SDK는 Game 매크로 조합만 싣는다(Docs/Design/BuildTargets 3.2절 BD5·BS2a).
+            if (args[0] == "sdk" && !rules.Target.Kind.Defines.SequenceEqual(new TargetKind(TargetType.Game).Defines))
+            {
+                throw new ArgumentException($"Target {targetName}: an installed SDK is exported from the Game macro combination only (this is a " +
+                    $"{rules.Target.Type} target or a Program with CompileWithEditor or WithEditorData).");
+            }
+
             if (args[0] == "sdk" && rules.Target.LogCompiledMinimum is not null)
             {
                 throw new ArgumentException($"Target {targetName}: LogCompiledMinimum cannot be overridden for an installed SDK export " +
@@ -500,6 +507,8 @@ namespace Rocks.Build.Cli
                     // 모듈 API 매크로(Docs/Design/BuildTargets 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
                     // 검사(native 컴파일 시험·생성 헤더 검증)는 Monolithic 값(빈 값)을 받는다. 그 검사는 타깃 폐포 밖 모듈의 헤더도 경로로 include하므로
                     // (예: Foundation의 meta 시험이 RenderBase 헤더를 쓴다) 저장소의 모든 모듈 규칙에서 만든다(BS8e).
+                    // 타깃 매크로 넷(BS2a)도 정의 헤더 없이 Core 헤더를 컴파일하는 검사가 받는다.
+                    string[] targetMacros = [.. rules.Target.Kind.Defines.SelectMany(define => new[] { "--clang-arg", "-D" + define })];
                     string[] apiMacros = [.. rules.Modules.Where(module => !module.ThirdParty)
                         .SelectMany(module => new[] { "--clang-arg", "-D" + LinkTypes.ApiMacro(module.Name) + "=" })];
                     var checks = new List<string[]> {
@@ -507,7 +516,7 @@ namespace Rocks.Build.Cli
                         // native 검사의 컴파일 시험(AlgorithmsCompilerTests 등)도 Core 헤더를 include하므로 구성·대상 OS 매크로를 받는다.
                         (string[])["native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
-                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. apiMacros,
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. targetMacros, .. apiMacros,
                             "--json", Path.Combine(output, "tool-native-report.json")]
                     };
                     if (configuration == NativeConfiguration.Asan)
@@ -558,7 +567,7 @@ namespace Rocks.Build.Cli
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"),
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration),
                             "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
-                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. apiMacros,
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. targetMacros, .. apiMacros,
                             "--json", Path.Combine(output, "tool-meta-report.json")]);
                     }
 

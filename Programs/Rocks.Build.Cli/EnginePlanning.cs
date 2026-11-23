@@ -35,6 +35,7 @@ internal static class EnginePlanning
             Configuration = configuration,
             LogCompiledMinimum = target.LogCompiledMinimum,
             LinkType = target.LinkType,
+            Target = target.Kind,
             TargetName = target.Name,
             RootDirectory = root,
             OutputDirectory = output,
