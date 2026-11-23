@@ -84,6 +84,32 @@ struct AssetImportResult {
     Array<AssetImportOutput> outputs;
 };
 
+// 묶음 임포트 구성원 하나다(7.1절 19 A2f3d UXR11 — AssetService::ImportGroup). 새 임포트면
+// sources·importer가 Import와 같고(replaceSources는 거짓이어야 한다), 재임포트(reimport)면
+// sources는 원본 바꾸기(Reimport overrides — replaceSources면 새 원본 전체)이고 importer는 비어야
+// 한다(기록의 임포터). 어긋나면 InvalidArgument다. 문자열·목록은 호출 동안 산다.
+struct AssetImportGroupMember {
+    StringView path{};
+    Span<const AssetImportSourceInput> sources{};
+    StringView importer{};
+    Span<const reflection_text::TextAssignment> assignments{};
+    bool reimport = false;
+    bool replaceSources = false;
+};
+
+// 묶음 하나의 구성원 수 상한이다(Unreal 교환의 Hard 순환 단위 — 7.1절 19 A2f3d).
+inline constexpr usize MaxImportGroupMembers = 64;
+
+namespace asset_database_detail {
+
+// 묶음 구성원의 주 출력 하나다(서비스 내부 — 임포트 문맥의 OpenAsset·MemberAsset이 본다).
+struct ImportGroupMember {
+    AssetId id{};
+    ObjectHandle asset{};
+};
+
+} // namespace asset_database_detail
+
 // 임포트 원본 하나의 상태다(7.1절 18 A2f2b — ImportStatus).
 struct AssetImportSourceStatus {
     explicit AssetImportSourceStatus(Allocator& allocator) noexcept
@@ -315,8 +341,9 @@ public:
     // struct 필드면 옵션(ImportRecord options), 아니면 주 출력의 설정(임포트 뒤 대입)이다. 저장은
     // 다른 출력(참조 기록·ImportOwner) 먼저, 주 출력(소유 기록) 마지막이다. 저장 전 실패면 아무것도
     // 쓰지 않고, 중간 저장 실패면 이번에 쓴 출력 파일을 지운다(못 지우면 경고 OrphanNotDeleted).
-    // 경고: ImportWarning(AbsoluteSourcePath·임포터 경고)·NotDurable·OrphanNotDeleted. 만든
-    // 패키지는 성공하면 열린 채, 실패하면 닫는다.
+    // 경고: ImportWarning(AbsoluteSourcePath·임포터 경고)·NotDurable·OrphanNotDeleted. 이번에 연
+    // 패키지(출력·그 의존·OpenAsset 대상)는 성공·실패 모두 닫는다. 구성원 하나짜리 ImportGroup과
+    // 같은 본문이다(진단 detail은 원본 번호 등 원래 뜻 — 7.1절 19 A2f3d).
     //
     // 오류(failure 진단): Initialize 전·잠금 아님·원본 없음 InvalidArgument, 경로 규칙 InvalidPath,
     // 별칭·점유 DuplicatePath / AlreadyExists, 임포터 없음(이름·확장자·표 없음)·원본 확장자의
@@ -366,6 +393,33 @@ public:
                           reflection_text::TextDiagnostics& diagnostics, AssetImportResult& result,
                           Array<EditorWarning>* warnings = nullptr,
                           AssetDiagnostic* failure = nullptr, bool replaceSources = false) noexcept;
+
+    // 묶음 임포트(7.1절 19 A2f3d UXR11): 서로 Hard로 참조하는 주 출력들(Unreal 교환의 Hard 순환
+    // 단위 등)을 한 번에 임포트·재임포트하고 저장한다. 순서: 구성원마다 Import·Reimport와 같은
+    // 판정(하나라도 실패하면 아무것도 쓰지 않는다) → 새 구성원의 주 출력을 먼저 만든다(임포터가
+    // 문맥 MemberAsset·OpenAsset으로 다른 구성원을 건다) → 구성원 순서대로 임포터 호출 → 저장. 저장
+    // 순서는 새 비주 출력 → 새 주 출력 → 기존 비주 출력 → 기존 주 출력(무리 안에서는 구성원·Output
+    // 순서)이다. 새 파일 무리에서 실패하면 이번에 쓴 새 파일을 지우고(못 지우면 OrphanNotDeleted),
+    // 기존 파일을 하나라도 교체한 뒤의 실패는 새 파일을 지우지 않는다(교체한 기존 파일이 가리킬 수
+    // 있다 — 같은 묶음을 다시 실행하면 고아 입양으로 수렴한다). 다중 파일 원자 교체는 없다(한계).
+    // results는 구성원마다 하나(members와 같은 수 — 호출자가 만든다)이고 실패하면 비운다.
+    //
+    // 오류(failure 진단 — detail = 실패한 구성원 번호, asset이 비면 그 구성원의 주 출력):
+    // Initialize 전·잠금 아님·구성원 0개 또는 MaxImportGroupMembers 초과·results 수가 다름·구성원
+    // 입력 규칙(AssetImportGroupMember)·같은 경로 둘 InvalidArgument, 구성원의 Import·Reimport
+    // 오류(다른 구성원의 주 경로를 추가 출력이 청함 DuplicatePath / AlreadyExists 포함), 할당 실패.
+    //
+    // 사용 예(Hard 순환 둘 — 임포터는 OpenAsset(MemberAsset(1 - GroupIndex()))로 상대를 건다):
+    //   const AssetImportGroupMember members[] = {{"/Game/A", sourcesA}, {"/Game/B", sourcesB}};
+    //   AssetImportResult results[] = {AssetImportResult(allocator), AssetImportResult(allocator)};
+    //   auto imported = service.ImportGroup(lock, members, diagnostics, results, &warnings,
+    //                                       &failure);
+    Result<void> ImportGroup(const AssetDatabaseLock& lock,
+                             Span<const AssetImportGroupMember> members,
+                             reflection_text::TextDiagnostics& diagnostics,
+                             Span<AssetImportResult> results,
+                             Array<EditorWarning>* warnings = nullptr,
+                             AssetDiagnostic* failure = nullptr) noexcept;
 
     // asset-info <path|AssetId> --import(7.1절 18 A2f2b): 대상의 ImportRecord를 디스크에서 읽어
     // 임포트 상태를 out에 쓴다. 패키지를 열지 않는다(파일의 ImportRecord 칸만 부분 읽기 — 상태는
@@ -454,10 +508,22 @@ private:
     // 둔다.
     Result<ObjectHandle> OpenTarget(StringView target, AssetId& id, Array<EditorWarning>* warnings,
                                     AssetDiagnostic* failure) noexcept;
-    // 새 임포트·재임포트가 같이 쓰는 실행이다(AssetServiceImport.cpp — 원본 읽기·옵션·임포터·설정·
-    // 저장·되돌리기).
+    // 묶음 임포트 본문이다(AssetServiceImport.cpp — 7.1절 19 A2f3d: 판정 → 새 주 출력 → 임포터 →
+    // 저장·되돌리기). 단일 Import·Reimport는 구성원 하나(group 거짓 — 진단을 묶음 표기로 바꾸지
+    // 않는다)다. ImportRun은 구성원 하나의 상태다.
     struct ImportRun;
-    Result<void> RunImport(ImportRun& run) noexcept;
+    Result<void> RunImportGroup(const AssetDatabaseLock& lock,
+                                Span<const AssetImportGroupMember> members,
+                                reflection_text::TextDiagnostics& diagnostics,
+                                Span<AssetImportResult> results, Array<EditorWarning>* warnings,
+                                AssetDiagnostic* failure, bool group) noexcept;
+    Result<void> PrepareImport(ImportRun& run, AssetDiagnostic* failure) noexcept;
+    Result<void> PrepareReimport(ImportRun& run, Span<const AssetId> before,
+                                 Array<EditorWarning>* warnings, AssetDiagnostic* failure) noexcept;
+    Result<void> StageImport(ImportRun& run,
+                             Span<const asset_database_detail::ImportGroupMember> members,
+                             usize memberIndex, reflection_text::TextDiagnostics& diagnostics,
+                             Array<EditorWarning>* warnings, AssetDiagnostic* failure) noexcept;
 
     // 타입 도구 이름의 클래스 lease다(에셋 클래스만이면 requireAsset).
     Result<TypeLease> FindClass(StringView name, bool requireAsset,

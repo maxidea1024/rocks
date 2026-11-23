@@ -114,6 +114,14 @@ public:
     // 출력(Output으로 받는다) InvalidArgument, 색인에 없음 NotFound(진단 MissingDependency, related
     // = id), 같은 id 둘 AlreadyExists(진단 DuplicateAssetId), 열기 오류, 할당 실패.
     virtual Result<ObjectHandle> OpenAsset(AssetId asset) noexcept = 0;
+    // 묶음 임포트(Docs/Design/AssetSystem 7.1절 19 A2f3d UXR11 — AssetService::ImportGroup)의
+    // 구성원 수(단일 Import·Reimport는 1)·이 구성원 번호·index번 구성원 주 출력 id(범위 밖은
+    // null)다. 모든 구성원의 주 출력은 임포터 호출 전에 있으므로 다른 구성원은
+    // OpenAsset(MemberAsset(i))로 열어 Hard로 건다(순환 가능 — 자기 번호는 OpenAsset이
+    // InvalidArgument).
+    virtual usize GroupSize() const noexcept = 0;
+    virtual usize GroupIndex() const noexcept = 0;
+    virtual AssetId MemberAsset(usize index) const noexcept = 0;
 
 protected:
     ~AssetImportContext() = default;

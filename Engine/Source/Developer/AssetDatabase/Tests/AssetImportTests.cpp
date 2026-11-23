@@ -156,6 +156,21 @@ bool HasText(Span<const uint8> bytes, StringView text) noexcept {
     return false;
 }
 
+// 두 byte 열이 같은지다.
+bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
+    if (left.Size() != right.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.Size(); ++index) {
+        if (left[index] != right[index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // 메모리 파일 시스템의 Content 아래 .rasset 수다.
 usize PackageFiles(ImportScene& scene) noexcept {
     usize count = 0;
@@ -471,6 +486,204 @@ TEST(AssetImport_OpenAsset) {
                       AssetDiagnosticCode::DuplicateAssetId, leaf));
         CHECK(!scene.files.Has("Content/Twice.rasset"));
     }
+}
+
+// 묶음 임포트(7.1절 19 A2f3d UXR11): 새 구성원 둘이 서로를 Hard로 건다(MemberAsset·OpenAsset —
+// 주 출력을 임포터 호출 전에 만든다), 재임포트 묶음(앞 구성원이 의존으로 연 다른 구성원은 Busy가
+// 아니다), 순환 구성원 하나만 단일 재임포트(open=), 새 구성원과 재임포트 구성원 섞기. 거부(detail =
+// 구성원 번호, 아무것도 쓰지 않는다): 구성원 0개·상한 초과·결과 수 다름·같은 경로 둘·재임포트
+// 구성원의 importer·새 구성원의 replaceSources(InvalidArgument), 둘째 구성원 원본 없음
+// (MissingSource — asset = 그 주 출력), 첫째 구성원의 추가 출력이 둘째 주 경로를 청함
+// (DuplicatePath). 저장 실패: 새 파일 무리에서 실패하면 새 파일을 모두 지우고, 기존 파일을 교체한
+// 뒤 실패하면 새 파일이 남고 교체 못 한 기존 파일은 옛 내용이며 다시 실행하면 같은 id로 수렴한다.
+TEST(AssetImport_Group) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-group");
+    REQUIRE(scene.ready);
+    auto registration =
+        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr});
+    REQUIRE(registration);
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=1\nopenmember=1") &&
+            scene.PutSource("SourceArt/B.trock", "value=2\nopenmember=0") &&
+            scene.PutSource("SourceArt/C.trock", "value=3") &&
+            scene.PutSource("SourceArt/P.trock", "value=4"));
+    const String aFile = scene.Absolute(env.allocator, "SourceArt/A.trock");
+    const String bFile = scene.Absolute(env.allocator, "SourceArt/B.trock");
+    const String cFile = scene.Absolute(env.allocator, "SourceArt/C.trock");
+    const String pFile = scene.Absolute(env.allocator, "SourceArt/P.trock");
+    const String noFile = scene.Absolute(env.allocator, "SourceArt/None.trock");
+    const AssetImportSourceInput aInputs[] = {{DefaultImportSourceRole, aFile.View()}};
+    const AssetImportSourceInput bInputs[] = {{DefaultImportSourceRole, bFile.View()}};
+    const AssetImportSourceInput cInputs[] = {{DefaultImportSourceRole, cFile.View()}};
+    const AssetImportSourceInput pInputs[] = {{DefaultImportSourceRole, pFile.View()}};
+    const AssetImportSourceInput noInputs[] = {{DefaultImportSourceRole, noFile.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    const auto hardOn = [&](StringView file, AssetId target) noexcept {
+        auto read = ReadFile(env, scene, file);
+        if (!read) {
+            return false;
+        }
+
+        bool hard = false;
+        for (const PackageDependencyEntry& entry : read.Value().dependencies) {
+            hard = hard || (entry.kind == PackageDependencyKind::Hard && entry.asset == target);
+        }
+
+        return hard;
+    };
+    const auto newMember = [](StringView path, Span<const AssetImportSourceInput> inputs) noexcept {
+        AssetImportGroupMember member;
+        member.path = path;
+        member.sources = inputs;
+        return member;
+    };
+    const auto reimportMember = [](StringView path) noexcept {
+        AssetImportGroupMember member;
+        member.path = path;
+        member.reimport = true;
+        return member;
+    };
+    AssetImportResult results[] = {AssetImportResult(env.allocator),
+                                   AssetImportResult(env.allocator)};
+
+    // 새 구성원 둘의 Hard 순환.
+    const AssetImportGroupMember cycle[] = {newMember("/Game/A", aInputs),
+                                            newMember("/Game/B", bInputs)};
+    REQUIRE(service.ImportGroup(scene.lock, cycle, diagnostics, results));
+    const AssetId a = results[0].id;
+    const AssetId b = results[1].id;
+    CHECK(!a.IsNull() && !b.IsNull() && results[0].path.View() == "/Game/A" &&
+          results[1].path.View() == "/Game/B");
+    CHECK(hardOn("Content/A.rasset", b) && hardOn("Content/B.rasset", a));
+    CHECK(scene.test.lastGroupSize == 2 && scene.test.lastGroupIndex == 1 &&
+          service.Packages().Count() == 0 && Matches(env, scene, service.Index()));
+
+    // 재임포트 묶음: A를 열면 B가 의존으로 열린다(Busy가 아니다).
+    const AssetImportGroupMember again[] = {reimportMember("/Game/A"), reimportMember("/Game/B")};
+    REQUIRE(service.ImportGroup(scene.lock, again, diagnostics, results));
+    CHECK(results[0].id == a && results[1].id == b && scene.test.lastReimport &&
+          hardOn("Content/A.rasset", b) && hardOn("Content/B.rasset", a) &&
+          service.Packages().Count() == 0);
+
+    // 순환 구성원 하나만 단일 재임포트(상대는 색인으로 연다 — 이미 의존으로 열렸다).
+    {
+        StringBuilder<128> text(env.allocator);
+        REQUIRE(text.TryAppendFormat("value=5\nopen={}", b));
+        REQUIRE(scene.PutSource("SourceArt/A.trock", text.View()));
+        AssetImportResult single(env.allocator);
+        REQUIRE(service.Reimport(scene.lock, "/Game/A", {}, {}, diagnostics, single));
+        CHECK(single.id == a && scene.test.lastGroupSize == 1 && scene.test.lastGroupIndex == 0 &&
+              hardOn("Content/A.rasset", b));
+    }
+
+    // 새 구성원과 재임포트 구성원 섞기: A(재임포트) ↔ C(새).
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=6\nopenmember=1") &&
+            scene.PutSource("SourceArt/C.trock", "value=7\nopenmember=0"));
+    const AssetImportGroupMember mixed[] = {reimportMember("/Game/A"),
+                                            newMember("/Game/C", cInputs)};
+    REQUIRE(service.ImportGroup(scene.lock, mixed, diagnostics, results));
+    const AssetId c = results[1].id;
+    CHECK(results[0].id == a && !c.IsNull() && hardOn("Content/A.rasset", c) &&
+          hardOn("Content/C.rasset", a) && Matches(env, scene, service.Index()));
+
+    // 거부.
+    AssetDiagnostic failure;
+    const auto refuses = [&](Span<const AssetImportGroupMember> members, usize resultCount,
+                             ErrorCode error, AssetDiagnosticCode code, uint64 detail) noexcept {
+        failure = AssetDiagnostic{};
+        results[0].id = AssetId{};
+        const usize files = PackageFiles(scene);
+        auto done =
+            service.ImportGroup(scene.lock, members, diagnostics,
+                                Span<AssetImportResult>(results, resultCount), nullptr, &failure);
+        return !done && done.Error() == error && failure.code == code && failure.detail == detail &&
+               PackageFiles(scene) == files && service.Packages().Count() == 0 &&
+               results[0].id.IsNull();
+    };
+    CHECK(refuses({}, 0, ErrorCode::InvalidArgument, AssetDiagnosticCode::None, 0));
+    CHECK(refuses(cycle, 1, ErrorCode::InvalidArgument, AssetDiagnosticCode::None, 0));
+    {
+        AssetImportGroupMember many[MaxImportGroupMembers + 1];
+        Array<AssetImportResult> manyResults(env.allocator);
+        for (AssetImportGroupMember& member : many) {
+            member = newMember("/Game/Many", pInputs);
+            REQUIRE(manyResults.TryPushBack(AssetImportResult(env.allocator)));
+        }
+
+        CHECK(service.ImportGroup(scene.lock, many, diagnostics, manyResults.View()).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+
+    REQUIRE(scene.PutSource("SourceArt/C.trock", "value=3"));
+    const AssetImportGroupMember samePath[] = {newMember("/Game/N", cInputs),
+                                               newMember("/Game/N", pInputs)};
+    CHECK(refuses(samePath, 2, ErrorCode::InvalidArgument, AssetDiagnosticCode::None, 1));
+    AssetImportGroupMember named = reimportMember("/Game/B");
+    named.importer = "TestImporter";
+    const AssetImportGroupMember withImporter[] = {named};
+    CHECK(refuses(withImporter, 1, ErrorCode::InvalidArgument, AssetDiagnosticCode::None, 0));
+    AssetImportGroupMember replacing = newMember("/Game/N", pInputs);
+    replacing.replaceSources = true;
+    const AssetImportGroupMember freshReplace[] = {replacing};
+    CHECK(refuses(freshReplace, 1, ErrorCode::InvalidArgument, AssetDiagnosticCode::None, 0));
+    const AssetImportGroupMember missing[] = {newMember("/Game/N1", pInputs),
+                                              newMember("/Game/N2", noInputs)};
+    CHECK(refuses(missing, 2, ErrorCode::NotFound, AssetDiagnosticCode::MissingSource, 1) &&
+          !failure.asset.IsNull());
+    REQUIRE(scene.PutSource("SourceArt/C.trock", "value=3\noutputs=x"));
+    const AssetImportGroupMember taken[] = {newMember("/Game/D", cInputs),
+                                            newMember("/Game/D_x", pInputs)};
+    CHECK(refuses(taken, 2, ErrorCode::AlreadyExists, AssetDiagnosticCode::DuplicatePath, 0));
+
+    // 저장 실패 1: 새 주 출력 E·F(Tags 1·2) — 둘째에서 실패하면 E 파일도 지운다.
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=1\nopenmember=1") &&
+            scene.PutSource("SourceArt/B.trock", "value=1\nopenmember=0"));
+    const AssetImportGroupMember fresh[] = {newMember("/Game/E", aInputs),
+                                            newMember("/Game/F", bInputs)};
+    tagCalls = 0;
+    failTagsOn = 2;
+    CHECK(refuses(fresh, 2, ErrorCode::Busy, AssetDiagnosticCode::None, 1));
+    failTagsOn = 0;
+    CHECK(!scene.files.Has("Content/E.rasset") && !scene.files.Has("Content/F.rasset") &&
+          Matches(env, scene, service.Index()));
+
+    // 저장 실패 2: A(재임포트 + 새 출력 fresh) ↔ C(재임포트). 순서 A_fresh(새) → A → C — C에서
+    // 실패하면 A_fresh·A는 새 내용, C는 옛 내용이다.
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=8\nopenmember=1\noutputs=fresh") &&
+            scene.PutSource("SourceArt/C.trock", "value=9\nopenmember=0"));
+    const auto copyOf = [&](StringView file) noexcept {
+        Array<uint8> copy(env.allocator);
+        CHECK(copy.TryAppend(scene.files.Bytes(file)));
+        return copy;
+    };
+    const Array<uint8> aBefore = copyOf("Content/A.rasset");
+    const Array<uint8> cBefore = copyOf("Content/C.rasset");
+    const AssetImportGroupMember partial[] = {reimportMember("/Game/A"), reimportMember("/Game/C")};
+    tagCalls = 0;
+    failTagsOn = 3;
+    failure = AssetDiagnostic{};
+    auto failed = service.ImportGroup(scene.lock, partial, diagnostics, results, nullptr, &failure);
+    failTagsOn = 0;
+    CHECK(!failed && failed.Error() == ErrorCode::Busy && failure.detail == 1 &&
+          service.Packages().Count() == 0 && scene.files.Has("Content/A_fresh.rasset"));
+    CHECK(!SameBytes(scene.files.Bytes("Content/A.rasset"), aBefore.View()) &&
+          SameBytes(scene.files.Bytes("Content/C.rasset"), cBefore.View()) &&
+          Matches(env, scene, service.Index()));
+    auto freshPath = ParseLogicalPath(env.allocator, "/Game/A_fresh");
+    REQUIRE(freshPath);
+    auto left = service.Index().FindByPath(freshPath.Value());
+    REQUIRE(left);
+    const AssetId leftId = left.Value()->id;
+    // 다시 하면 남은 A_fresh를 같은 key로 다시 써서 수렴한다.
+    REQUIRE(service.ImportGroup(scene.lock, partial, diagnostics, results));
+    CHECK(results[0].outputs.Size() == 1 && results[0].outputs[0].id == leftId &&
+          hardOn("Content/A.rasset", c) && hardOn("Content/C.rasset", a) &&
+          Matches(env, scene, service.Index()));
 }
 
 // 가변 원본(7.1절 19 A2f3b UXR9): 고정 역할 asset과 접두 blob:의 역할 여럿을 받고 문맥 순서는 고정
@@ -1085,6 +1298,112 @@ TEST(AssetImport_SaveFailures) {
     failTagsOn = 0;
 }
 
+// 묶음 할당 실패(7.1절 19 A2f3d): 새 구성원 둘의 Hard 순환(추가 출력·경고 포함) 묶음의 모든 할당
+// 실패가 OutOfMemory이고 파일·색인·열린 패키지가 그대로다. 재임포트 묶음(A ↔ B)의 할당 실패도
+// OutOfMemory이고 열린 패키지가 그대로다(기존 파일을 교체한 뒤의 실패는 그 파일이 새 내용일 수
+// 있다 — 색인은 디스크와 같다). GC 표 실패·성공 뒤 닫기 실패는 삼킨 성공이다.
+TEST(AssetImport_GroupAllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-group-oom");
+    REQUIRE(scene.ready);
+    StringBuilder<128> text(env.allocator);
+    REQUIRE(text.TryAppendFormat("value=2\nopenmember=1\noutputs=extra\nwarn={}",
+                                 static_cast<uint32>(AssetDiagnosticCode::UvOutOfRange)));
+    REQUIRE(scene.PutSource("SourceArt/A.trock", text.View()) &&
+            scene.PutSource("SourceArt/B.trock", "value=3\nopenmember=0"));
+    const String aFile = scene.Absolute(env.allocator, "SourceArt/A.trock");
+    const String bFile = scene.Absolute(env.allocator, "SourceArt/B.trock");
+    const AssetImportSourceInput aInputs[] = {{DefaultImportSourceRole, aFile.View()}};
+    const AssetImportSourceInput bInputs[] = {{DefaultImportSourceRole, bFile.View()}};
+    AssetImportGroupMember fresh[2];
+    fresh[0].path = "/Game/A";
+    fresh[0].sources = aInputs;
+    fresh[1].path = "/Game/B";
+    fresh[1].sources = bInputs;
+    TaggedFailAllocator failing(env.allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        AssetService service(failing, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        // 열린 패키지가 있으면 열린 id 기록이 할당한다.
+        String out(env.allocator);
+        REQUIRE(service.Info("/Game/Leaf", AssetInfoOptions{}, out));
+        const usize open = service.Packages().Count();
+        const usize packages = PackageFiles(scene);
+        TextDiagnostics diagnostics(env.allocator);
+        AssetImportResult results[] = {AssetImportResult(failing), AssetImportResult(failing)};
+        Array<EditorWarning> warnings(failing);
+        failing.FailOnAttempt(attempt);
+        auto imported = service.ImportGroup(scene.lock, fresh, diagnostics, results, &warnings);
+        const bool failed = failing.Failed();
+        const uint32 tag = failing.FailedTag();
+        failing.DisableFailure();
+        if (!failed || imported) {
+            REQUIRE(imported);
+            CHECK(scene.files.Has("Content/A.rasset") && scene.files.Has("Content/B.rasset") &&
+                  scene.files.Has("Content/A_extra.rasset") &&
+                  Matches(env, scene, service.Index()));
+            if (!failed) {
+                CHECK(service.Packages().Count() == open);
+                break;
+            }
+
+            CHECK(tag == GcReferenceTableTag || service.Packages().Count() > open);
+            scene.files.Remove("Content/A.rasset");
+            scene.files.Remove("Content/B.rasset");
+            scene.files.Remove("Content/A_extra.rasset");
+            continue;
+        }
+
+        CHECK(!imported && imported.Error() == ErrorCode::OutOfMemory);
+        CHECK(PackageFiles(scene) == packages && service.Packages().Count() == open &&
+              Matches(env, scene, service.Index()));
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+
+    // 재임포트 묶음(위 마지막 성공이 남긴 A·B·A_extra).
+    AssetImportGroupMember again[2];
+    again[0].path = "/Game/A";
+    again[0].reimport = true;
+    again[1].path = "/Game/B";
+    again[1].reimport = true;
+    uint32 reimportFailures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        AssetService service(failing, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        const usize open = service.Packages().Count();
+        TextDiagnostics diagnostics(env.allocator);
+        AssetImportResult results[] = {AssetImportResult(failing), AssetImportResult(failing)};
+        failing.FailOnAttempt(attempt);
+        auto reimported = service.ImportGroup(scene.lock, again, diagnostics, results);
+        const bool failed = failing.Failed();
+        const uint32 tag = failing.FailedTag();
+        failing.DisableFailure();
+        if (!failed || reimported) {
+            REQUIRE(reimported);
+            CHECK(Matches(env, scene, service.Index()));
+            if (!failed) {
+                CHECK(service.Packages().Count() == open);
+                break;
+            }
+
+            CHECK(tag == GcReferenceTableTag || service.Packages().Count() > open);
+            continue;
+        }
+
+        CHECK(!reimported && reimported.Error() == ErrorCode::OutOfMemory);
+        CHECK(service.Packages().Count() == open && Matches(env, scene, service.Index()));
+        ++reimportFailures;
+    }
+
+    CHECK(reimportFailures > 0);
+}
+
 // 할당 실패: 추가 출력·옵션·설정·경고가 있는 임포트의 모든 할당 실패가 OutOfMemory이고 파일·
 // 색인·열린 패키지가 그대로다(GC 표 실패는 Registry가 삼킨 성공).
 TEST(AssetImport_AllocationFailures) {
@@ -1421,21 +1740,6 @@ TEST(AssetReimport_InPlace) {
     REQUIRE(fourth.Reimport(scene.lock, "/Game/Second", {}, {}, diagnostics, result));
     CHECK(result.id == second.id && fourth.Packages().Count() == 0 &&
           Matches(env, scene, fourth.Index()));
-}
-
-// 두 byte 열이 같은지다.
-bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
-    if (left.Size() != right.Size()) {
-        return false;
-    }
-
-    for (usize index = 0; index < left.Size(); ++index) {
-        if (left[index] != right[index]) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 // 옵션 Record 하나다(schema·버전·필드 1의 wire·내용).
