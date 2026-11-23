@@ -4,6 +4,7 @@
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCommandlets/AssetIndexCommandlet.h>
+#include <AssetCommandlets/ClassDefaultsCommandlet.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
@@ -312,6 +313,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     }
     registered = registry.Register({"asset-alias-remove", "Remove a path alias of the project.",
                                     &RunAssetAliasRemoveCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"class-defaults-dump", "Print the class default fingerprints of the registered classes.",
+         &RunClassDefaultsDumpCommand, &assetContext});
     if (!registered) {
         return 1;
     }

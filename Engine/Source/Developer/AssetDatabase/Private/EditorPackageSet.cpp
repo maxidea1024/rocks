@@ -120,6 +120,35 @@ private:
     const HashMap<ObjectHandle, OverrideSet>& map_;
 };
 
+// 경고 text 칸에 NUL로 끝나는 ASCII 문자열을 복사한다(칸보다 길면 자른다).
+void CopyWarningText(const char* text, char* out, usize capacity) noexcept {
+    usize at = 0;
+    while (text[at] != '\0' && at + 1 < capacity) {
+        out[at] = text[at];
+        ++at;
+    }
+
+    out[at] = '\0';
+}
+
+// 경고 text 칸에 십진수를 쓴다(NUL로 끝남 — uint64는 20자리라 칸에 늘 들어간다).
+void FormatDecimalText(uint64 value, char* out, usize capacity) noexcept {
+    constexpr usize MaxDigits = 20;
+    char digits[MaxDigits];
+    usize count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+
+    usize at = 0;
+    while (count != 0 && at + 1 < capacity) {
+        out[at++] = digits[--count];
+    }
+
+    out[at] = '\0';
+}
+
 } // namespace
 
 // 닫힘에 넣은 패키지 하나다. state는 Prepare를 마친 상태(빼낸 패키지는 excluded)다.
@@ -987,6 +1016,48 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         }
     }
 
+    // 클래스 기본값 경고(A5c): 저장 당시와 다른 클래스(text = 그 클래스의 export 수), 지금 레코드를
+    // 만들 수 없는 클래스(text = 이유). 공개 전에 만들어 둔다.
+    Array<EditorWarning> defaultsWarnings(allocator);
+    if (warnings != nullptr) {
+        for (usize slot = 0; slot < count; ++slot) {
+            const PackageContents& contents = pending[origin[slot]].state->Contents();
+            const AssetId package = pending[origin[slot]].id;
+            for (TypeId type : contents.changedDefaults) {
+                uint64 exports = 0;
+                for (const PackageExportEntry& entry : contents.exports) {
+                    exports += entry.type == type ? 1 : 0;
+                }
+
+                EditorWarning warning;
+                warning.kind = EditorWarningKind::ClassDefaultsChanged;
+                warning.diagnostic =
+                    EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, package,
+                                     static_cast<uint32>(PackageSectionKind::Summary));
+                warning.diagnostic.related = AssetId{type};
+                warning.diagnostic.detail = exports;
+                FormatDecimalText(exports, warning.text, EditorWarningTextBytes);
+                if (auto pushed = defaultsWarnings.TryPushBack(warning); !pushed) {
+                    return oom(pushed.Error());
+                }
+            }
+
+            for (const PackageUnavailableDefaults& one : contents.unavailableDefaults) {
+                EditorWarning warning;
+                warning.kind = EditorWarningKind::ClassDefaultsUnavailable;
+                warning.diagnostic =
+                    EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, package,
+                                     static_cast<uint32>(PackageSectionKind::Summary));
+                warning.diagnostic.related = AssetId{one.type};
+                CopyWarningText(ClassDefaultsReasonName(one.reason), warning.text,
+                                EditorWarningTextBytes);
+                if (auto pushed = defaultsWarnings.TryPushBack(warning); !pushed) {
+                    return oom(pushed.Error());
+                }
+            }
+        }
+    }
+
     if (auto reserved = open_.TryReserve(open_.Size() + count); !reserved) {
         return oom(reserved.Error());
     }
@@ -996,8 +1067,8 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
     }
 
     if (warnings != nullptr) {
-        if (auto reserved =
-                warnings->TryReserve(warnings->Size() + excluded.Size() + unresolved.Size());
+        if (auto reserved = warnings->TryReserve(warnings->Size() + excluded.Size() +
+                                                 unresolved.Size() + defaultsWarnings.Size());
             !reserved) {
             return oom(reserved.Error());
         }
@@ -1026,6 +1097,10 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
                                  static_cast<uint32>(PackageSectionKind::ObjectImports));
             warning.diagnostic.related = one.target;
             warning.diagnostic.detail = one.import;
+            (void)warnings->TryPushBack(warning);
+        }
+
+        for (const EditorWarning& warning : defaultsWarnings) {
             (void)warnings->TryPushBack(warning);
         }
     }

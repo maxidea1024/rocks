@@ -567,4 +567,64 @@ TEST(ClassDefaults_ForEach) {
     CHECK(seen.holder && !seen.abstract && seen.counterFailed && seen.total > 3);
 }
 
+// 레코드 유무 분류(A5c — RuntimeClassMetadata 'A5c 지문 연결'): 생성 클래스는 Present(레코드),
+// 추상·불완전 레이아웃·손 함수표는 WithoutRecord(이유 그대로), 비결정 생성자는 Failed. 이유
+// 이름은 진단 출력용 영어 이름이다. 할당 실패(기억하지 않음)는 분류가 아니라 오류다.
+TEST(ClassDefaults_Availability) {
+    SystemAllocator allocator;
+    DefaultsFixture fixture(allocator);
+    auto manual = RegisterManual(fixture.types, ManualType, true);
+    auto incomplete = RegisterManual(fixture.types, IncompleteType, false);
+    REQUIRE(manual && incomplete);
+    const auto classify = [&](TypeId type) noexcept {
+        TypeLease lease = fixture.Lease(type);
+        return ClassifyClassDefaults(lease, allocator);
+    };
+    auto holder = classify(TypeIdOf<DefaultsHolder>());
+    REQUIRE(holder);
+    CHECK(holder.Value().availability == ClassDefaultsAvailability::Present &&
+          holder.Value().defaults != nullptr);
+    const struct {
+        TypeId type;
+        ClassDefaultsAvailability availability;
+        ClassDefaultsReason reason;
+    } cases[] = {
+        {TypeIdOf<DefaultsAbstractBase>(), ClassDefaultsAvailability::WithoutRecord,
+         ClassDefaultsReason::Abstract},
+        {IncompleteType, ClassDefaultsAvailability::WithoutRecord,
+         ClassDefaultsReason::IncompleteLayout},
+        {ManualType, ClassDefaultsAvailability::WithoutRecord, ClassDefaultsReason::ManualFields},
+        {TypeIdOf<DefaultsCounter>(), ClassDefaultsAvailability::Failed,
+         ClassDefaultsReason::NonDeterministic},
+    };
+    for (const auto& one : cases) {
+        auto status = classify(one.type);
+        REQUIRE(status);
+        CHECK(status.Value().availability == one.availability &&
+              status.Value().defaults == nullptr && status.Value().diagnostic.reason == one.reason);
+        CHECK(IsClassWithoutDefaults(one.reason) ==
+              (one.availability == ClassDefaultsAvailability::WithoutRecord));
+    }
+
+    CHECK(StringView(ClassDefaultsReasonName(ClassDefaultsReason::ManualFields)) ==
+          StringView("ManualFields"));
+    CHECK(StringView(ClassDefaultsReasonName(ClassDefaultsReason::NonDeterministic)) ==
+          StringView("NonDeterministic"));
+    CHECK(StringView(ClassDefaultsReasonName(static_cast<ClassDefaultsReason>(200))) ==
+          StringView("Unknown"));
+
+    // 할당 실패는 기억하지 않으므로 분류가 아니라 오류다(DefaultsVirtual은 아직 레코드가 없다).
+    {
+        TypeLease lease = fixture.Lease(TypeIdOf<DefaultsVirtual>());
+        test::NFailAllocator failing(allocator);
+        failing.FailOnAttempt(1);
+        auto status = ClassifyClassDefaults(lease, failing);
+        failing.DisableFailure();
+        CHECK(!status && status.Error() == ErrorCode::OutOfMemory);
+    }
+
+    CHECK(fixture.types.Unregister(Move(incomplete.Value())));
+    CHECK(fixture.types.Unregister(Move(manual.Value())));
+}
+
 } // namespace class_defaults_tests_file

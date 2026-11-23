@@ -505,6 +505,10 @@ try
     await Check("asset-list empty project", ["asset-list", $"--project={empty}"], 0, "", "");
     await Check("asset-list content is a file", ["asset-list", $"--project={fileContent}"], 1, "", "cannot scan");
     await Check("asset-list help", ["asset-list", "--help"], 0, "usage: asset-list", "");
+    // class-defaults-dump(A5c 대조 2): 등록된 구체 클래스마다 한 줄, 사용법.
+    await Check("class-defaults-dump", ["class-defaults-dump"], 0, " present ", "");
+    await Check("class-defaults-dump help", ["class-defaults-dump", "--help"], 0, "usage: class-defaults-dump", "");
+    await Check("class-defaults-dump extra", ["class-defaults-dump", "extra"], 2, "", "usage: class-defaults-dump");
     await Check("asset-list positional", ["asset-list", "extra"], 2, "", "usage: asset-list");
     await Check("asset-list twice", ["asset-list", $"--project={project}", $"--project={project}"], 2, "",
         "usage: asset-list");

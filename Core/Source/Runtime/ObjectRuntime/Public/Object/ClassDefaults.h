@@ -101,6 +101,37 @@ using ClassDefaultsBuilder = Result<void> (*)(void* user, const TypeLease& lease
                                               TypeRegistry& types, ClassDefaultsDraft& draft,
                                               ClassDefaultsDiagnostic& diagnostic) noexcept;
 
+// 이유의 영어 이름이다(진단·경고 출력 — "None"·"Abstract"·…·"EncodeFailed").
+constexpr const char* ClassDefaultsReasonName(ClassDefaultsReason reason) noexcept {
+    switch (reason) {
+    case ClassDefaultsReason::None:
+        return "None";
+    case ClassDefaultsReason::Abstract:
+        return "Abstract";
+    case ClassDefaultsReason::IncompleteLayout:
+        return "IncompleteLayout";
+    case ClassDefaultsReason::ManualFields:
+        return "ManualFields";
+    case ClassDefaultsReason::NonDeterministic:
+        return "NonDeterministic";
+    case ClassDefaultsReason::NonNullReference:
+        return "NonNullReference";
+    case ClassDefaultsReason::EncodeFailed:
+        return "EncodeFailed";
+    }
+
+    return "Unknown";
+}
+
+// 레코드 없는 타입의 이유인지다(RuntimeClassMetadata 'A5c 지문 연결' 레코드 유무 분류): 추상·불완전
+// 레이아웃·손 함수표는 정상적으로 레코드가 없다(차이 저장은 전부 저장, 지문 없음). 그 밖의 이유는
+// 레코드 실패(타입 계약 위반)다.
+constexpr bool IsClassWithoutDefaults(ClassDefaultsReason reason) noexcept {
+    return reason == ClassDefaultsReason::Abstract ||
+           reason == ClassDefaultsReason::IncompleteLayout ||
+           reason == ClassDefaultsReason::ManualFields;
+}
+
 // 등록 세대 동안 기억하는 실패인지다: 결정적 이유(같은 타입이면 늘 같은 실패)만 기억한다. 일시
 // 오류(OutOfMemory·Busy·ShuttingDown·NotFound — ClassRef 대상이 아직 등록 전·접근 오류)는 기억하지
 // 않아 다음 호출이 다시 만든다.

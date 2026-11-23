@@ -233,6 +233,13 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     }
 
     result.targets = targets.targets.Size();
+    // 클래스 기본값 표(A5c): 등록된 구체 클래스의 레코드를 한 번 모두 만든다. 레코드 실패 클래스는
+    // 쓰는 대상이 없어도 보고서 경고로 적는다(쓰는 대상은 cookKey 오류 — 아래 키 진단).
+    CookClassDefaultsTable classDefaults(allocator);
+    if (auto built = BuildCookClassDefaults(allocator, *request.types, classDefaults); !built) {
+        return built;
+    }
+
     CookKeyRequest keyRequest;
     keyRequest.index = request.index;
     keyRequest.files = request.files;
@@ -242,6 +249,7 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     keyRequest.profileSettings = request.profileSettings;
     keyRequest.projectGeneration = request.projectGeneration;
     keyRequest.cookerVersion = request.cookerVersion;
+    keyRequest.classDefaults = &classDefaults;
     CookKeySet keys(allocator);
     if (auto computed = ComputeCookKeys(allocator, keyRequest, keys); !computed) {
         return computed;
@@ -319,6 +327,18 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
 
     if (merged) {
         merged = AppendDiagnostics(result.diagnostics, run.diagnostics.View());
+    }
+
+    for (const CookClassDefaults& row : classDefaults.rows) {
+        if (merged && row.availability == ClassDefaultsAvailability::Failed) {
+            merged = result.diagnostics.TryPushBack(
+                CookDiagnostic{AssetDiagnosticCode::InvalidClassDefaults,
+                               true,
+                               {},
+                               AssetId{row.type},
+                               0,
+                               row.diagnostic.error});
+        }
     }
 
     if (!merged) {

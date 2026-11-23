@@ -107,7 +107,15 @@ enum class EditorWarningKind : uint8 {
     ImportWarning,
     // ID 수정: 새 id로 바꾼 패키지나 그 형제 출력이 고아가 됐다(진단 OrphanedOutput, asset = 고아,
     // related = 그 owner — 7.1절 17 A2e4b).
-    OrphanedOutput
+    OrphanedOutput,
+    // 열기: 저장 당시와 지금의 클래스 기본값이 다른 export 클래스다(A5c — 진단 None, asset =
+    // 패키지, related = 그 TypeId, text = 그 클래스의 export 수). 열기는 계속되고, 파일에 없던 값은
+    // 새 기본값이 된다(RuntimeClassMetadata 'A5c 지문 연결').
+    ClassDefaultsChanged,
+    // 열기: 지금 클래스 기본값 레코드를 만들 수 없는 export 클래스다(A5c — 진단 None, asset =
+    // 패키지, related = 그 TypeId, text = 이유 이름). 그 클래스를 고치기 전까지 이 패키지는 저장할
+    // 수 없다(차이 저장이 레코드를 요구한다).
+    ClassDefaultsUnavailable
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).

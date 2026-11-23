@@ -59,6 +59,38 @@ FindDefaultPayload(const TypeLease& lease, const ClassDefaults& defaults,
                    const PropertyPathBuffer& path, ClassDefaultsConfiguration configuration,
                    Allocator& scratch) noexcept;
 
+// 레코드 유무 분류다(RuntimeClassMetadata 'A5c 지문 연결'): 있음(지문 있음), 레코드 없는
+// 타입(IsClassWithoutDefaults — 정상), 실패(그 밖의 기억되는 이유 — 타입 계약 위반).
+enum class ClassDefaultsAvailability : uint8 {
+    Present,
+    WithoutRecord,
+    Failed
+};
+
+struct ClassDefaultsStatus {
+    ClassDefaultsAvailability availability = ClassDefaultsAvailability::Failed;
+    // Present일 때 레코드다(lease 수명 동안 유효).
+    const ClassDefaults* defaults = nullptr;
+    // WithoutRecord·Failed일 때 이유다.
+    ClassDefaultsDiagnostic diagnostic{};
+};
+
+// lease 클래스를 AcquireClassDefaults로 분류한다. 패키지 writer(Summary ClassDefaults 행)·
+// reader(지문 판정)·쿠커(cookKey 상태)·class-defaults-dump가 같은 분류를 쓴다.
+//
+// 반환: 분류. 오류: 기억하지 않는 일시 실패(OutOfMemory·Busy·ShuttingDown·NotFound 등 —
+// IsRememberedClassDefaultsFailure가 거짓)는 그 오류다(다시 부르면 만들 수 있다).
+//
+// 사용 예:
+//   auto status = ClassifyClassDefaults(lease, allocator);
+//   if (!status) { return status.Error(); }
+//   if (status.Value().availability == ClassDefaultsAvailability::Present) {
+//       const Sha256Digest digest =
+//           status.Value().defaults->Fingerprint(ClassDefaultsConfiguration::Cooked);
+//   }
+[[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<ClassDefaultsStatus>
+ClassifyClassDefaults(const TypeLease& lease, Allocator& scratch) noexcept;
+
 // ForEachClassDefaults가 구체 클래스마다 부르는 함수다. 성공이면 defaults(호출 동안만 유효)가 있고
 // diagnostic.reason이 None, 실패면 defaults가 null이고 diagnostic에 이유가 있다. 실패를 돌려주면
 // 순회를 그 오류로 멈춘다.

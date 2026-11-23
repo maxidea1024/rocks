@@ -23,7 +23,7 @@ namespace rocks {
 inline constexpr uint8 PackageMagic[4] = {'R', 'P', 'K', 'G'};
 
 // 이 엔진이 쓰고 읽는 컨테이너 버전이다(AS 5.3절 컨테이너 축).
-inline constexpr uint16 PackageFormatVersion = 1;
+inline constexpr uint16 PackageFormatVersion = 2;
 
 // 헤더 크기다(모든 포맷 버전에서 고정 — 버전 판정 전에 headerCrc 위치를 알아야 한다).
 inline constexpr uint32 PackageHeaderBytes = 64;

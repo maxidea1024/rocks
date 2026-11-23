@@ -387,6 +387,26 @@ Result<const ClassDefaults*> AcquireClassDefaults(const TypeLease& lease, Alloca
     return lease.ResolveClassDefaults(&BuildDefaults, &input, diagnostic);
 }
 
+Result<ClassDefaultsStatus> ClassifyClassDefaults(const TypeLease& lease,
+                                                  Allocator& scratch) noexcept {
+    ClassDefaultsStatus status;
+    auto defaults = AcquireClassDefaults(lease, scratch, &status.diagnostic);
+    if (defaults) {
+        status.availability = ClassDefaultsAvailability::Present;
+        status.defaults = defaults.Value();
+        return Result<ClassDefaultsStatus>::Success(status);
+    }
+
+    if (!IsRememberedClassDefaultsFailure(status.diagnostic)) {
+        return Result<ClassDefaultsStatus>::Failure(defaults.Error());
+    }
+
+    status.availability = IsClassWithoutDefaults(status.diagnostic.reason)
+                              ? ClassDefaultsAvailability::WithoutRecord
+                              : ClassDefaultsAvailability::Failed;
+    return Result<ClassDefaultsStatus>::Success(status);
+}
+
 Result<DefaultPayload> FindDefaultPayload(const TypeLease& lease, const ClassDefaults& defaults,
                                           const PropertyPathBuffer& path,
                                           ClassDefaultsConfiguration configuration,

@@ -26,6 +26,11 @@ RegistryOptions WorldRegistryOptions(const WorldDesc& desc) noexcept {
 
 } // namespace
 
+Result<void> TickSettings::Validate(const TickSettings& settings) noexcept {
+    return IsValidTickSettings(settings) ? Result<void>::Success()
+                                         : Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
 bool IsValidTickSettings(const TickSettings& settings) noexcept {
     if (!math::IsFinite(settings.intervalSeconds) || settings.intervalSeconds < 0.0) {
         return false;

@@ -404,6 +404,16 @@ Result<void> AssetIndex::IndexFile(platform::FileSystem& files, const PackageRea
         return appended;
     }
 
+    // export 타입 목록(A5c): Summary 타입 표가 export 타입 집합이다(정렬·중복 없음은 reader가
+    // 봤다).
+    if (auto reserved = entry.exportTypes.TryReserve(contents.summary.types.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const PackageTypeVersion& row : contents.summary.types) {
+        (void)entry.exportTypes.TryPushBack(row.type);
+    }
+
     auto tags = ReadPackageTags(*allocator_, contents.tags);
     if (tags) {
         entry.tags = Move(tags.Value());
@@ -667,6 +677,10 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
 
     if (step) {
         step = entry.dependencies.TryAppend(cached->dependencies.View());
+    }
+
+    if (step) {
+        step = entry.exportTypes.TryAppend(cached->exportTypes.View());
     }
 
     if (step) {

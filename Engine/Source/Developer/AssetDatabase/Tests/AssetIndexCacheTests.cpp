@@ -328,6 +328,20 @@ TEST(AssetIndexCache_RoundTripsAndReuses) {
               cached->tags.Size() == entry.tags.Size() &&
               cached->importRecord.present == entry.importRecord.present &&
               cached->importRecord.importerName.View() == entry.importRecord.importerName.View());
+        // export 타입 목록(A5c): 대표 타입을 담고 엄격 오름차순이며 캐시와 같다.
+        REQUIRE(!entry.exportTypes.IsEmpty());
+        bool hasPrimary = false;
+        for (usize at = 0; at < entry.exportTypes.Size(); ++at) {
+            hasPrimary = hasPrimary || entry.exportTypes[at] == entry.type;
+            CHECK(at == 0 || GuidLess(entry.exportTypes[at - 1], entry.exportTypes[at]));
+        }
+
+        CHECK(hasPrimary);
+        REQUIRE(cached->exportTypes.Size() == entry.exportTypes.Size());
+        for (usize at = 0; at < entry.exportTypes.Size(); ++at) {
+            CHECK(cached->exportTypes[at] == entry.exportTypes[at]);
+        }
+
         CHECK(cache.Find(entry.fileName.View(), PackageFingerprint{}) == nullptr);
     }
 

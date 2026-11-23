@@ -142,6 +142,26 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
         (void)entry.dependencies.TryPushBack(dependency);
     }
 
+    // export 타입 목록(A5c): 1개 이상, 엄격 오름차순.
+    const uint32 exportTypes = reader.ReadU32LE();
+    if (reader.Failed() || exportTypes == 0 || exportTypes > reader.Remaining() / GuidBytes) {
+        return Result<bool>::Success(false);
+    }
+
+    if (auto reserved = entry.exportTypes.TryReserve(exportTypes); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    for (uint32 index = 0; index < exportTypes; ++index) {
+        const TypeId type = ReadGuid(reader);
+        if (!entry.exportTypes.IsEmpty() &&
+            !GuidLess(entry.exportTypes[entry.exportTypes.Size() - 1], type)) {
+            return Result<bool>::Success(false);
+        }
+
+        (void)entry.exportTypes.TryPushBack(type);
+    }
+
     const uint32 tags = reader.ReadU32LE();
     if (reader.Failed() || tags > reader.Remaining() / MinTagBytes) {
         return Result<bool>::Success(false);
@@ -453,6 +473,11 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
             writer.WriteU32LE(static_cast<uint32>(dependency.kind));
             WriteGuid(writer, dependency.expectedType);
             writer.WriteU8(dependency.required ? 1 : 0);
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(entry->exportTypes.Size()));
+        for (TypeId type : entry->exportTypes) {
+            WriteGuid(writer, type);
         }
 
         writer.WriteU32LE(static_cast<uint32>(entry->tags.Size()));

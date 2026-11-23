@@ -76,7 +76,7 @@ enum class AssetOrphanReason : uint32 {
 struct AssetIndexEntry {
     explicit AssetIndexEntry(Allocator& allocator) noexcept
         : path(allocator), key(allocator), fileName(allocator), dependencies(allocator),
-          tags(allocator), importRecord(allocator) {
+          exportTypes(allocator), tags(allocator), importRecord(allocator) {
     }
 
     AssetIndexEntry(AssetIndexEntry&&) noexcept = default;
@@ -94,6 +94,10 @@ struct AssetIndexEntry {
     uint64 fileBytes = 0;
     int64 modifiedTicks = 0;
     Array<PackageDependencyEntry> dependencies;
+    // export 객체의 서로 다른 클래스다(TypeId 오름차순 — Summary 타입 표 = export 타입 집합).
+    // 쿠커의 cookKey가 클래스 기본값 지문을 넣는 데 쓴다(A5c — RuntimeClassMetadata 'A5c 지문
+    // 연결').
+    Array<TypeId> exportTypes;
     Array<PackageTag> tags;
     AssetIndexImportSummary importRecord;
     bool readOnly = false;
