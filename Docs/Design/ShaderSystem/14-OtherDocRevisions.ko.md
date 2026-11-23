@@ -34,3 +34,14 @@
 | CoreDataFoundations | 1.2절(:20) | ThirdParty `kind`는 `code`·`data` | `binary`·`headers`를 더한다(8절) |
 | 정책 검사(코드) | `PolicyChecks.cs` `PythonFreeMainPath`(:313–349) | `Programs`·`Build`·`.github`의 Python 호출 금지 | 오프라인 도구 빌드 workflow를 명시 제외(8절 4항, P3 구현 때) |
 | 코드(SH2 때) | `Engine/Source/Runtime/Graphics/Graphics.Build.cs:4–5`, `Programs/Sandbox/Sandbox.Build.cs:4·14`, `D3D12Graphics.Build.cs:21–22`, `DeviceTypes.h:14–15` | OpenGL·Vulkan·Metal 자리 설명, `d3dcompiler` 링크 | VulkanGraphics 의존 추가, OpenGL ES 설명, `d3dcompiler` 제거 |
+
+**개정 31(SH2 설계)이 요구하는 다른 문서 개정.** 이 문서는 고치지 않았다 — 각 문서를 맡은 세션이 SH2 하위 단계 착수 전에 반영한다(16.1절 범위 충돌).
+
+| 문서 | 고칠 곳 | 내용 |
+|---|---|---|
+| [에셋 시스템](../AssetSystem/10-Cooker.ko.md) | 10.2절 2·3·10·12항, 10.1절 | TargetProfile `graphicsBackend` → `graphicsBackends`·`shaderFormats`(12.3.1절 SD10), CookSettings `cookDevelopmentShaders`, `asset-cook` 셰이더 단계와 `--engine`(SD11), 매니페스트 v2 비에셋 산출물 표(SD13) |
+| [에셋 시스템](../AssetSystem/11-RuntimeLoading.ko.md) | 11절 로더 시작 | 매니페스트 v2의 라이브러리 항목을 셰이더 집합에 넘김(SD14), 엔진 전용 쿠킹 루트 |
+| [렌더 기반](../RenderBase.ko.md) | 9.2절, SX7·SX14, GX1·GX3, R8 | 엔진 라이브러리는 프로젝트 쿠킹 산출물(SD11), 공급자 interface는 SH2e(SD23), 메모리 라이브러리(SD16), `DeviceCaps` 장치 요구 비트(SD15), Graphics `CreateShader`·파이프라인 layout(SD18) |
+| [엔진 셰이더](../EngineShaders/09-LimitsAndFollowups.ko.md) | SLR3·SLR12 | SLR3은 16.1절 SD21(선택 하위 단계 SH2g, 완료 기준 6), SLR12는 7.2절 12항(SD22)으로 반영됨 |
+| [엔진 구현 계획](../EngineImplementationPlan.ko.md) | 9.6절 | 엔진 내장 셰이더 라이브러리를 만드는 단계(설치물 → 쿠킹, SD11) |
+| [빌드 타깃](../BuildTargets/README.ko.md) | Commandlet 타깃 | 쿠커가 셰이더 타입 Runtime 모듈을 링크(SD3) |
