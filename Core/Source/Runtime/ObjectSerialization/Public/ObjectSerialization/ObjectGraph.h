@@ -11,6 +11,11 @@
 // NodeTable이 있는 그래프를 한 트랜잭션으로 공개)다.
 namespace rocks {
 
+// graph 형식 버전이다(Docs/Design/ObjectFoundations.ko.md 5.1절 graph v2). 클래스 기본값 지문의
+// "codec wire 버전"이 이것이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드' — 바꾸면 모든
+// 지문이 바뀐다).
+inline constexpr uint32 ObjectGraphFormatVersion = 2;
+
 // byte 한도는 파일/필드와 migration 결과 누계다. peak RAM은 소유 index·필드 색인·참조 token·output
 // 복사도 포함한다. work는 codec의 반복/복사 비용이며 신뢰된 ctor/accessor/migration/hook의 임의
 // 코드를 중단하지 않는다. 이 콜백들은 유한 작업만 하고 registry/input/현재 wrapper를 재진입
@@ -22,11 +27,6 @@ namespace rocks {
 // 노드 Record의 합이 maxBytes로 묶인다, writer 성장 중에는 잠깐 더)에 외부 참조 위치 표(참조
 // 하나에 4 byte — 출력 byte와 합쳐 maxBytes 안)다. 로드는 원본을 빌리므로 피크가 staged 값 복사와
 // Required 검사 버퍼(Required를 품은 가장 큰 필드 하나의 검사 출력 — 성장 중에는 그 약 2.5배)다.
-// graph 형식 버전이다(Docs/Design/ObjectFoundations.ko.md 5.1절 graph v2). 클래스 기본값 지문의
-// "codec wire 버전"이 이것이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드' — 바꾸면 모든
-// 지문이 바뀐다).
-inline constexpr uint32 ObjectGraphFormatVersion = 2;
-
 struct ObjectGraphLimits {
     // 노드 수다(AS export 상한). 저장 집합과 Include가 더한 노드, 복원의 nodeCount에 건다. local
     // ID가 외부 참조 비트(0x80000000)와 겹치지 않게 2^31 − 1 이하여야 한다(넘으면 저장·복원 모두

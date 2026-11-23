@@ -20,6 +20,18 @@ constexpr char FingerprintDomain[] = {'R', 'o', 'c', 'k', 's', 'C', 'l', 'a', 's
 // u32 LE byte 수다.
 constexpr usize VersionBytes = 4;
 
+// 레코드를 다시 읽는 한도다(만들 때의 그래프 기본 한도와 같다 — 큰 레코드도 읽힌다).
+RecordLimits DefaultsReadLimits() noexcept {
+    const ObjectGraphLimits graph{};
+    RecordLimits limits;
+    limits.archive.maxTotalBytes = graph.maxBytes;
+    limits.archive.maxValueBytes = graph.maxValueBytes;
+    limits.archive.maxWork = graph.maxWork;
+    limits.archive.maxOperations = graph.maxWork;
+    limits.maxFields = graph.maxTotalFields;
+    return limits;
+}
+
 // 레코드 전용 hook이다: Soft 수집은 거부용(non-null Soft 기본값 — 경로를 남기고 실패), 치환은 값
 // 그대로(기본 구현).
 class DefaultsHooks final : public FieldCodecHooks {
@@ -226,8 +238,10 @@ Result<Array<uint8>> EncodeDefaults(Allocator& scratch, const TypeLease& lease, 
 // 못하면 빈 id다.
 Guid FirstDifferentField(Allocator& scratch, const TypeSchema& schema, Span<const uint8> left,
                          Span<const uint8> right) noexcept {
-    auto first = RecordReader::Open(scratch, left, schema.id, schema.version, schema.version);
-    auto second = RecordReader::Open(scratch, right, schema.id, schema.version, schema.version);
+    auto first = RecordReader::Open(scratch, left, schema.id, schema.version, schema.version,
+                                    DefaultsReadLimits());
+    auto second = RecordReader::Open(scratch, right, schema.id, schema.version, schema.version,
+                                     DefaultsReadLimits());
     if (!first || !second) {
         return Guid{};
     }
@@ -384,7 +398,7 @@ Result<DefaultPayload> FindDefaultPayload(const TypeLease& lease, const ClassDef
 
     const TypeSchema& schema = lease.Schema();
     auto opened = RecordReader::Open(scratch, defaults.Record(configuration), schema.id,
-                                     schema.version, schema.version);
+                                     schema.version, schema.version, DefaultsReadLimits());
     if (!opened) {
         return Out::Failure(opened.Error());
     }

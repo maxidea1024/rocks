@@ -25,8 +25,13 @@ namespace class_defaults_tests_file {
 using reflection_fixture::DefaultsAbstractBase;
 using reflection_fixture::DefaultsCounter;
 using reflection_fixture::DefaultsHolder;
+using reflection_fixture::DefaultsKindPick;
 using reflection_fixture::DefaultsPoint;
 using reflection_fixture::DefaultsSoftLink;
+using reflection_fixture::DefaultsSoftList;
+using reflection_fixture::DefaultsSoftNested;
+using reflection_fixture::DefaultsStrangerKind;
+using reflection_fixture::DefaultsStrangerType;
 using reflection_fixture::DefaultsVirtual;
 
 namespace {
@@ -107,17 +112,44 @@ Guid FieldNamed(StringView name) noexcept {
 }
 
 // 손 함수표 클래스다(생성 코덱 표지 없음 — ManualFields, completeFieldLayout 거짓이면
-// IncompleteLayout).
-constexpr Guid ManualType{0x4D414E55414C, 1};
+// IncompleteLayout). ManualType은 DefaultsStrangerKind의 ClassRef 대상 id와 같다.
+constexpr Guid ManualType = DefaultsStrangerType;
 constexpr Guid IncompleteType{0x4D414E55414C, 2};
+constexpr Guid DirectType{0x4D414E55414C, 3};
 constexpr Guid ManualValueId{0x4D414E, 1};
 
 struct ManualThing final : Object {
     uint32 value = 6;
 };
 
-Result<TypeRegistrationToken> RegisterManual(TypeRegistry& types, TypeId type,
-                                             bool completeLayout) noexcept {
+// 범용 codec이 아닌 손 encode다(Registry로 읽어 바로 쓴다 — 원본 모드를 모른다).
+Result<uint32> DirectEncode(const RuntimeFieldOps&, ObjectRegistry* registry,
+                            const ObjectAccessContext& access, ObjectHandle object,
+                            ArchiveWriter& out, FieldEncodeContext&) noexcept {
+    if (registry == nullptr) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto borrowed = registry->Resolve<ManualThing>(access, object);
+    if (!borrowed) {
+        return Result<uint32>::Failure(borrowed.Error());
+    }
+
+    auto value = borrowed.Value().Get();
+    if (!value) {
+        return Result<uint32>::Failure(value.Error());
+    }
+
+    if (auto written = out.WriteU32(value.Value()->value); !written) {
+        return Result<uint32>::Failure(written.Error());
+    }
+
+    return Result<uint32>::Success(static_cast<uint32>(WireType::U32));
+}
+
+Result<TypeRegistrationToken>
+RegisterManual(TypeRegistry& types, TypeId type, bool completeLayout,
+               FieldEncodeFunction encode = &detail::EncodeThroughFieldValue) noexcept {
     static constexpr char Name[] = {'v', 'a', 'l', 'u', 'e'};
     FieldSchema field;
     field.id = ManualValueId;
@@ -140,7 +172,7 @@ Result<TypeRegistrationToken> RegisterManual(TypeRegistry& types, TypeId type,
              return detail::WriteGeneratedStagedField<ManualThing>(transaction, object,
                                                                    &ManualThing::value, in);
          },
-         &detail::EncodeThroughFieldValue, &detail::DecodeThroughFieldValue}};
+         encode, &detail::DecodeThroughFieldValue}};
     auto ops = MakeRuntimeTypeOps<ManualThing>();
     ops.fields = accessors;
     ops.completeFieldLayout = completeLayout;
@@ -190,6 +222,18 @@ TEST(ClassDefaults_RecordMatchesGraphSave) {
             const ClassDefaults& record = *defaults.Value();
             CHECK(test::graph::SameBytes(record.Record(ClassDefaultsConfiguration::Editor),
                                          NodeRecord(editorGraph.View())));
+            // 다른 ObjectRegistry(같은 TypeRegistry)의 객체도 같은 기준이다.
+            {
+                ObjectRegistry other(allocator, fixture.types, {0x4344, 2});
+                auto copy = other.NewObject<DefaultsHolder>(other.OwnerAccess(), type);
+                REQUIRE(copy);
+                const Array<uint8> otherGraph = SaveOne(allocator, other, copy.Value().Handle(), 0);
+                CHECK(test::graph::SameBytes(record.Record(ClassDefaultsConfiguration::Editor),
+                                             NodeRecord(otherGraph.View())));
+                copy.Value().Reset();
+                CHECK(other.Shutdown(other.OwnerAccess()));
+            }
+
             CHECK(test::graph::SameBytes(record.Record(ClassDefaultsConfiguration::Cooked),
                                          NodeRecord(cookedGraph.View())));
             CHECK(record.Fingerprint(ClassDefaultsConfiguration::Editor) ==
@@ -239,8 +283,78 @@ TEST(ClassDefaults_TypesWithoutRecord) {
     CHECK(refuses(TypeIdOf<DefaultsAbstractBase>(), ClassDefaultsReason::Abstract));
     CHECK(refuses(IncompleteType, ClassDefaultsReason::IncompleteLayout));
     CHECK(refuses(ManualType, ClassDefaultsReason::ManualFields));
+    // 범용 codec이 아닌 손 encode도 표지가 없어 ManualFields다(원본 모드로 부르지 않는다).
+    auto direct = RegisterManual(fixture.types, DirectType, true, &DirectEncode);
+    REQUIRE(direct);
+    CHECK(refuses(DirectType, ClassDefaultsReason::ManualFields));
+    CHECK(fixture.types.Unregister(Move(direct.Value())));
     CHECK(fixture.types.Unregister(Move(incomplete.Value())));
     CHECK(fixture.types.Unregister(Move(manual.Value())));
+}
+
+// 재등록하면 새 슬롯이다(옛 레코드·기억이 따라오지 않는다 — builder 다시 호출).
+TEST(ClassDefaults_NewSlotAfterReregistration) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    CountingBuild build;
+    {
+        auto token = RegisterManual(types, ManualType, true);
+        REQUIRE(token);
+        {
+            auto lease = types.Acquire(ManualType);
+            REQUIRE(lease);
+            REQUIRE(lease.Value().ResolveClassDefaults(&CountingBuilder, &build));
+            REQUIRE(lease.Value().ResolveClassDefaults(&CountingBuilder, &build));
+            CHECK(build.calls == 1);
+        }
+
+        REQUIRE(types.Unregister(Move(token.Value())));
+    }
+
+    auto again = RegisterManual(types, ManualType, true);
+    REQUIRE(again);
+    {
+        auto lease = types.Acquire(ManualType);
+        REQUIRE(lease);
+        REQUIRE(lease.Value().ResolveClassDefaults(&CountingBuilder, &build));
+        CHECK(build.calls == 2);
+    }
+
+    CHECK(types.Unregister(Move(again.Value())));
+    CHECK(types.Shutdown());
+}
+
+// non-null ClassRef 기본값: 등록된 파생(DefaultsKindPick)은 레코드 = 그래프 저장 Record(ClassRef
+// 판정은 TypeRegistry). 대상 미등록(DefaultsStrangerKind)은 NotFound이고 기억하지 않는다 — 대상을
+// 등록하면 성공한다.
+TEST(ClassDefaults_ClassRefDefaults) {
+    SystemAllocator allocator;
+    DefaultsFixture fixture(allocator);
+    {
+        TypeLease pick = fixture.Lease(TypeIdOf<DefaultsKindPick>());
+        auto defaults = AcquireClassDefaults(pick, allocator);
+        REQUIRE(defaults);
+        ObjectRegistry objects(allocator, fixture.types, {0x4344, 3});
+        auto created = objects.NewObject<DefaultsKindPick>(objects.OwnerAccess(),
+                                                           TypeIdOf<DefaultsKindPick>());
+        REQUIRE(created);
+        const Array<uint8> graph = SaveOne(allocator, objects, created.Value().Handle(), 0);
+        CHECK(test::graph::SameBytes(defaults.Value()->Record(ClassDefaultsConfiguration::Editor),
+                                     NodeRecord(graph.View())));
+        created.Value().Reset();
+        CHECK(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    TypeLease stranger = fixture.Lease(TypeIdOf<DefaultsStrangerKind>());
+    ClassDefaultsDiagnostic why;
+    auto missing = AcquireClassDefaults(stranger, allocator, &why);
+    CHECK(!missing && missing.Error() == ErrorCode::NotFound &&
+          why.reason == ClassDefaultsReason::EncodeFailed);
+    auto token = RegisterManual(fixture.types, DefaultsStrangerType, true);
+    REQUIRE(token);
+    CHECK(AcquireClassDefaults(stranger, allocator));
+    stranger.Reset();
+    CHECK(fixture.types.Unregister(Move(token.Value())));
 }
 
 // 비결정 생성자는 NonDeterministic(첫 다른 필드 = serial)·InvalidArgument이고 기억한다(다시 불러도
@@ -255,11 +369,11 @@ TEST(ClassDefaults_ConstructorContractViolations) {
     CHECK(!first && first.Error() == ErrorCode::InvalidArgument &&
           why.reason == ClassDefaultsReason::NonDeterministic && why.fieldPathSteps == 1 &&
           why.fieldPath[0].fieldId == FieldNamed<DefaultsCounter>("serial"));
-    const int32 created = reflection_fixture::DefaultsCounterCreated;
+    const int32 created = DefaultsCounter::created;
     ClassDefaultsDiagnostic remembered;
     auto second = AcquireClassDefaults(counter, allocator, &remembered);
     CHECK(!second && remembered.reason == ClassDefaultsReason::NonDeterministic &&
-          remembered.fieldPathSteps == 1 && reflection_fixture::DefaultsCounterCreated == created);
+          remembered.fieldPathSteps == 1 && DefaultsCounter::created == created);
 
     TypeLease soft = fixture.Lease(TypeIdOf<DefaultsSoftLink>());
     ClassDefaultsDiagnostic softWhy;
@@ -267,6 +381,21 @@ TEST(ClassDefaults_ConstructorContractViolations) {
     CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument &&
           softWhy.reason == ClassDefaultsReason::NonNullReference && softWhy.fieldPathSteps >= 1 &&
           softWhy.fieldPath[0].fieldId == FieldNamed<DefaultsSoftLink>("target"));
+
+    // struct 멤버(slot.target)·배열 원소(list[0]) 안의 non-null Soft도 같은 hook이 잡는다.
+    TypeLease nested = fixture.Lease(TypeIdOf<DefaultsSoftNested>());
+    ClassDefaultsDiagnostic nestedWhy;
+    CHECK(!AcquireClassDefaults(nested, allocator, &nestedWhy) &&
+          nestedWhy.reason == ClassDefaultsReason::NonNullReference &&
+          nestedWhy.fieldPathSteps == 2 &&
+          nestedWhy.fieldPath[0].fieldId == FieldNamed<DefaultsSoftNested>("slot") &&
+          nestedWhy.fieldPath[1].fieldId ==
+              FieldNamed<reflection_fixture::DefaultsSoftSlot>("target"));
+    TypeLease list = fixture.Lease(TypeIdOf<DefaultsSoftList>());
+    ClassDefaultsDiagnostic listWhy;
+    CHECK(!AcquireClassDefaults(list, allocator, &listWhy) &&
+          listWhy.reason == ClassDefaultsReason::NonNullReference && listWhy.fieldPathSteps >= 1 &&
+          listWhy.fieldPath[0].fieldId == FieldNamed<DefaultsSoftList>("list"));
 }
 
 // 할당 실패: scratch의 모든 할당 실패는 OutOfMemory이고 기억하지 않아 다음 호출이 만든다.
@@ -334,7 +463,6 @@ TEST(ClassDefaults_PublishedAcrossThreads) {
         self.result = resolved ? resolved.Value() : nullptr;
     };
     REQUIRE(thread.Start(entry, &worker) == platform::ThreadStatus::Success);
-    REQUIRE(thread.WaitForCompletion(10000) == platform::WaitResult::Signaled);
     REQUIRE(thread.Join() == platform::ThreadStatus::Success);
     REQUIRE(worker.result != nullptr);
     auto here = lease.ResolveClassDefaults(&CountingBuilder, &build);

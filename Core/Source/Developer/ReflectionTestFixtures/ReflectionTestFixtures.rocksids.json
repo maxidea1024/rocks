@@ -1280,6 +1280,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsKindPick::pick",
+      "id": "05e6c76d09834f23ba2564a3bc92015e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::DefaultsNest::depth",
       "id": "6ce9a9cc6b8e4174ae557a602d838b5d",
       "aliases": [],
@@ -1338,6 +1345,34 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::DefaultsSoftLink::target",
       "id": "b7c14ee624e64b57a466d7b05f34dcc8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsSoftList::list",
+      "id": "88fdd4dd49bc41d4bdce20a39191764e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsSoftNested::slot",
+      "id": "7bce801161bd49ba95a09d5345a17c9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsSoftSlot::target",
+      "id": "39581c93211c4a8aa9d37fea4af15fae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsStrangerKind::stranger",
+      "id": "2fa50990cdc241b2be11f3c43c8b573d",
       "aliases": [],
       "retired": false
     },
@@ -4327,6 +4362,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsKindPick",
+      "id": "36030e17bde74902bf08e0222023b9da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::DefaultsMode",
       "id": "189899b4ae334892b155370946eccef6",
       "aliases": [],
@@ -4357,6 +4399,34 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::DefaultsSoftLink",
       "id": "c1f97d86e8564bf4b7cd38820891a518",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsSoftList",
+      "id": "6f5f43f4ba174f7d80f70ccd630f723b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsSoftNested",
+      "id": "b38ae9765a584241b314c6c626ecf2dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsSoftSlot",
+      "id": "dde04d9e9f444bd6963c8892318bd873",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsStrangerKind",
+      "id": "21cbfbf82bd14516a3a75670e3f66ebb",
       "aliases": [],
       "retired": false
     },

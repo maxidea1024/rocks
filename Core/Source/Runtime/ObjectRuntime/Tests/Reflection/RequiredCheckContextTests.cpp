@@ -642,7 +642,7 @@ TEST(RequiredCheck_MarkMakesStagedWritesBusyUntilTheCheckEnds) {
                 REQUIRE(ops);
                 {
                     FieldScope scope(check, lease.Value().Schema().fields[linkIndex], LinkedId);
-                    auto wire = ops->encode(*ops, objects, objects.OwnerAccess(), first.Value(),
+                    auto wire = ops->encode(*ops, &objects, objects.OwnerAccess(), first.Value(),
                                             writer, check);
                     REQUIRE(wire);
                     CHECK(wire.Value() == static_cast<uint32>(WireType::U64));

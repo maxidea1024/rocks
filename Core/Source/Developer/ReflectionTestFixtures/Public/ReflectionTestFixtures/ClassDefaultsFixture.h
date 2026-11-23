@@ -101,8 +101,9 @@ struct DefaultsHolder : DefaultsAbstractBase {
 };
 
 // 가상 함수가 있는 파생이다(MSVC ABI에서 vfptr 뒤에 Object 기반 — 저장소 시작을 반환하는지 본다).
+// final이 아니다(final 클래스의 새 virtual은 Clang -Wunnecessary-virtual-specifier).
 ROCKS_CLASS()
-struct DefaultsVirtual final : DefaultsHolder {
+struct DefaultsVirtual : DefaultsHolder {
     ROCKS_GENERATED_BODY()
 
     using DefaultsHolder::DefaultsHolder;
@@ -116,16 +117,17 @@ struct DefaultsVirtual final : DefaultsHolder {
     ROCKS_PROPERTY() int32 extra = 99;
 };
 
-// DefaultsCounter가 만든 수다(생성자가 읽고 올린다 — 시험 전용 전역).
-inline int32 DefaultsCounterCreated = 0;
-
 // 생성마다 다른 값을 넣는다(생성자 결정성 계약 위반 — NonDeterministic).
 ROCKS_CLASS()
 struct DefaultsCounter final : Object {
     ROCKS_GENERATED_BODY()
 
-    DefaultsCounter() noexcept : serial(++DefaultsCounterCreated) {
+    DefaultsCounter() noexcept : serial(++created) {
     }
+
+    // 만든 수다. 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지
+    // 않는다 — BuildTargets BD29).
+    ROCKS_REFLECTIONTESTFIXTURES_API static int32 created;
 
     ROCKS_PROPERTY() int32 stable = 5;
     ROCKS_PROPERTY() int32 serial = 0;
@@ -143,6 +145,67 @@ struct DefaultsSoftLink final : Object {
 
     ROCKS_PROPERTY() int32 before = 1;
     ROCKS_PROPERTY() SoftObjectRef<Object> target;
+};
+
+// Soft 멤버 struct다(struct 안 non-null Soft 기본값 — 경로 slot.target).
+ROCKS_STRUCT()
+struct DefaultsSoftSlot {
+    ROCKS_GENERATED_BODY()
+
+    explicit DefaultsSoftSlot(Allocator& allocator) noexcept : target(allocator) {
+    }
+
+    ROCKS_PROPERTY() SoftObjectRef<Object> target;
+};
+
+ROCKS_CLASS()
+struct DefaultsSoftNested final : Object {
+    ROCKS_GENERATED_BODY()
+
+    explicit DefaultsSoftNested(Allocator& allocator) noexcept : slot(allocator) {
+        (void)slot.target.TryAssign(AssetId{Guid{0x5DEF, 0x2}}, StringView());
+    }
+
+    ROCKS_PROPERTY() DefaultsSoftSlot slot;
+};
+
+// 배열 원소 non-null Soft 기본값이다(경로 첫 단계 list).
+ROCKS_CLASS()
+struct DefaultsSoftList final : Object {
+    ROCKS_GENERATED_BODY()
+
+    explicit DefaultsSoftList(Allocator& allocator) noexcept : list(allocator) {
+        SoftObjectRef<Object> one(allocator);
+        if (one.TryAssign(AssetId{Guid{0x5DEF, 0x3}}, StringView())) {
+            (void)list.TryPushBack(Move(one));
+        }
+    }
+
+    ROCKS_PROPERTY() Array<SoftObjectRef<Object>> list;
+};
+
+// non-null ClassRef 기본값이다: pick은 등록된 파생 DefaultsHolder(생성자는 생성 헤더가 보이는
+// Private/ClassDefaultsFixture.cpp — ClassRef::Of), stranger는 시험이 나중에 등록하는 손 함수표
+// 타입 id(DefaultsStrangerType — 미등록이면 NotFound이고 기억하지 않는다, 등록 뒤 성공).
+inline constexpr TypeId DefaultsStrangerType{0x4D414E55414C, 1};
+
+ROCKS_CLASS()
+struct DefaultsKindPick final : Object {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_REFLECTIONTESTFIXTURES_API DefaultsKindPick() noexcept;
+
+    ROCKS_PROPERTY() ClassRef<DefaultsAbstractBase> pick;
+};
+
+ROCKS_CLASS()
+struct DefaultsStrangerKind final : Object {
+    ROCKS_GENERATED_BODY()
+
+    DefaultsStrangerKind() noexcept : stranger(DefaultsStrangerType) {
+    }
+
+    ROCKS_PROPERTY() ClassRef<Object> stranger;
 };
 
 } // namespace rocks::reflection_fixture

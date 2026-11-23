@@ -106,7 +106,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 **만드는 순서**(생성 잠금 안):
 1. 슬롯 상태를 다시 본다(게시됨이면 그것, 실패 기억이면 그 오류·진단).
 2. 레코드가 없는 타입 판정.
-3. 임시 인스턴스 둘을 동시에 산 채로 만든다(주소에 기대는 값이 저장소 재사용으로 가려지지 않게): `ops.size`·`ops.alignment`로 받은 저장소마다 `ops.construct(memory, scratch)`. 소멸은 `ops.destroy(object)` 뒤 **저장소 시작 주소**를 반환한다(construct가 준 `Object*`는 vfptr 등으로 저장소 시작과 다를 수 있다). handle이 없는 객체라 생성자에서 Registry API를 쓸 수 없다(Create도 construct 뒤에 Registry를 세운다 — 생성자 순수성 계약과 같다). 생성자는 생성 잠금 안에서 돌므로 순수성 계약에 "잠금을 잡지 않고 레코드 생성을 다시 부르지 않는다"를 더한다. Debug는 같은 스레드의 재진입을 Fatal로 잡는다.
+3. 임시 인스턴스 둘을 동시에 산 채로 만든다(주소에 기대는 값이 저장소 재사용으로 가려지지 않게): `ops.size`·`ops.alignment`로 받은 저장소마다 `ops.construct(memory, scratch)`. 소멸은 `ops.destroy(object)` 뒤 **저장소 시작 주소**를 반환한다(construct가 준 `Object*`는 vfptr 등으로 저장소 시작과 다를 수 있다). handle이 없는 객체라 생성자에서 Registry API를 쓸 수 없다(Create도 construct 뒤에 Registry를 세운다 — 생성자 순수성 계약과 같다). 생성자는 생성 잠금 안에서 돌므로 순수성 계약에 "잠금을 잡지 않고 레코드 생성을 다시 부르지 않는다"를 더한다. 아직 게시되지 않은 타입을 같은 스레드가 builder 안에서 다시 부르면 Fatal이다(모든 구성 — 게시된 타입은 잠금 없는 빠른 경로로 바로 돌아간다).
 4. 두 인스턴스의 editor 인코딩을 byte 비교한다. 다르면 이유 `NonDeterministic`(첫 다른 필드 id)이다.
 5. 첫 인스턴스를 cooked 정책으로 한 번 더 인코딩한다.
 6. 지문: `SHA-256("RocksClassDefaults" ‖ 구성 byte ‖ ObjectGraphFormatVersion(u32 LE) ‖ 레코드 byte)`. `ObjectGraphFormatVersion`은 그래프 형식 버전(지금 `graph_detail::FormatVersion` = 2 — 공개 상수로 올린다)이고 결정의 "codec wire 버전"이 이것이다. Record 머리에 schema id·version이 있으므로 타입 버전이 오르면 지문도 바뀐다(의도 — 쿠킹 패키지가 다시 쿠킹된다). 구성 byte 표: 0 = editor(제외 {Transient}), 1 = cooked(제외 {Transient, EditorOnly}). 구성이 늘면 다음 번호를 주고 번호를 다시 쓰지 않는다.
