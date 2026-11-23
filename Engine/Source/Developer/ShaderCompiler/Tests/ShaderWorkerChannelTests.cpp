@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 셰이더 워커 채널과 실제 ShaderCompileWorker 시험이다(Docs/Design/ShaderSystem.ko.md 11.1절
+// 셰이더 워커 채널과 실제 ShaderCompileWorker 시험이다(Docs/Design/ShaderSystem 11.1절
 // SC4–SC7, SH1c): 버전·처리기·도구 표·툴체인 불일치의 종료 코드와 진단, 도구 조회,
 // D3D12_SM6·VULKAN_SM5 컴파일 (도구 저장소가 없으면 그 부분만 SKIP), hook 없는 워커의 hook 거부,
 // 강제 종료 보고(held gate), Crash·Assert 보고와 다음 묶음 성공(대화상자 없음 — 시험이 끝난다),

@@ -4,7 +4,7 @@ namespace Rocks.Build;
 
 /// <summary>
 /// 규칙이 만든 생성 번역 단위(<see cref="NativeModuleInput.GeneratedSources"/>)를 <c>&lt;out&gt;/GeneratedSources/&lt;모듈&gt;/</c>에 쓰고
-/// 모듈 소스에 더한다(Docs/Design/ShaderSystem.ko.md 9절 도구 표, BuildInfo 생성 TU와 같은 방식). 출력 잠금 아래에서만 부른다. 내용이
+/// 모듈 소스에 더한다(Docs/Design/ShaderSystem 9절 도구 표, BuildInfo 생성 TU와 같은 방식). 출력 잠금 아래에서만 부른다. 내용이
 /// 같으면 파일을 다시 쓰지 않으므로(<see cref="AtomicFile.WriteIfChanged(string, string)"/>) 증분 빌드는 compile을 다시 하지 않는다.
 /// 이번 실행에 없는 모듈의 파일은 지우지 않는다(입력이 아니다).
 /// </summary>

@@ -8,7 +8,7 @@
 #include <Core/Text/String.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 
-// 셰이더 컴파일 워커 메시지와 종료 코드다(Docs/Design/ShaderSystem.ko.md 11절, 11.1절 SC4–SC7).
+// 셰이더 컴파일 워커 메시지와 종료 코드다(Docs/Design/ShaderSystem 11절, 11.1절 SC4–SC7).
 // 메인 프로세스(ShaderCompiler의 워커 채널)와 워커(ShaderWorker)가 같은 정의를 쓴다.
 //
 // 파일 형식(little-endian):

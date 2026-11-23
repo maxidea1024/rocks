@@ -8,7 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <ShaderCompiler/ShaderSourceTree.h>
 
-// 셰이더 전처리기다(Docs/Design/ShaderSystem.ko.md 11.1절 SC3, 결정 6). C 전처리기의 부분집합을
+// 셰이더 전처리기다(Docs/Design/ShaderSystem 11.1절 SC3, 결정 6). C 전처리기의 부분집합을
 // Rocks가 직접 구현한다. 메인 프로세스가 job마다 원문을 전처리해 워커에 넘기므로 워커는 원본 파일
 // 경로를 받지 않는다(10절 경로 누출 금지).
 //

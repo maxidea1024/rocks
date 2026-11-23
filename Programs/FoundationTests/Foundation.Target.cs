@@ -35,7 +35,7 @@ public sealed class EngineTestsTarget : TargetRules
 
     public override string TestExecutable => "EngineTests";
 
-    // The shader worker channel tests start ShaderCompileWorker next to the test executable (Docs/Design/ShaderSystem.ko.md section 11.1 SC14).
+    // The shader worker channel tests start ShaderCompileWorker next to the test executable (Docs/Design/ShaderSystem section 11.1 SC14).
     public override IReadOnlyList<string> CompanionTargets => ["ShaderCompileWorker"];
 }
 

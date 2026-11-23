@@ -1,4 +1,4 @@
-# Offline build of the SPIRV-Cross C API shared library (spirv-cross-c-shared) (Windows x64). Docs/Design/ShaderSystem.ko.md section 8, item 4.
+# Offline build of the SPIRV-Cross C API shared library (spirv-cross-c-shared) (Windows x64). Docs/Design/ShaderSystem section 8, item 4.
 # The input is the build entry (pinned tag, source SHA-256, patches) of ThirdParty.json one folder up, compiled outside the engine build with the upstream
 # build settings (exceptions and RTTI) (the prebuilt binary section of the warning policy). The result is a tar.gz archive and a manifest hosts entry JSON. Does not publish.
 #

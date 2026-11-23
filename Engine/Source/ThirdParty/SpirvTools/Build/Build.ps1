@@ -1,4 +1,4 @@
-# Offline build of the SPIRV-Tools C API shared library (Windows x64). Docs/Design/ShaderSystem.ko.md section 8, item 4.
+# Offline build of the SPIRV-Tools C API shared library (Windows x64). Docs/Design/ShaderSystem section 8, item 4.
 # Builds the C API of libspirv.h (spvValidate, assembly, disassembly and the optimizer C API spvOptimizer*) as one shared library (SPIRV-Tools-c.dll).
 # The upstream shared build (BUILD_SHARED_LIBS) does not link on Windows because SPIRV-Tools-opt uses core's internal C++ symbols across the DLL
 # boundary. So the upstream static libraries (SPIRV-Tools-static, SPIRV-Tools-opt) are compiled with SPIRV_TOOLS_SHAREDLIB and SPIRV_TOOLS_IMPLEMENTATION

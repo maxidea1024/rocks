@@ -20,7 +20,7 @@ public sealed record LoadedRuleSet(IReadOnlyList<NativeModuleInput> Modules, IRe
 
 /// <summary>
 /// 규칙 어셈블리(Rocks.Engine.Rules 또는 게임 규칙)를 읽어 모든 모듈 규칙을 한 문맥으로 평가한다. 빌드 CLI와 정책 검사(Release 배제,
-/// Docs/Design/ShaderSystem.ko.md 9절)가 같은 평가를 쓴다. 사용 예:
+/// Docs/Design/ShaderSystem 9절)가 같은 평가를 쓴다. 사용 예:
 /// <code>
 /// var rules = RuleLoader.Load(rulesPath, "Sandbox", context);          // 빌드
 /// var all = RuleLoader.LoadAll(rulesPath, context);                    // 정책 검사

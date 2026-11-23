@@ -13,7 +13,7 @@
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
 
-// 측정 S2(Docs/Design/ShaderSystem.ko.md 5.4절): 이 기계의 하드웨어 어댑터와 WARP가 OS D3D12 런타임
+// 측정 S2(Docs/Design/ShaderSystem 5.4절): 이 기계의 하드웨어 어댑터와 WARP가 OS D3D12 런타임
 // (Agility SDK 없음)에서 지원하는 최대 셰이더 모델이다. 결정 3(D3D12 셰이더 모델)의 측정 근거다.
 namespace rocks::spike {
 

@@ -11,7 +11,7 @@
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
 
-// 측정 S12(데스크톱, Docs/Design/ShaderSystem.ko.md 5.4절·P11): 이 기계의 GL 드라이버가
+// 측정 S12(데스크톱, Docs/Design/ShaderSystem 5.4절·P11): 이 기계의 GL 드라이버가
 // SPIRV-Cross가 만든 `#version 320 es` 원문(GLES31_PC)을 받는지 본다. 숨김 창에 GL core context를
 // 만들고 GL_ARB_ES3_2_compatibility·GL_ARB_clip_control 유무와 실제 컴파일·링크 결과를 남긴다.
 // ES 3.2 context(WGL_EXT_create_context_es2_profile)가 되면 거기서도 같은 원문을 시험한다. 기존

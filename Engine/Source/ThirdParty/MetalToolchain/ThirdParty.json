@@ -19,7 +19,7 @@
     }
   },
   "notes": [
-    "Apple metal and metallib are system tools that are not fetched into the store (Xcode Metal tools; since Xcode 26 installed separately with xcodebuild -downloadComponent metalToolchain). The executables change with every update, so no SHA is pinned, only a minimum version. The worker measures the metal -v string and the metal and metallib SHA-256 and puts them into the job key (Docs/Design/ShaderSystem.ko.md section 8, item 2, and section 10).",
+    "Apple metal and metallib are system tools that are not fetched into the store (Xcode Metal tools; since Xcode 26 installed separately with xcodebuild -downloadComponent metalToolchain). The executables change with every update, so no SHA is pinned, only a minimum version. The worker measures the metal -v string and the metal and metallib SHA-256 and puts them into the job key (Docs/Design/ShaderSystem section 8, item 2, and section 10).",
     "minimumVersion is the leading part of the metalfe build number from metal -v. 32023 is in the same series as Metal Developer Tools 5.3 (32023) that UE 5.8 expects (MetalShaderFormat.cpp:724-725); the actual lower bound is settled in measurement S9.",
     "Apple Metal Developer Tools for Windows (windows-x64) are added after decision 5 (production host per format)."
   ]

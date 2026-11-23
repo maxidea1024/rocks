@@ -11,7 +11,7 @@
 #include <ShaderCompiler/ShaderCompileOptions.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 
-// 셰이더 job 키다(Docs/Design/ShaderSystem.ko.md 10절). 메인 프로세스가 NuggetKeyWriter에 10절 표의
+// 셰이더 job 키다(Docs/Design/ShaderSystem 10절). 메인 프로세스가 NuggetKeyWriter에 10절 표의
 // 1–7행 순서로 기록하고 그 SHA-256이 키다. 셰이더 job에는 AssetId·Build 의존 순환이 없으므로 SCC
 // 식을 거치지 않고 이 키를 Record 키로 그대로 쓴다(bucket NuggetBucketShader).
 //

@@ -8,7 +8,7 @@
 #include <Platform/Process.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 
-// 워커 채널이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC4·SC7). 워커 하나를 전용 채널 스레드가
+// 워커 채널이다(Docs/Design/ShaderSystem 11.1절 SC4·SC7). 워커 하나를 전용 채널 스레드가
 // 소유한다: P1 Process는 한 객체를 한 스레드만 다루고 다른 스레드에서 막힌 Read를 깨우는 취소가
 // 없으므로, 그 Process의 시작·쓰기·읽기·종료를 모두 채널 스레드가 한다. 다른 스레드는 Run으로
 // 묶음을 맡기고 결과를 기다린다(요청 큐).

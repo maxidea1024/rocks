@@ -7,7 +7,7 @@
 #include <Core/Text/StringView.h>
 #include <ShaderToolTable/ShaderToolTable.h>
 
-// 셰이더 형식 정의와 엔진 컴파일 프로필이다(Docs/Design/ShaderSystem.ko.md 12.1절, P6a).
+// 셰이더 형식 정의와 엔진 컴파일 프로필이다(Docs/Design/ShaderSystem 12.1절, P6a).
 //
 // 형식 정의(Engine/Config/ShaderFormats/<id>.json)는 한 셰이더 형식(D3D12_SM6 등)을 만드는 데
 // 필요한 모든 값의 단일 출처다: 쓰는 도구 목록(job 키 3항의 정적 목록), HLSL 2021 기본값(결정 2),

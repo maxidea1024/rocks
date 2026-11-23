@@ -142,7 +142,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | 그래픽 | D3D11/D3D12/Vulkan/Metal/OpenGL. 공통 material IR과 backend별 shader toolchain; 고급 capability는 독립 profile |
 | 좌표 | UE 5.8과 같다(2026-11-17 사용자 요구). 왼손, +X Forward·+Y Right·+Z Up, 길이 cm·질량 kg·시간 초. `Rotator`는 도, quaternion 축-각·삼각함수·각속도는 라디안(각속도·토크 API는 UE처럼 이름에 단위). 외부 형식·물리 middleware와는 경계에서 변환([수학 구현](../Implementation/Math.ko.md) 2절, [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)) |
 | 행렬 | UE 5.8과 같다. row vector p′=p·M, 행 우선 저장(이동은 마지막 행), A·B는 A를 먼저 적용, local-to-world=local×parentToWorld(UE `Child * Parent`). Transform 합성은 `TryMultiply(local, parentToWorld)`. 셰이더 전달 규약은 아래 view·깊이·앞면 행 |
-| view·깊이·앞면 | UE 5.8과 같다(2026-11-17 사용자 결정). view space는 +X 오른쪽·+Y 위·+Z 전방, 기본 원근은 reversed-Z(가까움 1·멂 0) 무한 원평면이고 투영 인자는 수평 반각(UE `FReversedZPerspectiveMatrix`), depth [0,1]. 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전([셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
+| view·깊이·앞면 | UE 5.8과 같다(2026-11-17 사용자 결정). view space는 +X 오른쪽·+Y 위·+Z 전방, 기본 원근은 reversed-Z(가까움 1·멂 0) 무한 원평면이고 투영 인자는 수평 반각(UE `FReversedZPerspectiveMatrix`), depth [0,1]. 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전([셰이더 시스템](ShaderSystem/07-BindingConventions.ko.md) 7.2절 6·8항). 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
 | 큰 월드 | 월드 위치 double(cm). `Transform`은 회전·이동·스케일 모두 double(UE FTransform)이고 대량 경로는 `Transform3f`. 렌더링은 카메라 상대 float. 물리는 Jolt adapter 경계에서 지역 원점 차감과 cm→m 변환(16.5절) |
 | 시간 | 시뮬레이션 기본 60Hz, 단조 증가 64-bit Tick. 렌더 보간과 오디오 sample clock 분리 |
 | 직렬화 | 명시적인 byte order, 고정 폭 정수, 길이 상한·체크섬. 구조체 메모리를 그대로 저장하지 않음 |
@@ -1074,7 +1074,7 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 
 **Deferred와 Forward+를 모두 불투명·반투명·skeletal mesh·조명·그림자를 지원하는 정식 렌더링 경로로 제공한다.** Deferred의 반투명 pass만 Forward로 처리하는 것은 이 요구의 완료가 아니다. 프로젝트 기본값과 개별 ViewDesc에서 경로를 선택한다. 같은 World/session을 보는 복수 view는 서로 다른 경로로 동일 RenderScene snapshot을 사용할 수 있다. EditorWorld와 각 Tryout은 별도 논리 RenderScene 또는 SessionId/WorldEpoch별 가시성·가변 proxy 격리를 갖는다.
 
-렌더 경로는 이 둘뿐이며 클러스터 없는 고전 Forward는 두지 않는다(2026-11-16 사용자 결정 "forward+, deferred 로 하자"). 저사양·모바일(OpenGL ES 3.2·Vulkan 1.1)도 Forward+로 그린다. 두 최저 사양 모두 compute와 texture buffer를 보장하므로 light grid 생성 pass를 어디서나 실행할 수 있다. 로컬 광원이 없는 view는 grid 생성을 건너뛰어 고전 Forward와 같은 비용으로 낮춘다. UE 5.8도 모바일 Forward에서 로컬 광원을 클러스터 light grid로 처리한다(`r.Mobile.Forward.EnableLocalLights` 기본 1, `Runtime/Core/Private/HAL/ConsoleManager.cpp:4025–4030`, `Runtime/Renderer/Private/MobileShadingRenderer.cpp:419`). OpenGL ES 3.2는 픽셀 셰이더의 storage buffer를 최소 0개로 보장하므로 GLES 형식은 light grid를 typed buffer(texture buffer)나 텍스처로 읽는다([셰이더 시스템](ShaderSystem.ko.md) 7.2절 4항 모바일 상한).
+렌더 경로는 이 둘뿐이며 클러스터 없는 고전 Forward는 두지 않는다(2026-11-16 사용자 결정 "forward+, deferred 로 하자"). 저사양·모바일(OpenGL ES 3.2·Vulkan 1.1)도 Forward+로 그린다. 두 최저 사양 모두 compute와 texture buffer를 보장하므로 light grid 생성 pass를 어디서나 실행할 수 있다. 로컬 광원이 없는 view는 grid 생성을 건너뛰어 고전 Forward와 같은 비용으로 낮춘다. UE 5.8도 모바일 Forward에서 로컬 광원을 클러스터 light grid로 처리한다(`r.Mobile.Forward.EnableLocalLights` 기본 1, `Runtime/Core/Private/HAL/ConsoleManager.cpp:4025–4030`, `Runtime/Renderer/Private/MobileShadingRenderer.cpp:419`). OpenGL ES 3.2는 픽셀 셰이더의 storage buffer를 최소 0개로 보장하므로 GLES 형식은 light grid를 typed buffer(texture buffer)나 텍스처로 읽는다([셰이더 시스템](ShaderSystem/07-BindingConventions.ko.md) 7.2절 4항 모바일 상한).
 
 ~~~cpp
 enum class RenderPath : uint8 {

@@ -23,7 +23,7 @@ public sealed record ReleaseException(string Rule, NativePlatform Platform, stri
 public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures, IReadOnlyList<string> Notices);
 
 /// <summary>
-/// Release 배제 정책이다(Docs/Design/ShaderSystem.ko.md 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
+/// Release 배제 정책이다(Docs/Design/ShaderSystem 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
 /// 각 플랫폼(Windows x64·macOS arm64·Android arm64)으로 규칙 평가해 다음을 거부한다.
 /// <list type="bullet">
 /// <item><c>release-developer-module</c>: 모듈 도달 집합(켠 플러그인 모듈 포함)에 Developer 모듈(<see cref="NativeModuleInput.Type"/>)이 있다.</item>

@@ -5,7 +5,7 @@
 // DynamicLibrary 시험(PlatformBase/Tests/DynamicLibraryTests.cpp)이 쓰는 플랫폼 도구다.
 //
 // 시험 라이브러리: Rocks.Build에는 공유 라이브러리 모듈 종류가 없고 더하지 않으므로
-// (ShaderSystem.ko.md 8절), 시험이 실행 중에 OS 로더가 받는 최소 공유 라이브러리를 직접 쓴다.
+// (Docs/Design/ShaderSystem 8절), 시험이 실행 중에 OS 로더가 받는 최소 공유 라이브러리를 직접 쓴다.
 // 코드 없이 데이터 export와 import만 담는다(DllMain·초기화 코드 없음). 그래서 실제 OS 로더의 경로
 // 검색·의존 해결·심볼 조회·해제를 그대로 시험하면서 시험 지원 코드가 컴파일러·링커에 기대지 않는다.
 // 현재는 Windows(PE32+, 실행 중인 프로세스와 같은 machine)만 만든다. macOS(Mach-O·코드 서명)와

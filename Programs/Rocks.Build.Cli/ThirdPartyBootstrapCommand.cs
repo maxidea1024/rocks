@@ -4,7 +4,7 @@ namespace Rocks.Build.Cli;
 
 /// <summary>
 /// <c>bootstrap</c> 명령이다. 미리 빌드한 바이너리(manifest <c>kind: binary</c>)를 사용자 단위 내용 주소 저장소에 받아 검사한다
-/// (Docs/Design/ShaderSystem.ko.md 8절 2항). 빌드·시험(<c>build</c>·<c>test</c>)은 이 명령을 부르지 않으며 받지도 않는다.
+/// (Docs/Design/ShaderSystem 8절 2항). 빌드·시험(<c>build</c>·<c>test</c>)은 이 명령을 부르지 않으며 받지도 않는다.
 /// <list type="bullet">
 /// <item><c>--root</c>: 저장소 루트(기본 현재 디렉터리).</item>
 /// <item><c>--library</c>: 한 라이브러리만(폴더 이름). 없으면 모든 binary 라이브러리.</item>

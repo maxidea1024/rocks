@@ -1,0 +1,124 @@
+# 셰이더 시스템 설계 — 11. SH1 워커 통신
+
+[목차](README.ko.md)
+
+## 11. SH1 워커 통신
+
+UE 5.8의 방식(파일 기반):
+- 메인 프로세스가 `ShaderCompileWorker <작업 디렉터리> <부모 PID> <스레드 번호> <입력 파일> <출력 파일> -communicatethroughfile -TimeToLive=<초>`로 워커를 띄운다(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:1687–1696`, 워커 쪽 `Programs/ShaderCompileWorker/Private/ShaderCompileWorker.cpp:642,647`).
+- 입력 파일은 입력 형식 버전(`ShaderCompileWorkerInputVersion`, `Runtime/RenderCore/Public/ShaderCompilerCore.h:35`)으로 시작하고, 압축 형식 이름과 (압축했으면) 압축된 본문이 뒤따르며, 형식별 버전 표는 본문 안에 있다. 워커는 둘 중 하나라도 자기 것과 다르면 끝난다(`Runtime/RenderCore/Private/ShaderCompileWorkerUtil.cpp:942–955, 970–1017`).
+- 워커는 입력 파일을 읽고 지우며(`ShaderCompileWorker.cpp:407–419`), 결과를 임시 파일에 쓴 뒤 출력 이름으로 옮긴다(`:425–433`, `:227–231`). 그래서 메인 프로세스가 덜 쓴 출력을 읽지 않는다.
+- 부모 PID로 부모 생존을 확인하고(`:460–469` macOS·Linux, `:483–507` Windows), 새 입력이 TimeToLive(기본 20초, 빌드 머신 600초, `ShaderCompiler.cpp:303–304`) 동안 없으면 끝난다.
+
+Rocks 규칙:
+1. **파일 기반**(UE와 같다). 작업 디렉터리는 `<root>/Intermediate/ShaderWorkers/<부모 PID>/<워커 번호>/`이다(root는 10절 너겟 root와 같다 — 프로젝트 루트 또는 엔진 폴더). 메시지는 Serialization Record TLV 기반 schema로 크기·정렬·endianness가 정의된 직렬화 메시지다(계획 §2.5 "프로세스/worker 경계에는 … 직렬화 메시지 또는 검증된 C ABI만 사용한다"). 메시지 본문은 파일로 주고받고, 짧은 제어 줄(묶음 번호·완료 알림)만 P1 pipe로 보낸다(11.1절 결정 SC4 — UE의 입력 파일 대기 polling 대신).
+2. **입력 머리.** 메시지 형식 버전, 형식별 처리기 버전 표(형식 정의 `processor.version`), 도구 표 SHA, 툴체인 지문·결정적 수학 버전(11.1절 결정 SC5). 워커는 자기 것과 다르면 정해진 종료 코드로 끝내고, 메인 프로세스는 "워커를 다시 빌드하라"는 진단을 낸다.
+3. **도구 조회.** 메인 프로세스는 세션마다 처음 한 번 워커에 도구 조회 요청을 보낸다. 워커는 저장소 도구의 SHA가 도구 표와 같은지와 Apple 도구 지문(`metal -v` 문자열, `metal`·`metallib` SHA-256)을 돌려준다. 메인 프로세스는 도구를 직접 실행하지 않고 이 값을 job 키 3항(10절)에 쓴다. 도구 조회 결과가 세션 중에 바뀌면(시스템 도구 갱신) 남은 job을 실패시키고 다시 조회한다.
+4. **job.** 키, 형식 id, 단계, 엔트리, 전처리된 원문(가상 경로 `#line`), 컴파일 옵션, 파라미터 레이아웃 표(7.2절 5항)다. 워커는 원본 파일 경로를 받지 않는다(10절 경로 누출 금지). 한 입력 파일에 job 여러 개를 묶으며, 묶음 크기(job 수·원문 바이트 상한)는 측정 S8로 정해 설정으로 둔다.
+5. **출력.** 임시 파일에 쓰고 no-replace `Move`(A0-P)로 출력 이름에 옮긴다. 입력 파일은 읽은 뒤 지운다. 디버그용으로 입력을 남기는 선택(UE `-KeepInput`)을 둔다.
+6. **부모 감시.** Windows는 P1 job object가 부모 비정상 종료 때 워커를 끝낸다. macOS는 프로세스 그룹이 부모 종료에 따라 끝나지 않으므로 워커가 입력 pipe EOF(P1 lifeline)로 부모 종료를 알고 끝난다. 끝나기 전에 자기가 띄운 자식(Apple `metal` 등, P1에서 자기 프로세스 그룹을 가진다)을 `Process::Close`로 끝낸다. 워커가 강제 종료되어 이 정리를 못 하면 남은 자식은 `RunProcess` 시간 제한으로 끝난다. PID 확인(`IsProcessRunning`)은 PID 재사용 때문에 보조로만 쓴다.
+7. **유휴 종료.** UE는 워커가 TimeToLive(기본 20초, 빌드 머신 600초) 동안 새 입력이 없으면 스스로 끝난다. Rocks 워커에는 타이머가 없다: 관리자가 유휴 시간(같은 기본값, 설정)이 지난 워커의 입력 pipe를 닫고, 워커는 EOF를 받으면 끝난다(11.1절 결정 SC4).
+8. **캐시.** 워커는 너겟을 읽거나 쓰지 않는다(`Rockpile.ko.md` 4절. 계획 §27.7 개정은 Rockpile 17절에 있다). 메인 프로세스가 조회·게시한다.
+9. **실패.** 워커가 비정상 종료하면 그 묶음의 job을 종료 종류·코드와 함께 실패로 보고하고 다른 묶음은 계속한다.
+
+### 11.1 SH1 설계(개정 23, 2026-11-23)
+
+SH1은 사용자 지시("에셋 처리 끝나고 남은 것들 이어가자", 2026-11-23)로 착수한다. 범위는 16절 SH1 행이고, 결정은 권장안으로 확정했다(애매한 곳은 UE 5.8 `ShaderCompileWorker`·`ShaderPreprocessor`·`ShaderCompilerCommon`·RenderCore `ShaderCore`를 따랐다). 결정 번호는 SC1–SC14다(5.4절 측정 S1–S14와 구분한다. 측정은 늘 "측정 Sn"으로 적는다). 교차 검증 1회(필수 11·권장 16)를 반영했다.
+
+**UE 대응표**(이름은 Rocks식, UE 이름은 이 표에만 둔다).
+
+| Rocks | UE 5.8 |
+|---|---|
+| `ShaderSourceTree`(가상 경로 → 디렉터리 mount) | `AddShaderSourceDirectoryMapping`·`GShaderSourceDirectoryMappings`(`Runtime/RenderCore/Private/ShaderCore.cpp:4218–4250`), `CheckVirtualShaderFilePath`(`:1620–1670`) |
+| `PreprocessShader` | `PreprocessShader`(`Developer/ShaderPreprocessor/Private/ShaderPreprocessor.cpp`, stb_preprocess) |
+| `Platform.rsh` | `Engine/Shaders/Public/Platform.ush` |
+| `BuildShaderJobKey` | `FShaderCompileJob::GetInputHash`(`ShaderCore.cpp:4612–4671`) |
+| `ShaderCompileOptions` | `FShaderCompilerEnvironment`의 컴파일 플래그 부분 |
+| `ShaderCompileManager` | `FShaderCompilingManager`(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp`) |
+| `ShaderWorkerPool`·워커 채널 | `FShaderCompileThreadRunnable`(같은 파일) |
+| `ShaderFormatBackend`(형식 컴파일 인터페이스) | `IShaderFormat`(`Developer/TargetPlatform/Public/Interfaces/IShaderFormat.h`) |
+| `ShaderWorkerExit`(워커 종료 코드) | `FSCWErrorCode`(`Runtime/RenderCore/Internal/ShaderCompileWorkerUtil.h:11–30`) |
+| `ShaderCompilerCommon` 모듈 | `Developer/ShaderCompilerCommon`(형식 모듈 공용 도구) |
+| 동반 타깃(`CompanionTargets`) | 에디터 빌드가 ShaderCompileWorker를 함께 빌드(`Programs/UnrealBuildTool/ProjectFiles/VisualStudio/VCProject.cs:2254` `bEditorDependsOnShaderCompileWorker`) |
+
+결정:
+
+- **SC1 모듈.** 3절 표대로다. 의존 방향은 `ShaderCompileWorker`(프로그램) → `ShaderWorker` → `ShaderFormat*` → `ShaderCompilerCommon`이고 정적 링크다(동적 모듈 아님). `ShaderCompilerCommon`은 두 프로세스가 같이 쓰는 것만 가진다: 형식 정의 읽기(지금 `ShaderCompiler`에 있는 `ShaderFormatDefinition`을 동작 불변으로 옮긴다), 워커 메시지 형식·종료 코드, 형식 컴파일 인터페이스 `ShaderFormatBackend`(형식 정의의 `compiler` 칸 struct `ShaderFormatCompiler`와 이름이 겹치지 않게 한다). `ShaderCompiler`는 메인 프로세스 전용(소스 트리·전처리기·키·옵션·너겟·관리자·워커 풀)이고 AssetNugget에 의존한다. 워커 쪽(`ShaderWorker`·`ShaderFormat*`·`Programs/ShaderCompileWorker`)은 `ShaderCompiler`·`AssetNugget`에 의존하지 않는다(11절 8항을 모듈 의존으로 강제 — 정책 `shader-worker-isolation`). 정책 `shader-tool-table`·`shader-tool-binary-load`의 허용 목록에 `ShaderCompilerCommon`(도구 표만)·`ShaderWorker`(도구 열기)를 더한다. 기존 `ShaderFormatVulkan`은 Sandbox의 개발용 컴파일 훅(`graphics::ShaderSourceCompiler`, Graphics 의존)을 SH2까지 그대로 두고, 같은 모듈에 `VULKAN_SM5` `ShaderFormatBackend`를 더해 워커가 링크한다. 훅과 Graphics 의존은 SH2에서 쿠킹 경로가 생길 때 지운다.
+- **SC2 소스 트리와 가상 경로.** `ShaderSourceTree`가 가상 루트 → 실제 디렉터리 mount 표를 가진다. 루트는 `/Engine`(엔진 `Engine/Shaders`, 그 아래 `Public`·`Private`·`Shared`)·`/Plugin/<이름>`·`/Project`다. mount 규칙은 UE `AddShaderSourceDirectoryMapping`과 같다: 가상 디렉터리는 `/`로 시작하고 `/`로 끝나지 않으며 `.`이 없고 중복 mount는 거부, 실제 디렉터리는 있어야 하고(PlatformBase `DirectoryExists`) 그 아래 `Generated` 디렉터리가 있으면 거부한다(모든 mount — UE `ShaderCore.cpp:4245–4248`). `/<루트>/Generated/…`는 메모리 원문(생성 HLSL, SH3) 전용이다. 파일 이름 규칙은 3절(`.rsf`·`.rsh`, `Shared`만 `.h`)이고 경로 성분은 ASCII `[A-Za-z0-9_.-]`만(`..`·`.`·빈 성분·`\` 거부). 시험은 임시 fixture 디렉터리를 `/Plugin/<이름>`으로 mount한다.
+- **SC3 전처리기(결정 6).** `PreprocessShader(tree, entryPath, defines, out)` — C 전처리기 부분집합을 Rocks가 직접 구현한다(외부 라이브러리 금지 규칙과 결정 6).
+  - 입력 정규화: 파일 앞 UTF-8 BOM을 떼고 CRLF·CR을 LF로 바꾼 뒤 처리한다(include 폐포의 내용 SHA-256은 원래 파일 byte로 계산한다). UTF-8이 아니면 오류.
+  - 지원: 줄 이음(`\` + 줄바꿈), 주석 제거(문자열 안 제외), `#include "…"`(`/`로 시작하면 가상 절대 경로, 아니면 포함한 파일 디렉터리 기준 상대 — UE `ShaderPreprocessor.cpp:436–441`), `#pragma once`(정규화된 가상 경로 기준), `#define`·`#undef`(객체형·함수형, `#`·`##`, `__VA_ARGS__`), `#if`·`#ifdef`·`#ifndef`·`#elif`·`#else`·`#endif`(`defined`, 64-bit 정수 산술·비교·논리·삼항), `#error`(진단으로 실패), `#line` 출력, `__LINE__`·`__FILE__`(가상 경로). 그 밖의 `#pragma`(예: `pack_matrix`·`warning`)는 그대로 출력에 남긴다(컴파일러가 해석한다).
+  - 컴파일러 내장 매크로: Rocks가 먼저 전처리하므로 `__SHADER_TARGET_MAJOR`·`__SHADER_TARGET_MINOR`·`__SHADER_TARGET_STAGE`·`__HLSL_VERSION`·`__spirv__`·`__DXC_VERSION_*` 같은 이름이 `#if`에서 조용히 0이 된다. UE는 이 값을 직접 정의해 넣지만(`Developer/Windows/ShaderFormatD3D/Private/ShaderFormatD3D.cpp:196–201`) Rocks는 `D3D11_SM5`의 대체 경로처럼 전처리 뒤에 컴파일러가 정해지는 경우가 있어 값이 하나로 정해지지 않는다. 그래서 `#if`·`#ifdef`·`#ifndef`·`#elif`·`defined`에 `__`로 시작하는 이름(`__LINE__`·`__FILE__` 제외)이 나오면 위치와 함께 오류로 막고, 작성자는 SC10의 `ROCKS_*` 정의를 쓴다. 조건 밖 원문에 쓴 내장 이름은 그대로 남아 실제 컴파일러가 펼친다.
+  - 받지 않는 것: `#include <…>`, 절대 OS 경로 include, trigraph, `#include_next`, `__DATE__`·`__TIME__`(결정성). 만나면 위치와 함께 오류다.
+  - 출력: 원문 줄 구조를 유지하고 파일이 바뀌거나 줄이 건너뛸 때 `#line N "<가상 경로>"`를 낸다. 결과는 결정적이다(같은 입력 같은 byte, 줄 끝 `\n`, 탭·공백 보존). include 폐포(가상 경로·내용 SHA-256 목록, 정렬)를 함께 돌려준다(셰이더 맵 키, 3절).
+  - 한도: include 깊이 64, 매크로 전개 깊이 256, 파일 하나 16 MiB, 출력 64 MiB(이름 있는 상수). 넘으면 위치와 함께 오류.
+  - 정합성(측정 S7): fixture 원문을 (가) Rocks 전처리 결과로 DXC 컴파일, (나) DXC가 직접 원문을 전처리해 컴파일(include handler가 같은 가상 경로를 주고, SC10 정의를 `-D`로 같이 준다)해 DXIL byte가 같고, 일부러 넣은 오류의 진단 위치(가상 경로·줄)가 같은지 본다. 내장 매크로를 `#if`에 쓴 fixture는 Rocks 쪽 오류를 확인한다. 시험 runner(EngineTests)가 도구를 연다(9절 정책 허용).
+- **SC4 워커 통신과 워커 채널.** 메인 프로세스가 P1 `Process`로 워커를 띄운다: `ShaderCompileWorker --work-dir <dir> --parent-pid <pid> --worker <n> [--keep-input] [--test-hooks]`.
+  - 입력 pipe는 lifeline이자 제어 통로다. 관리자는 `input.<seq>` 파일을 임시 이름에 다 쓴 뒤 no-replace 이동으로 놓고 `<seq>\n` 한 줄을 쓴다. 워커는 그 줄을 읽어(blocking) 입력을 읽고 지우며(`--keep-input`이면 남긴다), 결과를 임시 파일에 쓴 뒤 `output.<seq>`로 옮기고 출력 pipe에 `done <seq>\n`을 쓴다. 관리자는 그 줄을 받은 뒤에만 출력을 읽는다. 파일 존재 polling이 없다(UE는 입력 파일을 기다리며 잔다). 입력 EOF면 워커는 자기 자식을 정리하고 끝난다(11절 6항).
+  - **job 진행 줄(개정 27, [진행 보고](../ProgressReporting.ko.md) 10.3절).** 워커는 Compile 묶음의 job 하나(시험 hook job 제외)를 끝낼 때마다 출력 pipe에 `job <seq> <index>\n`(index는 묶음 안 0부터의 job 순번)을 쓴다. 결과는 여전히 `output.<seq>`로만 받는다 — 이 줄은 진행 표시용이다. 채널은 이 줄을 받아 관리자의 **잠정 완료 수**를 올리고, 묶음이 끝나면 잠정 값을 실제 결과(성공·실패)로 바꾼다. 묶음이 실패해(워커 종료) 이미 받은 `job` 줄의 결과가 사라지면 그 job은 실패로 다시 센다(잠정 값은 줄어든다 — 보이는 비율이 뒤로 가지 않게 하는 것은 진행 중계의 몫이다). 제어 줄이 바뀌었으므로 `ShaderWorkerMessageVersion`을 2로 올렸다(옛 워커는 `BadMessageVersion`으로 끝난다). 채널이 받는 줄은 `done`·`held`·`child`·`job`이고 그 밖은 워커 종료와 `ChannelFailed`다.
+  - 출력 pipe(stdout)는 제어 줄 전용이다. 워커 로그는 작업 디렉터리의 `worker.log` 파일로 보내고 stderr는 `Null`로 둔다(읽지 않는 pipe가 차서 워커가 멈추는 교착을 막는다 — `Process.h`의 pipe 계약).
+  - **워커 채널**: P1 `Process`는 한 객체를 한 번에 한 스레드만 다루고 다른 스레드에서 막힌 Read를 깨우는 취소가 없다(`Process.h` 스레드 계약, 후속). 그래서 관리자는 워커마다 전용 채널 스레드를 두고 그 스레드가 그 `Process`의 시작·쓰기·읽기·종료를 모두 한다. 다른 스레드는 채널의 요청 큐로만 일을 준다. 진행 중 묶음은 취소하지 않고 끝을 기다린다(워커 강제 종료는 채널 스레드 자신이 한다 — SC7). 관리자 종료는 큐에 종료를 넣고, 채널 스레드가 진행 중 묶음 뒤 입력 pipe를 닫고 종료 코드를 회수한다. P1에 교차 스레드 깨우기가 생기면 진행 중 묶음 취소를 더한다.
+  - 작업 디렉터리: 관리자는 시작할 때 자기 `<PID>` 디렉터리를 비우고(PID 재사용으로 남은 `input.*`·`output.*`가 no-replace 이동을 막지 않게), 다른 `<PID>` 디렉터리 가운데 그 PID가 살아 있지 않은 것을 지운다(PID 재사용 때문에 살아 있다고 보인 것은 남긴다 — 보수적).
+- **SC5 메시지 형식.** 입력 파일 `{magic "RSWI", u32 메시지 버전, Record TLV}`, 출력 파일 `{magic "RSWO", u32 메시지 버전, Record TLV}`(little-endian). 입력 Record의 머리: 도구 표 SHA-256(도구 표 전체의 정규 인코딩 SHA), 형식별 처리기 버전 표(형식 id → 형식 정의의 `processor.version` 정수), 메인 프로세스의 `build::ToolchainFingerprint()`와 `deterministic::Version`. 본문: 요청 종류(`ToolQuery`·`Compile`), 쓰는 형식 정의 byte(형식 id별 — 키에 넣은 바로 그 snapshot byte, 워커가 같은 파서로 읽는다), job 목록(키, 형식 id, 단계, 엔트리, 전처리 원문, 옵션, 레이아웃 표 정규 byte). 출력 Record: job마다 상태(성공·컴파일 오류·도구 오류·`UnsupportedCapability`)·값 목록(10절 ValueId)·진단, `ToolQuery`면 도구별 확인 결과와 system 도구 지문. 크기 상한(입력·출력 파일 각 1 GiB, 이름 있는 상수)을 넘는 묶음은 만들지 않는다.
+- **SC6 종료 코드와 버전 불일치.** `ShaderWorkerExit`: `Success` 0, `GeneralFailure` 1, `BadMessageVersion` 2, `BadFormatVersion` 3, `BadToolTable` 4, `BadInputFile` 5, `CannotDeleteInput` 6, `CannotSaveOutput` 7, `BadArguments` 8, `OutOfMemory` 9, `BadToolchain` 10(UE `FSCWErrorCode` 대응 — 위 표. `BadToolchain`은 Rocks가 더한 것이다: 키 머리의 툴체인 지문은 메인 프로세스 값이므로 다른 컴파일러로 빌드된 오래된 워커를 여기서 잡는다). 메시지 버전·처리기 버전 표·도구 표 SHA·툴체인 지문·결정적 수학 버전이 워커 자기 것과 다르면 출력 없이 해당 코드로 끝나고, 관리자는 "ShaderCompileWorker를 다시 빌드하라"(버전·툴체인)·"도구 표가 다른 빌드다"(도구) 진단으로 그 묶음 job을 실패시킨다(11절 2항). 그 밖의 비정상 종료(코드 밖 값·강제 종료·충돌)는 종료 종류·코드와 함께 그 묶음 job만 실패로 보고하고 다른 묶음은 계속한다(11절 9항). 워커는 오류 대화상자를 띄우지 않는다(Launch 크래시 수집 설정, abort·assert 대화상자 억제 — 도구 probe 규칙과 같다).
+- **SC7 시험 hook과 프로세스 감시 시험.** `--test-hooks`로 띄운 워커만 시험 job 종류를 받는다: `Hold`(출력 pipe에 `held <seq>\n`을 쓰고 입력 pipe의 다음 줄까지 막힌다), `SpawnChild`(P1으로 지정 probe를 자식으로 띄우고 PID를 출력 pipe에 쓴 뒤 `Hold`), `Crash`(접근 위반), `Assert`(Fatal 경로). 모두 명시 gate다.
+  - 강제 종료: 관리자 채널에 시험 hook(함수)을 걸면 채널 스레드가 `held` 줄을 받았을 때 hook을 부르고, hook이 종료를 고르면 채널 스레드가 그 워커를 끝낸 뒤 보고를 확인한다(교차 스레드 Terminate가 없다 — SC4).
+  - 충돌·대화상자: `Crash`·`Assert` job의 묶음이 실패로 보고되고 다른 묶음은 성공하며, 대화상자 없이 끝나는지(시험이 시간 상한 안에 끝남) 본다.
+  - 부모 종료: 중간 부모 probe가 워커를 띄우고, 워커가 손자를 띄워 PID들을 알린다. 시험은 중간 부모에게 명령 줄을 보내 **스스로** 비정상 종료하게 하고(시험이 중간 부모 `Process`를 Terminate하면 Windows job object가 자손을 함께 죽여 시험이 저절로 통과하므로), 워커·손자의 종료를 기다린 뒤에야 중간 부모 `Process`를 닫는다.
+  - 기다림은 `WaitForProcessExit(pid, timeoutMs)`다. 같은 이름·시그니처가 지금 `TestSupport/HostFailure.h`에 Windows만 있다. 이것을 PlatformBase로 옮겨(Windows `OpenProcess(SYNCHRONIZE)`+대기, macOS `kqueue` `EVFILT_PROC`·`NOTE_EXIT`, Linux `pidfd_open`+`poll`) TestSupport가 부르게 한다(공용 유틸리티 중복 금지). sleep·polling이 없고 시간 상한은 실패 판정에만 쓴다. 한계: PID로 여는 대기라 그 사이 PID가 재사용되면 다른 프로세스를 기다린다(11절 6항과 같은 한계 — 시험은 PID를 받은 직후 기다림을 연다).
+- **SC8 단계.** 새 단계 enum을 만들지 않고 형식 정의의 `ShaderStageBits`(vertex 1·pixel 2·compute 4) 한 비트를 job 단계로 쓴다. 키·메시지·명령이 이 값과 형식 정의 어휘(`vertex`·`pixel`·`compute`)를 쓴다. Graphics `graphics::ShaderStage`(0부터)와의 대응은 SH2의 쿠킹 경로가 정한다.
+- **SC9 컴파일 옵션.** `ShaderCompileOptions`(`ROCKS_STRUCT`, `ShaderCompiler` 모듈): `hlsl2021`(bool, 기본은 형식 정의 `language.hlsl2021`), `optimization`(enum `O0`·`O1`·`O2`·`O3`, 기본 `O3`), `debugSymbols`(bool, 기본 false — SH1은 true를 `Unsupported`로 거부하고 SH4에서 값 3을 만들 때 연다), `matrixLayout`(enum, `Row` 하나 — 7.2절 6항 고정). 키에는 `WriteReflected`로 기본값 포함 전체가 들어간다(10절 6행). 명령·API가 같은 옵션을 두 번 주거나 모르는 이름·값이면 job 생성 오류다.
+- **SC10 전처리 정의와 `Platform.rsh`.** 메인 프로세스가 job마다 정의를 넣고 전처리한다: `ROCKS_FORMAT_<형식 id>` = 1, `ROCKS_BACKEND_<D3D12|D3D11|VULKAN|METAL|GLES>` = 1, `ROCKS_COMPILER_DXC` 또는 `ROCKS_COMPILER_FXC` = 1(형식 정의의 1차 경로), `ROCKS_SHADER_MODEL_MAJOR`·`ROCKS_SHADER_MODEL_MINOR`(형식 정의 `compiler.shaderModel` — 내장 `__SHADER_TARGET_*` 대신), `ROCKS_HLSL2021` = 0·1, `ROCKS_VERTEX_SHADER`·`ROCKS_PIXEL_SHADER`·`ROCKS_COMPUTE_SHADER` 중 하나 = 1, 그리고 job이 준 정의(퍼뮤테이션 — P14). job이 준 정의가 `ROCKS_`로 시작하거나 같은 이름이 두 번이면 job 생성 오류다. 정의는 이름순으로 원문 앞에 놓인 것처럼 적용하고, 전처리기가 엔트리 원문 앞에 `/Engine/Public/Platform.rsh`를 **강제로 include**한다(작성자가 쓰지 않는다 — UE 원문이 `Common.ush`로 `Platform.ush`를 끌어오는 자리를 고정한 것). SH1의 `Platform.rsh`는 이 정의에서 나오는 형식·컴파일러 매크로와 `ROCKS_IMAGE_FORMAT(f)` 전개(형식 정의 `compiler.imageFormat`, 5.4절 SH0 결과)만 가진다. 바인딩 매크로(`ROCKS_ROOT_CONSTANTS` 등)는 SH2다.
+  - `D3D11_SM5`의 경로: `hlsl2021`이 참이면 FXC를 건너뛰고 바로 DXC → SPIR-V → SPIRV-Cross HLSL 5.0 → FXC다(옵션으로 정해지므로 결정적). 거짓이면 FXC를 먼저 쓰고, FXC가 **컴파일 오류**(오류 blob이 있는 `E_FAIL`)를 낼 때만 대체 경로를 탄다. 그 밖의 FXC 실패(`E_OUTOFMEMORY`, 다른 HRESULT, 도구 내부 오류)는 도구 오류로 job 실패이고 게시하지 않는다(같은 키에서 다른 출력이 나오지 않게). 두 경로 모두 FXC 정의(`ROCKS_COMPILER_FXC`)로 전처리한 같은 원문을 쓴다.
+- **SC11 관리자와 워커 풀.** `ShaderCompileManager`가 job을 받아 전처리 → (system 도구 형식이 있으면) 도구 조회 → 키 계산 → 너겟 일괄 조회 → 미적중을 묶음으로 나눠 워커 채널에 보냄 → 결과 게시 순서로 돈다. 조정은 관리자의 조정 스레드가 하고(너겟 요청을 기다리는 스레드 — 10절), 워커 채널 스레드는 묶음 실행만 한다.
+  - 도구 조회(11절 3항): 세션에서 처음 컴파일을 보낼 때 워커 하나에 `ToolQuery`를 보내 저장소 도구 확인과 system 도구 지문을 얻는다. system 도구(Apple `MetalToolchain`)를 쓰는 형식이 job에 있으면 키를 계산하기 **전에** 한다(지문이 키 2행에 들어간다). 도구 조회에서 `metal`·`metallib`의 절대 경로를 `xcrun --find`로 한 번 고정하고 그 파일을 SHA-256한다.
+  - 워커 수는 설정(기본 `min(논리 코어 - 1, 8)`, 최소 1), 묶음 상한은 job 32개·원문 합 4 MiB(이름 있는 상수, 측정 S8: 워커 열기 비용이 Release 약 80 ms라 묶음으로 나눠 갚는다). 결과는 job 순서 그대로 돌려준다(워커 배정 순서와 무관).
+- **SC12 필요 시 컴파일.** Development 실행이 쿠킹된 셰이더에 없는 job을 만나면 관리자의 `CompileNow(job)`(동기, 한 건)을 부른다(UE의 개발 중 셰이더 컴파일과 같은 자리). SH1은 API·시험까지이고 런타임 연결은 SH2다(쿠킹된 라이브러리 경로와 함께). Release 실행 파일은 이 모듈에 닿지 않는다(9절 정책).
+- **SC13 명령.** Commandlet 호스트에 `shader-compile`을 둔다: `shader-compile [--project <dir>] [--profile <엔진 프로필 id>] [--format <id>]... [--define NAME=VALUE]... [--option NAME=VALUE]... [--out <dir>] <가상 경로>:<엔트리>:<vertex|pixel|compute>...`. SH1의 `--profile`은 엔진 컴파일 프로필만 받는다(기본 호스트 프로필). job마다 키(hex)·적중 여부·산출 파일을 출력하고, `--out`이 있으면 `<out>/<형식>/<이름>.<엔트리>.<단계>.<확장자>`에 값 0을 쓴다. `<이름>`은 가상 경로의 `/`를 `+`로 바꾼 것이다(`+`는 가상 경로 문자가 아니므로 이름이 겹치지 않는다 — SC2). 종료 코드 0은 전부 성공, 1은 job 실패가 있음, 2는 사용법 오류.
+- **SC14 동반 타깃.** 워커는 독립 프로그램 타깃 `ShaderCompileWorker`다. 이 실행 파일을 쓰는 타깃(Commandlet·Sandbox·EngineTests)이 같이 빌드하도록 Rocks.Build `TargetRules`에 `CompanionTargets`(함께 빌드해 같은 bin에 두는 프로그램 타깃 목록)를 더한다(UE 에디터 ↔ ShaderCompileWorker 대응, BuildTargets 문서에 함께 적는다). 구성은 요청한 타깃과 같다(UE는 에디터 구성과 관계없이 워커를 Development로 빌드하지만 — `VCProject.cs:2257` — Rocks는 구성을 하나 더 빌드하지 않는다. Debug 워커의 도구 열기 비용 약 1.2 s(측정 S8)는 받아들이고 시험은 워커를 적게 띄우게 짠다). 워커 실행 파일은 호출하는 실행 파일과 같은 폴더에서 찾는다. 시험 hook은 `--test-hooks`로만 켠다.
+
+하위 단계(각각 첫 검증 1회 뒤 engine-runtime에 병합):
+
+| 단계 | 범위 | 시험 |
+|---|---|---|
+| SH1a | `ShaderSourceTree`(SC2)·`PreprocessShader`(SC3)·`Engine/Shaders/Public/Platform.rsh`(SC10의 매크로 부분)·전처리 정의 조립(SC10) | 가상 경로·mount 음성 대조(`Generated`·문자·중복), BOM·CRLF, 지시문 하나씩·중첩·`#pragma once`·상대 include·매크로(`#`·`##`·가변 인자·재귀 금지)·조건식, 내장 매크로 조건 거부, 예약·중복 정의 거부, `#line`·`__FILE__`, 한도 경계, 결정성(같은 입력 같은 byte, 작업 디렉터리 무관), 측정 S7(DXC 대조 — 도구가 없으면 SKIP) |
+| SH1b | `ShaderCompilerCommon` 분리(형식 정의 동작 불변 이동)·`ShaderCompileOptions`(SC9)·`BuildShaderJobKey`(10절)·셰이더 Record 값 표·너겟 위치(10절)·정책 `shader-worker-isolation`과 허용 목록 갱신 | 키 입력별 무효화와 불변(10절 완료 기준), 키 golden(`NuggetKeyTrace`, 실행 중 지문으로 기대값), 임시 root의 fixture `Config/AssetNuggets.json`으로 설정·위치(실제 `Engine/Intermediate`를 쓰지 않는다), 값 표 왕복 |
+| SH1c | 워커 메시지(SC5)·종료 코드(SC6)·`ShaderWorker`·`Programs/ShaderCompileWorker`·`ShaderFormatBackend`·`D3D12_SM6`(DXC DXIL, 서명 검사)·`VULKAN_SM5`(DXC SPIR-V·`spirv-val`) 경로·도구 조회·워커 채널(SC4)·PlatformBase `WaitForProcessExit`(SC7)·시험 hook·동반 타깃(SC14) | 메시지 왕복·손상 거부, 버전·처리기·도구 표·툴체인 불일치 종료 코드와 진단, 도구 조회, 강제 종료 보고(gate), `Crash`·`Assert` 보고와 대화상자 없음, 부모 종료 시 워커와 손자 종료 |
+| SH1d | `ShaderCompileManager`·`ShaderWorkerPool`(SC11)·너겟 일괄 요청·`CompileNow`(SC12)·`shader-compile`(SC13) | 같은 입력 같은 byte(반복·워커 수·묶음 크기·작업 디렉터리 변경), 빈 캐시와 찬 캐시 결과 동일(system 도구 없는 형식의 찬 캐시는 워커 0개), 묶음 하나 실패가 다른 묶음에 번지지 않음, DigestChanged·Corrupt·값 0 없는 Record 재컴파일, `required` 오류, 명령 출력·종료 코드·출력 이름 |
+| SH1e | 나머지 경로: `ShaderFormatD3D`의 FXC(`D3D11_SM5`, SC10의 대체 경로 규칙)·`ShaderFormatOpenGL`(ESSL 320 — SH2 재작성 전 출력)·`ShaderFormatMetal`(MSL 2.4 + metallib, `MetalToolchain`이 없으면 `METAL_SM5` job 전체가 `UnsupportedCapability` — MSL만 내고 성공하지 않는다). SH0에 남은 macOS 측정(측정 S1·S3·S9)을 `shader-compile --out`으로 옮긴 뒤 `Programs/ShaderToolSpike`를 지운다(9절 진척의 약속) | 형식별 산출(원문·정의·옵션을 스파이크와 같게 맞춘 fixture에서 스파이크와 같은 byte), FXC 대체 경로(컴파일 오류만), macOS 밖 metallib `UnsupportedCapability`, 실수 출력·상수 접기 fixture(10절) |
+
+SH1 출력은 SH2 정규화(재배치·리플렉션·GLES 재작성) 전의 형식 산출물이다. SH2가 그 처리를 더할 때 형식 정의의 `processor.version`을 올리므로 SH1 너겟은 키가 달라져 다시 만들어진다.
+
+**SH1a 구현 메모(개정 24, 2026-11-23).** SC2·SC3·SC10을 구현했고 측정 S7을 쟀다(5.4절).
+
+- 구조: `ShaderCompiler` 공개 헤더 `ShaderSourceTree.h`(mount·가상 경로·읽기)·`ShaderPreprocessor.h`(`PreprocessShader`·`PreprocessedShader`·한도)·`ShaderPreprocessDefines.h`(`BuildShaderPreprocessDefines`·`ShaderDefineSet`). 전처리기는 기능별 파일이다: 텍스트(정규화·논리 줄·토큰), 매크로(정의·숨김 집합·전개), 식, 지시문·출력. 재귀 금지는 숨김 집합(Prosser, C 6.10.3.4)이고, 매크로 깊이는 숨김 집합 크기와 인자 미리 전개 중첩 둘 다로 센다. 소스 트리·전처리·정의 조립은 오류 코드 하나(`ShaderSourceError`)와 고정 버퍼 결과(`ShaderSourceStatus` — 가상 경로·줄·영어 세부)를 함께 쓴다. `Engine/Shaders/Public/Platform.rsh`가 생겼다.
+- 스펙이 정하지 않은 곳(UE 5.8 또는 권장안으로 정함):
+  - 상대 include의 `.`·`..`는 UE(`ShaderPreprocessor.cpp:436–441`, `CollapseRelativeDirectories`)처럼 포함한 파일 디렉터리에 붙여 접은 뒤 가상 경로 규칙을 적용한다(가상 루트 위로 나가면 오류). `/`로 시작하는 include는 접지 않고 그대로 검사한다.
+  - `Shared`(`.h`만) 규칙은 모든 루트의 `<루트>/Shared/`에 쓴다. 엔트리는 `.rsf`만 받는다.
+  - 다른 내용의 매크로 재정의는 오류(`MacroRedefined`)다. clang은 경고 뒤 바꾸지만 job 정의·플랫폼 정의가 조용히 바뀌는 것을 막는다. 같은 내용은 받는다.
+  - 조건식의 `true`·`false`는 1·0이다(C++ 규칙. DXC와 같음을 S7 fixture로 확인했다). 문자 리터럴은 조건에서 받지 않는다. 결정성 거부에 `__TIMESTAMP__`를 더했고, job 정의 이름의 `__` 접두도 예약으로 막는다.
+  - 출력 공백: 원문 토큰은 앞 공백을 그대로, 전개 토큰은 공백 하나를 두고, 붙이면 다른 토큰이 되는 자리에는 공백을 넣는다(clang `-E`의 붙임 방지와 같은 목적). 같은 파일에서 8줄 이하 건너뜀은 빈 줄, 넘거나 파일이 바뀌면 `#line`이다(clang `-E`와 같은 기준). `#line`은 토큰을 낼 때만 쓰므로 토큰이 없는 파일(지금의 `Platform.rsh`)은 출력에 이름이 나오지 않는다. 다른 `#pragma`는 펼치지 않고 그 줄 그대로 둔다.
+  - 한도는 `ShaderPreprocessLimits`(기본값이 SC3 상수)로 받는다. 시험이 파일·출력 경계를 작은 값으로 정확히 잰다. 출력 한도는 한 줄의 전개 중간 결과(`#if` 식처럼 출력하지 않는 전개)에도 쓴다.
+  - SC10 파생 매크로는 `Platform.rsh`가 만든다: `ROCKS_SPIRV`(Vulkan·Metal·GLES면 1, D3D면 0)와 `ROCKS_IMAGE_FORMAT(Format)`(SPIR-V면 `[[vk::image_format("Format")]]`, D3D면 빈 것). 형식 정의 읽기가 `imageFormat`을 경로와 묶으므로(D3D 경로 `Empty`, SPIR-V 경로 `VkImageFormat`) backend 정의에서 같은 값이 나온다. 그래서 SC10 정의 목록에 새 정의를 더하지 않았다. `Platform.rsh`는 backend·컴파일러·단계 정의가 하나씩인지 `#error`로 검사한다.
+- S7 도구: `ShaderToolLoader`에 `CompileWithDxc`(IDxcCompiler3 + include handler, Windows 구현만, 다른 호스트는 `UnsupportedHost`)를 더했다. 도구를 여는 워커 자리 모듈이라 정책 `shader-tool-binary-load` 안이고, SH1c 형식 모듈이 다시 쓸 수 있다. 시험은 시험 runner(`Programs/FoundationTests/Engine/ShaderPreprocessDxcTests.cpp`)에 둔다 — 모듈 `Tests` 폴더(`Developer/ShaderCompiler/Tests`)는 도구 열기 허용 위치가 아니다. (나)는 주 파일에서 `Platform.rsh`와 엔트리를 include하고 `-I .`를 준다: DXC(clang)는 Windows에서 `/Engine/…`를 절대 경로로 보지 않아 포함한 파일 기준 후보(`.\Plugin\S7\Engine\…`)만 찾기 때문이다. handler는 `.\`·`\`·`/./`를 가상 경로로 바꾸고 트리에 없는 후보를 거절한다. 버린 대안: 형식 모듈(SH1c)을 앞당겨 DXIL 경로를 만드는 것(단계 범위 밖), 시험 runner에 Windows 전용 폴더를 더하는 것(정책 `platform-boundary` 예외가 늘어난다).
+- 한계(후속): Windows는 대소문자만 다른 가상 경로로 같은 파일을 연다. 폐포와 `#pragma once`는 철자가 다르면 다른 파일로 보고, 대소문자를 가리는 macOS에서는 그 철자가 실패한다(디렉터리 열거로 철자를 확인하는 것이 후속이다). 지원하지 않는 확장(GNU 이름 붙은 가변 인자 `args...`·`#warning`·`#line` 입력은 오류, `__VA_OPT__`·`_Pragma`·`, ## __VA_ARGS__` 쉼표 삼키기는 C 표준대로 처리하거나 그대로 남긴다). 컴파일러 진단의 줄은 원문과 같지만 열은 공백 정규화 때문에 다를 수 있다.
+
+**SH1b 구현 메모(개정 25, 2026-11-23).** SC1의 공용 모듈 분리, SC9 옵션, 10절 job 키·Record 값 표·너겟 위치, 정책 `shader-worker-isolation`을 구현했다.
+
+- 모듈: `Developer/ShaderCompilerCommon`을 만들고 `ShaderFormatDefinition`(헤더·구현·시험)을 동작 불변으로 옮겼다(include `<ShaderCompilerCommon/ShaderFormatDefinition.h>`, API `ROCKS_SHADERCOMPILERCOMMON_API`). `ShaderCompiler`는 `ShaderCompilerCommon`·`AssetNugget`·`HostConfig`에 의존하고 리플렉션 헤더 `ShaderCompileOptions.h`를 가진다(identity 명세 `ShaderCompiler.rocksids.json`). 키를 계산하는 쪽은 `RegisterShaderCompilerTypes`로 타입을 등록한 TypeRegistry와 ObjectRegistry를 `ShaderKeyReflection`으로 준다(AssetCooker `CookConfigContext`와 같은 방식).
+- 옵션: `ShaderCompileOptions`(`hlsl2021`·`optimization` `O0`–`O3`·`debugSymbols`·`matrixLayout` `Row`). 이름=값 파서는 손으로 쓴다(ReflectionText 대입 파서는 필드 경로·컨테이너용이라 중복·SH1 미지원 값 같은 job 생성 오류를 따로 내기 어렵다). 이름은 필드 이름 그대로, 값은 `true`·`false`와 열거자 이름이며 공백을 받지 않는다. `debugSymbols=true`는 파서와 키 계산 모두 `Unsupported`다.
+- 키: `BuildShaderJobKey(input, trace)` = 공통 머리(`ShaderJobProcessor` Guid 둘) + `WriteShaderJobKeyBody`(2–7행). 2–7행 함수를 따로 내놓아 시험이 머리의 결정적 수학 버전·툴체인 지문을 고정값으로 쓰는 기록 경로(리터럴 키 golden)를 만든다. 도구 설정 byte는 `hasDigest`인 Runtime·Redist·Tool 파일 SHA만 잇는다. 저장소 도구에 이 호스트 파일이 없으면(예: macOS의 FXC) 키도 `UnsupportedCapability`다. system 도구 지문은 `ShaderSystemToolFingerprint`(이름·버전 줄·`metal`·`metallib` SHA)로 받고, 형식 정의의 system 도구 이름과 맞는 지문이 없으면 `UnsupportedCapability`다(SH1c 도구 조회가 채운다). 입력은 snapshot의 digest만 받으므로 키 함수는 디스크를 읽지 않는다.
+- 값: `ShaderNuggetValue`(Code 0·BindingLayout 1·GlesCopyTable 2·DebugSymbols 3)와 `ShaderJobValues`(번호별 byte + 있음 비트 — 빈 값도 있는 값이다). `MoveShaderValuesToNugget`은 Code 없는 job을 거부하고(실패 job 비게시), `MoveShaderValuesFromNugget`은 Code가 없으면 `NotFound`, 모르는 번호·중복·오름차순 아님은 `InvalidArgument`(둘 다 손상 — 다시 컴파일)다.
+- 위치: `ResolveShaderNuggetRoot`(프로젝트 루트, 없으면 `FindEngineDirectory`의 `Engine`)와 `OpenShaderNuggetCache`(`ReadNuggetCacheSettings` → `NuggetCache::Open`). 저장소 `.gitignore`에 `/Engine/Intermediate/`를 더했다.
+- 정책: `shader-tool-table` 허용에 `Developer/ShaderCompilerCommon`·`Developer/ShaderWorker`, `shader-tool-binary-load` 허용에 `Developer/ShaderWorker`를 더했다. `shader-worker-isolation`은 워커 쪽(`Programs/ShaderCompileWorker`·`Developer/ShaderWorker`·`Developer/ShaderFormat*`)의 규칙이 `ShaderCompiler`·`AssetNugget`을 이름으로 참조하거나 소스가 `<ShaderCompiler/…>`·`<AssetNugget/…>`를 include하면 실패다(`ShaderCompilerCommon`은 허용). 지금 `ShaderFormatVulkan`(Graphics·ShaderToolLoader·SpirvReflect 의존)은 통과한다.
+- 한계: 리플렉션 문맥을 호출자가 준다(관리자 SH1d가 세션마다 한 벌 만든다). SPIRV-Reflect 항목(2행 끝)은 SH2에서 더한다.
+
+**SH1c 구현 메모(개정 26, 2026-11-23).** SC4–SC7·SC14와 SC1의 워커 쪽 모듈, `D3D12_SM6`·`VULKAN_SM5` 경로를 구현했다.
+
+- 모듈: `ShaderCompilerCommon`에 `ShaderWorkerProtocol`(메시지·`ShaderWorkerExit`·도구 표 SHA·요청 머리)과 `ShaderFormatBackend`(+ 프로필 이름·job 실패 도우미). 새 `ShaderFormatD3D`(`D3D12_SM6` — DXC DXIL, container hash가 0이거나 0x02×16이면 ToolError)와 `ShaderFormatVulkan`의 `VulkanShaderFormatBackend`(DXC SPIR-V + `spirv-val`). DXC 호출은 SH1a의 `ShaderToolLoader::CompileWithDxc`를 쓴다. 워커 본체 `ShaderWorker`와 프로그램 `Programs/ShaderCompileWorker`(Launch — 크래시는 `<work-dir>/Crashes`에 프로세스 안 덤프, OS·CRT 대화상자 억제). 채널은 `ShaderCompiler`의 `ShaderWorkerChannel`. `WaitForProcessExit`를 PlatformBase로 옮겼다(Windows `OpenProcess(SYNCHRONIZE)` 대기, macOS `kqueue` `NOTE_EXIT`, Android `pidfd_open` + `poll`; TestSupport 사본은 지웠다).
+- 메시지: 최상위 Record 하나, 형식·job·결과 목록은 RecordList, 작은 튜플 목록(처리기 버전·hook 인자·값·도구 확인)은 Bytes 값 안의 Archive다. 옵션은 `ShaderWorkerJobOptions`(필드 값)로 싣는다 — `ShaderCompileOptions`는 메인 프로세스 모듈이라 워커가 볼 수 없다(격리 정책).
+- 버전 대조(SC6 보충): 결정적 수학 버전 불일치도 `BadToolchain`이다. 처리기 버전 표 항목이 같은 요청의 형식 정의 `processor.version`과 다르면 `BadInputFile`, 워커 처리기 버전과 다르면 `BadFormatVersion`이다. 처리기가 아직 없는 형식(Metal·OpenGL)과 FXC 경로(`D3D11_SM5`)는 버전을 대조하지 않고 그 job이 `UnsupportedCapability`다(SH1e).
+- 제어 줄: 워커는 `done <seq>`·`held <seq>`·`child <pid>`만 쓴다. Hold는 입력 pipe의 다음 줄(내용 무관)로 풀린다. 채널은 모르는 줄을 받으면 워커를 끝내고 `ChannelFailed`(워커를 다시 빌드하라)다. 워커가 끝난 묶음 뒤에는 다음 묶음에서 워커를 다시 띄운다.
+- DXC 인자: `-E`·`-T <단계>_<모델>`·`-HV 2021|2018`·`-O0`–`-O3`·`-Zpr`·`-WX`, Vulkan은 `-spirv -fspv-target-env=vulkan1.1`과 형식 정의가 켜면 `-fvk-use-dx-position-w`.
+- 동반 타깃: `TargetRules.CompanionTargets`를 Rocks.Build에 더했다(`RuleLoader.WithCompanions`가 동반 Program·Monolithic 타깃의 모듈을 같은 빌드에 더한다 — 동반 타깃의 플러그인·동반 타깃, Modular 타깃은 거부). 지금은 EngineTests만 `ShaderCompileWorker`를 동반한다. Modular 시험 runner(EngineModular)는 동반을 받지 않으므로 워커 시험이 SKIP이다. Commandlet·Sandbox 동반은 그 사용처(SH1d `shader-compile`, SH2)와 함께 더한다.
+- 미룬 것: Apple system 도구 지문(`xcrun --find`·`metal -v`)은 Metal 경로와 함께 SH1e — 지금 도구 조회는 system 도구 이름만 `found = false`로 돌려준다. 다른 PID 작업 디렉터리 정리·워커 풀·묶음 크기는 SH1d.

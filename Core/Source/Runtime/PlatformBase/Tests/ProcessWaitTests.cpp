@@ -3,7 +3,7 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 
-// PID로 프로세스 종료를 기다리는 WaitForProcessExit(Docs/Design/ShaderSystem.ko.md 11.1절 SC7)
+// PID로 프로세스 종료를 기다리는 WaitForProcessExit(Docs/Design/ShaderSystem 11.1절 SC7)
 // 시험이다: 살아 있는 자식은 TimedOut(0 ms), 강제 종료한 자식은 Signaled(회수 전 POSIX zombie
 // 포함), PID 0은 Failed. 시간 상한은 실패 판정에만 쓴다(OS 대기가 끝을 알린다).
 using namespace rocks;

@@ -12,7 +12,7 @@ namespace shader_worker_protocol_tests_file {
 
 using namespace rocks::shader;
 
-// 셰이더 워커 메시지(Docs/Design/ShaderSystem.ko.md 11.1절 SC5·SC6) 시험이다: 요청·응답 왕복, 손상
+// 셰이더 워커 메시지(Docs/Design/ShaderSystem 11.1절 SC5·SC6) 시험이다: 요청·응답 왕복, 손상
 // 거부(잘림·magic·버전·byte 바꿈), 머리 채우기, 도구 표 SHA, 종료 코드 이름·진단, 프로필 이름.
 namespace {
 

@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 워커 채널(Docs/Design/ShaderSystem.ko.md 11.1절 SC4·SC7)이다. 규칙은 공개 헤더 주석을 따른다.
+// 워커 채널(Docs/Design/ShaderSystem 11.1절 SC4·SC7)이다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace worker_channel_detail {

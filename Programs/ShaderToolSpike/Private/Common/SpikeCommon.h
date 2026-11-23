@@ -8,7 +8,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 
-// 셰이더 도구 스파이크(SH0, Docs/Design/ShaderSystem.ko.md 16절)의 공통 형식이다. 스파이크는 단일
+// 셰이더 도구 스파이크(SH0, Docs/Design/ShaderSystem 16절)의 공통 형식이다. 스파이크는 단일
 // 스레드 측정 프로그램이며 이 파일의 형식은 모두 그 스레드에서만 쓴다.
 namespace rocks::spike {
 
@@ -116,7 +116,7 @@ bool ReadWholeFile(const char* path, ByteArray& bytes) noexcept;
 Span<const uint8> AsBytes(StringView text) noexcept;
 StringView AsText(Span<const uint8> bytes) noexcept;
 
-// DXBC·DXIL container 머리의 hash digest다(Docs/Design/ShaderSystem.ko.md 10절 dxil 서명). 머리는
+// DXBC·DXIL container 머리의 hash digest다(Docs/Design/ShaderSystem 10절 dxil 서명). 머리는
 // "DXBC" fourCC(4 byte) 다음 16 byte digest다.
 struct ContainerDigest {
     static constexpr usize Bytes = 16;

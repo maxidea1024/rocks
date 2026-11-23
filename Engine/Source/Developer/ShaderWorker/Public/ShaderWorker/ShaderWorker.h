@@ -5,7 +5,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/StringView.h>
 
-// 셰이더 컴파일 워커 본체다(Docs/Design/ShaderSystem.ko.md 11절, 11.1절 SC4–SC7). 워커 프로그램
+// 셰이더 컴파일 워커 본체다(Docs/Design/ShaderSystem 11절, 11.1절 SC4–SC7). 워커 프로그램
 // (Programs/ShaderCompileWorker)이 부른다.
 //
 // 명령줄: --work-dir <dir> --parent-pid <pid> --worker <n> [--keep-input] [--test-hooks]

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Offline build of the SPIRV-Cross C API shared library (spirv-cross-c-shared) (macOS arm64). The Windows version is Build.ps1 in the same folder.
-# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem.ko.md section 8 progress).
+# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem section 8 progress).
 #
 # Usage: sh Engine/Source/ThirdParty/SpirvCross/Build/Build.sh [work directory] [archive output directory]
 # Requires: Xcode command line tools (clang, install_name_tool, codesign, dsymutil), CMake, Ninja, git (to apply patches).

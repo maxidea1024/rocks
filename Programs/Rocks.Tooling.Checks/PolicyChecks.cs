@@ -467,7 +467,7 @@ public static partial class PolicyChecks
 
     /// <summary>
     /// 오프라인 도구 빌드 workflow다. 기본 빌드·시험 경로가 아니며 업스트림 빌드(DXC·SPIRV-Tools)가 Python으로 표를 생성하므로
-    /// <see cref="PythonFreeMainPath"/>에서 이 파일 하나만 명시 제외한다(Docs/Design/ShaderSystem.ko.md 8절 4항).
+    /// <see cref="PythonFreeMainPath"/>에서 이 파일 하나만 명시 제외한다(Docs/Design/ShaderSystem 8절 4항).
     /// </summary>
     public const string ThirdPartyToolsWorkflow = ".github/workflows/third-party-tools.yml";
 

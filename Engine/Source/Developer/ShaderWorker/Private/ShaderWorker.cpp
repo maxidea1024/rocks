@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 셰이더 컴파일 워커 본체(Docs/Design/ShaderSystem.ko.md 11절, 11.1절 SC4–SC7)다. 규칙은 공개 헤더
+// 셰이더 컴파일 워커 본체(Docs/Design/ShaderSystem 11절, 11.1절 SC4–SC7)다. 규칙은 공개 헤더
 // 주석을 따른다.
 namespace rocks::shader {
 

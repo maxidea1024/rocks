@@ -65,7 +65,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 - UE 근거: Game은 "Cooked monolithic game executable", Client는 "no server code", Server는 "no client code", Editor는 "Uncooked modular editor"다(`TargetRules.cs:24-45`). 모듈 포함 규칙은 `ModuleDescriptor.cs:785-810`이다. `ServerOnly`는 Program·Client가 아니면, `ClientOnly`는 Program·Server가 아니면 포함한다. `Editor`는 Editor 타깃만, `Developer`는 Editor·Program만, `DeveloperTool`은 `bBuildDeveloperTools`일 때 포함한다.
 - 플랫폼 열은 3.7절과 [전체 계획](EngineImplementationPlan.ko.md) 130행(Windows·macOS 에디터, Android·iOS 클라이언트, Linux 서버·기반 시험)을 따른다. 표 밖의 조합은 빌드 규칙이 이유와 함께 거부한다.
 - **`CompileWithEditor`**: Program 타깃 속성이다(UE `bCompileAgainstEditor`, `TargetRules.cs:1395-1400`). 켜면 `ROCKS_WITH_EDITOR=1`·`ROCKS_WITH_EDITOR_DATA=1`이 되고 Editor 모듈을 링크할 수 있다. 에디터 모듈을 쓰는 commandlet용이다. 기본은 꺼짐이다.
-- **`CompanionTargets`**: 모든 타깃 속성이다(개정 24, [셰이더 시스템](ShaderSystem.ko.md) 11.1절 SC14 — UE 에디터가 ShaderCompileWorker를 함께 빌드하는 `bEditorDependsOnShaderCompileWorker` 대응, `VCProject.cs:2254`). 함께 빌드해 같은 출력 폴더에 두는 프로그램 타깃 이름 목록이다. 빌드는 동반 타깃의 모듈을 이 타깃의 모듈 뒤에 더해 같은 구성으로 한 번에 빌드한다(`RuleLoader.WithCompanions`). 동반 타깃은 Program·Monolithic이고 플러그인·동반 타깃이 없어야 하며, 이 타깃도 Monolithic이어야 한다(Modular 동반은 모듈 manifest와 함께 후속). 지금은 EngineTests가 `ShaderCompileWorker`를 동반한다.
+- **`CompanionTargets`**: 모든 타깃 속성이다(개정 24, [셰이더 시스템](ShaderSystem/11-WorkerCommunication.ko.md) 11.1절 SC14 — UE 에디터가 ShaderCompileWorker를 함께 빌드하는 `bEditorDependsOnShaderCompileWorker` 대응, `VCProject.cs:2254`). 함께 빌드해 같은 출력 폴더에 두는 프로그램 타깃 이름 목록이다. 빌드는 동반 타깃의 모듈을 이 타깃의 모듈 뒤에 더해 같은 구성으로 한 번에 빌드한다(`RuleLoader.WithCompanions`). 동반 타깃은 Program·Monolithic이고 플러그인·동반 타깃이 없어야 하며, 이 타깃도 Monolithic이어야 한다(Modular 동반은 모듈 manifest와 함께 후속). 지금은 EngineTests가 `ShaderCompileWorker`를 동반한다.
 - **`WithEditorData`**: Program 타깃 속성이다. 켜면 `ROCKS_WITH_EDITOR_DATA=1`이다. 에디터 데이터를 읽는 에셋 도구용이다. 기본은 꺼짐이다(BD19). UE는 Program 기본값이 1이지만(`TargetRules.cs:1201-1203`) 시험 타깃은 0이다(`UBT/Configuration/Rules/TestTargetRules.cs:316-317`). Rocks Program의 대부분이 시험·벤치마크라 0을 기본으로 한다. 이렇게 하면 Program의 기본 매크로 조합이 Game과 같아 설치 SDK 라이브러리를 공유한다(3.2절).
 - **Server 타깃의 기능 축소**(렌더·오디오·입력 backend 제외, UE `USE_NULL_RHI=1` — `TargetRules.cs:3492-3493`)의 범위는 네트워크 단계 스펙에서 정한다. 이 문서는 그 결정이 기댈 type·매크로·검사를 준비한다(3.7절). 오디오 모듈의 범위는 [오디오 시스템](AudioSystem.ko.md) AD24가 정했다(개정 20): 장치 backend `AudioMiniaudio`와 디코더 `AudioOpus`는 `ClientOnly`, `Audio`·`EngineAudio`는 `Runtime`(서버에서는 재생 요청이 `Ignored`)이고, Server 쿠킹은 오디오 payload를 넣지 않는다.
 - **빌드 주입 상수**: [AppInfo·CommandLine](AppInfoCommandLine.ko.md)이 정한 `build::TargetType`(565행, 아직 미구현)을 같은 다섯 값으로 넓힌다. 실행 중 분기는 `build::Description()` 상수로 한다. UE의 `UE_GAME`·`UE_EDITOR`·`UE_SERVER`·`UE_CLIENT`·`IS_PROGRAM` 같은 타깃 종류 매크로는 두지 않는다(BD3). 실행 종류 `HostKind`(같은 문서 304행 — "에디터·서버는 생길 때 더한다")는 타깃 종류와 다른 축이다. Editor·Server 타깃이 생길 때 `HostKind`에 `Editor`·`Server`를 더한다.
@@ -125,7 +125,7 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 | ServerOnly | Runtime·ServerOnly |
 | Editor | 모든 type |
 
-**Release 배제 정책(BD20)**: `ReleaseExclusion`의 검사 대상을 `Type == Game`에서 Game·Client·Server로 넓힌다. UE도 Editor·Program이 아닌 모든 타깃의 Shipping을 같은 대상 범위로 본다(`UEBuildTarget.cs:3918` `CheckForEULAViolation` — 검사 내용은 NonRedist 라이선스로 다르다). 평가 플랫폼은 타깃 종류별이다: Game·Client는 Windows x64·macOS arm64·Android arm64, Server는 Windows x64·macOS arm64·Linux x64(BS6 뒤) Release 규칙이다. 그리고 `<계층>/Source/Editor/` 모듈(type Editor)이 Game·Client·Server 타깃에 닿는 것은 구성과 무관하게 정책 오류로 막는다. [셰이더 시스템](ShaderSystem.ko.md) 9절의 Release 배제 대상("Type == Game")도 Game·Client·Server로 읽는다.
+**Release 배제 정책(BD20)**: `ReleaseExclusion`의 검사 대상을 `Type == Game`에서 Game·Client·Server로 넓힌다. UE도 Editor·Program이 아닌 모든 타깃의 Shipping을 같은 대상 범위로 본다(`UEBuildTarget.cs:3918` `CheckForEULAViolation` — 검사 내용은 NonRedist 라이선스로 다르다). 평가 플랫폼은 타깃 종류별이다: Game·Client는 Windows x64·macOS arm64·Android arm64, Server는 Windows x64·macOS arm64·Linux x64(BS6 뒤) Release 규칙이다. 그리고 `<계층>/Source/Editor/` 모듈(type Editor)이 Game·Client·Server 타깃에 닿는 것은 구성과 무관하게 정책 오류로 막는다. [셰이더 시스템](ShaderSystem/09-ToolLoadingReleaseExclusion.ko.md) 9절의 Release 배제 대상("Type == Game")도 Game·Client·Server로 읽는다.
 
 채택하지 않은 UE type은 9.1절이다.
 
@@ -680,7 +680,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - [저장소 구성](../Guides/RepositoryLayout.ko.md): "후속"에 이 문서 링크를 더했다. 기술자 표·모듈 type 표·게임 빌드 연동·플랫폼 폴더 목록(Linux)은 BS2·BS4·BS6 구현 때 고친다.
 - [리플렉션 기반](ReflectionFoundations.ko.md) 134행 `EditorOnly`: BD6의 선언 규칙으로 바뀐다는 주석을 달았다.
 - [유니티 빌드·PCH](UnityBuildPch.ko.md) 8.4절 248행: 제공 모듈 후보를 "컴파일 환경에 보이는 제공 모듈"로 고쳤다.
-- [셰이더 시스템](ShaderSystem.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.
+- [셰이더 시스템](ShaderSystem/09-ToolLoadingReleaseExclusion.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.
 - [AppInfo·CommandLine](AppInfoCommandLine.ko.md) 307·565행 `build::TargetType`: 다섯 값으로 고쳤다. `HostKind`(304행)는 Editor·Server 타깃이 생길 때 더한다.
 - [UI 툴킷](UiToolkit.ko.md) 7.3절 (g) `MinimalAPI`·`*_API` 행(개정 2): BD27·BD28로 정했다고 고쳤다.
 

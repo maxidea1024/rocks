@@ -137,7 +137,7 @@ SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 �
 
 ## 외부 라이브러리(C 원본)
 
-빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 외부 라이브러리 폴더(Core가 쓰면 `Core/Source/ThirdParty/<Lib>/`, 엔진·도구 전용이면 `Engine/Source/ThirdParty/<Lib>/`) 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다. manifest 종류는 `code`·`data`·`headers`(헤더 전용, 모듈 규칙 없음)·`binary`(Rocks가 컴파일하지 않는 미리 빌드한 바이너리)다([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절).
+빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 외부 라이브러리 폴더(Core가 쓰면 `Core/Source/ThirdParty/<Lib>/`, 엔진·도구 전용이면 `Engine/Source/ThirdParty/<Lib>/`) 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다. manifest 종류는 `code`·`data`·`headers`(헤더 전용, 모듈 규칙 없음)·`binary`(Rocks가 컴파일하지 않는 미리 빌드한 바이너리)다([셰이더 시스템](../Docs/Design/ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절).
 
 라이브러리 폴더는 `<Lib>.Build.cs`(`ThirdPartyModuleRules` 상속, 이름만 적는다), `ThirdParty.json`(단일 출처), `<lib>-<version>/`(릴리스 원본을 byte 그대로)로 구성한다. 업그레이드 절차:
 
@@ -148,7 +148,7 @@ SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 �
 
 ## 미리 빌드한 바이너리(bootstrap)
 
-DXC·SPIRV-Cross·SPIRV-Tools처럼 Rocks 빌드가 컴파일하지 않는 도구는 manifest `kind: binary`로 `Engine/Source/ThirdParty/<Lib>/`에 둔다([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절). 저장소에는 공개 헤더·라이선스·`Build/` 오프라인 빌드 스크립트·manifest만 두고, 바이너리는 사용자 단위 내용 주소 저장소(Windows `%LOCALAPPDATA%\Rocks\ThirdParty\<SHA-256>\`, macOS `~/Library/Application Support/Rocks/ThirdParty/<SHA-256>/`)에 명시적인 bootstrap 명령으로만 받는다. 기본 빌드·시험과 Foundation CI는 bootstrap 없이 돈다(헤더는 저장소에 있다). 워커가 도구를 여는 실행·시험만 bootstrap이 필요하다.
+DXC·SPIRV-Cross·SPIRV-Tools처럼 Rocks 빌드가 컴파일하지 않는 도구는 manifest `kind: binary`로 `Engine/Source/ThirdParty/<Lib>/`에 둔다([셰이더 시스템](../Docs/Design/ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절). 저장소에는 공개 헤더·라이선스·`Build/` 오프라인 빌드 스크립트·manifest만 두고, 바이너리는 사용자 단위 내용 주소 저장소(Windows `%LOCALAPPDATA%\Rocks\ThirdParty\<SHA-256>\`, macOS `~/Library/Application Support/Rocks/ThirdParty/<SHA-256>/`)에 명시적인 bootstrap 명령으로만 받는다. 기본 빌드·시험과 Foundation CI는 bootstrap 없이 돈다(헤더는 저장소에 있다). 워커가 도구를 여는 실행·시험만 bootstrap이 필요하다.
 
 ```text
 dotnet msbuild Rocks.proj /t:ThirdPartyBootstrap
@@ -158,9 +158,9 @@ dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll bootstra
 - 받은 archive는 저장소 아래 임시 디렉터리에서 archive·파일 SHA-256과 크기를 검사한 뒤 최종 디렉터리로 옮긴다. 검사에 실패하거나 끊기면 최종 디렉터리는 생기지 않고, 다음 실행이 남은 임시 디렉터리를 지우고 다시 받는다. macOS는 검사 뒤 quarantine 속성을 지운다. 다른 bootstrap이 저장소를 쓰고 있으면 기다리지 않고 실패한다.
 - 이미 있으면 검사만 하고 받지 않는다. `--offline true`는 받지 않고 저장소만 검사한다. 저장소 파일이 manifest와 다르면 고치지 않고 오류다(그 디렉터리를 지우고 다시 실행한다).
 - `--mirror`: asset 이름(`<Lib>-<버전>-r<revision>-<호스트>.tar.gz`)으로 archive를 찾는 디렉터리. 없으면 manifest URL(저장소 GitHub Releases)에서 받고, 인증 없이 받을 수 없으면(비공개 저장소) `gh release download`가 사용자의 `gh` 로그인으로 받는다.
-- FXC(`D3DCompiler`)는 버전을 고정한 Windows SDK의 버전별 사본 `bin/10.0.22621.0/x64/d3dcompiler_47.dll`을(버전 구분 없는 `Redist` 본은 더 새 SDK가 덮어쓴다, [셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절 2항) SHA-256 검사 뒤 저장소로 복사한다. Apple Metal 도구(`MetalToolchain`, `status: system`)는 받지 않는다(최소 버전만 고정).
+- FXC(`D3DCompiler`)는 버전을 고정한 Windows SDK의 버전별 사본 `bin/10.0.22621.0/x64/d3dcompiler_47.dll`을(버전 구분 없는 `Redist` 본은 더 새 SDK가 덮어쓴다, [셰이더 시스템](../Docs/Design/ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절 2항) SHA-256 검사 뒤 저장소로 복사한다. Apple Metal 도구(`MetalToolchain`, `status: system`)는 받지 않는다(최소 버전만 고정).
 - 오프라인 도구 빌드: `pwsh Engine/Source/ThirdParty/<Lib>/Build/Build.ps1`(Windows x64), `sh Engine/Source/ThirdParty/<Lib>/Build/Build.sh`(macOS arm64)가 manifest `build`의 고정 원본을 받아 SHA-256을 검사하고 CMake·Ninja로 빌드해 archive와 `<asset>.host.json`(manifest `hosts` 항목)을 만든다. CMake·Ninja·Python 3·Visual Studio C++ 도구(macOS는 Xcode)가 필요하다. 수동 실행 workflow `.github/workflows/third-party-tools.yml`이 두 호스트에서 빌드하고, 입력 `publish`가 true면 Release에 올린다.
-- 도구 표와 열기([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 9절): `Developer/ShaderToolTable`은 빌드 대상 호스트의 도구 이름·저장소 디렉터리 이름·파일 SHA-256·role을 생성 TU로 가진다(메타데이터만, 파일을 열지 않는다). `Developer/ShaderToolLoader`(워커 자리)가 저장소 파일의 크기·SHA-256을 표와 대조한 뒤 `DynamicLibrary::Open`으로 절대 경로에서 열고 함수 표(DXC·FXC·SPIRV-Cross·SPIRV-Tools)를 얻는다. 저장소에 없으면 `NotBootstrapped`, 다르면 `DigestMismatch`로 bootstrap을 안내한다. 도구를 여는 EngineTests 시험은 저장소가 없으면 SKIP이다.
+- 도구 표와 열기([셰이더 시스템](../Docs/Design/ShaderSystem/09-ToolLoadingReleaseExclusion.ko.md) 9절): `Developer/ShaderToolTable`은 빌드 대상 호스트의 도구 이름·저장소 디렉터리 이름·파일 SHA-256·role을 생성 TU로 가진다(메타데이터만, 파일을 열지 않는다). `Developer/ShaderToolLoader`(워커 자리)가 저장소 파일의 크기·SHA-256을 표와 대조한 뒤 `DynamicLibrary::Open`으로 절대 경로에서 열고 함수 표(DXC·FXC·SPIRV-Cross·SPIRV-Tools)를 얻는다. 저장소에 없으면 `NotBootstrapped`, 다르면 `DigestMismatch`로 bootstrap을 안내한다. 도구를 여는 EngineTests 시험은 저장소가 없으면 SKIP이다.
 - 정책 검사: 도구 표는 ShaderCompiler·워커·ShaderFormat* 모듈만(`shader-tool-table`), 도구 binary 로드·binary 헤더·`DynamicLibrary::Open`은 워커·ShaderFormat*·ShaderToolLoader만(`shader-tool-binary-load`) 쓴다. Game 타깃(`TargetRules.Type`, 기본 Game, 도구·시험은 Program)은 Release 구성에서 Developer 모듈에 닿거나 d3dcompiler·dxcompiler를 링크하거나 Windows에서 OpenGLGraphics를 링크하면 안 된다(`release-*`). 알려진 예외 세 건(SH2까지 D3D12Graphics의 d3dcompiler와 Sandbox의 Windows OpenGLGraphics, SH5까지 D3D11Graphics의 d3dcompiler)은 `policy` 실행 때 `note: known Release exception until SH2`(또는 `SH5`)로 출력된다.
 
 ## 메타 선언

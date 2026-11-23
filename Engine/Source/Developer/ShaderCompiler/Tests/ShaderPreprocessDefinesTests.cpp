@@ -12,7 +12,7 @@ namespace shader_preprocess_defines_tests_file {
 using namespace rocks::shader;
 using namespace rocks::shader_source_test;
 
-// 전처리 정의 조립(Docs/Design/ShaderSystem.ko.md 11.1절 SC10)과 저장소 Engine/Shaders/Public/
+// 전처리 정의 조립(Docs/Design/ShaderSystem 11.1절 SC10)과 저장소 Engine/Shaders/Public/
 // Platform.rsh 시험이다. 형식 정의는 저장소 파일(Engine/Config/ShaderFormats)을 읽는다(시험은
 // 저장소 루트에서 돈다).
 namespace {
