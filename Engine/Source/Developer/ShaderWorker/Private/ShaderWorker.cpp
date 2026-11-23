@@ -152,6 +152,14 @@ private:
         return written > 0 && control_.WriteLine(StringView(text, static_cast<usize>(written)));
     }
 
+    bool ReplyPair(const char* verb, uint64 first, uint64 second) noexcept {
+        char text[ControlReplyBytes];
+        const int written = snprintf(text, sizeof(text), "%s %llu %llu", verb,
+                                     static_cast<unsigned long long>(first),
+                                     static_cast<unsigned long long>(second));
+        return written > 0 && control_.WriteLine(StringView(text, static_cast<usize>(written)));
+    }
+
     static bool ReadFile(const char* path, Array<uint8>& bytes) noexcept {
         platform::File file;
         uint64 size = 0;
@@ -257,6 +265,10 @@ private:
                 }
 
                 CompileJob(job, *result.Value());
+                // job 하나가 끝날 때마다 진행 줄을 쓴다(SC4 — 결과는 출력 파일로만 받는다).
+                if (!ReplyPair("job", sequence, response.jobs.Size() - 1)) {
+                    return Exit(ShaderWorkerExit::GeneralFailure);
+                }
             }
         }
 

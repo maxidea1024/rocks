@@ -35,7 +35,7 @@ namespace rocks::shader {
 
 // 메시지 형식 버전이다(필드·의미를 바꾸면 올린다 — 다른 버전의 워커는 BadMessageVersion으로
 // 끝난다).
-inline constexpr uint32 ShaderWorkerMessageVersion = 1;
+inline constexpr uint32 ShaderWorkerMessageVersion = 2;
 // 파일 앞 magic(4 byte)과 버전(u32)의 크기다.
 inline constexpr usize ShaderWorkerMagicBytes = 4;
 inline constexpr usize ShaderWorkerPrefixBytes = ShaderWorkerMagicBytes + sizeof(uint32);

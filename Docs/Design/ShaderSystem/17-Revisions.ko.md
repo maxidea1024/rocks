@@ -85,3 +85,4 @@
 - 개정 25(2026-11-23): SH1b 구현 메모(11.1절 — `ShaderCompilerCommon` 분리, 옵션 파서, 키 2–7행 함수와 system 도구 지문 입력, 값 표 도우미, 너겟 위치, 정책 `shader-worker-isolation`).
 - 개정 26(2026-11-23): SH1c 구현 메모(11.1절 — 워커 메시지·종료 코드 보충, 워커·형식 모듈, 제어 줄, DXC 인자, 동반 타깃, system 도구 지문 SH1e로).
 - 개정 27(2026-11-23): 11.1절 SC4에 워커 job 진행 줄 `job <seq> <index>`과 잠정·실제 계수 규칙을 더하고 메시지 버전을 2로 올렸다([진행 보고](../ProgressReporting.ko.md) 10.3절·12절).
+- 개정 28(2026-11-23): SH1d 구현 메모(11.1절 — 관리자와 채널 풀, 조정 스레드, 너겟 결과 처리, 진행 계수, 작업 디렉터리 정리, 형식 snapshot, `shader-compile` 인자·출력, Commandlet 동반 타깃). 문서를 장별 파일로 나눴다(내용 변경 없음, [문서 배치 규칙](../../Guides/DocumentLayout.ko.md)).
