@@ -42,7 +42,71 @@ public static class RuleLoader
             throw new ArgumentException("A target must select at least one module.");
         }
 
-        return new(set.Modules, selected) { Plugins = set.Plugins };
+        return new(set.Modules, WithCompanions(selected, set.Targets)) { Plugins = set.Plugins };
+    }
+
+    /// <summary>
+    /// 동반 타깃(<see cref="TargetRules.CompanionTargets"/>)의 모듈을 더한 타깃이다. 동반 타깃이 없으면 target 그대로다.
+    /// </summary>
+    /// <exception cref="ArgumentException">없는 동반 타깃, 자기 자신·중복, Program이 아니거나 Monolithic이 아니거나 플러그인·동반 타깃을 가진 동반
+    /// 타깃, Monolithic이 아닌 타깃.</exception>
+    public static TargetRules WithCompanions(TargetRules target, IReadOnlyList<TargetRules> targets)
+    {
+        if (target.CompanionTargets.Count == 0)
+        {
+            return target;
+        }
+
+        if (target.LinkType != NativeLinkType.Monolithic)
+        {
+            throw new ArgumentException($"Target '{target.Name}' has companion targets but is not Monolithic.");
+        }
+
+        List<string> modules = [.. target.Modules];
+        HashSet<string> seen = new(StringComparer.Ordinal) { target.Name };
+        foreach (string name in target.CompanionTargets)
+        {
+            if (!seen.Add(name))
+            {
+                throw new ArgumentException($"Target '{target.Name}' lists companion target '{name}' twice or itself.");
+            }
+
+            TargetRules companion = targets.SingleOrDefault(candidate => candidate.Name == name)
+                ?? throw new ArgumentException($"Target '{target.Name}' lists unknown companion target '{name}'.");
+            if (companion.Type != TargetType.Program || companion.LinkType != NativeLinkType.Monolithic || companion.Plugins.Count != 0 ||
+                companion.CompanionTargets.Count != 0)
+            {
+                throw new ArgumentException($"Companion target '{name}' must be a Monolithic Program target without plugins or companions.");
+            }
+
+            modules.AddRange(companion.Modules.Where(module => !modules.Contains(module, StringComparer.OrdinalIgnoreCase)));
+        }
+
+        return new CompanionTarget(target, modules);
+    }
+
+    // 동반 타깃의 모듈을 더한 타깃이다. 모듈 목록 밖은 원래 타깃 그대로다.
+    private sealed class CompanionTarget(TargetRules inner, IReadOnlyList<string> modules) : TargetRules
+    {
+        public override string Name => inner.Name;
+
+        public override IReadOnlyList<string> Modules => modules;
+
+        public override TargetType Type => inner.Type;
+
+        public override IReadOnlyList<Descriptors.PluginReference> Plugins => inner.Plugins;
+
+        public override NativeLinkType LinkType => inner.LinkType;
+
+        public override LogLevel? LogCompiledMinimum => inner.LogCompiledMinimum;
+
+        public override bool CheckPublicHeaders => inner.CheckPublicHeaders;
+
+        public override string? TestExecutable => inner.TestExecutable;
+
+        public override IReadOnlyList<string> TestPrograms => inner.TestPrograms;
+
+        public override IReadOnlyList<string> CompanionTargets => inner.CompanionTargets;
     }
 
     /// <summary>

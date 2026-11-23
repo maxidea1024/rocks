@@ -16,5 +16,5 @@ public sealed class ShaderCompilerCommon : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["ShaderToolTable", "PlatformBase", "Core"];
+    protected override string[] PublicDependencies => ["ShaderToolTable", "Serialization", "DeterministicMath", "PlatformBase", "Core"];
 }

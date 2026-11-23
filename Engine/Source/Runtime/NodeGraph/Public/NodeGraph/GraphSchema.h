@@ -17,6 +17,12 @@ class GraphCommandList;
 class GraphIdSource;
 struct GraphDiagnosticList;
 
+// 붙여넣기 판정이다(9.4절).
+enum class PasteDecision : uint8 {
+    Allow,
+    Deny
+};
+
 // 연결 판정의 처리다(7절, UE ECanCreateConnectionResponse 대응).
 enum class ConnectAction : uint8 {
     Deny,
@@ -111,6 +117,15 @@ public:
     // 도메인 구조 검사다(컴파일 진단과 별개, 빠름). 진단을 out에 더한다. 기본은 없음이다.
     virtual Result<void> Validate(const GraphReadView& view,
                                   GraphDiagnosticList& out) const noexcept;
+
+    // 붙여넣기에서 노드 하나를 받을지다(9.4절 — 도메인 규칙, 예: 붙일 수 없는 출력 노드). 공통 규칙
+    // (종류 버전·속성 schema·문서당 하나)은 붙여넣기가 먼저 본다. 기본은 Allow다.
+    virtual PasteDecision CanPasteNode(const GraphReadView& view,
+                                       const GraphNode& node) const noexcept;
+
+    // 같은 문서 붙여넣기에서 바깥 간선(조각 노드와 밖 노드 사이)을 다시 이을지다. 기본은 거짓(끊기
+    // — UE와 같다)이다.
+    virtual bool AllowExternalEdgeReconnect() const noexcept;
 };
 
 } // namespace rocks::nodegraph

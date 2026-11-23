@@ -33,8 +33,8 @@ struct EngineHostOptions {
 //   루프(프레임마다 sync 지점) → 엔진 정리(엔진 묶음 모듈 종료) → 호스트 묶음 모듈 종료 → trace
 //   정지 → 설치 해제 → LogHost::Stop → 설정 문맥 파괴. LogHost가 멈춘 출력 스레드를
 //   포기했으면(WriterAbandoned) LogHost와 설정 문맥을 파괴하지 않고
-//   context.RequestExitWithoutStaticTeardown()으로 Launch가 정리(크래시 수집 해제) 뒤 _Exit로
-//   끝내게 한다. allocator는 context.DefaultAllocator()다.
+//   context.RequestExitWithoutStaticTeardown()으로 Launch가 정리(크래시 수집 해제) 뒤 정적 소멸
+//   없이(ExitProcessWithoutTeardown) 끝내게 한다. allocator는 context.DefaultAllocator()다.
 // 설치 전 설정 오류는 비상 경로(stderr)로만 나간다. 성공 0, 실패 1, 설정 오류 2다.
 int RunEngineHost(rocks::launch::ApplicationContext& context,
                   const EngineHostOptions& options) noexcept;

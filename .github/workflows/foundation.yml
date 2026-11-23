@@ -101,8 +101,9 @@ jobs:
           $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
           dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable $executable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      # Modular linking (Docs/Design/BuildTargets.ko.md section 3.8 BS8d2, BS8d5): the FoundationTests module closure links as shared libraries
-      # without missing exports, and the tests run through the Modular entry (Docs/Design/ModuleLoader.ko.md section 3.14).
+      # Modular linking (Docs/Design/BuildTargets.ko.md section 3.8 BS8d2, BS8d5, BS8d6): the FoundationTests module closure links as shared
+      # libraries without missing exports, and the tests and the native crash and Launch harness run through the Modular entry
+      # (Docs/Design/ModuleLoader.ko.md section 3.14). The Launch companion targets build next to the output (out/ci-modular-<target>).
       - name: Test FoundationTests as Modular
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=FoundationModular /p:NativeOutput=out/ci-modular /v:minimal
       # Engine layer Modular linking (BS8e): the engine modules link as shared libraries (engine plugin tests excluded until ModuleLoader ML5).

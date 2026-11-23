@@ -273,6 +273,18 @@ ROCKS_PLATFORMBASE_API uint32 CurrentProcessId() noexcept;
 // 수명 계약의 lifeline을 먼저 쓴다). 0은 false다.
 ROCKS_PLATFORMBASE_API bool IsProcessRunning(uint32 processId) noexcept;
 
+// processId 프로세스가 끝나기를 최대 timeoutMilliseconds 기다린다(sleep·polling 없이 OS 대기 —
+// Windows OpenProcess(SYNCHRONIZE) 대기, macOS kqueue EVFILT_PROC·NOTE_EXIT, Android pidfd_open +
+// poll). 끝났거나 이미 없으면 Signaled, 시간이 다하면 TimedOut, 열 수 없거나(권한 등) 이 플랫폼이
+// 지원하지 않으면 Failed다. 0은 Failed다. 끝났지만 회수되지 않은(zombie) POSIX 프로세스도 끝난
+// 것이다. 한계: PID로 여는 대기라 열기 전에 그 PID가 다른 프로세스에 재사용되면 그 프로세스를
+// 기다린다(PID를 받은 직후 부른다 — Docs/Design/ShaderSystem.ko.md 11.1절 SC7).
+//
+// 사용 예(손자 프로세스가 끝났는지):
+//   if (platform::WaitForProcessExit(childPid, 30'000) != platform::WaitResult::Signaled) { ... }
+ROCKS_PLATFORMBASE_API WaitResult WaitForProcessExit(uint32 processId,
+                                                     uint32 timeoutMilliseconds) noexcept;
+
 // 현재 실행 파일의 절대 경로를 UTF-8로 buffer에 쓰고 길이를 bytes에 둔다(NUL 포함하지 않음,
 // buffer에는 NUL도 쓴다). macOS·Android는 link를 푼 경로이고 Windows는 로더가 쓴 경로 그대로다.
 // buffer가 부족하면 Overflow이며 bytes에 필요한 길이(NUL 제외)를 둔다. buffer가 null인데 capacity가

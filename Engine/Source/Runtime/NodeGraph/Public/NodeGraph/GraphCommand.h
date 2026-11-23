@@ -42,7 +42,9 @@ enum class GraphCommandKind : uint8 {
     RemoveGraph,
     RenameGraph,
     MoveNodesToGraph,
-    RemoveRetainedPin
+    RemoveRetainedPin,
+    InsertNode,
+    InsertEdge
 };
 
 // 명령 하나다. 칸은 종류마다 쓰는 것만 본다(GraphCommandList의 함수 주석).
@@ -66,6 +68,8 @@ struct ROCKS_NODEGRAPH_API GraphCommand {
     CommentBox comment;
     Bookmark bookmark;
     bool hasBookmark = false;
+    // Connect가 schema 판정 Make만 받는다(붙여넣기의 바깥 간선 — 바꾸기·변환이면 ConnectDenied).
+    bool requireMake = false;
     NodeEnableState enableState = NodeEnableState::Enabled;
     GraphRole role = GraphRole::Collapsed;
     uint32 domainRole = 0;
@@ -86,8 +90,9 @@ public:
     // graph의 노드들과 닿은 간선·배치를 뺀다.
     Result<void> RemoveNodes(Guid graph, Span<const Guid> nodes) noexcept;
 
-    // graph에 edge를 잇는다(order는 무시하고 mutator가 정한다).
-    Result<void> Connect(Guid graph, const GraphEdge& edge) noexcept;
+    // graph에 edge를 잇는다(order는 무시하고 mutator가 정한다). requireMake면 schema 판정이 Make일
+    // 때만 잇고 바꾸기·변환 판정은 ConnectDenied다(붙여넣기 — 기존 간선을 바꾸지 않는다).
+    Result<void> Connect(Guid graph, const GraphEdge& edge, bool requireMake = false) noexcept;
 
     // graph에서 edge(키만 본다)를 끊는다.
     Result<void> Disconnect(Guid graph, const GraphEdge& edge) noexcept;
@@ -131,6 +136,16 @@ public:
     Result<void> MoveNodesToGraph(Guid source, Span<const Guid> nodes, Guid target) noexcept;
 
     Result<void> RemoveRetainedPin(Guid graph, Guid node, Name key) noexcept;
+
+    // 완성된 노드 데이터(입력 기본값·고아 핀·활성 상태 포함, 등록되지 않은 종류 — 자리 노드 — 도
+    // 된다)를 graph에 넣는다(붙여넣기·template — Docs/Design/NodeGraph.ko.md 9.4절). layout.node는
+    // node.id로 맞춘다. 입력 기본값·고아 핀 목록은 넣을 때 정규 순서로 맞춘다.
+    Result<void> InsertNode(Guid graph, const GraphNode& node, const NodeLayout& layout) noexcept;
+
+    // schema 판정 없이 간선을 넣는다(붙여넣기 — 9.4절). 끝은 현재 핀이나 그 노드의 고아 핀이고, 알
+    // 수 없는 종류의 끝은 핀을 묻지 않는다. ordered 출력 핀이면 끝에 붙이고, 출력 끝이 알 수 없는
+    // 종류나 고아 핀이면 edge.order를 그대로 둔다(순번 규칙이 없다 — 6.3절).
+    Result<void> InsertEdge(Guid graph, const GraphEdge& edge) noexcept;
 
     Span<const GraphCommand> View() const noexcept {
         return commands_.View();
@@ -201,7 +216,11 @@ enum class GraphCommandReason : uint8 {
     // 그래프의 노드·간선 수가 상한(MaxGraphNodes·MaxGraphEdges)에 이르렀다.
     GraphFull,
     // 명령 뒤 전체 불변식 검사(SetFullValidation)가 실패했다 — mutator 결함이다.
-    InvariantBroken
+    InvariantBroken,
+    // 넣는 노드 데이터가 틀렸다(InsertNode): 입력 기본값 핀·고아 핀 키가 겹치거나 None이다, 고아 핀
+    // 방향이 정의되지 않았다, 재경유 노드에 고아 핀이 있다, 목록 끝에 값도 간선도 없는 고아 핀이
+    // 남았다(GI7).
+    NodeDataInvalid
 };
 
 ROCKS_NODEGRAPH_API const char* GraphCommandReasonName(GraphCommandReason reason) noexcept;

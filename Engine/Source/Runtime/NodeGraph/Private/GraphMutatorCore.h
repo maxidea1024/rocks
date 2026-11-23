@@ -120,8 +120,23 @@ private:
     Result<void> AddNode(const GraphCommand& command) noexcept;
     Result<void> RemoveNodes(const GraphCommand& command) noexcept;
     Result<void> Connect(const GraphCommand& command) noexcept;
+    // keptOrder가 있으면 순번을 계산하지 않고 그 값을 쓴다(InsertEdge — 순번 규칙이 없는 출력 끝).
+    // requireMake면 schema 판정이 Make가 아닐 때 ConnectDenied다.
     Result<void> ConnectResolved(Graph& graph, const GraphEdge& edge, const PinDescriptor& fromPin,
-                                 const PinDescriptor& toPin, bool checkSchema) noexcept;
+                                 const PinDescriptor& toPin, bool checkSchema,
+                                 const uint32* keptOrder = nullptr,
+                                 bool requireMake = false) noexcept;
+    // 목록의 InsertNode가 넣은 노드에 값도 간선도 없는 고아 핀이 남았는지 본다(목록 끝 GI7).
+    Result<void> CheckInsertedRetainedPins(Span<const GraphCommand> list) noexcept;
+    Result<void> InsertNode(const GraphCommand& command) noexcept;
+    Result<void> InsertEdge(const GraphCommand& command) noexcept;
+    // InsertEdge 끝 하나의 핀 서술이다(현재 핀, 고아 핀, 알 수 없는 종류). kept는 순번 규칙이 없는
+    // 끝인지다.
+    Result<void> ResolveInsertEnd(const Graph& graph, const GraphNode& node, Name key,
+                                  PinDirection direction, PinList& pins, PinDescriptor& out,
+                                  bool& kept) noexcept;
+    // 노드의 입력 기본값·고아 핀 목록을 정규 순서로 맞춘다. 키가 겹치면 거짓이다.
+    Result<bool> SortNodeLists(GraphNode& node) noexcept;
     Result<void> InsertConversion(Graph& graph, const GraphEdge& edge,
                                   Name conversionType) noexcept;
     Result<void> Disconnect(const GraphCommand& command) noexcept;

@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-23, 개정 25(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-23, 개정 26(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -747,6 +747,16 @@ SH1 출력은 SH2 정규화(재배치·리플렉션·GLES 재작성) 전의 형�
 - 정책: `shader-tool-table` 허용에 `Developer/ShaderCompilerCommon`·`Developer/ShaderWorker`, `shader-tool-binary-load` 허용에 `Developer/ShaderWorker`를 더했다. `shader-worker-isolation`은 워커 쪽(`Programs/ShaderCompileWorker`·`Developer/ShaderWorker`·`Developer/ShaderFormat*`)의 규칙이 `ShaderCompiler`·`AssetNugget`을 이름으로 참조하거나 소스가 `<ShaderCompiler/…>`·`<AssetNugget/…>`를 include하면 실패다(`ShaderCompilerCommon`은 허용). 지금 `ShaderFormatVulkan`(Graphics·ShaderToolLoader·SpirvReflect 의존)은 통과한다.
 - 한계: 리플렉션 문맥을 호출자가 준다(관리자 SH1d가 세션마다 한 벌 만든다). SPIRV-Reflect 항목(2행 끝)은 SH2에서 더한다.
 
+**SH1c 구현 메모(개정 26, 2026-11-23).** SC4–SC7·SC14와 SC1의 워커 쪽 모듈, `D3D12_SM6`·`VULKAN_SM5` 경로를 구현했다.
+
+- 모듈: `ShaderCompilerCommon`에 `ShaderWorkerProtocol`(메시지·`ShaderWorkerExit`·도구 표 SHA·요청 머리)과 `ShaderFormatBackend`(+ 프로필 이름·job 실패 도우미). 새 `ShaderFormatD3D`(`D3D12_SM6` — DXC DXIL, container hash가 0이거나 0x02×16이면 ToolError)와 `ShaderFormatVulkan`의 `VulkanShaderFormatBackend`(DXC SPIR-V + `spirv-val`). DXC 호출은 SH1a의 `ShaderToolLoader::CompileWithDxc`를 쓴다. 워커 본체 `ShaderWorker`와 프로그램 `Programs/ShaderCompileWorker`(Launch — 크래시는 `<work-dir>/Crashes`에 프로세스 안 덤프, OS·CRT 대화상자 억제). 채널은 `ShaderCompiler`의 `ShaderWorkerChannel`. `WaitForProcessExit`를 PlatformBase로 옮겼다(Windows `OpenProcess(SYNCHRONIZE)` 대기, macOS `kqueue` `NOTE_EXIT`, Android `pidfd_open` + `poll`; TestSupport 사본은 지웠다).
+- 메시지: 최상위 Record 하나, 형식·job·결과 목록은 RecordList, 작은 튜플 목록(처리기 버전·hook 인자·값·도구 확인)은 Bytes 값 안의 Archive다. 옵션은 `ShaderWorkerJobOptions`(필드 값)로 싣는다 — `ShaderCompileOptions`는 메인 프로세스 모듈이라 워커가 볼 수 없다(격리 정책).
+- 버전 대조(SC6 보충): 결정적 수학 버전 불일치도 `BadToolchain`이다. 처리기 버전 표 항목이 같은 요청의 형식 정의 `processor.version`과 다르면 `BadInputFile`, 워커 처리기 버전과 다르면 `BadFormatVersion`이다. 처리기가 아직 없는 형식(Metal·OpenGL)과 FXC 경로(`D3D11_SM5`)는 버전을 대조하지 않고 그 job이 `UnsupportedCapability`다(SH1e).
+- 제어 줄: 워커는 `done <seq>`·`held <seq>`·`child <pid>`만 쓴다. Hold는 입력 pipe의 다음 줄(내용 무관)로 풀린다. 채널은 모르는 줄을 받으면 워커를 끝내고 `ChannelFailed`(워커를 다시 빌드하라)다. 워커가 끝난 묶음 뒤에는 다음 묶음에서 워커를 다시 띄운다.
+- DXC 인자: `-E`·`-T <단계>_<모델>`·`-HV 2021|2018`·`-O0`–`-O3`·`-Zpr`·`-WX`, Vulkan은 `-spirv -fspv-target-env=vulkan1.1`과 형식 정의가 켜면 `-fvk-use-dx-position-w`.
+- 동반 타깃: `TargetRules.CompanionTargets`를 Rocks.Build에 더했다(`RuleLoader.WithCompanions`가 동반 Program·Monolithic 타깃의 모듈을 같은 빌드에 더한다 — 동반 타깃의 플러그인·동반 타깃, Modular 타깃은 거부). 지금은 EngineTests만 `ShaderCompileWorker`를 동반한다. Modular 시험 runner(EngineModular)는 동반을 받지 않으므로 워커 시험이 SKIP이다. Commandlet·Sandbox 동반은 그 사용처(SH1d `shader-compile`, SH2)와 함께 더한다.
+- 미룬 것: Apple system 도구 지문(`xcrun --find`·`metal -v`)은 Metal 경로와 함께 SH1e — 지금 도구 조회는 system 도구 이름만 `found = false`로 돌려준다. 다른 PID 작업 디렉터리 정리·워커 풀·묶음 크기는 SH1d.
+
 ## 12. P6a·P14·P6b 형식 정의·셰이더 타입·TargetProfile·쿠킹 매니페스트
 
 엔진 컴파일 프로필은 형식 정의와 함께 P6a(12.1절)가, TargetProfile 필드는 A4가 쓰는 프로필 파일에 P6b(12.3절)가 더한다.
@@ -991,3 +1001,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 16절: SH1 행에 하위 단계 참조.
 - 개정 24(2026-11-23): SH1a 구현 메모(11.1절 — 구조, 상대 include 접기·`Shared` 범위·재정의 오류·`true`·출력 공백과 `#line` 기준·한도 묶음·`ROCKS_SPIRV`, S7 도구 `CompileWithDxc`와 시험 위치, 대소문자 한계)와 측정 S7 결과(5.4절: DXIL·SPIR-V byte 동일, 오류 위치 동일).
 - 개정 25(2026-11-23): SH1b 구현 메모(11.1절 — `ShaderCompilerCommon` 분리, 옵션 파서, 키 2–7행 함수와 system 도구 지문 입력, 값 표 도우미, 너겟 위치, 정책 `shader-worker-isolation`).
+- 개정 26(2026-11-23): SH1c 구현 메모(11.1절 — 워커 메시지·종료 코드 보충, 워커·형식 모듈, 제어 줄, DXC 인자, 동반 타깃, system 도구 지문 SH1e로).

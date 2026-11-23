@@ -63,6 +63,17 @@ Result<void> GraphSchema::Validate(const GraphReadView& view,
     return Result<void>::Success();
 }
 
+PasteDecision GraphSchema::CanPasteNode(const GraphReadView& view,
+                                        const GraphNode& node) const noexcept {
+    static_cast<void>(view);
+    static_cast<void>(node);
+    return PasteDecision::Allow;
+}
+
+bool GraphSchema::AllowExternalEdgeReconnect() const noexcept {
+    return false;
+}
+
 Result<void> PinList::Add(const PinDescriptor& pin) noexcept {
     if (!pin.key.IsValid() || pin.key.IsNone()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

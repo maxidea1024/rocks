@@ -249,6 +249,11 @@ namespace Rocks.Build.Cli
                     "not supported yet — BuildTargets BS8d).");
             }
 
+            // 시험 동반 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)은 출력·잠금을 만들기 전에 확인한다. 하니스 전에 빌드한다.
+            IReadOnlyList<(string Target, string Executable)> testPrograms = args[0] == "test"
+                ? TestPrograms(rules, name => RuleLoader.Load(rulesPath, name, context).Target)
+                : [];
+
             if (args[0] == "sdk" && rules.Target.LogCompiledMinimum is not null)
             {
                 throw new ArgumentException($"Target {targetName}: LogCompiledMinimum cannot be overridden for an installed SDK export " +
@@ -522,16 +527,6 @@ namespace Rocks.Build.Cli
                         return 1;
                     }
 
-                    // Modular 시험 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5)은 native 시험 실행 파일만 돈다. host 검사(self·native·meta)는
-                    // 링크 방식과 무관한 도구 검사이거나 Monolithic 시험 프로그램(Launch 시험 프로그램·크래시 probe 모듈 이름)을 보는 하니스라
-                    // Monolithic 시험 타깃이 돈다. Modular 크래시·Launch 하니스는 후속(BS8d6)이다.
-                    if (rules.Target.LinkType == NativeLinkType.Modular)
-                    {
-                        Console.WriteLine("Modular: native tests only; host self, native harness, and meta checks run with the Monolithic test target.");
-                        var modularCompleted = await evidence.FinishAsync();
-                        return modularCompleted.Status == "PASS" ? 0 : 1;
-                    }
-
                     // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
                     // 검사(native 컴파일 시험·생성 헤더 검증)는 Monolithic 값(빈 값)을 받는다. 그 검사는 타깃 폐포 밖 모듈의 헤더도 경로로 include하므로
                     // (예: Foundation의 meta 시험이 RenderBase 헤더를 쓴다) 저장소의 모든 모듈 규칙에서 만든다(BS8e).
@@ -550,7 +545,44 @@ namespace Rocks.Build.Cli
                         checks[1] = [.. checks[1], "--asan"];
                     }
 
-                    if (plan.Generated.Count != 0)
+                    // Modular 시험 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5·BS8d6)은 native 시험 실행 파일과 native 하니스(크래시·Launch)를
+                    // 돈다. host self·meta 검사는 링크 방식과 무관한 도구 검사라 Monolithic 시험 타깃이 돈다. 하니스는 호스트 공유 라이브러리
+                    // (크래시 probe 함수가 그 안에 있다 — cdb 모듈 이름)를 받는다.
+                    bool modular = rules.Target.LinkType == NativeLinkType.Modular;
+                    if (modular)
+                    {
+                        Console.WriteLine("Modular: native tests and native harness; host self and meta checks run with the Monolithic test target.");
+                        checks.RemoveAt(0);
+                        // 공유 라이브러리 이름은 모듈 규칙의 철자를 쓴다(타깃이 적은 이름은 대소문자가 다를 수 있다).
+                        string hostModule = rules.Modules.First(module =>
+                            string.Equals(module.Name, rules.Target.TestExecutable, StringComparison.OrdinalIgnoreCase)).Name;
+                        checks[0] = [.. checks[0], "--host-module", Path.Combine(output, "bin",
+                            LinkTypes.SharedLibraryFileName(rules.Target.Name, hostModule, toolchain.Platform, configuration))];
+                    }
+
+                    // 시험 동반 타깃을 같은 구성·도구 체인·빌드 방식으로 빌드하고 그 실행 파일(동반 빌드 보고서의 모듈 출력)을 하니스에 넘긴다.
+                    foreach ((string program, string programExecutable) in testPrograms)
+                    {
+                        string programOutput = TestProgramOutput(options.ContainsKey("output") ? output : null, root, platformName, program, configuration);
+                        string[] programArguments = ["build", .. options.Where(pair => pair.Key != "target" && pair.Key != "output")
+                            .SelectMany(pair => new[] { "--" + pair.Key, pair.Value }), "--target", program, "--output", programOutput];
+                        var programStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        int programExit = await RunAsync(programArguments, cancellationToken);
+                        evidence.RecordStep("test-program", programArguments, programExit, System.Diagnostics.Stopwatch.GetElapsedTime(programStart));
+                        if (programExit != 0)
+                        {
+                            await evidence.FinishAsync($"Test program target {program} failed to build.");
+                            return 1;
+                        }
+
+                        var programReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(programOutput, "action-report.json")),
+                            JsonOptions)!;
+                        string programPath = programReport.ModuleOutputs[programExecutable];
+                        int nativeCheck = checks.FindIndex(check => check[0] == "native");
+                        checks[nativeCheck] = [.. checks[nativeCheck], "--program", programExecutable + "=" + programPath];
+                    }
+
+                    if (plan.Generated.Count != 0 && !modular)
                     {
                         // 생성 헤더 검증 컴파일은 Core 헤더를 include하므로 이 구성·대상 OS의 매크로가 필요하다.
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"),
@@ -677,6 +709,42 @@ namespace Rocks.Build.Cli
 
             return values;
         }
+
+        // 시험 동반 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)의 (타깃, 실행 파일 모듈)이다. 동반 타깃은 Program이고 실행 파일 모듈 하나만
+        // 고르며 시험 실행 파일·동반 타깃이 없어야 한다(재귀를 막는다). 이름은 대소문자까지 구별하고 중복은 오류다.
+        internal static IReadOnlyList<(string Target, string Executable)> TestPrograms(LoadedRules rules, Func<string, TargetRules> load)
+        {
+            var programs = new List<(string, string)>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string name in rules.Target.TestPrograms)
+            {
+                if (!seen.Add(name))
+                {
+                    throw new ArgumentException($"Target {rules.Target.Name}: test program target {name} is listed more than once.");
+                }
+
+                TargetRules program = load(name);
+                NativeModuleInput[] executables = [.. program.Modules.Select(module => rules.Modules.FirstOrDefault(value =>
+                    string.Equals(value.Name, module, StringComparison.OrdinalIgnoreCase))).OfType<NativeModuleInput>()
+                    .Where(module => module.Kind == NativeModuleKind.Executable)];
+                if (program.Type != TargetType.Program || program.TestExecutable is not null || program.TestPrograms.Count != 0 ||
+                    program.Modules.Count != 1 || executables.Length != 1)
+                {
+                    throw new ArgumentException($"Target {rules.Target.Name}: test program target {name} must be a Program target with one executable " +
+                        "module and no test executable or test programs of its own.");
+                }
+
+                programs.Add((program.Name, executables[0].Name));
+            }
+
+            return programs;
+        }
+
+        // 시험 동반 타깃의 출력 디렉터리다(BS8d6). 기본은 그 타깃의 기본 출력이고, test에 --output을 주면 그 경로 뒤에 "-<타깃 소문자>"를 붙인
+        // 형제 디렉터리다(시험 타깃 출력과 겹치지 않고 같은 out 아래에 있다 — CI가 /p:NativeOutput으로 출력을 정한다).
+        internal static string TestProgramOutput(string? customOutput, string root, string platformName, string program, NativeConfiguration configuration) =>
+            customOutput is null ? EnginePlanning.DefaultOutput(root, platformName, program, configuration)
+                : customOutput + "-" + program.ToLowerInvariant();
 
         internal static void Print(NativeBuildResult result)
         {

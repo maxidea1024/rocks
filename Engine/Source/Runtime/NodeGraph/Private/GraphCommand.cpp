@@ -58,7 +58,8 @@ Result<void> GraphCommandList::RemoveNodes(Guid graph, Span<const Guid> nodes) n
     return Result<void>::Success();
 }
 
-Result<void> GraphCommandList::Connect(Guid graph, const GraphEdge& edge) noexcept {
+Result<void> GraphCommandList::Connect(Guid graph, const GraphEdge& edge,
+                                       bool requireMake) noexcept {
     auto command = Push(GraphCommandKind::Connect, graph);
     if (!command) {
         return Result<void>::Failure(command.Error());
@@ -66,6 +67,7 @@ Result<void> GraphCommandList::Connect(Guid graph, const GraphEdge& edge) noexce
 
     command.Value()->edge = edge;
     command.Value()->edge.order = 0;
+    command.Value()->requireMake = requireMake;
     return Result<void>::Success();
 }
 
@@ -284,6 +286,36 @@ Result<void> GraphCommandList::RemoveRetainedPin(Guid graph, Guid node, Name key
     return Result<void>::Success();
 }
 
+Result<void> GraphCommandList::InsertNode(Guid graph, const GraphNode& node,
+                                          const NodeLayout& layout) noexcept {
+    auto command = Push(GraphCommandKind::InsertNode, graph);
+    if (!command) {
+        return Result<void>::Failure(command.Error());
+    }
+
+    command.Value()->node = node.id;
+    if (auto cloned = CloneGraphNode(node, command.Value()->nodeData); !cloned) {
+        return CommandListDropLast(commands_, cloned.Error());
+    }
+
+    if (auto cloned = CloneNodeLayout(layout, command.Value()->layout); !cloned) {
+        return CommandListDropLast(commands_, cloned.Error());
+    }
+
+    command.Value()->layout.node = node.id;
+    return Result<void>::Success();
+}
+
+Result<void> GraphCommandList::InsertEdge(Guid graph, const GraphEdge& edge) noexcept {
+    auto command = Push(GraphCommandKind::InsertEdge, graph);
+    if (!command) {
+        return Result<void>::Failure(command.Error());
+    }
+
+    command.Value()->edge = edge;
+    return Result<void>::Success();
+}
+
 const char* GraphCommandReasonName(GraphCommandReason reason) noexcept {
     switch (reason) {
     case GraphCommandReason::None:
@@ -366,6 +398,8 @@ const char* GraphCommandReasonName(GraphCommandReason reason) noexcept {
         return "GraphFull";
     case GraphCommandReason::InvariantBroken:
         return "InvariantBroken";
+    case GraphCommandReason::NodeDataInvalid:
+        return "NodeDataInvalid";
     }
 
     return "Unknown";

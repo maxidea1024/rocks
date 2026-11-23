@@ -1,6 +1,7 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/HostFailure.h>
 #include <Core/App/ProcessCommandLine.h>
+#include <Core/Module/ModuleEntry.h>
 #include <Launch/EntryPoint.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -552,9 +553,10 @@ using rocks::Span;
 using rocks::StringView;
 namespace launch = rocks::launch;
 
-// 층마다 실행 파일 이름이 다르다(FoundationTests.Build.cs의 FOUNDATION_TEST_RUNNER_LAYER: 0 Core,
-// 1 Foundation, 2 Engine). 크래시 폴더 이름과 메타데이터 "program"이다.
-constexpr const char* RunnerNames[] = {"CoreFoundationTests", "FoundationTests", "EngineTests"};
+// 실행 파일 이름이다. 시험 실행 파일 모듈 이름이 실행 파일 이름이므로 빌드가 정의하는 모듈 이름을
+// 쓴다(같은 소스가 CoreFoundationTests·FoundationTests·EngineTests·EngineModularTests가 된다).
+// 크래시 폴더 이름과 메타데이터 "program"이고, 하니스는 실행 파일 이름으로 찾는다.
+constexpr const char RunnerName[] = ROCKS_MODULE_NAME_TEXT;
 
 bool Is(StringView argument, const char* text) noexcept {
     return argument == StringView(text);
@@ -622,7 +624,7 @@ int RunRunner(launch::ApplicationContext& context) noexcept {
 
 const launch::ApplicationDescription& Describe() noexcept {
     static constexpr launch::ApplicationDescription Description{
-        .name = RunnerNames[FOUNDATION_TEST_RUNNER_LAYER],
+        .name = RunnerName,
         .kind = launch::ApplicationKind::TestRunner,
         .configure = &ConfigureRunner,
         .run = &RunRunner};

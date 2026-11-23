@@ -1181,6 +1181,28 @@ bool IsProcessRunning(uint32 processId) noexcept {
     return result == WAIT_TIMEOUT;
 }
 
+WaitResult WaitForProcessExit(uint32 processId, uint32 timeoutMilliseconds) noexcept {
+    if (processId == 0) {
+        return WaitResult::Failed;
+    }
+
+    const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processId);
+    if (process == nullptr) {
+        // 없는 PID다(이미 끝나 회수됐다).
+        return GetLastError() == ERROR_INVALID_PARAMETER ? WaitResult::Signaled
+                                                         : WaitResult::Failed;
+    }
+
+    const DWORD waited = WaitForSingleObject(
+        process, timeoutMilliseconds == InfiniteTimeout ? INFINITE : timeoutMilliseconds);
+    CloseHandle(process);
+    if (waited == WAIT_OBJECT_0) {
+        return WaitResult::Signaled;
+    }
+
+    return waited == WAIT_TIMEOUT ? WaitResult::TimedOut : WaitResult::Failed;
+}
+
 FileStatus GetExecutablePath(char* buffer, usize capacity, usize& bytes) noexcept {
     if (buffer == nullptr && capacity != 0) {
         return {FileCode::InvalidArgument, 0};

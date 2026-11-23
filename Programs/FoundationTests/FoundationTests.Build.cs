@@ -24,7 +24,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets.ko.md section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -32,7 +32,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "Material", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "Material", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine) and the MeshTools MikkTSpace reference
     // comparison test. Headers enter only through this executable's Private includes (adapter approach) and must produce zero warnings under the engine
@@ -151,8 +151,7 @@ public abstract class TestsModule : ModuleRules
                 .. (Layer == TestLayer.Engine ? [context.PathInRoot("Engine/Source/Runtime")] : Array.Empty<string>()),
                 .. (PluginTests ? PluginTestModules.Select(module => context.PathInRoot(PluginSourceDirectory(module))).ToArray() : Array.Empty<string>()),
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
-            // FOUNDATION_TEST_RUNNER_LAYER picks the runner name in Private/Main.cpp (0 Core, 1 Foundation, 2 Engine).
-            PrivateDefines = ["ROCKS_TESTING=1", $"FOUNDATION_TEST_RUNNER_LAYER={(int)Layer}",
+            PrivateDefines = ["ROCKS_TESTING=1",
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerDefines(context, EngineThirdPartyHeaders) : [])],
             // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader.ko.md section 3.8): it is linked into this
             // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.

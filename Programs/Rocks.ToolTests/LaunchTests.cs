@@ -97,7 +97,8 @@ internal static partial class LaunchTests
             return windows ? unchecked((uint)exitCode) == RocksFatal : exitCode == PosixAbortExitCode;
         }
 
-        string Program(string name) => Path.Combine(directory, name + (windows ? ".exe" : ""));
+        // 넘겨받은 실행 파일(Modular 시험 동반 타깃 — Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)이 먼저이고, 없으면 시험 실행 파일 옆이다.
+        string Program(string name) => options.Programs.TryGetValue(name, out string? path) ? path : Path.Combine(directory, name + (windows ? ".exe" : ""));
         string console = Program("LaunchProbe");
         string windowed = Program("LaunchWindowedProbe");
         string embedded = Program("LaunchEmbeddedHost");
@@ -465,6 +466,12 @@ internal static partial class LaunchTests
             await VerifyArguments(windowed, "LaunchWindowedProbe");
             Verify.Equal(42, (await Run(windowed, "exit", "42")).ExitCode, "windowed exit 42");
         });
+
+        // 내장 진입은 Modular를 지원하지 않아 Modular 하니스에는 그 프로그램이 없다(Docs/Design/ModuleLoader.ko.md 3.14절, BuildTargets BS8d6).
+        if (options.Modular)
+        {
+            return;
+        }
 
         // 내장 호스트: Rocks는 호스트의 처리되지 않은 예외 filter를 바꾸지 않고, 크래시를 보고(CrashInfo.json, 덤프 없음)한 뒤 호스트
         // filter로 넘긴다. 프로세스 종료는 호스트가 정한다(77). Fatal도 같은 예외로 호스트에 간다.
