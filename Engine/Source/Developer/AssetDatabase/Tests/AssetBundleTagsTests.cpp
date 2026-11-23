@@ -120,7 +120,7 @@ bool HasMember(const AssetTagSink& sink, uint64 id) noexcept {
 
 // 실효 bundle: portrait {UI, Game}, levels {Game}, slot.icon {UI,Game}∩{UI} = {UI}, slot.any {UI},
 // weights 키 {Audio}, extra 내용 icon {UI,Game}∩{Game} = {Game}·any {Game}. plain(지정 없음)·
-// editorExtra·editorSoft(EditorOnly 경로)는 태그가 없다. 태그는 10개다.
+// editorExtra·editorSoft(EditorOnly 경로)는 태그가 없다. 태그는 9개다.
 TEST(AssetBundleTags_EffectiveBundles) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -138,11 +138,11 @@ TEST(AssetBundleTags_EffectiveBundles) {
     CHECK(HasTag(sink, "Game", ExtraAny));
     CHECK(!HasMember(sink, PlainId) && !HasMember(sink, EditorIcon) &&
           !HasMember(sink, EditorSoft));
-    CHECK(sink.Tags().Size() == 10);
+    CHECK(sink.Tags().Size() == 9);
 
     // 같은 쌍은 합친다(두 번 모아도 그대로).
     REQUIRE(scene.Collect(env.allocator, sink));
-    CHECK(sink.Tags().Size() == 10);
+    CHECK(sink.Tags().Size() == 9);
 }
 
 // null 참조는 태그가 없고, 교집합이 비면 태그가 없다(icon을 비우고 바깥 slot 목록과 겹치지 않는
@@ -161,7 +161,7 @@ TEST(AssetBundleTags_NullAndSkippedTypes) {
     AssetTagSink sink(env.allocator);
     REQUIRE(scene.Collect(env.allocator, sink));
     CHECK(!HasMember(sink, PortraitId) && !HasMember(sink, ExtraAny) && HasTag(sink, "UI", IconId));
-    CHECK(sink.Tags().Size() == 7);
+    CHECK(sink.Tags().Size() == 6);
 
     auto other = NewPackage(registry, registry.OwnerAccess(), FixedId(2), PackageKind::Editor);
     REQUIRE(other);
@@ -195,7 +195,7 @@ TEST(AssetBundleTags_Failures) {
         auto collected = scene.Collect(failing, sink);
         if (collected) {
             succeeded = true;
-            CHECK(sink.Tags().Size() == 10);
+            CHECK(sink.Tags().Size() == 9);
         } else {
             CHECK(collected.Error() == ErrorCode::OutOfMemory);
         }

@@ -80,7 +80,9 @@ Result<void> Visitor::VisitField(const SchemaScope& scope, usize index, uint32 f
     }
 
     if (detail::HasNoJsonForm(*slot.field)) {
-        return Result<void>::Failure(ErrorCode::Unsupported);
+        return context.Options().skipFieldsWithoutText
+                   ? Result<void>::Success()
+                   : Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     if (!path.Push(slot.field->id)) {

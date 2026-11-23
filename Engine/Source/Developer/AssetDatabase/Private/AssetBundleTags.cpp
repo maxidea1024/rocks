@@ -23,29 +23,65 @@ struct BundleFrame {
     uint32 open = 0;
 };
 
-// 스키마가 bundle 목록이나 InstancedStruct(내용 struct가 자기 목록을 가질 수 있다)를 담을 수
-// 있는지다(대상 struct 멤버로 내려간다). 아니면 순회하지 않는다 — 저장마다 모든 에셋을 순회하지
-// 않는다. fieldStruct는 schemaIndex 멤버의 대상 struct view를 준다.
-template <class TFieldStruct>
-bool MayCarryBundles(const TypeSchema& schema, const TFieldStruct& fieldStruct) noexcept {
+// 필드가 스스로 bundle 대상인지다(목록이 있거나 InstancedStruct — 내용 struct가 자기 목록을 가질
+// 수 있다).
+bool FieldCarriesBundles(const FieldSchema& field) noexcept {
+    return field.assetBundles.Size() != 0 ||
+           FieldTargetType(field).kind == ValueKind::InstancedStruct;
+}
+
+// view(struct)의 멤버가 bundle 대상을 담을 수 있는지다(대상 struct 멤버로 내려간다). knownFalse는
+// 거짓으로 판정한 struct id다 — 같은 struct를 여러 필드가 써도 하위 트리를 한 번만 본다(A4e2b 리뷰
+// 권장). 오류: 할당 실패.
+Result<bool> StructMayCarryBundles(StructView view, Array<TypeId>& knownFalse) noexcept {
+    const TypeSchema& schema = view.Schema();
+    for (TypeId known : knownFalse) {
+        if (known == schema.id) {
+            return Result<bool>::Success(false);
+        }
+    }
+
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const FieldSchema& field = schema.fields[index];
-        const ValueKind target = FieldTargetType(field).kind;
-        if (field.assetBundles.Size() != 0 || target == ValueKind::InstancedStruct) {
-            return true;
+        if (FieldCarriesBundles(field)) {
+            return Result<bool>::Success(true);
         }
 
-        if (target == ValueKind::Struct) {
-            const StructView view = fieldStruct(index);
-            if (MayCarryBundles(view.Schema(), [&view](usize member) noexcept {
-                    return view.FieldStruct(member);
-                })) {
-                return true;
+        if (FieldTargetType(field).kind == ValueKind::Struct) {
+            auto inner = StructMayCarryBundles(view.FieldStruct(index), knownFalse);
+            if (!inner || inner.Value()) {
+                return inner;
             }
         }
     }
 
-    return false;
+    if (auto pushed = knownFalse.TryPushBack(schema.id); !pushed) {
+        return Result<bool>::Failure(pushed.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
+// 대표 에셋 타입이 bundle 대상을 담을 수 있는지다. 아니면 순회하지 않는다 — 저장마다 모든 에셋을
+// 순회하지 않는다. 오류: 할당 실패.
+Result<bool> TypeMayCarryBundles(const TypeLease& lease, Allocator& allocator) noexcept {
+    Array<TypeId> knownFalse(allocator);
+    const TypeSchema& schema = lease.Schema();
+    for (usize index = 0; index < schema.fields.Size(); ++index) {
+        const FieldSchema& field = schema.fields[index];
+        if (FieldCarriesBundles(field)) {
+            return Result<bool>::Success(true);
+        }
+
+        if (FieldTargetType(field).kind == ValueKind::Struct) {
+            auto inner = StructMayCarryBundles(lease.FieldStruct(index), knownFalse);
+            if (!inner || inner.Value()) {
+                return inner;
+            }
+        }
+    }
+
+    return Result<bool>::Success(false);
 }
 
 // list(쉼표 목록)에 name이 있는지다.
@@ -244,16 +280,18 @@ Result<void> CollectAssetBundleTags(ObjectRegistry& registry, const ObjectAccess
         return Result<void>::Failure(type.Error());
     }
 
-    const TypeLease& lease = type.Value();
-    if (!MayCarryBundles(lease.Schema(),
-                         [&lease](usize index) noexcept { return lease.FieldStruct(index); })) {
-        return Result<void>::Success();
+    auto carries = TypeMayCarryBundles(type.Value(), allocator);
+    if (!carries || !carries.Value()) {
+        return carries ? Result<void>::Success() : Result<void>::Failure(carries.Error());
     }
 
     BundleVisitor visitor(allocator, sink);
     reflection_text::TextCodecOptions options;
-    // 저장되는 값만 본다(Report는 Transient만 뺀다 — EditorOnly는 수집기가 경로로 거른다).
+    // 저장되는 값만 본다(Report는 Transient만 뺀다 — EditorOnly는 수집기가 경로로 거른다). 텍스트
+    // 꼴이 없는 필드(접근기 없는 Opaque — 리플렉션 소프트 참조를 담지 않는다)는 건너뛴다: 그런
+    // 필드가 있는 에셋도 저장된다(A4e2b 리뷰 필수).
     options.use = reflection_text::TextUse::Report;
+    options.skipFieldsWithoutText = true;
     const auto target = reflection_text::AssignmentTarget::Live(registry, access, object);
     return reflection_text::VisitValues(target, visitor, options);
 }

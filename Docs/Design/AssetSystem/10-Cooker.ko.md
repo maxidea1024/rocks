@@ -200,7 +200,8 @@
     - **쿠킹 패키지 안 EditorOnly 객체**: 쿠킹 패키지 쓰기는 EditorOnly 클래스 객체(상속 포함)를 저장 불가 객체처럼 뺀다 — export 집합에서 그 부분 트리를 빼고, 가리키는 참조는 null + `ExternalReference` 진단(value 5 = EditorOnly 클래스 — 쓰기 실패가 아니라 기록 진단, Transient 클래스 참조와 같다)이다. UE `SavePackage`가 쿠킹 때 편집기 전용 객체를 export·import에서 빼고 그 참조를 null로 쓰는 것과 같다(쿠킹 실패가 아님). UE의 `HasNonEditorOnlyReferences()`(편집기 전용 객체를 남기는 선택 장치) 대응은 없다(차이 — 요구가 생기면 클래스 표지로 더한다). 저장 정책에 저장 불가 마스크를 두고(기본 = Transient·Deprecated, 쿠킹 쓰기 = + EditorOnly) 에디터 패키지 저장은 그대로다.
 - A4e2b 상태: **구현(빌드·시험 실행 대기 — 사용자 지시로 빌드는 화면 마일스톤 뒤 한 번에)** — 대조표 14.1.77절, coverage 14.1.78절(빌드 때 잰다). 구현에서 정한 것:
   - 수집기는 AssetDatabase `AssetBundleTags.h`의 `CollectAssetBundleTags(registry, access, object, allocator, sink)`다. 공용 순회의 이벤트로 경로 필드 단계(목록·EditorOnly 표지·열린 묶음 수)를 쌓고, 소프트 참조 값·Map 소프트 키마다 단계 목록의 교집합으로 태그를 만든다. 단계는 묶음이 모두 닫히거나 단일 값이 끝나면 내린다.
-  - 사전 판정: 대표 타입(과 대상 struct 멤버, 재귀)이 bundle 목록도 InstancedStruct도 없으면 순회하지 않는다(저장마다 모든 에셋을 순회하지 않는다 — 큰 메시 에셋 저장 비용).
+  - 사전 판정: 대표 타입(과 대상 struct 멤버, 재귀)이 bundle 목록도 InstancedStruct도 없으면 순회하지 않는다(저장마다 모든 에셋을 순회하지 않는다 — 큰 메시 에셋 저장 비용). 거짓으로 판정한 struct id는 기억해 같은 struct를 다시 보지 않는다(리뷰 권장).
+  - 순회 옵션 `skipFieldsWithoutText`(ReflectionText `TextCodecOptions`)로 텍스트 꼴이 없는 필드(접근기 없는 Opaque)를 건너뛴다 — 그런 필드가 있는 에셋도 저장된다(리뷰 필수 — 처음 구현은 순회가 Unsupported로 멈춰 그 에셋 저장이 실패했다). 텍스트 출력·너겟 키 기록은 이 옵션을 쓰지 않는다.
   - 공용 순회의 필드 이벤트는 `Field(name, field, flags)`로 바뀌었다(필드 스키마와 유효 플래그 — 바깥 EditorOnly 전파 포함). 사용처는 너겟 키 기록(`NuggetReflected` — 이름만 쓴다)과 순회 시험이다.
   - 태그 키 접두는 AssetRuntime `PackageTags.h`의 `AssetBundleTagPrefix`로 옮겼다(쓰는 쪽 AssetDatabase와 읽는 쪽 AssetCooker가 같이 쓴다 — 전의 `CookBundleTagPrefix`는 없앴다).
   - 쿠커의 EditorOnly 판정은 NeverCook 판정(`IsNever`)에 합쳤다 — NeverCook이 쓰이는 모든 자리(뿌리·폐포·역방향 Build·기존 매니페스트 항목)가 같은 규칙이다. 대표 타입 0(대표 없음)은 판정하지 않는다.

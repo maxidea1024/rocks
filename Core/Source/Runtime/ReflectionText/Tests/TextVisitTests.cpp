@@ -401,7 +401,8 @@ constexpr StringView OpaqueVisitHolderName = "OpaqueVisitHolder";
 
 } // namespace
 
-// 접근기 없는 Opaque 필드는 Unsupported다(ExportJson과 같다).
+// 접근기 없는 Opaque 필드는 Unsupported다(ExportJson과 같다). skipFieldsWithoutText면 그 필드를
+// 건너뛰고 끝까지 돈다(에셋 A4e2b bundle 수집).
 TEST(TextVisit_OpaqueIsUnsupported) {
     VisitObjects fixture;
     FieldSchema field;
@@ -421,6 +422,12 @@ TEST(TextVisit_OpaqueIsUnsupported) {
     CHECK(VisitValues(AssignmentTarget::Live(fixture.objects, fixture.access, object), visitor,
                       fixture.options)
               .Error() == ErrorCode::Unsupported);
+    TextCodecOptions skipping = fixture.options;
+    skipping.skipFieldsWithoutText = true;
+    LogVisitor skipped(fixture.system);
+    REQUIRE(VisitValues(AssignmentTarget::Live(fixture.objects, fixture.access, object), skipped,
+                        skipping));
+    CHECK(!Has(skipped.log, "F:blob") && Has(skipped.log, "{\n}\n"));
     REQUIRE(fixture.objects.RequestDestroy(fixture.access, object));
 }
 
