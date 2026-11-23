@@ -994,7 +994,7 @@ RCM(`Docs/Design/RuntimeClassMetadata.ko.md`):
 
 18. **'클래스 기본값 결정' 66·75행**: "이 규칙은 … A0-O의 graph v2가 처음부터 갖는다"에 이 문서를 연결하고 "override 집합 자리(present 판정 `NotePresent`)도 A0-O가 남기고, 전부 저장의 집합은 그래프 바이트 밖, 차이 형식 여부는 호출자 옵션"을 덧붙인다.
 
-EngineRuntime(`Docs/Design/EngineRuntime.ko.md`):
+EngineRuntime(`Docs/Design/EngineRuntime`):
 
 19. **131행** "graph v1로 Level 루트를 저장할 수 있다" → A0-O(Od1) 뒤에는 graph v2 편의 API(`SaveObjectGraph(root)`)로 같은 구조 시험을 한다는 것을 단다.
 20. **134행** "World registry의 외부 생성 거부(정책 자리)" → 이 문서 1.3절 `worldOnlyCreationKey` 후속으로 연결한다.

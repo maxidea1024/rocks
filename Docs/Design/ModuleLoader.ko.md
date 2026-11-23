@@ -638,7 +638,7 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 - [CVar](CVarSystem.ko.md) "모듈 언로드 때 핸들 해제(결정 필요)": MD16·MD22로 답했다(등록은 `RegisterSettings`, 핸들이 모듈 lease를 잡고, 모듈 `Shutdown`이 해제한다 — 개정 5).
 - [저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크했다(개정 5).
 - [AppInfo·CommandLine](AppInfoCommandLine.ko.md) 11절: `BuildDescription`에 `ModuleBuildId`를 더한다(ML4).
-- [엔진 런타임](EngineRuntime.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기를 적었다(개정 5).
+- [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기를 적었다(개정 5).
 
 ## 9. 범위 밖과 채택하지 않은 UE 요소
 
@@ -659,7 +659,7 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 
 - 코드 다시 불러오기(UE Live Coding·hot reload): Modular 적재(ML4)가 생긴 뒤 별도 스펙.
 - Rocks Studio의 다시 빌드 안내 UI: Rocks Studio 설계.
-- HostSettings와 엔진 레지스트리의 통합: [설정 시스템](ConfigSystem.ko.md)·[엔진 런타임](EngineRuntime.ko.md).
+- HostSettings와 엔진 레지스트리의 통합: [설정 시스템](ConfigSystem.ko.md)·[엔진 런타임](EngineRuntime/README.ko.md).
 - 플러그인 C 함수 표 ABI([전체 계획](EngineImplementationPlan.ko.md) 2426행 "versioned C function table"): 바이너리 배포 플러그인용이다. 이 문서는 같은 빌드 계열에서 나온 모듈만 다룬다(`ModuleBuildId` 일치).
 
 ## 10. 개정 이력

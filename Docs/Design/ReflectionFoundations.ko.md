@@ -1076,4 +1076,4 @@ EngineVersion CurrentEngineVersion() noexcept {
 - `ReflectionMetadata.ko.md`: 타깃 소유 서술은 B1에서 모듈 소유로 바꿨다. 버전 비노출·모든 비정적 필드 리플렉션 필수 서술은 B2 결과로 바꾼다.
 - `SparksLanguage.ko.md`의 `Soft<T>`(AssetId만) → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
 - `EngineImplementationPlan.ko.md` 7.1절 예시 매크로(`ROCKS_REFLECT`·`ROCKS_FIELD(FieldId=…)`)와 `GcArray` 용어 → 현재 문법·`ObjectRefArray`.
-- `EngineRuntime.ko.md` 68·80·105행: `ROCKS_NATIVE_CLASS` → `ROCKS_NATIVE_TYPE`, B8 이전 계획.
+- `EngineRuntime.ko.md`(당시 한 파일, 지금 `EngineRuntime/` 폴더) 68·80·105행: `ROCKS_NATIVE_CLASS` → `ROCKS_NATIVE_TYPE`, B8 이전 계획.

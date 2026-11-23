@@ -1435,7 +1435,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 - **다리는 게임 스레드에서 놓는다.** 엔진 호스트가 `EngineHooks::PumpEvents`에서 `launch::IsTerminationRequested()`를 보고 `engine.RequestExit()`를 부른다. 그 뒤는 정상 종료(8.2절)다.
 - **크래시 종료와 섞지 않는다.** 크래시는 `RequestExit`·`Shutdown`을 부르지 않는다(8.3절).
 - **창 메시지·입력.** `WM_CLOSE`·입력은 Application 수명에 넣지 않는다. PlatformWindow·`ui::Platform` 이벤트가 PumpEvents에서 같은 방식으로 `RequestExit`로 이어진다(요구 4절).
-- **종료 게이트 재시도(개정 13).** `Engine::Shutdown`이 `Busy`(외부 실행 문맥이 아직 멈추지 않음 — [엔진 런타임](EngineRuntime.ko.md) 6절)를 돌려주면 엔진 호스트가 `MaxShutdownGateRetries`번까지 다시 부르고, 그래도 `Busy`면 `platform::Fatal`로 끝낸다. 정상 종료(8.2절) 안의 일이고 크래시 경로와 섞지 않는다.
+- **종료 게이트 재시도(개정 13).** `Engine::Shutdown`이 `Busy`(외부 실행 문맥이 아직 멈추지 않음 — [엔진 런타임](EngineRuntime/06-Engine.ko.md) 6절)를 돌려주면 엔진 호스트가 `MaxShutdownGateRetries`번까지 다시 부르고, 그래도 `Busy`면 `platform::Fatal`로 끝낸다. 정상 종료(8.2절) 안의 일이고 크래시 경로와 섞지 않는다.
 
 ## 21. 다른 설계와의 경계
 
@@ -1838,4 +1838,4 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **유일한 무기한 대기.** 크래시한 스레드의 대기(`HandleCrash`의 `WaitForSingleObject(reportFinished, TotalWaitMilliseconds)` 뒤 `TerminateProcess`)와 겹친 스레드의 대기(`WaitForOwner`, 마감 + 여유 뒤 종료)는 모두 유한하다. 종료 콜백은 공용 마감을 지키고 로그 flush는 막히는 lock을 쓰지 않는다. 마감 집행을 무력하게 만드는 곳은 살아 있는 자기 프로세스의 `MiniDumpWriteDump`뿐이었다(11.5절: dbghelp가 마감 스레드까지 suspend). 그 순간 worker가 heap 할당 중(`SystemAllocator` → 프로세스 heap)이거나 스레드 생성·종료(loader lock) 중이면 영원히 멈춘다. 부하가 큰 전체 실행에서만 드물게 나는 관찰과 맞는다.
   - **수정.** 프로세스 안 덤프를 자기 snapshot에서 쓴다(11.5절). gate로 결정적으로 재현하는 시험을 더했다.
 - 개정 11(2026-11-20): 범용 할당자를 쓰는 곳을 넓혔다(GC 규모 세션의 AL7 — 사용자 지시 "남은작업 진행", GC 규모 설계 18.11절). 게임 템플릿과 Commandlet이 `context.DefaultAllocator()`를 쓴다. Launch의 코드는 바뀌지 않았다. 시험: 내장 진입이 `allocator-leak-no-teardown`에서도 범용 할당자를 파괴해 Fatal로 끝나는 것(`Native.Launch.embedded-host`), 남긴 할당의 종료 코드를 Fatal 종료 코드와 견주는 것(`Native.Launch.default-allocator`).
-- 개정 13(2026-11-22): 20절에 엔진 종료 게이트 재시도([오디오 시스템](AudioSystem.ko.md) AD23, [엔진 런타임](EngineRuntime.ko.md) 6절).
+- 개정 13(2026-11-22): 20절에 엔진 종료 게이트 재시도([오디오 시스템](AudioSystem.ko.md) AD23, [엔진 런타임](EngineRuntime/06-Engine.ko.md) 6절).
