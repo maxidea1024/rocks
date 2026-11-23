@@ -8,7 +8,7 @@
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/Source.h>
 
-// Sparks 패키지 manifest(`SparksPackage.json5`)다(Docs/Design/SparksLanguage.ko.md 3.4절 "패키지
+// Sparks 패키지 manifest(`SparksPackage.json5`)다(Docs/Design/SparksLanguage 3.4절 "패키지
 // manifest", 진단 S1101–S1105).
 //
 // 사용 예:

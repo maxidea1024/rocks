@@ -7,7 +7,7 @@
 #include <ReflectionText/TextJson.h>
 #include <Serialization/Record.h>
 
-// 레코드 값(PropertyRecord)과 JSON 사이 변환이다(Docs/Design/NodeGraph.ko.md 9.4절 "레코드 값"):
+// 레코드 값(PropertyRecord)과 JSON 사이 변환이다(Docs/Design/NodeGraph 9.4절 "레코드 값"):
 // 리플렉션 텍스트는 독립 struct Record(Docs/Design/ReflectionExtensions.ko.md 26절)로 값을 만든 뒤
 // ExportJson·ImportJson을 거친다. 텍스트로 쓰기 전에 그 텍스트를 다시 읽어 같은 바이트가 되는지
 // 확인하고, 해석할 수 없거나 왕복이 다르면(ReadOnly·출력 제외 필드, 표기 없는 종류 등) base64

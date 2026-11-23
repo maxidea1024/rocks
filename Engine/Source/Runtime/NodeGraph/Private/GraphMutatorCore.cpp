@@ -10,7 +10,7 @@
 #include <NodeGraph/GraphValidation.h>
 
 // GraphMutator의 색인·op 적용·명령
-// 실행·undo·redo·bracket·통지다(Docs/Design/NodeGraph.ko.md 8.2·8.6절).
+// 실행·undo·redo·bracket·통지다(Docs/Design/NodeGraph 8.2·8.6절).
 namespace rocks::nodegraph {
 
 namespace detail {

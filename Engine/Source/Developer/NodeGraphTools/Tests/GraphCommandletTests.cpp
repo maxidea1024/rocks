@@ -3,7 +3,7 @@
 #include "GraphDumpGolden.h"
 #include <NodeGraphTools/GraphCommandlets.h>
 
-// graph-dump·graph-validate·graph-diff 시험이다(Docs/Design/NodeGraph.ko.md 9.4절 "commandlet",
+// graph-dump·graph-validate·graph-diff 시험이다(Docs/Design/NodeGraph 9.4절 "commandlet",
 // 13절 GT10): 표본 문서 dump golden, --out·--semantic-only, 사용법·파일·형식 오류의 종료 코드, 검증
 // 결과, diff 결과. 명령은 시험 도메인의 Name pool·등록표를 문맥으로 받는다.
 using namespace rocks;

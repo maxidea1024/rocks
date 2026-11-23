@@ -6,7 +6,7 @@
 #include <NodeGraph/GraphNameOrder.h>
 #include <NodeGraphTools/GraphDiff.h>
 
-// 문서 diff다(Docs/Design/NodeGraph.ko.md 9.4절 "diff"). 그래프·노드·간선·배치·주석·북마크를 키로
+// 문서 diff다(Docs/Design/NodeGraph 9.4절 "diff"). 그래프·노드·간선·배치·주석·북마크를 키로
 // 정렬한 사본을 병합 한 번으로 맞춘다(O(N log N) — 입력이 정규 순서가 아니어도 된다). 간선 키의
 // Name은 토큰 값(같은 pool)으로 비교한다 — 표시 순서가 아니라 짝 맞추기용이다.
 namespace rocks::nodegraph {

@@ -1,0 +1,82 @@
+## 19. 결정 사항
+
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 언어 코어 구현의 LC2a에서 컴파일 입력 3건(SD59–SD61)을, LC2b(2026.11.21)에서 이름 해석 4건(SD62–SD65)을, LC2c에서 타입 검사 7건(SD66–SD72 — SD69–SD72는 교차 검증 뒤의 보완)을, LC2d에서 흐름·대입 4건(SD73–SD76)을 권장안으로 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](../LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+
+- **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
+- **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
+- **SD3. 파괴 요청의 스크립트 단계 끝 지연:** 스크립트 단계가 열려 있는 동안 Game lane에서 요청된 파괴(스크립트, 스크립트가 호출한 native API, 전달 순회가 호출한 C++ handler)를 그 단계가 끝날 때 반영한다(§4.3). 스크립트가 호출하는 native API가 이 규칙을 지키도록 binding schema에서 선언·검사한다(§10.2). 전체 계획 §5.2의 즉시 전이와 조정하는 엔진 수준 결정이다.
+- **SD4. 런타임 eval의 target 정책:** 기본값만 정한다. 모든 target에서 출시 구성은 `Off`, 개발 구성은 `DevOnly`다. target별 실제 값은 마켓 규정 검토 후 정한다(§12.6, §18 L4).
+- **SD5. 컴파일러·언어 서버 구현 언어:** C++ 라이브러리로 구현한다. 런타임 eval을 위해 출시 바이너리에 포함될 수 있어야 한다.
+- **SD6. 저장 시 reload의 컴파일 경로:** Rocks Build의 Sparks compile action 단일 경로로 한다.
+- **SD7. 출시 빌드의 로드 검증:** 예외 없이 항상 검증하며 끄는 설정을 두지 않는다.
+- **SD8. VM 방식과 reload 시간 목표:** 레지스터 VM과 3개 bank(Scalar·Ref·Buf)로 하고, reload 시간 목표는 전체 계획 I1의 2 s로 한다(§17).
+- **SD9. C++ 수명 hook 가상 함수 이름:** `OnAwake`·`OnStart`·`OnTick` 등 `On` 접두를 사용한다. 일반 `Start()` 메서드와의 충돌을 피하고 Sparks의 `on Start()`와 1:1로 대응한다. 전체 계획의 수명 단계 이름(Initialize·BeginPlay 등)은 내부 단계 이름으로 유지한다. 엔진 수준 결정이며 전체 계획 개정 1.7의 §5.2·§20.2에 반영되어 있다.
+- **SD10. 비활성화 시 동작:** Disable이 실행 취소·유지 자원 해제·이벤트 수신 중지를 수행한다. Unity는 component 비활성화만으로 coroutine을 중지하지 않는다. "비활성 객체는 아무것도 하지 않는다"는 규칙이 누수 방지에 유리하여 Unity와 다르게 정한다.
+- **SD11. 기다리는 handler의 재진입 정책:** `await`가 있는 이벤트 handler(Start 제외)는 `@skipWhileBusy`(실행 중 같은 발행자의 새 이벤트를 버림) 또는 `@restart`(취소 후 다시 시작)를 표시해야 하며 표시가 없으면 오류다. `try await` 한 줄을 추가하는 것만으로 이벤트가 조용히 버려지는 일을 방지한다(§6.1).
+- **SD12. Start의 대기 범위:** Start는 준비 대기(`Load`·`LoadAll`·`Sequencer.Prepare`·`DataLayerReady`)만 기다린다. 시간·이벤트 대기는 Tick을 무기한 보류할 수 있으므로 오류다(§5.1).
+- **SD13. 이벤트 대기의 결과:** `await X.Event`는 값을 반환하지 않는다. 발행자가 사라지면 대기는 완료되지 않은 채 끝나며, 단독 대기는 그 실행을 끝내고 `Race`에서는 그 인자를 완료되지 않은 것으로 본다(§6.1).
+- **SD14. 객체 원소 Array의 파괴 처리:** `Array`는 파괴된 원소의 자리를 유지하고 null로 읽으며 순회는 살아 있는 원소만 제공한다. 자동 제거는 `Set` 원소와 `Map` 키에만 적용하여 번호가 조용히 바뀌는 일을 없앤다(§4.3).
+- **SD15. enum 값 표기:** 식에서는 항상 타입 이름으로 한정한다(`Clock.Game`). 짧은 이름은 attribute가 정의한 인자에만 쓴다(§3.3).
+- **SD16. 범위 표기:** `a..<b`(b 미포함)를 쓴다. 끝 포함 여부가 배경 언어마다 다르게 읽히는 `..`는 쓰지 않는다(§3.3).
+- **SD17. 정수 나눗셈:** 정수 타입끼리의 `/`는 오류다(SD56 이후 모든 정수 타입). 몫은 `Math.Div`, 비율은 `float(a) / float(b)`로 쓴다(§3.3). 2차 검증의 "`/`는 항상 `float`"를 대체한다.
+- **SD18. 단위:** 스크립트의 값은 엔진 규약을 따르며 엔진 규약은 UE 5.8과 같다: 길이 cm, 질량 kg, 시간 초, `Rotator`(`Pitch`·`Yaw`·`Roll`) 도, 삼각함수·quaternion 축-각·각속도 라디안(각속도·토크 API는 `…InRadians`·`…InDegrees` 쌍). `Math.Radians(...)`·`Math.Degrees(...)`는 상수식에서 허용한다(§4.2·§4.5). 각도를 받는 native 함수·필드는 이름이나 타입으로 단위를 드러내고 언어 서버가 hover에 표시한다. **2026-11-17 번복:** 처음 결정은 미터·라디안이었고 "한 언어 안에 각도 단위 2개"를 피하려 했으나, 사용자 요구로 엔진 규약이 UE와 같은 cm·도(`Rotator`)·라디안(삼각함수)이 되어 이를 따른다. 두 각도 단위는 UE와 같이 API 이름·타입으로 구분한다.
+- **SD19. 빈 Soft·Row 제거:** `Soft<T>`·`Row<T>`에는 빈 값이 없고 선택 값은 `Soft<T>?`·`Row<T>?`로 쓴다. "없음"은 `null` 하나다(§3.2).
+- **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·Tryout Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
+- **SD21. NextTick의 시계:** `NextTick()`은 게임 시계를 따라 일시 정지 중 재개하지 않으며 `Time.Delta`는 GameClock delta다. UI 시계의 다음 프레임 대기는 `Delay(0.0, Clock.UI)`다(§6.1).
+- **SD22. 엔진 이름 정렬:** 게임 객체는 `Actor`(Entity 대체, ER 2절), 조종 대상은 `Pawn`, `Character`는 Pawn 파생 자리표시, 장면 component는 `SceneComponent`다. `WorldService`는 Object 기반 스크립트 공유 상태 타입이며 엔진 쪽 호스트는 `WorldSubsystem`이다. ID 개념(`SoftEntityId` 등)은 Prefab과 함께 결정할 때까지 유지한다.
+- **SD23. 약한 객체 참조 이름:** 처음 이름 `WeakRef<T>`를 `WeakObjectRef<T>`로 바꾼다(사용자 결정, 코드 개명은 커밋 `e0e78953`에서 완료). `ObjectRef`·`WeakObjectRef`·`SoftObjectRef`로 가족을 맞추고 Core `WeakPtr`와 구분한다. 
+- **SD24. Start 시점:** C++ `OnStart`의 엔진 규칙(ER 7.2: 다음 프레임 시작 처리, `IsReadyToStart`)을 따르고, Sparks `on Start`는 그 시점에 시작하는 실행이다. 준비 대기 중에는 bridge가 Tick을 보류한다(§5.1).
+- **SD25. 파괴·활성 전환의 두 시점:** 스크립트 단계 끝에 World API를 호출하는 적용 시점과, 실제 hook·Detach가 실행되는 프레임 끝 정리를 구분한다. 적용 이후 스크립트는 대상을 null로 읽는다(§4.3).
+- **SD26. 프레임 순서:** Unity hook의 종류·의미를 따르되 프레임 안 순서는 엔진 World tick phase(UE tick group)를 따른다. FixedTick은 Tick 뒤이고 물리 이벤트는 프레임당 1 batch다(§5.4).
+- **SD27. 상속:** core에서 Sparks 클래스는 상속할 수 없고 `override fn`은 엔진 가상 함수에만 쓴다. full의 `open class`·`open fn`만 Sparks 파생과 재정의를 허용한다(§3.2).
+- **SD28. 핫 리로드 등급과 단계:** R1 본문 교체·R2 제자리 migration(언어 코어 LC7), R3 instance 재생성(연동 EI6), R4 복제 schema 교체(연동 EI7). Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4).
+- **SD29. reload 원자성:** 계획·검증이 모두 끝난 변경만 패키지와 의존 패키지 단위로 한 번에 적용하고, 하나라도 실패하면 이전 revision을 유지한다. instance 단위 실패는 그 instance만 격리한다(§12.4).
+- **SD30. 대기 중인 실행의 reload:** 자동 이전은 하지 않고 `ReloadExecutions: Keep | Cancel`(Tryout 기본 `Cancel`)과 모듈별 살아 있는 revision 상한 8을 둔다(§12.4).
+- **SD31. 스크립팅 backend 선택:** Unity Mono/IL2CPP처럼 target·빌드 구성마다 `Vm`·`Aot`를 고르는 옵션이며 기본은 `Vm`이다(사용자 결정: AOT는 반드시 제공하되 쓸지는 선택). VM은 항상 포함하고 두 backend의 관찰 가능한 결과는 같다. 예산은 bytecode 명령어 기준으로 센다(§12.5).
+- **SD32. 오류 방어 경계:** 컴파일·로드·실행·native 경계·권한·폭주·편집기·저장 데이터·복구·원격 경계를 정하고, 노출 API는 입력 오류로 Fatal하지 않는다(§8.4).
+- **SD33. 전달 수·큐 상한:** 스크립트 단계당 전달 항목 65,536, session 발행 큐 262,144. 스크립트 발행의 초과는 조용히 버리지 않고 `BudgetExceeded`, 엔진발은 합치고 집계한다. 이월 항목은 전달 직전에 재검증한다(§5.4).
+- **SD34. 예산 기본값:** §9.3 표의 값을 프로젝트 설정으로 두고 쿡 시 고정한다. 실행 중 변경은 막는다(fault 결과의 기기 간 일치).
+- **SD35. 입력 이벤트 이름:** 입력 상세안의 phase 이름(`Started`·`Triggered`·`Ongoing`·`Completed`·`Cancelled`)을 그대로 쓰고 별칭을 두지 않는다(§10.4).
+- **SD36. 로그:** `Log.Info/Warning/Error/Debug`, 카테고리는 패키지에서 자동, 보간은 이름 있는 로그 인자로 낮춘다. 스크립트 메시지의 언어는 사용자 콘텐츠이므로 프로젝트 정책이다(§10.4).
+- **SD37. 진단 형식:** `경로:줄:열: error S코드: 메시지`, 영어, 코드 대역 S01xx–S11xx. 지역화 설명은 LSP locale로 덧붙인다(§8.1).
+- **SD38. 사용자 정의 오류 타입 제거:** 오류는 엔진 닫힌 enum `Error` 하나다. 단순성 원칙에 따라 full에서도 두지 않는다(§8.2).
+- **SD39. `?? break`·`?? continue` 제거:** 지역 선언의 `?? return`만 남긴다(§3.3).
+- **SD40. 객체 원소 Array의 개수:** `Count` 대신 `SlotCount`·`AliveCount()`를 노출해 "모두 파괴되었는데 Count가 0이 아님" 함정을 없앤다(§4.3).
+- **SD41. `All`·`Race` 인자:** 결과가 `void`인 대기와 지역 변수에 담은 요청 handle만 허용해 결과가 조용히 버려지지 않게 한다(§6.1).
+- **SD42. 반복 fault 판정:** 시간(초) 대신 프레임 수(600 프레임)로 세어 모든 플랫폼·재시뮬레이션에서 같게 한다(§8.3).
+- **SD43. spawn 중 fault와 hook 안 `try`:** spawn 중 Enable fault도 Awake처럼 spawn 실패이며, Awake·Enable·Start 안의 `try` 실패는 그 hook의 fault다(§5.1·§8.2).
+- **SD44. 노출 이름과 명령 표시:** `Result`를 돌려주는 C++ `TryX`는 Sparks에서 `X`로 노출하고, `@command`를 `@cheat`(CheatSet)와 `@editorButton`으로 나눈다(§10.3).
+- **SD45. 권한 구역:** `@net` 쓰기는 흐름 분석으로 판정한 권한 구역에서만 컴파일되고, 실행 시 권한이 없으면 무시하고 보고한다. 서버에서만 발행하는 Sparks 이벤트는 `@authorityOnly`로 표시한다(§14).
+- **SD46. 기반 타입 LevelScript:** Blueprint 제외를 유지하고, 레벨마다 하나인 연결 스크립트(UE Level Blueprint 대응)를 Actor 파생 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 둔다. core에 포함하며 핵심 엔진 타입(§3.7)이다. 한 클래스를 여러 레벨이 쓸 수 있고, 프로젝트 공통 기반은 C++ 파생과 설정 `DefaultLevelScriptClass`로 고른다. 노드 시각 편집기는 보류 선택지로만 둔다(LevelScript LD1–LD5·LD13·LD19·LD20).
+- **SD47. LevelScript의 참조:** `@edit` 객체 필드는 `T?`만 허용하고(S0413), 대상은 같은 Level의 배치 Actor와 그 component다. 다른 Level은 저장 거부, 셀 사이는 영속 Entity 참조 전까지 거부(§4.3), prefab 배치가 펼친 Actor는 배치 정체와 노드 경로로 저장한다(Prefab D22). 레벨 사이 연락은 World 이벤트로 하며 이름 문자열 호출은 없다(LevelScript LD6·LD7·LD10·LD17).
+- **SD48. LevelScript의 수명:** 레벨 편입에서 그 Level의 모든 배치 Actor 뒤에 Awake·Enable하고, Start는 같은 프레임에 준비된 활성 배치 Actor 뒤에 시작하되 기다리지 않는다. Level을 내릴 때는 먼저 Disable·Destroy한다. `RequestDestroy`로 파괴할 수 없고 Level 파괴만 파괴한다(§5.1, LevelScript LD8·LD11·LD16).
+- **SD49. Actor 물리 이벤트와 LevelScript의 물리 금지:** 엔진 `Actor`가 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited` 이벤트를 노출해 다른 객체가 `on X.TriggerEntered(...)`로 받는다. 같은 물리 batch에서 hook 다음에 발행하고 지연 slot 표로 구독이 있을 때만 비용이 든다. 이름은 hook과 겹치지 않게 과거형이다. LevelScript는 물리 hook(S0801)과 Collider component(S0802)를 가질 수 없다(§5.2·§5.5, LevelScript LD9·LD18).
+- **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptableComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
+- **SD51. 언어 코어 우선:** 엔진 요소와 무관한 언어 코어(LC0–LC9)를 먼저 구현하고 엔진 연동(EI1–EI9)은 엔진이 준비되는 대로 하나씩 더한다(사용자 결정 2026-11-20). 엔진·도구 쪽 요구는 [연동 요구 목록](../SparksEngineIntegration.ko.md)에 따로 모으고, 구현 중 새로 드러난 요구도 코어 안에서 우회하지 않고 그 목록에 더한다(§18).
+- **SD52. host 경계:** 컴파일러는 엔진 API를 binding schema 파일로만 알고, VM은 엔진을 host interface로만 부른다. Sparks 필드의 저장소는 VM이 가진다. 언어 코어는 Core 층에만 의존하고 가짜 host(`SparksTestHost`)로 시험한다(§18.1).
+- **SD53. 모듈 배치:** `SparksVm`·`SparksCompiler`는 `Engine/Source/Runtime`, `SparksTestHost`는 `Engine/Source/Developer`, CLI와 언어 서버는 `Programs`에 둔다. 엔진 쪽 host 구현은 `ScriptRuntime` 모듈이다(§18.1).
+- **SD54. 숫자 리터럴은 C# 형태:** 자릿수 구분자 `_`, 16진 `0x`·2진 `0b`, `.5` 형태의 실수, 앞자리 0(10진)을 최신 C#처럼 받는다(사용자 결정 2026-11-20). 리터럴은 Go처럼 쓰는 자리의 타입을 따르므로(SD56) 접미사는 받지 않고 S0114로 안내한다(§3.6).
+- **SD55. verbatim 문자열:** C#의 `@"..."`를 받는다. escape·보간이 없고 `""`가 `"`이며 여러 줄일 수 있다. 값의 줄 끝은 LF로 맞춘다(사용자 결정 2026-11-20, §3.6).
+- **SD56. 숫자 타입은 Go 수준:** `int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`를 두고 기본형 `int`(=`int64`)·`float`(=`float64`)를 유지한다. 변환은 Go처럼 타입 이름으로만 하고 서로 다른 숫자 타입은 섞지 않으며, 리터럴은 Go의 untyped 상수처럼 쓰는 자리의 타입을 따른다(사용자 결정 2026-11-20, §3.3).
+- **SD57. 정수 overflow는 fault:** 모든 정수 타입의 범위 초과 산술과 정확하지 않은 변환은 `IntegerOverflow` fault다. Go의 wrap과 다르게 정한 이유는 방어적 설계(조용히 틀린 값을 내지 않음)다(사용자 결정 2026-11-20).
+- **SD58. 덤프는 필수:** 구문 트리(LC1)·typed IR·bytecode(LC4)를 결정적인 텍스트로 덤프하는 기능을 둔다. 검증 목적이며 golden 시험과 CLI `sparks dump`가 쓴다(사용자 결정 2026-11-20, §11).
+- **SD59. manifest 의존은 이름 목록:** `dependencies`는 패키지 이름 배열이다. 패키지에 아직 버전이 없으므로 초안의 "interface 호환 범위"는 패키지 버전이 생기는 단계(배포·EI9)에서 더한다(LC2a, 2026-11-20).
+- **SD60. `Rocks`는 import하지 않는다:** 엔진 binding schema의 `Rocks` 패키지 타입은 모두 import 없이 보이고(§2 예시가 그렇게 쓴다) `import Rocks…`는 S0305다. 충돌은 이름 하나에 대상 하나 규칙으로 판정한다(LC2a).
+- **SD61. binding schema 파일 형식:** 모듈마다 `<모듈>.sparkbind.json`, 엄격한 JSON, 타입·필드·함수·이벤트·enum case와 32자리 16진 ID, 타입은 Sparks 타입 표기 문자열(§10.2). key는 쓰는 마일스톤이 더한다(LC2a).
+
+- **SD62. 이름의 출처:** 내장 타입·prelude 타입·prelude 값(부록 B의 대상)은 언어가 소유하는 컴파일러 표이고, 엔진 객체·값 타입(핵심 엔진 타입, `Connection`·`PlaySession`·`Hit`, 닫힌 enum `Error`)은 binding schema(`Rocks`)가 제공한다. schema는 언어 소유 이름을 정의할 수 없다(§3.9, LC2b).
+- **SD63. 대소문자 비교:** 이름 찾기는 철자가 정확히 같은 대상이다. 충돌 판정은 같은 선언 공간 안과 값 이름(지역 이름·매개변수·Sparks 멤버·문맥 이름)끼리는 ASCII 대소문자를 무시하고, 그 밖은 정확히 같을 때만이다(§3.1의 규칙을 선언 공간 안으로 넓힌 것, §3.9).
+- **SD64. 이름 해석의 연쇄 방지:** 어휘·구문 진단이 있는 모듈, 해석하지 못한 import가 있는 모듈, 어휘·구문 진단이 있는 모듈을 직접 import한 모듈 안에서는 "찾지 못함"(S0317·S0318)을 내지 않고, 기반을 해석하지 못한 class 안에서는 기반에 기대는 검사도 하지 않는다. 같은 철자의 대상이 둘이면 진단을 받지 않은 쪽을 가리킨다(원인 하나에 진단 하나, §3.9).
+- **SD65. 재정의 가능 함수의 표시:** binding schema 함수에 `overridable`을 두어 엔진 가상 함수 중 Sparks가 재정의할 수 있는 것을 표시한다. `override fn`의 대상은 이것과 Sparks `open fn`·`override fn`뿐이다(§3.9, 연동 요구 SE-R4).
+
+- **SD66. 타입 없는 숫자 상수의 범위:** 타입 없는 정수 상수는 −2^63..2^64−1의 정확한 정수(int64·uint64 자리를 모두 덮는 범위)로 계산하고 벗어나면 S0503, 실수 상수는 double로 계산하고 NaN·Inf는 S0505다. 자리에 들어갈 때 그 타입의 범위를 다시 본다(S0109, §3.10).
+- **SD67. 부록 B는 시그니처 목록이다:** 표준 API의 정확한 시그니처를 부록 B 시그니처로 확정하고 컴파일러는 그 목록을 언어 소유 멤버 표로 가진다. `InputAction.Value`는 UE `FInputActionValue`처럼 3축 `vec3`이고(1축·bool은 X), `Input`의 타입은 엔진 schema `InputSystem`이다(§3.10).
+- **SD68. 타입 검사의 경계:** 숫자 사이 암묵 변환 없음, 제네릭 무공변, 타입 인자는 추론하지 않는다(명시), 생성은 이름 지정 인자, 함수 호출은 위치 인자, 반환 경로는 "끝나는 문장"(Go의 terminating statement) 규칙이다(§3.10).
+- **SD69. 진단 하나 원칙과 모르는 기대 타입:** 타입 진단은 자리(피연산자·인자·원소·이름 지정 인자)마다 하나이고 바깥 식은 안쪽 진단 뒤 해석하지 못한 것이다. 앞선 오류로 기대 타입을 모르는 자리는 기대 타입이 없는 자리와 구별해 S0417을 내지 않고, 표기를 해석하지 못한 이름은 초기값의 타입을 받지 않는다(§3.10 연쇄 방지).
+- **SD70. 정해진 상수 접기:** `const`와 상수만 쓰는 정해진 타입의 식은 컴파일 때 값을 정하고(범위 밖 S0503, NaN·Inf S0505) switch case·0 나누기 판정에 쓴다. 상수식 요구와 const 순환 진단은 LC2d다(§3.10 숫자 상수).
+- **SD71. 값 struct 순환과 초기값 깊이:** struct가 필드로 자신을 값으로 담으면(추론한 필드 포함) 순환 하나에 S0426, 이름이 아닌 길로 64단계를 넘는 초기값 연쇄는 S0427이다. 이름 의존은 의존 순서로 미리 정해 컴파일러가 재귀 깊이를 쓰지 않는다(§3.10).
+- **SD72. 확정한 세부 규칙:** 로드 요청은 대기가 아닌 값, 제네릭 함수(부록 B 포함)의 타입 인자는 언제나 명시, `?.`로 부른 대기의 결과는 `R?`, switch 대상은 정수·`bool`·`string`·enum, 복합 대입은 `x = x op v`의 규칙(원소 대상은 읽기 타입 `T?`), 생성은 읽기 전용 필드도 정한다, `Math` 자리표시 함수의 상수만 인자는 자리표시가 `int`를 받지 않으면 `float`(§3.10).
+- **SD73. 대입 경로:** 대입·변경 메서드의 경로를 뿌리부터 보아 처음 어긋난 곳의 진단 하나를 낸다. 참조 타입 값을 지나면 그 뒤는 객체 속성 쓰기이며 다른 객체의 Sparks 필드는 같은 class라도 읽기만 한다(§3.11).
+- **SD74. 미사용 판정:** 읽지 않는 지역·binding·반복 변수·인자와 그 뒤 읽지 않는 대입 값은 오류이고 선언 초기값의 덮어쓰기는 오류가 아니다. `_` 인자는 시그니처가 정해진 자리에서만 쓴다(§3.11).
+- **SD75. await 뒤 판정:** 문장 단위의 경로 분석(분기 합류·back-edge, 고정점)으로 "기다린 뒤" 상태를 정하고 객체 타입 지역 이름의 그 읽기만 `T?`로 본다(§3.11).
+- **SD76. 상수식과 const 타입:** 상수식 목록과 const 타입 목록(§3.11)을 확정하고, 순환·비상수 const의 값은 정하지 않아 쓰는 자리는 조용하다.

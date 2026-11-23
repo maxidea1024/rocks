@@ -5,7 +5,7 @@
 #include <NodeGraph/GraphSemantic.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// schema·노드 종류 등록표, 핀 목록, schema 기본 정규화다(Docs/Design/NodeGraph.ko.md 6.2·7·10절).
+// schema·노드 종류 등록표, 핀 목록, schema 기본 정규화다(Docs/Design/NodeGraph 6.2·7·10절).
 namespace rocks::nodegraph {
 
 namespace {

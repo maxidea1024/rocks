@@ -6,7 +6,7 @@
 #include <NodeGraph/NodeTypeRegistry.h>
 #include <NodeGraphTools/GraphText.h>
 
-// 복사·붙여넣기다(Docs/Design/NodeGraph.ko.md 9.2·9.4절). 복사는 문서의 노드·주석 선택을 조각으로
+// 복사·붙여넣기다(Docs/Design/NodeGraph 9.2·9.4절). 복사는 문서의 노드·주석 선택을 조각으로
 // 담고, 붙여넣기는 조각을 대상 문서의 명령 목록 하나(undo 1개)로 바꾼다. 명령 실행은 호출자가
 // GraphMutator로 한다.
 //

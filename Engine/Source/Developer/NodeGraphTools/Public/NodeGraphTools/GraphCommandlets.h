@@ -4,7 +4,7 @@
 #include <NodeGraph/NodeTypeRegistry.h>
 #include <Object/TypeRegistry.h>
 
-// 노드 그래프 commandlet이다(Docs/Design/NodeGraph.ko.md 9.4절 "commandlet"): graph-dump·
+// 노드 그래프 commandlet이다(Docs/Design/NodeGraph 9.4절 "commandlet"): graph-dump·
 // graph-validate·graph-diff. 입력은 문서 형식(`rocks.graph-document`) 텍스트 파일이다. 명령마다
 // Name pool·리플렉션 TypeRegistry·노드 종류 등록표를 새로 만들고 문맥의 도메인 등록 hook으로
 // 채운다.

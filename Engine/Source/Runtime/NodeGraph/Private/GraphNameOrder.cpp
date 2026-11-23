@@ -3,7 +3,7 @@
 #include <Core/Algorithms.h>
 #include <NodeGraph/GraphNameOrder.h>
 
-// Name·Guid 정규 순서와 내부 순위표다(Docs/Design/NodeGraph.ko.md 6.1·6.3절).
+// Name·Guid 정규 순서와 내부 순위표다(Docs/Design/NodeGraph 6.1·6.3절).
 namespace rocks::nodegraph {
 
 namespace {

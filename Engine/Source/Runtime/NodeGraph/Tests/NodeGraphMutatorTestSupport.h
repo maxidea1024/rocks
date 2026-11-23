@@ -5,7 +5,7 @@
 #include <NodeGraph/GraphClone.h>
 #include <NodeGraph/GraphMutator.h>
 
-// GraphMutator 시험 공용 도우미다(Docs/Design/NodeGraph.ko.md 13절 GT1–GT4·GT6): 문서 전체(의미 +
+// GraphMutator 시험 공용 도우미다(Docs/Design/NodeGraph 13절 GT1–GT4·GT6): 문서 전체(의미 +
 // 배치) 바이트로 같음 판정, 통지 기록기, 표본 문서 위 mutator 환경.
 namespace rocks::nodegraph_test {
 

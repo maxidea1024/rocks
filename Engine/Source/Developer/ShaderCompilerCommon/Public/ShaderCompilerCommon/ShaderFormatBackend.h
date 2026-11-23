@@ -16,6 +16,18 @@
 namespace rocks::shader {
 
 class ShaderToolSet;
+struct MetalToolchain;
+
+// 처리기 호출 문맥이다(11.1절 SH1e E1). 포인터·view는 Compile 동안 살아 있어야 한다.
+struct ShaderBackendContext {
+    // 열린 저장소 도구 묶음이다(열지 못했으면 null — 처리기는 ToolError를 둔다).
+    const ShaderToolSet* tools = nullptr;
+    // 찾은 Metal 도구(system 도구)다. 찾지 못했으면 null이거나 found가 false다.
+    const MetalToolchain* metal = nullptr;
+    // 처리기 임시 디렉터리(UTF-8 절대 경로, 이미 있음)다. 외부 프로그램과 파일을 주고받는 처리기만
+    // 쓰고, job마다 같은 이름을 다시 쓴다(한 워커가 한 job씩 부른다).
+    StringView scratchDirectory;
+};
 
 // 셰이더 프로필 이름의 최대 byte 수(NUL 포함, 예: "cs_6_6")다.
 inline constexpr usize MaxShaderProfileBytes = 16;
@@ -40,10 +52,11 @@ public:
     // 처리기 버전이다(형식 정의 processor.version과 같아야 한다 — 다르면 워커는 BadFormatVersion).
     virtual uint32 ProcessorVersion() const noexcept = 0;
 
-    // format의 job을 컴파일한다. tools는 열린 도구 묶음이다(열지 못했으면 null — 구현은 ToolError를
-    // 둔다). allocator는 결과 버퍼 할당자다.
+    // format의 job을 컴파일한다. context는 도구·임시 디렉터리다(위 ShaderBackendContext). 결과
+    // 버퍼는 result.values의 할당자에서 나온다.
     virtual void Compile(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
-                         const ShaderToolSet* tools, ShaderWorkerJobResult& result) noexcept = 0;
+                         const ShaderBackendContext& context,
+                         ShaderWorkerJobResult& result) noexcept = 0;
 };
 
 } // namespace rocks::shader

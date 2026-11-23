@@ -3,6 +3,7 @@
 #include <Base/TypeTraits.h>
 #include <Config/CVarDefinition.h>
 #include <Core/Containers/HashMap.h>
+#include <Core/Math/Transform.h>
 #include <Core/Text/String.h>
 #include <Core/Time/GameClock.h>
 #include <Core/Traits.h>
@@ -166,6 +167,22 @@ struct SpawnParams {
     // 소속 Level이다. null이면 영구 Level이다. 파괴 대기 중인 Level이면 Spawn이 Destroyed로
     // 실패한다.
     ObjectHandle level;
+    // hasTransform이면 FinishSpawning이 root SceneComponent의 상대 Transform으로 쓴다(root에 부모가
+    // 없으면 월드 Transform — UE SpawnTransform, 17.3절). root가 없으면 무시한다.
+    Transform transform;
+    bool hasTransform = false;
+    // 소유 Actor·원인(Actor::SetOwner·SetInstigator와 같은 검사 — 실패하면 Spawn이 실패한다).
+    ObjectHandle owner;
+    ObjectHandle instigator;
+
+    // 위치·회전만 정한 Spawn 인자다(scale 1).
+    static SpawnParams At(const Transform& at, ObjectHandle level = {}) noexcept {
+        SpawnParams params;
+        params.level = level;
+        params.transform = at;
+        params.hasTransform = true;
+        return params;
+    }
 };
 
 // World 생성 설정이다.
@@ -677,6 +694,13 @@ private:
         EndPlayReason endReason = EndPlayReason::Destroyed;
         // OnFrameworkPreAwake가 성공했다(OnFrameworkEndPlay를 받는다 — OnAwake가 실패해도).
         bool frameworkAwake = false;
+        // Spawn 인자의 Transform이다(FinishSpawning이 root에 쓴다).
+        bool hasSpawnTransform = false;
+        Transform spawnTransform;
+        // 마지막 SetLifeSpan의 번호다(0이면 없음 — 힙의 오래된 항목은 번호가 달라 무시한다).
+        uint64 lifeSpanSequence = 0;
+        // 시작 전에 건 LifeSpan(초)이다. 시작할 때 건다(0이면 없음).
+        double pendingLifeSpan = 0.0;
         // Level 클러스터의 소속이다(Component도 같은 클러스터에 넣는다).
         bool clustered = false;
         bool awake = false;
@@ -856,6 +880,23 @@ private:
     Result<void> RunEngineStage(EngineStage stage, TickPhase phase,
                                 const TickPhaseFrame& frame) noexcept;
     static void CloseOuterSubsystems(World& world) noexcept;
+    // Spawn 인자 Transform을 root에 쓴다(FinishSpawning — UE MultiplyWithRoot).
+    Result<void> ApplySpawnTransform(ObjectHandle actor) noexcept;
+    // Actor::SetOwner·SetInstigator·SetLifeSpan 구현이다.
+    Result<void> SetActorOwner(ObjectHandle actor, ObjectHandle owner) noexcept;
+    Result<void> SetActorInstigator(ObjectHandle actor, ObjectHandle instigator) noexcept;
+    Result<void> SetActorLifeSpan(ObjectHandle actor, double seconds) noexcept;
+    // 만료된 LifeSpan Actor를 파괴한다(엔진 단계 Timers의 World 부분).
+    void ExpireLifeSpans() noexcept;
+    // 켜진 Component가 모두 시작 준비됐는지다.
+    bool ComponentsReadyToStart(ObjectHandle actor) noexcept;
+
+    struct LifeSpanEntry {
+        double expiry = 0.0;
+        uint64 sequence = 0;
+        ObjectHandle actor;
+    };
+
     // 정리 이유를 주는 DestroyActor다(먼저 정한 이유를 유지).
     Result<void> DestroyActorFor(ObjectHandle actor, EndPlayReason reason) noexcept;
     // tickable WorldSubsystem의 OnTick을 부른다(엔진 단계 TickableSubsystems의 World 부분).
@@ -887,6 +928,9 @@ private:
     bool beginPlayDispatched_ = false;
     // EndPlay로 게임 진행을 끝냈다(다시 BeginPlay하지 않는다).
     bool endedPlay_ = false;
+    // LifeSpan 만료 최소 힙((만료 게임 시각, 설정 번호) 순 — 같은 시각은 먼저 설정한 것부터).
+    Array<LifeSpanEntry> lifeSpans_{allocator_};
+    uint64 lifeSpanCounter_ = 0;
     // IsTickable()이 참인 Subsystem이다(초기화 순서, Deinitialize 전에 비운다).
     Array<WorldSubsystem*> tickables_{allocator_};
     Span<const WorldSubsystemType> subsystemTypes_;

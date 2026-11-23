@@ -2,6 +2,7 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 9(2026-11-24): SL 3.13 표 `@test` 행 개정(SL 문서를 장별 폴더로 나눈 뒤).
 - 개정 8(2026-11-23): LC8d 구현·리뷰 반영(9.7절 — `@test` 반환 타입 금지(S0621), 엔진 enum 값 수정, 취소 판정·메서드 거부, 실행기 거부는 1, 토큰 밑줄).
 - 개정 7(2026-11-23): LC8d 설계(9절 — `@test`는 최상위 함수만(SL 3.13 표·컴파일러와 맞춤, 클래스 `@test` 삭제), 실행기는 SparksTestHost 공개 API, VM 최상위 진입 `CallFunction`, 결과 형식). T1·T10 개정.
 - 개정 6(2026-11-23): LC8c 구현·리뷰 반영(8.5절 — 주석 자리 규칙 보강, BOM 제거 확정, 인자 아래 모듈만 대상, 변형 corpus 시험).
@@ -156,7 +157,7 @@
 ### 9.1 실행기 API(SparksTestHost)
 
 - `SparksTestHost/TestRunner.h`(공개): `Result<void> RunTests(Allocator&, const Compilation&, const SourceSet& sources, Span<const uint32> modules, const TestOptions&, TestReport& out)`. compilation은 진단 없이 끝난 것(모든 단계 — `ModuleBytecode`가 모든 모듈에 있다)이고, modules는 시험을 찾을 모듈 번호(진단 경로 byte 순으로 호출자가 정한다)다. 링크는 compilation의 모든 모듈을 한 host로 묶고 `LinkImports`로 모듈 사이 호출을 푼다(시험 모듈이 다른 모듈 함수를 부른다). 실패: 링크 거부(InvalidArgument — 사유는 `out.reason`), 할당 실패(OutOfMemory). 시험 하나의 실패는 실행기 실패가 아니라 결과다.
-- **시험 찾기:** 모듈마다 `Symbols()` 중 그 모듈의 최상위 `Function`이고 `@test` attribute가 있는 것을 선언 순서(원문 위치)로. `@test`는 인자와 반환 타입이 없는 함수다(개정 8 — 반환 타입이 있으면 S0621: 실행기가 반환 값을 보지 않으므로 `Result` 오류 반환이 조용히 통과하지 않게. SL 3.13 표의 "인자 없는 최상위 함수"를 "인자·반환 타입 없는 최상위 함수"로 고치는 것은 SL 문서 분할(500줄 규칙) 커밋과 함께 한다). 컴파일러 공개 API `Compilation::HasAttribute(symbol, name)`(언어 서버도 쓴다)을 더한다. bytecode 함수는 같은 이름의 최상위 함수(이름에 `.`가 없는 것)다.
+- **시험 찾기:** 모듈마다 `Symbols()` 중 그 모듈의 최상위 `Function`이고 `@test` attribute가 있는 것을 선언 순서(원문 위치)로. `@test`는 인자와 반환 타입이 없는 함수다(개정 8 — 반환 타입이 있으면 S0621: 실행기가 반환 값을 보지 않으므로 `Result` 오류 반환이 조용히 통과하지 않게. SL 3.13 표도 "인자·반환 타입 없는 최상위 함수"로 고쳤다 — 개정 9). 컴파일러 공개 API `Compilation::HasAttribute(symbol, name)`(언어 서버도 쓴다)을 더한다. bytecode 함수는 같은 이름의 최상위 함수(이름에 `.`가 없는 것)다.
 - **결과(`TestResult`):** 모듈·시험 심볼·결과 종류·위치(SourceId와 byte 범위 — 없으면 시험 이름)·상세 글자·진행한 프레임 수. 종류: `Passed`, `Faulted`(VM fault 종류 — `AssertFailed` 포함), `EndedWithError`(`Result`가 아닌 시험의 `try` 실패 — SL 8.4, 오류 코드), `NeedsEngine`(엔진 기능 이름), `DidNotFinish`(프레임 상한).
 - **옵션(`TestOptions`):** `maxFrames`(기본 `DefaultTestMaxFrames` = 600 — 60 Hz 10초), 시험 프레임 시간은 `TestFrameSeconds` = 1/60.
 

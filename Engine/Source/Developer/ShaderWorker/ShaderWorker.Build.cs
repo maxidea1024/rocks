@@ -19,5 +19,5 @@ public sealed class ShaderWorker : EngineModuleRules
     protected override string[] PublicDependencies => ["PlatformBase", "Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
-    protected override string[] PrivateDependencies => ["DeterministicMath", "ShaderCompilerCommon", "ShaderFormatD3D", "ShaderFormatVulkan", "ShaderToolLoader"];
+    protected override string[] PrivateDependencies => ["DeterministicMath", "ShaderCompilerCommon", "ShaderFormatD3D", "ShaderFormatMetal", "ShaderFormatOpenGL", "ShaderFormatVulkan", "ShaderToolLoader"];
 }

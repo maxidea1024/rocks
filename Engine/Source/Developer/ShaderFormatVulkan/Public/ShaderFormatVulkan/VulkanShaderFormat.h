@@ -26,7 +26,8 @@ public:
     }
 
     void Compile(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
-                 const ShaderToolSet* tools, ShaderWorkerJobResult& result) noexcept override;
+                 const ShaderBackendContext& context,
+                 ShaderWorkerJobResult& result) noexcept override;
 };
 
 } // namespace rocks::shader

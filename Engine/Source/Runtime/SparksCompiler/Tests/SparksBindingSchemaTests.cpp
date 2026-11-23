@@ -9,7 +9,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// binding schema reader 시험이다(Docs/Design/SparksLanguage.ko.md 10.2절 "binding schema 파일
+// binding schema reader 시험이다(Docs/Design/SparksLanguage 10.2절 "binding schema 파일
 // 형식", S1120). 시험 schema는 key 하나를 한 줄에 쓰므로 값의 열은 key 길이 + 5다("key": 값).
 using namespace rocks;
 using namespace rocks::sparks;

@@ -2,11 +2,11 @@
 
 기준일: 2026-11-15, 확정안(설계 교차검증 3건 — UE 5.8 대조, Rocks 코드·스펙 정합과 구현 가능성, 소비자 적합성 — 과 사용자 결정(2026-11-15), 반영 확인 리뷰 1건과 조정자 결정을 반영). [에셋 시스템 설계](AssetSystem/README.ko.md)(이하 AS) 1절의 A0-O와 A0-G 사이에 두는 리플렉션 보강 단계다. 기준 코드는 `a4a7bcc`(A0-B B1–B8, A0-O Oa–Oe 구현 완료)다. 이름은 [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP)의 벤치마크 ID `B9`(EIP 2416·2538행)와 구별하려고 문서에서 "리플렉션 B9"라고 쓴다. 하위 단계는 B9a–B9m이고 문자 순서가 의존 순서다.
 
-근거: [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF) 3–7절과 12절 열린 문제, [객체·그래프 보강 설계](ObjectFoundations.ko.md)(이하 OF) 1·4·5절, [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [Sparks 언어](SparksLanguage.ko.md)(이하 SL), [UI 툴킷](UiToolkit.ko.md)(이하 UI) CU4·CU8, [리플렉션 메타데이터 구현](../Implementation/ReflectionMetadata.ko.md)(이하 RM), 현재 코드(`Core/Source/Runtime/MetaSchema`·`ObjectRuntime`·`ObjectSerialization`·`Serialization`·`Core`·`Localization`, `Programs/Rocks.MetaCompiler`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본을 파일:행으로 확인했다(18절).
+근거: [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF) 3–7절과 12절 열린 문제, [객체·그래프 보강 설계](ObjectFoundations.ko.md)(이하 OF) 1·4·5절, [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [Sparks 언어](SparksLanguage/README.ko.md)(이하 SL), [UI 툴킷](UiToolkit.ko.md)(이하 UI) CU4·CU8, [리플렉션 메타데이터 구현](../Implementation/ReflectionMetadata.ko.md)(이하 RM), 현재 코드(`Core/Source/Runtime/MetaSchema`·`ObjectRuntime`·`ObjectSerialization`·`Serialization`·`Core`·`Localization`, `Programs/Rocks.MetaCompiler`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본을 파일:행으로 확인했다(18절).
 
 원칙(RF와 같다): 실패 원자성(읽기 실패는 출력 불변, 쓰기 실패는 미게시, 로드는 전부 공개 또는 전부 rollback), 결정성(같은 입력 → 같은 byte), 모든 길이·개수·작업량에 한도, 하위호환 없음(`FieldSchema`·wire tag·`PathStep`·생성 코드 형식을 바로 바꾸고 시험을 고친다). 필드 접근은 생성 thunk만 쓰고 raw offset을 공개하지 않는다(RF 원칙). 범용 기능(해시·텍스트 분해·숫자 표기·JSON)은 Core 공용 모듈에 두고 기능 모듈에 다시 만들지 않는다.
 
-이름: 약한 객체 참조는 `WeakObjectRef<T>`로 부른다(2026-11-18 사용자 결정, [Sparks](SparksLanguage.ko.md) SD23). 현재 코드 이름은 `WeakObjectRef<T>`이며 코드 개명은 후속 작업이다(Sparks 17.2절). 구현 문서(Docs/Implementation)는 코드 개명 때까지 현재 이름을 쓴다.
+이름: 약한 객체 참조는 `WeakObjectRef<T>`로 부른다(2026-11-18 사용자 결정, [Sparks](SparksLanguage/README.ko.md) SD23). 현재 코드 이름은 `WeakObjectRef<T>`이며 코드 개명은 후속 작업이다(Sparks 17.2절). 구현 문서(Docs/Implementation)는 코드 개명 때까지 현재 이름을 쓴다.
 
 약어:
 
@@ -1743,7 +1743,7 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 
 ## 26. 독립 struct Record(NodeGraph NG2a)
 
-[노드 그래프](NodeGraph.ko.md) GD23은 노드 속성·입력 기본값을 struct Record 바이트(InstancedStruct 내용과 같은 wire)로 보관한다. NodeGraphTools의 조각 텍스트(노드 그래프 9.2절)는 그 바이트를 리플렉션 텍스트(`ExportJson`·`ImportJson`, 10.5절)로 바꾸고, 도메인은 struct 값을 바이트로 만든다(`SetNodeProperties`). 지금 struct codec(`EncodeStructRecord`·`DecodeStructValue`)이 쓰는 문맥은 객체 그래프 저장·복원(ObjectSerialization Private) 안에만 있어서, 값 하나를 그래프 없이 쓰고 읽는 공개 API를 둔다. UE는 `FInstancedStruct::Serialize`가 담긴 struct를 객체 없이 아카이브에 직접 쓴다(CoreUObject `StructUtils/InstancedStruct.cpp:122` — 같은 타입 기본값이 없으면 기본 생성 임시 값을 기준으로 둔다) — 같은 역할을 Rocks wire 규칙으로 둔다.
+[노드 그래프](NodeGraph/05-Decisions.ko.md) GD23은 노드 속성·입력 기본값을 struct Record 바이트(InstancedStruct 내용과 같은 wire)로 보관한다. NodeGraphTools의 조각 텍스트(노드 그래프 9.2절)는 그 바이트를 리플렉션 텍스트(`ExportJson`·`ImportJson`, 10.5절)로 바꾸고, 도메인은 struct 값을 바이트로 만든다(`SetNodeProperties`). 지금 struct codec(`EncodeStructRecord`·`DecodeStructValue`)이 쓰는 문맥은 객체 그래프 저장·복원(ObjectSerialization Private) 안에만 있어서, 값 하나를 그래프 없이 쓰고 읽는 공개 API를 둔다. UE는 `FInstancedStruct::Serialize`가 담긴 struct를 객체 없이 아카이브에 직접 쓴다(CoreUObject `StructUtils/InstancedStruct.cpp:122` — 같은 타입 기본값이 없으면 기본 생성 임시 값을 기준으로 둔다) — 같은 역할을 Rocks wire 규칙으로 둔다.
 
 **API**(ObjectSerialization `ObjectSerialization/StructRecord.h`).
 - `SaveStructRecord(Allocator&, ObjectRegistry&, const ObjectAccessContext&, const TypeLease& type, const void* value, const StructRecordOptions& = {}) -> Result<Array<uint8>>`: struct 값 하나를 Record(header schema = struct ID, version = struct 버전, 멤버 TLV)로 쓴다.

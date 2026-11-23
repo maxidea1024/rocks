@@ -9,7 +9,7 @@
 #include <Core/Text/StringView.h>
 #include <SparksCompiler/Source.h>
 
-// Sparks 컴파일 진단이다(Docs/Design/SparksLanguage.ko.md 8.1절).
+// Sparks 컴파일 진단이다(Docs/Design/SparksLanguage 8.1절).
 //
 // 진단은 오류뿐이다(경고 없음). 진단 하나는 코드(S0100–S1199), 원문 위치, 영어 메시지, 설명, 수정
 // 예를 가진다. DiagnosticList가 모으고 8.1절 순서로 정렬하며, AppendDiagnostics가 8.1절 형식으로

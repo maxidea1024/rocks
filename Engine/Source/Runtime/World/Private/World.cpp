@@ -506,6 +506,7 @@ Result<void> World::Shutdown(EndPlayReason reason) noexcept {
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
         tickables_.Clear();
+        lifeSpans_.Clear();
         if (initialized) {
             HookScope hooks(*this);
             // 게임 진행은 EndPlay가 끝냈다(OnWorldEndPlay). 바깥 조회 창 닫기 →

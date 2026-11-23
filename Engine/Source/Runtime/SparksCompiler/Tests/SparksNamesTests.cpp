@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 이름 해석 시험이다(Docs/Design/SparksLanguage.ko.md 3.9절, S0306–S0325, schema S1120의 이름
+// 이름 해석 시험이다(Docs/Design/SparksLanguage 3.9절, S0306–S0325, schema S1120의 이름
 // 부분). 규칙별 양성·음성 사례와 위치는 corpus `Conformance/Names`가 맡고, 여기서는 API(심볼·타입·
 // 시그니처·노드 기록·덤프·단계), 진단 문장과 수정 예, schema 이름 해석, 결정성, 할당 실패를 본다.
 using namespace rocks;

@@ -3,7 +3,7 @@
 #include <NodeGraph/GraphClone.h>
 #include <NodeGraphTools/GraphDiff.h>
 
-// 문서 diff 시험이다(Docs/Design/NodeGraph.ko.md 9.4절 "diff"): 같은 문서는 빈 결과, 항목 종류마다
+// 문서 diff 시험이다(Docs/Design/NodeGraph 9.4절 "diff"): 같은 문서는 빈 결과, 항목 종류마다
 // 바뀐 것을 찾고 정해진 순서·줄 형식으로 쓴다. semanticOnly는 배치·제목·주석·북마크를 보지 않는다.
 using namespace rocks;
 namespace graph_diff_tests_file {

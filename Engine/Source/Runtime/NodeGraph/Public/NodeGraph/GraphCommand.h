@@ -7,7 +7,7 @@
 #include <Core/Text/String.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 그래프 공통 명령과 명령 목록이다(Docs/Design/NodeGraph.ko.md 8.1·8.6절). 명령은 데이터다 — 메뉴
+// 그래프 공통 명령과 명령 목록이다(Docs/Design/NodeGraph 8.1·8.6절). 명령은 데이터다 — 메뉴
 // 항목·RPC· headless 시험이 같은 목록을 만들어 GraphMutator::Execute에 넘긴다. 도메인 명령(변환
 // 노드 끼우기 등)은 이 명령들의 목록이다.
 //
@@ -138,7 +138,7 @@ public:
     Result<void> RemoveRetainedPin(Guid graph, Guid node, Name key) noexcept;
 
     // 완성된 노드 데이터(입력 기본값·고아 핀·활성 상태 포함, 등록되지 않은 종류 — 자리 노드 — 도
-    // 된다)를 graph에 넣는다(붙여넣기·template — Docs/Design/NodeGraph.ko.md 9.4절). layout.node는
+    // 된다)를 graph에 넣는다(붙여넣기·template — Docs/Design/NodeGraph 9.4절). layout.node는
     // node.id로 맞춘다. 입력 기본값·고아 핀 목록은 넣을 때 정규 순서로 맞춘다.
     Result<void> InsertNode(Guid graph, const GraphNode& node, const NodeLayout& layout) noexcept;
 

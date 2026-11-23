@@ -272,8 +272,12 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
                         continue;
                     }
 
-                    // TickableSubsystems 자리는 World의 tickable Subsystem을 먼저 부르고 그다음
-                    // 등록된 콜백을 부른다(16.5절).
+                    // Timers 자리는 World의 LifeSpan 만료를, TickableSubsystems 자리는 tickable
+                    // Subsystem을 먼저 처리하고 그다음 등록된 콜백을 부른다(16.5·17.5절).
+                    if (stage == EngineStage::Timers) {
+                        ExpireLifeSpans();
+                    }
+
                     if (stage == EngineStage::TickableSubsystems) {
                         RunTickableSubsystems(frame);
                     }

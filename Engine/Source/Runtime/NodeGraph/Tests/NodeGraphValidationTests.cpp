@@ -1,6 +1,6 @@
 #include "NodeGraphTestSupport.h"
 
-// 문서 정규화와 불변식 검사 시험이다(Docs/Design/NodeGraph.ko.md 6.3절, 13절 GT1 구조 사례): 표본
+// 문서 정규화와 불변식 검사 시험이다(Docs/Design/NodeGraph 6.3절, 13절 GT1 구조 사례): 표본
 // 문서는 통과하고, 규칙(GI1–GI14)마다 하나씩 어긴 문서는 정확히 그 규칙·요소로 거부된다. 검사는
 // 문서를 바꾸지 않는다. 알 수 없는 종류의 검사 범위, 정규화의 결과·멱등성, 위반 상한.
 using namespace rocks;

@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 권한·RPC·저장 타입 규칙이다(Docs/Design/SparksLanguage.ko.md 3.15절): 저장 가능 타입(S1001), 복제
+// 권한·RPC·저장 타입 규칙이다(Docs/Design/SparksLanguage 3.15절): 저장 가능 타입(S1001), 복제
 // 타입(S1002), RPC 호출(S1004). 권한 구역 밖의 `@net` 쓰기(S1003)는 효과 분석(CheckContexts.cpp)이
 // 본다. Rules 단계(LC3)에서만 돈다.
 

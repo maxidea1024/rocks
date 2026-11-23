@@ -4,7 +4,7 @@
 #include <Core/Memory/Allocator.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 문서 변경 통지다(Docs/Design/NodeGraph.ko.md 8.3·8.6절). GraphMutator가 명령·undo·redo·bracket
+// 문서 변경 통지다(Docs/Design/NodeGraph 8.3·8.6절). GraphMutator가 명령·undo·redo·bracket
 // 취소 하나마다 묶음 하나를 구독자에게 보낸다.
 //
 // 사용 예:

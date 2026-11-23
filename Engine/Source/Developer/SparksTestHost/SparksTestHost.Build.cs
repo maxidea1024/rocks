@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Sparks test host (Docs/Design/SparksLanguage.ko.md sections 13.1 and 18.1): the conformance runner that compiles each
+// Sparks test host (Docs/Design/SparksLanguage sections 13.1 and 18.1): the conformance runner that compiles each
 // Conformance/<area>/<case>.spark and compares the result with <case>.expect, the fake engine host the VM runs against (from
 // milestone LC5), and the @test runner on a headless host (Docs/Design/SparksTools.ko.md section 9). Development module: tests and
 // the Sparks CLI link it; game targets do not.

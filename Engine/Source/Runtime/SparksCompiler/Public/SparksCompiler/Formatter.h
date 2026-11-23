@@ -6,7 +6,7 @@
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/Source.h>
 
-// Sparks 공식 formatter다(Docs/Design/SparksLanguage.ko.md 3.1절 "단일 공식 formatter", 규칙은
+// Sparks 공식 formatter다(Docs/Design/SparksLanguage 3.1절 "단일 공식 formatter", 규칙은
 // Docs/Design/SparksTools.ko.md 3절·8절). 설정이 없다. token 기반이다: 토큰 글자는 바꾸지 않고 토큰
 // 사이의 줄바꿈·빈 줄·들여쓰기·공백만 정한다(주석은 자리를 지키고 문자열 리터럴은 원문 그대로).
 //

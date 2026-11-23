@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 
-// 그래프 텍스트 codec 시험이다(Docs/Design/NodeGraph.ko.md 9.4절): 문서 왕복(바이트·텍스트 결정성),
+// 그래프 텍스트 codec 시험이다(Docs/Design/NodeGraph 9.4절): 문서 왕복(바이트·텍스트 결정성),
 // 레코드 값 텍스트·바이트 형식, semanticOnly, Json5 입력, 조각 왕복과 미해석 노드, 읽기 오류의 진단
 // 위치.
 using namespace rocks;

@@ -154,12 +154,26 @@ public:
         return Result<void>::Success();
     }
 
+    // 엔진이 Running이 되고 PostEngineInit 단계 모듈이 시작된 뒤 첫 프레임 전에 한 번 불린다(UE
+    // UGameEngine::Start 자리 — 기본 맵 열기처럼 CreateWorld가 필요한 시작 일). 실패하면 Engine이
+    // 정상 종료 순서(OnEngineShutdown부터)로 정리한 뒤 Failed가 되고 Initialize가 그 오류를
+    // 돌려준다(Docs/Design/EngineRuntime 18.2절).
+    virtual Result<void> OnEngineReady(Engine&) noexcept {
+        return Result<void>::Success();
+    }
+
     // 매 프레임 World Tick 전에 호출된다.
     virtual void OnEngineTick(Engine&) noexcept {
     }
 
     // 엔진 종료의 첫 단계다(World 파괴 전).
     virtual void OnEngineShutdown(Engine&) noexcept {
+    }
+
+    // World가 정리(EndPlay·Shutdown)를 마치고 저장소를 놓기 직전이다(UE
+    // FWorldDelegates::OnPreWorldFinishDestroy 자리 — 누가 DestroyWorld를 불렀든, 엔진 종료
+    // 포함). World 포인터를 든 쪽이 여기서 비운다. 이 안의 DestroyWorld는 5단계로 미뤄진다.
+    virtual void OnWorldDestroyed(Engine&, World&) noexcept {
     }
 
 protected:
@@ -287,9 +301,10 @@ struct EngineStats {
 // - 초기화 순서: TypeRegistry·ModuleRegistration -> 타입 등록(로더의 모듈 타입 — 타입 등록기를
 //   붙여 시작한 모듈의 타입을 시작 순서로, 그다음 엔진 묶음 모듈을 Startup 직전 등록하며 시작 ->
 //   EngineConfig.registerModuleTypes -> EngineConfig.registerTypes(native, 마지막)) -> 엔진
-//   Registry -> EngineSubsystem -> EngineClient -> PostEngineInit 단계 모듈. 어느 단계든 실패하면
-//   이미 한 단계를 역순으로 정리하고 Failed가 된다(PostEngineInit 실패는 client.OnEngineShutdown
-//   뒤).
+//   Registry -> EngineSubsystem -> EngineClient -> PostEngineInit 단계 모듈 -> Running ->
+//   client.OnEngineReady. 어느 단계든 실패하면 이미 한 단계를 역순으로 정리하고 Failed가
+//   된다(PostEngineInit 실패는 client.OnEngineShutdown 뒤, OnEngineReady 실패는 Shutdown과 같은
+//   정상 종료 순서).
 // - 종료 순서(계획 3.2절): BeginShutdown(Subsystem 역순 → hooks) -> client.OnEngineShutdown -> 모든
 //   World Shutdown·파괴 -> CompleteInFlightWork(Subsystem 역순 → hooks) -> Subsystem 역순 정리 ->
 //   [엔진 Registry 최종 GC -> hooks.DrainShutdownCleanup]을 둘 다 0이 될 때까지 반복(최대
@@ -300,7 +315,8 @@ struct EngineStats {
 //   남아 Unregister가 Busy로 멈추기 때문이다. Shutdown은 남은 lease만 검사하고 dependent 순서로
 //   레코드를 반납한다. 초기화 실패 경로는 hook 단계 없이 같은 정리 순서다. 프레임 실행 중(hook
 //   안)에는 Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
-// - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서 파괴된다.
+// - World는 Engine이 소유한다. World Tick 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서
+//   파괴된다(그 밖에서는 즉시).
 //
 // 로그(Docs/Design/LoggingSystem.ko.md 13절, 카테고리 LogEngine): 초기화 성공·단계별 실패, Run
 // 종료 사유, 종료 시작·완료·실패, World 생성 실패·Tick 실패(연속 실패는 첫 번째와 요약 한 번)·지연
@@ -376,7 +392,9 @@ public:
     // 포인터는 DestroyWorld·Shutdown까지 유효하다.
     Result<World*> CreateWorld(const WorldCreateDesc& desc) noexcept;
 
-    // World 파괴를 요청한다. 프레임 밖이면 즉시, 프레임 안이면 5단계(지연 작업)에서 파괴한다.
+    // World 파괴를 요청한다. World Tick(4단계) 안이나 다른 World를 파괴하는 중(그 정리 hook이 부른
+    // 경우)이면 5단계(지연 작업)로 미루고, 그 밖(client hook·loop hook·프레임 밖)이면 즉시 파괴한다
+    // (Docs/Design/EngineRuntime 18.5절 — 새 World를 만들기 전에 이전 World 정리가 끝나야 한다).
     // 모르는 World는 NotFound다. 파괴가 Busy로 실패하면(외부 Borrow) 다음 프레임에 다시 시도한다.
     // reason은 World EndPlay의 정리 이유다(17.6절 — 기본 Quit).
     Result<void> DestroyWorld(World* world, EndPlayReason reason = EndPlayReason::Quit) noexcept;
@@ -438,6 +456,9 @@ public:
     EngineStats Stats() const noexcept;
 
 private:
+    // 파괴를 아직 시도하지 않은 WorldContext의 destroyAttemptFrame이다.
+    static constexpr uint64 NoDestroyAttempt = NumericLimits<uint64>::Max();
+
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
@@ -447,6 +468,8 @@ private:
         bool destroyWarned = false;
         ErrorCode destroyError = ErrorCode::None;
         uint64 destroyDeferredFrame = 0;
+        // 5단계에서 마지막으로 파괴를 시도한 프레임이다(한 프레임에 한 번만 시도한다).
+        uint64 destroyAttemptFrame = NoDestroyAttempt;
         // 연속 Tick 실패다. 첫 실패만 Error로 남기고 뒤따른 실패는 세어 두었다가 회복·파괴 때 한 번
         // 요약한다.
         bool tickFailing = false;
@@ -462,6 +485,8 @@ private:
     Result<void> CloseAfterSubsystems(const char*& failedStage) noexcept;
     Result<void> DestroyWorldNow(usize index) noexcept;
     void ProcessDeferred() noexcept;
+    // 미룬 파괴가 WorldDestroyWarnFrames를 넘도록 남으면 한 번 경고한다.
+    void WarnLongDeferredDestroy(WorldContext& context) noexcept;
     // World Tick 결과를 반영한다. 연속 실패는 첫 번째만 Error로 남긴다.
     void NoteWorldTick(WorldContext& context, const Result<void>& ticked) noexcept;
     // 연속 Tick 실패를 끝낸다. 첫 실패 뒤 더 실패한 것이 있으면 한 번 요약한다.
@@ -506,6 +531,9 @@ private:
     // 전체 수집 요청 표지다(0·1, platform atomic — 다른 스레드가 세우고 프레임이 소비한다).
     uint32 fullCollectionRequested_ = 0;
     bool inFrame_ = false;
+    // 4단계(World Tick) 동안과 World 파괴(DestroyWorldNow) 동안 참이다. 이때 DestroyWorld는 5단계로
+    // 미룬다(World 배열을 도는 중이거나 정리 hook 안이다).
+    bool deferWorldDestroy_ = false;
     // RunFrame 전체 동안 참이다(IsInFrame — inFrame_은 5단계에서 잠시 거짓이다).
     bool frameRunning_ = false;
     // Shutdown이 도는 동안 참이다(재진입 Busy).

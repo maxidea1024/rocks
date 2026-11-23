@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 #include <Core/Text/StringView.h>
 
-// Sparks 이름 규칙의 글자 검사다(Docs/Design/SparksLanguage.ko.md 3.1절 명명, 3.4절 패키지·모듈
+// Sparks 이름 규칙의 글자 검사다(Docs/Design/SparksLanguage 3.1절 명명, 3.4절 패키지·모듈
 // 경로, 10.2절 binding schema). 이름은 ASCII 영문자로 시작하고 ASCII 영문자·숫자만 쓴다(`_` 없음).
 
 namespace rocks::sparks::detail {

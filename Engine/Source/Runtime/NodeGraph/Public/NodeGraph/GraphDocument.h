@@ -10,7 +10,7 @@
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 
-// 노드 그래프 문서와 배치 데이터의 리플렉션 타입이다(Docs/Design/NodeGraph.ko.md 6.1절, UE 대응은
+// 노드 그래프 문서와 배치 데이터의 리플렉션 타입이다(Docs/Design/NodeGraph 6.1절, UE 대응은
 // 4절 표).
 //
 // 의미 데이터(GraphDocument)와 배치 데이터(GraphDocumentLayout)는 별도 struct다(GD8). 도메인 자산이

@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-// 의미 바이트·semantic hash 시험이다(Docs/Design/NodeGraph.ko.md 8.4절, 13절 GT9 바이트 부분):
+// 의미 바이트·semantic hash 시험이다(Docs/Design/NodeGraph 8.4절, 13절 GT9 바이트 부분):
 // 결정성, 재경유 접기 (사슬·원천 없는 재경유·순번 출력 핀을 거친 순번), 배치·표시 대소문자와
 // 무관함, 의미 필드마다 바이트가 바뀜, 도메인 정규화의 적용과 계약 위반, 순환·입력 둘인 재경유의
 // 거부, 형식 머리와 golden hash.
