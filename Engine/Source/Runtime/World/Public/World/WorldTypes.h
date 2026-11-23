@@ -35,6 +35,24 @@ enum class ComponentState : uint8 {
 };
 
 const char* ActorStateName(ActorState state) noexcept;
+
+// World 종류다(UE EWorldType — Game·Editor·PIE·EditorPreview·GamePreview·Inactive, Preview가
+// EditorPreview·GamePreview를 합친다). Subsystem 생성 판정(16.3절 ERD9)과 GameDirector
+// 생성(19.3절)에 쓴다. Docs/Design/EngineRuntime 16.4절.
+enum class WorldKind : uint8 {
+    // 독립 실행·서버의 게임 World다.
+    Game,
+    // 편집 World다(BeginPlay하지 않는다).
+    Editor,
+    // 편집 World를 복제해 실행하는 World다(UE PIE).
+    Tryout,
+    // 에셋 미리보기·썸네일 World다.
+    Preview,
+    // 적재됐지만 실행하지 않는 World다.
+    Inactive
+};
+
+const char* WorldKindName(WorldKind kind) noexcept;
 const char* ComponentStateName(ComponentState state) noexcept;
 
 // World의 수명 단계다. 초기화와 게임플레이 시작을 분리한다(에디터·미리보기 World는 Initialized에서

@@ -383,6 +383,16 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
     initializedSteps_ = 0;
 }
 
+OuterSubsystemLookup Engine::SubsystemLookup() const noexcept {
+    OuterSubsystemLookup lookup;
+    lookup.context = this;
+    lookup.find = [](const void* context, SubsystemKey key) noexcept -> void* {
+        // 조회 창은 EngineSubsystem* 를 void*로 넘긴다(GetEngineSubsystem이 되돌린다).
+        return static_cast<const Engine*>(context)->FindSubsystem(key);
+    };
+    return lookup;
+}
+
 Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     if (state_ != EngineState::Running) {
         return Result<World*>::Failure(ErrorCode::InvalidArgument);
@@ -402,6 +412,9 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.gcSchedule = desc.gcSchedule;
     worldDesc.gcScheduler = desc.gcScheduler != nullptr ? desc.gcScheduler : gcScheduler_.Get();
     worldDesc.subsystems = desc.subsystems;
+    worldDesc.kind = desc.kind;
+    worldDesc.outerSubsystems =
+        desc.outerSubsystems.find != nullptr ? desc.outerSubsystems : SubsystemLookup();
     // World가 엔진 설정 문맥에 자기 CVar 범위를 만든다(CVarSystem 14.2절).
     worldDesc.settings = config_.settings;
     auto created = UniquePtr<World>::TryMake(allocator_, allocator_, *types_, worldDesc);

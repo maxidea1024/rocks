@@ -3,6 +3,7 @@
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogContext.h>
 #include <Core/Math/MathUtility.h>
 #include <Platform/Fatal.h>
 #include <World/Actor.generated.h>
@@ -39,6 +40,34 @@ bool IsValidTickSettings(const TickSettings& settings) noexcept {
 
     return true;
 }
+
+const char* WorldKindName(WorldKind kind) noexcept {
+    switch (kind) {
+    case WorldKind::Game:
+        return "Game";
+    case WorldKind::Editor:
+        return "Editor";
+    case WorldKind::Tryout:
+        return "Tryout";
+    case WorldKind::Preview:
+        return "Preview";
+    case WorldKind::Inactive:
+        return "Inactive";
+    }
+
+    return "Unknown";
+}
+
+namespace {
+
+// WorldSubsystem 기본 생성 판정이다: Game·Editor·Tryout World(UE DoesSupportWorldType 기본 — Game·
+// Editor·PIE).
+bool DefaultWorldSubsystemWanted(const World& world) noexcept {
+    const WorldKind kind = world.Kind();
+    return kind == WorldKind::Game || kind == WorldKind::Editor || kind == WorldKind::Tryout;
+}
+
+} // namespace
 
 const char* ActorStateName(ActorState state) noexcept {
     switch (state) {
@@ -84,6 +113,8 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
       gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings),
       gcSchedule_(desc.gcSchedule) {
+    kind_ = desc.kind;
+    outer_ = desc.outerSubsystems;
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -160,9 +191,10 @@ Result<void> World::Initialize() noexcept {
     // Subsystem Initialize가 Actor를 Spawn할 수 있도록 먼저 Initialized로 둔다.
     state_ = WorldState::Initialized;
     Result<void> initialized = Result<void>::Success();
+    outerOpen_ = true;
     {
         HookScope hooks(*this);
-        initialized = subsystems_.Initialize(subsystemTypes_, *this);
+        initialized = subsystems_.Initialize(subsystemTypes_, *this, &DefaultWorldSubsystemWanted);
     }
 
     if (!initialized) {
@@ -176,8 +208,36 @@ Result<void> World::Initialize() noexcept {
 
         persistentLevel_ = {};
         ReleaseCVarScope();
+        outerOpen_ = false;
         state_ = WorldState::Created;
         return initialized;
+    }
+
+    // 생략은 오류가 아니다. 필수 의존 누락만 Warning으로 알린다(조건 거짓은 정상 구성).
+    for (const SkippedSubsystem& skipped : subsystems_.Skipped()) {
+        if (skipped.reason == SubsystemSkipReason::MissingDependency) {
+            LogContextScope context("World", Name());
+            Log::Warning(
+                LogWorld,
+                "Skipped world subsystem {Subsystem}: dependency {Dependency} was not created",
+                skipped.name, skipped.missing);
+        }
+    }
+
+    {
+        HookScope hooks(*this);
+        for (usize index = 0; index < subsystems_.Count(); ++index) {
+            subsystems_.At(index)->PostInitialize(*this);
+        }
+    }
+
+    // 용량 확보 실패는 tickable이 Tick을 받지 못할 뿐이다(진단은 S14 덤프).
+    for (usize index = 0; index < subsystems_.Count(); ++index) {
+        WorldSubsystem* subsystem = subsystems_.At(index);
+        if (subsystem->IsTickable()) {
+            auto added = tickables_.TryPushBack(subsystem);
+            (void)added;
+        }
     }
 
     subsystemTypes_ = {};
@@ -308,6 +368,7 @@ Result<void> World::Shutdown() noexcept {
     ObjectAccessScope scope(Access());
     if (state_ != WorldState::TearingDown) {
         const bool initialized = state_ != WorldState::Created;
+        const bool played = state_ == WorldState::Playing;
         state_ = WorldState::TearingDown;
         ticks_.Close();
         // 엔진 단계 콜백을 건 모듈이 World보다 먼저 내려가도 포인터가 남지 않게 비운다.
@@ -317,10 +378,26 @@ Result<void> World::Shutdown() noexcept {
         DestroyAllActors();
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
+        tickables_.Clear();
         if (initialized) {
             HookScope hooks(*this);
+            // 게임 진행이 끝난다: Actor 정리 뒤 OnWorldEndPlay(역순) → 바깥 조회 창 닫기 →
+            // PreDeinitialize(역순) → Deinitialize(역순)(16.5절).
+            if (played) {
+                for (usize index = subsystems_.Count(); index > 0; --index) {
+                    subsystems_.At(index - 1)->OnWorldEndPlay(*this);
+                }
+            }
+
+            outerOpen_ = false;
+            for (usize index = subsystems_.Count(); index > 0; --index) {
+                subsystems_.At(index - 1)->PreDeinitialize(*this);
+            }
+
             subsystems_.Deinitialize(*this);
         }
+
+        outerOpen_ = false;
 
         // 모든 Actor가 정리됐으므로 영구 Level을 포함한 모든 Level 루트를 반환한다.
         while (levels_.Size() != 0) {

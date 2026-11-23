@@ -23,7 +23,7 @@
 ### 16.3 Rocks 계약
 
 - **엄격한 정적 의존 유지(ERD8).** 의존은 지금처럼 타입 정의에 정적으로 선언하고, 순환·누락을 생성 전에 거부한다. 정리는 초기화의 **역순**이다. UE와 다르다(UE는 순환 미감지·정방향 정리). 의존하는 쪽이 정리될 때까지 의존 대상이 살아 있어야 해서다. `InitializeDependency` 같은 실행 중 의존 요청은 두지 않는다.
-- **조건부 생성(ERD9).** `SubsystemType`에 `shouldCreate(const Owner&)` 판정을 더한다(없으면 항상 생성). WorldSubsystem 기본 판정은 World 종류가 Game·Editor·Tryout일 때 생성이다(UE `DoesSupportWorldType`, 16.4절 World 종류). 필수 의존이 생성되지 않으면 의존하는 쪽도 생성하지 않고 진단 `SubsystemSkippedMissingDependency`를 남긴다(오류는 아니다). UE와 다르다 — UE는 `InitializeDependency`가 nullptr를 돌려줘도 의존하는 쪽을 그대로 만든다. Rocks는 필수로 선언한 의존이 언제나 있다는 계약을 지키려고 의존하는 쪽을 뺀다(문서화된 차이). 있으면 순서만 맞추는 `optionalDependencies`를 따로 둔다.
+- **조건부 생성(ERD9).** `SubsystemType`에 `shouldCreate(const void* owner)` 판정을 더한다(없으면 소유자 기본 판정 — `SubsystemCollection::Initialize`의 세 번째 인자, 없으면 생성). 생략한 것은 `Skipped()`(`SkippedSubsystem{name, reason, missing}`)에 남고 World는 `SkippedSubsystems()`로 보여 준다. WorldSubsystem 기본 판정은 World 종류가 Game·Editor·Tryout일 때 생성이다(UE `DoesSupportWorldType`, 16.4절 World 종류). 필수 의존이 생성되지 않으면 의존하는 쪽도 생성하지 않고 진단 `SubsystemSkippedMissingDependency`를 남긴다(오류는 아니다). UE와 다르다 — UE는 `InitializeDependency`가 nullptr를 돌려줘도 의존하는 쪽을 그대로 만든다. Rocks는 필수로 선언한 의존이 언제나 있다는 계약을 지키려고 의존하는 쪽을 뺀다(문서화된 차이). 있으면 순서만 맞추는 `optionalDependencies`를 따로 둔다.
 - **바깥 계층 조회(ERD10).** 계층은 Engine ⊃ GameInstance ⊃ LocalPlayer, Engine ⊃ World다. World 모듈은 Engine·Gameplay를 모르므로(3절) World에는 **타입을 지운 조회 창**만 둔다: `WorldDesc::outerSubsystems`(`OuterSubsystemLookup` — `void* Find(SubsystemKey) const`)를 생성 때 넘기고 World는 해석하지 않는다. 타입 있는 도우미는 바깥 모듈의 자유 함수다: `GetEngineSubsystem<T>(World&)`(Engine 모듈), `GetGameInstanceSubsystem<T>(World&)`(Gameplay 모듈). 바깥이 안쪽을 조회하는 API는 두지 않는다.
   - 수명: GameInstance Subsystem은 게임 World의 `Deinitialize`보다 먼저 정리된다(18.2절 종료 순서, UE도 `GameEngine.cpp:1374–1381`에서 같다). 그래서 조회 창은 World `EndPlay`가 끝날 때(Director 없는 World는 `Shutdown` 시작 때) 닫히고, `PreDeinitialize`·`Deinitialize` 안의 조회는 nullptr다. 정리 단계에서 바깥 Subsystem이 필요하면 `OnWorldEndPlay`에서 끝낸다.
 - **새 종류(ERD11).** `GameInstanceSubsystem`(Gameplay 모듈, 18절)과 `LocalPlayerSubsystem`(18.4절)을 같은 `SubsystemCollection`으로 만든다. 초기화·정리 시점은 UE와 같다: GameInstance `OnInit` 뒤 마지막, LocalPlayer 추가 때. 정리는 LocalPlayer(제거 때) → GameInstance(LocalPlayer를 모두 지운 뒤).
@@ -44,7 +44,7 @@
 | `PreDeinitialize` | Shutdown, 모든 `Deinitialize` 전 일괄(역순) | 시점 같음, 순서만 다름(UE 정방향 — `World.cpp:6476–6479`) |
 | `Deinitialize` | 역순 | 순서만 다름(ERD8) |
 
-- **Tick하는 WorldSubsystem.** `WorldSubsystemType`에 `tickable` 표시와 `OnTick(const TickContext&)`를 더한다. LateUpdate 시작 엔진 단계 `TickableSubsystems`(15.4절)에서 초기화 순서대로 부른다. World가 Initialized·Playing일 때만 실행하고 pause 중에는 `tickWhenPaused`가 참인 것만 unscaled delta로 실행한다(UE `ETickableTickType`·`IsTickableWhenPaused`).
+- **Tick하는 WorldSubsystem.** `WorldSubsystem`의 `IsTickable()`·`TickWhenPaused()`·`OnTick(World&, const TickContext&)`(구현 S8). LateUpdate 시작 엔진 단계 `TickableSubsystems`(15.4절)에서 World가 초기화 순서대로 먼저 부르고, 그 자리에 등록된 콜백(`SetEngineStage`)은 그 뒤에 부른다. World가 Initialized·Playing일 때만 실행하고 pause 중에는 `tickWhenPaused`가 참인 것만 unscaled delta로 실행한다(UE `ETickableTickType`·`IsTickableWhenPaused`).
 - 늦은 추가가 없으므로 보충 호출은 필요 없다(동적 추가를 들일 때 UE처럼 보충한다).
 
 ### 16.6 시험(완료 조건)
