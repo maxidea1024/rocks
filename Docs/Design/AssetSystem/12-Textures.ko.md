@@ -257,7 +257,7 @@ BC·ASTC·ETC 인코더 없음, 렌더러는 비압축만. 쿠킹은 비압축�
 | 단계 | 내용 | 모듈 |
 |---|---|---|
 | A5a | 클래스 기본값 레코드: Registry 밖 인스턴스 인코딩 경로(그래프 저장과 같은 인코딩 본문), TypeRegistry 등록 레코드에 붙는 지연 생성·한 번 게시(TypeLease로 접근), 두 번 생성해 인코딩 대조(결정성), 참조 기본값 null만, 할당 실패가 아닌 실패는 등록 세대 동안 기억, 레코드가 없는 타입(추상·불완전 레이아웃·생성 함수표 없음), 레코드 경로 조회(PropertyPath), 지문(레코드 byte SHA-256 + 구성(editor·cooked)·codec wire 버전) | ObjectRuntime·ObjectSerialization |
-| A5b | 차이 쓰기와 override 집합: 차이 형식은 호출자 옵션(패키지 저장만 — undo·스냅샷·복제·세이브는 전부 저장 + 집합 기록), 저장 값 = override 집합 ∪ 기준과 인코딩이 다른 값, struct 멤버 단위·Atomic 통째·배열 통째, 차이 형식 로드가 파일의 값 경로로 집합을 채움, 경로 쓰기(`asset-set`)가 기록, 되돌리기(단일 값·원소·멤버, Atomic 통째), 같음 = wire byte(참조는 대상 정체성) | ObjectSerialization·AssetRuntime·AssetDatabase |
+| A5b | (A5b1 차이 쓰기·override 집합 → A5b2 되돌리기 — RuntimeClassMetadata 'A5b' 명세) 차이 쓰기와 override 집합: 차이 형식은 호출자 옵션(패키지 저장만 — undo·스냅샷·복제·세이브는 전부 저장 + 집합 기록), 저장 값 = override 집합 ∪ 기준과 인코딩이 다른 값, struct 멤버 단위·Atomic 통째·배열 통째, 차이 형식 로드가 파일의 값 경로로 집합을 채움, 경로 쓰기(`asset-set`)가 기록, 되돌리기(단일 값·원소·멤버, Atomic 통째), 같음 = wire byte(참조는 대상 정체성) | ObjectSerialization·AssetRuntime·AssetDatabase |
 | A5c | 지문 연결과 이주: 패키지 Summary 타입 표 클래스 행 지문 열(A1 형식 개정), cookKey 지역 입력의 export 구체 클래스별 (TypeId, 지문) 목록(A4 개정), 쿠킹 패키지 로드의 지문 불일치 `UnsupportedVersion`·에디터 패키지 진단, `TickSettings` 리플렉션 이동, fixture·바이트 헤더 재생성 | AssetRuntime·AssetCooker·Engine |
 | A5d | 텍스처 타입: `StreamableRenderAsset`(AssetRuntime), `Texture`와 차원 클래스 다섯, 설정 enum(12.4절 — TextureGroup 82종 등), `TextureSource`·`TexturePlatformData`, 계약 설정 `UnsupportedSetting`·숨김 값 `InvalidSetting` 판정 | Texture(새 Runtime 모듈)·AssetRuntime |
 | A5e | 원본 디코더 1: 결과 형식(TextureSource 형식 10종)·진단 공통부, BMP·TGA·PNG(15절)·PSD(12.2절 규칙) | ImageCore(새 Developer 모듈) |
