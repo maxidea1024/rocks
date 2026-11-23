@@ -118,6 +118,7 @@ Result<void> PlanAssignmentOverrides(const TypeLease& lease,
             }
         }
 
+        // PrepareAssignments가 검증한 대입이라 첫 필드는 늘 해석된다(여기 오지 않는다).
         if (!parsed) {
             continue;
         }

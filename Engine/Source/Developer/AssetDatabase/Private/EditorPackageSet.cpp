@@ -1893,6 +1893,11 @@ Result<void> EditorPackageSet::ReserveOverrides(ObjectHandle object,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 기록할 단위가 없으면 빈 항목을 만들지 않는다.
+    if (pending.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
     auto outermost = registry_->GetOutermost(Access(), object);
     if (!outermost) {
         return Result<void>::Failure(outermost.Error());
