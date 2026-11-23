@@ -11,6 +11,10 @@ constexpr uint32 NoIndex = NumericLimits<uint32>::Max();
 // 늦게 실행되는 일을 막는다(GameClock의 고정 스텝 판정과 같은 값).
 constexpr double IntervalTolerance = 1.0e-9;
 
+bool IsFixedPhase(TickPhase phase) noexcept {
+    return phase == TickPhase::Physics;
+}
+
 } // namespace
 
 const char* TickPhaseName(TickPhase phase) noexcept {
@@ -34,7 +38,7 @@ const char* TickPhaseName(TickPhase phase) noexcept {
 
 TickScheduler::Entry::Entry(Allocator& allocator, const TickRegistration& value,
                             uint64 order) noexcept
-    : registration(value), prerequisites(allocator), sequence(order) {
+    : registration(value), prerequisites(allocator), sequence(order), effective(value.phase) {
 }
 
 TickScheduler::TickScheduler(Allocator& allocator) noexcept
@@ -43,8 +47,8 @@ TickScheduler::TickScheduler(Allocator& allocator) noexcept
              Array<TickHandle>(allocator), Array<TickHandle>(allocator),
              Array<TickHandle>(allocator)},
       pendingRemoved_(allocator), scratch_(allocator), localIndex_(allocator), indegree_(allocator),
-      dependentOffsets_(allocator), dependents_(allocator), heap_(allocator), marks_(allocator),
-      stack_(allocator) {
+      dependentOffsets_(allocator), dependents_(allocator), heap_(allocator),
+      phaseScratch_(allocator), marks_(allocator), stack_(allocator) {
 }
 
 Result<TickHandle> TickScheduler::Register(const TickRegistration& registration) noexcept {
@@ -103,13 +107,19 @@ Result<void> TickScheduler::Unregister(TickHandle handle) noexcept {
         return Result<void>::Success();
     }
 
-    const uint32 phase = static_cast<uint32>(entry->registration.phase);
+    const uint32 phase = static_cast<uint32>(entry->effective);
     const bool ordered = entry->orderPosition != NoOrder;
     const bool reorder = ReleaseDependencies(*entry);
+    if (entry->effective != entry->registration.phase && demoted_ != 0) {
+        --demoted_;
+    }
     auto removed = entries_.TryRemove(handle.slot);
     if (!removed) {
         return removed;
     }
+
+    // 이 항목에 의존하던 항목은 이 항목 때문에 늦춰졌을 수 있다(늦춰진 항목이 있을 때만).
+    phasesDirty_ = phasesDirty_ || (reorder && demoted_ != 0);
 
     NoteRemovedLocked(phase, ordered);
     dirty_[phase] = dirty_[phase] || reorder;
@@ -129,6 +139,55 @@ Result<void> TickScheduler::SetEnabled(TickHandle handle, bool enabled) noexcept
     }
 
     entry->registration.enabled = enabled;
+    return Result<void>::Success();
+}
+
+Result<void> TickScheduler::SetPhase(TickHandle handle, TickPhase phase) noexcept {
+    Entry* entry = entries_.Find(handle.slot);
+    if (entry == nullptr || entry->removed) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (static_cast<uint32>(phase) >= TickPhaseCount ||
+        IsFixedPhase(phase) != IsFixedPhase(entry->registration.phase)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (entry->registration.phase != phase) {
+        entry->registration.phase = phase;
+        phasesDirty_ = true;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> TickScheduler::SetPriority(TickHandle handle, int32 priority) noexcept {
+    Entry* entry = entries_.Find(handle.slot);
+    if (entry == nullptr || entry->removed) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (entry->registration.priority != priority) {
+        entry->registration.priority = priority;
+        dirty_[static_cast<uint32>(entry->effective)] = true;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> TickScheduler::SetInterval(TickHandle handle, double intervalSeconds) noexcept {
+    Entry* entry = entries_.Find(handle.slot);
+    if (entry == nullptr || entry->removed) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (!math::IsFinite(intervalSeconds) || intervalSeconds < 0.0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    entry->registration.intervalSeconds = intervalSeconds;
+    entry->accumulated = 0.0;
+    entry->sinceLastRun = 0.0;
     return Result<void>::Success();
 }
 
@@ -195,7 +254,9 @@ Result<void> TickScheduler::AddPrerequisite(TickHandle dependent,
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (dependent == prerequisite || after->registration.phase != before->registration.phase) {
+    // 고정 스텝 등록과 가변 등록은 실행 횟수가 달라 순서가 뜻이 없다.
+    if (dependent == prerequisite ||
+        IsFixedPhase(after->registration.phase) != IsFixedPhase(before->registration.phase)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -223,9 +284,19 @@ Result<void> TickScheduler::AddPrerequisite(TickHandle dependent,
     before = entries_.Find(prerequisite.slot);
     ++before->dependents;
 
-    // 지금 순서에서 이미 선행이 앞이면 새 간선은 순서를 바꾸지 않는다(재구성해도 같은 순서 — 이
-    // 간선이 막는 선택은 원래 순서에서도 일어나지 않았다).
-    const uint32 phase = static_cast<uint32>(after->registration.phase);
+    // 선행이 더 늦은 단계면 dependent를 늦춘다(다음 프레임 첫 RunPhase 전에 반영). 더 이른 단계면
+    // 단계 순서가 이미 보장한다(간선은 실효 단계 계산을 위해 남긴다).
+    if (before->effective > after->effective) {
+        phasesDirty_ = true;
+        return Result<void>::Success();
+    }
+    if (before->effective < after->effective) {
+        return Result<void>::Success();
+    }
+
+    // 같은 단계: 지금 순서에서 이미 선행이 앞이면 새 간선은 순서를 바꾸지 않는다(재구성해도 같은
+    // 순서 — 이 간선이 막는 선택은 원래 순서에서도 일어나지 않았다).
+    const uint32 phase = static_cast<uint32>(after->effective);
     if (dirty_[phase] || before->orderPosition == NoOrder || after->orderPosition == NoOrder ||
         before->orderPosition >= after->orderPosition) {
         dirty_[phase] = true;
@@ -248,12 +319,19 @@ Result<void> TickScheduler::RemovePrerequisite(TickHandle dependent,
                 return removed;
             }
 
-            if (Entry* before = entries_.Find(prerequisite.slot);
-                before != nullptr && before->dependents != 0) {
+            Entry* before = entries_.Find(prerequisite.slot);
+            if (before != nullptr && before->dependents != 0) {
                 --before->dependents;
             }
 
-            dirty_[static_cast<uint32>(after->registration.phase)] = true;
+            if (before != nullptr && before->effective == after->effective) {
+                dirty_[static_cast<uint32>(after->effective)] = true;
+            }
+            // 이 간선 때문에 늦춰졌을 수 있다.
+            if (after->effective != after->registration.phase) {
+                phasesDirty_ = true;
+            }
+
             return Result<void>::Success();
         }
     }
@@ -266,8 +344,140 @@ bool TickScheduler::IsRegistered(TickHandle handle) const noexcept {
     return entry != nullptr && !entry->removed;
 }
 
+Result<TickPhase> TickScheduler::EffectivePhase(TickHandle handle) const noexcept {
+    const Entry* entry = entries_.Find(handle.slot);
+    if (entry == nullptr || entry->removed) {
+        return Result<TickPhase>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TickPhase>::Success(entry->effective);
+}
+
 void TickScheduler::BeginFrame() noexcept {
     executedThisFrame_ = 0;
+    phaseRanThisFrame_ = false;
+}
+
+Result<void> TickScheduler::RecomputeEffectivePhases() noexcept {
+    // 1) 살아 있는 항목을 모은다(scratch_ 위치 = 지역 번호).
+    scratch_.Clear();
+    for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
+        if (iterator->removed) {
+            continue;
+        }
+        auto pushed = scratch_.TryPushBack(TickHandle{iterator.Handle()});
+        if (!pushed) {
+            return pushed;
+        }
+    }
+
+    const usize count = scratch_.Size();
+    if (!localIndex_.TryResize(entries_.SlotCount()) || !indegree_.TryResize(count) ||
+        !dependentOffsets_.TryResize(count + 1) || !heap_.TryReserve(count) ||
+        !phaseScratch_.TryResize(count)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+    for (uint32& value : localIndex_) {
+        value = NoIndex;
+    }
+    for (usize index = 0; index < count; ++index) {
+        localIndex_[scratch_[index].slot.index] = static_cast<uint32>(index);
+        indegree_[index] = 0;
+        phaseScratch_[index] = entries_.Find(scratch_[index].slot)->registration.phase;
+    }
+    for (uint32& value : dependentOffsets_) {
+        value = 0;
+    }
+
+    // 2) 단계와 무관한 전체 그래프의 진입 차수와 역방향(선행 → 의존) 인접 목록(CSR)이다. 지역 번호는
+    //    칸 번호로 찾으므로 세대가 다른(해제 뒤 재사용된) 선행은 handle 비교로 거른다.
+    uint32 edges = 0;
+    for (usize index = 0; index < count; ++index) {
+        const Entry& entry = *entries_.Find(scratch_[index].slot);
+        for (const TickHandle& prerequisite : entry.prerequisites) {
+            const uint32 local = localIndex_[prerequisite.slot.index];
+            if (local == NoIndex || !(scratch_[local] == prerequisite)) {
+                continue;
+            }
+            ++indegree_[index];
+            ++dependentOffsets_[local + 1];
+            ++edges;
+        }
+    }
+    for (usize index = 0; index < count; ++index) {
+        dependentOffsets_[index + 1] += dependentOffsets_[index];
+    }
+    if (!dependents_.TryResize(edges)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+    // 채우기 위치로 heap_을 잠시 쓴다.
+    heap_.Clear();
+    for (usize index = 0; index < count; ++index) {
+        auto pushed = heap_.TryPushBack(dependentOffsets_[index]);
+        (void)pushed;
+    }
+    for (usize index = 0; index < count; ++index) {
+        const Entry& entry = *entries_.Find(scratch_[index].slot);
+        for (const TickHandle& prerequisite : entry.prerequisites) {
+            const uint32 local = localIndex_[prerequisite.slot.index];
+            if (local != NoIndex && scratch_[local] == prerequisite) {
+                dependents_[heap_[local]++] = static_cast<uint32>(index);
+            }
+        }
+    }
+
+    // 3) 위상 순서로 실효 단계 = max(요청 단계, 선행의 실효 단계)를 계산한다(phaseScratch_ — 다 계산한
+    //    뒤 반영하므로 실패해도 상태가 바뀌지 않는다). 처리 순서는 결과에 영향이 없다(최댓값).
+    heap_.Clear();
+    for (usize index = 0; index < count; ++index) {
+        if (indegree_[index] == 0) {
+            auto pushed = heap_.TryPushBack(static_cast<uint32>(index));
+            (void)pushed;
+        }
+    }
+    usize processed = 0;
+    while (heap_.Size() != 0) {
+        const uint32 local = heap_.TryPopBack().Value();
+        ++processed;
+        for (uint32 edge = dependentOffsets_[local]; edge < dependentOffsets_[local + 1]; ++edge) {
+            const uint32 next = dependents_[edge];
+            if (phaseScratch_[local] > phaseScratch_[next]) {
+                phaseScratch_[next] = phaseScratch_[local];
+            }
+            if (--indegree_[next] == 0) {
+                auto pushed = heap_.TryPushBack(next);
+                (void)pushed;
+            }
+        }
+    }
+
+    // 사이클은 추가 시점에 거부하므로 모든 항목이 처리되어야 한다.
+    if (processed != count) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 4) 바뀐 항목을 옮긴다. Physics는 늦춤 대상이 아니다(Physics 등록과 다른 등록 사이 간선은 추가 때
+    //    거부하므로 가변 등록의 결과가 Physics일 수 없지만, 그래도 PostPhysics로 민다 — UE도
+    //    Start/EndPhysics를 건너뛴다).
+    uint32 demoted = 0;
+    for (usize index = 0; index < count; ++index) {
+        Entry& entry = *entries_.Find(scratch_[index].slot);
+        TickPhase phase = phaseScratch_[index];
+        if (IsFixedPhase(phase) && !IsFixedPhase(entry.registration.phase)) {
+            phase = TickPhase::PostPhysics;
+        }
+        if (phase != entry.effective) {
+            dirty_[static_cast<uint32>(entry.effective)] = true;
+            dirty_[static_cast<uint32>(phase)] = true;
+            entry.effective = phase;
+            entry.orderPosition = NoOrder;
+        }
+        demoted += phase != entry.registration.phase ? 1u : 0u;
+    }
+
+    demoted_ = demoted;
+    phasesDirty_ = false;
+    return Result<void>::Success();
 }
 
 void TickScheduler::ApplyPendingRemovals() noexcept {
@@ -282,13 +492,17 @@ void TickScheduler::ApplyPendingRemovals() noexcept {
             continue;
         }
 
-        const uint32 phase = static_cast<uint32>(entry->registration.phase);
+        const uint32 phase = static_cast<uint32>(entry->effective);
         const bool ordered = entry->orderPosition != NoOrder;
         const bool reorder = ReleaseDependencies(*entry);
+        if (entry->effective != entry->registration.phase && demoted_ != 0) {
+            --demoted_;
+        }
         auto removed = entries_.TryRemove(handle.slot);
         (void)removed;
         NoteRemovedLocked(phase, ordered);
         dirty_[phase] = dirty_[phase] || reorder;
+        phasesDirty_ = phasesDirty_ || (reorder && demoted_ != 0);
     }
 
     pendingRemoved_.Clear();
@@ -382,7 +596,7 @@ Result<void> TickScheduler::RebuildOrder(uint32 phase) noexcept {
     scratch_.Clear();
     for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
         Entry& entry = *iterator;
-        if (entry.removed || static_cast<uint32>(entry.registration.phase) != phase) {
+        if (entry.removed || static_cast<uint32>(entry.effective) != phase) {
             continue;
         }
         for (usize index = entry.prerequisites.Size(); index > 0; --index) {
@@ -507,6 +721,15 @@ Result<void> TickScheduler::RunPhase(TickPhase phase, const TickPhaseFrame& fram
     }
 
     ApplyPendingRemovals();
+    // 실효 단계 이동은 프레임의 첫 단계 전에만 한다(이미 실행한 항목을 다른 단계로 옮기면 한
+    // 프레임에 두 번 실행될 수 있다).
+    if (!phaseRanThisFrame_ && phasesDirty_) {
+        auto recomputed = RecomputeEffectivePhases();
+        if (!recomputed) {
+            return recomputed;
+        }
+    }
+    phaseRanThisFrame_ = true;
     if (dirty_[index]) {
         auto rebuilt = RebuildOrder(index);
         if (!rebuilt) {
@@ -519,7 +742,8 @@ Result<void> TickScheduler::RunPhase(TickPhase phase, const TickPhaseFrame& fram
     // 실행 중 등록이 추가되어도 이 배열은 단계가 끝날 때까지 바뀌지 않는다(재정렬은 다음 경계).
     for (usize position = 0; position < order.Size(); ++position) {
         Entry* entry = entries_.Find(order[position].slot);
-        if (entry == nullptr || entry->removed || !entry->registration.enabled) {
+        if (entry == nullptr || entry->removed || !entry->registration.enabled ||
+            static_cast<uint32>(entry->effective) != index) {
             continue;
         }
         if (frame.paused && !entry->registration.tickWhenPaused) {
@@ -576,7 +800,7 @@ TickStats TickScheduler::Stats() const noexcept {
     }
 
     stats.executedThisFrame = executedThisFrame_;
-    stats.pendingChanges = pendingRemovals_;
+    stats.pendingChanges = pendingRemovals_ + (phasesDirty_ ? 1u : 0u);
     for (bool dirty : dirty_) {
         stats.pendingChanges += dirty ? 1u : 0u;
     }
