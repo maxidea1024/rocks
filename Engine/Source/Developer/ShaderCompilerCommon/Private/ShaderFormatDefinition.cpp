@@ -75,7 +75,8 @@ constexpr NameEntry<uint32> StageNames[] = {
 constexpr NameEntry<uint32> FeatureNames[] = {
     {"compute", ShaderFeatureCompute},
     {"waveOperations", ShaderFeatureWaveOperations},
-    {"vertexViewportLayerOutput", ShaderFeatureVertexViewportLayerOutput}};
+    {"vertexViewportLayerOutput", ShaderFeatureVertexViewportLayerOutput},
+    {"typedUavLoad", ShaderFeatureTypedUavLoad}};
 
 constexpr NameEntry<uint32> DeviceRequirementNames[] = {
     {"D3D_FEATURE_LEVEL_11_0", DeviceRequiresD3DFeatureLevel11_0},
@@ -84,7 +85,8 @@ constexpr NameEntry<uint32> DeviceRequirementNames[] = {
     {"OPENGL_4_3", DeviceRequiresOpenGL4_3},
     {"OPENGL_ES_3_2", DeviceRequiresOpenGLES3_2},
     {"GL_ARB_ES3_2_compatibility", DeviceRequiresGlArbEs32Compatibility},
-    {"GL_ARB_clip_control", DeviceRequiresGlArbClipControl}};
+    {"GL_ARB_clip_control", DeviceRequiresGlArbClipControl},
+    {"D3D12_TYPED_UAV_LOAD_ADDITIONAL_FORMATS", DeviceRequiresD3D12TypedUavLoadAdditionalFormats}};
 
 // DXC [[vk::image_format]] 철자(업스트림 DXC SPIR-V 문서의 지원 목록)다. 색인이 비트 번호다.
 constexpr const char* ImageFormatNames[] = {
@@ -912,6 +914,10 @@ usize ImageFormatIndex(StringView name) noexcept {
     }
 
     return IndexNone;
+}
+
+const char* ImageFormatName(usize index) noexcept {
+    return index < ImageFormatCount ? ImageFormatNames[index] : "unknown";
 }
 
 bool ShaderFormatDefinition::CanProduceOn(ShaderHost host) const noexcept {
