@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::GameInstance::localPlayers_",
+      "id": "d2b79efe2ec24551a31a0d9fcee2f67f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::GameInstance",
+      "id": "bef053838e674c3382f79015d9d0d037",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::LocalPlayer",
+      "id": "b8b4e06e3e304fdb95497cf7cf54d741",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}
