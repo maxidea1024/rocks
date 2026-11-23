@@ -6,7 +6,7 @@
 #include <Core/Text/String.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 위치가 있는 그래프 진단이다(Docs/Design/NodeGraph.ko.md GD19). 도메인 검증·컴파일러가 내고 화면은
+// 위치가 있는 그래프 진단이다(Docs/Design/NodeGraph GD19). 도메인 검증·컴파일러가 내고 화면은
 // 그대로 표시한다. 노드에 오류 필드를 저장하지 않는다.
 //
 // 사용 예:

@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Node graph tools (Docs/Design/NodeGraph.ko.md sections 9.2-9.4, 11.1): the graph text codec (fragment and document JSON, record values as
+// Node graph tools (Docs/Design/NodeGraph sections 9.2-9.4, 11.1): the graph text codec (fragment and document JSON, record values as
 // reflection text), copy and paste command building, document diff and the graph-dump, graph-validate and graph-diff commandlets. Developer
 // module: editor, cooker and tool programs link it, shipping runtime targets do not.
 public sealed class NodeGraphTools : EngineModuleRules

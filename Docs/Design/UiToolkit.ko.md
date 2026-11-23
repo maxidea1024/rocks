@@ -65,7 +65,7 @@ B를 채택하는 근거는 다음과 같다.
 | UiScreens | CommonUI · CommonInput 플러그인 | `Engine/Source/Runtime/UiScreens` | UiWidget·Input(action) | 화면 스택·입력 라우터·입력 모드·뒤로 가기·focus 복원·입력 장치 종류 전환·플랫폼별 버튼 아이콘. UE에서 플러그인인 만큼 선택 모듈이며, 게임이 쓰지 않으면 링크하지 않는다 |
 | PlatformWindow | `Runtime/ApplicationCore` | 기존 모듈 확장 | Core·PlatformBase·window SDK | 다중 창·DPI·IME·clipboard·cursor·OS drag/drop·접근성 provider(PW1–PW8) |
 | EditorFramework | `Editor/UnrealEd` 일부 · `PropertyEditor` · `EditorStyle` · `Developer/ToolMenus` | `Engine/Source/Editor/Framework` | UiFramework·UiWidget·EditorBackend | 셸·자산 편집기 host·메뉴 등록·Inspector·Transaction 연결·에디터 스타일·EditorViewport·곡선/타임라인 Element. 그래프 편집 화면은 GraphView 모듈이다. Shipping 링크 금지 |
-| GraphView | `Editor/GraphEditor` | `Engine/Source/Editor/GraphView` | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자) | 노드 그래프 편집 화면: 캔버스·노드·핀 시각·연결선·노드 메뉴·주석·diff 화면([노드 그래프](NodeGraph.ko.md) 11절). 그래프 데이터·변경·undo·복사는 `NodeGraph`(Runtime)·`NodeGraphTools`(Developer) 소유이고, 도메인 schema·노드 서술은 각 도구 소유다. 도메인 모듈 의존 금지, Shipping 링크 금지 |
+| GraphView | `Editor/GraphEditor` | `Engine/Source/Editor/GraphView` | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자) | 노드 그래프 편집 화면: 캔버스·노드·핀 시각·연결선·노드 메뉴·주석·diff 화면([노드 그래프](NodeGraph/11-ModulesAndView.ko.md) 11절). 그래프 데이터·변경·undo·복사는 `NodeGraph`(Runtime)·`NodeGraphTools`(Developer) 소유이고, 도메인 schema·노드 서술은 각 도구 소유다. 도메인 모듈 의존 금지, Shipping 링크 금지 |
 | WorldIntegration | `UWidgetComponent` · `UGameViewportSubsystem` · `SGameLayerManager` | 기존 계획 | World·UiWidget | game viewport의 화면 layer와 LocalPlayer별 layer, World 정리 연동, 월드 공간 Widget·가상 사용자 상호작용, 기본 입력 모드 |
 
 모듈 의존 방향은 전체 계획 3.1절을 따른다. UiCore·UiFramework는 Object·Graphics·World·PlatformWindow에 직접 의존하지 않는다. OS 창·clipboard·cursor·IME는 `ui::Platform` 계약(UE `GenericApplication` 대응)으로 주입받으며 CPU 시험에서는 가짜 구현을 주입한다. UE에서는 독·명령·layout 저장이 런타임 `Slate` 모듈에 있고 Rocks도 같은 위치(UiFramework)에 둔다. 도구 프로그램(Rocks Lens 등)이 에디터 없이 독을 사용하기 때문이다. Shipping 게임은 독·명령 코드를 참조하지 않으므로 링크에서 제외된다.
@@ -455,7 +455,7 @@ UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 �
 | viewport | `EditorViewport` · viewport client | `SEditorViewport` · `FEditorViewportClient` · `FSceneViewport` | 에디터 viewport는 별도 render target 합성, Tryout은 viewport 교체 또는 새 창. 마우스 capture 모드(없음·영구·누름 중 등)와 capture 해제 명령(UE 기본 Shift+F1) |
 | 에디터 스타일 | 에디터 `StyleSet` · 테마 · 앱 배율 | `FStarshipEditorStyle` · `USlateThemeManager` · `UEditorStyleSettings::ApplicationScale` | 4.2절 기본값 |
 | 자산 선택 | asset picker · path picker | `IContentBrowserSingleton::CreateAssetPicker` | 필터·선택 모드 |
-| 그래프 편집 | `GraphView` 모듈(Editor 계층, EditorFramework와 별도) · 도메인 시각 등록 · overlay | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | [노드 그래프](NodeGraph.ko.md) 11절. 머티리얼(전체 계획 14.5절)·오디오·애니메이션 등 그래프 편집기가 함께 쓰는 화면이다. 데이터 모델·변경·undo는 `NodeGraph`, 도메인은 schema·노드 서술과 시각 등록·overlay만 넣는다. 화면은 노드 시각을 `NodeId`로 찾고 통지 단위로 증분 갱신한다 |
+| 그래프 편집 | `GraphView` 모듈(Editor 계층, EditorFramework와 별도) · 도메인 시각 등록 · overlay | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | [노드 그래프](NodeGraph/11-ModulesAndView.ko.md) 11절. 머티리얼(전체 계획 14.5절)·오디오·애니메이션 등 그래프 편집기가 함께 쓰는 화면이다. 데이터 모델·변경·undo는 `NodeGraph`, 도메인은 schema·노드 서술과 시각 등록·overlay만 넣는다. 화면은 노드 시각을 `NodeId`로 찾고 통지 단위로 증분 갱신한다 |
 | 곡선·타임라인 | 곡선 편집기 · 컷씬 타임라인 | `FCurveEditor` · `FCurveModel` · `SCurveEditorPanel` · `ISequencer` | 곡선 편집기를 타임라인이 재사용(UE와 같다) |
 | 로그·검사 | 로그 패널 · UI 트리 검사기 | `OutputLog` · `SlateReflector` | UI 트리 검사기는 Element 트리·geometry·무효화 사유를 표시하며 개발 빌드 전용 |
 
@@ -675,7 +675,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 | UT5 | UiWidget·UiScreens: Widget·slot 객체·UserWidget·WidgetTree·WidgetAsset·결합 표·검증·Widget 풀·화면 layer(WorldIntegration 연동)·화면 스택·입력 라우터·입력 장치 전환, Designer 기초(palette·hierarchy·canvas·Inspector 재사용) | UT4, CB1·CB3 | UV7, UV9 화면 부분, 전체 계획 21.5절 HUD·menu·설정 sample | M3 착수 · M4 완료 |
 | UT6 | 완성: ViewModel 바인딩·UI 애니메이션·서식 텍스트·Widget 층 엔트리 목록·월드 공간 Widget·cache/retained panel 활용·곡선·타임라인 Element·코드 편집 Element·접근성(PW8)·전문 Designer | UT5 | 전체 계획 21.5절 필수 sample 5종·14.9절 MAT 시험·B12 | M5–M6 |
 
-그래프 편집 화면은 [노드 그래프](NodeGraph.ko.md) 단계 NG5–NG7이다. NG5는 UT3과 EditorBackend Transaction(UT4의 headless 부분, 노드 그래프 NG4) 뒤에, NG6은 공용 2D 격자([공간 색인](SpatialIndex.ko.md) 5.3절) 뒤에 착수한다.
+그래프 편집 화면은 [노드 그래프](NodeGraph/14-Stages.ko.md) 단계 NG5–NG7이다. NG5는 UT3과 EditorBackend Transaction(UT4의 headless 부분, 노드 그래프 NG4) 뒤에, NG6은 공용 2D 격자([공간 색인](SpatialIndex.ko.md) 5.3절) 뒤에 착수한다.
 
 ## 10. 위험과 대응
 
@@ -714,7 +714,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
-**초안 2.4(2026.11.22):** [노드 그래프](NodeGraph.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
+**초안 2.4(2026.11.22):** [노드 그래프](NodeGraph/README.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
 
 **초안 2.3(2026.11.20):** UD15의 확정 범위를 레벨 스크립트가 실제로 쓰는 CLASS 지정자 `NotPlaceable` 하나로 좁혔다. 나머지 표시 메타·편집 메타는 권장안으로 되돌렸다(사용자 결정).
 

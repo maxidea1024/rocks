@@ -36,7 +36,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
 
-**1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
+**1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph/README.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
 **1.19 엔진 컴포넌트:** UE 5.8 컴포넌트를 들이는 범위·선행·순서를 [컴포넌트 도입](ComponentCatalog/README.ko.md)에 둔다. 1부는 `Engine/Classes/Components`(필수 58, 선행 CR1–CR26, 묶음 CM0–CM11), 2부는 그 밖의 Engine 폴더·Runtime 모듈(필수 56, 선행 CR27–CR39, 묶음 CM12–CM21), 3부는 엔진 플러그인(필수 31·필수(실험 기반) 25, 선행 CR40–CR54, 묶음 CM22–CM31, 가상 제작·방송 계열은 범위 밖)이다. BSP(`UModelComponent`·`UBrushComponent`)와 폐기 계열은 제외하고 volume 형상은 공용 `VolumeShape`로 대체한다. 20.2절 tick group 문장을 [엔진 런타임](EngineRuntime/08-TickScheduler.ko.md) 8절의 구현된 단계 기준으로 고치고, 옛 그룹 PhysicsSync·AnimationFinalize를 Physics phase 끝의 엔진 단계로 바꾼다(UE 대응은 엔진 런타임 8절). 15.1·16.1·19·20.5·21·24.1·33.2절에 컴포넌트 쪽 링크와 결정(캐릭터 이동 CD15, Chaos 파괴 계열 CD14, VFX 효과 CD16, CameraDirector = 카메라 시스템 정본, 실험 플러그인 CD20, 범위 밖 CD22)을 더한다. 개정 범위는 표지·15.1·16.1·19·20.2·20.5·21·24.1·33.2절이다.
 
@@ -1394,7 +1394,7 @@ Unreal의 문서는 live update·node preview·platform stats·generated shader 
 | EditorMaterial: GraphCommands.cpp, PreviewSession.cpp, CompileCoordinator.cpp | EditorBackend transaction·NodeGraph `GraphMutator`·asset bridge·compiler service·renderer preview | async callback에 raw Object/widget 주소 캡처 금지 |
 | EditorMaterial 화면: MaterialGraphView.cpp, InstancePanel.cpp, DiagnosticsPanel.cpp | `GraphView` 모듈(Editor, 노드 그래프 11절)·EditorFramework; 그래프·속성·인스턴스·오류 화면 | 화면 코드에서 별도 shader 의미/validator 구현 금지 |
 
-경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 데이터 모델은 공통 `NodeGraph`, 그래프 canvas는 공통 `GraphView`이고 다른 전문 도구(오디오·애니메이션·VFX·PCG)도 같은 것을 쓴다([노드 그래프](NodeGraph.ko.md)). 다만 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다(노드 그래프 GD20). 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
+경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 데이터 모델은 공통 `NodeGraph`, 그래프 canvas는 공통 `GraphView`이고 다른 전문 도구(오디오·애니메이션·VFX·PCG)도 같은 것을 쓴다([노드 그래프](NodeGraph/README.ko.md)). 다만 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다(노드 그래프 GD20). 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
 
 ~~~cpp
 struct MaterialNodeDescriptor {
@@ -1930,7 +1930,7 @@ M3는 UI 툴킷 위의 Outliner, Inspector, Asset Browser, 3D viewport, transfor
 
 Script Editor는 자체 언어의 문법 강조·자동 완성·정의 이동·진단·breakpoint·call stack·watch를 제공한다. 범용 node graph로 게임 로직을 작성하는 기능은 구현하지 않는다. 컷씬 편집기는 25절의 독립 핵심 제작 도구로 개발한다.
 
-transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset revision을 기록한다. 생성·삭제·reparent·prefab structural override는 graph patch로 저장하고 undo 기간의 snapshot 메모리를 budget으로 제한한다. 삭제 객체를 undo용 root로 무제한 유지하지 않는다. 변환 drag·multi-edit·복합 component 추가는 atomic group으로 취급한다. 이 graph patch는 객체 계층용이다. 노드 그래프 편집(노드 추가·연결·붙여넣기·접기)의 patch는 [노드 그래프](NodeGraph.ko.md) 8절의 `GraphPatch`이며, 같은 Transaction에 들어가고 같은 undo 메모리 budget을 쓴다.
+transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset revision을 기록한다. 생성·삭제·reparent·prefab structural override는 graph patch로 저장하고 undo 기간의 snapshot 메모리를 budget으로 제한한다. 삭제 객체를 undo용 root로 무제한 유지하지 않는다. 변환 drag·multi-edit·복합 component 추가는 atomic group으로 취급한다. 이 graph patch는 객체 계층용이다. 노드 그래프 편집(노드 추가·연결·붙여넣기·접기)의 patch는 [노드 그래프](NodeGraph/08-ChangesUndo.ko.md) 8절의 `GraphPatch`이며, 같은 Transaction에 들어가고 같은 undo 메모리 budget을 쓴다.
 
 저장은 임시 파일→fsync/flush 정책→atomic replace→revision publication으로 수행한다. 외부 파일 변경·저장 충돌·프로세스 강제 종료를 감지하고 journal로 복구한다. source control 연동은 checkout/status/diff/asset lock을 adapter로 제공한다. multi-user editing은 단독 transaction·revision 충돌 해결이 안정화된 P3 이후 과제다.
 

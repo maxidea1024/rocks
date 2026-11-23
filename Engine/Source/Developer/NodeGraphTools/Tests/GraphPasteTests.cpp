@@ -2,7 +2,7 @@
 
 #include <NodeGraphTools/GraphPaste.h>
 
-// 복사·붙여넣기 시험이다(Docs/Design/NodeGraph.ko.md 9.4절, 13절 GT5): id 재발급·간선 재연결·위치
+// 복사·붙여넣기 시험이다(Docs/Design/NodeGraph 9.4절, 13절 GT5): id 재발급·간선 재연결·위치
 // 이동·주석, undo 1개, 같은 seed면 같은 바이트, 텍스트를 거친 왕복, 다른 도메인 거부, 노드 판정
 // 진단(미해석·버전·속성·복제 불가·문서당 하나·schema 거부), 자리 노드 바이트 보존, 바깥 간선 정책,
 // 값 없는 고아 핀 정리, 복사 오류.

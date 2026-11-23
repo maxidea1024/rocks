@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-// 붙여넣기 명령 InsertNode·InsertEdge 시험이다(Docs/Design/NodeGraph.ko.md 9.4절 "공통 명령 추가"):
+// 붙여넣기 명령 InsertNode·InsertEdge 시험이다(Docs/Design/NodeGraph 9.4절 "공통 명령 추가"):
 // 완성된 노드 데이터(입력 기본값·고아 핀·자리 노드)를 넣고 정규 순서로 맞추며, 종류 규칙·GI8·GI14를
 // 지킨다. 간선은 schema 판정 없이 현재 핀·고아 핀·알 수 없는 종류 끝에 넣고, ordered 출력은 끝에
 // 붙이며 순번 규칙이 없는 끝은 주어진 순번을 둔다.

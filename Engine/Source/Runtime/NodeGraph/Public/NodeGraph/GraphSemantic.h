@@ -8,7 +8,7 @@
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// 의미 바이트와 semantic hash다(Docs/Design/NodeGraph.ko.md 8.4절). 배치
+// 의미 바이트와 semantic hash다(Docs/Design/NodeGraph 8.4절). 배치
 // 데이터(GraphDocumentLayout)는 받지 않는다 — 배치는 의미에 들어가지 않는다(GD8). 재경유는 접는다.
 //
 // 형식(v1, 정수는 little-endian 고정 폭, 바이트열·문자열은 u64 길이 + 내용 —

@@ -12,7 +12,7 @@
 #include <NodeGraph/GraphSchema.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// GraphMutator의 내부다(Docs/Design/NodeGraph.ko.md 8.6절). GraphMutatorCore.cpp가 색인·op
+// GraphMutator의 내부다(Docs/Design/NodeGraph 8.6절). GraphMutatorCore.cpp가 색인·op
 // 적용·명령 실행· undo·redo·bracket·통지를, GraphMutatorCommands.cpp가 명령마다의 검증과 op 생성을
 // 맡는다.
 namespace rocks::nodegraph::detail {

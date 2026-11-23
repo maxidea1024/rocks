@@ -6,7 +6,7 @@
 #include <NodeGraph/GraphValidation.h>
 #include <Serialization/Record.h>
 
-// 문서 정규화와 전체 불변식 검사(GI1–GI14)다(Docs/Design/NodeGraph.ko.md 6.3절).
+// 문서 정규화와 전체 불변식 검사(GI1–GI14)다(Docs/Design/NodeGraph 6.3절).
 namespace rocks::nodegraph {
 
 bool GraphViolationList::Has(GraphInvariant rule) const noexcept {

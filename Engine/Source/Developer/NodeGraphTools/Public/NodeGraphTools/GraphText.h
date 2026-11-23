@@ -5,7 +5,7 @@
 #include <NodeGraph/GraphDocument.h>
 #include <Object/ObjectRegistry.h>
 
-// 노드 그래프 텍스트 codec이다(Docs/Design/NodeGraph.ko.md 9.2·9.4절). 문서
+// 노드 그래프 텍스트 codec이다(Docs/Design/NodeGraph 9.2·9.4절). 문서
 // 전체(`rocks.graph-document` — graph-dump)와 조각(`rocks.graph-fragment` — 복사·붙여넣기)을 정규
 // JSON으로 쓰고, Json5 문법도 받아 읽는다. 노드 속성·입력 기본값·고아 핀 값(PropertyRecord)은
 // 리플렉션 텍스트(`{"type", "value"}`)나 base64 Record 바이트(`{"record"}`)다.
