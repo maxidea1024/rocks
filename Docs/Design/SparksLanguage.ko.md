@@ -1607,7 +1607,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S1003 | `net-write-outside-authority` | 권한 구역 밖의 `@net` 필드 쓰기(직접·호출) | `if (Owner.HasAuthority) { ... }` |
 | S1004 | `rpc-call` | `@rpc` 함수를 접두 없이·다른 대상 접두로 부른다, `@rpc`가 아닌 함수에 접두 | `Server.F(...)` |
 | S1005 | `data-id-lost` | 패키지 ID manifest의 활성 `type`·`field`·`subobject`·`enumCase` 항목이 현재 선언에도 `@formerly`에도 없다(저장·복제·편집 데이터가 연결을 잃는다 — [SparksBytecode](SparksBytecode.ko.md) 6.1절, LC4d). 위치는 manifest의 그 `name` 값 | 새 이름에 `@formerly("<옛 이름>")`(모듈 이동이면 전체 옛 키)을 붙이거나, `rocks ids rename`으로 옮기거나, `rocks ids retire`로 은퇴시킨다. field와 subobject 사이로 형태만 바뀌었으면 형태를 되돌리거나 은퇴·데이터 이전 |
-| S1006 | `invalid-id-manifest` | 패키지 ID manifest(`<패키지>.rocksids.json`)가 공유 형식(`schema: 1`, 항목의 kind·name·id·aliases·retired)이 아니거나, 다른 패키지의 이름·alias, 같은 이름·ID 둘, 주인 type 없는 활성 멤버를 담는다 | 도구로 다시 만든다(손으로 고치지 않는다) |
+| S1006 | `invalid-id-manifest` | 패키지 ID manifest(`<패키지>.rocksids.json`)가 공유 형식(`schema: 1`, 항목의 kind·name·id·aliases·retired — 다른 키 없음)이 아니거나, 다른 패키지의 이름·alias, 같은 이름·ID 둘, 주인 type 없는 활성 멤버를 담는다 | 도구로 다시 만든다(손으로 고치지 않는다) |
 | S1007 | `id-name-reserved` | 선언의 이름 키가 ID manifest의 alias(다른 ID의 옛 이름)이거나 은퇴한 이름이다([SparksBytecode](SparksBytecode.ko.md) 6.1절). 위치는 선언 이름 | 다른 이름을 쓴다 |
 | S1008 | `id-claimed-twice` | `@formerly`가 가리키는 ID를 다른 선언이 이미 쓴다(옛 이름이 아직 선언돼 있거나 두 `@formerly`가 같은 이름). 위치는 `@formerly`를 단 선언 이름 | `@formerly`를 빼거나 다른 선언의 이름을 먼저 바꾼다 |
 

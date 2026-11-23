@@ -359,7 +359,9 @@ internal sealed class StableIdManifest
     private static StableIdEntry RenameEntry(StableIdEntry entry, string name) =>
         entry with { Name = name, Aliases = entry.Aliases.Append(entry.Name).ToArray() };
 
-    private byte[] Serialize()
+    // 저장 형식 byte다. Sparks 도구(`sparks ids`)가 같은 정규형을 쓰므로 시험이 두 쪽 출력을 같은 golden과 비교한다
+    // (Docs/Design/SparksTools.ko.md 7.2절).
+    internal byte[] Serialize()
     {
         var document = new
         {

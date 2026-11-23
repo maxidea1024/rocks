@@ -8,9 +8,7 @@ namespace rocks::sparks::tools::detail {
 
 namespace {
 
-constexpr StringView SourceExtension = ".spark";
 constexpr StringView SchemaExtension = ".sparkbind.json";
-constexpr StringView IdsExtension = ".rocksids.json";
 
 // 폴더 항목 하나다(열거 결과를 이름 순으로 정렬해 쓴다).
 struct Entry {
@@ -264,7 +262,7 @@ Result<bool> Workspace::Walk(platform::FileSystem& files, StringView full, Strin
         WorkspaceFile file(*allocator_);
         file.kind = kind;
         file.package = package;
-        if (!file.path.TryAssign(childDisplay.View())) {
+        if (!file.path.TryAssign(childDisplay.View()) || !file.full.TryAssign(childFull.View())) {
             return Result<bool>::Failure(ErrorCode::OutOfMemory);
         }
 
@@ -447,13 +445,12 @@ Result<bool> Workspace::Load(platform::FileSystem& files, Span<const StringView>
 
             WorkspaceFile file(*allocator_);
             file.kind = WorkspaceFileKind::Schema;
-            String full(*allocator_);
-            if (!Join(folder, entry.name.View(), full) ||
+            if (!Join(folder, entry.name.View(), file.full) ||
                 !Join(display.View(), entry.name.View(), file.path)) {
                 return Result<bool>::Failure(ErrorCode::OutOfMemory);
             }
 
-            auto read = ReadInto(files, full.View(), file, problem, ioFailure);
+            auto read = ReadInto(files, file.full.View(), file, problem, ioFailure);
             if (!read || !read.Value()) {
                 return read;
             }
@@ -467,8 +464,19 @@ Result<bool> Workspace::Load(platform::FileSystem& files, Span<const StringView>
     return Result<bool>::Success(true);
 }
 
+uint32 Workspace::IdsFile(uint32 package) const noexcept {
+    for (usize at = 0; at < files_.Size(); ++at) {
+        if (files_[at].kind == WorkspaceFileKind::Ids && files_[at].package == package) {
+            return static_cast<uint32>(at);
+        }
+    }
+
+    return NoPackage;
+}
+
 Result<void> Workspace::AddTo(SourceSet& sources, Compilation& compilation,
-                              DiagnosticList& diagnostics, Array<uint32>& modules) noexcept {
+                              DiagnosticList& diagnostics, Array<uint32>& modules,
+                              Array<uint32>& packages, Span<const IdsOverride> ids) noexcept {
     if (auto resized = modules.TryResize(files_.Size()); !resized) {
         return resized;
     }
@@ -478,22 +486,47 @@ Result<void> Workspace::AddTo(SourceSet& sources, Compilation& compilation,
     }
 
     // schema → 패키지(manifest·ID manifest) → 모듈 순(패키지 번호가 모듈보다 먼저 있어야 한다).
-    Array<uint32> packages(*allocator_);
     if (auto resized = packages.TryResize(roots_.Size()); !resized) {
         return resized;
     }
 
+    auto idsText = [&](uint32 package) noexcept {
+        return ids.IsEmpty() ? StringView() : ids[package].text;
+    };
+
     const WorkspaceFileKind order[] = {WorkspaceFileKind::Schema, WorkspaceFileKind::Manifest,
                                        WorkspaceFileKind::Ids, WorkspaceFileKind::Module};
     for (const WorkspaceFileKind kind : order) {
+        if (kind == WorkspaceFileKind::Module) {
+            // 파일이 없던 패키지의 새 ID manifest(ids 확인)다.
+            for (uint32 package = 0; package < ids.Size(); ++package) {
+                if (ids[package].text.IsEmpty() || IdsFile(package) != NoPackage) {
+                    continue;
+                }
+
+                auto id = sources.TryAdd(ids[package].path, ids[package].text, diagnostics);
+                if (!id) {
+                    return Result<void>::Failure(id.Error());
+                }
+
+                if (auto added = compilation.AddIdManifest(packages[package], id.Value()); !added) {
+                    return added;
+                }
+            }
+        }
+
         for (usize at = 0; at < files_.Size(); ++at) {
             const WorkspaceFile& file = files_[at];
             if (file.kind != kind) {
                 continue;
             }
 
-            auto id = sources.TryAdd(file.path.View(),
-                                     StringView(file.text.Data(), file.text.Size()), diagnostics);
+            const StringView replaced =
+                kind == WorkspaceFileKind::Ids ? idsText(file.package) : StringView();
+            auto id = sources.TryAdd(
+                file.path.View(),
+                replaced.IsEmpty() ? StringView(file.text.Data(), file.text.Size()) : replaced,
+                diagnostics);
             if (!id) {
                 return Result<void>::Failure(id.Error());
             }
