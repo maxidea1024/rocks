@@ -5,7 +5,7 @@
 #include "Names.h"
 
 // 패키지 검사다: binding schema·manifest 읽기, 패키지 이름 중복(S1112), 모듈 경로(S1108–S1110),
-// 의존(S1106·S1111), 순환(S1107). 규칙: Docs/Design/SparksLanguage.ko.md 3.4절, 10.2절.
+// 의존(S1106·S1111), 순환(S1107). 규칙: Docs/Design/SparksLanguage 3.4절, 10.2절.
 
 namespace rocks::sparks::detail {
 

@@ -9,7 +9,7 @@
 #include <Object/TypeRegistry.h>
 #include <ReflectionText/TextJson.h>
 
-// 문서·배치 리플렉션 타입의 시험이다(Docs/Design/NodeGraph.ko.md 6.1절): 모듈 등록, 표본
+// 문서·배치 리플렉션 타입의 시험이다(Docs/Design/NodeGraph 6.1절): 모듈 등록, 표본
 // 문서·배치의 JSON 왕복(내보내기 → 새 값에 들여오기 → 다시 내보낸 텍스트가 같다), 들여온 값의 의미
 // 바이트가 원본과 같음.
 using namespace rocks;

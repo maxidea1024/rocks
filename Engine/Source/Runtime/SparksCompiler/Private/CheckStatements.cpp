@@ -3,7 +3,7 @@
 #include "StringLiteralReader.h"
 #include "TypeChecker.h"
 
-// 선언 초기값과 본문의 문장이다(Docs/Design/SparksLanguage.ko.md 3.10절): 지역 선언의 타입,
+// 선언 초기값과 본문의 문장이다(Docs/Design/SparksLanguage 3.10절): 지역 선언의 타입,
 // 조건(S0408), `for`, 대입의 타입, `switch`(S0415·S0416), 반환(S0409·S0410)과 "끝나는 문장".
 
 namespace rocks::sparks::detail {

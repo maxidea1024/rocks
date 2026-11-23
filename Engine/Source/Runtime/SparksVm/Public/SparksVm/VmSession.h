@@ -144,6 +144,21 @@ public:
                               Span<const uint64> scalars, Span<const uint64> refs,
                               Span<VmBuffer* const> buffers) noexcept;
 
+    // instance 없이(this 없음) module의 최상위 function을 부른다(SparksRuntime 2.8절 — `@test`
+    // 실행기). 진입 규칙(발행 전달·반환 값 보관·fault 위치 기록)은 Call과 같고, 정지하면 그 실행은
+    // instance 없이 session에 남는다(동시 실행 상한·격리 계수 없음, Detach가 건드리지 않고
+    // CloseSession이 취소한다). 재개·끝은 Deliveries의 재개 기록(child 거짓)으로 본다.
+    // 사용 예:
+    //   auto called = session.CallFunction(linked, function, {}, {}, {});
+    //   while (called && called.Value().outcome == VmOutcome::Suspended && ...) {
+    //       session.Advance(1.0 / 60.0, 1.0 / 60.0); // Deliveries에서 끝을 찾는다
+    //   }
+    // 실패: session이 닫혔거나 실행 중이거나 function이 범위 밖·메서드(이름 `Owner.Name`)이거나
+    // 인자 모양(bank별 slot 수)이 함수 표와 다르면 InvalidArgument, 할당 실패는 OutOfMemory.
+    Result<VmCallResult> CallFunction(const VmLinkedModule& module, uint32 function,
+                                      Span<const uint64> scalars, Span<const uint64> refs,
+                                      Span<VmBuffer* const> buffers) noexcept;
+
     // 필드 버퍼와 저장소를 놓고 instance를 표에서 뺀다(번호는 뒤의 CreateInstance가 다시 쓸 수
     // 있다). 연결·정지 실행·조각의 쓰기 기록·확보한 Changed 자리도 지운다. 실패: 실행 중이면
     // InvalidArgument(없는 번호는 성공 — 할 일 없음).
@@ -186,6 +201,9 @@ public:
         uint32 function = NoBytecodeIndex;
         VmCallResult result;
         bool resumed = false; // 정지했던 실행의 재개(SparksRuntime 2.4절)
+        // 재개된 실행이 하위 실행(CALLW — `All`·`Race` 인자)이다(SparksRuntime 2.8절). 하위 fault로
+        // 끝난 부모의 기록은 부모가 하위 실행인지를 따른다.
+        bool child = false;
         // 적용 루프·프레임 끝 정리가 부른 수명 hook(SparksRuntime 2.6절 — function은 없다).
         bool hook = false;
         BytecodeHookKind hookKind = BytecodeHookKind::Enable;
@@ -617,6 +635,10 @@ private:
     void ReleaseItem(Item& item) noexcept;
     // 진입 하나(RunHook·Call·Emit·OpenPhase)의 앞뒤: 기록 모음·전달.
     void BeginEntry() noexcept;
+    // Call·CallFunction의 공통 진입이다(인자 모양은 호출자가 본다 — refs는 this 포함).
+    Result<VmCallResult> Enter(uint32 instance, const VmLinkedModule& module, uint32 function,
+                               Span<const uint64> scalars, Span<const uint64> refs,
+                               Span<VmBuffer* const> buffers) noexcept;
 
     struct Instance {
         explicit Instance(Allocator& allocator) noexcept

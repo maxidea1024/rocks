@@ -107,6 +107,11 @@ public:
     uint64 HeldBuffers() const noexcept;
     // 보관한 버퍼를 모두 놓는다(사례 끝).
     void ReleaseAll(VmExecution& execution) noexcept;
+    // 묶음 번호 id(Bind가 돌려준 것)의 묶음이다(`@test` headless host가 이름·bank를 본다).
+    const FakeBinding& BindingAt(uint64 id) const noexcept {
+        return bindings_[id];
+    }
+
     // 할당 실패를 겪었는지다(실행기는 OutOfMemory로 돌려준다).
     bool RanOutOfMemory() const noexcept {
         return outOfMemory_;

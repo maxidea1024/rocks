@@ -4,7 +4,7 @@
 #include "CompilationChecker.h"
 #include "LanguageNames.h"
 
-// 타입 정규 표기와 이름 해석 덤프다(Docs/Design/SparksLanguage.ko.md 3.9절 "이름 해석 덤프", SD58).
+// 타입 정규 표기와 이름 해석 덤프다(Docs/Design/SparksLanguage 3.9절 "이름 해석 덤프", SD58).
 // 형식은 Compilation.h의 AppendTypeText·AppendNameDump 설명이다.
 
 namespace rocks::sparks {

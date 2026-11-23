@@ -6,7 +6,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 
-// Sparks 원문 관리다(Docs/Design/SparksLanguage.ko.md 8.1절 "위치"·"원문 검사").
+// Sparks 원문 관리다(Docs/Design/SparksLanguage 8.1절 "위치"·"원문 검사").
 //
 // 언제 쓰나: 컴파일러가 원문을 받는 첫 단계다. 원문 하나를 SourceFile로 보관하고 byte 위치를
 // 줄·열로 바꾼다. 여러 파일은 SourceSet이 소유하고 진단은 SourceId로 파일을 가리킨다(파일 배열이

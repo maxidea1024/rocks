@@ -5,7 +5,7 @@
 #include "NameBinder.h"
 
 // 본문 해석이다: 지역 이름의 범위와 검사(S0306·S0307·S0309·S0310), 식의 단순 이름(S0317·S0321),
-// 타입 표기(S0318–S0320). 규칙: Docs/Design/SparksLanguage.ko.md 3.9절.
+// 타입 표기(S0318–S0320). 규칙: Docs/Design/SparksLanguage 3.9절.
 
 namespace rocks::sparks::detail {
 

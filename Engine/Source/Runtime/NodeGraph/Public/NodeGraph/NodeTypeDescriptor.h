@@ -8,7 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 핀·노드 종류 서술이다(Docs/Design/NodeGraph.ko.md 6.2절). 서술은 리플렉션 타입이 아니다 — 도메인
+// 핀·노드 종류 서술이다(Docs/Design/NodeGraph 6.2절). 서술은 리플렉션 타입이 아니다 — 도메인
 // 모듈이 코드로 만들어 NodeTypeRegistry에 등록한다.
 //
 // 서술의 StringView·Span이 가리키는 data는 등록한 모듈의 것이고, 등록 때 넘긴 module lease가 수명을

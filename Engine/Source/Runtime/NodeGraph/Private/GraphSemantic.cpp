@@ -6,7 +6,7 @@
 #include <NodeGraph/GraphSemantic.h>
 #include <Serialization/Archive.h>
 
-// 의미 바이트와 semantic hash다(Docs/Design/NodeGraph.ko.md 8.4절).
+// 의미 바이트와 semantic hash다(Docs/Design/NodeGraph 8.4절).
 namespace rocks::nodegraph {
 
 namespace {

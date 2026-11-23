@@ -11,7 +11,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
 
-// NodeGraph 시험 공용 도우미다(Docs/Design/NodeGraph.ko.md 13절): 시험 도메인 "Test"의 schema·노드
+// NodeGraph 시험 공용 도우미다(Docs/Design/NodeGraph 13절): 시험 도메인 "Test"의 schema·노드
 // 종류, 표본 문서(모든 핀 종류·재경유·순번 출력·동적 핀·고아 핀·알 수 없는 종류·하위 그래프·배치),
 // 속성 Record 바이트 도우미.
 //

@@ -13,13 +13,13 @@ public static partial class PolicyChecks
         "__ANDROID__|__linux__|__linux|__unix__|__unix)\\b");
 
     // 빌드·Compiler.h가 항상 0 또는 1로 정의하는 매크로를 정의 여부로 묻는 형태다. 언제나 참이므로 값으로 분기해야 한다
-    // (#ifdef ROCKS_PLATFORM_MAC은 모든 플랫폼에서 참이다).
+    // (#ifdef ROCKS_PLATFORM_MAC은 모든 플랫폼에서 참이다). 타깃 매크로 ROCKS_WITH_*도 같다(Docs/Design/BuildTargets 3.2절 BS2a).
     private static readonly Regex DefinedRocksTargetMacro = Pattern(
-        "\\bdefined\\s*\\(?\\s*ROCKS_(?:BUILD|PLATFORM|ARCH)_[A-Z0-9_]*|" +
-        "#\\s*(?:ifdef|ifndef|elifdef|elifndef)\\s+ROCKS_(?:BUILD|PLATFORM|ARCH)_[A-Z0-9_]*");
+        "\\bdefined\\s*\\(?\\s*ROCKS_(?:BUILD|PLATFORM|ARCH|WITH)_[A-Z0-9_]*|" +
+        "#\\s*(?:ifdef|ifndef|elifdef|elifndef)\\s+ROCKS_(?:BUILD|PLATFORM|ARCH|WITH)_[A-Z0-9_]*");
 
-    // Compiler.h가 정의하는 ROCKS_ARCH_*·ROCKS_PLATFORM_*를 쓰는 전처리기 줄이다(줄 이음을 합친 논리 줄 기준).
-    private static readonly Regex RocksTargetMacroUse = Pattern("\\bROCKS_(?:ARCH|PLATFORM)_[A-Z0-9_]+\\b");
+    // Compiler.h가 정의·검증하는 ROCKS_ARCH_*·ROCKS_PLATFORM_*·ROCKS_WITH_*를 쓰는 전처리기 줄이다(줄 이음을 합친 논리 줄 기준).
+    private static readonly Regex RocksTargetMacroUse = Pattern("\\bROCKS_(?:ARCH|PLATFORM|WITH)_[A-Z0-9_]+\\b");
 
     private static readonly Regex CompilerHeaderInclude = Pattern("^\\s*#\\s*include\\s*<Base/Compiler\\.h>");
 

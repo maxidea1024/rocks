@@ -101,7 +101,9 @@ public static class InstalledSdk
             foreach (var directory in module.PublicIncludeDirectories)
             {
                 var relative = $"Headers/{module.Name}/{includes.Count}";
-                CopyTree(directory, Path.Combine(stage, relative));
+                // 소스에서 빌드하는 서드파티는 소스 폴더가 공개 include 루트라(Docs/Design/BuildTargets 3.5절 BS3a) 번역 단위가 섞여 있다.
+                // SDK는 라이브러리를 object로 싣고 헤더만 내보낸다.
+                CopyTree(directory, Path.Combine(stage, relative), entry => File.Exists(entry) && SourceExtensions.Contains(Path.GetExtension(entry)));
                 includes.Add(relative);
             }
 
@@ -143,7 +145,9 @@ public static class InstalledSdk
                 throw new InvalidOperationException($"SDK module '{module.Name}' provides BuildInfo but exports no Core/Build/BuildInfo.h.");
             }
 
-            packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
+            // 서드파티 소비자 정의(ConsumerDefines)는 라이브러리 자신의 compile에는 빠지지만, SDK에서는 라이브러리가 이미 빌드되어 있어
+            // 소비자에게 공개 정의와 같다(BS3a).
+            packaged.Add(new(module.Name, includes.ToArray(), [.. module.PublicDefines, .. module.ConsumerDefines],
                 module.PublicDependencies.ToArray(), module.PrivateDependencies.ToArray(), libraries.ToArray(),
                 module.SystemLibraries.ToArray(),
                 module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo, module.ProvidesModuleTable,
@@ -788,6 +792,9 @@ public static class InstalledSdk
 
         return false;
     }
+
+    // SDK 헤더 복사에서 빼는 번역 단위 확장자다(.c를 include하는 라이브러리도 SDK에는 빌드된 라이브러리로 실린다).
+    private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase) { ".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm" };
 
     private static void CopyTree(string source, string destination, Func<string, bool>? skip = null)
     {

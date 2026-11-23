@@ -1,6 +1,6 @@
 #include "NodeGraphMutatorTestSupport.h"
 
-// GraphMutator 명령별 시험이다(Docs/Design/NodeGraph.ko.md 8.6절, 13절 GT1·GT2): 명령마다 성공
+// GraphMutator 명령별 시험이다(Docs/Design/NodeGraph 8.6절, 13절 GT1·GT2): 명령마다 성공
 // 사례는 통지 종류· semanticTouched·revision이 맞고 undo가 원래 바이트, redo가 적용 바이트를
 // 만든다. 위반 사례는 정확한 사유로 거부되고 문서 바이트·revision이 그대로이며 통지가 없다. 목록의
 // 뒤 명령이 실패하면 앞 명령도 되돌린다.

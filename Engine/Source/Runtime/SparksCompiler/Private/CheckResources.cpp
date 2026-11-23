@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 유지 자원·로드 규칙이다(Docs/Design/SparksLanguage.ko.md 3.14절): 버림(S0901), 담는 자리(S0902),
+// 유지 자원·로드 규칙이다(Docs/Design/SparksLanguage 3.14절): 버림(S0901), 담는 자리(S0902),
 // 옮김(S0903), 담는 선언(S0904), 기다리지 않는 지역 자원(S0905). Rules 단계(LC3)에서만 돈다.
 
 namespace rocks::sparks::detail {

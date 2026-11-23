@@ -7,7 +7,7 @@
 
 // 언어 소유 멤버(부록 B 시그니처, SD67)를 심볼로 만든다. 표는 컴파일러 안의 정적 자료이므로 형식이
 // 틀리면 진단이 아니라 Fatal이다(시험이 표 전체를 읽어 본다).
-// Docs/Design/SparksLanguage.ko.md 3.8절, 3.10절 "문맥 이름의 타입".
+// Docs/Design/SparksLanguage 3.8절, 3.10절 "문맥 이름의 타입".
 
 namespace rocks::sparks::detail {
 

@@ -9,7 +9,7 @@
 #include <NodeGraph/GraphSchema.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
-// 그래프 schema·노드 종류 등록표다(Docs/Design/NodeGraph.ko.md 6.2·10절, GD11).
+// 그래프 schema·노드 종류 등록표다(Docs/Design/NodeGraph 6.2·10절, GD11).
 //
 // 도메인마다 schema 하나와 노드 종류 여럿을 module lease와 함께 등록한다. 공통 노드 종류(지금은
 // 재경유 Graph.Reroute)는 Initialize가 모든 도메인에 대해 등록한다. 조회는 공통 종류가 먼저다.

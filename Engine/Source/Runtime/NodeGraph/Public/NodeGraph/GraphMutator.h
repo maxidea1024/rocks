@@ -11,7 +11,7 @@
 #include <NodeGraph/GraphReadView.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// 문서의 유일한 변경 API다(Docs/Design/NodeGraph.ko.md GD5·8절·8.6절). 명령 목록을 차례로
+// 문서의 유일한 변경 API다(Docs/Design/NodeGraph GD5·8절·8.6절). 명령 목록을 차례로
 // 적용·검증하고, 실패하면 무할당으로 되돌리며, 성공하면 patch와 통지 묶음을 낸다.
 // undo·redo·bracket도 여기서 한다.
 //

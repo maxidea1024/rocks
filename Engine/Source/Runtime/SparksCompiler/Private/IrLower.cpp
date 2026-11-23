@@ -330,7 +330,10 @@ uint32 IrBuilder::LoadConstant(const ConstantValue& value, uint32 type, uint32 n
 uint64 IrBuilder::EnumIndex(uint32 caseSymbol) const noexcept {
     const Symbol& entry = c_.symbols_[caseSymbol];
     if (entry.owner != NoSymbol && c_.symbols_[entry.owner].kind == SymbolKind::EngineType) {
-        return entry.item;
+        // 엔진 enum 값은 그 enum 안의 case 번호다(SparksBytecode 2절 — `Error` case 번호 + 1,
+        // host의 AppendEnumName). item은 schema 전체 case 표의 번호라 enum의 첫 case를 뺀다.
+        const Symbol& owner = c_.symbols_[entry.owner];
+        return entry.item - c_.Schema(owner.index).Types()[owner.item].firstCase;
     }
 
     uint64 index = 0;

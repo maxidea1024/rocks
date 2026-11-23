@@ -4,7 +4,7 @@
 #include <Core/Text/NamePool.h>
 #include <NodeGraph/GraphNameOrder.h>
 
-// 문서·조각 JSON 쓰기다(Docs/Design/NodeGraph.ko.md 9.4절). 키 순서는 형식이 정한
+// 문서·조각 JSON 쓰기다(Docs/Design/NodeGraph 9.4절). 키 순서는 형식이 정한
 // 순서이고(JsonWriter는 호출 순서대로 쓴다) 배열은 문서의 정규 순서다. 그래서 같은 입력은 같은
 // 바이트다.
 namespace rocks::nodegraph {

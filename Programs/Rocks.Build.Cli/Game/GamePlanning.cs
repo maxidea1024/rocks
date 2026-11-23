@@ -77,6 +77,13 @@ internal static class GamePlanning
     public static GameLayout Layout(LoadedRules rules, ProjectDescriptor descriptor, IReadOnlyList<PluginDescriptor> availablePlugins, BuildContext context,
         NativeToolchain toolchain, NativeConfiguration configuration, string sdk, IReadOnlyList<SdkModule> sdkModules, bool createDirectories)
     {
+        // 1차 SDK는 Game 매크로 조합만 싣는다(Docs/Design/BuildTargets 3.2절 BD5·BS2a). 다른 조합의 타깃은 그 조합의 SDK 변형이 없다.
+        if (!rules.Target.Kind.Defines.SequenceEqual(new TargetKind(TargetType.Game).Defines))
+        {
+            throw new ArgumentException($"Target {rules.Target.Name}: the installed SDK holds only the Game macro combination; a {rules.Target.Type} " +
+                "target (or a Program with CompileWithEditor or WithEditorData) needs an SDK variant that is not shipped yet.");
+        }
+
         // SDK 엔진 라이브러리는 구성 기본 로그 하한으로 미리 빌드됐다. 게임 타깃만 다른 값을 쓰면 Log.h inline 본문이 갈려 ODR 위반이다.
         if (rules.Target.LogCompiledMinimum is not null)
         {

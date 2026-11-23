@@ -1,6 +1,6 @@
 #include <NodeGraph/GraphClone.h>
 
-// 문서·배치 값의 깊은 복사다(Docs/Design/NodeGraph.ko.md GD24·8.6절).
+// 문서·배치 값의 깊은 복사다(Docs/Design/NodeGraph GD24·8.6절).
 namespace rocks::nodegraph {
 
 namespace {

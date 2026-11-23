@@ -153,6 +153,7 @@ try
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
     TestProgramsTests.Run();
+    TargetKindRulesTests.Run();
     await ProjectFilesWriterTests.RunAsync(root, toolchain);
     await IdeScriptsTests.RunAsync(root);
     await GameProjectTests.RunAsync();
@@ -1344,7 +1345,7 @@ try
             {
                 public override NativeModuleInput Configure(BuildContext context) => new()
                 {
-                    Name = "Extras", Sources = context.Sources("Plugins/Extras/Source/Extras/Private")
+                    Name = "Extras", ModuleDirectory = "Plugins/Extras/Source/Extras", Sources = context.Sources("Plugins/Extras/Source/Extras/Private")
                 };
             }
 
@@ -1352,7 +1353,7 @@ try
             {
                 public override NativeModuleInput Configure(BuildContext context) => new()
                 {
-                    Name = "ExtrasEditor", Sources = context.Sources("Plugins/Extras/Source/ExtrasEditor/Private")
+                    Name = "ExtrasEditor", ModuleDirectory = "Plugins/Extras/Source/ExtrasEditor", Sources = context.Sources("Plugins/Extras/Source/ExtrasEditor/Private")
                 };
             }
             """);
