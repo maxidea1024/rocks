@@ -105,7 +105,7 @@
 | `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, 렌더 전달 가능 등록(RenderBase 5.2절), `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표의 C++ 정의(결정 RN5, 14.2절) | 장치·Object·World |
 | `RendererShaders` | `Engine/Source/Runtime/RendererShaders` | ShaderCore·RenderData·MaterialSchema | pass 셰이더 타입·퍼뮤테이션 도메인·거르기 함수(`MaterialShaderTraits`를 받는다, 14.3절), `GBufferLayout` 정의와 shading model의 GBuffer 의미, 파라미터 구조체 선언 | 장치·Renderer |
 | `Renderer` | `Engine/Source/Runtime/Renderer` | RendererShaders·RenderGraph·RenderBase·RenderData·MaterialRuntime·TextureStreaming·SpatialIndex·Task·Core | `RenderScene`·`RenderView`·가시성·`GpuScene`·light grid·그림자·두 경로의 pass 조립·`PostChain`·GI 연결점 | World·ObjectRuntime·AssetRuntime |
-| `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제. 받는 컴포넌트 목록과 RS 단계별 도입 순서는 [컴포넌트 도입](ComponentCatalog.ko.md) 3·4.6절(CR12) | Renderer 내부 주소 |
+| `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제. 받는 컴포넌트 목록과 RS 단계별 도입 순서는 [컴포넌트 도입](ComponentCatalog/03-RequiredComponents.ko.md) 3·4.6절(CR12) | Renderer 내부 주소 |
 
 의존 방향(위가 아래를 쓴다):
 
@@ -160,7 +160,7 @@ RenderNotices 처리(해제 완료) ◀─────────────�
 - **이전 프레임 변환.** velocity·TAA는 이전 변환이 필요하다(계획 12.2절). `RenderScene`이 직전 적용 값을 보존하고, 이번 프레임에 변환 갱신이 없으면 이전 = 현재로 둔다. teleport 표시가 있으면 이전 = 현재로 리셋한다.
 - **텍스처 사용 기록.** 렌더러는 그린 그리기 항목이 쓴 텍스처의 사용 기록마다 "마지막으로 화면에 그린 프레임 번호"를 `RenderNotices`로 돌려준다(TextureStreaming 4.1절·결정 T3). 상주 계획이 보임 신호로 쓴다(RQ21).
 - **해제.** 인스턴스 제거는 렌더 lane에서 즉시 표에서 빼고, 그 인스턴스가 쓰던 GPU Scene 영역은 프레임 slot GPU 완료 뒤 재사용한다(계획 13.1절 "frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다").
-- **디버그·편집 표시(2026-11-23 결정, 권장안 — [컴포넌트 도입](ComponentCatalog.ko.md) CR23·CD12, 단계 RS13).** 선·점·삼각형·아이콘 sprite를 받는 **단순 요소 수집**(UE `FSimpleElementCollector`·`FBatchedElements`)을 view마다 둔다. `LineBatchComponent`·`ArrowComponent`·`BillboardComponent`·`DrawFrustumComponent` 등은 인스턴스 종류 "디버그 선 묶음"·"아이콘 sprite"로 등록하고 프레임 데이터(선 정점 목록)는 `RenderBlob`으로 넘긴다. UE는 line batch proxy가 프레임마다 동적 메시 요소를 낸다(`Engine/Private/Components/LineBatchComponent.cpp:60`). Rocks는 가상 함수 proxy 대신 종류별 처리기다. 그리는 곳은 UE와 같다(UE 경로는 `Engine/Source/Runtime/` 기준):
+- **디버그·편집 표시(2026-11-23 결정, 권장안 — [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR23·CD12, 단계 RS13).** 선·점·삼각형·아이콘 sprite를 받는 **단순 요소 수집**(UE `FSimpleElementCollector`·`FBatchedElements`)을 view마다 둔다. `LineBatchComponent`·`ArrowComponent`·`BillboardComponent`·`DrawFrustumComponent` 등은 인스턴스 종류 "디버그 선 묶음"·"아이콘 sprite"로 등록하고 프레임 데이터(선 정점 목록)는 `RenderBlob`으로 넘긴다. UE는 line batch proxy가 프레임마다 동적 메시 요소를 낸다(`Engine/Private/Components/LineBatchComponent.cpp:60`). Rocks는 가상 함수 proxy 대신 종류별 처리기다. 그리는 곳은 UE와 같다(UE 경로는 `Engine/Source/Runtime/` 기준):
   - **디버그 그리기 빌드**(Debug·Development와 에디터 — UE `UE_ENABLE_DEBUG_DRAWING`, `Engine/Public/EngineDefines.h:15`): line batch를 디버그 전용 수집에 넣고(`Engine/Private/Components/LineBatchComponent.cpp:70–75`) 후처리 PC9b에서 합성한다(UE `DebugPrimitive` pass — `Renderer/Private/PostProcess/PostProcessCompositeDebugPrimitives.cpp:140, 165`).
   - **편집 표시**(에디터 view만 — gizmo·선택·EditorOnly 시각화 컴포넌트): PC9a에서 합성한다(UE `EditorPrimitive` pass — `Renderer/Private/PostProcess/PostProcessCompositeEditorPrimitives.cpp:76–127`).
   - **Shipping**: 디버그 전용 수집이 없으므로 같은 선이 일반 수집으로 가서 base pass에서 불투명 단순 요소로 그려지고(UE `Renderer/Private/BasePassRendering.cpp:1211`) depth prepass에도 쓰인다(`Renderer/Private/DepthRendering.cpp:454–455`). 처리기를 빼지 않는다.
@@ -988,5 +988,5 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
 - 개정 10(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)을 18절 RQ19에 연결했다. RS12에 섹션 본 palette 한도·morph 적용 책임(MR2)을 적었다.
 - 개정 11(2026-11-20): RenderBase 결정 R18(섹션 분할 없음·LOD 통합 bone map·typed buffer 본 행렬)에 맞춰 RS12 내용을 고쳤다.
-- 개정 12(2026-11-23): [컴포넌트 도입](ComponentCatalog.ko.md) 개정 2 반영 — 3.2절 `WorldIntegration` 행에 컴포넌트 목록 링크(CR12), 4.2절 디버그·편집 표시(CR23).
+- 개정 12(2026-11-23): [컴포넌트 도입](ComponentCatalog/11-Revisions.ko.md) 개정 2 반영 — 3.2절 `WorldIntegration` 행에 컴포넌트 목록 링크(CR12), 4.2절 디버그·편집 표시(CR23).
 - 개정 13(2026-11-23): 디버그·편집 표시 결정(컴포넌트 도입 CD12, 권장안) — 4.2절을 UE와 같은 세 경로(디버그 합성·편집 합성·Shipping base pass)로 고침(개정 12의 "Shipping 처리기 미등록"은 UE와 달라 버림), 11.2절 PC9a·PC9b와 자리, 17절 RS13.

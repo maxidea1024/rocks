@@ -10,7 +10,7 @@
 - 사용자 요구(2026-11-17): 공간 좌표계·방향·회전 의미·단위는 UE 5.8과 같다. 물리 엔진 미구현이면 Jolt를 들이지 않고 연동 설계만 한다. cm↔m 변환은 물리 어댑터 경계에서 하고, 극성·축성 벡터·quaternion·winding을 구분하며, 확인하지 못한 단위는 검증 항목으로 둔다.
 - Rocks 규약 구현: [수학 구현](../Implementation/Math.ko.md) 2절("좌표·단위 규약", "단위 경계 변환", "행렬·Transform·view 규약")과 2.1절(기하 앞면).
 - UE 5.8.4(commit `f45729c0b6f0`, 로컬 클론) 원본. 경로는 `Engine/Source/Runtime/` 기준이다.
-- 이 경계를 쓰는 컴포넌트 쪽 요구(body·충돌 채널·응답·프로필, overlap·hit 이벤트, sweep 이동, scene query, simulate physics, ragdoll physics asset)와 충돌 형상 컴포넌트(Box·Sphere·Capsule·Cylinder)는 [컴포넌트 도입](ComponentCatalog.ko.md) CR16·3.10절·CM3에 있다. 물리 없는 영역 판정(`VolumeShape`, CR17)은 이 경계를 지나지 않는다.
+- 이 경계를 쓰는 컴포넌트 쪽 요구(body·충돌 채널·응답·프로필, overlap·hit 이벤트, sweep 이동, scene query, simulate physics, ragdoll physics asset)와 충돌 형상 컴포넌트(Box·Sphere·Capsule·Cylinder)는 [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR16·3.10절·CM3에 있다. 물리 없는 영역 판정(`VolumeShape`, CR17)은 이 경계를 지나지 않는다.
 
 ## 1. 양쪽 규약
 

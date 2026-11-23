@@ -40,7 +40,7 @@ rocks/
                               Build.version(엔진 버전 단일 출처 — ReflectionFoundations 8.2절)
   Templates/                  게임 프로젝트 템플릿
   Assets/Branding/            엔진 브랜드 자산(로고 SVG·PNG, 시각 아이덴티티 가이드라인)
-  Docs/                       설계·구현·검토 문서
+  Docs/                       설계·구현·검토 문서(파일 크기·장별 폴더 규칙은 Guides/DocumentLayout.ko.md)
   Rocks.proj                  MSBuild 진입점(Build·Test·InstalledSdk·Game)
 ```
 
