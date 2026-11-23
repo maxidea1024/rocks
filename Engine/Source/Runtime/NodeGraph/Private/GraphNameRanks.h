@@ -10,7 +10,7 @@
 #include <NodeGraph/GraphDocument.h>
 
 // 문서에 나오는 Name 토큰을 원문 정규 순서의 순위로 바꾸는 내부
-// 표다(Docs/Design/NodeGraph.ko.md 6.1절 "이름 키"). 정렬 비교마다 pool을 조회하지 않도록, 서로
+// 표다(Docs/Design/NodeGraph 6.1절 "이름 키"). 정렬 비교마다 pool을 조회하지 않도록, 서로
 // 다른 토큰마다 한 번만 원문을 읽어 순위를 매긴다.
 //
 // 사용 예:

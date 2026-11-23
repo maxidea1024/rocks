@@ -1,7 +1,7 @@
 #include <NodeGraph/GraphClone.h>
 #include <NodeGraph/GraphCommand.h>
 
-// 그래프 공통 명령 목록이다(Docs/Design/NodeGraph.ko.md 8.1·8.6절).
+// 그래프 공통 명령 목록이다(Docs/Design/NodeGraph 8.1·8.6절).
 namespace rocks::nodegraph {
 
 Result<GraphCommand*> GraphCommandList::Push(GraphCommandKind kind, Guid graph) noexcept {

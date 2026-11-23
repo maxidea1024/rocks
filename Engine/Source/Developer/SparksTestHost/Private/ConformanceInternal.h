@@ -30,7 +30,7 @@ inline constexpr usize MessageInlineBytes = 256;
 // corpus 파일 하나의 상한이다. 원문 상한보다 크면 S0103 사례가 되므로 그보다 한 byte 많게 둔다.
 inline constexpr usize MaxCorpusFileBytes = MaxSourceBytes + 1;
 
-// 파일 사례를 넣는 패키지의 manifest와 모듈 경로다(Docs/Design/SparksLanguage.ko.md 13.1절).
+// 파일 사례를 넣는 패키지의 manifest와 모듈 경로다(Docs/Design/SparksLanguage 13.1절).
 inline constexpr StringView FileCaseManifest = "{ name: \"Test\", sparks: 1, profile: \"full\" }\n";
 inline constexpr StringView FileCaseModulePath = "Main.spark";
 

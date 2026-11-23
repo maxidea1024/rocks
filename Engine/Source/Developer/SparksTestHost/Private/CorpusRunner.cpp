@@ -5,7 +5,7 @@
 
 #include "ConformanceInternal.h"
 
-// corpus·schema 폴더 탐색과 사례 짝 맞추기다(Docs/Design/SparksLanguage.ko.md 13.1절).
+// corpus·schema 폴더 탐색과 사례 짝 맞추기다(Docs/Design/SparksLanguage 13.1절).
 
 namespace rocks::sparks::conformance {
 

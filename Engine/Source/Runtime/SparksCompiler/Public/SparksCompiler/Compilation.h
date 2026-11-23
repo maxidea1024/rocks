@@ -16,7 +16,7 @@
 #include <SparksCompiler/Symbols.h>
 #include <SparksCompiler/SyntaxTree.h>
 
-// Sparks 컴파일 단위다(Docs/Design/SparksLanguage.ko.md 3.4절 패키지·모듈·import, 10.2절 binding
+// Sparks 컴파일 단위다(Docs/Design/SparksLanguage 3.4절 패키지·모듈·import, 10.2절 binding
 // schema, 18.2절 LC2a). 한 번의 컴파일에 함께 넣는 엔진 binding schema 파일과 소스
 // 패키지(manifest와 모듈 파일)를 받아 검사한다.
 //

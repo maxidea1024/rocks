@@ -5,7 +5,7 @@
 #include "LanguageNames.h"
 #include "TypeChecker.h"
 
-// 식의 타입이다(Docs/Design/SparksLanguage.ko.md 3.10절): 리터럴·이름·연산자·상수식·색인·보간·
+// 식의 타입이다(Docs/Design/SparksLanguage 3.10절): 리터럴·이름·연산자·상수식·색인·보간·
 // 컬렉션·`as?`·`await`·`try`와 기대 타입 맞추기(대입 가능, 상수 범위).
 
 namespace rocks::sparks::detail {

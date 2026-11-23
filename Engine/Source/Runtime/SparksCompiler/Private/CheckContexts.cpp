@@ -4,7 +4,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 실행 문맥·효과·attribute 규칙이다(Docs/Design/SparksLanguage.ko.md 3.13절): attribute 이름·자리·
+// 실행 문맥·효과·attribute 규칙이다(Docs/Design/SparksLanguage 3.13절): attribute 이름·자리·
 // 중복·인자(S0620–S0623), `async` 밖의 `await`(S0601), 문맥이 금지하는 효과(S0602 — 호출 그래프의
 // 전이 폐포), `while`의 대기(S0603). Rules 단계(LC3)에서만 돈다.
 

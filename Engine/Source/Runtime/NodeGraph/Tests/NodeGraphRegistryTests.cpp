@@ -1,7 +1,7 @@
 #include "NodeGraphTestSupport.h"
 
 // Name 정규 순서, 핀 목록, schema·노드 종류 등록표
-// 시험이다(Docs/Design/NodeGraph.ko.md 6.1·6.2·10절): 원문 순서와 Name 같음 규칙의 일치, 등록 검사
+// 시험이다(Docs/Design/NodeGraph 6.1·6.2·10절): 원문 순서와 Name 같음 규칙의 일치, 등록 검사
 // 항목마다 거부, 공통 재경유 종류, 해제와 lease, 핀 목록 계산(정적·동적).
 using namespace rocks;
 namespace node_graph_registry_tests_file {

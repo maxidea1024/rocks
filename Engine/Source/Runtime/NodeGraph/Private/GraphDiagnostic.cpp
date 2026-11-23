@@ -1,7 +1,7 @@
 #include <NodeGraph/GraphDiagnostic.h>
 #include <NodeGraph/GraphValidation.h>
 
-// 그래프 진단(Docs/Design/NodeGraph.ko.md GD19)과 불변식 위반의 진단 변환이다.
+// 그래프 진단(Docs/Design/NodeGraph GD19)과 불변식 위반의 진단 변환이다.
 namespace rocks::nodegraph {
 
 namespace {

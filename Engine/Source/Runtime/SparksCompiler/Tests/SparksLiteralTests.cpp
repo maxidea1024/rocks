@@ -2,7 +2,7 @@
 #include <SparksCompiler/Literal.h>
 #include <TestSupport/Test.h>
 
-// Sparks 리터럴 값 해석 시험이다(Docs/Design/SparksLanguage.ko.md 3.6절, SD54): 10진·16진·2진
+// Sparks 리터럴 값 해석 시험이다(Docs/Design/SparksLanguage 3.6절, SD54): 10진·16진·2진
 // 정수와 구분자, uint64 경계, 실수의 구분자·`.5`·범위.
 using namespace rocks;
 using namespace rocks::sparks;

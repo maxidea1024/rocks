@@ -10,7 +10,7 @@
 #include "Names.h"
 #include "SchemaInput.h"
 
-// binding schema reader다(Docs/Design/SparksLanguage.ko.md 10.2절 "binding schema 파일 형식"). 모든
+// binding schema reader다(Docs/Design/SparksLanguage 10.2절 "binding schema 파일 형식"). 모든
 // 형식 오류는 S1120이며 오류마다 하나를 내고 끝까지 읽는다.
 
 namespace rocks::sparks {

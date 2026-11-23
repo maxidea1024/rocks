@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 흐름 분석이다(Docs/Design/SparksLanguage.ko.md 3.11절): await 뒤의 객체 지역 이름(S0412 — 타입
+// 흐름 분석이다(Docs/Design/SparksLanguage 3.11절): await 뒤의 객체 지역 이름(S0412 — 타입
 // 검사 전에 읽기마다 정한다), 읽지 않는 지역 이름·인자(S0710·S0712)와 그 뒤 읽지 않는 대입 값
 // (S0711 — 타입 검사 뒤), 쓰지 않는 import(S0714). LC2d 단계(Flow)에서만 돈다.
 //

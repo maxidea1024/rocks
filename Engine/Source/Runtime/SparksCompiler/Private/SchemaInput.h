@@ -12,7 +12,7 @@ namespace rocks::sparks::detail {
 // 배열·객체는 여는 괄호 한 글자다(진단 밑줄용).
 SourceSpan JsonValueSpan(StringView text, JsonPosition position) noexcept;
 
-// binding schema의 타입 표기(Docs/Design/SparksLanguage.ko.md 10.2절)가 문법에 맞는지 본다.
+// binding schema의 타입 표기(Docs/Design/SparksLanguage 10.2절)가 문법에 맞는지 본다.
 // 문법: 이름 {'.' 이름} ['<' 표기 {", " 표기} '>'] ['?']. 이름은 ASCII 영문자로 시작하는
 // 영문자·숫자, 공백은 쉼표 뒤 한 칸만 쓴다(생성기 출력이 하나로 정해지게). 중첩은
 // MaxSyntaxNesting까지다.

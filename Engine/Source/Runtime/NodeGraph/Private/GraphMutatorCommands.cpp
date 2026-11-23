@@ -7,7 +7,7 @@
 #include <NodeGraph/GraphReadView.h>
 #include <Serialization/Record.h>
 
-// GraphMutator 명령마다의 검증과 op 생성이다(Docs/Design/NodeGraph.ko.md 8.1·8.6절 "명령 규칙").
+// GraphMutator 명령마다의 검증과 op 생성이다(Docs/Design/NodeGraph 8.1·8.6절 "명령 규칙").
 namespace rocks::nodegraph::detail {
 
 namespace {

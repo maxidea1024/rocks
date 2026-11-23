@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 패키지 manifest 시험이다(Docs/Design/SparksLanguage.ko.md 3.4절 "패키지 manifest", S1101–S1105):
+// 패키지 manifest 시험이다(Docs/Design/SparksLanguage 3.4절 "패키지 manifest", S1101–S1105):
 // key마다 양성·음성, 진단 위치(값의 시작, 빠진 key는 최상위 객체), 문장, 여러 오류를 함께 알림,
 // 할당 실패.
 using namespace rocks;

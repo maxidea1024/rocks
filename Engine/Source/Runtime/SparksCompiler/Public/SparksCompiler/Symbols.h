@@ -3,7 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Text/StringView.h>
 
-// Sparks 이름 해석의 심볼과 타입이다(Docs/Design/SparksLanguage.ko.md 3.9절, LC2b). Compilation이
+// Sparks 이름 해석의 심볼과 타입이다(Docs/Design/SparksLanguage 3.9절, LC2b). Compilation이
 // 만들고 가진다(Compilation::Symbols·Types).
 //
 // 심볼은 이름 하나가 가리키는 대상 하나다: 언어 소유 이름(내장 타입·prelude), 문맥 이름, RPC 접두,

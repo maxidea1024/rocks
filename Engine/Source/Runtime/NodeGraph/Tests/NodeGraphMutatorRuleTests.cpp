@@ -1,6 +1,6 @@
 #include "NodeGraphMutatorTestSupport.h"
 
-// GraphMutator 명령 규칙의 경계 사례 시험이다(Docs/Design/NodeGraph.ko.md 6.4·8.6절, 13절 GT1·GT2):
+// GraphMutator 명령 규칙의 경계 사례 시험이다(Docs/Design/NodeGraph 6.4·8.6절, 13절 GT1·GT2):
 // 중복 id, 고아 핀 자동 정리(GI7), 고아 핀 가림(GI8), 재경유 순환(GI10), 값·그래프 크기 상한, undo
 // 순서(LIFO) 위반, 통지 중 구독 해제, bracket 중 undo, 변환 노드의 문서당 하나, 같은 바이트
 // 속성(무동작), 출력 핀 단위 순번 통지.

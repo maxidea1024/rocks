@@ -5,7 +5,7 @@
 #include "TypeChecker.h"
 
 // 멤버 접근(S0326·S0412·S0414·S0425)과 호출(S0402–S0404·S0411·S0422), 생성·숫자 변환(S0502·S0508),
-// 검증 리터럴(S0417·S0424)이다. 규칙: Docs/Design/SparksLanguage.ko.md 3.10절, 부록 B 시그니처.
+// 검증 리터럴(S0417·S0424)이다. 규칙: Docs/Design/SparksLanguage 3.10절, 부록 B 시그니처.
 
 namespace rocks::sparks::detail {
 

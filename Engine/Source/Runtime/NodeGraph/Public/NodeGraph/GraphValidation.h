@@ -6,7 +6,7 @@
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// 문서 정규화와 전체 불변식 검사다(Docs/Design/NodeGraph.ko.md 6.3절, GI1–GI14).
+// 문서 정규화와 전체 불변식 검사다(Docs/Design/NodeGraph 6.3절, GI1–GI14).
 //
 // 사용 예:
 //   // import·시험 입력을 정규 순서로 맞춘다.

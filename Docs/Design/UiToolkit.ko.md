@@ -10,7 +10,7 @@ Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용�
 
 | 항목 | 내용 |
 |---|---|
-| 기준 문서 | [전체 구현 계획](EngineImplementationPlan.ko.md) 개정 1.9 · [Core·Object·Input 상세 구현 계획](CoreObjectInputDetailedPlan.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md) · [리플렉션 B9](ReflectionExtensions.ko.md) · [Sparks 언어 설계](SparksLanguage.ko.md) |
+| 기준 문서 | [전체 구현 계획](EngineImplementationPlan.ko.md) 개정 1.9 · [Core·Object·Input 상세 구현 계획](CoreObjectInputDetailedPlan.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md) · [리플렉션 B9](ReflectionExtensions.ko.md) · [Sparks 언어 설계](SparksLanguage/README.ko.md) |
 | UE 기준 | 로컬 클론 `C:\github\UnrealEngine` 5.8.4-release(commit `f45729c0b6f0`). 이 문서의 UE 경로는 `Engine/Source/` 기준 상대 경로이며, 행 번호는 해당 클론의 값이다 |
 | Rocks 상태 | UI·TextLayout·UiRender 코드 없음. Core·Object·리플렉션 구현 중. `PlatformWindow`은 Win64 단일 창(DPI·IME·clipboard·cursor 없음) |
 | 이름 | Rocks 고유 이름을 사용한다(UD12). UI 계층 매크로는 `ROCKS_UI_` 접두. UE 이름(모듈·타입·매크로)은 대응표와 근거 열에만 적는다 |
@@ -65,7 +65,7 @@ B를 채택하는 근거는 다음과 같다.
 | UiScreens | CommonUI · CommonInput 플러그인 | `Engine/Source/Runtime/UiScreens` | UiWidget·Input(action) | 화면 스택·입력 라우터·입력 모드·뒤로 가기·focus 복원·입력 장치 종류 전환·플랫폼별 버튼 아이콘. UE에서 플러그인인 만큼 선택 모듈이며, 게임이 쓰지 않으면 링크하지 않는다 |
 | PlatformWindow | `Runtime/ApplicationCore` | 기존 모듈 확장 | Core·PlatformBase·window SDK | 다중 창·DPI·IME·clipboard·cursor·OS drag/drop·접근성 provider(PW1–PW8) |
 | EditorFramework | `Editor/UnrealEd` 일부 · `PropertyEditor` · `EditorStyle` · `Developer/ToolMenus` | `Engine/Source/Editor/Framework` | UiFramework·UiWidget·EditorBackend | 셸·자산 편집기 host·메뉴 등록·Inspector·Transaction 연결·에디터 스타일·EditorViewport·곡선/타임라인 Element. 그래프 편집 화면은 GraphView 모듈이다. Shipping 링크 금지 |
-| GraphView | `Editor/GraphEditor` | `Engine/Source/Editor/GraphView` | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자) | 노드 그래프 편집 화면: 캔버스·노드·핀 시각·연결선·노드 메뉴·주석·diff 화면([노드 그래프](NodeGraph.ko.md) 11절). 그래프 데이터·변경·undo·복사는 `NodeGraph`(Runtime)·`NodeGraphTools`(Developer) 소유이고, 도메인 schema·노드 서술은 각 도구 소유다. 도메인 모듈 의존 금지, Shipping 링크 금지 |
+| GraphView | `Editor/GraphEditor` | `Engine/Source/Editor/GraphView` | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자) | 노드 그래프 편집 화면: 캔버스·노드·핀 시각·연결선·노드 메뉴·주석·diff 화면([노드 그래프](NodeGraph/11-ModulesAndView.ko.md) 11절). 그래프 데이터·변경·undo·복사는 `NodeGraph`(Runtime)·`NodeGraphTools`(Developer) 소유이고, 도메인 schema·노드 서술은 각 도구 소유다. 도메인 모듈 의존 금지, Shipping 링크 금지 |
 | WorldIntegration | `UWidgetComponent` · `UGameViewportSubsystem` · `SGameLayerManager` | 기존 계획 | World·UiWidget | game viewport의 화면 layer와 LocalPlayer별 layer, World 정리 연동, 월드 공간 Widget·가상 사용자 상호작용, 기본 입력 모드 |
 
 모듈 의존 방향은 전체 계획 3.1절을 따른다. UiCore·UiFramework는 Object·Graphics·World·PlatformWindow에 직접 의존하지 않는다. OS 창·clipboard·cursor·IME는 `ui::Platform` 계약(UE `GenericApplication` 대응)으로 주입받으며 CPU 시험에서는 가짜 구현을 주입한다. UE에서는 독·명령·layout 저장이 런타임 `Slate` 모듈에 있고 Rocks도 같은 위치(UiFramework)에 둔다. 도구 프로그램(Rocks Lens 등)이 에디터 없이 독을 사용하기 때문이다. Shipping 게임은 독·명령 코드를 참조하지 않으므로 링크에서 제외된다.
@@ -393,7 +393,7 @@ protected:
 | `WidgetTree` | `UWidgetTree`(`WidgetTree.h:106-158`) | 루트 Widget과 이름 있는 slot 내용, Widget 생성 함수 |
 | `NamedSlot` | `UNamedSlot` · `INamedSlotInterface` | 파생 에셋·인스턴스가 내용을 채우는 자리 |
 | `WidgetAsset` | `UWidgetBlueprint` + `UWidgetBlueprintGeneratedClass` | **UE와 다른 점:** Blueprint·생성 클래스 대신 에셋이 템플릿 WidgetTree, 컨트롤러 클래스, 결합 표, 애니메이션, 바인딩, 이름 있는 slot 선언, 부모 에셋 참조, 에셋 확장 자료(ViewModel 정의 등)를 저장한다. 인스턴스 생성은 템플릿 기반 subobject 인스턴싱이다(UE `DuplicateAndInitializeFromWidgetTree`, `UserWidget.cpp:228-337`). 파생 에셋은 부모 트리를 쓰고 이름 있는 slot 내용만 병합한다(UE `WidgetBlueprintGeneratedClass.cpp:210-226`) |
-| 컨트롤러 | C++ `UserWidget` 파생(UE의 C++ 부모 클래스와 같다) 또는 Sparks `WidgetController` | Sparks의 `Widget.이름` 경로는 컴파일 시 결합 표의 stable ID로 해석하며 이름은 작성·표시용이다. 구성·해체 통지는 WidgetController의 수명 hook으로 전달한다([Sparks 언어 설계](SparksLanguage.ko.md)) |
+| 컨트롤러 | C++ `UserWidget` 파생(UE의 C++ 부모 클래스와 같다) 또는 Sparks `WidgetController` | Sparks의 `Widget.이름` 경로는 컴파일 시 결합 표의 stable ID로 해석하며 이름은 작성·표시용이다. 구성·해체 통지는 WidgetController의 수명 hook으로 전달한다([Sparks 언어 설계](SparksLanguage/README.ko.md)) |
 | 결합 표 | `meta=(BindWidget)` · `BindWidgetOptional` · `BindWidgetAnim` | **UE와 다른 점:** UE는 인스턴싱 후 같은 이름의 모든 속성에 대입하고 명시 navigation 대상도 이름으로 해석한다(`WidgetBlueprintGeneratedClass.cpp:238-283`, `Widget.cpp:788`). Rocks 에셋은 (컨트롤러 FieldId → Widget stable ID) 표를 저장한다. 표는 Designer가 이름 일치나 명시 지정으로 만들고, 실행 스키마로 Shipping에 포함된다. 명시 navigation 대상·애니메이션 대상·이름 있는 slot도 같은 ID 체계를 쓰며, 파생 에셋 사슬 전체에서 ID 유일성을 보장한다 |
 | Widget navigation 규칙 | `UWidget::SetNavigationRule*` · `FNavigationMethod`(`Widget.cpp:788-893`) | 방향별 규칙(경계 탈출·명시·순환·정지·사용자 정의)과 명시 대상 ID를 Widget 속성으로 저장하여 Element navigation(3.9절)에 반영 |
 | 확장 | `UWidgetBlueprintGeneratedClassExtension` · `UUserWidgetExtension` | 에셋 확장 자료(예: ViewModel 정의)와 인스턴스 확장 객체(예: 바인딩 실행 view, 변경 통지 저장소) |
@@ -455,7 +455,7 @@ UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 �
 | viewport | `EditorViewport` · viewport client | `SEditorViewport` · `FEditorViewportClient` · `FSceneViewport` | 에디터 viewport는 별도 render target 합성, Tryout은 viewport 교체 또는 새 창. 마우스 capture 모드(없음·영구·누름 중 등)와 capture 해제 명령(UE 기본 Shift+F1) |
 | 에디터 스타일 | 에디터 `StyleSet` · 테마 · 앱 배율 | `FStarshipEditorStyle` · `USlateThemeManager` · `UEditorStyleSettings::ApplicationScale` | 4.2절 기본값 |
 | 자산 선택 | asset picker · path picker | `IContentBrowserSingleton::CreateAssetPicker` | 필터·선택 모드 |
-| 그래프 편집 | `GraphView` 모듈(Editor 계층, EditorFramework와 별도) · 도메인 시각 등록 · overlay | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | [노드 그래프](NodeGraph.ko.md) 11절. 머티리얼(전체 계획 14.5절)·오디오·애니메이션 등 그래프 편집기가 함께 쓰는 화면이다. 데이터 모델·변경·undo는 `NodeGraph`, 도메인은 schema·노드 서술과 시각 등록·overlay만 넣는다. 화면은 노드 시각을 `NodeId`로 찾고 통지 단위로 증분 갱신한다 |
+| 그래프 편집 | `GraphView` 모듈(Editor 계층, EditorFramework와 별도) · 도메인 시각 등록 · overlay | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | [노드 그래프](NodeGraph/11-ModulesAndView.ko.md) 11절. 머티리얼(전체 계획 14.5절)·오디오·애니메이션 등 그래프 편집기가 함께 쓰는 화면이다. 데이터 모델·변경·undo는 `NodeGraph`, 도메인은 schema·노드 서술과 시각 등록·overlay만 넣는다. 화면은 노드 시각을 `NodeId`로 찾고 통지 단위로 증분 갱신한다 |
 | 곡선·타임라인 | 곡선 편집기 · 컷씬 타임라인 | `FCurveEditor` · `FCurveModel` · `SCurveEditorPanel` · `ISequencer` | 곡선 편집기를 타임라인이 재사용(UE와 같다) |
 | 로그·검사 | 로그 패널 · UI 트리 검사기 | `OutputLog` · `SlateReflector` | UI 트리 검사기는 Element 트리·geometry·무효화 사유를 표시하며 개발 빌드 전용 |
 
@@ -484,7 +484,7 @@ UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 �
 | CU6 | 동적 속성 | `IDetailCustomization` 계열의 사용자 정의 행 · 스크립트 정의 속성 | 형태가 데이터로 정해지는 속성(스크립트 정의 속성·머티리얼 parameter)을 객체가 추가 노출. 저장 형식·Transaction 경로는 정적 속성과 동일 |
 | CU7 | 텍스트 위치 변환 | `FString`(UTF-16)·ICU · TSF ACP | UTF-8 byte ↔ UTF-16 ↔ code point 위치 변환은 Core, grapheme·줄 경계는 TextLayout의 ICU adapter(UD3). IME와 편집 Element가 사용 |
 | CU8 | 필드 형식 확장 | `FEnumProperty`·`FStructProperty`·`FArrayProperty`·`FTextProperty` 계열 | enum(플래그 포함)·값 구조체(Vector2·Color·여백·anchor·brush·Element 스타일)·Text·에셋 참조·배열. enum·구조체도 `.rocksids.json` 안정 ID 체계에 포함. A0-B와 B9(Text는 B9l)로 대부분 충족 |
-| CU9 | 스크립트 구현 interface 표 | `UINTERFACE` | [Sparks 언어 설계](SparksLanguage.ko.md) 10.3절에서 정의. `NativeOnly` 표지와 C++ interface 조회 offset은 7.3절 (f) |
+| CU9 | 스크립트 구현 interface 표 | `UINTERFACE` | [Sparks 언어 설계](SparksLanguage/10-EngineBinding.ko.md) 10.3절에서 정의. `NativeOnly` 표지와 C++ interface 조회 offset은 7.3절 (f) |
 
 선행 관계: CU1·CU4는 enum·구조체·배열을 대상으로 하므로 CU8 이후, CU3은 CU2 이후, CU5는 UD7 이후, CU6은 CU4·CU5 이후다. CU7은 독립이다. Sparks는 CU2·CU3·CU5·CU8을 언어 L1의 선행 조건으로 사용한다.
 
@@ -535,7 +535,7 @@ UE 5.8 `Templates`의 C++ 템플릿(헤더 119개, `.cpp` 119개)과 대조해 C
 | `DisplayOnly, EditScope = "Archetype"` | `VisibleDefaultsOnly` | `CPF_Edit \| CPF_EditConst \| CPF_DisableEditOnInstance` |
 | `DisplayOnly, EditScope = "Instance"` | `VisibleInstanceOnly` | `CPF_Edit \| CPF_EditConst \| CPF_DisableEditOnTemplate` |
 
-- **노출은 명시한다.** UE와 같이 `Edit`·`DisplayOnly`가 없는 리플렉션 필드는 Inspector에 나오지 않는다. [Sparks](SparksLanguage.ko.md) 10.1절 예시의 `ROCKS_PROPERTY(Edit, …)`가 이 지정자다. `Edit`과 `DisplayOnly`를 함께 쓰거나, 둘 다 없이 `EditScope`를 쓰면 메타 컴파일러 오류다(UE도 편집·보이기 지정자를 둘 이상 쓰면 오류 — 같은 파일 24–27행).
+- **노출은 명시한다.** UE와 같이 `Edit`·`DisplayOnly`가 없는 리플렉션 필드는 Inspector에 나오지 않는다. [Sparks](SparksLanguage/10-EngineBinding.ko.md) 10.1절 예시의 `ROCKS_PROPERTY(Edit, …)`가 이 지정자다. `Edit`과 `DisplayOnly`를 함께 쓰거나, 둘 다 없이 `EditScope`를 쓰면 메타 컴파일러 오류다(UE도 편집·보이기 지정자를 둘 이상 쓰면 오류 — 같은 파일 24–27행).
 - **`EditScope`는 값 하나다**(`"Archetype"`·`"Instance"`). 배타적인 두 지정자를 두지 않아 함께 쓰는 경우가 생기지 않고, `EditorOnly`·`WorldOnly`·`DevelopmentOnly` 같은 "존재 범위"의 `…Only` 이름과 헷갈리지 않는다.
 - **`DisplayOnly`와 `ReadOnly`는 다르다.** `DisplayOnly`는 Inspector 표시 전용(UE `CPF_EditConst`)이고 코드·스크립트·바인딩·애니메이션 트랙의 쓰기를 막지 않는다. `ReadOnly`는 경로·리플렉션 쓰기를 거부하는 실행 의미다([리플렉션 기반](ReflectionFoundations.ko.md) 954행, staged 쓰기만 허용). Inspector 규칙: `Edit`이고 `ReadOnly`인 필드는 생성 setter(5.3절 `Apply`, UD7)가 있으면 setter를 거쳐 편집하고(예: 장부를 거쳐야 하는 `relativeTransform`), 없으면 표시 전용으로 보인다.
 - **`EditScope`를 붙일 수 있는 곳:** 원형과 인스턴스가 나뉘는 타입, 곧 `WorldOnly` 클래스(Actor·Component — prefab 노드)와 UI Widget 클래스(UiWidget이 기반 클래스를 등록)의 필드, 그리고 struct 멤버다. 그 밖의 클래스(자산 전용 등)의 필드에 붙이면 메타 컴파일러 오류다. struct 멤버의 `EditScope`는 그 struct가 자산 객체 안에서 쓰일 때는 문맥이 없으므로 무시한다(두 위치 모두 편집할 수 있다).
@@ -560,14 +560,14 @@ UE 5.8 `Templates`의 C++ 템플릿(헤더 119개, `.cpp` 119개)과 대조해 C
 
 **원형 적용과 variant 만들기.** "원형에 적용"(Prefab 3.7절 Apply to source)과 "variant 만들기"(3.13절)는 `"Instance"` 필드 override를 옮기지 않으며, 옮기지 않은 항목은 인스턴스 집합에 그대로 남는다. UE는 인스턴스 변경을 Blueprint에 적용할 때(`ApplyInstanceChangesToBlueprint`, `Editor/UnrealEd/Private/Kismet2/Kismet2.cpp:2177`, 플래그 2210행), Actor에서 Blueprint를 만들 때(`CreateBlueprintFromActor`, 같은 파일 1553행), 컴포넌트 속성을 옮길 때(`Editor/UnrealEd/Private/Editor.cpp:1910`) `SkipInstanceOnlyProperties`로 뺀다.
 
-Sparks `@edit` 필드의 대응 표기(`@edit(Scope: Archetype)` 등)는 [Sparks 언어 설계](SparksLanguage.ko.md)가 정한다.
+Sparks `@edit` 필드의 대응 표기(`@edit(Scope: Archetype)` 등)는 [Sparks 언어 설계](SparksLanguage/README.ko.md)가 정한다.
 
 **(b) 도움말(UD14).** 설명은 `Help = "…"`로 PROPERTY·CLASS·STRUCT·ENUM·ENUMERATOR·FUNCTION(CU2, 인자 포함)에 둔다. 명령줄 바인더의 `ROCKS_PROPERTY(Help=…)`([AppInfo·CommandLine](AppInfoCommandLine.ko.md) 723행), 계획된 `ROCKS_FUNCTION(…, Help=…)`([CVar](CVarSystem.ko.md) 14.3절), CVar `.Help()`와 같은 키로 하나로 통일한다. Inspector tooltip, Designer palette, 자산·클래스 선택 목록, Sparks 언어 서버 hover(native API 설명)가 쓴다.
 - 길이 한도는 `MaxHelpBytes`(1024 — CVar `MaxVarHelpBytes`와 같은 값)다.
 - `Help`가 없으면 tooltip은 표시 이름을 쓴다(UE도 같다 — `Runtime/CoreUObject/Private/UObject/Class.cpp:323-363`). 선택 목록처럼 짧은 설명이 필요한 곳은 `Help`의 첫 줄(첫 줄바꿈 앞)을 쓴다. UE `ShortToolTip` 같은 별도 키는 두지 않는다.
 - 설정 struct 필드([설정 시스템](ConfigSystem.ko.md) 7절)와 명령줄 바인더의 `Help`는 게임 빌드의 콘솔·명령줄 도움말이 쓰므로 실행 스키마에도 남는다. 그 밖의 `Help`는 편집 메타데이터 블록에만 있다.
 - **C++ 문서 주석은 가져가지 않는다.** UE UHT는 선언 앞 주석(`/** */`와 `//` 모두)을 `Comment`·`ToolTip` 메타데이터로 자동 추출하고 명시 `ToolTip`이 있으면 건너뛴다(`EpicGames.UHT/Parsers/UhtParsingScope.cs:172-220`). 함수 주석의 `@param`은 편집기가 핀 tooltip으로 쓴다(`Editor/BlueprintGraph/Private/K2Node_CallFunction.cpp:1681` `GeneratePinTooltipFromFunction`). Rocks C++는 명시한 `Help`만 쓴다. 근거: (1) 저장소 규칙상 손으로 쓴 소스 주석은 한국어이고 표시 문구는 영어다(D18과 같은 이유). (2) 공개 API 주석은 프로그래머용(목적·사용 예·인자·오류·수명)이라 편집자용 tooltip과 독자·분량이 다르다. (3) 주석 수정이 생성 메타데이터를 바꿔 재빌드와 스키마 차이를 만든다. C++ 문서 주석은 프로그래머용 hover(C++ 언어 서버)가 그대로 쓴다.
-- **Sparks는 다르다.** Sparks는 `///` 문서 주석이 편집기 tooltip이다([Sparks](SparksLanguage.ko.md) 10.1절 표). Sparks 문서 주석은 언어가 정한 단일 형식이고 스크립트 작성자가 편집자에게 보이는 설명으로 쓰는 것이 언어 설계의 전제이므로 이 차이는 의도한 것이다. Sparks 컴파일러는 그 주석을 같은 `Help` 메타데이터로 기록한다.
+- **Sparks는 다르다.** Sparks는 `///` 문서 주석이 편집기 tooltip이다([Sparks](SparksLanguage/10-EngineBinding.ko.md) 10.1절 표). Sparks 문서 주석은 언어가 정한 단일 형식이고 스크립트 작성자가 편집자에게 보이는 설명으로 쓰는 것이 언어 설계의 전제이므로 이 차이는 의도한 것이다. Sparks 컴파일러는 그 주석을 같은 `Help` 메타데이터로 기록한다.
 
 **(c) 타입·함수 표시 메타(UD15).** `DisplayName`·`Category`·`Help`를 CLASS·STRUCT·ENUM과 FUNCTION(CU2 — Inspector 버튼·에디터 명령 목록)에도 둔다. 타입 선택 UI(클래스 선택, palette, 노드 목록)가 쓴다. 예를 들어 StateTree 노드 선택 목록은 struct 메타데이터 `Category`를 `|`로 나눠 분류한다(`Plugins/Runtime/StateTree/Source/StateTreeEditorModule/Private/Customizations/Widgets/SStateTreeNodeTypePicker.cpp:176`).
 - `DisplayName`이 없으면 필드 `DisplayName`이 없을 때와 같은 기본 표시 규칙을 타입 도구 이름(enum은 C++ 이름)에 적용한다. UE는 메타데이터가 없으면 이름을 표시 문자열로 바꾼다(`Runtime/CoreUObject/Private/UObject/Class.cpp:303-313`, `FName::NameToDisplayString`). Rocks 기본 표시 규칙은 CU1 구현에서 하나로 정해 필드·타입·함수가 같이 쓴다.
@@ -675,7 +675,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 | UT5 | UiWidget·UiScreens: Widget·slot 객체·UserWidget·WidgetTree·WidgetAsset·결합 표·검증·Widget 풀·화면 layer(WorldIntegration 연동)·화면 스택·입력 라우터·입력 장치 전환, Designer 기초(palette·hierarchy·canvas·Inspector 재사용) | UT4, CB1·CB3 | UV7, UV9 화면 부분, 전체 계획 21.5절 HUD·menu·설정 sample | M3 착수 · M4 완료 |
 | UT6 | 완성: ViewModel 바인딩·UI 애니메이션·서식 텍스트·Widget 층 엔트리 목록·월드 공간 Widget·cache/retained panel 활용·곡선·타임라인 Element·코드 편집 Element·접근성(PW8)·전문 Designer | UT5 | 전체 계획 21.5절 필수 sample 5종·14.9절 MAT 시험·B12 | M5–M6 |
 
-그래프 편집 화면은 [노드 그래프](NodeGraph.ko.md) 단계 NG5–NG7이다. NG5는 UT3과 EditorBackend Transaction(UT4의 headless 부분, 노드 그래프 NG4) 뒤에, NG6은 공용 2D 격자([공간 색인](SpatialIndex.ko.md) 5.3절) 뒤에 착수한다.
+그래프 편집 화면은 [노드 그래프](NodeGraph/14-Stages.ko.md) 단계 NG5–NG7이다. NG5는 UT3과 EditorBackend Transaction(UT4의 headless 부분, 노드 그래프 NG4) 뒤에, NG6은 공용 2D 격자([공간 색인](SpatialIndex.ko.md) 5.3절) 뒤에 착수한다.
 
 ## 10. 위험과 대응
 
@@ -714,7 +714,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
-**초안 2.4(2026.11.22):** [노드 그래프](NodeGraph.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
+**초안 2.4(2026.11.22):** [노드 그래프](NodeGraph/README.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
 
 **초안 2.3(2026.11.20):** UD15의 확정 범위를 레벨 스크립트가 실제로 쓰는 CLASS 지정자 `NotPlaceable` 하나로 좁혔다. 나머지 표시 메타·편집 메타는 권장안으로 되돌렸다(사용자 결정).
 
@@ -722,7 +722,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 
 **초안 2.1(2026.11.19):** UE 5.8 `Templates` 대조로 7.3절(CU1·CU2·CU9 보강: Inspector 노출과 편집 위치·도움말·타입·함수 표시 메타·분류 계층·타입 단위 편집 메타·스크립트 재정의 함수·남은 공백 목록)과 결정 UD13–UD17을 더했다. 초안 작성 뒤 서브에이전트 3개(빌드 문서 UE 대조, 7.3절 UE·Rocks 대조, Templates 독립 재대조)로 교차 검증하여 설명 키 통일(`Help`), `DisplayOnly`·`ReadOnly` 분리, 노출 명시(`Edit`), 저장 위치 기준 문맥·Designer 문맥, 편집기 쓰기 경로 거부, 중첩 전파 규칙, 편집 메타데이터 블록, 스크립트 재정의 함수 계약을 반영하고 UE 인용 위치를 바로잡았다. 반영본을 서브에이전트 1개로 다시 검증해 대리 클래스의 등록·저장 관계, interface 다중 상속 허용, `category` 실행 소비처, Category 표시 순서(Rocks 고유), `PrioritizeCategories`·펼침/접힘 병합 규칙, 시험 fixture 예외를 반영했다.
 
-이 개정에 맞춰 함께 고친 문서: [Prefab](Prefab.ko.md) 개정 4(3.7·3.11·3.13절 — 편집 위치 규칙), [빌드 타깃](BuildTargets/README.ko.md)(새 문서, `ROCKS_WITH_EDITOR_DATA`). 구현 전에 맞출 문서: [Sparks](SparksLanguage.ko.md) — `@edit(Scope:)` 표기, `ScriptOverridable` 함수와 `override fn`의 대응, 타입·필드 `Help`와 `///` 문서 주석의 기록, 10.1절 예시의 `Edit`이 이 절의 지정자임을 표기. [리플렉션 기반](ReflectionFoundations.ko.md) 지정자 표 — `Edit`·`DisplayOnly`·`EditScope`·`Help`, CLASS 편집 메타 지정자, `ScriptOverridable`·`NativeOnly`. 빌드 쪽 공백(타깃 종류·의존 공개 범위·플러그인 활성 조건)은 [빌드 타깃](BuildTargets/README.ko.md)으로 분리했다.
+이 개정에 맞춰 함께 고친 문서: [Prefab](Prefab.ko.md) 개정 4(3.7·3.11·3.13절 — 편집 위치 규칙), [빌드 타깃](BuildTargets/README.ko.md)(새 문서, `ROCKS_WITH_EDITOR_DATA`). 구현 전에 맞출 문서: [Sparks](SparksLanguage/README.ko.md) — `@edit(Scope:)` 표기, `ScriptOverridable` 함수와 `override fn`의 대응, 타입·필드 `Help`와 `///` 문서 주석의 기록, 10.1절 예시의 `Edit`이 이 절의 지정자임을 표기. [리플렉션 기반](ReflectionFoundations.ko.md) 지정자 표 — `Edit`·`DisplayOnly`·`EditScope`·`Help`, CLASS 편집 메타 지정자, `ScriptOverridable`·`NativeOnly`. 빌드 쪽 공백(타깃 종류·의존 공개 범위·플러그인 활성 조건)은 [빌드 타깃](BuildTargets/README.ko.md)으로 분리했다.
 
 **초안 2.0(2026.11.16):** 초안 1.0의 단일 층 설계를 폐기하고 UE 5.8 두 층 구조로 전면 재작성하였다. 외부 엔진 실행 결과와 비교하던 시험 GO1–GO6, 테마 상속·자식 Widget 배치 속성·`Affects` 효과 플래그 체계(UE 무효화 사유로 대체), AccessKit 후보를 삭제하였다. CU1–CU9의 ID와 7절 번호는 유지하였다. UD7·UD8은 같은 사안으로 유지하였다. UR4·UR5·UD5·UD6은 번호를 새 사안에 다시 사용하였다(이전 의미: UR4 세부 동작 차이, UR5 비교 기준 버전 변동, UD5 외부 코드 차용 방식, UD6 비교 기준 버전). 초안 작성 후 서브에이전트 3개(Element 층 UE 대조, Widget·에디터 층 UE 대조, Rocks 문서 정합성)로 교차 검증하여 무효화 기본 경로, hit grid 셀 크기, 정규화 표, 기본 스타일 출처, 글꼴 구성, 결합 표, Widget 풀, lane 모델 등을 바로잡았다.
 

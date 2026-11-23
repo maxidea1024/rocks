@@ -9,7 +9,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Sparks 구문 분석 시험이다(Docs/Design/SparksLanguage.ko.md 3.6절 EBNF, 8.1절 "구문 분석"·"복구"·
+// Sparks 구문 분석 시험이다(Docs/Design/SparksLanguage 3.6절 EBNF, 8.1절 "구문 분석"·"복구"·
 // "문법 세부", S0201–S0219). 구조는 시험용 S-식(아래 AppendTree)으로 비교하고, 위치까지 포함한 덤프
 // 형식은 DumpFormat 시험과 conformance corpus(Syntax 영역의 .ast)가 맡는다. 모든 분석 결과는
 // ValidTree로 트리 불변식(종류별 자식 수, 범위 포함·순서, 고아 노드 없음)을 확인한다.

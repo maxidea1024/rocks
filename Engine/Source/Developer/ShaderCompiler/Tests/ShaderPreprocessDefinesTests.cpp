@@ -131,9 +131,16 @@ TEST(ShaderPreprocessDefines_AssemblesFormatDefines) {
 
     REQUIRE(BuildShaderPreprocessDefines(d3d12, ShaderStagePixel, true, {}, set));
     const ExpectedDefine d3d12Pixel[] = {
-        {"ROCKS_BACKEND_D3D12", "1"},      {"ROCKS_COMPILER_DXC", "1"},
-        {"ROCKS_FORMAT_D3D12_SM6", "1"},   {"ROCKS_HLSL2021", "1"},
-        {"ROCKS_PIXEL_SHADER", "1"},       {"ROCKS_SHADER_MODEL_MAJOR", "6"},
+        {"ROCKS_BACKEND_D3D12", "1"},
+        {"ROCKS_COMPILER_DXC", "1"},
+        {"ROCKS_FEATURE_COMPUTE", "1"},
+        {"ROCKS_FEATURE_TYPED_UAV_LOAD", "1"},
+        {"ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT", "1"},
+        {"ROCKS_FEATURE_WAVE_OPERATIONS", "1"},
+        {"ROCKS_FORMAT_D3D12_SM6", "1"},
+        {"ROCKS_HLSL2021", "1"},
+        {"ROCKS_PIXEL_SHADER", "1"},
+        {"ROCKS_SHADER_MODEL_MAJOR", "6"},
         {"ROCKS_SHADER_MODEL_MINOR", "6"},
     };
     CHECK(SameDefines(set, d3d12Pixel));
@@ -141,9 +148,16 @@ TEST(ShaderPreprocessDefines_AssemblesFormatDefines) {
     // D3D11_SM5: 1차 경로가 FXC이므로 HLSL 2021(대체 경로)이어도 FXC 정의다.
     REQUIRE(BuildShaderPreprocessDefines(d3d11, ShaderStageVertex, true, {}, set));
     const ExpectedDefine d3d11Vertex[] = {
-        {"ROCKS_BACKEND_D3D11", "1"},      {"ROCKS_COMPILER_FXC", "1"},
-        {"ROCKS_FORMAT_D3D11_SM5", "1"},   {"ROCKS_HLSL2021", "1"},
-        {"ROCKS_SHADER_MODEL_MAJOR", "5"}, {"ROCKS_SHADER_MODEL_MINOR", "0"},
+        {"ROCKS_BACKEND_D3D11", "1"},
+        {"ROCKS_COMPILER_FXC", "1"},
+        {"ROCKS_FEATURE_COMPUTE", "1"},
+        {"ROCKS_FEATURE_TYPED_UAV_LOAD", "0"},
+        {"ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT", "1"},
+        {"ROCKS_FEATURE_WAVE_OPERATIONS", "0"},
+        {"ROCKS_FORMAT_D3D11_SM5", "1"},
+        {"ROCKS_HLSL2021", "1"},
+        {"ROCKS_SHADER_MODEL_MAJOR", "5"},
+        {"ROCKS_SHADER_MODEL_MINOR", "0"},
         {"ROCKS_VERTEX_SHADER", "1"},
     };
     CHECK(SameDefines(set, d3d11Vertex));
@@ -157,6 +171,10 @@ TEST(ShaderPreprocessDefines_AssemblesFormatDefines) {
         {"ROCKS_BACKEND_VULKAN", "1"},
         {"ROCKS_COMPILER_DXC", "1"},
         {"ROCKS_COMPUTE_SHADER", "1"},
+        {"ROCKS_FEATURE_COMPUTE", "1"},
+        {"ROCKS_FEATURE_TYPED_UAV_LOAD", "0"},
+        {"ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT", "1"},
+        {"ROCKS_FEATURE_WAVE_OPERATIONS", "0"},
         {"ROCKS_FORMAT_VULKAN_SM5", "1"},
         {"ROCKS_HLSL2021", "0"},
         {"ROCKS_SHADER_MODEL_MAJOR", "6"},
@@ -171,8 +189,17 @@ TEST(ShaderPreprocessDefines_AssemblesFormatDefines) {
 
     REQUIRE(BuildShaderPreprocessDefines(metal, ShaderStagePixel, true, {}, set));
     CHECK(set.Find("ROCKS_BACKEND_METAL", found) == StringView("1") && found);
+    CHECK(set.Find("ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT", found) == StringView("1") &&
+          found);
+    CHECK(set.Find("ROCKS_FEATURE_WAVE_OPERATIONS", found) == StringView("0") && found);
     REQUIRE(BuildShaderPreprocessDefines(gles, ShaderStagePixel, true, {}, set));
     CHECK(set.Find("ROCKS_BACKEND_GLES", found) == StringView("1") && found);
+    // GLES: compute만 있다(형식 기능 정의는 늘 0·1로 있다 — SC10 개정 29).
+    CHECK(set.Find("ROCKS_FEATURE_COMPUTE", found) == StringView("1") && found);
+    CHECK(set.Find("ROCKS_FEATURE_TYPED_UAV_LOAD", found) == StringView("0") && found);
+    CHECK(set.Find("ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT", found) == StringView("0") &&
+          found);
+    CHECK(set.Find("ROCKS_FEATURE_WAVE_OPERATIONS", found) == StringView("0") && found);
     CHECK(set.Find("ROCKS_FORMAT_GLES31_PC", found) == StringView("1") && found);
 }
 

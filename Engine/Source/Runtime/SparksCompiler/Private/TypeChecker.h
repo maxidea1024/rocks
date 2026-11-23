@@ -4,7 +4,7 @@
 
 #include "NameBinder.h"
 
-// 타입 검사(LC2c)다(Docs/Design/SparksLanguage.ko.md 3.10절, S0326·S04xx·S05xx·S0109). 이름 해석
+// 타입 검사(LC2c)다(Docs/Design/SparksLanguage 3.10절, S0326·S04xx·S05xx·S0109). 이름 해석
 // (NameBinder)의 이름 공간과 심볼을 그대로 쓰며 NameBinder::Run의 마지막에 돈다. 파일:
 //   TypeRelations.cpp    숫자 분류·대입 가능·파생·`==`·`<`·기본값·제네릭 치환·타입 문장
 //   CheckExpressions.cpp 식·연산자·상수·기대 타입 맞추기

@@ -2,7 +2,7 @@
 
 #include <Core/Text/StringView.h>
 
-// graph-dump golden이다(Docs/Design/NodeGraph.ko.md 13절 GT10): 표본 문서(NodeGraph 시험 Sample)의
+// graph-dump golden이다(Docs/Design/NodeGraph 13절 GT10): 표본 문서(NodeGraph 시험 Sample)의
 // 정규 dump 텍스트. 형식(9.4절)이 바뀌면 시험이 실제 출력을 보여 주므로 검토한 뒤 고친다.
 namespace rocks::nodegraph_tools_test {
 

@@ -4,7 +4,7 @@
 #include "LanguageNames.h"
 #include "TypeChecker.h"
 
-// 이벤트·hook 선언 규칙이다(Docs/Design/SparksLanguage.ko.md 3.12절): hook 이름·인자(S0803–S0805),
+// 이벤트·hook 선언 규칙이다(Docs/Design/SparksLanguage 3.12절): hook 이름·인자(S0803–S0805),
 // handler 자리(S0804), 중복(S0806), `on` 경로 해석(S0807–S0810), `emit`(S0811), 이벤트 호출
 // (S0812), 확장 이벤트(S0813–S0815), 재진입 표시(S0816·S0817), LevelScript(S0801). Rules 단계
 // (LC3)에서만 돈다.

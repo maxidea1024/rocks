@@ -6,7 +6,7 @@
 #include <Core/Text/NumberText.h>
 #include <NodeGraph/GraphValidation.h>
 
-// 문서·조각 JSON 읽기다(Docs/Design/NodeGraph.ko.md 9.4절). Json5 문법을 받고, 모든 객체에서 모르는
+// 문서·조각 JSON 읽기다(Docs/Design/NodeGraph 9.4절). Json5 문법을 받고, 모든 객체에서 모르는
 // 키를 거부하며, 첫 오류에서 멈추고 그 줄·열을 진단으로 남긴다(부분 읽기 없음).
 namespace rocks::nodegraph {
 namespace {

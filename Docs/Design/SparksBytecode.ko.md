@@ -1,6 +1,6 @@
 # Sparks typed IR·bytecode·.sparkc
 
-기준일: 2026-11-22 · 개정 3(LC4d 리뷰 반영 — 안정 ID 맞춤 순서·type rename 승계·S1007·S1008, hash 정규화) · 상위 문서: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) §11·§12.1–§12.3·18.2절 LC4
+기준일: 2026-11-22 · 개정 3(LC4d 리뷰 반영 — 안정 ID 맞춤 순서·type rename 승계·S1007·S1008, hash 정규화) · 상위 문서: [Sparks 언어](SparksLanguage/README.ko.md)(이하 SL) §11·§12.1–§12.3·18.2절 LC4
 
 이 문서는 언어 코어 LC4(typed IR, bank 할당, 32비트 명령, `.sparkc`, verifier, 안정 ID, interface·body hash, 덤프)의 설계 정본이다. 실행(interpreter·값 버퍼·fault)은 LC5, 실행 모델(instance·hook·큐·async)은 LC6이 이 형식을 읽는다. SL은 요구(레지스터 VM, 3 bank, 타입별 opcode, 32비트 고정 명령, verifier, 결정적 덤프)를 정하고, 이 문서는 그 형식을 정한다.
 

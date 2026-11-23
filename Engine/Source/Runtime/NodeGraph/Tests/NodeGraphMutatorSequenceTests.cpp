@@ -3,7 +3,7 @@
 #include <Core/Math/RandomStream.h>
 #include <stdio.h>
 
-// GraphMutator의 이력·bracket·실패 주입 시험이다(Docs/Design/NodeGraph.ko.md 8.2·8.6절, 13절
+// GraphMutator의 이력·bracket·실패 주입 시험이다(Docs/Design/NodeGraph 8.2·8.6절, 13절
 // GT3·GT4·GT6).
 //   GT3: seed 무작위 명령열(단계 수 RandomCommandSteps). 매 단계 전체 불변식
 //   검사(SetFullValidation), 실패한 명령은

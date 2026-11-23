@@ -5,7 +5,7 @@
 #include <Core/Text/String.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 되돌릴 수 있는 문서 변경 기록이다(Docs/Design/NodeGraph.ko.md 8.6절 "op와 patch"). GraphMutator가
+// 되돌릴 수 있는 문서 변경 기록이다(Docs/Design/NodeGraph 8.6절 "op와 patch"). GraphMutator가
 // 명령· bracket마다 만들고, undo·redo는 같은 mutator가 이 patch를 다시 적용한다. 내용(op)은 mutator
 // 전용이다.
 //

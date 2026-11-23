@@ -5,7 +5,7 @@
 // 독립 struct Record다(Docs/Design/ReflectionExtensions.ko.md 26절). struct 값 하나를 객체 그래프
 // 없이 Record 바이트(header schema = struct ID, version = struct 버전, 멤버 TLV)로 쓰고 읽는다.
 // 바이트는 같은 값을 객체 그래프의 InstancedStruct 필드에 담아 저장했을 때의 내용 Record와 같다.
-// 노드 그래프의 노드 속성·입력 기본값(Docs/Design/NodeGraph.ko.md GD23)과 그
+// 노드 그래프의 노드 속성·입력 기본값(Docs/Design/NodeGraph GD23)과 그
 // 텍스트화(NodeGraphTools)가 쓴다.
 //
 // 담을 수 있는 struct만 받는다: InstancedStruct 담기 조건(detail::CheckInstancedStructContent —

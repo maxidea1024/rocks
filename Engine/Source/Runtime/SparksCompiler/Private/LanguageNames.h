@@ -3,7 +3,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Text/StringView.h>
 
-// 언어가 소유하는 이름 표다(Docs/Design/SparksLanguage.ko.md 3.7절 부록 A, 3.8절 부록 B, 3.9절
+// 언어가 소유하는 이름 표다(Docs/Design/SparksLanguage 3.7절 부록 A, 3.8절 부록 B, 3.9절
 // "이름의 출처" SD62). binding schema reader(언어 소유 이름 금지)와 이름 해석이 같이 쓴다.
 
 namespace rocks::sparks::detail {
