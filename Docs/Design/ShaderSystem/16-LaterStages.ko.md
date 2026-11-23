@@ -34,7 +34,8 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 
 | 단계 | 범위 | 시험 |
 |---|---|---|
-| SH2a | ShaderCore: 공용 타입 이동·셰이더 타입 기술과 등록부·퍼뮤테이션·형식 사실·라이브러리 v1·`ShaderBindingLayout`·GLES 복사 표 형식·손으로 쓴 레이아웃 표·셰이더 전용 정렬 타입. `ShaderCompiler`의 job 열거와 `CookShaderLibraries`(파일 쓰기까지). 엔진 컴파일 프로필·키 7행 제거 | 12.2.1절 완료 기준 |
+| SH2a1 | ShaderCore 모듈: 공용 형식 타입 이동(12.2.1절 SSD1), 가상 경로 문법 이동(SC2 — 셰이더 타입 경로 검사와 ShaderCompiler가 같은 규칙을 쓴다), 셰이더 타입 기술·`nameHash`·소속 표지(SSD2), 등록부·`Freeze`(SSD3), 모듈 수명 객체 등록 도우미(호스트 서비스 `ShaderTypeRegistry`), 퍼뮤테이션 차원·ID(SSD4) | 12.2.1절 완료 기준의 등록·퍼뮤테이션 부분 |
+| SH2a2 | ShaderCore 나머지: 형식 사실·라이브러리 v1·`ShaderBindingLayout`·GLES 복사 표 형식·손으로 쓴 레이아웃 표·셰이더 전용 정렬 타입. `ShaderCompiler`의 job 열거와 `CookShaderLibraries`(파일 쓰기까지), 엔진 컴파일 프로필·키 7행 제거 | 12.2.1절 완료 기준의 나머지 |
 | SH2b | 워커 정규화 1: `ShaderBindingLayout`(D3D·SPIR-V 리플렉션), Vulkan 재배치·location 재작성, D3D11 SPIRV-Cross 재배정, Metal 인덱스, 오프셋·상한·시맨틱·짝·공유 샘플러·PS 진단 버퍼 규칙, 처리기 버전 2 | 7.3절 (a)·(b)·(e 컴파일)·(f)·(g)·(h 음성)·(j 컴파일)·(k) |
 | SH2c | 워커 정규화 2(GLES): 상수 버퍼 에뮬레이션 텍스트 재작성·복사 표·binding 재매김·combined sampler 이름·모바일 상한 | 7.3절 (i 컴파일)·GLES 부분의 (a)·(b)·(h) |
 | SH2e | 공급자와 메모리 라이브러리(SSD16), Graphics API 전환(4 backend `CreateShader`·파이프라인 layout), RB3 셰이더 집합, RB4 SH2분, 런타임 컴파일러 제거 | RenderBase SX10, 7.3절 (c)·(d)·(j 장치) |
@@ -56,7 +57,7 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 
 - **SSD18 Graphics API 모양.** 장치 셰이더를 파이프라인과 따로 만든다(UE `RHICreateVertexShader`·`RHICreatePixelShader` 뒤 PSO 초기화자가 handle을 받는 구조, `Runtime/RHI/Public/RHIResources.h:4440`). 셰이더 집합의 첫 사용 생성(RenderBase 9.2절)이 이 단위를 요구하기 때문이다. 버린 대안: `PipelineDesc`가 코드 byte를 직접 받기(같은 셰이더를 쓰는 파이프라인마다 장치 셰이더를 다시 만든다).
 - **SSD19 샘플 셰이더 위치.** Sandbox 원문은 `Programs/Sandbox/Shaders`를 `/Plugin/Sandbox`로 mount한다(SC2 `/Plugin/<이름>` 규칙 — 새 루트를 만들지 않는다). 소속은 `EnginePlugin`(루트 `/Plugin/Sandbox`)이지만 Sandbox 모듈만 등록하므로 쿠커의 모듈 집합에 들지 않고 쿠킹되지 않는다(Sandbox는 프로젝트가 없는 엔진 전용 실행이고 공급자로 받는다). 버린 대안: `Engine/Shaders`에 두기(엔진 계층에 샘플을 두지 않는다).
-- **SSD20 하위 단계 순서.** SH2a → SH2b → SH2c → SH2e → SH2f → SH2d → SH2g(선택). SH2b·SH2c는 런타임 변경 없이 쿠킹 산출물만 바꾸므로 먼저 하고, Graphics API 전환(SH2e)은 공급자·메모리 라이브러리가 준비된 뒤 한 번에 한다(네 backend self-test를 같은 변경에서 통과 — 결정 9). 쿠킹·매니페스트 연결(SH2d)은 에셋 세션의 AssetSystem 변경(TargetProfile·매니페스트 v2·훅)이 선행이라 마지막이다. 그 전에도 SH2e·SH2f는 공급자 경로와 완료 기준 2의 직접 호출로 쿠킹 라이브러리 형식을 확인한다.
+- **SSD20 하위 단계 순서.** SH2a1 → SH2a2 → SH2b → SH2c → SH2e → SH2f → SH2d → SH2g(선택). SH2b·SH2c는 런타임 변경 없이 쿠킹 산출물만 바꾸므로 먼저 하고, Graphics API 전환(SH2e)은 공급자·메모리 라이브러리가 준비된 뒤 한 번에 한다(네 backend self-test를 같은 변경에서 통과 — 결정 9). 쿠킹·매니페스트 연결(SH2d)은 에셋 세션의 AssetSystem 변경(TargetProfile·매니페스트 v2·훅)이 선행이라 마지막이다. 그 전에도 SH2e·SH2f는 공급자 경로와 완료 기준 2의 직접 호출로 쿠킹 라이브러리 형식을 확인한다.
 - **SSD21 SL0와 SH2(SLR3).** 엔진 셰이더 SL0(순수 함수 공통 라이브러리 1차, 엔진 셰이더 7장)는 SH2의 **선택 하위 단계 SH2g**로 두고 완료 기준도 SH2g 자체 기준으로 둔다. SH2e(쿠킹 셰이더로 VS·PS 그리기)와 A0-G 렌더 타깃·readback 뒤에 할 수 있다. 하지 않으면 엔진 셰이더 SL2에서 같은 범위를 한다(엔진 셰이더 6장). SL0의 원문 작성 범위(A01–A04 1차 수십 개 파일)가 SH2 규모와 맞먹어 SH2 완료를 막지 않게 했다. 시험 셰이더는 `/Plugin/EngineShaderTests`(SSD17)로 컴파일한다.
 - **SSD22 PS 진단 버퍼(SLR12).** 7.2절 12항대로 어휘·예약 위치·워커 예외를 SH2b에 넣는다. 런타임 버퍼 처리는 엔진 셰이더 SL2다.
 - **SSD23 공급자 시기(SX14).** RenderBase SX14는 공급자 interface를 SH1 산출물로 적었으나 SH1은 컴파일 쪽(관리자·`CompileNow`)만 만들었다. interface와 Development 등록은 SH2e에서 셰이더 집합과 함께 만든다.
