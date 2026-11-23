@@ -310,6 +310,10 @@ Result<void> World::Shutdown() noexcept {
         const bool initialized = state_ != WorldState::Created;
         state_ = WorldState::TearingDown;
         ticks_.Close();
+        // 엔진 단계 콜백을 건 모듈이 World보다 먼저 내려가도 포인터가 남지 않게 비운다.
+        for (EngineStageSlot& stage : engineStages_) {
+            stage = {};
+        }
         DestroyAllActors();
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
@@ -380,6 +384,7 @@ WorldStats World::Stats() const noexcept {
     stats.spawnedTotal = spawnedTotal_;
     stats.destroyedTotal = destroyedTotal_;
     stats.ticks = ticks_.Stats();
+    stats.engineStageFailures = engineStageFailures_;
     for (uint32 index = 0; index < TickPhaseCount; ++index) {
         stats.phaseNanoseconds[index] = phaseNanoseconds_[index];
     }

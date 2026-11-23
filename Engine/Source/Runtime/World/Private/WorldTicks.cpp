@@ -1,3 +1,4 @@
+#include <Base/InitializerList.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Core/Text/StringBuilder.h>
@@ -12,9 +13,6 @@
 namespace rocks {
 
 namespace {
-
-// Tick 순환 경고에 싣는 Actor 표시("타입#slot")의 최대 byte 수다. 넘치면 잘린다.
-constexpr usize MaxTickActorLabelBytes = 128;
 
 // hook별 실행 단계다. OnTick은 설정한 단계, OnFixedTick은 Physics, OnLateTick은 LateUpdate다.
 TickPhase HookPhase(uint8 hook, const TickSettings& settings) noexcept {
@@ -62,6 +60,8 @@ void World::RegisterTicks(ObjectHandle object, uint8 kind, const TickSettings& s
         auto registered = ticks_.Register(registration);
         if (registered) {
             handles[hook] = registered.Value();
+            // 시작 전에 선언했거나 상대가 먼저 등록하며 남긴 의존을 건다(15.3절 ERD5).
+            ApplyTickDeclarations(object, hook, handles);
         }
     }
 }
@@ -105,22 +105,9 @@ void World::RegisterComponentTicks(ObjectHandle component) noexcept {
         return;
     }
 
-    TickHandle actorTicks[detail::TickHookCount];
-    for (uint32 hook = 0; hook < detail::TickHookCount; ++hook) {
-        actorTicks[hook] = record->ticks[hook];
-    }
-
+    // 소유 Actor 뒤에 두는 자동 간선은 없다(UE에 Actor → Component 기본 의존이 없다 — 15.3절 ERD1).
+    // Actor Tick이 먼저 등록되므로 같은 priority면 등록 순서로 Actor가 먼저다.
     RegisterTicks(component, detail::TickKindComponent, settings, enabled, handles);
-    // 같은 단계의 소유 Actor Tick 뒤에 실행되게 한다(UE와 같은 기본 순서). OnTick 단계가 Actor와
-    // 다르면 의존을 걸지 않고 단계 순서를 따른다.
-    for (uint32 hook = 0; hook < detail::TickHookCount; ++hook) {
-        if (handles[hook].IsNull() || actorTicks[hook].IsNull()) {
-            continue;
-        }
-
-        auto ordered = ticks_.AddPrerequisite(handles[hook], actorTicks[hook]);
-        (void)ordered;
-    }
 
     auto stored = With<Component>(component, [&](Component& value) noexcept {
         for (uint32 hook = 0; hook < detail::TickHookCount; ++hook) {
@@ -142,48 +129,6 @@ void World::RegisterComponentTicks(ObjectHandle component) noexcept {
 }
 
 // --- 프레임 ---
-
-Result<void> World::AddActorTickPrerequisite(ObjectHandle dependent,
-                                             ObjectHandle prerequisite) noexcept {
-    const ActorRecord* after = FindActorRecord(dependent);
-    const ActorRecord* before = FindActorRecord(prerequisite);
-    if (after == nullptr || before == nullptr) {
-        return Result<void>::Failure(ErrorCode::StaleHandle);
-    }
-
-    const TickHandle afterTick = after->ticks[detail::TickHookUpdate];
-    const TickHandle beforeTick = before->ticks[detail::TickHookUpdate];
-    if (dependent == prerequisite || afterTick.IsNull() || beforeTick.IsNull()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    auto added = ticks_.AddPrerequisite(afterTick, beforeTick);
-    if (!added && added.Error() == ErrorCode::CycleDetected) {
-        // 이름이 있는 곳이 이 경계다. Actor에는 이름이 없어 "타입#slot"으로 알린다.
-        auto describe = [this](ObjectHandle actor, FixedStringBuilder& out) noexcept {
-            auto named = With<Actor>(actor, [&](Actor& value) noexcept {
-                const TypeLease type = value.GetType();
-                (void)out.TryAppendFormat("{}#{}", type.Name(), actor.slot);
-            });
-            if (!named) {
-                (void)out.TryAppendFormat("Actor#{}", actor.slot);
-            }
-        };
-
-        char beforeStorage[MaxTickActorLabelBytes];
-        char afterStorage[MaxTickActorLabelBytes];
-        FixedStringBuilder beforeLabel{Span<char>(beforeStorage)};
-        FixedStringBuilder afterLabel{Span<char>(afterStorage)};
-        describe(prerequisite, beforeLabel);
-        describe(dependent, afterLabel);
-        LogContextScope scope("World", Name());
-        Log::Warning(LogWorldTick,
-                     "Rejected tick prerequisite {Before} -> {After}: would create a cycle",
-                     beforeLabel.View(), afterLabel.View());
-    }
-
-    return added;
-}
 
 void World::ExecuteTick(const TickTarget& target, const TickContext& context) noexcept {
     if (target.kind == detail::TickKindActor) {
@@ -308,7 +253,32 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
                     outcome = Move(ran);
                 }
             }
+
+            // Physics 끝 엔진 단계: 고정 스텝 수와 무관하게 프레임에 한 번(15.4절).
+            for (EngineStage stage :
+                 {EngineStage::PhysicsResults, EngineStage::SkeletalPhysicsFinalize}) {
+                auto ran = RunEngineStage(stage, TickPhase::Physics, frame);
+                if (!ran && outcome) {
+                    outcome = Move(ran);
+                }
+            }
         } else {
+            // LateUpdate 시작 엔진 단계: 타이머 → tickable Subsystem → 카메라(UE LevelTick 순서).
+            // pause 중 카메라는 갱신하지 않는다(UE ShouldPerformFullTickWhenPaused 기본 거짓).
+            if (phase == TickPhase::LateUpdate) {
+                for (EngineStage stage : {EngineStage::Timers, EngineStage::TickableSubsystems,
+                                          EngineStage::CameraUpdate}) {
+                    if (stage == EngineStage::CameraUpdate && frame.paused) {
+                        continue;
+                    }
+
+                    auto ran = RunEngineStage(stage, TickPhase::LateUpdate, frame);
+                    if (!ran && outcome) {
+                        outcome = Move(ran);
+                    }
+                }
+            }
+
             auto ran = ticks_.RunPhase(phase, frame, *this);
             if (!ran && outcome) {
                 outcome = Move(ran);

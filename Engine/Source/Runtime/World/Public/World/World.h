@@ -197,7 +197,8 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // hook 순서(Actor A, Component C):
 //   생성: C.OnRegister -> A.OnAwake -> C.OnAwake -> A.OnEnable -> C.OnEnable
 //   시작: C.OnStart -> A.OnStart(BeginPlay 전 Spawn은 BeginPlay 안, 이후 Spawn은 다음 프레임 시작)
-//   Tick: 같은 단계에서 A의 Tick 뒤에 C의 Tick
+//   Tick: 같은 단계에서 (priority, 등록 순서) — 같은 priority면 먼저 등록되는 A가 C보다 먼저(자동
+//   의존은 없다. 부착된 SceneComponent는 부모 뒤, 그 밖의 순서는 AddTickPrerequisite)
 //   정리: C.OnDisable -> A.OnDisable -> C.OnDestroy -> A.OnDestroy -> C.OnUnregister
 //   비활성 객체는 활성화될 때까지 OnStart를 미룬다. OnDestroy는 OnAwake가 성공한 객체만 받는다.
 //
@@ -342,17 +343,53 @@ public:
         }
     }
 
-    // dependent Actor의 주 Tick(OnTick)이 prerequisite Actor의 OnTick 뒤에 실행되게 한다(UE
-    // AActor::AddTickPrerequisiteActor 대응, 주 Tick만). 두 Actor 모두 시작해 OnTick을 등록한
-    // 상태여야 한다(등록 전이면 InvalidArgument). 순서는 다음 단계 경계부터 반영된다.
-    // - 오류: 이 World의 Actor가 아니면 StaleHandle, 자기 자신·다른 Tick 단계는 InvalidArgument,
-    //   순환이 생기면 CycleDetected다. 순환은 상태를 바꾸지 않고 Warning을 한 번 남긴다(World.Tick
-    //   카테고리, 두 Actor를 "타입#slot"으로). 이미 있는 의존은 성공이다.
+    // --- Tick 의존·설정(Docs/Design/EngineRuntime 15절) ---
+
+    // dependent hook이 prerequisite hook 뒤에 실행되게 한다(UE AddTickPrerequisiteActor·Component).
+    // Actor·Component 어느 쪽이든, hook 세 종류 어느 것이든 된다. 시작 전(Spawn 직후·AddComponent
+    // 직후)에도 선언할 수 있고, 양쪽이 Tick을 등록할 때 적용한다. 선행이 더 늦은 단계면 dependent가
+    // 그 단계로 늦춰진다(다음 프레임부터). 순서는 다음 단계 경계부터 반영된다.
+    // - 판정은 선언 시점의 TickSettings다: 그 hook을 켜지 않은 대상은 InvalidArgument(생성자에서
+    // 정한다).
+    // - 오류: 이 World의 Actor·Component가 아니면 StaleHandle, 파괴 대기면 Destroyed, 정의되지 않은
+    // 출처·같은 hook 자신·Fixed hook과 다른 hook
+    //   사이 의존은 InvalidArgument, 사용자 간선이 순환을 만들면 CycleDetected(상태 불변,
+    //   World.Tick Warning — 시작 전 선언을 포함한 선언 전체에서 검사한다). 자동
+    //   출처(Attachment·Framework)는 순환이면 걸지 않고 Warning 뒤 성공이다. 이미 있는 의존은
+    //   성공(출처만 더한다)이다.
     //
     // 사용 예:
-    //   world.AddActorTickPrerequisite(turret, vehicle);   // vehicle이 먼저 Tick
-    Result<void> AddActorTickPrerequisite(ObjectHandle dependent,
-                                          ObjectHandle prerequisite) noexcept;
+    //   world.AddTickPrerequisite({turret}, {vehicle});                    // vehicle OnTick 먼저
+    //   world.AddTickPrerequisite({arm, TickHook::Late}, {body, TickHook::Late});
+    Result<void> AddTickPrerequisite(TickPoint dependent, TickPoint prerequisite,
+                                     TickEdgeSource source = TickEdgeSource::User) noexcept;
+
+    // 그 출처의 의존을 뗀다. 모든 출처가 떼면 간선이 없어진다. 없으면 NotFound다.
+    Result<void> RemoveTickPrerequisite(TickPoint dependent, TickPoint prerequisite,
+                                        TickEdgeSource source = TickEdgeSource::User) noexcept;
+
+    // OnTick 단계를 바꾼다(PrePhysics·PostPhysics·PreRender). 시작 뒤면 다음 프레임부터다. OnTick을
+    // 받지 않는 대상·Physics·LateUpdate는 InvalidArgument, 이 World의 대상이 아니면
+    // StaleHandle이다.
+    Result<void> SetTickPhase(ObjectHandle object, TickPhase phase) noexcept;
+
+    // 같은 단계 안 순서 값(모든 hook 공통)을 바꾼다. 시작 뒤면 다음 단계 경계부터다.
+    Result<void> SetTickPriority(ObjectHandle object, int32 priority) noexcept;
+
+    // 실행 간격(초, 모든 hook 공통)을 바꾸고 누적을 0으로 되돌린다. 음수·비유한 값은
+    // InvalidArgument다.
+    Result<void> SetTickInterval(ObjectHandle object, double intervalSeconds) noexcept;
+
+    // hook이 지금 실행되는 단계(늦춤 반영)다. Tick을 등록하지 않았으면 NotFound다.
+    Result<TickPhase> GetTickEffectivePhase(TickPoint point) const noexcept;
+
+    // 엔진 단계 자리에 콜백을 둔다(자리마다 하나 — 이미 있으면 AlreadyExists, null·범위 밖은
+    // InvalidArgument). 물리·애니메이션·Gameplay 모듈이 World를 만든 뒤 등록한다.
+    Result<void> SetEngineStage(EngineStage stage, EngineStageFunction function,
+                                void* user) noexcept;
+
+    // 엔진 단계 자리를 비운다(비어 있어도 성공).
+    void ClearEngineStage(EngineStage stage) noexcept;
 
     // actor가 속한 Level이다. 이 World의 Actor가 아니면 StaleHandle이다.
     Result<ObjectHandle> GetActorLevel(ObjectHandle actor) const noexcept;
@@ -529,6 +566,7 @@ private:
 
     friend class Actor;
     friend class Component;
+    friend class SceneComponent;
 
     // World가 관리하는 Actor 수명 기록이다. Actor 저장소는 Level이, Component는 Actor가 소유한다.
     struct ActorRecord {
@@ -672,6 +710,54 @@ private:
     bool QueueBypassedComponent(ObjectHandle component) noexcept;
     // Component를 색인에서 빼고 사본 Tick 등록을 해제한다(World 정리가 회수 요청 직전에 부른다).
     void ForgetComponent(ObjectHandle component) noexcept;
+
+    // --- Tick 의존 선언(WorldTickDependencies.cpp) ---
+
+    struct TickDependency {
+        TickPoint point;
+        uint8 sources = 0;
+    };
+
+    // (객체, hook) 하나의 선언이다. 등록 여부와 무관하게 의존 선언 전체를 담아 순환 검사와 늦은
+    // 등록의 적용에 쓴다. 해제된 객체를 가리키는 항목은 다음 선언·적용 때 지운다.
+    struct TickDeclarations {
+        explicit TickDeclarations(Allocator& allocator) noexcept
+            : prerequisites(allocator), dependents(allocator) {
+        }
+
+        TickPoint self;
+        Array<TickDependency> prerequisites;
+        Array<TickPoint> dependents;
+        uint32 mark = 0;
+    };
+
+    struct EngineStageSlot {
+        EngineStageFunction function = nullptr;
+        void* user = nullptr;
+    };
+
+    static uint64 TickPointKey(const TickPoint& point) noexcept;
+    bool IsTickPointAlive(const TickPoint& point) const noexcept;
+    TickHandle RegisteredTick(const TickPoint& point) const noexcept;
+    // 이 World의 Actor·Component의 Tick 설정을 읽는다(아니면 StaleHandle).
+    Result<TickSettings> ReadTickSettings(ObjectHandle object) noexcept;
+    Result<void> WriteTickSettings(ObjectHandle object, const TickSettings& settings) noexcept;
+    void PruneTickDeclarations(TickDeclarations& node) noexcept;
+    Result<bool> TickDeclarationReaches(const TickPoint& from, const TickPoint& to) noexcept;
+    void WarnTickCycle(const TickPoint& before, const TickPoint& after, bool automatic) noexcept;
+    // 막 등록한 hook에 선언된 의존(양방향)을 스케줄러에 건다. handles는 그 객체의 등록 중인
+    // 배열이다(같은 객체의 다른 hook을 여기서 찾는다).
+    void ApplyTickDeclarations(ObjectHandle object, uint8 hook,
+                               const TickHandle (&handles)[detail::TickHookCount]) noexcept;
+    // 파괴 대기(PendingDestroy)인 Actor·Component다.
+    bool IsTickTargetDestroying(ObjectHandle object) noexcept;
+    // 파괴되는 객체의 선언을 지운다(다른 선언의 참조는 다음 정리 때 지운다).
+    void ForgetTickDeclarations(ObjectHandle object) noexcept;
+    // SceneComponent 부모가 바뀌었다(자식 hook → 부모 같은 hook 간선, UE AttachToComponent).
+    void UpdateAttachmentTicks(ObjectHandle child, ObjectHandle oldParent,
+                               ObjectHandle newParent) noexcept;
+    Result<void> RunEngineStage(EngineStage stage, TickPhase phase,
+                                const TickPhaseFrame& frame) noexcept;
     // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor·Component·Level을 찾아 World
     // 파괴로 돌린다(Actor는 DestroyActor, Component는 파괴 큐, Level은 DestroyLevel — 영구 Level은
     // Fatal). 하나라도 있으면 참.
@@ -736,6 +822,12 @@ private:
     uint64 tickNanoseconds_ = 0;
     uint32 skippedTicks_ = 0;
     uint32 repairedBypasses_ = 0;
+    // (객체 slot × 4 + hook) → 선언이다. 순환 검사 방문 번호와 탐색 스택은 재사용한다.
+    HashMap<uint64, TickDeclarations> tickDeclarations_{allocator_};
+    uint32 tickDeclarationMark_ = 0;
+    Array<TickPoint> tickDeclarationStack_{allocator_};
+    EngineStageSlot engineStages_[EngineStageCount];
+    uint32 engineStageFailures_ = 0;
 };
 
 } // namespace rocks

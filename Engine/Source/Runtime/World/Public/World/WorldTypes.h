@@ -51,8 +51,11 @@ enum class WorldState : uint8 {
     Destroyed
 };
 
-// Actor·Component의 Tick 설정이다. 시작(OnStart) 시점에 등록한다. 시작 전에 생성자나 OnAwake에서
-// 채운다. 시작 후 변경은 SetTickEnabled만 반영된다.
+// Actor·Component의 Tick 설정이다. 시작(OnStart) 시점에 등록한다. 어느 hook을
+// 받을지(tick·fixedTick· lateTick)는 **생성자에서** 정한다 — 의존 선언·부착 간선이 선언 시점의 이
+// 값으로 hook 유무를 판정하므로(UE bCanEverTick과 같다) OnAwake에서 켠 hook은 그 전에 건 의존·부착
+// 간선을 받지 못한다. phase·priority·interval은 시작 전 OnAwake에서 바꿔도 되고, 시작 후에는
+// SetTickEnabled와 World::SetTickPhase·SetTickPriority·SetTickInterval로 바꾼다.
 //
 // 사용 예(생성자에서):
 //   TickSettings& tick = PrimaryTick();
@@ -79,6 +82,57 @@ struct TickSettings {
 // 등록할 수 있는 Tick 설정인지다(TickSettings 설명의 규칙).
 bool IsValidTickSettings(const TickSettings& settings) noexcept;
 
+// Tick hook 종류다. Update는 OnTick(TickSettings::phase), Fixed는 OnFixedTick(Physics), Late는
+// OnLateTick(LateUpdate)이다.
+enum class TickHook : uint8 {
+    Update,
+    Fixed,
+    Late
+};
+
+// Tick 의존의 한쪽이다(이 World의 Actor·Component와 그 hook).
+struct TickPoint {
+    ObjectHandle object;
+    TickHook hook = TickHook::Update;
+
+    bool operator==(const TickPoint&) const noexcept = default;
+};
+
+// Tick 의존의 출처다. 같은 간선을 여러 출처가 걸 수 있고, 모든 출처가 뗄 때 간선이 없어진다. 엔진이
+// 거는 자동 간선(Attachment·Framework)은 순환을 만들면 걸지 않고 Warning을 남긴다(사용자 간선은
+// CycleDetected로 거부 — Docs/Design/EngineRuntime 15.3절 ERD2).
+enum class TickEdgeSource : uint8 {
+    // AddTickPrerequisite를 부른 사용자 코드다.
+    User = 1 << 0,
+    // SceneComponent 부착(자식 hook이 부모의 같은 hook 뒤 — UE AttachToComponent).
+    Attachment = 1 << 1,
+    // 게임 프레임워크(Controller → Pawn 등, Gameplay 모듈).
+    Framework = 1 << 2
+};
+
+// 사용자 등록이 아닌 엔진 단계의 자리다(Docs/Design/EngineRuntime 15.4절 ERD7). 열거 순서가 실행
+// 순서다: Physics 단계 끝(고정 스텝 뒤, 프레임에 한 번) PhysicsResults → SkeletalPhysicsFinalize,
+// LateUpdate 단계 시작 Timers → TickableSubsystems → CameraUpdate.
+enum class EngineStage : uint8 {
+    PhysicsResults,
+    SkeletalPhysicsFinalize,
+    Timers,
+    TickableSubsystems,
+    CameraUpdate,
+    Count
+};
+
+inline constexpr uint32 EngineStageCount = static_cast<uint32>(EngineStage::Count);
+
+// "PhysicsResults" 같은 엔진 단계 이름이다. 범위 밖이면 "Unknown"이다.
+const char* EngineStageName(EngineStage stage) noexcept;
+
+// 엔진 단계 콜백이다. context.phase는 그 자리의 단계(Physics·LateUpdate), delta·pause 정보는 그
+// 프레임의 값이다(pause 정책은 콜백이 context.paused로 정한다 — CameraUpdate는 pause 중 부르지
+// 않는다). 실패는 그 프레임 Tick의 실패로 돌아가고 WorldStats::engineStageFailures에 센다.
+using EngineStageFunction = Result<void> (*)(World& world, const TickContext& context,
+                                             void* user) noexcept;
+
 // World 진단 수치다. 값은 호출 시점 스냅샷이다.
 struct WorldStats {
     uint32 levels = 0;
@@ -95,6 +149,8 @@ struct WorldStats {
     uint64 tickNanoseconds = 0;
     // 대상이 이미 파괴되어 건너뛴 Tick 실행 수(마지막 Tick 기준)다.
     uint32 skippedTicks = 0;
+    // 엔진 단계 콜백이 실패한 누적 수다.
+    uint32 engineStageFailures = 0;
     // Registry를 직접 조작해 우회 파괴된 Actor·Component·Level을 World가 발견해(Tick 실행·파괴
     // 요청 목록) 정리로 돌린 누적 수다.
     uint32 repairedBypasses = 0;
@@ -104,7 +160,7 @@ struct WorldStats {
 };
 
 namespace detail {
-// Tick 대상 종류와 hook 번호다. World 구현 전용이다.
+// Tick 대상 종류와 hook 번호다. World 구현 전용이다(hook 번호는 TickHook 값과 같다).
 inline constexpr uint8 TickKindActor = 0;
 inline constexpr uint8 TickKindComponent = 1;
 inline constexpr uint8 TickHookUpdate = 0;

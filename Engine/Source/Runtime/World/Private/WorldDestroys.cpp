@@ -164,6 +164,7 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
     }
 
     UnregisterTicks(record->ticks);
+    ForgetTickDeclarations(actor);
     const ObjectHandle level = record->level;
     LevelRecord* levelRecord = FindLevelRecord(level);
     if (levelRecord != nullptr) {

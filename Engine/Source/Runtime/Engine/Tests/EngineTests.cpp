@@ -1372,14 +1372,13 @@ TEST(EngineLog_TickPrerequisiteCycleIsRejectedWithActorNames) {
         auto first = main.SpawnActor<TickingActor>();
         auto second = main.SpawnActor<TickingActor>();
         REQUIRE(first && second);
-        // 시작(Tick 등록) 전에는 거부한다.
-        CHECK(main.AddActorTickPrerequisite(first.Value(), second.Value()).Error() ==
-              ErrorCode::InvalidArgument);
+        // 시작(Tick 등록) 전에도 선언할 수 있다(시작 때 적용 — EngineRuntime 15.3절 ERD5).
+        REQUIRE(main.AddTickPrerequisite({first.Value()}, {second.Value()}));
         REQUIRE(engine.RunFrame());
-        REQUIRE(main.AddActorTickPrerequisite(first.Value(), second.Value()));
-        CHECK(main.AddActorTickPrerequisite(first.Value(), first.Value()).Error() ==
+        CHECK(main.AddTickPrerequisite({first.Value()}, {second.Value()}));
+        CHECK(main.AddTickPrerequisite({first.Value()}, {first.Value()}).Error() ==
               ErrorCode::InvalidArgument);
-        CHECK(main.AddActorTickPrerequisite(second.Value(), first.Value()).Error() ==
+        CHECK(main.AddTickPrerequisite({second.Value()}, {first.Value()}).Error() ==
               ErrorCode::CycleDetected);
         // 거부는 상태를 바꾸지 않는다(다음 프레임도 정상 실행).
         REQUIRE(engine.RunFrame());
