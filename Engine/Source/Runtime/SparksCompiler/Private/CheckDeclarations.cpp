@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "LanguageNames.h"
-#include "StrongComponents.h"
 #include "TypeChecker.h"
+#include <Core/Graph/StrongComponents.h>
 
 // 선언 규칙이다(Docs/Design/SparksLanguage.ko.md 3.11절): `?` 없는 객체 필드(S0428), 상수식(S0510)·
 // const 순환(S0511)·const 타입(S0512), core 프로필의 full 문법(S1113). LC2d 단계(Flow)에서만 돈다.
@@ -543,11 +543,11 @@ void TypeChecker::CheckConstCycles() noexcept {
         return;
     }
 
-    auto visited = ForEachStrongComponent(
+    auto visited = algo::ForEachStrongComponent(
         allocator_, static_cast<uint32>(consts.Size()), firstEdge.View(), targets.View(),
-        [&](Span<const uint32> members, bool cyclic) noexcept {
+        [&](Span<const uint32> members, bool cyclic) noexcept -> Result<void> {
             if (!cyclic) {
-                return;
+                return Result<void>::Success();
             }
 
             uint32 first = consts[members[0]];
@@ -566,6 +566,8 @@ void TypeChecker::CheckConstCycles() noexcept {
                        "cycle.",
                        "Write the value of one constant directly.");
             }
+
+            return Result<void>::Success();
         });
     if (!visited) {
         binder_.error_ = visited.Error();

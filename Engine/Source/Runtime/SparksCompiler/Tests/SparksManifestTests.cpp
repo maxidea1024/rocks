@@ -68,7 +68,7 @@ bool Reports(StringView text, Span<const Expected> expected) noexcept {
             const SourceFile& file = read.sources.Get(SourceId{0});
             for (usize index = 0; same && index < expected.Size(); ++index) {
                 const Diagnostic& diagnostic = read.diagnostics[index];
-                const SourceLocation location = file.Locate(diagnostic.Span().begin);
+                const sparks::SourceLocation location = file.Locate(diagnostic.Span().begin);
                 same = diagnostic.Code() == expected[index].code &&
                        location.line == expected[index].line &&
                        location.column == expected[index].column;

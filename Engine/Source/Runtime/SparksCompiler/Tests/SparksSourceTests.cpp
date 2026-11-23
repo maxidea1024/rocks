@@ -30,15 +30,15 @@ TEST(SparksSource_LocatesLinesAndCodePointColumns) {
         CHECK(file.LineText(2) == StringView("\xED\x95\x9C\xEA\xB8\x80 x"));
         CHECK(file.LineText(3).IsEmpty());
 
-        const SourceLocation first = file.Locate(0);
+        const sparks::SourceLocation first = file.Locate(0);
         CHECK(first.line == 1 && first.column == 1);
-        const SourceLocation semicolon = file.Locate(9);
+        const sparks::SourceLocation semicolon = file.Locate(9);
         CHECK(semicolon.line == 1 && semicolon.column == 10);
-        const SourceLocation lineEnd = file.Locate(10); // LF 자체는 그 줄의 끝 열이다.
+        const sparks::SourceLocation lineEnd = file.Locate(10); // LF 자체는 그 줄의 끝 열이다.
         CHECK(lineEnd.line == 1 && lineEnd.column == 11);
-        const SourceLocation x = file.Locate(11 + 7); // 한글 6 byte + 공백 뒤
+        const sparks::SourceLocation x = file.Locate(11 + 7); // 한글 6 byte + 공백 뒤
         CHECK(x.line == 2 && x.column == 4);
-        const SourceLocation end = file.Locate(static_cast<uint32>(text.ByteCount()));
+        const sparks::SourceLocation end = file.Locate(static_cast<uint32>(text.ByteCount()));
         CHECK(end.line == 3 && end.column == 1);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -56,7 +56,7 @@ TEST(SparksSource_EmptyTextHasOneLine) {
         CHECK(file.IsUsable());
         CHECK(file.LineCount() == 1);
         CHECK(file.LineText(1).IsEmpty());
-        const SourceLocation location = file.Locate(0);
+        const sparks::SourceLocation location = file.Locate(0);
         CHECK(location.line == 1 && location.column == 1);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -75,11 +75,11 @@ TEST(SparksSource_SkipsLeadingBom) {
         CHECK(file.IsUsable());
         CHECK(file.ContentBegin() == Utf8BomBytes);
         CHECK(file.LineText(1) == StringView("var x;"));
-        const SourceLocation v = file.Locate(static_cast<uint32>(Utf8BomBytes));
+        const sparks::SourceLocation v = file.Locate(static_cast<uint32>(Utf8BomBytes));
         CHECK(v.line == 1 && v.column == 1);
-        const SourceLocation x = file.Locate(static_cast<uint32>(Utf8BomBytes) + 4);
+        const sparks::SourceLocation x = file.Locate(static_cast<uint32>(Utf8BomBytes) + 4);
         CHECK(x.line == 1 && x.column == 5);
-        const SourceLocation insideBom = file.Locate(1);
+        const sparks::SourceLocation insideBom = file.Locate(1);
         CHECK(insideBom.line == 1 && insideBom.column == 1);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -98,7 +98,7 @@ TEST(SparksSource_TreatsCrLfAsLineEnd) {
         CHECK(file.LineCount() == 3);
         CHECK(file.LineText(1) == StringView("a"));
         CHECK(file.LineText(2) == StringView("bc"));
-        const SourceLocation c = file.Locate(4);
+        const sparks::SourceLocation c = file.Locate(4);
         CHECK(c.line == 2 && c.column == 2);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -122,7 +122,7 @@ TEST(SparksSource_ReportsFirstLoneCarriageReturnOnly) {
         CHECK(file.IsUsable());
         // 홀로 선 CR은 줄을 나누지 않는다.
         CHECK(file.LineCount() == 2);
-        const SourceLocation location = file.Locate(diagnostic.Span().begin);
+        const sparks::SourceLocation location = file.Locate(diagnostic.Span().begin);
         CHECK(location.line == 1 && location.column == 3);
 
         DiagnosticList trailing(allocator);
@@ -152,7 +152,7 @@ TEST(SparksSource_ReportsFirstInvalidUtf8AndBlocksLaterStages) {
               StringView("The byte 0xE1 at this position does not start a valid UTF-8 sequence."));
         const SourceFile& file = sources.Get(id.Value());
         CHECK(!file.IsUsable());
-        const SourceLocation location = file.Locate(diagnostic.Span().begin);
+        const sparks::SourceLocation location = file.Locate(diagnostic.Span().begin);
         CHECK(location.line == 2 && location.column == 2);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -249,7 +249,7 @@ TEST(SparksSource_BoundaryPositions) {
         CHECK(bomFile.IsUsable());
         CHECK(bomFile.LineCount() == 1);
         CHECK(bomFile.LineText(1).IsEmpty());
-        const SourceLocation bomEnd = bomFile.Locate(static_cast<uint32>(Utf8BomBytes));
+        const sparks::SourceLocation bomEnd = bomFile.Locate(static_cast<uint32>(Utf8BomBytes));
         CHECK(bomEnd.line == 1 && bomEnd.column == 1);
         CHECK(diagnostics.IsEmpty());
 
@@ -272,7 +272,7 @@ TEST(SparksSource_BoundaryPositions) {
             REQUIRE(invalid.Count() == 1);
             CHECK(invalid[0].Code() == DiagnosticCode::InvalidUtf8);
             CHECK(invalid[0].Span().begin == item.offset);
-            const SourceLocation location = sources.Get(id.Value()).Locate(item.offset);
+            const sparks::SourceLocation location = sources.Get(id.Value()).Locate(item.offset);
             CHECK(location.line == item.line && location.column == item.column);
         }
     }
@@ -293,15 +293,15 @@ TEST(SparksSource_LineEndColumnsMatchAcrossLineEndings) {
                                    diagnostics);
         REQUIRE(lf && crlf);
         CHECK(diagnostics.IsEmpty());
-        const SourceLocation lfEnd = sources.Get(lf.Value()).Locate(2);
+        const sparks::SourceLocation lfEnd = sources.Get(lf.Value()).Locate(2);
         CHECK(lfEnd.line == 1 && lfEnd.column == 3);
         const SourceFile& crlfFile = sources.Get(crlf.Value());
-        const SourceLocation atCr = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 2);
-        const SourceLocation atLf = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 3);
+        const sparks::SourceLocation atCr = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 2);
+        const sparks::SourceLocation atLf = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 3);
         CHECK(atCr.line == 1 && atCr.column == 3);
         CHECK(atLf.line == 1 && atLf.column == 3);
         CHECK(crlfFile.LineText(1) == StringView("ab"));
-        const SourceLocation c = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 4);
+        const sparks::SourceLocation c = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 4);
         CHECK(c.line == 2 && c.column == 1);
 
         DiagnosticList loneCr(allocator);
