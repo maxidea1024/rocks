@@ -168,7 +168,8 @@ public:
     void SetStage(platform::RunPhase phase, const char* stageName) noexcept;
 
     // 정적 소멸·CRT 종료를 돌리면 안 될 때(멈춘 로그 출력 스레드 등) 부른다. Launch가 정리(도구
-    // 로그, 종료 요청 처리기, 크래시 수집 해제)를 마친 뒤 _Exit(본문 종료 코드)로 끝낸다. stdio
+    // 로그, 종료 요청 처리기, 크래시 수집 해제)를 마친 뒤 platform::ExitProcessWithoutTeardown(본문
+    // 종료 코드)로 끝낸다(공유 라이브러리의 정적 소멸도 돌지 않는다 — Modular). stdio
     // 버퍼는 비우지 않으므로 본문이 먼저 비운다. 내장 진입(RunEmbeddedApplication)은 호스트
     // 프로세스를 끝내지 않으므로 무시한다.
     void RequestExitWithoutStaticTeardown() noexcept;

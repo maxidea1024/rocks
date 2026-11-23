@@ -1,0 +1,51 @@
+// header comment
+class Door : ScriptableComponent {
+    @save @edit var Open = false;
+
+    var Count = 0; // trailing
+    /* leading */ var Mode = 1;
+
+    on Owner.Destroyed() {
+        if (Open) {
+            Count = 1;
+        } else if (Count > 2) {
+        } else {
+            Count = 2;
+        }
+    }
+    @rpc(Server) fn Ask() {
+    }
+    fn Empty() {
+    }
+}
+
+enum Side {
+    Left, Right
+}
+
+enum Big {
+    A,
+    @formerly("Bee") B,
+    C,
+}
+
+struct S {
+    var X: int = 1;
+}
+
+interface Usable {
+    fn Use();
+    async fn Wait(): int;
+}
+
+event Actor.Hit(amount: int);
+
+fn Sw(v: int) {
+    switch (v) {
+        case 1, 2: {
+            return;
+        }
+        default: {
+        }
+    }
+}

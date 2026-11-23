@@ -268,6 +268,16 @@ internal sealed class Options
 
     public List<string> ClangArguments { get; } = [];
 
+    // --program <이름>=<경로>(여러 번): native 하니스가 쓸 다른 실행 파일이다(Modular 시험 동반 타깃 — Docs/Design/BuildTargets.ko.md 3.8절
+    // BS8d6). 없는 이름은 시험 실행 파일 옆에서 찾는다.
+    public Dictionary<string, string> Programs { get; } = new(StringComparer.Ordinal);
+
+    // --host-module <경로>: Modular 시험 실행 파일의 호스트 공유 라이브러리다(크래시 probe 함수가 그 안에 있다 — BS8d6). 없으면 Monolithic이다.
+    public string? HostModule => Optional("host-module");
+
+    // native 하니스가 Modular 실행 파일을 보는가다(호스트 공유 라이브러리를 받았다).
+    public bool Modular => HostModule is not null;
+
     public bool Asan { get; private set; }
 
     // third-party·표 생성·format 명령: 대상을 실제로 고친다(없으면 차이만 보고).
@@ -309,7 +319,7 @@ internal sealed class Options
     {
         Options result = new();
         HashSet<string> allowed = new(StringComparer.Ordinal) { "root", "json", "seed", "native-executable",
-            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs", "filter", "only" };
+            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs", "filter", "only", "host-module" };
         for (int index = 0; index < arguments.Length; ++index)
         {
             string argument = arguments[index];
@@ -347,6 +357,14 @@ internal sealed class Options
             if (key == "clang-arg")
             {
                 result.ClangArguments.Add(value);
+            }
+            else if (key == "program")
+            {
+                int split = value.IndexOf('=');
+                if (split <= 0 || split == value.Length - 1 || !result.Programs.TryAdd(value[..split], Path.GetFullPath(value[(split + 1)..])))
+                {
+                    throw new ArgumentException("--program expects a unique <name>=<path>: " + value);
+                }
             }
             else if (!allowed.Contains(key) || !result.values.TryAdd(key, value))
             {

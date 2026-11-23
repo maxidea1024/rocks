@@ -80,7 +80,8 @@ public:
         bool same = index < diagnostics.Count();
         if (same) {
             const Diagnostic& actual = diagnostics[index];
-            const SourceLocation at = sources.Get(actual.Source()).Locate(actual.Span().begin);
+            const sparks::SourceLocation at =
+                sources.Get(actual.Source()).Locate(actual.Span().begin);
             same = actual.Code() == code && actual.HasSpan() && at.line == line &&
                    at.column == column && actual.Message() == message && actual.Fix() == fix &&
                    (explanation.IsEmpty() || actual.Explanation() == explanation);

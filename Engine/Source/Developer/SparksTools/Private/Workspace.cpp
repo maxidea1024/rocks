@@ -369,6 +369,20 @@ Result<bool> Workspace::LoadPath(platform::FileSystem& files, StringView path,
         return walked;
     }
 
+    // 폴더 인자: 그 폴더 아래 모듈을 고른다(패키지는 통째로 읽지만 대상은 인자 아래 — dump·fmt).
+    if (!file) {
+        const StringView prefix = display.View() == "." ? StringView() : display.View();
+        for (WorkspaceFile& entry : files_) {
+            const StringView path = entry.path.View();
+            if (entry.kind == WorkspaceFileKind::Module &&
+                (prefix.IsEmpty() ||
+                 (path.StartsWith(prefix) && path.ByteCount() > prefix.ByteCount() &&
+                  path.Data()[prefix.ByteCount()] == '/'))) {
+                entry.selected = true;
+            }
+        }
+    }
+
     // 파일 인자: 그 모듈을 고른다(이미 읽은 패키지면 기존 항목에서 찾는다).
     if (file) {
         bool found = false;

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <AssetCooker/CookConfig.h>
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetNugget/NuggetCache.h>
 #include <AssetNugget/NuggetKey.h>
+#include <AssetRuntime/PackageWriter.h>
 #include <Object/TypeRegistry.h>
 
 // 쿠킹 처리기와 처리기 표다(Docs/Design/AssetSystem.ko.md 10.2절 결정 6, "A4c 구현 세부"). 처리기는
@@ -15,7 +18,30 @@
 //   auto processor = table.Find(entry.type);   // 가장 가까운 등록 처리기, 없으면 기본 처리기
 namespace rocks {
 
-class CookProcessor {
+// 처리기 하나의 쿠킹 문맥이다(실행기가 채운다 — A4c2). 포인터는 Cook 동안만 유효하다.
+struct CookContext {
+    Allocator* allocator = nullptr;
+    // 열린 에디터 패키지의 Registry·접근 문맥·Package handle과 그 색인 항목이다.
+    ObjectRegistry* registry = nullptr;
+    ObjectAccessContext access{};
+    ObjectHandle package{};
+    const AssetIndexEntry* entry = nullptr;
+    // 대상 프로파일과 그 출력 설정 SHA-256, 쿠커 버전이다(쿠킹 Summary 값).
+    const TargetProfile* profile = nullptr;
+    Sha256Digest profileSettings{};
+    uint32 cookerVersion = 0;
+    // 에디터 패키지의 bulk 원본이다(열린 패키지의 파일 bulk 저장소).
+    PackageBulkSource* bulkSource = nullptr;
+    // 너겟 캐시다(없으면 null — 기본 처리기는 쓰지 않는다, 텍스처 처리기 A5가 쓴다).
+    NuggetCache* nuggets = nullptr;
+    // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
+    PackageSink* sink = nullptr;
+    AssetDiagnostic* failure = nullptr;
+};
+
+// 처리기다. Cook의 기본은 에디터 객체 그래프를 그대로 쿠킹 패키지로 쓴다(UE가 패키지를 대상
+// 플랫폼용으로 저장하는 것과 같다 — EditorOnly 필드는 writer가 뺀다).
+class ROCKS_ASSETCOOKER_API CookProcessor {
 public:
     virtual ~CookProcessor() = default;
 
@@ -29,6 +55,24 @@ public:
                                   const AssetIndexEntry& entry) const noexcept {
         (void)writer;
         (void)entry;
+    }
+
+    // 쿠킹 패키지를 context.sink에 쓴다. 기본: WritePackage(kind Cooked, profileId·profileSettings·
+    // cookerVersion, 프로파일 bulkCodec·bulkAlignment(0이면 PackageDefaultCookedBulkAlignment),
+    // bulkSource). 오류: WritePackage의 오류(진단은 context.failure).
+    virtual Result<void> Cook(CookContext& context) const noexcept;
+};
+
+// 기본 처리기의 정체성이다(기본 Cook의 출력 의미가 바뀌면 버전을 바꾼다).
+inline constexpr NuggetProcessorId DefaultCookProcessorId{
+    Guid{0x524f434b44454643ull, 0x0000000000000001ull},
+    Guid{0x524f434b44454656ull, 0x0000000000000001ull}};
+
+// 기본 처리기다(처리기 표의 fallback — Asset 루트).
+class DefaultCookProcessor final : public CookProcessor {
+public:
+    NuggetProcessorId Identity() const noexcept override {
+        return DefaultCookProcessorId;
     }
 };
 

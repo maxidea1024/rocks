@@ -101,4 +101,11 @@ void RemoveTerminationRequestHandler() noexcept {
     detail::ReleaseTerminationRequestHandler();
 }
 
+void ExitProcessWithoutTeardown(int exitCode) noexcept {
+    // 현재 프로세스의 TerminateProcess는 돌아오지 않는다. 실패하면(실제로는 없다) _Exit로 끝낸다 —
+    // 공유 라이브러리 정적 소멸이 돌 수 있지만 프로세스는 끝난다.
+    (void)TerminateProcess(GetCurrentProcess(), static_cast<UINT>(exitCode));
+    _Exit(exitCode);
+}
+
 } // namespace rocks::platform

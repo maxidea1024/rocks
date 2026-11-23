@@ -1,6 +1,7 @@
 #include "../Common/ProcessEntryInternal.h"
 
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace rocks::platform {
@@ -131,6 +132,10 @@ void RemoveTerminationRequestHandler() noexcept {
 
     signalsInstalled = false;
     detail::ReleaseTerminationRequestHandler();
+}
+
+void ExitProcessWithoutTeardown(int exitCode) noexcept {
+    _Exit(exitCode);
 }
 
 } // namespace rocks::platform

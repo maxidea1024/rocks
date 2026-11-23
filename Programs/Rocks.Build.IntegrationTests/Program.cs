@@ -152,6 +152,7 @@ try
     MetadataOutputTransactionTests.Run();
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
+    TestProgramsTests.Run();
     await ProjectFilesWriterTests.RunAsync(root, toolchain);
     await IdeScriptsTests.RunAsync(root);
     await GameProjectTests.RunAsync();

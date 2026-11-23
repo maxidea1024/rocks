@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-22, 개정 10. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-23, 개정 11. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -12,7 +12,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/Source/` 기준이다. UE 이름은 대응표와 근거에만 적는다. hot reload·Live Coding(코드 다시 불러오기)은 범위 밖이다(9.2절).
 
-상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML1(단계 실행·묶음·Launch 통합)은 crash-launch 병합 뒤 개정 5에서 3.11절로 정해 구현했고, 그 후속(호스트 서비스·서비스를 쓰는 `Startup` 등록)은 개정 6 3.12절이다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
+상태: **설계 초안**(결정 MD1–MD23, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML1(단계 실행·묶음·Launch 통합)은 crash-launch 병합 뒤 개정 5에서 3.11절로 정해 구현했고, 그 후속(호스트 서비스·서비스를 쓰는 `Startup` 등록)은 개정 6 3.12절이다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
 
 ## 1. 현재 상태
 
@@ -232,7 +232,7 @@ public:
   - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest, host }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
   - 모르는 키는 오류다(UE 파서도 거부한다 — `Runtime/Core/Private/Modules/ModuleManifest.cpp:101-229`).
   - manifest는 링크가 모두 성공한 뒤 원자적으로 쓴다(임시 파일 → 이름 바꾸기).
-- **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`). 로더는 이 폴더들의 manifest만 읽는다. 폴더를 훑어 파일을 찾지 않는다.
+- **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`. 엔진 저장소 빌드는 출력 폴더 안 `Plugins/<상대 경로>/Binaries/<Platform>/` — 3.15절 MD23). 로더는 이 폴더들의 manifest만 읽는다(실행 파일 manifest의 `plugins` 목록 — 3.15절). 폴더를 훑어 파일을 찾지 않는다.
 - **`ModuleBuildId`(MD13)**: UE와 같이 출력 폴더의 이전 manifest가 있으면 그 값을 재사용하고, 없거나 엔진 버전·툴체인 fingerprint가 바뀌면 새로 만든다(UE `CanRecycleBuildId` — `Programs/UnrealBuildTool/Modes/WriteMetadataMode.cs:103-117`, `UEBuildTarget.cs:2450-2459`). 값은 manifest에만 있고 코드에 넣지 않는다. 그래서 증분 빌드가 진입점 TU를 다시 컴파일하지 않는다.
   - 설치 SDK는 SDK manifest에 엔진 `buildId`를 싣고, 게임·플러그인 모듈은 빌드할 때 그 값을 받는다.
   - 판정: manifest의 `buildId`가 엔진 manifest와 다르면 그 manifest 전체가 `Incompatible`이다. UE는 "out-of-date" 로그를 남기고 건너뛴 뒤 결국 `FileNotFound`가 된다(`ModuleManager.cpp:1930-1966`). Rocks는 두 ID를 담은 `Incompatible`로 바로 알린다(7절).
@@ -480,7 +480,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
   - `extern "C" int RocksLaunchModularApplication(int argc, char** argv, const char* manifest) noexcept`(POSIX `main`).
   - `extern "C" int RocksLaunchModularWideApplication(int argc, wchar_t** argv, const char* manifest) noexcept`(Windows `wmain`).
   - `extern "C" int RocksLaunchModularWindowedApplication(const char* manifest) noexcept`(Windows `wWinMain` — CRT가 나눈 넓은 문자 인자를 쓴다, `RunWindowedApplication`과 같다).
-  - 반환값은 프로세스 종료 코드다. `manifest`는 실행 파일 폴더 기준 파일 이름이다. Rocks Studio(ML5)처럼 manifest를 여럿 읽는 호스트는 이 진입을 넓히지 않고 본문이 로더에 manifest를 더하는 길로 간다(ML5에서 정한다).
+  - 반환값은 프로세스 종료 코드다. `manifest`는 실행 파일 폴더 기준 파일 이름이다. manifest를 여럿 읽는 호스트도 이 진입을 넓히지 않는다: 실행 파일 manifest가 플러그인 manifest 목록(`plugins`)을 싣고 로더가 만들 때 함께 읽는다(ML5a — 3.15절).
 - **앱 기술 export**: 호스트 모듈(`ROCKS_MODULE_SHARED_LIBRARY` 1)에서 `ROCKS_IMPLEMENT_APPLICATION(Describe)`는 `main`을 만들지 않고 `extern "C"` export 함수 `RocksApplicationDescription()`(기술 포인터를 돌려준다)을 정의한다. Windows의 `ROCKS_IMPLEMENT_WINDOWED_APPLICATION`은 `RocksWindowedApplicationDescription()`을 정의한다. 이름이 다르므로 진입 스텁(빌드의 subsystem)과 소스 매크로가 어긋나면 Launch가 기호를 찾지 못해 알린다(Monolithic은 링크 오류로 같은 어긋남을 잡는다).
 - **Launch의 Modular 진입 순서**:
   1. 크래시 도우미 분기(`RunCrashHelperIfRequested`)가 먼저다(지금 독립 실행 진입과 같다). 뒤의 실행 흐름은 이 분기를 다시 하지 않는다.
@@ -489,7 +489,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
   4. 시동 할당자(`SystemAllocator`, 정적 저장소에 placement new — 전역 생성자 없음)로 `ModuleLoader::TryCreateFromManifest`를 부른다. 모든 행(호스트 모듈 포함)을 OS로 싣고 진입 기술을 읽는다(3.13절). OS의 적재 오류 대화상자는 `DynamicLibrary`가 이미 끈다.
   5. `FindHostSymbol`로 호스트 모듈 라이브러리에서 앱 기술 함수를 찾아 부른다. lease는 진입이 쥐고 로더 파괴 직전에 놓는다.
   6. 시동 크래시 수집을 뗀 뒤 그 기술과 로더로 독립 실행 흐름([크래시 처리와 실행](CrashHandlingAndLaunch.ko.md) 8.1절)을 그대로 돈다. 1단계가 기술 설정으로 수집을 다시 건다(떼고 다시 거는 사이 아주 짧게 보호가 없다 — configure 재설치와 같다). "Launch.Modules"는 로더를 새로 만들지 않고 받은 로더로 `StartPhase(EarliestPossible)`만 하고, 정리는 프로세스 묶음 종료와 lease 진단까지다.
-  7. 실행 흐름이 끝나면(크래시 수집 해제 뒤) lease를 놓고 로더를 파괴하고(모든 모듈을 내리고 라이브러리를 역순으로 닫는다) 시동 할당자를 파괴한다. 정적 소멸 없는 종료(`RequestExitWithoutStaticTeardown`)는 실행 흐름 안에서 `_Exit`로 끝나므로 로더를 내리지 않는다(지금과 같다).
+  7. 실행 흐름이 끝나면(크래시 수집 해제 뒤) lease를 놓고 로더를 파괴하고(모든 모듈을 내리고 라이브러리를 역순으로 닫는다) 시동 할당자를 파괴한다. 정적 소멸 없는 종료(`RequestExitWithoutStaticTeardown`)는 실행 흐름 안에서 `ExitProcessWithoutTeardown`으로 끝나므로 로더를 내리지 않는다(지금과 같다).
   - 3–5단계 실패는 stderr에 한 줄(manifest 경로·report의 코드·모듈·단계·문구, 영어)을 쓰고 `ModuleStartupFailureExitCode`(1)로 끝낸다. 도구 로그는 아직 없다(앱 기술이 정한다). 창 실행 파일은 stderr가 보이지 않는다 — 한계로 둔다(OS의 import 실패 대화상자에 해당하는 표시는 나중에 정한다).
 - **호스트 코드의 수명(불변식)**: 앱 기술·그 함수(`run`·`configure`)·문자열(단계 이름 `SetStage` 리터럴, 크래시 폴더 등)은 호스트 모듈 안에 있다. 그래서 로더(호스트 라이브러리)는 실행 흐름이 크래시 수집을 뗀 뒤에야 파괴한다. 실행 흐름은 그 전에 기술·호스트 리터럴을 모두 쓴다. 단계 표시는 포인터를 보관하지만(`platform::SetRunPhase` — 정적 문자열) 수집을 뗀 뒤에는 읽지 않는다.
 - **로더의 할당자**: Modular 로더는 시동 할당자에서 만든다. 범용 할당자의 종류는 앱 기술(`ApplicationSettings::defaultAllocator`)이 정하는데 그 기술이 로더가 실은 호스트 모듈 안에 있기 때문이다. 그래서 로더 내부와 모듈 수명 객체의 할당이 Monolithic(범용 할당자 — 보통 Binned)과 Modular(`SystemAllocator`)에서 다르다. 모듈 수명 객체는 작고 수가 적어 성능 차이는 무시하고, 본문은 어느 할당자인지 알 필요가 없다(`ApplicationContext::Modules()` 계약 문구가 링크 방식별로 적는다).
@@ -508,6 +508,51 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
   - 로더 시험: `host` 키(schema 3) 해석과 호스트 행 둘 거부, 정적 표 로더의 `FindHostSymbol`은 false.
   - 실제 Launch·로더로 호스트 모듈을 적재해 본문을 도는 성공 경로(manifest 로더 생성 성공·`FindHostSymbol` 양성·시동 크래시 수집·정리 순서)는 BS8d2(export 매크로) 없이는 Core가 Modular로 링크되지 않으므로 BS8d5의 Modular FoundationTests가 본다. 3.13절의 실행 파일 행 성공 시험(OS 적재 없이 로더 만들기)은 행이 OS 적재 대상이 되어 없어진다. Launch 실행 흐름은 프로세스 전역 상태(크래시 수집·정적 실행 상태)를 쓰므로 시험 runner 안에서 돌리지 않는다.
 - **버린 안**: 실행 파일 모듈을 실행 파일에 두고 의존 모듈을 직접 import(UE 방식 — MD21 계약 4를 깬다), Windows 지연 적재 import(`/DELAYLOAD` — macOS·Linux에 같은 장치가 없다), 따로 이름 지은 호스트 모듈 규칙(실행 파일 모듈과 내용이 같다), 앱 기술을 `ModuleEntry`에 싣기(Core가 Launch 형식을 모른다), 시동 전에 범용 할당자를 정하기(앱 기술이 호스트 모듈 안이라 순서가 거꾸로다), 실행 파일마다 manifest(빌드 정보가 Core 공유 라이브러리에 타깃 하나 몫이라 실행 파일마다 다른 도구 빌드 ID를 담을 수 없다), 한 manifest에 호스트 행 여럿(다른 실행 파일의 호스트까지 싣는다), Modular 내장 진입 API(내장 호스트의 진입점과 MD21이 맞지 않는다), 시동 단계에서 오류 대화상자 끄기(앱 종류를 모른 채 프로세스 설정을 바꾼다 — OS 적재 대화상자는 이미 꺼져 있다).
+
+### 3.15 ML5a 구현 세부 — 엔진 플러그인 Modular(개정 11)
+
+ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플러그인을 Modular로 링크하고 적재한다(플러그인 binaries 폴더·플러그인 manifest, 실행 파일 manifest의 플러그인 목록, manifest 사이 빌드 식별 대조). **ML5b**는 Rocks Studio가 프로젝트 기술자와 활성 조건으로 켤 플러그인을 정하고 빌드가 실은 목록과 대조한다(MD19 — [빌드 타깃](BuildTargets.ko.md) BS4·BS5와 함께). 나눈 까닭: 플러그인 manifest 기구는 활성 조건 해석과 독립이다. 그리고 지금 Engine 층 Modular 시험(빌드 타깃 BS8e `EngineModular`)은 플러그인 시험을 빼고 있어, Editor 전에 플러그인 모듈의 export 누락을 잡지 못한다.
+
+**플러그인 binaries 폴더(MD23).**
+- 켠 플러그인 모듈의 공유 라이브러리(와 디버그 정보)와 그 플러그인의 manifest는 `<출력>/Plugins/<플러그인 상대 경로>/Binaries/<Platform>/`에 둔다. 플러그인 상대 경로는 플러그인 루트(엔진 저장소는 `Engine/Plugins`) 기준 플러그인 폴더(예 `Importers/UnrealExchange`)이고, `<Platform>`은 플랫폼 폴더 이름(`Win64`·`Mac`·`Android` — 빌드 문맥 `PlatformDirectory`와 같은 표를 Rocks.Build 한 곳에 두고 둘 다 그것을 쓴다)이다. 엔진 모듈은 지금처럼 `<출력>/bin`이다. Windows import 라이브러리는 지금처럼 `<출력>/lib`이다.
+- UE 배치를 출력 폴더 안으로 옮긴 것이다. UE는 모듈마다 기준 폴더 + `Binaries/<Platform>`에 공유 라이브러리를 만든다(`Programs/UnrealBuildTool/Configuration/UEBuildTarget.cs:5379-5383` `CreateDynamicLibraryForModule` — 엔진 `Engine/Binaries/<Platform>`, 플러그인 `<Plugin>/Binaries/<Platform>`). 파일 이름도 UE처럼 엔진 모듈과 같은 규칙(`<Target>-<Module>[-<Platform>-<Configuration>]`)이다.
+- 버린 안: 원본 트리의 `Engine/Plugins/<…>/Binaries`(UE 그대로) — Rocks 빌드 출력은 `out` 아래만이고(빌드 증거), 출력마다 구성·타깃이 달라 같은 플러그인 폴더를 출력 여럿이 함께 쓰면 manifest와 라이브러리가 겹친다. 엔진 라이브러리와 같은 `bin`에 두기 — 플러그인을 켜고 끄는 단위(MD12, ML5b의 Studio)는 폴더와 manifest여야 한다.
+- 모듈 공유 라이브러리의 최종 경로는 빌드의 경로 함수 하나가 정한다(링크 출력·manifest 크기·Windows export 수 진단·하니스가 모두 그것을 쓴다 — 지금 `bin`을 직접 붙이는 곳을 모은다). 링크 출력 폴더가 없으면 링크 전에 만든다.
+
+**호스트는 켠 플러그인 모듈을 링크하지 않는다.** Monolithic은 켠 플러그인 모듈을 주 실행 파일에 링크한다([빌드 타깃](BuildTargets.ko.md) BD36). Modular 호스트 모듈은 그 모듈을 링크하지 않고 manifest 행(기술자 단계의 보통 행)으로만 싣는다. 링크하면 호스트 라이브러리가 켠 플러그인 라이브러리를 모두 import해서, 플러그인을 켜고 끄는 단위(폴더와 manifest — ML5b·ML6)가 링크에서 이미 깨진다. 3.14절이 `DynamicModules`를 호스트 링크에서 뺀 것과 같은 까닭이다. 호스트가 직접 의존하는 플러그인 모듈(플러그인 시험을 담는 시험 호스트 → UnrealExchange)만 import로 남는다.
+
+**플러그인 manifest와 실행 파일 manifest의 목록(schema 4).**
+- 플러그인마다 실행 파일 manifest와 같은 이름(`<Target>[-<Platform>-<Configuration>].modules.json`)의 manifest를 그 플러그인 binaries 폴더에 쓴다. 형식은 실행 파일 manifest와 같고, 행은 그 플러그인의 모듈만이며 `file`은 그 폴더 기준이다. `buildId`·`engineVersion`·`toolchainFingerprint`는 실행 파일 manifest와 같은 값이다(한 빌드다). 호스트 행이 없고 `plugins`는 빈 배열이다(아니면 로더가 거부한다 — 플러그인 manifest는 다른 manifest를 가리키지 않는다).
+- 실행 파일 manifest에 최상위 키 `plugins`를 더한다(schema 3 → 4). 빌드가 켠 플러그인 중 모듈이 있는 것을 이름 순으로 `{ "name": 플러그인 이름, "manifest": 상대 경로 }` 배열에 싣는다. 경로는 정확히 `../Plugins/<조각>/…/Binaries/<조각>/<실행 파일 manifest 파일 이름>` 모양이다: `/` 구분, 조각은 비지 않고 `.`·`..`·`\`·`:`이 없으며 첫 `../` 하나만 상위 폴더다(실행 파일 manifest 폴더 `bin`의 형제 `Plugins`). 로더는 실행 파일 manifest 폴더의 부모에 `Plugins/…`를 붙여 연다(어휘 정규화 — report의 경로와 적재 경로가 같다). 실행 파일 manifest의 행은 플러그인 모듈을 뺀 것이다.
+- 로더는 이 목록의 manifest만 읽는다(MD12 — 폴더를 훑지 않는다). MD19의 "빌드가 게임 manifest에 실은 플러그인 목록"이 이 키다. ML5b는 이 키를 그대로 쓰고(게임 Editor 실행 파일 manifest가 프로젝트·엔진 플러그인 manifest를 가리킨다), Studio가 활성 조건으로 고른 목록과 대조한다.
+
+**행 순서 `order`(schema 4).** 모든 manifest의 행에 정수 키 `order`를 더한다. 빌드가 Monolithic 모듈 표와 같은 행 순서(실행 파일의 링크 폐포 순서 — 켠 플러그인 모듈 포함, `ModuleTables.Rows`)로 0부터 번호를 매긴 뒤 행을 실행 파일 manifest와 플러그인 manifest로 나눈다. 로더는 합친 행을 `order`로 정렬해 로더 표 순서로 쓴다. 그래서 같은 단계 안의 시작 순서(표 순서 — 3.11절 `StartPhase`)가 Monolithic과 같다(BD30 계약 1). 버린 안: 로더가 manifest 순서·행 순서로 안정 위상 정렬 — 플러그인 행이 첫 의존자 바로 앞으로 밀려 Monolithic과 순서가 달라진다.
+
+**로더(`TryCreateFromManifest`) — 두 단계.**
+1. 해석: 실행 파일 manifest를 지금처럼 엄격히 해석한다(행 키에 `order`, 최상위 키에 `plugins`). `plugins` 항목은 키가 정확히 `name`·`manifest`이고 이름은 C 식별자(정확히 같은 이름 중복 없음), 경로는 위 모양이다. 그 뒤 목록의 플러그인 manifest를 같은 규칙으로 해석한다. 플러그인 manifest 파일이 없으면 `NotFound`, 호스트 행이 있거나 `plugins`가 비어 있지 않으면 `Incompatible`이다(단계 `"Manifest"`).
+2. 대조: 플러그인 manifest의 `buildId`·`engineVersion`·`toolchainFingerprint`가 실행 파일 manifest와 다르면 `Incompatible`(단계 `"Manifest"`, 플러그인 이름과 두 값을 문구에)이다. UE 모듈 관리자도 BuildId가 다른 `.modules`의 모듈은 쓰지 않는다(`Runtime/Core/Private/Modules/ModuleManager.cpp:1944` `FindModulePathsInDirectory` — BuildId만 비교하고 건너뛴다). Rocks는 건너뛰지 않고 실패한다(MD13 — 섞인 빌드는 진단으로 끝낸다).
+3. 합치기: 모든 manifest를 해석한 뒤 전체 행 수·이름·의존 수로 저장소를 한 번 잡고, 행을 `order`로 정렬해 행·파일 이름·크기·호스트 표지·manifest 폴더를 함께 옮긴다(행마다 자기 manifest 폴더를 가진다). 검사: 행 이름은 manifest 사이에서도 정확히 같은 이름이 없어야 하고(지금 조회처럼 대소문자를 구별한다 — 대소문자만 다른 이름은 빌드가 MD17로 거부한다), `order`는 모두 달라야 하며, 모든 의존은 합친 행에 있고 자기보다 작은 `order`여야 한다(이것이 의존 순서 검사다 — 순환도 여기서 걸린다). 위반은 `Incompatible`이다. 그 뒤 지금처럼 표 검사(`Initialize`의 앞 행 불변식)를 한다.
+4. `Prepare`(3.13절)는 표 순서로 각 행을 자기 manifest 폴더 + `file`로 연다. 크기 대조·진입점은 같다. report의 `requested`는 실행 파일 manifest 실패면 그 파일 이름, 플러그인 manifest(와 그 행) 실패면 플러그인 이름이다(manifest 파일 이름이 모두 같아서다 — 경로는 문구에).
+   - Windows: 의존 라이브러리를 먼저 열어 두므로 다른 폴더의 import도 이미 적재된 같은 이름 모듈로 풀린다(Windows DLL 검색 순서 "Factors that affect searching" — 적재된 모듈 목록은 어느 폴더에서 실었든 같은 모듈 이름이면 그것을 쓰고, 전체 경로로 실은 DLL의 의존도 모듈 이름으로 찾는다). 프로세스 전역 DLL 검색 경로(`AddDllDirectory`·`SetDllDirectory`)는 바꾸지 않는다. UE도 적재 전에 import를 찾아 먼저 싣는다(`Runtime/Core/Private/Windows/WindowsPlatformProcess.cpp:2418` `ResolveMissingImportsRecursive` — UE는 검색 폴더 목록으로 찾고, Rocks는 manifest가 순서를 준다). 불변식: 행이 없는 공유 라이브러리(PlatformBase·DeterministicMath)는 부트 모듈 링크 폐포에 있어 진입 스텁이 이미 싣는다. 빌드가 Modular에서 행 없는 공유 라이브러리가 부트 모듈 링크 폐포 밖이면 거부한다(다른 폴더의 import를 풀 수 없다).
+   - macOS·Linux: 빌드가 rpath를 넣는다(아래). install name·soname `@rpath/<파일>`은 그대로다(dyld·ld.so가 이미 적재한 이미지를 그 이름으로 맞춘다).
+
+**빌드.**
+- Modular 타깃이 플러그인을 켜도 거부하지 않는다([빌드 타깃](BuildTargets.ko.md) BD41 개정). 플러그인 모듈(기술자의 `modules`에 있는 모듈 — 플러그인 모듈 규칙)은 공유 라이브러리를 자기 플러그인 binaries 폴더에 링크한다. 모듈 입력에 그 폴더를 정하는 칸(플러그인 상대 경로)을 더하고 기술자 모듈 처리가 채운다(규칙은 채우지 않는다).
+- rpath: 공유 라이브러리·실행 파일이 링크하는 공유 라이브러리가 자기와 다른 폴더에 있으면 그 폴더의 상대 경로(링크하는 바이너리 폴더 기준)를 rpath로 더한다(macOS `@loader_path/<상대 경로>`, Linux `$ORIGIN/<상대 경로>`). UE macOS 툴체인과 같다(`Programs/UnrealBuildTool/Platform/Mac/MacToolChain.cs:365` — 링크하는 라이브러리 폴더마다 `-rpath @loader_path/<상대 경로>`). 진입 스텁은 부트 모듈만 import하므로 그대로다.
+- manifest 쓰기: 플러그인 manifest를 먼저 쓰고 실행 파일 manifest를 마지막에 쓴다(각각 원자적 교체, 내용이 같으면 쓰지 않는다 — 실행 파일 manifest가 새 플러그인 manifest를 가리킨 뒤에야 바뀐다). `buildId` 재사용(MD13)은 실행 파일 manifest가 정하고 플러그인 manifest가 같은 값을 받는다.
+- 빌드 보고서의 모듈 출력(`ModuleOutputs`)은 지금과 같다(Windows는 `lib`의 import 라이브러리, macOS·Linux는 공유 라이브러리 — 플러그인 모듈은 플러그인 폴더의 경로). 끈 플러그인의 옛 폴더는 지우지 않는다(실행 파일 manifest 목록에 없으면 읽지 않는다).
+- Windows export 수 진단(BS8d3)은 플러그인 라이브러리도 본다. Modular는 Asan을 거부하므로 Asan 런타임 복사는 바뀌지 않는다.
+- 플러그인 모듈의 export(BD27)는 엔진 모듈과 같다. 다른 모듈(시험 호스트·다른 플러그인)이 부르는 선언에 그 플러그인 모듈의 API 매크로를 붙인다.
+
+**시험.**
+- `EngineModular`가 UnrealExchange 플러그인을 켜고(`Plugins`) 엔진 플러그인 시험을 담는다(빌드 타깃 BS8e의 `TestsModule.PluginTests` 제외를 거둔다). 그래서 UnrealExchange가 플러그인 binaries 폴더에 링크되고, 시험 호스트가 그 라이브러리에 의존하며, CI(Windows·macOS)가 그 적재를 돈다. 시험이 부르는 UnrealExchange 선언의 export는 플러그인을 맡은 세션과 나눠 붙인다(BS8e와 같은 분담).
+- 로더 시험(실행 파일 없이 manifest 파일로): `plugins` 양성·음성(키, 이름 식별자·중복, 경로 모양 — 절대 경로·드라이브·빈 조각·`.`·두 번째 `..`·다른 파일 이름), 플러그인 manifest 없음, `buildId`·`engineVersion`·`toolchainFingerprint` 불일치, 호스트 행·비지 않은 `plugins`를 가진 플러그인 manifest, manifest 사이 이름 중복, `order` 중복, `order`가 큰 의존(manifest 사이 순환 포함), 앞 manifest 행이 뒤 manifest 행에 의존하는 정렬, 플러그인 사이 의존(BD39), report `requested`.
+- 빌드 시험: Modular 타깃과 플러그인 fixture — 플러그인 binaries 폴더의 라이브러리와 manifest, 실행 파일 manifest의 `plugins`·행 분리, 행 `order`가 Monolithic 모듈 표 순서와 같음, 같은 `buildId`, 증분 빌드에서 바뀌지 않음, 호스트가 켠 플러그인 모듈을 링크하지 않음, 끈 플러그인의 옛 폴더를 읽지 않음, 실행(실행 파일 모듈이 플러그인 모듈에 의존 — Windows·macOS). BD41의 Modular 거부 시험은 이 시험으로 바꾼다.
+
+**한계.**
+- Rocks Studio의 활성 조건 해석·목록 대조는 ML5b, 게임 프로젝트 플러그인(`<Project>/Plugins`)의 Modular는 게임 Editor 타깃(빌드 타깃 BS5)이다. 실행 중 플러그인 켜기·끄기는 ML6이다.
+- Windows는 manifest 순서로 import를 푼다. 로더 밖에서(manifest 없이) 플러그인 라이브러리를 직접 열면 다른 폴더의 import를 찾지 못한다 — 플러그인 라이브러리는 로더만 연다.
+- cdb 하니스의 기호 경로는 `bin`이다. 플러그인 라이브러리의 PDB는 라이브러리에 적힌 PDB 경로로 찾는다(크래시 probe 함수는 호스트에 있다).
 
 ## 4. 결정 요약
 
@@ -535,7 +580,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 | MD9 | 단계는 프로세스·호스트·엔진 묶음으로 나누고, 묶음마다 UE 절차(자동 종료 대상의 PreUnload 전부 → Shutdown 역순, 타입 해제, 공유 라이브러리는 해제하지 않음)로 내린다. 엔진 묶음은 `Engine::Shutdown`에서 TypeRegistry 종료 전, 호스트 묶음은 LogHost·HostSettings 정리 전, 프로세스 묶음은 Launch 정리에서 도구 로그 정리 전. 엔진 묶음은 Engine 수명에 묶이고 동시에 여럿이면 참조 수로 센다. 종료 절차에서는 `Changed`를 내지 않는다 | 권장안 |
 | MD10 | 실행 중 해제는 먼저 `SupportsUnload`·부트 모듈·의존 모듈·타입 해제 가능 여부를 검사해 `Unsupported`·`Busy`로 거부한다(바뀌는 것 없음). 내린 뒤 lease가 남으면 공유 라이브러리 해제를 미룬다. 플러그인 끄기는 전체를 먼저 검사한다 | 권장안 |
 | MD11 | 모듈 규칙 `DynamicModules`(UE `DynamicallyLoadedModuleNames`): Modular에서 링크하지 않고 manifest에만 싣는다. Monolithic은 링크한다. type 포함 규칙은 적용하고 단계 순서 검사는 적용하지 않는다. 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — 개정 4, 3.8절). `Dependencies`와 겹치거나 자기 자신이거나 모듈 표에 행이 없는 모듈이면 오류다. `DynamicModules`로만 표에 든 행은 단계 실행 대상이 아니다(UE `None`과 같다 — 개정 4 리뷰) | 권장안 |
-| MD12 | Modular manifest `<Target>[-<Platform>-<Configuration>].modules.json`(`buildId`·`modules`의 `file`·`size`·`dependencies`·`loadingPhase`), 링크 성공 뒤 원자적으로 쓴다. 엔진·게임·플러그인 `Binaries/<Platform>/`의 manifest만 읽고 폴더를 훑지 않는다. 모르는 키는 오류 | 권장안 |
+| MD12 | Modular manifest `<Target>[-<Platform>-<Configuration>].modules.json`(`buildId`·`modules`의 `file`·`size`·`dependencies`·`loadingPhase`), 링크 성공 뒤 원자적으로 쓴다. 엔진·게임·플러그인 `Binaries/<Platform>/`의 manifest만 읽고 폴더를 훑지 않는다(엔진 저장소 플러그인 폴더는 MD23). 모르는 키는 오류 | 권장안 |
 | MD13 | `ModuleBuildId`는 UE처럼 출력 폴더의 이전 값을 재사용하고 엔진 버전·툴체인 fingerprint가 바뀌면 새로 만든다. manifest에만 둔다(코드에 넣지 않음). 설치 SDK manifest에 실린다. 다르면 `Incompatible`, 파일 크기가 manifest와 다르면 `Incompatible` | 권장안 |
 | MD14 | 의존을 먼저 적재하므로 OS 탐색은 같은 폴더만 쓴다. Linux는 `-soname`을 넣는다. POSIX `dlerror` 문구를 report로 넘기도록 `DynamicLibrary`를 보강한다 | 권장안 |
 | MD15 | 타입 등록은 레지스트리 주인이 `ModuleTypeRegistrar`(`Register`·`CanUnregister`·`Unregister`)로 한다. 동시에 사는 Engine마다 등록기를 붙일 수 있다(최대 4개 — 개정 5, 3.11절). 엔진은 모듈마다 `ModuleRegistration`을 두고, 등록기를 `Engine::Initialize`에서 설정해 이미 시작한 모듈을 몰아서 등록하며 `Engine::Shutdown`에서 뗀다. 메타 컴파일러는 모듈 자신의 타입만 등록하는 함수를 더 낸다. HostSettings 레지스트리는 지금처럼 명시 등록 | 권장안 |
@@ -546,6 +591,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 | MD20 | 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 예외를 유지하고, Modular에서 등록 목록 머리는 시험 호스트 모듈에 한 벌(BS8d5), 시험 묶음 공유 라이브러리는 해제하지 않는다 | 권장안 |
 | MD21 | Modular 실행 파일은 부트 모듈만 import하고, 본문은 타깃의 호스트 모듈에 두어 로더가 적재한다. 부트 모듈 누락만 report 계약의 예외다 | 권장안 |
 | MD22 | 로더는 시작 전에 manifest의 모든 모듈 바이너리를 준비(`Prepare`)한다. HostSettings는 설정 확정 전에 모든 모듈의 `registerSettings`를 의존 순서로 부른다 | 권장안 |
+| MD23 | 켠 플러그인의 모듈 공유 라이브러리와 플러그인 manifest는 `<출력>/Plugins/<플러그인 상대 경로>/Binaries/<Platform>/`에 두고, 실행 파일 manifest가 플러그인 manifest 목록(`plugins`)을 싣는다. Modular 호스트는 켠 플러그인 모듈을 링크하지 않는다. 로더는 그 목록만 읽고 manifest 사이 `buildId`·엔진 버전·툴체인 지문이 다르면 실패하며, 합친 행을 빌드가 Monolithic 표 순서로 매긴 `order`로 정렬한다(3.15절). 버린 안: 원본 트리의 플러그인 `Binaries`, 엔진 `bin`에 함께 두기, 로더의 위상 정렬 | 권장안 |
 
 ## 6. 단계
 
@@ -556,7 +602,8 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 | ML2 | 타입 등록기(MD15)·모듈별 `ModuleRegistration`·모듈 자신의 타입만 등록하는 생성 함수, 실제 `ModuleLease`(MD16)와 생성 등록 함수의 lease 인자, 설정 등록(MD22, Monolithic), 기존 모듈별 등록 래퍼를 `Startup`·`RegisterSettings`로 옮기기, CVar·trace 채널 등록의 lease. ML1 전 연결과 ML1 뒤로 넘긴 것은 3.10절(개정 3) | 호스트 코드의 모듈별 명시 등록 호출이 HostSettings 설정 타입 외에 0. 늦은 단계 모듈의 CVar가 `ReportUnresolved` 경고 없이 설정 값을 받는 시험. 종료 뒤 남은 lease 진단 시험 |
 | ML3 | `DynamicModules`(MD11)와 Monolithic 링크 규칙, type 검사, 링크 의존만의 순환 거부(동적 관계는 참조 사슬 아님), 표에 행이 없는 모듈 거부 | 실행 중 적재 모듈을 `Load`·`Find<T>(name)`으로 쓰는 시험 |
 | ML4 | Modular 적재 — 선행: [빌드 타깃](BuildTargets.ko.md) BS8. manifest 쓰기·읽기(원자적 쓰기, 모르는 키 거부), `ModuleBuildId` 재사용·SDK manifest, 파일 크기 대조, export 진입점과 강제 참조, `Prepare`, 실행 파일의 부트 모듈 import와 호스트 모듈(MD21), Linux `-soname`, OS 적재·report, `Modular` FoundationTests를 로더로 실행 | `Modular` FoundationTests가 Windows·macOS에서 로더로 모듈을 적재해 통과한다. `buildId` 불일치·크기 불일치·의존 DLL 누락·진입점 없음·모르는 키의 report 시험. 증분 빌드에서 `buildId`가 바뀌지 않는 시험 |
-| ML5 | Rocks Studio 적재 — BS4·BS5와 함께: 프로젝트·플러그인 manifest, 플러그인 조건 해석, 빌드 목록 대조(MD19) | 게임·플러그인 모듈이 있는 프로젝트를 Rocks Studio가 열고 닫는다 |
+| ML5a | 엔진 플러그인 Modular(3.15절): 플러그인 binaries 폴더·플러그인 manifest(MD23), 실행 파일 manifest의 `plugins`(schema 4), manifest 사이 빌드 식별 대조, 합친 행의 의존 정렬, 빌드의 rpath | `EngineModular`가 UnrealExchange 플러그인을 Modular로 적재해 그 시험이 Windows·macOS에서 통과한다. 플러그인 manifest 불일치·없음·중복·순환의 report 시험 |
+| ML5b | Rocks Studio 적재 — BS4·BS5와 함께: 프로젝트 플러그인, 플러그인 조건 해석, 빌드 목록 대조(MD19) | 게임·플러그인 모듈이 있는 프로젝트를 Rocks Studio가 열고 닫는다 |
 | ML6 | 실행 중 해제(MD10)와 플러그인 끄기, 공유 라이브러리 지연 해제 | `Busy`(의존 모듈·살아 있는 인스턴스)·`Unsupported` 시험(아무것도 바뀌지 않음), 해제 뒤 다시 적재 시험(Modular), lease가 남은 경우의 지연 해제 시험 |
 
 ## 7. UE와 다르게 정한 점
@@ -617,6 +664,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 11 | 2026-11-23 | ML5를 ML5a(엔진 플러그인 Modular)와 ML5b(Rocks Studio 적재)로 나눴다. ML5a 세부(3.15절): 플러그인 binaries 폴더 `<출력>/Plugins/<상대 경로>/Binaries/<Platform>/`(MD23), Modular 호스트는 켠 플러그인 모듈을 링크하지 않음, 플러그인 manifest, 실행 파일 manifest의 `plugins`·행 `order`(schema 4 — Monolithic 표 순서), manifest 사이 `buildId`·엔진 버전·툴체인 지문 대조, 로더 두 단계(해석 → 합치기), Windows는 manifest 순서로 import를 풀고(행 없는 공유 라이브러리는 부트 폐포 안이어야 함) macOS·Linux는 rpath, `EngineModular`가 플러그인 시험을 담음. 설계 리뷰(리뷰어 1명) 반영: 호스트 링크·순서 번호·로더 저장소·경로 모양·report 이름·`bin` 고정 경로·문서 불일치 |
 | 10 | 2026-11-22 | ML4b 구현 세부(3.14절): Modular 실행 파일은 빌드 생성 진입 스텁(Launch만 import), 실행 파일 모듈은 호스트 공유 라이브러리(MD21), 앱 기술 export(`RocksApplicationDescription`·창 변형), Launch Modular 진입(`RocksLaunchModularApplication` — 시동 할당자로 manifest 로더를 먼저 만듦), manifest 행 키 `executable`→`host`(schema 3, `executableEntry` 인자 제거, 호스트 행도 OS 적재), `FindHostSymbol`, `GeneratedModuleTable()`은 Monolithic에만, `HostSettingsOptions::modules` 필수, 시험 등록 머리, 입력 검사(Launch 거부 해제·Launch 없는 Modular 실행 파일 거부) |
 | 9 | 2026-11-21 | ML4a 구현 세부(3.13절): `TryCreateFromManifest`(manifest 엄격 해석·`Prepare`·report), 행 키 `executable`과 실행 파일 진입 함수, 표 저장소·라이브러리 수명, 시험 범위(성공 경로는 BS8d5) |
 | 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |

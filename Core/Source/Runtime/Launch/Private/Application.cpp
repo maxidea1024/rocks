@@ -386,7 +386,8 @@ void ApplicationRunner::StopDefaultAllocator(ApplicationRunner& runner) noexcept
     }
 
     // 정적 소멸 없이 끝내는 경로(RequestExitWithoutStaticTeardown)는 남은 할당을 검사하지 않는다:
-    // 멈춘 스레드가 할당을 쥔 채일 수 있다. SystemAllocator를 파괴하지 않고 _Exit하는 것과 같다.
+    // 멈춘 스레드가 할당을 쥔 채일 수 있다. SystemAllocator를 파괴하지 않고 끝내는 것과 같다
+    // (ExitProcessWithoutTeardown).
     // 내장 진입은 그 요청을 무시하므로 파괴한다.
     if (runner.context_.exitWithoutStaticTeardown_ && !runner.embedded_) {
         return;
@@ -479,7 +480,8 @@ void ApplicationRunner::StopModules(ApplicationRunner& runner) noexcept {
 
     // 정적 소멸 없이 끝내는 경로는 로더를 내리지도 파괴하지도 않는다: 멈춘 출력 스레드를 포기한
     // 본문이 남긴 설정 문맥이 모듈 lease를 쥐고 있다(범용 할당자와 같은 규칙). 내장 진입은 그
-    // 요청을 무시하므로 내린다. Modular 진입의 로더는 Run이 _Exit로 끝나므로 그대로 남는다.
+    // 요청을 무시하므로 내린다. Modular 진입의 로더는 Run이 정적 소멸 없이 끝나므로
+    // (ExitProcessWithoutTeardown) 그대로 남는다.
     if (runner.context_.exitWithoutStaticTeardown_ && !runner.embedded_) {
         if (runner.modules_) {
             alignas(UniquePtr<ModuleLoader>) static unsigned char
@@ -569,7 +571,7 @@ int ApplicationRunner::Run() noexcept {
     }
 
     if (context_.exitWithoutStaticTeardown_ && !embedded_) {
-        _Exit(exitCode);
+        platform::ExitProcessWithoutTeardown(exitCode);
     }
 
     return exitCode;

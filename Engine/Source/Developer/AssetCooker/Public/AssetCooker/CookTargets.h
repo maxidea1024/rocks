@@ -111,7 +111,8 @@ struct CookTargetSet {
 
     // 대상(AssetId 순)이다.
     Array<CookTarget> targets;
-    // Soft로만 닿은 NeverCook 에셋(매니페스트 의존에서 뺄 것 — AssetId 순)이다.
+    // Soft로만 닿은 NeverCook 에셋(AssetId 순)이다. 대상에서 빠질 뿐 쿠킹 패키지·매니페스트의 의존
+    // 목록에는 남는다(로드가 NotFound) — cookKey 판정 입력으로만 쓴다(A4c1).
     Array<AssetId> excluded;
     // 기존 매니페스트에 있고 색인에 없는 항목(AssetId 순)이다.
     Array<AssetId> removed;

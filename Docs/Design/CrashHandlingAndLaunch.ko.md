@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-22, 개정 13(20절: 엔진 종료 게이트 재시도 — [오디오 시스템](AudioSystem.ko.md) AD23). 개정 12(7.4·8.1절: Modular 진입 — 진입 스텁이 Launch의 `RocksLaunchModularApplication`을 부르고, Launch가 시동 크래시 수집 아래에서 manifest 로더를 만들어 호스트 모듈의 앱 기술로 이 흐름을 돈다, [모듈 로더](ModuleLoader.ko.md) 3.14절 ML4b). 개정 11(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 10(7.4·8.1·8.2절: 모듈 로더 — Launch가 프로세스 모듈 로더를 소유하는 "Launch.Modules" 단계와 `ApplicationContext::Modules()`, [모듈 로더](ModuleLoader.ko.md) ML1). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-23, 개정 14(8.2절: 정적 소멸 없는 종료는 Windows `TerminateProcess` — `platform::ExitProcessWithoutTeardown`, [빌드 타깃](BuildTargets.ko.md) BS8d6). 개정 13(20절: 엔진 종료 게이트 재시도 — [오디오 시스템](AudioSystem.ko.md) AD23). 개정 12(7.4·8.1절: Modular 진입 — 진입 스텁이 Launch의 `RocksLaunchModularApplication`을 부르고, Launch가 시동 크래시 수집 아래에서 manifest 로더를 만들어 호스트 모듈의 앱 기술로 이 흐름을 돈다, [모듈 로더](ModuleLoader.ko.md) 3.14절 ML4b). 개정 11(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 10(7.4·8.1·8.2절: 모듈 로더 — Launch가 프로세스 모듈 로더를 소유하는 "Launch.Modules" 단계와 `ApplicationContext::Modules()`, [모듈 로더](ModuleLoader.ko.md) ML1). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -521,7 +521,7 @@ public:
     LogSystem* ToolLog() noexcept;          // ToolLogging::Stderr일 때만
     void SetStage(platform::RunPhase phase, const char* stageName) noexcept;  // 정적 문자열
     // 본문이 정적 소멸·CRT 종료를 돌리면 안 된다고 판단했을 때(멈춘 로그 출력 스레드 등). Launch가 정리 뒤
-    // _Exit(code)로 끝낸다.
+    // ExitProcessWithoutTeardown(code)로 끝낸다(공유 라이브러리의 정적 소멸도 돌지 않는다).
     void RequestExitWithoutStaticTeardown() noexcept;
 };
 
@@ -594,7 +594,7 @@ bool IsTerminationRequested() noexcept;
 | 7a | 모듈 로더(개정 10, 단계 이름 "Launch.Modules"): Monolithic은 범용 할당자와 `GeneratedModuleTable()`로 로더를 만들고 `StartPhase(EarliestPossible)`로 부트 모듈(Launch의 의존 폐포 — Core·ModuleLoader·Launch)을 시작한다. Modular는 0단계 앞의 Modular 진입(개정 12)이 시동 크래시 수집(프로세스 안 덤프) 아래에서 시동 할당자로 manifest 로더를 만들고(모든 모듈 라이브러리 적재) 호스트 모듈의 앱 기술을 읽은 뒤 시동 수집을 떼고 이 흐름에 들어온다. 이 단계는 그 로더로 부트 모듈만 시작하고, 로더는 흐름이 끝난 뒤(크래시 수집 해제 뒤) 그 진입이 파괴한다([모듈 로더](ModuleLoader.ko.md) 3.14절) | 로더 생성·부트 모듈 시작 실패는 `Log::Error` 한 번(모듈·단계·문구) 뒤 본문 없이 `ModuleStartupFailureExitCode`(1)로 끝낸다(시작한 단계만 역순 정리) |
 | 8 | `SetRunPhase(Running, "Main")` → `run(context)` | 본문의 반환값 |
 | 9 | 7a → 7 → 6a → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
-| 10 | 보호 프레임을 나와 `RemoveCrashReporting`(도우미에 `Shutdown`을 먼저 쓴다) → 종료 코드 반환(또는 `_Exit`) | — |
+| 10 | 보호 프레임을 나와 `RemoveCrashReporting`(도우미에 `Shutdown`을 먼저 쓴다) → 종료 코드 반환(또는 `ExitProcessWithoutTeardown`) | — |
 
 - **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7a다(6a·7a 포함). 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
 - **크래시 처리를 설정보다 먼저 건다(요구 10절).** 설정 로딩·LogHost·Engine 초기화는 모두 8단계 본문 안이다.
@@ -611,7 +611,7 @@ bool IsTerminationRequested() noexcept;
    3. 도우미 종료를 최대 2 s 기다린다. 넘으면 도우미를 `TerminateProcess`로 끝낸다.
    4. filter·CRT hook·SIGABRT 처리기를 이전 값으로 되돌린다.
    5. W를 깨워 join한다.
-4. 반환값이 `wmain`의 반환값이 되고, CRT가 `exit`를 돌린다(정적 소멸). `RequestExitWithoutStaticTeardown`이면 같은 `RemoveCrashReporting`(`Shutdown` 기록 포함)을 마친 뒤 `_Exit(code)`다.
+4. 반환값이 `wmain`의 반환값이 되고, CRT가 `exit`를 돌린다(정적 소멸). `RequestExitWithoutStaticTeardown`이면 같은 `RemoveCrashReporting`(`Shutdown` 기록 포함)을 마친 뒤 `platform::ExitProcessWithoutTeardown(code)`다(개정 14). Windows는 `TerminateProcess(GetCurrentProcess(), code)`다(UE `FPlatformMisc::RequestExit(true)`와 같다): `_Exit`는 `ExitProcess`를 불러 DLL마다 `DLL_PROCESS_DETACH`가 오고 DLL의 CRT가 그 DLL의 정적 소멸자를 돌리므로, Modular(엔진 모듈이 공유 라이브러리)에서는 정적 소멸을 막지 못한다(Modular 하니스 `Native.Launch.static-teardown`이 찾았다). POSIX는 `_Exit`다(공유 라이브러리 소멸자를 돌리지 않는다).
 
 정상 종료(`exit`·`_Exit`)는 어떤 종료 코드든 도우미가 기록하지 않는다. `Shutdown` 상태가 먼저 쓰이고, 기록 조건(11.4절)도 NTSTATUS 오류 코드로 좁혀져 있다.
 
@@ -1251,7 +1251,7 @@ Rocks는 이 값을 쓰지 않는다.
 | Full 덤프 마감 | 시험 도우미 마감 1 s, `Full`, 큰 메모리 | `Minidump.dmp` 있음·cdb로 열림, `detailDump.status = Cancelled`이고 그 파일은 없음, 부모는 캡처 뒤 바로 끝남 |
 | 보고 없는 비정상 종료 | `__fastfail` | 도우미가 쓴 `kind=UnreportedExit`, 종료 코드 0xC0000409 |
 | Ctrl-C·harness kill | `GenerateConsoleCtrlEvent`로 Ctrl-C를 보낸 자식, `Process.Kill` | 두 경우 모두 크래시 폴더가 생기지 않는다 |
-| 정상 `_Exit`(0이 아닌 코드) | `RequestExitWithoutStaticTeardown` 경로로 종료 코드 7 | 크래시 폴더 없음 |
+| 정적 소멸 없는 정상 종료(0이 아닌 코드) | `RequestExitWithoutStaticTeardown` 경로로 종료 코드 7 | 크래시 폴더 없음 |
 | Embedded 모드 | 시험 호스트가 바깥 `__try`로 받는다 | 콜백·메타데이터 뒤 호스트 처리기에 같은 예외 코드가 도달, 프로세스는 호스트가 끝냄 |
 | 디버거 정책 | `cdb -g -G -c "sxe av; g; .lastevent; q"`로 자식 실행 | 기본: 디버거가 원래 지점에서 멈춤, 크래시 폴더 없음. 강제 옵션: 보고됨 |
 | ASan 정책 | Asan 구성의 `asan-uaf`·접근 위반 | ASan 보고 문구 있음, `dump.status = Unsupported`, 예산 안 종료 |
@@ -1738,7 +1738,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **실행 프로그램별 결정.**
     - Sandbox: `--engine`이면 configure가 도구 로그를 끈다(LogHost). `--self-test`는 Launch 도구 로그다. 그래서 자체 검사가 로그를 시작하지 못할 때 종료 코드 1로 끝나던 동작은 "로그 없이 계속"(D22)으로 바뀐다. `handleTerminationRequests`는 켜지 않았다: 첫 Ctrl-C가 원자 표시만 남기고 아무도 보지 않으면 Ctrl-C로 끝나지 않게 되므로 PumpEvents 다리(LC6)와 함께 켠다. `WriterAbandoned`는 LogHost·설정 문맥을 정적 저장소에 만들어 파괴하지 않고 `RequestExitWithoutStaticTeardown`이다(Launch가 크래시 수집을 정상 종료로 뗀 뒤 `_Exit`, 도우미가 UnreportedExit를 남기지 않는다).
     - Commandlet: 도구 로그는 Launch(Stderr)가 맡고 `commandlet_host::Run`은 명령만 돈다. 인수 상한(128개·4096 byte)과 문구 "Too many or invalid arguments."는 본문이 확인한다. 인자 UTF-8 변환은 Launch가 하므로 Windows의 길이 초과 문구는 macOS와 같은 "Invalid or oversized UTF-8 argument."가 됐다(종료 코드 2 그대로). 잘못된 UTF-16·UTF-8은 Launch 문구와 종료 코드 2다. Win64 출력(`dda5c1e6`: 4096 byte 상한 없음, 콘솔은 글자 경계 조각)은 함수 본문을 그대로 옮겼다.
-    - 시험 실행기: 이름은 층별 정의 `FOUNDATION_TEST_RUNNER_LAYER`로 고른다(크래시 폴더·메타데이터 program). 본체는 Full(`--crash-dir <path>`로 폴더). configure가 자식 probe의 수집을 명시한다: `--negative-control crash-*`는 probe 설정(`ConfigureCrashProbe`: 방식·덤프 종류·시험 예산·도우미 경로·job 진입), `log-crash-*`는 InProcess와 `<dir>/Crashes`, 그 밖의 `--negative-control`·`--process-probe`·`--logger-failure-probe`는 Off(수집기 없는 Fatal 계약 그대로). probe는 설치를 확인한 뒤 실패를 낸다. 그래서 크래시 메타데이터의 program은 실행기 이름, build는 실제 빌드 식별이다(C# 시험 갱신). 고장 난 도우미·도우미 gate는 정적 초기화에서 `InstallCrashHelperTestMode`가 건다(Launch가 다른 무엇보다 먼저 도우미로 분기하므로). 고장 난 도우미 본체는 PlatformBase 시험 칸 `detail::SetCrashHelperOverride`로 넘겨 인자 해석을 PlatformBase가 한다.
+    - 시험 실행기: 이름은 시험 실행 파일 모듈 이름 `ROCKS_MODULE_NAME_TEXT`다(모듈 이름이 실행 파일 이름이다. 크래시 폴더·메타데이터 program — 같은 소스가 층별 실행기와 Modular 실행기 `EngineModularTests`가 되므로 층이 아니라 실행 파일 이름으로 준다, 개정 14). 본체는 Full(`--crash-dir <path>`로 폴더). configure가 자식 probe의 수집을 명시한다: `--negative-control crash-*`는 probe 설정(`ConfigureCrashProbe`: 방식·덤프 종류·시험 예산·도우미 경로·job 진입), `log-crash-*`는 InProcess와 `<dir>/Crashes`, 그 밖의 `--negative-control`·`--process-probe`·`--logger-failure-probe`는 Off(수집기 없는 Fatal 계약 그대로). probe는 설치를 확인한 뒤 실패를 낸다. 그래서 크래시 메타데이터의 program은 실행기 이름, build는 실제 빌드 식별이다(C# 시험 갱신). 고장 난 도우미·도우미 gate는 정적 초기화에서 `InstallCrashHelperTestMode`가 건다(Launch가 다른 무엇보다 먼저 도우미로 분기하므로). Modular에서는 도우미가 진입 스텁에서 갈라져 호스트 공유 라이브러리를 싣지 않으므로 이 주입이 걸리지 않는다 — 그 시험은 Monolithic 하니스만 돈다([빌드 타깃](BuildTargets.ko.md) BS8d6). 고장 난 도우미 본체는 PlatformBase 시험 칸 `detail::SetCrashHelperOverride`로 넘겨 인자 해석을 PlatformBase가 한다.
     - 시험 probe 서명은 `int (*)(int, const char* const*)`로 바꿨다(Launch 인자를 const 그대로 넘긴다). `PrepareAutomatedTestProcess`는 지웠다(TestRunner가 대화상자를 끈다). `PrepareFatalTestProcess`는 `SuppressSystemErrorDialogs`를 부르는 얇은 함수로 남겼다(probe가 실패 지점에서 의도를 드러낸다). 시험 실행기 안의 크래시 시험은 "설치 안 됨" 대신 "Launch가 설치함"과 `ValidateCrashReportingOptions`를 단언한다. `ProcessCommandLine_CapturesOnce`는 실행기가 이미 캡처한 상태에서 두 번째 캡처가 AlreadyExists이고 값이 그대로인지 본다.
     - 벤치: 손 파싱이 `Span<const StringView>`다. SpatialIndexBench JSON의 `argv[0]`은 실행 파일 절대 경로가 됐다(전에는 셸이 준 철자).
     - ShaderToolSpike: `PrepareSpikeProcess`(Win64 파일 하나)를 지우고 `suppressSystemErrorDialogs`·도구 로그 Stderr다.

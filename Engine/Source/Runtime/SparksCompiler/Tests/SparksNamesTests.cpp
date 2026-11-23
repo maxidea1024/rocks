@@ -90,7 +90,7 @@ public:
             if (same && expected[index].line == 0) {
                 same = !actual.HasSpan();
             } else if (same) {
-                const SourceLocation location = file.Locate(actual.Span().begin);
+                const sparks::SourceLocation location = file.Locate(actual.Span().begin);
                 same = actual.HasSpan() && location.line == expected[index].line &&
                        location.column == expected[index].column;
             }
