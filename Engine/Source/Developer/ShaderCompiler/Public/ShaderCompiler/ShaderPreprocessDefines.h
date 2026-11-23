@@ -4,7 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Text/String.h>
-#include <ShaderCompiler/ShaderFormatDefinition.h>
+#include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompiler/ShaderPreprocessor.h>
 
 // 전처리 정의 조립이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC10). 메인 프로세스가 job마다 형식
