@@ -1,9 +1,13 @@
 #include <Object/ConstructionContext.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogContext.h>
+#include <Core/Math/MathUtility.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
 #include <World/Level.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
+#include <World/WorldLog.h>
 
 namespace rocks {
 
@@ -105,10 +109,174 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     record.level = level;
     record.clustered = clustered;
     record.levelPosition = levelPosition;
+    record.hasSpawnTransform = params.hasTransform;
+    record.spawnTransform = params.transform;
     created.Value().Reset();
     FindLevelRecord(level)->actorCount += 1;
     ++spawnedTotal_;
+
+    // 소유자·원인은 Actor::SetOwner·SetInstigator와 같은 검사다. 실패하면 Spawn을 되돌린다(아직
+    // hook이 돌지 않아 정리 hook 없이 회수된다).
+    for (uint32 pass = 0; pass < 2; ++pass) {
+        const ObjectHandle target = pass == 0 ? params.owner : params.instigator;
+        if (target.IsNull()) {
+            continue;
+        }
+
+        auto applied =
+            pass == 0 ? SetActorOwner(handle, target) : SetActorInstigator(handle, target);
+        if (!applied) {
+            auto destroyed = DestroyActor(handle);
+            (void)destroyed;
+            if (!inTick_ && hookDepth_ == 0) {
+                FlushDestroys();
+            }
+            return Result<ObjectHandle>::Failure(applied.Error());
+        }
+    }
+
     return Result<ObjectHandle>::Success(handle);
+}
+
+// --- Owner·Instigator·LifeSpan(17.3·17.5절) ---
+
+namespace {
+
+// LifeSpan 만료 판정의 상대 허용오차다(TickScheduler interval·GameClock과 같은 값).
+constexpr double LifeSpanTolerance = 1.0e-9;
+
+} // namespace
+
+Result<void> World::SetActorOwner(ObjectHandle actor, ObjectHandle owner) noexcept {
+    if (FindActorRecord(actor) == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (!owner.IsNull()) {
+        const ActorRecord* target = FindActorRecord(owner);
+        if (target == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
+        // 새 소유자의 소유 사슬에 자신이 있으면 고리다(UE SetOwner — Error 로그 후 거부). 사슬은
+        // 고리가 없도록 유지되므로 Actor 수 안에 끝난다.
+        ObjectHandle current = owner;
+        for (usize depth = 0; !current.IsNull() && depth <= actors_.Size(); ++depth) {
+            if (current == actor) {
+                LogContextScope context("World", Name());
+                Log::Error(LogWorld,
+                           "Rejected actor owner: ownership would form a cycle (slot {Owner} -> "
+                           "slot {Actor})",
+                           owner.slot, actor.slot);
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto next = With<Actor>(current, [](Actor& value) noexcept { return value.owner_; });
+            current = next ? next.Value() : ObjectHandle{};
+        }
+    }
+
+    return With<Actor>(actor, [owner](Actor& value) noexcept { value.owner_ = owner; });
+}
+
+Result<void> World::SetActorInstigator(ObjectHandle actor, ObjectHandle instigator) noexcept {
+    if (FindActorRecord(actor) == nullptr ||
+        (!instigator.IsNull() && FindActorRecord(instigator) == nullptr)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return With<Actor>(actor,
+                       [instigator](Actor& value) noexcept { value.instigator_ = instigator; });
+}
+
+Result<void> World::SetActorLifeSpan(ObjectHandle actor, double seconds) noexcept {
+    ActorRecord* record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (!math::IsFinite(seconds)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 0 이하는 해제다(힙의 옛 항목은 번호가 달라 무시된다).
+    if (seconds <= 0.0) {
+        record->lifeSpanSequence = 0;
+        return Result<void>::Success();
+    }
+
+    LifeSpanEntry entry{clock_.GameTimeSeconds() + seconds, ++lifeSpanCounter_, actor};
+    auto pushed = lifeSpans_.TryPushBack(entry);
+    if (!pushed) {
+        return pushed;
+    }
+
+    record = FindActorRecord(actor);
+    record->lifeSpanSequence = entry.sequence;
+    // 최소 힙 위로 올리기((만료, 번호) 순).
+    auto before = [](const LifeSpanEntry& left, const LifeSpanEntry& right) noexcept {
+        return left.expiry != right.expiry ? left.expiry < right.expiry
+                                           : left.sequence < right.sequence;
+    };
+    usize child = lifeSpans_.Size() - 1;
+    while (child > 0) {
+        const usize parent = (child - 1) / 2;
+        if (!before(lifeSpans_[child], lifeSpans_[parent])) {
+            break;
+        }
+        const LifeSpanEntry swap = lifeSpans_[child];
+        lifeSpans_[child] = lifeSpans_[parent];
+        lifeSpans_[parent] = swap;
+        child = parent;
+    }
+
+    return Result<void>::Success();
+}
+
+void World::ExpireLifeSpans() noexcept {
+    auto before = [](const LifeSpanEntry& left, const LifeSpanEntry& right) noexcept {
+        return left.expiry != right.expiry ? left.expiry < right.expiry
+                                           : left.sequence < right.sequence;
+    };
+    // 게임 시간은 프레임 delta를 더해 가므로 같은 길이를 다른 경로로 더한 값이 아주 조금 다를 수
+    // 있다(GameClock 고정 스텝 판정과 같은 상대 허용오차로 흡수한다).
+    const double now = clock_.GameTimeSeconds();
+    const double limit = now + LifeSpanTolerance * (now > 1.0 ? now : 1.0);
+    while (!lifeSpans_.IsEmpty() && lifeSpans_[0].expiry <= limit) {
+        const LifeSpanEntry top = lifeSpans_[0];
+        const LifeSpanEntry last = lifeSpans_.TryPopBack().Value();
+        if (!lifeSpans_.IsEmpty()) {
+            lifeSpans_[0] = last;
+            usize parent = 0;
+            for (;;) {
+                const usize left = parent * 2 + 1;
+                const usize right = left + 1;
+                usize smallest = parent;
+                if (left < lifeSpans_.Size() && before(lifeSpans_[left], lifeSpans_[smallest])) {
+                    smallest = left;
+                }
+                if (right < lifeSpans_.Size() && before(lifeSpans_[right], lifeSpans_[smallest])) {
+                    smallest = right;
+                }
+                if (smallest == parent) {
+                    break;
+                }
+                const LifeSpanEntry swap = lifeSpans_[parent];
+                lifeSpans_[parent] = lifeSpans_[smallest];
+                lifeSpans_[smallest] = swap;
+                parent = smallest;
+            }
+        }
+
+        // 다시 설정·해제된 Actor의 옛 항목, 이미 파괴된 Actor는 무시한다.
+        ActorRecord* record = FindActorRecord(top.actor);
+        if (record != nullptr && record->lifeSpanSequence == top.sequence &&
+            record->state != ActorState::PendingDestroy) {
+            record->lifeSpanSequence = 0;
+            auto destroyed = DestroyActor(top.actor);
+            (void)destroyed;
+        }
+    }
 }
 
 Result<ObjectHandle> World::SpawnActor(TypeId type, const SpawnParams& params) noexcept {
@@ -150,6 +318,20 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
     ObjectAccessScope scope(Access());
     HookScope hooks(*this);
     record->finishing = true;
+    // Spawn 인자의 Transform을 root에 쓴다(UE PostSpawnInitialize의 root Transform — hook 전).
+    if (record->hasSpawnTransform) {
+        const Transform at = record->spawnTransform;
+        record->hasSpawnTransform = false;
+        auto root = With<Actor>(actor, [](Actor& value) noexcept { return value.RootComponent(); });
+        if (root && !root.Value().IsNull()) {
+            auto placed = With<SceneComponent>(root.Value(), [&at](SceneComponent& scene) noexcept {
+                return scene.SetRelativeTransform(at);
+            });
+            (void)placed;
+        }
+
+        record = FindActorRecord(actor);
+    }
     auto finish = [this, actor](Result<void> outcome) noexcept {
         ActorRecord* current = FindActorRecord(actor);
         if (current != nullptr) {

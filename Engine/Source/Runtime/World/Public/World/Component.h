@@ -103,6 +103,13 @@ public:
     virtual void OnDisable() noexcept {
     }
 
+    // 게임플레이 시작에 필요한 의존이 준비됐는지다(Actor::IsReadyToStart와 같은 뜻 — 17.4절 ERD18,
+    // CR4·SE-W2). 소유 Actor는 자신과 켜진 모든 Component가 준비된 프레임에 시작한다. 이미
+    // Playing인 Actor에 나중에 추가한 Component는 자기 준비만 기다린다. 기본은 참이다.
+    virtual bool IsReadyToStart() const noexcept {
+        return true;
+    }
+
     // reason은 정리 이유다(17.2절 — 소유 Actor와 함께 정리되면 Actor의 이유).
     virtual void OnDestroy(EndPlayReason) noexcept {
     }

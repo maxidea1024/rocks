@@ -118,6 +118,30 @@ public:
     // 장부 밖 객체는 InvalidArgument다.
     Result<void> Destroy() noexcept;
 
+    // 소유 Actor다(UE AActor::Owner — 게임 논리 참조이며 수명 소유가 아니다. 17.3절 ERD15). 없거나
+    // 파괴됐으면 null·stale handle이다.
+    ObjectHandle Owner() const noexcept {
+        return owner_;
+    }
+
+    // 소유 Actor를 바꾼다. null은 소유자 없음이다. 이 World의 살아 있는 Actor가 아니면 StaleHandle,
+    // 소유 고리(자기 자신 포함)는 InvalidArgument(Error 로그)다. World 장부 밖 객체는
+    // InvalidArgument다.
+    Result<void> SetOwner(ObjectHandle owner) noexcept;
+
+    // 이 Actor를 만든 원인(보통 Pawn — UE Instigator)이다. 게임 논리 참조다.
+    ObjectHandle Instigator() const noexcept {
+        return instigator_;
+    }
+
+    Result<void> SetInstigator(ObjectHandle instigator) noexcept;
+
+    // seconds 게임 시간 뒤 파괴한다(UE SetLifeSpan — 17.5절 ERD16, 사유 Destroyed). 0 이하는 해제,
+    // 다시 부르면 새 값으로 바꾼다. 만료는 LateUpdate 시작 엔진 단계 Timers에서 판정한다(pause
+    // 중에는 게임 시계가 멈춰 흐르지 않는다). 비유한 값은 InvalidArgument, World 장부 밖은
+    // InvalidArgument다.
+    Result<void> SetLifeSpan(double seconds) noexcept;
+
     // 대표 SceneComponent다. 없으면 null handle이다.
     ObjectHandle RootComponent() const noexcept {
         return rootComponent_.Handle();
@@ -218,6 +242,9 @@ private:
     ROCKS_NATIVE() TickSettings tickSettings_;
     ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;
+    // 게임 논리 참조다(17.3절). 저장 여부는 Prefab·저장 단계가 정한다(지금은 실행 중 값).
+    ROCKS_NATIVE() ObjectHandle owner_;
+    ROCKS_NATIVE() ObjectHandle instigator_;
 };
 
 } // namespace rocks

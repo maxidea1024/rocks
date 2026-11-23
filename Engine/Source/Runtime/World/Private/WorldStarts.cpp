@@ -52,6 +52,27 @@ void World::StartComponent(ObjectHandle component) noexcept {
     }
 }
 
+bool World::ComponentsReadyToStart(ObjectHandle actor) noexcept {
+    for (usize index = 0;; ++index) {
+        const ComponentSlot slot = ComponentSlotAt(actor, index);
+        if (index >= slot.count) {
+            return true;
+        }
+
+        if (slot.component.IsNull()) {
+            continue;
+        }
+
+        auto ready = With<Component>(slot.component, [](Component& value) noexcept {
+            return value.state_ != ComponentState::Initialized || !value.enabledApplied_ ||
+                   value.IsReadyToStart();
+        });
+        if (ready && !ready.Value()) {
+            return false;
+        }
+    }
+}
+
 void World::ProcessStarts() noexcept {
     if (state_ != WorldState::Playing) {
         return;
@@ -82,7 +103,9 @@ void World::ProcessStarts() noexcept {
             continue;
         }
 
-        if (!ready.Value()) {
+        // 켜진 Component도 모두 준비돼야 Actor를 시작한다(17.4절 — Actor 시작이 Component 시작을
+        // 묶는다).
+        if (!ready.Value() || !ComponentsReadyToStart(actor)) {
             pendingStart_[kept++] = actor;
             continue;
         }
@@ -160,6 +183,17 @@ void World::ProcessStarts() noexcept {
         });
         const ActorRecord* record = owner ? FindActorRecord(owner.Value()) : nullptr;
         if (record == nullptr || record->state != ActorState::Playing) {
+            continue;
+        }
+
+        // 나중에 추가한 Component는 자기 준비만 기다린다(다음 프레임에 다시 본다 — 큐 뒤에 다시
+        // 넣으면 아래 앞 구간 제거에 걸리지 않는다).
+        auto ready = With<Component>(component, [](Component& value) noexcept {
+            return value.state_ != ComponentState::Initialized || !value.enabledApplied_ ||
+                   value.IsReadyToStart();
+        });
+        if (ready && !ready.Value()) {
+            QueueComponentStart(component);
             continue;
         }
 

@@ -39,12 +39,12 @@ hook 이름과 Component·Actor 사이 호출 순서(World.h의 hook 순서)는 
 | 필드 | 뜻 | UE |
 |---|---|---|
 | `level` | 소속 Level(있음) | `OverrideLevel` |
-| `transform` | root SceneComponent의 월드 Transform. root가 없으면 무시한다(UE도 root 없으면 위치가 없다) | `SpawnTransform` |
+| `transform`·`hasTransform` | `hasTransform`이면 FinishSpawning이 hook 전에 root SceneComponent의 상대 Transform으로 쓴다(root에 부모가 없으면 월드 Transform). root가 없으면 무시한다(UE도 root 없으면 위치가 없다). `SpawnParams::At(transform, level)` 도우미 | `SpawnTransform` |
 | `owner` | 소유 Actor(`ObjectHandle`) | `Owner` |
 | `instigator` | 원인 Pawn(`ObjectHandle`, 20절) | `Instigator` |
 
 - `Actor::Owner()`·`SetOwner(handle)`: 소유 고리(자기 자신 포함)는 `InvalidArgument`와 Error 로그로 거부한다(UE `SetOwner` — `E/Private/Actor.cpp:2605–2630`). Owner가 파괴되면 handle은 generation 검사로 무효가 된다(4.2절). UE의 `Children` 배열은 두지 않는다(필요한 조회는 `ForEachActor`).
-- Owner·Instigator는 게임 논리 참조이며 수명 소유가 아니다(소유 사슬은 4.2절 그대로).
+- Owner·Instigator는 게임 논리 참조이며 수명 소유가 아니다(소유 사슬은 4.2절 그대로). Spawn 인자의 owner·instigator가 검사에 걸리면 Spawn이 실패하고 hook 없이 되돌린다.
 - Actor 이름(UE `FName` 고유 이름)은 객체 이름 체계(Core)가 정해질 때 다룬다. 진단은 타입 이름과 handle을 쓴다(22절).
 
 ### 17.4 Component 시작 준비(ERD18, CR4)
@@ -55,6 +55,8 @@ hook 이름과 Component·Actor 사이 호출 순서(World.h의 hook 순서)는 
 
 - `Actor::SetLifeSpan(seconds)`: 게임 시간으로 seconds 뒤 `DestroyActor`(사유 `Destroyed`). 0 이하면 해제한다. 다시 부르면 새 값으로 바꾼다(UE `SetLifeSpan` — `E/Private/Actor.cpp:6577–6604`).
 - 만료 판정은 LateUpdate 시작 엔진 단계 `Timers`(15.4절)에서 한다(UE 타이머가 PostPhysics 뒤에 돈다 — `LevelTick.cpp:1816`). World가 (만료 시각, 설정 순번) 순 힙으로 들어 만료 시각이 같으면 먼저 설정한 것부터 파괴한다. pause 중에는 게임 시계가 멈추므로 흐르지 않는다.
+- 판정은 상대 허용오차 1e-9로 한다(게임 시간이 프레임 delta 합이라 같은 길이도 경로에 따라 아주 조금 다르다 — GameClock·TickScheduler interval과 같다). World의 만료 처리는 `Timers` 자리의 콜백보다 먼저다.
+- 한계: 다시 설정·해제한 옛 힙 항목은 그 만료 시각까지 남는다(번호가 달라 무시). 같은 Actor가 긴 LifeSpan을 매 프레임 다시 설정하면 힙이 자란다 — 필요하면 Actor별 한 항목 갱신으로 바꾼다.
 - 범용 타이머(UE `FTimerManager`)는 이 단계에서 만들지 않는다. 같은 `Timers` 자리에 나중에 붙인다.
 
 ### 17.6 World EndPlay 분리(ERD17)
