@@ -70,8 +70,8 @@ struct TickSettings {
     ROCKS_GENERATED_BODY()
 
     // 리플렉션 검증 hook이다(IsValidTickSettings가 거짓이면 InvalidArgument — 할당·전역 상태
-    // 없음).
-    static Result<void> Validate(const TickSettings& settings) noexcept;
+    // 없음). Modular 대상의 다른 모듈(시험)도 부르므로 export한다.
+    ROCKS_WORLD_API static Result<void> Validate(const TickSettings& settings) noexcept;
 
     // OnTick을 받는다. 실행 단계는 phase(PrePhysics·PostPhysics·PreRender 중 하나)다.
     ROCKS_PROPERTY() bool tick = false;

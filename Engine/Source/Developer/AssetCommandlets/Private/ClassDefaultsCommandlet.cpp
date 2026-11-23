@@ -14,7 +14,8 @@ constexpr StringView DumpName = "class-defaults-dump";
 
 constexpr StringView DumpUsage =
     "usage: class-defaults-dump\n"
-    "  Print one line per registered concrete class in TypeId order:\n"
+    "  Print one line per concrete class registered by the asset type module (and its\n"
+    "  dependencies) in TypeId order:\n"
     "  '<TypeId> present <cooked fingerprint>', '<TypeId> without <reason>' or\n"
     "  '<TypeId> failed <reason> <error>'. Compare the output of build configurations and\n"
     "  platforms: a difference means a constructor default depends on the build.\n";

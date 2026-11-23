@@ -6,6 +6,7 @@
 #include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/Algorithms.h>
+#include <Core/Assert.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
@@ -475,6 +476,9 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
             writer.WriteU8(dependency.required ? 1 : 0);
         }
 
+        // 색인 항목은 대표 export가 있어 export 타입이 늘 1개 이상이다(읽기는 0을 형식 위반으로
+        // 캐시 전체를 버린다).
+        ROCKS_ASSERT(!entry->exportTypes.IsEmpty());
         writer.WriteU32LE(static_cast<uint32>(entry->exportTypes.Size()));
         for (TypeId type : entry->exportTypes) {
             WriteGuid(writer, type);

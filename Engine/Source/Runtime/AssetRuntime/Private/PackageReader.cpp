@@ -4,6 +4,7 @@
 #include <AssetRuntime/PackageReader.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
+#include <Core/Algorithms.h>
 #include <Core/Assert.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Text/NameComponent.h>
@@ -372,13 +373,16 @@ struct ClassDefaultsJudgement {
 Result<ClassDefaultsJudgement> JudgeClassDefaults(Allocator& allocator, const TypeLease& lease,
                                                   const PackageSummary& summary,
                                                   bool cooked) noexcept {
-    const PackageClassDefaults* stored = nullptr;
-    for (const PackageClassDefaults& row : summary.classDefaults) {
-        if (row.type == lease.Id()) {
-            stored = &row;
-            break;
-        }
-    }
+    // 행은 TypeId 오름차순이다(ReadClassDefaultsList가 확인했다) — 이진 탐색.
+    const TypeId type = lease.Id();
+    const usize at = algo::LowerBound(summary.classDefaults.View(), type,
+                                      [](const PackageClassDefaults& row, TypeId key) noexcept {
+                                          return GuidLess(row.type, key);
+                                      });
+    const PackageClassDefaults* stored =
+        at < summary.classDefaults.Size() && summary.classDefaults[at].type == type
+            ? &summary.classDefaults[at]
+            : nullptr;
 
     auto status = ClassifyClassDefaults(lease, allocator);
     if (!status) {
