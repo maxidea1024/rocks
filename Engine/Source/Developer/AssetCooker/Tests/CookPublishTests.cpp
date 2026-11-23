@@ -833,7 +833,8 @@ TEST(CookPublish_PlanReuse) {
 }
 
 // 할당 실패: 게시 흐름(Begin·Put·Reuse·Finish 전체·부분 병합·정리)의 모든 지점에서 OutOfMemory이고
-// 게시본은 그대로이거나(실패) 기준과 같다(성공).
+// 게시본은 그대로이거나(실패) 기준과 같다(성공). 경고 다섯 자리의 push와 게시하지 않는 오류 진단의
+// push도 OutOfMemory다.
 TEST(CookPublish_AllocationFailures) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -937,6 +938,64 @@ TEST(CookPublish_AllocationFailures) {
     }
 
     CHECK(cleanupFailures >= 10);
+
+    // 경고 push의 할당 실패도 OutOfMemory다(경고를 조용히 잃지 않는다). 경고 자리마다 그 경고가 첫
+    // 진단인 장면: 0 고아 삭제 실패, 1 CorruptEntry, 2 동기화 NotDurable, 3 매니페스트 NotDurable,
+    // 4 정리 삭제 실패.
+    const String orphanName = scene.Relative(".staging/orphan.tmp");
+    const String staleName = scene.Relative("Packages/zz/Stale.rpkg");
+    FakePackage fresh(env.allocator, 60, 1, "/Game/Fresh");
+    REQUIRE(fresh.ready);
+    const String freshName = scene.PackageName(fresh);
+    for (int warning = 0; warning < 5; ++warning) {
+        uint32 warned = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            scene.files.faults = MemoryFaults{};
+            scene.files.Remove(orphanName.View());
+            scene.files.Remove(staleName.View());
+            scene.files.Remove(freshName.View());
+            if (warning == 0) {
+                REQUIRE(scene.Place(orphanName.View(), junk));
+                scene.files.faults.remove = MemoryError;
+            } else if (warning == 1) {
+                REQUIRE(scene.Place(freshName.View(), junk));
+            } else if (warning == 2) {
+                scene.files.faults.sync = MemoryNotDurable;
+            } else if (warning == 3) {
+                scene.files.faults.replace = MemoryNotDurable;
+            } else {
+                REQUIRE(scene.Place(staleName.View(), junk));
+                scene.files.faults.remove = MemoryError;
+            }
+
+            CookPublisher publisher(failing, scene.Config());
+            failing.FailOnAttempt(attempt);
+            Result<void> step = publisher.Begin(scene.lock);
+            if (step) {
+                step = publisher.Put(fresh.View());
+            }
+
+            if (step) {
+                step = publisher.Finish(nullptr, {});
+            }
+
+            const bool hit = failing.Attempts() >= attempt;
+            failing.DisableFailure();
+            if (!hit) {
+                REQUIRE(step);
+                CHECK(publisher.Published() && !publisher.Diagnostics().IsEmpty() &&
+                      publisher.Diagnostics()[0].warning);
+                break;
+            }
+
+            CHECK(step.Error() == ErrorCode::OutOfMemory);
+            ++warned;
+        }
+
+        CHECK(warned >= 3);
+    }
+
+    scene.files.faults = MemoryFaults{};
 
     // 게시하지 않는 오류 진단(IncompatibleCook·검증 위반)의 push도 OutOfMemory로 돌아온다.
     FakePackage dangling(env.allocator, 40, 1, "/Game/Dangling");

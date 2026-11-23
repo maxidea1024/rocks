@@ -3,6 +3,118 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::CookReport::bytesWritten",
+      "id": "8a7c11bb317d4b9db11f271095117f6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::cooked",
+      "id": "4cda656498574120b7340d05e5510e71",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::diagnostics",
+      "id": "fd2ec2e0537b4b43ae0932e549d8dadd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::engineVersion",
+      "id": "da52f73fe9b94bec953a98ae05ad9917",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::partial",
+      "id": "8ea72abc4430480ea9b910b445e0940e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::profile",
+      "id": "b8bf416353084931a389ef3e841d0fc2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::published",
+      "id": "9cc9078c8b9849bb90fea1f7a5a6e5ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::reused",
+      "id": "4c693ab493c743eb8231eb340d0b8f0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::targets",
+      "id": "35afb71b07bc4302bc1687fee6cf91be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReport::toolBuildId",
+      "id": "87366d1789ee4f64a1e9470f04ca9f8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportDiagnostic::asset",
+      "id": "b9eb711b09e3428589ee33d679bcffc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportDiagnostic::code",
+      "id": "fd58bf78bf354dc480459f6e64922096",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportDiagnostic::error",
+      "id": "3290c12492884823aed5ead04d73d21e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportDiagnostic::level",
+      "id": "6deee4ab64834b20ad8b02dd6d705e40",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportDiagnostic::related",
+      "id": "f3e188a50c8b4da1b436a2352c9c8ae0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportDiagnostic::setting",
+      "id": "c51384d63c5248c69f6e59b06a4f45f1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::CookSettings::alwaysCook",
       "id": "e1efd776e8a7454e9f2333f721a7ca73",
       "aliases": [],
@@ -75,6 +187,20 @@
       "kind": "type",
       "name": "rocks::CookBulkCodec",
       "id": "bc73f60886ad445cb55dc3bf04117b37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CookReport",
+      "id": "abecd2f3bc844639b5139d9c2fe3a9ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CookReportDiagnostic",
+      "id": "62beb24a79864c1d988e6ccd52903892",
       "aliases": [],
       "retired": false
     },

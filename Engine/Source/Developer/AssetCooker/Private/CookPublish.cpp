@@ -174,9 +174,10 @@ CookPublisher::CookPublisher(Allocator& allocator, const CookPublishConfig& conf
       directories_(allocator), diagnostics_(allocator) {
 }
 
-void CookPublisher::Warn(AssetDiagnosticCode code, AssetId asset, ErrorCode error) noexcept {
-    // 경고 push의 할당 실패는 버린다(경고는 게시를 막지 않는다 — 결과가 바뀌지 않는다).
-    (void)diagnostics_.TryPushBack(CookDiagnostic{code, true, asset, {}, 0, error});
+// 경고를 남긴다(push의 할당 실패는 그 오류 — 경고를 조용히 잃지 않는다).
+Result<void> CookPublisher::Warn(AssetDiagnosticCode code, AssetId asset,
+                                 ErrorCode error) noexcept {
+    return diagnostics_.TryPushBack(CookDiagnostic{code, true, asset, {}, 0, error});
 }
 
 bool CookPublisher::HasErrors() const noexcept {
@@ -277,7 +278,10 @@ Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
         }
 
         if (auto removed = files.Delete(path.View().Data(), path.View().ByteCount()); !removed) {
-            Warn(AssetDiagnosticCode::None, {}, FileErrorCode(removed));
+            if (auto warned = Warn(AssetDiagnosticCode::None, {}, FileErrorCode(removed));
+                !warned) {
+                return warned;
+            }
         }
     }
 
@@ -430,8 +434,12 @@ Result<void> CookPublisher::Put(const CookedPackage& package) noexcept {
             discard();
         } else {
             // 손상된 게시 파일이다(시나리오 27) — 경고하고 새 byte로 교체한다.
-            Warn(AssetDiagnosticCode::CorruptEntry, package.asset,
-                 hashed ? ErrorCode::None : hashed.Error());
+            if (auto warned = Warn(AssetDiagnosticCode::CorruptEntry, package.asset,
+                                   hashed ? ErrorCode::None : hashed.Error());
+                !warned) {
+                discard();
+                return warned;
+            }
             const platform::FileStatus replaced =
                 files.Replace(temp.View().Data(), temp.View().ByteCount(), targetView.Data(),
                               targetView.ByteCount());
@@ -507,7 +515,9 @@ Result<void> CookPublisher::SyncDirectories() noexcept {
                 return Result<void>::Failure(FileErrorCode(synced));
             }
 
-            Warn(AssetDiagnosticCode::NotDurable, {}, ErrorCode::None);
+            if (auto warned = Warn(AssetDiagnosticCode::NotDurable, {}, ErrorCode::None); !warned) {
+                return warned;
+            }
         }
     }
 
@@ -585,7 +595,10 @@ Result<void> CookPublisher::RemoveUnreferenced(const CookedManifest& manifest) n
 
             if (auto removed = files.Delete(full.View().Data(), full.View().ByteCount());
                 !removed) {
-                Warn(AssetDiagnosticCode::None, {}, FileErrorCode(removed));
+                if (auto warned = Warn(AssetDiagnosticCode::None, {}, FileErrorCode(removed));
+                    !warned) {
+                    return warned;
+                }
             }
         }
     }
@@ -686,7 +699,9 @@ Result<void> CookPublisher::Finish(const CookedManifest* merge,
     }
 
     if (replaced.Value().notDurable) {
-        Warn(AssetDiagnosticCode::NotDurable, {}, ErrorCode::None);
+        if (auto warned = Warn(AssetDiagnosticCode::NotDurable, {}, ErrorCode::None); !warned) {
+            return warned;
+        }
     }
 
     published_ = true;

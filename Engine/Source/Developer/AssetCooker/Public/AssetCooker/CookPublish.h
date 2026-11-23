@@ -103,7 +103,7 @@ private:
     Result<void> RememberDirectory(StringView directory) noexcept;
     Result<void> SyncDirectories() noexcept;
     Result<void> RemoveUnreferenced(const CookedManifest& manifest) noexcept;
-    void Warn(AssetDiagnosticCode code, AssetId asset, ErrorCode error) noexcept;
+    Result<void> Warn(AssetDiagnosticCode code, AssetId asset, ErrorCode error) noexcept;
     Result<void> Refuse(AssetDiagnosticCode code, AssetId asset, AssetId related,
                         ErrorCode error) noexcept;
 

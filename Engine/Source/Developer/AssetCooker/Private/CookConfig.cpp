@@ -5,6 +5,7 @@
 #include <AssetNugget/NuggetReflected.h>
 #include <AssetRuntime/Package.generated.h>
 #include <Core/FileError.h>
+#include <Core/FileRead.h>
 #include <Core/Text/Json.h>
 #include <Object/TypeRegistry.h>
 #include <ReflectionText/TextJson.h>
@@ -36,40 +37,6 @@ Result<void> Fail(CookConfigFailure* failure, CookConfigFile file, CookConfigFie
     return Result<void>::Failure(error);
 }
 
-// path 파일 전체를 읽는다. 없으면 existed = false로 성공한다. 상한을 넘으면 CapacityExceeded다.
-Result<void> ReadWholeFile(platform::FileSystem& files, StringView path, Array<uint8>& bytes,
-                           bool& existed) noexcept {
-    existed = false;
-    platform::File file;
-    if (auto opened =
-            file.Open(files, path.Data(), path.ByteCount(), platform::FileOpenMode::ReadExisting);
-        !opened) {
-        if (opened.code == platform::FileCode::NotFound) {
-            return Result<void>::Success();
-        }
-
-        return Result<void>::Failure(FileErrorCode(opened));
-    }
-
-    existed = true;
-    uint64 size = 0;
-    if (auto sized = file.Size(size); !sized) {
-        return Result<void>::Failure(FileErrorCode(sized));
-    }
-
-    if (size > CookConfigMaxFileBytes) {
-        return Result<void>::Failure(ErrorCode::CapacityExceeded);
-    }
-
-    if (auto resized = bytes.TryResize(static_cast<usize>(size)); !resized) {
-        return resized;
-    }
-
-    const platform::FileTransfer read = file.ReadExact(bytes.Data(), bytes.Size());
-    return read.status ? Result<void>::Success()
-                       : Result<void>::Failure(FileErrorCode(read.status));
-}
-
 // directory/name 경로를 만든다.
 Result<void> JoinPath(StringView directory, StringView middle, StringView name, StringView suffix,
                       String& out) noexcept {
@@ -91,7 +58,8 @@ Result<void> ApplyJsonFile(const CookConfigContext& context, StringView path,
                            bool& existed) noexcept {
     Allocator& allocator = *context.allocator;
     Array<uint8> bytes(allocator);
-    if (auto read = ReadWholeFile(*context.files, path, bytes, existed); !read) {
+    if (auto read = ReadWholeFile(*context.files, path, CookConfigMaxFileBytes, bytes, existed);
+        !read) {
         const CookConfigField field = read.Error() == ErrorCode::CapacityExceeded
                                           ? CookConfigField::File
                                           : CookConfigField::None;

@@ -967,8 +967,18 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     - 실행기는 재사용 대상을 건너뛴다(`CookRunRequest`의 재사용 표지 — 열지 않는다).
   - **보고서**(A4d2, 결정 11): 리플렉션 struct `CookReport`(도구 빌드 ID·엔진 버전·프로파일·대상·쿠킹·재사용 수·쓴 byte·진단 목록)를 ReflectionText `ExportJson`으로 쓴다(결정적 — 진단은 `CookDiagnosticBefore` 순). 게시 성공·실패 모두 쓴다(실패도 원인을 남긴다).
   - **전체 흐름**(A4d2, `CookProject`): 설정 읽기(A4a) → 대상(A4b) → 키(A4c1) → 재사용 판정 → 실행(A4c2, 출력 = 게시기) → 오류 진단이 하나라도 있으면(대상·키·실행) 게시하지 않고 보고서만 → 아니면 Finish.
-    - 쿠킹 전에 색인을 갱신한다(A4b 콘텐츠 해시 한계 — 호출자가 넘긴 색인을 Rebuild 또는 감시 갱신으로).
+    - 색인은 호출자가 쿠킹 직전에 갱신해 넘긴다(A4b 콘텐츠 해시 한계 — Rebuild 또는 감시 갱신. 에디터 안에서는 열린 패키지가 색인 항목을 가리키므로 흐름이 스스로 Rebuild하지 않는다).
     - 에디터 프로세스 안 쿠킹은 dirty 패키지가 있으면 Busy다(결정 7 — 실행기가 본다).
+- A4d2 상태: **구현** — 대조표 14.1.71절, coverage 14.1.72절. 구현에서 정한 것:
+  - API는 AssetCooker `CookProject.h`의 `CookProject(request, result)`와 리플렉션 struct `CookReport`·`CookReportDiagnostic`이다(진단 줄은 코드·수준·AssetId 표준 문자열·순번·오류 이름).
+  - 보고서는 `ExportJson(TextUse::Report)`과 원자 교체로 쓴다. 보고서 struct의 codec 문맥은 집합의 Registry다. AssetCooker 타입을 등록하지 않았으면 보고서 쓰기의 타입 조회 오류(NotFound)다.
+  - 보고서는 흐름이 끝까지 오면 늘 쓴다(게시 성공·규칙 위반 실패 모두). 함수 오류(IO·잠금·할당 등)로 멈추면 쓰지 않는다.
+  - 기존 매니페스트:
+    - 읽기는 Core 공용 `ReadWholeFile`(`Core/FileRead.h` — 상한 CookedManifestMaxFileBytes)로 한다. A4a CookConfig의 사본을 이것으로 바꿨다. Config·AssetDatabase의 비공개 사본은 후속이다(Config는 다른 세션 몫).
+    - 깨졌으면 경고(그 진단 코드) 뒤 없는 것으로 보고 전체 쿠킹한다. 읽기 IO 오류는 함수 오류다.
+  - 기존 매니페스트가 없으면 인자가 있어도 전체 쿠킹이다(결정 10 — partial 거짓). 재사용 판정은 전체·부분 모두 기존 매니페스트로 한다.
+  - 진단은 대상·키·실행·게시 순으로 모아 `CookDiagnosticBefore`로 정렬한다. 오류가 하나라도 있으면 Finish를 부르지 않는다.
+  - JSON 내보내기와 `JsonWriter::Finish`는 한 갈래로 본다(내보내기가 성공하면 Finish의 실패는 끝 줄바꿈 append의 할당 실패뿐이다).
 - A4d1 상태: **구현** — 대조표 14.1.69절, coverage 14.1.70절. 구현에서 정한 것:
   - 공용으로 올린 것:
     - AssetDatabase `AtomicFileWrite.h`의 `WriteFileAtomically`를 비공개에서 공개로 옮겼다(namespace rocks, export).
@@ -976,7 +986,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - 시험 대역 `MemoryFileSystem`에 `SyncDirectory`(고장 `faults.sync`, 호출 수 `syncs`)를 더했다. 기본 구현은 Unsupported라 게시가 늘 실패했다.
   - staging 임시 이름은 `.staging/<대상 파일 이름>.tmp`다(Guid 없음). `.staging`은 잠금을 쥔 쿠커만 쓰고 Begin이 비운다. 한 쿠킹에 같은 패키지는 한 번만 넣으므로 겹치지 않는다. 열기는 CreateAlways다.
   - bundle 구성원은 그 항목의 의존이어야 한다(AS 10.1절 5 — `ValidateBundleMembers`). `AssetBundles`가 Soft 참조 필드라 정상 입력은 늘 맞는다. 어기면 Finish의 매니페스트 검증 오류로 게시하지 않는다.
-  - 게시하지 않는 오류 진단(IncompatibleCook·매니페스트 검증 위반)은 함수 성공 + 오류 진단이다(규칙 위반은 진단). 진단 push의 할당 실패만 OutOfMemory다. 경고 push의 할당 실패는 버린다(경고는 결과를 바꾸지 않는다).
+  - 게시하지 않는 오류 진단(IncompatibleCook·매니페스트 검증 위반)은 함수 성공 + 오류 진단이다(규칙 위반은 진단). 진단 push의 할당 실패는 OutOfMemory다. 경고 push의 할당 실패도 OutOfMemory다 — 처음 구현은 버렸으나 A4d2 할당 실패 시험이 "주입했는데 성공"으로 잡았다(경고를 조용히 잃지 않는다).
   - 정리는 `Packages/<a>/<파일>` 두 단계만 훑는다. 그 밖의 모양(최상위 파일·링크)은 쿠커가 만든 것이 아니라 두고, 빈 shard 디렉터리도 남긴다.
   - 실행기의 재사용 표지는 `CookRunRequest::reuse`다(표지 수가 대상 수와 다르면 InvalidArgument).
   - 첫 쿠킹 동기화(리뷰 필수): Begin이 `DirectoryExists`로 없던 상위 디렉터리를 찾아 그 부모를 동기화 목록에 넣는다(확인 실패는 오류). 시험 대역 `MemoryFileSystem`에 호출 기록(`recordJournal`·`journal` — 성공한 SyncDirectory·Replace)을 더해 "모든 동기화가 매니페스트 교체보다 먼저"를 순서로 본다.
@@ -3153,6 +3163,27 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 #### 14.1.70 Coverage(A4d1)
 
 측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookPublish.cpp` 줄 598/598·분기 288/288(리뷰 반영 뒤), `CookTargets.cpp` 줄 419/419·분기 220/220, `CookRun.cpp` 줄 249/249·분기 102/102, `CookPublish.h`·`CookRun.h` 전부. 처음 측정은 경로 조립(인라인 512 byte)이 할당하지 않아 할당 실패 분기 마흔여 곳이 닿지 않았다. 인라인을 64 byte로 줄여(경로는 대개 allocator로 자란다) 할당 지점이 늘 살아 있게 했고, Guid 임시 이름(발급 실패를 시험할 수 없음)을 대상 이름 기반으로 바꿨으며, 늘 참인 '/' 찾기 조건을 지웠다.
+
+닿지 않는 곳 없음.
+
+#### 14.1.71 요구 대조표(A4d2 — 쿠킹 전체 흐름·보고서)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookProjectTests.cpp`(`CookProject_*` 5 — 디스크 임시 루트의 잠금 + 그 루트의 메모리 파일 시스템, Content에 시험 원본 Sources 여덟)이고, 공용 `ReadWholeFile`은 CookConfig 시험(읽기·크기·열기 실패·상한)도 덮는다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 전체 흐름(결정 11·A4d 세부) | 대상 → 키 → 재사용 → 실행 → 게시, 결과 수(대상·쿠킹·재사용·쓴 byte), 보고서(published·cooked·profile·빈 진단) | `CookProject_FullTwiceReuses` |
+| 결정성(시나리오 13) | 두 번째 전체 쿠킹은 전부 재사용(쿠킹 0·쓴 byte 0)·매니페스트 byte 같음 | `CookProject_FullTwiceReuses` |
+| 부분 쿠킹(10절·결정 8) | 바뀐 기존 항목(Leaf)과 그것을 Hard로 쓰는 항목(Hub)만 다시 쿠킹·나머지 재사용·인자(Hero)는 같은 byte, 기존 매니페스트 없으면 전체 쿠킹 | `CookProject_PartialRecooksChanged` |
+| 오류는 게시하지 않음(10절) | 사라진 파일(MissingFile) → 게시 안 함·게시본 byte 그대로·보고서 published false·진단 줄(코드·수준), 같은 입력이면 같은 보고서 byte | `CookProject_ErrorsKeepPublished` |
+| 깨진 기존 매니페스트·거부 | 깨진 매니페스트는 경고 뒤 전체 쿠킹 게시, 인자 null 아홉 InvalidArgument(결과 비움), 잠금 아님 InvalidArgument, 매니페스트 읽기 IO 오류, 보고서 struct 미등록 NotFound | `CookProject_CorruptManifestAndRejects` |
+| 할당 실패 | 첫 쿠킹·재사용·깨진 매니페스트(경고 push)·게시기 경고만·대상 경고만·오류 진단(보고서 진단 줄)의 모든 지점 OutOfMemory(결과 객체도), 다 지나면 기준과 같음 | `CookProject_AllocationFailures` |
+| 경고 push 할당 실패(A4d1 보강) | 경고 다섯 자리(고아 삭제·CorruptEntry·동기화 NotDurable·매니페스트 NotDurable·정리 삭제) 각각이 첫 진단인 장면의 OutOfMemory | `CookPublish_AllocationFailures` |
+| 조합(14 완료 조건 2) | 실행 모드(첫 전체·재사용 전체·부분·매니페스트 없는 부분) × 기존 매니페스트(없음·정상·깨짐·읽기 불가) × 결과(게시·오류) | 위 시험 |
+
+#### 14.1.72 Coverage(A4d2)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookProject.cpp` 줄 237/237·분기 106/106, `CookPublish.cpp` 줄 611/611·분기 298/298(경고 push 전파 뒤), `CookProject.h` 전부. `-Filter Cook -Sources Core/Source/Runtime/Core/Private` — `FileRead.cpp` 줄 26/26·분기 12/12(`Sha256File.cpp`의 남은 두 갈래는 Foundation `Sha256File_RejectsEmptyBuffer`와 EngineTests `AssetIndex_ContentHashRejects`가 덮는다).
 
 닿지 않는 곳 없음.
 
