@@ -143,6 +143,9 @@ try
             case "ownership":
                 await IncludeOwnershipTests.RunAsync(request, root, Pass);
                 break;
+            case "target-kinds":
+                await TargetKindTests.RunAsync(request, root, repository, Pass);
+                break;
             case "descriptors":
                 DescriptorTests.Run(root, repository);
                 Pass("project and plugin descriptors parse strictly and resolve plugins");
@@ -366,6 +369,7 @@ try
     await ModularLinkTests.RunAsync(request, root, Pass);
     await ModularManifestTests.RunAsync(request, root, Pass);
     await IncludeOwnershipTests.RunAsync(request, root, Pass);
+    await TargetKindTests.RunAsync(request, root, repository, Pass);
 
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);

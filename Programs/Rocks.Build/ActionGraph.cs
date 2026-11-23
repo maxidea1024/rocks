@@ -818,6 +818,7 @@ internal static class ActionGraph
     /// 타깃의 모든 compile action이 같은 값으로 받는 인자다(Docs/Design/LoggingSystem.ko.md 6.4절).
     /// <list type="bullet">
     /// <item><c>ROCKS_LOG_COMPILED_MINIMUM=n</c>: 로그 컴파일 하한(<see cref="LogCompiledMinimums"/>). 타깃 재정의가 없으면 구성 기본값.</item>
+    /// <item><c>ROCKS_WITH_EDITOR</c>·<c>_EDITOR_DATA</c>·<c>_SERVER_CODE</c>·<c>_CLIENT_CODE</c>: 타깃 매크로(<see cref="TargetKind"/>).</item>
     /// <item><c>-fmacro-prefix-map=&lt;루트&gt;&lt;구분자&gt;=</c>: <c>__FILE__</c>·<c>__builtin_FILE()</c>을 루트 기준 상대 경로로 남긴다
     /// (로그 호출 위치·assert 위치가 빌드 장소를 담지 않는다). 루트는 소스 루트와, 설치 SDK 게임 빌드면 SDK 루트다. 디버그 정보 경로는
     /// 바꾸지 않으므로 <c>-ffile-prefix-map</c>이 아니다. clang-cl은 이 옵션을 직접 받지 않아 <c>/clang:</c>로 넘긴다. clang은
@@ -828,6 +829,12 @@ internal static class ActionGraph
     {
         bool windows = request.Toolchain.Platform == NativePlatform.Windows;
         yield return (windows ? "/D" : "-D") + LogCompiledMinimums.Macro(request.Configuration, request.LogCompiledMinimum);
+        // 타깃 매크로 넷(Docs/Design/BuildTargets 3.2절 BS2a — 타깃 전체에 같은 값, Base/Compiler.h가 검사한다).
+        foreach (string define in request.Target.Defines)
+        {
+            yield return (windows ? "/D" : "-D") + define;
+        }
+
         var prefixes = new List<string> { root };
         if (request.SdkDirectory is not null)
         {

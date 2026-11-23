@@ -109,6 +109,10 @@ internal static class ModularManifestTests
         ROCKS_CORE_API Sha256Digest ToolBuildId() noexcept;
         ROCKS_CORE_API EngineVersion CurrentEngineVersion() noexcept;
 
+        enum class TargetType : unsigned char { Game, Editor, Client, Server, Program };
+
+        ROCKS_CORE_API TargetType CurrentTargetType() noexcept;
+
         } // namespace build
 
         } // namespace rocks

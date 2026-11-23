@@ -64,10 +64,28 @@ public abstract class TargetRules
 
     /// <summary>
     /// 링크 방식이다(Docs/Design/BuildTargets 3.8절 BD17, UE TargetRules.LinkType). Monolithic은 모든 모듈을 실행 파일 하나에 링크하고,
-    /// Modular는 모듈마다 공유 라이브러리를 만든다. Editor 타깃(BS2)은 Modular가 기본이 되고, 지금 타깃 종류는 모두 Monolithic이다.
+    /// Modular는 모듈마다 공유 라이브러리를 만든다. Editor 타깃은 Modular가 기본이고(UE와 같다) 나머지 종류는 Monolithic이 기본이다.
     /// Android와 Asan·Coverage·Release 구성은 Modular를 거부한다.
     /// </summary>
-    public virtual NativeLinkType LinkType => NativeLinkType.Monolithic;
+    public virtual NativeLinkType LinkType => Type == TargetType.Editor ? NativeLinkType.Modular : NativeLinkType.Monolithic;
+
+    /// <summary>
+    /// Program만: 에디터 모듈을 링크하는 도구다(Docs/Design/BuildTargets 3.1절, UE <c>bCompileAgainstEditor</c>). 켜면
+    /// <c>ROCKS_WITH_EDITOR=1</c>·<c>ROCKS_WITH_EDITOR_DATA=1</c>이다. 다른 종류가 켜면 규칙 로드 오류다. 사용 예:
+    /// <code>
+    /// public override bool CompileWithEditor => true;
+    /// </code>
+    /// </summary>
+    public virtual bool CompileWithEditor => false;
+
+    /// <summary>
+    /// Program만: 에디터 전용 데이터를 읽는 에셋 도구다(Docs/Design/BuildTargets 3.1절 BD19). 켜면 <c>ROCKS_WITH_EDITOR_DATA=1</c>이다.
+    /// 다른 종류가 켜면 규칙 로드 오류다.
+    /// </summary>
+    public virtual bool WithEditorData => false;
+
+    /// <summary>이 타깃의 종류·Program 속성과 타깃 매크로다(<see cref="TargetKind"/>).</summary>
+    public TargetKind Kind => new(Type, CompileWithEditor, WithEditorData);
 
     /// <summary>
     /// 로그 컴파일 하한의 타깃 재정의다(UE <c>COMPILED_IN_MINIMUM_VERBOSITY</c> 대응). null(기본)이면 구성 기본값(Debug: Trace,

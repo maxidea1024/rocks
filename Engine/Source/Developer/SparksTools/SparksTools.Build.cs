@@ -15,5 +15,5 @@ public sealed class SparksTools : EngineModuleRules
     protected override string[] PublicDependencies => ["Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
-    protected override string[] PrivateDependencies => ["SparksCompiler", "SparksVm"];
+    protected override string[] PrivateDependencies => ["SparksCompiler", "SparksVm", "SparksTestHost"];
 }

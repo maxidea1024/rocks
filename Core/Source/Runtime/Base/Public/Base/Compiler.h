@@ -144,6 +144,39 @@
 #error "ROCKS_MONOLITHIC must be defined to 0 or 1 by Rocks.Build."
 #endif
 
+// 타깃 매크로다(Docs/Design/BuildTargets 3.2절 BS2a, UE WITH_EDITOR·WITH_EDITORONLY_DATA·
+// WITH_SERVER_CODE·WITH_CLIENT_CODE). 빌드 시스템이 타깃 종류로 정한 값(0 또는 1)을 타깃의 모든
+// 번역 단위에 정의한다. 기본값이 없다(빠지면 컴파일 오류 — 매크로를 넘기지 않은 경로가 조용히 다른
+// 조합으로 컴파일되지 않게). 정의 여부가 아니라 값으로 분기한다.
+//   ROCKS_WITH_EDITOR         에디터 코드(Editor 타깃, CompileWithEditor Program).
+//   ROCKS_WITH_EDITOR_DATA    에디터 전용 데이터(EditorOnly 필드). ROCKS_WITH_EDITOR면 1이다.
+//   ROCKS_WITH_SERVER_CODE    서버 코드(Client 타깃만 0).
+//   ROCKS_WITH_CLIENT_CODE    클라이언트 코드(Server 타깃만 0).
+// 사용 예:
+//   #if ROCKS_WITH_EDITOR_DATA
+//   ROCKS_PROPERTY(EditorOnly) String sourcePath;
+//   #endif
+#if !defined(ROCKS_WITH_EDITOR) || !defined(ROCKS_WITH_EDITOR_DATA) ||                             \
+    !defined(ROCKS_WITH_SERVER_CODE) || !defined(ROCKS_WITH_CLIENT_CODE)
+#error                                                                                             \
+    "ROCKS_WITH_EDITOR, ROCKS_WITH_EDITOR_DATA, ROCKS_WITH_SERVER_CODE and ROCKS_WITH_CLIENT_CODE must be defined by Rocks.Build."
+#endif
+
+#if (ROCKS_WITH_EDITOR != 0 && ROCKS_WITH_EDITOR != 1) ||                                          \
+    (ROCKS_WITH_EDITOR_DATA != 0 && ROCKS_WITH_EDITOR_DATA != 1) ||                                \
+    (ROCKS_WITH_SERVER_CODE != 0 && ROCKS_WITH_SERVER_CODE != 1) ||                                \
+    (ROCKS_WITH_CLIENT_CODE != 0 && ROCKS_WITH_CLIENT_CODE != 1)
+#error "The ROCKS_WITH_* target macros must be 0 or 1."
+#endif
+
+#if ROCKS_WITH_EDITOR && !ROCKS_WITH_EDITOR_DATA
+#error "ROCKS_WITH_EDITOR requires ROCKS_WITH_EDITOR_DATA (editor code reads editor-only data)."
+#endif
+
+#if !ROCKS_WITH_SERVER_CODE && !ROCKS_WITH_CLIENT_CODE
+#error "A target needs server code, client code or both."
+#endif
+
 // 공유 라이브러리 export·import 철자다(BuildTargets 3.8절 BD27). 모듈 API 매크로
 // ROCKS_<MODULE>_API는 빌드가 모듈 정의 헤더에 넣고(Monolithic이면 빈 값), 같은 철자를 쓴다. 모듈
 // API 매크로가 아닌 곳(Modular 진입점 등)이 직접 쓴다.

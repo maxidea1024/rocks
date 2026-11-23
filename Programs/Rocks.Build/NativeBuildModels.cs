@@ -581,6 +581,10 @@ public sealed record NativeBuildRequest
     // 받는다(LogCompiledMinimums).
     public LogLevel? LogCompiledMinimum { get; init; }
 
+    // 타깃 종류와 Program 속성(Docs/Design/BuildTargets 3.2절 BS2a)이다. 모든 compile action이 그 타깃 매크로 넷을 같은 값으로 받고, 빌드
+    // 정보 TU가 build::CurrentTargetType()을 이것으로 만든다. 기본은 Program 기본(Game과 같은 매크로 조합)이다.
+    public TargetKind Target { get; init; } = TargetKind.Default;
+
     // 링크 방식이다(TargetRules.LinkType — Docs/Design/BuildTargets 3.8절). Modular는 Android와 Asan·Coverage·Release 구성에서
     // 입력 오류다.
     public NativeLinkType LinkType { get; init; } = NativeLinkType.Monolithic;

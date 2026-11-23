@@ -46,6 +46,32 @@ public static class RuleLoader
     }
 
     /// <summary>
+    /// 타깃 종류와 Program 속성, 플랫폼 표를 검사한다(Docs/Design/BuildTargets 3.1절, BS2a). <c>CompileWithEditor</c>·<c>WithEditorData</c>는
+    /// Program만 켤 수 있다. 플랫폼은 Game·Client가 Windows·macOS·Android, Editor가 Windows·macOS, Server가 Windows·macOS(Linux는 BS6),
+    /// Program은 모두다. 어기면 <see cref="ArgumentException"/>이다.
+    /// </summary>
+    public static void ValidateTargetKind(TargetRules target, NativePlatform platform)
+    {
+        if (target.Type != TargetType.Program && (target.CompileWithEditor || target.WithEditorData))
+        {
+            throw new ArgumentException($"Target '{target.Name}' is a {target.Type} target; CompileWithEditor and WithEditorData are Program target " +
+                "properties.");
+        }
+
+        bool supported = target.Type switch
+        {
+            TargetType.Game or TargetType.Client => platform is NativePlatform.Windows or NativePlatform.MacOS or NativePlatform.Android,
+            TargetType.Editor or TargetType.Server => platform is NativePlatform.Windows or NativePlatform.MacOS,
+            _ => true
+        };
+        if (!supported)
+        {
+            throw new ArgumentException($"Target '{target.Name}': a {target.Type} target is not built for {platform} " +
+                "(Docs/Design/BuildTargets section 3.1 platform table).");
+        }
+    }
+
+    /// <summary>
     /// 동반 타깃(<see cref="TargetRules.CompanionTargets"/>)의 모듈을 더한 타깃이다. 동반 타깃이 없으면 target 그대로다.
     /// </summary>
     /// <exception cref="ArgumentException">없는 동반 타깃, 자기 자신·중복, Program이 아니거나 Monolithic이 아니거나 플러그인·동반 타깃을 가진 동반
@@ -104,6 +130,10 @@ public static class RuleLoader
 
         public override string? TestExecutable => inner.TestExecutable;
 
+        public override bool CompileWithEditor => inner.CompileWithEditor;
+
+        public override bool WithEditorData => inner.WithEditorData;
+
         public override IReadOnlyList<string> TestPrograms => inner.TestPrograms;
 
         public override IReadOnlyList<string> CompanionTargets => inner.CompanionTargets;
@@ -143,6 +173,11 @@ public static class RuleLoader
         {
             throw new ArgumentException($"Module rule '{listed.Name}' sets PluginModules; the build fills it from the target's enabled plugins " +
                 "(TargetRules.Plugins).");
+        }
+
+        foreach (TargetRules target in targets)
+        {
+            ValidateTargetKind(target, context.Platform);
         }
 
         // 공개 헤더 검사 표지는 빌드가 검사 모듈에만 채운다(Docs/Design/BuildTargets 3.5절 BS1b).

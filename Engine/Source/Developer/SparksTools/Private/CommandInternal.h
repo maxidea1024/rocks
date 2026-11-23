@@ -35,7 +35,8 @@ struct CommandArguments {
     DumpKind dump = DumpKind::None;
     StringView out; // build의 `--out`
     bool hasOut = false;
-    bool check = false; // fmt의 `--check`
+    bool check = false;   // fmt의 `--check`
+    uint32 maxFrames = 0; // test의 `--max-frames`(없으면 0 — 실행기 기본값)
 };
 
 // 명령 하나의 작업 공간과 그 컴파일이다.
@@ -77,5 +78,6 @@ int32 ReportProblem(CommandContext& context, StringView path, StringView message
 int32 RunBuild(CommandContext& context, StringBuilderBase& text) noexcept;
 int32 RunIds(CommandContext& context, StringBuilderBase& text) noexcept;
 int32 RunFmt(CommandContext& context, StringBuilderBase& text) noexcept;
+int32 RunTest(CommandContext& context, StringBuilderBase& text) noexcept;
 
 } // namespace rocks::sparks::tools::detail
