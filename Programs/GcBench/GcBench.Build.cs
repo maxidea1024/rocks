@@ -12,6 +12,6 @@ public sealed class GcBenchProgram : ModuleRules
         ModuleDirectory = "Programs/GcBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/GcBench/Private"),
-        PublicDependencies = ["Launch", "ObjectRuntime", "GcSoak"]
+        PublicDependencies = ["Launch", "ObjectRuntime", "GcSoak", "Task"]
     };
 }
