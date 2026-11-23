@@ -231,19 +231,25 @@ struct MadeOutput {
     bool used = true;
 };
 
+// 묶음 구성원의 주 출력 하나다(A2f3d — OpenAsset이 색인보다 먼저 본다).
+struct ImportGroupMember {
+    AssetId id{};
+    ObjectHandle asset{};
+};
+
 // 서비스가 임포터에 주는 문맥이다: 새 출력은 저장하지 않은 새 패키지, 재임포트는 기존 출력을
 // 미리 등록해 같은 key 요청에 그 대표 에셋을 준다(타입 정확 일치 — 7.1절 18 A2f2).
 class ImportContext final : public AssetImportContext {
 public:
     ImportContext(Allocator& allocator, EditorPackageSet& set, TypeRegistry& types,
-                  const AssetAliasTable& aliases, StringView path, const AssetImporterInfo& info,
-                  Span<const AssetImportSource> sources, const void* options, AssetId mainId,
-                  Array<EditorWarning>* warnings, bool reimport,
-                  Span<const ImportTag> previousTags) noexcept
-        : allocator_(allocator), set_(set), types_(types), aliases_(aliases), path_(path),
-          info_(info), sources_(sources), options_(options), mainId_(mainId), warnings_(warnings),
-          reimport_(reimport), previousTags_(previousTags), access_(set.Access()),
-          outputs_(allocator), tags_(allocator) {
+                  const AssetIndex& index, const AssetAliasTable& aliases, StringView path,
+                  const AssetImporterInfo& info, Span<const AssetImportSource> sources,
+                  const void* options, AssetId mainId, Array<EditorWarning>* warnings,
+                  bool reimport, Span<const ImportTag> previousTags) noexcept
+        : allocator_(allocator), set_(set), types_(types), index_(index), aliases_(aliases),
+          path_(path), info_(info), sources_(sources), options_(options), mainId_(mainId),
+          warnings_(warnings), reimport_(reimport), previousTags_(previousTags),
+          access_(set.Access()), outputs_(allocator), tags_(allocator) {
     }
 
     // 재임포트의 기존 출력 하나를 등록한다(아직 청하지 않음). 오류: 할당 실패.
@@ -460,6 +466,59 @@ public:
         return previousTags_;
     }
 
+    Result<ObjectHandle> OpenAsset(AssetId asset) noexcept override {
+        using Out = Result<ObjectHandle>;
+        auto refuse = [&](AssetDiagnosticCode code, ErrorCode error) noexcept {
+            failure_ = AssetDiagnostic{};
+            failure_.code = error == ErrorCode::OutOfMemory ? AssetDiagnosticCode::None : code;
+            failure_.error = error;
+            failure_.asset = mainId_;
+            failure_.related = asset;
+            return Out::Failure(error);
+        };
+        // 자기 출력은 Output으로 받는다.
+        bool own = asset.IsNull() || asset == mainId_;
+        for (const MadeOutput& made : outputs_) {
+            own = own || made.id == asset;
+        }
+
+        if (own) {
+            return refuse(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+        }
+
+        // 묶음 구성원 주 출력(A2f3d)을 먼저 본다 — 새 구성원은 색인에 없다.
+        for (const ImportGroupMember& member : members_) {
+            if (member.id == asset) {
+                return Out::Success(member.asset);
+            }
+        }
+
+        auto found = index_.FindById(asset);
+        if (!found) {
+            return refuse(found.Error() == ErrorCode::NotFound
+                              ? AssetDiagnosticCode::MissingDependency
+                              : AssetDiagnosticCode::DuplicateAssetId,
+                          found.Error());
+        }
+
+        AssetDiagnostic diagnostic;
+        auto opened = set_.Open(asset, warnings_, &diagnostic);
+        if (!opened) {
+            failure_ = diagnostic;
+            return Out::Failure(opened.Error());
+        }
+
+        // Open은 패키지를 준다 — 대표 에셋(이름 빈 자식 — 패키지에 늘 있다)을 준다.
+        auto representative = set_.Registry().FindChild(access_, opened.Value(), "");
+        return representative ? Out::Success(representative.Value())
+                              : refuse(AssetDiagnosticCode::None, representative.Error());
+    }
+
+    // 묶음 구성원 주 출력 표다(A2f3d — 단일 임포트는 비어 있다).
+    void SetGroupMembers(Span<const ImportGroupMember> members) noexcept {
+        members_ = members;
+    }
+
     Span<const MadeOutput> Outputs() const noexcept {
         return outputs_.View();
     }
@@ -478,6 +537,7 @@ private:
     Allocator& allocator_;
     EditorPackageSet& set_;
     TypeRegistry& types_;
+    const AssetIndex& index_;
     const AssetAliasTable& aliases_;
     StringView path_;
     const AssetImporterInfo& info_;
@@ -487,6 +547,7 @@ private:
     Array<EditorWarning>* warnings_;
     bool reimport_;
     Span<const ImportTag> previousTags_;
+    Span<const ImportGroupMember> members_{};
     ObjectAccessContext access_;
     Array<MadeOutput> outputs_;
     Array<ImportTag> tags_;
@@ -897,7 +958,7 @@ Result<void> AssetService::RunImport(ImportRun& run) noexcept {
     }
 
     // 임포터 호출(실패하면 이번에 연 것을 닫는다 — 열린 id는 호출자가 적었다).
-    ImportContext context(allocator, set_, *types_, *run.aliases, run.path->Text(), info,
+    ImportContext context(allocator, set_, *types_, index_, *run.aliases, run.path->Text(), info,
                           contextSources.View(), options.Get(), run.mainId,
                           warnings != nullptr ? &pending : nullptr, run.reimport, run.previousTags);
     auto abandon = [&](const AssetDiagnostic& diagnostic) noexcept {

@@ -18,6 +18,8 @@
 //   않는다 mainType=<타입>           주 출력을 그 타입으로 청한다(Output 규칙 시험) bulkForeign=1
 //   추가 출력이 아닌 객체에 AddBulk tags=<key>|<value>,… 임포터 태그(A2f3a — 값에 `,`·`|` 없음)
 //   keeptags=1 옛 기록 태그(PreviousTags)를 다시 더한다
+//   open=<AssetId>            OpenAsset(그 id)로 연 대표 에셋을 TestAsset::hard에 건다(A2f3c —
+//   reference보다 앞선다, 실패하면 그 오류로 끝낸다)
 // 옵션 TestImportOptions{scale, failAt}: failAt 1이면 원본을 읽은 뒤 Fail(InvalidSource,
 // InvalidArgument, 5), 2면 주 출력을 만든 뒤 Failure(Busy)(진단 없이), 3이면 모든 출력 뒤 Fail.
 // 역할 변형(roles px·nx)은 두 원본의 value를 더한다.
@@ -211,6 +213,23 @@ public:
             }
         }
 
+        // 다른 에셋 참조(A2f3c UXR10).
+        lastOpenError = ErrorCode::None;
+        if (FindLine(first, "open", option)) {
+            auto id = AssetId::TryParse(option);
+            if (!id) {
+                return Result<void>::Failure(id.Error());
+            }
+
+            auto opened = context.OpenAsset(id.Value());
+            if (!opened) {
+                lastOpenError = opened.Error();
+                return Result<void>::Failure(opened.Error());
+            }
+
+            referenced = opened.Value();
+        }
+
         // 임포트가 정하는 필드는 매번 모두 쓴다(참조가 없으면 null).
         if (!main.IsNull()) {
             auto set = context.Registry().SetReference(
@@ -285,6 +304,8 @@ public:
     bool lastReimport = false;
     // 마지막 Import가 받은 옛 기록 태그 수다(A2f3a).
     usize lastPreviousTags = 0;
+    // 마지막 Import의 OpenAsset 오류다(None이면 성공이거나 열지 않음 — A2f3c).
+    ErrorCode lastOpenError = ErrorCode::None;
     // 마지막 Import가 받은 원본 역할 순서(`role,` 반복)다.
     char lastRoles[512] = {};
     usize lastRolesBytes = 0;

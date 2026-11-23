@@ -354,6 +354,125 @@ TEST(AssetImport_ImporterTags) {
     CHECK(registered);
 }
 
+// 다른 에셋 참조(7.1절 19 A2f3c UXR10): OpenAsset으로 색인의 에셋(Leaf)을 열어 Hard로 건다 — 저장이
+// Hard 의존을 쓰고, 연 패키지는 끝나면 닫히며(원래 열려 있던 것은 열린 채), 읽기 전용 패키지도
+// 연다. 거부: 자기 주 출력·재임포트의 기존 출력·null(InvalidArgument — 파일은 그대로), 색인에
+// 없음(NotFound — MissingDependency, related = id, 파일을 쓰지 않는다), 같은 id 둘(AlreadyExists —
+// DuplicateAssetId). 묶음 구성원 순서는 AssetImport_Group(A2f3d)이 본다.
+TEST(AssetImport_OpenAsset) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-open");
+    REQUIRE(scene.ready);
+    REQUIRE(scene.files.AddFile("Content/Leaf.rasset", sources.leaf.View()));
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    const AssetId leaf = FixedId(LeafId);
+    const auto putOpen = [&](StringView extra, AssetId id) noexcept {
+        StringBuilder<256> text(env.allocator);
+        return text.TryAppendFormat("value=1\n{}open={}", extra, id) &&
+               scene.PutSource(RockSource, text.View());
+    };
+    const auto hardOn = [&](StringView file, AssetId target) noexcept {
+        auto read = ReadFile(env, scene, file);
+        if (!read) {
+            return false;
+        }
+
+        bool hard = false;
+        for (const PackageDependencyEntry& entry : read.Value().dependencies) {
+            hard = hard || (entry.kind == PackageDependencyKind::Hard && entry.asset == target);
+        }
+
+        return hard;
+    };
+    const auto refuses = [&](AssetService& service, StringView path, bool reimport, ErrorCode error,
+                             AssetDiagnosticCode code, AssetId related) noexcept {
+        AssetImportResult refused(env.allocator);
+        AssetDiagnostic failure;
+        auto done = reimport ? service.Reimport(scene.lock, path, {}, {}, diagnostics, refused,
+                                                nullptr, &failure)
+                             : service.Import(scene.lock, path, inputs, {}, {}, diagnostics,
+                                              refused, nullptr, &failure);
+        return !done && done.Error() == error && failure.code == code &&
+               (related.IsNull() || failure.related == related) && service.Packages().Count() == 0;
+    };
+
+    AssetId user{};
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        REQUIRE(putOpen({}, leaf));
+        AssetImportResult result(env.allocator);
+        REQUIRE(service.Import(scene.lock, "/Game/User", inputs, {}, {}, diagnostics, result));
+        user = result.id;
+        CHECK(hardOn("Content/User.rasset", leaf) && service.Packages().Count() == 0);
+
+        // 원래 열려 있던 대상은 열린 채다.
+        REQUIRE(service.Packages().Open(leaf));
+        AssetImportResult again(env.allocator);
+        REQUIRE(service.Reimport(scene.lock, "/Game/User", {}, {}, diagnostics, again));
+        CHECK(service.Packages().FindPackage(leaf) && service.Packages().Count() == 1);
+        REQUIRE(service.Packages().Close(leaf));
+
+        // 자기 주 출력·null·기존 출력은 Output으로 받는다.
+        REQUIRE(putOpen({}, user));
+        CHECK(refuses(service, "/Game/User", true, ErrorCode::InvalidArgument,
+                      AssetDiagnosticCode::None, user));
+        CHECK(hardOn("Content/User.rasset", leaf));
+        REQUIRE(putOpen({}, AssetId{}));
+        CHECK(refuses(service, "/Game/Null", false, ErrorCode::InvalidArgument,
+                      AssetDiagnosticCode::None, AssetId{}));
+        CHECK(!scene.files.Has("Content/Null.rasset"));
+        REQUIRE(putOpen("outputs=extra\n", leaf));
+        AssetImportResult multi(env.allocator);
+        REQUIRE(service.Import(scene.lock, "/Game/Multi", inputs, {}, {}, diagnostics, multi));
+        REQUIRE(multi.outputs.Size() == 1);
+        REQUIRE(putOpen("outputs=extra\n", multi.outputs[0].id));
+        CHECK(refuses(service, "/Game/Multi", true, ErrorCode::InvalidArgument,
+                      AssetDiagnosticCode::None, multi.outputs[0].id));
+        CHECK(hardOn("Content/Multi.rasset", leaf));
+
+        // 색인에 없는 id.
+        const AssetId missing = FixedId(990001);
+        REQUIRE(putOpen({}, missing));
+        CHECK(refuses(service, "/Game/Missing", false, ErrorCode::NotFound,
+                      AssetDiagnosticCode::MissingDependency, missing));
+        CHECK(!scene.files.Has("Content/Missing.rasset"));
+    }
+
+    // 읽기 전용 대상도 연다.
+    PackageWriteOptions readOnly = EditorOptions();
+    readOnly.customVersions = UnknownCustomVersions;
+    const Array<uint8> readOnlyLeaf =
+        Write(env.allocator, *env.source, sources.packages[4].Handle(), readOnly);
+    REQUIRE(!readOnlyLeaf.IsEmpty());
+    scene.files.Remove("Content/Leaf.rasset");
+    REQUIRE(scene.files.AddFile("Content/Leaf.rasset", readOnlyLeaf.View()));
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        REQUIRE(putOpen({}, leaf));
+        AssetImportResult result(env.allocator);
+        REQUIRE(
+            service.Import(scene.lock, "/Game/ReadOnlyUser", inputs, {}, {}, diagnostics, result));
+        CHECK(hardOn("Content/ReadOnlyUser.rasset", leaf) && service.Packages().Count() == 0);
+    }
+
+    // 같은 id 파일 둘.
+    REQUIRE(scene.files.AddFile("Content/Leaf2.rasset", scene.files.Bytes("Content/Leaf.rasset")));
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        CHECK(refuses(service, "/Game/Twice", false, ErrorCode::AlreadyExists,
+                      AssetDiagnosticCode::DuplicateAssetId, leaf));
+        CHECK(!scene.files.Has("Content/Twice.rasset"));
+    }
+}
+
 // 가변 원본(7.1절 19 A2f3b UXR9): 고정 역할 asset과 접두 blob:의 역할 여럿을 받고 문맥 순서는 고정
 // → 접두(byte 순)다. 기록 원본도 그 순서다. 재임포트는 기록 원본을 그대로 풀고, replaceSources는 준
 // 목록으로 원본 전체를 바꾼다(역할 없는 원본 하나 = 유일한 고정 역할). 거부: 고정 역할 없음·접두
