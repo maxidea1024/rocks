@@ -16,6 +16,4 @@ public sealed class MeshSource : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["AssetRuntime"];
-
-    protected override IReadOnlyList<string> Metadata => ["MeshSource/MeshSourceData.h"];
 }

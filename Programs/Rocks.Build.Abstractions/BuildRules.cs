@@ -42,7 +42,7 @@ public abstract class ModuleRules
     public abstract NativeModuleInput Configure(BuildContext context);
 }
 
-// 리플렉션 메타데이터는 모듈이 소유한다(NativeModuleInput.Metadata·ModuleDirectory). 타깃은 모듈만 고른다.
+// 리플렉션 메타데이터는 모듈이 소유한다(ModuleDirectory — 리플렉션 헤더는 빌드가 표지로 찾는다, Docs/Design/ReflectionFoundations.ko.md 1.10절). 타깃은 모듈만 고른다.
 public abstract class TargetRules
 {
     public abstract string Name { get; }

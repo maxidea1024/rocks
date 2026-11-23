@@ -68,7 +68,7 @@ C++는 다음 경우에 쓴다.
 
 ### 2.2 C++ (있음)
 
-- **모듈**: 게임 모듈의 `<모듈>.Build.cs`(템플릿에서 만든 프로젝트는 `<프로젝트>.Build.cs`)에 소스, 의존 모듈(`World` 등), 리플렉션 헤더 목록 `Metadata = [...]`를 적는다.
+- **모듈**: 게임 모듈의 `<모듈>.Build.cs`(템플릿에서 만든 프로젝트는 `<프로젝트>.Build.cs`)에 소스와 의존 모듈(`World` 등)을 적는다. 리플렉션 헤더는 적지 않는다 — 빌드가 `ROCKS_CLASS`·`ROCKS_STRUCT`·`ROCKS_ENUM` 표지가 있는 헤더를 찾는다.
 - **식별자**: 타입·필드 식별자는 메타 컴파일러가 `<모듈>.rocksids.json`에 발급한다. 매크로에 직접 적지 않는다.
 - **빌드**: `dotnet msbuild Rocks.proj -t:Game`. 메타 컴파일러가 `*.generated.h`와 모듈 등록 코드를 만든다.
 - **반영**: 에디터를 다시 시작한다. 실행 중에 코드를 다시 불러오는 기능(UE Live Coding 대응)은 모듈 적재 단계 뒤에 별도 스펙으로 다룬다.
@@ -180,7 +180,7 @@ rocks::Result<void> Health::ApplyDamage(rocks::int32 amount, rocks::WeakObjectRe
 
 작업 순서:
 
-1. 헤더와 소스를 쓰고 `<모듈>.Build.cs`의 `Metadata`에 `"Combat/Health.h"`를 더한다.
+1. 헤더(`Combat/Health.h` — `ROCKS_CLASS()` 표지)와 소스를 쓴다. 빌드가 표지로 헤더를 찾으므로 `<모듈>.Build.cs`는 고치지 않는다.
 2. 빌드한 뒤 에디터를 다시 시작한다.
 3. 이후는 Sparks와 같다. 컴포넌트 추가 목록에 `Health`가 나오고, `Edit` 필드가 Details에 나타난다.
 
@@ -432,7 +432,7 @@ void Stage1Script::HandleGateEntered(rocks::WeakObjectRef<rocks::Actor> other, r
 
 작업 순서:
 
-1. 클래스를 쓰고 `Metadata`에 등록한 뒤, 빌드하고 에디터를 다시 시작한다.
+1. 클래스를 `ROCKS_CLASS()` 표지와 함께 헤더에 쓰고, 빌드하고 에디터를 다시 시작한다.
 2. 레벨 Details의 **레벨 스크립트** 항목에서 `Stage1Script`를 고른다(`World::SetLevelScript`). 이 목록에는 C++와 Sparks의 `LevelScript` 파생 클래스가 모두 나온다.
 3. Details에 나타난 `gateTrigger_`, `gateDoor_`에 Outliner의 Actor를 지정한다.
 4. Tryout으로 확인한다.

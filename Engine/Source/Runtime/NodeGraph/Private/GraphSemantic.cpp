@@ -63,11 +63,13 @@ namespace detail {
 
 class SemanticEncoder {
 public:
+    // output은 바이트 writer의 allocator다(WriteSemanticBytes는 out의 allocator로 써서 복사 없이
+    // 넘긴다).
     SemanticEncoder(const GraphDocument& document, const NodeTypeRegistry& registry,
-                    Allocator& scratch) noexcept
+                    Allocator& scratch, Allocator& output) noexcept
         : document_(document), registry_(registry),
-          writer_(scratch, ArchiveLimits{MaxSemanticBytes, MaxPropertyRecordBytes,
-                                         SemanticMaxOperations, SemanticMaxWork}),
+          writer_(output, ArchiveLimits{MaxSemanticBytes, MaxPropertyRecordBytes,
+                                        SemanticMaxOperations, SemanticMaxWork}),
           ranks_(scratch, registry.Names()), lowered_(scratch), keys_(scratch), upstream_(scratch),
           edges_(scratch), order_(scratch) {
     }
@@ -490,23 +492,19 @@ Result<void> SemanticNodeWriter::WriteNode(const GraphNode& node,
 Result<void> WriteSemanticBytes(const GraphDocument& document, const NodeTypeRegistry& registry,
                                 Allocator& scratch, Array<uint8>& out) noexcept {
     out.Clear();
-    detail::SemanticEncoder encoder(document, registry, scratch);
+    detail::SemanticEncoder encoder(document, registry, scratch, out.GetAllocator());
     if (auto encoded = encoder.Run(); !encoded) {
         return encoded;
     }
 
-    Array<uint8> bytes = encoder.TakeBytes();
-    if (auto reserved = out.TryReserve(bytes.Size()); !reserved) {
-        return reserved;
-    }
-
-    return out.TryAppend(bytes.View());
+    out = encoder.TakeBytes();
+    return Result<void>::Success();
 }
 
 Result<Sha256Digest> ComputeSemanticHash(const GraphDocument& document,
                                          const NodeTypeRegistry& registry,
                                          Allocator& scratch) noexcept {
-    detail::SemanticEncoder encoder(document, registry, scratch);
+    detail::SemanticEncoder encoder(document, registry, scratch, scratch);
     if (auto encoded = encoder.Run(); !encoded) {
         return Result<Sha256Digest>::Failure(encoded.Error());
     }

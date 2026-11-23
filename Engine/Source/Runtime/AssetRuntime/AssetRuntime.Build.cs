@@ -16,6 +16,4 @@ public sealed class AssetRuntime : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ObjectSerialization", "ObjectRuntime", "Serialization", "Task", "Compression", "Crypto"];
-
-    protected override IReadOnlyList<string> Metadata => ["AssetRuntime/BulkData.h", "AssetRuntime/Package.h"];
 }

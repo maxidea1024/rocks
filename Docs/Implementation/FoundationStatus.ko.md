@@ -64,7 +64,7 @@ Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/Ren
 
 빌드 도구는 .NET 10과 MSBuild로 호스트 도구 및 규칙을 구성하고, `Rocks.Build`가 C++ 컴파일·정적 라이브러리·실행 파일의 의존성과 로컬 증분 판단을 수행한다. 설치 SDK에는 헤더·빌드된 라이브러리·호스트 도구와 호환성 manifest가 포함되며 외부 게임은 별도 경로에서 빌드한다. 현재 SDK 내보내기는 임의 컴파일·링크 옵션이나 외부 사전 빌드 라이브러리가 있는 모듈을 지원하지 않고 명시적으로 거부한다. CMake/Python 파일은 이전 구현의 참고 경로이며 새 빌드·검증의 기준은 .NET 경로다.
 
-메타컴파일러는 모듈 규칙의 `Metadata`에 등록한 헤더를 모듈 단위로 한 번에 Clang AST로 분석하고, 허용된 대상 컴파일 조건을 사용해 생성 C++도 검사한다. 모듈은 의존 순서로 생성되며 의존 모듈의 타입은 descriptor(`<M>.rocksmeta.json`) import로 쓴다. 모듈마다 명세의 활성 선언 누락·중복을, 타깃의 모든 명세 사이에서 ID 중복을 검사한 뒤 모든 생성물을 한 트랜잭션으로 게시한다. 한 헤더를 여러 모듈이 소유하는 구성은 거부한다. 미등록 헤더 자동 발견은 아직 제공하지 않는다. 사용자 정의 전체 컴파일 옵션·완전한 compilation database 재구성·생성 캐시도 아직 제공하지 않는다.
+메타컴파일러는 빌드가 표지(`ROCKS_CLASS`·`ROCKS_STRUCT`·`ROCKS_ENUM`)로 찾은 모듈의 리플렉션 헤더를 모듈 단위로 한 번에 Clang AST로 분석하고, 허용된 대상 컴파일 조건을 사용해 생성 C++도 검사한다. 모듈은 의존 순서로 생성되며 의존 모듈의 타입은 descriptor(`<M>.rocksmeta.json`) import로 쓴다. 모듈마다 명세의 활성 선언 누락·중복을, 타깃의 모든 명세 사이에서 ID 중복을 검사한 뒤 모든 생성물을 한 트랜잭션으로 게시한다. 한 헤더를 여러 모듈이 소유하는 구성은 거부한다. 리플렉션 헤더는 빌드가 표지로 자동 발견한다(규칙에 목록이 없다). 사용자 정의 전체 컴파일 옵션·완전한 compilation database 재구성·생성 캐시도 아직 제공하지 않는다.
 
 별도 `Localization → Core` 모듈에서 Text 불변 이력·catalog snapshot·named format을 구현하였다. 지역별 plural/날짜/통화·추출·쿠킹·UI는 후속이다. [Name·Text 구현 계약](NameTextImplementation.ko.md), [플랫폼 독립 동시성](PlatformConcurrency.ko.md), [컴파일러 경고 정책](../Design/CompilerDiagnostics.ko.md)을 함께 따른다.
 

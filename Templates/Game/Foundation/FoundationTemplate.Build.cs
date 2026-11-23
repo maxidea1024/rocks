@@ -13,7 +13,6 @@ public sealed class FoundationTemplateModule : ModuleRules
         PublicIncludeDirectories = [context.PathInRoot("Source")],
         // Launch: the common entry point (crash reporting, command line capture, exit code).
         PublicDependencies = ["ObjectRuntime", "Launch"],
-        Metadata = ["GameObject.h"],
         ModuleDirectory = "."
     };
 }

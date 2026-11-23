@@ -16,6 +16,4 @@ public sealed class NodeGraph : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings"];
-
-    protected override IReadOnlyList<string> Metadata => ["NodeGraph/GraphDocument.h"];
 }

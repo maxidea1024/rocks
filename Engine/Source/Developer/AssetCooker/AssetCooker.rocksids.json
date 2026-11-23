@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::CookSettings::alwaysCook",
+      "id": "e1efd776e8a7454e9f2333f721a7ca73",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookSettings::cookSoftReferences",
+      "id": "a38c28420e3945d9af736d4b0a678994",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookSettings::neverCook",
+      "id": "069b81a97fee4faf938adc93043d40ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookSettings::primaryAssets",
+      "id": "80b7c6001e1048afa86d257ea8d68098",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimaryAssetRule::directories",
+      "id": "b24b16575b644b7ba6420116e30eb00e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimaryAssetRule::type",
+      "id": "347c3857adab415f8a29895386882dba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TargetProfile::bulkAlignment",
+      "id": "f4d8a74364074105bd43c2d17b53e1f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TargetProfile::bulkCodec",
+      "id": "22fc87354fad4cd48a6d7f98f827d394",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TargetProfile::graphicsBackend",
+      "id": "c994c24a0f574498b2ac8ec1f0bc73a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TargetProfile::id",
+      "id": "e237ff820330488c87b7c6205bcf6dd2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CookBulkCodec",
+      "id": "bc73f60886ad445cb55dc3bf04117b37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CookSettings",
+      "id": "557d44693c7a4d7aa89d5a8e68e738b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PrimaryAssetRule",
+      "id": "44d6828121f54c21aff9592ec83fc4cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TargetProfile",
+      "id": "cb135f16b75b4340be3ad4b2fddc4450",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

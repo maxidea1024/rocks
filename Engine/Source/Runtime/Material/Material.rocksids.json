@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "type",
+      "name": "rocks::Material",
+      "id": "76129e92dc294ea294ab42577cd231a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialBase",
+      "id": "79ca53b7c7ba4e7e9a73dc14b4bd39bd",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

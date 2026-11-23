@@ -13,6 +13,4 @@ public sealed class TraceControl : CoreModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["Config", "TraceCapture"];
-
-    protected override IReadOnlyList<string> Metadata => ["TraceControl/TraceSettings.h"];
 }

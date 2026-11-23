@@ -15,6 +15,4 @@ public sealed class Curves : CoreModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ObjectRuntime"];
-
-    protected override IReadOnlyList<string> Metadata => ["Curves/CurveTypes.h", "Curves/TangentCurve.h", "Curves/PlainCurve.h", "Curves/StepCurves.h", "Curves/PackedTangentCurve.h"];
 }

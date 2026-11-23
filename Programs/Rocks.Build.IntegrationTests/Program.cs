@@ -501,7 +501,7 @@ try
 
     // 게임에는 메타데이터 모듈이 둘이다: 라이브러리 GameCore(CoreThing : SDK Base)와 실행 파일 SampleGame
     // (FixtureChild : GameCore의 CoreThing, SDK Node 참조). 한 빌드 안에서 stage descriptor import와 stage 생성 루트
-    // 치환, 상위 모듈 실패 시 미게시, Metadata에서 뺀 헤더의 생성물 삭제를 확인한다.
+    // 치환, 상위 모듈 실패 시 미게시, 지운 리플렉션 헤더의 생성물 삭제를 확인한다.
     var reflectionGame = Path.Combine(fixture, "reflection", "SampleGame");
     var reflectionOutput = GameProjectLayout.DefaultOutput(reflectionGame, "SampleGame", NativeConfiguration.Debug);
     await NewGame(reflectionGame);
@@ -513,11 +513,11 @@ try
     var reflectionRules = Path.Combine(reflectionGame, "SampleGame.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
     Require(reflectionRulesText.Contains("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
-        reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
-    // ObjectSerialization: 게임이 GameCore의 배열 필드를 그래프로 저장·복원한다(SDK 모듈로 링크만 한다).
+        !reflectionRulesText.Contains("Metadata", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
+    // ObjectSerialization: 게임이 GameCore의 배열 필드를 그래프로 저장·복원한다(SDK 모듈로 링크만 한다). 리플렉션 헤더(FixtureChild.h 포함)는
+    // 빌드가 표지로 찾는다(Docs/Design/ReflectionFoundations.ko.md 1.10절).
     File.WriteAllText(reflectionRules, reflectionRulesText
-        .Replace("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", "PublicDependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
-        .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
+        .Replace("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", "PublicDependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal));
     var reflectionProject = Path.Combine(reflectionGame, "SampleGame.rocksproject");
     var reflectionProjectText = File.ReadAllText(reflectionProject);
     const string sampleModuleEntry = "{ \"name\": \"SampleGame\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }";
@@ -536,7 +536,6 @@ try
                 Name = "GameCore",
                 PublicIncludeDirectories = [context.PathInRoot("Core/Public")],
                 PublicDependencies = ["ReflectionTestFixtures", "CoreTypeBindings"],
-                Metadata = ["GameCore/CoreThing.h", "GameCore/Extra.h"],
                 ModuleDirectory = "Core"
             };
         }
@@ -974,17 +973,17 @@ try
     File.WriteAllText(childHeader, childHeaderText);
     Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the generated body contract failure");
 
-    // Metadata에서 뺀 헤더의 생성물은 게시 트랜잭션이 지운다(ID는 은퇴시켜 예약한다). 생성 소스 루트(Source)의 잉여 파일도 같은
+    // 지운 리플렉션 헤더의 생성물은 게시 트랜잭션이 지운다(ID는 은퇴시켜 예약한다). 생성 소스 루트(Source)의 잉여 파일도 같은
     // 트랜잭션이 지운다.
     var extraGenerated = Path.Combine(reflectionOutput, "Generated/GameCore/Public/GameCore/Extra.generated.h");
     Require(File.Exists(extraGenerated), "GameCore Extra metadata was not generated");
     var leftoverSource = Path.Combine(reflectionOutput, "Generated/GameCore/Source/Removed.generated.cpp");
     File.WriteAllText(leftoverSource, "#error leftover generated source\n");
-    File.WriteAllText(coreRules, coreRulesText.Replace(", \"GameCore/Extra.h\"", "", StringComparison.Ordinal));
+    File.Delete(Path.Combine(reflectionGame, "Core/Public/GameCore/Extra.h"));
     var extraRetired = await Ids("retire", "--manifest", coreManifest, "--kind", "type", "--name", "sample::Extra");
     Require(extraRetired.ExitCode == 0, "Could not retire the GameCore Extra identity: " + extraRetired.StdErr);
-    Require((await ReflectionGame()).ExitCode == 0, "Game failed after removing a header from Metadata");
-    Require(!File.Exists(extraGenerated), "Generated header of a header removed from Metadata was not deleted");
+    Require((await ReflectionGame()).ExitCode == 0, "Game failed after removing a reflection header");
+    Require(!File.Exists(extraGenerated), "Generated header of a removed reflection header was not deleted");
     Require(!File.Exists(leftoverSource) && File.Exists(Path.Combine(reflectionOutput, "Generated/GameCore/Source/GameCore.module.generated.cpp")),
         "A leftover file in the generated source root was not deleted by the publish transaction");
     Require(!Directory.Exists(Path.Combine(reflectionOutput, ".metadata-backup")), "Metadata publication left backup files");
@@ -1090,24 +1089,28 @@ try
     var movedManifest = manifestPath + ".moved";
     try
     {
-        // Metadata를 지우면 활성 항목이 남은 명세가 고아가 된다(RMC2102).
-        var orphan = validModuleRules.Replace("        Metadata = [\"GameObject.h\"],\n", "", StringComparison.Ordinal);
-        Require(orphan != validModuleRules, "Module rule fixture no longer matches (Metadata)");
-        File.WriteAllText(moduleRulesPath, orphan);
+        // 리플렉션 표지를 떼면(헤더 목록이 비면) 활성 항목이 남은 명세가 고아가 된다(RMC2102). 표지가 주석 안에만 있으면 표지가 아니다.
+        var gameHeaderPath = Path.Combine(game, "Source/GameObject.h");
+        var validGameHeader = File.ReadAllText(gameHeaderPath);
+        var unmarked = validGameHeader.Replace("\nROCKS_CLASS(", "\n// ROCKS_CLASS(", StringComparison.Ordinal);
+        Require(unmarked != validGameHeader, "Game header fixture no longer matches (ROCKS_CLASS markup)");
+        File.WriteAllText(gameHeaderPath, unmarked);
         var rejected = await Game();
+        File.WriteAllText(gameHeaderPath, validGameHeader);
         Require(rejected.ExitCode != 0 && (rejected.StdOut + rejected.StdErr).Contains("RMC2102", StringComparison.Ordinal),
             "Orphan identity manifest with active entries was not rejected: " + rejected.StdErr);
         Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Orphan manifest rejection modified generated output");
 
-        // 같은 헤더를 두 번 소유할 수 없다.
-        var duplicate = validModuleRules.Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"GameObject.h\"]", StringComparison.Ordinal);
-        File.WriteAllText(moduleRulesPath, duplicate);
+        // 모듈 규칙은 Metadata 목록을 쓰지 않는다(빌드가 찾는다 — 1.10절).
+        var declared = validModuleRules.Replace("        ModuleDirectory = \".\"", "        Metadata = [\"GameObject.h\"],\n        ModuleDirectory = \".\"", StringComparison.Ordinal);
+        Require(declared != validModuleRules, "Module rule fixture no longer matches (ModuleDirectory)");
+        File.WriteAllText(moduleRulesPath, declared);
         rejected = await Game();
-        Require(rejected.ExitCode != 0 && (rejected.StdOut + rejected.StdErr).Contains("duplicate input ownership", StringComparison.Ordinal),
-            "Duplicate metadata header ownership was not rejected: " + rejected.StdErr);
-        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Duplicate ownership published metadata before rejection");
+        Require(rejected.ExitCode != 0 && (rejected.StdOut + rejected.StdErr).Contains("module rules do not declare Metadata", StringComparison.Ordinal),
+            "A Metadata list in module rules was not rejected: " + rejected.StdErr);
+        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Rejected Metadata list published metadata");
 
-        // Metadata가 있는데 명세가 없으면 RMC2100이다.
+        // 리플렉션 헤더가 있는데 명세가 없으면 RMC2100이다.
         File.WriteAllText(moduleRulesPath, validModuleRules);
         File.Move(manifestPath, movedManifest);
         rejected = await Game();

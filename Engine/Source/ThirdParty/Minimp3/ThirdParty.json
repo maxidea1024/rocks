@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "name": "Minimp3",
+  "version": "afb604c06bc8 (lieff/minimp3 master, 2021-11-30)",
+  "upstreamDirectory": "minimp3-afb604c06bc8",
+  "globalState": false,
+  "source": {
+    "url": "https://github.com/lieff/minimp3/archive/afb604c06bc8beb145fecd42c0ceb5bda8795144.tar.gz",
+    "sha256": "21672c32aaac29cf4b7e6f8e0154767080ae87faa79c682498453e5a9bc5e0d3",
+    "verification": "GitHub HTTPS commit archive of the author's repository (head of master = afb604c06bc8beb145fecd42c0ceb5bda8795144), downloaded on 2026-11-22 and its SHA-256 recorded. Upstream publishes no releases or signatures, so it is pinned by the commit and the archive hash. Imported files are minimp3.h, minimp3_ex.h and LICENSE (tests, vectors, player and tools are not imported)."
+  },
+  "licenses": [
+    {
+      "spdx": "CC0-1.0",
+      "upstreamExpression": "CC0 1.0 Universal dedication in LICENSE and in the header comments",
+      "file": "minimp3-afb604c06bc8/LICENSE",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [
+    "Minimp3Glue.c"
+  ],
+  "includeDirectories": [
+    "minimp3-afb604c06bc8"
+  ],
+  "defines": [
+    "MINIMP3_FLOAT_OUTPUT",
+    "MINIMP3_NO_STDIO",
+    "MINIMP3_ONLY_MP3"
+  ],
+  "platformDefines": {},
+  "consumerDefines": [
+    "MINIMP3_FLOAT_OUTPUT"
+  ],
+  "adapterHeaders": [
+    "minimp3-afb604c06bc8/minimp3.h"
+  ],
+  "files": {
+    "LICENSE": "6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01",
+    "minimp3.h": "5fb296a790734772b65a5514438cc06d14f24e539c13475ff2a7f737681c82c0",
+    "minimp3_ex.h": "bb001301b8666ea7a45ae057b62b17074483213b0d410555d97cc4d076e110df"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "MP3 source decoder for the audio importer (Docs/Design/AudioSystem.ko.md sections 3.10.1 and 3.26). Developer only: AudioTools links it, runtime targets do not.",
+    "Minimp3Glue.c compiles the header-only implementation once (MINIMP3_IMPLEMENTATION, float output, no stdio, Layer III only: MINIMP3_ONLY_MP3 leaves out the Layer I and II decoder, which AudioTools rejects anyway) and exposes the static tag helpers of minimp3_ex.h (ID3 skip, Xing/LAME tag) under Rocks names. The tag reader gets a zero-padded copy of the frame because mp3dec_check_vbrtag reads the tag fields before it checks the frame size. AudioTools decodes frame by frame with mp3dec_decode_frame and never calls the minimp3_ex load or ex functions, which allocate with malloc and realloc.",
+    "SIMD is selected at compile time (SSE2 on x86-64, NEON on ARM64) with no runtime CPU dispatch, so decoded samples are fixed per architecture (decision of section 3.10.1 on determinism)."
+  ]
+}

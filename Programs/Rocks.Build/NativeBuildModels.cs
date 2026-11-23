@@ -290,8 +290,9 @@ public sealed record NativeModuleInput
     public bool SanitizerInstrumentation { get; init; } = true;
 
     // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
-    // Docs/Design/ReflectionFoundations.ko.md 1.1절). 비어 있지 않으면 ModuleDirectory가 필요하다.
-    // 빌드는 생성 include 디렉터리(<out>/Generated/<Name>/Public·Private)를 이 모듈에 더한다.
+    // Docs/Design/ReflectionFoundations.ko.md 1.1·1.10절). 모듈 규칙은 쓰지 않는다 — MetadataLayout이 ModuleDirectory 안 include
+    // 디렉터리의 표지(ROCKS_CLASS·ROCKS_STRUCT·ROCKS_ENUM) 헤더를 찾아 채우고(규칙이 채우면 거부한다), 생성 include 디렉터리
+    // (<out>/Generated/<Name>/Public·Private)를 이 모듈에 더한다.
     public IReadOnlyList<string> Metadata { get; init; } = [];
 
     // 프로젝트 루트 기준 모듈 폴더다. identity 명세 <ModuleDirectory>/<Name>.rocksids.json의 위치를 정한다.
@@ -307,7 +308,7 @@ public sealed record NativeModuleInput
     public IReadOnlyList<string> PluginModules { get; init; } = [];
 
     // 설치 SDK 모듈 전용: 미리 생성된 descriptor와 identity 명세다. 다시 생성하지 않고 import만 한다.
-    // Metadata와 함께 쓸 수 없다.
+    // 이 모듈은 리플렉션 헤더를 찾지 않는다(미리 생성된 descriptor를 쓴다).
     public ImportedMetadata? ImportedMetadata { get; init; }
 
     // 리플렉션 생성 소스(MetaCompiler가 낸 번역 단위)의 경로다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). Metadata가 있는 모듈에

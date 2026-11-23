@@ -618,6 +618,10 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
     entry.fileBytes = reader.FileBytes();
     entry.modifiedTicks = modifiedTicks;
     entry.readOnly = cached->readOnly;
+    entry.contentHash = cached->contentHash;
+    entry.contentHashBytes = cached->contentHashBytes;
+    entry.contentHashTicks = cached->contentHashTicks;
+    entry.hasContentHash = cached->hasContentHash;
     entry.importRecord.present = cached->importRecord.present;
     entry.importRecord.owner = cached->importRecord.owner;
     entry.importRecord.importerId = cached->importRecord.importerId;

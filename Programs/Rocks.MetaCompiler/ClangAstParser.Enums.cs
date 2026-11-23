@@ -37,8 +37,9 @@ internal sealed partial class ClangAstParser
             if (!imported.TryGetValue(qualified, out ClassModel? external) || !external.IsEnum || physical is null ||
                 resolveHeader(external.Header) is not string externalFile || !CanonicalPath.Equals(externalFile, physical))
             {
-                throw new MetadataException($"{qualified}: reflected declaration is neither in this module's Metadata headers nor in an imported descriptor (same name and header)",
-                    "RMC2003", "Add the header to the owning module's Metadata list and depend on that module; do not redeclare reflected types.");
+                throw new MetadataException($"{qualified}: reflected declaration is neither in this module's reflection headers nor in an imported descriptor (same name and header)",
+                    "RMC2003", "Put the declaration in a header under the owning module's include directories (the build finds it by its markup) and depend on that module; " +
+                    "do not redeclare reflected types.");
             }
 
             return;

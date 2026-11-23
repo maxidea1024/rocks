@@ -80,4 +80,27 @@ inline bool ExceedsPcmLimit(uint32 channels, uint64 frames) noexcept {
     return frames > MaxSoundClipPcmBytes / (static_cast<uint64>(channels) * sizeof(float));
 }
 
+// Vorbis 채널 순서(Opus mapping family 0·1도 같다)를 내부 순서(3.3절: FL, FR, FC, LFE, SL, SR, BL,
+// BR)로 바꾸는 표다. VorbisChannelOrder[channels − 1][out]은 출력 채널 out이 가져올 원본 채널이다.
+// 채널 수별 출력 배치: 1 M, 2 FL FR, 3 FL FR FC, 4 FL FR SL SR, 5 FL FR FC SL SR, 6 FL FR FC LFE SL
+// SR, 7 FL FR FC LFE SL SR BC, 8 FL FR FC LFE SL SR BL BR. Vorbis의 rear 쌍은 4–6채널에서 SL·SR,
+// 8채널에서 BL·BR이다(3.28.2절).
+inline constexpr uint32 MaxVorbisOrderChannels = 8;
+inline constexpr uint8 VorbisChannelOrder[MaxVorbisOrderChannels][MaxVorbisOrderChannels] = {
+    {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {0, 2, 1, 0, 0, 0, 0, 0},
+    {0, 1, 2, 3, 0, 0, 0, 0}, {0, 2, 1, 3, 4, 0, 0, 0}, {0, 2, 1, 5, 3, 4, 0, 0},
+    {0, 2, 1, 6, 3, 4, 5, 0}, {0, 2, 1, 7, 3, 4, 5, 6}};
+
+// Vorbis 순서 교차 표본을 내부 순서 planar로 옮긴다. channels는 1–8이다.
+inline void DeinterleaveVorbisOrder(const float* interleaved, uint32 channels, uint64 frames,
+                                    float* planar) noexcept {
+    const uint8* order = VorbisChannelOrder[channels - 1];
+    for (uint64 index = 0; index < frames; ++index) {
+        const float* frame = interleaved + static_cast<usize>(index) * channels;
+        for (uint32 channel = 0; channel < channels; ++channel) {
+            planar[static_cast<usize>(channel) * frames + index] = frame[order[channel]];
+        }
+    }
+}
+
 } // namespace rocks::audio::sourcedetail

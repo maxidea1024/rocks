@@ -748,8 +748,8 @@ struct TraceReportOptions {
 - **identity 면제(D30).** Command struct·명령줄 enum은 직렬화하지 않으므로 stable ID가 없다.
   - `rocksids` 항목이 필요 없고 `ids add`를 부르지 않는다. 필드를 더하거나 이름을 바꿔도 빌드만 하면 된다.
   - 모듈 안 중복 판정과 descriptor 왕복에는 MetaCompiler가 정규 이름(`rocks::HostCommandLineOptions`)에서 만든 키를 쓴다. 이 키는 저장하지 않는다.
-  - Command 선언만 있는 모듈은 `Metadata`만 선언하면 되고 `<Name>.rocksids.json`이 없어도 된다(RMC2100 면제). 반대로 `rocksids`에 Command struct 항목이 있으면 RMC 오류다.
-  - 실행 파일 모듈(Programs 아래)도 `Metadata`를 선언할 수 있다. 지금 그런 모듈이 없으므로 CL1에서 Rocks.Build 경로를 함께 시험한다.
+  - Command 선언만 있는 모듈은 표지 헤더만 있으면 되고(빌드가 찾는다 — [리플렉션·빌드 보강](ReflectionFoundations.ko.md) 1.10절) `<Name>.rocksids.json`이 없어도 된다(RMC2100 면제). 반대로 `rocksids`에 Command struct 항목이 있으면 RMC 오류다.
+  - 실행 파일 모듈(Programs 아래)도 리플렉션 헤더를 가질 수 있다(`ModuleDirectory`가 있으면 빌드가 찾는다). 지금 그런 모듈이 없으므로 CL1에서 Rocks.Build 경로를 함께 시험한다.
 - **생성 코드.** Command struct마다 `GeneratedCommand<S>`를 낸다(`CppEmitter.cs` 796–815의 `Settings()` 선례와 같은 자리).
   - `Schema()` → `CommandLineSchema`(아래).
   - 필드마다 바인더 함수: 값 텍스트 하나를 그 필드 형식으로 바꿔 넣거나(배열은 원소 추가) 형식 오류를 진단에 남긴다. 함수표 하나로 묶어 스키마 필드 순서로 찾는다.
@@ -1142,7 +1142,7 @@ Result<int32> RunTraceReport(CommandContext& context, const TraceReportOptions& 
 |---|---|---|
 | 명령 하나의 코드 양 | 선언 약 25줄 + action | 선언 약 25줄 + 등록 1줄 |
 | 옵션을 더할 때 할 일 | `Option<T>` 하나를 만들고 명령에 넣고 action에서 꺼낸다 | 필드 하나와 `ROCKS_PROPERTY` 한 줄. `ids add`·`rocksids` 편집은 없다(identity 면제 — D30) |
-| 실행 파일 하나에 한 번 드는 비용 | 패키지 참조(중앙 버전) | Build.cs에 `Metadata` 헤더 목록 한 줄(MetaCompiler가 그 모듈을 처리한다). `rocksids` 파일은 없다 |
+| 실행 파일 하나에 한 번 드는 비용 | 패키지 참조(중앙 버전) | 헤더에 `ROCKS_STRUCT(Command(...))` 표지(빌드가 찾고 MetaCompiler가 그 모듈을 처리한다 — 규칙 수정 없음). `rocksids` 파일은 없다 |
 | 옵션 한 줄로 파싱·검증·도움말 | 된다(`Option<T>` + `Description`) | 된다(필드 + `ROCKS_PROPERTY(Help=…)`) |
 | 형식 변환 | 자동(`T`에서). 받는 표기는 `RocksCli` 사용자 파서가 C++과 같게 좁힌다 | 자동(필드 형식 + 생성 바인더) |
 | 결과 꺼내기 | 옵션마다 `GetValue(option)` | struct 필드 그대로(`options.format`) |
@@ -1270,7 +1270,7 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
 - **MetaCompiler**
   - 13.3절 RMC 검사 각각의 실패 사례(`Alias`+`Argument`, 위치 인자 순서, `Array` 위치 인자 둘, `Mandatory`+`Optional`, `Range` 형식·순서·기본값이 범위 밖, 이름·별칭 겹침, `Command` 이름 문법, `Help` 누락, 받지 않는 필드 형식, `Remaining` 둘·형식, `Group`에 필드, Command 키를 Command 밖에서 사용, Command struct에 설정·직렬화 지정자, Command struct에 리플렉션 `Validate`)
   - identity 면제: Command만 있는 모듈이 `rocksids` 없이 빌드되는지, `rocksids`에 Command 항목이 있으면 오류인지, 필드를 더해도 `ids add` 없이 빌드되는지
-  - 실행 파일 모듈(Programs 아래)의 `Metadata` 경로
+  - 실행 파일 모듈(Programs 아래)의 리플렉션 헤더 탐색 경로
   - descriptor 왕복(다른 모듈의 공용 옵션 struct)
   - 생성 코드: `ROCKS_BUILD_RELEASE && ROCKS_TARGET_KIND_GAME`에서 도움말 문자열이 빈 값이고, Program 대상 Release에서는 남는지(생성 결과 golden)
 - **출력 규약 golden(C++)**
@@ -1303,7 +1303,7 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
 | CL2 | Core 런타임 `CommandLine` 모듈: `CommandLineSchema.h`, 토큰화·매칭·생성 바인더 호출·필수·범위·`ValidateCommand`·진단·이름 제안·알 수 없는 인자 정책·`Remaining`·로그용 가리기·짧은 사용법 줄, Core `EditDistance`, Base `Guid` 텍스트 변환, 크기 측정 | CL1, AP1 | M |
 | AP2 | Rocks.Build `<exe>.BuildStamp.cpp`·`build::Description()`·`ROCKS_BUILD_BRANCH`, `ToolBuildId` 입력에서 제외, 시작 로그 묶음(D14 — 가린 명령줄은 CL2의 `RedactedArguments`) | AP1, CL2 | M |
 | CL3 | Developer `CommandLineTools`: 출력 규약 렌더러(도움말·오류)·응답 파일·`CommandSet`(`AddGroup` 포함)·`--version`, PlatformBase `TerminalColumns`, C++ 출력 규약 golden | CL2, AP2 | M |
-| CL4 | 이전: HostConfig에 `Metadata`와 `HostCommandLineOptions`(`--set`·`--config`·`--trace`·`--project`·실행 성격), 부트 순서(8.3절 — AppInfo 3단계), `HostSettings::ApplyCommandLine`·`TraceController::ApplyCommandLine` 입력 변경. RocksCommandlet 명령 넷과 묶음 `log`, `CommandletRegistry`·`CommandletOutput` 삭제, Config의 `RegisterConfigDumpCommandlet`을 `Programs/Commandlet`으로 옮김(덤프 본체는 Config에 남김). 실행 파일 등록 변경: Sandbox·ShaderToolSpike·벤치 넷·FoundationTests의 Build.cs에 `Metadata`(identity 면제), FoundationTests `process-probe`는 `Remaining`. Sandbox 고정 delta 상수를 지우고 `--deterministic`으로, 자체 시험 자식에 `--deterministic`을 넘김 | CL3 | M |
+| CL4 | 이전: HostConfig에 리플렉션 헤더(표지)와 `HostCommandLineOptions`(`--set`·`--config`·`--trace`·`--project`·실행 성격), 부트 순서(8.3절 — AppInfo 3단계), `HostSettings::ApplyCommandLine`·`TraceController::ApplyCommandLine` 입력 변경. RocksCommandlet 명령 넷과 묶음 `log`, `CommandletRegistry`·`CommandletOutput` 삭제, Config의 `RegisterConfigDumpCommandlet`을 `Programs/Commandlet`으로 옮김(덤프 본체는 Config에 남김). 실행 파일 등록 변경: Sandbox·ShaderToolSpike·벤치 넷·FoundationTests의 Build.cs에 `ModuleDirectory`와 리플렉션 헤더 폴더의 include 디렉터리(identity 면제 — 헤더는 빌드가 표지로 찾는다, [리플렉션·빌드 보강](ReflectionFoundations.ko.md) 1.10절), FoundationTests `process-probe`는 `Remaining`. Sandbox 고정 delta 상수를 지우고 `--deterministic`으로, 자체 시험 자식에 `--deterministic`을 넘김 | CL3 | M |
 | CL5 | C#: `Directory.Packages.props`·lock 파일·`NuGetAudit=false`·`Programs/ThirdPartyPackages.json`·허용 목록 policy·`BuildEvidence` 루트 목록, 새 어셈블리 `Rocks.Tooling.Cli`(`RocksCli` — 출력 규약 렌더러·파서 설정·사용자 파서), Rocks.Build.Cli·MetaCompiler(`ids` 포함)·ToolTests(`scaffold` 포함) 이전, 설치 SDK에 DLL 동봉 | — | M |
 | CL6 | 양쪽 같음 golden 시험(17절) | CL3, CL5 | S |
 | AP3 | `FrameTiming`(EngineTime 대체)·`LatestFrameIndex`, 렌더 packet 칸(RB1과 함께), worker 상속(CVar의 lane 묶음 장치에 `FrameTiming`을 넣는다), `Engine::IsForeground()` | AP1, RB1, CVR 묶음 장치 | M |
