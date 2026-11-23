@@ -229,12 +229,6 @@ private:
     bool previous_;
 };
 
-// Tarjan 반복 구현의 틀 하나다.
-struct LoaderTarjanFrame {
-    uint32 entry = 0;
-    uint32 position = 0;
-};
-
 // 포화 덧셈이다(임시 byte 합 — bulkRawBytes는 u64 최댓값까지 유효하다, 11.6절 9).
 inline uint64 LoaderSaturatingAdd(uint64 left, uint64 right) noexcept {
     return right > NumericLimits<uint64>::Max() - left ? NumericLimits<uint64>::Max()
@@ -261,10 +255,10 @@ struct AssetLoader::Impl {
           loadedRoots(allocator), loadedHandles(allocator), slotStates(allocator),
           freeLoadedSlots(allocator), publishedHolds(allocator), published(allocator),
           requests(allocator), units(allocator), admitCandidates(allocator), readyUnits(allocator),
-          postLoadUnits(allocator), tarjanIndex(allocator), tarjanLow(allocator),
-          tarjanOnStack(allocator), tarjanVisited(allocator), tarjanFrames(allocator),
-          tarjanStack(allocator), sccMembers(allocator), sccStarts(allocator), newUnits(allocator),
-          dependencyCounts(allocator), workStack(allocator) {
+          postLoadUnits(allocator), componentIndex(allocator), componentEntries(allocator),
+          componentFirst(allocator), componentTargets(allocator), sccMembers(allocator),
+          sccStarts(allocator), newUnits(allocator), dependencyCounts(allocator),
+          workStack(allocator) {
     }
 
     AssetLoader& owner;
@@ -316,12 +310,13 @@ struct AssetLoader::Impl {
     uint32 retireTail = LoaderNoIndex;
 
     // ResolveManifest 작업 공간이다(항목 표 크기 — 쓴 칸은 끝에 되돌린다).
-    Array<uint32> tarjanIndex;
-    Array<uint32> tarjanLow;
-    Array<uint8> tarjanOnStack;
-    Array<uint32> tarjanVisited;
-    Array<LoaderTarjanFrame> tarjanFrames;
-    Array<uint32> tarjanStack;
+    // componentIndex는 항목마다 이번 해석 그래프의 지역 번호(없으면 LoaderNoIndex),
+    // componentEntries는 지역 번호 → 항목, componentFirst·componentTargets는 지역 그래프 CSR(Core
+    // 공용 SCC가 읽는다)이다.
+    Array<uint32> componentIndex;
+    Array<uint32> componentEntries;
+    Array<uint32> componentFirst;
+    Array<uint32> componentTargets;
     Array<uint32> sccMembers;
     Array<uint32> sccStarts;
     Array<uint32> newUnits;
@@ -376,7 +371,7 @@ struct AssetLoader::Impl {
 
     // ---- ResolveManifest(11.6절 2) ----
 
-    void ResetTarjan() noexcept;
+    void ResetComponents() noexcept;
 
     // 항목 entry의 i번째 의존이 이번 해석에서 따라갈 Hard 대상이면 그 항목 번호, 아니면
     // LoaderNoIndex다.
@@ -384,9 +379,8 @@ struct AssetLoader::Impl {
 
     bool IsNew(uint32 entry) const noexcept;
 
-    Result<void> Visit(uint32 entry, uint32& counter) noexcept;
-
-    // root에서 닿는 새 항목들의 SCC를 sccMembers·sccStarts에 의존 먼저 순서로 담는다(반복 Tarjan).
+    // root에서 닿는 새 항목들의 SCC를 sccMembers·sccStarts에 의존 먼저 순서로 담는다(새 항목을 모아
+    // 지역 CSR 그래프를 만들고 Core algo::ForEachStrongComponent를 root부터 돌린다).
     Result<void> FindComponents(uint32 rootEntry) noexcept;
 
     // 새 단위들을 지운다(해석 실패 되돌림 — 아직 다른 단위·항목 표에 잇지 않았다).
