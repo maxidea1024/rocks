@@ -16,6 +16,9 @@ public sealed class VulkanGraphics : EngineModuleRules
 
     protected override string[] PublicDependencies => ["Graphics"];
 
+    // Vulkan headers are visible only to this module's sources (Docs/Design/BuildTargets section 3.5 BS3a).
+    protected override string[] PrivateDependencies => ["VulkanHeaders"];
+
     public override NativeModuleInput Configure(BuildContext context)
     {
         string backend = $"{ModuleDirectory}/Private";
@@ -33,9 +36,7 @@ public sealed class VulkanGraphics : EngineModuleRules
         return base.Configure(context) with
         {
             Sources = sources,
-            // Vulkan headers are visible only to this module's sources (adapter style).
-            PrivateIncludeDirectories = [context.PathInRoot(backend), .. ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "VulkanHeaders")],
-            PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, "VulkanHeaders")
+            PrivateIncludeDirectories = [context.PathInRoot(backend)]
         };
     }
 }

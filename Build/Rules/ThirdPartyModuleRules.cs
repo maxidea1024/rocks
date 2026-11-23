@@ -16,9 +16,13 @@ using Rocks.Tooling.Common;
 /// </code>
 /// Rule contract:
 /// <list type="bullet">
-/// <item>Third-party headers are not propagated. PublicIncludeDirectories is empty, and consuming modules take
-/// <see cref="ConsumerIncludeDirectories"/> and <see cref="ConsumerDefines"/> privately. Engine public headers never include
-/// third-party headers.</item>
+/// <item>Third-party modules are dependencies like any other module (Docs/Design/BuildTargets section 3.5 BS3a, UE External modules): the
+/// manifest include directories are public includes and its consumerDefines are consumer defines (dependents only; the library's own build
+/// defines stay private).
+/// Consuming modules list the library as a private dependency (engine public headers never include third-party headers; the public header
+/// check catches it). Header-only (<c>kind: headers</c>) and binary (<c>kind: binary</c>, loaded at run time) libraries with include
+/// directories are modules without sources. The library folder is the ModuleDirectory, so the include ownership check sees third-party
+/// headers.</item>
 /// <item>Always optimized (<see cref="CodeOptimization.Always"/>) so that asset decoding is not drastically slower in Debug
 /// builds. CRT, configuration macros and NDEBUG follow the configuration. A manifest with <c>linkTimeOptimization: false</c> is
 /// excluded from ThinLTO even in Release, and one with <c>sanitizerInstrumentation: false</c> is not instrumented even in Asan.</item>
@@ -47,17 +51,22 @@ public abstract class ThirdPartyModuleRules : ModuleRules
     {
         string library = LibraryDirectory(context, ModuleName);
         ThirdPartyManifest manifest = ThirdPartyManifest.Read(context.PathInRoot(library));
-        if (manifest.Kind != ThirdPartyKind.Code)
+        if (manifest.Kind == ThirdPartyKind.Data || manifest.Kind != ThirdPartyKind.Code && manifest.IncludeDirectories.Count == 0)
         {
-            throw new FormatException($"{library}: only a code library has a module rule (kind is {manifest.Kind})");
+            throw new FormatException($"{library}: only a code library or a header-only or binary library with include directories has a module rule " +
+                $"(kind is {manifest.Kind})");
         }
 
+        bool code = manifest.Kind == ThirdPartyKind.Code;
         return new()
         {
             Name = ModuleName,
-            Sources = manifest.TranslationUnits.Select(unit => context.PathInRoot($"{library}/{unit}")).ToArray(),
-            PrivateIncludeDirectories = manifest.IncludeDirectories.Select(directory => context.PathInRoot($"{library}/{directory}")).ToArray(),
-            PrivateDefines = manifest.DefinesFor(context.Platform.ToString(), context.Architecture.ToString()),
+            ModuleDirectory = library,
+            Sources = code ? manifest.TranslationUnits.Select(unit => context.PathInRoot($"{library}/{unit}")).ToArray() : [],
+            PublicIncludeDirectories = manifest.IncludeDirectories.Select(directory => context.PathInRoot($"{library}/{directory}")).ToArray(),
+            // Consumer defines go to dependents only: the library sources #define some of them themselves (BS3a).
+            ConsumerDefines = manifest.ConsumerDefines,
+            PrivateDefines = code ? manifest.DefinesFor(context.Platform.ToString(), context.Architecture.ToString()) : [],
             // Manifest compileArguments use GCC-style spellings, which clang-cl accepts as is (ThirdPartyManifest.AllowedCompileArguments).
             // The /clang: escape is not used because build input validation rejects it.
             AdditionalCompileArguments = manifest.CompileArguments,
@@ -70,26 +79,4 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             ThirdParty = true
         };
     }
-
-    /// <summary>
-    /// Paths from which an adapter (a consuming module's Private sources) includes third-party headers. Multiple libraries are
-    /// concatenated in order. Used for code libraries as well as header-only libraries (<c>kind: headers</c>, include only, no
-    /// module dependency) and the committed public headers of binary libraries (<c>kind: binary</c>).
-    /// Usage example: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "VulkanHeaders", "SpirvReflect")</c>.
-    /// </summary>
-    public static IReadOnlyList<string> ConsumerIncludeDirectories(BuildContext context, params string[] modules) =>
-        modules.SelectMany(module =>
-        {
-            string library = LibraryDirectory(context, module);
-            return ThirdPartyManifest.Read(context.PathInRoot(library)).IncludeDirectories
-                .Select(directory => context.PathInRoot($"{library}/{directory}"));
-        }).ToArray();
-
-    /// <summary>
-    /// Defines that must match the library build when an adapter includes third-party headers (e.g. zlib Z_PREFIX). The build
-    /// tool rejects the same name with conflicting values.
-    /// </summary>
-    public static IReadOnlyList<string> ConsumerDefines(BuildContext context, params string[] modules) =>
-        modules.SelectMany(module => ThirdPartyManifest.Read(context.PathInRoot(LibraryDirectory(context, module))).ConsumerDefines)
-            .Distinct(StringComparer.Ordinal).ToArray();
 }

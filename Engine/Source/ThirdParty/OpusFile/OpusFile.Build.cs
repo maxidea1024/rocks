@@ -9,13 +9,13 @@ public sealed class OpusFile : ThirdPartyModuleRules
     protected override string ModuleName => "OpusFile";
 
     // opusfile.h includes ogg/ogg.h and opus_multistream.h, so the library itself also compiles against the Ogg and Opus headers.
-    // Consumers take all three libraries.
+    // Its public headers include them, so they are public dependencies (consumers see them through OpusFile).
     public override NativeModuleInput Configure(BuildContext context)
     {
         NativeModuleInput input = base.Configure(context);
         return input with
         {
-            PrivateIncludeDirectories = [.. input.PrivateIncludeDirectories, .. ConsumerIncludeDirectories(context, "Ogg", "Opus")],
+            PublicDependencies = ["Ogg", "Opus"],
         };
     }
 }

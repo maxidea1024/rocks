@@ -11,9 +11,6 @@ using Rocks.Build.Rules;
 /// </summary>
 public sealed class ShaderFormatVulkan : EngineModuleRules
 {
-    // Tool and library headers included only by this module's sources (adapter style).
-    private static readonly string[] ToolHeaders = ["DirectXShaderCompiler", "SpirvTools", "SpirvReflect"];
-
     protected override string Group => "Developer";
 
     protected override string ModuleName => "ShaderFormatVulkan";
@@ -23,6 +20,9 @@ public sealed class ShaderFormatVulkan : EngineModuleRules
 
     protected override string[] PublicDependencies => ["Graphics", "ShaderCompilerCommon", "ShaderToolLoader", "SpirvReflect"];
 
+    // Tool headers included only by this module's sources (Docs/Design/BuildTargets section 3.5 BS3a).
+    protected override string[] PrivateDependencies => ["DirectXShaderCompiler", "SpirvTools"];
+
     public override NativeModuleInput Configure(BuildContext context)
     {
         string backend = $"{ModuleDirectory}/Private";
@@ -31,8 +31,7 @@ public sealed class ShaderFormatVulkan : EngineModuleRules
         {
             Sources = [.. Directory.GetFiles(context.PathInRoot(backend), "*.cpp").Order(StringComparer.Ordinal),
                 .. context.Sources($"{backend}/{platform}")],
-            PrivateIncludeDirectories = [context.PathInRoot(backend), .. ThirdPartyModuleRules.ConsumerIncludeDirectories(context, ToolHeaders)],
-            PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, ToolHeaders)
+            PrivateIncludeDirectories = [context.PathInRoot(backend)]
         };
     }
 }
