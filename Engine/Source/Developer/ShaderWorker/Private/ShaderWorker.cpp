@@ -10,7 +10,10 @@
 #include <ShaderCompilerCommon/ShaderFormatBackend.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 #include <ShaderFormatD3D/D3DShaderFormat.h>
+#include <ShaderFormatMetal/MetalShaderFormat.h>
+#include <ShaderFormatOpenGL/OpenGLShaderFormat.h>
 #include <ShaderFormatVulkan/VulkanShaderFormat.h>
+#include <ShaderToolLoader/MetalToolchain.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +33,8 @@ constexpr StringView TestHooksOption("--test-hooks");
 constexpr usize MaxDecimalDigits = 10;
 // "done "·"held "·"child " 뒤 숫자를 붙인 줄의 버퍼다.
 constexpr usize ControlReplyBytes = 32;
+// 처리기 임시 디렉터리 이름(<work-dir> 아래, SH1e E1)이다.
+constexpr char ScratchDirectoryName[] = "Backend";
 
 bool ParseUnsigned(StringView text, uint64 limit, uint64& value) noexcept {
     if (text.IsEmpty() || text.ByteCount() > MaxDecimalDigits) {
@@ -348,11 +353,37 @@ private:
         case ShaderFormatModule::Vulkan:
             return &vulkan_;
         case ShaderFormatModule::Metal:
+            return &metal_;
         case ShaderFormatModule::OpenGL:
-            break;
+            return &opengl_;
         }
 
         return nullptr;
+    }
+
+    // Metal 도구(system 도구)를 처음 쓸 때 찾는다(워커 수명 동안 고정 — 도구 조회와 컴파일이 같은
+    // 경로를 쓴다, SH1e E7).
+    const MetalToolchain& Metal() noexcept {
+        if (!metalTried_) {
+            metalTried_ = true;
+            LocateMetalToolchain(metalToolchain_);
+        }
+
+        return metalToolchain_;
+    }
+
+    // 처리기 임시 디렉터리(<work-dir>/Backend)를 처음 쓸 때 만든다(SH1e E1). 실패하면 빈 값이다.
+    StringView Scratch() noexcept {
+        if (!scratchTried_) {
+            scratchTried_ = true;
+            if (Path(ScratchDirectoryName, scratch_) &&
+                platform::MakeDirectoryTree(platform::PhysicalFileSystem(), scratch_,
+                                            strlen(scratch_))) {
+                scratchReady_ = true;
+            }
+        }
+
+        return scratchReady_ ? StringView(scratch_) : StringView();
     }
 
     // 도구를 처음 쓸 때 연다(워커 수명 동안 연 채로 둔다).
@@ -406,10 +437,18 @@ private:
             return;
         }
 
-        backend->Compile(*format, job, tools, result);
+        ShaderBackendContext context;
+        context.tools = tools;
+        if (format->module == ShaderFormatModule::Metal) {
+            context.metal = &Metal();
+            context.scratchDirectory = Scratch();
+        }
+
+        backend->Compile(*format, job, context, result);
     }
 
-    // 저장소 도구마다 열어 확인한다(11절 3항). system 도구 지문은 SH1e(Metal)에서 채운다.
+    // 저장소 도구마다 열어 확인하고 system 도구(Apple MetalToolchain) 지문을 채운다(11절 3항,
+    // SH1e E7).
     void QueryTools(ShaderWorkerResponse& response) noexcept {
         char root[MaxShaderToolPathBytes];
         usize rootBytes = 0;
@@ -420,6 +459,9 @@ private:
                 auto system = response.systemTools.TryEmplaceBack(allocator_);
                 if (system) {
                     (void)system.Value()->name.TryAssign(StringView(tool.name));
+                    if (StringView(tool.name) == StringView(MetalToolName)) {
+                        FillMetal(*system.Value());
+                    }
                 }
 
                 continue;
@@ -458,6 +500,21 @@ private:
 
             (void)library.Close();
         }
+    }
+
+    void FillMetal(ShaderWorkerSystemTool& system) noexcept {
+        static_assert(MetalToolExecutables == ShaderWorkerSystemToolExecutables,
+                      "Metal fingerprint executables must match the worker message");
+        const MetalToolchain& metal = Metal();
+        if (!metal.found || !system.version.TryAssign(StringView(metal.version))) {
+            return;
+        }
+
+        for (usize index = 0; index < MetalToolExecutables; ++index) {
+            system.executables[index] = metal.sha256[index];
+        }
+
+        system.found = true;
     }
 
     // 시험 hook(SC7)이다. false는 제어 통로 실패다.
@@ -549,6 +606,13 @@ private:
     bool toolsTried_ = false;
     D3DShaderFormatBackend d3d_;
     VulkanShaderFormatBackend vulkan_;
+    OpenGLShaderFormatBackend opengl_;
+    MetalShaderFormatBackend metal_;
+    MetalToolchain metalToolchain_;
+    bool metalTried_ = false;
+    char scratch_[MaxShaderWorkerPathBytes] = {};
+    bool scratchTried_ = false;
+    bool scratchReady_ = false;
     // Crash hook이 쓰는 주소(null)다.
     int32* crashTarget_ = nullptr;
 };

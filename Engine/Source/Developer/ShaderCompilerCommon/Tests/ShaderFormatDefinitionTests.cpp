@@ -2,6 +2,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/File.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
+#include <Base/InitializerList.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
@@ -184,6 +185,18 @@ TEST(ShaderFormat_EngineWindowsProfileCarriesDecisionsAndMeasurements) {
     CHECK((d3d12->deviceRequirements & DeviceRequiresD3D12ShaderModel6_6) != 0);
     CHECK((d3d12->features & ShaderFeatureWaveOperations) != 0);
     CHECK(d3d12->compiler.imageFormat == ImageFormatExpansion::Empty);
+    // 개정 29(E8): typedUavLoad는 장치 보장 기능이고 D3D12만 장치 요구로 보장한다.
+    CHECK((d3d12->features & ShaderFeatureTypedUavLoad) != 0);
+    CHECK((d3d12->deviceRequirements & DeviceRequiresD3D12TypedUavLoadAdditionalFormats) != 0);
+    CHECK(!IsRuntimeCheckedShaderFeature(ShaderFeatureTypedUavLoad));
+    for (const char* id : {"D3D11_SM5", "VULKAN_SM5", "GLES31_PC", "GLES31_ANDROID"}) {
+        const ShaderFormatDefinition* other = Find(profile, id);
+        REQUIRE(other != nullptr);
+        CHECK((other->features & ShaderFeatureTypedUavLoad) == 0);
+    }
+
+    CHECK(StringView(ImageFormatName(ImageFormatIndex("r11g11b10f"))) == "r11g11b10f");
+    CHECK(StringView(ImageFormatName(IndexNone)) == "unknown");
 
     // 결정 2: HLSL 2021은 D3D12·Vulkan·Metal 켬, D3D11 끔(D3D11의 2021 셰이더는 SPIRV-Cross 경로).
     const ShaderFormatDefinition* d3d11 = Find(profile, "D3D11_SM5");

@@ -5,8 +5,8 @@ using Rocks.Build.Rules;
 namespace Rocks.Tooling.Checks;
 
 /// <summary>
-/// Release 배제 위반 하나다. Rule은 <c>release-developer-module</c>·<c>release-shader-compiler</c>·<c>release-windows-opengl</c>이고
-/// Item은 위반 대상(Developer 모듈 이름, 링크 입력 이름, OpenGLGraphics)이다.
+/// Release 배제 위반 하나다. Rule은 <c>release-developer-module</c>·<c>release-editor-module</c>·<c>release-shader-compiler</c>·
+/// <c>release-windows-opengl</c>이고 Item은 위반 대상(Developer·Editor 모듈 이름, 링크 입력 이름, OpenGLGraphics)이다.
 /// </summary>
 public sealed record ReleaseViolation(string Rule, NativePlatform Platform, string Target, string Module, string Item)
 {
@@ -23,10 +23,12 @@ public sealed record ReleaseException(string Rule, NativePlatform Platform, stri
 public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures, IReadOnlyList<string> Notices);
 
 /// <summary>
-/// Release 배제 정책이다(Docs/Design/ShaderSystem 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
-/// 각 플랫폼(Windows x64·macOS arm64·Android arm64)으로 규칙 평가해 다음을 거부한다.
+/// Release 배제 정책이다(Docs/Design/ShaderSystem 9절, Docs/Design/BuildTargets 3.3절 BD20). 출시 타깃(Game·Client·Server, UE Shipping
+/// 대상)을 Release 구성의 각 플랫폼(Windows x64·macOS arm64·Android arm64 가운데 그 타깃 종류가 빌드되는 곳 — Server는 Android 제외)으로
+/// 규칙 평가해 다음을 거부한다.
 /// <list type="bullet">
 /// <item><c>release-developer-module</c>: 모듈 도달 집합(켠 플러그인 모듈 포함)에 Developer 모듈(<see cref="NativeModuleInput.Type"/>)이 있다.</item>
+/// <item><c>release-editor-module</c>: 도달 집합에 Editor 모듈이 있다(Release가 아닌 구성은 빌드 입력의 type 검사가 막는다).</item>
 /// <item><c>release-shader-compiler</c>: 도달 모듈의 시스템 라이브러리·prebuilt 라이브러리·링크 인자에 d3dcompiler·dxcompiler가 있다.</item>
 /// <item><c>release-windows-opengl</c>: Windows 대상이 OpenGLGraphics에 닿는다(GLES31_PC는 개발용 미리보기, UE와 같다). Android는 GLES
 /// backend로 링크한다.</item>
@@ -93,14 +95,14 @@ public static class ReleaseExclusion
             }
 
             var targets = new List<(string Name, IReadOnlyList<string> Modules)>();
-            foreach (TargetRules target in rules.Targets.Where(target => target.Type == TargetType.Game))
+            foreach (TargetRules target in rules.Targets.Where(target => Evaluates(target.Type, platform)))
             {
                 // 켠 플러그인 모듈은 타깃이 참조하지 않아도 주 실행 파일에 링크된다(Docs/Design/BuildTargets 3.9절 BD36·BD38). 해석
                 // 오류(끈 플러그인·빠진 모듈 사용)도 이 타깃의 Release 빌드를 막으므로 정책 실패로 알린다.
                 try
                 {
                     var set = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine(target.Name, target.Plugins, root), rules.Plugins, platform,
-                        NativeConfiguration.Release, target.Type);
+                        NativeConfiguration.Release, target.Kind);
                     set.Apply(rules.Modules, target.Modules);
                     targets.Add((target.Name, [.. target.Modules, .. set.IncludedPluginModules]));
                 }
@@ -116,6 +118,13 @@ public static class ReleaseExclusion
         ReleaseExclusionResult result = Apply(violations, KnownExceptions);
         return result with { Failures = [.. failures, .. result.Failures] };
     }
+
+    /// <summary>
+    /// 이 타깃 종류를 이 플랫폼의 Release로 평가하는가다(Docs/Design/BuildTargets 3.3절 BD20): 출시 타깃(Game·Client·Server)이고 그 종류가 이
+    /// 플랫폼에서 빌드된다(3.1절 표 — Server는 Android가 아니다). Editor·Program은 대상이 아니다.
+    /// </summary>
+    public static bool Evaluates(TargetType type, NativePlatform platform) =>
+        type is TargetType.Game or TargetType.Client or TargetType.Server && RuleLoader.SupportsPlatform(type, platform);
 
     /// <summary>
     /// 모듈 종류(<see cref="NativeModuleInput.Type"/>)가 Developer인 모듈 이름이다(Docs/Design/BuildTargets 3.9절 BD38). 엔진 모듈은
@@ -148,7 +157,9 @@ public static class ReleaseExclusion
                 "Editor" => ModuleType.Editor,
                 _ => ModuleType.Runtime
             } : ModuleType.Runtime;
-            if (module.Type != expected)
+            // Runtime 폴더의 모듈은 규칙이 ServerOnly·ClientOnly로 좁힐 수 있다(BS2b).
+            bool narrowed = expected == ModuleType.Runtime && module.Type is ModuleType.ServerOnly or ModuleType.ClientOnly;
+            if (module.Type != expected && !narrowed)
             {
                 failures.Add(new($"module {module.Name}", 0, "module-type-group",
                     $"module {module.Name} in {directory} has type {module.Type}, expected {expected}; start an overridden Configure from base.Configure"));
@@ -179,6 +190,11 @@ public static class ReleaseExclusion
                 if (developerModules.Contains(name))
                 {
                     violations.Add(new("release-developer-module", platform, target, name, name));
+                }
+
+                if (module.Type == ModuleType.Editor)
+                {
+                    violations.Add(new("release-editor-module", platform, target, name, name));
                 }
 
                 IEnumerable<string> links = module.SystemLibraries.Concat(module.PrebuiltLibraries.Select(Path.GetFileName))

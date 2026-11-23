@@ -21,6 +21,7 @@ internal static class InputValidation
     {
         RequireAbsoluteRoots(request);
         ValidateLinkType(request);
+        ValidateModuleTypes(request);
         if (request.MaxParallelism < 1 || request.MaxParallelism > ProcessRunner.MaximumConcurrentProcesses)
         {
             throw new ArgumentOutOfRangeException(nameof(request.MaxParallelism),
@@ -216,6 +217,23 @@ internal static class InputValidation
                 }
             }
         }
+    }
+
+    // 모듈 type(Docs/Design/BuildTargets 3.3절 BS2b)이다. 빌드 대상(없으면 전부)에서 링크 의존·플러그인 모듈·동적 모듈로 닿는 모듈은
+    // 이 타깃·구성에 들어갈 수 있는 type이어야 한다. 기술자 모듈은 먼저 걸러지므로 걸리는 것은 엔진 모듈과 SDK 모듈이다.
+    private static void ValidateModuleTypes(NativeBuildRequest request)
+    {
+        if (!Enum.IsDefined(request.Target.Type))
+        {
+            throw new ArgumentException($"Target: unsupported target type {(int)request.Target.Type}.");
+        }
+
+        if (request.Modules.FirstOrDefault(module => !Enum.IsDefined(module.Type)) is { } unsupported)
+        {
+            throw new ArgumentException($"Module {unsupported.Name}: unsupported module type {(int)unsupported.Type}.");
+        }
+
+        ModuleTypeRules.ValidateReach(request.Target, request.Configuration, request.Modules, request.Targets);
     }
 
     // 링크 방식(Docs/Design/BuildTargets 3.8절 BD17). Modular는 Android(UE도 모바일에서 거부)와 Asan·Coverage·Release 구성에서 쓰지

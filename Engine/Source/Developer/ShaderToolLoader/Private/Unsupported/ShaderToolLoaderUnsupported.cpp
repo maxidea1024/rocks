@@ -1,3 +1,5 @@
+#include "../MetalToolchainInternal.h"
+#include <ShaderToolLoader/ShaderToolCalls.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 
 // 셰이더 도구는 개발 호스트(Windows·macOS)에서만 돈다. 그 밖의 플랫폼(Android)은 저장소가 없다.
@@ -29,4 +31,23 @@ ShaderToolLoadStatus CompileWithDxc(const DxcFunctions&, const DxcCompileRequest
     return status;
 }
 
+// FXC는 Windows 도구다(Windows 밖에는 구현이 없다 — 11.1절 SH1e E3).
+ShaderToolOutcome CompileWithFxc(const FxcFunctions&, const FxcCompileRequest&,
+                                 Array<uint8>& object, String& diagnostics) noexcept {
+    object.Clear();
+    diagnostics.Clear();
+    (void)diagnostics.TryAppend("FXC runs only on Windows");
+    return ShaderToolOutcome::UnsupportedHost;
+}
+
 } // namespace rocks::shader
+
+namespace rocks::shader::metal_toolchain_detail {
+
+// Metal 도구는 개발 호스트(macOS·Windows)에만 있다.
+bool FindMetalExecutables(char (&)[MaxShaderToolPathBytes],
+                          char (&)[MaxShaderToolPathBytes]) noexcept {
+    return false;
+}
+
+} // namespace rocks::shader::metal_toolchain_detail

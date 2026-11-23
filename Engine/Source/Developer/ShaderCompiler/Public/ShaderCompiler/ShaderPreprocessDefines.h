@@ -19,6 +19,8 @@
 //   __SHADER_TARGET_* 대신)
 // - ROCKS_HLSL2021 = 0·1 (job 옵션, 기본은 형식 정의 language.hlsl2021)
 // - ROCKS_VERTEX_SHADER·ROCKS_PIXEL_SHADER·ROCKS_COMPUTE_SHADER 가운데 job 단계 하나 = 1
+// - 형식 기능마다 ROCKS_FEATURE_<이름> = 0·1 (형식 정의 features — COMPUTE·WAVE_OPERATIONS·
+//   VERTEX_VIEWPORT_LAYER_OUTPUT·TYPED_UAV_LOAD, 개정 29)
 // - job 정의. 이름이 ROCKS_·__로 시작하면 ReservedDefine, 같은 이름이 두 번이면 DuplicateDefine,
 //   이름이 식별자가 아니거나 값에 줄바꿈이 있으면 InvalidDefine이다.
 // 결과는 이름 byte 순이다. 형식·컴파일러 매크로의 파생(ROCKS_SPIRV, ROCKS_IMAGE_FORMAT)은

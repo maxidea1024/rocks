@@ -22,7 +22,7 @@
 | P4 | 도구 표 생성·binary 의존 정책·Release 배제 검사 | 이 문서 | **구현**(Windows. macOS 미검증, 알려진 Release 예외 2건은 SH2까지) | SH0, SH2 | P3, P10 | 9절 |
 | P5 | 셰이더 job 키 | 이 문서 | 설계(개정 23, A3 API에 맞춤) — 구현은 SH1b | SH1 | A2, A3, P6a | 10절 |
 | P6a | 형식 정의 스키마와 파일, 엔진 컴파일 프로필 | 이 문서 | **구현**(2026-11-17, Windows 시험) | P5, P14, P6b, SH1 | A0-C(JSON), 결정 2·3·5(결정됨) | 12.1절 |
-| P6b | TargetProfile 필드·매니페스트 v2·엔진 내장 셰이더 라이브러리 | 이 문서 | 설계 | SH2 | A1, A4, P6a, P14 | 12.3절 |
+| P6b | TargetProfile 필드·매니페스트 v2·엔진 내장 셰이더 라이브러리 | 이 문서 | 설계 확정(개정 31, 12.3.1절) | SH2 | A1, A4, P6a, P14 | 12.3절 |
 | P7 | MetaCompiler 셰이더 파라미터 | 이 문서 | 설계 | SH3 | B1–B8 | 13절 |
 | P8 | 다른 문서 개정 | 이 문서 | 목록 | 모든 단계의 기준 | 결정별 기한(15절) | 14절 |
 | P9 | Vulkan 선행 | 이 문서·[VulkanGraphics](../VulkanGraphics.ko.md) | **구현**(Windows. VulkanGraphics 개정 1, Android는 교차 빌드만) | SH2 | P3, P10 | 5.3 |
@@ -30,7 +30,7 @@
 | P11 | OpenGL ES 선행(OpenGLGraphics를 UE `OpenGLDrv` 방식으로) | [OpenGL ES backend](../OpenGLESGraphics.ko.md)·이 문서 | **구현**(2026-11-17, Windows 미리보기. Android는 컴파일만, 실행은 P13) | P13, SH2, SH6 | A0-G | 5.3 |
 | P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
 | P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
-| P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 | SH2, P6b | P6a | 12절 |
+| P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 확정(개정 31, 12.2.1절) | SH2, P6b | P6a | 12절 |
 | P15 | D3D11Graphics·MetalGraphics 설계 | EngineRuntime | D3D11 **구현**(10.2절), Metal 미설계 | SH5 | P12(Metal) | 5.3 |
 
 선행 작업 뒤 첫 단계인 SH0(16절)은 **Windows 부분 구현**(2026-11-17, `feature/shader-tools`, `Programs/ShaderToolSpike`)이다. 형식별 산출·검증·리플렉션 덤프·`ROCKS_IMAGE_FORMAT` 확인과 Windows에서 할 수 있는 측정(S2·S3·S6·S8·S12 데스크톱)을 마쳤고, macOS 측정(S1 macOS DXC 서명, S3 호스트 사이, S9)이 남았다. 결과는 5.4절, 진척은 16절이다.
@@ -176,4 +176,4 @@
 | S13 | SPIRV-Cross가 HLSL `Buffer<T>`·`RWBuffer<T>`(typed buffer)를 ESSL `samplerBuffer`·`isamplerBuffer`·`usamplerBuffer`와 `texelFetch`, `imageBuffer`와 `imageLoad`·`imageStore`로 내는지, 결합 sampler 목록에 typed buffer SRV가 들어가는지 | 7.2절 4항 GLES typed buffer 규칙(Renderer RQ10) | Windows(2026-11-20, SPIRV-Cross C API 0.68.0, `TypedBuffer.ps`·`TypedBuffer.cs` fixture): ESSL 320(`GLES31_PC`·`GLES31_ANDROID` 같음)에서 `Buffer<float4>`·`Buffer<int4>`·`Buffer<uint>`가 `samplerBuffer`·`isamplerBuffer`·`usamplerBuffer`와 `texelFetch`로, `RWBuffer<float4>`(rgba8 지정)·`RWBuffer<uint>`가 `layout(rgba8) writeonly imageBuffer`·`layout(r32ui) uimageBuffer`와 `imageLoad`·`imageStore`로 나온다(읽지 않는 UAV에 `writeonly`가 붙는다). 결합 sampler 목록(`spvc_compiler_get_combined_image_samplers`)에는 텍스처·샘플러 짝(`albedo`·`albedoSampler`)만 있고 typed buffer SRV는 **들어가지 않는다**. typed buffer는 SPIR-V binding을 그대로 단 `layout(binding = n)`으로, 결합 sampler는 binding 없이 id 이름(`_57`)으로 나온다. MSL 2.1은 기본값이면 `texture2d`와 좌표 변환 함수로 흉내 내고 `texture_buffer_native`를 켜면 `texture_buffer<T>`(UAV는 `access::write`·`access::read_write`)다. DXIL·SPIR-V(`spirv-val`) 모두 통과. 결론은 7.2절 4항 |
 | S14 | VS 출력 `SV_RenderTargetArrayIndex`·`SV_ViewportArrayIndex`의 변환: DXC DXIL(SM 6.6), DXC SPIR-V(target env 1.1에서 `ShaderViewportIndexLayerEXT` capability·`SPV_EXT_shader_viewport_index_layer` 확장으로 나오는지), SPIRV-Cross MSL(`[[render_target_array_index]]`·`[[viewport_array_index]]`), FXC `vs_5_0`이 받는지 | 7.2절 7항 VS layer·viewport 출력 규칙의 형식별 `vertexViewportLayerOutput`(Renderer RQ14), `D3D11_SM5` 포함 여부 | Windows(2026-11-20, `LayerViewport.vs` fixture: layer·viewport를 함께 낸다): DXC DXIL은 SM 6.6과 6.0 모두 받고 서명되며 요구 플래그 `D3D_SHADER_REQUIRES_VIEWPORT_AND_RT_ARRAY_INDEX_FROM_ANY_SHADER_FEEDING_RASTERIZER`(0x2000)가 선다. DXC SPIR-V(vulkan1.1)는 capability `ShaderViewportIndexLayerEXT`(5254)와 확장 `SPV_EXT_shader_viewport_index_layer`를 내고 `spirv-val`을 통과한다. SPIRV-Cross MSL 2.1은 `[[render_target_array_index]]`·`[[viewport_array_index]]`, HLSL 5.0은 `SV_RenderTargetArrayIndex`·`SV_ViewportArrayIndex`다. ESSL은 만들어지지만 `#extension GL_NV_viewport_array2 : require`가 붙는다. FXC `vs_5_0`은 원문과 SPIRV-Cross HLSL 5.0 출력을 모두 받고 같은 요구 플래그를 세운다. 결론은 7.2절 7항(`D3D11_SM5`에도 넣는다, 개정 21) |
 
-SH0 남은 측정(2026-11-20): Windows에서 할 수 있는 측정은 모두 끝났다. 남은 것은 macOS가 필요한 S1(macOS DXC 서명)·S3(Windows–macOS 사이 byte 비교)·S9, 기계가 하나라 못 잰 S2(Windows 10 요건)·S3(FMA3 유무·OS 버전)·S12(다른 GPU 공급자), 다른 단계 몫인 S5(Vulkan·GLES 미리보기 쿠킹 경로와 루트 상수 대응, SH2)·S7(SH1 완료 기준)·S11(SH6, P13 미설계)·S12(기기, SH6)다.
+SH0 남은 측정(2026-11-20): Windows에서 할 수 있는 측정은 모두 끝났다. 남은 것은 macOS가 필요한 S1(macOS DXC 서명)·S3(Windows–macOS 사이 byte 비교)·S9, 기계가 하나라 못 잰 S2(Windows 10 요건)·S3(FMA3 유무·OS 버전)·S12(다른 GPU 공급자), 다른 단계 몫인 S5(Vulkan·GLES 미리보기 쿠킹 경로와 루트 상수 대응, SH2)·S7(SH1 완료 기준)·S11(SH6, P13 미설계)·S12(기기, SH6)다. 개정 29: macOS 측정(S1·S3·S9)의 절차는 스파이크 대신 `shader-compile`로 옮겼다(11.1절 E10). macOS에서 DXC를 여는 일(P3 macOS 산출물)이 먼저다.

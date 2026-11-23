@@ -50,6 +50,30 @@ StringView StageDefine(uint32 stage) noexcept {
     }
 }
 
+// 형식 기능 정의(SC10, 개정 29)다. 기능마다 늘 0·1로 정의한다.
+struct FeatureDefine {
+    uint32 bit;
+    const char* name;
+};
+
+constexpr FeatureDefine FeatureDefines[] = {
+    {ShaderFeatureCompute, "ROCKS_FEATURE_COMPUTE"},
+    {ShaderFeatureWaveOperations, "ROCKS_FEATURE_WAVE_OPERATIONS"},
+    {ShaderFeatureVertexViewportLayerOutput, "ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT"},
+    {ShaderFeatureTypedUavLoad, "ROCKS_FEATURE_TYPED_UAV_LOAD"}};
+
+constexpr uint32 DefinedFeatures() noexcept {
+    uint32 bits = 0;
+    for (const FeatureDefine& feature : FeatureDefines) {
+        bits |= feature.bit;
+    }
+
+    return bits;
+}
+
+static_assert(DefinedFeatures() == AllShaderFeatures,
+              "every shader feature needs a ROCKS_FEATURE_ define (SC10)");
+
 bool IsIdentifier(StringView name) noexcept {
     if (name.IsEmpty() || name.ByteCount() > MaxShaderDefineNameBytes) {
         return false;
@@ -169,6 +193,11 @@ ShaderSourceStatus BuildShaderPreprocessDefines(const ShaderFormatDefinition& fo
         Decimal(format.compiler.shaderModel.minor, minor));
     add(StringView(), "ROCKS_HLSL2021", hlsl2021 ? StringView("1") : StringView("0"));
     add(StringView(), stageName, "1");
+    for (const FeatureDefine& feature : FeatureDefines) {
+        add(StringView(), StringView(feature.name),
+            (format.features & feature.bit) != 0 ? StringView("1") : StringView("0"));
+    }
+
     for (const ShaderDefine& define : jobDefines) {
         add(StringView(), define.name, define.value);
     }

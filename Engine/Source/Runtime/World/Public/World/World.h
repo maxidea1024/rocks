@@ -413,6 +413,11 @@ public:
 
     Result<ActorState> GetActorState(ObjectHandle actor) const noexcept;
 
+    // Actor의 Spawn 순번이다(이 World에서 Spawn할 때마다 1씩 커지는 번호 — 먼저 Spawn한 것이 작다).
+    // Level의 Actor 배열은 순서를 정하지 않으므로(7.2절) 만든 순서가 필요한 곳(PlayerStart 선택 —
+    // Docs/Design/EngineRuntime 19.2절)은 이 번호를 쓴다. 레코드가 없으면 StaleHandle이다.
+    Result<uint64> GetSpawnOrder(ObjectHandle actor) const noexcept;
+
     // 레코드가 있는 모든 Actor(Constructed·파괴 대기 포함)의 handle을 visitor(ObjectHandle)로
     // 넘긴다. 순회 중 Spawn·Destroy 요청은 허용하며 새 Actor는 이번 순회에 포함되지 않을 수 있다.
     template <class Visitor>
@@ -697,6 +702,8 @@ private:
         // Spawn 인자의 Transform이다(FinishSpawning이 root에 쓴다).
         bool hasSpawnTransform = false;
         Transform spawnTransform;
+        // Spawn 순번이다(GetSpawnOrder — spawnedTotal_로 매긴다).
+        uint64 spawnOrder = 0;
         // 마지막 SetLifeSpan의 번호다(0이면 없음 — 힙의 오래된 항목은 번호가 달라 무시한다).
         uint64 lifeSpanSequence = 0;
         // 시작 전에 건 LifeSpan(초)이다. 시작할 때 건다(0이면 없음).

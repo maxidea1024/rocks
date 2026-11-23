@@ -143,8 +143,16 @@ enum ShaderFeatureBits : uint32 {
     ShaderFeatureWaveOperations = 1u << 1,
     // VS 출력 SV_RenderTargetArrayIndex·SV_ViewportArrayIndex(7.2절 7항). 런타임 확인 기능이다.
     // 장치 쪽 값은 DeviceCaps의 vertexViewportLayerOutput이다.
-    ShaderFeatureVertexViewportLayerOutput = 1u << 2
+    ShaderFeatureVertexViewportLayerOutput = 1u << 2,
+    // 형식 확장 typed UAV load(R32 밖 형식의 typed UAV 읽기, 11.1절 E8). 장치 보장 기능이며 D3D12는
+    // 장치 요구 D3D12_TYPED_UAV_LOAD_ADDITIONAL_FORMATS로 보장한다.
+    ShaderFeatureTypedUavLoad = 1u << 3
 };
+
+// 모든 기능 비트다(SC10이 기능마다 ROCKS_FEATURE_<이름>을 정의한다 — 어휘를 더하면 이 값도 바꾼다).
+inline constexpr uint32 AllShaderFeatures = ShaderFeatureCompute | ShaderFeatureWaveOperations |
+                                            ShaderFeatureVertexViewportLayerOutput |
+                                            ShaderFeatureTypedUavLoad;
 
 // 런타임 확인 기능 비트 묶음이다. 나머지 기능은 장치 보장 기능이다. 셰이더 라이브러리 항목은
 // 요구 기능 가운데 이 비트만 담는다(12.2절).
@@ -163,7 +171,9 @@ enum ShaderDeviceRequirementBits : uint32 {
     DeviceRequiresOpenGL4_3 = 1u << 3,
     DeviceRequiresOpenGLES3_2 = 1u << 4,
     DeviceRequiresGlArbEs32Compatibility = 1u << 5,
-    DeviceRequiresGlArbClipControl = 1u << 6
+    DeviceRequiresGlArbClipControl = 1u << 6,
+    // D3D12 TypedUAVLoadAdditionalFormats(typedUavLoad 기능의 장치 보장, 11.1절 E8).
+    DeviceRequiresD3D12TypedUavLoadAdditionalFormats = 1u << 7
 };
 
 // 셰이더 모델·언어 버전(major.minor)이다. 셰이더 모델 6.6은 {6, 6}, MSL 2.4는 {2, 4}다.
@@ -362,5 +372,9 @@ const char* ShaderHostName(ShaderHost host) noexcept;
 // ROCKS_IMAGE_FORMAT 형식 이름(DXC [[vk::image_format]] 철자)의 색인이다. 없으면 IndexNone.
 // unsupportedImageFormats의 비트 번호다.
 ROCKS_SHADERCOMPILERCOMMON_API usize ImageFormatIndex(StringView name) noexcept;
+
+// 색인의 ROCKS_IMAGE_FORMAT 형식 이름이다(정적 수명). 범위 밖이면 "unknown". SPIR-V image format
+// 값은 이 색인 + 1이다(DXC 지원 목록과 SPIR-V ImageFormat 열거 순서가 같다).
+ROCKS_SHADERCOMPILERCOMMON_API const char* ImageFormatName(usize index) noexcept;
 
 } // namespace rocks::shader

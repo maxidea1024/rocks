@@ -92,7 +92,7 @@ internal static class GamePlanning
         }
 
         var moduleSet = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(descriptor, rules.Target.Name, rules.Target.Plugins),
-            availablePlugins, toolchain.Platform, configuration, rules.Target.Type);
+            availablePlugins, toolchain.Platform, configuration, rules.Target.Kind);
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
         // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 타입별 본문·등록 함수 등 생성
         // 소스의 object는 SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성
@@ -117,6 +117,7 @@ internal static class GamePlanning
             DynamicModules = module.DynamicModules,
             // Verify가 이름을 확인했다.
             LoadingPhase = Enum.Parse<LoadingPhase>(module.LoadingPhase!),
+            Type = Enum.Parse<ModuleType>(module.Type!),
             ProvidesLaunch = module.ProvidesLaunch,
             HasGlobalState = module.HasGlobalState
         }), .. projectModules];
@@ -124,14 +125,23 @@ internal static class GamePlanning
         // 같다). 메타데이터 생성도 같은 root 집합이다.
         modules = [.. moduleSet.LinkIntoPrimary(modules, rules.Target.Modules)];
         string[] targets = [.. rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
+        // type 사이 의존 규칙(BD25)은 타깃과 무관하게 모든 프로젝트 모듈(기술자 type, 거르기 전)과 SDK 모듈로 본다. 도달 검사는 메타 생성보다
+        // 먼저 한다(Docs/Design/BuildTargets 3.3절).
+        var projectNames = rules.Modules.Select(module => module.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ModuleTypeRules.ValidateDependencies([.. modules.Where(module => !projectNames.Contains(module.Name)), .. moduleSet.WithDescriptorTypes(rules.Modules)]);
+        ModuleTypeRules.ValidateReach(rules.Target.Kind, configuration, modules, targets);
         return new(moduleSet, MetadataLayout.Apply(context, modules, targets, createDirectories), targets);
     }
 
-    /// <summary>게임 타깃의 빌드 요청이다. 빌드 방식(유니티·PCH·작업 파일 분리·시간 측정·계획 모드)은 호출자가 덧붙인다.</summary>
+    /// <summary>
+    /// 게임 타깃의 빌드 요청이다. 빌드 방식(유니티·PCH·작업 파일 분리·시간 측정·계획 모드)은 호출자가 덧붙인다. target은 타깃 규칙의 종류다
+    /// (타깃 매크로와 빌드 정보 <c>CurrentTargetType()</c> — Docs/Design/BuildTargets 3.2절).
+    /// </summary>
     public static NativeBuildRequest Request(NativeToolchain toolchain, NativeConfiguration configuration, string project, string output,
-        IReadOnlyList<NativeModuleInput> modules, IReadOnlyList<string> targets, string sdk, EngineVersion engineVersion, int jobs) => new()
+        IReadOnlyList<NativeModuleInput> modules, IReadOnlyList<string> targets, string sdk, EngineVersion engineVersion, int jobs, TargetKind target) => new()
         {
             Toolchain = toolchain,
+            Target = target,
             Configuration = configuration,
             OutputDirectory = output,
             // 정적 링크이므로 실행 파일에는 참조한 모듈만 들어간다.

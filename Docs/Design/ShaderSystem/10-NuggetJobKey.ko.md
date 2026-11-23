@@ -18,7 +18,7 @@ AssetSystem A3(9.1절, 구현 `Engine/Source/Developer/AssetNugget`)을 그대�
 | 4 | `WriteU32(stage)` — 단계는 이미 있는 고정 값 `ShaderStageBits`의 한 비트(vertex 1·pixel 2·compute 4, 형식 정의 `stages` 어휘 `vertex`·`pixel`·`compute`와 1:1), `WriteString(entry)` | 에셋 TypeId 자리 |
 | 5 | `WriteDigest(전처리 결과 SHA-256)` — 가상 경로만 담긴 `#line`을 가진 원문이고 정의(`#define`)·`Platform.rsh`는 이미 펼쳐져 있다. 워커는 이 원문 밖의 정의를 컴파일러에 넘기지 않는다 | 입력 bulk SHA-256 |
 | 6 | `WriteReflected(writer, options)` — 컴파일 옵션 `ShaderCompileOptions`(`ROCKS_STRUCT`, 11.1절 결정 SC9)를 AssetSystem 9.1절 결정 2의 리플렉션 기록으로 쓴다(기본값 포함 전체, 필드 이름이 키와 trace에 들어간다). 그 뒤 파라미터 레이아웃 서명: P7 전에는 손으로 쓴 레이아웃 표(7.2절 5항)의 정규 인코딩 byte SHA-256을 `WriteDigest`, 레이아웃이 없는 job(SH1 시험·도구 원문)은 `WriteNone` | 결과에 영향을 주는 설정 전체 |
-| 7 | `WriteString(profileId)`, `WriteDigest(프로필 byte의 SHA-256)` — SH1은 호스트별 엔진 컴파일 프로필(`Engine-Windows`·`Engine-MacOS`, 12.1절)만 받는다. 프로젝트 TargetProfile(A4)은 엔진 파일과 프로젝트 재정의를 합친 결과를 `WriteReflected`로 쓰도록 P6b에서 바꾼다(파일 SHA로는 재정의 변경을 놓친다) | 대상 프로파일 id와 출력 설정 전체 |
+| 7 | (개정 32에서 지움 — 12.3.1절 SSD24) 프로필 id·byte SHA는 쓰지 않는다. 형식 정의 SHA-256이 3행에 있고 프로필의 형식 목록·순서는 출력 byte에 영향이 없다. SH2a가 코드에서 뺀다 | — |
 | — | 없다. include 폐포는 전처리 결과에 들어 있다 | 의존 목록 |
 
 **Record와 값(5.2절 N2).** bucket `shader`(`NuggetBucketShader`), namespace `rocks.nuggets`(고정), key = job 키. `inputs`는 비어 있다(다른 Record를 소비하지 않는다). `meta`는 비워 둔다. 값은 ValueId 오름차순의 부분이다:
