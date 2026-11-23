@@ -989,7 +989,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     - 진단은 표준 오류에 `asset-cook: <코드>: <대상>: <error|warning>[ <원인 오류>][ (related <대상>)]` 한 줄씩(보고서와 같은 순). 코드는 진단 코드 이름, 없으면 원인 오류 이름이다. 대상은 에셋이면 색인의 논리 경로(색인에 고유하게 없으면 AssetId 표준 문자열), 에셋이 없는 경로 진단(InvalidPath·DuplicatePath)은 부분 쿠킹이면 그 인자 경로·전체 쿠킹이면 `alwaysCook[<순번>]`, 그 밖은 쿠킹 루트다.
     - 요약은 표준 출력에 `asset-cook: <프로파일> <published|not published> targets <n> cooked <n> reused <n> bytes <n>[ partial]` 한 줄이다. `--json`이면 요약 대신 쓴 보고서(CookReport.json) 내용을 그대로 쓴다(진단 줄은 표준 오류에 그대로 쓴다).
     - 종료 코드: 게시 0(경고만 있어도), 오류 진단으로 게시하지 않음 1, 실행 실패 1(실패 줄), 사용법 2. 할당 실패는 명령 오류(OutOfMemory)다.
-- A4e1 상태: **구현** — 대조표 14.1.73절, coverage 14.1.74절. 구현에서 정한 것:
+- A4e1 상태: **구현** — 대조표 14.1.73절, coverage 14.1.74절. 리뷰 반영(2026-11-23, 필수 하나 — 경로 진단 대상은 인자 유무가 아니라 실제 쿠킹 모드(`result.partial`)로 고른다. 기존 매니페스트가 없거나 깨져 전체 쿠킹으로 바뀌면 순번은 alwaysCook 순번이다 — 인자 배열을 그 순번으로 읽으면 범위 밖일 수 있었다). 구현에서 정한 것:
   - 명령 시험은 EngineTests가 명령 함수를 이 프로세스에서 부른다(시험 타입 모듈·시험 임포터로 에셋을 만든다). 제품 실행 파일 시험(Rocks.Commandlet.Tests)은 실제 모듈 로더가 쿠커 모듈을 시작하고 실행 파일 위쪽 `Engine/Config` 프로파일로 쿠킹하는지 본다.
   - 명령 시험 공용 도구(출력 수집·시험 임포터 등록·디스크 프로젝트)는 `AssetCommandlets/Tests/AssetCommandletTestSupport.h`로 옮겼다(임포트 명령 시험과 같이 쓴다 — 동작 불변).
   - 설정 실패 줄은 `<코드>: <파일>: <칸 설명> (<원인 오류>)`이다. 파일 밖 판정(id 형식·합친 bulkAlignment)은 `TargetProfiles/<id>`, 칸 없는 거부는 엔진 프로파일 파일이 없는 것(`the file does not exist`), 칸 없는 실패는 읽기 오류(`cannot read` — 코드 자리에 원인 오류)다. 값 대입 진단은 그 앞에 `<TextDiagnostic 코드>: <경로>: <설명>` 줄로 쓴다. 너겟 설정 실패도 같은 모양이다(`<프로젝트>/Config/AssetNuggets.json`).
@@ -3226,7 +3226,7 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 부분 쿠킹 | `partial` 표지·인자 경로, 게시본 규칙이 다르면 쿠킹 전 IncompatibleCook(쿠킹 루트 대상·`targets 0`) | `AssetCookCommand_CooksAndReuses`·`AssetCookCommand_Diagnostics` |
 | verify(결정 12·9.1 결정 16) | 재사용 없이 모두 쿠킹(source local 포함), 같은 매니페스트 byte, 처리기 대조 실패 NuggetMismatch 오류 진단(게시하지 않음·보고서 코드), verify가 아니면 대조 없음, remote는 Unsupported 1 | `AssetCookCommand_CooksAndReuses`·`CookProject_VerifyNuggets`·`AssetCookCommand_Usage` |
 | NuggetMismatch 등록 | 이름 표의 고유 이름·마지막 열거자 | `AssetPackage_DiagnosticNames` |
-| 진단 줄(결정 11·13절) | alwaysCook 순번 경고(게시 0), NeverCook 우선 경고(에셋 논리 경로), 인자 경로 오류(1), 사라진 Hard 의존(related = AssetId — 색인에 없음), 같은 id 파일 둘(대상 = AssetId — 색인에 고유하지 않음), 원인 오류 이름 | `AssetCookCommand_Diagnostics`·`AssetCookCommand_DuplicateId`, C# `asset-cook invalid path` |
+| 진단 줄(결정 11·13절) | alwaysCook 순번 경고(게시 0 — 인자가 있어도 기존 매니페스트가 없어 전체 쿠킹이면 alwaysCook 순번), NeverCook 우선 경고(에셋 논리 경로), 인자 경로 오류(1), 사라진 Hard 의존(related = AssetId — 색인에 없음), 같은 id 파일 둘(대상 = AssetId — 색인에 고유하지 않음), 원인 오류 이름 | `AssetCookCommand_Diagnostics`·`AssetCookCommand_DuplicateId`, C# `asset-cook invalid path` |
 | 쿠킹 함수 오류 | 쿠킹 루트의 Packages 자리가 파일 → 실패 줄 1·보고서 없음 | `AssetCookCommand_CookFailure` |
 | 설정 거부(결정 2·3) | 엔진 프로파일 없음·id 형식·프로젝트 프로파일 JSON·id 다름·bulkAlignment, 쿠킹 규칙 JSON·대입 진단(줄 포함)·alwaysCook·neverCook·PrimaryAsset 타입·디렉터리·크기 상한·읽기 오류 | `AssetCookCommand_ConfigRejects` |
 | 너겟 캐시(결정 5·9.1) | 설정 거부 칸 여덟·크기 상한·읽기 오류 실패 줄, 열기 실패로 꺼지면 경고 `NuggetCacheDisabled` 뒤 쿠킹(0), required면 실패 줄 | `AssetCookCommand_NuggetSettings` |

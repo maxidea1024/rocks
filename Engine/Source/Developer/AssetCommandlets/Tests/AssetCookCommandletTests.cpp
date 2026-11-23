@@ -137,10 +137,14 @@ TEST(AssetCookCommand_Diagnostics) {
     REQUIRE(env.Ready());
     CookScene cook(env.allocator, "cook-command-diag");
     REQUIRE(cook.ready);
+    // 기존 매니페스트가 없으면 인자가 있어도 전체 쿠킹이라 경로 진단 순번은 alwaysCook 순번이다
+    // (인자 하나 — 순번 1로 인자를 읽지 않는다, 리뷰 필수).
     REQUIRE(cook.Settings("{\"alwaysCook\": [\"/Game/\", \"/Game/Missing\"]}"));
-    CHECK(cook.Cook() == 0);
+    CHECK(cook.Cook({"/Game/Rock"}) == 0);
     CHECK(cook.run.Error("asset-cook: InvalidPath: alwaysCook[1]: warning\n") &&
-          cook.run.Out("published targets 2"));
+          cook.run.Out("published targets 2") && !cook.run.Out(" partial"));
+    CHECK(cook.Cook() == 0);
+    CHECK(cook.run.Error("asset-cook: InvalidPath: alwaysCook[1]: warning\n"));
 
     REQUIRE(cook.Settings("{\"alwaysCook\": [\"/Game/Rock\"], \"neverCook\": [\"/Game/Rock\"]}"));
     CHECK(cook.Cook() == 0);

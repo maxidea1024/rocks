@@ -225,9 +225,11 @@ Result<void> AppendNuggetField(StringBuilderBase& out,
 }
 
 // 진단 대상 텍스트다: 에셋이면 색인의 논리 경로(고유하게 없으면 AssetId), 에셋이 없는 경로
-// 진단은 부분 쿠킹의 인자 경로·전체 쿠킹의 `alwaysCook[<순번>]`, 그 밖은 쿠킹 루트다.
+// 진단은 부분 쿠킹의 인자 경로·전체 쿠킹의 `alwaysCook[<순번>]`, 그 밖은 쿠킹 루트다. roots는
+// 실제로 부분 쿠킹했을 때만 인자 경로다(기존 매니페스트가 없거나 깨져 전체 쿠킹으로 바뀌면 비어
+// 있다 — 그때 순번은 alwaysCook 순번이다).
 Result<void> AppendTarget(StringBuilderBase& out, const AssetIndex& index, AssetId asset,
-                          const CookDiagnostic& diagnostic, Span<const StringView> paths,
+                          const CookDiagnostic& diagnostic, Span<const StringView> roots,
                           StringView root) noexcept {
     if (!asset.IsNull()) {
         if (auto found = index.FindById(asset); found) {
@@ -239,8 +241,8 @@ Result<void> AppendTarget(StringBuilderBase& out, const AssetIndex& index, Asset
 
     const bool pathCode = diagnostic.code == AssetDiagnosticCode::InvalidPath ||
                           diagnostic.code == AssetDiagnosticCode::DuplicatePath;
-    if (pathCode && paths.Size() != 0) {
-        return out.TryAppend(paths[diagnostic.setting]);
+    if (pathCode && diagnostic.setting < roots.Size()) {
+        return out.TryAppend(roots[diagnostic.setting]);
     }
 
     if (pathCode) {
@@ -254,6 +256,7 @@ Result<void> AppendTarget(StringBuilderBase& out, const AssetIndex& index, Asset
 Result<int32> WriteDiagnostics(CommandletOutput& output, Allocator& allocator,
                                const AssetIndex& index, const CookProjectResult& result,
                                Span<const StringView> paths, StringView root) noexcept {
+    const Span<const StringView> roots = result.partial ? paths : Span<const StringView>{};
     for (const CookDiagnostic& diagnostic : result.diagnostics) {
         StringBuilder<LineBytes> line(allocator);
         const char* code = diagnostic.code != AssetDiagnosticCode::None
@@ -261,7 +264,7 @@ Result<int32> WriteDiagnostics(CommandletOutput& output, Allocator& allocator,
                                : ErrorCodeName(diagnostic.error);
         Result<void> made = line.TryAppendFormat("{}: ", code);
         if (made) {
-            made = AppendTarget(line, index, diagnostic.asset, diagnostic, paths, root);
+            made = AppendTarget(line, index, diagnostic.asset, diagnostic, roots, root);
         }
 
         if (made) {
@@ -276,7 +279,7 @@ Result<int32> WriteDiagnostics(CommandletOutput& output, Allocator& allocator,
         if (made && !diagnostic.related.IsNull()) {
             made = line.TryAppend(" (related ");
             if (made) {
-                made = AppendTarget(line, index, diagnostic.related, diagnostic, paths, root);
+                made = AppendTarget(line, index, diagnostic.related, diagnostic, roots, root);
             }
 
             if (made) {
