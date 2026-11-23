@@ -1,6 +1,6 @@
 # 엔진 컴포넌트 도입 설계(UE 5.8 `Classes/Components` 대응)
 
-기준일: 2026-11-23, 개정 2(다른 문서 개정 반영·이름 정정 — 9절). 결정 CD1–CD10은 권장안으로 적었다(6절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다(5절).
+기준일: 2026-11-23, 개정 3(Tick 단계·디버그 표시 결정 — 9절). 결정 CD1–CD12는 권장안으로 적었다(6절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다(5절).
 
 이 문서는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 `Engine/Source/Runtime/Engine/Classes/Components` 폴더(헤더 73개)에 있는 컴포넌트를 Rocks에 들이는 범위와 순서를 정한다. 사용자 지시(2026-11-23): 기본은 전부 가져오되 폐기된 것과 BSP는 제외한다. 필수 컴포넌트 목록(3절)과 선행 작업 목록(4절)을 따로 둔다.
 
@@ -206,7 +206,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CR6 | 컴포넌트 타입 규칙(Actor당 하나·필수 동반·상호 배타)을 타입 메타로 | 없음 | — | EIP 20.2절 |
 | CR7 | 이벤트 slot 표(overlap·hit·타임라인·재생 끝 등 컴포넌트 이벤트를 구독이 있을 때만 저장) | 없음 | SE-W8 | SE-W8, EIP 20.2절 |
 | CR8 | World 필드 편집 setter·통지(CU5) — 속성을 바꾸면 CR1의 "다시 보내기" 표시 | 없음 | ER 14절 "World 필드는 ReadOnly" | ReflectionExtensions CU5 |
-| CR8a | Tick 단계 대조: Rocks 단계(PrePhysics·Physics·PostPhysics·LateUpdate·PreRender — ER 8절)와 UE `ETickingGroup`(`EE/EngineBaseTypes.h:86–104` — DuringPhysics·EndPhysics·PostUpdateWork)와 계획 20.2절 그룹(PhysicsSync·AnimationFinalize)이 어긋난다. skeletal mesh의 병렬 pose 평가·물리 결과 반영 지점을 정해 단계 표를 확정 | 문서 불일치 | ER 8절과 EIP 20.2절이 다르다 | ER 8절(개정 필요) |
+| CR8a | Tick 단계 UE 대응: Rocks 단계(PrePhysics·Physics·PostPhysics·LateUpdate·PreRender)와 UE `ETickingGroup`(`EE/EngineBaseTypes.h:86–104`) 대응, 물리 결과 반영·skeletal mesh 물리 마무리 지점 | 결정(CD11) — 구현은 물리·애니메이션 컴포넌트와 함께 | ER 8절 대응표 | ER 8절 |
 
 ### 4.2 에셋·데이터
 
@@ -226,7 +226,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CR14 | 머티리얼 런타임: section별 머티리얼 `RenderHandle`, 인스턴스 파라미터 override, 실행 중 머티리얼 인스턴스(UE `UMaterialInstanceDynamic` 대응) | MS3a 골격만 | 메모리 mesh-unreal-exchange-spec | [머티리얼 시스템](MaterialSystem.ko.md) |
 | CR14a | 텍스처 스트리밍 입력: 컴포넌트가 내는 텍스처 사용 기록(UV 밀도·화면 크기 — UE `FRenderAssetOwnerStreamingState`) | 설계만 | TextureStreaming 4.1절 | TextureStreaming |
 | CR15 | 추가 view와 render target 에셋(scene capture·planar reflection) | 없음 | — | RN 5절, AssetSystem 텍스처 계열 |
-| CR23 | 디버그 그리기 경로: 선·도형·아이콘 billboard를 그리는 개발 빌드용 pass(EditorOnly 시각화 포함) | 없음 | `Sandbox` 샘플 렌더러뿐(ER 3절). UE는 line batch proxy가 프레임마다 동적 메시 요소를 내는 렌더러 경로다(`Engine/Private/Components/LineBatchComponent.cpp:60`) | RN 4.2절 "디버그·편집 표시" |
+| CR23 | 디버그·편집 표시: 선·도형·아이콘 billboard(EditorOnly 시각화 포함) | 결정(CD12), 설계 RN RS13 — 코드 없음 | `Sandbox` 샘플 렌더러뿐(ER 3절). UE는 line batch proxy가 프레임마다 동적 메시 요소를 내는 렌더러 경로다(`Engine/Private/Components/LineBatchComponent.cpp:60`) | RN 4.2절 "디버그·편집 표시", 11.2절 PC9a·PC9b, 17절 RS13 |
 | CR18 | 글꼴 에셋·글리프 atlas(`TextRenderComponent`) | 없음 | — | [UI 툴킷](UiToolkit.ko.md) 글꼴 |
 
 ### 4.4 물리
@@ -255,7 +255,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CM0 기반 보강(+카메라) | CR1·CR2·CR3·CR4·CR5·CR6·CR8a·CR11(CR7·CR8은 있으면 쓰고 없으면 자리 — 3.1절 `Component`의 CR8도 같다) |
 | CM1a 정적 메시 | CM0, CR9, CR12, CR13(RS0), CR14, CR14a |
 | CM1b 광원 | CM1a, CR13(RS1·RS3) |
-| CM2 시각화 | CM1a, CR5, CR12, CR23 |
+| CM2 시각화 | CM1a, CR5, CR12, CR23(RN RS13) |
 | CM3 충돌 형상 | CM0, CR16, CR17, CR7. `DrawSphereComponent`만 CM2(CR23)도 |
 | CM4 오디오·햅틱·입력 | CM0, CR10, CR11, CR20, CR21, CR26 |
 | CM5 게임플레이 도구 | CM0, CR9a, CR10, CR7, CR16(`PathMoverComponent`의 sweep), CR18·CM1a·CR14(`TextRenderComponent`), 이동 컴포넌트 문서 |
@@ -292,6 +292,8 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CD8 | 활성(Activate) | UE의 Activate·Deactivate·`bAutoActivate`는 Rocks `enabled`·`OnEnable`·`OnDisable`로 대응(EIP 20.2절 Activate→Enable). 별도 활성 상태를 두지 않는다. "등록됐지만 재생 안 함" 같은 상태는 컴포넌트 속성(예: 오디오 자동 재생)으로 | 상태 하나를 줄인다. UE 대응은 계획 20.2절이 이미 정했다 |
 | CD9 | AssetUserData | 들이지 않는다. 필요한 확장 데이터는 리플렉션 필드나 별도 컴포넌트로 | 플러그인용 임의 부착 데이터로, 타입 규칙(CR6)과 겹친다. 요구가 생기면 다시 본다 |
 | CD10 | Mobility | UE와 같은 셋(Static·Stationary·Movable). Static 이동은 거부(진단), 정적 조명·캐시 그리기 항목과 연동 | UE와 같게(애매하면 UE 방식) |
+| CD11 | Tick 단계(CR8a) | 단계를 더하지 않는다. UE `TG_PrePhysics` → PrePhysics(컴포넌트 기본도 PrePhysics — UE 컴포넌트 기본 `TG_DuringPhysics`는 대응 단계가 없고 관찰 결과가 같다), `TG_StartPhysics`·`TG_EndPhysics` → Physics phase(엔진 전용), `TG_PostPhysics` → PostPhysics, 카메라 갱신 + `TG_PostUpdateWork` → LateUpdate(시작에 엔진 카메라 갱신), end-of-frame 갱신 → PreRender. 옛 PhysicsSync·AnimationFinalize는 Physics phase 끝의 엔진 단계 둘(물리 결과 반영 → skeletal mesh 물리 마무리)이다. 상세 대응표는 ER 8절 | UE 그룹 순서를 그대로 지키면서 Rocks 물리가 Physics phase에서 동기로 돈다는 점만 다르다. "물리와 병렬" 등록 종류는 비동기 물리·병렬 Tick 때 다시 본다(사용자 지시로 권장안 확정 2026-11-23) |
+| CD12 | 디버그·편집 표시(CR23) | UE와 같은 세 경로: 디버그 그리기 빌드(Debug·Development·에디터)는 디버그 전용 수집 → 후처리 합성 PC9b, 에디터 view의 편집 표시는 PC9a, Shipping은 base pass 불투명 단순 요소. 자리는 tone map·spatial AA 뒤, spatial upscale 앞. 깊이 우선 그룹 World·Foreground. 렌더러 단계 RS13(선행 RS0, RS6에서 정식 자리) — 에디터 뷰포트 단계를 기다리지 않는다 | UE `UE_ENABLE_DEBUG_DRAWING`·`EPass` 순서(RN 4.2·11.2절 근거). 개발 빌드 디버그 선은 에디터 전에도 필요하다(물리·AI 디버깅). 사용자 지시로 권장안 확정 2026-11-23 |
 
 ## 7. 다른 문서 개정
 
@@ -315,6 +317,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 
 ## 9. 개정 기록
 
+- 개정 3(2026-11-23): 남아 있던 두 항목을 권장안으로 확정(사용자 지시) — CD11 Tick 단계 UE 대응(ER 8절 대응표, EIP 20.2절), CD12 디버그·편집 표시(RN 4.2절 세 경로, 11.2절 PC9a·PC9b, 17절 RS13). CR8a·CR23 상태를 결정으로.
 - 개정 2(2026-11-23): 7절 다른 문서 개정 반영. CR23 정본을 RenderBase에서 Renderer 4.2절로 정정. `LightmassPortal` 대응 이름을 `LightPortal`에서 `LightBakePortal`로(사용자 지적 — 베이크 전용 의미, CD6).
 - 개정 1(2026-11-23): 리뷰어 1명 교차검증 반영 — CM1을 CM1a(정적 메시, RS0)·CM1b(광원, RS1·RS3)로 나누고 화면 마일스톤 범위를 CM0+카메라로 정정, 게임 프레임워크 선행 CR26 추가(입력·햅틱), 볼륨 안개·구름을 CM11로, CR5 근거(객체 단위 EditorOnly 미활성), 3절과 4.6절 선행 불일치·ID 오기 정정, PawnNoiseEmitter·HISM·InputComponent 인용 정정, 1.2절 Runtime 다른 모듈(UMG·Foliage·Landscape·AIModule).
 - 개정 0(2026-11-23): 첫 초안. 분류(필수 58·대체 3·제외 4·후속 프로필 1), 선행 CR1–CR25, 묶음 CM0–CM11, 결정 CD1–CD10 권장안.
