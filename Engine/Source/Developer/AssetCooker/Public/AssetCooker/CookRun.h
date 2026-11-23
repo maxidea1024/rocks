@@ -72,6 +72,9 @@ struct CookRunRequest {
     uint32 cookerVersion = CookerVersion;
     // 이번 쿠킹이 열어 둘 패키지 수 상한이다(0이면 InvalidArgument).
     usize maxOpenPackages = CookMaxOpenPackages;
+    // 재사용 표지다(대상과 같은 수 — 0이 아니면 그 대상은 열지 않고 건너뛴다, PlanCookReuse). 비면
+    // 재사용 없음이다.
+    Span<const uint8> reuse{};
     // 처리기에 넘길 너겟 캐시다(없으면 null).
     NuggetCache* nuggets = nullptr;
     CookOutputSink* output = nullptr;
@@ -102,7 +105,8 @@ struct CookRunResult {
 // 쿠킹 byte 검증 실패 CorruptPackage(error = 읽기 오류), 로더 대조(CheckCookedPackage — 프로파일
 // 칸·대표 타입 등) 실패 CorruptPackage(error = 대조 오류).
 //
-// 오류(멈춤): 요청 인자 null·상한 0·키 수가 대상 수와 다름·대상이 색인에 없음 InvalidArgument, 시작
+// 오류(멈춤): 요청 인자 null·상한 0·키 수나 재사용 표지 수가 대상 수와 다름·대상이 색인에 없음
+// InvalidArgument, 시작
 // 때 dirty 패키지 Busy, 처리기 조회 오류, 출력 sink 오류, 닫기 오류, 할당 실패. 멈춰도 이번 쿠킹이
 // 연 패키지는 닫는다(닫기 오류는 원래 오류 뒤에 묻힌다). 닫기 자체가 할당에 실패하면 패키지가 열린
 // 채 남고 OutOfMemory다 — 호출자가 시작 때 열린 목록으로 EditorPackageSet::CloseOpened를 다시

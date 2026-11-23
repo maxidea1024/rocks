@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-20, 개정 11(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-23, 개정 13(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -105,7 +105,7 @@
 | `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, 렌더 전달 가능 등록(RenderBase 5.2절), `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표의 C++ 정의(결정 RN5, 14.2절) | 장치·Object·World |
 | `RendererShaders` | `Engine/Source/Runtime/RendererShaders` | ShaderCore·RenderData·MaterialSchema | pass 셰이더 타입·퍼뮤테이션 도메인·거르기 함수(`MaterialShaderTraits`를 받는다, 14.3절), `GBufferLayout` 정의와 shading model의 GBuffer 의미, 파라미터 구조체 선언 | 장치·Renderer |
 | `Renderer` | `Engine/Source/Runtime/Renderer` | RendererShaders·RenderGraph·RenderBase·RenderData·MaterialRuntime·TextureStreaming·SpatialIndex·Task·Core | `RenderScene`·`RenderView`·가시성·`GpuScene`·light grid·그림자·두 경로의 pass 조립·`PostChain`·GI 연결점 | World·ObjectRuntime·AssetRuntime |
-| `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제 | Renderer 내부 주소 |
+| `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제. 받는 컴포넌트 목록과 RS 단계별 도입 순서는 [컴포넌트 도입](ComponentCatalog.ko.md) 3·4.6절(CR12) | Renderer 내부 주소 |
 
 의존 방향(위가 아래를 쓴다):
 
@@ -160,6 +160,11 @@ RenderNotices 처리(해제 완료) ◀─────────────�
 - **이전 프레임 변환.** velocity·TAA는 이전 변환이 필요하다(계획 12.2절). `RenderScene`이 직전 적용 값을 보존하고, 이번 프레임에 변환 갱신이 없으면 이전 = 현재로 둔다. teleport 표시가 있으면 이전 = 현재로 리셋한다.
 - **텍스처 사용 기록.** 렌더러는 그린 그리기 항목이 쓴 텍스처의 사용 기록마다 "마지막으로 화면에 그린 프레임 번호"를 `RenderNotices`로 돌려준다(TextureStreaming 4.1절·결정 T3). 상주 계획이 보임 신호로 쓴다(RQ21).
 - **해제.** 인스턴스 제거는 렌더 lane에서 즉시 표에서 빼고, 그 인스턴스가 쓰던 GPU Scene 영역은 프레임 slot GPU 완료 뒤 재사용한다(계획 13.1절 "frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다").
+- **디버그·편집 표시(2026-11-23 결정, 권장안 — [컴포넌트 도입](ComponentCatalog.ko.md) CR23·CD12, 단계 RS13).** 선·점·삼각형·아이콘 sprite를 받는 **단순 요소 수집**(UE `FSimpleElementCollector`·`FBatchedElements`)을 view마다 둔다. `LineBatchComponent`·`ArrowComponent`·`BillboardComponent`·`DrawFrustumComponent` 등은 인스턴스 종류 "디버그 선 묶음"·"아이콘 sprite"로 등록하고 프레임 데이터(선 정점 목록)는 `RenderBlob`으로 넘긴다. UE는 line batch proxy가 프레임마다 동적 메시 요소를 낸다(`Engine/Private/Components/LineBatchComponent.cpp:60`). Rocks는 가상 함수 proxy 대신 종류별 처리기다. 그리는 곳은 UE와 같다(UE 경로는 `Engine/Source/Runtime/` 기준):
+  - **디버그 그리기 빌드**(Debug·Development와 에디터 — UE `UE_ENABLE_DEBUG_DRAWING`, `Engine/Public/EngineDefines.h:15`): line batch를 디버그 전용 수집에 넣고(`Engine/Private/Components/LineBatchComponent.cpp:70–75`) 후처리 PC9b에서 합성한다(UE `DebugPrimitive` pass — `Renderer/Private/PostProcess/PostProcessCompositeDebugPrimitives.cpp:140, 165`).
+  - **편집 표시**(에디터 view만 — gizmo·선택·EditorOnly 시각화 컴포넌트): PC9a에서 합성한다(UE `EditorPrimitive` pass — `Renderer/Private/PostProcess/PostProcessCompositeEditorPrimitives.cpp:76–127`).
+  - **Shipping**: 디버그 전용 수집이 없으므로 같은 선이 일반 수집으로 가서 base pass에서 불투명 단순 요소로 그려지고(UE `Renderer/Private/BasePassRendering.cpp:1211`) depth prepass에도 쓰인다(`Renderer/Private/DepthRendering.cpp:454–455`). 처리기를 빼지 않는다.
+  - **깊이 우선 그룹** 둘: World(장면 깊이로 가려진다)·Foreground(늘 위) — UE `SDPG_World`·`SDPG_Foreground`.
 
 ## 5. view와 visibility
 
@@ -503,12 +508,15 @@ ForwardOpaquePS
 | PC7 | bloom(Gaussian 1차) | 출력 | — | RS6 |
 | PC8 | tone map + 색 보정 LUT + 출력 인코딩(SDR sRGB, HDR은 계획 26절) | 출력 | 노출 | RS0(최소)·RS6 |
 | PC9 | spatial AA(FXAA, 선택) | 출력 | — | RS6 |
+| PC9a | 편집 표시 합성(에디터 view만, UE `EditorPrimitive`) | 출력 | 편집 단순 요소, 장면 깊이 | RS13 |
+| PC9b | 디버그 표시 합성(디버그 그리기 빌드, UE `DebugPrimitive`) | 출력 | 디버그 단순 요소, 장면 깊이 | RS13 |
 | PC10 | spatial upscale(Native·Spatial 모드, 계획 12.1절 U0) | render → 출력 | — | RS6 |
 | PC11 | HUD·UI 합성 | 출력 | — | 화면 마일스톤 경로 |
 
 - **temporal 자리.** 계획 12.2절 "선형 HDR color, depth, motion, exposure가 유효한 단계에서 실행하고 tone mapping·출력 UI는 그 뒤"를 따른다. `UpscaleInputs`의 노출은 이전 프레임 노출 값이다(이번 프레임 PC6이 뒤에 있으므로). UE도 temporal 단계 뒤에 노출을 계산한다(`:1107–1184` → `:1440`).
 - **velocity 규약.** 렌더러 velocity는 계획 12.2절의 엔진 공통 규약(현재 표본 → 이전 위치, 출력 정규화)이고 adapter가 SDK 단위로 바꾼다. reversed-Z 깊이는 adapter가 SDK 깊이 규약 표시로 넘긴다(계획 12.1절).
 - **텍스처 mip bias.** temporal upscale(PC3)을 쓰는 view는 머티리얼 텍스처 표본에 음수 mip bias(log2(render 폭 ÷ 출력 폭))를 view 상수로 건다. 텍스처 스트리밍의 표본 해상도 계산(TextureStreaming 4.1절 "렌더 폭 × 2^(−mip bias)")이 이 값을 쓰므로 렌더러가 view마다 그 값을 사용 기록과 함께 넘긴다(RQ21).
+- **표시 합성 자리(PC9a·PC9b).** UE와 같이 tone map → spatial AA → tone map 뒤 후처리 머티리얼 다음이고 spatial upscale 앞이다(UE `EPass` 순서 `Tonemap → FXAA → SMAA → PostProcessMaterialAfterTonemapping → … → EditorPrimitive → DebugPrimitive → … → PrimaryUpscale` — `Renderer/Private/PostProcess/PostProcessing.cpp:507–550`, 533–534행). 표시는 tone map 영향을 받지 않고 AA로 흐려지지 않는다. RS6 전(RS0의 최소 tone map만 있을 때)에는 PC8 바로 뒤에 붙인다.
 - **경로 독립.** `PostChain`은 SceneColor·깊이·velocity만 받으므로 Forward+·Deferred·PathTracing이 같은 사슬을 쓴다. 경로 전환·upscaler 교체·크기 변경은 history reset이다(계획 12.2절).
 - 세부 효과(DOF·motion blur·지역 노출·lens flare·film grain·후처리 머티리얼)는 계획 26절 후처리 catalog 스펙이 정한다. 이 문서는 자리(해상도·입력)만 정한다.
 
@@ -855,6 +863,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RS10 | screen-space: SSR·contact shadow, Forward+ 보조 출력, 간접광 합성(F12) | RS2·RS6 | 순환 graph 거부(음성 대조), 두 경로 screen-space 영상 대조 |
 | RS11 | GI·RT 연결점: `IndirectLightingInputs`, `RayScene` 자리, `RenderMode::PathTracing` 골격(누적·리셋·후처리 연결) | RS10, 각 방식 스펙 | 방식 없음 view와 방식 있는 view의 직접광 동일, PathTracing 리셋 조건 시험, 미지원 장치 `Unsupported` |
 | RS12 | skinned 메시: 정점 입력 타입, 현재·이전 pose(velocity), 두 경로·그림자·투명. 본 행렬은 LOD 통합 bone map 기준으로 `RGBA32Float` typed buffer에 현재·이전 pose를 쓴다(섹션 분할 없음 — RenderBase 결정 R18), morph 희소 목록 적용(compute 또는 CPU)(MeshAnimationAssets MR2) | RS3·RS6, 애니메이션 skinning(계획 15절), MeshAnimationAssets MA5 | 계획 15절 "Deferred·Forward·shadow·picking에서 동일 pose", CPU skinning 기준 결과 대조, 계획 12.1절 U1 skinned motion(velocity) 시험 |
+| RS13 | 디버그·편집 표시(4.2절): view별 단순 요소 수집(일반·디버그·편집), 인스턴스 종류 "디버그 선 묶음"·"아이콘 sprite", PC9a·PC9b 합성, Shipping의 base pass·depth prepass 단순 요소 경로, 깊이 우선 그룹 World·Foreground | RS0(PC8 뒤에 붙임), RS6(PostChain 정식 자리) | (a) World 그룹은 장면 깊이로 가려지고 Foreground는 늘 위 (b) 디버그 그리기 빌드(합성 pass)와 Shipping(base pass)이 같은 선 집합을 그림(가림 결과 대조) (c) 에디터 view가 아니면 PC9a가 frame graph에 없음 (d) 표시 색이 tone map·FXAA 영향을 받지 않음 (e) 3 backend 기준 영상 |
 
 - 모든 GPU 시험은 검증 계층 오류 0(RenderBase 8절)과 렌더 lane·인라인 모드 결과 동일을 함께 요구한다.
 - 기준 영상은 계획 29.2절대로 장면 manifest·카메라 경로·seed·build hash를 고정한다. Vulkan·GLES가 CI에서 NOT RUN이면 로컬 결과를 기록한다(RenderBase 18.1절과 같다).
@@ -979,3 +988,5 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
 - 개정 10(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)을 18절 RQ19에 연결했다. RS12에 섹션 본 palette 한도·morph 적용 책임(MR2)을 적었다.
 - 개정 11(2026-11-20): RenderBase 결정 R18(섹션 분할 없음·LOD 통합 bone map·typed buffer 본 행렬)에 맞춰 RS12 내용을 고쳤다.
+- 개정 12(2026-11-23): [컴포넌트 도입](ComponentCatalog.ko.md) 개정 2 반영 — 3.2절 `WorldIntegration` 행에 컴포넌트 목록 링크(CR12), 4.2절 디버그·편집 표시(CR23).
+- 개정 13(2026-11-23): 디버그·편집 표시 결정(컴포넌트 도입 CD12, 권장안) — 4.2절을 UE와 같은 세 경로(디버그 합성·편집 합성·Shipping base pass)로 고침(개정 12의 "Shipping 처리기 미등록"은 UE와 달라 버림), 11.2절 PC9a·PC9b와 자리, 17절 RS13.

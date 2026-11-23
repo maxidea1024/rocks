@@ -1,6 +1,6 @@
 # 에셋 시스템 설계
 
-기준일: 2026-11-20, 개정 12([텍스처 스트리밍](TextureStreaming.ko.md) T1·T5·T8 반영 — 12.1절 플랫폼 데이터 메타, 12.5.1절 덩어리 hash·상주 꼬리 수·비스트리밍·시네마틱 mip·bias 용어. 시네마틱 mip은 UE 5.8 원본 확인 결과 쿠킹이 따로 남기지 않는다). 개정 11([레벨 스크립트](LevelScript.ko.md) 저장·쿡·로드 진단 — 4.6절). 개정 10(메시·애니메이션 스펙 [MeshAnimationAssets](MeshAnimationAssets.ko.md) MR9·MR10과 [Unreal 교환 형식](UnrealExchange.ko.md) UXR1–UXR3·UXR6 반영 — 3절 모듈, 4.6절 진단, 7절 임포터 태그, 12.2절 손실 원본 예외, 12.4.5절 메시 LOD 그룹, 14.1절 결정적 ID 발급기, 18절). 개정 9(A0-G 구현 — 1절 A0-G 행에 범위·스펙 차이, 2절 그래픽 행). 개정 8(텍스처 기반 클래스 `StreamableRenderAsset` — 12.1절, 사용자 결정). 개정 7(개정 6 최종 검증 반영: 저장 쪽 값 치환·SCC 키 튜플·Commit 간선 보고·Windows 디렉터리 동기화·PreserveBorder 정의). 원본 파일 임포트부터 쿠킹된 런타임 데이터 로드까지 에셋의 전체 수명주기와 첫 수직 단면(PNG → Texture Asset → 설정 수정·재임포트 → 플랫폼별 쿠킹 → 런타임 로드)을 정한다. [엔진 구현 계획](EngineImplementationPlan.ko.md)의 결정을 따른다: §5.2(Outer·객체 경로), §5.3(instancing), §6.1(참조 종류), §7(직렬화·스키마 변경), §9(에셋 파이프라인·로딩·패키지·재임포트·텍스처 스트리밍), §24.2(PrimaryAsset·bundle). 계획을 바꾸는 곳은 17절에 모으고 계획 문서도 같이 고친다. 에디터 UI 연동은 범위 밖이며(사용자 결정) 서비스 API와 명령행 도구로 같은 기능을 제공한다.
+기준일: 2026-11-23, 개정 13(5.7절 4항 객체 단위 EditorOnly를 켜는 시점 — [컴포넌트 도입](ComponentCatalog.ko.md) CR5). 개정 12([텍스처 스트리밍](TextureStreaming.ko.md) T1·T5·T8 반영 — 12.1절 플랫폼 데이터 메타, 12.5.1절 덩어리 hash·상주 꼬리 수·비스트리밍·시네마틱 mip·bias 용어. 시네마틱 mip은 UE 5.8 원본 확인 결과 쿠킹이 따로 남기지 않는다). 개정 11([레벨 스크립트](LevelScript.ko.md) 저장·쿡·로드 진단 — 4.6절). 개정 10(메시·애니메이션 스펙 [MeshAnimationAssets](MeshAnimationAssets.ko.md) MR9·MR10과 [Unreal 교환 형식](UnrealExchange.ko.md) UXR1–UXR3·UXR6 반영 — 3절 모듈, 4.6절 진단, 7절 임포터 태그, 12.2절 손실 원본 예외, 12.4.5절 메시 LOD 그룹, 14.1절 결정적 ID 발급기, 18절). 개정 9(A0-G 구현 — 1절 A0-G 행에 범위·스펙 차이, 2절 그래픽 행). 개정 8(텍스처 기반 클래스 `StreamableRenderAsset` — 12.1절, 사용자 결정). 개정 7(개정 6 최종 검증 반영: 저장 쪽 값 치환·SCC 키 튜플·Commit 간선 보고·Windows 디렉터리 동기화·PreserveBorder 정의). 원본 파일 임포트부터 쿠킹된 런타임 데이터 로드까지 에셋의 전체 수명주기와 첫 수직 단면(PNG → Texture Asset → 설정 수정·재임포트 → 플랫폼별 쿠킹 → 런타임 로드)을 정한다. [엔진 구현 계획](EngineImplementationPlan.ko.md)의 결정을 따른다: §5.2(Outer·객체 경로), §5.3(instancing), §6.1(참조 종류), §7(직렬화·스키마 변경), §9(에셋 파이프라인·로딩·패키지·재임포트·텍스처 스트리밍), §24.2(PrimaryAsset·bundle). 계획을 바꾸는 곳은 17절에 모으고 계획 문서도 같이 고친다. 에디터 UI 연동은 범위 밖이며(사용자 결정) 서비스 API와 명령행 도구로 같은 기능을 제공한다.
 
 원칙: 기반이 부족하면 우회하지 않고 기반을 보강한다(사용자 지시). 동작하지 않는 기능을 완성처럼 표시하지 않는다. 상태 표기: **구현**(이번 범위에서 동작·시험), **계약**(API·스키마·포맷이 있고 호출하거나 기본값이 아닌 값을 주면 명시 오류 — `Unsupported`·`UnsupportedSetting`·`UnsupportedCapability` — 를 반환), **후속**(이번 범위에 API도 없음).
 
@@ -240,7 +240,7 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 1. **표 섹션의 바이트 배치**: Exports·ObjectImports·Dependencies·BulkIndex는 Record가 아니라 고정 배치다(`u32 count` + 항목, 정수 little-endian, Guid high·low, 문자열은 `u64 길이 + UTF-8`). Exports 항목 = `{name, typeId, outerIndex u32, flags u32}`, ObjectImports = `{assetId, outerImportIndex u32, name, typeId}`, Dependencies = `{assetId, kind u32, expectedTypeId, flags u32(bit 0 required)}`, BulkIndex = `{bulkId u32, flags u32, offset u64, storedBytes u64, rawBytes u64, codec u32, crc32 u32, sha256 32B}`. Summary만 Record다(스키마·필드 Guid는 `Private/PackageInternal.h`, 버전 표는 RecordList `{id, version}`, 엔진 버전은 중첩 Record `{주, 부, 패치}`, 프로파일 id는 String·설정 SHA-256은 Bytes 32). 섹션 schemaVersion은 모두 1이다.
 2. **패딩·빈 섹션**: 섹션 offset은 정확히 앞 섹션 끝을 정렬한 값이어야 하고(사이 byte는 0), 섹션 표 offset도 마지막 섹션 끝을 8 정렬한 값이다. bytes 0인 섹션은 거부한다 — Bulk만 예외(entry가 모두 0 byte일 때). 존재하는 표 섹션의 count 0도 거부한다.
 3. **Exports 순서 검증**: reader가 깊이 우선 순서(outer는 바로 앞 export 또는 그 조상)와 같은 Outer 안 이름 byte 오름차순(같은 byte 이름 중복 포함)을 검사한다. 대소문자·정규화만 다른 중복은 그래프 1단계(형제 유일성)가 잡는다.
-4. **객체 단위 EditorOnly**: Exports flags의 EditorOnly(2)는 v1에서 예약이다. 객체를 EditorOnly로 표시하는 클래스 지정자가 없으므로 writer는 0을 쓰고 reader는 켜진 비트를 `CorruptPackage`로 거부한다(지정자가 생기면 schemaVersion을 올린다).
+4. **객체 단위 EditorOnly**: Exports flags의 EditorOnly(2)는 v1에서 예약이다. 객체를 EditorOnly로 표시하는 클래스 지정자가 없으므로 writer는 0을 쓰고 reader는 켜진 비트를 `CorruptPackage`로 거부한다(지정자가 생기면 schemaVersion을 올린다). 지정자와 비트를 켜는 시점은 EditorOnly 컴포넌트(시각화·편집 도우미)를 들이는 [컴포넌트 도입](ComponentCatalog.ko.md) CR5다. 그때 MetaCompiler 클래스 지정자, writer의 비트 기록, 쿠킹 제외(EditorOnly 객체와 그 객체만 가리키는 참조), schemaVersion 올림을 한 번에 한다.
 5. **Dependencies 합성 규칙**(writer와 로드 대조가 같은 함수 `MergeDependencyUses`): 에셋마다 hard 계열(외부 참조 대상 객체)은 EditorOnly가 아닌 쓰임이 하나라도 있으면 Hard, EditorOnly 쓰임만 있으면 EditorOnly, soft 계열도 같다(Soft·EditorOnly). 두 계열이 모두 EditorOnly면 EditorOnly 항목 하나다. required는 그 종류를 정한 쓰임들의 OR다. expectedTypeId는 Hard만 저장 때 대상 패키지 대표 에셋의 타입이고 나머지는 0이다(Soft 대상의 타입은 `RequestAsset`의 expectedType이 판정한다). 로드 대조는 (assetId, kind, required)의 정확한 일치(에디터 읽기 전용은 (assetId, kind) 부분집합)이며 모든 import의 에셋은 Hard 또는 EditorOnly 의존이어야 한다.
 6. **bulk**: writer는 저장 그래프의 struct 치환 hook(`SubstituteStruct`)으로 `BulkDataRef`를 첫 출현 순 1부터 다시 매기고 (옛 id → 새 id) 표를 돌려준다. raw byte는 `PackageBulkSource`에서 얻어 크기·SHA-256을 대조한다(다르면 `CorruptPackage`). entry의 EditorOnly 표시는 그 entry의 모든 참조 위치가 EditorOnly일 때다. Zstd entry의 저장 byte는 Compression 모듈의 블록 컨테이너(RCBK, `PackageBulkBlockSizeLog2` = 18 → 256 KiB 블록)다 — writer가 블록 하나씩 압축해 sink에 흘려 쓰고 비워 둔 인덱스 자리를 끝에 `WriteAt`으로 채우므로 압축 메모리 피크는 블록 하나다(5.5절 3, `AssetPackage_BulkBlockCompressionPeak`). 블록마다 압축이 줄이지 못하면 그 블록은 raw로 담긴다(컨테이너 규칙). entry 저장 CRC는 인덱스 CRC와 payload CRC를 이어 붙여(`Crc32Combine` — Core에 더함) 만든다. 0 byte entry는 언제나 None이다. 처음 구현은 entry 전체를 한 번에 압축해 그 크기만큼 메모리를 잡았고, 압축이 줄이지 못하면 entry를 None으로 저장했다(끝까지 압축해 봐야 정해져 흘려 쓸 수 없다). 쿠킹 패키지 v1은 로더가 패키지 전체를 읽으므로(SHA-256 확인) 압축을 푼 raw를 `Package`가 소유하고 `Package::BulkBytes(ref)`로 준다(mip 부분 읽기는 TextureStreaming 단계).
 7. **Package**: 하드 의존 패키지 목록(`ObjectRefArray<Package>`)은 두지 않는다 — AssetManager의 상주 단위 표가 의존과 간선 다중도를 가진다. `Package`의 id(Transient·ReadOnly)·종류·bulk는 로드가 Commit 전에 설정하고, 대표 `Asset`의 `assetId`(Transient·ReadOnly)도 같이 설정한다. 로드가 아닌 생성은 `NewPackage(registry, access, id, kind)`다.
@@ -905,7 +905,8 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 | A4b | 대상 계산(전체·부분·NeverCook·AlwaysCook∩NeverCook·Missing·Soft 설정·역방향 Build·사라진 항목·bundle 태그 읽기)·색인 콘텐츠 해시(지연·캐시) | 그래프 경우마다 대상·진단, 해시 캐시 무효화 |
 | A4c1 | 기반 둘(TypeRegistry 타입 목록·Core SCC)·CookProcessor 표·키(build key Build SCC·cookKey Hard SCC·타입 표 지문) | 순환 키(시나리오 28)·Build 원본만 바꾸면 배열 cookKey 바뀜·입력마다 키 바뀜·결정성 |
 | A4c2 | 기본 처리기·쿠킹 실행(출력 sink, 열기 관리) | EditorOnly 필드 부재(11)·두 번 같은 byte(13)·원본 없이 쿠킹(2)·열기 횟수·에셋별 오류 계속 |
-| A4d | 게시·전체 정리·부분 병합·재사용 조건·재사용 항목의 byte 밖 칸 재계산(결정 8)·IncompatibleCook·CorruptEntry·실패 시 게시본 불변·보고서 | 시나리오 13·22·27·재사용 대상의 Soft 의존이 색인에 새로 생기면 매니페스트 의존이 바뀜 |
+| A4d1 | 게시기(staging·no-replace 이동·있으면 대조·CorruptEntry 교체·디렉터리 동기화·매니페스트 원자 교체·전체 정리·부분 병합·IncompatibleCook)·재사용 판정(cookKey·파일 크기·SHA-256)·재사용 항목의 byte 밖 칸 재계산(결정 8) | 시나리오 22·27·재사용 대상의 판정 칸이 바뀌면 매니페스트가 바뀜·실패 시 게시본 불변 |
+| A4d2 | 보고서(CookReport.json)·쿠킹 전체 흐름(설정 → 대상 → 키 → 재사용 → 실행 → 게시, 오류 진단이 있으면 게시하지 않음) | 시나리오 13(전체 두 번 같은 byte·두 번째는 전부 재사용)·보고서 결정성 |
 | A4e | `asset-cook` 명령·`--verify-nuggets`(NuggetMismatch 등록)·리플렉션 요구 둘(필드 지정자 `AssetBundles`·클래스 표지 `EditorOnly` — 리플렉션 담당과 조정)·저장 때 bundle 태그·EditorOnly 에셋 규칙(결정 4) | 명령 출력·verify(A4는 늘 같음)·bundle 구성원·EditorOnly 에셋 |
 
 - A4b 구현 세부(2026-11-23 — 권장안으로 확정, 결정 4·5의 콘텐츠 해시를 구체화):
@@ -917,7 +918,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     1. 뿌리: 전체 쿠킹 = alwaysCook(에셋은 FindByPath, 디렉터리는 접두) ∪ PrimaryAsset 규칙(ListByType(type, types — 파생 포함) 중 디렉터리 하나 아래). 부분 쿠킹 = 인자 경로(같은 판정). 아무것도 가리키지 않는 alwaysCook 항목은 경고 `InvalidPath`(setting = 순번), 인자 경로는 오류 `InvalidPath`.
     2. NeverCook 뿌리는 뺀다. alwaysCook·인자 경로가 직접 가리킨 에셋이면 경고 `NeverCookReferenced`(UE와 같은 우선순위), PrimaryAsset 규칙으로만 닿았으면 진단 없이 뺀다.
     3. 폐포: 대상마다 색인 의존을 본다 — Hard는 늘, Soft는 cookSoftReferences일 때, PrimaryAsset이면 bundle 구성원(태그 `Bundle.<이름>` = 구성원 AssetId 표준 문자열, 구성원마다 태그 하나 — A4e가 쓴다)도 Hard와 같은 규칙. 의존이 색인에 없으면 Hard·bundle은 오류·Soft는 경고 `MissingDependency`(asset = 참조자, related = 의존), 같은 id가 둘 이상이면 오류 `DuplicateAssetId`, NeverCook이면 Hard·bundle은 오류 `NeverCookReferenced`·Soft는 제외 목록. bundle 태그 값이 AssetId가 아니면 오류 `CorruptPackage`(asset = PrimaryAsset). EditorOnly·Build·ImportOwner 간선은 따라가지 않는다.
-    4. 부분 쿠킹: 인자 뿌리와 역방향으로 더한 에셋을 Build로 의존하는 에셋(색인 Referencers(Build))을 고정점까지 더한다(NeverCook은 진단 없이 빼고, 더한 에셋도 3의 폐포를 따른다). Hard·Soft·bundle 폐포로만 들어온 에셋에는 적용하지 않는다 — 10절의 의도는 인자 쪽 편집(원본 Texture2D를 고치면 그것을 묶는 Texture2DArray도)이고, 폐포 에셋까지 넓히면 많이 쓰이는 원본 하나가 그것을 묶는 에셋 전부를 다시 쿠킹한다(리뷰 권장, 2026-11-23). 폐포로 먼저 들어온 에셋도 뒤에 역방향으로 닿으면 넓힌다. 기존 매니페스트 항목 중 색인에 없는 것은 사라진 항목이고, 이번에 다시 쿠킹하지 않는 남은 항목이 그것을 Hard로 의존하면 오류 `MissingDependency`(asset = 남은 항목). 다시 쿠킹하는 항목은 옛 매니페스트 의존이 아니라 색인 의존으로 3에서 이미 판정했다(리뷰 필수 — 지운 참조를 옛 의존으로 오류 내지 않는다). 기존 항목 중 다시 쿠킹할 것(결정 8)은 키가 필요하므로 A4c·A4d가 정한다.
+    4. 부분 쿠킹: 인자 뿌리와 역방향으로 더한 에셋을 Build로 의존하는 에셋(색인 Referencers(Build))을 고정점까지 더한다(NeverCook은 진단 없이 빼고, 더한 에셋도 3의 폐포를 따른다). Hard·Soft·bundle 폐포로만 들어온 에셋에는 적용하지 않는다 — 10절의 의도는 인자 쪽 편집(원본 Texture2D를 고치면 그것을 묶는 Texture2DArray도)이고, 폐포 에셋까지 넓히면 많이 쓰이는 원본 하나가 그것을 묶는 에셋 전부를 다시 쿠킹한다(리뷰 권장, 2026-11-23). 폐포로 먼저 들어온 에셋도 뒤에 역방향으로 닿으면 넓힌다. 기존 매니페스트 항목은 색인에 고유하게 있고 NeverCook이 아니면 뿌리로 더한다(폐포만 따르고 역방향 Build는 넓히지 않는다 — 10절 "기존 매니페스트에서 cookKey가 달라진 항목"을 다시 쿠킹하려고 키를 계산한다, 같으면 A4d가 재사용한다 — A4d1 리뷰로 더함). 색인에 없거나 NeverCook이 된 항목은 사라진 항목이고(다시 게시하지 않는다), 같은 id가 둘 이상이면 오류 `DuplicateAssetId`(asset = 그 id)다. 이번에 다시 쿠킹하지 않는 남은 항목(같은 id 항목뿐이다)이 사라진 항목을 Hard로 의존하면 오류 `MissingDependency`(asset = 남은 항목). 다시 쿠킹하는 항목은 옛 매니페스트 의존이 아니라 색인 의존으로 3에서 이미 판정했다(리뷰 필수 — 지운 참조를 옛 의존으로 오류 내지 않는다). 기존 항목 중 다시 쿠킹할 것(결정 8)은 키가 필요하므로 A4c·A4d가 정한다.
     5. PrimaryAsset 여부는 규칙에 맞는지로 정한다(폐포로 들어와도 규칙에 맞으면 PrimaryAsset). bundle은 PrimaryAsset에만 있다(이름 순, 구성원 AssetId 순).
   - 결정성: 대상·제외·사라진 항목은 AssetId(high, low) 순, 진단은 (asset, code, related, setting, 오류 먼저) 순이다(같은 의존의 Hard·Soft 누락은 칸이 같고 수준만 다르다).
 - A4c 구현 세부(2026-11-23 — 권장안으로 확정, 결정 5–7을 구체화. A4c1·A4c2로 나눈다):
@@ -951,6 +952,48 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     - 기본 처리기는 `WritePackage(kind=Cooked, profileId, profileSettings, cookerVersion, bulkCodec, bulkAlignment(0이면 4096), bulkSource=열린 패키지 store)`다.
     - 결과(`CookedPackage`)는 쓴 byte·SHA-256·크기·bulk raw 합·대표 타입·경로 힌트·flags·bundle·의존이다. 쓴 byte를 다시 읽어 검증하고, 의존 = 쿠킹 패키지 Dependencies 그대로다. 만든 항목은 로더 대조(`CheckCookedPackage`)로 확인한다.
     - 결과는 출력 sink(`CookOutputSink::Put`)로 하나씩 넘긴다(A4d가 바로 staging에 쓴다 — 전체를 메모리에 모으지 않는다). 에셋별 오류(열기·처리기·검증)는 진단으로 모으고 끝까지 진행한다.
+- A4d 구현 세부(2026-11-23 — 권장안으로 확정, 결정 8·10·11을 구체화. A4d1·A4d2로 나눈다):
+  - **공용 원자 쓰기**: AssetDatabase의 비공개 `WriteFileAtomically`(`<디렉터리>/<이름>.<guid>.tmp` → Flush → Replace)를 공개 API로 올려 매니페스트·보고서 쓰기에 그대로 쓴다(중복 구현 금지). 결정 10의 "매니페스트를 `.staging`에 쓰고 Replace"는 같은 볼륨의 임시 파일 → Replace라는 뜻이고, 임시 파일은 대상 옆에 둔다.
+  - **게시 배치**: `<Saved>/Cooked/<프로파일>/` 아래에 `CookedManifest.rman`·`CookReport.json`·`Packages/<a>/<A>-<h>.rpkg`(`AppendCookedPackagePath` — 이름에 SHA-256이 들어간다)·`.staging/`을 둔다.
+  - **게시기**(AssetCooker `CookPublish.h`, `CookPublisher` — `CookOutputSink`):
+    - `Begin(lock)`: 잠금은 이 프로젝트의 쓰기 잠금이어야 한다(InvalidArgument). 쿠킹 루트까지의 디렉터리(`Saved`·`Saved/Cooked`·루트·`Packages`) 중 없던 것은 그 부모를 기억해 Finish가 동기화한다(10절 게시 2 — 첫 쿠킹이면 새 루트의 항목이 매니페스트보다 먼저 매체에 남아야 한다, A4d1 리뷰로 더함). `.staging`·`Packages`를 만들고, `.staging` 안의 파일을 모두 지운다(잠금을 쥔 쿠커만 쓰는 자리라 남은 것은 모두 고아다 — 못 지우면 경고).
+    - `Put`: `.staging/<guid>.tmp`에 쓰고 Flush·Close한 뒤 대상 경로로 `Move(no-replace)`한다. 대상이 이미 있으면 크기·SHA-256을 흘려 읽어 대조한다. 같으면 임시 파일을 지우고, 다르면 경고 `CorruptEntry` 뒤 `Replace`한다(시나리오 27). 바뀐 디렉터리를 기억하고 매니페스트 항목을 만든다.
+    - `Reuse(기존 항목, 대상)`: byte에서 나오는 칸(SHA-256·크기·bulk raw·대표 타입·의존·cookKey)은 기존 항목에서, byte 밖 칸(경로 힌트·flags·bundle)은 이번 판정에서 가져와 항목을 만든다(결정 8).
+    - `Finish`: 바뀐 디렉터리를 안쪽부터 `SyncDirectory`한다(NotDurable은 경고). 매니페스트를 만든다(머리 = 프로파일 id·출력 설정·CookSettings SHA-256·쿠커 버전·쿠킹 엔진 버전, 항목은 AssetId 순). 부분 쿠킹은 기존 매니페스트와 병합한다: 기존 항목 중 이번 항목도 사라진 항목(A4b)도 아닌 것을 더하고, `CheckCookedManifestMerge`가 다르면 `IncompatibleCook` 오류로 게시하지 않는다. 그 뒤 `WriteCookedManifest`(검증 포함)와 원자 교체를 한다. 전체 쿠킹은 그 뒤 새 매니페스트가 가리키지 않는 `Packages/` 파일을 지운다(못 지우면 경고, 빈 디렉터리는 남겨도 된다).
+    - 실패하면 `Finish`를 부르지 않는다. 이미 옮긴 패키지 파일은 이름이 내용 해시라 기존 매니페스트가 가리키는 파일을 덮지 않는다(같은 이름이면 같은 내용 — 대조로 확인). 그래서 게시본(매니페스트 + 그것이 가리키는 파일)은 그대로다. 남은 새 파일은 다음 전체 쿠킹이 지운다.
+  - **재사용 판정**(`PlanCookReuse`): 기존 매니페스트가 있고 머리의 프로파일 id·출력 설정·쿠커 버전이 이번과 같을 때만 본다(다르면 아무것도 재사용하지 않는다). 대상마다 키가 있고, 기존 항목의 cookKey가 같고, 그 파일이 있으며 크기·SHA-256이 같으면 재사용한다. 파일 대조는 흘려 읽는 SHA-256이다(시나리오 27 — 손상·삭제된 파일은 다시 쿠킹한다).
+    - 전체 쿠킹도 재사용한다(UE 증분 쿠킹처럼 — cookKey가 판정을 담으므로 CookSettings가 달라도 안전하다). 부분 쿠킹의 병합 조건(CookSettings SHA-256까지 같음)은 게시 때 따로 본다.
+    - 부분 쿠킹은 살아 있는 기존 항목을 모두 대상에 넣으므로(A4b 규칙 4) 키가 같으면 재사용, 다르면 다시 쿠킹한다. 그래서 게시기 병합이 그대로 남기는 기존 항목은 같은 id 항목(오류 — 게시하지 않음)뿐이고, 병합 복사는 방어적이다.
+    - 실행기는 재사용 대상을 건너뛴다(`CookRunRequest`의 재사용 표지 — 열지 않는다).
+  - **보고서**(A4d2, 결정 11): 리플렉션 struct `CookReport`(도구 빌드 ID·엔진 버전·프로파일·대상·쿠킹·재사용 수·쓴 byte·진단 목록)를 ReflectionText `ExportJson`으로 쓴다(결정적 — 진단은 `CookDiagnosticBefore` 순). 게시 성공·실패 모두 쓴다(실패도 원인을 남긴다).
+  - **전체 흐름**(A4d2, `CookProject`): 설정 읽기(A4a) → 대상(A4b) → 키(A4c1) → 재사용 판정 → 실행(A4c2, 출력 = 게시기) → 오류 진단이 하나라도 있으면(대상·키·실행) 게시하지 않고 보고서만 → 아니면 Finish.
+    - 색인은 호출자가 쿠킹 직전에 갱신해 넘긴다(A4b 콘텐츠 해시 한계 — Rebuild 또는 감시 갱신. 에디터 안에서는 열린 패키지가 색인 항목을 가리키므로 흐름이 스스로 Rebuild하지 않는다).
+    - 에디터 프로세스 안 쿠킹은 dirty 패키지가 있으면 Busy다(결정 7 — 실행기가 본다).
+- A4d2 상태: **구현** — 대조표 14.1.71절, coverage 14.1.72절. 구현에서 정한 것:
+  - API는 AssetCooker `CookProject.h`의 `CookProject(request, result)`와 리플렉션 struct `CookReport`·`CookReportDiagnostic`이다(진단 줄은 코드·수준·AssetId 표준 문자열·순번·오류 이름).
+  - 보고서는 `ExportJson(TextUse::Report)`과 원자 교체로 쓴다. 보고서 struct의 codec 문맥은 집합의 Registry다. AssetCooker 타입을 등록하지 않았으면 보고서 쓰기의 타입 조회 오류(NotFound)다.
+  - 보고서는 흐름이 끝까지 오면 늘 쓴다(게시 성공·규칙 위반 실패 모두). 함수 오류(IO·잠금·할당 등)로 멈추면 쓰지 않는다.
+  - 기존 매니페스트:
+    - 읽기는 Core 공용 `ReadWholeFile`(`Core/FileRead.h` — 상한 CookedManifestMaxFileBytes)로 한다. A4a CookConfig의 사본을 이것으로 바꿨다. Config·AssetDatabase의 비공개 사본은 후속이다(Config는 다른 세션 몫).
+    - 깨졌으면(크기 상한 초과 포함 — `CorruptPackage` / CapacityExceeded) 경고 뒤 없는 것으로 보고 전체 쿠킹한다(사용자가 지우기 전까지 쿠킹이 멈추지 않게 — 리뷰 권장). 읽기 IO 오류는 함수 오류다. 상한은 요청 칸 `manifestLimitBytes`(기본 CookedManifestMaxFileBytes — 시험이 낮춘다)다.
+    - 부분 쿠킹은 병합 호환(`CheckCookedManifestMerge` — 프로파일·출력 설정·CookSettings·쿠커 버전)을 대상 계산 전에 본다. 다르면 쿠킹하지 않고 오류 `IncompatibleCook`과 보고서로 끝낸다(헛된 쿠킹을 막는다 — 리뷰 권장). 게시기 Finish의 같은 대조는 방어적으로 남는다.
+  - 기존 매니페스트가 없으면 인자가 있어도 전체 쿠킹이다(결정 10 — partial 거짓). 재사용 판정은 전체·부분 모두 기존 매니페스트로 한다.
+  - 진단은 대상·키·실행·게시 순으로 모아 `CookDiagnosticBefore`로 정렬한다. 오류가 하나라도 있으면 Finish를 부르지 않는다.
+  - 비용(리뷰 권장): 부분 쿠킹도 살아 있는 기존 항목을 모두 재사용 판정에 넣으므로 `PlanCookReuse`가 매번 게시된 패키지 전부를 흘려 해시한다(쿠킹 결과 byte에 비례 — 시나리오 27의 같은 크기 손상 감지와의 균형). 후속 두 길: (a) 지난 게시 때 패키지 파일의 (크기·수정 시각)을 기록해 같으면 해시를 건너뜀, (b) 전체 SHA 대조를 `--verify` 같은 선택으로 둠.
+  - JSON 내보내기와 `JsonWriter::Finish`는 한 갈래로 본다(내보내기가 성공하면 Finish의 실패는 끝 줄바꿈 append의 할당 실패뿐이다).
+- A4d1 상태: **구현** — 대조표 14.1.69절, coverage 14.1.70절. 구현에서 정한 것:
+  - 공용으로 올린 것:
+    - AssetDatabase `AtomicFileWrite.h`의 `WriteFileAtomically`를 비공개에서 공개로 옮겼다(namespace rocks, export).
+    - Core `Encoding/Sha256File.h`의 `HashFileSha256(file, buffer, digest, bytes)`를 새로 두었다. 연 파일을 조각으로 흘려 읽는다. 색인 ContentHash·게시 대조·재사용 판정이 쓴다(임포트 원본 대조·셰이더 도구·너겟의 기존 사본은 기대 크기 대조 등 계약이 달라 이번에 바꾸지 않았다).
+  - 시험 대역 `MemoryFileSystem`에 `SyncDirectory`(고장 `faults.sync`, 호출 수 `syncs`)를 더했다. 기본 구현은 Unsupported라 게시가 늘 실패했다.
+  - staging 임시 이름은 `.staging/<대상 파일 이름>.tmp`다(Guid 없음). `.staging`은 잠금을 쥔 쿠커만 쓰고 Begin이 비운다. 한 쿠킹에 같은 패키지는 한 번만 넣으므로 겹치지 않는다. 열기는 CreateAlways다.
+  - bundle 구성원은 그 항목의 의존이어야 한다(AS 10.1절 5 — `ValidateBundleMembers`). `AssetBundles`가 Soft 참조 필드라 정상 입력은 늘 맞는다. 어기면 Finish의 매니페스트 검증 오류로 게시하지 않는다.
+  - 게시하지 않는 오류 진단(IncompatibleCook·매니페스트 검증 위반)은 함수 성공 + 오류 진단이다(규칙 위반은 진단). 진단 push의 할당 실패는 OutOfMemory다. 경고 push의 할당 실패도 OutOfMemory다 — 처음 구현은 버렸으나 A4d2 할당 실패 시험이 "주입했는데 성공"으로 잡았다(경고를 조용히 잃지 않는다).
+  - 정리는 `Packages/<a>/<파일>` 두 단계만 훑는다. 그 밖의 모양(최상위 파일·링크)은 쿠커가 만든 것이 아니라 두고, 빈 shard 디렉터리도 남긴다.
+  - 실행기의 재사용 표지는 `CookRunRequest::reuse`다(표지 수가 대상 수와 다르면 InvalidArgument).
+  - 첫 쿠킹 동기화(리뷰 필수): Begin이 `DirectoryExists`로 없던 상위 디렉터리를 찾아 그 부모를 동기화 목록에 넣는다(확인 실패는 오류). 시험 대역 `MemoryFileSystem`에 호출 기록(`recordJournal`·`journal` — 성공한 SyncDirectory·Replace)을 더해 "모든 동기화가 매니페스트 교체보다 먼저"를 순서로 본다.
+  - 부분 쿠킹의 기존 항목(리뷰 필수): 게시기가 아니라 대상 계산(A4b 규칙 4)에서 막는다. 살아 있는 기존 항목이 모두 키 계산·재사용 판정을 거치므로 cookKey가 달라진 항목은 다시 쿠킹된다.
+  - 후속(리뷰 권장): `WriteFileAtomically`는 에셋 DB와 무관한 범용 기능이라 Core·PlatformBase 파일 유틸로 옮긴다. 해시 루프 사본 중 `CheckImportSource`(AssetSourceRoots — 크기 비교 뒤 흘려 해시)는 `HashFileSha256`으로 바꿀 수 있다(줄어든 파일의 진단이 IO 오류에서 SourceChanged로 바뀌는지 시험과 함께). `NuggetFile`의 범위 reader 검증은 File이 아니라 계약이 달라 남긴다. ShaderToolLoader는 다른 세션 몫이다.
 - A4c2 상태: **구현** — 대조표 14.1.67절, coverage 14.1.68절. 리뷰 반영(2026-11-23, 필수 하나·권장 둘 — 매니페스트 의존 거르기 제거·결정 4·8 문장, 로더 대조 자기 검증, cookKey 제외 Soft 근거). 구현에서 정한 것:
   - 기본 처리기는 `CookProcessor::Cook`의 기본 구현이다(에디터 그래프를 그대로 쿠킹 패키지로). `DefaultCookProcessor`는 정체성(`DefaultCookProcessorId`)만 정한다. 특화 처리기(A5 텍스처)는 Cook을 재정의한다. CookProcessor는 export 클래스다(Modular 빌드에서 기본 Cook을 시험 처리기가 물려받는다).
   - API는 AssetCooker `CookRun.h`의 `CookPackages(request, result)`다.
@@ -3031,7 +3074,7 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 뿌리 진단(규칙 1) | 디렉터리 재귀, 없는 에셋·디렉터리 경고 InvalidPath(순번), 같은 경로 DuplicatePath, 같은 id(alwaysCook 경로·PrimaryAsset 규칙·마운트 목록의 두 파일), 같은 뿌리 두 번은 한 번, 마운트는 전체 | `CookTargets_Roots` |
 | NeverCook(규칙 2·3) | 에셋·디렉터리 직접 지정 경고(순번), 규칙으로만 닿으면 조용히, Hard·bundle 오류, Soft 설정이면 제외 목록(둘 — AssetId 순)·아니면 없음, 마운트 NeverCook(경고만 — HasErrors 거짓) | `CookTargets_NeverCook` |
 | 누락·같은 id·bundle 태그(규칙 3) | Hard 누락 오류·Soft 누락 경고(같은 의존의 Hard·Soft 누락은 둘 다 — 오류 먼저), 같은 id Hard·Soft·bundle 오류, bundle 값 문자열·빈 이름(`Bundle.`)·null·대문자 CorruptPackage, bundle 목록은 올바른 태그만(누락·같은 id 구성원도 목록에는 있다), Soft 설정이 아니면 Soft 의존을 보지 않음 | `CookTargets_MissingAndDuplicates` |
-| 부분 쿠킹(규칙 4) | 인자 경로(없음 오류·NeverCook 경고·디렉터리), 역방향 Build 고정점(두 단계·더한 에셋의 Hard 폐포·NeverCook 참조자 조용히·같은 id 참조자 오류), 역방향 범위(Hard 폐포로만 들어온 에셋의 Build 참조자는 더하지 않음, 폐포로 먼저 들어온 에셋이 뒤에 역방향으로 닿으면 그 참조자도), PrimaryAsset 규칙에 맞는 폐포 에셋의 bundle, 기존 매니페스트(사라진 항목, 같은 id 항목은 남음, 다시 쿠킹하지 않는 남은 항목의 Hard → 사라짐 오류, 다시 쿠킹하는 항목의 옛 Hard → 사라짐은 오류 아님, 색인에 있는 Hard·Soft는 아님, 사라진 항목끼리는 보지 않음), 전체 쿠킹은 기존 매니페스트를 보지 않음 | `CookTargets_Partial` |
+| 부분 쿠킹(규칙 4) | 기존 항목 뿌리(살아 있는 항목은 대상 — 옛 의존으로 오류 없음, NeverCook이 된 항목은 사라진 항목, 같은 id 항목 DuplicateAssetId), 인자 경로(없음 오류·NeverCook 경고·디렉터리), 역방향 Build 고정점(두 단계·더한 에셋의 Hard 폐포·NeverCook 참조자 조용히·같은 id 참조자 오류), 역방향 범위(Hard 폐포로만 들어온 에셋의 Build 참조자는 더하지 않음, 폐포로 먼저 들어온 에셋이 뒤에 역방향으로 닿으면 그 참조자도), PrimaryAsset 규칙에 맞는 폐포 에셋의 bundle, 기존 매니페스트(사라진 항목, 같은 id 항목은 남음, 다시 쿠킹하지 않는 남은 항목의 Hard → 사라짐 오류, 다시 쿠킹하는 항목의 옛 Hard → 사라짐은 오류 아님, 색인에 있는 Hard·Soft는 아님, 사라진 항목끼리는 보지 않음), 전체 쿠킹은 기존 매니페스트를 보지 않음 | `CookTargets_Partial` |
 | 요청 거부 | 색인·TypeRegistry·설정 null(out 비움), 형식이 틀린 alwaysCook·neverCook·PrimaryAsset 디렉터리·인자 경로, 등록되지 않은 타입 — InvalidArgument, 종료한 TypeRegistry는 ShuttingDown 그대로 | `CookTargets_Rejects` |
 | 결정성 | 대상·제외·사라진 항목 AssetId 순, 진단 (asset, code, related, setting, 오류 먼저) 순(시험 쪽 비교로 정렬해 대조) | 위 시험 모두 |
 | 할당 실패(대상) | 전체(bundle·Soft·제외·경고)·부분(역방향 Build 참조자·같은 id 참조자·기존 매니페스트·진단) — 모든 지점 OutOfMemory, 다 지나면 기준과 대상·PrimaryAsset·bundle 수·제외·사라진 항목·진단 수가 같다 | `CookTargets_AllocationFailures` |
@@ -3098,6 +3141,51 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 #### 14.1.68 Coverage(A4c2)
 
 측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookRun.cpp` 줄 245/245·분기 94/94(리뷰 반영 뒤 — 의존 거르기를 없애고 로더 대조를 더함), `CookProcessor.cpp` 줄 49/49·분기 22/22, `CookRun.h`·`CookProcessor.h` 전부(A4c1 파일은 그대로 — `CookKeys.cpp` 분기 156/157의 남은 하나는 14.1.66의 단언).
+
+닿지 않는 곳 없음.
+
+#### 14.1.69 요구 대조표(A4d1 — 게시기·재사용 판정)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookPublishTests.cpp`(`CookPublish_*` 8 — 디스크 임시 루트의 잠금 + 그 루트의 메모리 파일 시스템, 합성 쿠킹 패키지)와 `CookRunTests.cpp`의 재사용 표지, FoundationTests `Core/Source/Runtime/Core/Tests/Sha256FileTests.cpp`(`Sha256File_*` 2)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 첫 쿠킹 동기화(10절 게시 2) | 쿠킹 루트까지 없을 때 새로 만든 디렉터리의 부모(프로젝트 루트·Saved·Cooked·루트)·Packages가 안쪽부터, 모두 매니페스트 교체보다 먼저, 두 번째 쿠킹은 있는 상위 디렉터리를 동기화하지 않음, 첫 쿠킹의 할당 실패 | `CookPublish_FirstCookSyncOrder` |
+| 전체 게시(결정 10) | 내용 해시 이름으로 옮김, 매니페스트 머리·AssetId 순 항목·칸·bundle, 동기화(호출 늘어남), Root, `.staging` 고아 정리, 가리키지 않는 `Packages/<a>/` 파일 정리, 모양 밖 파일·링크 유지, 임시 파일 남지 않음 | `CookPublish_FullCookAndCleanup` |
+| 같은 이름 파일(시나리오 27) | 같은 내용 안 씀(쓴 byte 제외·경고 없음), 같은 크기 손상·다른 크기 손상·읽을 수 없는 파일 → CorruptEntry(error 칸) 뒤 교체 | `CookPublish_ExistingFiles` |
+| 부분 병합(결정 8·10) | 새 항목, 재사용 항목(byte 칸 기존·경로·flags·bundle 이번 판정 — PrimaryAsset·아님), 사라진 항목 빼기, 남은 항목 유지, 가리키지 않는 파일 안 지움, IncompatibleCook(게시본 byte 그대로) | `CookPublish_PartialMerge` |
+| 실패 시 게시본 불변 | Finish 없음(매니페스트·기존 파일 그대로), 매니페스트 검증 위반(Hard 대상 없음 — CorruptPackage, asset·related) | `CookPublish_FailureKeepsPublished` |
+| 거부·IO | 설정 null 둘·잠금 아님·두 번째 Begin·Begin 전 Put·Reuse·Finish·두 번째 Finish·Finish 뒤 Put·Reuse InvalidArgument, 디렉터리 확인(Stat)·디렉터리 만들기(Begin·패키지)·임시 파일 만들기·쓰기·Flush·Close·옮기기·손상 교체 오류(임시 파일 지움), 교체 NotDurable 성공, 동기화 NotDurable 경고·그 밖 오류, 매니페스트 교체 NotDurable 경고·그 밖 오류, 고아·정리 삭제 실패 경고, 열거(`.staging`·`Packages`·`Packages/<a>`) 실패 오류 | `CookPublish_RejectsAndFaults` |
+| 재사용 판정(결정 8) | 머리 셋·cookKey·크기·SHA-256 모두 같을 때만, 파일 없음·같은 크기 손상·크기만 다름·cookKey 다름·키 없음·매니페스트에 없음은 다시, 머리 다름(셋 각각)·기존 없음은 재사용 없음, 인자 null·키 수 다름 InvalidArgument, 할당 실패 | `CookPublish_PlanReuse` |
+| 재사용 표지(실행기) | 표지 선 대상은 열지 않고 건너뜀, 표지 수 다름 InvalidArgument | `CookRun_CooksAllTargets`·`CookRun_Rejects` |
+| 할당 실패 | 부분 병합 흐름(고아·bundle 패키지·재사용·남은 bundle 항목 복사)·전체 정리 흐름의 모든 지점 OutOfMemory(실패면 게시본 그대로, 다 지나면 게시), 게시하지 않는 오류 진단(IncompatibleCook·검증 위반) push | `CookPublish_AllocationFailures` |
+| 공용 파일 해시 | 여러 조각·끝 조각·빈 파일·읽던 위치부터, 빈 buffer InvalidArgument, 읽기 실패(EngineTests ContentHash Read 고장) | `Sha256File_*`·`AssetIndex_ContentHashRejects` |
+| 조합(14 완료 조건 2) | 게시 모드(전체·부분) × 대상 파일 상태(없음·같음·같은 크기 손상·다른 크기·읽기 불가) × 항목 출처(새·재사용·남은·사라진) × IO 고장(열하나) | 위 시험 |
+
+#### 14.1.70 Coverage(A4d1)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookPublish.cpp` 줄 598/598·분기 288/288(리뷰 반영 뒤), `CookTargets.cpp` 줄 419/419·분기 220/220, `CookRun.cpp` 줄 249/249·분기 102/102, `CookPublish.h`·`CookRun.h` 전부. 처음 측정은 경로 조립(인라인 512 byte)이 할당하지 않아 할당 실패 분기 마흔여 곳이 닿지 않았다. 인라인을 64 byte로 줄여(경로는 대개 allocator로 자란다) 할당 지점이 늘 살아 있게 했고, Guid 임시 이름(발급 실패를 시험할 수 없음)을 대상 이름 기반으로 바꿨으며, 늘 참인 '/' 찾기 조건을 지웠다.
+
+닿지 않는 곳 없음.
+
+#### 14.1.71 요구 대조표(A4d2 — 쿠킹 전체 흐름·보고서)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookProjectTests.cpp`(`CookProject_*` 5 — 디스크 임시 루트의 잠금 + 그 루트의 메모리 파일 시스템, Content에 시험 원본 Sources 여덟)이고, 공용 `ReadWholeFile`은 CookConfig 시험(읽기·크기·열기 실패·상한)도 덮는다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 전체 흐름(결정 11·A4d 세부) | 대상 → 키 → 재사용 → 실행 → 게시, 결과 수(대상·쿠킹·재사용·쓴 byte), 보고서(published·cooked·profile·빈 진단) | `CookProject_FullTwiceReuses` |
+| 결정성(시나리오 13) | 두 번째 전체 쿠킹은 전부 재사용(쿠킹 0·쓴 byte 0)·매니페스트 byte 같음 | `CookProject_FullTwiceReuses` |
+| 부분 쿠킹(10절·결정 8) | 바뀐 기존 항목(Leaf)과 그것을 Hard로 쓰는 항목(Hub)만 다시 쿠킹·나머지 재사용·인자(Hero)는 같은 byte, 병합 호환 아님 → 쿠킹 전 IncompatibleCook(대상 0·게시본 그대로·보고서), 기존 매니페스트 없으면 전체 쿠킹 | `CookProject_PartialRecooksChanged` |
+| 오류는 게시하지 않음(10절) | 사라진 파일(MissingFile) → 게시 안 함·게시본 byte 그대로·보고서 published false·진단 줄(코드·수준), 같은 입력이면 같은 보고서 byte | `CookProject_ErrorsKeepPublished` |
+| 깨진 기존 매니페스트·거부 | 깨진 매니페스트·상한 초과(CapacityExceeded)는 경고 뒤 전체 쿠킹 게시, 인자 null 아홉 InvalidArgument(결과 비움), 잠금 아님 InvalidArgument, 매니페스트 읽기 IO 오류, 보고서 struct 미등록 NotFound | `CookProject_CorruptManifestAndRejects` |
+| 할당 실패 | 첫 쿠킹·재사용·깨진 매니페스트(경고 push)·게시기 경고만·대상 경고만·병합 호환 아님(조기 판정)·오류 진단(보고서 진단 줄)의 모든 지점 OutOfMemory(결과 객체도), 다 지나면 기준과 같음 | `CookProject_AllocationFailures` |
+| 경고 push 할당 실패(A4d1 보강) | 경고 다섯 자리(고아 삭제·CorruptEntry·동기화 NotDurable·매니페스트 NotDurable·정리 삭제) 각각이 첫 진단인 장면의 OutOfMemory | `CookPublish_AllocationFailures` |
+| 조합(14 완료 조건 2) | 실행 모드(첫 전체·재사용 전체·부분·매니페스트 없는 부분) × 기존 매니페스트(없음·정상·깨짐·읽기 불가) × 결과(게시·오류) | 위 시험 |
+
+#### 14.1.72 Coverage(A4d2)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookProject.cpp` 줄 264/264·분기 118/118(리뷰 권장 반영 뒤), `CookPublish.cpp` 줄 611/611·분기 298/298(경고 push 전파 뒤), `CookProject.h` 전부. `-Filter Cook -Sources Core/Source/Runtime/Core/Private` — `FileRead.cpp` 줄 26/26·분기 12/12(`Sha256File.cpp`의 남은 두 갈래는 Foundation `Sha256File_RejectsEmptyBuffer`와 EngineTests `AssetIndex_ContentHashRejects`가 덮는다).
 
 닿지 않는 곳 없음.
 

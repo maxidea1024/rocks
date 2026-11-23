@@ -121,6 +121,10 @@ public:
                     return added;
                 }
             }
+
+            if (request_.existing != nullptr) {
+                AddExistingRoots();
+            }
         } else {
             for (usize index = 0; index < settings.alwaysCook.Size(); ++index) {
                 if (auto added = AddRoots(settings.alwaysCook[index].View(),
@@ -384,18 +388,33 @@ private:
         return Result<void>::Success();
     }
 
-    // 기존 매니페스트(AssetId 순): 색인에 없는 항목은 사라진 항목(같은 id가 둘 이상인
-    // AlreadyExists는 색인에 있다), 이번에 다시 쿠킹하지 않는 남은 항목이 그것을 Hard로 의존하면
-    // 오류. 대상의 의존은 옛 매니페스트가 아니라 색인으로 이미 보았다(Follow).
-    void CheckExisting() noexcept {
-        const CookedManifest& existing = *request_.existing;
-        for (const CookedManifestEntry& entry : existing.entries) {
+    // 부분 쿠킹의 기존 매니페스트 항목도 뿌리다(10절 — cookKey가 달라진 기존 항목을 다시 쿠킹하려고
+    // 키를 계산한다, 같으면 A4d가 재사용한다). 폐포만 따르고 역방향 Build는 넓히지 않는다. 색인에
+    // 없거나 NeverCook이 된 항목은 사라진 항목이다(다시 게시하지 않는다 — AssetId 순으로 쌓인다).
+    // 같은 id가 둘 이상이면 오류 DuplicateAssetId(asset = 그 id)다.
+    void AddExistingRoots() noexcept {
+        for (const CookedManifestEntry& entry : request_.existing->entries) {
             auto found = request_.index->FindById(entry.asset);
-            if (!found && found.Error() == ErrorCode::NotFound) {
+            if (!found) {
+                // FindById의 오류는 NotFound·AlreadyExists뿐이다.
+                if (found.Error() == ErrorCode::NotFound) {
+                    Keep(out_.removed.TryPushBack(entry.asset));
+                } else {
+                    Diagnose(AssetDiagnosticCode::DuplicateAssetId, false, entry.asset);
+                }
+            } else if (IsNever(*found.Value())) {
                 Keep(out_.removed.TryPushBack(entry.asset));
+            } else {
+                Enqueue(*found.Value());
             }
         }
+    }
 
+    // 이번에 다시 쿠킹하지 않는 남은 기존 항목(대상도 사라진 항목도 아님 — 같은 id 항목)이 사라진
+    // 항목을 Hard로 의존하면 오류다. 대상의 의존은 옛 매니페스트가 아니라 색인으로 이미
+    // 보았다(Follow).
+    void CheckExisting() noexcept {
+        const CookedManifest& existing = *request_.existing;
         for (const CookedManifestEntry& entry : existing.entries) {
             if (IsRemoved(entry.asset) || visited_.Contains(entry.asset)) {
                 continue;

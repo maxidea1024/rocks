@@ -1,5 +1,5 @@
 #include "AssetDatabaseInternal.h"
-#include "AtomicFileWrite.h"
+#include <AssetDatabase/AtomicFileWrite.h>
 
 #include <AssetDatabase/AssetIndexCache.h>
 #include <AssetDatabase/ImportRecord.h>
@@ -503,8 +503,8 @@ Result<void> WriteAssetIndexCache(platform::FileSystem& files, const ProjectLayo
         return encoded;
     }
 
-    auto written = asset_database_detail::WriteFileAtomically(
-        files, allocator, layout.IntermediateDirectory(), AssetIndexCacheFileName, bytes.View());
+    auto written = WriteFileAtomically(files, allocator, layout.IntermediateDirectory(),
+                                       AssetIndexCacheFileName, bytes.View());
     if (!written) {
         return Result<void>::Failure(written.Error());
     }

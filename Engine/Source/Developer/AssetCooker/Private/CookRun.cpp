@@ -138,7 +138,8 @@ private:
             [&](Span<const uint32> members, bool) noexcept -> Result<void> {
                 const usize begin = order_.Size();
                 for (uint32 member : members) {
-                    if (request_.keys->keys[member].hasKey) {
+                    if (request_.keys->keys[member].hasKey &&
+                        (request_.reuse.IsEmpty() || request_.reuse[member] == 0)) {
                         (void)order_.TryPushBack(member);
                     }
                 }
@@ -315,7 +316,8 @@ Result<void> CookPackages(Allocator& allocator, const CookRunRequest& request,
     if (request.index == nullptr || request.packages == nullptr || request.processors == nullptr ||
         request.targets == nullptr || request.keys == nullptr || request.profile == nullptr ||
         request.output == nullptr || request.maxOpenPackages == 0 ||
-        request.keys->keys.Size() != request.targets->targets.Size()) {
+        request.keys->keys.Size() != request.targets->targets.Size() ||
+        (!request.reuse.IsEmpty() && request.reuse.Size() != request.targets->targets.Size())) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

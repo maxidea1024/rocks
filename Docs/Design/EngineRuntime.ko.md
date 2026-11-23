@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 2026-11-22 갱신: 6절 종료 게이트([오디오 시스템](AudioSystem.ko.md) AD23). 2026-11-20 갱신: 4.6절 Level `levelScript` 필드·레벨 편입 순서·레벨 저장 검증, 7.2절 Level 파괴 순서와 LevelScript 파괴 규칙([레벨 스크립트](LevelScript.ko.md) LD4–LD8·LD16·LD17). 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정, GC 일정(STW 병렬 전체 수집 요청·주기, 회수 예산, 엔진 소유 GC scheduler — GC 설계 17절). 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-23 갱신: 3절 `Gameplay` 행 상태, 7.3절 Component 보강 예정 항목, 8절 Tick 단계의 UE 대응 결정(물리 결과 반영·skeletal mesh 물리 마무리 엔진 단계, [컴포넌트 도입](ComponentCatalog.ko.md) CR1·CR2·CR8a·CR26·CD11). 2026-11-22 갱신: 6절 종료 게이트([오디오 시스템](AudioSystem.ko.md) AD23). 2026-11-20 갱신: 4.6절 Level `levelScript` 필드·레벨 편입 순서·레벨 저장 검증, 7.2절 Level 파괴 순서와 LevelScript 파괴 규칙([레벨 스크립트](LevelScript.ko.md) LD4–LD8·LD16·LD17). 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정, GC 일정(STW 병렬 전체 수집 요청·주기, 회수 예산, 엔진 소유 GC scheduler — GC 설계 17절). 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -44,7 +44,7 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `Engine` | ObjectRuntime, World | 엔진 상태 기계·메인 루프·WorldContext·EngineSubsystem | Gameplay·Graphics·창 참조 |
 | `World` | ObjectRuntime, CoreTypeBindings | World·Actor·Component·SceneComponent(WorldOnly 리플렉션 클래스 — 4.6절)·TickScheduler·WorldSubsystem | Engine·Graphics·Asset 참조 |
 | `WorldTestFixtures`(Developer) | World | World 타입을 상속한 리플렉션 시험 타입(SaveActor·SaveComponent)과 그 identity 명세. EngineTests만 의존 | 제품 링크 |
-| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·Controller·Pawn·LocalPlayer | Graphics 참조 |
+| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·Controller·Pawn·LocalPlayer. 아직 없다(S10–S12). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](ComponentCatalog.ko.md) CR26) | Graphics 참조 |
 | `AssetRuntime` | Serialization, Core | AssetId·에셋 파일 형식·AssetManager·TextureAsset | World·Graphics 참조 |
 | `AssetTools`(Developer) | AssetRuntime | BMP 임포터·에셋 파일 기록 | Shipping 링크 |
 | `RenderBase` | Graphics, Task, MetaSchema | 렌더 lane·프레임 slot·프레임 packet 전달·완료 통지·`RenderHandle` 예약([렌더 기반](RenderBase.ko.md) RB1) | ObjectRuntime·World 참조 |
@@ -202,6 +202,10 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 
 - `Component`는 Actor에 속하고 `OnRegister`/`OnUnregister`(엔진 내부·backend 등록)와 위 hook을 가진다. Actor의 `FinishSpawning`이 Component를 등록한다(OnRegister → Actor OnAwake → Component OnAwake → OnEnable). 이미 초기화된 Actor에 추가된 Component는 추가 즉시 OnRegister·OnAwake·OnEnable을 받고 OnStart는 다음 프레임 시작에 받는다(다른 객체의 hook 실행 중 OnStart 재진입 방지). 정리는 OnDisable(Component 역순 → Actor) → OnDestroy(Component 역순 → Actor) → OnUnregister 순이며, OnDestroy는 OnAwake가 성공한 객체만 받는다.
 - `SceneComponent`는 부모·자식 계층, 상대 Transform, 월드 행렬(`Mat4d` affine)을 가진다. 좌표·단위는 UE 5.8과 같다(왼손 +X 전방·+Y 오른쪽·+Z 위, 위치 cm, 회전 단위 quaternion — 도 단위 `Rotator`는 `ToQuaternion`으로 바꾼다, scale 무차원). 월드 행렬 = 상대 TRS 행렬 × 부모 월드 행렬(행 벡터 — UE `NewRelativeTransform * ParentToWorld`, 2026-11-17 전에는 column vector의 부모 × 상대)이며 dirty 플래그로 지연 계산한다. 행렬로 저장하므로 비균일 scale 부모 아래 회전한 자식(shear)도 정확하고, TRS가 필요할 때만 `TryWorldTransform`이 분해한다(shear면 Unsupported). 상대 Transform·부모 변경 시 하위 전체를 dirty로 표시한다. `AttachTo`는 순환(자기 자신·조상)과 장부 밖 객체를 `InvalidArgument`로 거부하며 같은 World 안에서만 붙인다. 부모가 파괴되면 자식은 루트가 된다. 영속 상태는 상대 Transform뿐이고 계층·월드 행렬은 저장하지 않는다(4.6절).
+- **보강 예정(설계만, 미구현).** UE 5.8 엔진 컴포넌트를 들이기 전에 이 절을 넓힌다. 요구의 정본은 [컴포넌트 도입](ComponentCatalog.ko.md) 4.1절이고 착수는 그 문서 CM0(화면 마일스톤 첫 단계)이다.
+  - CR1 시스템 상태 수명: 등록 안에서 렌더·물리·오디오 상태를 만들고 지우는 hook과 "다시 보내기" 표시(UE `CreateRenderState`·`MarkRenderStateDirty`·`CreatePhysicsState` 대응), 등록 실패 시 부분 등록 해제, 대량 등록 묶음. 지금은 `OnRegister`·`OnUnregister` 하나뿐이다.
+  - CR2 SceneComponent: 부착 규칙(KeepRelative·KeepWorld·SnapToTarget), socket 부착과 socket Transform, 절대 location·rotation·scale, Mobility(Static·Stationary·Movable — Static 이동은 진단과 함께 거부), 가시성(자식 전파·게임 중 숨김), 속도, bounds 계산과 갱신, Transform 변경 통지(구독형 — 이벤트 slot 표).
+  - 그 밖에 Component 시작 준비 hook(CR4 — SE-W2), EditorOnly 컴포넌트와 태그(CR5), 컴포넌트 타입 규칙(CR6)이다.
 
 ### 7.4 지연 작업과 안전 지점
 
@@ -236,6 +240,20 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 
 ## 8. Tick Scheduler
 
+- **UE 단계 대응(2026-11-23 결정, 권장안 — [컴포넌트 도입](ComponentCatalog.ko.md) CR8a·CD11).** 단계를 더하지 않는다. UE `ETickingGroup`(`Engine/Classes/Engine/EngineBaseTypes.h:86–104`)과 계획 20.2절의 옛 그룹 이름(PhysicsSync·AnimationFinalize)은 아래처럼 대응한다. UE 경로는 `Engine/Source/Runtime/Engine/` 기준이다.
+
+  | Rocks | UE 5.8 | 근거·규칙 |
+  |---|---|---|
+  | PrePhysics | `TG_PrePhysics` | Actor 기본(`Private/Actor.cpp:276`), skeletal mesh 기본(`Private/Components/SkeletalMeshComponent.cpp:441`). UE 컴포넌트 기본은 `TG_DuringPhysics`(`Private/Components/ActorComponent.cpp:548`)이나 Rocks에는 그 단계가 없으므로 컴포넌트 기본도 PrePhysics다. DuringPhysics 항목은 그 프레임 물리 결과를 보지 못하므로 PrePhysics와 관찰 결과가 같다 |
+  | Physics(고정 스텝) | `TG_StartPhysics`·`TG_EndPhysics`(UE도 Hidden — 엔진 전용) | 사용자 등록 단계는 그대로이고, phase 끝에 엔진 단계 둘을 이 순서로 둔다. (1) **물리 결과 반영**(옛 PhysicsSync): body transform을 컴포넌트에 쓰고 고정 스텝 동안 쌓인 충돌·trigger 통지를 스텝 순서대로 발행한다. 고정 스텝이 여러 번이어도 반영·발행은 프레임에 한 번이다(UE `FinishPhysicsSim` — `Private/PhysicsEngine/PhysLevel.cpp:170, 225–234`, 충돌 통지가 EndPhysics에서 나간다 — `Private/LevelTick.cpp:1767`). (2) **skeletal mesh 물리 마무리**(옛 AnimationFinalize): ragdoll·물리 blend 결과를 본 transform에 반영한다(UE `EndPhysicsTickFunction` = `TG_EndPhysics` — `SkeletalMeshComponent.cpp:452`, `Private/SkeletalMeshComponentPhysics.cpp:3419`) |
+  | PostPhysics | `TG_PostPhysics` | 물리 결과가 필요한 항목(UE spring arm — `Private/GameFramework/SpringArmComponent.cpp:22`) |
+  | LateUpdate | 카메라 갱신 + `TG_PostUpdateWork` | UE는 PostPhysics 뒤 타이머·tickable → 카메라 갱신 → PostUpdateWork 순이다(`Private/LevelTick.cpp:1835, 1877`). LateUpdate 시작에 엔진의 카메라 갱신(PlayerController 카메라 관리, S12)을 두고 등록 항목은 그 뒤에 실행한다 |
+  | PreRender | end-of-frame 갱신(렌더 상태 전송, `Private/LevelTick.cpp:1826`) | 렌더 추출 준비 |
+  | (없음) | `TG_LastDemotable`·`TG_NewlySpawned` | 같은 프레임에 새로 생긴 항목은 시작 큐 규칙(7.2절)대로 다음 프레임이다 |
+
+  - 애니메이션 pose 평가는 skeletal mesh의 PrePhysics Tick에서 한다. 병렬 평가(병렬 Tick과 함께, 후속)를 들이면 물리 body가 있는 mesh는 PrePhysics 끝에서 합류하고, 없는 mesh는 PostPhysics 끝까지 합류를 늦출 수 있다(UE end tick group — `SkeletalMeshComponent.cpp:2084–2086`).
+  - cloth는 스펙이 없다. UE는 PrePhysics에서 시작해 PostPhysics에서 끝나는 병렬 작업이다(`SkeletalMeshComponent.cpp:457–458`). cloth 스펙이 같은 자리로 정한다.
+  - UE DuringPhysics의 "물리와 병렬" 등록 종류는 물리를 비동기(Jolt job)로 돌리고 병렬 Tick을 들일 때 다시 본다.
 - 등록 기반이다. 등록 단위는 `(대상 핸들, 종류, hook, phase, priority, interval, pause 정책)`이며 `TickHandle`(slot+generation)로 식별한다.
 - 단계 순서(열거 순서 = 실행 순서)는 `PrePhysics → Physics(고정 스텝 수만큼) → PostPhysics → LateUpdate → PreRender`다. LateUpdate(카메라 추적 등 후처리)가 PreRender(렌더 추출 준비)보다 먼저 와야 같은 프레임 렌더에 반영된다.
 - phase마다 밀집 배열을 두고, 등록 집합이 바뀐 phase만 다시 정렬한다. 정렬은 (priority, 등록 순서) 최소 힙을 쓰는 위상 정렬이다. 선행 의존으로 묶이지 않은 항목끼리는 항상 (priority, 등록 순서)를 따른다. 순회 중에는 할당하지 않는다(실행 중 해제도 표시만 하고 단계 경계에서 지운다).
