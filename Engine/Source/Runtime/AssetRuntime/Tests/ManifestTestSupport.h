@@ -5,7 +5,7 @@
 #include <AssetRuntime/CookedManifest.h>
 #include <Serialization/Archive.h>
 
-// 쿠킹 매니페스트 시험 도구다(Docs/Design/AssetSystem.ko.md 10.1절): 모델 만들기, 검증하지 않는
+// 쿠킹 매니페스트 시험 도구다(Docs/Design/AssetSystem 10.1절): 모델 만들기, 검증하지 않는
 // 시험 인코더(규칙을 어긴 모델을 reader에 넣는다 — writer와 같은 배치), CRC 다시 맞추기.
 namespace rocks::asset_test {
 

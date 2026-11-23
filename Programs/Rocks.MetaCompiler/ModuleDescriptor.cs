@@ -10,7 +10,8 @@ namespace Rocks.MetaCompiler;
 internal static class ModuleDescriptor
 {
     // descriptor 형식 판이다. 2: 클래스 flags에 Exported(Docs/Design/BuildTargets 3.8절 BS8d3). 다른 판은 다시 만들어야 한다.
-    private const int DescriptorSchema = 2;
+    // 3: 필드 assetBundles(에셋 A4e2a)를 더했다.
+    private const int DescriptorSchema = 3;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
@@ -31,7 +32,7 @@ internal static class ModuleDescriptor
     private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
 
     private static readonly string[] FieldKeys =
-        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield"];
+        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield", "assetBundles"];
 
     public static byte[] Write(string module, IEnumerable<ClassModel> types)
     {
@@ -81,6 +82,11 @@ internal static class ModuleDescriptor
                 if (type.Deprecated)
                 {
                     json.WriteStringValue("Deprecated");
+                }
+
+                if (type.EditorOnly)
+                {
+                    json.WriteStringValue("EditorOnly");
                 }
 
                 // 클래스 전체 export(BS8d3) — 다른 모듈의 파생 클래스가 이 클래스를 상속할 수 있다.
@@ -254,6 +260,8 @@ internal static class ModuleDescriptor
             json.WriteNumber("maxElements", field.IsCounted || field.IsStaticArray ? field.MaxElements : 0);
             // 폭 1 bitfield bool(리플렉션 B9m)이면 참이다: 의존 모듈이 상속 필드 함수표에 base의 생성 접근자를 쓴다.
             json.WriteBoolean("bitfield", field.Bitfield);
+            // bundle 이름 목록의 정규 텍스트다(에셋 A4e2a — 없으면 ""). 상속 필드 일치 비교와 EditorOnly 필드 안 목록 거부가 쓴다.
+            json.WriteString("assetBundles", field.Spec.AssetBundles);
             json.WriteEndObject();
         }
 
@@ -390,7 +398,7 @@ internal static class ModuleDescriptor
             // struct는 선언 플래그 Atomic과 생성 형질, 클래스는 Abstract·WorldOnly만 받는다(struct 전용 Atomic이 클래스에
             // 있거나 클래스 플래그가 struct에 있으면 모르는 플래그다).
             bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray"
-                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "Exported";
+                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly" or "Exported";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -435,6 +443,7 @@ internal static class ModuleDescriptor
                 WorldOnly = flags.Contains("WorldOnly"),
                 Transient = flags.Contains("Transient"),
                 Deprecated = flags.Contains("Deprecated"),
+                EditorOnly = flags.Contains("EditorOnly"),
                 Exported = flags.Contains("Exported"),
                 Header = header,
                 Private = isPrivate,
@@ -666,6 +675,15 @@ internal static class ModuleDescriptor
                     referenceId = target.Length == 0 && !ValueKindTable.Has(targetKind, ValueKindProperty.RequiresTargetId) ? null : Hex(targetHolder.GetProperty("type"), Invalid);
                 }
 
+                // bundle 목록은 정규 텍스트(""이거나 같은 목록으로 되돌아오는 텍스트)이고 원본 선언의 RMC2202와 같이 종류·EditorOnly를 본다.
+                string assetBundles = field.GetProperty("assetBundles").GetString() ?? throw Invalid("assetBundles");
+                bool bundleCarrier = targetKind is "SoftObjectReference" or "Struct" or "InstancedStruct" || keyKind == "SoftObjectReference";
+                if (assetBundles.Length != 0 && (Specifiers.CanonicalAssetBundles(assetBundles) != assetBundles || !bundleCarrier ||
+                        fieldFlags.Contains("EditorOnly", StringComparer.Ordinal)))
+                {
+                    throw Invalid("assetBundles");
+                }
+
                 string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
                 // toolName은 실효 도구 이름이다(지정하지 않았으면 필드 이름).
                 string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
@@ -696,7 +714,8 @@ internal static class ModuleDescriptor
                         TextExportTransient = fieldFlags.Contains("TextExportTransient"),
                         ToolName = toolName == fieldName ? "" : toolName,
                         // 정적 배열의 maxElements는 지정자가 아니라 N이다(리플렉션 B9g).
-                        MaxElements = fixedArray ? 0 : maxElements
+                        MaxElements = fixedArray ? 0 : maxElements,
+                        AssetBundles = assetBundles
                     },
                     Kind = kind,
                     ElementKind = elementKind,

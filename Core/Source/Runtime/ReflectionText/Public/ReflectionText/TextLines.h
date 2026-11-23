@@ -4,7 +4,7 @@
 #include <ReflectionText/TextAssignments.h>
 
 // 리플렉션 값의 `<경로>=<값>` 줄 출력이다(Docs/Design/ReflectionExtensions.ko.md 10.4절 "asset-info
-// 출력", Docs/Design/AssetSystem.ko.md 13절·7.1절 15 A2c3). 대상의 필드를 명령행 대입(asset-set
+// 출력", Docs/Design/AssetSystem 13절·7.1절 15 A2c3). 대상의 필드를 명령행 대입(asset-set
 // 입력) 줄로 쓴다 — 출력을 그대로 대입 묶음(PrepareAssignments)에 넣으면 값이 보존된다(값 보존
 // 왕복). JSON 출력(ExportJson)과 같은 순회다.
 //

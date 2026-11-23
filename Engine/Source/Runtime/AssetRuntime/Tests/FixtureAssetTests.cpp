@@ -1,6 +1,6 @@
 #include "AssetFixtureValues.h"
 
-// fixture 에셋 클래스별 왕복 시험이다(Docs/Design/AssetSystem.ko.md 14.1절): 결정적 생성기로 채운
+// fixture 에셋 클래스별 왕복 시험이다(Docs/Design/AssetSystem 14.1절): 결정적 생성기로 채운
 // 대표 에셋을 쿠킹·에디터로 저장 → 다른 Registry에 로드 → 필드 단위 비교 → 로드한 상태를 다시
 // 저장해 byte 동일.
 using namespace rocks;

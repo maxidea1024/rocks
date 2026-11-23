@@ -4,7 +4,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <stdio.h>
 
-// import 정책 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c2a, ObjectFoundations 5.4절):
+// import 정책 시험이다(Docs/Design/AssetSystem 7.1절 15 — A2c2a, ObjectFoundations 5.4절):
 // NullMissing은 누락·형식이 맞지 않는 import를 null로 잇고 미해결 목록에 적는다 — 대상 패키지
 // 없음, 대표 에셋 형식이 Hard 의존 expectedType의 파생이 아님, 하위 객체 없음(그 아래 import도
 // 미해결), 하위 객체 형식이 선언과 다름, 대표 에셋 없음. Strict는 지금처럼 실패한다. 인자·할당

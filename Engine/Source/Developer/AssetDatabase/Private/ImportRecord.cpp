@@ -4,7 +4,7 @@
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
 
-// ImportRecord 값 스키마의 쓰기·읽기·ImportOwner 대조다(Docs/Design/AssetSystem.ko.md 5.4절, 7.1절
+// ImportRecord 값 스키마의 쓰기·읽기·ImportOwner 대조다(Docs/Design/AssetSystem 5.4절, 7.1절
 // 15 — A2c2a). 유니티 빌드에서 다른 파일과 이름이 겹치지 않게 도우미는 Import 접두를 단다.
 namespace rocks {
 

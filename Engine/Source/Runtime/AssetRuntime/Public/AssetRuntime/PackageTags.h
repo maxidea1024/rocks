@@ -7,7 +7,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 
-// 패키지 Tags 섹션의 값 스키마다(Docs/Design/AssetSystem.ko.md 7절, 7.1절 2·13 — A2b). UE
+// 패키지 Tags 섹션의 값 스키마다(Docs/Design/AssetSystem 7절, 7.1절 2·13 — A2b). UE
 // FAssetData의 태그처럼 문자열 키 → 문자열 값이고, 목록 값(예: Unreal 교환의 옛 경로 목록)은 같은
 // 키의 항목 여러 개다. 패키지 형식 층(PackageWriter·Reader)은 Tags를 "필드 id 오름차순 Record"로만
 // 검사하고, 이 스키마(PackageTagsSchema)는 색인·에디터가 읽고 쓴다 — 다른 스키마 Guid의 Tags도

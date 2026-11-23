@@ -264,7 +264,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     for (const FieldSchema& field : schema.fields) {
         if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
             !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size()) ||
-            !AddBytes(bytes, field.toolName.Size())) {
+            !AddBytes(bytes, field.toolName.Size()) ||
+            !AddBytes(bytes, field.assetBundles.Size())) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
         }
     }
@@ -420,6 +421,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         fields[index].category = CopyBytes(schema.fields[index].category, cursor);
         fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
         fields[index].toolName = CopyBytes(schema.fields[index].toolName, cursor);
+        fields[index].assetBundles = CopyBytes(schema.fields[index].assetBundles, cursor);
         // 멤버 함수표는 스키마 순서로 둔다(codec이 index로 바로 찾는다).
         for (const RuntimeStructFieldOps& candidate : ops.fields) {
             if (candidate.fieldId == fields[index].id) {

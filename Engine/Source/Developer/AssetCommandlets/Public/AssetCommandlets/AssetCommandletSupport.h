@@ -19,7 +19,7 @@ class ModuleLoader;
 
 } // namespace rocks
 
-// 에셋 명령(asset-*)의 공용 도구다(Docs/Design/AssetSystem.ko.md 13절): 출력 쓰기, 실패 줄,
+// 에셋 명령(asset-*)의 공용 도구다(Docs/Design/AssetSystem 13절): 출력 쓰기, 실패 줄,
 // 프로젝트 찾기·열기, 색인 읽기 옵션.
 namespace rocks::commandlet_host {
 
@@ -80,7 +80,7 @@ struct AssetCommandContext {
     AssetImporterSetup importers{};
 };
 
-// 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3b, ModuleLoader
+// 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem 7.1절 15 A2c3b, ModuleLoader
 // 3.11절): 에셋 타입 모듈(AssetTypeModule — AssetRuntime은 그 의존)을 시작하고 이 TypeRegistry의
 // 타입 등록기를 붙인다. Name pool도 둔다. 소멸이 등록기를 떼고 Registry·pool을 닫는다.
 class ROCKS_ASSETCOMMANDLETS_API AssetCommandTypes {
@@ -134,7 +134,7 @@ ROCKS_ASSETCOMMANDLETS_API bool ParseWaitMilliseconds(StringView text, uint32& o
 inline constexpr ContextId CommandletAssetContext{0x524f434b41535345ull, 1};
 
 // 명령 하나의 실행 상태다: 프로젝트·타입·서비스.
-// 색인 검색의 파일 읽기를 나눌 worker 수다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d2 — 패키지
+// 색인 검색의 파일 읽기를 나눌 worker 수다(Docs/Design/AssetSystem 7.1절 16 A2d2 — 패키지
 // 5만 개 측정에서 3개가 가장 빨랐고 더 늘리면 느려졌다).
 inline constexpr uint32 CommandletScanWorkers = 3;
 

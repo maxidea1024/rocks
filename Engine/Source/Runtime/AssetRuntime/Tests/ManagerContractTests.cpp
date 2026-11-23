@@ -3,7 +3,7 @@
 #include <AssetTestFixtures/TestAssets.generated.h>
 #include <Platform/Thread.h>
 
-// AssetManager API 계약 시험이다(Docs/Design/AssetSystem.ko.md 11.7절 1·5·6·7·12): 초기화 전
+// AssetManager API 계약 시험이다(Docs/Design/AssetSystem 11.7절 1·5·6·7·12): 초기화 전
 // InvalidArgument·잘못된 설정, 소유 스레드 밖 WrongThread, 무효 handle StaleHandle, callback 안
 // WrongContext, 종료 뒤 ShuttingDown, 닫힌·무효 scope, handle 이동 대입, 로더 PostLoad 안의 동기
 // 대기, ingest 전에 쌓인 간선의 순환 병합, 간선 없는 멤버를 가진 단위의 병합.

@@ -3,7 +3,7 @@
 #include <AssetRuntime/Package.generated.h>
 #include <TestSupport/Test.h>
 
-// "지원하는 모든 조합" 시험이다(Docs/Design/AssetSystem.ko.md 14.1절).
+// "지원하는 모든 조합" 시험이다(Docs/Design/AssetSystem 14.1절).
 // - FixtureAsset_CombinationsCoverPropertyTable: fixture 클래스의 스키마를 순회해 리플렉션 성질
 //   표(Meta/TypeSchema.h ValueKindProperties)가 허용하는 모든 (값 종류, 자리) 칸이 EditorOnly 실효
 //   플래그 두 값 모두로 fixture 필드에 있는지, Required를 받는 종류 × 자리마다 Required 필드가,

@@ -4,7 +4,7 @@
 #include <Core/FileError.h>
 #include <Core/Text/StringBuilder.h>
 
-// 프로젝트 쓰기 잠금이다(Docs/Design/AssetSystem.ko.md 8절, 7.1절 4 — A2a).
+// 프로젝트 쓰기 잠금이다(Docs/Design/AssetSystem 8절, 7.1절 4 — A2a).
 namespace rocks {
 
 namespace {

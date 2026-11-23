@@ -7,7 +7,7 @@
 #include <Base/InitializerList.h>
 #include <TestSupport/Test.h>
 
-// asset-cook 명령 시험이다(Docs/Design/AssetSystem.ko.md 13절, 10.2절 "A4e 구현 세부" — A4e1):
+// asset-cook 명령 시험이다(Docs/Design/AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1):
 // 명령 함수를 이 프로세스에서 부른다 — 문맥이 시험 타입 모듈(AssetTestFixtures)과 시험 임포터를
 // 주고, 에셋은 asset-import로 만든다. 엔진 설정은 저장소 `Engine/Config`(FindEngineDirectory)다.
 // 전체·재사용·verify·JSON·부분 쿠킹, 진단 줄(경로·AssetId·related·alwaysCook 순번·인자 경로·

@@ -6,7 +6,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 
-// 에셋의 논리 경로다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a). 형식은
+// 에셋의 논리 경로다(Docs/Design/AssetSystem 4.2절, 7.1절 10 — A2a). 형식은
 // `/<Mount>/<Dir>/.../<Name>`이고 진실의 원천은 파일 위치다(에디터 패키지는 경로를 저장하지
 // 않는다).
 //

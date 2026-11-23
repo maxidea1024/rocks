@@ -4,7 +4,7 @@
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
 
-// 패키지 Tags 값 스키마의 쓰기·읽기다(Docs/Design/AssetSystem.ko.md 7.1절 13 — A2b).
+// 패키지 Tags 값 스키마의 쓰기·읽기다(Docs/Design/AssetSystem 7.1절 13 — A2b).
 namespace rocks {
 
 namespace {

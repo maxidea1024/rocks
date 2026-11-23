@@ -4,7 +4,7 @@
 # runs the test executable with a test-name filter, merges the raw profiles with llvm-profdata and reports with llvm-cov.
 # llvm-profdata and llvm-cov come from the same toolchain directory as the compiler (they must match its profile format).
 #
-# Example (asset runtime, Docs/Design/AssetSystem.ko.md section 14.1):
+# Example (asset runtime, Docs/Design/AssetSystem section 14.1):
 #   pwsh Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,FixtureAsset `
 #     -Sources Engine/Source/Runtime/AssetRuntime/Private
 #

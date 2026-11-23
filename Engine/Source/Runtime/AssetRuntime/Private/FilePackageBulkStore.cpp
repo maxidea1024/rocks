@@ -4,7 +4,7 @@
 #include <Core/Encoding/Crc32.h>
 #include <Core/FileError.h>
 
-// 패키지 bulk 저장소 구현이다(Docs/Design/AssetSystem.ko.md 6.1절, 7.1절 15 — A2c1).
+// 패키지 bulk 저장소 구현이다(Docs/Design/AssetSystem 6.1절, 7.1절 15 — A2c1).
 namespace rocks {
 
 namespace {

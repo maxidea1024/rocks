@@ -7,7 +7,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 프로젝트 배치 시험이다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a): 디렉터리 이름,
+// 프로젝트 배치 시험이다(Docs/Design/AssetSystem 4.2절, 7.1절 10 — A2a): 디렉터리 이름,
 // 구분자 정리, 논리 경로 ↔ 파일 경로 왕복, 패키지 파일이 아닌 이름, 비 NFC 파일 이름, OS 경로 상한,
 // 할당 실패.
 using namespace rocks;

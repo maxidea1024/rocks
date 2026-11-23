@@ -2,7 +2,7 @@
 
 #include <AssetTestFixtures/TestAssets.generated.h>
 
-// 로더 조합 시험이다(Docs/Design/AssetSystem.ko.md 11.6절, 14절 완료 조건 2): 요청 단위
+// 로더 조합 시험이다(Docs/Design/AssetSystem 11.6절, 14절 완료 조건 2): 요청 단위
 // 모양(단일·둘 순환·셋 순환) × 의존(없음·Hard 단일·Hard 순환·Soft) × 결함(없음·요청 패키지
 // 손상·같은 단위 형제 손상·의존 손상·취소) × 진행 방식(바로 완료 — 취소는 첫 Pump 전, 붙잡음 —
 // IO·worker를 시험이 내보내고 취소는 IO 중)의 허가 조합 전부를 한 매니페스트에 담아 돌리고,

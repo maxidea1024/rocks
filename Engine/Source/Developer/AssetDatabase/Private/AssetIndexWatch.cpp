@@ -4,7 +4,7 @@
 #include <Core/Algorithms.h>
 #include <Core/FileError.h>
 
-// 색인 감시 갱신이다(Docs/Design/AssetSystem.ko.md 7.1절 16 — A2d3).
+// 색인 감시 갱신이다(Docs/Design/AssetSystem 7.1절 16 — A2d3).
 namespace rocks {
 
 namespace {

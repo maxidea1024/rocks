@@ -6,7 +6,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 
-// 에셋 너겟 Record다(Docs/Design/AssetSystem.ko.md 9.1절 결정 5 — Rockpile.ko.md 5.2·5.3절
+// 에셋 너겟 Record다(Docs/Design/AssetSystem 9.1절 결정 5 — Rockpile.ko.md 5.2·5.3절
 // `RockpileRecord`). 키 하나의 결과 묶음: echo(namespace·bucket·key), 값 표(160 byte 행, ValueId
 // 오름차순), 소비 입력(bucket·key·RecordDigest 정렬 목록), meta(결정적 정보). 불변이며 정규 형식만
 // 받는다(순서·중복·한도 위반은 NonCanonical — InvalidArgument).

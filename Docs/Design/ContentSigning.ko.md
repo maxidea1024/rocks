@@ -1,6 +1,6 @@
 # 콘텐츠 서명 — 서명된 쿠킹 매니페스트(청크 표) 설계안
 
-> 상태: 채택(2026-11-15 사용자 결정: 추천안, 구현은 AssetRuntime A1과 함께). 리뷰 1회 반영. 구현 A1f 완료(2026-11-21, 리뷰 3회 — 7절, 시험·coverage는 [AssetSystem](AssetSystem.ko.md) 14.1.11·14.1.12). [Crypto](Crypto.ko.md) 13절 후속 판단과
+> 상태: 채택(2026-11-15 사용자 결정: 추천안, 구현은 AssetRuntime A1과 함께). 리뷰 1회 반영. 구현 A1f 완료(2026-11-21, 리뷰 3회 — 7절, 시험·coverage는 [AssetSystem](AssetSystem/README.ko.md) 14.1.11·14.1.12). [Crypto](Crypto.ko.md) 13절 후속 판단과
 > 엔진 계획 9.3절을 따른다.
 
 ## 1. 범위
@@ -9,7 +9,7 @@
   다른 제품·채널(beta 등)의 콘텐츠를 섞어 넣기.
 - **막지 않는 것.** 실행 파일까지 고칠 수 있는 로컬 공격자(치트·크랙). 실행 파일 무결성은 OS 코드 서명 몫이고 신뢰 공개키는 그 실행
   파일 안에 있다. 클라이언트가 서버에 알리는 콘텐츠 버전은 자기 신고라 이것으로 검증되지 않는다. 콘텐츠 기밀성(암호화)도 범위 밖이다.
-- **이미 있는 것.** [AssetSystem](AssetSystem.ko.md) 10절 `CookedManifest.rman`이 패키지마다 SHA-256·크기를 담고, 로더가 패키지를 열 때
+- **이미 있는 것.** [AssetSystem](AssetSystem/10-Cooker.ko.md) 10절 `CookedManifest.rman`이 패키지마다 SHA-256·크기를 담고, 로더가 패키지를 열 때
   확인한다. 매니페스트에 서명하면 **패키지 byte는 모두 묶인다.** Release가 읽는 콘텐츠는 매니페스트 항목이거나 실행 파일 안에만
   있어야 한다(매니페스트 밖 파일 — 프로젝트 설정, 프로파일 재정의, 셰이더·지역화 파일 — 은 Release에서 읽지 않거나 매니페스트 항목으로
   넣는다). 이것을 AssetRuntime 요구사항으로 둔다.
@@ -70,7 +70,7 @@
 
 ## 7. 구현에서 정한 점(A1f — 2026-11-21)
 
-AssetRuntime 다음 단계(A1f, [AssetSystem](AssetSystem.ko.md) 1절)가 1–6절을 다음과 같이 정했다. 애매한 곳은 UE 5.8 pak 서명(`FPakSignatureFile` — 서명 파일 + 공개키를 실행 파일에 넣고 불일치면 거부)을 따른다.
+AssetRuntime 다음 단계(A1f, [AssetSystem](AssetSystem/01-Stages.ko.md) 1절)가 1–6절을 다음과 같이 정했다. 애매한 곳은 UE 5.8 pak 서명(`FPakSignatureFile` — 서명 파일 + 공개키를 실행 파일에 넣고 불일치면 거부)을 따른다.
 
 1. **위치**: 봉투 형식·검증·쓰기는 AssetRuntime `ContentSignature.h`(Crypto 의존을 더한다 — Core 층 모듈이라 의존 방향이 맞다). 쓰는 쪽은 `content-sign` commandlet이고 읽는 쪽은 EngineAssets다.
    - `ContentScope`: `MakeContentScope(productId, channel)` = SHA-256(productId ‖ 0 ‖ channel). productId·channel은 ASCII 식별자(빈 값·NUL 금지 — InvalidArgument).

@@ -1,6 +1,6 @@
 #include "ManifestTestSupport.h"
 
-// 쿠킹 매니페스트 v1의 규모·조합·결정성·퍼징 시험이다(Docs/Design/AssetSystem.ko.md 10.1절 A1b):
+// 쿠킹 매니페스트 v1의 규모·조합·결정성·퍼징 시험이다(Docs/Design/AssetSystem 10.1절 A1b):
 // 고정 byte(golden SHA-256과 체크인 v1 byte), 칸 종류·플래그·의존 특성 부분집합·경로 모양의 모든
 // 조합(번호 ↔ 항목 일대일 검사), 많은 패키지·깊은 Hard 사슬·SCC를 담은 큰 매니페스트, 고정 seed
 // 변조.

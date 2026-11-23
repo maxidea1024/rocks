@@ -1,6 +1,6 @@
 #include "PackageEditing.h"
 
-// 패키지 규칙 함수 단위 시험이다(Docs/Design/AssetSystem.ko.md 5.7절 5·6·7): Dependencies 합성 규칙
+// 패키지 규칙 함수 단위 시험이다(Docs/Design/AssetSystem 5.7절 5·6·7): Dependencies 합성 규칙
 // (MergeDependencyUses — writer와 로드 대조가 같은 함수), 같은 bulk가 EditorOnly·일반 위치에 함께
 // 쓰일 때의 entry 표시, ImportOwner 의존의 로드(대조하지 않음), Package·NewPackage의 인자 오류.
 using namespace rocks;

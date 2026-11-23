@@ -8,7 +8,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <string.h>
 
-// AssetManager 실패·경계 시험이다(Docs/Design/AssetSystem.ko.md 11.7절 3·6·13): Discard Busy(열린
+// AssetManager 실패·경계 시험이다(Docs/Design/AssetSystem 11.7절 3·6·13): Discard Busy(열린
 // ConstructionContext)로 Closing에 머무름과 되살리기, 첫 Discard 뒤 Busy인 Discarding(퇴출된 id의
 // 새 로드·Discarding 단위로 생긴 늦은 간선 진단), 모든 할당 지점의 실패 뒤 일관성, 수명 위반
 // Fatal(살아 있는 lease·소유 스레드 밖 파괴·scope 소멸).

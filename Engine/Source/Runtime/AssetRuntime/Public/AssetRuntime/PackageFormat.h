@@ -5,7 +5,7 @@
 #include <Meta/TypeSchema.h>
 #include <Object/AssetId.h>
 
-// 패키지 포맷 v1의 상수·열거와 헤더·섹션 표 값이다(Docs/Design/AssetSystem.ko.md 5.1·5.2절).
+// 패키지 포맷 v1의 상수·열거와 헤더·섹션 표 값이다(Docs/Design/AssetSystem 5.1·5.2절).
 // 쓰기는 PackageWriter.h, 읽기·검증은 PackageReader.h가 이 정의를 같이 쓴다.
 //
 // 물리 배치(모든 정수 little-endian, Guid는 high·low u64):

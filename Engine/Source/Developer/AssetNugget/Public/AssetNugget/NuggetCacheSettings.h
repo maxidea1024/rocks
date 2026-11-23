@@ -5,7 +5,7 @@
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 
-// 프로젝트의 에셋 너겟 설정이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 4·10, "A3c1 구현 세부").
+// 프로젝트의 에셋 너겟 설정이다(Docs/Design/AssetSystem 9.1절 결정 4·10, "A3c1 구현 세부").
 // 파일 `Config/AssetNuggets.json`(엄격 JSON):
 //   { "backend": "filesystem" | "rockpile" | "off" | "auto", "required": bool,
 //     "localPath": 문자열, "generation": Guid 표준 문자열 }

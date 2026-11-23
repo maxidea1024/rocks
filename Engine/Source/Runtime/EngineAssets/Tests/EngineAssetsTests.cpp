@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// EngineAssets 엔진 연결 시험이다(Docs/Design/AssetSystem.ko.md 11.8절): 디스크 쿠킹 장면을 시험
+// EngineAssets 엔진 연결 시험이다(Docs/Design/AssetSystem 11.8절): 디스크 쿠킹 장면을 시험
 // 임시 디렉터리에 쓰고 설정 문맥의 `asset.*` CVar로 엔진을 띄운다. 로드 순서는 프레임 밖 동기
 // 로드로 상주시킨 뒤 프레임 안에서 요청해 다음 Pump의 callback으로 정한다(디스크 IO가 끝나는
 // 프레임에 기대지 않는다). GC는 객체 수 예산으로 조각 수를 정한다.

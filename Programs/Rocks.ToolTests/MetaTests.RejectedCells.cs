@@ -3,7 +3,7 @@ using Rocks.MetaCompiler;
 
 namespace Rocks.ToolTests;
 
-// 성질 표가 막는 모든 칸의 거부 시험이다(Docs/Design/AssetSystem.ko.md 14.1절 "지원하는 모든 조합", ReflectionExtensions.ko.md 1.3절).
+// 성질 표가 막는 모든 칸의 거부 시험이다(Docs/Design/AssetSystem 14.1절 "지원하는 모든 조합", ReflectionExtensions.ko.md 1.3절).
 // ValueKindTable.Rows를 순회해 원소 자리(Array·정적 배열·Map 키·Map 값·Set·Optional)마다 표가 ×인 (종류, 자리) 칸을 원본 선언으로
 // 만들고 MetaCompiler가 칸마다 정해진 RMC 진단 하나로 거부하는지 본다(ExpectedRejection). 대부분은 철자 검사의 RMC2xxx이고, C 배열을
 // 템플릿 원소로 쓰는 칸만 Clang 단계 RMC3000이다. 칸이 다른 이유(명세에 없는 이름의 RMC2100, 환경·입력 오류의 RMC1xxx, 엉뚱한 Clang

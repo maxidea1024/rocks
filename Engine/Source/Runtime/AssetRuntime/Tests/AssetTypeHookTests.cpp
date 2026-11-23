@@ -3,7 +3,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 에셋 타입 hook 표 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c1): base 사슬의 가장
+// 에셋 타입 hook 표 시험이다(Docs/Design/AssetSystem 7.1절 15 — A2c1): base 사슬의 가장
 // 가까운 hook 하나, CallBase로 부모 hook 부르기(부르지 않으면 부모 태그가 꺼진다), 종류마다 따로
 // 찾기, hook· 타입 조회 오류 전달, 등록 수명(handle 소멸·Release·이동), 태그·의존 sink의
 // 검사·합치기·정렬·할당 실패.

@@ -4,7 +4,7 @@
 #include <Core/FileError.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 키 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 5·6, "A4c 구현 세부" — A4c1): 처리기
+// 쿠킹 키 시험이다(Docs/Design/AssetSystem 10.2절 결정 5·6, "A4c 구현 세부" — A4c1): 처리기
 // 표(등록 거부·가장 가까운 base·fallback·조회 오류), 키 기본(대상 순·콘텐츠 해시·서로 다름·결정성·
 // 타입 표 지문), 입력마다 바뀌는 키(프로파일·프로젝트 세대·쿠커 버전·처리기 정체성·설정 키·Build
 // 원본 내용·Hard 의존 내용·Hard 순환·Build 순환·PrimaryAsset·제외 Soft·경로·타입 표 — 바뀌지 않아야

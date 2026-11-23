@@ -24,7 +24,7 @@
 
 | ID | 요구 | 상태 | 확인 근거 | 정본 |
 |---|---|---|---|---|
-| CR9 | 에셋 런타임 A1–A5: 패키지·로더·`AssetLease`(WorldOnly 클래스 멤버 허용 — A0-B), 클래스 기본값 레코드(A5). 컴포넌트가 메시·머티리얼·사운드를 필드로 잡는 전제 | A1–A3 완료, A4 진행(A4c2까지) | 메모리·AssetSystem 1절 | [에셋 시스템](../AssetSystem.ko.md) |
+| CR9 | 에셋 런타임 A1–A5: 패키지·로더·`AssetLease`(WorldOnly 클래스 멤버 허용 — A0-B), 클래스 기본값 레코드(A5). 컴포넌트가 메시·머티리얼·사운드를 필드로 잡는 전제 | A1–A3 완료, A4 진행(A4c2까지) | 메모리·AssetSystem 1절 | [에셋 시스템](../AssetSystem/README.ko.md) |
 | CR9a | Prefab PF1(클래스 원형·default subobject) — 컴포넌트를 클래스 원형으로 선언하고 `ChildActorComponent`가 템플릿 Actor를 갖는 전제 | 설계만 | PF 5.2절 | PF |
 | CR10 | 커브 에셋(Curve 에셋 층 — 타임라인·햅틱 효과·감쇠 커브) | 값 타입 층 완료(CV1–CV10), 에셋 층은 A1 뒤 | 메모리 curve-data-spec | CurveData |
 

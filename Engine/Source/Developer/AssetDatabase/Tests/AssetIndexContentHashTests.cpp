@@ -6,7 +6,7 @@
 #include <AssetDatabase/LogicalPath.h>
 #include <Core/FileError.h>
 
-// 색인 콘텐츠 해시 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 "A4b 구현 세부"): 처음 계산은 파일
+// 색인 콘텐츠 해시 시험이다(Docs/Design/AssetSystem 10.2절 "A4b 구현 세부"): 처음 계산은 파일
 // 전체 SHA-256(조각 경계를 넘는 큰 파일·빈 파일 포함)이고 Stat(크기·수정 시각)이 같으면 열지 않고
 // 저장된 값을 준다. 크기만·시각만 달라도 다시 계산한다. 읽기 전후 Stat이 다르면(크기만·시각만)
 // Busy이고 해시를 두지 않는다. 오류: 없는 id NotFound, 같은 id AlreadyExists, Stat·열기·읽기·두

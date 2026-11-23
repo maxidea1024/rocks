@@ -9,7 +9,7 @@ namespace rocks {
 
 // 에셋 안 객체를 가리키는 약한(soft) 참조다(Docs/Design/ReflectionFoundations.ko.md 3.3절, UE
 // TSoftObjectPtr 대응). GC 간선이 아니다 — 대상을 살려 두지 않고 로드도 하지 않는다. asset은 에셋
-// ID, objectPath는 패키지 안 객체 경로(Outer 이름을 '.'로 이은 것 — Docs/Design/AssetSystem.ko.md
+// ID, objectPath는 패키지 안 객체 경로(Outer 이름을 '.'로 이은 것 — Docs/Design/AssetSystem
 // 4.1절, 비면 대표 객체)이며, T는 기대 타입(리플렉션 필드의 value.type, Object면 0)이다. 경로
 // 문법과 기대 타입은 대상을 찾을 때(A0-O·A1) 검사하며 이 타입은 아래 규칙만 검사한다.
 //

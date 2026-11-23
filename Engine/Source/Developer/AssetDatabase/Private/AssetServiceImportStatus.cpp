@@ -8,7 +8,7 @@
 #include <AssetRuntime/PackageReader.h>
 #include <Core/Text/StringBuilder.h>
 
-// 임포트 상태다(Docs/Design/AssetSystem.ko.md 7.1절 18 A2f2b — asset-info --import). 패키지를
+// 임포트 상태다(Docs/Design/AssetSystem 7.1절 18 A2f2b — asset-info --import). 패키지를
 // 열지 않고 파일의 ImportRecord 칸만 읽는다.
 namespace rocks {
 

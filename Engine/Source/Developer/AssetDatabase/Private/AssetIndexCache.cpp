@@ -12,7 +12,7 @@
 #include <Core/Text/Unicode.h>
 #include <Object/AssetId.h>
 
-// 색인 캐시의 형식·검사·읽기·쓰기다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d1).
+// 색인 캐시의 형식·검사·읽기·쓰기다(Docs/Design/AssetSystem 7.1절 16 A2d1).
 namespace rocks {
 
 namespace {

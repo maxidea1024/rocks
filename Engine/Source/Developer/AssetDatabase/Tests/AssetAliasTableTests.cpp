@@ -11,7 +11,7 @@
 #include <Core/Time/DateTime.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 경로 별칭 표 시험이다(Docs/Design/AssetSystem.ko.md 4.3절, 7.1절 17 A2e1): 왕복(결정적 byte —
+// 경로 별칭 표 시험이다(Docs/Design/AssetSystem 4.3절, 7.1절 17 A2e1): 왕복(결정적 byte —
 // golden, 빈 표도 파일, 정렬·같은 키 뒤가 이김·caseless 키), 신뢰하지 않는 입력(칸마다 위반·JSON
 // 문법·중복 키·크기·항목 수 상한, 정렬이 어긋난 파일은 받음), 쓰기(잠금·입력 검사·IO 고장·
 // NotDurable·할당 실패 — 실패하면 파일·메모리 표 그대로), 되돌리기, prune(만료 경계·텍스트 사용

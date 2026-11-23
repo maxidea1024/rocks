@@ -5,7 +5,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <stdio.h>
 
-// 저장 기반 시험이다(Docs/Design/AssetSystem.ko.md 5.5절 5, 7.1절 15 — A2c1): 재검증과 전체 읽기의
+// 저장 기반 시험이다(Docs/Design/AssetSystem 5.5절 5, 7.1절 15 — A2c1): 재검증과 전체 읽기의
 // 판정 일치(모든 bit 손상·자르기·IO·할당), 편집 읽기(Bulk 내용만 뺌)의 판정 관계, 지문 읽기, entry
 // 하나 해제, 파일 sink, 지연 로드(Defer)와 저장소 연결, 저장하지 않은 bulk id 거부, 내용 비교.
 using namespace rocks;

@@ -4,7 +4,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/Unicode.h>
 
-// 논리 경로 파싱·정규화·비교 키다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a).
+// 논리 경로 파싱·정규화·비교 키다(Docs/Design/AssetSystem 4.2절, 7.1절 10 — A2a).
 namespace rocks {
 
 namespace {

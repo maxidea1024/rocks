@@ -2,7 +2,7 @@
 
 #include <AssetTestFixtures/TestAssets.generated.h>
 
-// 로더 결함 단계·종료 시점 조합 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 4·6·9·14·16, 14절
+// 로더 결함 단계·종료 시점 조합 시험이다(Docs/Design/AssetSystem 11.6절 4·6·9·14·16, 14절
 // 완료 조건 2): 결함 단계(없음·IO 완료 오류·Begin 즉시 실패·worker 손상(SHA-256)·공개 실패(오래된
 // 의존 쿠킹 결과의 대표 타입 — TypeMismatch)) × 의존(없음·Hard) × 종료 시점(없음·IO·worker·Ready·
 // PostLoad 대기) × 허가 상한(무제한·1) × 종료 시점의 단위(요청 패키지·의존)의 허가 조합 전부.

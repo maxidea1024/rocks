@@ -2,7 +2,7 @@
 
 #include <Core/Diagnostics/Log.h>
 
-// AssetManager의 상주 단위·간선 표·병합·Closing·Discarding이다(Docs/Design/AssetSystem.ko.md 11.7절
+// AssetManager의 상주 단위·간선 표·병합·Closing·Discarding이다(Docs/Design/AssetSystem 11.7절
 // 3·4).
 namespace rocks {
 

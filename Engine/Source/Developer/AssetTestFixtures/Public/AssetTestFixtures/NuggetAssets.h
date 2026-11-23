@@ -15,7 +15,7 @@
 #include <Object/InstancedStruct.h>
 #include <Object/SoftObjectRef.h>
 
-// 에셋 너겟 키 기록 시험의 설정 struct다(Docs/Design/AssetSystem.ko.md 9.1절 결정 2 — A3a
+// 에셋 너겟 키 기록 시험의 설정 struct다(Docs/Design/AssetSystem 9.1절 결정 2 — A3a
 // WriteReflected). 키에 쓸 수 있는 모든 값 종류(정수 폭·부호, 실수 둘, bool, Guid·AssetId·Digest,
 // String·Name, enum, Soft 참조, 배열·정적 배열·byte 배열·struct 배열, Set·Map·struct 값 Map,
 // Optional 단일 값·struct, 중첩 struct, InstancedStruct, Transient)를 담는다. 객체 참조와 Text는

@@ -17,7 +17,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <string.h>
 
-// 색인 캐시 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d1): 쓰기 → 읽기 왕복과 캐시를 쓴
+// 색인 캐시 시험이다(Docs/Design/AssetSystem 7.1절 16 A2d1): 쓰기 → 읽기 왕복과 캐시를 쓴
 // 검색의 같은 결과, 지문이 같으면 다시 읽지 않음(바꾼 캐시 값이 보인다)·다르면 다시 읽음, 진단이
 // 있는 파일은 넣지 않음(같은 id 진단은 넣음), 키 축마다 무효, 신뢰하지 않는
 // 입력(헤더·SHA-256·경계·의미 검사 각각 — 시험 쪽에서 형식을 따로 써서 만든다), 읽기 실패는 캐시

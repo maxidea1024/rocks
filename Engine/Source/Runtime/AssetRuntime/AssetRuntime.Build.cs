@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Asset runtime (Docs/Design/AssetSystem.ko.md sections 5, 6, 10 and 11, stage A1): package format v1 (PackageWriter and PackageReader),
+// Asset runtime (Docs/Design/AssetSystem sections 5, 6, 10 and 11, stage A1): package format v1 (PackageWriter and PackageReader),
 // Package and Asset reflection classes, bulk data references, the cooked manifest reader and the runtime loader with AssetManager.
 // Knows nothing about Engine, World or graphics (EngineAssets connects AssetManager to the engine frame). Package, Asset and
 // BulkDataRef are reflection types; generated headers are <AssetRuntime/<Type>.generated.h>, module registration is

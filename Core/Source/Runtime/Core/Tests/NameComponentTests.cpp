@@ -5,7 +5,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 이름 구성 요소 규칙(Docs/Design/AssetSystem.ko.md 4.2절, Docs/Design/ObjectFoundations.ko.md 1.1·
+// 이름 구성 요소 규칙(Docs/Design/AssetSystem 4.2절, Docs/Design/ObjectFoundations.ko.md 1.1·
 // 1.2절)과 비교 키의 ASCII 빠른 경로를 검증한다.
 using namespace rocks;
 namespace name_component_tests_file {

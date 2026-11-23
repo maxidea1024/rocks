@@ -1,6 +1,6 @@
 # 리플렉션·빌드 보강(A0-B) 설계
 
-기준일: 2026-11-13, 초안 3(교차검증 3건 — 빌드 실현성·런타임 값 모델·소비자 적합성 — 과 최종 검증 반영). [에셋 시스템 설계](AssetSystem.ko.md) 1절 A0-B 단계와 5.6절의 상세다. 현재 구현은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)·[직렬화](../Implementation/Serialization.ko.md)에 있다. 패키지 형식(A1)·텍스처 설정(12.4절)·graph v2(A0-O)·World 객체·UI·Sparks가 이 기반을 쓴다. UE 대조 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`)이다 — 본문의 UE 사실 서술은 2026-11-15에 5.8 원본으로 다시 확인했고, 날짜를 적은 설계 교차검증 기록(4.6·5.6·7.1·9.1절 확정안 머리)의 UE 대조는 당시 기준 UE 5.6이다. A0-O 다음 단계인 리플렉션 B9가 이 문서의 값 종류·지정자·경로·텍스트 표기를 넓힌다 — [리플렉션 보강(리플렉션 B9) 설계](ReflectionExtensions.ko.md)(이하 RX).
+기준일: 2026-11-13, 초안 3(교차검증 3건 — 빌드 실현성·런타임 값 모델·소비자 적합성 — 과 최종 검증 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-B 단계와 5.6절의 상세다. 현재 구현은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)·[직렬화](../Implementation/Serialization.ko.md)에 있다. 패키지 형식(A1)·텍스처 설정(12.4절)·graph v2(A0-O)·World 객체·UI·Sparks가 이 기반을 쓴다. UE 대조 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`)이다 — 본문의 UE 사실 서술은 2026-11-15에 5.8 원본으로 다시 확인했고, 날짜를 적은 설계 교차검증 기록(4.6·5.6·7.1·9.1절 확정안 머리)의 UE 대조는 당시 기준 UE 5.6이다. A0-O 다음 단계인 리플렉션 B9가 이 문서의 값 종류·지정자·경로·텍스트 표기를 넓힌다 — [리플렉션 보강(리플렉션 B9) 설계](ReflectionExtensions.ko.md)(이하 RX).
 
 원칙:
 
@@ -133,6 +133,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 | `Abstract` | CLASS | 지금과 같다 |
 | `Version=N` | CLASS·STRUCT | `version`·Record schema version. 없으면 1 |
 | `WorldOnly` | CLASS | `TypeFlags::WorldOnly`(2). **상속된다**(UE의 상속 클래스 플래그처럼 base가 WorldOnly면 파생도 자동으로 WorldOnly, 파생에 다시 쓰지 않아도 된다). 에셋 객체 Registry가 생성을 거부한다(정책은 A0-O — [ObjectFoundations](ObjectFoundations.ko.md) 1.3절). TypeRegistry는 WorldOnly base의 파생이 플래그를 갖는지 검사한다(수동 등록 대비) |
+| `EditorOnly` | CLASS | `TypeFlags::EditorOnly`(32 — 에셋 A4e2a). 쿠킹 데이터에 없는 클래스다. **상속된다**(WorldOnly와 같다 — TypeRegistry가 파생의 플래그를 검사한다). 대표 타입이 EditorOnly인 에셋은 쿠킹 대상이 아니고, 쿠킹 패키지 쓰기는 EditorOnly 객체를 저장 불가 객체처럼 뺀다([AssetSystem](AssetSystem/10-Cooker.ko.md) 10.2절 "A4e 구현 세부"). UE 대응은 `UObject::IsEditorOnly()` 재정의 |
 | `Flags` | ENUM | 플래그 enum(3.4절) |
 | `ToolPrefix="…"` | ENUM | 도구 이름의 선택 접두(예 `TC_`) |
 | `Binds="…"` | STRUCT·ENUM | 미러 선언이 결합하는 실제 타입 철자(4.5절 — ENUM은 CurveData CV9, [RX](ReflectionExtensions.ko.md) 25절) |
@@ -151,6 +152,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 | `EditorOnly` | 4 | 항상 컴파일되고 플래그만 단다. graph v2(A0-O)가 쿠킹 데이터에서 뺀다. 중첩 struct·배열 안의 값에도 효력이 전파된다(6.1절 유효 플래그). 쿠킹 데이터 로드에서 EditorOnly 필드 누락은 `NotFound`가 아니고(누락 = 기준), EditorOnly 필드·멤버·원소가 있으면 InvalidArgument다(로드 정책 `excludedFlags` — A0-O, ObjectFoundations 4절). A0-B의 graph v1은 보통 필드처럼 저장한다. **[빌드 타깃](BuildTargets/README.ko.md) BD6 구현 뒤에는** `#if ROCKS_WITH_EDITOR_DATA` 블록 안에 선언하고(블록 안 필드와 `EditorOnly`는 양방향 일치), `ROCKS_WITH_EDITOR_DATA=0` 빌드에서는 메모리 배치에서 빠진다 |
 | `Required` | 8 | ObjectRef·SoftObjectRef 필드와 그 배열(`ObjectRefArray`·`Array<SoftObjectRef>` — 원소마다 non-null, 5.6절)에만 쓸 수 있다(그 밖은 RMC2202). **패키지 저장·쿠킹에서** null이면 거부한다 — graph 저장 옵션 `rejectMissingRequired`(패키지 저장·쿠킹이 켠다, 스냅샷·복제 같은 다른 저장은 끈다)이 켜져 있으면 InvalidArgument, Soft 대상의 존재 확인은 패키지 저장·쿠킹(A1). **로드는 거부하지 않고** 진단(`RequiredMissing`)만 낸다 — 기존 필드에 `Required`를 붙여도 null을 가진 에셋을 열어 고칠 수 있어야 한다 |
 | `Name="…"` | — | 도구·명령행 이름(`toolName`). ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`), 없으면 C++ 필드 이름. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID라 이름과 무관하다 |
+| `AssetBundles="a,b"` | — | 에셋 bundle 이름 목록(UE `meta=(AssetBundles=…)` — 에셋 A4e2a). 값(컨테이너 원소·Map 키·값 포함)이 SoftObjectRef·struct·InstancedStruct인 필드만, EditorOnly 필드(유효 플래그)와 AssetId 값 필드는 아니다(RMC2202). 이름은 ASCII 식별자 1–64 byte, 1–16개, 중복 금지(RMC2212). 소프트 참조의 실효 bundle은 경로에 있는 목록들의 교집합이다(struct 필드의 목록은 사슬 제한). `FieldSchema::assetBundles`(정규 텍스트) — 저장 때 bundle 태그가 쓴다([AssetSystem](AssetSystem/10-Cooker.ko.md) 10.2절) |
 | `MaxElements=N` | — | 배열 길이 상한(5.5절 — 쓰기·저장에서 건다). 1..1,048,576(밖은 RMC2000), 없으면 65,536. 배열이 아닌 필드는 RMC2202 |
 
 설정 계층(CF1)이 설정 struct 직접 멤버의 설정 지정자 `UserConfig`·`ConsoleName="…"`·`RestartRequired`·`StartupOnly`·`RenderRead`·`DevelopmentOnly`를 더한다(`FieldFlags`가 아니라 `SettingsFieldSchema`에 실린다 — [설정 계층](ConfigSystem.ko.md) 7절, RMC2210·RMC2202). 출시 제외 `ShippingExcluded`는 쿠킹(CF5) 때 더한다.
@@ -172,7 +174,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 
 ### 2.6 스키마·Registry 변경
 
-- `FieldFlags`: `EditorOnly = 4`, `Required = 8`. `TypeFlags`: `WorldOnly = 2`. TypeRegistry의 허용 마스크를 넓히고, `Required`는 참조 종류 필드에만, `MaxElements`는 배열에만 허용한다(수동 등록도 같은 검사).
+- `FieldFlags`: `EditorOnly = 4`, `Required = 8`. `TypeFlags`: `WorldOnly = 2`, `EditorOnly = 32`(에셋 A4e2a — WorldOnly와 같은 상속 검사). `FieldSchema::assetBundles`(에셋 A4e2a — 깊은 복사·등록 때 문법·종류 검사·상속 필드 일치 비교). TypeRegistry의 허용 마스크를 넓히고, `Required`는 참조 종류 필드에만, `MaxElements`는 배열에만 허용한다(수동 등록도 같은 검사).
 - 상속 필드 일치 비교에 새 서술자(3.5절 `ValueType`·`toolName`·`maxElements`)를 더한다.
 - `toolName`은 등록 때 깊게 복사하고(단일 할당 원자성 유지) 대소문자 무시 유일성도 등록 때 검사한다.
 
@@ -932,7 +934,7 @@ EngineVersion CurrentEngineVersion() noexcept {
 - **호환 술어 둘**(패치는 둘 다 무시, UE `IsCompatibleWith`와 같은 이름에 다른 의미를 주지 않으려고 이름을 나눈다): (a) **프로젝트 연결** — 주·부가 같아야 한다(UE 플러그인 판정과 같은 형태, C# `EngineVersion.CanLinkProject(major, minor)`). (b) **패키지 로드** — 패키지 compatibleWith의 (주, 부)가 현재 엔진보다 새면 거부하고, 같거나 오래되면 엔진 버전으로는 거부하지 않고 데이터 축(formatVersion·schemaVersion·타입 스키마)이 판정한다(C++ `EngineVersion::CanLoadPackageCompatibleWith(compatibleWith)` — A1 로더가 쓴다).
 - **프로젝트 기술자**: `game`이 `.rocksproject`의 engineVersion을 SDK manifest 버전과 (a)로 대조하고, 다르면 `<경로>: engineVersion X.Y does not match the installed SDK engine A.B.C; set engineVersion to A.B to upgrade the project.`로 규칙 컴파일 전에 멈춘다. `DescriptorReader`는 engineVersion을 `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`(각 0–65535)로 좁혀 `ProjectEngineVersion(Major, Minor)`로 돌려준다. Rocks.Build.Tests가 게임 템플릿(`Templates/Game/Foundation/FoundationTemplate.rocksproject`)의 engineVersion = Build.version 주·부와 저장소 파일의 한 줄 정규형을 확인한다. 소스 트리 프로젝트 빌드가 생기면 Build.version과 대조한다(후속 — 지금 `.rocksproject`는 game 경로에서만 읽는다, [RepositoryLayout](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동).
 - **설치 SDK**: `ManifestVersion` 5, `"EngineVersion": { "Major": 0, "Minor": 1, "Patch": 0 }`(PascalCase). 위치 record는 빠진 인자를 null·0으로 채우므로 칸을 `int?`로 두고 `Verify`가 null·범위·0.0을 직접 검사해, 없으면 "re-export" 오류로 멈춘다(다른 값으로 대신하지 않는다). Build.version 파일은 SDK에 복사하지 않는다. 버전 4 SDK는 버전 불일치로 거부한다.
-- **A1(스펙만)**: 에디터 패키지 Summary에 savedByEngineVersion(주·부·패치)과 compatibleWithEngineVersion(`CompatibleBaseline()` — 주·부·0)을 기록하고, 로드 시 (b)가 거짓이면 `NewerVersion`이다([AssetSystem](AssetSystem.ko.md) 5.2·5.3절). **쿠킹 패키지 Summary에는 기록하지 않는다**(UE도 쿠킹·procedural 저장에서 비운다 — 쿠킹 byte·내용 주소 이름의 결정성, 도구 빌드 ID를 뺀 이유와 같다). writer는 엔진 버전을 인자로 받는다(시험은 고정 값 — golden이 버전 올림에 흔들리지 않게).
+- **A1(스펙만)**: 에디터 패키지 Summary에 savedByEngineVersion(주·부·패치)과 compatibleWithEngineVersion(`CompatibleBaseline()` — 주·부·0)을 기록하고, 로드 시 (b)가 거짓이면 `NewerVersion`이다([AssetSystem](AssetSystem/README.ko.md) 5.2·5.3절). **쿠킹 패키지 Summary에는 기록하지 않는다**(UE도 쿠킹·procedural 저장에서 비운다 — 쿠킹 byte·내용 주소 이름의 결정성, 도구 빌드 ID를 뺀 이유와 같다). writer는 엔진 버전을 인자로 받는다(시험은 고정 값 — golden이 버전 올림에 흔들리지 않게).
 - **A4(스펙만)**: 엔진 버전은 cookKey·너겟 키에 넣지 않는다. 쿠커 출력 의미가 바뀌면 기존 쿠커 버전(엔진 버전과 독립된 정수)을 올린다. 쿠킹 보고서·CookedManifest 헤더에 cookedByEngineVersion을 진단용으로 기록한다(AS 10절).
 - 올리는 규칙(패치·부·주, Build.version과 템플릿 engineVersion을 함께)은 [Build/README.md](../../Build/README.md#엔진-버전)에 둔다. `--version` 명령은 이번 범위에서 뺀다 — 넣는다면 C++ Commandlet이 주입 상수를 출력하고 C# 어셈블리에 버전을 굽지 않는다(두 번째 주입 경로 금지).
 - 시험: Rocks.Build.Tests — 파서 오류(파일 없음·키 누락·추가·대소문자·중복·범위 초과·음수·0.0·소수·지수·문자열·null·1 KiB 초과·주석·후행 쉼표·UTF-8 아님)와 정확히 1 KiB 허용, 생성자 범위, 프로젝트 연결 판정, 요청에 값이 없거나 빈 값이면 거부(출력 없음), 생성 TU·manifest의 버전 줄과 실행 결과(가짜 Core 픽스처가 출력한 값 = 요청 값), **버전만 바꾸면 생성 TU·link만 실행되고 다른 compile 0**, 같은 값이면 no-op, 원래 값으로 돌아가면 ID도 원래 값, engineVersion 정규형(앞자리 0·패치·공백·부호·전각 숫자 거부, 65535 허용), 템플릿 engineVersion = Build.version 주·부. IntegrationTests — v5 manifest의 EngineVersion = Build.version, SDK에 Build.version 없음, 게임 manifest·생성 TU의 버전, 게임 실행 파일이 SDK 버전 값을 가짐(실행 시 확인), 버전 4·EngineVersion 없음·Patch 없음·0.0 manifest 거부, 기술자 불일치(부·주 +1) 거부. FoundationTests — `build::CurrentEngineVersion()` 불변식(빈 값 아님, CompatibleBaseline, ToChars가 칸 값과 같음, 비교, 자기 기준 로드 가능 — 기대 숫자는 C# 쪽이 확인)과 `EngineVersion` 연산(정규 10진·가장 긴 표기, 사전식 순서, 빈 값, 로드 판정).

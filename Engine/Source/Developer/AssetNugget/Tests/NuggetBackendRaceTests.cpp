@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 파일 시스템 에셋 너겟 backend의 실패·경합 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 8,
+// 파일 시스템 에셋 너겟 backend의 실패·경합 시험이다(Docs/Design/AssetSystem 9.1절 결정 8,
 // "A3b 구현 세부"): IO 실패 주입(만들기·쓰기·Flush·Close·이동·교체·읽기 열기·읽기·크기·지우기·
 // 열거·시각), 같은 프로세스 경합(hook — 같은 키 동시 게시 Exists·Conflict, 판정 전에 지워짐, 잠금
 // 안에서 다른 쪽이 고침, GC 대 Put), 두 프로세스 경합(pipe gate), 잡힌 키 잠금, 할당 실패.

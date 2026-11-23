@@ -6,7 +6,7 @@
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 
-// 고아 임시 파일 정리다(Docs/Design/AssetSystem.ko.md 7.1절 12·16 — asset-index-rebuild). 저장의
+// 고아 임시 파일 정리다(Docs/Design/AssetSystem 7.1절 12·16 — asset-index-rebuild). 저장의
 // 임시 파일(Content 아래 `<이름>.rasset.<36자 소문자 guid>.tmp`)과 캐시 쓰기의 임시 파일
 // (`Intermediate/AssetIndex.cache.<guid>.tmp`), 별칭 표 쓰기의 임시 파일
 // (`Config/AssetAliases.json.<guid>.tmp` — 7.1절 17 A2e1)은 그 쓰기가 끝나지 못하면 남는다. 잠금을

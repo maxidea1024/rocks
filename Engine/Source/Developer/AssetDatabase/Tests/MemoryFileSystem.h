@@ -7,7 +7,7 @@
 #include <Platform/File.h>
 #include <string.h>
 
-// AssetDatabase 시험의 메모리 파일 시스템이다(Docs/Design/AssetSystem.ko.md 7.1절 — 색인·열기·저장
+// AssetDatabase 시험의 메모리 파일 시스템이다(Docs/Design/AssetSystem 7.1절 — 색인·열기·저장
 // 시험의 진단 장면: 링크·장치·같은 경로 키·IO 고장 주입).
 namespace rocks::asset_database_test {
 

@@ -2,7 +2,7 @@
 
 #include <Platform/Thread.h>
 
-// 패키지 그래프 시험이다(Docs/Design/AssetSystem.ko.md 11.3절, 14절 7·28): 3노드 하드 순환을 어떤
+// 패키지 그래프 시험이다(Docs/Design/AssetSystem 11.3절, 14절 7·28): 3노드 하드 순환을 어떤
 // 순서로 넘겨도 한 트랜잭션에 로드되고 둘만으로는 MissingDependency, 다이아몬드(A → B·C → D)의
 // 의존 표·아래부터 로드·한 묶음 로드, 자기 참조(대표·하위 객체·Soft)는 의존을 만들지 않음, 실패
 // 전파(묶음 하나의 실패는 묶음 전체를 공개하지 않음), 복합 에셋(GameDataAsset — 하위 객체 여러 개·

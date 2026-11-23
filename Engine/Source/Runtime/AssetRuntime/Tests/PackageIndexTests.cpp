@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 패키지 부분 읽기·범위 읽기·Tags 값 스키마 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 13 —
+// 패키지 부분 읽기·범위 읽기·Tags 값 스키마 시험이다(Docs/Design/AssetSystem 7.1절 13 —
 // A2b): 부분 읽기가 전체 읽기와 같은 내용을 주는지, 모든 byte·bit 손상에서 판정 관계(읽은 구간은
 // 같은 진단, 건너뛴 구간은 부분 읽기 통과·전체 읽기 거부)가 지켜지는지, 모든 길이의 자르기, 범위
 // 읽기의 모든 IO 실패·할당 실패, 범위 읽기 구현의 경계, Tags 스키마의 쓰기·읽기·거부.

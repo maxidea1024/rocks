@@ -5,7 +5,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 빈틈 리뷰가 찾은 경로의 시험이다(Docs/Design/AssetSystem.ko.md 5.3절, 5.7절 13·14, 14.1.2절):
+// 빈틈 리뷰가 찾은 경로의 시험이다(Docs/Design/AssetSystem 5.3절, 5.7절 13·14, 14.1.2절):
 // 헤더 크기 상한의 두 칸, 엔진·컨테이너 버전 경계, writer의 섹션 크기·null id 패키지·Package 객체
 // 참조, NewPackage의 스레드·할당 실패(typed root 실패 시 Discard)·트랜잭션 판(대표 에셋 Id·할당
 // 실패), InstantiatePackages의 트랜잭션

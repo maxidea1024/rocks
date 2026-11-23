@@ -9,7 +9,7 @@
 #include <Platform/File.h>
 #include <ReflectionText/TextDiagnostics.h>
 
-// 쿠킹 설정이다(Docs/Design/AssetSystem.ko.md 10절, 10.2절 결정 2·3 — A4a). 대상 프로파일
+// 쿠킹 설정이다(Docs/Design/AssetSystem 10절, 10.2절 결정 2·3 — A4a). 대상 프로파일
 // (TargetProfile — 엔진 `Engine/Config/TargetProfiles/<id>.json` 위에 프로젝트
 // `Config/TargetProfiles/<id>.json`)과 쿠킹 규칙(CookSettings — `Config/CookSettings.json`)을
 // ReflectionText ImportJson으로 읽는다(struct 재귀 멤버 병합·배열 통째 교체). 두 설정의 SHA-256은

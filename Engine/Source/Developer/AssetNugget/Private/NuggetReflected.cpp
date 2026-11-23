@@ -6,7 +6,7 @@
 #include <Object/ObjectRegistry.h>
 #include <ReflectionText/TextVisit.h>
 
-// 리플렉션 값의 너겟 키 기록이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 2 — NuggetReflected.h).
+// 리플렉션 값의 너겟 키 기록이다(Docs/Design/AssetSystem 9.1절 결정 2 — NuggetReflected.h).
 namespace rocks {
 
 namespace {

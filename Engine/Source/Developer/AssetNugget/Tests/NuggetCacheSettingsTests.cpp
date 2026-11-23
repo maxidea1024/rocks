@@ -7,7 +7,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 에셋 너겟 설정 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 4·10, "A3c1 구현 세부"): 없는
+// 에셋 너겟 설정 시험이다(Docs/Design/AssetSystem 9.1절 결정 4·10, "A3c1 구현 세부"): 없는
 // 파일의 기본값, 모든 칸, 칸마다 거부(문법 위치·루트·모르는 키·타입·backend 값·빈 localPath·NUL·
 // Guid 형식), 상한 초과, 읽기 오류, 할당 실패, localPath 해석(상대·절대).
 using namespace rocks;

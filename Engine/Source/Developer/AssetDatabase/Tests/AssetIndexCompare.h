@@ -2,7 +2,7 @@
 
 #include <AssetDatabase/AssetIndex.h>
 
-// 색인 비교다(Docs/Design/AssetSystem.ko.md 7.1절 16 — 캐시·감시 시험이 캐시 없는 검색과 같은지
+// 색인 비교다(Docs/Design/AssetSystem 7.1절 16 — 캐시·감시 시험이 캐시 없는 검색과 같은지
 // 단언한다): 항목과 진단의 모든 칸.
 namespace rocks::asset_database_test {
 

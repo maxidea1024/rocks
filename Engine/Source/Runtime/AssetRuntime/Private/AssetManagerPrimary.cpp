@@ -6,7 +6,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Thread.h>
 
-// AssetManager의 PrimaryAsset·bundle 로드다(Docs/Design/AssetSystem.ko.md 11.7절 10 — UE
+// AssetManager의 PrimaryAsset·bundle 로드다(Docs/Design/AssetSystem 11.7절 10 — UE
 // UAssetManager::LoadPrimaryAsset·FAssetBundleData 대응).
 namespace rocks {
 

@@ -3,7 +3,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 
-// 취소 표시다(Docs/Design/AssetSystem.ko.md 11.1절 AssetRequest::cancel, 11.6절 7). 요청을 낸 쪽이
+// 취소 표시다(Docs/Design/AssetSystem 11.1절 AssetRequest::cancel, 11.6절 7). 요청을 낸 쪽이
 // CancelSource를 쥐고 Cancel을 부르면, 그 Token을 받은 쪽(로더)이 다음 단계 경계에서 표시를 보고
 // 그 요청만 Cancelled로 끝낸다. UE 5.8 로딩에는 개별 취소 표시가
 // 없다(FStreamableHandle::CancelHandle은 관심만 놓는다) — Rocks 고유 이름이다.

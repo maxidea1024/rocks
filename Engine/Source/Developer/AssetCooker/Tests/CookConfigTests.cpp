@@ -9,7 +9,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 쿠킹 설정 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 2·3 — A4a): 프로파일 엔진·프로젝트
+// 쿠킹 설정 시험이다(Docs/Design/AssetSystem 10.2절 결정 2·3 — A4a): 프로파일 엔진·프로젝트
 // 병합(멤버 병합·id 채움), 거부(id 형식·엔진 파일 없음·파일의 id 다름·bulkAlignment·JSON 문법·대입
 // 진단·크기 상한), 쿠킹 규칙(기본값·모든 칸·경로 형식·PrimaryAsset 타입·디렉터리), SHA-256(같은
 // 내용 같음·칸마다 바뀜), 엔진 기본 프로파일 파일, 읽기 오류, 할당 실패.

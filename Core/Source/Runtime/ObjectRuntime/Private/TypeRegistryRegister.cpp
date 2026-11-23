@@ -28,7 +28,8 @@ using detail::ValidateFieldList;
 // WorldOnly 포함)는 InvalidArgument다.
 constexpr uint32 KnownClassFlags =
     static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly) |
-    static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated);
+    static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated) |
+    static_cast<uint32>(TypeFlags::EditorOnly);
 
 constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
@@ -173,6 +174,20 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // bundle 목록(에셋 A4e2a)은 정규 목록이고, 소프트 참조·struct·InstancedStruct 값(Map은 키
+        // 소프트 참조도)에만, EditorOnly가 아닌 필드에만 쓴다(쿠킹 패키지에서 빠지는 참조는 bundle
+        // 구성원이 될 수 없다 — MetaCompiler RMC2202·RMC2212와 같은 규칙).
+        if (field.assetBundles.Size() != 0) {
+            const bool carries = target.kind == ValueKind::SoftObjectReference ||
+                                 target.kind == ValueKind::Struct ||
+                                 target.kind == ValueKind::InstancedStruct ||
+                                 (map && key.kind == ValueKind::SoftObjectReference);
+            if (!carries || HasFlag(field.flags, FieldFlags::EditorOnly) ||
+                !IsAssetBundleList(field.assetBundles)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
         // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조,
         // ObjectRefArray, ObjectRef 원소 정적 배열 또는 ObjectRefMap). 대상 type은 성질 표의 대상
         // 타입 종류(참조·소프트 참조의 기대 대상, Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수
@@ -228,7 +243,8 @@ bool ContainsInheritedFields(Span<const FieldSchema> base,
                 field.element.type == inherited.element.type &&
                 field.key.kind == inherited.key.kind && field.key.type == inherited.key.type &&
                 field.maxElements == inherited.maxElements && field.flags == inherited.flags &&
-                SameBytes(EffectiveToolName(field), EffectiveToolName(inherited))) {
+                SameBytes(EffectiveToolName(field), EffectiveToolName(inherited)) &&
+                SameBytes(field.assetBundles, inherited.assetBundles)) {
                 matched = true;
                 break;
             }
@@ -352,7 +368,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         const auto& field = schema.fields[fieldIndex];
         if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
             !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size()) ||
-            !AddBytes(bytes, field.toolName.Size())) {
+            !AddBytes(bytes, field.toolName.Size()) ||
+            !AddBytes(bytes, field.assetBundles.Size())) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
         }
     }
@@ -407,15 +424,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
             }
 
-            // WorldOnly는 상속되는 플래그다. 수동 등록이 파생에서 빠뜨려도 받아들이지 않는다.
-            if (HasFlag(base->schema.flags, TypeFlags::WorldOnly) &&
-                !HasFlag(schema.flags, TypeFlags::WorldOnly)) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
-            }
-
-            // Transient·Deprecated도 상속되고(리플렉션 B9h2) Within은 파생이 이어받는다(base에
-            // Within이 있으면 파생도 0이 아니어야 한다 — 파생 관계 판정은 MetaCompiler RMC2208).
-            if ((base->schema.flags & UnsaveableTypeFlags & ~schema.flags) != 0 ||
+            // WorldOnly·Transient·Deprecated(리플렉션 B9h2)·EditorOnly(에셋 A4e2a)는 상속되는
+            // 플래그다 — 수동 등록이 파생에서 빠뜨려도 받아들이지 않는다. Within은 파생이
+            // 이어받는다 (base에 Within이 있으면 파생도 0이 아니어야 한다 — 파생 관계 판정은
+            // MetaCompiler RMC2208).
+            if ((base->schema.flags & InheritedTypeFlags & ~schema.flags) != 0 ||
                 (base->schema.withinType != TypeId{} && schema.withinType == TypeId{})) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
@@ -513,6 +526,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         fields[index].category = CopyBytes(schema.fields[index].category, cursor);
         fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
         fields[index].toolName = CopyBytes(schema.fields[index].toolName, cursor);
+        fields[index].assetBundles = CopyBytes(schema.fields[index].assetBundles, cursor);
         fieldOrder[index] = static_cast<uint32>(index);
         opsIndex[index] = Record::NoOps;
     }

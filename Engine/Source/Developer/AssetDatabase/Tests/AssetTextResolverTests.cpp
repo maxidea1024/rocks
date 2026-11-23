@@ -11,7 +11,7 @@
 #include <ReflectionText/TextLines.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 에셋 참조 텍스트 resolver 시험이다(Docs/Design/AssetSystem.ko.md 4.1·4.2절·7.1절 15 A2c3): 논리
+// 에셋 참조 텍스트 resolver 시험이다(Docs/Design/AssetSystem 4.1·4.2절·7.1절 15 A2c3): 논리
 // 경로·AssetId 텍스트 × 대표 에셋·하위 객체·중첩 하위 객체 × Hard·Weak·Soft의 해석(Hard·Weak는
 // 패키지를 열고 Soft는 열지 않는다), 기대 타입, 저장하지 않은 새 패키지, 형식 거부, 색인의
 // 없음·같은 경로 키 둘, 열기 실패와 열기 경고, 출력(색인 경로·새 패키지 경로·AssetId 대신·하위 객체

@@ -11,7 +11,7 @@
 #include <Platform/Sync.h>
 #include <Task/WorkerScheduler.h>
 
-// 에셋 너겟 캐시다(Docs/Design/AssetSystem.ko.md 9.1절 결정 10·11·13–15, "A3c1 구현 세부").
+// 에셋 너겟 캐시다(Docs/Design/AssetSystem 9.1절 결정 10·11·13–15, "A3c1 구현 세부").
 // Memory 계층(프로세스 안) → backend 하나(FileSystem). 세션 고정 표가 한 세션이 쓴 Record digest를
 // 지켜 같은 키가 세션 안에서 다른 값으로 바뀌어 보이지 않게 한다(DigestChanged), 적중한 Record의
 // 소비 입력을 고정 표와 대조한다.

@@ -7,7 +7,7 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 
-// EngineAssets 수명·설정 전달 시험이다(Docs/Design/AssetSystem.ko.md 11.8절 3·5·6): IO가 진행 중인
+// EngineAssets 수명·설정 전달 시험이다(Docs/Design/AssetSystem 11.8절 3·5·6): IO가 진행 중인
 // 종료, callback 안의 재종료, GC cycle 도중 종료, 재시도 대기 중의 새 Discard, 실행 중 CVar 변경,
 // 허가 상한·worker 수 CVar 전달, 예산 변환, 두 엔진의 Registry 문맥.
 using namespace rocks;

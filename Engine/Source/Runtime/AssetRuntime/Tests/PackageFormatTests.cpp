@@ -1,6 +1,6 @@
 #include "AssetTestSupport.h"
 
-// 패키지 포맷 v1 시험이다(Docs/Design/AssetSystem.ko.md 5절, 14절 시나리오 11·12): 쿠킹·에디터
+// 패키지 포맷 v1 시험이다(Docs/Design/AssetSystem 5절, 14절 시나리오 11·12): 쿠킹·에디터
 // 왕복, EditorOnly 제외, bulk(None·Zstd)·재번호, 결정적 byte·지문, 손상·버전 판정, SCC 한 트랜잭션
 // 로드, 의존 누락·타입 불일치, Dependencies 대조, Required 저장 거부.
 using namespace rocks;

@@ -4,7 +4,7 @@
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
-UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 같은 날 작성한 미추적 분석 초안(`tmp/Rocks_Audio_System_UE58_Analysis.ko.md`)의 내용을 이어받았고, 그 초안의 단계 이름 A0–A6은 [에셋 시스템](AssetSystem.ko.md) 단계와 겹쳐 AU로 바꿨다.
+UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 같은 날 작성한 미추적 분석 초안(`tmp/Rocks_Audio_System_UE58_Analysis.ko.md`)의 내용을 이어받았고, 그 초안의 단계 이름 A0–A6은 [에셋 시스템](AssetSystem/README.ko.md) 단계와 겹쳐 AU로 바꿨다.
 
 상태: **설계 초안**(결정 AD1–AD28. AD5만 사용자 결정이고 나머지는 권장안. 교차 검증 1회 반영 — 필수 9·권장 13). 구현 단계는 AU1–AU10(6절)이며 착수 시점은 사용자가 정한다. 계획 순서(A0-B → A0-O → 리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)에 끼워 넣지 않는다. AU1–AU3은 에셋 후속 단계에 기대지 않고, AU4 이후는 해당 에셋 단계(A2f·A3·A4)가 끝나야 시작한다.
 
@@ -364,7 +364,7 @@ CVar(이름은 [CVar](CVarSystem.ko.md) 규칙 — 소문자 점 구분):
 
 #### 3.10.1 원본 형식
 
-**사용자 결정(2026-11-22): 오디오는 무손실·손실 원본을 모두 받는다.** [에셋 시스템](AssetSystem.ko.md) 12.2절의 텍스처 무손실 원칙(`LossySource` 거부)은 오디오에 적용하지 않는다(AD5).
+**사용자 결정(2026-11-22): 오디오는 무손실·손실 원본을 모두 받는다.** [에셋 시스템](AssetSystem/12-Textures.ko.md) 12.2절의 텍스처 무손실 원칙(`LossySource` 거부)은 오디오에 적용하지 않는다(AD5).
 
 | 확장자 | 형식 | 해석 | UE |
 |---|---|---|---|
@@ -1762,7 +1762,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | [크래시 처리·실행](CrashHandlingAndLaunch.ko.md) 개정 13 | 20절 호스트 재시도·Fatal | — |
 | [플랫폼 계층](PlatformLayer.ko.md) | "앱 수명 이벤트" 절(PR9) | — |
 | [빌드 타깃](BuildTargets/README.ko.md) 개정 20 | 오디오 모듈 유형·Server 쿠킹 payload 제외(AD24) | — |
-| [에셋 시스템](AssetSystem.ko.md) | 진단 `IgnoredSourceChunks`, `ReadyMask`와 오디오 준비 티켓의 관계(AD18) | 오디오 쿠킹 처리기·sidecar 청크 게시 세부는 A4 설계 때(AU5·AU6 전) |
+| [에셋 시스템](AssetSystem/README.ko.md) | 진단 `IgnoredSourceChunks`, `ReadyMask`와 오디오 준비 티켓의 관계(AD18) | 오디오 쿠킹 처리기·sidecar 청크 게시 세부는 A4 설계 때(AU5·AU6 전) |
 | [Sparks 엔진 통합](SparksEngineIntegration.ko.md) 개정 2 | SE-G7 오디오 의미 | `Engine.sparkbind.json` 스키마 변경(`Play2D`)은 AU3b 코드와 함께 |
 | [Trace 시스템](TraceSystem.ko.md) | — | `Audio`·`AudioMixer` 채널(AU8 전) |
 

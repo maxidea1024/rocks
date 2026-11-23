@@ -4,7 +4,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 로더 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 A1c): Hard 폐포·SCC 단위·합류, SCC 모양(단일·
+// 로더 시험이다(Docs/Design/AssetSystem 11.6절 A1c): Hard 폐포·SCC 단위·합류, SCC 모양(단일·
 // 둘·셋 순환·사슬·다이아몬드·큰 그래프), 우선순위·aging·승격, 동시 진행·임시 메모리 상한, Pump
 // 예산, 상태 관측, 경로 색인, 초기화·인자·스레드 오류. IO와 worker는 시험이 내보내는 구현이라
 // 순서가 결정적이다.

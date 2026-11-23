@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 
 // asset-list·asset-index-verify 명령 시험(Programs/Rocks.Commandlet.Tests)이 프로젝트에 쓰는 에디터
-// 패키지 byte다(Docs/Design/AssetSystem.ko.md 7.1절 13 — A2b). AssetIndex_CommandletFixtureBytes가
+// 패키지 byte다(Docs/Design/AssetSystem 7.1절 13 — A2b). AssetIndex_CommandletFixtureBytes가
 // writer 출력과 같은지 고정하고(다르면 새 내용을 출력한다), C# 시험은 이 파일의 배열을 읽는다.
 namespace rocks::asset_index_fixtures {
 

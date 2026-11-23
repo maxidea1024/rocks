@@ -4,7 +4,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Platform/File.h>
 
-// 프로젝트 쓰기 잠금이다(Docs/Design/AssetSystem.ko.md 8절, 7.1절 4 — A2a). 이 잠금을 쥔 프로세스만
+// 프로젝트 쓰기 잠금이다(Docs/Design/AssetSystem 8절, 7.1절 4 — A2a). 이 잠금을 쥔 프로세스만
 // 에셋·별칭 표·색인 캐시·쿠킹 출력을 바꾼다. 쓰기 API는 잠금 객체를 인자로 받아 잠금 없는 쓰기를
 // 타입으로 막는다. 잠금 파일은 `<Intermediate>/AssetDatabase.lock`이고 Intermediate가 없으면
 // 만든다. PlatformBase FileLock(Windows LockFileEx + 삭제 공유 없는 열기, POSIX flock + 잠근 뒤

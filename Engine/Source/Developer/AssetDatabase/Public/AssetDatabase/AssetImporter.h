@@ -11,7 +11,7 @@
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeLease.h>
 
-// 임포터 인터페이스와 표다(Docs/Design/AssetSystem.ko.md 7.1절 18 — A2f1a; UE UFactory·
+// 임포터 인터페이스와 표다(Docs/Design/AssetSystem 7.1절 18 — A2f1a; UE UFactory·
 // FReimportHandler 대응). 임포터는 원본 byte와 옵션 값에서 출력 에셋 객체를 채운다. 패키지 만들기·
 // 기록·저장은 서비스가 한다(AssetService::Import — A2f1b). 모듈이 표에 등록하고 등록 해제 토큰을
 // 쥔다.

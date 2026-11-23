@@ -7,7 +7,7 @@
 #include <Object/ReferenceObserver.h>
 #include <Task/TaskLane.h>
 
-// 에셋 관리자다(Docs/Design/AssetSystem.ko.md 11.1·11.4·11.7절). 에셋 객체 Registry와 로더를
+// 에셋 관리자다(Docs/Design/AssetSystem 11.1·11.4·11.7절). 에셋 객체 Registry와 로더를
 // 소유하고, 요청 관심(LoadTicket)·상주 수명(AssetLease)·수명 범위(AssetScope)·미준비 대상
 // 정책(RunWhenReady)을 준다. 상주 단위(Hard SCC)의 보유 수가 0이 되면 Pump가 Discard하고 로더가
 // 패키지를 놓는다.

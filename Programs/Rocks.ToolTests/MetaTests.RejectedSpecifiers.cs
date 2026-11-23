@@ -2,7 +2,7 @@ using Rocks.MetaCompiler;
 
 namespace Rocks.ToolTests;
 
-// 지정자 축의 거부 칸과 허용 대조 시험이다(Docs/Design/AssetSystem.ko.md 14.1절 "지원하는 모든 조합", ReflectionExtensions.ko.md 1.3절).
+// 지정자 축의 거부 칸과 허용 대조 시험이다(Docs/Design/AssetSystem 14.1절 "지원하는 모든 조합", ReflectionExtensions.ko.md 1.3절).
 // 성질 표(ValueKindTable.Rows)와 철자 표(KindSpellings)에서 칸을 기계적으로 만든다. 지정자 자리는 클래스 필드(probe::Holder::cell)와 struct
 // 멤버(probe::Cell::cell) 둘이고, 같은 원본 생성기(SpecifierHolders)로 거부 칸과 허용 대조를 만든다.
 // 거부 칸(Meta.EveryRejectedSpecifierCellIsRejected) — MetaCompiler가 칸마다 정한 진단 코드 하나로 거부해야 한다(RMC2100·RMC1xxx·엉뚱한

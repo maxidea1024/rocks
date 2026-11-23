@@ -7,7 +7,7 @@
 #include <Core/Containers/Array.h>
 #include <Platform/File.h>
 
-// 에디터 패키지 색인이다(Docs/Design/AssetSystem.ko.md 7절, 7.1절 11·13 — A2b, UE AssetRegistry
+// 에디터 패키지 색인이다(Docs/Design/AssetSystem 7절, 7.1절 11·13 — A2b, UE AssetRegistry
 // 대응). 패키지 파일이 유일한 진실이고 색인은 `Content/` 아래 `.rasset`의 헤더·섹션 표·Summary·
 // Exports·Dependencies·ImportRecord·Tags만 부분 읽기로 읽은 요약이다. 전체 검색(Rebuild — 캐시
 // 재사용 A2d1)과 부분 갱신(Refresh·RefreshPaths — 저장·감시 A2d3)이 바꾼다.

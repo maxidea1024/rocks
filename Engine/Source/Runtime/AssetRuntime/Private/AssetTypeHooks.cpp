@@ -3,7 +3,7 @@
 #include <Object/TypeRegistry.h>
 #include <Platform/Fatal.h>
 
-// 에셋 타입 hook 표 구현이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c1).
+// 에셋 타입 hook 표 구현이다(Docs/Design/AssetSystem 7.1절 15 — A2c1).
 namespace rocks {
 
 Result<void> AssetTagSink::Add(StringView key, StringView value) noexcept {

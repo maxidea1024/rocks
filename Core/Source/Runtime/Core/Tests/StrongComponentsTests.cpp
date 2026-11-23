@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 공용 SCC 시험이다(Core/Graph/StrongComponents.h — Docs/Design/AssetSystem.ko.md 10.2절 "A4c 구현
+// 공용 SCC 시험이다(Core/Graph/StrongComponents.h — Docs/Design/AssetSystem 10.2절 "A4c 구현
 // 세부" 기반 보강 2): 빈 그래프, 간선 없는 노드, 자기 간선, 순환과 꼬리(의존 먼저), 떨어진 묶음의
 // 순서(뿌리 0부터 — 결정적), 깊은 사슬(재귀 없음), visit 실패 전파(멈춤), 모든 할당 실패.
 using namespace rocks;

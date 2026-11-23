@@ -11,7 +11,7 @@
 #include <Core/Time/DateTime.h>
 #include <Platform/File.h>
 
-// 별칭 명령 구현이다(Docs/Design/AssetSystem.ko.md 4.3·13절, 7.1절 17 A2e1). 별칭 표·검색은
+// 별칭 명령 구현이다(Docs/Design/AssetSystem 4.3·13절, 7.1절 17 A2e1). 별칭 표·검색은
 // AssetDatabase AssetAliasTable이 맡고 여기서는 인수·잠금·출력만 다룬다. 타입을 등록하지
 // 않는다(별칭 표와 색인만 쓴다).
 namespace rocks::commandlet_host {

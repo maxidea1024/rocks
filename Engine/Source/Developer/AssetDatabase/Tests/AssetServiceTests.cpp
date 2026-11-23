@@ -9,7 +9,7 @@
 #include <AssetRuntime/Package.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 에셋 서비스 API 시험이다(Docs/Design/AssetSystem.ko.md 13절·7.1절 15 A2c3): asset-new(타입 도구
+// 에셋 서비스 API 시험이다(Docs/Design/AssetSystem 13절·7.1절 15 A2c3): asset-new(타입 도구
 // 이름·대입·참조·저장, 타입·경로·대입·저장 거부), asset-set(경로·AssetId 대상, 대입 모두 검증,
 // --force, 거부), asset-info(Edit 줄·Report 줄·JSON, 줄로 쓸 수 없는 값), asset-list(--type 파생
 // 포함·등록되지 않은 타입, --under), 수명(Initialize 전·두 번·설정 오류·Content 열거 실패·집합
