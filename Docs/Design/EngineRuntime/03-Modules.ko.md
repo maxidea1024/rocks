@@ -21,7 +21,7 @@
 | `Engine` | ObjectRuntime, World | 엔진 상태 기계·메인 루프·WorldContext·EngineSubsystem | Gameplay·Graphics·창 참조 |
 | `World` | ObjectRuntime, CoreTypeBindings | World·Actor·Component·SceneComponent(WorldOnly 리플렉션 클래스 — 4.6절)·TickScheduler·WorldSubsystem | Engine·Graphics·Asset 참조 |
 | `WorldTestFixtures`(Developer) | World | World 타입을 상속한 리플렉션 시험 타입(SaveActor·SaveComponent)과 그 identity 명세. EngineTests만 의존 | 제품 링크 |
-| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·PlayerState·Controller·Pawn·LocalPlayer. 아직 없다(S10–S12). PlayerState는 모듈식 게임플레이 `PlayerStateComponent`의 소유 클래스다([컴포넌트 도입](../ComponentCatalog/09-Plugins.ko.md) CR48). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR26) | Graphics 참조 |
+| `Gameplay` | Engine, World, Input | GameInstance·GameDirector·GameState·PlayerState·Controller·Pawn·LocalPlayer·CameraDirector·PlayerStart(18–20절). 아직 없다(S10–S12). PlayerState는 모듈식 게임플레이 `PlayerStateComponent`의 소유 클래스다([컴포넌트 도입](../ComponentCatalog/09-Plugins.ko.md) CR48). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR26) | Graphics 참조 |
 | `AssetRuntime` | Serialization, Core | AssetId·에셋 파일 형식·AssetManager·TextureAsset | World·Graphics 참조 |
 | `AssetTools`(Developer) | AssetRuntime | BMP 임포터·에셋 파일 기록 | Shipping 링크 |
 | `RenderBase` | Graphics, Task, MetaSchema | 렌더 lane·프레임 slot·프레임 packet 전달·완료 통지·`RenderHandle` 예약([렌더 기반](../RenderBase.ko.md) RB1) | ObjectRuntime·World 참조 |

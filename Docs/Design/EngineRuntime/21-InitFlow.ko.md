@@ -1,0 +1,63 @@
+# 엔진 런타임 — 21. 초기화·종료 흐름과 시나리오(S13)
+
+[목차](README.ko.md)
+
+## 21. 초기화·종료 흐름과 시나리오(S13)
+
+설계일 2026-11-23. 1절 표의 S7–S14 완료 기준 "붙임 계획 24절의 14단계 시나리오"는 저장소에 원문이 없다(계획 24절은 Unreal 참고 체계 추가 도입이다). 이 절이 그 시나리오를 UE 5.8 순서(18–20절의 UE 계약)로 다시 정한 정본이다.
+
+### 21.1 원칙
+
+- 단계 순서는 UE standalone 경로와 같다: Login·Possess가 World BeginPlay **전**에 끝나고, BeginPlay는 GameDirector `StartPlay` → GameState `HandleBeginPlay` → Actor 시작이다(UE `E/Private/UnrealEngine.cpp:16620–16661`, `E/Private/World.cpp:6153–6187`).
+- 문서화된 UE와의 차이(이 흐름에 보이는 것):
+  - BeginPlay 뒤 Spawn한 Actor의 `OnStart`가 다음 프레임 시작(7.2절).
+  - Subsystem 정리·`OnWorldEndPlay`·`PreDeinitialize`가 역순, 필수 의존이 없는 Subsystem은 생략(ERD8·ERD9).
+  - `OnAwake`가 성공한 객체는 `OnStart` 전이어도 `OnDestroy`를 받음(17.2절).
+  - 사용자 Tick 의존의 순환은 호출 때 거부, 단계 늦춤은 프레임 시작에 정적으로(ERD2·ERD4).
+  - PlayerStart는 Spawn 순번 첫 번째(ERD20).
+  - Director 없는 World는 `BeginPlay`가 바로 Actor를 시작(21.4절).
+  - 종료 때 PlayerController를 `EndPlay(Quit)` 전에 정리(18.2절), 전환 때 배치 Pawn은 파괴하지 않음(21.3절).
+
+### 21.2 14단계 시나리오(standalone)
+
+| 단계 | 하는 일 | 관찰할 사건(시험 로그) |
+|---|---|---|
+| 1 | `Engine::Initialize`: 엔진 Registry → EngineSubsystem 초기화(의존 순서) | `EngineSubsystem.Initialize` |
+| 2 | `GameInstanceClient::OnEngineStart`(Engine Initializing): GameInstance 생성 → `OnInit` → GameInstance Subsystem 초기화 → `OnPostInit` | `GameInstance.OnInit`, `GiSubsystem.Initialize`, `GameInstance.OnPostInit` |
+| 3 | 첫 LocalPlayer 생성 → LocalPlayer Subsystem 초기화 | `LocalPlayer.Added`, `LpSubsystem.Initialize` |
+| 4 | Engine Running·PostEngineInit 모듈 시작 뒤 `OnEngineReady` → `StartGameInstance` → 기본 맵 `OpenWorld` | `OpenWorld(begin)` |
+| 5 | World 생성·`Initialize`: WorldSubsystem `Initialize` → `PostInitialize` | `WorldSubsystem.Initialize`, `.PostInitialize` |
+| 6 | GameDirector 선택·`SpawnActorDeferred` → `InitGame` → `FinishSpawning`(`OnFrameworkPreAwake`: GameState spawn — GameState는 자기 `OnFrameworkPostAwake`에서 등록 → Director `OnAwake`) | `Director.InitGame`, `GameState.Awake`, `Director.Awake` |
+| 7 | 배치 Actor `populate`(PlayerStart, 배치 Pawn — `autoPossessAi`면 AiController spawn·Possess) | `Actor.Awake`…, `AiController.Possess` |
+| 8 | LocalPlayer마다 `Login`: PlayerController 지연 spawn → FinishSpawning(PlayerState spawn·GameState 추가, CameraDirector spawn, Spectating) → `InitNewPlayer` | `PlayerController.Awake`, `PlayerState.Added`, `CameraDirector.Awake` |
+| 9 | `SetPlayer`(LocalPlayer↔PlayerController) → `PostLogin` → `HandleStartingNewPlayer` → `RestartPlayer`: `FindPlayerStart` → `SpawnDefaultPawnFor`(PlayerStart Transform) → `FinishRestartPlayer` → `Possess`(PossessedBy·SetPawn·ControlRotation·Restart) | `Director.PostLogin`, `Pawn.Possessed`, `Pawn.Restart` |
+| 10 | `World::BeginPlay`: WorldSubsystem `OnWorldBeginPlay` → `GameDirector::StartPlay` → `GameState::HandleBeginPlay` → `DispatchBeginPlay`(BeginPlay 전 Spawn한 모든 Actor·Component `OnStart`, hook 순서는 World.h) → `matchStarted` | `WorldSubsystem.OnWorldBeginPlay`, `Director.StartPlay`, `Actor.Start`… |
+| 11 | 프레임: 게임 시계 → 대기 `OnStart` → PrePhysics(PlayerController PlayerTick → Pawn Tick) → Physics(고정 스텝, 끝에 엔진 단계) → PostPhysics → LateUpdate(Timers·LifeSpan → tickable Subsystem → CameraUpdate → 등록 항목) → PreRender → 파괴 정리 → GC | `PC.PlayerTick`, `Pawn.Tick`, `Camera.Update` |
+| 12 | 게임 중 Pawn 파괴: `OnFrameworkEndPlay` → `PawnPendingDestroy`(PlayerController는 Inactive, PlayerState 유지) → 게임이 `RestartPlayer`로 다시 spawn | `Controller.PawnPendingDestroy`, 새 `Pawn.Possessed` |
+| 13 | World 전환 `OpenWorld(다음 맵)`: 21.3절 정리(spawn한 Pawn 파괴 → PlayerController 파괴 — `Logout`·PlayerState 제거) → `EndPlay(LevelTransition)`(LevelScript 먼저 Actor 정리 → `OnWorldEndPlay`) → World 즉시 파괴(`PreDeinitialize` → `Deinitialize` 역순) → 새 World에서 5–10단계. LocalPlayer·GameInstance Subsystem은 유지 | `Director.Logout`, `EndPlay(LevelTransition)`, 새 `Director.InitGame` |
+| 14 | 종료: `Engine::RequestExit` → `OnEngineShutdown`: 21.3절 정리(`Logout` 포함) → `EndPlay(Quit)` → `OnShutdown` → LocalPlayer 역순 제거(LocalPlayer Subsystem 정리) → GameInstance Subsystem 정리 → Engine이 World 파괴 → EngineSubsystem 정리(역순) | `GameInstance.OnShutdown`, …, `EngineSubsystem.Deinitialize` |
+
+시험 `GameplayFlow_FourteenStepScenario`가 위 사건 로그 전체를 순서대로 단언한다(순서 이외의 시각·경쟁에 기대지 않는다 — 단계마다 명시 호출과 프레임 수).
+
+### 21.3 종료·전환 정리 규칙
+
+- **전환(OpenWorld).** UE `LoadMap`처럼 LocalPlayer마다 Pawn을 먼저, 그다음 PlayerController를 `DestroyActor`로 지운다(사유 `Destroyed` — UE `UnrealEngine.cpp:16245–16250`, `Actor.cpp:3313`). PlayerController의 `OnFrameworkEndPlay`가 `Logout`을 부른다(UE `Controller.cpp:595–605` — Logout이 PlayerController EndPlay보다 먼저).
+  - Pawn은 Spawn한 것(`SpawnDefaultPawnFor` 등)만 지운다. Level에 배치된 Pawn은 UnPossess만 하고 `EndPlay`에 맡긴다 — LevelScript가 자기 Level의 다른 Actor보다 먼저 정리돼야 하므로(LD8). UE는 possess 중인 Pawn을 배치 여부와 관계없이 지운다(문서화된 차이).
+- **종료(OnEngineShutdown).** 같은 정리를 `EndPlay(Quit)` 전에 한다. UE는 `EndPlay(Quit)` 뒤 `RemoveLocalPlayer`가 PlayerController를 지운다(18.2절). Rocks는 GameDirector가 살아 있을 때 `Logout`이 돌게 앞에 둔다(문서화된 차이).
+- 남은 Actor는 `World::EndPlay`가 그 사유(`LevelTransition`·`Quit`)로 LevelScript 먼저 정리한다(17.6절).
+- 이 정리는 World Tick 밖(`OnEngineTick`·`OnEngineShutdown`)에서 하고, 그 자리에서 끝난다(안전 지점을 기다리지 않는다). World 저장소 파괴도 즉시다(18.5절 Engine 변경).
+
+### 21.4 Director 없는 World 시나리오
+
+편집·미리보기·Client World와 GameInstance 없이 World만 쓰는 도구·시험(지금의 Sandbox·WorldBench)이다.
+
+1. `Engine::CreateWorld`(kind = Editor·Preview, 또는 GameInstance 없는 Game) → WorldSubsystem 초기화. `GameplayWorldSubsystem`은 GameInstance `OpenWorld`가 목록에 넣을 때만 생기므로(19.5절) dispatcher가 없다.
+2. Actor Spawn은 지금처럼 동작한다(Initialized까지).
+3. `World::BeginPlay`(부르는 쪽이 원할 때만) → `OnWorldBeginPlay` → 바로 `DispatchBeginPlay`. Login·Pawn·카메라 없음.
+4. `World::Shutdown` → `EndPlay(Quit)`(Playing이었으면) → 정리.
+
+시험 `GameplayFlow_WorldWithoutDirector`가 단언하고, 기존 World 시험 전부가 이 경로의 회귀 시험이다.
+
+### 21.5 Sandbox 연결
+
+Sandbox는 `GameInstanceClient`를 쓰도록 바꾼다: 기본 맵 = PlayerStart 하나와 기본 Pawn, 창 입력을 LocalPlayer `InputSource`로 넘긴다. 마우스·키보드로 Pawn이 받는 입력을 로그로 확인한다(엔진 1차 목표 입력 확인 — 화면 출력은 화면 마일스톤이 붙인다).
