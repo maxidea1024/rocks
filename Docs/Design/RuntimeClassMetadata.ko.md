@@ -170,10 +170,29 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 **A5b2 되돌리기**:
 - 명령 `asset-set <target> --reset=<경로>`와 `AssetService::Set`의 대입 종류 Reset이다.
 - 그 경로 값을 기준 값으로 쓴 뒤(이 쓰기는 기록하지 않는다) 집합에서 그 단위(펼친 잎 포함)를 지운다(결정).
-- 값 쓰기(교차 검증 필수 2): 레코드의 그 경로 payload(`FindDefaultPayload` — 필드·비Atomic 멤버 사슬·Atomic 통째)를 그 경로에 **binary로 decode**해 게시한다. 텍스트(ReflectionText)를 거치지 않는다 — 텍스트는 NaN을 부호·payload 없이 `nan` 하나로 써서 기준과 byte가 달라지고(결정의 같음은 NaN payload까지), 임시 객체를 편집기 Registry에 만들면 생성 규칙·관찰자·GC 부작용이 생긴다. 경로 쓰기의 검증·진단(ReadOnly·타입·Required 실효 값)은 그 decode 위에 그대로 둔다. decode를 경로 쓰기에 잇는 API(경로 위치의 값 타입으로 payload를 해석해 그 값을 교체)는 A5b2 착수 때 이 절에 적는다.
+- 값 쓰기(교차 검증 필수 2): 레코드의 그 경로 payload(`FindDefaultPayload` — 필드·비Atomic 멤버 사슬·Atomic 통째)를 그 경로에 **binary로 decode**해 게시한다. 텍스트(ReflectionText)를 거치지 않는다 — 텍스트는 NaN을 부호·payload 없이 `nan` 하나로 써서 기준과 byte가 달라지고(결정의 같음은 NaN payload까지), 임시 객체를 편집기 Registry에 만들면 생성 규칙·관찰자·GC 부작용이 생긴다. 경로 쓰기의 검증·진단(ReadOnly·타입·Required 실효 값)은 그 decode 위에 그대로 둔다. decode를 경로 쓰기에 잇는 API는 아래 "A5b2 decode 명세"다.
 - 단위: 단일 값·멤버·Atomic struct·배열 계열 필드 통째(필드 payload)다. 원소·key 경로는 기준이 없어 Unsupported다(A5a 경로 조회와 같다). 비Atomic struct 통째 되돌리기는 그 struct 필드 payload(레코드는 모든 멤버를 담는다)로 된다.
 - Sparks 타입(초기값 덮기)도 레코드가 생기는 L2에서 같은 payload 경로를 쓴다.
 - ReadOnly 필드와 소유 컨테이너는 거부한다(결정).
+
+**A5b2 decode 명세**(2026-11-24 — 착수 전, 교차 검증 필수 4 반영: 문맥 모드·Optional·Map API·사전 단계·묶음 순서):
+- API(ObjectSerialization `ClassDefaults.h`): `RevertToDefault(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle object, const PropertyPathBuffer& path, Allocator& scratch, PropertyPathFailure* failure = nullptr) → Result<void>`과 그 두 단계 `PlanRevert(…) → Result<RevertPlan>`(사전 단계)·`ApplyRevert(RevertPlan&)`. path는 그 객체 타입 스키마로 해석한 단위 경로다(원소·key 단계가 있으면 Unsupported — A5a 경로 조회와 같다). 객체 타입 lease로 `AcquireClassDefaults`(Editor 구성) → `FindDefaultPayload`로 (wire, payload)를 얻는다.
+- 값 해석 문맥(`RevertDecodeContext` — FieldDecodeContext): 한 번에 해석한다. 기록하지 않는 단계의 기본 동작(1단계가 남긴 기록을 꺼내기 — `TakeClassReference`·`TakeName`)을 재정의해 ClassRef는 대상 TypeRegistry `Acquire` + `CheckClassReferenceLease`로 판정하고, Name은 대상 Registry 풀에 intern한다. hook 없음, 한도는 그래프 기본 한도. 그 위치의 FieldScope(lease의 FieldEnum·FieldStruct·FieldKeyEnum)를 세우고 `ParseFieldValue(FieldView{id, wire, payload})`로 FieldValue를 만든다 — float·double은 비트 그대로다(NaN payload·-0.0, 텍스트 왕복 없음). Text는 FieldValue text 칸(`MakeParsedText`), 참조는 기준이 늘 null이라 null 값이다.
+- 재생 규칙(값 종류별 — 경로 쓰기 API):
+  - 단일 값(bool·정수·실수·enum·String·Text·Name·Guid·AssetId·Digest·Soft·ClassRef·강한·weak 참조)·bitfield(최상위·struct 멤버)·**Optional 단일 값**(FieldValue present = set 여부 — false면 unset): `PathWrite(path, value)`.
+  - 단일 struct(Atomic·비Atomic): payload Record의 스키마 멤버마다 path + 멤버 단계로 재생한다(Editor 레코드는 모든 멤버를 담는다).
+  - Optional<값 struct>: 기준 unset이면 `PathResetOptional`, set이면 `PathEmplaceOptional` 뒤 안쪽 멤버 경로로 재생.
+  - 배열(Array): `PathClear` 뒤 원소 순서대로 — 단일 값 원소는 해석한 값으로 `PathInsertElement`(끝 index), struct 원소는 값 없이 `PathInsertElement`로 기본 원소를 넣고 index 멤버 경로로 재생.
+  - 정적 배열: 원소마다 index 경로로 재생(크기 고정 — 삽입·삭제 없음).
+  - Set: `PathClear` 뒤 원소마다 `PathInsertKey`.
+  - Map 단일 값: `PathClear` 뒤 항목마다 key 단계 경로에 `PathWrite`(없으면 끝에 넣는다 — key는 wire 정규형으로 PathKey). Map<K, 값 struct>: `PathInsertKey`로 기본 값을 넣은 뒤 `m[k].member`로 재생.
+  - InstancedStruct: 기준은 늘 빈 값(A5a)이라 `PathClearInstanced`.
+  - C++ 생성자가 만든 컨테이너는 거의 비어 있어 대개 `PathClear` 하나다.
+- 사전 단계(`PlanRevert` — 어떤 쓰기보다 먼저): 위 규칙대로 재생할 연산 목록(경로·FieldValue·연산 종류)을 모두 만들고 검사한다 — 모든 경로가 해석되는지, 유효 플래그(`PropagateFieldFlags` 누적)에 ReadOnly가 있는 위치가 하나라도 있으면 되돌리기 전체를 Unsupported(ReadOnly)로 거부한다(struct 안 ReadOnly 멤버 포함 — 결정의 ReadOnly 거부), 배열 원소 수가 MaxElements 안인지. 그래서 적용 단계에 남는 실패는 할당·Busy·종료(자원·상태)뿐이다.
+- 원자성: 적용은 여러 경로 쓰기라 남는 실패(할당 등)가 중간에 나면 일부만 되돌아간 채 남는다(한계 — 실패 시 복원은 CU4 Undo 체계(PathWrite previous·연산 전 PathRead)와 함께 후속, 복원 자체도 할당으로 실패할 수 있다). asset-set은 실패하면 저장하지 않고 오류를 돌려준다(그 객체는 dirty로 남아 다음 저장·닫기에서 정리된다).
+- asset-set 묶음 안 순서(교차 검증 필수 4): Reset은 묶음 맨 앞에 적용한다(다른 텍스트 대입보다 먼저). 같은 단위(또는 한쪽이 다른 쪽 접두 — 펼친 잎 포함)에 Reset과 텍스트 대입을 섞으면 InvalidArgument(사용법)다 — 그래서 순서가 결과를 바꾸지 않는다. 흐름(재판정 필수 — 텍스트 Publish는 Prepare 뒤 owner가 Registry API로 바뀌면 Busy라, 되돌리기 뒤에 텍스트를 다시 준비한다): Reset 경로 해석·`PlanRevert`(모두) → 텍스트 `PrepareAssignments`(검증만 — 버린다) → override 계획(최종 결과 = 지금 집합 − Reset 단위 ∪ 대입 단위 — 더할 단위 예약, 지울 단위는 할당 없음) → `ApplyRevert`(모두) → 텍스트 `PrepareAssignments`를 다시 → `Publish` → 합치기·지우기 → 저장. 검증 실패는 어떤 게시보다 먼저 드러난다. 두 번째 Prepare는 같은 대입을 같은 단위 밖에서 다시 해석하므로(Reset과 단위가 겹치지 않는다) 자원 실패만 남고, 그 경우는 적용 중 실패와 같은 한계다. `RevertPlan`(연산 목록 — FieldValue의 String·Text 포함)은 scratch allocator로 만들고 계획부터 적용까지 산다(그 사이 두 Prepare를 지난다).
+- 오류: 레코드 없는 타입 Unsupported(진단 이유 그대로), 원소·key 경로·Atomic 멤버 경로 Unsupported·InvalidArgument(FindDefaultPayload와 같다), ReadOnly 위치 Unsupported, 경로 해석·MaxElements 오류, 적용 단계의 자원 오류. 명령 `--reset=`은 경로가 비면 사용법 오류(종료 2)다.
+- 시험: 단일 값 각 종류(Text·Name None·non-null ClassRef 기본값·NaN payload·-0.0 비트 그대로), bitfield(최상위·struct 안), Optional 단일 값(기준 set·unset)·Optional<struct>, Array 단일 값·struct 원소, 정적 배열 원소, Set, Map 단일 값·Map 값 struct, InstancedStruct, Atomic·비Atomic struct 통째, ReadOnly 멤버가 있는 struct 통째 거부(아무것도 쓰지 않음), override 펼친 잎 지움, 레코드 없는 타입 Unsupported, 원소 경로 Unsupported, 묶음 안 Reset과 같은 단위 대입 InvalidArgument·다른 단위는 둘 다 적용(되돌리기 뒤 Publish가 Busy가 아님), 적용 중 할당 실패 뒤 상태(문서화한 한계 — 오류·저장 없음), `--reset=` 사용법 오류.
 
 **로드**: 바꾸지 않는다 — 빠진 필드·멤버는 이미 형식 규칙으로 기준(생성자 값)이다(A0-O). Required 진단은 실효 값으로 한다(A0-O).
 
