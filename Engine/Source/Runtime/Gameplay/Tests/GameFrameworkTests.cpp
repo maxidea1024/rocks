@@ -88,12 +88,17 @@ public:
 
     Result<void> InitGame(StringView mapName, StringView options) noexcept override {
         Record("director.initgame");
+        if (failInit) {
+            return Result<void>::Failure(ErrorCode::DependencyFailed);
+        }
+
         // GameState는 아직 없고 options는 이미 보관됐다.
         CHECK(GameStateHandle().IsNull());
         CHECK(Options() == options);
         StringView rounds;
         CHECK(FindMapOption(options, "Rounds", rounds) && rounds == StringView("3"));
-        CHECK(mapName == StringView("Arena"));
+        // 미룬 요청(Deferred)도 복사한 이름이 그대로 온다.
+        CHECK(mapName == StringView("Arena") || mapName == StringView("Deferred"));
         return Result<void>::Success();
     }
 
@@ -110,6 +115,48 @@ public:
     }
 
     static inline bool skipBase = false;
+    static inline bool failInit = false;
+};
+
+// OnAwake가 실패하는 Director다(PreAwake가 만든 GameState를 EndPlay가 되돌린다).
+class FailingAwakeDirector final : public GameDirector {
+    ROCKS_NATIVE_TYPE(FailingAwakeDirector, GameDirector, 0x7a3e0c5d9b1f4268ull,
+                      0xe6b2d8104fa9c35bull)
+
+public:
+    explicit FailingAwakeDirector(Allocator& allocator) noexcept : GameDirector(allocator) {
+    }
+
+    Result<void> OnAwake() noexcept override {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+};
+
+// BeginFrame(프레임 안)에서 OpenWorld를 요청하는 loop hook이다(미룬 요청의 복사 확인).
+class RequestHooks final : public EngineLoopHooks {
+public:
+    void BeginFrame(Engine&) noexcept override {
+        if (!pending || client == nullptr) {
+            return;
+        }
+
+        pending = false;
+        // 요청 뒤 원본 문자열을 지워도 미룬 요청은 자기 사본을 쓴다.
+        char name[16] = "Deferred";
+        char options[16] = "?Rounds=3";
+        MapDesc map = request;
+        map.name = StringView(name);
+        map.options = StringView(options);
+        auto requested = client->WithInstance(
+            [&map](GameInstance& instance) noexcept { return instance.OpenWorld(map); });
+        CHECK(requested.IsOk());
+        memset(name, 'x', sizeof(name) - 1);
+        memset(options, 'x', sizeof(options) - 1);
+    }
+
+    GameInstanceClient* client = nullptr;
+    MapDesc request;
+    bool pending = false;
 };
 
 class DirectorA final : public GameDirector {
@@ -211,6 +258,10 @@ Result<void> RegisterTestTypes(TypeRegistry& types) noexcept {
         registered = RegisterOne<OverridingGameInstance>(types);
     }
 
+    if (registered) {
+        registered = RegisterOne<FailingAwakeDirector>(types);
+    }
+
     return registered;
 }
 
@@ -222,6 +273,7 @@ struct Fixture {
         config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 1.0 / 60.0;
         config.registerTypes = &RegisterTestTypes;
+        config.hooks = &hooks;
     }
 
     Result<void> Start() noexcept {
@@ -232,6 +284,7 @@ struct Fixture {
 
         client = Move(madeClient.Value());
         config.client = client.Get();
+        hooks.client = client.Get();
         auto madeEngine = UniquePtr<Engine>::TryMake(allocator, allocator);
         if (!madeEngine) {
             return Result<void>::Failure(madeEngine.Error());
@@ -250,6 +303,7 @@ struct Fixture {
         engine.Reset();
         client.Reset();
         RecordingDirector::skipBase = false;
+        RecordingDirector::failInit = false;
         OverridingGameInstance::overrideBToA = false;
     }
 
@@ -288,6 +342,7 @@ struct Fixture {
     SystemAllocator allocator;
     GameInstanceConfig game;
     EngineConfig config;
+    RequestHooks hooks;
     UniquePtr<GameInstanceClient> client;
     UniquePtr<Engine> engine;
 };
@@ -399,6 +454,20 @@ TEST(GameFramework_InitGameStartPlayOrderAndDispatchContract) {
         "director.startplay", "gamestate.handlebeginplay", "actor.start"};
     CHECK(EventsAre(started));
     CHECK(fixture.DirectorTypeOfCurrent() == ObjectTypeIdOf<RecordingDirector>());
+    // 이미 시작한 GameState의 HandleBeginPlay는 WrongContext이고 상태는 그대로다.
+    auto again = fixture.Current()->With<GameState>(
+        fixture.Gameplay()->GameStateHandle(), [](GameState& state) noexcept {
+            const bool wrong = state.HandleBeginPlay().Error() == ErrorCode::WrongContext;
+            return wrong && state.HasBegunPlay() && state.HasMatchStarted();
+        });
+    CHECK(again.Value());
+
+    // InitGame 실패는 OpenWorld 실패다(새 World 정리).
+    RecordingDirector::failInit = true;
+    ResetEvents();
+    CHECK(fixture.Open(fixture.game.defaultMap).Error() == ErrorCode::DependencyFailed);
+    CHECK(fixture.Current() == nullptr && fixture.engine->WorldCount() == 0);
+    RecordingDirector::failInit = false;
 
     RecordingDirector::skipBase = true;
     ResetEvents();
@@ -527,4 +596,56 @@ TEST(GameFramework_FindMapOptionParsesKeysCaseInsensitively) {
     CHECK(!FindMapOption("?starter=1", "start", value));
 }
 
+// 리뷰 보강(19.7절): 프레임 안에서 미룬 OpenWorld는 name·options·directorType을 복사해 둔다.
+TEST(GameFramework_DeferredOpenKeepsOptionsAndDirectorType) {
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    fixture.hooks.request.directorType = ObjectTypeIdOf<RecordingDirector>();
+    fixture.hooks.pending = true;
+    // BeginFrame의 요청은 같은 프레임 OnEngineTick에서 실행된다(그 사이 원본 문자열은 지워졌다).
+    // RecordingDirector InitGame이 복사한 맵 이름·options("?Rounds=3")를 확인한다.
+    REQUIRE(fixture.engine->RunFrame());
+    REQUIRE(fixture.Current() != nullptr);
+    CHECK(fixture.Current()->Name() == StringView("Deferred"));
+    CHECK(fixture.DirectorTypeOfCurrent() == ObjectTypeIdOf<RecordingDirector>());
+    auto options = fixture.Current()->With<GameDirector>(
+        fixture.Gameplay()->Director(), [](GameDirector& director) noexcept {
+            return director.Options() == StringView("?Rounds=3");
+        });
+    CHECK(options.Value());
+}
+
+// 리뷰 보강(17.8·19.7절): Director OnAwake가 실패하면 PreAwake가 만든 GameState도 정리된다. 지연
+// Spawn 중(Constructed)인 PlayerState는 GameState가 모으지 않고 자기 PostAwake에서 들어온다.
+TEST(GameFramework_FailedDirectorRollsBackGameStateAndDeferredPlayerStateJoinsLater) {
+    Fixture fixture;
+    fixture.game.defaultMap.kind = WorldKind::Editor;
+    REQUIRE(fixture.Start());
+    World& world = *fixture.Current();
+    CHECK(world.SpawnActor<FailingAwakeDirector>().Error() == ErrorCode::DependencyFailed);
+    REQUIRE(fixture.engine->RunFrame());
+    uint32 gameStates = 0;
+    world.ForEachActor([&](ObjectHandle actor) noexcept {
+        if (world.With<GameState>(actor, [](GameState&) noexcept {})) {
+            ++gameStates;
+        }
+    });
+    CHECK(gameStates == 0);
+    CHECK(fixture.Gameplay()->GameStateHandle().IsNull() &&
+          fixture.Gameplay()->Director().IsNull());
+
+    auto deferred = world.SpawnActorDeferred<PlayerState>();
+    REQUIRE(deferred);
+    auto state = world.SpawnActor<GameState>();
+    REQUIRE(state);
+    auto count = [&]() noexcept {
+        return world
+            .With<GameState>(state.Value(),
+                             [](GameState& value) noexcept { return value.PlayerStates().Size(); })
+            .Value();
+    };
+    CHECK(count() == 0);
+    REQUIRE(world.FinishSpawning(deferred.Value()));
+    CHECK(count() == 1);
+}
 } // namespace gameplay_game_framework_tests_file

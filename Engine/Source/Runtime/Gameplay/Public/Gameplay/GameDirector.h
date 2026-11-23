@@ -121,10 +121,13 @@ protected:
 
 private:
     friend class GameInstance;
+    friend class GameState;
 
     ROCKS_NATIVE() String options_;
     ROCKS_NATIVE() ObjectHandle gameState_;
     ROCKS_NATIVE() int32 nextPlayerId_ = 1;
+    // PostAwake까지 마쳤다(아니면 EndPlay가 PreAwake의 GameState를 되돌린다).
+    ROCKS_NATIVE() bool postAwake_ = false;
 };
 
 } // namespace rocks

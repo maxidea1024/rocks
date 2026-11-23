@@ -16,10 +16,13 @@ namespace rocks {
 
 namespace {
 
-// 파괴 대기가 아닌 Actor인지다(프레임워크 목록·선택에서 뺀다).
+// 초기화를 마쳤고 파괴 대기가 아닌 Actor인지다(프레임워크 목록·선택 대상). 지연 Spawn
+// 중(Constructed)은 뺀다 — 아직 프레임워크 hook을 받지 않아 FinishSpawning 전에 파괴되면 정리
+// hook도 없다(그 Actor는 자기 PostAwake에서 스스로 들어온다).
 bool IsLiveActor(World& world, ObjectHandle actor) noexcept {
     auto state = world.GetActorState(actor);
-    return state && state.Value() != ActorState::PendingDestroy;
+    return state &&
+           (state.Value() == ActorState::Initialized || state.Value() == ActorState::Playing);
 }
 
 // Spawn 순번이다(레코드가 없으면 가장 큰 값 — 고르지 않는다).
@@ -134,7 +137,10 @@ Result<void> GameDirector::OnFrameworkPreAwake() noexcept {
     const TypeId directorType = GetType().Id();
     auto spawned = world.SpawnActorDeferred(type);
     if (!spawned) {
-        return Result<void>::Failure(spawned.Error());
+        // Actor가 아니거나 등록되지 않은 타입이다(19.7절 — InvalidArgument).
+        Log::Error(LogGameplay, "GameDirector gameStateType could not be spawned: {Error}",
+                   ErrorCodeName(spawned.Error()));
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // World는 TypeRegistry를 내보이지 않으므로 빌림으로 파생을 판정한다(19.7절).
@@ -162,13 +168,24 @@ Result<void> GameDirector::OnFrameworkPostAwake() noexcept {
         gameplay->director_ = Handle();
     }
 
+    postAwake_ = true;
     return Result<void>::Success();
 }
 
 void GameDirector::OnFrameworkEndPlay(EndPlayReason) noexcept {
-    auto* gameplay = GetWorld().GetSubsystem<GameplayWorldSubsystem>();
+    World& world = GetWorld();
+    auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
     if (gameplay != nullptr && gameplay->director_ == Handle()) {
         gameplay->director_ = {};
+    }
+
+    // PreAwake가 만든 GameState를 Spawn 실패(PostAwake 전 실패)에서 되돌린다(17.8절 — 이 자리가
+    // 있는 이유). 정상 정리에서는 GameState가 자기 수명대로 남는다(UE도 GameMode 파괴가 GameState를
+    // 지우지 않는다).
+    if (!postAwake_ && !gameState_.IsNull()) {
+        auto destroyed = world.DestroyActor(gameState_);
+        (void)destroyed;
+        gameState_ = {};
     }
 }
 
@@ -200,6 +217,11 @@ void GameState::RemovePlayerState(ObjectHandle playerState) noexcept {
 }
 
 Result<void> GameState::HandleBeginPlay() noexcept {
+    // 이미 시작했으면 다시 시작하지 않는다(DispatchBeginPlay도 WrongContext다 — 상태 불변).
+    if (hasBegunPlay_) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
     // UE HandleBeginPlay(GameStateBase.cpp:205–211): bReplicatedHasBegunPlay → NotifyBeginPlay
     // (Actor DispatchBeginPlay) → NotifyMatchStarted.
     hasBegunPlay_ = true;
@@ -250,9 +272,26 @@ Result<void> GameState::OnFrameworkPostAwake() noexcept {
 }
 
 void GameState::OnFrameworkEndPlay(EndPlayReason) noexcept {
-    auto* gameplay = GetWorld().GetSubsystem<GameplayWorldSubsystem>();
-    if (gameplay != nullptr && gameplay->gameState_ == Handle()) {
+    World& world = GetWorld();
+    auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
+    if (gameplay == nullptr) {
+        return;
+    }
+
+    if (gameplay->gameState_ == Handle()) {
         gameplay->gameState_ = {};
+    }
+
+    // Director의 handle도 비운다(GameStateHandle "없으면 null" 계약).
+    const ObjectHandle self = Handle();
+    if (!gameplay->director_.IsNull()) {
+        auto cleared =
+            world.With<GameDirector>(gameplay->director_, [self](GameDirector& director) noexcept {
+                if (director.gameState_ == self) {
+                    director.gameState_ = {};
+                }
+            });
+        (void)cleared;
     }
 }
 

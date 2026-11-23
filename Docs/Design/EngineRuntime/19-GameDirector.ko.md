@@ -80,6 +80,7 @@ S11은 Controller·Pawn 없이 되는 범위다. Login·RestartPlayer·Logout·`
 - **OpenWorld 순서(18.5절 보강).** World 생성(WorldSubsystem 초기화 — GameplayWorldSubsystem이 dispatcher가 된다) → Director 조건(19.3절)이 맞으면 타입 결정 → 엔진 TypeRegistry `IsA(type, GameDirector)`가 아니면 `InvalidArgument` → `SpawnActorDeferred` → options 보관 → `InitGame` → `FinishSpawning`(GameState spawn·등록) → `populate` → `BeginPlay`(StartPlay → HandleBeginPlay → DispatchBeginPlay). 어느 단계든 실패하면 새 World를 정리한다(실패 단계 이름 Director·InitGame·FinishSpawning).
 - **GameState 타입 검사.** Director가 `gameStateType`으로 Spawn한 Actor가 GameState 파생이 아니면 그 Actor를 파괴하고 PreAwake가 `InvalidArgument`로 실패한다(Director Spawn 실패 → OpenWorld 실패). World는 TypeRegistry를 내보이지 않으므로 Spawn 뒤 빌림으로 판정한다.
 - **빌림.** 프레임워크 Actor끼리는 handle로 잇고 `World::With`로 빌린다(GameplayWorldSubsystem은 handle만 든다).
+- **리뷰 반영.** 프레임워크 목록·선택(PlayerState 모으기·FindPlayerStart)은 Initialized·Playing Actor만 본다. 지연 Spawn 중인 Actor는 아직 프레임워크 hook을 받지 않아서, FinishSpawning 전에 파괴되면 정리 hook도 없기 때문이다. 이런 Actor는 자기 PostAwake에서 스스로 들어온다. Director의 PostAwake 전에 실패하면 EndPlay가 PreAwake에서 만든 GameState를 파괴한다. GameState가 사라지면 Director의 handle도 비운다. `HandleBeginPlay`를 다시 부르면 `WrongContext`이고 상태는 바뀌지 않는다. 미룬 OpenWorld는 이름과 options를 둘 다 복사한 뒤에만 바꾼다. `gameStateType`을 Spawn할 수 없을 때(Actor가 아니거나 미등록)도 `InvalidArgument`다.
 
 ### 19.8 시험(완료 조건)
 
