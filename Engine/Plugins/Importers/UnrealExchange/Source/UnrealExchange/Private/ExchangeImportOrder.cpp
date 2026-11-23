@@ -1,12 +1,13 @@
 #include <UnrealExchange/ExchangeImportOrder.h>
 
 #include <Core/Algorithms.h>
+#include <Core/Graph/StrongComponents.h>
 #include <Core/Text/Unicode.h>
 #include <UnrealExchange/ExchangePaths.h>
 
 // Unreal 교환 임포트 순서다(Docs/Design/UnrealExchange.ko.md 9.1·9.3절, 10.4절 13–15번, 10.5절):
-// --only 닫힘, 기존 에셋 조회, 경로 대응과 겹침, Hard·Build 그래프의 SCC(재귀 없는 Tarjan), 단위
-// 깊이·실패 전파.
+// --only 닫힘, 기존 에셋 조회, 경로 대응과 겹침, Hard·Build 그래프의 SCC(Core 공용 반복 Tarjan),
+// 단위 깊이·실패 전파.
 
 namespace rocks {
 
@@ -74,29 +75,12 @@ struct OrderNode {
     bool missingTarget = false;
     // 자기 자신을 Build로 참조하면 참이다.
     bool selfBuild = false;
-    // Tarjan 상태다.
-    uint32 index = ExchangeNoIndex;
-    uint32 low = 0;
-    bool onStack = false;
-    // 간선 범위(edges 안)다.
-    uint32 firstEdge = 0;
-    uint32 edgeCount = 0;
-};
-
-struct OrderEdge {
-    uint32 target;
-    bool build;
-};
-
-struct OrderFrame {
-    uint32 node;
-    uint32 edge;
 };
 
 // 순서 계산 전체의 작업 상태다.
 struct OrderState {
     explicit OrderState(Allocator& allocator) noexcept
-        : nodes(allocator), edges(allocator), stack(allocator), frames(allocator),
+        : nodes(allocator), edgeStart(allocator), edgeTargets(allocator), edgeBuild(allocator),
           depths(allocator), redirectsByTarget(allocator), formerPaths(allocator),
           foundByFormer(allocator) {
     }
@@ -106,10 +90,12 @@ struct OrderState {
     // 고른 에셋 표다(계획의 selected_ — 에셋마다 0·1).
     const uint8* selected = nullptr;
     Array<OrderNode> nodes;
-    Array<OrderEdge> edges;
-    Array<uint32> stack;
-    Array<OrderFrame> frames;
-    // 내보낸 순서(Tarjan 완료 순)의 단위 깊이다.
+    // 간선(묶음 안 Hard 대상) CSR 표다: 에셋 n의 간선은 [edgeStart[n], edgeStart[n + 1])이고
+    // edgeStart는 에셋 수 + 1개다. edgeBuild는 간선마다 Build 관계인지(0·1)다.
+    Array<uint32> edgeStart;
+    Array<uint32> edgeTargets;
+    Array<uint8> edgeBuild;
+    // 내보낸 순서(SCC 알림 순 — 의존이 먼저)의 단위 깊이다.
     Array<uint32> depths;
     // redirect 번호를 (to, from) byte 순으로 정렬한 표다(옛 경로 찾기 — 10.5절 4번).
     Array<uint32> redirectsByTarget;
@@ -117,7 +103,6 @@ struct OrderState {
     Array<StringView> formerPaths;
     // 에셋마다 기존 에셋을 둘째 단계(옛 경로)로 찾았는지다.
     Array<uint8> foundByFormer;
-    uint32 counter = 0;
 };
 
 Result<void> AddOrderDiagnostic(OrderState& state, AssetDiagnosticCode code, ErrorCode error,
@@ -135,6 +120,13 @@ Result<void> AddOrderDiagnostic(OrderState& state, AssetDiagnosticCode code, Err
 
 bool IsSelected(const OrderState& state, usize asset) noexcept {
     return state.selected[asset] != 0;
+}
+
+// 순서 단위가 될 에셋인지다(고른 지원 에셋). 아닌 에셋은 간선이 없고 간선 대상도 아니다(선택은
+// Hard 닫힘이고, 의존 className은 대상 클래스와 같다 — ManifestMismatch).
+bool IsOrdered(const OrderState& state, usize asset) noexcept {
+    return state.bundle->Assets()[asset].state != ExchangeAssetState::Unsupported &&
+           IsSelected(state, asset);
 }
 
 // redirect 번호를 (to, from) 순으로 정렬한다.
@@ -522,10 +514,14 @@ Result<void> CheckTakenPaths(OrderState& state, const ExchangeOrderOptions& opti
 // 간선(묶음 안 Hard 대상)을 만들고 묶음에 없는 대상을 분류한다.
 Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) noexcept {
     Span<const ExchangeAsset> assets = state.bundle->Assets();
+    if (auto resized = state.edgeStart.TryResize(assets.Size() + 1); !resized) {
+        return resized;
+    }
+
     for (usize index = 0; index < assets.Size(); ++index) {
         const ExchangeAsset& asset = assets[index];
         OrderNode& node = state.nodes[index];
-        node.firstEdge = static_cast<uint32>(state.edges.Size());
+        state.edgeStart[index] = static_cast<uint32>(state.edgeTargets.Size());
         if (asset.state != ExchangeAssetState::Ready || !IsSelected(state, index)) {
             continue;
         }
@@ -552,12 +548,14 @@ Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) 
                     continue;
                 }
 
-                if (auto pushed = state.edges.TryPushBack(OrderEdge{dependency.target, build});
-                    !pushed) {
+                if (auto pushed = state.edgeTargets.TryPushBack(dependency.target); !pushed) {
                     return pushed;
                 }
 
-                ++node.edgeCount;
+                if (auto pushed = state.edgeBuild.TryPushBack(build ? 1 : 0); !pushed) {
+                    return pushed;
+                }
+
                 continue;
             }
 
@@ -605,6 +603,7 @@ Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) 
         }
     }
 
+    state.edgeStart[assets.Size()] = static_cast<uint32>(state.edgeTargets.Size());
     return Result<void>::Success();
 }
 
@@ -627,17 +626,16 @@ Result<void> ReportMembers(OrderState& state, Span<const uint32> members, AssetD
     return Result<void>::Success();
 }
 
-// 끝난 SCC 하나를 단위로 만든다(깊이·Build 순환·실패 전파, 10.4절 14·15번).
-Result<void> EmitUnit(OrderState& state, ExchangeImportPlan& out, usize stackStart) noexcept {
+// SCC 하나를 단위로 만든다(깊이·Build 순환·실패 전파, 10.4절 14·15번). SCC는 의존이 먼저
+// 오므로 단위 밖 간선 대상의 단위는 이미 있다.
+Result<void> EmitUnit(OrderState& state, ExchangeImportPlan& out,
+                      Span<const uint32> component) noexcept {
     Array<ExchangeImportUnit>& units = ExchangePlanAccess::Units(out);
     Array<uint32>& members = ExchangePlanAccess::Members(out);
     Array<uint32>& unitOf = ExchangePlanAccess::UnitOf(out);
     const uint32 unitIndex = static_cast<uint32>(units.Size());
     const usize firstMember = members.Size();
-    while (state.stack.Size() > stackStart) {
-        // 비어 있지 않으므로 꺼내기는 실패하지 않는다.
-        const uint32 member = state.stack.TryPopBack().Value();
-        state.nodes[member].onStack = false;
+    for (const uint32 member : component) {
         unitOf[member] = unitIndex;
         if (auto pushed = members.TryPushBack(member); !pushed) {
             return pushed;
@@ -664,11 +662,11 @@ Result<void> EmitUnit(OrderState& state, ExchangeImportPlan& out, usize stackSta
             blockedMember = member;
         }
 
-        for (uint32 edge = node.firstEdge; edge < node.firstEdge + node.edgeCount; ++edge) {
-            const OrderEdge& item = state.edges[edge];
-            const uint32 targetUnit = unitOf[item.target];
+        for (uint32 edge = state.edgeStart[member]; edge < state.edgeStart[member + 1]; ++edge) {
+            const uint32 target = state.edgeTargets[edge];
+            const uint32 targetUnit = unitOf[target];
             if (targetUnit == unitIndex) {
-                buildCycle = buildCycle || item.build;
+                buildCycle = buildCycle || state.edgeBuild[edge] != 0;
                 continue;
             }
 
@@ -677,7 +675,7 @@ Result<void> EmitUnit(OrderState& state, ExchangeImportPlan& out, usize stackSta
             if (units[targetUnit].state == ExchangeUnitState::Failed &&
                 blockedBy == ExchangeNoIndex) {
                 blockedMember = member;
-                blockedBy = item.target;
+                blockedBy = target;
             }
         }
     }
@@ -742,67 +740,6 @@ Result<void> EmitUnit(OrderState& state, ExchangeImportPlan& out, usize stackSta
     }
 
     return units.TryPushBack(unit);
-}
-
-// root에서 시작하는 재귀 없는 Tarjan이다.
-Result<void> VisitFrom(OrderState& state, ExchangeImportPlan& out, uint32 root) noexcept {
-    auto enter = [&](uint32 node) noexcept -> Result<void> {
-        state.nodes[node].index = state.counter;
-        state.nodes[node].low = state.counter;
-        ++state.counter;
-        state.nodes[node].onStack = true;
-        if (auto pushed = state.stack.TryPushBack(node); !pushed) {
-            return pushed;
-        }
-
-        return state.frames.TryPushBack(OrderFrame{node, state.nodes[node].firstEdge});
-    };
-
-    if (auto entered = enter(root); !entered) {
-        return entered;
-    }
-
-    while (!state.frames.IsEmpty()) {
-        const usize top = state.frames.Size() - 1;
-        const uint32 node = state.frames[top].node;
-        const OrderNode& current = state.nodes[node];
-        if (state.frames[top].edge < current.firstEdge + current.edgeCount) {
-            const uint32 target = state.edges[state.frames[top].edge].target;
-            ++state.frames[top].edge;
-            if (state.nodes[target].index == ExchangeNoIndex) {
-                if (auto entered = enter(target); !entered) {
-                    return entered;
-                }
-            } else if (state.nodes[target].onStack) {
-                const uint32 reached = state.nodes[target].index;
-                state.nodes[node].low = reached < current.low ? reached : current.low;
-            }
-
-            continue;
-        }
-
-        // 끝난 node의 frame을 꺼낸다(비어 있지 않으므로 실패하지 않는다).
-        const OrderFrame finished = state.frames.TryPopBack().Value();
-        if (!state.frames.IsEmpty()) {
-            OrderNode& parent = state.nodes[state.frames[state.frames.Size() - 1].node];
-            parent.low = current.low < parent.low ? current.low : parent.low;
-        }
-
-        if (current.low != current.index) {
-            continue;
-        }
-
-        usize stackStart = state.stack.Size();
-        while (state.stack[stackStart - 1] != finished.node) {
-            --stackStart;
-        }
-
-        if (auto emitted = EmitUnit(state, out, stackStart - 1); !emitted) {
-            return emitted;
-        }
-    }
-
-    return Result<void>::Success();
 }
 
 // 단위를 (깊이, 가장 작은 구성원) 순으로 정렬하고 unitOf를 다시 맞춘다.
@@ -900,15 +837,18 @@ Result<void> PlanInto(const ExchangeBundle& bundle, const ExchangeOrderOptions& 
         return built;
     }
 
-    for (usize index = 0; index < count; ++index) {
-        if (bundle.Assets()[index].state == ExchangeAssetState::Unsupported ||
-            !IsSelected(state, index) || state.nodes[index].index != ExchangeNoIndex) {
-            continue;
-        }
+    // 단위가 아닌 에셋은 간선이 없어 혼자 SCC가 되므로 건너뛴다(IsOrdered).
+    auto visited = algo::ForEachStrongComponent(
+        allocator, static_cast<uint32>(count), state.edgeStart.View(), state.edgeTargets.View(),
+        [&](Span<const uint32> component, bool) noexcept -> Result<void> {
+            if (component.Size() == 1 && !IsOrdered(state, component[0])) {
+                return Result<void>::Success();
+            }
 
-        if (auto visited = VisitFrom(state, out, static_cast<uint32>(index)); !visited) {
-            return visited;
-        }
+            return EmitUnit(state, out, component);
+        });
+    if (!visited) {
+        return visited;
     }
 
     SortUnits(out);
