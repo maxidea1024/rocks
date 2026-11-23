@@ -184,6 +184,11 @@ public:
         return symbolBases_.View();
     }
 
+    // 사용자 선언 심볼(최상위 fn·class·필드 등 — 선언 노드가 있는 것)에 이름이 name인 attribute가
+    // 있는지다(`@test` → "test"). 언어·엔진 심볼과 범위 밖 번호는 거짓이다.
+    // 사용 예: `@test` 시험 찾기(SparksTestHost RunTests), 언어 서버의 attribute 표시.
+    bool HasAttribute(uint32 symbol, StringView name) const noexcept;
+
     // 모듈 구문 트리 노드의 심볼이다: 선언 이름 노드는 그 선언, 식의 Identifier와 on·emit 경로의
     // 첫 Name은 가리키는 대상. 없거나 해석하지 못했으면 NoSymbol.
     uint32 NodeSymbol(uint32 module, uint32 node) const noexcept;

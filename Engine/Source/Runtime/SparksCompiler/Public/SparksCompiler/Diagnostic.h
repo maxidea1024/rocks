@@ -336,6 +336,17 @@ private:
     uint32 nextSequence_ = 0;
 };
 
+// 진단과 같은 형식(8.1절)의 보고 하나를 out에 붙인다: 첫 줄 `경로:줄:열: error <code>: <message>`
+// (hasSpan이 거짓이면 `경로: error <code>: <message>`), 원문 줄과 밑줄, 설명 줄, `fix:` 줄. code는
+// S 코드 표기 대신 쓰는 글자다(도구의 결과 — 예: `sparks test`의 `AssertFailed`,
+// SparksTools 9.5절). message·fix는 한 줄, explanation은 LF로 여러 줄, 비면 그 줄을 생략한다.
+// span은 source 원문 안이어야 한다(밖이면 Fatal — SourceFile::Locate). 실패: out의 할당 실패(out에
+// 일부가 남을 수 있다).
+ROCKS_SPARKSCOMPILER_API Result<void>
+AppendSourceReport(StringBuilderBase& out, const SourceSet& sources, SourceId source, bool hasSpan,
+                   SourceSpan span, StringView code, StringView message, StringView explanation,
+                   StringView fix) noexcept;
+
 // 진단 하나를 8.1절 형식으로 out에 붙인다. 원문 줄은 제어 문자를 공백으로, 잘못된 UTF-8 byte를
 // U+FFFD로 바꿔 보인다(출력은 항상 UTF-8이다).
 // 실패: out의 할당 실패. 실패하면 out에 일부가 남을 수 있다(호출자가 버린다).
