@@ -2,10 +2,11 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 /// <summary>
-/// Shader compile management module (main process) (Docs/Design/ShaderSystem.ko.md sections 3 and 12.1). For now it only has P6a format definition
-/// (<c>Engine/Config/ShaderFormats/&lt;id&gt;.json</c>) and engine compile profile (<c>Engine-&lt;host&gt;.json</c>) reading, validation and SHA-256.
-/// The preprocessor (decision 6), job keys (P5) and worker communication (SH1) are added to this module. It checks the tool names of format definitions
-/// against the tool table (ShaderToolTable) but never opens tool binaries (policy check shader-tool-binary-load).
+/// Shader compile management module (main process) (Docs/Design/ShaderSystem.ko.md sections 3, 10 and 11.1). It holds the shader source tree and the
+/// preprocessor (SC2, SC3), preprocess define assembly (SC10), compile options (SC9), job keys and the shader nugget record values and location (P5),
+/// and grows the compile manager and worker pool (SH1). Format definitions come from ShaderCompilerCommon. AssetNugget: key writer and the nugget
+/// cache. HostConfig: the engine folder used as the nugget root without a project. It checks tool names against the tool table (ShaderToolTable)
+/// but never opens tool binaries (policy check shader-tool-binary-load).
 /// </summary>
 public sealed class ShaderCompiler : EngineModuleRules
 {
@@ -16,5 +17,5 @@ public sealed class ShaderCompiler : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["ShaderToolTable", "PlatformBase", "Core"];
+    protected override string[] PublicDependencies => ["ShaderCompilerCommon", "AssetNugget", "HostConfig", "PlatformBase", "Core"];
 }

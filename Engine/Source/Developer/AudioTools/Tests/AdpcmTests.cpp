@@ -180,7 +180,7 @@ TEST(Audio_Adpcm_DecodeMatchesReference) {
         for (uint32 frame = 0; frame < BlockFrames; ++frame) {
             smooth = round % 2 == 0 ? 0.95f * smooth + 0.05f * random.NextFloatInRange(-1.0f, 1.0f)
                                     : random.NextFloatInRange(-1.0f, 1.0f);
-            signal[frame] = AdpcmQuantize(amplitude * smooth);
+            signal[frame] = QuantizePcm16(amplitude * smooth);
         }
 
         (void)ReferenceEncode(signal, BlockFrames, round % AdpcmCoefficientSets, block);
@@ -216,14 +216,14 @@ TEST(Audio_Adpcm_DecodeMatchesReference) {
 }
 
 TEST(Audio_Adpcm_QuantizeRoundsHalfToEven) {
-    CHECK(AdpcmQuantize(0.0f) == 0);
-    CHECK(AdpcmQuantize(0.5f / SampleScale) == 0);
-    CHECK(AdpcmQuantize(1.5f / SampleScale) == 2);
-    CHECK(AdpcmQuantize(2.5f / SampleScale) == 2);
-    CHECK(AdpcmQuantize(-1.5f / SampleScale) == -2);
-    CHECK(AdpcmQuantize(1.0f) == SampleHigh && AdpcmQuantize(-1.0f) == SampleLow &&
-          AdpcmQuantize(4.0f) == SampleHigh);
-    CHECK(AdpcmQuantize(PlatformMath::QuietNaN<float>()) == 0);
+    CHECK(QuantizePcm16(0.0f) == 0);
+    CHECK(QuantizePcm16(0.5f / SampleScale) == 0);
+    CHECK(QuantizePcm16(1.5f / SampleScale) == 2);
+    CHECK(QuantizePcm16(2.5f / SampleScale) == 2);
+    CHECK(QuantizePcm16(-1.5f / SampleScale) == -2);
+    CHECK(QuantizePcm16(1.0f) == SampleHigh && QuantizePcm16(-1.0f) == SampleLow &&
+          QuantizePcm16(4.0f) == SampleHigh);
+    CHECK(QuantizePcm16(PlatformMath::QuietNaN<float>()) == 0);
 }
 
 TEST(Audio_Adpcm_EncoderMatchesReferenceBytes) {
@@ -251,7 +251,7 @@ TEST(Audio_Adpcm_EncoderMatchesReferenceBytes) {
             const uint32 valid = Frames - first < BlockFrames ? Frames - first : BlockFrames;
             for (uint32 index = 0; index < BlockFrames; ++index) {
                 samples[index] =
-                    index < valid ? AdpcmQuantize(input.Channel(channel)[first + index]) : int16{0};
+                    index < valid ? QuantizePcm16(input.Channel(channel)[first + index]) : int16{0};
             }
 
             ReferenceBestBlock(samples, valid, expected);
@@ -263,8 +263,8 @@ TEST(Audio_Adpcm_EncoderMatchesReferenceBytes) {
     }
 
     // 머리 byte: +3·+4 = 두 번째 표본, +5·+6 = 첫 표본(0이 아닌 입력으로 직접 확인).
-    const int16 firstSample = AdpcmQuantize(input.Channel(0)[0]);
-    const int16 secondSample = AdpcmQuantize(input.Channel(0)[1]);
+    const int16 firstSample = QuantizePcm16(input.Channel(0)[0]);
+    const int16 secondSample = QuantizePcm16(input.Channel(0)[1]);
     CHECK(firstSample != 0 && secondSample != 0);
     CHECK(static_cast<int16>(payload[3] | (payload[4] << 8)) == secondSample);
     CHECK(static_cast<int16>(payload[5] | (payload[6] << 8)) == firstSample);
@@ -286,7 +286,7 @@ TEST(Audio_Adpcm_EncoderMatchesReferenceBytes) {
         for (uint32 frame = 0; frame < BlockFrames; ++frame) {
             smooth = 0.9f * smooth + 0.1f * random.NextFloatInRange(-0.9f, 0.9f);
             samples[frame] =
-                AdpcmQuantize(round % 2 == 0 ? smooth : random.NextFloatInRange(-0.3f, 0.3f));
+                QuantizePcm16(round % 2 == 0 ? smooth : random.NextFloatInRange(-0.3f, 0.3f));
         }
 
         uint8 scratch[BlockBytes];
@@ -331,7 +331,7 @@ TEST(Audio_Adpcm_RandomAccessMatchesFullDecode) {
         REQUIRE(DecodeAdpcmFrames(Span<const uint8>(encoded.Data(), encoded.Size()), 1, frames, 0,
                                   back.View()));
         CHECK(back.Channel(0)[0] ==
-              static_cast<float>(AdpcmQuantize(small.Channel(0)[0])) / SampleScale);
+              static_cast<float>(QuantizePcm16(small.Channel(0)[0])) / SampleScale);
     }
 }
 

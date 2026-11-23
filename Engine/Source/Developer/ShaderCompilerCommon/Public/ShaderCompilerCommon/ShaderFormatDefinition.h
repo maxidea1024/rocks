@@ -226,7 +226,7 @@ struct ShaderFormatProducer {
 };
 
 // 형식 정의 하나다. 값 형식이며 도구 표 항목(정적 수명)만 가리킨다.
-struct ROCKS_SHADERCOMPILER_API ShaderFormatDefinition {
+struct ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatDefinition {
     char id[MaxShaderFormatIdBytes] = {};
     ShaderFormatState state = ShaderFormatState::Placeholder;
     ShaderBackend backend = ShaderBackend::D3D12;
@@ -314,7 +314,8 @@ enum class ShaderFormatErrorCode : uint8 {
 };
 
 // 진단용 열거자 이름이다(정적 수명).
-ROCKS_SHADERCOMPILER_API const char* ShaderFormatErrorName(ShaderFormatErrorCode code) noexcept;
+ROCKS_SHADERCOMPILERCOMMON_API const char*
+ShaderFormatErrorName(ShaderFormatErrorCode code) noexcept;
 
 // 읽기·검증 결과다. path는 오류 위치(예: "compiler.esslVersion", "formats[2]", 읽기 실패면 파일
 // 경로)이고, line은 JSON 위치(1부터, 모르면 0)다.
@@ -331,27 +332,27 @@ struct [[nodiscard]] ShaderFormatStatus {
 // 형식 정의 파일 byte를 읽고 검증한다. expectedId는 파일 이름에서 얻은 id(빈 값이면 검사하지
 // 않는다), tools는 도구 이름을 찾는 표다(기본은 생성 도구 표). 성공하면 out.sha256 =
 // SHA-256(bytes)다. 실패하면 out은 정해지지 않은 상태다.
-ROCKS_SHADERCOMPILER_API ShaderFormatStatus ParseShaderFormatDefinition(
+ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus ParseShaderFormatDefinition(
     Span<const uint8> bytes, StringView expectedId, ShaderFormatDefinition& out,
     Span<const ShaderTool> tools = ShaderTools()) noexcept;
 
 // directory(UTF-8, NUL 종료)/<id>.json을 읽어 ParseShaderFormatDefinition한다.
-ROCKS_SHADERCOMPILER_API ShaderFormatStatus LoadShaderFormatDefinition(
+ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus LoadShaderFormatDefinition(
     const char* directory, StringView id, ShaderFormatDefinition& out) noexcept;
 
 // 엔진 컴파일 프로필 파일 byte를 읽는다({schema, id, host, formats}). 형식 이름의 중복은 오류다.
-ROCKS_SHADERCOMPILER_API ShaderFormatStatus ParseEngineCompileProfile(
+ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus ParseEngineCompileProfile(
     Span<const uint8> bytes, StringView expectedId, EngineCompileProfileDesc& out) noexcept;
 
 // desc의 형식을 definitions에서 찾아 out을 채운다. 없으면 UnknownFormat, 자리만 둔 형식이면
 // PlaceholderFormat, 프로필 호스트가 생산 호스트가 아니면 HostCannotProduce다.
-ROCKS_SHADERCOMPILER_API ShaderFormatStatus ResolveEngineCompileProfile(
+ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus ResolveEngineCompileProfile(
     const EngineCompileProfileDesc& desc, Span<const ShaderFormatDefinition> definitions,
     EngineCompileProfile& out) noexcept;
 
 // directory/<profileId>.json과 그 프로필이 가리키는 형식 정의 파일들을 읽고 검증한다. 형식 정의
 // 파일이 없으면 UnknownFormat(path에 형식 id)이다.
-ROCKS_SHADERCOMPILER_API ShaderFormatStatus LoadEngineCompileProfile(
+ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus LoadEngineCompileProfile(
     const char* directory, StringView profileId, EngineCompileProfile& out) noexcept;
 
 // 어휘 이름 조회다(진단·시험용, 정적 수명). 범위 밖이면 "unknown".
@@ -360,6 +361,6 @@ const char* ShaderHostName(ShaderHost host) noexcept;
 
 // ROCKS_IMAGE_FORMAT 형식 이름(DXC [[vk::image_format]] 철자)의 색인이다. 없으면 IndexNone.
 // unsupportedImageFormats의 비트 번호다.
-ROCKS_SHADERCOMPILER_API usize ImageFormatIndex(StringView name) noexcept;
+ROCKS_SHADERCOMPILERCOMMON_API usize ImageFormatIndex(StringView name) noexcept;
 
 } // namespace rocks::shader

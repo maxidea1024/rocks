@@ -1,6 +1,5 @@
 #include <AssetCooker/CookTargets.h>
 #include <AssetDatabase/LogicalPath.h>
-#include <AssetRuntime/PackageReader.h>
 #include <Core/Algorithms.h>
 #include <Core/Containers/HashSet.h>
 #include <Object/TypeRegistry.h>
@@ -497,27 +496,7 @@ private:
                    [](AssetId left, AssetId right) noexcept { return AssetIdLess(left, right); });
         algo::Sort(out_.removed.View(),
                    [](AssetId left, AssetId right) noexcept { return AssetIdLess(left, right); });
-        algo::Sort(out_.diagnostics.View(),
-                   [](const CookDiagnostic& left, const CookDiagnostic& right) noexcept {
-                       if (!(left.asset == right.asset)) {
-                           return AssetIdLess(left.asset, right.asset);
-                       }
-
-                       if (left.code != right.code) {
-                           return left.code < right.code;
-                       }
-
-                       if (!(left.related == right.related)) {
-                           return AssetIdLess(left.related, right.related);
-                       }
-
-                       if (left.setting != right.setting) {
-                           return left.setting < right.setting;
-                       }
-
-                       // 같은 칸에 수준만 다른 진단(같은 의존의 Hard·Soft 누락)은 오류가 먼저다.
-                       return !left.warning && right.warning;
-                   });
+        algo::Sort(out_.diagnostics.View(), CookDiagnosticBefore);
         return Result<void>::Success();
     }
 

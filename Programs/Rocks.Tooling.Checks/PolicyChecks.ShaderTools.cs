@@ -6,21 +6,33 @@ namespace Rocks.Tooling.Checks;
 // 셰이더 도구 참조 정책이다(Docs/Design/ShaderSystem.ko.md 9절 정책 검사). 도구 표 참조와 binary 로드를 따로 본다.
 public static partial class PolicyChecks
 {
-    // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 워커와 그 안의
-    // 형식 모듈, 워커 자리 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다), SH0 도구 스파이크
-    // (Programs/ShaderToolSpike, 워커가 생기기 전에 도구를 직접 여는 측정 프로그램).
+    // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 두 프로세스 공용
+    // 모듈(ShaderCompilerCommon — 형식 정의가 도구 이름을 표와 대조한다), 워커(프로그램과 본체 모듈 ShaderWorker)와 그 안의 형식 모듈,
+    // 워커 자리 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다), SH0 도구 스파이크(Programs/ShaderToolSpike,
+    // 워커가 생기기 전에 도구를 직접 여는 측정 프로그램).
     private static readonly string[] ShaderToolTableUsers =
     [
-        "Engine/Source/Developer/ShaderToolTable/", "Engine/Source/Developer/ShaderCompiler/", "Engine/Source/Developer/ShaderToolLoader/",
-        "Programs/ShaderCompileWorker/", "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
+        "Engine/Source/Developer/ShaderToolTable/", "Engine/Source/Developer/ShaderCompiler/", "Engine/Source/Developer/ShaderCompilerCommon/",
+        "Engine/Source/Developer/ShaderWorker/", "Engine/Source/Developer/ShaderToolLoader/", "Programs/ShaderCompileWorker/",
+        "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
     ];
 
-    // 도구 binary를 열어도 되는 곳이다: 워커와 그 안의 형식 모듈, 워커 자리 모듈, 시험 runner, SH0 도구 스파이크. 메인
-    // 프로세스(ShaderCompiler)는 도구 표만 쓰고 binary를 열지 않는다.
+    // 도구 binary를 열어도 되는 곳이다: 워커(프로그램과 그 본체 모듈 ShaderWorker)와 그 안의 형식 모듈, 워커 자리 모듈, 시험 runner, SH0
+    // 도구 스파이크. 메인 프로세스(ShaderCompiler)는 도구 표만 쓰고 binary를 열지 않는다.
     private static readonly string[] ShaderToolLoadUsers =
     [
-        "Engine/Source/Developer/ShaderToolLoader/", "Programs/ShaderCompileWorker/", "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
+        "Engine/Source/Developer/ShaderToolLoader/", "Engine/Source/Developer/ShaderWorker/", "Programs/ShaderCompileWorker/",
+        "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
     ];
+
+    // 워커 쪽(워커 프로그램·본체 모듈·형식 모듈)이다. 메인 프로세스 전용 모듈(ShaderCompiler — 소스 트리·키·관리자)과 에셋 너겟에 닿으면
+    // 안 된다(Docs/Design/ShaderSystem.ko.md 11절 8항·11.1절 SC1: 워커는 너겟을 읽거나 쓰지 않는다).
+    private static readonly string[] ShaderWorkerSides = ["Engine/Source/Developer/ShaderWorker/", "Programs/ShaderCompileWorker/"];
+
+    // 워커 쪽이 참조하면 안 되는 모듈이다(규칙 이름 문자열·include 폴더).
+    private static readonly string[] ShaderWorkerForbiddenModules = ["ShaderCompiler", "AssetNugget"];
+
+    private static readonly Regex ShaderWorkerForbiddenInclude = Pattern("#\\s*include\\s*[<\"](?:ShaderCompiler|AssetNugget)/");
 
     // DynamicLibrary::Open(절대 경로 열기)을 불러도 되는 곳이다: 도구 로드 허용 위치와 API 구현·시험(PlatformBase·TestSupport), 모듈
     // 로더의 Modular manifest 적재(Docs/Design/ModuleLoader.ko.md 3.13절 — 엔진 모듈 공유 라이브러리를 manifest 폴더의 절대 경로로 연다).
@@ -51,6 +63,8 @@ public static partial class PolicyChecks
     private static bool MayUseShaderToolTable(string relative) => UnderAny(relative, ShaderToolTableUsers) || IsShaderFormatModule(relative);
 
     private static bool MayLoadShaderTools(string relative) => UnderAny(relative, ShaderToolLoadUsers) || IsShaderFormatModule(relative);
+
+    private static bool IsShaderWorkerSide(string relative) => UnderAny(relative, ShaderWorkerSides) || IsShaderFormatModule(relative);
 
     private static bool MayOpenDynamicLibraryPath(string relative) =>
         UnderAny(relative, DynamicLibraryOpenUsers) || IsShaderFormatModule(relative);
@@ -101,6 +115,10 @@ public static partial class PolicyChecks
     /// 그 밖의 규칙이 ShaderToolLoader나 binary 라이브러리(<paramref name="binaryLibraries"/>, 예: DirectXShaderCompiler)를 이름으로
     /// 참조, 그 밖의 소스가 <c>&lt;ShaderToolLoader/...&gt;</c>나 binary 공개 헤더(<paramref name="binaryHeaders"/>, 예: dxc/dxcapi.h)를
     /// include, DynamicLibrary를 쓰는 소스의 절대 경로 <c>Open(</c> 호출(PlatformBase·TestSupport·모듈 로더 manifest 적재 제외, OS 라이브러리는 OpenSystem).</item>
+    /// <item><c>shader-worker-isolation</c>: 워커 쪽(Programs/ShaderCompileWorker·Developer/ShaderWorker·Developer/ShaderFormat*)은 메인 프로세스
+    /// 전용 모듈 ShaderCompiler와 AssetNugget을 규칙에서 이름으로 참조하거나 그 헤더(<c>&lt;ShaderCompiler/...&gt;</c>·
+    /// <c>&lt;AssetNugget/...&gt;</c>)를 include하지 않는다(11절 8항 — 워커는 너겟을 읽거나 쓰지 않는다, 11.1절 SC1). 공용 모듈
+    /// ShaderCompilerCommon은 허용한다.</item>
     /// </list>
     /// 주석은 보지 않는다. 문자열 리터럴은 보므로(의존 목록) 규칙의 설명 문자열에 모듈 이름을 따옴표로 쓰지 않는다.
     /// </summary>
@@ -119,6 +137,19 @@ public static partial class PolicyChecks
             {
                 failures.Add(new(relative, LineOf(text, "\"ShaderToolTable\""), "shader-tool-table",
                     "only Developer/ShaderCompiler, the shader compile worker and Developer/ShaderFormat* modules may depend on ShaderToolTable"));
+            }
+
+            if (IsShaderWorkerSide(relative))
+            {
+                foreach (string name in ShaderWorkerForbiddenModules)
+                {
+                    string literal = "\"" + name + "\"";
+                    if (text.Contains(literal, StringComparison.Ordinal))
+                    {
+                        failures.Add(new(relative, LineOf(text, literal), "shader-worker-isolation",
+                            $"the shader compile worker and Developer/ShaderFormat* modules must not depend on {name} (main process only)"));
+                    }
+                }
             }
 
             if (MayLoadShaderTools(relative))
@@ -153,6 +184,13 @@ public static partial class PolicyChecks
                     "only the shader compile worker and Developer/ShaderFormat* modules may open shader tool binaries", failures);
                 AddMatches(relative, text, binaryInclude, "shader-tool-binary-load",
                     "only the shader compile worker and Developer/ShaderFormat* modules may include tool binary headers", failures);
+            }
+
+            if (IsShaderWorkerSide(relative))
+            {
+                AddMatches(relative, text, ShaderWorkerForbiddenInclude, "shader-worker-isolation",
+                    "the shader compile worker and Developer/ShaderFormat* modules must not include main process shader compiler or asset nugget headers",
+                    failures);
             }
 
             string code = WithoutCommentsAndLiterals(text);

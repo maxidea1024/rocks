@@ -1,6 +1,7 @@
 #include "AssetLoaderInternal.h"
+#include <Core/Graph/StrongComponents.h>
 
-// 로더 초기화·단위 표·ResolveManifest(Hard 폐포·Tarjan SCC)·요청이다(11.6절 1·2).
+// 로더 초기화·단위 표·ResolveManifest(Hard 폐포·SCC — Core 공용 Tarjan)·요청이다(11.6절 1·2).
 namespace rocks {
 
 uint64 AssetLoader::Impl::Now() const noexcept {
@@ -113,9 +114,7 @@ Result<void> AssetLoader::Impl::Initialize(AssetDiagnostic* failure) noexcept {
     LoaderKeepFirst(sized, entryUnit.TryResize(count));
     LoaderKeepFirst(sized, entryLoaded.TryResize(count));
     LoaderKeepFirst(sized, publishedHolds.TryResize(count));
-    LoaderKeepFirst(sized, tarjanIndex.TryResize(count));
-    LoaderKeepFirst(sized, tarjanLow.TryResize(count));
-    LoaderKeepFirst(sized, tarjanOnStack.TryResize(count));
+    LoaderKeepFirst(sized, componentIndex.TryResize(count));
     if (sized != ErrorCode::None) {
         return resource(Result<void>::Failure(sized));
     }
@@ -124,7 +123,7 @@ Result<void> AssetLoader::Impl::Initialize(AssetDiagnostic* failure) noexcept {
         entryUnit[index] = LoaderNoIndex;
         entryLoaded[index] = LoaderNoIndex;
         publishedHolds[index] = 0;
-        tarjanIndex[index] = LoaderNoIndex;
+        componentIndex[index] = LoaderNoIndex;
     }
 
     return resource(BuildPathIndex());
@@ -191,15 +190,14 @@ void AssetLoader::Impl::RemoveValue(Array<uint32>& values, uint32 value) noexcep
     }
 }
 
-void AssetLoader::Impl::ResetTarjan() noexcept {
-    for (uint32 entry : tarjanVisited) {
-        tarjanIndex[entry] = LoaderNoIndex;
-        tarjanOnStack[entry] = 0;
+void AssetLoader::Impl::ResetComponents() noexcept {
+    for (uint32 entry : componentEntries) {
+        componentIndex[entry] = LoaderNoIndex;
     }
 
-    tarjanVisited.Clear();
-    tarjanFrames.Clear();
-    tarjanStack.Clear();
+    componentEntries.Clear();
+    componentFirst.Clear();
+    componentTargets.Clear();
 }
 
 uint32 AssetLoader::Impl::HardTarget(uint32 entry, uint32 position) const noexcept {
@@ -217,93 +215,66 @@ bool AssetLoader::Impl::IsNew(uint32 entry) const noexcept {
     return entryLoaded[entry] == LoaderNoIndex && entryUnit[entry] == LoaderNoIndex;
 }
 
-Result<void> AssetLoader::Impl::Visit(uint32 entry, uint32& counter) noexcept {
-    if (auto pushed = tarjanVisited.TryPushBack(entry); !pushed) {
-        return pushed;
-    }
-
-    if (auto pushed = tarjanFrames.TryPushBack(LoaderTarjanFrame{entry, 0}); !pushed) {
-        (void)tarjanVisited.TryPopBack();
-        return pushed;
-    }
-
-    if (auto pushed = tarjanStack.TryPushBack(entry); !pushed) {
-        return pushed;
-    }
-
-    tarjanIndex[entry] = counter;
-    tarjanLow[entry] = counter;
-    tarjanOnStack[entry] = 1;
-    ++counter;
-    return Result<void>::Success();
-}
-
 Result<void> AssetLoader::Impl::FindComponents(uint32 rootEntry) noexcept {
     sccMembers.Clear();
     sccStarts.Clear();
-    uint32 counter = 0;
-    if (auto visited = Visit(rootEntry, counter); !visited) {
-        return visited;
+    // root에서 닿는 새 항목을 모으며 지역 그래프를 만든다(root = 지역 0, 간선은 의존 순서 그대로 —
+    // 공용 SCC가 root부터 같은 순서로 깊이 우선 탐색해 의존 먼저 알린다).
+    if (auto pushed = componentEntries.TryPushBack(rootEntry); !pushed) {
+        return pushed;
     }
 
-    while (!tarjanFrames.IsEmpty()) {
-        LoaderTarjanFrame& frame = tarjanFrames[tarjanFrames.Size() - 1];
-        const uint32 entry = frame.entry;
+    componentIndex[rootEntry] = 0;
+    // CSR 시작 칸이다(항목마다 끝 칸을 하나씩 더한다).
+    if (auto pushed = componentFirst.TryPushBack(0); !pushed) {
+        return pushed;
+    }
+
+    for (usize at = 0; at < componentEntries.Size(); ++at) {
+        const uint32 entry = componentEntries[at];
+
         const auto count = static_cast<uint32>(config.manifest->entries[entry].dependencies.Size());
-        bool descended = false;
-        while (frame.position < count) {
-            const uint32 target = HardTarget(entry, frame.position);
-            ++frame.position;
+        for (uint32 position = 0; position < count; ++position) {
+            const uint32 target = HardTarget(entry, position);
             if (target == LoaderNoIndex || !IsNew(target)) {
                 continue;
             }
 
-            if (tarjanIndex[target] == LoaderNoIndex) {
-                if (auto visited = Visit(target, counter); !visited) {
-                    return visited;
+            if (componentIndex[target] == LoaderNoIndex) {
+                if (auto pushed = componentEntries.TryPushBack(target); !pushed) {
+                    return pushed;
                 }
 
-                descended = true;
-                break;
+                componentIndex[target] = static_cast<uint32>(componentEntries.Size() - 1);
             }
 
-            if (tarjanOnStack[target] != 0 && tarjanIndex[target] < tarjanLow[entry]) {
-                tarjanLow[entry] = tarjanIndex[target];
-            }
-        }
-
-        if (descended) {
-            continue;
-        }
-
-        (void)tarjanFrames.TryPopBack();
-        if (!tarjanFrames.IsEmpty()) {
-            const uint32 parent = tarjanFrames[tarjanFrames.Size() - 1].entry;
-            if (tarjanLow[entry] < tarjanLow[parent]) {
-                tarjanLow[parent] = tarjanLow[entry];
-            }
-        }
-
-        if (tarjanLow[entry] != tarjanIndex[entry]) {
-            continue;
-        }
-
-        if (auto pushed = sccStarts.TryPushBack(static_cast<uint32>(sccMembers.Size())); !pushed) {
-            return pushed;
-        }
-
-        uint32 member = LoaderNoIndex;
-        do {
-            member = tarjanStack[tarjanStack.Size() - 1];
-            (void)tarjanStack.TryPopBack();
-            tarjanOnStack[member] = 0;
-            if (auto pushed = sccMembers.TryPushBack(member); !pushed) {
+            if (auto pushed = componentTargets.TryPushBack(componentIndex[target]); !pushed) {
                 return pushed;
             }
-        } while (member != entry);
+        }
+
+        if (auto pushed = componentFirst.TryPushBack(static_cast<uint32>(componentTargets.Size()));
+            !pushed) {
+            return pushed;
+        }
     }
 
-    return Result<void>::Success();
+    return algo::ForEachStrongComponent(
+        allocator, static_cast<uint32>(componentEntries.Size()), componentFirst.View(),
+        componentTargets.View(), [&](Span<const uint32> members, bool) noexcept -> Result<void> {
+            if (auto pushed = sccStarts.TryPushBack(static_cast<uint32>(sccMembers.Size()));
+                !pushed) {
+                return pushed;
+            }
+
+            for (uint32 member : members) {
+                if (auto pushed = sccMembers.TryPushBack(componentEntries[member]); !pushed) {
+                    return pushed;
+                }
+            }
+
+            return Result<void>::Success();
+        });
 }
 
 void AssetLoader::Impl::DiscardNewUnits() noexcept {
@@ -316,7 +287,7 @@ void AssetLoader::Impl::DiscardNewUnits() noexcept {
 
 Result<uint32> AssetLoader::Impl::Resolve(uint32 rootEntry) noexcept {
     auto fail = [this](ErrorCode error) noexcept {
-        ResetTarjan();
+        ResetComponents();
         DiscardNewUnits();
         return Result<uint32>::Failure(error);
     };
@@ -459,7 +430,7 @@ Result<uint32> AssetLoader::Impl::Resolve(uint32 rootEntry) noexcept {
     }
 
     const uint32 target = entryUnit[rootEntry];
-    ResetTarjan();
+    ResetComponents();
     newUnits.Clear();
     return Result<uint32>::Success(target);
 }

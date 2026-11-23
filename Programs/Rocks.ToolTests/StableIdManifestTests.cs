@@ -4,8 +4,20 @@ namespace Rocks.ToolTests;
 
 internal static class StableIdManifestTests
 {
-    public static void Register(TestSuite suite)
+    public static void Register(TestSuite suite, Options options)
     {
+        // `sparks ids`(C++ SparksTools)와 같은 정규형: Sparks 도구 시험의 golden을 읽어 다시 쓰면 byte가 같다(항목은 kind·name ordinal
+        // 순, aliases ordinal 순, 들여쓰기 2칸·LF — Docs/Design/SparksTools.ko.md 7.2절). C++ 시험은 같은 golden을 `sparks ids` 출력과
+        // 비교한다.
+        suite.Add("StableIds.SerializationMatchesSparksIds", () =>
+        {
+            string golden = Path.Combine(options.Root, "Engine", "Source", "Developer", "SparksTools", "Tests", "Data", "IdsGolden.rocksids.json");
+            byte[] expected = File.ReadAllBytes(golden);
+            StableIdManifest manifest = StableIdManifest.Load(golden);
+            Verify.That(manifest.Serialize().AsSpan().SequenceEqual(expected), "the Sparks golden manifest is the canonical C# serialization");
+            Verify.That(manifest.Resolve("type", "Game/Doors/Door.Door") == "00000000000000000000000000000001", "renamed type keeps its ID");
+        });
+
         // ids reissue(Docs/Design/ProjectFiles.ko.md 11.4절): 활성 항목은 새 ID, aliases는 비우고, 은퇴 항목은 지운다. Sparks kind(경로 이름의
         // 멤버)도 같은 규칙이다.
         suite.Add("StableIds.ReissueForNewProject", () =>

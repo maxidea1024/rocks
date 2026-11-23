@@ -289,7 +289,7 @@ TEST(SparksCodegen_FunctionTooLargeS1150) {
     REQUIRE(fixture.diagnostics.Count() == 1);
     const Diagnostic& diagnostic = fixture.diagnostics[0];
     CHECK(diagnostic.Code() == DiagnosticCode::FunctionTooLarge);
-    const SourceLocation at =
+    const sparks::SourceLocation at =
         fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
     CHECK(at.line == 1);
     CHECK(at.column == 4);

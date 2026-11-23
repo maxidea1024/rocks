@@ -1,4 +1,4 @@
-#include <ShaderCompiler/ShaderFormatDefinition.h>
+#include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>

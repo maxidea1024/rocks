@@ -16,13 +16,14 @@ public sealed class AudioTools : EngineModuleRules
     protected override string[] PublicDependencies => ["Core", "Audio"];
 
     // Source decoders from Engine/Source/ThirdParty (sections 3.26-3.29): minimp3 for MP3, libFLAC for FLAC, libvorbis for Ogg Vorbis,
-    // opusfile and libopus for Ogg Opus, libogg for both Ogg formats. Their headers stay private to this module. The Ogg users come
+    // opusfile and libopus for Ogg Opus, libogg for both Ogg formats, and libsamplerate for the cook-time resampler (section 3.31).
+    // Their headers stay private to this module. The Ogg users come
     // before Ogg (and OpusFile before Opus) so that a left-to-right static linker resolves their references.
-    protected override string[] PrivateDependencies => ["Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg"];
+    protected override string[] PrivateDependencies => ["Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg", "SampleRate"];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg");
+        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg", "SampleRate");
 
     protected override IReadOnlyList<string> PrivateDefines(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerDefines(context, "Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg");
+        ThirdPartyModuleRules.ConsumerDefines(context, "Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg", "SampleRate");
 }
