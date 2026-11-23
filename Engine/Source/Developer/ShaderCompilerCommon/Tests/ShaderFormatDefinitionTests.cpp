@@ -11,7 +11,7 @@ namespace shader_format_definition_tests_file {
 
 using namespace rocks::shader;
 
-// 셰이더 형식 정의·엔진 컴파일 프로필(Docs/Design/ShaderSystem.ko.md 12.1절, P6a)의 저장소 파일과
+// 셰이더 형식 정의·엔진 컴파일 프로필(Docs/Design/ShaderSystem 12.1절, P6a)의 저장소 파일과
 // 스키마 검증 시험이다. 시험은 저장소 루트에서 돈다(Engine/Config/ShaderFormats). 음성 대조는
 // 저장소 파일 byte에서 한 군데만 바꾼 입력으로 만든다.
 namespace {

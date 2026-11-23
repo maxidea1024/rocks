@@ -9,7 +9,7 @@
 #include <Platform/DynamicLibrary.h>
 #include <ShaderToolTable/ShaderToolTable.h>
 
-// 셰이더 도구 열기 계층이다(Docs/Design/ShaderSystem.ko.md 9절). 사용자 단위 저장소(bootstrap이
+// 셰이더 도구 열기 계층이다(Docs/Design/ShaderSystem 9절). 사용자 단위 저장소(bootstrap이
 // 채우는 내용 주소 저장소, Rocks.Tooling.Common ThirdPartyStore)의 도구 파일을 도구 표
 // (ShaderToolTable)와 대조한 뒤 P10 DynamicLibrary::Open으로 절대 경로에서 열고 함수 표를 얻는다.
 // UE 5.8이 DXC·FXC를 전체 경로로 여는
@@ -382,7 +382,7 @@ struct DxcCompileResult {
     bool compiled = false;
 };
 
-// DXC(IDxcCompiler3::Compile)로 request를 컴파일한다. 측정 S7(Docs/Design/ShaderSystem.ko.md 11.1절
+// DXC(IDxcCompiler3::Compile)로 request를 컴파일한다. 측정 S7(Docs/Design/ShaderSystem 11.1절
 // SC3 — Rocks 전처리 결과와 DXC 직접 전처리의 DXIL 대조)과 형식 모듈이 쓴다. 결과는 먼저 비운다.
 // 반환: DXC가 돌았으면 Success(컴파일 오류는 result.compiled로 본다), 함수 표가 비었으면
 // WrongState, 인자가 UTF-8이 아니면 InvalidArgument, COM 호출 실패는 CallFailed(file.nativeError에

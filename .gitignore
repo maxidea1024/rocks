@@ -3,7 +3,7 @@
 /Build/Cache/
 /Binaries/
 /Intermediate/
-# Engine-only asset nuggets (engine shaders without a project — Docs/Design/ShaderSystem.ko.md section 10)
+# Engine-only asset nuggets (engine shaders without a project — Docs/Design/ShaderSystem section 10)
 /Engine/Intermediate/
 /Saved/
 /out/

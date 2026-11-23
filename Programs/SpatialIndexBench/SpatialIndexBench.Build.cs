@@ -10,6 +10,7 @@ public sealed class SpatialIndexBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "SpatialIndexBench",
+        ModuleDirectory = "Programs/SpatialIndexBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/SpatialIndexBench/Private"),
         PublicDependencies = ["Launch", "SpatialIndex", "Task"]

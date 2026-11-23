@@ -17,6 +17,7 @@ public sealed class SandboxProgram : ModuleRules
         return new()
         {
             Name = "Sandbox",
+            ModuleDirectory = "Programs/Sandbox",
             Kind = NativeModuleKind.Executable,
             Sources = context.Sources("Programs/Sandbox/Private"),
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],

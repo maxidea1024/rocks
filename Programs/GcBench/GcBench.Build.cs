@@ -9,6 +9,7 @@ public sealed class GcBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "GcBench",
+        ModuleDirectory = "Programs/GcBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/GcBench/Private"),
         PublicDependencies = ["Launch", "ObjectRuntime", "GcSoak"]

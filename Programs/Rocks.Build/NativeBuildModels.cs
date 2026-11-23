@@ -225,6 +225,20 @@ public sealed record NativeToolchain
 /// </summary>
 public sealed record ModulePlugin(string Name, string Directory);
 
+/// <summary>
+/// 소스 묶음이다(Docs/Design/BuildTargets 3.5절 BS1b, BD22 개정). <paramref name="Directory"/>(루트 기준 또는 절대 경로) 아래 소스는 include 소유
+/// 검사(BD11)에서 대상 모듈 <paramref name="Target"/>의 세 영역, T의 컴파일 환경에 보이는 모듈의 공개·시험 영역, 추가 모듈
+/// <paramref name="Modules"/>의 시험 영역과 그 공개 환경의 공개 영역, <paramref name="Internals"/>의 비공개 영역(시험 접근 헤더 — 명시한
+/// 것만), 그리고 묶음을 가진 모듈 자신을 본다. 컴파일 환경은 바꾸지 않는다(모듈 하나의 환경 그대로 — 유니티 묶음만 소스 묶음 경계를 넘지
+/// 않는다). 시험 실행 파일 규칙이 시험 대상 모듈마다 하나씩 만든다. 사용 예:
+/// <code>new SourceGroup("Engine/Source/Developer/AssetCooker/Tests", "AssetCooker", ["AssetTestFixtures"], ["AssetRuntime"])</code>
+/// </summary>
+public sealed record SourceGroup(string Directory, string Target, IReadOnlyList<string> Modules, IReadOnlyList<string>? Internals = null)
+{
+    /// <summary>비공개 영역이 보이는 모듈이다(없으면 빈 목록).</summary>
+    public IReadOnlyList<string> InternalModules => Internals ?? [];
+}
+
 /// <summary>입력 경로는 request.RootDirectory 기준이다. dependency의 public 설정만 전파한다.</summary>
 public sealed record NativeModuleInput
 {
@@ -313,6 +327,14 @@ public sealed record NativeModuleInput
     // 파일(TargetRules.Modules[0])에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). 의존이 아니므로 include·정의를 받지 않고, 링크 폐포 뒤에
     // 그 모듈과 링크 폐포를 링크하며 모듈 표에 보통 행(기술자 단계로 시작)으로 싣는다. 실행 파일만 가질 수 있다.
     public IReadOnlyList<string> PluginModules { get; init; } = [];
+
+    // 소스 묶음이다(SourceGroup — Docs/Design/BuildTargets 3.5절 BS1b). 비면 모든 소스가 이 모듈의 보임을 쓴다. 묶음 대상 모듈의 두 의존 목록은
+    // 규칙 로더가 이 모듈의 비공개 의존에 더한다(SourceGroups.WithTargetDependencies — 컴파일 환경은 묶음 대상 환경의 합집합이다).
+    public IReadOnlyList<SourceGroup> SourceGroups { get; init; } = [];
+
+    // 공개 헤더 검사 모듈이면 검사 대상 모듈 이름이다(Docs/Design/BuildTargets 3.5절 BS1a·BS1b). 빌드가 그 검사의 의존 기록으로 대상 모듈의
+    // 쓰지 않는 공개 의존을 알린다. 규칙은 채우지 않는다.
+    public string? PublicHeaderCheckOf { get; init; }
 
     // 이 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader.ko.md 3.15절 MD23). 기술자 모듈 처리(DescriptorModuleSet.Apply)가 플러그인
     // 모듈에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). Modular에서 그 공유 라이브러리와 플러그인 manifest의 폴더를 정한다
@@ -411,7 +433,7 @@ public sealed record NativeModuleInput
     // 작업 파일 분리(7.2절)로 묶음에서 빠진 번역 단위도 PCH를 쓰는가(기본 참).
     public bool AdaptivePch { get; init; } = true;
 
-    // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
+    // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem 9절 도구 표).
     // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
     // 모듈 소스로 컴파일한다. 내용은 호스트 경로를 담지 않아야 한다(도구 빌드 ID가 호스트 무관이다). 규칙은 이 목록을 매 실행 다시
     // 만들므로 입력 manifest가 바뀌면 다음 빌드에서 내용과 compile key가 함께 바뀐다.

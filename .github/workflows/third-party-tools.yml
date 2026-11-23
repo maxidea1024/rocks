@@ -1,5 +1,5 @@
 name: Third-party tools
-# Offline tool build of prebuilt binaries (manifest kind: binary) (Docs/Design/ShaderSystem.ko.md section 8, item 4).
+# Offline tool build of prebuilt binaries (manifest kind: binary) (Docs/Design/ShaderSystem section 8, item 4).
 # Runs manually only. For each library the scripts in Engine/Source/ThirdParty/<Lib>/Build/ produce Windows x64 and macOS arm64 archives, and
 # when publish is true they are uploaded as assets to the manifest's Release tag (third-party-<name>-<version>-r<revision>). After upload, each archive's
 # <asset>.host.json is copied into the manifest hosts and committed (bootstrap verifies that SHA-256).

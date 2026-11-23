@@ -19,7 +19,7 @@ namespace shader_preprocess_dxc_tests_file {
 
 using namespace rocks::shader;
 
-// 측정 S7(Docs/Design/ShaderSystem.ko.md 5.4절, 11.1절 SC3)이다. 같은 fixture 원문을
+// 측정 S7(Docs/Design/ShaderSystem 5.4절, 11.1절 SC3)이다. 같은 fixture 원문을
 // (가) Rocks 전처리 결과(PreprocessShader)로 DXC 컴파일하고,
 // (나) DXC가 원문을 직접 전처리해 컴파일한다(include handler가 같은 소스 트리의 가상 경로를 주고,
 //      SC10 정의를 -D로 같이 준다. 강제 include는 주 파일에서 Platform.rsh와 엔트리를 include해

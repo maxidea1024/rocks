@@ -8,6 +8,7 @@ public sealed class CryptoBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "CryptoBench",
+        ModuleDirectory = "Programs/CryptoBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/CryptoBench/Private"),
         PublicDependencies = ["Launch", "Crypto"]

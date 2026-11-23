@@ -20,7 +20,7 @@ public sealed record LoadedRuleSet(IReadOnlyList<NativeModuleInput> Modules, IRe
 
 /// <summary>
 /// 규칙 어셈블리(Rocks.Engine.Rules 또는 게임 규칙)를 읽어 모든 모듈 규칙을 한 문맥으로 평가한다. 빌드 CLI와 정책 검사(Release 배제,
-/// Docs/Design/ShaderSystem.ko.md 9절)가 같은 평가를 쓴다. 사용 예:
+/// Docs/Design/ShaderSystem 9절)가 같은 평가를 쓴다. 사용 예:
 /// <code>
 /// var rules = RuleLoader.Load(rulesPath, "Sandbox", context);          // 빌드
 /// var all = RuleLoader.LoadAll(rulesPath, context);                    // 정책 검사
@@ -145,13 +145,31 @@ public static class RuleLoader
                 "(TargetRules.Plugins).");
         }
 
+        // 공개 헤더 검사 표지는 빌드가 검사 모듈에만 채운다(Docs/Design/BuildTargets 3.5절 BS1b).
+        if (modules.FirstOrDefault(module => module.PublicHeaderCheckOf is not null) is { } checker)
+        {
+            throw new ArgumentException($"Module rule '{checker.Name}' sets PublicHeaderCheckOf; only the build's public header check modules set it.");
+        }
+
+        // include 소유 모듈 검사(BS1b)는 모듈 폴더로 소유를 정하므로 서드파티가 아니고 소스나 public include가 있는 모듈은 ModuleDirectory가
+        // 있어야 한다.
+        string[] homeless = [.. modules.Where(module => !module.ThirdParty && module.ModuleDirectory is null &&
+                (module.Sources.Count != 0 || module.PublicIncludeDirectories.Count != 0))
+            .Select(module => module.Name).Order(StringComparer.Ordinal)];
+        if (homeless.Length != 0)
+        {
+            throw new ArgumentException($"Module rules {string.Join(", ", homeless)} have no ModuleDirectory; set it to the module folder (relative to " +
+                "the root) so the include ownership check can tell which module owns its headers (Docs/Design/BuildTargets section 3.5 BS1b).");
+        }
+
         // 모듈의 플러그인(Docs/Design/ModuleLoader.ko.md 3.15절)은 빌드가 기술자에서 채운다.
         if (modules.FirstOrDefault(module => module.Plugin is not null) is { } owned)
         {
             throw new ArgumentException($"Module rule '{owned.Name}' sets Plugin; the build fills it from the plugin descriptor that declares the module.");
         }
 
-        return new(modules, targets) { Plugins = context.Plugins };
+        // 소스 묶음을 가진 모듈(시험 실행 파일)의 컴파일 환경은 묶음 대상 모듈 환경의 합집합이다(BS1b).
+        return new(SourceGroups.WithTargetDependencies(modules), targets) { Plugins = context.Plugins };
     }
 
     private static T Create<T>(Type type)

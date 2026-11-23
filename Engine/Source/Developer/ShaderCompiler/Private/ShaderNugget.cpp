@@ -3,7 +3,7 @@
 #include <Core/Containers/Span.h>
 #include <HostConfig/HostSettings.h>
 
-// 셰이더 Record 값 표와 너겟 위치(Docs/Design/ShaderSystem.ko.md 10절)다.
+// 셰이더 Record 값 표와 너겟 위치(Docs/Design/ShaderSystem 10절)다.
 namespace rocks::shader {
 
 namespace shader_nugget_detail {

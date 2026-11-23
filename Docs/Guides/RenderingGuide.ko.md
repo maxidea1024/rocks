@@ -216,7 +216,7 @@
   - 인스턴스 stream
   - 셰이더 입력 대조
 
-근거 문서: [셰이더 시스템](../Design/ShaderSystem.ko.md), [렌더 기반](../Design/RenderBase.ko.md) 9·10절.
+근거 문서: [셰이더 시스템](../Design/ShaderSystem/README.ko.md), [렌더 기반](../Design/RenderBase.ko.md) 9·10절.
 
 ## 9. 렌더 경로와 GI
 
@@ -309,7 +309,7 @@
 |---|---|
 | [엔진 런타임](../Design/EngineRuntime/README.ko.md) | 엔진 상태 기계·World·Tick·입력·Graphics 최소 경로 |
 | [렌더 기반](../Design/RenderBase.ko.md) | 렌더 lane·자원 수명·렌더 그래프·셰이더 런타임·정점 입력·화면 마일스톤 범위 |
-| [셰이더 시스템](../Design/ShaderSystem.ko.md) | 셰이더 언어·형식·바인딩 규약·도구·워커·키·라이브러리 |
+| [셰이더 시스템](../Design/ShaderSystem/README.ko.md) | 셰이더 언어·형식·바인딩 규약·도구·워커·키·라이브러리 |
 | [텍스처 스트리밍](../Design/TextureStreaming.ko.md) | 상주 계획·mip 전송 |
 | [픽셀 형식](../Design/PixelFormat.ko.md) | 형식 번호표·정보 표·형식 능력·backend 형식 대응·sRGB·깊이/스텐실 |
 | [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) | 8절 실행 규약, 11절 렌더러·RHI·렌더 그래프, 14절 조명·GI |

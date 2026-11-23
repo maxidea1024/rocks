@@ -4,7 +4,7 @@
 
 #include <Platform/Memory.h>
 
-// 셰이더 컴파일 옵션(Docs/Design/ShaderSystem.ko.md 11.1절 SC9)의 이름=값 파서다.
+// 셰이더 컴파일 옵션(Docs/Design/ShaderSystem 11.1절 SC9)의 이름=값 파서다.
 namespace rocks::shader {
 
 namespace compile_options_detail {

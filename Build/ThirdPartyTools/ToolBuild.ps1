@@ -1,5 +1,5 @@
 # Shared functions for the offline tool build of prebuilt binaries (manifest kind: binary) (Windows, PowerShell 7).
-# Per-library scripts (Engine/Source/ThirdParty/<Lib>/Build/Build.ps1) dot-source this file. Docs/Design/ShaderSystem.ko.md section 8, item 4.
+# Per-library scripts (Engine/Source/ThirdParty/<Lib>/Build/Build.ps1) dot-source this file. Docs/Design/ShaderSystem section 8, item 4.
 #
 # Order: download build.source and build.dependencies of the manifest (ThirdParty.json) and verify SHA-256 -> assemble the source tree -> apply build.patches ->
 # confirm the public headers and licenses committed to the repository match the sources byte for byte -> (the library script builds with CMake and Ninja) -> collect

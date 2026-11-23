@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 // 셰이더 도구 스파이크(SH0)다. bootstrap한 사용자 저장소의 도구로 지금의 내장 Renderer 셰이더를
-// 모든 형식으로 만들고 검증·측정한다(Docs/Design/ShaderSystem.ko.md 5.4·16절).
+// 모든 형식으로 만들고 검증·측정한다(Docs/Design/ShaderSystem 5.4·16절).
 //
 // 사용:
 //   ShaderToolSpike --out <디렉터리> [--sm 6_0]

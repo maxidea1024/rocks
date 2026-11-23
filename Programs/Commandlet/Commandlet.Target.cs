@@ -15,4 +15,8 @@ public sealed class CommandletTarget : TargetRules
     public override IReadOnlyList<PluginReference> Plugins => [new("UnrealExchange", true)];
 
     public override bool CheckPublicHeaders => true;
+
+    // shader-compile starts ShaderCompileWorker next to the commandlet (Docs/Design/ShaderSystem section 11.1 SC13 and SC14). Commandlet is a
+    // Monolithic Program, so the worker is a companion target, not a TestPrograms entry (that list is for Modular test targets).
+    public override IReadOnlyList<string> CompanionTargets => ["ShaderCompileWorker"];
 }

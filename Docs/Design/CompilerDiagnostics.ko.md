@@ -22,7 +22,7 @@
 - `_CRT_SECURE_NO_WARNINGS` 같은 전역 경고 억제 정의를 사용하지 않는다. 플랫폼 API 차이는 private adapter와 올바른 호출로 해결한다.
 - 외부 SDK 헤더를 엔진 공개 헤더나 공용 구현에 무분별하게 포함하지 않는다. 현재 시스템 SDK 자체의 진단 기본 처리는 공급자 도구 체계를 따르되, 엔진 소유 코드를 `SYSTEM` 헤더로 표시하여 숨기지 않는다.
 
-외부 라이브러리를 추가할 때는 고정 버전·별도 target·adapter 경계를 기록한다. 외부 라이브러리는 Core가 쓰면 `Core/Source/ThirdParty`, 엔진·도구 전용이면 `Engine/Source/ThirdParty`에 둔다(두 루트, [셰이더 시스템](ShaderSystem.ko.md) 8절 1항). 외부 원본에서 빌드 경고가 발생하면 호환 버전 선택 또는 추적 가능한 수정으로 해결하고 엔진 전체에 억제 옵션을 전파하지 않는다. Rocks 빌드가 컴파일하는 외부 원본(manifest `kind: code`의 번역 단위, `kind: headers`·`kind: binary`의 공개 헤더를 include하는 엔진 번역 단위)은 엔진과 같은 경고 프로필(`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror`)로 컴파일한다. Rocks 빌드가 컴파일하지 않는 미리 빌드한 바이너리는 아래 승인 절을 따른다.
+외부 라이브러리를 추가할 때는 고정 버전·별도 target·adapter 경계를 기록한다. 외부 라이브러리는 Core가 쓰면 `Core/Source/ThirdParty`, 엔진·도구 전용이면 `Engine/Source/ThirdParty`에 둔다(두 루트, [셰이더 시스템](ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절 1항). 외부 원본에서 빌드 경고가 발생하면 호환 버전 선택 또는 추적 가능한 수정으로 해결하고 엔진 전체에 억제 옵션을 전파하지 않는다. Rocks 빌드가 컴파일하는 외부 원본(manifest `kind: code`의 번역 단위, `kind: headers`·`kind: binary`의 공개 헤더를 include하는 엔진 번역 단위)은 엔진과 같은 경고 프로필(`/W4 /WX`, `-Wall -Wextra -Wpedantic -Werror`)로 컴파일한다. Rocks 빌드가 컴파일하지 않는 미리 빌드한 바이너리는 아래 승인 절을 따른다.
 
 ### 외부 원본 내부 진단 지시문 (2026-11-12 승인)
 

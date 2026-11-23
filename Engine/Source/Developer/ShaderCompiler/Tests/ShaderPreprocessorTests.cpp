@@ -9,7 +9,7 @@ namespace shader_preprocessor_tests_file {
 using namespace rocks::shader;
 using namespace rocks::shader_source_test;
 
-// 셰이더 전처리기(Docs/Design/ShaderSystem.ko.md 11.1절 SC3) 시험이다: 정규화, 주석·줄 이음,
+// 셰이더 전처리기(Docs/Design/ShaderSystem 11.1절 SC3) 시험이다: 정규화, 주석·줄 이음,
 // 지시문 하나씩·중첩, #include·#pragma once, 매크로, #line·__FILE__, 결정성. 시험마다 임시
 // fixture를 /Engine(빈 Platform.rsh)·/Plugin/Test로 mount하고 /Plugin/Test/Main.rsf를 엔트리로
 // 쓴다.

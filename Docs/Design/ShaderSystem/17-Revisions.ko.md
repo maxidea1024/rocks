@@ -1,0 +1,88 @@
+# 셰이더 시스템 설계 — 17. 개정 이력
+
+[목차](README.ko.md)
+
+## 17. 개정 이력
+
+- 개정 1(2026-11-13): 초안.
+- 개정 2(2026-11-13): 독립 검토 2건 반영.
+  - UE 사실 확인: 약 60개 주장 중 14건을 고쳤다(모바일 형식 이름, D3D11 DXC 경로 근거, Vulkan bindless·SM5/SM6 구분, 예약 space와 register 명시, QBSS 양자화, Metal UAV 배정, `-fvk-use-dx-position-w`, 루트 상수 4 DWORD, DXCWrapper Windows 한정, `[ShaderPlatform]` 범위, ShaderArchive 파일·배포, HLSL 2021 기본값, `GLSL_430_REMOVED`).
+  - 반례·정합성: OpenGL과 SH2의 모순 → Vulkan을 SH2로 앞당김. D3D12 64 DWORD 예산. 상수 버퍼 반례 → 허용 타입 제한. macOS 셰이더 생산 호스트 부재 → macOS DXC 자체 빌드와 Windows Metal 도구. DXC location 선언 순서 → 재작성과 `spirv-val` 필수. 공통 상한. SPIRV-Cross 예외 → 공유 라이브러리 격리. 경고 예외 삭제. 바이너리 manifest. FXC 지문. job 키 정의. 의존 관계. P6 출처 일원화와 MacOS 프로필. 개정 대상 누락. 교차 참조·용어.
+- 개정 3(2026-11-13): 개정 2의 재검토 2건 반영.
+  - 사실 9건: QBSS tier 기준, 구조화 SRV 근거, UE location 재배정 범위, UAV 상한의 파이프라인 단위, Metal 인덱스 상한, HLSL 2021 기본값 목록, DXC 1.8.2505 내장 validator, 근거 줄 번호, SPIRV-Cross locale 보정.
+  - 반례·정합성 17건: 공유 라이브러리 모듈 종류를 P4에(차단), SPIRV-Tools 생성 파일·DXC 빌드의 Python과 버전 정합, 상한 표를 descriptor 종류로·UAV는 CS만, Metal buffer 배정·예산, D3D signature 연결 규칙·SV 허용 목록·vertex attribute remap, 워커 오프셋 검사·셰이더 전용 정렬 타입, job 키(모든 호스트 SHA·빌드 툴체인·SPIRV-Reflect·Apple 도구 manifest·공유 등급 기록), 상수 접기 결정성, 상한 검사를 프로필 단위로, 시험 시기를 SH2로, P9 Vulkan 선행, macOS DXIL 서명 실측, 텍스처·샘플러 짝, 저장 위치·CI 캐시·FXC 출처·header, P7 세부, 개정 대상 추가, 내부 정합성.
+  - 사용자 결정으로 올림: 도구 공급 방식(결정 8), SH2 범위(결정 9), 셰이더 키의 툴체인 지문(결정 10). 전처리기 표현을 결정 6으로 통일.
+- 개정 4(2026-11-13): 사용자 결정 반영.
+  - 결정 8(도구 공급)을 UE 방식으로 정했다: 엔진 빌드 밖 스크립트로 DXC·SPIRV-Cross·SPIRV-Tools를 빌드해 바이너리로 배포하고 엔진은 링크·복사만 한다(UE ShaderConductor 빌드 스크립트·External 모듈 확인. 개정 7에서 절대 경로 동적 로드로 바뀌었다). 이에 따라 공유 라이브러리 모듈 종류, hostCode 종류, C++17·예외 빌드 설정, SPIRV-Tools 생성 파일 커밋, 경고 정책 결정(7)이 필요 없어졌다.
+  - 결정 9(SH2에서 Vulkan 추가·OpenGL 제거를 한 변경으로)를 확정했다.
+  - 결정 10에 UE 5.6 셰이더 job 키 구성(호스트·엔진 컴파일러 미포함)과 예외 없이 갈 때의 결과를 적었다.
+- 개정 5(2026-11-13): 결정 10을 공통 규칙 준수로 확정했다.
+  - 셰이더 job 키에 AssetSystem 9절 공통 항목을 모두 넣는다: 툴체인 지문, 결정적 수학 버전, 대상 프로파일 id와 출력 설정 전체. 공유 등급(`portable`)·영역별 프로필 digest·호스트 사이 바이트 동일 시험을 없앴다. 셰이더 캐시는 호스트 사이에 공유하지 않는다.
+  - 상수 접기 결정성은 예외로 두지 않는다. 다르게 나오면 방법을 사용자 결정으로 올린다.
+  - 같은 원칙으로 P7 셰이더 파라미터의 identity 면제를 없애고 `ROCKS_STRUCT` 경로를 따르게 했다. 공통 상한 검사는 job 안으로 옮겼다.
+- 개정 6(2026-11-13): 결정 1(확장자 `.rsf`·`.rsh`)을 확정했다.
+- 개정 7(2026-11-14): 현재 코드베이스·스펙 기준으로 구현 계획을 다시 세웠다.
+  - 사용자 결정 반영: OpenGL ES 필수와 UE 방식("구형 모바일 때문이라도 opengles는 지원해야함", "언리얼이 다루는 방식으로 맞추면됨"), UE 근거 기준을 5.8로("앞으로 조사는 5.8 기준으로 해"). 결정 9를 개정했다(OpenGLGraphics는 지우지 않고 GLES 미리보기로 전환).
+  - 조사: 빌드·ThirdParty 코드, 그래픽 런타임 코드, 관련 스펙 상태를 다시 조사해 4절(현재 코드베이스)을 새로 쓰고, 선행 작업을 다른 문서 담당(5.2절)과 셰이더 전용(5.3절)으로 나눠 상태·산출물·의존·막는 단계·완료 기준을 적었다. 측정 항목(5.4절)과 전체 순서(6절)를 더했다.
+  - 독립 설계 대조(초안을 보지 않은 계획과 비교)에서 들인 것: Vulkan 로더 링크의 문제(Vulkan 런타임 없는 기계에서 실행 불가) → P10 동적 라이브러리 API와 도구 동적 로드(9절), 에셋 단계(A0-G·A1·A3·A4)에 넣을 셰이더 요구, 엔진 내장 셰이더 라이브러리(계획 9.6), Release 배제 정책 검사, Metal의 Objective-C++ 빌드·macOS 창(P12), Android 실행 기반(P13), 측정 항목.
+  - UE 5.8.4 재확인(개정 6의 UE 근거 전부): 줄 번호를 모두 고쳤고, 내용이 바뀐 것은 RHI 셰이더 생성 API(`FRHICreateShaderDesc`), 셰이더 맵·코드 해시(XxHash64), Vulkan push constant(bindless RayGen에서 사용), Vulkan bindless set 구성, Metal Shader Converter 선택 조건·buffer 순서(UB 먼저), 정적 UB 매크로, 전처리 근거 위치, job 키 항목(`PreferredShaderCodeFormat`·`bBindlessEnabled`), D3D SM 선택 규칙, ShaderCodeLibrary 파일 위치, Windows Metal 도구 기대 버전, 워커 입력 검사 위치, Windows 도구 빌드 스크립트(VS2022·ClangCL)다. UE가 SPIRV-Cross·SPIRV-Tools를 ShaderConductor에 정적으로 묶고 DXC 1.8.2403·`dxil.dll`을 쓰는 점을 적고, Rocks의 업스트림 공유 라이브러리·DXC 1.8.2505 선택을 Rocks 결정으로 구분했다.
+  - GLES 추가: 형식 `GLES31_ANDROID`·`GLES31_PC`(2절), UE 5.8 GL 경로 조사로 바인딩 규칙(상수 버퍼 에뮬레이션·combined sampler·클립 공간, 7절), UE 수정 도구에 기대지 않는 업스트림 대응(7.2절 11항), P11.
+  - 워커 통신을 UE 파일 기반 방식으로 정했다(11절).
+  - Vulkan target env를 UE `SF_VULKAN_SM5`와 같은 1.1로 고쳤다(개정 6은 1.2).
+  - 교차 검증 4건(Rocks 코드 근거 약 185건, UE 5.8.4 근거 약 220건, 다른 스펙 정합성, 반례·선행 작업 완결성)을 반영했다.
+    - 근거: 줄 번호·절 번호·인용 문구 30여 건(CoreObjectInputDetailedPlan 줄, Rockpile 절, `ThirdPartyRoot` 사용처, Metal 도구 버전 줄, ClangCL 기본 시점, `dxil.dll` 출처, `-Zpr` 근거, 업스트림 DXC 줄 번호 미확인 처리 등).
+    - 차단 2건: 셰이더 타입·퍼뮤테이션·라이브러리 형식 → P14(12.2절). 형식 정의가 job 키보다 늦음 → P6을 P6a(형식 정의, P5 앞)와 P6b(프로필·매니페스트·내장 라이브러리, SH2 앞)로 나눔.
+    - GLES: VS·PS 샘플러 binding 충돌 → 워커가 PS 0·VS 16부터 다시 매김(UE도 ESSL 320에서는 binding을 낸다), 상수 버퍼 에뮬레이션의 텍스트 치환 한계 → 구조체 1단·구조체 배열·버퍼 전체 load 금지, 모바일 상한(에뮬레이션 `vec4`·varying·MRT), UE 수정 도구 목록 정정(`pad_ubo_blocks`는 padding만, 묶음은 텍스트 재작성), sRGB 표시·확장 의존 목록, `GLES31_PC` 표시 blit과 Release 배제.
+    - 키·결정성: 에셋이 아닌 처리기의 키 식(SCC 식 대신 SHA-256(`BuildKey`)), 형식 정의가 선언한 모든 도구 SHA(정적 목록), Apple 도구 지문을 워커 조회로, 프로필 없는 컴파일의 엔진 프로필, 호스트 사이 바이트 동일 측정(S3) 복원.
+    - 빌드: 도구 공개 헤더를 저장소에(bootstrap 없이 기본 빌드), 도구 표 모듈과 로드 정책 구분, macOS quarantine, Agility 재배포 role, 내장 라이브러리는 설치물 단계 명령으로(Rocks.Build에 프로그램 실행 action이 없다), 라이브러리 파일 내용 주소와 게시 규칙.
+    - 선행 작업: P15(D3D11·Metal 설계), P12·P13 완료 기준, APK VFS를 AssetSystem 선행으로, A0-G G2의 ES 확장 조건, A2 요구, storage image 형식 매크로, 손으로 쓴 레이아웃 표(P7 전 서명), 결정별 기한, SH 선행 열, D3D12·Metal 예산 수치, `SV_VertexID` base 규칙, 파이프라인 래스터·깊이 상태(SH2).
+    - 경고 정책(결정 7)을 CompilerDiagnostics와의 충돌 때문에 확인 항목으로 되돌렸다.
+  - 2차 점검(내부 정합성과 이번에 더한 UE 근거) 반영: 한 16 byte 슬롯에 기본 타입을 섞지 않는 규칙(GLES 배열 크기 계산), GLES binding을 종류별 공간으로 다시 매김, VS·PS storage block 0(ES 3.2 최소), 공통 상한을 셰이더 타입이 컴파일되는 형식으로 한정하고 그 형식 정의 SHA를 키에 넣음, 결정 2·3·5 기한을 P6a 전으로, 결정 6을 측정 없이 정하고 S7을 SH1 완료 기준으로, 엔진 컴파일 프로필을 P6a로 옮기고 TargetProfile과 스키마를 나눔, backend 이름 고정 어휘, `redist` role, Apple 도구 로드 예외, `GL_ARB_ES3_2_compatibility`, S12를 데스크톱(SH0)·기기(SH6)로 나눔, 막는 단계 열과 인용 정정.
+- 개정 8(2026-11-14): GLES 기기 요구(ES 3.2 필수)의 근거를 2절에 기록했다(사용자 요청). Android 배포 대시보드의 OpenGL ES·Vulkan 분포(2025-11-24까지), Android의 Vulkan 요구 조건, ES 3.0·3.1 기기 세대(GPU별은 미확인), Google의 OpenGL ES·ANGLE 방향, ES 3.0·3.1을 넣지 않는 이유.
+- 개정 9(2026-11-17): 사용자 결정(좌표계·단위·행렬 규약을 UE 5.8과 같게)에 맞춰 7.2절을 고쳤다.
+  - 6항: 행 벡터·행 우선 규약으로 바꾸고 형식별 행 우선 옵션의 UE 근거를 확인했다. S5는 옵션을 고르는 시험에서 규약을 확인하는 시험으로 바꿨다.
+  - 8항: 앞면 규약(화면 반시계·뒤면 컬), 음수 행렬식 반전, backend 매핑 근거를 더했다.
+  - 근거: 좌표 전환 세션의 차이표(UE 5.8.4 소스·probe)와 이 문서의 UE 소스 재확인.
+- 개정 10(2026-11-17): 좌표 전환 C7(렌더 코드 반영)을 구현 상태로 적었다.
+  - 6항: 런타임 D3D12는 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`, OpenGL은 `transpose = GL_TRUE`로 행렬을 행 우선으로 담는다. 손으로 쓴 GLSL에 `layout(row_major)`를 쓰지 않은 이유(기본 블록 uniform)도 적었다.
+  - 8항: Graphics `CullMode`와 기본값 None, backend 매핑, 샘플 렌더러의 음수 행렬식 반전을 적었다.
+  - S5: D3D12·WARP·OpenGL 런타임 경로 결과를 적었다.
+- 개정 11(2026-11-17): P11을 구현 상태로 적었다([OpenGL ES backend](../OpenGLESGraphics.ko.md)).
+  - 5.1·5.3: P11 상태와 달성. Windows 미리보기는 ES 3.2 profile 우선, GL 4.3 core 대체(스펙의 "GL 4.3 core 이상"과 다른 점).
+  - 6항: OpenGL의 행렬 업로드를 `transpose = GL_TRUE`에서 루트 상수 `vec4` 배열(쿠킹된 ESSL과 같은 방식)로 바꿨다.
+  - 8항: 창 `GL_LOWER_LEFT` 규칙이 `GL_UPPER_LEFT` + offscreen 스왑체인 + Y 반전 blit으로 바뀌었다(SH2에서 P11로 앞당김). 앞면은 클립 공간 규약별(`GLES31_PC` `GL_CCW`, `GLES31_ANDROID` `GL_CW`).
+  - S5·S12: GLES 미리보기 결과와 ES profile 측정을 더했다.
+- 개정 12(2026-11-18): 결정 4(파라미터 선언)를 권장안 MetaCompiler 방식으로 확정했다(사용자 지시 "결정사항들은 권장안대로 하면됨"). 15절 결정 4와 기한 문장, 서문의 남은 결정, 5.3절 P7 제목, 13절 서두, 14절 ReflectionFoundations 행의 "고를 때" 조건을 정리했다. 13절에 `ShaderParameterLayout` 데이터 형식 요구를 더해 머티리얼 동적 layout(머티리얼 시스템 결정 MD3·MSR4)과 연결했다.
+- 개정 13(2026-11-18): [렌더러](../Renderer.ko.md) RQ22·RQ23과 [머티리얼 시스템](../MaterialSystem.ko.md) MSR1·MSR12·MSR13(결정 RN13·MD4 개정, 사용자 결정 "형식별 상한")을 반영했다.
+  - 7.2절 4항: SRV 텍스처·샘플러 수는 프로필 공통 상한이 아니라 job 형식 상한으로 검사하고, 오류에 셰이더 타입·퍼뮤테이션·형식·머티리얼·pass를 담는다. 형식 정의 값(D3D12·Metal 128, D3D11·GLES 16, Vulkan은 GX1 뒤)과 Vulkan을 넓힐 때의 set·단계 합계 한도를 적었다.
+  - 7.2절 9항: 짝 규칙의 예외로 공유 샘플러 `SharedWrapSampler`·`SharedClampSampler`(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`)를 후속에서 SH2로 앞당겼다. 텍스처마다 샘플러 출처 하나, 리플렉션 출처 필드, backend별 위치(GLES는 유닛마다 `glBindSampler`), 상태는 렌더러가 view마다 정한다. 정적 샘플러는 후속으로 남는다.
+  - 7.3절 (b)·(h): job 형식 상한과 공유 샘플러 시험을 더했다.
+  - 12.1절: `D3D11_SM5` `sampledTextures` 128 → 16(형식 정의 파일도 함께 고쳤다). `VULKAN_SM5` 확장은 GX1 측정 뒤 할 일로 남겼다.
+- 개정 14(2026-11-18): GX1 측정으로 `VULKAN_SM5` `sampledTextures` 128·`renderTargets` 8을 정했다(Renderer RQ11·RQ22, 결정 RN3 (가), 권장안 기본 지시). 7.2절 4항에 "상한은 장치 요구다" 규칙(형식 `limits`를 런타임 형식 선택이 `DeviceCaps`와 대조, Vulkan set·`maxPerStageResources` 합산 포함)을 두고 장치 요구 어휘 추가 계획을 없앴다. 12.1절 진척을 고쳤다.
+- 개정 15(2026-11-18): Renderer RQ10 반영. 7.2절 4항 GLES에 typed buffer SRV가 `samplerBuffer`로 텍스처 유닛을 차지하고 SRV 텍스처 수·샘플러 16 안에 든다는 규칙, typed buffer UAV는 `imageBuffer`·CS만이라는 규칙을 더했다. 5.4절에 SPIRV-Cross 출력 확인 측정 S13을 더했다.
+- 개정 16(2026-11-18): Renderer RQ13·RQ14 반영.
+  - RQ14(7.2절 4·7항): `SV_Target0–7`의 상한을 job 형식 `renderTargets`로 검사한다(프로필 공통 상한 4로 검사하면 MRT 8 형식 전용 GBuffer +D·+E가 모든 형식에서 오류가 되는 빈틈을 고쳤다). VS `SV_RenderTargetArrayIndex`를 런타임 확인 기능 `vertexLayerOutput`으로 연다: 형식 `features`에 넣되 장치 요구가 아니고, 셰이더 집합이 `DeviceCaps`로 확인하며, 형식 id를 나누지 않는다(15절 결정 12, 권장안). UE 근거(정적 표시·실행 때 감지·장치 값)를 달았다. 측정 S14와 시험 (j)를 더했다.
+  - RQ13(12.2절, RenderBase SX4, 머티리얼 시스템 MSR5와 함께): 머티리얼 셰이더 표지·정점 입력 축 표지, 거르기 서명(`MaterialShaderTraits`·정점 입력 타입·퍼뮤테이션·형식, 머티리얼 시스템 8.3절과 같음)과 AND 결합, 거르기가 읽는 형식 사실 조회(라이브러리 머리에 담아 쿠커·런타임 결과를 같게), 퍼뮤테이션 수 보고, 정점 입력 타입을 넣은 라이브러리 항목 키·런타임 조회 키. 묶음 id 열(SX5·MSR2)과 레이아웃 서명(SX6)은 남겼다.
+- 개정 17(2026-11-18): 개정 16 교차 검증 반영.
+  - 7.2절 4항: 모든 상한을 job 형식 상한으로 검사한다. 프로필 공통 상한은 셰이더 타입 단위라 거르기 뒤 데스크톱 전용 퍼뮤테이션에도 GLES 상한을 걸었다. 공통 상한을 폐기하고 job 키 9항의 공통 상한 형식 목록, P6b 완료 기준, 시험 (b)를 고쳤다. "상한은 쿠킹 코드의 바인딩 수에 박히므로 늘 장치 요구다" 근거를 적었다. 읽기 코드 정리는 12.1절 진척(SH2).
+  - 7.2절 7항: VS 출력 규칙을 layer·viewport 둘로 넓혀 어휘를 `vertexViewportLayerOutput` 하나로 했다. Renderer 결정 RN10 (가)의 2D atlas는 layer가 아니라 viewport 출력이 맞다. D3D12는 이 기능이 늘 된다(UE `D3D12Device.cpp:272`)는 점, ES는 `GL_NV_viewport_array2` 확장만 있고 Rocks·UE가 쓰지 않는다는 점, UE 조건의 두 범주(정적 표시 OR (설정 AND 장치 값))를 고쳐 적었다. Graphics `DeviceCaps` 이름·viewport 수·D3D12 값은 Graphics 쪽 일로 적었다. S14·시험 (j)·결정 12를 맞췄다.
+  - 12.2절: 라이브러리 항목에 런타임 확인 기능 비트(RenderBase 9.2절이 대조), 형식 사실에 기능 등급 자리(머티리얼 시스템 MSR9).
+- 개정 18(2026-11-18): 12.1절 진척 두 항목(런타임 확인 기능 `vertexViewportLayerOutput`, `CommonLimits` 제거)을 SH2 전에 구현했다.
+- 개정 19(2026-11-18): [렌더 기반](../RenderBase.ko.md) SX2 반영. 7.2절 2항에 결정 R7 확정(루트 상수 배치는 선언 명시, 128 byte·16 byte 배수, 크기 기준 자동 배치는 버림)과 파이프라인 layout의 크기 선언(Graphics `drawConstantBytes`·`SetDrawConstants`)을 적었다. Graphics 고정 구조체 `DrawConstants`를 없앴으므로 7.2절 5항·6항과 13절의 해당 문구를 고쳤다(13절은 그리기별 상수도 파라미터 구조체 종류 표시로 선언).
+- 개정 20(2026-11-19): 5.2절에 텍스처 스트리밍 결정 T6(명시 LOD·`Load` helper와 진단)의 셰이더 요구를 더했다([텍스처 스트리밍](../TextureStreaming.ko.md) 개정 4).
+- 개정 21(2026-11-20): SH0 남은 측정 S10·S13·S14(Windows) 결과를 5.4절에 적고 규칙에 반영했다. 남은 측정을 5.4절 끝과 16절 SH0 행에 정리했다.
+  - S10 → 8절 2항: `d3dcompiler_47.dll`은 SDK REDIST 목록에 있어 고치지 않은 파일을 데스크톱 응용과 함께만 재배포할 수 있다. Runtime에는 넣지 않고, 개발 도구 묶음에는 넣을 수 있으며, DLL만 따로 게시하지 않는다. 고정 버전 10.0.22621.2428은 그대로다.
+  - S13 → 7.2절 4항: GLES typed buffer 모양이 예상대로이고 typed buffer SRV는 결합 sampler 목록에 없으므로 워커가 따로 유닛을 매긴다. 읽고 쓰는 ES image는 `r32f`·`r32i`·`r32ui`만이라는 워커 검사를 더했다. Metal typed buffer는 `texture_buffer_native`로 낸다.
+  - S14 → 7.2절 7항: 모든 형식의 변환을 확인했고 FXC `vs_5_0`이 받으므로 `D3D11_SM5`에 `vertexViewportLayerOutput`을 넣었다(형식 정의·시험, 12.1절). SPIR-V 확장은 그 기능을 요구한 셰이더에만 허용한다.
+- 개정 22(2026-11-21): 8절 2항 FXC의 bootstrap 원본을 버전 구분 없는 `Redist/D3D/x64`에서 버전별 `bin/10.0.22621.0/x64` 사본으로 바꿨다(SDK 10.0.26100 설치가 `Redist` 본을 덮어써 SHA 불일치). 버전별 사본은 REDIST 목록 밖이라 재배포 묶음은 `Redist` 본을 따로 고정한다. 설치 마법사·`.vsconfig`가 SDK 10.0.22621도 설치한다([설치 마법사](../SetupWizard.ko.md)).
+- 개정 23(2026-11-23): P5를 A3 실제 API에 맞추고 SH1 설계를 더했다(사용자 지시 "에셋 처리 끝나고 남은 것들 이어가자").
+  - 10절: job 키를 `NuggetKeyWriter` 기록 순서로 다시 썼다(공통 머리 `WriteNuggetKeyHeader`, 도구는 `WriteNuggetEncoder` 목록, 키를 Record 키로 그대로). 너겟 위치(엔진만 쓸 때 root = 엔진 폴더), Record 값 표(ValueId 0–4), 실패 job 비게시, 일괄 요청과 결과 상태 처리, 완료 기준(세대·처리기·단계·엔트리 무효화, 키 golden, 빈·찬 캐시).
+  - 5.1·5.2절: A1–A3 구현 상태, N1–N3 반영 기록.
+  - 3절·11절·11.1절: 모듈(`ShaderCompilerCommon`·`ShaderWorker` 추가), 워커 pipe 제어 줄과 관리자 쪽 유휴 종료, SH1 결정 SC1–SC14와 하위 단계 SH1a–SH1e, UE 대응표.
+  - 교차 검증 1회(필수 11·권장 16) 반영: 결정 번호를 측정과 구분(SC), 키 golden은 실행 중 지문으로, 전체 Record 조회, 진단을 Record에서 뺌(값 표 0–3), D3D11 대체 경로는 FXC 컴파일 오류만, 입력 머리에 툴체인 지문(`BadToolchain`), system 도구 조회를 키 계산 앞으로, 내장 매크로 조건 거부와 `ROCKS_SHADER_MODEL_*`, 인터페이스 이름 `ShaderFormatBackend`, 워커 채널 스레드(P1 스레드 계약), 옵션은 `ShaderCompileOptions` 리플렉션 기록, 도구 role·Apple 지문 규칙, snapshot byte, 엔진 프로필 한정, `ShaderStageBits`, `WaitForProcessExit`를 PlatformBase로 옮김, 작업 디렉터리 정리, 동반 타깃 구성, 스파이크 삭제 순서, BOM·CRLF, 예약 정의, `Platform.rsh` 강제 include, `Generated` 범위, 출력 이름.
+  - 16절: SH1 행에 하위 단계 참조.
+- 개정 24(2026-11-23): SH1a 구현 메모(11.1절 — 구조, 상대 include 접기·`Shared` 범위·재정의 오류·`true`·출력 공백과 `#line` 기준·한도 묶음·`ROCKS_SPIRV`, S7 도구 `CompileWithDxc`와 시험 위치, 대소문자 한계)와 측정 S7 결과(5.4절: DXIL·SPIR-V byte 동일, 오류 위치 동일).
+- 개정 25(2026-11-23): SH1b 구현 메모(11.1절 — `ShaderCompilerCommon` 분리, 옵션 파서, 키 2–7행 함수와 system 도구 지문 입력, 값 표 도우미, 너겟 위치, 정책 `shader-worker-isolation`).
+- 개정 26(2026-11-23): SH1c 구현 메모(11.1절 — 워커 메시지·종료 코드 보충, 워커·형식 모듈, 제어 줄, DXC 인자, 동반 타깃, system 도구 지문 SH1e로).
+- 개정 27(2026-11-23): 11.1절 SC4에 워커 job 진행 줄 `job <seq> <index>`과 잠정·실제 계수 규칙을 더하고 메시지 버전을 2로 올렸다([진행 보고](../ProgressReporting.ko.md) 10.3절·12절).
+- 개정 28(2026-11-23): SH1d 구현 메모(11.1절 — 관리자와 채널 풀, 조정 스레드, 너겟 결과 처리, 진행 계수, 작업 디렉터리 정리, 형식 snapshot, `shader-compile` 인자·출력, Commandlet 동반 타깃). 문서를 장별 파일로 나눴다(내용 변경 없음, [문서 배치 규칙](../../Guides/DocumentLayout.ko.md)).

@@ -9,7 +9,7 @@ namespace shader_source_tree_tests_file {
 using namespace rocks::shader;
 using namespace rocks::shader_source_test;
 
-// 셰이더 소스 트리(Docs/Design/ShaderSystem.ko.md 11.1절 SC2)의 가상 경로·mount 규칙 시험이다.
+// 셰이더 소스 트리(Docs/Design/ShaderSystem 11.1절 SC2)의 가상 경로·mount 규칙 시험이다.
 // 음성 대조는 규칙 하나씩만 어긴 입력이다.
 namespace {
 

@@ -8,7 +8,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.ToolTests;
 
 /// <summary>
-/// 외부 라이브러리 Engine 루트와 headers·binary 종류의 manifest·정책 시험이다(Docs/Design/ShaderSystem.ko.md 8절 1–3항).
+/// 외부 라이브러리 Engine 루트와 headers·binary 종류의 manifest·정책 시험이다(Docs/Design/ShaderSystem 8절 1–3항).
 /// 음성 대조는 정상 fixture에 결함을 하나씩 넣고 리더나 정책 검사가 잡는지 본다.
 /// </summary>
 internal static class ThirdPartyKindTests

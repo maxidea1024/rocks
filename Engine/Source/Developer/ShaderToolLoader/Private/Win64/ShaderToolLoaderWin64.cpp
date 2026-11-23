@@ -6,7 +6,7 @@
 
 // dxcapi.h는 Windows에서 COM 형식(IUnknown·HRESULT·REFCLSID)을 쓰므로 Windows 헤더 뒤에
 // include한다. 이 번역 단위가 엔진 경고 규칙으로 경고 0인지가 P3에서 넘어온 확인 항목이다
-// (Docs/Design/ShaderSystem.ko.md 8절 진척). 빌드가 WIN32_LEAN_AND_MEAN을 정의하므로 COM 기본
+// (Docs/Design/ShaderSystem 8절 진척). 빌드가 WIN32_LEAN_AND_MEAN을 정의하므로 COM 기본
 // 형식(IUnknown)과 IStream 헤더를 직접 더한다.
 
 #include <Platform/Win64/WindowsHeadersBegin.h>

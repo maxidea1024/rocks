@@ -79,7 +79,7 @@ bool ValidateSpirv(const shader::SpirvToolsFunctions& tools, Span<const uint8> c
 bool OptimizeSpirv(const shader::SpirvToolsFunctions& tools, Span<const uint8> code, ByteArray& out,
                    StringBuilderBase& diagnostics) noexcept;
 
-// SPIRV-Cross 출력 종류다(Docs/Design/ShaderSystem.ko.md 2절 형식 표).
+// SPIRV-Cross 출력 종류다(Docs/Design/ShaderSystem 2절 형식 표).
 enum class CrossTarget : uint8 {
     // GLES31_ANDROID: ESSL 320, fixup_clipspace·flip_vert_y 켬.
     EsslAndroid,

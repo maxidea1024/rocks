@@ -3,7 +3,7 @@
 #include <ShaderWorker/ShaderWorker.h>
 #include <stdio.h>
 
-// ShaderCompileWorker 진입점이다(Docs/Design/ShaderSystem.ko.md 11절, 11.1절 SC4–SC7). 본체는
+// ShaderCompileWorker 진입점이다(Docs/Design/ShaderSystem 11절, 11.1절 SC4–SC7). 본체는
 // ShaderWorker다. 오류 대화상자를 끄고(abort·assert·OS 오류 상자), 크래시는 작업 디렉터리의 Crashes
 // 아래에 프로세스 안 덤프로 남긴다(워커는 대화상자에 막히면 안 된다 — SC6). 종료 코드는
 // ShaderWorkerExit다.

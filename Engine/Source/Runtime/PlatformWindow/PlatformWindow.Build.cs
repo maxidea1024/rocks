@@ -19,6 +19,7 @@ public sealed class PlatformWindow : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            ModuleDirectory = ModuleDirectory,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
             // Windows uses Win32 windows and XInput; other platforms have no window backend yet and return Unsupported.

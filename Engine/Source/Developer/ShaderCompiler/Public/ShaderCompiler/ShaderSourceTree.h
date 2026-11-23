@@ -7,7 +7,7 @@
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
 
-// 셰이더 소스 트리와 가상 경로다(Docs/Design/ShaderSystem.ko.md 3절, 11.1절 SC2).
+// 셰이더 소스 트리와 가상 경로다(Docs/Design/ShaderSystem 3절, 11.1절 SC2).
 //
 // 셰이더 원문은 가상 경로로만 가리킨다. 가상 루트는 세 종류다.
 // - /Engine: 엔진 Engine/Shaders(그 아래 Public·Private·Shared).

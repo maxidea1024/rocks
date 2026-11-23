@@ -10,7 +10,7 @@ namespace shader_preprocessor_condition_tests_file {
 using namespace rocks::shader;
 using namespace rocks::shader_source_test;
 
-// 셰이더 전처리기(Docs/Design/ShaderSystem.ko.md 11.1절 SC3)의 조건식·내장 이름 거부·한도 경계
+// 셰이더 전처리기(Docs/Design/ShaderSystem 11.1절 SC3)의 조건식·내장 이름 거부·한도 경계
 // 시험이다.
 namespace {
 

@@ -2,7 +2,7 @@
 # Offline build of DirectXShaderCompiler (DXC) (macOS arm64). The Windows version is Build.ps1 in the same folder. Like UE 5.8
 # ThirdParty/ShaderConductor/Build_ShaderConductor_Mac.command, builds with CMake and Ninja and fixes up install names and dSYMs.
 # The upstream build uses exceptions and RTTI and generates tables with Python 3 (PATH).
-# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem.ko.md section 8 progress).
+# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem section 8 progress).
 #
 # Usage: sh Engine/Source/ThirdParty/DirectXShaderCompiler/Build/Build.sh [work directory] [archive output directory]
 # Requires: Xcode command line tools, CMake, Ninja, Python 3, git (to apply patches).

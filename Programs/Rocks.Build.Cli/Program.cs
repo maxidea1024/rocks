@@ -75,7 +75,7 @@ namespace Rocks.Build.Cli
                 "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", SingleFileCommand.Option, MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 "sdk" => new HashSet<string>(["root", "target", "configuration", "configurations", "output", "compiler", "rules", "jobs", "destination", "register", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", SingleFileCommand.Option, "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
-                // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
+                // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 // 출력 디렉터리 하나를 비운다(Docs/Design/ProjectFiles.ko.md 7.3절 — Visual Studio Clean·Rebuild가 부른다).
                 CleanCommand.Name => new HashSet<string>(["root", "project", "target", "configuration", "platform", "android-abi", "output"], StringComparer.Ordinal),

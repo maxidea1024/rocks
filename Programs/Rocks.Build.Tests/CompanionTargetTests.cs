@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// 동반 타깃(TargetRules.CompanionTargets, Docs/Design/ShaderSystem.ko.md 11.1절 SC14) 시험이다: 동반 프로그램 타깃의 모듈이 같은 빌드에
+// 동반 타깃(TargetRules.CompanionTargets, Docs/Design/ShaderSystem 11.1절 SC14) 시험이다: 동반 프로그램 타깃의 모듈이 같은 빌드에
 // 더해지고 나머지 속성은 원래 타깃 그대로이며, 없는 타깃·중복·자기 자신·Program이 아님·Modular·플러그인·동반의 동반·Modular 타깃은
 // 거부한다.
 internal static class CompanionTargetTests
