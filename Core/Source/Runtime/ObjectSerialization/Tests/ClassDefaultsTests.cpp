@@ -180,6 +180,29 @@ RegisterManual(TypeRegistry& types, TypeId type, bool completeLayout,
     return types.Register({type, 1, fields, {TypeName, sizeof(TypeName)}}, Move(ops));
 }
 
+// DefaultsStrangerKind의 ClassRef 대상이다(DefaultsAbstractBase 파생 손 타입 — 시험이 나중에
+// 등록한다). base의 펼친 필드와 생성 함수표를 그대로 싣는다(상속 필드 서술 일치 규칙).
+struct StrangerThing final : DefaultsAbstractBase {};
+
+Result<TypeRegistrationToken> RegisterStranger(TypeRegistry& types) noexcept {
+    auto base = types.Acquire(TypeIdOf<DefaultsAbstractBase>());
+    if (!base) {
+        return Result<TypeRegistrationToken>::Failure(base.Error());
+    }
+
+    static constexpr char Name[] = {'S', 't', 'r', 'a', 'n', 'g', 'e', 'r'};
+    TypeSchema schema;
+    schema.id = DefaultsStrangerType;
+    schema.fields = base.Value().Schema().fields;
+    schema.name = Span<const char>(Name, sizeof(Name));
+    schema.baseType = TypeIdOf<DefaultsAbstractBase>();
+    auto ops = MakeRuntimeTypeOps<StrangerThing>();
+    ops.fields = base.Value().Ops().fields;
+    ops.completeFieldLayout = true;
+    ops.nativeBaseType = NativeTypeKey<DefaultsAbstractBase>();
+    return types.Register(schema, Move(ops));
+}
+
 // builder 호출 수를 세는 시험 builder다(ResolveClassDefaults 게시 한 번 — 레코드 byte는 고정 값).
 struct CountingBuild {
     uint32 calls = 0;
@@ -350,7 +373,7 @@ TEST(ClassDefaults_ClassRefDefaults) {
     auto missing = AcquireClassDefaults(stranger, allocator, &why);
     CHECK(!missing && missing.Error() == ErrorCode::NotFound &&
           why.reason == ClassDefaultsReason::EncodeFailed);
-    auto token = RegisterManual(fixture.types, DefaultsStrangerType, true);
+    auto token = RegisterStranger(fixture.types);
     REQUIRE(token);
     CHECK(AcquireClassDefaults(stranger, allocator));
     stranger.Reset();

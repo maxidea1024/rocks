@@ -185,8 +185,9 @@ struct DefaultsSoftList final : Object {
 };
 
 // non-null ClassRef 기본값이다: pick은 등록된 파생 DefaultsHolder(생성자는 생성 헤더가 보이는
-// Private/ClassDefaultsFixture.cpp — ClassRef::Of), stranger는 시험이 나중에 등록하는 손 함수표
-// 타입 id(DefaultsStrangerType — 미등록이면 NotFound이고 기억하지 않는다, 등록 뒤 성공).
+// Private/ClassDefaultsFixture.cpp — ClassRef::Of), stranger는 시험이 나중에 등록하는
+// DefaultsAbstractBase 파생 손 타입 id(DefaultsStrangerType — 미등록이면 NotFound이고 기억하지
+// 않는다, 등록 뒤 성공. ClassRef base는 리플렉션 클래스여야 한다 — RMC2003).
 inline constexpr TypeId DefaultsStrangerType{0x4D414E55414C, 1};
 
 ROCKS_CLASS()
@@ -205,7 +206,7 @@ struct DefaultsStrangerKind final : Object {
     DefaultsStrangerKind() noexcept : stranger(DefaultsStrangerType) {
     }
 
-    ROCKS_PROPERTY() ClassRef<Object> stranger;
+    ROCKS_PROPERTY() ClassRef<DefaultsAbstractBase> stranger;
 };
 
 } // namespace rocks::reflection_fixture
