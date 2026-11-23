@@ -154,6 +154,12 @@ public:
     virtual Result<void> Initialize(ConstructionContext& transaction,
                                     ObjectHandle asset) noexcept = 0;
 
+    // Initialize가 쓴 경로의 override 집합이다(없으면 null — RuntimeClassMetadata 'A5b'). Create가
+    // 공개 전에 새 대표 에셋의 집합으로 설치한다.
+    virtual const OverrideSet* InitialOverrides() const noexcept {
+        return nullptr;
+    }
+
 protected:
     ~EditorAssetInitializer() = default;
 };
@@ -370,6 +376,12 @@ public:
     // 정규화한다 (AddOverrideUnits — 원소·key는 필드, Atomic은 struct, 비Atomic struct 끝은 잎
     // 멤버로 펼침). 오류: 열린 패키지 객체가 아님 NotFound, 타입 조회·정규화의 오류, 할당 실패.
     Result<void> RecordOverride(ObjectHandle object, Span<const PathStep> path) noexcept;
+    // 값 게시 전에 pending(단위 집합)을 object 집합에 합칠 자리를 잡는다(집합 항목을 만들고 용량을
+    // 예약 — RuntimeClassMetadata 'A5b'). 그 뒤 MergeOverrides는 실패하지 않는다. 오류: 열린 패키지
+    // 객체가 아님 NotFound, 할당 실패.
+    Result<void> ReserveOverrides(ObjectHandle object, const OverrideSet& pending) noexcept;
+    // ReserveOverrides 뒤 pending을 object 집합에 합친다(할당 없음).
+    void MergeOverrides(ObjectHandle object, const OverrideSet& pending) noexcept;
     // object의 override 집합이다(없으면 null — 객체의 패키지가 닫히면 무효).
     const OverrideSet* FindOverrides(ObjectHandle object) const noexcept;
 

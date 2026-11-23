@@ -91,6 +91,15 @@ Result<void> PackageLoadHooks::NotePresent(const PresentInfo& info) noexcept {
         return Result<void>::Success();
     }
 
+    // 원소·key 단계가 있는 경로(배열·Map 값·Optional·InstancedStruct 안 struct의 멤버)는 담지
+    // 않는다 — 그 필드 자체의 present가 최상위에서 따로 오고, 단위는 그 필드다(컨테이너 원소 수만큼
+    // 쌓이지 않게).
+    for (const PathStep& entry : info.path) {
+        if (entry.selector != PathSelector::None) {
+            return Result<void>::Success();
+        }
+    }
+
     // 자리를 먼저 모두 잡는다(실패하면 로드가 할당 실패다).
     Result<void> step = presentIds.TryReserve(presentIds.Size() + info.path.Size());
     if (step) {

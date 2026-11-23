@@ -1138,6 +1138,20 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         if (!initialized) {
             return fail(AssetDiagnosticCode::None, initialized.Error());
         }
+
+        // 초기화가 쓴 경로는 override 집합이다(A5b — 공개 전에 설치해 공개 뒤 실패하지 않는다).
+        if (const OverrideSet* initial = initializer->InitialOverrides();
+            initial != nullptr && !initial->IsEmpty()) {
+            OverrideSet copy(*allocator_);
+            if (auto copied = copy.TryAssign(*initial); !copied) {
+                return fail(AssetDiagnosticCode::None, copied.Error());
+            }
+
+            if (auto inserted = info.overrides.Insert(representative.Value(), Move(copy));
+                !inserted) {
+                return fail(AssetDiagnosticCode::None, inserted.Error());
+            }
+        }
     }
 
     // 표 자리는 초기화 뒤에 잡는다 — 초기화가 다른 패키지를 열 수 있다(참조 해석 —
@@ -1871,6 +1885,51 @@ Result<void> EditorPackageSet::RecordOverride(ObjectHandle object,
     }
 
     return AddOverrideUnits(lease.Value(), path, *set);
+}
+
+Result<void> EditorPackageSet::ReserveOverrides(ObjectHandle object,
+                                                const OverrideSet& pending) noexcept {
+    if (registry_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto outermost = registry_->GetOutermost(Access(), object);
+    if (!outermost) {
+        return Result<void>::Failure(outermost.Error());
+    }
+
+    EditorPackageInfo* owner = nullptr;
+    for (EditorPackageInfo& info : open_) {
+        owner = info.package == outermost.Value() ? &info : owner;
+    }
+
+    if (owner == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    OverrideSet* set = owner->overrides.Find(object);
+    if (set == nullptr) {
+        if (auto inserted = owner->overrides.Insert(object, OverrideSet(*allocator_)); !inserted) {
+            return Result<void>::Failure(inserted.Error());
+        }
+
+        set = owner->overrides.Find(object);
+    }
+
+    return set->TryReserve(pending.Count(), pending.IdCount());
+}
+
+void EditorPackageSet::MergeOverrides(ObjectHandle object, const OverrideSet& pending) noexcept {
+    for (EditorPackageInfo& info : open_) {
+        if (OverrideSet* set = info.overrides.Find(object)) {
+            for (usize index = 0; index < pending.Count(); ++index) {
+                // ReserveOverrides가 자리를 잡았다(할당하지 않는다).
+                (void)set->Add(pending.At(index));
+            }
+
+            return;
+        }
+    }
 }
 
 const OverrideSet* EditorPackageSet::FindOverrides(ObjectHandle object) const noexcept {

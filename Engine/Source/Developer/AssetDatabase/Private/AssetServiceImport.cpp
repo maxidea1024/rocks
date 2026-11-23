@@ -1430,13 +1430,23 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
                                     run.mainId);
         }
 
-        // 사용자 설정 대입은 override 집합에 기록한다(A5b — 임포터가 쓴 출력은 기록하지 않는다).
-        if (auto recorded = asset_database_detail::RecordAssignmentOverrides(
-                set_, main->asset, settingAssignments.View());
-            !recorded) {
+        // 사용자 설정 대입은 override 집합에 기록한다(A5b — 임포터가 쓴 출력은 기록하지 않는다). 이
+        // 단계의 실패는 임포트 실패라 아무것도 저장하지 않는다.
+        OverrideSet pending(allocator);
+        auto lease = set_.Registry().AcquireType(set_.Access(), main->asset);
+        Result<void> recorded = lease ? asset_database_detail::PlanAssignmentOverrides(
+                                            lease.Value(), settingAssignments.View(), pending)
+                                      : Result<void>::Failure(lease.Error());
+        if (recorded) {
+            recorded = set_.ReserveOverrides(main->asset, pending);
+        }
+
+        if (!recorded) {
             return FailImport<void>(failure, AssetDiagnosticCode::None, recorded.Error(),
                                     run.mainId);
         }
+
+        set_.MergeOverrides(main->asset, pending);
     }
 
     // 결과·기록 입력·소유 기록 byte를 만든다(저장 사이에 할당이 실패하지 않게).

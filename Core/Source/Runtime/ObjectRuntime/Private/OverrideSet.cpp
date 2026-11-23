@@ -103,11 +103,8 @@ Result<void> VisitUnits(const TypeLease& lease, Span<const PathStep> path, Visit
 
         const bool singleStruct = field.value.kind == ValueKind::Struct && !nested.IsEmpty();
         if (!singleStruct || nested.IsAtomic()) {
-            // 단일 값·배열 계열·Atomic struct는 여기서 끝난다(뒤 단계는 struct가 아닌 값 뒤).
-            if (step + 1 != path.Size() && !singleStruct) {
-                return Result<void>::Failure(ErrorCode::TypeMismatch);
-            }
-
+            // 단일 값·배열 계열·Atomic struct, 그리고 단일 struct가 아닌 칸(InstancedStruct 내용·
+            // Optional 안 — 뒤 단계가 그 안쪽)은 그 필드가 단위다(원소·key와 같은 규칙).
             return visit(here);
         }
 
@@ -142,6 +139,28 @@ usize OverrideSet::LowerBound(Span<const Guid> unit, bool& found) const noexcept
 
     found = low < starts_.Size() && CompareUnits(At(low), unit) == 0;
     return low;
+}
+
+Result<void> OverrideSet::TryReserve(usize units, usize ids) noexcept {
+    Result<void> step = ids_.TryReserve(ids_.Size() + ids);
+    if (step) {
+        step = starts_.TryReserve(starts_.Size() + units);
+    }
+
+    if (step) {
+        step = lengths_.TryReserve(lengths_.Size() + units);
+    }
+
+    return step;
+}
+
+usize OverrideSet::IdCount() const noexcept {
+    usize total = 0;
+    for (uint32 length : lengths_) {
+        total += length;
+    }
+
+    return total;
 }
 
 Span<const Guid> OverrideSet::At(usize index) const noexcept {

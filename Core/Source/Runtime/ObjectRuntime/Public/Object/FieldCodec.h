@@ -312,7 +312,7 @@ protected:
     virtual Result<void> NotePresent(const FieldCodecFrame& frame) noexcept {
         (void)frame;
         FieldCodecHooks* hooks = Hooks();
-        if (!hooks) {
+        if (!hooks || !hooks->WantsPresent()) {
             return Result<void>::Success();
         }
 

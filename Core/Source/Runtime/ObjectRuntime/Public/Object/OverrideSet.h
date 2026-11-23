@@ -32,6 +32,11 @@ public:
     // (같은 집합이면 순서가 같다). 오류: 빈 경로·MaxPropertyPathSteps 초과 InvalidArgument, 할당
     // 실패(집합은 그대로).
     Result<void> Add(Span<const Guid> unit) noexcept;
+    // 단위 units개·필드 ID ids개를 더할 자리를 미리 잡는다(그 안의 Add는 할당하지 않아 실패하지
+    // 않는다 — 값 게시 뒤의 기록, RuntimeClassMetadata 'A5b'). 오류: 할당 실패.
+    Result<void> TryReserve(usize units, usize ids) noexcept;
+    // 필드 ID 수의 합이다(예약 크기 계산).
+    usize IdCount() const noexcept;
     // 단위 경로 하나를 지운다(없으면 아무것도 하지 않는다).
     void Remove(Span<const Guid> unit) noexcept;
     // prefix로 시작하는 단위를 모두 지운다(prefix 자체 포함 — 되돌리기의 struct 통째).

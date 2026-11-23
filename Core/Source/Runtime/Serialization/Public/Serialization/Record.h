@@ -172,6 +172,10 @@ public:
     Result<void> CancelField() noexcept;
     // 마지막으로 끝낸 필드 payload의 writer 안 시작 offset이다(없으면 IndexNone).
     usize LastFieldPayloadOffset() const noexcept;
+
+    // 필드 수·payload 크기를 채운다. 열린 필드가 있으면 InvalidArgument, 전체가 maxTotalBytes를
+    // 넘으면 CapacityExceeded다.
+    Result<void> End() noexcept;
     usize FieldCount() const noexcept;
 
 private:

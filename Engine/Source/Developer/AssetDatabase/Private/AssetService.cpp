@@ -40,12 +40,14 @@ EditorPackageSetConfig MakeSetConfig(const AssetServiceConfig& config, const Pro
     return packages;
 }
 
-// 공개 전 대표 에셋에 대입을 모두 검증·게시하는 초기화다(asset-new).
+// 공개 전 대표 에셋에 대입을 모두 검증·게시하는 초기화다(asset-new). 대입 경로는 override 집합이다
+// (A5b — Create가 공개 전에 설치한다).
 class AssignInitializer final : public EditorAssetInitializer {
 public:
-    AssignInitializer(Span<const TextAssignment> assignments, const TextCodecOptions& options,
-                      TextDiagnostics& diagnostics) noexcept
-        : assignments_(assignments), options_(options), diagnostics_(diagnostics) {
+    AssignInitializer(Allocator& allocator, Span<const TextAssignment> assignments,
+                      const TextCodecOptions& options, TextDiagnostics& diagnostics) noexcept
+        : assignments_(assignments), options_(options), diagnostics_(diagnostics),
+          overrides_(allocator) {
     }
 
     Result<void> Initialize(ConstructionContext& transaction,
@@ -56,34 +58,74 @@ public:
             return Result<void>::Failure(prepared.Error());
         }
 
+        if (!assignments_.IsEmpty()) {
+            auto lease = transaction.AcquireType(asset);
+            if (!lease) {
+                return Result<void>::Failure(lease.Error());
+            }
+
+            if (auto planned = asset_database_detail::PlanAssignmentOverrides(
+                    lease.Value(), assignments_, overrides_);
+                !planned) {
+                return planned;
+            }
+        }
+
         auto published = prepared.Value().Publish();
         return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
+    }
+
+    const OverrideSet* InitialOverrides() const noexcept override {
+        return &overrides_;
     }
 
 private:
     Span<const TextAssignment> assignments_;
     const TextCodecOptions& options_;
     TextDiagnostics& diagnostics_;
+    OverrideSet overrides_;
 };
 
 } // namespace
 
 namespace asset_database_detail {
 
-Result<void>
-RecordAssignmentOverrides(EditorPackageSet& set, ObjectHandle asset,
-                          Span<const reflection_text::TextAssignment> assignments) noexcept {
+Result<void> PlanAssignmentOverrides(const TypeLease& lease,
+                                     Span<const reflection_text::TextAssignment> assignments,
+                                     OverrideSet& pending) noexcept {
     for (const reflection_text::TextAssignment& assignment : assignments) {
-        PropertyPathBuffer path;
-        if (auto parsed =
-                ParsePropertyPath(set.Registry(), set.Access(), asset, assignment.path, path);
-            !parsed) {
-            return parsed;
+        const StringView text = assignment.path;
+        usize end = text.ByteCount();
+        for (usize index = 0; index < text.ByteCount(); ++index) {
+            if (text.Data()[index] == '[') {
+                end = index;
+                break;
+            }
         }
 
-        if (auto recorded = set.RecordOverride(asset, Span<const PathStep>(path.steps, path.count));
-            !recorded) {
-            return recorded;
+        // 해석되는 가장 긴 앞부분을 찾는다(검증된 대입이라 첫 필드는 늘 해석된다).
+        PropertyPathBuffer path;
+        bool parsed = false;
+        while (end > 0 && !parsed) {
+            parsed = static_cast<bool>(ParsePropertyPath(lease, text.SliceBytes(0, end), path));
+            if (!parsed) {
+                usize dot = end;
+                while (dot > 0 && text.Data()[dot - 1] != '.') {
+                    --dot;
+                }
+
+                end = dot > 0 ? dot - 1 : 0;
+            }
+        }
+
+        if (!parsed) {
+            continue;
+        }
+
+        if (auto added =
+                AddOverrideUnits(lease, Span<const PathStep>(path.steps, path.count), pending);
+            !added && added.Error() == ErrorCode::OutOfMemory) {
+            return added;
         }
     }
 
@@ -1266,7 +1308,7 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
     resolver.SetAliases(&aliasLookup_);
     const TextCodecOptions options = asset_database_detail::CodecOptions(set_, resolver);
-    AssignInitializer initializer(assignments, options, diagnostics);
+    AssignInitializer initializer(*allocator_, assignments, options, diagnostics);
     auto created = set_.Create(parsed.Value(), lease.Value().Id(), {}, failure, &initializer);
     if (!created) {
         return Result<AssetId>::Failure(created.Error());
@@ -1277,17 +1319,6 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
     for (usize index = 0; index < set_.Count(); ++index) {
         if (set_.At(index).package == created.Value()) {
             id = set_.At(index).id;
-        }
-    }
-
-    // 초기 대입은 사용자 쓰기다(override 집합 — A5b). 대표 에셋은 이름 빈 자식이다.
-    if (!assignments.IsEmpty()) {
-        auto representative = set_.Registry().FindChild(set_.Access(), created.Value(), "");
-        Result<void> recorded = representative ? asset_database_detail::RecordAssignmentOverrides(
-                                                     set_, representative.Value(), assignments)
-                                               : Result<void>::Failure(representative.Error());
-        if (!recorded) {
-            return FailAsset<AssetId>(failure, AssetDiagnosticCode::None, recorded.Error());
         }
     }
 
@@ -1324,17 +1355,31 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
         return FailAsset<void>(failure, AssetDiagnosticCode::None, prepared.Error());
     }
 
+    // 경로 쓰기는 override 집합에 기록한다(A5b — 기준과 같은 값을 넣어도 저장되어 기본값 변경
+    // 뒤에도 남는다). 단위 계산과 자리 예약은 게시 전에 하고 게시 뒤에는 실패 없이 합친다.
+    OverrideSet pending(*allocator_);
+    {
+        auto lease = set_.Registry().AcquireType(set_.Access(), asset.Value());
+        if (!lease) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, lease.Error());
+        }
+
+        if (auto planned =
+                asset_database_detail::PlanAssignmentOverrides(lease.Value(), assignments, pending);
+            !planned) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, planned.Error());
+        }
+    }
+
+    if (auto reserved = set_.ReserveOverrides(asset.Value(), pending); !reserved) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, reserved.Error());
+    }
+
     if (auto published = prepared.Value().Publish(); !published) {
         return FailAsset<void>(failure, AssetDiagnosticCode::None, published.Error());
     }
 
-    // 경로 쓰기는 override 집합에 기록한다(A5b — 기준과 같은 값을 넣어도 저장되어 기본값 변경
-    // 뒤에도 남는다).
-    if (auto recorded =
-            asset_database_detail::RecordAssignmentOverrides(set_, asset.Value(), assignments);
-        !recorded) {
-        return FailAsset<void>(failure, AssetDiagnosticCode::None, recorded.Error());
-    }
+    set_.MergeOverrides(asset.Value(), pending);
 
     // 열린 패키지다(MarkDirty는 실패하지 않는다).
     (void)set_.MarkDirty(id);

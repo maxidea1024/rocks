@@ -165,6 +165,11 @@ public:
         return Result<void>::Success();
     }
 
+    // present를 받는지다(거짓이면 복원이 경로를 만들지 않는다 — 런타임 로드 비용). 기본 거짓.
+    virtual bool WantsPresent() const noexcept {
+        return false;
+    }
+
     virtual Result<void> CollectSoftReference(const SoftReferenceInfo&) noexcept {
         return Result<void>::Success();
     }

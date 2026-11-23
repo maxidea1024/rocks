@@ -23,6 +23,10 @@ public:
     // 파일에 있는 필드·멤버 경로를 모은다(collectPresent일 때만 — 차이 형식 로드의 override 집합,
     // Docs/Design/RuntimeClassMetadata.ko.md 'A5b').
     Result<void> NotePresent(const PresentInfo& info) noexcept override;
+
+    bool WantsPresent() const noexcept override {
+        return collectPresent_;
+    }
     Result<void> CollectSoftReference(const SoftReferenceInfo& info) noexcept override;
     Span<const TypeId> ObservedStructs() noexcept override;
     Result<void> ObserveStruct(const FieldCodecFrame& frame, TypeId type, const void* nativeKey,

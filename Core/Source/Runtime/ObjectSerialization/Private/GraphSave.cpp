@@ -462,6 +462,12 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 
+        // encode 작업량은 생략하는 값도 청구한다(기준과 같은 큰 값이 작업량 한도를 비켜 가지 않게).
+        spent = budget.Spend(encoded.WorkUsed());
+        if (!spent) {
+            return spent;
+        }
+
         // 차이 쓰기(A5b): 기준과 같으면 Record에 더하지 않는다(위치·지연 항목이 늘지 않은 값만).
         auto omit = context.OmitCurrent(wire.Value(), encoded.View(), referenceMark);
         if (!omit) {
@@ -470,11 +476,6 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
 
         if (omit.Value()) {
             continue;
-        }
-
-        spent = budget.Spend(encoded.WorkUsed());
-        if (!spent) {
-            return spent;
         }
 
         usize appended = 0;

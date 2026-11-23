@@ -264,8 +264,12 @@ TEST(OverrideSet_UnitNormalization) {
     // 거부.
     const PathStep unknown[] = {Step(Guid{0xDEAD, 0xBEEF})};
     CHECK(AddOverrideUnits(lease.Value(), unknown, set).Error() == ErrorCode::NotFound);
+    // 단일 struct가 아닌 칸 뒤 단계(InstancedStruct 내용·Optional 안과 같은 모양)는 그 필드에서
+    // 자른다.
+    const usize before = set.Count();
     const PathStep afterScalar[] = {Step(count), Step(x)};
-    CHECK(AddOverrideUnits(lease.Value(), afterScalar, set).Error() == ErrorCode::TypeMismatch);
+    REQUIRE(AddOverrideUnits(lease.Value(), afterScalar, set));
+    CHECK(set.Count() == before && set.Contains(Span<const Guid>(countUnit)));
     CHECK(AddOverrideUnits(lease.Value(), {}, set).Error() == ErrorCode::InvalidArgument);
 
     // present: 비Atomic struct 자체는 버리고, 잎은 담고, 모르는 필드는 무시한다.

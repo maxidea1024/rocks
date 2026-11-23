@@ -301,11 +301,13 @@ inline reflection_text::TextCodecOptions CodecOptions(EditorPackageSet& set,
 Result<void> ReadWhole(platform::FileSystem& files, StringView path, uint64 limit,
                        Array<uint8>& bytes, bool& existed, bool& tooLarge) noexcept;
 
-// asset(열린 패키지 안 객체)에 게시한 대입들의 경로를 override 집합에 기록한다(Docs/Design/
-// RuntimeClassMetadata.ko.md 'A5b' — asset-set·asset-new·임포트 설정 대입). 경로는 객체 문맥으로
-// 해석한다(InstancedStruct 내용 포함). 오류: 경로 해석·EditorPackageSet::RecordOverride의 오류.
-Result<void>
-RecordAssignmentOverrides(EditorPackageSet& set, ObjectHandle asset,
-                          Span<const reflection_text::TextAssignment> assignments) noexcept;
+// 대입들의 경로를 override 단위로 정규화해 pending에 더한다(Docs/Design/RuntimeClassMetadata.ko.md
+// 'A5b' — asset-set·asset-new·임포트 설정 대입). 값 게시 전에 부른다(게시 뒤에는 예약한 자리로
+// 합치기만 한다). 경로는 lease 스키마로 해석한다: 첫 `[` 앞까지(원소·key는 필드 단위), 해석이
+// 실패하면 마지막 `.` 구간을 떼어 다시(InstancedStruct 내용·Optional 안은 그 필드까지). 오류: 할당
+// 실패.
+Result<void> PlanAssignmentOverrides(const TypeLease& lease,
+                                     Span<const reflection_text::TextAssignment> assignments,
+                                     OverrideSet& pending) noexcept;
 
 } // namespace rocks::asset_database_detail
