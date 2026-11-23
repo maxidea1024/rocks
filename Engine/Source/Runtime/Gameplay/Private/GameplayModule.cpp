@@ -24,6 +24,61 @@ const char* NetModeName(NetMode mode) noexcept {
     return "Unknown";
 }
 
+namespace {
+
+char LowerAscii(char value) noexcept {
+    return value >= 'A' && value <= 'Z' ? static_cast<char>(value - 'A' + 'a') : value;
+}
+
+bool SameKey(StringView left, StringView right) noexcept {
+    if (left.ByteCount() != right.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.ByteCount(); ++index) {
+        if (LowerAscii(left.Data()[index]) != LowerAscii(right.Data()[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace
+
+bool FindMapOption(StringView options, StringView key, StringView& value) noexcept {
+    // '?'로 나눈 항목마다 "key" 또는 "key=value"다. 앞의 맵 이름 부분(첫 '?' 전)은 보지 않는다.
+    const char* const data = options.Data();
+    const usize size = options.ByteCount();
+    usize at = 0;
+    while (at < size && data[at] != '?') {
+        ++at;
+    }
+
+    while (at < size) {
+        const usize start = at + 1;
+        usize end = start;
+        while (end < size && data[end] != '?') {
+            ++end;
+        }
+
+        usize equals = start;
+        while (equals < end && data[equals] != '=') {
+            ++equals;
+        }
+
+        if (SameKey(options.SliceBytes(start, equals - start), key)) {
+            value = equals < end ? options.SliceBytes(equals + 1, end - equals - 1)
+                                 : options.SliceBytes(end, 0);
+            return true;
+        }
+
+        at = end;
+    }
+
+    return false;
+}
+
 Result<void> RegisterGameplayTypes(ModuleRegistration& registration) noexcept {
     return generated::Gameplay::RegisterModuleTypes(registration);
 }

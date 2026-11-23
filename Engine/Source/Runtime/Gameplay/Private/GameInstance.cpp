@@ -1,7 +1,10 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/ScopeExit.h>
+#include <Gameplay/GameDirector.generated.h>
+#include <Gameplay/GameDirector.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstanceClient.h>
+#include <Gameplay/GameplayWorldSubsystem.h>
 #include <Gameplay/LocalPlayer.generated.h>
 #include <Platform/Fatal.h>
 
@@ -19,7 +22,7 @@ void LogOpenFailure(StringView map, const char* stage, ErrorCode error) noexcept
 } // namespace
 
 GameInstance::GameInstance(Allocator& allocator) noexcept
-    : localPlayers_(allocator), pendingName_(allocator) {
+    : localPlayers_(allocator), pendingName_(allocator), pendingOptions_(allocator) {
 }
 
 GameInstance::~GameInstance() noexcept = default;
@@ -166,6 +169,10 @@ Result<void> GameInstance::OpenWorld(const MapDesc& map) noexcept {
             return copied;
         }
 
+        if (auto copied = pendingOptions_.TryAssign(map.options); !copied) {
+            return copied;
+        }
+
         if (hasPendingOpen_) {
             Log::Warning(LogGameplay, "OpenWorld {Map} replaces an earlier pending request",
                          map.name);
@@ -173,6 +180,7 @@ Result<void> GameInstance::OpenWorld(const MapDesc& map) noexcept {
 
         pendingMap_ = map;
         pendingMap_.name = pendingName_.View();
+        pendingMap_.options = pendingOptions_.View();
         hasPendingOpen_ = true;
         return Result<void>::Success();
     }
@@ -190,13 +198,20 @@ Result<void> GameInstance::RunPendingOpen() noexcept {
     hasPendingOpen_ = false;
     // OpenWorldNow 안의 정리 hook이 새 요청을 남길 수 있어 복사해서 쓴다.
     String name(pendingName_.GetAllocator());
-    if (auto copied = name.TryAssign(pendingName_.View()); !copied) {
+    String options(pendingOptions_.GetAllocator());
+    auto copied = name.TryAssign(pendingName_.View());
+    if (copied) {
+        copied = options.TryAssign(pendingOptions_.View());
+    }
+
+    if (!copied) {
         LogOpenFailure(pendingName_.View(), "Request", copied.Error());
         return copied;
     }
 
     MapDesc map = pendingMap_;
     map.name = name.View();
+    map.options = options.View();
     return OpenWorldNow(map);
 }
 
@@ -225,7 +240,9 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     WorldCreateDesc desc;
     desc.name = map.name;
     desc.timeStep = config_->timeStep;
-    desc.subsystems = config_->worldSubsystems;
+    // 설정 목록 + GameplayWorldSubsystem(client 소유 — World가 Shutdown까지 Span을 쥔다).
+    desc.subsystems = Span<const WorldSubsystemType>(services_->worldSubsystems.Data(),
+                                                     services_->worldSubsystems.Size());
     desc.kind = map.kind;
     desc.outerSubsystems = SubsystemLookup();
     desc.beginPlay = false;
@@ -242,6 +259,12 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
         (void)destroyed;
         return Result<void>::Failure(error);
     };
+
+    // GameDirector는 배치 Actor보다 먼저다(21.2절 6단계).
+    const char* stage = "Director";
+    if (auto directed = SpawnDirector(*world, map, stage); !directed) {
+        return fail(stage, directed.Error());
+    }
 
     if (map.populate != nullptr) {
         if (auto populated = map.populate(*world, map.populateContext); !populated) {
@@ -261,6 +284,48 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> GameInstance::SpawnDirector(World& world, const MapDesc& map,
+                                         const char*& stage) noexcept {
+    // 19.3절: Game·Tryout World이고 Client가 아닐 때만 만든다(UE SetGameMode — 서버·standalone).
+    if ((map.kind != WorldKind::Game && map.kind != WorldKind::Tryout) ||
+        netMode_ == NetMode::Client) {
+        return Result<void>::Success();
+    }
+
+    // 타입 우선순위: 맵 → 프로젝트 기본 → GameDirector, 마지막에 GameInstance override.
+    stage = "Director";
+    TypeId type = map.directorType != TypeId{}               ? map.directorType
+                  : config_->defaultDirectorType != TypeId{} ? config_->defaultDirectorType
+                                                             : ObjectTypeIdOf<GameDirector>();
+    type = OverrideDirectorType(type);
+    auto derived = engine_->Types().IsA(type, ObjectTypeIdOf<GameDirector>());
+    if (!derived || !derived.Value()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto spawned = world.SpawnActorDeferred(type);
+    if (!spawned) {
+        return Result<void>::Failure(spawned.Error());
+    }
+
+    // options를 먼저 보관하고 FinishSpawning 전에 InitGame(UE InitGame — GameState는 아직 없다).
+    stage = "InitGame";
+    auto initialized =
+        world.With<GameDirector>(spawned.Value(), [&](GameDirector& director) noexcept {
+            if (auto copied = director.options_.TryAssign(map.options); !copied) {
+                return copied;
+            }
+
+            return director.InitGame(map.name, director.Options());
+        });
+    if (!initialized) {
+        return initialized;
+    }
+
+    stage = "FinishSpawning";
+    return world.FinishSpawning(spawned.Value());
+}
+
 GameInstanceClient::GameInstanceClient(Allocator& allocator,
                                        const GameInstanceConfig& config) noexcept
     : config_(config), services_(allocator) {
@@ -275,6 +340,29 @@ GameInstanceClient::~GameInstanceClient() {
 Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     engine_ = &engine;
     services_.engine = &engine;
+    // OpenWorld가 만드는 World의 Subsystem 목록이다: 설정 목록 + GameplayWorldSubsystem(19.5절 —
+    // 설정에 이미 있으면 더하지 않는다).
+    services_.worldSubsystems.Clear();
+    bool hasGameplay = false;
+    for (const WorldSubsystemType& type : config_.worldSubsystems) {
+        hasGameplay = hasGameplay || type.key == SubsystemKeyOf<GameplayWorldSubsystem>();
+    }
+
+    auto listed = services_.worldSubsystems.TryReserve(config_.worldSubsystems.Size() + 1);
+    for (usize index = 0; listed && index < config_.worldSubsystems.Size(); ++index) {
+        listed = services_.worldSubsystems.TryPushBack(config_.worldSubsystems[index]);
+    }
+
+    if (listed && !hasGameplay) {
+        listed = services_.worldSubsystems.TryPushBack(
+            MakeSubsystemType<WorldSubsystem, GameplayWorldSubsystem>("Gameplay"));
+    }
+
+    if (!listed) {
+        engine_ = nullptr;
+        return listed;
+    }
+
     ObjectRegistry& objects = engine.Objects();
     const TypeId type = config_.gameInstanceType != TypeId{} ? config_.gameInstanceType
                                                              : ObjectTypeIdOf<GameInstance>();

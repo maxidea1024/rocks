@@ -135,7 +135,7 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     record.spawnTransform = params.transform;
     created.Value().Reset();
     FindLevelRecord(level)->actorCount += 1;
-    ++spawnedTotal_;
+    record.spawnOrder = ++spawnedTotal_;
 
     // 소유자·원인은 위에서 검사했다(새 Actor는 아무도 소유하지 않아 고리가 생길 수 없다).
     if (!params.owner.IsNull() || !params.instigator.IsNull()) {

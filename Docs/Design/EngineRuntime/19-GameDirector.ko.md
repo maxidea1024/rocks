@@ -62,7 +62,26 @@ World 모듈은 Gameplay를 모른다(3절 의존 방향). Gameplay 모듈의 `G
 - Pawn 파괴·possession 변경에도 유지되고 Controller 파괴 때 함께 파괴한다(UE `CleanupPlayerState`).
 - 비활성 PlayerState(재접속 복구)와 World 전환 이어받기(`CopyProperties`)는 네트워크·travel 단계 후속이다. 모듈식 게임플레이 `PlayerStateComponent`(CR48)는 이 클래스를 소유자로 쓴다.
 
-### 19.7 시험(완료 조건)
+### 19.7 S11 구현 계약
+
+S11은 Controller·Pawn 없이 되는 범위다. Login·RestartPlayer·Logout·`playerControllerType`·`defaultPawnType`·`aiControllerType`는 S12가 더한다.
+
+| 타입(Gameplay 모듈) | S11 내용 |
+|---|---|
+| `GameplayWorldSubsystem : WorldSubsystem, BeginPlayDispatcher` | GameInstance `OpenWorld`가 만드는 World 목록 끝에 더한다(client 소유 목록 — World가 Shutdown까지 Span을 쥔다). `Initialize`에서 dispatcher로 걸고 `StartPlay`에서 Director가 있으면 `GameDirector::StartPlay`, 없으면 바로 `DispatchBeginPlay`. `Director()`·`GameStateHandle()`. 다른 모듈이 `GetSubsystem`으로 찾으므로 키를 모듈 사이에 같게 선언한다 |
+| `GameDirector : Actor` | `gameStateType`·`playerStateType`(protected, 파생 생성자가 정한다). `virtual InitGame(mapName, options)`(FinishSpawning 전, options는 엔진이 먼저 보관 — `Options()`), `virtual StartPlay()`(기본: GameState `HandleBeginPlay`), `virtual FindPlayerStart(controller, incomingName)`(19.2절 규칙, incomingName이 비면 options `?start=`), `AllocatePlayerId()`(1부터). 프레임워크 hook: PreAwake = GameState spawn → `InitGameState`(directorType 기록), PostAwake = Subsystem 등록, EndPlay = 해제 |
+| `GameState : Actor` | `DirectorType`·`PlayerStates`(추가 순서)·`HasBegunPlay`·`HasMatchStarted`, `AddPlayerState`·`RemovePlayerState`(중복·없음 무시), `virtual HandleBeginPlay()`(hasBegunPlay → `DispatchBeginPlay` → matchStarted, 실패하면 hasBegunPlay를 되돌린다). PostAwake = Subsystem 등록 + 이미 있는 PlayerState를 Spawn 순번으로 모음 |
+| `PlayerState : Actor` | `PlayerId`·`PlayerName`·`IsSpectator`·`IsBot`·`PawnHandle`(S12가 고친다). PostAwake = Director가 있으면 `AllocatePlayerId`, GameState가 있으면 추가. EndPlay = 제거 |
+| `PlayerStart : Actor` | `PlayerStartTag`(UE `PlayerStartTag`). PreAwake에서 root SceneComponent를 만든다(Spawn Transform이 root에 붙는다 — 17.3절) |
+| `MapDesc` | `directorType`·`options` 추가(미룬 요청은 options도 복사) |
+| `GameInstanceConfig`·`GameInstance` | `defaultDirectorType`, `virtual TypeId OverrideDirectorType(TypeId)`(UE `OverrideGameModeClass`) |
+| World(World 모듈) | `GetSpawnOrder(actor)` — Spawn마다 1씩 커지는 번호(FindPlayerStart·PlayerState 모으기) |
+
+- **OpenWorld 순서(18.5절 보강).** World 생성(WorldSubsystem 초기화 — GameplayWorldSubsystem이 dispatcher가 된다) → Director 조건(19.3절)이 맞으면 타입 결정 → 엔진 TypeRegistry `IsA(type, GameDirector)`가 아니면 `InvalidArgument` → `SpawnActorDeferred` → options 보관 → `InitGame` → `FinishSpawning`(GameState spawn·등록) → `populate` → `BeginPlay`(StartPlay → HandleBeginPlay → DispatchBeginPlay). 어느 단계든 실패하면 새 World를 정리한다(실패 단계 이름 Director·InitGame·FinishSpawning).
+- **GameState 타입 검사.** Director가 `gameStateType`으로 Spawn한 Actor가 GameState 파생이 아니면 그 Actor를 파괴하고 PreAwake가 `InvalidArgument`로 실패한다(Director Spawn 실패 → OpenWorld 실패). World는 TypeRegistry를 내보이지 않으므로 Spawn 뒤 빌림으로 판정한다.
+- **빌림.** 프레임워크 Actor끼리는 handle로 잇고 `World::With`로 빌린다(GameplayWorldSubsystem은 handle만 든다).
+
+### 19.8 시험(완료 조건)
 
 - Director 생성 조건(종류·NetMode)과 타입 우선순위·override hook·잘못된 타입 거부.
 - InitGame이 FinishSpawning 전, GameState가 Director OnAwake에서 생성·등록.

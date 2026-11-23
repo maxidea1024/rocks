@@ -44,11 +44,15 @@ namespace detail {
 // 하고, GameInstance를 정리한 뒤에도(Editor·Inactive World는 Shutdown 때까지 창이 열려 있다) 창이
 // 닫힌 묶음만 보게 한다(Docs/Design/EngineRuntime 18.6절).
 struct GameInstanceServices {
-    explicit GameInstanceServices(Allocator& allocator) noexcept : subsystems(allocator) {
+    explicit GameInstanceServices(Allocator& allocator) noexcept
+        : subsystems(allocator), worldSubsystems(allocator) {
     }
 
     Engine* engine = nullptr;
     GameInstanceSubsystems subsystems;
+    // OpenWorld가 만드는 World의 Subsystem 목록이다(설정 목록 + GameplayWorldSubsystem). World가
+    // Shutdown까지 Span을 쥐므로 client가 소유한다.
+    Array<WorldSubsystemType> worldSubsystems;
     // GameInstance Subsystem을 조회 창에 보이는지다(초기화 뒤 참, 정리 전에 거짓).
     bool visible = false;
 };
@@ -61,6 +65,8 @@ struct GameInstanceConfig {
     // 타입이어야 한다(native 파생은 EngineConfig::registerTypes).
     TypeId gameInstanceType;
     TypeId localPlayerType;
+    // 맵이 GameDirector 타입을 정하지 않을 때의 프로젝트 기본이다(비면 GameDirector — 19.3절).
+    TypeId defaultDirectorType;
     NetMode netMode = NetMode::Standalone;
     Span<const GameInstanceSubsystemType> subsystems;
     Span<const LocalPlayerSubsystemType> localPlayerSubsystems;
@@ -195,6 +201,12 @@ protected:
         return Result<void>::Success();
     }
 
+    // GameDirector 타입을 마지막으로 바꾼다(UE OverrideGameModeClass — 19.3절). 받은 타입은 맵 →
+    // 프로젝트 기본 → GameDirector 순으로 정한 것이다. 기본은 그대로 돌려준다.
+    virtual TypeId OverrideDirectorType(TypeId type) noexcept {
+        return type;
+    }
+
     // 기본 맵을 연 뒤다(UE OnStart).
     virtual void OnStart() noexcept {
     }
@@ -210,6 +222,9 @@ private:
     // 미룬 요청을 지금 실행한다(OnEngineTick).
     Result<void> RunPendingOpen() noexcept;
     Result<void> OpenWorldNow(const MapDesc& map) noexcept;
+    // 조건(19.3절)이 맞으면 GameDirector를 Spawn한다(InitGame → FinishSpawning). stage는 실패한
+    // 단계 이름을 받는다.
+    Result<void> SpawnDirector(World& world, const MapDesc& map, const char*& stage) noexcept;
     // 현재 World를 reason으로 끝내고 파괴를 요청한다(없으면 아무것도 하지 않는다).
     void CloseCurrentWorld(EndPlayReason reason) noexcept;
     // LocalPlayer를 모두 역순으로 지운다(종료·시작 실패 되돌림).
@@ -223,6 +238,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "localPlayers") ObjectRefArray<LocalPlayer> localPlayers_;
     ROCKS_NATIVE() World* currentWorld_ = nullptr;
     ROCKS_NATIVE() String pendingName_;
+    ROCKS_NATIVE() String pendingOptions_;
     ROCKS_NATIVE() MapDesc pendingMap_;
     ROCKS_NATIVE() NetMode netMode_ = NetMode::Standalone;
     ROCKS_NATIVE() bool hasPendingOpen_ = false;

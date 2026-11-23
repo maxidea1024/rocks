@@ -447,6 +447,15 @@ Result<ActorState> World::GetActorState(ObjectHandle actor) const noexcept {
     return Result<ActorState>::Success(record->state);
 }
 
+Result<uint64> World::GetSpawnOrder(ObjectHandle actor) const noexcept {
+    const ActorRecord* record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return Result<uint64>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<uint64>::Success(record->spawnOrder);
+}
+
 Result<ObjectHandle> World::GetActorLevel(ObjectHandle actor) const noexcept {
     const ActorRecord* record = FindActorRecord(actor);
     if (record == nullptr) {
