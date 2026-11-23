@@ -18,6 +18,12 @@ inline constexpr uint64 MaxWorkspaceFileBytes = uint64(MaxSourceBytes) + 1;
 
 inline constexpr uint32 NoPackage = NumericLimits<uint32>::Max();
 
+// 모듈 원문 파일 이름의 끝이다.
+inline constexpr StringView SourceExtension = ".spark";
+
+// ID manifest 파일 이름의 끝이다(`<패키지>.rocksids.json`).
+inline constexpr StringView IdsExtension = ".rocksids.json";
+
 enum class WorkspaceFileKind : uint8 {
     Schema,
     Manifest,
@@ -28,12 +34,13 @@ enum class WorkspaceFileKind : uint8 {
 // 읽은 파일 하나다.
 struct WorkspaceFile {
     explicit WorkspaceFile(Allocator& allocator) noexcept
-        : path(allocator), modulePath(allocator), text(allocator) {
+        : path(allocator), full(allocator), modulePath(allocator), text(allocator) {
     }
 
     WorkspaceFileKind kind = WorkspaceFileKind::Module;
     uint32 package = NoPackage; // Manifest·Ids·Module의 패키지 번호
     String path;                // 진단 경로(인자 경로 기준 — `/` 구분)
+    String full;                // 파일 시스템 경로(인자 경로에 이름을 이은 것)
     String modulePath;          // Module: 패키지 뿌리 기준 경로(`Combat/Score.spark`)
     Array<char> text;
     bool selected = false; // 파일 인자로 고른 모듈(dump가 그 모듈만 쓴다)
@@ -51,13 +58,38 @@ public:
                       Span<const StringView> schemaFolders, StringBuilderBase& problem,
                       bool& ioFailure) noexcept;
 
-    // 읽은 파일을 compilation에 더한다. modules는 파일마다 모듈 번호다(Module이 아니면 NoModule).
+    // 읽은 파일을 compilation에 더한다. modules는 파일마다 모듈 번호(Module이 아니면 NoModule),
+    // packages는 작업 공간 패키지마다 compilation 패키지 번호다. ids가 비어 있지 않으면 작업 공간
+    // 패키지마다 ID manifest 원문을 바꿔 넣는다(IdsOverride::text가 빈 패키지는 그대로 — 파일이
+    // 없던 패키지는 IdsOverride::path를 진단 경로로 새로 더한다 — `sparks ids`의 쓰기 전 확인).
+    struct IdsOverride {
+        StringView text;
+        StringView path;
+    };
+
     Result<void> AddTo(SourceSet& sources, Compilation& compilation, DiagnosticList& diagnostics,
-                       Array<uint32>& modules) noexcept;
+                       Array<uint32>& modules, Array<uint32>& packages,
+                       Span<const IdsOverride> ids = Span<const IdsOverride>()) noexcept;
 
     Span<const WorkspaceFile> Files() const noexcept {
         return files_.View();
     }
+
+    uint32 PackageCount() const noexcept {
+        return static_cast<uint32>(roots_.Size());
+    }
+
+    // 패키지 뿌리의 파일 시스템 경로와 진단 경로다(진단 경로는 지금 폴더면 빈 글자).
+    StringView RootPath(uint32 package) const noexcept {
+        return roots_[package].View();
+    }
+
+    StringView RootDisplay(uint32 package) const noexcept {
+        return rootDisplays_[package].View();
+    }
+
+    // 패키지의 ID manifest 파일 번호다(Files() 색인). 없으면 NoPackage.
+    uint32 IdsFile(uint32 package) const noexcept;
 
 private:
     Result<bool> LoadPath(platform::FileSystem& files, StringView path, StringBuilderBase& problem,

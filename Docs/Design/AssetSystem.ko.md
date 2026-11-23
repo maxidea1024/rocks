@@ -902,11 +902,31 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 | 단계 | 범위 | 시험 |
 |---|---|---|
 | A4a | 모듈·TargetProfile·CookSettings(읽기·병합·검증·SHA-256)·엔진 기본 프로파일 파일 | 병합·거부·SHA 안정·칸 변경 시 SHA 변경 |
-| A4b | 대상 계산(전체·부분·NeverCook·AlwaysCook∩NeverCook·Missing·Soft 설정·EditorOnly·역방향 Build·사라진 항목)·색인 콘텐츠 해시(지연·캐시) | 그래프 경우마다 대상·진단, 해시 캐시 무효화 |
+| A4b | 대상 계산(전체·부분·NeverCook·AlwaysCook∩NeverCook·Missing·Soft 설정·역방향 Build·사라진 항목·bundle 태그 읽기)·색인 콘텐츠 해시(지연·캐시) | 그래프 경우마다 대상·진단, 해시 캐시 무효화 |
 | A4c | 키(build key Build SCC·cookKey Hard SCC·타입 표 지문)·CookProcessor 표·기본 처리기·쿠킹 실행(메모리, 열기 관리) | 순환 키(시나리오 28)·Build 원본만 바꾸면 배열 cookKey 바뀜·EditorOnly 필드 부재(11)·두 번 같은 byte(13)·원본 없이 쿠킹(2)·열기 횟수 |
 | A4d | 게시·전체 정리·부분 병합·재사용 조건·IncompatibleCook·CorruptEntry·실패 시 게시본 불변·보고서 | 시나리오 13·22·27 |
-| A4e | `asset-cook` 명령·`--verify-nuggets`(NuggetMismatch 등록)·bundle 지정자(리플렉션 조정)·저장 때 bundle 태그 | 명령 출력·verify(A4는 늘 같음)·bundle 구성원 |
+| A4e | `asset-cook` 명령·`--verify-nuggets`(NuggetMismatch 등록)·리플렉션 요구 둘(필드 지정자 `AssetBundles`·클래스 표지 `EditorOnly` — 리플렉션 담당과 조정)·저장 때 bundle 태그·EditorOnly 에셋 규칙(결정 4) | 명령 출력·verify(A4는 늘 같음)·bundle 구성원·EditorOnly 에셋 |
 
+- A4b 구현 세부(2026-11-23 — 권장안으로 확정, 결정 4·5의 콘텐츠 해시를 구체화):
+  - EditorOnly 에셋 규칙(결정 4)은 A4e로 옮긴다 — 클래스 표지 `EditorOnly`가 리플렉션에 아직 없다(`TypeFlags`에 없음). 필드 지정자 `AssetBundles`와 같은 리플렉션 요구라 함께 다룬다.
+  - **콘텐츠 해시**(AssetDatabase): `AssetIndexEntry`에 `contentHash`·`contentHashBytes`·`contentHashTicks`·`hasContentHash`를 둔다. `AssetIndex::ContentHash(files, id)`는 Content 파일을 Stat해 크기·수정 시각이 저장된 값과 같으면 저장된 해시를, 아니면 64 KiB씩 흘려 읽어 SHA-256을 계산해 그 Stat 값과 함께 둔다(바뀐 파일만 다시 해시 — 권장 1). 읽기 전후 Stat이 다르면 `Busy`(해시하는 동안 바뀜 — 쿠킹은 그 에셋 오류). 색인 캐시가 네 칸을 보존한다(캐시 schemaVersion 3 — 캐시 항목은 지문으로 재사용되므로 해시는 Stat 대조로만 믿는다). 오류: 없음 NotFound, 같은 id 둘 이상 AlreadyExists, 파일 IO 오류, 할당 실패.
+  - **API**(AssetCooker `CookTargets.h`): `ComputeCookTargets(request, out)`. 요청 = 색인·TypeRegistry·CookSettings·부분 쿠킹 경로 목록(비면 전체 쿠킹)·기존 매니페스트(부분, 없으면 null). 결과 = 대상(AssetId 순 — 각각 PrimaryAsset 여부·bundle 목록), 제외 목록(Soft로만 닿은 NeverCook 에셋 — 매니페스트 의존에서 뺄 것), 사라진 항목(기존 매니페스트에 있고 색인에 없음), 진단 목록. 진단은 `CookDiagnostic{code, warning, asset, related, setting}`다 — 같은 코드가 경고·오류로 쓰인다(NeverCookReferenced·MissingDependency·InvalidPath)라 `AssetDiagnostic`(코드별 고정 수준)이 아닌 따로 둔 표지다. 함수 오류는 색인 조회 오류·할당 실패뿐이고 규칙 위반은 진단이다(쿠킹은 오류 진단이 하나라도 있으면 게시하지 않는다 — 10절).
+  - 경로 판정은 비교 키로 한다: 에셋 경로는 키 일치, 디렉터리는 키 접두(`<dir key>/`, 마운트 디렉터리는 모든 항목).
+  - 규칙(판정 순서):
+    1. 뿌리: 전체 쿠킹 = alwaysCook(에셋은 FindByPath, 디렉터리는 접두) ∪ PrimaryAsset 규칙(ListByType(type, types — 파생 포함) 중 디렉터리 하나 아래). 부분 쿠킹 = 인자 경로(같은 판정). 아무것도 가리키지 않는 alwaysCook 항목은 경고 `InvalidPath`(setting = 순번), 인자 경로는 오류 `InvalidPath`.
+    2. NeverCook 뿌리는 뺀다. alwaysCook·인자 경로가 직접 가리킨 에셋이면 경고 `NeverCookReferenced`(UE와 같은 우선순위), PrimaryAsset 규칙으로만 닿았으면 진단 없이 뺀다.
+    3. 폐포: 대상마다 색인 의존을 본다 — Hard는 늘, Soft는 cookSoftReferences일 때, PrimaryAsset이면 bundle 구성원(태그 `Bundle.<이름>` = 구성원 AssetId 표준 문자열, 구성원마다 태그 하나 — A4e가 쓴다)도 Hard와 같은 규칙. 의존이 색인에 없으면 Hard·bundle은 오류·Soft는 경고 `MissingDependency`(asset = 참조자, related = 의존), 같은 id가 둘 이상이면 오류 `DuplicateAssetId`, NeverCook이면 Hard·bundle은 오류 `NeverCookReferenced`·Soft는 제외 목록. bundle 태그 값이 AssetId가 아니면 오류 `CorruptPackage`(asset = PrimaryAsset). EditorOnly·Build·ImportOwner 간선은 따라가지 않는다.
+    4. 부분 쿠킹: 인자 뿌리와 역방향으로 더한 에셋을 Build로 의존하는 에셋(색인 Referencers(Build))을 고정점까지 더한다(NeverCook은 진단 없이 빼고, 더한 에셋도 3의 폐포를 따른다). Hard·Soft·bundle 폐포로만 들어온 에셋에는 적용하지 않는다 — 10절의 의도는 인자 쪽 편집(원본 Texture2D를 고치면 그것을 묶는 Texture2DArray도)이고, 폐포 에셋까지 넓히면 많이 쓰이는 원본 하나가 그것을 묶는 에셋 전부를 다시 쿠킹한다(리뷰 권장, 2026-11-23). 폐포로 먼저 들어온 에셋도 뒤에 역방향으로 닿으면 넓힌다. 기존 매니페스트 항목 중 색인에 없는 것은 사라진 항목이고, 이번에 다시 쿠킹하지 않는 남은 항목이 그것을 Hard로 의존하면 오류 `MissingDependency`(asset = 남은 항목). 다시 쿠킹하는 항목은 옛 매니페스트 의존이 아니라 색인 의존으로 3에서 이미 판정했다(리뷰 필수 — 지운 참조를 옛 의존으로 오류 내지 않는다). 기존 항목 중 다시 쿠킹할 것(결정 8)은 키가 필요하므로 A4c·A4d가 정한다.
+    5. PrimaryAsset 여부는 규칙에 맞는지로 정한다(폐포로 들어와도 규칙에 맞으면 PrimaryAsset). bundle은 PrimaryAsset에만 있다(이름 순, 구성원 AssetId 순).
+  - 결정성: 대상·제외·사라진 항목은 AssetId(high, low) 순, 진단은 (asset, code, related, setting, 오류 먼저) 순이다(같은 의존의 Hard·Soft 누락은 칸이 같고 수준만 다르다).
+- A4b 상태: **구현** — 대조표 14.1.63절, coverage 14.1.64절. 구현에서 정한 것:
+  - 콘텐츠 해시는 `AssetIndexContentHash.cpp`(조회는 `FindById`를 그대로 써서 NotFound·AlreadyExists가 같다). 색인 캐시 schemaVersion 3은 readOnly 뒤에 표지(u8, 0·1 밖은 캐시 없음)·digest·크기(u64)·시각(u64)을 둔다.
+  - 뿌리 진단을 더 정했다: 에셋 경로가 같은 경로 키 파일 둘 이상을 가리키면 오류 `DuplicatePath`(asset null, setting = 순번 — 어느 것도 뿌리로 고르지 않는다), 같은 id 파일은 alwaysCook·인자 경로·디렉터리 목록·PrimaryAsset 규칙 어디서 닿아도 오류 `DuplicateAssetId`(asset = 그 id), 역방향 Build 참조자가 같은 id면 오류 `DuplicateAssetId`(asset = 대상, related = 참조자 id). 디렉터리가 가리킨 NeverCook 항목도 "직접 가리킴"이라 경고다.
+  - 대상 큐는 색인 항목 포인터다(고유 항목만 들어온다 — 의존·태그를 다시 찾지 않는다). 진단·대상·제외 목록의 할당 실패는 기록해 두고 계속한 뒤 끝에서 OutOfMemory로 돌려준다(호출마다 분기하지 않는다). bundle 구성원은 태그 순서((키, 값) 정렬·중복 없음)를 써서 마지막 bundle에 붙이고 AssetId 순으로 정렬한다.
+  - 비교는 `GuidLess`(AssetRuntime)를 쓴다(따로 만든 비교 함수 없음).
+  - PrimaryAsset 타입 조회: 없는 타입(NotFound)만 설정 위반 InvalidArgument이고, 그 밖(종료 뒤 ShuttingDown·lease 포화 Overflow)은 TypeRegistry 오류 그대로다.
+  - 리뷰 반영(2026-11-23, 필수 하나·권장 넷): 다시 쿠킹하는 기존 항목의 옛 의존 판정 제거(규칙 4), 역방향 Build 범위를 인자 뿌리·역방향 에셋으로 한정(규칙 4), 진단 정렬에 수준, TypeRegistry 오류 보존, 아래 Stat 한계 기록.
+  - 콘텐츠 해시의 한계: 크기·수정 시각이 같으면 저장된 해시를 믿으므로, 같은 크기로 다시 쓰면서 수정 시각을 보존한 파일(`cp -p`·`rsync -t`·압축 해제·거친 시각 해상도의 파일 시스템)은 낡은 해시가 남는다. 플랫폼 층 `FileInfo`에 변경 시각(ctime)·파일 id가 아직 없어 더 대조하지 못한다 — 생기면 대조에 더한다. 쿠킹은 이 한계를 줄이려고 A4c 실행 단계에서 쿠킹 전에 색인을 갱신해(감시 갱신 또는 Rebuild) 색인 의존과 파일 내용을 같은 시점으로 맞춘다.
 - A4a 상태: **구현** — 대조표 14.1.61절, coverage 14.1.62절. 구현에서 정한 것:
   - 모듈 `Engine/Source/Developer/AssetCooker`(`CookConfig.h` — `TargetProfile`·`PrimaryAssetRule`·`CookSettings`·`CookBulkCodec` 리플렉션 타입, `ReadTargetProfile`·`ReadCookSettings`·`HashTargetProfile`·`HashCookSettings`·`ClassifyCookPath`). 엔진 기본 파일 `Engine/Config/TargetProfiles/Windows.json`(graphicsBackend D3D12)·`Android.json`(빈 backend — 후속).
   - PrimaryAsset 규칙은 `{type, directories}`다(UE `FPrimaryAssetTypeInfo` — 디렉터리는 하나 이상, 빈 목록은 거부, 진단은 규칙 순번 index와 디렉터리 순번 item). 처음 구현은 "codec이 배열 원소 안의 배열에 대입하지 못한다"고 보고 `{type, directory}`로 바꿨으나 틀린 가정이었다 — 그 제약은 Config의 배열 연산 문법(`+=` 등)의 것이고 ImportJson은 원소 안 배열을 통째 교체로 받는다(리뷰 필수 — 확인 없이 스키마를 바꾸지 않는다).
@@ -2946,6 +2966,33 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 위치 | 닿지 않는 것 | 근거 |
 |---|---|---|
 | `ApplyJsonFile`의 `Publish` 실패 | 실패 | 값 대상의 게시는 준비한 사본과 무할당 맞바꾸기다(ReflectionText TextAssignments.h — 실패는 살아 있는 객체의 묶음 게시에만 있다) |
+
+#### 14.1.63 요구 대조표(A4b — 대상 계산·콘텐츠 해시)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookTargetsTests.cpp`(`CookTargets_*` 7 — 메모리 Content에 노드 그래프를 쓰고 색인을 만든다, 의존 섹션은 시험이 다시 써서 import 없이 어떤 그래프든 만든다)와 `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexContentHashTests.cpp`(`AssetIndex_ContentHash*` 4), 캐시 형식은 `AssetIndexCacheTests.cpp`다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 전체 쿠킹(A4b 규칙 1·3·5) | alwaysCook ∪ PrimaryAsset 규칙, Hard 폐포(두 단계), Soft는 설정일 때만, EditorOnly·Build·ImportOwner 따라가지 않음, bundle(이름 순·구성원 AssetId 순), PrimaryAsset 아닌 에셋의 bundle 태그 무시, 파생 타입 규칙(Base 규칙이 Derived 포함·TestAsset 제외), 규칙 밖 뿌리는 PrimaryAsset 아님·폐포로 들어온 규칙 에셋은 PrimaryAsset, 디렉터리 구성 요소 경계, out 비움 | `CookTargets_FullCook` |
+| 뿌리 진단(규칙 1) | 디렉터리 재귀, 없는 에셋·디렉터리 경고 InvalidPath(순번), 같은 경로 DuplicatePath, 같은 id(alwaysCook 경로·PrimaryAsset 규칙·마운트 목록의 두 파일), 같은 뿌리 두 번은 한 번, 마운트는 전체 | `CookTargets_Roots` |
+| NeverCook(규칙 2·3) | 에셋·디렉터리 직접 지정 경고(순번), 규칙으로만 닿으면 조용히, Hard·bundle 오류, Soft 설정이면 제외 목록(둘 — AssetId 순)·아니면 없음, 마운트 NeverCook(경고만 — HasErrors 거짓) | `CookTargets_NeverCook` |
+| 누락·같은 id·bundle 태그(규칙 3) | Hard 누락 오류·Soft 누락 경고(같은 의존의 Hard·Soft 누락은 둘 다 — 오류 먼저), 같은 id Hard·Soft·bundle 오류, bundle 값 문자열·빈 이름(`Bundle.`)·null·대문자 CorruptPackage, bundle 목록은 올바른 태그만(누락·같은 id 구성원도 목록에는 있다), Soft 설정이 아니면 Soft 의존을 보지 않음 | `CookTargets_MissingAndDuplicates` |
+| 부분 쿠킹(규칙 4) | 인자 경로(없음 오류·NeverCook 경고·디렉터리), 역방향 Build 고정점(두 단계·더한 에셋의 Hard 폐포·NeverCook 참조자 조용히·같은 id 참조자 오류), 역방향 범위(Hard 폐포로만 들어온 에셋의 Build 참조자는 더하지 않음, 폐포로 먼저 들어온 에셋이 뒤에 역방향으로 닿으면 그 참조자도), PrimaryAsset 규칙에 맞는 폐포 에셋의 bundle, 기존 매니페스트(사라진 항목, 같은 id 항목은 남음, 다시 쿠킹하지 않는 남은 항목의 Hard → 사라짐 오류, 다시 쿠킹하는 항목의 옛 Hard → 사라짐은 오류 아님, 색인에 있는 Hard·Soft는 아님, 사라진 항목끼리는 보지 않음), 전체 쿠킹은 기존 매니페스트를 보지 않음 | `CookTargets_Partial` |
+| 요청 거부 | 색인·TypeRegistry·설정 null(out 비움), 형식이 틀린 alwaysCook·neverCook·PrimaryAsset 디렉터리·인자 경로, 등록되지 않은 타입 — InvalidArgument, 종료한 TypeRegistry는 ShuttingDown 그대로 | `CookTargets_Rejects` |
+| 결정성 | 대상·제외·사라진 항목 AssetId 순, 진단 (asset, code, related, setting, 오류 먼저) 순(시험 쪽 비교로 정렬해 대조) | 위 시험 모두 |
+| 할당 실패(대상) | 전체(bundle·Soft·제외·경고)·부분(역방향 Build 참조자·같은 id 참조자·기존 매니페스트·진단) — 모든 지점 OutOfMemory, 다 지나면 기준과 대상·PrimaryAsset·bundle 수·제외·사라진 항목·진단 수가 같다 | `CookTargets_AllocationFailures` |
+| 콘텐츠 해시(결정 5) | 처음 계산(전체 SHA-256·Stat 값), Stat 같으면 열지 않음, 시각만·크기만 달라도 다시 읽음, 내용 바뀌면 새 해시, 큰 파일(조각 셋 + 끝)·빈 파일 | `AssetIndex_ContentHashComputesAndReuses` |
+| 콘텐츠 해시 거부 | 없는 id·null NotFound, 같은 id AlreadyExists, 첫 Stat·두 번째 Stat·열기·읽기 실패·파일 없음, 읽는 동안 크기만·시각만 바뀌면 Busy — 해시를 두지 않음, 고장을 걷으면 계산 | `AssetIndex_ContentHashRejects` |
+| 캐시 보존 | 네 칸 왕복(SameIndex), 캐시를 쓴 색인은 Stat 같으면 열지 않음, 캐시 뒤 시각만 바뀐 파일(같은 지문 — 항목 재사용)은 다시 읽음, 해시 없는 항목은 없음 그대로 | `AssetIndex_ContentHashCachePersists` |
+| 캐시 형식(schemaVersion 3) | 네 칸을 가진 항목을 받음(값 그대로), 표지 2 거부, 잘림(모든 칸 위치) 거부 | `AssetIndexCache_RejectsUntrustedInput` |
+| 할당 실패(해시) | 경로·읽기 버퍼 — OutOfMemory·해시 없음, 다 지나면 계산 | `AssetIndex_ContentHashAllocationFailures` |
+| 조합(14 완료 조건 2) | 뿌리 출처(alwaysCook 에셋·디렉터리·마운트·규칙·인자) × 항목 상태(정상·같은 id·같은 경로·NeverCook·없음) × 간선(Hard·Soft·bundle·Build 역방향·따라가지 않는 셋) × Soft 설정 × 전체·부분 | 위 시험 |
+
+#### 14.1.64 Coverage(A4b)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter CookTargets_ -Sources Engine/Source/Developer/AssetCooker` — `CookTargets.cpp` 줄 436/436·분기 228/228(리뷰 반영 뒤), `CookTargets.h` 분기 4/4. `-Filter AssetIndex_ContentHash -Sources Engine/Source/Developer/AssetDatabase` — `AssetIndexContentHash.cpp` 줄 61/61·분기 30/30. `-Filter AssetIndexCache_` — `AssetIndexCache.cpp`의 새 칸 읽기·쓰기는 모두 닿았다(남은 분기 셋 — 캐시 파일 크기 조회 실패·키의 normalizesNames 쓰기·readOnly 참 쓰기 — 은 A2d1 때부터 있던 것이다).
+
+닿지 않는 곳 없음.
 
 ## 15. PNG 디코더 범위
 

@@ -155,6 +155,11 @@ bool Patch(Array<uint8>& bytes, StringView needle, StringView replacement) noexc
 struct EntrySpec {
     StringView name = "A.rasset";
     uint8 readOnly = 0;
+    // 콘텐츠 해시 칸이다(10.2절 A4b — schemaVersion 3).
+    uint8 hasContentHash = 0;
+    uint8 contentHashByte = 0;
+    uint64 contentHashBytes = 0;
+    uint64 contentHashTicks = 0;
     uint32 dependencyCount = 0;
     uint32 dependencyKind = 1;
     uint8 required = 0;
@@ -199,6 +204,15 @@ void WriteEntry(ByteWriter& writer, const EntrySpec& spec) noexcept {
     writer.WriteU64LE(spec.type.high);
     writer.WriteU64LE(spec.type.low);
     writer.WriteU8(spec.readOnly);
+    writer.WriteU8(spec.hasContentHash);
+    Sha256Digest contentHash{};
+    for (uint8& byte : contentHash.bytes) {
+        byte = spec.contentHashByte;
+    }
+
+    writer.WriteBytes(Span<const uint8>(contentHash.bytes, DigestBytes));
+    writer.WriteU64LE(spec.contentHashBytes);
+    writer.WriteU64LE(spec.contentHashTicks);
     writer.WriteU32LE(spec.dependencyCount);
     for (uint32 index = 0; index < spec.dependencyCount && index < 2; ++index) {
         writer.WriteZeros(16);
@@ -421,9 +435,9 @@ TEST(AssetIndexCache_KeyAxes) {
 // 신뢰하지 않는 입력: 헤더(짧음·magic·예약 byte·정규화 칸 2·본문 byte 불일치·SHA-256 불일치·항목 수
 // 상한·크기 상한), 항목(이름 UTF-8·빈 이름·.rasset 아님·이름 길이 경계·같은 이름·순서·readOnly 2·
 // 의존 수 경계·의존 종류 0·6·required 2·태그 수 경계·빈 태그 키·태그 키·값 길이 상한·태그 순서·같은
-// 태그·null id·0 타입·요약 표지 2·
+// 태그·null id·0 타입·요약 표지 2·콘텐츠 해시 표지 2·
 // 요약 이름 UTF-8·남은 byte·잘림)의 위반은 모두 캐시 없음(비운 채 false)이다. 올바른 여러 항목은
-// 받는다(경계 값 — 태그 둘·의존 둘·요약 있음·readOnly 1).
+// 받는다(경계 값 — 태그 둘·의존 둘·요약 있음·readOnly 1·콘텐츠 해시 칸 넷).
 TEST(AssetIndexCache_RejectsUntrustedInput) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -436,6 +450,10 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
 
     EntrySpec full;
     full.readOnly = 1;
+    full.hasContentHash = 1;
+    full.contentHashByte = 0xA5;
+    full.contentHashBytes = 1234;
+    full.contentHashTicks = 0x8000000000000001ull;
     full.dependencyCount = 2;
     full.dependencyKind = static_cast<uint32>(PackageDependencyKind::ImportOwner);
     full.required = 1;
@@ -448,6 +466,11 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
     auto accepted = cache.Parse(good.View(), key);
     REQUIRE(accepted && accepted.Value());
     REQUIRE(cache.Count() == 2);
+    CHECK(cache.At(0).hasContentHash && cache.At(0).contentHash.bytes[0] == 0xA5 &&
+          cache.At(0).contentHash.bytes[DigestBytes - 1] == 0xA5 &&
+          cache.At(0).contentHashBytes == 1234 &&
+          cache.At(0).contentHashTicks == static_cast<int64>(0x8000000000000001ull));
+    CHECK(!cache.At(1).hasContentHash);
     CHECK(cache.At(0).readOnly && cache.At(0).dependencies.Size() == 2 &&
           cache.At(0).dependencies[1].kind == PackageDependencyKind::ImportOwner &&
           cache.At(0).dependencies[0].required && cache.At(0).tags.Size() == 2 &&
@@ -518,7 +541,8 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
                     {EntrySpec{}, "zero type"},
                     {EntrySpec{}, "tag key too long"},
                     {EntrySpec{}, "tag value too long"},
-                    {EntrySpec{}, "output count"}};
+                    {EntrySpec{}, "output count"},
+                    {EntrySpec{}, "hasContentHash 2"}};
     cases[0].spec.rawName = true;
     cases[0].spec.rawNameByte = 0xff;
     cases[1].spec.name = "";
@@ -554,6 +578,7 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
     cases[18].spec.tagValues[0] = longValue.View();
     cases[19].spec.present = 1;
     cases[19].spec.outputCount = static_cast<uint32>(MaxImportOutputs + 1);
+    cases[20].spec.hasContentHash = 2;
     for (const Case& item : cases) {
         const Array<uint8> bytes =
             MakeCache(env.allocator, key, Span<const EntrySpec>(&item.spec, 1));

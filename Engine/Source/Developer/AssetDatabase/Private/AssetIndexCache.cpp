@@ -105,9 +105,18 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
     entry.id = AssetId{ReadGuid(reader)};
     entry.type = ReadGuid(reader);
     const uint8 readOnly = reader.ReadU8();
+    const uint8 hasContentHash = reader.ReadU8();
+    if (!ReadDigest(reader, entry.contentHash)) {
+        return Result<bool>::Success(false);
+    }
+
+    entry.contentHashBytes = reader.ReadU64LE();
+    entry.contentHashTicks = static_cast<int64>(reader.ReadU64LE());
+    entry.hasContentHash = hasContentHash == 1;
     const uint32 dependencies = reader.ReadU32LE();
-    if (reader.Failed() || readOnly > 1 || entry.id.IsNull() || entry.type == TypeId{} ||
-        entry.fileName.IsEmpty() || !entry.fileName.View().EndsWith(EditorPackageExtension) ||
+    if (reader.Failed() || readOnly > 1 || hasContentHash > 1 || entry.id.IsNull() ||
+        entry.type == TypeId{} || entry.fileName.IsEmpty() ||
+        !entry.fileName.View().EndsWith(EditorPackageExtension) ||
         dependencies > reader.Remaining() / DependencyBytes) {
         return Result<bool>::Success(false);
     }
@@ -434,6 +443,10 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
         WriteGuid(writer, entry->id.value);
         WriteGuid(writer, entry->type);
         writer.WriteU8(entry->readOnly ? 1 : 0);
+        writer.WriteU8(entry->hasContentHash ? 1 : 0);
+        WriteDigest(writer, entry->contentHash);
+        writer.WriteU64LE(entry->contentHashBytes);
+        writer.WriteU64LE(static_cast<uint64>(entry->contentHashTicks));
         writer.WriteU32LE(static_cast<uint32>(entry->dependencies.Size()));
         for (const PackageDependencyEntry& dependency : entry->dependencies) {
             WriteGuid(writer, dependency.asset.value);

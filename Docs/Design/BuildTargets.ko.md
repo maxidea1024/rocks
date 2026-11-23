@@ -142,7 +142,7 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 **판정 수단**:
 - 지금 메타 컴파일러는 Clang `-ast-dump=json`만 쓰고(`Programs/Rocks.MetaCompiler/CompilerDriver.cs:36-37`), 이 출력에는 조건 블록 정보가 없다. 그래서 UHT처럼 메타 컴파일러가 리플렉션 헤더를 **어휘 스캔**한다.
 - 스캔은 `#if`·`#ifdef`·`#ifndef`·`#elif`·`#else`·`#endif` 중첩을 따라가며, 각 리플렉션 매크로를 감싼 조건 블록의 조건식 철자를 본다. 허용되는 조건은 정확히 `#if ROCKS_WITH_EDITOR_DATA`(필드)와 `#if ROCKS_WITH_EDITOR`(함수) 두 철자다. 그 밖의 조건식(간접 매크로 `#if X` 포함)과 `#else`·`#elif` 가지 안의 리플렉션 선언은 오류다.
-- 리플렉션 선언은 모듈 규칙 `Metadata` 목록의 헤더에만 쓸 수 있으므로(기존 정책 `reflection-metadata-not-literal` 등), include를 거쳐 다른 파일에 숨은 선언은 이미 거부된다.
+- 리플렉션 선언은 빌드가 찾는 리플렉션 헤더(표지 헤더 — [리플렉션·빌드 보강](ReflectionFoundations.ko.md) 1.10절)에만 쓸 수 있으므로(정책 `reflection-annotation-unscanned` 등), include를 거쳐 다른 파일에 숨은 선언은 이미 거부된다.
 
 **두 변형 비교(보강 검사)**: 메타 컴파일러는 모든 빌드에서 리플렉션 헤더의 AST를 에디터 조합(`ROCKS_WITH_EDITOR=1`, `ROCKS_WITH_EDITOR_DATA=1`)과 게임 조합(둘 다 0)으로 만든다. 두 결과의 차이는 정확히 `EditorOnly` 필드·함수여야 한다. 차이가 없어야 하는 것은 타입 집합, 기반 타입, 나머지 필드의 순서·형식·지정자, enum 값이다. 어휘 스캔을 빠져나가는 경우를 잡는 방어선이다. 서버·클라이언트·플랫폼 조건은 어휘 스캔이 막으므로 비교 축에 넣지 않는다.
 

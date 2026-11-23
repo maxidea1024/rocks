@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "enumCase",
+      "name": "Game/Doors/Door.Side.Left",
+      "id": "00000000000000000000000000000005",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "enumCase",
+      "name": "Game/Doors/Door.Side.Right",
+      "id": "0000000000000000000000000000000a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "Game/Doors/Door.Door.Old",
+      "id": "00000000000000000000000000000006",
+      "aliases": [
+        "Game/Doors/Door.Gate.Old"
+      ],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "Game/Doors/Door.Door.Open",
+      "id": "00000000000000000000000000000002",
+      "aliases": [
+        "Game/Doors/Door.Door.Shut",
+        "Game/Doors/Door.Gate.Shut"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "Game/Doors/Door.Door.Width",
+      "id": "00000000000000000000000000000003",
+      "aliases": [
+        "Game/Doors/Door.Gate.Width"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "Game/Doors/Door.Door.on(Owner.Destroyed)",
+      "id": "0000000000000000000000000000000b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "Game/Doors/Door.Door",
+      "id": "00000000000000000000000000000001",
+      "aliases": [
+        "Game/Doors/Door.Arch",
+        "Game/Doors/Door.Gate",
+        "Game/Old/Z.Gate"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "Game/Doors/Door.Side",
+      "id": "00000000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

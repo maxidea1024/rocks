@@ -17,6 +17,4 @@ public sealed class WorldTestFixtures : EngineModuleRules
     protected override string[] PublicDependencies => ["World"];
 
     protected override bool HasSources => false;
-
-    protected override IReadOnlyList<string> Metadata => ["WorldTestFixtures/SaveFixture.h"];
 }

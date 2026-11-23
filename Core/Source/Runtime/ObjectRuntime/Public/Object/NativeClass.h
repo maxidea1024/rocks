@@ -5,8 +5,8 @@
 #include <Object/TypeRegistry.h>
 
 // 메타컴파일러를 거치지 않는 네이티브 클래스의 타입 등록이다. 리플렉션 클래스(ROCKS_CLASS)는 소유
-// 모듈의 Metadata 헤더에 선언하고 모든 필드가 리플렉션 형식(또는 ROCKS_NATIVE)이어야 한다. .cpp
-// 안의 시험 타입이나 영속 상태가 없는 런타임 전용 파생은 Metadata 입력이 될 수 없거나 될 필요가
+// 모듈의 리플렉션 헤더에 선언하고 모든 필드가 리플렉션 형식(또는 ROCKS_NATIVE)이어야 한다. .cpp
+// 안의 시험 타입이나 영속 상태가 없는 런타임 전용 파생은 리플렉션 헤더가 될 수 없거나 될 필요가
 // 없으므로 ROCKS_NATIVE_TYPE으로 선언하고 RegisterNativeClass로 등록해 Object 생성·수명·상속
 // 판정(Resolve<기반 타입>)과 GC Trace를 쓴다. native 클래스가 더한 필드는 리플렉션·객체 그래프
 // 직렬화 대상이 아니다.

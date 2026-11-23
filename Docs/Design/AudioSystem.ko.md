@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 18(3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입). 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 20(3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강). 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -132,7 +132,7 @@ Inline(결정적) 모드: `OfflineAudioRender`가 AudioRT 스레드 대신 호�
 - **내부 형식**: float32, 채널 비교차(planar)로 voice·버스 버퍼를 둔다. 장치 경계에서만 장치 형식(교차 float32 또는 int16)으로 바꾼다. UE도 내부는 float다.
 - **mix rate**: 장치 하나에 하나. 기본 `DefaultMixSampleRate` = 48000. 장치가 다른 rate를 요구하면 그 rate로 mix한다(UE와 같다 — 장치 협상값). rate가 바뀌면 clock epoch를 올리고 예약 시각을 초 단위로 다시 맞춘다(3.7.3절).
 - **블록 크기 Q**: 기본 `DefaultMixBlockFrames` = 256(계획 §18), 64·128·256·512·1024 중 설정(`audio.mixer.blockframes`). UE 기본 1024보다 작다(AD7).
-- **채널 레이아웃**: `ChannelLayout { Mono, Stereo, Quad, Surround51, Surround71 }`, 최대 `MaxOutputChannels` = 8. 내부 채널 순서는 FL, FR, FC, LFE, SL, SR, BL, BR(UE `AudioChannelUtils` 기본 순서 — `Source/Runtime/SignalProcessing/Private/AudioChannelUtils.cpp:16–26`)이고 5.1은 앞 여섯이다. UE `EAudioMixerChannel` 열거 순서(FL, FR, FC, LFE, BL, BR, FLC, FRC, BC, SL, SR… — `AudioMixerCore/Public/AudioMixerChannel.h:12–34`)와 다르다. 장치 순서는 backend가 알려주는 채널 마스크로 매핑한다(WAVEFORMATEXTENSIBLE·miniaudio 7.1 장치는 FL, FR, FC, LFE, BL, BR, SL, SR). 디코더가 내는 순서(Vorbis 순서, Opus 채널 매핑 family 1 = FL, FC, FR, …, LFE)도 디코드 직후 내부 순서로 바꾼다. 첫 장치 출력은 스테레오다. 다채널 출력·downmix 행렬은 AU9.
+- **채널 레이아웃**: `ChannelLayout { Mono, Stereo, Quad, Surround51, Surround71 }`, 최대 `MaxOutputChannels` = 8. 내부 채널 순서는 FL, FR, FC, LFE, SL, SR, BL, BR(UE `AudioChannelUtils` 기본 순서 — `Source/Runtime/SignalProcessing/Private/AudioChannelUtils.cpp:16–26`)이고 5.1은 앞 여섯이다. UE `EAudioMixerChannel` 열거 순서(FL, FR, FC, LFE, BL, BR, FLC, FRC, BC, SL, SR… — `AudioMixerCore/Public/AudioMixerChannel.h:12–34`)와 다르다. 장치 순서는 backend가 알려주는 채널 마스크로 매핑한다(WAVEFORMATEXTENSIBLE·miniaudio 7.1 장치는 FL, FR, FC, LFE, BL, BR, SL, SR). 디코더가 내는 순서(Vorbis 순서, Opus 채널 매핑 family 1 = FL, FC, FR, …, LFE)도 디코드 직후 내부 순서로 바꾼다(채널 수별 표는 3.29.2절). 첫 장치 출력은 스테레오다. 다채널 출력·downmix 행렬은 AU9.
 - **mix clock**: 장치 하나의 64비트 frame 카운터(`MixFrame`). 블록 시작마다 Q만큼 증가한다. 명령의 예약 시각은 이 단위다.
 - **device clock**: backend가 알려주는 실제 재생 위치. mix clock과의 차이를 지연 추정치로 공개한다.
 - **clip 커서**: clip 원본 rate의 frame 단위 정수부 + 소수부(리샘플 상태).
@@ -1336,6 +1336,7 @@ ffmpeg flac 파일은 메타데이터 뒤에 8 KiB PADDING이 있어 손상 시�
   - `OV_HOLE`: 순차 모드의 vorbisfile은 link 경계를 지날 때도 한 번 돌려준다(`_fetch_headers` 뒤 이미 넣은 마지막 header page를 다시 넣어 page 번호가 어긋난다. 규격에 맞는 stream에서는 결정적이다). 표시만 하고, 다음 읽기가 새 link에서 나오면 경계로 본다. 같은 link에서 나오거나 바로 stream이 끝나면 page 손상·누락이라 `InvalidArgument`다. 연이은 `OV_HOLE`과 그 밖 음수도 `InvalidArgument`다. 손실 원본이지만 Ogg page에 CRC가 있어 손상을 정확히 알므로 메우지 않고 거부한다(MP3의 무음 채움과 다르다).
   - 비유한 표본(손상된 setup·packet)은 `InvalidArgument`다.
 - 길이는 granule 기준이다. vorbisfile이 마지막 page granule로 끝을 자르므로 frame 수가 원본 길이와 같다.
+- 채널 순서: Vorbis 순서를 3.3절 내부 순서로 바꾸며 planar로 옮긴다(표는 3.29.2절).
 - 결과: `sampleFormat = Lossy`, `sourceCodec = Vorbis`, loop·cue 없음(`LOOPSTART` 같은 comment는 읽지 않는다. UE도 읽지 않는다). 실패하면 결과를 비운다.
 - 한계: 메모리 정점은 FLAC과 같다. Ogg page CRC·번호·BOS·EOS로 손상·누락·잘림을 모두 잡으므로 page 단위 무결성 한계는 없다.
 
@@ -1350,6 +1351,72 @@ ffmpeg flac 파일은 메타데이터 뒤에 8 KiB PADDING이 있어 손상 시�
 | page 무결성 | 첫 link 가운데 audio page·첫 link EOS page·둘째 link BOS page 한 byte 손상, page 중간 잘림, page 경계 잘림(EOS 없음), page 하나 누락, 같은 serial 재연결, 앞·뒤 쓰레기: 모두 `InvalidArgument`. 다중화(두 BOS가 연달아): `Unsupported` |
 | 거부 | Ogg 아님·빈 입력·첫 page 머리만 `InvalidArgument`. audio page 한 byte 손상 `InvalidArgument`. 실패 시 비움 |
 | 견고성 | 앞부분 43 byte 간격 전부(받으면 길이 ≤ 원본), byte 4개 무작위 교체 200회(멈춤·범위 밖 읽기 없음, 받으면 표본 유한) |
+
+### 3.29 AU4 앞당김 — Ogg Opus 원본 디코드(개정 19, 20)
+
+3.25절과 같은 결과 형식으로 Ogg Opus를 디코드한다. ThirdParty `Opus`(libopus)·`OpusFile`(opusfile, AD13)을 반입한다. 클라이언트 런타임 Opus 코덱(`AudioOpus`, PR6 대기)과 쿠킹용 Opus 인코더도 나중에 같은 `Opus`를 링크한다.
+
+#### 3.29.1 ThirdParty `Opus`·`OpusFile`
+
+- libopus 1.6.1, opusfile 0.12(둘 다 BSD-3-Clause). 공식 릴리스 tarball이고 downloads.xiph.org의 SHA256SUMS.txt와 SHA-256이 같다.
+- `Opus`: float build. `celt_sources.mk`·`silk_sources.mk`·`opus_sources.mk`의 기본·float 원본 137개와 그 헤더, `COPYING`. SIMD 원본·RTCD(런타임 CPU 탐지)·DNN(deep PLC·LACE)은 들이지 않는다.
+  - define은 upstream CMake 기본을 따른다: `OPUS_BUILD`, `VAR_ARRAYS`(alloca 대신 C99 VLA), `HAVE_LRINTF`·`HAVE_LRINT`, `ENABLE_HARDENING`(release에서도 켜는 값싼 불변식 검사).
+  - `OPUS_X86_MAY_HAVE_*`·`OPUS_HAVE_RTCD`가 없어 사칙연산 경로는 아키텍처·컴파일 설정마다 고정이다. 다만 float build(`FLOAT_APPROX` 없음)는 디코드에서 플랫폼 libm을 부른다(`denormalise_bands`의 `exp`, `exp_rotation`의 `cos`, 머리 gain의 `exp`). UCRT·Apple libm·glibc의 double ulp 차이가 float 반올림을 넘는 일은 드물지만 긴 원본에서는 0이 아니므로, 디코드 결과 고정값은 아키텍처·OS마다다(3.10.1절의 "기기마다 같다"는 같은 OS·아키텍처 안에서 성립한다). `FLOAT_APPROX`만으로는 `cos`가 남아 해결되지 않는다. Vorbis도 같은 성격이다.
+  - `ENABLE_HARDENING`의 불변식 검사(`celt_assert`·`VALIDATE_CELT_DECODER` 등)가 실패하면 `celt_fatal`이 stderr에 쓰고 `abort()`한다. bitstream으로는 닿지 않게 설계된 불변식이고 upstream fuzzing도 이 설정으로 돈다(끄면 같은 결함이 메모리 손상이 된다). 결함이 있으면 임포트가 Log·`Result` 없이 프로세스를 끝낸다는 것이 한계다.
+  - stack: `VAR_ARRAYS`와 multistream 버퍼로 디코드 한 번에 약 100 KB를 쓴다. 임포트 worker stack은 이보다 커야 한다.
+  - 내부 include 경로(`celt`·`silk`·`silk/float`·`src`)는 `Opus.Build.cs`가 라이브러리 빌드에만 더한다. manifest `includeDirectories`는 `include`만 두어 `debug.h`·`errors.h`·`main.h` 같은 흔한 이름이 소비 모듈로 새지 않는다.
+  - 수정 없음. 원본의 지시문(`#pragma intrinsic`, `#pragma GCC poison`, 최적화 안내 `#pragma message`)은 `pragmaDirectives`에 기록한다.
+- `OpusFile`: `opusfile.h`와 디코드 원본(`info.c`·`internal.c`·`opusfile.c`·`stream.c`), `COPYING`. HTTP·인증서(`http.c`·`wincerts.c`)는 들이지 않고 `OP_DISABLE_HTTP`를 정의한다. `OpusFile.Build.cs`가 `Ogg`·`Opus` include 경로를 더한다.
+  - 경고 0을 위한 수정(`OpusFile/Rocks.patch`):
+    - `opusfile.c` 9곳·`stream.c` 3곳·`info.c` 2곳: clang이 요구하는 괄호를 더한다(`-Wshift-op-parentheses`·`-Wbitwise-op-parentheses`·`-Wlogical-op-parentheses`). C 우선순위와 결과는 그대로다. `stream.c`의 Windows 파일 이름 UTF-8 변환에서 넷째 byte를 `|` 대신 `&`로 합치는 upstream 코드(버그로 보인다)도 동작을 바꾸지 않는다(AudioTools는 메모리 stream만 연다).
+    - `stream.c`: Rocks 빌드가 명령줄에서 `WIN32_LEAN_AND_MEAN`을 정의하므로 정의되지 않았을 때만 정의한다(`-Wmacro-redefined`).
+    - `stream.c`: Microsoft CRT deprecated 호출을 바꾼다 — `_wfopen` → `_wfsopen(…, _SH_DENYNO)`(공유 같음), `fdopen` → Windows `_fdopen`, `_wfreopen` → `_wfreopen_s`(공유 없음). `internal.h`의 `#pragma warning(disable:4996)`이 clang-cl에서 이 경고를 가리고 있었다(지시문을 지운 사본 컴파일 시험 `Native.ThirdPartyDirectivesHideNoWarnings`로 확인).
+  - 원본 지시문(`opusfile.h`의 visibility push/pop, `internal.h`의 GCC `-Wparentheses` 억제·MSVC 4554·4996)은 byte 그대로인 파일이라 `pragmaDirectives`에 기록한다. 괄호와 CRT 호출을 고쳤으므로 가리는 경고가 없다(GCC 억제는 `__GNUC__`가 있는 macOS clang에서만 켜진다. clang-cl은 `#pragma warning(disable:4996)`을 `-Wdeprecated-declarations`로 받아들인다).
+- 소비 모듈은 `OpusFile`·`Opus`·`Ogg`를 이 순서로 링크한다.
+
+#### 3.29.2 `DecodeOpus`
+
+- page 구조를 먼저 확인한다(3.28.2절 `OggValidation`).
+- 열기 전에 OpusHead를 본다: mapping family가 0·1이 아니거나(2·3 ambisonics, 255 discrete) 채널이 9개 이상이면 `Unsupported`다. opusfile은 이런 머리도 `OP_EBADHEADER`(머리 손상)로 돌려주기 때문이다. OpusHead 표지가 없으면 opusfile에 맡긴다.
+- `op_open_memory`로 연다(메모리 stream이라 seekable). opusfile 오류는 `OP_EFAULT`(할당 실패) `OutOfMemory`, `OP_EIMPL`·`OP_EVERSION` `Unsupported`, 그 밖(`OP_ENOTFORMAT` 등) `InvalidArgument`로 옮긴다. 읽는 중 오류도 같다.
+- link마다 채널 수가 같아야 한다(다르면 `Unsupported`). seekable 모드의 opusfile은 새 link의 BOS에서 serial을 다시 맞추고 link 시작에서 hole을 무시하므로, 정상 연결 stream에서 `OP_HOLE`이 나오지 않는다.
+- 채널 순서: mapping family 0·1은 Vorbis 순서다. 디코드 직후 3.3절 내부 순서로 바꾼다(아래 "다채널 순서").
+- 출력 rate는 언제나 48000 Hz다. 머리의 원본 입력 rate는 참고값일 뿐이라 쓰지 않는다(재표본화하지 않는다). OpusHead output gain은 opusfile 기본(`OP_HEADER_GAIN`)대로 적용한다(RFC 7845).
+- 길이: `op_pcm_total(-1)`(granule 기준, pre-skip·끝 자르기 반영, link 합)을 열 때 읽어 디코드 전에 PCM 상한을 판정하고 교차 버퍼를 미리 잡는다(16M 표본까지, FLAC과 같다). 끝에 디코드한 frame 수가 이 값과 같아야 한다. opusfile은 TOC가 잘못된 packet(길이 0 이하)을 오류 없이 버리므로, 길이 대조가 그런 손상을 잡는다.
+- `op_read_float`로 120 ms(5760 표본 × 채널)씩 읽어 쌓는다. 음수와 비유한 표본은 위 오류 대응을 따른다(`InvalidArgument`가 대부분).
+- 결과: `sampleFormat = Lossy`, `sourceCodec = Opus`, `sampleRate = 48000`, loop·cue 없음. 실패하면 결과를 비운다.
+- 한계: 메모리 정점은 Vorbis와 같다.
+
+다채널 순서(Vorbis·Opus 공통, `DeinterleaveVorbisOrder`): Vorbis I 규격의 채널 순서를 3.3절 내부 순서(FL, FR, FC, LFE, SL, SR, BL, BR)로 바꾼다. `DecodedSourceAudio`에는 레이아웃 필드가 없고, 채널 수가 배치를 정한다.
+
+| 채널 수 | Vorbis 순서 | 출력(내부 순서) |
+|---|---|---|
+| 1 | M | M |
+| 2 | L, R | FL, FR |
+| 3 | L, C, R | FL, FR, FC |
+| 4 | FL, FR, RL, RR | FL, FR, SL, SR |
+| 5 | FL, C, FR, RL, RR | FL, FR, FC, SL, SR |
+| 6 | FL, C, FR, RL, RR, LFE | FL, FR, FC, LFE, SL, SR |
+| 7 | FL, C, FR, SL, SR, RC, LFE | FL, FR, FC, LFE, SL, SR, BC |
+| 8 | FL, C, FR, SL, SR, RL, RR, LFE | FL, FR, FC, LFE, SL, SR, BL, BR |
+
+4–6채널의 rear 쌍은 5.1 내부 배치(앞 여섯)에 맞춰 SL·SR로 둔다. 7채널(6.1)의 BC는 `ChannelLayout`에 없어 맨 뒤에 둔다(임포터가 다룬다). WAV·AIFF·FLAC은 파일 순서(WAVE 채널 마스크 순서)를 그대로 내고, 내부 순서로 옮기는 일은 임포터가 채널 마스크로 한다.
+
+#### 3.29.3 시험
+
+입력은 `Tests/OpusTestFixtures.h`의 byte 배열이다(`<이름>PageOffsets`는 page 시작 위치). ffmpeg 9.1 libopus 인코더(`-fflags +bitexact -flags:a +bitexact`)로 lavfi sine·pink noise에서 만들었다. ffmpeg Ogg Opus는 OpusHead·OpusTags가 각각 page 하나이고 granule이 pre-skip 312를 포함한다(마지막 granule − 312 = 원본 길이로 확인).
+
+| 대상 | 확인 |
+|---|---|
+| 길이·정렬 | stereo 48000 Hz 0.25 s: frame 수 12000(마지막 granule 12312 − pre-skip), 원본 sine과 정렬(SNR ≥ 15 dB), 오른쪽 = −왼쪽. 5.1(mapping family 1) 6채널 2400 frame |
+| 채널 순서 | 채널마다 다른 sine(FL 300, FR 500, FC 700, LFE 60, BL 900, BR 1100 Hz)을 ffmpeg 5.1로 넣은 파일: 내부 순서 채널마다 제 주파수가 가장 강함(Goertzel). Vorbis도 같은 시험(`VorbisOrder51`) |
+| 고정값 | stereo 디코드 결과 SHA-256 — x86-64 Windows(UCRT) 값(Debug·Release 같음). 그 밖은 두 번 디코드가 같은지만 본다(libm 차이). Vorbis도 같은 시험 |
+| 연결 stream | 잡음 link 둘(72000 + 48000). 채널 수가 다른 link(stereo + mono) `Unsupported` |
+| page 무결성 | 첫 link 가운데 audio page·EOS page·둘째 link BOS page 한 byte 손상, page 중간·경계 잘림: `InvalidArgument` |
+| 지원 안 함 | OpusHead mapping family 2·255, 9채널(page CRC 다시 계산): `Unsupported`. 올바른 Ogg Vorbis: `InvalidArgument`(`OP_ENOTFORMAT`) |
+| packet 손상 | audio page 본문 byte 3개를 바꾸고 page CRC를 다시 계산 200회: 멈춤·abort 없음, 받으면 길이 원본과 같고 표본 유한, 아니면 `InvalidArgument` |
+| 거부 | Ogg 아님·빈 입력 `InvalidArgument`, OpusHead 표지 손상(CRC 그대로 — page 검사에서) `InvalidArgument`, 실패 시 비움 |
+| 견고성 | 앞부분 29 byte 간격 전부 `InvalidArgument`(page 중간이면 page 검사, page 경계면 EOS 없음), byte 하나 무작위 교체 100회(값이 같으면 성공, 다르면 `InvalidArgument`) |
 
 ## 4. 결정 요약
 

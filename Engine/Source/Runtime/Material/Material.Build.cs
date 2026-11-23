@@ -15,6 +15,4 @@ public sealed class Material : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["AssetRuntime"];
-
-    protected override IReadOnlyList<string> Metadata => ["Material/Material.h"];
 }

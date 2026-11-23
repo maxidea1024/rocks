@@ -24,7 +24,7 @@ internal static class EnginePlanning
             toolchain.Platform, configuration, rules.Target.Type);
         var ruleModules = pluginSet.LinkIntoPrimary(pluginSet.Apply(rules.Modules, rules.Target.Modules), rules.Target.Modules);
         string[] buildRoots = [.. rules.Target.Modules.Concat(pluginSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
-        return new(pluginSet, MetadataLayout.Apply(context, ruleModules, buildRoots, createDirectories), buildRoots);
+        return new(pluginSet, MetadataLayout.Apply(context, ruleModules, buildRoots, createDirectories, rules.Modules), buildRoots);
     }
 
     /// <summary>엔진 타깃의 빌드 요청이다. 빌드 방식(유니티·PCH·작업 파일 분리·시간 측정·계획만)은 호출자가 덧붙인다.</summary>

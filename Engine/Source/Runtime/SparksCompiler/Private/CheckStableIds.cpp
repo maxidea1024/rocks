@@ -567,107 +567,167 @@ void TypeChecker::CheckPackageIds(uint32 package, Span<const uint8> unstable,
     }
 
     // 2) `@formerly`와 주인 type의 rename. 옛 키는 전체 키(`/`가 있으면 — 모듈을 옮긴 type)이거나
-    // 같은 주인(주인이 `@formerly`로 이어졌으면 옛 주인) 아래 이름이다.
+    // 같은 주인(주인이 `@formerly`로 이어졌으면 옛 주인) 아래 이름이다. 차례(선언 순서와 무관한
+    // 결과): (a) type의 `@formerly`, (b) `@formerly` 없는 멤버의 주인 rename 승계(옛 이름이 그대로
+    // 선언된 것 — 1단계의 현재 이름 맞춤과 같은 우선), (c) 멤버의 `@formerly`, (d) `@formerly`로
+    // 잇지 못한 멤버의 승계. 승계 대상이 은퇴 항목이면 S1007, 다른 선언이 이미 이었으면
+    // S1008이다(도구의 type rename이 그 항목을 새 주인 아래로 옮기므로 새 발급이 같은 이름과
+    // 겹친다).
     StringBuilder<KeyInlineBytes> probe(allocator_);
     StringBuilder<KeyInlineBytes> pendingFormer(allocator_);
+    auto ownerOf = [&](const WantedId& entry) noexcept -> const WantedId* {
+        return entry.owner == NoWanted ? nullptr : &wanted[entry.owner];
+    };
+    auto reportClaimed = [&](uint32 index, uint32 manifestEntry) noexcept {
+        const WantedId& entry = wanted[index];
+        const WantedId& other = wanted[claimedBy[manifestEntry]];
+        wanted[index].state = WantedState::Reported;
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.AppendFormat("The stable ID of '{}' is already used by '{}'.",
+                             current[manifestEntry], view(other.keyOffset, other.keyLength));
+        if (binder_.Succeeded(message)) {
+            report(entry, DiagnosticCode::IdClaimedTwice, message.View(),
+                   "Two declarations cannot share one stable ID; the old name is still declared "
+                   "or another '@formerly' names it.",
+                   "Remove '@formerly' here, or rename the other declaration first.");
+        }
+    };
+    // `@formerly`로 잇는다. 잇지 못하면(옛 키가 manifest에 없거나 은퇴) 그대로 둔다.
+    auto tryFormer = [&](uint32 index) noexcept {
+        const WantedId entry = wanted[index];
+        const WantedId* owner = ownerOf(entry);
+        const StringView former = view(entry.formerOffset, entry.formerLength);
+        probe.Clear();
+        if (Contains(former, '/')) {
+            probe.Append(former);
+        } else if (owner == nullptr) {
+            probe.Append(packageName).Append("/").Append(modulePath(entry.module));
+            probe.Append(".").Append(former);
+        } else {
+            probe.Append(owner->state == WantedState::Renamed
+                             ? current[owner->entry]
+                             : view(owner->keyOffset, owner->keyLength));
+            probe.Append(".").Append(former);
+        }
+
+        if (!binder_.Succeeded(probe)) {
+            return;
+        }
+
+        const ManifestIdName* previous = find(entry.kind, probe.View());
+        if (previous == nullptr || previous->role == ManifestNameRole::Retired) {
+            return;
+        }
+
+        if (claimedBy[previous->entry] != NoWanted) {
+            reportClaimed(index, previous->entry);
+            return;
+        }
+
+        wanted[index].state = WantedState::Renamed;
+        wanted[index].entry = previous->entry;
+        claimedBy[previous->entry] = index;
+    };
+    // 주인 type의 rename을 따라 옮겨지는 같은 멤버 이름의 항목을 잇는다.
+    auto tryCarried = [&](uint32 index) noexcept {
+        const WantedId entry = wanted[index];
+        const WantedId* owner = ownerOf(entry);
+        if (owner == nullptr || owner->state != WantedState::Renamed) {
+            return;
+        }
+
+        probe.Clear();
+        probe.Append(current[owner->entry])
+            .Append(".")
+            .Append(view(entry.memberOffset, entry.memberLength));
+        if (!binder_.Succeeded(probe)) {
+            return;
+        }
+
+        const ManifestIdName* carried = find(entry.kind, probe.View());
+        if (carried == nullptr || carried->role == ManifestNameRole::Alias) {
+            return; // alias는 옛 주인 아래 그대로 남는다(새 이름과 겹치지 않는다)
+        }
+
+        if (carried->role == ManifestNameRole::Retired) {
+            wanted[index].state = WantedState::Reported;
+            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+            message.AppendFormat("'{}' follows its type's rename from '{}', which was retired in "
+                                 "the ID manifest.",
+                                 view(entry.keyOffset, entry.keyLength), probe.View());
+            if (binder_.Succeeded(message)) {
+                report(entry, DiagnosticCode::IdNameReserved, message.View(),
+                       "Renaming the type moves its retired members to the new name, and saved, "
+                       "replicated and edited data may still refer to them, so the name cannot "
+                       "name a new declaration.",
+                       "Choose another name.");
+            }
+
+            return;
+        }
+
+        if (claimedBy[carried->entry] != NoWanted) {
+            reportClaimed(index, carried->entry);
+            return;
+        }
+
+        wanted[index].state = WantedState::Carried;
+        wanted[index].entry = carried->entry;
+        claimedBy[carried->entry] = index;
+    };
+    constexpr uint32 MatchPasses = 4;
+    for (uint32 pass = 0; pass < MatchPasses && binder_.error_ == ErrorCode::None; ++pass) {
+        for (uint32 index = 0; index < wanted.Size() && binder_.error_ == ErrorCode::None;
+             ++index) {
+            const WantedId& entry = wanted[index];
+            if (entry.state != WantedState::Unresolved) {
+                continue;
+            }
+
+            const bool member = entry.owner != NoWanted;
+            const bool former = entry.formerLength != 0;
+            if (pass == 0 && !member && former) {
+                tryFormer(index);
+            } else if (pass == 1 && member && !former) {
+                tryCarried(index);
+            } else if (pass == 2 && member && former) {
+                tryFormer(index);
+            } else if (pass == 3 && member && former) {
+                tryCarried(index);
+            }
+        }
+    }
+
+    // 3) 발급 대기(선언 순): rename은 옛 이름(항목의 현재 이름 — alias로 찾았어도, 도구의 rename은
+    // 현재 이름으로 찾는다. 주인 type도 rename이면 그 rename 뒤의 이름(새 주인 키 아래)), 잇지 못한
+    // 선언은 새 발급이다.
     for (uint32 index = 0; index < wanted.Size() && binder_.error_ == ErrorCode::None; ++index) {
-        if (wanted[index].state != WantedState::Unresolved) {
+        const WantedId& entry = wanted[index];
+        if (entry.state != WantedState::Renamed && entry.state != WantedState::Unresolved) {
             continue;
         }
 
-        const WantedId entry = wanted[index];
-        const WantedId* owner = entry.owner == NoWanted ? nullptr : &wanted[entry.owner];
-        const bool ownerRenamed = owner != nullptr && owner->state == WantedState::Renamed;
-        auto ownerPrefix = [&](StringBuilderBase& out) noexcept {
-            if (owner == nullptr) {
-                out.Append(packageName).Append("/").Append(modulePath(entry.module));
-            } else if (ownerRenamed) {
-                out.Append(current[owner->entry]);
+        pendingFormer.Clear();
+        if (entry.state == WantedState::Renamed) {
+            const WantedId* owner = ownerOf(entry);
+            const bool ownerRenamed = owner != nullptr && owner->state == WantedState::Renamed;
+            const StringView name = current[entry.entry];
+            if (ownerRenamed && name.StartsWith(current[owner->entry])) {
+                pendingFormer.Append(view(owner->keyOffset, owner->keyLength));
+                pendingFormer.Append(
+                    StringView(name.Data() + current[owner->entry].ByteCount(),
+                               name.ByteCount() - current[owner->entry].ByteCount()));
             } else {
-                out.Append(view(owner->keyOffset, owner->keyLength));
-            }
-        };
-        if (entry.formerLength != 0) {
-            const StringView former = view(entry.formerOffset, entry.formerLength);
-            probe.Clear();
-            if (Contains(former, '/')) {
-                probe.Append(former);
-            } else {
-                ownerPrefix(probe);
-                probe.Append(".").Append(former);
+                pendingFormer.Append(name);
             }
 
-            if (!binder_.Succeeded(probe)) {
+            if (!binder_.Succeeded(pendingFormer)) {
                 return;
-            }
-
-            const ManifestIdName* previous = find(entry.kind, probe.View());
-            if (previous != nullptr && previous->role != ManifestNameRole::Retired) {
-                if (claimedBy[previous->entry] != NoWanted) {
-                    const WantedId& other = wanted[claimedBy[previous->entry]];
-                    wanted[index].state = WantedState::Reported;
-                    StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-                    message.AppendFormat("The stable ID of '{}' is already used by '{}'.",
-                                         current[previous->entry],
-                                         view(other.keyOffset, other.keyLength));
-                    if (binder_.Succeeded(message)) {
-                        report(entry, DiagnosticCode::IdClaimedTwice, message.View(),
-                               "Two declarations cannot share one stable ID; the old name is "
-                               "still declared or another '@formerly' names it.",
-                               "Remove '@formerly' here, or rename the other declaration first.");
-                    }
-
-                    continue;
-                }
-
-                wanted[index].state = WantedState::Renamed;
-                wanted[index].entry = previous->entry;
-                claimedBy[previous->entry] = index;
-                // 발급 대기의 옛 이름은 항목의 현재 이름이다(alias로 찾았어도 — 도구의 rename은
-                // 현재 이름으로 찾는다). 주인 type도 rename이면 그 rename 뒤의 이름(새 주인 키
-                // 아래)이다.
-                const StringView name = current[previous->entry];
-                pendingFormer.Clear();
-                if (ownerRenamed && name.StartsWith(current[owner->entry])) {
-                    pendingFormer.Append(view(owner->keyOffset, owner->keyLength));
-                    pendingFormer.Append(
-                        StringView(name.Data() + current[owner->entry].ByteCount(),
-                                   name.ByteCount() - current[owner->entry].ByteCount()));
-                } else {
-                    pendingFormer.Append(name);
-                }
-
-                if (!binder_.Succeeded(pendingFormer) ||
-                    !AddPendingId(entry.kind, view(entry.keyOffset, entry.keyLength),
-                                  pendingFormer.View())) {
-                    return;
-                }
-
-                continue;
             }
         }
 
-        if (ownerRenamed) {
-            // 주인 type의 rename을 따라 옮겨진다(같은 멤버 이름).
-            probe.Clear();
-            probe.Append(current[owner->entry])
-                .Append(".")
-                .Append(view(entry.memberOffset, entry.memberLength));
-            if (!binder_.Succeeded(probe)) {
-                return;
-            }
-
-            const ManifestIdName* carried = find(entry.kind, probe.View());
-            if (carried != nullptr && carried->role == ManifestNameRole::Current &&
-                claimedBy[carried->entry] == NoWanted) {
-                wanted[index].state = WantedState::Carried;
-                wanted[index].entry = carried->entry;
-                claimedBy[carried->entry] = index;
-                continue;
-            }
-        }
-
-        if (!AddPendingId(entry.kind, view(entry.keyOffset, entry.keyLength), StringView())) {
+        if (!AddPendingId(entry.kind, view(entry.keyOffset, entry.keyLength),
+                          pendingFormer.View())) {
             return;
         }
     }
@@ -837,6 +897,16 @@ bool TypeChecker::ReadIdManifest(uint32 package, JsonDocument& document,
         return reject(root.Position(), "The ID manifest needs an \"entries\" array.");
     }
 
+    // 다른 키는 받지 않는다(C# StableIdManifest.Load와 같다 — 도구가 다시 쓸 때 사라지지 않게).
+    // 같은 키 둘은 JSON reader가 거부한다.
+    constexpr usize RootKeys = 2;
+    constexpr usize EntryKeys = 5;
+    if (root.Size() != RootKeys) {
+        return reject(
+            root.Position(),
+            "The ID manifest has only \"schema\" and \"entries\"; remove the other keys.");
+    }
+
     const StringView packageName = c.packages_[package].manifest.Name();
     auto inPackage = [&](StringView key) noexcept {
         return key.ByteCount() > packageName.ByteCount() + 1 &&
@@ -868,10 +938,11 @@ bool TypeChecker::ReadIdManifest(uint32 package, JsonDocument& document,
         const JsonValue retired = item.IsObject() ? item.Find("retired") : JsonValue();
         if (!kind.IsValid() || !kind.IsString() || IdKindOf(kind.GetString()) == NoIdKind ||
             !name.IsValid() || !name.IsString() || !id.IsValid() || !id.IsString() ||
-            !aliases.IsValid() || !aliases.IsArray() || !retired.IsValid() || !retired.IsBool()) {
+            !aliases.IsValid() || !aliases.IsArray() || !retired.IsValid() || !retired.IsBool() ||
+            item.Size() != EntryKeys) {
             return reject(item.Position(),
-                          "An ID manifest entry needs \"kind\", \"name\", \"id\", \"aliases\" and "
-                          "\"retired\".");
+                          "An ID manifest entry has exactly \"kind\", \"name\", \"id\", "
+                          "\"aliases\" and \"retired\".");
         }
 
         if (!IsLowerHexId(id.GetString())) {

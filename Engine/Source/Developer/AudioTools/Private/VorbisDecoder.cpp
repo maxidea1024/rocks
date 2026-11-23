@@ -188,14 +188,8 @@ Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) n
         return Result<void>::Failure(pcm.Error());
     }
 
-    float* planar = pcm.Value();
-    const float* samples = interleaved.Data();
-    for (uint64 index = 0; index < frames; ++index) {
-        for (uint32 channel = 0; channel < channels; ++channel) {
-            planar[static_cast<usize>(channel) * frames + index] =
-                samples[static_cast<usize>(index) * channels + channel];
-        }
-    }
+    // Vorbis 채널 순서를 내부 순서로 바꾸며 planar로 옮긴다(3.3절).
+    DeinterleaveVorbisOrder(interleaved.Data(), channels, frames, pcm.Value());
 
     return Result<void>::Success();
 }

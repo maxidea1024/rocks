@@ -11,6 +11,4 @@ public sealed class AssetCooker : EngineModuleRules
     protected override string ModuleName => "AssetCooker";
 
     protected override string[] PublicDependencies => ["AssetDatabase", "AssetRuntime", "AssetNugget", "ReflectionText"];
-
-    protected override IReadOnlyList<string> Metadata => ["AssetCooker/CookConfig.h"];
 }

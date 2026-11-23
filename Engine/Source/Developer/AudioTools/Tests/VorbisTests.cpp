@@ -1,6 +1,8 @@
+#include "SourceAudioTestSupport.h"
 #include "VorbisTestFixtures.h"
 
 #include <AudioTools/SourceAudio.h>
+#include <Base/Compiler.h>
 #include <Base/InitializerList.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/MathUtility.h>
@@ -13,6 +15,7 @@ namespace vorbis_tests_file {
 
 using namespace rocks::audio;
 using namespace rocks::audio::vorbisfixtures;
+using namespace rocks::audio::sourcetest;
 
 // Ogg Vorbis 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.28.3절).
 
@@ -21,13 +24,21 @@ namespace {
 // lavfi sine의 기본 진폭(1/8)과 주파수다.
 constexpr double SineAmplitude = 0.125;
 constexpr double SineFrequency = 440.0;
-constexpr double TwoPi = 6.283185307179586;
 
 // 표본 위치가 맞을 때 기대하는 최소 신호 대 잡음 에너지 비(20 dB)다. ffmpeg로 재면 약 41 dB이다.
 constexpr double MinimumSignalToNoise = 100.0;
 
 // 오른쪽 = −왼쪽 stereo에서 (L+R) 에너지가 L 에너지에 대해 넘지 않을 비율이다.
 constexpr double MaximumMidToLeft = 0.01;
+
+// VorbisOrder51의 채널별 sine 주파수(내부 순서 FL, FR, FC, LFE, SL, SR)와 길이다.
+constexpr uint32 Order51Channels = 6;
+constexpr double Order51Frequencies[Order51Channels] = {300.0, 500.0, 700.0, 60.0, 900.0, 1100.0};
+constexpr uint64 Order51Frames = 8820;
+
+// x86-64 Windows(UCRT libm)에서 VorbisStereo 디코드 결과(모든 채널 planar float32)의 SHA-256이다.
+constexpr const char* StereoDigestX64 =
+    "df80529fcc7983afcd3810f287a338aad25381eeb623e73ade462c6909028a84";
 
 // 시험 입력의 rate·frame 수(마지막 page granule)다.
 constexpr uint32 Rate44100 = 44100;
@@ -116,6 +127,31 @@ TEST(Audio_Vorbis_StereoGranuleLength) {
     REQUIRE(DecodeVorbis(Bytes(VorbisMono22k), audio));
     CHECK(audio.ChannelCount() == 1 && audio.SampleRate() == Rate22050 &&
           audio.FrameCount() == Mono22kFrames);
+
+    // 채널마다 다른 sine: Vorbis 5.1 순서(FL, C, FR, RL, RR, LFE)를 내부 순서로 바꾼다.
+    REQUIRE(DecodeVorbis(Bytes(VorbisOrder51), audio));
+    CHECK(audio.FrameCount() == Order51Frames);
+    CHECK(ChannelsMatchFrequencies(audio, Order51Frequencies, Order51Channels));
+}
+
+TEST(Audio_Vorbis_DecodeHashFixed) {
+    // Vorbis 디코드는 SIMD 없는 float 계산이지만 libm(sin·cos 등)을 부를 수 있어 고정값은
+    // 아키텍처·OS마다 다르다(3.28.1절). x86-64는 Windows(UCRT) 값을 단언하고, 그 밖은 두 번
+    // 디코드가 같은지만 본다.
+    SystemAllocator allocator;
+    DecodedSourceAudio audio(allocator);
+    REQUIRE(DecodeVorbis(Bytes(VorbisStereo), audio));
+    char hex[Sha256Digest::HexBytes + 1];
+    DecodedDigest(audio, hex);
+#if ROCKS_ARCH_X64
+    CHECK(StringView(hex) == StringView(StereoDigestX64));
+#else
+    DecodedSourceAudio again(allocator);
+    REQUIRE(DecodeVorbis(Bytes(VorbisStereo), again));
+    char repeated[Sha256Digest::HexBytes + 1];
+    DecodedDigest(again, repeated);
+    CHECK(StringView(hex) == StringView(repeated));
+#endif
 }
 
 TEST(Audio_Vorbis_ChainedStreams) {

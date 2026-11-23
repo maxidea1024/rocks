@@ -70,7 +70,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
             if (!classes.Values.Any(model => model.Header == input.Include))
             {
                 throw new MetadataException($"reflected header declares no ROCKS_CLASS, ROCKS_STRUCT or ROCKS_ENUM: {input.Include}", "RMC2000",
-                    "Remove the header from the module's Metadata list or declare its reflected types.").At(new(input.Path, 1));
+                    "The build found ROCKS_CLASS/ROCKS_STRUCT/ROCKS_ENUM markup in this header (a markup line inside #if 0 or a disabled branch still counts); " +
+                    "remove the markup line or make the declaration compile.").At(new(input.Path, 1));
             }
         }
 
@@ -785,8 +786,9 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     if (!imported.TryGetValue(qualified, out ClassModel? external) || external.IsEnum || external.IsStruct != isStruct || physical is null ||
                         resolveHeader(external.Header) is not string externalFile || !CanonicalPath.Equals(externalFile, physical))
                     {
-                        throw new MetadataException($"{qualified}: reflected declaration is neither in this module's Metadata headers nor in an imported descriptor (same name and header)",
-                            "RMC2003", "Add the header to the owning module's Metadata list and depend on that module; do not redeclare reflected types.");
+                        throw new MetadataException($"{qualified}: reflected declaration is neither in this module's reflection headers nor in an imported descriptor (same name and header)",
+                            "RMC2003", "Put the declaration in a header under the owning module's include directories (the build finds it by its markup) and depend on that module; " +
+                            "do not redeclare reflected types.");
                     }
 
                     foreach (JsonElement child in Children(node))
