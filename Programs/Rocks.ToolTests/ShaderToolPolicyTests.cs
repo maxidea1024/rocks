@@ -5,7 +5,7 @@ using Rocks.Tooling.Checks;
 namespace Rocks.ToolTests;
 
 // 셰이더 도구 정책(Docs/Design/ShaderSystem.ko.md 9절)의 저장소 실행과 음성 대조다: 도구 표 참조(shader-tool-table), binary 로드
-// (shader-tool-binary-load), Release 배제(release-*).
+// (shader-tool-binary-load), 워커 격리(shader-worker-isolation, 11.1절 SC1), Release 배제(release-*).
 internal static class ShaderToolPolicyTests
 {
     private static readonly string[] BinaryLibraries = ["DirectXShaderCompiler"];
@@ -33,9 +33,20 @@ internal static class ShaderToolPolicyTests
         using TemporaryDirectory temporary = new();
         IReadOnlyList<CheckFailure> Run() => PolicyChecks.ShaderToolReferences(temporary.Root, BinaryLibraries, BinaryHeaders);
 
-        // 양성 대조: 메인 프로세스는 표를, 형식 모듈은 표·로더·binary 헤더·절대 경로 열기를, Runtime은 OpenSystem을 쓴다.
-        temporary.Write("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs", "PublicDependencies => [\"ShaderToolTable\"];\n");
-        temporary.Write("Engine/Source/Developer/ShaderCompiler/Private/Keys.cpp", "#include <ShaderToolTable/ShaderToolTable.h>\n");
+        // 양성 대조: 메인 프로세스는 표·너겟을, 공용 모듈은 표를, 워커 본체와 형식 모듈은 공용 모듈·표·로더·binary 헤더·절대 경로 열기를,
+        // Runtime은 OpenSystem을 쓴다.
+        temporary.Write("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs",
+            "PublicDependencies => [\"ShaderCompilerCommon\", \"AssetNugget\", \"ShaderToolTable\"];\n");
+        temporary.Write("Engine/Source/Developer/ShaderCompiler/Private/Keys.cpp",
+            "#include <ShaderToolTable/ShaderToolTable.h>\n#include <AssetNugget/NuggetKey.h>\n");
+        temporary.Write("Engine/Source/Developer/ShaderCompilerCommon/ShaderCompilerCommon.Build.cs", "PublicDependencies => [\"ShaderToolTable\"];\n");
+        temporary.Write("Engine/Source/Developer/ShaderCompilerCommon/Private/Format.cpp", "#include <ShaderToolTable/ShaderToolTable.h>\n");
+        temporary.Write("Engine/Source/Developer/ShaderWorker/ShaderWorker.Build.cs",
+            "PublicDependencies => [\"ShaderCompilerCommon\", \"ShaderToolLoader\", \"ShaderToolTable\"];\n");
+        temporary.Write("Engine/Source/Developer/ShaderWorker/Private/Worker.cpp",
+            "#include <ShaderCompilerCommon/ShaderFormatDefinition.h>\n#include <ShaderToolLoader/ShaderToolLoader.h>\n" +
+            "#include <ShaderToolTable/ShaderToolTable.h>\n// #include <ShaderCompiler/ShaderJobKey.h> in a comment is not code\n");
+        temporary.Write("Programs/ShaderCompileWorker/ShaderCompileWorker.Build.cs", "PublicDependencies = [\"ShaderWorker\"];\n");
         temporary.Write("Engine/Source/Developer/ShaderFormatD3D/ShaderFormatD3D.Build.cs",
             "PublicDependencies => [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
         temporary.Write("Engine/Source/Developer/ShaderFormatD3D/Private/Win64/Dxc.cpp",
@@ -66,7 +77,17 @@ internal static class ShaderToolPolicyTests
             // 이름이 비슷한 폴더는 형식 모듈이 아니다.
             ("Engine/Source/Developer/ShaderFormat/Private/Load.cpp", "#include <ShaderToolLoader/ShaderToolLoader.h>\n", "shader-tool-binary-load"),
             // 스파이크와 이름만 비슷한 프로그램 폴더는 허용 위치가 아니다.
-            ("Programs/ShaderToolSpikeOld/Private/Dxc.cpp", "#include <dxc/dxcapi.h>\n", "shader-tool-binary-load")
+            ("Programs/ShaderToolSpikeOld/Private/Dxc.cpp", "#include <dxc/dxcapi.h>\n", "shader-tool-binary-load"),
+            // 워커 쪽은 메인 프로세스 전용 모듈(ShaderCompiler)과 에셋 너겟에 닿지 않는다(shader-worker-isolation).
+            ("Engine/Source/Developer/ShaderWorker/ShaderWorker.Build.cs", "PublicDependencies => [\"ShaderCompilerCommon\", \"ShaderCompiler\"];\n",
+                "shader-worker-isolation"),
+            ("Engine/Source/Developer/ShaderWorker/Private/Nugget.cpp", "#include <AssetNugget/NuggetCache.h>\n", "shader-worker-isolation"),
+            ("Engine/Source/Developer/ShaderFormatD3D/Private/Key.cpp", "#include <ShaderCompiler/ShaderJobKey.h>\n", "shader-worker-isolation"),
+            ("Engine/Source/Developer/ShaderFormatVulkan/ShaderFormatVulkan.Build.cs", "PublicDependencies => [\"AssetNugget\"];\n",
+                "shader-worker-isolation"),
+            ("Programs/ShaderCompileWorker/ShaderCompileWorker.Build.cs", "PublicDependencies = [\"ShaderWorker\", \"AssetNugget\"];\n",
+                "shader-worker-isolation"),
+            ("Programs/ShaderCompileWorker/Private/Main.cpp", "#include \"ShaderCompiler/ShaderPreprocessor.h\"\n", "shader-worker-isolation")
         ];
         foreach ((string file, string content, string rule) in cases)
         {

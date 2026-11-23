@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::shader::ShaderCompileOptions::debugSymbols",
+      "id": "7e4d321a499c4c7191dc8cea0731dda0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::shader::ShaderCompileOptions::hlsl2021",
+      "id": "62ebc2ab1b8642159cdd585656664abb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::shader::ShaderCompileOptions::matrixLayout",
+      "id": "27928ef7f706463bba1b95f047e00ee9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::shader::ShaderCompileOptions::optimization",
+      "id": "ce571eeed89e463ba9f17da7d0383a1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::shader::ShaderCompileOptions",
+      "id": "351a68b6894f4af7b4880b809e862092",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::shader::ShaderMatrixLayout",
+      "id": "8ae52f6251904ff5b4a868912274bf0f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::shader::ShaderOptimization",
+      "id": "74bcd8f6e9394b05aa7578fd181ac1ea",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

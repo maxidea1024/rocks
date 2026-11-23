@@ -261,9 +261,4 @@ ROCKS_ASSETRUNTIME_API Result<void>
 DecodePackageBulk(const PackageContents& contents, Array<uint8>& out, Array<PackageBulkSlot>& slots,
                   uint64 maxRawBytes, AssetDiagnostic* failure = nullptr) noexcept;
 
-// Guid의 정렬 순서다((high, low) 부호 없는 수치 순 — AS 4.2절).
-constexpr bool GuidLess(const Guid& left, const Guid& right) noexcept {
-    return left.high != right.high ? left.high < right.high : left.low < right.low;
-}
-
 } // namespace rocks
