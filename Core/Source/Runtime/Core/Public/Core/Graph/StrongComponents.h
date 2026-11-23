@@ -1,13 +1,29 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Result.h>
 
-// 반복형 Tarjan 강하게 연결된 묶음 찾기다(재귀가 없어 노드 수와 무관하게 stack을 쓰지 않는다).
-// 그래프는 노드 0..count-1과 노드마다 [firstEdge[n], firstEdge[n + 1])의 간선 대상 targets다.
-// 묶음은 끝(다른 묶음을 가리키지 않는 쪽)부터 visit(members, cyclic)으로 알린다 — cyclic은 노드가
-// 둘 이상이거나 자기 간선이 있을 때다. 할당 실패면 그 오류를 돌려준다.
-
-namespace rocks::sparks::detail {
+// 반복형 Tarjan 강하게 연결된 묶음(SCC) 찾기다(재귀가 없어 노드 수와 무관하게 호출 stack을 쓰지
+// 않는다). SparksCompiler 비공개 구현을 공용으로 올린 것이다(Docs/Design/AssetSystem.ko.md 10.2절
+// "A4c 구현 세부" — 쿠커의 Build·Hard SCC, 컴파일러의 패키지·struct 순환이 같은 것을 쓴다).
+//
+// 그래프는 노드 0..count-1과 노드마다 [firstEdge[n], firstEdge[n + 1]) 범위의 간선 대상 targets다
+// (CSR — firstEdge는 count + 1개, 대상은 count 미만). 묶음은 끝(다른 묶음을 가리키지 않는 쪽)부터,
+// 즉 의존이 먼저 visit(members, cyclic)으로 알린다. 뿌리는 0부터, 간선은 주어진 순서로 따라가므로
+// 같은 그래프면 같은 순서다(결정적). members는 이 호출 동안만 유효하고 순서는 정해져 있지
+// 않다(필요한 쪽이 정렬한다). cyclic은 노드가 둘 이상이거나 자기 간선이 있을 때다. visit은
+// Result<void>를 돌려주고, 실패하면 그 오류로 멈춘다. 할당 실패면 OutOfMemory다.
+//
+// 사용 예:
+//   // 0 → 1 → 0, 1 → 2
+//   const uint32 first[] = {0, 1, 3, 3};
+//   const uint32 to[] = {1, 0, 2};
+//   auto found = algo::ForEachStrongComponent(allocator, 3, first, to,
+//       [&](Span<const uint32> members, bool cyclic) noexcept -> Result<void> {
+//           // 먼저 {2}(cyclic 거짓), 다음 {0, 1}(cyclic 참)
+//           return Result<void>::Success();
+//       });
+namespace rocks::algo {
 
 template <typename Visit>
 Result<void> ForEachStrongComponent(Allocator& allocator, uint32 count,
@@ -108,11 +124,13 @@ Result<void> ForEachStrongComponent(Allocator& allocator, uint32 count,
                 cyclic = targets[at] == node;
             }
 
-            visit(members.View(), cyclic);
+            if (auto reported = visit(members.View(), cyclic); !reported) {
+                return reported;
+            }
         }
     }
 
     return Result<void>::Success();
 }
 
-} // namespace rocks::sparks::detail
+} // namespace rocks::algo

@@ -1,0 +1,29 @@
+fn Long() {
+    let total = First(a,
+        b) +
+        Second(
+            c,
+            d
+        );
+    let x = a
+        + b;
+    F(G(
+        x
+    ));
+    let list = [
+        1,
+        2
+    ];
+    if (a &&
+        b) {
+    }
+}
+
+/// Documented
+/// twice
+fn Doc() {
+    let s = "HP ${current}/${max}" + "\n";
+    let v = @"line1
+   line2  ";
+    let w = v;
+}

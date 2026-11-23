@@ -22,6 +22,14 @@ struct TypeStats {
     uint32 leases = 0;
 };
 
+// 등록된 타입 하나의 정체성과 스키마 버전이다(TypeRegistry::ListTypeVersions). enum은 스키마
+// 버전이 없어 0이다.
+struct TypeVersionEntry {
+    TypeId type{};
+    TypeKind kind = TypeKind::Class;
+    uint32 version = 0;
+};
+
 // 등록·해제·Shutdown은 생성 스레드 전용이다. Acquire/Stats/lease 계수는 잠금으로 보호한다.
 // Allocator는 Registry보다 오래 살아야 하며 소멸 전 모든 lease를 반환해야 한다.
 // 콜백 코드는 입력 계약을 신뢰한다. 임의 플러그인의 메모리 안전성을 검증하지 않는다.
@@ -168,6 +176,17 @@ public:
     // Busy를 무시한 Registry 파괴는 강제 해제 대신 즉시 종료한다.
     Result<void> Shutdown() noexcept;
     TypeStats Stats() const noexcept;
+
+    // 등록된 모든 타입의 (TypeId, 종류, 스키마 버전)을 TypeId 순으로 out에 채운다(out을 비운다 —
+    // 쿠커의 타입 표 지문 등 전체 목록이 필요한 도구용). 등록·해제와 같은 소유 스레드 전용이라
+    // 개수를 세고 잠금 밖에서 예약한 뒤 복사하는 사이에 목록이 바뀌지 않는다.
+    //
+    // 오류: 다른 스레드 WrongThread, Shutdown 뒤 ShuttingDown, 할당 실패(out은 빈다).
+    //
+    // 사용 예:
+    //   Array<TypeVersionEntry> types(allocator);
+    //   if (auto listed = registry.ListTypeVersions(types); !listed) { return listed; }
+    Result<void> ListTypeVersions(Array<TypeVersionEntry>& out) const noexcept;
 
 private:
     friend class TypeLease;

@@ -43,7 +43,7 @@ struct WorkspaceFile {
     String full;                // 파일 시스템 경로(인자 경로에 이름을 이은 것)
     String modulePath;          // Module: 패키지 뿌리 기준 경로(`Combat/Score.spark`)
     Array<char> text;
-    bool selected = false; // 파일 인자로 고른 모듈(dump가 그 모듈만 쓴다)
+    bool selected = false; // 인자로 고른 모듈(파일 인자 그 자신, 폴더 인자 아래 — dump·fmt의 대상)
 };
 
 class Workspace final {

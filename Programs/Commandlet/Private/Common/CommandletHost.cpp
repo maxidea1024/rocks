@@ -8,6 +8,7 @@
 #include <Config/ConfigDump.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <HostConfig/HostSettings.h>
+#include <NodeGraphTools/GraphCommandlets.h>
 #include <Platform/File.h>
 #include <TraceAnalysis/TraceModel.h>
 #include <TraceAnalysis/TraceReport.h>
@@ -171,6 +172,9 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);
+    // 노드 그래프 명령 문맥은 registry보다 먼저 만들어 오래 산다(헤더 계약).
+    nodegraph::GraphCommandletContext graphContext;
+    graphContext.allocator = &allocator;
     CommandletRegistry registry;
     auto registered = registry.Register(
         {"core-check", "Check the Core allocator lifecycle.", &CoreCheck, nullptr});
@@ -300,6 +304,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     if (!registered) {
         return 1;
     }
+    // 노드 그래프 명령이다. 등록된 도메인은 아직 없다(도메인 모듈이 생기면 setup hook을 준다).
+    registered = nodegraph::RegisterGraphCommandlets(registry, graphContext);
+    if (!registered) {
+        return 1;
+    }
+
     if (settingsReady) {
         registered = config::RegisterConfigDumpCommandlet(registry, settings.Context());
         if (!registered) {

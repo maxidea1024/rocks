@@ -13,4 +13,9 @@ struct Guid {
     friend constexpr bool operator==(const Guid&, const Guid&) noexcept = default;
 };
 
+// Guid의 정렬 순서다((high, low) 부호 없는 수치 순 — 정렬된 표·이진 탐색·결정적 순서가 쓴다).
+constexpr bool GuidLess(const Guid& left, const Guid& right) noexcept {
+    return left.high != right.high ? left.high < right.high : left.low < right.low;
+}
+
 } // namespace rocks

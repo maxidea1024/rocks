@@ -1,0 +1,21 @@
+fn A() {
+    x(); // after
+    // own line
+    y();
+
+    // before close
+}
+
+// between decls
+fn B() {
+}
+
+/* block
+   spanning
+lines */
+fn C() {
+    z(); /* tail */
+    /* lead */ w();
+    F(a, // first
+        b);
+}

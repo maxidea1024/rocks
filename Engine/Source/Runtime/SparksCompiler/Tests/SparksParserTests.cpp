@@ -717,7 +717,7 @@ bool DiagnosticsAre(const Parsed& parsed, Span<const ExpectedDiagnostic> expecte
     const SourceFile& file = parsed.sources.Get(parsed.id);
     for (usize index = 0; same && index < expected.Size(); ++index) {
         const Diagnostic& actual = parsed.diagnostics[index];
-        const SourceLocation location = file.Locate(actual.Span().begin);
+        const sparks::SourceLocation location = file.Locate(actual.Span().begin);
         same = actual.Code() == expected[index].code && location.line == expected[index].line &&
                location.column == expected[index].column;
     }
