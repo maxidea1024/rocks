@@ -40,7 +40,7 @@
   3. 붙이는 위치를 기준으로 배치를 옮긴다.
   4. `properties` 텍스트인데 지금 타입이 등록되어 있지 않은 노드는 바이트로 바꿀 수 없다. 그 노드와 닿은 간선을 빼고, 진단으로 보고한다. 나머지는 붙인다.
   5. `record` 형식 속성의 모르는 종류 노드는 자리 노드로 붙인다.
-  6. migration이 필요한 노드는 migration 명령을 함께 넣는다.
+  6. 서술 버전과 다른 노드(옛 버전 포함)는 진단과 함께 뺀다(붙여넣기 migration은 하지 않는다 — 10.1절).
   7. 결과 명령 목록 하나를 `GraphMutator`에 보낸다. undo 1개다.
 - 바깥 간선은 같은 문서이고 대상 노드가 아직 있으며 `AllowExternalEdgeReconnect()`가 참일 때만 다시 잇는다. 다시 이을 때도 schema 판정을 거친다. 기본값은 끊기로, UE와 같다(`EdGraphUtilities.cpp:46–102`).
 - 같은 형식을 template 조각(계획 22.3절)과 commandlet dump에도 쓴다.
@@ -79,7 +79,7 @@
 
 **붙여넣기(`BuildPasteCommands`).** 입력: 조각, 대상 문서의 `GraphReadView`·등록표, 대상 그래프 id, 붙이는 위치(조각 노드·주석 왼쪽 위가 그 위치가 된다), 대상 AssetId, `GraphIdSource`. 출력: 명령 목록 하나(undo 1개), 진단 목록, 옛 id → 새 id 표(노드·주석).
 1. 도메인이 다르면 전체 실패다(`InvalidArgument`). 대상 그래프가 없으면 `NotFound`다.
-2. 노드마다 판정한다(뺀 노드는 진단 하나): 미해석 텍스트 속성, 알려진 종류인데 `typeVersion`이 서술 버전과 다름(옛 버전은 migration — NG3, 새 버전은 거부), 속성 Record schema가 서술과 다름, `CanDuplicate` 거짓, `SinglePerDocument` 충돌(문서에 있거나 조각 안에 둘째), schema `CanPasteNode`가 `Deny`.
+2. 노드마다 판정한다(뺀 노드는 진단 하나): 미해석 텍스트 속성, 알려진 종류인데 `typeVersion`이 서술 버전과 다름(옛·새 버전 모두 거부 — 붙여넣기 migration은 하지 않는다, 10.1절), 속성 Record schema가 서술과 다름, `CanDuplicate` 거짓, `SinglePerDocument` 충돌(문서에 있거나 조각 안에 둘째), schema `CanPasteNode`가 `Deny`.
 3. 남은 노드에 새 id(발급기 — 조각 노드 순서), 위치 이동, `InsertNode`를 만든다. 값 없는 고아 핀은 붙는 간선이 남지 않으면 뺀다(GI7).
 4. 조각 간선 중 두 끝이 남은 노드인 것을 원래 순번 순으로 `InsertEdge`한다(schema 판정 없음 — 원본에서 유효했던 연결을 그대로 옮긴다. UE도 복사 집합 안 링크는 그대로 둔다 — `EdGraphUtilities.cpp:48–51`).
 5. 바깥 간선은 대상 AssetId가 조각의 sourceAsset과 같고, `AllowExternalEdgeReconnect()`가 참이고, 밖 끝 노드가 대상 그래프에 있고, 그 핀이 지금 핀 목록에 있으며, `CanConnect` 판정이 `Make`일 때만 `Connect`한다. 바꾸기·변환 판정은 붙여넣기가 기존 간선을 바꾸게 되므로 하지 않고 진단한다. 기본은 끊기다.

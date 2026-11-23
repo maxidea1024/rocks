@@ -185,11 +185,50 @@ struct DynamicPinsInput {
 // 결과를 낸다. 속성을 해석할 수 없으면 InvalidArgument를 돌려준다.
 using DynamicPinsFn = Result<void> (*)(const DynamicPinsInput& input, PinList& out) noexcept;
 
-// 노드 종류 하나의 서술이다(6.2절). migration 함수(GD13)는 NG3에서 더한다.
+// migration 한 노드가 거칠 수 있는 단계 수 상한이다(10.1절 — 사슬이 끝나지 않는 함수를 막는다).
+inline constexpr uint32 MaxMigrationSteps = 64;
+
+// migration 한 단계의 입력이다(10.1절). node는 지금까지의 단계를 거친 노드다(종류·버전·속성과
+// 입력 기본값·고아 핀 키가 앞 단계 결과를 반영한다). fromVersion은 node의 버전이다.
+struct NodeMigrationInput {
+    const GraphDocument& document;
+    const Graph& graph;
+    const GraphNode& node;
+    uint32 fromVersion;
+    NamePool& names;
+};
+
+// 핀 키 재지정 하나다(옛 키 → 새 키).
+struct PinKeyRename {
+    PinKey from;
+    PinKey to;
+};
+
+// migration 한 단계의 결과다. 부르기 전에 노드의 종류·버전·속성 사본으로 채워 두고 renames는
+// 비운다. 함수는 버전을 반드시 올린다: 같은 종류면 fromVersion < schemaVersion ≤ 서술 버전, 다른
+// 종류(1:1 교체 — 같은 도메인, "Graph." 종류 아님)면 1 ≤ schemaVersion ≤ 그 종류의 서술 버전이다.
+// properties는 결과 종류의 propertiesStruct Record여야 한다.
+struct NodeMigrationResult {
+    explicit NodeMigrationResult(Allocator& allocator) noexcept
+        : properties(allocator), renames(allocator) {
+    }
+
+    NodeTypeId type;
+    uint32 schemaVersion = 0;
+    PropertyRecord properties;
+    Array<PinKeyRename> renames;
+};
+
+// 옛 버전 노드를 다음 버전으로 옮긴다(GD13, 10.1절). 상태 없이 같은 입력에 같은 결과를 낸다.
+// 옮길 수 없으면 실패를 돌려준다(그 노드는 옛 버전 그대로 남고 보고서에 적힌다).
+using MigrateFn = Result<void> (*)(const NodeMigrationInput& input,
+                                   NodeMigrationResult& out) noexcept;
+
+// 노드 종류 하나의 서술이다(6.2절).
 struct NodeTypeDescriptor {
     // "<도메인>.<이름>" 형식을 권한다(예: "Material.Multiply"). "Graph." 접두는 공통 종류 전용이다.
     Name type;
-    // 서술 버전이다. 1 이상.
+    // 서술 버전이다. 1 이상. 1보다 크면 migrate가 있어야 한다(등록 검사).
     uint32 schemaVersion = 1;
     // 속성 struct ID(Record schema)다. 0이면 속성이 없다(GI13).
     Guid propertiesStruct;
@@ -200,6 +239,8 @@ struct NodeTypeDescriptor {
     Span<const PassThroughPair> passThrough;
     NodeMenuInfo menu;
     NodeCapabilities capabilities = DefaultNodeCapabilities;
+    // 옛 버전 노드를 옮기는 함수다(GD13). schemaVersion이 1이면 선택이다.
+    MigrateFn migrate = nullptr;
 };
 
 } // namespace rocks::nodegraph

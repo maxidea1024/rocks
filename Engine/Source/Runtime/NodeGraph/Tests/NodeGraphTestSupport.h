@@ -60,6 +60,10 @@ inline constexpr uint32 TestDynamicDuplicateVersion = 12;
 inline constexpr uint32 TestDynamicBadTypeVersion = 13;
 // MaxPinsPerNode를 넘도록 동적 핀을 더한다.
 inline constexpr uint32 TestDynamicOverflowVersion = 14;
+// Item_0 입력과 출력 Item_1을 더한다(재결합 방향 충돌 — 10.1절).
+inline constexpr uint32 TestDynamicOutputVersion = 15;
+// Item_0 입력과 값 정책 Hidden인 입력 Item_1을 더한다.
+inline constexpr uint32 TestDynamicHiddenVersion = 16;
 
 // Test.Multi 입력 Items의 간선 상한이다.
 inline constexpr uint16 TestMultiMaxEdges = 2;
@@ -219,6 +223,13 @@ inline Result<void> AddTestItemPin(const DynamicPinsInput& input, PinList& out, 
     return out.Add(InputPin(key.Value(), type, "Item"));
 }
 
+// Test.Param의 migration 함수다(버전이 1보다 크면 등록에 필요하다 — 10.1절). 버전만 올린다.
+inline Result<void> TestParamMigrate(const NodeMigrationInput& input,
+                                     NodeMigrationResult& out) noexcept {
+    out.schemaVersion = input.fromVersion + 1;
+    return Result<void>::Success();
+}
+
 // Test.Dynamic의 동적 핀 함수다.
 inline Result<void> TestDynamicPins(const DynamicPinsInput& input, PinList& out) noexcept {
     auto header = ReadRecordHeader(input.node.properties.bytes.View());
@@ -240,6 +251,25 @@ inline Result<void> TestDynamicPins(const DynamicPinsInput& input, PinList& out)
     }
     case TestDynamicBadTypeVersion:
         return AddTestItemPin(input, out, 0, TestPinTypeCount);
+    case TestDynamicOutputVersion:
+    case TestDynamicHiddenVersion: {
+        if (auto added = AddTestItemPin(input, out, 0, TestFloatType); !added) {
+            return added;
+        }
+
+        auto key = input.names.TryIntern("Item_1");
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (version == TestDynamicOutputVersion) {
+            return out.Add(OutputPin(key.Value(), TestFloatType, "Item"));
+        }
+
+        PinDescriptor hidden = InputPin(key.Value(), TestFloatType, "Item");
+        hidden.valuePolicy = PinValuePolicy::Hidden;
+        return out.Add(hidden);
+    }
     case TestDynamicOverflowVersion:
         for (uint32 index = 0; index < MaxPinsPerNode; ++index) {
             if (auto added = AddTestItemPin(input, out, index, TestFloatType); !added) {
@@ -335,6 +365,7 @@ struct TestEnv {
         param.schemaVersion = TestParamVersion;
         param.propertiesStruct = TestParamStruct;
         param.staticPins = paramPins;
+        param.migrate = &TestParamMigrate;
 
         PinDescriptor then = OutputPin(pinThen, TestFlowType, "Then", PinKind::Flow);
         then.ordered = true;

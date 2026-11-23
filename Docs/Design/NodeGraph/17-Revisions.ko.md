@@ -56,3 +56,10 @@
   - 등록표 hash 조회의 완전성 표지, `WouldCreateCycle` 서명·비용 문구, GT3 출력 문구.
   - NG3·NG4로 미룬 것: 통지의 AssetId, 원인 Migration·Reload·Registry, `DocumentReloaded`·`NodeTypesChanged`, `RemoveGraph`의 부모 참조 정리, 경계 노드 이동.
 - 개정 3(2026-11-22): 다른 문서 개정 요청 GR1·GR2·GR3·GR5를 해당 문서에 반영하고 15절에 상태 열을 더했다. GR4(오디오)는 미반영이다. GD16의 2D 격자 참조를 공간 색인 5.3절로 고쳤다.
+- 개정 9(2026-11-24): 문서를 장별 폴더로 나눈 뒤(이동 커밋, 내용 변경 없음) NG3 설계(10.1절)를 더하고 NG3a·NG3b를 구현했다.
+  - 설계 교차 검증 1회(필수 7·권장 7·참고 5) 반영: 핀 재정리 규칙 2·3을 GI8에 맞춰 방향 충돌·Hidden을 실패로, GI13에 migration 전 노드(핀 목록 모름) 명시, 붙여넣기 migration은 하지 않음(9절 6단계·9.4절 개정), 키 재지정 항등 사상·단계 안 중복 금지, 노드마다 계획 후 바로 적용, 없는 오류 코드 대신 `TypeMismatch`·`DependencyFailed`, 재등록 때 이력 낡음, 종류·버전이 바뀐 노드의 `NodePinsChanged`, 10절 해제 순서·8.1절 표·GT8 정리, NG3c 경계 핀 저장(타입 이름·`maxEdges`, 표시 이름은 키)·전용 decoder·GI15·GI16 범위·연쇄 삭제·펼치기 기본값·`requireMake`.
+  - NG3a: `MigrateFn`·`NodeMigrationResult`·`MaxMigrationSteps`(서술), `GraphMutator::Migrate`·`MigrateGraphDocument`(`GraphMigration.h`), 핀 재정리 공통 루틴(`GraphMutatorReconcile.cpp`), `SetNodeProperties`의 고아 처리·재결합(사유 `PinsDropped` 삭제, `MigrationInvalid` 추가), migration 전 노드의 `TypeVersion` 거부, 버전 1보다 큰 서술의 `migrate` 필수, 통지 원인 Migration.
+  - NG3b: `NodeTypeRegistryListener`·`NodeTypeKey`(해제 순서: 조회에서 빼기 → 통지 → lease 놓기, 콜백 안 등록·해제는 `Busy`), `GraphMutator::RefreshNodeTypes`·`Reload`(`GraphMutatorReload.cpp`), 통지 `NodeTypesChanged`·`DocumentReloaded`, 원인 Reload·Registry.
+  - `ResetInputDefault`는 핀 목록 없이 되므로 migration 전 노드에도 허용한다(알 수 없는 종류와 같다).
+  - 코드 리뷰 1회 반영(필수 1·권장 3·참고 5): 연쇄·교환 키 재지정에서 간선이 사라지던 결함을 고쳤다(바뀌는 간선을 모두 지운 뒤 넣는다). `RefreshNodeTypes`는 검사 할당 실패도 `DependencyFailed` 상태로 두고, 재등록 이력 낡음을 통지 기록보다 먼저 한다. bracket 중·통지 콜백 안의 등록표 변경은 버리지 않고 미뤘다가 bracket이 끝날 때·통지가 끝날 때 반영한다. `Migrate`·`Reload`는 통지 콜백 안이면 `Busy`다. 시험을 더했다: 교환·연쇄·None 재지정, 자기 간선, 양 끝이 옮겨지는 간선, 교체 뒤 이어받기, 해제 뒤 undo·redo, 버전을 낮춘 재등록, bracket 중 미루기.
+  - 남긴 것: migration 할당 실패 주입 시험(NG3c 무작위 시험과 함께), 해제 콜백 안 lease 생존 시험.
