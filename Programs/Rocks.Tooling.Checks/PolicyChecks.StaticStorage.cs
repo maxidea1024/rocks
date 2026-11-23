@@ -11,7 +11,7 @@ public static partial class PolicyChecks
 
     /// <summary>
     /// 엔진 소유 모듈의 공개 헤더(<c>&lt;루트&gt;/Source/&lt;그룹&gt;/&lt;모듈&gt;/Public/</c>와 엔진 플러그인 모듈의 <c>Public/</c>, 서드파티 제외)에서
-    /// <c>thread_local</c>을 찾는다(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c, 규칙 <c>public-header-static-storage</c>). 스레드 지역
+    /// <c>thread_local</c>을 찾는다(Docs/Design/BuildTargets 3.8절 BD29·BS8c, 규칙 <c>public-header-static-storage</c>). 스레드 지역
     /// 변수는 공유 라이브러리 경계로 import할 수 없으므로 정의(<c>inline thread_local</c>)뿐 아니라 선언(<c>extern thread_local</c>,
     /// <c>static thread_local</c> 데이터 멤버)도 공개 헤더에 두지 않는다 — 소유 모듈 <c>.cpp</c>에 두고 접근 함수로 노출한다. 쓰기 가능한 inline
     /// 변수·inline 함수 정적 지역 변수는 공개 헤더 검사의 Clang 진단(<c>-Wunique-object-duplication</c>)이 본다. 주석·문자열·문자 리터럴은 보지
@@ -52,7 +52,7 @@ public static partial class PolicyChecks
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
 
     /// <summary>
-    /// 엔진 소유 모듈의 공개 헤더에서 변수 템플릿의 주소를 타입 표지로 쓰는 곳을 찾는다(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8e, 규칙
+    /// 엔진 소유 모듈의 공개 헤더에서 변수 템플릿의 주소를 타입 표지로 쓰는 곳을 찾는다(Docs/Design/BuildTargets 3.8절 BD29·BS8e, 규칙
     /// <c>public-header-type-tag</c>). 같은 헤더에 <c>template &lt;class T&gt; inline … Name = …;</c> 선언과 그 주소 <c>&amp;Name&lt;</c>가 함께
     /// 있으면 선언 줄을 알린다. inline 변수는 Modular(모듈마다 공유 라이브러리)에서 이미지마다 따로 생겨 모듈 사이에 키가 갈라지고(조회가 조용히
     /// 실패한다), const면 Monolithic에서도 링커 동일 데이터 병합(ICF)이 서로 다른 타입의 주소를 합칠 수 있다. 타입 키는 Core/TypeKey.h의

@@ -233,7 +233,7 @@ struct NamedEnumSchema {
 
 // 리플렉션 enum 스키마를 이 모듈 안의 함수로 감싼다. Modular에서 GeneratedType<E>::Schema는 다른
 // 공유 라이브러리가 export한 함수라(dllimport) 그 주소는 상수식이 아니다 — constinit CVar가 담을 수
-// 없다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5). 감싼 함수의 주소는 이 모듈 안의 상수다.
+// 없다(Docs/Design/BuildTargets 3.8절 BS8d5). 감싼 함수의 주소는 이 모듈 안의 상수다.
 template <class E>
 const EnumSchema& ReflectedEnumSchema() noexcept {
     return GeneratedType<E>::Schema();

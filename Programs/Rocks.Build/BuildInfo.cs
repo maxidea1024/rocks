@@ -382,7 +382,7 @@ internal static class BuildInfoGenerator
 
         AtomicFile.WriteIfChanged(Path.Combine(directory, "ToolchainFingerprint.txt"), Encoding.UTF8.GetBytes(canonical));
         // Monolithic은 정의 TU를 실행 파일 소스에 넣는다. Modular는 그 타깃이 닿는 빌드 정보 제공 모듈(Core)의 공유 라이브러리 소스에 넣는다
-        // (Docs/Design/BuildTargets.ko.md 3.8절 BS8d1 — 실행 파일이 정의하면 Core 공유 라이브러리에 미해결 기호가 남는다). Modular 요청은
+        // (Docs/Design/BuildTargets 3.8절 BS8d1 — 실행 파일이 정의하면 Core 공유 라이브러리에 미해결 기호가 남는다). Modular 요청은
         // 타깃이 하나라 제공 모듈의 정의 TU도 하나다.
         if (request.LinkType == NativeLinkType.Modular)
         {

@@ -3,7 +3,7 @@ using Rocks.Build.Cli;
 
 namespace Rocks.Build.IntegrationTests;
 
-// 모듈별 공개 헤더 검사(Docs/Design/BuildTargets.ko.md 3.5절 BD9·BS1a)의 실제 컴파일 검사다. 픽스처: Alpha(공개 헤더 Alpha.h), Beta(Alpha에
+// 모듈별 공개 헤더 검사(Docs/Design/BuildTargets 3.5절 BD9·BS1a)의 실제 컴파일 검사다. 픽스처: Alpha(공개 헤더 Alpha.h), Beta(Alpha에
 // 의존하고 공개 헤더가 Alpha.h를 include), Gamma(의존 없이 공개 헤더가 Alpha.h를 include), 실행 파일 App(Beta·Gamma에 의존). 예전 검사 모듈
 // 하나(도달한 모든 라이브러리를 공개 의존으로 둠)는 Gamma의 빠진 의존을 Alpha로 메웠다.
 internal static class PublicHeaderCheckTests

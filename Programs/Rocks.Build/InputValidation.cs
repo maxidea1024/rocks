@@ -133,7 +133,7 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {module.Name}: reserved filesystem name.");
             }
 
-            // C++ 모듈 이름은 모듈 API 매크로(ROCKS_<MODULE>_API)와 진입점 기호를 만들므로 C 식별자여야 한다(Docs/Design/BuildTargets.ko.md
+            // C++ 모듈 이름은 모듈 API 매크로(ROCKS_<MODULE>_API)와 진입점 기호를 만들므로 C 식별자여야 한다(Docs/Design/BuildTargets
             // 3.8절 BD27). 서드파티 모듈은 매크로를 받지 않는다.
             if (!module.ThirdParty && !ModuleTables.IsIdentifier(module.Name))
             {
@@ -193,7 +193,7 @@ internal static class InputValidation
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines " +
                         $"{name} for every module that implements a module entry point.");
                 }
-                // 링크 방식·모듈 API 매크로는 빌드가 타깃·모듈마다 정의한다(Docs/Design/BuildTargets.ko.md 3.8절 BD27).
+                // 링크 방식·모듈 API 매크로는 빌드가 타깃·모듈마다 정의한다(Docs/Design/BuildTargets 3.8절 BD27).
                 if (name == LinkTypes.MonolithicMacroName || LinkTypes.IsApiMacro(name))
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines {LinkTypes.MonolithicMacroName} " +
@@ -216,7 +216,7 @@ internal static class InputValidation
         }
     }
 
-    // 링크 방식(Docs/Design/BuildTargets.ko.md 3.8절 BD17). Modular는 Android(UE도 모바일에서 거부)와 Asan·Coverage·Release 구성에서 쓰지
+    // 링크 방식(Docs/Design/BuildTargets 3.8절 BD17). Modular는 Android(UE도 모바일에서 거부)와 Asan·Coverage·Release 구성에서 쓰지
     // 않는다(Editor는 Release로 빌드하지 않는다 — BD20).
     private static void ValidateLinkType(NativeBuildRequest request)
     {
@@ -365,7 +365,7 @@ internal static class InputValidation
                 }
             }
 
-            // 한 모듈을 두 목록에 함께 적으면 공개 범위가 모호하다(Docs/Design/BuildTargets.ko.md 3.5절 BD11).
+            // 한 모듈을 두 목록에 함께 적으면 공개 범위가 모호하다(Docs/Design/BuildTargets 3.5절 BD11).
             foreach (string dependency in module.PublicDependencies)
             {
                 if (module.PrivateDependencies.Contains(dependency, StringComparer.OrdinalIgnoreCase))
@@ -381,7 +381,7 @@ internal static class InputValidation
         ValidateGlobalStateConsumers(modules);
     }
 
-    // 프로세스 전역 상태가 있는 서드파티(NativeModuleInput.HasGlobalState — Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c)는 직접 의존하는
+    // 프로세스 전역 상태가 있는 서드파티(NativeModuleInput.HasGlobalState — Docs/Design/BuildTargets 3.8절 BD29·BS8c)는 직접 의존하는
     // 모듈이 하나여야 한다. Modular에서 서드파티는 직접 소비 모듈의 공유 라이브러리마다 링크되므로 둘이면 상태가 두 벌이 된다(Monolithic에서도
     // 같은 규칙으로 막아 Editor 빌드에서만 드러나지 않게 한다). 소비 모듈 이름을 모두 알린다. 표지는 서드파티 모듈만 가질 수 있다(Rocks 모듈의
     // 상태는 소유 모듈 .cpp에 두고 API로 노출한다).
@@ -404,7 +404,7 @@ internal static class InputValidation
         }
     }
 
-    // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets.ko.md 3.9절 BD36)이다. 빌드가
+    // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets 3.9절 BD36)이다. 빌드가
     // 주 실행 파일에만 채운다. 표에 있는 라이브러리 모듈을 정확한 철자로 한 번씩 가리켜야 한다.
     private static void ValidatePluginModules(IReadOnlyList<NativeModuleInput> modules, Dictionary<string, string> byFolded)
     {

@@ -27,7 +27,7 @@
 namespace rocks {
 
 // Subsystem 타입의 실행 중 식별 키다. 저장하지 않는다. 키는 TypeKeyOf<T>()다(Core/TypeKey.h, UE는
-// UClass* — Docs/Design/BuildTargets.ko.md 3.8절 BS8e). 다른 모듈이 GetSubsystem<T>()·의존 목록으로
+// UClass* — Docs/Design/BuildTargets 3.8절 BS8e). 다른 모듈이 GetSubsystem<T>()·의존 목록으로
 // 찾는 Subsystem은 공개 헤더에 ROCKS_DECLARE_NATIVE_TYPE_KEY(T, 모듈 API 매크로)를 두고 .cpp 하나에
 // ROCKS_DEFINE_NATIVE_TYPE_KEY(T)로 정의한다 — 그래야 Modular(모듈마다 공유 라이브러리)에서 모듈
 // 사이에 키가 같다. 선언하지 않은 타입의 키는 실행 이미지마다 다르다(한 모듈 안에서만 쓰는

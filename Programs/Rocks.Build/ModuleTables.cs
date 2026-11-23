@@ -79,7 +79,7 @@ public static class ModuleTables
     public const string ModuleTypesMacro = "ROCKS_MODULE_TYPES";
 
     /// <summary>
-    /// 빌드가 진입점 모듈의 소스에 정의하는 공유 라이브러리 표지 매크로다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1). Modular에서 공유
+    /// 빌드가 진입점 모듈의 소스에 정의하는 공유 라이브러리 표지 매크로다(Docs/Design/BuildTargets 3.8절 BS8d1). Modular에서 공유
     /// 라이브러리로 컴파일하는 모듈이면 1이고 <c>ROCKS_IMPLEMENT_MODULE</c>이 export 진입점 <c>RocksModuleEntry()</c>를 더 정의한다. 실행
     /// 파일·Monolithic은 0이다. 규칙·명령줄은 정의할 수 없다.
     /// </summary>
@@ -91,7 +91,7 @@ public static class ModuleTables
     /// <summary>
     /// 진입점 매크로가 export 진입점과 같은 자리에 정의하는 export하지 않는 모듈별 C 기호의 접두사다(<c>RocksModuleEntryOf_&lt;이름&gt;</c>).
     /// 빌드는 공유 라이브러리 링크에 이 기호를 강제 참조로 넣는다. export 진입점 이름은 의존 모듈의 import 라이브러리도 내므로 그 이름의 강제
-    /// 참조로는 매크로 빠짐을 잡지 못한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1).
+    /// 참조로는 매크로 빠짐을 잡지 못한다(Docs/Design/BuildTargets 3.8절 BS8d1).
     /// </summary>
     public const string EntryAnchorPrefix = "RocksModuleEntryOf_";
 
@@ -182,7 +182,7 @@ public static class ModuleTables
         var tables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (string executable in TableExecutables(request, modules, entries))
         {
-            // Modular는 표 TU 대신 같은 행을 manifest에 쓴다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1 — ModuleManifests). 행 검사(이름·
+            // Modular는 표 TU 대신 같은 행을 manifest에 쓴다(Docs/Design/BuildTargets 3.8절 BS8d1 — ModuleManifests). 행 검사(이름·
             // 단계 순서)는 같게 한다.
             if (request.LinkType == NativeLinkType.Modular)
             {
@@ -281,7 +281,7 @@ public static class ModuleTables
 
     /// <summary>
     /// 실행 파일 <paramref name="executable"/>의 모듈 표 TU 내용이다. 행은 의존 우선 깊이 탐색의 후위 순서(의존 목록 순서대로)에서 진입점
-    /// 모듈만 고른 것이고, 그 뒤에 실행 파일에 링크하는 켠 플러그인 모듈(PluginModules — 보통 행, Docs/Design/BuildTargets.ko.md 3.9절 BD36)과
+    /// 모듈만 고른 것이고, 그 뒤에 실행 파일에 링크하는 켠 플러그인 모듈(PluginModules — 보통 행, Docs/Design/BuildTargets 3.9절 BD36)과
     /// 실행 중 적재 모듈(DynamicModules) 쪽이 같은 규칙으로 붙으며 실행 파일이 마지막이다. 행의 의존은 직접
     /// 의존 가운데 진입점 모듈이며, 면제 모듈을 거치는 의존은 그 너머의 진입점 모듈로 바꿔 싣는다(중복 제거, 처음 만난 순서). 링크 폐포
     /// 밖에서 DynamicModules로만 든 행은 요청 시 적재 행(onRequest)이다 — 단계 실행이 건너뛴다(3.8·3.11절). 행마다 단계 순서를 검사한다(MD6).
@@ -326,7 +326,7 @@ public static class ModuleTables
     }
 
     /// <summary>
-    /// 실행 파일 <paramref name="executable"/>의 모듈 표 행이다(Monolithic 표 TU와 Modular manifest가 같은 행을 쓴다 — Docs/Design/BuildTargets.ko.md
+    /// 실행 파일 <paramref name="executable"/>의 모듈 표 행이다(Monolithic 표 TU와 Modular manifest가 같은 행을 쓴다 — Docs/Design/BuildTargets
     /// 3.8절 BS8d1). 실행 파일이 링크하는 모듈(링크 폐포 다음 동적 모듈 쪽 — LinkClosure)에서 진입점 모듈만 고르고 실행 파일을 끝에 둔다. 동적
     /// 모듈 행은 실행 파일 행 앞에 오며, 행의 의존은 링크 의존뿐이라 Load(실행 파일)가 동적 모듈을 시작하지 않는다(Docs/Design/ModuleLoader.ko.md
     /// 3.8절). 행 이름이 C 식별자가 아니거나 단계 순서(MD6)를 어기면 <see cref="ArgumentException"/>이다.

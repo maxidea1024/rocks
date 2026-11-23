@@ -304,7 +304,7 @@ Rocks 이름은 서술형이다. UE 이름은 이 표에만 둔다.
 | `IsRunningCommandlet` 등 실행 종류 전역 | `HostKind` | `Game`·`Commandlet`·`Tool`·`TestRunner`(에디터·서버는 생길 때 더한다) |
 | `GetBuildConfiguration`·`GetBuildTargetType`·`GetBranchName`·`GetBuildDate` 등 | `build::Description()` → `BuildDescription` | 빌드가 주입한 상수 레코드 |
 | `EBuildConfiguration` | `build::BuildConfiguration` | `Debug`·`Development`·`Release` |
-| `EBuildTargetType` | `build::TargetType` | `Game`·`Editor`·`Client`·`Server`·`Program`(빌드 규칙의 `TargetType`과 같은 이름·같은 값 — [빌드 타깃](BuildTargets.ko.md) BD1) |
+| `EBuildTargetType` | `build::TargetType` | `Game`·`Editor`·`Client`·`Server`·`Program`(빌드 규칙의 `TargetType`과 같은 이름·같은 값 — [빌드 타깃](BuildTargets/README.ko.md) BD1) |
 | `FAppTime` | `FrameTiming` | 한 프레임의 시간 값(double 초). 지금의 `EngineTime`을 대체한다 |
 | `FAppTime::GetApproximateCurrentTime` | `LatestFrameIndex()` + `platform::MonotonicNanoseconds()` | 아무 스레드가 읽는 대략값 |
 | `FCommandLine` | `ProcessCommandLine` | 진입점에서 캡처한 불변 UTF-8 인자 배열 |

@@ -4,7 +4,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.Build.Cli;
 
 /// <summary>
-/// 공개 헤더 검사 모듈이다(Docs/Design/BuildTargets.ko.md 3.5절 BD9·BS1a). 검사 대상 모듈 M마다 검사 모듈 <c>PublicHeaderChecks_&lt;M&gt;</c>를
+/// 공개 헤더 검사 모듈이다(Docs/Design/BuildTargets 3.5절 BD9·BS1a). 검사 대상 모듈 M마다 검사 모듈 <c>PublicHeaderChecks_&lt;M&gt;</c>를
 /// 만든다. 공개 의존은 M 하나이므로 M의 공개 헤더는 M의 공개 환경(M과 그 공개 의존의 public include·define)만으로 컴파일된다. 헤더가
 /// 의존하지 않은 모듈의 헤더를 include하면 그 검사 컴파일이 실패한다. 공개 리플렉션 헤더가 있는 모듈은 생성 Public 디렉터리가 public include에
 /// 있으므로 생성 헤더(<c>.generated.h</c>)도 단독으로 검사한다(의도 — 생성 헤더도 스스로 컴파일되어야 한다).
@@ -60,7 +60,7 @@ internal static class PublicHeaderChecks
                 // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
                 Unity = UnityMode.Off,
                 PchUsage = PchUsage.Off,
-                // 공개 헤더의 쓰기 가능한 정적 저장소(공유 라이브러리마다 복제된다)를 Clang 진단으로 거부한다(Docs/Design/BuildTargets.ko.md
+                // 공개 헤더의 쓰기 가능한 정적 저장소(공유 라이브러리마다 복제된다)를 Clang 진단으로 거부한다(Docs/Design/BuildTargets
                 // 3.8절 BD29·BS8c). Windows 대상만 켠다(다른 대상에서는 숨김 가시성 객체만 알린다 — thread_local은 정책 검사가 따로 본다).
                 AdditionalCompileArguments = ToolchainCheck.SupportsUniqueObjectDuplication(toolchain.Platform, toolchain.CompilerVersion)
                     ? [ToolchainCheck.UniqueObjectDuplicationWarning] : [],

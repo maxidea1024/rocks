@@ -28,7 +28,7 @@ public sealed class EngineTestsTarget : TargetRules
 
     public override IReadOnlyList<string> Modules => ["EngineTests", .. LaunchTestPrograms.Names];
 
-    // Engine plugins whose module tests EngineTests runs (FoundationTests.Build.cs PluginTestModules, Docs/Design/BuildTargets.ko.md section 3.9 BD40).
+    // Engine plugins whose module tests EngineTests runs (FoundationTests.Build.cs PluginTestModules, Docs/Design/BuildTargets section 3.9 BD40).
     public override IReadOnlyList<PluginReference> Plugins => [new("UnrealExchange", true)];
 
     public override bool CheckPublicHeaders => true;
@@ -67,7 +67,7 @@ public sealed class CoreTarget : TargetRules
     public override string TestExecutable => "CoreFoundationTests";
 }
 
-// Modular build of the Foundation tests (Docs/Design/BuildTargets.ko.md section 3.8 BD31, BS8d5): every non-third-party library module is a
+// Modular build of the Foundation tests (Docs/Design/BuildTargets section 3.8 BD31, BS8d5): every non-third-party library module is a
 // shared library and the test executable starts through the Modular entry (Docs/Design/ModuleLoader.ko.md section 3.14). One executable only
 // (a Modular target builds one executable: the Launch test programs are the companion targets in TestPrograms, BS8d6, and the embedded entry
 // program stays in the Monolithic targets). Tests stay in the FoundationTests host module and the module internals they call are exported.
@@ -93,12 +93,12 @@ internal static class LaunchTestPrograms
 {
     public static readonly string[] Names = ["LaunchProbe", "LaunchWindowedProbe", "LaunchEmbeddedHost"];
 
-    // Modular companion targets of the Modular test targets (Docs/Design/BuildTargets.ko.md section 3.8 BS8d6). The embedded entry program has
+    // Modular companion targets of the Modular test targets (Docs/Design/BuildTargets section 3.8 BS8d6). The embedded entry program has
     // none: the embedded entry does not support Modular (Docs/Design/ModuleLoader.ko.md section 3.14).
     public static readonly string[] ModularTargets = ["LaunchProbeModular", "LaunchWindowedProbeModular"];
 }
 
-// Modular builds of the Launch test programs (Docs/Design/BuildTargets.ko.md section 3.8 BS8d6): one executable per Modular target, like UE
+// Modular builds of the Launch test programs (Docs/Design/BuildTargets section 3.8 BS8d6): one executable per Modular target, like UE
 // Modular programs. The Modular test targets build them through TestPrograms.
 public sealed class LaunchProbeModularTarget : TargetRules
 {
@@ -124,7 +124,7 @@ public sealed class LaunchWindowedProbeModularTarget : TargetRules
     public override IReadOnlyList<string> Modules => ["LaunchWindowedProbe"];
 }
 
-// Modular build of the engine tests (Docs/Design/BuildTargets.ko.md section 3.8 BS8e): the engine layer modules link as shared libraries and the
+// Modular build of the engine tests (Docs/Design/BuildTargets section 3.8 BS8e): the engine layer modules link as shared libraries and the
 // test executable starts through the Modular entry. The test module is EngineModularTests (the EngineTests sources). The enabled engine plugins
 // link into their plugin binaries folders with their own module manifests (Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
 public sealed class EngineModularTarget : TargetRules

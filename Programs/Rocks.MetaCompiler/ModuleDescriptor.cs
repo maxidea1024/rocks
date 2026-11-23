@@ -9,7 +9,7 @@ namespace Rocks.MetaCompiler;
 // schema 1만 받는다. 쓰기는 결정적이다(타입 이름 순, 필드는 생성 순서, 고정 서식, LF).
 internal static class ModuleDescriptor
 {
-    // descriptor 형식 판이다. 2: 클래스 flags에 Exported(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3). 다른 판은 다시 만들어야 한다.
+    // descriptor 형식 판이다. 2: 클래스 flags에 Exported(Docs/Design/BuildTargets 3.8절 BS8d3). 다른 판은 다시 만들어야 한다.
     private const int DescriptorSchema = 2;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지

@@ -15,7 +15,7 @@ namespace rocks {
 
 // 호스트 서비스 형식 하나의 식별자다. 주소가 식별자이므로 형식마다 한 벌만 있어야 한다. 그래서
 // 서비스 형식을 가진 모듈의 cpp에 ROCKS_DEFINE_HOST_SERVICE로 한 번만 정의한다(공개 헤더에 정의하면
-// Modular에서 공유 라이브러리마다 다른 주소가 된다 — Docs/Design/BuildTargets.ko.md BD29).
+// Modular에서 공유 라이브러리마다 다른 주소가 된다 — Docs/Design/BuildTargets BD29).
 struct HostServiceKey {
     // 진단용 형식 이름(ROCKS_DEFINE_HOST_SERVICE에 쓴 철자)이다.
     const char* name = nullptr;
@@ -30,7 +30,7 @@ struct HostServiceTraits;
 
 // 서비스 형식 Type의 키 조회를 선언한다. Type의 공개 헤더에서 전역 namespace에 한 번 쓴다. Api는
 // 소유 모듈의 API 매크로다(Modular에서 다른 모듈이 Key를 링크한다 —
-// Docs/Design/BuildTargets.ko.md 3.8절 BS8d4. 한 번역 단위 안에서만 쓰는 형식은 빈 값). 정의는 소유
+// Docs/Design/BuildTargets 3.8절 BS8d4. 한 번역 단위 안에서만 쓰는 형식은 빈 값). 정의는 소유
 // 모듈 cpp의 ROCKS_DEFINE_HOST_SERVICE(Type)다.
 #define ROCKS_DECLARE_HOST_SERVICE(Type, Api)                                                      \
     template <>                                                                                    \

@@ -19,7 +19,7 @@ public sealed record BuildContext(string RootDirectory, string OutputDirectory,
         .Order(StringComparer.Ordinal).ToArray();
 
     /// <summary>
-    /// 플러그인을 찾는 폴더다(Docs/Design/BuildTargets.ko.md 3.9절 BD32). 엔진 저장소 빌드는 <c>Engine/Plugins</c>, 설치 SDK 게임
+    /// 플러그인을 찾는 폴더다(Docs/Design/BuildTargets 3.9절 BD32). 엔진 저장소 빌드는 <c>Engine/Plugins</c>, 설치 SDK 게임
     /// 빌드(<see cref="SdkDirectory"/>가 있음)는 프로젝트의 <c>Plugins</c>다. 설치 SDK는 엔진 플러그인을 싣지 않는다.
     /// </summary>
     public string PluginRoot => PathInRoot(SdkDirectory is null ? "Engine/Plugins" : "Plugins");
@@ -52,7 +52,7 @@ public abstract class TargetRules
     public virtual TargetType Type => TargetType.Game;
 
     /// <summary>
-    /// 이 타깃이 켜거나 끄는 플러그인이다(Docs/Design/BuildTargets.ko.md 3.9절 BD33, UE TargetRules.EnablePlugins·DisablePlugins). 형식과 의미는
+    /// 이 타깃이 켜거나 끄는 플러그인이다(Docs/Design/BuildTargets 3.9절 BD33, UE TargetRules.EnablePlugins·DisablePlugins). 형식과 의미는
     /// 프로젝트 기술자의 <c>plugins[]</c>와 같고, 같은 이름을 프로젝트도 적으면 이 목록이 이긴다. 켠 플러그인의 의존 플러그인도 켜진다.
     /// Program 타깃은 여기(와 프로젝트)에 적은 플러그인만 켜고, Game 타깃은 enabledByDefault 플러그인도 켠다(BD34). 켠 플러그인의 모듈은
     /// <see cref="Modules"/>의 첫 항목(주 실행 파일)에 링크된다(BD36). 이름은 식별자여야 하고 중복은 오류다. 사용 예:
@@ -63,7 +63,7 @@ public abstract class TargetRules
     public virtual IReadOnlyList<Descriptors.PluginReference> Plugins => [];
 
     /// <summary>
-    /// 링크 방식이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17, UE TargetRules.LinkType). Monolithic은 모든 모듈을 실행 파일 하나에 링크하고,
+    /// 링크 방식이다(Docs/Design/BuildTargets 3.8절 BD17, UE TargetRules.LinkType). Monolithic은 모든 모듈을 실행 파일 하나에 링크하고,
     /// Modular는 모듈마다 공유 라이브러리를 만든다. Editor 타깃(BS2)은 Modular가 기본이 되고, 지금 타깃 종류는 모두 Monolithic이다.
     /// Android와 Asan·Coverage·Release 구성은 Modular를 거부한다.
     /// </summary>
@@ -86,7 +86,7 @@ public abstract class TargetRules
     public virtual string? TestExecutable => null;
 
     /// <summary>
-    /// 시험 동반 타깃이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6). native 하니스가 쓰는 다른 실행 파일을 그 실행 파일 하나뿐인 타깃으로
+    /// 시험 동반 타깃이다(Docs/Design/BuildTargets 3.8절 BS8d6). native 하니스가 쓰는 다른 실행 파일을 그 실행 파일 하나뿐인 타깃으로
     /// 적는다 — Modular 타깃은 실행 파일이 하나라(manifest·빌드 정보) Launch 시험 프로그램을 같은 타깃에 둘 수 없다. <c>test</c>가 native 시험
     /// 뒤 하니스 전에 같은 구성으로 따로(자기 출력에) 빌드하고 실행 파일 경로를 하니스에 넘긴다. 동반 타깃은 Program이고 시험 실행 파일이
     /// 없어야 한다. <see cref="CompanionTargets"/>(같은 빌드에 모듈을 합치는 Monolithic 동반)와 다르다. 사용 예:

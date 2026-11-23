@@ -23,7 +23,7 @@ public abstract class SourceModuleRules : ModuleRules
     protected abstract string ModuleName { get; }
 
     /// <summary>
-    /// Public dependencies (counterpart of UE PublicDependencyModuleNames, Docs/Design/BuildTargets.ko.md section 3.5): modules whose headers this
+    /// Public dependencies (counterpart of UE PublicDependencyModuleNames, Docs/Design/BuildTargets section 3.5): modules whose headers this
     /// module's public headers use. Their public include paths and defines reach this module and its consumers. Only lower modules of the same
     /// layer or modules of a lower layer. A module may appear in only one of the two lists.
     /// </summary>
@@ -66,7 +66,7 @@ public abstract class SourceModuleRules : ModuleRules
     protected virtual string Group => "Runtime";
 
     /// <summary>
-    /// Module type (Docs/Design/BuildTargets.ko.md section 3.9, BD38). Engine modules take it from the Group folder; plugin modules take it
+    /// Module type (Docs/Design/BuildTargets section 3.9, BD38). Engine modules take it from the Group folder; plugin modules take it
     /// from the plugin descriptor. The Release exclusion policy reads it. Rules that override Configure start from base.Configure so the
     /// type is kept.
     /// </summary>
@@ -240,7 +240,7 @@ public abstract class EngineModuleRules : SourceModuleRules
 }
 
 /// <summary>
-/// Rules for engine plugin modules (Engine/Plugins, Docs/Design/BuildTargets.ko.md section 3.9, BD37). The plugin descriptor
+/// Rules for engine plugin modules (Engine/Plugins, Docs/Design/BuildTargets section 3.9, BD37). The plugin descriptor
 /// (&lt;Plugin&gt;.rocksplugin) is the single source of the module's folder, type and loading phase: the module lives in
 /// &lt;Plugin&gt;/Source/&lt;Module&gt;/ (UE plugin layout) and its rules only name the module and list dependencies. A module that no
 /// descriptor declares is an error. Usage example (Engine/Plugins/Importers/UnrealExchange/Source/UnrealExchange/UnrealExchange.Build.cs):

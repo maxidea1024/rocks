@@ -2,7 +2,7 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.ToolTests;
 
-// NativeTypeKey의 컴파일 시 계약을 실제 컴파일러로 확인한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4): 리플렉션 struct
+// NativeTypeKey의 컴파일 시 계약을 실제 컴파일러로 확인한다(Docs/Design/BuildTargets 3.8절 BS8d4): 리플렉션 struct
 // (ROCKS_GENERATED_BODY)와 Binds 미러의 실제 Core 값 타입(BoundCoreValueV — cv 포함)의 키를 생성 헤더 없이 쓰면 안내
 // static_assert로 멈춘다(Modular에서 공유 라이브러리마다 다른 키가 생기지 않게). 리플렉션하지 않는 native 타입은 inline 키나 키 매크로
 // 쌍으로 컴파일된다. 생성 헤더 검증과 같이 구성·대상 OS·모듈 API 매크로가 필요하므로 meta 검사(--clang-arg)에서 돈다.

@@ -379,7 +379,7 @@ install_android() {
 if [ "$host" = Linux ]; then
     steps='git dotnet format'
     echo "Rocks setup for Linux ($root)"
-    echo 'Linux is not a C++ build host yet (planned: Docs/Design/BuildTargets.ko.md section 3.7). Setup prepares the C# tools and the'
+    echo 'Linux is not a C++ build host yet (planned: Docs/Design/BuildTargets section 3.7). Setup prepares the C# tools and the'
     echo 'policy and format checks (Docs/Guides/BuildEnvironment.ko.md section 5).'
 else
     steps='xcode git dotnet pwsh format'

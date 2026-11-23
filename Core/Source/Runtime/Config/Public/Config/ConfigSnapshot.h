@@ -264,7 +264,7 @@ struct ThreadBinding {
 };
 
 // 이 스레드의 묶음이다. 그 스레드만 읽고 쓴다(10.1절 표). 저장소는 Config .cpp의
-// thread_local이다(공개 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets.ko.md 3.8절
+// thread_local이다(공개 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets 3.8절
 // BD29).
 ROCKS_CONFIG_API ThreadBinding& CurrentBinding() noexcept;
 
@@ -273,5 +273,5 @@ ROCKS_CONFIG_API ThreadBinding& CurrentBinding() noexcept;
 } // namespace rocks::config
 
 // 렌더 설정 참조(RenderBase RenderSettingsRef)가 게임 lane에서 담고 렌더러 모듈에서 꺼내므로 모듈
-// 사이에 같은 타입 키를 export한다(Core/TypeKey.h, Docs/Design/BuildTargets.ko.md 3.8절 BS8e).
+// 사이에 같은 타입 키를 export한다(Core/TypeKey.h, Docs/Design/BuildTargets 3.8절 BS8e).
 ROCKS_DECLARE_NATIVE_TYPE_KEY(rocks::config::ConfigSnapshot, ROCKS_CONFIG_API)

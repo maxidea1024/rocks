@@ -21,7 +21,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 | 엔진 수명 | `EngineSubsystem`의 `Initialize`·`OnFrameBegin`·`OnFrameEnd`·`BeginShutdown`·`CompleteInFlightWork`·`Deinitialize`(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:46–70`). 종료 2단계 주석에 "audio epoch" 대기 | `CompleteInFlightWork` 실패는 `KeepFirst`로 누적되고 정리가 이어진다. 장치 콜백이 살아 있는 채 소유자가 풀릴 수 있다(3.8.6절) |
 | 명령줄 | AppInfo 개정 4가 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`를 설계했다(미구현 — AP1) | 판정 값이 아직 코드에 없다(3.8.4절) |
 | 설정 | 콘솔 영역 `"audio"`(`Core/Source/Runtime/Config/Public/Config/ConsoleSettings.h:66`), `audio.master.volume` 시험 사용 | 오디오 CVar가 없다 |
-| 빌드 대상 | [빌드 타깃](BuildTargets.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | 빌드 코드에 `ClientOnly`가 없다. 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
+| 빌드 대상 | [빌드 타깃](BuildTargets/README.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | 빌드 코드에 `ClientOnly`가 없다. 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
 | 에셋 | A1 구현, A2a–A2e 구현, A2f 임포트 프레임워크는 A2f1a 구현(진단 등록·원본 루트·원본 읽기·임포터 표)·A2f1b·A2f2 설계(`AssetImporter`·`AssetImporterTable`, AssetSystem 7.1절 18), A3 AssetNugget·A4 AssetCooker 설계. `ReadyMask { Cpu, Render }`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/AssetManager.h:36`) | 오디오 재생 구간이 준비됐는지 표현할 수단이 없다(3.12.4절) |
 | Sparks | 스키마 `Engine/Source/Developer/SparksTestHost/Schema/Engine.sparkbind.json`에 `SoundAsset`·`AudioSystem.PlayAt/StartLoop`·`World.Audio`. [Sparks 엔진 통합](SparksEngineIntegration.ko.md) SE-G7·EI5는 모듈 없음으로 대기 | — |
 | policy | `PolicyChecks.WindowsMacroLeak.cs`가 `xaudio2.h`·`mmdeviceapi.h`·`audioclient.h`를 Windows 매크로 누출 헤더로 안다 | 장치 헤더는 backend 모듈의 Private에만 둔다 |
@@ -1761,7 +1761,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | [엔진 런타임](EngineRuntime.ko.md) 6절 | 종료 게이트(`Busy`면 멈춤·이어 부르기, AD23) | — |
 | [크래시 처리·실행](CrashHandlingAndLaunch.ko.md) 개정 13 | 20절 호스트 재시도·Fatal | — |
 | [플랫폼 계층](PlatformLayer.ko.md) | "앱 수명 이벤트" 절(PR9) | — |
-| [빌드 타깃](BuildTargets.ko.md) 개정 20 | 오디오 모듈 유형·Server 쿠킹 payload 제외(AD24) | — |
+| [빌드 타깃](BuildTargets/README.ko.md) 개정 20 | 오디오 모듈 유형·Server 쿠킹 payload 제외(AD24) | — |
 | [에셋 시스템](AssetSystem.ko.md) | 진단 `IgnoredSourceChunks`, `ReadyMask`와 오디오 준비 티켓의 관계(AD18) | 오디오 쿠킹 처리기·sidecar 청크 게시 세부는 A4 설계 때(AU5·AU6 전) |
 | [Sparks 엔진 통합](SparksEngineIntegration.ko.md) 개정 2 | SE-G7 오디오 의미 | `Engine.sparkbind.json` 스키마 변경(`Play2D`)은 AU3b 코드와 함께 |
 | [Trace 시스템](TraceSystem.ko.md) | — | `Audio`·`AudioMixer` 채널(AU8 전) |

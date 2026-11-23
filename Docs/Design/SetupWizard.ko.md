@@ -110,7 +110,7 @@
 - winget 패키지 ID(`Microsoft.VisualStudio.BuildTools`·`Microsoft.VisualStudio.Community`)가 가리키는 판은 winget 저장소가 정한다
   (2026-11-21 조회에서 18.12.1, VS 2026). `--version 10.0.302`는 그 버전을 정확히 설치하고, 더 새 SDK가 이미 있어도 나란히 들어간다
   (`global.json` latestPatch가 고른다) — 로컬 미검증.
-- Linux는 C++ 빌드 호스트가 아니므로([빌드 타깃](BuildTargets.ko.md) 3.7절) .NET SDK와 clang-format만 다룬다(x86_64만 고정 파일이 있다).
+- Linux는 C++ 빌드 호스트가 아니므로([빌드 타깃](BuildTargets/03-Design/03.07-DedicatedServer.ko.md) 3.7절) .NET SDK와 clang-format만 다룬다(x86_64만 고정 파일이 있다).
   Linux 빌드 플랫폼(BS6)이 생기면 컴파일러 점검을 더한다.
 - macOS·Linux 경로는 CI macOS의 `--check`와 내려받기 확인 외에 로컬 실행 기록이 없다.
 

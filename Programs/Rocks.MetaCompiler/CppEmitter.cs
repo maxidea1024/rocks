@@ -95,7 +95,7 @@ internal static class CppEmitter
         }
 
         Line($"namespace rocks::generated::{module} {{");
-        // public 등록 함수는 다른 모듈(의존 모듈의 등록·호스트)이 부르므로 모듈 API 매크로로 export한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2).
+        // public 등록 함수는 다른 모듈(의존 모듈의 등록·호스트)이 부르므로 모듈 API 매크로로 export한다(Docs/Design/BuildTargets 3.8절 BS8d2).
         // private 등록 함수는 그 모듈 안에서만 부른다.
         Line((privateTypes ? "" : ApiMacro(module) + " ") + RegistrationSignature(privateTypes, declaration: true) + ";");
         // public·private 헤더 모두 같은 선언을 둔다(어느 쪽만 있는 모듈도 있다 — 같은 선언의 반복은 허용된다).
@@ -333,7 +333,7 @@ internal static class CppEmitter
         Body("// A comment before a type or field names the reflected declaration as <header>:<line> <Type>::<member>.");
         Body($"#include <{CompilerOptions.GeneratedSpelling(include)}>");
         // 클래스 대상(참조의 기대 타입·ClassRef의 Base·클래스 base)의 NativeTypeKey는 그 타입 생성 .cpp의 키(GeneratedType<T>::NativeKey)를
-        // 쓰므로(Docs/Design/BuildTargets.ko.md 3.8절 BS8b) 생성 소스가 그 생성 헤더를 include한다. 생성 소스는 다른 곳에서 include하지
+        // 쓰므로(Docs/Design/BuildTargets 3.8절 BS8b) 생성 소스가 그 생성 헤더를 include한다. 생성 소스는 다른 곳에서 include하지
         // 않는 말단 번역 단위라 헤더와 달리 include 순환이 생기지 않는다.
         // import 타입에서 물려받은 필드의 클래스 대상은 이름 없이 ID만 있다(SchemaValidator.Imports — enum·struct 대상만 이름으로 잇는다).
         Dictionary<string, ClassModel> byId = schema.Classes.Values.Concat(schema.Imported.Values)
@@ -882,11 +882,11 @@ internal static class CppEmitter
         type.Fields.Any(field => !field.Spec.Transient &&
             (field.Spec.Required || (field.StructTarget && ContainsRequired(schema, schema.Find(field.Reference!)))));
 
-    // 모듈 API 매크로 이름이다(Docs/Design/BuildTargets.ko.md 3.8절 BD27 — 빌드가 모듈 정의 헤더에 정의한다).
+    // 모듈 API 매크로 이름이다(Docs/Design/BuildTargets 3.8절 BD27 — 빌드가 모듈 정의 헤더에 정의한다).
     internal static string ApiMacro(string module) => "ROCKS_" + module.ToUpperInvariant() + "_API";
 
     // 생성 헤더의 out-of-line 정적 멤버 선언(본문이 생성 소스에 있는 `static ... noexcept;` — ValidateTree·CopyValue·ReferenceLayout·비트
-    // 필드 접근·Binds 검사 등)에 모듈 API 매크로를 붙이는 줄 출력이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2). 다른 모듈의 생성 코드·
+    // 필드 접근·Binds 검사 등)에 모듈 API 매크로를 붙이는 줄 출력이다(Docs/Design/BuildTargets 3.8절 BS8d2). 다른 모듈의 생성 코드·
     // 헤더 템플릿이 이 정적 멤버를 부르므로 Modular에서 export해야 한다. inline 정의(`{`)·constexpr·이미 매크로가 있는 선언은 그대로 둔다.
     // 클래스 단위로 붙이지 않는 것은 NativeKey처럼 멤버에 이미 붙인 선언과 겹치면 안 되기 때문이다.
     // 선언 줄에 본문({…} — 마지막 닫는 괄호 뒤의 {)이 있는가다. 기본 인자의 {}(`ModuleLease module = {}`)는 괄호 안이라 본문이 아니다.
@@ -913,7 +913,7 @@ internal static class CppEmitter
         };
     }
 
-    // 리플렉션 클래스·struct·enum(Binds 미러면 실제 타입)의 native 키다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b·BS8d4). 헤더는 모듈 API
+    // 리플렉션 클래스·struct·enum(Binds 미러면 실제 타입)의 native 키다(Docs/Design/BuildTargets 3.8절 BS8b·BS8d4). 헤더는 모듈 API
     // 매크로로 export한 선언만 두고, 생성 소스가 const가 아닌 정적 지역 저장소의 주소로 정의한다(소유 모듈에 하나 — 공유 라이브러리
     // 사이에서도 같은 키).
     private static void EmitNativeKey(string module, string self, Action<string> Line, Action<string> Body)

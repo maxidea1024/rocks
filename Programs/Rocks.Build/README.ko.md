@@ -20,7 +20,7 @@
 
 ## 빌드 주입 상수(BuildInfo)
 
-`NativeModuleInput.ProvidesBuildInfo` 표지 모듈(엔진 Core — `Core/Build/BuildInfo.h`)에 닿는 `Executable` 모듈마다 빌드가 출력 잠금 아래에서 `<out>/BuildInfo/<Module>.BuildInfo.cpp`(`rocks::build::ToolchainFingerprint()`·`ToolBuildId()`·`CurrentEngineVersion()` 정의, 머리말 `BuildInfo 2`)를 만들어 그 모듈 소스에 더한다(계획 두 단계 — 1단계 계획으로 manifest를 만든 뒤 액션 그래프를 세운다). 같은 폴더에 `<Module>.BuildInfo.txt`(manifest 원문, SHA-256 = ID)와 `ToolchainFingerprint.txt`(지문 정규 텍스트, SHA-256 = 지문)가 있다. 이름 "Core"로 판정하지 않는다. Modular에서는 이 TU를 실행 파일 대신 그 타깃이 닿는 빌드 정보 제공 모듈(Core)의 공유 라이브러리 소스에 넣는다(선언의 `ROCKS_CORE_API`로 export — [빌드 타깃](../../Docs/Design/BuildTargets.ko.md) 3.8절 BS8d1).
+`NativeModuleInput.ProvidesBuildInfo` 표지 모듈(엔진 Core — `Core/Build/BuildInfo.h`)에 닿는 `Executable` 모듈마다 빌드가 출력 잠금 아래에서 `<out>/BuildInfo/<Module>.BuildInfo.cpp`(`rocks::build::ToolchainFingerprint()`·`ToolBuildId()`·`CurrentEngineVersion()` 정의, 머리말 `BuildInfo 2`)를 만들어 그 모듈 소스에 더한다(계획 두 단계 — 1단계 계획으로 manifest를 만든 뒤 액션 그래프를 세운다). 같은 폴더에 `<Module>.BuildInfo.txt`(manifest 원문, SHA-256 = ID)와 `ToolchainFingerprint.txt`(지문 정규 텍스트, SHA-256 = 지문)가 있다. 이름 "Core"로 판정하지 않는다. Modular에서는 이 TU를 실행 파일 대신 그 타깃이 닿는 빌드 정보 제공 모듈(Core)의 공유 라이브러리 소스에 넣는다(선언의 `ROCKS_CORE_API`로 export — [빌드 타깃](../../Docs/Design/BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8d1).
 
 - 툴체인 지문(`ToolchainFingerprint.CanonicalText`·`Compute`): 컴파일러 식별·버전, 컴파일러·링커 바이너리 SHA-256, 대상(MSVC 접미 제거), 빌드 프로필의 FP 모델 인자. 구성·호스트 경로·환경은 넣지 않으며 모든 구성 × 최적화 × 언어 조합의 FP 모델 인자가 같아야 한다. 에셋 너겟 키에만 쓴다.
 - 도구 빌드 ID: 그 실행 파일 도달 집합의 Compile·Archive·Link 액션(정규화한 인자 — 툴체인 인자 부분열 제외, object는 `obj:<소스 키>`, 경로는 키)과 입력(소스, 선언 입력, include 디렉터리 inventory, prebuilt — 액션 출력·`<out>/BuildInfo`·`OwnedRoots` 제외, MetaCompiler 생성 헤더 포함)의 내용 SHA-256. 경로 키는 `Path.GetRelativePath`로 가장 긴 루트부터 `out:`·`sdk:`(설치 SDK 게임 빌드의 `SdkDirectory`)·`src:`이고, 루트 밖 include는 `ext<i>:`, 그 밖 파일은 `ext:<이름>`이며 그때 `host-dependent: yes`다. 텍스트 확장자(header·`.cpp .cc .cxx .c++ .m .mm`)만 CRLF를 LF로 정규화해 해시한다. 진단·캐시 무효화용이며 패키지에 쓰지 않는다.
@@ -30,7 +30,7 @@
 
 ## 의존 공개 범위(ModuleVisibility)
 
-- 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈)와 `PrivateDependencies`(구현만 쓰는 모듈) 두 목록으로 의존한다([빌드 타깃](../../Docs/Design/BuildTargets.ko.md) 3.5절, UE `PublicDependencyModuleNames`·`PrivateDependencyModuleNames`). 한 모듈을 두 목록에 함께 적으면 `InputValidation`이 거부한다.
+- 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈)와 `PrivateDependencies`(구현만 쓰는 모듈) 두 목록으로 의존한다([빌드 타깃](../../Docs/Design/BuildTargets/03-Design/03.05-DependencyVisibility.ko.md) 3.5절, UE `PublicDependencyModuleNames`·`PrivateDependencyModuleNames`). 한 모듈을 두 목록에 함께 적으면 `InputValidation`이 거부한다.
 - 보임: `ModuleVisibility.Of`가 컴파일 환경에 보이는 의존 모듈을 계산한다 — 대상 모듈은 두 목록, 그 밖의 모듈은 공개 목록만 따라간다(의존 우선 후위 순서). include·정의·`AdditionalInputs`·공유 PCH 후보와 메타데이터의 include 순서·import 범위·생성 헤더 해석이 이 결과를 쓴다.
 - 도달: 링크·빌드 대상·순환 검사·`Closures`·모듈 표·SDK·기술자 검사·Release 배제는 `AllDependencies`(공개 다음 비공개)를 따라간다. 비공개 의존도 링크한다.
 - BS0 전환은 기존 모듈을 모두 공개 의존으로 옮겼고, 모든 타깃의 `compile_commands.json`이 전환 전과 같다.

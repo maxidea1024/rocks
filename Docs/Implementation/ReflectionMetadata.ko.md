@@ -414,7 +414,7 @@ C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 리플렉션 헤�
 
 ### 상속 export(RMC2002)
 
-다른 모듈의 리플렉션 클래스를 상속하려면 그 기반과 그 위 조상(`rocks::Object` 아래까지)이 클래스 전체를 모듈 API 매크로로 export해야 한다(`class ROCKS_<기반 모듈>_API Base : public Object`). 파생 클래스가 기반의 생성자·소멸자·가상 함수를 링크하기 때문이다(Modular). 메타 컴파일러는 선언부의 매크로를 descriptor 클래스 flags `Exported`로 전하고, 없는 기반을 상속하면 `RMC2002`로 거부한다. 같은 모듈 안의 상속은 매크로가 필요 없다. 루트 `rocks::Object`는 이미 export되어 있다. 자세한 규칙은 [빌드 타깃](../Design/BuildTargets.ko.md) 3.8절 BS8d3이다.
+다른 모듈의 리플렉션 클래스를 상속하려면 그 기반과 그 위 조상(`rocks::Object` 아래까지)이 클래스 전체를 모듈 API 매크로로 export해야 한다(`class ROCKS_<기반 모듈>_API Base : public Object`). 파생 클래스가 기반의 생성자·소멸자·가상 함수를 링크하기 때문이다(Modular). 메타 컴파일러는 선언부의 매크로를 descriptor 클래스 flags `Exported`로 전하고, 없는 기반을 상속하면 `RMC2002`로 거부한다. 같은 모듈 안의 상속은 매크로가 필요 없다. 루트 `rocks::Object`는 이미 export되어 있다. 자세한 규칙은 [빌드 타깃](../Design/BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8d3이다.
 
 ## 현재 한계와 검증 범위
 

@@ -5,7 +5,7 @@ using Rocks.Build.Descriptors;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// Modular 빌드 기반(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1)과 실행 파일 연결(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b)을 실제
+/// Modular 빌드 기반(Docs/Design/BuildTargets 3.8절 BS8d1)과 실행 파일 연결(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b)을 실제
 /// 컴파일·링크로 검사한다. 픽스처: 가짜 Core(모듈 표·빌드 정보 제공, 최소 진입 헤더) ← Lib·가짜 Launch(Modular 진입 C 함수) ← App(실행 파일
 /// 모듈 — Modular에서 호스트 공유 라이브러리), App의 동적 모듈 Dyn.
 /// <list type="bullet">

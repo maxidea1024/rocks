@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// 정확한 C++ 타입 비교용 실행 중 키다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4·BS8e). 저장하거나
+// 정확한 C++ 타입 비교용 실행 중 키다(Docs/Design/BuildTargets 3.8절 BS8d4·BS8e). 저장하거나
 // 직렬화하지 않는다. 타입이 서로 다른 모듈에서 같은 키를 가져야 하면(Modular — 모듈마다 공유
 // 라이브러리) 그 타입의 공개 헤더에 ROCKS_DECLARE_NATIVE_TYPE_KEY를 두고 그 모듈의 .cpp 하나에
 // ROCKS_DEFINE_NATIVE_TYPE_KEY로 정의한다. 선언하지 않은 타입의 키는 inline 표지의 주소라 실행

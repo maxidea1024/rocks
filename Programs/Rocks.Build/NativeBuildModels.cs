@@ -245,7 +245,7 @@ public sealed record NativeModuleInput
 
     public IReadOnlyList<string> PrivateDefines { get; init; } = [];
 
-    // 공개 의존이다(UE PublicDependencyModuleNames, Docs/Design/BuildTargets.ko.md 3.5절 BD7). 이 모듈의 공개 헤더가 쓰는 모듈이며, 그
+    // 공개 의존이다(UE PublicDependencyModuleNames, Docs/Design/BuildTargets 3.5절 BD7). 이 모듈의 공개 헤더가 쓰는 모듈이며, 그
     // 모듈의 공개 환경(public include·정의, 그 공개 의존의 공개 환경)이 이 모듈과 소비자에게 보인다. 두 목록에 함께 적으면 입력 오류다.
     public IReadOnlyList<string> PublicDependencies { get; init; } = [];
 
@@ -305,11 +305,11 @@ public sealed record NativeModuleInput
     // 프로젝트 루트 기준 모듈 폴더다. identity 명세 <ModuleDirectory>/<Name>.rocksids.json의 위치를 정한다.
     public string? ModuleDirectory { get; init; }
 
-    // 모듈 종류다(Docs/Design/BuildTargets.ko.md 3.9절 BD38). 엔진 모듈은 규칙의 Group 폴더(SourceModuleRules), 플러그인 모듈은 기술자
+    // 모듈 종류다(Docs/Design/BuildTargets 3.9절 BD38). 엔진 모듈은 규칙의 Group 폴더(SourceModuleRules), 플러그인 모듈은 기술자
     // (PluginModuleRules)가 정한다. Release 배제 정책이 Developer 모듈을 이 칸으로 찾는다. 실행 파일·서드파티는 Runtime이다.
     public Descriptors.ModuleType Type { get; init; } = Descriptors.ModuleType.Runtime;
 
-    // 이 실행 파일에 링크할 켠 플러그인 모듈이다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE AddModuleToBinary). 빌드가 타깃의 주 실행
+    // 이 실행 파일에 링크할 켠 플러그인 모듈이다(Docs/Design/BuildTargets 3.9절 BD36, UE AddModuleToBinary). 빌드가 타깃의 주 실행
     // 파일(TargetRules.Modules[0])에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). 의존이 아니므로 include·정의를 받지 않고, 링크 폐포 뒤에
     // 그 모듈과 링크 폐포를 링크하며 모듈 표에 보통 행(기술자 단계로 시작)으로 싣는다. 실행 파일만 가질 수 있다.
     public IReadOnlyList<string> PluginModules { get; init; } = [];
@@ -356,7 +356,7 @@ public sealed record NativeModuleInput
     // 않는다(Docs/Design/ModuleLoader.ko.md 3.1절 면제). 설치 SDK가 함께 나른다.
     public bool ThirdParty { get; init; }
 
-    // 프로세스 전역 상태가 있는 서드파티 모듈 표지다(ThirdPartyModuleRules가 ThirdParty.json globalState로 켠다 — Docs/Design/BuildTargets.ko.md
+    // 프로세스 전역 상태가 있는 서드파티 모듈 표지다(ThirdPartyModuleRules가 ThirdParty.json globalState로 켠다 — Docs/Design/BuildTargets
     // 3.8절 BD29·BS8c). 켜진 모듈을 직접 의존(두 의존 목록)하는 모듈이 둘 이상이면 입력 오류다(InputValidation): Modular에서 서드파티는
     // 소비 모듈의 공유 라이브러리마다 링크되므로 상태가 두 벌이 된다. 다른 모듈은 그 소비 모듈의 Rocks API를 거친다.
     public bool HasGlobalState { get; init; }
@@ -428,12 +428,12 @@ public sealed record NativeGeneratedSource(string FileName, string Content);
 public sealed record ImportedMetadata(string Descriptor, string IdentityManifest);
 
 /// <summary>
-/// 링크 방식이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17, UE TargetLinkType). Monolithic은 모든 모듈을 정적 라이브러리로 실행 파일 하나에
+/// 링크 방식이다(Docs/Design/BuildTargets 3.8절 BD17, UE TargetLinkType). Monolithic은 모든 모듈을 정적 라이브러리로 실행 파일 하나에
 /// 링크하고, Modular는 서드파티가 아닌 라이브러리 모듈마다 공유 라이브러리 하나를 만든다.
 /// </summary>
 public enum NativeLinkType { Monolithic, Modular }
 
-/// <summary>링크 방식 매크로와 모듈 API 매크로·공유 라이브러리 이름 규칙이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17·BD27).</summary>
+/// <summary>링크 방식 매크로와 모듈 API 매크로·공유 라이브러리 이름 규칙이다(Docs/Design/BuildTargets 3.8절 BD17·BD27).</summary>
 public static class LinkTypes
 {
     /// <summary>링크 방식 매크로 이름이다(UE IS_MONOLITHIC). 모든 compile이 0·1 중 하나를 받고 Base/Compiler.h가 기본값 없이 검사한다.</summary>
@@ -554,7 +554,7 @@ public sealed record NativeBuildRequest
     // 받는다(LogCompiledMinimums).
     public LogLevel? LogCompiledMinimum { get; init; }
 
-    // 링크 방식이다(TargetRules.LinkType — Docs/Design/BuildTargets.ko.md 3.8절). Modular는 Android와 Asan·Coverage·Release 구성에서
+    // 링크 방식이다(TargetRules.LinkType — Docs/Design/BuildTargets 3.8절). Modular는 Android와 Asan·Coverage·Release 구성에서
     // 입력 오류다.
     public NativeLinkType LinkType { get; init; } = NativeLinkType.Monolithic;
 
@@ -689,7 +689,7 @@ public sealed record NativeBuildResult
     // 실행 파일 모듈 이름 → 도구 빌드 ID(SHA-256 소문자 hex)다. link가 성공한 BuildInfo 대상 실행 파일만 담는다.
     public IReadOnlyDictionary<string, string> ToolBuildIds { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
-    // Modular 타깃의 모듈 manifest 경로다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1 — ModuleManifests). Monolithic·모듈 표 제공 모듈에 닿지
+    // Modular 타깃의 모듈 manifest 경로다(Docs/Design/BuildTargets 3.8절 BS8d1 — ModuleManifests). Monolithic·모듈 표 제공 모듈에 닿지
     // 않는 빌드·실패한 빌드는 null이다.
     public string? ModuleManifestPath { get; init; }
 }

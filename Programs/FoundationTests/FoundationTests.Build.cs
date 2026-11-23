@@ -26,7 +26,7 @@ public abstract class TestsModule : ModuleRules
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools"];
 
-    // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets.ko.md section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
+    // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
     // EngineTests target enables these plugins (EngineTestsTarget.Plugins); EngineTests links their modules.
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
@@ -182,7 +182,7 @@ public sealed class EngineTests : TestsModule
     protected override string ExecutableName => "EngineTests";
 }
 
-// Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources, engine plugin tests included (Docs/Design/BuildTargets.ko.md
+// Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources, engine plugin tests included (Docs/Design/BuildTargets
 // section 3.8 BS8e, Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
 public sealed class EngineModularTests : TestsModule
 {

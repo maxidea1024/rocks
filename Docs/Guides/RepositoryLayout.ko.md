@@ -86,7 +86,7 @@ public sealed class Core : CoreModuleRules
    `<Module>.Build.cs`를 만든다.
 2. 테스트는 `<Module>/Tests/`에 두고 `Programs/FoundationTests/FoundationTests.Build.cs`의 테스트 모듈
    목록에 이름을 더한다.
-3. 다른 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈 — 소비자에게도 보인다)나 `PrivateDependencies`(구현만 쓰는 모듈)에 이름을 넣어 의존한다([빌드 타깃](../Design/BuildTargets.ko.md) 3.5절).
+3. 다른 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈 — 소비자에게도 보인다)나 `PrivateDependencies`(구현만 쓰는 모듈)에 이름을 넣어 의존한다([빌드 타깃](../Design/BuildTargets/03-Design/03.05-DependencyVisibility.ko.md) 3.5절).
 
 ## 프로젝트·플러그인 기술자
 
@@ -138,7 +138,7 @@ public sealed class Core : CoreModuleRules
    이름은 오류다.
 4. 다음 모듈은 이번 빌드에서 뺀다. 타깃이나 남은 모듈이 빠진 모듈을 쓰면 이유와 함께 오류다.
 5. 켠 플러그인의 남은 모듈은 타깃이 참조하지 않아도 빌드하고 타깃의 주 실행 파일(`Modules` 첫 항목)에 링크해
-   모듈 표에 기술자 단계로 싣는다(UE처럼 — [빌드 타깃](../Design/BuildTargets.ko.md) 3.9절). Program 타깃은
+   모듈 표에 기술자 단계로 싣는다(UE처럼 — [빌드 타깃](../Design/BuildTargets/03-Design/03.09-EnginePlugins.ko.md) 3.9절). Program 타깃은
    `enabledByDefault`를 받지 않고 명시한 플러그인만 켠다. 타깃 규칙 `Plugins`가 같은 이름의 프로젝트 참조를 이긴다.
    엔진 저장소 빌드도 `Engine/Plugins`에 같은 규칙을 적용한다(플러그인 모듈 규칙은 `PluginModuleRules`). 설치 SDK는 엔진
    플러그인을 내보내지 않는다.
@@ -156,7 +156,7 @@ public sealed class Core : CoreModuleRules
 ## 후속
 
 - 타깃 종류 확장(Editor·Client·Server와 `ROCKS_WITH_EDITOR` 계열 매크로), 모듈 의존의 Public·Private 구분, 프로젝트 플러그인 참조의
-  활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](../Design/BuildTargets.ko.md). 구현하면 위 기술자 표·모듈
+  활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](../Design/BuildTargets/README.ko.md). 구현하면 위 기술자 표·모듈
   type 표·게임 빌드 연동 절을 함께 고친다.
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
 - `loadingPhase`의 런타임 반영: [모듈 로더](../Design/ModuleLoader.ko.md) 3.3·3.11절(ML1)이 모듈 표 행의 단계로 반영한다(`PostEngineInit`·`None` 포함). 기술자 모듈의 플러그인 활성 반영은 ML5다.
