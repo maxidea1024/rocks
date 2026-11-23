@@ -255,7 +255,8 @@ void Controller::OnFrameworkEndPlay(EndPlayReason) noexcept {
     World& world = GetWorld();
     auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
     const ObjectHandle self = Handle();
-    if (gameplay != nullptr && !gameplay->Director().IsNull()) {
+    // UE AController::Destroyed는 PlayerState가 있을 때만 Logout한다(Controller.cpp:597).
+    if (gameplay != nullptr && !gameplay->Director().IsNull() && !playerState_.IsNull()) {
         auto loggedOut =
             world.With<GameDirector>(gameplay->Director(), [self](GameDirector& director) noexcept {
                 director.Logout(self);

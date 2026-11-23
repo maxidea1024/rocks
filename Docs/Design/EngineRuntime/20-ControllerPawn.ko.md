@@ -31,7 +31,7 @@
 | `SetPawn` | Pawn Tick에 Controller Tick 선행을 건다(15.3절 자동 간선, UE `AddPawnTickDependency`). 바뀌면 이전 간선을 뗀다 |
 | `PawnPendingDestroy(pawn)` | UnPossess → `state = Inactive` → PlayerState가 없으면 자신 파괴 |
 | `OnFrameworkPostAwake` | PlayerState 생성(PlayerController는 언제나, AiController는 `wantsPlayerState`일 때) → `GameplayWorldSubsystem`에 등록 |
-| `OnFrameworkEndPlay` | GameDirector가 있으면 사유와 무관하게 `Logout`(UE는 `Destroyed`에서 부르고, 전환·종료에서도 PlayerController를 `DestroyActor`로 지워 결국 부른다 — 21.3절) → PlayerState 파괴 → UnPossess(Pawn은 남긴다) → 등록 해제 |
+| `OnFrameworkEndPlay` | GameDirector가 있고 PlayerState가 있으면(UE `Controller.cpp:597`) 사유와 무관하게 `Logout`(UE는 `Destroyed`에서 부르고, 전환·종료에서도 PlayerController를 `DestroyActor`로 지워 결국 부른다 — 21.3절) → PlayerState 파괴 → UnPossess(Pawn은 남긴다) → 등록 해제 |
 
 ### 20.4 Pawn
 
@@ -79,13 +79,14 @@
 | `PlayerController` | `LocalPlayerHandle`·`PlayerInput()`(`input::InputState` 스냅숏)·`CameraDirectorHandle`. `OnTick`을 닫고 `TickPlayerInput` → `OnPlayerTick`(pause 중 생략) → `OnControllerTick`. 생성자에서 `tick`·`tickWhenPaused`를 켠다 |
 | `CameraDirector` | `ViewTarget`·`SetViewTarget`·`View()`(`CameraView{location, rotation, fov = 90}`)·`UpdateCamera(dt)`·사용자 hook `OnUpdateView(CameraView&)`. view target이 Controller면 위치는 직전 값을 두고 회전만 그 controlRotation이다(Controller는 root가 없다) |
 | `AiController` | `wantsPlayerState` 기본 거짓 |
-| `GameDirector` | `playerControllerType`·`defaultPawnType`·`aiControllerType`(protected), `Login(localPlayer)`(PlayerController 지연 Spawn → FinishSpawning → `InitNewPlayer`), `PostLogin` → `HandleStartingNewPlayer` → `RestartPlayer`(`FindPlayerStart` → `SpawnDefaultPawnFor` → `FinishRestartPlayer`: Possess → controlRotation = 시작 위치 yaw), `Logout`. 모두 `virtual`이며 기본 흐름은 `GameDirector::이름`으로 부른다 |
+| `GameDirector` | `playerControllerType`·`defaultPawnType`·`aiControllerType`(protected), `Login(localPlayer)`(PlayerController 지연 Spawn → FinishSpawning → `InitNewPlayer`), `PostLogin` → `HandleStartingNewPlayer` → `RestartPlayer`(`FindPlayerStart` → `SpawnDefaultPawnFor` → `FinishRestartPlayer`: Possess → controlRotation = 시작 위치 회전(roll 0 — UE와 같다)), `RestartPlayer`는 파괴 대기 Controller면 하지 않고 Pawn이 있으면 다시 쓰며, 만든 Pawn을 Possess하지 못하면 파괴한다(UE `FailedToRestartPlayer`), `Logout`. 모두 `virtual`이며 기본 흐름은 `GameDirector::이름`으로 부른다 |
 | `GameplayWorldSubsystem` | Controller 목록(등록 순서), 권한(`HasAuthority` — NetMode가 Client가 아니면 참), 배치 중 표시(`IsPopulating` — OpenWorld가 `populate` 동안 세운다), 엔진 단계 `CameraUpdate`를 맡아 PlayerController 등록 순서로 `UpdateCamera`를 부른다 |
 | `GameInstance`·`LocalPlayer` | `CreateLocalPlayer(controllerId, spawnPlayerController = true)`(현재 World가 Playing이고 Director가 있으면 바로 Login), `RemoveLocalPlayer`가 그 PlayerController를 파괴, `LocalPlayer::PlayerControllerHandle`, `GameInstance::SetLocalPlayerInput(player, input)`(LocalPlayer 입력 원천과 현재 PlayerController를 함께 바꾼다 — PlayerController는 엔진 Registry를 빌리지 않고 입력 원천 포인터만 든다) |
 
 - **Login 자리.** OpenWorld는 `populate` 뒤 LocalPlayer마다 Login(Director가 있을 때만 — Client·편집 World는 Login이 없다) → `SetPlayer` → `PostLogin`을 하고 BeginPlay한다. 실패하면 단계 이름 `Login`으로 새 World를 정리한다.
 - **정리(21.3절).** OpenWorld의 이전 World 정리와 `OnEngineShutdown`은 LocalPlayer마다 Spawn된 Pawn(`IsPlacedInWorld`가 거짓)을 먼저, 그다음 PlayerController를 `DestroyActor`로 대기에 넣고 `EndPlay`를 부른다. `EndPlay`가 대기 큐를 넣은 순서대로 먼저 정리하므로 Pawn → PlayerController(`Logout`) → 나머지 순서가 된다.
 - **배치 판정.** `IsPlacedInWorld`는 Pawn `OnFrameworkPostAwake` 때 GameplayWorldSubsystem의 `IsPopulating`이다(레벨 에셋이 생기면 Level 적재 출처로 바꾼다). AI 자동 Possess도 이 값을 쓰며, GameplayWorldSubsystem이 없거나 권한이 없거나 Game·Tryout World가 아니면 하지 않는다(UE `IsGameWorld`·Authority).
+- **리뷰 반영(S12).** Spawn Transform을 `OnFrameworkPostAwake` 전에 적용한다(17.3절). AI 자동 Possess가 Spawn 회전을 controlRotation으로 받게 하려는 것이다. OpenWorld의 Login 반복은 LocalPlayer handle을 복사해 돈다. 그 동안 현재 World를 새 World로 둔다(hook 안의 `RemoveLocalPlayer`가 PlayerController를 지우도록). Login·BeginPlay가 실패하면 현재 World와 LocalPlayer→PlayerController 연결을 되돌린다. 전환·종료 정리에서는 `World::EndPlay`가 PlayerState에 먼저 그 정리 사유를 매긴다. 그래서 PlayerController가 부르는 `DestroyActor(playerState)`는 사유를 바꾸지 않는다(첫 사유 유지, 17.2절).
 - **Tick 간선.** `SetPawn`은 Pawn `OnTick` → Controller `OnTick` 선행을 Framework 출처로 건다. 한쪽이 OnTick을 켜지 않았으면 걸지 않는다(오류 아님).
 
 ### 20.9 시험(완료 조건)

@@ -130,8 +130,10 @@ public:
     // 새 플레이어를 시작시킨다(UE HandleStartingNewPlayer): RestartPlayer.
     virtual void HandleStartingNewPlayer(ObjectHandle playerController) noexcept;
 
-    // 플레이어에게 Pawn을 준다(UE RestartPlayer): FindPlayerStart → SpawnDefaultPawnFor →
-    // FinishRestartPlayer. Pawn을 만들지 못하면 Controller는 그대로(Spectating)다.
+    // 플레이어에게 Pawn을 준다(UE RestartPlayer): FindPlayerStart → (Pawn이 없으면)
+    // SpawnDefaultPawnFor → FinishRestartPlayer. 파괴 대기 Controller는 하지 않고, Pawn이 있으면 그
+    // Pawn을 다시 쓴다. Pawn을 만들지 못하면 Controller는 그대로(Spectating)이고, 만든 Pawn을
+    // Possess하지 못하면 파괴한다.
     virtual void RestartPlayer(ObjectHandle controller) noexcept;
 
     // 기본 Pawn을 만든다(UE SpawnDefaultPawnFor): defaultPawnType(비면 Pawn)을 시작 위치(없으면
@@ -139,7 +141,7 @@ public:
     virtual Result<ObjectHandle> SpawnDefaultPawnFor(ObjectHandle controller,
                                                      ObjectHandle start) noexcept;
 
-    // Possess하고 controlRotation을 시작 방향 yaw로 둔다(UE FinishRestartPlayer).
+    // Possess하고 controlRotation을 시작 방향(roll 0)으로 둔다(UE FinishRestartPlayer).
     virtual void FinishRestartPlayer(ObjectHandle controller, ObjectHandle pawn,
                                      const Rotator<double>& startRotation) noexcept;
 

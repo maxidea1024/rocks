@@ -179,7 +179,26 @@ public:
         Record("director.logout");
         GameDirector::Logout(controller);
     }
+
+    Result<void> InitNewPlayer(ObjectHandle controller) noexcept override {
+        if (failInitNewPlayer) {
+            return Result<void>::Failure(ErrorCode::DependencyFailed);
+        }
+
+        return GameDirector::InitNewPlayer(controller);
+    }
+
+    static inline bool failInitNewPlayer = false;
 };
+
+ObjectHandle placedPawn;
+
+// 배치 Pawn 하나(AI 없음)를 둔다.
+Result<void> PopulatePlacedPawn(World& world, void*) noexcept {
+    auto pawn = world.SpawnActor<RecordingPawn>();
+    placedPawn = pawn ? pawn.Value() : ObjectHandle{};
+    return pawn ? Result<void>::Success() : Result<void>::Failure(pawn.Error());
+}
 
 template <class T>
 Result<void> RegisterOne(TypeRegistry& types) noexcept {
@@ -241,6 +260,7 @@ struct Fixture {
         engine.Reset();
         client.Reset();
         RecordingPawn::nextMode = AutoPossessAi::Disabled;
+        RecordingDirector::failInitNewPlayer = false;
     }
 
     World& Current() noexcept {
@@ -559,6 +579,24 @@ TEST(ControllerPawn_AutoPossessAiMatrix) {
         }
     }
 
+    // 회전한 Transform으로 Spawn해도 AI의 controlRotation이 그 회전이다(Transform이 PostAwake 전 —
+    // S12 리뷰).
+    RecordingPawn::nextMode = AutoPossessAi::PlacedInWorldOrSpawned;
+    const ObjectHandle turned =
+        SpawnPawn(world, Transform(Rotator<double>(0.0, 90.0, 0.0).ToQuaternion(),
+                                   Vec3d(0.0, 0.0, 0.0), Vec3d::One()));
+    RecordingPawn::nextMode = AutoPossessAi::Disabled;
+    const ObjectHandle turnedAi = ControllerOfPawn(world, turned);
+    REQUIRE(!turnedAi.IsNull());
+    auto yaw = world.With<Controller>(
+        turnedAi, [](Controller& value) noexcept { return value.ControlRotation().yaw; });
+    CHECK(yaw.Value() > 89.999 && yaw.Value() < 90.001);
+    // PlayerState 없는 AI의 파괴는 Logout을 부르지 않는다(UE Controller.cpp:597).
+    ResetEvents();
+    REQUIRE(world.DestroyActor(turnedAi));
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(IndexOf("ai.destroy") < MaxEvents && IndexOf("director.logout") == MaxEvents);
+
     // Editor World·Client에서는 자동 Possess하지 않는다.
     MapDesc editor;
     editor.name = "Editing";
@@ -616,4 +654,49 @@ TEST(ControllerPawn_TransitionCleanupAndLocalPlayerLogin) {
     CHECK(!fixture.PawnOf(fixture.PlayerControllerOf(0)).IsNull());
 }
 
+// 21.3절(S12 리뷰 보강): PlayerController가 배치 Pawn을 조종 중이면 전환 정리는 그 Pawn을 지우지
+// 않는다 — Logout(PlayerController 정리)이 먼저이고 배치 Pawn은 EndPlay의 일반 정리에서 지워진다.
+// RestartPlayer는 Pawn이 있으면 다시 쓴다.
+TEST(ControllerPawn_TransitionKeepsPlacedPawnAndRestartReusesPawn) {
+    Fixture fixture;
+    fixture.game.defaultMap.populate = &PopulatePlacedPawn;
+    REQUIRE(fixture.Start());
+    World& world = fixture.Current();
+    const ObjectHandle controller = fixture.PlayerControllerOf(0);
+    const ObjectHandle spawned = fixture.PawnOf(controller);
+    REQUIRE(!placedPawn.IsNull() && !spawned.IsNull() && placedPawn != spawned);
+
+    // Pawn이 있으면 RestartPlayer가 새로 만들지 않는다.
+    const ObjectHandle director = fixture.Gameplay().Director();
+    REQUIRE(world.With<GameDirector>(
+        director, [controller](GameDirector& value) noexcept { value.RestartPlayer(controller); }));
+    CHECK(fixture.PawnOf(controller) == spawned);
+
+    REQUIRE(Possess(world, controller, placedPawn));
+    ResetEvents();
+    auto opened = fixture.client->WithInstance([](GameInstance& instance) noexcept {
+        MapDesc next;
+        next.name = "Next";
+        return instance.OpenWorld(next);
+    });
+    REQUIRE(opened);
+    CHECK(IndexOf("director.logout") < IndexOf("pawn.destroy") &&
+          IndexOf("pawn.destroy") < MaxEvents);
+}
+
+// 18.4절(S12 리뷰 보강): 게임 중 CreateLocalPlayer의 Login이 실패하면 LocalPlayer도 되돌린다.
+TEST(ControllerPawn_CreateLocalPlayerRollsBackWhenLoginFails) {
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    RecordingDirector::failInitNewPlayer = true;
+    auto created = fixture.client->WithInstance(
+        [](GameInstance& instance) noexcept { return instance.CreateLocalPlayer(1); });
+    CHECK(created.Error() == ErrorCode::DependencyFailed);
+    RecordingDirector::failInitNewPlayer = false;
+    auto count = fixture.client->WithInstance(
+        [](GameInstance& instance) noexcept { return instance.LocalPlayerCount(); });
+    CHECK(count.Value() == 1);
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(fixture.Gameplay().Controllers().Size() == 1);
+}
 } // namespace gameplay_controller_pawn_tests_file

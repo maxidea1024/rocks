@@ -252,9 +252,24 @@ void GameDirector::HandleStartingNewPlayer(ObjectHandle playerController) noexce
 }
 
 void GameDirector::RestartPlayer(ObjectHandle controller) noexcept {
-    // UE RestartPlayer → RestartPlayerAtPlayerStart.
+    // UE RestartPlayer → RestartPlayerAtPlayerStart: 파괴 대기 Controller는 하지 않고, Pawn이 이미
+    // 있으면 그 Pawn을 다시 Possess한다(새로 만들지 않는다).
+    World& world = GetWorld();
+    auto state = world.GetActorState(controller);
+    if (!state || state.Value() == ActorState::PendingDestroy) {
+        return;
+    }
+
+    auto existing = world.With<Controller>(
+        controller, [](Controller& value) noexcept { return value.PawnHandle(); });
+    if (!existing) {
+        return;
+    }
+
     const ObjectHandle start = FindPlayerStart(controller, StringView());
-    auto pawn = SpawnDefaultPawnFor(controller, start);
+    const bool reuse = !existing.Value().IsNull();
+    auto pawn = reuse ? Result<ObjectHandle>::Success(existing.Value())
+                      : SpawnDefaultPawnFor(controller, start);
     if (!pawn) {
         Log::Warning(LogGameplay, "RestartPlayer could not spawn a pawn: {Error}",
                      ErrorCodeName(pawn.Error()));
@@ -272,6 +287,13 @@ void GameDirector::RestartPlayer(ObjectHandle controller) noexcept {
     }
 
     FinishRestartPlayer(controller, pawn.Value(), rotation);
+    // Possess하지 못했으면 새로 만든 Pawn을 남기지 않는다(UE FailedToRestartPlayer).
+    auto possessed = world.With<Controller>(
+        controller, [](Controller& value) noexcept { return value.PawnHandle(); });
+    if (!reuse && (!possessed || possessed.Value() != pawn.Value())) {
+        auto destroyed = world.DestroyActor(pawn.Value());
+        (void)destroyed;
+    }
 }
 
 Result<ObjectHandle> GameDirector::SpawnDefaultPawnFor(ObjectHandle, ObjectHandle start) noexcept {
@@ -305,8 +327,8 @@ Result<ObjectHandle> GameDirector::SpawnDefaultPawnFor(ObjectHandle, ObjectHandl
 
 void GameDirector::FinishRestartPlayer(ObjectHandle controller, ObjectHandle pawn,
                                        const Rotator<double>& startRotation) noexcept {
-    // UE FinishRestartPlayer: Possess → controlRotation = 시작 방향(yaw만).
-    const Rotator<double> facing(0.0, startRotation.yaw, 0.0);
+    // UE FinishRestartPlayer: Possess → controlRotation = 시작 방향(roll만 0).
+    const Rotator<double> facing(startRotation.pitch, startRotation.yaw, 0.0);
     auto possessed =
         GetWorld().With<Controller>(controller, [pawn, facing](Controller& value) noexcept {
             auto result = value.Possess(pawn);

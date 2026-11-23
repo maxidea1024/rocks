@@ -426,21 +426,52 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
         }
     }
 
-    // 21.2절 8–9단계: LocalPlayer마다 Login(Director가 있을 때만).
+    // 21.2절 8–9단계: LocalPlayer마다 Login(Director가 있을 때만). 사용자 hook이 LocalPlayer를
+    // 더하거나 뺄 수 있으므로 handle을 복사해 돌고, 그 동안 현재 World로 둬 RemoveLocalPlayer가
+    // PlayerController를 지우게 한다. 실패하면 현재 World와 PlayerController 연결을 되돌린다.
+    currentWorld_ = world;
+    auto unwind = [&](const char* failedStage, ErrorCode error) noexcept {
+        currentWorld_ = nullptr;
+        for (ObjectHandle player : localPlayers_.View()) {
+            auto cleared = WithLocalPlayer(
+                player, [](LocalPlayer& local) noexcept { local.playerController_ = {}; });
+            (void)cleared;
+        }
+
+        return fail(failedStage, error);
+    };
+    Array<ObjectHandle> players(engine_->GetAllocator());
+    if (auto copied = players.TryReserve(LocalPlayerCount()); !copied) {
+        return unwind("Login", copied.Error());
+    }
+
     for (ObjectHandle player : localPlayers_.View()) {
+        auto pushed = players.TryPushBack(player);
+        (void)pushed;
+    }
+
+    for (ObjectHandle player : players) {
+        bool present = false;
+        for (ObjectHandle current : localPlayers_.View()) {
+            present = present || current == player;
+        }
+
+        if (!present) {
+            continue;
+        }
+
         if (auto logged = LoginPlayer(*world, player); !logged) {
-            return fail("Login", logged.Error());
+            return unwind("Login", logged.Error());
         }
     }
 
     // 편집·비활성 World는 시작하지 않는다(16.4절).
     if (map.kind != WorldKind::Editor && map.kind != WorldKind::Inactive) {
         if (auto begun = world->BeginPlay(); !begun) {
-            return fail("BeginPlay", begun.Error());
+            return unwind("BeginPlay", begun.Error());
         }
     }
 
-    currentWorld_ = world;
     Log::Info(LogGameplay, "Opened world {Map}", map.name);
     return Result<void>::Success();
 }
