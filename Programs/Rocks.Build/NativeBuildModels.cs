@@ -218,6 +218,13 @@ public sealed record NativeToolchain
     public IReadOnlyList<string> RemovedEnvironment { get; init; } = [];
 }
 
+/// <summary>
+/// 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader.ko.md 3.15절). <paramref name="Name"/>은 플러그인 이름(C 식별자),
+/// <paramref name="Directory"/>는 플러그인 루트(엔진 저장소 <c>Engine/Plugins</c>, 프로젝트 <c>Plugins</c>) 기준 플러그인 폴더다(<c>/</c> 구분,
+/// 예 <c>Importers/UnrealExchange</c>).
+/// </summary>
+public sealed record ModulePlugin(string Name, string Directory);
+
 /// <summary>입력 경로는 request.RootDirectory 기준이다. dependency의 public 설정만 전파한다.</summary>
 public sealed record NativeModuleInput
 {
@@ -306,6 +313,11 @@ public sealed record NativeModuleInput
     // 파일(TargetRules.Modules[0])에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). 의존이 아니므로 include·정의를 받지 않고, 링크 폐포 뒤에
     // 그 모듈과 링크 폐포를 링크하며 모듈 표에 보통 행(기술자 단계로 시작)으로 싣는다. 실행 파일만 가질 수 있다.
     public IReadOnlyList<string> PluginModules { get; init; } = [];
+
+    // 이 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader.ko.md 3.15절 MD23). 기술자 모듈 처리(DescriptorModuleSet.Apply)가 플러그인
+    // 모듈에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). Modular에서 그 공유 라이브러리와 플러그인 manifest의 폴더를 정한다
+    // (LinkTypes.SharedLibraryDirectory). 엔진·프로젝트 모듈은 null이다.
+    public ModulePlugin? Plugin { get; init; }
 
     // 설치 SDK 모듈 전용: 미리 생성된 descriptor와 identity 명세다. 다시 생성하지 않고 import만 한다.
     // 이 모듈은 리플렉션 헤더를 찾지 않는다(미리 생성된 descriptor를 쓴다).
@@ -488,6 +500,30 @@ public static class LinkTypes
         string stem = target + "-" + module + (configuration == NativeConfiguration.Development ? "" : "-" + platform + "-" + configuration);
         return platform == NativePlatform.Windows ? stem : "lib" + stem;
     }
+
+    /// <summary>
+    /// 플랫폼 폴더 이름이다(UE Binaries/&lt;Platform&gt;): Windows <c>Win64</c>, macOS <c>Mac</c>, Android <c>Android</c>. 빌드 문맥
+    /// (<c>BuildContext.PlatformDirectory</c>)과 플러그인 binaries 폴더가 같은 표를 쓴다. 새 플랫폼은 명시적으로 더한다. 모르는 값은
+    /// <see cref="ArgumentOutOfRangeException"/>이고 그 인자 이름은 <paramref name="parameterName"/>이다(호출자의 속성 이름을 진단에 쓴다).
+    /// </summary>
+    public static string PlatformDirectory(NativePlatform platform, string parameterName = "platform") => platform switch
+    {
+        NativePlatform.Windows => "Win64",
+        NativePlatform.MacOS => "Mac",
+        NativePlatform.Android => "Android",
+        _ => throw new ArgumentOutOfRangeException(parameterName, platform, "Unsupported native platform.")
+    };
+
+    /// <summary>
+    /// Modular 공유 라이브러리의 폴더다(Docs/Design/ModuleLoader.ko.md 3.15절 MD23). 엔진·프로젝트 모듈은 <c>&lt;출력&gt;/bin</c>, 플러그인 모듈
+    /// (<see cref="NativeModuleInput.Plugin"/>)은 <c>&lt;출력&gt;/Plugins/&lt;플러그인 폴더&gt;/Binaries/&lt;Platform&gt;</c>이다. 링크 출력·
+    /// manifest·export 수 진단이 이 함수 하나를 쓴다. 사용 예: UnrealExchange 플러그인 모듈의 Windows 폴더는
+    /// <c>&lt;출력&gt;/Plugins/Importers/UnrealExchange/Binaries/Win64</c>다.
+    /// </summary>
+    public static string SharedLibraryDirectory(string output, NativeModuleInput module, NativePlatform platform) =>
+        module.Plugin is { } plugin
+            ? Path.Combine([output, "Plugins", .. plugin.Directory.Split('/'), "Binaries", PlatformDirectory(platform)])
+            : Path.Combine(output, "bin");
 
     /// <summary>공유 라이브러리 확장자다(Windows <c>.dll</c>, macOS <c>.dylib</c>, 그 밖 <c>.so</c>).</summary>
     public static string SharedLibraryExtension(NativePlatform platform) =>

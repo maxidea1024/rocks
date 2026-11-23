@@ -286,11 +286,31 @@ internal static class InputValidation
             }
         }
 
-        // 켠 플러그인 모듈의 공유 라이브러리 위치(플러그인 Binaries manifest)는 ML4다(Docs/Design/BuildTargets.ko.md 3.9절 BD41).
-        if (request.Modules.FirstOrDefault(module => module.PluginModules.Count != 0) is { } host)
+        // 플러그인 모듈은 다른 폴더(플러그인 binaries 폴더)의 공유 라이브러리다(Docs/Design/ModuleLoader.ko.md 3.15절 ML5a). Windows는 로더가
+        // manifest 순서로 의존 라이브러리를 먼저 열어 import를 푸는데, 모듈 표 행이 없는 공유 라이브러리(진입점 면제 모듈 — PlatformBase 등)는
+        // 로더가 열지 않는다. 그런 라이브러리는 진입 스텁이 import하는 부트 모듈(Launch)의 링크 폐포 안이어야 이미 적재되어 있다.
+        if (byName.Values.Any(module => module.Plugin is not null) &&
+            byName.Values.FirstOrDefault(module => module.ProvidesLaunch) is { } launchModule)
         {
-            throw new ArgumentException($"Module {host.Name}: Modular linking of a target that enables plugins is not supported until the plugin " +
-                "binary manifest (ModuleLoader ML4); use Monolithic.");
+            HashSet<string> entries = ModuleTables.EntryModules(byName);
+            var boot = new HashSet<string>(LinkClosure.Of(launchModule.Name, byName, withDynamic: false), StringComparer.OrdinalIgnoreCase)
+            {
+                launchModule.Name
+            };
+            // 빌드 대상(없으면 전부)에서 닿는 모듈만 본다.
+            HashSet<string> built = LinkClosure.Reachable(request.Targets.Count == 0 ? byName.Keys : request.Targets, byName);
+            foreach (NativeModuleInput module in byName.Values.Where(module => built.Contains(module.Name))
+                .OrderBy(module => module.Name, StringComparer.Ordinal))
+            {
+                bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0;
+                if (hasCode && !entries.Contains(module.Name) && LinkTypes.CompilesAsSharedLibrary(module, request.LinkType, false) &&
+                    !boot.Contains(module.Name))
+                {
+                    throw new ArgumentException($"Module {module.Name}: a Modular shared library without a module table row must be in the link " +
+                        $"closure of the launch module {launchModule.Name} when plugin modules are built, so that it is loaded before plugin " +
+                        "libraries import it (Docs/Design/ModuleLoader.ko.md section 3.15).");
+                }
+            }
         }
 
         // 미리 빌드한 라이브러리만 있는 모듈(설치 SDK 모듈)은 아직 공유 라이브러리로 나르지 않는다.
@@ -357,6 +377,7 @@ internal static class InputValidation
 
         ValidateDynamicModules(modules, byFolded);
         ValidatePluginModules(modules, byFolded);
+        ValidateModulePlugins(modules);
         ValidateGlobalStateConsumers(modules);
     }
 
@@ -413,6 +434,38 @@ internal static class InputValidation
                     throw new ArgumentException($"Module {module.Name}, PluginModules: {plugin} is listed twice or is an executable.");
                 }
             }
+        }
+    }
+
+    // 모듈의 플러그인(NativeModuleInput.Plugin — Docs/Design/ModuleLoader.ko.md 3.15절)이다. 빌드가 기술자에서 채운다. 이름은 C 식별자이고
+    // 폴더는 플러그인 루트 기준 상대 경로다(/ 구분, 빈 조각·.·..·\\·: 없음 — 출력 폴더 안 플러그인 binaries 폴더와 manifest 목록 경로가 된다).
+    // 같은 플러그인 이름은 같은 폴더이고, 다른 플러그인은 다른 폴더다(플러그인 manifest가 폴더마다 하나다).
+    private static void ValidateModulePlugins(IReadOnlyList<NativeModuleInput> modules)
+    {
+        var folders = new Dictionary<string, string>(StringComparer.Ordinal);
+        var owners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in modules.Where(module => module.Plugin is not null))
+        {
+            ModulePlugin plugin = module.Plugin!;
+            if (!ModuleTables.IsIdentifier(plugin.Name) || plugin.Directory.Length == 0 ||
+                plugin.Directory.Split('/').Any(part => part.Length == 0 || part is "." or ".." || part.IndexOfAny(['\\', ':']) >= 0))
+            {
+                throw new ArgumentException($"Module {module.Name}: plugin '{plugin.Name}' at '{plugin.Directory}' must have a C identifier name and " +
+                    "a relative folder with '/' separators and no empty, '.', '..', '\\' or ':' parts.");
+            }
+
+            if (folders.TryGetValue(plugin.Name, out string? folder) && folder != plugin.Directory)
+            {
+                throw new ArgumentException($"Plugin '{plugin.Name}' has modules in two folders: '{folder}' and '{plugin.Directory}'.");
+            }
+
+            if (owners.TryGetValue(plugin.Directory, out string? owner) && owner != plugin.Name)
+            {
+                throw new ArgumentException($"Plugins '{owner}' and '{plugin.Name}' share the folder '{plugin.Directory}'.");
+            }
+
+            folders[plugin.Name] = plugin.Directory;
+            owners[plugin.Directory] = plugin.Name;
         }
     }
 

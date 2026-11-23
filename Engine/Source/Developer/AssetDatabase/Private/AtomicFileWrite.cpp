@@ -1,4 +1,4 @@
-#include "AtomicFileWrite.h"
+#include <AssetDatabase/AtomicFileWrite.h>
 
 #include "AssetDatabaseInternal.h"
 
@@ -6,8 +6,11 @@
 #include <Core/Guid.h>
 #include <Core/Text/String.h>
 
-// 작은 파일의 원자 교체 쓰기다(Docs/Design/AssetSystem.ko.md 7.1절 16·17).
-namespace rocks::asset_database_detail {
+// 작은 파일의 원자 교체 쓰기다(Docs/Design/AssetSystem.ko.md 7.1절 16·17·10.2절 A4d).
+namespace rocks {
+
+using asset_database_detail::EditorAppendGuidText;
+using asset_database_detail::EditorTempSuffix;
 
 Result<AtomicWriteOutcome> WriteFileAtomically(platform::FileSystem& files, Allocator& allocator,
                                                StringView directory, StringView fileName,
@@ -96,4 +99,4 @@ Result<AtomicWriteOutcome> WriteFileAtomically(platform::FileSystem& files, Allo
     return Result<Out>::Success(outcome);
 }
 
-} // namespace rocks::asset_database_detail
+} // namespace rocks

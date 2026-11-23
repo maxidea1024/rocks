@@ -16,7 +16,7 @@
 
 namespace rocks {
 
-class ExchangeIndexLookup final : public ExchangeExistingAssets {
+class ROCKS_UNREALEXCHANGE_API ExchangeIndexLookup final : public ExchangeExistingAssets {
 public:
     // index는 이 조회보다 오래 살아야 하고 조회하는 동안 바뀌지 않아야 한다(돌려준 path는 그 색인
     // 항목의 문자열이고 정렬 표가 항목을 가리킨다). allocator는 정렬 표와 조회 하나의 임시 목록에

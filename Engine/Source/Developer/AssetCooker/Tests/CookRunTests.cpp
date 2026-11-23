@@ -392,6 +392,19 @@ TEST(CookRun_CooksAllTargets) {
     request.keys = &partial;
     REQUIRE(CookPackages(env.allocator, request, result));
     CHECK(result.cooked == 7 && skipped.Of(LeafId) == nullptr && result.diagnostics.IsEmpty());
+
+    // 재사용 표지가 선 대상(Hero)은 열지 않고 건너뛴다(PlanCookReuse — A4d).
+    Array<uint8> reuse(env.allocator);
+    REQUIRE(reuse.TryResize(scene.targets.targets.Size()));
+    for (usize index = 0; index < reuse.Size(); ++index) {
+        reuse[index] = scene.targets.targets[index].id == FixedId(HeroId) ? 1 : 0;
+    }
+
+    MemoryOutput reused(env.allocator);
+    request = scene.Request(reused);
+    request.reuse = reuse.View();
+    REQUIRE(CookPackages(env.allocator, request, result));
+    CHECK(result.cooked == 7 && reused.Of(HeroId) == nullptr && reused.Of(VillainId) != nullptr);
 }
 
 // 매니페스트 재료: 의존은 쿠킹 패키지 Dependencies 그대로라 Soft 의존은 색인에 있어도(SoftA → Leaf)
@@ -579,8 +592,9 @@ TEST(CookRun_ErrorsContinue) {
     }
 }
 
-// 요청 거부: 인자 null·상한 0·키 수 다름·다른 색인의 대상 InvalidArgument(결과 비움), 시작 때 dirty
-// 패키지 Busy, 출력 sink 오류·처리기 조회 오류는 그대로이고 이번 쿠킹이 연 패키지는 닫힌다.
+// 요청 거부: 인자 null·상한 0·키 수·재사용 표지 수 다름·다른 색인의 대상 InvalidArgument(결과
+// 비움), 시작 때 dirty 패키지 Busy, 출력 sink 오류·처리기 조회 오류는 그대로이고 이번 쿠킹이 연
+// 패키지는 닫힌다.
 TEST(CookRun_Rejects) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -609,6 +623,10 @@ TEST(CookRun_Rejects) {
     CookKeySet fewer(env.allocator);
     request = scene.Request(output);
     request.keys = &fewer;
+    CHECK(CookPackages(env.allocator, request, result).Error() == ErrorCode::InvalidArgument);
+    const uint8 shortReuse[] = {0};
+    request = scene.Request(output);
+    request.reuse = shortReuse;
     CHECK(CookPackages(env.allocator, request, result).Error() == ErrorCode::InvalidArgument);
     CookTargetSet foreign(env.allocator);
     REQUIRE(foreign.targets.TryEmplaceBack(env.allocator));

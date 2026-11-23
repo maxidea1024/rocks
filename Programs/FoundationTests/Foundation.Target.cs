@@ -125,8 +125,8 @@ public sealed class LaunchWindowedProbeModularTarget : TargetRules
 }
 
 // Modular build of the engine tests (Docs/Design/BuildTargets.ko.md section 3.8 BS8e): the engine layer modules link as shared libraries and the
-// test executable starts through the Modular entry. The test module is EngineModularTests (the EngineTests sources without the engine plugin tests:
-// Modular targets cannot enable plugins until the plugin binary manifest, ModuleLoader ML5).
+// test executable starts through the Modular entry. The test module is EngineModularTests (the EngineTests sources). The enabled engine plugins
+// link into their plugin binaries folders with their own module manifests (Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
 public sealed class EngineModularTarget : TargetRules
 {
     public override string Name => "EngineModular";
@@ -137,6 +137,9 @@ public sealed class EngineModularTarget : TargetRules
     public override Rocks.Build.NativeLinkType LinkType => Rocks.Build.NativeLinkType.Modular;
 
     public override IReadOnlyList<string> Modules => ["EngineModularTests"];
+
+    // Engine plugins whose module tests EngineModularTests runs (the same as EngineTests).
+    public override IReadOnlyList<PluginReference> Plugins => [new("UnrealExchange", true)];
 
     public override string TestExecutable => "EngineModularTests";
 

@@ -52,6 +52,47 @@ bool IsAbsolutePath(StringView path) noexcept {
     return drive || unc || posix;
 }
 
+// 파일 전체를 읽는다. 실패하면 FileStatus 실패이고 text는 비어 있을 수 있다(크기를 읽지 못함·너무
+// 큼은 Overflow다). 할당 실패는 outOfMemory를 켠다.
+platform::FileStatus ReadWholeFile(StringView path, Array<char>& text, bool& outOfMemory) noexcept {
+    outOfMemory = false;
+    StringBuilder<> terminated(text.GetAllocator());
+    if (!terminated.TryAppend(path)) {
+        outOfMemory = true;
+        return platform::FileStatus{platform::FileCode::OutOfMemory, 0};
+    }
+
+    platform::File file;
+    const platform::FileStatus opened =
+        file.Open(terminated.CString(), platform::FileOpenMode::ReadExisting);
+    if (!opened) {
+        return opened;
+    }
+
+    uint64 bytes = 0;
+    const platform::FileStatus sized = file.Size(bytes);
+    if (!sized || bytes > NumericLimits<usize>::Max()) {
+        return sized ? platform::FileStatus{platform::FileCode::Overflow, 0} : sized;
+    }
+
+    if (!text.TryResize(static_cast<usize>(bytes))) {
+        outOfMemory = true;
+        return platform::FileStatus{platform::FileCode::OutOfMemory, 0};
+    }
+
+    return file.ReadExact(text.Data(), text.Size()).status;
+}
+
+// 플러그인 manifest 하나의 본문과 폴더다(3.15절 — 실행 파일 manifest 폴더의 부모 + "Plugins/…").
+struct PluginManifestFile {
+    explicit PluginManifestFile(Allocator& allocator) noexcept
+        : text(allocator), folder(allocator) {
+    }
+
+    Array<char> text;
+    StringBuilder<> folder;
+};
+
 // 단계 값의 순서 번호다(LoadingPhase 값 순서가 단계 순서다).
 constexpr uint8 PhaseOrder(LoadingPhase phase) noexcept {
     return static_cast<uint8>(phase);
@@ -181,40 +222,111 @@ ModuleLoader::TryCreateFromManifest(Allocator& allocator, StringView manifestPat
 
     // POSIX 루트 바로 아래 파일("/x.modules.json")은 폴더가 "/"다.
     const StringView directory(manifestPath.Data(), separator == 0 ? 1 : separator);
-    StringBuilder<> path(allocator);
-    if (!path.TryAppend(manifestPath)) {
-        report.error = ErrorCode::OutOfMemory;
-        return reject(ModuleLoadCode::Incompatible, 0,
-                      "Out of memory while reading the module manifest {}");
-    }
+    const StringView fileName(manifestPath.Data() + separator + 1,
+                              manifestPath.ByteCount() - separator - 1);
+    // 파일 하나를 읽는다. 실패하면 report를 채운다(path는 문구, 없으면 NotFound).
+    auto read = [&](StringView path, Array<char>& text) noexcept {
+        bool outOfMemory = false;
+        const platform::FileStatus status = ReadWholeFile(path, text, outOfMemory);
+        if (status) {
+            return true;
+        }
 
-    platform::File file;
-    const platform::FileStatus opened =
-        file.Open(path.CString(), platform::FileOpenMode::ReadExisting);
-    if (!opened) {
-        return reject(opened.code == platform::FileCode::NotFound ? ModuleLoadCode::NotFound
-                                                                  : ModuleLoadCode::Incompatible,
-                      opened.nativeError, "Module manifest {} cannot be opened");
-    }
-
-    uint64 bytes = 0;
-    const platform::FileStatus sized = file.Size(bytes);
-    if (!sized || bytes > NumericLimits<usize>::Max()) {
-        return reject(ModuleLoadCode::Incompatible, sized.nativeError,
-                      "Module manifest {} size cannot be read");
-    }
+        report.code = outOfMemory || status.code != platform::FileCode::NotFound
+                          ? ModuleLoadCode::Incompatible
+                          : ModuleLoadCode::NotFound;
+        report.nativeError = status.nativeError;
+        report.error = outOfMemory ? ErrorCode::OutOfMemory : report.error;
+        WriteReportText(report, report.stage, ManifestStage);
+        WriteReportText(report, report.message,
+                        outOfMemory
+                            ? StringView("Out of memory while reading the module manifest {}")
+                            : StringView("Module manifest {} cannot be read"),
+                        path);
+        return false;
+    };
 
     Array<char> text(allocator);
-    if (!text.TryResize(static_cast<usize>(bytes))) {
+    if (!read(manifestPath, text)) {
+        return failed();
+    }
+
+    // 실행 파일 manifest가 가리키는 플러그인 manifest를 읽는다(3.15절 — 목록의 manifest만, 폴더는
+    // 실행 파일 manifest 폴더의 부모 + "Plugins/…").
+    detail::ModuleManifestPlugins plugins(allocator);
+    if (!detail::ListModuleManifestPlugins(StringView(text.Data(), text.Size()), fileName, plugins,
+                                           report)) {
+        return failed();
+    }
+
+    // 부모 폴더는 마지막 구분자(연속 구분자는 첫 것) 앞이다. POSIX 루트 바로 아래("/bin")는 빈
+    // 부모("/Plugins/…")이고, 드라이브("C:")나 UNC 서버("\\srv")까지 올라가면 부모가 없다.
+    auto isSeparator = [](char value) noexcept { return value == '/' || value == '\\'; };
+    usize parent = IndexNone;
+    for (usize index = 0; index < directory.ByteCount(); ++index) {
+        if (isSeparator(directory.Data()[index])) {
+            parent = index;
+        }
+    }
+
+    while (parent != IndexNone && parent != 0 && isSeparator(directory.Data()[parent - 1])) {
+        --parent;
+    }
+
+    const bool unc =
+        directory.ByteCount() >= 2 && directory.Data()[0] == '\\' && directory.Data()[1] == '\\';
+    bool uncServerOnly = unc;
+    for (usize index = 2; unc && parent != IndexNone && index < parent; ++index) {
+        uncServerOnly = uncServerOnly && !isSeparator(directory.Data()[index]);
+    }
+
+    if (plugins.Count() != 0 && (parent == IndexNone || uncServerOnly)) {
+        return reject(ModuleLoadCode::Incompatible, 0,
+                      "Module manifest {} lists plugin manifests but its folder has no parent");
+    }
+
+    const usize count = plugins.Count() + 1;
+    Array<UniquePtr<PluginManifestFile>> files(allocator);
+    Array<detail::ModuleManifestText> manifests(allocator);
+    if (!files.TryReserve(plugins.Count()) || !manifests.TryReserve(count) ||
+        !manifests.TryPushBack({StringView(text.Data(), text.Size()), directory, StringView()})) {
         report.error = ErrorCode::OutOfMemory;
         return reject(ModuleLoadCode::Incompatible, 0,
                       "Out of memory while reading the module manifest {}");
     }
 
-    const platform::FileTransfer read = file.ReadExact(text.Data(), text.Size());
-    if (!read.status) {
-        return reject(ModuleLoadCode::Incompatible, read.status.nativeError,
-                      "Module manifest {} cannot be read");
+    for (usize index = 0; index < plugins.Count(); ++index) {
+        // "../Plugins/…/<파일>"의 첫 "../"를 실행 파일 manifest 폴더의 부모로 바꾼다.
+        const StringView relative = plugins.Path(index);
+        const StringView inside(relative.Data() + 3, relative.ByteCount() - 3);
+        usize fileStart = inside.ByteCount();
+        while (fileStart != 0 && inside.Data()[fileStart - 1] != '/') {
+            --fileStart;
+        }
+
+        auto made = UniquePtr<PluginManifestFile>::TryMake(allocator, allocator);
+        StringBuilder<> path(allocator);
+        if (!made || !files.TryPushBack(Move(made.Value())) ||
+            !path.TryAppend(StringView(directory.Data(), parent)) || !path.TryAppend("/") ||
+            !path.TryAppend(inside) ||
+            !files[index]->folder.TryAppend(StringView(directory.Data(), parent)) ||
+            !files[index]->folder.TryAppend("/") ||
+            !files[index]->folder.TryAppend(StringView(inside.Data(), fileStart - 1))) {
+            report.error = ErrorCode::OutOfMemory;
+            return reject(ModuleLoadCode::Incompatible, 0,
+                          "Out of memory while reading the module manifest {}");
+        }
+
+        if (!read(path.View(), files[index]->text)) {
+            WriteReportName(report, report.requested, plugins.Name(index));
+            return failed();
+        }
+
+        const Array<char>& body = files[index]->text;
+        if (!manifests.TryPushBack({StringView(body.Data(), body.Size()),
+                                    files[index]->folder.View(), plugins.Name(index)})) {
+            platform::Fatal("ModuleLoader reserved manifest push failed");
+        }
     }
 
     auto data = UniquePtr<detail::ModuleManifestData>::TryMake(allocator, allocator);
@@ -224,8 +336,10 @@ ModuleLoader::TryCreateFromManifest(Allocator& allocator, StringView manifestPat
                       "Out of memory while reading the module manifest {}");
     }
 
-    if (!detail::ParseModuleManifest(StringView(text.Data(), text.Size()), *data.Value(), report) ||
-        !detail::PrepareModuleBinaries(directory, *data.Value(), report)) {
+    if (!detail::ParseModuleManifests(
+            Span<const detail::ModuleManifestText>(manifests.Data(), manifests.Size()),
+            *data.Value(), report) ||
+        !detail::PrepareModuleBinaries(*data.Value(), report)) {
         return failed();
     }
 

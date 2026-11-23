@@ -46,7 +46,7 @@ struct ExchangeExistingMatch {
 // UE objectPath의 Rocks 에셋이 이미 있는지 알려 주는 조회다(10.5절 4번 — ExchangeIndexLookup이
 // AssetIndex의 UnrealExchange.ObjectPath·FormerPaths 태그로 구현한다). PlanExchangeImport 동안만
 // 빌린다.
-class ExchangeExistingAssets {
+class ROCKS_UNREALEXCHANGE_API ExchangeExistingAssets {
 public:
     virtual ~ExchangeExistingAssets() = default;
 
@@ -92,7 +92,7 @@ struct ExchangeImportUnit {
 };
 
 // 임포트 순서 결과다. 단위는 (깊이, 가장 작은 구성원 objectPath) 순이고 결정적이다.
-class ExchangeImportPlan {
+class ROCKS_UNREALEXCHANGE_API ExchangeImportPlan {
 public:
     explicit ExchangeImportPlan(Allocator& allocator) noexcept;
 
@@ -152,8 +152,10 @@ private:
 // 따라가지 않는다. 범위 밖 클래스 에셋도 직접 고르면 고른다.
 //
 // 반환: only 값이 묶음에 없으면 NotFound이고 missing(있으면)에 그 값의 번호를 둔다. 할당 실패.
-Result<void> SelectExchangeClosure(const ExchangeBundle& bundle, Span<const StringView> only,
-                                   Array<uint8>& out, uint32* missing = nullptr) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> SelectExchangeClosure(const ExchangeBundle& bundle,
+                                                            Span<const StringView> only,
+                                                            Array<uint8>& out,
+                                                            uint32* missing = nullptr) noexcept;
 
 // bundle의 임포트 순서와 대응 경로를 out에 채운다(out은 먼저 비운다). 에셋·단위 실패는 진단과
 // 단위 state로 알리고 성공한다(9.3절 부분 결과).
@@ -161,7 +163,9 @@ Result<void> SelectExchangeClosure(const ExchangeBundle& bundle, Span<const Stri
 // 반환: root가 논리 경로 규칙을 어기면 InvalidArgument(InvalidPath 진단, out 빈 상태), selection
 // 크기가 에셋 수와 다르거나 Hard 닫힘이 아니면 InvalidArgument(진단 없음, out 빈 상태), 기존 에셋
 // 조회의 오류와 할당 실패는 진단 없이 그 오류다.
-Result<void> PlanExchangeImport(const ExchangeBundle& bundle, const ExchangeOrderOptions& options,
-                                ExchangeImportPlan& out, ExchangeDiagnostics& diagnostics) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> PlanExchangeImport(const ExchangeBundle& bundle,
+                                                         const ExchangeOrderOptions& options,
+                                                         ExchangeImportPlan& out,
+                                                         ExchangeDiagnostics& diagnostics) noexcept;
 
 } // namespace rocks

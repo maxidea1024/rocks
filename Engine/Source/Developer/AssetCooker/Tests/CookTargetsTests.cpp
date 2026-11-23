@@ -328,9 +328,11 @@ TEST(CookTargets_MissingAndDuplicates) {
 // 참조자는 조용히 빼고, 같은 id 참조자는 오류 DuplicateAssetId) Hard 폐포로만 들어온 에셋(Arena)의
 // Build 참조자(AR)는 더하지 않는다. 폐포로 먼저 들어온 에셋(Q)이 뒤에 역방향으로 닿으면 그
 // 참조자(QR)도 더한다. PrimaryAsset 규칙에 맞는 폐포 에셋은 bundle을 따른다. 기존 매니페스트:
-// 색인에 없는 항목은 사라진 항목(같은 id 항목은 색인에 있음), 이번에 다시 쿠킹하지 않는 남은 항목의
-// Hard 의존이 사라졌으면 오류 MissingDependency(다시 쿠킹하는 R의 옛 의존·색인에 있는 Hard·Soft는
-// 아님, 사라진 항목끼리는 보지 않음). 전체 쿠킹은 기존 매니페스트를 보지 않는다.
+// 색인에 고유하게 있고 NeverCook이 아닌 항목(Keep)은 뿌리(키를 다시 계산 — 10절, 옛 의존으로 오류
+// 내지 않음), 색인에 없거나 NeverCook이 된 항목(NB)은 사라진 항목, 같은 id 항목은 오류
+// DuplicateAssetId이고 다시 쿠킹하지 않는 그 항목의 Hard 의존이 사라졌으면 오류
+// MissingDependency(다시 쿠킹하는 R의 옛 의존은 아님, 사라진 항목끼리는 보지 않음). 전체 쿠킹은
+// 기존 매니페스트를 보지 않는다.
 TEST(CookTargets_Partial) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -371,7 +373,8 @@ TEST(CookTargets_Partial) {
         Dep deps[3];
         usize count;
     };
-    const ManifestRow rows[] = {{100, {{150, K::Hard}}, 1},
+    const ManifestRow rows[] = {{72, {}, 0},
+                                {100, {{A2Id, K::Hard}, {150, K::Hard}, {151, K::Soft}}, 3},
                                 {120, {{150, K::Hard}}, 1},
                                 {140, {{A2Id, K::Hard}, {150, K::Hard}, {151, K::Soft}}, 3},
                                 {150, {{151, K::Hard}}, 1},
@@ -390,7 +393,9 @@ TEST(CookTargets_Partial) {
     const StringView paths[] = {"/Game/Props/A2", "/Game/Nope", "/Game/Never/NB", "/Game/Props/P"};
     CookTargetSet out(env.allocator);
     REQUIRE(ComputeCookTargets(env.allocator, scene.Request(paths, &existing), out));
-    const uint64 expected[] = {ArenaId, A2Id, U1Id, 120, 121, 122, 130, 131, 132};
+    // 기존 항목 중 색인에 고유하게 있고 NeverCook이 아닌 Keep(140)도 대상이다(키를 다시 계산 —
+    // 10절).
+    const uint64 expected[] = {ArenaId, A2Id, U1Id, 120, 121, 122, 130, 131, 132, 140};
     CHECK(SameTargets(out, expected));
     const CookTarget* arena = TargetOf(out, ArenaId);
     REQUIRE(arena != nullptr && arena->primary && arena->bundles.Size() == 1);
@@ -398,9 +403,10 @@ TEST(CookTargets_Partial) {
     const ExpectedDiagnostic diagnostics[] = {
         {C::InvalidPath, false, 0, 0, 1},           {C::NeverCookReferenced, true, 72, 0, 2},
         {C::DuplicateAssetId, false, A2Id, 100, 0}, {C::DuplicateAssetId, false, A2Id, 100, 0},
-        {C::MissingDependency, false, 100, 150, 0}, {C::MissingDependency, false, 140, 150, 0}};
+        {C::MissingDependency, false, 100, 150, 0}, {C::DuplicateAssetId, false, 100, 0, 0}};
     CHECK(SameDiagnostics(out.diagnostics, diagnostics));
-    const uint64 removed[] = {150, 151};
+    // 색인에 없는 150·151과 NeverCook이 된 72는 사라진 항목이다.
+    const uint64 removed[] = {72, 150, 151};
     CHECK(SameIds(out.removed, removed));
 
     // 디렉터리 인자: 그 아래 전부와 역방향 Build(이미 대상인 참조자는 한 번).

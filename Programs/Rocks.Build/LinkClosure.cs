@@ -12,16 +12,18 @@ public static class LinkClosure
     /// root를 뺀 링크 모듈 이름을 의존 우선 순서로 돌려준다. 앞부분은 링크 의존 폐포의 후위 순서(의존 목록 순서대로 — 컴파일 의존 순서와
     /// 같다)이고, 그 뒤에 동적 모듈 쪽이 같은 규칙으로 붙는다. 정적 라이브러리 링크는 이 순서를 뒤집어 의존하는 쪽을 앞에 둔다.
     /// </summary>
-    public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules) => Collect(root, modules, out _);
+    public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules) => Collect(root, modules, out _, out _);
 
     /// <summary>
     /// <paramref name="withDynamic"/>이면 <see cref="Of(string, IReadOnlyDictionary{string, NativeModuleInput})"/>와 같고, 아니면 링크 의존
-    /// 폐포(앞부분)만이다(라이브러리 모듈의 도달 집합).
+    /// 폐포(앞부분)만이다(라이브러리 모듈의 도달 집합). <paramref name="withPlugins"/>가 거짓이면 켠 플러그인 모듈 쪽(<see
+    /// cref="NativeModuleInput.PluginModules"/>)도 빼고 링크 의존 폐포만이다(Modular 호스트 — Docs/Design/ModuleLoader.ko.md 3.15절:
+    /// 로더가 manifest로 싣는다). 동적 모듈 쪽은 플러그인 쪽 뒤에 오므로 <paramref name="withPlugins"/>가 거짓이면 함께 빠진다.
     /// </summary>
-    public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, bool withDynamic)
+    public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, bool withDynamic, bool withPlugins = true)
     {
-        List<string> order = Collect(root, modules, out int linked);
-        return withDynamic ? order : order.GetRange(0, linked);
+        List<string> order = Collect(root, modules, out int direct, out int linked);
+        return !withPlugins ? order.GetRange(0, direct) : withDynamic ? order : order.GetRange(0, linked);
     }
 
     /// <summary>
@@ -30,15 +32,16 @@ public static class LinkClosure
     /// </summary>
     public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, out HashSet<string> onRequest)
     {
-        List<string> order = Collect(root, modules, out int linked);
+        List<string> order = Collect(root, modules, out _, out int linked);
         onRequest = new HashSet<string>(order.Skip(linked), StringComparer.OrdinalIgnoreCase);
         return order;
     }
 
-    // linked는 order 앞부분 가운데 링크 의존 폐포의 길이다.
-    private static List<string> Collect(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, out int linked)
+    // direct는 order 앞부분 가운데 링크 의존 폐포의 길이, linked는 그 뒤 켠 플러그인 모듈 쪽까지의 길이다.
+    private static List<string> Collect(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, out int direct, out int linked)
     {
         var order = new List<string>();
+        direct = 0;
         linked = 0;
         if (!modules.TryGetValue(root, out NativeModuleInput? rootModule))
         {
@@ -66,6 +69,7 @@ public static class LinkClosure
             Visit(dependency);
         }
 
+        direct = order.Count;
         // 실행 파일에 링크하는 켠 플러그인 모듈(Docs/Design/BuildTargets.ko.md 3.9절 BD36)은 링크 폐포 뒤, 동적 모듈 앞이다. 링크하므로
         // 요청 시 적재 행이 아니다.
         foreach (string plugin in rootModule.PluginModules)

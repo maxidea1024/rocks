@@ -554,10 +554,10 @@ namespace Rocks.Build.Cli
                         Console.WriteLine("Modular: native tests and native harness; host self and meta checks run with the Monolithic test target.");
                         checks.RemoveAt(0);
                         // 공유 라이브러리 이름은 모듈 규칙의 철자를 쓴다(타깃이 적은 이름은 대소문자가 다를 수 있다).
-                        string hostModule = rules.Modules.First(module =>
-                            string.Equals(module.Name, rules.Target.TestExecutable, StringComparison.OrdinalIgnoreCase)).Name;
-                        checks[0] = [.. checks[0], "--host-module", Path.Combine(output, "bin",
-                            LinkTypes.SharedLibraryFileName(rules.Target.Name, hostModule, toolchain.Platform, configuration))];
+                        NativeModuleInput hostModule = rules.Modules.First(module =>
+                            string.Equals(module.Name, rules.Target.TestExecutable, StringComparison.OrdinalIgnoreCase));
+                        checks[0] = [.. checks[0], "--host-module", Path.Combine(LinkTypes.SharedLibraryDirectory(output, hostModule, toolchain.Platform),
+                            LinkTypes.SharedLibraryFileName(rules.Target.Name, hostModule.Name, toolchain.Platform, configuration))];
                     }
 
                     // 시험 동반 타깃을 같은 구성·도구 체인·빌드 방식으로 빌드하고 그 실행 파일(동반 빌드 보고서의 모듈 출력)을 하니스에 넘긴다.

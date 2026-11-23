@@ -11,7 +11,7 @@ using Rocks.Tooling.Common;
 /// <item>Tool이 Importer를 링크하고 모듈 표에 기술자 단계의 보통 행(요청 시 적재 아님)으로 싣는다. 행은 링크 폐포 뒤, 실행 파일 앞이다.</item>
 /// <item>Probe에는 Importer가 없고, 끈 Viewer 모듈은 빌드되지 않는다.</item>
 /// <item>주 모듈이 라이브러리인 타깃은 플러그인 모듈을 빌드만 한다.</item>
-/// <item>거부: 라이브러리의 PluginModules, 모르는 이름, 중복, Modular 타깃(ML4 전).</item>
+/// <item>거부: 라이브러리의 PluginModules, 모르는 이름, 중복. Modular 타깃의 플러그인은 ModularManifestTests가 본다(ML5a).</item>
 /// </list>
 /// </summary>
 internal static class PluginModuleLinkTests
@@ -106,6 +106,9 @@ internal static class PluginModuleLinkTests
             modules.Single(module => module.Name == "Probe").PluginModules.Count == 0, "only the primary executable links plugin modules");
         Check(modules.All(module => module.Name != "Viewer"), "a disabled plugin module must not be built");
         Check(modules.Single(module => module.Name == "Importer").LoadingPhase == LoadingPhase.PostDefault, "descriptor loading phase");
+        // 플러그인 모듈은 선언한 플러그인과 플러그인 루트 기준 폴더를 받는다(Modular 공유 라이브러리 폴더 — ModuleLoader 3.15절). 엔진 모듈은 없다.
+        Check(modules.Single(module => module.Name == "Importer").Plugin == new ModulePlugin("Importer", "Tools/Importer") &&
+            modules.Single(module => module.Name == "Engine").Plugin is null, "plugin modules carry their plugin name and folder");
 
         var byName = modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
         List<string> linkOrder = LinkClosure.Of("Tool", byName, out HashSet<string> onRequest);
@@ -167,26 +170,7 @@ internal static class PluginModuleLinkTests
             "unknown module Missing", "an unknown plugin module");
         await Rejects(builder, build with { Modules = Replace(byName["Tool"] with { PluginModules = ["Importer", "Importer"] }) },
             "listed twice", "a plugin module listed twice");
-        // Modular은 모듈 표 제공 모듈이 없는 작은 묶음으로 본다(표 제공 모듈의 Modular 거부보다 앞서 플러그인 거부가 드러나게).
-        if (request.Toolchain.Platform != NativePlatform.Android)
-        {
-            NativeModuleInput[] small =
-            [
-                new() { Name = "Lib", Sources = [Write("small/lib.cpp", "int LibValue() noexcept { return 1; }\n")] },
-                new() { Name = "Exe", Kind = NativeModuleKind.Executable, Sources = [Write("small/main.cpp", "int main() { return 0; }\n")], PluginModules = ["Lib"] }
-            ];
-            await Rejects(builder, request with
-            {
-                OutputDirectory = Path.Combine(fixture, "out-modular"),
-                Modules = small,
-                Targets = ["Exe", "Lib"],
-                LinkType = NativeLinkType.Modular,
-                Configuration = NativeConfiguration.Debug,
-                TargetName = "Exe"
-            }, "Modular linking of a target that enables plugins", "a Modular target with plugin modules");
-        }
-
-        pass("plugin module links are validated (executables only, known names, once, Monolithic only)");
+        pass("plugin module links are validated (executables only, known names, once)");
     }
 
     private static async Task Rejects(NativeBuildEngine builder, NativeBuildRequest request, string expected, string name)

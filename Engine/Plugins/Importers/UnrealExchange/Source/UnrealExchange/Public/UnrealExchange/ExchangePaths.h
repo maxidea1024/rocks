@@ -37,21 +37,23 @@ struct ExchangePathOutcome {
 // objectPath가 10.4절 7번 문법을 지키면 참이다: 앞 `/`, 패키지 경로 구성 요소 2개 이상, 빈 구성
 // 요소 없음, `.`은 비지 않은 객체 이름 앞 하나뿐, `:`·`\`·제어 문자 없음, 유효한 UTF-8,
 // UnrealObjectPathMaxBytes 이하.
-bool IsValidUnrealObjectPath(StringView objectPath) noexcept;
+ROCKS_UNREALEXCHANGE_API bool IsValidUnrealObjectPath(StringView objectPath) noexcept;
 
 // objectPath의 패키지 경로(`.` 앞)다. 문법을 지키지 않는 입력이면 빈 view다.
-StringView UnrealPackagePath(StringView objectPath) noexcept;
+ROCKS_UNREALEXCHANGE_API StringView UnrealPackagePath(StringView objectPath) noexcept;
 
 // root가 Rocks 논리 경로 규칙(AssetSystem 4.2절 — 앞 `/`, 구성 요소마다 ValidateNameComponent, 끝
 // `/` 없음, UnrealPathMaxBytes 이하)을 지키는지 본다. 어기면 InvalidArgument, scratch 할당 실패는
 // 그 오류다.
-Result<void> ValidateUnrealImportRoot(StringView root, Allocator& scratch) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> ValidateUnrealImportRoot(StringView root,
+                                                               Allocator& scratch) noexcept;
 
 // objectPath의 대응 논리 경로를 out 뒤에 붙인다. 임시 저장소는 out의 allocator다.
 //
 // 반환: 성공. objectPath·root 문법 위반은 InvalidArgument, 결과가 UnrealPathMaxBytes를 넘으면
 // CapacityExceeded(outcome.failure에 이유), 할당 실패는 그 오류다. 실패하면 out은 호출 전 그대로다.
-Result<void> MapUnrealObjectPath(StringView objectPath, StringView root, StringBuilderBase& out,
-                                 ExchangePathOutcome& outcome) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void> MapUnrealObjectPath(StringView objectPath, StringView root,
+                                                          StringBuilderBase& out,
+                                                          ExchangePathOutcome& outcome) noexcept;
 
 } // namespace rocks

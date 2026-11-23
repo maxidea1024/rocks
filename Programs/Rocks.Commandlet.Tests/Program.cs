@@ -1864,6 +1864,57 @@ finally
     Directory.Delete(importDirectory, true);
 }
 
+// asset-cook(AssetSystem.ko.md 13절, 10.2절 "A4e 구현 세부" — A4e1): 제품 실행 파일이 쿠커 모듈을 시작해 설정·보고서 타입을
+// 등록하고 엔진 프로파일(실행 파일 위쪽 Engine/Config)로 쿠킹한다. 전체 쿠킹 게시·두 번째는 전부 재사용·--json·사용법·도움말. 진단 줄·
+// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+string cookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(cookDirectory, "Cooking");
+    Directory.CreateDirectory(Path.Combine(project, "Config"));
+    File.WriteAllText(Path.Combine(project, "Cooking.rocksproject"), "{}\n");
+    File.WriteAllText(Path.Combine(project, "Config", "CookSettings.json"), "{\"alwaysCook\": [\"/Game/\"]}\n");
+    string projectOption = $"--project={project}";
+
+    async Task<ProcessResult> RunCook(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(60)));
+
+    void ReportCook(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult made = await RunCook("asset-new", "Skeleton", "/Game/Hero", projectOption);
+    ReportCook("asset-cook setup", made.ExitCode == 0, made);
+    ProcessResult first = await RunCook("asset-cook", "--profile=Windows", projectOption);
+    ReportCook("asset-cook full", first.ExitCode == 0 &&
+        first.StdOut.StartsWith("asset-cook: Windows published targets 1 cooked 1 reused 0 bytes ", StringComparison.Ordinal) &&
+        first.StdErr.Length == 0 && File.Exists(Path.Combine(project, "Saved", "Cooked", "Windows", "CookedManifest.rman")) &&
+        File.Exists(Path.Combine(project, "Saved", "Cooked", "Windows", "CookReport.json")), first);
+    ProcessResult second = await RunCook("asset-cook", "--profile=Windows", projectOption);
+    ReportCook("asset-cook reuses", second.ExitCode == 0 &&
+        second.StdOut == "asset-cook: Windows published targets 1 cooked 0 reused 1 bytes 0\n", second);
+    ProcessResult json = await RunCook("asset-cook", "--profile=Windows", "--json", projectOption);
+    ReportCook("asset-cook json", json.ExitCode == 0 && json.StdOut.StartsWith('{') &&
+        json.StdOut.Contains("\"published\": true", StringComparison.Ordinal), json);
+    ProcessResult missing = await RunCook("asset-cook", "--profile=Windows", "/Game/Nope", projectOption);
+    ReportCook("asset-cook invalid path", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-cook: InvalidPath: /Game/Nope: error", StringComparison.Ordinal), missing);
+    ProcessResult usage = await RunCook("asset-cook", projectOption);
+    ReportCook("asset-cook usage", usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-cook", StringComparison.Ordinal), usage);
+    ProcessResult help = await RunCook("asset-cook", "--help");
+    ReportCook("asset-cook help", help.ExitCode == 0 && help.StdOut.StartsWith("usage: asset-cook", StringComparison.Ordinal), help);
+}
+finally
+{
+    Directory.Delete(cookDirectory, true);
+}
+
 // asset-import-unreal(UnrealExchange.ko.md 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
 // dry run(텍스처 하나 계획), 실행(임포터 없음 — 건너뜀 경고, 종료 0), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터
 // 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.

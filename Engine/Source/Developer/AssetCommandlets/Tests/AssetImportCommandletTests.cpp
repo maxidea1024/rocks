@@ -1,5 +1,6 @@
 #include "../../AssetDatabase/Tests/AssetDatabaseTestSupport.h"
 #include "../../AssetDatabase/Tests/AssetImportTestSupport.h"
+#include "AssetCommandletTestSupport.h"
 
 #include <AssetCommandlets/AssetCommandletSupport.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
@@ -18,105 +19,9 @@ using namespace rocks::asset_test;
 using namespace rocks::asset_database_test;
 using namespace rocks::import_test;
 using namespace rocks::commandlet_host;
+using namespace rocks::commandlet_test;
 
 namespace {
-
-// 표준 출력·오류를 모은다.
-struct Captured {
-    explicit Captured(Allocator& allocator) noexcept : out(allocator), error(allocator) {
-    }
-
-    static Result<void> Write(void* context, CommandletStream stream, StringView text) noexcept {
-        Captured& captured = *static_cast<Captured*>(context);
-        if (stream == captured.failStream && captured.failWrites) {
-            return Result<void>::Failure(ErrorCode::Busy);
-        }
-
-        return (stream == CommandletStream::Output ? captured.out : captured.error).TryAppend(text);
-    }
-
-    CommandletOutput Output() noexcept {
-        return CommandletOutput{&Captured::Write, this};
-    }
-
-    String out;
-    String error;
-    // 참이면 failStream 쓰기가 Busy로 실패한다(출력 실패 시험).
-    bool failWrites = false;
-    CommandletStream failStream = CommandletStream::Output;
-};
-
-// 시험 임포터 등록 상태다(failWith가 None이 아니면 등록이 그 오류로 실패한다).
-struct ImporterState {
-    TestImporter test{TestImporterInfo()};
-    TestImporter cube{CubeImporterInfo()};
-    ErrorCode failWith = ErrorCode::None;
-};
-
-Result<void> RegisterTestImporters(void* state, AssetImporterTable& table,
-                                   Array<AssetImporterRegistration>& tokens) noexcept {
-    ImporterState& importers = *static_cast<ImporterState*>(state);
-    if (importers.failWith != ErrorCode::None) {
-        return Result<void>::Failure(importers.failWith);
-    }
-
-    TestImporter* const all[] = {&importers.test, &importers.cube};
-    for (TestImporter* importer : all) {
-        auto registered = table.Register(*importer);
-        if (!registered) {
-            return Result<void>::Failure(registered.Error());
-        }
-
-        if (auto pushed = tokens.TryPushBack(rocks::Move(registered.Value())); !pushed) {
-            return pushed;
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-// 디스크 프로젝트(작업 디렉터리 아래 상대 이름 — `*.rocksproject`)와 원본 파일이다.
-struct CommandScene {
-    explicit CommandScene(const char* tag) noexcept : root(tag) {
-        ready = root.made && WriteFile("Scene.rocksproject", "{}\n");
-    }
-
-    bool WriteFile(StringView relative, StringView text) noexcept {
-        char path[1024] = {};
-        FixedStringBuilder builder{Span<char>(path)};
-        if (!builder.TryAppendFormat("{}/{}", root.Root(), relative)) {
-            return false;
-        }
-
-        platform::File file;
-        return static_cast<bool>(file.Open(platform::PhysicalFileSystem(), builder.View().Data(),
-                                           builder.View().ByteCount(),
-                                           platform::FileOpenMode::CreateAlways)) &&
-               static_cast<bool>(file.WriteAll(text.Data(), text.ByteCount()).status) &&
-               static_cast<bool>(file.Close());
-    }
-
-    bool RemoveFile(StringView relative) noexcept {
-        char path[1024] = {};
-        FixedStringBuilder builder{Span<char>(path)};
-        return builder.TryAppendFormat("{}/{}", root.Root(), relative) &&
-               static_cast<bool>(platform::PhysicalFileSystem().Delete(builder.View().Data(),
-                                                                       builder.View().ByteCount()));
-    }
-
-    bool Exists(StringView relative) noexcept {
-        char path[1024] = {};
-        FixedStringBuilder builder{Span<char>(path)};
-        platform::File file;
-        return builder.TryAppendFormat("{}/{}", root.Root(), relative) &&
-               static_cast<bool>(file.Open(platform::PhysicalFileSystem(), builder.View().Data(),
-                                           builder.View().ByteCount(),
-                                           platform::FileOpenMode::ReadExisting));
-    }
-
-    TempProject root;
-    bool ready = false;
-};
 
 struct Run {
     Run(Allocator& allocator, ImporterState* state) noexcept : captured(allocator) {

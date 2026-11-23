@@ -244,9 +244,21 @@ public sealed class DescriptorModuleSet
         }
 
         // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
+        // 플러그인 모듈에는 플러그인 이름과 플러그인 루트 기준 폴더를 넣는다(Docs/Design/ModuleLoader.ko.md 3.15절 — Modular 공유 라이브러리 폴더).
         return included.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module)
-            ? rule with { LoadingPhase = module.Descriptor.LoadingPhase }
+            ? rule with { LoadingPhase = module.Descriptor.LoadingPhase, Plugin = module.FromPlugin ? PluginOf(module) : null }
             : rule).ToList();
+    }
+
+    // 플러그인 모듈의 플러그인 이름과 플러그인 루트(엔진 저장소 Engine/Plugins, 프로젝트 Plugins) 기준 폴더(/ 구분)다.
+    private ModulePlugin PluginOf(DescribedModule module)
+    {
+        string root = Owner.Project is { } project ? Path.Combine(project.RootDirectory, "Plugins")
+            : Path.Combine(Owner.EngineRoot ?? throw new InvalidOperationException("Internal error: an engine descriptor owner has no root."),
+                "Engine", "Plugins");
+        string directory = Path.GetRelativePath(Path.GetFullPath(root), Path.GetDirectoryName(Path.GetFullPath(module.OwnerFile))!)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        return new(module.OwnerName, directory);
     }
 
     /// <summary>

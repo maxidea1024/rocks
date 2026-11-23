@@ -214,6 +214,8 @@ internal static class ActionGraph
         var outputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var terminalActions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var closures = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        // Modular 공유 라이브러리 모듈의 최종 경로다(rpath — 링크하는 라이브러리 폴더).
+        var sharedLibraryPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         bool windows = request.Toolchain.Platform == NativePlatform.Windows;
         // 생성 TU 디렉터리는 header 디렉터리 목록에 넣지 않는다 — 공용 디렉터리의 header 확장자 파일 하나가 모든 실행 파일 TU를
         // 다시 컴파일하게 만들지 않는다(생성 TU의 key는 cpp 내용이다).
@@ -230,11 +232,17 @@ internal static class ActionGraph
             // 파일의 액션을 고른다)도 링크하는 모듈 전부다.
             // Modular 호스트 모듈(ModuleLoader 3.14절)은 동적 모듈을 링크하지 않는다 — 그 모듈은 로더가 manifest로 싣는다(호스트가 import하면
             // OS가 붙잡아 실행 중 해제할 수 없다).
-            bool withDynamic = module.Kind == NativeModuleKind.Executable &&
-                !LinkTypes.IsHostModule(module, request.LinkType, entryModules.Contains(module.Name));
-            NativeModuleInput[] linked = LinkClosure.Of(module.Name, modules, withDynamic)
+            // 켠 플러그인 모듈(BD36)도 같은 까닭으로 Modular 호스트는 링크하지 않는다(ModuleLoader 3.15절 — 호스트가 import하면 플러그인을
+            // 켜고 끄는 단위가 깨진다). 호스트가 직접 의존하는 플러그인 모듈은 링크 의존 폐포라 남는다.
+            bool hostModule = LinkTypes.IsHostModule(module, request.LinkType, entryModules.Contains(module.Name));
+            bool withDynamic = module.Kind == NativeModuleKind.Executable && !hostModule;
+            NativeModuleInput[] linked = LinkClosure.Of(module.Name, modules, withDynamic, withPlugins: !hostModule)
                 .Select(name => modules[name]).ToArray();
-            closures[module.Name] = [module.Name, .. linked.Select(value => value.Name)];
+            // 빌드 정보 범위(closures)는 Modular 호스트도 Monolithic처럼 켠 플러그인 모듈을 포함한다(링크하지 않아도 그 코드가 바뀌면
+            // 빌드 ID가 바뀐다 — ModuleLoader 3.15절).
+            closures[module.Name] = hostModule
+                ? [module.Name, .. LinkClosure.Of(module.Name, modules, withDynamic)]
+                : [module.Name, .. linked.Select(value => value.Name)];
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
                 .Concat(dependencies.SelectMany(value => value.PublicIncludeDirectories)).Select(Absolute)
                 .Distinct(NativeToolchains.PathComparer).ToArray();
@@ -506,8 +514,8 @@ internal static class ActionGraph
             }
 
             // Modular(Docs/Design/BuildTargets.ko.md 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
-            // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 둔다(Windows import 라이브러리는
-            // lib 폴더). 모듈 표 제공 모듈에 닿는 Modular 실행 파일의 모듈은 호스트 모듈이다 — 공유 라이브러리로 링크하고, 실행 파일은
+            // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 두고, 플러그인 모듈은 플러그인
+            // binaries 폴더에 둔다(LinkTypes.SharedLibraryDirectory — ModuleLoader 3.15절). Windows import 라이브러리는 lib 폴더다. 모듈 표 제공 모듈에 닿는 Modular 실행 파일의 모듈은 호스트 모듈이다 — 공유 라이브러리로 링크하고, 실행 파일은
             // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b).
             bool entryModule = entryModules.Contains(module.Name);
             bool host = LinkTypes.IsHostModule(module, request.LinkType, entryModule);
@@ -520,7 +528,7 @@ internal static class ActionGraph
             string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
             string executablePath = Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
-                : sharedLibrary ? Path.Combine(output, "bin", sharedFile)
+                : sharedLibrary ? Path.Combine(LinkTypes.SharedLibraryDirectory(output, module, request.Toolchain.Platform), sharedFile)
                 : executablePath;
             string? importLibrary = sharedLibrary && windows ? Path.Combine(output, "lib", sharedStem + ".lib") : null;
             if (ide)
@@ -528,6 +536,11 @@ internal static class ActionGraph
                 // IDE 계획은 archive·link를 세우지 않고 출력 경로만 적는다(prebuilt·ASan 런타임 존재 확인도 하지 않는다).
                 outputs[module.Name] = host ? executablePath : importLibrary ?? finalPath;
                 continue;
+            }
+
+            if (sharedLibrary)
+            {
+                sharedLibraryPaths[module.Name] = finalPath;
             }
 
             PlanFinal(module.Name + (archive ? ":archive" : ":link"), archive, sharedLibrary, finalPath, importLibrary, objectPaths, compileIds,
@@ -710,6 +723,16 @@ internal static class ActionGraph
                         {
                             // 같은 폴더의 공유 라이브러리를 찾는다(UE MacToolChain.cs:578-584 — @loader_path·@executable_path 둘 다).
                             finalArguments.AddRange(mac ? ["-Wl,-rpath,@loader_path/", "-Wl,-rpath,@executable_path/"] : ["-Wl,-rpath,$ORIGIN"]);
+                            // 링크하는 공유 라이브러리가 다른 폴더(플러그인 binaries 폴더 — ModuleLoader 3.15절)에 있으면 이 바이너리 폴더 기준 상대
+                            // 경로를 rpath로 더한다(UE MacToolChain.cs:365 — 링크하는 라이브러리 폴더마다 @loader_path/<상대 경로>).
+                            string here = Path.GetDirectoryName(finalPath)!;
+                            foreach (string folder in linkModules.Where(value => sharedLibraryPaths.ContainsKey(value.Name))
+                                .Select(value => Path.GetDirectoryName(sharedLibraryPaths[value.Name])!)
+                                .Where(folder => !NativeToolchains.PathComparer.Equals(folder, here)).Distinct(NativeToolchains.PathComparer))
+                            {
+                                string relative = Path.GetRelativePath(here, folder).Replace('\\', '/');
+                                finalArguments.Add("-Wl,-rpath," + (mac ? "@loader_path/" : "$ORIGIN/") + relative);
+                            }
                         }
 
                         finalArguments.AddRange(["-o", "{OUTPUT0}"]);

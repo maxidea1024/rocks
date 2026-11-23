@@ -87,9 +87,9 @@ public abstract class TestsModule : ModuleRules
 
     protected abstract string ExecutableName { get; }
 
-    // Whether the engine layer runner also runs the PluginTestModules tests (and links those plugin modules). The Modular engine runner does not:
-    // Modular targets cannot enable plugins until the plugin binary manifest (Docs/Design/ModuleLoader.ko.md ML5, BuildTargets.ko.md BD41).
-    protected virtual bool PluginTests => Layer == TestLayer.Engine;
+    // Whether the runner also runs the PluginTestModules tests (and links those plugin modules): both engine layer runners do. The Modular one
+    // loads the plugin modules from their plugin binaries folders (Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
+    private bool PluginTests => Layer == TestLayer.Engine;
 
     public override NativeModuleInput Configure(BuildContext context)
     {
@@ -182,13 +182,11 @@ public sealed class EngineTests : TestsModule
     protected override string ExecutableName => "EngineTests";
 }
 
-// Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources without the engine plugin tests (Docs/Design/BuildTargets.ko.md
-// section 3.8 BS8e).
+// Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources, engine plugin tests included (Docs/Design/BuildTargets.ko.md
+// section 3.8 BS8e, Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
 public sealed class EngineModularTests : TestsModule
 {
     protected override TestLayer Layer => TestLayer.Engine;
 
     protected override string ExecutableName => "EngineModularTests";
-
-    protected override bool PluginTests => false;
 }
