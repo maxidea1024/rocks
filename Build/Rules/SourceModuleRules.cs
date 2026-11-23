@@ -147,8 +147,8 @@ public abstract class SourceModuleRules : ModuleRules
     protected string ModuleEntrySource(BuildContext context) => context.PathInRoot($"{ModuleDirectory}/Private/{ModuleName}Module.cpp");
 
     /// <summary>
-    /// Include paths used only by this module's sources (not propagated to dependents). Used by third-party library adapters.
-    /// Example: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Zstd")</c>.
+    /// Include paths used only by this module's sources (not propagated to dependents). Third-party libraries are dependencies instead
+    /// (PrivateDependencies — Docs/Design/BuildTargets section 3.5 BS3a). Example: <c>[context.PathInRoot($"{ModuleDirectory}/Private")]</c>.
     /// </summary>
     protected virtual IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) => [];
 

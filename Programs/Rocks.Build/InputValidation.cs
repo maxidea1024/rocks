@@ -170,7 +170,7 @@ internal static class InputValidation
                     $"{request.Toolchain.Platform}. Declare them only when BuildContext.Platform is MacOS.");
             }
 
-            foreach (string define in module.PublicDefines.Concat(module.PrivateDefines))
+            foreach (string define in module.PublicDefines.Concat(module.PrivateDefines).Concat(module.ConsumerDefines))
             {
                 string name = define.Split('=')[0];
                 if (name.Length == 0 || (!char.IsAsciiLetter(name[0]) && name[0] != '_') ||

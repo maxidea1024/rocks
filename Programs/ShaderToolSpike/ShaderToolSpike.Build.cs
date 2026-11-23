@@ -9,9 +9,6 @@ using Rocks.Build.Rules;
 /// </summary>
 public sealed class ShaderToolSpikeProgram : ModuleRules
 {
-    // Public tool headers this program includes (external headers are visible only to this module's sources, adapter approach).
-    private static readonly string[] ToolHeaders = ["DirectXShaderCompiler", "SpirvCross", "SpirvTools", "SpirvReflect"];
-
     public override NativeModuleInput Configure(BuildContext context)
     {
         const string root = "Programs/ShaderToolSpike/Private";
@@ -22,9 +19,10 @@ public sealed class ShaderToolSpikeProgram : ModuleRules
             ModuleDirectory = "Programs/ShaderToolSpike",
             Kind = NativeModuleKind.Executable,
             Sources = context.Sources($"{root}/Common", windows ? $"{root}/Win64" : $"{root}/Unsupported"),
-            PrivateIncludeDirectories = [context.PathInRoot($"{root}/Common"), .. ThirdPartyModuleRules.ConsumerIncludeDirectories(context, ToolHeaders)],
-            PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, ToolHeaders),
+            PrivateIncludeDirectories = [context.PathInRoot($"{root}/Common")],
             PublicDependencies = ["Launch", "ShaderToolLoader", "SpirvReflect"],
+            // Public tool headers this program includes (Docs/Design/BuildTargets section 3.5 BS3a).
+            PrivateDependencies = ["DirectXShaderCompiler", "SpirvCross", "SpirvTools"],
             // Used for the D3D12 shader model query (S2) and the hidden-window GL context (S12). Tool DLLs are not linked but opened at run time.
             SystemLibraries = windows ? ["d3d12", "dxgi", "opengl32", "gdi32", "user32"] : []
         };

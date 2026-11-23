@@ -257,6 +257,11 @@ public sealed record NativeModuleInput
 
     public IReadOnlyList<string> PublicDefines { get; init; } = [];
 
+    // 이 모듈에 의존하는 모듈(컴파일 환경에 이 모듈이 보이는 모듈)만 받는 정의다. 이 모듈 자신의 컴파일에는 넣지 않는다(PublicDefines와
+    // 다른 점). 직접 빌드하는 서드파티 라이브러리의 소비자 정의(ThirdParty.json consumerDefines — 예 ZSTD_STATIC_LINKING_ONLY)에 쓴다:
+    // 라이브러리 원본이 같은 매크로를 스스로 #define하므로 자기 컴파일에 넣으면 재정의가 된다(Docs/Design/BuildTargets 3.5절 BS3a).
+    public IReadOnlyList<string> ConsumerDefines { get; init; } = [];
+
     public IReadOnlyList<string> PrivateDefines { get; init; } = [];
 
     // 공개 의존이다(UE PublicDependencyModuleNames, Docs/Design/BuildTargets 3.5절 BD7). 이 모듈의 공개 헤더가 쓰는 모듈이며, 그

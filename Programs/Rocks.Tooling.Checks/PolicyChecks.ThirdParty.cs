@@ -18,9 +18,10 @@ public static partial class PolicyChecks
     /// 고정 버전 외부 라이브러리(<see cref="ThirdPartyManifest.ThirdPartyRoots"/>의 <c>&lt;루트&gt;/&lt;Lib&gt;/</c>)를 검사한다(rule id
     /// <c>third-party</c>). 라이브러리 폴더 이름은 두 루트를 통틀어 하나여야 한다(모듈 이름).
     /// <list type="bullet">
-    /// <item>폴더마다 엄격한 <c>ThirdParty.json</c>이 있어야 한다. code 라이브러리는 <c>&lt;Lib&gt;.Build.cs</c>도 있어야 하고, 그 밖의
-    /// 파일은 manifest의 번역 단위로 등록한 Rocks 글루(.c)뿐이다. 데이터 전용(<c>"kind": "data"</c>)·헤더 전용(<c>"headers"</c>)·
-    /// 미리 빌드한 바이너리(<c>"binary"</c>) 라이브러리는 모듈 규칙이 없어야 한다. 데이터는 지시문 검사를 하지 않는다(파일
+    /// <item>폴더마다 엄격한 <c>ThirdParty.json</c>이 있어야 한다. code 라이브러리와 include 디렉터리가 있는 헤더 전용(<c>"headers"</c>)·
+    /// 미리 빌드한 바이너리(<c>"binary"</c>) 라이브러리는 <c>&lt;Lib&gt;.Build.cs</c>도 있어야 하고(소비 모듈이 의존으로 쓴다 —
+    /// Docs/Design/BuildTargets 3.5절 BS3a), 그 밖의 파일은 manifest의 번역 단위로 등록한 Rocks 글루(.c)뿐이다. 데이터 전용
+    /// (<c>"kind": "data"</c>)과 include 디렉터리가 없는 라이브러리(sdk·system 출처 바이너리)는 모듈 규칙이 없어야 한다. 데이터는 지시문 검사를 하지 않는다(파일
     /// 집합·SHA-256·라이선스 검사는 같다).</item>
     /// <item>binary: 커밋한 공개 헤더(원본 디렉터리)에 위 검사를 똑같이 하고, build 출처는 <c>Build/</c>의 파일 집합이 manifest
     /// <c>build.scripts</c>·<c>build.patches</c>와 정확히 같아야 한다. 커밋한 파일이 없는 sdk·system 출처는 manifest만 둔다.</item>
@@ -175,21 +176,23 @@ public static partial class PolicyChecks
         bool code = manifest.Kind == ThirdPartyKind.Code;
         ThirdPartyToolBuild? build = manifest.Binary?.Build;
         bool hasRule = File.Exists(Path.Combine(library, name + ".Build.cs"));
-        if (code && !hasRule)
+        // 모듈 규칙이 있어야 하는 라이브러리: code, 그리고 include 디렉터리가 있는 headers·binary(소스 없는 헤더 모듈 — BS3a).
+        bool ruled = code || !data && manifest.IncludeDirectories.Count != 0;
+        if (ruled && !hasRule)
         {
             Fail(relativeLibrary, 0, $"missing module rule {name}.Build.cs");
         }
 
-        if (!code && hasRule)
+        if (!ruled && hasRule)
         {
             Fail($"{relativeLibrary}/{name}.Build.cs", 0,
-                $"{manifest.Kind.ToString().ToLowerInvariant()} library must not have a module rule (it is not built by Rocks)");
+                $"{manifest.Kind.ToString().ToLowerInvariant()} library without include directories must not have a module rule (it is not built by Rocks)");
         }
 
         foreach (string entry in Directory.EnumerateFileSystemEntries(library).Order(StringComparer.Ordinal))
         {
             string child = Path.GetFileName(entry);
-            bool allowed = child == ThirdPartyManifest.FileName || (code && child == name + ".Build.cs") ||
+            bool allowed = child == ThirdPartyManifest.FileName || (ruled && child == name + ".Build.cs") ||
                            (manifest.HasUpstream && child == manifest.UpstreamDirectory) || glue.Contains(child) ||
                            SystemMetadataFiles.Contains(child) || child == manifest.Patch ||
                            (build is not null && child == ThirdPartyManifest.BuildDirectory && Directory.Exists(entry) && !IsLink(entry));

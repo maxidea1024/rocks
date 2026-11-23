@@ -9,7 +9,8 @@ namespace Rocks.Build;
 /// <item>소유: 경로를 담는 가장 긴 모듈 폴더(<see cref="NativeModuleInput.ModuleDirectory"/>)의 모듈이다(여러 모듈이 같은 폴더면 그 모두 —
 /// 하나라도 보이면 된다. 예: Launch 시험 프로그램 셋이 Programs/LaunchTests를 함께 쓴다). 영역은 public include 디렉터리(공개),
 /// <c>&lt;폴더&gt;/Tests</c>(시험), 그 밖(비공개)이다. 메타 생성 폴더 <c>&lt;out&gt;/Generated/&lt;M&gt;/Public·Private</c>는 M의 공개·비공개다.
-/// 저장소 밖, 출력의 그 밖 파일, 서드파티 루트, 어떤 모듈 폴더에도 없는 경로는 보지 않는다.</item>
+/// 저장소 밖, 출력의 그 밖 파일, 어떤 모듈 폴더에도 없는 경로(서드파티 데이터 라이브러리 등)는 보지 않는다. 서드파티 모듈의 폴더는
+/// 라이브러리 폴더다(공개 영역은 manifest include 디렉터리 — BS3a).</item>
 /// <item>보임: 모듈 M의 소스에는 M의 세 영역과 M의 컴파일 환경에 보이는 모듈의 공개 영역, 그리고 M의 include 허가 폴더가 보인다(M 자신의
 /// include 디렉터리 가운데 다른 모듈 폴더 안의 것 — 규칙이 일부러 보여 주는 비공개 헤더, 예 AsyncCompression의 Compression/Private). 소스
 /// 묶음(<see cref="SourceGroup"/>)의 소스에는 묶음을 가진 모듈과 대상 모듈 T의 세 영역, T의 include 허가 폴더, T의 컴파일 환경에 보이는
@@ -206,7 +207,6 @@ internal static class IncludeOwnership
         private readonly string root;
         private readonly string output;
         private readonly string generated;
-        private readonly string[] thirdPartyRoots;
         // 폴더·디렉터리는 끝 구분자를 붙여 정규화해 두고 접두 비교한다(경로마다 GetFullPath를 다시 하지 않는다).
         private readonly List<(string Directory, NativeModuleInput[] Modules)> folders;
         private readonly List<(string Directory, string Module)> outsidePublic = [];
@@ -220,8 +220,7 @@ internal static class IncludeOwnership
             root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.RootDirectory));
             output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.OutputDirectory));
             generated = Path.Combine(output, "Generated");
-            thirdPartyRoots = [.. ThirdPartyManifest.ThirdPartyRoots.Select(value => Path.GetFullPath(value, root))];
-            folders = [.. modules.Values.Where(module => !module.ThirdParty && module.ModuleDirectory is not null)
+            folders = [.. modules.Values.Where(module => module.ModuleDirectory is not null)
                 .GroupBy(module => Path.TrimEndingDirectorySeparator(Path.GetFullPath(module.ModuleDirectory!, root)), NativeToolchains.PathComparer)
                 .Select(group => (group.Key, group.OrderBy(module => module.Name, StringComparer.Ordinal).ToArray()))
                 .OrderByDescending(item => item.Key.Length)];
@@ -231,7 +230,6 @@ internal static class IncludeOwnership
             }
 
             folders = [.. folders.Select(folder => (Prefix(folder.Directory), folder.Modules))];
-            thirdPartyRoots = [.. thirdPartyRoots.Select(Prefix)];
             // 모듈 폴더 밖에 있는 public include 디렉터리(쓰지 않는 공개 의존 판정에서 그 모듈이 쓴 것으로 센다).
             foreach (NativeModuleInput module in modules.Values.Where(module => !module.ThirdParty && module.ModuleDirectory is not null))
             {
@@ -301,7 +299,7 @@ internal static class IncludeOwnership
                 };
             }
 
-            if (!DirectoryPath.IsAtOrUnder(path, root) || thirdPartyRoots.Any(value => Under(Path.GetFullPath(path), value)))
+            if (!DirectoryPath.IsAtOrUnder(path, root))
             {
                 return null;
             }

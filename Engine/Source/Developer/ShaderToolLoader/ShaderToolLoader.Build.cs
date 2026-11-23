@@ -19,6 +19,9 @@ public sealed class ShaderToolLoader : EngineModuleRules
 
     protected override string[] PublicDependencies => ["ShaderToolTable", "PlatformBase", "Core"];
 
+    // Only the Windows implementation includes the DXC public header (dxcapi.h); it is visible only to this module's sources (BS3a).
+    protected override string[] PrivateDependencies => ["DirectXShaderCompiler"];
+
     public override NativeModuleInput Configure(BuildContext context)
     {
         string backend = $"{ModuleDirectory}/Private";
@@ -31,10 +34,7 @@ public sealed class ShaderToolLoader : EngineModuleRules
         return base.Configure(context) with
         {
             Sources = [.. Directory.GetFiles(context.PathInRoot(backend), "*.cpp").Order(StringComparer.Ordinal),
-                .. context.Sources($"{backend}/{platform}")],
-            // Only the Windows implementation includes the DXC public header (dxcapi.h). External headers are visible only to this module's sources (adapter approach).
-            PrivateIncludeDirectories = ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "DirectXShaderCompiler"),
-            PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, "DirectXShaderCompiler")
+                .. context.Sources($"{backend}/{platform}")]
         };
     }
 }
