@@ -1,0 +1,21 @@
+using Rocks.Build;
+using Rocks.Build.Rules;
+
+/// <summary>
+/// Shader compile worker body (Docs/Design/ShaderSystem.ko.md sections 11 and 11.1 SC1, SC4-SC7): control lines on the standard streams, input and
+/// output message files, version checks and exit codes, tool queries, dispatch to the ShaderFormat* modules and the test hooks. The worker program
+/// (Programs/ShaderCompileWorker) calls it. It may open tool binaries (policy check shader-tool-binary-load) and must not depend on the main
+/// process shader compiler or the asset nugget (policy check shader-worker-isolation).
+/// </summary>
+public sealed class ShaderWorker : EngineModuleRules
+{
+    protected override string Group => "Developer";
+
+    protected override string ModuleName => "ShaderWorker";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
+    protected override string[] PublicDependencies =>
+        ["ShaderCompilerCommon", "ShaderToolLoader", "ShaderFormatD3D", "ShaderFormatVulkan", "DeterministicMath", "PlatformBase", "Core"];
+}
