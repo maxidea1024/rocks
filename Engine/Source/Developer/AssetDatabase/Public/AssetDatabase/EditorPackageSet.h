@@ -12,6 +12,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
+#include <Object/OverrideSet.h>
 #include <Object/ReferenceObserver.h>
 #include <Platform/File.h>
 
@@ -164,7 +165,7 @@ inline constexpr usize EditorSaveVerifyScratchBytes = 64 * 1024;
 struct EditorPackageInfo {
     explicit EditorPackageInfo(Allocator& allocator) noexcept
         : fileName(allocator), logicalPath(allocator), unresolved(allocator),
-          importRecord(allocator), importOwner(allocator) {
+          importRecord(allocator), importOwner(allocator), overrides(allocator) {
     }
 
     EditorPackageInfo(EditorPackageInfo&&) noexcept = default;
@@ -192,6 +193,10 @@ struct EditorPackageInfo {
     bool unsaved = false;
     // 이 패키지의 파일 bulk 저장소다(Package가 소유 — 저장의 bulk source·Rebind).
     FilePackageBulkStore* store = nullptr;
+    // 이 패키지 객체들의 override 집합이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5b' — 차이
+    // 형식 저장이 기준과 같아도 쓰는 값 경로). 열 때 파일에 있던 값 경로로 채우고, 경로 쓰기
+    // (RecordOverride)가 더한다. 패키지를 닫으면 함께 사라진다.
+    HashMap<ObjectHandle, OverrideSet> overrides;
 };
 
 // 열린 패키지 경로 바꾸기 준비다(EditorPackageSet::PrepareRelocate가 채우고 CommitRelocate가 쓴다 —
@@ -359,6 +364,14 @@ public:
 
     // 열린 패키지 정보다(없으면 null). 다음 Open까지 유효하다.
     const EditorPackageInfo* Find(AssetId id) const noexcept;
+
+    // object(열린 패키지 안 객체)의 경로 쓰기를 override 집합에 기록한다(RuntimeClassMetadata 'A5b'
+    // — asset-set·asset-new·임포트 설정 대입). path는 그 객체 타입 스키마의 경로이고 단위로
+    // 정규화한다 (AddOverrideUnits — 원소·key는 필드, Atomic은 struct, 비Atomic struct 끝은 잎
+    // 멤버로 펼침). 오류: 열린 패키지 객체가 아님 NotFound, 타입 조회·정규화의 오류, 할당 실패.
+    Result<void> RecordOverride(ObjectHandle object, Span<const PathStep> path) noexcept;
+    // object의 override 집합이다(없으면 null — 객체의 패키지가 닫히면 무효).
+    const OverrideSet* FindOverrides(ObjectHandle object) const noexcept;
 
     // 이동하는 열린 패키지의 경로를 바꿀 준비를 한다(7.1절 17 A2e2). 저장된 패키지는 fileName이
     // fromFile(Content 상대 OS 이름 — 파일 또는 디렉터리, 이동하는 실제 이름)과 같거나 그 아래면 그

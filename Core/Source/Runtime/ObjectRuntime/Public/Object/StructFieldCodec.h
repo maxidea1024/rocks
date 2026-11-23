@@ -41,6 +41,23 @@ inline Result<uint32> EncodeStructRecord(StructView view, const void* value, Arc
         return Result<uint32>::Failure(record.Error());
     }
 
+    // 차이 쓰기(Docs/Design/RuntimeClassMetadata.ko.md 'A5b'): 이 struct 값에 기준이 있으면 기준과
+    // 같은 멤버를 쓴 즉시 걷어 낸다(모든 출구에서 기준을 닫는다).
+    auto baseline = context.BeginStructBaseline();
+    if (!baseline) {
+        return Result<uint32>::Failure(baseline.Error());
+    }
+
+    struct BaselineGuard {
+        FieldEncodeContext& context;
+        bool active;
+
+        ~BaselineGuard() {
+            if (active) {
+                context.EndStructBaseline();
+            }
+        }
+    } guard{context, baseline.Value()};
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const FieldSchema& member = schema.fields[index];
         const StructView nested = view.FieldStruct(index);
@@ -63,6 +80,7 @@ inline Result<uint32> EncodeStructRecord(StructView view, const void* value, Arc
             return Result<uint32>::Failure(begun.Error());
         }
 
+        const usize referenceMark = context.ReferenceMark();
         auto wire = ops.encode(ops, value, out, context);
         if (!wire) {
             return wire;
@@ -77,6 +95,21 @@ inline Result<uint32> EncodeStructRecord(StructView view, const void* value, Arc
 
         if (auto ended = record.Value().EndField(wire.Value()); !ended) {
             return Result<uint32>::Failure(ended.Error());
+        }
+
+        if (guard.active) {
+            const usize payload = record.Value().LastFieldPayloadOffset();
+            auto omit = context.OmitCurrent(
+                wire.Value(), out.View().Slice(payload, out.ByteCount() - payload), referenceMark);
+            if (!omit) {
+                return Result<uint32>::Failure(omit.Error());
+            }
+
+            if (omit.Value()) {
+                if (auto cancelled = record.Value().CancelField(); !cancelled) {
+                    return Result<uint32>::Failure(cancelled.Error());
+                }
+            }
         }
     }
 

@@ -301,4 +301,11 @@ inline reflection_text::TextCodecOptions CodecOptions(EditorPackageSet& set,
 Result<void> ReadWhole(platform::FileSystem& files, StringView path, uint64 limit,
                        Array<uint8>& bytes, bool& existed, bool& tooLarge) noexcept;
 
+// asset(열린 패키지 안 객체)에 게시한 대입들의 경로를 override 집합에 기록한다(Docs/Design/
+// RuntimeClassMetadata.ko.md 'A5b' — asset-set·asset-new·임포트 설정 대입). 경로는 객체 문맥으로
+// 해석한다(InstancedStruct 내용 포함). 오류: 경로 해석·EditorPackageSet::RecordOverride의 오류.
+Result<void>
+RecordAssignmentOverrides(EditorPackageSet& set, ObjectHandle asset,
+                          Span<const reflection_text::TextAssignment> assignments) noexcept;
+
 } // namespace rocks::asset_database_detail

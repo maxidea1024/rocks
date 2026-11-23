@@ -106,6 +106,20 @@ usize EditorParentBytes(StringView path) noexcept {
     return slash - 1;
 }
 
+// 열린 패키지의 override 집합을 그래프 저장에 보이는 어댑터다(A5b — 저장 동안만 산다).
+class PackageOverrides final : public GraphOverrides {
+public:
+    explicit PackageOverrides(const HashMap<ObjectHandle, OverrideSet>& map) noexcept : map_(map) {
+    }
+
+    const OverrideSet* Find(ObjectHandle object) const noexcept override {
+        return map_.Find(object);
+    }
+
+private:
+    const HashMap<ObjectHandle, OverrideSet>& map_;
+};
+
 } // namespace
 
 // 닫힘에 넣은 패키지 하나다. state는 Prepare를 마친 상태(빼낸 패키지는 excluded)다.
@@ -699,6 +713,8 @@ Result<void> EditorPackageSet::PreparePending(Pending& pending,
     options.bulk = PackageBulkMode::Defer;
     options.read = config_.read;
     options.read.expectedKind = PackageKind::Editor;
+    // 파일에 있는 값 경로가 override 집합이다(A5b — 공개 전에 노드 handle로 옮긴다).
+    options.collectPresent = true;
     auto state = UniquePtr<PackageLoadState>::TryMake(allocator, allocator, *registry_,
                                                       *config_.types, Access(), options);
     if (!state) {
@@ -936,6 +952,39 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         }
 
         (void)infos.TryPushBack(Move(info));
+    }
+
+    // 파일에 있던 값 경로를 객체 handle의 override 집합으로 옮긴다(A5b — 공개 전이라 실패하면
+    // 아무것도 열리지 않는다). 모르는 필드·정규화할 수 없는 경로는 버린다.
+    for (usize slot = 0; slot < count; ++slot) {
+        PackageLoadState& state = *pending[origin[slot]].state;
+        const Span<const ObjectHandle> nodes = state.Stage().Nodes();
+        EditorPackageInfo& info = infos[slot];
+        for (usize at = 0; at < state.PresentCount(); ++at) {
+            const uint32 node = state.PresentObject(at);
+            if (node >= nodes.Size()) {
+                continue;
+            }
+
+            auto lease = transaction.AcquireType(nodes[node]);
+            if (!lease) {
+                return oom(lease.Error());
+            }
+
+            OverrideSet* set = info.overrides.Find(nodes[node]);
+            if (set == nullptr) {
+                if (auto inserted = info.overrides.Insert(nodes[node], OverrideSet(allocator));
+                    !inserted) {
+                    return oom(inserted.Error());
+                }
+
+                set = info.overrides.Find(nodes[node]);
+            }
+
+            if (auto added = AddPresentUnit(lease.Value(), state.PresentPath(at), *set); !added) {
+                return oom(added.Error());
+            }
+        }
     }
 
     if (auto reserved = open_.TryReserve(open_.Size() + count); !reserved) {
@@ -1786,6 +1835,54 @@ Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, As
     return Result<void>::Success();
 }
 
+Result<void> EditorPackageSet::RecordOverride(ObjectHandle object,
+                                              Span<const PathStep> path) noexcept {
+    if (registry_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const ObjectAccessContext access = Access();
+    auto outermost = registry_->GetOutermost(access, object);
+    if (!outermost) {
+        return Result<void>::Failure(outermost.Error());
+    }
+
+    EditorPackageInfo* owner = nullptr;
+    for (EditorPackageInfo& info : open_) {
+        owner = info.package == outermost.Value() ? &info : owner;
+    }
+
+    if (owner == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    auto lease = registry_->AcquireType(access, object);
+    if (!lease) {
+        return Result<void>::Failure(lease.Error());
+    }
+
+    OverrideSet* set = owner->overrides.Find(object);
+    if (set == nullptr) {
+        if (auto inserted = owner->overrides.Insert(object, OverrideSet(*allocator_)); !inserted) {
+            return Result<void>::Failure(inserted.Error());
+        }
+
+        set = owner->overrides.Find(object);
+    }
+
+    return AddOverrideUnits(lease.Value(), path, *set);
+}
+
+const OverrideSet* EditorPackageSet::FindOverrides(ObjectHandle object) const noexcept {
+    for (const EditorPackageInfo& info : open_) {
+        if (const OverrideSet* set = info.overrides.Find(object)) {
+            return set;
+        }
+    }
+
+    return nullptr;
+}
+
 Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
                                                Array<EditorWarning>* warnings,
                                                AssetDiagnostic& diagnostic,
@@ -1854,6 +1951,10 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
     write.extraDependencies = plan.extra.View();
     write.importRecord = duplicate != nullptr ? duplicate->importRecord : info.importRecord.View();
     write.duplicateId = duplicate != nullptr ? duplicate->id : AssetId{};
+    // 차이 형식(A5b): 이 패키지(복제·ID 수정은 원본) 객체들의 override 집합 단위는 기준과 같아도
+    // 쓴다.
+    PackageOverrides overrides(info.overrides);
+    write.overrides = &overrides;
     PackageWriteResult result(allocator);
     {
         platform::File file;

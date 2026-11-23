@@ -7,6 +7,8 @@
 #include <AssetDatabase/LogicalPath.h>
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/Package.h>
+#include <AssetTestFixtures/TestAssets.generated.h>
+#include <Object/OverrideSet.h>
 #include <TestSupport/NFailAllocator.h>
 
 // 에셋 서비스 API 시험이다(Docs/Design/AssetSystem 13절·7.1절 15 A2c3): asset-new(타입 도구
@@ -317,6 +319,68 @@ TEST(AssetService_SetAssignsAndSaves) {
     AssetDatabaseLock idle;
     CHECK(service.Set(idle, "/Game/Hero", {}, false, diagnostics).Error() ==
           ErrorCode::InvalidArgument);
+}
+
+// override 집합(Docs/Design/RuntimeClassMetadata.ko.md 'A5b'): asset-set이 기준과 같은
+// 값(value=0)을 넣어도 집합에 기록해 차이 형식 저장이 그 값을 쓰고, 다시 연 패키지는 파일에 있는 값
+// 경로로 집합을 채운다(value 있음, 손대지 않은 label 없음).
+TEST(AssetService_SetRecordsOverrides) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    TempProject root("service-overrides");
+    ServiceScene scene(env, sources, env.allocator, root);
+    REQUIRE(scene.ready);
+    AssetDatabaseLock lock;
+    REQUIRE(lock.Acquire(scene.project.layout, 0));
+    const auto fieldId = [](StringView name) noexcept {
+        for (const FieldSchema& field : TypeOf<asset_fixture::TestAsset>().fields) {
+            if (StringView(field.name.Data(), field.name.Size()) == name) {
+                return field.id;
+            }
+        }
+
+        return Guid{};
+    };
+    const Guid value[] = {fieldId("value")};
+    const Guid label[] = {fieldId("label")};
+    // 다시 연 서비스에서 Leaf 대표 에셋의 집합을 본다.
+    const auto reopened = [&](bool& hasValue, bool& hasLabel) noexcept {
+        AssetService again(env.allocator, scene.project.layout,
+                           ServiceConfig(env, scene.project, scene.hooks));
+        if (!again.Initialize()) {
+            return false;
+        }
+
+        auto package = again.Packages().Open(FixedId(LeafId));
+        if (!package) {
+            return false;
+        }
+
+        auto asset =
+            again.Packages().Registry().FindChild(again.Packages().Access(), package.Value(), "");
+        if (!asset) {
+            return false;
+        }
+
+        const OverrideSet* set = again.Packages().FindOverrides(asset.Value());
+        hasValue = set != nullptr && set->Contains(Span<const Guid>(value));
+        hasLabel = set != nullptr && set->Contains(Span<const Guid>(label));
+        return true;
+    };
+    bool hasValue = true;
+    bool hasLabel = true;
+    REQUIRE(reopened(hasValue, hasLabel));
+    CHECK(!hasValue && !hasLabel);
+
+    TextDiagnostics diagnostics(env.allocator);
+    Array<TextAssignment> assignments(env.allocator);
+    const StringView texts[] = {"value=0"};
+    REQUIRE(MakeAssignments(texts, assignments));
+    REQUIRE(scene.service.Set(lock, "/Game/Leaf", assignments.View(), false, diagnostics));
+    REQUIRE(reopened(hasValue, hasLabel));
+    CHECK(hasValue && !hasLabel);
 }
 
 // Weak 참조 대입(5.1절 — 같은 패키지 안만 보존): asset-set의 Weak은 대상 패키지 안의 객체만

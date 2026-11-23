@@ -1100,6 +1100,10 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     save.hooks = &hooks;
     save.externals = GraphExternalPolicy::Admit;
     save.writeNodeTable = false;
+    // 패키지는 차이 형식이다(A5b — 기준 레코드와 같은 값은 쓰지 않는다, 쿠킹은 집합 없이).
+    save.baseline =
+        options.kind == PackageKind::Cooked ? GraphBaseline::Cooked : GraphBaseline::Editor;
+    save.overrides = options.kind == PackageKind::Cooked ? nullptr : options.overrides;
     auto saved = SaveObjectGraphSet(allocator, registry, access, exports.View(), save);
     if (!saved) {
         if (hooks.SawUnpackaged()) {

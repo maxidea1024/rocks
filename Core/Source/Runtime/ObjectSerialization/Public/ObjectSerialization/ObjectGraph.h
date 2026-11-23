@@ -121,6 +121,28 @@ inline bool IsUnsaveableType(const TypeLease& type, uint32 mask = UnsaveableType
     return (type.Schema().flags & mask) != 0;
 }
 
+class OverrideSet;
+
+// 차이 쓰기의 기준 구성이다(Docs/Design/RuntimeClassMetadata.ko.md '클래스 기본값 구현 명세 —
+// A5b'). None은 전부 저장(기본 — 세이브게임·시험·Rockpile 등), Editor·Cooked는 노드마다 그 구체
+// 클래스의 기본값 레코드(AcquireClassDefaults의 그 구성)와 같은 값을 쓰지 않는다(override 집합
+// 단위는 쓴다).
+enum class GraphBaseline : uint8 {
+    None,
+    Editor,
+    Cooked,
+};
+
+// 차이 쓰기가 객체의 override 집합을 묻는 곳이다(편집기 패키지 집합이 구현한다 — 없으면 null).
+// 저장 중이므로 Registry·집합을 바꾸지 않는다.
+class GraphOverrides {
+public:
+    virtual const OverrideSet* Find(ObjectHandle object) const noexcept = 0;
+
+protected:
+    ~GraphOverrides() = default;
+};
+
 // 저장 옵션이다. policy.rejectMissingRequired면 Required 참조 null을 RequiredMissing 진단 뒤
 // InvalidArgument로 거부하고, policy.excludedFlags의 필드는 저장하지 않는다. hooks는 진단·소프트
 // 참조 수집·struct 치환·외부 참조 허락(Admit)을 받는다(없으면 버리고, Admit은 모두 Reject다).
@@ -141,6 +163,12 @@ struct ObjectGraphSaveOptions {
     // 그 노드보다 앞의 노드이거나 기준 Outer(노드 1의 Outer — 없으면 Outer 없음)여야 한다(아니면
     // InvalidArgument — 기준 Outer와 다른 집합 밖 Outer, Outer 없음과 기준 Outer의 혼합 포함).
     bool writeNodeTable = false;
+    // 차이 쓰기 기준 구성과 override 집합이다(A5b). Editor는 policy.excludedFlags에 EditorOnly가
+    // 없어야 하고 Cooked는 있어야 하며, 둘 다 policy.includeFlags가 0이어야 한다(아니면
+    // InvalidArgument). 레코드가 없는 타입(IncompleteLayout·ManualFields)의 노드는 전부 저장하고,
+    // 그 밖의 레코드 실패는 저장 실패다.
+    GraphBaseline baseline = GraphBaseline::None;
+    const GraphOverrides* overrides = nullptr;
 };
 
 // 외부 참조 대상 하나다(저장의 Admit 정책이 Import로 쓴 대상 — slot 순서 = 첫 출현 순,

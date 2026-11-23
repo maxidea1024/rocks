@@ -55,6 +55,35 @@ public:
         return nullptr;
     }
 
+    // 차이 쓰기(Docs/Design/RuntimeClassMetadata.ko.md 'A5b')의 기준 비교 자리다. 기본 문맥은 전부
+    // 쓴다(모두 거짓·0). 그래프 저장 문맥이 기준 구성이 있을 때 구현한다.
+    //
+    // 지금 위치(단일 struct 값 — 원소 index 없음)를 기준 멤버 비교로 쓸지 정하고 시작한다. 참이면
+    // EncodeStructRecord가 멤버마다 OmitCurrent를 묻고 끝에 EndStructBaseline을 부른다.
+    virtual Result<bool> BeginStructBaseline() noexcept {
+        return Result<bool>::Success(false);
+    }
+
+    virtual void EndStructBaseline() noexcept {
+    }
+
+    // 지금 위치(필드·멤버)에 방금 쓴 값(wire, payload)을 생략할지다: 기준과 byte가 같고, override
+    // 단위가 아니고, 그 값을 쓰는 동안 참조 표지(ReferenceMark)가 그대로일 때 참이다. 멤버 비교로
+    // 쓴 struct 값은 남은 멤버가 없을 때 참이다. referenceMark는 그 값을 쓰기 전의 ReferenceMark다.
+    virtual Result<bool> OmitCurrent(uint32 wire, Span<const uint8> payload,
+                                     usize referenceMark) noexcept {
+        (void)wire;
+        (void)payload;
+        (void)referenceMark;
+        return Result<bool>::Success(false);
+    }
+
+    // 외부 참조 위치·weak 지연 항목의 누계다(생략 판정 — 그 값을 쓰는 동안 늘었으면 생략하지
+    // 않는다).
+    virtual usize ReferenceMark() const noexcept {
+        return 0;
+    }
+
     // 지금 위치가 Required이고 값이 null일 때: 검사 모드면 RequiredMissing을 보고한 뒤 성공(hook
     // 실패는 그 오류), 아니면 rejectMissingRequired일 때 보고 뒤 InvalidArgument다. 그 밖은
     // 성공이다.

@@ -1429,6 +1429,14 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
             return FailImport<void>(failure, AssetDiagnosticCode::None, published.Error(),
                                     run.mainId);
         }
+
+        // 사용자 설정 대입은 override 집합에 기록한다(A5b — 임포터가 쓴 출력은 기록하지 않는다).
+        if (auto recorded = asset_database_detail::RecordAssignmentOverrides(
+                set_, main->asset, settingAssignments.View());
+            !recorded) {
+            return FailImport<void>(failure, AssetDiagnosticCode::None, recorded.Error(),
+                                    run.mainId);
+        }
     }
 
     // 결과·기록 입력·소유 기록 byte를 만든다(저장 사이에 할당이 실패하지 않게).

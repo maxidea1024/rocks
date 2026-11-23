@@ -11,6 +11,7 @@
 #include <Core/Text/Json.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/AssetId.h>
+#include <Object/PropertyPath.h>
 #include <ReflectionText/TextJson.h>
 #include <ReflectionText/TextLines.h>
 
@@ -66,6 +67,30 @@ private:
 };
 
 } // namespace
+
+namespace asset_database_detail {
+
+Result<void>
+RecordAssignmentOverrides(EditorPackageSet& set, ObjectHandle asset,
+                          Span<const reflection_text::TextAssignment> assignments) noexcept {
+    for (const reflection_text::TextAssignment& assignment : assignments) {
+        PropertyPathBuffer path;
+        if (auto parsed =
+                ParsePropertyPath(set.Registry(), set.Access(), asset, assignment.path, path);
+            !parsed) {
+            return parsed;
+        }
+
+        if (auto recorded = set.RecordOverride(asset, Span<const PathStep>(path.steps, path.count));
+            !recorded) {
+            return recorded;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace asset_database_detail
 
 AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
                            const AssetServiceConfig& config) noexcept
@@ -1255,6 +1280,17 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
         }
     }
 
+    // 초기 대입은 사용자 쓰기다(override 집합 — A5b). 대표 에셋은 이름 빈 자식이다.
+    if (!assignments.IsEmpty()) {
+        auto representative = set_.Registry().FindChild(set_.Access(), created.Value(), "");
+        Result<void> recorded = representative ? asset_database_detail::RecordAssignmentOverrides(
+                                                     set_, representative.Value(), assignments)
+                                               : Result<void>::Failure(representative.Error());
+        if (!recorded) {
+            return FailAsset<AssetId>(failure, AssetDiagnosticCode::None, recorded.Error());
+        }
+    }
+
     EditorSaveOptions save;
     if (auto saved = set_.Save(id, lock, save, warnings, failure); !saved) {
         return Result<AssetId>::Failure(saved.Error());
@@ -1290,6 +1326,14 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
 
     if (auto published = prepared.Value().Publish(); !published) {
         return FailAsset<void>(failure, AssetDiagnosticCode::None, published.Error());
+    }
+
+    // 경로 쓰기는 override 집합에 기록한다(A5b — 기준과 같은 값을 넣어도 저장되어 기본값 변경
+    // 뒤에도 남는다).
+    if (auto recorded =
+            asset_database_detail::RecordAssignmentOverrides(set_, asset.Value(), assignments);
+        !recorded) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, recorded.Error());
     }
 
     // 열린 패키지다(MarkDirty는 실패하지 않는다).

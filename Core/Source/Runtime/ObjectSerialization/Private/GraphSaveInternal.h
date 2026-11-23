@@ -66,9 +66,25 @@ public:
           scratch_(allocator, budget), observation_(allocator, budget, false), locals_(allocator),
           expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
           slots_(allocator), externals_(allocator), externalLeases_(allocator),
-          positions_(allocator), weakDeferrals_(allocator), weakPaths_(allocator) {
+          positions_(allocator), weakDeferrals_(allocator), weakPaths_(allocator),
+          baselines_(allocator) {
         // Name 필드는 이 Registry의 pool로 표시 문자열을 읽는다.
         SetNames(registry.Names());
+    }
+
+    // 노드 하나의 차이 쓰기 기준을 연다(A5b — record는 그 구체 클래스 레코드의 기준 구성 byte,
+    // overrides는 그 객체의 집합 또는 null). EndBaseline이 닫는다. 오류: Record 열기의 오류.
+    Result<void> BeginBaseline(const TypeSchema& schema, Span<const uint8> record,
+                               const OverrideSet* overrides) noexcept;
+    void EndBaseline() noexcept;
+
+    Result<bool> BeginStructBaseline() noexcept override;
+    void EndStructBaseline() noexcept override;
+    Result<bool> OmitCurrent(uint32 wire, Span<const uint8> payload,
+                             usize referenceMark) noexcept override;
+
+    usize ReferenceMark() const noexcept override {
+        return positions_.Size() + weakDeferrals_.Size();
     }
 
     // 노드 하나의 encode를 시작한다. fileBytes는 이 노드 앞까지의 출력 byte 누계다(위치 표 메모리
@@ -258,6 +274,18 @@ private:
     Array<PathStep> weakPaths_;
     const ArchiveWriter* fieldWriter_ = nullptr;
     usize committedBytes_ = 0;
+    // 차이 쓰기 기준 사슬이다(A5b): 맨 아래는 노드 클래스 레코드(frame null), 위로 멤버 비교 중인
+    // struct 값(그 위치 frame과 기준 Record reader).
+    struct BaselineLevel {
+        BaselineLevel(const FieldCodecFrame* position, RecordReader&& opened) noexcept
+            : frame(position), reader(Move(opened)) {
+        }
+
+        const FieldCodecFrame* frame = nullptr;
+        RecordReader reader;
+    };
+    Array<BaselineLevel> baselines_;
+    const OverrideSet* overrides_ = nullptr;
 };
 
 // 객체 하나의 필드 루프가 저장 쪽에 묻고 알리는 곳이다(EncodeObjectFields — 그래프 저장 노드와

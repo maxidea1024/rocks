@@ -1,5 +1,8 @@
 #include "GraphSaveInternal.h"
 
+#include <Object/OverrideSet.h>
+#include <ObjectSerialization/ClassDefaults.h>
+
 namespace rocks::graph_detail {
 
 // 저장 결과를 만드는 내부 통로다(ObjectGraphSaveResult의 생성자는 비공개다).
@@ -284,6 +287,131 @@ Result<const TypeLease*> GraphEncodeContext::ExpectedLease(TypeId type) noexcept
     return Result<const TypeLease*>::Success(expected_.Find(type));
 }
 
+Result<void> GraphEncodeContext::BeginBaseline(const TypeSchema& schema, Span<const uint8> record,
+                                               const OverrideSet* overrides) noexcept {
+    auto reader = RecordReader::Open(allocator_, record, schema.id, schema.version, schema.version,
+                                     budget_.Record());
+    if (!reader) {
+        return Result<void>::Failure(reader.Error());
+    }
+
+    if (auto reserved = baselines_.TryReserve(baselines_.Size() + 1); !reserved) {
+        return reserved;
+    }
+
+    (void)baselines_.TryPushBack(BaselineLevel(nullptr, Move(reader.Value())));
+    overrides_ = overrides;
+    return Result<void>::Success();
+}
+
+void GraphEncodeContext::EndBaseline() noexcept {
+    baselines_.Clear();
+    overrides_ = nullptr;
+}
+
+Result<bool> GraphEncodeContext::BeginStructBaseline() noexcept {
+    const FieldCodecFrame* frame = Current();
+    if (baselines_.IsEmpty() || frame == nullptr || frame->index != FieldCodecFrame::NoIndex ||
+        frame->field == nullptr || frame->field->value.kind != ValueKind::Struct ||
+        frame->structure.IsEmpty() || frame->structure.IsAtomic()) {
+        return Result<bool>::Success(false);
+    }
+
+    // 기준 사슬 맨 위가 바로 바깥 위치여야 한다(원소·InstancedStruct 내용·다른 struct의 멤버는
+    // 기준이 없다).
+    BaselineLevel& top = baselines_[baselines_.Size() - 1];
+    if (top.frame != frame->parent) {
+        return Result<bool>::Success(false);
+    }
+
+    auto found = top.reader.Find(frame->field->id);
+    if (!found) {
+        // 기준 레코드에 없는 위치(그 구성에서 제외)는 기준 없이 쓴다.
+        return found.Error() == ErrorCode::NotFound ? Result<bool>::Success(false)
+                                                    : Result<bool>::Failure(found.Error());
+    }
+
+    const TypeSchema& schema = frame->structure.Schema();
+    auto nested = top.reader.OpenRecordField(allocator_, found.Value(), schema.id, schema.version,
+                                             schema.version, budget_.RemainingFields());
+    if (!nested) {
+        return Result<bool>::Failure(nested.Error());
+    }
+
+    if (auto reserved = baselines_.TryReserve(baselines_.Size() + 1); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    (void)baselines_.TryPushBack(BaselineLevel(frame, Move(nested.Value())));
+    return Result<bool>::Success(true);
+}
+
+void GraphEncodeContext::EndStructBaseline() noexcept {
+    if (!baselines_.IsEmpty()) {
+        (void)baselines_.TryRemoveAt(baselines_.Size() - 1);
+    }
+}
+
+Result<bool> GraphEncodeContext::OmitCurrent(uint32 wire, Span<const uint8> payload,
+                                             usize referenceMark) noexcept {
+    const FieldCodecFrame* frame = Current();
+    if (baselines_.IsEmpty() || frame == nullptr || frame->field == nullptr ||
+        frame->index != FieldCodecFrame::NoIndex) {
+        return Result<bool>::Success(false);
+    }
+
+    BaselineLevel& top = baselines_[baselines_.Size() - 1];
+    // 바로 바깥이 기준 사슬 맨 위인 위치만 비교한다. 그 값을 쓰는 동안 외부 참조 위치·weak 지연
+    // 항목이 늘었으면(Include weak 자리값 0 포함) byte가 같아도 쓴다(A5b 교차 검증 필수 1).
+    if (top.frame != frame->parent || ReferenceMark() != referenceMark) {
+        return Result<bool>::Success(false);
+    }
+
+    // 멤버 비교로 쓴 struct 값은 남은 멤버가 없을 때 생략한다(잎 override는 멤버로 남는다).
+    const FieldSchema& field = *frame->field;
+    if (field.value.kind == ValueKind::Struct && !frame->structure.IsEmpty() &&
+        !frame->structure.IsAtomic()) {
+        auto found = top.reader.Find(field.id);
+        if (!found) {
+            return found.Error() == ErrorCode::NotFound ? Result<bool>::Success(false)
+                                                        : Result<bool>::Failure(found.Error());
+        }
+
+        auto header = ReadRecordHeader(payload);
+        if (!header) {
+            return Result<bool>::Failure(header.Error());
+        }
+
+        return Result<bool>::Success(header.Value().fieldCount == 0);
+    }
+
+    if (overrides_ != nullptr) {
+        PathStep steps[MaxPropertyPathSteps];
+        if (overrides_->Contains(BuildPath(steps))) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    auto found = top.reader.Find(field.id);
+    if (!found) {
+        return found.Error() == ErrorCode::NotFound ? Result<bool>::Success(false)
+                                                    : Result<bool>::Failure(found.Error());
+    }
+
+    const FieldView& base = found.Value();
+    if (base.wireType != wire || base.payload.Size() != payload.Size()) {
+        return Result<bool>::Success(false);
+    }
+
+    for (usize index = 0; index < payload.Size(); ++index) {
+        if (base.payload[index] != payload[index]) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    return Result<bool>::Success(true);
+}
+
 // TLV 하나의 머리 byte다(id 16 + wire 4 + 길이 8 — Record.h).
 constexpr usize FieldHeaderBytes = 28;
 
@@ -318,6 +446,7 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
         ArchiveLimits fieldLimits = budget.Archive();
         fieldLimits.maxTotalBytes = maxFieldBytes;
         ArchiveWriter encoded(allocator, fieldLimits);
+        const usize referenceMark = context.ReferenceMark();
         sink.BeginField(encoded);
         auto wire =
             accessor.Value()->encode(*accessor.Value(), registry, access, handle, encoded, context);
@@ -331,6 +460,16 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
         auto expected = detail::FieldWireType(field, context.ReferenceWireType());
         if (!expected || expected.Value() != wire.Value()) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        // 차이 쓰기(A5b): 기준과 같으면 Record에 더하지 않는다(위치·지연 항목이 늘지 않은 값만).
+        auto omit = context.OmitCurrent(wire.Value(), encoded.View(), referenceMark);
+        if (!omit) {
+            return Result<void>::Failure(omit.Error());
+        }
+
+        if (omit.Value()) {
+            continue;
         }
 
         spent = budget.Spend(encoded.WorkUsed());
@@ -422,6 +561,7 @@ private:
 Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                             const ObjectAccessContext& access, Array<SaveNode>& nodes,
                             usize nodeIndex, Budget& budget, usize& fileBytes, bool nodeTable,
+                            GraphBaseline baseline, const GraphOverrides* overrides,
                             GraphEncodeContext& context) noexcept {
     const ObjectHandle handle = nodes[nodeIndex].handle;
     // 이 노드의 필드를 encode하는 동안 owner를 고정한다(필드마다 잠그지 않는다). 저장 중 콜백이
@@ -463,13 +603,34 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     }
 
     context.BeginObject(schema.id, static_cast<uint32>(nodeIndex), fileBytes);
+    // 차이 쓰기(A5b): 그 구체 클래스의 기준 레코드를 연다. 레코드가 없는 타입은 전부 쓴다.
+    if (baseline != GraphBaseline::None) {
+        ClassDefaultsDiagnostic why;
+        auto defaults = AcquireClassDefaults(nodes[nodeIndex].lease, allocator, &why);
+        if (defaults) {
+            const ClassDefaultsConfiguration configuration =
+                baseline == GraphBaseline::Editor ? ClassDefaultsConfiguration::Editor
+                                                  : ClassDefaultsConfiguration::Cooked;
+            if (auto opened =
+                    context.BeginBaseline(schema, defaults.Value()->Record(configuration),
+                                          overrides != nullptr ? overrides->Find(handle) : nullptr);
+                !opened) {
+                return opened;
+            }
+        } else if (why.reason != ClassDefaultsReason::IncompleteLayout &&
+                   why.reason != ClassDefaultsReason::ManualFields) {
+            return Result<void>::Failure(defaults.Error());
+        }
+    }
+
     RecordBuilder record(allocator, schema.id, schema.version, recordLimits);
     usize payloadBytes = 0;
     NodeFieldSink sink(nodes, nodeIndex, context);
-    if (auto encoded = EncodeObjectFields(allocator, &registry, access, handle, budget,
-                                          recordLimits.archive.maxTotalBytes, context, record, sink,
-                                          payloadBytes);
-        !encoded) {
+    auto encoded =
+        EncodeObjectFields(allocator, &registry, access, handle, budget,
+                           recordLimits.archive.maxTotalBytes, context, record, sink, payloadBytes);
+    context.EndBaseline();
+    if (!encoded) {
         return encoded;
     }
 
@@ -521,6 +682,17 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
 
     if (set.Size() == 0) {
         return Output::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 차이 쓰기 기준 구성은 저장 정책과 맞아야 한다(A5b — Editor는 EditorOnly를 쓰고 Cooked는 뺀다,
+    // 포함 필터 저장은 차이 형식이 아니다).
+    if (options.baseline != GraphBaseline::None) {
+        const bool editorOnlyExcluded =
+            (options.policy.excludedFlags & static_cast<uint32>(FieldFlags::EditorOnly)) != 0;
+        if (options.policy.includeFlags != 0 ||
+            editorOnlyExcluded != (options.baseline == GraphBaseline::Cooked)) {
+            return Output::Failure(ErrorCode::InvalidArgument);
+        }
     }
 
     for (ObjectHandle handle : set) {
@@ -576,8 +748,9 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
     // 된다 — 외부 참조 위치 표가 노드 순서다).
     usize bytes = HeaderBytes;
     for (usize index = 0; index < nodes.Size(); ++index) {
-        auto saved = SaveNodeFields(allocator, registry, access, nodes, index, budget.Value(),
-                                    bytes, options.writeNodeTable, context);
+        auto saved =
+            SaveNodeFields(allocator, registry, access, nodes, index, budget.Value(), bytes,
+                           options.writeNodeTable, options.baseline, options.overrides, context);
         if (!saved) {
             return Output::Failure(saved.Error());
         }

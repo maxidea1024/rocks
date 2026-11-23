@@ -5,6 +5,7 @@
 #include <AssetRuntime/PackageReader.h>
 #include <Core/Build/EngineVersion.h>
 #include <Object/ObjectRegistry.h>
+#include <ObjectSerialization/ObjectGraph.h>
 #include <Platform/File.h>
 
 namespace rocks {
@@ -130,6 +131,11 @@ struct PackageWriteOptions {
     // 바꾼다(자기 의존 제외도 이 id로 한다). 쿠킹 패키지에서 주거나 지금 id와 같으면
     // InvalidArgument다.
     AssetId duplicateId{};
+    // 에디터 패키지의 override 집합 조회다(Docs/Design/RuntimeClassMetadata.ko.md 'A5b' — 기준과
+    // 같아도 집합 단위 값은 쓴다, null이면 집합 없음). 패키지는 늘 차이 형식이다: 에디터는 Editor,
+    // 쿠킹은 Cooked 기준 레코드와 같은 값을 쓰지 않는다. 쿠킹 패키지는 집합을 쓰지 않는다(무시한다
+    // — 런타임은 같은 빌드 레코드로 읽는다).
+    const GraphOverrides* overrides = nullptr;
 };
 
 // 쓰기 결과다.
