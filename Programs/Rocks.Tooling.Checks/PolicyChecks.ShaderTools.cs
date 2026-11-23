@@ -159,6 +159,12 @@ public static partial class PolicyChecks
 
             foreach (string name in binaryLibraries.Prepend("ShaderToolLoader"))
             {
+                // 그 라이브러리 자신의 모듈 규칙(<루트>/<Lib>/<Lib>.Build.cs — Docs/Design/BuildTargets 3.5절 BS3a)은 자기 이름을 적는다.
+                if (relative.EndsWith("/" + name + "/" + name + ".Build.cs", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 string literal = "\"" + name + "\"";
                 if (text.Contains(literal, StringComparison.Ordinal))
                 {
