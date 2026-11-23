@@ -8,7 +8,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 
-// 쿠킹 패키지 로더다(Docs/Design/AssetSystem.ko.md 11.2–11.6절, A1c). 쿠킹 매니페스트에서 요청
+// 쿠킹 패키지 로더다(Docs/Design/AssetSystem 11.2–11.6절, A1c). 쿠킹 매니페스트에서 요청
 // 에셋의 Hard 전이 폐포를 구하고(ResolveManifest) Hard SCC마다 로드 단위를 만들어, 패키지를
 // IO(CookedPackageIo) → worker(크기·SHA-256 → Prepare(압축 해제·검증) → 내용 대조) → Game Pump(단위
 // 하나를 한 트랜잭션으로 InstantiatePackages → Commit)로 진행한다. UE 5.8

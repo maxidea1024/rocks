@@ -2,7 +2,7 @@
 
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 대상 계산 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 4, "A4b 구현 세부"): 전체
+// 쿠킹 대상 계산 시험이다(Docs/Design/AssetSystem 10.2절 결정 4, "A4b 구현 세부"): 전체
 // 쿠킹(alwaysCook·PrimaryAsset 규칙·파생 타입·디렉터리 판정·Hard 폐포·Soft 설정·따라가지 않는
 // 간선·bundle 태그·PrimaryAsset이 아닌 에셋의 태그), 뿌리 진단(없는 경로 경고·같은 경로·같은 id·
 // 마운트), NeverCook(직접 지정 경고·규칙은 조용히·Hard·bundle 오류·Soft 제외·마운트 전체),

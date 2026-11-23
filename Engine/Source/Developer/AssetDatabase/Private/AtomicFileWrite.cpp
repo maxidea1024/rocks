@@ -6,7 +6,7 @@
 #include <Core/Guid.h>
 #include <Core/Text/String.h>
 
-// 작은 파일의 원자 교체 쓰기다(Docs/Design/AssetSystem.ko.md 7.1절 16·17·10.2절 A4d).
+// 작은 파일의 원자 교체 쓰기다(Docs/Design/AssetSystem 7.1절 16·17·10.2절 A4d).
 namespace rocks {
 
 using asset_database_detail::EditorAppendGuidText;

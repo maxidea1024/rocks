@@ -4,7 +4,7 @@
 #include <AssetRuntime/Package.h>
 #include <Core/Text/NameComponent.h>
 
-// 에셋 참조 텍스트 resolver다(Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3).
+// 에셋 참조 텍스트 resolver다(Docs/Design/AssetSystem 7.1절 15 A2c3).
 namespace rocks {
 
 namespace {

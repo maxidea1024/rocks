@@ -35,7 +35,7 @@ enum class ErrorCode : uint32 {
     CycleDetected,
     // 대상 장치·backend·기능 집합이 이 요청에 필요한 능력을 갖추지 않았다(예: 셰이더 형식을 만들 수
     // 없는 backend, 아직 계약만 있는 ReadyMask::Render). 인자는 올바르며 능력이 있는 대상에서는
-    // 성공한다. 기능 자체를 구현하지 않은 Unsupported와 구분한다(Docs/Design/AssetSystem.ko.md 1절
+    // 성공한다. 기능 자체를 구현하지 않은 Unsupported와 구분한다(Docs/Design/AssetSystem 1절
     // A1, Docs/Design/ShaderSystem 5.2절).
     UnsupportedCapability,
     // 한 번만 등록할 수 있는 자리에 이미 등록되어 있다(예: LoadTicket 하나에 OnReady 두 번). 상태는

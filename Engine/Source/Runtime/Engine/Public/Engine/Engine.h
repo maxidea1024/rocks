@@ -355,7 +355,7 @@ public:
 
     // RunFrame이 도는 동안(1–6단계 전체 — 5단계 World 지연 파괴 포함) 참이다. 게임 스레드에서
     // 읽는다. 프레임 안에서 금지된 동기 대기(에셋 LoadBlocking 등)의 판정 함수로 쓴다
-    // (Docs/Design/AssetSystem.ko.md 11.8절 5).
+    // (Docs/Design/AssetSystem 11.8절 5).
     bool IsInFrame() const noexcept {
         return frameRunning_;
     }

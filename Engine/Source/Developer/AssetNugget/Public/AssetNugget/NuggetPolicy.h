@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// 에셋 너겟 요청 정책이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 14 — UE 5.8 ECachePolicy와 같은
+// 에셋 너겟 요청 정책이다(Docs/Design/AssetSystem 9.1절 결정 14 — UE 5.8 ECachePolicy와 같은
 // 비트). 요청 항목마다 준다.
 //
 // - Query: QueryLocal(로컬 backend·Memory 조회)·QueryRemote(원격 — A3에는 원격이 없어 QueryRemote만

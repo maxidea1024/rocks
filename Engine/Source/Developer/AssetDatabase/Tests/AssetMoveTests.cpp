@@ -11,7 +11,7 @@
 #include <Core/Time/DateTime.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 이동 시험이다(Docs/Design/AssetSystem.ko.md 4.4절, 7.1절 17 A2e2): 색인 이름 바꾸기(RefreshPaths
+// 이동 시험이다(Docs/Design/AssetSystem 4.4절, 7.1절 17 A2e2): 색인 이름 바꾸기(RefreshPaths
 // moves — 파일·디렉터리·대소문자만·없는 원본·진단 이름·규칙 위반·할당 실패, 결과는 이동 뒤 새
 // 검색과 같다), 서비스 이동(파일·디렉터리·열린 패키지·저장하지 않은 새 패키지·빈 디렉터리·
 // 대소문자만·자기 별칭 자리로 되돌아가기, 모든 거부와 실패 — 파일·별칭·색인 그대로, OS 단계 실패의

@@ -7,7 +7,7 @@
 #include <AssetRuntime/PackageRangeReader.h>
 #include <string.h>
 
-// 저장 기반 시험 공용 도구다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c1): bulk 셋을 가진 에디터
+// 저장 기반 시험 공용 도구다(Docs/Design/AssetSystem 7.1절 15 — A2c1): bulk 셋을 가진 에디터
 // 장면(Zstd·None), 경로마다 byte를 가진 메모리 파일 시스템(열기·크기·이동·읽기·쓰기 고장 주입, 내용
 // 바꾸기 — 외부 변경 흉내), n번째 범위 읽기를 실패시키는 읽기.
 namespace rocks::asset_test {

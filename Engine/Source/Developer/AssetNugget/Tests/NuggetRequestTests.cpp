@@ -12,7 +12,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 에셋 너겟 요청 객체 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 12, "A3c2 구현 세부"): 일괄
+// 에셋 너겟 요청 객체 시험이다(Docs/Design/AssetSystem 9.1절 결정 12, "A3c2 구현 세부"): 일괄
 // Put·Get(순서·값 이동·빈 요청·다시 Start), 진행 중 Busy·취소(gate), 대기 Put byte 상한, 제출 실패
 // (scheduler 시작 전·maxInFlight), required 결과, Shutdown(요청 없음·drain 0·drain 끝까지 — hook),
 // scheduler Shutdown(Cancel)이 버린 항목(ticket), Fatal 셋(자식 프로세스).

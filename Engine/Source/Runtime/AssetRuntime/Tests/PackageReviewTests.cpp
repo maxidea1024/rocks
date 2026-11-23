@@ -6,7 +6,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 재리뷰가 찾은 경로의 시험이다(Docs/Design/AssetSystem.ko.md 5.2절, 5.5절 3, 5.7절 13–18):
+// 재리뷰가 찾은 경로의 시험이다(Docs/Design/AssetSystem 5.2절, 5.5절 3, 5.7절 13–18):
 // 선언 타입이 기대 타입보다 넓은 import의 연결 단계 대조, 쓰이지 않는 import 거부, resolver 결과
 // 검증, Prepare의 allocator 스레드 계약, 에디터 읽기 전용 열기의 끝까지 로드, export 이름 규칙의
 // 로드 분류, Zstd bulk 블록 압축의 메모리 피크, Tags 키 정렬·형식·할당 실패, 종료된 TypeRegistry,

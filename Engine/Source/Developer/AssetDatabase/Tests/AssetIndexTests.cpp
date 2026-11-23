@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 에디터 패키지 색인 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 11·13 — A2b): 실제 디스크의
+// 에디터 패키지 색인 시험이다(Docs/Design/AssetSystem 7.1절 11·13 — A2b): 실제 디스크의
 // 검색과 모든 조회(경로·id·디렉터리·타입·태그·정방향 의존의 모든 종류 묶음·역방향 참조자), Verify의
 // MissingDependency·TypeMismatch(상속·미등록·종료한 TypeRegistry), 메모리 파일 시스템으로 만든 진단
 // 장면(InvalidPath·패키지 판정·쿠킹·다른 Tags 스키마·깨진 Tags·사라진 파일·IO 실패·링크·장치·같은

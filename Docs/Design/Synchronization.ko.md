@@ -62,7 +62,7 @@ UE 이름은 3절 근거 문장과 6절 대응표에만 쓴다.
   - CVar·Config는 snapshot 포인터 게시와 다중 생산자 쓰기 큐를 쓴다(`CVarSystem.ko.md` 294·353–354행).
   - 앱 정보 D4는 프레임마다 게시하는 refcount 묶음을 worker에 넘긴다(`AppInfoCommandLine.ko.md` 1307행).
   - 렌더 기반은 완료 통지 큐와 lane 간 전달을 쓴다(`RenderBase.ko.md` 47·52·160행).
-  - 에셋 lease 해제 큐는 "미리 할당한 큐 항목"을 요구한다(`AssetSystem.ko.md` 337행). 이것은 호출자 소유 노드의 MPSC 큐다.
+  - 에셋 lease 해제 큐는 "미리 할당한 큐 항목"을 요구한다(`AssetSystem` 337행). 이것은 호출자 소유 노드의 MPSC 큐다.
   - 텍스처 스트리밍은 IO 완료 worker가 단계를 넘긴다(`TextureStreaming.ko.md` 274–275행).
 - 모듈이 각자 만든 spin·free list·세대 대기를 공용 장치로 바꿀 근거를 둔다(4.5절).
 
@@ -78,7 +78,7 @@ UE 이름은 3절 근거 문장과 6절 대응표에만 쓴다.
 
 ### 2.3 범위 밖
 
-- **프로세스 간 동기화.** UE `FSystemWideCriticalSection`(`CS` 16행, `WPM` 120행)과 이름 있는 프로세스 간 semaphore(`WPP` 2111–2130행)는 대응하지 않는다. 에셋 쓰기 잠금은 이미 파일 잠금(`FileLock`, `AssetSystem.ko.md` 270행)으로 한다.
+- **프로세스 간 동기화.** UE `FSystemWideCriticalSection`(`CS` 16행, `WPM` 120행)과 이름 있는 프로세스 간 semaphore(`WPP` 2111–2130행)는 대응하지 않는다. 에셋 쓰기 잠금은 이미 파일 잠금(`FileLock`, `AssetSystem` 270행)으로 한다.
 - **AutoRTFM 전용 계열.** `TransactionallySafeMutex`·`TransactionallySafeSharedMutex`·`TransactionallySafeRecursiveMutex`·`TransactionallySafeSharedRecursiveMutex`·`TransactionallySafeMutexPool`(`Public/Async/`)과 `TransactionallySafeMpscQueue`·`TransactionallySafeSpscQueue`(`Public/Containers/`)는 다루지 않는다. 이 타입들은 `AutoRTFM::IsClosed()`·`AutoRTFM::Close`로 트랜잭션 안의 잠금을 미루거나 되돌리는 장치다(`Public/Async/TransactionallySafeMutex.h` 45–119행). Rocks에는 AutoRTFM(트랜잭션 메모리 기반 스크립트 롤백)이 없고 도입 계획도 없다. `TAtomicRefCount`(`Public/Async/AtomicRefCount.h`)도 같은 이유로 AutoRTFM 부분은 빼고 "원자 참조 계수"라는 뜻만 11절에서 다룬다.
 - **작업 scheduler 내부 큐와 worker 보충.** work-stealing deque(UE `TWorkStealingQueue2`, `LQ` 33–157행), overflow 큐(UE `FAAArrayQueue`, `LQ` 193행), 대기 중 worker 보충(UE oversubscription)은 **Task 설계(후속 문서)** 의 몫이다. 이 문서는 그 큐가 쓸 원자·회수 기반과 훅 자리만 정한다(10.5·12.5절). Task 설계 문서는 아직 없다. `Docs/Design`에는 Task 문서가 없고, 지금 있는 것은 `EngineImplementationPlan.ko.md` 423·719행의 원칙 문장뿐이다(D33).
 - **GPU 동기화.** fence·timeline은 RenderBase(`Graphics/FenceTimeline.h`)다.
@@ -837,7 +837,7 @@ private:
 |---|---|---|---|
 | `BoundedMpscQueue<T>`(기존) | Vyukov 유한 MPSC | 칸 재사용, 순번으로 ABA 없음 | 로그, CVar 쓰기 큐 |
 | `BoundedSpscQueue<T>` | 고정 원형 버퍼, 생산자·소비자 하나. head·tail을 각자 cache line에 두고 상대 값을 지역에 캐시한다 | 칸 재사용 | lane 간 일방 전달, 오디오 lane 입력 |
-| `IntrusiveMpscQueue<Node>` | Vyukov 침투형 무한 MPSC. 노드는 호출자 소유이고 `next` 칸을 노드가 갖는다. push는 exchange 하나, pop은 소비자 하나 | 노드 수명은 호출자. 소비자가 하나라 ABA 없음 | 에셋 lease 해제 큐(`AssetSystem.ko.md` 337행), 지연 정리 목록 |
+| `IntrusiveMpscQueue<Node>` | Vyukov 침투형 무한 MPSC. 노드는 호출자 소유이고 `next` 칸을 노드가 갖는다. push는 exchange 하나, pop은 소비자 하나 | 노드 수명은 호출자. 소비자가 하나라 ABA 없음 | 에셋 lease 해제 큐(`AssetSystem` 337행), 지연 정리 목록 |
 | `TakeAllStack<Node>` | 침투형 스택. push는 CAS, 소비는 `TakeAll()`이 머리를 exchange로 통째로 가져간다(LIFO, 뒤집기 함수로 FIFO). `Close()`를 부르면 이후 push가 false다 | pop 경합이 없어 ABA 없음 | 완료 통지 묶음, GC dirty root(UE `GarbageCollection.cpp` 630행과 같은 용도), 작업 후속 목록, `FrameArena` 소멸자 기록(4.5절 11번) |
 | `IndexedFreeList<IndexBits = 24>` | 미리 잡은 칸 배열 위의 Treiber 스택. 머리는 64-bit `[태그 64−IndexBits \| 색인 IndexBits]`(기본 태그 40 bit, 색인 24 bit = 칸 약 1,677만 개), 다음 색인은 칸마다 `Atomic<uint32>` | 칸은 배열 수명 동안 해제하지 않는다. 태그로 ABA를 막는다(12.4절) | `LogBlockPool`·`TraceBlockPool` 통합(4.5절 3번), GC 512칸 블록 풀 |
 | `FixedBlockPool` | 고정 크기 블록 할당기. 페이지 단위로 늘리고(늘리기만 `Mutex`) 블록은 `IndexedFreeList`로 돌린다. 스레드 지역 캐시는 두지 않는다(측정 뒤) | 파괴 때만 페이지를 돌려준다 | 작업 레코드, trace 블록, 객체 블록 |

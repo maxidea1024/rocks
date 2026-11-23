@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// ImportRecord 값 스키마 시험이다(Docs/Design/AssetSystem.ko.md 5.4절, 7.1절 15 — A2c2a): 소유·참조
+// ImportRecord 값 스키마 시험이다(Docs/Design/AssetSystem 5.4절, 7.1절 15 — A2c2a): 소유·참조
 // 기록 왕복과 손으로 만든 정규 배치(golden)와의 byte 일치, 모든 경계값 양성(문자열 상한·개수
 // 상한·빈 root·빈 outputKey·점이 든 경로 성분), 쓰기 규칙 위반 전부, 읽기의 손상 전부(필드
 // 없음·wire·크기· 모르는 필드·빈 목록·개수·항목 schema·버전·순서·중복·self 없음·options envelope),

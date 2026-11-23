@@ -7,7 +7,7 @@
 #include <Base/TypeTraits.h>
 
 // "지원하는 모든 조합" fixture(AssetTestFixtures/CombinationAssets.h)의 결정적 생성기와 비교기다
-// (Docs/Design/AssetSystem.ko.md 14.1절). 종류별 조합 struct의 멤버 이름이 같으므로(value·array·
+// (Docs/Design/AssetSystem 14.1절). 종류별 조합 struct의 멤버 이름이 같으므로(value·array·
 // fixed·keyed·mapped·set·maybe) 템플릿 하나가 모든 종류를 채운다. 값 하나는 seed에서 정해지고, 같은
 // seed로 기대값을 다시 만들어 비교한다. 참조는 대상 표(ComboTargets)의 순번으로 정한다 — 쓴 쪽과
 // 읽은 쪽 Registry가 같은 순번에 같은 정체성의 객체를 둔다.

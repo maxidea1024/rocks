@@ -10,7 +10,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <TestSupport/Test.h>
 
-// AssetCooker 시험 공용 장면이다(Docs/Design/AssetSystem.ko.md 10.2절 — A4b·A4c): 노드 그래프를
+// AssetCooker 시험 공용 장면이다(Docs/Design/AssetSystem 10.2절 — A4b·A4c): 노드 그래프를
 // 메모리 Content에 패키지로 쓰고(의존 섹션을 시험이 다시 써서 import 없이 어떤 그래프든) 색인을
 // 만든다, 쿠킹 규칙 조립, 대상·진단 대조.
 namespace rocks::cook_test {

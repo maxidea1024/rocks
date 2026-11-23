@@ -423,7 +423,7 @@ finally
     Directory.Delete(signDirectory, true);
 }
 
-// asset-list·asset-index-verify(AssetSystem.ko.md 13절, 7.1절 13 — A2b): 패키지는 C++ 시험이 고정한 fixture 배열
+// asset-list·asset-index-verify(AssetSystem 13절, 7.1절 13 — A2b): 패키지는 C++ 시험이 고정한 fixture 배열
 // (AssetDatabase/Tests/AssetIndexCommandletFixtures.h — Hero 2300·Base 2301·같은 id의 Derived 대표·엔진 99.0.0 저장 Newer
 // 2310)을 읽어 쓴다. 목록·--under·프로젝트 찾기(위로)·기술자 없는 --project·진단 줄(누락 의존·형식 불일치·같은 id·이름
 // 규칙·깨진 패키지·새 엔진·IO 실패)·빈 프로젝트·Content가 파일·사용법 오류·출력 실패.
@@ -599,7 +599,7 @@ finally
     Directory.Delete(indexDirectory, true);
 }
 
-// asset-new·asset-set·asset-info·asset-list --type(AssetSystem.ko.md 13절, 7.1절 15 — A2c3b): 실제 에셋 타입 Skeleton·
+// asset-new·asset-set·asset-info·asset-list --type(AssetSystem 13절, 7.1절 15 — A2c3b): 실제 에셋 타입 Skeleton·
 // AnimationClip(Animation 모듈 — Commandlet이 시작해 타입을 등록한다)으로 만들기·대입(Hard·Soft 참조·float·bool·enum·
 // struct 멤버·struct 원소 배열·Name)·출력(줄·JSON·--all·AssetId 대상)·줄 출력 → asset-set 왕복·목록 옵션(--erase·
 // --unset)·대입 오류 모아 보고·타입·경로·대상 거부·--type(파생 포함)·사용법 오류·잠금 Busy·열기 경고와 --force·
@@ -899,7 +899,7 @@ finally
     Directory.Delete(editDirectory, true);
 }
 
-// asset-index-rebuild·색인 캐시(AssetSystem.ko.md 7.1절 16 — A2d1): 재구축은 잠금을 잡고 캐시 없이 검색해 고아 임시
+// asset-index-rebuild·색인 캐시(AssetSystem 7.1절 16 — A2d1): 재구축은 잠금을 잡고 캐시 없이 검색해 고아 임시
 // 파일(Content 저장 임시·Intermediate 캐시 임시)을 지우고 캐시를 쓴다(진단이 있어도 0). 쓰기 명령은 끝에 캐시를 쓰고 쓰지
 // 못하면 경고 CacheNotWritten(성공 0)이다. 손상된 캐시는 없는 것과 같다(목록·점검 결과 그대로).
 string cacheDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cache-{Environment.ProcessId}");
@@ -1059,7 +1059,7 @@ finally
     Directory.Delete(cacheDirectory, true);
 }
 
-// asset-alias-*·별칭 해석(AssetSystem.ko.md 4.3절, 7.1절 17 — A2e1): 목록(만료·shadowed·missing·지금 경로), 열기가 옛
+// asset-alias-*·별칭 해석(AssetSystem 4.3절, 7.1절 17 — A2e1): 목록(만료·shadowed·missing·지금 경로), 열기가 옛
 // 경로를 별칭으로 풀고 경고 AliasResolved, 별칭 경로에 새 패키지는 DuplicatePath, prune은 Config 텍스트에 쓰인 만료 항목을
 // 남기고 나머지 만료 항목을 지운다, remove, 깨진 표의 진단 줄, 사용법·환경 오류, 재구축이 별칭 표 임시 파일을 지운다.
 string aliasDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-alias-{Environment.ProcessId}");
@@ -1316,7 +1316,7 @@ finally
     Directory.Delete(aliasDirectory, true);
 }
 
-// asset-move(AssetSystem.ko.md 4.4절, 7.1절 17 — A2e2): 파일·디렉터리 이동(요약 줄·디스크·옛 경로의 별칭 해석), 대소문자만
+// asset-move(AssetSystem 4.4절, 7.1절 17 — A2e2): 파일·디렉터리 이동(요약 줄·디스크·옛 경로의 별칭 해석), 대소문자만
 // 바꾸기(별칭 없음), 거부(대상 점유 — 색인 항목·다른 에셋 별칭, 없는 원본, 대상이 원본 아래), 사용법·도움말·프로젝트 없음·잠금 Busy.
 string moveDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-move-{Environment.ProcessId}");
 try
@@ -1430,7 +1430,7 @@ finally
     Directory.Delete(moveDirectory, true);
 }
 
-// asset-delete(AssetSystem.ko.md 7.1절 17 — A2e3a): 지우기(요약 줄·파일·지운 별칭 경고 줄), 디스크 참조자 거부(참조자 줄·
+// asset-delete(AssetSystem 7.1절 17 — A2e3a): 지우기(요약 줄·파일·지운 별칭 경고 줄), 디스크 참조자 거부(참조자 줄·
 // 진단 줄)와 --force(경고 줄 — 참조자는 MissingDependency), id로 고르기, 없음·별칭 경로 따르지 않음·경로 규칙, 잠금 Busy,
 // 사용법·도움말·프로젝트 없음.
 string deleteDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-delete-{Environment.ProcessId}");
@@ -1542,7 +1542,7 @@ finally
     Directory.Delete(deleteDirectory, true);
 }
 
-// asset-duplicate(AssetSystem.ko.md 7.1절 17 — A2e3b): 경로·id로 고른 원본의 사본(새 id·새 파일·열림), 대상 점유(패키지·다른 에셋 별칭),
+// asset-duplicate(AssetSystem 7.1절 17 — A2e3b): 경로·id로 고른 원본의 사본(새 id·새 파일·열림), 대상 점유(패키지·다른 에셋 별칭),
 // 없는 원본·대상 경로 규칙, 잠금 Busy, 사용법·도움말·프로젝트 없음.
 string duplicateDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-duplicate-{Environment.ProcessId}");
 try
@@ -1643,7 +1643,7 @@ finally
     Directory.Delete(duplicateDirectory, true);
 }
 
-// asset-fix-duplicate-id(AssetSystem.ko.md 7.1절 17 — A2e4b): 밖에서 복사한 Skeleton 사본을 새 id로(출력 두 줄 — 옛 id 참조는 남은
+// asset-fix-duplicate-id(AssetSystem 7.1절 17 — A2e4b): 밖에서 복사한 Skeleton 사본을 새 id로(출력 두 줄 — 옛 id 참조는 남은
 // 원본으로), verify의 같은 id 진단이 사라지고 원본을 참조하는 AnimationClip은 그대로, 같은 id가 아님·없음·경로 규칙 거부, 잠금 Busy,
 // 사용법·도움말·프로젝트 없음. OrphanedOutput 경고는 명령이 임포트 기록을 만들 수 없어(A2f 전) C++ 시험이 맡는다.
 string fixDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-fix-id-{Environment.ProcessId}");
@@ -1753,7 +1753,7 @@ finally
     Directory.Delete(fixDirectory, true);
 }
 
-// asset-import(AssetSystem.ko.md 7.1절 18 — A2f1b): 제품 실행 파일은 실제 임포터만 등록하고 이 단계에는 아직 없다(A5 텍스처) — 임포터 없음
+// asset-import(AssetSystem 7.1절 18 — A2f1b): 제품 실행 파일은 실제 임포터만 등록하고 이 단계에는 아직 없다(A5 텍스처) — 임포터 없음
 // UnsupportedSourceFormat, 사용법·도움말·프로젝트 없음. 성공·출력·경고 줄은 EngineTests가 시험 임포터로 명령 함수를 부른다.
 string importDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-{Environment.ProcessId}");
 try
@@ -1864,7 +1864,7 @@ finally
     Directory.Delete(importDirectory, true);
 }
 
-// asset-cook(AssetSystem.ko.md 13절, 10.2절 "A4e 구현 세부" — A4e1): 제품 실행 파일이 쿠커 모듈을 시작해 설정·보고서 타입을
+// asset-cook(AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1): 제품 실행 파일이 쿠커 모듈을 시작해 설정·보고서 타입을
 // 등록하고 엔진 프로파일(실행 파일 위쪽 Engine/Config)로 쿠킹한다. 전체 쿠킹 게시·두 번째는 전부 재사용·--json·사용법·도움말. 진단 줄·
 // 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다.
 string cookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-{Environment.ProcessId}");
@@ -1976,7 +1976,7 @@ finally
     Directory.Delete(unrealDirectory, true);
 }
 
-// asset-orphans-*·verify 경고(AssetSystem.ko.md 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
+// asset-orphans-*·verify 경고(AssetSystem 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
 // 2313 — 기록 없는 Hero가 owner)로 목록 줄(경로 키 순, owner 경로·missing), 경고만인 verify는 종료 0, 고아 지우기·고아 아닌 거부,
 // 잠금 Busy, 사용법·도움말·프로젝트 없음.
 string orphanDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-orphans-{Environment.ProcessId}");

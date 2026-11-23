@@ -11,7 +11,7 @@
 #include <ReflectionText/TextAssignments.h>
 #include <ReflectionText/TextDiagnostics.h>
 
-// 에셋 서비스 API다(Docs/Design/AssetSystem.ko.md 13절·7.1절 15 A2c3). 명령행 asset-new·asset-set·
+// 에셋 서비스 API다(Docs/Design/AssetSystem 13절·7.1절 15 A2c3). 명령행 asset-new·asset-set·
 // asset-info·asset-list와 1:1 함수이고 에디터가 나중에 같은 함수를 쓴다. 프로젝트 하나의 색인과
 // 에디터 패키지 집합을 소유한다(명령 하나가 서비스 하나를 만들고 끝나면 버린다).
 //

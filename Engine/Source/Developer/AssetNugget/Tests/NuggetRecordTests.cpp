@@ -5,7 +5,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 에셋 너겟 Record 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 5 — Rockpile 5.2·5.3절):
+// 에셋 너겟 Record 시험이다(Docs/Design/AssetSystem 9.1절 결정 5 — Rockpile 5.2·5.3절):
 // 왕복, bucket·namespace 규칙 경계, 정규 형식 규칙마다 거부, TLV 형식 변조(schema·버전·필드 순서·
 // wire·추가 필드·크기), 1 MiB 한도, 논리 digest(저장 표현 제외·논리 칸 포함), 소비 입력 순서, 할당
 // 실패.

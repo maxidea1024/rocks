@@ -4,7 +4,7 @@
 #include <Core/Text/NameComponent.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 매니페스트 v1 시험이다(Docs/Design/AssetSystem.ko.md 10절, 10.1절 A1b): 왕복·결정성·Find,
+// 쿠킹 매니페스트 v1 시험이다(Docs/Design/AssetSystem 10절, 10.1절 A1b): 왕복·결정성·Find,
 // 칸마다 규칙 위반(검증·writer·reader가 같은 진단), 구조 변조(CRC를 다시 맞춘 잘림·개수·길이·남는
 // byte), 버전, 대조 함수(프로파일·병합·패키지 — A1a writer가 쓴 쿠킹 패키지와), 파일 경로.
 using namespace rocks;

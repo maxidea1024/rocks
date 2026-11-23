@@ -1,6 +1,6 @@
 # 객체·그래프 보강(A0-O) 설계
 
-기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 대조(당시 기준 UE 5.6) — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존), A0-Oc(누락 = 기준·실효 값 Required — graph v1 envelope 위), A0-Od1(graph v2 형식·저장 집합·편의 저장·복원, v1 삭제), A0-Od2(단계형 복원 `ObjectGraphStage`·2a 사전 확인·`ConstructionContext::FindObject`, 편의 복원을 Stage 위로) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Oe는 구현 전이다.
+기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 대조(당시 기준 UE 5.6) — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem/README.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존), A0-Oc(누락 = 기준·실효 값 Required — graph v1 envelope 위), A0-Od1(graph v2 형식·저장 집합·편의 저장·복원, v1 삭제), A0-Od2(단계형 복원 `ObjectGraphStage`·2a 사전 확인·`ConstructionContext::FindObject`, 편의 복원을 Stage 위로) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Oe는 구현 전이다.
 
 근거: AS 1절 A0-O 행과 3·5·6·7·11절, [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF)의 A0-O 언급(2.2·2.3·3.3·5.5·6.1–6.4절, 결정 16·21·22), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) §5.2 "Outer와 객체 경로", 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본으로 다시 확인했다(10절, 2026-11-15 — 처음 대조는 당시 기준 UE 5.6 브랜치).
 
@@ -964,7 +964,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 
 **(가) 설계 문서 — 이 문서를 넣을 때 함께 고쳤다**(A0-O0)
 
-AS(`Docs/Design/AssetSystem.ko.md`):
+AS(`Docs/Design/AssetSystem`):
 
 1. **1절 A0-O 행**: 이 문서를 가리키고, "Discard" → "부분 트리 Discard", "ReferenceObserver(큐 전달)" → "순 다중도 합산 표", "외부 참조 resolver 또는 거부" → "외부 참조 허락 hook(Import·Null·Reject) 또는 거부", "저장 쪽 값 치환 hook" → "B4 `SubstituteStruct` 사용", 한도의 작업량 식(결정 5)·문자열 4 KiB 범위(결정 6)·값 64 MiB(결정 4)를 고친다.
 2. **2절 사전 조사 표**: 객체 행의 보강 칸에 "다중 root Commit(root마다 RootRef)"과 이 문서를, 직렬화 행의 보강 칸에 A0-O 뒤 모양(graph v2 — 이 문서 5절)을 단다. "있는 것" 칸("RootRef는 첫 객체에만", "단일 root, 내부 Commit, …")은 2026-11-12 조사 기록이라 그대로 둔다.

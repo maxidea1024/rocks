@@ -63,9 +63,9 @@ constexpr uint32 Flag(FieldFlags flag) noexcept {
 TEST(TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
-    // 알려진 마지막 타입 플래그(Atomic 16 — 클래스에는 struct 전용이라 거부된다) 다음 비트다(4·8은
-    // 리플렉션 B9h2의 Transient·Deprecated).
-    CHECK(RegisterBase(types, {}, static_cast<uint32>(TypeFlags::Atomic) << 1).Error() ==
+    // 알려진 마지막 타입 플래그(EditorOnly 32 — 에셋 A4e2a) 다음 비트다(4·8은 리플렉션 B9h2의
+    // Transient·Deprecated, 16 Atomic은 struct 전용이라 클래스에서 거부된다).
+    CHECK(RegisterBase(types, {}, static_cast<uint32>(TypeFlags::EditorOnly) << 1).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(RegisterBase(types, {}, static_cast<uint32>(TypeFlags::Atomic)).Error() ==
           ErrorCode::InvalidArgument);
@@ -101,6 +101,74 @@ TEST(TypeFlags_RequiredIsOnlyForTypedReferenceFields) {
           ErrorCode::InvalidArgument);
     FieldSchema opaque[] = {
         Field(1, "target", FieldKind::ObjectReference, Flag(FieldFlags::Required))};
+    CHECK(RegisterBase(types, Span<const FieldSchema>(opaque, 1)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(types.Shutdown());
+}
+
+// EditorOnly 클래스 플래그(에셋 A4e2a)도 상속된다: 파생이 빠뜨리면 거부하고, 다른 상속 플래그와
+// 함께 쓸 수 있다.
+TEST(TypeFlags_EditorOnlyIsInherited) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    auto base = RegisterBase(types, {}, static_cast<uint32>(TypeFlags::EditorOnly));
+    REQUIRE(base);
+    CHECK(RegisterDerived(types, {}).Error() == ErrorCode::InvalidArgument);
+    CHECK(RegisterDerived(types, {}, static_cast<uint32>(TypeFlags::WorldOnly)).Error() ==
+          ErrorCode::InvalidArgument);
+    auto derived = RegisterDerived(types, {},
+                                   static_cast<uint32>(TypeFlags::EditorOnly) |
+                                       static_cast<uint32>(TypeFlags::WorldOnly));
+    REQUIRE(derived);
+    auto lease = types.Acquire(DerivedId);
+    REQUIRE(lease);
+    CHECK(HasFlag(lease.Value().Schema().flags, TypeFlags::EditorOnly));
+    lease.Value().Reset();
+    REQUIRE(types.Unregister(derived.Value()));
+    REQUIRE(types.Unregister(base.Value()));
+    CHECK(types.Shutdown());
+}
+
+// bundle 목록(에셋 A4e2a): 정규 목록 판정(이름 문법·길이·수·중복·공백)과, 대상이 소프트 참조·
+// struct·InstancedStruct가 아닌 필드(Opaque)의 목록 거부. 수락·깊은 복사·EditorOnly 필드 거부는
+// 생성 fixture(AssetBundleSchema 시험 — EngineTests)가 본다.
+TEST(TypeFlags_AssetBundleLists) {
+    CHECK(IsAssetBundleList(Chars("UI")) && IsAssetBundleList(Chars("UI,Game")) &&
+          IsAssetBundleList(Chars("_a1,B")) && IsAssetBundleList(Chars("UI,ui")));
+    CHECK(!IsAssetBundleList(Chars("")) && !IsAssetBundleList(Chars("UI,")) &&
+          !IsAssetBundleList(Chars(",UI")) && !IsAssetBundleList(Chars("UI,,Game")) &&
+          !IsAssetBundleList(Chars("U I")) && !IsAssetBundleList(Chars("1UI")) &&
+          !IsAssetBundleList(Chars("UI,UI")) && !IsAssetBundleList(Chars("Game,UI,Game")) &&
+          !IsAssetBundleList(Chars("UI-1")) && !IsAssetBundleList(Chars("UI~")) &&
+          !IsAssetBundleList(Chars("UI@")));
+    char name[AssetBundleNameMaxBytes + 2] = {};
+    for (usize index = 0; index < AssetBundleNameMaxBytes + 1; ++index) {
+        name[index] = 'a';
+    }
+
+    CHECK(!IsAssetBundleList(Span<const char>(name, AssetBundleNameMaxBytes + 1)));
+    CHECK(IsAssetBundleList(Span<const char>(name, AssetBundleNameMaxBytes)));
+    // A0,A1,…: 상한 수까지 받고 하나 더면 거부한다.
+    char list[AssetBundleMaxNames * 4] = {};
+    usize length = 0;
+    for (usize index = 0; index <= AssetBundleMaxNames; ++index) {
+        if (index != 0) {
+            list[length++] = ',';
+        }
+
+        list[length++] = 'A';
+        list[length++] = static_cast<char>('a' + index);
+        if (index + 1 == AssetBundleMaxNames) {
+            CHECK(IsAssetBundleList(Span<const char>(list, length)));
+        }
+    }
+
+    CHECK(!IsAssetBundleList(Span<const char>(list, length)));
+
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    FieldSchema opaque[] = {Field(1, "target")};
+    opaque[0].assetBundles = Chars("UI");
     CHECK(RegisterBase(types, Span<const FieldSchema>(opaque, 1)).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(types.Shutdown());

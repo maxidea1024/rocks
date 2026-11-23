@@ -14,7 +14,7 @@
 #include <Platform/Sync.h>
 #include <Task/WorkerScheduler.h>
 
-// 쿠킹 패키지 로더다(Docs/Design/AssetSystem.ko.md 11.6절). 모든 상태 전이는 소유(Game) 스레드가
+// 쿠킹 패키지 로더다(Docs/Design/AssetSystem 11.6절). 모든 상태 전이는 소유(Game) 스레드가
 // 하고, IO·worker 스레드는 패키지 작업의 버퍼·로드 상태만 만진 뒤 완료 큐에 작업을 넣는다(할당
 // 없음).
 //

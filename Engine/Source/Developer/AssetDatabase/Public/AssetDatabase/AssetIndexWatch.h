@@ -4,7 +4,7 @@
 #include <AssetDatabase/AssetIndex.h>
 #include <Platform/DirectoryWatch.h>
 
-// 색인 감시 갱신이다(Docs/Design/AssetSystem.ko.md 7절, 7.1절 16 — A2d3, UE AssetRegistry의
+// 색인 감시 갱신이다(Docs/Design/AssetSystem 7절, 7.1절 16 — A2d3, UE AssetRegistry의
 // DirectoryWatcher 연결 대응). Content의 변경 이벤트를 받아 바뀐 파일·하위 트리만 다시 읽는다.
 // 감시가 바꾸는 것은 색인뿐이다 — 이미 열린 패키지의 외부 변경은 저장 1단계(지문)와 지연 읽기가
 // 잡는다.

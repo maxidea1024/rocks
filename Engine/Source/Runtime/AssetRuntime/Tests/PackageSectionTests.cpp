@@ -4,7 +4,7 @@
 #include <Compression/Compression.h>
 #include <Core/Text/NameComponent.h>
 
-// 섹션 내용 시험이다(Docs/Design/AssetSystem.ko.md 5.2절 표, 5.3절 타입·커스텀 버전 축, 5.7절
+// 섹션 내용 시험이다(Docs/Design/AssetSystem 5.2절 표, 5.3절 타입·커스텀 버전 축, 5.7절
 // 구현에서 정한 점): Summary Record의 모든 필드, Exports·ObjectImports·Dependencies·BulkIndex 고정
 // 배치의 모든 칸과 표 사이 규칙, bulk 해제. 변조마다 섹션을 writer 규칙대로 다시
 // 배치(EditablePackage)해 CRC·배치가 아니라 그 내용 규칙에 걸리게 한다.

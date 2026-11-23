@@ -7,7 +7,7 @@
 #include <Core/Text/StringView.h>
 #include <Object/AssetId.h>
 
-// 에셋 너겟 키다(Docs/Design/AssetSystem.ko.md 9절·9.1절 결정 2–4). 처리기는 결과에 영향을 주는
+// 에셋 너겟 키다(Docs/Design/AssetSystem 9절·9.1절 결정 2–4). 처리기는 결과에 영향을 주는
 // 입력을 고정 순서로 NuggetKeyWriter에 쓰고 그 SHA-256이 키다. 모든 기록은 태그(u8) + 값이고 가변
 // 길이에는 길이 접두가 있어 이웃 기록과 경계가 모호하지 않다.
 //

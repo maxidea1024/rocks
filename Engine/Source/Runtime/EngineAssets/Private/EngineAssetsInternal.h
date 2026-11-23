@@ -6,7 +6,7 @@
 #include <Config/CVar.h>
 #include <Object/ObjectRegistryOptions.h>
 
-// EngineAssets 모듈 안에서 함께 쓰는 CVar와 예산 읽기다(Docs/Design/AssetSystem.ko.md 11.8절 3).
+// EngineAssets 모듈 안에서 함께 쓰는 CVar와 예산 읽기다(Docs/Design/AssetSystem 11.8절 3).
 namespace rocks::engine_assets_detail {
 
 extern BootCVar<String> CookedRootVar;

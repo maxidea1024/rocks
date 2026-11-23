@@ -7,7 +7,7 @@
 #include <Core/Text/NameComponent.h>
 #include <Serialization/Archive.h>
 
-// 쿠킹 매니페스트 v1 reader·writer·검증·대조다(Docs/Design/AssetSystem.ko.md 10절, 10.1절).
+// 쿠킹 매니페스트 v1 reader·writer·검증·대조다(Docs/Design/AssetSystem 10절, 10.1절).
 // reader는 byte를 모델로 풀기만 하고(구조 — 길이·잘림·개수), 칸 규칙과 항목 사이 규칙은 writer와
 // 같은 ValidateCookedManifest가 본다(두 쪽 규칙이 갈리지 않는다).
 namespace rocks {

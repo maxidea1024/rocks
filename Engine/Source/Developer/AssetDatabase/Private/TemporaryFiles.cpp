@@ -5,7 +5,7 @@
 #include <AssetDatabase/TemporaryFiles.h>
 #include <Core/FileError.h>
 
-// 고아 임시 파일 정리다(Docs/Design/AssetSystem.ko.md 7.1절 12·16).
+// 고아 임시 파일 정리다(Docs/Design/AssetSystem 7.1절 12·16).
 namespace rocks {
 
 namespace {

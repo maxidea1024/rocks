@@ -7,7 +7,7 @@
 #include <Platform/File.h>
 #include <Platform/Thread.h>
 
-// 에셋 명령의 공용 도구 구현이다(Docs/Design/AssetSystem.ko.md 13절).
+// 에셋 명령의 공용 도구 구현이다(Docs/Design/AssetSystem 13절).
 namespace rocks::commandlet_host {
 
 bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView command,

@@ -12,7 +12,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 고아 출력 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 17 A2e4a): 판정(소유 기록이 적은 출력은
+// 고아 출력 시험이다(Docs/Design/AssetSystem 7.1절 17 A2e4a): 판정(소유 기록이 적은 출력은
 // 고아 아님, 적지 않음 NotListed, owner 없음 OwnerMissing, owner가 기록 없음·참조 기록
 // OwnerNotImporter, 같은 id owner 둘 — 하나라도 적으면 아님·소유 기록 있으면 NotListed·없으면
 // OwnerNotImporter, 기록 없는·소유 기록 항목은 고아 아님), Orphans 순서, Verify 경고 진단·줄·경고

@@ -3,7 +3,7 @@
 #include <Base/Endian.h>
 #include <Compression/CompressedBlocks.h>
 
-// `.rnug` v2 파일이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 6 — NuggetFile.h).
+// `.rnug` v2 파일이다(Docs/Design/AssetSystem 9.1절 결정 6 — NuggetFile.h).
 namespace rocks {
 
 namespace {

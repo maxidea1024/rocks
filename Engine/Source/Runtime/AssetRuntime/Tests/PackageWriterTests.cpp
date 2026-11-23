@@ -3,7 +3,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쓰기 시험이다(Docs/Design/AssetSystem.ko.md 5.1·5.5·5.7절): 옵션 검증 하나하나, 대표 에셋 규칙,
+// 쓰기 시험이다(Docs/Design/AssetSystem 5.1·5.5·5.7절): 옵션 검증 하나하나, 대표 에셋 규칙,
 // export 상한(4096 경계), 경계 패키지(대표만·0 byte bulk만), 저장 그래프 거부(자기 패키지 객체
 // 참조· 패키지에 속하지 않은 객체 — UnpackagedReference), bulk 원본 오류, 출력(sink) 실패 전파,
 // 할당 실패 주입(쓰기·읽기·Prepare·Instantiate의 모든 할당 지점).

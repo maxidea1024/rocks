@@ -15,7 +15,7 @@
 #include <Object/ReferenceObserver.h>
 #include <Platform/File.h>
 
-// 에디터가 연 패키지 집합이다(Docs/Design/AssetSystem.ko.md 7.1절 3·15 — A2c2a 열기, A2c2b 저장).
+// 에디터가 연 패키지 집합이다(Docs/Design/AssetSystem 7.1절 3·15 — A2c2a 열기, A2c2b 저장).
 // 패키지 정책 에셋 Registry 하나와 그 관찰자, bulk 파일 핸들 캐시를 소유하고, 색인(AssetIndex)으로
 // 찾은 에디터 패키지를 Hard·EditorOnly 의존 닫힘째 한 트랜잭션으로 연다. bulk는 지연 읽기(파일
 // 저장소)다. UE 에디터의 패키지 로드(LoadPackage + FLinkerLoad의 누락 import 경고)에 대응한다.

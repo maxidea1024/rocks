@@ -45,6 +45,76 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::editorExtra",
+      "id": "951f4c2149f246e08ae8d89a11275936",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::editorSoft",
+      "id": "e9cc0827ee854a3eaa42870cd2dee66f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::extra",
+      "id": "6dbc4cecd3914d57998806d2db20da18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::levels",
+      "id": "07c646fb65e0492db33b36894212c811",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::plain",
+      "id": "33c68f993fc54abcb5bbf2e54ae1f237",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::portrait",
+      "id": "e84e25c1a8ca4861959dc345d981a934",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::slot",
+      "id": "6ce266da4da64e559933f7221a03232a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleAsset::weights",
+      "id": "991cf4d2daff490884b04440c41192a9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleSlot::any",
+      "id": "e8ca86832ffa429ba94b02713a355100",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BundleSlot::icon",
+      "id": "2f353a0c8ac74c85864fd163b70e8191",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::CollidingImportOptions::conflicting",
       "id": "e5c26bc99abd419d8e25e36d19b55980",
       "aliases": [],
@@ -2376,6 +2446,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::EditorNote::value",
+      "id": "f3bc1d0a47ef43b3a1d7dd83afc43268",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::EditorToolAsset::value",
+      "id": "f3ab5fa9752e47c1abba81c5f546d6ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::FixtureEntry::cost",
       "id": "4837a3a4151d410c8fd00a555bc4ecd0",
       "aliases": [],
@@ -3216,6 +3300,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::asset_fixture::BundleAsset",
+      "id": "a4ba53e4e9d243289529a399693ac811",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::BundleSlot",
+      "id": "759e8f3259644a4296d961d6eaa172f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::asset_fixture::CollidingImportOptions",
       "id": "a6079a3a943349c6a4b4b47653d1ff68",
       "aliases": [],
@@ -3547,6 +3645,20 @@
       "kind": "type",
       "name": "rocks::asset_fixture::DuplicableSlot",
       "id": "b2e9b6bbab2b49fd971b542ae7cffd1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::EditorNote",
+      "id": "d7ed4feea1c947ddbe8ed73216813f72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::EditorToolAsset",
+      "id": "543eccce1137429bb37591c7dd749978",
       "aliases": [],
       "retired": false
     },

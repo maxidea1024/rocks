@@ -6,7 +6,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 논리 경로 시험이다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a): 규칙마다 양성·음성, 판정
+// 논리 경로 시험이다(Docs/Design/AssetSystem 4.2절, 7.1절 10 — A2a): 규칙마다 양성·음성, 판정
 // 순서(겹친 위반), NFC 정규화·caseless 키, 접근자, 할당 실패.
 using namespace rocks;
 

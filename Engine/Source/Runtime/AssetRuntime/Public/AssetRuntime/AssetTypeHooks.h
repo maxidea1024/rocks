@@ -5,7 +5,7 @@
 #include <Core/Containers/Array.h>
 #include <Object/ObjectRegistry.h>
 
-// 에셋 타입 hook 표다(Docs/Design/AssetSystem.ko.md 7.1절 15, 16.2절 — A2c1). 에디터 저장이 대표
+// 에셋 타입 hook 표다(Docs/Design/AssetSystem 7.1절 15, 16.2절 — A2c1). 에디터 저장이 대표
 // 에셋에 hook을 불러 Tags 섹션(태그 — UE UObject::GetAssetRegistryTags 대응)과 Build 의존(16.2절
 // DependencyDeclarer)을 만든다. 런타임은 쓰지 않는다(쿠커 A4가 Build hook을 쓴다).
 //
@@ -74,7 +74,7 @@ struct ROCKS_ASSETRUNTIME_API AssetTypeHookContext {
     TypeId hookType;
     const AssetTypeHookTable& table;
     TypeRegistry& types;
-    // 저장할 패키지 id다(복제면 사본 id — AssetSystem.ko.md 7.1절 17 A2e3b). object는 원본
+    // 저장할 패키지 id다(복제면 사본 id — AssetSystem 7.1절 17 A2e3b). object는 원본
     // 객체이므로 태그·Build 의존이 패키지 정체성(id)을 써야 하면 객체의 값 대신 이것을 쓴다.
     AssetId asset{};
 

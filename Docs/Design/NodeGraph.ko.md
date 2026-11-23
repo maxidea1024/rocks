@@ -429,7 +429,7 @@ struct Bookmark   { uint32 number; Vec2 viewCenter; float zoom; };
 - **배치 필드.** 위치·크기는 캔버스 단위 float(`Vec2`)이고 크기 0은 자동 크기다. 말풍선(`bubble`·`bubbleVisible`)은 UE `NodeComment`·`bCommentBubbleVisible`, 주석 상자의 색·글자 크기는 UE `CommentColor`(`FLinearColor`)·`FontSize`에 대응한다. 북마크는 UE QuickJump(번호 → 보기 위치·zoom)다.
 - **그래프 이름**(`title`)은 배치 데이터다. 하위 그래프는 GraphId로 식별하고 이름은 표시에만 쓰므로 의미 비교·컴파일에 넣지 않는다.
 
-- `PinValueEntry`는 `{PinKey, PropertyRecord}`다. 값 struct는 도메인 타입 표가 정한다. 자산 참조는 `AssetId`로 저장한다(그래서 [에셋 시스템](AssetSystem.ko.md) 6.2절 의존 종류로 보고된다).
+- `PinValueEntry`는 `{PinKey, PropertyRecord}`다. 값 struct는 도메인 타입 표가 정한다. 자산 참조는 `AssetId`로 저장한다(그래서 [에셋 시스템](AssetSystem/06-AssetTypes.ko.md) 6.2절 의존 종류로 보고된다).
 - 하위 그래프는 같은 문서 안에서만 참조한다. 다른 자산의 그래프(머티리얼 함수 등)는 도메인 노드 속성의 `AssetId`로 참조한다.
 - **재경유**는 공통 노드 종류 `Reroute`다. 입력 하나·출력 여럿이고, 다른 노드처럼 `nodes`와 배치 항목을 가진다.
   - 추가·삭제는 문서 revision을 올린다.

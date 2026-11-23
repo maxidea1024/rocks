@@ -5,7 +5,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
 
-// 패키지 bulk 저장소 추상이다(Docs/Design/AssetSystem.ko.md 6.1절, 7.1절 15 — A2c1). 런타임
+// 패키지 bulk 저장소 추상이다(Docs/Design/AssetSystem 6.1절, 7.1절 15 — A2c1). 런타임
 // 패키지는 로드 때 bulk를 모두 풀어 Package가 갖고(저장소 없음), 에디터 패키지는 저장소
 // (FilePackageBulkStore)가 지연 읽기·저장하지 않은 bulk·저장 뒤 다시 잇기를 맡는다(UE
 // FEditorBulkData 대응).

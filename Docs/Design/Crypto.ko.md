@@ -1142,6 +1142,6 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 - Tink Streaming AEAD(세그먼트 구성 비교): [developers.google.com/tink/streaming-aead](https://developers.google.com/tink/streaming-aead). STREAM: Hoang·Reyhanitabar·Rogaway·Vizár, "Online Authenticated-Encryption and its Nonce-Reuse Misuse-Resistance"(CRYPTO 2015).
 - Wycheproof: [github.com/C2SP/wycheproof](https://github.com/C2SP/wycheproof).
 - NIST SP 800-38A·38B·38D, RFC 8439·8032·7748·5869·4231·7693·4493.
-- Rocks: `Docs/Design/Compression.ko.md`(외부 라이브러리 통합·스트리밍 규약), `Docs/Design/Rockpile.ko.md`(R0 SHA-256 HW 경로), `Docs/Design/AssetSystem.ko.md`, `Core/Source/Runtime/PlatformBase/Public/Platform/Cpu.h`·`SecureRandom.h`·`VirtualMemory.h`, `Core/Public/Core/Containers/Span.h`·`Encoding/Sha256.h`.
+- Rocks: `Docs/Design/Compression.ko.md`(외부 라이브러리 통합·스트리밍 규약), `Docs/Design/Rockpile.ko.md`(R0 SHA-256 HW 경로), `Docs/Design/AssetSystem`, `Core/Source/Runtime/PlatformBase/Public/Platform/Cpu.h`·`SecureRandom.h`·`VirtualMemory.h`, `Core/Public/Core/Containers/Span.h`·`Encoding/Sha256.h`.
 
 사실 구분: libsodium·Tink 항목과 AES 라이브러리 비교는 1차 자료(공식 문서·원본·릴리스)로 확인했다. libsodium의 clang-cl(Windows MSVC ABI) 빌드는 공식 시험 대상이 아니어서 미확인이며, Rocks native 빌드로 확인할 위험 항목이다. 경량 계층 규모는 원본 줄 수에서 잡은 추정이고, 성능 수치는 측정 전이라 적지 않았다. STREAM 논문 서지, NIST·RFC 번호, VAES·SHA CPUID bit, macOS FEAT_* sysctl 이름, Goldmont의 AVX 부재는 원문을 다시 열람하지 않은 지식 기반(2차)이다.

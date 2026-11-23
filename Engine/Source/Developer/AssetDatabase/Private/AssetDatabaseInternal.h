@@ -13,7 +13,7 @@
 #include <Platform/File.h>
 #include <ReflectionText/TextCodecOptions.h>
 
-// AssetDatabase 모듈 안에서 함께 쓰는 도우미다(Docs/Design/AssetSystem.ko.md 7.1절).
+// AssetDatabase 모듈 안에서 함께 쓰는 도우미다(Docs/Design/AssetSystem 7.1절).
 namespace rocks::asset_database_detail {
 
 // pieces를 차례로 out 뒤에 붙인다. 처음 실패한 붙이기의 오류를 돌려준다(그때까지 붙인 것은 남는다 —

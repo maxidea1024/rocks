@@ -5,7 +5,7 @@
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
 
-// 패키지 파일의 범위 읽기다(Docs/Design/AssetSystem.ko.md 7.1절 2·13 — A2b). 부분 읽기
+// 패키지 파일의 범위 읽기다(Docs/Design/AssetSystem 7.1절 2·13 — A2b). 부분 읽기
 // (ReadPackageIndex)가 헤더·섹션 표·고른 섹션만 읽을 때 쓴다. 메모리 구현은 시험·이미 읽은 byte에,
 // 파일 구현은 색인 검색에 쓴다.
 //

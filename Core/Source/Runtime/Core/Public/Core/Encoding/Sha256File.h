@@ -5,7 +5,7 @@
 #include <Core/Result.h>
 #include <Platform/File.h>
 
-// 연 파일의 SHA-256이다(Docs/Design/AssetSystem.ko.md 10.2절 "A4d 구현 세부" — 색인 콘텐츠 해시·
+// 연 파일의 SHA-256이다(Docs/Design/AssetSystem 10.2절 "A4d 구현 세부" — 색인 콘텐츠 해시·
 // 쿠킹 게시 대조·재사용 판정이 함께 쓴다). 파일 전체를 메모리에 두지 않고 buffer 조각으로 흘려
 // 읽는다.
 namespace rocks {

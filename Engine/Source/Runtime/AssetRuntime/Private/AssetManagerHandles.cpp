@@ -5,7 +5,7 @@
 #include <Platform/Fatal.h>
 
 // AssetManager의 handle 슬롯·해제 큐·티켓·callback·scope·보류
-// 명령이다(Docs/Design/AssetSystem.ko.md 11.7절 5–9).
+// 명령이다(Docs/Design/AssetSystem 11.7절 5–9).
 namespace rocks {
 
 bool AssetManager::Impl::OnOwnerThread() const noexcept {

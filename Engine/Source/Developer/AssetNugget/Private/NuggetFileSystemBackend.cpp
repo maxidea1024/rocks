@@ -8,7 +8,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Time/DateTime.h>
 
-// 파일 시스템 에셋 너겟 backend다(Docs/Design/AssetSystem.ko.md 9.1절 결정 7–9 —
+// 파일 시스템 에셋 너겟 backend다(Docs/Design/AssetSystem 9.1절 결정 7–9 —
 // NuggetFileSystemBackend.h).
 namespace rocks {
 

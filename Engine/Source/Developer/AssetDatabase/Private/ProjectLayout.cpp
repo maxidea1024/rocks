@@ -7,7 +7,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Path.h>
 
-// 프로젝트 배치와 경로 대응이다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a).
+// 프로젝트 배치와 경로 대응이다(Docs/Design/AssetSystem 4.2절, 7.1절 10 — A2a).
 namespace rocks {
 
 namespace {

@@ -6,7 +6,7 @@
 #include <Core/FileError.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 전체 흐름 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 8·10·11, "A4d 구현 세부" —
+// 쿠킹 전체 흐름 시험이다(Docs/Design/AssetSystem 10.2절 결정 8·10·11, "A4d 구현 세부" —
 // A4d2): 전체 쿠킹 두 번(두 번째는 전부 재사용·같은 매니페스트 byte — 시나리오 13), 부분 쿠킹(바뀐
 // 기존 항목과 그것을 Hard로 쓰는 항목만 다시 쿠킹, 나머지 재사용), 기존 매니페스트 없는 부분 쿠킹은
 // 전체 쿠킹, 오류 진단이 있으면 게시하지 않음(게시본 불변·보고서는 씀·같은 입력이면 같은 보고서),

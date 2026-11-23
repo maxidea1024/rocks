@@ -4,7 +4,7 @@
 #include <Base/Compiler.h>
 
 // 프로젝트 디렉터리 배치와 논리 경로 ↔ 파일 경로
-// 대응이다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a). 디렉터리 이름은 UE와 같다:
+// 대응이다(Docs/Design/AssetSystem 4.2절, 7.1절 10 — A2a). 디렉터리 이름은 UE와 같다:
 // `<루트>/Content`(마운트 `/Game`), `Config`, `Intermediate` (잠금·색인 캐시), `Saved`.
 //
 // 사용 예:

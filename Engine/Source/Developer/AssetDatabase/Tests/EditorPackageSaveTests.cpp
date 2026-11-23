@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 에디터 패키지 저장 시험이다(Docs/Design/AssetSystem.ko.md 5.5절, 7.1절 15 — A2c2b): 기존 패키지
+// 에디터 패키지 저장 시험이다(Docs/Design/AssetSystem 5.5절, 7.1절 15 — A2c2b): 기존 패키지
 // 저장·다시 열기(지연 bulk의 Rebind 포함)·같은 byte 다시 저장, 새 패키지 만들기·첫 저장(디렉터리
 // 만들기)과 만들기·첫 저장의 거부, 판정 순서의 거부(열리지 않음·잠금·읽기 전용·미해결 import·
 // dropUnresolved), 외부 변경, 모든 IO 고장(만들기·n번째 쓰기·쓰기 손상·Flush·Close·교체·

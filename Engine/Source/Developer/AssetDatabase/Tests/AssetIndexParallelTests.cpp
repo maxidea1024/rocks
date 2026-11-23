@@ -8,7 +8,7 @@
 #include <Platform/Atomics.h>
 #include <Task/WorkerScheduler.h>
 
-// 색인 병렬 읽기 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d2): 걷기는 호출 스레드, 파일
+// 색인 병렬 읽기 시험이다(Docs/Design/AssetSystem 7.1절 16 A2d2): 걷기는 호출 스레드, 파일
 // 읽기는 scheduler worker와 나눠도 결과가 직렬과 같다(항목·진단 모든 칸 — 같은 id·Tags 손상·읽기
 // 실패·중첩 디렉터리 섞음, worker 수 1·2·4·7, 캐시 재사용, 하위 트리 갱신, 시작하지 않은 scheduler,
 // worker 안에서 부름). 할당 실패는 어느 스레드의 것이든 검색 전체 실패이거나(helper 제출 실패는

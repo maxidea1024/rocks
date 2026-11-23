@@ -313,4 +313,4 @@
 | [텍스처 스트리밍](../Design/TextureStreaming.ko.md) | 상주 계획·mip 전송 |
 | [픽셀 형식](../Design/PixelFormat.ko.md) | 형식 번호표·정보 표·형식 능력·backend 형식 대응·sRGB·깊이/스텐실 |
 | [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) | 8절 실행 규약, 11절 렌더러·RHI·렌더 그래프, 14절 조명·GI |
-| [에셋 시스템](../Design/AssetSystem.ko.md) | 에셋·쿠킹·텍스처 설정 |
+| [에셋 시스템](../Design/AssetSystem/README.ko.md) | 에셋·쿠킹·텍스처 설정 |

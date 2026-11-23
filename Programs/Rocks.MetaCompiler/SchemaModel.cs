@@ -142,6 +142,10 @@ internal sealed class FieldModel
     // Meta.ValueKindTableMatchesRuntime). 원본 선언은 SchemaValidator가 Optional 전용 문구로 먼저 거부한다.
     public bool AcceptsRequired => ValueKindTable.Has(TargetKind, ValueKindProperty.AcceptsRequired);
 
+    // AssetBundles를 쓸 수 있는 종류다(Docs/Design/AssetSystem 10.2절 A4e2a): 대상 종류가 소프트 참조·struct·InstancedStruct이거나
+    // Map 키가 소프트 참조다(런타임 등록 검사와 같은 규칙). AssetId 값은 참조 간선이 아니라 받지 않는다.
+    public bool AcceptsAssetBundles => TargetKind is "SoftObjectReference" or "Struct" or "InstancedStruct" || KeyKind == "SoftObjectReference";
+
     // 배열 필드의 컨테이너다(저장하지 않는 파생 속성 — Docs/Design/ReflectionFoundations.ko.md 5.6절): 원소가
     // ObjectReference면 ObjectRefArray, 원소가 Struct이고 그 struct가 ContainsStrongReference면 StructRefArray, 그
     // 밖은 Array. 배열이 아니면 null이다. find는 원소 struct의 정규 이름으로 모델을 찾는다.
@@ -669,6 +673,9 @@ internal sealed class ClassModel
 
     public bool Deprecated { get; set; }
 
+    // TypeFlags::EditorOnly(클래스 — Docs/Design/AssetSystem 10.2절 A4e2a). 선언이 직접 쓰거나 base에서 상속된다.
+    public bool EditorOnly { get; set; }
+
     // Within="…" 지정자의 원문 철자다(이 모듈 클래스, 없으면 ""). CompilerDriver가 Clang으로 정규 이름(WithinResolved)을 얻는다.
     public string WithinSpelling { get; init; } = "";
 
@@ -680,8 +687,9 @@ internal sealed class ClassModel
 
     public string? WithinId { get; set; }
 
-    // TypeFlags 비트: Abstract 1, WorldOnly 2, Transient 4, Deprecated 8(클래스), Atomic 16(struct). 생성 스키마의 flags다.
-    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Transient ? 4u : 0u) | (Deprecated ? 8u : 0u) | (Atomic ? 16u : 0u);
+    // TypeFlags 비트: Abstract 1, WorldOnly 2, Transient 4, Deprecated 8, EditorOnly 32(클래스), Atomic 16(struct). 생성 스키마의 flags다.
+    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Transient ? 4u : 0u) | (Deprecated ? 8u : 0u) | (Atomic ? 16u : 0u) |
+        (EditorOnly ? 32u : 0u);
 
     // Name="…" 지정자의 타입 도구 이름이다(클래스·struct — 한정하지 않은 C++ 이름과 같거나 없으면 ""). import 타입은 descriptor의
     // toolName에서 온다(기본 이름과 같으면 "").

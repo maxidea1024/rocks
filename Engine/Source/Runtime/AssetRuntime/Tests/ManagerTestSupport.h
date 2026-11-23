@@ -4,7 +4,7 @@
 
 #include <AssetRuntime/AssetManager.h>
 
-// AssetManager 시험 도구다(Docs/Design/AssetSystem.ko.md 11.7절): 로더 시험의 쿠킹 장면·gate
+// AssetManager 시험 도구다(Docs/Design/AssetSystem 11.7절): 로더 시험의 쿠킹 장면·gate
 // IO·손으로 돌리는 worker 위에 AssetManager 하나를 띄우고, 상태 조회·동적 하드 간선·callback 기록을
 // 돕는다. 순서는 모두 시험이 정한다(시간·경쟁에 기대지 않는다).
 namespace rocks::asset_test {

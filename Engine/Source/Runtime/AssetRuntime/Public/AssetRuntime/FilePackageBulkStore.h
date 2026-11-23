@@ -9,7 +9,7 @@
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 
-// 에디터 패키지의 파일 bulk 저장소와 파일 핸들 캐시다(Docs/Design/AssetSystem.ko.md 7.1절 15 —
+// 에디터 패키지의 파일 bulk 저장소와 파일 핸들 캐시다(Docs/Design/AssetSystem 7.1절 15 —
 // A2c1). 추상과 bulkId 규칙은 BulkStore.h에 있다.
 namespace rocks {
 

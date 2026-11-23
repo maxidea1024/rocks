@@ -8,7 +8,7 @@
 #include <Core/Text/Path.h>
 #include <Platform/File.h>
 
-// asset-new·asset-set·asset-info 명령 구현이다(Docs/Design/AssetSystem.ko.md 13절, 7.1절 15
+// asset-new·asset-set·asset-info 명령 구현이다(Docs/Design/AssetSystem 13절, 7.1절 15
 // A2c3b). 대입 해석·저장·출력은 AssetService가 맡고 여기서는 인수·타입 등록·잠금·출력만 다룬다.
 namespace rocks::commandlet_host {
 

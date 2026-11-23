@@ -21,13 +21,15 @@ internal static class MetaProbeIdentity
                 "probe::Target", "probe::Slot", "probe::Host", "probe::Flags", "probe::Base", "probe::Mid", "probe::Tagged", "probe::AtomicBase",
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
                 "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Hollow", "probe::Cell",
-                "probe::ViaAliasTemplate", "probe::ViaMemberTypedef", "probe::ViaDecltype", "probe::TwoTags" }
+                "probe::ViaAliasTemplate", "probe::ViaMemberTypedef", "probe::ViaDecltype", "probe::TwoTags", "probe::Tool" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
             }
 
             foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Value::other", "probe::Object::value",
+                "probe::Value::soft", "probe::Value::id", "probe::Value::portrait", "probe::Value::levels", "probe::Value::slot",
+                "probe::Value::weights", "probe::Slot::icon",
                 "probe::ViaAliasTemplate::extra", "probe::ViaMemberTypedef::extra", "probe::ViaDecltype::extra", "probe::TwoTags::extra",
                 "probe::Value::mode", "probe::Value::nested",
                 "example::Invalid::valid", "example::Invalid::bad",

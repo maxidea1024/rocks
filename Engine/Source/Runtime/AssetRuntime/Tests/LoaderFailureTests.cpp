@@ -4,7 +4,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 로더 실패 경로 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 A1c): 단계마다 취소(허가 대기·IO·
+// 로더 실패 경로 시험이다(Docs/Design/AssetSystem 11.6절 A1c): 단계마다 취소(허가 대기·IO·
 // worker·의존 대기·Pump 대기·공개 뒤), 합류 요청 중 하나만 취소, 손상(크기·SHA-256·패키지 내용·bulk
 // 상한·매니페스트 칸 불일치), Hard 실패 전파(사슬·SCC·다이아몬드, Soft 무영향, 다시 요청), 파일
 // 없음·IO 오류·즉시 실패·worker 실패, 할당 실패 sweep, 종료.

@@ -15,7 +15,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 새 임포트 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 18 A2f1b): 원본 하나·여럿(역할)·추가
+// 새 임포트 시험이다(Docs/Design/AssetSystem 7.1절 18 A2f1b): 원본 하나·여럿(역할)·추가
 // 출력의 저장과 ImportRecord(소유·참조 기록, 원본 위치·SHA-256·옵션 Record·출력 목록), 옵션과 설정
 // 나누기, 임포터 고르기(이름·확장자), 모든 거부, 임포터 실패·출력 규칙·경고, 저장 실패의
 // 되돌리기(출력 파일 지우기·못 지우면 경고), 할당 실패, 실제 디스크.

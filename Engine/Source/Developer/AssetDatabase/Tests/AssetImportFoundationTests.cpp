@@ -9,7 +9,7 @@
 #include <Core/Text/Path.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 임포트 기반 시험이다(Docs/Design/AssetSystem.ko.md 4.5절, 7.1절 18 A2f1a): 원본 루트 표(없음·
+// 임포트 기반 시험이다(Docs/Design/AssetSystem 4.5절, 7.1절 18 A2f1a): 원본 루트 표(없음·
 // 기본 Project·덮어쓰기·상대·절대·`..`·정렬, 칸마다 위반·JSON 문법·크기·수 상한·IO·할당 실패), 기록
 // 위치(가장 긴 접두·성분 경계·대소문자 무시·같은 경로 이름 순·루트 자신·밖의 절대 경로·상대 거부·
 // 길이 상한), 풀기(루트·절대·모르는 루트·규칙 위반), 원본 읽기(내용·SHA-256·없음·상한·IO·할당

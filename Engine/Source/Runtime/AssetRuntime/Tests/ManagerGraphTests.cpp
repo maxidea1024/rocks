@@ -3,7 +3,7 @@
 #include <AssetTestFixtures/TestAssets.generated.h>
 #include <Object/ConstructionContext.h>
 
-// AssetManager 단위 그래프 시험이다(Docs/Design/AssetSystem.ko.md 11.7절 3·4): 순환 탐색의
+// AssetManager 단위 그래프 시험이다(Docs/Design/AssetSystem 11.7절 3·4): 순환 탐색의
 // 전방·후방 경계(도달 뒤 더 가는 단위, 전방 집합 밖에서 오는 간선), 한 묶음의 여러 새 간선이 같은
 // 순환을 이룰 때 한 번만 합치기, Discard 예산이 단위 중간에서 끝날 때, 두 로더 단위가 함께 PostLoad
 // 중일 때 서로를 가리키는 간선의 넘겨받기 순서.

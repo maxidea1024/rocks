@@ -12,7 +12,7 @@
 #include <ReflectionText/TextLines.h>
 
 // `<경로>=<값>` 줄 출력 시험이다(Docs/Design/ReflectionExtensions.ko.md 10.4절 "asset-info 출력",
-// Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3a): 모든 종류의 줄 표기와 값 보존 왕복(줄을 대입
+// Docs/Design/AssetSystem 7.1절 15 A2c3a): 모든 종류의 줄 표기와 값 보존 왕복(줄을 대입
 // 묶음으로 새 staged 객체·같은 객체에 넣으면 같은 줄·무동작), Optional unset의 `--unset=` 줄,
 // struct·struct 원소·struct 값 Map·InstancedStruct·정적 배열·바이트 배열·Text의 줄, 줄로 쓸 수
 // 없는 값(줄바꿈·Localized Text·resolver가 쓰지 못한 참조)의 Unsupported, 용도별 제외, 대상 종류,

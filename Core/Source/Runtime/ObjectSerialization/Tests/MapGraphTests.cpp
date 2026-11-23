@@ -439,7 +439,7 @@ TEST(MapGraph_WireErrorsAreRejected) {
     CHECK(types.Shutdown());
 }
 
-// 소프트 참조 치환은 Map 키·Set 원소·Map 값 struct 멤버에도 적용된다(AssetSystem.ko.md 7.1절 17
+// 소프트 참조 치환은 Map 키·Set 원소·Map 값 struct 멤버에도 적용된다(AssetSystem 7.1절 17
 // A2e3b): 같은 asset·다른 경로 키 둘은 바뀐 asset으로 둘 다 남고 삽입 순서 그대로다. null 키는
 // 부르지 않는다.
 TEST(MapGraph_SoftKeysSubstitutedOnSave) {

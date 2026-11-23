@@ -41,7 +41,7 @@ public static class NativeArchitectures
 /// <item>Asan: Debug와 같은 코드 생성에 AddressSanitizer를 더한다. 릴리스 CRT를 쓴다.</item>
 /// <item>Coverage: Debug와 같은 코드 생성에 clang source-based coverage 계측(<c>-fprofile-instr-generate
 /// -fcoverage-mapping</c>, 링크는 clang_rt.profile)을 더한다. 릴리스 CRT를 쓴다(Asan과 같다). 측정 절차는
-/// Build/MeasureCoverage.ps1이다(Docs/Design/AssetSystem.ko.md 14.1절).</item>
+/// Build/MeasureCoverage.ps1이다(Docs/Design/AssetSystem 14.1절).</item>
 /// </list>
 /// 각 구성은 정확히 하나의 ROCKS_BUILD_DEBUG·ROCKS_BUILD_DEVELOPMENT·ROCKS_BUILD_RELEASE를 1로 정의한다
 /// (Asan·Coverage는 ROCKS_BUILD_DEBUG).

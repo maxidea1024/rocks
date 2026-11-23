@@ -3,7 +3,7 @@
 #include <AssetCooker/CookProcessor.h>
 #include <AssetCooker/CookTargets.h>
 
-// 쿠킹 키 계산이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 5, "A4c 구현 세부" — A4c1). 패키지를
+// 쿠킹 키 계산이다(Docs/Design/AssetSystem 10.2절 결정 5, "A4c 구현 세부" — A4c1). 패키지를
 // 열지 않고 색인으로만 정한다(UE 증분 쿠킹의 TargetDomain 키처럼). build key는 Build SCC, cookKey는
 // 대상 사이 Hard SCC로 구한다(9절 너겟 키 — 순환도 결정적 키). 에셋 문제(콘텐츠 해시 실패·Build
 // 의존 없음·처리기를 못 고름)는 진단이고 그 에셋과 그것에 기대는 에셋은 키가 없다.

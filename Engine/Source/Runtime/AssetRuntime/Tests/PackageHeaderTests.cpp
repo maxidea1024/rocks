@@ -1,7 +1,7 @@
 #include "PackageEditing.h"
 
 // 헤더·섹션 표의 필드 하나하나를 바꿔 정해진 진단이 나오는지
-// 본다(Docs/Design/AssetSystem.ko.md 5.1절 검증 순서 1–4, 5.3절 버전 축, 14절 12). 변조마다 CRC를
+// 본다(Docs/Design/AssetSystem 5.1절 검증 순서 1–4, 5.3절 버전 축, 14절 12). 변조마다 CRC를
 // 다시 맞춰 CRC가 아니라 그 필드의 규칙에 걸리게 한다.
 using namespace rocks;
 namespace package_header_tests_file {

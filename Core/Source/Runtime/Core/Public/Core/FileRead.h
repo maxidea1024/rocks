@@ -5,7 +5,7 @@
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
 
-// 작은 파일 전체 읽기다(Docs/Design/AssetSystem.ko.md 10.2절 "A4d 구현 세부" — 쿠킹 설정·쿠킹
+// 작은 파일 전체 읽기다(Docs/Design/AssetSystem 10.2절 "A4d 구현 세부" — 쿠킹 설정·쿠킹
 // 매니페스트 등 상한이 있는 파일을 한 번에 읽는 곳이 함께 쓴다).
 namespace rocks {
 

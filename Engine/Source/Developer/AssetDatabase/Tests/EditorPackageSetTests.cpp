@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 에디터 패키지 집합 열기 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c2a): Hard·EditorOnly
+// 에디터 패키지 집합 열기 시험이다(Docs/Design/AssetSystem 7.1절 15 — A2c2a): Hard·EditorOnly
 // 닫힘(Soft는 따르지 않음)·순환·이미 연 패키지 잇기·경로 열기·지연 bulk 읽기, 의존 패키지 Base의
 // 모든 실패 모양(색인에 없음·같은 id 둘·색인 뒤 사라짐·열기·읽기 IO·손상·다른 id·ImportRecord
 // 손상·ImportOwner 위반·다른 스키마 기록·모르는 커스텀 버전·대표 타입 다름·더 새 엔진)마다 열기

@@ -288,11 +288,12 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
     ops.hasStrongReferences = detail::NativeClassAccess::ChainDeclaresTrace<T>();
     if constexpr (!IsSameV<Reflected, void>) {
         // 리플렉션 조상의 필드를 같은 ID·표현으로 담고(TypeRegistry의 상속 필드 대조) 그 생성
-        // thunk를 빌린다. 스키마와 함수표는 TypeRegistry가 깊게 복사한다. WorldOnly는 상속되는
-        // 플래그다(생성 스키마의 flags는 상속한 WorldOnly를 포함한다).
+        // thunk를 빌린다. 스키마와 함수표는 TypeRegistry가 깊게 복사한다. 상속되는 플래그
+        // (InheritedTypeFlags — WorldOnly·Transient·Deprecated·EditorOnly)를 물려받는다(생성
+        // 스키마의 flags는 상속한 비트를 포함한다).
         const TypeSchema& reflected = GeneratedType<Reflected>::Schema();
         schema.fields = reflected.fields;
-        schema.flags |= reflected.flags & static_cast<uint32>(TypeFlags::WorldOnly);
+        schema.flags |= reflected.flags & InheritedTypeFlags;
         ops.fields = GeneratedType<Reflected>::Ops().fields;
         ops.completeFieldLayout = false;
         ops.parallelTraceSafe = false;

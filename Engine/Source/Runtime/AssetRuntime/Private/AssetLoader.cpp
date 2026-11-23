@@ -1,6 +1,6 @@
 #include "AssetLoaderInternal.h"
 
-// AssetLoader 공개 API와 이름 함수다(Docs/Design/AssetSystem.ko.md 11.6절).
+// AssetLoader 공개 API와 이름 함수다(Docs/Design/AssetSystem 11.6절).
 namespace rocks {
 
 Result<void> WorkerSchedulerLoaderWorker::Run(Job job, void* context) noexcept {

@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// EngineAssets 시험 공용 도구다(Docs/Design/AssetSystem.ko.md 11.8절): 시험 임시 디렉터리에 쓰는
+// EngineAssets 시험 공용 도구다(Docs/Design/AssetSystem 11.8절): 시험 임시 디렉터리에 쓰는
 // 디스크 쿠킹 장면, asset.* CVar 준비, 엔진 설정.
 namespace rocks::engine_assets_test {
 

@@ -651,6 +651,20 @@ internal static partial class SchemaValidator
                         "Remove MaxElements; it limits the element count of reflected array, map and set fields (a static array T name[N] always holds exactly N elements).").At(field.Site);
                 }
 
+                // AssetBundles(에셋 A4e2a)는 소프트 참조·struct·InstancedStruct 값에만, EditorOnly가 아닌 필드에만 쓴다 — 쿠킹 패키지에서
+                // 빠지는 참조는 bundle 구성원(그 항목의 런타임 의존)이 될 수 없다. EditorOnly struct 필드 안의 목록도 같은 이유로 막는다.
+                if (field.Spec.AssetBundles.Length != 0 && !field.AcceptsAssetBundles)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: AssetBundles applies only to soft object reference, struct and instanced struct fields and containers of them", "RMC2202",
+                        "Put AssetBundles on a SoftObjectRef field (or an array, static array, set, optional or map of them) or on a struct field that holds such fields; an AssetId value is not a reference and cannot be a bundle member.").At(field.Site);
+                }
+
+                if (field.Spec.EditorOnly && (field.Spec.AssetBundles.Length != 0 || (field.StructTarget && ContainsAssetBundles(Find(field.Reference!), Find))))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: AssetBundles cannot apply inside an EditorOnly field", "RMC2202",
+                        "Cooked packages drop EditorOnly fields, so their soft references cannot be bundle members; remove EditorOnly or the AssetBundles specifier.").At(field.Site);
+                }
+
                 CheckSettingsField(model, field);
                 if (field.IsCounted)
                 {
@@ -951,6 +965,8 @@ internal static partial class SchemaValidator
                 // Transient·Deprecated도 상속된다(끄는 지정자는 없다 — 리플렉션 B9h2).
                 model.Transient |= baseModel.Transient;
                 model.Deprecated |= baseModel.Deprecated;
+                // EditorOnly도 상속된다(에셋 A4e2a — UE IsEditorOnly 재정의를 파생이 물려받는 것과 같다).
+                model.EditorOnly |= baseModel.EditorOnly;
                 model.Within = baseModel.Within;
                 model.WithinId = baseModel.WithinId;
             }

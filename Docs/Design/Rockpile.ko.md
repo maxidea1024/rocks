@@ -1,6 +1,6 @@
 # Rockpile — 에셋 너겟 서버
 
-기준일: 2026-11-13, 개정 2(1차 교차검증 — 독립 설계 1·반례 검토 3·사실 확인 3 — 과 2차 최종 검증 2를 반영, 19절). UE 대조 기준: UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조(2026-11-15에 5.6에서 옮겨 3절·19.3절을 다시 확인했다). UE Zen Storage Server에 대응하는 Rocks의 에셋 너겟 서버를 정한다. 에디터·쿠커·명령행이 함께 쓰는 사용자별 로컬 캐시 프로세스이고, 같은 프로그램을 팀 공유 서버로도 띄운다. 구현은 .NET 10·C#이다(사용자 결정 — 13절). 너겟 키·값의 의미는 [에셋 시스템](AssetSystem.ko.md) 9절, 계층 구조는 [구현 계획](EngineImplementationPlan.ko.md) 9.1·27.2절을 따른다. 이 문서가 바꾸는 다른 문서의 내용은 17절에 모은다(아직 반영하지 않았다).
+기준일: 2026-11-13, 개정 2(1차 교차검증 — 독립 설계 1·반례 검토 3·사실 확인 3 — 과 2차 최종 검증 2를 반영, 19절). UE 대조 기준: UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조(2026-11-15에 5.6에서 옮겨 3절·19.3절을 다시 확인했다). UE Zen Storage Server에 대응하는 Rocks의 에셋 너겟 서버를 정한다. 에디터·쿠커·명령행이 함께 쓰는 사용자별 로컬 캐시 프로세스이고, 같은 프로그램을 팀 공유 서버로도 띄운다. 구현은 .NET 10·C#이다(사용자 결정 — 13절). 너겟 키·값의 의미는 [에셋 시스템](AssetSystem/09-AssetNuggets.ko.md) 9절, 계층 구조는 [구현 계획](EngineImplementationPlan.ko.md) 9.1·27.2절을 따른다. 이 문서가 바꾸는 다른 문서의 내용은 17절에 모은다(아직 반영하지 않았다).
 
 원칙: 기반이 부족하면 우회하지 않고 보강한다. 동작하지 않는 기능을 완성처럼 표시하지 않는다. 상태 표기는 AssetSystem과 같다 — **구현**(동작·시험), **계약**(API·형식이 있고 호출하면 `Unsupported`·`UnsupportedCapability`), **후속**(API도 없음). 지금은 설계 단계이며 구현은 없다.
 
@@ -754,9 +754,9 @@ Programs/
 
 ## 17. 다른 문서 개정 사항
 
-이 설계를 승인하면 함께 고친다. AssetSystem.ko.md 부분(아래 첫 항목)과 CoreDataFoundations 132행은 2026-11-22 A3 착수 때 반영했다(AssetSystem 17절 기록). 나머지는 서버 착수 때 반영한다.
+이 설계를 승인하면 함께 고친다. AssetSystem 부분(아래 첫 항목)과 CoreDataFoundations 132행은 2026-11-22 A3 착수 때 반영했다(AssetSystem 17절 기록). 나머지는 서버 착수 때 반영한다.
 
-- **AssetSystem.ko.md**
+- **AssetSystem**
   - 1절 A3 행: 레코드 계약·NuggetFileSystemBackend·NuggetRockpileBackend, R단계 연결.
   - 2절 "프로세스: 없음" 행 → PlatformBase `Process`·`LocalChannel`(R0).
   - 3절 상태("공유·원격 backend 계약" → "NuggetRockpileBackend + Rockpile upstream", C++ 직접 원격 backend 없음)와 의존 그래프(`AssetNugget → RockpileClient`).

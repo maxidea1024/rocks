@@ -6,7 +6,7 @@
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
 
-// 에셋 너겟 Record다(Docs/Design/AssetSystem.ko.md 9.1절 결정 5 — NuggetRecord.h).
+// 에셋 너겟 Record다(Docs/Design/AssetSystem 9.1절 결정 5 — NuggetRecord.h).
 namespace rocks {
 
 namespace {

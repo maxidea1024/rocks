@@ -4,7 +4,7 @@
 #include <Core/Result.h>
 
 // 반복형 Tarjan 강하게 연결된 묶음(SCC) 찾기다(재귀가 없어 노드 수와 무관하게 호출 stack을 쓰지
-// 않는다). SparksCompiler 비공개 구현을 공용으로 올린 것이다(Docs/Design/AssetSystem.ko.md 10.2절
+// 않는다). SparksCompiler 비공개 구현을 공용으로 올린 것이다(Docs/Design/AssetSystem 10.2절
 // "A4c 구현 세부" — 쿠커의 Build·Hard SCC, 컴파일러의 패키지·struct 순환이 같은 것을 쓴다).
 //
 // 그래프는 노드 0..count-1과 노드마다 [firstEdge[n], firstEdge[n + 1]) 범위의 간선 대상 targets다

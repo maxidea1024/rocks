@@ -10,7 +10,7 @@
 #include <DeterministicMath/DeterministicMath.h>
 #include <Platform/Math/GenericPlatformMath.h>
 
-// 에셋 너겟 키 기록이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 2–4).
+// 에셋 너겟 키 기록이다(Docs/Design/AssetSystem 9.1절 결정 2–4).
 namespace rocks {
 
 namespace {

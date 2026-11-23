@@ -5,7 +5,7 @@
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
-// AssetManager 공개 API와 handle 클래스다(Docs/Design/AssetSystem.ko.md 11.7절).
+// AssetManager 공개 API와 handle 클래스다(Docs/Design/AssetSystem 11.7절).
 namespace rocks {
 
 AssetManager::Impl::Impl(AssetManager& owner, const AssetManagerConfig& config) noexcept

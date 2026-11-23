@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 로더의 실제 경계 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 4·5·7·11): 디스크 파일을
+// 로더의 실제 경계 시험이다(Docs/Design/AssetSystem 11.6절 4·5·7·11): 디스크 파일을
 // PlatformBase AsyncReadFile로 읽는 기본 IO(조각 읽기·파일 없음·크기 다름)와 WorkerScheduler
 // worker로 끝까지 로드, 동기 대기 추적(관찰자·횟수·프레임 안 금지), CancelToken 계약. 스레드가
 // 실제로 돌지만 단언은 결과만 본다(완료 순서와 무관하다).

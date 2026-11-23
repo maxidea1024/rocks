@@ -11,7 +11,7 @@
 #include <ModuleLoader/ModuleLoader.h>
 #include <Platform/File.h>
 
-// asset-cook 명령 구현이다(Docs/Design/AssetSystem.ko.md 13절, 10.2절 "A4e 구현 세부" — A4e1).
+// asset-cook 명령 구현이다(Docs/Design/AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1).
 // 쿠킹 흐름은 CookProject(AssetCooker)가 맡고 여기서는 인수·세션·설정·너겟 캐시·출력만 다룬다.
 namespace rocks::commandlet_host {
 
