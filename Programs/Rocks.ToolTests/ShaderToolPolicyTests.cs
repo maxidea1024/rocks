@@ -4,7 +4,7 @@ using Rocks.Tooling.Checks;
 
 namespace Rocks.ToolTests;
 
-// 셰이더 도구 정책(Docs/Design/ShaderSystem.ko.md 9절)의 저장소 실행과 음성 대조다: 도구 표 참조(shader-tool-table), binary 로드
+// 셰이더 도구 정책(Docs/Design/ShaderSystem 9절)의 저장소 실행과 음성 대조다: 도구 표 참조(shader-tool-table), binary 로드
 // (shader-tool-binary-load), 워커 격리(shader-worker-isolation, 11.1절 SC1), Release 배제(release-*).
 internal static class ShaderToolPolicyTests
 {

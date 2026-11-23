@@ -170,7 +170,7 @@ UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본(경로는 `Engine/Source/Runtime/Cor
 
 ## 동적 라이브러리 (2026-11-16 1차 구현, 셰이더 P10)
 
-`Platform/DynamicLibrary.h`는 OS 공유 라이브러리를 열고 심볼을 찾고 내린다(UE `FPlatformProcess::GetDllHandle`·`GetDllExport`·`FreeDllHandle` 대응). 셰이더 워커가 도구(DXC·SPIRV-Cross·SPIRV-Tools·FXC)를 사용자 단위 저장소의 절대 경로에서 열고, 렌더러가 OS 공급 라이브러리(Vulkan 로더, XInput)를 여는 선행 기반이다([셰이더 시스템](ShaderSystem.ko.md) 5.3절 P10·9절). 엔진 모듈을 동적으로 싣는 로더가 아니다. 인자 검사·lease 계수·수명은 `Private/Common/DynamicLibrary.cpp`, OS 호출은 `Private/Win64/DynamicLibrary.cpp`·`Private/Posix/DynamicLibrary.cpp`(시스템 라이브러리 디렉터리만 OS hook)가 맡는다.
+`Platform/DynamicLibrary.h`는 OS 공유 라이브러리를 열고 심볼을 찾고 내린다(UE `FPlatformProcess::GetDllHandle`·`GetDllExport`·`FreeDllHandle` 대응). 셰이더 워커가 도구(DXC·SPIRV-Cross·SPIRV-Tools·FXC)를 사용자 단위 저장소의 절대 경로에서 열고, 렌더러가 OS 공급 라이브러리(Vulkan 로더, XInput)를 여는 선행 기반이다([셰이더 시스템](ShaderSystem/05-Prerequisites.ko.md) 5.3절 P10·9절). 엔진 모듈을 동적으로 싣는 로더가 아니다. 인자 검사·lease 계수·수명은 `Private/Common/DynamicLibrary.cpp`, OS 호출은 `Private/Win64/DynamicLibrary.cpp`·`Private/Posix/DynamicLibrary.cpp`(시스템 라이브러리 디렉터리만 OS hook)가 맡는다.
 
 | API | 계약 |
 |---|---|
@@ -191,7 +191,7 @@ UE 5.8(`Engine/Source/Runtime/Core/Private/Windows/WindowsPlatformProcess.cpp:23
 | 수명 | `FreeDllHandle`은 확인 없이 `FreeLibrary`한다. 얻은 함수 포인터의 수명은 호출자가 관리한다 | 심볼 표를 lease로 세고 lease가 남으면 `Close`가 `Busy`. 소유자가 먼저 사라지면 마지막 lease가 내린다 |
 | 실패 정보 | 핸들 null만 돌려준다 | 공통 `FileStatus` 코드와 OS 원인 코드 |
 
-시험 라이브러리: Rocks.Build에는 공유 라이브러리 모듈 종류가 없고 더하지 않으므로([셰이더 시스템](ShaderSystem.ko.md) 8절), 시험 지원 코드(`TestSupport/DynamicLibraryFixture.h`, `Private/Win64/DynamicLibraryFixture.cpp`)가 실행 중에 데이터 전용 PE32+ DLL(실행 중인 프로세스와 같은 machine, 코드·재배치·진입점 없음, export와 import만)을 직접 쓴다. 실제 OS 로더의 경로 검색·의존 해결·심볼 조회·해제를 그대로 시험하며 시험 지원 코드가 컴파일러·링커에 기대지 않는다. macOS(Mach-O와 ad-hoc 코드 서명)·Android(ELF) 생성기는 후속이며 그 플랫폼에서는 OS 공급 라이브러리 시험만 돌고 나머지는 SKIP이다.
+시험 라이브러리: Rocks.Build에는 공유 라이브러리 모듈 종류가 없고 더하지 않으므로([셰이더 시스템](ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절), 시험 지원 코드(`TestSupport/DynamicLibraryFixture.h`, `Private/Win64/DynamicLibraryFixture.cpp`)가 실행 중에 데이터 전용 PE32+ DLL(실행 중인 프로세스와 같은 machine, 코드·재배치·진입점 없음, export와 import만)을 직접 쓴다. 실제 OS 로더의 경로 검색·의존 해결·심볼 조회·해제를 그대로 시험하며 시험 지원 코드가 컴파일러·링커에 기대지 않는다. macOS(Mach-O와 ad-hoc 코드 서명)·Android(ELF) 생성기는 후속이며 그 플랫폼에서는 OS 공급 라이브러리 시험만 돌고 나머지는 SKIP이다.
 
 한계:
 

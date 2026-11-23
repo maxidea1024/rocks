@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// SH0 스파이크 실행 순서(Docs/Design/ShaderSystem.ko.md 16절):
+// SH0 스파이크 실행 순서(Docs/Design/ShaderSystem 16절):
 // 1. 도구 열기와 S8(열기·첫 컴파일 비용, SHA-256 처리량).
 // 2. 내장 Renderer VS·PS → DXIL(서명 hash, 리플렉션), SPIR-V(spirv-val, 리플렉션),
 //    DXBC(FXC), SPIRV-Cross MSL·ESSL 두 가지·HLSL 5.0(→ FXC).

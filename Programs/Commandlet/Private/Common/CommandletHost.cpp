@@ -11,6 +11,7 @@
 #include <HostConfig/HostSettings.h>
 #include <NodeGraphTools/GraphCommandlets.h>
 #include <Platform/File.h>
+#include <ShaderCompiler/ShaderCompileCommandlet.h>
 #include <TraceAnalysis/TraceModel.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <UnrealExchange/ExchangeCommand.h>
@@ -176,6 +177,9 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     // 노드 그래프 명령 문맥은 registry보다 먼저 만들어 오래 산다(헤더 계약).
     nodegraph::GraphCommandletContext graphContext;
     graphContext.allocator = &allocator;
+    // 셰이더 명령 문맥(엔진 폴더·워커는 실행 파일 기준으로 찾는다)이다.
+    shader::ShaderCompileCommandContext shaderContext;
+    shaderContext.allocator = &allocator;
     CommandletRegistry registry;
     auto registered = registry.Register(
         {"core-check", "Check the Core allocator lifecycle.", &CoreCheck, nullptr});
@@ -260,6 +264,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
 
     registered = registry.Register({"asset-cook", "Cook the project for a target profile.",
                                     &RunAssetCookCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered = registry.Register({"shader-compile", "Compile shaders through the shader workers.",
+                                    &shader::RunShaderCompileCommand, &shaderContext});
     if (!registered) {
         return 1;
     }

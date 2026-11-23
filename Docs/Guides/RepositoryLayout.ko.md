@@ -58,7 +58,7 @@ rocks/
   둔다(Core는 Engine을 참조하지 않는다). 라이브러리 이름은 두 루트를 통틀어 하나다. 원본 디렉터리는 수정하지 않고
   `ThirdParty.json`(종류·버전·출처·라이선스·파일별 SHA-256·번역 단위·정의·컴파일러 지시문 목록)이 단일 출처다. 종류는
   `code`(C 번역 단위)·`data`(데이터 파일)·`headers`(헤더 전용)·`binary`(미리 빌드한 바이너리)이며, `binary`의 파일은
-  저장소와 `out/`이 아니라 bootstrap 명령이 받는 사용자 단위 내용 주소 저장소에 둔다([셰이더 시스템](../Design/ShaderSystem.ko.md) 8절). 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
+  저장소와 `out/`이 아니라 bootstrap 명령이 받는 사용자 단위 내용 주소 저장소에 둔다([셰이더 시스템](../Design/ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절). 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
   원본 디렉터리만 제외한다. 외부 헤더는 소비 모듈의 Private 구현에만 노출한다. 규칙과 절차는
   [압축 설계](../Design/Compression.ko.md) 3절을 따른다.
 

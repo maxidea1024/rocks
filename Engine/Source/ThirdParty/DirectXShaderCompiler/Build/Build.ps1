@@ -1,4 +1,4 @@
-# Offline build of DirectXShaderCompiler (DXC) (Windows x64). Docs/Design/ShaderSystem.ko.md section 8, item 4. Same role as UE 5.8
+# Offline build of DirectXShaderCompiler (DXC) (Windows x64). Docs/Design/ShaderSystem section 8, item 4. Same role as UE 5.8
 # ThirdParty/ShaderConductor/Build_ShaderConductor_Win64.bat (CMake build outside the engine build, shipping only the resulting shared libraries).
 # Downloads the pinned tag sources and submodule (SPIRV-Headers, SPIRV-Tools, DirectX-Headers) sources from the manifest build, verifies SHA-256,
 # and builds dxcompiler.dll and dxc.exe with the upstream cache (cmake/caches/PredefinedParams.cmake) with only tests turned off. The upstream build

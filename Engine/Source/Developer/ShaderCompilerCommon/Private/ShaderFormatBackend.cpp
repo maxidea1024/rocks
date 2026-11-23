@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-// 형식 구현이 함께 쓰는 도구다(Docs/Design/ShaderSystem.ko.md 11.1절 SC1).
+// 형식 구현이 함께 쓰는 도구다(Docs/Design/ShaderSystem 11.1절 SC1).
 namespace rocks::shader {
 
 bool MakeShaderProfile(uint32 stage, ShaderVersion model,

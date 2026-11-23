@@ -14,7 +14,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 기준 문서 | 전체 계획 §23 · [엔진 런타임](EngineRuntime.ko.md)(이하 ER) 2·6–8절과 World 코드 · [Prefab](Prefab.ko.md) 개정 3 · [레벨 스크립트](LevelScript.ko.md) 개정 1 · [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) · [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) · [입력 상세안](CoreObjectInputDetailedPlan.ko.md) · [UI 툴킷](UiToolkit.ko.md) CU1–CU9 · [로깅](LoggingSystem.ko.md) · [CVar](CVarSystem.ko.md) · [콘텐츠 서명](ContentSigning.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md)(구현 상태) |
+| 기준 문서 | 전체 계획 §23 · [엔진 런타임](EngineRuntime/README.ko.md)(이하 ER) 2·6–8절과 World 코드 · [Prefab](Prefab.ko.md) 개정 3 · [레벨 스크립트](LevelScript.ko.md) 개정 1 · [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) · [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) · [입력 상세안](CoreObjectInputDetailedPlan.ko.md) · [UI 툴킷](UiToolkit.ko.md) CU1–CU9 · [로깅](LoggingSystem.ko.md) · [CVar](CVarSystem.ko.md) · [콘텐츠 서명](ContentSigning.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md)(구현 상태) |
 | Unity·Verse 비교 기준 | Unity 수명 hook 체계(종류·호출 순서·의미). Verse는 The Book of Verse[R19] 기준이며 언어 설계의 참고 대상이다. Rocks의 Unreal 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`) |
 | Rocks 상태 | Sparks 언어·VM·컴파일러 미구현. Core C5(`NamePool::TryFind`)는 구현됨 |
 | 식별자 | 도입 단계 L0–L4, 언어 코어 마일스톤 LC0–LC9, 엔진 연동 단계 EI1–EI9(요구 항목 SE-*), Core 변경 C1–C5, 리플렉션 확장 CU9, Gate G1–G6, 결정 SD1–SD50, 진단 코드 S0100–S1199, 부록 A·B, 참고 자료 R1–R31 |

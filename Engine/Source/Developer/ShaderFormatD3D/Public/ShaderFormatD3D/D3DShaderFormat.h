@@ -2,7 +2,7 @@
 
 #include <ShaderCompilerCommon/ShaderFormatBackend.h>
 
-// D3D 형식 처리기다(Docs/Design/ShaderSystem.ko.md 2절, 11.1절 SC1). D3D12_SM6은 DXC → DXIL이고
+// D3D 형식 처리기다(Docs/Design/ShaderSystem 2절, 11.1절 SC1). D3D12_SM6은 DXC → DXIL이고
 // 내장 validator 서명을 확인한다(10절 "dxil 서명": container hash가 0이거나 preview 우회 값이면
 // ToolError). D3D11_SM5(FXC·대체 경로)는 SH1e에서 더한다 — 지금은 UnsupportedCapability다.
 //

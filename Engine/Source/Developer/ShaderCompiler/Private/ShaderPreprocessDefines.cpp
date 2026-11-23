@@ -2,7 +2,7 @@
 
 #include "ShaderSourceStatusInternal.h"
 
-// 전처리 정의 조립(Docs/Design/ShaderSystem.ko.md 11.1절 SC10)이다. 규칙은 공개 헤더 주석을
+// 전처리 정의 조립(Docs/Design/ShaderSystem 11.1절 SC10)이다. 규칙은 공개 헤더 주석을
 // 따른다.
 namespace rocks::shader {
 

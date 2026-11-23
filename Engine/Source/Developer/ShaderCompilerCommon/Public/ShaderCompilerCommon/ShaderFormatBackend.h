@@ -3,7 +3,7 @@
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 
-// 형식 컴파일 인터페이스다(Docs/Design/ShaderSystem.ko.md 11.1절 SC1, UE IShaderFormat 대응). 워커
+// 형식 컴파일 인터페이스다(Docs/Design/ShaderSystem 11.1절 SC1, UE IShaderFormat 대응). 워커
 // (ShaderWorker)가 형식 정의의 처리기(module)마다 구현(ShaderFormatD3D·ShaderFormatVulkan …)을 골라
 // job을 맡긴다. 도구 묶음(ShaderToolSet)은 워커 쪽 모듈만 정의를 본다 — 이 헤더는 이름만
 // 쓴다(도구를 여는 것은 워커 쪽뿐이다, 정책 shader-tool-binary-load).

@@ -4,7 +4,7 @@
 - [저장소 구성](../../Guides/RepositoryLayout.ko.md): "후속"에 이 문서 링크를 더했다. 기술자 표·모듈 type 표·게임 빌드 연동·플랫폼 폴더 목록(Linux)은 BS2·BS4·BS6 구현 때 고친다.
 - [리플렉션 기반](../ReflectionFoundations.ko.md) 134행 `EditorOnly`: BD6의 선언 규칙으로 바뀐다는 주석을 달았다.
 - [유니티 빌드·PCH](../UnityBuildPch.ko.md) 8.4절 248행: 제공 모듈 후보를 "컴파일 환경에 보이는 제공 모듈"로 고쳤다.
-- [셰이더 시스템](../ShaderSystem.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.
+- [셰이더 시스템](../ShaderSystem/09-ToolLoadingReleaseExclusion.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.
 - [AppInfo·CommandLine](../AppInfoCommandLine.ko.md) 307·565행 `build::TargetType`: 다섯 값으로 고쳤다. `HostKind`(304행)는 Editor·Server 타깃이 생길 때 더한다.
 - [UI 툴킷](../UiToolkit.ko.md) 7.3절 (g) `MinimalAPI`·`*_API` 행(개정 2): BD27·BD28로 정했다고 고쳤다.
 

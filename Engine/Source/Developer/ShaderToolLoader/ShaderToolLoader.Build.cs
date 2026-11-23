@@ -2,7 +2,7 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 /// <summary>
-/// Shader tool opening module (Docs/Design/ShaderSystem.ko.md section 9). Matches tool files in the user store against the tool table (ShaderToolTable)
+/// Shader tool opening module (Docs/Design/ShaderSystem section 9). Matches tool files in the user store against the tool table (ShaderToolTable)
 /// and SHA-256, then opens them with P10 DynamicLibrary::Open and obtains the function table. Only workers and ShaderFormat modules open tools; until
 /// the worker (Programs/ShaderCompileWorker) exists, this module stands in for it (policy check shader-tool-binary-load).
 /// Platform implementations are Private/Win64 (repository root; DXC version query that uses dxcapi.h together with Windows headers), Private/Mac and Private/Unsupported

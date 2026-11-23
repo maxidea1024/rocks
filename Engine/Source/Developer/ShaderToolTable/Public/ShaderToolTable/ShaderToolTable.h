@@ -5,7 +5,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Core/Text/StringView.h>
 
-// 셰이더 도구 표다(Docs/Design/ShaderSystem.ko.md 9절). 빌드가 Engine 루트의 kind: binary manifest
+// 셰이더 도구 표다(Docs/Design/ShaderSystem 9절). 빌드가 Engine 루트의 kind: binary manifest
 // (Engine/Source/ThirdParty/<Lib>/ThirdParty.json)에서 정의
 // TU(<출력>/GeneratedSources/ShaderToolTable/ ShaderToolTable.Generated.cpp)를 만들어 이 모듈에
 // 넣는다(BuildInfo와 같은 생성 방식). 그래서 메인 프로세스(job 키 계산)와 워커(도구 열기)가 같은

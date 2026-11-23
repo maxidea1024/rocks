@@ -22,7 +22,7 @@ using namespace rocks::shader;
 using namespace rocks::test;
 } // namespace shader_tool_loader_tests_file
 
-// 셰이더 도구 열기(ShaderToolLoader, Docs/Design/ShaderSystem.ko.md 9절 완료 기준)를 검사한다.
+// 셰이더 도구 열기(ShaderToolLoader, Docs/Design/ShaderSystem 9절 완료 기준)를 검사한다.
 // - 실제 저장소: bootstrap한 사용자 저장소만으로 네 도구를 열고 함수 표를 실제로 부른다. 저장소가
 //   없으면(bootstrap 전, CI) SKIP이며 실패가 아니다.
 // - 대조 저장소: 시험 지원 코드가 쓴 데이터 전용 라이브러리(TestSupport/DynamicLibraryFixture.h)로

@@ -7,7 +7,7 @@
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
 
-// 셰이더 워커 메시지(Docs/Design/ShaderSystem.ko.md 11.1절 SC5) 인코딩이다. 최상위는 Record 하나,
+// 셰이더 워커 메시지(Docs/Design/ShaderSystem 11.1절 SC5) 인코딩이다. 최상위는 Record 하나,
 // job·형식·결과 목록은 RecordList, 작은 튜플 목록(처리기 버전·hook 인자·값·도구 확인)은 Bytes 값
 // 안의 Archive(u32 개수 + 항목)다. 읽기는 모든 필드의 wire tag와 값 끝을 확인하고, 손상은
 // InvalidArgument로 모은다(할당 실패만 OutOfMemory).

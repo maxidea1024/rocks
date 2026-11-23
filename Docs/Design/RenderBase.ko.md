@@ -8,7 +8,7 @@
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/` 기준이며 `RenderCore/` 아래 파일은 `RC/`로 줄여 적는다. 셰이더 원문은 `Engine/Shaders/`, 플러그인은 `Engine/Plugins/` 기준이다. Rocks 경로는 저장소 루트 기준이고 HEAD `79f966a`에서 확인했다(초안 기준 `1638a7f`와 인용 파일 내용이 같다).
 
-[셰이더 시스템](ShaderSystem.ko.md)(개정 8, 구현 전)과 겹치는 부분은 그 문서의 결정을 따른다. RenderCore 런타임 요구 때문에 그 문서를 고쳐야 하는 곳은 9.9절에 모았다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 3·8·9.6·11절, [엔진 런타임](EngineRuntime.ko.md) 6·10–14절과 충돌하는 부분은 이 문서 기준으로 정리하고 그 문서들도 함께 고친다(15절).
+[셰이더 시스템](ShaderSystem/README.ko.md)(개정 8, 구현 전)과 겹치는 부분은 그 문서의 결정을 따른다. RenderCore 런타임 요구 때문에 그 문서를 고쳐야 하는 곳은 9.9절에 모았다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 3·8·9.6·11절, [엔진 런타임](EngineRuntime/README.ko.md) 6·10–14절과 충돌하는 부분은 이 문서 기준으로 정리하고 그 문서들도 함께 고친다(15절).
 
 상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음). 이 문서는 **설계**다. 화면 마일스톤(18.1절)에서 구현하며, 미리 해서 유리한 Core 선행 작업만 먼저 착수했다(16절 결정 R10). 다만 결정 R12(샘플러 위치)와 SX13(비교 샘플러)은 A0-G에 걸리므로 **A0-G 착수 전**에 정해 AssetSystem에 반영해야 한다(6절의 기한 가운데 가장 이르다).
 
@@ -31,7 +31,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 파라미터 구조체 | 한 구조체가 셰이더 상수·자원 바인딩과 렌더 그래프 의존 선언을 함께 맡는다(결정 R4) | UE 파라미터 매크로(`RC/Public/ShaderParameterMacros.h:1697–1760, 1868–1900`)와 그래프 수집(`RC/Private/RenderGraphBuilder.cpp:2384–2532`) |
 | 셰이더 런타임 | 셰이더 라이브러리(셰이더 시스템 12절) 위에 **셰이더 집합**을 둔다. 장치 셰이더는 처음 쓸 때 만들고 게시는 한 번이다. frozen memory image는 들이지 않는다 | UE `RC/Public/Shader.h:405–417`, `RC/Private/ShaderResource.cpp:579–657`. memory image(`Core/Public/Serialization/MemoryLayout.h`)는 C++ 객체 배치를 굽는 장치이고 Rocks는 정규화 표를 Archive·Record로 읽는다 |
 | 설정 변수 | Core에 **콘솔 설정**과 Config 계층을 선행 작업으로 둔다. 렌더 lane에는 프레임 packet 안 snapshot으로 넘긴다 | RenderCore에 콘솔 변수 정의가 약 190줄 있다(`git grep -c` 줄 수). UE는 렌더 쪽 사본 주소에 쓰는 명령으로 전파한다(`RC/Private/RenderingThread.cpp:493–530`). Rocks에는 체계가 없다(UnrealCoreFeatureAudit UE-C21·C29 **후속**) |
-| 좌표·행렬 규약 | UE 5.8과 같다(2026-11-17 사용자 결정): 행 벡터(`p·M`)·행 우선 저장, 셰이더 `mul(v, M)`과 행 우선 packing, view space +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면 원근(수평 반각), 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전. 렌더 코드 반영은 C7에서 했다(Graphics `CullMode`·`DrawConstants` 행 우선, 샘플 렌더러 반전 컬, Sandbox 컬링·행렬 시험) | [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항, [엔진 구현 계획](EngineImplementationPlan.ko.md) 2.2절. UE `LocalPlayer.cpp:1241–1245`(view 축), `PerspectiveMatrix.h:135–153`(투영), `D3D12State.cpp:33–35, 353`(앞면) |
+| 좌표·행렬 규약 | UE 5.8과 같다(2026-11-17 사용자 결정): 행 벡터(`p·M`)·행 우선 저장, 셰이더 `mul(v, M)`과 행 우선 packing, view space +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면 원근(수평 반각), 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전. 렌더 코드 반영은 C7에서 했다(Graphics `CullMode`·`DrawConstants` 행 우선, 샘플 렌더러 반전 컬, Sandbox 컬링·행렬 시험) | [셰이더 시스템](ShaderSystem/07-BindingConventions.ko.md) 7.2절 6·8항, [엔진 구현 계획](EngineImplementationPlan.ko.md) 2.2절. UE `LocalPlayer.cpp:1241–1245`(view 축), `PerspectiveMatrix.h:135–153`(투영), `D3D12State.cpp:33–35, 353`(앞면) |
 
 ## 2. 용어 대응
 
@@ -115,7 +115,7 @@ RenderCore는 Public 38,326줄·Private 63,918줄·Internal 1,239줄이다(`wc -
 | 업로드·readback | 생성 때 초기 데이터만, 텍스처 업로드는 동기 완료(`Device.h:50`), `ReadPixels`는 시험용 동기 대기(`:90–92`) | GX8 |
 | 계측 | query·marker 없음 | GX9 |
 | Renderer | 내장 셰이더 원문 문자열, 파이프라인 하나, 메시 둘. 엔진 모듈이 아니라 Sandbox 시험 샘플(`Programs/Sandbox/Private/SampleRenderer.*`, 2026-11-17 이동)이다 | 셰이더 시스템 SH2, RB 단계 |
-| 엔진 루프 | `EngineSubsystem`(Initialize·OnFrameBegin·OnFrameEnd·Deinitialize)과 `EngineLoopHooks`(PumpEvents·BeginFrame·EndFrame)가 있다(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:27–69`). 렌더 추출과 제출은 `EndFrame` hook에서 게임 스레드가 동기로 한다. 렌더 스레드·in-flight snapshot은 후속(`Docs/Design/EngineRuntime.ko.md` 14절) | RB1, CP6 |
+| 엔진 루프 | `EngineSubsystem`(Initialize·OnFrameBegin·OnFrameEnd·Deinitialize)과 `EngineLoopHooks`(PumpEvents·BeginFrame·EndFrame)가 있다(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:27–69`). 렌더 추출과 제출은 `EndFrame` hook에서 게임 스레드가 동기로 한다. 렌더 스레드·in-flight snapshot은 후속(`Docs/Design/EngineRuntime` 14절) | RB1, CP6 |
 | 스레드·동기화 | join 소유 `platform::Thread`(`Core/Source/Runtime/PlatformBase/Public/Platform/Thread.h:23–44`), `Mutex`·`ConditionVariable`·`ManualResetEvent`·`Semaphore`(`Sync.h:19,62,79,98`), `Atomics.h`. 스레드 이름·우선순위·affinity·스택 크기는 후속(`Docs/Implementation/PlatformConcurrency.ko.md:42`) | CP1 |
 | 작업 | `WorkerScheduler`(선행 작업·취소·Drain, 외부 이벤트 `WorkerTaskEvent`, `Core/Source/Runtime/Task/Public/Task/WorkerScheduler.h:93–149, 182–217`), `AsyncIoEvent`, `InlineExecutor`(동기 기준, `TaskScheduler.h:55–56`). 직렬 체인·ParallelFor·전용 스레드 lane 없음 | CP1·CP2 |
 | 할당기 | `StackAllocator`(단일 스레드 LIFO, `Core/Memory/StackAllocator.h:42`), `ArenaAllocator`(반환 안 된 할당이 있으면 Reset이 Busy, 프레임 일괄 무효화 없음, `ArenaAllocator.h:23–25`) | CP3 |

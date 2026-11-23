@@ -43,7 +43,7 @@ public sealed record ThirdPartyStoreOptions
 }
 
 /// <summary>
-/// 미리 빌드한 바이너리(manifest <c>kind: binary</c>)의 사용자 단위 내용 주소 저장소다(Docs/Design/ShaderSystem.ko.md 8절 2항).
+/// 미리 빌드한 바이너리(manifest <c>kind: binary</c>)의 사용자 단위 내용 주소 저장소다(Docs/Design/ShaderSystem 8절 2항).
 /// <list type="bullet">
 /// <item>위치: Windows <c>%LOCALAPPDATA%\Rocks\ThirdParty\&lt;키&gt;\</c>, macOS <c>~/Library/Application Support/Rocks/ThirdParty/&lt;키&gt;/</c>. 키는
 /// archive SHA-256(build 출처) 또는 파일 SHA-256(sdk 출처)이다(<see cref="ThirdPartyHost.StoreKey"/>). archive 단위로 풀어 두므로 한

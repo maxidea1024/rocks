@@ -3,7 +3,7 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.Tooling.Checks;
 
-// 셰이더 도구 참조 정책이다(Docs/Design/ShaderSystem.ko.md 9절 정책 검사). 도구 표 참조와 binary 로드를 따로 본다.
+// 셰이더 도구 참조 정책이다(Docs/Design/ShaderSystem 9절 정책 검사). 도구 표 참조와 binary 로드를 따로 본다.
 public static partial class PolicyChecks
 {
     // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 두 프로세스 공용
@@ -26,7 +26,7 @@ public static partial class PolicyChecks
     ];
 
     // 워커 쪽(워커 프로그램·본체 모듈·형식 모듈)이다. 메인 프로세스 전용 모듈(ShaderCompiler — 소스 트리·키·관리자)과 에셋 너겟에 닿으면
-    // 안 된다(Docs/Design/ShaderSystem.ko.md 11절 8항·11.1절 SC1: 워커는 너겟을 읽거나 쓰지 않는다).
+    // 안 된다(Docs/Design/ShaderSystem 11절 8항·11.1절 SC1: 워커는 너겟을 읽거나 쓰지 않는다).
     private static readonly string[] ShaderWorkerSides = ["Engine/Source/Developer/ShaderWorker/", "Programs/ShaderCompileWorker/"];
 
     // 워커 쪽이 참조하면 안 되는 모듈이다(규칙 이름 문자열·include 폴더).
@@ -106,7 +106,7 @@ public static partial class PolicyChecks
     }
 
     /// <summary>
-    /// 셰이더 도구 참조 정책이다(Docs/Design/ShaderSystem.ko.md 9절). 도구 표 참조와 binary 로드를 따로 본다.
+    /// 셰이더 도구 참조 정책이다(Docs/Design/ShaderSystem 9절). 도구 표 참조와 binary 로드를 따로 본다.
     /// <list type="bullet">
     /// <item><c>shader-tool-table</c>: 도구 표 모듈(<c>"ShaderToolTable"</c> 의존, <c>&lt;ShaderToolTable/...&gt;</c> include)은
     /// Developer/ShaderCompiler·워커(Programs/ShaderCompileWorker)·Developer/ShaderFormat*·워커 자리 모듈 ShaderToolLoader·시험 runner만

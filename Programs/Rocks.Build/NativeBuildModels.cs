@@ -433,7 +433,7 @@ public sealed record NativeModuleInput
     // 작업 파일 분리(7.2절)로 묶음에서 빠진 번역 단위도 PCH를 쓰는가(기본 참).
     public bool AdaptivePch { get; init; } = true;
 
-    // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
+    // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem 9절 도구 표).
     // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
     // 모듈 소스로 컴파일한다. 내용은 호스트 경로를 담지 않아야 한다(도구 빌드 ID가 호스트 무관이다). 규칙은 이 목록을 매 실행 다시
     // 만들므로 입력 manifest가 바뀌면 다음 빌드에서 내용과 compile key가 함께 바뀐다.

@@ -2,7 +2,7 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Direct3D 11 graphics backend (Windows, feature level 11_0 or later). Device creation returns Unsupported on
-// other platforms. Design: Docs/Design/EngineRuntime.ko.md section 10.2.
+// other platforms. Design: Docs/Design/EngineRuntime section 10.2.
 public sealed class D3D11Graphics : EngineModuleRules
 {
     protected override string ModuleName => "D3D11Graphics";

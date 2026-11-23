@@ -15,7 +15,7 @@
 // Actor 수 N을 바꿔 연산 하나의 비용이 N과 무관한지 본다.
 // - destroy: Actor 하나의 파괴(DestroyActor와 다음 프레임의 정리)
 // - bypass destroy: World API 밖 파괴(Registry RequestDestroy) 하나와 다음 프레임의 복구·정리
-//   (RepairBypassedObjects — Docs/Design/EngineRuntime.ko.md 7.4절)
+//   (RepairBypassedObjects — Docs/Design/EngineRuntime 7.4절)
 // - frame with GC start: Actor 하나를 파괴한 프레임(그 프레임이 GC cycle을 시작한다)의 Tick
 // - level destroy: Actor가 적은 Level 하나의 파괴(다른 Level의 Actor 수 N과 무관해야 한다)
 // - frame after one spawn: 틱 있는 Actor 하나를 만든 뒤의 프레임(틱 순서 재구성 포함)

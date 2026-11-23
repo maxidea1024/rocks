@@ -7,7 +7,7 @@
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompiler/ShaderPreprocessor.h>
 
-// 전처리 정의 조립이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC10). 메인 프로세스가 job마다 형식
+// 전처리 정의 조립이다(Docs/Design/ShaderSystem 11.1절 SC10). 메인 프로세스가 job마다 형식
 // 정의에서 정의를 만들고 job이 준 정의(퍼뮤테이션 — P14)를 더한다.
 //
 // 만드는 정의(값):

@@ -27,7 +27,8 @@ public sealed class CommandletHost : ModuleRules
         // UnrealExchange (plugin enabled by the Commandlet target): the asset-import-unreal command (Docs/Design/UnrealExchange.ko.md section
         // 10.5; a Program may depend on the modules of plugins its target enables, Docs/Design/BuildTargets BD39).
         // NodeGraphTools (Developer): the graph-dump, graph-validate and graph-diff commands (Docs/Design/NodeGraph.ko.md section 9.4).
+        // ShaderCompiler (Developer): the shader-compile command (Docs/Design/ShaderSystem section 11.1 SC13).
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
-            "UnrealExchange", "NodeGraphTools"]
+            "UnrealExchange", "NodeGraphTools", "ShaderCompiler"]
     };
 }

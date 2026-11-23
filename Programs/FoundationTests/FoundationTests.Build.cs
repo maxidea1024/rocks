@@ -36,7 +36,7 @@ public abstract class TestsModule : ModuleRules
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine) and the MeshTools MikkTSpace reference
     // comparison test. Headers enter only through this executable's Private includes (adapter approach) and must produce zero warnings under the engine
-    // warning rules (Docs/Design/ShaderSystem.ko.md section 8).
+    // warning rules (Docs/Design/ShaderSystem section 8).
     private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace

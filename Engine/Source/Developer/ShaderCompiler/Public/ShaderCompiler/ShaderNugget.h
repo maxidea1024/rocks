@@ -9,7 +9,7 @@
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 
-// 셰이더 job의 에셋 너겟 Record 값과 너겟 위치다(Docs/Design/ShaderSystem.ko.md 10절).
+// 셰이더 job의 에셋 너겟 Record 값과 너겟 위치다(Docs/Design/ShaderSystem 10절).
 //
 // Record: bucket NuggetBucketShader, namespace rocks.nuggets, key = job 키(ShaderJobKey.h),
 // inputs·meta는 비어 있다. 값은 ShaderNuggetValue 번호 오름차순의 부분이다. 진단은 Record에 넣지

@@ -9,7 +9,7 @@ namespace shader_tool_table_tests_file {
 using namespace rocks::shader;
 
 // 생성 도구 표(Engine 루트 binary manifest → GeneratedSources/ShaderToolTable)의 내용과 불변식을
-// 검사한다(Docs/Design/ShaderSystem.ko.md 9절). 값 대조는 manifest에 고정한 SHA-256이다.
+// 검사한다(Docs/Design/ShaderSystem 9절). 값 대조는 manifest에 고정한 SHA-256이다.
 namespace {
 
 bool IsLowerHex(const char* text, usize bytes) noexcept {

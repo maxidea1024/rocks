@@ -1,5 +1,5 @@
 // 셰이더 도구용 외부 라이브러리(Engine/Source/ThirdParty)를 엔진 경고 규칙으로 쓰는지
-// 확인한다(Docs/Design/ShaderSystem.ko.md 8절). SPIRV-Reflect는 Rocks 경고 규칙으로 빌드한 C 번역
+// 확인한다(Docs/Design/ShaderSystem 8절). SPIRV-Reflect는 Rocks 경고 규칙으로 빌드한 C 번역
 // 단위이고, 두 헤더(adapter)는 이 C++ 번역 단위가 경고 0으로 include한다.
 #include <TestSupport/Test.h>
 #include <spirv_reflect.h>
