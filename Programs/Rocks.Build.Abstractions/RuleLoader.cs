@@ -145,6 +145,12 @@ public static class RuleLoader
                 "(TargetRules.Plugins).");
         }
 
+        // 모듈의 플러그인(Docs/Design/ModuleLoader.ko.md 3.15절)은 빌드가 기술자에서 채운다.
+        if (modules.FirstOrDefault(module => module.Plugin is not null) is { } owned)
+        {
+            throw new ArgumentException($"Module rule '{owned.Name}' sets Plugin; the build fills it from the plugin descriptor that declares the module.");
+        }
+
         return new(modules, targets) { Plugins = context.Plugins };
     }
 

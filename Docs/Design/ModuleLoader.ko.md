@@ -529,7 +529,7 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 **행 순서 `order`(schema 4).** 모든 manifest의 행에 정수 키 `order`를 더한다. 빌드가 Monolithic 모듈 표와 같은 행 순서(실행 파일의 링크 폐포 순서 — 켠 플러그인 모듈 포함, `ModuleTables.Rows`)로 0부터 번호를 매긴 뒤 행을 실행 파일 manifest와 플러그인 manifest로 나눈다. 로더는 합친 행을 `order`로 정렬해 로더 표 순서로 쓴다. 그래서 같은 단계 안의 시작 순서(표 순서 — 3.11절 `StartPhase`)가 Monolithic과 같다(BD30 계약 1). 버린 안: 로더가 manifest 순서·행 순서로 안정 위상 정렬 — 플러그인 행이 첫 의존자 바로 앞으로 밀려 Monolithic과 순서가 달라진다.
 
 **로더(`TryCreateFromManifest`) — 두 단계.**
-1. 해석: 실행 파일 manifest를 지금처럼 엄격히 해석한다(행 키에 `order`, 최상위 키에 `plugins`). `plugins` 항목은 키가 정확히 `name`·`manifest`이고 이름은 C 식별자(정확히 같은 이름 중복 없음), 경로는 위 모양이다. 그 뒤 목록의 플러그인 manifest를 같은 규칙으로 해석한다. 플러그인 manifest 파일이 없으면 `NotFound`, 호스트 행이 있거나 `plugins`가 비어 있지 않으면 `Incompatible`이다(단계 `"Manifest"`).
+1. 해석: 실행 파일 manifest를 지금처럼 엄격히 해석한다(행 키에 `order`, 최상위 키에 `plugins`). 머리(최상위 키·schema·buildId·엔진 버전·툴체인 지문)와 `plugins` 목록은 플러그인 manifest 파일을 열기 전에 검사한다(실행 파일 manifest의 오류가 플러그인 파일 없음에 가려지지 않게). 플러그인 manifest 폴더는 실행 파일 manifest 폴더의 부모(연속 구분자는 하나로 본다)에 `Plugins/…`를 붙인 것이고, 부모가 드라이브·UNC 서버 루트면 `Incompatible`이다. `plugins` 항목은 키가 정확히 `name`·`manifest`이고 이름은 C 식별자(정확히 같은 이름 중복 없음), 경로는 위 모양이다. 그 뒤 목록의 플러그인 manifest를 같은 규칙으로 해석한다. 플러그인 manifest 파일이 없으면 `NotFound`, 호스트 행이 있거나 `plugins`가 비어 있지 않으면 `Incompatible`이다(단계 `"Manifest"`).
 2. 대조: 플러그인 manifest의 `buildId`·`engineVersion`·`toolchainFingerprint`가 실행 파일 manifest와 다르면 `Incompatible`(단계 `"Manifest"`, 플러그인 이름과 두 값을 문구에)이다. UE 모듈 관리자도 BuildId가 다른 `.modules`의 모듈은 쓰지 않는다(`Runtime/Core/Private/Modules/ModuleManager.cpp:1944` `FindModulePathsInDirectory` — BuildId만 비교하고 건너뛴다). Rocks는 건너뛰지 않고 실패한다(MD13 — 섞인 빌드는 진단으로 끝낸다).
 3. 합치기: 모든 manifest를 해석한 뒤 전체 행 수·이름·의존 수로 저장소를 한 번 잡고, 행을 `order`로 정렬해 행·파일 이름·크기·호스트 표지·manifest 폴더를 함께 옮긴다(행마다 자기 manifest 폴더를 가진다). 검사: 행 이름은 manifest 사이에서도 정확히 같은 이름이 없어야 하고(지금 조회처럼 대소문자를 구별한다 — 대소문자만 다른 이름은 빌드가 MD17로 거부한다), `order`는 모두 달라야 하며, 모든 의존은 합친 행에 있고 자기보다 작은 `order`여야 한다(이것이 의존 순서 검사다 — 순환도 여기서 걸린다). 위반은 `Incompatible`이다. 그 뒤 지금처럼 표 검사(`Initialize`의 앞 행 불변식)를 한다.
 4. `Prepare`(3.13절)는 표 순서로 각 행을 자기 manifest 폴더 + `file`로 연다. 크기 대조·진입점은 같다. report의 `requested`는 실행 파일 manifest 실패면 그 파일 이름, 플러그인 manifest(와 그 행) 실패면 플러그인 이름이다(manifest 파일 이름이 모두 같아서다 — 경로는 문구에).
@@ -540,6 +540,8 @@ ML5를 둘로 나눈다. **ML5a**는 엔진 저장소 타깃이 켠 엔진 플�
 - Modular 타깃이 플러그인을 켜도 거부하지 않는다([빌드 타깃](BuildTargets.ko.md) BD41 개정). 플러그인 모듈(기술자의 `modules`에 있는 모듈 — 플러그인 모듈 규칙)은 공유 라이브러리를 자기 플러그인 binaries 폴더에 링크한다. 모듈 입력에 그 폴더를 정하는 칸(플러그인 상대 경로)을 더하고 기술자 모듈 처리가 채운다(규칙은 채우지 않는다).
 - rpath: 공유 라이브러리·실행 파일이 링크하는 공유 라이브러리가 자기와 다른 폴더에 있으면 그 폴더의 상대 경로(링크하는 바이너리 폴더 기준)를 rpath로 더한다(macOS `@loader_path/<상대 경로>`, Linux `$ORIGIN/<상대 경로>`). UE macOS 툴체인과 같다(`Programs/UnrealBuildTool/Platform/Mac/MacToolChain.cs:365` — 링크하는 라이브러리 폴더마다 `-rpath @loader_path/<상대 경로>`). 진입 스텁은 부트 모듈만 import하므로 그대로다.
 - manifest 쓰기: 플러그인 manifest를 먼저 쓰고 실행 파일 manifest를 마지막에 쓴다(각각 원자적 교체, 내용이 같으면 쓰지 않는다 — 실행 파일 manifest가 새 플러그인 manifest를 가리킨 뒤에야 바뀐다). `buildId` 재사용(MD13)은 실행 파일 manifest가 정하고 플러그인 manifest가 같은 값을 받는다.
+- 빌드 정보 ID(빌드 정보 생성 TU가 덮는 액션 범위)는 Modular 호스트도 Monolithic처럼 켠 플러그인 모듈을 포함한다(링크하지 않아도 그 코드가 바뀌면 ID가 바뀐다).
+- 서로 다른 플러그인이 같은 폴더를 쓰면 거부한다(플러그인 manifest가 폴더마다 하나다). 행 없는 공유 라이브러리 검사는 빌드 대상에서 닿는 모듈만 본다.
 - 빌드 보고서의 모듈 출력(`ModuleOutputs`)은 지금과 같다(Windows는 `lib`의 import 라이브러리, macOS·Linux는 공유 라이브러리 — 플러그인 모듈은 플러그인 폴더의 경로). 끈 플러그인의 옛 폴더는 지우지 않는다(실행 파일 manifest 목록에 없으면 읽지 않는다).
 - Windows export 수 진단(BS8d3)은 플러그인 라이브러리도 본다. Modular는 Asan을 거부하므로 Asan 런타임 복사는 바뀌지 않는다.
 - 플러그인 모듈의 export(BD27)는 엔진 모듈과 같다. 다른 모듈(시험 호스트·다른 플러그인)이 부르는 선언에 그 플러그인 모듈의 API 매크로를 붙인다.

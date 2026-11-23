@@ -15,6 +15,8 @@ using Rocks.Tooling.Common;
 /// <item>진입점 모듈의 공유 라이브러리마다 export 진입점 <c>RocksModuleEntry</c>가 있고, 진입점 매크로가 빠지면 링크 오류다.</item>
 /// <item>manifest: 행 순서·파일·크기·의존·단계·요청 시 적재 표지, 같은 입력의 다시 빌드는 <c>buildId</c>를 다시 쓰고 엔진 버전이 바뀌면 새로
 /// 만든다.</item>
+/// <item>플러그인 모듈(ModuleLoader 3.15절 ML5a): 플러그인 binaries 폴더·플러그인 manifest·실행 파일 manifest의 plugins·Monolithic 표 순서의
+/// order, 호스트는 직접 의존하는 플러그인 모듈만 import하고 다른 폴더를 넘는 적재가 된다.</item>
 /// <item>같은 픽스처의 Monolithic 빌드는 manifest가 없고 실행 파일이 표 TU·빌드 정보를 갖는다.</item>
 /// </list>
 /// </summary>
@@ -301,7 +303,8 @@ internal static class ModularManifestTests
         {
             JsonElement document = manifest.RootElement;
             Check(document.EnumerateObject().Select(property => property.Name)
-                    .SequenceEqual(["schema", "buildId", "engineVersion", "toolchainFingerprint", "modules"]), "manifest keys");
+                    .SequenceEqual(["schema", "buildId", "engineVersion", "toolchainFingerprint", "plugins", "modules"]), "manifest keys");
+            Check(document.GetProperty("plugins").GetArrayLength() == 0, "a target without plugins lists no plugin manifests");
             Check(document.GetProperty("schema").GetInt32() == ModuleManifests.Schema && document.GetProperty("engineVersion").GetString() == "2.4.6" &&
                 document.GetProperty("toolchainFingerprint").GetString()!.Length == 64, "manifest header");
             firstId = document.GetProperty("buildId").GetString()!;
@@ -315,7 +318,8 @@ internal static class ModularManifestTests
                 string name = row.GetProperty("name").GetString()!;
                 string file = Path.Combine(bin, row.GetProperty("file").GetString()!);
                 Check(row.EnumerateObject().Select(property => property.Name)
-                        .SequenceEqual(["name", "file", "size", "dependencies", "loadingPhase", "onRequest", "host"]), "row keys of " + name);
+                        .SequenceEqual(["name", "order", "file", "size", "dependencies", "loadingPhase", "onRequest", "host"]), "row keys of " + name);
+                Check(row.GetProperty("order").GetInt32() == Array.IndexOf(order, name), "row order of " + name + " is its table position");
                 Check(row.GetProperty("host").GetBoolean() == (name == "App"), "row host flag of " + name);
                 Check(File.Exists(file) && new FileInfo(file).Length == row.GetProperty("size").GetInt64(), "row file and size of " + name);
                 Check(row.GetProperty("onRequest").GetBoolean() == (name == "Dyn"), "row on-request flag of " + name);
@@ -376,6 +380,158 @@ internal static class ModularManifestTests
         Rejects(modular with { Modules = twoExecutables, Targets = [] }, "targets reach App, Other", "two Modular executables through every target");
         Rejects(modular with { EngineVersion = null }, "needs NativeBuildRequest.EngineVersion", "a Modular executable without an engine version");
         pass("modular manifest: an executable without Launch, two executables and a missing engine version are rejected");
+
+        // 플러그인 모듈(Docs/Design/ModuleLoader.ko.md 3.15절 ML5a): 켠 플러그인 모듈은 플러그인 binaries 폴더에 링크하고 플러그인마다 manifest를
+        // 쓰며, 실행 파일 manifest가 그 목록(plugins)을 싣는다. 행 order는 Monolithic 표 순서다. 호스트는 켠 플러그인 모듈(PluginModules)을
+        // 링크하지 않고 직접 의존하는 플러그인 모듈(Plug)만 import한다. Plug는 bin의 Lib를, 호스트는 플러그인 폴더의 Plug를 import한다.
+        Write("plug/include/plug/plug.h", "#pragma once\nROCKS_PLUG_API int PlugValue() noexcept;\n");
+        string plugSource = Write("plug/plug.cpp",
+            "#include <Core/Module/ModuleEntry.h>\n#include <lib/lib.h>\n#include <plug/plug.h>\nROCKS_IMPLEMENT_MODULE(Unused, Plug)\n" +
+            "int PlugValue() noexcept { return LibValue() - 2; }\n");
+        string optSource = Write("opt/opt.cpp", "#include <Core/Module/ModuleEntry.h>\nROCKS_IMPLEMENT_MODULE(Unused, Opt)\n");
+        string pluginMain = Write("app/plugin-main.cpp", """
+            #include <Core/Module/ModuleEntry.h>
+            #include <plug/plug.h>
+
+            ROCKS_IMPLEMENT_MODULE(Unused, App)
+
+            extern "C" FIXTURE_EXPORT int RocksApplicationDescription() noexcept;
+            extern "C" FIXTURE_EXPORT int RocksApplicationDescription() noexcept {
+                return PlugValue() == 5 ? 0 : 1;
+            }
+
+            """);
+        NativeModuleInput[] pluginModules =
+        [
+            .. modules.Where(module => module.Name is not "App" and not "Dyn"),
+            new()
+            {
+                Name = "Plug", Sources = [plugSource], PublicIncludeDirectories = [Path.Combine(fixture, "plug", "include")], PublicDependencies = ["Lib"],
+                Plugin = new("Plug", "Group/Plug")
+            },
+            new() { Name = "Opt", Sources = [optSource], PublicDependencies = ["Core"], Plugin = new("Opt", "Opt"), LoadingPhase = LoadingPhase.PostDefault },
+            new()
+            {
+                Name = "App", Kind = NativeModuleKind.Executable, Sources = [pluginMain], PublicDependencies = ["Plug", "Launch"], PluginModules = ["Plug", "Opt"]
+            }
+        ];
+        NativeBuildRequest plugged = modular with { OutputDirectory = Path.Combine(fixture, "out-plugins"), Modules = pluginModules };
+        NativeBuildResult withPlugins = await builder.BuildAsync(plugged);
+        Check(withPlugins.Succeeded, "Modular plugin fixture build failed: " + Failure(withPlugins));
+        NativePlatform platform = request.Toolchain.Platform;
+        string pluggedBin = Path.Combine(plugged.OutputDirectory, "bin");
+        string PluginFolder(string folder) =>
+            Path.Combine([plugged.OutputDirectory, "Plugins", .. folder.Split('/'), "Binaries", LinkTypes.PlatformDirectory(platform)]);
+        string Library(string module, string folder) =>
+            Path.Combine(folder, LinkTypes.SharedLibraryFileName("Fixture", module, platform, NativeConfiguration.Debug));
+        string plugLibrary = Library("Plug", PluginFolder("Group/Plug"));
+        string optLibrary = Library("Opt", PluginFolder("Opt"));
+        Check(File.Exists(plugLibrary) && File.Exists(optLibrary) && !File.Exists(Library("Plug", pluggedBin)),
+            "plugin modules link into their plugin binaries folders");
+        var orders = new Dictionary<string, int>(StringComparer.Ordinal);
+        string pluggedManifest = Path.Combine(pluggedBin, manifestName);
+        string pluggedId = BuildId(pluggedManifest);
+        using (JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(pluggedManifest)))
+        {
+            JsonElement document = manifest.RootElement;
+            (string, string)[] listed = [.. document.GetProperty("plugins").EnumerateArray()
+                .Select(entry => (entry.GetProperty("name").GetString()!, entry.GetProperty("manifest").GetString()!))];
+            string platformFolder = LinkTypes.PlatformDirectory(platform);
+            Check(listed.SequenceEqual([("Opt", $"../Plugins/Opt/Binaries/{platformFolder}/{manifestName}"),
+                ("Plug", $"../Plugins/Group/Plug/Binaries/{platformFolder}/{manifestName}")]),
+                "the executable manifest lists the plugin manifests by name: " + string.Join(", ", listed));
+            foreach (JsonElement row in document.GetProperty("modules").EnumerateArray())
+            {
+                orders[row.GetProperty("name").GetString()!] = row.GetProperty("order").GetInt32();
+            }
+        }
+
+        Check(!orders.ContainsKey("Plug") && !orders.ContainsKey("Opt"), "the executable manifest leaves out the plugin module rows");
+        foreach ((string module, string folder) in new[] { ("Plug", PluginFolder("Group/Plug")), ("Opt", PluginFolder("Opt")) })
+        {
+            using JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(folder, manifestName)));
+            JsonElement document = manifest.RootElement;
+            JsonElement[] rows = [.. document.GetProperty("modules").EnumerateArray()];
+            Check(document.GetProperty("buildId").GetString() == pluggedId && document.GetProperty("plugins").GetArrayLength() == 0 &&
+                rows.Length == 1 && rows[0].GetProperty("name").GetString() == module && !rows[0].GetProperty("host").GetBoolean() &&
+                new FileInfo(Library(module, folder)).Length == rows[0].GetProperty("size").GetInt64(),
+                "plugin manifest of " + module + ": same build id, no plugins, its own row and file size");
+            orders[module] = rows[0].GetProperty("order").GetInt32();
+        }
+
+        // Monolithic 표 순서: App의 링크 폐포(Core ← Lib ← Plug, Launch), 켠 플러그인 모듈(Opt), 실행 파일.
+        Check(orders.OrderBy(pair => pair.Value).Select(pair => pair.Key).SequenceEqual(["Core", "Lib", "Plug", "Launch", "Opt", "App"]) &&
+            orders.Values.Order().SequenceEqual(Enumerable.Range(0, orders.Count)),
+            "row orders follow the Monolithic module table: " + string.Join(", ", orders.OrderBy(pair => pair.Value).Select(pair => pair.Key + "=" + pair.Value)));
+        string[] pluggedHostImports = await FixtureImports(request, Library("App", pluggedBin));
+        Check(pluggedHostImports.Contains(Path.GetFileName(plugLibrary), StringComparer.OrdinalIgnoreCase) &&
+            !pluggedHostImports.Contains(Path.GetFileName(optLibrary), StringComparer.OrdinalIgnoreCase),
+            "the host imports the plugin module it depends on but not the other enabled plugin modules: " + string.Join(", ", pluggedHostImports));
+        // 적재: Windows는 로더처럼 order 순서로 먼저 연 라이브러리가 다른 폴더의 import를 푼다. macOS·Linux는 rpath로 호스트 하나만 연다.
+        var handles = new List<IntPtr>();
+        try
+        {
+            string[] preload = platform == NativePlatform.Windows
+                ? [Library("Core", pluggedBin), Library("Lib", pluggedBin), plugLibrary, Library("Launch", pluggedBin)]
+                : [];
+            foreach (string library in preload)
+            {
+                handles.Add(NativeLibrary.Load(library));
+            }
+
+            IntPtr host = NativeLibrary.Load(Library("App", pluggedBin));
+            handles.Add(host);
+            Check(NativeLibrary.TryGetExport(host, "RocksApplicationDescription", out IntPtr description) &&
+                Marshal.GetDelegateForFunctionPointer<HostCheck>(description)() == 0,
+                "the host module calls the plugin module in another folder, which calls a module in bin");
+        }
+        finally
+        {
+            handles.Reverse();
+            handles.ForEach(NativeLibrary.Free);
+        }
+
+        NativeBuildResult pluggedAgain = await builder.BuildAsync(plugged);
+        Check(pluggedAgain.Succeeded && pluggedAgain.ExecutedActions == 0 && BuildId(pluggedManifest) == pluggedId &&
+            BuildId(Path.Combine(PluginFolder("Opt"), manifestName)) == pluggedId, "an unchanged rebuild keeps every manifest and its build id");
+        // 끈 플러그인(Opt)의 옛 폴더는 남지만 실행 파일 manifest가 가리키지 않는다.
+        NativeBuildResult withoutOpt = await builder.BuildAsync(plugged with
+        {
+            Modules = [.. pluginModules.Where(module => module.Name is not "Opt" and not "App"),
+                pluginModules.Single(module => module.Name == "App") with { PluginModules = ["Plug"] }]
+        });
+        using (JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(pluggedManifest)))
+        {
+            Check(withoutOpt.Succeeded && File.Exists(Path.Combine(PluginFolder("Opt"), manifestName)) &&
+                manifest.RootElement.GetProperty("plugins").EnumerateArray().Select(entry => entry.GetProperty("name").GetString())
+                    .SequenceEqual(["Plug"]), "a disabled plugin's old folder stays but the executable manifest no longer lists it");
+        }
+
+        pass("modular manifest: plugin binaries folders, plugin manifests listed by the executable manifest, Monolithic row order, host links only " +
+            "the plugin modules it depends on");
+
+        // 입력 검사: 플러그인 폴더 모양, 플러그인 모듈이 있을 때 모듈 표 행이 없는 공유 라이브러리는 Launch 링크 폐포 안이어야 한다.
+        Rejects(plugged with
+        {
+            Modules = [.. pluginModules.Select(module => module.Name == "Opt" ? module with { Plugin = new("Opt", "../Opt") } : module)]
+        }, "must have a C identifier name and a relative folder", "a plugin folder outside the plugin root");
+        Rejects(plugged with
+        {
+            Modules = [.. pluginModules.Select(module => module.Name == "Opt" ? module with { Plugin = new("Plug", "Opt") } : module)]
+        }, "has modules in two folders", "one plugin in two folders");
+        Rejects(plugged with
+        {
+            Modules = [.. pluginModules.Select(module => module.Name == "Opt" ? module with { Plugin = new("Opt", "Group/Plug") } : module)]
+        }, "share the folder", "two plugins in one folder");
+        string rowless = Write("rowless/rowless.cpp", "int RowlessValue() noexcept { return 1; }\n");
+        // Plug가 의존해 빌드 대상에서 닿는 행 없는 모듈이다(닿지 않는 모듈은 보지 않는다).
+        Rejects(plugged with
+        {
+            Modules = [.. pluginModules.Select(module => module.Name == "Plug" ? module with { PublicDependencies = ["Lib", "Rowless"] } : module),
+                new() { Name = "Rowless", Sources = [rowless] }]
+        },
+            "without a module table row must be in the link closure of the launch module", "a row-less shared library outside the boot closure");
+        pass("modular manifest: plugin folders and row-less shared libraries are validated");
 
         // 같은 픽스처의 Monolithic 빌드는 manifest가 없고 실행 파일이 표 TU를 갖는다.
         NativeBuildRequest monolithic = modular with { OutputDirectory = Path.Combine(fixture, "out-monolithic"), LinkType = NativeLinkType.Monolithic };

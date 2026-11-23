@@ -54,12 +54,13 @@ Result<int32> Fail(CommandletOutput& output, Allocator& allocator, StringView co
 
 // 옵션의 프로젝트(없으면 현재 디렉터리에서 위로 찾은 것)로 layout을 연다. 실패하면 오류를 출력하고
 // 그 종료 코드를 failure에 둔다.
-bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView command,
-                 StringView project, ProjectLayout& layout, Result<int32>& failure) noexcept;
+ROCKS_ASSETCOMMANDLETS_API bool OpenProject(CommandletOutput& output, Allocator& allocator,
+                                            StringView command, StringView project,
+                                            ProjectLayout& layout, Result<int32>& failure) noexcept;
 
 // 에디터 패키지 색인·열기의 읽기 옵션이다(에디터 종류, 이 엔진의 버전 — 더 새 엔진의 패키지는
 // NewerVersion).
-PackageReadOptions IndexReadOptions() noexcept;
+ROCKS_ASSETCOMMANDLETS_API PackageReadOptions IndexReadOptions() noexcept;
 
 // 세션의 임포터 등록이다(7.1절 18 A2f1b — 타입 등록 뒤·서비스 만들기 전에 부른다): table(세션
 // TypeRegistry에 묶인 표)에 임포터를 등록하고 토큰을 tokens에 둔다(세션이 서비스 뒤에 해제한다).
@@ -82,7 +83,7 @@ struct AssetCommandContext {
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3b, ModuleLoader
 // 3.11절): 에셋 타입 모듈(AssetTypeModule — AssetRuntime은 그 의존)을 시작하고 이 TypeRegistry의
 // 타입 등록기를 붙인다. Name pool도 둔다. 소멸이 등록기를 떼고 Registry·pool을 닫는다.
-class AssetCommandTypes {
+class ROCKS_ASSETCOMMANDLETS_API AssetCommandTypes {
 public:
     // module은 시작할 에셋 타입 모듈이다(비면 AssetTypeModule).
     AssetCommandTypes(Allocator& allocator, ModuleLoader& modules, StringView module = {}) noexcept;
@@ -127,7 +128,7 @@ inline constexpr uint32 MillisecondsPerSecond = 1000;
 
 // --wait 값(10진 숫자만, 0–MaxWaitSeconds)을 밀리초로 푼다. 비어 있으면 0이다. 형식·범위 위반은
 // false다.
-bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept;
+ROCKS_ASSETCOMMANDLETS_API bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept;
 
 // 에셋 Registry의 문맥 id다(명령 하나의 에디터 집합).
 inline constexpr ContextId CommandletAssetContext{0x524f434b41535345ull, 1};
@@ -140,7 +141,7 @@ inline constexpr uint32 CommandletScanWorkers = 3;
 // 명령 하나 동안의 검색 scheduler다. 시작하지 못하거나(스레드 생성 실패) 논리 프로세서가 하나면
 // Get이 null이고 검색은 직렬이다(결과가 같다). allocator는 여러 스레드의 동시 호출을 받는다
 // (프로세스 기본 allocator).
-class ScanScheduler {
+class ROCKS_ASSETCOMMANDLETS_API ScanScheduler {
 public:
     explicit ScanScheduler(Allocator& allocator) noexcept;
     ~ScanScheduler() noexcept;
@@ -182,8 +183,9 @@ struct EditSession {
 
 // 프로젝트를 열고(write면 바로 잠그고 — 색인은 잠금 아래에서 만든다) 타입을 등록하고 서비스를
 // 만든다. 실패하면 `<명령>: <코드>: <대상>: <설명>` 줄을 쓰고 failure에 종료 코드를 둔다.
-bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView command,
-                 StringView project, StringView wait, bool write, EditSession& session,
-                 Result<int32>& failure) noexcept;
+ROCKS_ASSETCOMMANDLETS_API bool OpenSession(CommandletOutput& output, Allocator& allocator,
+                                            StringView command, StringView project, StringView wait,
+                                            bool write, EditSession& session,
+                                            Result<int32>& failure) noexcept;
 
 } // namespace rocks::commandlet_host

@@ -74,10 +74,10 @@ enum class ExchangeIssue : uint8 {
 };
 
 // 세부 규칙 이름이다(예: BlobHash → "BlobHash"). 모르는 값은 "Unknown"이다. 정적 수명이다.
-const char* ExchangeIssueName(ExchangeIssue issue) noexcept;
+ROCKS_UNREALEXCHANGE_API const char* ExchangeIssueName(ExchangeIssue issue) noexcept;
 
 // 코드의 수준이다(10.3절 표). 이 모듈이 내지 않는 코드는 Error다.
-ExchangeSeverity ExchangeSeverityOf(AssetDiagnosticCode code) noexcept;
+ROCKS_UNREALEXCHANGE_API ExchangeSeverity ExchangeSeverityOf(AssetDiagnosticCode code) noexcept;
 
 // 진단 하나다.
 struct ExchangeDiagnostic {
@@ -116,7 +116,7 @@ struct ExchangeDiagnosticInput {
 
 // 묶음 하나의 진단 목록이다. 상한 UnrealExchangeMaxDiagnostics를 넘는 진단은 담지 않고 개수만 센다.
 // 한 스레드에서 쓴다.
-class ExchangeDiagnostics {
+class ROCKS_UNREALEXCHANGE_API ExchangeDiagnostics {
 public:
     explicit ExchangeDiagnostics(Allocator& allocator) noexcept;
 
