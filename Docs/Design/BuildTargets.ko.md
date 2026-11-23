@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-23, 개정 25. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-23, 개정 26. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -421,7 +421,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 측정(2026-11-22, Windows Debug, `/FORCE:UNRESOLVED`는 측정에서만): Engine 시험을 Modular로 빌드하면 매크로를 붙일 선언이 364곳이다(빌드를 세 번 돌려 링크가 진행되며 드러난 것까지). 많은 순으로 AssetRuntime 68·Graphics 40·GraphicsTypes 32·AssetDatabase 29·Animation 25·SparksCompiler 23·AssetNugget 19·SparksVm 17·Mesh 16·RenderBase 15이고, Core 층 6곳(`Log`·`ModuleTypeRegistrations`·Trace 함수 둘·`LogicalProcessorCount`·HostConfig `FindEngineDirectory`)도 있다. 비공개 헤더는 AssetRuntime `PackageInternal.h`·EngineAssets `EngineAssetsInternal.h`·MeshTools `MeshBuildInternal.h` 셋이다. friend 재선언(`InstantiatePackages`·`ParseLogicalPath`·`LinkModule`·`LinkImports`·`TryParseExpectation`)에도 붙인다.
 - 분담: 모듈을 맡은 세션이 있으면 그 세션이 목록을 받아 붙인다(Animation·Mesh·MeshSource·MeshTools — rocks-ff, 55곳). 나머지는 이 단계가 붙이고 그 세션들에 알린다.
 - 시험 타깃 `EngineModular`: Modular Program 타깃, 실행 파일은 시험 모듈 `EngineModularTests` 하나(`EngineTests`와 같은 소스, 엔진 플러그인 시험 제외). 로컬 체인과 CI(Windows·macOS)가 `/t:Test`로 돈다(native 시험과 native 하니스 — BS8d6).
-- 엔진 플러그인 제외: `EngineTests`는 켠 엔진 플러그인의 시험 모듈(`PluginTestModules` — UnrealExchange)을 링크하는데, `Modular` 타깃의 플러그인은 플러그인 binary manifest(플러그인마다 `<Plugin>/Binaries/<Platform>/` — [모듈 로더](ModuleLoader.ko.md) MD12, ML5) 전까지 거부한다(BD41). 그래서 Modular 시험 모듈은 플러그인 시험을 빼고(`TestsModule.PluginTests`), 플러그인 모듈의 export는 ML5에서 한다. 플러그인 manifest를 지금 앞당기지 않은 것은 플러그인 활성 조건 해석·빌드 목록 대조와 한 묶음(ML5 — Rocks Studio)이기 때문이다.
+- 엔진 플러그인 제외: `EngineTests`는 켠 엔진 플러그인의 시험 모듈(`PluginTestModules` — UnrealExchange)을 링크하는데, `Modular` 타깃의 플러그인은 플러그인 binary manifest 전까지 거부했다(BD41). 그래서 Modular 시험 모듈은 플러그인 시험을 뺐다(`TestsModule.PluginTests`). 그때는 플러그인 manifest를 활성 조건 해석·빌드 목록 대조(ML5 — Rocks Studio)와 한 묶음으로 보았는데, 개정 26에서 ML5를 나눠 플러그인 manifest 기구만 ML5a([모듈 로더](ModuleLoader.ko.md) 3.15절 — `<출력>/Plugins/<상대 경로>/Binaries/<Platform>/`, MD23)로 앞당겼다. ML5a가 이 제외를 거두고 플러그인 모듈을 export한다.
 - 정적 모듈 표를 쓰는 Engine 시험(ModuleLoader 3.14절): `EngineAssets_ModuleEntryRegistersSettings`는 프로세스 로더 표(`test::ProcessModules()`·`EntryAt`)로 옮겼고, 정적 표로 새 로더를 만드는 `GpuTrace_RenderBaseModuleRegistersThroughTheTraceService`는 `ROCKS_MONOLITHIC`으로 감쌌다.
 - 타입 키(Core `Core/TypeKey.h`): 헤더의 변수 템플릿 주소를 타입 표지로 쓰던 세 곳은 Modular에서 이미지마다 주소가 달라 모듈 사이 조회가 갈라진다 — BD29가 금지한 주소 식별 정적 객체인데 템플릿 문맥이라 BS8c 검사가 보지 못했다. 그래서 BS8d4의 native 등록 타입 키 기구(`NativeTypeKeyTraits`·`ROCKS_DECLARE_NATIVE_TYPE_KEY`·`ROCKS_DEFINE_NATIVE_TYPE_KEY`·이미지 지역 표지 `NativeTypeIdentity`)를 ObjectRuntime에서 Core로 내리고 `TypeKeyOf<T>()`(선언한 export 키, 없으면 이미지 지역 표지 — 선언이 보이는지는 템플릿 기본 인자로 판정, BS8d4와 같은 ODR 이유)를 두었다. `NativeTypeKey`(리플렉션 생성 키 우선)는 그 위에 있다. 다른 모듈이 같은 키를 써야 하는 타입은 export 키를 선언한다.
   - Subsystem(`World/Subsystem.h` `SubsystemKeyOf`): 다른 모듈(시험·게임)의 `GetSubsystem<EngineAssetsSubsystem>()`이 nullptr였다(EngineModular 첫 실행에서 찾음 — UE는 `UClass*`). `EngineAssetsSubsystem`이 export 키를 선언한다.
@@ -429,7 +429,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - 콘솔 명령 대상(`Config/CVarCommand.h` `CommandContext::Target<T>`·`ConfigContext::BindCommand`): 대상을 묶는 모듈과 명령 함수의 모듈이 다르면 Modular에서 Fatal이었다. 대상 타입(`int32` 같은 기본 타입 포함)은 보통 한 모듈 안이라 이미지 지역 표지로 충분하고, 모듈을 넘으면 그 타입이 키를 선언한다. 옛 표지도 `const`였다.
   - 정책 `public-header-type-tag`: 엔진 소유 모듈 공개 헤더에서 같은 헤더의 변수 템플릿 선언과 그 주소(`&Name<`)가 함께 있으면 거부한다(`Core/TypeKey.h`만 예외). 어휘 검사라 다른 헤더에 선언한 변수 템플릿의 주소는 보지 못한다.
 - 이름 상수의 주소: 헤더의 `inline constexpr char[]`(예 `EngineStageReady`)도 이미지마다 사본이다(inline 함수 주소와 같은 이유 — BS8d5). 계약이 문자열 내용인 자리(크래시 기록 단계 이름)는 내용으로 비교한다(시험 `Engine_MarksRunStagesForCrashRecords`).
-- 한계: Engine 층 크래시·Launch 하니스는 BS8d6이 Modular에서도 돌린다(아래). 엔진 플러그인 모듈의 Modular 링크는 ML5다.
+- 한계: Engine 층 크래시·Launch 하니스는 BS8d6이 Modular에서도 돌린다(아래). 엔진 플러그인 모듈의 Modular 링크는 ML5a([모듈 로더](ModuleLoader.ko.md) 3.15절)다.
 
 **BS8d6 Modular 크래시·Launch 하니스 세부(개정 25).**
 - 범위: Modular 시험 타깃(`FoundationModular`·`EngineModular`)의 `/t:Test`가 native 시험 실행 파일 뒤에 native 하니스(크래시 수집·Launch·로그 크래시·컴파일 계약 시험 — `Rocks.ToolTests native`)도 돈다. Editor(BD17)가 Modular라 크래시 수집(도우미·덤프·cdb 스택)과 Launch 흐름(Modular 진입 — [모듈 로더](ModuleLoader.ko.md) 3.14절)을 Modular 실행 파일로 확인한다. host self·meta 검사는 링크 방식과 무관한 도구 검사라 지금처럼 Monolithic 시험 타깃만 돈다.
@@ -530,7 +530,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 
 **플러그인 시험(BD40).** 플러그인 모듈 시험은 `<플러그인>/Source/<모듈>/Tests/`에 둔다. EngineTests 규칙이 `PluginTestModules` 목록(`플러그인/모듈`)으로 모으고, EngineTests 타깃이 그 플러그인을 켠다. `Private/` include 루트는 `<플러그인>/Source`다. UE는 플러그인마다 `<플러그인>/Tests` 시험 타깃을 둘 수 있지만 Rocks는 시험 실행기를 하나로 유지한다.
 
-**거부(BD41).** SDK export 타깃은 엔진 플러그인을 켤 수 없다(설치 SDK는 엔진 플러그인을 싣지 않는다). `Modular` 타깃이 플러그인을 켜면 ML4(플러그인 binary manifest) 전까지 거부한다.
+**거부(BD41).** SDK export 타깃은 엔진 플러그인을 켤 수 없다(설치 SDK는 엔진 플러그인을 싣지 않는다). `Modular` 타깃이 플러그인을 켜는 것은 [모듈 로더](ModuleLoader.ko.md) ML5a(3.15절, 개정 26)부터 허용한다: 플러그인 모듈의 공유 라이브러리와 플러그인 manifest는 `<출력>/Plugins/<플러그인 상대 경로>/Binaries/<Platform>/`이고 실행 파일 manifest가 그 목록을 싣는다(MD23). Modular 호스트는 켠 플러그인 모듈을 링크하지 않고 manifest 행으로만 싣는다(BD36의 Modular 예외 — 링크하면 호스트가 모든 켠 플러그인을 import해 켜고 끄는 단위가 깨진다). 그 전에는 거부했다.
 
 **정책 경로(BD42).** `crt-number-conversion` 검사 루트에 `Engine/Plugins`를 더한다(교환 리더가 JSON 숫자를 읽는다). 시험 소스·시험 fixture 판정에 플러그인 경로 모양(`Engine/Plugins/**/Source/<모듈>/Tests`)을 더한다.
 
@@ -623,7 +623,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD38 | `NativeModuleInput.Type`을 두고, Release 배제는 경로 대신 이 칸으로 판정한다 | 권장안 |
 | BD39 | 엔진 모듈 → 플러그인 모듈 의존 금지(동적 포함), 끈 플러그인 모듈 의존은 오류(UE는 경고), 플러그인 사이는 `plugins` 선언 필요 | 권장안 |
 | BD40 | 플러그인 시험은 `<플러그인>/Source/<모듈>/Tests/`에 두고 EngineTests가 `PluginTestModules`로 모은다. 버린 안: 플러그인마다 시험 실행 파일 | 권장안 |
-| BD41 | SDK export 타깃의 엔진 플러그인 켜기 거부, `Modular` 타깃의 플러그인은 ML4 전까지 거부 | 권장안 |
+| BD41 | SDK export 타깃의 엔진 플러그인 켜기 거부. `Modular` 타깃의 플러그인은 ML5a(모듈 로더 MD23 — 플러그인 binaries 폴더·manifest)부터 허용(개정 26, 그 전에는 거부) | 권장안 |
 | BD42 | 정책 경로에 `Engine/Plugins` 모양 추가(`crt-number-conversion`·시험 소스·fixture 판정), 새 검사 `plugin-module-rules-base` | 권장안 |
 
 ## 6. 단계
@@ -749,3 +749,5 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 22 | 2026-11-22 | BS8d5 세부(사용자 결정 — 시험용 내부 export): Modular FoundationTests 측정(1,174 — 공개 359·내부 85), BD31 개정(시험은 호스트 하나, 순환 6개 모듈 때문에 모듈 공유 라이브러리 링크를 버림, 내부 선언 export·비공개 헤더 허용 목록), 시험 타깃 `FoundationModular`, 정적 모듈 표 시험, `constinit`과 dllimport 주소, inline 함수 주소·thread_local·constexpr 멤버 클래스 export 한계, 무할당 시험·부트 모듈 두 번 적재 한계, `ModularCheck`를 `FoundationModular`로 대체 |
 | 23 | 2026-11-22 | BS8e Engine 층 Modular export 세부: 측정 364곳(비공개 헤더 셋, friend 재선언), 세션 분담, 시험 타깃 `EngineModular`(시험 모듈 `EngineModularTests`, 엔진 플러그인 시험 제외 — 플러그인 Modular는 ML5), 정적 모듈 표 Engine 시험 둘, 타입 키 기구를 Core `TypeKeyOf`로(Subsystem·렌더 설정 참조·콘솔 명령 대상), 정책 `public-header-type-tag`, 이름 상수 주소, BD27 inline 멤버 예외 |
 | 24 | 2026-11-23 | 3.1절에 타깃 속성 `CompanionTargets`를 더했다(셰이더 시스템 SC14 — 동반 프로그램 타깃을 같은 빌드·출력 폴더에, Monolithic만). |
+| 25 | 2026-11-23 | BS8d6 Modular 크래시·Launch 하니스 세부(3.8절): Launch 시험 프로그램의 Modular 타깃 따로(`LaunchProbeModular`·`LaunchWindowedProbeModular`), 시험 동반 타깃 `TargetRules.TestPrograms`(`--output`이면 형제 출력, `CompanionTargets`와 별개), cdb 모듈 이름 `--host-module`, 도우미 실패 주입·내장 진입 시험은 Monolithic만, 시험 실행기 이름, 정적 소멸 없는 종료 결함 수정(`ExitProcessWithoutTeardown`) |
+| 26 | 2026-11-23 | BD41 개정: `Modular` 타깃의 플러그인을 [모듈 로더](ModuleLoader.ko.md) ML5a(3.15절, MD23 — 플러그인 binaries 폴더·manifest)부터 허용, Modular 호스트는 켠 플러그인 모듈을 링크하지 않음(BD36 예외), BS8e의 엔진 플러그인 시험 제외를 거둠 |
