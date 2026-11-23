@@ -1911,6 +1911,23 @@ TEST(Engine_DestroyWorldDefersOnlyDuringWorldTickAndWorldTeardown) {
         REQUIRE(engine.RunFrame());
         CHECK(stepCount == 0);
         CHECK(engine.WorldCount() == 0);
+
+        // 5단계에서 파괴하는 World의 정리 hook이 뒤에 만든 World 파괴를 요청해도 같은 5단계에서
+        // 끝난다(리뷰 보강 — 한 바퀴 뒤 다시 돈다).
+        desc.name = "First";
+        auto first = engine.CreateWorld(desc);
+        desc.name = "Second";
+        desc.subsystems = {};
+        auto second = engine.CreateWorld(desc);
+        REQUIRE(first && second);
+        REQUIRE(first.Value()->SpawnActor<TickingActor>());
+        TickingActor::destroyEngine = &engine;
+        TickingActor::destroyTarget = first.Value();
+        TeardownDestroyerSubsystem::engine = &engine;
+        TeardownDestroyerSubsystem::target = second.Value();
+        REQUIRE(engine.RunFrame());
+        CHECK(TeardownDestroyerSubsystem::engine == nullptr);
+        CHECK(engine.WorldCount() == 0);
         REQUIRE(engine.Shutdown());
     }
 

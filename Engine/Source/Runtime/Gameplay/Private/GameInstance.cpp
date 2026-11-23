@@ -1,7 +1,10 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/ScopeExit.h>
+#include <Gameplay/GameDirector.generated.h>
+#include <Gameplay/GameDirector.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstanceClient.h>
+#include <Gameplay/GameplayWorldSubsystem.h>
 #include <Gameplay/LocalPlayer.generated.h>
 #include <Platform/Fatal.h>
 
@@ -19,7 +22,7 @@ void LogOpenFailure(StringView map, const char* stage, ErrorCode error) noexcept
 } // namespace
 
 GameInstance::GameInstance(Allocator& allocator) noexcept
-    : subsystems_(allocator), localPlayers_(allocator), pendingName_(allocator) {
+    : localPlayers_(allocator), pendingName_(allocator), pendingOptions_(allocator) {
 }
 
 GameInstance::~GameInstance() noexcept = default;
@@ -131,17 +134,21 @@ void GameInstance::RemoveAllLocalPlayers() noexcept {
 
 OuterSubsystemLookup GameInstance::SubsystemLookup() const noexcept {
     OuterSubsystemLookup lookup;
-    lookup.context = this;
+    // context는 client가 소유한 묶음이다(GameInstance 객체를 빌리지 않는다 — client는 Engine보다
+    // 오래 살므로 World Shutdown까지 유효하다).
+    lookup.context = services_;
     lookup.find = [](const void* context, SubsystemKey key) noexcept -> void* {
         // 계층 순서(16.3절): GameInstance Subsystem → EngineSubsystem. 각 계층의 Base 포인터를
         // 돌려주고 타입 도우미(GetGameInstanceSubsystem·GetEngineSubsystem)가 되돌린다. 키는
         // 타입마다 하나라 다른 계층과 겹치지 않는다.
-        const GameInstance& instance = *static_cast<const GameInstance*>(context);
-        if (GameInstanceSubsystem* found = instance.subsystems_.Find(key)) {
-            return found;
+        const auto& services = *static_cast<const detail::GameInstanceServices*>(context);
+        if (services.visible) {
+            if (GameInstanceSubsystem* found = services.subsystems.Find(key)) {
+                return found;
+            }
         }
 
-        return instance.engine_->FindSubsystem(key);
+        return services.engine->FindSubsystem(key);
     };
     return lookup;
 }
@@ -162,6 +169,10 @@ Result<void> GameInstance::OpenWorld(const MapDesc& map) noexcept {
             return copied;
         }
 
+        if (auto copied = pendingOptions_.TryAssign(map.options); !copied) {
+            return copied;
+        }
+
         if (hasPendingOpen_) {
             Log::Warning(LogGameplay, "OpenWorld {Map} replaces an earlier pending request",
                          map.name);
@@ -169,6 +180,7 @@ Result<void> GameInstance::OpenWorld(const MapDesc& map) noexcept {
 
         pendingMap_ = map;
         pendingMap_.name = pendingName_.View();
+        pendingMap_.options = pendingOptions_.View();
         hasPendingOpen_ = true;
         return Result<void>::Success();
     }
@@ -186,13 +198,20 @@ Result<void> GameInstance::RunPendingOpen() noexcept {
     hasPendingOpen_ = false;
     // OpenWorldNow 안의 정리 hook이 새 요청을 남길 수 있어 복사해서 쓴다.
     String name(pendingName_.GetAllocator());
-    if (auto copied = name.TryAssign(pendingName_.View()); !copied) {
+    String options(pendingOptions_.GetAllocator());
+    auto copied = name.TryAssign(pendingName_.View());
+    if (copied) {
+        copied = options.TryAssign(pendingOptions_.View());
+    }
+
+    if (!copied) {
         LogOpenFailure(pendingName_.View(), "Request", copied.Error());
         return copied;
     }
 
     MapDesc map = pendingMap_;
     map.name = name.View();
+    map.options = options.View();
     return OpenWorldNow(map);
 }
 
@@ -221,7 +240,9 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     WorldCreateDesc desc;
     desc.name = map.name;
     desc.timeStep = config_->timeStep;
-    desc.subsystems = config_->worldSubsystems;
+    // 설정 목록 + GameplayWorldSubsystem(client 소유 — World가 Shutdown까지 Span을 쥔다).
+    desc.subsystems = Span<const WorldSubsystemType>(services_->worldSubsystems.Data(),
+                                                     services_->worldSubsystems.Size());
     desc.kind = map.kind;
     desc.outerSubsystems = SubsystemLookup();
     desc.beginPlay = false;
@@ -238,6 +259,12 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
         (void)destroyed;
         return Result<void>::Failure(error);
     };
+
+    // GameDirector는 배치 Actor보다 먼저다(21.2절 6단계).
+    const char* stage = "Director";
+    if (auto directed = SpawnDirector(*world, map, stage); !directed) {
+        return fail(stage, directed.Error());
+    }
 
     if (map.populate != nullptr) {
         if (auto populated = map.populate(*world, map.populateContext); !populated) {
@@ -257,8 +284,51 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     return Result<void>::Success();
 }
 
-GameInstanceClient::GameInstanceClient(const GameInstanceConfig& config) noexcept
-    : config_(config) {
+Result<void> GameInstance::SpawnDirector(World& world, const MapDesc& map,
+                                         const char*& stage) noexcept {
+    // 19.3절: Game·Tryout World이고 Client가 아닐 때만 만든다(UE SetGameMode — 서버·standalone).
+    if ((map.kind != WorldKind::Game && map.kind != WorldKind::Tryout) ||
+        netMode_ == NetMode::Client) {
+        return Result<void>::Success();
+    }
+
+    // 타입 우선순위: 맵 → 프로젝트 기본 → GameDirector, 마지막에 GameInstance override.
+    stage = "Director";
+    TypeId type = map.directorType != TypeId{}               ? map.directorType
+                  : config_->defaultDirectorType != TypeId{} ? config_->defaultDirectorType
+                                                             : ObjectTypeIdOf<GameDirector>();
+    type = OverrideDirectorType(type);
+    auto derived = engine_->Types().IsA(type, ObjectTypeIdOf<GameDirector>());
+    if (!derived || !derived.Value()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto spawned = world.SpawnActorDeferred(type);
+    if (!spawned) {
+        return Result<void>::Failure(spawned.Error());
+    }
+
+    // options를 먼저 보관하고 FinishSpawning 전에 InitGame(UE InitGame — GameState는 아직 없다).
+    stage = "InitGame";
+    auto initialized =
+        world.With<GameDirector>(spawned.Value(), [&](GameDirector& director) noexcept {
+            if (auto copied = director.options_.TryAssign(map.options); !copied) {
+                return copied;
+            }
+
+            return director.InitGame(map.name, director.Options());
+        });
+    if (!initialized) {
+        return initialized;
+    }
+
+    stage = "FinishSpawning";
+    return world.FinishSpawning(spawned.Value());
+}
+
+GameInstanceClient::GameInstanceClient(Allocator& allocator,
+                                       const GameInstanceConfig& config) noexcept
+    : config_(config), services_(allocator) {
 }
 
 GameInstanceClient::~GameInstanceClient() {
@@ -269,6 +339,30 @@ GameInstanceClient::~GameInstanceClient() {
 
 Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     engine_ = &engine;
+    services_.engine = &engine;
+    // OpenWorld가 만드는 World의 Subsystem 목록이다: 설정 목록 + GameplayWorldSubsystem(19.5절 —
+    // 설정에 이미 있으면 더하지 않는다).
+    services_.worldSubsystems.Clear();
+    bool hasGameplay = false;
+    for (const WorldSubsystemType& type : config_.worldSubsystems) {
+        hasGameplay = hasGameplay || type.key == SubsystemKeyOf<GameplayWorldSubsystem>();
+    }
+
+    auto listed = services_.worldSubsystems.TryReserve(config_.worldSubsystems.Size() + 1);
+    for (usize index = 0; listed && index < config_.worldSubsystems.Size(); ++index) {
+        listed = services_.worldSubsystems.TryPushBack(config_.worldSubsystems[index]);
+    }
+
+    if (listed && !hasGameplay) {
+        listed = services_.worldSubsystems.TryPushBack(
+            MakeSubsystemType<WorldSubsystem, GameplayWorldSubsystem>("Gameplay"));
+    }
+
+    if (!listed) {
+        engine_ = nullptr;
+        return listed;
+    }
+
     ObjectRegistry& objects = engine.Objects();
     const TypeId type = config_.gameInstanceType != TypeId{} ? config_.gameInstanceType
                                                              : ObjectTypeIdOf<GameInstance>();
@@ -286,6 +380,7 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     auto started = WithInstance([&](GameInstance& game) noexcept -> Result<void> {
         game.engine_ = &engine;
         game.config_ = &config_;
+        game.services_ = &services_;
         game.netMode_ = config_.netMode;
         // 2) OnInit(UE ReceiveInit) → 3) GameInstance Subsystem → 4) OnPostInit.
         if (auto init = game.OnInit(); !init) {
@@ -294,13 +389,16 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
             return init;
         }
 
-        if (auto subsystems = game.subsystems_.Initialize(config_.subsystems, game); !subsystems) {
+        detail::GameInstanceServices& services = *game.services_;
+        if (auto subsystems = services.subsystems.Initialize(config_.subsystems, game);
+            !subsystems) {
             Log::Error(LogGameplay, "GameInstance subsystems failed to initialize: {Error}",
                        ErrorCodeName(subsystems.Error()));
             return subsystems;
         }
 
-        for (const SkippedSubsystem& skipped : game.subsystems_.Skipped()) {
+        services.visible = true;
+        for (const SkippedSubsystem& skipped : services.subsystems.Skipped()) {
             if (skipped.reason == SubsystemSkipReason::MissingDependency) {
                 Log::Warning(LogGameplay,
                              "Skipped game instance subsystem {Subsystem}: dependency "
@@ -312,7 +410,8 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
         if (auto postInit = game.OnPostInit(); !postInit) {
             Log::Error(LogGameplay, "GameInstance OnPostInit failed: {Error}",
                        ErrorCodeName(postInit.Error()));
-            game.subsystems_.Deinitialize(game);
+            services.visible = false;
+            services.subsystems.Deinitialize(game);
             return postInit;
         }
 
@@ -321,7 +420,8 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
             if (auto player = game.CreateLocalPlayer(0); !player) {
                 Log::Error(LogGameplay, "Initial local player could not be created: {Error}",
                            ErrorCodeName(player.Error()));
-                game.subsystems_.Deinitialize(game);
+                services.visible = false;
+                services.subsystems.Deinitialize(game);
                 return Result<void>::Failure(player.Error());
             }
         }
@@ -355,6 +455,20 @@ Result<void> GameInstanceClient::OnEngineReady(Engine&) noexcept {
     });
 }
 
+void GameInstanceClient::OnWorldDestroyed(Engine&, World& world) noexcept {
+    if (!instance_.IsValid()) {
+        return;
+    }
+
+    // 누가 DestroyWorld를 불렀든 현재 World를 비운다(남은 포인터 방지 — 18.6절).
+    auto cleared = WithInstance([&world](GameInstance& game) noexcept {
+        if (game.currentWorld_ == &world) {
+            game.currentWorld_ = nullptr;
+        }
+    });
+    (void)cleared;
+}
+
 void GameInstanceClient::OnEngineTick(Engine&) noexcept {
     auto ran = WithInstance([](GameInstance& game) noexcept {
         game.inEngineTick_ = true;
@@ -384,7 +498,9 @@ void GameInstanceClient::OnEngineShutdown(Engine&) noexcept {
 
         game.OnShutdown();
         game.RemoveAllLocalPlayers();
-        game.subsystems_.Deinitialize(game);
+        // 정리 전에 조회 창에서 감춘다(Shutdown까지 창이 열린 Editor·Inactive World 대비).
+        game.services_->visible = false;
+        game.services_->subsystems.Deinitialize(game);
     });
     (void)stopped;
     // 5) 루트를 반환한다. 객체는 엔진 Registry 최종 GC가 회수한다.

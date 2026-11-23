@@ -21,6 +21,7 @@ internal static class InputValidation
     {
         RequireAbsoluteRoots(request);
         ValidateLinkType(request);
+        ValidateModuleTypes(request);
         if (request.MaxParallelism < 1 || request.MaxParallelism > ProcessRunner.MaximumConcurrentProcesses)
         {
             throw new ArgumentOutOfRangeException(nameof(request.MaxParallelism),
@@ -214,6 +215,38 @@ internal static class InputValidation
                     throw new ArgumentException($"Module {module.Name}: define '{define}' contains an absolute path; " +
                         "declare external files as inputs (include directories, AdditionalInputs, PrebuiltLibraries) instead.");
                 }
+            }
+        }
+    }
+
+    // 모듈 type(Docs/Design/BuildTargets 3.3절 BS2b)이다. 빌드 대상(없으면 전부)에서 링크 의존·플러그인 모듈·동적 모듈로 닿는 모듈은
+    // 이 타깃·구성에 들어갈 수 있는 type이어야 한다. 기술자 모듈은 먼저 걸러지므로 걸리는 것은 엔진 모듈과 SDK 모듈이다.
+    private static void ValidateModuleTypes(NativeBuildRequest request)
+    {
+        if (!Enum.IsDefined(request.Target.Type))
+        {
+            throw new ArgumentException($"Target: unsupported target type {(int)request.Target.Type}.");
+        }
+
+        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in request.Modules)
+        {
+            if (!Enum.IsDefined(module.Type))
+            {
+                throw new ArgumentException($"Module {module.Name}: unsupported module type {(int)module.Type}.");
+            }
+
+            byName.TryAdd(module.Name, module);
+        }
+
+        HashSet<string> reached = LinkClosure.Reachable(request.Targets.Count == 0 ? byName.Keys : request.Targets, byName);
+        foreach (string name in reached.Order(StringComparer.Ordinal))
+        {
+            NativeModuleInput module = byName[name];
+            if (ModuleTypeRules.ExclusionReason(request.Target, request.Configuration, module.Type) is { } reason)
+            {
+                throw new ArgumentException($"Module {module.Name} has type {module.Type}, but the build reaches it: {reason} " +
+                    "(Docs/Design/BuildTargets section 3.3).");
             }
         }
     }

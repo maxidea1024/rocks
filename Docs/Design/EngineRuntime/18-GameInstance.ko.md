@@ -17,7 +17,7 @@
 ### 18.2 GameInstance
 
 - 엔진 Registry(4.1절)의 리플렉션 클래스 `GameInstance : Object`다. 게임은 파생 클래스를 만들고, 실행 파일이 `EngineConfig::client`에 `GameInstanceClient`(Gameplay 모듈의 `EngineClient` 구현, 6절)를 넘기며 GameInstance 타입을 지정한다.
-- 소유: LocalPlayer 목록(리플렉션 필드 `ObjectRefArray<LocalPlayer>` — 강한 GC 간선, UE `LocalPlayers`), GameInstance Subsystem 묶음, 현재 게임 World의 Engine World 식별자, 기본 맵 설정(18.5절).
+- 소유: LocalPlayer 목록(리플렉션 필드 `ObjectRefArray<LocalPlayer>` — 강한 GC 간선, UE `LocalPlayers`), 현재 게임 World 포인터(누가 `Engine::DestroyWorld`로 지워도 `EngineClient::OnWorldDestroyed`가 비운다 — 18.6절), 기본 맵 설정(18.5절). GameInstance Subsystem 묶음은 client가 소유한다(18.6절).
 - hook(사용자 파생이 재정의): `OnInit()`(GameInstance Subsystem 전 — UE `ReceiveInit` 자리), `OnPostInit()`(GameInstance Subsystem 뒤 — C++ 파생이 `Super::Init()` 뒤에 두던 코드 자리), `OnStart()`, `OnShutdown()`. 엔진 쪽 순서는 아래로 고정한다.
 - `EngineClient`에 hook `OnEngineReady()`를 더한다(Engine 변경, S10). Engine이 Running이 되고 PostEngineInit 모듈이 시작된 **뒤** 한 번 부른다. `OnEngineStart`는 Engine이 Initializing일 때 불리고(`Engine.cpp:293–325`) `CreateWorld`는 Running에서만 되므로(`Engine.cpp:386–389`), 맵 열기는 `OnEngineReady`로 간다(UE `UGameEngine::Start`와 같은 자리).
 
@@ -81,11 +81,13 @@ S10은 GameDirector·Controller가 없는 범위(S11·S12가 붙인다)까지 �
 | `GetGameInstanceSubsystem<T>(const World&)` | 바깥 조회 창으로 찾는다(16.3절). 창은 GameInstance Subsystem을 먼저 보고 없으면 EngineSubsystem으로 넘긴다 |
 
 - **빌림 규칙.** GameInstance·LocalPlayer는 엔진 Registry 객체라 Borrow 범위에서만 쓴다(4.2절). client는 hook을 부를 때마다 엔진 Registry에서 빌리고, 게임 코드는 hook·Subsystem 안(소유자 참조를 받는 자리)이나 `WithInstance`·`WithLocalPlayer` 안에서만 쓴다. Subsystem 자체는 평범한 C++ 객체라 묶음이 정리될 때까지 포인터가 유효하다.
+- **client 소유 묶음.** GameInstance Subsystem 묶음과 World 바깥 조회 창의 context(`detail::GameInstanceServices`)는 GameInstance 객체가 아니라 client가 소유한다(client는 생성 때 allocator를 받는다). 조회 창이 엔진 Registry 객체를 빌리지 않고 읽게 하려는 것이다. 또 Editor·Inactive World는 EndPlay가 없어 창이 World `Shutdown`까지 열려 있는데, 이때도 정리된 묶음만 보게 한다. GameInstance Subsystem은 정리 직전에 창에서 감춘다.
+- **현재 World 추적.** `EngineClient::OnWorldDestroyed(Engine&, World&)`(Engine 변경 — UE `FWorldDelegates::OnPreWorldFinishDestroy` 자리)를 World 정리 뒤, 저장소를 놓기 직전에 부른다. 게임 코드가 현재 World를 직접 파괴해도 GameInstance가 포인터를 비운다. 포인터 비교로 살아 있는지 확인하는 방법은 쓰지 않았다. 새 World가 같은 주소에 다시 할당될 수 있어서다.
 - **소유.** client가 GameInstance의 `RootRef`를 쥐고, GameInstance는 LocalPlayer를 `ObjectRefArray` 필드(강한 간선, Registry API로만 고친다)로 든다. 메타 컴파일러는 `ROCKS_NATIVE` 안의 강한 참조(`RootRef`)를 거부한다(RMC2205) — 객체가 객체를 붙잡는 것은 GC가 보는 간선이어야 해서다. 제거한 LocalPlayer와 반환한 GameInstance의 회수는 엔진 Registry 최종 GC(6절 종료 순서)다.
 - **CreateLocalPlayer.** `DedicatedServer`는 `InvalidArgument`(UE `GameInstance.cpp:854–861`), 같은 `controllerId`가 이미 있으면 `AlreadyExists`(UE도 같은 ControllerId를 거부 — `GameInstance.cpp:865–868`, 화면 분할 상한은 viewport가 생길 때). LocalPlayer Subsystem 초기화가 실패하면 LocalPlayer를 만들지 않은 것으로 되돌린다. 로컬 번호는 목록 위치이며 `RemoveLocalPlayer` 뒤 앞당겨진다(UE `LocalPlayers` 배열 index와 같다).
 - **OpenWorld 실패.** 새 World 생성·`populate`·`BeginPlay` 중 하나가 실패하면 새 World를 `DestroyWorld`로 정리하고 실패를 돌려주며, 현재 World는 없음이 된다(이전 World는 이미 정리했다). Editor·Inactive 종류는 `BeginPlay`를 부르지 않는다(16.4절).
 - **로그(LogGameplay).** OpenWorld 시작·끝(Info), 실패(Error — 단계 이름), 미룬 요청을 덮어쓴 경우(Warning).
-- **Engine 변경(S10).** `EngineClient::OnEngineReady`(Running이 된 뒤 한 번, 실패하면 Engine이 정상 종료 순서로 정리한 뒤 `Failed`로 끝나고 `Initialize`가 그 오류를 돌려준다), `DestroyWorld`는 World Tick(④) 중과 다른 World 파괴 중(정리 hook이 부른 경우)에만 미룬다.
+- **Engine 변경(S10).** `EngineClient::OnEngineReady`(Running이 된 뒤 한 번, 실패하면 Engine이 정상 종료 순서로 정리한 뒤 `Failed`로 끝나고 `Initialize`가 그 오류를 돌려준다), `DestroyWorld`는 World Tick(④) 중과 다른 World 파괴 중(정리 hook·`OnWorldDestroyed`가 부른 경우)에만 미룬다. ⑤는 한 바퀴에 하나라도 파괴했으면 다시 돌아, 파괴 중에 미룬 것도 같은 프레임에 끝낸다(외부 보유권으로 실패한 것은 프레임마다 한 번만 시도). `OnWorldDestroyed`를 더한다(위).
 
 ### 18.7 시험(완료 조건)
 

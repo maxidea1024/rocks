@@ -10,6 +10,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::GameDirector",
+      "id": "450f9400add247c1810372934c5dc283",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::GameInstance",
       "id": "bef053838e674c3382f79015d9d0d037",
       "aliases": [],
@@ -17,8 +24,29 @@
     },
     {
       "kind": "type",
+      "name": "rocks::GameState",
+      "id": "2f6dc8c1af634743b681726194b56d09",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::LocalPlayer",
       "id": "b8b4e06e3e304fdb95497cf7cf54d741",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlayerStart",
+      "id": "58dd45b5353a41248c016246635a75a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlayerState",
+      "id": "ccb9bb44b464419e9ebf260c7119fc3e",
       "aliases": [],
       "retired": false
     }

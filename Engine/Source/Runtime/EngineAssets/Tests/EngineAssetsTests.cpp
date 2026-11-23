@@ -592,7 +592,7 @@ public:
 
     void Deinitialize(World&) noexcept override {
         WorldTicket.deinitInFrame = WorldTicket.engine->IsInFrame();
-        // 5단계(World 파괴)도 프레임 안이라 동기 로드를 거절한다.
+        // client Tick(3단계)의 즉시 World 파괴도 프레임 안이라 동기 로드를 거절한다.
         auto blocking =
             WorldTicket.engine->GetSubsystem<EngineAssetsSubsystem>()->Manager().LoadBlocking(
                 RequestOf(2), "EngineAssetsTests.WorldDeinit");
@@ -604,7 +604,8 @@ private:
     LoadTicket ticket;
 };
 
-// 1번 프레임에 World를 만들고 2번 프레임에 파괴를 요청하는 client다(파괴는 그 프레임 5단계).
+// 1번 프레임에 World를 만들고 2번 프레임에 파괴하는 client다(World Tick 밖이라 그 자리에서 파괴한다
+// — Docs/Design/EngineRuntime 18.5절).
 class WorldClient final : public EngineClient {
 public:
     void OnEngineTick(Engine& engine) noexcept override {
@@ -629,10 +630,10 @@ public:
 
 } // namespace
 
-// World가 쥔 티켓(11.8절 5·6): World Subsystem이 요청한 티켓은 World 파괴(프레임 5단계 — 그동안
-// IsInFrame은 참이고 LoadBlocking은 WrongContext다)가 놓고, 다음 프레임 Pump가 아직 끝나지 않은 그
-// 요청을 취소해 callback이 Cancelled를 한 번 받는다(World가 사라진 뒤의 전달). 전제: 요청은 1번
-// 프레임 client Tick의 World 생성에서 냈으므로 2번 프레임 Pump가 허가해 IO를 내고(Pump는 완료를
+// World가 쥔 티켓(11.8절 5·6): World Subsystem이 요청한 티켓은 World 파괴(2번 프레임 client Tick —
+// 그동안 IsInFrame은 참이고 LoadBlocking은 WrongContext다)가 놓고, 다음 프레임 Pump가 아직 끝나지
+// 않은 그 요청을 취소해 callback이 Cancelled를 한 번 받는다(World가 사라진 뒤의 전달). 전제: 요청은
+// 1번 프레임 client Tick의 World 생성에서 냈으므로 2번 프레임 Pump가 허가해 IO를 내고(Pump는 완료를
 // 먼저 거두고 허가가 IO를 낸다 — 그 Pump 안에서는 끝나지 않는다), 3번 프레임 Pump는 완료를 거둔
 // 뒤 공개 전에 취소를 확인한다. 그래서 요청은 끝나기 전에 취소된다 — IO 속도와 무관하다.
 TEST(EngineAssets_WorldReleasedTicketIsCancelled) {

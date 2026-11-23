@@ -18,7 +18,7 @@ namespace rocks {
 //   GameInstanceConfig game;
 //   game.defaultMap.name = "Arena";
 //   game.defaultMap.populate = &PopulateArena;
-//   GameInstanceClient client(game);
+//   GameInstanceClient client(allocator, game);
 //   EngineConfig config;
 //   config.client = &client;
 //   engine.Initialize(config);                     // 여기서 Arena World가 BeginPlay까지 열린다
@@ -27,8 +27,8 @@ namespace rocks {
 // 스레드: 엔진 게임 스레드 전용이다. client는 Engine보다 오래 살아야 한다.
 class ROCKS_GAMEPLAY_API GameInstanceClient final : public EngineClient {
 public:
-    // config는 client보다 오래 살아야 한다.
-    explicit GameInstanceClient(const GameInstanceConfig& config) noexcept;
+    // allocator(GameInstance Subsystem 묶음)와 config는 client보다 오래 살아야 한다.
+    GameInstanceClient(Allocator& allocator, const GameInstanceConfig& config) noexcept;
     GameInstanceClient(const GameInstanceClient&) = delete;
     GameInstanceClient& operator=(const GameInstanceClient&) = delete;
     // OnEngineShutdown(또는 시작 실패 되돌림)이 GameInstance를 반환한 뒤여야 한다(아니면 Fatal).
@@ -38,6 +38,7 @@ public:
     Result<void> OnEngineReady(Engine& engine) noexcept override;
     void OnEngineTick(Engine& engine) noexcept override;
     void OnEngineShutdown(Engine& engine) noexcept override;
+    void OnWorldDestroyed(Engine& engine, World& world) noexcept override;
 
     // GameInstance handle이다(엔진 Registry, 시작 전·종료 뒤에는 null).
     ObjectHandle Instance() const noexcept {
@@ -60,6 +61,8 @@ public:
 
 private:
     const GameInstanceConfig& config_;
+    // GameInstance Subsystem 묶음·조회 창 context다(Engine보다 오래 살아야 해서 client가 소유).
+    detail::GameInstanceServices services_;
     Engine* engine_ = nullptr;
     RootRef<GameInstance> instance_;
 };
