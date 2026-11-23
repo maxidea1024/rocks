@@ -137,6 +137,8 @@ protected:
     void OnFrameworkEndPlay(EndPlayReason reason) noexcept final;
 
 private:
+    friend class Controller;
+
     ROCKS_NATIVE() String playerName_;
     ROCKS_NATIVE() ObjectHandle pawn_;
     ROCKS_NATIVE() int32 playerId_ = 0;

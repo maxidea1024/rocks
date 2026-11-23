@@ -10,6 +10,27 @@
     },
     {
       "kind": "type",
+      "name": "rocks::AiController",
+      "id": "48eb910cb4634ae38dc763bcb036262d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CameraDirector",
+      "id": "e6fb317d7637487aae72f552dd53f763",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Controller",
+      "id": "de221b0a116c47e2a1be5fdcd3d2c277",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::GameDirector",
       "id": "450f9400add247c1810372934c5dc283",
       "aliases": [],
@@ -33,6 +54,20 @@
       "kind": "type",
       "name": "rocks::LocalPlayer",
       "id": "b8b4e06e3e304fdb95497cf7cf54d741",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Pawn",
+      "id": "5a95428280aa4238b7bfa771df45c5d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlayerController",
+      "id": "4d112200159c4861a8781c9b302da99d",
       "aliases": [],
       "retired": false
     },

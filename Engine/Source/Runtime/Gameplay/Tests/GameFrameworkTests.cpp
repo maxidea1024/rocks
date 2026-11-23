@@ -481,6 +481,8 @@ TEST(GameFramework_InitGameStartPlayOrderAndDispatchContract) {
 // 모은다(Level 배열 순서와 무관).
 TEST(GameFramework_PlayerStatesNumberRegisterAndLeave) {
     Fixture fixture;
+    // 직접 Spawn 경로만 본다(전용 서버 — LocalPlayer·Login이 없다).
+    fixture.game.netMode = NetMode::DedicatedServer;
     REQUIRE(fixture.Start());
     World& world = *fixture.Current();
     const ObjectHandle gameState = fixture.Gameplay()->GameStateHandle();
