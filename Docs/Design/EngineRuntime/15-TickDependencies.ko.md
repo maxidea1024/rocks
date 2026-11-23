@@ -63,7 +63,7 @@ Result<TickPhase> GetTickEffectivePhase(TickPoint point) const noexcept;
 | Physics 단계 끝(고정 스텝 뒤, 프레임에 한 번) | (1) `PhysicsResults` 물리 결과 반영 → (2) `SkeletalPhysicsFinalize` | `TG_EndPhysics`(8절 표) |
 | LateUpdate 단계 시작 | (1) `Timers` 타이머·LifeSpan(17.5절) → (2) `TickableSubsystems`(16.5절) → (3) `CameraUpdate`(20.6절) | `LevelTick.cpp:1778–1883`: PostPhysics 뒤 타이머 → tickable → `UpdateCameraManager` → PostUpdateWork |
 
-- 자리마다 등록은 최대 하나이고(중복은 `AlreadyExists`), 비어 있으면 건너뛴다. 콜백은 `Result`를 돌려주며 실패는 그 프레임 Tick 실패로 집계한다(6절 Tick 실패 요약).
+- 자리마다 등록은 최대 하나이고(중복은 `AlreadyExists`), 비어 있으면 건너뛴다. 콜백은 `World::SetEngineStage(stage, function, user)`로 두고 World `Shutdown`이 모두 비운다. 콜백이 받는 `TickContext`는 그 프레임의 delta·pause 정보이며 `handle`·`fixedStepIndex`는 비어 있다. Physics 끝 두 단계는 고정 스텝이 0번인 프레임과 pause 중에도 프레임마다 한 번 돈다(pause 판단은 `context.paused`로 콜백이). 콜백 안에서 Spawn·Destroy·의존 선언 같은 World API를 부를 수 있다(Spawn은 다음 프레임 시작, Destroy는 곧바로 Tick에서 빠진다). 콜백은 `Result`를 돌려주며 실패는 그 프레임 Tick 실패로 집계한다(6절 Tick 실패 요약).
 - pause 중에는 `Timers`(게임 시계가 멈춤)·`TickableSubsystems`(16.5절)가 pause 정책을 따르고, `CameraUpdate`는 실행하지 않는다. UE는 pause 중 `!bIsPaused || ShouldPerformFullTickWhenPaused()`일 때만 `UpdateCameraManager`를 부른다(`LevelTick.cpp:1844–1851`, 기본 거짓). 디버그 단일 스텝 프레임은 pause가 아닌 것으로 본다(8절).
 
 ### 15.5 시험(완료 조건)

@@ -51,9 +51,11 @@ enum class WorldState : uint8 {
     Destroyed
 };
 
-// Actor·Component의 Tick 설정이다. 시작(OnStart) 시점에 등록한다. 시작 전에 생성자나 OnAwake에서
-// 채운다. 시작 후에는 SetTickEnabled와 World::SetTickPhase·SetTickPriority·SetTickInterval로 바꾼다
-// (어느 hook을 받을지는 바꿀 수 없다 — 의존 선언이 이 설정으로 hook 유무를 판정한다).
+// Actor·Component의 Tick 설정이다. 시작(OnStart) 시점에 등록한다. 어느 hook을
+// 받을지(tick·fixedTick· lateTick)는 **생성자에서** 정한다 — 의존 선언·부착 간선이 선언 시점의 이
+// 값으로 hook 유무를 판정하므로(UE bCanEverTick과 같다) OnAwake에서 켠 hook은 그 전에 건 의존·부착
+// 간선을 받지 못한다. phase·priority·interval은 시작 전 OnAwake에서 바꿔도 되고, 시작 후에는
+// SetTickEnabled와 World::SetTickPhase·SetTickPriority·SetTickInterval로 바꾼다.
 //
 // 사용 예(생성자에서):
 //   TickSettings& tick = PrimaryTick();

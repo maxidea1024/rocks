@@ -351,8 +351,8 @@ public:
     // 그 단계로 늦춰진다(다음 프레임부터). 순서는 다음 단계 경계부터 반영된다.
     // - 판정은 선언 시점의 TickSettings다: 그 hook을 켜지 않은 대상은 InvalidArgument(생성자에서
     // 정한다).
-    // - 오류: 이 World의 Actor·Component가 아니면 StaleHandle, 같은 hook 자신·Fixed hook과 다른
-    // hook
+    // - 오류: 이 World의 Actor·Component가 아니면 StaleHandle, 파괴 대기면 Destroyed, 정의되지 않은
+    // 출처·같은 hook 자신·Fixed hook과 다른 hook
     //   사이 의존은 InvalidArgument, 사용자 간선이 순환을 만들면 CycleDetected(상태 불변,
     //   World.Tick Warning — 시작 전 선언을 포함한 선언 전체에서 검사한다). 자동
     //   출처(Attachment·Framework)는 순환이면 걸지 않고 Warning 뒤 성공이다. 이미 있는 의존은
@@ -745,8 +745,12 @@ private:
     void PruneTickDeclarations(TickDeclarations& node) noexcept;
     Result<bool> TickDeclarationReaches(const TickPoint& from, const TickPoint& to) noexcept;
     void WarnTickCycle(const TickPoint& before, const TickPoint& after, bool automatic) noexcept;
-    // 막 등록한 hook에 선언된 의존(양방향)을 스케줄러에 건다.
-    void ApplyTickDeclarations(ObjectHandle object, uint8 hook, TickHandle handle) noexcept;
+    // 막 등록한 hook에 선언된 의존(양방향)을 스케줄러에 건다. handles는 그 객체의 등록 중인
+    // 배열이다(같은 객체의 다른 hook을 여기서 찾는다).
+    void ApplyTickDeclarations(ObjectHandle object, uint8 hook,
+                               const TickHandle (&handles)[detail::TickHookCount]) noexcept;
+    // 파괴 대기(PendingDestroy)인 Actor·Component다.
+    bool IsTickTargetDestroying(ObjectHandle object) noexcept;
     // 파괴되는 객체의 선언을 지운다(다른 선언의 참조는 다음 정리 때 지운다).
     void ForgetTickDeclarations(ObjectHandle object) noexcept;
     // SceneComponent 부모가 바뀌었다(자식 hook → 부모 같은 hook 간선, UE AttachToComponent).

@@ -61,7 +61,7 @@ void World::RegisterTicks(ObjectHandle object, uint8 kind, const TickSettings& s
         if (registered) {
             handles[hook] = registered.Value();
             // 시작 전에 선언했거나 상대가 먼저 등록하며 남긴 의존을 건다(15.3절 ERD5).
-            ApplyTickDeclarations(object, hook, handles[hook]);
+            ApplyTickDeclarations(object, hook, handles);
         }
     }
 }

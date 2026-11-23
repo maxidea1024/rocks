@@ -87,9 +87,11 @@ public:
         PrimaryTick().lateTick = true;
     }
 
-    void Configure(char value, int32 priority = 0) noexcept {
+    void Configure(char value, int32 priority = 0,
+                   TickPhase phase = TickPhase::PrePhysics) noexcept {
         tag = value;
         PrimaryTick().priority = priority;
+        PrimaryTick().phase = phase;
     }
 
     void OnTick(const TickContext&) noexcept override {
@@ -159,14 +161,16 @@ struct Fixture {
         return actor.Value();
     }
 
-    ObjectHandle AddScene(ObjectHandle actor, char tag, int32 priority = 0) noexcept {
+    ObjectHandle AddScene(ObjectHandle actor, char tag, int32 priority = 0,
+                          TickPhase phase = TickPhase::PrePhysics) noexcept {
         auto scene = world->AddComponent<OrderScene>(actor);
         if (!scene) {
             return {};
         }
 
-        auto configured = world->With<OrderScene>(
-            scene.Value(), [&](OrderScene& value) noexcept { value.Configure(tag, priority); });
+        auto configured = world->With<OrderScene>(scene.Value(), [&](OrderScene& value) noexcept {
+            value.Configure(tag, priority, phase);
+        });
         return configured ? scene.Value() : ObjectHandle{};
     }
 
@@ -456,6 +460,138 @@ TEST(WorldTick_EngineStagesRunInDocumentedOrder) {
     CHECK(LogIs("AuP!S!T!K!CxAl"));
     CHECK(world.Stats().engineStageFailures == 1);
     stageLog.failCamera = false;
+    REQUIRE(world.Shutdown());
+}
+
+// 리뷰 보강: 같은 Component의 hook 사이 시작 전 선언도 적용된다(Late가 PreRender의 Update 뒤로
+// 늦춰진다 — 15.3절 hook별 실효 단계).
+TEST(WorldTick_SameComponentHooksDeclaredBeforeStart) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto owner = world.SpawnActorDeferred<OrderActor>();
+    REQUIRE(owner);
+    REQUIRE(world.With<OrderActor>(owner.Value(),
+                                   [](OrderActor& value) noexcept { value.Configure('A'); }));
+    const ObjectHandle scene = fixture.AddScene(owner.Value(), 'c', 0, TickPhase::PreRender);
+    REQUIRE(!scene.IsNull());
+    REQUIRE(world.AddTickPrerequisite({scene, TickHook::Late}, {scene, TickHook::Update}));
+    REQUIRE(world.FinishSpawning(owner.Value()));
+    CHECK(fixture.Frame("AuAlcucl"));
+    CHECK(world.GetTickEffectivePhase({scene, TickHook::Late}).Value() == TickPhase::PreRender);
+    REQUIRE(world.Shutdown());
+}
+
+// 정의되지 않은 출처 값(0·여러 비트)은 거부하고, 파괴 대기 대상에 대한 선언·설정 변경은
+// Destroyed다. 파괴된 선행의 참조는 상대 선언에서 바로 지워져 남은 순서가 그대로 돈다.
+TEST(WorldTick_InvalidSourceAndDestroyingTargetsAreRejected) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectHandle a = fixture.Spawn('A', 1);
+    const ObjectHandle b = fixture.Spawn('B', 0);
+    REQUIRE(!a.IsNull() && !b.IsNull());
+    CHECK(world.AddTickPrerequisite({a}, {b}, static_cast<TickEdgeSource>(0)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(world.AddTickPrerequisite({a}, {b}, static_cast<TickEdgeSource>(3)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(world.RemoveTickPrerequisite({a}, {b}, static_cast<TickEdgeSource>(0)).Error() ==
+          ErrorCode::InvalidArgument);
+    REQUIRE(world.AddTickPrerequisite({b}, {a}));
+    CHECK(fixture.Frame("AuBuBlAl"));
+
+    REQUIRE(world.DestroyActor(a));
+    CHECK(world.AddTickPrerequisite({b}, {a, TickHook::Late}).Error() == ErrorCode::Destroyed);
+    CHECK(world.SetTickPriority(a, 5).Error() == ErrorCode::Destroyed);
+    CHECK(world.SetTickPhase(a, TickPhase::PostPhysics).Error() == ErrorCode::Destroyed);
+    CHECK(world.SetTickInterval(a, 1.0).Error() == ErrorCode::Destroyed);
+    REQUIRE(world.Tick(1.0 / 60.0));
+    CHECK(fixture.Frame("BuBl"));
+    // 지운 선행을 가리키는 제거는 없다.
+    CHECK(world.RemoveTickPrerequisite({b}, {a}).Error() == ErrorCode::NotFound);
+    REQUIRE(world.Shutdown());
+}
+
+namespace {
+
+struct StageWork {
+    ObjectHandle victim;
+    bool done = false;
+};
+
+Result<void> SpawnAndDestroyInStage(World& world, const TickContext&, void* user) noexcept {
+    auto* work = static_cast<StageWork*>(user);
+    Log('T', '!');
+    if (work->done) {
+        return Result<void>::Success();
+    }
+
+    work->done = true;
+    auto spawned = world.SpawnActor<OrderActor>();
+    if (!spawned) {
+        return Result<void>::Failure(spawned.Error());
+    }
+
+    auto destroyed = world.DestroyActor(work->victim);
+    if (!destroyed) {
+        return destroyed;
+    }
+
+    // 파괴 대기 대상에 대한 선언은 Destroyed여야 한다.
+    auto declared = world.AddTickPrerequisite({spawned.Value()}, {work->victim, TickHook::Late});
+    return !declared && declared.Error() == ErrorCode::Destroyed
+               ? Result<void>::Success()
+               : Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
+} // namespace
+
+// 엔진 단계 콜백 안에서 Spawn·Destroy·의존 선언을 불러도 안전하다(Spawn은 다음 프레임 시작,
+// Destroy는 곧바로 Tick에서 빠진다).
+TEST(WorldTick_EngineStageCallbackMayUseWorldApis) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectHandle a = fixture.Spawn('A');
+    REQUIRE(!a.IsNull());
+    StageWork work;
+    work.victim = a;
+    REQUIRE(world.SetEngineStage(EngineStage::Timers, &SpawnAndDestroyInStage, &work));
+    CHECK(fixture.Frame("AuT!"));
+    CHECK(fixture.Frame("?uT!?l"));
+    REQUIRE(world.Shutdown());
+}
+
+// 다른 Actor의 Component에 부착한 뒤 부모 Actor를 파괴하면 부착 간선이 풀리고 자식은 계속 돈다.
+TEST(WorldTick_AttachmentAcrossActorsSurvivesParentActorDestroy) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto x = world.SpawnActorDeferred<OrderActor>();
+    auto y = world.SpawnActorDeferred<OrderActor>();
+    REQUIRE(x && y);
+    REQUIRE(world.With<OrderActor>(x.Value(),
+                                   [](OrderActor& value) noexcept { value.Configure('X', 5); }));
+    REQUIRE(world.With<OrderActor>(y.Value(),
+                                   [](OrderActor& value) noexcept { value.Configure('Y', 5); }));
+    const ObjectHandle parent = fixture.AddScene(x.Value(), 'p', 2);
+    const ObjectHandle child = fixture.AddScene(y.Value(), 'c', 1);
+    REQUIRE(!parent.IsNull() && !child.IsNull());
+    REQUIRE(fixture.Attach(child, parent));
+    REQUIRE(world.FinishSpawning(x.Value()));
+    REQUIRE(world.FinishSpawning(y.Value()));
+    CHECK(fixture.Frame("pucuXuYuplclXlYl"));
+    REQUIRE(world.DestroyActor(x.Value()));
+    REQUIRE(world.Tick(1.0 / 60.0));
+    CHECK(fixture.Frame("cuYuclYl"));
     REQUIRE(world.Shutdown());
 }
 
