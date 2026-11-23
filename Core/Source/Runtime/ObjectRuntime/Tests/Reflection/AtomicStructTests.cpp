@@ -252,7 +252,7 @@ TEST(AtomicStruct_IsAtomicIsDeclaredPerStructAndNotPropagated) {
     RuntimeFieldOps fieldOps;
     fieldOps.fieldId = InnerId;
     fieldOps.valueNativeType = Key(0);
-    fieldOps.encode = +[](const RuntimeFieldOps&, ObjectRegistry&, const ObjectAccessContext&,
+    fieldOps.encode = +[](const RuntimeFieldOps&, ObjectRegistry*, const ObjectAccessContext&,
                           ObjectHandle, ArchiveWriter&, FieldEncodeContext&) noexcept {
         return Result<uint32>::Failure(ErrorCode::Unsupported);
     };

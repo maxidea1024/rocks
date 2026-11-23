@@ -284,12 +284,137 @@ Result<const TypeLease*> GraphEncodeContext::ExpectedLease(TypeId type) noexcept
     return Result<const TypeLease*>::Success(expected_.Find(type));
 }
 
+// TLV 하나의 머리 byte다(id 16 + wire 4 + 길이 8 — Record.h).
+constexpr usize FieldHeaderBytes = 28;
+
+Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
+                                const ObjectAccessContext& access, ObjectHandle handle,
+                                Budget& budget, usize maxFieldBytes, FieldEncodeContext& context,
+                                RecordBuilder& record, ObjectFieldSink& sink,
+                                usize& payloadBytes) noexcept {
+    const auto& schema = sink.Lease().Schema();
+    for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+        const auto& field = schema.fields[fieldIndex];
+        // 최상위 필드의 declaringType은 객체 타입이다(상속 필드도 펼친 스키마로 다룬다).
+        const TypeLease& type = sink.Lease();
+        FieldScope scope(context, field, schema.id, type.FieldEnum(fieldIndex),
+                         type.FieldStruct(fieldIndex), FieldCodecFrame::NoIndex,
+                         type.FieldKeyEnum(fieldIndex));
+        // Transient 참조는 GC 수명에는 참여하지만 저장 그래프에는 참여하지 않는다.
+        if (context.ExcludesCurrent()) {
+            continue;
+        }
+
+        auto accessor = FindOps(type, field.id, budget);
+        if (!accessor) {
+            return Result<void>::Failure(accessor.Error());
+        }
+
+        auto spent = budget.Spend(1);
+        if (!spent) {
+            return spent;
+        }
+
+        ArchiveLimits fieldLimits = budget.Archive();
+        fieldLimits.maxTotalBytes = maxFieldBytes;
+        ArchiveWriter encoded(allocator, fieldLimits);
+        sink.BeginField(encoded);
+        auto wire =
+            accessor.Value()->encode(*accessor.Value(), registry, access, handle, encoded, context);
+        sink.EndField();
+        if (!wire) {
+            return Result<void>::Failure(wire.Error());
+        }
+
+        // codec이 스키마 필드의 wire(배열은 원소에 따라 ValueArray·RecordList)를 썼는지 다시
+        // 확인한다.
+        auto expected = detail::FieldWireType(field, context.ReferenceWireType());
+        if (!expected || expected.Value() != wire.Value()) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        spent = budget.Spend(encoded.WorkUsed());
+        if (!spent) {
+            return spent;
+        }
+
+        usize appended = 0;
+        if (!TryAdd(FieldHeaderBytes, encoded.ByteCount(), appended)) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+
+        // builder의 실제 작업(복사, 성장할 때만 기존 byte 이동, id 중복 검사)을 청구한다.
+        const uint64 builderBefore = record.WorkUsed();
+        auto added = record.AddField(field.id, wire.Value(), encoded.View());
+        if (!added) {
+            return added;
+        }
+
+        spent = budget.Spend(record.WorkUsed() - builderBefore);
+        if (!spent) {
+            return spent;
+        }
+
+        if (auto noted = sink.FieldAdded(record.LastFieldPayloadOffset()); !noted) {
+            return noted;
+        }
+
+        if (!TryAdd(payloadBytes, appended, payloadBytes)) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace rocks::graph_detail
 
 namespace rocks {
 namespace {
 
 using namespace graph_detail;
+
+// 그래프 저장 노드의 필드 루프 쪽 일이다: 필드 writer를 문맥에 걸고, 필드를 Record에 더한 뒤 그
+// 필드의 외부 참조 위치·weak 지연 항목을 필드 writer offset에서 Record offset으로 바꾼다.
+class NodeFieldSink final : public ObjectFieldSink {
+public:
+    NodeFieldSink(Array<SaveNode>& nodes, usize nodeIndex, GraphEncodeContext& context) noexcept
+        : nodes_(nodes), nodeIndex_(nodeIndex), context_(context) {
+    }
+
+    const TypeLease& Lease() noexcept override {
+        return nodes_[nodeIndex_].lease;
+    }
+
+    // 이 필드의 외부 참조 위치는 [fieldPosition_, 끝), weak 지연 항목은 [fieldWeak_, 끝)이고 필드
+    // writer 안 offset으로 기록된다.
+    void BeginField(ArchiveWriter& writer) noexcept override {
+        fieldPosition_ = context_.PositionCount();
+        fieldWeak_ = context_.WeakDeferralCount();
+        context_.SetFieldWriter(&writer);
+    }
+
+    void EndField() noexcept override {
+        context_.SetFieldWriter(nullptr);
+    }
+
+    Result<void> FieldAdded(usize payloadOffset) noexcept override {
+        if (auto rebased =
+                context_.RebasePositions(fieldPosition_, context_.PositionCount(), payloadOffset);
+            !rebased) {
+            return rebased;
+        }
+
+        return context_.RebaseWeakDeferrals(fieldWeak_, payloadOffset);
+    }
+
+private:
+    Array<SaveNode>& nodes_;
+    usize nodeIndex_;
+    GraphEncodeContext& context_;
+    usize fieldPosition_ = 0;
+    usize fieldWeak_ = 0;
+};
 
 // 노드 하나의 필드를 encode해 Record를 만든다. fileBytes는 지금까지의 출력 byte 누계이고 이 노드의
 // Bytes(Record)와(NodeTable이면) 노드 항목, 외부 참조 위치 표 메모리를 더해 maxBytes와 비교한다.
@@ -340,88 +465,12 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     context.BeginObject(schema.id, static_cast<uint32>(nodeIndex), fileBytes);
     RecordBuilder record(allocator, schema.id, schema.version, recordLimits);
     usize payloadBytes = 0;
-    for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
-        const auto& field = schema.fields[fieldIndex];
-        // 최상위 필드의 declaringType은 객체 타입이다(상속 필드도 펼친 스키마로 다룬다). encode가
-        // 노드를 더하면 nodes가 다시 할당될 수 있으므로 lease는 매번 nodes[nodeIndex]로 접근한다.
-        const TypeLease& type = nodes[nodeIndex].lease;
-        FieldScope scope(context, field, schema.id, type.FieldEnum(fieldIndex),
-                         type.FieldStruct(fieldIndex), FieldCodecFrame::NoIndex,
-                         type.FieldKeyEnum(fieldIndex));
-        // Transient 참조는 GC 수명에는 참여하지만 저장 그래프에는 참여하지 않는다.
-        if (context.ExcludesCurrent()) {
-            continue;
-        }
-
-        auto accessor = FindOps(type, field.id, budget);
-        if (!accessor) {
-            return Result<void>::Failure(accessor.Error());
-        }
-
-        auto spent = budget.Spend(1);
-        if (!spent) {
-            return spent;
-        }
-
-        ArchiveLimits fieldLimits = budget.Archive();
-        fieldLimits.maxTotalBytes = recordLimits.archive.maxTotalBytes;
-        ArchiveWriter encoded(allocator, fieldLimits);
-        // 이 필드의 외부 참조 위치는 [fieldPosition, 끝), weak 지연 항목은 [fieldWeak, 끝)이고
-        // encoded 안 offset으로 기록된다.
-        const usize fieldPosition = context.PositionCount();
-        const usize fieldWeak = context.WeakDeferralCount();
-        context.SetFieldWriter(&encoded);
-        auto wire =
-            accessor.Value()->encode(*accessor.Value(), registry, access, handle, encoded, context);
-        context.SetFieldWriter(nullptr);
-        if (!wire) {
-            return Result<void>::Failure(wire.Error());
-        }
-
-        // codec이 스키마 필드의 wire(배열은 원소에 따라 ValueArray·RecordList)를 썼는지 다시
-        // 확인한다.
-        auto expected = detail::FieldWireType(field, context.ReferenceWireType());
-        if (!expected || expected.Value() != wire.Value()) {
-            return Result<void>::Failure(ErrorCode::TypeMismatch);
-        }
-
-        spent = budget.Spend(encoded.WorkUsed());
-        if (!spent) {
-            return spent;
-        }
-
-        usize appended = 0;
-        if (!TryAdd(28, encoded.ByteCount(), appended)) {
-            return Result<void>::Failure(ErrorCode::Overflow);
-        }
-
-        // builder의 실제 작업(복사, 성장할 때만 기존 byte 이동, id 중복 검사)을 청구한다.
-        const uint64 builderBefore = record.WorkUsed();
-        auto added = record.AddField(field.id, wire.Value(), encoded.View());
-        if (!added) {
-            return added;
-        }
-
-        spent = budget.Spend(record.WorkUsed() - builderBefore);
-        if (!spent) {
-            return spent;
-        }
-
-        // 필드 writer offset → Record offset(이 필드 payload의 Record 안 시작을 더한다).
-        if (auto rebased = context.RebasePositions(fieldPosition, context.PositionCount(),
-                                                   record.LastFieldPayloadOffset());
-            !rebased) {
-            return rebased;
-        }
-
-        if (auto rebased = context.RebaseWeakDeferrals(fieldWeak, record.LastFieldPayloadOffset());
-            !rebased) {
-            return rebased;
-        }
-
-        if (!TryAdd(payloadBytes, appended, payloadBytes)) {
-            return Result<void>::Failure(ErrorCode::Overflow);
-        }
+    NodeFieldSink sink(nodes, nodeIndex, context);
+    if (auto encoded = EncodeObjectFields(allocator, &registry, access, handle, budget,
+                                          recordLimits.archive.maxTotalBytes, context, record, sink,
+                                          payloadBytes);
+        !encoded) {
+        return encoded;
     }
 
     // 이 노드가 출력에 더하는 byte: Bytes(Record) = 8 + 44 + payload, NodeTable이면 노드 항목.

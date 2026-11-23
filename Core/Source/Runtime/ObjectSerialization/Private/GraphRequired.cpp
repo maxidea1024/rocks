@@ -158,8 +158,8 @@ Result<void> CheckRequiredFields(Allocator& allocator, ConstructionContext& tran
             }
 
             writer.Clear();
-            auto wire = ops->encode(*ops, transaction.Registry(), transaction.Access(), node.handle,
-                                    writer, context);
+            auto wire = ops->encode(*ops, &transaction.Registry(), transaction.Access(),
+                                    node.handle, writer, context);
             if (!wire) {
                 return Result<void>::Failure(wire.Error());
             }

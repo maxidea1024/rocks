@@ -1077,6 +1077,279 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsAbstractBase::baseValue",
+      "id": "2f427abb955e478bac7b55d90609964f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsCounter::serial",
+      "id": "ef86cfc1a62c4a4ea6bece078d89f118",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsCounter::stable",
+      "id": "d780f36d1e4f43de8473bc2db11b62d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::caption",
+      "id": "265c6350f13d42adbb915fe02d4b2b2f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::count",
+      "id": "76ddc000b0114f258028f18fc7fa128a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::dim",
+      "id": "20d61607fa614776a97d39c71a7aad34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::editorPoint",
+      "id": "c09a209bc8364485ac34193420a32e15",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::editorValue",
+      "id": "d92aac5644bb473b8f1f94abf46c064e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::enabled",
+      "id": "4c733fd2268e40679d7fce4d8a1d30d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::fixed",
+      "id": "676a4f8fe98f4189909057ee9925f8fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::kind",
+      "id": "842397764e794a2f8eae218507320f47",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::label",
+      "id": "aa16e491015d45ac855049a1299213c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::link",
+      "id": "99758975a8b54f57942363e82c142ca9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::lit",
+      "id": "e12753d2ab4747fe9325c4e017efbed4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::maybe",
+      "id": "da5bbf3307fa4900b2aafe7ce07d573d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::mode",
+      "id": "a92a9fd9935440ed8fc7df2dbfa258c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::nest",
+      "id": "f002740420a14d498369bf8ff3c57717",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::pair",
+      "id": "f863ab0730c34ef6a703ba1055a3deb6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::payload",
+      "id": "a0e45d9de8e54c96a9e210baee0c47e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::point",
+      "id": "1d068d11e2c94c5fb14d38efedc0a474",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::precise",
+      "id": "ff7b6774e1164d1185329eb9e1f57921",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::scale",
+      "id": "c37c6f43b44d4fb6b2aa8c2b07b2c7e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::scratch",
+      "id": "82d639f2c80b4b78a66dda32cb5b23d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::soft",
+      "id": "c2acda4976ca4d9bb95f7494ea25e621",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::table",
+      "id": "8085fef7babe4e0c84badbe4eadd8ba8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::tag",
+      "id": "7fb198d248b34a4e892db14e3a858b9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::tags",
+      "id": "e30876ca593a4645b424fec89ab898b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::values",
+      "id": "559410d78a364daca809a187a118ed53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsHolder::weak",
+      "id": "9d8202e198224a89beef26c2076712a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsNest::depth",
+      "id": "6ce9a9cc6b8e4174ae557a602d838b5d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsNest::inner",
+      "id": "29b312f64e824c2f95cf24befb3a41cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsPair::u",
+      "id": "75b209ae437644e2a25826a8bc4cd8b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsPair::v",
+      "id": "3367ca34452f4345b3d01abb66a92b65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsPoint::note",
+      "id": "b8c7e188b646452abe470948216c206a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsPoint::x",
+      "id": "5c0609eea44c4bc18eb8410f0e02d1f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsPoint::y",
+      "id": "943da3978c2f42a68928a63a5b00a6be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsSoftLink::before",
+      "id": "3e5d90f31dc346a4bd07fe7676ebea3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsSoftLink::target",
+      "id": "b7c14ee624e64b57a466d7b05f34dcc8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsVirtual::extra",
+      "id": "f24cb0ce84924fb8b1756c8f6ef8b212",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::EnumFields::bias",
       "id": "143574e2d2e246afb4434737709cc37b",
       "aliases": [],
@@ -4028,6 +4301,69 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::CountLimit",
       "id": "95c710567ae74a2193387f4913404031",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsAbstractBase",
+      "id": "ab3e3335e3494532afc1af5d6df60c16",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsCounter",
+      "id": "dc90b8d3bf1a43db9a83f75ff3747a69",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsHolder",
+      "id": "3a5824cbf8f449569529a895433e27c1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsMode",
+      "id": "189899b4ae334892b155370946eccef6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsNest",
+      "id": "c1f447b438a647bf8b04cefe8eb7e459",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsPair",
+      "id": "57d5d9453ef743f48b2ab23661234d70",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsPoint",
+      "id": "43e3e75330a440019bca9253d38f01f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsSoftLink",
+      "id": "c1f97d86e8564bf4b7cd38820891a518",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsVirtual",
+      "id": "5426736cac7f48869d135f5e315d3b02",
       "aliases": [],
       "retired": false
     },

@@ -37,7 +37,7 @@ void Destroy(void*) noexcept {
 void Trace(const void*, TraceVisitor&) noexcept {
 }
 
-Result<uint32> ClassEncode(const RuntimeFieldOps&, ObjectRegistry&, const ObjectAccessContext&,
+Result<uint32> ClassEncode(const RuntimeFieldOps&, ObjectRegistry*, const ObjectAccessContext&,
                            ObjectHandle, ArchiveWriter&, FieldEncodeContext&) noexcept {
     return Result<uint32>::Failure(ErrorCode::Unsupported);
 }

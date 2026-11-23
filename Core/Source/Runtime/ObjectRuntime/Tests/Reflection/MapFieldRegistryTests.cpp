@@ -34,7 +34,7 @@ constexpr TypeId BaseClassType{0x4d4652, 5};
 
 struct Holder final : Object {};
 
-Result<uint32> ClassEncode(const RuntimeFieldOps&, ObjectRegistry&, const ObjectAccessContext&,
+Result<uint32> ClassEncode(const RuntimeFieldOps&, ObjectRegistry*, const ObjectAccessContext&,
                            ObjectHandle, ArchiveWriter&, FieldEncodeContext&) noexcept {
     return Result<uint32>::Failure(ErrorCode::Unsupported);
 }

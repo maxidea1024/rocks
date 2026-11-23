@@ -8,6 +8,8 @@
 // Admit 질의가 있다. Object/FieldCodec.h로 받는다.
 namespace rocks {
 
+class Object;
+
 // 저장 문맥이다(그래프 저장이 구현한다). 그래프 로드의 Required 실효 값 검사(Docs/Design/
 // ObjectFoundations.ko.md 4절)도 이 문맥의 검사 모드로 같은 encode 경로를 쓴다.
 class FieldEncodeContext : public FieldCodecContext {
@@ -42,6 +44,15 @@ public:
     // RuntimeFieldOps::readStaged로 읽는다(encode 고정을 쥐지 않는다 — 검사 중 표시가 대신한다).
     ConstructionContext* StagedSource() const noexcept {
         return staged_;
+    }
+
+    // Registry 밖 원본 객체를 읽는 문맥이면 그 객체다(아니면 nullptr — 클래스 기본값 레코드의 임시
+    // 인스턴스, Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드'). 생성 encode thunk
+    // (detail::EncodeGeneratedField·EncodeBitfieldField)는 이것이 있으면 Registry·staged 대신 이
+    // 객체에서 멤버를 읽고(같은 EncodeMemberValue — 같은 byte), 수동 함수표의 범용 encode는
+    // Unsupported다. 이때 thunk가 받는 registry는 null이다.
+    virtual const Object* RawSource() const noexcept {
+        return nullptr;
     }
 
     // 지금 위치가 Required이고 값이 null일 때: 검사 모드면 RequiredMissing을 보고한 뒤 성공(hook

@@ -260,6 +260,45 @@ private:
     usize committedBytes_ = 0;
 };
 
+// 객체 하나의 필드 루프가 저장 쪽에 묻고 알리는 곳이다(EncodeObjectFields — 그래프 저장 노드와
+// 클래스 기본값 레코드가 같은 루프를 쓴다).
+class ObjectFieldSink {
+public:
+    // 지금 객체의 lease다. 필드마다 다시 묻는다(그래프 저장은 encode가 노드 표를 다시 할당할 수
+    // 있다 — 스키마·필드 정보는 Registry 레코드 안이라 안정적이다).
+    virtual const TypeLease& Lease() noexcept = 0;
+
+    // 필드 encode 직전(그 필드 writer — 외부 참조 위치 기록의 기준)과 직후다.
+    virtual void BeginField(ArchiveWriter& writer) noexcept {
+        (void)writer;
+    }
+
+    virtual void EndField() noexcept {
+    }
+
+    // 필드를 Record에 더한 뒤다(payloadOffset = 그 필드 payload의 Record 안 시작).
+    virtual Result<void> FieldAdded(usize payloadOffset) noexcept {
+        (void)payloadOffset;
+        return Result<void>::Success();
+    }
+
+protected:
+    ~ObjectFieldSink() = default;
+};
+
+// 객체 하나의 필드를 스키마 순서로 encode해 record에 더한다(GraphSave.cpp). 그래프 저장 노드와
+// 클래스 기본값 레코드(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드')가 같은 함수를 써서 같은
+// thunk·같은 순서·같은 wire 재확인으로 같은 byte를 낸다. 지금 위치(FieldScope)를 세우고 제외 판정
+// (ExcludesCurrent)·함수표 찾기·encode(필드 writer 한도 maxFieldBytes)·wire 재확인·예산 청구·
+// AddField를 한다. registry는 원본 모드(context.RawSource())면 null이다. payloadBytes에 더한 필드
+// byte(TLV 머리 28 + payload)의 합을 더한다. 오류: 함수표 찾기·encode·builder·예산의 오류, wire가
+// 스키마와 다름 TypeMismatch, byte 합 넘침 Overflow.
+Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
+                                const ObjectAccessContext& access, ObjectHandle handle,
+                                Budget& budget, usize maxFieldBytes, FieldEncodeContext& context,
+                                RecordBuilder& record, ObjectFieldSink& sink,
+                                usize& payloadBytes) noexcept;
+
 // NodeTable의 outer 값과 BaseOuter 비트를 정한다(GraphSaveSet.cpp).
 Result<bool> ResolveNodeTable(const Array<SaveNode>& nodes, const GraphEncodeContext& context,
                               Array<uint32>& outers, Budget& budget) noexcept;
