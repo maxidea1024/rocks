@@ -339,7 +339,8 @@ Result<void> EmitRevertValue(Allocator& allocator, RevertDecodeContext& context,
     FieldScope scope(context, field, at.declaringType, at.enumeration, at.structure,
                      FieldCodecFrame::NoIndex, at.keyEnumeration);
     FieldValue value(allocator);
-    if (auto parsed = ParseFieldValue(FieldView{field.id, wire, payload}, context, nullptr, &value);
+    if (auto parsed =
+            detail::ParseFieldValue(FieldView{field.id, wire, payload}, context, nullptr, &value);
         !parsed) {
         return parsed;
     }

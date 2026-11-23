@@ -1464,23 +1464,31 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
         return FailAsset<void>(failure, AssetDiagnosticCode::None, reserved.Error());
     }
 
+    // 되돌리기를 적용한 뒤의 실패는 일부만 바뀐 객체를 남기므로 패키지를 dirty로 표시하고 저장하지
+    // 않는다(다음 저장·닫기가 정리한다 — RuntimeClassMetadata 'A5b2 decode 명세' 원자성).
+    // MarkDirty는 열린 패키지에 실패하지 않는다.
+    const auto failApplied = [&](ErrorCode error) noexcept {
+        (void)set_.MarkDirty(id);
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, error);
+    };
     if (!plans.IsEmpty()) {
-        // 되돌리기는 묶음 맨 앞이다. 남는 실패는 자원·상태 오류뿐이며 중간 실패면 일부만 되돌아간
-        // 채 저장하지 않는다(RuntimeClassMetadata 'A5b2 decode 명세' 원자성).
+        // 되돌리기는 묶음 맨 앞이다. 남는 실패는 자원·상태 오류뿐이다.
         for (const RevertPlan& plan : plans) {
             if (auto applied = ApplyRevert(set_.Registry(), set_.Access(), plan); !applied) {
-                return FailAsset<void>(failure, AssetDiagnosticCode::None, applied.Error());
+                return failApplied(applied.Error());
             }
         }
 
         prepared = reflection_text::PrepareAssignments(live, texts.View(), options, diagnostics);
         if (!prepared) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, prepared.Error());
+            return failApplied(prepared.Error());
         }
     }
 
     if (auto published = prepared.Value().Publish(); !published) {
-        return FailAsset<void>(failure, AssetDiagnosticCode::None, published.Error());
+        return plans.IsEmpty()
+                   ? FailAsset<void>(failure, AssetDiagnosticCode::None, published.Error())
+                   : failApplied(published.Error());
     }
 
     set_.MergeOverrides(asset.Value(), pending);
