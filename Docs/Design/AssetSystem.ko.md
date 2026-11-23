@@ -895,7 +895,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 9. **bundle**: 리플렉션 지정자 `AssetBundles="a,b"`(Soft 참조 필드 — UE `meta=(AssetBundles=…)`)가 있는 PrimaryAsset은 **저장 때** 타입 hook Tags(A2c)로 bundle 구성원을 색인 태그에 남긴다(UE가 `FAssetBundleData`를 AssetRegistry 태그로 남기는 것과 같다). 쿠커는 태그만 읽는다(2차 열기 없음). MetaCompiler 지정자와 필드 메타는 리플렉션 쪽 요구다(ReflectionExtensions 문서에 적고 리플렉션 담당과 조정한다 — A4e).
 10. **게시**(10절 1–3 그대로): `<Project>/Saved/Cooked/<Profile>/.staging/<guid>.tmp` 기록·Flush → `Packages/<a>/<이름>`에 `Move(no-replace)` → 있으면 크기·SHA-256 대조(같으면 임시 삭제, 다르면 `CorruptEntry` 경고 + `Replace`) → 바뀐 디렉터리 안쪽부터 `SyncDirectory` → 매니페스트를 `.staging`에 쓰고 Flush → `Replace`. 전체 쿠킹은 그 뒤 새 매니페스트가 가리키지 않는 `Packages/` 파일을 지운다(못 지우면 경고). 부분 쿠킹은 기존 매니페스트와 병합(`CheckCookedManifestMerge` — 다르면 `IncompatibleCook`)하고 파일은 지우지 않는다. 기존 매니페스트가 없으면 부분 쿠킹은 전체 쿠킹과 같다.
 11. **보고서**: `Saved/Cooked/<Profile>/CookReport.json`(결정적 — 진단을 (assetId, 코드) 순), 도구 빌드 ID·엔진 버전(진단용 — 10절), 대상 수·재사용 수·쓴 byte. 명령은 사람이 읽는 줄도 낸다.
-12. **명령** `asset-cook --profile=<id> [<path>...] [--verify-nuggets[=local]] [--json]`: 경로가 없으면 전체 쿠킹. `--verify-nuggets`는 처리기가 너겟 적중을 쓰지 않고 다시 만들어 적중 결과와 byte를 대조한다(다르면 `NuggetMismatch` 오류 — A4e가 진단 코드를 등록, 9.1 결정 16). A4의 기본 처리기는 너겟을 쓰지 않아 verify는 늘 같다 — 실질 시험은 A5 텍스처 처리기 때다.
+12. **명령** `asset-cook --profile=<id> [<path>...] [--verify-nuggets] [--verify-nuggets-source=local|remote] [--json]`(13절 문법 — A4e1에서 13절 형태로 맞췄다): 경로가 없으면 전체 쿠킹. `--verify-nuggets`는 처리기가 너겟 적중을 쓰지 않고 다시 만들어 적중 결과와 byte를 대조한다(다르면 `NuggetMismatch` 오류 — A4e가 진단 코드를 등록, 9.1 결정 16). A4의 기본 처리기는 너겟을 쓰지 않아 verify는 늘 같다 — 실질 시험은 A5 텍스처 처리기 때다.
 
 하위 단계(각각 14절 완료 조건 넷):
 
@@ -969,6 +969,32 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - **전체 흐름**(A4d2, `CookProject`): 설정 읽기(A4a) → 대상(A4b) → 키(A4c1) → 재사용 판정 → 실행(A4c2, 출력 = 게시기) → 오류 진단이 하나라도 있으면(대상·키·실행) 게시하지 않고 보고서만 → 아니면 Finish.
     - 색인은 호출자가 쿠킹 직전에 갱신해 넘긴다(A4b 콘텐츠 해시 한계 — Rebuild 또는 감시 갱신. 에디터 안에서는 열린 패키지가 색인 항목을 가리키므로 흐름이 스스로 Rebuild하지 않는다).
     - 에디터 프로세스 안 쿠킹은 dirty 패키지가 있으면 Busy다(결정 7 — 실행기가 본다).
+- A4e 구현 세부(2026-11-23 — 권장안으로 확정, 결정 4·9·12를 구체화. A4e1·A4e2로 나눈다):
+  - A4e1 = `asset-cook` 명령·`--verify-nuggets`·`NuggetMismatch` 등록. A4e2 = 리플렉션 요구 둘(필드 지정자 `AssetBundles`·클래스 표지 `EditorOnly`)·저장 때 bundle 태그·EditorOnly 에셋 규칙.
+  - **명령 자리**: AssetCommandlets `AssetCookCommandlet.h`의 `RunAssetCookCommand`(문맥 `AssetCommandContext` — 다른 에셋 명령과 같다). AssetCommandlets가 AssetCooker에 의존한다. 제품 실행 파일(Commandlet 프로그램)이 등록한다.
+  - **문법**(13절): `asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote] [--json] [--project=<dir>] [--wait=<초>]`. 값 옵션 두 번·빈 값·모르는 옵션·`--profile` 없음은 사용법 오류 2다. `--verify-nuggets-source`는 `--verify-nuggets` 없이 쓰면 사용법 오류다(효과가 없는 옵션을 조용히 받지 않는다).
+  - **흐름**:
+    1. 세션을 쓰기로 연다(`OpenSession` — 잠금을 잡은 뒤 색인을 만든다. 그래서 색인은 쿠킹 직전의 디스크다 — A4b 콘텐츠 해시 한계).
+    2. AssetCooker 모듈을 시작해 쿠킹 설정·보고서 struct를 세션 TypeRegistry에 등록한다(세션 등록기가 붙어 있으므로 시작하는 모듈의 타입이 들어간다 — ModuleLoader 3.11절. 이미 시작했으면 붙일 때 이미 들어갔다).
+    3. 설정: 엔진 설정 디렉터리 = `FindEngineDirectory`(HostConfig) + `/Config`, 프로젝트 설정 디렉터리 = layout의 Config. `ReadTargetProfile`·`ReadCookSettings`(codec 문맥은 세션 패키지 집합의 Registry) 뒤 두 SHA-256(`HashTargetProfile`·`HashCookSettings`)을 만든다. 거부는 실패 줄(아래 출력) 뒤 1이다.
+    4. 너겟 캐시: `ReadNuggetCacheSettings` → `NuggetCache::Open`(시계는 `NuggetSystemClock`). 프로젝트 세대는 캐시의 `ProjectGeneration()`이다(너겟 키 공통 머리와 같은 값 — 결정 5). required가 아닌데 열지 못해 꺼졌으면 경고 줄 하나(`<오류>: <로컬 경로>: warning NuggetCacheDisabled`)를 쓰고 계속한다. 설정 거부·required 열기 실패는 실패 줄 뒤 1이다. 명령 끝에서 `Shutdown`한다.
+    5. `CookProject`(A4d2 — 처리기 표는 기본 처리기뿐이다. 타입별 처리기는 그 단계가 이 표에 더한다 — A5 텍스처).
+  - **verify**(결정 12, 9.1절 결정 16):
+    - `CookProjectRequest`·`CookRunRequest`·`CookContext`에 `verifyNuggets`(bool)를 둔다. 처리기는 이것이 켜져 있으면 너겟 적중을 쓰지 않고 다시 만든 결과와 적중 결과를 byte로 대조하고, 다르면 진단 `NuggetMismatch`(오류 — error는 InvalidArgument)로 실패한다(실행기가 에셋 오류로 모은다 — 게시하지 않음).
+    - verify 쿠킹은 재사용하지 않는다(재사용 대상은 처리기를 거치지 않으므로 대조가 비게 된다 — UE `-VerifyDDC`도 모든 대상을 다시 만든다). `PlanCookReuse`를 부르지 않는다.
+    - `--verify-nuggets-source=local`(기본)은 로컬 backend 적중을 대조한다. `remote`는 Rockpile backend가 생기기 전까지 실행 실패 `Unsupported`(1)다(문법은 13절대로 받는다).
+    - `AssetDiagnosticCode::NuggetMismatch`를 등록한다(오류 수준 — 마지막 열거자 뒤에 더한다).
+    - A4의 기본 처리기는 너겟을 쓰지 않아 verify 결과가 늘 같다. 흐름 시험은 시험 처리기(verify면 NuggetMismatch)로 진단이 보고서·명령 출력까지 가는지 본다. 실질 대조는 A5 텍스처 처리기다.
+  - **출력**:
+    - 진단은 표준 오류에 `asset-cook: <코드>: <대상>: <error|warning>[ <원인 오류>][ (related <대상>)]` 한 줄씩(보고서와 같은 순). 코드는 진단 코드 이름, 없으면 원인 오류 이름이다. 대상은 에셋이면 색인의 논리 경로(색인에 고유하게 없으면 AssetId 표준 문자열), 에셋이 없는 경로 진단(InvalidPath·DuplicatePath)은 부분 쿠킹이면 그 인자 경로·전체 쿠킹이면 `alwaysCook[<순번>]`, 그 밖은 쿠킹 루트다.
+    - 요약은 표준 출력에 `asset-cook: <프로파일> <published|not published> targets <n> cooked <n> reused <n> bytes <n>[ partial]` 한 줄이다. `--json`이면 요약 대신 쓴 보고서(CookReport.json) 내용을 그대로 쓴다(진단 줄은 표준 오류에 그대로 쓴다).
+    - 종료 코드: 게시 0(경고만 있어도), 오류 진단으로 게시하지 않음 1, 실행 실패 1(실패 줄), 사용법 2. 할당 실패는 명령 오류(OutOfMemory)다.
+- A4e1 상태: **구현** — 대조표 14.1.73절, coverage 14.1.74절. 구현에서 정한 것:
+  - 명령 시험은 EngineTests가 명령 함수를 이 프로세스에서 부른다(시험 타입 모듈·시험 임포터로 에셋을 만든다). 제품 실행 파일 시험(Rocks.Commandlet.Tests)은 실제 모듈 로더가 쿠커 모듈을 시작하고 실행 파일 위쪽 `Engine/Config` 프로파일로 쿠킹하는지 본다.
+  - 명령 시험 공용 도구(출력 수집·시험 임포터 등록·디스크 프로젝트)는 `AssetCommandlets/Tests/AssetCommandletTestSupport.h`로 옮겼다(임포트 명령 시험과 같이 쓴다 — 동작 불변).
+  - 설정 실패 줄은 `<코드>: <파일>: <칸 설명> (<원인 오류>)`이다. 파일 밖 판정(id 형식·합친 bulkAlignment)은 `TargetProfiles/<id>`, 칸 없는 거부는 엔진 프로파일 파일이 없는 것(`the file does not exist`), 칸 없는 실패는 읽기 오류(`cannot read` — 코드 자리에 원인 오류)다. 값 대입 진단은 그 앞에 `<TextDiagnostic 코드>: <경로>: <설명>` 줄로 쓴다. 너겟 설정 실패도 같은 모양이다(`<프로젝트>/Config/AssetNuggets.json`).
+  - 부분 쿠킹의 조기 병합 판정(A4d2 권장)은 명령에서 `IncompatibleCook: <쿠킹 루트>: error Unsupported` 줄과 `not published … partial` 요약이 된다(게시본 규칙과 다른 CookSettings로 부분 쿠킹하면 먼저 전체 쿠킹해야 한다).
+  - verify 쿠킹은 매니페스트 byte가 같다(기본 처리기 — 재사용과 다시 쿠킹이 같은 byte, 시나리오 13과 같은 근거).
 - A4d2 상태: **구현** — 대조표 14.1.71절, coverage 14.1.72절. 구현에서 정한 것:
   - API는 AssetCooker `CookProject.h`의 `CookProject(request, result)`와 리플렉션 struct `CookReport`·`CookReportDiagnostic`이다(진단 줄은 코드·수준·AssetId 표준 문자열·순번·오류 이름).
   - 보고서는 `ExportJson(TextUse::Report)`과 원자 교체로 쓴다. 보고서 struct의 codec 문맥은 집합의 Registry다. AssetCooker 타입을 등록하지 않았으면 보고서 쓰기의 타입 조회 오류(NotFound)다.
@@ -1456,7 +1482,7 @@ asset-alias-remove <옛 path>
 asset-alias-prune
 asset-orphans-list
 asset-orphans-delete <path>
-asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote]
+asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote] [--json]
 asset-load-cooked --profile=<id> <AssetId|경로 힌트>
 nugget-gc --max-bytes=<n> --unused-days=<n>   (Rockpile backend면 `rockpile gc`로 위임 — --max-bytes → maxBytes, --unused-days → maxUnusedDays)
 공통 옵션: --project=<dir>(기본: 현재 디렉터리에서 위로 *.rocksproject 탐색), --wait=<초>(쓰기 잠금 대기, 기본 0)
@@ -3188,6 +3214,43 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookProject.cpp` 줄 264/264·분기 118/118(리뷰 권장 반영 뒤), `CookPublish.cpp` 줄 611/611·분기 298/298(경고 push 전파 뒤), `CookProject.h` 전부. `-Filter Cook -Sources Core/Source/Runtime/Core/Private` — `FileRead.cpp` 줄 26/26·분기 12/12(`Sha256File.cpp`의 남은 두 갈래는 Foundation `Sha256File_RejectsEmptyBuffer`와 EngineTests `AssetIndex_ContentHashRejects`가 덮는다).
 
 닿지 않는 곳 없음.
+
+#### 14.1.73 요구 대조표(A4e1 — asset-cook 명령·verify)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCommandlets/Tests/AssetCookCommandletTests.cpp`(`AssetCookCommand_*` 8 — 디스크 임시 프로젝트, asset-import 시험 임포터로 Rock(Hard → Rock_extra)·Rock_extra), `AssetCooker/Tests/CookProjectTests.cpp`(`CookProject_VerifyNuggets`), `AssetRuntime/Tests/PackageLoadTests.cpp`(`AssetPackage_DiagnosticNames`), 제품 실행 파일 `Programs/Rocks.Commandlet.Tests`(asset-cook 7항목)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 전체 쿠킹·요약(결정 12·13절) | 게시 0·요약 줄(프로파일·published·수·byte)·매니페스트·보고서 파일, 두 번째는 전부 재사용(`bytes 0`) | `AssetCookCommand_CooksAndReuses`, C# `asset-cook full`·`asset-cook reuses` |
+| `--json` | 요약 대신 보고서 내용(published·reused·profile), 실패도 보고서(`published false`·1) | `AssetCookCommand_CooksAndReuses`·`AssetCookCommand_Diagnostics`, C# `asset-cook json` |
+| 부분 쿠킹 | `partial` 표지·인자 경로, 게시본 규칙이 다르면 쿠킹 전 IncompatibleCook(쿠킹 루트 대상·`targets 0`) | `AssetCookCommand_CooksAndReuses`·`AssetCookCommand_Diagnostics` |
+| verify(결정 12·9.1 결정 16) | 재사용 없이 모두 쿠킹(source local 포함), 같은 매니페스트 byte, 처리기 대조 실패 NuggetMismatch 오류 진단(게시하지 않음·보고서 코드), verify가 아니면 대조 없음, remote는 Unsupported 1 | `AssetCookCommand_CooksAndReuses`·`CookProject_VerifyNuggets`·`AssetCookCommand_Usage` |
+| NuggetMismatch 등록 | 이름 표의 고유 이름·마지막 열거자 | `AssetPackage_DiagnosticNames` |
+| 진단 줄(결정 11·13절) | alwaysCook 순번 경고(게시 0), NeverCook 우선 경고(에셋 논리 경로), 인자 경로 오류(1), 사라진 Hard 의존(related = AssetId — 색인에 없음), 같은 id 파일 둘(대상 = AssetId — 색인에 고유하지 않음), 원인 오류 이름 | `AssetCookCommand_Diagnostics`·`AssetCookCommand_DuplicateId`, C# `asset-cook invalid path` |
+| 쿠킹 함수 오류 | 쿠킹 루트의 Packages 자리가 파일 → 실패 줄 1·보고서 없음 | `AssetCookCommand_CookFailure` |
+| 설정 거부(결정 2·3) | 엔진 프로파일 없음·id 형식·프로젝트 프로파일 JSON·id 다름·bulkAlignment, 쿠킹 규칙 JSON·대입 진단(줄 포함)·alwaysCook·neverCook·PrimaryAsset 타입·디렉터리·크기 상한·읽기 오류 | `AssetCookCommand_ConfigRejects` |
+| 너겟 캐시(결정 5·9.1) | 설정 거부 칸 여덟·크기 상한·읽기 오류 실패 줄, 열기 실패로 꺼지면 경고 `NuggetCacheDisabled` 뒤 쿠킹(0), required면 실패 줄 | `AssetCookCommand_NuggetSettings` |
+| 사용법(13절) | 도움말 0, 인자 없음·위치 인자만·빈 값·옵션 두 번(값·플래그)·source만·모르는 source·wait 형식·모르는 옵션·빈 위치 인자·도움말 뒤 인자 → 2, 프로젝트 없음 1 | `AssetCookCommand_Usage`, C# `asset-cook usage`·`asset-cook help` |
+| 출력 실패 | 요약·JSON·진단 줄·대입 진단 줄·경고 줄 쓰기 실패 → 명령 오류 | `AssetCookCommand_OutputFailures` |
+| 제품 실행 파일 | 쿠커 모듈 시작·엔진 프로파일 찾기·실제 에셋 타입(Skeleton) 쿠킹 | C# asset-cook 7항목 |
+| 조합(14 완료 조건 2) | 실행 모드(전체·재사용·부분·verify·JSON) × 결과(게시·경고 게시·오류·함수 오류·설정 거부) × 출력(줄·JSON·쓰기 실패) | 위 시험 |
+
+#### 14.1.74 Coverage(A4e1)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter AssetCookCommand -Sources Engine/Source/Developer/AssetCommandlets` — `AssetCookCommandlet.cpp` 줄 335/383·분기 186/228·함수 10/10. `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookProject.cpp` 267/267·120/120, `CookRun.cpp` 250/250·102/102(verify 칸 전달 뒤), 나머지는 A4a–A4d 측정과 같다.
+
+닿지 않은 곳과 근거(`AssetCookCommandlet.cpp`):
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| 할당 실패 | 인자 push, 설정·너겟 실패 줄 조립, 대상·진단 줄 조립, 엔진 경로 버퍼, 해시, 너겟 로컬 경로, 쿠킹 루트, JSON 경로, 요약과 각 `== OutOfMemory` 판정의 참 쪽 | 명령 allocator에 결정적으로 실패를 주입할 수 없다 — 세션의 색인 검색 worker가 같은 allocator를 여러 스레드에서 쓴다(14.1.26과 같은 근거). 같은 결과를 만드는 라이브러리 경로는 `CookProject_AllocationFailures`·CookConfig·너겟 설정 시험이 모든 지점을 돈다 |
+| 쿠커 모듈 시작 실패 | 실패 줄 `cannot start the cooker module` | AssetCooker는 실행 파일에 링크된 모듈이라 표에 늘 있고 시작 콜백이 실패하지 않는다(14.1.26 `AssetCommandTypes::Start`와 같다) |
+| 엔진 폴더 찾기 실패 | 실패 줄 `cannot find the engine` | 시험·제품 실행 파일 모두 저장소 빌드 출력에서 돌아 `Engine/Config`가 늘 있다 |
+| 해시 실패 | `HashTargetProfile`·`HashCookSettings` 오류 | 두 struct를 방금 같은 Registry로 읽었으므로 타입 조회가 성공한다 — 남는 실패는 할당 실패다 |
+| `--json` 보고서 읽기 실패 | 실패 줄 `cannot read the cook report` | CookProject가 방금 원자 교체로 쓴 파일이라 쓰기 잠금 밖 외부 삭제 말고는 없다 |
+| DuplicatePath 대상 갈래 | 경로 진단이 DuplicatePath인 쪽 | 같은 경로 키 파일 둘은 대소문자 변형인데 Windows NTFS 디렉터리가 받지 않는다(NFC·NFD 이름 두 파일은 같은 경로 키 둘로 잡히지 않았다 — 시험으로 확인). 판정·순번은 `CookTargets_MissingAndDuplicates`(메모리 파일 시스템)가 덮고 줄 모양은 InvalidPath와 같은 갈래다 |
+| 코드 없는 진단 | 코드 자리에 원인 오류 이름 | 콘텐츠 해시의 NotFound 밖 실패(해시 중 변경 Busy·읽기 IO 오류)만 낸다 — OS·경쟁 조건이고 `CookKeys_Failures`가 메모리 파일 시스템으로 덮는다 |
+| switch 밖 반환 | 설정 파일·칸·너겟 칸 switch의 열거형 밖 | 열거형 밖 값이 없다 |
 
 ## 15. PNG 디코더 범위
 

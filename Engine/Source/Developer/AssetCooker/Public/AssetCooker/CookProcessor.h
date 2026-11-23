@@ -34,6 +34,9 @@ struct CookContext {
     PackageBulkSource* bulkSource = nullptr;
     // 너겟 캐시다(없으면 null — 기본 처리기는 쓰지 않는다, 텍스처 처리기 A5가 쓴다).
     NuggetCache* nuggets = nullptr;
+    // 참이면 처리기는 너겟 적중을 쓰지 않고 다시 만든 결과를 적중 결과와 byte로 대조하고, 다르면
+    // failure 코드 NuggetMismatch(오류 InvalidArgument)로 실패한다(10.2절 결정 12 — A4e1).
+    bool verifyNuggets = false;
     // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
     PackageSink* sink = nullptr;
     AssetDiagnostic* failure = nullptr;

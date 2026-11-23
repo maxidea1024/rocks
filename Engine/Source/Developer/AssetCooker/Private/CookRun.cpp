@@ -202,6 +202,7 @@ private:
         context.cookerVersion = request_.cookerVersion;
         context.bulkSource = info.store;
         context.nuggets = request_.nuggets;
+        context.verifyNuggets = request_.verifyNuggets;
         context.sink = &sink;
         context.failure = &failure;
         if (auto cooked = processor.Value()->Cook(context); !cooked) {

@@ -1,6 +1,7 @@
 #include "CommandletHost.h"
 #include <AssetCommandlets/AssetAliasCommandlet.h>
 #include <AssetCommandlets/AssetCommandletSupport.h>
+#include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCommandlets/AssetIndexCommandlet.h>
 #include "ContentSignCommandlet.h"
@@ -253,6 +254,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
 
     registered = registry.Register({"asset-import", "Import a source file into a new asset.",
                                     &RunAssetImportCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered = registry.Register({"asset-cook", "Cook the project for a target profile.",
+                                    &RunAssetCookCommand, &assetContext});
     if (!registered) {
         return 1;
     }

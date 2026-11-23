@@ -125,6 +125,25 @@ struct ProjectScene {
     bool ready = false;
 };
 
+// verify 쿠킹이면 Leaf에서 NuggetMismatch로 실패하고(너겟 적중 대조 실패 흉내 — A4e1), 그 밖은
+// 기본 Cook이다.
+class MismatchProcessor final : public CookProcessor {
+public:
+    NuggetProcessorId Identity() const noexcept override {
+        return DefaultCookProcessorId;
+    }
+
+    Result<void> Cook(CookContext& context) const noexcept override {
+        if (context.verifyNuggets && context.entry->path.View() == "/Game/Leaf") {
+            context.failure->code = AssetDiagnosticCode::NuggetMismatch;
+            context.failure->error = ErrorCode::InvalidArgument;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return CookProcessor::Cook(context);
+    }
+};
+
 bool Same(Span<const uint8> left, Span<const uint8> right) noexcept {
     if (left.Size() != right.Size()) {
         return false;
@@ -179,6 +198,46 @@ TEST(CookProject_FullTwiceReuses) {
     CHECK(again.published && again.cooked == 0 && again.reused == 8 && again.bytesWritten == 0);
     CHECK(Same(scene.files.Bytes(Manifest), first.View()));
     CHECK(Contains(scene.ReportText(), "\"reused\":8"));
+}
+
+// verify(10.2절 결정 12 — A4e1): 재사용 없이 모든 대상을 쿠킹하고(기본 처리기 — 같은 매니페스트
+// byte), 처리기의 대조 실패 NuggetMismatch는 에셋 오류 진단이다(게시하지 않음·보고서 코드).
+// verify가 아니면 같은 처리기도 대조하지 않는다(전부 재사용).
+TEST(CookProject_VerifyNuggets) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ProjectScene scene(env, "cook-project-verify");
+    REQUIRE(scene.ready);
+    CookProjectResult first(env.allocator);
+    REQUIRE(CookProject(env.allocator, scene.Request(), first));
+    REQUIRE(first.published);
+    const Array<uint8> manifest = scene.Copy(Manifest);
+
+    CookProjectRequest request = scene.Request();
+    request.verifyNuggets = true;
+    CookProjectResult verified(env.allocator);
+    REQUIRE(CookProject(env.allocator, request, verified));
+    CHECK(verified.published && verified.cooked == 8 && verified.reused == 0 &&
+          verified.diagnostics.IsEmpty());
+    CHECK(Same(scene.files.Bytes(Manifest), manifest.View()));
+
+    MismatchProcessor mismatch;
+    CookProcessorTable table(env.allocator, env.types, mismatch);
+    request.processors = &table;
+    CookProjectResult failed(env.allocator);
+    REQUIRE(CookProject(env.allocator, request, failed));
+    REQUIRE(failed.diagnostics.Size() == 1);
+    CHECK(!failed.published && failed.reused == 0 &&
+          failed.diagnostics[0].code == AssetDiagnosticCode::NuggetMismatch &&
+          !failed.diagnostics[0].warning &&
+          failed.diagnostics[0].error == ErrorCode::InvalidArgument);
+    CHECK(Same(scene.files.Bytes(Manifest), manifest.View()));
+    CHECK(Contains(scene.ReportText(), "\"code\":\"NuggetMismatch\""));
+
+    request.verifyNuggets = false;
+    CookProjectResult plain(env.allocator);
+    REQUIRE(CookProject(env.allocator, request, plain));
+    CHECK(plain.published && plain.cooked == 0 && plain.reused == 8);
 }
 
 // 부분 쿠킹: Leaf 내용을 바꾸고 Hero만 인자로 주면 기존 항목 중 바뀐 Leaf와 그것을 Hard로 쓰는

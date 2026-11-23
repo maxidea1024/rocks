@@ -111,7 +111,10 @@ enum class AssetDiagnosticCode : uint16 {
     // 임포트 옵션 값·역할이 잘못됨(InvalidImportOption), 옵션도 설정도 아닌 이름(UnknownProperty).
     ImporterOutdated,
     InvalidImportOption,
-    UnknownProperty
+    UnknownProperty,
+    // 쿠킹 verify(AssetSystem.ko.md 10.2절 결정 12 — A4e1): 처리기가 너겟 적중 없이 다시 만든
+    // 결과가 적중 결과와 byte가 다르다(오류 — 키가 입력을 다 담지 않았거나 처리기가 비결정적이다).
+    NuggetMismatch
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

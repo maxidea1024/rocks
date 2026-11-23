@@ -256,9 +256,12 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     reuseRequest.profileId = request.profile->id.View();
     reuseRequest.profileSettings = request.profileSettings;
     reuseRequest.cookerVersion = request.cookerVersion;
+    // verify 쿠킹은 재사용하지 않는다(재사용 대상은 처리기를 거치지 않는다 — 계획은 빈 채로 둔다).
     CookReusePlan reuse(allocator);
-    if (auto planned = PlanCookReuse(allocator, reuseRequest, reuse); !planned) {
-        return planned;
+    if (!request.verifyNuggets) {
+        if (auto planned = PlanCookReuse(allocator, reuseRequest, reuse); !planned) {
+            return planned;
+        }
     }
 
     CookPublishConfig publishConfig;
@@ -274,7 +277,7 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
         return begun;
     }
 
-    for (usize at = 0; at < targets.targets.Size(); ++at) {
+    for (usize at = 0; at < reuse.reuse.Size(); ++at) {
         if (reuse.reuse[at] == 0) {
             continue;
         }
@@ -301,6 +304,7 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     runRequest.maxOpenPackages = request.maxOpenPackages;
     runRequest.reuse = reuse.reuse.View();
     runRequest.nuggets = request.nuggets;
+    runRequest.verifyNuggets = request.verifyNuggets;
     runRequest.output = &publisher;
     CookRunResult run(allocator);
     if (auto cooked = CookPackages(allocator, runRequest, run); !cooked) {

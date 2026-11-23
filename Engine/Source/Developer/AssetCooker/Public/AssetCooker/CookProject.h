@@ -86,6 +86,9 @@ struct CookProjectRequest {
     EngineVersion cookedBy{};
     usize maxOpenPackages = CookMaxOpenPackages;
     NuggetCache* nuggets = nullptr;
+    // 참이면 처리기가 너겟 적중을 다시 만들어 대조한다(CookContext::verifyNuggets). 재사용하지
+    // 않는다 (재사용 대상은 처리기를 거치지 않아 대조가 빈다 — 10.2절 "A4e 구현 세부").
+    bool verifyNuggets = false;
     // 기존 매니페스트 크기 상한이다(넘으면 깨진 것으로 본다 — 시험이 낮춘다).
     uint64 manifestLimitBytes = CookedManifestMaxFileBytes;
 };
@@ -118,9 +121,9 @@ struct CookProjectResult {
 // 끝까지 오면 성공·실패와 상관없이 보고서를 쓴다. 기존 매니페스트가 깨졌으면(상한 초과 포함)
 // 경고(그 진단 코드 — 상한 초과는 CorruptPackage / CapacityExceeded)를 남기고 없는 것으로 본다(전체
 // 쿠킹). 부분 쿠킹인데 병합 호환(CheckCookedManifestMerge)이 아니면 쿠킹하지 않고 오류
-// IncompatibleCook과 보고서로 끝낸다. 오류(멈춤 — 보고서 없음): 요청 인자 null InvalidArgument, 각
-// 단계의 함수 오류(색인·TypeRegistry·IO·잠금 아님 등), 기존 매니페스트 읽기 IO 오류, 보고서 쓰기
-// 오류, 할당 실패.
+// IncompatibleCook과 보고서로 끝낸다. verifyNuggets면 재사용 없이 모든 대상을 쿠킹한다. 오류(멈춤 —
+// 보고서 없음): 요청 인자 null InvalidArgument, 각 단계의 함수 오류(색인·TypeRegistry·IO·잠금 아님
+// 등), 기존 매니페스트 읽기 IO 오류, 보고서 쓰기 오류, 할당 실패.
 ROCKS_ASSETCOOKER_API Result<void> CookProject(Allocator& allocator,
                                                const CookProjectRequest& request,
                                                CookProjectResult& result) noexcept;

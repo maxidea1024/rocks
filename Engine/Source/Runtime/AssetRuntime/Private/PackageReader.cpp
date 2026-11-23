@@ -926,6 +926,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "InvalidImportOption";
     case AssetDiagnosticCode::UnknownProperty:
         return "UnknownProperty";
+    case AssetDiagnosticCode::NuggetMismatch:
+        return "NuggetMismatch";
     }
 
     return "Unknown";

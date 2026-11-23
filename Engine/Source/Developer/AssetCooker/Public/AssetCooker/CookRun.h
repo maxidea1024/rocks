@@ -75,8 +75,9 @@ struct CookRunRequest {
     // 재사용 표지다(대상과 같은 수 — 0이 아니면 그 대상은 열지 않고 건너뛴다, PlanCookReuse). 비면
     // 재사용 없음이다.
     Span<const uint8> reuse{};
-    // 처리기에 넘길 너겟 캐시다(없으면 null).
+    // 처리기에 넘길 너겟 캐시와 verify 표지다(CookContext로 그대로 넘긴다).
     NuggetCache* nuggets = nullptr;
+    bool verifyNuggets = false;
     CookOutputSink* output = nullptr;
 };
 
