@@ -10,6 +10,7 @@ public sealed class WorldBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "WorldBench",
+        ModuleDirectory = "Programs/WorldBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/WorldBench/Private"),
         PublicDependencies = ["Launch", "World"]

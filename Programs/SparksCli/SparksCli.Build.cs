@@ -8,6 +8,7 @@ public sealed class SparksCliProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "SparksCli",
+        ModuleDirectory = "Programs/SparksCli",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/SparksCli/Private"),
         PublicDependencies = ["Launch", "Core", "SparksTools"]

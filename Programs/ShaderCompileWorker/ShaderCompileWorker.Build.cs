@@ -11,6 +11,7 @@ public sealed class ShaderCompileWorkerProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "ShaderCompileWorker",
+        ModuleDirectory = "Programs/ShaderCompileWorker",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/ShaderCompileWorker/Private"),
         PublicDependencies = ["Core", "Launch", "ShaderWorker"]

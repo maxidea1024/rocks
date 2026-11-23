@@ -416,10 +416,17 @@ internal static class ActionGraph
                     continue;
                 }
 
-                UnityGroupPlan grouped = UnityBuild.Plan(module.Name, group, root, output, module.UnityAnchorFiles, module.UnityBatchBytes,
-                    source => new FileInfo(source).Length, ReferenceEquals(group, candidates) ? separated : null);
-                batches.AddRange(grouped.Batches);
-                singles.AddRange(grouped.Singles);
+                // 유니티 묶음은 소스 묶음 경계를 넘지 않는다(Docs/Design/BuildTargets 3.5절 BS1b — 묶음 TU의 의존 기록을 소스 묶음 하나로 판정한다).
+                // 묶음 파일 이름은 첫 구성원으로 정하므로 나눈 부분끼리 겹치지 않는다.
+                IEnumerable<List<string>> parts = module.SourceGroups.Count == 0 ? [group]
+                    : group.GroupBy(source => SourceGroups.Of(module, source, root)?.Directory ?? "").Select(part => part.ToList());
+                foreach (List<string> part in parts)
+                {
+                    UnityGroupPlan grouped = UnityBuild.Plan(module.Name, part, root, output, module.UnityAnchorFiles, module.UnityBatchBytes,
+                        source => new FileInfo(source).Length, ReferenceEquals(group, candidates) ? separated : null);
+                    batches.AddRange(grouped.Batches);
+                    singles.AddRange(grouped.Singles);
+                }
             }
 
             unityBatches.AddRange(batches);

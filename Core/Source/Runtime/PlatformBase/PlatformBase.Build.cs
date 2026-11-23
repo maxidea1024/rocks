@@ -18,6 +18,7 @@ public sealed class PlatformBase : CoreModuleRules
         return new()
         {
             Name = ModuleName,
+            ModuleDirectory = ModuleDirectory,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
             Sources = context.Platform switch

@@ -8,6 +8,7 @@ public sealed class CompressionBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "CompressionBench",
+        ModuleDirectory = "Programs/CompressionBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/CompressionBench/Private"),
         PublicDependencies = ["Launch", "Compression", "AsyncCompression"]

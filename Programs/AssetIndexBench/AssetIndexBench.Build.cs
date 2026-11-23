@@ -9,6 +9,7 @@ public sealed class AssetIndexBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "AssetIndexBench",
+        ModuleDirectory = "Programs/AssetIndexBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/AssetIndexBench/Private"),
         PublicDependencies = ["Launch", "Core", "Task", "AssetRuntime", "AssetDatabase", "AssetTestFixtures"]

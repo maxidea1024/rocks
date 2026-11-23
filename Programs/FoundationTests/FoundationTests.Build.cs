@@ -77,6 +77,62 @@ public abstract class TestsModule : ModuleRules
         "Programs/FoundationTests/Private/NumberCorpus.cpp",
     ];
 
+    // Modules the tests of a module may use besides that module's compile environment (Docs/Design/BuildTargets section 3.5 BS1b): fixture modules,
+    // test-only tools and modules an integration test exercises. The include ownership check lets the tests in <module>/Tests include only headers of
+    // the module, the public and Tests areas of the modules its compile environment sees, and the public and Tests areas of these modules (with the
+    // public areas of their public environment). Keep each list to what the tests include.
+    private static readonly Dictionary<string, string[]> TestGroupModules = new(StringComparer.Ordinal)
+    {
+        ["Animation"] = ["AssetTestFixtures"],
+        ["AssetCommandlets"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        ["AssetCooker"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        ["AssetDatabase"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        ["AssetNugget"] = ["AssetDatabase", "AssetRuntime", "AssetTestFixtures", "ObjectSerialization"],
+        ["AssetRuntime"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        ["Base"] = ["Core"],
+        ["Compression"] = ["AsyncCompression", "Task"],
+        ["CompressionTraining"] = ["Task"],
+        ["Config"] = ["ConfigTestFixtures", "CoreTypeBindings"],
+        ["Curves"] = ["CoreTypeBindings", "CurvesTestFixtures", "ObjectSerialization", "ReflectionText"],
+        ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
+        ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
+        ["Material"] = ["AssetTestFixtures"],
+        ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
+        ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
+        ["MeshTools"] = ["AssetTestFixtures"],
+        ["ModuleLoader"] = ["DynamicModuleTestApi"],
+        ["NodeGraph"] = ["ReflectionText"],
+        ["NodeGraphTools"] = ["ReflectionTestFixtures"],
+        ["ObjectRuntime"] = ["CoreTypeBindings", "GcSoak", "ObjectSerialization", "ReflectionTestFixtures"],
+        ["ObjectSerialization"] = ["CoreTypeBindings", "ReflectionTestFixtures"],
+        ["PlatformBase"] = ["Core"],
+        ["ReflectionText"] = ["CoreTypeBindings", "ReflectionTestFixtures"],
+        // The RenderBase tests also cover its integration with the engine (render settings through Config, GPU trace through TraceAnalysis, the
+        // World render lane).
+        ["RenderBase"] = ["Config", "ConfigTestFixtures", "CoreTypeBindings", "Engine", "ObjectRuntime", "ReflectionTestFixtures", "ReflectionText",
+            "Serialization", "TraceAnalysis", "World"],
+        ["SparksCompiler"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
+        ["SparksTestHost"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
+        ["SparksTools"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
+        ["Task"] = ["TraceAnalysis"],
+        ["TraceCapture"] = ["TraceAnalysis"],
+        ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
+        ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
+        ["World"] = ["ObjectSerialization", "WorldTestFixtures"]
+    };
+
+    // Modules whose private headers (test access headers) the tests of a module include (Docs/Design/BuildTargets section 3.5 BS1b). Each entry is
+    // an explicit test access to another module's internals.
+    private static readonly Dictionary<string, string[]> TestGroupInternals = new(StringComparer.Ordinal)
+    {
+        // PackageInternal.h: the package writer internals the asset tests build packages with.
+        ["AssetCooker"] = ["AssetRuntime"],
+        ["AssetDatabase"] = ["AssetRuntime"],
+        ["EngineAssets"] = ["AssetRuntime"],
+        // VirtualMemoryTestAccess.h: the access overlap checker tests drive the virtual memory backend.
+        ["Core"] = ["PlatformBase"]
+    };
+
     // <plugin>/Source of a PluginTestModules entry ("Importers/UnrealExchange/UnrealExchange" -> "Engine/Plugins/Importers/UnrealExchange/Source").
     private static string PluginSourceDirectory(string module) => $"Engine/Plugins/{module[..module.LastIndexOf('/')]}/Source";
 
@@ -115,6 +171,18 @@ public abstract class TestsModule : ModuleRules
             directories.Add("Programs/FoundationTests/Engine");
         }
 
+        // One source group per tested module (Docs/Design/BuildTargets section 3.5 BS1b): the folder of its tests, the module, and its extra modules.
+        SourceGroup[] groups = [.. directories.Where(directory => directory.EndsWith("/Tests", StringComparison.Ordinal))
+            .Select(directory =>
+            {
+                string target = directory[..^"/Tests".Length];
+                target = target[(target.LastIndexOf('/') + 1)..];
+                return new SourceGroup(directory, target, TestGroupModules.GetValueOrDefault(target, []), TestGroupInternals.GetValueOrDefault(target));
+            }),
+            // The test support code (crash and file probes) reads PlatformBase internals. Its group targets the runner, so it sees the runner's
+            // three areas, the public and Tests areas of the modules the runner's compile environment sees, and the PlatformBase internals.
+            new SourceGroup(support, ExecutableName, [], ["PlatformBase"])];
+
         // POSIX platforms use the shared test support implementation.
         directories.Add(context.Platform == NativePlatform.Windows ? $"{support}/Private/Win64" : $"{support}/Private/Posix");
         var sources = context.Sources(directories.ToArray()).ToList();
@@ -140,6 +208,7 @@ public abstract class TestsModule : ModuleRules
         return new()
         {
             Name = ExecutableName,
+            ModuleDirectory = "Programs/FoundationTests",
             Kind = NativeModuleKind.Executable,
             Sources = sources,
             Unity = RepositoryUnity.Effective(UnityMode.On, context),
@@ -156,7 +225,8 @@ public abstract class TestsModule : ModuleRules
             // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader.ko.md section 3.8): it is linked into this
             // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.
             PublicDependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
-            DynamicModules = ["DynamicModuleTestFixture"]
+            DynamicModules = ["DynamicModuleTestFixture"],
+            SourceGroups = groups
         };
     }
 }

@@ -8,6 +8,7 @@ public sealed class LogBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "LogBench",
+        ModuleDirectory = "Programs/LogBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/LogBench/Private"),
         PublicDependencies = ["Launch", "Core", "Task", "TraceCapture"]
