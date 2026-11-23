@@ -169,6 +169,9 @@ try
     DescriptorTests.Run(root, repository);
     Pass("project and plugin descriptors parse strictly and resolve plugins");
 
+    CompanionTargetTests.Run();
+    Pass("companion targets merge program modules and reject invalid companions");
+
     EngineVersionTests.Run(root, repository);
     Pass(repository is null
         ? "engine version file parses strictly, project link predicate (repository checks skipped)"

@@ -90,4 +90,15 @@ public abstract class TargetRules
     public virtual bool CheckPublicHeaders => false;
 
     public virtual string? TestExecutable => null;
+
+    /// <summary>
+    /// 이 타깃과 함께 빌드해 같은 출력 폴더에 두는 프로그램 타깃의 이름이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC14, UE 에디터가
+    /// ShaderCompileWorker를 함께 빌드하는 <c>bEditorDependsOnShaderCompileWorker</c> 대응). 빌드는 동반 타깃의 <see cref="Modules"/>를
+    /// 이 타깃의 모듈 목록 뒤에 더해 같은 구성으로 한 번에 빌드한다. 동반 타깃은 Program·Monolithic이어야 하고 플러그인·동반 타깃을 가질 수
+    /// 없으며, 이 타깃도 Monolithic이어야 한다(아니면 빌드가 거부한다). 사용 예:
+    /// <code>
+    /// public override IReadOnlyList&lt;string&gt; CompanionTargets =&gt; ["ShaderCompileWorker"];
+    /// </code>
+    /// </summary>
+    public virtual IReadOnlyList<string> CompanionTargets => [];
 }
