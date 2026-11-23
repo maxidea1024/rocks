@@ -27,6 +27,7 @@
 - [x] 개정 16·17(Renderer RQ14), 구현 개정 18(2026-11-18): `features` 어휘에 런타임 확인 기능 `vertexViewportLayerOutput`을 더해 `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5` 형식 정의에 넣었다. 읽기 코드(`ShaderFormatDefinition.h`)에 `ShaderFeatureVertexViewportLayerOutput`, 런타임 확인 기능 묶음 `RuntimeCheckedShaderFeatures`와 `IsRuntimeCheckedShaderFeature`를 두었다(7.2절 7항, 15절 결정 12). SH2 전에 앞당겼다.
 - [ ] job 키 계산(P5)과 상한 검사(워커: 모든 상한을 job 형식 상한으로, 개정 17)는 이 값을 쓰는 다음 단계에서 한다.
 - [x] 개정 21(2026-11-20, 측정 S14): `D3D11_SM5` 형식 정의 `features`에 `vertexViewportLayerOutput`을 더하고 형식 정의 시험의 D3D11 단언을 바꿨다.
+- [ ] 개정 29(SH1e E8, [엔진 셰이더](../EngineShaders/09-LimitsAndFollowups.ko.md) SLR1): `features` 어휘에 장치 보장 기능 `typedUavLoad`(형식 확장 typed UAV load)를 더하고, `deviceRequirements` 어휘에 `D3D12_TYPED_UAV_LOAD_ADDITIONAL_FORMATS`를 더해 `D3D12_SM6`에 둘 다 넣는다. 다른 형식은 0(11.1절 E8). 어휘는 SC10 정의 `ROCKS_FEATURE_<이름>`으로 원문에 보인다(11.1절 SC10).
 - [x] 개정 17(7.2절 4항), 구현 개정 18(2026-11-18): `CommonLimits`와 그 시험(Windows 프로필 공통 상한 단언)을 지우고, 시험을 형식별 상한 단언(D3D12·Vulkan 128, D3D11·GLES 16, Vulkan render target 8, GLES 에뮬레이션 vec4 등)으로 바꿨다.
 
 ### 12.2 P14 셰이더 타입·퍼뮤테이션·라이브러리 형식
@@ -62,6 +63,7 @@
 - `GLES31_PC`는 출시 프로필과 엔진 내장 라이브러리에 넣지 않는다. Development 실행 파일이 필요할 때 컴파일한다(SH1). UE도 쿠킹 데이터를 쓰는 실행 파일에는 이 플랫폼을 등록하지 않는다(2절). Release Windows 실행 파일은 OpenGLGraphics를 링크하지 않는다(9절 정책).
 - **쿠킹 산출물.** (프로필, 형식)마다 셰이더 라이브러리 파일 하나를 만든다. 파일 이름은 패키지처럼 내용 주소(AssetSystem 4.2절 규칙, 형식 id와 내용 SHA-256)라 게시된 파일을 덮어쓰지 않는다. 게시와 정리는 `Packages/`와 같다: staging → no-replace `Move` → `SyncDirectory` → 매니페스트 `Replace`, 전체 쿠킹은 새 매니페스트가 가리키지 않는 라이브러리 파일을 지우고 부분 쿠킹은 지우지 않는다(AssetSystem 10절). UE는 라이브러리(Global·프로젝트·플러그인/청크)×형식마다 `ShaderArchive-<Library>-<Format>-<Platform>.ushaderbytecode`를 쿠킹하고(`Runtime/RenderCore/Private/ShaderLibrary/ShaderCodeLibraryUtilities.cpp:84–96`, `<Format>-<Platform>` 문자열 `ShaderCodeLibrary.cpp:1482–1488`), 배포는 IoStore나 네이티브 라이브러리로 연다(ushaderbytecode는 배포 형식이 아니라는 주석, `ShaderLibraryInstance.cpp:27–43`). Rocks도 라이브러리 파일은 쿠킹 단위이고, 배포 컨테이너로 옮기는 일은 패키징 단계가 맡는다. 라이브러리 분할(플러그인·청크)은 후속이다.
 - **엔진 내장 셰이더 라이브러리.** 엔진 셰이더(`Engine/Shaders`)의 라이브러리는 엔진 설치물을 만드는 단계(설치 SDK 내보내기·패키징)에서 `shader-compile --engine` 명령으로 그 호스트의 엔진 프로필 형식(`GLES31_PC` 제외)마다 만든다. 빌드 그래프 action이 아니다: Rocks.Build에는 빌드한 프로그램을 실행하는 action이 없다(action 종류는 Compile·Archive·Link·Copy, `ActionGraph.cs`). 그 호스트가 만들 수 없는 형식은 다른 호스트의 설치물 단계가 만든다(macOS는 DXBC를 만들지 않는다. 계획 §27.9는 호스트가 지원하는 target의 로컬 빌드가 되어야 한다고 요구한다). 설치물에서는 프로젝트·너겟·네트워크 없이 연다(계획 9.6, 5.2절 K3). 개발 트리에서는 Development 필요 시 컴파일이 같은 역할을 한다. UE의 Global 라이브러리에 해당한다. 프로젝트 쿠킹은 프로젝트·플러그인 셰이더 라이브러리만 만든다.
+- 시험 전용 플러그인 루트 `/Plugin/EngineShaderTests`(11.1절 SC2, 개정 29 — 엔진 셰이더 SLR2)의 원문은 엔진 내장 라이브러리에 넣지 않는다. 엔진 셰이더 시험 runner만 그 루트를 mount해 Development에서 컴파일한다.
 - 쿠킹 매니페스트 v1은 AssetId 단위라서 v2에 "에셋이 아닌 산출물" 항목(이름, 형식 id, 파일 SHA-256·크기, cookKey)을 더한다. 라이브러리 cookKey 입력은 포함된 job 키 정렬 목록과 라이브러리 형식 버전이다. 게시는 기존 쿠킹 게시와 같다(staging → `SyncDirectory` → `Replace`).
 - 런타임은 실행 장치의 backend에 맞는 형식의 라이브러리만 연다. 없거나 필요한 셰이더가 빠졌으면 `IncompatibleCook`이다.
 
