@@ -25,18 +25,23 @@
 
 ### 15.3 Rocks 계약
 
-**의존 API.** Tick 대상은 `TickTarget{object handle, hook}`이다. hook은 `Update`(OnTick)·`Fixed`(OnFixedTick)·`Late`(OnLateTick)다.
+**의존 API.** 의존의 한쪽은 `TickPoint{object handle, hook}`이다(스케줄러 내부의 `TickTarget`과 구분). hook은 `TickHook::Update`(OnTick)·`Fixed`(OnFixedTick)·`Late`(OnLateTick)다. 간선마다 출처(`TickEdgeSource` — `User`·`Attachment`·`Framework`)를 비트로 두고, 모든 출처가 떼면 간선이 없어진다.
 
 ```cpp
-// World 공개 API(S7). 대상은 Actor·Component 어느 쪽이든 된다.
-Result<void> AddTickPrerequisite(TickTarget dependent, TickTarget prerequisite) noexcept;
-Result<void> RemoveTickPrerequisite(TickTarget dependent, TickTarget prerequisite) noexcept;
-Result<void> SetTickPhase(TickTarget target, TickPhase phase) noexcept;      // Update hook만
+// World 공개 API(S7b, World.h). 대상은 Actor·Component 어느 쪽이든 된다.
+Result<void> AddTickPrerequisite(TickPoint dependent, TickPoint prerequisite,
+                                 TickEdgeSource source = TickEdgeSource::User) noexcept;
+Result<void> RemoveTickPrerequisite(TickPoint dependent, TickPoint prerequisite,
+                                    TickEdgeSource source = TickEdgeSource::User) noexcept;
+Result<void> SetTickPhase(ObjectHandle object, TickPhase phase) noexcept;   // OnTick 단계
 Result<void> SetTickPriority(ObjectHandle object, int32 priority) noexcept;
 Result<void> SetTickInterval(ObjectHandle object, double seconds) noexcept;
+Result<TickPhase> GetTickEffectivePhase(TickPoint point) const noexcept;
 ```
 
-- **시작 전 선언(ERD5).** Constructed·Initialized 객체에도 선언할 수 있다. World가 모든 선언을 **선언 그래프**(TickTarget 사이 간선, 등록 여부와 무관) 하나에 두고 호출 시점에 그 그래프에서 순환을 검사한다(ERD2와 같은 시점). 양쪽이 등록되는 시점(OnStart 직후 등록)에 TickScheduler 간선으로 옮긴다. 한쪽이 끝내 등록되지 않으면 간선은 효력이 없다(UE의 "등록 안 된 선행 무시"와 같다). 해당 hook을 TickSettings에서 켜지 않은 대상은 `InvalidArgument`다(UE `bCanEverTick` 검사).
+옛 `AddActorTickPrerequisite`(Actor OnTick끼리, 둘 다 시작한 뒤에만)는 이 API로 바뀌었다.
+
+- **시작 전 선언(ERD5).** Constructed·Initialized 객체에도 선언할 수 있다. World가 모든 선언을 **선언 그래프**(TickTarget 사이 간선, 등록 여부와 무관) 하나에 두고 호출 시점에 그 그래프에서 순환을 검사한다(ERD2와 같은 시점). 양쪽이 등록되는 시점(OnStart 직후 등록)에 TickScheduler 간선으로 옮긴다. 한쪽이 끝내 등록되지 않으면 간선은 효력이 없다(UE의 "등록 안 된 선행 무시"와 같다). 해당 hook을 TickSettings에서 켜지 않은 대상은 `InvalidArgument`다(UE `bCanEverTick` 검사). 판정은 선언 시점의 설정이므로 hook은 생성자에서 정한다. 객체가 파괴되면 그 선언을 지우고, 다른 선언에 남은 참조는 다음 선언·등록 때 지운다.
 - **꺼진 선행(ERD4).** 꺼졌거나(`SetTickEnabled(false)`) interval 대기 중인 선행은 실행만 건너뛰고 순서 간선은 남는다. 같은 단계 안은 순차 실행이라 UE의 "무시"와 관찰 결과가 같다. 단계를 넘는 경우는 다르다: UE는 꺼지거나 cooldown 중인 선행을 늦춤 계산에서도 뺀다(`TickTaskManager.cpp:2668–2674`). Rocks는 실효 단계를 프레임 시작에 정적으로 정하므로 선행이 꺼져 있어도 의존하는 쪽은 늦춰진 단계에 남는다(문서화된 차이 — 단계가 프레임마다 흔들리지 않는다).
 - **단계를 넘는 의존(ERD3).** TickScheduler는 단계와 상관없이 모든 간선을 **한 그래프**에 둔다(지금의 같은 단계 제한을 없앤다). 순환 검사(`Reaches`)도 전체 그래프에서 한다. 항목마다 요청 단계(`TickSettings::phase`)와 **실효 단계**를 두고, 실효 단계 = max(요청 단계, 모든 선행의 실효 단계)를 전체 그래프 위상 순서로 계산한다(UE demotion). 선행이 더 이른 단계인 간선도 지우지 않는다 — 나중에 선행이 늦춰지거나 단계가 바뀌면 계산에 다시 쓰인다. 같은 실효 단계 안의 간선만 실행 순서 정렬에 쓰인다.
   - 반영 시점: 간선·요청 단계가 바뀌면 표시만 하고 **프레임의 첫 단계 실행 전**(`TickPhaseFrame::frameIndex`가 바뀐 첫 `RunPhase` — `BeginFrame` 호출 여부와 무관해 hook 안에서 `BeginFrame`을 불러도 같은 프레임에 다시 계산하지 않는다)에 실효 단계를 다시 계산해 항목을 단계 배열 사이로 옮긴다. 재계산의 할당이 실패하면 그 프레임은 이전 실효 단계로 실행하고(상태는 바뀌지 않는다) 다음 프레임에 다시 계산하며 `TickStats::phaseRecomputeFailures`에 센다. 그 프레임의 첫 단계 전에 생긴 변경(시작 처리에서 등록된 항목의 선언 포함)은 그 프레임에, 단계가 하나라도 실행된 뒤의 변경은 다음 프레임에 반영된다. 단계 경계에서 옮기면 한 프레임에 두 번 실행되거나 빠질 수 있어서다.

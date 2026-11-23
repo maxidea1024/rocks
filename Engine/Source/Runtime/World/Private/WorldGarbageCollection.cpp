@@ -228,6 +228,7 @@ void World::ForgetComponent(ObjectHandle component) noexcept {
 
     UnregisterTicks(entry->ticks);
     componentRecords_.Erase(component.slot);
+    ForgetTickDeclarations(component);
 }
 
 } // namespace rocks

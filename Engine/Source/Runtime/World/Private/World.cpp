@@ -380,6 +380,7 @@ WorldStats World::Stats() const noexcept {
     stats.spawnedTotal = spawnedTotal_;
     stats.destroyedTotal = destroyedTotal_;
     stats.ticks = ticks_.Stats();
+    stats.engineStageFailures = engineStageFailures_;
     for (uint32 index = 0; index < TickPhaseCount; ++index) {
         stats.phaseNanoseconds[index] = phaseNanoseconds_[index];
     }

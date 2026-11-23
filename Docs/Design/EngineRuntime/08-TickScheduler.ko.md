@@ -28,7 +28,7 @@
   - 사이클 검사(`Reaches`)는 호출 번호 표시로 방문한 칸만 본다(호출마다 표시 배열을 비우지 않는다 — 번호가 한 바퀴 돌 때만 비운다). 실행 중 미룬 해제는 목록으로 지운다(전 항목을 훑지 않는다 — 목록 용량은 등록 때 확보).
   - 한계: priority가 최댓값보다 낮은 등록과 선행 제거는 지금처럼 단계 전체를 다시 만든다.
 - 선행 의존은 같은 phase 안에서만 허용한다. 사이클은 `AddPrerequisite` 호출 시점에 방문 표시 탐색(선형 시간)으로 검출해 거부한다. 다른 phase 간 순서는 phase 순서로 보장된다.
-- Component Tick은 같은 hook의 소유 Actor Tick 뒤에 오도록 World가 선행 의존을 자동으로 건다. **S7에서 바뀐다(ERD1, 15.3절)**: UE에는 Actor → Component 기본 의존이 없으므로 이 간선을 없애고, SceneComponent 부착 관계(자식 → 부모) 간선을 건다.
+- Component Tick은 같은 hook의 소유 Actor Tick 뒤에 오도록 World가 선행 의존을 자동으로 건다. **S7b에서 바뀌었다(ERD1, 15.3절)**: UE에는 Actor → Component 기본 의존이 없으므로 이 간선을 없애고, SceneComponent 부착 관계(자식 → 부모) 간선을 건다. 같은 priority면 Actor Tick이 먼저 등록되므로 지금처럼 Actor가 먼저다.
 - interval은 대상별 누적으로 판정하고 상대 허용오차(1e-9)로 합산 오차를 흡수한다. 남은 누적은 다음 주기로 이월해 평균 주기를 interval에 맞추되 한 번에 여러 주기를 따라잡지 않는다. delta는 마지막 실행 이후 흐른 시간이다.
 - pause 정책: 기본은 World pause 시 정지, `TickWhenPaused`는 unscaled delta로 계속 실행한다. 디버그 단일 스텝 프레임은 pause가 아닌 것처럼 실행한다.
 - 병렬 Tick은 후속이다. 등록 단위가 읽기·쓰기 선언을 추가할 수 있도록 구조를 남긴다.

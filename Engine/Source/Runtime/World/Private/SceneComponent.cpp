@@ -152,6 +152,9 @@ Result<void> SceneComponent::AttachTo(ObjectHandle parent) noexcept {
         (void)removed;
     }
 
+    // 자식 hook이 부모의 같은 hook 뒤에 실행되게 한다(UE AttachToComponent의 tick 선행).
+    const ObjectHandle oldParent = parent_;
+    world.UpdateAttachmentTicks(self, oldParent, parent);
     parent_ = parent;
     // 부모가 바뀌면 이미 dirty였더라도 새 부모 기준으로 다시 계산하도록 자손까지 표시한다.
     worldDirty_ = false;
@@ -172,6 +175,7 @@ Result<void> SceneComponent::Detach() noexcept {
     auto removed = GetWorld().With<SceneComponent>(
         parent_, [self](SceneComponent& component) noexcept { component.RemoveChild(self); });
     (void)removed;
+    GetWorld().UpdateAttachmentTicks(self, parent_, {});
     parent_ = {};
     worldDirty_ = false;
     MarkDirty();
@@ -189,7 +193,9 @@ void SceneComponent::DetachForDestroy() noexcept {
     // 자식은 루트가 된다(상대 Transform 유지). 이미 계산된 월드 행렬은 죽은 부모를 포함하므로 다시
     // 계산하도록 자손까지 dirty로 표시한다.
     World& world = GetWorld();
+    const ObjectHandle self = Handle();
     for (ObjectHandle child : children_) {
+        world.UpdateAttachmentTicks(child, self, {});
         auto orphaned = world.With<SceneComponent>(child, [](SceneComponent& component) noexcept {
             component.parent_ = {};
             component.worldDirty_ = false;
