@@ -88,6 +88,10 @@ Result<void> GraphMutatorCore::ExecuteCommand(const GraphCommand& command) noexc
         return MoveNodesToGraph(command);
     case GraphCommandKind::RemoveRetainedPin:
         return RemoveRetainedPin(command);
+    case GraphCommandKind::InsertNode:
+        return InsertNode(command);
+    case GraphCommandKind::InsertEdge:
+        return InsertEdge(command);
     }
 
     return Fail(GraphCommandReason::None, command.graph);
@@ -536,13 +540,13 @@ Result<void> GraphMutatorCore::Connect(const GraphCommand& command) noexcept {
     // 핀 서술은 아래 op 적용 동안 바뀔 수 있는 목록을 가리키므로 값으로 잡는다.
     const PinDescriptor from = *fromPin;
     const PinDescriptor to = *toPin;
-    return ConnectResolved(*graph, edge, from, to, true);
+    return ConnectResolved(*graph, edge, from, to, true, nullptr, command.requireMake);
 }
 
 Result<void> GraphMutatorCore::ConnectResolved(Graph& graph, const GraphEdge& edge,
                                                const PinDescriptor& fromPin,
-                                               const PinDescriptor& toPin,
-                                               bool checkSchema) noexcept {
+                                               const PinDescriptor& toPin, bool checkSchema,
+                                               const uint32* keptOrder, bool requireMake) noexcept {
     bool exists = false;
     if (auto position = EdgeLowerBound(graph, edge, exists); !position) {
         return Result<void>::Failure(position.Error());
@@ -586,7 +590,7 @@ Result<void> GraphMutatorCore::ConnectResolved(Graph& graph, const GraphEdge& ed
         const ConnectVerdict verdict =
             schema != nullptr ? schema->CanConnect(view, query) : DefaultConnectVerdict(query);
         action = verdict.action;
-        if (action == ConnectAction::Deny) {
+        if (action == ConnectAction::Deny || (requireMake && action != ConnectAction::Make)) {
             return Fail(GraphCommandReason::ConnectDenied, graph.id, edge.toNode, edge.toPin);
         }
 
@@ -656,9 +660,353 @@ Result<void> GraphMutatorCore::ConnectResolved(Graph& graph, const GraphEdge& ed
     op.edgeKey = edge;
     op.edgeKey.order = 0;
     op.edge = op.edgeKey;
-    op.edge.order = fromPin.ordered ? static_cast<uint32>(edgesB_.Size()) : 0;
+    if (keptOrder != nullptr) {
+        op.edge.order = *keptOrder;
+    } else {
+        op.edge.order = fromPin.ordered ? static_cast<uint32>(edgesB_.Size()) : 0;
+    }
+
     op.hasValue = true;
     return Emit(Move(op));
+}
+
+// ---- 붙여넣기 명령(9.4절) ----
+
+Result<void> GraphMutatorCore::CheckInsertedRetainedPins(Span<const GraphCommand> list) noexcept {
+    for (usize index = 0; index < list.Size(); ++index) {
+        const GraphCommand& command = list[index];
+        if (command.kind != GraphCommandKind::InsertNode) {
+            continue;
+        }
+
+        Graph* graph = FindGraph(command.graph);
+        if (graph == nullptr) {
+            continue;
+        }
+
+        const usize nodeIndex = NodeIndex(*graph, command.nodeData.id);
+        if (nodeIndex == IndexNone) {
+            continue;
+        }
+
+        const GraphNode& node = graph->nodes[nodeIndex];
+        for (const RetainedPin& pin : node.retainedPins) {
+            if (!pin.value.bytes.IsEmpty()) {
+                continue;
+            }
+
+            edgesA_.Clear();
+            const Result<void> collected = pin.direction == PinDirection::Input
+                                               ? CollectIncoming(*graph, node.id, pin.key, edgesA_)
+                                               : CollectOutgoing(*graph, node.id, pin.key, edgesA_);
+            if (!collected) {
+                return Result<void>::Failure(collected.Error());
+            }
+
+            if (edgesA_.IsEmpty()) {
+                commandIndex_ = static_cast<uint32>(index);
+                return Fail(GraphCommandReason::NodeDataInvalid, command.graph, node.id, pin.key);
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<bool> GraphMutatorCore::SortNodeLists(GraphNode& node) noexcept {
+    NamePool& names = registry_.Names();
+    // 작은 목록이라 삽입 정렬로 맞추고 같은 키를 찾는다(비교가 실패할 수 있어 algo::Sort를 쓰지
+    // 않는다).
+    for (usize index = 1; index < node.inputDefaults.Size(); ++index) {
+        for (usize at = index; at > 0; --at) {
+            auto compared =
+                CompareNames(names, node.inputDefaults[at - 1].pin, node.inputDefaults[at].pin);
+            if (!compared) {
+                return Result<bool>::Failure(compared.Error());
+            }
+
+            if (compared.Value() == 0) {
+                return Result<bool>::Success(false);
+            }
+
+            if (compared.Value() < 0) {
+                break;
+            }
+
+            PinValueEntry moved(Move(node.inputDefaults[at]));
+            node.inputDefaults[at] = Move(node.inputDefaults[at - 1]);
+            node.inputDefaults[at - 1] = Move(moved);
+        }
+    }
+
+    for (usize index = 1; index < node.retainedPins.Size(); ++index) {
+        for (usize at = index; at > 0; --at) {
+            auto compared =
+                CompareNames(names, node.retainedPins[at - 1].key, node.retainedPins[at].key);
+            if (!compared) {
+                return Result<bool>::Failure(compared.Error());
+            }
+
+            if (compared.Value() == 0) {
+                return Result<bool>::Success(false);
+            }
+
+            if (compared.Value() < 0) {
+                break;
+            }
+
+            RetainedPin moved(Move(node.retainedPins[at]));
+            node.retainedPins[at] = Move(node.retainedPins[at - 1]);
+            node.retainedPins[at - 1] = Move(moved);
+        }
+    }
+
+    return Result<bool>::Success(true);
+}
+
+Result<void> GraphMutatorCore::InsertNode(const GraphCommand& command) noexcept {
+    Graph* graph = FindGraph(command.graph);
+    if (graph == nullptr) {
+        return Fail(GraphCommandReason::GraphMissing, command.graph);
+    }
+
+    const GraphNode& source = command.nodeData;
+    if (CommandIsZero(source.id)) {
+        return Fail(GraphCommandReason::IdZero, command.graph);
+    }
+
+    if (graph->nodes.Size() >= MaxGraphNodes) {
+        return Fail(GraphCommandReason::GraphFull, command.graph, source.id);
+    }
+
+    if (IdExists(source.id)) {
+        return Fail(GraphCommandReason::NodeExists, command.graph, source.id);
+    }
+
+    if (CommandNameNone(source.type)) {
+        return Fail(GraphCommandReason::TypeUnknown, command.graph, source.id);
+    }
+
+    bool tooLarge = source.properties.bytes.Size() > MaxPropertyRecordBytes;
+    for (const PinValueEntry& entry : source.inputDefaults) {
+        tooLarge = tooLarge || entry.value.bytes.Size() > MaxPropertyRecordBytes;
+    }
+
+    for (const RetainedPin& pin : source.retainedPins) {
+        tooLarge = tooLarge || pin.value.bytes.Size() > MaxPropertyRecordBytes;
+    }
+
+    if (tooLarge) {
+        return Fail(GraphCommandReason::ValueTooLarge, command.graph, source.id);
+    }
+
+    if (source.enableState != NodeEnableState::Enabled &&
+        source.enableState != NodeEnableState::Disabled) {
+        return Fail(GraphCommandReason::EnableState, command.graph, source.id);
+    }
+
+    for (const RetainedPin& pin : source.retainedPins) {
+        if ((pin.direction != PinDirection::Input && pin.direction != PinDirection::Output) ||
+            CommandNameNone(pin.key)) {
+            return Fail(GraphCommandReason::NodeDataInvalid, command.graph, source.id, pin.key);
+        }
+    }
+
+    for (const PinValueEntry& entry : source.inputDefaults) {
+        if (CommandNameNone(entry.pin)) {
+            return Fail(GraphCommandReason::NodeDataInvalid, command.graph, source.id, entry.pin);
+        }
+    }
+
+    // 재경유 노드는 고아 핀을 갖지 않는다(GI13).
+    if (source.type == registry_.RerouteType() && !source.retainedPins.IsEmpty()) {
+        return Fail(GraphCommandReason::NodeDataInvalid, command.graph, source.id);
+    }
+
+    GraphPatchOp node = MakeOp(GraphSlotKind::Node, command.graph);
+    node.id = source.id;
+    node.hasValue = true;
+    if (auto cloned = CloneGraphNode(source, node.node); !cloned) {
+        return cloned;
+    }
+
+    auto sorted = SortNodeLists(node.node);
+    if (!sorted) {
+        // 키 토큰이 pool에 없으면(낡은 Name) 노드 데이터 오류다. 할당 실패는 그 오류다.
+        if (sorted.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(sorted.Error());
+        }
+
+        return Fail(GraphCommandReason::NodeDataInvalid, command.graph, source.id);
+    }
+
+    if (!sorted.Value()) {
+        return Fail(GraphCommandReason::NodeDataInvalid, command.graph, source.id);
+    }
+
+    // 등록된 종류면 AddNode의 종류 규칙과 입력 기본값(GI14)·고아 핀 가림(GI8)을 본다. 모르는
+    // 종류(자리 노드)는 바이트 그대로 넣는다.
+    const RegisteredNodeType* type = registry_.FindNodeType(document_.domain, source.type);
+    if (type != nullptr) {
+        const NodeTypeDescriptor& descriptor = type->descriptor;
+        if (source.typeSchemaVersion != descriptor.schemaVersion) {
+            return Fail(GraphCommandReason::TypeVersion, command.graph, source.id);
+        }
+
+        if (!CommandPropertiesMatch(descriptor, source.properties.bytes.View())) {
+            return Fail(GraphCommandReason::PropertiesSchema, command.graph, source.id);
+        }
+
+        if (source.enableState == NodeEnableState::Disabled &&
+            !HasCapability(descriptor.capabilities, NodeCapabilities::AllowDisable)) {
+            return Fail(GraphCommandReason::EnableState, command.graph, source.id);
+        }
+
+        if (HasCapability(descriptor.capabilities, NodeCapabilities::SinglePerDocument)) {
+            for (const Graph& other : document_.graphs) {
+                for (const GraphNode& existing : other.nodes) {
+                    if (existing.type == source.type) {
+                        return Fail(GraphCommandReason::SinglePerDocument, command.graph,
+                                    source.id);
+                    }
+                }
+            }
+        }
+
+        auto pins = PinsOf(*graph, node.node, pinsA_);
+        if (!pins) {
+            if (pins.Error() == ErrorCode::OutOfMemory) {
+                return Result<void>::Failure(pins.Error());
+            }
+
+            return Fail(GraphCommandReason::PropertiesSchema, command.graph, source.id);
+        }
+
+        for (const PinValueEntry& entry : node.node.inputDefaults) {
+            const PinDescriptor* pin = pinsA_.Find(entry.pin);
+            if (pin == nullptr || pin->direction != PinDirection::Input) {
+                return Fail(GraphCommandReason::PinMissing, command.graph, source.id, entry.pin);
+            }
+
+            if (pin->valuePolicy == PinValuePolicy::Hidden) {
+                return Fail(GraphCommandReason::ValueHidden, command.graph, source.id, entry.pin);
+            }
+
+            if (entry.value.bytes.IsEmpty()) {
+                return Fail(GraphCommandReason::ValueEmpty, command.graph, source.id, entry.pin);
+            }
+        }
+
+        for (const RetainedPin& pin : node.node.retainedPins) {
+            if (pinsA_.Find(pin.key) != nullptr) {
+                return Fail(GraphCommandReason::RetainedShadowed, command.graph, source.id,
+                            pin.key);
+            }
+        }
+    }
+
+    GraphPatchOp layout = MakeOp(GraphSlotKind::NodeLayout, command.graph);
+    layout.id = source.id;
+    layout.hasValue = true;
+    if (auto cloned = CloneNodeLayout(command.layout, layout.layout); !cloned) {
+        return cloned;
+    }
+
+    layout.layout.node = source.id;
+    if (auto emitted = Emit(Move(node)); !emitted) {
+        return emitted;
+    }
+
+    return Emit(Move(layout));
+}
+
+Result<void> GraphMutatorCore::ResolveInsertEnd(const Graph& graph, const GraphNode& node, Name key,
+                                                PinDirection direction, PinList& pins,
+                                                PinDescriptor& out, bool& kept) noexcept {
+    auto known = PinsOf(graph, node, pins);
+    if (!known) {
+        return Result<void>::Failure(known.Error());
+    }
+
+    // 순번 규칙이 없는 끝(고아 핀·알 수 없는 종류)은 상한·순번 없는 서술로 둔다(6.3절 — 방향만
+    // 본다).
+    out = PinDescriptor{};
+    out.key = key;
+    out.direction = direction;
+    out.maxEdges = UnlimitedEdges;
+    out.ordered = false;
+    kept = true;
+    if (!known.Value()) {
+        return Result<void>::Success();
+    }
+
+    if (const PinDescriptor* pin = pins.Find(key); pin != nullptr) {
+        if (pin->direction != direction) {
+            return Fail(GraphCommandReason::PinDirection, graph.id, node.id, key);
+        }
+
+        out = *pin;
+        kept = false;
+        return Result<void>::Success();
+    }
+
+    for (const RetainedPin& retained : node.retainedPins) {
+        if (retained.key == key) {
+            if (retained.direction != direction) {
+                return Fail(GraphCommandReason::PinDirection, graph.id, node.id, key);
+            }
+
+            return Result<void>::Success();
+        }
+    }
+
+    return Fail(GraphCommandReason::PinMissing, graph.id, node.id, key);
+}
+
+Result<void> GraphMutatorCore::InsertEdge(const GraphCommand& command) noexcept {
+    Graph* graph = FindGraph(command.graph);
+    if (graph == nullptr) {
+        return Fail(GraphCommandReason::GraphMissing, command.graph);
+    }
+
+    const GraphEdge& edge = command.edge;
+    const usize fromIndex = NodeIndex(*graph, edge.fromNode);
+    const usize toIndex = NodeIndex(*graph, edge.toNode);
+    if (fromIndex == IndexNone) {
+        return Fail(GraphCommandReason::NodeMissing, command.graph, edge.fromNode);
+    }
+
+    if (toIndex == IndexNone) {
+        return Fail(GraphCommandReason::NodeMissing, command.graph, edge.toNode);
+    }
+
+    // 핀 키는 None일 수 없다(GI11 — 알 수 없는 종류의 끝도).
+    if (CommandNameNone(edge.fromPin)) {
+        return Fail(GraphCommandReason::PinMissing, command.graph, edge.fromNode, edge.fromPin);
+    }
+
+    if (CommandNameNone(edge.toPin)) {
+        return Fail(GraphCommandReason::PinMissing, command.graph, edge.toNode, edge.toPin);
+    }
+
+    PinDescriptor from;
+    PinDescriptor to;
+    bool fromKept = false;
+    bool toKept = false;
+    if (auto resolved = ResolveInsertEnd(*graph, graph->nodes[fromIndex], edge.fromPin,
+                                         PinDirection::Output, pinsA_, from, fromKept);
+        !resolved) {
+        return resolved;
+    }
+
+    if (auto resolved = ResolveInsertEnd(*graph, graph->nodes[toIndex], edge.toPin,
+                                         PinDirection::Input, pinsB_, to, toKept);
+        !resolved) {
+        return resolved;
+    }
+
+    static_cast<void>(toKept);
+    return ConnectResolved(*graph, edge, from, to, false, fromKept ? &edge.order : nullptr);
 }
 
 Result<void> GraphMutatorCore::InsertConversion(Graph& graph, const GraphEdge& edge,

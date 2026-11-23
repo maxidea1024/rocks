@@ -94,10 +94,22 @@ public abstract class TargetRules
     /// <summary>
     /// 시험 동반 타깃이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6). native 하니스가 쓰는 다른 실행 파일을 그 실행 파일 하나뿐인 타깃으로
     /// 적는다 — Modular 타깃은 실행 파일이 하나라(manifest·빌드 정보) Launch 시험 프로그램을 같은 타깃에 둘 수 없다. <c>test</c>가 native 시험
-    /// 뒤 하니스 전에 같은 구성으로 빌드하고 실행 파일 경로를 하니스에 넘긴다. 동반 타깃은 Program이고 시험 실행 파일이 없어야 한다. 사용 예:
+    /// 뒤 하니스 전에 같은 구성으로 따로(자기 출력에) 빌드하고 실행 파일 경로를 하니스에 넘긴다. 동반 타깃은 Program이고 시험 실행 파일이
+    /// 없어야 한다. <see cref="CompanionTargets"/>(같은 빌드에 모듈을 합치는 Monolithic 동반)와 다르다. 사용 예:
     /// <code>
     /// public override IReadOnlyList&lt;string&gt; TestPrograms =&gt; ["LaunchProbeModular"];
     /// </code>
     /// </summary>
     public virtual IReadOnlyList<string> TestPrograms => [];
+
+    /// <summary>
+    /// 이 타깃과 함께 빌드해 같은 출력 폴더에 두는 프로그램 타깃의 이름이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC14, UE 에디터가
+    /// ShaderCompileWorker를 함께 빌드하는 <c>bEditorDependsOnShaderCompileWorker</c> 대응). 빌드는 동반 타깃의 <see cref="Modules"/>를
+    /// 이 타깃의 모듈 목록 뒤에 더해 같은 구성으로 한 번에 빌드한다. 동반 타깃은 Program·Monolithic이어야 하고 플러그인·동반 타깃을 가질 수
+    /// 없으며, 이 타깃도 Monolithic이어야 한다(아니면 빌드가 거부한다). 사용 예:
+    /// <code>
+    /// public override IReadOnlyList&lt;string&gt; CompanionTargets =&gt; ["ShaderCompileWorker"];
+    /// </code>
+    /// </summary>
+    public virtual IReadOnlyList<string> CompanionTargets => [];
 }

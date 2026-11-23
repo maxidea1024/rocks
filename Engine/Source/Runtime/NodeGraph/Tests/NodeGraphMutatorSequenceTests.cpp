@@ -118,7 +118,7 @@ private:
     bool AddOne(GraphCommandList& list) noexcept {
         const Graph& graph = PickGraph();
         const Guid node = PickNode(graph);
-        switch (random_.NextUInt32Below(16)) {
+        switch (random_.NextUInt32Below(18)) {
         case 0:
         case 1: {
             const Name types[] = {env_.typeAdd,   env_.typeParam,  env_.typeSequence,
@@ -217,6 +217,27 @@ private:
         case 14:
             return static_cast<bool>(list.RemoveRetainedPin(
                 graph.id, node, random_.NextBool() ? env_.pinGone : PickPin()));
+        case 15: {
+            // 완성된 노드 데이터(입력 기본값·고아 핀, 알 수 없는 종류 포함)를 넣는다.
+            const Name types[] = {env_.typeAdd, env_.typeUnknown, env_.typeToggle};
+            const Name type = types[random_.NextUInt32Below(
+                static_cast<uint32>(sizeof(types) / sizeof(types[0])))];
+            GraphNode created = MakeNode(env_, NewId(), type);
+            PinValueEntry entry(env_.allocator);
+            entry.pin = PickPin();
+            RetainedPin retained(env_.allocator);
+            retained.key = env_.pinGone;
+            retained.direction = random_.NextBool() ? PinDirection::Input : PinDirection::Output;
+            return FillRecord(entry.value.bytes, TestValueStruct, 1, random_.NextUInt32()) &&
+                   FillRecord(retained.value.bytes, TestValueStruct, 1, 1) &&
+                   created.inputDefaults.TryPushBack(Move(entry)) &&
+                   created.retainedPins.TryPushBack(Move(retained)) &&
+                   list.InsertNode(graph.id, created, MakeLayout(env_, created.id, 1, 2));
+        }
+        case 16:
+            return static_cast<bool>(
+                list.InsertEdge(graph.id, MakeEdge(node, PickPin(), PickNode(graph), PickPin(),
+                                                   random_.NextUInt32Below(3))));
         default: {
             // ordered 출력 핀의 간선 순서를 뒤집는다(Sequence가 아니면 위반이다).
             Array<GraphEdge> order(env_.allocator);

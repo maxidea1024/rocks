@@ -1,50 +1,74 @@
 #include <Core/Algorithms.h>
-#include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/SyntaxTree.h>
-#include <SparksTools/SparksCommand.h>
-#include "Workspace.h"
+#include "CommandInternal.h"
 
-// `sparks` 명령 실행이다(Docs/Design/SparksTools.ko.md 2절 — LC8a: check·dump).
+// `sparks` 명령 실행이다(Docs/Design/SparksTools.ko.md 2절·7절 — check·dump·build·ids).
 namespace rocks::sparks::tools {
+
+namespace detail {
+
+Result<void> ModuleOrder(const Workspace& workspace, bool selectedOnly,
+                         Array<usize>& order) noexcept {
+    const Span<const WorkspaceFile> files = workspace.Files();
+    for (usize at = 0; at < files.Size(); ++at) {
+        const WorkspaceFile& file = files[at];
+        if (file.kind == WorkspaceFileKind::Module && (!selectedOnly || file.selected)) {
+            if (auto pushed = order.TryPushBack(at); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
+        return StringView::CompareBytes(files[left].path.View(), files[right].path.View()) < 0;
+    });
+    return Result<void>::Success();
+}
+
+void AppendSummary(StringBuilderBase& text, const CommandContext& context) noexcept {
+    usize modules = 0;
+    for (const WorkspaceFile& file : context.workspace.Files()) {
+        modules += file.kind == WorkspaceFileKind::Module ? 1 : 0;
+    }
+
+    text.AppendFormat("{} errors in {} modules\n", context.diagnostics.Count(), modules);
+}
+
+int32 ReportProblem(CommandContext& context, StringView path, StringView message,
+                    int32 code) noexcept {
+    StringBuilder<OutputInlineBytes> text(context.allocator);
+    text.AppendFormat("{}: {}\n", path.IsEmpty() ? StringView("sparks") : path, message);
+    if (text.HasFailed() || !context.output.WriteError(text.View())) {
+        return ExitError;
+    }
+
+    return code;
+}
+
+} // namespace detail
 
 namespace {
 
-using detail::Workspace;
+using detail::CommandArguments;
+using detail::CommandContext;
+using detail::DumpKind;
+using detail::OutputInlineBytes;
 using detail::WorkspaceFile;
-using detail::WorkspaceFileKind;
-
-// 출력 builder의 inline 크기다(넘치면 allocator에서 늘린다).
-constexpr usize OutputInlineBytes = 4096;
 
 constexpr StringView Usage = R"(usage: sparks <command> [options] <path>...
 commands:
   check    check the packages and print the diagnostics
   dump     print a dump of each module: --ast, --names, --types, --ir or --bytecode
+  build    write each module's bytecode to --out <folder>/<package>/<module>.sparkc
+  ids      issue the pending stable IDs into each package's .rocksids.json
+  fmt      rewrite each module in the official format (--check: only list the files that differ)
 options:
   --schema <folder>   engine binding schemas (*.sparkbind.json); may repeat
+  --out <folder>      the output folder of 'build'
+  --check             'fmt' writes nothing and fails when a file is not formatted
 a path is a folder (every package below it, or the package it is in) or a .spark file (its package;
-dump prints that module only).
+dump and fmt use that module only).
 )";
-
-enum class DumpKind : uint8 {
-    None,
-    Syntax,
-    Names,
-    Types,
-    Ir,
-    Bytecode
-};
-
-// 명령 인자 분해 결과다(T5).
-struct Arguments {
-    explicit Arguments(Allocator& allocator) noexcept : schemas(allocator), paths(allocator) {
-    }
-
-    StringView command;
-    Array<StringView> schemas;
-    Array<StringView> paths;
-    DumpKind dump = DumpKind::None;
-};
 
 // 사용법 오류: 문장과 사용법을 오류 스트림에 쓴다.
 int32 UsageError(CommandOutput& output, Allocator& allocator, StringView message) noexcept {
@@ -59,10 +83,17 @@ int32 UsageError(CommandOutput& output, Allocator& allocator, StringView message
 }
 
 // 인자를 나눈다. 값 false는 사용법 오류(message에 이유).
-bool Parse(Span<const StringView> input, Arguments& out, StringView& message,
+bool Parse(Span<const StringView> input, CommandArguments& out, StringView& message,
            bool& outOfMemory) noexcept {
     outOfMemory = false;
     out.command = input[0];
+    // 명령 이름을 먼저 본다(옵션 오류보다 앞 — `sparks frob --out o`는 알 수 없는 명령).
+    if (out.command != "check" && out.command != "dump" && out.command != "build" &&
+        out.command != "ids" && out.command != "fmt") {
+        message = "unknown command";
+        return false;
+    }
+
     for (usize at = 1; at < input.Size(); ++at) {
         const StringView argument = input[at];
         if (argument == "--schema") {
@@ -76,6 +107,30 @@ bool Parse(Span<const StringView> input, Arguments& out, StringView& message,
                 return false;
             }
 
+            continue;
+        }
+
+        if (argument == "--check") {
+            if (out.command != "fmt" || out.check) {
+                message = out.command != "fmt" ? "'--check' is only for 'fmt'"
+                                               : "'--check' is given twice";
+                return false;
+            }
+
+            out.check = true;
+            continue;
+        }
+
+        if (argument == "--out") {
+            if (out.command != "build" || out.hasOut || at + 1 == input.Size()) {
+                message = out.command != "build" ? "'--out' is only for 'build'"
+                          : out.hasOut           ? "'build' takes one --out"
+                                                 : "'--out' needs a folder";
+                return false;
+            }
+
+            out.out = input[++at];
+            out.hasOut = true;
             continue;
         }
 
@@ -107,8 +162,8 @@ bool Parse(Span<const StringView> input, Arguments& out, StringView& message,
         }
     }
 
-    if (out.command != "check" && out.command != "dump") {
-        message = "unknown command";
+    if (out.command == "build" && !out.hasOut) {
+        message = "'build' needs --out <folder>";
         return false;
     }
 
@@ -185,7 +240,7 @@ int32 RunCommand(Allocator& allocator, platform::FileSystem& files,
         return UsageError(output, allocator, "no command given");
     }
 
-    Arguments parsed(allocator);
+    CommandArguments parsed(allocator);
     StringView message;
     bool outOfMemory = false;
     if (!Parse(arguments, parsed, message, outOfMemory)) {
@@ -193,11 +248,11 @@ int32 RunCommand(Allocator& allocator, platform::FileSystem& files,
     }
 
     // 작업 공간(T3).
-    Workspace workspace(allocator);
+    CommandContext context(allocator, files, parsed, output);
     StringBuilder<OutputInlineBytes> problem(allocator);
     bool ioFailure = false;
-    auto loaded =
-        workspace.Load(files, parsed.paths.View(), parsed.schemas.View(), problem, ioFailure);
+    auto loaded = context.workspace.Load(files, parsed.paths.View(), parsed.schemas.View(), problem,
+                                         ioFailure);
     if (!loaded) {
         return ExitError;
     }
@@ -211,45 +266,43 @@ int32 RunCommand(Allocator& allocator, platform::FileSystem& files,
         return ioFailure ? ExitError : ExitFailure;
     }
 
-    SourceSet sources(allocator);
-    DiagnosticList diagnostics(allocator);
-    Compilation compilation(allocator, sources);
-    Array<uint32> modules(allocator);
-    if (!workspace.AddTo(sources, compilation, diagnostics, modules) ||
-        !compilation.SetLastStage(StageOf(parsed.dump)) || !compilation.Check(diagnostics)) {
-        return ExitError;
-    }
-
-    diagnostics.Sort(sources);
-    StringBuilder<OutputInlineBytes> text(allocator);
-    if (!AppendDiagnostics(text, sources, diagnostics)) {
-        return ExitError;
-    }
-
-    // 모듈 목록(진단 경로 byte 순 — dump 파일 인자는 고른 모듈만).
-    Array<usize> order(allocator);
-    bool selected = false;
-    for (const WorkspaceFile& file : workspace.Files()) {
-        selected = selected || (file.selected && parsed.command == "dump");
-    }
-
-    for (usize at = 0; at < workspace.Files().Size(); ++at) {
-        const WorkspaceFile& file = workspace.Files()[at];
-        if (file.kind == WorkspaceFileKind::Module && (!selected || file.selected) &&
-            !order.TryPushBack(at)) {
+    // fmt는 컴파일하지 않는다(파일마다 구문만 — 8.3절).
+    if (parsed.command == "fmt") {
+        StringBuilder<OutputInlineBytes> text(allocator);
+        const int32 code = detail::RunFmt(context, text);
+        if (code == ExitError || text.HasFailed() || !output.WriteOutput(text.View())) {
             return ExitError;
         }
+
+        return code;
     }
 
-    const Span<const WorkspaceFile> loadedFiles = workspace.Files();
-    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
-        return StringView::CompareBytes(loadedFiles[left].path.View(),
-                                        loadedFiles[right].path.View()) < 0;
-    });
+    if (!context.workspace.AddTo(context.sources, context.compilation, context.diagnostics,
+                                 context.modules, context.packages) ||
+        !context.compilation.SetLastStage(StageOf(parsed.dump)) ||
+        !context.compilation.Check(context.diagnostics)) {
+        return ExitError;
+    }
+
+    context.diagnostics.Sort(context.sources);
+    StringBuilder<OutputInlineBytes> text(allocator);
+    if (!AppendDiagnostics(text, context.sources, context.diagnostics)) {
+        return ExitError;
+    }
+
+    int32 code = context.diagnostics.Count() == 0 ? ExitSuccess : ExitFailure;
     if (parsed.command == "dump") {
+        // 모듈 목록(진단 경로 byte 순 — 파일 인자는 고른 모듈만).
+        Array<usize> order(allocator);
+        if (!detail::ModuleOrder(context.workspace, true, order)) {
+            return ExitError;
+        }
+
+        const Span<const WorkspaceFile> loadedFiles = context.workspace.Files();
         for (const usize at : order) {
             text.AppendFormat("== {}\n", loadedFiles[at].path.View());
-            auto dumped = AppendDump(text, parsed.dump, sources, compilation, modules[at]);
+            auto dumped = AppendDump(text, parsed.dump, context.sources, context.compilation,
+                                     context.modules[at]);
             if (!dumped) {
                 return ExitError;
             }
@@ -258,15 +311,19 @@ int32 RunCommand(Allocator& allocator, platform::FileSystem& files,
                 text.Append("(no dump: the module stopped before this stage)\n");
             }
         }
+    } else if (parsed.command == "build") {
+        code = detail::RunBuild(context, text);
+    } else if (parsed.command == "ids") {
+        code = detail::RunIds(context, text);
     } else {
-        text.AppendFormat("{} errors in {} modules\n", diagnostics.Count(), order.Size());
+        detail::AppendSummary(text, context);
     }
 
     if (text.HasFailed() || !output.WriteOutput(text.View())) {
         return ExitError;
     }
 
-    return diagnostics.Count() == 0 ? ExitSuccess : ExitFailure;
+    return code;
 }
 
 } // namespace rocks::sparks::tools

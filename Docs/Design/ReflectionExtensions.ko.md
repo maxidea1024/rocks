@@ -1740,3 +1740,41 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 - **private 멤버**: 실제 타입이 `template <class> friend struct ::rocks::GeneratedType;`을 선언하면(Core는 앞 선언만 한다) 미러가 private 멤버를 C++ 이름으로 나열할 수 있다. 대조 static_assert·구조적 바인딩(C++20 접근 가능 멤버 규칙)·멤버 포인터 thunk·깊은 복사·검증 트리가 모두 `GeneratedType` 특수화 안이라 생성 코드는 바뀌지 않았다. friend가 없는 private 멤버는 여전히 생성 코드 컴파일 실패다. 도구 이름은 `Name=`으로 준다.
 - **미러 검증 hook**: 미러 struct의 `static Result<void> Validate(const 실제 타입&) noexcept`를 받는다(모양은 생성 static_assert가 대조한다 — 파서는 미러의 인자 철자를 보지 않는다). 생성 `ValidateSelf`·`ValidateTree`가 미러 함수를 부르고, 나머지 hook 규칙(23절)은 같다.
 - 시험: ToolTests `Meta.BindsEnumMirrorPrivateMembersAndValidate`·`Meta.BindsEnumMustListEveryRealEnumerator`·`Meta.BindsEnumMismatchFailsToCompile`·`Meta.BindsEnumTargetMustBeAnEnum`·`Meta.BindsEnumIsAllowedOnlyInCoreTypeBindings`, Curves `InterpCurveReflection_*`, ObjectRuntime `AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform`(CoreTypeBindings 등록 수 17 + 11).
+
+## 26. 독립 struct Record(NodeGraph NG2a)
+
+[노드 그래프](NodeGraph.ko.md) GD23은 노드 속성·입력 기본값을 struct Record 바이트(InstancedStruct 내용과 같은 wire)로 보관한다. NodeGraphTools의 조각 텍스트(노드 그래프 9.2절)는 그 바이트를 리플렉션 텍스트(`ExportJson`·`ImportJson`, 10.5절)로 바꾸고, 도메인은 struct 값을 바이트로 만든다(`SetNodeProperties`). 지금 struct codec(`EncodeStructRecord`·`DecodeStructValue`)이 쓰는 문맥은 객체 그래프 저장·복원(ObjectSerialization Private) 안에만 있어서, 값 하나를 그래프 없이 쓰고 읽는 공개 API를 둔다. UE는 `FInstancedStruct::Serialize`가 담긴 struct를 객체 없이 아카이브에 직접 쓴다(CoreUObject `StructUtils/InstancedStruct.cpp:122` — 같은 타입 기본값이 없으면 기본 생성 임시 값을 기준으로 둔다) — 같은 역할을 Rocks wire 규칙으로 둔다.
+
+**API**(ObjectSerialization `ObjectSerialization/StructRecord.h`).
+- `SaveStructRecord(Allocator&, ObjectRegistry&, const ObjectAccessContext&, const TypeLease& type, const void* value, const StructRecordOptions& = {}) -> Result<Array<uint8>>`: struct 값 하나를 Record(header schema = struct ID, version = struct 버전, 멤버 TLV)로 쓴다.
+- `LoadStructRecord(Allocator&, ObjectRegistry&, const ObjectAccessContext&, Span<const uint8> record, const TypeLease& type, void* value, const StructRecordOptions& = {}) -> Result<void>`: Record를 struct 값 하나로 읽는다. value는 그 타입의 살아 있는 값이다.
+- `AcquireStructRecordType(TypeRegistry&, Span<const uint8> record) -> Result<TypeLease>`: Record header의 schema로 struct lease를 연다(`ReadRecordHeader` + `AcquireValueType(id, Struct)` — 미등록 NotFound, struct가 아니면 TypeMismatch, header 오류는 그 오류).
+- `StructRecordOptions`: `ObjectGraphLimits limits`, `FieldEncodePolicy encodePolicy`, `FieldDecodePolicy decodePolicy`, `ObjectGraphMigration migrateStruct`·`void* migrationUser`(그래프 로드와 같은 struct 마이그레이션 override), `FieldCodecHooks* hooks`(진단·Soft 수집 — 없으면 진단이 필요한 정책은 그래프와 같이 InvalidArgument).
+
+**규칙.**
+- 바이트는 같은 값을 객체 그래프의 InstancedStruct 필드에 담아 저장했을 때의 내용 Record와 같다(같은 `EncodeStructRecord`, 시험으로 대조). 그래서 NodeGraph 바이트를 InstancedStruct로 옮기거나 그 반대가 바이트 복사다.
+- 담을 수 있는 struct만 받는다: InstancedStruct 담기 조건(11절 `CheckInstancedStructContent` — 강한 참조·Registry 컨테이너·InstancedStruct·Required·WorldOnly 소유자 요구 없음)을 그대로 쓴다. 위반은 InvalidArgument, lease가 struct가 아니면 InvalidArgument다.
+- weak 참조: 그래프 밖이라 대상을 쓸 곳이 없다. 저장은 그래프 저장의 집합 밖 Reject 규칙과 같다: 다른 Registry의 handle은 WrongContext, 파괴된 대상은 0, 살아 있는 대상은 기대 형식 검사(TypeMismatch) 뒤 `ExternalReference` 진단(값 2 — hooks가 있을 때) 뒤 0이다. 그래서 같은 값을 InstancedStruct에 담아 Reject 정책으로 저장한 바이트와 같다. 읽기는 0만 받는다(그 밖은 InvalidArgument). Soft 참조(경로)·ClassRef는 그래프와 같다(ClassRef 판정은 이 Registry의 TypeRegistry).
+- 저장 문맥: 최상위에 합성 struct 필드 하나(`FieldSchema` — 값 종류 Struct, 대상 = 그 struct, 플래그 0)를 FieldScope로 세우고 그 안에서 `EncodeStructRecord`를 부른다. SubstituteStruct hook·제외 플래그(encodePolicy)·한도는 그래프 저장과 같다. 출력은 Record 하나이고 크기 한도는 `limits.maxValueBytes`다.
+- 읽기는 그래프 복원과 같은 두 단계다.
+  - 1단계(검증): 값에 닿지 않는다. 같은 합성 필드 위치에서 `DecodeStructValue(Record 내용 출처)`로 버전 판정·마이그레이션(override 먼저, 없으면 타입이 등록한 것)·멤버 검증을 하고 Name 표시 문자열·ClassRef 판정·마이그레이션 결과를 방문 순서대로 기록한다. 예산은 그래프 로드와 같이 2단계 몫까지 청구한다(Spend 두 배).
+  - 2단계(적용): `ConstructionContext`(객체를 만들지 않는 트랜잭션 — 끝에 버린다)와 그 타입의 기본 생성 값(ObjectAllocator)에 같은 순서로 적용한다(Name은 이 Registry의 NamePool에 intern — pool이 없고 None이 아닌 Name이 있으면 Unsupported). 적용 뒤 struct 검증 hook이 돈다(DecodeStructValue).
+  - 게시: 성공하면 새 값을 `RuntimeStructOps::swap`으로 value와 맞바꾸고 옛 값을 소멸한다. swap이 없는 struct는 Unsupported다. 실패하면 value는 그대로다(원자성).
+  - Record에 없는 멤버는 **기본 생성 값**이다(그래프의 InstancedStruct 2단계는 같은 타입이면 지금 값 위에 적용하지만, 독립 값은 기준이 없으므로 기본값을 기준으로 둔다 — 텍스트·조각에서 읽은 값이 호출 전 내용에 좌우되지 않게).
+- 스레드: 2단계가 ObjectRegistry 트랜잭션이므로 Registry 소유 스레드에서 부른다(1단계만 따로 노출하지 않는다 — 소비자가 생기면 더한다).
+
+**구현(NG2a)에서 정한 점**(리뷰 1회 반영 — 필수 1·권장 4·참고 7).
+- 합성 필드는 ID = struct ID, 값 종류 Struct, 이름 `value`, 플래그 0, 선언 타입 0이다. 진단·hook(SubstituteStruct·Soft)이 받는 경로는 이 필드에서 시작하고 objectType은 struct ID다.
+- 2단계 트랜잭션은 1단계 직후, Name intern·값 블록 할당 전에 열고 `CheckOpen`으로 확인한다. 다른 스레드·문맥·종료 중이면 pool·객체 allocator에 닿기 전에 그 오류다. 트랜잭션은 Commit 없이 소멸한다(만든 객체가 없어 Rollback이 무동작).
+- 예산: 1단계는 문맥 청구(Spend 두 배·Name·ClassRef·마이그레이션)와 reader 청구를 공유 예산에 하고, 끝에 reader 청구분(전체 증가 − 문맥 청구)을 한 번 더 청구해 2단계 reader 몫을 미리 덮는다(그래프 DecodeNode와 같다). 2단계는 같은 크기 한도·무제한 작업이다.
+- 마이그레이션 결과 상한은 그래프 1단계와 같은 `maxBytes`·`maxMigrationBytes` 누계다.
+- 옵션 검사: `maxValueBytes`·`maxTotalFields`가 0이면 InvalidArgument, 읽기 정책 `ReportAndDefault`(undeclared enum)·`LoadNewerSkippingUnknown`은 hooks가 없으면 데이터와 무관하게 InvalidArgument다(그래프 `CheckLoadOptions`와 같다). 빈 입력은 InvalidArgument다.
+- 관찰(ObservedStructs)은 하지 않는다(값 하나라 관찰할 그래프 노드가 없다).
+- 수명 문구: 새 값의 생성은 `construct(ObjectAllocator)`다 — `S(Allocator&)` 생성자가 없는 struct는 그 allocator를 쓰지 않을 수 있다. 멤버 Text 노드와 String 등 decode가 만드는 버퍼는 ObjectAllocator다.
+- 시험하지 못한 것: Soft 참조 왕복(struct fixture에 Soft 멤버가 없다 — 클래스 fixture만 있다), swap 없는 struct의 Unsupported(그런 fixture가 없다), 다른 스레드 호출의 WrongThread(시험 기반 없음 — 코드 경로는 `CheckOpen` 하나).
+
+**버린 대안.** (1) NodeGraphTools가 Record TLV를 스키마로 직접 JSON으로 옮기기: 리플렉션 텍스트 형식 지식이 두 벌이 된다. (2) 임시 객체 하나에 InstancedStruct 필드를 두고 객체 그래프로 저장·복원: 그래프 envelope를 손으로 만들고 벗겨야 하고 임시 클래스 등록이 필요하다. (3) 단일 단계 적용(검증 없이 임시 값에 바로 해석): 1단계에서만 하는 검사(관찰·예산 선청구·마이그레이션 기록)와 경로가 갈라진다.
+
+**한계.** 강한 참조를 담은 struct는 독립 Record가 될 수 없다(그래프가 필요하다). 노드 속성 struct는 InstancedStruct 담기 조건 안에서 설계한다(노드 그래프 9.4절).
+
+**시험(ObjectSerialization `StructRecord_*` 11개).** 왕복(스칼라·String·Name·Text·Array·Map·Set·Optional·중첩 struct·enum·EditorOnly 멤버·ClassRef), InstancedStruct 필드 내용과 바이트 일치, 담기 조건 위반 거부, weak 규칙(살아 있는 대상 진단 뒤 0·파괴 요청 대상 0·읽기 non-zero 거부), Name pool 없는 Registry의 Unsupported, 타입 등록 마이그레이션, 옛 버전 마이그레이션(타입 등록·override), newer 정책, 잘린·손상 Record와 다른 schema 거부, 실패 때 value 불변(할당 실패 주입 포함), 없는 멤버는 기본값, swap 없는 struct Unsupported, 한도(maxValueBytes·필드 수).

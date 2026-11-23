@@ -66,7 +66,8 @@ bool DiagnosticIs(const Lexed& lexed, usize index, DiagnosticCode code, uint32 l
     }
 
     const Diagnostic& diagnostic = lexed.diagnostics[index];
-    const SourceLocation location = lexed.sources.Get(lexed.id).Locate(diagnostic.Span().begin);
+    const sparks::SourceLocation location =
+        lexed.sources.Get(lexed.id).Locate(diagnostic.Span().begin);
     return diagnostic.Code() == code && location.line == line && location.column == column;
 }
 

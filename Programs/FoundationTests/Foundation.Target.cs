@@ -34,6 +34,9 @@ public sealed class EngineTestsTarget : TargetRules
     public override bool CheckPublicHeaders => true;
 
     public override string TestExecutable => "EngineTests";
+
+    // The shader worker channel tests start ShaderCompileWorker next to the test executable (Docs/Design/ShaderSystem.ko.md section 11.1 SC14).
+    public override IReadOnlyList<string> CompanionTargets => ["ShaderCompileWorker"];
 }
 
 // SDK target holding only the reflection fixture modules (and their dependencies). Exported when Rocks.Build.IntegrationTests tests SDK descriptor import

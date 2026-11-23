@@ -206,17 +206,6 @@ bool ExitWithControlCStatus() noexcept {
     return true;
 }
 
-bool WaitForProcessExit(uint32 processId, uint32 timeoutMilliseconds) noexcept {
-    const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processId);
-    if (process == nullptr) {
-        return GetLastError() == ERROR_INVALID_PARAMETER;
-    }
-
-    const bool exited = WaitForSingleObject(process, timeoutMilliseconds) == WAIT_OBJECT_0;
-    CloseHandle(process);
-    return exited;
-}
-
 namespace {
 
 // ROCKS_CRASH_PROBE_HELPER 값이다(정적 초기화에서 읽는다).

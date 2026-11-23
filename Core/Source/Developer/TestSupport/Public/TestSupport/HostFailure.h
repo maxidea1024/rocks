@@ -45,10 +45,6 @@ bool CorruptProcessHeap() noexcept;
 bool FailFast() noexcept;
 bool ExitWithControlCStatus() noexcept;
 
-// processId 프로세스가 끝나기를 최대 timeoutMilliseconds 기다린다. 이미 없으면 true다. 끝나지
-// 않았거나 열 수 없으면 false다(다른 플랫폼은 늘 false).
-bool WaitForProcessExit(uint32 processId, uint32 timeoutMilliseconds) noexcept;
-
 // 크래시 수집 시험의 덤프 도우미 장치(설계 17절, Windows)를 건다. 시험 환경 변수
 // ROCKS_CRASH_PROBE_HELPER의 값으로 고르고, 없으면 아무것도 하지 않고 false다. 시험 실행기가 정적
 // 초기화에서 부른다(Launch 진입점이 다른 무엇보다 먼저 도우미 모드로 분기하므로). 도우미로 띄워진

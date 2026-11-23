@@ -203,7 +203,7 @@ class Door : ScriptableComponent {
         CHECK(diagnostic.Message() ==
               StringView("field 'Game/Doors/Door.Door.Open' is in the ID manifest but is no longer "
                          "declared."));
-        const SourceLocation at =
+        const sparks::SourceLocation at =
             fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
         CHECK(at.line == 8);
         CHECK(at.column == 28);
@@ -299,7 +299,7 @@ bool HasPending(const Fixture& fixture, StringView line) noexcept {
 }
 
 // 진단 index의 원문 위치(줄·열)다.
-SourceLocation LocationOf(const Fixture& fixture, usize index) noexcept {
+sparks::SourceLocation LocationOf(const Fixture& fixture, usize index) noexcept {
     const Diagnostic& diagnostic = fixture.diagnostics[index];
     return fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
 }
@@ -447,6 +447,58 @@ TEST(SparksStableIds_ClaimedTwiceS1008) {
     }
 }
 
+TEST(SparksStableIds_CarriedMemberRetiredOrClaimed) {
+    // type rename이 옮기는 같은 멤버 이름(승계)이 은퇴 항목이면 S1007, `@formerly`가 이미 가져간
+    // 항목이면 `@formerly` 쪽에 S1008이다 — 선언 순서와 무관하다(승계가 `@formerly`보다 먼저
+    // 맞춘다). 진단 없이 새 발급으로 넘기면 도구의 type rename이 옮긴 항목과 이름이 겹친다.
+    SystemAllocator allocator;
+    {
+        constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Door", "id": "00000000000000000000000000000006", "aliases": [], "retired": false },
+{ "kind": "field", "name": "Game/Doors/Door.Door.Old", "id": "00000000000000000000000000000007", "aliases": [], "retired": true }
+] })json";
+        constexpr StringView Source = R"(@formerly("Door") class Gate : ScriptableComponent {
+    var Old = 1;
+}
+)";
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Build(Source, Manifest));
+        REQUIRE(fixture.diagnostics.Count() == 1);
+        CHECK(fixture.diagnostics[0].Code() == DiagnosticCode::IdNameReserved);
+        CHECK(LocationOf(fixture, 0).line == 2);
+        StringBuilder<1024> pending(allocator);
+        fixture.Pending(pending);
+        CHECK(pending.View() == StringView("type Game/Doors/Door.Gate <- Game/Doors/Door.Door\n"));
+    }
+
+    constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Door", "id": "00000000000000000000000000000006", "aliases": [], "retired": false },
+{ "kind": "field", "name": "Game/Doors/Door.Door.Old", "id": "00000000000000000000000000000007", "aliases": [], "retired": false }
+] })json";
+    constexpr StringView FormerFirst = R"(@formerly("Door") class Gate : ScriptableComponent {
+    @formerly("Old") var Fresh = 1;
+    var Old = 2;
+}
+)";
+    constexpr StringView CarriedFirst = R"(@formerly("Door") class Gate : ScriptableComponent {
+    var Old = 2;
+    @formerly("Old") var Fresh = 1;
+}
+)";
+    const StringView sources[] = {FormerFirst, CarriedFirst};
+    const uint32 lines[] = {2, 3};
+    for (usize at = 0; at < 2; ++at) {
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Build(sources[at], Manifest));
+        REQUIRE(fixture.diagnostics.Count() == 1);
+        CHECK(fixture.diagnostics[0].Code() == DiagnosticCode::IdClaimedTwice);
+        CHECK(LocationOf(fixture, 0).line == lines[at]);
+        StringBuilder<1024> pending(allocator);
+        fixture.Pending(pending);
+        CHECK(pending.View() == StringView("type Game/Doors/Door.Gate <- Game/Doors/Door.Door\n"));
+    }
+}
+
 TEST(SparksStableIds_FormerlyThroughAliasUsesCurrentName) {
     // `@formerly`가 alias에 맞아도 발급 대기의 옛 이름은 항목의 현재 이름이다(도구의 rename은 현재
     // 이름으로 찾는다).
@@ -558,6 +610,10 @@ TEST(SparksStableIds_InvalidManifestsS1006) {
         R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": false }, { "kind": "type", "name": "Game/A.C", "id": "00000000000000000000000000000001", "aliases": [], "retired": false } ] })",
         R"({ "schema": 1, "entries": [ { "kind": "field", "name": "Game/A.B.X", "id": "00000000000000000000000000000001", "aliases": [], "retired": false } ] })",
         R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": true }, { "kind": "field", "name": "Game/A.B.X", "id": "00000000000000000000000000000002", "aliases": [], "retired": false } ] })",
+        // 모르는 키(최상위·항목 — C# Load와 같이 거부), 같은 키 둘.
+        R"({ "schema": 1, "entries": [], "note": "x" })",
+        R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": false, "note": 1 } ] })",
+        R"({ "schema": 1, "entries": [ { "kind": "type", "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": false } ] })",
     };
     for (const StringView manifest : bad) {
         Fixture fixture(allocator);

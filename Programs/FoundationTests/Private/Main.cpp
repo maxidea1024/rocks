@@ -554,8 +554,8 @@ using rocks::StringView;
 namespace launch = rocks::launch;
 
 // 실행 파일 이름이다. 시험 실행 파일 모듈 이름이 실행 파일 이름이므로 빌드가 정의하는 모듈 이름을
-// 쓴다(같은 소스가 CoreFoundationTests·FoundationTests·EngineTests·EngineModularTests가 된다). 크래시
-// 폴더 이름과 메타데이터 "program"이고, 하니스는 실행 파일 이름으로 찾는다.
+// 쓴다(같은 소스가 CoreFoundationTests·FoundationTests·EngineTests·EngineModularTests가 된다).
+// 크래시 폴더 이름과 메타데이터 "program"이고, 하니스는 실행 파일 이름으로 찾는다.
 constexpr const char RunnerName[] = ROCKS_MODULE_NAME_TEXT;
 
 bool Is(StringView argument, const char* text) noexcept {

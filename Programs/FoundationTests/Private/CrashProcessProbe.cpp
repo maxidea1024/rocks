@@ -8,6 +8,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Launch/Application.h>
+#include <Platform/Process.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
@@ -434,7 +435,9 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
         FaultAccess();
     } else if (CrashModeIs(mode, "helper-exited-early")) {
         // 도우미가 먼저 끝난 것을 확인한 뒤 실패한다(순서는 프로세스 종료 대기로 정한다).
-        if (!WaitForProcessExit(platform::CrashHelperProcessId(), HelperExitWaitMilliseconds)) {
+        if (platform::WaitForProcessExit(platform::CrashHelperProcessId(),
+                                         HelperExitWaitMilliseconds) !=
+            platform::WaitResult::Signaled) {
             return SetupFailed;
         }
 
@@ -456,8 +459,8 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
     } else if (CrashModeIs(mode, "control-c-exit")) {
         return ExitWithControlCStatus() ? DidNotCrash : UnknownMode;
     } else if (CrashModeIs(mode, "exit-7")) {
-        // 정상 종료(정리 없이 바로 — 공유 라이브러리의 정적 소멸도 돌지 않는다)다. 도우미는 기록하지
-        // 않는다.
+        // 정상 종료(정리 없이 바로 — 공유 라이브러리의 정적 소멸도 돌지 않는다)다. 도우미는
+        // 기록하지 않는다.
         rocks::platform::ExitProcessWithoutTeardown(ProbeExitCode);
     } else if (CrashModeIs(mode, "normal-exit")) {
         // 정상 종료: Launch가 수집기를 떼며 도우미에 Shutdown을 알리고 끝낸다(도우미가 남지

@@ -95,10 +95,6 @@ bool ExitWithControlCStatus() noexcept {
     return false;
 }
 
-bool WaitForProcessExit(uint32, uint32) noexcept {
-    return false;
-}
-
 bool InstallCrashHelperTestMode() noexcept {
     return false;
 }
