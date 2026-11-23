@@ -129,7 +129,7 @@ Result<void> World::DestroyLevel(ObjectHandle level) noexcept {
         for (usize at = 0; at < owner.actors_.Size(); ++at) {
             const ActorRecord* actor = FindActorRecord(owner.actors_[at]);
             if (actor != nullptr && actor->state != ActorState::PendingDestroy) {
-                auto destroyed = DestroyActor(actor->handle);
+                auto destroyed = DestroyActorFor(actor->handle, EndPlayReason::RemovedFromWorld);
                 (void)destroyed;
             }
         }
@@ -140,7 +140,7 @@ Result<void> World::DestroyLevel(ObjectHandle level) noexcept {
         // DestroyActor는 큐에만 넣으므로 레코드를 훑는 동안 저장소가 바뀌지 않는다.
         for (const ActorRecord& actor : actors_) {
             if (actor.level == level && actor.state != ActorState::PendingDestroy) {
-                auto destroyed = DestroyActor(actor.handle);
+                auto destroyed = DestroyActorFor(actor.handle, EndPlayReason::RemovedFromWorld);
                 (void)destroyed;
             }
         }

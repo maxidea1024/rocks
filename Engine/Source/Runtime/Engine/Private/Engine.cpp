@@ -280,6 +280,16 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
             return fail(InitStage::Subsystems, subsystems.Error());
         }
 
+        for (const SkippedSubsystem& skipped : subsystems_.Skipped()) {
+            if (skipped.reason == SubsystemSkipReason::MissingDependency) {
+                Log::Warning(
+                    LogEngine,
+                    "Skipped engine subsystem {Subsystem}: dependency {Dependency} was not "
+                    "created",
+                    skipped.name, skipped.missing);
+            }
+        }
+
         initializedSteps_ = StepSubsystems;
     }
 
@@ -383,6 +393,16 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
     initializedSteps_ = 0;
 }
 
+OuterSubsystemLookup Engine::SubsystemLookup() const noexcept {
+    OuterSubsystemLookup lookup;
+    lookup.context = this;
+    lookup.find = [](const void* context, SubsystemKey key) noexcept -> void* {
+        // 조회 창은 EngineSubsystem* 를 void*로 넘긴다(GetEngineSubsystem이 되돌린다).
+        return static_cast<const Engine*>(context)->FindSubsystem(key);
+    };
+    return lookup;
+}
+
 Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     if (state_ != EngineState::Running) {
         return Result<World*>::Failure(ErrorCode::InvalidArgument);
@@ -402,6 +422,9 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.gcSchedule = desc.gcSchedule;
     worldDesc.gcScheduler = desc.gcScheduler != nullptr ? desc.gcScheduler : gcScheduler_.Get();
     worldDesc.subsystems = desc.subsystems;
+    worldDesc.kind = desc.kind;
+    worldDesc.outerSubsystems =
+        desc.outerSubsystems.find != nullptr ? desc.outerSubsystems : SubsystemLookup();
     // World가 엔진 설정 문맥에 자기 CVar 범위를 만든다(CVarSystem 14.2절).
     worldDesc.settings = config_.settings;
     auto created = UniquePtr<World>::TryMake(allocator_, allocator_, *types_, worldDesc);
@@ -442,7 +465,10 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
 
 Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     WorldContext& context = worlds_[index];
-    auto finished = context.world->Shutdown();
+    // 게임 진행 중이면 정리 이유로 먼저 끝낸다(Shutdown은 그다음 — 17.6절).
+    auto ended = context.world->EndPlay(context.endReason);
+    (void)ended;
+    auto finished = context.world->Shutdown(context.endReason);
     if (!finished) {
         // 외부가 Borrow·RootRef를 보유하고 있다. 지연 작업에서 다시 시도한다.
         context.pendingDestroy = true;
@@ -480,10 +506,15 @@ Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> Engine::DestroyWorld(World* world) noexcept {
+Result<void> Engine::DestroyWorld(World* world, EndPlayReason reason) noexcept {
     for (usize index = 0; index < worlds_.Size(); ++index) {
         if (worlds_[index].world.Get() != world) {
             continue;
+        }
+
+        // 이미 미룬 파괴면 먼저 정한 이유를 유지한다.
+        if (!worlds_[index].pendingDestroy) {
+            worlds_[index].endReason = reason;
         }
 
         if (inFrame_) {
@@ -632,7 +663,8 @@ Result<void> Engine::RunFrame() noexcept {
     Result<void> outcome = Move(synced);
     const uint64 worldStart = platform::MonotonicNanoseconds();
     for (usize index = 0; index < worlds_.Size(); ++index) {
-        if (worlds_[index].pendingDestroy) {
+        // 비활성 World는 Tick하지 않는다(16.4절).
+        if (worlds_[index].pendingDestroy || worlds_[index].world->Kind() == WorldKind::Inactive) {
             continue;
         }
 

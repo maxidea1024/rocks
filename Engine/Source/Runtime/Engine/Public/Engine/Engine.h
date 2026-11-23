@@ -240,6 +240,11 @@ struct WorldCreateDesc {
     // 쓴다(EngineConfig::gcWorkers가 0이면 직렬).
     WorkerScheduler* gcScheduler = nullptr;
     Span<const WorldSubsystemType> subsystems;
+    // World 종류다(WorldDesc::kind — Subsystem 기본 생성 판정).
+    WorldKind kind = WorldKind::Game;
+    // 바깥 계층 Subsystem 조회 창이다. 비우면 엔진이 EngineSubsystem 조회 창을
+    // 넣는다(GameInstance는 자기 Subsystem을 먼저 보고 엔진으로 넘기는 창을 넣는다 — 18절).
+    OuterSubsystemLookup outerSubsystems;
     // 만든 뒤 바로 BeginPlay한다. 에디터·미리보기 World는 false로 둔다.
     bool beginPlay = true;
 };
@@ -373,7 +378,8 @@ public:
 
     // World 파괴를 요청한다. 프레임 밖이면 즉시, 프레임 안이면 5단계(지연 작업)에서 파괴한다.
     // 모르는 World는 NotFound다. 파괴가 Busy로 실패하면(외부 Borrow) 다음 프레임에 다시 시도한다.
-    Result<void> DestroyWorld(World* world) noexcept;
+    // reason은 World EndPlay의 정리 이유다(17.6절 — 기본 Quit).
+    Result<void> DestroyWorld(World* world, EndPlayReason reason = EndPlayReason::Quit) noexcept;
 
     usize WorldCount() const noexcept {
         return worlds_.Size();
@@ -416,12 +422,26 @@ public:
         return subsystems_.template Get<T>();
     }
 
+    // 마지막 초기화에서 생략한 EngineSubsystem이다(진단용 — 필수 의존 누락은 Warning도 남긴다).
+    Span<const SkippedSubsystem> SkippedSubsystems() const noexcept {
+        return subsystems_.Skipped();
+    }
+
+    // 키로 EngineSubsystem을 찾는다(바깥 계층 조회 창 — 16.3절). 없으면 nullptr이다.
+    EngineSubsystem* FindSubsystem(SubsystemKey key) const noexcept {
+        return subsystems_.Find(key);
+    }
+
+    // 엔진이 World에 넣는 기본 바깥 조회 창이다(EngineSubsystem만).
+    OuterSubsystemLookup SubsystemLookup() const noexcept;
+
     EngineStats Stats() const noexcept;
 
 private:
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
+        EndPlayReason endReason = EndPlayReason::Quit;
         // 파괴 시도가 실패해 미뤄진 상태다. 첫 실패 프레임부터 센다(WorldDestroyWarnFrames).
         bool destroyDeferred = false;
         bool destroyWarned = false;
@@ -499,5 +519,14 @@ private:
     // 설정 Sync가 실패하고 있는지다(연속 실패는 첫 번째만 Error로 남긴다).
     bool settingsSyncFailing_ = false;
 };
+
+// World 안(WorldSubsystem 등)에서 EngineSubsystem을 찾는다(World의 바깥 조회 창 — 16.3절 ERD10).
+// 조회 창이 닫힌 뒤(PreDeinitialize·Deinitialize)나 없으면 nullptr이다.
+template <class T>
+T* GetEngineSubsystem(const World& world) noexcept {
+    static_assert(IsBaseOfV<EngineSubsystem, T>);
+    return static_cast<T*>(
+        static_cast<EngineSubsystem*>(world.FindOuterSubsystem(SubsystemKeyOf<T>())));
+}
 
 } // namespace rocks

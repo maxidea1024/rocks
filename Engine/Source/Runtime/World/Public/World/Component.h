@@ -103,7 +103,8 @@ public:
     virtual void OnDisable() noexcept {
     }
 
-    virtual void OnDestroy() noexcept {
+    // reason은 정리 이유다(17.2절 — 소유 Actor와 함께 정리되면 Actor의 이유).
+    virtual void OnDestroy(EndPlayReason) noexcept {
     }
 
 protected:
@@ -136,6 +137,8 @@ private:
     ROCKS_NATIVE() bool awake_ = false;
     ROCKS_NATIVE() bool enabledApplied_ = false;
     ROCKS_NATIVE() bool startQueued_ = false;
+    // 단독 파괴(DestroyComponent)의 정리 이유다(먼저 정한 것을 유지한다).
+    ROCKS_NATIVE() EndPlayReason endReason_ = EndPlayReason::Destroyed;
     ROCKS_NATIVE() TickHandle ticks_[detail::TickHookCount];
 };
 
