@@ -61,13 +61,13 @@ hook 이름과 Component·Actor 사이 호출 순서(World.h의 hook 순서)는 
 
 `World::EndPlay(EndPlayReason)`를 더한다. Playing World에서만 뜻이 있고 두 번째 호출은 성공이다.
 
-1. 상태를 `EndingPlay`로 바꾼다(새 `OnStart` 시작 금지 — Spawn은 된다, 종료 정리용 객체를 위해).
+1. 상태를 `EndingPlay`(새 `WorldState` 값)로 바꾼다(새 `OnStart` 시작 금지 — Spawn은 된다, 종료 정리용 객체를 위해).
 2. Level마다 `DestroyLevel`과 같은 규칙으로 정리한다: `levelScript` 간선을 먼저 끊고 LevelScript를 그 Level의 다른 Actor보다 먼저 파괴 대기에 넣은 뒤(LD8·LD16 — `DestroyActor`는 LevelScript를 거부하므로 이 길을 쓴다) 나머지 Actor를 그 사유로 넣고, 즉시 정리한다(프레임 밖이므로 안전 지점을 기다리지 않는다). Level 자체는 남긴다.
 3. WorldSubsystem `OnWorldEndPlay`(역순).
 4. 바깥 Subsystem 조회 창을 닫는다(16.3절 ERD10).
 5. 상태를 `Initialized`로 돌린다(UE도 EndPlay 뒤 World는 정리 전까지 남는다).
 
-`Shutdown`은 Playing이면 먼저 `EndPlay(Quit)`를 부른다. `Engine::DestroyWorld(world, reason)`은 사유를 받는다(기본 `Quit`).
+`Shutdown`은 Playing이면 먼저 `EndPlay(Quit)`를 부른다(그 뒤 `Shutdown`은 `OnWorldEndPlay`를 다시 부르지 않는다). LevelScript는 아직 코드에 없어(LevelScript 문서 — 설계만) 2단계의 LevelScript 먼저 규칙은 LevelScript 구현 때 붙인다. `Engine::DestroyWorld(world, reason)`은 `EndPlay(reason)` 뒤 `Shutdown`이다(미룬 파괴는 먼저 정한 이유를 유지). `Engine::DestroyWorld(world, reason)`은 사유를 받는다(기본 `Quit`).
 
 ### 17.7 파괴 시점 규칙
 

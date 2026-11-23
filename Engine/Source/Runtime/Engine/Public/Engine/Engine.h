@@ -378,7 +378,8 @@ public:
 
     // World 파괴를 요청한다. 프레임 밖이면 즉시, 프레임 안이면 5단계(지연 작업)에서 파괴한다.
     // 모르는 World는 NotFound다. 파괴가 Busy로 실패하면(외부 Borrow) 다음 프레임에 다시 시도한다.
-    Result<void> DestroyWorld(World* world) noexcept;
+    // reason은 World EndPlay의 정리 이유다(17.6절 — 기본 Quit).
+    Result<void> DestroyWorld(World* world, EndPlayReason reason = EndPlayReason::Quit) noexcept;
 
     usize WorldCount() const noexcept {
         return worlds_.Size();
@@ -440,6 +441,7 @@ private:
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
+        EndPlayReason endReason = EndPlayReason::Quit;
         // 파괴 시도가 실패해 미뤄진 상태다. 첫 실패 프레임부터 센다(WorldDestroyWarnFrames).
         bool destroyDeferred = false;
         bool destroyWarned = false;

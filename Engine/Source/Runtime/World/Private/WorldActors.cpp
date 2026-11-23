@@ -197,8 +197,16 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
         return finish(Result<void>::Failure(ErrorCode::Destroyed));
     }
 
-    // 2) Actor OnAwake.
-    auto awoke = With<Actor>(actor, [](Actor& value) noexcept { return value.OnAwake(); });
+    // 2) 프레임워크 PreAwake(UE PreInitializeComponents) → Actor OnAwake. PreAwake 실패는 OnAwake
+    //    실패와 같다.
+    auto awoke = With<Actor>(actor, [](Actor& value) noexcept -> Result<void> {
+        auto prepared = value.OnFrameworkPreAwake();
+        if (!prepared) {
+            return prepared;
+        }
+
+        return value.OnAwake();
+    });
     record = FindActorRecord(actor);
     if (record == nullptr) {
         return finish(Result<void>::Failure(ErrorCode::Destroyed));
@@ -232,6 +240,25 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
         return finish(Result<void>::Success());
     }
 
+    // 4) 프레임워크 PostAwake(UE PostInitializeComponents — 모든 Component OnAwake 뒤). 실패하면
+    //    Spawn이 실패하고, OnAwake가 성공했으므로 정리에서 OnDestroy를 받는다.
+    auto posted =
+        With<Actor>(actor, [](Actor& value) noexcept { return value.OnFrameworkPostAwake(); });
+    record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return finish(Result<void>::Failure(ErrorCode::Destroyed));
+    }
+
+    if (!posted) {
+        auto destroyed = DestroyActor(actor);
+        (void)destroyed;
+        return finish(Result<void>::Failure(posted.Error()));
+    }
+
+    if (record->state == ActorState::PendingDestroy) {
+        return finish(Result<void>::Success());
+    }
+
     record->state = ActorState::Initialized;
 
     // 4) 활성이면 OnEnable(Actor -> Component).
@@ -248,11 +275,16 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
 }
 
 Result<void> World::DestroyActor(ObjectHandle actor) noexcept {
+    return DestroyActorFor(actor, EndPlayReason::Destroyed);
+}
+
+Result<void> World::DestroyActorFor(ObjectHandle actor, EndPlayReason reason) noexcept {
     ActorRecord* record = FindActorRecord(actor);
     if (record == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 이미 파괴 대기면 먼저 정한 이유를 유지한다(17.2절).
     if (record->state == ActorState::PendingDestroy) {
         return Result<void>::Success();
     }
@@ -265,6 +297,7 @@ Result<void> World::DestroyActor(ObjectHandle actor) noexcept {
 
     ObjectAccessScope scope(Access());
     record->state = ActorState::PendingDestroy;
+    record->endReason = reason;
     // 실행 중 Tick에서도 즉시 빠진다(스케줄러가 저장소 정리를 단계 경계까지 미룬다).
     UnregisterTicks(record->ticks);
     for (usize index = 0;; ++index) {

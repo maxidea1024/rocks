@@ -131,7 +131,7 @@ public:
         Log('L', "lt");
     }
 
-    void OnDestroy() noexcept override {
+    void OnDestroy(EndPlayReason) noexcept override {
         Log('L', "ds");
     }
 };

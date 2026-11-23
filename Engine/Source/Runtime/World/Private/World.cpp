@@ -41,6 +41,23 @@ bool IsValidTickSettings(const TickSettings& settings) noexcept {
     return true;
 }
 
+const char* EndPlayReasonName(EndPlayReason reason) noexcept {
+    switch (reason) {
+    case EndPlayReason::Destroyed:
+        return "Destroyed";
+    case EndPlayReason::LevelTransition:
+        return "LevelTransition";
+    case EndPlayReason::RemovedFromWorld:
+        return "RemovedFromWorld";
+    case EndPlayReason::Quit:
+        return "Quit";
+    case EndPlayReason::TryoutEnded:
+        return "TryoutEnded";
+    }
+
+    return "Unknown";
+}
+
 const char* WorldKindName(WorldKind kind) noexcept {
     switch (kind) {
     case WorldKind::Game:
@@ -150,7 +167,8 @@ void World::ReleaseCVarScope() noexcept {
 }
 
 bool World::CanMutate() const noexcept {
-    return state_ == WorldState::Initialized || state_ == WorldState::Playing;
+    return state_ == WorldState::Initialized || state_ == WorldState::Playing ||
+           state_ == WorldState::EndingPlay;
 }
 
 // --- 초기화·시작 ---
@@ -264,12 +282,89 @@ Result<void> World::BeginPlay() noexcept {
 
     ObjectAccessScope scope(Access());
     HookScope hooks(*this);
-    state_ = WorldState::Playing;
+    // UE UWorld::BeginPlay: Subsystem OnWorldBeginPlay → GameMode StartPlay(→ Actor BeginPlay).
     for (usize index = 0; index < subsystems_.Count(); ++index) {
         subsystems_.At(index)->OnWorldBeginPlay(*this);
     }
 
+    if (beginPlayDispatcher_ == nullptr) {
+        dispatchingBeginPlay_ = true;
+        auto dispatched = DispatchBeginPlay();
+        dispatchingBeginPlay_ = false;
+        return dispatched;
+    }
+
+    dispatchingBeginPlay_ = true;
+    beginPlayDispatched_ = false;
+    auto started = beginPlayDispatcher_->StartPlay(*this);
+    dispatchingBeginPlay_ = false;
+    if (!started) {
+        return started;
+    }
+
+    if (!beginPlayDispatched_) {
+        LogContextScope context("World", Name());
+        Log::Error(LogWorld, "BeginPlay dispatcher returned without calling DispatchBeginPlay");
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> World::DispatchBeginPlay() noexcept {
+    if (!dispatchingBeginPlay_ || beginPlayDispatched_ || state_ != WorldState::Initialized) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    beginPlayDispatched_ = true;
+    state_ = WorldState::Playing;
     ProcessStarts();
+    return Result<void>::Success();
+}
+
+Result<void> World::SetBeginPlayDispatcher(BeginPlayDispatcher* dispatcher) noexcept {
+    if (state_ != WorldState::Initialized && state_ != WorldState::Created) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    beginPlayDispatcher_ = dispatcher;
+    return Result<void>::Success();
+}
+
+Result<void> World::EndPlay(EndPlayReason reason) noexcept {
+    if (state_ != WorldState::Playing) {
+        return Result<void>::Success();
+    }
+
+    if (inTick_ || hookDepth_ != 0) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    ObjectAccessScope scope(Access());
+    state_ = WorldState::EndingPlay;
+    // 모든 Actor를 그 이유로 정리 대기에 넣고 바로 정리한다(프레임 밖이므로 안전 지점을 기다리지
+    // 않는다). LevelScript가 생기면 Level마다 LevelScript를 먼저 넣는다(LD8 — DestroyLevel과 같은
+    // 규칙).
+    for (const ActorRecord& record : actors_) {
+        if (record.state != ActorState::PendingDestroy) {
+            auto destroyed = DestroyActorFor(record.handle, reason);
+            (void)destroyed;
+        }
+    }
+
+    FlushDestroys();
+    pendingStart_.Clear();
+    pendingComponentStart_.Clear();
+    {
+        HookScope hooks(*this);
+        for (usize index = subsystems_.Count(); index > 0; --index) {
+            subsystems_.At(index - 1)->OnWorldEndPlay(*this);
+        }
+    }
+
+    outerOpen_ = false;
+    beginPlayDispatched_ = false;
+    state_ = WorldState::Initialized;
     return Result<void>::Success();
 }
 
@@ -375,9 +470,16 @@ Result<void> World::Shutdown() noexcept {
     }
 
     ObjectAccessScope scope(Access());
+    // 게임 진행 중이면 먼저 끝낸다(OnWorldEndPlay는 EndPlay가 부른다).
+    if (state_ == WorldState::Playing) {
+        auto ended = EndPlay(EndPlayReason::Quit);
+        if (!ended) {
+            return ended;
+        }
+    }
+
     if (state_ != WorldState::TearingDown) {
         const bool initialized = state_ != WorldState::Created;
-        const bool played = state_ == WorldState::Playing;
         state_ = WorldState::TearingDown;
         ticks_.Close();
         // 엔진 단계 콜백을 건 모듈이 World보다 먼저 내려가도 포인터가 남지 않게 비운다.
@@ -390,14 +492,8 @@ Result<void> World::Shutdown() noexcept {
         tickables_.Clear();
         if (initialized) {
             HookScope hooks(*this);
-            // 게임 진행이 끝난다: Actor 정리 뒤 OnWorldEndPlay(역순) → 바깥 조회 창 닫기 →
+            // 게임 진행은 EndPlay가 끝냈다(OnWorldEndPlay). 바깥 조회 창 닫기 →
             // PreDeinitialize(역순) → Deinitialize(역순)(16.5절).
-            if (played) {
-                for (usize index = subsystems_.Count(); index > 0; --index) {
-                    subsystems_.At(index - 1)->OnWorldEndPlay(*this);
-                }
-            }
-
             outerOpen_ = false;
             for (usize index = subsystems_.Count(); index > 0; --index) {
                 subsystems_.At(index - 1)->PreDeinitialize(*this);

@@ -30,8 +30,8 @@ void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
             return awake;
         });
         if (destroying && destroying.Value()) {
-            auto called =
-                With<Component>(component, [](Component& value) noexcept { value.OnDestroy(); });
+            auto called = With<Component>(
+                component, [](Component& value) noexcept { value.OnDestroy(value.endReason_); });
             (void)called;
         }
     }
@@ -93,6 +93,18 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
         return;
     }
 
+    const EndPlayReason reason = record->endReason;
+    // 0) 프레임워크 EndPlay(UE Destroyed·EndPlay의 엔진 부분 — 17.8절). OnAwake가 성공한 Actor만.
+    if (record->awake) {
+        auto ended = With<Actor>(
+            actor, [reason](Actor& value) noexcept { value.OnFrameworkEndPlay(reason); });
+        (void)ended;
+        record = FindActorRecord(actor);
+        if (record == nullptr) {
+            return;
+        }
+    }
+
     // 1) 비활성화: Component(역순) -> Actor.
     if (record->enabledApplied) {
         EnableActor(actor, false);
@@ -123,8 +135,8 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
             return awake;
         });
         if (destroying && destroying.Value()) {
-            auto called =
-                With<Component>(component, [](Component& value) noexcept { value.OnDestroy(); });
+            auto called = With<Component>(
+                component, [reason](Component& value) noexcept { value.OnDestroy(reason); });
             (void)called;
         }
     }
@@ -132,7 +144,8 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
     record = FindActorRecord(actor);
     if (record != nullptr && record->awake) {
         record->awake = false;
-        auto called = With<Actor>(actor, [](Actor& value) noexcept { value.OnDestroy(); });
+        auto called =
+            With<Actor>(actor, [reason](Actor& value) noexcept { value.OnDestroy(reason); });
         (void)called;
     }
 
