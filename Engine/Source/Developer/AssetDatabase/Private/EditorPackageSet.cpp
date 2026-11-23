@@ -1937,6 +1937,19 @@ void EditorPackageSet::MergeOverrides(ObjectHandle object, const OverrideSet& pe
     }
 }
 
+void EditorPackageSet::RemoveOverridesUnder(ObjectHandle object,
+                                            const OverrideSet& prefixes) noexcept {
+    for (EditorPackageInfo& info : open_) {
+        if (OverrideSet* set = info.overrides.Find(object)) {
+            for (usize index = 0; index < prefixes.Count(); ++index) {
+                set->RemoveUnder(prefixes.At(index));
+            }
+
+            return;
+        }
+    }
+}
+
 const OverrideSet* EditorPackageSet::FindOverrides(ObjectHandle object) const noexcept {
     for (const EditorPackageInfo& info : open_) {
         if (const OverrideSet* set = info.overrides.Find(object)) {

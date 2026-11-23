@@ -40,11 +40,12 @@ constexpr StringView NewUsage =
 
 constexpr StringView SetUsage =
     "usage: asset-set <path|AssetId> <property>=<value>... [--unset=<paths>] [--erase=<paths>]\n"
-    "                 [--force] [--project=<dir>] [--wait=<seconds>]\n"
+    "                 [--reset=<paths>] [--force] [--project=<dir>] [--wait=<seconds>]\n"
     "  Check every assignment, apply them together and save the package. Errors are all\n"
     "  reported and nothing changes. --unset resets Optional values, --erase removes map\n"
-    "  entries, set elements or array elements (comma separated path lists). --force saves\n"
-    "  unresolved imports as null. Takes the project write lock.\n";
+    "  entries, set elements or array elements, --reset restores class default values and\n"
+    "  drops those overrides (comma separated path lists). --force saves unresolved imports\n"
+    "  as null. Takes the project write lock.\n";
 
 constexpr StringView InfoUsage =
     "usage: asset-info <path|AssetId> [--json] [--all | --import] [--project=<dir>]\n"
@@ -151,6 +152,8 @@ struct EditArgs {
 struct EditGrammar {
     usize positionalCount = 1;
     bool assignments = false;
+    // `--reset=`(기본값 되돌리기 — asset-set만)을 받는지다.
+    bool resets = false;
     bool force = false;
     bool infoFlags = false;
 };
@@ -256,16 +259,27 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
 
             constexpr StringView Unset = "--unset=";
             constexpr StringView Erase = "--erase=";
+            constexpr StringView Reset = "--reset=";
             const bool unset = argument.StartsWith(Unset, StringComparison::CaseSensitive);
             const bool erase = argument.StartsWith(Erase, StringComparison::CaseSensitive);
-            if (!grammar.assignments || (!unset && !erase)) {
+            const bool reset =
+                grammar.resets && argument.StartsWith(Reset, StringComparison::CaseSensitive);
+            if (!grammar.assignments || (!unset && !erase && !reset)) {
                 return false;
             }
 
-            const usize prefix = unset ? Unset.ByteCount() : Erase.ByteCount();
+            AssignmentKind kind = AssignmentKind::Reset;
+            usize prefix = Reset.ByteCount();
+            if (unset) {
+                kind = AssignmentKind::Unset;
+                prefix = Unset.ByteCount();
+            } else if (erase) {
+                kind = AssignmentKind::Erase;
+                prefix = Erase.ByteCount();
+            }
+
             if (!AppendPathList(StringView(argument.Data() + prefix, argument.ByteCount() - prefix),
-                                unset ? AssignmentKind::Unset : AssignmentKind::Erase,
-                                out.assignments)) {
+                                kind, out.assignments)) {
                 return false;
             }
 
@@ -504,6 +518,7 @@ Result<int32> RunAssetSetCommand(void* context, Span<const StringView> args,
     EditArgs parsed(allocator);
     EditGrammar grammar;
     grammar.assignments = true;
+    grammar.resets = true;
     grammar.force = true;
     bool done = false;
     const bool valid = ParseEdit(args, grammar, parsed) && !parsed.assignments.IsEmpty();

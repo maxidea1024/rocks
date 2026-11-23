@@ -310,4 +310,8 @@ Result<void> PlanAssignmentOverrides(const TypeLease& lease,
                                      Span<const reflection_text::TextAssignment> assignments,
                                      OverrideSet& pending) noexcept;
 
+// 두 단위 집합에 한쪽이 다른 쪽의 접두인(같은 단위 포함) 단위 쌍이 있는지다(asset-set 묶음 안
+// Reset과 텍스트 대입의 겹침 — A5b2, 두 집합 크기의 곱에 비례).
+bool UnitsOverlap(const OverrideSet& left, const OverrideSet& right) noexcept;
+
 } // namespace rocks::asset_database_detail

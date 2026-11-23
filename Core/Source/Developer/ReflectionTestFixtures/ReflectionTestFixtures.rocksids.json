@@ -1084,6 +1084,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsBag::items",
+      "id": "850a4358d8e94554bbac14924dfbab35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsBag::size",
+      "id": "56b30f0f8e1e4ed8b33ea6eae994c5d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsBits::level",
+      "id": "f37ab94d07304ad1a8302964f0e2aa7b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsBits::off",
+      "id": "336d19d7ca0b4dd1ac9eda1f0543f241",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsBits::on",
+      "id": "e1f5687e4cf4410d873d4af3aa4667d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::DefaultsCounter::serial",
       "id": "ef86cfc1a62c4a4ea6bece078d89f118",
       "aliases": [],
@@ -1093,6 +1128,20 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::DefaultsCounter::stable",
       "id": "d780f36d1e4f43de8473bc2db11b62d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsGuarded::locked",
+      "id": "9d1129034a8b439abdea62a5cd31c3ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsGuarded::open",
+      "id": "f823b19180384bd6babc6c00c782da93",
       "aliases": [],
       "retired": false
     },
@@ -1331,6 +1380,69 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::DefaultsPoint::y",
       "id": "943da3978c2f42a68928a63a5b00a6be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::absent",
+      "id": "aeda29a17687408ab2661b5a43258abf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::bag",
+      "id": "308cd5bac15344e39dce9cad4786798a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::bits",
+      "id": "a34b2228e17d4c8191d45f88cb446cc0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::guarded",
+      "id": "51c1fd4b1bd74f7e80f6a4699e68d4b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::negative",
+      "id": "38e32c35e98346dd82691f519c6b3d5c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::none",
+      "id": "9e144961c92d45239b39e49529298f82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::preview",
+      "id": "35151ee178c34758a691b2ff7ceb123a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::quiet",
+      "id": "b37f7910dfa44a27b7ff882f7bc97b56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::DefaultsRevert::sealed",
+      "id": "4757ac758dc44ffebc2bbdad09d75d9e",
       "aliases": [],
       "retired": false
     },
@@ -4348,8 +4460,29 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsBag",
+      "id": "6a1fac0253f04bd69d548fafccc4aa7e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsBits",
+      "id": "fb84ca6a5fe84590b06fb5bdbe28ea72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::DefaultsCounter",
       "id": "dc90b8d3bf1a43db9a83f75ff3747a69",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsGuarded",
+      "id": "06a2fd92e29f4fd7a6eb7134e1c0ccb0",
       "aliases": [],
       "retired": false
     },
@@ -4392,6 +4525,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::DefaultsPoint",
       "id": "43e3e75330a440019bca9253d38f01f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DefaultsRevert",
+      "id": "4eaefb004408464f93e2681eca617499",
       "aliases": [],
       "retired": false
     },

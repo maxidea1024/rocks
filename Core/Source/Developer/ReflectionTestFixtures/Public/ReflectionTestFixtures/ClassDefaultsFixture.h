@@ -209,4 +209,58 @@ struct DefaultsStrangerKind final : Object {
     ROCKS_PROPERTY() ClassRef<DefaultsAbstractBase> stranger;
 };
 
+// 되돌리기 fixture다(RuntimeClassMetadata 'A5b2 decode 명세' 시험 — ClassDefaultsRevertTests).
+// ReadOnly 멤버가 있는 struct(통째 되돌리기는 거부, ReadOnly가 아닌 멤버 경로는 된다)다.
+ROCKS_STRUCT()
+struct DefaultsGuarded {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 open = 1;
+    ROCKS_PROPERTY(ReadOnly) int32 locked = 2;
+};
+
+// struct 안 bitfield다.
+ROCKS_STRUCT()
+struct DefaultsBits {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() uint8 on : 1 = 1;
+    ROCKS_PROPERTY() uint8 off : 1 = 0;
+    ROCKS_PROPERTY() int32 level = 6;
+};
+
+// 배열 멤버를 품은 struct다(1차 범위 밖 — struct 통째 되돌리기는 Unsupported, 단일 값 멤버는 된다).
+ROCKS_STRUCT()
+struct DefaultsBag {
+    ROCKS_GENERATED_BODY()
+
+    explicit DefaultsBag(Allocator& allocator) noexcept : items(allocator) {
+    }
+
+    ROCKS_PROPERTY() int32 size = 1;
+    ROCKS_PROPERTY() Array<int32> items;
+};
+
+// quiet는 payload가 있는 NaN 기본값(텍스트 왕복이면 잃는다), negative는 -0.0, preview는 set인
+// Optional<struct>(x 13), absent·none은 unset이다. 생성자는 Private/ClassDefaultsFixture.cpp다.
+ROCKS_CLASS()
+struct DefaultsRevert final : Object {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_REFLECTIONTESTFIXTURES_API explicit DefaultsRevert(Allocator& allocator) noexcept;
+
+    // quiet NaN에 payload 0xABC를 실은 비트다.
+    static constexpr uint32 QuietPayloadBits = 0x7FC00ABCu;
+
+    ROCKS_PROPERTY() float quiet = 0.0f;
+    ROCKS_PROPERTY() double negative = -0.0;
+    ROCKS_PROPERTY() DefaultsGuarded guarded;
+    ROCKS_PROPERTY() DefaultsBits bits;
+    ROCKS_PROPERTY() DefaultsBag bag;
+    ROCKS_PROPERTY() Optional<DefaultsPoint> preview;
+    ROCKS_PROPERTY() Optional<DefaultsPoint> absent;
+    ROCKS_PROPERTY() Optional<int32> none;
+    ROCKS_PROPERTY(ReadOnly) int32 sealed = 3;
+};
+
 } // namespace rocks::reflection_fixture

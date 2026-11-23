@@ -382,6 +382,10 @@ public:
     Result<void> ReserveOverrides(ObjectHandle object, const OverrideSet& pending) noexcept;
     // ReserveOverrides 뒤 pending을 object 집합에 합친다(할당 없음).
     void MergeOverrides(ObjectHandle object, const OverrideSet& pending) noexcept;
+    // object 집합에서 prefixes의 각 경로로 시작하는 단위를 모두 지운다(그 경로 자체 포함 — 기본값
+    // 되돌리기 A5b2, 비Atomic struct 통째면 그 아래 잎과 옛 스키마의 잎까지). 할당하지 않는다(열린
+    // 패키지 객체가 아니거나 집합이 없으면 아무것도 하지 않는다).
+    void RemoveOverridesUnder(ObjectHandle object, const OverrideSet& prefixes) noexcept;
     // object의 override 집합이다(없으면 null — 객체의 패키지가 닫히면 무효).
     const OverrideSet* FindOverrides(ObjectHandle object) const noexcept;
 

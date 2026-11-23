@@ -1,7 +1,9 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
 #include <Object/ClassDefaults.h>
 #include <Object/PropertyPath.h>
+#include <Object/RuntimeTypeOps.h>
 #include <Object/TypeLease.h>
 #include <ObjectSerialization/ObjectGraph.h>
 
@@ -71,5 +73,85 @@ using ClassDefaultsVisitor = Result<void> (*)(void* user, TypeId type,
 [[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<void>
 ForEachClassDefaults(TypeRegistry& types, Allocator& scratch, ClassDefaultsVisitor visitor,
                      void* user) noexcept;
+
+// 되돌리기 계획의 경로 쓰기 연산 하나다(RuntimeClassMetadata 'A5b2 decode 명세'). kind에 따라
+// 기존 경로 API 하나로 재생한다: Write = PathWrite(value), ResetOptional = PathResetOptional,
+// EmplaceOptional = PathEmplaceOptional(이어지는 멤버 Write가 값을 채운다), ClearInstanced =
+// PathClearInstanced. 경로는 필드 단계만이다(원소·key 단계 없음). 이동 전용이다.
+struct RevertOperation {
+    enum class Kind : uint8 {
+        Write,
+        ResetOptional,
+        EmplaceOptional,
+        ClearInstanced
+    };
+
+    explicit RevertOperation(Allocator& allocator) noexcept : value(allocator) {
+    }
+
+    RevertOperation(RevertOperation&&) noexcept = default;
+    RevertOperation& operator=(RevertOperation&&) noexcept = default;
+
+    // 연산의 경로 view다(이 연산이 사는 동안 유효).
+    PropertyPath Path() const noexcept {
+        return PropertyPath{Span<const PathStep>(steps, stepCount)};
+    }
+
+    Kind kind = Kind::Write;
+    PathStep steps[MaxPropertyPathSteps]{};
+    usize stepCount = 0;
+    // Write의 값이다(그 밖의 kind는 비어 있다).
+    FieldValue value;
+};
+
+// 되돌리기 계획이다: 대상 객체와 순서대로 재생할 연산들. PlanRevert가 채우고 ApplyRevert가 쓴다.
+struct RevertPlan {
+    explicit RevertPlan(Allocator& allocator) noexcept : operations(allocator) {
+    }
+
+    ObjectHandle object{};
+    Array<RevertOperation> operations;
+};
+
+// object의 path(필드 → struct 멤버 단계만 — ParsePropertyPath로 해석)를 클래스 기본값(Editor
+// 레코드)으로 되돌리는 계획을 만든다. 대상 값은 바꾸지 않는다: 레코드의 그 경로 payload를 binary로
+// 해석해(텍스트 왕복 없음) 경로 쓰기 연산으로 펼친다 — 단일 값·bitfield·Optional 단일 값은 Write,
+// 비Atomic·Atomic struct는 멤버마다(Transient 제외), Optional<struct>는 unset이면 ResetOptional,
+// set이면 EmplaceOptional + 멤버, InstancedStruct는 ClearInstanced(기준은 늘 비어 있다). 참조
+// 기준은 null, Name은 대상 Registry 풀로 intern, ClassRef는 지금 TypeRegistry에서 Base 파생을 다시
+// 본다.
+//
+// 오류(실패하면 out.operations는 비어 있다): 빈 경로·단계 수 초과 InvalidArgument, 원소·key 단계와
+// 1차 범위 밖(배열·Set·Map·정적 배열과 그것을 품은 struct 경로) Unsupported, 경로 위 어디든
+// ReadOnly 유효 플래그 Unsupported(되돌리기 전체 거부),
+// AcquireType·AcquireClassDefaults(diagnostic에 이유)· FindDefaultPayload의 오류, Name intern 실패,
+// ClassRef 재판정 실패(NotFound·InvalidArgument), 할당 실패 OutOfMemory. scratch는 레코드 색인·연산
+// 목록·값 복사에 쓴다(out도 그 allocator여야 한다).
+//
+// 사용 예(asset-set --reset=: 모든 경로를 먼저 계획한 뒤 적용):
+//   RevertPlan plan(allocator);
+//   if (auto planned = PlanRevert(registry, access, asset, path, allocator, plan); !planned) {
+//       return planned;
+//   }
+//
+//   auto applied = ApplyRevert(registry, access, plan);
+[[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<void>
+PlanRevert(ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object,
+           const PropertyPathBuffer& path, Allocator& scratch, RevertPlan& out,
+           ClassDefaultsDiagnostic* diagnostic = nullptr) noexcept;
+
+// 계획의 연산을 순서대로 경로 API로 재생한다. 연산마다 원자적이지만 계획 전체는 원자적이지 않다
+// (중간 실패면 앞 연산은 이미 적용됐다 — 사전 단계가 ReadOnly·범위·값 판정을 끝냈으므로 남는
+// 실패는 경로 API의 수명·고정·할당 오류다). failure가 있으면 실패한 연산의 사유를 채운다.
+[[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<void>
+ApplyRevert(ObjectRegistry& registry, const ObjectAccessContext& access, const RevertPlan& plan,
+            PropertyPathFailure* failure = nullptr) noexcept;
+
+// PlanRevert 뒤 ApplyRevert다(경로 하나를 바로 되돌릴 때).
+[[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<void>
+RevertToDefault(ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object,
+                const PropertyPathBuffer& path, Allocator& scratch,
+                PropertyPathFailure* failure = nullptr,
+                ClassDefaultsDiagnostic* diagnostic = nullptr) noexcept;
 
 } // namespace rocks

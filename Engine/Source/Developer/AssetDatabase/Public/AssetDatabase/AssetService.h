@@ -249,12 +249,19 @@ public:
     // asset-set <path|AssetId> <속성>=<값>…: 대상을 열고(Hard·EditorOnly 닫힘째) 대입을 모두
     // 검증한 뒤 한꺼번에 게시하고 저장한다. Weak 참조는 대상 패키지 안의 객체만 받는다(5.1절 —
     // 밖은 진단 Unresolved). force는 미해결 import를 null로 저장한다(--force —
-    // 경고 DroppedUnresolvedImport). 빈 대입 목록도 저장한다.
+    // 경고 DroppedUnresolvedImport). 빈 대입 목록도 저장한다. 대입 종류 Reset(`--reset=` — A5b2)은
+    // 그 경로를 클래스 기본값으로 되돌리고(PlanRevert·ApplyRevert — binary 재생) override 집합에서
+    // 그 경로로 시작하는 단위를 지운다. Reset은 다른 대입보다 먼저 적용하고, 같은 단위(한쪽이 다른
+    // 쪽 접두)에 Reset과 다른 대입을 섞으면
+    // InvalidArgument다(Docs/Design/RuntimeClassMetadata.ko.md 'A5b2 decode 명세' 묶음 순서).
     //
     // 오류(failure 진단): Initialize 전 InvalidArgument, 대상 텍스트 형식(논리 경로 규칙·36자
     // 소문자 AssetId) InvalidPath / InvalidArgument, 열기의 오류(EditorPackageSet::Open), 대입 오류
-    // InvalidArgument(진단 None — diagnostics에 모두 모인다, 아무것도 바꾸지 않는다), 게시의 오류,
-    // EditorPackageSet::Save의 오류(바뀐 값은 집합에 남는다), 할당 실패.
+    // InvalidArgument(진단 None — diagnostics에 모두 모인다, 아무것도 바꾸지 않는다), Reset 경로
+    // 해석·PlanRevert의 오류(레코드 없는 타입·컨테이너 경로·ReadOnly Unsupported 등 — 아무것도
+    // 바꾸지 않는다), Reset과 대입의 단위 겹침 InvalidArgument, 되돌리기 적용 중 자원 오류(일부만
+    // 되돌아간 채 저장하지 않는다), 게시의 오류, EditorPackageSet::Save의 오류(바뀐 값은 집합에
+    // 남는다), 할당 실패.
     Result<void> Set(const AssetDatabaseLock& lock, StringView target,
                      Span<const reflection_text::TextAssignment> assignments, bool force,
                      reflection_text::TextDiagnostics& diagnostics,

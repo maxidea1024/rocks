@@ -695,6 +695,15 @@ try
         quotedErased.StdOut.Contains("targetFrameRate.overrides=\n", StringComparison.Ordinal) &&
         !quotedErased.StdOut.Contains("targetFrameRate.overrides[", StringComparison.Ordinal), quotedErased);
 
+    // --reset: 클래스 기본값으로 되돌린다(A5b2 — rateScale 기본 1). 빈 경로는 사용법 오류, asset-new는
+    // --reset을 받지 않는다(사용법 오류).
+    await CheckAll("asset-set reset", ["asset-set", "/Game/Anims/Run", "--reset=rateScale", projectOption], 0, [], []);
+    await CheckAll("asset-set reset result", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["rateScale=1\n"], []);
+    await CheckAll("asset-set reset empty", ["asset-set", "/Game/Anims/Run", "--reset=", projectOption], 2, [],
+        ["usage: asset-set"]);
+    await CheckAll("asset-new reset", ["asset-new", "AnimationClip", "/Game/Anims/Reset", "--reset=rateScale",
+        projectOption], 2, [], ["usage: asset-new"]);
+
     // 대입 오류는 모두 모아 보고하고 아무것도 바꾸지 않는다(파일 byte 그대로).
     string runFile = Path.Combine(project, "Content", "Anims", "Run.rasset");
     byte[] before = File.ReadAllBytes(runFile);
