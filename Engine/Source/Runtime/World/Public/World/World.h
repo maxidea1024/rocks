@@ -699,6 +699,8 @@ private:
         Transform spawnTransform;
         // 마지막 SetLifeSpan의 번호다(0이면 없음 — 힙의 오래된 항목은 번호가 달라 무시한다).
         uint64 lifeSpanSequence = 0;
+        // 시작 전에 건 LifeSpan(초)이다. 시작할 때 건다(0이면 없음).
+        double pendingLifeSpan = 0.0;
         // Level 클러스터의 소속이다(Component도 같은 클러스터에 넣는다).
         bool clustered = false;
         bool awake = false;
@@ -878,6 +880,8 @@ private:
     Result<void> RunEngineStage(EngineStage stage, TickPhase phase,
                                 const TickPhaseFrame& frame) noexcept;
     static void CloseOuterSubsystems(World& world) noexcept;
+    // Spawn 인자 Transform을 root에 쓴다(FinishSpawning — UE MultiplyWithRoot).
+    Result<void> ApplySpawnTransform(ObjectHandle actor) noexcept;
     // Actor::SetOwner·SetInstigator·SetLifeSpan 구현이다.
     Result<void> SetActorOwner(ObjectHandle actor, ObjectHandle owner) noexcept;
     Result<void> SetActorInstigator(ObjectHandle actor, ObjectHandle instigator) noexcept;

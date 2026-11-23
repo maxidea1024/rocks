@@ -39,21 +39,21 @@ hook 이름과 Component·Actor 사이 호출 순서(World.h의 hook 순서)는 
 | 필드 | 뜻 | UE |
 |---|---|---|
 | `level` | 소속 Level(있음) | `OverrideLevel` |
-| `transform`·`hasTransform` | `hasTransform`이면 FinishSpawning이 hook 전에 root SceneComponent의 상대 Transform으로 쓴다(root에 부모가 없으면 월드 Transform). root가 없으면 무시한다(UE도 root 없으면 위치가 없다). `SpawnParams::At(transform, level)` 도우미 | `SpawnTransform` |
+| `transform`·`hasTransform` | `hasTransform`이면 FinishSpawning이 Component 초기화(`OnFrameworkPostAwake`) 뒤, `OnEnable` 전에 root SceneComponent에 쓴다. root의 월드 Transform = root 상대 Transform(생성자·`OnAwake`에서 정한 기본 offset) × Spawn Transform이다(UE `PostSpawnInitialize`의 `MultiplyWithRoot` — `E/Private/Actor.cpp:4303–4323`). root에 부모가 있으면 부모 월드의 역으로 상대 Transform을 구한다. `OnAwake`에서 만든 root도 받는다. root가 없으면 무시한다(UE도 root 없으면 위치가 없다). 유효하지 않은 Transform(비유한 성분·단위가 아닌 회전, `Transform::IsValid`)은 Spawn 전에 `InvalidArgument`, 합성 실패는 Actor를 파괴하고 Spawn 실패다. `SpawnParams::At(transform, level)` 도우미 | `SpawnTransform` |
 | `owner` | 소유 Actor(`ObjectHandle`) | `Owner` |
 | `instigator` | 원인 Pawn(`ObjectHandle`, 20절) | `Instigator` |
 
 - `Actor::Owner()`·`SetOwner(handle)`: 소유 고리(자기 자신 포함)는 `InvalidArgument`와 Error 로그로 거부한다(UE `SetOwner` — `E/Private/Actor.cpp:2605–2630`). Owner가 파괴되면 handle은 generation 검사로 무효가 된다(4.2절). UE의 `Children` 배열은 두지 않는다(필요한 조회는 `ForEachActor`).
-- Owner·Instigator는 게임 논리 참조이며 수명 소유가 아니다(소유 사슬은 4.2절 그대로). Spawn 인자의 owner·instigator가 검사에 걸리면 Spawn이 실패하고 hook 없이 되돌린다.
+- Owner·Instigator는 게임 논리 참조이며 수명 소유가 아니다(소유 사슬은 4.2절 그대로). 없는 대상은 `StaleHandle`, 파괴 대기 대상은 `Destroyed`로 거부한다(`SetOwner`·`SetInstigator`와 Spawn 인자 모두). Spawn 인자 검사는 Actor를 만들기 전에 하므로 실패해도 hook·부작용(다른 대기 파괴의 정리 등)이 없다.
 - Actor 이름(UE `FName` 고유 이름)은 객체 이름 체계(Core)가 정해질 때 다룬다. 진단은 타입 이름과 handle을 쓴다(22절).
 
 ### 17.4 Component 시작 준비(ERD18, CR4)
 
-`Component::IsReadyToStart()`를 더한다(기본 참). 소유 Actor는 자신과 **켜진 모든 Component**가 준비됐을 때 시작한다(Actor 시작이 Component 시작을 묶으므로). 이미 Playing인 Actor에 나중에 추가한 Component는 자기 준비만 기다린다. 매 프레임 확인하고 기다리느라 막지 않는다(7.2절과 같다). 요구 출처는 Sparks 연동 SE-W2([컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR4).
+`Component::IsReadyToStart()`를 더한다(기본 참). 소유 Actor는 자신과 **켜진 모든 Component**가 준비됐을 때 시작한다(Actor 시작이 Component 시작을 묶으므로). 이미 Playing인 Actor에 나중에 추가한 Component(Actor `OnStart` 안에서 추가한 것 포함)는 자기 준비만 기다린다. 매 프레임 확인하고 기다리느라 막지 않는다(7.2절과 같다). 요구 출처는 Sparks 연동 SE-W2([컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR4).
 
 ### 17.5 LifeSpan(ERD16)
 
-- `Actor::SetLifeSpan(seconds)`: 게임 시간으로 seconds 뒤 `DestroyActor`(사유 `Destroyed`). 0 이하면 해제한다. 다시 부르면 새 값으로 바꾼다(UE `SetLifeSpan` — `E/Private/Actor.cpp:6577–6604`).
+- `Actor::SetLifeSpan(seconds)`: 게임 시간으로 seconds 뒤 `DestroyActor`(사유 `Destroyed`). 0 이하면 해제한다. 다시 부르면 새 값으로 바꾼다(UE `SetLifeSpan` — `E/Private/Actor.cpp:6577–6604`). 아직 시작하지 않은 Actor(Initialized World·준비 대기)에 건 값은 보관했다가 시작(Playing)할 때부터 센다(UE `InitialLifeSpan`을 `BeginPlay`에서 거는 것과 같다).
 - 만료 판정은 LateUpdate 시작 엔진 단계 `Timers`(15.4절)에서 한다(UE 타이머가 PostPhysics 뒤에 돈다 — `LevelTick.cpp:1816`). World가 (만료 시각, 설정 순번) 순 힙으로 들어 만료 시각이 같으면 먼저 설정한 것부터 파괴한다. pause 중에는 게임 시계가 멈추므로 흐르지 않는다.
 - 판정은 상대 허용오차 1e-9로 한다(게임 시간이 프레임 delta 합이라 같은 길이도 경로에 따라 아주 조금 다르다 — GameClock·TickScheduler interval과 같다). World의 만료 처리는 `Timers` 자리의 콜백보다 먼저다.
 - 한계: 다시 설정·해제한 옛 힙 항목은 그 만료 시각까지 남는다(번호가 달라 무시). 같은 Actor가 긴 LifeSpan을 매 프레임 다시 설정하면 힙이 자란다 — 필요하면 Actor별 한 항목 갱신으로 바꾼다.
@@ -94,9 +94,9 @@ UE는 `PreInitializeComponents`·`PostInitializeComponents`·`Destroyed` 같은 
 ### 17.9 시험(완료 조건)
 
 - 사유 다섯 가지가 각 경로에서 정확히 전달, 먼저 정한 사유 유지.
-- Spawn 인자: transform이 root에 반영, owner 고리 거부, instigator 보관, Owner 파괴 뒤 무효.
-- Component 준비 대기: Actor 시작이 Component 준비까지 기다림, 나중 추가 Component는 따로.
-- LifeSpan: 만료 프레임, 재설정·해제, pause 중 정지, 같은 프레임 다른 파괴와 겹침.
+- Spawn 인자: transform이 root에 반영(`OnAwake`에서 만든 root·기본 offset과 합성), 잘못된 transform 거부, owner 고리 거부, 파괴 대기 owner·instigator 거부(부작용 없음), instigator 보관, Owner 파괴 뒤 무효.
+- Component 준비 대기: Actor 시작이 Component 준비까지 기다림, 나중 추가 Component(`OnStart` 안 추가 포함)는 따로.
+- LifeSpan: 만료 프레임, 재설정·해제, pause 중 정지, 같은 프레임 다른 파괴와 겹침, 시작 전에 건 값은 시작부터 셈.
 - World EndPlay: 순서(Actor 정리 → OnWorldEndPlay), 두 번 호출, EndPlay 뒤 Spawn, Shutdown이 EndPlay(Quit)를 먼저 부름.
 - World EndPlay의 LevelScript 먼저 정리(LD8), LifeSpan 동률 순서.
 - 프레임워크 hook 세 개의 시점(Component OnAwake 전·후, OnDisable 전)과 실패 처리.

@@ -51,9 +51,7 @@ public:
         PrimaryTick().lateTick = true;
     }
 
-    void OnStart() noexcept override {
-        Tag('S');
-    }
+    void OnStart() noexcept override;
 
     void OnLateTick(const TickContext&) noexcept override {
         Tag('L');
@@ -64,6 +62,33 @@ public:
     }
 
     char tag = 'D';
+    static inline bool addWaitingOnStart = false;
+};
+
+// OnAwake에서 root를 만들고 위로 10 cm 올리는 Actor다(Actor.h 사용 예처럼 root를 hook에서 만든다).
+class RootedActor final : public Actor {
+    ROCKS_NATIVE_TYPE(RootedActor, Actor, 0x9d47c2e1a50b3f68ull, 0x27e0f8b6c1d94a53ull)
+
+public:
+    explicit RootedActor(Allocator& allocator) noexcept : Actor(allocator) {
+    }
+
+    Result<void> OnAwake() noexcept override {
+        auto root = GetWorld().AddComponent<SceneComponent>(Handle());
+        if (!root) {
+            return Result<void>::Failure(root.Error());
+        }
+
+        auto lifted =
+            GetWorld().With<SceneComponent>(root.Value(), [](SceneComponent& scene) noexcept {
+                return scene.SetRelativeLocation(Vec3d(0.0, 0.0, 10.0));
+            });
+        if (!lifted) {
+            return lifted;
+        }
+
+        return SetRootComponent(root.Value());
+    }
 };
 
 // 준비 여부를 바꿀 수 있는 Component다.
@@ -82,10 +107,18 @@ public:
     bool ready = false;
 };
 
+void SpawnActor::OnStart() noexcept {
+    Tag('S');
+    if (addWaitingOnStart) {
+        auto added = GetWorld().AddComponent<WaitingComponent>(Handle());
+        CHECK(added.IsOk());
+    }
+}
+
 struct Fixture {
     Fixture() noexcept : types(allocator), modules(types, allocator) {
         registered = RegisterWorldTypes(modules).IsOk() && Register<SpawnActor>() &&
-                     Register<WaitingComponent>();
+                     Register<WaitingComponent>() && Register<RootedActor>();
         WorldDesc desc;
         desc.name = "Test";
         desc.context = {0x574f524c44ull, 13};
@@ -289,4 +322,103 @@ TEST(WorldSpawn_LifeSpanExpiresAtTimersStage) {
     REQUIRE(world.Shutdown());
 }
 
+// 리뷰 보강: OnAwake에서 만든 root도 Spawn Transform을 받는다. UE MultiplyWithRoot처럼 root 상대(위
+// 10 cm) × Spawn Transform이 root의 월드 Transform이다. 잘못된 Transform은 Spawn 전에 거부한다.
+TEST(WorldSpawn_TransformComposesWithRootCreatedInAwake) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    const Transform at(Quatd::Identity(), Vec3d(100.0, 0.0, 0.0), Vec3d::One());
+    auto actor = world.SpawnActor<RootedActor>(SpawnParams::At(at));
+    REQUIRE(actor);
+    auto root = world.With<Actor>(actor.Value(),
+                                  [](Actor& value) noexcept { return value.RootComponent(); });
+    REQUIRE(root && !root.Value().IsNull());
+    auto location = world.With<SceneComponent>(root.Value(), [](SceneComponent& scene) noexcept {
+        return scene.RelativeTransform().translation;
+    });
+    REQUIRE(location);
+    CHECK(location.Value().x == 100.0 && location.Value().y == 0.0 && location.Value().z == 10.0);
+
+    volatile double zero = 0.0;
+    const Transform broken(Quatd::Identity(), Vec3d(0.0 / zero, 0.0, 0.0), Vec3d::One());
+    CHECK(world.SpawnActor<RootedActor>(SpawnParams::At(broken)).Error() ==
+          ErrorCode::InvalidArgument);
+    REQUIRE(world.Shutdown());
+}
+
+// 파괴 대기 소유자·원인은 Destroyed다. Spawn 인자 검사 실패는 Actor를 만들기 전이라 다른 대기
+// 파괴를 앞당기지 않는다.
+TEST(WorldSpawn_PendingOwnerIsRejectedWithoutSideEffects) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    const ObjectHandle owner = fixture.Spawn('o');
+    const ObjectHandle victim = fixture.Spawn('v');
+    const ObjectHandle child = fixture.Spawn('c');
+    REQUIRE(!owner.IsNull() && !victim.IsNull() && !child.IsNull());
+    REQUIRE(world.DestroyActor(owner));
+    REQUIRE(world.DestroyActor(victim));
+    CHECK(world.With<Actor>(child, [owner](Actor& value) noexcept { return value.SetOwner(owner); })
+              .Error() == ErrorCode::Destroyed);
+    SpawnParams params;
+    params.instigator = owner;
+    ResetTags();
+    CHECK(world.SpawnActor<SpawnActor>(params).Error() == ErrorCode::Destroyed);
+    CHECK(TagsAre(""));
+    CHECK(world.HasActor(victim));
+    REQUIRE(fixture.Frame());
+    CHECK(TagsAre("ov"));
+    REQUIRE(world.Shutdown());
+}
+
+// 리뷰 보강: Actor OnStart 안에서 추가한 Component도 준비를 기다린다. 시작 전에 건 LifeSpan은
+// 시작할 때부터 센다(UE InitialLifeSpan — BeginPlay).
+TEST(WorldSpawn_ReadinessForComponentsAddedInStartAndPendingLifeSpan) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    SpawnActor::addWaitingOnStart = true;
+    const ObjectHandle actor = fixture.Spawn('x');
+    REQUIRE(!actor.IsNull());
+    ResetTags();
+    REQUIRE(fixture.Frame());
+    REQUIRE(fixture.Frame());
+    SpawnActor::addWaitingOnStart = false;
+    CHECK(TagsAre("SLL"));
+    ObjectHandle components[2];
+    auto count = world.GetComponents(actor, Span<ObjectHandle>(components, 2));
+    REQUIRE(count && count.Value() == 1);
+    fixture.SetReady(components[0], true);
+    ResetTags();
+    REQUIRE(fixture.Frame());
+    CHECK(TagsAre("cL"));
+    REQUIRE(world.Shutdown());
+
+    // 시작 전 LifeSpan: Initialized World에서 몇 프레임이 흘러도 줄지 않고, BeginPlay로 시작한
+    // 시각부터 세어 2프레임째 Timers 단계에서 만료된다(그 프레임 늦은 Tick 없음).
+    Fixture later;
+    REQUIRE(later.registered);
+    World& idle = *later.world;
+    REQUIRE(idle.Initialize());
+    const ObjectHandle mortal = later.Spawn('m');
+    REQUIRE(!mortal.IsNull());
+    REQUIRE(idle.With<Actor>(mortal,
+                             [](Actor& value) noexcept { return value.SetLifeSpan(2.0 / 60.0); }));
+    REQUIRE(later.Frame());
+    REQUIRE(later.Frame());
+    REQUIRE(later.Frame());
+    CHECK(idle.HasActor(mortal));
+    REQUIRE(idle.BeginPlay());
+    ResetTags();
+    REQUIRE(later.Frame());
+    REQUIRE(later.Frame());
+    REQUIRE(later.Frame());
+    CHECK(TagsAre("Lm"));
+    REQUIRE(idle.Shutdown());
+}
 } // namespace world_spawn_tests_file

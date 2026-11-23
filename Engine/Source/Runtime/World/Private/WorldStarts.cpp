@@ -18,7 +18,10 @@ void World::QueueComponentStart(ObjectHandle component) noexcept {
         return true;
     });
     if (queue && queue.Value()) {
-        // 용량은 AddComponent에서 Component 수만큼 확보했다(중복 없이 한 번씩만 들어간다).
+        // 용량은 AddComponent에서 Component 수만큼 확보했다. 준비 대기로 다시 넣으면 처리 중인 옛
+        // 항목이 잠시 같이 있어 하나를 넘을 수 있으므로 늘린다(할당 실패만 남는다).
+        auto grown = pendingComponentStart_.TryEnsureCapacity(pendingComponentStart_.Size() + 1);
+        (void)grown;
         auto pushed = pendingComponentStart_.TryPushBack(component);
         if (!pushed) {
             auto reset = With<Component>(
@@ -34,6 +37,15 @@ void World::StartComponent(ObjectHandle component) noexcept {
         return value.state_ == ComponentState::Initialized && value.enabledApplied_;
     });
     if (!eligible || !eligible.Value()) {
+        return;
+    }
+
+    // 준비되지 않았으면 다음 프레임에 다시 본다(17.4절 — Actor 시작 중·OnStart 안에서 추가된 것
+    // 포함).
+    auto ready = With<Component>(component,
+                                 [](Component& value) noexcept { return value.IsReadyToStart(); });
+    if (ready && !ready.Value()) {
+        QueueComponentStart(component);
         return;
     }
 
@@ -140,6 +152,15 @@ void World::ProcessStarts() noexcept {
         }
 
         updated->state = ActorState::Playing;
+        // 시작 전에 건 LifeSpan을 지금부터 센다.
+        if (updated->pendingLifeSpan > 0.0) {
+            const double seconds = updated->pendingLifeSpan;
+            updated->pendingLifeSpan = 0.0;
+            auto armed = SetActorLifeSpan(actor, seconds);
+            (void)armed;
+            updated = FindActorRecord(actor);
+        }
+
         TickSettings settings;
         bool tickEnabled = false;
         auto read = With<Actor>(actor, [&](Actor& value) noexcept {
@@ -186,17 +207,8 @@ void World::ProcessStarts() noexcept {
             continue;
         }
 
-        // 나중에 추가한 Component는 자기 준비만 기다린다(다음 프레임에 다시 본다 — 큐 뒤에 다시
-        // 넣으면 아래 앞 구간 제거에 걸리지 않는다).
-        auto ready = With<Component>(component, [](Component& value) noexcept {
-            return value.state_ != ComponentState::Initialized || !value.enabledApplied_ ||
-                   value.IsReadyToStart();
-        });
-        if (ready && !ready.Value()) {
-            QueueComponentStart(component);
-            continue;
-        }
-
+        // 준비되지 않았으면 StartComponent가 큐 뒤에 다시 넣는다(아래 앞 구간 제거에 걸리지
+        // 않는다).
         StartComponent(component);
     }
 

@@ -1,4 +1,5 @@
 #include <Object/ConstructionContext.h>
+#include <Base/InitializerList.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Core/Math/MathUtility.h>
@@ -27,6 +28,27 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
 
     if (levelRecord->pendingDestroy) {
         return Result<ObjectHandle>::Failure(ErrorCode::Destroyed);
+    }
+
+    // Spawn 인자 검사(Actor를 만들기 전 — 실패해도 되돌릴 것이 없다). 소유자·원인은 이 World의 살아
+    // 있는 Actor여야 한다(파괴 대기면 Destroyed — Level과 같다).
+    if (params.hasTransform && !params.transform.IsValid()) {
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (const ObjectHandle target : {params.owner, params.instigator}) {
+        if (target.IsNull()) {
+            continue;
+        }
+
+        const ActorRecord* linked = FindActorRecord(target);
+        if (linked == nullptr) {
+            return Result<ObjectHandle>::Failure(ErrorCode::StaleHandle);
+        }
+
+        if (linked->state == ActorState::PendingDestroy) {
+            return Result<ObjectHandle>::Failure(ErrorCode::Destroyed);
+        }
     }
 
     // 정리·시작 단계에서 할당 실패로 큐에 넣지 못하는 일이 없도록 여유를 먼저 확보한다. Actor
@@ -115,27 +137,76 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     FindLevelRecord(level)->actorCount += 1;
     ++spawnedTotal_;
 
-    // 소유자·원인은 Actor::SetOwner·SetInstigator와 같은 검사다. 실패하면 Spawn을 되돌린다(아직
-    // hook이 돌지 않아 정리 hook 없이 회수된다).
-    for (uint32 pass = 0; pass < 2; ++pass) {
-        const ObjectHandle target = pass == 0 ? params.owner : params.instigator;
-        if (target.IsNull()) {
-            continue;
-        }
-
-        auto applied =
-            pass == 0 ? SetActorOwner(handle, target) : SetActorInstigator(handle, target);
-        if (!applied) {
-            auto destroyed = DestroyActor(handle);
-            (void)destroyed;
-            if (!inTick_ && hookDepth_ == 0) {
-                FlushDestroys();
-            }
-            return Result<ObjectHandle>::Failure(applied.Error());
-        }
+    // 소유자·원인은 위에서 검사했다(새 Actor는 아무도 소유하지 않아 고리가 생길 수 없다).
+    if (!params.owner.IsNull() || !params.instigator.IsNull()) {
+        auto linked = With<Actor>(handle, [&params](Actor& value) noexcept {
+            value.owner_ = params.owner;
+            value.instigator_ = params.instigator;
+        });
+        (void)linked;
     }
 
     return Result<ObjectHandle>::Success(handle);
+}
+
+Result<void> World::ApplySpawnTransform(ObjectHandle actor) noexcept {
+    ActorRecord* record = FindActorRecord(actor);
+    if (record == nullptr || !record->hasSpawnTransform) {
+        return Result<void>::Success();
+    }
+
+    const Transform spawn = record->spawnTransform;
+    record->hasSpawnTransform = false;
+    auto root = With<Actor>(actor, [](Actor& value) noexcept { return value.RootComponent(); });
+    if (!root || root.Value().IsNull()) {
+        return Result<void>::Success();
+    }
+
+    // world = root 상대 × spawn(UE RootRelative * UserSpawnTransform). root에 부모가 있으면 상대 =
+    // world × 부모 월드의 역(SetWorldTransform과 같다 — 부모·자식은 TryMultiply(local,
+    // parentToWorld)).
+    auto parts = With<SceneComponent>(root.Value(), [](SceneComponent& scene) noexcept {
+        struct Parts {
+            Transform relative;
+            ObjectHandle parent;
+        };
+        return Parts{scene.RelativeTransform(), scene.Parent()};
+    });
+    if (!parts) {
+        return Result<void>::Failure(parts.Error());
+    }
+
+    auto world = Transform::TryMultiply(parts.Value().relative, spawn);
+    if (!world) {
+        return Result<void>::Failure(world.Error());
+    }
+
+    Transform relative = world.Value();
+    if (!parts.Value().parent.IsNull()) {
+        auto parentWorld =
+            With<SceneComponent>(parts.Value().parent, [](SceneComponent& scene) noexcept {
+                return scene.TryWorldTransform();
+            });
+        if (!parentWorld) {
+            return Result<void>::Failure(parentWorld.Error());
+        }
+
+        auto inverse = parentWorld.Value().TryInverse();
+        if (!inverse) {
+            return Result<void>::Failure(inverse.Error());
+        }
+
+        auto local = Transform::TryMultiply(world.Value(), inverse.Value());
+        if (!local) {
+            return Result<void>::Failure(local.Error());
+        }
+
+        relative = local.Value();
+    }
+
+    return With<SceneComponent>(root.Value(), [&relative](SceneComponent& scene) noexcept {
+        return scene.SetRelativeTransform(relative);
+    });
 }
 
 // --- Owner·Instigator·LifeSpan(17.3·17.5절) ---
@@ -156,6 +227,10 @@ Result<void> World::SetActorOwner(ObjectHandle actor, ObjectHandle owner) noexce
         const ActorRecord* target = FindActorRecord(owner);
         if (target == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
+        if (target->state == ActorState::PendingDestroy) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
         }
 
         // 새 소유자의 소유 사슬에 자신이 있으면 고리다(UE SetOwner — Error 로그 후 거부). 사슬은
@@ -180,9 +255,13 @@ Result<void> World::SetActorOwner(ObjectHandle actor, ObjectHandle owner) noexce
 }
 
 Result<void> World::SetActorInstigator(ObjectHandle actor, ObjectHandle instigator) noexcept {
-    if (FindActorRecord(actor) == nullptr ||
-        (!instigator.IsNull() && FindActorRecord(instigator) == nullptr)) {
+    const ActorRecord* target = instigator.IsNull() ? nullptr : FindActorRecord(instigator);
+    if (FindActorRecord(actor) == nullptr || (!instigator.IsNull() && target == nullptr)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (target != nullptr && target->state == ActorState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
     }
 
     return With<Actor>(actor,
@@ -202,6 +281,14 @@ Result<void> World::SetActorLifeSpan(ObjectHandle actor, double seconds) noexcep
     // 0 이하는 해제다(힙의 옛 항목은 번호가 달라 무시된다).
     if (seconds <= 0.0) {
         record->lifeSpanSequence = 0;
+        record->pendingLifeSpan = 0.0;
+        return Result<void>::Success();
+    }
+
+    // 시작 전이면 시작할 때부터 센다(UE는 InitialLifeSpan을 BeginPlay에서 건다).
+    if (record->state != ActorState::Playing) {
+        record->lifeSpanSequence = 0;
+        record->pendingLifeSpan = seconds;
         return Result<void>::Success();
     }
 
@@ -318,20 +405,7 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
     ObjectAccessScope scope(Access());
     HookScope hooks(*this);
     record->finishing = true;
-    // Spawn 인자의 Transform을 root에 쓴다(UE PostSpawnInitialize의 root Transform — hook 전).
-    if (record->hasSpawnTransform) {
-        const Transform at = record->spawnTransform;
-        record->hasSpawnTransform = false;
-        auto root = With<Actor>(actor, [](Actor& value) noexcept { return value.RootComponent(); });
-        if (root && !root.Value().IsNull()) {
-            auto placed = With<SceneComponent>(root.Value(), [&at](SceneComponent& scene) noexcept {
-                return scene.SetRelativeTransform(at);
-            });
-            (void)placed;
-        }
 
-        record = FindActorRecord(actor);
-    }
     auto finish = [this, actor](Result<void> outcome) noexcept {
         ActorRecord* current = FindActorRecord(actor);
         if (current != nullptr) {
@@ -442,6 +516,22 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
         auto destroyed = DestroyActor(actor);
         (void)destroyed;
         return finish(Result<void>::Failure(posted.Error()));
+    }
+
+    // 5) Spawn 인자의 Transform을 root에 쓴다. OnAwake에서 만든 root도 받도록 Component 초기화 뒤에
+    //    한다. UE 기본(MultiplyWithRoot)처럼 root 상대 Transform × Spawn Transform을 root의 월드
+    //    Transform으로 둔다(PostSpawnInitialize — Actor.cpp:4312–4324). 표현할 수 없는
+    //    합성(shear)이면 Spawn이 실패한다.
+    auto placed = ApplySpawnTransform(actor);
+    record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return finish(Result<void>::Failure(ErrorCode::Destroyed));
+    }
+
+    if (!placed) {
+        auto destroyed = DestroyActor(actor);
+        (void)destroyed;
+        return finish(Result<void>::Failure(placed.Error()));
     }
 
     if (record->state == ActorState::PendingDestroy) {
