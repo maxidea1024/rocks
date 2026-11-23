@@ -1740,4 +1740,52 @@ TEST(Engine_CrashDuringInitializeAndShutdownRecordsTheStage) {
     CHECK(strstr(content, EngineStageShutdown) != nullptr);
 }
 
+namespace {
+
+// 바깥 조회 창으로 EngineSubsystem을 찾는 WorldSubsystem이다(EngineRuntime 16.3절 ERD10).
+class EngineLookupWorldSubsystem final : public WorldSubsystem {
+public:
+    Result<void> Initialize(World& world) noexcept override {
+        foundAtInitialize = GetEngineSubsystem<AlphaSubsystem>(world) != nullptr;
+        return Result<void>::Success();
+    }
+
+    void PreDeinitialize(World& world) noexcept override {
+        foundAtPreDeinitialize = GetEngineSubsystem<AlphaSubsystem>(world) != nullptr;
+    }
+
+    static inline bool foundAtInitialize = false;
+    static inline bool foundAtPreDeinitialize = true;
+};
+
+} // namespace
+
+TEST(Engine_WorldSubsystemFindsEngineSubsystemThroughOuterLookup) {
+    ResetSteps();
+    SystemAllocator allocator;
+    {
+        const EngineSubsystemType subsystems[] = {
+            MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha")};
+        const WorldSubsystemType worldSubsystems[] = {
+            MakeSubsystemType<WorldSubsystem, EngineLookupWorldSubsystem>("EngineLookup")};
+        EngineConfig config;
+        config.modules = &test::ProcessModules();
+        config.subsystems = subsystems;
+        config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+        config.registerTypes = &RegisterGameTypes;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        WorldCreateDesc desc;
+        desc.name = "Main";
+        desc.subsystems = worldSubsystems;
+        auto world = engine.CreateWorld(desc);
+        REQUIRE(world);
+        CHECK(world.Value()->Kind() == WorldKind::Game);
+        CHECK(EngineLookupWorldSubsystem::foundAtInitialize);
+        REQUIRE(engine.Shutdown());
+        // 조회 창은 PreDeinitialize부터 닫힌다(EngineSubsystem은 아직 살아 있어도).
+        CHECK(!EngineLookupWorldSubsystem::foundAtPreDeinitialize);
+    }
+}
+
 } // namespace engine_tests_file
