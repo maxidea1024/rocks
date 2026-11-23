@@ -5,7 +5,9 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 // Android는 자식 프로세스 생성을 아직 지원하지 않는다(posix_spawn이 API 28부터이고 앱 sandbox에서
@@ -84,6 +86,39 @@ bool IsProcessRunning(uint32 processId) noexcept {
     }
 
     return kill(static_cast<pid_t>(processId), 0) == 0 || errno == EPERM;
+}
+
+WaitResult WaitForProcessExit(uint32 processId, uint32 timeoutMilliseconds) noexcept {
+    if (processId == 0 || processId > static_cast<uint32>(NumericLimits<pid_t>::Max())) {
+        return WaitResult::Failed;
+    }
+
+    // pidfd는 프로세스가 끝나면(회수 전 포함) 읽기 가능해진다. 없는 PID는 ESRCH다.
+    const long descriptor = syscall(SYS_pidfd_open, static_cast<pid_t>(processId), 0);
+    if (descriptor < 0) {
+        return errno == ESRCH ? WaitResult::Signaled : WaitResult::Failed;
+    }
+
+    struct pollfd entry{};
+    entry.fd = static_cast<int>(descriptor);
+    entry.events = POLLIN;
+    int ready = 0;
+    do {
+        ready = poll(&entry, 1,
+                     timeoutMilliseconds == InfiniteTimeout
+                         ? -1
+                         : static_cast<int>(timeoutMilliseconds >
+                                                    static_cast<uint32>(NumericLimits<int>::Max())
+                                                ? NumericLimits<int>::Max()
+                                                : timeoutMilliseconds));
+    } while (ready < 0 && errno == EINTR);
+
+    close(entry.fd);
+    if (ready > 0) {
+        return WaitResult::Signaled;
+    }
+
+    return ready == 0 ? WaitResult::TimedOut : WaitResult::Failed;
 }
 
 FileStatus GetExecutablePath(char* buffer, usize capacity, usize& bytes) noexcept {

@@ -1000,6 +1000,44 @@ bool IsProcessRunning(uint32 processId) noexcept {
     return kill(static_cast<pid_t>(processId), 0) == 0 || errno == EPERM;
 }
 
+WaitResult WaitForProcessExit(uint32 processId, uint32 timeoutMilliseconds) noexcept {
+    if (processId == 0 || processId > static_cast<uint32>(NumericLimits<pid_t>::Max())) {
+        return WaitResult::Failed;
+    }
+
+    const int queue = kqueue();
+    if (queue < 0) {
+        return WaitResult::Failed;
+    }
+
+    // NOTE_EXIT는 끝난(회수 전 zombie 포함) 프로세스에도 온다. 등록이 ESRCH면 이미 없다.
+    struct kevent change;
+    EV_SET(&change, static_cast<uintptr_t>(processId), EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT,
+           0, nullptr);
+    if (kevent(queue, &change, 1, nullptr, 0, nullptr) != 0) {
+        const int error = errno;
+        close(queue);
+        return error == ESRCH ? WaitResult::Signaled : WaitResult::Failed;
+    }
+
+    struct timespec timeout{};
+    timeout.tv_sec = static_cast<time_t>(timeoutMilliseconds / 1000u);
+    timeout.tv_nsec = static_cast<long>((timeoutMilliseconds % 1000u) * 1'000'000u);
+    struct kevent event;
+    int received = 0;
+    do {
+        received = kevent(queue, nullptr, 0, &event, 1,
+                          timeoutMilliseconds == InfiniteTimeout ? nullptr : &timeout);
+    } while (received < 0 && errno == EINTR);
+
+    close(queue);
+    if (received > 0) {
+        return WaitResult::Signaled;
+    }
+
+    return received == 0 ? WaitResult::TimedOut : WaitResult::Failed;
+}
+
 FileStatus GetExecutablePath(char* buffer, usize capacity, usize& bytes) noexcept {
     if (buffer == nullptr && capacity != 0) {
         return {FileCode::InvalidArgument, 0};

@@ -8,6 +8,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Launch/Application.h>
+#include <Platform/Process.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
@@ -433,7 +434,9 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
         FaultAccess();
     } else if (CrashModeIs(mode, "helper-exited-early")) {
         // 도우미가 먼저 끝난 것을 확인한 뒤 실패한다(순서는 프로세스 종료 대기로 정한다).
-        if (!WaitForProcessExit(platform::CrashHelperProcessId(), HelperExitWaitMilliseconds)) {
+        if (platform::WaitForProcessExit(platform::CrashHelperProcessId(),
+                                         HelperExitWaitMilliseconds) !=
+            platform::WaitResult::Signaled) {
             return SetupFailed;
         }
 
