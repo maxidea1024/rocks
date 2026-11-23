@@ -15,5 +15,8 @@ public sealed class RenderBase : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["Graphics", "Task", "MetaSchema", "TraceCapture", "ModuleLoader"];
+    protected override string[] PublicDependencies => ["Graphics", "Task", "MetaSchema", "TraceCapture"];
+
+    // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
+    protected override string[] PrivateDependencies => ["ModuleLoader"];
 }

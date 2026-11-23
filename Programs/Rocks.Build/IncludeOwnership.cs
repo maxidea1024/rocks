@@ -165,7 +165,12 @@ internal static class IncludeOwnership
         }
 
         // 쓰지 않는 공개 의존: 공개 헤더 검사 기록에 공개 의존 D가 소유한 헤더가 하나도 없다. 모듈 폴더가 없는 의존(소유를 정할 수 없다)과
-        // 서드파티는 빼고, 간접 include도 쓴 것으로 센다.
+        // 서드파티는 빼고, 간접 include도 쓴 것으로 센다. 리플렉션이 없는 모듈 M의 공개 의존 D가 리플렉션 모듈이거나 리플렉션 모듈에 닿으면
+        // 리플렉션 등록 사슬이 쓰는 것으로 본다: M의 소비 모듈의 생성 소스가 M을 건너 D 쪽 리플렉션 모듈의 등록 함수를 부르므로(M에는 등록
+        // 함수가 없다) 그 모듈이 소비 모듈에 보여야 한다(Docs/Design/BuildTargets 3.5절 BS3b).
+        bool Reflective(NativeModuleInput module) => module.Metadata.Count != 0 || module.ReflectionSources.Count != 0;
+        bool ReachesReflection(string name) =>
+            LinkClosure.Reachable([name], modules).Any(reached => modules.TryGetValue(reached, out NativeModuleInput? value) && Reflective(value));
         var unused = new List<string>();
         foreach ((string checkedName, HashSet<string> seenModules) in seenByCheck.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
@@ -175,7 +180,8 @@ internal static class IncludeOwnership
             }
 
             string[] idle = [.. checkedModule.PublicDependencies.Where(name => modules.TryGetValue(name, out NativeModuleInput? dependency) &&
-                    !dependency.ThirdParty && dependency.ModuleDirectory is not null && !seenModules.Contains(dependency.Name))
+                    !dependency.ThirdParty && dependency.ModuleDirectory is not null && !seenModules.Contains(dependency.Name) &&
+                    (Reflective(checkedModule) || !ReachesReflection(dependency.Name)))
                 .Order(StringComparer.Ordinal)];
             if (idle.Length != 0)
             {

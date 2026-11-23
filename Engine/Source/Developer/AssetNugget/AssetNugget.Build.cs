@@ -12,5 +12,8 @@ public sealed class AssetNugget : EngineModuleRules
 
     protected override string ModuleName => "AssetNugget";
 
-    protected override string[] PublicDependencies => ["Core", "Serialization", "ReflectionText", "Compression", "Task", "DeterministicMath"];
+    protected override string[] PublicDependencies => ["Core", "ReflectionText", "Task"];
+
+    // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
+    protected override string[] PrivateDependencies => ["Compression", "DeterministicMath", "Serialization"];
 }
