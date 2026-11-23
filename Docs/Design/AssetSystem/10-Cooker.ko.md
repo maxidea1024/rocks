@@ -84,7 +84,7 @@
 5. **키 계산**(패키지를 열지 않는다 — UE 증분 쿠킹 TargetDomain 키처럼 로드 없이 판정):
    - **콘텐츠 해시** = 에디터 패키지 파일 전체 SHA-256(패키지 지문은 섹션 CRC32 표의 SHA라 충돌이 CRC 수준이어서 쓰지 않는다). 색인이 지연 계산해 항목과 색인 캐시에 둔다(`AssetIndex::ContentHash(id)` — 크기·수정 시각이 같으면 캐시 값, 다르면 다시 읽음 — 바뀐 파일만 다시 해시, 색인 캐시 형식 버전을 올린다).
    - **처리기 build key** = 9절 너겟 키: 공통 머리(`WriteNuggetKeyHeader(writer, {처리기 id, 처리기 버전}, projectGeneration)`) + 처리기 설정 키(색인 정보만으로 — 기본 처리기는 없음, 설정이 패키지 안에 있으면 콘텐츠 해시가 이미 담는다) + Build 의존 튜플 (역할, AssetId, 그 의존의 build key). Build 그래프에 순환이 있을 수 있으므로 **Build SCC**로 계산한다(`NuggetSccKey` — 구성원 지역 키 = 공통 머리 + 설정 + 콘텐츠 해시, 외부 튜플 = Build 의존의 구성원 key; build key = `NuggetMemberKey`).
-   - **cookKey 지역 입력** = 공통 머리(`{CookerProcessorGuid, cookerVersion}`) + 콘텐츠 해시 + 논리 경로 키 + CookSettings 판정(PrimaryAsset 여부·bundle 이름과 구성원) + 처리기 build key + 쿠킹 패키지 formatVersion·섹션 schemaVersion 집합 + **타입 표 지문** + 프로파일 출력 설정 SHA-256. 클래스 기본값 지문 열은 A5가 더한다.
+   - **cookKey 지역 입력** = 공통 머리(`{CookerProcessorGuid, cookerVersion}`) + 콘텐츠 해시 + 논리 경로 키 + CookSettings 판정(PrimaryAsset 여부·bundle 이름과 구성원) + 처리기 build key + 쿠킹 패키지 formatVersion·섹션 schemaVersion 집합 + **타입 표 지문** + 프로파일 출력 설정 SHA-256. 클래스 기본값은 A5c가 export 타입마다 (TypeId, 상태, cooked 지문) 목록으로 더한다(RuntimeClassMetadata 'A5c 지문 연결' — 레코드 실패 타입은 `InvalidClassDefaults`).
    - **타입 표 지문** = 등록된 리플렉션 타입 전체의 (TypeId, 스키마 버전) 정렬 목록 SHA-256이다. Summary 타입 표는 export 클래스만 담아 필드 안 struct·enum·InstancedStruct 내용 타입의 스키마 변경을 놓치고, InstancedStruct 내용 타입은 실행 중에 정해져 스키마로 폐포를 셀 수 없다 — 그래서 보수적으로 전체 표를 쓴다(어느 타입의 버전이 바뀌어도 전체가 다시 쿠킹된다 — 안전 쪽, 범위를 줄이는 것은 저장된 타입 참조를 색인에 두는 후속).
    - **cookKey** = Hard 그래프 SCC(대상 사이, Tarjan — AssetId 순 결정적): SCC key = `NuggetSccKey(구성원 {AssetId, 지역 키}, 외부 튜플 {구성원, "Hard", 의존, 의존 cookKey})`, cookKey = `NuggetMemberKey(SCC key, AssetId)`. 순서: Build SCC(build key) → Hard SCC 역위상(cookKey).
 6. **CookProcessor 표**: TypeId → `CookProcessor{정체성 NuggetProcessorId(처리기 Guid·버전 Guid — 너겟 키 공통 머리와 같다), WriteSettingsKey(writer, 색인 항목)(선택 — 색인 정보만), Cook(context)}`. 대표 에셋 타입에서 상속 사슬을 따라 가장 가까운 등록 처리기 하나(AssetTypeHookTable과 같은 규칙). 기본 처리기(Asset 루트): 에디터 객체 그래프를 그대로 `WritePackage(kind=Cooked, profile 값, bulkCodec·bulkAlignment, bulkSource=에디터 패키지 store)`로 쓴다(EditorOnly 필드는 writer가 뺀다). 처리기는 `CookContext`로 NuggetCache·프로파일·진단 sink를 받는다(텍스처 처리기 A5가 너겟을 쓴다).
@@ -135,7 +135,7 @@
     - 지역 키 = 공통 머리(처리기 정체성, 프로젝트 세대) + 처리기 설정 키 + 콘텐츠 해시.
     - Build SCC(AssetId 순 노드·간선 — 결정적)마다 `NuggetSccKey(구성원, 외부 튜플 {구성원, "Build", 의존, 의존 build key})`를 구하고, build key = `NuggetMemberKey`.
   - **cookKey**:
-    - 지역 키 = 공통 머리({`CookerProcessorGuid`, `CookerKeyVersion`}, 프로젝트 세대) + 쿠커 버전 + 콘텐츠 해시 + 논리 경로 키 + PrimaryAsset 여부 + bundle(이름·구성원) + 이 대상의 제외된 Soft 의존(AssetId 순) + build key + `PackageFormatVersion` + `PackageSectionSchemaVersion` + 타입 표 지문 + 프로파일 출력 설정 SHA-256.
+    - 지역 키 = 공통 머리({`CookerProcessorGuid`, `CookerKeyVersion`}, 프로젝트 세대) + 쿠커 버전 + 콘텐츠 해시 + 논리 경로 키 + PrimaryAsset 여부 + bundle(이름·구성원) + 이 대상의 제외된 Soft 의존(AssetId 순) + build key + `PackageFormatVersion` + `PackageSectionSchemaVersion` + 타입 표 지문 + 프로파일 출력 설정 SHA-256 + (A5c) export 타입별 클래스 기본값 (TypeId, 상태, cooked 지문) 목록.
     - CookSettings SHA-256 전체는 넣지 않는다 — 판정 결과만 넣는다. 그래서 alwaysCook을 더해도 기존 대상의 키는 바뀌지 않는다. 제외된 Soft 의존은 byte에도 매니페스트에도 영향이 없지만 판정 입력으로 보수적으로 남긴다(적중만 줄어든다).
     - Hard SCC는 대상 사이 Hard 간선으로 만든다(대상 밖 Hard 의존은 A4b가 이미 오류로 보고했다 — 간선에서 뺀다). 외부 튜플은 {구성원, "Hard", 의존, 의존 cookKey}다.
   - **타입 표 지문** = `ListTypeVersions` 목록(개수, 그리고 칸마다 TypeId·종류·버전)을 NuggetKeyWriter로 흘린 SHA-256이다.

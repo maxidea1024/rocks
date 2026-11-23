@@ -66,7 +66,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 - **누락 = 기준(형식 규칙):** 빠진 필드·멤버는 정책이 아니라 형식 규칙으로 허용되며 기준 값을 뜻한다(C++ 타입에서는 지금의 "누락 필드는 생성자 값 유지"와 같다). Required 진단은 기준을 적용한 뒤의 실효 값으로 낸다(빠졌다고 null로 보지 않는다). 레코드 인코딩은 `rejectMissingRequired`를 끄고 한다. 이 규칙은 레코드가 없어도 성립하므로 A0-O의 graph v2가 처음부터 갖는다(A5에서 형식 버전을 다시 올리지 않는다). A0-O는 1단계의 present 판정을 override 집합의 자리로 남기고, 전부 저장(undo·스냅샷·복제)의 override 집합은 그래프 바이트 밖 컨테이너에 두며, 차이 형식인지는 형식 비트가 아니라 호출자 옵션으로 정한다([ObjectFoundations](ObjectFoundations.ko.md) 4절).
 - **마이그레이션:** 빠진 값은 "저장 당시 그 버전의 기본값"이다. 기본값만 바꾸는 것은 버전을 올리지 않는다(전파가 목적이다). 기존 인스턴스에 전파하지 않으려 하거나 필드의 의미(단위·분할)를 바꾸면 버전을 올리고, migrate가 값의 존재 여부를 받아 빠진 값에 옛 기본값(마이그레이션 코드의 상수)을 써 넣는다. struct 멤버의 기본값은 소유 클래스 생성자가 정하므로, struct 멤버의 전파 차단은 소유 클래스 버전을 올려 클래스 migrate가 한다. 엔진은 버전별 옛 레코드를 보관하지 않는다.
 - **참조 기본값과 의존:** C++ 레코드의 강한 참조는 구조적으로 null이다. non-null 참조 기본값(Sparks `Asset(...)`·Soft·Row 초기값, SparksLanguage 3.2·7.2절)은 다음과 함께 허용한다 — 비교는 대상 정체성, 패키지 Dependencies = 저장된 참조 ∪ override하지 않은 값의 레코드 참조이며 로드 대조(AssetSystem 5.2절)도 기준 적용 결과로 한다, World 객체 참조는 거부. 그 전까지 레코드의 참조 기본값(Soft 포함)은 null만 허용하고 위반은 레코드 생성 오류다. 이 의존 수집과 default subobject는 Sparks의 해당 도입 단계(L2)의 선행 조건이다.
-- **지문과 쿠킹:** 레코드 지문은 레코드 byte의 SHA-256이며 대상 구성(editor·cooked)의 EditorOnly 포함 여부와 codec wire 버전을 넣는다. 에셋 너겟 키는 처리기가 읽은 유효 값으로 만들므로 지문을 넣지 않는다(타입 전체 지문은 무관한 필드 변경까지 무효화한다). cookKey 지역 입력에 패키지 export 구체 클래스별 (TypeId, 지문) 정렬 목록을 더하고(base 기본값은 파생 레코드에 이미 들어 있다), 패키지 Summary 타입 표의 클래스 행에 저장 당시 지문을 기록한다. 쿠킹 패키지도 차이 형식이며(UE도 쿠킹 데이터를 기준 차이로 저장한다), 로드 때 지문이 다르면 `UnsupportedVersion`(AssetSystem 5.3절 타입 데이터 축, 다시 쿠킹)이다. 편집기 패키지는 지문이 다르면 "기본값이 바뀐 타입·영향받은 객체"를 진단하고 계속 연다.
+- **지문과 쿠킹:** 레코드 지문은 레코드 byte의 SHA-256이며 대상 구성(editor·cooked)의 EditorOnly 포함 여부와 codec wire 버전을 넣는다. 에셋 너겟 키는 처리기가 읽은 유효 값으로 만들므로 지문을 넣지 않는다(타입 전체 지문은 무관한 필드 변경까지 무효화한다). cookKey 지역 입력에 패키지 export 구체 클래스별 (TypeId, 지문) 정렬 목록을 더하고(base 기본값은 파생 레코드에 이미 들어 있다), 패키지 Summary의 `ClassDefaults` 목록(레코드 있는 export 클래스 행 — A5c)에 저장 당시 지문을 기록한다. 쿠킹 패키지도 차이 형식이며(UE도 쿠킹 데이터를 기준 차이로 저장한다), 로드 때 지문이 다르면 `UnsupportedVersion`(AssetSystem 5.3절 타입 데이터 축, 다시 쿠킹)이다. 편집기 패키지는 지문이 다르면 "기본값이 바뀐 타입·영향받은 객체"를 진단하고 계속 연다.
 - **조회·되돌리기:** 기본값 읽기는 레코드를 경로(PropertyPath)로 해석해 돌려준다. 되돌리기는 단일 값·원소·멤버부터 지원하고 struct·배열 통째 되돌리기는 후속이다(Atomic struct의 되돌리기는 통째이며 A5에서 이 후속과 함께 구현한다 — ReflectionExtensions 3.1절). ReadOnly 필드와 소유 컨테이너(`components` 등)는 되돌리기 대상이 아니다.
 - **reload(SparksLanguage 12.4절):** reload는 새 등록 revision과 새 레코드를 만들고, 같은 revision의 레코드는 바뀌지 않는다. 살아 있는 인스턴스에서 override 집합에 없고 인코딩이 이전 레코드와 같은 값은 새 값으로 바꾼다. override 집합의 값은 유지하고 편집기에 표시한다. 이전 레코드는 reload가 끝날 때까지 보관한다.
 - **기준의 일반화:** 조회 API와 차이 형식은 "기준(base)"을 명시한다. 지금 기준은 클래스 레코드이고, prefab이 생기면 archetype 사슬이 된다(UE도 archetype 기준이다).
@@ -219,39 +219,51 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 - 되돌리기(A5b2): 단일 값·멤버·Atomic·배열, NaN·-0.0 기본값 되돌린 뒤 byte가 기준과 같음, 집합에서 지움, ReadOnly 거부, 원소 경로 Unsupported.
 - 할당 실패.
 
-### 클래스 기본값 구현 명세 — A5c 지문 연결 (2026-11-24, 착수 전)
+### 클래스 기본값 구현 명세 — A5c 지문 연결 (2026-11-24, 착수 전 — 교차 검증 1차 반영)
 
-'클래스 기본값 결정'의 지문과 쿠킹 문단을 패키지 형식·로드·쿠커·색인에 잇고, Tick 설정을 리플렉션으로 옮긴다([AssetSystem](AssetSystem/12-Textures.ko.md) 12.7절 A5c). 근거 조사는 2026-11-24 코드(PackageWriter·PackageReader Summary, CookKeys `CookLocalKey`·`HashTypeTable`, AssetIndexEntry, World `TickSettings`)다.
+'클래스 기본값 결정'의 지문과 쿠킹 문단을 패키지 형식·로드·쿠커·색인에 잇고, Tick 설정을 리플렉션으로 옮긴다([AssetSystem](AssetSystem/12-Textures.ko.md) 12.7절 A5c). 근거 조사는 2026-11-24 코드(PackageWriter·PackageReader Summary, CookKeys `CookLocalKey`·`HashTypeTable`, AssetIndexEntry, World `TickSettings`)다. 교차 검증(필수 3 — 문서 충돌, 레코드 없는 export 타입, 빌드 구성 간 지문)을 반영했다.
+
+**레코드 유무 분류**(아래 모든 곳이 같은 분류를 쓴다):
+- 레코드 있음 — 지문이 있다.
+- 레코드 없는 타입 — A5a의 기억되는 Unsupported 이유(Abstract·IncompleteLayout·ManualFields — 손 함수표·지금의 Sparks 등록 타입 포함). 차이 저장은 이 타입을 전부 저장하고(A5b) 정상 export가 될 수 있다. 지문이 없고 그것이 정상이다.
+- 레코드 실패 — 그 밖의 실패(NonDeterministic·NonNullReference·EncodeFailed, 할당 실패는 일시적이라 그 호출의 오류). 타입 계약 위반이다 — 차이 저장이 실패하므로 그 타입의 객체는 저장할 수 없다.
 
 **패키지 형식(A1 개정)**:
-- Summary Record에 필드 `ClassDefaults`(RecordList `{id Guid, fingerprint Bytes 32}`)를 더한다. 행 = Exports의 서로 다른 typeId(모두 구체 클래스 — 객체를 만들 수 있는 타입), TypeId 오름차순, 중복 없음. 지문 구성은 패키지 종류를 따른다(에디터 = Editor, 쿠킹 = Cooked — 차이 쓰기 기준과 같다). 타입 버전 표(`Types`)는 그대로 둔다(클래스 행 지문은 그 표의 열이 아니라 같은 Record의 별도 목록 — 버전 표에는 struct·enum 행도 있어 열을 비우는 행이 생긴다).
+- Summary Record에 필드 `ClassDefaults`(RecordList `{id Guid, fingerprint Bytes 32}`)를 더한다. 행 = Exports의 서로 다른 typeId 가운데 레코드 있는 타입(레코드 없는 타입은 행이 없다), TypeId 오름차순, 중복 없음. 지문 구성은 패키지 종류를 따른다(에디터 = Editor, 쿠킹 = Cooked — 차이 쓰기 기준과 같다). 타입 버전 표(`Types`)에 열을 두지 않는 이유: 그 표에는 struct·enum 행도 있어 빈 열이 생긴다.
 - `PackageFormatVersion` 1 → 2. 차이 형식 Objects(A5b)와 이 필드를 함께 표시한다. 하위호환을 두지 않으므로 v1 파일은 기존 형식 축 규칙(낮은 formatVersion — 에디터·쿠킹 모두 `UnsupportedVersion`, PackageReader 헤더 검사 2)대로 거부한다. 시험 fixture·바이트 헤더는 다시 만든다.
 - `PackageSummary::classDefaults`(`Array<PackageClassDefaults{TypeId type, Sha256Digest fingerprint}>`).
-- writer: 객체 그래프를 차이 저장한 뒤 export 클래스마다 `AcquireClassDefaults`(그래프 저장이 이미 만들었으므로 조회)로 지문을 얻는다. 레코드 실패는 저장 실패다(차이 저장과 같은 규칙).
-- reader 형식 검사: 행이 정렬·중복 없음이고 행 집합 = export 타입 집합이어야 한다(아니면 Summary `CorruptPackage`). 할당 실패는 `OutOfMemory`(5.7절 12).
+- writer: 차이 저장한 뒤 export 클래스마다 `AcquireClassDefaults`(그래프 저장이 이미 만들었으므로 조회) — 있음은 행, 없는 타입은 행 없음, 실패는 저장 실패(차이 저장이 먼저 실패한다).
+- reader 형식 검사: 행이 정렬·중복 없음이고 행 집합 ⊆ export 타입 집합이어야 한다(아니면 Summary `CorruptPackage` — 5.7절에 더한다). 할당 실패는 `OutOfMemory`(5.7절 12).
+- 문서 개정(이 명세와 함께): AssetSystem 05-PackageFormat 5.2절 Summary 행("클래스 행에는 … 지문 열" → `ClassDefaults` 목록)·5.7절 1(Summary Record 필드 목록)·5.7절 `CorruptPackage` 경우, 10-Cooker 10절 cookKey 지역 입력 문구, 이 문서 '클래스 기본값 결정'의 지문과 쿠킹 문단("Summary 타입 표의 클래스 행" → "Summary의 ClassDefaults 목록").
 
-**로드 판정**(`PackageReadOptions::types`가 있을 때만 — 타입 축과 같다):
-- 등록된 클래스 행마다 지금 레코드의 지문(그 패키지 종류의 구성)과 비교한다. 미등록·클래스가 아닌 행은 이미 `unavailableExportType` 경로가 판정하므로 건너뛴다.
-- 쿠킹: 지문이 다르거나 지금 레코드를 만들 수 없으면 Summary `UnsupportedVersion`(다시 쿠킹 — 진단 related = 그 TypeId, 오류 코드는 다름 `Unsupported`·레코드 실패면 그 오류).
-- 에디터: 다르면(레코드 실패 포함) `PackageContents::changedDefaults`(TypeId 목록, 정렬)에 담고 계속 연다(읽기 전용이 아니다). `EditorPackageSet::Open`이 타입마다 경고 `ClassDefaultsChanged`(diagnostic.asset = 패키지, related = TypeId, text = 영향받은 export 수)를 낸다. 저장하면 파일에 있던 값(present → override 집합)은 그대로 남고 빠져 있던 값은 새 기본값이 된다(UE에서 CDO가 바뀐 뒤 다시 저장한 것과 같다) — 그 뒤 저장은 새 지문을 쓴다.
-- 비용: 레코드는 등록 세대마다 한 번 만들고 기억하므로 로드마다 지문 계산은 조회다.
+**로드 판정**(`PackageReadOptions::types`가 있을 때만 — 타입 축과 같다). 등록된 클래스인 export 타입마다(미등록·클래스가 아닌 타입은 `unavailableExportType` 경로가 이미 판정한다) 저장 쪽(행 있음 + 지문 / 행 없음)과 지금 쪽(그 패키지 종류 구성의 레코드 있음 + 지문 / 레코드 없는 타입 / 레코드 실패)을 맞춘다:
+- 같음 = 둘 다 행·레코드가 있고 지문이 같거나, 둘 다 없음(행 없음 + 지금 레코드 없는 타입).
+- 쿠킹: 같지 않으면 Summary `UnsupportedVersion`(다시 쿠킹 — related = 그 TypeId). 지금 레코드 실패도 `UnsupportedVersion`이다(이 빌드가 기준을 만들 수 없다).
+- 에디터: 계속 연다(읽기 전용이 아니다). `PackageContents::changedDefaults`(TypeId 정렬 목록)·`unavailableDefaults`(지금 레코드 실패인 TypeId 정렬 목록과 이유)에 담는다. `EditorPackageSet::Open`이 타입마다 경고를 낸다 — 지문·유무가 다르면 `ClassDefaultsChanged`(diagnostic.asset = 패키지, related = TypeId, text = 영향받은 export 수), 지금 레코드 실패면 `ClassDefaultsUnavailable`(text = 이유 이름 — 이 패키지는 그 타입을 고치기 전까지 저장할 수 없다). 바뀐 기본값으로 다시 저장하면 파일에 있던 값(present → override 집합)은 그대로 남고 빠져 있던 값은 새 기본값이 된다(UE에서 CDO가 바뀐 뒤 다시 저장한 것과 같다) — 그 뒤 저장은 새 지문을 쓴다.
+- 비용: 레코드는 등록 세대마다 한 번 만들고 기억하므로 로드마다 지문 비교는 조회다.
 
 **cookKey(A4 개정)**:
-- `AssetIndexEntry::exportTypes`(TypeId 정렬 목록)를 둔다 — 색인이 에디터 패키지의 Summary `ClassDefaults` 행에서 읽는다(Exports를 다시 훑지 않는다). AssetIndex 캐시 schemaVersion을 올린다.
-- 쿠커는 시작 때 `ForEachClassDefaults`로 (TypeId → cooked 지문 또는 실패 진단) 표를 한 번 만든다(결정의 "쿠킹은 모든 레코드를 강제로 만들어 실패를 미리 드러낸다" — 표는 cookKey와 처리기가 같이 쓴다).
-- `CookLocalKey`에 export 구체 클래스별 (TypeId, cooked 지문) 목록을 더한다(개수, 그리고 칸마다 TypeId·지문 — 정렬은 exportTypes 순). 표에 없는 타입(미등록)·레코드 실패 타입이 있는 대상은 cookKey 실패이고 진단 `UnsupportedVersion`(related = 그 TypeId)이다 — 그 대상은 쿠킹하지 않는다. base 기본값은 파생 레코드에 이미 들어 있으므로 base 행은 따로 넣지 않는다.
-- 10절 cookKey 지역 입력 목록의 "클래스 기본값 지문 열은 A5가 더한다"를 이 목록으로 바꾼다.
+- `AssetIndexEntry::exportTypes`(TypeId 정렬 목록 — Exports의 서로 다른 typeId)를 둔다. 색인이 에디터 패키지 Exports에서 만든다(Summary 행은 레코드 있는 타입만이라 쓰지 않는다). AssetIndex 캐시 schemaVersion을 올린다.
+- 쿠커는 시작 때 `ForEachClassDefaults`로 (TypeId → cooked 지문 / 레코드 없는 타입 / 레코드 실패와 진단) 표를 한 번 만든다(결정의 "쿠킹은 모든 레코드를 강제로 만들어 실패를 미리 드러낸다" — 비용은 등록된 구체 클래스 수 × 생성 2회). 레코드 실패 타입은 쿠킹 보고서에 경고로 모두 적는다 — 쓰는 에셋이 없으면 쿠킹을 멈추지 않는다.
+- `CookLocalKey`에 export 타입마다 (TypeId, 상태 byte(0 = 레코드 있음, 1 = 레코드 없는 타입), 지문(상태 0일 때만)) 목록을 더한다(개수 먼저, exportTypes 순). export 타입이 미등록이면 그 대상은 cookKey 실패이고 진단 `UnsupportedVersion`(A4c1 분류와 같다), 레코드 실패면 cookKey 실패이고 새 진단 `InvalidClassDefaults`(related = TypeId, 이유는 보고서 — 다시 쿠킹으로 풀리지 않는 타입 계약 위반이라 `UnsupportedVersion`과 나눈다)다. base 기본값은 파생 레코드에 이미 들어 있으므로 base 행은 따로 넣지 않는다.
+- 쿠커 프로세스의 모듈 구성에 따라 표가 달라질 수 있다(타입 표 지문과 같은 한계 — 적중만 잃는다).
 
-**지문 golden(CI 대조)**: `ClassDefaults_FingerprintGolden` — 시험 fixture 모듈(ReflectionTestFixtures) 등록으로 `ForEachClassDefaults`를 돌려 `TypeId editor지문 cooked지문`(실패면 이유) 줄을 golden 파일과 비교한다. 같은 golden을 Windows·macOS CI가 함께 보므로 플랫폼 간 지문 대조가 된다(결정의 "CI가 Windows·macOS의 지문 목록을 대조한다"). 엔진 타입 전체가 아니라 fixture만인 이유: 엔진 타입은 자주 바뀌어 golden이 흔들린다 — 엔진 타입의 플랫폼 차이는 쿠킹 결정성 시험(같은 입력 같은 byte)이 잡는다.
+**빌드 구성과 지문**(교차 검증 필수 3):
+- 생성자 결정성 계약(A5a)에 더한다: 비EditorOnly 필드의 생성자 값은 빌드 구성(에디터·게임·전용 서버, Debug·Release)과 플랫폼에 무관해야 한다. cooked 지문은 쿠커(에디터 빌드)가 만들고 쿠킹 패키지를 읽는 런타임(게임 빌드)이 자기 레코드로 다시 계산해 비교하므로, 구성마다 값이 다르면 모든 쿠킹 패키지가 런타임에서 `UnsupportedVersion`이 된다. EditorOnly 필드는 cooked 레코드에 없어 이 계약 밖이다.
+- 대조 1(fixture golden): `ClassDefaults_FingerprintGolden` — 시험 fixture 모듈(ReflectionTestFixtures) 등록으로 `ForEachClassDefaults`를 돌려 `TypeId editor지문 cooked지문`(레코드 없는 타입·실패는 이유) 줄을 golden 파일과 비교한다. Windows·macOS·Debug·Release 체인이 같은 golden을 본다.
+- 대조 2(엔진 타입 구성 간): commandlet `class-defaults-dump`가 로드한 모든 모듈의 구체 클래스에 대해 `TypeId cooked지문`(또는 이유) 줄을 쓴다. 검증 체인이 구성(Debug·Release, 그리고 게임·전용 서버 대상이 생기면 그것)과 플랫폼마다 덤프를 만들고 서로 비교한다(golden 파일 없이 두 결과의 같음 — 엔진 타입이 바뀌어도 흔들리지 않는다). 다르면 그 타입을 보고하고 실패한다. 구성 사이 비교는 같은 모듈 구성(같은 대상 종류)끼리만 한다.
 
 **Tick 설정 리플렉션 이동**(ReflectionFoundations 결정 21):
-- `TickPhase`를 `ROCKS_ENUM`, `TickSettings`를 `ROCKS_STRUCT`(멤버 일곱 모두 `ROCKS_PROPERTY`)로 바꾸고, Actor·Component의 `tickSettings_`를 `ROCKS_PROPERTY(Name = "tickSettings")`로 바꾼다. ID는 rocksids에 등록한다.
-- 결과: 생성자가 채운 Tick 설정이 레코드에 들어가고(차이 저장은 기본값과 같으면 생략), 인스턴스마다 바꾼 값은 저장·로드된다. 검증은 그대로 `IsValidTickSettings`(FinishSpawning·AddComponent)다 — 로드한 잘못된 값은 거기서 거부된다. 시작 뒤 변경은 지금처럼 `SetTickEnabled`만 반영한다(편집 반영은 SparksEngineIntegration SE-W5).
-- WorldOnly 클래스라 패키지에 저장되는 경로는 레벨 저장(후속)이다 — 지금 확인은 그래프 왕복·레코드 시험이다.
+- `TickPhase`를 `ROCKS_ENUM`(센티널 `Count`는 `Hidden` 열거자 — 저장·편집 값이 아니다), `TickSettings`를 `ROCKS_STRUCT`(멤버 일곱 모두 `ROCKS_PROPERTY`)로 바꾸고, Actor·Component의 `tickSettings_`를 `ROCKS_PROPERTY(Name = "tickSettings")`로 바꾼다(`enabled_`와 같은 방식). `ROCKS_NATIVE() TickHandle ticks_[...]`는 그대로다. ID는 rocksids에 등록한다. 멤버에 참조가 없어 WorldOnly 소유 형질·깊이 제약에 걸리지 않는다.
+- 검증: struct 검증 hook(`validateTree`)에 `IsValidTickSettings`를 연결해 경로 쓰기·로드로 들어온 잘못된 값(OnTick phase = Physics·음수·비유한 interval)을 그 자리에서 거부한다. FinishSpawning·AddComponent의 검사는 그대로 둔다(생성자가 채운 값).
+- 결과: 생성자가 채운 Tick 설정이 레코드에 들어가고(차이 저장은 기본값과 같으면 생략), 인스턴스마다 바꾼 값은 저장·로드된다. 시작 뒤 변경은 지금처럼 `SetTickEnabled`만 반영한다(편집 반영은 SparksEngineIntegration SE-W5). WorldOnly 클래스라 패키지에 저장되는 경로는 레벨 저장(후속)이다 — 지금 확인은 그래프 왕복·레코드 시험이다.
+- Component.h·Actor.h 머리 주석의 "Tick 설정은 ROCKS_NATIVE" 문구를 고친다.
 
-**버린 대안**: 지문을 타입 버전 표의 열로(struct·enum 행에 빈 열 — 행 종류마다 다른 모양), 로드 때 지문 대신 레코드 byte 비교(패키지에 레코드를 담아야 한다 — 크기), cookKey에 타입 표 전체 지문만(무관한 클래스 기본값 변경까지 전부 다시 쿠킹 — 결정의 "타입 전체 지문은 무관한 필드 변경까지 무효화"), 쿠커가 cookKey 때 에디터 패키지를 다시 읽어 export 타입을 얻기(색인이 이미 Summary를 읽는다), 엔진 전체 타입 golden(위).
+**UE 5.8 대조**: UE 증분 쿠킹의 클래스 다이제스트(`FClassDigestData` — Editor/UnrealEd/Private/EditorDomain/EditorDomainUtils.h 44–67행)는 `InclusiveSchemaHash`(배치)·CustomVersion·ConstructClasses만 담고 CDO 기본값을 키에 넣지 않으며, allowlist(`bTargetIterativeEnabled`) 클래스에만 증분 쿠킹을 쓴다. UE 쿠킹 데이터도 CDO 기준 차이지만 기본값 변경 뒤 다시 쿠킹을 보장하지 않는다(엔진·게임 빌드를 함께 갈아 끼우는 운용에 기댄다). Rocks는 쿠킹 패키지가 기준 차이 형식이고 매니페스트 재사용을 하므로 지문을 키에 넣는다. 에디터 로드 경고는 UE에 없는 Rocks 결정('클래스 기본값 결정')이다.
 
-**시험(A5c)**: Summary 필드 왕복(에디터·쿠킹 구성), 행 정렬·중복·집합 불일치 `CorruptPackage`, v1 파일 거부, 쿠킹 로드 지문 불일치·레코드 실패 `UnsupportedVersion`, 에디터 로드 지문 불일치 경고·계속 열기·다시 저장하면 새 지문, 색인 exportTypes(캐시 왕복), cookKey가 export 클래스 지문에 반응(기본값 변경 → 그 대상만 키 바뀜 — 무관한 클래스는 그대로), 레코드 실패 클래스 대상의 cookKey 실패, 지문 golden, TickSettings 레코드·그래프 왕복·잘못된 로드 값 거부, 할당 실패.
+**버린 대안**: 지문을 타입 버전 표의 열로(위), 레코드 없는 타입에 "없음" 행(이유 byte + 빈 지문 — 형식 칸이 하나 늘고 행 없음과 뜻이 같다), 로드 때 지문 대신 레코드 byte 비교(패키지에 레코드를 담아야 한다 — 크기), cookKey에 타입 표 전체 지문만(무관한 클래스 기본값 변경까지 전부 다시 쿠킹 — 결정의 "타입 전체 지문은 무관한 필드 변경까지 무효화"), 쿠커가 cookKey 때 에디터 패키지를 다시 읽어 export 타입을 얻기(색인이 이미 Exports를 읽는다), 엔진 전체 타입 golden 파일(엔진 타입이 바뀔 때마다 흔들린다 — 대조 2가 구성 간 같음만 본다), 레코드 실패를 cookKey `UnsupportedVersion`으로(다시 쿠킹으로 풀린다고 읽힌다).
+
+**시험(A5c)**: Summary 필드 왕복(에디터·쿠킹 구성, 레코드 없는 타입은 행 없음), 행 정렬·중복·export 밖 행 `CorruptPackage`, v1 파일 거부, 쿠킹 로드(지문 불일치·행 유무 불일치·지금 레코드 실패 `UnsupportedVersion`, 레코드 없는 타입끼리는 통과), 에디터 로드(`ClassDefaultsChanged`·`ClassDefaultsUnavailable` 경고·계속 열기·다시 저장하면 새 지문), 색인 exportTypes(캐시 왕복), cookKey(기본값 변경 → 그 클래스를 쓰는 대상만 키 바뀜, 레코드 없는 타입 상태 byte, 미등록 `UnsupportedVersion`·레코드 실패 `InvalidClassDefaults`, 쓰지 않는 실패 타입은 경고만), 지문 golden, `class-defaults-dump` 출력, TickSettings(레코드·그래프 왕복·Hidden `Count`·경로 쓰기·로드의 잘못된 값 거부), 할당 실패.
 
 ## 단계와 완료 기준
 
