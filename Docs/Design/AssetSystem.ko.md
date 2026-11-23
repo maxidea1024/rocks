@@ -975,9 +975,11 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - 보고서는 흐름이 끝까지 오면 늘 쓴다(게시 성공·규칙 위반 실패 모두). 함수 오류(IO·잠금·할당 등)로 멈추면 쓰지 않는다.
   - 기존 매니페스트:
     - 읽기는 Core 공용 `ReadWholeFile`(`Core/FileRead.h` — 상한 CookedManifestMaxFileBytes)로 한다. A4a CookConfig의 사본을 이것으로 바꿨다. Config·AssetDatabase의 비공개 사본은 후속이다(Config는 다른 세션 몫).
-    - 깨졌으면 경고(그 진단 코드) 뒤 없는 것으로 보고 전체 쿠킹한다. 읽기 IO 오류는 함수 오류다.
+    - 깨졌으면(크기 상한 초과 포함 — `CorruptPackage` / CapacityExceeded) 경고 뒤 없는 것으로 보고 전체 쿠킹한다(사용자가 지우기 전까지 쿠킹이 멈추지 않게 — 리뷰 권장). 읽기 IO 오류는 함수 오류다. 상한은 요청 칸 `manifestLimitBytes`(기본 CookedManifestMaxFileBytes — 시험이 낮춘다)다.
+    - 부분 쿠킹은 병합 호환(`CheckCookedManifestMerge` — 프로파일·출력 설정·CookSettings·쿠커 버전)을 대상 계산 전에 본다. 다르면 쿠킹하지 않고 오류 `IncompatibleCook`과 보고서로 끝낸다(헛된 쿠킹을 막는다 — 리뷰 권장). 게시기 Finish의 같은 대조는 방어적으로 남는다.
   - 기존 매니페스트가 없으면 인자가 있어도 전체 쿠킹이다(결정 10 — partial 거짓). 재사용 판정은 전체·부분 모두 기존 매니페스트로 한다.
   - 진단은 대상·키·실행·게시 순으로 모아 `CookDiagnosticBefore`로 정렬한다. 오류가 하나라도 있으면 Finish를 부르지 않는다.
+  - 비용(리뷰 권장): 부분 쿠킹도 살아 있는 기존 항목을 모두 재사용 판정에 넣으므로 `PlanCookReuse`가 매번 게시된 패키지 전부를 흘려 해시한다(쿠킹 결과 byte에 비례 — 시나리오 27의 같은 크기 손상 감지와의 균형). 후속 두 길: (a) 지난 게시 때 패키지 파일의 (크기·수정 시각)을 기록해 같으면 해시를 건너뜀, (b) 전체 SHA 대조를 `--verify` 같은 선택으로 둠.
   - JSON 내보내기와 `JsonWriter::Finish`는 한 갈래로 본다(내보내기가 성공하면 Finish의 실패는 끝 줄바꿈 append의 할당 실패뿐이다).
 - A4d1 상태: **구현** — 대조표 14.1.69절, coverage 14.1.70절. 구현에서 정한 것:
   - 공용으로 올린 것:
@@ -3174,16 +3176,16 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 |---|---|---|
 | 전체 흐름(결정 11·A4d 세부) | 대상 → 키 → 재사용 → 실행 → 게시, 결과 수(대상·쿠킹·재사용·쓴 byte), 보고서(published·cooked·profile·빈 진단) | `CookProject_FullTwiceReuses` |
 | 결정성(시나리오 13) | 두 번째 전체 쿠킹은 전부 재사용(쿠킹 0·쓴 byte 0)·매니페스트 byte 같음 | `CookProject_FullTwiceReuses` |
-| 부분 쿠킹(10절·결정 8) | 바뀐 기존 항목(Leaf)과 그것을 Hard로 쓰는 항목(Hub)만 다시 쿠킹·나머지 재사용·인자(Hero)는 같은 byte, 기존 매니페스트 없으면 전체 쿠킹 | `CookProject_PartialRecooksChanged` |
+| 부분 쿠킹(10절·결정 8) | 바뀐 기존 항목(Leaf)과 그것을 Hard로 쓰는 항목(Hub)만 다시 쿠킹·나머지 재사용·인자(Hero)는 같은 byte, 병합 호환 아님 → 쿠킹 전 IncompatibleCook(대상 0·게시본 그대로·보고서), 기존 매니페스트 없으면 전체 쿠킹 | `CookProject_PartialRecooksChanged` |
 | 오류는 게시하지 않음(10절) | 사라진 파일(MissingFile) → 게시 안 함·게시본 byte 그대로·보고서 published false·진단 줄(코드·수준), 같은 입력이면 같은 보고서 byte | `CookProject_ErrorsKeepPublished` |
-| 깨진 기존 매니페스트·거부 | 깨진 매니페스트는 경고 뒤 전체 쿠킹 게시, 인자 null 아홉 InvalidArgument(결과 비움), 잠금 아님 InvalidArgument, 매니페스트 읽기 IO 오류, 보고서 struct 미등록 NotFound | `CookProject_CorruptManifestAndRejects` |
-| 할당 실패 | 첫 쿠킹·재사용·깨진 매니페스트(경고 push)·게시기 경고만·대상 경고만·오류 진단(보고서 진단 줄)의 모든 지점 OutOfMemory(결과 객체도), 다 지나면 기준과 같음 | `CookProject_AllocationFailures` |
+| 깨진 기존 매니페스트·거부 | 깨진 매니페스트·상한 초과(CapacityExceeded)는 경고 뒤 전체 쿠킹 게시, 인자 null 아홉 InvalidArgument(결과 비움), 잠금 아님 InvalidArgument, 매니페스트 읽기 IO 오류, 보고서 struct 미등록 NotFound | `CookProject_CorruptManifestAndRejects` |
+| 할당 실패 | 첫 쿠킹·재사용·깨진 매니페스트(경고 push)·게시기 경고만·대상 경고만·병합 호환 아님(조기 판정)·오류 진단(보고서 진단 줄)의 모든 지점 OutOfMemory(결과 객체도), 다 지나면 기준과 같음 | `CookProject_AllocationFailures` |
 | 경고 push 할당 실패(A4d1 보강) | 경고 다섯 자리(고아 삭제·CorruptEntry·동기화 NotDurable·매니페스트 NotDurable·정리 삭제) 각각이 첫 진단인 장면의 OutOfMemory | `CookPublish_AllocationFailures` |
 | 조합(14 완료 조건 2) | 실행 모드(첫 전체·재사용 전체·부분·매니페스트 없는 부분) × 기존 매니페스트(없음·정상·깨짐·읽기 불가) × 결과(게시·오류) | 위 시험 |
 
 #### 14.1.72 Coverage(A4d2)
 
-측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookProject.cpp` 줄 237/237·분기 106/106, `CookPublish.cpp` 줄 611/611·분기 298/298(경고 push 전파 뒤), `CookProject.h` 전부. `-Filter Cook -Sources Core/Source/Runtime/Core/Private` — `FileRead.cpp` 줄 26/26·분기 12/12(`Sha256File.cpp`의 남은 두 갈래는 Foundation `Sha256File_RejectsEmptyBuffer`와 EngineTests `AssetIndex_ContentHashRejects`가 덮는다).
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookProject.cpp` 줄 264/264·분기 118/118(리뷰 권장 반영 뒤), `CookPublish.cpp` 줄 611/611·분기 298/298(경고 push 전파 뒤), `CookProject.h` 전부. `-Filter Cook -Sources Core/Source/Runtime/Core/Private` — `FileRead.cpp` 줄 26/26·분기 12/12(`Sha256File.cpp`의 남은 두 갈래는 Foundation `Sha256File_RejectsEmptyBuffer`와 EngineTests `AssetIndex_ContentHashRejects`가 덮는다).
 
 닿지 않는 곳 없음.
 

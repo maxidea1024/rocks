@@ -160,15 +160,21 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
 
     Array<uint8> manifestBytes(allocator);
     bool existed = false;
-    if (auto read = ReadWholeFile(*request.files, manifestPath.View(), CookedManifestMaxFileBytes,
-                                  manifestBytes, existed);
-        !read) {
-        return read;
-    }
-
     CookedManifest existing(allocator);
     bool hasExisting = false;
-    if (existed) {
+    // 깨진 기존 매니페스트(상한 초과 포함)는 경고 뒤 없는 것으로 본다 — 사용자가 지우기 전까지
+    // 쿠킹이 멈추지 않게 한다.
+    AssetDiagnosticCode brokenCode = AssetDiagnosticCode::CorruptPackage;
+    ErrorCode broken = ErrorCode::None;
+    if (auto read = ReadWholeFile(*request.files, manifestPath.View(), request.manifestLimitBytes,
+                                  manifestBytes, existed);
+        !read) {
+        if (read.Error() != ErrorCode::CapacityExceeded) {
+            return read;
+        }
+
+        broken = read.Error();
+    } else if (existed) {
         AssetDiagnostic failure;
         auto parsed = ReadCookedManifest(allocator, manifestBytes.View(), &failure);
         if (parsed) {
@@ -176,9 +182,16 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
             hasExisting = true;
         } else if (parsed.Error() == ErrorCode::OutOfMemory) {
             return Result<void>::Failure(parsed.Error());
-        } else if (auto pushed = result.diagnostics.TryPushBack(
-                       CookDiagnostic{failure.code, true, {}, {}, 0, parsed.Error()});
-                   !pushed) {
+        } else {
+            brokenCode = failure.code;
+            broken = parsed.Error();
+        }
+    }
+
+    if (broken != ErrorCode::None) {
+        if (auto pushed =
+                result.diagnostics.TryPushBack(CookDiagnostic{brokenCode, true, {}, {}, 0, broken});
+            !pushed) {
             return pushed;
         }
     }
@@ -186,6 +199,27 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     // 기존 매니페스트가 없으면 부분 쿠킹은 전체 쿠킹과 같다(결정 10).
     result.partial = hasExisting && !request.paths.IsEmpty();
     const CookedManifest* previous = hasExisting ? &existing : nullptr;
+    if (result.partial) {
+        // 병합 호환(프로파일·출력 설정·CookSettings·쿠커 버전)을 쿠킹 전에 본다 — 다르면 쿠킹하지
+        // 않고 IncompatibleCook으로 끝낸다(Finish까지 가서 헛되이 쿠킹하지 않는다).
+        CookedManifest header(allocator);
+        if (auto assigned = header.profileId.TryAssign(request.profile->id.View()); !assigned) {
+            return assigned;
+        }
+
+        header.profileSettings = request.profileSettings;
+        header.cookSettings = request.cookSettings;
+        header.cookerVersion = request.cookerVersion;
+        if (auto compatible = CheckCookedManifestMerge(existing, header); !compatible) {
+            if (auto pushed = result.diagnostics.TryPushBack(CookDiagnostic{
+                    AssetDiagnosticCode::IncompatibleCook, false, {}, {}, 0, compatible.Error()});
+                !pushed) {
+                return pushed;
+            }
+
+            return WriteReport(allocator, request, result, root.View());
+        }
+    }
 
     CookTargetRequest targetRequest;
     targetRequest.index = request.index;

@@ -182,8 +182,8 @@ TEST(CookProject_FullTwiceReuses) {
 }
 
 // 부분 쿠킹: Leaf 내용을 바꾸고 Hero만 인자로 주면 기존 항목 중 바뀐 Leaf와 그것을 Hard로 쓰는
-// Hub만 다시 쿠킹하고 나머지는 재사용한다(10절 — cookKey가 달라진 기존 항목). 기존 매니페스트가
-// 없으면 부분 쿠킹은 전체 쿠킹이다.
+// Hub만 다시 쿠킹하고 나머지는 재사용한다(10절 — cookKey가 달라진 기존 항목). 병합 호환이 아니면
+// 쿠킹 전에 IncompatibleCook으로 끝낸다. 기존 매니페스트가 없으면 부분 쿠킹은 전체 쿠킹이다.
 TEST(CookProject_PartialRecooksChanged) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -219,6 +219,21 @@ TEST(CookProject_PartialRecooksChanged) {
     CHECK(!(after.Value().Find(FixedId(LeafId))->packageSha256 == oldLeaf));
     CHECK(after.Value().Find(FixedId(HeroId))->packageSha256 ==
           before.Value().Find(FixedId(HeroId))->packageSha256);
+
+    // 병합 호환이 아니면(CookSettings가 다름) 쿠킹하지 않고 IncompatibleCook으로 끝낸다 — 게시본
+    // 그대로, 보고서는 쓴다.
+    const Array<uint8> mergedBytes = scene.Copy(Manifest);
+    CookProjectRequest other = scene.Request(hero);
+    other.cookSettings = Sha256::Hash(Span<const uint8>(reinterpret_cast<const uint8*>("X"), 1));
+    CookProjectResult incompatible(env.allocator);
+    REQUIRE(CookProject(env.allocator, other, incompatible));
+    CHECK(!incompatible.published && incompatible.partial && incompatible.cooked == 0 &&
+          incompatible.targets == 0);
+    REQUIRE(incompatible.diagnostics.Size() == 1);
+    CHECK(incompatible.diagnostics[0].code == AssetDiagnosticCode::IncompatibleCook &&
+          !incompatible.diagnostics[0].warning);
+    CHECK(Same(scene.files.Bytes(Manifest), mergedBytes.View()));
+    CHECK(Contains(scene.ReportText(), "\"code\":\"IncompatibleCook\""));
 
     // 기존 매니페스트가 없으면 인자가 있어도 전체 쿠킹이다.
     AssetEnv freshEnv;
@@ -262,9 +277,9 @@ TEST(CookProject_ErrorsKeepPublished) {
     CHECK(Same(scene.files.Bytes(Report), firstReport.View()));
 }
 
-// 깨진 기존 매니페스트는 경고(그 진단 코드) 뒤 없는 것으로 보고 전체 쿠킹해 게시한다. 요청 거부:
-// 인자 null InvalidArgument(결과 비움)·잠금 아님 InvalidArgument, 기존 매니페스트 읽기 IO
-// 오류·보고서 struct 미등록(NotFound)은 그대로다.
+// 깨진 기존 매니페스트(상한 초과 포함)는 경고(그 진단 코드) 뒤 없는 것으로 보고 전체 쿠킹해
+// 게시한다. 요청 거부: 인자 null InvalidArgument(결과 비움)·잠금 아님 InvalidArgument, 기존
+// 매니페스트 읽기 IO 오류·보고서 struct 미등록(NotFound)은 그대로다.
 TEST(CookProject_CorruptManifestAndRejects) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -280,6 +295,17 @@ TEST(CookProject_CorruptManifestAndRejects) {
     REQUIRE(result.diagnostics.Size() == 1);
     CHECK(result.diagnostics[0].warning &&
           result.diagnostics[0].code == AssetDiagnosticCode::CorruptPackage);
+
+    // 상한을 넘는 기존 매니페스트도 깨진 것으로 본다(경고 CorruptPackage / CapacityExceeded 뒤 전체
+    // 쿠킹 — 사용자가 지우기 전까지 멈추지 않는다).
+    CookProjectRequest limited = scene.Request();
+    limited.manifestLimitBytes = 16;
+    REQUIRE(CookProject(env.allocator, limited, result));
+    CHECK(result.published && !result.HasErrors());
+    REQUIRE(result.diagnostics.Size() == 1);
+    CHECK(result.diagnostics[0].warning &&
+          result.diagnostics[0].code == AssetDiagnosticCode::CorruptPackage &&
+          result.diagnostics[0].error == ErrorCode::CapacityExceeded);
 
     const auto rejects = [&](void (*mutate)(CookProjectRequest&)) noexcept {
         CookProjectRequest request = scene.Request();
@@ -327,8 +353,11 @@ TEST(CookProject_AllocationFailures) {
     test::NFailAllocator failing(env.allocator);
     const uint8 junk[] = {'J', 'U', 'N', 'K'};
     // 0: 첫 쿠킹, 1: 재사용, 2: 깨진 기존 매니페스트(경고), 3: 게시기 경고만(`.staging` 고아 삭제
-    // 실패), 4: 대상 경고만(없는 alwaysCook 경로), 5: 오류 진단(사라진 파일 — 게시 안 함).
-    constexpr int ErrorPass = 5;
+    // 실패), 4: 대상 경고만(없는 alwaysCook 경로), 5: 병합 호환 아님(부분 — IncompatibleCook),
+    // 6: 오류 진단(사라진 파일 — 게시 안 함).
+    constexpr int IncompatiblePass = 5;
+    constexpr int ErrorPass = 6;
+    const StringView heroPath[] = {"/Game/Characters/Hero"};
     const String orphan = [&]() noexcept {
         String name(env.allocator);
         CHECK(name.TryAssign("Saved/Cooked/Windows/.staging/orphan.tmp"));
@@ -366,14 +395,22 @@ TEST(CookProject_AllocationFailures) {
             }
 
             CookProjectResult result(failing);
+            CookProjectRequest request = scene.Request();
+            if (pass == IncompatiblePass) {
+                request = scene.Request(heroPath);
+                request.cookSettings =
+                    Sha256::Hash(Span<const uint8>(reinterpret_cast<const uint8*>("X"), 1));
+            }
+
             failing.FailOnAttempt(attempt);
-            auto cooked = CookProject(failing, scene.Request(), result);
+            auto cooked = CookProject(failing, request, result);
             const bool hit = failing.Attempts() >= attempt;
             failing.DisableFailure();
             CHECK(scene.set.Count() == 0);
             if (!hit) {
                 REQUIRE(cooked);
-                CHECK(pass == ErrorPass ? !result.published : result.published);
+                CHECK((pass == ErrorPass || pass == IncompatiblePass) ? !result.published
+                                                                      : result.published);
                 break;
             }
 
@@ -381,7 +418,7 @@ TEST(CookProject_AllocationFailures) {
             ++failures;
         }
 
-        CHECK(failures >= 20);
+        CHECK(failures >= (pass == IncompatiblePass ? 3u : 20u));
     }
 }
 
