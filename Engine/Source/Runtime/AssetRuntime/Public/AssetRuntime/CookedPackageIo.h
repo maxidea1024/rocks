@@ -5,7 +5,7 @@
 #include <Core/Result.h>
 #include <Platform/AsyncFile.h>
 
-// 로더(AssetLoader)가 쿠킹 패키지 파일을 읽는 IO 경계다(Docs/Design/AssetSystem.ko.md 11.6절 4).
+// 로더(AssetLoader)가 쿠킹 패키지 파일을 읽는 IO 경계다(Docs/Design/AssetSystem 11.6절 4).
 // 로더는 파일 하나를 통째로 읽는 요청(CookedPackageRead)을 Begin으로 넘기고, 구현은 끝나면 아무
 // 스레드에서 read.complete를 정확히 한 번 부른다. 로더는 그 결과를 Game 스레드에서 처리한 뒤
 // Release로 구현의 요청별 자원을 돌려준다. 기본 구현은 PlatformBase AsyncReadFile을 쓰는

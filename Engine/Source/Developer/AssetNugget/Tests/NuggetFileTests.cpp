@@ -6,7 +6,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// `.rnug` v2 파일 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 6): 쓰기 계획·붙이기·열기
+// `.rnug` v2 파일 시험이다(Docs/Design/AssetSystem 9.1절 결정 6): 쓰기 계획·붙이기·열기
 // 왕복(작은 값·1 MiB 이상 값의 조각 해시 표·Rcbk 값), 머리·Record byte 변조 위치마다 거부, 값·표
 // 변조, 잘림·남는 byte, 다른 버전 Unsupported, 값 읽기·해제 검증(RawHash·IndexHash·Codec 계약),
 // 계획 입력 거부, 범위 reader 경계, 할당 실패.

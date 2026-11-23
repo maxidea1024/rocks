@@ -9,7 +9,7 @@
 #include <Platform/File.h>
 #include <Platform/Process.h>
 
-// EngineAssetsSubsystem 구현이다(Docs/Design/AssetSystem.ko.md 11.8절).
+// EngineAssetsSubsystem 구현이다(Docs/Design/AssetSystem 11.8절).
 namespace rocks {
 
 namespace {

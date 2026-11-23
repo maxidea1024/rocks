@@ -732,7 +732,7 @@ TEST(Codec_SoftReferenceCollectorFailurePropagates) {
     CHECK(types.Shutdown());
 }
 
-// 소프트 참조 치환 hook(AssetSystem.ko.md 7.1절 17 A2e3b — 패키지 복제): null이 아닌 값마다
+// 소프트 참조 치환 hook(AssetSystem 7.1절 17 A2e3b — 패키지 복제): null이 아닌 값마다
 // 부르고(경로·기대 타입·플래그·필드 경로를 준다) 바뀐 asset을 쓴다 — 로드한 값은 새 asset·같은
 // 경로이고 저장의 수집도 바뀐 asset을 본다. 바꾸지 않는 값은 그대로다. hook이 null asset을
 // 돌려주면 InvalidArgument, 실패는 그 오류로 저장이 실패한다.

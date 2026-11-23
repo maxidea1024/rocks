@@ -4,7 +4,7 @@
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
 
-// 로더 단계 경계 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 A1c): 실패와 취소의 겹침(실패가
+// 로더 단계 경계 시험이다(Docs/Design/AssetSystem 11.6절 A1c): 실패와 취소의 겹침(실패가
 // 이긴다), 정리 중 재요청, Queued 단위의 의존 실패, 의존 단위를 직접 요청한 쪽만 취소, 단계별 합류,
 // 공개된 의존, 비ASCII 경로 색인, 임시 byte 포화, 실패 단위의 상태 관측, 최근 동기 대기, 매니페스트
 // 검증, PostLoad 단계(순서·예산·합류·취소·종료·PostLoad 중인 의존).

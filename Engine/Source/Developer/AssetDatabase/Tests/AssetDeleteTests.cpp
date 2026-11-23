@@ -14,7 +14,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 삭제 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 17 A2e3a): 집합의 간선 표(관찰자 묶음 적용 —
+// 삭제 시험이다(Docs/Design/AssetSystem 7.1절 17 A2e3a): 집합의 간선 표(관찰자 묶음 적용 —
 // 열기·편집·닫기, 쌍별 합산, 할당 실패에도 묶음을 잃지 않음), 닫기(들어오는 참조 Busy·Discard·
 // 초기화 안 Busy), 색인 빼기(removed), 서비스 삭제(색인 항목·열린 패키지·저장하지 않은 새 패키지·
 // 디스크 참조자 거부와 force·메모리 참조 Busy·별칭 지우기·모든 거부와 실패 — 파일·별칭·색인

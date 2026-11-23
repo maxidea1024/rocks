@@ -2,7 +2,7 @@
 
 #include <Core/Commandlet/Commandlet.h>
 
-// 에셋 편집 명령이다(Docs/Design/AssetSystem.ko.md 13절, 7.1절 15 A2c3b). 서비스 API
+// 에셋 편집 명령이다(Docs/Design/AssetSystem 13절, 7.1절 15 A2c3b). 서비스 API
 // AssetService(AssetDatabase)를 부르고 인수·출력만 다룬다. context는 AssetCommandContext*다
 // (commandlet_host::Run이 건다). 사용법 오류 2, 실행 실패 1(진단은 표준 오류에
 // `<명령>: <코드>: <대상>: <설명>` 한 줄씩), 성공 0(경고만 있어도 0)이다. 공통 옵션

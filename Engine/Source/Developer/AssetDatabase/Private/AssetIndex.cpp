@@ -13,7 +13,7 @@
 #include <Object/TypeRegistry.h>
 #include <Task/ParallelFor.h>
 
-// 에디터 패키지 색인이다(Docs/Design/AssetSystem.ko.md 7절, 7.1절 11·13 — A2b).
+// 에디터 패키지 색인이다(Docs/Design/AssetSystem 7절, 7.1절 11·13 — A2b).
 namespace rocks {
 
 namespace {

@@ -5,7 +5,7 @@
 #include <AssetDatabase/ProjectLayout.h>
 #include <Core/Text/StringBuilder.h>
 
-// 쿠킹 게시와 재사용 판정이다(Docs/Design/AssetSystem.ko.md 10절 1–3, 10.2절 결정 8·10, "A4d 구현
+// 쿠킹 게시와 재사용 판정이다(Docs/Design/AssetSystem 10절 1–3, 10.2절 결정 8·10, "A4d 구현
 // 세부" — A4d1). 게시본은 `<Saved>/Cooked/<프로파일>/`의 `CookedManifest.rman`과 그것이 가리키는
 // `Packages/<a>/<A>-<h>.rpkg`(이름에 내용 SHA-256)다. 패키지는 `.staging`에 쓴 뒤 덮어쓰지 않고
 // 옮기고, 매니페스트는 마지막에 원자 교체한다 — 도중에 실패해도 게시본은 그대로다.

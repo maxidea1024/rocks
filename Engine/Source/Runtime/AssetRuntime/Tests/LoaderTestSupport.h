@@ -5,7 +5,7 @@
 #include <AssetRuntime/AssetLoader.h>
 #include <Core/Text/StringBuilder.h>
 
-// 로더 시험 도구다(Docs/Design/AssetSystem.ko.md 11.6절): 쿠킹 패키지 장면(A1a writer로 쓴 패키지와
+// 로더 시험 도구다(Docs/Design/AssetSystem 11.6절): 쿠킹 패키지 장면(A1a writer로 쓴 패키지와
 // 그 결과로 만든 매니페스트), 완료를 명시 gate로 내보내는 IO, 손으로 돌리는 worker, 단계마다 정해진
 // 만큼 가는 시계, 로더 묶음. 순서는 모두 시험이 정한다(시간·경쟁에 기대지 않는다).
 namespace rocks::asset_test {

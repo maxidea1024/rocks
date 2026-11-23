@@ -142,7 +142,7 @@ internal sealed class FieldModel
     // Meta.ValueKindTableMatchesRuntime). 원본 선언은 SchemaValidator가 Optional 전용 문구로 먼저 거부한다.
     public bool AcceptsRequired => ValueKindTable.Has(TargetKind, ValueKindProperty.AcceptsRequired);
 
-    // AssetBundles를 쓸 수 있는 종류다(Docs/Design/AssetSystem.ko.md 10.2절 A4e2a): 대상 종류가 소프트 참조·struct·InstancedStruct이거나
+    // AssetBundles를 쓸 수 있는 종류다(Docs/Design/AssetSystem 10.2절 A4e2a): 대상 종류가 소프트 참조·struct·InstancedStruct이거나
     // Map 키가 소프트 참조다(런타임 등록 검사와 같은 규칙). AssetId 값은 참조 간선이 아니라 받지 않는다.
     public bool AcceptsAssetBundles => TargetKind is "SoftObjectReference" or "Struct" or "InstancedStruct" || KeyKind == "SoftObjectReference";
 
@@ -673,7 +673,7 @@ internal sealed class ClassModel
 
     public bool Deprecated { get; set; }
 
-    // TypeFlags::EditorOnly(클래스 — Docs/Design/AssetSystem.ko.md 10.2절 A4e2a). 선언이 직접 쓰거나 base에서 상속된다.
+    // TypeFlags::EditorOnly(클래스 — Docs/Design/AssetSystem 10.2절 A4e2a). 선언이 직접 쓰거나 base에서 상속된다.
     public bool EditorOnly { get; set; }
 
     // Within="…" 지정자의 원문 철자다(이 모듈 클래스, 없으면 ""). CompilerDriver가 Clang으로 정규 이름(WithinResolved)을 얻는다.

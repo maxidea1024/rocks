@@ -7,7 +7,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 실행 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 6·7, "A4c 구현 세부" — A4c2): 기본
+// 쿠킹 실행 시험이다(Docs/Design/AssetSystem 10.2절 결정 6·7, "A4c 구현 세부" — A4c2): 기본
 // 처리기로 전체 쿠킹(의존 먼저 순서·Hard 순환·검증된 쿠킹 byte·SHA-256·cookKey·경로 힌트·bulk 크기·
 // 의존 목록 — EditorOnly·색인에 없는 Soft·제외 Soft 빼기, EditorOnly 필드 부재(시나리오 11), 원본
 // 없이 쿠킹(2)), 두 번 같은 byte(13), 열린 집합 관리(시작 때 열린 패키지 유지·열기 횟수·상한으로

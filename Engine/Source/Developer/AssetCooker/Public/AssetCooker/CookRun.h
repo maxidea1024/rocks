@@ -4,7 +4,7 @@
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetRuntime/CookedManifest.h>
 
-// 쿠킹 실행이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 7, "A4c 구현 세부" — A4c2). 키가 있는
+// 쿠킹 실행이다(Docs/Design/AssetSystem 10.2절 결정 7, "A4c 구현 세부" — A4c2). 키가 있는
 // 대상을 Hard SCC 역위상(의존 먼저, SCC 안은 AssetId 순)으로 열고 처리기로 쿠킹해 출력 sink에
 // 하나씩 넘긴다. 열린 집합은 이번 쿠킹이 연 패키지 수가 상한을 넘으면 한꺼번에 닫는다(UE가 메모리
 // 압박에서 GC로 내리는 것과 같은 방식 — 결정적인 수 기준). 에셋별 오류는 진단으로 모으고 끝까지

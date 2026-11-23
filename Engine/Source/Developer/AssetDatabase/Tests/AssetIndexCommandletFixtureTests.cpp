@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 명령 시험 fixture byte 고정 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 13 — A2b). C# 명령
+// 명령 시험 fixture byte 고정 시험이다(Docs/Design/AssetSystem 7.1절 13 — A2b). C# 명령
 // 시험(Programs/Rocks.Commandlet.Tests)은 패키지를 만들 수 없어 AssetIndexCommandletFixtures.h의
 // 배열을 읽어 프로젝트에 쓴다. 이 시험이 그 배열이 지금 writer 출력과 같은지 본다 — 포맷이 바뀌어
 // 다르면 새 헤더 내용을 현재 디렉터리의 AssetIndexCommandletFixtures.h.new에 쓰고 실패한다(그

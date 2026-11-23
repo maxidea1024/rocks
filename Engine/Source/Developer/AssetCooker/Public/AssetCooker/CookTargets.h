@@ -4,7 +4,7 @@
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetRuntime/CookedManifest.h>
 
-// 쿠킹 대상 계산이다(Docs/Design/AssetSystem.ko.md 10.2절 결정 4, "A4b 구현 세부"). 색인만 쓰고
+// 쿠킹 대상 계산이다(Docs/Design/AssetSystem 10.2절 결정 4, "A4b 구현 세부"). 색인만 쓰고
 // 패키지를 열지 않는다(UE가 AssetRegistry로 쿠킹 대상을 세는 것과 같다). 규칙 위반은 진단으로
 // 모으고 함수 오류는 색인 조회 오류·할당 실패뿐이다(쿠킹은 오류 진단이 하나라도 있으면 게시하지
 // 않는다).

@@ -11,7 +11,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 
-// 쿠킹 매니페스트 v1(`CookedManifest.rman`)이다(Docs/Design/AssetSystem.ko.md 10절, 10.1절 A1b).
+// 쿠킹 매니페스트 v1(`CookedManifest.rman`)이다(Docs/Design/AssetSystem 10절, 10.1절 A1b).
 // 쿠커(A4)가 모델을 만들어 WriteCookedManifest로 쓰고, 로더(A1c)가 ReadCookedManifest로 읽어
 // 패키지를 찾고(Find) 연 패키지를 CheckCookedPackage로 대조한다. 서명 봉투(ContentSigning)는 검증한
 // 같은 버퍼의 매니페스트 byte를 reader에 넘긴다.

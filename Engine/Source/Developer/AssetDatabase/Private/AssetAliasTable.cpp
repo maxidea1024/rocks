@@ -9,7 +9,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Time/DateTime.h>
 
-// 경로 별칭 표다(Docs/Design/AssetSystem.ko.md 4.3절, 7.1절 17 A2e1).
+// 경로 별칭 표다(Docs/Design/AssetSystem 4.3절, 7.1절 17 A2e1).
 namespace rocks {
 
 namespace {

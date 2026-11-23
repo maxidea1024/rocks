@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// SCC Record 값 번호·meta 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 15, "A3c1 구현 세부"):
+// SCC Record 값 번호·meta 시험이다(Docs/Design/AssetSystem 9.1절 결정 15, "A3c1 구현 세부"):
 // 값 번호 경계, meta golden(high → low big-endian), 순번 찾기, 거부(빈 목록·null·중복·상한
 // 초과·잘못된 크기·상한을 넘는 meta), 할당 실패.
 using namespace rocks;

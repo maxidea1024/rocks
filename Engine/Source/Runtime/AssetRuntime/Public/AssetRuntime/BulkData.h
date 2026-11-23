@@ -5,7 +5,7 @@
 
 namespace rocks {
 
-// 패키지 Bulk 섹션의 entry 하나를 가리키는 영속 값이다(Docs/Design/AssetSystem.ko.md 6.1절). 대용량
+// 패키지 Bulk 섹션의 entry 하나를 가리키는 영속 값이다(Docs/Design/AssetSystem 6.1절). 대용량
 // 데이터(텍스처 원본·mip 등)는 리플렉션 필드가 아니라 Bulk 섹션에 두고, 객체는 이 값을 필드로
 // 갖는다. 파일 offset은 BulkIndex만 알며 이 값은 bulkId·raw 크기·raw SHA-256만 담는다.
 //

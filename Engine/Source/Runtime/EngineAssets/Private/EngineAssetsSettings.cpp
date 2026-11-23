@@ -3,7 +3,7 @@
 #include <Config/CVar.h>
 #include <EngineAssets/EngineAssetsSubsystem.h>
 
-// `asset.*` CVar 정의와 등록, 쿠킹 루트·실행 프로파일 결정이다(Docs/Design/AssetSystem.ko.md 11.8절
+// `asset.*` CVar 정의와 등록, 쿠킹 루트·실행 프로파일 결정이다(Docs/Design/AssetSystem 11.8절
 // 3). 부팅 값은 시작 때 한 번 읽고, Pump·GC 예산은 프레임마다 설정 sync 뒤에 읽는다.
 namespace rocks {
 

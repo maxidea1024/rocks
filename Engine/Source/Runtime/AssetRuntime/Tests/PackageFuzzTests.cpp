@@ -1,6 +1,6 @@
 #include "AssetFixtureValues.h"
 
-// 고정 seed 변조 시험이다(Docs/Design/AssetSystem.ko.md 14절 12): 유효한 패키지의 byte를 수천 번
+// 고정 seed 변조 시험이다(Docs/Design/AssetSystem 14절 12): 유효한 패키지의 byte를 수천 번
 // 무작위로 바꿔 reader·Prepare·InstantiatePackages가 크래시·누수 없이 정해진 오류 코드만 내는지
 // 단언한다. 절반은 변조 뒤 모든 CRC(헤더·섹션 표·비-Bulk 섹션)를 다시 맞춰 CRC 검사 뒤의 내용
 // 검증까지 닿게 한다.

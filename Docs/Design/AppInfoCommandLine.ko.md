@@ -339,7 +339,7 @@ Engine/Source/Runtime에는 핵심만 둔다. 게임 실행 파일이 쓰는 최
 
 지금 Core 런타임에 있는 `CommandletRegistry`(`Core/Source/Runtime/Core/Public/Core/Commandlet/Commandlet.h`)는 `CommandLineTools`의 `CommandSet`으로 대체하고 지운다(하위호환 없음, D24). 게임 실행 파일은 commandlet을 쓰지 않는다.
 - Core 런타임 `Config`가 공개하는 `RegisterConfigDumpCommandlet(CommandletRegistry&)`(`Core/Source/Runtime/Config/Public/Config/ConfigDump.h:47–48`)는 Runtime 모듈이 Developer `CommandSet`을 볼 수 없으므로 옮긴다. 덤프 본체(`ConfigDump`)는 Config에 두고, 명령 등록과 `ConfigDumpOptions`는 `Programs/Commandlet`으로 옮긴다(CL4).
-- [셰이더 시스템](ShaderSystem/README.ko.md) 4·5.2절(나누기 전 96·147행, `shader-compile`)과 [에셋 시스템](AssetSystem.ko.md) 37행(`asset-*`)은 `CommandletRegistry`를 전제로 썼다. CL7에서 `CommandSet`으로 고친다.
+- [셰이더 시스템](ShaderSystem/README.ko.md) 4·5.2절(나누기 전 96·147행, `shader-compile`)과 [에셋 시스템](AssetSystem/README.ko.md) 37행(`asset-*`)은 `CommandletRegistry`를 전제로 썼다. CL7에서 `CommandSet`으로 고친다.
 
 ### 7.2 코드 크기 목표
 
@@ -1308,7 +1308,7 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
 | CL6 | 양쪽 같음 golden 시험(17절) | CL3, CL5 | S |
 | AP3 | `FrameTiming`(EngineTime 대체)·`LatestFrameIndex`, 렌더 packet 칸(RB1과 함께), worker 상속(CVar의 lane 묶음 장치에 `FrameTiming`을 넣는다), `Engine::IsForeground()` | AP1, RB1, CVR 묶음 장치 | M |
 | AP4 | 실행 성격 소비처: 엔진 고정 step·시드, unattended 입력 장치 정책, `app.info` 콘솔 명령 | AP1, CL4 | S |
-| CL7 | 문서 반영(설정 계층 5.4절 부트 순서, CVar 콘솔 영역 `app`과 12절 편집 거리 함수 이름, 로깅 시작 기록, 리플렉션 보강의 지정자 표와 identity 면제, [셰이더 시스템](ShaderSystem/README.ko.md) 4·5.2절(나누기 전 96·147행)과 [에셋 시스템](AssetSystem.ko.md) 37행의 `CommandletRegistry` → `CommandSet`, 구현 문서), 묶음 끝 리뷰 | 전부 | S |
+| CL7 | 문서 반영(설정 계층 5.4절 부트 순서, CVar 콘솔 영역 `app`과 12절 편집 거리 함수 이름, 로깅 시작 기록, 리플렉션 보강의 지정자 표와 identity 면제, [셰이더 시스템](ShaderSystem/README.ko.md) 4·5.2절(나누기 전 96·147행)과 [에셋 시스템](AssetSystem/README.ko.md) 37행의 `CommandletRegistry` → `CommandSet`, 구현 문서), 묶음 끝 리뷰 | 전부 | S |
 
 ## 19. 결정 목록
 

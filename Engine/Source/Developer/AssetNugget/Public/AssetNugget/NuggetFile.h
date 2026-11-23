@@ -2,7 +2,7 @@
 
 #include <AssetNugget/NuggetRecord.h>
 
-// `.rnug` v2 파일이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 6): { magic "RNUG", u32 버전 2,
+// `.rnug` v2 파일이다(Docs/Design/AssetSystem 9.1절 결정 6): { magic "RNUG", u32 버전 2,
 // u64 Record byte 수, Record SHA-256, Record, 값 저장 byte(ValueId 순), 조각 해시 표(storedSize ≥
 // 1 MiB인 값만, ValueId 순) }, little-endian. 파일 크기는 각 부분의 합과 정확히 같아야 한다.
 //

@@ -8,7 +8,7 @@
 #include <Platform/File.h>
 #include <TestSupport/Test.h>
 
-// asset-import 명령 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 18 A2f1b, 13절): 제품 실행 파일은
+// asset-import 명령 시험이다(Docs/Design/AssetSystem 7.1절 18 A2f1b, 13절): 제품 실행 파일은
 // 실제 임포터만 등록하므로 명령 함수를 이 프로세스에서 부른다 — 문맥이 시험 타입 모듈
 // (AssetTestFixtures)과 시험 임포터를 준다. 성공 줄·출력 줄·경고 줄·캐시 쓰기, 역할 원본, 상대 원본
 // 경로(작업 디렉터리 기준), 실패 줄(원본 없음·옵션 오류·임포터 없음·등록 실패), 사용법·도움말.

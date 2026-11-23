@@ -21,7 +21,7 @@
 #include <Object/SoftObjectRef.h>
 #include <Object/StructRefArray.h>
 
-// 리플렉션 성질 표의 "지원하는 모든 조합" fixture다(Docs/Design/AssetSystem.ko.md 14.1절,
+// 리플렉션 성질 표의 "지원하는 모든 조합" fixture다(Docs/Design/AssetSystem 14.1절,
 // ReflectionExtensions.ko.md 1.3절). 값 종류마다 struct 하나(ComboXxx)가 그 종류를 표가 허용하는
 // 모든 자리에 둔다: value(struct 멤버), array(Array 원소), fixed(정적 배열 원소), keyed(Map 키),
 // mapped(Map 값), set(Set 원소), maybe(Optional 내부). 표가 막는 자리의 멤버는 두지 않는다. 클래스

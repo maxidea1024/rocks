@@ -3,7 +3,7 @@
 #include <Base/Checked.h>
 #include <Platform/Memory.h>
 
-// import 표 시험이다(Docs/Design/AssetSystem.ko.md 5.2절 ObjectImports, 5.7절 13·14):
+// import 표 시험이다(Docs/Design/AssetSystem 5.2절 ObjectImports, 5.7절 13·14):
 // - 다른 패키지의 깊은 하위 객체만 참조하면 그 Outer는 outer 전용 import(slot 없음)가 되고, 쿠킹·
 //   에디터 모두 묶음 안·resolver로 로드되며, 중간 객체 타입이 다르면 TypeMismatch다.
 // - 다른 에셋의 outer 전용 import는 그래프가 받는다(쓰이지 않는 외부 번호) — 그 에셋이 Hard·

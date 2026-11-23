@@ -20,7 +20,7 @@ namespace detail {
 struct PackageAccess;
 } // namespace detail
 
-// 에셋 패키지다(Docs/Design/AssetSystem.ko.md 6.1절, UE UPackage 대응). 에셋 객체 Registry(패키지
+// 에셋 패키지다(Docs/Design/AssetSystem 6.1절, UE UPackage 대응). 에셋 객체 Registry(패키지
 // 정책 Registry)에서 Outer·이름이 없는 유일한 객체이며 정체성은 AssetId다. 소속 객체(export)는
 // 목록이 아니라 Registry의 자식 고리가 붙잡고(패키지 정책 — outer → inner 강한 간선), 소속 객체는
 // Discard로만 죽는다 (ObjectFoundations 1.7절). 패키지 사이 하드 의존 목록은 두지 않는다 —
@@ -123,7 +123,7 @@ ROCKS_ASSETRUNTIME_API Result<RootRef<Package>>
 NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access, AssetId id,
            PackageKind kind = PackageKind::Editor) noexcept;
 
-// transaction 안에 새 빈 패키지를 만든다(공개 전 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3).
+// transaction 안에 새 빈 패키지를 만든다(공개 전 — Docs/Design/AssetSystem 7.1절 15 A2c3).
 // 같은 트랜잭션에서 대표 에셋을 만들고(NewRepresentativeAsset) 값을 채운 뒤 Commit으로 함께
 // 공개한다. Commit 전에 실패하거나 Rollback하면 아무것도 남지 않는다. 반환은 공개 전 Package
 // handle이다.

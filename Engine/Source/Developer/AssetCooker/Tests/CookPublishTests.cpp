@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <string.h>
 
-// 쿠킹 게시·재사용 판정 시험이다(Docs/Design/AssetSystem.ko.md 10절 1–3, 10.2절 결정 8·10, "A4d
+// 쿠킹 게시·재사용 판정 시험이다(Docs/Design/AssetSystem 10절 1–3, 10.2절 결정 8·10, "A4d
 // 구현 세부" — A4d1): 전체 게시(staging → no-replace 이동·매니페스트 원자 교체·디렉터리 동기화
 // 안쪽부터·
 // `.staging` 고아 정리·가리키지 않는 패키지 정리·모양 밖 파일 유지), 같은 이름 파일(같은 내용은

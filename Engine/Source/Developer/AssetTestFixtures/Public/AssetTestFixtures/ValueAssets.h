@@ -19,7 +19,7 @@
 #include <Object/ObjectRefs.h>
 #include <Object/SoftObjectRef.h>
 
-// 값 종류별 시험 에셋이다(Docs/Design/AssetSystem.ko.md 14.1절 fixture 표). 단순(스칼라) → 값
+// 값 종류별 시험 에셋이다(Docs/Design/AssetSystem 14.1절 fixture 표). 단순(스칼라) → 값
 // 묶음(struct· 컨테이너·Core 값 타입·커브·Text·InstancedStruct) → 큰 데이터(bulk) → 상속 → 검증
 // hook → 복합(게임 데이터) 순서다. 값은 시험의 결정적 생성기(Tests/AssetFixtureValues.h)가 seed로
 // 채우고 같은 seed의 기대값과 필드 단위로 비교한다.

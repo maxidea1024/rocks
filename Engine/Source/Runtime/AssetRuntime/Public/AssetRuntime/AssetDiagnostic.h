@@ -5,7 +5,7 @@
 
 namespace rocks {
 
-// 에셋 진단 코드다(Docs/Design/AssetSystem.ko.md 4.6절). API는 Result의 ErrorCode로 실패를 알리고,
+// 에셋 진단 코드다(Docs/Design/AssetSystem 4.6절). API는 Result의 ErrorCode로 실패를 알리고,
 // 그 실패가 에셋 쪽 어떤 분류인지는 이 코드로 따로 준다(ErrorCode 하나로는 "손상"과 "더 새 버전"을
 // 가를 수 없다). 원본 오류 코드는 AssetDiagnostic::error에 그대로 남긴다.
 //
@@ -81,10 +81,10 @@ enum class AssetDiagnosticCode : uint16 {
     UnrealPathTooLong,
     UnrealPathCollision,
     MissingUnrealDependency,
-    // 감시 갱신(AssetSystem.ko.md 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
+    // 감시 갱신(AssetSystem 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
     // 다시 나타나면 전체 검색).
     RootLost,
-    // 별칭(AssetSystem.ko.md 4.3절, 7.1절 17 — A2e1): 경고 AliasResolved(옛 경로를 별칭으로
+    // 별칭(AssetSystem 4.3절, 7.1절 17 — A2e1): 경고 AliasResolved(옛 경로를 별칭으로
     // 풀었다)· AliasInUse(prune이 만료 항목의 텍스트 사용을 찾아 남겼다)·AliasSearchTruncated(prune
     // 검색이 상한에 닿아 아무것도 지우지 않았다), 오류 CorruptAliasTable(Config/AssetAliases.json
     // 형식 위반).
@@ -92,12 +92,12 @@ enum class AssetDiagnosticCode : uint16 {
     AliasInUse,
     AliasSearchTruncated,
     CorruptAliasTable,
-    // 삭제(AssetSystem.ko.md 7.1절 17 — A2e3): 다른 패키지가 대상을 참조한다(디스크 참조자 —
+    // 삭제(AssetSystem 7.1절 17 — A2e3): 다른 패키지가 대상을 참조한다(디스크 참조자 —
     // InvalidArgument, 열린 패키지의 메모리 참조 — Busy, related = 첫 참조자).
     ReferencedBy,
     // 고아 출력(7.1절 17 — A2e4, 경고): 참조 기록의 owner가 이 출력을 소유하지 않는다.
     OrphanedOutput,
-    // 임포트 원본(AssetSystem.ko.md 4.5·4.6절, 7.1절 18 — A2f): 원본 파일·루트가
+    // 임포트 원본(AssetSystem 4.5·4.6절, 7.1절 18 — A2f): 원본 파일·루트가
     // 없음(MissingSource), 원본 내용이 기록과 다름(SourceChanged — 상태), 원본·원본 루트 표를
     // 읽거나 해석하지 못함 (InvalidSource), 원본 형식을 받는 임포터가
     // 없음(UnsupportedSourceFormat), 원본이 어느 루트 아래도 아니라 절대 경로로
@@ -112,7 +112,7 @@ enum class AssetDiagnosticCode : uint16 {
     ImporterOutdated,
     InvalidImportOption,
     UnknownProperty,
-    // 쿠킹 verify(AssetSystem.ko.md 10.2절 결정 12 — A4e1): 처리기가 너겟 적중 없이 다시 만든
+    // 쿠킹 verify(AssetSystem 10.2절 결정 12 — A4e1): 처리기가 너겟 적중 없이 다시 만든
     // 결과가 적중 결과와 byte가 다르다(오류 — 키가 입력을 다 담지 않았거나 처리기가 비결정적이다).
     NuggetMismatch
 };

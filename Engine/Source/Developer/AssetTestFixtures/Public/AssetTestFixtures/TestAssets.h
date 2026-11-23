@@ -10,7 +10,7 @@
 
 namespace rocks::asset_fixture {
 
-// 에셋 패키지 시험의 대표 에셋이다(Docs/Design/AssetSystem.ko.md 14절). 값·문자열·bulk·다른
+// 에셋 패키지 시험의 대표 에셋이다(Docs/Design/AssetSystem 14절). 값·문자열·bulk·다른
 // 패키지로의 Hard 참조(단일·배열·TestAsset 기대)·Soft 참조와 EditorOnly 필드(값·bulk·Hard 참조)를
 // 담는다.
 ROCKS_CLASS()
@@ -44,7 +44,7 @@ struct DuplicableSlot {
     ROCKS_PROPERTY(DuplicateTransient) int32 cache = 0;
 };
 
-// 복제 제외 필드와 Soft 참조를 가진 에셋이다(writer 복제 옵션 시험 — AssetSystem.ko.md 7.1절 17
+// 복제 제외 필드와 Soft 참조를 가진 에셋이다(writer 복제 옵션 시험 — AssetSystem 7.1절 17
 // A2e3b): cache·instance는 복제가 쓰지 않고(클래스 기본값), self는 자기 패키지를 가리켜 사본 id로
 // 바뀌고, other는 그대로다.
 ROCKS_CLASS()
@@ -104,7 +104,7 @@ struct TestHookAssetHooks {
 ROCKS_ASSETTESTFIXTURES_API TestHookAssetHooks& ActiveTestHookAssetHooks() noexcept;
 
 // 생성자·소멸자가 시험 hook을 부르는 에셋이다(로더 공개 트랜잭션 안의 사용자 코드가 로더에
-// 재진입하는 시험 — Docs/Design/AssetSystem.ko.md 11.6절 18). typed는 기대 타입이 TestAsset인 Hard
+// 재진입하는 시험 — Docs/Design/AssetSystem 11.6절 18). typed는 기대 타입이 TestAsset인 Hard
 // 참조다(오래된 의존 쿠킹 결과를 가리켜 공개를 실패시키면 롤백이 소멸자를 부른다).
 ROCKS_CLASS()
 struct TestHookAsset final : Asset {
@@ -128,7 +128,7 @@ struct TestHookAsset final : Asset {
     ROCKS_PROPERTY() ObjectRef<TestAsset> typed;
 };
 
-// 시험 임포터의 옵션이다(AssetSystem.ko.md 7.1절 18 — A2f): scale은 값 배율, failAt은 0이 아니면
+// 시험 임포터의 옵션이다(AssetSystem 7.1절 18 — A2f): scale은 값 배율, failAt은 0이 아니면
 // 시험 임포터가 그 단계에서 실패한다.
 ROCKS_STRUCT()
 struct TestImportOptions {

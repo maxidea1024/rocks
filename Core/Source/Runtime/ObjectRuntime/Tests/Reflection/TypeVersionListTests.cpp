@@ -5,7 +5,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// TypeRegistry 타입 목록 시험이다(Docs/Design/AssetSystem.ko.md 10.2절 "A4c 구현 세부" 기반 보강
+// TypeRegistry 타입 목록 시험이다(Docs/Design/AssetSystem 10.2절 "A4c 구현 세부" 기반 보강
 // 1): 빈 Registry, 종류마다(클래스·struct·enum — enum 버전 0) TypeId 순, 해제 뒤 빠짐, 다른 스레드
 // WrongThread, Shutdown 뒤 ShuttingDown, 할당 실패(out은 빈다), out을 비우고 채움.
 using namespace rocks;

@@ -24,7 +24,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 **관계 문서.**
 - [셰이더 시스템](ShaderSystem/README.ko.md)(개정 12): 원문 규약·바인딩 규약 7.2절·job 키·셰이더 타입과 퍼뮤테이션(P14)·파라미터 구조체(P7)·라이브러리. 이 문서는 그 위에 머티리얼이 만드는 원문과 layout을 얹는다. 충돌은 그 문서의 결정을 따르고, 고칠 곳은 16절에 모은다.
 - [렌더 기반](RenderBase.ko.md)(개정 9): 셰이더 집합·바인딩 지도·상수 블록·공유 상수 slot·파이프라인 캐시·정점 입력 타입.
-- [에셋 시스템](AssetSystem.ko.md)(개정 8): 에셋·참조 종류·에셋 너겟 키·Cooker.
+- [에셋 시스템](AssetSystem/README.ko.md)(개정 8): 에셋·참조 종류·에셋 너겟 키·Cooker.
 - [텍스처 스트리밍](TextureStreaming.ko.md)(개정 3) 결정 T4: 재질 sampling scale 공급.
 - [Renderer](Renderer.ko.md)(개정 3): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`와 머티리얼 함수, shading model·블렌드 모드·영역 번호표, pass별 경로·퍼뮤테이션, 경계표, 이 문서 요구의 처리). 이 문서는 그 계약에 맞춘다(10.1절). 두 문서의 정합 결과는 10.4절이다. 이 문서에서 "Renderer 스펙"이라 부른다.
 - [노드 그래프](NodeGraph.ko.md)(개정 2): 그래프 문서 모델(`GraphDocument`)·노드 서술 등록표·`GraphSchema`·변경·undo·복사·의미 바이트·migration. 머티리얼 그래프는 그 위의 도메인 schema다(3.2·4.3·5.2·5.5·14절).
@@ -1132,7 +1132,7 @@ UE 대조:
 | MRD11 | 10.4절 D8: Depth·ShadowDepth pass가 마스크 전용 함수를 부름 | 반영(Renderer 14.1·14.3절) |
 | MRD12 | DeferredDecal이 쓰는 속성, 반투명 scene color·depth 입력, PostProcess 위치(5.6절) | 자리 반영(Renderer 14.7절): decal 속성은 RS7, 반투명 입력은 RS5, PostProcess 위치는 계획 26절 스펙 |
 
-**에셋 시스템(AssetSystem.ko.md)**
+**에셋 시스템(AssetSystem)**
 
 | ID | 위치 | 요구 |
 |---|---|---|

@@ -2,7 +2,7 @@
 
 #include <AssetTestFixtures/TestAssets.generated.h>
 
-// AssetManager 상주 수명 시험이다(Docs/Design/AssetSystem.ko.md 11.4·11.7절 3·4, 시나리오
+// AssetManager 상주 수명 시험이다(Docs/Design/AssetSystem 11.4·11.7절 3·4, 시나리오
 // 16·23·28): 해제 뒤 Discard·같은 id 새 로드, Closing 되살리기, 하드 순환 단위 해제, 의존 보유,
 // 로드 중 의존 보유(로더 공개 보유), 동적 하드 간선 계수와 다중도, 동적 순환 병합. IO·worker는
 // 시험이 내보낸다.

@@ -13,7 +13,7 @@
 #include <Core/Time/DateTime.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 복제 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 17 A2e3b): 메모리 상태 복제(저장하지 않은
+// 복제 시험이다(Docs/Design/AssetSystem 7.1절 17 A2e3b): 메모리 상태 복제(저장하지 않은
 // 편집·bulk·의존, 원본 정보 그대로, 사본은 열지 않음, 색인에 새 항목), 자기 Soft 참조의 새 id,
 // 원본 고르기(경로·id·별칭·저장하지 않은 새 패키지), ImportRecord(소유 기록 다시 쓰기·참조 기록
 // 버리기), 모든 거부와 IO 실패(대상·색인·원본 그대로), OS 경로 상한, 할당 실패, 실제 디스크.

@@ -14,7 +14,7 @@
 #include <Object/ConstructionContext.h>
 #include <Platform/Fatal.h>
 
-// 에디터 패키지 집합의 열기·만들기·저장이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c2a·A2c2b).
+// 에디터 패키지 집합의 열기·만들기·저장이다(Docs/Design/AssetSystem 7.1절 15 — A2c2a·A2c2b).
 namespace rocks {
 
 namespace {

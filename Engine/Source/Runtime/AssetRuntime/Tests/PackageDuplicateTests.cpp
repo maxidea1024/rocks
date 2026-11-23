@@ -4,7 +4,7 @@
 #include <AssetRuntime/PackageWriter.h>
 #include <AssetTestFixtures/TestAssets.h>
 
-// writer 복제 옵션 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 17 A2e3b — PackageWriteOptions::
+// writer 복제 옵션 시험이다(Docs/Design/AssetSystem 7.1절 17 A2e3b — PackageWriteOptions::
 // duplicateId): 헤더 id는 사본 id, DuplicateTransient·NonTryoutDuplicateTransient 필드는(struct
 // 필드·원소 배열 안의 멤버도) 쓰지 않아 로드가 클래스 기본값, 자기 패키지를 가리키는 Soft 참조는
 // 사본 id(자기 의존이 아니다), 다른 Soft 참조는 그대로. 복제가 아닌 쓰기는 모두 그대로다. 쿠킹·지금

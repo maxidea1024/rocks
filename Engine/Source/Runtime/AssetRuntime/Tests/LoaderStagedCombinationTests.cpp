@@ -2,7 +2,7 @@
 
 #include <AssetTestFixtures/TestAssets.generated.h>
 
-// 로더 단계 조합 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 4·6·7·16, 14절 완료 조건 2): 요청
+// 로더 단계 조합 시험이다(Docs/Design/AssetSystem 11.6절 4·6·7·16, 14절 완료 조건 2): 요청
 // 단위 모양(단일·둘 순환) × 의존 상태(없음·새로·진행 중 — 먼저 요청해 IO 보류·PostLoad 대기 — 먼저
 // 공개하고 PostLoad를 Critical 감시 단위들이 가져가 대기에 둔다·공개됨) × 결함 단계(없음·IO 완료
 // 오류·Begin 즉시 실패·worker 손상·공개 실패 — 오래된 쿠킹 결과(대표 타입이 기대와 다름)를 Hard로

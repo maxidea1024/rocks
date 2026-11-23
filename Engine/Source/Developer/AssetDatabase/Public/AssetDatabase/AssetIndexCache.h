@@ -8,7 +8,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Platform/File.h>
 
-// 색인 캐시다(Docs/Design/AssetSystem.ko.md 7절 캐시, 7.1절 16 A2d1).
+// 색인 캐시다(Docs/Design/AssetSystem 7절 캐시, 7.1절 16 A2d1).
 // `Intermediate/AssetIndex.cache` 하나에 진단 없이 색인된 파일의 항목과 지문을 둔다. 다음 검색은
 // 파일의 범위 읽기 지문이 같으면 그 항목을 다시 쓰고(부분 읽기 생략), 다르면 다시 읽는다. 캐시는
 // 정확성에 필요 없다 — 키가 다르거나 손상되었으면 없는 것과 같다. 쓰기는 쓰기 잠금을 쥔 프로세스만

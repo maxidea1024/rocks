@@ -14,7 +14,7 @@
 #include <Object/AssetId.h>
 #include <Platform/File.h>
 
-// asset-list·asset-index-verify 명령 구현이다(Docs/Design/AssetSystem.ko.md 13절, 7.1절 13 — A2b).
+// asset-list·asset-index-verify 명령 구현이다(Docs/Design/AssetSystem 13절, 7.1절 13 — A2b).
 // 색인·진단은 AssetDatabase AssetIndex가 맡고, 여기서는 인수·프로젝트 찾기·출력만 다룬다.
 namespace rocks::commandlet_host {
 

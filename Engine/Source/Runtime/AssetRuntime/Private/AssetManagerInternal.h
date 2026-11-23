@@ -7,7 +7,7 @@
 #include <Platform/Atomics.h>
 #include <Platform/Sync.h>
 
-// AssetManager의 내부 상태다(Docs/Design/AssetSystem.ko.md 11.7절). 정의는 기능별 파일에 나뉜다:
+// AssetManager의 내부 상태다(Docs/Design/AssetSystem 11.7절). 정의는 기능별 파일에 나뉜다:
 // AssetManager.cpp(공개 API·handle 클래스), AssetManagerHandles.cpp(슬롯·해제
 // 큐·티켓·callback·scope· 보류 명령), AssetManagerUnits.cpp(상주 단위·간선
 // 표·병합·Closing·Discarding).

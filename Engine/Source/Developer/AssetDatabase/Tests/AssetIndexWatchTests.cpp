@@ -9,7 +9,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 색인 부분 갱신·감시 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d3): RefreshPaths(파일·하위
+// 색인 부분 갱신·감시 시험이다(Docs/Design/AssetSystem 7.1절 16 A2d3): RefreshPaths(파일·하위
 // 트리·중복·덮음·이름 규칙·쓰는 중 미루기·정규화 대조·할당 실패 — 결과는 지금 파일 상태의 새
 // 검색과 같다), RootLost, 감시(시작·정지, 이벤트 종류 × 항목 종류 대응, Overflow·원천 오류·잘못된
 // 이름, 루트 소실·재열기 간격·시계 역행, 쓰는 중 대기의 안정·상한·사라짐, 할당 실패 뒤 다시 하기),

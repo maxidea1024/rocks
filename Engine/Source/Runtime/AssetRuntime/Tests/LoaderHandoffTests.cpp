@@ -3,7 +3,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 로더 → AssetManager 넘겨받기 API 시험이다(Docs/Design/AssetSystem.ko.md 11.7절 2):
+// 로더 → AssetManager 넘겨받기 API 시험이다(Docs/Design/AssetSystem 11.7절 2):
 // TakePublished는 PostLoad까지 끝난 단위만 같은 group으로 넘기고, PublishedHolds는 공개된 패키지에
 // Hard로 기대는 진행 중 단위 수이며, RetirePublished·ReleaseRetired는 모두 확인한 뒤에만 바꾼다. 각
 // API의 초기화 전·다른 스레드·콜백 안·종료 뒤·할당 실패 오류를 확인한다.

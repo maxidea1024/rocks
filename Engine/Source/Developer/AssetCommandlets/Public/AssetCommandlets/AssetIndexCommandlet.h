@@ -2,7 +2,7 @@
 
 #include <Core/Commandlet/Commandlet.h>
 
-// 에디터 패키지 색인 명령이다(Docs/Design/AssetSystem.ko.md 13절, 7.1절 13 — A2b). 둘 다 쓰기 잠금
+// 에디터 패키지 색인 명령이다(Docs/Design/AssetSystem 13절, 7.1절 13 — A2b). 둘 다 쓰기 잠금
 // 없이 Content를 검색해 읽기만 한다. 공통 옵션 --project=<dir>(없으면 현재 디렉터리에서 위로
 // `*.rocksproject`를 찾는다). 사용법 오류 2, 실행 실패 1, 성공 0이다. context는 asset-list가
 // AssetCommandContext*, asset-index-verify가 작업 메모리 Allocator*다(commandlet_host::Run이 건다).

@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Asset commands of the command-line tool (Docs/Design/AssetSystem.ko.md section 13, section 7.1 item 18): asset-list, asset-info,
+// Asset commands of the command-line tool (Docs/Design/AssetSystem section 13, section 7.1 item 18): asset-list, asset-info,
 // asset-new, asset-set, asset-move, asset-duplicate, asset-delete, asset-fix-duplicate-id, asset-index-*, asset-alias-*, asset-orphans-*,
 // the import commands and asset-cook. Developer module: the RocksCommandlet program registers these commands, and EngineTests calls the command
 // functions in process with test importers (the product executable registers real importers only).

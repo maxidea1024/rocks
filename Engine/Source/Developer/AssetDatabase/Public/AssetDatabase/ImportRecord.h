@@ -10,7 +10,7 @@
 #include <Core/Text/StringView.h>
 #include <Object/AssetId.h>
 
-// 에디터 패키지 ImportRecord 섹션의 값 스키마다(Docs/Design/AssetSystem.ko.md 5.4절, 7.1절 15 —
+// 에디터 패키지 ImportRecord 섹션의 값 스키마다(Docs/Design/AssetSystem 5.4절, 7.1절 15 —
 // A2c2a). 패키지 형식 층(AssetRuntime)은 ImportRecord를 Record envelope로만 검사하고, 이 스키마는
 // AssetDatabase가 쓰고 읽는다. UE의 AssetImportData(원본 파일 목록·해시·임포트 옵션)에 대응한다.
 //

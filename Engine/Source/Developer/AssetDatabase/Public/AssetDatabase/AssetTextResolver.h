@@ -4,7 +4,7 @@
 #include <AssetDatabase/EditorPackageSet.h>
 #include <ReflectionText/TextReference.h>
 
-// 에셋 참조 텍스트 resolver다(Docs/Design/AssetSystem.ko.md 4.1·4.2절·7.1절 15 A2c3,
+// 에셋 참조 텍스트 resolver다(Docs/Design/AssetSystem 4.1·4.2절·7.1절 15 A2c3,
 // Docs/Design/ReflectionExtensions.ko.md 10.3절). asset-new·asset-set의 참조 값 입력과 asset-info의
 // 참조 값 출력이 쓴다(TextCodecOptions::resolver).
 //

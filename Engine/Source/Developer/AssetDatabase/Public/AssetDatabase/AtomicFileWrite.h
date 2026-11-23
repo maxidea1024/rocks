@@ -6,7 +6,7 @@
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
 
-// 작은 파일의 원자 교체 쓰기다(Docs/Design/AssetSystem.ko.md 7.1절 16·17·10.2절 "A4d 구현 세부" —
+// 작은 파일의 원자 교체 쓰기다(Docs/Design/AssetSystem 7.1절 16·17·10.2절 "A4d 구현 세부" —
 // 색인 캐시·별칭 표·쿠킹 매니페스트·쿠킹 보고서가 함께 쓴다). `<directory>/<fileName>.<36자 소문자
 // guid>.tmp`에 쓰고 Flush·Close한 뒤 Replace한다. 고아 임시 파일 정리(TemporaryFiles — Content·
 // Intermediate·Config)가 이 모양의 이름을 지운다.

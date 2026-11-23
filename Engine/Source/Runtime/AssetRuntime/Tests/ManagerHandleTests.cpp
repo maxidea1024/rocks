@@ -3,7 +3,7 @@
 #include <AssetTestFixtures/TestAssets.generated.h>
 #include <Platform/Thread.h>
 
-// AssetManager handle 계약 시험이다(Docs/Design/AssetSystem.ko.md 11.1·11.7절 5–9·12): 준비
+// AssetManager handle 계약 시험이다(Docs/Design/AssetSystem 11.1·11.7절 5–9·12): 준비
 // callback (정확히 한 번·AlreadyRegistered·lane·늦은 등록·먼저 놓은 티켓의 Cancelled·실패 진단),
 // scope Revoke, LoadBlocking과 프레임 판정, 기대 타입·준비 수준, 미준비 대상 정책, 다른 스레드의
 // lease 해제, 종료.

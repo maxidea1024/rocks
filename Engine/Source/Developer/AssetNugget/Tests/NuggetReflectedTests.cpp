@@ -6,7 +6,7 @@
 #include <Platform/Math/GenericPlatformMath.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 리플렉션 값의 너겟 키 기록 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 2 — WriteReflected):
+// 리플렉션 값의 너겟 키 기록 시험이다(Docs/Design/AssetSystem 9.1절 결정 2 — WriteReflected):
 // 모든 필드의 변이(값을 바꾸면 키가 바뀐다 — 필드 하나씩), Transient는 키 밖, Map·Set 저장 순서
 // 무관, NaN payload 무관·-0 구분, 필드 이름이 키에 들어감, Optional unset·set, InstancedStruct,
 // 추적 golden, 거부(Text·객체 참조·이미 실패한 기록기), 할당 실패.

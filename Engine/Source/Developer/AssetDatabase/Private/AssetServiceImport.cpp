@@ -16,7 +16,7 @@
 #include <ReflectionText/TextJson.h>
 #include <Serialization/Record.h>
 
-// 새 임포트다(Docs/Design/AssetSystem.ko.md 7.1절 18 A2f1b).
+// 새 임포트다(Docs/Design/AssetSystem 7.1절 18 A2f1b).
 namespace rocks {
 
 namespace {

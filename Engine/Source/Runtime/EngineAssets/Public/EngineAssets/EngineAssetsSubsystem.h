@@ -11,7 +11,7 @@
 #include <Platform/AsyncFile.h>
 #include <Task/WorkerScheduler.h>
 
-// 게임 엔진에 에셋 런타임을 붙이는 Subsystem이다(Docs/Design/AssetSystem.ko.md 11.8절 — A1e).
+// 게임 엔진에 에셋 런타임을 붙이는 Subsystem이다(Docs/Design/AssetSystem 11.8절 — A1e).
 // 게임이 소유하는 AssetManager 하나를 만들고, 매 프레임 World Tick 전에 Pump하며, 프레임 끝에 에셋
 // 객체 Registry GC를 한 조각 진행하고, 엔진 종료 순서 안에서 끝낸다. 설정은 `asset.*` CVar다.
 //

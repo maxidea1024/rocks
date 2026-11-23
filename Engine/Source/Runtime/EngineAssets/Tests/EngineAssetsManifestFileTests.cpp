@@ -6,7 +6,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// EngineAssets 매니페스트 파일 읽기 시험이다(Docs/Design/AssetSystem.ko.md 11.8절 4): 고장 난
+// EngineAssets 매니페스트 파일 읽기 시험이다(Docs/Design/AssetSystem 11.8절 4): 고장 난
 // FileSystem을 끼워 존재 확인·열기·크기·읽기·닫기 실패, 크기 상한, 빈 파일, 할당 실패와 정상 읽기를
 // 결정적으로 본다(OS 상태에 기대지 않는다).
 using namespace rocks;

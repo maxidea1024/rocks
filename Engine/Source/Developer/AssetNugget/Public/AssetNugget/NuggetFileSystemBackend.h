@@ -3,7 +3,7 @@
 #include <AssetNugget/NuggetFile.h>
 #include <Platform/File.h>
 
-// 파일 시스템 에셋 너겟 backend다(Docs/Design/AssetSystem.ko.md 9절·9.1절 결정 7–9, "A3b 구현
+// 파일 시스템 에셋 너겟 backend다(Docs/Design/AssetSystem 9절·9.1절 결정 7–9, "A3b 구현
 // 세부"). 키 하나를 `.rnug` v2 파일 하나(`<root>/<k0k1>/<key>.rnug`)로 둔다. 쓰기는 임시 파일에 다
 // 쓴 뒤 no-replace 이동으로 게시하므로 잠금 없이 여러 프로세스가 같은 루트를 쓴다. 모든 읽기를
 // 검증하고 손상 항목은 지운다(틀린 적중 0건 — Rockpile R-0).

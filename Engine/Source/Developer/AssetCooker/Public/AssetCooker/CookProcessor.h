@@ -7,7 +7,7 @@
 #include <AssetRuntime/PackageWriter.h>
 #include <Object/TypeRegistry.h>
 
-// 쿠킹 처리기와 처리기 표다(Docs/Design/AssetSystem.ko.md 10.2절 결정 6, "A4c 구현 세부"). 처리기는
+// 쿠킹 처리기와 처리기 표다(Docs/Design/AssetSystem 10.2절 결정 6, "A4c 구현 세부"). 처리기는
 // 대표 에셋 타입마다 쿠킹 출력을 만든다(기본 처리기는 에디터 객체 그래프를 그대로 쿠킹 패키지로 —
 // A4c2). 정체성(처리기 Guid·버전 Guid)과 설정 키가 build key에 들어간다.
 //

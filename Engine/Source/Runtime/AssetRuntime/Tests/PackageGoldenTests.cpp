@@ -2,7 +2,7 @@
 
 #include <Serialization/Record.h>
 
-// 고정 byte(golden) 시험이다(Docs/Design/AssetSystem.ko.md 5.3절 옛 fixture, 14절). 시험 인코더가
+// 고정 byte(golden) 시험이다(Docs/Design/AssetSystem 5.3절 옛 fixture, 14절). 시험 인코더가
 // writer·reader와 스키마·Guid를 공유하므로 둘을 함께 바꾸거나 Zstd를 올려도 왕복 시험은 통과한다 —
 // 그래서 고정 장면의 출력 SHA-256(풍부한 에디터·쿠킹 None·쿠킹 Zstd)을 고정하고, 체크인한 v1
 // byte(대표 에셋 하나뿐인 B, 모든 선택 섹션을 담은 풍부한 A)를 읽어 다시 저장해 같은지 본다. 이

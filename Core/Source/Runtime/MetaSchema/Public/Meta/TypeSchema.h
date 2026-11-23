@@ -32,7 +32,7 @@ using ContextId = Guid;
 //               그것을 가리키는 참조를 null + 진단으로 쓴다. 로드는 되고
 //               진단(TransientType·DeprecatedType)을 낸다. Deprecated 클래스는 ClassRef 쓰기가
 //               거부한다(이미 저장된 값은 진단과 함께 읽고 그대로 저장한다).
-//   EditorOnly — 클래스(ROCKS_CLASS(EditorOnly) — Docs/Design/AssetSystem.ko.md 10.2절 A4e2a, UE
+//   EditorOnly — 클래스(ROCKS_CLASS(EditorOnly) — Docs/Design/AssetSystem 10.2절 A4e2a, UE
 //               UObject::IsEditorOnly() 재정의 대응). 쿠킹 데이터에 없는 클래스다. 상속된다(파생도
 //               같은 비트를 가져야 한다 — 등록 InvalidArgument). 대표 타입이 EditorOnly인 에셋은
 //               쿠킹 대상이 아니고 쿠킹 패키지 쓰기는 이 클래스 객체를 저장 불가 객체처럼 뺀다.
@@ -555,7 +555,7 @@ struct FieldSchema {
     // 필드는 {Opaque, 0}이어야 한다.
     ValueType key{};
     // 에셋 bundle 이름 목록(ROCKS_PROPERTY(AssetBundles="a,b") —
-    // Docs/Design/AssetSystem.ko.md 10.2절 A4e2a, UE meta=(AssetBundles=…))이다. 쉼표로 이은 정규
+    // Docs/Design/AssetSystem 10.2절 A4e2a, UE meta=(AssetBundles=…))이다. 쉼표로 이은 정규
     // 텍스트(공백 없음 — IsAssetBundleList)이고 비면 없다. 대상 종류(FieldTargetType)가
     // SoftObjectReference·Struct· InstancedStruct이거나 Map 키가 SoftObjectReference인 필드에만
     // 쓰고, EditorOnly 필드에는 쓰지 않는다(등록 InvalidArgument). 저장 때 bundle 태그만 읽는 편집
@@ -563,7 +563,7 @@ struct FieldSchema {
     Span<const char> assetBundles{};
 };
 
-// bundle 이름 하나의 byte 상한과 목록의 이름 수 상한이다(AssetSystem.ko.md 10.2절 A4e2a).
+// bundle 이름 하나의 byte 상한과 목록의 이름 수 상한이다(AssetSystem 10.2절 A4e2a).
 inline constexpr usize AssetBundleNameMaxBytes = 64;
 inline constexpr usize AssetBundleMaxNames = 16;
 

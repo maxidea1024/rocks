@@ -3,7 +3,7 @@
 #include <AssetNugget/NuggetKey.h>
 #include <ReflectionText/TextAssignments.h>
 
-// 리플렉션 값의 너겟 키 기록이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 2). 처리기는 설정을
+// 리플렉션 값의 너겟 키 기록이다(Docs/Design/AssetSystem 9.1절 결정 2). 처리기는 설정을
 // 손으로 쓰지 않고 이것으로 쓴다 — 필드마다 Field(이름) + 태그 + 값이라 필드를 빠뜨리거나, 같은
 // 타입 필드를 맞바꾸거나, 이름만 바꿔도 키가 바뀐다.
 namespace rocks {

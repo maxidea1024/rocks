@@ -3,7 +3,7 @@
 #include <AssetTestFixtures/BundleAssets.generated.h>
 #include <AssetTestFixtures/BundleAssets.h>
 
-// 에셋 bundle·EditorOnly 클래스의 리플렉션 스키마 시험이다(Docs/Design/AssetSystem.ko.md 10.2절
+// 에셋 bundle·EditorOnly 클래스의 리플렉션 스키마 시험이다(Docs/Design/AssetSystem 10.2절
 // "A4e 구현 세부" — A4e2a): 생성 스키마의 bundle 정규 텍스트(공백 뗌·struct 사슬·Map 키·
 // InstancedStruct·지정 없음)와 EditorOnly 클래스 비트, Registry의 깊은 복사, 수동 등록 거부
 // (EditorOnly 필드의 목록·정규 목록이 아닌 텍스트).

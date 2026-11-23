@@ -5,7 +5,7 @@
 #include <AssetTestFixtures/ValueAssets.generated.h>
 #include <AssetTestFixtures/ValueAssets.h>
 
-// fixture 에셋의 결정적 값 생성기와 필드 단위 검사 함수다(Docs/Design/AssetSystem.ko.md 14.1절).
+// fixture 에셋의 결정적 값 생성기와 필드 단위 검사 함수다(Docs/Design/AssetSystem 14.1절).
 // Fill*은 seed로 모든 영속 필드를 채우고, Check*는 같은 seed의 기대값과 필드마다 비교한다. 참조
 // 필드는 장면을 만드는 시험이 따로 설정·확인한다(대상 handle은 Registry마다 다르다).
 namespace rocks::asset_test {

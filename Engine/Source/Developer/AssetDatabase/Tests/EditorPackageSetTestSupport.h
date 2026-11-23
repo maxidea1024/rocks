@@ -9,7 +9,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
 
-// 에디터 패키지 집합 시험(열기·저장)의 공용 장면이다(Docs/Design/AssetSystem.ko.md 7.1절 15 —
+// 에디터 패키지 집합 시험(열기·저장)의 공용 장면이다(Docs/Design/AssetSystem 7.1절 15 —
 // A2c2a·A2c2b): 시험 원본 패키지 묶음, 메모리 프로젝트와 색인, 집합 설정, 실패한 할당의 tag를
 // 기록하는 allocator.
 namespace rocks::editor_set_test {

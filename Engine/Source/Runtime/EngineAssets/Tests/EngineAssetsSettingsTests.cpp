@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// EngineAssets 설정 결정 시험이다(Docs/Design/AssetSystem.ko.md 11.8절 3): 쿠킹 루트(설정 값 →
+// EngineAssets 설정 결정 시험이다(Docs/Design/AssetSystem 11.8절 3): 쿠킹 루트(설정 값 →
 // 실행 파일 디렉터리 + /Cooked), 실행 프로파일 기본값, 실행 파일 경로의 디렉터리 부분.
 using namespace rocks;
 namespace engine_assets_settings_tests_file {

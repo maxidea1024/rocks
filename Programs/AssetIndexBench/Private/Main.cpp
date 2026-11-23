@@ -22,7 +22,7 @@
 
 #include <stdio.h>
 
-// 색인 검색 측정 도구다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d2 — 제품 밖). 합성
+// 색인 검색 측정 도구다(Docs/Design/AssetSystem 7.1절 16 A2d2 — 제품 밖). 합성
 // 프로젝트(fixture TestAsset 패키지 count개, 태그 둘, 중첩 디렉터리 25개)를 처음 한 번 만들고
 // Rebuild를 직렬· 병렬(worker 수별)·캐시 재사용으로 rounds번 재 중앙값을 보고한다. 첫 round는 OS
 // 파일 캐시를 데우므로 중앙값은 따뜻한 캐시 기준이다(차가운 디스크는 재부팅 뒤 첫 실행으로 따로

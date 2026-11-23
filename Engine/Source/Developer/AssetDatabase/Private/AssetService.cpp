@@ -14,7 +14,7 @@
 #include <ReflectionText/TextJson.h>
 #include <ReflectionText/TextLines.h>
 
-// 에셋 서비스 API다(Docs/Design/AssetSystem.ko.md 13절·7.1절 15 A2c3).
+// 에셋 서비스 API다(Docs/Design/AssetSystem 13절·7.1절 15 A2c3).
 namespace rocks {
 
 namespace {

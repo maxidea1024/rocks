@@ -321,7 +321,7 @@ internal static class ActionGraph
                     arguments.Add("-flto=thin");
                 }
 
-                // clang source-based coverage 계측(Docs/Design/AssetSystem.ko.md 14.1절 — 줄·분기 coverage를 llvm-cov로 잰다)도
+                // clang source-based coverage 계측(Docs/Design/AssetSystem 14.1절 — 줄·분기 coverage를 llvm-cov로 잰다)도
                 // 코드 생성 옵션이라 AST 프로필에 넣지 않는다(MetaCompiler는 프로필 밖 옵션을 거부한다).
                 if (request.Configuration == NativeConfiguration.Coverage)
                 {

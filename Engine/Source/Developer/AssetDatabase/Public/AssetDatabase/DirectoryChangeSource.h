@@ -2,7 +2,7 @@
 
 #include <Platform/DirectoryWatch.h>
 
-// 디렉터리 변경 이벤트의 공급원이다(Docs/Design/AssetSystem.ko.md 7절 갱신, 7.1절 9 — A2a).
+// 디렉터리 변경 이벤트의 공급원이다(Docs/Design/AssetSystem 7절 갱신, 7.1절 9 — A2a).
 // AssetIndex의 감시 갱신은 이 인터페이스로 이벤트를 받는다. 실제 OS 감시는 PlatformBase
 // DirectoryWatcher를 감싼 WatcherChangeSource이고, 시험은 이벤트를 직접 주입하는 구현으로 순서와
 // 종류(추가·삭제·수정·이름 변경·Overflow·RootRemoved)를 결정적으로 만든다.

@@ -3,7 +3,7 @@
 #include <AssetNugget/NuggetCache.h>
 #include <Task/WorkerScheduler.h>
 
-// 에셋 너겟 일괄·비동기 요청이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 12, "A3c2 구현 세부" —
+// 에셋 너겟 일괄·비동기 요청이다(Docs/Design/AssetSystem 9.1절 결정 12, "A3c2 구현 세부" —
 // Rockpile 12.2절 형태). 항목마다 WorkerScheduler 작업 하나가 NuggetCache의 동기 Get·Put을 부르고,
 // 모든 항목이 끝나면 완료 handle이 완료된다(결과는 항목 순서 그대로).
 //

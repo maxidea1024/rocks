@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// "지원하는 모든 조합" 왕복 시험이다(Docs/Design/AssetSystem.ko.md 14.1절).
+// "지원하는 모든 조합" 왕복 시험이다(Docs/Design/AssetSystem 14.1절).
 // - FixtureAsset_CombinationRoundTrip: ComboAsset·ComboEditorAsset을 쿠킹·에디터 × seed 둘로 저장 →
 //   다른 Registry에 로드 → 필드 단위 비교(참조는 대상 표의 같은 정체성, weak의 다른 패키지 대상은
 //   null, 쿠킹의 EditorOnly는 기본값) → 다시 저장해 byte 동일.

@@ -2,7 +2,7 @@
 
 #include <AssetTestFixtures/TestAssets.generated.h>
 
-// AssetManager PrimaryAsset·bundle 시험이다(Docs/Design/AssetSystem.ko.md 10.1절 5·11.7절 10):
+// AssetManager PrimaryAsset·bundle 시험이다(Docs/Design/AssetSystem 10.1절 5·11.7절 10):
 // bundle 구성원 함께 로드·caseless 이름·bundle 사이 중복 제거·lease 묶음, 오류(PrimaryAsset
 // 아님·없는 bundle· 매니페스트에 없음·AlreadyRegistered·lane), 처음 실패, 먼저 놓은 묶음 티켓·scope
 // Revoke, 용량 추정.

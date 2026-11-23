@@ -5,7 +5,7 @@
 
 namespace rocks {
 
-// 에셋 식별자다(Docs/Design/AssetSystem.ko.md 4.1–4.2절). 128-bit Guid이며 0은 null(에셋 없음)이다.
+// 에셋 식별자다(Docs/Design/AssetSystem 4.1–4.2절). 128-bit Guid이며 0은 null(에셋 없음)이다.
 // 문자열 표기는 RFC 9562 36자 소문자 하이픈 형식("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")이고 해석도
 // 그 형식만 받는다 (경로·파일 이름에 쓰이므로 정규 표기 하나만 둔다).
 //

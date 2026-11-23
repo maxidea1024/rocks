@@ -3,7 +3,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.ToolTests;
 
 // meta 시험 중 클래스 플래그 지정자(리플렉션 B9h2 — Docs/Design/ReflectionExtensions.ko.md 9.2·15절, 에셋 A4e2a EditorOnly)와 필드
-// AssetBundles(에셋 A4e2a — Docs/Design/AssetSystem.ko.md 10.2절) 시험이다.
+// AssetBundles(에셋 A4e2a — Docs/Design/AssetSystem 10.2절) 시험이다.
 internal static partial class MetaTests
 {
     // AssetBundles 원본이 쓰는 헤더(소프트 참조·배열·Map·InstancedStruct·AssetId)다.
@@ -42,7 +42,7 @@ internal static partial class MetaTests
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated class flag header compiles: " + compiled.StdOut + compiled.StdErr);
         });
-        // 클래스 EditorOnly(에셋 A4e2a — Docs/Design/AssetSystem.ko.md 10.2절)는 descriptor flags와 생성 스키마 비트 32에 닿고 상속되며,
+        // 클래스 EditorOnly(에셋 A4e2a — Docs/Design/AssetSystem 10.2절)는 descriptor flags와 생성 스키마 비트 32에 닿고 상속되며,
         // 다른 클래스 플래그와 함께 쓸 수 있다. descriptor로 읽은 import 클래스의 파생도 물려받는다.
         suite.Add("Meta.EditorOnlyClassFlagIsInherited", async () =>
         {

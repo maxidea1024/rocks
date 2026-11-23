@@ -7,7 +7,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 쓰기 잠금·시계·감시 공급 시험이다(Docs/Design/AssetSystem.ko.md 8절, 7.1절 4·9 — A2a). 다른
+// 쓰기 잠금·시계·감시 공급 시험이다(Docs/Design/AssetSystem 8절, 7.1절 4·9 — A2a). 다른
 // 프로세스의 잠금은 자식 프로세스와 파이프 gate로 순서를 정한다(시간에 기대지 않는다).
 using namespace rocks;
 

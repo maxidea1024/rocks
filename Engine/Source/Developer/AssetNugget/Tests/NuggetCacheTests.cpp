@@ -8,7 +8,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 에셋 너겟 캐시 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 10·11·13–15, "A3c1 구현 세부"):
+// 에셋 너겟 캐시 시험이다(Docs/Design/AssetSystem 9.1절 결정 10·11·13–15, "A3c1 구현 세부"):
 // 열기 방식(off·rockpile·auto·filesystem·열기 실패와 required), Memory 계층(적중 순서·값 선택·
 // partial·SkipData·SkipMeta·64 MiB 규칙·합치기·축출·KeepAlive), 세션 고정(DigestChanged·다시 만든
 // Record 고정 보관·캐시 없음·비결정 Put), 소비 입력 대조, 정책, SCC 헬퍼, backend 실패 표지, 할당

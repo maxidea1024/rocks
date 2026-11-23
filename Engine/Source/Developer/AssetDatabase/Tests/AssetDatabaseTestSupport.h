@@ -8,7 +8,7 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 
-// AssetDatabase 시험 공용 도구다(Docs/Design/AssetSystem.ko.md 7.1절 — A2).
+// AssetDatabase 시험 공용 도구다(Docs/Design/AssetSystem 7.1절 — A2).
 namespace rocks::asset_database_test {
 
 // 시험 프로젝트 디렉터리다(현재 디렉터리 아래 `rocks-asset-database-<tag>-<pid>` — 끝나면 지운다).

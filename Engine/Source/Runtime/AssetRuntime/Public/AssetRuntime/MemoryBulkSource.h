@@ -5,7 +5,7 @@
 
 namespace rocks {
 
-// 저장 전 bulk raw byte를 메모리에 모아 두는 bulk 원본이다(Docs/Design/AssetSystem.ko.md 5.5절,
+// 저장 전 bulk raw byte를 메모리에 모아 두는 bulk 원본이다(Docs/Design/AssetSystem 5.5절,
 // MeshAnimationAssets.ko.md 3.7절 2). 원본 데이터(메시 속성·텍스처 원본 등)를 에셋 필드의
 // BulkDataRef로 만들 때 쓴다. Add가 byte를 넘겨받아
 // 임시 bulkId(1부터 차례로)·크기·SHA-256을 담은 ref를 돌려주고, WritePackage가 그 ref로 ReadBulk를

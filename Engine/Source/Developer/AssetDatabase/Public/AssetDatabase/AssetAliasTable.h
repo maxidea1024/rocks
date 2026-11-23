@@ -10,7 +10,7 @@
 #include <Object/AssetId.h>
 #include <Platform/File.h>
 
-// 경로 별칭 표다(Docs/Design/AssetSystem.ko.md 4.3절, 7.1절 17 A2e1 — UE ObjectRedirector
+// 경로 별칭 표다(Docs/Design/AssetSystem 4.3절, 7.1절 17 A2e1 — UE ObjectRedirector
 // 대응이지만 패키지가 아니라 사용자 데이터 파일). 이동·이름 변경이 옛 논리 경로 → AssetId를 남겨
 // 설정·스크립트· 명령의 텍스트 경로가 계속 풀리게 한다(참조는 AssetId라 별칭이 필요 없다). 파일은
 // `Config/AssetAliases.json`(버전 관리 대상, 도구가 다시 쓰는 엄격 JSON — 항목은 경로 키 순).

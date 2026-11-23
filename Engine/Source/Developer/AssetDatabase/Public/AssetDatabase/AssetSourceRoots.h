@@ -9,7 +9,7 @@
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
 
-// 임포트 원본 루트와 원본 읽기다(Docs/Design/AssetSystem.ko.md 4.5절, 7.1절 18 — A2f1a). 원본은
+// 임포트 원본 루트와 원본 읽기다(Docs/Design/AssetSystem 4.5절, 7.1절 18 — A2f1a). 원본은
 // 이름 있는 루트 기준 상대 경로로 기록해(ImportRecord sources[].root·relativePath) 다른 기기·
 // 체크아웃 위치에서도 같은 원본을 찾는다. 루트 표는 `Config/AssetSources.json`(사용자가 손으로 쓰는
 // 버전 관리 데이터 — 별칭 표와 같다)이고 이 모듈은 읽기만 한다.

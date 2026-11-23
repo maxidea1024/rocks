@@ -2,7 +2,7 @@
 #include <Core/FileError.h>
 #include <string.h>
 
-// 패키지 범위 읽기 구현이다(Docs/Design/AssetSystem.ko.md 7.1절 13 — A2b).
+// 패키지 범위 읽기 구현이다(Docs/Design/AssetSystem 7.1절 13 — A2b).
 namespace rocks {
 
 namespace {

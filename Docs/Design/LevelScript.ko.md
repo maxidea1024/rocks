@@ -2,7 +2,7 @@
 
 기준일: 2026-11-20, 개정 1(결정 LD1–LD20 확정 — 5절, 리뷰 정정 반영 — 10절). 초안 0.1(2026-11-19, 결정 대기)을 리뷰어 1명이 문서 원문·UE 소스와 대조한 정정과 사용자 결정(모든 항목 권장안)을 반영한 첫 정본이다. 구현하지 않는다. 착수는 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)와 Sparks 도입 단계(L2 이후, [Sparks](SparksLanguage.ko.md) 18절)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
 
-근거: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) 초안 1.4, [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) 20·22·23절, [엔진 런타임](EngineRuntime/README.ko.md)(이하 ER) 4.6·7절, [Prefab](Prefab.ko.md)(이하 PF) 개정 5, [UI 툴킷](UiToolkit.ko.md)(이하 UT) 7.3절 (e), [에셋 시스템](AssetSystem.ko.md)(이하 AS) 4.6절, [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) 5.2절(클래스 참조). UE 대조는 UE 5.8(5.8.4) 원본을 파일:행으로 확인했다(2절).
+근거: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) 초안 1.4, [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) 20·22·23절, [엔진 런타임](EngineRuntime/README.ko.md)(이하 ER) 4.6·7절, [Prefab](Prefab.ko.md)(이하 PF) 개정 5, [UI 툴킷](UiToolkit.ko.md)(이하 UT) 7.3절 (e), [에셋 시스템](AssetSystem/README.ko.md)(이하 AS) 4.6절, [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) 5.2절(클래스 참조). UE 대조는 UE 5.8(5.8.4) 원본을 파일:행으로 확인했다(2절).
 
 사용 흐름: 컴포넌트·액터·레벨 스크립트에 동작을 넣는 작업 순서를 Sparks와 C++로 나눠 [게임플레이 작업 안내](../Guides/GameplayWorkflowGuide.ko.md)에 둔다.
 
@@ -560,7 +560,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 | [엔진 런타임](EngineRuntime/README.ko.md) | 4.6절 Level 행 `levelScript`, 레벨 편입 6항(LD8), 레벨 저장 검증(LD5·LD6·LD17), 7.2절 `DestroyLevel`·World 종료 순서와 파괴 규칙(LD16) |
 | [Prefab](Prefab.ko.md) 개정 5 | D22(LD17), 1.3절 비범위, 3.6절 배치 노드 참조, 3.11절 진단, 7절 Level 행 |
 | [UI 툴킷](UiToolkit.ko.md) 초안 2.3 | 7.3절 (e) `NotPlaceable`을 LevelScript가 쓴다, UD15 중 `NotPlaceable`만 확정 |
-| [에셋 시스템](AssetSystem.ko.md) 개정 11 | 4.6절 진단 행 |
+| [에셋 시스템](AssetSystem/README.ko.md) 개정 11 | 4.6절 진단 행 |
 
 [CompilerDiagnostics](CompilerDiagnostics.ko.md)는 C++ 경고 정책 문서라 고치지 않았다. 레벨 저장·쿡·로드 진단은 AS 4.6절, Sparks 컴파일 오류는 SL 8.1절 S 대역에 둔다.
 

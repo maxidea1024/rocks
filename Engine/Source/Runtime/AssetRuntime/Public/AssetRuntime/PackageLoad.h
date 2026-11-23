@@ -72,7 +72,7 @@ struct PackageLoadOptions {
     ObjectGraphLimits limits;
 };
 
-// 패키지 하나의 로드 상태다(Docs/Design/AssetSystem.ko.md 11.2절 단계): 소유 스레드에서 만들고 →
+// 패키지 하나의 로드 상태다(Docs/Design/AssetSystem 11.2절 단계): 소유 스레드에서 만들고 →
 // Prepare(어느 스레드 — 검증·압축 해제·graph 1단계·Dependencies·Bulk 대조) →
 // InstantiatePackages(소유 스레드, 한 트랜잭션 — 객체 생성·import 연결·적용·Required·id 설정) →
 // 호출자 Commit.

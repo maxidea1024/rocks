@@ -7,7 +7,7 @@
 #include <AssetTestFixtures/TestAssets.generated.h>
 #include <Core/Text/NumberText.h>
 
-// 시험 임포터다(Docs/Design/AssetSystem.ko.md 7.1절 18 A2f — 서비스 시험과 명령 시험이 같이
+// 시험 임포터다(Docs/Design/AssetSystem 7.1절 18 A2f — 서비스 시험과 명령 시험이 같이
 // 쓴다). 원본은 줄마다 `<이름>=<값>`인 텍스트다:
 //   value=<정수>              주 출력 TestAsset::value = 정수 × 옵션 scale
 //   label=<텍스트>            주 출력 TestAsset::label

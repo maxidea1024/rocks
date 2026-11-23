@@ -6,7 +6,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 
-// 이름 구성 요소 규칙 검사와 대소문자 무시 비교 키다(Docs/Design/AssetSystem.ko.md 4.2절,
+// 이름 구성 요소 규칙 검사와 대소문자 무시 비교 키다(Docs/Design/AssetSystem 4.2절,
 // Docs/Design/ObjectFoundations.ko.md 1.1절). 객체 이름(ObjectRegistry의 Outer 아래 이름)과 A2 논리
 // 경로의 구성 요소가 같은 규칙을 쓴다.
 //

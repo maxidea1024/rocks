@@ -9,7 +9,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 파일 시스템 에셋 너겟 backend 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 7–9, "A3b 구현
+// 파일 시스템 에셋 너겟 backend 시험이다(Docs/Design/AssetSystem 9.1절 결정 7–9, "A3b 구현
 // 세부"): 왕복(저장 압축 판단·값 선택·partial·skipData·skipMeta), Exists·Conflict, 손상(위치마다)
 // 삭제·교체, 다른 버전은 손대지 않음, echo, Touch·Remove·GC(시각·용량·순서·이름 거름·지난 임시
 // 파일·잡힌 잠금), 읽기 전용, IO 실패 주입, 같은 프로세스 경합(hook), 두 프로세스 경합(pipe gate),

@@ -7,7 +7,7 @@
 #include <Object/InstancedStruct.h>
 #include <Object/SoftObjectRef.h>
 
-// 에셋 bundle·EditorOnly 클래스 시험 에셋이다(Docs/Design/AssetSystem.ko.md 10.2절 "A4e 구현
+// 에셋 bundle·EditorOnly 클래스 시험 에셋이다(Docs/Design/AssetSystem 10.2절 "A4e 구현
 // 세부" — A4e2): 필드 지정자 AssetBundles(단일·배열·struct 사슬·Map 키·InstancedStruct 내용·지정
 // 없음·EditorOnly 경로)와 클래스 표지 EditorOnly(에셋·하위 객체).
 namespace rocks::asset_fixture {

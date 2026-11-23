@@ -159,7 +159,7 @@ public:
     // 규칙이 거부한다). Map 키·Set 원소의 값도 부른다(순서는 삽입 순서라 그대로다 — 두 키를 같게
     // 만들지 않는 것은 hook의 책임이다).
     //
-    // 사용 예(패키지 복제 — 원본 id를 가리키는 값을 사본 id로, AssetSystem.ko.md 7.1절 17 A2e3b):
+    // 사용 예(패키지 복제 — 원본 id를 가리키는 값을 사본 id로, AssetSystem 7.1절 17 A2e3b):
     //   Result<AssetId> SubstituteSoftReference(const SoftReferenceInfo& info) noexcept override {
     //       return Result<AssetId>::Success(info.asset == source_ ? copy_ : info.asset);
     //   }

@@ -3,7 +3,7 @@
 #include <AssetCooker/CookPublish.h>
 #include <Meta/Annotations.h>
 
-// 쿠킹 전체 흐름과 보고서다(Docs/Design/AssetSystem.ko.md 10.2절 결정 11, "A4d 구현 세부" — A4d2).
+// 쿠킹 전체 흐름과 보고서다(Docs/Design/AssetSystem 10.2절 결정 11, "A4d 구현 세부" — A4d2).
 // 기존 매니페스트 읽기 → 대상(A4b) → 키(A4c1) → 재사용 판정(A4d1) → 실행(A4c2, 출력 = 게시기) →
 // 오류 진단이 없으면 게시 → 보고서. 색인은 호출자가 쿠킹 직전에 갱신해 넘긴다(콘텐츠 해시의 Stat
 // 한계 — A4b 상태).

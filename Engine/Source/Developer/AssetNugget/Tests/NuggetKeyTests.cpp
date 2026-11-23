@@ -8,7 +8,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 에셋 너겟 키 기록 시험이다(Docs/Design/AssetSystem.ko.md 9.1절 결정 2–4): 태그·인코딩 golden,
+// 에셋 너겟 키 기록 시험이다(Docs/Design/AssetSystem 9.1절 결정 2–4): 태그·인코딩 golden,
 // NaN 단일화·-0, 경계(None·길이 접두), 유효하지 않은 UTF-8, buffer 기록기·Finish 규칙·Fail, 추적
 // 줄, 공통 머리 항목과 순서, 인코더, SCC 키(순서 무관·중복·null·역할 접두·Merkle), 구성원 키, 할당
 // 실패.

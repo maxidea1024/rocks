@@ -13,7 +13,7 @@
 #include <Core/Time/DateTime.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 같은 id 고치기 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 17 A2e4b): 밖에서 복사한 파일을 새
+// 같은 id 고치기 시험이다(Docs/Design/AssetSystem 7.1절 17 A2e4b): 밖에서 복사한 파일을 새
 // id로 제자리에 다시 쓰기(헤더 id·자기 Soft·bulk·의존·hook 출력, 색인의 같은 id 진단이 사라짐,
 // 남은 같은 id 항목 경로), ImportRecord(소유 기록의 자기 출력만 새 id, 형제는 빠짐 — 쓰기 뒤 색인
 // 판정으로 실제 고아만 경고), Hard 순환 묶음 닫기, 모든 거부와 IO 실패(파일·색인 그대로, 연

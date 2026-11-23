@@ -2,7 +2,7 @@
 
 #include <Core/Commandlet/Commandlet.h>
 
-// 쿠킹 명령이다(Docs/Design/AssetSystem.ko.md 13절, 10.2절 결정 12, "A4e 구현 세부" — A4e1).
+// 쿠킹 명령이다(Docs/Design/AssetSystem 13절, 10.2절 결정 12, "A4e 구현 세부" — A4e1).
 // context는 AssetCommandContext*다(commandlet_host::Run이 건다).
 //   asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote]
 //              [--json] [--project=<dir>] [--wait=<초>]

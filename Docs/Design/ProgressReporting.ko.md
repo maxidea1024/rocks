@@ -66,7 +66,7 @@ UE는 진행 보고를 세 층으로 나눈다.
 
 ## 4. 취소 표지(`CancelToken`)를 Core로
 
-`CancelToken`·`CancelSource`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/CancelToken.h`)를 `Core/Public/Core/CancelToken.h`로 옮기고 export 매크로를 `ROCKS_CORE_API`로 바꾼다. 기존 계약(아무 스레드에서 Cancel·조회, 공유 상태는 원자 계수, `Create(allocator)`)은 그대로다. 하위호환 별칭 없이 호출처를 모두 바꾸고, 참조하는 문서(AssetSystem.ko.md 11.1절, CoreObjectInputDetailedPlan.ko.md, EngineImplementationPlan.ko.md의 `CancelToken` 언급)도 갱신한다. 범용 기능을 한 곳에만 두는 규칙을 따른다.
+`CancelToken`·`CancelSource`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/CancelToken.h`)를 `Core/Public/Core/CancelToken.h`로 옮기고 export 매크로를 `ROCKS_CORE_API`로 바꾼다. 기존 계약(아무 스레드에서 Cancel·조회, 공유 상태는 원자 계수, `Create(allocator)`)은 그대로다. 하위호환 별칭 없이 호출처를 모두 바꾸고, 참조하는 문서(AssetSystem 11.1절, CoreObjectInputDetailedPlan.ko.md, EngineImplementationPlan.ko.md의 `CancelToken` 언급)도 갱신한다. 범용 기능을 한 곳에만 두는 규칙을 따른다.
 
 더할 것:
 - `Result<void> CancelToken::CheckCancelled() const noexcept` — 취소면 `ErrorCode::Cancelled`.

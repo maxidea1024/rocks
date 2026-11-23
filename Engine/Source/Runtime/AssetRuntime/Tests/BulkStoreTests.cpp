@@ -4,7 +4,7 @@
 #include <Core/FileError.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 파일 bulk 저장소·핸들 캐시 시험이다(Docs/Design/AssetSystem.ko.md 6.1절, 7.1절 15 — A2c1): 지연
+// 파일 bulk 저장소·핸들 캐시 시험이다(Docs/Design/AssetSystem 6.1절, 7.1절 15 — A2c1): 지연
 // 읽기(처음 읽을 때만 열기·같은 span), ref 판정, 지연 읽기의 손상·외부 변경·IO·할당 실패, 캐시
 // 상한(LRU)·지문 대조, 저장하지 않은 bulk·복사, 저장 뒤 다시 잇기(옛 ref 유지·빠진 id·이미 준 span
 // 유효·잘못된 표 거부), Detach, Package에 잇기.

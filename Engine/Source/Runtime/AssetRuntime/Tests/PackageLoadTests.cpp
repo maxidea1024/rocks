@@ -1,6 +1,6 @@
 #include "PackageEditing.h"
 
-// 로드 단계 시험이다(Docs/Design/AssetSystem.ko.md 5.7절 8–10, 11.2절): Prepare의 대조(대표 에셋
+// 로드 단계 시험이다(Docs/Design/AssetSystem 5.7절 8–10, 11.2절): Prepare의 대조(대표 에셋
 // 타입· 저장 버전·BulkDataRef ↔ BulkIndex·Dependencies ↔ 디코딩 결과·읽기 전용 부분집합·import
 // 의존), InstantiatePackages의 인자·resolver 오류, 로드 hook의 진단 분류.
 using namespace rocks;

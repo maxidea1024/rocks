@@ -4,7 +4,7 @@
 #include <Core/Result.h>
 #include <Object/AssetId.h>
 
-// SCC Record의 값 번호와 meta다(Docs/Design/AssetSystem.ko.md 9.1절 결정 3·15 — Rockpile 12.3절).
+// SCC Record의 값 번호와 meta다(Docs/Design/AssetSystem 9.1절 결정 3·15 — Rockpile 12.3절).
 // SCC 하나를 Record 하나(key = SCC key)로 두고, 값 번호는 (구성원 순번 << 16) | 부분 번호, meta는
 // 구성원 AssetId 목록(16 byte씩, 순서 = 구성원 순번)이다.
 //

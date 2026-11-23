@@ -13,7 +13,7 @@ internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, st
 
     public bool Deprecated { get; init; }
 
-    // 쿠킹 데이터에 없는 클래스(TypeFlags::EditorOnly — 상속된다, Docs/Design/AssetSystem.ko.md 10.2절 A4e2a)다.
+    // 쿠킹 데이터에 없는 클래스(TypeFlags::EditorOnly — 상속된다, Docs/Design/AssetSystem 10.2절 A4e2a)다.
     public bool EditorOnly { get; init; }
 
     public string Within { get; init; } = "";
@@ -56,7 +56,7 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public uint MaxElements { get; init; }
 
-    // 에셋 bundle 이름 목록 AssetBundles="a,b"(Docs/Design/AssetSystem.ko.md 10.2절 A4e2a — UE meta=(AssetBundles=…))의 정규 텍스트다
+    // 에셋 bundle 이름 목록 AssetBundles="a,b"(Docs/Design/AssetSystem 10.2절 A4e2a — UE meta=(AssetBundles=…))의 정규 텍스트다
     // (이름 앞뒤 공백을 뗀 쉼표 목록, 없으면 ""). 문법은 Specifiers.CanonicalAssetBundles(RMC2212), 필드 종류는 SchemaValidator(RMC2202)가 본다.
     public string AssetBundles { get; init; } = "";
 
