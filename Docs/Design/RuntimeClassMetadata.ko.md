@@ -75,6 +75,64 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 - **시점:** 처음 필요한 곳은 A5(텍스처 설정의 UnsupportedSetting 판정, 빌드 키의 "기본값 포함")다. A0-O의 graph v2가 누락=기준 규칙과 실효 값 Required 진단을 처음부터 갖고, A5는 레코드·차이 쓰기·override 집합·지문·cookKey·Summary 지문 열을 더한다(A1 Summary, A4 cookKey 산출물을 그때 고친다). A5 전에 만든 패키지·fixture는 A5에서 다시 만든다(하위호환을 두지 않는 방침). Tick 설정(`TickSettings`)은 struct 멤버 단위 비교와 함께 A5에서 리플렉션으로 옮긴다(ReflectionFoundations 결정 21). 표현 방식(override 집합 자료구조, Registry 밖 인코딩 경로, 레코드 경로 해석기)은 A5 구현 명세에서 정한다.
 - **거부한 대안 — UE식 객체 CDO:** WorldOnly 타입의 CDO는 어느 World에도 속하지 않는 장부 밖 객체가 되고, 코드 곳곳에 `IsDefaultObject` 분기가 생긴다. 상주 객체라 메모리·GC root를 차지하고 모듈 재등록 때 교체해야 한다. 가변 CDO는 이후 생성·차이 저장의 기준을 실행 중 바꿔 결정성을 깬다 — UE도 이 때문에 원격 이주에는 불변 기준 객체를 따로 만든다. 생성자 순수성 계약은 두 방식 모두 필요하므로 거부 사유가 아니다.
 
+### 클래스 기본값 구현 명세 — A5a 레코드 (2026-11-23)
+
+'클래스 기본값 결정'이 "A5 구현 명세에서 정한다"고 남긴 표현 방식 가운데 레코드 부분이다(차이 쓰기·override 집합은 A5b, 지문 연결은 A5c — [AssetSystem](AssetSystem/12-Textures.ko.md) 12.7절). 근거 조사는 2026-11-23 현재 코드이고, 설계 교차 검증(필수 4 — ObjectRegistry 의존·Soft 검출·수동 함수표 표지·할당 소유)을 반영했다.
+
+**데이터와 자리.**
+- `ClassDefaults`(ObjectRuntime `Object/ClassDefaults.h`, 불변): `editorRecord`(그래프 저장과 같은 wire의 클래스 Record byte — 저장 정책 editor: Transient만 뺀다), `cookedRecord`(저장 정책 cooked: EditorOnly 실효 필드·멤버도 뺀다 — 쿠킹 저장과 같은 `excludedFlags`·`includeFlags`로 다시 인코딩한다), `editorFingerprint`·`cookedFingerprint`. 구성은 저장 정책의 제외 플래그 집합으로 식별한다. 다른 구성(예: 전용 서버 쿠킹의 클라이언트 전용 제외)이 생기면 구성을 더한다.
+- 자리는 `TypeRegistry::Record`(등록 세대 하나)의 지연 슬롯이다. 원자 칸 하나에 상태(없음·게시됨·실패 기억)와 게시 포인터를 함께 담는다. 읽기는 acquire 적재로 잠금 없이 하고, 게시는 release 저장이다. 생성은 TypeRegistry의 생성 전용 잠금(`defaultsGate_` — `gate_`와 다른 잠금, ClassRef 판정이 `gate_`를 잡으므로) 안에서 한 번만 한다. 잠금을 잡은 뒤 상태를 다시 보므로 같은 타입을 두 번 만들지 않는다. `DestroyRecord`가 해제한다. 등록 세대가 바뀌면(재등록·reload) 새 슬롯이라 옛 레코드·실패 기억이 따라오지 않는다.
+- **할당 소유**: 게시하는 `ClassDefaults`와 그 byte 배열, 실패 기억의 진단(필드 경로 포함)은 TypeRegistry allocator로 만든다(게시 시도가 TypeRegistry 안에서 복사한다 — `DestroyRecord`가 같은 allocator로 해제). 그래서 TypeRegistry 계약에 "allocator는 스레드 안전해야 한다(레코드 게시는 생성 스레드 밖에서도 할당한다)"를 더한다. 구현 때 기존 TypeRegistry 생성처(엔진 기본 allocator·시험의 할당 실패 allocator)가 넘기는 allocator를 점검한다. 임시 인스턴스와 작업 버퍼는 호출자 allocator다.
+- `TypeLease`에 접근자를 더한다: 게시된 레코드 읽기, 실패 기억 읽기, 게시·실패 기억 시도(잠금은 TypeRegistry가 잡는다). 레코드 수명은 lease가 쥔 등록 레코드 수명이다(lease 밖으로 byte를 넘기지 않는다).
+- 만드는 쪽은 인코딩 본문이 있는 ObjectSerialization이다: `AcquireClassDefaults(const TypeLease& lease, Allocator& scratch, ClassDefaultsDiagnostic* diagnostic = nullptr) → Result<const ClassDefaults*>`. ObjectRegistry를 받지 않는다 — 레코드는 TypeRegistry 등록 세대에 속하므로 특정 ObjectRegistry의 상태(소유 스레드·GC 처리 중·종료)에 성패가 걸리면 안 된다. 그래서 어느 스레드에서나 부를 수 있다.
+  - ClassRef 기본값(값은 TypeId — 생성자가 non-null을 넣을 수 있다)은 복원 1단계처럼 `TypeRegistry::Acquire`로 판정한다(잠금 보호).
+  - Name은 C++ 생성자가 풀에 닿을 수 없어 None만 만든다. 문맥의 Name 풀은 없고, None이 아닌 Name이 나오면 결정적 codec 위반이다.
+  - BulkDataRef(AssetRuntime)는 생성자가 bulk id를 만들 수 없어 구조적으로 비어 있다(저장의 bulk 재번호 hook과 엇갈리지 않는다).
+
+**레코드가 없는 타입**(Unsupported — 기억한다, 호출자는 전부 저장):
+- 추상(`construct` 없음), `completeFieldLayout` 거짓.
+- 생성 코덱 표지가 없는 타입(`ManualFields`). MetaCompiler가 생성 함수표에 `ops.generatedFieldCodecs = true`를 한 줄 더 낸다. 표지는 모든 필드 thunk가 생성 코드(`EncodeGeneratedField`·`EncodeBitfieldField`)라는 뜻이고, base 사슬의 모든 등록 레코드에 표지가 있어야 한다(생성 클래스가 손 함수표 base를 상속하면 base 필드가 원본 모드를 모른다). 손으로 쓴 함수표는 encode가 원본 모드를 모르므로 표지가 없고, 레코드 없이 전부 저장한다.
+- Sparks 등록 타입은 지금 손 함수표로 등록되어 표지가 없으므로 같은 규칙으로 레코드가 없다. 초기값 합성(위 결정)은 Sparks L2 단계에서 그 등록이 표지와 합성 경로를 함께 가져온다.
+
+**Registry 밖 인코딩 경로**:
+- `FieldEncodeContext`에 원본 모드를 더한다: 가상 `RawSource() → const Object*`(기본 null). 생성 class 필드 thunk(`EncodeGeneratedField` — 컨테이너·Optional·Map·InstancedStruct·정적 배열·struct·Text 모두)와 bitfield thunk(`EncodeBitfieldField`)는 `RawSource()`가 있으면 Registry `Resolve`·staged 대신 그 객체에서 멤버를 읽는다. 선례는 같은 두 함수의 staged 분기다. 그 뒤는 같은 `EncodeMemberValue`라 byte가 같다. struct 멤버 thunk는 원래 `const void*`를 받는다. 수동 함수표 경로(`EncodeThroughFieldValue`)는 원본 모드에서 Unsupported다(표지 판정이 먼저 막지만 방어로 둔다 — 실제로 나오면 이유는 `ManualFields`다).
+- 객체 하나의 필드 루프(필드 범위·제외 판정·ops 찾기·encode·wire 재확인·`RecordBuilder::AddField` — 지금 `SaveNodeFields` 375–400행)를 공용 함수로 꺼낸다. pin·`BeginObject`·budget·위치 rebase·파일 byte 누계는 그래프 저장이 그 앞뒤에서 한다. 필드마다 그래프 저장만 하는 일이 있으면 그 지점을 콜백 인자로 둔다(구현 때 확정). `ValidateLayout`은 레코드도 먼저 부른다.
+- 레코드 문맥 `ClassDefaultsEncodeContext`(ObjectSerialization 내부):
+  - 강한 참조 null은 그래프 저장과 같은 `U32 0`이다. non-null 강한·weak 참조는 실패한다(이유 `NonNullReference` + 필드 경로).
+  - Soft 참조는 hook을 거쳐서만 문맥에 닿으므로(비가상 `SubstituteSoftReference`·`CollectSoftReference`) 레코드 전용 내부 hook을 둔다: `CollectSoftReference`는 경로를 담아 `NonNullReference`로 실패, `SubstituteStruct`·`SubstituteSoftReference`는 값 그대로, `Report`는 진단을 모은다(치환 없음, 수집은 거부용).
+  - 한도는 저장 한도 이상(`ObjectGraphLimits`의 최댓값 — 레코드가 저장 한도에 걸려 결정적 CapacityExceeded로 기억되는 일이 없게)이다.
+  - Required 검사는 끈다(`rejectMissingRequired` 거짓 — 결정의 레코드 인코딩 규칙).
+
+**만드는 순서**(생성 잠금 안):
+1. 슬롯 상태를 다시 본다(게시됨이면 그것, 실패 기억이면 그 오류·진단).
+2. 레코드가 없는 타입 판정.
+3. 임시 인스턴스 둘을 동시에 산 채로 만든다(주소에 기대는 값이 저장소 재사용으로 가려지지 않게): `ops.size`·`ops.alignment`로 받은 저장소마다 `ops.construct(memory, scratch)`. 소멸은 `ops.destroy(object)` 뒤 **저장소 시작 주소**를 반환한다(construct가 준 `Object*`는 vfptr 등으로 저장소 시작과 다를 수 있다). handle이 없는 객체라 생성자에서 Registry API를 쓸 수 없다(Create도 construct 뒤에 Registry를 세운다 — 생성자 순수성 계약과 같다). 생성자는 생성 잠금 안에서 돌므로 순수성 계약에 "잠금을 잡지 않고 레코드 생성을 다시 부르지 않는다"를 더한다. Debug는 같은 스레드의 재진입을 Fatal로 잡는다.
+4. 두 인스턴스의 editor 인코딩을 byte 비교한다. 다르면 이유 `NonDeterministic`(첫 다른 필드 id)이다.
+5. 첫 인스턴스를 cooked 정책으로 한 번 더 인코딩한다.
+6. 지문: `SHA-256("RocksClassDefaults" ‖ 구성 byte ‖ ObjectGraphFormatVersion(u32 LE) ‖ 레코드 byte)`. `ObjectGraphFormatVersion`은 그래프 형식 버전(지금 `graph_detail::FormatVersion` = 2 — 공개 상수로 올린다)이고 결정의 "codec wire 버전"이 이것이다. Record 머리에 schema id·version이 있으므로 타입 버전이 오르면 지문도 바뀐다(의도 — 쿠킹 패키지가 다시 쿠킹된다). 구성 byte 표: 0 = editor(제외 {Transient}), 1 = cooked(제외 {Transient, EditorOnly}). 구성이 늘면 다음 번호를 주고 번호를 다시 쓰지 않는다.
+7. 게시. 기억하는 실패는 결정적 이유뿐이다: 레코드 없는 타입(셋), `NonDeterministic`, `NonNullReference`, 결정적 codec 위반(InvalidArgument·TypeMismatch 등 입력이 같으면 늘 같은 오류). OutOfMemory·Busy·ShuttingDown·NotFound(ClassRef 대상이 아직 등록 전)·접근 오류는 기억하지 않는다(다음 호출이 다시 만든다). ClassRef 대상만 재등록되어 "base 파생 아님"으로 기억한 실패가 이 타입 세대에 남는 경우는 C++ 타입이 재등록되지 않아 지금 없다 — Sparks L2(reload)에서 다시 본다.
+
+**경로 조회**: `FindDefaultPayload(const ClassDefaults&, const PropertyPathBuffer& path, bool cooked) → Result<DefaultPayload{wire, bytes}>`. path는 그 타입 스키마로 해석한 것이다(`ParsePropertyPath`). 필드 → (비Atomic struct면) 멤버 사슬, 정적 배열 원소(고정 index — 기준이 있다)까지 Record를 따라 내려가 그 값의 wire와 payload byte를 준다. Atomic struct는 그 struct 경로까지만이다(멤버 경로는 InvalidArgument). 동적 배열 원소·Map 키·Set·Optional 안쪽은 기준이 없어 Unsupported다(결정의 원소 단위 차이 후속). cooked로 조회한 EditorOnly 경로와 레코드에 없는 경로는 NotFound다. 쓰는 곳: A5b 되돌리기(payload를 그 경로에 decode), A5d 계약 설정 판정(필드 payload byte 비교). 값으로 푸는 텍스트 조회는 ReflectionText 쪽 후속이다.
+
+**전부 만들기**: `ForEachClassDefaults(TypeRegistry&, Allocator& scratch, callback)` — 등록 목록의 TypeId를 `gate_` 아래에서 복사한 뒤(어느 스레드에서나) 하나씩 Acquire해 lease를 쥐고, 등록된 구체 클래스(추상은 뺀다)의 레코드를 만들어 (TypeId, 지문 둘 또는 실패 진단)을 넘긴다. 쿠킹 시작과 CI 시험이 쓴다(결정의 "실패를 미리 드러낸다"). Windows·macOS 지문 대조는 이 목록의 golden 덤프 시험이다(A5c).
+
+**진단** `ClassDefaultsDiagnostic{reason, type, fieldPath}` — reason: `None`·`Abstract`·`IncompleteLayout`·`ManualFields`·`NonDeterministic`·`NonNullReference`·`EncodeFailed`(그 밖의 codec 오류 — 오류 코드 보존). 오류 코드는 Unsupported(앞 셋)·InvalidArgument(NonDeterministic·NonNullReference)·codec 오류 그대로·OutOfMemory. 실패를 기억하면 진단(경로 포함)도 함께 기억해 두 번째 호출이 같은 진단을 낸다.
+
+**버린 대안**: 레코드를 살아 있는 객체로 두기(결정의 거부 대안), 별도 raw thunk 칸(생성 코드가 커지고 같은 본문을 두 경로가 부른다 — 문맥 모드 + 표지 한 줄로 충분하다), 레코드를 ObjectRegistry마다 두기·ObjectRegistry로 만들기(레코드는 타입 등록 세대에 속한다 — Registry 상태에 성패가 걸리고 일시 오류가 기억된다), CAS 경쟁 게시(진 쪽이 헛일을 하고 TypeRegistry allocator 사용이 두 배다 — 생성 잠금으로 한 번만), cooked 레코드를 editor 레코드에서 걸러 만들기(struct 안 EditorOnly 실효 멤버는 다시 인코딩해야 정확하다).
+
+**시험(A5a)**:
+- 같음: 기본값 fixture 클래스(정수·float·문자열·enum·struct(비Atomic·Atomic)·배열·Set·Map·Optional·정적 배열·Text·InstancedStruct(빈·비어 있지 않은)·Name None·ClassRef(null·non-null)·null 강한 참조(필드·struct·컨테이너 안)·EditorOnly 필드·EditorOnly 전파(struct 필드 플래그·EditorOnly struct 타입)·Transient·bitfield·상속 필드·가상 함수가 있는 클래스)의 editor 레코드 = 같은 객체의 editor 그래프 저장 Record, cooked 레코드 = cooked 그래프 저장 Record.
+- 지문: 값 고정(같은 입력 같은 값, 구성마다 다름, 타입 버전이 오르면 다름).
+- 레코드 없는 타입 셋(손 함수표는 `EncodeThroughFieldValue`가 아닌 직접 만든 encode 포함)과 기억.
+- 비결정 생성자 NonDeterministic 기억, non-null Soft(필드·struct·배열·Map·Optional·InstancedStruct 안 — 경로) NonNullReference 기억, 두 번째 호출 진단 같음.
+- 할당 실패 모든 지점 OutOfMemory·기억 안 함·다시 성공(TypeRegistry allocator·scratch 둘 다).
+- ClassRef 대상 미등록 NotFound 기억 안 함 → 등록 뒤 성공.
+- 동시 생성: 두 스레드(gate로 순서를 정해 결정적으로) — 생성 한 번, 둘 다 같은 레코드.
+- ObjectRegistry 독립: ObjectRegistry 둘(같은 TypeRegistry)에서 저장 비교 기준이 같은 byte.
+- 재등록 뒤 새 슬롯.
+- 경로 조회: 필드·struct 멤버·정적 배열 원소·Atomic struct 통째·Atomic 멤버 InvalidArgument·동적 배열 원소 Unsupported·cooked의 EditorOnly NotFound·없는 경로.
+- `ForEachClassDefaults` 목록(추상 제외·실패 진단 포함).
+
 ## 단계와 완료 기준
 
 1. **타입 접근 기반:** 정적 생성 정보와 동적 등록 정보를 구분하는 API, lease·World·Borrow 및 오류 경로 검증. 생성기가 반영 클래스를 누락하거나 파생 클래스가 부모의 정적 함수로 잘못 식별되지 않아야 한다.

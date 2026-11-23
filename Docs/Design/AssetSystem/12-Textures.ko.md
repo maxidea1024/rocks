@@ -269,4 +269,4 @@ BC·ASTC·ETC 인코더 없음, 렌더러는 비압축만. 쿠킹은 비압축�
 | A5k | 14절 텍스처 시나리오(임포트 → 설정 편집 → 쿠킹 → 런타임 로드 데이터 대조), 클래스별 PostLoad dispatch 필요 여부 판정(11절 9번 — 텍스처가 쓰지 않으면 후속으로 둔다), 렌더 세션에 쿠킹 데이터 형태 알림 | 전체 |
 
 - 임포터 구성(차원마다 임포터를 나눌지, 고정 역할·접두 역할 배치)은 A5h 세부 설계에서 정한다. A2f 규칙상 고정 역할은 정확히 한 번씩 와야 하므로(7.1절 19 A2f3b), 원본 하나 구성(2D·배치 Cube·타일 Volume)과 파일 여러 개 구성(6면 Cube·Array·slice Volume)은 역할 집합이 다르다.
-- A5a–A5c의 표현 방식(override 집합 자료구조, Registry 밖 인코딩 경로, 레코드 경로 해석기)은 RuntimeClassMetadata가 "A5 구현 명세에서 정한다"고 남긴 항목이다. A5a 착수 때 ObjectFoundations에 그 명세를 먼저 적는다.
+- A5a–A5c의 표현 방식(override 집합 자료구조, Registry 밖 인코딩 경로, 레코드 경로 해석기)은 RuntimeClassMetadata가 "A5 구현 명세에서 정한다"고 남긴 항목이다. A5a 착수 때 RuntimeClassMetadata에 그 명세를 먼저 적는다(ObjectFoundations는 1000줄이 넘어 나눔 대상이라 결정 원문이 있는 RuntimeClassMetadata에 둔다 — A5a 명세 2026-11-23).
