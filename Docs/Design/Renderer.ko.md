@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-20, 개정 11(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-23, 개정 12(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -105,7 +105,7 @@
 | `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, 렌더 전달 가능 등록(RenderBase 5.2절), `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표의 C++ 정의(결정 RN5, 14.2절) | 장치·Object·World |
 | `RendererShaders` | `Engine/Source/Runtime/RendererShaders` | ShaderCore·RenderData·MaterialSchema | pass 셰이더 타입·퍼뮤테이션 도메인·거르기 함수(`MaterialShaderTraits`를 받는다, 14.3절), `GBufferLayout` 정의와 shading model의 GBuffer 의미, 파라미터 구조체 선언 | 장치·Renderer |
 | `Renderer` | `Engine/Source/Runtime/Renderer` | RendererShaders·RenderGraph·RenderBase·RenderData·MaterialRuntime·TextureStreaming·SpatialIndex·Task·Core | `RenderScene`·`RenderView`·가시성·`GpuScene`·light grid·그림자·두 경로의 pass 조립·`PostChain`·GI 연결점 | World·ObjectRuntime·AssetRuntime |
-| `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제 | Renderer 내부 주소 |
+| `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제. 받는 컴포넌트 목록과 RS 단계별 도입 순서는 [컴포넌트 도입](ComponentCatalog.ko.md) 3·4.6절(CR12) | Renderer 내부 주소 |
 
 의존 방향(위가 아래를 쓴다):
 
@@ -160,6 +160,7 @@ RenderNotices 처리(해제 완료) ◀─────────────�
 - **이전 프레임 변환.** velocity·TAA는 이전 변환이 필요하다(계획 12.2절). `RenderScene`이 직전 적용 값을 보존하고, 이번 프레임에 변환 갱신이 없으면 이전 = 현재로 둔다. teleport 표시가 있으면 이전 = 현재로 리셋한다.
 - **텍스처 사용 기록.** 렌더러는 그린 그리기 항목이 쓴 텍스처의 사용 기록마다 "마지막으로 화면에 그린 프레임 번호"를 `RenderNotices`로 돌려준다(TextureStreaming 4.1절·결정 T3). 상주 계획이 보임 신호로 쓴다(RQ21).
 - **해제.** 인스턴스 제거는 렌더 lane에서 즉시 표에서 빼고, 그 인스턴스가 쓰던 GPU Scene 영역은 프레임 slot GPU 완료 뒤 재사용한다(계획 13.1절 "frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다").
+- **디버그·편집 표시(설계 요구, 단계 미정 — [컴포넌트 도입](ComponentCatalog.ko.md) CR23).** 선·도형·아이콘 billboard(UE `ULineBatchComponent`·`UArrowComponent`·`UBillboardComponent`·`UDrawFrustumComponent` 등)를 그리는 개발 빌드·에디터 view 전용 경로다. UE는 line batch proxy가 프레임마다 동적 메시 요소를 낸다(`Engine/Private/Components/LineBatchComponent.cpp:60`). Rocks는 가상 함수 proxy가 없으므로 인스턴스 종류 "디버그 선 묶음"·"아이콘 sprite"와 프레임 `RenderBlob`(선 정점 목록)으로 넘긴다. Shipping 빌드에서는 처리기를 등록하지 않는다. 자리(frame graph 순서)와 RS 번호는 에디터 뷰포트 단계와 함께 정한다.
 
 ## 5. view와 visibility
 
@@ -979,3 +980,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
 - 개정 10(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)을 18절 RQ19에 연결했다. RS12에 섹션 본 palette 한도·morph 적용 책임(MR2)을 적었다.
 - 개정 11(2026-11-20): RenderBase 결정 R18(섹션 분할 없음·LOD 통합 bone map·typed buffer 본 행렬)에 맞춰 RS12 내용을 고쳤다.
+- 개정 12(2026-11-23): [컴포넌트 도입](ComponentCatalog.ko.md) 개정 2 반영 — 3.2절 `WorldIntegration` 행에 컴포넌트 목록 링크(CR12), 4.2절 디버그·편집 표시(CR23).

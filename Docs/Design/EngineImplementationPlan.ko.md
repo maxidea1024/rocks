@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.22 · 개정 1.18 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.23 · 개정 1.19 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -37,6 +37,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
 
 **1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
+
+**1.19 엔진 컴포넌트:** UE 5.8 `Engine/Classes/Components`의 컴포넌트를 들이는 범위·선행·순서를 [컴포넌트 도입](ComponentCatalog.ko.md)(필수 58, 선행 CR1–CR26, 묶음 CM0–CM11)에 둔다. BSP(`UModelComponent`·`UBrushComponent`)와 폐기 계열은 제외하고 volume 형상은 공용 `VolumeShape`로 대체한다. 20.2절 tick group 문장을 [엔진 런타임](EngineRuntime.ko.md) 8절의 구현된 단계 기준으로 고친다. 개정 범위는 표지·20.2절이다.
 
 ## 1. 목표와 실행 전략
 
@@ -1795,9 +1797,11 @@ struct TickSpec {
 };
 ~~~
 
-tick group은 PrePhysics, PhysicsSync, PostPhysics, AnimationFinalize, LateUpdate를 기본으로 하고 prerequisite DAG의 cycle을 오류로 검출한다. 독립 component의 병렬 tick은 read/write access 선언이 검증된 경우만 허용한다. Object 가변 상태를 다루는 기본 tick은 Game lane에서 수행한다. tick 중 component 추가·삭제·reparent는 deferred command로 commit한다.
+tick group은 구현된 단계 PrePhysics·Physics(고정 스텝)·PostPhysics·LateUpdate·PreRender([엔진 런타임](EngineRuntime.ko.md) 8절)를 기본으로 한다. 물리 결과 반영(옛 표기 PhysicsSync)과 애니메이션 마무리(옛 표기 AnimationFinalize) 지점은 UE `ETickingGroup`과 대조해 물리·애니메이션 컴포넌트 착수 전에 정한다([컴포넌트 도입](ComponentCatalog.ko.md) CR8a). prerequisite DAG의 cycle은 오류로 검출한다. 독립 component의 병렬 tick은 read/write access 선언이 검증된 경우만 허용한다. Object 가변 상태를 다루는 기본 tick은 Game lane에서 수행한다. tick 중 component 추가·삭제·reparent는 deferred command로 commit한다.
 
 singleton-per-entity·required component·mutually exclusive 규칙을 type metadata로 표현한다. editor가 자동 추가하는 종속 component는 transaction에 포함한다. cook은 순환 종속·누락 필수 component를 검사한다. constructor에서 backend world에 즉시 등록하지 않으며 Register가 실패하면 backend의 부분 등록을 해제하고, 이미 Commit된 객체는 5.3절의 RequestDestroy·정상 retire 경로로 정리한다. 미공개 rollback과 구분한다. editor에는 component tree, active state, tick 의존성, native handle 상태를 표시한다.
+
+엔진이 제공하는 컴포넌트 종류(메시·광원·대기·캡처·충돌 형상·오디오·입력 등)와 그 선행·도입 순서는 [컴포넌트 도입](ComponentCatalog.ko.md)이 정한다.
 
 editor는 배치한 Actor에 ScriptableComponent를 바로 붙일 수 있다. 직접 배치한 Actor는 그 component 목록에 추가해 레벨과 함께 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행). 이것은 레벨·배치 데이터 편집이므로 Sparks core에서도 되며, 실행 중 스크립트가 component를 추가하는 것(Sparks full 전용)과 구분한다([레벨 스크립트](LevelScript.ko.md) LD15).
 

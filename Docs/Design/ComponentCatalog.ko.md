@@ -1,6 +1,6 @@
 # 엔진 컴포넌트 도입 설계(UE 5.8 `Classes/Components` 대응)
 
-기준일: 2026-11-23, 개정 1(리뷰어 1명 교차검증 반영 — 9절). 결정 CD1–CD10은 권장안으로 적었다(6절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다(5절).
+기준일: 2026-11-23, 개정 2(다른 문서 개정 반영·이름 정정 — 9절). 결정 CD1–CD10은 권장안으로 적었다(6절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다(5절).
 
 이 문서는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 `Engine/Source/Runtime/Engine/Classes/Components` 폴더(헤더 73개)에 있는 컴포넌트를 Rocks에 들이는 범위와 순서를 정한다. 사용자 지시(2026-11-23): 기본은 전부 가져오되 폐기된 것과 BSP는 제외한다. 필수 컴포넌트 목록(3절)과 선행 작업 목록(4절)을 따로 둔다.
 
@@ -145,7 +145,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 
 | UE | Rocks | 선행 | 묶음 |
 |---|---|---|---|
-| `ULightmassPortalComponent` | `LightPortalComponent` | 라이트맵 bake(EIP 14.10절), RN RS7 `StaticLighting::Baked` | CM10 |
+| `ULightmassPortalComponent` | `LightBakePortalComponent` | 라이트맵·프로브 bake(EIP 14.10절), RN RS7 `StaticLighting::Baked`. 베이커만 읽는다 — UE도 정적 조명 빌드가 portal 변환을 베이커로 내보낼 뿐(`Editor/UnrealEd/Private/StaticLightingSystem/StaticLightingSystem.cpp:2316–2321`, `Editor/UnrealEd/Private/Lightmass/Lightmass.h:113–115`) 런타임 렌더러는 쓰지 않는다(render state는 편집 미리보기 상자뿐, `Engine/Private/Components/PortalComponent.cpp:79–89`) | CM10 |
 
 ### 3.8 오디오·햅틱·입력
 
@@ -226,7 +226,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CR14 | 머티리얼 런타임: section별 머티리얼 `RenderHandle`, 인스턴스 파라미터 override, 실행 중 머티리얼 인스턴스(UE `UMaterialInstanceDynamic` 대응) | MS3a 골격만 | 메모리 mesh-unreal-exchange-spec | [머티리얼 시스템](MaterialSystem.ko.md) |
 | CR14a | 텍스처 스트리밍 입력: 컴포넌트가 내는 텍스처 사용 기록(UV 밀도·화면 크기 — UE `FRenderAssetOwnerStreamingState`) | 설계만 | TextureStreaming 4.1절 | TextureStreaming |
 | CR15 | 추가 view와 render target 에셋(scene capture·planar reflection) | 없음 | — | RN 5절, AssetSystem 텍스처 계열 |
-| CR23 | 디버그 그리기 경로: 선·도형·아이콘 billboard를 그리는 개발 빌드용 pass(EditorOnly 시각화 포함) | 없음 | `Sandbox` 샘플 렌더러뿐(ER 3절) | RenderBase 그리기 유틸리티(추가 요구) |
+| CR23 | 디버그 그리기 경로: 선·도형·아이콘 billboard를 그리는 개발 빌드용 pass(EditorOnly 시각화 포함) | 없음 | `Sandbox` 샘플 렌더러뿐(ER 3절). UE는 line batch proxy가 프레임마다 동적 메시 요소를 내는 렌더러 경로다(`Engine/Private/Components/LineBatchComponent.cpp:60`) | RN 4.2절 "디버그·편집 표시" |
 | CR18 | 글꼴 에셋·글리프 atlas(`TextRenderComponent`) | 없음 | — | [UI 툴킷](UiToolkit.ko.md) 글꼴 |
 
 ### 4.4 물리
@@ -287,24 +287,25 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CD3 | 앱 수명·플랫폼 이벤트 래퍼 | 컴포넌트 없이 엔진 이벤트로 노출 | Blueprint가 없다(EIP 20.4절) |
 | CD4 | Stereo layer | VR P3 프로필 문서로 미룸 | EIP 14절 |
 | CD5 | Cascade vector field·pawn noise | 제외 | 2.2절 |
-| CD6 | 이름 | 업계 공용 이름(StaticMesh·PointLight·Decal·SkyAtmosphere 등)은 그대로 쓰고 UE 고유 이름은 바꾼다: `ExponentialHeightFog` → `HeightFog`, `LightmassPortal` → `LightPortal`(Lightmass는 UE 도구 이름), `WorldPartitionStreamingSource` → `StreamingSource`, `InterpToMovement` → `PathMover`, `RuntimeVirtualTexture` → `VirtualTextureVolume`, `LODSync` → `LodSync`, `WindDirectionalSource` → `WindSource`. `Component`(UE `UActorComponent`)는 이미 정한 이름 | Rocks 이름 규칙(UE 구조, Rocks 이름) |
+| CD6 | 이름 | 업계 공용 이름(StaticMesh·PointLight·Decal·SkyAtmosphere 등)은 그대로 쓰고 UE 고유 이름은 바꾼다: `ExponentialHeightFog` → `HeightFog`, `LightmassPortal` → `LightBakePortal`(Lightmass는 UE 정적 조명 베이커 이름이다. 베이크 전용이라는 뜻을 남기고 계획 14.10절의 Bake 어휘에 맞춘다. `LightPortal`은 런타임 광원처럼 읽히고, `LightmapPortal`은 프로브 bake도 쓰는 범위를 좁히며, V-Ray식 `SkyPortal`은 베이크 전용임이 드러나지 않아 버렸다 — 사용자 지적 2026-11-23), `WorldPartitionStreamingSource` → `StreamingSource`, `InterpToMovement` → `PathMover`, `RuntimeVirtualTexture` → `VirtualTextureVolume`, `LODSync` → `LodSync`, `WindDirectionalSource` → `WindSource`. `Component`(UE `UActorComponent`)는 이미 정한 이름 | Rocks 이름 규칙(UE 구조, Rocks 이름) |
 | CD7 | 입력 컴포넌트 | Enhanced Input 구조(액션·매핑 컨텍스트) 하나. 옛 축·액션 이름 바인딩 없음 | 3.8절, 하위호환 없음 원칙 |
 | CD8 | 활성(Activate) | UE의 Activate·Deactivate·`bAutoActivate`는 Rocks `enabled`·`OnEnable`·`OnDisable`로 대응(EIP 20.2절 Activate→Enable). 별도 활성 상태를 두지 않는다. "등록됐지만 재생 안 함" 같은 상태는 컴포넌트 속성(예: 오디오 자동 재생)으로 | 상태 하나를 줄인다. UE 대응은 계획 20.2절이 이미 정했다 |
 | CD9 | AssetUserData | 들이지 않는다. 필요한 확장 데이터는 리플렉션 필드나 별도 컴포넌트로 | 플러그인용 임의 부착 데이터로, 타입 규칙(CR6)과 겹친다. 요구가 생기면 다시 본다 |
 | CD10 | Mobility | UE와 같은 셋(Static·Stationary·Movable). Static 이동은 거부(진단), 정적 조명·캐시 그리기 항목과 연동 | UE와 같게(애매하면 UE 방식) |
 
-## 7. 다른 문서 개정(반영 대기)
+## 7. 다른 문서 개정
 
-| 문서 | 고칠 것 |
+개정 2(2026-11-23)에서 모두 반영했다. 요구의 정본은 여전히 이 문서 4절이고, 각 문서에는 요구 요약과 링크만 넣었다.
+
+| 문서 | 고친 것 |
 |---|---|
-| ER 7.3·8절 | CR1(시스템 상태 hook), CR2(SceneComponent 보강), CR8a(Tick 단계 확정) |
-| EIP 20.2절 | tick group 목록을 ER 8절과 맞춤(CR8a), 이 문서 링크 |
-| RN 3.2·4.2절 | `WorldIntegration`이 받는 컴포넌트 목록과 인스턴스 종류를 이 문서 3절로 링크 |
-| AU 3.15절 | 영역 형상을 `VolumeShape` 공용 타입으로(CR17) |
-| RenderBase | 디버그 그리기 pass(CR23) |
-| AssetSystem | 객체 단위 EditorOnly 비트 활성(Exports 플래그, schemaVersion 올림)과 MetaCompiler 클래스 지정자(CR5) |
-| ER 1·3절 | `Gameplay` 모듈(S10–S12)이 입력·햅틱 컴포넌트의 선행이라는 링크(CR26) |
-| PhysicsJoltAdapter | 컴포넌트 쪽 요구(CR16) 목록 링크 |
+| ER 7.3·8절 | 7.3절에 보강 예정 항목(CR1 시스템 상태 hook, CR2 SceneComponent 보강), 8절에 Tick 단계 대조 미결(CR8a) |
+| EIP 20.2절 | tick group 문장을 구현된 ER 8절 단계 기준으로 고치고, 물리 결과 반영·애니메이션 마무리 지점은 CR8a에서 정한다고 적음 |
+| RN 3.2·4.2절 | `WorldIntegration` 행에 이 문서 3절 링크, 4.2절에 "디버그·편집 표시"(CR23). 처음 표의 RenderBase 대상은 잘못이었다 — UE 디버그 선은 RenderCore가 아니라 렌더러의 동적 메시 경로다 |
+| AU 3.15.2절 | 영역 형상을 공용 `VolumeShape`로(CR17) |
+| AssetSystem 5.7절 4항 | 객체 단위 EditorOnly 활성 시점을 컴포넌트 도입(CR5)으로 연결 |
+| ER 3절 | `Gameplay` 행에 미착수와 입력·햅틱 컴포넌트 선행(CR26) |
+| PhysicsJoltAdapter | 관련 문서에 컴포넌트 쪽 요구(CR16) 링크 |
 
 ## 8. 확인하지 못한 것
 
@@ -314,5 +315,6 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 
 ## 9. 개정 기록
 
+- 개정 2(2026-11-23): 7절 다른 문서 개정 반영. CR23 정본을 RenderBase에서 Renderer 4.2절로 정정. `LightmassPortal` 대응 이름을 `LightPortal`에서 `LightBakePortal`로(사용자 지적 — 베이크 전용 의미, CD6).
 - 개정 1(2026-11-23): 리뷰어 1명 교차검증 반영 — CM1을 CM1a(정적 메시, RS0)·CM1b(광원, RS1·RS3)로 나누고 화면 마일스톤 범위를 CM0+카메라로 정정, 게임 프레임워크 선행 CR26 추가(입력·햅틱), 볼륨 안개·구름을 CM11로, CR5 근거(객체 단위 EditorOnly 미활성), 3절과 4.6절 선행 불일치·ID 오기 정정, PawnNoiseEmitter·HISM·InputComponent 인용 정정, 1.2절 Runtime 다른 모듈(UMG·Foliage·Landscape·AIModule).
 - 개정 0(2026-11-23): 첫 초안. 분류(필수 58·대체 3·제외 4·후속 프로필 1), 선행 CR1–CR25, 묶음 CM0–CM11, 결정 CD1–CD10 권장안.
