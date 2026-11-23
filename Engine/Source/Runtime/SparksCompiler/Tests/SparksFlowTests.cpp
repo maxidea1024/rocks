@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 흐름 분석 시험이다(Docs/Design/SparksLanguage.ko.md 3.11절, S0412·S0710–S0712·S0714). 규칙별
+// 흐름 분석 시험이다(Docs/Design/SparksLanguage 3.11절, S0412·S0710–S0712·S0714). 규칙별
 // 양성·음성 사례와 위치·읽기 타입은 corpus `Conformance/Flow`가 맡고, 여기서는 진단 문장과 수정 예,
 // 단계(Types까지면 흐름 진단이 없다), word 경계를 넘는 지역 이름·대입 값 수, 깊은 중첩 반복,
 // 결정성, 할당 실패를 본다.

@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// struct 값의 순환(S0426)과 struct 기본값이다(Docs/Design/SparksLanguage.ko.md 3.10절 "값 struct의
+// struct 값의 순환(S0426)과 struct 기본값이다(Docs/Design/SparksLanguage 3.10절 "값 struct의
 // 순환", 3.2절 기본값). Sparks struct의 필드 그래프(필드 타입에서 `?`를 벗긴 것이 struct일 때의
 // 간선)에서 강하게 연결된 묶음을 반복형 Tarjan으로 찾는다. 묶음은 끝(다른 묶음을 가리키지 않는
 // 쪽)부터 나오므로 그 순서로 기본값을 정하면 가리키는 struct의 판정이 이미 있다. 재귀가 없어 struct

@@ -9,7 +9,7 @@
 #include <Platform/File.h>
 #include <SparksCompiler/Compilation.h>
 
-// Sparks conformance corpus 실행기다(Docs/Design/SparksLanguage.ko.md 13.1절).
+// Sparks conformance corpus 실행기다(Docs/Design/SparksLanguage 13.1절).
 //
 // 언제 쓰나: 언어 규칙마다 둔 사례를 컴파일해 기대값(`.expect`)과 맞춰 본다. 시험과 이후의
 // `sparks test`가 쓴다.

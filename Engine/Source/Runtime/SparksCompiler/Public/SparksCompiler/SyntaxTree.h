@@ -10,7 +10,7 @@
 #include <SparksCompiler/Source.h>
 #include <SparksCompiler/Token.h>
 
-// Sparks 구문 트리와 구문 분석이다(Docs/Design/SparksLanguage.ko.md 3.6절 문법, 8.1절 "구문 분석"·
+// Sparks 구문 트리와 구문 분석이다(Docs/Design/SparksLanguage 3.6절 문법, 8.1절 "구문 분석"·
 // "복구", S02xx).
 //
 // 사용 예:
@@ -45,7 +45,7 @@ inline constexpr uint32 NoToken = NumericLimits<uint32>::Max();
 
 // 재귀 구문의 중첩 상한이다(S0215). 단계는 문장 하나, 식 하나(괄호·대괄호·호출 인자·인덱스·보간
 // 안의 식마다 새로 하나), 단항 연산자 하나, `??`의 오른쪽 하나, try·await 하나, 타입 하나(타입
-// 인자마다 새로 하나), `else if` 하나마다 늘어난다(Docs/Design/SparksLanguage.ko.md 8.1절 "깊이
+// 인자마다 새로 하나), `else if` 하나마다 늘어난다(Docs/Design/SparksLanguage 8.1절 "깊이
 // 상한"). 한 단계가 parser 함수 프레임 여러 개(식 한 단계에 약 12개)를 쓰므로 Debug 빌드에서도 기본
 // stack(1 MiB) 안에 들도록 정한 값이다. 넘으면 그 파일의 나머지는 분석하지 않는다.
 inline constexpr uint32 MaxSyntaxNesting = 128;

@@ -1,6 +1,6 @@
 # Sparks VM
 
-기준일: 2026-11-22 · 개정 1 · 상위 문서: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) §8.3·§9·§11·18.2절 LC5, [Sparks bytecode](SparksBytecode.ko.md)(이하 BC)
+기준일: 2026-11-22 · 개정 1 · 상위 문서: [Sparks 언어](SparksLanguage/README.ko.md)(이하 SL) §8.3·§9·§11·18.2절 LC5, [Sparks bytecode](SparksBytecode.ko.md)(이하 BC)
 
 이 문서는 언어 코어 LC5(VM 핵심 — interpreter, 값 버퍼, 숫자 검사와 fault, 예산, 부록 B 표준 API, host interface 1차)의 설계 정본이다. 실행 모델(instance·hook·큐·async — LC6)은 이 VM 위에 얹는다. 형식(opcode·명령 모양·`.sparkc`)은 BC가 정본이고, 이 문서는 그 형식을 실행하는 방법을 정한다.
 

@@ -16,7 +16,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.8 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다. 이 전환은 개정 1.12에서 사용자 결정으로 되돌렸다(Jolt, 16절·33.17절).
 
-**1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparkc`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
+**1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparkc`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage/README.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
 
 **1.8 Sparks 언어 모호성 교차 검증:** 같은 규격을 읽은 구현자나 사용자가 다른 결론에 이를 수 있는 지점을 6개 관점으로 교차 검증하고, 스크립트 단계와 프레임 순서·인과 깊이 연쇄 상한·전달 순회·Changed 값 기준·격리·종료 경로별 hook·이름 해석·예약 이름·어휘를 확정하였다. 결정 SD11–SD21(재진입 정책 표시, Start 대기 범위, 이벤트 대기 결과, Array 파괴 처리, enum 한정, 범위 `..<`, 정수 나눗셈 오류, 미터·라디안 단위(개정 1.12에서 UE와 같은 cm·도로 번복), 빈 Soft 제거, 종료 경로 hook, NextTick 시계)을 채택하였고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)절과 33.1절 A04의 문구를 개정하고 결과는 33.13절에 기록한다.
 
@@ -175,7 +175,7 @@ prefix를 모든 경계에서 금지하거나 강제하는 결론은 보류한�
 
 C language linkage의 동일 이름은 C++ namespace가 달라도 같은 entity를 가리킬 수 있으므로, namespace만으로 C export 충돌을 방지한다고 가정하지 않는다. 정확한 symbol decoration·calling convention은 target toolchain에서 확인한다. [S68](https://timsong-cpp.github.io/cppwp/n4950/dcl.link)
 
-경계 후보 예시는 C++의 `rocks::Object`에 대응하는 C ABI의 `rocks_object_handle`·`rocks_object_create`, namespace를 표현할 수 있는 언어의 `rocks.Object`, 평면 타입 이름이 필요한 바인딩의 `RocksObject`다. 마지막 형태는 해당 바인딩의 편의 선택이며 내부 타입까지 변경하는 근거가 아니다. macro·export와 같이 namespace로 구분할 수 없는 전역 식별자는 ROCKS_/rocks_ 프로젝트 표식을 사용할 수 있다. 중첩 namespace를 모든 언어에 그대로 복제할 필요는 없으며 타입·함수 ID로 원래 선언과 연결한다. 자체 언어 Sparks의 경계는 2026-11-12에 정하였다: 엔진 API는 패키지 `Rocks`에 두고, 타입·함수·이벤트 이름은 C++ 이름을 그대로 사용하며, 리플렉션 필드는 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거해 노출한다. 스크립트에 노출하는 함수의 C++ 오버로드에 서로 다른 `ScriptName`이 없거나 변환한 이름이 중복·예약 이름과 같으면 메타 컴파일 오류다(23절, [Sparks 언어 설계](SparksLanguage.ko.md)).
+경계 후보 예시는 C++의 `rocks::Object`에 대응하는 C ABI의 `rocks_object_handle`·`rocks_object_create`, namespace를 표현할 수 있는 언어의 `rocks.Object`, 평면 타입 이름이 필요한 바인딩의 `RocksObject`다. 마지막 형태는 해당 바인딩의 편의 선택이며 내부 타입까지 변경하는 근거가 아니다. macro·export와 같이 namespace로 구분할 수 없는 전역 식별자는 ROCKS_/rocks_ 프로젝트 표식을 사용할 수 있다. 중첩 namespace를 모든 언어에 그대로 복제할 필요는 없으며 타입·함수 ID로 원래 선언과 연결한다. 자체 언어 Sparks의 경계는 2026-11-12에 정하였다: 엔진 API는 패키지 `Rocks`에 두고, 타입·함수·이벤트 이름은 C++ 이름을 그대로 사용하며, 리플렉션 필드는 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거해 노출한다. 스크립트에 노출하는 함수의 C++ 오버로드에 서로 다른 `ScriptName`이 없거나 변환한 이름이 중복·예약 이름과 같으면 메타 컴파일 오류다(23절, [Sparks 언어 설계](SparksLanguage/README.ko.md)).
 
 C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 사용한다. Result·String·Array·vtable·예외를 경계에 직접 전달하지 않는다. allocator ownership·calling convention·packing·structSize·ABI version은 이름 정책과 독립 검증한다. serialization의 TypeId/FieldId는 namespace나 display name 변경으로 바뀌지 않는다.
 
@@ -2024,7 +2024,7 @@ Stop은 비동기 전이로 일반 작업 차단→World 정상 종료(스크립
 
 ### 23.1 언어 범위와 구현 단계
 
-**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** UE Level Blueprint 대응은 Sparks 기반 타입 `LevelScript`이고 노드 시각 편집은 보류 선택지다([레벨 스크립트](LevelScript.ko.md)). 소스는 `.spark`, 컴파일 모듈은 `.sparkc`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD21은 [Sparks 언어 설계](SparksLanguage.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
+**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** UE Level Blueprint 대응은 Sparks 기반 타입 `LevelScript`이고 노드 시각 편집은 보류 선택지다([레벨 스크립트](LevelScript.ko.md)). 소스는 `.spark`, 컴파일 모듈은 `.sparkc`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD21은 [Sparks 언어 설계](SparksLanguage/README.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
 
 설계 목표는 프로그래머가 아닌 사용자도 실수할 여지가 적은 언어다. 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 두며, 실수가 잦은 구조는 lint가 아니라 언어 규칙으로 제거한다. [S93](https://go.dev/doc/faq) 문법은 C 계열이고 수명 hook은 Unity 체계를 따른다(20.2절). Epic이 UE6의 게임플레이 프로그래밍 모델을 Verse로 전환한다고 밝혔으나 [S95](https://www.unrealengine.com/news/the-road-to-ue-6), Sparks는 Verse의 문법을 채택하지 않고 failure context·구조적 동시성·persistable 호환성 검사 등의 의미만 차용한다. [S94](https://verselang.github.io/book/)
 
@@ -3013,11 +3013,11 @@ Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플�
 
 Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프로그래밍 모델의 Verse 전환과 Blueprint의 장기적 deprecate를 밝혔고, UE6 Early Access부터의 즉시 제거는 2차 보도로만 확인되었다. 원문 페이지는 접근이 거부되어 재게재 인용으로 확인하였다. Verse의 투기 실행·rollback은 엔진 C++ 쪽의 transactional 기반이 없어 보류하였다. 누수 검토가 근거로 든 코드 사실(`MulticastDelegate::TryAdd`의 compact 부재, `NamePool`의 Shutdown 전용 해제와 기본 상한 65,536, TypeRegistry Busy)은 저장소 코드와 대조하였다.
 
-결정 SD1–SD10은 2026-11-12에 확정하였다. 런타임 eval의 target별 사용 여부만 마켓 규정 검토 후 정하며, 기본값은 출시 `Off`, 개발 `DevOnly`다. 개정 범위는 표지·2.4·5.2·9.2·20.2·23·29.6(NL09)·31(R03)·33.2·33.12·34절과 신규 [Sparks 언어 설계](SparksLanguage.ko.md), 입력 상세안 22.3절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+결정 SD1–SD10은 2026-11-12에 확정하였다. 런타임 eval의 target별 사용 여부만 마켓 규정 검토 후 정하며, 기본값은 출시 `Off`, 개발 `DevOnly`다. 개정 범위는 표지·2.4·5.2·9.2·20.2·23·29.6(NL09)·31(R03)·33.2·33.12·34절과 신규 [Sparks 언어 설계](SparksLanguage/README.ko.md), 입력 상세안 22.3절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ### 33.13 개정 1.8의 Sparks 언어 모호성 교차 검증
 
-검토 입력은 사용자 요구인 "언어적 모호함이 없는지 다수의 에이전트로 교차 검증"이다. 서브에이전트 6개가 구문, 이름 해석, 타입·값 의미, 실행·이벤트·수명 의미, 용어·서술, 비프로그래머 오독 관점에서 Sparks 설계 초안 1.0을 독립 검토하였다. 원보고 147건을 119개 항목으로 병합하였고, 항목별 조치와 에이전트 간 권고 충돌의 판정은 [Sparks 언어 설계](SparksLanguage.ko.md) §20.1에 기록하였다.
+검토 입력은 사용자 요구인 "언어적 모호함이 없는지 다수의 에이전트로 교차 검증"이다. 서브에이전트 6개가 구문, 이름 해석, 타입·값 의미, 실행·이벤트·수명 의미, 용어·서술, 비프로그래머 오독 관점에서 Sparks 설계 초안 1.0을 독립 검토하였다. 원보고 147건을 119개 항목으로 병합하였고, 항목별 조치와 에이전트 간 권고 충돌의 판정은 [Sparks 언어 설계](SparksLanguage/20-CrossValidation.ko.md) §20.1에 기록하였다.
 
 | 지적 | 조치 |
 |---|---|
@@ -3028,7 +3028,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 | 예시가 cm·도로 적혀 있으나 엔진 규약은 미터·라디안(2.2절) | 단위 통일과 `Math.Radians` 상수식(SD18), 예시 수정(23.1절). 개정 1.12에서 엔진 규약이 UE와 같은 cm·도가 되어 번복(33.17절) |
 | 문서 간 불일치: 오버로드 처리, session의 VM globals·root, 순환 import | 2.4·22.6·23.4절 정정 |
 
-반영 뒤 서브에이전트 2개로 다시 검증하여 상태 반영 위치(Enable), 문 예시의 회전 연출(Tick), 프레임 순서(8.2·20.2절)를 바로잡았고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 개정 범위는 표지·2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)·33.1(A04)·33.13절, [Sparks 언어 설계](SparksLanguage.ko.md) 초안 1.1, 입력 상세안 11.2·22.3·26.1절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+반영 뒤 서브에이전트 2개로 다시 검증하여 상태 반영 위치(Enable), 문 예시의 회전 연출(Tick), 프레임 순서(8.2·20.2절)를 바로잡았고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 개정 범위는 표지·2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)·33.1(A04)·33.13절, [Sparks 언어 설계](SparksLanguage/README.ko.md) 초안 1.1, 입력 상세안 11.2·22.3·26.1절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ### 33.14 개정 1.9의 UI 구조 전환
 
@@ -3111,7 +3111,7 @@ Core 수학·World의 코드 전환(C1–C5)과 UE 원본 대조 근거는 [수�
 | 물리 | 엔진 Actor 물리 이벤트 `TriggerEntered` 등(20.2절), LevelScript의 물리 hook·Collider 금지(LD9·LD18) |
 | 편집기 | 열기·참조 추가·이벤트 추가 명령, 언어 서버 명령 채널, 템플릿(22.1·22.3절), 배치 Actor에 component 추가(20.2절)(LD14·LD15·LD20) |
 
-UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem/README.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage/README.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem/README.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ## 34. 참고 자료와 설계 근거
 

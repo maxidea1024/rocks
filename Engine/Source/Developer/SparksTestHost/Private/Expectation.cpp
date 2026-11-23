@@ -4,7 +4,7 @@
 
 #include "ConformanceInternal.h"
 
-// `.expect` 해석(Docs/Design/SparksLanguage.ko.md 13.1절)과 Report다.
+// `.expect` 해석(Docs/Design/SparksLanguage 13.1절)과 Report다.
 
 namespace rocks::sparks::conformance {
 

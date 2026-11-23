@@ -7,7 +7,7 @@
 #include "Names.h"
 #include "SchemaInput.h"
 
-// manifest reader다(Docs/Design/SparksLanguage.ko.md 3.4절 "패키지 manifest"). 오류마다 진단 하나를
+// manifest reader다(Docs/Design/SparksLanguage 3.4절 "패키지 manifest"). 오류마다 진단 하나를
 // 내고 끝까지 읽는다.
 
 namespace rocks::sparks {

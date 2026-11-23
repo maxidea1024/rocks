@@ -3,7 +3,7 @@
 
 #include "CompilationChecker.h"
 
-// 모듈 구문 분석과 import 해석이다(Docs/Design/SparksLanguage.ko.md 3.4절 "import 해석",
+// 모듈 구문 분석과 import 해석이다(Docs/Design/SparksLanguage 3.4절 "import 해석",
 // S0301–S0305).
 
 namespace rocks::sparks::detail {

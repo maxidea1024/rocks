@@ -9,7 +9,7 @@
 
 // 선언 검사다: 모듈·멤버 선언, import 이름(S0311), 선언 타입과 시그니처, 기반 목록(S0322)·상속
 // 순환(S0323), 멤버 이름(S0306–S0313), override(S0314–S0316), interface 구현(S0324), manifest
-// services(S0325). 규칙: Docs/Design/SparksLanguage.ko.md 3.9절.
+// services(S0325). 규칙: Docs/Design/SparksLanguage 3.9절.
 
 namespace rocks::sparks::detail {
 

@@ -6,7 +6,7 @@
 
 #include "ConformanceInternal.h"
 
-// 사례 하나 실행이다(Docs/Design/SparksLanguage.ko.md 13.1절): 사례를 패키지로 컴파일하고 진단과
+// 사례 하나 실행이다(Docs/Design/SparksLanguage 13.1절): 사례를 패키지로 컴파일하고 진단과
 // 구문 트리 golden을 기대값과 비교한다.
 
 namespace rocks::sparks::conformance {
