@@ -37,6 +37,8 @@ public static class RuleLoader
         LoadedRuleSet set = LoadAll(assemblyPath, context);
         var selected = set.Targets.SingleOrDefault(target => target.Name == targetName)
             ?? throw new ArgumentException($"Unknown target '{targetName}'. Available: {string.Join(", ", set.Targets.Select(target => target.Name))}");
+        // 플랫폼 표는 고른 타깃만 본다(규칙 모음에 다른 플랫폼 전용 타깃 — Editor·Server 등 — 이 있어도 이 타깃의 빌드는 막지 않는다).
+        ValidateTargetKind(selected, context.Platform);
         if (selected.Modules.Count == 0)
         {
             throw new ArgumentException("A target must select at least one module.");
@@ -52,22 +54,76 @@ public static class RuleLoader
     /// </summary>
     public static void ValidateTargetKind(TargetRules target, NativePlatform platform)
     {
+        ValidateTargetProperties(target);
+        if (!SupportsPlatform(target.Type, platform))
+        {
+            throw new ArgumentException($"Target '{target.Name}': a {target.Type} target is not built for {platform} " +
+                "(Docs/Design/BuildTargets section 3.1 platform table).");
+        }
+    }
+
+    /// <summary>
+    /// 타깃 종류와 Program 속성을 검사한다(3.1절 — <c>CompileWithEditor</c>·<c>WithEditorData</c>는 Program만). 규칙 로드가 모든 타깃에
+    /// 한다. 어기면 <see cref="ArgumentException"/>이다.
+    /// </summary>
+    public static void ValidateTargetProperties(TargetRules target)
+    {
+        if (!Enum.IsDefined(target.Type))
+        {
+            throw new ArgumentException($"Target '{target.Name}' has an unsupported target type {(int)target.Type}.");
+        }
+
         if (target.Type != TargetType.Program && (target.CompileWithEditor || target.WithEditorData))
         {
             throw new ArgumentException($"Target '{target.Name}' is a {target.Type} target; CompileWithEditor and WithEditorData are Program target " +
                 "properties.");
         }
+    }
 
-        bool supported = target.Type switch
+    /// <summary>
+    /// 타깃 종류의 플랫폼 표(Docs/Design/BuildTargets 3.1절)다. Game·Client는 Windows·macOS·Android, Editor·Server는 Windows·macOS(Server의
+    /// Linux는 BS6), Program은 모두다. Release 배제 정책이 타깃 종류별 평가 플랫폼을 이 표로 고른다.
+    /// </summary>
+    public static bool SupportsPlatform(TargetType type, NativePlatform platform) => type switch
+    {
+        TargetType.Game or TargetType.Client => platform is NativePlatform.Windows or NativePlatform.MacOS or NativePlatform.Android,
+        TargetType.Editor or TargetType.Server => platform is NativePlatform.Windows or NativePlatform.MacOS,
+        _ => true
+    };
+
+    /// <summary>
+    /// type 사이 의존 규칙(Docs/Design/BuildTargets 3.3절 BD25, BS2b)을 검사한다. 실행 파일이 아닌 모듈 A의 두 의존 목록과 실행 중 적재
+    /// 모듈(<c>DynamicModules</c>)의 모듈 B마다 <see cref="ModuleTypeRules.MayDependOn"/>이어야 한다(A를 넣는 어떤 타깃에서 B가 빠지면
+    /// 빌드가 깨진다). 실행 파일은 한 타깃에만 들어가므로 빌드 입력의 도달 검사(<c>InputValidation</c>)가 대신 본다. 규칙 모음 밖의 이름은
+    /// 빌드 입력 검사가 알린다. 어기면 <see cref="ArgumentException"/>이다.
+    /// </summary>
+    public static void ValidateModuleTypeDependencies(IReadOnlyList<NativeModuleInput> modules)
+    {
+        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in modules)
         {
-            TargetType.Game or TargetType.Client => platform is NativePlatform.Windows or NativePlatform.MacOS or NativePlatform.Android,
-            TargetType.Editor or TargetType.Server => platform is NativePlatform.Windows or NativePlatform.MacOS,
-            _ => true
-        };
-        if (!supported)
+            byName.TryAdd(module.Name, module);
+        }
+
+        var violations = new List<string>();
+        foreach (NativeModuleInput module in modules.Where(module => module.Kind != NativeModuleKind.Executable).OrderBy(module => module.Name,
+                     StringComparer.Ordinal))
         {
-            throw new ArgumentException($"Target '{target.Name}': a {target.Type} target is not built for {platform} " +
-                "(Docs/Design/BuildTargets section 3.1 platform table).");
+            foreach (string name in module.AllDependencies.Concat(module.DynamicModules).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (byName.TryGetValue(name, out NativeModuleInput? dependency) && !ModuleTypeRules.MayDependOn(module.Type, dependency.Type))
+                {
+                    violations.Add($"{module.Name} ({module.Type}) -> {dependency.Name} ({dependency.Type})");
+                }
+            }
+        }
+
+        if (violations.Count != 0)
+        {
+            string allowed = string.Join("; ", Enum.GetValues<Descriptors.ModuleType>().Select(type =>
+                $"{type} may depend on {string.Join(", ", ModuleTypeRules.DependableTypes(type))}"));
+            throw new ArgumentException($"Module type dependency rule violated: {string.Join(", ", violations)}. {allowed} " +
+                "(Docs/Design/BuildTargets section 3.3 BD25).");
         }
     }
 
@@ -103,6 +159,15 @@ public static class RuleLoader
                 companion.CompanionTargets.Count != 0)
             {
                 throw new ArgumentException($"Companion target '{name}' must be a Monolithic Program target without plugins or companions.");
+            }
+
+            // 동반 타깃은 주 타깃과 한 빌드로 컴파일되므로 타깃 매크로가 같아야 한다(Docs/Design/BuildTargets 3.1절 — 다른 조합이면 동반
+            // 실행 파일이 주 타깃의 매크로로 컴파일된다).
+            if (!companion.Kind.Defines.SequenceEqual(target.Kind.Defines))
+            {
+                throw new ArgumentException($"Companion target '{name}' needs the target macros of '{target.Name}' ({target.Type}: " +
+                    $"{string.Join(", ", target.Kind.Defines)}), but has {string.Join(", ", companion.Kind.Defines)}; companions are compiled in the " +
+                    "same build.");
             }
 
             modules.AddRange(companion.Modules.Where(module => !modules.Contains(module, StringComparer.OrdinalIgnoreCase)));
@@ -177,8 +242,10 @@ public static class RuleLoader
 
         foreach (TargetRules target in targets)
         {
-            ValidateTargetKind(target, context.Platform);
+            ValidateTargetProperties(target);
         }
+
+        ValidateModuleTypeDependencies(modules);
 
         // 공개 헤더 검사 표지는 빌드가 검사 모듈에만 채운다(Docs/Design/BuildTargets 3.5절 BS1b).
         if (modules.FirstOrDefault(module => module.PublicHeaderCheckOf is not null) is { } checker)

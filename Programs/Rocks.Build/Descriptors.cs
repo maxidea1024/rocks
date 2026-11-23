@@ -28,8 +28,12 @@ namespace Rocks.Build.Descriptors;
 //     "plugins": [ { "name": "Physics", "enabled": true } ]
 //   }
 
-/// <summary>모듈 종류다. Runtime은 게임에 들어가고 Developer·Editor는 도구·에디터에서만 쓴다.</summary>
-public enum ModuleType { Runtime, Developer, Editor }
+/// <summary>
+/// 모듈 종류다(Docs/Design/BuildTargets 3.3절 BD4). 들어가는 타깃은 <see cref="ModuleTypeRules.Allows"/>다: Runtime은 모든 타깃, Developer는
+/// Release 출시 타깃(Game·Client·Server)을 뺀 곳, Editor는 Editor 타깃과 CompileWithEditor Program, ServerOnly는 Client를 뺀 곳, ClientOnly는
+/// Server를 뺀 곳이다.
+/// </summary>
+public enum ModuleType { Runtime, Developer, Editor, ServerOnly, ClientOnly }
 
 /// <summary>
 /// 모듈을 올리는 시점이다(UE ELoadingPhase의 일부, Docs/Design/ModuleLoader.ko.md 3.3절). 기본은 Default다. 값 순서가 단계 순서이고 Core

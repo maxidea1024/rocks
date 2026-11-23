@@ -1,4 +1,5 @@
 using Rocks.Build;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 namespace Rocks.Build.IntegrationTests;
@@ -19,7 +20,11 @@ internal static class TargetKindRulesTests
         [
             (TargetType.Game, NativePlatform.Android, true), (TargetType.Client, NativePlatform.Android, true),
             (TargetType.Editor, NativePlatform.Android, false), (TargetType.Server, NativePlatform.Android, false),
-            (TargetType.Editor, NativePlatform.MacOS, true), (TargetType.Server, NativePlatform.Windows, true),
+            (TargetType.Editor, NativePlatform.MacOS, true), (TargetType.Editor, NativePlatform.Windows, true),
+            (TargetType.Server, NativePlatform.Windows, true), (TargetType.Server, NativePlatform.MacOS, true),
+            (TargetType.Client, NativePlatform.Windows, true), (TargetType.Client, NativePlatform.MacOS, true),
+            (TargetType.Game, NativePlatform.Windows, true), (TargetType.Game, NativePlatform.MacOS, true),
+            (TargetType.Program, NativePlatform.Windows, true), (TargetType.Program, NativePlatform.MacOS, true),
             (TargetType.Program, NativePlatform.Android, true)
         ];
         foreach ((TargetType type, NativePlatform platform, bool allowed) in table)
@@ -30,7 +35,45 @@ internal static class TargetKindRulesTests
         Require(new Probe(TargetType.Editor).LinkType == NativeLinkType.Modular && new Probe(TargetType.Game).LinkType == NativeLinkType.Monolithic,
             "Editor targets link Modular by default");
         Require(new Probe(TargetType.Program) { Editor = true }.Kind == new TargetKind(TargetType.Program, CompileWithEditor: true), "target kind");
+        // 규칙 로드는 모든 타깃의 Program 속성만 보고, 플랫폼 표는 고른 타깃에만 한다(Load — 다른 플랫폼 전용 타깃이 있어도 이 타깃은 빌드한다).
+        RuleLoader.ValidateTargetProperties(new Probe(TargetType.Server));
+        Expect(true, () => RuleLoader.ValidateTargetProperties(new Probe(TargetType.Game) { Editor = true }), "property check on Game");
         Console.WriteLine("PASS target kinds: Program properties, platform table, Editor link type");
+
+        // type 사이 의존 규칙(3.3절 BD25): 의존·동적 모듈 모두 본다. 실행 파일은 빌드 입력의 도달 검사를 받으므로 예외다.
+        NativeModuleInput Module(string name, ModuleType type, params string[] dependencies) =>
+            new() { Name = name, Sources = [], Type = type, PublicDependencies = dependencies };
+        NativeModuleInput[] valid =
+        [
+            Module("Base", ModuleType.Runtime), Module("Tools", ModuleType.Developer, "Base"), Module("Net", ModuleType.ServerOnly, "Base"),
+            Module("Render", ModuleType.ClientOnly, "Base"), Module("Studio", ModuleType.Editor, "Tools", "Net", "Render"),
+            new() { Name = "Tests", Kind = NativeModuleKind.Executable, Sources = [], PrivateDependencies = ["Tools", "Studio"] }
+        ];
+        RuleLoader.ValidateModuleTypeDependencies(valid);
+        foreach ((string name, NativeModuleInput[] modules, string expected) in new (string, NativeModuleInput[], string)[]
+                 {
+                     ("Runtime -> Developer", [.. valid, Module("Game", ModuleType.Runtime, "Tools")], "Game (Runtime) -> Tools (Developer)"),
+                     ("Runtime -> ClientOnly", [.. valid, Module("Game", ModuleType.Runtime) with { PrivateDependencies = ["Render"] }],
+                         "Game (Runtime) -> Render (ClientOnly)"),
+                     ("ServerOnly -> ClientOnly", [.. valid, Module("Auth", ModuleType.ServerOnly, "Render")], "Auth (ServerOnly) -> Render (ClientOnly)"),
+                     ("Developer -> Editor (dynamic)", [.. valid, Module("Cook", ModuleType.Developer) with { DynamicModules = ["Studio"] }],
+                         "Cook (Developer) -> Studio (Editor)"),
+                     ("ClientOnly -> Developer", [.. valid, Module("Hud", ModuleType.ClientOnly, "Tools")], "Hud (ClientOnly) -> Tools (Developer)")
+                 })
+        {
+            try
+            {
+                RuleLoader.ValidateModuleTypeDependencies(modules);
+                Require(false, name + " was accepted");
+            }
+            catch (ArgumentException error)
+            {
+                Require(error.Message.Contains(expected, StringComparison.Ordinal) &&
+                    error.Message.Contains("Runtime may depend on Runtime;", StringComparison.Ordinal), name + ": " + error.Message);
+            }
+        }
+
+        Console.WriteLine("PASS module types: dependency rule at rule load (dependencies, dynamic modules, executables exempt)");
     }
 
     private static void Expect(bool rejected, Action action, string name)

@@ -181,6 +181,31 @@ internal static class ShaderToolPolicyTests
             "type and group mismatch escaped: " + string.Join('\n', mismatches));
         NoFailures(ReleaseExclusion.GroupMismatches([.. typed.Where(module => module.Name != "Cooker"),
             new() { Name = "Cooker", Type = Rocks.Build.Descriptors.ModuleType.Developer }], directories));
+
+        // Runtime 폴더의 모듈은 규칙이 ServerOnly·ClientOnly로 좁힐 수 있다(Docs/Design/BuildTargets 3.3절 BS2b). Developer 폴더는 그대로 Developer다.
+        var runtimeDirectories = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Net"] = "Engine/Source/Runtime/Net",
+            ["Hud"] = "Engine/Source/Runtime/Hud",
+            ["Probe"] = "Engine/Source/Developer/Probe"
+        };
+        NoFailures(ReleaseExclusion.GroupMismatches(
+        [
+            new() { Name = "Net", Type = Rocks.Build.Descriptors.ModuleType.ServerOnly },
+            new() { Name = "Hud", Type = Rocks.Build.Descriptors.ModuleType.ClientOnly }
+        ], runtimeDirectories));
+        IReadOnlyList<CheckFailure> narrowed = ReleaseExclusion.GroupMismatches(
+            [new() { Name = "Probe", Type = Rocks.Build.Descriptors.ModuleType.ServerOnly }], runtimeDirectories);
+        Verify.That(narrowed.Count == 1 && narrowed[0].Rule == "module-type-group", "a ServerOnly module in a Developer folder escaped");
+
+        // Release 출시 타깃이 Editor 모듈에 닿으면 release-editor-module이다(BD20).
+        NativeModuleInput[] withEditor = [.. modules.Where(module => module.Name != "Game"),
+            modules.Single(module => module.Name == "Game") with { PrivateDependencies = ["Studio"] },
+            new() { Name = "Studio", Type = Rocks.Build.Descriptors.ModuleType.Editor }];
+        IReadOnlyList<ReleaseViolation> editor = ReleaseExclusion.Analyze(withEditor, ReleaseExclusion.DeveloperModules(withEditor), [("Game", ["Game"])],
+            NativePlatform.Windows);
+        Verify.That(editor.Any(violation => violation.Rule == "release-editor-module" && violation.Module == "Studio"),
+            "an Editor module reached by a Release target escaped: " + string.Join('\n', editor));
     }
 
     private static void NoFailures(IReadOnlyList<CheckFailure> failures) => Verify.That(failures.Count == 0, string.Join('\n', failures));

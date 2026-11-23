@@ -18,12 +18,13 @@ namespace Rocks.Build.Cli;
 // Descriptors.LoadingPhase)·ProvidesLaunch는 NativeModuleInput과 같은 칸이다(3.11절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 단계로 단계
 // 순서·부트 모듈 검사를 소스 빌드와 같게 한다). PublicDependencies·PrivateDependencies는 NativeModuleInput과 같은 두 의존 목록이다
 // (Docs/Design/BuildTargets 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다). HasGlobalState는 NativeModuleInput과
-// 같은 서드파티 표지다(3.8절 BD29 — 게임 모듈이 SDK의 전역 상태 서드파티를 직접 의존하면 소비 모듈이 둘이 되어 거부된다).
+// 같은 서드파티 표지다(3.8절 BD29 — 게임 모듈이 SDK의 전역 상태 서드파티를 직접 의존하면 소비 모듈이 둘이 되어 거부된다). Type은
+// 모듈 type 이름(Descriptors.ModuleType)이다(3.3절 BS2b — 게임 빌드가 SDK 모듈도 타깃·구성의 type 검사를 받는다).
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] PublicDependencies, string[] PrivateDependencies,
     string[] Libraries,
     string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo,
     bool ProvidesModuleTable, bool ThirdParty, string? SharedPchHeader, string[] DynamicModules, string? LoadingPhase,
-    bool ProvidesLaunch, bool HasGlobalState);
+    bool ProvidesLaunch, bool HasGlobalState, string? Type);
 
 // SDK를 만든 엔진 버전이다(Build/Build.version 값 — 그 파일은 SDK에 복사하지 않는다, Docs/Design/ReflectionFoundations.ko.md 8.2절).
 // 게임 빌드는 저장소 파일을 읽지 않고 이 값만 쓴다(BuildInfo 생성 TU·.rocksproject engineVersion 대조). 위치 record는 JSON에서 빠진
@@ -66,7 +67,9 @@ public static class InstalledSdk
     // 14: 다중 구성 SDK. Configuration·Modules를 Configurations(구성 이름 → 모듈 선언·구성 파일 목록)로 바꾸고 구성마다 다른 파일을
     // Configurations/<구성>/ 아래에 둔다(Docs/Design/ProjectFiles.ko.md 10.3절 — 이전 SDK는 구성 목록이 없어 게임 솔루션이 구성을 알 수 없으므로
     // 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 14;
+    // 15: SdkModule에 Type 추가(Docs/Design/BuildTargets 3.3절 BS2b — 이전 SDK는 모듈 type이 없어 게임 빌드가 Developer 모듈의 Release
+    // 도달 같은 type 검사를 할 수 없으므로 버전 불일치로 거부한다).
+    internal const int ManifestVersion = 15;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -152,7 +155,7 @@ public static class InstalledSdk
                 module.SystemLibraries.ToArray(),
                 module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo, module.ProvidesModuleTable,
                 module.ThirdParty, module.SharedPchHeader, module.DynamicModules.ToArray(), module.LoadingPhase.ToString(),
-                module.ProvidesLaunch, module.HasGlobalState));
+                module.ProvidesLaunch, module.HasGlobalState, module.Type.ToString()));
         }
         // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
         // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
@@ -453,12 +456,12 @@ public static class InstalledSdk
         if (options.TryGetValue(SingleFileCommand.Option, out string? files))
         {
             return await SingleFileCommand.RunAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk, engineVersion,
-                BuildCommand.Jobs(options)), files, project, cancellationToken, SingleFileCommand.GameTargets(project, sdk, rulesPath, rules.Target.Name,
+                BuildCommand.Jobs(options), rules.Target.Kind), files, project, cancellationToken, SingleFileCommand.GameTargets(project, sdk, rulesPath, rules.Target.Name,
                 projectDescriptor, availablePlugins, toolchain, configuration, sdkModules, engineVersion));
         }
 
         var result = await new NativeBuildEngine().BuildAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk,
-            engineVersion, BuildCommand.Jobs(options)) with
+            engineVersion, BuildCommand.Jobs(options), rules.Target.Kind) with
         {
             Unity = BuildCommand.Switch(options, BuildCommand.UnityOption),
             Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
@@ -627,7 +630,8 @@ public static class InstalledSdk
         {
             if (module.Includes is null || module.Libraries is null || module.PublicDependencies is null ||
                 module.PrivateDependencies is null || module.Defines is null ||
-                module.SystemLibraries is null || module.Frameworks is null || module.DynamicModules is null || module.LoadingPhase is null)
+                module.SystemLibraries is null || module.Frameworks is null || module.DynamicModules is null || module.LoadingPhase is null ||
+                module.Type is null)
             {
                 throw new InvalidDataException($"SDK module '{module.Name}' has incomplete declarations.");
             }
@@ -636,6 +640,11 @@ public static class InstalledSdk
             if (!Enum.IsDefined(typeof(Descriptors.LoadingPhase), module.LoadingPhase))
             {
                 throw new InvalidDataException($"SDK module '{module.Name}' has an unknown loading phase '{module.LoadingPhase}'.");
+            }
+
+            if (!Enum.IsDefined(typeof(Descriptors.ModuleType), module.Type))
+            {
+                throw new InvalidDataException($"SDK module '{module.Name}' has an unknown module type '{module.Type}'.");
             }
 
             foreach (var include in module.Includes)

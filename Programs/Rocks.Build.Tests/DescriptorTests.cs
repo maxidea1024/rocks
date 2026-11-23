@@ -345,13 +345,13 @@ internal static class DescriptorTests
 
         // Program 타깃(명령행 도구·시험)은 Release에서도 Developer 모듈을 넣는다(BD35 — UE DeveloperTool). Game Release만 뺀다.
         var programRelease = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Tool", []), available, NativePlatform.Windows,
-            NativeConfiguration.Release, TargetType.Program);
+            NativeConfiguration.Release, new TargetKind(TargetType.Program));
         Check(Names(programRelease.Apply(rules, ["GameTools"])).SequenceEqual(["Game", "GameTools", "Water"]),
             "a Program target keeps Developer modules in Release");
 
         // 타깃 규칙의 참조가 프로젝트 참조를 이긴다: 프로젝트가 켠 Water를 타깃이 끄면 Water 모듈이 빠진다.
         var targetDisables = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Game", [new("Water", false)]), available,
-            NativePlatform.Windows, NativeConfiguration.Development, TargetType.Game);
+            NativePlatform.Windows, NativeConfiguration.Development, new TargetKind(TargetType.Game));
         Check(targetDisables.EnabledPlugins.Count == 0, "a target reference overrides the project reference");
 
         // 엔진 저장소 타깃(프로젝트 없음): 기술자가 없는 엔진 모듈은 대조 없이 통과하고, 켠 플러그인 모듈만 더해진다. 플랫폼 검사는 없다.
@@ -364,14 +364,14 @@ internal static class DescriptorTests
             EngineRule("Water", "Plugins/Water/Source/Water", "Engine"), EngineRule("Weather", "Plugins/Weather/Source/Weather", "Engine")
         ];
         var engine = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("EngineTests", [new("Water", true)], engineRoot), available,
-            NativePlatform.Android, NativeConfiguration.Release, TargetType.Program);
+            NativePlatform.Android, NativeConfiguration.Release, new TargetKind(TargetType.Program));
         Check(Names(engine.Apply(engineRules, ["Engine"])).SequenceEqual(["Core", "Engine", "Water"]),
             "an engine target keeps engine modules and adds enabled plugin modules");
         Check(engine.IncludedPluginModules.SequenceEqual(["Water"]), "engine target plugin modules");
         ExpectFailure(() => engine.Apply([.. engineRules, Rule("Tool", "Weather")], ["Tool"]),
             "an engine module used a disabled plugin module", "plugin 'Weather' is not enabled");
         var engineNone = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Foundation", [], engineRoot), available, NativePlatform.Windows,
-            NativeConfiguration.Debug, TargetType.Program);
+            NativeConfiguration.Debug, new TargetKind(TargetType.Program));
         Check(engineNone.EnabledPlugins.Count == 0 && Names(engineNone.Apply(engineRules, ["Engine"])).SequenceEqual(["Core", "Engine"]),
             "an engine target without plugin references builds no plugin module");
 
@@ -398,7 +398,7 @@ internal static class DescriptorTests
               "modules": [ { "name": "Storm", "type": "Developer" } ], "plugins": [ { "name": "Weather", "enabled": true } ] }
             """);
         var storm = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Commandlet", [new("Storm", true)], engineRoot),
-            PluginCatalog.Discover([plugins]), NativePlatform.Windows, NativeConfiguration.Release, TargetType.Program);
+            PluginCatalog.Discover([plugins]), NativePlatform.Windows, NativeConfiguration.Release, new TargetKind(TargetType.Program));
         Check(Names(storm.Apply([.. engineRules, EngineRule("Storm", "Plugins/Storm/Source/Storm", "Weather")], ["Engine"]))
             .SequenceEqual(["Core", "Engine", "Weather", "Storm"]), "a plugin module may use a declared dependency plugin");
         File.Delete(Path.Combine(plugins, "Storm", "Storm.rocksplugin"));
@@ -407,7 +407,7 @@ internal static class DescriptorTests
     // 설치 SDK 게임 빌드의 Game 타깃(타깃 참조 없음)이다.
     private static DescriptorModuleSet GameSet(ProjectDescriptor project, IReadOnlyList<PluginDescriptor> available, NativePlatform platform,
         NativeConfiguration configuration) =>
-        DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Game", []), available, platform, configuration, TargetType.Game);
+        DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Game", []), available, platform, configuration, new TargetKind(TargetType.Game));
 
     private static string Write(string directory, string relative, string text)
     {
