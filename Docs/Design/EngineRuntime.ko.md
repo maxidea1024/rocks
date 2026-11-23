@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 2026-11-23 갱신: 3절 `Gameplay` 행 상태, 7.3절 Component 보강 예정 항목, 8절 Tick 단계의 UE 대응 결정(물리 결과 반영·skeletal mesh 물리 마무리 엔진 단계, [컴포넌트 도입](ComponentCatalog.ko.md) CR1·CR2·CR8a·CR26·CD11). 2026-11-22 갱신: 6절 종료 게이트([오디오 시스템](AudioSystem.ko.md) AD23). 2026-11-20 갱신: 4.6절 Level `levelScript` 필드·레벨 편입 순서·레벨 저장 검증, 7.2절 Level 파괴 순서와 LevelScript 파괴 규칙([레벨 스크립트](LevelScript.ko.md) LD4–LD8·LD16·LD17). 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정, GC 일정(STW 병렬 전체 수집 요청·주기, 회수 예산, 엔진 소유 GC scheduler — GC 설계 17절). 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-23 갱신: 3절 `Gameplay` 행 상태, 7.3절 Component 보강 예정 항목, 8절 Tick 단계의 UE 대응 결정(물리 결과 반영·skeletal mesh 물리 마무리 엔진 단계, [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR1·CR2·CR8a·CR26·CD11). 2026-11-22 갱신: 6절 종료 게이트([오디오 시스템](AudioSystem.ko.md) AD23). 2026-11-20 갱신: 4.6절 Level `levelScript` 필드·레벨 편입 순서·레벨 저장 검증, 7.2절 Level 파괴 순서와 LevelScript 파괴 규칙([레벨 스크립트](LevelScript.ko.md) LD4–LD8·LD16·LD17). 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정, GC 일정(STW 병렬 전체 수집 요청·주기, 회수 예산, 엔진 소유 GC scheduler — GC 설계 17절). 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -44,7 +44,7 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `Engine` | ObjectRuntime, World | 엔진 상태 기계·메인 루프·WorldContext·EngineSubsystem | Gameplay·Graphics·창 참조 |
 | `World` | ObjectRuntime, CoreTypeBindings | World·Actor·Component·SceneComponent(WorldOnly 리플렉션 클래스 — 4.6절)·TickScheduler·WorldSubsystem | Engine·Graphics·Asset 참조 |
 | `WorldTestFixtures`(Developer) | World | World 타입을 상속한 리플렉션 시험 타입(SaveActor·SaveComponent)과 그 identity 명세. EngineTests만 의존 | 제품 링크 |
-| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·Controller·Pawn·LocalPlayer. 아직 없다(S10–S12). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](ComponentCatalog.ko.md) CR26) | Graphics 참조 |
+| `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·Controller·Pawn·LocalPlayer. 아직 없다(S10–S12). PlayerController의 입력 컴포넌트 스택·햅틱 효과 관리가 입력·force feedback 컴포넌트의 선행이다([컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR26) | Graphics 참조 |
 | `AssetRuntime` | Serialization, Core | AssetId·에셋 파일 형식·AssetManager·TextureAsset | World·Graphics 참조 |
 | `AssetTools`(Developer) | AssetRuntime | BMP 임포터·에셋 파일 기록 | Shipping 링크 |
 | `RenderBase` | Graphics, Task, MetaSchema | 렌더 lane·프레임 slot·프레임 packet 전달·완료 통지·`RenderHandle` 예약([렌더 기반](RenderBase.ko.md) RB1) | ObjectRuntime·World 참조 |
@@ -202,7 +202,7 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 
 - `Component`는 Actor에 속하고 `OnRegister`/`OnUnregister`(엔진 내부·backend 등록)와 위 hook을 가진다. Actor의 `FinishSpawning`이 Component를 등록한다(OnRegister → Actor OnAwake → Component OnAwake → OnEnable). 이미 초기화된 Actor에 추가된 Component는 추가 즉시 OnRegister·OnAwake·OnEnable을 받고 OnStart는 다음 프레임 시작에 받는다(다른 객체의 hook 실행 중 OnStart 재진입 방지). 정리는 OnDisable(Component 역순 → Actor) → OnDestroy(Component 역순 → Actor) → OnUnregister 순이며, OnDestroy는 OnAwake가 성공한 객체만 받는다.
 - `SceneComponent`는 부모·자식 계층, 상대 Transform, 월드 행렬(`Mat4d` affine)을 가진다. 좌표·단위는 UE 5.8과 같다(왼손 +X 전방·+Y 오른쪽·+Z 위, 위치 cm, 회전 단위 quaternion — 도 단위 `Rotator`는 `ToQuaternion`으로 바꾼다, scale 무차원). 월드 행렬 = 상대 TRS 행렬 × 부모 월드 행렬(행 벡터 — UE `NewRelativeTransform * ParentToWorld`, 2026-11-17 전에는 column vector의 부모 × 상대)이며 dirty 플래그로 지연 계산한다. 행렬로 저장하므로 비균일 scale 부모 아래 회전한 자식(shear)도 정확하고, TRS가 필요할 때만 `TryWorldTransform`이 분해한다(shear면 Unsupported). 상대 Transform·부모 변경 시 하위 전체를 dirty로 표시한다. `AttachTo`는 순환(자기 자신·조상)과 장부 밖 객체를 `InvalidArgument`로 거부하며 같은 World 안에서만 붙인다. 부모가 파괴되면 자식은 루트가 된다. 영속 상태는 상대 Transform뿐이고 계층·월드 행렬은 저장하지 않는다(4.6절).
-- **보강 예정(설계만, 미구현).** UE 5.8 엔진 컴포넌트를 들이기 전에 이 절을 넓힌다. 요구의 정본은 [컴포넌트 도입](ComponentCatalog.ko.md) 4.1절이고 착수는 그 문서 CM0(화면 마일스톤 첫 단계)이다.
+- **보강 예정(설계만, 미구현).** UE 5.8 엔진 컴포넌트를 들이기 전에 이 절을 넓힌다. 요구의 정본은 [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) 4.1절이고 착수는 그 문서 CM0(화면 마일스톤 첫 단계)이다.
   - CR1 시스템 상태 수명: 등록 안에서 렌더·물리·오디오 상태를 만들고 지우는 hook과 "다시 보내기" 표시(UE `CreateRenderState`·`MarkRenderStateDirty`·`CreatePhysicsState` 대응), 등록 실패 시 부분 등록 해제, 대량 등록 묶음. 지금은 `OnRegister`·`OnUnregister` 하나뿐이다.
   - CR2 SceneComponent: 부착 규칙(KeepRelative·KeepWorld·SnapToTarget), socket 부착과 socket Transform, 절대 location·rotation·scale, Mobility(Static·Stationary·Movable — Static 이동은 진단과 함께 거부), 가시성(자식 전파·게임 중 숨김), 속도, bounds 계산과 갱신, Transform 변경 통지(구독형 — 이벤트 slot 표).
   - 그 밖에 Component 시작 준비 hook(CR4 — SE-W2), EditorOnly 컴포넌트와 태그(CR5), 컴포넌트 타입 규칙(CR6)이다.
@@ -240,7 +240,7 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 
 ## 8. Tick Scheduler
 
-- **UE 단계 대응(2026-11-23 결정, 권장안 — [컴포넌트 도입](ComponentCatalog.ko.md) CR8a·CD11).** 단계를 더하지 않는다. UE `ETickingGroup`(`Engine/Classes/Engine/EngineBaseTypes.h:86–104`)과 계획 20.2절의 옛 그룹 이름(PhysicsSync·AnimationFinalize)은 아래처럼 대응한다. UE 경로는 `Engine/Source/Runtime/Engine/` 기준이다.
+- **UE 단계 대응(2026-11-23 결정, 권장안 — [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR8a·CD11).** 단계를 더하지 않는다. UE `ETickingGroup`(`Engine/Classes/Engine/EngineBaseTypes.h:86–104`)과 계획 20.2절의 옛 그룹 이름(PhysicsSync·AnimationFinalize)은 아래처럼 대응한다. UE 경로는 `Engine/Source/Runtime/Engine/` 기준이다.
 
   | Rocks | UE 5.8 | 근거·규칙 |
   |---|---|---|
