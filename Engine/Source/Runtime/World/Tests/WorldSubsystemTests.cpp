@@ -333,4 +333,116 @@ TEST(WorldSubsystem_TickableRunsAtLateUpdateStart) {
     REQUIRE(world.Shutdown());
 }
 
+namespace {
+
+class DeltaRecorder final : public Recorder<'D'> {};
+
+// Initialize가 실패하는 Subsystem이다(되돌림 시험).
+class FailingRecorder final : public WorldSubsystem {
+public:
+    Result<void> Initialize(World&) noexcept override {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+};
+
+// 되돌림의 Deinitialize에서 조회 창을 본다.
+class RollbackObserver final : public WorldSubsystem {
+public:
+    void Deinitialize(World& world) noexcept override {
+        sawOuter = world.FindOuterSubsystem(OuterKey) != nullptr;
+        deinitialized = true;
+    }
+
+    static inline bool sawOuter = true;
+    static inline bool deinitialized = false;
+};
+
+} // namespace
+
+// 선택 의존이 생성되지 않아도 의존하는 쪽은 만든다. 필수 의존 누락은 연쇄로 생략되고 각자 빠진 의존
+// 이름을 남긴다. 선택 의존을 거친 순환은 선언 오류다.
+TEST(WorldSubsystem_SkipChainsAndOptionalCycles) {
+    static const SubsystemKey optionalAlpha[] = {SubsystemKeyOf<AlphaRecorder>()};
+    static const SubsystemKey needsBeta[] = {SubsystemKeyOf<BetaRecorder>()};
+    static const SubsystemKey needsGamma[] = {SubsystemKeyOf<GammaRecorder>()};
+    static const SubsystemKey needsAlpha[] = {SubsystemKeyOf<AlphaRecorder>()};
+    {
+        const WorldSubsystemType types[] = {
+            MakeSubsystemType<WorldSubsystem, BetaRecorder>("Beta", {}, optionalAlpha),
+            MakeSubsystemType<WorldSubsystem, AlphaRecorder>("Alpha", {}, {}, &Never),
+        };
+        Fixture fixture(types);
+        REQUIRE(fixture.registered);
+        REQUIRE(fixture.world->Initialize());
+        CHECK(fixture.world->GetSubsystem<BetaRecorder>() != nullptr);
+        REQUIRE(fixture.world->Shutdown());
+    }
+    {
+        // Delta → Gamma → Beta → Alpha(생성 안 함): Beta·Gamma·Delta 모두 생략.
+        static const SubsystemKey needsGammaForDelta[] = {SubsystemKeyOf<GammaRecorder>()};
+        const WorldSubsystemType types[] = {
+            MakeSubsystemType<WorldSubsystem, DeltaRecorder>("Delta", needsGammaForDelta),
+            MakeSubsystemType<WorldSubsystem, GammaRecorder>("Gamma", needsBeta),
+            MakeSubsystemType<WorldSubsystem, BetaRecorder>("Beta", needsAlpha),
+            MakeSubsystemType<WorldSubsystem, AlphaRecorder>("Alpha", {}, {}, &Never),
+        };
+        Fixture fixture(types);
+        REQUIRE(fixture.registered);
+        REQUIRE(fixture.world->Initialize());
+        const Span<const SkippedSubsystem> skipped = fixture.world->SkippedSubsystems();
+        REQUIRE(skipped.Size() == 4);
+        CHECK(strcmp(skipped[1].name, "Beta") == 0 && strcmp(skipped[1].missing, "Alpha") == 0);
+        CHECK(strcmp(skipped[2].name, "Gamma") == 0 && strcmp(skipped[2].missing, "Beta") == 0);
+        CHECK(strcmp(skipped[3].name, "Delta") == 0 && strcmp(skipped[3].missing, "Gamma") == 0);
+        REQUIRE(fixture.world->Shutdown());
+    }
+    {
+        static const SubsystemKey optionalGamma[] = {SubsystemKeyOf<GammaRecorder>()};
+        const WorldSubsystemType types[] = {
+            MakeSubsystemType<WorldSubsystem, BetaRecorder>("Beta", {}, optionalGamma),
+            MakeSubsystemType<WorldSubsystem, GammaRecorder>("Gamma",
+                                                             Span<const SubsystemKey>(needsBeta)),
+        };
+        Fixture fixture(types);
+        REQUIRE(fixture.registered);
+        CHECK(fixture.world->Initialize().Error() == ErrorCode::InvalidArgument);
+    }
+    (void)needsGamma;
+}
+
+// 초기화 실패의 되돌림도 Deinitialize 계약대로 조회 창을 먼저 닫는다.
+TEST(WorldSubsystem_RollbackDeinitializeSeesClosedOuterLookup) {
+    static const SubsystemKey needsObserver[] = {SubsystemKeyOf<RollbackObserver>()};
+    const WorldSubsystemType types[] = {
+        MakeSubsystemType<WorldSubsystem, FailingRecorder>("Failing", needsObserver),
+        MakeSubsystemType<WorldSubsystem, RollbackObserver>("Observer"),
+    };
+    OuterSubsystemLookup outer;
+    outer.find = &FindOuter;
+    Fixture fixture(types, WorldKind::Game, outer);
+    REQUIRE(fixture.registered);
+    CHECK(fixture.world->Initialize().Error() == ErrorCode::DependencyFailed);
+    CHECK(RollbackObserver::deinitialized);
+    CHECK(!RollbackObserver::sawOuter);
+}
+
+// 편집·비활성 World는 BeginPlay하지 않는다(16.4절).
+TEST(WorldSubsystem_EditorAndInactiveWorldsRejectBeginPlay) {
+    const WorldKind kinds[] = {WorldKind::Editor, WorldKind::Inactive};
+    for (WorldKind kind : kinds) {
+        Fixture fixture({}, kind);
+        REQUIRE(fixture.registered);
+        REQUIRE(fixture.world->Initialize());
+        CHECK(fixture.world->BeginPlay().Error() == ErrorCode::InvalidArgument);
+        REQUIRE(fixture.world->Tick(1.0 / 60.0));
+        REQUIRE(fixture.world->Shutdown());
+    }
+
+    Fixture preview({}, WorldKind::Preview);
+    REQUIRE(preview.registered);
+    REQUIRE(preview.world->Initialize());
+    CHECK(preview.world->BeginPlay().IsOk());
+    REQUIRE(preview.world->Shutdown());
+}
+
 } // namespace world_subsystem_tests_file

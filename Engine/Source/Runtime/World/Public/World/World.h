@@ -78,6 +78,14 @@ public:
 // World보다 바깥 계층(Engine·GameInstance)의 Subsystem을 키로 찾는 창이다. World는 해석하지 않는다
 // (World 모듈은 Engine·Gameplay를 모른다 — 3절). 타입 있는 도우미는 바깥 모듈의 자유 함수다
 // (GetEngineSubsystem<T> — Engine.h, GetGameInstanceSubsystem<T> — Gameplay). 16.3절 ERD10.
+// 계약:
+// - find는 찾은 Subsystem을 **그 계층 묶음의 Base
+// 포인터**(EngineSubsystem*·GameInstanceSubsystem*)를
+//   void*로 바꿔 돌려준다(도우미가 Base*로 되돌린 뒤 T*로 내린다 — 최파생·T* 포인터를 넣으면 다중
+//   상속에서 주소가 어긋난다). 여러 계층을 잇는 창은 키가 맞는 계층의 Base 포인터를 돌려준다.
+// - context(와 그 Subsystem)는 이 World의 Shutdown이 끝날 때까지 살아 있어야 한다. 엔진이 넣는 기본
+//   창은 Engine이 World를 먼저 파괴하므로 지켜진다. 엔진 밖에서 만든 World에 엔진 창을 넣으면 그
+//   World를 엔진보다 먼저 Shutdown해야 한다.
 struct OuterSubsystemLookup {
     void* (*find)(const void* context, SubsystemKey key) noexcept = nullptr;
     const void* context = nullptr;
@@ -815,6 +823,7 @@ private:
                                ObjectHandle newParent) noexcept;
     Result<void> RunEngineStage(EngineStage stage, TickPhase phase,
                                 const TickPhaseFrame& frame) noexcept;
+    static void CloseOuterSubsystems(World& world) noexcept;
     // tickable WorldSubsystem의 OnTick을 부른다(엔진 단계 TickableSubsystems의 World 부분).
     void RunTickableSubsystems(const TickPhaseFrame& frame) noexcept;
     // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor·Component·Level을 찾아 World

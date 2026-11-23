@@ -280,6 +280,16 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
             return fail(InitStage::Subsystems, subsystems.Error());
         }
 
+        for (const SkippedSubsystem& skipped : subsystems_.Skipped()) {
+            if (skipped.reason == SubsystemSkipReason::MissingDependency) {
+                Log::Warning(
+                    LogEngine,
+                    "Skipped engine subsystem {Subsystem}: dependency {Dependency} was not "
+                    "created",
+                    skipped.name, skipped.missing);
+            }
+        }
+
         initializedSteps_ = StepSubsystems;
     }
 
@@ -645,7 +655,8 @@ Result<void> Engine::RunFrame() noexcept {
     Result<void> outcome = Move(synced);
     const uint64 worldStart = platform::MonotonicNanoseconds();
     for (usize index = 0; index < worlds_.Size(); ++index) {
-        if (worlds_[index].pendingDestroy) {
+        // 비활성 World는 Tick하지 않는다(16.4절).
+        if (worlds_[index].pendingDestroy || worlds_[index].world->Kind() == WorldKind::Inactive) {
             continue;
         }
 

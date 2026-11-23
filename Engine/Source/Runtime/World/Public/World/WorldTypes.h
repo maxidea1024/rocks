@@ -42,13 +42,13 @@ const char* ActorStateName(ActorState state) noexcept;
 enum class WorldKind : uint8 {
     // 독립 실행·서버의 게임 World다.
     Game,
-    // 편집 World다(BeginPlay하지 않는다).
+    // 편집 World다(BeginPlay하지 않는다 — BeginPlay는 InvalidArgument).
     Editor,
     // 편집 World를 복제해 실행하는 World다(UE PIE).
     Tryout,
     // 에셋 미리보기·썸네일 World다.
     Preview,
-    // 적재됐지만 실행하지 않는 World다.
+    // 적재됐지만 실행하지 않는 World다(BeginPlay는 InvalidArgument, Engine이 Tick하지 않는다).
     Inactive
 };
 

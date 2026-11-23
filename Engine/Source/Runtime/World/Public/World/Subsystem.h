@@ -109,7 +109,7 @@ public:
     SubsystemCollection& operator=(const SubsystemCollection&) = delete;
 
     ~SubsystemCollection() {
-        if (instances_.Size() != 0) {
+        if (instances_.Size() != 0 || initialized_) {
             platform::Fatal("SubsystemCollection destroyed before Deinitialize");
         }
     }
@@ -119,9 +119,13 @@ public:
     // 없는 것은 생략하고 Skipped()에 남긴다. 생성·초기화 실패는 그 오류를 반환하고 이미 초기화한
     // Subsystem을 역순으로 Deinitialize한 뒤 비운다. 이미 초기화된 묶음은 AlreadyExists다.
     // defaultShouldCreate는 type.shouldCreate가 없을 때의 소유자 기본 판정이다(없으면 생성).
+    // beforeRollback은 생성·초기화 실패로 이미 초기화한 것을 정리하기 직전에 부른다(소유자가 바깥
+    // 조회 창을 닫는 등 — 되돌림에서는 PreDeinitialize 없이 Deinitialize만 부른다).
     Result<void> Initialize(Span<const SubsystemType<Base>> types, Owner& owner,
-                            bool (*defaultShouldCreate)(const Owner&) noexcept = nullptr) noexcept {
-        if (instances_.Size() != 0) {
+                            bool (*defaultShouldCreate)(const Owner&) noexcept = nullptr,
+                            void (*beforeRollback)(Owner&) noexcept = nullptr) noexcept {
+        // 모두 생략돼 instances_가 비어도 두 번째 초기화는 거부한다.
+        if (initialized_) {
             return Result<void>::Failure(ErrorCode::AlreadyExists);
         }
 
@@ -174,6 +178,9 @@ public:
 
             auto created = type.create(allocator_);
             if (!created) {
+                if (beforeRollback != nullptr) {
+                    beforeRollback(owner);
+                }
                 Deinitialize(owner);
                 return Result<void>::Failure(created.Error());
             }
@@ -183,6 +190,9 @@ public:
                 // 그 소멸자가 Initialize 중 얻은 의존에 접근할 수 있으므로 의존을 정리하기 전에
                 // 파괴한다.
                 created.Value().Reset();
+                if (beforeRollback != nullptr) {
+                    beforeRollback(owner);
+                }
                 Deinitialize(owner);
                 return initialized;
             }
@@ -193,11 +203,13 @@ public:
             (void)keyed;
         }
 
+        initialized_ = true;
         return Result<void>::Success();
     }
 
     // 초기화 역순으로 Deinitialize하고 파괴한다. 여러 번 호출해도 안전하다.
     void Deinitialize(Owner& owner) noexcept {
+        initialized_ = false;
         skipped_.Clear();
         // 자기 Deinitialize 중에도 Get<자기 타입>이 동작하도록 정리한 뒤에 목록에서 뺀다.
         while (instances_.Size() != 0) {
@@ -325,6 +337,7 @@ private:
     Array<UniquePtr<Base>> instances_;
     Array<SubsystemKey> keys_;
     Array<SkippedSubsystem> skipped_;
+    bool initialized_ = false;
 };
 
 } // namespace rocks

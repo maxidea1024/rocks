@@ -421,6 +421,11 @@ public:
         return subsystems_.template Get<T>();
     }
 
+    // 마지막 초기화에서 생략한 EngineSubsystem이다(진단용 — 필수 의존 누락은 Warning도 남긴다).
+    Span<const SkippedSubsystem> SkippedSubsystems() const noexcept {
+        return subsystems_.Skipped();
+    }
+
     // 키로 EngineSubsystem을 찾는다(바깥 계층 조회 창 — 16.3절). 없으면 nullptr이다.
     EngineSubsystem* FindSubsystem(SubsystemKey key) const noexcept {
         return subsystems_.Find(key);

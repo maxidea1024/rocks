@@ -194,7 +194,10 @@ Result<void> World::Initialize() noexcept {
     outerOpen_ = true;
     {
         HookScope hooks(*this);
-        initialized = subsystems_.Initialize(subsystemTypes_, *this, &DefaultWorldSubsystemWanted);
+        // 되돌림(이미 초기화한 것의 Deinitialize)에서도 Deinitialize 계약대로 조회 창을 먼저
+        // 닫는다.
+        initialized = subsystems_.Initialize(subsystemTypes_, *this, &DefaultWorldSubsystemWanted,
+                                             &CloseOuterSubsystems);
     }
 
     if (!initialized) {
@@ -244,8 +247,14 @@ Result<void> World::Initialize() noexcept {
     return Result<void>::Success();
 }
 
+void World::CloseOuterSubsystems(World& world) noexcept {
+    world.outerOpen_ = false;
+}
+
 Result<void> World::BeginPlay() noexcept {
-    if (state_ != WorldState::Initialized) {
+    // 편집·비활성 World는 게임을 진행하지 않는다(16.4절).
+    if (state_ != WorldState::Initialized || kind_ == WorldKind::Editor ||
+        kind_ == WorldKind::Inactive) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
