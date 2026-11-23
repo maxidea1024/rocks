@@ -1,6 +1,6 @@
 # 엔진 컴포넌트 도입 설계(UE 5.8 컴포넌트 대응)
 
-기준일: 2026-11-23, 개정 4(폴더 밖 컴포넌트 2부 — 8절, 개정 기록 10절). 결정 CD1–CD18은 권장안으로 적었다(6절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다(5절).
+기준일: 2026-11-23, 개정 5(2부 다른 문서 개정 반영 — 8.8절, 개정 기록 10절). 결정 CD1–CD18은 권장안으로 적었다(6절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다(5절).
 
 이 문서는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 `Engine/Source/Runtime/Engine/Classes/Components` 폴더(헤더 73개)에 있는 컴포넌트를 Rocks에 들이는 범위와 순서를 정한다. 사용자 지시(2026-11-23): 기본은 전부 가져오되 폐기된 것과 BSP는 제외한다. 필수 컴포넌트 목록(3절)과 선행 작업 목록(4절)을 따로 둔다. 1–7절(1부)은 이 폴더, 8절(2부)은 폴더 밖(Engine 모듈의 다른 폴더, Runtime의 다른 모듈, 플러그인 색인)이다.
 
@@ -519,14 +519,16 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | CD17 | 편집기 쪽 컴포넌트 | gizmo·지형 gizmo·레벨 인스턴스 편집 도우미는 런타임 카탈로그 밖. 에디터 문서와 Prefab이 정한다. 편집 표시는 CD12 경로 | 런타임 Shipping에 들어가지 않는다 |
 | CD18 | 이름(2부) | 업계 공용 이름은 그대로. UE 줄임말·브랜드만 바꾼다: `CineCamera` → `CinematicCamera`, `FXSystem` → `Effect`, `LandscapeHeightfieldCollision` → `LandscapeCollision`, `ActorTextureStreamingBuildData` → `TextureStreamingBuildData`, `GameplayDebuggerRendering` → `GameplayDebugDraw`, `EQSRendering` → `EqsDraw` | CD6과 같은 규칙 |
 
-### 8.8 다른 문서 개정(반영 대기)
+### 8.8 다른 문서 개정
 
-| 문서 | 고칠 것 |
+개정 5(2026-11-23)에서 모두 반영했다(EIP 개정 1.19 범위에 더함). 요구의 정본은 이 문서 8.5절이다.
+
+| 문서 | 고친 것 |
 |---|---|
-| EIP 16절 | 캐릭터 이동 구조(CD15)와 물리 보조 컴포넌트(CM14) 링크 |
-| EIP 19절 | AI·내비 컴포넌트(CM16)와 선행 CR30·CR31 링크 |
-| EIP 21절 | 지형·식생(CM18)·VFX 효과(CM21)·world-space UI(CM17) 링크, 파괴 문서(CD14) |
-| EIP 20.5절 | `CameraDirector`가 카메라 컴포넌트(CM0·CM15)와 CR29의 정본임을 링크 |
+| EIP 16.1절 | 물리 쪽 컴포넌트(CM3·CM12–CM14) 링크, 캐릭터 이동 구조(CD15), Chaos 파괴·field·cluster union·네트워크 물리 미도입(CD14) |
+| EIP 19절 | AI·내비 컴포넌트(CM16)와 선행 CR30·CR31·CR39 링크, PawnSensing·GridPathFollowing 미도입 |
+| EIP 20.5절 | `CameraDirector` = UE `APlayerCameraManager` 대응, 카메라 컴포넌트(CM0·CM12·CM15) 링크, CR29의 정본, AI 컨트롤러 CR39 |
+| EIP 21절 | VFX 효과(CD16, CM21)·world-space UI(CM17)·지형·식생(CM18) 링크, 절차 식생 후속, destruction(CD14) |
 
 UiToolkit은 world-space UI를 이미 5.9절·UT6에서 다루므로 고칠 것이 없다(CR32가 그쪽을 정본으로 가리킨다).
 
@@ -559,6 +561,7 @@ UiToolkit은 world-space UI를 이미 5.9절·UT6에서 다루므로 고칠 것�
 
 ## 10. 개정 기록
 
+- 개정 5(2026-11-23): 8.8절 다른 문서 개정 반영(EIP 16.1·19·20.5·21절).
 - 개정 4(2026-11-23): 8절 폴더 밖 컴포넌트(2부) 추가(사용자 지시) — Engine 다른 폴더·Runtime 다른 모듈 전수 분류(필수 56·대체 2(`USynthComponent`·`UMediaSoundComponent` — AU 9.1절)·제외 4·후속 38·편집기 9·아님 13), 선행 CR27–CR39, 묶음 CM12–CM21, 결정 CD13–CD18, 플러그인 색인. `PathMoverComponent`를 CM5에서 CM12로. 리뷰어 1명 교차검증 반영: 빠진 `UMediaSoundComponent`(대체)·`UMockDataMeshTrackerComponent`(XR 후속), 절차 식생은 UE 실험 기능이라 후속, AI 컨트롤러 선행 CR39, CR29 정본을 EIP 20.5절 `CameraDirector`로, CM12·CM13에 CM3, `LandscapeMeshProxyComponent`를 CM19로, 플러그인 색인의 모델링 도구·Dataflow·단계 표기 정정. 확인하지 못한 것·개정 기록을 9·10절로 옮김.
 - 개정 3(2026-11-23): 남아 있던 두 항목을 권장안으로 확정(사용자 지시) — CD11 Tick 단계 UE 대응(ER 8절 대응표, EIP 20.2절), CD12 디버그·편집 표시(RN 4.2절 세 경로, 11.2절 PC9a·PC9b, 17절 RS13). CR8a·CR23 상태를 결정으로.
 - 개정 2(2026-11-23): 7절 다른 문서 개정 반영. CR23 정본을 RenderBase에서 Renderer 4.2절로 정정. `LightmassPortal` 대응 이름을 `LightPortal`에서 `LightBakePortal`로(사용자 지적 — 베이크 전용 의미, CD6).
