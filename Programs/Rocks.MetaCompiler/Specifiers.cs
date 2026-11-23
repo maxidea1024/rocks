@@ -13,6 +13,9 @@ internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, st
 
     public bool Deprecated { get; init; }
 
+    // 쿠킹 데이터에 없는 클래스(TypeFlags::EditorOnly — 상속된다, Docs/Design/AssetSystem.ko.md 10.2절 A4e2a)다.
+    public bool EditorOnly { get; init; }
+
     public string Within { get; init; } = "";
 }
 
@@ -52,6 +55,10 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
     public string ToolName { get; init; } = "";
 
     public uint MaxElements { get; init; }
+
+    // 에셋 bundle 이름 목록 AssetBundles="a,b"(Docs/Design/AssetSystem.ko.md 10.2절 A4e2a — UE meta=(AssetBundles=…))의 정규 텍스트다
+    // (이름 앞뒤 공백을 뗀 쉼표 목록, 없으면 ""). 문법은 Specifiers.CanonicalAssetBundles(RMC2212), 필드 종류는 SchemaValidator(RMC2202)가 본다.
+    public string AssetBundles { get; init; } = "";
 
     // 설정 필드 지정자다(Docs/Design/ConfigSystem.ko.md 7절 — 설정 struct의 직접 멤버만, 그 밖은 RMC2210): 사용자 층 쓰기 허용(UserConfig),
     // 콘솔 설정 이름(ConsoleName="render.graph.immediate"), 효력 시점(RestartRequired·StartupOnly — 둘 중 하나), 설정 snapshot에 넣기
@@ -97,7 +104,7 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Abstract" or "WorldOnly" or "Transient" or "Deprecated";
+            bool flag = key is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly";
             bool number = key is "Version";
             bool label = key is "Name" or "Within";
             if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
@@ -118,6 +125,7 @@ internal static class Specifiers
         {
             Transient = values.ContainsKey("Transient"),
             Deprecated = values.ContainsKey("Deprecated"),
+            EditorOnly = values.ContainsKey("EditorOnly"),
             Within = within
         };
     }
@@ -209,7 +217,7 @@ internal static class Specifiers
         {
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly";
-            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName";
+            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
                 (number && value?.Number is null))
@@ -232,6 +240,14 @@ internal static class Specifiers
                 "Write the console setting name as <area>.<name>, e.g. ConsoleName = \"render.graph.immediate\".");
         }
 
+        string assetBundles = "";
+        if (values.GetValueOrDefault("AssetBundles")?.Text is string bundleText)
+        {
+            assetBundles = CanonicalAssetBundles(bundleText) ?? throw new MetadataException(
+                $"{symbol}: AssetBundles must list 1 to {AssetBundleMaxNames} distinct ASCII identifiers of at most {AssetBundleNameMaxBytes} bytes separated by commas: \"{bundleText}\"",
+                "RMC2212", "Write AssetBundles = \"UI,Game\" with identifier names ([A-Za-z_][A-Za-z0-9_]*) and no repeated name.");
+        }
+
         if (values.ContainsKey("RestartRequired") && values.ContainsKey("StartupOnly"))
         {
             throw new MetadataException($"{symbol}: RestartRequired and StartupOnly cannot be combined", "RMC2210",
@@ -250,6 +266,7 @@ internal static class Specifiers
             // 필드 이름과 같은 Name은 지정하지 않은 것과 같다(모듈 사이 상속 필드의 도구 이름이 같은 바이트가 되게).
             ToolName = toolName == fieldName ? "" : toolName,
             MaxElements = values.GetValueOrDefault("MaxElements")?.Number ?? 0,
+            AssetBundles = assetBundles,
             UserConfig = values.ContainsKey("UserConfig"),
             ConsoleName = consoleName,
             RestartRequired = values.ContainsKey("RestartRequired"),
@@ -338,6 +355,21 @@ internal static class Specifiers
     // enum 도구 이름·접두의 문자 집합이다: [A-Za-z0-9_]+ (UE의 접두를 뗀 이름 "8BitData"처럼 숫자로 시작할 수 있다).
     public static bool IsEnumToolName(string text) =>
         text.Length != 0 && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    // bundle 이름 byte 상한과 목록 이름 수 상한이다(런타임 AssetBundleNameMaxBytes·AssetBundleMaxNames와 같은 값).
+    public const int AssetBundleNameMaxBytes = 64;
+
+    public const int AssetBundleMaxNames = 16;
+
+    // AssetBundles 값의 정규 텍스트다: 쉼표로 나눈 이름마다 앞뒤 ASCII 공백을 떼고 다시 잇는다(UE ParseIntoArrayWS처럼 공백을 받는다).
+    // 이름이 ASCII 식별자가 아니거나 길이·수가 상한을 넘거나 같은 이름이 둘이면 null이다(런타임 IsAssetBundleList와 같은 규칙).
+    public static string? CanonicalAssetBundles(string text)
+    {
+        string[] names = text.Split(',').Select(name => name.Trim(' ', '\t')).ToArray();
+        bool valid = names.Length <= AssetBundleMaxNames && names.All(name => name.Length <= AssetBundleNameMaxBytes && IsAsciiIdentifier(name)) &&
+            names.Distinct(StringComparer.Ordinal).Count() == names.Length;
+        return valid ? string.Join(',', names) : null;
+    }
 
     public static bool IsAsciiIdentifier(string text) =>
         text.Length != 0 && (char.IsAsciiLetter(text[0]) || text[0] == '_') && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');

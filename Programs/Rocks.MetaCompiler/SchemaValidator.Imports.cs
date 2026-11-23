@@ -229,6 +229,12 @@ internal static partial class SchemaValidator
     internal static bool ContainsRequiredTrait(ClassModel type, Func<string, ClassModel> find) =>
         type.Fields.Any(field => !field.Spec.Transient && (field.Spec.Required || (field.StructTarget && ContainsRequiredTrait(find(field.Reference!), find))));
 
+    // struct가 (멤버 struct·base struct까지) AssetBundles 멤버를 담는가다(EditorOnly 필드 안 목록 거부 — Docs/Design/AssetSystem.ko.md 10.2절 A4e2a).
+    // 이 모듈 타입은 검증 중이라 Fields가 아직 비었을 수 있어 OwnFields(+ base)를, import 타입은 descriptor의 Fields(상속 포함)를 본다.
+    internal static bool ContainsAssetBundles(ClassModel type, Func<string, ClassModel> find) =>
+        (type.Imported ? type.Fields : type.OwnFields).Any(field => field.Spec.AssetBundles.Length != 0 || (field.StructTarget && ContainsAssetBundles(find(field.Reference!), find))) ||
+        (type.IsStruct && type.Base.Length != 0 && ContainsAssetBundles(find(type.Base), find));
+
     private static void ComputeRanks(IEnumerable<ClassModel> structs, IReadOnlyDictionary<string, ClassModel> classes)
     {
         HashSet<string> done = new(StringComparer.Ordinal);

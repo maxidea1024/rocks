@@ -32,18 +32,29 @@ using ContextId = Guid;
 //               그것을 가리키는 참조를 null + 진단으로 쓴다. 로드는 되고
 //               진단(TransientType·DeprecatedType)을 낸다. Deprecated 클래스는 ClassRef 쓰기가
 //               거부한다(이미 저장된 값은 진단과 함께 읽고 그대로 저장한다).
+//   EditorOnly — 클래스(ROCKS_CLASS(EditorOnly) — Docs/Design/AssetSystem.ko.md 10.2절 A4e2a, UE
+//               UObject::IsEditorOnly() 재정의 대응). 쿠킹 데이터에 없는 클래스다. 상속된다(파생도
+//               같은 비트를 가져야 한다 — 등록 InvalidArgument). 대표 타입이 EditorOnly인 에셋은
+//               쿠킹 대상이 아니고 쿠킹 패키지 쓰기는 이 클래스 객체를 저장 불가 객체처럼 뺀다.
+//               값 32는 Atomic(16) 다음 비트다.
 enum class TypeFlags : uint32 {
     None = 0,
     Abstract = 1,
     WorldOnly = 2,
     Transient = 4,
     Deprecated = 8,
-    Atomic = 16
+    Atomic = 16,
+    EditorOnly = 32
 };
 
 // 저장 불가 클래스 비트(Transient·Deprecated — 리플렉션 B9h2)다.
 inline constexpr uint32 UnsaveableTypeFlags =
     static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated);
+
+// 상속되는 클래스 비트다(base에 있으면 파생에도 있어야 한다 — 등록 InvalidArgument).
+inline constexpr uint32 InheritedTypeFlags = static_cast<uint32>(TypeFlags::WorldOnly) |
+                                             UnsaveableTypeFlags |
+                                             static_cast<uint32>(TypeFlags::EditorOnly);
 
 // FieldFlags:
 //   Transient  — GC 추적은 하되 저장 그래프에서 뺀다.
@@ -543,7 +554,66 @@ struct FieldSchema {
     // Required가 없다(필드의 Required는 값마다 non-null — 대상 형식 element로 판정한다). Map이 아닌
     // 필드는 {Opaque, 0}이어야 한다.
     ValueType key{};
+    // 에셋 bundle 이름 목록(ROCKS_PROPERTY(AssetBundles="a,b") —
+    // Docs/Design/AssetSystem.ko.md 10.2절 A4e2a, UE meta=(AssetBundles=…))이다. 쉼표로 이은 정규
+    // 텍스트(공백 없음 — IsAssetBundleList)이고 비면 없다. 대상 종류(FieldTargetType)가
+    // SoftObjectReference·Struct· InstancedStruct이거나 Map 키가 SoftObjectReference인 필드에만
+    // 쓰고, EditorOnly 필드에는 쓰지 않는다(등록 InvalidArgument). 저장 때 bundle 태그만 읽는 편집
+    // 정보라 UiToolkit 7.3 편집 메타데이터 블록(CU1)이 생기면 그리로 옮긴다.
+    Span<const char> assetBundles{};
 };
+
+// bundle 이름 하나의 byte 상한과 목록의 이름 수 상한이다(AssetSystem.ko.md 10.2절 A4e2a).
+inline constexpr usize AssetBundleNameMaxBytes = 64;
+inline constexpr usize AssetBundleMaxNames = 16;
+
+// list가 정규 bundle 목록인지다: 쉼표로 이은 이름 1–AssetBundleMaxNames개, 이름마다 ASCII
+// 식별자([A-Za-z_][A-Za-z0-9_]*, 1–AssetBundleNameMaxBytes byte), 목록 안 중복 없음(대소문자
+// 구분 — 태그 키가 `Bundle.<이름>`이다), 공백 없음.
+constexpr bool IsAssetBundleList(Span<const char> list) noexcept {
+    usize names = 0;
+    usize start = 0;
+    for (usize end = 0; end <= list.Size(); ++end) {
+        if (end < list.Size() && list[end] != ',') {
+            const char c = list[end];
+            const bool letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+            if (!letter && (end == start || c < '0' || c > '9')) {
+                return false;
+            }
+
+            continue;
+        }
+
+        const usize length = end - start;
+        if (length == 0 || length > AssetBundleNameMaxBytes || ++names > AssetBundleMaxNames) {
+            return false;
+        }
+
+        // 앞선 이름과 같은지 본다(목록이 짧아 제곱 비교로 충분하다).
+        usize other = 0;
+        while (other < start) {
+            usize otherEnd = other;
+            while (list[otherEnd] != ',') {
+                ++otherEnd;
+            }
+
+            bool same = otherEnd - other == length;
+            for (usize at = 0; same && at < length; ++at) {
+                same = list[other + at] == list[start + at];
+            }
+
+            if (same) {
+                return false;
+            }
+
+            other = otherEnd + 1;
+        }
+
+        start = end + 1;
+    }
+
+    return true;
+}
 
 // 경로의 index 단계([i])를 받는 컨테이너 종류(Array·StaticArray)인지다. 원소 수를 바꾸는
 // 삽입·삭제·비우기는 Array만 받는다(StaticArray는 길이가 N으로 고정 — 리플렉션 B9g).

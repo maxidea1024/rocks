@@ -989,6 +989,23 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     - 진단은 표준 오류에 `asset-cook: <코드>: <대상>: <error|warning>[ <원인 오류>][ (related <대상>)]` 한 줄씩(보고서와 같은 순). 코드는 진단 코드 이름, 없으면 원인 오류 이름이다. 대상은 에셋이면 색인의 논리 경로(색인에 고유하게 없으면 AssetId 표준 문자열), 에셋이 없는 경로 진단(InvalidPath·DuplicatePath)은 부분 쿠킹이면 그 인자 경로·전체 쿠킹이면 `alwaysCook[<순번>]`, 그 밖은 쿠킹 루트다.
     - 요약은 표준 출력에 `asset-cook: <프로파일> <published|not published> targets <n> cooked <n> reused <n> bytes <n>[ partial]` 한 줄이다. `--json`이면 요약 대신 쓴 보고서(CookReport.json) 내용을 그대로 쓴다(진단 줄은 표준 오류에 그대로 쓴다).
     - 종료 코드: 게시 0(경고만 있어도), 오류 진단으로 게시하지 않음 1, 실행 실패 1(실패 줄), 사용법 2. 할당 실패는 명령 오류(OutOfMemory)다.
+  - **A4e2a — 리플렉션 요구 둘**(ReflectionFoundations 2.2·2.3·2.6절에 행으로 적는다 — 리플렉션 쪽 문서가 정본):
+    - **클래스 표지 `ROCKS_CLASS(EditorOnly)`** = `TypeFlags::EditorOnly`(32). 쿠킹 데이터에 없는 클래스다. WorldOnly처럼 **상속된다**(MetaCompiler가 base에서 더하고, TypeRegistry는 EditorOnly base의 파생이 플래그를 갖는지 검사한다 — 수동 등록 대비). UE에는 UHT 클래스 지정자가 없고 `UObject::IsEditorOnly()` 재정의(가상 — 파생이 물려받는다)와 편집기 모듈 클래스가 같은 뜻이다(UE 5.8 `SavePackage`·쿠커가 `IsEditorOnlyObject`로 거른다). Rocks는 판정을 실행 코드가 아니라 선언으로 둔다(패키지를 열지 않는 대상 계산이 색인의 대표 타입만으로 판정해야 한다 — 결정 5). WorldOnly·Abstract와 함께 쓸 수 있다.
+    - **필드 지정자 `ROCKS_PROPERTY(AssetBundles="a,b")`**(UE `meta=(AssetBundles="a,b")`): 쉼표 목록, 이름마다 ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`, 1–`AssetBundleNameMaxBytes`(64) byte), 목록 안 중복 금지(대소문자 구분 — 태그 키가 `Bundle.<이름>`이다), 이름 수 1–`AssetBundleMaxNames`(16). 위반은 RMC2212. 쓸 수 있는 필드: 값(Array·StaticArray·Set·Optional의 원소, Map의 키 또는 값 포함)이 SoftObjectRef이거나 struct이거나 InstancedStruct인 필드(InstancedStruct는 내용 struct를 따라가므로 사슬 제한에 든다). 그 밖은 RMC2202다 — `AssetId` 값 필드는 참조 간선이 아니라(쿠킹 패키지 Dependencies에 남지 않는다) bundle 구성원이 될 수 없고(구성원은 그 항목의 런타임 의존이어야 한다 — 10.1절 5), EditorOnly 필드(유효 플래그 — 바깥 필드가 EditorOnly인 struct 멤버 포함)는 쿠킹 패키지에서 빠지므로 막는다(교차 검증 필수). struct 쪽은 UE처럼 **사슬 제한**이다 — 소프트 참조의 실효 bundle은 대표 에셋에서 그 값까지 경로에 있는 `AssetBundles`들의 교집합이고(UE `InitializeAssetBundlesFromMetadata_Recursive`가 속성 사슬의 집합을 교차한다), 경로에 하나도 없으면 어느 bundle에도 들지 않는다. 교집합이 비면 들지 않는다 — UE는 중간 교집합이 비면 더 깊은 메타가 집합을 다시 채운다("비었으면 초기화, 아니면 교차"). Rocks는 엄격한 교집합으로 둔다(바깥 목록이 늘 제한이 되어 일관된다 — UE와 다른 점).
+    - 스키마: `FieldSchema::assetBundles`(정규 텍스트 — 쉼표로 이은 이름, 비면 없음). 저장 때만 읽는 편집 정보라 UiToolkit 7.3 편집 메타데이터 블록(CU1)이 생기면 그리로 옮긴다(그때 `ROCKS_WITH_EDITOR_DATA=0` 빌드에서 빠진다). Registry는 깊게 복사하고 등록 때 같은 규칙(이름 문법·수·중복·필드 종류)을 다시 본다(수동 등록 대비 — InvalidArgument). 상속 필드 일치 비교에 넣는다.
+    - 버린 안: bundle을 타입 hook(A2c)으로 타입마다 손으로 쓰기 — UE와 다르고 필드를 더할 때마다 hook을 고쳐야 한다. 필드 플래그 비트 하나 + 별도 표 — 이름 목록을 담을 곳이 결국 필요하다.
+  - **A4e2b — 저장 때 bundle 태그·EditorOnly 규칙**:
+    - **bundle 태그**: 에디터 패키지 저장(`EditorPackageSet` — Tags를 저장마다 다시 만드는 자리)이 타입 hook Tags 뒤에 대표 에셋의 값을 공용 순회(`reflection_text::VisitValues` — 출력 제외는 Report와 같다, Transient만 뺀다)로 돌며, 경로의 어느 단계든 EditorOnly인 필드는 건너뛰고(쿠킹 패키지 쓰기와 같은 제외 — 수동 등록 스키마도 막는다, 교차 검증 필수) 실효 bundle이 있는 null 아닌 소프트 참조마다 태그 `Bundle.<이름>` = 대상 AssetId 표준 문자열을 더한다(같은 쌍은 sink가 합친다). 모든 에셋에 쓴다(PrimaryAsset 여부는 쿠킹 설정이 정하므로 저장 때 알 수 없다 — 쿠커는 PrimaryAsset의 태그만 읽는다, A4b 규칙 3). InstancedStruct 내용도 따라간다(순회가 내용 struct를 준다). 하위 객체(UE `CPF_InstancedReference`·`IncludeAssetBundles`)는 따라가지 않는다 — 인스턴스 하위 객체 참조 표지가 리플렉션에 없다(생기면 더한다). 소프트 참조의 객체 경로(하위 객체)는 버리고 패키지 AssetId만 쓴다(UE도 `GetLongPackageName`으로 패키지를 본다).
+    - 공용 순회의 필드 이벤트에 그 필드의 스키마를 함께 넘긴다(`ValueVisitor::Field(name, field)` — 순회를 따로 만들지 않는다, 순회 사용처 둘을 함께 고친다).
+    - **EditorOnly 에셋 규칙**(결정 4): 대표 타입이 EditorOnly인 에셋은 NeverCook과 같은 규칙이다 — 뿌리면 빼고(alwaysCook·인자 경로가 직접 가리키면 경고 `NeverCookReferenced`, PrimaryAsset 규칙으로만 닿았으면 진단 없음), Hard·bundle 참조는 오류 `NeverCookReferenced`, Soft는 제외 목록. 대표 타입의 플래그는 TypeRegistry로 본다. 색인의 대표 타입은 이 프로세스에 로드되지 않은 모듈의 타입일 수 있으므로(교차 검증 필수) 미등록(NotFound)은 EditorOnly가 아닌 것으로 두고 판정을 키 단계에 맡긴다 — 키 단계가 그 에셋에 `UnsupportedVersion`(error NotFound) 오류를 내므로 쿠킹은 게시되지 않고 진단은 한 번이다. 그 밖의 조회 오류(ShuttingDown 등)는 함수 오류다.
+    - bundle 구성원의 엄격도(Hard와 같은 오류 규칙 — 없거나 NeverCook·EditorOnly인 구성원은 오류)는 의도한 결정이다(교차 검증 권장 확인): 매니페스트 bundle 구성원은 그 항목의 런타임 의존이어야 하고(10.1절 5) 런타임 bundle 로드가 실패하지 않아야 한다. UE는 bundle 데이터를 AssetRegistry에 기록만 하고 쿠킹을 막지 않는다(차이).
+    - **쿠킹 패키지 안 EditorOnly 객체**: 쿠킹 패키지 쓰기는 EditorOnly 클래스 객체(상속 포함)를 저장 불가 객체처럼 뺀다 — export 집합에서 그 부분 트리를 빼고, 가리키는 참조는 null + `ExternalReference` 진단(value 5 = EditorOnly 클래스 — 쓰기 실패가 아니라 기록 진단, Transient 클래스 참조와 같다)이다. UE `SavePackage`가 쿠킹 때 편집기 전용 객체를 export·import에서 빼고 그 참조를 null로 쓰는 것과 같다(쿠킹 실패가 아님). UE의 `HasNonEditorOnlyReferences()`(편집기 전용 객체를 남기는 선택 장치) 대응은 없다(차이 — 요구가 생기면 클래스 표지로 더한다). 저장 정책에 저장 불가 마스크를 두고(기본 = Transient·Deprecated, 쿠킹 쓰기 = + EditorOnly) 에디터 패키지 저장은 그대로다.
+- A4e2a 상태: **구현** — 대조표 14.1.75절, coverage 14.1.76절. 구현에서 정한 것:
+  - 상속 클래스 비트를 `InheritedTypeFlags`(WorldOnly·Transient·Deprecated·EditorOnly — MetaSchema `TypeSchema.h`)로 묶었다. TypeRegistry의 파생 검사와 손 등록 파생(`NativeClass` — 리플렉션 조상 플래그 상속)이 함께 쓴다. 전에는 손 등록 파생이 WorldOnly만 물려받아 Transient·Deprecated 조상의 손 등록 파생은 등록이 거부됐다(같은 상수로 고쳤다).
+  - bundle 목록 판정은 런타임 `IsAssetBundleList`(constexpr)와 MetaCompiler `Specifiers.CanonicalAssetBundles`가 같은 규칙(이름 문법·길이·수·중복)이다. MetaCompiler는 이름 앞뒤 공백을 떼어 정규 텍스트로 만들고(UE `ParseIntoArrayWS`처럼 공백을 받는다), 런타임·descriptor는 정규 텍스트만 받는다.
+  - 생성 `FieldSchema` 초기화에서 bundle 목록은 마지막 칸이라, 목록이 있는 단일 값 필드는 element·maxElements·key를 빈 값으로 채워 쓴다(목록이 없는 필드의 생성 텍스트는 그대로 — 모든 생성 소스가 다시 생성되지 않는다).
+  - MetaCompiler descriptor 형식을 3으로 올렸다(필드 `assetBundles`). 이전 형식은 거부한다(설치형 SDK도 다시 만든다).
+  - EditorOnly struct 필드 안의 목록 검사는 이 모듈 struct(검증 중 — `OwnFields`와 base)와 import struct(descriptor `Fields`)를 모두 본다. InstancedStruct 내용은 실행 중에 정해지므로 컴파일 검사가 없고, 수집기(A4e2b)가 EditorOnly 경로를 건너뛴다.
 - A4e1 상태: **완료**(리뷰어 판정 충족, 2026-11-23) — 대조표 14.1.73절, coverage 14.1.74절. 리뷰 반영(필수 하나 — 경로 진단 대상은 인자 유무가 아니라 실제 쿠킹 모드(`result.partial`)로 고른다. 기존 매니페스트가 없거나 깨져 전체 쿠킹으로 바뀌면 순번은 alwaysCook 순번이다 — 인자 배열을 그 순번으로 읽으면 범위 밖일 수 있었다). 구현에서 정한 것:
   - 명령 시험은 EngineTests가 명령 함수를 이 프로세스에서 부른다(시험 타입 모듈·시험 임포터로 에셋을 만든다). 제품 실행 파일 시험(Rocks.Commandlet.Tests)은 실제 모듈 로더가 쿠커 모듈을 시작하고 실행 파일 위쪽 `Engine/Config` 프로파일로 쿠킹하는지 본다.
   - 명령 시험 공용 도구(출력 수집·시험 임포터 등록·디스크 프로젝트)는 `AssetCommandlets/Tests/AssetCommandletTestSupport.h`로 옮겼다(임포트 명령 시험과 같이 쓴다 — 동작 불변).
@@ -3251,6 +3268,33 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | DuplicatePath 대상 갈래 | 경로 진단이 DuplicatePath인 쪽 | 같은 경로 키 파일 둘은 대소문자 변형인데 Windows NTFS 디렉터리가 받지 않는다(NFC·NFD 이름 두 파일은 같은 경로 키 둘로 잡히지 않았다 — 시험으로 확인). 판정·순번은 `CookTargets_MissingAndDuplicates`(메모리 파일 시스템)가 덮고 줄 모양은 InvalidPath와 같은 갈래다 |
 | 코드 없는 진단 | 코드 자리에 원인 오류 이름 | 콘텐츠 해시의 NotFound 밖 실패(해시 중 변경 Busy·읽기 IO 오류)만 낸다 — OS·경쟁 조건이고 `CookKeys_Failures`가 메모리 파일 시스템으로 덮는다 |
 | switch 밖 반환 | 설정 파일·칸·너겟 칸 switch의 열거형 밖 | 열거형 밖 값이 없다 |
+
+#### 14.1.75 요구 대조표(A4e2a — 리플렉션 EditorOnly 클래스·AssetBundles 필드)
+
+시험: Foundation `Core/Source/Runtime/ObjectRuntime/Tests/TypeFlagTests.cpp`(`TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected`·`TypeFlags_EditorOnlyIsInherited`·`TypeFlags_AssetBundleLists`), EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/AssetBundleSchemaTests.cpp`(`AssetBundleSchema_*` 2 — fixture `AssetTestFixtures/BundleAssets.h`), 도구 시험 `Programs/Rocks.ToolTests`(meta).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| EditorOnly 비트(A4e2a) | 32 수락·다음 비트 거부, 생성 스키마 비트·descriptor flags, 다른 플래그와 함께(WorldOnly·Abstract) | `TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected`·`Meta.EditorOnlyClassFlagIsInherited`·`AssetBundleSchema_GeneratedListsAndFlags` |
+| EditorOnly 상속 | 파생이 빠뜨리면 등록 InvalidArgument(다른 상속 비트만 있어도), MetaCompiler 파생 자동 상속 | `TypeFlags_EditorOnlyIsInherited`·`Meta.EditorOnlyClassFlagIsInherited` |
+| EditorOnly는 클래스 전용 | STRUCT 지정자·값 있는 지정자 거부(RMC2000) | `Meta.EditorOnlyIsClassOnly` |
+| AssetBundles 정규 텍스트 | 공백 뗌, 단일·배열·struct·Map 키·InstancedStruct·struct 멤버, 지정 없음은 빈 텍스트, descriptor·생성 스키마·생성 헤더 컴파일 | `Meta.AssetBundlesReachDescriptorAndSchema`·`AssetBundleSchema_GeneratedListsAndFlags` |
+| 목록 문법(RMC2212) | 빈 값·빈 이름·중복·식별자 아님·65 byte·17개 | `Meta.AssetBundlesRejectBadLists`·`TypeFlags_AssetBundleLists`(경계 64 byte·16개, 대소문자 다른 이름) |
+| 필드 종류(RMC2202) | 정수·AssetId 값 거부 | `Meta.AssetBundlesRejectWrongFields` |
+| EditorOnly 경로(RMC2202) | EditorOnly 필드의 목록, EditorOnly struct 필드 안 멤버 목록 | `Meta.AssetBundlesRejectEditorOnlyFields` |
+| Registry | 깊은 복사, 수동 등록 거부(대상 Opaque·EditorOnly 필드·정규 아닌 텍스트 셋), 상속 필드 일치 비교 | `AssetBundleSchema_GeneratedListsAndFlags`·`AssetBundleSchema_ManualRegistrationRejects`·`TypeFlags_AssetBundleLists` |
+| descriptor 형식 3 | 이전 형식 거부, 엄격 읽기(값이 맞지 않는 목록), 손 descriptor 시험의 새 칸 | `Meta.CrossModuleBaseMustBeExported`·`Meta.ModuleDescriptorIsReadStrictly`·`Meta.ArrayDescriptorTraitsAndVisibilityAreChecked` |
+| 조합(14 완료 조건 2) | 자리(클래스 필드·struct 멤버·컨테이너 원소·Map 키·InstancedStruct) × 검사 주체(MetaCompiler·descriptor·Registry) × 결과(수락·RMC2202·RMC2212·InvalidArgument) | 위 시험 |
+
+#### 14.1.76 Coverage(A4e2a)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): 새 런타임 코드는 두 실행 파일을 합쳐 모든 줄·분기에 닿는다.
+- `IsAssetBundleList`(`TypeSchema.h`): Foundation `-Filter TypeFlags` — 줄·분기 전부(이름 문자 판정의 갈래마다 — 'z' 위·'9'와 'A' 사이·'0' 아래 문자, 길이·수 경계, 중복 비교).
+- TypeRegistry 등록 검사(`TypeRegistryRegister.cpp` bundle 블록): EngineTests `-Filter AssetBundleSchema`(Soft·struct·InstancedStruct·Map 소프트 키 수락, EditorOnly·정규 아닌 텍스트·소프트 키 아닌 Map 거부)와 Foundation `-Filter TypeFlags`(대상이 Opaque인 필드 — Map 아님)를 합쳐 전부. 깊은 복사·상속 필드 비교 줄은 생성 fixture 등록이 지난다.
+- `NativeClass`의 상속 비트 마스크는 컴파일 시 식이다(손 등록 파생 시험 `NativeDerivedGraphTests`가 그 등록을 지난다).
+- MetaCompiler(C#)는 meta 시험 270건으로 본다(지정자·검증·생성·descriptor 갈래마다 위 대조표의 시험 — C# coverage 측정 체계는 없다).
+
+닿지 않는 곳 없음.
 
 ## 15. PNG 디코더 범위
 

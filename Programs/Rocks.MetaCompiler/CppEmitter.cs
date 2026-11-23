@@ -1274,10 +1274,15 @@ internal static class CppEmitter
             string head = $"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ";
             string labels = $"{View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}";
             string? keyId = field.KeyHasTargetType ? field.KeyReferenceId : null;
-            string key = field.IsMap ? $", {{ValueKind::{field.KeyKind}, {GuidValue(keyId)}}}" : "";
+            // bundle 목록(에셋 A4e2a)은 FieldSchema의 마지막 칸이라, 있으면 그 앞 칸(element·maxElements·key)을 빈 값으로라도 채운다.
+            string bundles = field.Spec.AssetBundles.Length != 0 ? $", {View(field.Spec.AssetBundles)}" : "";
+            const string NoType = "{ValueKind::Opaque, Guid{}}";
+            string key = field.IsMap ? $", {{ValueKind::{field.KeyKind}, {GuidValue(keyId)}}}" : bundles.Length != 0 ? ", " + NoType : "";
             Line(field.HasElement
-                ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u{key}}},"
-                : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},");
+                ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u{key}{bundles}}},"
+                : bundles.Length != 0
+                    ? $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}, {NoType}, 0u{key}{bundles}}},"
+                    : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},");
         }
 
         Line("};");
