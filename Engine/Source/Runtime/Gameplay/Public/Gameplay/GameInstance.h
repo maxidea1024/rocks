@@ -37,6 +37,24 @@ public:
 using GameInstanceSubsystemType = SubsystemType<GameInstanceSubsystem>;
 using GameInstanceSubsystems = SubsystemCollection<GameInstanceSubsystem, GameInstance>;
 
+namespace detail {
+
+// GameInstance Subsystem 묶음과 World 바깥 조회 창의 context다. GameInstanceClient가 소유한다 —
+// 엔진 Registry 객체(GameInstance) 밖에 둬서 World의 조회 창이 GameInstance를 빌리지 않고 읽게
+// 하고, GameInstance를 정리한 뒤에도(Editor·Inactive World는 Shutdown 때까지 창이 열려 있다) 창이
+// 닫힌 묶음만 보게 한다(Docs/Design/EngineRuntime 18.6절).
+struct GameInstanceServices {
+    explicit GameInstanceServices(Allocator& allocator) noexcept : subsystems(allocator) {
+    }
+
+    Engine* engine = nullptr;
+    GameInstanceSubsystems subsystems;
+    // GameInstance Subsystem을 조회 창에 보이는지다(초기화 뒤 참, 정리 전에 거짓).
+    bool visible = false;
+};
+
+} // namespace detail
+
 // GameInstanceClient의 설정이다(18.6절). Span·포인터가 가리키는 것은 client보다 오래 살아야 한다.
 struct GameInstanceConfig {
     // 만들 GameInstance·LocalPlayer 클래스다(비면 기본 클래스). 엔진 TypeRegistry에 등록된
@@ -101,12 +119,12 @@ public:
     // nullptr). 포인터는 묶음이 정리될 때까지 유효하다.
     template <class T>
     T* GetSubsystem() const noexcept {
-        return subsystems_.template Get<T>();
+        return services_->subsystems.template Get<T>();
     }
 
     // 시작 때 생략한 GameInstance Subsystem이다(진단용).
     Span<const SkippedSubsystem> SkippedSubsystems() const noexcept {
-        return subsystems_.Skipped();
+        return services_->subsystems.Skipped();
     }
 
     // --- LocalPlayer(18.4절) ---
@@ -150,7 +168,8 @@ public:
     // 정리하고 현재 World는 없음이 된다 — 이전 World는 이미 정리했다).
     Result<void> OpenWorld(const MapDesc& map) noexcept;
 
-    // 현재 게임 World다(없으면 null). OpenWorld·종료까지 유효하다.
+    // 현재 게임 World다(없으면 null). OpenWorld·종료까지, 또는 누가 Engine::DestroyWorld로 지울
+    // 때까지 유효하다(파괴되면 EngineClient::OnWorldDestroyed가 비운다).
     World* CurrentWorld() const noexcept {
         return currentWorld_;
     }
@@ -199,7 +218,7 @@ private:
 
     ROCKS_NATIVE() Engine* engine_ = nullptr;
     ROCKS_NATIVE() const GameInstanceConfig* config_ = nullptr;
-    ROCKS_NATIVE() GameInstanceSubsystems subsystems_;
+    ROCKS_NATIVE() detail::GameInstanceServices* services_ = nullptr;
     // LocalPlayer 목록이다(강한 GC 간선 — UE LocalPlayers 배열). Registry API로만 고친다.
     ROCKS_PROPERTY(ReadOnly, Name = "localPlayers") ObjectRefArray<LocalPlayer> localPlayers_;
     ROCKS_NATIVE() World* currentWorld_ = nullptr;

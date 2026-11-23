@@ -170,6 +170,12 @@ public:
     virtual void OnEngineShutdown(Engine&) noexcept {
     }
 
+    // World가 정리(EndPlay·Shutdown)를 마치고 저장소를 놓기 직전이다(UE
+    // FWorldDelegates::OnPreWorldFinishDestroy 자리 — 누가 DestroyWorld를 불렀든, 엔진 종료
+    // 포함). World 포인터를 든 쪽이 여기서 비운다. 이 안의 DestroyWorld는 5단계로 미뤄진다.
+    virtual void OnWorldDestroyed(Engine&, World&) noexcept {
+    }
+
 protected:
     ~EngineClient() = default;
 };
@@ -450,6 +456,9 @@ public:
     EngineStats Stats() const noexcept;
 
 private:
+    // 파괴를 아직 시도하지 않은 WorldContext의 destroyAttemptFrame이다.
+    static constexpr uint64 NoDestroyAttempt = NumericLimits<uint64>::Max();
+
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
@@ -459,6 +468,8 @@ private:
         bool destroyWarned = false;
         ErrorCode destroyError = ErrorCode::None;
         uint64 destroyDeferredFrame = 0;
+        // 5단계에서 마지막으로 파괴를 시도한 프레임이다(한 프레임에 한 번만 시도한다).
+        uint64 destroyAttemptFrame = NoDestroyAttempt;
         // 연속 Tick 실패다. 첫 실패만 Error로 남기고 뒤따른 실패는 세어 두었다가 회복·파괴 때 한 번
         // 요약한다.
         bool tickFailing = false;
@@ -474,6 +485,8 @@ private:
     Result<void> CloseAfterSubsystems(const char*& failedStage) noexcept;
     Result<void> DestroyWorldNow(usize index) noexcept;
     void ProcessDeferred() noexcept;
+    // 미룬 파괴가 WorldDestroyWarnFrames를 넘도록 남으면 한 번 경고한다.
+    void WarnLongDeferredDestroy(WorldContext& context) noexcept;
     // World Tick 결과를 반영한다. 연속 실패는 첫 번째만 Error로 남긴다.
     void NoteWorldTick(WorldContext& context, const Result<void>& ticked) noexcept;
     // 연속 Tick 실패를 끝낸다. 첫 실패 뒤 더 실패한 것이 있으면 한 번 요약한다.

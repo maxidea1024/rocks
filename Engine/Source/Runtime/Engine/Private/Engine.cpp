@@ -500,6 +500,13 @@ Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     auto ended = target->EndPlay(reason);
     (void)ended;
     auto finished = target->Shutdown(reason);
+    // 저장소를 놓기 직전에 client에 알린다(UE OnPreWorldFinishDestroy 자리 — World 포인터를 든
+    // GameInstance가 비운다, Docs/Design/EngineRuntime 18.6절). 이 안의 DestroyWorld도 미룬다.
+    if (finished && config_.client != nullptr) {
+        ObjectAccessScope scope(objects_->OwnerAccess());
+        config_.client->OnWorldDestroyed(*this, *target);
+    }
+
     deferWorldDestroy_ = deferring;
     // 정리 hook이 다른 World를 미룬 파괴에 넣었어도 배열 자리는 그대로다(만들기만 하면 뒤에
     // 붙는다).
@@ -564,26 +571,38 @@ Result<void> Engine::DestroyWorld(World* world, EndPlayReason reason) noexcept {
 }
 
 void Engine::ProcessDeferred() noexcept {
-    for (usize index = worlds_.Size(); index > 0; --index) {
-        if (!worlds_[index - 1].pendingDestroy) {
-            continue;
-        }
+    // 파괴 중(정리 hook)에 새로 미룬 파괴도 이번 5단계에서 끝낸다: 한 바퀴에 하나라도 파괴했으면
+    // 다시 돈다. 이번 프레임에 시도해 실패한 것(외부 보유권)은 다시 시도하지 않는다 — 바퀴마다 하나
+    // 이상 줄어드므로 끝난다.
+    bool progressed = true;
+    while (progressed) {
+        progressed = false;
+        for (usize index = worlds_.Size(); index > 0; --index) {
+            WorldContext& candidate = worlds_[index - 1];
+            if (!candidate.pendingDestroy || candidate.destroyAttemptFrame == time_.frameIndex) {
+                continue;
+            }
 
-        auto destroyed = DestroyWorldNow(index - 1);
-        if (destroyed) {
-            continue;
-        }
+            candidate.destroyAttemptFrame = time_.frameIndex;
+            if (DestroyWorldNow(index - 1)) {
+                progressed = true;
+                continue;
+            }
 
-        // 오래 남으면 사람이 봐야 한다(외부가 보유권을 놓지 않음). 한 번만 경고한다.
-        WorldContext& context = worlds_[index - 1];
-        const uint64 frames = time_.frameIndex - context.destroyDeferredFrame;
-        if (!context.destroyWarned && frames > WorldDestroyWarnFrames) {
-            context.destroyWarned = true;
-            Log::Warning(LogEngine,
-                         "World {World} destroy still deferred after {Frames} frames: {Error}; "
-                         "something outside still holds its objects",
-                         context.world->Name(), frames, ErrorCodeName(context.destroyError));
+            WarnLongDeferredDestroy(worlds_[index - 1]);
         }
+    }
+}
+
+void Engine::WarnLongDeferredDestroy(WorldContext& context) noexcept {
+    // 오래 남으면 사람이 봐야 한다(외부가 보유권을 놓지 않음). 한 번만 경고한다.
+    const uint64 frames = time_.frameIndex - context.destroyDeferredFrame;
+    if (!context.destroyWarned && frames > WorldDestroyWarnFrames) {
+        context.destroyWarned = true;
+        Log::Warning(LogEngine,
+                     "World {World} destroy still deferred after {Frames} frames: {Error}; "
+                     "something outside still holds its objects",
+                     context.world->Name(), frames, ErrorCodeName(context.destroyError));
     }
 }
 

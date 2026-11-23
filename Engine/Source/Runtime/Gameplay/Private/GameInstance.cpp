@@ -19,7 +19,7 @@ void LogOpenFailure(StringView map, const char* stage, ErrorCode error) noexcept
 } // namespace
 
 GameInstance::GameInstance(Allocator& allocator) noexcept
-    : subsystems_(allocator), localPlayers_(allocator), pendingName_(allocator) {
+    : localPlayers_(allocator), pendingName_(allocator) {
 }
 
 GameInstance::~GameInstance() noexcept = default;
@@ -131,17 +131,21 @@ void GameInstance::RemoveAllLocalPlayers() noexcept {
 
 OuterSubsystemLookup GameInstance::SubsystemLookup() const noexcept {
     OuterSubsystemLookup lookup;
-    lookup.context = this;
+    // context는 client가 소유한 묶음이다(GameInstance 객체를 빌리지 않는다 — client는 Engine보다
+    // 오래 살므로 World Shutdown까지 유효하다).
+    lookup.context = services_;
     lookup.find = [](const void* context, SubsystemKey key) noexcept -> void* {
         // 계층 순서(16.3절): GameInstance Subsystem → EngineSubsystem. 각 계층의 Base 포인터를
         // 돌려주고 타입 도우미(GetGameInstanceSubsystem·GetEngineSubsystem)가 되돌린다. 키는
         // 타입마다 하나라 다른 계층과 겹치지 않는다.
-        const GameInstance& instance = *static_cast<const GameInstance*>(context);
-        if (GameInstanceSubsystem* found = instance.subsystems_.Find(key)) {
-            return found;
+        const auto& services = *static_cast<const detail::GameInstanceServices*>(context);
+        if (services.visible) {
+            if (GameInstanceSubsystem* found = services.subsystems.Find(key)) {
+                return found;
+            }
         }
 
-        return instance.engine_->FindSubsystem(key);
+        return services.engine->FindSubsystem(key);
     };
     return lookup;
 }
@@ -257,8 +261,9 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     return Result<void>::Success();
 }
 
-GameInstanceClient::GameInstanceClient(const GameInstanceConfig& config) noexcept
-    : config_(config) {
+GameInstanceClient::GameInstanceClient(Allocator& allocator,
+                                       const GameInstanceConfig& config) noexcept
+    : config_(config), services_(allocator) {
 }
 
 GameInstanceClient::~GameInstanceClient() {
@@ -269,6 +274,7 @@ GameInstanceClient::~GameInstanceClient() {
 
 Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     engine_ = &engine;
+    services_.engine = &engine;
     ObjectRegistry& objects = engine.Objects();
     const TypeId type = config_.gameInstanceType != TypeId{} ? config_.gameInstanceType
                                                              : ObjectTypeIdOf<GameInstance>();
@@ -286,6 +292,7 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     auto started = WithInstance([&](GameInstance& game) noexcept -> Result<void> {
         game.engine_ = &engine;
         game.config_ = &config_;
+        game.services_ = &services_;
         game.netMode_ = config_.netMode;
         // 2) OnInit(UE ReceiveInit) → 3) GameInstance Subsystem → 4) OnPostInit.
         if (auto init = game.OnInit(); !init) {
@@ -294,13 +301,16 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
             return init;
         }
 
-        if (auto subsystems = game.subsystems_.Initialize(config_.subsystems, game); !subsystems) {
+        detail::GameInstanceServices& services = *game.services_;
+        if (auto subsystems = services.subsystems.Initialize(config_.subsystems, game);
+            !subsystems) {
             Log::Error(LogGameplay, "GameInstance subsystems failed to initialize: {Error}",
                        ErrorCodeName(subsystems.Error()));
             return subsystems;
         }
 
-        for (const SkippedSubsystem& skipped : game.subsystems_.Skipped()) {
+        services.visible = true;
+        for (const SkippedSubsystem& skipped : services.subsystems.Skipped()) {
             if (skipped.reason == SubsystemSkipReason::MissingDependency) {
                 Log::Warning(LogGameplay,
                              "Skipped game instance subsystem {Subsystem}: dependency "
@@ -312,7 +322,8 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
         if (auto postInit = game.OnPostInit(); !postInit) {
             Log::Error(LogGameplay, "GameInstance OnPostInit failed: {Error}",
                        ErrorCodeName(postInit.Error()));
-            game.subsystems_.Deinitialize(game);
+            services.visible = false;
+            services.subsystems.Deinitialize(game);
             return postInit;
         }
 
@@ -321,7 +332,8 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
             if (auto player = game.CreateLocalPlayer(0); !player) {
                 Log::Error(LogGameplay, "Initial local player could not be created: {Error}",
                            ErrorCodeName(player.Error()));
-                game.subsystems_.Deinitialize(game);
+                services.visible = false;
+                services.subsystems.Deinitialize(game);
                 return Result<void>::Failure(player.Error());
             }
         }
@@ -355,6 +367,20 @@ Result<void> GameInstanceClient::OnEngineReady(Engine&) noexcept {
     });
 }
 
+void GameInstanceClient::OnWorldDestroyed(Engine&, World& world) noexcept {
+    if (!instance_.IsValid()) {
+        return;
+    }
+
+    // 누가 DestroyWorld를 불렀든 현재 World를 비운다(남은 포인터 방지 — 18.6절).
+    auto cleared = WithInstance([&world](GameInstance& game) noexcept {
+        if (game.currentWorld_ == &world) {
+            game.currentWorld_ = nullptr;
+        }
+    });
+    (void)cleared;
+}
+
 void GameInstanceClient::OnEngineTick(Engine&) noexcept {
     auto ran = WithInstance([](GameInstance& game) noexcept {
         game.inEngineTick_ = true;
@@ -384,7 +410,9 @@ void GameInstanceClient::OnEngineShutdown(Engine&) noexcept {
 
         game.OnShutdown();
         game.RemoveAllLocalPlayers();
-        game.subsystems_.Deinitialize(game);
+        // 정리 전에 조회 창에서 감춘다(Shutdown까지 창이 열린 Editor·Inactive World 대비).
+        game.services_->visible = false;
+        game.services_->subsystems.Deinitialize(game);
     });
     (void)stopped;
     // 5) 루트를 반환한다. 객체는 엔진 Registry 최종 GC가 회수한다.
