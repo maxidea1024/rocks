@@ -1,5 +1,5 @@
 #include "AssetDatabaseInternal.h"
-#include "AtomicFileWrite.h"
+#include <AssetDatabase/AtomicFileWrite.h>
 
 #include <AssetDatabase/AssetAliasTable.h>
 #include <AssetDatabase/LogicalPath.h>
@@ -16,7 +16,6 @@ namespace {
 
 using asset_database_detail::AssignDisplayName;
 using asset_database_detail::EditorTempStem;
-using asset_database_detail::WriteFileAtomically;
 
 // 별칭 항목 하나의 JSON 노드 수 상한(객체 + 키 넷 + 값 넷)과 최상위 여유다 — 읽기 옵션의 노드 상한
 // (항목 수 상한까지 읽을 수 있게).

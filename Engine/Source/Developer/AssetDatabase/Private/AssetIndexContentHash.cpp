@@ -1,4 +1,5 @@
 #include <AssetDatabase/AssetIndex.h>
+#include <Core/Encoding/Sha256File.h>
 #include <Core/FileError.h>
 
 namespace rocks {
@@ -55,18 +56,10 @@ Result<Sha256Digest> AssetIndex::ContentHash(platform::FileSystem& files, AssetI
         return Result<Out>::Failure(FileErrorCode(opened));
     }
 
-    Sha256 hasher;
-    for (;;) {
-        const platform::FileTransfer read = file.Read(buffer.Data(), buffer.Size());
-        if (!read.status) {
-            return Result<Out>::Failure(FileErrorCode(read.status));
-        }
-
-        if (read.bytes == 0) {
-            break;
-        }
-
-        hasher.Update(Span<const uint8>(buffer.Data(), read.bytes));
+    Sha256Digest digest;
+    uint64 hashed = 0;
+    if (auto read = HashFileSha256(file, buffer.View(), digest, hashed); !read) {
+        return Result<Out>::Failure(read.Error());
     }
 
     (void)file.Close();
@@ -80,7 +73,7 @@ Result<Sha256Digest> AssetIndex::ContentHash(platform::FileSystem& files, AssetI
         return Result<Out>::Failure(ErrorCode::Busy);
     }
 
-    entry.contentHash = hasher.Finish();
+    entry.contentHash = digest;
     entry.contentHashBytes = before.size;
     entry.contentHashTicks = before.modifiedTicks;
     entry.hasContentHash = true;

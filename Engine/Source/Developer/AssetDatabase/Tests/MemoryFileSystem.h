@@ -64,6 +64,8 @@ struct MemoryFaults {
     platform::FileStatus move{};
     platform::FileStatus stat{};
     const char* statPath = nullptr;
+    // SyncDirectory의 결과다(NotDurable은 성공처럼 세고 그 상태를 돌려준다).
+    platform::FileStatus sync{};
 };
 
 class MemoryHandle final : public platform::FileHandle {
@@ -195,7 +197,8 @@ public:
     };
 
     MemoryFileSystem(Allocator& allocator, StringView content) noexcept
-        : allocator_(&allocator), content_(allocator), nodes_(allocator), handles_(allocator) {
+        : journal(allocator), allocator_(&allocator), content_(allocator), nodes_(allocator),
+          handles_(allocator) {
         ready_ = static_cast<bool>(content_.TryAssign(content)) &&
                  AddDirectory("", false, MemoryFault::None);
     }
@@ -411,6 +414,30 @@ public:
         return AddDirectory(RelativeOf(target)) ? platform::FileStatus{} : MemoryError;
     }
 
+    // 디렉터리 동기화다(메모리라 매체가 없다 — 성공). faults.sync가 실패 상태면 그것을(NotDurable
+    // 등), 없으면 NotFound, 디렉터리가 아니면 WrongType이다. syncs는 성공·NotDurable 호출 수다.
+    platform::FileStatus SyncDirectory(const char* path, usize pathBytes) noexcept override {
+        const StringView target(path, pathBytes);
+        if (!IsContentAncestor(target)) {
+            const Node* node = Find(target);
+            if (node == nullptr) {
+                return MemoryMissing;
+            }
+
+            if (node->type != platform::FileType::Directory) {
+                return MemoryWrongType;
+            }
+        }
+
+        if (!faults.sync && faults.sync.code != platform::FileCode::NotDurable) {
+            return faults.sync;
+        }
+
+        ++syncs;
+        Record("sync ", target);
+        return faults.sync;
+    }
+
     platform::FileStatus Replace(const char* from, usize fromBytes, const char* to,
                                  usize toBytes) noexcept override {
         if (!faults.replace && faults.replace.code != platform::FileCode::NotDurable) {
@@ -450,7 +477,20 @@ public:
         }
 
         ++replaces;
+        Record("replace ", target);
         return faults.replace;
+    }
+
+    // 기록이 켜져 있으면 "<kind><상대 경로>"를 남긴다(할당 실패는 기록을 버린다 — 시험 보조).
+    void Record(StringView kind, StringView path) noexcept {
+        if (!recordJournal) {
+            return;
+        }
+
+        String line(*allocator_);
+        if (line.TryAssign(kind) && line.TryAppend(RelativeOf(path))) {
+            (void)journal.TryPushBack(rocks::Move(line));
+        }
     }
 
     // 같은 파일 시스템 안 이동이다(파일·디렉터리 — 디렉터리면 하위 노드 경로를 모두 바꾼다).
@@ -582,6 +622,11 @@ public:
     // 모든 수정 시각에 더하는 값이다(크기는 같고 시각만 바뀐 파일 — 감시의 관찰).
     int64 modifiedShift = 0;
     uint32 opens = 0;
+    uint32 syncs = 0;
+    // recordJournal이면 성공한 SyncDirectory·Replace를 "sync <상대 경로>"·"replace <상대 경로>"로
+    // 순서대로 남긴다(게시 순서 시험).
+    bool recordJournal = false;
+    Array<String> journal;
     uint32 deletes = 0;
     uint32 replaces = 0;
     uint32 moves = 0;
