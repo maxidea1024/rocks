@@ -85,14 +85,14 @@ public static partial class PolicyChecks
                 if (DefinedRocksTargetMacro.IsMatch(logical))
                 {
                     failures.Add(new(relative, start + 1, "target-macro-defined",
-                        "ROCKS_BUILD_*/ROCKS_PLATFORM_*/ROCKS_ARCH_* are always defined to 0 or 1; branch on the value, not on defined()"));
+                        "ROCKS_BUILD_*/ROCKS_PLATFORM_*/ROCKS_ARCH_*/ROCKS_WITH_* are always defined to 0 or 1; branch on the value, not on defined()"));
                 }
 
                 if (!reportedOrder && RocksTargetMacroUse.IsMatch(logical) && (compilerInclude is null || compilerInclude > start))
                 {
                     reportedOrder = true;
                     failures.Add(new(relative, start + 1, "target-macro-order",
-                        "#include <Base/Compiler.h> must come before the first ROCKS_ARCH_*/ROCKS_PLATFORM_* directive (undefined macros silently read as 0)"));
+                        "#include <Base/Compiler.h> must come before the first ROCKS_ARCH_*/ROCKS_PLATFORM_*/ROCKS_WITH_* directive (undefined macros silently read as 0)"));
                 }
             }
         }

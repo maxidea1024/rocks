@@ -53,11 +53,12 @@ public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<P
 /// var project = DescriptorReader.ReadProject(projectFile);
 /// var plugins = PluginCatalog.Discover([Path.Combine(project.RootDirectory, "Plugins")]);
 /// var owner = DescriptorOwner.ForProject(project, target.Name, target.Plugins);
-/// var set = DescriptorModuleSet.Resolve(owner, plugins, platform, configuration, target.Type);
+/// var set = DescriptorModuleSet.Resolve(owner, plugins, platform, configuration, target.Kind);
 /// var modules = set.Apply(ruleModules, target.Modules);   // 빌드할 규칙 모듈만 남는다
 /// </code>
 ///
-/// 켤 플러그인: owner의 참조와, Game 타깃이면 enabledByDefault 플러그인(Program 타깃은 명시한 것만 — BD34), 그리고 그 의존 플러그인.
+/// 켤 플러그인: owner의 참조와, Program이 아닌 타깃이면 enabledByDefault 플러그인(Program 타깃은 명시한 것만 — BD34, UE와 같다), 그리고 그
+/// 의존 플러그인.
 ///
 /// 모듈을 빼는 규칙(BD35):
 /// <list type="bullet">
@@ -108,11 +109,11 @@ public sealed class DescriptorModuleSet
         Modules.Where(module => module.FromPlugin && module.Included).Select(module => module.Name).ToList();
 
     /// <summary>
-    /// owner와 찾은 플러그인(available)으로 targetType 타깃의 모듈 집합을 정한다. available에는 켜지지 않은 플러그인도 넣는다(그
+    /// owner와 찾은 플러그인(available)으로 target 타깃(종류와 Program 속성)의 모듈 집합을 정한다. available에는 켜지지 않은 플러그인도 넣는다(그
     /// 모듈도 규칙과 대조하고, 참조하면 "켜지지 않음"으로 알려 준다).
     /// </summary>
     public static DescriptorModuleSet Resolve(DescriptorOwner owner, IReadOnlyList<PluginDescriptor> available,
-        NativePlatform platform, NativeConfiguration configuration, TargetType targetType)
+        NativePlatform platform, NativeConfiguration configuration, TargetKind target)
     {
         ProjectDescriptor? project = owner.Project;
         if (project is not null && !project.TargetPlatforms.Contains(platform))
@@ -122,13 +123,13 @@ public sealed class DescriptorModuleSet
         }
 
         IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(owner.Plugins, owner.Referrer, available,
-            applyDefaults: targetType == TargetType.Game);
+            applyDefaults: target.Type != TargetType.Program);
         var enabledNames = enabled.Select(plugin => plugin.Name).ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, DescribedModule>(StringComparer.OrdinalIgnoreCase);
 
         void Add(ModuleDescriptor module, string ownerName, string file, bool fromPlugin, string? pluginNotEnabled)
         {
-            string? reason = pluginNotEnabled ?? ExclusionReason(module, platform, configuration, targetType);
+            string? reason = pluginNotEnabled ?? ExclusionReason(module, platform, configuration, target);
             if (!result.TryAdd(module.Name, new(module, ownerName, file, fromPlugin, reason)))
             {
                 throw new DescriptorException(file,
@@ -160,13 +161,9 @@ public sealed class DescriptorModuleSet
     /// 켠 기술자의 모듈 하나를 이번 문맥에서 빼는 이유다(BD35 표). 들어가면 null이다.
     /// </summary>
     public static string? ExclusionReason(ModuleDescriptor module, NativePlatform platform, NativeConfiguration configuration,
-        TargetType targetType) => module.Type switch
-        {
-            ModuleType.Editor => "Editor modules are not built yet (there is no editor target)",
-            ModuleType.Developer when targetType == TargetType.Game && configuration == NativeConfiguration.Release =>
-                "Developer modules are not built in Release game targets",
-            _ => module.SupportsPlatform(platform) ? null : $"the module does not support {platform}"
-        };
+        TargetKind target) =>
+        ModuleTypeRules.ExclusionReason(target, configuration, module.Type) ??
+        (module.SupportsPlatform(platform) ? null : $"the module does not support {platform}");
 
     /// <summary>
     /// 규칙 모듈(ruleModules)을 기술자와 대조하고 이번 빌드에 넣을 모듈만 돌려준다(입력 순서 유지).

@@ -21,7 +21,7 @@ internal static class EnginePlanning
         NativeConfiguration configuration, bool createDirectories)
     {
         var pluginSet = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine(rules.Target.Name, rules.Target.Plugins, root), rules.Plugins,
-            toolchain.Platform, configuration, rules.Target.Type);
+            toolchain.Platform, configuration, rules.Target.Kind);
         var ruleModules = pluginSet.LinkIntoPrimary(pluginSet.Apply(rules.Modules, rules.Target.Modules), rules.Target.Modules);
         string[] buildRoots = [.. rules.Target.Modules.Concat(pluginSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
         return new(pluginSet, MetadataLayout.Apply(context, ruleModules, buildRoots, createDirectories, rules.Modules), buildRoots);
