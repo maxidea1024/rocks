@@ -494,8 +494,11 @@ TEST(AssetImport_OpenAsset) {
 // 구성원 번호, 아무것도 쓰지 않는다): 구성원 0개·상한 초과·결과 수 다름·같은 경로 둘·재임포트
 // 구성원의 importer·새 구성원의 replaceSources(InvalidArgument), 둘째 구성원 원본 없음
 // (MissingSource — asset = 그 주 출력), 첫째 구성원의 추가 출력이 둘째 주 경로를 청함
-// (DuplicatePath). 저장 실패: 새 파일 무리에서 실패하면 새 파일을 모두 지우고, 기존 파일을 교체한
-// 뒤 실패하면 새 파일이 남고 교체 못 한 기존 파일은 옛 내용이며 다시 실행하면 같은 id로 수렴한다.
+// (DuplicatePath), 묶음 전에 열려 있던 구성원(Busy — detail·asset), MemberAsset 범위
+// 밖(OpenAsset(null) InvalidArgument). 저장 실패: 새 파일 무리에서 실패하면 새 파일을 모두 지우고,
+// 기존 파일을 교체한 뒤 실패하면 새 파일이 남고 교체 못 한 기존 파일은 옛 내용이며 다시 실행하면
+// 같은 id로 수렴한다 (새 구성원이 섞였으면 주 출력까지 저장한 구성원의 결과가 남고 그 구성원을
+// 재임포트로 넘긴다). 색인 FindByOwner는 참조 기록 항목만 준다.
 TEST(AssetImport_Group) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -653,7 +656,8 @@ TEST(AssetImport_Group) {
           Matches(env, scene, service.Index()));
 
     // 저장 실패 2: A(재임포트 + 새 출력 fresh) ↔ C(재임포트). 순서 A_fresh(새) → A → C — C에서
-    // 실패하면 A_fresh·A는 새 내용, C는 옛 내용이다.
+    // 실패하면 A_fresh·A는 새 내용, C는 옛 내용이다. 다시 하면 A 기록(저장됨)에 있는 A_fresh를 같은
+    // key로 다시 쓴다(기록 출력 재사용 — 고아 입양 경로는 AssetReimport_PartialFailure가 본다).
     REQUIRE(scene.PutSource("SourceArt/A.trock", "value=8\nopenmember=1\noutputs=fresh") &&
             scene.PutSource("SourceArt/C.trock", "value=9\nopenmember=0"));
     const auto copyOf = [&](StringView file) noexcept {
@@ -684,6 +688,70 @@ TEST(AssetImport_Group) {
     CHECK(results[0].outputs.Size() == 1 && results[0].outputs[0].id == leftId &&
           hardOn("Content/A.rasset", c) && hardOn("Content/C.rasset", a) &&
           Matches(env, scene, service.Index()));
+
+    // 색인 owner 표: A의 참조 기록 항목은 A_fresh 하나(A 자신은 소유 기록), 없는 owner는 빈 목록.
+    {
+        Array<const AssetIndexEntry*> owned(env.allocator);
+        REQUIRE(service.Index().FindByOwner(a, owned));
+        CHECK(owned.Size() == 1 && owned[0]->id == leftId);
+        owned.Clear();
+        REQUIRE(service.Index().FindByOwner(FixedId(990002), owned));
+        CHECK(owned.IsEmpty());
+    }
+
+    // 저장 실패 3(섞인 묶음): A·C(재임포트) + N(새). 순서 N(새 주) → A_fresh(기존 비주) → A → C —
+    // C에서 실패하면 N·A의 결과는 남고(주 출력까지 저장) C의 결과는 빈다. N을 재임포트로 넘기면
+    // 수렴한다.
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=10\nopenmember=1\noutputs=fresh") &&
+            scene.PutSource("SourceArt/C.trock", "value=11\nopenmember=0") &&
+            scene.PutSource("SourceArt/P.trock", "value=12"));
+    const Array<uint8> cKept = copyOf("Content/C.rasset");
+    AssetImportResult three[] = {AssetImportResult(env.allocator), AssetImportResult(env.allocator),
+                                 AssetImportResult(env.allocator)};
+    const AssetImportGroupMember withNew[] = {reimportMember("/Game/A"), reimportMember("/Game/C"),
+                                              newMember("/Game/N9", pInputs)};
+    tagCalls = 0;
+    failTagsOn = 4;
+    failure = AssetDiagnostic{};
+    auto mixedFailed =
+        service.ImportGroup(scene.lock, withNew, diagnostics, three, nullptr, &failure);
+    failTagsOn = 0;
+    CHECK(!mixedFailed && mixedFailed.Error() == ErrorCode::Busy && failure.detail == 1 &&
+          service.Packages().Count() == 0 && scene.files.Has("Content/N9.rasset"));
+    CHECK(three[0].id == a && three[1].id.IsNull() && three[1].path.IsEmpty() &&
+          !three[2].id.IsNull() && three[2].path.View() == "/Game/N9" &&
+          SameBytes(scene.files.Bytes("Content/C.rasset"), cKept.View()) &&
+          Matches(env, scene, service.Index()));
+    const AssetId n9 = three[2].id;
+    // 그대로 다시 실행하면 N9가 새 임포트라 DuplicatePath다(호출자가 재임포트로 넘긴다).
+    failure = AssetDiagnostic{};
+    auto rerun = service.ImportGroup(scene.lock, withNew, diagnostics, three, nullptr, &failure);
+    CHECK(!rerun && rerun.Error() == ErrorCode::AlreadyExists &&
+          failure.code == AssetDiagnosticCode::DuplicatePath && failure.detail == 2 &&
+          three[2].id.IsNull() && service.Packages().Count() == 0);
+    const AssetImportGroupMember converged[] = {
+        reimportMember("/Game/A"), reimportMember("/Game/C"), reimportMember("/Game/N9")};
+    REQUIRE(service.ImportGroup(scene.lock, converged, diagnostics, three));
+    CHECK(three[0].id == a && three[1].id == c && three[2].id == n9 &&
+          Matches(env, scene, service.Index()));
+
+    // 묶음 전에 열려 있던 구성원은 Busy다(detail = 그 번호, asset = 그 id). C를 열면 Hard 순환
+    // 상대 A도 열리므로 첫 구성원 A에서 걸린다. 열린 것은 그대로다.
+    REQUIRE(service.Packages().Open(c));
+    const usize openBefore = service.Packages().Count();
+    failure = AssetDiagnostic{};
+    auto busy = service.ImportGroup(scene.lock, partial, diagnostics, results, nullptr, &failure);
+    CHECK(!busy && busy.Error() == ErrorCode::Busy && failure.detail == 0 && failure.asset == a &&
+          openBefore == 2 && service.Packages().Count() == openBefore);
+    REQUIRE(service.Packages().CloseOpened({}));
+
+    // MemberAsset 범위 밖은 null — OpenAsset(null)은 InvalidArgument다(단일 임포트는 구성원 하나).
+    REQUIRE(scene.PutSource("SourceArt/P.trock", "value=1\nopenmember=5"));
+    AssetImportResult outside(env.allocator);
+    CHECK(service.Import(scene.lock, "/Game/Outside", pInputs, {}, {}, diagnostics, outside)
+                  .Error() == ErrorCode::InvalidArgument &&
+          scene.test.lastOpenError == ErrorCode::InvalidArgument &&
+          !scene.files.Has("Content/Outside.rasset"));
 }
 
 // 가변 원본(7.1절 19 A2f3b UXR9): 고정 역할 asset과 접두 blob:의 역할 여럿을 받고 문맥 순서는 고정

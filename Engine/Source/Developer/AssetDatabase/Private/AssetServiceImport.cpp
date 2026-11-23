@@ -7,6 +7,7 @@
 #include <AssetRuntime/FilePackageBulkStore.h>
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
+#include <Core/Algorithms.h>
 #include <Core/FileError.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Optional.h>
@@ -672,6 +673,8 @@ struct AssetService::ImportRun {
     Array<ImportTagInput> recordTags;
     // 주 출력의 소유 기록 byte다(저장 전에 만든다 — 저장 사이에 할당이 실패하지 않게).
     Array<uint8> ownedRecord;
+    // 주 출력까지 저장했는지다(기존 파일 교체 뒤의 실패에서 결과를 남긴다).
+    bool mainSaved = false;
 };
 
 Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path,
@@ -925,10 +928,27 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
 
         // 색인에서 지운 파일을 뺀다. 갱신이 실패하면(할당·읽기) 이 서비스의 색인은 다음
         // 갱신·검색까지 지운 파일 항목을 남긴다(같은 경로 임포트는 DuplicatePath — 7.1절 18).
-        AssetIndexRefreshPaths paths;
-        paths.files = savedNames.View();
-        (void)index_.RefreshPaths(*files_, paths, read_);
-        clearResults();
+        if (!savedNames.IsEmpty()) {
+            AssetIndexRefreshPaths paths;
+            paths.files = savedNames.View();
+            (void)index_.RefreshPaths(*files_, paths, read_);
+        }
+
+        // 기존 파일을 교체한 뒤의 실패는 주 출력까지 저장한 구성원의 결과(id·경로·출력)를
+        // 남긴다 — 새 구성원이었으면 그 파일이 남으므로 호출자는 다음 실행에서 그 구성원을
+        // 재임포트로 넘긴다(그래야 수렴한다 — 새 임포트면 DuplicatePath). 나머지는 비운다.
+        for (const UniquePtr<ImportRun>& run : runs) {
+            AssetImportResult& result = *run->result;
+            if (existingSaved && run->mainSaved) {
+                result.id = run->mainId;
+                continue;
+            }
+
+            result.id = AssetId{};
+            result.path.Clear();
+            result.outputs.Clear();
+        }
+
         if (failure != nullptr) {
             *failure = diagnostic;
         }
@@ -1002,6 +1022,7 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
                         return saved;
                     }
 
+                    run.mainSaved = true;
                     continue;
                 }
 
@@ -1330,15 +1351,16 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
     }
 
     // 임포터 호출(실패하면 묶음이 이번에 연 것을 닫는다).
-    auto made = UniquePtr<ImportContext>::TryMake(
+    auto createdContext = UniquePtr<ImportContext>::TryMake(
         allocator, allocator, set_, *types_, index_, *run.aliases, run.path->Text(), info,
         run.contextSources.View(), static_cast<const void*>(options.Get()), run.mainId,
         warnings != nullptr ? &run.pending : nullptr, run.member->reimport, run.previousTags);
-    if (!made) {
-        return FailImport<void>(failure, AssetDiagnosticCode::None, made.Error(), run.mainId);
+    if (!createdContext) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, createdContext.Error(),
+                                run.mainId);
     }
 
-    run.context = rocks::Move(made.Value());
+    run.context = rocks::Move(createdContext.Value());
     ImportContext& context = *run.context;
     context.SetGroup(members, memberIndex);
     for (const ImportRun::Existing& existing : run.existing) {
@@ -1490,15 +1512,12 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
     Allocator& allocator = *allocator_;
     const AssetImportGroupMember& member = *run.member;
     const Span<const AssetImportSourceInput> overrides = member.sources;
-    // 묶음 전에 열려 있던 패키지다(편집 중 — Busy). 묶음이 연 다른 구성원은 아니다.
+    // 묶음 전에 열려 있던 패키지다(편집 중 — Busy, before는 id 순). 묶음이 연 다른 구성원은 아니다.
     auto wasOpen = [&](AssetId id) noexcept {
-        for (AssetId open : before) {
-            if (open == id) {
-                return true;
-            }
-        }
-
-        return false;
+        const usize at = algo::LowerBound(before, id, [](AssetId left, AssetId key) noexcept {
+            return GuidLess(left.value, key.value);
+        });
+        return at < before.Size() && before[at] == id;
     };
     if (!member.importer.IsEmpty()) {
         return FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
@@ -1801,19 +1820,19 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
     // 이 owner를 가리키는 참조 기록의 고아 출력(`<주 경로>_<key>` — 앞선 임포트가 기존 파일을
     // 교체한 뒤 실패해 남긴 새 출력, 7.1절 19 A2f3d)도 기존 출력으로 더한다: 임포터가 같은 key를
     // 청하면 그 패키지를 다시 쓰고(아니면 OrphanedOutput 경고), 같은 경로 점유(DuplicatePath)로
-    // 다시 실행이 막히지 않는다(수렴한다).
-    const StringView mainPath = main.path.View();
-    for (usize at = 0; at < index_.Count(); ++at) {
-        const AssetIndexEntry& candidate = index_.At(at);
-        bool listed = !candidate.importRecord.present ||
-                      !(candidate.importRecord.owner == mainId) || candidate.id == mainId ||
-                      candidate.duplicateId;
-        for (const ImportOutput& output : recorded.outputs) {
-            listed = listed || output.asset == candidate.id;
-        }
+    // 다시 실행이 막히지 않는다(수렴한다). 후보는 색인의 owner 표로 찾는다(O(log N + 후보) —
+    // 재임포트마다 색인 전체를 훑지 않는다). 경로 검사를 먼저 하고 기록 출력 대조는 후보에만 한다.
+    Array<const AssetIndexEntry*> referencing(allocator);
+    if (auto found = index_.FindByOwner(mainId, referencing); !found) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, found.Error(), mainId);
+    }
 
+    const StringView mainPath = main.path.View();
+    for (const AssetIndexEntry* entry : referencing) {
+        const AssetIndexEntry& candidate = *entry;
         const StringView path = candidate.path.View();
-        if (listed || path.ByteCount() <= mainPath.ByteCount() + 1 ||
+        if (candidate.id == mainId || candidate.duplicateId ||
+            path.ByteCount() <= mainPath.ByteCount() + 1 ||
             !path.StartsWith(mainPath, StringComparison::CaseSensitive) ||
             path.Data()[mainPath.ByteCount()] != '_') {
             continue;
@@ -1821,8 +1840,20 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
 
         const StringView key =
             path.SliceBytes(mainPath.ByteCount() + 1, path.ByteCount() - mainPath.ByteCount() - 1);
-        if (!IsOutputKey(key)) {
+        bool listed = !IsOutputKey(key);
+        for (const ImportOutput& output : recorded.outputs) {
+            listed = listed || output.asset == candidate.id;
+        }
+
+        if (listed) {
             continue;
+        }
+
+        // 기록 출력과 입양 출력의 합은 출력 상한 안이다(넘으면 기록 쓰기가 실패한다 — 그 전에
+        // 거부한다, 한계: 고아를 asset-orphans-delete로 지운 뒤 다시 실행).
+        if (run.existing.Size() >= MaxImportOutputs) {
+            return FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::CapacityExceeded,
+                                    candidate.id);
         }
 
         // 묶음 전에 열려 있으면 Busy(기록 출력과 같다), 읽기 전용이면 NewerVersion.

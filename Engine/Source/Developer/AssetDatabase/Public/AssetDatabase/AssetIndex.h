@@ -191,8 +191,8 @@ class AssetIndexRefresh {
 public:
     explicit AssetIndexRefresh(Allocator& allocator) noexcept
         : added_(allocator), fileDiagnostics_(allocator), neighbors_(allocator),
-          entryOrder_(allocator), flags_(allocator), byId_(allocator), diagnosticOrder_(allocator),
-          entries_(allocator), diagnostics_(allocator) {
+          entryOrder_(allocator), flags_(allocator), byId_(allocator), byOwner_(allocator),
+          diagnosticOrder_(allocator), entries_(allocator), diagnostics_(allocator) {
     }
 
     AssetIndexRefresh(const AssetIndexRefresh&) = delete;
@@ -217,6 +217,7 @@ private:
     Array<AssetIndexEntry*> entryOrder_;
     Array<uint8> flags_;
     Array<usize> byId_;
+    Array<usize> byOwner_;
     Array<AssetIndexDiagnostic*> diagnosticOrder_;
     // 자리를 잡아 둔 결과 배열이다(확정은 할당 없이 옮긴다).
     Array<AssetIndexEntry> entries_;
@@ -315,6 +316,11 @@ public:
     // 오류: 없으면 NotFound, 같은 id·경로가 둘 이상이면 AlreadyExists(어느 쪽인지 정할 수 없다).
     Result<const AssetIndexEntry*> FindById(AssetId id) const noexcept;
     Result<const AssetIndexEntry*> FindByPath(const LogicalPath& path) const noexcept;
+    // 참조 기록(ImportRecord owner ≠ 자신)의 owner가 owner인 항목을 경로 순으로 out에 붙인다
+    // (Docs/Design/AssetSystem 7.1절 19 A2f3d — 재임포트의 고아 출력 입양). owner 순 표의 이진
+    // 검색이라 O(log N + 찾은 수)다. 같은 id 둘인 항목도 그대로 준다(호출자가 거른다). 오류: 할당
+    // 실패(out은 그대로).
+    Result<void> FindByOwner(AssetId owner, Array<const AssetIndexEntry*>& out) const noexcept;
 
     // id 패키지 파일 전체의 SHA-256이다(쿠킹 cookKey의 콘텐츠 해시 — 10.2절 결정 5, A4b). 파일을
     // Stat해 크기·수정 시각이 저장된 값과 같으면 저장된 해시, 아니면 64 KiB씩 흘려 읽어 계산하고
@@ -451,6 +457,8 @@ private:
     Array<AssetIndexEntry> entries_;
     // 항목 index를 id 순으로 둔 표다(FindById 이진 검색).
     Array<usize> byId_;
+    // 참조 기록 항목 index를 owner → 경로 순으로 둔 표다(FindByOwner 이진 검색).
+    Array<usize> byOwner_;
     Array<AssetIndexDiagnostic> diagnostics_;
     // 게시마다 오르는 세대다(AssetIndexRefresh 대조).
     uint64 revision_ = 0;

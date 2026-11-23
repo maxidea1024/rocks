@@ -108,11 +108,12 @@ public:
     virtual Span<const ImportTag> PreviousTags() const noexcept = 0;
     // 다른 에셋 id의 대표 객체를 연다(Docs/Design/AssetSystem 7.1절 19 A2f3c UXR10 — 출력에서 Hard
     // 참조로 건다: SetReference, 저장이 import·Hard 의존을 쓴다). 찾는 순서는 이번 실행의 묶음
-    // 구성원 주 출력(A2f3d — 색인에 없어도 된다) → 색인에 고유하게 있는 에셋(이번 실행이 앞서
-    // 저장한 것 포함) 이다. 읽기 전용 패키지도 연다. 연 패키지는 임포트가 끝나면(성공·실패 모두)
-    // 닫힌다(이미 열려 있던 것은 그대로). 대상 타입은 임포터가 확인한다. 오류: 이 임포트의 자기
-    // 출력(Output으로 받는다) InvalidArgument, 색인에 없음 NotFound(진단 MissingDependency, related
-    // = id), 같은 id 둘 AlreadyExists(진단 DuplicateAssetId), 열기 오류, 할당 실패.
+    // 구성원 주 출력(A2f3d — 색인에 없어도 된다) → 색인에 고유하게 있는 에셋이다(이번 실행의
+    // 출력은 아직 저장 전이라 색인에 없다). 읽기 전용 패키지도 연다. 연 패키지는 임포트가
+    // 끝나면(성공·실패 모두) 닫힌다(이미 열려 있던 것은 그대로). 대상 타입은 임포터가 확인한다.
+    // 오류: 이 임포트의 자기 출력(Output으로 받는다) InvalidArgument, 색인에 없음 NotFound(진단
+    // MissingDependency, related = id), 같은 id 둘 AlreadyExists(진단 DuplicateAssetId), 열기 오류,
+    // 할당 실패.
     virtual Result<ObjectHandle> OpenAsset(AssetId asset) noexcept = 0;
     // 묶음 임포트(Docs/Design/AssetSystem 7.1절 19 A2f3d UXR11 — AssetService::ImportGroup)의
     // 구성원 수(단일 Import·Reimport는 1)·이 구성원 번호·index번 구성원 주 출력 id(범위 밖은
