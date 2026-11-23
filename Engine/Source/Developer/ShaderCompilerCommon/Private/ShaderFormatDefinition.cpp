@@ -898,10 +898,6 @@ const char* ShaderFormatErrorName(ShaderFormatErrorCode code) noexcept {
     return "Unknown";
 }
 
-const char* ShaderBackendName(ShaderBackend backend) noexcept {
-    return NameOf(Names(BackendNames), backend);
-}
-
 const char* ShaderHostName(ShaderHost host) noexcept {
     return NameOf(Names(HostNames), host);
 }
