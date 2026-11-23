@@ -18,10 +18,10 @@ public sealed class ShaderFormatVulkan : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["Graphics", "ShaderCompilerCommon", "ShaderToolLoader", "SpirvReflect"];
+    protected override string[] PublicDependencies => ["Graphics", "ShaderCompilerCommon", "SpirvReflect"];
 
     // Tool headers included only by this module's sources (Docs/Design/BuildTargets section 3.5 BS3a).
-    protected override string[] PrivateDependencies => ["DirectXShaderCompiler", "SpirvTools"];
+    protected override string[] PrivateDependencies => ["DirectXShaderCompiler", "SpirvTools", "ShaderToolLoader"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {

@@ -14,6 +14,6 @@ public sealed class ShaderCompileWorkerProgram : ModuleRules
         ModuleDirectory = "Programs/ShaderCompileWorker",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/ShaderCompileWorker/Private"),
-        PublicDependencies = ["Core", "Launch", "ShaderWorker"]
+        PublicDependencies = ["Core", "Launch", "ShaderWorker", "ShaderCompilerCommon"]
     };
 }

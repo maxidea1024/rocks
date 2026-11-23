@@ -93,6 +93,8 @@ public abstract class TestsModule : ModuleRules
         ["Compression"] = ["AsyncCompression", "Task"],
         ["CompressionTraining"] = ["Task"],
         ["Config"] = ["ConfigTestFixtures", "CoreTypeBindings"],
+        // The segment stream negative tests compress their payloads.
+        ["Crypto"] = ["Compression"],
         ["Curves"] = ["CoreTypeBindings", "CurvesTestFixtures", "ObjectSerialization", "ReflectionText"],
         ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
@@ -113,6 +115,7 @@ public abstract class TestsModule : ModuleRules
             "Serialization", "TraceAnalysis", "World"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
+        ["ShaderCompiler"] = ["DeterministicMath"],
         ["SparksCompiler"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTestHost"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTools"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
@@ -120,7 +123,7 @@ public abstract class TestsModule : ModuleRules
         ["TraceCapture"] = ["TraceAnalysis"],
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
-        ["World"] = ["ObjectSerialization", "WorldTestFixtures"]
+        ["World"] = ["ObjectSerialization", "Task", "WorldTestFixtures"]
     };
 
     // Modules whose private headers (test access headers) the tests of a module include (Docs/Design/BuildTargets section 3.5 BS1b). Each entry is
