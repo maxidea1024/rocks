@@ -16,7 +16,7 @@ namespace rocks::audio {
 
 // float 표본 하나를 int16로 바꾼다: ×32768, round-half-even, [−32768, 32767]로 자른다. 비유한 값은
 // 0이다.
-ROCKS_AUDIOTOOLS_API int16 AdpcmQuantize(float sample) noexcept;
+ROCKS_AUDIOTOOLS_API int16 QuantizePcm16(float sample) noexcept;
 
 // planar float 입력을 ADPCM payload로 인코드해 out에 쓴다(out은 비우고 다시 채운다).
 // - 채널 1–MaxOutputChannels, frame 1 이상. 비유한 표본이 있으면 InvalidArgument.

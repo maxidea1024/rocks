@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 20(3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강). 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 22(3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외). 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -400,6 +400,8 @@ libsndfile은 LGPL이라 쓰지 않는다. 디코더 라이브러리는 Develope
 
 #### 3.11.1 인터페이스
 
+개정 22: 아래 인터페이스와 3.11.3절 머리 목록은 3.30절이 대체한다(청크 가운데 시작, 단위씩 디코드, 채널 마스크, 재생 정책 칸 제외). 아래는 처음 설계로 남긴다.
+
 ```cpp
 // AudioTools — 쿠킹 쪽
 class AudioEncoder {
@@ -439,7 +441,7 @@ Opus 48 kHz 리샘플의 결과:
 #### 3.11.3 플랫폼 데이터
 
 쿠킹 산출물(`SoundClip` 플랫폼 데이터):
-- 헤더: 형식 버전, 코덱 id·버전, 채널 레이아웃, 인코딩 rate, 유효 PCM frame 수, loop 구간(인코딩 rate 기준), encoder delay·끝 padding, 청크 수, 로딩 동작, 첫 청크 상주 여부.
+- 헤더: 형식 버전, 코덱 id·버전, 채널 레이아웃, 인코딩 rate, 유효 PCM frame 수, loop 구간(인코딩 rate 기준), encoder delay·끝 padding, 청크 수, 로딩 동작, 첫 청크 상주 여부. (개정 22: 3.30.1절이 대체 — 채널 레이아웃은 채널 마스크, 로딩 동작·첫 청크 상주는 `SoundClip` 쿠킹 필드)
 - 청크 표: 청크마다 payload 위치·크기, 첫 frame·frame 수, 독립 디코드 시작 여부, 필요한 pre-roll frame, SHA-256(서명 프로필에서 manifest가 덮는다).
 - 청크 크기: 목표 `TargetChunkBytes`(= 256 KiB, 플랫폼 프로필로 바꿈). 청크 경계는 코덱 프레임 경계다.
 - 청크 독립성: 모든 청크는 그 청크만으로 디코드를 시작할 수 있다. Opus는 앞 청크 끝의 패킷을 `OpusPreRollMs`(= 80 ms, RFC 7845 권장값)만큼 이 청크 앞에 **복제**해 두고, 디코더는 그 구간을 디코드해 버린다(`preRollFrames`). 앞 청크를 읽지 않아도 seek·재시작이 되며, 대가는 청크마다 약 80 ms 분량의 byte다. ADPCM·PCM은 블록 독립이라 pre-roll이 없다.
@@ -448,7 +450,7 @@ Opus 48 kHz 리샘플의 결과:
 
 #### 3.11.4 AssetNugget 키
 
-키 = AssetSystem의 공통 너겟 키(툴 빌드 식별 등 — AssetSystem 508행 부근) + 원본 PCM SHA-256 + 쿠킹에 닿는 설정(코덱·품질·rate·loop·`loopOverride`·로딩 동작·채널 처리) + 플랫폼 재정의 + 인코더 이름·버전·고정 SIMD 수준 + 쿠킹 리샘플러 버전 + 플랫폼 데이터 형식 버전. UE `FDerivedAudioDataCompressor`(`Source/Runtime/Engine/Private/AudioDerivedData.cpp`)가 DDC 키로 같은 일을 한다. 같은 입력은 같은 byte를 낸다(인코더 결정성 — 멀티스레드 인코더 옵션 끔).
+키 = AssetSystem의 공통 너겟 키(툴 빌드 식별 등 — AssetSystem 508행 부근) + 원본 PCM SHA-256 + 쿠킹에 닿는 설정(코덱·품질·rate·loop·`loopOverride`·채널 처리. 로딩 동작·첫 청크 상주는 재생 정책이라 넣지 않는다 — 3.30.1절) + 플랫폼 재정의 + 인코더 이름·버전·고정 SIMD 수준 + 쿠킹 리샘플러 버전 + 플랫폼 데이터 형식 버전. UE `FDerivedAudioDataCompressor`(`Source/Runtime/Engine/Private/AudioDerivedData.cpp`)가 DDC 키로 같은 일을 한다. 같은 입력은 같은 byte를 낸다(인코더 결정성 — 멀티스레드 인코더 옵션 끔).
 
 #### 3.11.5 패키지 게시
 
@@ -479,7 +481,7 @@ UE `ESoundWaveLoadingBehavior`(`Source/Runtime/Engine/Classes/Sound/SoundWaveLoa
 
 #### 3.12.3 디코드
 
-- voice마다 PCM 링(원본 rate frame 단위). 용량 = `2 × max(디코더 최대 출력 단위, ceil(Q × MaxPitchScale × srcRate / mixRate))`. Opus 최대 출력 단위는 패킷 최대 길이 120 ms = 5760 frame, ADPCM은 블록 frame 수, PCM은 Q다. `MaxPitchScale` = 2.0(UE `GlobalMaxPitchScale` 기본 — `Source/Runtime/Engine/Private/AudioSettings.cpp:30`). 디코드 worker가 다음 구간을 채운다. 시작 water mark·재충전 water mark는 품질 프로필 값이다.
+- voice마다 PCM 링(원본 rate frame 단위). 용량 = `2 × max(디코더 최대 출력 단위, ceil(Q × MaxPitchScale × srcRate / mixRate))`. Opus 최대 출력 단위는 패킷 최대 길이 120 ms = 5760 frame, ADPCM은 블록 frame 수, PCM16은 단위 1024 frame이다(디코더 `MaxFramesPerCall`, 3.30.2절). `MaxPitchScale` = 2.0(UE `GlobalMaxPitchScale` 기본 — `Source/Runtime/Engine/Private/AudioSettings.cpp:30`). 디코드 worker가 다음 구간을 채운다. 시작 water mark·재충전 water mark는 품질 프로필 값이다.
 - 디코더 인스턴스 하나에 작업 하나만 돈다. seek·stop 뒤 늦게 끝난 디코드는 (voice generation, seek 번호) 불일치로 버린다.
 - AudioRT는 디코드를 기다리지 않는다. 링이 비면 무음을 넣고 굶음을 센다. 음악은 굶은 동안 transport를 진행할지(건너뜀) 멈출지(이어 재생)를 `SoundClip` 설정으로 정한다.
 - 예산 예: 48 kHz 스테레오 float32는 초당 384,000 B다. 3분 곡을 풀면 69.12 MB다. Opus 48 kHz 스테레오 스트림의 PCM 링은 2 × max(5760, 512) = 11,520 frame × 2채널 × 4 B = 92,160 B이고, 스트리밍 voice 8개면 737,280 B(720 KiB)다. 여기에 디코더 상태·압축 청크·IO 진행분이 더해진다.
@@ -1035,7 +1037,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 
 ### 3.24 AU5 앞당김 — ADPCM 블록 코덱(개정 12)
 
-사용자 지시 순서(DSP → 믹서 → 코덱 → 임포터)에 따라, 선행작업(PR6 ClientOnly 모듈 유형, PR11 A3/A4 쿠커)이 필요 없는 코덱 부분을 먼저 만든다. 이번 범위는 ADPCM 블록 코덱이다. 청크 표·플랫폼 데이터 헤더·`AudioDecoder` 인터페이스·`AudioDecoderTable`·AssetNugget 키는 쿠커(PR11)와 함께 AU5에서 한다. Opus(`AudioOpus`, ClientOnly)는 PR6 뒤다.
+사용자 지시 순서(DSP → 믹서 → 코덱 → 임포터)에 따라, 선행작업(PR6 ClientOnly 모듈 유형, PR11 A3/A4 쿠커)이 필요 없는 코덱 부분을 먼저 만든다. 이번 범위는 ADPCM 블록 코덱이다. 청크 표·플랫폼 데이터 헤더·`AudioDecoder` 인터페이스·`AudioDecoderTable`·AssetNugget 키는 쿠커(PR11)와 함께 AU5에서 한다(개정 21: 쿠커 A4c를 앞두고 형식·인터페이스는 3.30절로 앞당겼다. AssetNugget 키는 여전히 A4c 뒤). Opus(`AudioOpus`)는 PR6 뒤다(개정 21: BS2 전까지 일반 Engine 모듈로 두고 등록 방식으로 연결 — 3.30절).
 
 #### 3.24.1 형식(UE `AdpcmAudioDecoder`·`AudioFormatADPCM`과 같은 MS ADPCM)
 
@@ -1417,6 +1419,158 @@ ffmpeg flac 파일은 메타데이터 뒤에 8 KiB PADDING이 있어 손상 시�
 | packet 손상 | audio page 본문 byte 3개를 바꾸고 page CRC를 다시 계산 200회: 멈춤·abort 없음, 받으면 길이 원본과 같고 표본 유한, 아니면 `InvalidArgument` |
 | 거부 | Ogg 아님·빈 입력 `InvalidArgument`, OpusHead 표지 손상(CRC 그대로 — page 검사에서) `InvalidArgument`, 실패 시 비움 |
 | 견고성 | 앞부분 29 byte 간격 전부 `InvalidArgument`(page 중간이면 page 검사, page 경계면 EOS 없음), byte 하나 무작위 교체 100회(값이 같으면 성공, 다르면 `InvalidArgument`) |
+
+### 3.30 AU5 앞당김 — 코덱 계층 C1: 플랫폼 데이터·청크 표·인코더/디코더 인터페이스(개정 21, 22)
+
+3.24절은 청크 표·플랫폼 데이터 헤더·`AudioDecoder`·`AudioDecoderTable`을 쿠커(PR11)와 함께 하기로 했다. 에셋 쿠커가 A4a·A4b까지 들어왔고 A4c(CookProcessor 표·키)가 다음이라, 쿠커와 맞물리는 부분(쿠킹 처리기·AssetNugget 키·sidecar 게시)만 남기고 형식과 코덱 계층을 앞당긴다. 이 절이 3.11.1절 인터페이스와 3.11.3절 머리 목록을 대체한다(개정 22 설계 교차 검증 반영). 단계:
+
+| 단계 | 범위 |
+|---|---|
+| C1(이 절) | `Audio`: 플랫폼 데이터 형식·검증, `AudioDecoder`·`AudioDecoderTable`, PCM16·ADPCM 디코더, 전체 디코드 도우미. `AudioTools`: `AudioEncoder`, PCM16·ADPCM 인코더, 청크 나누기(pre-roll 복제)·플랫폼 데이터 쓰기 |
+| C2 | 쿠킹 리샘플러: UE와 같이 libsamplerate `SRC_SINC_BEST_QUALITY`(UE `AudioPlatformConfiguration/Private/AudioResampler.cpp`, `AudioDerivedData.cpp:1597` `ResampleWaveData`) — ThirdParty 반입, 판을 너겟 키에 |
+| C3 | Opus 인코더(`AudioTools`, multistream family 1)·Opus 디코더(`AudioOpus`, 아래 등록 방식). codec 머리 = mapping family 1, stream 수, coupled 수, mapping 표, output gain 0. pre-skip은 머리 encoder delay와 같아야 한다 |
+| AU5 나머지 | 쿠킹 처리기·AssetNugget 키(A4c 뒤), sidecar 게시·청크 캐시(AU6) |
+
+모듈 경계(빌드 세션 조언, BuildTargets BD25): Runtime 모듈은 ClientOnly 모듈에 링크로 의존할 수 없다. 그래서 `Audio`(Runtime)는 코덱 구현 모듈을 링크하지 않고 `AudioDecoderTable`로 조회만 한다(3.30.2절 등록 경로). `AudioOpus`는 BS2(모듈 유형)가 들어올 때까지 일반 Engine 모듈로 둔다. 그 뒤 유형만 ClientOnly로 바꾼다. `AudioTools`(Developer)가 Opus 왕복 시험에 `AudioOpus`를 링크해도 되는지(Developer → ClientOnly, BD25)는 C3 전에 BuildTargets 3.3절 표로 확인한다.
+
+#### 3.30.1 플랫폼 데이터 형식(`Audio/AudioPlatformData.h`, little endian)
+
+byte 배치는 `[메타 = 머리 + codec 머리 + 청크 표 + 정렬 0][payload 영역]`이다.
+
+- 메타와 payload를 나눠 둘 수 있다(3.11.5절). sidecar = payload 영역 byte 그대로(위치 기준 불변), 패키지 = 메타 + 선택으로 payload 영역 앞부분 [0, 청크 0 끝). 위치·SHA가 나누기 전후로 같으므로 쿠킹 처리기는 byte를 다시 쓰지 않는다. Server 쿠킹은 메타만 둔다.
+- 머리(`AudioPlatformDataHeaderBytes` = 80):
+
+| 위치 | 크기 | 필드 |
+|---|---|---|
+| 0 | 4 | magic `RAPD` |
+| 4 | 2 | 형식 판 `AudioPlatformDataVersion` = 1 |
+| 6 | 1 | codec id(`AudioCodecId`: Pcm16 = 1, Adpcm = 2, Opus = 3 — 저장 값이라 번호를 바꾸지 않는다) |
+| 7 | 1 | 채널 수(1–8) |
+| 8 | 4 | bitstream 판(codec 단위 framing·bitstream 판. 디코더가 확인한다. PCM16 1, ADPCM 1, Opus 1). 인코더 판은 머리에 넣지 않고 너겟 키에만 넣는다 |
+| 12 | 4 | 인코딩 rate(Hz) |
+| 16 | 8 | 유효 frame 수 |
+| 24 | 8 | loop 시작(유효 frame 기준) |
+| 32 | 8 | loop 끝(포함하지 않음). 0이면 쿠킹된 loop 구간이 없고, looping 재생은 [0, 유효 frame)을 쓴다. looping 여부는 `SoundClip`·재생이 정한다 |
+| 40 | 4 | encoder delay(codec frame) |
+| 44 | 4 | 끝 padding(codec frame) |
+| 48 | 4 | 청크 수 |
+| 52 | 4 | codec 머리 byte 수(8의 배수) |
+| 56 | 4 | 채널 마스크(아래) |
+| 60 | 4 | 0 |
+| 64 | 8 | payload 영역 byte 수 |
+| 72 | 8 | 0 |
+
+- 채널 마스크: bit 0 FL, 1 FR, 2 FC, 3 LFE, 4 SL, 5 SR, 6 BL, 7 BR, 8 BC. 켜진 bit 수 = 채널 수이고, data 채널 i는 i번째로 켜진 bit의 자리다(bit 순서 = 3.3절 내부 순서, BC는 끝). mono는 FC다. 같은 채널 수의 다른 배치(4채널 Quad FL FR SL SR와 3.1 FL FR FC LFE)를 가린다. 쿠커가 원본 채널 마스크·디코더 순서 표(3.29.2절)에서 정한다.
+- 로딩 동작·첫 청크 상주는 머리에 두지 않는다. 재생 정책이라 바꿔도 다시 인코드할 필요가 없으므로 `SoundClip` 쿠킹 필드로 두고 너겟 키에서 뺀다(3.11.4절 고침). cue도 `SoundClip` 쿠킹 필드(유효 frame 기준 위치)다.
+- codec frame 시간축: 디코더가 내는 frame은 codec 시간축이다. 유효 frame f = codec frame (f + encoder delay)다. codec frame 합 = delay + 유효 frame + padding이다.
+- 청크 표(청크마다 `AudioChunkEntryBytes` = 64):
+
+| 위치 | 크기 | 필드 |
+|---|---|---|
+| 0 | 8 | payload 위치(payload 영역 기준) |
+| 8 | 4 | payload byte 수 |
+| 12 | 4 | flags(bit 0 = 독립 디코드 시작 가능. C1은 모든 청크가 1이어야 한다. 다른 bit는 0) |
+| 16 | 8 | 첫 codec frame |
+| 24 | 4 | codec frame 수(pre-roll 제외) |
+| 28 | 4 | pre-roll codec frame 수(payload 앞부분을 디코드해 버리는 양) |
+| 32 | 32 | payload SHA-256 |
+
+- 정렬: 메타 끝은 0으로 채워 16 byte 배수로 맞춘다(payload 영역 시작 정렬). 청크 payload 위치는 `AudioChunkAlignment` = 16의 배수이고 증가만 한다. 사이 빈틈은 0이다(writer가 채운다).
+- 단위 framing: 청크 payload는 codec 단위(PCM16 frame 묶음, ADPCM 블록 묶음, Opus 패킷)의 연속이고, 단위 경계는 byte만으로 알 수 있어야 한다(codec이 정한다). PCM16은 `Pcm16UnitFrames`(= 1024) frame × 채널 × 2 byte(청크 마지막 단위만 짧다), ADPCM은 채널 × 512 byte, Opus는 `[u16 LE 길이][multistream 패킷]`이다.
+- 검증(`ParseAudioPlatformData(bytes)`: 읽기 전용 view. bytes = 메타 + payload 영역 앞부분(없어도 된다)):
+  - magic·형식 판, 0이어야 할 칸(머리 60·72, 메타 정렬 채움)이 다르면 `InvalidArgument`.
+  - codec id 0은 `InvalidArgument`, 표 범위(`MaxAudioCodecs` = 8) 이상은 이 판이 모르는 codec이라 `Unsupported`다. 범위 안의 id는 형식 규칙만 보고(rate 규칙은 아는 codec에만), 디코더 유무는 표가 정한다(`NotFound`). 그래서 시험 전용 codec(범위 안의 빈 id)도 형식 시험에 쓸 수 있다.
+  - 채널 1–8, 채널 마스크의 켜진 bit 수 = 채널 수, bit 9 이상 0. rate: PCM16·ADPCM은 [8000, 192000], Opus는 48000.
+  - 유효 frame > 0. delay + 유효 + padding이 넘치지 않고 청크 frame 수 합과 같다.
+  - loop: 끝이 0이면 시작도 0, 아니면 시작 < 끝 ≤ 유효 frame.
+  - codec 머리 byte 수는 8의 배수. 청크 수 ≥ 1, 첫 codec frame이 0부터 빈틈없이 이어진다. codec frame 수 > 0. pre-roll ≤ 첫 codec frame(청크 0은 0). flags = 1.
+  - 청크 0의 위치 = 0, 위치는 16 배수이고 앞 청크 끝 이상, payload 구간이 payload 영역 안.
+  - 메타 byte 수 = 정렬(80 + codec 머리 + 64 × 청크 수)와, 주어진 bytes ≥ 메타. 메타 뒤 byte 수(있는 payload)는 payload 영역 이하다. view는 어떤 청크의 payload가 있는지 알려 준다(`ChunkPayload(index)` — 없으면 빈 Span).
+  - 덧셈·곱셈 넘침은 모두 검사한다(청크 수 × 64 등).
+  - codec별 검사(codec 머리 크기, PCM16·ADPCM은 pre-roll 0·codec 머리 0·청크 byte와 frame 수 관계)는 디코더 `Open`·`BeginChunk`가 한다.
+- 청크 SHA 확인 `VerifyAudioChunk(chunk, payload)`: 다르면 `InvalidArgument`. 청크 캐시가 sidecar에서 읽을 때와 도구(전체 디코드 도우미)가 부른다. 패키지 안 메타·상주 청크는 패키지 SHA(manifest)가 덮으므로 재생 때마다 부르지 않는다.
+
+#### 3.30.2 디코더(`Audio/AudioDecoder.h`)
+
+3.11.1절의 `Decode(chunk, out)`·`SeekToChunk`는 청크를 한 번에 풀거나 청크 머리에서만 시작해 voice PCM 링(3.12.3절)·청크 가운데 시작(`PreparePlayback(startFrame)`, 청크 가운데의 loop 시작, loop 머리 PCM 뒤를 잇는 위치)에 맞지 않는다. 그래서 청크를 열고 단위씩 내는 모양으로 고친다:
+
+```cpp
+class AudioDecoder {
+public:
+    virtual ~AudioDecoder() = default;
+    // 머리를 받아 codec 머리를 확인하고 상태·scratch를 모두 잡는다(이 뒤 BeginChunk·DecodeNext는 할당하지 않는다).
+    virtual Result<void> Open(const AudioPlatformDataHeader& header, Span<const uint8> codecHeader) noexcept = 0;
+    // 청크를 startCodecFrame(∈ [첫 codec frame, 끝))부터 디코드할 준비를 한다. 상태를 비우고, payload 단위 경계와 크기를 먼저
+    // 검사하고, pre-roll과 startCodecFrame 앞 frame을 디코드해 버린다(내지 않는다). payload는 청크를 다 낼 때까지 살아 있어야 한다.
+    virtual Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload, uint64 startCodecFrame) noexcept = 0;
+    // 다음 단위를 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수, 청크 끝이면 0.
+    virtual Result<uint32> DecodeNext(PlanarView out) noexcept = 0;
+    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수(out 용량 하한). PCM16 1024, ADPCM 1012, Opus 5760.
+    virtual uint32 MaxFramesPerCall() const noexcept = 0;
+};
+```
+
+- 청크 경계 규칙: 순차 재생도 청크마다 상태를 비우고 pre-roll부터 디코드한다(앞 청크 상태를 이어 쓰지 않는다). 그래서 처음부터 재생·seek 시작·전체 디코드 도우미가 같은 표본을 낸다. Opus는 80 ms pre-roll 뒤에도 연속 디코드와 bit가 같지 않으므로, 기준은 "청크별 디코드"다.
+- 청크 가운데 시작: PCM16·ADPCM은 단위로 바로 건너뛴다. Opus는 길이 접두를 훑어 (startCodecFrame − pre-roll 요구량) 이전의 패킷부터 디코드한다. 그 지점이 청크 머리 앞이면 복제 pre-roll 구간부터 쓴다.
+- `out` 채널 수가 머리 채널 수와 다르거나 frame 용량이 `MaxFramesPerCall()`보다 작으면 `InvalidArgument`, `BeginChunk` 전·`Open` 전 호출은 `InvalidArgument`다.
+- 손상 판정: 단위 경계·크기(PCM16·ADPCM byte 수, Opus 길이 접두 합)는 `BeginChunk`에서 먼저 검사한다(이미 낸 PCM이 voice에 나간 뒤 실패하지 않게). `DecodeNext`의 실패는 실제 디코드 오류뿐이다.
+- `AudioDecoderTable`: codec id(1–`MaxAudioCodecs` − 1, `MaxAudioCodecs` = 8)마다 factory(`Result<UniquePtr<AudioDecoder>> (*)(Allocator&)`) 하나다. `Register`(이미 있으면 `AlreadyExists`, 범위 밖 `InvalidArgument`), `Create(codec, allocator)`(없으면 `NotFound`, factory 실패는 그 오류). 전역 표·전역 생성자는 없다.
+- 등록 경로(backend와 같은 방식, AD24):
+  - 내장(PCM16·ADPCM): `RegisterBuiltInAudioDecoders(table)`.
+  - 코덱 모듈(`AudioOpus`): 모듈 `Startup`에서 `HostServices`에 디코더 factory 서비스를 등록한다. 표를 만드는 쪽(AU3 `AudioEngineSubsystem`, 에디터 미리듣기·AD25 변환 도구, 시험)은 내장을 넣은 뒤 `HostServices`에서 찾은 factory를 넣는다.
+  - Modular 빌드에서 factory·디코더 vtable이 `AudioOpus` 안에 있으므로 `AudioOpus`는 `SupportsUnload` = false다(디코더가 남은 채 내려가지 않게).
+- 수명: 디코더는 제어 쪽이 만들고 디코드 worker가 쓰며(3.12.3절), voice 회수 ACK 뒤 제어 쪽이 파괴한다. AudioRT는 디코더를 만지지 않는다.
+- 전체 디코드 도우미 `DecodeAudioPlatformData(view, table, allocator, DecodedAudioPcm& out)`: payload가 모두 있어야 한다(없으면 `InvalidArgument`). 할당 전에 모든 청크의 SHA 확인과 `BeginChunk`(단위 경계·크기)를 먼저 돌려 손상된 frame 수로 큰 버퍼를 잡지 않는다. 그 뒤 청크마다 `BeginChunk(첫 frame)` → `DecodeNext` 반복, delay·padding을 잘라 유효 frame만 planar로 남긴다(`DecodedAudioPcm` = 채널 수·frame 수·planar float `Array`. `PlanarBuffer`는 block 크기 상한이라 쓰지 않는다). 에디터 미리듣기·시험·도구용이다.
+- 내장 디코더 `Open`은 codec·채널 1–8·rate [8000, 192000]·codec 머리 없음을 보고(검증하지 않은 머리로 열어도 `PlanarView` 범위 밖을 쓰지 않게), 실패하면 앞 상태(열린 청크)를 비운다. bitstream 판이 다르면 `Unsupported`다.
+- PCM16 디코더: 단위 = 1024 frame 교차 int16 LE(마지막 단위는 청크 frame 수로 안다). 값 × `Pcm16SampleScale`(1/32768).
+- ADPCM 디코더: 단위 = 블록 묶음(채널 × 512 byte, 3.24.1절). 마지막 청크의 마지막 묶음만 1012보다 적은 frame을 담는다(디코더는 청크 frame 수로 묶음 수를 정하므로 중간 청크의 짧은 묶음도 받는다 — 청크마다 독립이라 해가 없다). `DecodeAdpcmFrames`를 묶음 단위로 부른다.
+
+#### 3.30.3 인코더와 청크 나누기(`AudioTools/AudioEncoder.h`·`AudioPlatformDataWriter.h`)
+
+```cpp
+struct EncodedAudio {           // 인코더 출력: codec 단위 목록
+    AudioCodecId codec; uint32 bitstreamVersion; uint32 encoderVersion;   // encoderVersion은 너겟 키용(머리에 넣지 않는다)
+    uint32 channels; uint32 channelMask; uint32 sampleRate;
+    uint64 frames; uint32 encoderDelay; uint32 endPadding;
+    uint32 preRollFrames;       // 청크 앞에 둘 최소 pre-roll codec frame(Opus 80 ms = 3840, 그 밖 0)
+    Array<uint8> codecHeader; Array<uint8> payload; Array<EncodedAudioUnit> units;   // 단위 = {payload 위치, byte 수, codec frame 수}, 단위 byte는 3.30.1절 framing
+};
+class AudioEncoder {
+public:
+    virtual ~AudioEncoder() = default;
+    virtual const AudioCodecInfo& Info() const noexcept = 0;   // codec id, 이름, 인코더 판, bitstream 판, rate 범위, 최대 채널
+    virtual Result<void> Encode(PlanarConstView pcm, uint32 sampleRate, uint32 channelMask, const AudioEncodeSettings& settings,
+                                EncodedAudio& out) noexcept = 0;
+};
+Result<void> WriteAudioPlatformData(const EncodedAudio& encoded, const AudioPlatformDataOptions& options, Array<uint8>& out) noexcept;
+```
+
+- `AudioEncodeSettings`: 품질(codec별 뜻 — Opus, C3). PCM16·ADPCM은 쓰지 않는다. 입력에 비유한 표본이 있으면 `InvalidArgument`다.
+- `AudioPlatformDataOptions`: 목표 청크 byte(`TargetChunkBytes` = 256 KiB 기본), 첫 청크 목표 byte(기본 = 목표 — UE `ZerothChunkSize`·`MaxLengthOfFirstAudioChunkInFrames`, `AudioDerivedData.cpp:800–864`에 해당, 상주 첫 청크를 작게), loop 구간(유효 frame 기준).
+- 청크 나누기:
+  - 단위를 차례로 넣다가 청크 자기 단위 byte가 목표를 넘게 되면 새 청크를 연다(한 청크에 단위 하나는 늘 들어간다 — 단위 하나가 목표보다 크면 그 청크만 목표를 넘는다).
+  - 청크 k > 0은 스트림 순서로 바로 앞 단위들을 거꾸로 모아 frame 합이 `preRollFrames` 이상이 될 때까지 복제해 payload 앞에 둔다(청크 경계와 상관없이 앞 청크들을 넘어 모으되 codec frame 0 앞으로는 넘어가지 않는다). 그 frame 합이 청크 pre-roll이다. 복제분은 목표 크기 계산에 넣지 않는다.
+  - payload 위치는 청크 순서대로 16 byte 정렬로 이어 붙인다(빈틈 0). SHA-256은 청크 payload(복제분 포함) 전체다.
+- writer는 아는 codec의 불변식도 본다: PCM16·ADPCM에 pre-roll이나 codec 머리가 있으면 `InvalidArgument`. 청크 하나가 4 GiB(청크 표 32비트 칸)를 넘으면 `CapacityExceeded`다.
+- PCM16 인코더: 단위 = 1024 frame 교차 int16(마지막은 남은 frame). 양자화는 `QuantizePcm16`(×32768, round-half-even, 자르기 — 3.24.2절 `AdpcmQuantize`를 이 이름으로 바꾸고 ADPCM도 쓴다).
+- ADPCM 인코더: `EncodeAdpcm`(3.24.2절) 결과를 블록 묶음 단위로 나눈다. 마지막 단위의 codec frame 수는 남은 frame이다(padding 0).
+- 결정성: 같은 입력·설정은 같은 byte다(시험, golden 해시).
+
+#### 3.30.4 시험
+
+| 대상 | 확인 |
+|---|---|
+| 형식 왕복 | PCM16·ADPCM: 쓰기 → 검증 → 전체 디코드. PCM16은 양자화 결과와 표본 일치, ADPCM은 `DecodeAdpcmFrames` 결과와 일치. 같은 입력 두 번 같은 byte, 고정 입력의 golden SHA-256(형식이 우연히 바뀌면 실패) |
+| 청크 | 작은 목표 크기로 여러 청크: 경계가 단위 경계, 단위 하나가 목표보다 큰 경우, 첫 청크 목표 따로, 16 정렬·빈틈 0, 첫 codec frame 연속, 청크 하나씩 따로 디코드해 이어 붙인 결과 = 전체 디코드 |
+| 청크 가운데 시작 | 모든 codec·청크에서 여러 startCodecFrame: 낸 표본 = 전체 디코드의 같은 구간 |
+| pre-roll | 시험 전용 codec(상태 기억이 정확히 N frame인 단위, pre-roll 요구 N)을 표에 등록: 청크 k만으로·청크 가운데서 디코드한 결과가 기준과 같음, pre-roll이 앞 청크 여럿을 넘어 모임(작은 목표), codec frame 0 앞으로 넘지 않음, 복제 byte가 SHA에 들어감, delay·padding이 있는 경우 전체 디코드가 앞뒤를 정확히 자름 |
+| 메타·payload 분리 | 메타만(Server)·메타 + 청크 0(패키지)·전체: 검증 통과, 있는 청크만 payload가 보임, 전체 디코드는 payload가 다 있어야 함 |
+| 검증 음성 | magic·판·0 칸·codec id(모름 `Unsupported`)·채널 0·9·마스크(bit 수 불일치, bit 9 이상)·rate 범위·유효 frame 0·delay+padding 불일치·loop(시작 ≥ 끝, 끝 > 유효, 끝 0인데 시작 ≠ 0)·codec 머리 8 배수 아님·청크 0개·frame 빈틈·pre-roll > 첫 frame·청크 0 pre-roll·flags·청크 0 위치 ≠ 0·정렬·위치 감소·payload 범위 밖·메타 크기·덧셈 넘침(청크 수 최대값, 첫 frame 넘침): 칸마다 하나씩 |
+| 청크 손상 | SHA 불일치 `InvalidArgument`, PCM16·ADPCM byte 수 불일치(`BeginChunk`에서), PCM16·ADPCM의 pre-roll·codec 머리 ≠ 0 |
+| 견고성 | 올바른 blob의 byte 무작위 교체·앞부분 자르기: 멈추거나 범위 밖을 읽지 않음(검증·디코드 어디서든 오류 또는 성공) |
+| 표 | 등록 중복 `AlreadyExists`, 범위 밖 `InvalidArgument`, 없는 codec `NotFound`, factory 실패 전달, 내장 등록 둘 |
+| 디코더 계약 | out 채널 수 불일치·용량 부족 `InvalidArgument`, `Open`·`BeginChunk` 전 호출, 청크 끝 뒤 0, startCodecFrame 범위 밖 |
+| 인코더 | 비유한 입력 `InvalidArgument`, 채널 0·9, 채널 마스크 bit 수 불일치 |
 
 ## 4. 결정 요약
 

@@ -97,7 +97,7 @@ uint64 EncodeBlock(const int16* samples, uint32 validFrames, uint32 coefficient,
 
 } // namespace
 
-int16 AdpcmQuantize(float sample) noexcept {
+int16 QuantizePcm16(float sample) noexcept {
     // 비유한 값은 0이다(EncodeAdpcm은 그 전에 거부한다).
     if (!math::IsFinite(sample)) {
         return 0;
@@ -149,7 +149,7 @@ Result<void> EncodeAdpcm(const PlanarConstView& input, Array<uint8>& out) noexce
             for (uint32 index = 0; index < AdpcmFramesPerBlock; ++index) {
                 const uint64 frame = first + index;
                 samples[index] =
-                    frame < frames ? AdpcmQuantize(input.channels[channel][frame]) : int16{0};
+                    frame < frames ? QuantizePcm16(input.channels[channel][frame]) : int16{0};
             }
 
             // 계수 세트 7개 중 제곱 오차가 가장 작은 것(동률이면 낮은 색인)을 고른다.
