@@ -60,7 +60,7 @@ UE 이름은 6절 대응표와 근거 문장에만 쓴다.
 
 **범위 밖**
 - UE `FGenericApplication`(OS 창·메시지·포커스 원천). [UI 툴킷](UiToolkit.ko.md) 3절의 `ui::Platform` 계약과 PlatformWindow 모듈이 맡는다. 이 문서는 포커스 상태를 어디서 읽는지만 정한다(8.6절).
-- UE `FEngineLoop` 구조 자체(PreInit·Init·Tick 순서). Rocks 엔진 루프는 [엔진 런타임](EngineRuntime.ko.md)과 `Engine::RunFrame`이 정한다. 이 문서는 부트 순서에 끼우는 지점만 적는다(8.3절).
+- UE `FEngineLoop` 구조 자체(PreInit·Init·Tick 순서). Rocks 엔진 루프는 [엔진 런타임](EngineRuntime/README.ko.md)과 `Engine::RunFrame`이 정한다. 이 문서는 부트 순서에 끼우는 지점만 적는다(8.3절).
 - UE Zen 저장소 프로젝트 ID(`GetZenStoreProjectId`). Rocks 파생 데이터 캐시는 에셋 너겟이고 Zen 대응이 없다.
 - UE 원격 세션 도구의 사용자 허가 목록(`AuthorizeUser`·`DenyUser`). 대응하는 원격 세션 도구가 없다.
 - 오디오 볼륨 배수와 VR 포커스. 오디오는 [오디오 시스템](AudioSystem.ko.md)이 정했고(8.6절), XR은 그 설계 때 정한다.
@@ -211,7 +211,7 @@ FApp 조회 함수(`APP` 547–654)는 이 값을 그대로 넘긴다. setter(`A
 | 부트 순서 | 등록 → 층 파일 → `--config` → `--set` → `CompleteStartup` → LogHost → trace·`--trace` → 엔진 루프 | [설정 계층](ConfigSystem.ko.md) 5.4절, `EngineHost.cpp:181–236` |
 | 프레임 시간 | `EngineTime{frameIndex, deltaSeconds, realTimeSeconds, averageFrameSeconds}`, 모두 double 초. `RunFrame` 2단계에서 단조 시계 차로 계산한다. `EngineConfig::fixedFrameDeltaSeconds > 0`이면 그 값을 쓴다 | `Engine/Source/Runtime/Engine/Public/Engine/Engine.h:172–173,209–216`, `Engine/Source/Runtime/Engine/Private/Engine.cpp:452–463` |
 | 프레임 번호 공유 | `Log::SetFrame`이 LogSystem의 `frame_`을 relaxed 원자 값으로 둔다 | `Core/Source/Runtime/Core/Private/Diagnostics/LogSystem.cpp:1006–1007` |
-| World 시간 | World마다 `GameClock`(pause·배율·고정 step) | [엔진 런타임](EngineRuntime.ko.md) 5절 |
+| World 시간 | World마다 `GameClock`(pause·배율·고정 step) | [엔진 런타임](EngineRuntime/05-Time.ko.md) 5절 |
 | 빌드 정보 | 구성·플랫폼 매크로, 로그 하한 매크로, 생성 TU의 `ToolchainFingerprint`·`ToolBuildId`·`CurrentEngineVersion`. 대상 종류·브랜치·커밋·날짜는 없다 | `Programs/Rocks.Build/BuildInfo.cs:298–370,596–616`, `ActionGraph.cs:376–486` |
 | 실행 성격 | `Unattended`·`nullrhi`·`FixedSeed`가 코드에 없다. 실행 모드 구분은 `LogSystemConfig::ForTool()`(Sync)과 `ForEngineHost()`(Async)뿐이다 | `Core/Source/Runtime/Core/Public/Core/Diagnostics/LogSystem.h:104–112` |
 | 대화상자 억제 | PlatformBase 공용 API가 없다. 같은 Windows 억제 코드(`_set_abort_behavior`·`_CrtSetReportMode`·`SetErrorMode`)가 두 곳에 복사돼 있다 | `Core/Source/Developer/TestSupport/Private/Win64/HostFailure.cpp:19–34`, `Programs/ShaderToolSpike/Private/Win64/SpikeHostWin64.cpp:13–18` |
@@ -304,7 +304,7 @@ Rocks 이름은 서술형이다. UE 이름은 이 표에만 둔다.
 | `IsRunningCommandlet` 등 실행 종류 전역 | `HostKind` | `Game`·`Commandlet`·`Tool`·`TestRunner`(에디터·서버는 생길 때 더한다) |
 | `GetBuildConfiguration`·`GetBuildTargetType`·`GetBranchName`·`GetBuildDate` 등 | `build::Description()` → `BuildDescription` | 빌드가 주입한 상수 레코드 |
 | `EBuildConfiguration` | `build::BuildConfiguration` | `Debug`·`Development`·`Release` |
-| `EBuildTargetType` | `build::TargetType` | `Game`·`Editor`·`Client`·`Server`·`Program`(빌드 규칙의 `TargetType`과 같은 이름·같은 값 — [빌드 타깃](BuildTargets.ko.md) BD1) |
+| `EBuildTargetType` | `build::TargetType` | `Game`·`Editor`·`Client`·`Server`·`Program`(빌드 규칙의 `TargetType`과 같은 이름·같은 값 — [빌드 타깃](BuildTargets/README.ko.md) BD1) |
 | `FAppTime` | `FrameTiming` | 한 프레임의 시간 값(double 초). 지금의 `EngineTime`을 대체한다 |
 | `FAppTime::GetApproximateCurrentTime` | `LatestFrameIndex()` + `platform::MonotonicNanoseconds()` | 아무 스레드가 읽는 대략값 |
 | `FCommandLine` | `ProcessCommandLine` | 진입점에서 캡처한 불변 UTF-8 인자 배열 |
@@ -339,7 +339,7 @@ Engine/Source/Runtime에는 핵심만 둔다. 게임 실행 파일이 쓰는 최
 
 지금 Core 런타임에 있는 `CommandletRegistry`(`Core/Source/Runtime/Core/Public/Core/Commandlet/Commandlet.h`)는 `CommandLineTools`의 `CommandSet`으로 대체하고 지운다(하위호환 없음, D24). 게임 실행 파일은 commandlet을 쓰지 않는다.
 - Core 런타임 `Config`가 공개하는 `RegisterConfigDumpCommandlet(CommandletRegistry&)`(`Core/Source/Runtime/Config/Public/Config/ConfigDump.h:47–48`)는 Runtime 모듈이 Developer `CommandSet`을 볼 수 없으므로 옮긴다. 덤프 본체(`ConfigDump`)는 Config에 두고, 명령 등록과 `ConfigDumpOptions`는 `Programs/Commandlet`으로 옮긴다(CL4).
-- [셰이더 시스템](ShaderSystem.ko.md) 96·147행(`shader-compile`)과 [에셋 시스템](AssetSystem.ko.md) 37행(`asset-*`)은 `CommandletRegistry`를 전제로 썼다. CL7에서 `CommandSet`으로 고친다.
+- [셰이더 시스템](ShaderSystem/README.ko.md) 4·5.2절(나누기 전 96·147행, `shader-compile`)과 [에셋 시스템](AssetSystem.ko.md) 37행(`asset-*`)은 `CommandletRegistry`를 전제로 썼다. CL7에서 `CommandSet`으로 고친다.
 
 ### 7.2 코드 크기 목표
 
@@ -500,7 +500,7 @@ uint64 LatestFrameIndex() noexcept;
 - 지금의 `EngineTime`을 `FrameTiming`으로 대체한다. `Engine::Time()`은 `Engine::Timing()`이 된다(하위호환 없음).
 - **고정 step delta는 double 그대로다(D5).** UE는 고정 delta를 float 지역 변수로 거쳐 넣는다(`UEN` 3019). `-FPS=`의 `1 / FixedFPS`도 float 나눗셈이다(`LEL` 4730). 그래서 UE의 1/30은 float로 반올림된 값이다. 단위·형식(double 초)과 기본값(1/30)은 UE와 같고, Rocks는 중간 float 반올림만 따르지 않는다. 이 차이는 D5에 결정으로 적었다. 결정적 실행의 비트 결과가 UE와 같아야 하는 기능(UE 데이터와 비트 대조)이 생기면 다시 본다.
 - **음수 delta 처리 없음.** 단조 시계(`uint64` 차)라 음수가 없다. UE의 "음수면 0.01"(`UEN` 3160–3164)은 필요 없다.
-- **엔진 delta에 상한이 없다.** UE 단독 게임의 `MaxDeltaTime` 상한(`UEN` 3184–3196)은 Rocks에서 World `GameClock`의 `maxFrameDeltaSeconds`가 맡는다([엔진 런타임](EngineRuntime.ko.md) 5절). 엔진 프레임 값은 측정값 그대로다.
+- **엔진 delta에 상한이 없다.** UE 단독 게임의 `MaxDeltaTime` 상한(`UEN` 3184–3196)은 Rocks에서 World `GameClock`의 `maxFrameDeltaSeconds`가 맡는다([엔진 런타임](EngineRuntime/05-Time.ko.md) 5절). 엔진 프레임 값은 측정값 그대로다.
 
 ### 9.2 스레드별 읽기
 
@@ -1308,7 +1308,7 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
 | CL6 | 양쪽 같음 golden 시험(17절) | CL3, CL5 | S |
 | AP3 | `FrameTiming`(EngineTime 대체)·`LatestFrameIndex`, 렌더 packet 칸(RB1과 함께), worker 상속(CVar의 lane 묶음 장치에 `FrameTiming`을 넣는다), `Engine::IsForeground()` | AP1, RB1, CVR 묶음 장치 | M |
 | AP4 | 실행 성격 소비처: 엔진 고정 step·시드, unattended 입력 장치 정책, `app.info` 콘솔 명령 | AP1, CL4 | S |
-| CL7 | 문서 반영(설정 계층 5.4절 부트 순서, CVar 콘솔 영역 `app`과 12절 편집 거리 함수 이름, 로깅 시작 기록, 리플렉션 보강의 지정자 표와 identity 면제, [셰이더 시스템](ShaderSystem.ko.md) 96·147행과 [에셋 시스템](AssetSystem.ko.md) 37행의 `CommandletRegistry` → `CommandSet`, 구현 문서), 묶음 끝 리뷰 | 전부 | S |
+| CL7 | 문서 반영(설정 계층 5.4절 부트 순서, CVar 콘솔 영역 `app`과 12절 편집 거리 함수 이름, 로깅 시작 기록, 리플렉션 보강의 지정자 표와 identity 면제, [셰이더 시스템](ShaderSystem/README.ko.md) 4·5.2절(나누기 전 96·147행)과 [에셋 시스템](AssetSystem.ko.md) 37행의 `CommandletRegistry` → `CommandSet`, 구현 문서), 묶음 끝 리뷰 | 전부 | S |
 
 ## 19. 결정 목록
 

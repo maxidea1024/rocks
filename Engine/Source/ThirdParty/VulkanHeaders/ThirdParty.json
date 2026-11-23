@@ -73,7 +73,7 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "Pinned to the Vulkan SDK 1.4.363.0 tag. The SPIRV-Headers and SPIRV-Tools submodule commits of DXC v1.9.2609 exactly match the same SDK tag (vulkan-sdk-1.4.363.0), so this tag is aligned together with SPIRV-Reflect and SPIRV-Cross (Docs/Design/ShaderSystem.ko.md section 8).",
+    "Pinned to the Vulkan SDK 1.4.363.0 tag. The SPIRV-Headers and SPIRV-Tools submodule commits of DXC v1.9.2609 exactly match the same SDK tag (vulkan-sdk-1.4.363.0), so this tag is aligned together with SPIRV-Reflect and SPIRV-Cross (Docs/Design/ShaderSystem section 8).",
     "Only C headers are kept (vk_platform.h, vulkan.h and vulkan_core.h of include/vulkan, the Windows, Metal, Android and beta platform headers, and all of include/vk_video that vulkan_core.h includes). C++ bindings (*.hpp, *.cppm), the registry and unused platform headers (X11, Wayland and the like) are not included.",
     "VK_NO_PROTOTYPES: the engine opens the Vulkan loader at run time and calls it only through function pointers (it does not link it). Consumer modules include it with the same definition.",
     "Of Apache-2.0 OR MIT, the license chosen is MIT (LICENSES/MIT.txt)."

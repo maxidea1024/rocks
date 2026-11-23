@@ -1,6 +1,6 @@
 # OpenGL ES 그래픽 backend(P11)
 
-기준일: 2026-11-18, 개정 2. [셰이더 시스템](ShaderSystem.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
+기준일: 2026-11-18, 개정 2. [셰이더 시스템](ShaderSystem/README.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
 
 UE 근거는 UE 5.8.4(로컬 클론, `release` 브랜치)의 `Engine/Source/Runtime/OpenGLDrv`이며, 아래 경로는 `Runtime/OpenGLDrv/Private/` 기준이다(셰이더 컴파일러는 `Developer/ShaderFormatOpenGL/Private/`). 레거시·deprecated 경로와 데스크톱 GL SM5 경로는 보지 않았다.
 

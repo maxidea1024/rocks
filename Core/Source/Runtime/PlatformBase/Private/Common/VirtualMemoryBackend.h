@@ -27,7 +27,7 @@ extern thread_local VirtualMemoryFaults virtualMemoryFaults;
 
 // 이 스레드의 주입 상태다(virtualMemoryFaults). thread_local은 공유 라이브러리 경계로 export할 수
 // 없으므로 다른 모듈(Modular의 시험 호스트)의 VirtualMemoryTestAccess는 이 함수로
-// 닿는다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+// 닿는다(Docs/Design/BuildTargets 3.8절 BS8d5).
 ROCKS_PLATFORMBASE_API VirtualMemoryFaults& ThisThreadVirtualMemoryFaults() noexcept;
 
 // 주입한 실패가 돌려주는 nativeError 값이다(OS 오류 코드와 겹치지 않는 표지).

@@ -23,7 +23,7 @@ public sealed record ReleaseException(string Rule, NativePlatform Platform, stri
 public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures, IReadOnlyList<string> Notices);
 
 /// <summary>
-/// Release 배제 정책이다(Docs/Design/ShaderSystem.ko.md 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
+/// Release 배제 정책이다(Docs/Design/ShaderSystem 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
 /// 각 플랫폼(Windows x64·macOS arm64·Android arm64)으로 규칙 평가해 다음을 거부한다.
 /// <list type="bullet">
 /// <item><c>release-developer-module</c>: 모듈 도달 집합(켠 플러그인 모듈 포함)에 Developer 모듈(<see cref="NativeModuleInput.Type"/>)이 있다.</item>
@@ -95,7 +95,7 @@ public static class ReleaseExclusion
             var targets = new List<(string Name, IReadOnlyList<string> Modules)>();
             foreach (TargetRules target in rules.Targets.Where(target => target.Type == TargetType.Game))
             {
-                // 켠 플러그인 모듈은 타깃이 참조하지 않아도 주 실행 파일에 링크된다(Docs/Design/BuildTargets.ko.md 3.9절 BD36·BD38). 해석
+                // 켠 플러그인 모듈은 타깃이 참조하지 않아도 주 실행 파일에 링크된다(Docs/Design/BuildTargets 3.9절 BD36·BD38). 해석
                 // 오류(끈 플러그인·빠진 모듈 사용)도 이 타깃의 Release 빌드를 막으므로 정책 실패로 알린다.
                 try
                 {
@@ -118,7 +118,7 @@ public static class ReleaseExclusion
     }
 
     /// <summary>
-    /// 모듈 종류(<see cref="NativeModuleInput.Type"/>)가 Developer인 모듈 이름이다(Docs/Design/BuildTargets.ko.md 3.9절 BD38). 엔진 모듈은
+    /// 모듈 종류(<see cref="NativeModuleInput.Type"/>)가 Developer인 모듈 이름이다(Docs/Design/BuildTargets 3.9절 BD38). 엔진 모듈은
     /// Group 폴더, 플러그인 모듈은 기술자가 종류를 정하므로 플러그인 경로(<c>Engine/Plugins/…/Source/&lt;모듈&gt;</c>)의 Developer 모듈도 잡힌다.
     /// </summary>
     public static IReadOnlySet<string> DeveloperModules(IReadOnlyList<NativeModuleInput> modules) =>

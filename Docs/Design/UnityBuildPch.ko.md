@@ -323,7 +323,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
 - 엔진의 제공 모듈은 Core(`Core/CoreSharedPch.h`)와 ObjectRuntime(`Object/ObjectSharedPch.h`)이다. 고른 방법과 헤더 목록은 이 절 끝의 "엔진의 제공 모듈과 헤더 목록"에 있다. Engine은 아직 제공하지 않는다(같은 곳).
 
 **선택**
-- 소비 모듈은 도달 집합에 있는 제공 모듈 중 **다른 제공 모듈을 가장 많이 포함하는 것**을 고른다. Public·Private 의존이 생기면([빌드 타깃](BuildTargets.ko.md) 3.5절) 후보는 "도달 집합"이 아니라 "컴파일 환경에 보이는 제공 모듈"이고, "public include closure"는 그 문서의 공개 환경이다(UE `InternalGetAllDependencyModulesForPCH`와 같다). 동률이면 이름 ordinal 순이다.
+- 소비 모듈은 도달 집합에 있는 제공 모듈 중 **다른 제공 모듈을 가장 많이 포함하는 것**을 고른다. Public·Private 의존이 생기면([빌드 타깃](BuildTargets/03-Design/03.05-DependencyVisibility.ko.md) 3.5절) 후보는 "도달 집합"이 아니라 "컴파일 환경에 보이는 제공 모듈"이고, "public include closure"는 그 문서의 공개 환경이다(UE `InternalGetAllDependencyModulesForPCH`와 같다). 동률이면 이름 ordinal 순이다.
 - 제공 모듈이 소비 모듈에 의존하면(소비 모듈이 제공 모듈의 의존 closure에 있으면) 그 PCH를 쓸 수 없다. UE와 같다(`Configuration/UEBuildTarget.cs:4854–4895`).
 
 **공유 정의**

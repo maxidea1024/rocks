@@ -352,7 +352,7 @@ public:
     // 규칙(장부·관찰자 기록·오류)은 RemoveReferenceAt과 같다. 옮기는 원소는 같은 배열에 이미 있는
     // 간선이라 대상의 생존·cutoff·세대를 다시 묻지 않는다(대상이 DestroyRequested여도 성공한다 —
     // SetReferenceAt으로 옮기면 대상 검증이 실패한다). 순서가 의미 없는 큰 목록의 제거에 쓴다
-    // (Docs/Design/EngineRuntime.ko.md 4.5절).
+    // (Docs/Design/EngineRuntime 4.5절).
     //
     // 사용 예(World가 Level의 Actor 배열에서 위치를 기억해 뗀다):
     //   registry.RemoveReferenceAtSwap(access, level, levelPointer->actors_, position);

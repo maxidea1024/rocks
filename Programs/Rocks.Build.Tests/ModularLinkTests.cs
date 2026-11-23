@@ -2,7 +2,7 @@ using Rocks.Build;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 링크 방식(Docs/Design/BuildTargets.ko.md 3.8절, BS8a)을 실제 컴파일·링크로 검사한다. 픽스처: Lib ← Mid ← App(실행 파일). Lib·Mid는 모듈
+/// 링크 방식(Docs/Design/BuildTargets 3.8절, BS8a)을 실제 컴파일·링크로 검사한다. 픽스처: Lib ← Mid ← App(실행 파일). Lib·Mid는 모듈
 /// API 매크로(<c>ROCKS_LIB_API</c>·<c>ROCKS_MID_API</c>)로 함수를 export한다.
 /// <list type="bullet">
 /// <item>Modular: Lib·Mid가 공유 라이브러리(<c>&lt;타깃&gt;-&lt;모듈&gt;-&lt;플랫폼&gt;-&lt;구성&gt;</c>)가 되고 App이 import해 실행된다. 각 compile은

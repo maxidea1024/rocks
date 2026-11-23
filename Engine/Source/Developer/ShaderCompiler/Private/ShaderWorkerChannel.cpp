@@ -1,6 +1,7 @@
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 
 #include <Base/PlacementNew.h>
+#include <Platform/Atomics.h>
 #include <Platform/File.h>
 #include <Platform/Path.h>
 #include <Platform/Sync.h>
@@ -8,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 워커 채널(Docs/Design/ShaderSystem.ko.md 11.1절 SC4·SC7)이다. 규칙은 공개 헤더 주석을 따른다.
+// 워커 채널(Docs/Design/ShaderSystem 11.1절 SC4·SC7)이다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace worker_channel_detail {
@@ -27,6 +28,7 @@ constexpr usize NumberBytes = 16;
 constexpr StringView DonePrefix("done ");
 constexpr StringView HeldPrefix("held ");
 constexpr StringView ChildPrefix("child ");
+constexpr StringView JobPrefix("job ");
 
 bool ParseNumber(StringView text, uint32& value) noexcept {
     if (text.IsEmpty() || text.ByteCount() >= NumberBytes) {
@@ -52,13 +54,6 @@ bool ParseNumber(StringView text, uint32& value) noexcept {
 
 } // namespace worker_channel_detail
 
-// 맡긴 묶음 하나다(Run을 부른 스레드의 스택에 있다).
-struct ChannelPending {
-    Span<const uint8> request;
-    ShaderWorkerBatchResult* out = nullptr;
-    platform::ManualResetEvent done;
-};
-
 struct ShaderWorkerChannel::State {
     explicit State(Allocator& allocator) noexcept
         : allocator(allocator), executable(allocator), directory(allocator), queue(allocator),
@@ -75,13 +70,15 @@ struct ShaderWorkerChannel::State {
     platform::Thread thread;
     platform::Mutex mutex;
     platform::ConditionVariable changed;
-    Array<ChannelPending*> queue;
+    Array<ShaderWorkerTicket*> queue;
     bool stopping = false;
     bool running = false;
     // 아래는 채널 스레드만 쓴다.
     platform::Process process;
     uint32 sequence = 0;
     Array<char> line;
+    // 띄운 워커 수다(다른 스레드가 읽는다 — 원자).
+    uint32 started = 0;
 
     static void Entry(void* context) noexcept {
         static_cast<State*>(context)->Loop();
@@ -89,7 +86,7 @@ struct ShaderWorkerChannel::State {
 
     void Loop() noexcept {
         while (true) {
-            ChannelPending* pending = nullptr;
+            ShaderWorkerTicket* pending = nullptr;
             {
                 platform::LockGuard lock(mutex);
                 while (queue.IsEmpty() && !stopping) {
@@ -104,7 +101,7 @@ struct ShaderWorkerChannel::State {
                 (void)queue.TryRemoveAt(0);
             }
 
-            Batch(*pending->out, pending->request);
+            Batch(*pending->out, pending->request, pending->progress);
             pending->done.Signal();
         }
 
@@ -178,6 +175,7 @@ struct ShaderWorkerChannel::State {
         }
 
         line.Clear();
+        (void)platform::AtomicFetchAdd(&started, 1u);
         return true;
     }
 
@@ -241,11 +239,13 @@ struct ShaderWorkerChannel::State {
         return static_cast<bool>(written.status) && written.bytes == bytes;
     }
 
-    void Batch(ShaderWorkerBatchResult& out, Span<const uint8> request) noexcept {
+    void Batch(ShaderWorkerBatchResult& out, Span<const uint8> request,
+               const ShaderWorkerProgress& progress) noexcept {
         using namespace worker_channel_detail;
         out.outcome = ShaderWorkerBatchOutcome::ChannelFailed;
         out.diagnostics.Clear();
         out.children.Clear();
+        out.reportedJobs = 0;
         out.exit = platform::ProcessExit{};
         if (!process.IsStarted() && !StartWorker(out)) {
             return;
@@ -306,6 +306,24 @@ struct ShaderWorkerChannel::State {
                 value == current) {
                 ReadOutput(out, output);
                 return;
+            }
+
+            // `job <seq> <index>`: 잠정 완료(진행 보고 10.3절).
+            if (text.StartsWith(JobPrefix, StringComparison::CaseSensitive)) {
+                const StringView rest = text.SliceBytes(JobPrefix.ByteCount(),
+                                                        text.ByteCount() - JobPrefix.ByteCount());
+                StringView first;
+                StringView second;
+                uint32 index = 0;
+                if (rest.Split(" ", first, second, StringComparison::CaseSensitive) &&
+                    ParseNumber(first, value) && value == current && ParseNumber(second, index)) {
+                    ++out.reportedJobs;
+                    if (progress.job != nullptr) {
+                        progress.job(progress.context, index);
+                    }
+
+                    continue;
+                }
             }
 
             if (text.StartsWith(ChildPrefix, StringComparison::CaseSensitive) &&
@@ -436,25 +454,33 @@ Result<void> ShaderWorkerChannel::Start(const ShaderWorkerLaunch& launch,
     return Result<void>::Success();
 }
 
-void ShaderWorkerChannel::Run(Span<const uint8> request, ShaderWorkerBatchResult& out) noexcept {
-    out.outcome = ShaderWorkerBatchOutcome::ShutDown;
-    if (state_ == nullptr) {
-        return;
-    }
-
-    ChannelPending pending;
-    pending.request = request;
-    pending.out = &out;
-    {
+void ShaderWorkerChannel::Post(ShaderWorkerTicket& ticket) noexcept {
+    ticket.out->outcome = ShaderWorkerBatchOutcome::ShutDown;
+    if (state_ != nullptr) {
         platform::LockGuard lock(state_->mutex);
-        if (state_->stopping || !state_->queue.TryPushBack(&pending)) {
+        if (!state_->stopping && state_->queue.TryPushBack(&ticket)) {
+            state_->changed.NotifyAll();
             return;
         }
-
-        state_->changed.NotifyAll();
     }
 
-    (void)pending.done.Wait();
+    ticket.done.Signal();
+}
+
+void ShaderWorkerChannel::Wait(ShaderWorkerTicket& ticket) noexcept {
+    (void)ticket.done.Wait();
+}
+
+uint32 ShaderWorkerChannel::WorkersStarted() const noexcept {
+    return state_ != nullptr ? platform::AtomicLoad(&state_->started) : 0;
+}
+
+void ShaderWorkerChannel::Run(Span<const uint8> request, ShaderWorkerBatchResult& out) noexcept {
+    ShaderWorkerTicket ticket;
+    ticket.request = request;
+    ticket.out = &out;
+    Post(ticket);
+    Wait(ticket);
 }
 
 void ShaderWorkerChannel::Shutdown() noexcept {

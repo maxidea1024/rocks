@@ -7,7 +7,7 @@
 #include <Core/Containers/Span.h>
 #include <ShaderCompiler/ShaderPreprocessor.h>
 
-// 셰이더 전처리기 내부 형식이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC3). 파일은 기능별로
+// 셰이더 전처리기 내부 형식이다(Docs/Design/ShaderSystem 11.1절 SC3). 파일은 기능별로
 // 나뉜다.
 // - ShaderPreprocessorText.cpp: 원문 정규화(BOM·CRLF·UTF-8), 논리 줄(줄 이음·주석), 토큰 나누기.
 // - ShaderPreprocessorMacros.cpp: 매크로 정의·숨김 집합·전개(#·##·가변 인자).

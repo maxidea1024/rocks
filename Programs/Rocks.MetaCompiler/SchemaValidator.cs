@@ -953,7 +953,7 @@ internal static partial class SchemaValidator
                             string macro = "ROCKS_" + ancestor.Module.ToUpperInvariant() + "_API";
                             throw new MetadataException($"{model.Name}: base {ancestor.Name} is defined in module {ancestor.Module} without a class-level " +
                                 $"export, but a derived class in another module links its constructor, destructor and virtual functions", "RMC2002",
-                                $"Export the whole base class in its declaration: class {macro} {ancestor.Name.Split("::")[^1]} ... (Docs/Design/BuildTargets.ko.md section 3.8 BS8d3).")
+                                $"Export the whole base class in its declaration: class {macro} {ancestor.Name.Split("::")[^1]} ... (Docs/Design/BuildTargets section 3.8 BS8d3).")
                                 .At(model.Site);
                         }
                     }

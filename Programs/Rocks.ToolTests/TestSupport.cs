@@ -268,7 +268,7 @@ internal sealed class Options
 
     public List<string> ClangArguments { get; } = [];
 
-    // --program <이름>=<경로>(여러 번): native 하니스가 쓸 다른 실행 파일이다(Modular 시험 동반 타깃 — Docs/Design/BuildTargets.ko.md 3.8절
+    // --program <이름>=<경로>(여러 번): native 하니스가 쓸 다른 실행 파일이다(Modular 시험 동반 타깃 — Docs/Design/BuildTargets 3.8절
     // BS8d6). 없는 이름은 시험 실행 파일 옆에서 찾는다.
     public Dictionary<string, string> Programs { get; } = new(StringComparer.Ordinal);
 

@@ -281,7 +281,7 @@ struct DefaultWriteProbe {
 };
 
 // 지금 관찰 지점이다(null이면 부르지 않는다). 저장소는 Config .cpp의 상수 초기화 정적 변수다(공개
-// 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 — Docs/Design/BuildTargets.ko.md 3.8절 BD29).
+// 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 — Docs/Design/BuildTargets 3.8절 BD29).
 ROCKS_CONFIG_API DefaultWriteProbe*& ActiveDefaultWriteProbe() noexcept;
 
 } // namespace detail

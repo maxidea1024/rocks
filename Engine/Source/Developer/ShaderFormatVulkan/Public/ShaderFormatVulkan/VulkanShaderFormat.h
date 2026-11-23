@@ -2,7 +2,7 @@
 
 #include <ShaderCompilerCommon/ShaderFormatBackend.h>
 
-// Vulkan 형식 처리기다(Docs/Design/ShaderSystem.ko.md 2절, 11.1절 SC1 — 워커가 링크한다).
+// Vulkan 형식 처리기다(Docs/Design/ShaderSystem 2절, 11.1절 SC1 — 워커가 링크한다).
 // VULKAN_SM5는 DXC → SPIR-V(target env는 형식 정의 compiler.spirvTargetEnv)이고 spirv-val로
 // 검증한다. SH2의 재배치·리플렉션 전 산출물이다(processor.version을 SH2가 올린다). 개발용 컴파일 훅
 // (VulkanShaderCompiler)은 SH2까지 같은 모듈에 남는다.

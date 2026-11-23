@@ -158,6 +158,7 @@ try
     await GameProjectTests.RunAsync();
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
+    await PublicHeaderCheckTests.RunAsync(toolchain, Path.Combine(fixture, "public-header-checks"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,
         options.GetValueOrDefault("--compiler"));
     Pass("output-invocation-lock-and-platform-header-incremental", timer.Elapsed);

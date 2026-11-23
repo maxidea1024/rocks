@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 25(3.15.2절 리버브 존 영역 형상을 공용 `VolumeShape`로 — [컴포넌트 도입](ComponentCatalog.ko.md) CR17). 개정 24(3.31절 리뷰 반영 — 끝 무음 덧붙이기로 끝 frame 보장, 블록 처리, 할당 전 PCM 상한, 위치 변환 Result, 겹침 거부, 시험 보강). 개정 23: 3.31절 AU5 앞당김 C2 — 쿠킹 리샘플러, ThirdParty SampleRate 반입. 개정 22: 3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외. 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 26(3.15.2절 AudioGameplayVolume 컴포넌트 대응·submix send·효과 교체 영역 속성, 9.1절 Synthesis 신스 — [컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9절 CR54). 개정 25(3.15.2절 리버브 존 영역 형상을 공용 `VolumeShape`로 — [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR17). 개정 24(3.31절 리뷰 반영 — 끝 무음 덧붙이기로 끝 frame 보장, 블록 처리, 할당 전 PCM 상한, 위치 변환 Result, 겹침 거부, 시험 보강). 개정 23: 3.31절 AU5 앞당김 C2 — 쿠킹 리샘플러, ThirdParty SampleRate 반입. 개정 22: 3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외. 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -21,7 +21,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 | 엔진 수명 | `EngineSubsystem`의 `Initialize`·`OnFrameBegin`·`OnFrameEnd`·`BeginShutdown`·`CompleteInFlightWork`·`Deinitialize`(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:46–70`). 종료 2단계 주석에 "audio epoch" 대기 | `CompleteInFlightWork` 실패는 `KeepFirst`로 누적되고 정리가 이어진다. 장치 콜백이 살아 있는 채 소유자가 풀릴 수 있다(3.8.6절) |
 | 명령줄 | AppInfo 개정 4가 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`를 설계했다(미구현 — AP1) | 판정 값이 아직 코드에 없다(3.8.4절) |
 | 설정 | 콘솔 영역 `"audio"`(`Core/Source/Runtime/Config/Public/Config/ConsoleSettings.h:66`), `audio.master.volume` 시험 사용 | 오디오 CVar가 없다 |
-| 빌드 대상 | [빌드 타깃](BuildTargets.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | 빌드 코드에 `ClientOnly`가 없다. 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
+| 빌드 대상 | [빌드 타깃](BuildTargets/README.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | 빌드 코드에 `ClientOnly`가 없다. 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
 | 에셋 | A1 구현, A2a–A2e 구현, A2f 임포트 프레임워크는 A2f1a 구현(진단 등록·원본 루트·원본 읽기·임포터 표)·A2f1b·A2f2 설계(`AssetImporter`·`AssetImporterTable`, AssetSystem 7.1절 18), A3 AssetNugget·A4 AssetCooker 설계. `ReadyMask { Cpu, Render }`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/AssetManager.h:36`) | 오디오 재생 구간이 준비됐는지 표현할 수단이 없다(3.12.4절) |
 | Sparks | 스키마 `Engine/Source/Developer/SparksTestHost/Schema/Engine.sparkbind.json`에 `SoundAsset`·`AudioSystem.PlayAt/StartLoop`·`World.Audio`. [Sparks 엔진 통합](SparksEngineIntegration.ko.md) SE-G7·EI5는 모듈 없음으로 대기 | — |
 | policy | `PolicyChecks.WindowsMacroLeak.cs`가 `xaudio2.h`·`mmdeviceapi.h`·`audioclient.h`를 Windows 매크로 누출 헤더로 안다 | 장치 헤더는 backend 모듈의 Private에만 둔다 |
@@ -336,7 +336,7 @@ CVar(이름은 [CVar](CVarSystem.ko.md) 규칙 — 소문자 점 구분):
 3. `CompleteInFlightWork`(AudioEngineSubsystem): stop-all epoch → AudioRT의 그 epoch ACK 대기(장치가 정상일 때). 장치가 이미 정지·분리됐으면 backend `Stop` 반환을 장벽으로 쓴다(블록이 더 나오지 않는 장치에서 epoch를 기다리면 종료가 멈춘다). → backend `Stop`(콜백 종료) → AudioRT 종료 플래그 설정 → 깨우기 신호 Signal(링이 차서 대기 중인 AudioRT를 깨운다) → AudioRT join → `NullAudioOutput`을 쓰던 중이면 그 타이머 스레드도 같은 순서(플래그 → 깨우기 → join) → 디코드·IO 취소 완료 → PCM pin·`AssetLease` 반환.
 4. `Deinitialize`: backend `Close`, 링·plan·DSP 상태 해제.
 
-대기에는 상한(`ShutdownDrainTimeoutMs`)을 두고, 넘으면 오류를 돌려준다. 이때 지금의 `KeepFirst` 누적 후 정리 계속 흐름은 콜백이 살아 있을 수 있는 소유자를 풀어버린다. 그래서 Engine 종료에 재시도 게이트가 필요하다(선행 PR8): 오디오 `CompleteInFlightWork` 실패면 `AssetManager` 종료·subsystem 해제로 넘어가지 않고 재시도하거나, 재시도할 수 없으면 소유자를 해제하지 않은 채 `platform::Fatal`로 끝낸다(해제 뒤 접근보다 명시 실패가 낫다). 이 게이트의 정확한 계약은 [엔진 런타임](EngineRuntime.ko.md)·[크래시·실행](CrashHandlingAndLaunch.ko.md) 개정으로 정한다.
+대기에는 상한(`ShutdownDrainTimeoutMs`)을 두고, 넘으면 오류를 돌려준다. 이때 지금의 `KeepFirst` 누적 후 정리 계속 흐름은 콜백이 살아 있을 수 있는 소유자를 풀어버린다. 그래서 Engine 종료에 재시도 게이트가 필요하다(선행 PR8): 오디오 `CompleteInFlightWork` 실패면 `AssetManager` 종료·subsystem 해제로 넘어가지 않고 재시도하거나, 재시도할 수 없으면 소유자를 해제하지 않은 채 `platform::Fatal`로 끝낸다(해제 뒤 접근보다 명시 실패가 낫다). 이 게이트의 정확한 계약은 [엔진 런타임](EngineRuntime/README.ko.md)·[크래시·실행](CrashHandlingAndLaunch.ko.md) 개정으로 정한다.
 
 ### 3.9 사운드 에셋
 
@@ -593,13 +593,14 @@ Master
 
 | 하는 일 | 문맥 | 입력 → 출력 |
 |---|---|---|
-| 리스너·emitter의 영역 판정, 겹침 우선순위(동률은 안정 id), 경계 hysteresis | Game(`AudioWorldSubsystem`, `OnFrameEnd`) | 영역 형상과 위치 → 영역 id. 형상은 후처리 볼륨 등과 함께 쓰는 공용 `VolumeShape`(상자·구·캡슐·볼록체 — UE brush volume 대체, [컴포넌트 도입](ComponentCatalog.ko.md) CR17·CD1)다. SpatialIndex 후보 검색 + 형상 내부 판정. 물리 엔진은 쓰지 않는다 |
+| 리스너·emitter의 영역 판정, 겹침 우선순위(동률은 안정 id), 경계 hysteresis | Game(`AudioWorldSubsystem`, `OnFrameEnd`) | 영역 형상과 위치 → 영역 id. 형상은 후처리 볼륨 등과 함께 쓰는 공용 `VolumeShape`(상자·구·캡슐·볼록체 — UE brush volume 대체, [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR17·CD1)다. SpatialIndex 후보 검색 + 형상 내부 판정. 물리 엔진은 쓰지 않는다 |
 | 프리셋 선택, 전환 시작(시작값·끝값·끝 frame), 재생별 wet send·안팎 gain·LPF 목표값 | 제어 pipe | 영역 id·거리 → AudioRT 명령 |
 | 파라미터 보간, 리버브 DSP, 잔향 꼬리 유지 | AudioRT | 목표값만 받는다 |
 
 - `ReverbPreset`: UE `UReverbEffect`와 같은 파라미터 이름·범위. 기본 프리셋(동굴·대성당·작은 방·복도·야외)을 엔진 콘텐츠로 준다.
 - `ReverbZoneComponent`: 형상, 프리셋, wet 양(0–1), 전환 시간, 우선순위, `ZoneInteriorSettings`(UE `FInteriorSettings`와 같은 여덟 값).
 - World 기본 리버브: World 설정에 프리셋(없음 가능)과 안팎 기본값.
+- UE AudioGameplayVolume 플러그인 컴포넌트 대응([컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9.5절 대체, CR54): `UReverbVolumeComponent` → 프리셋·wet·전환, `UAttenuationVolumeComponent`·`UFilterVolumeComponent` → `ZoneInteriorSettings`의 안팎 gain·LPF, `USubmixSendVolumeComponent` → 영역 안 재생에 더하는 `MixBus` send(AU7 send), `USubmixOverrideVolumeComponent` → 영역 안에서 `MixBus` 효과 체인 교체(3.14.4절 plan 교체). 영역 하나(`ReverbZoneComponent`)가 이 속성들을 함께 갖고, UE의 volume 컴포넌트 + mutator 분리는 들이지 않는다. send·효과 교체 속성은 AU7에서 구현한다.
 - **전환(AD11)**: UE와 같이 리버브 하나의 파라미터를 전환 시간 동안 선형 보간한다. bypass 쪽은 0으로 보고 보간한다. wet은 리버브 입력에 램프를 걸어 잔향 꼬리를 보존한다. UE와 다른 점은 진행률을 벽시계가 아니라 mix clock frame으로 계산하고 AudioRT가 블록마다 진행하는 것이다(오프라인 렌더 결정성 — 7절).
 - **bypass 지연(AD27)**: 전환 끝값이 early·late bypass이거나 리버브 없음이어도, 해당 단계는 출력 에너지가 `ReverbTailSilenceDb`(= −90 dBFS) 아래로 `ReverbTailHoldFrames`(= Q × 4) 동안 머문 뒤에야 끄고 이력을 지운다. UE는 전환 끝에 바로 지워 꼬리가 잘린다(위). 그 사이 다른 프리셋으로 다시 전환하면 이력을 유지한 채 보간을 시작한다.
 - 거리별 리버브 send: `AttenuationSettings`의 거리 곡선으로 먼 소리의 wet 비율을 늘린다(UE와 같다).
@@ -1757,10 +1758,10 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 개정 1.17 | 18절: 전용 AudioRT 스레드 + 출력 링(AD2), 이 문서 링크, 표지 1.17 항목 | — |
 | [동기화](Synchronization.ko.md) 개정 3 | 9.6절 `RealtimeWakeSignal`, D34, 단계 SY12(AD26). D27(AudioRT SPSC 입력)은 그대로 | — |
 | [AppInfo·명령줄](AppInfoCommandLine.ko.md) 개정 4 | `RunTraits::audioOutput`·`audioMuted`, `--no-sound`·`--mute-audio`·`--allow-commandlet-audio`, 8.6절 볼륨 CVar | — |
-| [엔진 런타임](EngineRuntime.ko.md) 6절 | 종료 게이트(`Busy`면 멈춤·이어 부르기, AD23) | — |
+| [엔진 런타임](EngineRuntime/06-Engine.ko.md) 6절 | 종료 게이트(`Busy`면 멈춤·이어 부르기, AD23) | — |
 | [크래시 처리·실행](CrashHandlingAndLaunch.ko.md) 개정 13 | 20절 호스트 재시도·Fatal | — |
 | [플랫폼 계층](PlatformLayer.ko.md) | "앱 수명 이벤트" 절(PR9) | — |
-| [빌드 타깃](BuildTargets.ko.md) 개정 20 | 오디오 모듈 유형·Server 쿠킹 payload 제외(AD24) | — |
+| [빌드 타깃](BuildTargets/README.ko.md) 개정 20 | 오디오 모듈 유형·Server 쿠킹 payload 제외(AD24) | — |
 | [에셋 시스템](AssetSystem.ko.md) | 진단 `IgnoredSourceChunks`, `ReadyMask`와 오디오 준비 티켓의 관계(AD18) | 오디오 쿠킹 처리기·sidecar 청크 게시 세부는 A4 설계 때(AU5·AU6 전) |
 | [Sparks 엔진 통합](SparksEngineIntegration.ko.md) 개정 2 | SE-G7 오디오 의미 | `Engine.sparkbind.json` 스키마 변경(`Play2D`)은 AU3b 코드와 함께 |
 | [Trace 시스템](TraceSystem.ko.md) | — | `Audio`·`AudioMixer` 채널(AU8 전) |
@@ -1774,7 +1775,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 - 레거시 `FIOSAudioDevice`, XAudio2 backend.
 - `EAudioDeviceScope`의 장치 참조 계수 핸들(`FAudioDeviceHandle`) 공개 — Rocks는 `AudioEngineSubsystem`이 소유하고 World는 id만 쓴다.
 - 다채널 `_L`·`_R` 분리 파일 임포트.
-- `USynthComponent`(procedural은 `SoundGenerator` source 입력으로 — AU10).
+- `USynthComponent`(procedural은 `SoundGenerator` source 입력으로 — AU10). Synthesis 플러그인의 신스 컴포넌트 5종(`UGranularSynth`·`UModularSynthComponent`·`USynthComponentMonoWaveTable`·`USynthComponentToneGenerator`·`USynthSamplePlayer`)도 같은 길로, 신스를 `SoundGenerator` 구현으로 만들어 `AudioComponent`가 재생한다([컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9.5절).
 
 ### 9.2 범위 밖
 

@@ -4,7 +4,7 @@
 # (ToolBuild.ps1): download the manifest sources and verify SHA-256 -> source tree and patches -> compare committed public headers -> (the library script builds)
 # -> install name (@loader_path), ad-hoc signing and dSYM -> tar.gz archive and host entry JSON. Does not publish.
 #
-# Status: unverified. It could not be run on this machine (Windows). Confirm on the first macOS host that runs it (ShaderSystem.ko.md section 8 progress).
+# Status: unverified. It could not be run on this machine (Windows). Confirm on the first macOS host that runs it (Docs/Design/ShaderSystem section 8 progress).
 # The manifest is read with plutil, a default macOS tool (no reliance on jq or Python).
 
 set -eu

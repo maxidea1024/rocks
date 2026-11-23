@@ -15,7 +15,7 @@
 // 직접 이름 짓지 않는다. 이 참조는 snapshot의 공유 소유권과 타입 키만 들고, 꺼낼 때 같은
 // 타입으로만 돌려준다. Config를 아는 쪽(실행 파일·렌더러 모듈)이 타입을 정한다. 타입 키는
 // TypeKeyOf<T>()다(Core/TypeKey.h): 담는 쪽(게임 lane)과 꺼내는 쪽(렌더러 모듈)이 다른 모듈이면
-// T가 export 키를 선언해야 한다 — ConfigSnapshot은 선언한다(Docs/Design/BuildTargets.ko.md 3.8절
+// T가 export 키를 선언해야 한다 — ConfigSnapshot은 선언한다(Docs/Design/BuildTargets 3.8절
 // BS8e).
 //
 // 사용 예:

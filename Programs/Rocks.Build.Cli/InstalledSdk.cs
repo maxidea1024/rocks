@@ -17,7 +17,7 @@ namespace Rocks.Build.Cli;
 // 목록이다(3.8절 — 게임 실행 파일이 SDK 모듈을 링크하면 그 동적 모듈도 링크하고 모듈 표에 싣는다). LoadingPhase(단계 이름 —
 // Descriptors.LoadingPhase)·ProvidesLaunch는 NativeModuleInput과 같은 칸이다(3.11절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 단계로 단계
 // 순서·부트 모듈 검사를 소스 빌드와 같게 한다). PublicDependencies·PrivateDependencies는 NativeModuleInput과 같은 두 의존 목록이다
-// (Docs/Design/BuildTargets.ko.md 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다). HasGlobalState는 NativeModuleInput과
+// (Docs/Design/BuildTargets 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다). HasGlobalState는 NativeModuleInput과
 // 같은 서드파티 표지다(3.8절 BD29 — 게임 모듈이 SDK의 전역 상태 서드파티를 직접 의존하면 소비 모듈이 둘이 되어 거부된다).
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] PublicDependencies, string[] PrivateDependencies,
     string[] Libraries,
@@ -59,9 +59,9 @@ public static class InstalledSdk
     // 그 동적 모듈도 함께 링크하고 모듈 표에 싣는다).
     // 11: SdkModule에 LoadingPhase·ProvidesLaunch 추가(로딩 단계 — Docs/Design/ModuleLoader.ko.md 3.11절. 이전 SDK의 Core·ModuleLoader·
     // Launch는 단계가 없어 게임 실행 파일의 부트 모듈이 EarliestPossible에 시작하지 않으므로 버전 불일치로 거부한다).
-    // 12: SdkModule의 Dependencies를 PublicDependencies·PrivateDependencies로 나눴다(Docs/Design/BuildTargets.ko.md 3.5절 BS0 — 이전 SDK는
+    // 12: SdkModule의 Dependencies를 PublicDependencies·PrivateDependencies로 나눴다(Docs/Design/BuildTargets 3.5절 BS0 — 이전 SDK는
     // 두 목록이 없어 게임 빌드가 공개 환경을 계산할 수 없으므로 버전 불일치로 거부한다).
-    // 13: SdkModule에 HasGlobalState 추가(Docs/Design/BuildTargets.ko.md 3.8절 BS8c — 이전 SDK는 전역 상태 서드파티를 표시하지 않아 게임
+    // 13: SdkModule에 HasGlobalState 추가(Docs/Design/BuildTargets 3.8절 BS8c — 이전 SDK는 전역 상태 서드파티를 표시하지 않아 게임
     // 빌드가 단일 소비 검사를 할 수 없으므로 버전 불일치로 거부한다).
     // 14: 다중 구성 SDK. Configuration·Modules를 Configurations(구성 이름 → 모듈 선언·구성 파일 목록)로 바꾸고 구성마다 다른 파일을
     // Configurations/<구성>/ 아래에 둔다(Docs/Design/ProjectFiles.ko.md 10.3절 — 이전 SDK는 구성 목록이 없어 게임 솔루션이 구성을 알 수 없으므로
@@ -419,7 +419,7 @@ public static class InstalledSdk
         var engineVersion = EngineVersionOf(manifest);
         var projectDescriptor = GamePlanning.Descriptor(project, engineVersion);
         // 플러그인 기술자 검증은 규칙을 읽기 전에 한다. 켤 플러그인과 모듈 해석은 타깃 종류·타깃 플러그인 참조가 필요하므로 규칙 로드 뒤다
-        // (Docs/Design/BuildTargets.ko.md BD24, 3.9절).
+        // (Docs/Design/BuildTargets BD24, 3.9절).
         var availablePlugins = PluginCatalog.Discover([Path.Combine(project, "Plugins")]);
         // 입력 snapshot과 같은 제외 규칙으로 찾는다(점 디렉터리·out/·Saved/ 아래 사본을 규칙으로 컴파일하지 않는다, 10.6절).
         string? rulesPath = await GamePlanning.CompileRulesAsync(Path.Combine(output, "Rules"), GameProjectLayout.RuleFiles(project, output, sdk), sdk,

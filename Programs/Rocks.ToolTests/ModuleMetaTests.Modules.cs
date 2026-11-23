@@ -253,7 +253,7 @@ internal static partial class ModuleMetaTests
             await Reject(layout.RunUpperAsync(extra: [MetaCompilerArguments.VerifySources]), "RMC1000", "duplicate option --verify-sources");
         });
 
-        // 생성 소스의 native 키(Docs/Design/BuildTargets.ko.md 3.8절 BS8b): 헤더는 GeneratedType<X>::NativeKey()를 모듈 API 매크로로
+        // 생성 소스의 native 키(Docs/Design/BuildTargets 3.8절 BS8b): 헤더는 GeneratedType<X>::NativeKey()를 모듈 API 매크로로
         // 선언하고(빌드 밖 fallback 정의 포함) 생성 소스가 정의한다. 생성 소스는 클래스 대상의 생성 헤더를 include한다 — 다른 모듈
         // base에서 물려받은 필드의 대상은 이름 없이 ID로만 이어지므로(import 클래스 대상) ID 경로가 Lower/Target.generated.h를 찾아야
         // 한다. 대상이 ROCKS_GENERATED_BODY 타입이라 빠지면 NativeTypeKey의 static_assert로 검증 컴파일이 실패한다.
@@ -283,7 +283,7 @@ internal static partial class ModuleMetaTests
             Verify.Contains("#include <Lower/Target.generated.h>", source, "inherited imported class target found by ID");
         });
 
-        // struct·enum의 native 키(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4): 클래스처럼 생성 헤더가 GeneratedType<X>::NativeKey()를
+        // struct·enum의 native 키(Docs/Design/BuildTargets 3.8절 BS8d4): 클래스처럼 생성 헤더가 GeneratedType<X>::NativeKey()를
         // 모듈 API 매크로로 선언하고 생성 소스가 정의한다(Modular에서 공유 라이브러리마다 다른 키가 생기지 않게).
         suite.Add("Meta.StructsAndEnumsGetGeneratedNativeKeys", async () =>
         {
@@ -552,7 +552,7 @@ internal static partial class ModuleMetaTests
         });
 
         // descriptor는 빌드 산출물이다. 모르는 속성, 잘못된 모듈 이름·헤더 철자·이름·버전은 생성 C++에 들어가기 전에 거부한다.
-        // 상속 export 진단(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3): 다른 모듈이 상속하는 기반은 선언부에 모듈 API 매크로가 있어야 하고
+        // 상속 export 진단(Docs/Design/BuildTargets 3.8절 BS8d3): 다른 모듈이 상속하는 기반은 선언부에 모듈 API 매크로가 있어야 하고
         // descriptor flags의 Exported로 전해진다. 없으면 파생 모듈이 RMC2002, 같은 모듈 안의 상속은 매크로가 없어도 된다.
         suite.Add("Meta.CrossModuleBaseMustBeExported", async () =>
         {

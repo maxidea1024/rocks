@@ -1,4 +1,4 @@
-// Rocks 셰이더 플랫폼 머리다(Docs/Design/ShaderSystem.ko.md 11.1절 SC10).
+// Rocks 셰이더 플랫폼 머리다(Docs/Design/ShaderSystem 11.1절 SC10).
 //
 // 전처리기가 모든 엔트리 원문 앞에 강제로 include한다(작성자는 쓰지 않는다). 형식·컴파일러 값은
 // 메인 프로세스의 정의 조립(ShaderPreprocessDefines)이 넣은 정의에서만 얻는다. 컴파일러 내장 이름

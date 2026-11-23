@@ -8,7 +8,7 @@
 #include <Object/ModuleRegistration.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 
-// 셰이더 컴파일 옵션이다(Docs/Design/ShaderSystem.ko.md 11.1절 SC9). job 키 6행에 리플렉션 기록
+// 셰이더 컴파일 옵션이다(Docs/Design/ShaderSystem 11.1절 SC9). job 키 6행에 리플렉션 기록
 // (WriteReflected — 기본값 포함 전체, 필드 이름이 키와 trace에 들어간다)으로 들어간다. 명령
 // (`shader-compile --option NAME=VALUE`)과 API는 같은 이름=값 파서를 쓴다.
 //

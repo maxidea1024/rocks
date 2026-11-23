@@ -192,7 +192,7 @@ internal static class DescriptorTests
         ExpectFailure(() => ResolveProject(Project("Game5", ""), [.. all, left, right]), "cycle");
         ExpectFailure(() => ResolveProject(Project("Game6", ""), [.. all, core]), "duplicate plugin");
 
-        // 타깃 규칙 참조(엔진 저장소 타깃, Docs/Design/BuildTargets.ko.md 3.9절). Program은 enabledByDefault를 적용하지 않고 명시한 것과
+        // 타깃 규칙 참조(엔진 저장소 타깃, Docs/Design/BuildTargets 3.9절). Program은 enabledByDefault를 적용하지 않고 명시한 것과
         // 그 의존만 켠다(BD34). Game은 기본 활성도 켠다.
         string[] Names(IEnumerable<PluginDescriptor> plugins) => plugins.Select(plugin => plugin.Name).ToArray();
         PluginReferrer commandlet = PluginReferrer.OfTarget("Commandlet");

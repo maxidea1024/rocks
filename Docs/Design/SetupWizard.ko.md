@@ -43,7 +43,7 @@
 | PowerShell 7 | `pwsh` 7 이상(Windows·macOS 늘 — `Rocks.proj` `BootstrapTools`가 `Build/Tools.ps1`을, `--android`가 `SelectAndroidNdk.ps1`을 쓴다) | winget `Microsoft.PowerShell`, macOS는 `Build/Toolchain.json` `powershell`에 고정한 공식 tar.gz(SHA-256 확인)를 도구 모음 루트에 풀고 시작 파일 블록으로 PATH에 둔다 |
 | VS IDE(Windows, `-WithIde`) | 최신 IDE 설치(vswhere 기본 제품: Community·Professional·Enterprise, 하한 이상)에 `.vsconfig` 구성 요소 전부 | 있으면 `setup.exe modify --config .vsconfig`, 없으면 winget `Microsoft.VisualStudio.Community`(`--config .vsconfig`) |
 | C++ 빌드 도구(Windows) | 위 vswhere 조건의 설치, 디스크의 Windows SDK, 고른 MSVC 도구 모음이 하한 이상(`ROCKS_MSVC_TOOLSET` 포함) | 위 규칙대로 `modify --add` 또는 winget `Microsoft.VisualStudio.BuildTools` |
-| FXC SDK(Windows) | 고정 FXC 원본 파일(`Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json`의 `sdkPath`, 지금 `bin/10.0.22621.0/x64/d3dcompiler_47.dll`)이 있는지 | `modify --add Windows11SDK.22621`. 셰이더 시험의 bootstrap만 쓰고 빌드에는 필요 없다([셰이더 시스템](ShaderSystem.ko.md) 8절 2항) |
+| FXC SDK(Windows) | 고정 FXC 원본 파일(`Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json`의 `sdkPath`, 지금 `bin/10.0.22621.0/x64/d3dcompiler_47.dll`)이 있는지 | `modify --add Windows11SDK.22621`. 셰이더 시험의 bootstrap만 쓰고 빌드에는 필요 없다([셰이더 시스템](ShaderSystem/08-ThirdPartyToolBuild.ko.md) 8절 2항) |
 | Xcode 도구(macOS) | `xcode-select -p`, PATH 첫 `clang++`가 Apple clang 최소 이상. 검증 목록 밖이면 내용에 CI 검증 줄을 함께 보인다(빌드는 "미검증 도구 모음" 알림 뒤 진행) | `xcode-select --install`(창을 마친 뒤 다시 실행) |
 | LLVM(Windows) | 새 터미널 PATH의 첫 `clang-cl`이 `Build/Toolchain.json` 검증 목록에 있고, 고른 MSVC STL의 최소 Clang(`yvals_core.h` STL1000 두 형식) 이상 | 7-Zip이 없으면 winget `7zip.7zip`, `Build/InstallLlvm.ps1 -ToolchainRoot`, 사용자 PATH 맨 앞 |
 | clang-format | `ROCKS_CLANG_FORMAT`이 가리키는 파일이 `clangFormat.version` | Windows: `Build/InstallFormatter.ps1 -ToolchainRoot`. macOS·Linux: `Setup.sh`가 같은 wheel(`clangFormat.packages`)을 SHA-256으로 확인하고 실행 파일만 꺼낸다. 이어서 `ROCKS_CLANG_FORMAT` 설정 |
@@ -110,7 +110,7 @@
 - winget 패키지 ID(`Microsoft.VisualStudio.BuildTools`·`Microsoft.VisualStudio.Community`)가 가리키는 판은 winget 저장소가 정한다
   (2026-11-21 조회에서 18.12.1, VS 2026). `--version 10.0.302`는 그 버전을 정확히 설치하고, 더 새 SDK가 이미 있어도 나란히 들어간다
   (`global.json` latestPatch가 고른다) — 로컬 미검증.
-- Linux는 C++ 빌드 호스트가 아니므로([빌드 타깃](BuildTargets.ko.md) 3.7절) .NET SDK와 clang-format만 다룬다(x86_64만 고정 파일이 있다).
+- Linux는 C++ 빌드 호스트가 아니므로([빌드 타깃](BuildTargets/03-Design/03.07-DedicatedServer.ko.md) 3.7절) .NET SDK와 clang-format만 다룬다(x86_64만 고정 파일이 있다).
   Linux 빌드 플랫폼(BS6)이 생기면 컴파일러 점검을 더한다.
 - macOS·Linux 경로는 CI macOS의 `--check`와 내려받기 확인 외에 로컬 실행 기록이 없다.
 

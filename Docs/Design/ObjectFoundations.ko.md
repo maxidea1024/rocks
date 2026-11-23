@@ -813,7 +813,7 @@ return transaction.Commit(roots, held);
 | `ObjectRegistry.h` 컨테이너 API 주석 | `SetReferenceAt`·`RemoveReferenceAt`·`ClearReferences` 주석의 "할당하지 않는다" — 관찰자 Registry에서는 `SetReference`·`SetElementReference`·`SetReferenceAt`·`RemoveReferenceAt`·`RemoveReference`·`ClearReferences`·`RemoveElementAt`·`ClearElements`가 관찰자 allocator로 할당할 수 있고 OutOfMemory·Busy·CapacityExceeded를 돌려준다고 고친다(Ob) |
 | `ConstructionContext.h/.cpp` | `Create(type, outer, name)`, `Commit(roots, out)`, `DescribeOuter`, `Registry()`·`Access()`·`TransactionId()`, `FindObject`, Required 검사 중 표시(표시 동안 쓰기·Commit Busy), `CheckOpen`·`Fail`(Od2 리뷰 반영 — 트랜잭션 상태 판정·실패로 고정), `AcquireType`(Oe — 이 트랜잭션 객체도 받는 타입 lease, 2b imports 확인) |
 | `Object/ReferenceObserver.h`(새) | 관찰자 합산 표 |
-| `StructRefArray.h` | `StructElementOps`(키 없음 — 원소를 지우는 `RemoveElementAt`·`ClearElements`가 `NativeTypeKey<S>()`를 넘긴다, [빌드 타깃](BuildTargets.ko.md) 3.8절 BS8d4) |
+| `StructRefArray.h` | `StructElementOps`(키 없음 — 원소를 지우는 `RemoveElementAt`·`ClearElements`가 `NativeTypeKey<S>()`를 넘긴다, [빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8d4) |
 | `TypeRegistry.h/.cpp` | `AcquireStructByNative(const void*)`, TypeId·(native 키, 종류) Core HashMap 색인(등록·해제·Shutdown이 유지 — `Acquire` 류·등록 중복 확인·대상 찾기가 쓴다, 3절 구현에서 정한 점), `containsRequired`가 배열 멤버·원소 struct도 셈과 readStaged 등록 규칙(Oc — 4절 구현에서 정한 점) |
 | `FieldCodec.h`·`FieldCodecHooks.h`(Oe에서 나눔) | `FieldDecodePolicy`에서 `allowMissingFields`·`allowMissingFlags` 삭제·`excludedFlags` 추가, `IsMissingAllowed`·`ReportIfRequiredNull` 삭제, `NotePresent` 자리, `FieldEncodeContext` 검사 모드·`StagedSource`, protected `FieldEncodeContext::AdmitExternalReference`(Oe — 위치에서 hook 정보를 채운다), `WriteReference`의 필드 writer 계약, 주석(hook 계약·objectIndex). Oe에서 1000행을 넘어 hook 묶음과 진단·Soft·외부 참조 정보(`FieldDiagnosticKind`(`ExternalReference`)·`FieldDiagnostic`·`SoftReferenceInfo`·`ExternalReferenceInfo`·`ExternalAdmission`·`FieldCodecHooks`(`AdmitExternalReference`))를 `Object/FieldCodecHooks.h`로 옮겼다(`FieldCodec.h`가 include) |
 | `RuntimeTypeOps.h` | `RuntimeFieldOps::readStaged`(선택, 끝 칸) |
@@ -994,7 +994,7 @@ RCM(`Docs/Design/RuntimeClassMetadata.ko.md`):
 
 18. **'클래스 기본값 결정' 66·75행**: "이 규칙은 … A0-O의 graph v2가 처음부터 갖는다"에 이 문서를 연결하고 "override 집합 자리(present 판정 `NotePresent`)도 A0-O가 남기고, 전부 저장의 집합은 그래프 바이트 밖, 차이 형식 여부는 호출자 옵션"을 덧붙인다.
 
-EngineRuntime(`Docs/Design/EngineRuntime.ko.md`):
+EngineRuntime(`Docs/Design/EngineRuntime`):
 
 19. **131행** "graph v1로 Level 루트를 저장할 수 있다" → A0-O(Od1) 뒤에는 graph v2 편의 API(`SaveObjectGraph(root)`)로 같은 구조 시험을 한다는 것을 단다.
 20. **134행** "World registry의 외부 생성 거부(정책 자리)" → 이 문서 1.3절 `worldOnlyCreationKey` 후속으로 연결한다.

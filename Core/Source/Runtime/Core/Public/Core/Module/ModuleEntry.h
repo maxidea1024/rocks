@@ -273,7 +273,7 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 #define ROCKS_MODULE_TYPES_FUNCTION_1(Name) &::rocks::generated::Name::RegisterModuleOwnTypes
 
 // 빌드가 진입점 모듈의 소스마다 정의하는 값이다(ROCKS_MODULE_SHARED_LIBRARY=1이면 Modular에서 공유
-// 라이브러리로 컴파일한다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8d1). 빌드 밖 컴파일은 0이다.
+// 라이브러리로 컴파일한다 — Docs/Design/BuildTargets 3.8절 BS8d1). 빌드 밖 컴파일은 0이다.
 #ifndef ROCKS_MODULE_SHARED_LIBRARY
 #define ROCKS_MODULE_SHARED_LIBRARY 0
 #endif

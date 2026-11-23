@@ -7,7 +7,7 @@
 #include <Object/TypeRegistry.h>
 #include <ShaderToolTable/ShaderToolTable.h>
 
-// 셰이더 job 키(Docs/Design/ShaderSystem.ko.md 10절)다. 기록 순서는 공개 헤더 주석의 1–7행이다.
+// 셰이더 job 키(Docs/Design/ShaderSystem 10절)다. 기록 순서는 공개 헤더 주석의 1–7행이다.
 namespace rocks::shader {
 
 namespace job_key_detail {

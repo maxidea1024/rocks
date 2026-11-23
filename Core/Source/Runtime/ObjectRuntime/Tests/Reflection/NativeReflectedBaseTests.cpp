@@ -165,7 +165,7 @@ static_assert(IsSameV<detail::ReflectedAncestor<NativeSceneActor>, SceneFixture>
 static_assert(IsSameV<detail::ReflectedAncestor<NativePlain>, void>);
 static_assert(NativeClassType<NativeWorldActor> && !NativeClassType<WorldFixture>);
 
-// NativeTypeKey의 리플렉션 판정(Docs/Design/BuildTargets.ko.md 3.8절 BS8b): ROCKS_GENERATED_BODY를
+// NativeTypeKey의 리플렉션 판정(Docs/Design/BuildTargets 3.8절 BS8b): ROCKS_GENERATED_BODY를
 // 직접 선언한 class·struct만 리플렉션 타입이다. 리플렉션 base를 물려받은 native 파생은 base의 본문
 // 선언(struct라 public이어도)을 물려받지만, 그 표지가 base 자신을 가리키므로 리플렉션 타입이
 // 아니다.

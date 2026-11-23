@@ -139,7 +139,7 @@ public sealed class NativeBuildEngine
         if (succeeded)
         {
             RemoveStaleOutputs(request, plan);
-            // Modular 타깃의 모듈 manifest는 링크가 모두 성공한 뒤에 쓴다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1).
+            // Modular 타깃의 모듈 manifest는 링크가 모두 성공한 뒤에 쓴다(Docs/Design/BuildTargets 3.8절 BS8d1).
             moduleManifest = ModuleManifests.Write(request);
             // Modular Windows 공유 라이브러리의 export 수 진단(BS8d3)이다.
             (IReadOnlyDictionary<string, int> exportCounts, IReadOnlyList<string> unreadable) = ModularExports.Count(request);

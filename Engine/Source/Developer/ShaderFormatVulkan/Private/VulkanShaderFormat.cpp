@@ -3,7 +3,7 @@
 #include <ShaderToolLoader/ShaderToolLoader.h>
 #include <spirv-tools/libspirv.h>
 
-// Vulkan 형식 처리기(Docs/Design/ShaderSystem.ko.md 11.1절 SC1)다. 규칙은 공개 헤더 주석을 따른다.
+// Vulkan 형식 처리기(Docs/Design/ShaderSystem 11.1절 SC1)다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace vulkan_format_detail {

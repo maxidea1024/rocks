@@ -4,7 +4,7 @@ using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 켠 엔진 플러그인 모듈의 링크와 모듈 표 행(<see cref="NativeModuleInput.PluginModules"/> — Docs/Design/BuildTargets.ko.md 3.9절 BD36)을
+/// 켠 엔진 플러그인 모듈의 링크와 모듈 표 행(<see cref="NativeModuleInput.PluginModules"/> — Docs/Design/BuildTargets 3.9절 BD36)을
 /// 실제 기술자 해석·컴파일·링크로 검사한다. 픽스처: 가짜 Core(모듈 표 제공)·Engine, 플러그인 Importer(켬, Developer, PostDefault)와
 /// Viewer(끔), 주 실행 파일 Tool과 부 실행 파일 Probe(둘 다 플러그인에 의존하지 않는다). 확인하는 것:
 /// <list type="bullet">

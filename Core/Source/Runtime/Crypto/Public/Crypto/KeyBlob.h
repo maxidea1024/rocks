@@ -218,7 +218,7 @@ template <KeyBlobKey TKey>
                                                                   Span<const uint8> blob) noexcept;
 
 // 정의는 KeyBlob.cpp에 있고 위 10개 타입으로만 인스턴스화한다. Modular에서 시험·다른 모듈이
-// 부르므로 인스턴스를 export한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+// 부르므로 인스턴스를 export한다(Docs/Design/BuildTargets 3.8절 BS8d5).
 #define ROCKS_CRYPTO_KEYBLOB_EXTERN(TKey)                                                          \
     extern template ROCKS_CRYPTO_API Result<usize> TryGetKeyBlobBytes<TKey>(                       \
         const TKey&, KeyBlobWrapMethod) noexcept;                                                  \

@@ -563,7 +563,7 @@ outer 간선(생성 때 고정)도 같은 규칙으로 센다. 패키지 고리 
 
 ## 14. Registry 규모 점검 반영 (개정 4, 2026-11-18)
 
-연산·cycle마다 객체·Actor·타입 수에 비례하던 곳을 고친 구조다(측정과 그대로 둔 곳의 판단은 [실험 결과](../Implementation/GcScaleExperiment.ko.md) 16절, World·틱 쪽 계약은 [엔진 런타임](EngineRuntime.ko.md) 4.5·7.2·7.4·8절).
+연산·cycle마다 객체·Actor·타입 수에 비례하던 곳을 고친 구조다(측정과 그대로 둔 곳의 판단은 [실험 결과](../Implementation/GcScaleExperiment.ko.md) 16절, World·틱 쪽 계약은 [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.5·7.2·7.4·8절).
 
 ### 14.1 파괴 요청 목록 (`TakeDestroyRequests`)
 

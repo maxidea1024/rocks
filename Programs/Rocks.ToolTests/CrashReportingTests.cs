@@ -940,7 +940,7 @@ internal static partial class CrashReportingTests
         });
         // 도우미 실패 주입(FaultyHelperVariable)은 시험 호스트 모듈의 정적 초기화가 건다. Modular 도우미는 진입 스텁에서 갈라져 호스트 공유
         // 라이브러리를 싣지 않으므로 주입이 걸리지 않는다 — 시험 대상(부모의 도우미 실패 처리)은 링크 방식과 무관해 Monolithic 하니스가 본다
-        // (Docs/Design/BuildTargets.ko.md 3.8절 BS8d6).
+        // (Docs/Design/BuildTargets 3.8절 BS8d6).
         bool helperFaults = !options.Modular;
         foreach ((string mode, string fault, string status, string? exitCode) in helperFaults ? new[] {
             ("helper-capture-timeout", "hang", "CaptureTimedOut", (string?)null),

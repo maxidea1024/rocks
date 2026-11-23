@@ -7,7 +7,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.Build;
 
 /// <summary>
-/// Modular 타깃의 모듈 manifest(<c>&lt;Target&gt;[-&lt;Platform&gt;-&lt;Configuration&gt;].modules.json</c>)를 쓴다(Docs/Design/BuildTargets.ko.md
+/// Modular 타깃의 모듈 manifest(<c>&lt;Target&gt;[-&lt;Platform&gt;-&lt;Configuration&gt;].modules.json</c>)를 쓴다(Docs/Design/BuildTargets
 /// 3.8절 BS8d1, Docs/Design/ModuleLoader.ko.md 3.5절). Monolithic 실행 파일의 모듈 표 TU와 같은 행(<see cref="ModuleTables.Rows"/>)을 파일
 /// 이름·크기와 함께 싣는다. 링크가 모두 성공하고 입력이 바뀌지 않은 빌드 끝에서만 쓴다(원자적 교체, 내용이 같으면 쓰지 않는다). 키는 영어이고
 /// 모듈 로더가 모르는 키를 거부한다(ML4a). 켠 플러그인의 모듈 행은 플러그인마다 그 플러그인 binaries 폴더의 같은 이름 manifest에 싣고,

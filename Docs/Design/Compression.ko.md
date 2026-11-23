@@ -35,7 +35,7 @@ gate를 둔다.** 설치 SDK는 각 라이브러리 manifest `licenses`의 모�
 ### 3.1 배치
 
 외부 원본은 Core가 쓰므로 Core 계층에 둔다(Core는 Engine을 참조하지 않는다). UE `Engine/Source/ThirdParty/<lib>/<version>/`과
-같은 방식이다. 엔진·도구 전용 라이브러리는 같은 규칙으로 `Engine/Source/ThirdParty/`에 둔다(2026-11-16, [셰이더 시스템](ShaderSystem.ko.md)
+같은 방식이다. 엔진·도구 전용 라이브러리는 같은 규칙으로 `Engine/Source/ThirdParty/`에 둔다(2026-11-16, [셰이더 시스템](ShaderSystem/08-ThirdPartyToolBuild.ko.md)
 8절 1항). 이 절의 규칙(manifest·byte 보존·정책 검사)은 두 루트에 똑같이 적용한다.
 
 ```text

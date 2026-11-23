@@ -19,7 +19,7 @@ namespace shader_job_key_tests_file {
 
 using namespace rocks::shader;
 
-// 셰이더 job 키(Docs/Design/ShaderSystem.ko.md 10절) 시험이다: 입력별 무효화와 불변(완료 기준
+// 셰이더 job 키(Docs/Design/ShaderSystem 10절) 시험이다: 입력별 무효화와 불변(완료 기준
 // 목록), 공통 머리가 A3 머리 그대로임, trace golden(순서·태그·필드 이름은 고정 — 툴체인 지문·결정적
 // 수학 버전 줄은 실행 중 값), 리터럴 키 golden(공통 머리의 두 항목을 고정값으로 쓰는 기록 경로),
 // 오류. 형식 정의는 fixture 도구 표로 읽은 fixture byte라 도구 SHA·형식 SHA가 호스트·manifest와

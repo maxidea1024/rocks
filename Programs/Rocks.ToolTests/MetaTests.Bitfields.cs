@@ -54,7 +54,7 @@ internal static partial class MetaTests
             }
 
             // 기본 인자 `= {}`가 있는 선언(Ops)도 본문이 아니므로 export하고, 필드 없는 클래스(Base)의 한 줄 템플릿 VisitFields 다음
-            // 줄도 건너뛰지 않는다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+            // 줄도 건너뛰지 않는다(Docs/Design/BuildTargets 3.8절 BS8d5).
             Verify.Equal(2, generated.Split(Compact("static ROCKS_PROBE_API RuntimeTypeOps Ops(ModuleLease module = {}) noexcept;"),
                 StringSplitOptions.None).Length - 1, "class Ops declarations are exported (Value, Base)");
             Verify.That(generated.Contains(Compact("static ROCKS_PROBE_API RuntimeStructOps Ops(ModuleLease module = {}) noexcept;"),

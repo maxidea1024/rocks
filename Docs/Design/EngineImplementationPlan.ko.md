@@ -38,7 +38,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
-**1.19 엔진 컴포넌트:** UE 5.8 컴포넌트를 들이는 범위·선행·순서를 [컴포넌트 도입](ComponentCatalog.ko.md)에 둔다. 1부는 `Engine/Classes/Components`(필수 58, 선행 CR1–CR26, 묶음 CM0–CM11), 2부는 그 밖의 Engine 폴더·Runtime 모듈(필수 56, 선행 CR27–CR39, 묶음 CM12–CM21)이고 플러그인은 색인만 둔다. BSP(`UModelComponent`·`UBrushComponent`)와 폐기 계열은 제외하고 volume 형상은 공용 `VolumeShape`로 대체한다. 20.2절 tick group 문장을 [엔진 런타임](EngineRuntime.ko.md) 8절의 구현된 단계 기준으로 고치고, 옛 그룹 PhysicsSync·AnimationFinalize를 Physics phase 끝의 엔진 단계로 바꾼다(UE 대응은 엔진 런타임 8절). 16.1·19·20.5·21절에 컴포넌트 쪽 링크와 결정(캐릭터 이동 CD15, Chaos 파괴 계열 CD14, VFX 효과 CD16, CameraDirector = 카메라 시스템 정본)을 더한다. 개정 범위는 표지·16.1·19·20.2·20.5·21절이다.
+**1.19 엔진 컴포넌트:** UE 5.8 컴포넌트를 들이는 범위·선행·순서를 [컴포넌트 도입](ComponentCatalog/README.ko.md)에 둔다. 1부는 `Engine/Classes/Components`(필수 58, 선행 CR1–CR26, 묶음 CM0–CM11), 2부는 그 밖의 Engine 폴더·Runtime 모듈(필수 56, 선행 CR27–CR39, 묶음 CM12–CM21), 3부는 엔진 플러그인(필수 31·필수(실험 기반) 25, 선행 CR40–CR54, 묶음 CM22–CM31, 가상 제작·방송 계열은 범위 밖)이다. BSP(`UModelComponent`·`UBrushComponent`)와 폐기 계열은 제외하고 volume 형상은 공용 `VolumeShape`로 대체한다. 20.2절 tick group 문장을 [엔진 런타임](EngineRuntime/08-TickScheduler.ko.md) 8절의 구현된 단계 기준으로 고치고, 옛 그룹 PhysicsSync·AnimationFinalize를 Physics phase 끝의 엔진 단계로 바꾼다(UE 대응은 엔진 런타임 8절). 15.1·16.1·19·20.5·21·24.1·33.2절에 컴포넌트 쪽 링크와 결정(캐릭터 이동 CD15, Chaos 파괴 계열 CD14, VFX 효과 CD16, CameraDirector = 카메라 시스템 정본, 실험 플러그인 CD20, 범위 밖 CD22)을 더한다. 개정 범위는 표지·15.1·16.1·19·20.2·20.5·21·24.1·33.2절이다.
 
 ## 1. 목표와 실행 전략
 
@@ -142,7 +142,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | 그래픽 | D3D11/D3D12/Vulkan/Metal/OpenGL. 공통 material IR과 backend별 shader toolchain; 고급 capability는 독립 profile |
 | 좌표 | UE 5.8과 같다(2026-11-17 사용자 요구). 왼손, +X Forward·+Y Right·+Z Up, 길이 cm·질량 kg·시간 초. `Rotator`는 도, quaternion 축-각·삼각함수·각속도는 라디안(각속도·토크 API는 UE처럼 이름에 단위). 외부 형식·물리 middleware와는 경계에서 변환([수학 구현](../Implementation/Math.ko.md) 2절, [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)) |
 | 행렬 | UE 5.8과 같다. row vector p′=p·M, 행 우선 저장(이동은 마지막 행), A·B는 A를 먼저 적용, local-to-world=local×parentToWorld(UE `Child * Parent`). Transform 합성은 `TryMultiply(local, parentToWorld)`. 셰이더 전달 규약은 아래 view·깊이·앞면 행 |
-| view·깊이·앞면 | UE 5.8과 같다(2026-11-17 사용자 결정). view space는 +X 오른쪽·+Y 위·+Z 전방, 기본 원근은 reversed-Z(가까움 1·멂 0) 무한 원평면이고 투영 인자는 수평 반각(UE `FReversedZPerspectiveMatrix`), depth [0,1]. 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전([셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
+| view·깊이·앞면 | UE 5.8과 같다(2026-11-17 사용자 결정). view space는 +X 오른쪽·+Y 위·+Z 전방, 기본 원근은 reversed-Z(가까움 1·멂 0) 무한 원평면이고 투영 인자는 수평 반각(UE `FReversedZPerspectiveMatrix`), depth [0,1]. 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전([셰이더 시스템](ShaderSystem/07-BindingConventions.ko.md) 7.2절 6·8항). 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
 | 큰 월드 | 월드 위치 double(cm). `Transform`은 회전·이동·스케일 모두 double(UE FTransform)이고 대량 경로는 `Transform3f`. 렌더링은 카메라 상대 float. 물리는 Jolt adapter 경계에서 지역 원점 차감과 cm→m 변환(16.5절) |
 | 시간 | 시뮬레이션 기본 60Hz, 단조 증가 64-bit Tick. 렌더 보간과 오디오 sample clock 분리 |
 | 직렬화 | 명시적인 byte order, 고정 폭 정수, 길이 상한·체크섬. 구조체 메모리를 그대로 저장하지 않음 |
@@ -1074,7 +1074,7 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 
 **Deferred와 Forward+를 모두 불투명·반투명·skeletal mesh·조명·그림자를 지원하는 정식 렌더링 경로로 제공한다.** Deferred의 반투명 pass만 Forward로 처리하는 것은 이 요구의 완료가 아니다. 프로젝트 기본값과 개별 ViewDesc에서 경로를 선택한다. 같은 World/session을 보는 복수 view는 서로 다른 경로로 동일 RenderScene snapshot을 사용할 수 있다. EditorWorld와 각 Tryout은 별도 논리 RenderScene 또는 SessionId/WorldEpoch별 가시성·가변 proxy 격리를 갖는다.
 
-렌더 경로는 이 둘뿐이며 클러스터 없는 고전 Forward는 두지 않는다(2026-11-16 사용자 결정 "forward+, deferred 로 하자"). 저사양·모바일(OpenGL ES 3.2·Vulkan 1.1)도 Forward+로 그린다. 두 최저 사양 모두 compute와 texture buffer를 보장하므로 light grid 생성 pass를 어디서나 실행할 수 있다. 로컬 광원이 없는 view는 grid 생성을 건너뛰어 고전 Forward와 같은 비용으로 낮춘다. UE 5.8도 모바일 Forward에서 로컬 광원을 클러스터 light grid로 처리한다(`r.Mobile.Forward.EnableLocalLights` 기본 1, `Runtime/Core/Private/HAL/ConsoleManager.cpp:4025–4030`, `Runtime/Renderer/Private/MobileShadingRenderer.cpp:419`). OpenGL ES 3.2는 픽셀 셰이더의 storage buffer를 최소 0개로 보장하므로 GLES 형식은 light grid를 typed buffer(texture buffer)나 텍스처로 읽는다([셰이더 시스템](ShaderSystem.ko.md) 7.2절 4항 모바일 상한).
+렌더 경로는 이 둘뿐이며 클러스터 없는 고전 Forward는 두지 않는다(2026-11-16 사용자 결정 "forward+, deferred 로 하자"). 저사양·모바일(OpenGL ES 3.2·Vulkan 1.1)도 Forward+로 그린다. 두 최저 사양 모두 compute와 texture buffer를 보장하므로 light grid 생성 pass를 어디서나 실행할 수 있다. 로컬 광원이 없는 view는 grid 생성을 건너뛰어 고전 Forward와 같은 비용으로 낮춘다. UE 5.8도 모바일 Forward에서 로컬 광원을 클러스터 light grid로 처리한다(`r.Mobile.Forward.EnableLocalLights` 기본 1, `Runtime/Core/Private/HAL/ConsoleManager.cpp:4025–4030`, `Runtime/Renderer/Private/MobileShadingRenderer.cpp:419`). OpenGL ES 3.2는 픽셀 셰이더의 storage buffer를 최소 0개로 보장하므로 GLES 형식은 light grid를 typed buffer(texture buffer)나 텍스처로 읽는다([셰이더 시스템](ShaderSystem/07-BindingConventions.ko.md) 7.2절 4항 모바일 상한).
 
 ~~~cpp
 enum class RenderPath : uint8 {
@@ -1537,6 +1537,8 @@ socket/attachment, blend space, layered/additive blend, montage slot·sync group
 
 M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 검색 prototype → M8/M9의 motion matching·cloth/groom profile 순서로 확장한다. pose search database는 feature schema·normalization·selection cost·너겟 key를 갖는다. geometry cache/Alembic 계열과 USD scene import는 선택 importer를 통해 M7 이후 편입하고 지원 field·변환 손실을 보고한다.
 
+애니메이션 플러그인 쪽 엔진 컴포넌트(Control Rig·IK Rig·Motion Warping·속성 기반 root motion·tick 예산 skeletal mesh, geometry cache)의 범위·선행은 [컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9.3·9.6–9.7절(CM22·CM28, 선행 CR40–CR42·CR44·CR50)이 정한다. Live Link·performance capture·ML deformer·cloth·groom·contextual animation·motion trajectory 계열 컴포넌트는 위 단계 순서에 맞춰 후속으로 둔다(같은 문서 9.5절).
+
 ## 16. 충돌·물리·캐릭터 이동
 
 ### 16.1 통합 구조
@@ -1568,7 +1570,7 @@ public:
 
 Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. Jolt의 작업 분배 연결 지점(job system)은 공통 Task Graph의 worker에 작업을 제출하며 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. adapter가 보고하는 worker 수는 Game·Render·IO 예약분을 제외한 physics 예산이다. 제출 실패를 반환할 수 없는 연결 지점이면 사전 예약한 node pool을 사용하고, 포화 시 작업을 폐기하지 않고 제출 thread에서 즉시 실행한다. 실행 중 작업을 취소할 수 없으면 종료 절차는 그 완료를 기다린다(연결 지점의 실패 표현·취소 가능 여부는 검증 항목 J14). physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
 
-물리 쪽 엔진 컴포넌트(충돌 형상 Box·Sphere·Capsule·Cylinder, constraint·handle·spring·thruster·radial force·physical animation, 이동 컴포넌트와 캐릭터 이동)의 범위·선행·순서는 [컴포넌트 도입](ComponentCatalog.ko.md) 3.10·8.4–8.6절(CM3·CM12–CM14)이 정한다. 캐릭터 이동은 UE 안정판 `UCharacterMovementComponent` 구조를 들이고 실험 플러그인 Mover는 참고만 한다. 단독 실행을 먼저 만들고 네트워크 예측은 이동 기록 자리를 남겨 뒤에 붙인다(CD15). Chaos 파괴·field·cluster union·네트워크 물리 컴포넌트는 들이지 않고, P3 파괴 문서가 Jolt 위 방식으로 정한다(CD14).
+물리 쪽 엔진 컴포넌트(충돌 형상 Box·Sphere·Capsule·Cylinder, constraint·handle·spring·thruster·radial force·physical animation, 이동 컴포넌트와 캐릭터 이동)의 범위·선행·순서는 [컴포넌트 도입](ComponentCatalog/03-RequiredComponents.ko.md) 3.10·8.4–8.6절(CM3·CM12–CM14)이 정한다. 플러그인 쪽 Physics Control(CM23, CR43)과 케이블(CM28, CR51)은 같은 문서 9절이 정하고, Chaos vehicle·modular vehicle과 motor sim 오디오 컴포넌트는 vehicle 단계(개별 P3)의 후속이다. 캐릭터 이동은 UE 안정판 `UCharacterMovementComponent` 구조를 들이고 실험 플러그인 Mover는 참고만 한다. 단독 실행을 먼저 만들고 네트워크 예측은 이동 기록 자리를 남겨 뒤에 붙인다(CD15). Chaos 파괴·field·cluster union·네트워크 물리 컴포넌트는 들이지 않고, P3 파괴 문서가 Jolt 위 방식으로 정한다(CD14).
 
 ### 16.2 소유권과 event
 
@@ -1739,7 +1741,7 @@ AI는 perception → blackboard snapshot → behavior/state/utility decision →
 
 AI LOD는 거리·화면 가시성·교전 중요도별로 60/20/5/1Hz 등 제안 rate를 배정한다. 모든 NPC가 같은 frame에 갱신되지 않게 분산한다. gameplay critical event는 낮은 주기와 별도 interrupt로 처리한다. path 재요청·perception raycast는 budget을 제한한다. nav debug view, BT 실행 trace, perception 로그, path cancellation 이유를 editor에 표시한다.
 
-AI·내비 컴포넌트(brain·behavior tree·blackboard·perception·자극 원천·path/crowd following·gameplay task·nav relevant·modifier·link·invoker와 디버그 표시)의 범위와 선행(내비 CR30, AI 런타임 CR31, AI 컨트롤러 CR39)은 [컴포넌트 도입](ComponentCatalog.ko.md) 8.4–8.6절(CM16)이 정한다. UE `UPawnSensingComponent`(5.5 deprecated)와 `UGridPathFollowingComponent`(Experimental)는 들이지 않는다.
+AI·내비 컴포넌트(brain·behavior tree·blackboard·perception·자극 원천·path/crowd following·gameplay task·nav relevant·modifier·link·invoker와 디버그 표시)의 범위와 선행(내비 CR30, AI 런타임 CR31, AI 컨트롤러 CR39)은 [컴포넌트 도입](ComponentCatalog/08-OutsideFolder.ko.md) 8.4–8.6절(CM16)이 정한다. UE `UPawnSensingComponent`(5.5 deprecated)와 `UGridPathFollowingComponent`(Experimental)는 들이지 않는다.
 
 ## 20. 오브젝트 태깅·컴포넌트·프리팹·게임플레이
 
@@ -1801,11 +1803,11 @@ struct TickSpec {
 };
 ~~~
 
-tick group은 구현된 단계 PrePhysics·Physics(고정 스텝)·PostPhysics·LateUpdate·PreRender([엔진 런타임](EngineRuntime.ko.md) 8절)를 기본으로 한다. 물리 결과 반영(옛 표기 PhysicsSync)과 skeletal mesh 물리 마무리(옛 표기 AnimationFinalize)는 tick group이 아니라 Physics phase 끝의 엔진 단계 두 개(이 순서)이고, UE `ETickingGroup` 대응은 엔진 런타임 8절이 정한다([컴포넌트 도입](ComponentCatalog.ko.md) CR8a·CD11). prerequisite DAG의 cycle은 오류로 검출한다. 독립 component의 병렬 tick은 read/write access 선언이 검증된 경우만 허용한다. Object 가변 상태를 다루는 기본 tick은 Game lane에서 수행한다. tick 중 component 추가·삭제·reparent는 deferred command로 commit한다.
+tick group은 구현된 단계 PrePhysics·Physics(고정 스텝)·PostPhysics·LateUpdate·PreRender([엔진 런타임](EngineRuntime/08-TickScheduler.ko.md) 8절)를 기본으로 한다. 물리 결과 반영(옛 표기 PhysicsSync)과 skeletal mesh 물리 마무리(옛 표기 AnimationFinalize)는 tick group이 아니라 Physics phase 끝의 엔진 단계 두 개(이 순서)이고, UE `ETickingGroup` 대응은 엔진 런타임 8절이 정한다([컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR8a·CD11). prerequisite DAG의 cycle은 오류로 검출한다. 독립 component의 병렬 tick은 read/write access 선언이 검증된 경우만 허용한다. Object 가변 상태를 다루는 기본 tick은 Game lane에서 수행한다. tick 중 component 추가·삭제·reparent는 deferred command로 commit한다.
 
 singleton-per-entity·required component·mutually exclusive 규칙을 type metadata로 표현한다. editor가 자동 추가하는 종속 component는 transaction에 포함한다. cook은 순환 종속·누락 필수 component를 검사한다. constructor에서 backend world에 즉시 등록하지 않으며 Register가 실패하면 backend의 부분 등록을 해제하고, 이미 Commit된 객체는 5.3절의 RequestDestroy·정상 retire 경로로 정리한다. 미공개 rollback과 구분한다. editor에는 component tree, active state, tick 의존성, native handle 상태를 표시한다.
 
-엔진이 제공하는 컴포넌트 종류(메시·광원·대기·캡처·충돌 형상·오디오·입력 등)와 그 선행·도입 순서는 [컴포넌트 도입](ComponentCatalog.ko.md)이 정한다.
+엔진이 제공하는 컴포넌트 종류(메시·광원·대기·캡처·충돌 형상·오디오·입력 등)와 그 선행·도입 순서는 [컴포넌트 도입](ComponentCatalog/README.ko.md)이 정한다.
 
 editor는 배치한 Actor에 ScriptableComponent를 바로 붙일 수 있다. 직접 배치한 Actor는 그 component 목록에 추가해 레벨과 함께 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행). 이것은 레벨·배치 데이터 편집이므로 Sparks core에서도 되며, 실행 중 스크립트가 component를 추가하는 것(Sparks full 전용)과 구분한다([레벨 스크립트](LevelScript.ko.md) LD15).
 
@@ -1844,7 +1846,7 @@ Input은 action/context, key/gamepad/touch, rebinding, dead zone, chord, haptics
 
 MatchRules는 서버 전용 규칙·spawn/respawn·match lifecycle, MatchState는 모든 참여자에게 복제할 경기 상태, PlayerState는 possession·재접속을 넘는 플레이어 상태다. PlayerAgent는 해당 connection의 입력·명령 경계이며 LocalPlayer는 로컬 viewport·device·focus를 소유한다. CameraDirector는 gameplay·spectator·cutscene control layer를 합성한다. pause·time dilation·spectator·split-screen을 clock/context별로 정의한다. [S27](https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-framework-in-unreal-engine)
 
-CameraDirector는 UE `APlayerCameraManager`(view target·blend·camera modifier)에 대응하고, 카메라 컴포넌트(`CameraComponent`·`SpringArmComponent`·`CameraShakeSourceComponent`·`CinematicCameraComponent`)가 view의 원천이다. 컴포넌트 쪽 범위·선행은 [컴포넌트 도입](ComponentCatalog.ko.md) 8.4–8.6절(CM0·CM12·CM15)이 정하고, 그 문서의 카메라 시스템 선행 CR29는 이 절을 정본으로 한다. AI가 Pawn을 조종하는 Controller(UE `AAIController`)는 같은 문서 CR39다.
+CameraDirector는 UE `APlayerCameraManager`(view target·blend·camera modifier)에 대응하고, 카메라 컴포넌트(`CameraComponent`·`SpringArmComponent`·`CameraShakeSourceComponent`·`CinematicCameraComponent`)가 view의 원천이다. 컴포넌트 쪽 범위·선행은 [컴포넌트 도입](ComponentCatalog/08-OutsideFolder.ko.md) 8.4–8.6절(CM0·CM12·CM15)이 정하고, 그 문서의 카메라 시스템 선행 CR29는 이 절을 정본으로 한다. AI가 Pawn을 조종하는 Controller(UE `AAIController`)는 같은 문서 CR39다.
 
 nested prefab의 주소는 PrefabInstanceGuid + 중첩 instance 경로 + NodeGuid + FieldId + ElementGuid다. 같은 NodeGuid를 가진 원본이 여러 번 중첩되어도 충돌하지 않는다. instance EntityGuid는 저장 시 보존하고 새 복제 시 재발급한다. runtime component 추가/제거·class default 갱신·script reload·network subobject 생성은 같은 instancing registry를 사용한다.
 
@@ -1862,7 +1864,7 @@ UI render는 출력 해상도에서 업스케일 이후 실행한다. Widget Obj
 
 환경 모듈은 terrain heightfield/tile LOD, foliage instancing·wind, sky·sun/time-of-day, fog를 P2로 구성한다. terrain render/collision/nav 변경은 하나의 편집 revision으로 cook dependency를 갱신한다. M7에는 water surface·underwater 원신호와 기본 volumetric fog를, M8에는 cloud·고급 대기/volume profile을 제공하여 26절의 합성이 입력 부재로 지연되지 않게 한다. groom·destruction·고급 fluid는 P3의 개별 budget·feature gate로 계획한다. 모든 후속 모듈은 태그·component·prefab·asset·profiling 계약을 사용한다.
 
-이 절의 엔진 컴포넌트 범위·선행은 [컴포넌트 도입](ComponentCatalog.ko.md) 8.4–8.6절이 정한다: VFX 효과 컴포넌트 `EffectComponent`(UE `UFXSystemComponent`·Niagara 컴포넌트 대응, Cascade 제외 — CD16, CM21), world-space UI `WidgetComponent`·`WidgetInteractionComponent`(UI 툴킷 5.9절, CM17), 지형·식생 컴포넌트(landscape·지형 충돌·spline·foliage·grass, CM18 — 절차 식생은 UE에서도 실험 기능이라 PCG와 함께 후속). destruction은 Chaos 컴포넌트 계열을 들이지 않고 파괴 문서가 Jolt 위 방식으로 정한다(CD14).
+이 절의 엔진 컴포넌트 범위·선행은 [컴포넌트 도입](ComponentCatalog/08-OutsideFolder.ko.md) 8.4–8.6절이 정한다: VFX 효과 컴포넌트 `EffectComponent`(UE `UFXSystemComponent`·Niagara 컴포넌트 대응, Cascade 제외 — CD16, CM21), world-space UI `WidgetComponent`·`WidgetInteractionComponent`(UI 툴킷 5.9절, CM17), 지형·식생 컴포넌트(landscape·지형 충돌·spline·foliage·grass, CM18 — 절차 식생은 UE에서도 실험 기능이라 PCG와 함께 후속). 플러그인 쪽은 같은 문서 9절이 정한다: 물 컴포넌트(water body·물 표면 메시·물 충돌·buoyancy, CM31 — UE에서 실험 플러그인이지만 M7 필수 기능이라 "필수(실험 기반)", 착수 때 UE 소스를 다시 대조한다 — CD20), PCG 컴포넌트(CM27), 얕은 물 시뮬레이션은 고급 fluid라 후속. destruction은 Chaos 컴포넌트 계열을 들이지 않고 파괴 문서가 Jolt 위 방식으로 정한다(CD14).
 
 ### 21.1 전문 제작 데이터와 UI 편집
 
@@ -2122,6 +2124,8 @@ Unreal에서 참고할 대상은 작업 흐름·데이터 규약·검증 체계�
 | MetaSounds / Quartz 계열 | typed DSP graph, parameter automation, sample clock 예약 | P2 · M6–M7 |
 | Device Profile / Scalability / CVar | 품질 계층·caps·예산 profile, override 우선순위·재현 설정 | P0부터, P1 완성 M5 |
 | Localization / Automation / Insights | text ID·번역 pipeline, headless commandlet, 통합 trace·회귀 | P0부터 전 단계 |
+
+표의 Game Features·Gameplay Ability·StateTree·Smart Objects·Mass·PCG에 딸린 엔진 컴포넌트(모듈식 게임플레이 컴포넌트, `AbilitySystemComponent`, StateTree·Smart Object 컴포넌트, Mass·ZoneGraph 컴포넌트, PCG 컴포넌트)의 범위·선행·순서는 [컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9절(CM24–CM27·CM30, 선행 CR45–CR49·CR52)이 정한다. Mass 계열은 UE에서 실험 플러그인이므로 "필수(실험 기반)"으로 두고 착수 때 UE 소스를 다시 대조한다(CD20).
 
 ### 24.2 게임플레이·콘텐츠 확장 계약
 
@@ -2826,7 +2830,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | Test·trace·crash·localization·quality | CPU/GPU/audio/script/build timeline·headless matrix·schema/텍스트 | 필수 첫 Core 작업부터 |
 | Multi-user/remote collaboration | revision·transaction을 기반으로 후속 동시 편집 | 후속, 단독 편집/저장 gate 이후 |
 | Mobile·console·XR/stereo·Linux GPU editor | platform/caps·입력·UI·SDK·렌더 profile 확장 | 후속 플랫폼 gate; 기본 Windows/macOS 개발·Linux server 범위와 구분 |
-| nDisplay·DMX·LED stage·전문 방송 | 일반 게임/컷씬과 다른 장비/동기화 제품 범위 | 별도 확장, 현재 기본 완료 조건에 미포함 |
+| nDisplay·DMX·LED stage·전문 방송 | 일반 게임/컷씬과 다른 장비/동기화 제품 범위. 해당 UE 플러그인 컴포넌트 목록은 [컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9.5절 범위 밖(CD22) | 별도 확장, 현재 기본 완료 조건에 미포함 |
 
 ### 33.3 잔여 설계·성능 판단
 
@@ -3107,7 +3111,7 @@ Core 수학·World의 코드 전환(C1–C5)과 UE 원본 대조 근거는 [수�
 | 물리 | 엔진 Actor 물리 이벤트 `TriggerEntered` 등(20.2절), LevelScript의 물리 hook·Collider 금지(LD9·LD18) |
 | 편집기 | 열기·참조 추가·이벤트 추가 명령, 언어 서버 명령 채널, 템플릿(22.1·22.3절), 배치 Actor에 component 추가(20.2절)(LD14·LD15·LD20) |
 
-UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ## 34. 참고 자료와 설계 근거
 
