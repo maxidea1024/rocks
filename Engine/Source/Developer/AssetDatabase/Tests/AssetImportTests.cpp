@@ -354,6 +354,133 @@ TEST(AssetImport_ImporterTags) {
     CHECK(registered);
 }
 
+// 가변 원본(7.1절 19 A2f3b UXR9): 고정 역할 asset과 접두 blob:의 역할 여럿을 받고 문맥 순서는 고정
+// → 접두(byte 순)다. 기록 원본도 그 순서다. 재임포트는 기록 원본을 그대로 풀고, replaceSources는 준
+// 목록으로 원본 전체를 바꾼다(역할 없는 원본 하나 = 유일한 고정 역할). 거부: 고정 역할 없음·접두
+// 뒤가 빈 역할·모르는 역할·같은 역할 둘(InvalidImportOption), 빈 교체 목록. 등록 거부: 접두
+// 문자·고정 역할이 접두로 시작·접두가 다른 접두의 앞부분.
+TEST(AssetImport_VariableSources) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-variable");
+    REQUIRE(scene.ready);
+    static constexpr StringView AssetRoles[] = {"asset"};
+    static constexpr StringView BlobPrefixes[] = {"blob:"};
+    AssetImporterInfo info = TestImporterInfo();
+    info.id = Guid{0x494d50540001ull, 11};
+    info.name = "VariableImporter";
+    info.extensions = {};
+    info.optionsType = TypeId{};
+    info.roles = AssetRoles;
+    info.rolePrefixes = BlobPrefixes;
+    TestImporter variable(info);
+    auto registered = scene.importers.Register(variable);
+    REQUIRE(registered);
+    REQUIRE(scene.PutSource("SourceArt/Asset.trock", "value=1") &&
+            scene.PutSource("SourceArt/B.trock", "value=2") &&
+            scene.PutSource("SourceArt/A.trock", "value=4") &&
+            scene.PutSource("SourceArt/C.trock", "value=8"));
+    const String assetFile = scene.Absolute(env.allocator, "SourceArt/Asset.trock");
+    const String bFile = scene.Absolute(env.allocator, "SourceArt/B.trock");
+    const String aFile = scene.Absolute(env.allocator, "SourceArt/A.trock");
+    const String cFile = scene.Absolute(env.allocator, "SourceArt/C.trock");
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    TextDiagnostics diagnostics(env.allocator);
+    AssetImportResult result(env.allocator);
+    const AssetImportSourceInput inputs[] = {
+        {"blob:bbb", bFile.View()}, {"asset", assetFile.View()}, {"blob:aaa", aFile.View()}};
+    REQUIRE(service.Import(scene.lock, "/Game/Variable", inputs, "VariableImporter", {},
+                           diagnostics, result));
+    CHECK(variable.LastRoles() == "asset,blob:aaa,blob:bbb,");
+    String text(env.allocator);
+    REQUIRE(service.Info("/Game/Variable", AssetInfoOptions{}, text));
+    TestAsset* imported = Representative(service.Packages(), result.id);
+    REQUIRE(imported != nullptr);
+    CHECK(imported->value == 7);
+    REQUIRE(service.Packages().Close(result.id));
+    auto read = ReadFile(env, scene, "Content/Variable.rasset");
+    REQUIRE(read);
+    auto record = ReadImportRecord(env.allocator, result.id, read.Value().importRecord);
+    REQUIRE(record);
+    REQUIRE(record.Value().sources.Size() == 3);
+    CHECK(record.Value().sources[0].role.View() == "asset" &&
+          record.Value().sources[1].role.View() == "blob:aaa" &&
+          record.Value().sources[2].role.View() == "blob:bbb");
+
+    // 재임포트(기록 원본 그대로) — 같은 순서.
+    AssetImportResult again(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/Variable", {}, {}, diagnostics, again));
+    CHECK(variable.LastRoles() == "asset,blob:aaa,blob:bbb,");
+
+    // 전체 교체: asset + blob:ccc(blob 둘은 사라진다).
+    const AssetImportSourceInput replaced[] = {{"blob:ccc", cFile.View()},
+                                               {"asset", assetFile.View()}};
+    REQUIRE(service.Reimport(scene.lock, "/Game/Variable", replaced, {}, diagnostics, again,
+                             nullptr, nullptr, true));
+    CHECK(variable.LastRoles() == "asset,blob:ccc,");
+    auto reread = ReadFile(env, scene, "Content/Variable.rasset");
+    REQUIRE(reread);
+    auto rerecord = ReadImportRecord(env.allocator, result.id, reread.Value().importRecord);
+    REQUIRE(rerecord);
+    CHECK(rerecord.Value().sources.Size() == 2);
+
+    // 역할 없는 원본 하나로 교체하면 유일한 고정 역할(asset)이다.
+    const AssetImportSourceInput onlyAsset[] = {{{}, assetFile.View()}};
+    REQUIRE(service.Reimport(scene.lock, "/Game/Variable", onlyAsset, {}, diagnostics, again,
+                             nullptr, nullptr, true));
+    CHECK(variable.LastRoles() == "asset,");
+
+    // 거부.
+    const auto refuses = [&](Span<const AssetImportSourceInput> list) noexcept {
+        AssetImportResult refused(env.allocator);
+        AssetDiagnostic failure;
+        auto imported = service.Import(scene.lock, "/Game/Refused", list, "VariableImporter", {},
+                                       diagnostics, refused, nullptr, &failure);
+        return !imported && imported.Error() == ErrorCode::InvalidArgument &&
+               failure.code == AssetDiagnosticCode::InvalidImportOption;
+    };
+    const AssetImportSourceInput noFixed[] = {{"blob:aaa", aFile.View()}};
+    CHECK(refuses(noFixed));
+    const AssetImportSourceInput emptyRest[] = {{"asset", assetFile.View()},
+                                                {"blob:", aFile.View()}};
+    CHECK(refuses(emptyRest));
+    const AssetImportSourceInput unknown[] = {{"asset", assetFile.View()}, {"other", aFile.View()}};
+    CHECK(refuses(unknown));
+    const AssetImportSourceInput twice[] = {
+        {"asset", assetFile.View()}, {"blob:aaa", aFile.View()}, {"blob:aaa", bFile.View()}};
+    CHECK(refuses(twice));
+    const AssetImportSourceInput fixedTwice[] = {{"asset", assetFile.View()},
+                                                 {"asset", aFile.View()}};
+    CHECK(refuses(fixedTwice));
+    AssetDiagnostic emptyFailure;
+    CHECK(service
+              .Reimport(scene.lock, "/Game/Variable", {}, {}, diagnostics, again, nullptr,
+                        &emptyFailure, true)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(emptyFailure.code == AssetDiagnosticCode::InvalidImportOption);
+
+    // 등록 거부.
+    const auto rejects = [&](Span<const StringView> roles, Span<const StringView> prefixes,
+                             uint64 low) noexcept {
+        AssetImporterInfo bad = info;
+        bad.id = Guid{0x494d50540001ull, low};
+        bad.name = "BadVariable";
+        bad.roles = roles;
+        bad.rolePrefixes = prefixes;
+        TestImporter importer(bad);
+        return scene.importers.Register(importer).Error() == ErrorCode::InvalidArgument;
+    };
+    static constexpr StringView BadChar[] = {"blob/"};
+    CHECK(rejects(AssetRoles, BadChar, 21));
+    static constexpr StringView FixedBlob[] = {"blob:x"};
+    CHECK(rejects(FixedBlob, BlobPrefixes, 22));
+    static constexpr StringView Overlap[] = {"b", "blob:"};
+    CHECK(rejects(AssetRoles, Overlap, 23));
+}
+
 // 추가 출력: Output 순서대로 `<path>_<key>`에 저장, 참조 기록(owner = 주 출력)·ImportOwner 의존,
 // 주 출력의 소유 기록 출력 목록(key 순 — 빈 key 먼저), 출력 사이 Hard 참조, 고아 없음, 경고(Warn)
 // ImportWarning(코드·detail·asset = 주 출력), AbsoluteSourcePath(Project를 다른 곳으로 — 원본은
@@ -1556,8 +1683,11 @@ TEST(AssetReimport_Rejects) {
     }
 }
 
-// 재임포트 중간 실패: 주 출력 저장이 실패하면 이번에 새로 만든 출력 파일은 지우고, 먼저 저장한 기존
-// 출력은 새 내용으로 남으며, 주 출력 파일은 그대로다(기록은 옛 SHA — 다시 하면 수렴한다).
+// 재임포트 중간 실패(저장 순서 새 출력 → 기존 출력 → 주 출력 — 7.1절 19 A2f3d): 새 출력 저장이
+// 실패하면(기존 파일을 아직 교체하지 않았다) 아무 파일도 바뀌지 않는다. 주 출력 저장이 실패하면
+// 먼저 교체한 기존 출력은 새 내용으로 남고, 새 출력 파일도 남는다(교체한 기존 파일이 가리킬 수
+// 있다), 주 출력 파일은 그대로다(기록은 옛 SHA). 다시 하면 남은 새 출력(이 owner의 참조 기록
+// 고아)을 같은 key로 다시 써서 수렴한다(같은 id).
 TEST(AssetReimport_PartialFailure) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -1593,22 +1723,43 @@ TEST(AssetReimport_PartialFailure) {
     REQUIRE(scene.PutSource(RockSource, "value=9\noutputs=extra,fresh"));
     AssetService service(env.allocator, scene.layout, scene.Config(env));
     REQUIRE(service.Initialize());
-    // 저장 순서: extra(기존) → fresh(새) → 주 출력 — 셋째 Tags가 실패한다.
+    // 첫째 저장(새 출력 fresh)의 Tags가 실패한다 — 아무 파일도 바뀌지 않는다.
+    tagCalls = 0;
+    failTagsOn = 1;
+    Array<EditorWarning> warnings(env.allocator);
+    auto early = service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, result, &warnings);
+    failTagsOn = 0;
+    CHECK(!early && early.Error() == ErrorCode::Busy && warnings.IsEmpty() &&
+          !scene.files.Has("Content/Rock_fresh.rasset") && service.Packages().Count() == 0);
+    CHECK(SameBytes(scene.files.Bytes("Content/Rock.rasset"), mainBefore.View()) &&
+          SameBytes(scene.files.Bytes("Content/Rock_extra.rasset"), extraBefore.View()));
+
+    // 저장 순서: fresh(새) → extra(기존) → 주 출력 — 셋째 Tags가 실패한다.
     tagCalls = 0;
     failTagsOn = 3;
-    Array<EditorWarning> warnings(env.allocator);
     auto reimported =
         service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, result, &warnings);
     failTagsOn = 0;
     CHECK(!reimported && reimported.Error() == ErrorCode::Busy && warnings.IsEmpty() &&
-          !scene.files.Has("Content/Rock_fresh.rasset") && service.Packages().Count() == 0);
+          scene.files.Has("Content/Rock_fresh.rasset") && service.Packages().Count() == 0);
     const Span<const uint8> mainAfter = scene.files.Bytes("Content/Rock.rasset");
     const Span<const uint8> extraAfter = scene.files.Bytes("Content/Rock_extra.rasset");
     CHECK(SameBytes(mainAfter, mainBefore.View()) && !SameBytes(extraAfter, extraBefore.View()));
     CHECK(Matches(env, scene, service.Index()));
-    // 다시 하면 수렴한다.
+    auto fresh = ParseLogicalPath(env.allocator, "/Game/Rock_fresh");
+    REQUIRE(fresh);
+    auto left = service.Index().FindByPath(fresh.Value());
+    REQUIRE(left);
+    const AssetId leftId = left.Value()->id;
+    // 다시 하면 남은 fresh를 같은 key로 다시 써서 수렴한다.
     REQUIRE(service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, result));
     CHECK(result.outputs.Size() == 2 && scene.files.Has("Content/Rock_fresh.rasset"));
+    bool reused = false;
+    for (const AssetImportOutput& output : result.outputs) {
+        reused = reused || (output.key.View() == "fresh" && output.id == leftId);
+    }
+
+    CHECK(reused && Matches(env, scene, service.Index()));
 }
 
 // 재임포트 할당 실패: 기존 출력·새 출력·옵션 기록이 있는 재임포트의 모든 할당 실패가
@@ -1684,11 +1835,16 @@ TEST(AssetReimport_AllocationFailures) {
 
         CHECK(!reimported && reimported.Error() == ErrorCode::OutOfMemory &&
               failure.code == AssetDiagnosticCode::None);
-        CHECK(!scene.files.Has("Content/Rock_fresh.rasset") &&
-              SameBytes(scene.files.Bytes("Content/Rock.rasset"), mainSnapshot.View()) &&
+        CHECK(SameBytes(scene.files.Bytes("Content/Rock.rasset"), mainSnapshot.View()) &&
               service.Packages().Count() == open && Matches(env, scene, service.Index()));
-        // 먼저 저장된 기존 출력(중간 실패)을 처음 내용으로 되돌려 다음 반복이 같은 상태에서
-        // 시작한다.
+        // 새 출력 fresh는 기존 출력을 교체하기 전의 실패면 없다(교체한 뒤면 남는다 — A2f3d).
+        if (SameBytes(scene.files.Bytes("Content/Rock_extra.rasset"), extraSnapshot.View())) {
+            CHECK(!scene.files.Has("Content/Rock_fresh.rasset"));
+        }
+
+        // 먼저 저장된 기존 출력·남은 새 출력(중간 실패)을 처음 상태로 되돌려 다음 반복이 같은
+        // 상태에서 시작한다.
+        scene.files.Remove("Content/Rock_fresh.rasset");
         scene.files.Remove("Content/Rock_extra.rasset");
         REQUIRE(scene.files.AddFile("Content/Rock_extra.rasset", extraSnapshot.View()));
         ++failures;

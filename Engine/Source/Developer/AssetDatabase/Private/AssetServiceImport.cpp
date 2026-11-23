@@ -119,6 +119,83 @@ bool IsOutputKey(StringView key) noexcept {
     return true;
 }
 
+// 역할 목록(roleAt(i), i < count)을 임포터 역할 규칙(7.1절 18·19 A2f3b)으로 판정하고 원본 순서를
+// order에 둔다: 고정 역할(roles — 비면 DefaultImportSourceRole)은 정확히 한 번씩 roles 순, 그 밖은
+// 접두(rolePrefixes) 하나로 시작하고 접두 뒤가 비지 않으며 서로 다른 역할을 byte 순으로. 위반이면
+// bad에 그 번호(빠진 고정 역할이면 count + 그 고정 역할 번호)를 두고 거짓이다. 오류: 할당 실패.
+template <class RoleAt>
+Result<bool> OrderImportRoles(Allocator& allocator, const AssetImporterInfo& info, usize count,
+                              RoleAt roleAt, Array<usize>& order, usize& bad) noexcept {
+    order.Clear();
+    const StringView defaultRole = DefaultImportSourceRole;
+    const Span<const StringView> fixed =
+        info.roles.IsEmpty() ? Span<const StringView>(&defaultRole, 1) : info.roles;
+    if (count > MaxImportSources) {
+        bad = MaxImportSources;
+        return Result<bool>::Success(false);
+    }
+
+    if (auto reserved = order.TryReserve(count); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    for (usize index = 0; index < fixed.Size(); ++index) {
+        usize found = IndexNone;
+        for (usize at = 0; at < count; ++at) {
+            if (roleAt(at) == fixed[index]) {
+                if (found != IndexNone) {
+                    bad = at;
+                    return Result<bool>::Success(false);
+                }
+
+                found = at;
+            }
+        }
+
+        if (found == IndexNone) {
+            bad = count + index;
+            return Result<bool>::Success(false);
+        }
+
+        (void)order.TryPushBack(found);
+    }
+
+    // 고정 역할 밖은 접두 역할이다 — 접두 판정 뒤 byte 순으로 넣는다(같은 역할 둘은 위반).
+    const usize fixedCount = order.Size();
+    for (usize at = 0; at < count; ++at) {
+        const StringView role = roleAt(at);
+        bool isFixed = false;
+        for (StringView one : fixed) {
+            isFixed = isFixed || role == one;
+        }
+
+        if (isFixed) {
+            continue;
+        }
+
+        bool prefixed = false;
+        for (StringView prefix : info.rolePrefixes) {
+            prefixed = prefixed || (role.ByteCount() > prefix.ByteCount() &&
+                                    role.StartsWith(prefix, StringComparison::CaseSensitive));
+        }
+
+        usize position = fixedCount;
+        while (position < order.Size() &&
+               StringView::CompareBytes(roleAt(order[position]), role) < 0) {
+            ++position;
+        }
+
+        if (!prefixed || (position < order.Size() && roleAt(order[position]) == role)) {
+            bad = at;
+            return Result<bool>::Success(false);
+        }
+
+        (void)order.TryInsert(at, position);
+    }
+
+    return Result<bool>::Success(true);
+}
+
 // 읽은 원본 하나다.
 struct ReadSource {
     explicit ReadSource(Allocator& allocator) noexcept
@@ -591,34 +668,19 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     }
 
     const AssetImporterInfo& info = chosen->Info();
-    // 역할: 임포터 roles와 정확히 같은 집합(원본 하나면 DefaultImportSourceRole), 문맥은 roles 순.
-    const StringView defaultRoles[] = {DefaultImportSourceRole};
-    const Span<const StringView> roles =
-        info.roles.IsEmpty() ? Span<const StringView>(defaultRoles) : info.roles;
-    if (sources.Size() != roles.Size()) {
-        return FailImport<void>(failure, AssetDiagnosticCode::InvalidImportOption,
-                                ErrorCode::InvalidArgument);
-    }
-
+    // 역할: 고정 역할 정확히 한 번씩 + 접두 역할(A2f3b), 문맥은 고정 → 접두(byte 순).
     Array<usize> order(allocator);
-    if (auto reserved = order.TryReserve(roles.Size()); !reserved) {
-        return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
+    usize badRole = 0;
+    auto roleCheck = OrderImportRoles(
+        allocator, info, sources.Size(), [&](usize at) noexcept { return sources[at].role; }, order,
+        badRole);
+    if (!roleCheck) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, roleCheck.Error());
     }
 
-    for (usize index = 0; index < roles.Size(); ++index) {
-        usize found = IndexNone;
-        for (usize at = 0; at < sources.Size(); ++at) {
-            if (sources[at].role == roles[index]) {
-                found = found == IndexNone ? at : found;
-            }
-        }
-
-        if (found == IndexNone) {
-            return FailImport<void>(failure, AssetDiagnosticCode::InvalidImportOption,
-                                    ErrorCode::InvalidArgument, {}, index);
-        }
-
-        (void)order.TryPushBack(found);
+    if (!roleCheck.Value()) {
+        return FailImport<void>(failure, AssetDiagnosticCode::InvalidImportOption,
+                                ErrorCode::InvalidArgument, {}, badRole);
     }
 
     // 원본 위치·읽기(합계 예산).
@@ -632,14 +694,14 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
         return loaded;
     }
 
-    // 원본을 임포터 roles 순으로 둔다(역할은 roles의 것).
+    // 원본을 판정 순서(고정 → 접두)로 둔다.
     Array<AssetImportSourceInput> ordered(allocator);
-    if (auto reserved = ordered.TryReserve(roles.Size()); !reserved) {
+    if (auto reserved = ordered.TryReserve(order.Size()); !reserved) {
         return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
     }
 
-    for (usize index = 0; index < roles.Size(); ++index) {
-        (void)ordered.TryPushBack(AssetImportSourceInput{roles[index], sources[order[index]].path});
+    for (usize index : order) {
+        (void)ordered.TryPushBack(sources[index]);
     }
 
     // 지금 열린 id다(실패하면 이번에 연 것만 닫는다).
@@ -986,10 +1048,15 @@ Result<void> AssetService::RunImport(ImportRun& run) noexcept {
         }
     }
 
-    // 저장 실패의 되돌리기: 만든 패키지를 닫고 이번에 쓴 출력 파일을 지운다(못 지우면 경고).
+    // 기존 파일(재임포트의 기존 출력·주 출력)을 하나라도 교체했는지다. 교체한 기존 파일은 새 출력을
+    // Hard로 가리킬 수 있으므로 그 뒤의 실패는 새 파일을 지우지 않는다(7.1절 19 A2f3d — 디스크에는
+    // 참조가 닫힌 상태만 남는다, 교차 검증 필수 2).
+    bool existingSaved = false;
+    // 저장 실패의 되돌리기: 만든 패키지를 닫고, 기존 파일을 교체하기 전이면 이번에 쓴 새 출력
+    // 파일을 지운다(못 지우면 경고).
     auto rollback = [&](const AssetDiagnostic& diagnostic) noexcept {
         (void)set_.CloseOpened(run.before);
-        for (usize index = 0; index < savedFiles.Size(); ++index) {
+        for (usize index = 0; index < savedFiles.Size() && !existingSaved; ++index) {
             target.Clear();
             (void)target.TryAppend(layout_->ContentDirectory());
             (void)target.TryAppend("/");
@@ -1030,47 +1097,54 @@ Result<void> AssetService::RunImport(ImportRun& run) noexcept {
                                    : warnings->TryReserve(warnings->Size() + SaveWarnings +
                                                           savedFiles.Capacity() + pending.Size());
     };
-    // 다른 출력 먼저(참조 기록 owner = 주 출력), 주 출력 마지막(소유 기록).
+    // 저장 순서(7.1절 19 A2f3d): 새 출력 → 기존 출력(재임포트) → 주 출력(소유 기록 — 출력 목록이
+    // 디스크에 없는 출력을 적지 않는다). 새 파일을 먼저 써서 교체한 기존 파일이 없는 새 파일을
+    // 가리키는 일이 없게 한다.
     const EditorSaveOptions save{};
-    for (const MadeOutput& made : context.Outputs()) {
-        if (made.key.IsEmpty() || !made.used) {
-            continue;
-        }
+    constexpr int SavePasses = 2;
+    for (int pass = 0; pass < SavePasses; ++pass) {
+        for (const MadeOutput& made : context.Outputs()) {
+            if (made.key.IsEmpty() || !made.used || made.created != (pass == 0)) {
+                continue;
+            }
 
-        ImportRecordInput reference;
-        reference.owner = run.mainId;
-        AssetDiagnostic diagnostic;
-        auto record = WriteImportRecord(allocator, made.id, reference);
-        Result<void> saved = record
-                                 ? set_.SetImportRecord(made.id, record.Value().View(), run.mainId)
-                                 : Result<void>::Failure(record.Error());
-        // 저장 뒤 파일 이름을 담을 자리를 먼저 잡는다(저장 뒤 복사가 실패하면 그 파일을 되돌리기
-        // 목록에 넣지 못해 고아로 남는다).
-        // 기존 출력(재임포트)은 실패해도 지우지 않으므로 이름을 담지 않는다.
-        String file(allocator);
-        if (saved && made.created) {
-            saved = file.TryReserve(MaxNativePathBytes());
-        }
+            ImportRecordInput reference;
+            reference.owner = run.mainId;
+            AssetDiagnostic diagnostic;
+            auto record = WriteImportRecord(allocator, made.id, reference);
+            Result<void> saved =
+                record ? set_.SetImportRecord(made.id, record.Value().View(), run.mainId)
+                       : Result<void>::Failure(record.Error());
+            // 저장 뒤 파일 이름을 담을 자리를 먼저 잡는다(저장 뒤 복사가 실패하면 그 파일을
+            // 되돌리기 목록에 넣지 못해 고아로 남는다). 기존 출력(재임포트)은 실패해도 지우지
+            // 않으므로 이름을 담지 않는다.
+            String file(allocator);
+            if (saved && made.created) {
+                saved = file.TryReserve(MaxNativePathBytes());
+            }
 
-        if (saved) {
-            saved = reserveWarnings();
-        }
+            if (saved) {
+                saved = reserveWarnings();
+            }
 
-        if (!saved) {
-            diagnostic = AssetDiagnostic{};
-            diagnostic.error = saved.Error();
-            diagnostic.asset = made.id;
-            return rollback(diagnostic);
-        }
+            if (!saved) {
+                diagnostic = AssetDiagnostic{};
+                diagnostic.error = saved.Error();
+                diagnostic.asset = made.id;
+                return rollback(diagnostic);
+            }
 
-        if (saved = set_.Save(made.id, lock, save, warnings, &diagnostic); !saved) {
-            return rollback(diagnostic);
-        }
+            if (saved = set_.Save(made.id, lock, save, warnings, &diagnostic); !saved) {
+                return rollback(diagnostic);
+            }
 
-        if (made.created) {
-            (void)file.TryAssign(set_.Find(made.id)->fileName.View());
-            (void)savedFiles.TryPushBack(rocks::Move(file));
-            (void)savedIds.TryPushBack(made.id);
+            if (made.created) {
+                (void)file.TryAssign(set_.Find(made.id)->fileName.View());
+                (void)savedFiles.TryPushBack(rocks::Move(file));
+                (void)savedIds.TryPushBack(made.id);
+            } else {
+                existingSaved = true;
+            }
         }
     }
 
@@ -1134,8 +1208,8 @@ Result<void> AssetService::Reimport(const AssetDatabaseLock& lock, StringView pa
                                     Span<const AssetImportSourceInput> overrides,
                                     Span<const TextAssignment> assignments,
                                     TextDiagnostics& diagnostics, AssetImportResult& result,
-                                    Array<EditorWarning>* warnings,
-                                    AssetDiagnostic* failure) noexcept {
+                                    Array<EditorWarning>* warnings, AssetDiagnostic* failure,
+                                    bool replaceSources) noexcept {
     Allocator& allocator = *allocator_;
     result.id = AssetId{};
     result.path.Clear();
@@ -1309,74 +1383,104 @@ Result<void> AssetService::Reimport(const AssetDatabaseLock& lock, StringView pa
         return close(AssetDiagnosticCode::ExternalModification, ErrorCode::StaleHandle, mainId);
     }
 
-    // 원본: 기록 역할 집합 = 임포터 roles, 바꾸기를 적용한 뒤 루트로 푼다(임포터 roles 순).
+    // 원본(7.1절 18·19 A2f3b): 기록 역할은 임포터 역할 규칙에 맞아야 한다(임포터 버전이 역할을
+    // 바꿨으면 InvalidImportOption — 다시 임포트한다). replaceSources면 overrides가 새 원본 전체다
+    // (새 임포트와 같은 역할 규칙 — 기록 원본은 버린다), 아니면 기록 원본을 루트로 풀고 overrides가
+    // 같은 역할만 바꾼다. 문맥 순서는 고정 역할 → 접두 역할(byte 순)이다.
     const AssetImporterInfo& info = importer->Info();
-    const StringView defaultRoles[] = {DefaultImportSourceRole};
-    const Span<const StringView> roles =
-        info.roles.IsEmpty() ? Span<const StringView>(defaultRoles) : info.roles;
-    if (recorded.sources.Size() != roles.Size()) {
-        return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument, mainId);
-    }
-
-    const bool single = overrides.Size() == 1 && overrides[0].role.IsEmpty();
-    if (single && recorded.sources.Size() != 1) {
-        return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument, mainId);
-    }
-
-    for (usize index = 0; index < overrides.Size() && !single; ++index) {
-        bool known = false;
-        for (const ImportSource& source : recorded.sources) {
-            known = known || source.role.View() == overrides[index].role;
-        }
-
-        if (!known) {
-            return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
-                         mainId, index);
-        }
-    }
-
+    Array<usize> order(allocator);
+    usize badRole = 0;
     Array<String> resolved(allocator);
     Array<AssetImportSourceInput> ordered(allocator);
-    if (auto reserved = resolved.TryReserve(roles.Size()); !reserved) {
-        return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
-    }
-
-    if (auto reserved = ordered.TryReserve(roles.Size()); !reserved) {
-        return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
-    }
-
-    for (usize index = 0; index < roles.Size(); ++index) {
-        const ImportSource* source = nullptr;
-        for (const ImportSource& one : recorded.sources) {
-            source = one.role.View() == roles[index] ? &one : source;
-        }
-
-        if (source == nullptr) {
+    const bool single = overrides.Size() == 1 && overrides[0].role.IsEmpty();
+    if (replaceSources) {
+        // 역할 없는 원본 하나(`--source=`)는 유일한 고정 역할이다(고정 역할이 하나일 때만).
+        const StringView defaultRole = DefaultImportSourceRole;
+        const StringView onlyRole = info.roles.IsEmpty()     ? defaultRole
+                                    : info.roles.Size() == 1 ? info.roles[0]
+                                                             : StringView();
+        if (overrides.IsEmpty() || (single && onlyRole.IsEmpty())) {
             return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
-                         mainId, index);
+                         mainId);
         }
 
-        StringView chosen{};
-        for (const AssetImportSourceInput& override : overrides) {
-            chosen = single || override.role == roles[index] ? override.path : chosen;
+        const auto roleAt = [&](usize at) noexcept {
+            return single ? onlyRole : overrides[at].role;
+        };
+        auto checked = OrderImportRoles(allocator, info, overrides.Size(), roleAt, order, badRole);
+        if (!checked) {
+            return close(AssetDiagnosticCode::None, checked.Error(), mainId);
         }
 
-        if (chosen.IsEmpty()) {
-            String path(allocator);
-            if (auto unpacked =
-                    roots.Resolve(source->root.View(), source->relativePath.View(), path);
-                !unpacked) {
-                return close(unpacked.Error() == ErrorCode::NotFound
-                                 ? AssetDiagnosticCode::MissingSource
-                                 : AssetDiagnosticCode::InvalidSource,
-                             unpacked.Error(), mainId, index);
+        if (!checked.Value()) {
+            return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
+                         mainId, badRole);
+        }
+
+        if (auto reserved = ordered.TryReserve(order.Size()); !reserved) {
+            return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
+        }
+
+        for (usize index : order) {
+            (void)ordered.TryPushBack(AssetImportSourceInput{roleAt(index), overrides[index].path});
+        }
+    } else {
+        auto checked = OrderImportRoles(
+            allocator, info, recorded.sources.Size(),
+            [&](usize at) noexcept { return recorded.sources[at].role.View(); }, order, badRole);
+        if (!checked) {
+            return close(AssetDiagnosticCode::None, checked.Error(), mainId);
+        }
+
+        if (!checked.Value() || (single && recorded.sources.Size() != 1)) {
+            return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
+                         mainId);
+        }
+
+        for (usize index = 0; index < overrides.Size() && !single; ++index) {
+            bool known = false;
+            for (const ImportSource& source : recorded.sources) {
+                known = known || source.role.View() == overrides[index].role;
             }
 
-            (void)resolved.TryPushBack(rocks::Move(path));
-            chosen = resolved[resolved.Size() - 1].View();
+            if (!known) {
+                return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
+                             mainId, index);
+            }
         }
 
-        (void)ordered.TryPushBack(AssetImportSourceInput{roles[index], chosen});
+        if (auto reserved = resolved.TryReserve(order.Size()); !reserved) {
+            return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
+        }
+
+        if (auto reserved = ordered.TryReserve(order.Size()); !reserved) {
+            return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
+        }
+
+        for (usize index : order) {
+            const ImportSource& source = recorded.sources[index];
+            StringView chosen{};
+            for (const AssetImportSourceInput& override : overrides) {
+                chosen = single || override.role == source.role.View() ? override.path : chosen;
+            }
+
+            if (chosen.IsEmpty()) {
+                String path(allocator);
+                if (auto unpacked =
+                        roots.Resolve(source.root.View(), source.relativePath.View(), path);
+                    !unpacked) {
+                    return close(unpacked.Error() == ErrorCode::NotFound
+                                     ? AssetDiagnosticCode::MissingSource
+                                     : AssetDiagnosticCode::InvalidSource,
+                                 unpacked.Error(), mainId, index);
+                }
+
+                (void)resolved.TryPushBack(rocks::Move(path));
+                chosen = resolved[resolved.Size() - 1].View();
+            }
+
+            (void)ordered.TryPushBack(AssetImportSourceInput{source.role.View(), chosen});
+        }
     }
 
     // 기존 출력을 연다(주 출력은 빈 key — 기록 key·타입, 경로는 지금 색인 경로).
@@ -1428,6 +1532,70 @@ Result<void> AssetService::Reimport(const AssetDatabaseLock& lock, StringView pa
         existing.type = output.type;
         existing.asset = representative.Value();
         (void)run.existing.TryPushBack(rocks::Move(existing));
+    }
+
+    // 이 owner를 가리키는 참조 기록의 고아 출력(`<주 경로>_<key>` — 앞선 임포트가 기존 파일을
+    // 교체한 뒤 실패해 남긴 새 출력, 7.1절 19 A2f3d)도 기존 출력으로 더한다: 임포터가 같은 key를
+    // 청하면 그 패키지를 다시 쓰고(아니면 OrphanedOutput 경고), 같은 경로 점유(DuplicatePath)로
+    // 다시 실행이 막히지 않는다(수렴한다).
+    const StringView mainPath = main.path.View();
+    for (usize at = 0; at < index_.Count(); ++at) {
+        const AssetIndexEntry& entry = index_.At(at);
+        bool listed = !entry.importRecord.present || !(entry.importRecord.owner == mainId) ||
+                      entry.id == mainId || entry.duplicateId;
+        for (const ImportOutput& output : recorded.outputs) {
+            listed = listed || output.asset == entry.id;
+        }
+
+        const StringView path = entry.path.View();
+        if (listed || path.ByteCount() <= mainPath.ByteCount() + 1 ||
+            !path.StartsWith(mainPath, StringComparison::CaseSensitive) ||
+            path.Data()[mainPath.ByteCount()] != '_') {
+            continue;
+        }
+
+        const StringView key =
+            path.SliceBytes(mainPath.ByteCount() + 1, path.ByteCount() - mainPath.ByteCount() - 1);
+        if (!IsOutputKey(key)) {
+            continue;
+        }
+
+        // 열려 있으면 Busy(기록 출력과 같다), 읽기 전용이면 NewerVersion.
+        if (set_.Find(entry.id) != nullptr) {
+            return close(AssetDiagnosticCode::None, ErrorCode::Busy, entry.id);
+        }
+
+        if (entry.readOnly) {
+            return close(AssetDiagnosticCode::NewerVersion, ErrorCode::Unsupported, entry.id);
+        }
+
+        AssetDiagnostic diagnostic;
+        auto opened = set_.Open(entry.id, warnings, &diagnostic);
+        if (!opened) {
+            (void)set_.CloseOpened(before.View());
+            if (failure != nullptr) {
+                *failure = diagnostic;
+            }
+
+            return Result<void>::Failure(opened.Error());
+        }
+
+        ImportRun::Existing adopted(allocator);
+        Result<void> step = adopted.key.TryAssign(key);
+        if (step) {
+            step = adopted.path.TryAssign(path);
+        }
+
+        if (step) {
+            adopted.id = entry.id;
+            adopted.type = entry.type;
+            adopted.asset = set_.Registry().FindChild(set_.Access(), opened.Value(), "").Value();
+            step = run.existing.TryPushBack(rocks::Move(adopted));
+        }
+
+        if (!step) {
+            return close(AssetDiagnosticCode::None, step.Error(), mainId);
+        }
     }
 
     run.lock = &lock;

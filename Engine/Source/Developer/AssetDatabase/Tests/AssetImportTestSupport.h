@@ -104,6 +104,19 @@ public:
             return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, 5);
         }
 
+        // 받은 원본 역할 순서를 남긴다(`role,role,…` — 가변 원본 순서 시험, A2f3b).
+        lastRolesBytes = 0;
+        for (const AssetImportSource& source : context.Sources()) {
+            for (usize at = 0;
+                 at < source.role.ByteCount() && lastRolesBytes + 1 < sizeof(lastRoles); ++at) {
+                lastRoles[lastRolesBytes++] = source.role.Data()[at];
+            }
+
+            if (lastRolesBytes + 1 < sizeof(lastRoles)) {
+                lastRoles[lastRolesBytes++] = ',';
+            }
+        }
+
         int64 total = 0;
         for (const AssetImportSource& source : context.Sources()) {
             StringView text;
@@ -272,6 +285,13 @@ public:
     bool lastReimport = false;
     // 마지막 Import가 받은 옛 기록 태그 수다(A2f3a).
     usize lastPreviousTags = 0;
+    // 마지막 Import가 받은 원본 역할 순서(`role,` 반복)다.
+    char lastRoles[512] = {};
+    usize lastRolesBytes = 0;
+
+    StringView LastRoles() const noexcept {
+        return StringView(lastRoles, lastRolesBytes);
+    }
 };
 
 inline AssetImporterInfo TestImporterInfo() noexcept {

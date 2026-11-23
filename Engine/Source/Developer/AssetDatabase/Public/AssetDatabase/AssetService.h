@@ -356,12 +356,16 @@ public:
     // 원본 수·옵션 기록 형식 InvalidImportOption, 모르는 원본 루트 MissingSource(detail = 원본
     // 번호), Import의 원본·대입·임포터·출력(타입이 다른 기존 출력 TypeMismatch / InvalidArgument)·
     // 저장 오류, 할당 실패.
+    //
+    // replaceSources(7.1절 19 A2f3b — 가변 원본)면 overrides가 새 원본 전체다(새 임포트와 같은 역할
+    // 규칙: 고정 역할 정확히 한 번씩 + 접두 역할, 역할 없는 원본 하나는 유일한 고정 역할), 기록
+    // 원본은 버린다. 비거나 규칙 위반이면 InvalidImportOption이다.
     Result<void> Reimport(const AssetDatabaseLock& lock, StringView path,
                           Span<const AssetImportSourceInput> overrides,
                           Span<const reflection_text::TextAssignment> assignments,
                           reflection_text::TextDiagnostics& diagnostics, AssetImportResult& result,
                           Array<EditorWarning>* warnings = nullptr,
-                          AssetDiagnostic* failure = nullptr) noexcept;
+                          AssetDiagnostic* failure = nullptr, bool replaceSources = false) noexcept;
 
     // asset-info <path|AssetId> --import(7.1절 18 A2f2b): 대상의 ImportRecord를 디스크에서 읽어
     // 임포트 상태를 out에 쓴다. 패키지를 열지 않는다(파일의 ImportRecord 칸만 부분 읽기 — 상태는

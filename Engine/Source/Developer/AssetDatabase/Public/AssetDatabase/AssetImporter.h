@@ -45,7 +45,13 @@ struct AssetImporterInfo {
     // `[a-z0-9]`)다. 비면 `--importer=`로만 고른다.
     Span<const StringView> extensions{};
     // 원본 역할 목록(ImportRecord 역할 규칙, 유일)이다. 비면 원본 하나 DefaultImportSourceRole.
+    // 고정 역할은 임포트마다 정확히 한 번씩이다.
     Span<const StringView> roles{};
+    // 가변 원본 역할 접두(예 `blob:` — Docs/Design/AssetSystem 7.1절 19 A2f3b UXR9)다. 고정 역할
+    // 밖의 역할은 이 중 하나로 시작하고 접두 뒤가 비지 않아야 한다(여럿 가능 — 원본 수·합 상한 안).
+    // 접두는 역할 문자 1–MaxImportRoleBytes byte이고, 고정 역할이 접두로 시작하거나 한 접두가 다른
+    // 접두의 앞부분이면 등록 InvalidArgument다. 비면 가변 원본 없음.
+    Span<const StringView> rolePrefixes{};
     // 옵션 struct(등록 ROCKS_STRUCT)다. 0이면 옵션 없음. 필드 이름은 outputType의 노출 속성
     // 이름·ImportReservedNames와 겹칠 수 없다(대소문자 무시 — 옵션과 설정을 첫 이름으로 나눈다).
     TypeId optionsType{};
@@ -62,7 +68,8 @@ struct AssetImportSource {
 // Import 호출 동안만 쓴다.
 class AssetImportContext {
 public:
-    // 원본들이다(임포터 roles 순 — 원본 하나면 역할 DefaultImportSourceRole).
+    // 원본들이다(고정 역할 roles 순 → 접두 역할 byte 순 — 원본 하나면 역할
+    // DefaultImportSourceRole).
     virtual Span<const AssetImportSource> Sources() const noexcept = 0;
     // 옵션 struct 값(optionsType의 C++ 값 — 읽기 전용)이다. 옵션이 없으면 null.
     virtual const void* Options() const noexcept = 0;

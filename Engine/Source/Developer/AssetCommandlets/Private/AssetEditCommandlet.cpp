@@ -96,13 +96,15 @@ constexpr StringView ImportUsage =
     "  'output <key> <path> <AssetId>' line per additional output. Takes the project write lock.\n";
 
 constexpr StringView ReimportUsage =
-    "usage: asset-reimport <path> [--source=<file> | --source.<role>=<file>...] "
-    "[--<setting>=<value>...]\n"
-    "       [--unset=<paths>] [--erase=<paths>] [--project=<dir>] [--wait=<seconds>]\n"
+    "usage: asset-reimport <path> [--source=<file> | [--replace-sources] "
+    "--source.<role>=<file>...]\n"
+    "       [--<setting>=<value>...] [--unset=<paths>] [--erase=<paths>] [--project=<dir>] "
+    "[--wait=<seconds>]\n"
     "  Import the recorded source files of the asset at <path> again with its recorded importer "
     "and\n"
     "  options, updating the outputs in place (references to them stay valid). --source replaces\n"
-    "  the only source, --source.<role> one source of several. Settings change the recorded "
+    "  the only source, --source.<role> one source of several; with --replace-sources the given\n"
+    "  sources replace the whole recorded list. Settings change the recorded "
     "import\n"
     "  options or the asset properties as in asset-import. A recorded output the importer no "
     "longer\n"
@@ -667,6 +669,8 @@ struct ImportArgs {
     StringView wait;
     StringView importer;
     bool help = false;
+    // 재임포트의 원본 전체 교체(`--replace-sources` — A2f3b)다.
+    bool replaceSources = false;
     Array<StringView> positional;
     Array<AssetImportSourceInput> sources;
     Array<TextAssignment> assignments;
@@ -700,6 +704,16 @@ bool ParseImport(Span<const StringView> args, bool reimport, ImportArgs& out) no
                 return false;
             }
 
+            continue;
+        }
+
+        // 원본 전체 교체(재임포트만 — 7.1절 19 A2f3b). `--source.<역할>=`과만 쓴다(끝에서 본다).
+        if (reimport && argument == "--replace-sources") {
+            if (out.replaceSources) {
+                return false;
+            }
+
+            out.replaceSources = true;
             continue;
         }
 
@@ -789,9 +803,10 @@ bool ParseImport(Span<const StringView> args, bool reimport, ImportArgs& out) no
         }
     }
 
-    // 재임포트: path 하나(원본 바꾸기는 선택).
+    // 재임포트: path 하나(원본 바꾸기는 선택). 전체 교체는 역할 있는 원본이 하나 이상이어야 한다.
     if (reimport) {
-        return out.positional.Size() == 1;
+        const bool roleSources = !out.sources.IsEmpty() && !out.sources[0].role.IsEmpty();
+        return out.positional.Size() == 1 && (!out.replaceSources || roleSources);
     }
 
     // path는 하나, 원본은 위치 인자 하나 또는 --source.<역할>= 하나 이상(섞지 않는다).
@@ -876,7 +891,7 @@ Result<int32> RunImportCommand(void* context, Span<const StringView> args, Comma
         reimport
             ? session.service->Reimport(session.lock, parsed.positional[0], parsed.sources.View(),
                                         parsed.assignments.View(), session.diagnostics, result,
-                                        &session.warnings, &diagnostic)
+                                        &session.warnings, &diagnostic, parsed.replaceSources)
             : session.service->Import(session.lock, parsed.positional[0], parsed.sources.View(),
                                       parsed.importer, parsed.assignments.View(),
                                       session.diagnostics, result, &session.warnings, &diagnostic);

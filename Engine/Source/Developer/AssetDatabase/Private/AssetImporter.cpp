@@ -123,6 +123,35 @@ Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& 
         }
     }
 
+    // 가변 원본 접두(A2f3b): 역할 문자, 고정 역할이 접두로 시작하지 않고, 접두끼리 앞부분이 아니다
+    // (어느 역할이 어느 규칙에 드는지 모호함이 없게).
+    if (info.rolePrefixes.Size() > MaxImportSources || HasDuplicate(info.rolePrefixes)) {
+        return invalid();
+    }
+
+    const StringView defaultRole = DefaultImportSourceRole;
+    const Span<const StringView> fixedRoles =
+        info.roles.IsEmpty() ? Span<const StringView>(&defaultRole, 1) : info.roles;
+    for (usize index = 0; index < info.rolePrefixes.Size(); ++index) {
+        const StringView prefix = info.rolePrefixes[index];
+        if (!IsRole(prefix)) {
+            return invalid();
+        }
+
+        for (StringView role : fixedRoles) {
+            if (role.StartsWith(prefix, StringComparison::CaseSensitive)) {
+                return invalid();
+            }
+        }
+
+        for (usize other = 0; other < info.rolePrefixes.Size(); ++other) {
+            if (other != index &&
+                info.rolePrefixes[other].StartsWith(prefix, StringComparison::CaseSensitive)) {
+                return invalid();
+            }
+        }
+    }
+
     // 주 출력: 추상 아닌 에셋 클래스.
     // 조회의 종류 불일치(TypeMismatch)는 규칙 위반이다.
     auto lookupError = [](ErrorCode error) noexcept {
