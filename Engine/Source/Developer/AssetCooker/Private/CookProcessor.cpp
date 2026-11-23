@@ -1,6 +1,24 @@
 #include <AssetCooker/CookProcessor.h>
+#include <AssetRuntime/PackageFormat.h>
 
 namespace rocks {
+
+Result<void> CookProcessor::Cook(CookContext& context) const noexcept {
+    const TargetProfile& profile = *context.profile;
+    PackageWriteOptions options;
+    options.kind = PackageKind::Cooked;
+    options.profileId = profile.id.View();
+    options.profileSettings = context.profileSettings;
+    options.cookerVersion = context.cookerVersion;
+    options.bulkCodec =
+        profile.bulkCodec == CookBulkCodec::Zstd ? BulkCodec::Zstd : BulkCodec::None;
+    options.bulkAlignment =
+        profile.bulkAlignment == 0 ? PackageDefaultCookedBulkAlignment : profile.bulkAlignment;
+    options.bulkSource = context.bulkSource;
+    auto written = WritePackage(*context.allocator, *context.registry, context.access,
+                                context.package, options, *context.sink, context.failure);
+    return written ? Result<void>::Success() : Result<void>::Failure(written.Error());
+}
 
 CookProcessorTable::CookProcessorTable(Allocator& allocator, TypeRegistry& types,
                                        const CookProcessor& fallback) noexcept

@@ -879,9 +879,9 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 4. **대상 계산**(색인만 — 패키지를 열지 않는다, UE가 AssetRegistry로 쿠킹 대상을 세는 것과 같다):
    - 뿌리: 전체 쿠킹은 alwaysCook이 가리키는 에셋(디렉터리는 재귀) ∪ PrimaryAsset(규칙 타입 또는 그 파생 타입이며 규칙 디렉터리 아래). 부분 쿠킹은 인자 경로(에셋·디렉터리).
    - 폐포: Hard 의존(+ cookSoftReferences면 Soft) + bundle 구성원(결정 9 — 색인 태그, cookSoftReferences와 무관). EditorOnly·Build·ImportOwner 간선은 따라가지 않는다.
-   - NeverCook: 뿌리면 뺀다. alwaysCook과 NeverCook에 함께 걸리면 NeverCook이 이기고 경고 `NeverCookReferenced`(UE와 같은 우선순위). 다른 대상이 Hard로 참조하면 `NeverCookReferenced`(오류), Soft로 참조하면 진단 없이 빠지고 매니페스트 의존 목록에서도 뺀다(로드가 NotFound).
+   - NeverCook: 뿌리면 뺀다. alwaysCook과 NeverCook에 함께 걸리면 NeverCook이 이기고 경고 `NeverCookReferenced`(UE와 같은 우선순위). 다른 대상이 Hard로 참조하면 `NeverCookReferenced`(오류), Soft로 참조하면 진단 없이 대상에서 빠진다. 의존 목록에는 남는다 — 매니페스트 의존은 쿠킹 패키지 Dependencies와 같아야 하고(로더 대조 11.6절 3), 그 대상은 매니페스트 항목이 없어 로드 요청이 NotFound다(UE도 쿠킹되지 않은 soft 참조를 남기고 로드에서 실패시킨다 — A4c2 리뷰로 고침).
    - EditorOnly 에셋(대표 타입이 EditorOnly 클래스)은 대상이 아니다. Hard로 참조하면 `NeverCookReferenced`와 같은 오류 규칙.
-   - 색인에 없는 Hard 의존은 `MissingDependency`(쿠킹 실패), Soft는 경고 `MissingDependency`(의존 목록에서 뺀다).
+   - 색인에 없는 Hard 의존은 `MissingDependency`(쿠킹 실패), Soft는 경고 `MissingDependency`(의존 목록에는 남는다 — 위와 같은 이유).
    - 부분 쿠킹: 위에 역방향 Build 폐포(대상을 Build로 의존하는 에셋 — 색인 Referencers(Build), 전이)와 기존 매니페스트 항목 중 다시 쿠킹할 것(결정 8)을 더한다. 에디터에서 사라진 에셋의 매니페스트 항목은 빼고, 남은 항목이 그것을 Hard로 참조하면 `MissingDependency`.
 5. **키 계산**(패키지를 열지 않는다 — UE 증분 쿠킹 TargetDomain 키처럼 로드 없이 판정):
    - **콘텐츠 해시** = 에디터 패키지 파일 전체 SHA-256(패키지 지문은 섹션 CRC32 표의 SHA라 충돌이 CRC 수준이어서 쓰지 않는다). 색인이 지연 계산해 항목과 색인 캐시에 둔다(`AssetIndex::ContentHash(id)` — 크기·수정 시각이 같으면 캐시 값, 다르면 다시 읽음 — 바뀐 파일만 다시 해시, 색인 캐시 형식 버전을 올린다).
@@ -891,7 +891,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
    - **cookKey** = Hard 그래프 SCC(대상 사이, Tarjan — AssetId 순 결정적): SCC key = `NuggetSccKey(구성원 {AssetId, 지역 키}, 외부 튜플 {구성원, "Hard", 의존, 의존 cookKey})`, cookKey = `NuggetMemberKey(SCC key, AssetId)`. 순서: Build SCC(build key) → Hard SCC 역위상(cookKey).
 6. **CookProcessor 표**: TypeId → `CookProcessor{정체성 NuggetProcessorId(처리기 Guid·버전 Guid — 너겟 키 공통 머리와 같다), WriteSettingsKey(writer, 색인 항목)(선택 — 색인 정보만), Cook(context)}`. 대표 에셋 타입에서 상속 사슬을 따라 가장 가까운 등록 처리기 하나(AssetTypeHookTable과 같은 규칙). 기본 처리기(Asset 루트): 에디터 객체 그래프를 그대로 `WritePackage(kind=Cooked, profile 값, bulkCodec·bulkAlignment, bulkSource=에디터 패키지 store)`로 쓴다(EditorOnly 필드는 writer가 뺀다). 처리기는 `CookContext`로 NuggetCache·프로파일·진단 sink를 받는다(텍스처 처리기 A5가 너겟을 쓴다).
 7. **쿠킹 실행**: 대상을 Hard SCC 역위상(의존 먼저, 같은 깊이는 AssetId 순)으로 처리한다. 열린 패키지는 "남은 참조자 수"로 관리해 그것을 Hard로 의존하는 대상이 모두 쿠킹되면 닫는다(공통 의존을 대상마다 다시 열지 않는다 — 열기 횟수 ≤ 대상 수 + 의존 수, 시험이 카운터로 본다). 메모리 상한(`CookOpenPackageBytes`)을 넘으면 참조자가 남은 패키지도 닫고 나중에 다시 연다. 처리기는 메모리 sink에 쓰고 패키지 SHA-256·크기·bulk raw 합을 얻는다. 오류는 에셋별로 모아 끝까지 진행하고(보고서), 하나라도 있으면 게시하지 않는다(10절). 병렬은 후속(결정성은 정렬된 순회로 지킨다). 에디터 프로세스 안 쿠킹(서비스 API)은 dirty 패키지가 열려 있으면 `Busy`로 거부한다(쿠킹은 디스크 상태 — Commandlet에는 열린 패키지가 없다). 쿠킹은 에셋 DB 잠금을 쥔다.
-8. **부분 쿠킹 재사용**: 기존 매니페스트 항목은 cookKey가 같고 `Packages/`의 그 파일이 있으며 크기·SHA-256이 매니페스트와 같을 때만 재사용한다. 파일이 없거나 다르면 다시 쿠킹한다(사용자가 쿠킹 디렉터리를 일부 지운 경우 — 시나리오 27 손상된 게시 파일의 재게시). 재사용하는 것은 **패키지 byte와 그 byte에서 나오는 칸**(SHA-256·크기·bulk raw 합·대표 타입)뿐이다. 매니페스트 항목의 byte 밖 칸(의존 목록·PrimaryAsset flags·bundle·경로 힌트)은 재사용 항목도 이번 판정(A4b 대상·제외 목록·색인)으로 늘 다시 만든다(A4c1 리뷰 필수 — 예: Soft 의존이 색인에 새로 생기면 의존 목록이 바뀌어야 하는데, cookKey는 byte 입력의 키라 그 판정을 다 담지 않는다. 판정 입력이 늘어도 키를 같이 늘릴 필요가 없다).
+8. **부분 쿠킹 재사용**: 기존 매니페스트 항목은 cookKey가 같고 `Packages/`의 그 파일이 있으며 크기·SHA-256이 매니페스트와 같을 때만 재사용한다. 파일이 없거나 다르면 다시 쿠킹한다(사용자가 쿠킹 디렉터리를 일부 지운 경우 — 시나리오 27 손상된 게시 파일의 재게시). 재사용하는 것은 **패키지 byte와 그 byte에서 나오는 칸**(SHA-256·크기·bulk raw 합·대표 타입·의존 목록 — 의존 목록은 쿠킹 패키지 Dependencies 그대로다)뿐이다. 매니페스트 항목의 byte 밖 칸(PrimaryAsset flags·bundle·경로 힌트)은 재사용 항목도 이번 판정(A4b 대상·제외 목록·색인)으로 늘 다시 만든다(A4c1 리뷰 필수 — cookKey는 byte 입력의 키라 판정을 다 담지 않는다. 판정 입력이 늘어도 키를 같이 늘릴 필요가 없다).
 9. **bundle**: 리플렉션 지정자 `AssetBundles="a,b"`(Soft 참조 필드 — UE `meta=(AssetBundles=…)`)가 있는 PrimaryAsset은 **저장 때** 타입 hook Tags(A2c)로 bundle 구성원을 색인 태그에 남긴다(UE가 `FAssetBundleData`를 AssetRegistry 태그로 남기는 것과 같다). 쿠커는 태그만 읽는다(2차 열기 없음). MetaCompiler 지정자와 필드 메타는 리플렉션 쪽 요구다(ReflectionExtensions 문서에 적고 리플렉션 담당과 조정한다 — A4e).
 10. **게시**(10절 1–3 그대로): `<Project>/Saved/Cooked/<Profile>/.staging/<guid>.tmp` 기록·Flush → `Packages/<a>/<이름>`에 `Move(no-replace)` → 있으면 크기·SHA-256 대조(같으면 임시 삭제, 다르면 `CorruptEntry` 경고 + `Replace`) → 바뀐 디렉터리 안쪽부터 `SyncDirectory` → 매니페스트를 `.staging`에 쓰고 Flush → `Replace`. 전체 쿠킹은 그 뒤 새 매니페스트가 가리키지 않는 `Packages/` 파일을 지운다(못 지우면 경고). 부분 쿠킹은 기존 매니페스트와 병합(`CheckCookedManifestMerge` — 다르면 `IncompatibleCook`)하고 파일은 지우지 않는다. 기존 매니페스트가 없으면 부분 쿠킹은 전체 쿠킹과 같다.
 11. **보고서**: `Saved/Cooked/<Profile>/CookReport.json`(결정적 — 진단을 (assetId, 코드) 순), 도구 빌드 ID·엔진 버전(진단용 — 10절), 대상 수·재사용 수·쓴 byte. 명령은 사람이 읽는 줄도 낸다.
@@ -937,7 +937,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     - Build SCC(AssetId 순 노드·간선 — 결정적)마다 `NuggetSccKey(구성원, 외부 튜플 {구성원, "Build", 의존, 의존 build key})`를 구하고, build key = `NuggetMemberKey`.
   - **cookKey**:
     - 지역 키 = 공통 머리({`CookerProcessorGuid`, `CookerKeyVersion`}, 프로젝트 세대) + 쿠커 버전 + 콘텐츠 해시 + 논리 경로 키 + PrimaryAsset 여부 + bundle(이름·구성원) + 이 대상의 제외된 Soft 의존(AssetId 순) + build key + `PackageFormatVersion` + `PackageSectionSchemaVersion` + 타입 표 지문 + 프로파일 출력 설정 SHA-256.
-    - CookSettings SHA-256 전체는 넣지 않는다 — 판정 결과만 넣는다. 그래서 alwaysCook을 더해도 기존 대상의 키는 바뀌지 않는다. 제외된 Soft 의존은 매니페스트 의존 목록을 바꾸므로 넣는다.
+    - CookSettings SHA-256 전체는 넣지 않는다 — 판정 결과만 넣는다. 그래서 alwaysCook을 더해도 기존 대상의 키는 바뀌지 않는다. 제외된 Soft 의존은 byte에도 매니페스트에도 영향이 없지만 판정 입력으로 보수적으로 남긴다(적중만 줄어든다).
     - Hard SCC는 대상 사이 Hard 간선으로 만든다(대상 밖 Hard 의존은 A4b가 이미 오류로 보고했다 — 간선에서 뺀다). 외부 튜플은 {구성원, "Hard", 의존, 의존 cookKey}다.
   - **타입 표 지문** = `ListTypeVersions` 목록(개수, 그리고 칸마다 TypeId·종류·버전)을 NuggetKeyWriter로 흘린 SHA-256이다.
   - **키 실패 전파**: 콘텐츠 해시를 못 구했거나 Build 의존이 없는 에셋은 키가 없다(hasKey 거짓). 그 에셋에 Build·Hard로 기대는 에셋도 키가 없고, 진단은 원인에 하나만 남긴다. 쿠킹은 오류 진단이 있으면 게시하지 않는다.
@@ -947,10 +947,20 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
     - 열린 집합 관리(결정 7을 고친다): 대상을 열고 쿠킹한다(이미 열린 의존은 그대로 잇는다). 이번 쿠킹이 연 패키지 수가 상한 `CookMaxOpenPackages`(요청 칸, 기본 4096)를 넘으면 시작 때 열린 것만 남기고 모두 닫는다(`CloseOpened(before)`). 끝에도 닫는다.
     - 상한 판정을 byte 대신 패키지 수로 하는 근거: 결정적이고 O(1)이다. UE도 쿠킹 중 메모리 압박에서 GC로 한꺼번에 내린다. 참조자 수로 하나씩 닫는 방식은 EditorOnly 의존 묶음과 닫기 순서 규칙(참조되는 패키지는 Busy) 때문에 버린다. 열기 횟수 ≤ 대상 수 + 의존 수(상한을 넘지 않을 때)이고, 시험이 파일 열기 계수로 본다.
     - 처리기는 `CookContext`(Registry·접근 문맥·패키지 handle·색인 항목·프로파일·출력 sink·allocator, 선택 NuggetCache)를 받는다.
-  - 매니페스트 항목은 재사용 여부와 상관없이 byte 밖 칸을 이번 판정으로 만든다(결정 8) — 의존 목록의 계산(아래)은 재사용 항목에도 같다(재사용 항목은 기존 `Packages/` 파일을 읽어 의존을 얻는다).
+  - 매니페스트 항목은 재사용 여부와 상관없이 byte 밖 칸을 이번 판정으로 만든다(결정 8). 의존 목록은 byte에서 나온다(재사용 항목은 기존 `Packages/` 파일을 읽어 얻는다).
     - 기본 처리기는 `WritePackage(kind=Cooked, profileId, profileSettings, cookerVersion, bulkCodec, bulkAlignment(0이면 4096), bulkSource=열린 패키지 store)`다.
-    - 결과(`CookedPackage`)는 쓴 byte·SHA-256·크기·bulk raw 합·대표 타입·경로 힌트·flags·bundle·의존이다. 쓴 byte를 다시 읽어 검증하고, 의존 = 쿠킹 패키지의 Hard·Soft에서 제외 목록과 색인에 없는 Soft를 뺀 것이다.
+    - 결과(`CookedPackage`)는 쓴 byte·SHA-256·크기·bulk raw 합·대표 타입·경로 힌트·flags·bundle·의존이다. 쓴 byte를 다시 읽어 검증하고, 의존 = 쿠킹 패키지 Dependencies 그대로다. 만든 항목은 로더 대조(`CheckCookedPackage`)로 확인한다.
     - 결과는 출력 sink(`CookOutputSink::Put`)로 하나씩 넘긴다(A4d가 바로 staging에 쓴다 — 전체를 메모리에 모으지 않는다). 에셋별 오류(열기·처리기·검증)는 진단으로 모으고 끝까지 진행한다.
+- A4c2 상태: **구현** — 대조표 14.1.67절, coverage 14.1.68절. 리뷰 반영(2026-11-23, 필수 하나·권장 둘 — 매니페스트 의존 거르기 제거·결정 4·8 문장, 로더 대조 자기 검증, cookKey 제외 Soft 근거). 구현에서 정한 것:
+  - 기본 처리기는 `CookProcessor::Cook`의 기본 구현이다(에디터 그래프를 그대로 쿠킹 패키지로). `DefaultCookProcessor`는 정체성(`DefaultCookProcessorId`)만 정한다. 특화 처리기(A5 텍스처)는 Cook을 재정의한다. CookProcessor는 export 클래스다(Modular 빌드에서 기본 Cook을 시험 처리기가 물려받는다).
+  - API는 AssetCooker `CookRun.h`의 `CookPackages(request, result)`다.
+    - 결과(`CookRunResult`): 진단, 쿠킹 수, 대상 Open 호출 수, 상한으로 한꺼번에 닫은 횟수.
+    - 출력: `CookOutputSink::Put(CookedPackage)` — span은 Put 동안만 유효하다.
+  - 에셋별 진단: 읽기 전용 패키지(더 새 타입·커스텀 버전 — 지금 스키마로 쓰면 모르는 데이터를 잃는다) `UnsupportedVersion`, 열기 실패는 Open의 진단 코드·오류, null로 이은 import는 `MissingDependency`(related = 첫 미해결 대상), 처리기 실패는 그 진단 코드·오류, 쿠킹 byte 검증 실패는 `CorruptPackage`(error = 읽기 오류). 열기·처리기·검증의 할당 실패는 진단이 아니라 OutOfMemory로 멈춘다(규칙 위반으로 바꾸지 않는다).
+  - 멈춰도 이번 쿠킹이 연 패키지는 닫는다. 닫기 자체가 할당에 실패하면 패키지가 열린 채 남고 OutOfMemory다(`EditorPackageSet::CloseOpened`는 할당 실패면 아무것도 닫지 않는다 — 호출자가 시작 때 목록으로 다시 닫는다).
+  - 쿠킹 순서의 Hard 간선은 대상 사이만이다. 대상 밖 Hard 의존은 A4b 오류다.
+  - 키가 없는 대상은 진단 없이 건너뛴다(원인 진단은 키 단계).
+  - 매니페스트 의존은 쿠킹 패키지 Dependencies 그대로다(로더가 같은지 대조한다 — 처음 구현은 제외·색인에 없는 Soft를 빼서 로드 대조에서 거부될 결함이었다, 리뷰 필수). bulk raw 합은 BulkIndex rawBytes 합이다. 만든 항목은 `CheckCookedPackage`로 자기 검증한다(처리기가 프로파일 값·대표 타입을 다르게 쓰면 `CorruptPackage` — 리뷰 권장).
 - A4c1 상태: **구현** — 대조표 14.1.65절, coverage 14.1.66절. 구현에서 정한 것:
   - `GuidLess`를 AssetRuntime `PackageReader.h`에서 Base `Guid.h`로 옮겼다. ObjectRuntime(ListTypeVersions 정렬)도 쓰므로 공용 자리에 둔다. 이름이 같아 기존 사용처는 그대로다.
   - 진단 순서는 `CookTargets.h`의 `CookDiagnosticBefore`((asset, code, related, setting, 오류 먼저, 원인 오류)) 하나다. 대상 계산·키·이후 보고서가 같은 순서를 쓴다.
@@ -3066,6 +3076,30 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 위치 | 닿지 않는 것 | 근거 |
 |---|---|---|
 | `CookKeys.cpp` `CookLocalKey`의 `ROCKS_ASSERT(key)` | 단언 실패 쪽 | 기록하는 문자열은 LogicalPath 키·PackageTags가 검증한 UTF-8이고 해시 기록기는 할당하지 않는다 — 실패할 수 없는 불변식이다 |
+
+#### 14.1.67 요구 대조표(A4c2 — 기본 처리기·쿠킹 실행)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookRunTests.cpp`(`CookRun_*` 7 — 실제 객체 그래프의 시험 원본 패키지 `EditorPackageSetTestSupport` Sources: Hero는 Hard·EditorOnly·없는 Soft·bulk, Villain은 Hard, CycleA ↔ CycleB, Hub는 Hard 다섯)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 기본 처리기(결정 6) | 쿠킹 byte 검증(종류·프로파일 id·쿠커 버전), SHA-256, 키의 cookKey, 경로 힌트·대표 타입, bulk raw 합, Zstd 프로파일(bulk 코덱·정렬 8192) | `CookRun_CooksAllTargets`·`CookRun_ManifestInputsAndProfile` |
+| EditorOnly 필드 부재(시나리오 11) | 쿠킹 Hero의 의존·import에 EditorOnly 대상(Derived) 없음 | `CookRun_CooksAllTargets` |
+| 원본 없이 쿠킹(시나리오 2) | 원본 파일 없이 에디터 패키지만으로 전부 쿠킹 | `CookRun_CooksAllTargets` |
+| 순서(결정 7) | 의존 먼저(Base → Hero → Villain, Hub는 Hard 대상들 뒤), Hard 순환 이웃 | `CookRun_CooksAllTargets` |
+| 매니페스트 재료(결정 8) | 의존 = 쿠킹 패키지 Dependencies 그대로(색인에 있는·제외된·색인에 없는 Soft 모두 남음 — 모든 출력에서 단언), PrimaryAsset flags·bundle, 로더 대조 실패(처리기가 다른 프로파일 id로 씀) CorruptPackage | `CookRun_ManifestInputsAndProfile` |
+| 결정성(시나리오 13) | 두 번 같은 byte, 상한 1(매번 닫고 다시 열기)에도 같은 byte | `CookRun_DeterministicBytes` |
+| 열린 집합(결정 7) | 시작 때 열린 패키지 유지·이번에 연 것만 닫음, 의존으로 이미 열린 대상은 Open 안 함(Open 수 < 대상 수), 패키지 파일 열기 ≤ 패키지 수, 상한 1이면 한꺼번에 닫기·Open 증가, 키 없는 대상 건너뜀(진단 없음) | `CookRun_OpenSetManagement`·`CookRun_CooksAllTargets` |
+| 에셋별 오류 계속 | 읽기 전용 UnsupportedVersion, 사라진 파일 MissingFile(NotFound), 미해결 import MissingDependency(related), 처리기 실패(그 코드·오류), 깨진 출력 CorruptPackage — 나머지는 쿠킹, 끝에 다 닫힘 | `CookRun_ErrorsContinue` |
+| 요청 거부 | null 일곱·상한 0·키 수 다름·다른 색인의 대상 InvalidArgument(결과 비움), dirty Busy, sink 오류(그대로·연 패키지 닫힘), 처리기 조회 오류 ShuttingDown | `CookRun_Rejects` |
+| 할당 실패 | 실행 allocator 모든 지점(처리기 쓰기·검증 읽기·순서·의존·진단·시작 목록) OutOfMemory·닫힘·다 지나면 같은 byte, 집합 allocator(열기 OutOfMemory·닫기 실패는 남고 다시 닫힘·GC 참조 칸 표는 삼켜짐), 진단 장면·시작 때 열린 패키지 유지 | `CookRun_AllocationFailures` |
+| 조합(14 완료 조건 2) | 그래프 모양(단독·Hard 사슬·순환·여러 Hard·bulk·EditorOnly·Soft 셋) × 열린 집합(빈·미리 열림·상한 1) × 실패(여섯) × 프로파일(기본·Zstd) | 위 시험 |
+
+#### 14.1.68 Coverage(A4c2)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Filter Cook -Sources Engine/Source/Developer/AssetCooker` — `CookRun.cpp` 줄 245/245·분기 94/94(리뷰 반영 뒤 — 의존 거르기를 없애고 로더 대조를 더함), `CookProcessor.cpp` 줄 49/49·분기 22/22, `CookRun.h`·`CookProcessor.h` 전부(A4c1 파일은 그대로 — `CookKeys.cpp` 분기 156/157의 남은 하나는 14.1.66의 단언).
+
+닿지 않는 곳 없음.
 
 ## 15. PNG 디코더 범위
 
