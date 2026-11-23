@@ -383,7 +383,11 @@ internal static partial class CrashReportingTests
                     "cdb.exe");
             Verify.That(File.Exists(cdb), "cdb.exe is required for crash dump verification (Windows Kits 10 Debuggers): " + cdb);
             string bin = Path.GetDirectoryName(executable)!;
-            string program = Path.GetFileNameWithoutExtension(executable);
+            // Modular면 probe 함수는 호스트 공유 라이브러리 안에 있다. cdb는 이미지 이름의 식별자가 아닌 글자를 '_'로 바꿔 모듈 이름으로
+            // 쓴다(FoundationModular-FoundationTests-Windows-Debug.dll → FoundationModular_FoundationTests_Windows_Debug — BuildTargets BS8d6).
+            string program = options.HostModule is string host
+                ? Regex.Replace(Path.GetFileNameWithoutExtension(host), "[^A-Za-z0-9_]", "_")
+                : Path.GetFileNameWithoutExtension(executable);
             var start = new ProcessStartInfo(cdb)
             {
                 UseShellExecute = false,
@@ -934,10 +938,14 @@ internal static partial class CrashReportingTests
             Verify.That(error is "0x00000002" or "0x00000003", "start error: " + error);
             return Task.CompletedTask;
         });
-        foreach ((string mode, string fault, string status, string? exitCode) in new[] {
+        // 도우미 실패 주입(FaultyHelperVariable)은 시험 호스트 모듈의 정적 초기화가 건다. Modular 도우미는 진입 스텁에서 갈라져 호스트 공유
+        // 라이브러리를 싣지 않으므로 주입이 걸리지 않는다 — 시험 대상(부모의 도우미 실패 처리)은 링크 방식과 무관해 Monolithic 하니스가 본다
+        // (Docs/Design/BuildTargets.ko.md 3.8절 BS8d6).
+        bool helperFaults = !options.Modular;
+        foreach ((string mode, string fault, string status, string? exitCode) in helperFaults ? new[] {
             ("helper-capture-timeout", "hang", "CaptureTimedOut", (string?)null),
             ("helper-exit-during-capture", "exit-on-request", "ExitedDuringCapture", "0x00000005"),
-            ("helper-exited-early", "exit-now", "ExitedEarly", "0x00000006") })
+            ("helper-exited-early", "exit-now", "ExitedEarly", "0x00000006") } : [])
         {
             AddCrash(new(mode, "main", AccessViolation, ReasonException, "Exception", "FaultAccess", Writer: "InProcess", HelperStatus: status),
                 (result, folder) =>
@@ -956,14 +964,17 @@ internal static partial class CrashReportingTests
         // 소유 CAS의 반대 순서(부모가 먼저 거둠)를 시험 gate로 결정적으로 만든다. 실제 도우미가 캡처한 뒤 부모가 끝날 때까지
         // CAS를 미루므로, 부모는 캡처 마감을 넘겨 요청을 거두고 프로세스 안에서 쓴다. 도우미는 CAS에 져서 아무 파일도 쓰지
         // 않는다(덤프 하나, 쓴 쪽 InProcess, 폴더에 남는 파일은 둘뿐). 도우미가 이기는 순서는 main-access-violation이다.
-        AddCrash(new("helper-gate-parent-first", "main", AccessViolation, ReasonException, "Exception", "FaultAccess", Writer: "InProcess",
-            HelperStatus: "CaptureTimedOut"), (result, folder) =>
+        if (helperFaults)
         {
-            Verify.Equal("CrashInfo.json,Minidump.dmp", string.Join(',', Directory.GetFileSystemEntries(folder).Select(Path.GetFileName).Order()),
-                "gate crash folder entries");
-            Verify.That(result.HelperPid != 0, "gate helper pid");
-            return Task.CompletedTask;
-        }, new Dictionary<string, string> { [FaultyHelperVariable] = "gate-parent-first" });
+            AddCrash(new("helper-gate-parent-first", "main", AccessViolation, ReasonException, "Exception", "FaultAccess", Writer: "InProcess",
+                HelperStatus: "CaptureTimedOut"), (result, folder) =>
+            {
+                Verify.Equal("CrashInfo.json,Minidump.dmp", string.Join(',', Directory.GetFileSystemEntries(folder).Select(Path.GetFileName).Order()),
+                    "gate crash folder entries");
+                Verify.That(result.HelperPid != 0, "gate helper pid");
+                return Task.CompletedTask;
+            }, new Dictionary<string, string> { [FaultyHelperVariable] = "gate-parent-first" });
+        }
 
         // job을 닫으면 그 안 프로세스가 모두 끝나는 harness(KILL_ON_JOB_CLOSE)다. 도우미가 job을 빠져나올 수 없으면 부모는 기본
         // 덤프와 최종 CrashInfo.json이 끝날 때까지 기다린 뒤 끝난다(그 뒤 job이 닫혀 도우미가 끝나도 덤프가 남는다).

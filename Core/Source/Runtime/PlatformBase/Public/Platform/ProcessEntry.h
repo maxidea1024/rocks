@@ -63,4 +63,17 @@ InstallTerminationRequestHandler(TerminationRequestHandler handler) noexcept;
 // 수도 지운다. 종료 단계에서 부른다.
 ROCKS_PLATFORMBASE_API void RemoveTerminationRequestHandler() noexcept;
 
+// 정적 소멸·CRT 종료 처리·공유 라이브러리 종료 처리 없이 이 프로세스를 exitCode로 끝낸다(UE
+// FPlatformMisc::RequestExit(true)의 강제 종료와 같다). 돌아오지 않는다. stdio 버퍼는 비우지
+// 않으므로 호출자가 먼저 비운다. 다른 스레드는 그 자리에서 끝난다.
+// - Windows: TerminateProcess(현재 프로세스)다. _Exit는 ExitProcess를 불러 공유 라이브러리마다
+//   DLL_PROCESS_DETACH가 오고 그 라이브러리의 CRT가 정적 소멸자를 돌리므로(Modular — 빌드 타깃
+//   BS8d6) 쓰지 않는다. 종료 코드는 unsigned로 그대로 보인다.
+// - POSIX: _Exit다(atexit·공유 라이브러리 소멸자를 돌리지 않는다). 종료 상태는 하위 8비트다.
+//
+// 사용 예(Launch — RequestExitWithoutStaticTeardown):
+//   platform::RemoveCrashReporting();
+//   platform::ExitProcessWithoutTeardown(exitCode);
+[[noreturn]] ROCKS_PLATFORMBASE_API void ExitProcessWithoutTeardown(int exitCode) noexcept;
+
 } // namespace rocks::platform

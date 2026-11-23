@@ -90,4 +90,14 @@ public abstract class TargetRules
     public virtual bool CheckPublicHeaders => false;
 
     public virtual string? TestExecutable => null;
+
+    /// <summary>
+    /// 시험 동반 타깃이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6). native 하니스가 쓰는 다른 실행 파일을 그 실행 파일 하나뿐인 타깃으로
+    /// 적는다 — Modular 타깃은 실행 파일이 하나라(manifest·빌드 정보) Launch 시험 프로그램을 같은 타깃에 둘 수 없다. <c>test</c>가 native 시험
+    /// 뒤 하니스 전에 같은 구성으로 빌드하고 실행 파일 경로를 하니스에 넘긴다. 동반 타깃은 Program이고 시험 실행 파일이 없어야 한다. 사용 예:
+    /// <code>
+    /// public override IReadOnlyList&lt;string&gt; TestPrograms =&gt; ["LaunchProbeModular"];
+    /// </code>
+    /// </summary>
+    public virtual IReadOnlyList<string> TestPrograms => [];
 }

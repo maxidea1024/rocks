@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-22, 개정 23. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-23, 개정 24. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -327,7 +327,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   5. **BS8d3 진단**: 상속 export 진단(메타 컴파일러)·모듈별 export 수 진단.
   6. **BS8d4 남은 키**: struct·enum·native 등록 타입 키의 모듈 사이 통합(BS8b 한계), `ROCKS_GRAPH_SHARED_DATA` 선언·정의 나누기(BS8c 한계).
   7. **BS8d5 검사 체인**: `Modular` FoundationTests를 로더로 실행해 통과(Windows 로컬, macOS CI) — BS8·ML4 완료 기준.
-  8. **BS8d6 Modular 크래시·Launch 하니스**(개정 22에서 더함): native 하니스의 크래시·Launch 시험을 Modular에서 돌린다(Launch 시험 프로그램의 Modular 타깃, cdb 스택 검사의 모듈 이름, 도우미 프로세스의 Modular 진입). Editor가 Modular라 크래시 수집 경로를 확인한다.
+  8. **BS8d6 Modular 크래시·Launch 하니스**(개정 22에서 더함, 세부는 개정 24): native 하니스의 크래시·Launch 시험을 Modular에서 돌린다(Launch 시험 프로그램의 Modular 타깃, cdb 스택 검사의 모듈 이름, 도우미 프로세스의 Modular 진입). Editor가 Modular라 크래시 수집 경로를 확인한다.
   9. **BS8e Engine 층 Modular export**(개정 23에서 더함): Engine 층 모듈과 Engine 시험이 부르는 선언의 export, 시험 타깃 `EngineModular`(엔진 플러그인 시험 제외 — 플러그인 Modular는 ML5). 모듈을 맡은 세션은 목록을 받아 붙인다.
 - 버린 안: 실행 파일이 모듈 표를 export하고 Core가 OS 기호 조회로 찾는 임시 방식(UE에 없고 ML4가 대체하면 버릴 코드다).
 
@@ -405,7 +405,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - 비공개 헤더의 매크로: 정책 `module-api-macro`의 허용 목록(`PolicyChecks.ExportedPrivateHeaders`)에 그 헤더를 더한다(BS8d2 규칙 5의 예외 — 다른 모듈이 비공개 include로 보는 내부 헤더와 시험이 보는 내부 헤더). 목록에 없는 비공개 헤더의 매크로는 여전히 오류다.
   - 명시적 인스턴스(BS8d2 규칙 3 "템플릿에는 붙이지 않는다"의 예외): 모듈 .cpp가 명시적으로 인스턴스화하고 헤더가 `extern template`으로 다른 TU의 인스턴스화를 막는 템플릿은 그 선언에 매크로를 붙인다(`extern template ROCKS_CRYPTO_API ...` — Crypto `KeyBlob.h`). 정의 TU의 명시적 인스턴스 정의가 그 속성을 이어받아 export하고, 쓰는 모듈은 import한다.
   - 시험 등록 머리(MD20): 시험이 호스트 하나에 있으므로 등록 목록 머리(`first`)는 시험 runner(호스트)에 한 벌이다. Core로 옮기지 않는다.
-- 시험 타깃 `FoundationModular`: Modular Program 타깃, 실행 파일은 FoundationTests 하나(ML4b — Launch 시험 프로그램·내장 진입 프로그램 제외), `TestExecutable`은 FoundationTests. 실행은 ML4b Modular 진입(진입 스텁 → Launch → manifest 로더 → 호스트 앱 기술 → 시험 runner)이다. 로컬 체인과 CI(Windows·macOS — `foundation.yml` "Test FoundationTests as Modular")가 `/t:Test`로 돈다 — BS8·ML4 완료 기준. Modular `/t:Test`는 native 시험 실행 파일만 돈다. host 검사(self·native 하니스·meta)는 링크 방식과 무관한 도구 검사이거나 Monolithic 시험 프로그램을 보는 하니스라 Monolithic 시험 타깃(`Foundation`)이 돈다. native 하니스의 크래시·Launch 시험은 Modular에서 그대로 돌지 않는다(첫 실행: 44건 — Launch 시험 프로그램이 타깃에 없음, cdb 스택 검사의 모듈 이름 `FoundationTests!`가 Modular에서는 `FoundationModular_FoundationTests_…!`, 도우미 프로세스가 Modular 진입을 거치며 덤프 작성자가 달라짐). Editor가 Modular라 크래시 수집의 Modular 경로는 확인해야 하므로 후속 BS8d6(Modular 크래시·Launch 하니스)으로 둔다. 확인 타깃 `ModularCheck`를 대신한다(겹치므로 지웠다). 첫 실행(2026-11-22, Windows Debug): 2,698개 시험 통과.
+- 시험 타깃 `FoundationModular`: Modular Program 타깃, 실행 파일은 FoundationTests 하나(ML4b — Launch 시험 프로그램·내장 진입 프로그램 제외), `TestExecutable`은 FoundationTests. 실행은 ML4b Modular 진입(진입 스텁 → Launch → manifest 로더 → 호스트 앱 기술 → 시험 runner)이다. 로컬 체인과 CI(Windows·macOS — `foundation.yml` "Test FoundationTests as Modular")가 `/t:Test`로 돈다 — BS8·ML4 완료 기준. Modular `/t:Test`는 native 시험 실행 파일과 native 하니스(크래시·Launch — BS8d6, 아래 세부)를 돈다. host self·meta 검사는 링크 방식과 무관한 도구 검사라 Monolithic 시험 타깃(`Foundation`)이 돈다. BS8d5 때는 native 시험만 돌았다. 확인 타깃 `ModularCheck`를 대신한다(겹치므로 지웠다). 첫 실행(2026-11-22, Windows Debug): 2,698개 시험 통과.
 - 정적 모듈 표를 쓰는 시험(DynamicModuleTests·ModuleLoaderTests의 `GeneratedModuleTable()`): Modular에는 그 표가 없으므로 그 시험은 로더 표(`test::ProcessModules().Table()`)를 쓰거나 Monolithic에서만 돈다(`ROCKS_MONOLITHIC`) — 시험이 보는 것이 무엇인지에 따라 하나를 고른다.
 - `constinit`과 dllimport: Windows에서 다른 공유 라이브러리가 export한 함수·변수의 주소는 상수식이 아니다(dllimport — `__imp_` 포인터를 읽는다). 그래서 상수 초기화(`constinit` CVar·상수 표)가 다른 모듈의 함수 주소를 담으면 Modular에서 컴파일 오류다. 그 자리는 이 모듈 안의 inline 함수(템플릿)로 감싸 그 주소를 담는다 — 예: CVar의 리플렉션 enum 스키마 함수(`cvar::detail::ReflectedEnumSchema<E>`).
 - 한계:
@@ -419,7 +419,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 범위: Engine 층 모듈(Engine/Source)과 Engine 시험이 부르는 Core 층 선언을 Modular로 링크되게 한다. Editor(BD17 — Modular)가 엔진 모듈 공유 라이브러리를 싣기 전에 export 누락을 시험 빌드로 먼저 잡는다(BD31과 같은 이유). 규칙은 BS8d2(붙이는 자리)와 BS8d5(시험용 내부 export·비공개 헤더 허용 목록·inline 함수 주소·thread_local)를 그대로 쓴다.
 - 측정(2026-11-22, Windows Debug, `/FORCE:UNRESOLVED`는 측정에서만): Engine 시험을 Modular로 빌드하면 매크로를 붙일 선언이 364곳이다(빌드를 세 번 돌려 링크가 진행되며 드러난 것까지). 많은 순으로 AssetRuntime 68·Graphics 40·GraphicsTypes 32·AssetDatabase 29·Animation 25·SparksCompiler 23·AssetNugget 19·SparksVm 17·Mesh 16·RenderBase 15이고, Core 층 6곳(`Log`·`ModuleTypeRegistrations`·Trace 함수 둘·`LogicalProcessorCount`·HostConfig `FindEngineDirectory`)도 있다. 비공개 헤더는 AssetRuntime `PackageInternal.h`·EngineAssets `EngineAssetsInternal.h`·MeshTools `MeshBuildInternal.h` 셋이다. friend 재선언(`InstantiatePackages`·`ParseLogicalPath`·`LinkModule`·`LinkImports`·`TryParseExpectation`)에도 붙인다.
 - 분담: 모듈을 맡은 세션이 있으면 그 세션이 목록을 받아 붙인다(Animation·Mesh·MeshSource·MeshTools — rocks-ff, 55곳). 나머지는 이 단계가 붙이고 그 세션들에 알린다.
-- 시험 타깃 `EngineModular`: Modular Program 타깃, 실행 파일은 시험 모듈 `EngineModularTests` 하나(`EngineTests`와 같은 소스, 엔진 플러그인 시험 제외). 로컬 체인과 CI(Windows·macOS)가 `/t:Test`로 돈다(BS8d5와 같이 native 시험만).
+- 시험 타깃 `EngineModular`: Modular Program 타깃, 실행 파일은 시험 모듈 `EngineModularTests` 하나(`EngineTests`와 같은 소스, 엔진 플러그인 시험 제외). 로컬 체인과 CI(Windows·macOS)가 `/t:Test`로 돈다(native 시험과 native 하니스 — BS8d6).
 - 엔진 플러그인 제외: `EngineTests`는 켠 엔진 플러그인의 시험 모듈(`PluginTestModules` — UnrealExchange)을 링크하는데, `Modular` 타깃의 플러그인은 플러그인 binary manifest(플러그인마다 `<Plugin>/Binaries/<Platform>/` — [모듈 로더](ModuleLoader.ko.md) MD12, ML5) 전까지 거부한다(BD41). 그래서 Modular 시험 모듈은 플러그인 시험을 빼고(`TestsModule.PluginTests`), 플러그인 모듈의 export는 ML5에서 한다. 플러그인 manifest를 지금 앞당기지 않은 것은 플러그인 활성 조건 해석·빌드 목록 대조와 한 묶음(ML5 — Rocks Studio)이기 때문이다.
 - 정적 모듈 표를 쓰는 Engine 시험(ModuleLoader 3.14절): `EngineAssets_ModuleEntryRegistersSettings`는 프로세스 로더 표(`test::ProcessModules()`·`EntryAt`)로 옮겼고, 정적 표로 새 로더를 만드는 `GpuTrace_RenderBaseModuleRegistersThroughTheTraceService`는 `ROCKS_MONOLITHIC`으로 감쌌다.
 - 타입 키(Core `Core/TypeKey.h`): 헤더의 변수 템플릿 주소를 타입 표지로 쓰던 세 곳은 Modular에서 이미지마다 주소가 달라 모듈 사이 조회가 갈라진다 — BD29가 금지한 주소 식별 정적 객체인데 템플릿 문맥이라 BS8c 검사가 보지 못했다. 그래서 BS8d4의 native 등록 타입 키 기구(`NativeTypeKeyTraits`·`ROCKS_DECLARE_NATIVE_TYPE_KEY`·`ROCKS_DEFINE_NATIVE_TYPE_KEY`·이미지 지역 표지 `NativeTypeIdentity`)를 ObjectRuntime에서 Core로 내리고 `TypeKeyOf<T>()`(선언한 export 키, 없으면 이미지 지역 표지 — 선언이 보이는지는 템플릿 기본 인자로 판정, BS8d4와 같은 ODR 이유)를 두었다. `NativeTypeKey`(리플렉션 생성 키 우선)는 그 위에 있다. 다른 모듈이 같은 키를 써야 하는 타입은 export 키를 선언한다.
@@ -428,7 +428,22 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - 콘솔 명령 대상(`Config/CVarCommand.h` `CommandContext::Target<T>`·`ConfigContext::BindCommand`): 대상을 묶는 모듈과 명령 함수의 모듈이 다르면 Modular에서 Fatal이었다. 대상 타입(`int32` 같은 기본 타입 포함)은 보통 한 모듈 안이라 이미지 지역 표지로 충분하고, 모듈을 넘으면 그 타입이 키를 선언한다. 옛 표지도 `const`였다.
   - 정책 `public-header-type-tag`: 엔진 소유 모듈 공개 헤더에서 같은 헤더의 변수 템플릿 선언과 그 주소(`&Name<`)가 함께 있으면 거부한다(`Core/TypeKey.h`만 예외). 어휘 검사라 다른 헤더에 선언한 변수 템플릿의 주소는 보지 못한다.
 - 이름 상수의 주소: 헤더의 `inline constexpr char[]`(예 `EngineStageReady`)도 이미지마다 사본이다(inline 함수 주소와 같은 이유 — BS8d5). 계약이 문자열 내용인 자리(크래시 기록 단계 이름)는 내용으로 비교한다(시험 `Engine_MarksRunStagesForCrashRecords`).
-- 한계: Engine 층 크래시·Launch 하니스는 BS8d6과 같이 Monolithic만 본다. 엔진 플러그인 모듈의 Modular 링크는 ML5다.
+- 한계: Engine 층 크래시·Launch 하니스는 BS8d6이 Modular에서도 돌린다(아래). 엔진 플러그인 모듈의 Modular 링크는 ML5다.
+
+**BS8d6 Modular 크래시·Launch 하니스 세부(개정 24).**
+- 범위: Modular 시험 타깃(`FoundationModular`·`EngineModular`)의 `/t:Test`가 native 시험 실행 파일 뒤에 native 하니스(크래시 수집·Launch·로그 크래시·컴파일 계약 시험 — `Rocks.ToolTests native`)도 돈다. Editor(BD17)가 Modular라 크래시 수집(도우미·덤프·cdb 스택)과 Launch 흐름(Modular 진입 — [모듈 로더](ModuleLoader.ko.md) 3.14절)을 Modular 실행 파일로 확인한다. host self·meta 검사는 링크 방식과 무관한 도구 검사라 지금처럼 Monolithic 시험 타깃만 돈다.
+- 첫 실행(2026-11-23, Windows Debug, FoundationModular): 192건 중 44건 실패 — cdb 스택 검사 29건, Launch 시험 프로그램 없음 15건(그중 내장 진입 1건), 도우미 실패 주입 4건(실패 줄로는 cdb 검사와 겹친 것이 있다).
+- **Launch 시험 프로그램은 Modular 타깃을 따로 둔다**(결정, UE 방식): Modular 링크는 실행 파일 하나마다 manifest(`<Target>.modules.json`)와 빌드 정보(Core 공유 라이브러리의 정의 TU 하나 — BS8d1)를 만들므로 Modular 타깃의 실행 파일은 하나다(입력 검사가 거부한다). UE도 Modular 프로그램마다 타깃이 따로다(`ShaderCompileWorker`처럼 target 하나 = 실행 파일 하나 = `.modules` 하나). 그래서 `LaunchProbeModular`·`LaunchWindowedProbeModular`(Program, Modular, 실행 파일 `LaunchProbe`·`LaunchWindowedProbe`)를 더한다. 내장 진입 프로그램(`LaunchEmbeddedHost`)은 Modular를 지원하지 않으므로(ModuleLoader 3.14절) 타깃이 없다.
+  - 버린 안: Modular 타깃 하나에 실행 파일 여럿(manifest를 실행 파일마다 두기). 빌드 정보 ID가 실행 파일의 링크 폐포로 계산되는데(ReflectionFoundations 8.1절) Modular에서는 Core 공유 라이브러리 하나에 정의 TU가 하나뿐이라, 실행 파일이 여럿이면 빌드 정보의 뜻(타깃 단위 ID)을 새로 정해야 한다. UE에도 없는 구조라 버린다.
+- **시험 동반 타깃 `TargetRules.TestPrograms`**: 시험 타깃이 하니스에 필요한 다른 타깃 이름을 적는다(기본 빈 목록). `test`는 native 시험 실행 파일 뒤, 하니스 전에 그 타깃들을 같은 구성·도구 체인·빌드 방식으로 빌드하고(출력은 각 타깃의 기본 출력 디렉터리이고, `--output <경로>`를 준 `test`는 `<경로>-<타깃 소문자>` 형제 디렉터리다 — 시험 타깃 출력과 겹치지 않고 같은 `out` 아래다. CI가 `/p:NativeOutput`으로 출력을 정한다. 실행 파일 경로는 동반 빌드 보고서 `action-report.json`의 모듈 출력에서 읽는다) 실행 파일 경로를 하니스에 `--program <이름>=<경로>`로 넘긴다. 하니스는 넘겨받은 프로그램을 쓰고, 없는 이름은 지금처럼 시험 실행 파일 옆에서 찾는다(Monolithic 타깃은 Launch 시험 프로그램을 같은 타깃에 둔다 — 바뀌지 않는다). `FoundationModular`·`EngineModular`가 `LaunchProbeModular`·`LaunchWindowedProbeModular`를 적는다. 동반 타깃은 `Program`이고 실행 파일 모듈 하나만 고르며 시험 실행 파일·동반 타깃이 없어야 한다(재귀를 막는다). 이름은 대소문자까지 구별하고 중복은 오류다(모두 `ArgumentException`).
+- **cdb 스택의 모듈 이름**: Modular에서는 크래시 probe 함수가 실행 파일이 아니라 호스트 공유 라이브러리(`<Target>-<Module>[-<Platform>-<Configuration>].dll`) 안에 있고, cdb는 이미지 이름의 식별자가 아닌 글자를 `_`로 바꿔 모듈 이름으로 쓴다(`FoundationModular_FoundationTests_Windows_Debug!rocks::test::RunCrashProbe`). 그래서 `test`가 Modular면 하니스에 호스트 공유 라이브러리 경로를 `--host-module <경로>`로 넘기고, 하니스는 스택 프레임·`lm v m`·private PDB 검사를 그 이름으로 한다. 실행 파일 이름(크래시 폴더 이름·`program`·PDB 이름 칸)은 그대로 실행 파일이다.
+- **도우미 실패 주입 시험은 Monolithic만**: 실패 주입(`ROCKS_CRASH_PROBE_HELPER` — 시험 도우미 본문 대체·캡처 gate, `InstallCrashHelperTestMode`)은 시험 호스트 모듈의 정적 초기화가 건다. Modular 도우미 프로세스는 진입 스텁의 도우미 분기에서 갈라져 호스트 공유 라이브러리를 싣지 않으므로(ModuleLoader 3.14절 1단계) 주입이 걸리지 않는다. 시험 대상(부모의 도우미 실패 처리 — PlatformBase)은 링크 방식과 무관한 코드라 Monolithic 하니스가 보고, Modular 하니스는 이 네 시험(`helper-capture-timeout`·`helper-exit-during-capture`·`helper-exited-early`·`helper-gate-parent-first`)을 등록하지 않는다. 정상 도우미 경로(도우미가 덤프를 씀)는 Modular의 다른 크래시 시험이 본다.
+  - 버린 안: 진입 스텁에 시험 주입 고리를 두기(시험 전용 코드가 모든 Modular 실행 파일 진입에 들어간다), 도우미 프로세스가 호스트 모듈을 싣기(도우미는 시동 비용과 실패 면을 줄이려고 Launch 상태·할당기·로그 없이 갈라진다 — CrashHandlingAndLaunch).
+- 내장 진입 시험(`Native.Launch.embedded-host`)도 Modular에서는 등록하지 않는다(프로그램이 없다).
+- **시험 실행기 이름**: 크래시 폴더 이름·`program`은 앱 기술 이름이고 하니스는 실행 파일 이름으로 찾는다. 실행기 이름을 층 번호(`FOUNDATION_TEST_RUNNER_LAYER`)로 고르던 것을 빌드가 정의하는 모듈 이름(`ROCKS_MODULE_NAME_TEXT` — 시험 실행 파일 모듈 이름이 실행 파일 이름이다)으로 바꿨다 — `EngineModularTests`는 Engine 층이지만 이름이 다르다(EngineModular 하니스 첫 실행 37건).
+- **정적 소멸 없는 종료(하니스가 찾은 제품 결함)**: `RequestExitWithoutStaticTeardown`은 `_Exit`로 끝냈는데, Windows `_Exit`는 `ExitProcess`를 불러 DLL마다 `DLL_PROCESS_DETACH`가 오고 DLL의 CRT가 그 DLL의 정적 소멸자를 돌린다. 그래서 Modular에서는 호스트 공유 라이브러리의 정적 소멸이 돌았다(`Native.Launch.static-teardown`·`off-no-teardown`). PlatformBase `ExitProcessWithoutTeardown`(Windows `TerminateProcess(GetCurrentProcess(), code)` — UE `FPlatformMisc::RequestExit(true)`와 같다, POSIX `_Exit`)으로 바꿨다([크래시 처리와 실행](CrashHandlingAndLaunch.ko.md) 8.2절 개정 14).
+- 시험: 하니스 자체가 시험이다. 로컬 체인과 CI(Windows "Test FoundationTests as Modular"·"Test EngineTests as Modular", macOS)가 Modular `/t:Test`로 돈다. CLI 시험 — 동반 타깃의 검사(시험 실행 파일이 있는 동반 타깃·없는 타깃 이름·중복 거부, 기본 출력과 `--output` 형제 출력).
+- 한계: 동반 타깃은 따로 빌드하므로 Core 등 공유 모듈을 타깃마다 다시 컴파일한다(출력 디렉터리가 타깃마다다 — 시험 시간이 는다). macOS의 cdb 검사는 원래 없다(lldb 검사가 생기면 같은 이름 규칙을 쓴다).
 
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.

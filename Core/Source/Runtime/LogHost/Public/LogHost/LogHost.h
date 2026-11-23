@@ -44,7 +44,7 @@
 //   (void)host.Watch(context);
 //   ... 엔진 실행 ...
 //   host.Stop();                        // 설치 범위가 끝난 뒤
-//   if (host.WriterAbandoned()) { 정리 없이 프로세스 종료(_Exit) }
+//   if (host.WriterAbandoned()) { 정리 없이 프로세스 종료(RequestExitWithoutStaticTeardown) }
 namespace rocks {
 
 // log.mode 값이다(호스트 프리셋 그대로, 또는 LogMode::Async·Sync로 덮어쓰기).
@@ -316,7 +316,8 @@ public:
     // sink·파일 sink· 봉인기를 일부러 놓아 프로세스 끝까지 살려 둔다(남은 스레드가 돌아오면 그
     // sink들을 쥐고 있다). 생성자에 준 allocator도 프로세스 끝까지 살아 있어야 한다. 이때
     // WriterAbandoned가 참이고, 호스트는 정리(전역 소멸자·CRT 종료 처리) 없이 프로세스를 끝낸다(예:
-    // _Exit). 그 뒤 Start는 Busy다.
+    // Launch RequestExitWithoutStaticTeardown — platform::ExitProcessWithoutTeardown. _Exit는
+    // Windows에서 공유 라이브러리의 정적 소멸을 돌린다). 그 뒤 Start는 Busy다.
     void Stop() noexcept;
 
     // 앞 Stop이 멈춘 sink에 걸린 출력 스레드를 남겨 두고 LogSystem과 sink를 놓았는지다(Stop 설명).

@@ -14,6 +14,7 @@
 #include <Platform/Fatal.h>
 #include <Platform/File.h>
 #include <Platform/Memory.h>
+#include <Platform/ProcessEntry.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
 
@@ -455,8 +456,9 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
     } else if (CrashModeIs(mode, "control-c-exit")) {
         return ExitWithControlCStatus() ? DidNotCrash : UnknownMode;
     } else if (CrashModeIs(mode, "exit-7")) {
-        // 정상 종료(정리 없이 바로)다. 도우미는 기록하지 않는다.
-        _Exit(ProbeExitCode);
+        // 정상 종료(정리 없이 바로 — 공유 라이브러리의 정적 소멸도 돌지 않는다)다. 도우미는 기록하지
+        // 않는다.
+        rocks::platform::ExitProcessWithoutTeardown(ProbeExitCode);
     } else if (CrashModeIs(mode, "normal-exit")) {
         // 정상 종료: Launch가 수집기를 떼며 도우미에 Shutdown을 알리고 끝낸다(도우미가 남지
         // 않는다).

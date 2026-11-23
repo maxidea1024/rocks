@@ -357,7 +357,7 @@ LogHost host(allocator);
     (void)host.Watch(settings.Context());              // log.level·log.levels 변경을 프레임 Sync에서 적용
     // ... trace 세션 → 엔진 루프(프레임마다 Config Sync) → 엔진 정리 → trace 정지
 }
-host.Stop();                                           // WriterAbandoned()면 정리 없이 _Exit
+host.Stop();                                           // WriterAbandoned()면 RequestExitWithoutStaticTeardown
 ```
 
 | 설정 | 종류 | 기본값 | 변경 |

@@ -16,7 +16,7 @@
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Development /p:RocksTarget=Foundation
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation
-dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=FoundationModular   # Modular(모듈마다 공유 라이브러리) 시험, native 시험만
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=FoundationModular   # Modular(모듈마다 공유 라이브러리) 시험, native 시험과 크래시·Launch 하니스
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=EngineModular       # Engine 층 Modular 시험(엔진 플러그인 시험 제외)
 dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engine
 ```
