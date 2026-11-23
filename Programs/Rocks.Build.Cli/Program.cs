@@ -359,44 +359,14 @@ namespace Rocks.Build.Cli
                 }
                 else if (rules.Target.CheckPublicHeaders)
                 {
-                    var sources = new List<string>();
-                    // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
-                    HashSet<string> reached = LinkClosure.Reachable(targets,
-                        modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase),
-                        (name, _) => throw new ArgumentException($"Unknown dependency {name}"));
-
-                    foreach (var includeDirectory in modules.Where(module => reached.Contains(module.Name)).SelectMany(module => module.PublicIncludeDirectories).Distinct())
+                    // 공개 헤더 검사 모듈은 정적 라이브러리라 Modular에서는 공유 라이브러리가 된다(Docs/Design/BuildTargets.ko.md 3.5절 BS1a).
+                    if (rules.Target.LinkType != NativeLinkType.Monolithic)
                     {
-                        foreach (var header in Directory.GetFiles(includeDirectory, "*.h", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
-                        {
-                            var include = Path.GetRelativePath(includeDirectory, header).Replace('\\', '/');
-                            var path = Path.Combine(output, "HeaderChecks", Hashing.Sha256Text(include) + ".cpp");
-                            AtomicFile.WriteIfChanged(path, $"#include <{include}>\nint RocksHeaderCheck_{Hashing.Sha256Text(include)}() noexcept {{ return 0; }}\n");
-                            sources.Add(path);
-                        }
+                        throw new ArgumentException($"Target {rules.Target.Name}: CheckPublicHeaders needs a Monolithic target.");
                     }
 
-                    modules.Add(new()
-                    {
-                        Name = "PublicHeaderChecks",
-                        Sources = sources,
-                        // 헤더 하나가 스스로 컴파일되는지 보는 검사이므로 유니티와 PCH 없이 돈다(Docs/Design/UnityBuildPch.ko.md 10절).
-                        // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
-                        Unity = UnityMode.Off,
-                        PchUsage = PchUsage.Off,
-                        // 공개 헤더의 쓰기 가능한 정적 저장소(공유 라이브러리마다 복제된다)를 Clang 진단으로 거부한다(Docs/Design/BuildTargets.ko.md
-                        // 3.8절 BD29·BS8c). Windows 대상만 켠다(다른 대상에서는 숨김 가시성 객체만 알린다 — thread_local은 정책 검사가 따로 본다).
-                        AdditionalCompileArguments = ToolchainCheck.SupportsUniqueObjectDuplication(toolchain.Platform, toolchain.CompilerVersion)
-                            ? [ToolchainCheck.UniqueObjectDuplicationWarning] : [],
-                        // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다. 도달한 라이브러리를
-                        // 모두 공개 의존으로 두므로 모듈마다 자기 공개 환경만으로 컴파일하는 검사(BD9)가 아니다 — 그 검사는 BS1이다.
-                        // BS1 전에는 의존을 비공개로 내리지 않는다(Docs/Design/BuildTargets.ko.md 3.5절, BS0 → BS1 → BS3).
-                        // 서드파티 모듈은 뺀다: 공개 include가 없고(서드파티 규칙 계약) 전역 상태 서드파티의 직접 소비 모듈이 하나여야 한다(BD29·BS8c).
-                        PublicDependencies = reached.Select(name => modules.Single(module => module.Name == name))
-                            .Where(module => module.Kind == NativeModuleKind.StaticLibrary && !module.ThirdParty)
-                            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray()
-                    });
-                    targets.Add("PublicHeaderChecks");
+                    // 모듈마다 자기 공개 환경만으로 공개 헤더를 컴파일한다(BD9 — BS1a).
+                    targets.AddRange(PublicHeaderChecks.Add(modules, targets, output, toolchain));
                 }
 
                 // --plan-only on(build 전용): 메타 생성과 계획까지만 하고 compile_commands.json·묶음 파일을 쓴 뒤 끝낸다. 아무것도

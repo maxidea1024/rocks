@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-23, 개정 26. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-23, 개정 27. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -192,7 +192,7 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 
 **서드파티 모듈(BD21)**: private 의존이 생기면 UE 방식으로 바꾼다. 서드파티 모듈은 자기 include·define을 public으로 내고, 소비 모듈은 `PrivateDependencies`로 쓴다. `ConsumerIncludeDirectories`·`ConsumerDefines` 우회는 없앤다(BS3). "엔진 공개 헤더는 서드파티 헤더를 include하지 않는다"([저장소 구성](../Guides/RepositoryLayout.ko.md) "외부 헤더는 소비 모듈의 Private 구현에만 노출") 규칙은 공개 헤더 검사(BD9)가 자동으로 잡는다.
 
-**시험 실행 파일(BD22)**: 시험 모듈(`FoundationTests`·`EngineTests`)의 각 `<Module>/Tests/` 소스는 시험 대상 모듈의 컴파일 환경 전체(비공개 의존 포함)와 그 모듈의 `Private/` 폴더를 받는다. 지금 `NativeModuleInput.Sources`는 문자열 목록이라(`NativeBuildModels.cs:206`) 소스마다 환경을 줄 수 없으므로 `NativeModuleInput`에 **소스 묶음** `SourceGroups`를 더한다. 묶음은 (소스 목록, 추가 비공개 의존, 추가 private include 디렉터리)이고, 묶음의 소스는 모듈 컴파일 환경에 묶음의 추가분을 더한 환경으로 컴파일한다. 시험 규칙은 대상 모듈마다 묶음 하나를 만든다(추가 비공개 의존 = 대상 모듈과 그 두 의존 목록, 추가 include = 대상 모듈 `Private/`). 지금 시험 실행 파일이 상위 모듈만 나열하고 하위 의존 전파에 기대며(`FoundationTests.Build.cs`의 "lower dependencies propagate"), `Core/Source/Runtime` 루트 include로 비공개 헤더를 여는 것(83–85행)을 이 규칙으로 바꾼다. BD11의 소유 모듈 판정은 묶음 환경을 쓴다. 정적 라이브러리로 나누지 않으므로 시험 등록(정적 초기화)이 링커에 의해 빠지는 문제가 없다. [유니티 빌드·PCH](UnityBuildPch.ko.md)의 묶음 TU는 소스 묶음 경계를 넘지 않는다(환경이 다른 소스를 한 TU로 묶을 수 없다).
+**시험 실행 파일(BD22 — 개정 27에서 구현 방식을 바꿨다: 아래 "BS1 구현 세부"의 시험 소스 묶음. 묶음은 컴파일 환경이 아니라 BD11 검사의 보이는 모듈을 정한다)**: 시험 모듈(`FoundationTests`·`EngineTests`)의 각 `<Module>/Tests/` 소스는 시험 대상 모듈의 컴파일 환경 전체(비공개 의존 포함)와 그 모듈의 `Private/` 폴더를 받는다. 지금 `NativeModuleInput.Sources`는 문자열 목록이라(`NativeBuildModels.cs:206`) 소스마다 환경을 줄 수 없으므로 `NativeModuleInput`에 **소스 묶음** `SourceGroups`를 더한다. 묶음은 (소스 목록, 추가 비공개 의존, 추가 private include 디렉터리)이고, 묶음의 소스는 모듈 컴파일 환경에 묶음의 추가분을 더한 환경으로 컴파일한다. (개정 27에서 버린 원안: 묶음의 소스를 모듈 컴파일 환경에 묶음의 추가분을 더한 환경으로 컴파일하고, 시험 규칙은 대상 모듈마다 묶음 하나를 만든다 — 추가 비공개 의존 = 대상 모듈과 그 두 의존 목록, 추가 include = 대상 모듈 `Private/`. 지금 방식은 아래 "BS1 구현 세부"다.) 지금 시험 실행 파일이 상위 모듈만 나열하고 하위 의존 전파에 기대며(`FoundationTests.Build.cs`의 "lower dependencies propagate"), `Core/Source/Runtime` 루트 include로 비공개 헤더를 여는 것(83–85행)을 이 규칙으로 바꾼다. BD11의 소유 모듈 판정은 묶음 환경을 쓴다. 정적 라이브러리로 나누지 않으므로 시험 등록(정적 초기화)이 링커에 의해 빠지는 문제가 없다. [유니티 빌드·PCH](UnityBuildPch.ko.md)의 묶음 TU는 소스 묶음 경계를 넘지 않는다(환경이 다른 소스를 한 TU로 묶을 수 없다).
 
 **설치 SDK**: `SdkModule`(`InstalledSdk.cs:14`)의 `Dependencies`를 두 목록으로 바꾼다(`Reachable` `:49`, 검증 `:455-469`도 같다). SDK 게임 빌드는 같은 규칙으로 컴파일 환경을 만든다.
 
@@ -209,6 +209,38 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 - 한 모듈을 두 목록에 함께 적으면 입력 오류다(BD11의 첫 항목 — 규칙 값만 보므로 BS1의 depfile 없이 지금 한다).
 - 설치 SDK manifest 12: `SdkModule.Dependencies`를 `PublicDependencies`·`PrivateDependencies`로 나눈다. SDK 게임 빌드는 같은 보임 규칙을 쓴다.
 - 전환 검증(완료 기준): 모든 타깃(Foundation·EngineTests·Engine·Sandbox·Commandlet·벤치 여섯·ShaderToolSpike·WorldBench)의 Debug `compile_commands.json`이 전환 전과 byte 단위로 같다.
+
+**BS1 구현 세부(개정 27).** BS1을 둘로 나눈다. BS1a는 모듈별 공개 헤더 검사(BD9), BS1b는 include 소유 모듈 검사와 시험 소스 묶음(BD11·BD22 개정)과 쓰지 않는 공개 의존 진단이다. BS1a가 먼저다(BS1b의 진단이 BS1a 검사의 depfile을 쓴다).
+
+*BS1a 모듈별 공개 헤더 검사(BD9).*
+- 공개 헤더 검사를 모듈마다 따로 둔다: 검사 대상 모듈 M마다 검사 모듈 `PublicHeaderChecks_<M>`(정적 라이브러리, 유니티·PCH 끔)을 만들고 그 공개 의존은 M 하나다. 그래서 M의 공개 헤더는 **M의 공개 환경만으로** 컴파일된다(M의 public include·define과 M의 공개 의존의 공개 환경 — 3.5절 첫 규칙). 지금은 검사 모듈 하나가 도달한 라이브러리를 모두 공개 의존으로 두어, 헤더가 의존하지 않은 모듈의 헤더도 열렸다.
+- 검사 대상: 타깃 도달 집합의 라이브러리 모듈 가운데 서드파티가 아닌 것(지금과 같다), 그 모듈의 public include 디렉터리 아래 `*.h`(지금과 같다). 헤더마다 검사 TU 하나(`#include <상대 경로>`)다.
+- 검사 모듈은 `CheckPublicHeaders` 타깃에만 만들고 실행 파일에 링크하지 않는다(지금과 같다). 정적 라이브러리라 Modular 타깃에서는 공유 라이브러리가 되므로 `CheckPublicHeaders`는 Monolithic 타깃만 켠다(Modular면 입력 오류).
+- 버린 안: 검사 모듈 하나에 소스 묶음마다 다른 환경(BD22 원안의 SourceGroups) — 아래 BD22 개정과 같은 이유로 묶음별 컴파일 환경을 두지 않는다. 검사 모듈을 모듈마다 두면 지금 빌드 기구(모듈 단위 정의 헤더·유니티·PCH)를 그대로 쓴다.
+- 검사 모듈의 종류(`Type`)는 대상 모듈의 것이다(Release 배제·type 의존 규칙이 같게 본다). 공개 리플렉션 헤더가 있는 모듈은 메타 생성 Public 폴더가 public include에 있으므로 생성 헤더(`.generated.h`)도 단독으로 검사한다(의도 — 생성 헤더도 스스로 컴파일되어야 한다).
+- 결과: 헤더가 자기 모듈의 의존 목록 밖 모듈의 헤더를 include하면 검사 컴파일이 실패한다. 첫 실행(2026-11-23, Windows Debug — Foundation·EngineTests): 위반 0건(BS0이 모든 의존을 공개로 두었고 의존 목록이 빠짐없다).
+- 시험: 통합 시험 `PublicHeaderCheckTests`(모듈마다 검사 모듈, 의존하지 않은 모듈의 헤더를 include한 공개 헤더는 그 검사만 실패, 의존을 적으면 통과).
+
+*BS1b include 소유 모듈 검사(BD11)와 시험 소스 묶음(BD22 개정).*
+- **소유 영역**: 헤더 경로를 담는 가장 긴 모듈 폴더(`ModuleDirectory`)의 모듈 M이 소유한다. 소유는 셋으로 나눈다. **공개 영역**은 M의 public include 디렉터리와 M의 메타 생성 Public 폴더(`<out>/Generated/<M>/Public`)다. **시험 영역**은 `<M 폴더>/Tests/`다. **비공개 영역**은 M 폴더의 나머지(`Private/` 등)와 메타 생성 Private 폴더다. 경로 비교는 플랫폼 경로 비교(Windows·macOS는 대소문자 무시)와 경로 성분 경계로 하고, 심볼릭 링크·subst 드라이브는 풀지 않는다(PathSpelling과 같다).
+- **`ModuleDirectory` 필수**: 서드파티가 아니고 소스나 public include가 있는 모든 모듈은 `ModuleDirectory`가 있어야 한다(입력 오류). 지금 없는 규칙(PlatformBase·PlatformWindow·D3D11Graphics·D3D12Graphics·Dxgi·OpenGLGraphics와 Programs 규칙)에 자기 폴더를 넣는다. include 디렉터리로 소유를 정하는 대체 규칙은 두지 않는다(시험 실행 파일의 루트 include처럼 넓은 디렉터리가 다른 모듈의 파일을 가로챈다).
+- **보지 않는 경로**: 저장소 밖(시스템·SDK·툴체인), 출력 폴더의 그 밖 파일(정의 헤더·빌드 정보), 서드파티 루트(`ThirdPartyManifest.ThirdPartyRoots` — 지금 서드파티는 소비 모듈이 `ConsumerIncludeDirectories`로 의존 없이 쓰는 우회가 있어 BS3이 서드파티 판정을 켠다), 어떤 모듈 폴더에도 없는 경로(시험 지원 `Core/Source/Developer/TestSupport`는 모듈이 아니라 시험 실행 파일의 소스·include다).
+- **보이는 것**: 모듈 M의 소스에는 M의 세 영역과, M의 컴파일 환경에 보이는 모듈(`ModuleVisibility.Of`) X의 공개 영역이 보인다.
+- **시험 소스 묶음(BD22 개정)**: `NativeModuleInput.SourceGroups`는 (폴더, 대상 모듈 T, 추가 모듈 목록)의 목록이다. 그 폴더 아래 소스에는 다음이 보인다.
+  - T의 세 영역.
+  - T의 컴파일 환경에 보이는 모듈 X의 공개 영역과 시험 영역(다른 모듈 시험 도우미 — 예 AssetCooker 시험이 AssetDatabase `Tests/`의 도우미를 쓴다).
+  - 추가 모듈 Y와 Y의 공개 환경(`PublicClosure`)에 있는 모듈의 공개 영역.
+  - 호스트(시험 실행 파일 모듈) 자신의 세 영역.
+  - 겹치는 묶음 폴더는 가장 긴 폴더가 이긴다. 묶음 밖 호스트 소스(`Programs/FoundationTests/Private`·`/Engine`)는 호스트 모듈의 보임을 쓴다(합집합).
+  - **컴파일 환경은 바꾸지 않는다.** 모듈 하나의 환경(정의 헤더·include·PCH)은 그대로다. 유니티 묶음만 소스 묶음 경계를 넘지 않는다(묶음 TU를 한 묶음으로 판정하기 위해서다. 지금의 경로 해시 분할 전에 소스 묶음으로 먼저 나누므로 시험 유니티 TU가 한 번 모두 다시 만들어진다).
+  - 시험 규칙(`FoundationTests.Build.cs`)은 시험 대상 모듈 T마다 묶음 (`<T 폴더>/Tests`, T, 추가 모듈)을 만든다. 추가 모듈은 그 시험이 쓰는 fixture 모듈(`ReflectionTestFixtures`·`AssetTestFixtures` 등)과 `DynamicModuleTestApi`를 묶음마다 명시한다(모든 묶음에 붙이면 fixture의 공개 의존이 검사를 덮는다). 첫 실행의 위반은 시험을 그 헤더를 쓸 수 있는 상위 모듈의 `Tests/`로 옮기거나, 시험 전용 접근 수단이 정당하면 묶음 추가 모듈로 푼다(옮김은 동작 불변 이동이다).
+  - 시험 실행 파일의 컴파일 환경은 묶음 대상 모듈 환경의 합집합이다. 빌드가 각 묶음 대상 T의 두 의존 목록을 호스트의 비공개 의존에 자동으로 더한다(BS3이 의존을 비공개로 내려도 시험 규칙을 고칠 필요가 없다). 비공개 헤더 include 철자(`<Module/Private/X.h>` — `Core/Source/Runtime` 같은 루트 include)는 그대로이고, 루트 include로 다른 모듈의 파일이 열리는 것은 이 검사가 막는다.
+  - 버린 안(원안): 묶음마다 컴파일 환경(묶음별 정의 헤더·include·PCH 후보)을 따로 두기. 묶음마다 정의 헤더와 공유 PCH 선택을 따로 해야 해 액션 그래프가 크게 바뀌고 액션이 는다(사용자 결정 2026-11-23). 한계: 헤더 없이 쓰는 다른 모듈의 정의(정의 헤더가 합집합이다)는 잡지 못한다.
+- **검사 대상 기록**: 빌드가 이번 실행에서 게시했거나 증분 검증(`IncrementalStore.IsCurrent`)으로 재사용한 컴파일 액션의 의존 기록(`DependencyRecord` — `<obj>.deps`, 툴체인 헤더와 계획 산출물은 이미 빠져 있다)을 본다. 검증 때 읽은 기록을 다시 쓴다. 실패·취소로 게시도 검증도 안 된 액션의 옛 기록은 보지 않는다. 위반은 빌드 실패다(오류 줄: 소스, 헤더, 소유 모듈·영역, 이유). 경로별 소유 판정은 한 빌드 안에서 캐시한다.
+- **공유 PCH**: PCH를 쓰는 TU의 의존 기록에는 PCH 입력 헤더가 들어 있다(UnityBuildPch 4.1절). 소비 TU 검사에서는 그 PCH 액션 기록에 든 경로를 뺀다. PCH 액션 자신은 제공 모듈의 공개 환경(제공 모듈의 공개 영역과 `PublicClosure`의 공개 영역)으로 검사한다. 한계: PCH에 든 헤더를 소스가 직접 include해도 잡지 못한다(정밀 확인은 `--pch off` 빌드).
+- **쓰지 않는 공개 의존 진단**: BS1a 검사 모듈의 의존 기록에 공개 의존 D가 소유한 헤더가 하나도 없으면 M의 공개 의존 D는 공개 헤더가 쓰지 않는 것이다. 빌드가 알림 한 줄(`Unused public dependencies: M: D, …`)로 모아 낸다(오류 아님 — BS3이 비공개로 내린다). 간접 include도 쓴 것으로 센다(보수적). 한계: 공개 헤더가 없는 모듈(검사 모듈이 없다)은 진단하지 않고, 정의만 쓰는 의존은 "안 씀"으로 본다. BS3의 완료 기준은 여러 타깃의 진단을 합쳐 판정한다.
+- **설치 SDK 게임 빌드**: 엔진 헤더가 저장소 밖이라 보지 않는다(한계 — SDK 모듈의 include 디렉터리로 소유를 정하는 것은 후속).
+- 시험: 소유 영역(가장 긴 폴더, 공개·시험·비공개, 생성 Public·Private, 저장소 밖·출력·서드파티·소유 없는 경로 무시), 보이는 것(공개 의존의 공개 영역, 다른 모듈 비공개 영역 거부, 시험 영역은 시험 묶음만), 묶음(대상·추가 모듈·호스트·겹침), PCH 입력 제외, 검사 대상 기록(재사용 액션 포함, 실패 액션 제외), 위반 빌드 실패와 문구, 유니티 묶음이 소스 묶음 경계를 넘지 않음, 호스트 비공개 의존 자동 추가, `ModuleDirectory` 필수, 쓰지 않는 공개 의존 알림.
 
 **[유니티 빌드·PCH](UnityBuildPch.ko.md)와의 관계**: 8.4절 공유 PCH의 "제공 모듈의 public include closure"는 이 문서의 공개 환경이다. 소비 모듈이 고르는 제공 모듈의 후보(같은 절 248행 "도달 집합에 있는 제공 모듈")는 "컴파일 환경에 보이는 제공 모듈"로 바꾼다. UE도 공개 closure와 직접 비공개 의존만 본다(`UEBuildModule.cs:1169-1206` `InternalGetAllDependencyModulesForPCH`).
 
@@ -604,7 +636,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD19 | Program 타깃의 기본 매크로 조합은 Game과 같다(`ROCKS_WITH_EDITOR_DATA=0`). `WithEditorData`·`CompileWithEditor` 속성으로 켠다 | 권장안 |
 | BD20 | Release 배제 정책을 Game·Client·Server로 넓히고, type Editor 모듈이 Game·Client·Server에 닿는 것을 구성과 무관하게 막는다 | 권장안 |
 | BD21 | 서드파티 모듈은 include·define을 public으로 내고, 소비자는 `PrivateDependencies`로 쓴다. `Consumer*` 우회를 없앤다 | 권장안 |
-| BD22 | 시험 소스는 시험 대상 모듈의 컴파일 환경 전체와 그 모듈의 `Private/`를 받는다. 수단은 `NativeModuleInput.SourceGroups`(묶음별 추가 비공개 의존·include)이고, 유니티 묶음 TU는 소스 묶음 경계를 넘지 않는다 | 권장안 |
+| BD22 | 시험 소스는 시험 대상 모듈의 컴파일 환경 전체와 그 모듈의 `Private/`만 include할 수 있다. 개정 27(사용자 결정): 시험 실행 파일의 컴파일 환경은 대상 모듈 환경의 합집합 하나이고, `NativeModuleInput.SourceGroups`(폴더, 보이는 모듈)가 BD11 검사의 보이는 모듈을 묶음마다 정한다. 유니티 묶음 TU는 소스 묶음 경계를 넘지 않는다. 버린 안: 묶음별 컴파일 환경 | 권장안·사용자 결정 |
 | BD23 | 플러그인 의존 참조(`.rocksplugin` `plugins`)에는 조건을 두지 않는다 | 권장안 |
 | BD24 | 게임 빌드의 플러그인 처리는 문맥 무관 검증(규칙 로드 전)과 문맥별 해석(규칙 로드 뒤, 타깃 종류 사용)으로 나눈다 | 권장안 |
 | BD25 | 모듈 A는 들어갈 수 있는 (타깃 종류, 구성) 집합이 자기 집합을 포함하는 모듈에만 의존한다(3.3절 표). 위반은 규칙 로드 때 오류다 | 권장안 |
@@ -633,7 +665,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | BS0 | 의존 두 목록(3.5절): `NativeModuleInput`·규칙 기반 클래스·ActionGraph 전파·순환 검사·Closures, MetadataRunner·MetadataLayout 범위, SDK manifest(`SdkModule`·`Reachable`·검증), DescriptorModules·ReleaseExclusion 도달 검사. 기존 모듈은 모두 공개 의존으로 옮긴다 | 모든 타깃의 빌드 결과(object 인자)가 전환 전과 같다 |
-| BS1 | 공개 헤더 검사의 모듈별 공개 환경(BD9), include 소유 모듈 정책 검사(BD11), `SourceGroups`와 시험 소스 환경(BD22). 선행: UB0의 depfile 파서 | 공개 헤더가 비공개 의존 헤더를 include한 시험 모듈을 검사가 거부한다 |
+| BS1 | BS1a: 모듈별 공개 헤더 검사(BD9 — 검사 모듈 `PublicHeaderChecks_<M>`). BS1b: include 소유 모듈 검사(BD11, depfile — UB0 파서), 시험 소스 묶음(BD22 개정 27), 쓰지 않는 공개 의존 진단 | 공개 헤더가 의존하지 않은 모듈의 헤더를 include하면 검사 컴파일이 실패한다. 소스가 보이지 않는 모듈의 헤더를 include하면 빌드가 실패한다(시험 소스는 대상 모듈 환경 밖 헤더). 쓰지 않는 공개 의존 알림 |
 | BS2 | 타깃 종류 다섯 값·플랫폼 표·`build::TargetType`·네 매크로와 주입 위치(3.2절 목록)·`Base/Compiler.h` 검사·`CompileWithEditor`·`WithEditorData`·모듈 type ServerOnly·ClientOnly와 `SourceModuleRules.ModuleType`·SDK manifest type, Release 배제 정책 확장과 타깃 종류별 평가 플랫폼(BD20), type 사이 의존 규칙(BD25), 메타 컴파일러 어휘 스캔·두 조합 비교·조건부 생성·합집합 descriptor·`EditorOnly` FieldId 목록(BD6), 에디터 패키지 저장 거부(BD26), 기존 fixture의 `EditorOnly` 필드 이동 | 타깃 종류별 모듈 포함 표와 매크로 값을 시험이 확인한다. 허용되지 않은 조건 블록 안 리플렉션 선언, 블록 안 타입 선언, 블록 밖 `EditorOnly`를 거부한다. `ROCKS_WITH_EDITOR_DATA=0` 빌드의 에디터 패키지 저장이 Unsupported다. `ROCKS_WITH_EDITOR_DATA` 0·1 조합 시험 빌드가 통과한다 |
 | BS3 | 서드파티 모듈 전환(BD21), 기존 모듈의 공개 의존을 비공개로 내리기 | 쓰지 않는 공개 의존 진단 0, `Consumer*` 우회 0, 빌드 통과 |
 | BS4 | 플러그인 활성 조건(3.6절): 기술자 읽기·값 검사, 처리 순서 분리(BD24), 문맥별 해석, 플러그인 `platforms` | 조건 조합 시험(타깃·플랫폼·구성), `enabledByDefault` 플러그인의 Editor 전용 켜기, 미지원 플랫폼 조용히 빼기와 명시 오류 시험 |
@@ -751,3 +783,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 24 | 2026-11-23 | 3.1절에 타깃 속성 `CompanionTargets`를 더했다(셰이더 시스템 SC14 — 동반 프로그램 타깃을 같은 빌드·출력 폴더에, Monolithic만). |
 | 25 | 2026-11-23 | BS8d6 Modular 크래시·Launch 하니스 세부(3.8절): Launch 시험 프로그램의 Modular 타깃 따로(`LaunchProbeModular`·`LaunchWindowedProbeModular`), 시험 동반 타깃 `TargetRules.TestPrograms`(`--output`이면 형제 출력, `CompanionTargets`와 별개), cdb 모듈 이름 `--host-module`, 도우미 실패 주입·내장 진입 시험은 Monolithic만, 시험 실행기 이름, 정적 소멸 없는 종료 결함 수정(`ExitProcessWithoutTeardown`) |
 | 26 | 2026-11-23 | BD41 개정: `Modular` 타깃의 플러그인을 [모듈 로더](ModuleLoader.ko.md) ML5a(3.15절, MD23 — 플러그인 binaries 폴더·manifest)부터 허용, Modular 호스트는 켠 플러그인 모듈을 링크하지 않음(BD36 예외), BS8e의 엔진 플러그인 시험 제외를 거둠 |
+| 27 | 2026-11-23 | BS1 구현 세부(3.5절): BS1a 모듈별 공개 헤더 검사(검사 모듈 `PublicHeaderChecks_<M>`, Modular 타깃의 `CheckPublicHeaders` 거부, 첫 실행 위반 0), BS1b include 소유 모듈 검사(`ModuleDirectory` 필수, 공개·시험·비공개 소유 영역, 서드파티는 BS3, PCH 입력 제외, 이번 실행에서 게시·검증한 의존 기록), 시험 소스 묶음으로 BD22 개정(사용자 결정 — 컴파일 환경은 합집합 하나, 묶음은 검사의 보이는 것을 정하고 fixture는 묶음마다 명시, 호스트 비공개 의존 자동), 쓰지 않는 공개 의존 알림. 설계 리뷰(리뷰어 1명) 반영 |
