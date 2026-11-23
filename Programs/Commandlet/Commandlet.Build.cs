@@ -6,6 +6,7 @@ public sealed class CommandletHost : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "RocksCommandlet",
+        ModuleDirectory = "Programs/Commandlet",
         Kind = NativeModuleKind.Executable,
         // Commandlet is a desktop tool. Android has no standard output backend, so only the common sources are listed (it is not built
         // unless a target includes it). The platform directory holds the standard output channel (StandardOutput.cpp).

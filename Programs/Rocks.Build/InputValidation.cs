@@ -378,6 +378,7 @@ internal static class InputValidation
         ValidateDynamicModules(modules, byFolded);
         ValidatePluginModules(modules, byFolded);
         ValidateModulePlugins(modules);
+        ValidateSourceGroups(modules, byFolded);
         ValidateGlobalStateConsumers(modules);
     }
 
@@ -432,6 +433,31 @@ internal static class InputValidation
                 if (!seen.Add(plugin) || kinds[plugin] == NativeModuleKind.Executable)
                 {
                     throw new ArgumentException($"Module {module.Name}, PluginModules: {plugin} is listed twice or is an executable.");
+                }
+            }
+        }
+    }
+
+    // 소스 묶음(NativeModuleInput.SourceGroups — Docs/Design/BuildTargets 3.5절 BS1b)이다. 폴더는 비지 않고, 대상·추가 모듈은 표에 있는 모듈을
+    // 정확한 철자로 가리키며, 같은 폴더는 한 번이다.
+    private static void ValidateSourceGroups(IReadOnlyList<NativeModuleInput> modules, Dictionary<string, string> byFolded)
+    {
+        foreach (NativeModuleInput module in modules.Where(module => module.SourceGroups.Count != 0))
+        {
+            var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (SourceGroup group in module.SourceGroups)
+            {
+                if (string.IsNullOrWhiteSpace(group.Directory) || !folders.Add(group.Directory))
+                {
+                    throw new ArgumentException($"Module {module.Name}, SourceGroups: the folder '{group.Directory}' is empty or listed twice.");
+                }
+
+                foreach (string name in new[] { group.Target }.Concat(group.Modules).Concat(group.InternalModules))
+                {
+                    if (!byFolded.TryGetValue(name, out string? actual) || !string.Equals(actual, name, StringComparison.Ordinal))
+                    {
+                        throw new ArgumentException($"Module {module.Name}, SourceGroups '{group.Directory}': unknown module {name}.");
+                    }
                 }
             }
         }

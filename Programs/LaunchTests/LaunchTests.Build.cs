@@ -19,6 +19,7 @@ public abstract class LaunchTestProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = ExecutableName,
+        ModuleDirectory = "Programs/LaunchTests",
         Kind = NativeModuleKind.Executable,
         // TerminationSignal.cpp: the real OS termination event the probe sends to itself (console Ctrl-Break, SIGINT).
         Sources = [.. context.Sources($"{Root}/Common"), .. EntrySources(context).Select(context.PathInRoot),

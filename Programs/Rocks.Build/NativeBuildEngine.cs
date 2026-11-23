@@ -89,6 +89,8 @@ public sealed class NativeBuildEngine
         }
 
         var store = new IncrementalStore(request.OutputDirectory);
+        // 지난 실행의 include 소유 위반 보고는 실행 전에 지운다(이번 빌드가 검사 전에 실패해도 옛 보고가 남지 않는다 — BS1b).
+        File.Delete(Path.Combine(request.OutputDirectory, IncludeOwnership.ReportFileName));
         string toolchainKey = Fingerprints.Toolchain(request.Toolchain);
         string initialInputs = InputSnapshot(request, plan, prepared.Digests);
         // 입력 메모는 첫 InputSnapshot이 읽은 값에서 시작한다(같은 파일을 action마다 다시 읽지 않는다 — BuildInputs).
@@ -136,6 +138,23 @@ public sealed class NativeBuildEngine
         bool succeeded = stable && results.All(value => value.Succeeded);
         string? moduleManifest = null;
         IReadOnlyList<string> notices = plan.Notices;
+        string? ownershipFailure = null;
+        if (succeeded)
+        {
+            // include 소유 모듈 검사(Docs/Design/BuildTargets 3.5절 BD11·BS1b): 모든 컴파일 액션의 의존 기록이 이번 실행에서 게시됐거나
+            // 증분 검증됐다. 위반은 빌드 실패이고, 공개 헤더 검사 기록으로 쓰지 않는 공개 의존을 알린다.
+            IncludeOwnership.Result ownership = IncludeOwnership.Check(request, plan.Actions);
+            notices = [.. notices, .. ownership.Notices];
+            if (ownership.ViolationCount != 0)
+            {
+                ownershipFailure = $"Include ownership check failed ({ownership.ViolationCount} includes of headers the source cannot see; " +
+                    "Docs/Design/BuildTargets section 3.5 BS1b):\n" + string.Join("\n", ownership.Violations) +
+                    (ownership.ViolationCount > ownership.Violations.Count ? $"\n... and {ownership.ViolationCount - ownership.Violations.Count} more" : "") +
+                    "\nAll violations: " + ownership.ReportPath;
+                succeeded = false;
+            }
+        }
+
         if (succeeded)
         {
             RemoveStaleOutputs(request, plan);
@@ -153,7 +172,7 @@ public sealed class NativeBuildEngine
         var toolBuildIds = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string module, string id) in prepared.ToolBuildIds)
         {
-            if (stable && results.Any(value => value.Kind == "Link" && value.Succeeded &&
+            if (stable && ownershipFailure is null && results.Any(value => value.Kind == "Link" && value.Succeeded &&
                     string.Equals(value.Module, module, StringComparison.OrdinalIgnoreCase)))
             {
                 toolBuildIds.Add(module, id);
@@ -175,7 +194,7 @@ public sealed class NativeBuildEngine
             AdaptiveSeparated = plan.AdaptiveSeparated,
             Notices = notices,
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
-                results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
+                ownershipFailure ?? results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
             ToolchainFingerprint = prepared.ToolchainFingerprint,
             ToolBuildIds = toolBuildIds,
             ModuleManifestPath = moduleManifest

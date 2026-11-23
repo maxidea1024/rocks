@@ -19,6 +19,7 @@ public sealed class DxgiGraphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            ModuleDirectory = ModuleDirectory,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
             Sources = windows ? context.Sources($"{sources}/Common", $"{sources}/Win64") : context.Sources($"{sources}/Common"),

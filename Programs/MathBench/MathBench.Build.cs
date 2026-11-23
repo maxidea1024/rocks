@@ -9,6 +9,7 @@ public sealed class MathBenchProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "MathBench",
+        ModuleDirectory = "Programs/MathBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/MathBench/Private"),
         PublicDependencies = ["Launch", "Core"]

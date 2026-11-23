@@ -65,7 +65,9 @@ internal static class PublicHeaderChecks
                 AdditionalCompileArguments = ToolchainCheck.SupportsUniqueObjectDuplication(toolchain.Platform, toolchain.CompilerVersion)
                     ? [ToolchainCheck.UniqueObjectDuplicationWarning] : [],
                 // 저장소 루트를 include하지 않는다: 검사 TU는 M의 공개 환경만으로 헤더를 연다.
-                PublicDependencies = [checkedModule.Name]
+                PublicDependencies = [checkedModule.Name],
+                // 빌드가 이 검사의 의존 기록으로 대상 모듈의 쓰지 않는 공개 의존을 알린다(BS1b).
+                PublicHeaderCheckOf = checkedModule.Name
             });
             added.Add(name);
         }

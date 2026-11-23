@@ -19,6 +19,7 @@ public sealed class D3D11Graphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            ModuleDirectory = ModuleDirectory,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
             // The entry point (Private/<Module>Module.cpp) is built on every platform.

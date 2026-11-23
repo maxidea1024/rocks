@@ -19,6 +19,7 @@ public sealed class ShaderToolSpikeProgram : ModuleRules
         return new()
         {
             Name = "ShaderToolSpike",
+            ModuleDirectory = "Programs/ShaderToolSpike",
             Kind = NativeModuleKind.Executable,
             Sources = context.Sources($"{root}/Common", windows ? $"{root}/Win64" : $"{root}/Unsupported"),
             PrivateIncludeDirectories = [context.PathInRoot($"{root}/Common"), .. ThirdPartyModuleRules.ConsumerIncludeDirectories(context, ToolHeaders)],
