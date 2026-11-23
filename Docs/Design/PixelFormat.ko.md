@@ -837,7 +837,7 @@ Rocks MetalGraphics는 SH5에서 구현한다. 그때 UE 표(MTL:798–1046)를 
 | D3D12 `ResourceFormat(Format)` | `D3D12PixelFormats.cpp` 표 | `D3D12Device.cpp:116–123` |
 | OpenGL `InternalFormat(Format)` | `OpenGLPixelFormats.cpp` 표 | `OpenGLDevice.cpp:418–425` |
 
-사용처는 3절 표의 10개 파일 전부다. 문서 쪽 갱신 대상: `Docs/Design/EngineRuntime.ko.md:35`(GraphicsTypes 설명), `Docs/Design/RenderBase.ko.md` 4.1절 "자원 종류" 행·11.2절 "크기 계산", `Docs/Design/ShaderSystem/04-CurrentCodebase.ko.md:16`(GraphicsTypes 현황 행). 헤더 이름 `GraphicsTypes/PixelFormat.h`는 그대로 둔다.
+사용처는 3절 표의 10개 파일 전부다. 문서 쪽 갱신 대상: `Docs/Design/EngineRuntime:35`(GraphicsTypes 설명), `Docs/Design/RenderBase.ko.md` 4.1절 "자원 종류" 행·11.2절 "크기 계산", `Docs/Design/ShaderSystem/04-CurrentCodebase.ko.md:16`(GraphicsTypes 현황 행). 헤더 이름 `GraphicsTypes/PixelFormat.h`는 그대로 둔다.
 
 ## 14. 구현 단계
 

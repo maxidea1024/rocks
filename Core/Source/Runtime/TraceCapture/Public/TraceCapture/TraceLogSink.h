@@ -43,7 +43,7 @@ namespace detail {
 // 이 스레드가 TraceLogSink::Write 안에 있는지다. LogSystem을 거친 호출은 LogSystem의 sink 표시가
 // 이미 재귀를 막지만, sink를 직접 부르는 호스트·시험 경로와 trace 쓰기 안에서 남는 로그를 다시 받지
 // 않도록 sink 자신도 막는다(두 표시는 지키는 범위가 다르다). 표시는 TraceCapture .cpp의
-// thread_local이다 (공개 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets.ko.md 3.8절
+// thread_local이다 (공개 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets 3.8절
 // BD29).
 ROCKS_TRACECAPTURE_API bool InTraceLogWrite() noexcept;
 

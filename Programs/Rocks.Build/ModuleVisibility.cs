@@ -1,7 +1,7 @@
 namespace Rocks.Build;
 
 /// <summary>
-/// 모듈의 컴파일 환경에 보이는 의존 모듈을 계산한다(Docs/Design/BuildTargets.ko.md 3.5절, UE <c>UEBuildModule.cs:607-647</c>와 같은 규칙).
+/// 모듈의 컴파일 환경에 보이는 의존 모듈을 계산한다(Docs/Design/BuildTargets 3.5절, UE <c>UEBuildModule.cs:607-647</c>와 같은 규칙).
 /// 대상 모듈은 공개·비공개 두 목록을 모두 따라가고, 그 밖의 모듈은 공개 목록만 따라간다. 그래서 비공개 의존의 공개 의존은 대상에게
 /// 보이지만 대상의 소비자에게는 보이지 않는다. include·정의·<see cref="NativeModuleInput.AdditionalInputs"/>·공유 PCH 후보·메타데이터
 /// 범위가 모두 이 결과를 쓴다. 링크와 빌드 대상은 보임이 아니라 도달(<see cref="NativeModuleInput.AllDependencies"/>)을 따른다.

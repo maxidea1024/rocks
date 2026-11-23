@@ -4,7 +4,7 @@ namespace Rocks.Tooling.Checks;
 
 public static partial class PolicyChecks
 {
-    // 엔진 플러그인 폴더다(Docs/Design/BuildTargets.ko.md 3.9절). Rocks.Engine.Rules.csproj가 이 아래 규칙을 모은다.
+    // 엔진 플러그인 폴더다(Docs/Design/BuildTargets 3.9절). Rocks.Engine.Rules.csproj가 이 아래 규칙을 모은다.
     private const string EnginePluginRoot = "Engine/Plugins";
 
     private const string PluginModuleRulesRule = "plugin-module-rules-base";

@@ -243,7 +243,7 @@ public static class MetadataLayout
 
     /// <summary>
     /// ActionGraph와 같은 include 검색 순서다: 자기 public, 자기 private, 컴파일 환경에 보이는 의존 모듈 public(후위 순서 —
-    /// ModuleVisibility, Docs/Design/BuildTargets.ko.md 3.5절).
+    /// ModuleVisibility, Docs/Design/BuildTargets 3.5절).
     /// </summary>
     public static IReadOnlyList<string> IncludeOrder(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> byName)
     {
@@ -502,7 +502,7 @@ public static class MetadataLayout
         }
     }
 
-    // module의 컴파일 환경에 target 모듈이 보이는지다(생성 헤더 해석 — "도달"이 아니라 "보임", Docs/Design/BuildTargets.ko.md 3.5절).
+    // module의 컴파일 환경에 target 모듈이 보이는지다(생성 헤더 해석 — "도달"이 아니라 "보임", Docs/Design/BuildTargets 3.5절).
     private static bool DependsOn(NativeModuleInput module, string target, IReadOnlyDictionary<string, NativeModuleInput> byName) =>
         ModuleVisibility.Sees(module, target, byName);
 }

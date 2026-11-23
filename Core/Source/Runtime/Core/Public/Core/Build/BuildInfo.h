@@ -8,7 +8,7 @@
 // (<출력>/BuildInfo/<실행파일>.BuildInfo.cpp)에 있다. 정적 라이브러리는 정의를 갖지 않으므로
 // 주입되지 않은 링크(Rocks.Build를 거치지 않은 실행 파일)에서 부르면 링크 오류다. Modular에서는
 // 같은 TU가 실행 파일 대신 Core 공유 라이브러리에 들어가고 그 라이브러리가
-// export한다(ROCKS_CORE_API — Docs/Design/BuildTargets.ko.md 3.8절 BS8d1). 원문(지문 정규 텍스트와
+// export한다(ROCKS_CORE_API — Docs/Design/BuildTargets 3.8절 BS8d1). 원문(지문 정규 텍스트와
 // 도구 빌드 ID manifest)은 같은 폴더의 ToolchainFingerprint.txt와 <실행파일>.BuildInfo.txt에 있고,
 // 그 SHA-256이 아래 값과 같다.
 //

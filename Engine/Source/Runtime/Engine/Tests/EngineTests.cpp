@@ -1483,7 +1483,7 @@ struct StageRecorder final : public EngineLoopHooks, public EngineClient {
 };
 
 // 단계 이름의 내용이 같은가다. 이름 상수(inline constexpr char[])는 Modular에서 실행 이미지마다
-// 사본이라 주소가 다르므로 내용을 비교한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8e).
+// 사본이라 주소가 다르므로 내용을 비교한다(Docs/Design/BuildTargets 3.8절 BS8e).
 bool SameStage(const char* actual, const char* expected) noexcept {
     return actual != nullptr && strcmp(actual, expected) == 0;
 }

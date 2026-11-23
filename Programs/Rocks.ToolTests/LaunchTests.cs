@@ -97,7 +97,7 @@ internal static partial class LaunchTests
             return windows ? unchecked((uint)exitCode) == RocksFatal : exitCode == PosixAbortExitCode;
         }
 
-        // 넘겨받은 실행 파일(Modular 시험 동반 타깃 — Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)이 먼저이고, 없으면 시험 실행 파일 옆이다.
+        // 넘겨받은 실행 파일(Modular 시험 동반 타깃 — Docs/Design/BuildTargets 3.8절 BS8d6)이 먼저이고, 없으면 시험 실행 파일 옆이다.
         string Program(string name) => options.Programs.TryGetValue(name, out string? path) ? path : Path.Combine(directory, name + (windows ? ".exe" : ""));
         string console = Program("LaunchProbe");
         string windowed = Program("LaunchWindowedProbe");

@@ -26,7 +26,7 @@ ROCKS_RENDERGRAPH_API uint32 AllocateGraphSharedDataIndex() noexcept;
 // 타입을 그래프 공유 값으로 등록한다. 선언(ROCKS_DECLARE_GRAPH_SHARED_DATA — 타입의 헤더, 전역
 // namespace, 타입 정의 뒤)과 정의(ROCKS_DEFINE_GRAPH_SHARED_DATA — 그 모듈의 cpp 하나)로 나눈다.
 // 번호는 정의 쪽 정적 지역 하나라 Modular에서도 프로세스에 하나다(공개 헤더에 정적 지역을 두지
-// 않는다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8c·BS8d4). Api는 그 모듈의 API 매크로다(한 번역
+// 않는다 — Docs/Design/BuildTargets 3.8절 BS8c·BS8d4). Api는 그 모듈의 API 매크로다(한 번역
 // 단위 안에서만 쓰는 타입은 빈 값).
 //
 // 사용 예:

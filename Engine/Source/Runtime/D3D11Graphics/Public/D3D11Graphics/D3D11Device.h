@@ -4,7 +4,7 @@
 
 namespace rocks::graphics {
 
-// Direct3D 11 장치를 만든다(설계: Docs/Design/EngineRuntime.ko.md 10.2절). D3D12의 SM 6.6 기준을
+// Direct3D 11 장치를 만든다(설계: Docs/Design/EngineRuntime 10.2절). D3D12의 SM 6.6 기준을
 // 받지 못하는 GPU·드라이버를 위한 Windows 대체 backend다.
 //
 // 어댑터는 고성능 하드웨어 어댑터를 차례로 시도하고(feature level 11_1·11_0), 모두 실패하거나

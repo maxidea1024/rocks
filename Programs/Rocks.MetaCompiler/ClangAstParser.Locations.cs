@@ -5,7 +5,7 @@ namespace Rocks.MetaCompiler;
 // ClangAstParser 중 Clang JSON 위치 색인(IndexLocations — 생략된 file 복원)과 진단 위치(UpdateSite)다.
 internal sealed partial class ClangAstParser
 {
-    // 클래스 선언부의 원문에 모듈 API 매크로 토큰이 있는가다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d3). Monolithic에서는 매크로가 빈 값이라
+    // 클래스 선언부의 원문에 모듈 API 매크로 토큰이 있는가다(Docs/Design/BuildTargets 3.8절 BS8d3). Monolithic에서는 매크로가 빈 값이라
     // AST에 export 속성이 없으므로 원문을 본다. 범위는 선언의 시작(class·struct 키워드 — range.begin)부터 이름(loc)까지이고 주석·문자열·
     // 문자 리터럴은 빼고 토큰으로 본다. 매크로는 이 모듈(moduleName)의 것이어야 한다 — 다른 모듈 이름이면 RMC2007(Modular에서 import가
     // 되어 정의가 export되지 않는다). 매크로가 펼친 선언(범위가 매크로 자리)은 마커 검사가 따로 거부하므로 여기서는 export 없음으로 본다.
@@ -44,7 +44,7 @@ internal sealed partial class ClangAstParser
             {
                 throw new MetadataException($"{qualified}: {token.Value} is the API macro of another module; a class of module {moduleName} is " +
                     $"exported with {own}", "RMC2007",
-                    $"Use the macro of the module that defines the class: class {own} {qualified.Split("::")[^1]} (Docs/Design/BuildTargets.ko.md section 3.8 BS8d3).")
+                    $"Use the macro of the module that defines the class: class {own} {qualified.Split("::")[^1]} (Docs/Design/BuildTargets section 3.8 BS8d3).")
                     .At(currentSite);
             }
 

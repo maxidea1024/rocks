@@ -177,7 +177,7 @@ UE에서 실험 플러그인(`IsExperimentalVersion: true`)이지만 계획이 �
 | CR45 | 능력 체계: attribute·effect·stack·duration·ability·cue·prediction key(UE GAS 대응). CR31의 gameplay task 위 | 없음 | EIP 24.2절 "능력 체계는 attribute base/current value, modifier aggregation, …" | EIP 24.2절 |
 | CR46 | StateTree 런타임: 에셋·평가기·task·조건, AI 확장(brain 컴포넌트로 실행) | 없음 | EIP 19절 "State Tree·EQS·utility AI를 확장한다", 24.1절 표 P2 · M6–M7 | AI 문서(없음) |
 | CR47 | Smart Object: interaction definition·slot·예약 token·접근 경로·중단 사유, subsystem | 없음 | EIP 24.2절 "SmartObject는 interaction definition·slot·예약 token·접근 경로·중단 사유를 …" | EIP 24.2절 |
-| CR48 | 모듈식 게임플레이: 게임 프레임워크 Actor에 component·extension을 등록하는 관리자(UE `UGameFrameworkComponentManager` — receiver Actor, init state), Game Feature 수명. `PlayerStateComponent`의 소유 클래스 PlayerState(EIP 20.5절에만 있고 ER 2절 명칭에 없다 — ER에 추가 필요) | 없음 | EIP 24.1절 표 "Game Features / Plugins — component/input/data 등록 token P2 · M6", 24.2절 "GameFeature는 Installed → Registered → Loaded → Active" | EIP 24.2절 |
+| CR48 | 모듈식 게임플레이: 게임 프레임워크 Actor에 component·extension을 등록하는 관리자(UE `UGameFrameworkComponentManager` — receiver Actor, init state), Game Feature 수명. `PlayerStateComponent`의 소유 클래스 PlayerState(EIP 20.5절, ER 2절 명칭 — 개정 7에서 ER에 더함) | 없음 | EIP 24.1절 표 "Game Features / Plugins — component/input/data 등록 token P2 · M6", 24.2절 "GameFeature는 Installed → Registered → Loaded → Active" | EIP 24.2절 |
 | CR49 | PCG 런타임: 그래프·point/attribute 데이터·실행·incremental rebuild, 런타임 생성(생성 원천 주변), GPU scene 인스턴스 직접 기록(RN 4.2절 인스턴스 종류) | 없음 | EIP 24.1절 표 "PCG 계열 P2/P3 · M7–M8" | PCG 문서(없음) |
 | CR50 | Geometry cache: 정점 애니메이션 track 에셋·재생·스트리밍, Alembic 가져오기(선택 importer) | 없음 | EIP 15절 "geometry cache/Alembic 계열 … M7 이후 편입" | MA·가져오기 문서 |
 | CR51 | 케이블 시뮬레이션: verlet 입자·길이 제약·충돌 질의(CR16). 렌더는 동적 메시(CR37) | 없음 | EIP 16.2절 "rope … 기본 이동과 joint 안정화 이후 개별 모듈로 추가", 16.3절 "fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고". 33.2절 표의 P3 목록은 "파괴/softbody/vehicle"뿐이라 rope는 물리 필수(M4–M7) 안에 남는다 — 그래서 케이블은 필수, vehicle은 후속이다 | 물리 문서 |
@@ -228,4 +228,4 @@ UE에서 실험 플러그인(`IsExperimentalVersion: true`)이지만 계획이 �
 | EIP 33.2절 표 | "nDisplay·DMX·LED stage·전문 방송" 행에 범위 밖 플러그인 목록(9.5절, CD22) 링크 |
 | AU 3.15.2절·9.1절 | 리버브 존 영역 속성에 submix send·효과 교체(CR54), AudioGameplayVolume mutator 대응. Synthesis 신스 컴포넌트 5종도 `SoundGenerator` 구현으로 간다는 것 |
 
-남은 것: CR48의 PlayerState 명칭을 ER 2절에 더하는 일은 ER을 다음에 고칠 때 한다.
+개정 7(2026-11-23)에서 CR48의 PlayerState 명칭을 ER 2절(명칭)·3절(`Gameplay` 행)·1절 단계표(S7–S14)에 더했다.

@@ -119,7 +119,7 @@ public sealed partial record ThirdPartyManifest(
 
     /// <summary>
     /// 프로세스 전역 상태(초기화 상태·전역 훅·바꿔 끼운 구현 등)가 있는 code 라이브러리인지다(manifest <c>globalState</c>, code 라이브러리는
-    /// 필수 — Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c). 참이면 그 모듈을 직접 의존하는 Rocks 모듈이 하나여야 한다(Modular에서 소비
+    /// 필수 — Docs/Design/BuildTargets 3.8절 BD29·BS8c). 참이면 그 모듈을 직접 의존하는 Rocks 모듈이 하나여야 한다(Modular에서 소비
     /// 모듈의 공유 라이브러리마다 링크되어 상태가 두 벌이 되지 않게). 다른 종류(data·headers·binary)에는 둘 수 없다.
     /// </summary>
     public bool GlobalState { get; init; }

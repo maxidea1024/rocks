@@ -157,7 +157,7 @@ internal static class ModuleEntryCompilerTests
                 "static_assert(rocks::detail::MakeModuleEntry<rocks::DefaultModuleImplementation>(\"Curves\", &rocks::generated::Curves::RegisterModuleOwnTypes)" +
                 ".registerTypes != nullptr);", moduleTypes: true);
 
-            // 공유 라이브러리 표지(ROCKS_MODULE_SHARED_LIBRARY=1, Docs/Design/BuildTargets.ko.md 3.8절 BS8d1): 매크로가 export 진입점
+            // 공유 라이브러리 표지(ROCKS_MODULE_SHARED_LIBRARY=1, Docs/Design/BuildTargets 3.8절 BS8d1): 매크로가 export 진입점
             // RocksModuleEntry와 강제 참조용 모듈별 기호 RocksModuleEntryOf_<Name>을 더 정의한다. 헤더가 export 철자(Base/Compiler.h)를 스스로
             // include해야 PCH 없이도 컴파일된다.
             Task<ProcessResult> sharedLibrary = Compile("shared_library", "Curves",

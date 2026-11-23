@@ -117,7 +117,7 @@ Visual Studio 솔루션 생성은 아직 없다([설계](../Design/ProjectFiles.
 ## 5. Linux
 
 지금 Linux 호스트는 C++ 빌드를 받지 않는다(`Only Windows and macOS native hosts are supported.`). Linux 빌드 플랫폼(전용 서버·기반 시험)은
-계획 단계다([빌드 타깃](../Design/BuildTargets.ko.md) 3.7절). 지금은 C# 도구 빌드와 정책·서식 검사만 된다(x86_64, 로컬 미검증).
+계획 단계다([빌드 타깃](../Design/BuildTargets/03-Design/03.07-DedicatedServer.ko.md) 3.7절). 지금은 C# 도구 빌드와 정책·서식 검사만 된다(x86_64, 로컬 미검증).
 
 1. Git·curl·unzip을 설치하고 저장소를 받는다(예: `sudo apt install git curl unzip`).
 2. `./Setup.sh`를 실행한다. .NET SDK와 clang-format 21.1.6을 고정 파일(SHA 확인)로 사용자 디렉터리에 받고, PATH와 `ROCKS_CLANG_FORMAT`을
@@ -159,7 +159,7 @@ dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy -
 | 유니티 묶음·PCH를 끈 검증 빌드(빠진 include 찾기) | `dotnet msbuild Rocks.proj -t:Build -p:Unity=off -p:Pch=off -p:Configuration=Debug -p:RocksTarget=Foundation` |
 | Release(ThinLTO) | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Release -p:RocksTarget=Foundation` |
 | AddressSanitizer | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Asan -p:RocksTarget=Foundation` |
-| Modular(모듈마다 공유 라이브러리 — export 누락 확인, native 시험과 크래시·Launch 하니스, [빌드 타깃](../Design/BuildTargets.ko.md) 3.8절 BS8d5·BS8d6) | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=FoundationModular` |
+| Modular(모듈마다 공유 라이브러리 — export 누락 확인, native 시험과 크래시·Launch 하니스, [빌드 타깃](../Design/BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8d5·BS8d6) | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=FoundationModular` |
 | Engine 층 Modular(엔진 플러그인 시험 제외, 3.8절 BS8e) | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=EngineModular` |
 | CI처럼 검증 도구 모음만 받기 | 명령 뒤에 `-p:RequireVerifiedToolchain=on` |
 

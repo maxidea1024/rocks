@@ -428,7 +428,7 @@ TEST(GpuTrace_SettingsAndDisjointSamples) {
 }
 
 // 정적 모듈 표로 새 로더를 만드는 시험이라 Monolithic에서만 돈다(Modular에는 정적 표가 없다 —
-// Docs/Design/ModuleLoader.ko.md 3.14절, BuildTargets.ko.md 3.8절 BS8e).
+// Docs/Design/ModuleLoader.ko.md 3.14절, Docs/Design/BuildTargets 3.8절 BS8e).
 #if ROCKS_MONOLITHIC
 // RenderBase 모듈(Docs/Design/ModuleLoader.ko.md 3.12절): 호스트가 실행 중인 trace 세션을 서비스로
 // 등록하면 모듈 Startup이 GPU 채널·형을 등록하고 모듈 lease를 잡으며, 묶음 종료가 등록을 풀고

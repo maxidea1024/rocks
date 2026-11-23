@@ -245,7 +245,7 @@ ROCKS_CORE_API Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept;
 template <>
 struct Formatter<TimeSpan> {
     // 클래스 전체가 아니라 Format만 export한다 — dllimport 클래스의 constexpr 멤버(IsValidSpec)는
-    // 상수식에서 쓸 수 없다(로그 spec 검사가 consteval — Docs/Design/BuildTargets.ko.md 3.8절
+    // 상수식에서 쓸 수 없다(로그 spec 검사가 consteval — Docs/Design/BuildTargets 3.8절
     // BS8d5).
     static ROCKS_CORE_API Result<void> Format(StringBuilderBase& out, const TimeSpan& span,
                                               StringView spec) noexcept;

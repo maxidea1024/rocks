@@ -40,7 +40,7 @@
 - 그래픽 backend의 주력은 Vulkan이다. OpenGL ES는 구형 Android 기기와 Windows의 모바일 미리보기용이다. 데스크톱 OpenGL은 지원하지 않는다.
 - 지금의 최소 렌더러(내장 메시 둘, 원문 셰이더 하나)는 Sandbox 샘플로 옮긴다. 정식 렌더러는 RenderBase·RenderGraph·쿠킹 셰이더 위에 처음부터 새로 쓴다.
 
-근거 문서: [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) 3절, [엔진 런타임](../Design/EngineRuntime.ko.md) 3절, [렌더 기반](../Design/RenderBase.ko.md) 1·3절.
+근거 문서: [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) 3절, [엔진 런타임](../Design/EngineRuntime/03-Modules.ko.md) 3절, [렌더 기반](../Design/RenderBase.ko.md) 1·3절.
 
 ## 2. 엔진 한 프레임
 
@@ -63,7 +63,7 @@
    - **지금 코드**: 게임 스레드가 장치에 직접 그리고 present한다.
    - **바뀔 구조**(진행 중): 게임 lane은 렌더 lane에 프레임 packet만 넘기고 곧바로 다음 프레임으로 간다(4절).
 
-근거 문서: [엔진 런타임](../Design/EngineRuntime.ko.md) 5–8절, 계획 8.2–8.3절.
+근거 문서: [엔진 런타임](../Design/EngineRuntime/05-Time.ko.md) 5–8절, 계획 8.2–8.3절.
 
 ## 3. 스레드와 lane
 
@@ -307,7 +307,7 @@
 
 | 문서 | 다루는 것 |
 |---|---|
-| [엔진 런타임](../Design/EngineRuntime.ko.md) | 엔진 상태 기계·World·Tick·입력·Graphics 최소 경로 |
+| [엔진 런타임](../Design/EngineRuntime/README.ko.md) | 엔진 상태 기계·World·Tick·입력·Graphics 최소 경로 |
 | [렌더 기반](../Design/RenderBase.ko.md) | 렌더 lane·자원 수명·렌더 그래프·셰이더 런타임·정점 입력·화면 마일스톤 범위 |
 | [셰이더 시스템](../Design/ShaderSystem/README.ko.md) | 셰이더 언어·형식·바인딩 규약·도구·워커·키·라이브러리 |
 | [텍스처 스트리밍](../Design/TextureStreaming.ko.md) | 상주 계획·mip 전송 |

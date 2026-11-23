@@ -136,7 +136,7 @@ ROCKS_CORE_API bool CurrentCorrelation(CorrelationIds& out) noexcept;
 
 // 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 비어 있는지를 분기 하나로 볼 수 있다.
 // 깊이는 Core .cpp의 thread_local이라 호출 하나를 거친다(공개 헤더에 thread_local을 두지 않는다 —
-// Docs/Design/BuildTargets.ko.md 3.8절 BD29).
+// Docs/Design/BuildTargets 3.8절 BD29).
 ROCKS_CORE_API usize CorrelationDepth() noexcept;
 
 // 쌓기·내리기 관찰자를 정한다(원자 포인터 하나). 같은 관찰자를 다시 주면 아무것도 바꾸지 않고

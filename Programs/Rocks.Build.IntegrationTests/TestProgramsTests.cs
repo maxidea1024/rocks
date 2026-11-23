@@ -3,7 +3,7 @@ using Rocks.Build.Rules;
 
 namespace Rocks.Build.IntegrationTests;
 
-// 시험 동반 타깃(TargetRules.TestPrograms — Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)의 검사다. test 명령이 하니스 전에 빌드할
+// 시험 동반 타깃(TargetRules.TestPrograms — Docs/Design/BuildTargets 3.8절 BS8d6)의 검사다. test 명령이 하니스 전에 빌드할
 // (타깃, 실행 파일 모듈)을 고르고, 동반 타깃이 Program이 아니거나 시험 실행 파일·동반 타깃을 가지거나 실행 파일 모듈 하나가 아니거나
 // 중복이면 거부한다. --output을 준 test의 동반 출력은 형제 디렉터리다.
 internal static class TestProgramsTests

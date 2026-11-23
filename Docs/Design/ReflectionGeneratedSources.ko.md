@@ -7,7 +7,7 @@
 지금은 본문 전체가 생성 헤더에 inline으로 들어 있어, 그 헤더를 include하는 번역 단위마다 같은 코드를 다시 인스턴스화하고 코드 생성한다. 시험 빌드 시간의 가장 큰 원인이다(1절).
 
 다른 문서와의 관계:
-- [빌드 타깃](BuildTargets.ko.md) 3.8절 BD28이 모듈식 링크를 위해 "생성 `.cpp`를 낸다"고 이미 정했다(BS8 단계, 미구현). 이 문서는 그 가운데 **생성 코드를 헤더에서 소스로 옮기는 부분**의 구현 스펙이고, 컴파일 시간 때문에 BS8보다 먼저 한다. 모듈 API 매크로 주입과 `NativeTypeKey` 교체는 BS8에 그대로 둔다.
+- [빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BD28이 모듈식 링크를 위해 "생성 `.cpp`를 낸다"고 이미 정했다(BS8 단계, 미구현). 이 문서는 그 가운데 **생성 코드를 헤더에서 소스로 옮기는 부분**의 구현 스펙이고, 컴파일 시간 때문에 BS8보다 먼저 한다. 모듈 API 매크로 주입과 `NativeTypeKey` 교체는 BS8에 그대로 둔다.
 - [리플렉션 기반](ReflectionFoundations.ko.md) 1.1절(생성물 배치)·1.2절(검증 컴파일)과 등록 절의 집계 헤더 서술을 바꾼다(13절).
 - [모듈 로더](ModuleLoader.ko.md) ML2(개정 3 작업 중)는 빌드가 만드는 TU `<M>.ModuleTypes.cpp`에 "모듈 자신의 타입만 등록하는 함수"를 두려 했다. 이 문서의 모듈 생성 소스가 그 자리를 대신한다. ML2는 GS1 병합 뒤에 그 함수와 진입점 연결을 모듈 생성 소스 구조 위에 더한다(모듈 로더 세션과 2026-11-19 조율).
 - [유니티 빌드·PCH](UnityBuildPch.ko.md)는 "리플렉션 생성물은 헤더뿐"을 전제로 썼다. 생성 소스가 생기므로 그 전제를 고친다(13절).
@@ -265,7 +265,7 @@ GS2(타입별 본문 분리)는 소비 코드를 고치지 않는다.
 | `ReflectedStructField<S>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 되어 필드 형질이 struct가 아닌 길로 간다 | **조용히 갈림** |
 | `GeneratedFieldVisitor`·`GeneratedLogFields`(같은 파일) | 로그 구조 특수화가 빠진다 | **조용히 갈림** |
 | `render::CheckRenderTransfer<T>`(`RenderBase/RenderTransfer.h`) | 스키마 검사를 건너뛴다 | **조용히 갈림** |
-| `NativeTypeKey<T>`(`Object/Object.h`) | 리플렉션 클래스의 키는 생성 `.cpp`의 `GeneratedType<T>::NativeKey()`다([빌드 타깃](BuildTargets.ko.md) 3.8절 BS8b) — `ReflectedDeclarationV`와 Object 파생으로 고르고 생성 헤더가 없으면 `static_assert`(struct·enum도 생성 키(BS8d4 — [빌드 타깃](BuildTargets.ko.md) 3.8절)) | 컴파일 오류(BS8b) |
+| `NativeTypeKey<T>`(`Object/Object.h`) | 리플렉션 클래스의 키는 생성 `.cpp`의 `GeneratedType<T>::NativeKey()`다([빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8b) — `ReflectedDeclarationV`와 Object 파생으로 고르고 생성 헤더가 없으면 `static_assert`(struct·enum도 생성 키(BS8d4 — [빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절)) | 컴파일 오류(BS8b) |
 | `ReflectedEnumField<E>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 된다 | 표지 없음(아래 한계) |
 
 **규칙**
@@ -388,7 +388,7 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 ## 13. 다른 문서 개정
 
 이번 개정에서 고친 것:
-- [빌드 타깃](BuildTargets.ko.md) BD28(3.8절 본문과 결정 표): 생성 코드 분리의 구현 스펙이 이 문서이고, 생성 소스 단위가 "헤더마다 하나 + 모듈마다 하나"임을 적었다.
+- [빌드 타깃](BuildTargets/README.ko.md) BD28(3.8절 본문과 결정 표): 생성 코드 분리의 구현 스펙이 이 문서이고, 생성 소스 단위가 "헤더마다 하나 + 모듈마다 하나"임을 적었다.
 - [유니티 빌드·PCH](UnityBuildPch.ko.md) 1절 "생성 TU" 행: 리플렉션 생성 소스가 생긴다는 것과 이 문서 링크를 적었다.
 - [리플렉션 기반](ReflectionFoundations.ko.md) 1.1절: 이 문서 링크를 적었다.
 

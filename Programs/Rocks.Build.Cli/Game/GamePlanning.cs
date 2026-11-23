@@ -113,7 +113,7 @@ internal static class GamePlanning
             ProvidesLaunch = module.ProvidesLaunch,
             HasGlobalState = module.HasGlobalState
         }), .. projectModules];
-        // 켠 플러그인의 모듈은 타깃이 직접 참조하지 않아도 빌드하고 주 실행 파일에 링크한다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE와
+        // 켠 플러그인의 모듈은 타깃이 직접 참조하지 않아도 빌드하고 주 실행 파일에 링크한다(Docs/Design/BuildTargets 3.9절 BD36, UE와
         // 같다). 메타데이터 생성도 같은 root 집합이다.
         modules = [.. moduleSet.LinkIntoPrimary(modules, rules.Target.Modules)];
         string[] targets = [.. rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];

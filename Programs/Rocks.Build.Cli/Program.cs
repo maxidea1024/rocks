@@ -249,7 +249,7 @@ namespace Rocks.Build.Cli
                     "not supported yet — BuildTargets BS8d).");
             }
 
-            // 시험 동반 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)은 출력·잠금을 만들기 전에 확인한다. 하니스 전에 빌드한다.
+            // 시험 동반 타깃(Docs/Design/BuildTargets 3.8절 BS8d6)은 출력·잠금을 만들기 전에 확인한다. 하니스 전에 빌드한다.
             IReadOnlyList<(string Target, string Executable)> testPrograms = args[0] == "test"
                 ? TestPrograms(rules, name => RuleLoader.Load(rulesPath, name, context).Target)
                 : [];
@@ -284,7 +284,7 @@ namespace Rocks.Build.Cli
             {
                 // 모듈 소유 메타데이터의 배치(생성 include 디렉터리·명세 경로·검증)를 타깃에서 도달하는 모듈에 대해 정한다.
                 // 아래 모든 단계가 이 결과를 쓰고, 검증 실패도 build-evidence에 기록된다.
-                // 엔진 플러그인(Docs/Design/BuildTargets.ko.md 3.9절): 타깃이 켠 플러그인의 모듈만 기술자 종류대로 남기고(끈 플러그인 모듈과
+                // 엔진 플러그인(Docs/Design/BuildTargets 3.9절): 타깃이 켠 플러그인의 모듈만 기술자 종류대로 남기고(끈 플러그인 모듈과
                 // 그 사용은 오류), 주 실행 파일에 링크하도록 표시한다. 켠 플러그인 모듈은 타깃이 참조하지 않아도 빌드 대상이다.
                 // 규칙 해석·플러그인 적용·메타 배치는 projectfiles와 같은 함수다(Docs/Design/ProjectFiles.ko.md 8.1절).
                 EngineLayout layout = EnginePlanning.Layout(rules, context, root, toolchain, configuration, createDirectories: true);
@@ -359,44 +359,14 @@ namespace Rocks.Build.Cli
                 }
                 else if (rules.Target.CheckPublicHeaders)
                 {
-                    var sources = new List<string>();
-                    // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
-                    HashSet<string> reached = LinkClosure.Reachable(targets,
-                        modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase),
-                        (name, _) => throw new ArgumentException($"Unknown dependency {name}"));
-
-                    foreach (var includeDirectory in modules.Where(module => reached.Contains(module.Name)).SelectMany(module => module.PublicIncludeDirectories).Distinct())
+                    // 공개 헤더 검사 모듈은 정적 라이브러리라 Modular에서는 공유 라이브러리가 된다(Docs/Design/BuildTargets 3.5절 BS1a).
+                    if (rules.Target.LinkType != NativeLinkType.Monolithic)
                     {
-                        foreach (var header in Directory.GetFiles(includeDirectory, "*.h", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
-                        {
-                            var include = Path.GetRelativePath(includeDirectory, header).Replace('\\', '/');
-                            var path = Path.Combine(output, "HeaderChecks", Hashing.Sha256Text(include) + ".cpp");
-                            AtomicFile.WriteIfChanged(path, $"#include <{include}>\nint RocksHeaderCheck_{Hashing.Sha256Text(include)}() noexcept {{ return 0; }}\n");
-                            sources.Add(path);
-                        }
+                        throw new ArgumentException($"Target {rules.Target.Name}: CheckPublicHeaders needs a Monolithic target.");
                     }
 
-                    modules.Add(new()
-                    {
-                        Name = "PublicHeaderChecks",
-                        Sources = sources,
-                        // 헤더 하나가 스스로 컴파일되는지 보는 검사이므로 유니티와 PCH 없이 돈다(Docs/Design/UnityBuildPch.ko.md 10절).
-                        // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
-                        Unity = UnityMode.Off,
-                        PchUsage = PchUsage.Off,
-                        // 공개 헤더의 쓰기 가능한 정적 저장소(공유 라이브러리마다 복제된다)를 Clang 진단으로 거부한다(Docs/Design/BuildTargets.ko.md
-                        // 3.8절 BD29·BS8c). Windows 대상만 켠다(다른 대상에서는 숨김 가시성 객체만 알린다 — thread_local은 정책 검사가 따로 본다).
-                        AdditionalCompileArguments = ToolchainCheck.SupportsUniqueObjectDuplication(toolchain.Platform, toolchain.CompilerVersion)
-                            ? [ToolchainCheck.UniqueObjectDuplicationWarning] : [],
-                        // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다. 도달한 라이브러리를
-                        // 모두 공개 의존으로 두므로 모듈마다 자기 공개 환경만으로 컴파일하는 검사(BD9)가 아니다 — 그 검사는 BS1이다.
-                        // BS1 전에는 의존을 비공개로 내리지 않는다(Docs/Design/BuildTargets.ko.md 3.5절, BS0 → BS1 → BS3).
-                        // 서드파티 모듈은 뺀다: 공개 include가 없고(서드파티 규칙 계약) 전역 상태 서드파티의 직접 소비 모듈이 하나여야 한다(BD29·BS8c).
-                        PublicDependencies = reached.Select(name => modules.Single(module => module.Name == name))
-                            .Where(module => module.Kind == NativeModuleKind.StaticLibrary && !module.ThirdParty)
-                            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray()
-                    });
-                    targets.Add("PublicHeaderChecks");
+                    // 모듈마다 자기 공개 환경만으로 공개 헤더를 컴파일한다(BD9 — BS1a).
+                    targets.AddRange(PublicHeaderChecks.Add(modules, targets, output, toolchain));
                 }
 
                 // --plan-only on(build 전용): 메타 생성과 계획까지만 하고 compile_commands.json·묶음 파일을 쓴 뒤 끝낸다. 아무것도
@@ -527,7 +497,7 @@ namespace Rocks.Build.Cli
                         return 1;
                     }
 
-                    // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
+                    // 모듈 API 매크로(Docs/Design/BuildTargets 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
                     // 검사(native 컴파일 시험·생성 헤더 검증)는 Monolithic 값(빈 값)을 받는다. 그 검사는 타깃 폐포 밖 모듈의 헤더도 경로로 include하므로
                     // (예: Foundation의 meta 시험이 RenderBase 헤더를 쓴다) 저장소의 모든 모듈 규칙에서 만든다(BS8e).
                     string[] apiMacros = [.. rules.Modules.Where(module => !module.ThirdParty)
@@ -545,7 +515,7 @@ namespace Rocks.Build.Cli
                         checks[1] = [.. checks[1], "--asan"];
                     }
 
-                    // Modular 시험 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5·BS8d6)은 native 시험 실행 파일과 native 하니스(크래시·Launch)를
+                    // Modular 시험 타깃(Docs/Design/BuildTargets 3.8절 BS8d5·BS8d6)은 native 시험 실행 파일과 native 하니스(크래시·Launch)를
                     // 돈다. host self·meta 검사는 링크 방식과 무관한 도구 검사라 Monolithic 시험 타깃이 돈다. 하니스는 호스트 공유 라이브러리
                     // (크래시 probe 함수가 그 안에 있다 — cdb 모듈 이름)를 받는다.
                     bool modular = rules.Target.LinkType == NativeLinkType.Modular;
@@ -710,7 +680,7 @@ namespace Rocks.Build.Cli
             return values;
         }
 
-        // 시험 동반 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d6)의 (타깃, 실행 파일 모듈)이다. 동반 타깃은 Program이고 실행 파일 모듈 하나만
+        // 시험 동반 타깃(Docs/Design/BuildTargets 3.8절 BS8d6)의 (타깃, 실행 파일 모듈)이다. 동반 타깃은 Program이고 실행 파일 모듈 하나만
         // 고르며 시험 실행 파일·동반 타깃이 없어야 한다(재귀를 막는다). 이름은 대소문자까지 구별하고 중복은 오류다.
         internal static IReadOnlyList<(string Target, string Executable)> TestPrograms(LoadedRules rules, Func<string, TargetRules> load)
         {

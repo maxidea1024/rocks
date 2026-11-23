@@ -179,7 +179,7 @@ internal static class ActionGraph
         // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
         // 관계는 순환 검사의 참조 사슬이 아니다. 그 모듈을 링크하는 실행 파일은 그 archive 뒤에 계획해야 하므로 실행 파일을 끝으로 옮긴다
         // (실행 파일은 누구의 의존도 아니다). 동적 모듈이 없으면 순서가 바뀌지 않는다. 실행 파일에 링크하는 켠 플러그인 모듈
-        // (PluginModules — Docs/Design/BuildTargets.ko.md 3.9절 BD36)도 같은 방식으로 빌드하고 실행 파일 앞에 계획한다.
+        // (PluginModules — Docs/Design/BuildTargets 3.9절 BD36)도 같은 방식으로 빌드하고 실행 파일 앞에 계획한다.
         bool anyDynamic = false;
         for (int index = 0; index < ordered.Count; ++index)
         {
@@ -225,7 +225,7 @@ internal static class ActionGraph
         HashSet<string> entryModules = ModuleTables.EntryModules(modules);
         foreach (var module in ordered)
         {
-            // 컴파일 환경에 보이는 의존 모듈이다(공개 환경 규칙 — ModuleVisibility, Docs/Design/BuildTargets.ko.md 3.5절). include·정의·
+            // 컴파일 환경에 보이는 의존 모듈이다(공개 환경 규칙 — ModuleVisibility, Docs/Design/BuildTargets 3.5절). include·정의·
             // AdditionalInputs·공유 PCH 후보가 쓴다.
             var dependencies = ModuleVisibility.Of(module, modules).ToArray();
             // 링크 모듈은 두 목록의 도달 폐포다(실행 파일은 동적 모듈 쪽을 더한다 — LinkClosure). 도달 집합(closures — BuildInfo가 실행
@@ -513,7 +513,7 @@ internal static class ActionGraph
                 continue;
             }
 
-            // Modular(Docs/Design/BuildTargets.ko.md 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
+            // Modular(Docs/Design/BuildTargets 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
             // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 두고, 플러그인 모듈은 플러그인
             // binaries 폴더에 둔다(LinkTypes.SharedLibraryDirectory — ModuleLoader 3.15절). Windows import 라이브러리는 lib 폴더다. 모듈 표 제공 모듈에 닿는 Modular 실행 파일의 모듈은 호스트 모듈이다 — 공유 라이브러리로 링크하고, 실행 파일은
             // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b).
@@ -924,7 +924,7 @@ internal static class ActionGraph
 
             yield return "-D" + buildMacro;
             yield return "-D" + LinkTypes.MonolithicDefine(linkType);
-            // Modular 공유 라이브러리의 가시성(UE bHideSymbolsByDefault — Docs/Design/BuildTargets.ko.md 3.8절 BD27): 함수·변수는 기본으로
+            // Modular 공유 라이브러리의 가시성(UE bHideSymbolsByDefault — Docs/Design/BuildTargets 3.8절 BD27): 함수·변수는 기본으로
             // 숨기고 타입 정보는 보인다(Android는 Modular를 거부하므로 여기에 오지 않는다).
             if (linkType == NativeLinkType.Modular)
             {

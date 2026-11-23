@@ -309,7 +309,7 @@ native 클래스 안에는 `ROCKS_PROPERTY`·`ROCKS_NATIVE`를 쓰지 않는다.
 
 ## World 타입(B8b)
 
-World 모듈의 Level·Actor·Component는 `ROCKS_CLASS(WorldOnly)`, SceneComponent는 `ROCKS_CLASS()`(WorldOnly 상속)인 리플렉션 클래스다([리플렉션·빌드 보강](../Design/ReflectionFoundations.ko.md) 9.1절, 멤버 분류는 [엔진 런타임](../Design/EngineRuntime.ko.md) 4.6절). `World.Build.cs`는 `PublicDependencies = ["ObjectRuntime", "CoreTypeBindings"]`(SceneComponent의 Transform 필드)와 리터럴 `Metadata`(네 헤더)를 두고, identity 명세는 `World.rocksids.json`(타입 4·필드 7 — 이전 수동 TypeId는 어디에도 영속되지 않았으므로 ids 도구로 새로 발급했다)이다.
+World 모듈의 Level·Actor·Component는 `ROCKS_CLASS(WorldOnly)`, SceneComponent는 `ROCKS_CLASS()`(WorldOnly 상속)인 리플렉션 클래스다([리플렉션·빌드 보강](../Design/ReflectionFoundations.ko.md) 9.1절, 멤버 분류는 [엔진 런타임](../Design/EngineRuntime/04-ObjectSystem.ko.md) 4.6절). `World.Build.cs`는 `PublicDependencies = ["ObjectRuntime", "CoreTypeBindings"]`(SceneComponent의 Transform 필드)와 리터럴 `Metadata`(네 헤더)를 두고, identity 명세는 `World.rocksids.json`(타입 4·필드 7 — 이전 수동 TypeId는 어디에도 영속되지 않았으므로 ids 도구로 새로 발급했다)이다.
 
 - 영속 필드는 모두 `ReadOnly`이고 도구 이름(`Name`)을 가진다: Level `actors`·`name`, Actor `components`·`rootComponent`(`ObjectRef<SceneComponent>` — 영속 강한 참조)·`enabled`, Component `enabled`, SceneComponent `relativeTransform`. World 포인터·소유·Tick·수명·계층은 `ROCKS_NATIVE`다. 경로·리플렉션 쓰기는 ReadOnly로 Unsupported(`PropertyPathError::ReadOnly`)이고 로드의 staged 쓰기는 된다.
 - 등록: `RegisterWorldTypes(ModuleRegistration&)`가 `rocks::generated::World::RegisterModuleTypes`를 부른다(멱등). Engine은 ModuleRegistration을 소유하고 World → `EngineConfig::registerModuleTypes` → `EngineConfig::registerTypes`(native) 순서로 등록하며, 종료할 때 타입을 Unregister하지 않는다(ModuleRegistration 파괴 → `TypeRegistry::Shutdown`).
@@ -414,7 +414,7 @@ C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 리플렉션 헤�
 
 ### 상속 export(RMC2002)
 
-다른 모듈의 리플렉션 클래스를 상속하려면 그 기반과 그 위 조상(`rocks::Object` 아래까지)이 클래스 전체를 모듈 API 매크로로 export해야 한다(`class ROCKS_<기반 모듈>_API Base : public Object`). 파생 클래스가 기반의 생성자·소멸자·가상 함수를 링크하기 때문이다(Modular). 메타 컴파일러는 선언부의 매크로를 descriptor 클래스 flags `Exported`로 전하고, 없는 기반을 상속하면 `RMC2002`로 거부한다. 같은 모듈 안의 상속은 매크로가 필요 없다. 루트 `rocks::Object`는 이미 export되어 있다. 자세한 규칙은 [빌드 타깃](../Design/BuildTargets.ko.md) 3.8절 BS8d3이다.
+다른 모듈의 리플렉션 클래스를 상속하려면 그 기반과 그 위 조상(`rocks::Object` 아래까지)이 클래스 전체를 모듈 API 매크로로 export해야 한다(`class ROCKS_<기반 모듈>_API Base : public Object`). 파생 클래스가 기반의 생성자·소멸자·가상 함수를 링크하기 때문이다(Modular). 메타 컴파일러는 선언부의 매크로를 descriptor 클래스 flags `Exported`로 전하고, 없는 기반을 상속하면 `RMC2002`로 거부한다. 같은 모듈 안의 상속은 매크로가 필요 없다. 루트 `rocks::Object`는 이미 export되어 있다. 자세한 규칙은 [빌드 타깃](../Design/BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8d3이다.
 
 ## 현재 한계와 검증 범위
 
