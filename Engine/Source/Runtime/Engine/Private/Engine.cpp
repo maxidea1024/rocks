@@ -465,7 +465,10 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
 
 Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     WorldContext& context = worlds_[index];
-    auto finished = context.world->Shutdown();
+    // 게임 진행 중이면 정리 이유로 먼저 끝낸다(Shutdown은 그다음 — 17.6절).
+    auto ended = context.world->EndPlay(context.endReason);
+    (void)ended;
+    auto finished = context.world->Shutdown(context.endReason);
     if (!finished) {
         // 외부가 Borrow·RootRef를 보유하고 있다. 지연 작업에서 다시 시도한다.
         context.pendingDestroy = true;
@@ -503,10 +506,15 @@ Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> Engine::DestroyWorld(World* world) noexcept {
+Result<void> Engine::DestroyWorld(World* world, EndPlayReason reason) noexcept {
     for (usize index = 0; index < worlds_.Size(); ++index) {
         if (worlds_[index].world.Get() != world) {
             continue;
+        }
+
+        // 이미 미룬 파괴면 먼저 정한 이유를 유지한다.
+        if (!worlds_[index].pendingDestroy) {
+            worlds_[index].endReason = reason;
         }
 
         if (inFrame_) {

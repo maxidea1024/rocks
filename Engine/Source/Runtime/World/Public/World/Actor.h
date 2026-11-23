@@ -169,7 +169,8 @@ public:
     }
 
     // 정리 hook이다. 다른 Actor 파괴·Spawn 요청은 허용한다(같은 프레임 정리 단계에서 처리된다).
-    virtual void OnDestroy() noexcept {
+    // reason은 정리 이유다(17.2절). OnStart를 받지 못했어도 OnAwake가 성공했으면 받는다.
+    virtual void OnDestroy(EndPlayReason) noexcept {
     }
 
 protected:
@@ -181,6 +182,28 @@ protected:
 private:
     friend class World;
 
+protected:
+    // --- 프레임워크 내부 hook(Docs/Design/EngineRuntime 17.8절 ERD19) ---
+    // Gameplay 모듈의 프레임워크 클래스(GameDirector·GameState·PlayerState·Controller·Pawn·
+    // CameraDirector)만 재정의하고 final로 닫는다. 게임 코드는 OnAwake·OnDestroy를 쓴다.
+
+    // Component OnRegister 뒤, Actor OnAwake 전(UE PreInitializeComponents). 실패는 OnAwake 실패와
+    // 같다(Spawn 실패, OnDestroy 없음).
+    virtual Result<void> OnFrameworkPreAwake() noexcept {
+        return Result<void>::Success();
+    }
+
+    // 모든 Component OnAwake 뒤, OnEnable 전(UE PostInitializeComponents). 실패하면 Spawn이
+    // 실패하고 OnAwake가 성공했으므로 정리에서 OnDestroy를 받는다.
+    virtual Result<void> OnFrameworkPostAwake() noexcept {
+        return Result<void>::Success();
+    }
+
+    // 정리의 OnDisable 전(UE Destroyed·EndPlay의 엔진 부분). OnAwake가 성공한 Actor만 받는다.
+    virtual void OnFrameworkEndPlay(EndPlayReason) noexcept {
+    }
+
+private:
     ROCKS_NATIVE() World* world_ = nullptr;
     // actors 포함 관계에서 유도되는 값이다(편입이 다시 채운다).
     ROCKS_NATIVE() ObjectHandle level_;

@@ -2,6 +2,8 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 8(2026-11-23): LC8d 구현·리뷰 반영(9.7절 — `@test` 반환 타입 금지(S0621), 엔진 enum 값 수정, 취소 판정·메서드 거부, 실행기 거부는 1, 토큰 밑줄).
+- 개정 7(2026-11-23): LC8d 설계(9절 — `@test`는 최상위 함수만(SL 3.13 표·컴파일러와 맞춤, 클래스 `@test` 삭제), 실행기는 SparksTestHost 공개 API, VM 최상위 진입 `CallFunction`, 결과 형식). T1·T10 개정.
 - 개정 6(2026-11-23): LC8c 구현·리뷰 반영(8.5절 — 주석 자리 규칙 보강, BOM 제거 확정, 인자 아래 모듈만 대상, 변형 corpus 시험).
 - 개정 5(2026-11-23): LC8c 설계(8절 — 서식 알고리즘·주석 수집·`fmt` 명령·시험). 3절 규칙을 구체화(이항 연산자 표에서 없는 `->` 삭제, 블록 안 enum case 줄, 이어지는 줄의 들여쓰기 단위).
 - 개정 4(2026-11-23): LC8b 구현·리뷰 반영(7.4절 — 컴파일러의 승계 판정 순서·은퇴/이미 이은 승계 진단, manifest의 모르는 키 S1006, 도구의 이름 겹침 검사·확인 실패 진단 출력, 결과 줄 정렬, 잠금 공유 모드 한계).
@@ -16,14 +18,14 @@
 | LC8a 표준 입출력·작업 공간·check | PlatformBase 표준 스트림 API(SE-B7), `SparksTools`(Developer) 작업 공간 적재(패키지 폴더 찾기·schema 폴더·원문 읽기)와 명령 실행 라이브러리, 프로그램 `sparks`의 `check`·`dump` | 명령 시험(종료 코드·출력 golden), 작업 공간 적재의 할당 실패 전수, corpus 사례를 CLI로 돌린 진단이 conformance와 같음 — 완료(개정 2, 6절) |
 | LC8b build·ids | `build`(모듈마다 `.sparkc` — 출력 폴더), `ids`(발급 대기 안정 ID를 `.rocksids.json`에 GUID로 발급) | 출력 byte golden, manifest 왕복 시험 — 완료(개정 4, 7절) |
 | LC8c formatter·fmt | lexer의 주석 보존 모드, 공식 서식 규칙(3절)의 token 기반 formatter(SparksCompiler), `fmt`·`fmt --check` | corpus 전체에서 멱등(fmt(fmt(x)) = fmt(x))·token 열 보존, 서식 golden — 완료(개정 6, 8절) |
-| LC8d @test·test | `@test fn` 실행기(headless 가짜 host — 엔진 함수는 "엔진 필요" 실패), 결과를 진단 형식으로 | 실행기 시험(통과·Assert 실패·fault·엔진 필요) |
+| LC8d @test·test | `@test fn` 실행기(headless 가짜 host — 엔진 함수는 "엔진 필요" 실패), 결과를 진단 형식으로 | 실행기 시험(통과·Assert 실패·fault·엔진 필요·끝나지 않음) — 완료(개정 8, 9절) |
 | LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) |
 | LC8f 언어 서버 편집 | 자동완성(멤버·hook·attribute·리터럴·경로·Unity 이름 제시), hover, 정의 이동, 빠른 수정(SL §13 목록), 문서 서식 | 자동완성 후보 golden, prefix fuzz, 빠른 수정 golden |
 | LC8g VS Code 확장 | `Tools/VSCode/sparks`(TypeScript — 언어 등록·문법 강조·`sparks-lsp` 시작) | 확장 패키징 시험(C# 도구 시험에서 manifest 검사) |
 
 ## 2. 구조
 
-- **모듈(T1):** formatter는 `SparksCompiler`(SL 18.1 — 컴파일러 라이브러리가 같은 규칙을 쓴다). 작업 공간 적재·명령 실행·`@test` 실행기·언어 서버 핵심은 `Engine/Source/Developer/SparksTools`(Developer — 출시 실행 파일에 링크하지 않는다, 시험은 EngineTests에서 같은 프로세스로 부른다). 프로그램 `Programs/SparksCli`(실행 파일 `SparksCli` — 설치 이름 `sparks`는 배포 도구의 몫, 사용법 문장은 `sparks`)와 `Programs/SparksLsp`(`SparksLsp` — 설치 이름 `sparks-lsp`)는 Launch 진입(CrashHandlingAndLaunch)과 명령 함수 호출만 한다(Commandlet과 같은 배치).
+- **모듈(T1):** formatter는 `SparksCompiler`(SL 18.1 — 컴파일러 라이브러리가 같은 규칙을 쓴다). `@test` 실행기는 `SparksTestHost`(SL 18.1 — conformance와 `@test`가 같은 가짜 host에서 돈다, 공개 API `SparksTestHost/TestRunner.h`). 작업 공간 적재·명령 실행·언어 서버 핵심은 `Engine/Source/Developer/SparksTools`(Developer — 출시 실행 파일에 링크하지 않는다, 시험은 EngineTests에서 같은 프로세스로 부른다). 프로그램 `Programs/SparksCli`(실행 파일 `SparksCli` — 설치 이름 `sparks`는 배포 도구의 몫, 사용법 문장은 `sparks`)와 `Programs/SparksLsp`(`SparksLsp` — 설치 이름 `sparks-lsp`)는 Launch 진입(CrashHandlingAndLaunch)과 명령 함수 호출만 한다(Commandlet과 같은 배치).
 - **표준 입출력(T2 — SE-B7):** `Platform/StandardStream.h` — `WriteStandardOutput(StringView utf8)`·`WriteStandardError(StringView utf8)`(콘솔이면 Windows는 UTF-16 `WriteConsoleW`, 리디렉션·pipe는 byte 그대로 — Commandlet 구현과 같은 규칙), `ReadStandardInput(Span<char> buffer)` → 읽은 byte 수(0은 끝, pipe·파일은 byte 그대로 — 언어 서버의 Content-Length 틀), 실패는 `DependencyFailed`(handle 없음·쓰기 실패)·`InvalidArgument`(UTF-8 아님 — 출력만). Windows는 `GetStdHandle`+`ReadFile`/`WriteFile`/`WriteConsoleW`, macOS·Linux는 `read`/`write`(EINTR 재시도). CRT stdio를 쓰지 않는다(text 모드 변환이 Content-Length를 깨지 않게). Commandlet의 전용 구현은 이 API로 옮길 수 있다(그 세션의 일 — 알림).
 - **작업 공간(T3):** 명령 인자의 경로(폴더)마다 아래를 훑어 `SparksPackage.json5`가 있는 폴더를 패키지 뿌리로, 그 아래 `.spark`를 모듈로 넣는다(conformance 폴더 사례와 같은 규칙 — 모듈 경로는 패키지 뿌리 기준). schema는 `--schema <폴더>`(여러 번 — `*.sparkbind.json`), ID manifest는 패키지 뿌리의 `.rocksids.json`. 설정 파일(`SparksWorkspace.json5`)은 엔진 연동(EI — 엔진이 schema 위치를 안다)에서 더한다. 파일 읽기는 PlatformBase `FileSystem`.
 - **출력(T4):** 진단은 SL §8.1 텍스트(`AppendDiagnostics`)를 표준 출력에, 요약 한 줄(`N errors in M files`)을 끝에. 명령 사용법 오류는 표준 오류. 종료 코드: 0 성공(진단 없음·시험 통과·서식 같음), 1 진단·시험 실패·`fmt --check`의 다름, 2 사용법 오류, 3 입출력·할당 실패. 출력은 결정적이다(경로 byte 순, 진단은 §8.1 순서).
@@ -32,7 +34,7 @@
 - **build(T7):** `sparks build <경로> --out <폴더>` — 진단 없으면 모듈마다 `<출력>/<패키지 이름>/<모듈 경로의 .spark를 .sparkc로>`(SparksBytecode `.sparkc` 형식). 진단이 있으면 아무것도 쓰지 않는다(1). 파일마다 원자적으로 쓰고 내용이 같으면 쓰지 않는다(7절).
 - **ids(T8):** `sparks ids <경로>` — 컴파일의 발급 대기 목록(`PendingIds`)마다 새 GUID(Core `TryNewGuid` — OS 보안 난수 UUID v4, C# `Guid.NewGuid`와 같은 종류)를 그 패키지 ID manifest에 더하고, 옛 이름이 있는 대기는 C# `StableIdManifest.Rename`과 같은 규칙으로 옮긴다(옛 이름은 aliases, type rename은 멤버 항목도 함께). 출력 byte는 C# `StableIdManifest`의 직렬화와 같다(항목은 kind·name ordinal 순, aliases ordinal 순 — C# 도구가 다시 써도 바뀌지 않는다. 기존 항목의 원문 순서는 지키지 않는다). 쓰기 전에 새 manifest로 다시 컴파일해 진단·대기가 0인지 보고, C#과 같은 잠금 파일·임시 파일 교체로 쓴다(7절).
 - **formatter(T9 — 3절):** token 기반이다. lexer의 주석 보존 모드가 주석을 trivia 목록(종류·범위)으로 따로 돌려주고, formatter는 token 열과 trivia를 원래 순서로 걸으며 공백·줄바꿈·들여쓰기만 정한다(token 글자는 바꾸지 않는다 — 의미 보존을 token 열 비교로 시험). 구문 오류(S02xx)가 있는 파일은 서식하지 않는다(그대로 — 진단). 설정이 없다(SL §3.1 R21).
-- **@test(T10):** `@test fn`(최상위 — 인자 없음)과 클래스의 `@test fn`(그 클래스 instance를 headless 가짜 객체에 붙여 `$init` 뒤 호출)을 VM session으로 돌린다. 시계는 `Advance`로 결정적으로 진행(정지한 시험은 `--max-frames`(기본 600)까지 프레임을 진행하고 남으면 "did not finish"). 결과: 통과, `Assert` 실패·fault(진단 형식 — 원문 위치), 엔진 함수 호출(가짜 host가 모르는 native — "needs the engine (EI)" — 실패로 센다). headless World fixture(SL §13.1)는 엔진 연동(EI)이 host를 바꿔 끼운다.
+- **@test(T10 — 개정 7):** `@test fn`(최상위 — 인자 없음, `async`도 된다 — SL 3.13 표)을 시험마다 새 VM session의 최상위 진입(`VmSession::CallFunction`)으로 돌린다. 클래스 안 `@test`는 없다(SL 3.13 — 클래스는 시험 함수가 만들어 쓴다, 객체 생성은 엔진 fixture가 필요하다). 시계는 결정적 프레임으로 진행(정지한 시험은 `--max-frames`(기본 600)까지 프레임을 진행하고 남으면 "did not finish"). 결과: 통과, `Assert` 실패·fault(진단 형식 — 원문 위치), 엔진 기능 사용(객체·필드·native 함수·문맥·로드 — "needs the engine" — 실패로 센다). headless World fixture(SL §13.1)는 엔진 연동(EI)이 host를 바꿔 끼운다(9절).
 - **언어 서버(T11):** LSP 3.17, JSON-RPC 2.0, stdio Content-Length 틀(Core JSON reader·writer). 문서 동기화는 전체 내용(`TextDocumentSyncKind.Full`) — 증분은 측정 뒤. 분석은 작업 공간 원문에 열린 문서 내용을 덮은 snapshot으로 전체를 컴파일한다(SL §13 "문서 버전별 arena" — snapshot마다 새 allocator 영역). 진단은 같은 `Compilation`이라 CLI와 같다(동등성 시험). 위치는 LSP 규약대로 UTF-16 code unit 열(컴파일러 위치는 byte·code point — 변환 함수와 시험). 처리 중 들어온 같은 문서의 새 변경은 이전 분석 결과를 버린다(취소 — 순서는 메시지 순서로 결정적).
 - **의미 강조(T12):** semanticTokens/full — 이름 해석 결과로 type·class·struct·enum·enumMember·event·function·method·property(필드)·parameter·variable·namespace(모듈) + modifier(declaration·readonly(`let`)·static(최상위)·async·defaultLibrary(엔진 schema)).
 - **편집 기능(T13 — LC8f):** 자동완성 후보는 위치의 문법 자리(멤버 접근·`on`·attribute·리터럴 인자·import 경로)와 이름 해석 범위에서 만든다. 리터럴(태그·에셋 경로)은 컴파일 검증과 같은 사전(엔진 연동 전에는 schema·manifest만). Unity 이름(`Update` 등)은 Rocks 이름 후보에 별칭으로 붙인다. core 패키지는 full 후보를 숨긴다. hover는 타입·문서 주석·선언 위치(엔진 native는 schema 위치), 빠른 수정은 진단 코드별 편집 생성기(SL §13 목록 — 해당 진단이 있는 것부터).
@@ -55,7 +57,7 @@
 - T7 대안(모듈을 바로 덮어쓰기)은 쓰는 도중 실패하면 반쪽 `.sparkc`가 남는다(읽는 쪽이 형식 오류로 거부하지만 이전의 맞는 파일을 잃는다). 대안(바뀌지 않은 파일도 다시 쓰기)은 수정 시각이 바뀌어 뒤 단계(쿠킹·패키징)가 할 일을 늘린다. 지운 모듈의 옛 `.sparkc`는 지우지 않는다(출력 폴더 정리는 호출자의 몫 — 다른 도구의 파일을 지우지 않게).
 - T8 대안(기존 항목 순서 유지)은 C# 도구가 같은 manifest를 다시 쓸 때마다 순서가 바뀌어 diff가 생긴다 — 두 도구가 같은 정규형을 쓴다. 대안(발급 뒤 쓰고 나서 다시 컴파일해 확인)은 확인이 실패해도 이미 쓴 manifest가 남는다 — 쓰기 전에 메모리에서 확인한다.
 - T9 대안(구문 트리 재출력)은 괄호·주석·빈 줄 보존에 노드마다 규칙이 필요하고 의미 보존 시험이 어렵다. token 기반은 token 열 동일성으로 의미 보존을 기계적으로 보인다. 줄 길이 자동 줄바꿈은 구문 트리가 필요해 뒤로 미룬다(Go `gofmt`처럼 줄바꿈을 사람이 정한다).
-- T10 대안(엔진 없이 `@test` 금지)은 언어 코어의 시험 작성(SL §13.1)을 막는다. 가짜 host는 conformance의 FakeHost와 같은 schema 구동 방식을 쓰되 공개 API로 `SparksTools`에 둔다(FakeHost는 corpus 전용 — 기록 형식이 다르다).
+- T10 대안(엔진 없이 `@test` 금지)은 언어 코어의 시험 작성(SL §13.1)을 막는다. 대안(실행기를 `SparksTools`에 두고 schema 묶기를 따로 구현)은 FakeHost의 schema 구동 묶기(서술자 대조 — 약 500줄)를 베낀다 — 실행기를 `SparksTestHost`에 두고 FakeHost의 묶기를 그대로 쓴다(SL 18.1의 "conformance와 `@test`가 이 host에서 돈다"와도 같다). 대안(클래스 `@test` — 개정 1)은 SL 3.13 표·컴파일러(S0621)와 어긋나고 객체 없는 headless host에서 instance를 붙일 엔진 객체가 없다.
 - T11 증분 동기화·증분 분석은 SL §13 목표(파일 1,000개 진단 p95 300 ms)를 재 본 뒤 넣는다(LC7c3처럼 측정 먼저).
 
 ## 5. 시험
@@ -148,3 +150,51 @@
 - **주석 자리 규칙(리뷰 반영):** 줄 처음 블록 주석 뒤라도 `}`는 자기 줄로 간다. `}`와 `else` 사이에 블록 주석이 있어도 `} /* c */ else {` 한 줄이다(줄 주석이 있으면 줄을 바꾼다 — 바꿀 수 없다). `{` 뒤 첫 줄바꿈까지(같은 줄 뒤 주석이 있어도)와 문서 주석 뒤에는 빈 줄을 두지 않는다. 자기 줄에 오는 `{`(앞이 줄 주석)는 이어지는 줄 들여쓰기를 받지 않는다. 문서 주석도 줄 끝 공백을 지운다.
 - **한계:** `;`·`,` 앞의 줄 주석(`y() // c` 다음 줄 `;`)은 줄을 바꿀 수밖에 없어 `;`가 이어지는 줄로 들여쓰인다(멱등). 줄 처음 블록 주석 뒤의 `)`·`]`는 그 줄에 남는다. 보간 `${ }` 안은 서식하지 않는다. `fmt` 쓰기 실패는 그 자리에서 3으로 끝난다(앞에서 바꾼 파일은 남는다 — build와 같다).
 - **시험:** `SparksFormatter_Golden`(`Formatting/` 5사례 — Spacing·Blocks·Continuation·Comments·Edges), `SparksFormatter_CrlfTabsAndBlankEdges`(CRLF·탭·빈 파일·주석만·BOM), `SparksFormatter_SyntaxErrorsAreNotFormatted`, `SparksFormatter_CorpusIdempotentAndTokenPreserving`(conformance 전체), `SparksFormatter_CorpusVariantsIdempotentAndTokenPreserving`(corpus 원문마다 토큰 경계에 블록 주석·줄 주석을 끼우거나 모든 경계를 줄바꿈으로 바꾼 결정적 변형 셋 — 멱등·token 열·주석 열), `SparksFormatter_AllocationFailureEverywhere`(실패를 견딘 시도의 출력이 기준과 같음), `SparksTools_FmtRewritesAndChecks`·`SparksTools_FmtSelectsArgumentModules`·`SparksTools_FmtAllocationFailure`. 수동 확인(2026-11-23 Windows): `SparksCli fmt --check`(1)·`fmt`(0)·재검사(0).
+
+## 9. LC8d 설계(개정 7)
+
+### 9.1 실행기 API(SparksTestHost)
+
+- `SparksTestHost/TestRunner.h`(공개): `Result<void> RunTests(Allocator&, const Compilation&, const SourceSet& sources, Span<const uint32> modules, const TestOptions&, TestReport& out)`. compilation은 진단 없이 끝난 것(모든 단계 — `ModuleBytecode`가 모든 모듈에 있다)이고, modules는 시험을 찾을 모듈 번호(진단 경로 byte 순으로 호출자가 정한다)다. 링크는 compilation의 모든 모듈을 한 host로 묶고 `LinkImports`로 모듈 사이 호출을 푼다(시험 모듈이 다른 모듈 함수를 부른다). 실패: 링크 거부(InvalidArgument — 사유는 `out.reason`), 할당 실패(OutOfMemory). 시험 하나의 실패는 실행기 실패가 아니라 결과다.
+- **시험 찾기:** 모듈마다 `Symbols()` 중 그 모듈의 최상위 `Function`이고 `@test` attribute가 있는 것을 선언 순서(원문 위치)로. `@test`는 인자와 반환 타입이 없는 함수다(개정 8 — 반환 타입이 있으면 S0621: 실행기가 반환 값을 보지 않으므로 `Result` 오류 반환이 조용히 통과하지 않게. SL 3.13 표의 "인자 없는 최상위 함수"를 "인자·반환 타입 없는 최상위 함수"로 고치는 것은 SL 문서 분할(500줄 규칙) 커밋과 함께 한다). 컴파일러 공개 API `Compilation::HasAttribute(symbol, name)`(언어 서버도 쓴다)을 더한다. bytecode 함수는 같은 이름의 최상위 함수(이름에 `.`가 없는 것)다.
+- **결과(`TestResult`):** 모듈·시험 심볼·결과 종류·위치(SourceId와 byte 범위 — 없으면 시험 이름)·상세 글자·진행한 프레임 수. 종류: `Passed`, `Faulted`(VM fault 종류 — `AssertFailed` 포함), `EndedWithError`(`Result`가 아닌 시험의 `try` 실패 — SL 8.4, 오류 코드), `NeedsEngine`(엔진 기능 이름), `DidNotFinish`(프레임 상한).
+- **옵션(`TestOptions`):** `maxFrames`(기본 `DefaultTestMaxFrames` = 600 — 60 Hz 10초), 시험 프레임 시간은 `TestFrameSeconds` = 1/60.
+
+### 9.2 headless host
+
+- FakeHost의 묶기(`Bind` — schema 구동 서술자 대조)·리터럴(`MakeLiteral` — 이름 표)·이름 표기(`AppendName`·`AppendEnumName`)를 그대로 쓰고, 엔진 객체를 만들거나 읽는 호출은 모두 거부한다: `GetContext`(`World`·`Session` …), `GetField`·`SetField`, `CallNative`, `ResolveVirtual`, `InitializeStruct`(엔진 struct 기본값), `StartLoad`(0 — 계약 위반, 거부 이름 `Soft.Load`), 객체를 만드는 리터럴(Ref bank — 값 리터럴 `Tag`·`Name`은 만든다). 거부는 `ContractViolation` fault이고 host가 처음 거부한 묶음 이름(`World`·`Actor.Destroy` …)을 기억한다 — 실행기는 그 시험의 결과를 `NeedsEngine`으로 바꾼다(fault 위치 그대로). 살아 있는 객체가 없으므로 `IsAlive`·`IsA`는 거짓, `ReleaseHeld`는 할 일이 없다.
+- 엔진 연동(EI)은 같은 실행기에 World fixture host를 끼운다(그때 `TestOptions`에 host 선택을 더한다 — 지금은 headless 하나).
+
+### 9.3 실행
+
+- 시험마다 새 `VmSession`(host·링크는 공유 — 시험 사이 상태는 host의 "처음 거부한 이름"뿐이고 시험마다 지운다)에 모든 링크 모듈을 `AddModule`하고 `CallFunction`으로 부른다. 반환이면 통과, fault·`Ended`면 그 결과다.
+- 정지(`Suspended`)면 프레임을 진행한다. 프레임 하나 = `FixedStep()` → `Advance(TestFrameSeconds, TestFrameSeconds)` → `ApplyRequests()` → `EndFrame()`(SL 5.4 순서의 고정 재개 → 가변 재개 → 적용 → 끝 정리 — instance가 없어 뒤 둘은 할 일이 없지만 엔진 fixture와 같은 틀). 프레임마다 `Deliveries()`에서 이 시험 실행의 끝(재개 기록 중 하위 실행이 아닌 것 — `Delivery::child` 거짓, 결과가 정지가 아님)을 찾는다. `maxFrames` 프레임 뒤에도 정지해 있으면 `DidNotFinish`(위치는 시험 이름)이고 session을 닫아 실행을 취소한다. 끝 기록은 FixedStep·Advance·ApplyRequests·EndFrame 뒤마다 찾고, 끝 기록 없이 정지 실행이 사라지면(엔진 fixture의 취소 경로) 실행기 거부(InvalidArgument — `a test execution was cancelled without a result`)다(조용히 `DidNotFinish`가 되지 않게).
+- 시험 뒤 `CloseSession` — 실행 문맥 ledger가 0이어야 한다(아니면 실행기 버그 — `ContractViolation` 결과가 아니라 실행기 실패 InvalidArgument). 대기·정지 실행은 session과 함께 사라진다.
+- **순서·결정성:** 모듈 순서는 호출자, 모듈 안은 원문 위치 순. 시험 사이 공유 상태가 없으므로 결과는 시험 하나만 돌려도 같다. 시계는 프레임 수로만 진행한다(실제 시간 없음 — SL 13.1).
+
+### 9.4 VM 최상위 진입(SparksRuntime 2.8절)
+
+- `VmSession::CallFunction(module, function, scalars, refs, buffers)`: instance 없이(this 없음) 최상위 함수를 부른다(메서드 — 이름 `Owner.Name` — 는 InvalidArgument). `Call`과 같은 진입 규칙(발행 전달·반환 값 보관·fault 기록)이고 다른 점은 instance가 없다는 것뿐이다 — 정지 실행의 instance는 `NoBytecodeIndex`(동시 실행 상한·격리 대상 아님 — instance 예산이 없다), fault는 위치 기록(`Faults()`)만 남고 격리 계수가 없다. `Detach`·`DetachAll`이 건드리지 않으며 `CloseSession`이 취소한다. `Detach`의 "이 instance를 this로 쓰는 frame" 판정은 클래스 메서드 frame(이름 `Class.Name`의 Class가 그 모듈 클래스)만 본다 — 최상위 함수·struct 메서드 frame의 Ref 0번은 this가 아니다(개정 8 리뷰 반영, 전에는 모든 frame의 Ref 0번을 this로 보았다).
+- `Delivery::child`: 재개 기록이 하위 실행(CALLW — `All`·`Race` 인자)의 것인지다. 하위 fault로 부모가 끝난 기록은 부모의 것이다(`child`는 부모가 하위 실행인지).
+- 엔진 연동에서 최상위 진입을 쓰는 곳은 `@test`(World fixture)와 편집기 명령(요구 시)이다 — 게임 실행 경로는 언제나 instance가 있다.
+
+### 9.5 test 명령
+
+- `sparks test [--schema <폴더>]... [--max-frames <N>] <경로>...` — check와 같이 작업 공간 전체를 컴파일하고(진단이 있으면 진단과 요약, 시험은 돌리지 않는다 — 1), 인자 아래 모듈(8.3절 대상 규칙)의 시험을 돌린다. `--max-frames`는 `test`에만, 한 번만, 1–`MaxTestFrames`(1,000,000)의 10진수다(사용법 오류: `'--max-frames' is only for 'test'`, `'test' takes one --max-frames`, `'--max-frames' needs a number from 1 to 1000000`).
+- **출력(표준 출력):** 실패한 시험마다 진단과 같은 형식(SL 8.1 — `AppendSourceReport`)으로 한 보고: 첫 줄 `<경로>:<줄>:<열>: error <종류>: Test '<이름>' failed.`(종류 자리는 S코드 대신 결과 이름 — `AssertFailed`·`IntegerOverflow`·…·`EndedWithError`·`NeedsEngine`·`DidNotFinish`), 원문 줄과 밑줄(fault 위치의 토큰 — 위치가 없으면 시험 이름), 설명 줄(종류별 — `NeedsEngine`은 `'<이름>' needs the engine; tests run on the headless host until engine integration (EI).`, `DidNotFinish`는 `The test was still waiting after <N> frames.`, `EndedWithError`는 `A 'try' failed with 'Error.<case>'.`(컴파일러가 해석한 엔진 타입 `Error`의 case — 찾지 못하면 `error code <N>`), 다른 fault는 `The test stopped with the fault '<종류>'.`). 보고 순서는 시험 순서. 끝 줄 `<P> passed, <F> failed`(시험이 없으면 `no tests`).
+- 종료: 0(모두 통과·시험 없음), 1(컴파일 진단·실패한 시험·실행기 거부 — 표준 오류 `sparks: cannot run the tests: <사유>`, 링크·import 거부 등), 2(사용법), 3(입출력·할당).
+- 컴파일러에 `AppendSourceReport(out, sources, source, hasSpan, span, code, message, explanation, fix)`(공개)를 더하고 `AppendDiagnostic`이 그것을 쓴다(같은 원문 줄·밑줄·제어 문자 처리 — 형식이 갈라지지 않게).
+
+### 9.6 시험(LC8d)
+
+- 실행기(`SparksTestHost/Tests`): 통과(동기·`async` — `NextTick`·`Delay`·`NextFixedTick`·`All`·`Race`·다른 모듈 함수), `Assert` 실패(위치), 다른 fault(정수 넘침·0 나눗셈·색인), `try` 실패(`EndedWithError`), 엔진 기능마다 `NeedsEngine`(문맥·native 함수·필드·로드 — 이름), 끝나지 않음(`while` + `NextTick` — 프레임 상한과 정확한 프레임 수), 하위 실행 fault가 부모 결과로, 시험 사이 독립(앞 시험의 정지 실행·거부 이름이 뒤 시험에 남지 않음 — 같은 모듈을 다시 돌려도 결과 같음), 여러 모듈 순서, 할당 실패 전수(결과가 기준과 같거나 OutOfMemory).
+- VM(`SparksTestHost` 시험 — 원문을 컴파일해 쓰므로 컴파일러가 있는 곳): `CallFunction` — 동기 반환, 정지·재개, 하위 실행의 `child` 표시, fault 기록, `CloseSession` 취소 뒤 ledger 0, this가 있는 함수·잘못된 인자 모양 거부.
+- 명령(`SparksTools`): 출력 golden(통과·실패 섞임 — 보고 형식, 요약), 진단 있는 작업 공간(시험 안 돎, 1), 시험 없음(0), `--max-frames` 사용법 오류 셋과 적용, 할당 실패 전수.
+
+### 9.7 구현과 리뷰 반영(개정 8)
+
+- **파일:** `SparksTestHost` — `Public/SparksTestHost/TestRunner.h`, `Private/TestRunner.cpp`(headless host `TestHeadlessHost` — FakeHost 묶기 위임, 실행 루프, 보고), FakeHost `BindingAt`. `SparksTools` — `Private/TestCommand.cpp`, `Command.cpp`(`--max-frames`). `SparksVm` — `VmSession::CallFunction`·`Enter`(Call과 공통 진입)·`Delivery::child`, `CancelExecutions`의 this frame 판정. `SparksCompiler` — `Compilation::HasAttribute`, `AppendSourceReport`(`AppendDiagnostic`이 쓴다), `@test` 반환 타입 S0621.
+- **엔진 enum 값 수정(컴파일러 버그):** 엔진 enum case 값이 schema 전체 case 표의 번호(`Symbol::item`)로 내려가고 있었다(규격은 그 enum 안의 case 번호 — SparksBytecode 2절 `Error` case 번호 + 1, host `AppendEnumName`). `IrBuilder::EnumIndex`가 enum의 첫 case를 뺀다. conformance golden 7개(`Codegen/Edges`·`Flow`의 `.ir`·`.bc`, `Run/Async`·`Structs`·`Values`의 `.run`)가 그 값만 바뀌었다. 엔진 연동 host(EI)도 native·로드 오류를 "enum 안 번호 + 1"로 낸다.
+- **리뷰 반영:** `Result`를 반환하는 `@test`의 오류 반환이 통과로 세어짐 → 반환 타입 금지(S0621, conformance `Rules/Attributes` 사례). instance 없는 정지 실행이 `Detach`의 this frame 판정으로 조용히 취소될 수 있음 → 판정을 클래스 메서드 frame으로 좁히고 실행기는 끝 기록 없는 소멸을 거부. 링크 거부 종료 코드 3 → 1. `CallFunction`의 메서드 거부와 시험. 밑줄을 구문 트리 토큰으로. 로드 거부 이름 `Soft.Load`. `Error` case 이름은 컴파일러 심볼로. 엔진 struct 기본값·로드 거부·Tag 값 리터럴·색인 fault 시험. 프레임 수 해석은 상한을 넘는 순간 멈춘다(자리 수 상수 대신 — 앞의 0은 된다).
+- **한계:** 최상위 함수에는 문맥 이름이 없어(S0321) `@test`가 `World`를 쓸 수 없다 — headless World fixture(SL 13.1)는 EI에서 `@test` 문맥 규칙(SL 개정)과 함께 정한다. `Assert` 문구는 원문 줄로만 보인다(설명 줄에 따로 넣지 않는다). 시험의 `Log` 출력은 보이지 않는다(요구 시 `--verbose`). 정지 실행의 재개 순서에서 instance 없는 실행은 생성 번호 0이라 같은 프레임의 instance 실행보다 먼저다(결정적).
+- **시험:** `SparksTestRunner_ResultsOfEachKind`(11가지 — 프레임 수·위치), `SparksTestRunner_EngineRefusalsAndIndexFault`, `SparksTestRunner_ReportFormat`(보고 golden), `SparksTestRunner_TestsAreIndependent`, `SparksTestRunner_RejectsBadInput`, `SparksTestRunner_CallFunctionSession`, `SparksTestRunner_AllocationFailureEverywhere`, `SparksTools_TestRunsAndReports`·`SparksTools_TestNoTestsAndDiagnostics`·`SparksTools_TestAllocationFailure`, `SparksTools_UsageErrors`(`--max-frames` 8가지). 수동 확인(2026-11-23 Windows): `SparksCli test`(통과·Assert·0 나눗셈·끝나지 않음·엔진 필요 섞임 — 1).

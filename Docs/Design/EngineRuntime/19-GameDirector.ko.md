@@ -51,7 +51,7 @@
 
 World 모듈은 Gameplay를 모른다(3절 의존 방향). Gameplay 모듈의 `GameplayWorldSubsystem`(GameInstance의 `OpenWorld`가 World Subsystem 목록에 넣을 때만 생긴다 — World 종류만으로 기본 생성하지 않는다. 그래서 GameInstance 없이 만든 Game World에는 없다, 21.4절)이 GameDirector·GameState handle과 Controller 목록을 든다. World 쪽에는 시작 위임 자리 하나만 더한다.
 
-- `World::SetBeginPlayDispatcher(BeginPlayDispatcher*)`: 있으면 `World::BeginPlay`가 Subsystem `OnWorldBeginPlay` 뒤 `dispatcher->StartPlay(world)`를 부르고, dispatcher가 정확히 한 번 `World::DispatchBeginPlay()`(상태를 Playing으로 바꾸고 대기 Actor를 시작)를 불러야 한다. 안 부르면 `BeginPlay`가 `NotReady`로 실패하고, 두 번째 호출과 `StartPlay` 밖의 호출은 `WrongContext`다(진단 `BeginPlayDispatchContractViolated`). 없으면 `BeginPlay`가 바로 `DispatchBeginPlay`한다 — **Director 없는 World 시나리오**(21.4절).
+- `World::SetBeginPlayDispatcher(BeginPlayDispatcher*)`: 있으면 `World::BeginPlay`가 Subsystem `OnWorldBeginPlay` 뒤 `dispatcher->StartPlay(world)`를 부르고, dispatcher가 정확히 한 번 `World::DispatchBeginPlay()`(상태를 Playing으로 바꾸고 대기 Actor를 시작)를 불러야 한다. 안 부르거나 StartPlay가 그 전에 실패하면 `BeginPlay`가 실패하고(미호출은 `NotReady`) `OnWorldBeginPlay`를 받은 Subsystem에 `OnWorldEndPlay`로 짝을 맞춘 뒤 Initialized에 남으며(다시 시도할 수 있다), 두 번째 호출과 `StartPlay` 밖의 호출은 `WrongContext`다(진단 `BeginPlayDispatchContractViolated`). 없으면 `BeginPlay`가 바로 `DispatchBeginPlay`한다 — **Director 없는 World 시나리오**(21.4절).
 - `GameplayWorldSubsystem`이 dispatcher이며 `StartPlay`에서 `GameDirector::StartPlay()`를 부른다. GameDirector가 없는 Game World(Client)면 바로 `DispatchBeginPlay`한다(복제 트리거는 네트워크 단계).
 
 ### 19.6 PlayerState

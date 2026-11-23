@@ -619,6 +619,39 @@ void VmSession::ReleaseSuspended(Suspended& entry) noexcept {
     entry.live = false;
 }
 
+namespace {
+
+// frame의 함수가 Ref 0번에 this를 받는 클래스 메서드인지다(함수 이름 `Class.Name`의 Class가 그
+// 모듈의 클래스 — 최상위 함수·struct 메서드의 Ref 0번은 this가 아니다, SparksRuntime 2.8절).
+bool VmFrameHasThis(const VmExecution::Frame& frame) noexcept {
+    if (frame.link == nullptr || frame.function >= frame.link->Module().functions.Size()) {
+        return false;
+    }
+
+    const BytecodeModule& module = frame.link->Module();
+    // 주인 이름은 첫 `.` 앞이다(handler 이름 `Door.on Peer.Ping`처럼 뒤에 `.`가 더 있을 수 있다).
+    const StringView name = module.String(module.functions[frame.function].name);
+    usize dot = 0;
+    while (dot < name.ByteCount() && name.Data()[dot] != '.') {
+        ++dot;
+    }
+
+    if (dot == name.ByteCount()) {
+        return false;
+    }
+
+    const StringView owner(name.Data(), dot);
+    for (const BytecodeClass& entry : module.classes) {
+        if (module.String(entry.name) == owner) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+} // namespace
+
 void VmSession::CancelExecutions(uint32 instance, bool frames) noexcept {
     // instance의 정지 실행을 취소한다: frame의 Buf를 놓고 대기를 돌려받는다(SL 6.1절 — 취소는 await
     // 지점에서만, 유지 자원 해제는 LC6d). frames면 그 instance를 this(frame의 Ref 0번)로 쓰는
@@ -633,7 +666,8 @@ void VmSession::CancelExecutions(uint32 instance, bool frames) noexcept {
         bool owned = entry.instance == instance;
         for (usize frame = 0; frames && !owned && frame < entry.frames.Size(); ++frame) {
             const usize base = entry.frames[frame].base[static_cast<uint32>(BytecodeBank::Ref)];
-            owned = handle != 0 && base < entry.refs.Size() && entry.refs[base] == handle;
+            owned = handle != 0 && base < entry.refs.Size() && entry.refs[base] == handle &&
+                    VmFrameHasThis(entry.frames[frame]);
         }
 
         if (owned) {
@@ -931,6 +965,7 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     delivery.function = bottom.function;
     delivery.result = continued.Value();
     delivery.resumed = true;
+    delivery.child = childWait != 0;
     execution_.ReleaseReturned();
     ErrorCode failure = ErrorCode::None;
     if (!deliveries_.TryPushBack(delivery)) {
@@ -994,6 +1029,7 @@ Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result
             delivery.function = parent.frames[0].function;
             delivery.result = result;
             delivery.resumed = true;
+            delivery.child = parent.childWait != 0;
             if (!deliveries_.TryPushBack(delivery)) {
                 failure = ErrorCode::OutOfMemory;
             }
@@ -1075,6 +1111,7 @@ Result<void> VmSession::FaultSuspended(uint32 suspended, VmFaultKind kind) noexc
     delivery.function = entry.frames[0].function;
     delivery.result = result;
     delivery.resumed = true;
+    delivery.child = childWait != 0;
     const bool recorded = static_cast<bool>(deliveries_.TryPushBack(delivery));
     CancelSuspended(suspended, false);
     Result<void> finished = Result<void>::Success();

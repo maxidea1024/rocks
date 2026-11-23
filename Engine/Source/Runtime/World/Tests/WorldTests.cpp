@@ -92,7 +92,7 @@ public:
         Record("c.disable");
     }
 
-    void OnDestroy() noexcept override {
+    void OnDestroy(EndPlayReason) noexcept override {
         Record("c.destroy");
     }
 
@@ -155,7 +155,7 @@ public:
         Record("a.disable");
     }
 
-    void OnDestroy() noexcept override {
+    void OnDestroy(EndPlayReason) noexcept override {
         Record("a.destroy");
         if (!destroyBypassVictim.IsNull()) {
             CHECK(GetWorld()
