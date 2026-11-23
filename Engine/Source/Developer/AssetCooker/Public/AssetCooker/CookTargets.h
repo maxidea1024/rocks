@@ -33,7 +33,37 @@ struct CookDiagnostic {
     AssetId related{};
     // 설정·인자 항목의 순번이다(InvalidPath·NeverCookReferenced의 alwaysCook·인자 경로, 그 밖 0).
     uint32 setting = 0;
+    // 원인 오류다(콘텐츠 해시의 파일 오류 등 — 없으면 None, A4c).
+    ErrorCode error = ErrorCode::None;
 };
+
+// 진단 순서다((asset, code, related, setting, 오류 먼저, 원인 오류) — 보고서·시험이 결정적으로
+// 읽는다).
+constexpr bool CookDiagnosticBefore(const CookDiagnostic& left,
+                                    const CookDiagnostic& right) noexcept {
+    if (!(left.asset == right.asset)) {
+        return GuidLess(left.asset.value, right.asset.value);
+    }
+
+    if (left.code != right.code) {
+        return left.code < right.code;
+    }
+
+    if (!(left.related == right.related)) {
+        return GuidLess(left.related.value, right.related.value);
+    }
+
+    if (left.setting != right.setting) {
+        return left.setting < right.setting;
+    }
+
+    // 같은 칸에 수준만 다른 진단(같은 의존의 Hard·Soft 누락)은 오류가 먼저다.
+    if (left.warning != right.warning) {
+        return !left.warning;
+    }
+
+    return static_cast<uint32>(left.error) < static_cast<uint32>(right.error);
+}
 
 struct CookTargetBundle {
     explicit CookTargetBundle(Allocator& allocator) noexcept : name(allocator), members(allocator) {
@@ -85,7 +115,7 @@ struct CookTargetSet {
     Array<AssetId> excluded;
     // 기존 매니페스트에 있고 색인에 없는 항목(AssetId 순)이다.
     Array<AssetId> removed;
-    // 진단((asset, code, related, setting) 순)이다.
+    // 진단(CookDiagnosticBefore 순)이다.
     Array<CookDiagnostic> diagnostics;
 };
 

@@ -1,5 +1,6 @@
 #include "TypeRegistryInternal.h"
 
+#include <Core/Algorithms.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -430,6 +431,45 @@ TypeStats TypeRegistry::Stats() const noexcept {
     }
 
     return stats;
+}
+
+Result<void> TypeRegistry::ListTypeVersions(Array<TypeVersionEntry>& out) const noexcept {
+    out.Clear();
+    if (platform::CurrentThreadId() != ownerThread_) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    usize count = 0;
+    {
+        platform::LockGuard lock(gate_);
+        if (closed_) {
+            return Result<void>::Failure(ErrorCode::ShuttingDown);
+        }
+
+        for (Record* record = records_; record; record = record->next) {
+            ++count;
+        }
+    }
+
+    // 할당은 잠금 밖이다. 등록·해제는 이 스레드에서만 하므로 그 사이 목록이 같다.
+    if (auto reserved = out.TryReserve(count); !reserved) {
+        return reserved;
+    }
+
+    {
+        platform::LockGuard lock(gate_);
+        for (Record* record = records_; record; record = record->next) {
+            // enum 레코드도 schema.id를 채운다(RegisterEnum). enum은 스키마 버전이 없다.
+            const uint32 version = record->kind == TypeKind::Enum ? 0u : record->schema.version;
+            (void)out.TryPushBack(TypeVersionEntry{record->schema.id, record->kind, version});
+        }
+    }
+
+    algo::Sort(out.View(),
+               [](const TypeVersionEntry& left, const TypeVersionEntry& right) noexcept {
+                   return GuidLess(left.type, right.type);
+               });
+    return Result<void>::Success();
 }
 
 } // namespace rocks

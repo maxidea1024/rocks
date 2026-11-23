@@ -63,4 +63,17 @@ TEST(Guid_NewGuidIsRandomVersion4) {
         CHECK(TryParseGuid(text.View()).Value() == value);
     }
 }
+
+// 순서: high를 먼저, 같으면 low를 부호 없는 수치로 본다(같은 값은 앞서지 않는다).
+TEST(Guid_LessOrdersHighThenLow) {
+    constexpr uint64 Top = ~uint64{0};
+    CHECK(GuidLess(Guid{0, Top}, Guid{1, 0}));
+    CHECK(!GuidLess(Guid{1, 0}, Guid{0, Top}));
+    CHECK(GuidLess(Guid{5, 1}, Guid{5, 2}));
+    CHECK(!GuidLess(Guid{5, 2}, Guid{5, 1}));
+    CHECK(GuidLess(Guid{5, 1}, Guid{5, Top}));
+    CHECK(!GuidLess(Guid{5, 5}, Guid{5, 5}));
+    static_assert(GuidLess(Guid{1, 2}, Guid{2, 1}), "GuidLess must be constexpr");
+}
+
 } // namespace guid_tests_file
