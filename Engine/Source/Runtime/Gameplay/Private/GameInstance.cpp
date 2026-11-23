@@ -165,13 +165,20 @@ Result<void> GameInstance::OpenWorld(const MapDesc& map) noexcept {
     // 프레임 안(World Tick·loop hook)이면 다음 OnEngineTick으로 미룬다. OnEngineTick 안과 프레임
     // 밖에서는 바로 연다(World 전환은 프레임 사이에서만 — 18.5절).
     if (engine_->IsInFrame() && !inEngineTick_) {
-        if (auto copied = pendingName_.TryAssign(map.name); !copied) {
+        // 둘 다 복사한 뒤에만 바꾼다(앞 요청과 섞이지 않게).
+        String name(pendingName_.GetAllocator());
+        String options(pendingOptions_.GetAllocator());
+        auto copied = name.TryAssign(map.name);
+        if (copied) {
+            copied = options.TryAssign(map.options);
+        }
+
+        if (!copied) {
             return copied;
         }
 
-        if (auto copied = pendingOptions_.TryAssign(map.options); !copied) {
-            return copied;
-        }
+        pendingName_ = Move(name);
+        pendingOptions_ = Move(options);
 
         if (hasPendingOpen_) {
             Log::Warning(LogGameplay, "OpenWorld {Map} replaces an earlier pending request",
