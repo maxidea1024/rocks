@@ -350,6 +350,7 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
     - **A2f3b 가변 원본(UXR9)**:
       - 역할 규칙을 넓힌다(교차 검증 필수 1 — 교환 역할 `blob:<sha256 hex 64>`은 69 byte이고 `:`를 쓴다): 역할 byte 상한 `MaxImportRoleBytes` 64 → 128(ImportRecord role 필드도), 임포터 역할 문자에 `:`를 더한다(`[A-Za-z0-9_.:]`). `--source.<역할>=<파일>`은 첫 `=`에서 나누므로 `:`와 겹치지 않는다.
       - `AssetImporterInfo::rolePrefixes`(예 `blob:`): 고정 역할(`roles`)은 정확히 한 번씩, 그 밖 역할은 어느 접두로 시작하고 접두 뒤가 비지 않아야 한다(역할 규칙·유일). 원본 수 `MaxImportSources`(256)·합 `MaxImportTotalSourceBytes`(2 GiB)를 넘는 에셋은 실패한다(한계 — blob이 매우 많은 에셋). 등록 검사: 접두는 1–`MaxImportRoleBytes`의 역할 문자, 고정 역할이 접두로 시작하면 InvalidArgument(모호함), 접두끼리 하나가 다른 것의 앞부분이면 InvalidArgument.
+      - `AssetImporterInfo::variableSourcesOnly`(A5h 보강 — 2026-11-24, 12.12절): 참이면 고정 역할이 없다(기본 `source`도 없음). 등록 검사: `roles`가 비고 `rolePrefixes`가 하나 이상(아니면 InvalidArgument). 원본은 가변 역할 하나 이상(0개 InvalidImportOption). 단일 원본 재지정 `--source=`는 받지 않는다(사용법 오류) — 텍스처 slice처럼 모든 원본이 같은 종류인 임포터용.
       - 재임포트 원본 전체 교체: `Reimport(…, replaceSources)`(묶음 구성원은 `AssetImportGroupMember::replaceSources`) — 참이면 준 원본 목록(overrides)이 새 원본 전체다(새 임포트와 같은 역할 규칙, 기록 원본은 버린다). 명령 `asset-reimport <path> --replace-sources --source.<역할>=…`(`--replace-sources`는 `--source.<역할>=`과만 — 하나 이상 필요, 사용법 오류 2).
       - 원본 순서: 고정 역할(roles 순) 다음 접두 역할(역할 byte 순) — 결정적.
     - **A2f3c 기존 에셋 참조(UXR10)**:
