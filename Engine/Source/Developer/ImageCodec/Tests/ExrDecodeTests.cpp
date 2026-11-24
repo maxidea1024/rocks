@@ -391,6 +391,16 @@ TEST(ExrDecode_ChannelMapping) {
     CHECK(decoded.ok && decoded.result.image.format == TextureSourceFormat::RGBA32F &&
           Single(decoded, 4) == 8.0f);
 
+    // 한 변 한도는 CapacityExceeded다(라이브러리 머리 검증이 아니라 결과 할당에서 판정한다).
+    spec.channels = rgb;
+    ImageDecodeLimits tight;
+    tight.maxDimension = 1;
+    ImageDecodeResult limited(allocator);
+    CHECK(!DecodeImage(allocator, WriteExr(allocator, spec).View(), ImageFileFormat::Exr, tight,
+                       limited));
+    CHECK(limited.failure.code == AssetDiagnosticCode::InvalidSource &&
+          limited.failure.error == ErrorCode::CapacityExceeded);
+
     // subsampling 채널을 쓰면 받지 않는다.
     const Halves small(1.0f, 1);
     const ExrChannelSpec sub[] = {{"G", EXR_PIXEL_HALF, g.Bytes()},

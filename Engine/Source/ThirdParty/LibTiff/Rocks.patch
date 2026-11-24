@@ -132,7 +132,7 @@ diff --git a/libtiff/tif_config.h b/libtiff/tif_config.h
 new file mode 100644
 --- /dev/null
 +++ b/libtiff/tif_config.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,36 @@
 +/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
 +   libtiff CMake build generates from tif_config.h.cmake.in. Only the entries the imported library sources test are set: the
 +   codec switches come from tiffconf.h, fcntl.h supplies the open mode flags _TIFFgetMode uses, and the size_t width selects the
@@ -151,7 +151,11 @@ new file mode 100644
 +#define PACKAGE_TARNAME "tiff"
 +#define PACKAGE_URL ""
 +
-+#define SIZEOF_SIZE_T __SIZEOF_SIZE_T__
++#if SIZE_MAX == UINT64_MAX
++#define SIZEOF_SIZE_T 8
++#else
++#define SIZEOF_SIZE_T 4
++#endif
 +
 +#define WORDS_BIGENDIAN 0
 +
@@ -191,7 +195,7 @@ new file mode 100644
 +#define TIFF_UINT64_T uint64_t
 +#define TIFF_UINT8_T uint8_t
 +
-+#if __SIZEOF_SIZE_T__ == 8
++#if SIZE_MAX == UINT64_MAX
 +#define TIFF_SSIZE_T int64_t
 +#else
 +#define TIFF_SSIZE_T int32_t
@@ -226,7 +230,7 @@ diff --git a/libtiff/tif_rocks.c b/libtiff/tif_rocks.c
 new file mode 100644
 --- /dev/null
 +++ b/libtiff/tif_rocks.c
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,112 @@
 +/* Rocks platform layer for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), in place of tif_unix.c and tif_win32.c. See
 +   tif_rocks.h. The global message handlers stay null: callers receive messages through TIFFOpenOptionsSetErrorHandlerExtR and
 +   TIFFOpenOptionsSetWarningHandlerExtR, and nothing is printed. */
@@ -238,6 +242,38 @@ new file mode 100644
 +
 +static _Thread_local const RocksTiffAllocator* rocksTiffAllocator = NULL;
 +
++/* Every block starts with a header that records the allocator table that made it, so _TIFFfree and
++   _TIFFrealloc work even when the binding has changed (or is gone) by the time the block is
++   released. The header size keeps the user area 16-byte aligned. */
++#define ROCKS_TIFF_HEADER_BYTES 16
++
++typedef struct RocksTiffBlock {
++    const RocksTiffAllocator* allocator;
++} RocksTiffBlock;
++
++static void* rocksTiffUserArea(void* block)
++{
++    return (unsigned char*)block + ROCKS_TIFF_HEADER_BYTES;
++}
++
++static RocksTiffBlock* rocksTiffHeader(void* p)
++{
++    return (RocksTiffBlock*)((unsigned char*)p - ROCKS_TIFF_HEADER_BYTES);
++}
++
++static void* rocksTiffAllocate(size_t bytes)
++{
++    if (rocksTiffAllocator == NULL || bytes > (size_t)TIFF_TMSIZE_T_MAX - ROCKS_TIFF_HEADER_BYTES)
++        return NULL;
++
++    RocksTiffBlock* block = (RocksTiffBlock*)rocksTiffAllocator->allocate(bytes + ROCKS_TIFF_HEADER_BYTES);
++    if (block == NULL)
++        return NULL;
++
++    block->allocator = rocksTiffAllocator;
++    return rocksTiffUserArea(block);
++}
++
 +const RocksTiffAllocator* RocksTiffBindAllocator(const RocksTiffAllocator* allocator)
 +{
 +    const RocksTiffAllocator* previous = rocksTiffAllocator;
@@ -248,21 +284,21 @@ new file mode 100644
 +void* _TIFFmalloc(tmsize_t s)
 +{
 +    /* Like tif_unix.c, a zero size returns null. */
-+    if (s <= 0 || rocksTiffAllocator == NULL)
++    if (s <= 0)
 +        return NULL;
 +
-+    return rocksTiffAllocator->allocate((size_t)s);
++    return rocksTiffAllocate((size_t)s);
 +}
 +
 +void* _TIFFcalloc(tmsize_t nmemb, tmsize_t siz)
 +{
-+    if (nmemb <= 0 || siz <= 0 || rocksTiffAllocator == NULL)
++    if (nmemb <= 0 || siz <= 0)
 +        return NULL;
 +
 +    if (nmemb > TIFF_TMSIZE_T_MAX / siz)
 +        return NULL;
 +
-+    void* p = rocksTiffAllocator->allocate((size_t)(nmemb * siz));
++    void* p = rocksTiffAllocate((size_t)(nmemb * siz));
 +    if (p != NULL)
 +        memset(p, 0, (size_t)(nmemb * siz));
 +
@@ -271,16 +307,31 @@ new file mode 100644
 +
 +void _TIFFfree(void* p)
 +{
-+    if (p != NULL && rocksTiffAllocator != NULL)
-+        rocksTiffAllocator->release(p);
++    if (p == NULL)
++        return;
++
++    RocksTiffBlock* block = rocksTiffHeader(p);
++    block->allocator->release(block);
 +}
 +
 +void* _TIFFrealloc(void* p, tmsize_t s)
 +{
-+    if (s < 0 || rocksTiffAllocator == NULL)
++    if (s < 0 || (size_t)s > (size_t)TIFF_TMSIZE_T_MAX - ROCKS_TIFF_HEADER_BYTES)
 +        return NULL;
 +
-+    return rocksTiffAllocator->reallocate(p, (size_t)s);
++    if (p == NULL)
++        return rocksTiffAllocate((size_t)s);
++
++    /* The block keeps its allocator: reallocate through the table that made it. */
++    RocksTiffBlock* block = rocksTiffHeader(p);
++    const RocksTiffAllocator* allocator = block->allocator;
++    RocksTiffBlock* resized =
++        (RocksTiffBlock*)allocator->reallocate(block, (size_t)s + ROCKS_TIFF_HEADER_BYTES);
++    if (resized == NULL)
++        return NULL;
++
++    resized->allocator = allocator;
++    return rocksTiffUserArea(resized);
 +}
 +
 +void _TIFFmemset(void* p, int v, tmsize_t c) { memset(p, v, (size_t)c); }
@@ -300,8 +351,8 @@ new file mode 100644
 +/* Rocks platform layer for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10). tif_rocks.c replaces the upstream platform
 +   files tif_unix.c and tif_win32.c: it defines the memory entry points, the global message handlers (none) and no file open
 +   functions, so the only way in is TIFFClientOpenExt with caller procedures. Allocation goes to the allocator the caller binds
-+   to the current thread; without a binding every allocation fails (no CRT fallback). The binding must cover every libtiff call
-+   from TIFFClientOpenExt to TIFFClose on that thread, because _TIFFfree also uses it. */
++   to the current thread; without a binding every allocation fails (no CRT fallback). Each block records the allocator table that
++   made it, so freeing and reallocating do not depend on the binding. */
 +#ifndef TIF_ROCKS_H
 +#define TIF_ROCKS_H
 +

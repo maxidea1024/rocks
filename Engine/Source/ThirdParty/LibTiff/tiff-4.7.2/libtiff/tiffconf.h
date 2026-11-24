@@ -19,7 +19,7 @@
 #define TIFF_UINT64_T uint64_t
 #define TIFF_UINT8_T uint8_t
 
-#if __SIZEOF_SIZE_T__ == 8
+#if SIZE_MAX == UINT64_MAX
 #define TIFF_SSIZE_T int64_t
 #else
 #define TIFF_SSIZE_T int32_t

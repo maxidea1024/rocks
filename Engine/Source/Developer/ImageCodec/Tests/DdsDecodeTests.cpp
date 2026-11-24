@@ -208,6 +208,15 @@ TEST(DdsDecode_Dx10Formats) {
         CHECK(decoded.result.warnings.Size() == 0);
     }
 
+    // X 채널은 모든 texel이 255다(UE ConvertRGBXtoRGBA는 첫 texel만 255로 쓴다 — UE와 다르다).
+    const uint8 bgrxTexels[] = {3, 2, 1, 7, 6, 5, 4, 9, 9, 8, 7, 11};
+    const uint8 bgrxTexelsOut[] = {1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255};
+    DdsSpec xSpec;
+    xSpec.width = 3;
+    xSpec.dxgi = 88;
+    xSpec.data = bgrxTexels;
+    CHECK(SamePixels(Decode(allocator, Dds(allocator, xSpec).View()), bgrxTexelsOut));
+
     // 블록 압축(BC1·BC5·BC6H·BC7)은 LossySource, SNORM·SINT·R32_UINT·모르는 값은
     // UnsupportedSourceFormat.
     const uint32 lossy[] = {71, 72, 83, 95, 98, 99};

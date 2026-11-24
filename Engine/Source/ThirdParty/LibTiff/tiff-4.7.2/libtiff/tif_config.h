@@ -16,7 +16,11 @@
 #define PACKAGE_TARNAME "tiff"
 #define PACKAGE_URL ""
 
-#define SIZEOF_SIZE_T __SIZEOF_SIZE_T__
+#if SIZE_MAX == UINT64_MAX
+#define SIZEOF_SIZE_T 8
+#else
+#define SIZEOF_SIZE_T 4
+#endif
 
 #define WORDS_BIGENDIAN 0
 

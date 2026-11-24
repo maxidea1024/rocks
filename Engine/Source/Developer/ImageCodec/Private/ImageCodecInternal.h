@@ -58,10 +58,19 @@ inline Result<void> AllocateImage(const ImageDecodeLimits& limits, TextureSource
         return OverLimit(out, 0);
     }
 
-    // 세 인자가 모두 2^32 미만이고 texel은 16 byte 이하라 곱이 넘치지 않는 단계로 나눠 본다.
-    const uint64 sliceBytes = uint64{width} * height * TextureSourceTexelBytes(format);
-    if (sliceBytes > limits.maxPixelBytes || sliceBytes * numSlices > limits.maxPixelBytes ||
-        sliceBytes * numSlices > NumericLimits<usize>::Max()) {
+    // 한도 값이 크게 주어져도 곱이 넘치지 않게 나눗셈으로 비교한다(width·height < 2^32, texel ≤
+    // 16).
+    const uint64 cap = limits.maxPixelBytes < NumericLimits<usize>::Max()
+                           ? limits.maxPixelBytes
+                           : static_cast<uint64>(NumericLimits<usize>::Max());
+    const uint64 texelBytes = TextureSourceTexelBytes(format);
+    const uint64 rowBytes = uint64{width} * texelBytes;
+    if (rowBytes > cap / height) {
+        return OverLimit(out, 0);
+    }
+
+    const uint64 sliceBytes = rowBytes * height;
+    if (sliceBytes > cap / numSlices) {
         return OverLimit(out, 0);
     }
 

@@ -540,6 +540,26 @@ TEST(TiffDecode_ColorPaletteAlpha) {
                      TextureSourceFormat::RGBA8, rgbaOut));
     }
 
+    // ExtraSamples 태그 없이 표본 4개(DEFAULT_EXTRASAMPLE_AS_ALPHA — UE와 같다).
+    image = TiffImage{};
+    image.samples = 4;
+    image.photometric = PHOTOMETRIC_RGB;
+    image.raw = rgba;
+    CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::RGBA8,
+                 rgbaOut));
+
+    // 한 변 한도는 CapacityExceeded다.
+    ImageDecodeLimits tight;
+    tight.maxDimension = 1;
+    image.width = 2;
+    const uint8 twoTexels[] = {100, 50, 25, 128, 100, 50, 25, 128};
+    image.raw = twoTexels;
+    ImageDecodeResult limited(allocator);
+    CHECK(!DecodeImage(allocator, WriteTiff(allocator, image).View(), ImageFileFormat::Tiff, tight,
+                       limited));
+    CHECK(limited.failure.code == AssetDiagnosticCode::InvalidSource &&
+          limited.failure.error == ErrorCode::CapacityExceeded);
+
     const uint8 rgbaa[] = {100, 50, 25, 128, 77};
     const uint16 twoExtra[] = {EXTRASAMPLE_UNASSALPHA, EXTRASAMPLE_UNSPECIFIED};
     image.samples = 5;

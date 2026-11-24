@@ -238,12 +238,11 @@ Result<void> DecodeExr(Allocator& allocator, Span<const uint8> file,
     initializer.user_data = &memory;
     initializer.read_fn = ExrRead;
     initializer.size_fn = ExrSize;
-    const uint32 dimensionLimit =
-        limits.maxDimension < static_cast<uint32>(NumericLimits<int32>::Max())
-            ? limits.maxDimension
-            : static_cast<uint32>(NumericLimits<int32>::Max());
-    initializer.max_image_width = static_cast<int>(dimensionLimit);
-    initializer.max_image_height = static_cast<int>(dimensionLimit);
+    // 한 변 한도는 라이브러리에 주지 않는다(넘으면 머리 검증 실패가 InvalidArgument가 된다) —
+    // 머리는 크기에 비례해 할당하지 않고, chunk 표는 첫 chunk에서 잡히므로 AllocateImage가 먼저
+    // CapacityExceeded로 판정한다(12.9절과 같은 분류).
+    initializer.max_image_width = 0;
+    initializer.max_image_height = 0;
     ExrContext opened;
     if (exr_start_read(&opened.context, "memory", &initializer) != EXR_ERR_SUCCESS) {
         return ExrLibraryFailure(scope, out);

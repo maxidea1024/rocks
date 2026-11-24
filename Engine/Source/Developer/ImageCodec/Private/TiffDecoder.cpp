@@ -465,6 +465,12 @@ Result<void> TiffDecodeDirect(Allocator& allocator, TIFF* tiff, const TiffShape&
             return Invalid(out, 0);
         }
 
+        // tile 한 변도 한 변 한도를 따른다 — 1×1 그림에 거대한 tile을 선언해 띠·tile 버퍼를 키우지
+        // 못하게 한다.
+        if (tileWidth > limits.maxDimension || tileLength > limits.maxDimension) {
+            return OverLimit(out, 0);
+        }
+
         bandRows = tileLength;
     } else {
         uint32 rowsPerStrip = 0;

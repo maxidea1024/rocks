@@ -168,6 +168,18 @@ TEST(HdrDecode_FlatAndHeader) {
     CHECK(Fails(resolution("-Y 1 +X 99999999999"), AssetDiagnosticCode::InvalidSource));
     CHECK(resolution("-Y 1 +X 1").ok);
 
+    // 한 변 한도는 CapacityExceeded다.
+    Bytes wideFile(allocator);
+    Header(wideFile, 2, 1);
+    wideFile.Rgbe(1, 2, 3, 128);
+    wideFile.Rgbe(4, 5, 6, 128);
+    ImageDecodeLimits tight;
+    tight.maxDimension = 1;
+    ImageDecodeResult limited(allocator);
+    CHECK(!DecodeImage(allocator, wideFile.data.View(), ImageFileFormat::Hdr, tight, limited));
+    CHECK(limited.failure.code == AssetDiagnosticCode::InvalidSource &&
+          limited.failure.error == ErrorCode::CapacityExceeded);
+
     // 머리 줄 256 byte 초과·NUL은 손상이다.
     Bytes longLine(allocator);
     longLine.Text("#?RADIANCE\n");
