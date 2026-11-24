@@ -62,24 +62,63 @@ Result<void> SceneComponent::SetRelativeTransform(const Transform& transform) no
     return Result<void>::Success();
 }
 
-Result<void> SceneComponent::CheckMovable(const char* action) const noexcept {
-    // UE CheckStaticMobilityAndWarn(SceneComponent.cpp:3383): 등록된 게임 World Component이고 소유
-    // Actor가 초기화된 뒤에만 막는다(Spawn·OnAwake 안의 배치는 된다).
-    if (mobility_ == ComponentMobility::Movable || !HasWorld() || !IsRegistered()) {
-        return Result<void>::Success();
+bool SceneComponent::IsPastGameInitialization() const noexcept {
+    // 등록된 게임 World Component이고 소유 Actor가 초기화된 뒤다(Spawn·OnAwake 안은 아니다).
+    if (!HasWorld() || !IsRegistered()) {
+        return false;
     }
 
     World& world = GetWorld();
     if (world.Kind() != WorldKind::Game && world.Kind() != WorldKind::Tryout) {
-        return Result<void>::Success();
+        return false;
     }
 
     auto state = world.GetActorState(GetOwner());
-    if (!state ||
-        (state.Value() != ActorState::Initialized && state.Value() != ActorState::Playing)) {
+    return state &&
+           (state.Value() == ActorState::Initialized || state.Value() == ActorState::Playing);
+}
+
+Result<void> SceneComponent::CheckDynamicDataChange(const char* property,
+                                                    bool blockStationary) const noexcept {
+    // UE AreDynamicDataChangesAllowed(SceneComponent.h:1363): Static은 늘, Stationary는
+    // blockStationary일 때 막는다.
+    const bool blocked = mobility_ == ComponentMobility::Static ||
+                         (blockStationary && mobility_ == ComponentMobility::Stationary);
+    if (!blocked || !IsPastGameInitialization()) {
         return Result<void>::Success();
     }
 
+    LogContextScope context("World", GetWorld().Name());
+    Log::Warning(LogWorld,
+                 "Scene component #{Slot} cannot change {Property} at runtime; mobility is "
+                 "{Mobility} ({Code})",
+                 Handle().slot, StringView(property),
+                 mobility_ == ComponentMobility::Static ? "Static" : "Stationary",
+                 DiagStaticComponentDataChanged);
+    return Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
+Result<void>
+SceneComponent::CheckChangeBeforeGameInitialization(const char* property) const noexcept {
+    if (!IsPastGameInitialization()) {
+        return Result<void>::Success();
+    }
+
+    LogContextScope context("World", GetWorld().Name());
+    Log::Warning(LogWorld,
+                 "Scene component #{Slot} cannot change {Property} after initialization ({Code})",
+                 Handle().slot, StringView(property), DiagComponentDataLockedInGame);
+    return Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
+Result<void> SceneComponent::CheckMovable(const char* action) const noexcept {
+    // UE CheckStaticMobilityAndWarn(SceneComponent.cpp:3383): 등록된 게임 World Component이고 소유
+    // Actor가 초기화된 뒤에만 막는다(Spawn·OnAwake 안의 배치는 된다).
+    if (mobility_ == ComponentMobility::Movable || !IsPastGameInitialization()) {
+        return Result<void>::Success();
+    }
+
+    World& world = GetWorld();
     LogContextScope context("World", world.Name());
     Log::Warning(LogWorld,
                  "Scene component #{Slot} must be Movable to {Action}; mobility is {Mobility} "
