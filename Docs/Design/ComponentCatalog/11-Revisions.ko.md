@@ -4,6 +4,7 @@
 
 ## 11. 개정 기록
 
+- 개정 9(2026-11-24): 데이터 먼저 예외(사용자 결정 — 5절 D1–D5, 상세 ER 24장).
 - 개정 8(2026-11-24): CM0을 엔진 런타임 S7–S14 뒤로 앞당김(사용자 결정 — 5절, 상세 설계 ER 23절), CR1·CR4·CR6·CR11·CR26 상태 갱신(4.1·4.3·4.5절), 4.7절 셰이더 선행(SL 단계 — 엔진 셰이더 5장 SLR7, rocks-c1 요청).
 - 개정 7(2026-11-23): CR48의 PlayerState 명칭을 ER 2·3절과 1절 단계표에 반영(사용자 지시), 9.9절 남은 항목 해소.
 - 개정 6(2026-11-23): 9절 플러그인 컴포넌트(3부) 추가(사용자 지시) — `Engine/Plugins` 139개 플러그인의 클래스 418개를 상속 추적으로 전수 분류(필수 31·필수(실험 기반) 25·대체 28·제외 10·후속 154·편집기 26·범위 밖 124·아님 20), 선행 CR40–CR54, 묶음 CM22–CM31(+ CM20에 `ProceduralMeshComponent`), 결정 CD19–CD24. CD13(색인만)을 CD19로 대체하고 8.9절 색인을 지움. 같은 추적으로 2부 재대조 — 빠진 deprecated 4종(`UAtmosphericFogComponent`·`ULandscapeMeshCollisionComponent_DEPRECATED`·GeometryCollection ISM pool 2종)을 8.3절 제외에 더함(2부 제외 4 → 8). 2부 이름을 CD24 규칙으로 맞춤(`Hlod…`, `AiPerception…`, 내비 디버그 표시 `…Draw`). 9.9절 다른 문서 개정 반영(EIP 15.1·16.1·21·24.1·33.2절, AU 3.15.2·9.1절). 리뷰어 1명 교차검증 반영: namespace 한정 부모로 빠진 26종(MeshPartition modifier·MeshPartitionWater·PCG 어댑터·시험 1), EIP 인용 절 번호 정정(24.3절 Live Link, 16.2·16.3·33.2절 rope·vehicle), CR43·CR44 근거, `UWaterTerrainComponent` 역할(지형 → 물 정보 텍스처), DaySequence·InstancedActors의 CD20 판정 사유, MetaHumanSDK·LidarPointCloud를 범위 밖에서 후속으로, `UDirectMeshControlComponent`(실험)를 편집기에서 후속으로, `UMoverCVDSimDataComponent`를 대체에서 범위 밖(Chaos 디버거)으로, CR48에 PlayerState, CM30·CM31 선행 정리, ISM pool 정의 줄, MotoSynth 의존 행 분리. 확인하지 못한 것·개정 기록을 10·11절로 옮김.

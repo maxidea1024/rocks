@@ -30,6 +30,13 @@ inline constexpr char DiagSystemStateRecreateFailed[] = "SystemStateRecreateFail
 // 거부했다(Warning —
 //   23.3절, UE CheckStaticMobilityAndWarn).
 inline constexpr char DiagStaticComponentMoved[] = "StaticComponentMoved";
+// - StaticComponentDataChanged: 게임 World에서 초기화 뒤 Static(값에 따라 Stationary도)
+//   SceneComponent의 데이터(광원 세기 등)를 바꾸려 해 거부했다(Warning — 24.2.3절, UE
+//   AreDynamicDataChangesAllowed).
+inline constexpr char DiagStaticComponentDataChanged[] = "StaticComponentDataChanged";
+// - ComponentDataLockedInGame: 게임 World에서 초기화 뒤에는 바꿀 수 없는 데이터(광원
+//   affectsWorld)를 바꾸려 해 거부했다(Warning — 24.2.3절).
+inline constexpr char DiagComponentDataLockedInGame[] = "ComponentDataLockedInGame";
 inline constexpr char DiagAutoTickPrerequisiteCycleSkipped[] = "AutoTickPrerequisiteCycleSkipped";
 inline constexpr char DiagBeginPlayDispatchContractViolated[] = "BeginPlayDispatchContractViolated";
 

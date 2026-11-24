@@ -209,7 +209,8 @@ private:
 protected:
     // --- 프레임워크 내부 hook(Docs/Design/EngineRuntime 17.8절 ERD19) ---
     // Gameplay 모듈의 프레임워크 클래스(GameDirector·GameState·PlayerState·Controller·Pawn·
-    // CameraDirector)만 재정의하고 final로 닫는다. 게임 코드는 OnAwake·OnDestroy를 쓴다.
+    // CameraDirector)와 엔진 Actor 클래스(광원 Actor 등 — 24.2.5절)만 재정의하고 final로 닫는다.
+    // 게임 코드는 OnAwake·OnDestroy를 쓴다.
 
     // Component OnRegister 뒤, Actor OnAwake 전(UE PreInitializeComponents). 실패는 OnAwake 실패와
     // 같다(Spawn 실패, OnDestroy 없음).

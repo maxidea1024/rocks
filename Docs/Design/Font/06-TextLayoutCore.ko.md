@@ -90,3 +90,24 @@ UE `FSlateFontInfo`(`SFI`)의 material을 뺀 부분이다. material 두 개(`Fo
 ### 6.7 스레드와 lane
 
 UiToolkit 3.4절 lane 모델을 따른다: 측정·shaping·cache 조회는 UI lane, 거리장 생성은 Task, GPU 업로드는 Render lane 제출. Canvas(게임 lane)가 같은 cache를 쓸 때는 UI lane과 같은 프레임 단계에서 접근하도록 Canvas 설계가 정한다(7.2절). TextLayout은 cache 접근에 잠금 하나를 두어, 정해진 단계 밖 호출도 경쟁 없이 직렬화된다.
+
+### 6.8 FT2 하위 단계와 FT2a API(2026-11-25, 사용자 결정으로 UT2 전에 착수)
+
+| 하위 단계 | 내용 |
+|---|---|
+| FT2a | 모듈 골격(`TextLayout` Runtime·`TextLayoutBackend` ClientOnly), backend 생성·라이브러리 초기화, face 열기·하위 face 수·face 정보·metric·글리프 번호 |
+| FT2b | 조합 글꼴 탐색(6.3절) |
+| FT2c | shaping·측정(6.4절) |
+| FT2d | 래스터·글리프 cache CPU(6.5–6.6절) |
+| FT2e | 전처리 geometry·거리장(6.5절) |
+
+**FT2a API.**
+- `TextLayout`(Runtime, Core만 의존):
+  - `TextLayout/FontTypes.h`: `FontHinting`·`FontLayoutMethod`(4.1절 값), `FontFaceInfo`(family·style 이름, 글리프 수, unitsPerEm, scalable, 컬러, 고정 크기 수), `FontMetrics`(픽셀 단위 ascender·descender(음수)·줄 높이·밑줄 위치·두께), `ComputeFontPixelSize(size, scale)` — UE `ComputeFontPixelSize`와 같은 식(26.6 고정소수로 `size × 96 / 72`를 반올림해 배율을 곱하고 픽셀로 반올림, `FontCacheFreeType.cpp` 118–135행).
+  - `TextLayout/FontFaceData.h`: 불변 원본 byte(`TryCreate(allocator, bytes)`가 복사, 스레드 안전 `SharedPtr`로 공유 — 4.5절).
+  - `TextLayout/TextBackend.h`: `TextBackend`(`CountSubFaces`·`OpenFace(FontFaceDesc)`)와 `BackendFace`(`Info`·`Metrics(size, scale)`·`GlyphIndex(codePoint)`). `FontFaceDesc` = (data, 하위 face 번호, hinting, layout method, ascent·descent 재정의).
+- `TextLayoutBackend`(ClientOnly): `InitializeTextLibraries(icuData)` — 프로세스에서 한 번 ICU 할당 hook(`u_setMemoryFunctions`)과 데이터(`udata_setCommonData`)를 건다. 첫 ICU·HarfBuzz 사용 전에 불러야 하고, 같은 데이터로 다시 부르면 성공, 다른 데이터면 `InvalidArgument`. 데이터는 프로세스 끝까지 살아야 한다. `CreateTextBackend(options)` — 초기화 뒤 FreeType library(Rocks `FT_Memory`)를 가진 backend를 만든다. HarfBuzz 할당 hook(`RocksHarfBuzz*`)과 ICU hook은 이 모듈이 프로세스 수명 Rocks 할당기로 정의한다(HarfBuzz·ICU의 정적 객체가 프로세스 종료 때 풀리므로). `u_cleanup`은 부르지 않는다(프로세스 종료가 정리한다 — HarfBuzz가 붙잡은 ICU 객체를 끊지 않게).
+- metric은 UE와 같다(`FontCacheFreeType.cpp` 257–297행, `FontCacheFreeType.h` 269–293행): scalable face는 글꼴 단위 값(`ascender`·`descender`·`height`, BoundingBox면 `bbox`)에 `y_scale`을 곱하고, 재정의 ascent는 26.6 올림·descent는 내림, 재정의가 있으면 줄 높이 = ascent − descent.
+- 오류: 글꼴이 아니거나 손상 `InvalidArgument`(원본 FreeType 오류 문구를 로그), 하위 face 번호 범위 밖 `InvalidArgument`, 초기화 전 `CreateTextBackend` `NotReady`, 할당 실패 `OutOfMemory`.
+- ICU·HarfBuzz를 직접 부르는 FT1 연결 시험(`ThirdPartyIcuTests`·`ThirdPartyHarfBuzzTests`)은 FT2a에서 지운다. 시험 실행 파일이 ICU를 직접 의존하면 전역 상태 소비 모듈이 둘(시험 실행 파일·`TextLayoutBackend`)이 되고, Modular 빌드에서는 ICU가 두 벌이 되어 backend가 초기화한 쪽과 시험이 부르는 쪽이 갈라진다(모듈 시험 묶음은 include 소유 검사만 바꾸고 컴파일 환경은 시험 실행 파일 것이다). 같은 검증(태국어 사전 경계, ZWJ grapheme, BiDi run, ICU 기본 유니코드 함수, 합자·아랍어 shaping)은 FT2b·FT2c에서 backend API로 다시 한다. FreeType·libpng·msdfgen 연결 시험은 전역 상태가 없어 그대로 둔다.
+- `TextLayoutBackend`는 내리지 않는 모듈이다(`SupportsUnload` = false — backend vtable과 라이브러리 할당 hook이 이 모듈 코드에 있다).
