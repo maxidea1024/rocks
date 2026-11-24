@@ -50,6 +50,9 @@ struct FontFaceInfo {
     bool color = false;
     // 비트맵 strike 수다(컬러 비트맵 글꼴).
     int32 fixedSizeCount = 0;
+    // face style 플래그(굵게·기울임)다. 조합 글꼴의 속성 best match가 쓴다(6.3절).
+    bool bold = false;
+    bool italic = false;
 };
 
 // 크기·배율이 정해진 face의 줄 metric이다. 단위는 픽셀, 위쪽이 양수다(descender는 보통 음수).
