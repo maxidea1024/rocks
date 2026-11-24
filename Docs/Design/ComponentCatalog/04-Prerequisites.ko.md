@@ -10,12 +10,12 @@
 
 | ID | 요구 | 상태 | 확인 근거 | 정본 |
 |---|---|---|---|---|
-| CR1 | 컴포넌트 시스템 상태 수명: 등록 안에서 렌더·물리·오디오 상태를 만들고 지우는 hook과 "다시 보내기" 표시(UE `CreateRenderState`·`MarkRenderStateDirty`·`CreatePhysicsState` 대응). 등록 실패 시 부분 등록 해제. 대량 등록 묶음 | 없음 | `World/Component.h`에 `OnRegister`·`OnUnregister`만 있다 | EIP 20.2절(순서 Register 단계), 추가 요구 |
+| CR1 | 컴포넌트 시스템 상태 수명: 등록 안에서 렌더·물리·오디오 상태를 만들고 지우는 hook과 "다시 보내기" 표시(UE `CreateRenderState`·`MarkRenderStateDirty`·`CreatePhysicsState` 대응). 등록 실패 시 부분 등록 해제. 대량 등록 묶음 | 구현(CM0a — ER 23.2절, 대량 등록 묶음은 CM1a·RS0) | `World/Component.h`에 `OnRegister`·`OnUnregister`만 있다 | EIP 20.2절(순서 Register 단계), 추가 요구 |
 | CR2 | SceneComponent 보강: 부착 규칙(KeepRelative·KeepWorld·SnapToTarget — UE `EE/EngineTypes.h:62`), socket 이름 부착과 `GetSocketTransform`, 절대 location·rotation·scale, Mobility(Static·Stationary·Movable), 가시성(visible 자식 전파·hiddenInGame), 속도, bounds 계산 가상 함수와 bounds 갱신, Transform 변경 통지(구독형 — CR7) | 없음 | `World/SceneComponent.h`는 상대 Transform·계층·월드 행렬만 있다 | ER 7.3절, 추가 요구 |
 | CR3 | 부착 계층 영속(부모 WeakObjectRef PROPERTY) | 없음(자리) | ER 14절 "부착 계층은 저장되지 않고" | PF 5.1절 World 단계, 리플렉션 B9d1 |
-| CR4 | Component 시작 준비 hook(`IsReadyToStart`) — 메시·텍스처 로드 대기 | 없음 | SE-W2 | ER 7.2절, SE-W2 |
+| CR4 | Component 시작 준비 hook(`IsReadyToStart`) — 메시·텍스처 로드 대기 | 구현(ER S9b — 17.4절) | SE-W2 | ER 7.2절, SE-W2 |
 | CR5 | EditorOnly 컴포넌트와 쿠킹 제외, 태그(`TagSet`) | 없음 | `World/Component.h`에 없다. A0-B `EditorOnly` 지정자는 필드 단위다. 객체 단위 EditorOnly는 패키지 Exports 플래그로 예약만 됐고 클래스 지정자가 없으며 reader는 그 비트를 `CorruptPackage`로 거부한다(AssetSystem 243행 — 켜려면 schemaVersion을 올린다). 태그 사전은 계획만 있다 | EIP 20.1절(태그), AssetSystem 패키지 형식 개정, MetaCompiler 클래스 지정자 |
-| CR6 | 컴포넌트 타입 규칙(Actor당 하나·필수 동반·상호 배타)을 타입 메타로 | 없음 | — | EIP 20.2절 |
+| CR6 | 컴포넌트 타입 규칙(Actor당 하나·필수 동반·상호 배타)을 타입 메타로 | 구현(CM0a — `Component::TypeRules`, ER 23.2절) | — | EIP 20.2절 |
 | CR7 | 이벤트 slot 표(overlap·hit·타임라인·재생 끝 등 컴포넌트 이벤트를 구독이 있을 때만 저장) | 없음 | SE-W8 | SE-W8, EIP 20.2절 |
 | CR8 | World 필드 편집 setter·통지(CU5) — 속성을 바꾸면 CR1의 "다시 보내기" 표시 | 없음 | ER 14절 "World 필드는 ReadOnly" | ReflectionExtensions CU5 |
 | CR8a | Tick 단계 UE 대응: Rocks 단계(PrePhysics·Physics·PostPhysics·LateUpdate·PreRender)와 UE `ETickingGroup`(`EE/EngineBaseTypes.h:86–104`) 대응, 물리 결과 반영·skeletal mesh 물리 마무리 지점 | 결정(CD11) — 구현은 물리·애니메이션 컴포넌트와 함께 | ER 8절 대응표 | ER 8절 |
@@ -32,7 +32,7 @@
 
 | ID | 요구 | 상태 | 확인 근거 | 정본 |
 |---|---|---|---|---|
-| CR11 | 카메라·view: `CameraComponent`(1.2절)와 `ViewDesc` 생성 | 없음 | — | RN 5.1절, 별도 문서 |
+| CR11 | 카메라·view: `CameraComponent`(1.2절)와 `ViewDesc` 생성 | `CameraComponent` 구현(CM0c — ER 23.4절), `ViewDesc` 생성은 RS0 `WorldIntegration` | — | RN 5.1절, 별도 문서 |
 | CR12 | `WorldIntegration`·`RenderData`: 컴포넌트 변경 감지 → `SceneChangeList`(인스턴스·광원 추가·제거·변환·재질), `RenderNotices` 처리. 인스턴스 종류(정적 메시·인스턴스드·skinned·sprite) 등록 | 없음(모듈 없음) | RN 3.2·4.2절 | RN |
 | CR13 | 렌더러 단계 RS0(정적 메시·Unlit)·RS1(광원)·RS3(그림자)·RS5(투명·하늘·안개)·RS6(후처리)·RS7(capture·decal·bake 표본)·RS9(rect)·RS10(screen-space)·RS12(skinned) | 설계만(화면 마일스톤 뒤) | RN 17절 | RN |
 | CR14 | 머티리얼 런타임: section별 머티리얼 `RenderHandle`, 인스턴스 파라미터 override, 실행 중 머티리얼 인스턴스(UE `UMaterialInstanceDynamic` 대응) | MS3a 골격만 | 메모리 mesh-unreal-exchange-spec | [머티리얼 시스템](../MaterialSystem.ko.md) |
@@ -56,7 +56,7 @@
 | CR20 | 오디오 엔진 연결 AU3(`AudioWorldSubsystem`·emitter 등록) | 설계만 | AU 3.8절 | AU |
 | CR21 | 입력 액션·매핑 컨텍스트·리바인딩, 햅틱 출력(XInput 진동 등) | 없음(프레임 입력 상태만) | ER 9절 "액션 매핑… 이번 범위가 아니다" | EIP 20.4절 |
 | CR22 | World Partition(셀·streaming source·data layer) | 없음 | SE-W7 | EIP 10.2절 |
-| CR26 | 게임 프레임워크: PlayerController·LocalPlayer(입력 컴포넌트 스택, 햅틱 효과 관리, 주 리스너·view 소유) | 없음 | ER 3절 표에 `Gameplay` 모듈이 있으나 `Engine/Source/Runtime`에 없다(ER 1절 S10–S12 미착수) | ER 1절 S10–S12, EIP 20.4·20.5절 |
+| CR26 | 게임 프레임워크: PlayerController·LocalPlayer(입력 컴포넌트 스택, 햅틱 효과 관리, 주 리스너·view 소유) | 골격 구현(ER S10–S14 — `Gameplay` 모듈), 입력 컴포넌트 스택·햅틱은 CR21과 함께 | ER 3절 표에 `Gameplay` 모듈이 있으나 `Engine/Source/Runtime`에 없다(ER 1절 S10–S12 미착수) | ER 1절 S10–S12, EIP 20.4·20.5절 |
 | CR24 | 복제(컴포넌트 복제·서브오브젝트) | 없음 | — | EIP 17절. 컴포넌트 도입을 막지 않는다 — 필드에 복제 표지를 둘 자리만 남긴다 |
 | CR25 | Sparks 바인딩(컴포넌트 API 노출) | 없음 | SE 3절 EI 단계 | SE. C++ 구현을 막지 않는다 |
 

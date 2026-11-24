@@ -24,6 +24,48 @@
     },
     {
       "kind": "field",
+      "name": "rocks::CameraComponent::aspectRatio_",
+      "id": "56b30aa61c3b4f81a8b79fd5cac57b4d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::constrainAspectRatio_",
+      "id": "2ae996287bd1448091943860c47b2590",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::fieldOfView_",
+      "id": "e693c383b5d14e819b79ee90eee2f98b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::orthoWidth_",
+      "id": "004a0d0f326e4946829a1a67aafce3f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::projection_",
+      "id": "4365c04519d24abba0a9deb04a749dca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::usePawnControlRotation_",
+      "id": "4fd834321b7843b6a33478a5f3781bd5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Component::enabled_",
       "id": "c5074d28e80b4e6992d165e099cf8ee7",
       "aliases": [],
@@ -45,8 +87,64 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SceneComponent::absoluteLocation_",
+      "id": "1e2dbcde54bc4d2893cfa884f2c202c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::absoluteRotation_",
+      "id": "7525cf051bc142fcb0dcab013912c765",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::absoluteScale_",
+      "id": "d3b2462b63b7417f933cd986f975b970",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::attachParent_",
+      "id": "bc8fa700ff094e77ae01c8803bda9dea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::attachSocket_",
+      "id": "b1e18d8cea574eaba9a317876949dc4b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::hiddenInGame_",
+      "id": "5a0725af1c844c0bb2aba58e24c10362",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::mobility_",
+      "id": "8c3f4acf94524eca95dc04e83f5a25e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SceneComponent::relative_",
       "id": "1713d9606fad4c06b1796784725b290c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::visible_",
+      "id": "a529060c44bd4a96bc497d955c488a44",
       "aliases": [],
       "retired": false
     },
@@ -59,8 +157,29 @@
     },
     {
       "kind": "type",
+      "name": "rocks::CameraComponent",
+      "id": "fc5c14c217674f1ba2f77cdc74d591d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CameraProjection",
+      "id": "1fcc7761e5fa4ca2b4095aa29d3a2b26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::Component",
       "id": "7fc3644ef61c4d0883a9a76cd1893955",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ComponentMobility",
+      "id": "0a5cbc1ea18e46acaf7eab49af171151",
       "aliases": [],
       "retired": false
     },

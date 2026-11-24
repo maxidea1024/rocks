@@ -10,6 +10,7 @@
 #include <Gameplay/PlayerController.generated.h>
 #include <Gameplay/PlayerController.h>
 #include <World/Actor.generated.h>
+#include <World/CameraComponent.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 
@@ -397,7 +398,7 @@ CameraDirector::CameraDirector(Allocator& allocator) noexcept : Actor(allocator)
 
 CameraDirector::~CameraDirector() noexcept = default;
 
-void CameraDirector::UpdateCamera(double) noexcept {
+void CameraDirector::UpdateCamera(double deltaSeconds) noexcept {
     World& world = GetWorld();
     // 대상이 없거나 사라졌으면 소유 PlayerController로 되돌린다.
     if (viewTarget_.IsNull() || !IsAlive(world, viewTarget_)) {
@@ -405,6 +406,56 @@ void CameraDirector::UpdateCamera(double) noexcept {
     }
 
     const ObjectHandle target = viewTarget_;
+    // 켜진 첫 CameraComponent(UE CalcCamera의 bFindCameraComponentWhenViewTarget — Actor.cpp:3688).
+    bool fromCamera = false;
+    CameraViewInfo info;
+    auto searched = world.With<Actor>(target, [&](Actor& actor) noexcept {
+        for (ObjectHandle component : actor.Components()) {
+            auto used =
+                world.With<CameraComponent>(component, [&](CameraComponent& camera) noexcept {
+                    if (!camera.IsEnabled() ||
+                        camera.GetState() == ComponentState::PendingDestroy) {
+                        return false;
+                    }
+
+                    camera.GetCameraView(deltaSeconds, info);
+                    return true;
+                });
+            if (used && used.Value()) {
+                fromCamera = true;
+                return;
+            }
+        }
+    });
+    (void)searched;
+    if (fromCamera) {
+        view_.location = info.location;
+        view_.fov = info.fieldOfView;
+        view_.projection = info.projection;
+        view_.orthoWidth = info.orthoWidth;
+        view_.aspectRatio = info.aspectRatio;
+        view_.constrainAspectRatio = info.constrainAspectRatio;
+        auto pawn =
+            info.usePawnControlRotation
+                ? world.With<Pawn>(target,
+                                   [](Pawn& value) noexcept { return value.GetControlRotation(); })
+                : Result<Rotator<double>>::Failure(ErrorCode::NotFound);
+        if (pawn) {
+            view_.rotation = pawn.Value();
+        } else if (auto rotator = Rotator<double>::TryFromQuaternion(info.rotation)) {
+            view_.rotation = rotator.Value();
+        }
+
+        OnUpdateView(view_);
+        return;
+    }
+
+    // 카메라 Component가 없으면 시야·투영은 기본이다.
+    view_.fov = CameraView::DefaultFov;
+    view_.projection = CameraProjection::Perspective;
+    view_.orthoWidth = CameraComponent::DefaultOrthoWidth;
+    view_.aspectRatio = CameraComponent::DefaultAspectRatio;
+    view_.constrainAspectRatio = false;
     auto transform = RootWorldTransform(world, target);
     if (transform) {
         view_.location = transform.Value().translation;

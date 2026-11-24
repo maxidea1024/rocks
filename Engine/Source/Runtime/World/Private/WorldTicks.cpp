@@ -298,6 +298,8 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
         phaseNanoseconds_[phaseIndex] += platform::MonotonicNanoseconds() - phaseStart;
     }
 
+    // PreRender 끝: 다시 만들 시스템 상태(UE SendAllEndOfFrameUpdates 자리) → 파괴 정리.
+    FlushSystemStateUpdates();
     FlushDestroys();
     StepGarbageCollection();
     inTick_ = false;

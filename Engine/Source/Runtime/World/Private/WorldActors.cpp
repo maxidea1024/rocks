@@ -435,13 +435,7 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
             continue;
         }
 
-        auto registered = With<Component>(
-            component, [](Component& value) noexcept { return value.OnRegister(); });
-        if (registered) {
-            auto marked = With<Component>(
-                component, [](Component& value) noexcept { value.registered_ = true; });
-            (void)marked;
-        } else {
+        if (!RegisterComponentNow(component)) {
             auto destroyed = DestroyComponent(component);
             (void)destroyed;
         }
