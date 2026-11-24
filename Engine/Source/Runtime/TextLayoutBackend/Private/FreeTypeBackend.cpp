@@ -1,6 +1,8 @@
 // FreeType backend의 face 열기·정보·metric이다(Docs/Design/Font 6.2·6.8절, FT2a). metric 계산은 UE
 // FFreeTypeFace·FreeTypeUtils(FontCacheFreeType.cpp 142–297행, FontCacheFreeType.h 269–293행)와
 // 같다.
+#include "FontShaping.h"
+#include "IcuText.h"
 #include "TextLibraries.h"
 
 #include <Core/Diagnostics/Log.h>
@@ -69,6 +71,10 @@ public:
     }
 
     ~FreeTypeFace() override {
+        if (hbFont_ != nullptr) {
+            hb_font_destroy(hbFont_);
+        }
+
         FT_Done_Face(face_);
     }
 
@@ -147,6 +153,18 @@ public:
         return FT_Get_Char_Index(face_, codePoint);
     }
 
+    Result<void> Shape(const ShapeRunRequest& request, Array<ShapedGlyph>& out) noexcept override {
+        if (!(request.size > 0.0f) || !(request.scale > 0.0f)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto applied = ApplySize(ComputeFontPixelSize(request.size, request.scale)); !applied) {
+            return applied;
+        }
+
+        return detail::ShapeRun(face_, hbFont_, this, desc_.hinting, request, out);
+    }
+
 private:
     // UE ApplySizeAndScale과 같다: scalable은 픽셀 크기를 정하고, 비트맵 글꼴은 가장 알맞은
     // strike를 골라 그 strike에서 요청 크기로의 배율을 x_scale·y_scale에 둔다.
@@ -207,6 +225,7 @@ private:
 
     FT_Face face_;
     FontFaceDesc desc_;
+    hb_font_t* hbFont_ = nullptr;
 };
 
 class FreeTypeBackend final : public TextBackend {
@@ -274,6 +293,16 @@ public:
         }
 
         return Result<UniquePtr<BackendFace>>::Success(UniquePtr<BackendFace>(Move(made.Value())));
+    }
+
+    Result<void> FindBoundaries(TextBoundaryKind kind, StringView utf8, StringView culture,
+                                Array<usize>& out) noexcept override {
+        return detail::FindBoundaries(kind, utf8, culture, out);
+    }
+
+    Result<void> ResolveBidi(StringView utf8, TextBaseDirection base,
+                             Array<BidiRun>& out) noexcept override {
+        return detail::ResolveBidi(utf8, base, out);
     }
 
 private:

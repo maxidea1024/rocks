@@ -4,6 +4,7 @@
 #include <Core/Result.h>
 #include <TextLayout/FontFaceData.h>
 #include <TextLayout/FontTypes.h>
+#include <TextLayout/TextShaping.h>
 
 // 글꼴 라이브러리 backend 계약이다(Docs/Design/Font 3장·6.8절). 구현은 ClientOnly 모듈
 // TextLayoutBackend(FreeType·HarfBuzz·ICU·msdfgen)가 하고, 호스트(UI 앱·도구·시험)가 만들어
@@ -42,6 +43,12 @@ public:
 
     // code point의 글리프 번호다(없으면 0 = .notdef).
     virtual uint32 GlyphIndex(uint32 codePoint) noexcept = 0;
+
+    // run을 shaping해 글리프를 out 뒤에 붙인다(FullShaping은 HarfBuzz, KerningOnly는 advance +
+    // kerning). RTL이면 글리프를 시각 순서로 낸다. 크기·배율이 0 이하면 InvalidArgument, 할당
+    // 실패는 OutOfMemory다.
+    virtual Result<void> Shape(const ShapeRunRequest& request,
+                               Array<ShapedGlyph>& out) noexcept = 0;
 };
 
 class ROCKS_TEXTLAYOUT_API TextBackend {
@@ -55,6 +62,16 @@ public:
     // face를 연다. data가 없거나 글꼴이 아니거나 하위 face 번호가 범위 밖이면 InvalidArgument,
     // 할당 실패는 OutOfMemory다. face는 desc.data를 붙잡는다.
     virtual Result<UniquePtr<BackendFace>> OpenFace(const FontFaceDesc& desc) noexcept = 0;
+
+    // utf8의 경계 byte 위치를 out에 쓴다(0은 빼고 끝은 넣는다, 오름차순). culture는 경계 규칙
+    // 로캘이다 (예 "th", 비면 root). 잘못된 UTF-8은 InvalidArgument다.
+    virtual Result<void> FindBoundaries(TextBoundaryKind kind, StringView utf8, StringView culture,
+                                        Array<usize>& out) noexcept = 0;
+
+    // utf8의 방향 run을 시각 순서(왼쪽부터)로 out에 쓴다(UAX #9, ICU ubidi_getVisualRun). 빈
+    // 문자열은 run이 없다. 잘못된 UTF-8은 InvalidArgument다.
+    virtual Result<void> ResolveBidi(StringView utf8, TextBaseDirection base,
+                                     Array<BidiRun>& out) noexcept = 0;
 };
 
 } // namespace rocks::text

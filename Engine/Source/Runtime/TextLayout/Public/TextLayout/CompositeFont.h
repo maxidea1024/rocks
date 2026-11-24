@@ -121,6 +121,11 @@ public:
     // 없다. 할당 실패는 OutOfMemory다(이전 culture가 남는다).
     Result<void> SetCulture(StringView culture) noexcept;
 
+    // 지금 culture다(SetCulture의 값, 처음은 빈 문자열).
+    StringView Culture() const noexcept {
+        return culture_.View();
+    }
+
     // code point에 쓸 face를 고른다(6.3절 규칙). 항상 face 하나를 준다(기본 typeface가 있으므로).
     FontSelection Select(uint32 codePoint, StringView typefaceName, FontStyleRequest style,
                          FontFallback fallback) noexcept;
@@ -141,6 +146,7 @@ private:
     Array<CompositeFontRange> priorityRanges_;
     Array<CompositeFontRange> generalRanges_;
     UniquePtr<BackendFace> lastResort_;
+    String culture_;
 };
 
 } // namespace rocks::text

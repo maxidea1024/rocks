@@ -82,7 +82,8 @@ Result<void> OpenTypeface(Allocator& allocator, TextBackend& backend,
 
 ResolvedCompositeFont::ResolvedCompositeFont(Allocator& allocator) noexcept
     : allocator_(allocator), defaultTypeface_(allocator), fallbackTypeface_(allocator),
-      subTypefaces_(allocator), priorityRanges_(allocator), generalRanges_(allocator) {
+      subTypefaces_(allocator), priorityRanges_(allocator), generalRanges_(allocator),
+      culture_(allocator) {
 }
 
 Result<UniquePtr<ResolvedCompositeFont>>
@@ -196,6 +197,10 @@ Result<void> ResolvedCompositeFont::SetCulture(StringView culture) noexcept {
                 return added;
             }
         }
+    }
+
+    if (auto copied = culture_.TryAssign(culture); !copied) {
+        return copied;
     }
 
     priorityRanges_ = Move(priority);
