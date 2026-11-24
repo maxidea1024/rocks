@@ -143,6 +143,11 @@ try
             case "ownership":
                 await IncludeOwnershipTests.RunAsync(request, root, Pass);
                 break;
+            case "c-language":
+                ObjectiveCppTests.Run(request, root);
+                await CLanguageTests.RunAsync(request, root);
+                Pass("C and Objective-C++ translation units");
+                break;
             case "target-kinds":
                 await TargetKindTests.RunAsync(request, root, repository, Pass);
                 ModuleTypeTests.Run(request, Pass);
