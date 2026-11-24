@@ -289,7 +289,7 @@ v1은 A4f에서 v2(backend 표·비에셋 산출물 표 — 10.3절 4항)로 바
 
 렌더 세션(SH2 — [ShaderSystem](../ShaderSystem/12-FormatDefinitionsCooking.ko.md) 12.3.1절, 14절 개정 요구)이 에셋 쪽에 요구한 것을 정한다. 셰이더 쪽은 `CookShaderLibraries`와 아래 단계 구현만 맡고(ShaderSystem 16.1절 범위), 이 절의 TargetProfile 칸·매니페스트 v2·비에셋 산출물 단계·`--engine`은 에셋 세션이 구현한다(A4f). 하위호환은 두지 않는다(옛 프로필·v1 매니페스트는 다시 쿠킹한다). 애매한 곳은 UE 5.8과 같게 했다 — UE는 엔진 전역 셰이더 라이브러리("Global")도 프로젝트 쿠킹이 만들고(ShaderCodeLibrary.cpp:2272) backend별 형식 목록을 플랫폼 설정에 둔다(`D3D12TargetedShaderFormats` — WindowsDynamicRHI.cpp:624–626).
 
-**구현 시점**: SH2d(셰이더 쪽 마지막 단계 — 순서 SH2a → b → c → e → f → d) 착수 전에 끝낸다. 사용자가 정한 에셋 순서(A5 → A6 → 화면 마일스톤)를 바꾸지 않으므로 끼울 자리는 사용자와 정한다.
+**구현 시점**: A5(A5g–A5k) 뒤, A6 전(사용자 결정 2026-11-24). SH2d(셰이더 쪽 마지막 단계 — 순서 SH2a → b → c → e → f → d)보다 먼저 끝나고, 끝나면 렌더 세션(rocks-6b)에 알린다.
 
 **렌더 세션과 맞춘 것(요구 원문과 다른 곳 — 2026-11-24 rocks-6b가 셋 다 받아들임, ShaderSystem 다음 개정에 반영)**: (a) SSD10의 "쿠커가 형식 정의 디렉터리와 대조"를 비에셋 산출물 단계(셰이더 쪽) 시작 때 대조로 옮겼다(1항 — AssetCooker가 ShaderCompiler에 의존하지 않게). (b) `graphicsBackends`가 빈 프로필은 셰이더 없는 프로필이다(1항). 셰이더 쪽 런타임 규칙: 매니페스트 backendCount 0이면 그래픽 장치·렌더러를 만들지 않고(UE 전용 서버의 NullDrv처럼), 그 실행에서 장치 생성을 요청하면 `Unsupported`("this cook has no shader formats")다 — 셰이더 라이브러리를 찾지 않으므로 `CorruptPackage`도 없다. (c) macOS 프로필 id는 Rocks·UE 플랫폼 이름 `Mac`이다(SSD10·SSD24 문구를 고친다).
 
