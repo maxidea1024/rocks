@@ -130,7 +130,11 @@ enum class AssetDiagnosticCode : uint16 {
     // detail = slice당 버린 mip 수 — mip 0만 쓴다), 버린 추가 이미지(IgnoredSourceImages — 경고,
     // detail = 버린 수 — TIFF 다음 IFD·EXR 다른 part).
     IgnoredSourceMips,
-    IgnoredSourceImages
+    IgnoredSourceImages,
+    // 텍스처 빌드(AssetSystem 12.13절 — A5i): SRGB를 무시함(SrgbIgnored — 경고, 선형 데이터 종류나
+    // float 출력의 SRGB on), Address Wrap인 PreserveBorder(PreserveBorderWithWrap — 경고).
+    SrgbIgnored,
+    PreserveBorderWithWrap
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

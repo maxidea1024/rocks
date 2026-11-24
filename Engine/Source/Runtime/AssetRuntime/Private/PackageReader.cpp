@@ -1067,6 +1067,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "IgnoredSourceMips";
     case AssetDiagnosticCode::IgnoredSourceImages:
         return "IgnoredSourceImages";
+    case AssetDiagnosticCode::SrgbIgnored:
+        return "SrgbIgnored";
+    case AssetDiagnosticCode::PreserveBorderWithWrap:
+        return "PreserveBorderWithWrap";
     }
 
     return "Unknown";
@@ -1078,6 +1082,8 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::IgnoredSourceChannels:
     case AssetDiagnosticCode::IgnoredSourceMips:
     case AssetDiagnosticCode::IgnoredSourceImages:
+    case AssetDiagnosticCode::SrgbIgnored:
+    case AssetDiagnosticCode::PreserveBorderWithWrap:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:

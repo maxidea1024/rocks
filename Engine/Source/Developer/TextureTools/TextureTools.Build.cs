@@ -20,6 +20,7 @@ public sealed class TextureTools : EngineModuleRules
     // translator types, AssetRuntime for the type hook table.
     protected override string[] PublicDependencies => ["Core", "Texture", "AssetRuntime", "AssetDatabase"];
 
-    // ImageCodec decodes the source files (sections 12.9-12.11).
-    protected override string[] PrivateDependencies => ["ImageCodec"];
+    // ImageCodec decodes the source files (sections 12.9-12.11). DeterministicMath gives the build the same bytes on every host
+    // (Lanczos, sRGB and gamma curves — section 12.13).
+    protected override string[] PrivateDependencies => ["ImageCodec", "DeterministicMath"];
 }
