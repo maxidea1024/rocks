@@ -597,6 +597,7 @@ Result<void> World::SetEngineStage(EngineStage stage, EngineStageFunction functi
     }
 
     engineStages_[index] = {function, user};
+    engineStageNanoseconds_[index] = 0;
     return Result<void>::Success();
 }
 
@@ -604,6 +605,7 @@ void World::ClearEngineStage(EngineStage stage) noexcept {
     const uint32 index = static_cast<uint32>(stage);
     if (index < EngineStageCount) {
         engineStages_[index] = {};
+        engineStageNanoseconds_[index] = 0;
     }
 }
 
@@ -663,6 +665,13 @@ const char* TickHookName(uint8 hook) noexcept {
     return "?";
 }
 
+// 엔진 단계 자리가 그 Tick 단계의 시작(LateUpdate — Tick 항목 전)인지다(15.4절). 아니면 끝(Physics
+// — Tick 항목 뒤)이다.
+bool StageRunsAtStart(EngineStage stage) noexcept {
+    return stage == EngineStage::Timers || stage == EngineStage::TickableSubsystems ||
+           stage == EngineStage::CameraUpdate;
+}
+
 // 그 단계 끝·시작의 엔진 단계 자리다(15.4절).
 bool StageBelongsTo(EngineStage stage, TickPhase phase) noexcept {
     switch (stage) {
@@ -694,11 +703,26 @@ Result<void> World::DumpTickGraph(String& out) noexcept {
         }
     };
 
-    Result<void> written = AppendFormatted(out, "World {} tick graph\n", Name());
+    Result<void> written = AppendFormatted(
+        out, "World {} tick graph{}\n", Name(),
+        ticks_.ArePhaseChangesPending() ? " (phase changes pending until the next frame)" : "");
+    // 그 단계의 엔진 단계 자리를 실행 위치(시작·끝)에 맞춰 쓴다.
+    auto stages = [&](TickPhase phase, bool atStart) noexcept {
+        for (uint32 stage = 0; written && stage < EngineStageCount; ++stage) {
+            const auto kind = static_cast<EngineStage>(stage);
+            if (StageBelongsTo(kind, phase) && StageRunsAtStart(kind) == atStart) {
+                written = AppendFormatted(out, "    [engine stage {} at {} {}]\n",
+                                          EngineStageName(kind), atStart ? "start" : "end",
+                                          engineStages_[stage].function != nullptr ? "registered"
+                                                                                   : "empty");
+            }
+        }
+    };
     for (uint32 index = 0; written && index < TickPhaseCount; ++index) {
         const auto phase = static_cast<TickPhase>(index);
         written = AppendFormatted(out, "  {}{}:\n", TickPhaseName(phase),
                                   ticks_.IsOrderStale(phase) ? " (order rebuilt at next run)" : "");
+        stages(phase, true);
         ticks_.ForEachInPhase(phase, [&](const TickEntryInfo& info) noexcept {
             if (!written) {
                 return;
@@ -733,14 +757,7 @@ Result<void> World::DumpTickGraph(String& out) noexcept {
                                           TickHookName(target.Value().hook));
             }
         });
-        for (uint32 stage = 0; written && stage < EngineStageCount; ++stage) {
-            if (StageBelongsTo(static_cast<EngineStage>(stage), phase)) {
-                written = AppendFormatted(out, "    [engine stage {} {}]\n",
-                                          EngineStageName(static_cast<EngineStage>(stage)),
-                                          engineStages_[stage].function != nullptr ? "registered"
-                                                                                   : "empty");
-            }
-        }
+        stages(phase, false);
     }
 
     return written;

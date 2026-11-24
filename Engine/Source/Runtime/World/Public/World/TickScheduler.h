@@ -120,7 +120,8 @@ struct TickStats {
     // 실효 단계 재계산이 할당 실패로 미뤄진 누적 횟수다. 그 프레임은 이전 실효 단계로 실행하고 다음
     // 프레임에 다시 계산한다.
     uint32 phaseRecomputeFailures = 0;
-    // 실효 단계가 요청 단계보다 늦춰진 항목 수다(마지막 재계산 기준).
+    // 실효 단계가 요청 단계와 다른(늦춰진) 항목 수다(마지막 재계산 기준 — 그 뒤 SetPhase로 요청만
+    // 바뀐 항목은 다음 재계산에서 반영된다).
     uint32 demoted = 0;
 };
 
@@ -236,11 +237,25 @@ public:
             visitor(Describe(*entry, false));
         }
 
-        for (const Entry& entry : entries_) {
-            if (!entry.removed && entry.effective == phase && entry.orderPosition == NoOrder) {
+        // 순서 배열에 들지 않은 항목(새 등록, 재구성이 할당 실패로 멈춘 단계의 항목)은 끝에 넘긴다.
+        for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
+            const Entry& entry = *iterator;
+            if (entry.removed || entry.effective != phase) {
+                continue;
+            }
+
+            const bool ordered = entry.orderPosition < order.Size() &&
+                                 order[entry.orderPosition].slot == iterator.Handle();
+            if (!ordered) {
                 visitor(Describe(entry, true));
             }
         }
+    }
+
+    // 실효 단계 재계산이 다음 프레임 첫 단계 전에 남아 있는지다(SetPhase·단계를 넘는 의존 변경 뒤 —
+    // 그때까지 TickEntryInfo의 effective는 이전 계산 값이다).
+    bool ArePhaseChangesPending() const noexcept {
+        return phasesDirty_;
     }
 
     // phase의 순서 배열이 다음 실행 때 다시 만들어지는지다(진단 표시).

@@ -753,7 +753,8 @@ Result<void> GameInstanceClient::DescribeSubsystems(Engine&, String& out) noexce
                 game.WithLocalPlayer(game.LocalPlayerAt(index), [&](LocalPlayer& player) noexcept {
                     return player.subsystems_.Describe(out, layer.View());
                 });
-            if (!described) {
+            // 낡은 LocalPlayer는 건너뛰고 쓰기 실패(할당)만 전체 실패로 돌린다.
+            if (!described && described.Error() == ErrorCode::OutOfMemory) {
                 written = Move(described);
             }
         }
@@ -822,7 +823,10 @@ Result<void> GameInstanceClient::DumpFramework(String& out) noexcept {
                                 view.location.z, view.rotation.pitch, view.rotation.yaw,
                                 view.rotation.roll, view.fov);
                         });
-                    return camera ? Result<void>::Success() : Result<void>::Success();
+                    // 없는 CameraDirector(낡은 handle)는 건너뛰고 쓰기 실패(할당)만 돌려준다.
+                    return !camera && camera.Error() == ErrorCode::OutOfMemory
+                               ? Result<void>::Failure(ErrorCode::OutOfMemory)
+                               : Result<void>::Success();
                 });
             if (!described && described.Error() == ErrorCode::OutOfMemory) {
                 written = Move(described);

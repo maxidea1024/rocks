@@ -827,15 +827,12 @@ TickStats TickScheduler::Stats() const noexcept {
         if (entry.registration.enabled) {
             ++stats.enabled;
         }
-
-        if (entry.effective != entry.registration.phase) {
-            ++stats.demoted;
-        }
     }
 
     stats.executedThisFrame = executedThisFrame_;
     stats.pendingChanges = pendingRemovals_ + (phasesDirty_ ? 1u : 0u);
     stats.phaseRecomputeFailures = recomputeFailures_;
+    stats.demoted = demoted_;
     for (bool dirty : dirty_) {
         stats.pendingChanges += dirty ? 1u : 0u;
     }

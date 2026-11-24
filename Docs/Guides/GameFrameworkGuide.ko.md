@@ -219,7 +219,7 @@ GameInstance 없이 World만 쓰는 도구·시험도 있다(`Engine::CreateWorl
 | `world.dumpticks [World 이름]` | 단계마다 실행 순서대로 Tick 항목(hook·priority·interval·늦춤), 선행, 엔진 단계 자리 |
 | `game.dumpframework` | GameInstance → LocalPlayer → PlayerController(state) → Pawn·PlayerState·CameraDirector, GameDirector(수 통계)·GameState |
 
-- 명령은 설정 문맥(`EngineConfig::settings`)이 있을 때 등록된다. 출력은 콘솔 sink와 Info 로그에 같은 내용으로 남는다.
+- 명령은 설정 문맥(`EngineConfig::settings`)이 있을 때 등록된다. 출력은 콘솔 sink와 Info 로그에 같은 내용으로 남는다. 한 설정 문맥을 Engine 여럿이 쓰면 마지막에 시작한 Engine이 대상이다.
 - 같은 내용은 코드에서도 얻을 수 있다: `Engine::DumpSubsystems`, `Engine::DumpTickGraphs`, `World::DumpTickGraph`, `GameInstanceClient::DumpFramework`.
 - 통계는 `World::Stats()`와 `GameplayWorldSubsystem::Stats(world)`에 있다. `World::Stats()`에는 늦춘 Tick 수·엔진 단계 시간·LifeSpan 대기 수가, `GameplayWorldSubsystem::Stats(world)`에는 Controller·Pawn·PlayerState 수가 있다.
 - 로그의 `{Code}` 속성으로 진단을 찾는다: `SubsystemSkippedMissingDependency` · `AutoTickPrerequisiteCycleSkipped` · `BeginPlayDispatchContractViolated` · `InvalidDirectorType` · `PossessDeniedNoAuthority`.
