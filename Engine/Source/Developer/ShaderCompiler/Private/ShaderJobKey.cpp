@@ -97,8 +97,9 @@ Result<void> WriteShaderJobKeyBody(NuggetKeyWriter& writer,
     const ShaderKeyReflection& reflection = input.reflection;
     if (input.format == nullptr || input.format->state != ShaderFormatState::Supported ||
         !IsSingleStage(input.stage) || (input.format->stages & input.stage) == 0 ||
-        input.entry.IsEmpty() || input.options == nullptr || reflection.registry == nullptr ||
-        reflection.types == nullptr || reflection.allocator == nullptr) {
+        (input.requiredFeatures & ~AllShaderFeatures) != 0 || input.entry.IsEmpty() ||
+        input.options == nullptr || reflection.registry == nullptr || reflection.types == nullptr ||
+        reflection.allocator == nullptr) {
         return Fail(writer, ErrorCode::InvalidArgument);
     }
 
@@ -116,6 +117,7 @@ Result<void> WriteShaderJobKeyBody(NuggetKeyWriter& writer,
     writer.WriteDigest(input.format->sha256);
     writer.WriteU32(input.stage);
     writer.WriteString(input.entry);
+    writer.WriteU32(input.requiredFeatures);
     writer.WriteDigest(input.preprocessedSha256);
 
     // 6행: 옵션(리플렉션 기록 — 기본값 포함 전체)과 레이아웃 서명.

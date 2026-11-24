@@ -437,7 +437,7 @@ void ApplicationRunner::StopToolLog(ApplicationRunner& runner) noexcept {
 }
 
 bool ApplicationRunner::StartModules(ApplicationRunner& runner) noexcept {
-    // 로더를 정하고 부트 모듈(EarliestPossible)을 시작한다(Docs/Design/ModuleLoader.ko.md 3.11·
+    // 로더를 정하고 부트 모듈(EarliestPossible)을 시작한다(Docs/Design/ModuleLoader 3.11·
     // 3.14절). Monolithic은 이 실행 파일의 모듈 표로 로더를 만들고, Modular는 Modular 진입이
     // manifest로 만든 로더를 쓴다. 실패는 여기서 한 번 기록한다(로더는 기록하지 않는다).
     if (runner.preloaded_ == nullptr) {
@@ -664,7 +664,7 @@ void BootstrapProgram(const char* path, usize bytes, char (&out)[BootstrapProgra
     out[length] = '\0';
 }
 
-// Modular 진입 본문이다(Docs/Design/ModuleLoader.ko.md 3.14절). 도우미 분기 → manifest 경로(실행
+// Modular 진입 본문이다(Docs/Design/ModuleLoader 3.14절). 도우미 분기 → manifest 경로(실행
 // 파일 폴더 + 이름) → 시동 크래시 수집(프로세스 안 덤프) → 시동 할당자로 manifest 로더 → 호스트
 // 모듈의 앱 기술 → 시동 수집 해제 → RunApplication과 같은 흐름 → lease·로더·시동 할당자 정리
 // 순서다.

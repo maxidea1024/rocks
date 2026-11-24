@@ -656,7 +656,7 @@ public:
     // AlreadyExists, 다른 스레드 WrongThread.
     Result<void> MakeProcessDefault() noexcept;
 
-    // 모듈 코드 수명 토큰을 문맥이 맡는다(Docs/Design/ModuleLoader.ko.md 3.10절 MD16). 모듈의
+    // 모듈 코드 수명 토큰을 문맥이 맡는다(Docs/Design/ModuleLoader 3.10절 MD16). 모듈의
     // RegisterSettings가 등록한 CVar 핸들·설정 struct·콘솔 명령 정의는 그 모듈의 코드·데이터를
     // 가리키므로, 설정 등록을 부르는 쪽(HostSettings)이 그 모듈의 lease를 여기에 맡겨 문맥이 사는
     // 동안 모듈 코드를 붙잡는다. 맡긴 lease는 문맥이 없어질 때 등록을 모두 정리한 뒤 놓는다. 빈
@@ -733,6 +733,6 @@ private:
 
 } // namespace rocks::config
 
-// 호스트 서비스다(Docs/Design/ModuleLoader.ko.md 3.12절). 엔진 호스트가 모듈 단계 실행 전에
+// 호스트 서비스다(Docs/Design/ModuleLoader 3.12절). 엔진 호스트가 모듈 단계 실행 전에
 // 등록하고 호스트 묶음을 내린 뒤 뗀다.
 ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext, ROCKS_CONFIG_API)

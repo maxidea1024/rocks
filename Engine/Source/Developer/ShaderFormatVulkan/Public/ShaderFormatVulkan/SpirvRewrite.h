@@ -6,7 +6,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Graphics/ShaderSourceCompiler.h>
-#include <ShaderCore/ShaderFormatTypes.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
 
 namespace rocks::shader {
 
@@ -35,21 +35,5 @@ inline constexpr char DrawConstantsBlockName[] = "DrawConstants";
 Result<void> RewriteSpirv(Span<const uint32> input, graphics::ShaderStage stage,
                           StringView rootConstantsName, Array<uint32>& output,
                           String& diagnostics) noexcept;
-
-// 셰이더 워커(VULKAN_SM5)의 고쳐 쓰기 선택이다(ShaderSystem 16.1절 SSD29 SH2b1).
-struct SpirvRewriteOptions {
-    // ShaderStageBits 한 비트다.
-    uint32 stage = 0;
-    // push constant로 바꿀 상수 버퍼 이름이다(빈 값이면 바꾸지 않는다 — 워커는
-    // ROCKS_ROOT_CONSTANTS가 이미 push constant를 낸다).
-    StringView rootConstantsName;
-    // 단계 사이 변수(VS 출력·PS 입력)의 location을 시맨틱 TEXCOORDn의 n으로 바꾼다(7.2절 7항). 켜면
-    // TEXCOORDn(n ≤ 15)이 아닌 단계 사이 변수와 겹치는 n은 InvalidArgument다.
-    bool stageLocations = false;
-};
-
-// 위와 같되 단계는 ShaderStageBits이고 단계 사이 location 재작성을 고를 수 있다.
-Result<void> RewriteSpirv(Span<const uint32> input, const SpirvRewriteOptions& options,
-                          Array<uint32>& output, String& diagnostics) noexcept;
 
 } // namespace rocks::shader

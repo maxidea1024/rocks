@@ -12,6 +12,6 @@ public sealed class Engine : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    // ModuleLoader: the engine attaches its type registrar to the module loader (Docs/Design/ModuleLoader.ko.md section 3.10).
+    // ModuleLoader: the engine attaches its type registrar to the module loader (Docs/Design/ModuleLoader section 3.10).
     protected override string[] PublicDependencies => ["World", "Config", "Task", "ModuleLoader"];
 }

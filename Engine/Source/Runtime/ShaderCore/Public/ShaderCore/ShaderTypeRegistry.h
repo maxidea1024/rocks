@@ -108,7 +108,7 @@ private:
 };
 
 // 셰이더 타입을 정의하는 모듈의 수명 객체가 쓰는 등록
-// 도우미다(Docs/Design/ModuleLoader.ko.md 3.12절). Startup에서 호스트 서비스의 ShaderTypeRegistry를
+// 도우미다(Docs/Design/ModuleLoader 3.12절). Startup에서 호스트 서비스의 ShaderTypeRegistry를
 // 찾아 types를 등록하고, 등록한 동안 모듈 lease를 잡는다(desc가 이 모듈의 데이터다). 호스트가
 // 등록부를 올리지 않았으면(셰이더를 쓰지 않는 도구) 아무 일도 하지 않는다.
 //

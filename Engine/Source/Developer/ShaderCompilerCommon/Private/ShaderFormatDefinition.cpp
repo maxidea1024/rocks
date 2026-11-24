@@ -76,7 +76,8 @@ constexpr NameEntry<uint32> FeatureNames[] = {
     {"compute", ShaderFeatureCompute},
     {"waveOperations", ShaderFeatureWaveOperations},
     {"vertexViewportLayerOutput", ShaderFeatureVertexViewportLayerOutput},
-    {"typedUavLoad", ShaderFeatureTypedUavLoad}};
+    {"typedUavLoad", ShaderFeatureTypedUavLoad},
+    {"debugPixelUav", ShaderFeatureDebugPixelUav}};
 
 constexpr NameEntry<uint32> DeviceRequirementNames[] = {
     {"D3D_FEATURE_LEVEL_11_0", DeviceRequiresD3DFeatureLevel11_0},

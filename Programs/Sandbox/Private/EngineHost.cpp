@@ -200,7 +200,7 @@ UniquePtr<platform::GamepadBackend> CreateSandboxGamepads(Allocator& allocator) 
     return Move(gamepads.Value());
 }
 
-// 호스트 서비스를 등록한다(Docs/Design/ModuleLoader.ko.md 3.12절). 서비스는 선택이라 실패하면
+// 호스트 서비스를 등록한다(Docs/Design/ModuleLoader 3.12절). 서비스는 선택이라 실패하면
 // Warning을 남기고 모듈은 서비스 없이 시작한다.
 template <class Service>
 void RegisterHostService(HostServices& services, Service& service) noexcept {
@@ -535,7 +535,7 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
 
 } // namespace
 
-// 엔진 호스트 본문이다(Docs/Design/ModuleLoader.ko.md 3.11절). Launch가 소유한 프로세스 모듈
+// 엔진 호스트 본문이다(Docs/Design/ModuleLoader 3.11절). Launch가 소유한 프로세스 모듈
 // 로더(부트 모듈이 시작해 있다)로 설정(HostSettings — 모든 모듈의 RegisterSettings) → LogHost·trace
 // → PostConfigInit 단계 → 엔진(엔진 단계) → 호스트 묶음 종료를 돈다. 프로세스 묶음은 Launch가
 // 내린다. 멈춘 로그 출력 스레드를 포기했으면 LogHost·설정 문맥을 파괴하지 않고 정적 소멸 없이

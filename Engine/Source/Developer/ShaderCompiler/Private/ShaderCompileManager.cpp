@@ -463,8 +463,9 @@ private:
         }
 
         ShaderDefineSet defines(state_.allocator);
-        const ShaderSourceStatus built = BuildShaderPreprocessDefines(
-            job.format->definition, job.stage, job.options.hlsl2021, job.defines, defines);
+        const ShaderSourceStatus built =
+            BuildShaderPreprocessDefines(job.format->definition, job.stage, job.options.hlsl2021,
+                                         job.defines, job.developmentOnly, defines);
         if (!built) {
             Fail(index, ShaderCompileStatus::InvalidJob, StringView(built.message));
             return;
@@ -500,6 +501,7 @@ private:
         input.systemTools = state_.systemTools.View();
         input.stage = job.stage;
         input.entry = job.entryPoint;
+        input.requiredFeatures = job.requiredFeatures;
         input.preprocessedSha256 = Sha256::Hash(
             Span<const uint8>(reinterpret_cast<const uint8*>(result.preprocessed.text.Data()),
                               result.preprocessed.text.ByteCount()));
@@ -787,6 +789,7 @@ private:
             worker.kind = job.testHook;
             worker.key = out_[index].key;
             worker.stage = job.stage;
+            worker.requiredFeatures = job.requiredFeatures;
             worker.options.hlsl2021 = job.options.hlsl2021;
             worker.options.optimization = static_cast<uint8>(job.options.optimization);
             worker.options.debugSymbols = job.options.debugSymbols;

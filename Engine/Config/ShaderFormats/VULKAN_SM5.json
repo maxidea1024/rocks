@@ -3,7 +3,7 @@
   "id": "VULKAN_SM5",
   "status": "supported",
   "backend": "Vulkan",
-  "processor": { "module": "ShaderFormatVulkan", "version": 2 },
+  "processor": { "module": "ShaderFormatVulkan", "version": 3 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler", "SpirvTools"],
   "language": { "hlsl2021": true },
@@ -26,7 +26,7 @@
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute", "vertexViewportLayerOutput"],
+  "features": ["compute", "vertexViewportLayerOutput", "debugPixelUav"],
   "deviceRequirements": ["VULKAN_1_1"],
   "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
 }

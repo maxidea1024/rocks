@@ -147,6 +147,13 @@ internal static class InputValidation
                     "starting with a digit) — it names ROCKS_<MODULE>_API.");
             }
 
+            // RTTI는 엔진 모듈에서 금지다. 서드파티 C++ 라이브러리만 ThirdParty.json rtti로 켤 수 있다(Docs/Design/Compression.ko.md
+            // 3.3절 C++ 서드파티).
+            if (module.RuntimeTypeInformation && !module.ThirdParty)
+            {
+                throw new ArgumentException($"Module {module.Name}: RuntimeTypeInformation is only for a third-party module (ThirdParty.json rtti).");
+            }
+
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
             ValidateReflectionSources(module);
@@ -287,7 +294,7 @@ internal static class InputValidation
             byName.TryAdd(module.Name, module);
         }
 
-        // 모듈 표 제공 모듈에 닿는 Modular 실행 파일은 호스트 모듈이 되고 실행 파일은 Launch의 Modular 진입만 부른다(Docs/Design/ModuleLoader.ko.md
+        // 모듈 표 제공 모듈에 닿는 Modular 실행 파일은 호스트 모듈이 되고 실행 파일은 Launch의 Modular 진입만 부른다(Docs/Design/ModuleLoader
         // 3.14절 ML4b). Launch에 닿지 않으면 모듈을 시작할 진입이 없으므로 거부한다.
         foreach (NativeModuleInput executable in byName.Values.Where(module => module.Kind == NativeModuleKind.Executable)
             .OrderBy(module => module.Name, StringComparer.Ordinal))
@@ -297,7 +304,7 @@ internal static class InputValidation
                 !closure.Any(name => byName.TryGetValue(name, out NativeModuleInput? value) && value.ProvidesLaunch))
             {
                 throw new ArgumentException($"Module {executable.Name}: a Modular executable that reaches the module table provider must reach " +
-                    "the launch module, whose Modular entry loads the module manifest (Docs/Design/ModuleLoader.ko.md section 3.14).");
+                    "the launch module, whose Modular entry loads the module manifest (Docs/Design/ModuleLoader section 3.14).");
             }
         }
 
@@ -320,7 +327,7 @@ internal static class InputValidation
             }
         }
 
-        // 플러그인 모듈은 다른 폴더(플러그인 binaries 폴더)의 공유 라이브러리다(Docs/Design/ModuleLoader.ko.md 3.15절 ML5a). Windows는 로더가
+        // 플러그인 모듈은 다른 폴더(플러그인 binaries 폴더)의 공유 라이브러리다(Docs/Design/ModuleLoader 3.15절 ML5a). Windows는 로더가
         // manifest 순서로 의존 라이브러리를 먼저 열어 import를 푸는데, 모듈 표 행이 없는 공유 라이브러리(진입점 면제 모듈 — PlatformBase 등)는
         // 로더가 열지 않는다. 그런 라이브러리는 진입 스텁이 import하는 부트 모듈(Launch)의 링크 폐포 안이어야 이미 적재되어 있다.
         if (byName.Values.Any(module => module.Plugin is not null) &&
@@ -342,7 +349,7 @@ internal static class InputValidation
                 {
                     throw new ArgumentException($"Module {module.Name}: a Modular shared library without a module table row must be in the link " +
                         $"closure of the launch module {launchModule.Name} when plugin modules are built, so that it is loaded before plugin " +
-                        "libraries import it (Docs/Design/ModuleLoader.ko.md section 3.15).");
+                        "libraries import it (Docs/Design/ModuleLoader section 3.15).");
                 }
             }
         }
@@ -397,7 +404,7 @@ internal static class InputValidation
         }
     }
 
-    // 모듈 이름은 실행 중 대소문자를 구분해 비교한다(Docs/Design/ModuleLoader.ko.md 3.4절 MD17). 대소문자만 다른 두 모듈은 Windows 파일 이름과
+    // 모듈 이름은 실행 중 대소문자를 구분해 비교한다(Docs/Design/ModuleLoader 3.4절 MD17). 대소문자만 다른 두 모듈은 Windows 파일 이름과
     // 진입점 기호가 충돌하므로 거부한다. 의존 목록의 철자도 모듈 이름과 정확히 같아야 한다(빌드가 대소문자를 무시해 이어 준 의존이 모듈 표에서
     // 끊기지 않게). 정확히 같은 이름의 중복과 모르는 의존은 액션 그래프가 알린다.
     private static void ValidateModuleNameCase(IReadOnlyList<NativeModuleInput> modules)
@@ -459,14 +466,38 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {library.Name}: HasGlobalState is only for a third-party module (ThirdParty.json globalState).");
             }
 
-            string[] consumers = modules.Where(module => module.AllDependencies.Contains(library.Name, StringComparer.OrdinalIgnoreCase))
-                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            // 소비 모듈은 직접 의존하거나 서드파티 모듈만 거쳐 닿는 Rocks 모듈이다. 서드파티 정적 라이브러리는 그것을 쓰는 Rocks 모듈에
+            // 함께 링크되므로(ICU를 쓰는 HarfBuzz) 서드파티 모듈 자체는 세지 않는다(Docs/Design/BuildTargets 3.8절 BD29).
+            string[] consumers = GlobalStateConsumers(modules, library.Name);
             if (consumers.Length > 1)
             {
                 throw new ArgumentException($"Module {library.Name} has process-wide state (ThirdParty.json globalState), so only one module may " +
                     $"depend on it directly; found {string.Join(", ", consumers)}. Route the others through the owning module's API.");
             }
         }
+    }
+
+    // library에 직접, 또는 서드파티 모듈만 거쳐 의존하는 Rocks 모듈 이름이다(정렬).
+    private static string[] GlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules, string library)
+    {
+        var thirdParty = modules.Where(module => module.ThirdParty).ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        var reaching = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { library };
+        bool grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (NativeModuleInput module in thirdParty.Values)
+            {
+                if (!reaching.Contains(module.Name) && module.AllDependencies.Any(reaching.Contains))
+                {
+                    reaching.Add(module.Name);
+                    grew = true;
+                }
+            }
+        }
+
+        return modules.Where(module => !module.ThirdParty && module.AllDependencies.Any(reaching.Contains))
+            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
     }
 
     // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets 3.9절 BD36)이다. 빌드가
@@ -527,7 +558,7 @@ internal static class InputValidation
         }
     }
 
-    // 모듈의 플러그인(NativeModuleInput.Plugin — Docs/Design/ModuleLoader.ko.md 3.15절)이다. 빌드가 기술자에서 채운다. 이름은 C 식별자이고
+    // 모듈의 플러그인(NativeModuleInput.Plugin — Docs/Design/ModuleLoader 3.15절)이다. 빌드가 기술자에서 채운다. 이름은 C 식별자이고
     // 폴더는 플러그인 루트 기준 상대 경로다(/ 구분, 빈 조각·.·..·\\·: 없음 — 출력 폴더 안 플러그인 binaries 폴더와 manifest 목록 경로가 된다).
     // 같은 플러그인 이름은 같은 폴더이고, 다른 플러그인은 다른 폴더다(플러그인 manifest가 폴더마다 하나다).
     private static void ValidateModulePlugins(IReadOnlyList<NativeModuleInput> modules)
@@ -559,7 +590,7 @@ internal static class InputValidation
         }
     }
 
-    // 실행 중 적재 모듈 목록(NativeModuleInput.DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절 MD11)이다. 표에 있는 라이브러리 모듈을
+    // 실행 중 적재 모듈 목록(NativeModuleInput.DynamicModules — Docs/Design/ModuleLoader 3.8절 MD11)이다. 표에 있는 라이브러리 모듈을
     // 정확한 철자로 한 번씩 가리켜야 한다. 링크 의존과 겹치면 거부한다(UE도 오류 — UEBuildModuleCPP.cs ValidateModule): 같은 모듈을
     // 링크하면서 실행 중에 적재한다는 뜻이 모순이다. 순환은 검사하지 않는다(동적 관계는 참조 사슬이 아니다).
     private static void ValidateDynamicModules(IReadOnlyList<NativeModuleInput> modules, Dictionary<string, string> byFolded)

@@ -30,9 +30,13 @@ using platform::windows::ComRef;
 constexpr UINT D3D12RootConstantsSpace = 3;
 constexpr UINT D3D12RootConstantsRegister = 0;
 constexpr UINT D3D11RootConstantsRegister = 13;
+// PS 진단 버퍼 space다(16.1절 SSD34 — register(u0, space999)).
+constexpr UINT D3D12DebugBufferSpace = 999;
 // D3D11 루트 상수 cbuffer 이름 접미다(Platform.rsh 전개 Name##RootConstants).
 constexpr StringView RootConstantsSuffix("RootConstants");
 constexpr StringView GlobalsName("$Globals");
+// SPIRV-Cross HLSL이 상수 버퍼 이름 앞에 붙이는 접두다(SPIR-V 블록 타입 이름 type.<이름>).
+constexpr StringView CrossTypePrefix("type_");
 
 // D3D12·D3D11 리플렉션 인터페이스는 같은 모양이다(이름만 다르다).
 struct D3D12Traits {
@@ -127,8 +131,10 @@ bool KindOf(D3D_SHADER_INPUT_TYPE type, ShaderResourceKind& kind) noexcept {
 template <class Traits>
 class Walker {
 public:
-    Walker(D3DCodeKind kind, ShaderReflection& out, String& diagnostics) noexcept
-        : kind_(kind), out_(out), diagnostics_(diagnostics) {
+    // crossNames: SPIRV-Cross HLSL 출력(D3D11 대체 경로)의 이름이다 — 상수 버퍼는 type_<이름>,
+    // 멤버는 <이름>_<멤버>로 바뀌어 나오므로 원래 이름으로 되돌린다(SSD38).
+    Walker(D3DCodeKind kind, bool crossNames, ShaderReflection& out, String& diagnostics) noexcept
+        : kind_(kind), crossNames_(crossNames), out_(out), diagnostics_(diagnostics) {
     }
 
     ShaderToolOutcome Run(typename Traits::Reflection& reflection) noexcept {
@@ -180,6 +186,30 @@ private:
         return ShaderToolOutcome::CompileError;
     }
 
+    static StringView Name(const char* name) noexcept {
+        return name != nullptr ? StringView(name) : StringView();
+    }
+
+    static StringView StripPrefix(StringView name, StringView prefix) noexcept {
+        return name.ByteCount() > prefix.ByteCount() &&
+                       name.StartsWith(prefix, StringComparison::CaseSensitive)
+                   ? StringView(name.Data() + prefix.ByteCount(),
+                                name.ByteCount() - prefix.ByteCount())
+                   : name;
+    }
+
+    // SPIRV-Cross 이름이면 <블록>_<멤버>에서 <멤버>를 꺼낸다.
+    StringView MemberName(StringView block, StringView name) const noexcept {
+        if (!crossNames_ || name.ByteCount() <= block.ByteCount() + 1 ||
+            !name.StartsWith(block, StringComparison::CaseSensitive) ||
+            name.Data()[block.ByteCount()] != '_') {
+            return name;
+        }
+
+        return StringView(name.Data() + block.ByteCount() + 1,
+                          name.ByteCount() - block.ByteCount() - 1);
+    }
+
     static ShaderReflectedSignature
     Signature(const typename Traits::SignatureDesc& parameter) noexcept {
         ShaderReflectedSignature element;
@@ -190,7 +220,7 @@ private:
     }
 
     // 멤버 하나와 (구조체면) 그 자식을 더한다.
-    bool AddMember(typename Traits::Type* type, const char* name, uint32 offset, uint32 bytes,
+    bool AddMember(typename Traits::Type* type, StringView name, uint32 offset, uint32 bytes,
                    uint32 parent) noexcept {
         typename Traits::TypeDesc desc = {};
         if (type == nullptr || FAILED(type->GetDesc(&desc))) {
@@ -198,7 +228,7 @@ private:
         }
 
         ShaderReflectedMember member;
-        member.name = name != nullptr ? StringView(name) : StringView();
+        member.name = name;
         member.base = BaseOf(desc.Class, desc.Type);
         member.rows = desc.Rows;
         member.columns = desc.Columns;
@@ -219,7 +249,8 @@ private:
             typename Traits::Type* childType = type->GetMemberTypeByIndex(child);
             typename Traits::TypeDesc childDesc = {};
             if (childType == nullptr || FAILED(childType->GetDesc(&childDesc)) ||
-                !AddMember(childType, type->GetMemberTypeName(child), childDesc.Offset, 0, index)) {
+                !AddMember(childType, Name(type->GetMemberTypeName(child)), childDesc.Offset, 0,
+                           index)) {
                 return false;
             }
         }
@@ -229,12 +260,19 @@ private:
 
     ShaderToolOutcome AddResource(typename Traits::Reflection& reflection,
                                   const typename Traits::BindDesc& bind) noexcept {
-        const StringView name = bind.Name != nullptr ? StringView(bind.Name) : StringView();
+        StringView name = Name(bind.Name);
         ShaderReflectedResource resource;
         if (!KindOf(bind.Type, resource.kind)) {
             return Compile(name, "resource type is not supported (append, consume, counter and "
                                  "texture buffers are rejected)");
         }
+
+        if (crossNames_ && resource.kind == ShaderResourceKind::ConstantBuffer) {
+            name = StripPrefix(name, CrossTypePrefix);
+        }
+
+        // 멤버 이름 앞의 <블록 이름>_(SPIRV-Cross)을 떼는 기준이다(루트 상수 접미를 떼기 전 이름).
+        const StringView block = name;
 
         resource.name = name;
         resource.slot = bind.BindPoint;
@@ -253,7 +291,9 @@ private:
             }
         }
 
-        if (space != 0 && !resource.rootConstants) {
+        resource.debugBuffer = kind_ == D3DCodeKind::Dxil && space == D3D12DebugBufferSpace &&
+                               resource.kind == ShaderResourceKind::StorageBufferReadWrite;
+        if (space != 0 && !resource.rootConstants && !resource.debugBuffer) {
             return Compile(name, "register spaces other than 0 are reserved for the engine");
         }
 
@@ -275,8 +315,9 @@ private:
                 auto* value = buffer->GetVariableByIndex(variable);
                 typename Traits::VariableDesc variableDesc = {};
                 if (value == nullptr || FAILED(value->GetDesc(&variableDesc)) ||
-                    !AddMember(value->GetType(), variableDesc.Name, variableDesc.StartOffset,
-                               variableDesc.Size, NoShaderReflectedParent)) {
+                    !AddMember(value->GetType(), MemberName(block, Name(variableDesc.Name)),
+                               variableDesc.StartOffset, variableDesc.Size,
+                               NoShaderReflectedParent)) {
                     return Tool("constant buffer member reflection failed");
                 }
             }
@@ -292,6 +333,7 @@ private:
     }
 
     D3DCodeKind kind_;
+    bool crossNames_ = false;
     ShaderReflection& out_;
     String& diagnostics_;
 };
@@ -317,13 +359,24 @@ ShaderToolOutcome Normalize(const ShaderFormatDefinition& format,
 
 ShaderToolOutcome BuildD3DBindingLayout(D3DCodeKind kind, const ShaderToolSet& tools,
                                         const ShaderFormatDefinition& format, uint32 stage,
+                                        uint32 requiredFeatures,
                                         Span<const ShaderParameterLayout> layouts,
+                                        Span<const ShaderSamplerUse> uses, bool hasUses,
                                         Span<const uint8> code, Array<uint8>& out,
                                         String& diagnostics) noexcept {
     using namespace d3d_reflection_detail;
     out.Clear();
     ShaderReflection reflection(out.GetAllocator());
     reflection.stage = stage;
+    reflection.requiredFeatures = requiredFeatures;
+    reflection.signatureOrdered = true;
+    if (hasUses) {
+        reflection.hasSamplerUses = true;
+        if (!reflection.samplerUses.TryAppend(uses)) {
+            (void)diagnostics.TryAppend("out of memory");
+            return ShaderToolOutcome::ToolError;
+        }
+    }
     if (kind == D3DCodeKind::Dxil) {
         const auto create = reinterpret_cast<DxcCreateInstanceProc>(
             tools.Dxc().address[DxcFunctions::CreateInstance]);
@@ -340,7 +393,7 @@ ShaderToolOutcome BuildD3DBindingLayout(D3DCodeKind kind, const ShaderToolSet& t
             return ShaderToolOutcome::ToolError;
         }
 
-        Walker<D3D12Traits> walker(kind, reflection, diagnostics);
+        Walker<D3D12Traits> walker(kind, false, reflection, diagnostics);
         const ShaderToolOutcome walked = walker.Run(*shader.Get());
         return walked == ShaderToolOutcome::Success
                    ? Normalize(format, layouts, reflection, out, diagnostics)
@@ -356,7 +409,7 @@ ShaderToolOutcome BuildD3DBindingLayout(D3DCodeKind kind, const ShaderToolSet& t
         return ShaderToolOutcome::ToolError;
     }
 
-    Walker<D3D11Traits> walker(kind, reflection, diagnostics);
+    Walker<D3D11Traits> walker(kind, hasUses, reflection, diagnostics);
     const ShaderToolOutcome walked = walker.Run(*shader.Get());
     return walked == ShaderToolOutcome::Success
                ? Normalize(format, layouts, reflection, out, diagnostics)

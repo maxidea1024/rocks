@@ -54,6 +54,12 @@ ROCKS_SHADERCOMPILERCOMMON_API void SucceedShaderJob(ShaderWorkerJobResult& resu
                                                      Array<uint8>& code,
                                                      Array<uint8>& bindingLayout) noexcept;
 
+// 위와 같되 glesHeader가 비지 않으면 값 2(GlesCopyTable)도 둔다(OpenGL ES 처리기 — 16.1절 SSD42).
+ROCKS_SHADERCOMPILERCOMMON_API void SucceedShaderJob(ShaderWorkerJobResult& result,
+                                                     Array<uint8>& code,
+                                                     Array<uint8>& bindingLayout,
+                                                     Array<uint8>& glesHeader) noexcept;
+
 class ShaderFormatBackend {
 public:
     virtual ~ShaderFormatBackend() = default;

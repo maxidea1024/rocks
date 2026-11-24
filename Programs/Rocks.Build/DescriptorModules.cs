@@ -234,15 +234,15 @@ public sealed class DescriptorModuleSet
 
         foreach (NativeModuleInput rule in included)
         {
-            // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절, BuildTargets BD25).
+            // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader 3.8절, BuildTargets BD25).
             foreach (string dependency in rule.AllDependencies.Concat(rule.DynamicModules))
             {
                 RequireIncluded(dependency, $"module '{rule.Name}'");
             }
         }
 
-        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
-        // 플러그인 모듈에는 플러그인 이름과 플러그인 루트 기준 폴더를 넣는다(Docs/Design/ModuleLoader.ko.md 3.15절 — Modular 공유 라이브러리 폴더).
+        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
+        // 플러그인 모듈에는 플러그인 이름과 플러그인 루트 기준 폴더를 넣는다(Docs/Design/ModuleLoader 3.15절 — Modular 공유 라이브러리 폴더).
         // 모듈 type도 기술자 값이다(Docs/Design/BuildTargets 3.3절 — 게임 모듈 규칙은 type 칸을 쓰지 않는다).
         return included.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module)
             ? rule with { Type = module.Descriptor.Type, LoadingPhase = module.Descriptor.LoadingPhase, Plugin = module.FromPlugin ? PluginOf(module) : null }

@@ -109,6 +109,10 @@ struct ShaderCompileJob {
     // 손으로 쓴 파라미터 레이아웃 표 목록이다(7.2절 5항, SSD31 — 정적 수명). 관리자가 정규 byte를
     // 워커에 보내고 그 SHA-256(ShaderParameterLayoutSignature)이 키 8행이다. 비면 8행은 none이다.
     Span<const ShaderParameterLayout> parameterLayouts{};
+    // 셰이더 타입 요구 기능(ShaderFeatureBits — 워커의 기능 판정과 키 4행, 16.1절 SSD35)이다.
+    uint32 requiredFeatures = 0;
+    // 개발 전용 퍼뮤테이션인가(PS면 SC10이 ROCKS_DEBUG_BUFFER를 넣는다 — 16.1절 SSD34).
+    bool developmentOnly = false;
     // 시험 hook(config.testHooks일 때만 — Compile 밖 값이면 그 job은 hook으로 워커에 간다).
     ShaderWorkerJobKind testHook = ShaderWorkerJobKind::Compile;
 };

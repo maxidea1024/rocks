@@ -95,7 +95,7 @@ internal static partial class ModuleMetaTests
             string publicBody = compactSource[..privateDefinition];
             string privateBody = compactSource[privateDefinition..ownDefinition];
             // 모듈 로더가 부르는 자기 타입 함수는 의존 모듈·모듈 키 없이 이 모듈 타입만 public 다음 private 순서로 등록한다
-            // (Docs/Design/ModuleLoader.ko.md 3.10절). 두 모듈 생성 헤더가 같은 선언을 둔다.
+            // (Docs/Design/ModuleLoader 3.10절). 두 모듈 생성 헤더가 같은 선언을 둔다.
             string ownBody = compactSource[ownDefinition..];
             int ownValue = ownBody.IndexOf("GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
             int ownLeaf = ownBody.IndexOf("GeneratedType<::probe::Leaf>::Schema()", StringComparison.Ordinal);

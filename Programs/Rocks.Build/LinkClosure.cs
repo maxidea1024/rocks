@@ -1,7 +1,7 @@
 namespace Rocks.Build;
 
 /// <summary>
-/// 실행 파일이 링크하는 모듈 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절, Monolithic). 링크 의존(두 의존 목록 —
+/// 실행 파일이 링크하는 모듈 집합이다(Docs/Design/ModuleLoader 3.8절, Monolithic). 링크 의존(두 의존 목록 —
 /// <see cref="NativeModuleInput.AllDependencies"/>) 폐포에, 그 폐포의 모듈(과 이어서 더해진 모듈)이 <see cref="NativeModuleInput.DynamicModules"/>로 둔 모듈과 그 링크 폐포를 더한다.
 /// 실행 파일은 링크 폐포 뒤에 켠 플러그인 모듈(<see cref="NativeModuleInput.PluginModules"/>)과 그 링크 폐포를 링크한다. 동적 관계는 순환 검사의 참조 사슬이 아니므로(UE와 같다) 이미 닿은 모듈로 돌아가는 관계는 건너뛴다. 이름을 모르는 모듈은 건너뛴다
 /// (그 오류는 입력 검사·액션 그래프가 알린다).
@@ -17,7 +17,7 @@ public static class LinkClosure
     /// <summary>
     /// <paramref name="withDynamic"/>이면 <see cref="Of(string, IReadOnlyDictionary{string, NativeModuleInput})"/>와 같고, 아니면 링크 의존
     /// 폐포(앞부분)만이다(라이브러리 모듈의 도달 집합). <paramref name="withPlugins"/>가 거짓이면 켠 플러그인 모듈 쪽(<see
-    /// cref="NativeModuleInput.PluginModules"/>)도 빼고 링크 의존 폐포만이다(Modular 호스트 — Docs/Design/ModuleLoader.ko.md 3.15절:
+    /// cref="NativeModuleInput.PluginModules"/>)도 빼고 링크 의존 폐포만이다(Modular 호스트 — Docs/Design/ModuleLoader 3.15절:
     /// 로더가 manifest로 싣는다). 동적 모듈 쪽은 플러그인 쪽 뒤에 오므로 <paramref name="withPlugins"/>가 거짓이면 함께 빠진다.
     /// </summary>
     public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, bool withDynamic, bool withPlugins = true)
@@ -28,7 +28,7 @@ public static class LinkClosure
 
     /// <summary>
     /// <see cref="Of"/>와 같은 목록과, 그 가운데 링크 의존으로는 닿지 않고 동적 관계로만 닿는 모듈 이름 집합(요청 시 적재 — 모듈 표 행의
-    /// 표지, Docs/Design/ModuleLoader.ko.md 3.8절)을 돌려준다.
+    /// 표지, Docs/Design/ModuleLoader 3.8절)을 돌려준다.
     /// </summary>
     public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, out HashSet<string> onRequest)
     {

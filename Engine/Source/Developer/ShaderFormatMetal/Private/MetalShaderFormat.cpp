@@ -1,7 +1,10 @@
 #include <ShaderFormatMetal/MetalShaderFormat.h>
 
 #include <Platform/File.h>
+#include <Platform/Memory.h>
 #include <Platform/Process.h>
+#include <ShaderCompilerCommon/ShaderSpirvBindings.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
 #include <ShaderToolLoader/MetalToolchain.h>
 #include <ShaderToolLoader/ShaderToolCalls.h>
 #include <stdio.h>
@@ -166,8 +169,20 @@ void MetalShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     request.hlsl2021 = job.options.hlsl2021;
     request.optimization = job.options.optimization;
     request.dxPositionW = format.compiler.dxPositionW;
+    request.reflect = true;
+    ShaderParameterLayoutSet layouts(allocator);
+    if (!DecodeShaderJobLayouts(job, layouts, result)) {
+        return;
+    }
+
     Array<uint8> spirv(allocator);
     String diagnostics(allocator);
+    if (!CheckStorageImageFormats(job.source.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "shader binding rules",
+                      diagnostics.View());
+        return;
+    }
+
     const ShaderToolOutcome compiled =
         CompileHlslToSpirv(*context.tools, request, spirv, diagnostics);
     if (compiled != ShaderToolOutcome::Success) {
@@ -175,9 +190,88 @@ void MetalShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
+    // 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location, set·binding)·검증·사용 쌍·값 1과 Metal 인덱스(16.1절
+    // SSD36·SSD39)다.
+    Array<uint32> raw(allocator);
+    Array<uint32> rewritten(allocator);
+    Array<uint8> rewrittenBytes(allocator);
+    if (spirv.Size() % sizeof(uint32) != 0 || !raw.TryResize(spirv.Size() / sizeof(uint32))) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "DXC produced a malformed SPIR-V module");
+        return;
+    }
+
+    platform::MemoryCopy(raw.Data(), spirv.Data(), spirv.Size());
+    SpirvRewriteOptions rewrite;
+    rewrite.stage = job.stage;
+    rewrite.stageLocations = true;
+    if (!RewriteSpirv(raw.View(), rewrite, rewritten, diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "SPIR-V binding rules",
+                      diagnostics.View());
+        return;
+    }
+
+    if (!rewrittenBytes.TryResize(rewritten.Size() * sizeof(uint32))) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    platform::MemoryCopy(rewrittenBytes.Data(), rewritten.Data(), rewrittenBytes.Size());
+    if (!ValidateSpirv(context.tools->SpirvTools(), rewrittenBytes.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "spirv-val rejected the rewritten SPIR-V", diagnostics.View());
+        return;
+    }
+
+    Array<SpirvSamplerUse> pairs(allocator);
+    const ShaderToolOutcome queried = QuerySpirvSamplerUses(
+        context.tools->SpirvCross(), rewrittenBytes.View(), pairs, diagnostics);
+    if (queried != ShaderToolOutcome::Success) {
+        FailShaderJob(result, MetalJobStatus(queried), "SPIR-V sampler use query",
+                      diagnostics.View());
+        return;
+    }
+
+    Array<ShaderSamplerUse> uses(allocator);
+    for (const SpirvSamplerUse& pair : pairs) {
+        if (!uses.TryPushBack(ShaderSamplerUse{pair.texture.View(), pair.sampler.View()})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
+    SpirvBindingRequest bindingRequest;
+    bindingRequest.format = &format;
+    bindingRequest.stage = job.stage;
+    bindingRequest.requiredFeatures = job.requiredFeatures;
+    bindingRequest.layouts = layouts.View();
+    bindingRequest.raw = raw.View();
+    bindingRequest.rewritten = rewritten.View();
+    bindingRequest.uses = uses.View();
+    bindingRequest.hasUses = true;
+    SpirvBindingResult bound(allocator);
+    const ShaderWorkerJobStatus normalized =
+        BuildSpirvBindingLayout(bindingRequest, bound, diagnostics);
+    if (normalized != ShaderWorkerJobStatus::Success) {
+        FailShaderJob(result, normalized, "shader binding rules", diagnostics.View());
+        return;
+    }
+
+    Array<SpirvMslBinding> mslBindings(allocator);
+    for (const MetalResourceBinding& entry : bound.metalBindings) {
+        if (!mslBindings.TryPushBack(SpirvMslBinding{entry.set, entry.binding, entry.buffer,
+                                                     entry.texture, entry.sampler})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
     SpirvCrossRequest cross;
-    cross.spirv = spirv.View();
+    cross.spirv = rewrittenBytes.View();
     cross.target = SpirvCrossTarget::Msl;
+    cross.stage = job.stage;
+    cross.mslBindings = mslBindings.View();
+    cross.mslBufferSizeIndex = bound.metalBufferSizeIndex;
     cross.mslMajor = format.compiler.mslVersion.major;
     cross.mslMinor = format.compiler.mslVersion.minor;
     String msl(allocator);
@@ -225,17 +319,7 @@ void MetalShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
-    result.status = ShaderWorkerJobStatus::Success;
-    result.diagnostics.Clear();
-    result.values.Clear();
-    auto value = result.values.TryEmplaceBack(allocator);
-    if (!value) {
-        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
-        return;
-    }
-
-    value.Value()->id = 0;
-    value.Value()->bytes = Move(code);
+    SucceedShaderJob(result, code, bound.bindingLayout);
 }
 
 } // namespace rocks::shader

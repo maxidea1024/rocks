@@ -66,7 +66,7 @@ internal static class CppEmitter
         $"::rocks::Result<void> {RegistrationFunction(privateTypes)}(::rocks::ModuleRegistration& registration, " +
         $"const ::rocks::ModuleLease& module{(declaration ? " = {}" : "")}) noexcept";
 
-    // 이 모듈 자신의 타입만(public 다음 private, 의존 모듈 없이) 등록하는 함수의 서명이다(Docs/Design/ModuleLoader.ko.md 3.10절). 모듈
+    // 이 모듈 자신의 타입만(public 다음 private, 의존 모듈 없이) 등록하는 함수의 서명이다(Docs/Design/ModuleLoader 3.10절). 모듈
     // 로더가 진입 기술의 registerTypes로 부르며 lease는 로더가 발급한 이 모듈의 것이다. 진입점 매크로(ROCKS_IMPLEMENT_MODULE,
     // ROCKS_MODULE_TYPES=1)가 같은 서명으로 스스로 선언하므로 기본 인자를 두지 않는다.
     private static string OwnTypesSignature() =>

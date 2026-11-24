@@ -34,10 +34,10 @@ public abstract class TestsModule : ModuleRules
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
     private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools"];
 
-    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine) and the MeshTools MikkTSpace reference
-    // comparison test. Headers enter only through this executable's Private includes (adapter approach) and must produce zero warnings under the engine
-    // warning rules (Docs/Design/ShaderSystem section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace"];
+    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
+    // comparison test and the font library tests (Docs/Design/Font section 8.5, FT1). Headers enter only through this executable's Private includes
+    // (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8).
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Icu"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
@@ -151,7 +151,7 @@ public abstract class TestsModule : ModuleRules
     protected abstract string ExecutableName { get; }
 
     // Whether the runner also runs the PluginTestModules tests (and links those plugin modules): both engine layer runners do. The Modular one
-    // loads the plugin modules from their plugin binaries folders (Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
+    // loads the plugin modules from their plugin binaries folders (Docs/Design/ModuleLoader section 3.15 ML5a).
     private bool PluginTests => Layer == TestLayer.Engine;
 
     public override NativeModuleInput Configure(BuildContext context)
@@ -229,7 +229,7 @@ public abstract class TestsModule : ModuleRules
             PrivateDefines = ["ROCKS_TESTING=1"],
             // Third-party libraries the engine runner's adapter tests include directly (Docs/Design/BuildTargets section 3.5 BS3a).
             PrivateDependencies = Layer == TestLayer.Engine ? EngineThirdPartyHeaders : [],
-            // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader.ko.md section 3.8): it is linked into this
+            // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader section 3.8): it is linked into this
             // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.
             PublicDependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
             DynamicModules = ["DynamicModuleTestFixture"],
@@ -260,7 +260,7 @@ public sealed class EngineTests : TestsModule
 }
 
 // Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources, engine plugin tests included (Docs/Design/BuildTargets
-// section 3.8 BS8e, Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
+// section 3.8 BS8e, Docs/Design/ModuleLoader section 3.15 ML5a).
 public sealed class EngineModularTests : TestsModule
 {
     protected override TestLayer Layer => TestLayer.Engine;

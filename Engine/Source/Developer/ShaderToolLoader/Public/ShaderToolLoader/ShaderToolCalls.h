@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Text/String.h>
@@ -80,6 +81,35 @@ enum class SpirvCrossTarget : uint8 {
     Msl
 };
 
+// MSL 자원 배정 하나다(SPIRV-Cross spvc_msl_resource_binding_2 — set이 SpirvMslPushConstantSet이면
+// push constant, 배정 없는 공간은 SpirvMslNoIndex).
+struct SpirvMslBinding {
+    uint32 set = 0;
+    uint32 binding = 0;
+    uint32 buffer = 0;
+    uint32 texture = 0;
+    uint32 sampler = 0;
+};
+
+inline constexpr uint32 SpirvMslNoIndex = NumericLimits<uint32>::Max();
+inline constexpr uint32 SpirvMslPushConstantSet = NumericLimits<uint32>::Max();
+
+// ESSL 자원 binding 하나다(SPIR-V (set, binding) → GLES binding — storage block·image·typed
+// buffer).
+struct SpirvGlslBinding {
+    uint32 set = 0;
+    uint32 binding = 0;
+    uint32 glBinding = 0;
+};
+
+// ESSL 결합 sampler 하나의 이름과 텍스처 유닛이다((텍스처, 샘플러) 변수 이름으로 찾는다).
+struct SpirvGlslCombined {
+    StringView texture;
+    StringView sampler;
+    StringView name;
+    uint32 unit = 0;
+};
+
 struct SpirvCrossRequest {
     Span<const uint8> spirv;
     SpirvCrossTarget target = SpirvCrossTarget::Essl;
@@ -91,6 +121,22 @@ struct SpirvCrossRequest {
     // MSL 버전(major.minor)이다.
     uint32 mslMajor = 0;
     uint32 mslMinor = 0;
+    // ShaderStageBits 한 비트(자원 배정의 실행 모델)다. HLSL 배정·MSL 배정에만 쓴다.
+    uint32 stage = 0;
+    // HLSL 5.0: register를 종류의 공간(b·t·u·s)마다 0부터 (set, binding) 순으로 정하고 이름이
+    // RootConstants로 끝나는 cbuffer는 b13, 정점 입력 location n은 시맨틱 ATTRIBUTEn이다(SPIR-V를
+    // 먼저 RewriteSpirv로 고쳐 써 location = n이어야 한다 — D3D11 대체 경로, ShaderSystem 16.1절
+    // SSD38).
+    bool hlslAssignRegisters = false;
+    // MSL: 자원 인덱스 배정(SSD39)과 구조화 버퍼 크기 side table buffer 인덱스(없으면
+    // SpirvMslNoIndex)다.
+    Span<const SpirvMslBinding> mslBindings;
+    uint32 mslBufferSizeIndex = SpirvMslNoIndex;
+    // ESSL: 상수 버퍼를 plain uniform 구조체로 낸다(GLES 에뮬레이션 재작성의 입력 — 16.1절 SSD42).
+    bool glslPlainUniforms = false;
+    // ESSL: 자원 binding과 결합 sampler 이름·유닛(SSD42)이다.
+    Span<const SpirvGlslBinding> glslBindings;
+    Span<const SpirvGlslCombined> glslCombined;
 };
 
 // SPIRV-Cross C API로 spirv를 target 원문으로 바꾼다. ESSL은 결합 sampler를 만들고 기본 float
@@ -100,6 +146,23 @@ ROCKS_SHADERTOOLLOADER_API ShaderToolOutcome CrossCompileSpirv(const SpirvCrossF
                                                                const SpirvCrossRequest& request,
                                                                String& text,
                                                                String& diagnostics) noexcept;
+
+// (텍스처, 샘플러) 사용 쌍 하나다(이름은 SPIR-V OpName — 변수 이름).
+struct SpirvSamplerUse {
+    explicit SpirvSamplerUse(Allocator& allocator) noexcept
+        : texture(allocator), sampler(allocator) {
+    }
+
+    String texture;
+    String sampler;
+};
+
+// SPIRV-Cross build_combined_image_samplers로 spirv의 (텍스처, 샘플러) 사용 쌍을 out에
+// 둔다(ShaderSystem 16.1절 SSD36 — 같은 쌍은 한 번). 실패는 ToolError(진단)다.
+ROCKS_SHADERTOOLLOADER_API ShaderToolOutcome QuerySpirvSamplerUses(const SpirvCrossFunctions& cross,
+                                                                   Span<const uint8> spirv,
+                                                                   Array<SpirvSamplerUse>& out,
+                                                                   String& diagnostics) noexcept;
 
 // FXC(D3DCompile) 입력이다.
 struct FxcCompileRequest {

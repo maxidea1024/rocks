@@ -3,7 +3,7 @@
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/LocalPlayer.generated.h>
 
-// Gameplay 모듈의 진입점이다(Docs/Design/ModuleLoader.ko.md 3.2절). 시작할 일이 없다 — 리플렉션
+// Gameplay 모듈의 진입점이다(Docs/Design/ModuleLoader 3.2절). 시작할 일이 없다 — 리플렉션
 // 타입은 엔진의 모듈 타입 등록기가 등록한다.
 ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, Gameplay)
 

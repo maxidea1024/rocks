@@ -19,7 +19,7 @@
 // 이 헤더는 <Windows.h>를 넣지 않는다. wWinMain은 선언만으로 쓴다(HINSTANCE는 struct HINSTANCE__*).
 //
 // Modular 호스트 모듈(빌드가 ROCKS_MODULE_SHARED_LIBRARY=1로 알린다 —
-// Docs/Design/ModuleLoader.ko.md 3.14절)에서는 플랫폼 진입점을 만들지 않는다. 실행 파일은 빌드가
+// Docs/Design/ModuleLoader 3.14절)에서는 플랫폼 진입점을 만들지 않는다. 실행 파일은 빌드가
 // 만든 진입 TU이고 Launch의 Modular 진입이 이 모듈을 적재해 앱 기술을 찾는다. 그래서 두 매크로는
 // export 함수 RocksApplicationDescription()·RocksWindowedApplicationDescription()(창 — Windows만
 // 따로)을 정의한다. 이름이 다르므로 소스 매크로와 빌드 규칙의 subsystem이 맞지 않으면 Launch가

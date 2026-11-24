@@ -21,6 +21,8 @@ constexpr StringView SharedWrapSamplerName("SharedWrapSampler");
 constexpr StringView SharedClampSamplerName("SharedClampSampler");
 constexpr StringView SharedWrapTextureName("SharedWrap");
 constexpr StringView SharedClampTextureName("SharedClamp");
+// PS 진단 버퍼 이름이다(Platform.rsh, 16.1절 SSD34).
+constexpr StringView DebugBufferName("RocksDebugBuffer");
 
 uint64 AlignUp(uint64 value, uint64 alignment) noexcept {
     return (value + alignment - 1) / alignment * alignment;
@@ -48,6 +50,7 @@ public:
         out_.rootConstantBytes = 0;
         out_.attributeMask = 0;
         out_.renderTargetMask = 0;
+        out_.interStageMask = 0;
         out_.resources.Clear();
         out_.members.Clear();
         if (reflection_.hasGlobals) {
@@ -112,30 +115,53 @@ private:
         Number(element.index);
         if (IsSemantic(element, "SV_RenderTargetArrayIndex") ||
             IsSemantic(element, "SV_ViewportArrayIndex")) {
-            return Fail(" needs the vertexViewportLayerOutput feature, which shader jobs cannot "
-                        "request yet (ShaderSystem 16.1 SSD29, SH2b2)");
+            return Fail(
+                " needs vertexViewportLayerOutput in both the shader type's required features "
+                "and the format's features (ShaderSystem 7.2 item 7, 16.1 SSD35)");
         }
 
         return Fail(" is not allowed (ShaderSystem 7.2 item 7)");
     }
 
     // 단계 사이 변수(TEXCOORDn)와 SV_Position이다. interStage는 TEXCOORD 수다.
+    // VS layer·viewport 출력이 열렸는가(job 요구 기능과 형식 기능 둘 다 — 16.1절 SSD35).
+    bool LayerOutputAllowed() const noexcept {
+        return (reflection_.requiredFeatures & ShaderFeatureVertexViewportLayerOutput) != 0 &&
+               (format_.features & ShaderFeatureVertexViewportLayerOutput) != 0;
+    }
+
     bool CheckInterStage(Span<const ShaderReflectedSignature> elements, StringView where,
                          bool pixelInput, uint32& interStage) noexcept {
         uint32 used = 0;
+        int64 previous = -1;
         for (const ShaderReflectedSignature& element : elements) {
             if (IsSemantic(element, "TEXCOORD")) {
                 if (!CheckIndexed(element, used, where)) {
                     return false;
                 }
 
+                if (reflection_.signatureOrdered && static_cast<int64>(element.index) < previous) {
+                    Text(where);
+                    Text(" TEXCOORD");
+                    Number(element.index);
+                    return Fail(
+                        " is declared after a higher TEXCOORD; declare inter-stage variables "
+                        "in ascending n order (ShaderSystem 7.2 item 7)");
+                }
+
+                previous = element.index;
                 ++interStage;
+            } else if (!pixelInput && LayerOutputAllowed() &&
+                       (IsSemantic(element, "SV_RenderTargetArrayIndex") ||
+                        IsSemantic(element, "SV_ViewportArrayIndex"))) {
+                continue;
             } else if (!IsSemantic(element, "SV_Position") &&
                        !(pixelInput && IsSemantic(element, "SV_IsFrontFace"))) {
                 return RejectSemantic(where, element);
             }
         }
 
+        out_.interStageMask = used;
         return true;
     }
 
@@ -495,6 +521,24 @@ private:
                 return FailNamed("resource", resource.name, "binding slot is out of range");
             }
 
+            if (resource.debugBuffer || resource.name == DebugBufferName) {
+                if (!resource.debugBuffer || resource.name != DebugBufferName ||
+                    resource.kind != ShaderResourceKind::StorageBufferReadWrite) {
+                    return FailNamed("resource", resource.name,
+                                     "the PS diagnostic buffer location and name are reserved "
+                                     "(RocksDebugBuffer, ShaderSystem 7.2 item 12)");
+                }
+
+                if (reflection_.stage != ShaderStagePixel ||
+                    (format_.features & ShaderFeatureDebugPixelUav) == 0) {
+                    return FailNamed("resource", resource.name,
+                                     "the diagnostic buffer is only for pixel shaders of formats "
+                                     "with debugPixelUav");
+                }
+
+                debugBuffer_ = true;
+            }
+
             const bool constantBuffer = resource.kind == ShaderResourceKind::ConstantBuffer;
             if (resource.rootConstants) {
                 if (!constantBuffer || rootSeen_) {
@@ -605,6 +649,59 @@ private:
             }
         }
 
+        return reflection_.hasSamplerUses ? CheckSamplerUses() : true;
+    }
+
+    // SPIR-V 사용 쌍(16.1절 SSD36): 텍스처마다 출처 하나, 예약 이름이 아닌 샘플러는 자기
+    // 텍스처로만.
+    bool CheckSamplerUses() noexcept {
+        for (ShaderBindingResource& texture : pending_) {
+            if (texture.kind != ShaderResourceKind::SampledTexture) {
+                continue;
+            }
+
+            ShaderSamplerSource source = ShaderSamplerSource::None;
+            for (const ShaderSamplerUse& use : reflection_.samplerUses) {
+                if (use.texture != texture.name) {
+                    continue;
+                }
+
+                ShaderSamplerSource used = ShaderSamplerSource::Own;
+                if (use.sampler == SharedWrapSamplerName) {
+                    used = ShaderSamplerSource::SharedWrap;
+                } else if (use.sampler == SharedClampSamplerName) {
+                    used = ShaderSamplerSource::SharedClamp;
+                } else {
+                    const bool own =
+                        use.sampler.ByteCount() ==
+                            texture.name.ByteCount() + SamplerSuffix.ByteCount() &&
+                        use.sampler.StartsWith(texture.name, StringComparison::CaseSensitive) &&
+                        use.sampler.EndsWith(SamplerSuffix, StringComparison::CaseSensitive);
+                    if (!own) {
+                        Text("texture '");
+                        Text(texture.name);
+                        Text("' is sampled with '");
+                        Text(use.sampler);
+                        return Fail("', which is neither its own XSampler nor a shared sampler "
+                                    "(ShaderSystem 7.2 item 9)");
+                    }
+                }
+
+                if (source != ShaderSamplerSource::None && source != used) {
+                    return FailNamed(
+                        "texture", texture.name,
+                        "a texture is sampled with exactly one sampler source (its own "
+                        "sampler, SharedWrapSampler or SharedClampSampler)");
+                }
+
+                source = used;
+            }
+
+            if (source != ShaderSamplerSource::None) {
+                texture.samplerSource = source;
+            }
+        }
+
         return true;
     }
 
@@ -630,6 +727,11 @@ private:
         uint32 d3dUnordered = 0;
         uint32 d3dSampler = 0;
         for (const ShaderBindingResource& binding : pending_) {
+            // PS 진단 버퍼는 형식 상한·UAV 단계 밖의 예약 자원이다(16.1절 SSD34).
+            if (debugBuffer_ && binding.name == DebugBufferName) {
+                continue;
+            }
+
             ++counts[static_cast<uint32>(binding.kind)];
             const uint32 end = static_cast<uint32>(binding.slot) + 1;
             switch (binding.kind) {
@@ -697,6 +799,31 @@ private:
 
         if (renderTargets > limits.renderTargets) {
             return Over("render target count", renderTargets, limits.renderTargets);
+        }
+
+        // 상수 버퍼 에뮬레이션 형식의 단계 vec4 합(4항 모바일 상한, 16.1절 SSD42)이다.
+        const usize stageIndex = reflection_.stage == ShaderStageVertex
+                                     ? 0
+                                     : (reflection_.stage == ShaderStagePixel ? 1 : 2);
+        if (limits.uniformVectors[stageIndex] != NoShaderLimit) {
+            uint64 vectors = out_.rootConstantBytes / SlotBytes;
+            for (const ShaderBindingResource& binding : pending_) {
+                vectors += binding.kind == ShaderResourceKind::ConstantBuffer
+                               ? binding.constantBufferBytes / SlotBytes
+                               : 0;
+            }
+
+            if (vectors > limits.uniformVectors[stageIndex]) {
+                return Over("emulated uniform vector count", vectors,
+                            limits.uniformVectors[stageIndex]);
+            }
+        }
+
+        // ES 3.2의 VS·PS storage block 최소 보장은 0이다(4항 모바일 상한).
+        if (format_.backend == ShaderBackend::OpenGL && reflection_.stage != ShaderStageCompute &&
+            storage > 0) {
+            return Fail("OpenGL ES vertex and pixel shaders cannot use structured or raw buffers "
+                        "(ShaderSystem 7.2 item 4)");
         }
 
         if (interStage_ > limits.interStageVectors) {
@@ -769,6 +896,7 @@ private:
     Array<ShaderBindingMember> members_{out_.resources.GetAllocator()};
     uint32 interStage_ = 0;
     bool rootSeen_ = false;
+    bool debugBuffer_ = false;
 };
 
 } // namespace reflection_rules_detail

@@ -82,4 +82,22 @@ void SucceedShaderJob(ShaderWorkerJobResult& result, Array<uint8>& code,
     layout.Value()->bytes = Move(bindingLayout);
 }
 
+void SucceedShaderJob(ShaderWorkerJobResult& result, Array<uint8>& code,
+                      Array<uint8>& bindingLayout, Array<uint8>& glesHeader) noexcept {
+    SucceedShaderJob(result, code, bindingLayout);
+    if (result.status != ShaderWorkerJobStatus::Success || glesHeader.IsEmpty()) {
+        return;
+    }
+
+    constexpr uint32 GlesCopyTableValue = 2;
+    auto value = result.values.TryEmplaceBack(result.values.GetAllocator());
+    if (!value) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    value.Value()->id = GlesCopyTableValue;
+    value.Value()->bytes = Move(glesHeader);
+}
+
 } // namespace rocks::shader

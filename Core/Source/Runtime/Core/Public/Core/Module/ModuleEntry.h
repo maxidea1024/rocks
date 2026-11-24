@@ -10,7 +10,7 @@
 #include <Core/Result.h>
 #include <Platform/Memory.h>
 
-// 모듈 진입점 계약이다(Docs/Design/ModuleLoader.ko.md 3.1·3.2절, UE IMPLEMENT_MODULE·
+// 모듈 진입점 계약이다(Docs/Design/ModuleLoader 3.1·3.2절, UE IMPLEMENT_MODULE·
 // FModuleInitializerEntry 대응). 진입점은 전역 생성자 없이 상수 기술(ModuleEntry)과 그것을 돌려주는
 // 함수(RocksModuleEntry_<Name>)다. 빌드는 실행 파일마다 모듈 표(ModuleTableRow 배열)를 만들어 이
 // 함수를 모두 직접 참조하므로, 매크로가 빠진 모듈은 링크 오류가 난다. 로더(ModuleLoader 모듈)는 이
@@ -32,7 +32,7 @@ class ConfigContext;
 } // namespace config
 
 // 모듈을 자동으로 시작하는 시점이다(UE ELoadingPhase의 일부, 기술자 loadingPhase와 같은 값·순서 —
-// Docs/Design/ModuleLoader.ko.md 3.3·3.11절). 빌드가 모듈 표 행에 싣는다. 기술자
+// Docs/Design/ModuleLoader 3.3·3.11절). 빌드가 모듈 표 행에 싣는다. 기술자
 // 모듈(게임·플러그인)은 기술자의 값, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 로더의
 // StartPhase가 앞 단계부터 차례로 돈다. 값 순서가 단계 순서다.
 enum class LoadingPhase : uint8 {
@@ -75,7 +75,7 @@ constexpr const char* LoadingPhaseName(LoadingPhase phase) noexcept {
 
 // ModuleEntry 구조체의 ABI 버전이다. 칸을 바꾸면 올린다. 로더는 다른 버전의 진입 기술을 거부한다.
 // 2: unregisterTypes를 뺐다(모듈별 ModuleRegistration이 되돌린다 —
-// Docs/Design/ModuleLoader.ko.md 3.10절).
+// Docs/Design/ModuleLoader 3.10절).
 inline constexpr uint32 ModuleEntryVersion = 2;
 
 // 모듈 하나의 상수 진입 기술이다. ROCKS_IMPLEMENT_MODULE이 모듈 cpp에 상수로 정의한다(정적 수명,
@@ -119,7 +119,7 @@ struct ModuleTableRow {
     usize dependencyCount = 0;
     LoadingPhase phase = LoadingPhase::Default;
     // 요청 시 적재 행이다(실행 파일의 링크 의존으로는 닿지 않고 DynamicModules 관계로만 표에 든
-    // 모듈 — Docs/Design/ModuleLoader.ko.md 3.8절). 단계 실행(StartPhase)이 건너뛰고 코드의
+    // 모듈 — Docs/Design/ModuleLoader 3.8절). 단계 실행(StartPhase)이 건너뛰고 코드의
     // Load(이름)으로만 시작한다(UE LoadingPhase None과 같다).
     bool onRequest = false;
 };
@@ -131,7 +131,7 @@ using ModuleTable = Span<const ModuleTableRow>;
 // 이 실행 파일의 모듈 표다. 빌드가 실행 파일마다 만드는 생성 TU(<실행 파일>.ModuleTable.cpp)가
 // 정의한다. 로더를 만드는 쪽(Launch·시험 runner)이 ModuleLoader::TryCreate에 넘긴다. Modular에는
 // 없다 — 모듈 표는 manifest이고 Launch의 Modular 진입이 로더를 만든다
-// (Docs/Design/ModuleLoader.ko.md 3.14절). 그래서 Modular에서 부르면 컴파일 오류다.
+// (Docs/Design/ModuleLoader 3.14절). 그래서 Modular에서 부르면 컴파일 오류다.
 ModuleTable GeneratedModuleTable() noexcept;
 #endif
 
@@ -165,7 +165,7 @@ struct ModuleSettingsNameProbe : Class, ModuleSettingsNameFallback {};
 // Class(와 그 기반)에 RegisterSettings라는 이름이 있는지다. 접근 권한·오버로드·정적 여부와
 // 무관하다: 이름 조회가 접근 검사보다 먼저이므로 private이거나 오버로드여도 탐침의 조회가
 // 모호해진다(requires 식이 거짓). final 클래스는 탐침이 상속할 수 없으므로 public 이름만 본다(한계
-// — Docs/Design/ModuleLoader.ko.md 3.1절).
+// — Docs/Design/ModuleLoader 3.1절).
 template <class Class>
 consteval bool DeclaresRegisterSettings() noexcept {
     if constexpr (IsFinalV<Class>) {
@@ -251,7 +251,7 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 
 // 빌드가 진입점 모듈의 소스마다 정의하는 값이다(ROCKS_MODULE_TYPES=1이면 그 모듈에 리플렉션
 // 메타데이터가 있고, 메타 컴파일러가 낸 모듈 생성 소스 <Name>.module.generated.cpp가
-// RegisterModuleOwnTypes를 정의한다 — Docs/Design/ModuleLoader.ko.md 3.10절). 빌드 밖 컴파일은
+// RegisterModuleOwnTypes를 정의한다 — Docs/Design/ModuleLoader 3.10절). 빌드 밖 컴파일은
 // 0이다.
 #ifndef ROCKS_MODULE_TYPES
 #define ROCKS_MODULE_TYPES 0
@@ -280,7 +280,7 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 
 // 공유 라이브러리마다 하나뿐인 export 진입점(ROCKS_MODULE_SHARED_LIBRARY=1)이나 아무것도
 // 아님(0)으로 펼쳐진다. 모듈 로더가 OS로 적재한 라이브러리에서 이 이름으로 진입 기술을 찾는다
-// (Docs/Design/ModuleLoader.ko.md 3.2절, UE GetDllExport("InitializeModule")와 같은 역할). 같은
+// (Docs/Design/ModuleLoader 3.2절, UE GetDllExport("InitializeModule")와 같은 역할). 같은
 // 자리에서 export하지 않는 모듈별 C 기호 RocksModuleEntryOf_<Name>도 정의하고 빌드가 링크에 그
 // 기호를 강제 참조로 넣는다 — 매크로가 빠진 모듈은 링크 오류다(의존 모듈의 import 라이브러리도
 // RocksModuleEntry를 export하므로 그 이름으로는 빠짐을 잡지 못한다).

@@ -35,7 +35,7 @@ namespace rocks::shader {
 
 // 메시지 형식 버전이다(필드·의미를 바꾸면 올린다 — 다른 버전의 워커는 BadMessageVersion으로
 // 끝난다).
-inline constexpr uint32 ShaderWorkerMessageVersion = 2;
+inline constexpr uint32 ShaderWorkerMessageVersion = 3;
 // 파일 앞 magic(4 byte)과 버전(u32)의 크기다.
 inline constexpr usize ShaderWorkerMagicBytes = 4;
 inline constexpr usize ShaderWorkerPrefixBytes = ShaderWorkerMagicBytes + sizeof(uint32);
@@ -152,6 +152,8 @@ struct ShaderWorkerJob {
     String formatId;
     // ShaderStageBits 한 비트(SC8).
     uint32 stage = 0;
+    // 셰이더 타입 요구 기능(ShaderFeatureBits — 16.1절 SSD35, 메시지 버전 3)이다.
+    uint32 requiredFeatures = 0;
     String entry;
     // 전처리된 원문(가상 경로 #line).
     String source;

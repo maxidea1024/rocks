@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-23, 개정 14(8.2절: 정적 소멸 없는 종료는 Windows `TerminateProcess` — `platform::ExitProcessWithoutTeardown`, [빌드 타깃](BuildTargets/README.ko.md) BS8d6). 개정 13(20절: 엔진 종료 게이트 재시도 — [오디오 시스템](AudioSystem.ko.md) AD23). 개정 12(7.4·8.1절: Modular 진입 — 진입 스텁이 Launch의 `RocksLaunchModularApplication`을 부르고, Launch가 시동 크래시 수집 아래에서 manifest 로더를 만들어 호스트 모듈의 앱 기술로 이 흐름을 돈다, [모듈 로더](ModuleLoader.ko.md) 3.14절 ML4b). 개정 11(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 10(7.4·8.1·8.2절: 모듈 로더 — Launch가 프로세스 모듈 로더를 소유하는 "Launch.Modules" 단계와 `ApplicationContext::Modules()`, [모듈 로더](ModuleLoader.ko.md) ML1). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-23, 개정 14(8.2절: 정적 소멸 없는 종료는 Windows `TerminateProcess` — `platform::ExitProcessWithoutTeardown`, [빌드 타깃](BuildTargets/README.ko.md) BS8d6). 개정 13(20절: 엔진 종료 게이트 재시도 — [오디오 시스템](AudioSystem.ko.md) AD23). 개정 12(7.4·8.1절: Modular 진입 — 진입 스텁이 Launch의 `RocksLaunchModularApplication`을 부르고, Launch가 시동 크래시 수집 아래에서 manifest 로더를 만들어 호스트 모듈의 앱 기술로 이 흐름을 돈다, [모듈 로더](ModuleLoader/03-Design/03.14-ML4bExecutableLink.ko.md) 3.14절 ML4b). 개정 11(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 10(7.4·8.1·8.2절: 모듈 로더 — Launch가 프로세스 모듈 로더를 소유하는 "Launch.Modules" 단계와 `ApplicationContext::Modules()`, [모듈 로더](ModuleLoader/README.ko.md) ML1). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -14,7 +14,7 @@
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(크래시 수집은 사전 확보 저장소·제한 시간·불완전 표시), 종료 코드 계약(2479행).
 - [플랫폼 계층](PlatformLayer.ko.md): OS 경계와 자식 프로세스.
 - [동기화](Synchronization.ko.md): 설계만 있다. 크래시 경로는 그 잠금을 쓰지 않는다(OS 이벤트·원자 변수만 쓴다).
-- [모듈 로더](ModuleLoader.ko.md) 개정 2(ML0 병합 `77cb1817`): 모든 C++ 모듈·실행 파일의 모듈 진입점. Launch 통합은 그 문서의 ML1이다(21절).
+- [모듈 로더](ModuleLoader/README.ko.md) 개정 2(ML0 병합 `77cb1817`): 모든 C++ 모듈·실행 파일의 모듈 진입점. Launch 통합은 그 문서의 ML1이다(21절).
 - [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)(GS1 병합 `493f9a0d`): 모듈 생성 헤더는 등록 함수 선언만 담는다. 이 구현의 새 소스는 모듈 생성 헤더를 include하지 않는다.
 
 UE 근거는 UE 5.8.4(로컬 클론 `C:\github\UnrealEngine`, `Engine/Source/` 기준)다. 레거시·deprecated 경로는 보지 않았다. 아래 약자를 쓴다.
@@ -567,7 +567,7 @@ bool IsTerminationRequested() noexcept;
   - 링크가 `/SUBSYSTEM:CONSOLE` 또는 `/SUBSYSTEM:WINDOWS`를 고른다.
   - 진입점 매크로와 맞지 않으면 링크 오류(진입 기호 없음)로 드러난다.
   - 기존 도구는 모두 Console로 남는다(요구 4절).
-- **모듈 로더(개정 10 — [모듈 로더](ModuleLoader.ko.md) 3.11절 ML1).** Launch가 프로세스의 모듈 로더를 소유한다(UE `FModuleManager`의 자리, 전역 접근자 없음 — MD4). `ApplicationContext::Modules()`가 그 로더이고 본문 수명 동안 유효하다. 범용 할당자로 이 실행 파일의 모듈 표(`GeneratedModuleTable()`)에서 만들고 부트 모듈(`EarliestPossible`)을 시작한다. 엔진 호스트는 `PostConfigInit`과 호스트 묶음 종료를, `Engine`은 엔진 단계를 이 로더로 돈다. Launch 모듈은 `ModuleLoader`에 의존한다.
+- **모듈 로더(개정 10 — [모듈 로더](ModuleLoader/03-Design/03.11-ML1Details.ko.md) 3.11절 ML1).** Launch가 프로세스의 모듈 로더를 소유한다(UE `FModuleManager`의 자리, 전역 접근자 없음 — MD4). `ApplicationContext::Modules()`가 그 로더이고 본문 수명 동안 유효하다. 범용 할당자로 이 실행 파일의 모듈 표(`GeneratedModuleTable()`)에서 만들고 부트 모듈(`EarliestPossible`)을 시작한다. 엔진 호스트는 `PostConfigInit`과 호스트 묶음 종료를, `Engine`은 엔진 단계를 이 로더로 돈다. Launch 모듈은 `ModuleLoader`에 의존한다.
 - **본문 서명이 `ApplicationContext&` 하나인 이유.** 인자·할당기·도구 로그·단계 표시를 모두 거기서 얻는다. 그래서 프로그램마다 시작 코드를 되풀이하지 않는다.
 - **범용 할당자(개정 8 — GC 규모 설계 18.10절, 사용자 지시 "엔진에 BinnedAllocator 연결해").** Launch가 프로세스의 범용 할당자를 소유한다(UE가 프로세스 기본 할당자를 Binned로 두는 자리).
   - `ApplicationSettings::defaultAllocator`가 `DefaultAllocatorKind::Binned`(기본)이면 Launch가 자기 `SystemAllocator`를 상위로 `BinnedAllocator`를 하나 만들고 `ApplicationContext::DefaultAllocator()`가 그것을 돌려준다. `System`이면 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체다(문제를 가를 때의 비교 수단). `configure`가 바꿀 수 있다. 명령줄 옵션은 두지 않는다.
@@ -591,14 +591,14 @@ bool IsTerminationRequested() noexcept;
 | 6 | 종료 요청 처리기(선택) | 실패는 경고만 |
 | 6a | 범용 할당자(개정 8 — `defaultAllocator`가 `Binned`면 `SystemAllocator` 위에 `BinnedAllocator`를 만든다. 번호를 밀지 않으려고 6a로 둔다) | 실패하지 않는다(내부 상태를 할당하지 못하면 Fatal) |
 | 7 | 도구 로그 서비스(`ToolLogging::Stderr`) | stderr 한 줄, 로그 없이 계속(D22) |
-| 7a | 모듈 로더(개정 10, 단계 이름 "Launch.Modules"): Monolithic은 범용 할당자와 `GeneratedModuleTable()`로 로더를 만들고 `StartPhase(EarliestPossible)`로 부트 모듈(Launch의 의존 폐포 — Core·ModuleLoader·Launch)을 시작한다. Modular는 0단계 앞의 Modular 진입(개정 12)이 시동 크래시 수집(프로세스 안 덤프) 아래에서 시동 할당자로 manifest 로더를 만들고(모든 모듈 라이브러리 적재) 호스트 모듈의 앱 기술을 읽은 뒤 시동 수집을 떼고 이 흐름에 들어온다. 이 단계는 그 로더로 부트 모듈만 시작하고, 로더는 흐름이 끝난 뒤(크래시 수집 해제 뒤) 그 진입이 파괴한다([모듈 로더](ModuleLoader.ko.md) 3.14절) | 로더 생성·부트 모듈 시작 실패는 `Log::Error` 한 번(모듈·단계·문구) 뒤 본문 없이 `ModuleStartupFailureExitCode`(1)로 끝낸다(시작한 단계만 역순 정리) |
+| 7a | 모듈 로더(개정 10, 단계 이름 "Launch.Modules"): Monolithic은 범용 할당자와 `GeneratedModuleTable()`로 로더를 만들고 `StartPhase(EarliestPossible)`로 부트 모듈(Launch의 의존 폐포 — Core·ModuleLoader·Launch)을 시작한다. Modular는 0단계 앞의 Modular 진입(개정 12)이 시동 크래시 수집(프로세스 안 덤프) 아래에서 시동 할당자로 manifest 로더를 만들고(모든 모듈 라이브러리 적재) 호스트 모듈의 앱 기술을 읽은 뒤 시동 수집을 떼고 이 흐름에 들어온다. 이 단계는 그 로더로 부트 모듈만 시작하고, 로더는 흐름이 끝난 뒤(크래시 수집 해제 뒤) 그 진입이 파괴한다([모듈 로더](ModuleLoader/03-Design/03.14-ML4bExecutableLink.ko.md) 3.14절) | 로더 생성·부트 모듈 시작 실패는 `Log::Error` 한 번(모듈·단계·문구) 뒤 본문 없이 `ModuleStartupFailureExitCode`(1)로 끝낸다(시작한 단계만 역순 정리) |
 | 8 | `SetRunPhase(Running, "Main")` → `run(context)` | 본문의 반환값 |
 | 9 | 7a → 7 → 6a → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
 | 10 | 보호 프레임을 나와 `RemoveCrashReporting`(도우미에 `Shutdown`을 먼저 쓴다) → 종료 코드 반환(또는 `ExitProcessWithoutTeardown`) | — |
 
 - **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7a다(6a·7a 포함). 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
 - **크래시 처리를 설정보다 먼저 건다(요구 10절).** 설정 로딩·LogHost·Engine 초기화는 모두 8단계 본문 안이다.
-- **모듈 로더(개정 10, ML1).** 7a단계가 로더를 만들고 부트 모듈을 시작하며, 9단계에서 도구 로그 정리 전에 프로세스 묶음을 내린다([모듈 로더](ModuleLoader.ko.md) 3.9·3.11절). 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`)은 상수 기술과 함수뿐이라 실행 순서가 없고, 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과 겹치지 않는다(21절).
+- **모듈 로더(개정 10, ML1).** 7a단계가 로더를 만들고 부트 모듈을 시작하며, 9단계에서 도구 로그 정리 전에 프로세스 묶음을 내린다([모듈 로더](ModuleLoader/README.ko.md) 3.9·3.11절). 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`)은 상수 기술과 함수뿐이라 실행 순서가 없고, 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과 겹치지 않는다(21절).
 - **정상 종료 정리는 한 번만 한다.** `RunApplication`은 반환 경로가 하나다. 크래시 종료는 이 경로를 타지 않는다(8.3절).
 
 ### 8.2 정상 종료
@@ -1453,7 +1453,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 - **[엔진 구현 계획](EngineImplementationPlan.ko.md)**
   - 29.4절의 "사전 확보 storage·제한 시간·truncated 표시·잠긴 heap·registry를 순회하지 않음"을 이 설계가 그대로 따른다.
   - 종료 코드 계약(2479행)의 "OS crash code는 별도로 보존"을 D8로 구체화한다. 도구들의 0·1·2 정리는 CL4 출력 규약이 맡는다.
-- **[모듈 로더](ModuleLoader.ko.md)(ML0 병합, 개정 2)**
+- **[모듈 로더](ModuleLoader/README.ko.md)(ML0 병합, 개정 2)**
   - **지금(ML0).** Launch 모듈과 Launch 시험 실행 파일(`LaunchProbe`·`LaunchWindowedProbe`·`LaunchEmbeddedHost`, 같은 소스라 이름 자리에 `ROCKS_MODULE_NAME`)도 다른 모듈처럼 `ROCKS_IMPLEMENT_MODULE` 진입점을 가진다(`Launch/Private/LaunchModule.cpp`, `Programs/LaunchTests/Private/Common/LaunchTestsModule.cpp`). 빌드가 실행 파일마다 모듈 표를 만들고 진입점 모듈 소스에 `ROCKS_MODULE_NAME`을 넣는다. 모듈 진입점은 상수 기술과 함수뿐이어서 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`이 만드는 `wmain`·`main`)과 실행 순서가 얽히지 않는다. Launch는 아직 `ModuleLoader`에 의존하지 않는다.
   - **ML1(그 문서, 이 구현 병합 뒤).** Launch가 로더를 소유한다(`ApplicationContext`, 전역 접근자 없음, MD4). 8.1절 7단계(도구 로그) 뒤·8단계(본문) 전에 로더 생성·`Prepare`·부트 모듈(Launch 의존 폐포)과 `EarliestPossible` 시작, 9단계에서 도구 로그 정리 전에 프로세스 묶음 종료를 넣는다. 실패 정리는 Launch 단계 실행기의 "시작한 단계만 역순"을 그대로 쓴다. Launch 모듈 규칙에 `ModuleLoader` 의존을 더한다. 이 문서 8.1·8.2절과 7.4절(`ApplicationContext`)의 고침은 ML1에서 한다(그 문서 8절).
   - **경계.** 크래시 수집 설치(1단계)와 명령줄 캡처(3단계)는 로더보다 먼저다. 모듈 `Startup`의 크래시도 그래서 보고된다. 로더는 크래시 경로에 끼지 않는다.
@@ -1825,7 +1825,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 - Windows CI Asan 두 건(2026-11-20, run 44657190704, 개정 7).
   - **원인(수집기 설정).** `asan-policy-main-stack-overflow`·`log-crash-stack-overflow`가 `0xC0000005`로 끝났다. ASan은 stack overflow를 넘친 스레드에서 보고하는데, 그 보고가 Rocks가 잡은 stack 보장분 32 KiB 가운데 약 29 KiB를 쓴다(로컬 측정). CI에서는 ASan 보고가 `ERROR` 줄 직후 다시 넘쳤다. 로컬에서 보장분을 28 KiB로 줄이면 같은 출력(ERROR 줄에서 끝)과 종료 코드가 재현되고, 29 KiB부터는 death callback까지 간다. 공식 LLVM 21.1.6과 Foundation 대상으로 빌드해도 32 KiB에서는 로컬에서 통과했으므로, CI와의 차이는 남은 여유 3 KiB를 넘는 추가 stack 사용이다(CPU의 XSAVE 영역 크기 등 기계 차이). 유니티·PCH나 할당자 변경과는 무관하다(Debug 시험·Asan 시험 2,659건은 CI에서도 통과했다).
   - **수정.** `CrashStackReserveBytes`를 Asan 구성에서 128 KiB로 키웠다(일반 구성 32 KiB 그대로, 10.5절). 일반 구성은 보장분 4 KiB로도 stack overflow 보고·덤프가 끝나 여유가 충분하다(Debug 측정).
-- 개정 10(2026-11-20): 모듈 로더 통합([모듈 로더](ModuleLoader.ko.md) ML1, 개정 5 3.11절).
+- 개정 10(2026-11-20): 모듈 로더 통합([모듈 로더](ModuleLoader/README.ko.md) ML1, 개정 5 3.11절).
   - 실행 단계에 "Launch.Modules"(7a)를 더했다(도구 로그 뒤 — 8.2절의 역순 정리에서 도구 로그보다 먼저 프로세스 묶음을 내린다). 실패는 Abort(`ModuleStartupFailureExitCode`).
   - `ApplicationContext::Modules()`를 더했다(7.4절). Launch 모듈 규칙이 `ModuleLoader`에 의존하고 부트 모듈 표지 `ProvidesLaunch`를 켠다.
 - 개정 8(2026-11-20): 범용 할당자(GC 규모 세션의 AL6 — 사용자 지시 "엔진에 BinnedAllocator 연결해", GC 규모 설계 18.10절).

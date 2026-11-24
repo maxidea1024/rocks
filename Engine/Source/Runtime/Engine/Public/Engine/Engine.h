@@ -206,7 +206,7 @@ struct EngineConfig {
     double fixedFrameDeltaSeconds = 0.0;
     // 0이 아니면 Run이 이 프레임 수를 실행한 뒤 스스로 종료 요청한다.
     uint64 maxFrames = 0;
-    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader.ko.md 3.11절 — 보통
+    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader 3.11절 — 보통
     // launch::ApplicationContext::Modules(), 시험은 test::ProcessModules()). Initialize가 엔진
     // TypeRegistry의 타입 등록기(ModuleTypeRegistrations)를 이 로더에 붙여 이미 시작한 모듈의
     // 리플렉션 타입을 시작 순서로 등록하고(로더가 발급한 모듈 lease로), 엔진 묶음

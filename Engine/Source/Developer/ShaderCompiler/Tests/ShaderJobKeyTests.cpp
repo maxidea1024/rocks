@@ -63,7 +63,7 @@ constexpr char FixtureVulkan[] =
 
 // 리터럴 키 golden(공통 머리의 결정적 수학 버전 = GoldenMathVersion, 툴체인 지문 = 0x5a×32)이다.
 // 기록 순서·태그·번호 표를 바꾸면 이 값이 바뀐다(그때는 ShaderJobProcessor 버전 Guid도 바꾼다).
-constexpr char GoldenKey[] = "7edf92b1bce2d1d62f3ab5beed2ff136f35aff1f1aea73cbb5fa108d81070202";
+constexpr char GoldenKey[] = "157eb30410c3d54cb4a8b2905ef36acf587c0dee76e17702cfdb0fdbf544133e";
 constexpr uint32 GoldenMathVersion = 7;
 constexpr uint8 GoldenToolchainByte = 0x5a;
 
@@ -282,6 +282,12 @@ TEST(ShaderJobKey_EveryInputChangesTheKey) {
                   [](KeyCase& c) noexcept { c.input.stage = ShaderStagePixel; }));
     CHECK(changes([](KeyCase& c) noexcept { c.input.entry = "PSMain2"; },
                   [](KeyCase& c) noexcept { c.input.entry = "PSMain"; }));
+    // 요구 기능(16.1절 SSD35).
+    CHECK(changes(
+        [](KeyCase& c) noexcept {
+            c.input.requiredFeatures = ShaderFeatureVertexViewportLayerOutput;
+        },
+        [](KeyCase& c) noexcept { c.input.requiredFeatures = 0; }));
     // 전처리 결과.
     CHECK(changes([](KeyCase& c) noexcept { c.input.preprocessedSha256 = Digest(0x81); },
                   [](KeyCase& c) noexcept { c.input.preprocessedSha256 = Digest(0x80); }));
@@ -407,7 +413,7 @@ TEST(ShaderJobKey_TraceGolden) {
         "list 2\nstring\nDirectXShaderCompiler\nstring\n1.9.2609\nbytes 32\n"
         "string\nSpirvTools\nstring\n2025.1\nbytes 96\n"
         // 3–5행.
-        "string\nVULKAN_SM5\ndigest %s\nu32 2\nstring\nPSMain\ndigest %s\n"
+        "string\nVULKAN_SM5\ndigest %s\nu32 2\nstring\nPSMain\nu32 0\ndigest %s\n"
         // 6행: 옵션 리플렉션 기록(필드 이름 포함 — 순서는 리플렉션 순회 순서)과 레이아웃 없음.
         "struct\nfield\nmatrixLayout\ni64 0\nfield\nhlsl2021\nbool true\nfield\ndebugSymbols\nbool "
         "false\nfield\noptimization\ni64 3\nend\nnone\n",

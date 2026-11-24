@@ -21,7 +21,7 @@ internal static class PublicHeaderChecks
     /// </summary>
     public static IReadOnlyList<string> Add(List<NativeModuleInput> modules, IReadOnlyCollection<string> targets, string output, NativeToolchain toolchain)
     {
-        // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+        // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader 3.8절).
         HashSet<string> reached = LinkClosure.Reachable(targets, modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase),
             (name, _) => throw new ArgumentException($"Unknown dependency {name}"));
         // 서드파티 모듈은 뺀다: 공개 include가 없고(서드파티 규칙 계약) 전역 상태 서드파티의 직접 소비 모듈이 하나여야 한다(BD29·BS8c).

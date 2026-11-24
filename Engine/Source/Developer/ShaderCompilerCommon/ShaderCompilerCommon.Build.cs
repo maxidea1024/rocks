@@ -7,7 +7,9 @@ using Rocks.Build.Rules;
 /// exit codes and the format compile interface (ShaderFormatBackend) are added in SH1c. It checks the tool names of format definitions against the
 /// tool table (ShaderToolTable) but never opens tool binaries (policy check shader-tool-binary-load). The shared format vocabulary
 /// types (stages, features, device requirements, limits, backends) live in the runtime module ShaderCore (section 12.2.1 SSD1). The shared
-/// reflection model and binding rules (ShaderReflection, section 16.1 SSD33) let every format processor produce the binding layout value the same way.
+/// reflection model and binding rules (ShaderReflection, section 16.1 SSD33) let every format processor produce the binding layout value the same way;
+/// the SPIR-V rewrite and the SPIR-V binding normalization with Metal index assignment (SpirvRewrite, ShaderSpirvBindings, SSD38 and SSD39) are
+/// pure transforms shared by the SPIR-V path processors (SPIRV-Reflect is a source library, no tool binary is opened).
 /// </summary>
 public sealed class ShaderCompilerCommon : EngineModuleRules
 {
@@ -21,5 +23,5 @@ public sealed class ShaderCompilerCommon : EngineModuleRules
     protected override string[] PublicDependencies => ["ShaderCore", "ShaderToolTable", "PlatformBase", "Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
-    protected override string[] PrivateDependencies => ["DeterministicMath", "Serialization"];
+    protected override string[] PrivateDependencies => ["DeterministicMath", "Serialization", "SpirvReflect"];
 }

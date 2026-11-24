@@ -5,7 +5,7 @@ using Rocks.Build.Descriptors;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// Modular 빌드 기반(Docs/Design/BuildTargets 3.8절 BS8d1)과 실행 파일 연결(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b)을 실제
+/// Modular 빌드 기반(Docs/Design/BuildTargets 3.8절 BS8d1)과 실행 파일 연결(Docs/Design/ModuleLoader 3.14절 ML4b)을 실제
 /// 컴파일·링크로 검사한다. 픽스처: 가짜 Core(모듈 표·빌드 정보 제공, 최소 진입 헤더) ← Lib·가짜 Launch(Modular 진입 C 함수) ← App(실행 파일
 /// 모듈 — Modular에서 호스트 공유 라이브러리), App의 동적 모듈 Dyn.
 /// <list type="bullet">
@@ -385,7 +385,7 @@ internal static class ModularManifestTests
         Rejects(modular with { EngineVersion = null }, "needs NativeBuildRequest.EngineVersion", "a Modular executable without an engine version");
         pass("modular manifest: an executable without Launch, two executables and a missing engine version are rejected");
 
-        // 플러그인 모듈(Docs/Design/ModuleLoader.ko.md 3.15절 ML5a): 켠 플러그인 모듈은 플러그인 binaries 폴더에 링크하고 플러그인마다 manifest를
+        // 플러그인 모듈(Docs/Design/ModuleLoader 3.15절 ML5a): 켠 플러그인 모듈은 플러그인 binaries 폴더에 링크하고 플러그인마다 manifest를
         // 쓰며, 실행 파일 manifest가 그 목록(plugins)을 싣는다. 행 order는 Monolithic 표 순서다. 호스트는 켠 플러그인 모듈(PluginModules)을
         // 링크하지 않고 직접 의존하는 플러그인 모듈(Plug)만 import한다. Plug는 bin의 Lib를, 호스트는 플러그인 폴더의 Plug를 import한다.
         Write("plug/include/plug/plug.h", "#pragma once\nROCKS_PLUG_API int PlugValue() noexcept;\n");
