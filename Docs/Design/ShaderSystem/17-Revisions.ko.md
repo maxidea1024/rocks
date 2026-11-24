@@ -104,3 +104,4 @@
 - 개정 44(2026-11-24): SH2e3 구현 메모(16.1절 — 조합 열거 ShaderCore 공용화, RenderBase 셰이더 집합·공급자 interface·바인딩 지도·상수 블록·업로드 판단·파이프라인 캐시, Graphics 장치 셰이더 API와 slot 이름 표).
 - 개정 45(2026-11-24): SH2e2·SH2f 구현 메모(16.1절 — Graphics API 전환·장치 셰이더 CPU 사본(SSD18과 다른 점), 값 1 v3(모양·원소 타입·stride·attribute 타입), 네 backend 쿠킹 코드 수신, 런타임 컴파일러·Graphics 컴파일 훅·Release 예외 제거, 워커 PointSize·dummy 샘플러, Sandbox 셰이더 `/Plugin/Sandbox`·Development 공급자, 픽셀 대조 결과와 GLES NOT RUN 항목).
 - 개정 46(2026-11-25): SH2g 구현 메모(16.1절 — `RWTextureCube`·`RWTextureCubeArray`, GLES 처리기 cube storage image 고쳐 쓰기·처리기 버전 OpenGL 4, 값 1 storage image cube 모양, GLES cube 쓰기 slot 묶기).
+- 개정 47(2026-11-25): RenderBase GX6(9.11절) 반영. 7.2절 4항 D3D12: 진단 root UAV 자리, 루트 상수 DWORD는 파이프라인의 그리기별 상수 크기, 예산식에 진단 root UAV와 넘친 CBV 테이블, 보장 root CBV를 그래픽 13·진단 12·CS 14로 고침(UAV 테이블은 CS만 — 개정 32의 12·11은 VS·PS UAV 테이블을 센 값). 12항·7.3절 (k)의 진단 경계 11 → 12. 16.1절 SH2e2 메모에 단계별 테이블 전환을 적음.

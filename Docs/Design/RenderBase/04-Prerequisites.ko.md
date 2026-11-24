@@ -41,7 +41,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 구현 | — | RB5, 메시 에셋 | M | 10.4절 |
 | GX4 | 명령 기록 확장 | 구현(장치 쪽 2026-11-18: attachment 시작·dispatch·간접 명령·복사·UAV clear, 여러 기록 객체는 RG3 기록 목록으로 대체. 그룹 수 도우미·그래프 compute pass·그래프 버퍼 view는 개정 37, 4.4절 "GX3·GX4 compute 연결 설계". 후속: 접는 그룹 수·그룹 수 콜백) | GX2·GX3 | RB5, RB6, RG1 | L | 4.4절 |
 | GX5 | 명시 접근 상태와 전이 | 구현(전이 API·분리 전이(begin·end)·D3D12·D3D11·OpenGL ES·Vulkan·기록 장치. pipe와 queue 사이 대기는 RG4, 8절 개정 32) | GX2·GX4 | RG1 | M–L | 4.4절 |
-| GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
+| GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 설계(개정 38, 9.11절 — 상수 버퍼 묶기. 공유 slot 표·`ParameterBatch` 자원 부분은 이 절 밖) | P2·SH2 | RB4 | L | 4.4절, 9절 |
 | GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
 | GX8 | 업로드 ring·비동기 readback | 구현 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
 | GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 구현(`GpuScope`는 RB7에서 구현) | GX7 | RB7 | M | 4.4절, 13절 |
@@ -272,7 +272,7 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
     - Vulkan: `VK_KHR_synchronization2`(기준 판 1.1이라 확장, 기능 `synchronization2`)가 있으면 begin은 `vkCmdSetEvent2`, end는 같은 `VkDependencyInfo`의 `vkCmdWaitEvents2`다(UE `VulkanBarriers.cpp:661–663, 1405–1414`, `VulkanCommandBuffer.cpp:553–561`). event(`VK_EVENT_CREATE_DEVICE_ONLY_BIT`)는 기록마다 상한 64개를 만들어 두고, 기록 끝에 `vkCmdResetEvent2`로 되돌리며 그 제출의 fence 뒤 기록을 다시 쓸 때 재사용한다(UE는 장치 pool, `VulkanDevice.cpp:1799–1831`). 상한을 넘은 짝은 end에서 `vkCmdPipelineBarrier2`로 낸다. 이미지 layout은 begin 뒤 바뀌므로 before 대조와 추적 상태 갱신을 begin 때 하고, 그래서 사이에 render pass를 다시 열지 않는다(`AttachmentsReady`). `vkCmdSetEvent2`·이미지 layout이 바뀌는 대기는 render pass 밖에서 낸다(열린 pass를 닫는다). 확장·기능이 없으면 end에서 `Transition`처럼 낮춘다. `splitTransitions`는 synchronization2를 켰을 때 참이다.
     - D3D11·OpenGL ES: begin은 짝만 열고 end는 `Transition`과 같다(드라이버 암묵 전이). `splitTransitions` false.
     - 기록 장치: begin·end를 `Op::BeginTransitions`·`EndTransitions`(짝 번호)와 `TransitionLog`의 단계(`Full`·`Begin`·`End`)로 기록하고, D3D12와 같이 end에서 대조·적용한다. 모르는 짝의 end는 `IgnoredDraws`, 다른 목록의 end·끝나지 않은 짝·열린 짝의 subresource를 건드리는 전이와 begin은 검증 오류다.
-- **GX6 파라미터 바인딩 런타임.** 9.3–9.5절을 Graphics 쪽에서 받는 부분이다: 상수 블록 생성(수명 3종)·갱신, 파라미터 묶음 설정, 공유 상수 slot 표.
+- **GX6 파라미터 바인딩 런타임.** 9.3–9.5절을 Graphics 쪽에서 받는 부분이다: 상수 블록 생성(수명 3종)·갱신, 파라미터 묶음 설정, 공유 상수 slot 표. 상수 버퍼 묶기(할당·업로드 ring·정렬·값 1 slot 묶기·backend 매핑·D3D12 root 예산·RenderBase·RenderGraph API) 설계는 9.11절(개정 38)이다.
 - **GX7 제출·완료·회수.** 계획 11.2절 계약(`Submit`·`Retire`·`GpuFencePoint`·`RenderResourceLease`·device epoch)을 Graphics `Device`에 들인다.
   - OpenGL ES도 fence sync로 같은 계약을 따르고 "즉시 삭제" 예외를 없앤다.
   - descriptor(D3D12 heap slot, Vulkan descriptor set)도 마지막 사용 fence 뒤에 회수한다(계획 11.2절).
