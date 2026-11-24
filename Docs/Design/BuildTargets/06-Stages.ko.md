@@ -17,5 +17,6 @@
 | BS9b | `PluginModuleRules`, `NativeModuleInput.Type`, Release 배제 정책 전환, BD39 계층 검사, BD42 정책 | 규칙 시험(디렉터리 일치, 선언 없는 규칙·규칙 없는 선언·대소문자 이름 오류, 끈 플러그인 규칙 Configure 성공), 계층 위반 시험, 플러그인 Developer 모듈을 Release 정책이 잡는 음성 대조 |
 | BS9c | 엔진 타깃 연결(CLI), BD36 링크·모듈 표 행(게임 빌드 포함), BD41 거부 | 의존 없는 주 실행 파일에 켠 플러그인 모듈이 링크되고 기술자 단계로 시작, probe에는 없음, 끈 플러그인 모듈은 빌드되지 않음, 실행 파일 없는 타깃은 빌드만, SDK export·Modular 거부 시험 |
 | BS9d | 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`(기술자와 진입점만 있는 모듈), Commandlet·EngineTests가 켬, 플러그인 시험 수집(BD40) | EngineTests가 플러그인 Tests를 실행, 다른 타깃에는 모듈 없음 — Unreal 교환 UX1a 선행 조건 충족 |
+| BS10 | 쿠커 모듈 집합(3.10절) — SH2d와 함께: 정책 `cooker-module-set`(Commandlet ⊇ Engine 타깃 폐포의 Runtime·ClientOnly), 대상 모듈 집합 계산(GamePlanning과 같은 함수)·쿠커의 이름 대조, 프로젝트·플러그인 모듈 적재는 ML5b 뒤 | 빠진 엔진 모듈 정책 실패, 대상 집합 계산(타깃 종류·플랫폼·플러그인 조건), 집합이 다를 때 쿠킹 거부 |
 
 순서: BS0 → BS1(UB0 depfile 파서 뒤) → BS3. BS2는 BS0 뒤가 쉽다(규칙 기반 클래스를 한 번에 고친다). BS4는 BS2 뒤다(`targets` 값 검증과 문맥별 해석에 다섯 값 `TargetType`이 필요하다). BS6은 다른 단계와 독립이다. BS7은 BS2·BS6 뒤이고, 렌더·오디오·입력 backend를 서버에서 빼는 범위는 BS7 전에 네트워크 단계 스펙이 정한다. BS9a → BS9b → BS9c → BS9d는 BS2·BS4와 독립이다(타깃 종류 두 값, 프로젝트 없는 엔진 타깃만으로 동작). BS2·BS4가 나중에 종류 표와 조건 필드를 넓힌다.

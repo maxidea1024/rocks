@@ -30,6 +30,7 @@ public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<P
     public static DescriptorOwner ForProject(ProjectDescriptor project, string targetName, IReadOnlyList<PluginReference> targetPlugins)
     {
         TargetPluginReferences.Validate(targetName, targetPlugins);
+        DescriptorReader.RequireTargetPlatforms(project.FilePath, $"target '{targetName}'", targetPlugins, project.TargetPlatforms);
         PluginReferrer referrer = targetPlugins.Count == 0
             ? PluginReferrer.Of(project)
             : new($"target '{targetName}' or project", project.FilePath);
@@ -123,7 +124,7 @@ public sealed class DescriptorModuleSet
         }
 
         IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(owner.Plugins, owner.Referrer, available,
-            applyDefaults: target.Type != TargetType.Program);
+            applyDefaults: target.Type != TargetType.Program, new PluginContext(target.Type, platform, configuration));
         var enabledNames = enabled.Select(plugin => plugin.Name).ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, DescribedModule>(StringComparer.OrdinalIgnoreCase);
 

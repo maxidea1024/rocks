@@ -6,7 +6,7 @@
 
 | 문서 | 바꾼 곳 | 내용 |
 |---|---|---|
-| [UI 툴킷](../UiToolkit.ko.md) | 2절 모듈 표 TextLayout 행, 3.12절 표 앞, UT2 행, UD3 | TextLayout의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮김, 글꼴 상세의 소유 문서, 글꼴 단계 연결, UD3 버전 문구에 FD14(사용자 확인 대상) 연결 |
+| [UI 툴킷](../UiToolkit.ko.md) | 2절 모듈 표 TextLayout 행, 3.12절 표 앞, UT2 행, UD3 | TextLayout의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮김, 글꼴 상세의 소유 문서, 글꼴 단계 연결, UD3 버전 문구에 FD14(사용자 결정으로 확정) 연결 |
 | [컴포넌트 목록](../ComponentCatalog/04-Prerequisites.ko.md) | CR18 행 | 선행 문서를 이 문서 7.3절로, 단계 FT5·FT7 |
 | [머티리얼](../MaterialSystem.ko.md) | 파라미터 종류 "font — 후속" 행 | `FontSampleParameter`, 노드 단계 FT7 |
 | [압축](../Compression.ko.md) | 13절 "WOFF2 글꼴 importer는 글꼴 모듈의 몫" | FD10·FT8 연결 |
@@ -32,4 +32,4 @@
 
 ### 12.3 개정 이력
 
-- **개정 1(2026-11-24, 초안).** 사용자 지시로 작성. UE 5.8.4 소스(FontFace·Font·CompositeFont·SlateFontInfo·FontCache·FontCacheCompositeFont·SlateTextShaper·SlateFontRenderer·FontImportOptions·임포트 팩토리·TTFontImport·TextRenderComponent·CanvasItem·머티리얼 글꼴 표현식·SlateRHIRendererModule·서드파티 Build.cs)를 대조했다. 사용자 확인으로 FT1(서드파티 도입)은 고정 순서와 무관하게 지금 착수한다. 초안 뒤 서브에이전트 1개로 교차 검증하고 반영했다: 필수 16건(FontInfo 기본값 `All`·크기 단위 96 DPI 포인트, hinting 플래그 표, 조합 탐색 순서(작은 구간 우선·보조 하나만·속성 best match·U+FFFD 재탐색·grapheme 단위), Auto shaping 판정, `_Font` 이름, LazyLoad 기본 동기 표 정리, 서버 분리를 타깃 매크로에서 ClientOnly backend로(BD2·BD3·BD25), CVar 이름 snake_case, `hb-icu.cc` 별도 번역 단위, 할당 hook 한계, 미리 굽기 페이지를 별도 패키지로(FD18), 미리 굽기 시점을 임포트로·문자 파일을 임포트 입력으로, FT1 완료 조건(Linux·서버 검사 시점), 내장 UI 글꼴 FD6 예외)과 권장·참고 다수(SDF 자리표시·spread·MTSDF, 컬러 strike, atlas 밖 글리프·flush 기본값, 자간 예외, 거리장 CVar 기본값, 거리장 alpha 강제값, 페이지 채널, msdfgen 하한 1.12·FreeType 윤곽 연결·STL 예외, ICU 빌드 정의·stubdata·데이터 위치·전역 상태, 서버 ICU 제외, 서버 쿠킹 빈 참조, geometry를 로딩 방식에 따름, 결정성 범위, UE 덤프 미사용, 다른 문서 개정 목록 보강). 결정 FD1–FD19(FD9·FD14 사용자 확인 필요), 단계 FT1–FT8, 선행 FP1–FP7, 시험 FV1–FV17.
+- **개정 1(2026-11-24, 초안).** 사용자 지시로 작성. UE 5.8.4 소스(FontFace·Font·CompositeFont·SlateFontInfo·FontCache·FontCacheCompositeFont·SlateTextShaper·SlateFontRenderer·FontImportOptions·임포트 팩토리·TTFontImport·TextRenderComponent·CanvasItem·머티리얼 글꼴 표현식·SlateRHIRendererModule·서드파티 Build.cs)를 대조했다. 사용자 확인으로 FT1(서드파티 도입)은 고정 순서와 무관하게 지금 착수한다. 초안 뒤 서브에이전트 1개로 교차 검증하고 반영했다: 필수 16건(FontInfo 기본값 `All`·크기 단위 96 DPI 포인트, hinting 플래그 표, 조합 탐색 순서(작은 구간 우선·보조 하나만·속성 best match·U+FFFD 재탐색·grapheme 단위), Auto shaping 판정, `_Font` 이름, LazyLoad 기본 동기 표 정리, 서버 분리를 타깃 매크로에서 ClientOnly backend로(BD2·BD3·BD25), CVar 이름 snake_case, `hb-icu.cc` 별도 번역 단위, 할당 hook 한계, 미리 굽기 페이지를 별도 패키지로(FD18), 미리 굽기 시점을 임포트로·문자 파일을 임포트 입력으로, FT1 완료 조건(Linux·서버 검사 시점), 내장 UI 글꼴 FD6 예외)과 권장·참고 다수(SDF 자리표시·spread·MTSDF, 컬러 strike, atlas 밖 글리프·flush 기본값, 자간 예외, 거리장 CVar 기본값, 거리장 alpha 강제값, 페이지 채널, msdfgen 하한 1.12·FreeType 윤곽 연결·STL 예외, ICU 빌드 정의·stubdata·데이터 위치·전역 상태, 서버 ICU 제외, 서버 쿠킹 빈 참조, geometry를 로딩 방식에 따름, 결정성 범위, UE 덤프 미사용, 다른 문서 개정 목록 보강). 결정 FD1–FD19(FD9·FD14는 사용자 확인 뒤 확정 — 2026-11-24), 단계 FT1–FT8, 선행 FP1–FP7, 시험 FV1–FV17.

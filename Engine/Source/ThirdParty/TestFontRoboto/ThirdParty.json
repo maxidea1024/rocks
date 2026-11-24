@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "TestFontRoboto",
+  "version": "3.016",
+  "upstreamDirectory": "roboto-3-classic-v3.016",
+  "source": {
+    "url": "https://github.com/googlefonts/roboto-3-classic/releases/download/v3.016/Roboto_v3.016.zip",
+    "sha256": "1653dbe12f248da8fb0b9920db7b9496cd677ed3981154f6f15285c8bd4e334f",
+    "verification": "Release asset of googlefonts/roboto-3-classic v3.016 (2026-06-17); its SHA-256 matches the GitHub release asset digest. hinted/static/Roboto-Regular.ttf was extracted byte for byte from the archive. The archive has no license file, so OFL.txt was taken from the same tag (raw.githubusercontent.com/googlefonts/roboto-3-classic/v3.016/OFL.txt)."
+  },
+  "licenses": [
+    {
+      "spdx": "OFL-1.1",
+      "upstreamExpression": "OFL.txt (SIL Open Font License 1.1)",
+      "file": "roboto-3-classic-v3.016/OFL.txt",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "OFL.txt": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41",
+    "hinted/static/Roboto-Regular.ttf": "9f300202f482ad59f8b13bc3131a295744d14fd530fa3765a0a11ec87264d203"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Fixed test font for the font library and font backend tests (Docs/Design/Font/08-ThirdParty.ko.md section 8.5): tests read the file from the repository and never use fonts installed on the machine. Not shipped in any product."
+  ]
+}
