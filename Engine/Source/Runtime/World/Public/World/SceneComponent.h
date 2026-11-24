@@ -70,12 +70,23 @@ struct ComponentBounds {
     double sphereRadius = 0.0;
 };
 
+// 옮긴 bounds의 구 반지름 규칙이다(UE 클래스마다 식이 다르다 — Docs/Design/EngineRuntime 24.3.6·
+// 25.7절).
+enum class BoundsSphereRule : uint8 {
+    // min(R × 3×3 부분의 최대 열 길이, |새 extent|)(UE FBoxSphereBounds::TransformBy — Shape).
+    TransformedSphere,
+    // |새 extent|(UE FBoxSphereBounds(FBox::TransformBy) — 스플라인).
+    BoxExtent
+};
+
 // 지역 bounds를 affine 행렬(행 벡터 규약)로 옮긴다(UE FBoxSphereBounds::TransformBy(FMatrix) —
 // Core/Public/Math/BoxSphereBounds.h:498, Docs/Design/EngineRuntime 24.3.6절). 중심은 행렬로
-// 옮기고, extent는 |E.x·행0| + |E.y·행1| + |E.z·행2|, 구 반지름은 min(R × 3×3 부분의 최대 열 길이,
-// |새 extent|)다(UE가 행 0–2의 성분별 제곱합을 쓴다). CalcBounds 재정의(Shape·메시 계열)가 쓴다.
-ROCKS_WORLD_API ComponentBounds TransformComponentBounds(const ComponentBounds& local,
-                                                         const Mat4d& localToWorld) noexcept;
+// 옮기고, extent는 |E.x·행0| + |E.y·행1| + |E.z·행2|, 구 반지름은 rule을 따른다(TransformedSphere는
+// UE가 행 0–2의 성분별 제곱합 — 열 길이 — 을 쓴다). CalcBounds 재정의(Shape·스플라인·메시 계열)가
+// 쓴다.
+ROCKS_WORLD_API ComponentBounds
+TransformComponentBounds(const ComponentBounds& local, const Mat4d& localToWorld,
+                         BoundsSphereRule rule = BoundsSphereRule::TransformedSphere) noexcept;
 
 // Transform 계층을 가진 Component다. 부모 기준 상대 Transform을 저장하고 월드 행렬은 필요할 때
 // 계산한다(dirty 플래그). 렌더·물리·카메라 Component의 기반이다.
@@ -153,6 +164,12 @@ public:
     // absoluteScale이면 상대 scale 그대로다. 행렬 분해(TryWorldTransform)와 달리 반사 부호가 원래
     // 축에 남는다(Docs/Design/EngineRuntime 24.3.6절).
     Vec3d WorldScale3D() const noexcept;
+
+    // 월드 회전이다(UE GetComponentQuat): 부모 사슬의 상대 회전과 부착 socket 회전을 합성한다(부모
+    // × socket × 상대 — UE FTransform 합성, scale·shear와 무관). absoluteRotation이면 상대
+    // 회전이다. 행렬 분해(TryWorldTransform)와 달리 shear·0 scale·반사에서도 UE와 같은 값이다
+    // (Docs/Design/EngineRuntime 25.5절).
+    Quatd WorldQuaternion() const noexcept;
 
     ObjectHandle Parent() const noexcept {
         return parent_;
@@ -288,6 +305,11 @@ protected:
     // 분해되지 않아도(0 scale 축·shear) 회전·scale을 잃지 않는다(24.3.6절).
     virtual bool TryLocalBounds(ComponentBounds&) const noexcept {
         return false;
+    }
+
+    // TryLocalBounds를 옮길 때의 구 반지름 규칙이다(기본 TransformedSphere — 스플라인은 BoxExtent).
+    virtual BoundsSphereRule LocalBoundsSphereRule() const noexcept {
+        return BoundsSphereRule::TransformedSphere;
     }
 
     // 생성자에서 hiddenInGame 기본값을 정한다(hook·다시 보내기 없이 — Shape 기본값).

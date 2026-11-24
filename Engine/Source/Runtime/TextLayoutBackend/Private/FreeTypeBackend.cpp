@@ -1,6 +1,7 @@
 // FreeType backend의 face 열기·정보·metric이다(Docs/Design/Font 6.2·6.8절, FT2a). metric 계산은 UE
 // FFreeTypeFace·FreeTypeUtils(FontCacheFreeType.cpp 142–297행, FontCacheFreeType.h 269–293행)와
 // 같다.
+#include "FontRaster.h"
 #include "FontShaping.h"
 #include "IcuText.h"
 #include "TextLibraries.h"
@@ -67,7 +68,8 @@ float ToPixels(FT_Pos value) noexcept {
 
 class FreeTypeFace final : public BackendFace {
 public:
-    FreeTypeFace(FT_Face face, const FontFaceDesc& desc) noexcept : face_(face), desc_(desc) {
+    FreeTypeFace(FT_Library library, FT_Face face, const FontFaceDesc& desc) noexcept
+        : library_(library), face_(face), desc_(desc) {
     }
 
     ~FreeTypeFace() override {
@@ -165,6 +167,18 @@ public:
         return detail::ShapeRun(face_, hbFont_, this, desc_.hinting, request, out);
     }
 
+    Result<void> Rasterize(const GlyphRasterRequest& request, GlyphBitmap& out) noexcept override {
+        if (!(request.size > 0.0f) || !(request.scale > 0.0f)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto applied = ApplySize(ComputeFontPixelSize(request.size, request.scale)); !applied) {
+            return applied;
+        }
+
+        return detail::RasterizeGlyph(library_, face_, desc_.hinting, request, out);
+    }
+
 private:
     // UE ApplySizeAndScale과 같다: scalable은 픽셀 크기를 정하고, 비트맵 글꼴은 가장 알맞은
     // strike를 골라 그 strike에서 요청 크기로의 배율을 x_scale·y_scale에 둔다.
@@ -223,6 +237,7 @@ private:
         return Result<void>::Success();
     }
 
+    FT_Library library_;
     FT_Face face_;
     FontFaceDesc desc_;
     hb_font_t* hbFont_ = nullptr;
@@ -286,7 +301,7 @@ public:
             return Result<UniquePtr<BackendFace>>::Failure(ErrorCode::InvalidArgument);
         }
 
-        auto made = UniquePtr<FreeTypeFace>::TryMake(allocator_, face, desc);
+        auto made = UniquePtr<FreeTypeFace>::TryMake(allocator_, library_, face, desc);
         if (!made) {
             FT_Done_Face(face);
             return Result<UniquePtr<BackendFace>>::Failure(made.Error());

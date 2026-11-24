@@ -67,7 +67,7 @@ UE `FSlateFontInfo`(`SFI`)의 material을 뺀 부분이다. material 두 개(`Fo
 | 모드 | 방법 | atlas 종류 |
 |---|---|---|
 | Bitmap | FreeType 래스터(크기·배율·기울임마다 따로). 기울임은 `FT_Set_Transform` | Alpha |
-| 컬러 글리프 | `FT_LOAD_COLOR`(CBDT·sbix 비트맵, COLRv0 층 — FreeType이 합성). 비트맵 face는 가장 가까운 고정 크기 strike를 `FT_Select_Size`로 고르고 atlas에 넣기 전에 목표 크기로 축소한다. non-scalable face는 보조 typeface 배율을 무시한다 | Color(sRGB RGBA) |
+| 컬러 글리프 | `FT_LOAD_COLOR`(CBDT·sbix 비트맵, COLRv0 층 — FreeType이 합성). 비트맵 face는 가장 가까운 고정 크기 strike를 `FT_Select_Size`로 고르고 atlas에 넣기 전에 목표 크기로 축소한다. non-scalable face는 보조 typeface 배율을 무시한다 | Color(sRGB BGRA, premultiplied — FreeType 출력 그대로, UE `PF_B8G8R8A8`) |
 | 외곽선 | `FT_Stroker`(mitered·round), 채움과 외곽선을 따로 cache(UE `EFontCacheAtlasDataType` Regular·Outline) | Alpha |
 | Msdf | 전처리 geometry → msdfgen **MTSDF**(4채널: 다중 채널 + 실제 거리), Task에서 생성. 먼저 자리표시(빈 글리프, 같은 metric)를 내고 생성이 끝나면 바꾼다 | Msdf(linear RGBA) |
 | Sdf | 전처리 geometry → msdfgen 단일 채널, 자리표시 후 교체 | Alpha |
@@ -81,7 +81,7 @@ UE `FSlateFontInfo`(`SFI`)의 material을 뺀 부분이다. material 두 개(`Fo
 ### 6.6 글리프 cache(CPU 부분)
 
 - 키: (`FontFaceHandle`, 글리프 번호, 크기 × 배율(거리장이면 ppem·spread), 기울임, 외곽선 크기·모서리, 모드). 값: atlas 종류·페이지·사각형·bearing·advance.
-- atlas 페이지 할당(선반 방식, 1 px 여백 — UE와 같다)과 페이지 수 상한은 TextLayout이 한다. 크기: Alpha 1024(편집기 2048), Color 512, 거리장 512(편집기 1024), 설정 범위 128–2048(UE `SRM` 37–43행 — Config `ui.font.alpha_atlas_size`·`color_atlas_size`·`distance_field_atlas_size`).
+- atlas 페이지 할당과 페이지 수 상한은 TextLayout이 한다. 할당은 UE `FSlateTextureAtlas::FindSlotForTexture`(`TextureAtlas.cpp` 321–410행)와 같은 guillotine 분할이다: 빈 칸을 너비의 `CeilLogTwo` 구간 목록에 두고, 요청 너비 구간부터 각 목록을 최근에 넣은 칸부터 찾는다. 남는 높이 ≤ 남는 너비면 세로로, 아니면 가로로 나누며, 2 px보다 좁은 조각은 버린다. 여백은 0으로 채운 1 px(UE `PadWithZero`)이고, 크기 0 글리프(공백)도 여백만 있는 칸을 받는다. 크기: Alpha 1024(편집기 2048), Color 512, 거리장 512(편집기 1024), 설정 범위 128–2048(UE `SRM` 37–43행 — Config `ui.font.alpha_atlas_size`·`color_atlas_size`·`distance_field_atlas_size`).
 - **atlas 밖 글리프**: 한 변이 atlas 크기를 넘는 글리프는 atlas 밖 개별 텍스처로 둔다(UE `FontCache.cpp` 1100–1122행). 개수 상한 `ui.font.max_non_atlas_textures_before_flush`, 성장 창 `ui.font.grow_non_atlas_frame_window`.
 - 페이지가 `ui.font.max_atlas_pages_before_flush`를 넘으면 다음 프레임 경계에서 cache 전체를 비운다. `ui.font.grow_atlas_frame_window` 프레임 수 안에 다시 넘으면 비우지 않고 늘린다. 네 값의 기본은 UE와 같이 모두 1이다(`TextureAtlas.h` 281–287행). `ui.font.unload_face_data_on_flush`(기본 true — UE `Slate.UnloadFreeTypeDataOnFlush` = 1)면 비울 때 face도 닫는다.
 - 진단 명령: `ui.font.flush_cache`(UE `Slate.FlushFontCache`), `ui.font.dump_cache_stats`(UE `Slate.DumpFontCacheStats`).
@@ -121,3 +121,20 @@ UiToolkit 3.4절 lane 모델을 따른다: 측정·shaping·cache 조회는 UI l
 - `TextLayout/TextShaping.h`(라이브러리 중립): `TextShapingMethod`(Auto·KerningOnly·FullShaping), `TextBaseDirection`(Auto·LeftToRight·RightToLeft), `TextBoundaryKind`(Grapheme·Word·Line·Sentence), `BidiRun`(UTF-8 byte 시작·길이·RTL 여부), `ShapedGlyph`(face·글리프 번호·원문 byte cluster·advance·offset 픽셀), `RequiresFullShaping(utf8)` — UE `SlateTextShaper.cpp` 154–273행의 문자 구간 표 그대로(ZWJ, 결합 문자, 인도계·태국어·티베트어·크메르어 등, BMP 밖 code point), `ShapeText(backend, font, utf8, options, out)`, `MeasureWidth(glyphs)`.
 - backend 계약 추가: `TextBackend::FindBoundaries(kind, utf8, culture, out)`(경계 byte 위치, 0 제외·끝 포함 — ICU `utext_openUTF8`로 UTF-8 위치를 그대로 받는다), `TextBackend::ResolveBidi(utf8, base, out)`(시각 순서 run — ICU `ubidi_getVisualRun`, RTL 문단 안 LTR 구간도 바른 순서), `BackendFace::Shape(request, out)`(FullShaping은 HarfBuzz `hb-ft`, KerningOnly는 `FT_Get_Advance` + `FT_Get_Kerning`, load 플래그는 6.2절 표).
 - `ShapeText` 순서: UTF-8 검사 → BiDi run → grapheme 경계 → grapheme 첫 code point로 face 선택(공백류는 앞 face를 이어 쓴다) → 같은 face·배율 묶음마다 방식(Auto면 RTL 또는 `RequiresFullShaping`이면 FullShaping)으로 shaping → RTL run은 묶음을 시각 순서(역순)로 잇는다 → 자간(`letterSpacing × scale × size / 1000`, RTL run·여러 code point grapheme이 있는 run은 무시, 자간이 있으면 `liga` 끔)과 고정폭(`monospacedWidth × size × scale` — UE와 같이 포인트 값에 배율을 곱한다).
+
+**FT2d API(래스터·글리프 cache CPU, 6.5–6.6절).**
+- `TextLayout/GlyphRaster.h`(라이브러리 중립): `FontAtlasContent`(Alpha·Color·DistanceField — UE `ESlateFontAtlasContentType` Alpha·Color·Msdf, 화소 1·4·4 byte), `GlyphOutline`(크기(포인트, 배율 전)·mitered·separateFillAlpha — UE `FFontOutlineSettings`의 글리프 부분), `GlyphRasterRequest`(글리프 번호·크기·배율·기울임·외곽선·안티앨리어싱·span 래스터 강제), `GlyphBitmap`(내용 종류·너비·높이·bearing x·y(위쪽 양수)·`bitmapRenderScale`·외곽선 지원 여부·화소, 첫 행이 위).
+- backend 계약 추가: `BackendFace::Rasterize(request, out)` — UE `FSlateFontRenderer::GetRenderData`·`GetRenderDataInternal`(`SlateFontRenderer.cpp` 420–774행)과 같다.
+  - 기울임 ≠ 0이면 `FT_Set_Transform`(xy = skew), 아니면 변환을 지운다. load 플래그는 6.2절 표(안티앨리어싱 끔이면 MONO)다.
+  - 외곽선 크기 × 배율(반올림) > 0이거나 span 래스터 강제(UE `Slate.OutlineFontRenderMethod` = 1)이고 글리프가 윤곽이면, 채움 span과 `FT_Glyph_StrokeBorder` span(mitered면 square cap·miter join·miter 한계 2, 아니면 round)을 `FT_Outline_Render` 직접 모드로 모은다. 두 경계 상자의 합에 그리고, 채움 칸은 `separateFillAlpha`면 |외곽선 − 채움|(채움 0이면 0), 아니면 채움 255인 칸만 255로 둔다. bearing에는 외곽선 offset을 더한다.
+  - 그 밖은 `FT_Render_Glyph`(NORMAL 또는 MONO)다. BGRA면 Color, GRAY가 아니면 `FT_Bitmap_Convert`로 8 bit, `num_grays` ≠ 256이면 255/(num_grays − 1)을 곱한다.
+  - 비트맵 strike가 목표보다 크면(x_scale < 1) atlas에 넣기 전에 UE `ResizeFontBitmap` 평균 축소로 줄이고, 작으면 `bitmapRenderScale` = x_scale(GPU가 키운다)이다. 외곽선은 scalable face에서만 지원한다.
+- `TextLayout/GlyphCache.h`:
+  - `GlyphCacheSettings`: atlas 크기 셋(기본 Alpha 1024·Color 512·거리장 512, 편집기 기본 2048·512·1024 — 이름 있는 상수, 128–2048로 자른다), flush 네 값(모두 1), 안티앨리어싱, span 래스터 강제.
+  - `GlyphKey`: face·글리프 번호·크기·배율·기울임·외곽선. 거리장 키(ppem·spread)는 FT2e에서 더한다.
+  - `CachedGlyph`: valid·내용 종류·텍스처 번호·사각형(여백 포함 칸 — UE와 같이 bearing x −여백, y +여백)·bearing·`bitmapRenderScale`·외곽선 지원.
+  - `GlyphCache::TryCreate(allocator, settings)`, `FindOrAdd(key)`: 없으면 래스터해 넣는다. 래스터 실패는 valid = false로 기억한다(UE와 같다). 같은 내용 종류의 페이지를 앞에서부터 시도하고, 다 차면 새 페이지를 만든다. 한 변이 atlas보다 크면 atlas 밖 텍스처를 만든다(텍스처 수 상한 255 — UE `uint8` 번호). 새 페이지·atlas 밖 텍스처마다 flush 계수를 갱신한다(아래).
+  - 그 밖의 API: `TextureCount`·`Texture(index)`(내용 종류·atlas 여부·크기·화소), `TakeDirtyRegion(index)`(마지막 가져간 뒤 바뀐 사각형 — Render lane 업로드용), `RequestFlush`(`ui.font.flush_cache`), `AdvanceFrame()`(프레임 경계 — 요청된 flush를 하고 했으면 true), `Stats()`(`ui.font.dump_cache_stats` 내용 — 글리프 수·종류별 페이지 수·atlas 밖 수·화소 byte).
+  - flush 계수는 UE `FSlateFlushableAtlasCache::UpdateInternal`(`TextureAtlas.cpp` 432–476행)과 같다. 종류별 페이지 수(또는 atlas 밖 수)가 현재 한도를 넘으면: 초기 한도 이하로 돌아왔으면 한도를 초기값으로 되돌린다. 마지막 flush 요청 뒤 성장 창 프레임 안이면 한도를 지금 수로 올린다(경고 로그). 아니면 flush를 요청하고 계수를 되돌린다. flush는 요청 즉시가 아니라 `AdvanceFrame`에서 한다(그 프레임에 내준 글리프 사각형이 유효하도록 — UE `ConditionalFlushCache`).
+- 잠금: cache는 잠금 하나(`platform::Mutex`)로 모든 호출을 직렬화하고, 래스터는 그 잠금 안에서 face를 부른다. face 잠금(6.2절)은 face cache(FT3)가 생기면 shaping과 래스터가 함께 거치며, 그 전에는 6.7절 lane 규칙(측정·shaping·cache 조회가 모두 UI lane)이 직렬화를 맡는다.
+- CVar(`ui.font.*`) 등록과 `GlyphCacheSettings` 연결은 UiToolkit UT2가 한다. `ui.font.unload_face_data_on_flush`는 face cache 소유자(FT3)가 `AdvanceFrame` 결과를 보고 한다. FT2d는 설정 구조와 동작만 둔다.
