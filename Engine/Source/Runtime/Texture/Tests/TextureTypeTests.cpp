@@ -313,8 +313,8 @@ TEST(Texture_CheckSettings) {
         });
         REQUIRE(CheckTextureSettings(objects, access, handle, allocator, issues));
         const StringView conditioned[] = {
-            "chromaKeyTexture",        "chromaKeyThreshold", "doScaleMipsForAlphaCoverage",
-            "alphaCoverageThresholds", "compositeTexture",   "compositeTextureMode"};
+            "doScaleMipsForAlphaCoverage", "alphaCoverageThresholds", "chromaKeyTexture",
+            "chromaKeyThreshold",          "compositeTexture",        "compositeTextureMode"};
         REQUIRE(issues.Size() == sizeof(conditioned) / sizeof(conditioned[0]));
         for (usize index = 0; index < issues.Size(); ++index) {
             CHECK(issues[index].code == AssetDiagnosticCode::UnsupportedSetting);

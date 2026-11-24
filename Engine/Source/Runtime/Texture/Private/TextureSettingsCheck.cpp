@@ -277,17 +277,23 @@ Result<void> CheckTextureSettings(ObjectRegistry& registry, const ObjectAccessCo
     }
 
     Array<KeyedIssue> issues(scratch);
-    Array<PropertyPathBuffer> changed(scratch);
-    auto found = FindChangedFields(registry, access, texture, scratch, changed);
-    if (found) {
+    // 레코드 없는 타입은 값 판정만 한다 — 분류를 먼저 보아 인코딩 중 Unsupported와 가른다.
+    auto status = ClassifyClassDefaults(lease.Value(), scratch);
+    if (!status) {
+        return Result<void>::Failure(status.Error());
+    }
+
+    if (status.Value().availability != ClassDefaultsAvailability::WithoutRecord) {
+        Array<PropertyPathBuffer> changed(scratch);
+        if (auto found = FindChangedFields(registry, access, texture, scratch, changed); !found) {
+            return found;
+        }
+
         for (const PropertyPathBuffer& path : changed) {
             if (auto added = AddContractIssue(issues, lease.Value(), path, facts); !added) {
                 return added;
             }
         }
-    } else if (found.Error() != ErrorCode::Unsupported) {
-        // 레코드 없는 타입(Unsupported)은 값 판정만 한다.
-        return found;
     }
 
     if (auto added = AddValueIssues(issues, lease.Value(), facts); !added) {

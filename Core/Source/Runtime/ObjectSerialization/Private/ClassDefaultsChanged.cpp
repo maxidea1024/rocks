@@ -18,10 +18,11 @@ using namespace graph_detail;
 // 판정 인코딩 문맥이다(Registry로 읽는다, hook 없음).
 class ChangedEncodeContext final : public FieldEncodeContext {
 public:
-    ChangedEncodeContext(Allocator& allocator, ObjectRegistry& registry, Budget& budget,
-                         TypeId type) noexcept
+    ChangedEncodeContext(Allocator& allocator, ObjectRegistry& registry,
+                         const ObjectAccessContext& access, Budget& budget, TypeId type) noexcept
         : FieldEncodeContext(FieldEncodePolicy{}, nullptr, ReferenceWire), registry_(registry),
-          budget_(budget), scratch_(allocator, budget), observation_(allocator, budget, false) {
+          access_(access), budget_(budget), scratch_(allocator, budget),
+          observation_(allocator, budget, false) {
         SetObject(type, 0);
         SetNames(registry.Names());
     }
@@ -67,13 +68,28 @@ protected:
         return out.WriteU32(target.IsNull() ? 0u : 1u);
     }
 
+    // weak는 그래프 저장처럼 죽은 대상(StaleHandle·Destroyed·Alive 아님)을 null(0)로 쓴다 — 저장
+    // 결과와 같은 판정.
     Result<void> WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                         const ReferenceExpectation&) noexcept override {
-        return out.WriteU32(target.IsNull() ? 0u : 1u);
+        if (target.IsNull()) {
+            return out.WriteU32(0);
+        }
+
+        auto lifecycle = registry_.InspectLifecycle(access_, target);
+        if (!lifecycle) {
+            const ErrorCode error = lifecycle.Error();
+            return error == ErrorCode::StaleHandle || error == ErrorCode::Destroyed
+                       ? out.WriteU32(0)
+                       : Result<void>::Failure(error);
+        }
+
+        return out.WriteU32(lifecycle.Value() == ObjectLifecycle::Alive ? 1u : 0u);
     }
 
 private:
     ObjectRegistry& registry_;
+    const ObjectAccessContext& access_;
     Budget& budget_;
     BudgetAllocator scratch_;
     BudgetAllocator observation_;
@@ -230,7 +246,13 @@ Result<void> FindChangedFields(ObjectRegistry& registry, const ObjectAccessConte
     }
 
     const RecordLimits limits = budget.Value().Record();
-    ChangedEncodeContext context(scratch, registry, budget.Value(), schema.id);
+    // encode 동안 owner를 고정한다(그래프 저장과 같은 계약 — owner 밖 버퍼 보호).
+    auto pin = registry.PinForEncode(access, object);
+    if (!pin) {
+        return Result<void>::Failure(pin.Error());
+    }
+
+    ChangedEncodeContext context(scratch, registry, access, budget.Value(), schema.id);
     RecordBuilder record(scratch, schema.id, schema.version, limits);
     ChangedFieldSink sink(lease.Value());
     usize payloadBytes = 0;
