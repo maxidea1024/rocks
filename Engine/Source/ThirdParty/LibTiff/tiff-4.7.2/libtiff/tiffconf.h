@@ -1,7 +1,8 @@
 /* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
    libtiff CMake build generates from tiffconf.h.cmake.in. Every Rocks target is little endian with IEEE floating point. The codecs
-   are the lossless ones UE 5.8 also enables (CCITT, LZW, NeXT, PackBits, ThunderScan, ZIP through the Rocks zlib); JPEG and old
-   JPEG arrive with libjpeg-turbo (A5f rejects them), and PixarLog, SGILog, JBIG, LERC, LZMA, WebP and ZSTD are not built.
+   are the lossless ones UE 5.8 also enables (CCITT, LZW, NeXT, PackBits, ThunderScan, ZIP through the Rocks zlib) plus JPEG and
+   old JPEG through the Rocks libjpeg-turbo (section 12.11 - UE enables them on Mac and Linux only); PixarLog, SGILog, JBIG, LERC,
+   LZMA, WebP and ZSTD are not built.
    DEFAULT_EXTRASAMPLE_AS_ALPHA matches UE: a fourth sample without an ExtraSamples value is alpha. */
 #ifndef _TIFFCONF_
 #define _TIFFCONF_
@@ -30,8 +31,10 @@
 #define HOST_BIGENDIAN 0
 
 #define CCITT_SUPPORT 1
+#define JPEG_SUPPORT 1
 #define LZW_SUPPORT 1
 #define NEXT_SUPPORT 1
+#define OJPEG_SUPPORT 1
 #define PACKBITS_SUPPORT 1
 #define THUNDER_SUPPORT 1
 #define ZIP_SUPPORT 1

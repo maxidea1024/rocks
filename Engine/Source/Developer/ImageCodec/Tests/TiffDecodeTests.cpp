@@ -6,6 +6,7 @@
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
+#include <rocksjpeg.h>
 #include <tif_rocks.h>
 #include <tiffio.h>
 
@@ -54,18 +55,24 @@ void* TestTiffReallocate(void* address, size_t bytes) noexcept {
 
 const RocksTiffAllocator testTiffAllocator = {TestTiffAllocate, TestTiffReallocate,
                                               TestTiffRelease};
+const RocksJpegAllocator testJpegAllocator = {TestTiffAllocate, TestTiffRelease};
 
+// libtiff와 그 JPEG 코덱(libjpeg-turbo) 할당을 함께 묶는다(JPEG TIFF 쓰기).
 class TestTiffBinding {
 public:
-    TestTiffBinding() noexcept : previous_(RocksTiffBindAllocator(&testTiffAllocator)) {
+    TestTiffBinding() noexcept
+        : previous_(RocksTiffBindAllocator(&testTiffAllocator)),
+          previousJpeg_(RocksJpegBindAllocator(&testJpegAllocator)) {
     }
 
     ~TestTiffBinding() noexcept {
+        RocksJpegBindAllocator(previousJpeg_);
         RocksTiffBindAllocator(previous_);
     }
 
 private:
     const RocksTiffAllocator* previous_;
+    const RocksJpegAllocator* previousJpeg_;
 };
 
 // ---- 메모리 쓰기 ----
@@ -152,6 +159,7 @@ struct TiffImage {
     bool writeExtraSamples = false;
     const uint16* colormap = nullptr;
     bool ycbcr11 = false;
+    bool jpegColorModeRgb = false;
     Span<const uint8> raw;
     uint32 pages = 1;
     const char* mode = "w";
@@ -197,6 +205,11 @@ Array<uint8> WriteTiff(Allocator& allocator, const TiffImage& image) noexcept {
 
         if (image.ycbcr11) {
             TIFFSetField(tiff, TIFFTAG_YCBCRSUBSAMPLING, 1, 1);
+        }
+
+        if (image.jpegColorModeRgb) {
+            // YCbCr JPEG: libtiff가 RGB 입력을 YCbCr 4:2:0으로 바꿔 쓴다.
+            TIFFSetField(tiff, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
         }
 
         const uint32 planes = separate ? image.samples : 1;
@@ -795,13 +808,14 @@ TEST(TiffDecode_RejectionsAndDamage) {
     CHECK(Pixels(
         Decode(allocator, HandGray(allocator, COMPRESSION_NONE, PHOTOMETRIC_MINISBLACK).View()),
         TextureSourceFormat::G8, handPixels));
-    // JPEG·옛 JPEG은 A5g 전까지 UnsupportedSourceFormat, PixarLog·SGILog·LogLuv는 LossySource.
+    // JPEG·옛 JPEG은 libjpeg-turbo로 푼다(A5g) — 손으로 만든 데이터는 JPEG가 아니라 손상이다.
+    // PixarLog·SGILog·LogLuv는 LossySource.
     CHECK(Fails(
         Decode(allocator, HandGray(allocator, COMPRESSION_JPEG, PHOTOMETRIC_MINISBLACK).View()),
-        AssetDiagnosticCode::UnsupportedSourceFormat));
+        AssetDiagnosticCode::InvalidSource));
     CHECK(Fails(
         Decode(allocator, HandGray(allocator, COMPRESSION_OJPEG, PHOTOMETRIC_MINISBLACK).View()),
-        AssetDiagnosticCode::UnsupportedSourceFormat));
+        AssetDiagnosticCode::InvalidSource));
     CHECK(Fails(
         Decode(allocator, HandGray(allocator, COMPRESSION_PIXARLOG, PHOTOMETRIC_MINISBLACK).View()),
         AssetDiagnosticCode::LossySource));
@@ -858,6 +872,87 @@ TEST(TiffDecode_RejectionsAndDamage) {
     for (usize length = 0; length < file.Size(); ++length) {
         CHECK(!Decode(allocator, file.View().Slice(0, length)).ok);
     }
+}
+
+// JPEG·YCbCr JPEG TIFF(libtiff 코덱 + libjpeg-turbo — 12.11절, JPEGTables 태그는 libtiff가 쓴다),
+// 할당 실패는 두 묶음(tif_rocks·jmemrocks)이 같은 Allocator로 가는지 본다.
+TEST(TiffDecode_Jpeg) {
+    SystemAllocator allocator;
+    constexpr uint32 Size = 16;
+    uint8 rgb[Size * Size * 3] = {};
+    for (uint32 y = 0; y < Size; ++y) {
+        for (uint32 x = 0; x < Size; ++x) {
+            uint8* p = rgb + (y * Size + x) * 3;
+            p[0] = static_cast<uint8>(x * 15);
+            p[1] = static_cast<uint8>(y * 15);
+            p[2] = 100;
+        }
+    }
+
+    TiffImage image;
+    image.width = Size;
+    image.height = Size;
+    image.samples = 3;
+    image.photometric = PHOTOMETRIC_RGB;
+    image.compression = COMPRESSION_JPEG;
+    image.rowsPerStrip = Size;
+    image.raw = rgb;
+    const auto close = [&rgb](const Decoded& decoded) noexcept {
+        if (!decoded.ok || decoded.result.image.format != TextureSourceFormat::RGBA8 ||
+            decoded.result.image.pixels.Size() != Size * Size * 4) {
+            return false;
+        }
+
+        // 손실 부호화라 값은 원본 근처다(부드러운 기울기의 오차 한도).
+        constexpr int Tolerance = 24;
+        for (uint32 texel = 0; texel < Size * Size; ++texel) {
+            for (uint32 c = 0; c < 3; ++c) {
+                const int difference =
+                    static_cast<int>(decoded.result.image.pixels[texel * 4 + c]) -
+                    static_cast<int>(rgb[texel * 3 + c]);
+                if (difference > Tolerance || difference < -Tolerance) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    };
+    const Array<uint8> rgbFile = WriteTiff(allocator, image);
+    CHECK(close(Decode(allocator, rgbFile.View())));
+    image.photometric = PHOTOMETRIC_YCBCR;
+    image.jpegColorModeRgb = true;
+    const Array<uint8> yccFile = WriteTiff(allocator, image);
+    CHECK(close(Decode(allocator, yccFile.View())));
+
+    // 할당 실패 전수: 모든 시도가 OutOfMemory거나 같은 결과로 성공한다.
+    const Decoded reference = Decode(allocator, rgbFile.View());
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        test::NFailAllocator failing(allocator);
+        failing.FailOnAttempt(attempt);
+        ImageDecodeResult result(failing);
+        auto decoded = DecodeImage(failing, rgbFile.View(), ImageFileFormat::Tiff, {}, result);
+        const bool exhausted = failing.Attempts() < attempt;
+        failing.DisableFailure();
+        if (exhausted) {
+            CHECK(decoded);
+            break;
+        }
+
+        if (decoded) {
+            CHECK(platform::MemoryEquals(result.image.pixels.Data(),
+                                         reference.result.image.pixels.Data(),
+                                         reference.result.image.pixels.Size()));
+            continue;
+        }
+
+        CHECK(decoded.Error() == ErrorCode::OutOfMemory &&
+              result.failure.code == AssetDiagnosticCode::None);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
 }
 
 namespace {

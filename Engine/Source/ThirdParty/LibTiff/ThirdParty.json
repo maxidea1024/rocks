@@ -35,8 +35,10 @@
     "tiff-4.7.2/libtiff/tif_flush.c",
     "tiff-4.7.2/libtiff/tif_getimage.c",
     "tiff-4.7.2/libtiff/tif_hash_set.c",
+    "tiff-4.7.2/libtiff/tif_jpeg.c",
     "tiff-4.7.2/libtiff/tif_lzw.c",
     "tiff-4.7.2/libtiff/tif_next.c",
+    "tiff-4.7.2/libtiff/tif_ojpeg.c",
     "tiff-4.7.2/libtiff/tif_open.c",
     "tiff-4.7.2/libtiff/tif_packbits.c",
     "tiff-4.7.2/libtiff/tif_predict.c",
@@ -88,8 +90,10 @@
     "libtiff/tif_getimage.c": "9ebfe8afe9d74f6b3d23d5172d1e20150c3162082a80d2eb0fa776817915dc07",
     "libtiff/tif_hash_set.c": "b1257c93662c75de7ad67fc73f73a20e0645502fc05120d14f12bf08be49f10b",
     "libtiff/tif_hash_set.h": "de1ba012c293a798301e445e2d65b8a37bfd60426b7a6be59891058163c896eb",
+    "libtiff/tif_jpeg.c": "f6b80b90e7fb8f17448d07ceebb075dc1b8371fba5f84ab3ed00df2730a13c21",
     "libtiff/tif_lzw.c": "d313ba3ff2e358e9a516f7c5e7ce9b2f86ef12f505e667b2c6526da1a5085099",
     "libtiff/tif_next.c": "10a71e4975baac7278c6ed3ae4b0eb18402027ce1e4a2feb58873250269b9022",
+    "libtiff/tif_ojpeg.c": "e0dcb8bf12d3b403407155ac84402158c4efb0f19d2c6e10f16329b2bf311bc4",
     "libtiff/tif_open.c": "d536531e0323cc007982e8ec10d4cae03b984f19523d1b3e66dd60a7f33ce959",
     "libtiff/tif_packbits.c": "6882b72c2770de2f5c491d34f81a40be6b0782a65f04b6c5b7b4a18035db7e83",
     "libtiff/tif_predict.c": "5480cb89241e7c0095b4a85c37aeb91a1c7ddf62ab05c2ac634e9ce96bc0618a",
@@ -106,7 +110,7 @@
     "libtiff/tif_write.c": "2d970aacf60e6e6e884353361c1e781c2fe5f90fdd2fe1aaee7cf93863e53f78",
     "libtiff/tif_zip.c": "1ca068ada61c583f20dcd969d1acabc2b9c58eea4a4b18964644d34d5452e207",
     "libtiff/tiff.h": "ff8668357867cefdb31d7807a441fea04422bcff929303be09e16d99c7528fa6",
-    "libtiff/tiffconf.h": "c63d15cf7b145bc2fc3060a7f6b5aea77f45f770b6e62c4b6f5edaca0f9fe958",
+    "libtiff/tiffconf.h": "66c91344020b5b776a653708b2e59719e7ff3f1e3dd4090b3a8c7d54f4ca15ad",
     "libtiff/tiffio.h": "03ed4a148b230ae5ae3636b07b66e97d55956f9a13c4baf98ed707fc7e712f5e",
     "libtiff/tiffiop.h": "45f09bf096c43a776456e23045ade192d9b20adbdbaaa20bd14df0570ea7d668",
     "libtiff/tiffvers.h": "42c5229cac5520092fd13e7dbec357bfa18cec4e685ef252252a2918ed036a36",
@@ -187,11 +191,41 @@
       "file": "libtiff/tif_dirinfo.c",
       "line": 539,
       "text": "#pragma clang diagnostic pop"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "line": 164,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "line": 165,
+      "text": "#pragma warning(disable : 4324) /* structure padding due to alignment */"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "line": 205,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "libtiff/tif_ojpeg.c",
+      "line": 2829,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "libtiff/tif_ojpeg.c",
+      "line": 2830,
+      "text": "#pragma warning(disable : 4702) /* unreachable code */"
+    },
+    {
+      "file": "libtiff/tif_ojpeg.c",
+      "line": 2843,
+      "text": "#pragma warning(pop)"
     }
   ],
   "notes": [
     "TIFF source decoder for the texture importer (Docs/Design/AssetSystem section 12.10, stage A5f). Developer only: ImageCodec links it, runtime targets do not.",
-    "LibTiff.Build.cs adds the Zlib include directory and consumer defines, because tif_zip.c includes zlib.h; consumers link LibTiff before Zlib. tif_zip.c passes its own zalloc and zfree (TIFF_zalloc through _TIFFmallocExt), as Z_SOLO requires.",
+    "LibTiff.Build.cs adds the Zlib and LibJpegTurbo include directories and the Zlib consumer defines, because tif_zip.c includes zlib.h and tif_jpeg.c and tif_ojpeg.c include jpeglib.h; consumers link LibTiff before LibJpegTurbo and Zlib. During TIFF decoding ImageCodec binds both tif_rocks and jmemrocks allocators (section 12.11). tif_zip.c passes its own zalloc and zfree (TIFF_zalloc through _TIFFmallocExt), as Z_SOLO requires.",
     "Allocation: tif_rocks.c defines _TIFFmalloc, _TIFFcalloc, _TIFFrealloc and _TIFFfree on a per-thread allocator binding (RocksTiffBindAllocator); without a binding every allocation fails. Rocks.patch moves the two CRT allocation sites (tif_hash_set.c, the IFD offset map in tif_dirread.c) to these functions, so no libtiff allocation reaches the CRT.",
     "Messages: the global handlers are null and ImageCodec sets per-handle handlers with TIFFOpenOptionsSetErrorHandlerExtR and TIFFOpenOptionsSetWarningHandlerExtR; nothing is printed. TIFFOpen and the other file open functions are not defined; ImageCodec reads from memory through TIFFClientOpenExt.",
     "In Debug builds (NDEBUG not defined) libtiff assert becomes the CRT assert. The asserts check internal invariants, not input data."
@@ -225,7 +259,7 @@
     {
       "file": "libtiff/tiffconf.h",
       "upstreamSha256": null,
-      "reason": "Hand-written configuration header in place of the file the libtiff CMake build generates from tiffconf.h.cmake.in (lossless codecs, DEFAULT_EXTRASAMPLE_AS_ALPHA as in UE 5.8) (Docs/Design/AssetSystem section 12.10)"
+      "reason": "Hand-written configuration header in place of the file the libtiff CMake build generates from tiffconf.h.cmake.in (lossless codecs, JPEG and old JPEG through libjpeg-turbo, DEFAULT_EXTRASAMPLE_AS_ALPHA as in UE 5.8) (Docs/Design/AssetSystem section 12.10)"
     }
   ],
   "patch": "Rocks.patch"

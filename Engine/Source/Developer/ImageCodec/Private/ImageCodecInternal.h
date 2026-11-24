@@ -182,5 +182,7 @@ Result<void> DecodeHdr(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
 Result<void> DecodeExr(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
+Result<void> DecodeJpeg(Allocator& allocator, Span<const uint8> file,
+                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
 
 } // namespace rocks::image::detail

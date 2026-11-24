@@ -201,12 +201,13 @@ Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFile
     case ImageFileFormat::Exr:
         decoded = detail::DecodeExr(allocator, file, limits, out);
         break;
+    case ImageFileFormat::Jpeg:
+        decoded = detail::DecodeJpeg(allocator, file, limits, out);
+        break;
     case ImageFileFormat::WebP:
         decoded = RejectWebP(file, out);
         break;
     case ImageFileFormat::Unknown:
-    case ImageFileFormat::Jpeg:
-        // JPEG은 A5g 전에는 받지 않는다.
         decoded = detail::Unsupported(out, 0);
         break;
     }

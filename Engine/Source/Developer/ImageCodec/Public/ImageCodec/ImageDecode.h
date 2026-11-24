@@ -12,8 +12,7 @@
 // 변환하지 않는다(sRGB가 아닌 표시는 NonSrgbSource 경고).
 namespace rocks::image {
 
-// 원본 파일 형식이다. Jpeg는 A5g가 구현한다(그 전에는 UnsupportedSourceFormat). WebP는 손실이면
-// LossySource, 무손실이면 UnsupportedSourceFormat이다.
+// 원본 파일 형식이다. WebP는 손실이면 LossySource, 무손실이면 UnsupportedSourceFormat이다.
 enum class ImageFileFormat : uint8 {
     Unknown,
     Bmp,

@@ -1,8 +1,7 @@
-#include "ExternalAllocation.h"
+#include "ExternalBindings.h"
 #include "ImageCodecInternal.h"
 
 #include <Core/Math/Float16.h>
-#include <tif_rocks.h>
 #include <tiffio.h>
 
 // TIFF 디코더다(Docs/Design/AssetSystem 12.10절 — libtiff, UE TiffImageWrapper.cpp 701–820과 같은
@@ -14,8 +13,6 @@
 namespace rocks::image::detail {
 namespace {
 
-constexpr uint16 TiffCompressionOldJpeg = 6;
-constexpr uint16 TiffCompressionJpeg = 7;
 constexpr uint16 TiffCompressionPixarLog = 32909;
 constexpr uint16 TiffCompressionSgiLog = 34676;
 constexpr uint16 TiffCompressionSgiLog24 = 34677;
@@ -86,25 +83,6 @@ void TiffUnmap(thandle_t, void*, toff_t) noexcept {
 int TiffMessage(TIFF*, void*, const char*, const char*, va_list) noexcept {
     return 1;
 }
-
-const RocksTiffAllocator tiffAllocator = {ExternalAllocate, ExternalReallocate, ExternalFree};
-
-// libtiff 할당을 이 스레드의 ExternalAllocationScope로 잇는다(TIFFClose까지 덮어야 한다).
-class TiffAllocatorBinding {
-public:
-    TiffAllocatorBinding() noexcept : previous_(RocksTiffBindAllocator(&tiffAllocator)) {
-    }
-
-    ~TiffAllocatorBinding() noexcept {
-        RocksTiffBindAllocator(previous_);
-    }
-
-    TiffAllocatorBinding(const TiffAllocatorBinding&) = delete;
-    TiffAllocatorBinding& operator=(const TiffAllocatorBinding&) = delete;
-
-private:
-    const RocksTiffAllocator* previous_;
-};
 
 class TiffHandle {
 public:
@@ -570,7 +548,9 @@ Result<void> TiffDecodeDirect(Allocator& allocator, TIFF* tiff, const TiffShape&
 Result<void> DecodeTiff(Allocator& allocator, Span<const uint8> file,
                         const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept {
     ExternalAllocationScope scope(allocator);
-    TiffAllocatorBinding binding;
+    // JPEG TIFF의 libjpeg 할당도 같은 묶음으로 간다(12.11절).
+    TiffAllocatorBinding tiffBinding;
+    JpegAllocatorBinding jpegBinding;
     TIFFOpenOptions* options = TIFFOpenOptionsAlloc();
     if (options == nullptr) {
         return Resource(out, ErrorCode::OutOfMemory);
@@ -616,9 +596,9 @@ Result<void> DecodeTiff(Allocator& allocator, Span<const uint8> file,
         return Fail(out, AssetDiagnosticCode::LossySource, ErrorCode::Unsupported, 0);
     }
 
-    // JPEG·옛 JPEG은 A5g에서 libjpeg-turbo와 함께 받는다.
-    if (compression == TiffCompressionJpeg || compression == TiffCompressionOldJpeg ||
-        TIFFIsCODECConfigured(compression) == 0) {
+    // JPEG·옛 JPEG은 libtiff 코덱이 libjpeg-turbo로 푼다(12.11절 — UE Windows는 받지 않는다,
+    // Rocks는 상위집합).
+    if (TIFFIsCODECConfigured(compression) == 0) {
         return Unsupported(out, 0);
     }
 
