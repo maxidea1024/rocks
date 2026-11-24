@@ -115,17 +115,28 @@ public:
         gestures_.Reset();
     }
 
-    // 터치 제스처 인식(Pinch·Rotate·Flick — Docs/Design/TouchInput.ko.md 5.1절)을 켜고 끈다. 기본은
-    // 꺼짐이다(UE bEnableGestureRecognizer = false). 켜면 TickPlayerInput 단계에서 입력 스냅숏
-    // 다음에 돈다. 끄면 진행 중인 제스처를 지운다.
+    // 터치 제스처 인식(Pinch·Rotate·Flick — Docs/Design/TouchInput.ko.md 5.1절)을 켜고 끈다. 명시로
+    // 정하면 설정 input.enable_gesture_recognizer(기본 꺼짐 — UE bEnableGestureRecognizer)보다
+    // 우선한다. 켜면 TickPlayerInput 단계에서 입력 스냅숏 다음에 돈다. 끄면 진행 중인 제스처를
+    // 지운다.
     //
     // 사용 예:
     //   controller.SetGestureRecognizerEnabled(true);
     //   if (controller.Gesture(input::TouchGesture::Pinch).active) { ... }
     void SetGestureRecognizerEnabled(bool enabled) noexcept {
-        gestureRecognizerEnabled_ = enabled;
-        if (!enabled) {
-            gestures_.Reset();
+        gestureRecognizerExplicit_ = true;
+        SetGestureRecognition(enabled);
+    }
+
+    // 명시 설정을 지우고 설정 값을 따르게 한다.
+    void UseGestureRecognizerSetting() noexcept {
+        gestureRecognizerExplicit_ = false;
+    }
+
+    // 설정 값을 넣는다(GameInstance가 프레임마다 부른다). 명시로 정했으면 무시한다.
+    void ApplyGestureRecognizerSetting(bool enabled) noexcept {
+        if (!gestureRecognizerExplicit_) {
+            SetGestureRecognition(enabled);
         }
     }
 
@@ -157,6 +168,15 @@ protected:
     Result<void> OnPossess(ObjectHandle pawn) noexcept override;
     void OnUnPossess() noexcept override;
 
+private:
+    void SetGestureRecognition(bool enabled) noexcept {
+        if (enabled != gestureRecognizerEnabled_) {
+            gestureRecognizerEnabled_ = enabled;
+            gestures_.Reset();
+        }
+    }
+
+protected:
     void OnTick(const TickContext& context) noexcept final;
     Result<void> OnFrameworkPostAwake() noexcept final;
     void OnFrameworkEndPlay(EndPlayReason reason) noexcept final;
@@ -166,6 +186,7 @@ private:
     ROCKS_NATIVE() const input::InputState* inputSource_ = nullptr;
     ROCKS_NATIVE() input::TouchGestureRecognizer gestures_;
     ROCKS_NATIVE() bool gestureRecognizerEnabled_ = false;
+    ROCKS_NATIVE() bool gestureRecognizerExplicit_ = false;
     ROCKS_NATIVE() ObjectHandle localPlayer_;
     ROCKS_NATIVE() ObjectHandle cameraDirector_;
 };

@@ -14,6 +14,7 @@
 #include <Gameplay/GameInstanceClient.h>
 #include <HostConfig/HostSettings.h>
 #include <Input/InputEvent.h>
+#include <Input/InputSettings.h>
 #include <Input/InputState.h>
 #include <Launch/Application.h>
 #include <Platform/Clock.h>
@@ -132,6 +133,10 @@ public:
         if (options_.gamepads != nullptr) {
             options_.gamepads->Poll(queue_);
         }
+
+        // input.use_mouse_for_touch(설정 문맥이 묶인 게임 스레드 —
+        // Docs/Design/TouchInput.ko.md 3.4절).
+        input_.SetMouseTouchEmulation(input::UseMouseForTouchSetting());
 
         if (options_.injectKeyAtFrame != 0 && pumped_ == options_.injectKeyAtFrame) {
             (void)queue_.Push(input::InputEvent::KeyDown(input::Key::W));
