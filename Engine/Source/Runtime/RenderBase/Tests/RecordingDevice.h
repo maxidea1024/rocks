@@ -70,8 +70,26 @@ public:
         // value는 획득한 자원의 slot 번호(버퍼면 AcquireBufferBit을 더한다)다.
         CreateTransientHeap,
         CreatePlaced,
-        Acquire
+        Acquire,
+        // compute(GX3·GX4, Docs/Design/RenderBase 4.4절 "GX3·GX4 compute 연결 설계")다.
+        // CreateComputePipeline의 value는 그리기별 상수 byte 수다.
+        CreateComputePipeline,
+        // value는 (ReadWrite면 1 << 32) | 종류(BufferViewKind)다.
+        CreateBufferView,
+        RetireBufferView,
+        // value는 (slot << 1) | (묶은 view가 유효하면 1)이다.
+        SetBufferView,
+        SetWritableBufferView,
+        // value는 DispatchValue(x, y, z)다.
+        Dispatch,
+        // value는 인자 offset이다.
+        DispatchIndirect
     };
+
+    // Op::Dispatch value다(축마다 21 bit).
+    static constexpr uint64 DispatchValue(uint32 x, uint32 y, uint32 z) noexcept {
+        return (static_cast<uint64>(x) << 42) | (static_cast<uint64>(y) << 21) | z;
+    }
 
     // Op::Acquire value에서 버퍼 표시 bit다.
     static constexpr uint64 AcquireBufferBit = 1ull << 32;
@@ -122,6 +140,8 @@ public:
     };
 
     static constexpr usize MaxCalls = 1024;
+    // compute 그룹 수 기본 한도(축별, D3D12 D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION)다.
+    static constexpr uint32 DefaultComputeGroupLimit = 65535;
 
     explicit RecordingDevice(Allocator& allocator) noexcept;
     ~RecordingDevice() override;
@@ -348,6 +368,24 @@ public:
         return lastVertexShader_;
     }
 
+    // 마지막으로 만든 compute 파이프라인의 CS handle이다.
+    graphics::ShaderHandle LastPipelineComputeShader() const noexcept {
+        return lastComputeShader_;
+    }
+
+    // 장치 compute 한도(DeviceLimits::computeGroupCount)를 바꾼다(그룹 수 검사 시험). 장치를 쓰기
+    // 전에 부른다.
+    void SetComputeGroupLimit(uint32 x, uint32 y, uint32 z) noexcept {
+        caps_.limits.computeGroupCount[0] = x;
+        caps_.limits.computeGroupCount[1] = y;
+        caps_.limits.computeGroupCount[2] = z;
+    }
+
+    // 살아 있는 버퍼 view 수다(그래프가 view를 모두 Retire했는지).
+    usize LiveBufferViews() const noexcept {
+        return bufferViews_.Size();
+    }
+
     // CreatePipeline 호출 수(실패 포함)다.
     uint64 PipelineCreateCalls() const noexcept {
         return pipelineCreateCalls_;
@@ -385,6 +423,17 @@ private:
         uint64 fenceValue = 0;
         uint64 bytes = 0;
     };
+
+    // 버퍼 view 하나다(원 버퍼와 접근).
+    struct BufferViewState {
+        SlotHandle buffer;
+        graphics::ViewAccess access = graphics::ViewAccess::Read;
+    };
+
+    // view를 묶을 때 원 버퍼 상태가 allowed 가운데 하나인지 본다(아니면 검증 오류). 묶은 view가
+    // 유효하면 true다.
+    bool CheckBufferView(graphics::BufferViewHandle view, graphics::ViewAccess access,
+                         graphics::ResourceAccess allowed) noexcept;
 
     // subresource(mip × slice)마다 추적한 상태다. view(CreateTextureView)면 상태 표는 비고 원
     // 텍스처와 범위를 가진다.
@@ -533,6 +582,8 @@ private:
     uint64 createdShaders_ = 0;
     uint64 retiredShaders_ = 0;
     graphics::ShaderHandle lastVertexShader_;
+    graphics::ShaderHandle lastComputeShader_;
+    SlotArray<BufferViewState> bufferViews_;
     uint64 pipelineCreateCalls_ = 0;
     Array<Retired> retired_;
     SlotArray<Readback> readbacks_;

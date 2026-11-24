@@ -707,16 +707,27 @@ Result<void> PreparePass(FrameArena& arena, GraphState& state, uint32 pass) noex
             continue;
         }
 
-        const ResourceRecord& resource = state.resources[view.texture];
-        auto created =
-            state.device->CreateTextureView(graphics::TextureHandle{resource.device}, view.desc);
+        const ResourceRecord& resource = state.resources[view.resource];
+        Result<SlotHandle> created = Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+        if (view.kind == GraphResourceKind::Texture) {
+            auto texture = state.device->CreateTextureView(graphics::TextureHandle{resource.device},
+                                                           view.desc);
+            created = texture ? Result<SlotHandle>::Success(texture.Value().slot)
+                              : Result<SlotHandle>::Failure(texture.Error());
+        } else {
+            auto buffer = state.device->CreateBufferView(graphics::BufferHandle{resource.device},
+                                                         view.bufferDesc);
+            created = buffer ? Result<SlotHandle>::Success(buffer.Value().slot)
+                             : Result<SlotHandle>::Failure(buffer.Error());
+        }
+
         if (!created) {
             return Result<void>::Failure(RecordGraphError(
                 state, created.Error(), false, "pass '{}' could not create a view of '{}' ({})",
                 passName, resource.name, ErrorCodeName(created.Error())));
         }
 
-        view.device = created.Value().slot;
+        view.device = created.Value();
     }
 
     return Result<void>::Success();
@@ -1109,7 +1120,12 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
     // 장치 view를 놓는다(장치 Retire는 마지막 사용 fence 뒤 해제다).
     for (ViewRecord& view : state.views) {
         if (!view.device.IsNull()) {
-            state.device->Retire(graphics::TextureHandle{view.device});
+            if (view.kind == GraphResourceKind::Texture) {
+                state.device->Retire(graphics::TextureHandle{view.device});
+            } else {
+                state.device->Retire(graphics::BufferViewHandle{view.device});
+            }
+
             view.device = {};
         }
     }

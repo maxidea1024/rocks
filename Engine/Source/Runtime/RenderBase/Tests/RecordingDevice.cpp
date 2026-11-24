@@ -15,11 +15,15 @@ RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
       placedTextures_(allocator), placedBuffers_(allocator), buffers_(allocator),
       allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
       pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), shaders_(allocator),
-      retired_(allocator), readbacks_(allocator),
+      bufferViews_(allocator), retired_(allocator), readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
     tickSource_.pool = &timestampPool_;
+    // compute 그룹 수 한도는 D3D12와 같은 축별 65535다(SetComputeGroupLimit로 바꾼다).
+    for (uint32& limit : caps_.limits.computeGroupCount) {
+        limit = DefaultComputeGroupLimit;
+    }
 }
 
 TimestampReadState RecordingDevice::TickSource::ReadTimestamps(uint32 first, uint32 count,
@@ -986,9 +990,42 @@ uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noe
 
 Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,
                                                            const BufferViewDesc& desc) noexcept {
-    (void)buffer;
-    (void)desc;
-    return Result<BufferViewHandle>::Failure(ErrorCode::Unsupported);
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<BufferViewHandle>::Failure(owner.Error());
+    }
+
+    if (!buffers_.IsValid(buffer.slot)) {
+        return Result<BufferViewHandle>::Failure(ErrorCode::StaleHandle);
+    }
+
+    BufferViewState state;
+    state.buffer = buffer.slot;
+    state.access = desc.access;
+    auto added = bufferViews_.TryAdd(state);
+    if (!added) {
+        return Result<BufferViewHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateBufferView, (desc.access == ViewAccess::ReadWrite ? 1ull << 32 : 0ull) |
+                                     static_cast<uint32>(desc.kind));
+    return Result<BufferViewHandle>::Success(BufferViewHandle{added.Value()});
+}
+
+bool RecordingDevice::CheckBufferView(BufferViewHandle view, ViewAccess access,
+                                      ResourceAccess allowed) noexcept {
+    const BufferViewState* state = bufferViews_.Find(view.slot);
+    if (state == nullptr) {
+        return false;
+    }
+
+    const ResourceAccess* tracked = buffers_.Find(state->buffer);
+    if (state->access != access || tracked == nullptr || !HasAnyAccess(*tracked, allowed)) {
+        ++validationErrors_;
+    }
+
+    TouchBuffer(state->buffer);
+    return true;
 }
 
 Result<void> RecordingDevice::ReadBuffer(BufferHandle buffer, uint64 offset,
@@ -1000,24 +1037,48 @@ Result<void> RecordingDevice::ReadBuffer(BufferHandle buffer, uint64 offset,
 }
 
 void RecordingDevice::Retire(BufferViewHandle view) noexcept {
-    (void)view;
+    if (!ownership_.Check() || !bufferViews_.TryRemove(view.slot)) {
+        return;
+    }
+
+    Defer();
+    Record(Op::RetireBufferView);
 }
 
+// 읽기 view는 셰이더 읽기(그래픽·compute) 상태여야 한다.
 void RecordingDevice::SetBufferView(uint32 slot, BufferViewHandle view) noexcept {
-    (void)slot;
-    (void)view;
+    const bool valid = CheckBufferView(view, ViewAccess::Read,
+                                       ResourceAccess::SrvGraphics | ResourceAccess::SrvCompute);
+    Record(Op::SetBufferView, (static_cast<uint64>(slot) << 1) | (valid ? 1u : 0u));
 }
 
-// 아래 GX3·GX4 명령은 기록 장치가 쓰지 않는다(렌더 그래프 시험 범위 밖).
+// compute 파이프라인은 그리기별 상수 크기만 기억한다(SetDrawConstants 검사, 그래픽과 같은 표).
 Result<PipelineHandle>
 RecordingDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
-    (void)desc;
-    return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+    ++pipelineCreateCalls_;
+    lastComputeShader_ = desc.computeShader;
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<PipelineHandle>::Failure(owner.Error());
+    }
+
+    if (!graphics::ValidateComputePipelineDesc(desc)) {
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto added = pipelines_.TryAdd(desc.drawConstantBytes);
+    if (!added) {
+        return Result<PipelineHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateComputePipeline, desc.drawConstantBytes);
+    return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
 }
 
+// 쓰기 view는 UAV 상태여야 한다.
 void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {
-    (void)slot;
-    (void)view;
+    const bool valid = CheckBufferView(view, ViewAccess::ReadWrite, UavAccessMask);
+    Record(Op::SetWritableBufferView, (static_cast<uint64>(slot) << 1) | (valid ? 1u : 0u));
 }
 
 void RecordingDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
@@ -1062,16 +1123,38 @@ void RecordingDevice::DrawIndexedIndirect(BufferHandle arguments, uint64 offset)
     (void)offset;
 }
 
+// 그룹 수가 한도 밖이거나 파이프라인이 없으면 실제 장치처럼 무시한다(IgnoredDraws).
 void RecordingDevice::Dispatch(uint32 groupCountX, uint32 groupCountY,
                                uint32 groupCountZ) noexcept {
-    (void)groupCountX;
-    (void)groupCountY;
-    (void)groupCountZ;
+    const uint32 counts[3] = {groupCountX, groupCountY, groupCountZ};
+    bool inside = recording_ && pipelines_.IsValid(boundPipeline_.slot);
+    for (uint32 axis = 0; axis < 3; ++axis) {
+        inside = inside && counts[axis] <= caps_.limits.computeGroupCount[axis];
+    }
+
+    if (!inside) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    Record(Op::Dispatch, DispatchValue(groupCountX, groupCountY, groupCountZ));
 }
 
+// 인자 버퍼는 IndirectArgs 상태여야 한다(아니면 검증 오류, 렌더 그래프가 전이를 낸다).
 void RecordingDevice::DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept {
-    (void)arguments;
-    (void)offset;
+    const ResourceAccess* tracked = buffers_.Find(arguments.slot);
+    if (!recording_ || tracked == nullptr || !pipelines_.IsValid(boundPipeline_.slot) ||
+        offset % sizeof(uint32) != 0) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    if (!HasAnyAccess(*tracked, ResourceAccess::IndirectArgs)) {
+        ++validationErrors_;
+    }
+
+    TouchBuffer(arguments.slot);
+    Record(Op::DispatchIndirect, offset);
 }
 
 void RecordingDevice::SetViewport(const Viewport& viewport) noexcept {

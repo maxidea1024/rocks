@@ -4,6 +4,7 @@
 #include <Core/Result.h>
 #include <TextLayout/FontFaceData.h>
 #include <TextLayout/FontTypes.h>
+#include <TextLayout/GlyphRaster.h>
 #include <TextLayout/TextShaping.h>
 
 // 글꼴 라이브러리 backend 계약이다(Docs/Design/Font 3장·6.8절). 구현은 ClientOnly 모듈
@@ -49,6 +50,12 @@ public:
     // 실패는 OutOfMemory다.
     virtual Result<void> Shape(const ShapeRunRequest& request,
                                Array<ShapedGlyph>& out) noexcept = 0;
+
+    // 글리프 하나를 래스터해 out에 쓴다(UE FSlateFontRenderer::GetRenderData와 같다 — 6.8절
+    // FT2d). 크기·배율이 0 이하이거나 글리프 번호가 범위 밖이면 InvalidArgument, FreeType 래스터
+    // 실패는 Unsupported(원본 오류를 로그), 할당 실패는 OutOfMemory다.
+    virtual Result<void> Rasterize(const GlyphRasterRequest& request,
+                                   GlyphBitmap& out) noexcept = 0;
 };
 
 class ROCKS_TEXTLAYOUT_API TextBackend {

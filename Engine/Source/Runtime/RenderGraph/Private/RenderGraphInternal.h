@@ -255,14 +255,24 @@ struct PhysicalResource {
     SlotHandle device;
 };
 
-// 그래프 텍스처 view 하나다(CreateTextureView). 장치 view는 처음 쓰는 pass 직전에 만들고 그래프
-// 끝에 Retire한다.
+// 그래프 view 하나다(CreateTextureView·CreateBufferView). 장치 view는 처음 쓰는 pass 직전에 만들고
+// 그래프 끝에 Retire한다.
 struct ViewRecord {
-    uint32 texture = GraphIndexNone;
+    GraphResourceKind kind = GraphResourceKind::Texture;
+    // 원 자원 번호다(텍스처 view면 텍스처, 버퍼 view면 버퍼).
+    uint32 resource = GraphIndexNone;
     graphics::TextureViewDesc desc;
-    // 텍스처에 맞춰 푼 범위다(접근 선언의 subresource 범위).
+    graphics::BufferViewDesc bufferDesc;
+    // 텍스처에 맞춰 푼 범위다(접근 선언의 subresource 범위, 버퍼 view는 쓰지 않는다).
     graphics::ResolvedSubresourceRange range;
     SlotHandle device;
+
+    // 쓰기(UAV) view인지다.
+    bool Writable() const noexcept {
+        return kind == GraphResourceKind::Texture
+                   ? desc.access == graphics::ViewAccess::ReadWrite
+                   : bufferDesc.access == graphics::ViewAccess::ReadWrite;
+    }
 };
 
 class GraphCommandList;
