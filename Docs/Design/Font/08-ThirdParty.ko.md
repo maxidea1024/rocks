@@ -16,7 +16,7 @@
 | `NanoSvg` | nanosvg `239e102`(2026-07-09, 릴리스 없음) | UE 트리 판 | GitHub 커밋 해시 | `src/nanosvg.h`·`nanosvgrast.h` | Zlib |
 | 기존 `Zlib`·`Brotli`(Core) | — | — | — | FreeType·libpng의 zlib, FreeType의 Brotli 의존을 이것으로 채운다(새로 들이지 않음) | — |
 
-nanosvg는 글꼴이 아니라 UiToolkit SVG brush(4.1절)용이며 소비 모듈은 UiRender다(3장). UD3의 같은 묶음이라 함께 들인다.
+nanosvg는 글꼴이 아니라 UiToolkit SVG brush(4.1절)용이며 소비 모듈은 UiRender다(3장). FT1d에서 확인해 보니 원본 `#pragma warning(disable: 4996)`이 가리던 경고(`sscanf` 세 곳·`strncpy` 세 곳·`nsvgParseFromFile`의 `fopen`, 부호 비교 한 곳 — 지시문을 지운 사본도 경고 0이어야 한다)를 고치는 수정이 필요해, 도입은 SVG brush를 쓰는 UiToolkit UT2로 미룬다(2026-11-24). 그때 구현부는 glue C 번역 단위 하나(`NANOSVG_IMPLEMENTATION`·`NANOSVGRAST_IMPLEMENTATION`)로 빌드하는 code 라이브러리로 둔다.
 
 ### 8.2 빌드 구성
 
@@ -29,7 +29,7 @@ nanosvg는 글꼴이 아니라 UiToolkit SVG brush(4.1절)용이며 소비 모�
   - 할당: `FT_New_Library`에 Rocks 할당기를 건 `FT_Memory`로 library를 만든다(`FT_Init_FreeType`의 `malloc` 미사용).
 - **HarfBuzz**: `harfbuzz.cc` + `hb-icu.cc`. `HAVE_FREETYPE`·`HAVE_ICU`·`HAVE_ICU_BUILTIN`(UE 12.2.0 빌드와 같다 — 1.9절, FD15). glib·cairo·graphite·coretext·directwrite·uniscribe 끔. 할당은 `hb_malloc_impl`·`hb_calloc_impl`·`hb_realloc_impl`·`hb_free_impl` 매크로를 Rocks 할당 함수로 정한다.
 - **ICU**: `source/common` 전부와 `source/stubdata/stubdata.cpp`(`udata_setCommonData`로 데이터를 넣을 때 필요한 진입점 `U_ICUDATA_ENTRY_POINT`). 정의: `U_COMMON_IMPLEMENTATION`(없으면 `putil.cpp`가 `#error`), `U_STATIC_IMPLEMENTATION`, `U_CHARSET_IS_UTF8=1`, `UCONFIG_NO_LEGACY_CONVERSION=1`, `UCONFIG_NO_CONVERSION=1`·`UCONFIG_NO_IDNA=1`(엔진이 쓰지 않는 변환기·IDNA, ICU가 자기 사용 중단 API를 부르는 경로도 함께 빠진다), `UCONFIG_NO_FILE_IO=1`(데이터는 메모리로만), `U_USING_ICU_NAMESPACE=0`. `rtti: true`(1.9절·C++ 서드파티 항목). 경고 규칙(`-Werror`)에 걸리는 다섯 곳은 추적 가능한 수정으로 고쳤다: `cstring.h`의 `uprv_strcpy`·`strcat`·`strncpy`·`strncat`(같은 결과의 memcpy 구현), `ubrk.cpp` `ubrk_clone`(사용 중단 `ubrk_safeClone` 대신 같은 본문), `putil.cpp`(Windows `_get_timezone`·`_get_tzname`, `ICU_TIMEZONE_FILES_DIR` 환경 변수 읽지 않음), `umapfile.cpp`·`uinit.cpp`(쓰지 않는 인자 표시). 이름 바꾸기(`u_xxx_79`)는 켜 둔다(macOS 시스템 `libicucore`와 충돌 방지). 할당은 `u_setMemoryFunctions`로 Rocks 할당기. `globalState` = true(3장).
-- **msdfgen**: `core/*.cpp` + `ext/import-font.cpp`(FreeType 윤곽 → `msdfgen::Shape`, `MSDFGEN_USE_FREETYPE` — UE `SlateSdfGenerator.cpp` 261행과 같은 경로). 나머지 ext(SVG·PNG 저장·tinyxml2·skia)는 들이지 않는다. `MSDFGEN_PUBLIC` 비움.
+- **msdfgen**(FT1d 구현): 최상위 `msdfgen.h`와 `core/` 헤더 전부, `core/*.cpp` 중 파일 출력 도구(`export-svg`·`save-*`·`shape-description`)를 뺀 것 + `ext/import-font.cpp`. 미사용 인자·필드 초기화 경고 네 파일은 추적 가능한 수정. `import-font.h`는 FreeType 헤더 뒤에 include해야 FT_Face 함수가 선언된다(FreeType 윤곽 → `msdfgen::Shape`, `MSDFGEN_USE_FREETYPE` — UE `SlateSdfGenerator.cpp` 261행과 같은 경로). 나머지 ext(SVG·PNG 저장·tinyxml2·skia)는 들이지 않는다. `MSDFGEN_PUBLIC` 비움.
 - **libpng**: `scripts/pnglibconf.h.prebuilt`를 그대로 쓴다(원본 파일). 아키텍처별 SIMD 경로(`PNG_*_OPT=0`)는 끈다 — PNG는 무손실이라 결과는 같고, 플랫폼별 소스 목록을 두지 않아 빌드가 단순해진다.
 - **C++ 서드파티.** HarfBuzz·ICU·msdfgen은 C++이다. 빌드 체계는 원래 서드파티 code 라이브러리를 C17로만 받았으므로, C++ 번역 단위를 받도록 넓혔다([압축](../Compression.ko.md) 3.3절 "C++ 서드파티"). 엔진과 같은 C++23 인자로 컴파일하고 RTTI·예외는 끈다. ICU만 manifest `rtti: true`로 RTTI를 켠다(ICU4C common의 `dynamic_cast`·`typeid` — 사용자 결정 2026-11-24). ICU 소비자는 C API만 쓴다.
 - 모든 라이브러리는 정적 라이브러리다. Rocks 소비 모듈은 FreeType·HarfBuzz·Icu·Msdfgen·LibPng는 `TextLayoutBackend`(ClientOnly)뿐이고, NanoSvg는 UiRender다(3장). 서드파티 사이 의존은 FreeType → {Zlib, Brotli, LibPng}, LibPng → Zlib, HarfBuzz → {FreeType, Icu}, Msdfgen → FreeType이다.

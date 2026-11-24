@@ -16,7 +16,7 @@
 
 | 단계 | 내용 | 선행 | 완료 조건 | 시기 |
 |---|---|---|---|---|
-| FT1 | 서드파티 도입(8장): FT1a FreeType·LibPng(Zlib·Brotli 연결), FT1b HarfBuzz(hb-icu는 FT1c 뒤 연결), FT1c ICU·데이터 부분집합·staging, FT1d msdfgen·nanosvg, FT1e 시험 글꼴·연결 시험·고지 | 없음 | 8.5절 | **지금 가능** |
+| FT1 | 서드파티 도입(8장): FT1a FreeType·LibPng(Zlib·Brotli 연결), FT1b HarfBuzz(hb-icu는 FT1c 뒤 연결), FT1c ICU·데이터 부분집합·staging, FT1d msdfgen(nanosvg는 UiToolkit UT2로 — 8.1절), FT1e 시험 글꼴·연결 시험·고지 | 없음 | 8.5절 | **지금 가능** |
 | FT2 | `TextLayout` 글꼴 코어(6장 라이브러리 중립 부분)와 `TextLayoutBackend`(ClientOnly, 라이브러리 구현·등록): face·metric·hinting, 조합 탐색, shaping·측정, Bitmap·컬러·외곽선 래스터, 전처리 geometry·거리장, 글리프 cache CPU, CVar | FT1 | FV1–FV7 | UiToolkit UT2의 TextLayout 부분(고정 순서) |
 | FT3 | Font 모듈: 열거형·FontFace·Font·저장 기술·검증·face 공급자·Resolve·로딩 방식 셋 | FT2, FP1(LazyLoad·Stream) | FV8–FV10 | FT2 뒤 |
 | FT4 | FontTools: 임포터·재임포트·같은 이름 Font·쿠킹 처리기·서버 쿠킹 | FT3, FP6(서버 쿠킹) | FV11–FV13 | FT3 뒤 |
