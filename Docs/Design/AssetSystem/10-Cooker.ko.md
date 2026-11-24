@@ -291,7 +291,7 @@ v1은 A4f에서 v2(backend 표·비에셋 산출물 표 — 10.3절 4항)로 바
 
 **구현 시점**: SH2d(셰이더 쪽 마지막 단계 — 순서 SH2a → b → c → e → f → d) 착수 전에 끝낸다. 사용자가 정한 에셋 순서(A5 → A6 → 화면 마일스톤)를 바꾸지 않으므로 끼울 자리는 사용자와 정한다.
 
-**렌더 세션에 알릴 것(요구 원문과 다른 곳 — 이 설계 확정 때 알림)**: (a) SSD10의 "쿠커가 형식 정의 디렉터리와 대조"를 비에셋 산출물 단계(셰이더 쪽) 시작 때 대조로 옮겼다(1항 — AssetCooker가 ShaderCompiler에 의존하지 않게). (b) `graphicsBackends`가 빈 프로필은 셰이더 없는 프로필이다(1항 — UE 전용 서버 타깃처럼 형식이 없는 경우, 런타임 규칙은 셰이더 쪽이 정한다). (c) macOS 프로필 id는 `MacOS`가 아니라 Rocks 플랫폼 이름 `Mac`이다(1항 — SSD10·SSD24 문구 수정 요청). 렌더 세션이 (c)를 받지 않으면 id를 `MacOS`로 두고 `asset.runtime_profile` 기본값(11.8절)과 EngineAssets 대체값·시험 수정을 A4f 범위에 넣는다.
+**렌더 세션과 맞춘 것(요구 원문과 다른 곳 — 2026-11-24 rocks-6b가 셋 다 받아들임, ShaderSystem 다음 개정에 반영)**: (a) SSD10의 "쿠커가 형식 정의 디렉터리와 대조"를 비에셋 산출물 단계(셰이더 쪽) 시작 때 대조로 옮겼다(1항 — AssetCooker가 ShaderCompiler에 의존하지 않게). (b) `graphicsBackends`가 빈 프로필은 셰이더 없는 프로필이다(1항). 셰이더 쪽 런타임 규칙: 매니페스트 backendCount 0이면 그래픽 장치·렌더러를 만들지 않고(UE 전용 서버의 NullDrv처럼), 그 실행에서 장치 생성을 요청하면 `Unsupported`("this cook has no shader formats")다 — 셰이더 라이브러리를 찾지 않으므로 `CorruptPackage`도 없다. (c) macOS 프로필 id는 Rocks·UE 플랫폼 이름 `Mac`이다(SSD10·SSD24 문구를 고친다).
 
 1. **TargetProfile 칸**(SSD10 — 10.2절 2항의 `graphicsBackend`를 바꾼다):
    - `graphicsBackends`(`Array<String>`): 런타임이 시도하는 backend 순서. 병합은 ReflectionText 기본(배열 통째 교체).
