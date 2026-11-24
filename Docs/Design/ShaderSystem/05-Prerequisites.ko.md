@@ -58,7 +58,7 @@
   - N2. 값은 여러 부분(`.rnug` 부분 구조)이다: 바이트코드·정규화 바인딩 layout·GLES 복사 표·진단·디버그 심볼.
   - N3. Rockpile이 요구한 AssetSystem 9절 개정(`Rockpile.ko.md` 17절: 키의 에셋 너겟 세대 Guid 11.4절, `.rnug` v2 5.2절, 일괄·비동기 API 12.2절)이 A3에 반영되면 셰이더 키·값도 그대로 따른다. 셰이더 bucket은 `shader`다(`Rockpile.ko.md` 5.1절).
 - **A4**
-  - K1. TargetProfile에 `graphicsBackends`(복수, 순서 = 런타임 선택 순서)·`shaderFormats`(backend마다 선호 순서가 있는 형식 목록) 필드와 엔진 기본 `MacOS` 프로필을 둔다(12절). 지금 AssetSystem 10절은 "그래픽 backend"를 이름 없는 단일 항목으로 적고 기본 프로필은 Windows·Android뿐이다.
+  - K1. TargetProfile에 `graphicsBackends`(복수, 순서 = 런타임 선택 순서)·`shaderFormats`(backend마다 선호 순서가 있는 형식 목록) 필드와 엔진 기본 `Mac` 프로필을 둔다(12절). 지금 AssetSystem 10절은 "그래픽 backend"를 이름 없는 단일 항목으로 적고 기본 프로필은 Windows·Android뿐이다.
   - K2. 쿠킹 매니페스트 v2에 에셋이 아닌 산출물 항목을 둔다(12절). v1 항목은 AssetId 단위다(AssetSystem 10절).
   - K3. 엔진 내장 셰이더 라이브러리를 프로젝트·너겟·네트워크 없이 제공하는 경로를 둔다. 계획 9.6절이 "에셋 너겟·네트워크·프로젝트 없는 설치에서도 최소 자원을 제공한다"고 요구한다. 라이브러리를 만들 때 쓰는 엔진 컴파일 프로필은 P6a가 정하고(12.1절), A4는 설치물에 라이브러리를 두고 여는 경로만 맡는다(12.3절).
 
