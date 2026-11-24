@@ -401,6 +401,7 @@ Array<uint8> Png(Allocator& allocator, const PngSpec& spec) noexcept {
         CHECK(false);
         return Array<uint8>(allocator);
     }
+
     Chunk(file, "IDAT", compressed.View());
     Chunk(file, "IEND", {});
     return Move(file.data);
