@@ -91,6 +91,24 @@ struct ClassDefaultsStatus {
 [[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<ClassDefaultsStatus>
 ClassifyClassDefaults(const TypeLease& lease, Allocator& scratch) noexcept;
 
+// object의 값이 클래스 기본값(editor 레코드)과 다른 위치를 out에 모은다(AssetSystem 12.8절 계약
+// 판정 — 차이 저장과 같은 같음: wire byte, NaN payload까지). 그래프 저장과 같은 필드 루프로
+// 인코딩하되 노드 Record·외부 참조 표를 만들지 않는다: 객체 참조(강한·weak)는 null이 아니면 언제나
+// 다름이다(그래프 밖 대상도). 위치는 최상위 필드, 비Atomic 단일 struct는 다른 잎 멤버 경로(A5b
+// override 단위와 같은 펼침), 그 밖(Atomic struct·배열·Map·Set·Optional·InstancedStruct)은 그 필드
+// 경로이고 스키마 순서다.
+//
+// 오류(out은 빈다): AcquireType의 오류, 레코드 없는 타입 Unsupported(호출자는 값 판정만 한다),
+// 레코드 실패는 그 진단 오류, 인코딩·Record 오류, 할당 실패 OutOfMemory.
+//
+// 사용 예:
+//   Array<PropertyPathBuffer> changed(allocator);
+//   if (auto found = FindChangedFields(registry, access, texture, allocator, changed); !found)
+//   {...}
+[[nodiscard]] ROCKS_OBJECTSERIALIZATION_API Result<void>
+FindChangedFields(ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object,
+                  Allocator& scratch, Array<PropertyPathBuffer>& out) noexcept;
+
 // ForEachClassDefaults가 구체 클래스마다 부르는 함수다. 성공이면 defaults(호출 동안만 유효)가 있고
 // diagnostic.reason이 None, 실패면 defaults가 null이고 diagnostic에 이유가 있다. 실패를 돌려주면
 // 순회를 그 오류로 멈춘다.

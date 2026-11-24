@@ -11,6 +11,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Object/ModuleTypeRegistrations.h>
 #include <Object/TypeRegistry.h>
+#include <ReflectionText/TextDiagnostics.h>
 #include <Task/WorkerScheduler.h>
 
 namespace rocks {
@@ -72,7 +73,7 @@ struct AssetImporterSetup {
 };
 
 // 에셋 명령의 문맥이다(commandlet_host::Run이 건다): 작업 메모리와 Launch의 프로세스 모듈 로더,
-// 에셋 타입 모듈 이름(비면 AssetTypeModule — 시험은 fixture 모듈), 임포터 등록.
+// 에셋 타입 모듈 이름(비면 AssetTypeModules 전부 — 시험은 fixture 모듈), 임포터 등록.
 struct AssetCommandContext {
     Allocator* allocator = nullptr;
     ModuleLoader* modules = nullptr;
@@ -81,11 +82,11 @@ struct AssetCommandContext {
 };
 
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem 7.1절 15 A2c3b, ModuleLoader
-// 3.11절): 에셋 타입 모듈(AssetTypeModule — AssetRuntime은 그 의존)을 시작하고 이 TypeRegistry의
+// 3.11절): 에셋 타입 모듈(AssetTypeModules — AssetRuntime은 그 의존)을 시작하고 이 TypeRegistry의
 // 타입 등록기를 붙인다. Name pool도 둔다. 소멸이 등록기를 떼고 Registry·pool을 닫는다.
 class ROCKS_ASSETCOMMANDLETS_API AssetCommandTypes {
 public:
-    // module은 시작할 에셋 타입 모듈이다(비면 AssetTypeModule).
+    // module은 시작할 에셋 타입 모듈이다(비면 AssetTypeModules 전부).
     AssetCommandTypes(Allocator& allocator, ModuleLoader& modules, StringView module = {}) noexcept;
     ~AssetCommandTypes() noexcept;
     AssetCommandTypes(const AssetCommandTypes&) = delete;
@@ -103,7 +104,8 @@ public:
         return names_;
     }
 
-    // 시작하는 에셋 타입 모듈 이름이다(실패 줄이 쓴다).
+    // 시작하는 에셋 타입 모듈 이름이다(실패 줄이 쓴다 — 목록이면 Start가 실패한 모듈, 시작 전이나
+    // 성공 뒤에는 첫 모듈).
     StringView Module() const noexcept {
         return module_;
     }
@@ -111,6 +113,8 @@ public:
 private:
     ModuleLoader* modules_;
     StringView module_;
+    // module이 비어 AssetTypeModules 전부를 시작하는지다.
+    bool defaultModules_ = false;
     TypeRegistry types_;
     ModuleTypeRegistrations registrations_;
     NamePool names_;
@@ -118,9 +122,16 @@ private:
     bool namesReady_ = false;
 };
 
-// 에셋 명령이 시작하는 에셋 타입 모듈이다(그 의존 폐포의 타입이 등록된다 — A5 뒤 텍스처 모듈을
-// 더한다).
-inline constexpr StringView AssetTypeModule = "Animation";
+// 에셋 명령이 시작하는 에셋 타입 모듈들이다(차례로 시작 — 각 의존 폐포의 타입이 등록된다,
+// Docs/Design/AssetSystem 12.8절). 시험은 AssetCommandContext::typeModule로 모듈 하나를 준다.
+inline constexpr StringView AssetTypeModules[] = {"Animation", "Texture"};
+
+// 대입 진단 줄의 진단 이름이다(AS 13절 `<command>: <진단>: <경로>: <설명>`). 숨김 열거자 입력
+// (HiddenEnumerator — 저장 값으로만 유효한 값)은 에셋 설정 진단 InvalidSetting으로 낸다
+// (Docs/Design/AssetSystem 12.8절, ReflectionExtensions "A5가 InvalidSetting으로 바꾼다"). 그 밖은
+// ReflectionText 이름 그대로다.
+ROCKS_ASSETCOMMANDLETS_API const char*
+AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept;
 
 // 공통 옵션 --wait=<초>의 상한이다(하루 — 밖이면 사용법 오류).
 inline constexpr uint32 MaxWaitSeconds = 86400;

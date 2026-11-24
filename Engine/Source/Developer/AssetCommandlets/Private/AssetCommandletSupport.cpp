@@ -86,8 +86,9 @@ ScanScheduler::~ScanScheduler() noexcept {
 
 AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules,
                                      StringView module) noexcept
-    : modules_(&modules), module_(module.IsEmpty() ? AssetTypeModule : module), types_(allocator),
-      registrations_(types_, allocator), names_(allocator) {
+    : modules_(&modules), module_(module.IsEmpty() ? AssetTypeModules[0] : module),
+      defaultModules_(module.IsEmpty()), types_(allocator), registrations_(types_, allocator),
+      names_(allocator) {
 }
 
 AssetCommandTypes::~AssetCommandTypes() noexcept {
@@ -103,9 +104,15 @@ AssetCommandTypes::~AssetCommandTypes() noexcept {
 }
 
 Result<void> AssetCommandTypes::Start() noexcept {
-    if (auto loaded = modules_->Load(module_); !loaded.IsOk()) {
-        return Result<void>::Failure(loaded.error != ErrorCode::None ? loaded.error
-                                                                     : ErrorCode::Unsupported);
+    // 기본은 타입 모듈 목록 전부다(실패하면 그 모듈 이름을 남긴다).
+    const Span<const StringView> list = defaultModules_ ? Span<const StringView>(AssetTypeModules)
+                                                        : Span<const StringView>(&module_, 1);
+    for (StringView name : list) {
+        if (auto loaded = modules_->Load(name); !loaded.IsOk()) {
+            module_ = name;
+            return Result<void>::Failure(loaded.error != ErrorCode::None ? loaded.error
+                                                                         : ErrorCode::Unsupported);
+        }
     }
 
     if (auto attached = modules_->AttachTypeRegistrar(registrations_); !attached.IsOk()) {
@@ -120,6 +127,12 @@ Result<void> AssetCommandTypes::Start() noexcept {
 
     namesReady_ = true;
     return Result<void>::Success();
+}
+
+const char* AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept {
+    return code == reflection_text::TextDiagnosticCode::HiddenEnumerator
+               ? AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting)
+               : reflection_text::TextDiagnosticCodeName(code);
 }
 
 bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {

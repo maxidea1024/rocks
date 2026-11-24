@@ -173,9 +173,8 @@ Result<int32> WriteConfigFailure(CommandletOutput& output, Allocator& allocator,
 
     for (usize index = 0; index < diagnostics.Count(); ++index) {
         const auto entry = diagnostics.Get(index);
-        auto written =
-            Fail(output, allocator, CookName, 1, "{}: {}: {}",
-                 reflection_text::TextDiagnosticCodeName(entry.code), entry.path, entry.message);
+        auto written = Fail(output, allocator, CookName, 1, "{}: {}: {}",
+                            AssetTextDiagnosticName(entry.code), entry.path, entry.message);
         if (!written) {
             return written;
         }

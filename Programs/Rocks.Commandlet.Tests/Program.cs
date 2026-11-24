@@ -719,6 +719,14 @@ try
     await CheckAll("asset-set soft unresolved", ["asset-set", "/Game/Characters/Hero", "compatibleSkeletons=/Game/Nope",
         projectOption], 1, [], ["asset-set: Unresolved: compatibleSkeletons: "]);
 
+    // 텍스처 타입 모듈(A5d — AssetTypeModules): Texture2D를 만들고 값·숨김 값 입력을 본다.
+    await CheckAll("asset-new texture", ["asset-new", "Texture2D", "/Game/Tex/Plain", "lodGroup=UI",
+        "compressionSettings=Normalmap", projectOption], 0, ["/Game/Tex/Plain "], []);
+    await CheckAll("asset-new texture result", ["asset-info", "/Game/Tex/Plain", projectOption], 0,
+        ["lodGroup=UI\n", "compressionSettings=Normalmap\n"], []);
+    await CheckAll("asset-set texture hidden value", ["asset-set", "/Game/Tex/Plain", "compressionSettings=LQ", projectOption],
+        1, [], ["asset-set: InvalidSetting: compressionSettings: "]);
+
     // asset-new 거부: 타입(모름·추상·에셋 아님·struct)·경로(있음·규칙)·대입 오류(만들지 않음).
     await CheckAll("asset-new unknown type", ["asset-new", "NoSuchType", "/Game/X", projectOption], 1, [],
         ["asset-new: NotFound: NoSuchType: unknown type"]);
@@ -2210,7 +2218,7 @@ static byte[] EmptyCookedManifest(string profile)
 static Dictionary<string, byte[]> ReadPackageFixtures(string executable)
 {
     DirectoryInfo root = FindRepositoryRoot(executable);
-    string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "Source", "Developer", "AssetDatabase", "Tests",
+    string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "source", "Developer", "AssetDatabase", "Tests",
         "AssetIndexCommandletFixtures.h"));
     Dictionary<string, byte[]> arrays = [];
     foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(header,
