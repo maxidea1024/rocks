@@ -217,8 +217,7 @@ Result<void> DecodeBmp(Allocator&, Span<const uint8> file, const ImageDecodeLimi
         (compression == BiRle8 && bitCount == 8) || (compression == BiRle4 && bitCount == 4) ||
         (masked && (bitCount == 16 || bitCount == 32));
     if (!valid) {
-        return compression > BiAlphaBitfields ? Invalid(out, BmpFileHeaderBytes + 16)
-                                              : Unsupported(out, BmpFileHeaderBytes + 14);
+        return Unsupported(out, BmpFileHeaderBytes + 14);
     }
 
     if (rle && topDown) {

@@ -225,8 +225,7 @@ void PngEmitRow(const PngHeader& header, const uint8* row, uint32 count, uint32 
                 texel[2] = entry[2];
                 texel[3] = index < header.transparencyBytes ? header.transparency[index] : 255;
             } else {
-                // 팔레트 밖 index는 디코딩 전에 거부했다(PngPaletteIndicesValid) — 여기 오지
-                // 않는다.
+                // 팔레트 밖 index는 불투명 검정이다(libpng는 팔레트를 256개로 0 채움 — UE와 같다).
                 texel[0] = texel[1] = texel[2] = 0;
                 texel[3] = 255;
             }
@@ -266,17 +265,6 @@ void PngEmitRow(const PngHeader& header, const uint8* row, uint32 count, uint32 
         }
         }
     }
-}
-
-// 행의 팔레트 index가 모두 팔레트 안인지 본다(밖이면 InvalidSource — PNG 규격 오류).
-bool PngPaletteIndicesValid(const PngHeader& header, const uint8* row, uint32 count) noexcept {
-    for (uint32 n = 0; n < count; ++n) {
-        if (PngSample(row, n, header.depth) >= header.paletteCount) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 bool PngNonSrgb(bool srgb, bool icc, const uint8* gamma, const uint8* chromaticities) noexcept {
@@ -493,11 +481,6 @@ Result<void> DecodePng(Allocator& allocator, Span<const uint8> file,
         for (uint32 row = 0; row < rows; ++row) {
             uint8* line = raw.Data() + offset;
             if (!PngUnfilter(line[0], line + 1, previous, rowBytes, bpp)) {
-                return Invalid(out, PngSignatureBytes);
-            }
-
-            if (header.colorType == PngPalette &&
-                !PngPaletteIndicesValid(header, line + 1, columns)) {
                 return Invalid(out, PngSignatureBytes);
             }
 

@@ -14,6 +14,10 @@
 // 설정·축소). 필드 이름은 camelCase다(UE 이름은 AssetSystem 12.4절 대응표).
 namespace rocks {
 
+// TextureSourceFormat 한 texel의 byte 수다(Invalid는 0 — G8 1, GA8·G16·R16F 2, GA16·RGBA8·R32F 4,
+// RGBA16·RGBA16F 8, RGBA32F 16). 원본 디코더·빌드·검사가 같이 쓴다.
+ROCKS_TEXTURE_API uint32 TextureSourceTexelBytes(TextureSourceFormat format) noexcept;
+
 // 원본 픽셀이다(UE FTextureSource 대응 — 12.4.4절). 원본 파일 byte가 아니라 디코딩한 정규 픽셀을
 // Bulk(Zstd, raw SHA-256 = 원본 정체성)로 담는다. Texture가 EditorOnly 필드로 가진다. NumMips·
 // NumLayers는 1만 구현이다(다른 값은 계약 — CheckTextureSettings). 검증 hook은 Format이 Invalid가

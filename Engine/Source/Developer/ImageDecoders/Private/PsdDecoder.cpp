@@ -374,7 +374,7 @@ Result<void> DecodePsd(Allocator& allocator, Span<const uint8> file,
         }
     }
 
-    if (channels > used && mode != PsdBitmap && mode != PsdIndexed) {
+    if (channels > used) {
         return Warn(out, AssetDiagnosticCode::IgnoredSourceChannels, channels - used);
     }
 

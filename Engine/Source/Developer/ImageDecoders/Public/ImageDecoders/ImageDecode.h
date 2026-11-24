@@ -4,7 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
-#include <Texture/TextureEnums.h>
+#include <Texture/TextureSource.h>
 
 // 텍스처 원본 이미지 디코더다(Docs/Design/AssetSystem 12.2·12.9·15절). 모든 형식을 같은 결과
 // (TextureSourceFormat 픽셀 — 12.2절 표, 위 행부터)와 같은 진단으로 낸다. 입력은 신뢰하지 않는다:
@@ -86,8 +86,9 @@ struct ImageDecodeResult {
     ImageDecodeFailure failure;
 };
 
-// file을 format으로 디코딩해 out에 쓴다(Unknown이면 DetectImageFileFormat(file)로 판별 — 판별
-// 실패는 UnsupportedSourceFormat). 반환 오류는 out.failure.error와 같다.
+// file을 format으로 디코딩해 out에 쓴다(Unknown이면 DetectImageFileFormat(file, pathHint)로 판별 —
+// footer 없는 TGA는 확장자가 필요하다, 판별 실패는 UnsupportedSourceFormat). 반환 오류는
+// out.failure.error와 같다.
 //
 // 사용 예:
 //   image::ImageDecodeResult decoded(allocator);
@@ -97,9 +98,7 @@ struct ImageDecodeResult {
 ROCKS_IMAGEDECODERS_API Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file,
                                                  ImageFileFormat format,
                                                  const ImageDecodeLimits& limits,
-                                                 ImageDecodeResult& out) noexcept;
-
-// TextureSourceFormat 한 texel의 byte 수다(Invalid는 0).
-ROCKS_IMAGEDECODERS_API uint32 TextureSourceTexelBytes(TextureSourceFormat format) noexcept;
+                                                 ImageDecodeResult& out,
+                                                 StringView pathHint = {}) noexcept;
 
 } // namespace rocks::image

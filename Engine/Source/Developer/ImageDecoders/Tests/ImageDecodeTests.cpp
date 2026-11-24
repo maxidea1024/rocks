@@ -395,8 +395,12 @@ Array<uint8> Png(Allocator& allocator, const PngSpec& spec) noexcept {
 
     Array<uint8> compressed(allocator);
     auto settings = CompressionSettings::TryDefault(CompressionFormat::Zlib);
-    REQUIRE(settings);
-    REQUIRE(TryCompressAppend(settings.Value(), spec.raw, compressed));
+    // 값을 돌려주는 함수라 REQUIRE(return;)를 쓰지 않는다 — 실패하면 빈 파일(뒤 디코딩이 실패한다).
+    CHECK(settings);
+    if (!settings || !TryCompressAppend(settings.Value(), spec.raw, compressed)) {
+        CHECK(false);
+        return Array<uint8>(allocator);
+    }
     Chunk(file, "IDAT", compressed.View());
     Chunk(file, "IEND", {});
     return Move(file.data);
@@ -473,11 +477,12 @@ TEST(ImageDecode_Png) {
     const uint8 expectIndexed[] = {4, 5, 6, 255, 1, 2, 3, 7};
     CHECK(Pixels(Decode(allocator, Png(allocator, spec).View()), TextureSourceFormat::RGBA8, 2, 1,
                  expectIndexed));
-    // 팔레트 밖 index는 InvalidSource.
+    // 팔레트 밖 index는 불투명 검정(libpng 읽기 — UE와 같다).
     const uint8 outside[] = {0, 5, 0};
     spec.raw = outside;
-    CHECK(
-        Fails(Decode(allocator, Png(allocator, spec).View()), AssetDiagnosticCode::InvalidSource));
+    const uint8 expectOutside[] = {0, 0, 0, 255, 4, 5, 6, 255};
+    CHECK(Pixels(Decode(allocator, Png(allocator, spec).View()), TextureSourceFormat::RGBA8, 2, 1,
+                 expectOutside));
     // RGBA 8비트, 필터 1(Sub)·2(Up)·3(Average)·4(Paeth) — 2×2.
     spec = PngSpec{};
     spec.width = 2;

@@ -13,6 +13,30 @@ Result<void> RegisterTextureTypes(ModuleRegistration& registration) noexcept {
     return generated::Texture::RegisterModuleTypes(registration);
 }
 
+uint32 TextureSourceTexelBytes(TextureSourceFormat format) noexcept {
+    switch (format) {
+    case TextureSourceFormat::Invalid:
+        return 0;
+    case TextureSourceFormat::G8:
+        return 1;
+    case TextureSourceFormat::GA8:
+    case TextureSourceFormat::G16:
+    case TextureSourceFormat::R16F:
+        return 2;
+    case TextureSourceFormat::GA16:
+    case TextureSourceFormat::RGBA8:
+    case TextureSourceFormat::R32F:
+        return 4;
+    case TextureSourceFormat::RGBA16:
+    case TextureSourceFormat::RGBA16F:
+        return 8;
+    case TextureSourceFormat::RGBA32F:
+        return 16;
+    }
+
+    return 0;
+}
+
 Result<void> TextureSource::Validate(const TextureSource& source) noexcept {
     if (source.format == TextureSourceFormat::Invalid) {
         return Result<void>::Success();

@@ -104,30 +104,6 @@ const char* ImageFileFormatName(ImageFileFormat format) noexcept {
     return "Unknown";
 }
 
-uint32 TextureSourceTexelBytes(TextureSourceFormat format) noexcept {
-    switch (format) {
-    case TextureSourceFormat::Invalid:
-        return 0;
-    case TextureSourceFormat::G8:
-        return 1;
-    case TextureSourceFormat::GA8:
-    case TextureSourceFormat::G16:
-    case TextureSourceFormat::R16F:
-        return 2;
-    case TextureSourceFormat::GA16:
-    case TextureSourceFormat::RGBA8:
-    case TextureSourceFormat::R32F:
-        return 4;
-    case TextureSourceFormat::RGBA16:
-    case TextureSourceFormat::RGBA16F:
-        return 8;
-    case TextureSourceFormat::RGBA32F:
-        return 16;
-    }
-
-    return 0;
-}
-
 ImageFileFormat DetectImageFileFormat(Span<const uint8> file, StringView pathHint) noexcept {
     if (StartsWith(file, "\x89PNG\r\n\x1a\n", 8)) {
         return ImageFileFormat::Png;
@@ -183,7 +159,8 @@ ImageFileFormat DetectImageFileFormat(Span<const uint8> file, StringView pathHin
 }
 
 Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFileFormat format,
-                         const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept {
+                         const ImageDecodeLimits& limits, ImageDecodeResult& out,
+                         StringView pathHint) noexcept {
     out.warnings.Clear();
     out.failure = ImageDecodeFailure{};
     out.image.pixels.Clear();
@@ -192,7 +169,7 @@ Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFile
     out.image.height = 0;
     out.image.numSlices = 1;
     if (format == ImageFileFormat::Unknown) {
-        format = DetectImageFileFormat(file);
+        format = DetectImageFileFormat(file, pathHint);
     }
 
     Result<void> decoded = Result<void>::Success();
