@@ -11,3 +11,4 @@
 - [12.10 A5f 원본 디코더 2](12.10-A5fDecoders.ko.md)
 - [12.11 A5g JPEG](12.11-A5gJpeg.ko.md)
 - [12.12 A5h 텍스처 임포터](12.12-A5hImporter.ko.md)
+- [12.13 A5i 텍스처 빌드](12.13-A5iBuild.ko.md)
