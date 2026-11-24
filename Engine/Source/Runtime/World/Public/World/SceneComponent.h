@@ -70,6 +70,13 @@ struct ComponentBounds {
     double sphereRadius = 0.0;
 };
 
+// 지역 bounds를 affine 행렬(행 벡터 규약)로 옮긴다(UE FBoxSphereBounds::TransformBy(FMatrix) —
+// Core/Public/Math/BoxSphereBounds.h:498, Docs/Design/EngineRuntime 24.3.6절). 중심은 행렬로
+// 옮기고, extent는 |E.x·행0| + |E.y·행1| + |E.z·행2|, 구 반지름은 min(R × 3×3 부분의 최대 열 길이,
+// |새 extent|)다(UE가 행 0–2의 성분별 제곱합을 쓴다). CalcBounds 재정의(Shape·메시 계열)가 쓴다.
+ROCKS_WORLD_API ComponentBounds TransformComponentBounds(const ComponentBounds& local,
+                                                         const Mat4d& localToWorld) noexcept;
+
 // Transform 계층을 가진 Component다. 부모 기준 상대 Transform을 저장하고 월드 행렬은 필요할 때
 // 계산한다(dirty 플래그). 렌더·물리·카메라 Component의 기반이다.
 //
@@ -140,6 +147,12 @@ public:
 
     // 월드 위치(cm, 월드 행렬의 이동 성분 — 마지막 행)다.
     Vec3d WorldLocation() const noexcept;
+
+    // 월드 scale이다(UE GetComponentTransform().GetScale3D()): 부모 사슬의 상대 scale과 부착 socket
+    // scale을 성분별로 곱한다(UE FTransform 합성 — 회전과 무관하게 축별 곱이고 부호를 지킨다).
+    // absoluteScale이면 상대 scale 그대로다. 행렬 분해(TryWorldTransform)와 달리 반사 부호가 원래
+    // 축에 남는다(Docs/Design/EngineRuntime 24.3.6절).
+    Vec3d WorldScale3D() const noexcept;
 
     ObjectHandle Parent() const noexcept {
         return parent_;
@@ -264,6 +277,28 @@ protected:
 
     // 가시성(visible·hiddenInGame)이 바뀌었다.
     virtual void OnVisibilityChanged() noexcept {
+    }
+
+    // Render 시스템 상태가 있으면 다시 보내기를 표시한다(실패는 무시 — 다음 변경이 다시 표시한다).
+    // 데이터 컴포넌트 setter가 값이 바뀐 뒤 부른다(Docs/Design/EngineRuntime 24.1절).
+    void MarkRenderStateDirtyIfPresent() noexcept;
+
+    // 지역 bounds가 있으면 채우고 참이다(기본 거짓 — Shape·메시 계열이 재정의한다). 참이면
+    // Bounds()가 TransformComponentBounds(local, WorldMatrix())로 계산한다. 월드 행렬이 TRS로
+    // 분해되지 않아도(0 scale 축·shear) 회전·scale을 잃지 않는다(24.3.6절).
+    virtual bool TryLocalBounds(ComponentBounds&) const noexcept {
+        return false;
+    }
+
+    // 생성자에서 hiddenInGame 기본값을 정한다(hook·다시 보내기 없이 — Shape 기본값).
+    void InitializeHiddenInGame(bool hidden) noexcept {
+        hiddenInGame_ = hidden;
+    }
+
+    // 캐시한 bounds를 버린다(다음 Bounds()가 CalcBounds를 다시 부른다 — UE UpdateBounds). 기하
+    // 데이터(Shape 크기 등)가 바뀐 setter가 부른다.
+    void InvalidateBounds() noexcept {
+        boundsDirty_ = true;
     }
 
     // 게임 World에서 초기화가 끝났는지다: 등록되어 있고 World가 Game·Tryout이며 소유 Actor가
