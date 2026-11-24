@@ -39,7 +39,7 @@
 | CR14a | 텍스처 스트리밍 입력: 컴포넌트가 내는 텍스처 사용 기록(UV 밀도·화면 크기 — UE `FRenderAssetOwnerStreamingState`) | 설계만 | TextureStreaming 4.1절 | TextureStreaming |
 | CR15 | 추가 view와 render target 에셋(scene capture·planar reflection) | 없음 | — | RN 5절, AssetSystem 텍스처 계열 |
 | CR23 | 디버그·편집 표시: 선·도형·아이콘 billboard(EditorOnly 시각화 포함) | 결정(CD12), 설계 RN RS13 — 코드 없음 | `Sandbox` 샘플 렌더러뿐(ER 3절). UE는 line batch proxy가 프레임마다 동적 메시 요소를 내는 렌더러 경로다(`Engine/Private/Components/LineBatchComponent.cpp:60`) | RN 4.2절 "디버그·편집 표시", 11.2절 PC9a·PC9b, 17절 RS13 |
-| CR18 | 글꼴 에셋·글리프 atlas(`TextRenderComponent`) | 없음 | — | [UI 툴킷](../UiToolkit.ko.md) 글꼴 |
+| CR18 | 글꼴 에셋·글리프 atlas(`TextRenderComponent`) | 없음 | — | [글꼴 설계](../Font/07-Consumers.ko.md) 7.3절(미리 구운 글꼴만 — UE와 같다), 단계 FT5(미리 구운 글꼴)·FT7(사용처) |
 
 ### 4.4 물리
 
