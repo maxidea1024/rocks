@@ -1,6 +1,6 @@
 # Rocks Cylinder 형상 설계
 
-기준일: 2026-11-19, 개정 4.
+기준일: 2026-11-25, 개정 5.
 
 이 문서는 기본 형상에 cylinder(원기둥)를 더하는 설계다. Core 수학의 형상·판정(CY1)과 물리 어댑터의 충돌·질의 형상(CY2) 두 층을 정한다. 문서 전체가 설계이며 구현된 항목은 없다.
 
@@ -147,23 +147,25 @@ struct Cylinder {
 
 - 에셋 단순 충돌 형상(UE `FKAggregateGeom` 대응)에 cylinder 원소를 더한다. 원소는 로컬 중심·회전·반높이·반경을 가지며 축은 로컬 +Z다(Rocks 캡슐과 같다, 물리 어댑터 경계 4절).
 - 씬 질의 형상(UE `FCollisionShape` 대응)을 Line, Box, Sphere, Capsule, Cylinder로 둔다.
-- Jolt 사상: 물리 어댑터 경계의 기준 사상 A가 Rocks +Z를 Jolt +Y로 옮기는 경우(J2·J6 결과에 따름)에만 형상 회전이 필요 없다. 아니면 고정 회전으로 감싼다(물리 어댑터 경계 2·4절 문구와 같다). `Cylinder{start, end, radius}`는 중심 (start + end)/2, 반높이 |end − start|/2, 축 회전으로 바꾸고, 단위는 어댑터 경계에서 cm → m.
-- scale: Jolt의 XZ 균일 조건은 사상 A를 거치면 Rocks의 축 수직 두 축(XY) 균일이다. 위반하면 쿠킹이 거부한다. 음수(거울) scale은 J8 결과를 따른다.
-- 반높이·반경이 Jolt 기본 convex radius(문서상 기본값, 크기는 J12)보다 작은 cylinder는 J18 결과에 따라 convex radius를 줄이거나 쿠킹이 거부한다.
+- Jolt 사상: 물리 어댑터 경계의 축 사상 A가 Rocks +Z를 Jolt +Y로 옮기고 Jolt `CylinderShape` 축이 +Y이므로(J2·J6 확인, 물리 어댑터 경계 2·4절) 형상 회전이 필요 없다. `Cylinder{start, end, radius}`는 중심 (start + end)/2, 반높이 |end − start|/2, 축 회전으로 바꾸고, 단위는 어댑터 경계에서 cm → m.
+- scale: Jolt의 XZ 균일 조건은 사상 A를 거치면 Rocks의 축 수직 두 축(XY) 균일이다. 위반하면 쿠킹이 거부한다. 음수(거울) scale은 Jolt가 inside-out으로 처리하므로 그대로 넘긴다(J8 확인).
+- Jolt는 convex radius를 min(설정값, 반높이, 반경)으로 잘라 쓴다(J18 확인, 거부하지 않음). 기본 convex radius는 0.05 m = 5 cm다(J12). 반높이나 반경이 5 cm보다 작은 cylinder는 잘린 convex radius 때문에 모서리가 더 둥글어지므로 에셋 검증이 알린다.
 
 ### 4.2 convex radius 정책
 
 - 질의 형상과 trigger(sensor)는 convex radius 0으로 만들어 판정을 정확하게 한다.
 - 정적·동적 body의 충돌 형상은 Jolt 기본 convex radius를 쓴다. 이때 body는 지정한 cylinder보다 모서리만큼 안쪽에 있으므로, Core `Bounds`·컬링은 보수적으로 남는다. 둥근 모서리만큼 형상이 달라짐을 에셋 도구에 표시한다.
-- 같은 cylinder라도 질의 형상(convex radius 0)과 body 형상(기본값)이 달라, sweep 결과와 실제 접촉이 모서리 근처에서 어긋날 수 있다. 이 차이를 어댑터 문서에 적는다.
+- 같은 cylinder라도 질의 형상(convex radius 0)과 body 형상(기본값)이 달라, sweep 결과와 실제 접촉이 모서리 근처에서 어긋날 수 있다. 또 Jolt ray 판정(`CastRay`)은 convex radius를 무시하고 정확한 원기둥과 판정하므로(J17 확인), body 형상에 대한 ray와 sweep도 모서리에서 다를 수 있다.
 
 ### 4.3 안정성 경고
 
 동적 rigid body에 cylinder 충돌 형상을 쓰면 에셋 검증이 경고를 낸다(Jolt 문서의 안정성 주의). 굴러가는 바퀴처럼 꼭 필요한 경우는 허용하되, 캡슐·convex로 대신할 수 있으면 그쪽을 권한다.
 
-### 4.4 검증 항목(물리 어댑터 경계 8절 표에 추가)
+### 4.4 검증 항목(물리 어댑터 경계 8절)
 
-| ID | 확인할 것 |
+물리 어댑터 경계 개정 3(2026-11-25)에서 Jolt v5.7.0 소스로 모두 확인했다. 결과와 근거 행은 그 문서 8절 표다. 요약: cylinder는 볼록 대 볼록·볼록 대 mesh·heightfield 질의를 모두 받고(J16), ray는 정확한 원기둥(J17), convex radius는 잘림(J18), 질량·부력·캐릭터 형상 모두 지원(J19).
+
+| ID | 확인한 것 |
 |---|---|
 | J16 | `NarrowPhaseQuery::CastShape`·`CollideShape`가 cylinder를 질의 형상으로 받는지, 결과 법선·거리 의미(J11과 연동), cylinder 대 mesh·heightfield의 활성 모서리 처리 |
 | J17 | `RayCylinder`의 정확성(끝면·모서리·시작점이 안인 경우), convex radius가 ray 판정에 주는 영향 |
@@ -176,7 +178,7 @@ struct Cylinder {
 |---|---|---|---|
 | CY0 | 이 문서 | 지금 | 교차검증 반영(개정 2) |
 | CY1 | Core `Cylinder<T>`와 3.2절 판정, Capsule 보강, 시험, `Intersection.h` 기능별 분리 — **구현**(2026-11-19) | 지금(별도 브랜치 `feature/cylinder-shape`) | 시험 통과, Foundation·format·policy, 수학 구현 2.1절·Core 상세 명세 G04·G05·G06 갱신 |
-| CY2 | 물리 어댑터 cylinder 충돌·질의 형상 | 물리 어댑터 구현 단계 | J16–J19 확인, 어댑터 시험 |
+| CY2 | 물리 어댑터 cylinder 충돌·질의 형상 | 물리 어댑터 구현 단계 | J16–J19 확인(완료, 2026-11-25), 어댑터 시험 |
 
 ## 6. 결정 사항
 
@@ -186,7 +188,7 @@ struct Cylinder {
 
 ## 7. 미확인 사항
 
-- Jolt `RayCylinder` 본문, 질의 경로의 cylinder 지원 세부, convex radius와 크기의 관계, master와 v5.7.0 태그의 일치(J16–J19).
+- (개정 5에서 해소) Jolt `RayCylinder` 본문, 질의 경로의 cylinder 지원, convex radius와 크기의 관계는 v5.7.0 태그 소스로 확인했다(J16–J19).
 - UE에서 Chaos cylinder를 엔진 충돌 에셋으로 만드는 경로는 찾지 못했다(직렬화 경로만 확인).
 
 ## 8. 파일 배치
@@ -199,3 +201,4 @@ struct Cylinder {
 - 개정 2(2026-11-19): 교차검증(치명 2, 중요 6, 경미 6) 반영. 경계 반폭과 support를 소거 없는 꼴로 바꾸고 경계 포함을 계산(상대 여유 + 한 ulp 바깥 보정)과 정확 산술 시험으로 보장하게 했다. 퇴화 규칙(radius > 0이면 축 정규화 필수, radius 0은 선분 경로)과 `IsValid`·`TryMake` 일치, 수직 거리 계산 꼴, 광선 구간 교집합 알고리즘과 규칙, 평면·선분 겹침, Capsule 평면·볼록 영역 판정 보강, UE 인용 정정(`FCylinder`, `#if 0` 블록, 보수적 bounds), 물리 계약 조건부 문구와 J18 수정·J19 추가, 결정 1–3 확정.
 - 개정 3(2026-11-19): CY1 구현을 반영했다. `TryBounds`(Result 반환)와 크기 조정·비정규 보정을 포함한 반폭 오차 예산, 끝면 중심 거리 기반 support, 원판 거부가 실제로는 `start == end`와 overflow뿐이라는 점, 판정 사이 일관성 시험, 정확 산술 독립 검증 결과, `Intersection.h` 파일 배치(8절)를 적었다.
 - 개정 4(2026-11-19): CY1 리뷰 반영 결과로 판정 사이 일관성 계약, radius 0 포함 식, 최근접점 안쪽 보정, 언더플로 진입, 접선 법선 근사, 공용 시험 도구 위치를 3.6절에 적었다.
+- 개정 5(2026-11-25): 물리 어댑터 경계 개정 3의 Jolt v5.7.0 확인 결과(J2·J6·J8·J12·J16–J19)를 4절에 반영했다. 형상 회전 불필요, 거울 scale 그대로, convex radius 잘림, ray가 convex radius를 무시하는 점.

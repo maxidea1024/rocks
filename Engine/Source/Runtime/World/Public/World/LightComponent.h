@@ -5,6 +5,7 @@
 #include <Core/Math/Shapes.h>
 #include <Core/Math/Vector3.h>
 #include <Meta/Annotations.h>
+#include <World/LightingChannels.h>
 #include <World/SceneComponent.h>
 
 namespace rocks {
@@ -17,19 +18,6 @@ enum class LightUnits : uint8 {
     Lumens,
     EV,
     Nits
-};
-
-// 광원 채널이다(UE FLightingChannels — EngineTypes.h:568). 같은 채널의 primitive만 빛을 받는다.
-ROCKS_STRUCT()
-struct LightingChannels {
-    ROCKS_GENERATED_BODY()
-
-    ROCKS_PROPERTY() bool channel0 = true;
-    ROCKS_PROPERTY() bool channel1 = false;
-    ROCKS_PROPERTY() bool channel2 = false;
-
-    friend constexpr bool operator==(const LightingChannels&,
-                                     const LightingChannels&) noexcept = default;
 };
 
 // 모든 광원 컴포넌트의 기반이다(UE ULightComponentBase — Docs/Design/EngineRuntime 24.2절).
@@ -170,9 +158,6 @@ protected:
 
         return Result<void>::Success();
     }
-
-    // Render 시스템 상태가 있으면 다시 보내기를 표시한다(실패는 무시 — 다음 변경이 다시 표시한다).
-    void MarkRenderStateDirtyIfPresent() noexcept;
 
     // 파생 생성자가 기본값을 바꾼다(UE 파생 생성자처럼).
     ROCKS_PROPERTY(ReadOnly, Name = "intensity") float intensity_ = DefaultIntensity;
