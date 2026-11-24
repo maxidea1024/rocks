@@ -528,6 +528,16 @@ public:
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    // 쿠킹된 셰이더 코드로 장치 셰이더를 만든다(ShaderSystem 16.1절 SSD18). 장치는 자기 backend의
+    // 코드 종류(ShaderCodeKindOf(Info().backend))만 받는다. 코드와 layout은 호출 안에서 복사한다.
+    // 돌려준 handle은 PipelineDesc·ComputePipelineDesc가 받고 Retire로 놓는다(파이프라인은 만든 뒤
+    // 셰이더를 붙잡지 않는다 — 셰이더를 Retire해도 이미 만든 파이프라인은 그대로다).
+    // 실패: 다른 backend 코드 종류·빈 코드·layout 단계 불일치·GLES 머리 유무 위반 InvalidArgument,
+    // layout·머리 byte 손상 InvalidArgument(LastError에 이유), 장치가 코드를 거부하면
+    // DependencyFailed(LastError), 할당 실패 OutOfMemory. 생성의 스레드 규칙은 파이프라인 생성과
+    // 같다(DeviceInfo::concurrentResourceCreation).
+    virtual Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept = 0;
+
     // 셰이더를 컴파일하고 파이프라인을 만든다. 셰이더 컴파일 실패는 DependencyFailed다(진단 로그는
     // LastError로 읽는다). 정점 배치 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는
     // InvalidArgument, backend가 지원하지 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
@@ -598,6 +608,7 @@ public:
     virtual void Retire(BufferViewHandle view) noexcept = 0;
     virtual void Retire(TextureHandle texture) noexcept = 0;
     virtual void Retire(PipelineHandle pipeline) noexcept = 0;
+    virtual void Retire(ShaderHandle shader) noexcept = 0;
     virtual void Retire(SwapChainHandle swapChain) noexcept = 0;
 
     // fence가 끝난 회수 대기 자원을 해제하고 끝난 제출의 기록 저장소를 재사용 목록에 돌린다.

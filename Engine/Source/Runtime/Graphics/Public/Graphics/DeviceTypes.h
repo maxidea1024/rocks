@@ -6,6 +6,7 @@
 #include <Core/Text/StringView.h>
 #include <Graphics/DeviceCaps.h>
 #include <Graphics/PipelineState.h>
+#include <Graphics/ShaderCode.h>
 #include <GraphicsTypes/ChannelSwizzle.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
@@ -29,6 +30,25 @@ enum class Backend : uint8 {
 
 // "D3D12" 같은 이름이다. 범위 밖이면 "Unknown"이다.
 const char* BackendName(Backend backend) noexcept;
+
+// backend 장치가 받는 셰이더 코드 종류다(D3D12 Dxil, D3D11 Dxbc, OpenGL Essl, Vulkan Spirv, Metal
+// Metallib).
+constexpr ShaderCodeKind ShaderCodeKindOf(Backend backend) noexcept {
+    switch (backend) {
+    case Backend::D3D12:
+        return ShaderCodeKind::Dxil;
+    case Backend::D3D11:
+        return ShaderCodeKind::Dxbc;
+    case Backend::OpenGL:
+        return ShaderCodeKind::Essl;
+    case Backend::Vulkan:
+        return ShaderCodeKind::Spirv;
+    case Backend::Metal:
+        return ShaderCodeKind::Metallib;
+    }
+
+    return ShaderCodeKind::Metallib;
+}
 
 // 자원 handle이다. 발급한 장치 안에서만 의미가 있으며 파괴 후에는 stale이 된다(slot+generation).
 struct BufferHandle {
@@ -291,6 +311,8 @@ ROCKS_GRAPHICS_API Result<void> CheckBufferViewLimits(const DeviceLimits& limits
 // (samplerBuffer), 구조화·raw는 storage block binding n이다. 단계당 SRV 합계는 텍스처 t0와 합쳐
 // 5다(형식 정의 최소 보장 16 안).
 inline constexpr uint32 MaxDrawBufferViews = 4;
+static_assert(MaxDrawBufferViews == MaxPipelineNamedSlots,
+              "named pipeline slots must cover every draw buffer view slot");
 
 // 파이프라인이 읽는 버퍼 view slot 배치다. backend가 셰이더 리플렉션(D3D reflection, SPIR-V
 // 리플렉션, GL program introspection)으로 채우고, 그리기 때 묶인 view가 배치를 채우는지 본다
@@ -736,6 +758,11 @@ Span<const uint8> DrawConstantBytes(const T& constants) noexcept {
 struct PipelineDesc {
     ShaderSource vertex;
     ShaderSource pixel;
+    // 장치 셰이더(CreateShader)다. 단계는 Vertex·Pixel이어야 한다.
+    ShaderHandle vertexShader;
+    ShaderHandle pixelShader;
+    // 고정 slot과 셰이더 자원 이름의 표다(ShaderCode.h PipelineBindingNames).
+    PipelineBindingNames bindings;
     VertexLayout layout;
     PrimitiveTopology topology = PrimitiveTopology::TriangleList;
     uint32 colorTargetCount = 1;
@@ -788,6 +815,10 @@ ROCKS_GRAPHICS_API bool PipelineWritesDepthStencil(const PipelineDesc& desc) noe
 // 배치 밖 자원은 InvalidArgument다.
 struct ComputePipelineDesc {
     ShaderSource shader;
+    // 장치 셰이더(CreateShader, 단계 Compute)다.
+    ShaderHandle computeShader;
+    // 고정 slot과 셰이더 자원 이름의 표다(ShaderCode.h PipelineBindingNames).
+    PipelineBindingNames bindings;
     // 그리기별 상수 byte 수다(0 = 없음, IsValidDrawConstantBytes).
     uint32 drawConstantBytes = 0;
 };
