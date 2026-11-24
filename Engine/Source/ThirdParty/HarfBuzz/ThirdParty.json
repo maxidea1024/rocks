@@ -1,0 +1,1233 @@
+{
+  "schema": 1,
+  "name": "HarfBuzz",
+  "version": "15.2.0",
+  "upstreamDirectory": "harfbuzz-15.2.0",
+  "globalState": false,
+  "source": {
+    "url": "https://github.com/harfbuzz/harfbuzz/releases/download/15.2.0/harfbuzz-15.2.0.tar.xz",
+    "sha256": "e2ec49090744383cdbe7df808c1cedaafba06a97be8dc4211fe546ba585f12cb",
+    "verification": "Release asset of harfbuzz/harfbuzz 15.2.0 (2026-11-19); its SHA-256 matches the GitHub release asset digest. Imported files are the library sources and headers under src/ (.cc, .hh, .h) and COPYING; tests, utilities, docs and build scripts are not imported."
+  },
+  "licenses": [
+    {
+      "spdx": "MIT-Modern-Variant",
+      "upstreamExpression": "COPYING (HarfBuzz 'Old MIT' license, with the copyright holders listed there)",
+      "file": "harfbuzz-15.2.0/COPYING",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "harfbuzz-15.2.0/src/harfbuzz.cc",
+    "harfbuzz-15.2.0/src/hb-icu.cc"
+  ],
+  "includeDirectories": [
+    "harfbuzz-15.2.0/src"
+  ],
+  "defines": [
+    "HAVE_FREETYPE=1",
+    "HAVE_ICU=1",
+    "HAVE_ICU_BUILTIN=1",
+    "HB_NO_UCD",
+    "HB_NO_GETENV",
+    "HB_NO_OPEN",
+    "HB_NO_BUFFER_SERIALIZE",
+    "hb_malloc_impl=RocksHarfBuzzMalloc",
+    "hb_calloc_impl=RocksHarfBuzzCalloc",
+    "hb_realloc_impl=RocksHarfBuzzRealloc",
+    "hb_free_impl=RocksHarfBuzzFree"
+  ],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "harfbuzz-15.2.0/src/hb-blob.h",
+    "harfbuzz-15.2.0/src/hb-buffer.h",
+    "harfbuzz-15.2.0/src/hb-common.h",
+    "harfbuzz-15.2.0/src/hb-deprecated.h",
+    "harfbuzz-15.2.0/src/hb-draw.h",
+    "harfbuzz-15.2.0/src/hb-face.h",
+    "harfbuzz-15.2.0/src/hb-font.h",
+    "harfbuzz-15.2.0/src/hb-ft.h",
+    "harfbuzz-15.2.0/src/hb-icu.h",
+    "harfbuzz-15.2.0/src/hb-map.h",
+    "harfbuzz-15.2.0/src/hb-ot-color.h",
+    "harfbuzz-15.2.0/src/hb-ot-deprecated.h",
+    "harfbuzz-15.2.0/src/hb-ot-fetch.h",
+    "harfbuzz-15.2.0/src/hb-ot-font.h",
+    "harfbuzz-15.2.0/src/hb-ot-layout.h",
+    "harfbuzz-15.2.0/src/hb-ot-math.h",
+    "harfbuzz-15.2.0/src/hb-ot-meta.h",
+    "harfbuzz-15.2.0/src/hb-ot-metrics.h",
+    "harfbuzz-15.2.0/src/hb-ot-name.h",
+    "harfbuzz-15.2.0/src/hb-ot-shape.h",
+    "harfbuzz-15.2.0/src/hb-ot-var.h",
+    "harfbuzz-15.2.0/src/hb-ot.h",
+    "harfbuzz-15.2.0/src/hb-paint.h",
+    "harfbuzz-15.2.0/src/hb-script-list.h",
+    "harfbuzz-15.2.0/src/hb-set.h",
+    "harfbuzz-15.2.0/src/hb-shape-plan.h",
+    "harfbuzz-15.2.0/src/hb-shape.h",
+    "harfbuzz-15.2.0/src/hb-style.h",
+    "harfbuzz-15.2.0/src/hb-unicode.h",
+    "harfbuzz-15.2.0/src/hb-version.h",
+    "harfbuzz-15.2.0/src/hb.h"
+  ],
+  "files": {
+    "COPYING": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+    "src/OT/Color/CBDT/CBDT.hh": "1cbc69c870ffb0daec3bde127f6c482cea09f369734c2cc2ba4ed195c36916c6",
+    "src/OT/Color/COLR/COLR.hh": "f75c345e78eac944fb246277ed965d7ac1a02f70dbb07469344b9d0027be56a7",
+    "src/OT/Color/COLR/colrv1-closure.hh": "a93aea1c3ef12c1792af989cfb39cc19f811b6ae9a4d1eaa3648e02f3e35ccbb",
+    "src/OT/Color/COLR/colrv1-depend.hh": "7f50a94f923b55938ca4c28e8287969e8ea19658b747274cb6e5a7c426cb33b2",
+    "src/OT/Color/CPAL/CPAL.hh": "39cd55165d6ac7210f7735618cf547b7547f9c7ec291b30bf87b11c2468076f3",
+    "src/OT/Color/sbix/sbix.hh": "f50c0ee6949668c7d04e4999d3a0bafcc6bc59fcc54126d46b04f3c7fb3692dd",
+    "src/OT/Color/svg/svg.hh": "68ada99b35ec69cc6fb402eae5b09d4aa5861f2bbcbe258f34cf3df6cdaa5217",
+    "src/OT/Layout/Common/Coverage.hh": "5d37d67f91f527b69666ae7d22c15fe1e0b1d2e77a6ce6c2cfa35b24c3b8acb8",
+    "src/OT/Layout/Common/CoverageFormat1.hh": "8eb8feeeb0c93800f5b69d9b0f5337c226be51de4f7f44088ff4f0cf9c5a16f5",
+    "src/OT/Layout/Common/CoverageFormat2.hh": "034cc25dfc648f765940da36564470decd4be3d61337ac20ca9e5c624c50602e",
+    "src/OT/Layout/Common/RangeRecord.hh": "1c582e181d078b40018a2d3d7306b4ee0bdf67adf69313886a999aa8fce06526",
+    "src/OT/Layout/GDEF/GDEF.hh": "332320f9da9961a1f1dacfa190b884487204bac65685c55e7f13496d425bf054",
+    "src/OT/Layout/GPOS/Anchor.hh": "ee4ba0170a507354cc67c4cce763c3aa442b9394a1ee4bbc4023c04d12be5ae4",
+    "src/OT/Layout/GPOS/AnchorFormat1.hh": "e5a65b7ebb17411027802ada680b43d9cbe74f022d687da6910a6e05dd36350b",
+    "src/OT/Layout/GPOS/AnchorFormat2.hh": "cbffb2662d989c60bd9adbadfcbe31812a6208698c0352b1992377d79cfdb1d0",
+    "src/OT/Layout/GPOS/AnchorFormat3.hh": "2a35ff6b02e36c48ebedb69b35aa96e5bb89e6dd4cc325066269ed6a3833da63",
+    "src/OT/Layout/GPOS/AnchorMatrix.hh": "39d923f87e17b44761ab7ebbac2bd407cc369d3f7504d68bc6b59e780839d7da",
+    "src/OT/Layout/GPOS/ChainContextPos.hh": "c34439da36999ba2ea22c8e3f79e3d8ac7e5f1526b2952574ee9b89db3b20b46",
+    "src/OT/Layout/GPOS/Common.hh": "872f3b5db7166920f185333a2eb5d5f0ebce328a6ae897ed4d3bef1da56f51ba",
+    "src/OT/Layout/GPOS/ContextPos.hh": "76cc7ef26c40970e39d96f6343f1ecfdc1e06369810db6e3cc4f4dff46f57e65",
+    "src/OT/Layout/GPOS/CursivePos.hh": "479716818eccf5848b5b8b97dad44404e3a449656c1b95d9ae75a255b4bd2ccc",
+    "src/OT/Layout/GPOS/CursivePosFormat1.hh": "ed7739acea0ce5ba75ece93df295667e9f3c7c7e9b0fed158a726a9f28ab15ed",
+    "src/OT/Layout/GPOS/ExtensionPos.hh": "5a80507ba337f036a614e37c619d59a90e9ac8589a835705aa3510e76fa5278b",
+    "src/OT/Layout/GPOS/GPOS.hh": "2278e29cc5a5091feb4091d9a84aa5dc034709dfe69b2de87d351884744f6b8d",
+    "src/OT/Layout/GPOS/LigatureArray.hh": "85dd611ba46bec48e32211e2d2729aef1cbdc0f4c52ac38aff17323890409de8",
+    "src/OT/Layout/GPOS/MarkArray.hh": "248c827a41a72294d3ffd0aeb6f2159b1d1432335f20c0eeddc98f315d683dc4",
+    "src/OT/Layout/GPOS/MarkBasePos.hh": "29853d36341eea95a6ccd6c2e120a68d99d888751d7f9c6641102cd4f09b1aeb",
+    "src/OT/Layout/GPOS/MarkBasePosFormat1.hh": "4c42347a7330cfcf849884da8fb7ab4d5cffefb2ea4839b1f64d51b060a450e8",
+    "src/OT/Layout/GPOS/MarkLigPos.hh": "b2f606e62aa0be5ff8836cc6d29ee77cab4970edcb967d6d41c99decc39db92e",
+    "src/OT/Layout/GPOS/MarkLigPosFormat1.hh": "03cf85cfd64b0f0950747739639701cd3a9f06ef32fa8eb8f5808ad2c2f8dbf3",
+    "src/OT/Layout/GPOS/MarkMarkPos.hh": "4eb6cd4e3638f60d77950cafcc7bb04f29751c11e94f8683b238e60af4e89077",
+    "src/OT/Layout/GPOS/MarkMarkPosFormat1.hh": "74a6923170bce7cf427894bd76d9e7b57590f3b7bfd378ab5ed804aa4a1a871f",
+    "src/OT/Layout/GPOS/MarkRecord.hh": "fea28da68d47dd8750ba954df6277934dbb01eaf7071bbf9ff7a97028126fb3c",
+    "src/OT/Layout/GPOS/PairPos.hh": "914bff124a1ed3b50870643b555277ceceac067f2977255cef0b43338a669d08",
+    "src/OT/Layout/GPOS/PairPosFormat1.hh": "496bca3116421b7c67ccbbdd7f57a6a032e418a56be7ae8dbf0b26c4c164fdd8",
+    "src/OT/Layout/GPOS/PairPosFormat2.hh": "2f56943821070da16dea81fa78f8272e9055b13538af65103502c2de710d36b9",
+    "src/OT/Layout/GPOS/PairSet.hh": "426f7b459312de1d5c039eaf73892e02d5c0e0e22d641caa80c365eac5c82627",
+    "src/OT/Layout/GPOS/PairValueRecord.hh": "266f9601fbd4af8dfde1cbe0f00dc3e288d3de1bf72838b8ddbb2b4ce864434b",
+    "src/OT/Layout/GPOS/PosLookup.hh": "3d5dc44eae59aa662f1a9654a88c7601cd36983ab57dae039610172d1570539e",
+    "src/OT/Layout/GPOS/PosLookupSubTable.hh": "f10808258ccf4e9aa92522cb72e73392113a01c147beaa066e77e2a8aaeea99a",
+    "src/OT/Layout/GPOS/SinglePos.hh": "e7895dcd7f3d4c54d57a3a8da26e9c9c6555aad2f1e795c4930c36f78bc7df19",
+    "src/OT/Layout/GPOS/SinglePosFormat1.hh": "7bfe7d87bf12acf1eacf07745445520b257ff0cf74b25740ab7d3675f77eef27",
+    "src/OT/Layout/GPOS/SinglePosFormat2.hh": "c9b86e4e0dcabc019f4abfe60a313fc57e1af83a82255602541d8df9af4f2d68",
+    "src/OT/Layout/GPOS/ValueFormat.hh": "d8cb2ab9ed2321b67dd83af1132b5bebd596fdf42876fb99f38e5856450546ba",
+    "src/OT/Layout/GSUB/AlternateSet.hh": "b3c2cf8392be627cf824321b38d2fa7af25981b88fe0a4bdf2b03787de5e5b09",
+    "src/OT/Layout/GSUB/AlternateSubst.hh": "45d930e8d031f92b5f05e966b837ffd75e7cbaa556c78f05f5d35baca7418327",
+    "src/OT/Layout/GSUB/AlternateSubstFormat1.hh": "de567826417474c40d490009c137feafdbd968066f5ac82b2698665c7ff730c8",
+    "src/OT/Layout/GSUB/ChainContextSubst.hh": "906b673e7e03c5dcf9da4f60596299b2d3336a26e4553b60325b4a5536e95344",
+    "src/OT/Layout/GSUB/Common.hh": "ce87391d986275cafe7b830db774c538b2a799ede2fc762786a0ae602a07a9d7",
+    "src/OT/Layout/GSUB/ContextSubst.hh": "188c24bb3603b4f580ca8b6c2c415fc7766b23ad8b2e519723622f85f76bf4d8",
+    "src/OT/Layout/GSUB/ExtensionSubst.hh": "ed6003a5fb8e6196367d1c474e646c12c008bc26c551f987e94b9fef210e4383",
+    "src/OT/Layout/GSUB/GSUB.hh": "811a1b1fd0a1df4e1371028d33c72f7da34dc4cf49acc1d59315a21f6d8a6a8f",
+    "src/OT/Layout/GSUB/Ligature.hh": "02542fc8644f4a3df073bed89c04b676be4228b52990c0def09a18a572b340bc",
+    "src/OT/Layout/GSUB/LigatureSet.hh": "25d8c9e08667f1acb086f58c3b1710dc966b9c23b51e47fbadb72709a04e37fc",
+    "src/OT/Layout/GSUB/LigatureSubst.hh": "7222de83f1fd252cb25a8ed4ad3c677acdf1bdb6182af29c48d3135b7daebdf6",
+    "src/OT/Layout/GSUB/LigatureSubstFormat1.hh": "ce1d73c5b71a89cc3bfabf102a730d5a052c285385ecaf69a10bb84a72de8a13",
+    "src/OT/Layout/GSUB/MultipleSubst.hh": "bdc5e7fb09c0a86a27cbe6e512f21d58f876b18bf3170bff8f627a5a05dccd6d",
+    "src/OT/Layout/GSUB/MultipleSubstFormat1.hh": "33fd52d20e9f7123603996b189b8f916f551c77b20266e34df48aef83313073e",
+    "src/OT/Layout/GSUB/ReverseChainSingleSubst.hh": "31a9ebab1e66bd3a9886e8ddb2598432f70eacd149acbca7986cde778303da81",
+    "src/OT/Layout/GSUB/ReverseChainSingleSubstFormat1.hh": "68a950b7ba4ef45aac932806af2e527e66b44587fdd6b2ee98b7dc74b170f5b4",
+    "src/OT/Layout/GSUB/Sequence.hh": "2c1c1de66b71b14aac472b676928af34121f052ba6995765d7a69d42fdb69a79",
+    "src/OT/Layout/GSUB/SingleSubst.hh": "31fa6ce5d9b3bb4c48d184956b55d60187b1d6d18350c3d30ce6b426cc58923b",
+    "src/OT/Layout/GSUB/SingleSubstFormat1.hh": "9385d8fa856e6f173b9475bf04b8d3641de2e86e8088428dd772da1db50444c4",
+    "src/OT/Layout/GSUB/SingleSubstFormat2.hh": "c6484ff2a57aea7d95deccf3387343acefca673537c6082d98345dd16768a7c6",
+    "src/OT/Layout/GSUB/SubstLookup.hh": "2397fefd5bdb68abe1c2a010cfe39ddd3d398848c15ffc1e23840d7f5a7217ac",
+    "src/OT/Layout/GSUB/SubstLookupSubTable.hh": "300b2624319fbcb6f07a5de36f3cb41c9ae1b739972d3510531b75a273cfd51c",
+    "src/OT/Var/VARC/VARC-subset.hh": "faed5081e0fa2d86cf24132ab4e62019a111c12b7d0575aaa81c4fd0a9e48e98",
+    "src/OT/Var/VARC/VARC.cc": "833567d4b90c1f48b81ee6e8d86d50a31802b29a333ce9e110ef3dafa30da950",
+    "src/OT/Var/VARC/VARC.hh": "de1b219a19d5a4e6139286c0920211ea9943756750af928b88ed63bc70bf6539",
+    "src/OT/Var/VARC/coord-setter.hh": "c681f66bcd365e0818a9db801da38a4677be962f11cf82cbc7ef96d022e48bf0",
+    "src/OT/glyf/CompositeGlyph.hh": "401dd22844d9ea9d92f4430b52e3b28e3c898d5c1f15470b6e76caac8067ba5f",
+    "src/OT/glyf/Glyph.hh": "42bd39d82881cf9a7ef62ad74536a51b5bde5297249b623ab41b935b3844b8f7",
+    "src/OT/glyf/GlyphHeader.hh": "097358c6babebac698266e9783d510db5a93890defb1199597ab9c11de3755e8",
+    "src/OT/glyf/SimpleGlyph.hh": "a6506ea778f2ab4c37831ff9afe1f07d03ac5cea5a30ed5d883301a73491f4e6",
+    "src/OT/glyf/SubsetGlyph.hh": "9ffc15e03908441ca820bef7aca2dcdb6af85d68274a6e2cf2082ee2ba526b0d",
+    "src/OT/glyf/composite-iter.hh": "45934080ed391569ef8d62e19b72b87be1dc11900b39fc086e1a980cc9bbd94e",
+    "src/OT/glyf/glyf-helpers.hh": "9d13166196002f35534ee79216f59d52f543037a7c092535638781a84314df93",
+    "src/OT/glyf/glyf.hh": "8ddaa361f85245821722315c672e2a24e857300cec1cf7619a1112bd7034b8d5",
+    "src/OT/glyf/loca.hh": "456a15abb15bb31e4adc5a2472591d445b1192824c7fce2556f4fcd11c0b5aeb",
+    "src/OT/glyf/path-builder.hh": "7517428e5bdf0c0042539bff9d3509a3dc47ec017b364b6b522e0ccf96a6b79f",
+    "src/OT/name/name.hh": "b503d5f932a2fb817e03a26d63bbe0b11290f67ec89b541acdf6189d3eefc411",
+    "src/graph/classdef-graph.hh": "1e301e8084826ac6dac09aaa53cd87fd528cdb8ab4352d0be6e7ab1d321a7682",
+    "src/graph/coverage-graph.hh": "9cdb5303d72384e2313424d305fb72b9633309397e84210baa080e1b5a7a55e1",
+    "src/graph/graph-result.hh": "f2d0a7861e39a40d8c1d7c4c1528c1c90d2223429c0cfbc49ccb8c5efcc58958",
+    "src/graph/graph.hh": "d6563c3726b7fcaaa1ae06c48842f07c16e64a6d54fa5c326a796638d0feb28e",
+    "src/graph/gsubgpos-context.cc": "ab6ca72b269ba652b62f5af8e47c3cfd87fa5093b8ee4a70533a6371fe055c10",
+    "src/graph/gsubgpos-context.hh": "896d0d2e1efa37399a8e77f1fcfb1b953eefd2fa0f5c448d9b29ccd84aa3b1bf",
+    "src/graph/gsubgpos-graph.hh": "097e29f0c43818c3df7860a4e8155d63282c7dc258c040f7d8a20607fb26c553",
+    "src/graph/ligature-graph.hh": "acf18955b306f37afaf3e9f7506a1fc8aac083cc65223e1d04194f41f4d2b4f1",
+    "src/graph/markbasepos-graph.hh": "152958ce8ecfb230e386b0cc4ac8d5ab3872805ac5d5a107715a9c3dd0dad6ce",
+    "src/graph/pairpos-graph.hh": "a14f74170366622f1eb529cf6f4877c82c15a36a1567206b322b4dd4fbd81e88",
+    "src/graph/serialize.hh": "14ae2140418711e60242d2d03e70f3952ea129d8e7c16cd24bdedada3b03860e",
+    "src/graph/split-helpers.hh": "53d0069fb33cb261b3028ec2006082bda276796acb67c71d6e5bd1470f66420b",
+    "src/graph/test-classdef-graph.cc": "4471871c0e4bc1c26cf1b6bfbddafe82affbc284794d6732e117ecc8ed83a61d",
+    "src/harfbuzz-subset.cc": "ea3da91841fe247269e7a8803004d1702f34d87a6ad5e7a83109127b82ba526c",
+    "src/harfbuzz-world.cc": "acbe9e9309ff4d45cf3ec07f2fefd26d907e2369c51dc55f3b11c0e4a3cd8557",
+    "src/harfbuzz.cc": "2dbf1ffa1228a3fcad35a369fef67a469326b847786d7fa5add6a6b7716d1e44",
+    "src/hb-aat-layout-ankr-table.hh": "b6941750b297df62c7ed1fa398e23021e58975fadb162184b96eb33707de2de2",
+    "src/hb-aat-layout-bsln-table.hh": "e51fb035be527da629509c96a9d9690197c5e287635ca144d43a691b719a5e5a",
+    "src/hb-aat-layout-common.hh": "ff7a8e9698dae33276c5edfc6372981b00ccb8dd708316714116440866963785",
+    "src/hb-aat-layout-feat-table.hh": "0b5fb75d201410351ebc9a30ebe7ce05cd86d5fa695c99737d17870eee2f4c0e",
+    "src/hb-aat-layout-just-table.hh": "fb044098c7ad9aecdee121af61360bcde182cb1b09bbb4d7bd7abf33b4fd813b",
+    "src/hb-aat-layout-kerx-table.hh": "f0e23caf71f270de3b455fe35b93604e033792f7f0e05b21da6c18b48b73c364",
+    "src/hb-aat-layout-morx-table.hh": "1b6259f99474f192fd13f1b4de87b45dad5a34ceaadab172ed330bb08e555769",
+    "src/hb-aat-layout-opbd-table.hh": "6494e88fbb9817e2264d7823bd28546c23407ced0ad91b3be04b47495e8d665a",
+    "src/hb-aat-layout-trak-table.hh": "4a32f426900bebc09966816a24f6682af071c37b5b63eb8fb9a93dd0b8bc1f07",
+    "src/hb-aat-layout.cc": "1e7cb3975d90aecdb98a7cff0a8efd1f90248b3f4e021ad82f3564b5a5f50433",
+    "src/hb-aat-layout.h": "19260855effa365dabbea60543813bdb88c67835aa347b7970e416906f3ff392",
+    "src/hb-aat-layout.hh": "1a0eb4aac2efc702de0714180dc66669b9b9dbe57bac5470986630f447a3885f",
+    "src/hb-aat-ltag-table.hh": "2ccd9a900fb18d1dcb9e894d33f7e815a8f94c76c55a76f894eb0baa54de3195",
+    "src/hb-aat-map.cc": "40f434da95676fd13d634d397f0e66cd91f53ab172dd6cc91d28df113359c5cd",
+    "src/hb-aat-map.hh": "092becb2645754271f09c74b2c2acc125218e55c7fdf975d3ad82afb3d2daedc",
+    "src/hb-aat.h": "bce10093cad39cfbd5355d763368b22a04ae2bec9289ef0642e5f752bd6e79ff",
+    "src/hb-algs.hh": "216c105c1a08fe7868ee480728317de01adf7094abb71b75c9c73d505d984e65",
+    "src/hb-alloc-pool.hh": "60d402ed5b22471a8890e2345722cac0f7850276c5a703551a3cfbfd4d2d8bb4",
+    "src/hb-array.hh": "8f2ebb4dd2e946b9d92aed294ad879d3d17a64182ba2a70f0e7f9c6592c81b33",
+    "src/hb-atomic.hh": "6570d5f9cb4ee4af00eb59f4cd95eb6b37292dd241c5a88c0d2c8275f2a5c1fd",
+    "src/hb-bimap.hh": "5abb964152afb19caa923e8614bc31a8712ba1c40699ad64d4cef30a1af0674b",
+    "src/hb-bit-page.hh": "3caf6f20d657e92c6f6f38510b0be9b2750be8fc8b1b77ae2a15c85fb9a80d4b",
+    "src/hb-bit-set-invertible.hh": "88291acf80e3523f6e691a8fbd82ec0dd8f277fd400bca3c4e1c8f894f26ea7c",
+    "src/hb-bit-set.hh": "ed4c0b14e38b59820f28c7a34e7588c315bd836e566a92c2e6608e094eaf2574",
+    "src/hb-bit-vector.hh": "cf04f39e2a38c297777d5714e641e2f192904e8e6103ac745c63a9fd156dd880",
+    "src/hb-blob.cc": "c2acba1bc99929996eef56989579b2762077bb69d396dc4f4e070508271c8a67",
+    "src/hb-blob.h": "710fe0a1be3b3a344154939be9bf6cc30674f6abd4ae0fcc0d3144b9d6b9a6bd",
+    "src/hb-blob.hh": "f5c7be3d6fb057bcda705cc1ed1102923678600d70c9edcf7c75709f8d137a74",
+    "src/hb-buffer-deserialize-json.hh": "8fb43286ed2238c53c84c8384930b54d892bb0c1ed4a36128c96764f51c9b748",
+    "src/hb-buffer-deserialize-text-glyphs.hh": "a14f20821d18c76fb9f8ded17a513c1469013544fccdf86e1a9cfe567033e488",
+    "src/hb-buffer-deserialize-text-unicode.hh": "ecfe7268d81ebc6710d8927722864afc571eb502dd4606626a9a97a7a0b7ae11",
+    "src/hb-buffer-serialize.cc": "8ee61d3bcc49f3d2e6f89b08cc501445c94b391dd8a806542c395d37dfc804f4",
+    "src/hb-buffer-verify.cc": "006a176586dd05e1696bcfd57eb9088116d8e9b62da810d47251096c8c025a56",
+    "src/hb-buffer.cc": "9827995d602d95ee2f24fdcf59f76cf88a0257067ad3f714aaa8a8437d695186",
+    "src/hb-buffer.h": "6a5baa80420a7bb89e02ad575609cd3b94cc5f0dcc7a58fbb60be9af9ec2d5f0",
+    "src/hb-buffer.hh": "1165942a181c527e4aaf0d0c65c3fd87d4249766e0a277b23172978a067bce52",
+    "src/hb-cache.hh": "5ffb45141ba2dcdfb9cfede2f3bd10ecfd2e929aa7ec4eb15e0310f92b317657",
+    "src/hb-cairo-utils.cc": "6edc4a1858f12daeba527a71de00b7f2d6607298f9fa3905a3d49af184900a3d",
+    "src/hb-cairo-utils.hh": "d9d07c5b75dee72eea67ed3c93ef874a82fd24c9b19d411c1ab9ca0f3c43a5b1",
+    "src/hb-cairo.cc": "ddb8c3661132198afe181aaffd21d6315c825c59ffc6fa935c6edeed5847963d",
+    "src/hb-cairo.h": "ca71ef1a2f5210ed65294fb9f96b90973a2baa60e2ef8c2702404e13fd3b186d",
+    "src/hb-cff-interp-common.hh": "620592e14d420acc8962558e8a56dddfbc88f89a6f93756b4f2559a61181db09",
+    "src/hb-cff-interp-cs-common.hh": "115763e44c89436aa076223ada96bd85d7beaf6041caa73729acdb5768cc749b",
+    "src/hb-cff-interp-dict-common.hh": "2cbab301bd81efd977119f045c88dad244223edda15ab331a9a9d66ef577e799",
+    "src/hb-cff-specializer.hh": "ca5d8fe57e71906778499c3541ab4b1d690f092eebdd08f7cb0ac02bdedd03d7",
+    "src/hb-cff-width-optimizer.hh": "bc48c9702a1e12027a9b4918581cd135c6d5c415ef3497b8666fd9a848405477",
+    "src/hb-cff1-interp-cs.hh": "6847830ef885432a712818c1b1b67e16dd8f12cca9b5e42791b67185118eebbd",
+    "src/hb-cff2-interp-cs.hh": "4478cf480d838e881f7c52584ddeb42d5a7c26d379b65cb8ddbc82cf685d336a",
+    "src/hb-common.cc": "78afe977c2402ed238cd2437de3f8acd4b801b3ed9a73c93327b3b7fc0be30d8",
+    "src/hb-common.h": "5238d77823c4fc37ad37aff7422b1fe5157fcd10c706862db7c37dcb975e3b37",
+    "src/hb-config.hh": "276cce94e27e14d3ea125502c11f750ebb87dc66d23855b55e67e6283d79dfc9",
+    "src/hb-coretext-font.cc": "b855159c5f00f5610c143d30175912b50fa016e5f15d658c5f697c860cccc5b5",
+    "src/hb-coretext-shape.cc": "4ad0aa9a6bf6fd25f8330f4f71ae5426de5681bd824fbaea22f79c5efb385d5e",
+    "src/hb-coretext.cc": "af57d0429a8fca8f8dea2843a54bfd4d9bc73e0e70b6abdd15506b3d6ffa4e05",
+    "src/hb-coretext.h": "27f22c0c9fee8e164fc6672494b03bca5340f3be9682bad338936d3507cfd5f0",
+    "src/hb-coretext.hh": "d80466c9ff51c4cdd3744ceb74cb888ef7f09a34e93271873f70f8be50217f4b",
+    "src/hb-cplusplus.hh": "e6aa3fee07a1384316172a4ab28ba2b710cc2710c952d2bdbfead348c7887b0e",
+    "src/hb-debug.hh": "1396c1705610fb92e7103672e8e1eaf4b2e7f81386a29b7aa713dc3353871967",
+    "src/hb-decycler.hh": "0632868b53758e45ee832a0910e3a8e23f82e0407a2c7d19603e16ca0b1e2558",
+    "src/hb-depend-data.hh": "f23be36f4c58418c736d8c61676451f525a0f4616bd36b97a2350227d9bd99c4",
+    "src/hb-depend.cc": "7632ee557b70bd841084286510628f0ae0de0786b65e9930d7526685ac9fcbbb",
+    "src/hb-depend.hh": "1c4db106cc0dcf11238932119eb7bdd617fb526ac0c3559c5c72a208f1a9832f",
+    "src/hb-deprecated.h": "0e957a731ee97c5bc813fe9f3e01600a0e61e43af557581874a5a82079d069cb",
+    "src/hb-directwrite-font.cc": "8cff1c8ae570f276ebfd3207c5eb69e4febfcca9a8ca7f250c7b9ef48ad48910",
+    "src/hb-directwrite-shape.cc": "d80f5223140594e6f2d6f84be204b9afc5dce094317043f1bdc47cbe02f5d0f4",
+    "src/hb-directwrite.cc": "1ccd179f546a606a702b5581c6c4332d013d9236e9196316f1714efc69af225d",
+    "src/hb-directwrite.h": "aed6703986f540a5fabe03f25d731d7efeeca788c1c28f0e4b8e4e18a803111c",
+    "src/hb-directwrite.hh": "5f609adeec64c1f34d5d3cbd6c02a278ab0b30cc0f1f4fefcea50e07aecd010b",
+    "src/hb-dispatch.hh": "38359a6994ce7e90db1a9473c16e0b692ca0bc4770f2427bae09becd0024ad80",
+    "src/hb-draw.cc": "570e2671edb01a876236d5c992b1d0d6a69f8eeb634760d701cdca7d4787e782",
+    "src/hb-draw.h": "c121d6ffed28256074ff4ac921231d330e47f81ac51c65aff9a534a60ddf6af4",
+    "src/hb-draw.hh": "47bf75cd132357371c5cc7c5e14a889084185027ed6cb25a8552a9016554539c",
+    "src/hb-face-builder.cc": "04ed3d648ec1d512633841b45f9f7dc4e8afc25e11486c3c4055c519231a4dfd",
+    "src/hb-face.cc": "2371e53909c544baefb274c40f97a7a2eca7dc39a2a3654105bbe26b4ff872e0",
+    "src/hb-face.h": "fd53fe46728fbd055f2e7232d9c38510320a879ee508147e7c1a2b1c9b5cbaba",
+    "src/hb-face.hh": "c64d60bef1054ace2578eeea862e343465796fc1fd0c890bfafd39f2367be9e8",
+    "src/hb-fallback-shape.cc": "03c6ea4985478a3132ce8447c52fbbaae3b65a3bcf7271d56d3e5713e0f283e0",
+    "src/hb-font.cc": "3f24492b1957995639bafa1578d540bb9e0aeb103ba45c4b111a6a7519bbca61",
+    "src/hb-font.h": "7b969a428cbb7e5fe010f96c137ebe27b7e98e333b04aa0056055c5e9e3bd65a",
+    "src/hb-font.hh": "ad7b1279c0306d8f8dd1831ceb4b55c4105326010c8415539a14556a6d8cf3e3",
+    "src/hb-fontations.h": "23f3660cb26167d58da354e8a8561f0fedbb8663aed13065f8dccc46d2b30a9c",
+    "src/hb-free-pool.hh": "a6418d89a9cada235861c64ca4ea5b406c1504198b1e0c31880132b57a9c1754",
+    "src/hb-ft-colr.hh": "53ceea403073da4db5cfaf41cd75ceeb60f4ccd430ed3eac053765c6a548899f",
+    "src/hb-ft.cc": "b5c9d7d74ae96a537d5c04e4e8eb69fae952ba76c550e0fcacbe6854cae1431e",
+    "src/hb-ft.h": "e5a128de581bad91eec64eb057a26dbb4539b60cafa6017d5ca2578cfe0de3e8",
+    "src/hb-gdi.cc": "bf108f1e3f43fda03c92c419faef829b8e5fe04b3ee67e76678e5e25c5289d09",
+    "src/hb-gdi.h": "746f8a752275816dccc24952203b8763305489c4d4f4f1a3ce9180a7eb0945d5",
+    "src/hb-geometry.hh": "bce880dd6f4bb7cdd28c843558081a3bb9bd24d31919b17751e323d4bcbf4721",
+    "src/hb-glib.cc": "ba847c349b06e1e84d9f6e8a15954172e7bd363312a088f95fdfe0857341b107",
+    "src/hb-glib.h": "05402cbae1f44fc2587ea8f59afa235107f9e568e5a4aa93c12ed2727de74aac",
+    "src/hb-gobject-structs.cc": "7ae7081d78aab51c6c5762fcadd2faddda248a71ccb4a4c6caed00c663772004",
+    "src/hb-gobject-structs.h": "43eb2a7d5a6ac89b9b1d30df278c9ceae429f4f309a54e3bdc0a4bd86b5fac6b",
+    "src/hb-gobject.h": "98639ef9185189a968e606db6429a024c363809df2b654297f6aecb59236dbc4",
+    "src/hb-gpu-cu2qu.hh": "eb2cb8c151e53599060421ae820e6d61f4bae129f181e6f740b84fbca3877f97",
+    "src/hb-gpu-draw-fragment-glsl.hh": "2d8469b22885708d045b167a167ed58828625ebb9695f90f2f01c8509a09a8c1",
+    "src/hb-gpu-draw-fragment-hlsl.hh": "30edcd3e3fc6d97f872300d0cf4220ef78ca5cba5656c88689a5562da360e7ce",
+    "src/hb-gpu-draw-fragment-msl.hh": "dccc5b028b6f7d2d234c2d566a60aa8ca0b6555f798d31340558e4149c7e5c91",
+    "src/hb-gpu-draw-fragment-wgsl.hh": "360d97d70be995b429cfeba6374adf6a2878dffc3cd8d474afeacb70c26a7ae5",
+    "src/hb-gpu-draw.cc": "db7dc9a1e0000109ce473852e7dc862280709810c83350a80ff596b82ad9aaa4",
+    "src/hb-gpu-draw.hh": "b040c40d7a001a1b8b9a6fe813762885eab147f66f0775ee951d8093315bc5d4",
+    "src/hb-gpu-fragment-glsl.hh": "bdc23b4f189a54248d2385c8ebc9cebf7ce817cdaea66d8d73227584d05c68f8",
+    "src/hb-gpu-fragment-hlsl.hh": "a4aacb709440c5cd3d7e9ca8968189c773042f4ecc696d72128170a187875f5e",
+    "src/hb-gpu-fragment-msl.hh": "cae221dedee5d6b270cef59725e59a4636b3cb2600586a54cb75e64dae33fe9b",
+    "src/hb-gpu-fragment-wgsl.hh": "a40ec2e86998ea16a97aa42232cddc44fe868fe016ede57878c268c468cdfe53",
+    "src/hb-gpu-paint-fragment-glsl.hh": "0523f3d16476b153e2bca739f253fb85ffd8647fadd9a936a8dab377fd9d1aa9",
+    "src/hb-gpu-paint-fragment-hlsl.hh": "85a0ff08bcd0661bc4118374ab815148b7326c7c313a618297de9bc8ac568a2f",
+    "src/hb-gpu-paint-fragment-msl.hh": "9a3e2748e1945b5ad27238840a090a09bb789c111ac44c8cb34ca5e0e02f76c1",
+    "src/hb-gpu-paint-fragment-wgsl.hh": "c92c05ce7b75828f99f8b01e45019b1b5107c5893b6b90049eb8ab754e4fe0ca",
+    "src/hb-gpu-paint.cc": "c0259d5223d2ab74a4f33952c09b80b37f8cf7558cf22722d7ff8c6021f52049",
+    "src/hb-gpu-paint.hh": "cbea8aba6fc73df2b2bb291accdbd7ffe0332395895168385deee78ae4fe9d1e",
+    "src/hb-gpu-vertex-glsl.hh": "59292f58831ff4029cfca735de05109afd83f43c898ed191d40de40c8ef5cc08",
+    "src/hb-gpu-vertex-hlsl.hh": "eb1b7f278ed4ea6fecdec02bf28208899952ce7422f35f598cbfd1b1b3c796ef",
+    "src/hb-gpu-vertex-msl.hh": "f87ea254b7c64d041bf791328859965145263de601549af1f3bff78eb6fca09b",
+    "src/hb-gpu-vertex-wgsl.hh": "441104fb1e1144b8b93236a6ec50209691c2da715b4c92df9e2edb00929b3496",
+    "src/hb-gpu.cc": "a7330b210e650880d568ba499c3458c35ada09b24a6b93f3d4137394041ae16b",
+    "src/hb-gpu.h": "39554d8253c91678618054c568f68d49a8b5561725b6bd53bb644cab1531c490",
+    "src/hb-graphite2.cc": "1337fd50dc52accdd352d30f70d3f0e155bb2f73089c4491f4b2cc6aa114fc5a",
+    "src/hb-graphite2.h": "98180c71960325ae9a9c886859547f56899504072da6935ae977cb5e7b2586da",
+    "src/hb-harfrust.cc": "908f50e40b4c224af16a07120e6225168c286982ae9df1a3a56612ad681d5341",
+    "src/hb-icu.cc": "63448046175a79cbb68f098aa56060dfa43bd36996527f3b3ac8f8e157e22d51",
+    "src/hb-icu.h": "f2eaa478e7ecc533be912d75288e6fa8c2157191edbc03b2bd68c302bbcd0f6e",
+    "src/hb-iter.hh": "b1035c7209779afabeb7aab77a08c9788b4dc96dd2e7b69df6ed794d2194ee3f",
+    "src/hb-kbts.cc": "cfcaab2eb66057548a82adb832f96328b26858c35e0259d8a297f328b9a65e94",
+    "src/hb-kern.hh": "27cd6fcbb38ebcb410d015a6b0e1aa2cca9ffa6f32c545dca6410e1ced591790",
+    "src/hb-limits.hh": "8e171b8d4abad7235b0468a59401d10bbd9048f81aef3bfaf3c599bdd56dc9d3",
+    "src/hb-machinery.hh": "19e09f7bb8573b4c95bc6035620f7f0713a170e9bbb9789d3c74a0d5df730ca4",
+    "src/hb-map.cc": "123f976e0db59c148b6f5e647be0e491a95ddbc90f8358476e25b44ffbb3f303",
+    "src/hb-map.h": "b073aa19718e43e3535caeddc0015a4e45a89032a76059cc5ab8f3f0d220bece",
+    "src/hb-map.hh": "de25f7e7c18eb30a509a09d6793154c760f4072255ec8e6f4d24158e46c9aae6",
+    "src/hb-meta.hh": "96544d789d1736fcfdc9f74cc9dba44435f5f61b7b7ad529a939d6a739626916",
+    "src/hb-ms-feature-ranges.hh": "ba05a93017685252423f38538493d729e854d3c27dd75b096779532593ce097a",
+    "src/hb-multimap.hh": "f16feac27df49c23231915e72553996889ec42c2c1a2d63ab1ee931bf669f5bc",
+    "src/hb-mutex.hh": "450e83b3636c77424bb0dc693eb59bddd7241ff6847f170f8a194225680b820f",
+    "src/hb-null.hh": "aabbf2801c94b1c5283c03b769b6be9b79d7b0941c3354103384462fc1428ae7",
+    "src/hb-number-parser.hh": "a6e261f48f3790991a36981b843f9b34c78c743d87167b023e58a6f392b90ece",
+    "src/hb-number.cc": "0a190eee5c8a77519cce73802a336f402f15d966a4978eaf7d76eb5001e034c8",
+    "src/hb-number.hh": "44f1c28c9317ab5c125aa9d837fde597f340e00a7e2dba670f9879405439eb4f",
+    "src/hb-object.hh": "5ae613317e85ce4ccd082b628aec4879ac8232c8d67f2b1c5dfba6409e32a718",
+    "src/hb-open-file.hh": "0ec9dd249a6d025003ac447253ed1fab8391efe5b6aae3b9bf27da37f394a5dc",
+    "src/hb-open-type.hh": "dd32aaebf59644ee451fc48371ed539ade0dec7aef4480c77e89265b134e333e",
+    "src/hb-ot-cff-common.hh": "f20353009f7f0a3c548f67e9a09ab396db266a41839811e47eb175191f0626b1",
+    "src/hb-ot-cff1-std-str.hh": "319cc1238cb5c72dd04684858e0df16bdfaf5d1051b504cd8447528c9378aad0",
+    "src/hb-ot-cff1-table.cc": "5bd4358efdc44478d3b68c690d07525504d800aad21f9aae47398c7b4c281a94",
+    "src/hb-ot-cff1-table.hh": "9155997ae4cbce3fe5061d732df232d8e4c28318d471726dea8d0a27bab0a22a",
+    "src/hb-ot-cff2-table.cc": "b9f2f8dfdf3f89ee7fd5dab635de7d5f6d8a25fa00828e3c869f0fd2a461e12e",
+    "src/hb-ot-cff2-table.hh": "7d02b5f7d090e202fda1f8a36d64c81a6f9543d850f5562b264794752ce70ee3",
+    "src/hb-ot-cmap-table.hh": "e582210e7f4eb9c6753437002ac5fceced922f5e11260c4fe452c2ea09cc1f11",
+    "src/hb-ot-color.cc": "4bf18d0dbe6bff108628dcb54c4d2dd25a905c010b120adffbcc90df1331771f",
+    "src/hb-ot-color.h": "187e95990bb37e5e124ba7fc2fa8b42975717502531759a0f298916df17d5158",
+    "src/hb-ot-deprecated.h": "c3a9878ac0633d5e6d7e16821114ad4555458a6924100581f0d16fef5728b1c4",
+    "src/hb-ot-dual.hh": "b7205f2cb19b1b910269554aab9f79e0f5306d4212ba5beb3e2b133b46d16b29",
+    "src/hb-ot-face-table-list.hh": "1770acc46c8cc82d3c68560fb42d5a2aba18b4c7db629c07289eae48b3663be2",
+    "src/hb-ot-face.cc": "a8cdc4a58bc5dcc48ba691e529af05067aa7e71c3bc848f66f3fb5615ba1338a",
+    "src/hb-ot-face.hh": "4cb9eae2d5462f763c251f6cd973d51984e836e99aa83b91357993457aec84ff",
+    "src/hb-ot-fetch.cc": "ab8a252c3c0a191fb6747ce9b70d30f6fdc8b6d46463806f4de0ad68310e6ace",
+    "src/hb-ot-fetch.h": "e574d686e1a00e3df6d31f2b92849b8330ba295012556bb190056fc7a5d00296",
+    "src/hb-ot-font.cc": "6890d726d9a3a41b2e0a005ed81e340bbeb247d2cb43f39a5f7a046d5014e01b",
+    "src/hb-ot-font.h": "e62d178aa73ef9c80b08d3c076db3e99bb8cb4e8219e978e793ef7ffe965f8f1",
+    "src/hb-ot-gasp-table.hh": "0c50108328bceb4d568ad6d5661b4905963abceafa97717d7752d50bb61777dc",
+    "src/hb-ot-glyf-table.hh": "b9631df8e7c3a6f72cc44918b7f5163202ddf645eb8c38648a6bf9459c58b49a",
+    "src/hb-ot-hdmx-table.hh": "70249812c390e20cc2a54541073b450510c05b0e935b9bd30d0b19036fa5dfa2",
+    "src/hb-ot-head-table.hh": "e09c6b3de1c584b0b203d78a7c45f3c4b2cf2044ecaf88f164f0ad13c050e04a",
+    "src/hb-ot-hhea-table.hh": "4681e93426e8bd04ddc04f0558d15c8022b1f6b51481122b3b902c942bfc90f2",
+    "src/hb-ot-hmtx-table.hh": "557fbc5cc9591d88d903c6bfe34ccaeec4fb903cee29585fb1b9fc4436da87be",
+    "src/hb-ot-kern-table.hh": "067d50b10f289bf73f87782d063431c8fded0ebfb91192f25b9035c6d3e87bf4",
+    "src/hb-ot-layout-base-table.hh": "bd36ac24b7c4178ec3bd9fddf2ef951c90020cfe2bb56b635fc4ad4920dfac58",
+    "src/hb-ot-layout-common.hh": "4defa36d0334ac473903c1ab7ce48e6f8b4ccf19896ea659441ec47673a56be3",
+    "src/hb-ot-layout-gdef-table.hh": "f19e79b06516c0d999d38aca145ecf6f85aa3528c7f17f4f42df031fe1d78e0e",
+    "src/hb-ot-layout-gpos-table.hh": "f57deb908794cfca8dca3d570e8fb4e9009614c56a2b03f86a10745295a9aedb",
+    "src/hb-ot-layout-gsub-table.hh": "937d172281861ff404c03ea7f74808019b2641392394fbad11afaeb830e1fd93",
+    "src/hb-ot-layout-gsubgpos.hh": "bc8d34bab400d1e2c4abb5a6b4b352874540e0e4ef3b5f5c93aa5522b98426a0",
+    "src/hb-ot-layout-jstf-table.hh": "c75cf7394cc6543b563cbd0802b2780ac37c73f7a4e38269c4a97cfd8225ccad",
+    "src/hb-ot-layout.cc": "5f42609f54160572624ad7cbcbec305e5998c1854ff8b56d72b192f77f29b724",
+    "src/hb-ot-layout.h": "073f5222dba1761dccfb55ad38fedf0560259e1d63f037bf3414e9276be3bb8c",
+    "src/hb-ot-layout.hh": "e1b0a898295ad709b9ca01f72a5805c6ade8f4026f9d4bbe1589caac6c0dd1d5",
+    "src/hb-ot-map.cc": "bd94ad93aa52ccc73ceec6dc5960a40aab2ae3349cea20abc453b0747ec97dda",
+    "src/hb-ot-map.hh": "4ad8d51d3f537a4027338129679f48f140e3bca409bedddb8b183ceac29efd7c",
+    "src/hb-ot-math-table.hh": "c79a5bd0488e8281d05ec464ab9f8cc4f8429c150a9d9289b47e9e7d6f09144b",
+    "src/hb-ot-math.cc": "d55ceeb69164b30b8fd2646d10019a9026cce5657c93cbe1d0025ca33f9db338",
+    "src/hb-ot-math.h": "4e737e5ed9dcb3db18a64534a1ff2faf638ef720dc30db0ee821324099432f90",
+    "src/hb-ot-maxp-table.hh": "6432e1791063858d587690a0df2bb38a948dfd57e5d223a9102c6e721cc54e49",
+    "src/hb-ot-meta-table.hh": "352b74d60296ca9a66ca6c02cd63b74b9bb5bb20ee97b14449a648ecaff6a44c",
+    "src/hb-ot-meta.cc": "398cf15b2dbc9f3418fc5409fe5fb7c4a6ecb439b40738a1678aca81da2f5a0b",
+    "src/hb-ot-meta.h": "1d38c9bcbc0d417f8b7e0e818c2f5f9b83d2abddc39f2f116cc0ae84157a572d",
+    "src/hb-ot-metrics.cc": "4a48ff150cc3d227c8a9e1cd81fe3973840726954ce85f450df6624ed0871f8d",
+    "src/hb-ot-metrics.h": "788a493674bd17b8b5995b2e050cb3eedcd3ad812e79033a017487b5ae6fdbb5",
+    "src/hb-ot-metrics.hh": "85b44bf5a04c6a859e87bbc4602774ffd1ec984730a600ae4d6a2e57e9bf375f",
+    "src/hb-ot-name-language-static.hh": "9d3e308fd1467443c18b251545360efe80a2bbf68e02ab9fdba6f08f285b2167",
+    "src/hb-ot-name-language.hh": "a70e2231ad126d79c75009034485ff1c205ba584df1a4d711c3c5232d4745288",
+    "src/hb-ot-name-table.hh": "9ff82369883b752f707560c3e4b6aa9f24370bd3f9eaf88d30141f0a33d5df2f",
+    "src/hb-ot-name.cc": "bdcab8554abf1e7cd36dfd59c157f9e10f371768bdb864dcea0124cde5ff78ab",
+    "src/hb-ot-name.h": "5be924687f71a0f98149b1987f3de3fd766ed9e84c4e144250e97048a36cb1ac",
+    "src/hb-ot-os2-table.hh": "3cab67644860f2573e175e72b421bfcdf5a9213cc28341a9a484edcbdb385cc1",
+    "src/hb-ot-os2-unicode-ranges.hh": "71e0410f0469d6471978ccfa31a2421068bb65a31d3c6f6c13b20664bcce49fa",
+    "src/hb-ot-post-macroman.hh": "48463e4ce19ad6726ccafc0decffdcc1fe12ea30b2a2b4d46c8a4d11aad4c594",
+    "src/hb-ot-post-table-v2subset.hh": "915d50f238be607428b0d64d4865e43297f87b65d7ed9718e2ced7719e6a664b",
+    "src/hb-ot-post-table.hh": "9f2f9619fec3da150ade53cf15cf11caddf6717a8b6348afacf6fe249d944fee",
+    "src/hb-ot-shape-fallback.cc": "aae652f7618e77861fd497ec917b39d8b410bb58f12f430765acb2592bf84336",
+    "src/hb-ot-shape-fallback.hh": "7b6deee5ae42fd6ce433b4d64425fb47e3511c2c4feecfc7a68856ae0711f6f0",
+    "src/hb-ot-shape-normalize.cc": "b33055e9752c6767319828e56477cd751e7d5f2927ba62a1a136ccaecec6606f",
+    "src/hb-ot-shape-normalize.hh": "381d0a03e6051977f79a9f4e84a7dff13fbf729b73fa620de6fa89dc8df05e32",
+    "src/hb-ot-shape.cc": "9a6d76a4607b4a92ca64005bbcf0320c7dfadbc656fa91b9e9c0de1024955514",
+    "src/hb-ot-shape.h": "fd484f67e5c0d99cd428a2debadface7e80f7163b9c1be150cf1860fabe050c6",
+    "src/hb-ot-shape.hh": "2dfa92bd46cfa143ccd7a1bacac35174c6eb4edf754aef20f4b2295418d5b225",
+    "src/hb-ot-shaper-arabic-fallback.hh": "17af4b8dc7fafa07f2d1a89eaa6c3f8f8ef3d87847117162ad9fdbf713218d9d",
+    "src/hb-ot-shaper-arabic-joining-list.hh": "cd80914c08f1be9c29b94c3bc3e4f1e12b7e7c2d4cc34a945b937a7fb9dfe7cd",
+    "src/hb-ot-shaper-arabic-pua.hh": "4f7a6f501b364b89982f1da22eac5798831421cbfba1ea1dbb9468f88a98ecb2",
+    "src/hb-ot-shaper-arabic-table.hh": "8fef6413088130a71bde584d0e42e7cc1a916c01b2da1a50be586d2cf6297441",
+    "src/hb-ot-shaper-arabic-win1256.hh": "b62763d69a5238444f74163d37dae7bf52ee16686097e345a0d75704b02f30d5",
+    "src/hb-ot-shaper-arabic.cc": "18be6a6c19d5540e1e546c208c56874c679a624c6a3d5b07e5978721c4ac1f2b",
+    "src/hb-ot-shaper-arabic.hh": "080c66f82955bf2a4578fbf946a54cd2c230f9aa241950419ee6630442920b8e",
+    "src/hb-ot-shaper-default.cc": "0035a3cf8b359f4b4a59ff59b36998c36578174ba836fa74bf00310754451e66",
+    "src/hb-ot-shaper-hangul.cc": "479bdacdcaabb8d98dae2df02c030815bcc9888f9c72a260a5a4145696641789",
+    "src/hb-ot-shaper-hebrew.cc": "4dbb5128ec416028ae347ddac1047a13f5e43cc69df5c3101554577667862a01",
+    "src/hb-ot-shaper-indic-machine.hh": "b4133ffe1d2a2d393fd024845d1656365a0acb56609abd6d6429ddf9f8d44a05",
+    "src/hb-ot-shaper-indic-table.cc": "135cfa7cefb52fef78a8a710e848c62efb0c48e9d902c8b44a31c50b3258f8ef",
+    "src/hb-ot-shaper-indic.cc": "4f74698c5a752402a3cc6721770e80e709a216f434e6be73c5cfa22bf69e2777",
+    "src/hb-ot-shaper-indic.hh": "3c6ddb7bc92ac5d641ba1b0206b091e40b0e8f41569f97704a7a6d8eac47d405",
+    "src/hb-ot-shaper-khmer-machine.hh": "b4ccfb6e22a4e0980a169e151010a391144a2f0ace2e9aadc4dcaf2c73ed5b96",
+    "src/hb-ot-shaper-khmer.cc": "892f0b5f6e891fa7f11219cd1b2b1fa077c56b23ab11db046699a6256a21ee1d",
+    "src/hb-ot-shaper-myanmar-machine.hh": "874d812aee2bf91e4e59e4bc075c1d75c033b7599935a277bdfa934ba87821a7",
+    "src/hb-ot-shaper-myanmar.cc": "b487d9a2875bbacc9d414e9aa9a05b699ae2257daf11f6c8cc3b1b5b6352414d",
+    "src/hb-ot-shaper-syllabic.cc": "2152ba9988c54c13d61b66210992d73d8b8b6c2618ef547c28d83aef85aa80fb",
+    "src/hb-ot-shaper-syllabic.hh": "75dca86fdee296f9d1c98a4c37e417b509429ed19128c7efa272f3d29cd7f8cc",
+    "src/hb-ot-shaper-thai.cc": "77ff4f4b92c7dcdf7c56dd506f1590bcc94a631ae2446bbc7c4343399ea96262",
+    "src/hb-ot-shaper-use-machine.hh": "b9fe46c2ba3ef811b965cf84e0432ba8d97af28e6add1d9edd76d60082c71196",
+    "src/hb-ot-shaper-use-table.hh": "e987a2c9454d8f528bf65e529c41898faca6722a176c74fb7d7d0f7573f8f5d9",
+    "src/hb-ot-shaper-use.cc": "0cf3dcd7fa7149dd5356f1d307488217570b01e9d3182f37e7715a93b1d6d923",
+    "src/hb-ot-shaper-vowel-constraints.cc": "d5af84db15f3867adb89a55417bc8ad586366a1fa051acc5877ac178185c51f5",
+    "src/hb-ot-shaper-vowel-constraints.hh": "310be59d8c3baec5f34d9997f304a867205d5dda885038be0d808b7a5eecea4a",
+    "src/hb-ot-shaper.hh": "3eb84b0a89a8c4dbee0930e66bd071bb374d76e9f2748ac441d84e79dc34cce3",
+    "src/hb-ot-stat-table.hh": "fa13e8e1af8d7293329e5dd129583c710f9f19a4fa6c66fa296d3563693662a2",
+    "src/hb-ot-tag-table.hh": "19dd8ad0e75c6d0eaef0c9ccd0ba23d213ac4592ea702322f3afcff1e010e9b1",
+    "src/hb-ot-tag.cc": "6bcd8c41ec3bd40185c1b26b3ef1743f3fb3175d1f176cbc131dc50b6fa60e55",
+    "src/hb-ot-var-avar-table.hh": "a1fdc6b3e2034a5ac237de708c71069eb12fd44efc28f95ae2d5f0b78bc40a59",
+    "src/hb-ot-var-common.hh": "f4d928fe476c23f91f114fc09e6aa953e1096042c87c4ac1989713edf602bc2a",
+    "src/hb-ot-var-cvar-table.hh": "f1a5bcb333c7a5feeca95f20c7c6c1efbe3ded916824d3b701d1362dea67d3af",
+    "src/hb-ot-var-fvar-table.hh": "d257cc622c9f0368d9044eac016413457fb5a37a94f55a5d893a7f9bdf4b239e",
+    "src/hb-ot-var-gvar-table.hh": "a8198eacbc75f8cb7bdfd75336946fff0b7620023868fe9e5cb996656e47d5c6",
+    "src/hb-ot-var-hvar-table.hh": "ae32c18d6a3c854aa8ad709e6d89048b88cb607614ebeaef57213304292d0544",
+    "src/hb-ot-var-mvar-table.hh": "c8fd8805d7f8f034fd66a4547c75137f8ab560a1295bffdce408277a63a67f9c",
+    "src/hb-ot-var-varc-table.hh": "be2e2ce15201b49fe629052e43e2c30d284d00224c3d45f64760d7ad9027dced",
+    "src/hb-ot-var.cc": "f5e59b1937d8d055a080aba3b1300a7ecbd71bda3c505a0b45bfa8c70f2eb947",
+    "src/hb-ot-var.h": "9c438bc34f43afcc95c3f5f390b929903156af93e19473fc29daa650d98cf20e",
+    "src/hb-ot-vorg-table.hh": "37111607b0829b3b0e3298d6eef8d20e2de0b0961a4e7fa0b50253104c593e1f",
+    "src/hb-ot.h": "b1f9eb217039400ca9031f6a84a85cb879fc16fa0ca927ed453c17d2c3e05429",
+    "src/hb-outline.cc": "2f21f5bc5ab216cd5ae79f17dceb995b3928634873e1209d3bc2d266c527124d",
+    "src/hb-outline.hh": "344b8222a24d304a8cba318e37ab7db97e4a314d134fa8a8b7a6884e19ecff40",
+    "src/hb-paint-bounded.cc": "c91c273c22cb739a8fb70adad65616373385dd9a75d0774b77276e8764407835",
+    "src/hb-paint-bounded.hh": "732efedcb24a64197d493e86a82a664a28d53f10516af0b017a1cdb6ace44cc3",
+    "src/hb-paint-extents.cc": "f5851b289b2761870c5437b169d060ba71de5d8cd48314ce675677fbc0f62d5c",
+    "src/hb-paint-extents.hh": "ef254cbd4cf8aecfbbbeda44f4a355e0afeb6616ecc8aef36d7b2589b2d3ecc7",
+    "src/hb-paint.cc": "f1bc1354c177e61b594d406586d34c343d923ba7c08a5bdb6f3b5389ebaf58c0",
+    "src/hb-paint.h": "ba9e2d78eebed719ef0b7c21229d4fe0d55466e891d15abcde7e1f94de17788d",
+    "src/hb-paint.hh": "f0820c01a97ee95f87137e9435397406ef96905b8b59a26060d3cb556c3fb403",
+    "src/hb-priority-queue.hh": "73d07c7c91b1353bc6ef9c94177227c0ade7dbb3f5772d670dd78762fffa8d63",
+    "src/hb-raster-draw.cc": "ce9e28e8ec5880453f530f6d48c83783c7927e48953b0ee44f3513169f47d854",
+    "src/hb-raster-image.cc": "bb90e12b94f5ef7b3b686694ab847474c1b93387f40cc68a6eb6b4cb6aaa0459",
+    "src/hb-raster-image.hh": "0306193aeb3022437ef3fac26814631e1f23b3fb2b17eb6360feffdbc0110a03",
+    "src/hb-raster-paint.cc": "26a901d6c4fc4d31cf5b5a14b6ff293fd1acb5de277f772c0507b3cb296f0871",
+    "src/hb-raster-paint.hh": "552d979bdc654b8fe309f1a9252ed1e373391a364f2b5608170ec91bbbaa89db",
+    "src/hb-raster.h": "f7f242464926ecb9793e932edbfd0a647c134c01b266937d9edab45ce4da4b45",
+    "src/hb-raster.hh": "10f32d4960735358502e9df4e281d5e4131cc13459a4b1e784c4a1d49acf409f",
+    "src/hb-repacker.hh": "38c803671c729dc1d043cae80697c417b85f842a3865380d0be332db76eafc95",
+    "src/hb-result.hh": "94c3e59f58268871cef90356c0867822658ad353faa588b3fedd776e8f31dcc5",
+    "src/hb-sanitize.hh": "bd1c2fdaf48e415a090157df5bc243a7d858aa79e951d670e04b0f8a362499c6",
+    "src/hb-script-list.h": "898de25adaf9253471d9f1351a6c90e3547e1470dd2f468ab19a86561868182b",
+    "src/hb-serialize.hh": "87ada1d08554fa3321341d18c04549ba11126084f9891b59b7fa42c2c8d9f52a",
+    "src/hb-set-digest.hh": "1c28fce757504caac550e087d1035b7dbdc6eebabbe188104ee49b2e8dadc216",
+    "src/hb-set.cc": "68a4a7bc456b217b82d1e0bd6d995257e6be595c537c202f043b6aad18f4b0e9",
+    "src/hb-set.h": "f19c6a8dea1733d749f6cebe6a7366a9ece37a0020bd1153b233f1fbb72d3440",
+    "src/hb-set.hh": "401d54b77e586486432119b0f9a10f79483992113b6670e83cb2a032eebcdeda",
+    "src/hb-shape-plan.cc": "6bb8126212a8b43f5079cd5e732592645f319be588deda9a7af37e7598152db6",
+    "src/hb-shape-plan.h": "03555c82558fa347e96549ec99698fae790c2cfb9ee795c5ea48ff4134e06224",
+    "src/hb-shape-plan.hh": "2c0596333430546d947368752020afa34510a9f4e684558fecf2f4c610fe3c1e",
+    "src/hb-shape.cc": "03e5e5e761768032afd4ca802e0db1f5ed1affbb03ffe3202776a9b6bdd19b87",
+    "src/hb-shape.h": "3adfcf510853bc118a120b7633c0e4d15134e4ac4bdf7911cb85511887e7e328",
+    "src/hb-shaper-impl.hh": "459fb7af72bdcce6a46899f23f3d5fcd68dbc311c65973a533bcb53051a3f485",
+    "src/hb-shaper-list.hh": "92e227c4dacf188e3f26b624fa15eead49018dc622c691dfdf445211adfd367f",
+    "src/hb-shaper.cc": "6f2084e14e002982c4cbf61884cc7d76b05850706e243fa1f83ee9fb850652c6",
+    "src/hb-shaper.hh": "173cca48acdaa448dfefd111bf28674e68f4520df29aec4263e471535ca56055",
+    "src/hb-static.cc": "fc77554422daaf33be8ab2f33b22106b0e0e2931ebf54b01bc19cc4a186b2498",
+    "src/hb-string-array.hh": "f45ed87b8b6d99fd0f5d1a49e0dfccafaa093b435e6aad769e6e781c48ed4dcc",
+    "src/hb-style.cc": "616f89f2e983e2a0ba27e86f534ff01ff9b985a00c3b4d381459c81d1ae3291b",
+    "src/hb-style.h": "6e88aec3ae6db176b37e4d6089923f78859134a26fd12b33b40b772e91673b5a",
+    "src/hb-subset-accelerator.hh": "8a29588d8a138aac2d304dd1774ba61ba034ad2e80a503ecf7f30aa993e07141",
+    "src/hb-subset-cff-common.cc": "c406053a778ff8b8c73ee17bcdb441db4dd908cd0a3352b802c725f0b1e638ed",
+    "src/hb-subset-cff-common.hh": "0aa70ede23eeaa80cc2cd96bf3776f827edcca0c1c1ae137eee2ef660483ede6",
+    "src/hb-subset-cff1.cc": "b35685f37008aadf2ee42dcbb54ef870335a4878ff036430e08d3539adf04d93",
+    "src/hb-subset-cff2-round.hh": "d52bcacde4fdb5a478120ad670d18922eb6326ca7f0e3d1d3dce7a365b383c7a",
+    "src/hb-subset-cff2-to-cff1.hh": "8fd6d8f692efe3132b8f144570fb7bab7e9845e5adf25a9c5c5dcdd3ca4646f1",
+    "src/hb-subset-cff2.cc": "5749153c7b0a031183560b7bf40361735fe7aae7529f9745e4265648af7b51cd",
+    "src/hb-subset-depend.h": "10c59339844a027d2938e1fcbe5432de529ca47f931e3bf9e20feda9a14c4147",
+    "src/hb-subset-hinting.hh": "0b0ad44f1970153f39848d58715d3efd5386fc65603b0ef182bf40cdb63692a3",
+    "src/hb-subset-input.cc": "69b3a58b6740528ba5cd31a9e36b0bf026439148a7fed0ce4cc186c935b4bb50",
+    "src/hb-subset-input.hh": "0ec2ac9e31e09d6334e3f6de0e6627307a373897ce0f8c42055d81e309e1f07f",
+    "src/hb-subset-instancer-iup.cc": "61aa3358e47dde30e016509201f0def3d266d4515c7f2a457519e62f7bc4d2a3",
+    "src/hb-subset-instancer-iup.hh": "d91eacc26737276b3aa5516251fcdd277d2d9c114e62f49684098a0ba3d40619",
+    "src/hb-subset-instancer-solver.cc": "557b907470cf59ca09dcb093fee670662a5c8b944ff1a2071cff56e50ed1c866",
+    "src/hb-subset-instancer-solver.hh": "938647626f474387fbcfbb8403aa48b271a2cecb71c5cda320d5710ab813ebdb",
+    "src/hb-subset-plan-layout.cc": "812ec864385efec033b3f3505544cdc89efce8818229f9e3ff04bd712daca431",
+    "src/hb-subset-plan-member-list.hh": "e4fa2f09c104d1cd07f326376189c78f17aaeff25f14d85e06b79e3325b04e56",
+    "src/hb-subset-plan-var.cc": "573d589e7dbfa275f4525a95367f355b1d13cb3c3f54331321a1d8480932cd0f",
+    "src/hb-subset-plan.cc": "ceed46dc2ffaeb140dbf80257a14bec589f7ec8eec8d3b8a61ebc7696ed2dff5",
+    "src/hb-subset-plan.hh": "7b8188ce014f2687a79f75b60cd6cdc26d2f992d4fefa8afe2a1e11f6c97d6e0",
+    "src/hb-subset-serialize.cc": "a32726499e89883377d21a9ae0b07e2af5d59aa902fb76f869415be3a6f40b35",
+    "src/hb-subset-serialize.h": "3c6e7ba4adabe6d07c80c7cfa6f8e731a7b10bc64b195c806810025a13277241",
+    "src/hb-subset-table-cff.cc": "896009eebe9562c14e1535572e8308cfd7910b893a717cddf414d48dfea9ea26",
+    "src/hb-subset-table-color.cc": "77edf352cd9a8e2acfe4e81597c6326b3b95f5dcc6f9ab37321d8418ce4883c5",
+    "src/hb-subset-table-layout.cc": "e8f2d61443348d5dc376c0d16ee18ff5ba9a3d3295eb724af427ccdcb1e75a8d",
+    "src/hb-subset-table-other.cc": "000cc01bb79d6e1e700d7d7cce7f53269bd35f33c04d60d0de98defc7e6b9542",
+    "src/hb-subset-table-var.cc": "ca7a80c1c8f3e201328fbacd035b6d985163df71ec230c0eb9858abd0b4b6c4b",
+    "src/hb-subset-table.hh": "dbd305e99e823c7f002d8f324d9f30258592ea411635189d25d85622b4f28c30",
+    "src/hb-subset.cc": "19d50f45e16697893f65a74272edd0abe6e4cf10c47e7705eaf1a4238c13c82e",
+    "src/hb-subset.h": "d21606af530ed77b54239ec70b71a31cf89ea49142d10b1b5cbfb3d232ef99b5",
+    "src/hb-subset.hh": "37744c17495877162ee66ef423e9a33a66cb3ba30252c829360a0979eab57d82",
+    "src/hb-ucd-table.hh": "a106db3cfd36f1e3baa3223c3863e083d114dcb4c315364d403178291ef10f2f",
+    "src/hb-ucd.cc": "becfbe951e8fb0b1a582f1a106ea94ea4c74bad4805f855b1ef2412a6e7afb85",
+    "src/hb-unicode-emoji-table.hh": "04dcc8caf9c4e10720d56a0f721dde631ee56ca9c05fa380f659d447b3390ba8",
+    "src/hb-unicode.cc": "2c4825a02154815244c971f23078066e8322c4a3d662936b368c7135ac624b94",
+    "src/hb-unicode.h": "6131f0eb9e411fa392101f58793f4e4347ec3bc6fe45226736b186004cea8038",
+    "src/hb-unicode.hh": "8c15f338fe6e3cb11315d2cf9368abac64525c6d84f391353f78e9d4518655a4",
+    "src/hb-uniscribe.cc": "f8d468ccaab4892a65fecb3fecf6f2c7747e30cedef705af6aa4e9ddceae4b1a",
+    "src/hb-uniscribe.h": "fad494ab421c382ef5d0264472e2f1b6527e0af165444103b71cc7447e9dc5e2",
+    "src/hb-utf.hh": "694ac8ba7122abbe6bd77d046007753eb786955421f15fb14f7f8a39e3acf8eb",
+    "src/hb-vector-buf.hh": "e42114e7f1200ea410b15b8867140d33a99fff0d5309e9be71e96a7cfcec2ad2",
+    "src/hb-vector-draw.cc": "ae8bc8e88db8c71026d68eca1118a28f3109b2523feb53f2e82c7b900a8b5685",
+    "src/hb-vector-draw.hh": "1939eeee7e8cb2769f7cb76f9b03aa41641d179e0aa000db83720f207d2ead8c",
+    "src/hb-vector-internal.hh": "b47d5822d61e3a5c371a724b86207120db2705f482977c9ea0f7c5999d0aeb1e",
+    "src/hb-vector-paint-pdf-image.hh": "1fa834c061b257026c865512e42cd5053a5981fb9cee29c386af3bb5b3e1aa59",
+    "src/hb-vector-paint-pdf.cc": "7f98250c575f5b0c8e0956092335b7a96b380b0ab090ae3b9db2fff6a18d95ef",
+    "src/hb-vector-paint-svg.cc": "273b7fa2c00e043b735ec25dd7bc9c9265d0e5d059acaee6f1dcaf6c3fe69789",
+    "src/hb-vector-paint.cc": "1241d4be4c99aa0ecaacba778914c86588b3fa1f77d144e3aa22729c59bb0f3c",
+    "src/hb-vector-paint.hh": "13e1e1a924afc78793c120ee91f5631fe80f62282939473998a2e0e608bcdb34",
+    "src/hb-vector-path.cc": "cc19c76b855f8a538ba78b2b83552014480136f3da21d008ef6ff21208a72b07",
+    "src/hb-vector-path.hh": "b2291f5b57672cd0f640fae5da0f453355be509e38168e76f7aab20dcd8c5c0c",
+    "src/hb-vector.cc": "607826e15d0753237f6bcaf4dfb7f034a151832c51722f50b5b8d393efd87939",
+    "src/hb-vector.h": "c9f480bfba4b09c20dc60e54807d73291fbefd9ce7f675dee39e04790b1f15c7",
+    "src/hb-vector.hh": "7d719783d88adae28972ac4efccfba35191efac31d47c71bd37e5674ae812875",
+    "src/hb-version.h": "ab64ea96d266921b56672d897af99852e3a9a4d4d74d5c1a797a3bcb0ae5dcd0",
+    "src/hb-wasm-api-blob.hh": "fbd431d04e3b9d979c38652d9bac5c220cb4a3d042653adf14a3a2760354dfd2",
+    "src/hb-wasm-api-buffer.hh": "f612c9c29532277982300aecb086dde0a6cd4634765a3898054f1bdc038617f4",
+    "src/hb-wasm-api-common.hh": "603d1c3134c3fa0872a2a4fe209ceaf7e479d080b23d9e34116c2c7edb0d2d2d",
+    "src/hb-wasm-api-face.hh": "b08e6601a5632a793642138ee05c7d43939e5f7da593a4bdd22fe77423aec3b9",
+    "src/hb-wasm-api-font.hh": "3ce4d24dd5ead352dbb924d86eeee2ad9a280c7fe52f160f91852bdc059ca435",
+    "src/hb-wasm-api-list.hh": "0ad83e46b3c64ff7632945ff61caa5e99accf0abdafde0356ee6c8e408564db6",
+    "src/hb-wasm-api-shape.hh": "1fa7917e0add640927ab51549b504fbe2f034e1f9b31253be0f389de49211143",
+    "src/hb-wasm-api.cc": "8cfbdfbf4d48d54dabd0d50e265d80d6d8999823454e9df37174d97f6cc035c5",
+    "src/hb-wasm-api.h": "67ca374f98768ff8983c5ca519f6fcbe6f004f4e4f48a18ba81ede449dd36b9d",
+    "src/hb-wasm-api.hh": "1c1d9caa4b09f8b0233de97eac7c6b9d22eda1f7439028c2f8ee4a7ab48c146d",
+    "src/hb-wasm-shape.cc": "622ac9e94afba2cf5b4f0b8e24d16046a13776aae0c33aa87919b7f25f0c5ec4",
+    "src/hb-zlib.cc": "b07ed518b09419e3ab7aafa01c6ed58b5a92fbe1c6ad9181bf06340fa1d6245a",
+    "src/hb-zlib.hh": "457fa8a066d2e50223aa0fa02a59da1a317409721e287585265725c9cb2fc809",
+    "src/hb.h": "31a1b53db3ee4395916e6d4f105b2c64772b8037bbb97d0e6d1e4a905eb6c6c9",
+    "src/hb.hh": "af90464c2a4cb5ff04b578be0aa11cb67d646dc9742a426bd4149ea9f99abe57",
+    "src/test-aat.cc": "bb71039cfde990faec13772b70ff72ff10e76f731734c0c8f741d586aa1c1249",
+    "src/test-algs.cc": "39f8d5407153924d8a2d7d7b70d5e06ea4eb71dbf6af972dcdba703619cc959e",
+    "src/test-array.cc": "668d529f2c1b5bf2b33cca4434c33e7e435af8c69c86e654978347b2a10258c4",
+    "src/test-bimap.cc": "3dbf57fd66afe88a241a30d528ff4b3005cce2338c288aa37310afac72598312",
+    "src/test-bit-vector.cc": "cc494153903c71df4b72b249d40e064fbf84ed7c0d7d51adead22c624b66614e",
+    "src/test-buffer-serialize.cc": "4b26ce6c6395dec92ebdc93576ab27860cb92d82e1da1883ea1eb51ea68842b1",
+    "src/test-buffer.cc": "88df5b44dc0f98c410c0058d5ef2f5ac0e6ac3089389c5d602f6df20cc6984c7",
+    "src/test-cache.cc": "859becb0e241e3a21a47abdbf23549f4930ae863ca786136d52ecfeb6f5f5c2f",
+    "src/test-cbdt-cache.cc": "c0b3449fd75c8678f914d343816237283c60d68990a4c0df7d8be7af60ae93d4",
+    "src/test-cff.cc": "814ef9858feeefc8e8b34c18b28216c45666a88974909435472706f250e4426c",
+    "src/test-checksum.cc": "a0568997c55b8ac4160458999ac7dd83707608db4beba7e99c03cacd85745ec5",
+    "src/test-colr.cc": "3fe3fac5547c73bb8bd6b7602d2f362aad2bbb070d2efcd994c36a1454e94322",
+    "src/test-decycler.cc": "68eb395407ef11189191c528b2c53ae0ff863d72418507b9bfd3f04dc0ef0f80",
+    "src/test-gdef-cache.cc": "40e6f10cc10f72e0ff536b0152d9d8944bd53be8fea7f453af0f8e9fe9e08540",
+    "src/test-geometry.cc": "682db752853572cd8d2b74aba4393e995e44487da2c06ae7f707c31baa208f70",
+    "src/test-gpos-size-params.cc": "7ce08b723ca904987d275d01b351f482901d8dc7312618f797c1b679f9bc227b",
+    "src/test-graphite2-buffer.cc": "6ed44394fc28d4e48cf6a32791d5ef9dd8409986a004f66bef4906fbbd970a62",
+    "src/test-gsub-get-alternates.cc": "10cc94fb858c77b7c7b62f480e569a221bcbc85ea8b65dbc9e1f952bf34a9dc1",
+    "src/test-gsub-would-substitute.cc": "2c731fe0fef0f7f7ebcc80d07d3c60373e616f6b6c93076ed999bfc5168fb1b4",
+    "src/test-item-varstore.cc": "ca8d9160322c3222b701580c11cee12e029218664f504f01a9f879e7a9a2b0aa",
+    "src/test-iter.cc": "b9090644b66feda5a95322ba304481b711d57f903033acf47ae0a970700441f4",
+    "src/test-jstf.cc": "fa24549269b972d1ecd9cc6989e53ac41449f2c1f3860e833c132da7689ee58c",
+    "src/test-machinery.cc": "23a8d5a5c5c483f082e90dc665f192c96a6b19e45c0bdbb121696067656a0131",
+    "src/test-map.cc": "bb21d69df20a18429b2bc316142a8f12340ab5921df4d03654e2be194153ef11",
+    "src/test-multimap.cc": "f43bd0bd50a5545cd6591d7a3b6616396f10630968fc43e2a72676d503ffdc52",
+    "src/test-number.cc": "b1b517e98c0c02795e698450390a16466fc92783e25e07801b5d4557271c112a",
+    "src/test-ot-glyphname.cc": "1c96fc59b3eae9460267a78eead2746d59e2741cc15c72f3b3b208cc36fbf43a",
+    "src/test-ot-meta.cc": "ee04b46d1c2fe49cff67bc312e33af366a4714ecc05377618bc06e7d1c615ddd",
+    "src/test-ot-name.cc": "c16e45a88dbcf5c16f030c361954f41fe3a0d89cf89bd38285fde11c086faabf",
+    "src/test-paint-extents.cc": "f87834535eec9d2523f72d47980b40210ad9ee91ead7df94a64f1dec62585b6d",
+    "src/test-priority-queue.cc": "13c0c7a0e6ad94e329a2616560b6ebc46a1dc5c3c58441a7b89e6b3f4463349f",
+    "src/test-raster-paint.cc": "67c62c6645e3edbd1b4aaad42254fdd52a98f0c915b84d5cdaf51595654f645e",
+    "src/test-repacker.cc": "29101e69ffb493770c72cc7132a88f678d6b946490148d63ee9314173ceffb8b",
+    "src/test-result.cc": "41afd2feeda00fe18c388ee8efb171023e965406ee2fc57f60682200179d8184",
+    "src/test-serialize.cc": "07a0eb6d07c957dd5cecb71d8498dfe908725ad91f248e3f0abffde14bbb6d75",
+    "src/test-set.cc": "96749520a4cb92bf62f188ca4fb0d9247f7b413f2cca2e663b4e40e61194dacc",
+    "src/test-subset-glyf-budget.cc": "2ab9a221e1e833913138b7d7e9e42b180d763298fae6be56a132f781d5b7cb95",
+    "src/test-subset-instancer-solver.cc": "b97ef06cc1e3140996a6963101343f0a28faa6caac62d9954639d7a191f07c0c",
+    "src/test-tuple-varstore.cc": "51c3ef1c1e5cc56df53cf34798b1a27045e6593317912d0cfc1b77264b165fd2",
+    "src/test-unicode-ranges.cc": "6506a4fb714ed4f0a6e383e05254a7da0db3fe18b0b722af38a30926d8149ae8",
+    "src/test-uniscribe.cc": "ac91f2c829dfed36bbde7f9fc23c90b2da72fcae320b582af3170e7d1645e8c5",
+    "src/test-use-table.cc": "13e723435c6c78b2b50aacfcc5b1a3eaaf0b4ed8bfebb2a668afb1c4c6230b0c",
+    "src/test-vector.cc": "8791885260a390c7b3b0395a5ccc6c0567897d8a426e704602613391f529c233",
+    "src/test.cc": "9f51b48e1c40bb4c99204d7b92d758ab118d1ce698f3aa4aa9c4bcfc26f84a07",
+    "src/wasm/graphite/shape.cc": "24095b9e42363c4a30256e62cd3faf39e90d13393a526a2415f1f812327c1a54",
+    "src/wasm/sample/c/shape-fallback.cc": "bf24e6cd4ce83cc61f47cd0e8fc0d407e848663c6f786bbd90b874c7ca1189a4",
+    "src/wasm/sample/c/shape-ot.cc": "9ac5d6267bc92a35a7fda2b8949232de4104a6148824d25aadced3a4bda3665c"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "src/hb-algs.hh",
+      "line": 67,
+      "text": "# pragma warning(disable:4200)"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 68,
+      "text": "# pragma warning(disable:4800)"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1435,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1436,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1438,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1461,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1462,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1465,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1475,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1476,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-algs.hh",
+      "line": 1479,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-bit-set.hh",
+      "line": 204,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-bit-set.hh",
+      "line": 205,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-bit-set.hh",
+      "line": 207,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-coretext.cc",
+      "line": 356,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-coretext.cc",
+      "line": 357,
+      "text": "#pragma GCC diagnostic ignored \"-Wdeprecated-declarations\""
+    },
+    {
+      "file": "src/hb-coretext.cc",
+      "line": 359,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-icu.cc",
+      "line": 34,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-icu.cc",
+      "line": 37,
+      "text": "#pragma GCC diagnostic ignored \"-Wredundant-decls\""
+    },
+    {
+      "file": "src/hb-icu.cc",
+      "line": 52,
+      "text": "#pragma GCC diagnostic ignored \"-Wextra-semi-stmt\""
+    },
+    {
+      "file": "src/hb-icu.cc",
+      "line": 291,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-kbts.cc",
+      "line": 39,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-kbts.cc",
+      "line": 40,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-kbts.cc",
+      "line": 41,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-function\""
+    },
+    {
+      "file": "src/hb-kbts.cc",
+      "line": 42,
+      "text": "#pragma GCC diagnostic ignored \"-Wextra-semi-stmt\""
+    },
+    {
+      "file": "src/hb-kbts.cc",
+      "line": 43,
+      "text": "#pragma GCC diagnostic ignored \"-Wstringop-overflow\""
+    },
+    {
+      "file": "src/hb-kbts.cc",
+      "line": 45,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-machinery.hh",
+      "line": 54,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-machinery.hh",
+      "line": 55,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-machinery.hh",
+      "line": 57,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-machinery.hh",
+      "line": 62,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-machinery.hh",
+      "line": 63,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-machinery.hh",
+      "line": 65,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-mutex.hh",
+      "line": 105,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-mutex.hh",
+      "line": 106,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb-mutex.hh",
+      "line": 111,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-null.hh",
+      "line": 117,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-null.hh",
+      "line": 118,
+      "text": "#pragma GCC diagnostic ignored \"-Wstrict-aliasing\""
+    },
+    {
+      "file": "src/hb-null.hh",
+      "line": 120,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-ot-shaper-indic-table.cc",
+      "line": 23,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-ot-shaper-indic-table.cc",
+      "line": 24,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-macros\""
+    },
+    {
+      "file": "src/hb-ot-shaper-indic-table.cc",
+      "line": 126,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-ot-shaper-use-table.hh",
+      "line": 57,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-ot-shaper-use-table.hh",
+      "line": 58,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-macros\""
+    },
+    {
+      "file": "src/hb-ot-shaper-use-table.hh",
+      "line": 104,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb-uniscribe.cc",
+      "line": 223,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "src/hb-uniscribe.cc",
+      "line": 224,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-function-type\""
+    },
+    {
+      "file": "src/hb-uniscribe.cc",
+      "line": 228,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 40,
+      "text": "#pragma warning( disable: 4068 ) /* Unknown pragma */"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 56,
+      "text": "#pragma GCC diagnostic warning \"-Wall\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 57,
+      "text": "#pragma GCC diagnostic warning \"-Wextra\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 60,
+      "text": "#pragma GCC diagnostic ignored \"-Wpragmas\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 61,
+      "text": "#pragma GCC diagnostic ignored \"-Wunknown-pragmas\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 62,
+      "text": "#pragma GCC diagnostic ignored \"-Wunknown-warning-option\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 70,
+      "text": "#pragma GCC diagnostic error   \"-Wbitwise-instead-of-logical\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 71,
+      "text": "#pragma GCC diagnostic error   \"-Wcast-align\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 72,
+      "text": "#pragma GCC diagnostic error   \"-Wcast-function-type\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 73,
+      "text": "#pragma GCC diagnostic error   \"-Wcast-function-type-strict\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 74,
+      "text": "#pragma GCC diagnostic error   \"-Wconstant-conversion\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 75,
+      "text": "#pragma GCC diagnostic error   \"-Wcomma\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 76,
+      "text": "#pragma GCC diagnostic error   \"-Wdelete-non-virtual-dtor\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 77,
+      "text": "#pragma GCC diagnostic error   \"-Wembedded-directive\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 78,
+      "text": "#pragma GCC diagnostic error   \"-Wextra-semi-stmt\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 79,
+      "text": "#pragma GCC diagnostic error   \"-Wformat-security\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 80,
+      "text": "#pragma GCC diagnostic error   \"-Wimplicit-function-declaration\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 81,
+      "text": "#pragma GCC diagnostic error   \"-Winit-self\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 82,
+      "text": "#pragma GCC diagnostic error   \"-Winjected-class-name\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 83,
+      "text": "#pragma GCC diagnostic error   \"-Wmissing-braces\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 84,
+      "text": "#pragma GCC diagnostic error   \"-Wmissing-declarations\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 85,
+      "text": "#pragma GCC diagnostic error   \"-Wmissing-prototypes\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 86,
+      "text": "#pragma GCC diagnostic error   \"-Wnarrowing\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 87,
+      "text": "#pragma GCC diagnostic error   \"-Wnested-externs\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 88,
+      "text": "#pragma GCC diagnostic error   \"-Wold-style-definition\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 89,
+      "text": "#pragma GCC diagnostic error   \"-Wpointer-arith\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 90,
+      "text": "#pragma GCC diagnostic error   \"-Wredundant-decls\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 91,
+      "text": "#pragma GCC diagnostic error   \"-Wreorder\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 92,
+      "text": "#pragma GCC diagnostic error   \"-Wsign-compare\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 93,
+      "text": "#pragma GCC diagnostic error   \"-Wstrict-aliasing\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 94,
+      "text": "#pragma GCC diagnostic error   \"-Wstrict-flex-arrays\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 95,
+      "text": "#pragma GCC diagnostic error   \"-Wstrict-prototypes\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 96,
+      "text": "#pragma GCC diagnostic error   \"-Wstring-conversion\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 97,
+      "text": "#pragma GCC diagnostic error   \"-Wswitch-enum\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 98,
+      "text": "#pragma GCC diagnostic error   \"-Wtautological-overlap-compare\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 100,
+      "text": "#pragma GCC diagnostic error   \"-Wuninitialized\" // A warning under gcc; see below"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 102,
+      "text": "#pragma GCC diagnostic error   \"-Wunneeded-internal-declaration\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 103,
+      "text": "#pragma GCC diagnostic error   \"-Wunused\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 104,
+      "text": "#pragma GCC diagnostic error   \"-Wunused-local-typedefs\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 105,
+      "text": "#pragma GCC diagnostic error   \"-Wunused-value\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 106,
+      "text": "#pragma GCC diagnostic error   \"-Wunused-variable\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 107,
+      "text": "#pragma GCC diagnostic error   \"-Wvla\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 108,
+      "text": "#pragma GCC diagnostic error   \"-Wwrite-strings\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 113,
+      "text": "#pragma GCC diagnostic warning \"-Wbuiltin-macro-redefined\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 114,
+      "text": "#pragma GCC diagnostic warning \"-Wdeprecated\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 115,
+      "text": "#pragma GCC diagnostic warning \"-Wdeprecated-declarations\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 116,
+      "text": "#pragma GCC diagnostic warning \"-Wdisabled-optimization\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 117,
+      "text": "#pragma GCC diagnostic warning \"-Wdouble-promotion\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 118,
+      "text": "#pragma GCC diagnostic warning \"-Wformat=2\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 119,
+      "text": "#pragma GCC diagnostic warning \"-Wformat-signedness\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 120,
+      "text": "#pragma GCC diagnostic warning \"-Wignored-pragma-optimize\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 121,
+      "text": "#pragma GCC diagnostic warning \"-Wlogical-op\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 122,
+      "text": "#pragma GCC diagnostic warning \"-Wmissing-format-attribute\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 123,
+      "text": "#pragma GCC diagnostic warning \"-Wpessimizing-move\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 124,
+      "text": "#pragma GCC diagnostic warning \"-Wundef\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 125,
+      "text": "#pragma GCC diagnostic warning \"-Wunsafe-loop-optimizations\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 126,
+      "text": "#pragma GCC diagnostic warning \"-Wunused-but-set-variable\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 137,
+      "text": "#pragma GCC diagnostic warning \"-Wuninitialized\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 138,
+      "text": "#pragma GCC diagnostic ignored \"-Wmaybe-uninitialized\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 144,
+      "text": "#pragma GCC diagnostic ignored \"-Wconversion\"\t\t\t// TODO fix"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 145,
+      "text": "#pragma GCC diagnostic ignored \"-Wshadow\"\t\t\t// TODO fix"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 146,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-parameter\"\t\t// TODO fix"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 148,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-result\"\t\t// TODO fix"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 154,
+      "text": "#pragma GCC diagnostic ignored \"-Warray-bounds\" // https://github.com/harfbuzz/harfbuzz/issues/5738"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 155,
+      "text": "#pragma GCC diagnostic ignored \"-Wclass-memaccess\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 156,
+      "text": "#pragma GCC diagnostic ignored \"-Wcast-function-type-strict\" // https://github.com/harfbuzz/harfbuzz/pull/3859#issuecomment-1295409126"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 157,
+      "text": "#pragma GCC diagnostic ignored \"-Wdangling-reference\" // https://github.com/harfbuzz/harfbuzz/issues/4043"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 158,
+      "text": "#pragma GCC diagnostic ignored \"-Wdangling-pointer\" // Trigerred by hb_decycler_node_t()."
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 159,
+      "text": "#pragma GCC diagnostic ignored \"-Wformat-nonliteral\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 160,
+      "text": "#pragma GCC diagnostic ignored \"-Wformat-zero-length\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 161,
+      "text": "#pragma GCC diagnostic ignored \"-Wmissing-field-initializers\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 162,
+      "text": "#pragma GCC diagnostic ignored \"-Wold-style-cast\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 163,
+      "text": "#pragma GCC diagnostic ignored \"-Wpacked\" // Erratic impl in clang"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 164,
+      "text": "#pragma GCC diagnostic ignored \"-Wrange-loop-analysis\" // https://github.com/harfbuzz/harfbuzz/issues/2834"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 165,
+      "text": "#pragma GCC diagnostic ignored \"-Wtype-limits\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 166,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-template\""
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 167,
+      "text": "#pragma GCC diagnostic ignored \"-Wc++11-compat\" // only gcc raises it"
+    },
+    {
+      "file": "src/hb.hh",
+      "line": 295,
+      "text": "#define HB_UNUSED __pragma(warning(suppress: 4100 4101 4189))"
+    }
+  ],
+  "notes": [
+    "Text shaping for the font backend (Docs/Design/Font/08-ThirdParty.ko.md section 8.2). The only Rocks consumer is the ClientOnly module TextLayoutBackend. Translation units: the upstream amalgamation harfbuzz.cc (with hb-ft through HAVE_FREETYPE) and hb-icu.cc, which the amalgamation does not include; HAVE_ICU_BUILTIN with HB_NO_UCD makes the ICU Unicode functions the default (without HB_NO_UCD the built-in UCD tables come first) (decision FD15, the same as the UE 5.8 HarfBuzz 12.2.0 build).",
+    "Allocation: hb_malloc_impl, hb_calloc_impl, hb_realloc_impl and hb_free_impl name RocksHarfBuzzMalloc, RocksHarfBuzzCalloc, RocksHarfBuzzRealloc and RocksHarfBuzzFree (extern \"C\", declared by hb.hh). The module that links HarfBuzz defines them over a Rocks allocator; HarfBuzz never calls the CRT heap.",
+    "HB_NO_GETENV (behavior does not depend on HB_SHAPER_LIST and the other environment variables), HB_NO_OPEN (no hb_blob_create_from_file: the engine passes font bytes from memory) and HB_NO_BUFFER_SERIALIZE (no debug text serialization) are upstream configuration switches (CONFIG.md); they also remove the CRT getenv, fopen, mbstowcs and strcpy calls the engine warning rules reject.",
+    "No RTTI and no exceptions (HarfBuzz does not use either)."
+  ],
+  "modifications": [
+    {
+      "file": "src/hb-ft.cc",
+      "upstreamSha256": "833c36c7a6e7c341647d91ce28937151ed2a91e26c205ed0eec618a648ce9c4a",
+      "reason": "strncpy copies a byte string of known length that is shorter than the buffer and is followed by buf[len] = '\\0', so hb_memcpy gives the same C string; the Microsoft CRT marks strncpy deprecated and the engine warning rules reject -Wdeprecated-declarations."
+    },
+    {
+      "file": "src/hb-ot-cff1-table.hh",
+      "upstreamSha256": "3fb444b96fe0bb584b48a05d000772ec2442db50f71a7663e8ff506e86b950fd",
+      "reason": "strncpy copies a byte string of known length that is shorter than the buffer and is followed by buf[len] = '\\0', so hb_memcpy gives the same C string; the Microsoft CRT marks strncpy deprecated and the engine warning rules reject -Wdeprecated-declarations."
+    },
+    {
+      "file": "src/hb-ot-post-table.hh",
+      "upstreamSha256": "fe8c8b1046cd287bb837435177a14f71ebc29e8eedf6e432bc392b500863ad83",
+      "reason": "strncpy copies a byte string of known length that is shorter than the buffer and is followed by buf[len] = '\\0', so hb_memcpy gives the same C string; the Microsoft CRT marks strncpy deprecated and the engine warning rules reject -Wdeprecated-declarations."
+    }
+  ],
+  "patch": "Rocks.patch"
+}
