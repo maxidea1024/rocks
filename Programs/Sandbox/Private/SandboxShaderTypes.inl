@@ -30,6 +30,10 @@ SANDBOX_PIXEL_IF(CommandReaderPS, "Command.rsf", "ReaderPS", NoGraphicsStorageBl
 SANDBOX_COMPUTE(CommandArgumentsCS, "Command.rsf", "ArgumentsCS")
 SANDBOX_COMPUTE(CommandMarkerCS, "Command.rsf", "MarkerCS")
 SANDBOX_COMPUTE(CommandOutsideCS, "Command.rsf", "OutsideCS")
+
+SANDBOX_COMPUTE(GraphSequenceCS, "GraphCompute.rsf", "SequenceCS")
+SANDBOX_COMPUTE(GraphArgumentsCS, "GraphCompute.rsf", "ArgumentsCS")
+SANDBOX_COMPUTE(GraphPatternCS, "GraphCompute.rsf", "PatternCS")
 SANDBOX_PIXEL_IF(CommandMrtPS, "Command.rsf", "MrtPS", EightRenderTargets)
 
 SANDBOX_PIXEL(TintPS, "Tint.rsf", "TintPS")

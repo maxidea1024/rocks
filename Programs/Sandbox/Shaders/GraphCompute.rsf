@@ -1,0 +1,44 @@
+// 렌더 그래프 compute self-test 셰이더다(Docs/Design/RenderBase 4.4절 "GX3·GX4 compute 연결 설계"):
+// 직접 dispatch가 수열을 구조화 버퍼에 쓰고, compute가 raw 버퍼에 간접 인자를 쓰고, 간접 dispatch가
+// 수열을 읽어 R32Uint 텍스처에 무늬를 쓴다. 값은 모두 정수라 backend마다 같아야 한다.
+struct SequenceConstants {
+    // x 원소 수, y 곱, z 더하기, w 간접 그룹 수의 한 변이다(정수 값).
+    float4 values;
+};
+
+ROCKS_ROOT_CONSTANTS(SequenceConstants, Sequence);
+
+RWStructuredBuffer<uint> Values;
+
+// values[i] = i * i * 곱 + 더하기(i < 원소 수)다.
+[numthreads(64, 1, 1)]
+void SequenceCS(uint3 id : SV_DispatchThreadID) {
+    uint count = (uint)Sequence.values.x;
+    if (id.x >= count) {
+        return;
+    }
+
+    Values[id.x] = id.x * id.x * (uint)Sequence.values.y + (uint)Sequence.values.z;
+}
+
+RWByteAddressBuffer Arguments;
+
+// byte 16에 간접 인자(한 변, 한 변, 1)를 쓰고 앞 16 byte는 표지로 채운다.
+[numthreads(1, 1, 1)]
+void ArgumentsCS(uint3 id : SV_DispatchThreadID) {
+    uint side = (uint)Sequence.values.w;
+    Arguments.Store4(0, uint4(0xA0u, 0xA1u, 0xA2u, 0xA3u));
+    Arguments.Store3(16, uint3(side, side, 1u));
+}
+
+StructuredBuffer<uint> ReadValues;
+ROCKS_IMAGE_FORMAT(r32ui) RWTexture2D<uint> Pattern;
+
+// pattern[x, y] = values[(x + y × 폭) % 원소 수] + (y << 20)이다(폭은 그룹 한 변 × 8).
+[numthreads(8, 8, 1)]
+void PatternCS(uint3 id : SV_DispatchThreadID) {
+    uint count = (uint)Sequence.values.x;
+    uint width = (uint)Sequence.values.w * 8u;
+    uint index = (id.x + id.y * width) % count;
+    Pattern[id.xy] = ReadValues[index] + (id.y << 20);
+}

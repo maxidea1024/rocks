@@ -105,6 +105,9 @@ private:
 // 활성 집합에 타입이 있는가(거르기로 빠진 타입은 없다).
 bool Has(const ShaderTypeDesc& type) noexcept;
 
+// 활성 집합이다(파이프라인 캐시 요청용). 없으면 null이다.
+rocks::render::ShaderSet* ActiveSet() noexcept;
+
 // 활성 집합의 장치 셰이더(첫 사용 생성)다. 활성 집합이 없으면 NotReady다.
 rocks::Result<rocks::graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept;
 

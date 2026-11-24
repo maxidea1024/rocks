@@ -469,6 +469,10 @@ bool Has(const ShaderTypeDesc& type) noexcept {
     return active != nullptr && active->FindEntry(type.nameHash).IsOk();
 }
 
+render::ShaderSet* ActiveSet() noexcept {
+    return active;
+}
+
 Result<graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept {
     if (active == nullptr) {
         return Result<graphics::ShaderHandle>::Failure(ErrorCode::NotReady);
