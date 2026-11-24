@@ -1,10 +1,12 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <ShaderCore/ShaderReadStatus.h>
 
 // 손으로 쓴 셰이더 파라미터 레이아웃 표와 그 서명이다(Docs/Design/ShaderSystem 7.2절 5항,
 // 12.2.1절 SSD27).
@@ -126,5 +128,37 @@ ValidateShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
 // 목록은 ValidateShaderParameterLayouts를 통과해야 한다(이름 byte 수가 u8 안이다).
 ROCKS_SHADERCORE_API Sha256Digest
 ShaderParameterLayoutSignature(Span<const ShaderParameterLayout> layouts) noexcept;
+
+// 표 목록의 정규 byte(위 서명의 입력과 같다 — Sha256(byte) = 서명)를 out 끝에 붙인다. 관리자가 워커
+// job에 담아 보낸다(SSD31). 오류: 목록이 ValidateShaderParameterLayouts를 통과하지 못하면
+// InvalidArgument(out은 바뀌지 않는다), 할당 실패.
+ROCKS_SHADERCORE_API Result<void>
+EncodeShaderParameterLayouts(Span<const ShaderParameterLayout> layouts, Array<uint8>& out) noexcept;
+
+// 읽은 표 목록이다. 이름은 원본 byte를 가리키므로 원본이 이 값보다 오래 살아야 한다.
+struct ROCKS_SHADERCORE_API ShaderParameterLayoutSet {
+    explicit ShaderParameterLayoutSet(Allocator& allocator) noexcept
+        : layouts(allocator), members(allocator) {
+    }
+
+    ShaderParameterLayoutSet(const ShaderParameterLayoutSet&) = delete;
+    ShaderParameterLayoutSet& operator=(const ShaderParameterLayoutSet&) = delete;
+
+    Span<const ShaderParameterLayout> View() const noexcept {
+        return layouts.View();
+    }
+
+    // name의 표다. 없으면 null이다.
+    const ShaderParameterLayout* Find(StringView name) const noexcept;
+
+    Array<ShaderParameterLayout> layouts;
+    Array<ShaderParameterMember> members;
+};
+
+// 정규 byte를 읽는다(빈 byte는 빈 목록). 잘림·남는 byte·타입 범위 밖·검사
+// (ValidateShaderParameterLayouts) 위반은 CorruptPackage, 할당 실패도 CorruptPackage(이유가
+// 따로)다.
+ROCKS_SHADERCORE_API ShaderReadStatus
+DecodeShaderParameterLayouts(Span<const uint8> bytes, ShaderParameterLayoutSet& out) noexcept;
 
 } // namespace rocks::shader

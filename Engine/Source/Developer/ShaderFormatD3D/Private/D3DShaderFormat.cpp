@@ -1,5 +1,7 @@
 #include <ShaderFormatD3D/D3DShaderFormat.h>
 
+#include "D3DReflection.h"
+
 #include <ShaderToolLoader/ShaderToolCalls.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 
@@ -39,19 +41,25 @@ ShaderWorkerJobStatus D3DJobStatus(ShaderToolOutcome outcome) noexcept {
     return ShaderWorkerJobStatus::ToolError;
 }
 
-// 결과에 값 0(Code)을 둔다.
-void Succeed(ShaderWorkerJobResult& result, Array<uint8>& code) noexcept {
-    result.status = ShaderWorkerJobStatus::Success;
-    result.diagnostics.Clear();
-    result.values.Clear();
-    auto value = result.values.TryEmplaceBack(result.values.GetAllocator());
-    if (!value) {
-        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+// 리플렉션을 공용 규칙으로 정규화해 값 0(Code)·값 1(BindingLayout)을 둔다(16.1절 SSD33).
+void Succeed(D3DCodeKind kind, const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
+             const ShaderToolSet& tools, ShaderWorkerJobResult& result,
+             Array<uint8>& code) noexcept {
+    ShaderParameterLayoutSet layouts(result.values.GetAllocator());
+    if (!DecodeShaderJobLayouts(job, layouts, result)) {
         return;
     }
 
-    value.Value()->id = 0;
-    value.Value()->bytes = Move(code);
+    Array<uint8> binding(result.values.GetAllocator());
+    String diagnostics(result.values.GetAllocator());
+    const ShaderToolOutcome normalized = BuildD3DBindingLayout(
+        kind, tools, format, job.stage, layouts.View(), code.View(), binding, diagnostics);
+    if (normalized != ShaderToolOutcome::Success) {
+        FailShaderJob(result, D3DJobStatus(normalized), "shader binding rules", diagnostics.View());
+        return;
+    }
+
+    SucceedShaderJob(result, code, binding);
 }
 
 void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
@@ -101,7 +109,7 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
         return;
     }
 
-    Succeed(result, compiled.object);
+    Succeed(D3DCodeKind::Dxil, format, job, tools, result, compiled.object);
 }
 
 // 대체 경로: DXC → SPIR-V → SPIRV-Cross HLSL 5.0 → FXC(E4). 실패하면 outcome과 diagnostics다.
@@ -174,7 +182,7 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
         const ShaderToolOutcome compiled =
             CompileWithFxc(tools.Fxc(), request, object, fxcDiagnostics);
         if (compiled == ShaderToolOutcome::Success) {
-            Succeed(result, object);
+            Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object);
             return;
         }
 
@@ -190,7 +198,7 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     const ShaderToolOutcome fallback =
         CompileFallback(format, job, tools, StringView(profile), object, fallbackDiagnostics);
     if (fallback == ShaderToolOutcome::Success) {
-        Succeed(result, object);
+        Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object);
         return;
     }
 

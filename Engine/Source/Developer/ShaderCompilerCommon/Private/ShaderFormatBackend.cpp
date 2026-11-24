@@ -40,4 +40,46 @@ void FailShaderJob(ShaderWorkerJobResult& result, ShaderWorkerJobStatus status, 
     }
 }
 
+bool DecodeShaderJobLayouts(const ShaderWorkerJob& job, ShaderParameterLayoutSet& out,
+                            ShaderWorkerJobResult& result) noexcept {
+    const ShaderReadStatus read = DecodeShaderParameterLayouts(job.layout.View(), out);
+    if (!read) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError,
+                      "shader job parameter layout bytes are invalid", StringView(read.reason));
+        return false;
+    }
+
+    return true;
+}
+
+void SucceedShaderJob(ShaderWorkerJobResult& result, Array<uint8>& code,
+                      Array<uint8>& bindingLayout) noexcept {
+    result.status = ShaderWorkerJobStatus::Success;
+    result.diagnostics.Clear();
+    result.values.Clear();
+    // 값 id 오름차순(0 Code, 1 BindingLayout)이다.
+    constexpr uint32 CodeValue = 0;
+    constexpr uint32 BindingLayoutValue = 1;
+    auto value = result.values.TryEmplaceBack(result.values.GetAllocator());
+    if (!value) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    value.Value()->id = CodeValue;
+    value.Value()->bytes = Move(code);
+    if (bindingLayout.IsEmpty()) {
+        return;
+    }
+
+    auto layout = result.values.TryEmplaceBack(result.values.GetAllocator());
+    if (!layout) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    layout.Value()->id = BindingLayoutValue;
+    layout.Value()->bytes = Move(bindingLayout);
+}
+
 } // namespace rocks::shader

@@ -350,14 +350,14 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
         }
     }
 
-    // 처리기 버전: 형식 정의 processor.version을 2로 올린 요청은 워커의 D3D 처리기(1)와 다르다.
+    // 처리기 버전: 형식 정의 processor.version을 3으로 올린 요청은 워커의 D3D 처리기(2)와 다르다.
     {
         RequestBuilder builder;
         auto format = builder.request.formats.TryEmplaceBack(TestAllocator());
         REQUIRE(format && format.Value()->id.TryAssign("D3D12_SM6"));
         Array<uint8> original(TestAllocator());
         REQUIRE(ReadConfig("D3D12_SM6", original));
-        const char needle[] = "\"version\": 1";
+        const char needle[] = "\"version\": 2";
         const char* text = reinterpret_cast<const char*>(original.Data());
         usize at = IndexNone;
         for (usize index = 0; index + sizeof(needle) - 1 <= original.Size(); ++index) {
@@ -369,10 +369,10 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
 
         REQUIRE(at != IndexNone);
         REQUIRE(format.Value()->bytes.TryAppend(original.View()));
-        format.Value()->bytes[at + sizeof(needle) - 2] = '2';
+        format.Value()->bytes[at + sizeof(needle) - 2] = '3';
         ShaderFormatDefinition definition;
         REQUIRE(ParseShaderFormatDefinition(format.Value()->bytes.View(), "D3D12_SM6", definition));
-        REQUIRE(definition.moduleVersion == 2);
+        REQUIRE(definition.moduleVersion == 3);
         const ShaderFormatDefinition* pointers[] = {&definition};
         REQUIRE(MakeShaderWorkerHeader(pointers, builder.request.header));
         Array<uint8> bytes(TestAllocator());
@@ -462,10 +462,12 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
                 static_cast<int>(spirv.diagnostics.ByteCount()), spirv.diagnostics.Data());
     }
 
-    REQUIRE(dxil.status == ShaderWorkerJobStatus::Success && dxil.values.Size() == 1);
+    REQUIRE(dxil.status == ShaderWorkerJobStatus::Success && dxil.values.Size() == 2 &&
+            dxil.values[1].id == 1);
     CHECK(dxil.values[0].id == 0 && dxil.values[0].bytes.Size() > 20 &&
           memcmp(dxil.values[0].bytes.Data(), "DXBC", 4) == 0 && dxil.diagnostics.IsEmpty());
-    REQUIRE(spirv.status == ShaderWorkerJobStatus::Success && spirv.values.Size() == 1);
+    REQUIRE(spirv.status == ShaderWorkerJobStatus::Success && spirv.values.Size() == 2 &&
+            spirv.values[1].id == 1);
     CHECK(spirv.values[0].bytes.Size() % 4 == 0 && spirv.values[0].bytes[0] == 0x03 &&
           spirv.values[0].bytes[1] == 0x02 && spirv.values[0].bytes[2] == 0x23 &&
           spirv.values[0].bytes[3] == 0x07);
@@ -474,7 +476,7 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
           test.result.response.jobs[2].values.IsEmpty() &&
           strstr(test.result.response.jobs[2].diagnostics.Data(), "undefined_name_c") != nullptr);
     CHECK(test.result.response.jobs[3].status == ShaderWorkerJobStatus::Success &&
-          test.result.response.jobs[3].values.Size() == 1 &&
+          test.result.response.jobs[3].values.Size() == 2 &&
           memcmp(test.result.response.jobs[3].values[0].bytes.Data(), "DXBC", 4) == 0);
 
     // 같은 입력은 같은 byte다(워커를 새로 띄워도).
@@ -596,7 +598,7 @@ TEST(ShaderWorkerChannel_CompilesRemainingFormats) {
     // D3D11: FXC 직접, HLSL 2021(대체 경로), FXC 오류 뒤 대체 경로 성공, 두 경로 모두 실패.
     for (usize index = 0; index < 3; ++index) {
         REQUIRE(JobIs(test.result, index, ShaderWorkerJobStatus::Success, "D3D11_SM5"));
-        CHECK(jobs[index].values.Size() == 1 && jobs[index].values[0].bytes.Size() > 20 &&
+        CHECK(jobs[index].values.Size() == 2 && jobs[index].values[0].bytes.Size() > 20 &&
               memcmp(jobs[index].values[0].bytes.Data(), "DXBC", 4) == 0);
     }
 

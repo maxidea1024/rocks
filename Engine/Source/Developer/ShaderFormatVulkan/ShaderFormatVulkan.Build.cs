@@ -8,6 +8,9 @@ using Rocks.Build.Rules;
 /// SPIRV-Reflect reflection. Tool binaries are opened from the user store through ShaderToolLoader (a ShaderFormat module may load shader tools).
 /// Only development programs link it; Release Game targets must not reach it (Release exclusion policy).
 /// The DXC call uses COM types and lives in Private/Win64; other platforms report Unsupported (Private/Unsupported).
+/// Inside the shader compile worker the VULKAN_SM5 processor compiles with -fspv-reflect, rewrites inputs (ATTRIBUTEn), inter-stage locations
+/// (TEXCOORDn) and set/binding, validates again with spirv-val and turns the SPIRV-Reflect reflection into the binding layout value through the
+/// shared binding rules (ShaderSystem section 16.1 SSD29-SSD33).
 /// </summary>
 public sealed class ShaderFormatVulkan : EngineModuleRules
 {

@@ -94,6 +94,10 @@ ShaderToolOutcome CompileHlslToSpirv(const ShaderToolSet& tools, const SpirvComp
         arguments[count++] = "-fvk-use-dx-position-w";
     }
 
+    if (request.reflect) {
+        arguments[count++] = "-fspv-reflect";
+    }
+
     DxcCompileRequest dxc;
     dxc.source = request.source;
     dxc.arguments = Span<const StringView>(arguments, count);

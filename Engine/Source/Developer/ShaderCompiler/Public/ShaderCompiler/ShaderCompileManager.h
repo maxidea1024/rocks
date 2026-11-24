@@ -13,6 +13,7 @@
 #include <ShaderCompiler/ShaderSourceTree.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
+#include <ShaderCore/ShaderParameterLayout.h>
 
 // 셰이더 컴파일 관리자와 워커 풀이다(Docs/Design/ShaderSystem 10절, 11.1절 SC4·SC11·SC12, UE
 // FShaderCompilingManager 대응). job마다 전처리 → (system 도구 형식이면) 도구 조회 → 키 → 너겟 일괄
@@ -105,8 +106,9 @@ struct ShaderCompileJob {
     // job 정의(퍼뮤테이션)다. ROCKS_·__ 접두는 job 생성 오류다(SC10).
     Span<const ShaderDefine> defines{};
     ShaderCompileOptions options{};
-    // 파라미터 레이아웃 서명(없으면 null)이다.
-    const Sha256Digest* layoutSignature = nullptr;
+    // 손으로 쓴 파라미터 레이아웃 표 목록이다(7.2절 5항, SSD31 — 정적 수명). 관리자가 정규 byte를
+    // 워커에 보내고 그 SHA-256(ShaderParameterLayoutSignature)이 키 8행이다. 비면 8행은 none이다.
+    Span<const ShaderParameterLayout> parameterLayouts{};
     // 시험 hook(config.testHooks일 때만 — Compile 밖 값이면 그 job은 hook으로 워커에 간다).
     ShaderWorkerJobKind testHook = ShaderWorkerJobKind::Compile;
 };

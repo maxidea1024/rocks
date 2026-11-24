@@ -2,6 +2,7 @@
 
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
+#include <ShaderCore/ShaderParameterLayout.h>
 
 // 형식 컴파일 인터페이스다(Docs/Design/ShaderSystem 11.1절 SC1, UE IShaderFormat 대응). 워커
 // (ShaderWorker)가 형식 정의의 처리기(module)마다 구현(ShaderFormatD3D·ShaderFormatVulkan …)을 골라
@@ -41,6 +42,17 @@ ROCKS_SHADERCOMPILERCOMMON_API bool MakeShaderProfile(uint32 stage, ShaderVersio
 ROCKS_SHADERCOMPILERCOMMON_API void FailShaderJob(ShaderWorkerJobResult& result,
                                                   ShaderWorkerJobStatus status, StringView message,
                                                   StringView detail = StringView()) noexcept;
+
+// job의 레이아웃 표 정규 byte(SSD31)를 읽는다. 손상이면 result에 CompileError를 두고 false다.
+ROCKS_SHADERCOMPILERCOMMON_API bool DecodeShaderJobLayouts(const ShaderWorkerJob& job,
+                                                           ShaderParameterLayoutSet& out,
+                                                           ShaderWorkerJobResult& result) noexcept;
+
+// 결과에 값 0(Code)과, bindingLayout이 비지 않으면 값 1(BindingLayout)을 둔다(byte를 옮긴다). 할당
+// 실패는 ToolError다.
+ROCKS_SHADERCOMPILERCOMMON_API void SucceedShaderJob(ShaderWorkerJobResult& result,
+                                                     Array<uint8>& code,
+                                                     Array<uint8>& bindingLayout) noexcept;
 
 class ShaderFormatBackend {
 public:

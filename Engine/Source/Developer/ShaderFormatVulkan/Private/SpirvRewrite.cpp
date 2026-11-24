@@ -43,6 +43,7 @@ constexpr uint32 DecorationUserType = 5636;
 
 constexpr uint32 StorageUniformConstant = 0;
 constexpr uint32 StorageInput = 1;
+constexpr uint32 StorageOutput = 3;
 constexpr uint32 StorageUniform = 2;
 constexpr uint32 StoragePushConstant = 9;
 constexpr uint32 StorageStorageBuffer = 12;
@@ -57,6 +58,8 @@ constexpr uint32 ImageSampledStorage = 2;
 
 // 정점 입력 location 상한(ATTRIBUTE0–15)이다(Graphics MaxVertexAttributes와 같다).
 constexpr uint32 MaxAttributeLocations = 16;
+// 단계 사이 location 상한(TEXCOORD0–15, ShaderSystem 7.2절 7항)이다.
+constexpr uint32 MaxStageLocations = 16;
 
 // 지울 확장 이름이다(-fspv-reflect가 더한다).
 constexpr const char* ReflectionExtensions[] = {"SPV_GOOGLE_hlsl_functionality1",
@@ -175,26 +178,29 @@ bool EqualsIgnoringCase(StringView left, const char* right) noexcept {
     return true;
 }
 
-// "ATTRIBUTEn"(대소문자 무시)의 n이다. 형식이 아니면 MaxAttributeLocations다.
-uint32 AttributeLocation(StringView semantic) noexcept {
-    constexpr char Prefix[] = "ATTRIBUTE";
-    constexpr usize PrefixBytes = sizeof(Prefix) - 1;
+// "<prefix>n"(대소문자 무시)의 n이다. 형식이 아니거나 limit 이상이면 limit다.
+uint32 SemanticNumber(StringView semantic, const char* Prefix, uint32 limit) noexcept {
+    const usize PrefixBytes = StringView(Prefix).ByteCount();
     if (semantic.ByteCount() <= PrefixBytes || semantic.ByteCount() > PrefixBytes + 2 ||
         !EqualsIgnoringCase(StringView(semantic.Data(), PrefixBytes), Prefix)) {
-        return MaxAttributeLocations;
+        return limit;
     }
 
     uint32 value = 0;
     for (usize index = PrefixBytes; index < semantic.ByteCount(); ++index) {
         const char digit = semantic.Data()[index];
         if (digit < '0' || digit > '9') {
-            return MaxAttributeLocations;
+            return limit;
         }
 
         value = value * 10 + static_cast<uint32>(digit - '0');
     }
 
-    return value < MaxAttributeLocations ? value : MaxAttributeLocations;
+    return value < limit ? value : limit;
+}
+
+uint32 AttributeLocation(StringView semantic) noexcept {
+    return SemanticNumber(semantic, "ATTRIBUTE", MaxAttributeLocations);
 }
 
 class Rewriter {
@@ -207,8 +213,8 @@ public:
           words_(allocator) {
     }
 
-    Result<void> Run(graphics::ShaderStage stage, StringView rootName,
-                     Array<uint32>& output) noexcept {
+    Result<void> Run(const SpirvRewriteOptions& options, Array<uint32>& output) noexcept {
+        const uint32 stage = options.stage;
         auto parsed = Parse();
         if (!parsed) {
             return parsed;
@@ -226,14 +232,22 @@ public:
 
         bound_ = input_[BoundWord];
         RemoveReflectionData();
-        if (stage == graphics::ShaderStage::Vertex) {
+        if (stage == ShaderStageVertex) {
             auto located = RewriteInputLocations();
             if (!located) {
                 return located;
             }
         }
 
-        auto pushed = RewriteRootConstants(rootName);
+        if (options.stageLocations && stage != ShaderStageCompute) {
+            auto located =
+                RewriteStageLocations(stage == ShaderStageVertex ? StorageOutput : StorageInput);
+            if (!located) {
+                return located;
+            }
+        }
+
+        auto pushed = RewriteRootConstants(options.rootConstantsName);
         if (!pushed) {
             return pushed;
         }
@@ -349,13 +363,13 @@ private:
         return Result<void>::Success();
     }
 
-    Result<void> CheckStage(graphics::ShaderStage stage) noexcept {
+    Result<void> CheckStage(uint32 stage) noexcept {
         const uint32 expected =
-            stage == graphics::ShaderStage::Vertex
+            stage == ShaderStageVertex
                 ? ExecutionModelVertex
-                : (stage == graphics::ShaderStage::Compute ? ExecutionModelGLCompute
-                                                           : ExecutionModelFragment);
-        if (!hasEntryPoint_ || executionModel_ != expected) {
+                : (stage == ShaderStageCompute ? ExecutionModelGLCompute : ExecutionModelFragment);
+        if (stage == 0 || (stage & (stage - 1)) != 0 || !hasEntryPoint_ ||
+            executionModel_ != expected) {
             return Reject(diagnostics_,
                           StringView("SPIR-V entry point does not match the shader stage"));
         }
@@ -467,6 +481,43 @@ private:
         return Result<void>::Success();
     }
 
+    // 단계 사이 변수(storage의 시스템 값이 아닌 변수)의 location을 TEXCOORDn의 n으로 바꾼다(7.2절
+    // 7항).
+    Result<void> RewriteStageLocations(uint32 storage) noexcept {
+        uint32 used = 0;
+        for (const Variable& variable : variables_) {
+            if (variable.storage != storage ||
+                FindDecoration(variable.id, DecorationBuiltIn) != nullptr) {
+                continue;
+            }
+
+            const StringView semantic = FindString(semantics_, variable.id);
+            const uint32 location = SemanticNumber(semantic, "TEXCOORD", MaxStageLocations);
+            if (location >= MaxStageLocations) {
+                Append(diagnostics_, StringView("inter-stage variable "));
+                Append(diagnostics_, semantic.ByteCount() != 0 ? semantic : StringView("?"));
+                return Reject(diagnostics_, StringView(" must use semantic TEXCOORD0-15"));
+            }
+
+            if ((used & (1u << location)) != 0) {
+                Append(diagnostics_, StringView("inter-stage location "));
+                AppendNumber(diagnostics_, location);
+                return Reject(diagnostics_, StringView(" is used twice"));
+            }
+
+            used |= 1u << location;
+            const Decoration* decoration = FindDecoration(variable.id, DecorationLocation);
+            if (decoration == nullptr) {
+                return Reject(diagnostics_,
+                              StringView("inter-stage variable has no Location decoration"));
+            }
+
+            words_[decoration->literal] = location;
+        }
+
+        return Result<void>::Success();
+    }
+
     // pointee를 가리키는 PushConstant 포인터 타입 id다. 없으면 anchor 명령 뒤에 새로 만든다.
     Result<uint32> PushPointer(uint32 pointee, usize anchor) noexcept {
         for (const Pointer& pointer : pointers_) {
@@ -497,6 +548,10 @@ private:
 
     // 그리기 상수 블록을 push constant로 바꾼다(ShaderSystem 7.2절 2항의 SH2 전 대역).
     Result<void> RewriteRootConstants(StringView rootName) noexcept {
+        if (rootName.IsEmpty()) {
+            return Result<void>::Success();
+        }
+
         const Variable* root = nullptr;
         for (const Variable& variable : variables_) {
             if (variable.storage == StorageUniform && FindString(names_, variable.id) == rootName) {
@@ -621,7 +676,7 @@ private:
     }
 
     // set = 단계, binding = 종류 순서로 다시 매긴다(ShaderSystem 7.2절 4항).
-    Result<void> RenumberResources(graphics::ShaderStage stage) noexcept {
+    Result<void> RenumberResources(uint32 stage) noexcept {
         for (const Variable& variable : variables_) {
             if (variable.id == rootId_ ||
                 (variable.storage != StorageUniformConstant && variable.storage != StorageUniform &&
@@ -664,7 +719,7 @@ private:
                                                  : left.id < right.id;
         });
         // compute 파이프라인은 단계가 하나라 set 0이다(ShaderSystem 7.2절 4항: VS 0, PS 1, CS 0).
-        const uint32 newSet = stage == graphics::ShaderStage::Pixel ? 1u : 0u;
+        const uint32 newSet = stage == ShaderStagePixel ? 1u : 0u;
         for (usize index = 0; index < resources_.Size(); ++index) {
             const Decoration* set = FindDecoration(resources_[index].id, DecorationDescriptorSet);
             const Decoration* binding = FindDecoration(resources_[index].id, DecorationBinding);
@@ -740,8 +795,19 @@ private:
 Result<void> RewriteSpirv(Span<const uint32> input, graphics::ShaderStage stage,
                           StringView rootConstantsName, Array<uint32>& output,
                           String& diagnostics) noexcept {
+    SpirvRewriteOptions options;
+    options.stage =
+        stage == graphics::ShaderStage::Vertex
+            ? ShaderStageVertex
+            : (stage == graphics::ShaderStage::Compute ? ShaderStageCompute : ShaderStagePixel);
+    options.rootConstantsName = rootConstantsName;
+    return RewriteSpirv(input, options, output, diagnostics);
+}
+
+Result<void> RewriteSpirv(Span<const uint32> input, const SpirvRewriteOptions& options,
+                          Array<uint32>& output, String& diagnostics) noexcept {
     Rewriter rewriter(output.GetAllocator(), input, diagnostics);
-    return rewriter.Run(stage, rootConstantsName, output);
+    return rewriter.Run(options, output);
 }
 
 } // namespace rocks::shader

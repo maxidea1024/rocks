@@ -424,6 +424,50 @@ TEST(ShaderCore_ParameterLayoutSignatureIsCanonicalBytes) {
     CHECK(!(ShaderParameterLayoutSignature(root) == signature));
 }
 
+TEST(ShaderCore_ParameterLayoutBytesRoundTrip) {
+    const ShaderParameterMember passMembers[] = {{"tint", ShaderParameterType::Float4, 0, 0},
+                                                 {"count", ShaderParameterType::Uint, 16, 0}};
+    const ShaderParameterLayout layouts[] = {SampleLayout, {"Pass", false, 32, passMembers}};
+    Array<uint8> bytes(TestAllocator());
+    REQUIRE(EncodeShaderParameterLayouts(layouts, bytes));
+    // 정규 byte의 SHA-256이 서명이다(SSD31 — 키 8행과 워커가 같은 byte를 본다).
+    CHECK(Sha256::Hash(bytes.View()) == ShaderParameterLayoutSignature(layouts));
+    ShaderParameterLayoutSet decoded(TestAllocator());
+    REQUIRE(DecodeShaderParameterLayouts(bytes.View(), decoded));
+    REQUIRE(decoded.View().Size() == 2);
+    CHECK(ShaderParameterLayoutSignature(decoded.View()) ==
+          ShaderParameterLayoutSignature(layouts));
+    const ShaderParameterLayout* pass = decoded.Find("Pass");
+    REQUIRE(pass != nullptr);
+    CHECK(!pass->rootConstants && pass->totalBytes == 32 && pass->members.Size() == 2 &&
+          pass->members[1].name == StringView("count") && pass->members[1].offset == 16);
+    CHECK(decoded.Find("SampleConstants")->rootConstants && decoded.Find("Missing") == nullptr);
+    // 빈 byte는 빈 목록이다.
+    CHECK(DecodeShaderParameterLayouts({}, decoded) && decoded.View().IsEmpty());
+    // 모든 잘린 길이·남는 byte·타입 범위 밖·규칙 위반은 손상이다.
+    for (usize length = 1; length < bytes.Size(); ++length) {
+        CHECK(DecodeShaderParameterLayouts(bytes.View().Left(length), decoded).error ==
+              ShaderReadError::CorruptPackage);
+    }
+
+    REQUIRE(bytes.TryPushBack(0));
+    CHECK(!DecodeShaderParameterLayouts(bytes.View(), decoded));
+    (void)bytes.TryResize(bytes.Size() - 1);
+    // 첫 멤버 타입 byte(u32 수, u8 길이 + 이름 15, u8 표시, u32 크기, u32 멤버 수, u8 길이 + 이름
+    // 9).
+    const usize typeAt = 4 + 1 + 15 + 1 + 4 + 4 + 1 + 9;
+    bytes[typeAt] = 13;
+    CHECK(!DecodeShaderParameterLayouts(bytes.View(), decoded));
+    bytes[typeAt] = static_cast<uint8>(ShaderParameterType::Float4x4);
+    // 둘째 멤버(uvScale)를 float4x4로: uvBias와 겹친다.
+    bytes[typeAt + 17] = static_cast<uint8>(ShaderParameterType::Float4x4);
+    CHECK(!DecodeShaderParameterLayouts(bytes.View(), decoded));
+    // 규칙을 어기는 목록은 쓰지 않는다.
+    const ShaderParameterLayout twice[] = {SampleLayout, SampleLayout};
+    Array<uint8> rejected(TestAllocator());
+    CHECK(!EncodeShaderParameterLayouts(twice, rejected) && rejected.IsEmpty());
+}
+
 TEST(ShaderCore_RegistryChecksParameterLayouts) {
     constexpr ShaderParameterMember badMembers[] = {{"a", ShaderParameterType::Float2, 4, 0}};
     const ShaderParameterLayout bad[] = {{"Bad", false, 16, badMembers}};

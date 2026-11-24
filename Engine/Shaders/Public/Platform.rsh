@@ -20,9 +20,14 @@
 //   [[vk::image_format]] 철자(rgba8·rgba8snorm·rgba16f·r11g11b10f·r32f·r32ui·unknown 등)다. SPIR-V
 //   형식은 [[vk::image_format("Format")]]으로, D3D 형식은 빈 것으로 전개한다(DXIL은 이 attribute를
 //   무시하며 경고를 내므로 남기지 않는다 — SH0 확인).
+// - ROCKS_ROOT_CONSTANTS(Type, Name): 그리기별 상수(루트 상수, 7.2절 2항·16.1절 SSD32). 셰이더 하나에
+//   하나다. D3D12는 register(b0, space3)의 ConstantBuffer<Type>, D3D11은 register(b13)의 cbuffer,
+//   SPIR-V 형식은 push constant다. Type 크기는 128 byte 이하·16 byte 배수다(워커가 검사한다).
 //
 // 사용 예:
 //   ROCKS_IMAGE_FORMAT(rgba8) RWTexture2D<float4> Output;
+//   struct DrawConstants { float4x4 transform; float4 color; };
+//   ROCKS_ROOT_CONSTANTS(DrawConstants, Draw);   // Draw.color
 //   #if ROCKS_SHADER_MODEL_MAJOR >= 6
 //   ...
 //   #endif
@@ -54,4 +59,12 @@
 #define ROCKS_IMAGE_FORMAT(Format) [[vk::image_format(#Format)]]
 #else
 #define ROCKS_IMAGE_FORMAT(Format)
+#endif
+
+#if ROCKS_SPIRV
+#define ROCKS_ROOT_CONSTANTS(Type, Name) [[vk::push_constant]] Type Name
+#elif defined(ROCKS_BACKEND_D3D12)
+#define ROCKS_ROOT_CONSTANTS(Type, Name) ConstantBuffer<Type> Name : register(b0, space3)
+#else
+#define ROCKS_ROOT_CONSTANTS(Type, Name) cbuffer Name##RootConstants : register(b13) { Type Name; }
 #endif
