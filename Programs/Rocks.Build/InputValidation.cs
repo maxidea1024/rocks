@@ -142,6 +142,13 @@ internal static class InputValidation
                     "starting with a digit) — it names ROCKS_<MODULE>_API.");
             }
 
+            // RTTI는 엔진 모듈에서 금지다. 서드파티 C++ 라이브러리만 ThirdParty.json rtti로 켤 수 있다(Docs/Design/Compression.ko.md
+            // 3.3절 C++ 서드파티).
+            if (module.RuntimeTypeInformation && !module.ThirdParty)
+            {
+                throw new ArgumentException($"Module {module.Name}: RuntimeTypeInformation is only for a third-party module (ThirdParty.json rtti).");
+            }
+
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
             ValidateReflectionSources(module);
@@ -424,14 +431,38 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {library.Name}: HasGlobalState is only for a third-party module (ThirdParty.json globalState).");
             }
 
-            string[] consumers = modules.Where(module => module.AllDependencies.Contains(library.Name, StringComparer.OrdinalIgnoreCase))
-                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            // 소비 모듈은 직접 의존하거나 서드파티 모듈만 거쳐 닿는 Rocks 모듈이다. 서드파티 정적 라이브러리는 그것을 쓰는 Rocks 모듈에
+            // 함께 링크되므로(ICU를 쓰는 HarfBuzz) 서드파티 모듈 자체는 세지 않는다(Docs/Design/BuildTargets 3.8절 BD29).
+            string[] consumers = GlobalStateConsumers(modules, library.Name);
             if (consumers.Length > 1)
             {
                 throw new ArgumentException($"Module {library.Name} has process-wide state (ThirdParty.json globalState), so only one module may " +
                     $"depend on it directly; found {string.Join(", ", consumers)}. Route the others through the owning module's API.");
             }
         }
+    }
+
+    // library에 직접, 또는 서드파티 모듈만 거쳐 의존하는 Rocks 모듈 이름이다(정렬).
+    private static string[] GlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules, string library)
+    {
+        var thirdParty = modules.Where(module => module.ThirdParty).ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        var reaching = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { library };
+        bool grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (NativeModuleInput module in thirdParty.Values)
+            {
+                if (!reaching.Contains(module.Name) && module.AllDependencies.Any(reaching.Contains))
+                {
+                    reaching.Add(module.Name);
+                    grew = true;
+                }
+            }
+        }
+
+        return modules.Where(module => !module.ThirdParty && module.AllDependencies.Any(reaching.Contains))
+            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
     }
 
     // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets 3.9절 BD36)이다. 빌드가
