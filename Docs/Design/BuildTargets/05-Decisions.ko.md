@@ -44,3 +44,4 @@
 | BD40 | 플러그인 시험은 `<플러그인>/Source/<모듈>/Tests/`에 두고 EngineTests가 `PluginTestModules`로 모은다. 버린 안: 플러그인마다 시험 실행 파일 | 권장안 |
 | BD41 | SDK export 타깃의 엔진 플러그인 켜기 거부. `Modular` 타깃의 플러그인은 ML5a(모듈 로더 MD23 — 플러그인 binaries 폴더·manifest)부터 허용(개정 26, 그 전에는 거부) | 권장안 |
 | BD42 | 정책 경로에 `Engine/Plugins` 모양 추가(`crt-number-conversion`·시험 소스·fixture 판정), 새 검사 `plugin-module-rules-base` | 권장안 |
+| BD43 | 쿠커(Commandlet)의 모듈 집합은 쿠킹 대상 출시 타깃(Game·Client, Release)의 모듈 집합과 같아야 한다: 엔진 몫은 Commandlet이 Engine 타깃 폐포의 Runtime·ClientOnly 모듈을 링크(정책 `cooker-module-set`), 프로젝트·플러그인 몫은 ML5b 뒤 모듈 로더로 적재, 쿠커가 이름으로 대조(3.10절, 렌더 세션 요청 — 셰이더 시스템 SSD3). 버린 안: 대상 타깃마다 쿠커 링크, 모듈 없이 셰이더 타입 manifest로 쿠킹 | 권장안 |
