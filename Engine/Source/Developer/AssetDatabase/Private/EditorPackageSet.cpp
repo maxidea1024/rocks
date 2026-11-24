@@ -2012,6 +2012,126 @@ void EditorPackageSet::MergeOverrides(ObjectHandle object, const OverrideSet& pe
     }
 }
 
+namespace {
+
+// 원본 재구성 hook의 sink다(12.14절 A5j2 — 원소 bulk 읽기, 자기 패키지 bulk 더하기).
+class RebuildSink final : public AssetSourceRebuildSink {
+public:
+    RebuildSink(ObjectRegistry& registry, const ObjectAccessContext& access,
+                Span<const EditorPackageInfo> open, const EditorPackageInfo& target,
+                AssetSourceRebuildCause cause, ObjectHandle changed, Array<EditorWarning>* warnings,
+                AssetDiagnostic* failure) noexcept
+        : registry_(registry), access_(access), open_(open), target_(target), cause_(cause),
+          changed_(changed), warnings_(warnings), failure_(failure) {
+    }
+
+    Result<Span<const uint8>> ReadBulk(ObjectHandle object,
+                                       const BulkDataRef& ref) noexcept override {
+        if (ref.IsEmpty()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto outermost = registry_.GetOutermost(access_, object);
+        if (!outermost) {
+            return Result<Span<const uint8>>::Failure(outermost.Error());
+        }
+
+        for (const EditorPackageInfo& info : open_) {
+            if (info.package == outermost.Value() && info.store != nullptr) {
+                return info.store->Read(ref, failure_);
+            }
+        }
+
+        return Result<Span<const uint8>>::Failure(ErrorCode::NotFound);
+    }
+
+    Result<BulkDataRef> AddBulk(Array<uint8>&& raw) noexcept override {
+        if (target_.store == nullptr) {
+            return Result<BulkDataRef>::Failure(ErrorCode::NotFound);
+        }
+
+        return target_.store->AddUnsaved(rocks::Move(raw));
+    }
+
+    bool HasImportRecord() const noexcept override {
+        return !target_.importRecord.IsEmpty();
+    }
+
+    AssetSourceRebuildCause Cause() const noexcept override {
+        return cause_;
+    }
+
+    ObjectHandle ChangedSource() const noexcept override {
+        return changed_;
+    }
+
+    Result<void> Fail(AssetDiagnosticCode code, ErrorCode error, uint64 detail) noexcept override {
+        if (failure_ != nullptr) {
+            *failure_ = AssetDiagnostic{};
+            failure_->code = code;
+            failure_->error = error;
+            failure_->asset = target_.id;
+            failure_->detail = detail;
+        }
+
+        return Result<void>::Failure(error);
+    }
+
+    Result<void> Warn(AssetDiagnosticCode code, uint64 detail) noexcept override {
+        if (!AssetDiagnosticIsWarning(code)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (warnings_ == nullptr) {
+            return Result<void>::Success();
+        }
+
+        EditorWarning warning;
+        warning.kind = EditorWarningKind::SourceRebuildWarning;
+        warning.diagnostic.code = code;
+        warning.diagnostic.asset = target_.id;
+        warning.diagnostic.detail = detail;
+        return warnings_->TryPushBack(warning);
+    }
+
+private:
+    ObjectRegistry& registry_;
+    const ObjectAccessContext& access_;
+    Span<const EditorPackageInfo> open_;
+    const EditorPackageInfo& target_;
+    AssetSourceRebuildCause cause_;
+    ObjectHandle changed_;
+    Array<EditorWarning>* warnings_;
+    AssetDiagnostic* failure_;
+};
+
+} // namespace
+
+Result<void> EditorPackageSet::RebuildSource(ObjectHandle object, AssetId asset,
+                                             Span<const StringView> assignedFields,
+                                             AssetSourceRebuildCause cause, ObjectHandle changed,
+                                             Array<EditorWarning>* warnings,
+                                             AssetDiagnostic* failure) noexcept {
+    if (registry_.Get() == nullptr || config_.hooks == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const EditorPackageInfo* target = Find(asset);
+    if (target == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    const ObjectAccessContext access = Access();
+    auto type = registry_->AcquireType(access, object);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    RebuildSink sink(*registry_, access, open_.View(), *target, cause, changed, warnings, failure);
+    return config_.hooks->RebuildSource(*registry_, access, object, type.Value().Id(), asset,
+                                        assignedFields, sink);
+}
+
 Result<void> EditorPackageSet::NormalizeSettings(ObjectHandle object, AssetId asset,
                                                  Span<const StringView> assignedFields) noexcept {
     if (registry_.Get() == nullptr || config_.hooks == nullptr) {

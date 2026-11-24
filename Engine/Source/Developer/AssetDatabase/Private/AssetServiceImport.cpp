@@ -875,6 +875,85 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
         }
     }
 
+    // 원소 재임포트 전파(Docs/Design/AssetSystem 12.14절 A5j2 — UE UReimportTextureFactory):
+    // 재임포트한 주 출력을 EditorOnly로 참조하는 에셋을 열어 원본을 다시 만들고 정규화한다. 저장
+    // 전에 하므로 묶음 hook이 실패하면 아무것도 저장하지 않는다. 저장은 원소 뒤다(아래).
+    Array<AssetId> propagated(allocator);
+    for (current = 0; current < runs.Size(); ++current) {
+        ImportRun& run = *runs[current];
+        if (!run.member->reimport) {
+            continue;
+        }
+
+        ObjectHandle changed{};
+        for (const ImportRun::Existing& existing : run.existing) {
+            changed = existing.key.IsEmpty() ? existing.asset : changed;
+        }
+
+        Array<const AssetIndexEntry*> referencers(allocator);
+        if (auto listed = index_.Referencers(
+                run.mainId, DependencyKindBit(PackageDependencyKind::EditorOnly), referencers);
+            !listed) {
+            return abandon(FailImport<void>(failure, AssetDiagnosticCode::None, listed.Error()));
+        }
+
+        for (const AssetIndexEntry* referencer : referencers) {
+            bool member = false;
+            for (const UniquePtr<ImportRun>& other : runs) {
+                member = member || other->mainId == referencer->id;
+            }
+
+            bool seen = false;
+            for (AssetId id : propagated) {
+                seen = seen || id == referencer->id;
+            }
+
+            if (member || seen) {
+                continue;
+            }
+
+            AssetDiagnostic diagnostic;
+            auto opened = set_.Open(referencer->id, warnings, &diagnostic);
+            if (!opened) {
+                if (failure != nullptr) {
+                    *failure = diagnostic;
+                }
+
+                return abandon(Result<void>::Failure(opened.Error()));
+            }
+
+            auto representative = set_.Registry().FindChild(set_.Access(), opened.Value(), "");
+            Result<void> rebuilt = representative ? Result<void>::Success()
+                                                  : Result<void>::Failure(representative.Error());
+            if (rebuilt) {
+                rebuilt = set_.RebuildSource(representative.Value(), referencer->id, {},
+                                             AssetSourceRebuildCause::Propagate, changed, warnings,
+                                             &diagnostic);
+            }
+
+            if (rebuilt) {
+                rebuilt = set_.NormalizeSettings(representative.Value(), referencer->id, {});
+            }
+
+            if (rebuilt) {
+                rebuilt = propagated.TryPushBack(referencer->id);
+            }
+
+            if (!rebuilt) {
+                if (failure != nullptr) {
+                    *failure = diagnostic.code != AssetDiagnosticCode::None ? diagnostic
+                                                                            : AssetDiagnostic{};
+                    if (diagnostic.code == AssetDiagnosticCode::None) {
+                        failure->error = rebuilt.Error();
+                        failure->asset = referencer->id;
+                    }
+                }
+
+                return abandon(Result<void>::Failure(rebuilt.Error()));
+            }
+        }
+    }
+
     // 저장 준비(저장 사이에 할당이 실패하지 않게): 되돌리기의 OS 경로 버퍼·새 파일 이름 표·색인
     // 갱신 이름 표.
     current = 0;
@@ -1050,6 +1129,25 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
                 }
             }
         }
+    }
+
+    // 전파한 묶음 에셋을 원소 뒤에 저장한다(기존 파일 — 실패는 다른 기존 출력과 같은 되돌리기).
+    for (AssetId id : propagated) {
+        AssetDiagnostic diagnostic;
+        (void)set_.MarkDirty(id);
+        Result<void> saved = reserveWarnings();
+        if (saved) {
+            saved = set_.Save(id, lock, save, warnings, &diagnostic);
+        } else {
+            diagnostic.error = saved.Error();
+            diagnostic.asset = id;
+        }
+
+        if (!saved) {
+            return rollback(diagnostic);
+        }
+
+        existingSaved = true;
     }
 
     // 구성원 경고를 넘긴다(자리는 저장 전에 잡았다).

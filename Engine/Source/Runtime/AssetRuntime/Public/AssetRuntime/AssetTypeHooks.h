@@ -1,5 +1,7 @@
 #pragma once
 
+#include <AssetRuntime/AssetDiagnostic.h>
+#include <AssetRuntime/BulkData.h>
 #include <AssetRuntime/PackageReader.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/Containers/Array.h>
@@ -68,6 +70,48 @@ private:
     Array<PackageDependencyEntry> dependencies_;
 };
 
+// 원본 재구성을 부른 까닭이다(12.14절 A5j2).
+enum class AssetSourceRebuildCause : uint8 {
+    // asset-set — 대입·되돌린 필드(assignedFields)에 묶음 필드가 있을 때만 다시 만든다.
+    Edit,
+    // asset-new — Edit와 같고, 팩토리 기본 원본(Volume 1×1)을 둘 수 있다.
+    New,
+    // 원소 재임포트 전파 — assignedFields는 비고, 묶음 필드가 ChangedSource를 가리킬 때만 지금 값
+    // 그대로 다시 복사한다(Volume 타일을 다시 정하지 않는다 — UE UReimportTextureFactory).
+    Propagate
+};
+
+// 원본 재구성 hook이 서비스에 닿는 길이다(Docs/Design/AssetSystem 12.14절 A5j2 — EditorPackageSet이
+// 구현한다). hook 호출 동안만 유효하다.
+class AssetSourceRebuildSink {
+public:
+    // object가 속한 패키지(outermost)의 bulk raw byte다(열린 패키지의 bulk 저장소 — 손상·외부 변경
+    // 확인). span은 sink가 살아 있는 동안 유효하다. 오류: 빈 ref InvalidArgument, 그 패키지가 열려
+    // 있지 않거나 bulk가 없음 NotFound, 저장소 읽기의 오류(진단은 Fail로 낸다).
+    virtual Result<Span<const uint8>> ReadBulk(ObjectHandle object,
+                                               const BulkDataRef& ref) noexcept = 0;
+
+    // hook 대상 패키지에 저장 전 bulk로 더하고 그 ref를 준다(raw는 소비된다). 오류: 저장소의 오류.
+    virtual Result<BulkDataRef> AddBulk(Array<uint8>&& raw) noexcept = 0;
+
+    // hook 대상 에셋에 ImportRecord가 있는지다(파일로 임포트한 에셋 — 12.14절 임포트한 배열 보호).
+    virtual bool HasImportRecord() const noexcept = 0;
+
+    // 부른 까닭과, Propagate일 때 재임포트한 원소의 대표 에셋이다(그 밖은 null).
+    virtual AssetSourceRebuildCause Cause() const noexcept = 0;
+    virtual ObjectHandle ChangedSource() const noexcept = 0;
+
+    // 진단을 남기고 error로 실패한다(hook은 이 값을 그대로 돌려준다).
+    virtual Result<void> Fail(AssetDiagnosticCode code, ErrorCode error,
+                              uint64 detail) noexcept = 0;
+
+    // 경고를 남긴다. 오류: 할당 실패.
+    virtual Result<void> Warn(AssetDiagnosticCode code, uint64 detail) noexcept = 0;
+
+protected:
+    ~AssetSourceRebuildSink() = default;
+};
+
 // hook에 넘기는 문맥이다(hook 호출 동안만 유효하다).
 struct ROCKS_ASSETRUNTIME_API AssetTypeHookContext {
     ObjectRegistry& registry;
@@ -86,6 +130,8 @@ struct ROCKS_ASSETRUNTIME_API AssetTypeHookContext {
     Result<void> CallBaseTags(AssetTagSink& sink) const noexcept;
     Result<void> CallBaseBuildDependencies(AssetDependencySink& sink) const noexcept;
     Result<void> CallBaseNormalizeSettings(Span<const StringView> assignedFields) const noexcept;
+    Result<void> CallBaseRebuildSource(Span<const StringView> assignedFields,
+                                       AssetSourceRebuildSink& sink) const noexcept;
 };
 
 using AssetTagHook = Result<void> (*)(const AssetTypeHookContext& context,
@@ -98,12 +144,20 @@ using AssetBuildDependencyHook = Result<void> (*)(const AssetTypeHookContext& co
 // 오류(실패하면 명령이 실패한다).
 using AssetSettingsNormalizeHook = Result<void> (*)(const AssetTypeHookContext& context,
                                                     Span<const StringView> assignedFields) noexcept;
+// 원본 재구성 hook이다(12.14절 A5j2 — UE UpdateSourceFromSourceTextures 대응). 다른 에셋을 원본으로
+// 묶는 필드(assignedFields에 있을 때만)에서 context.object의 원본을 다시 만든다. 서비스가 정규화
+// hook 앞에서 부른다(asset-set·asset-new·원소 재임포트 전파). 두 번 불러도 결과가 같아야 한다.
+// 오류: sink.Fail의 오류(진단), 객체 접근 오류, 할당 실패.
+using AssetSourceRebuildHook = Result<void> (*)(const AssetTypeHookContext& context,
+                                                Span<const StringView> assignedFields,
+                                                AssetSourceRebuildSink& sink) noexcept;
 
 // 타입 하나의 hook이다(모두 null일 수 있다 — null이면 그 종류는 base 사슬 위로 찾는다).
 struct AssetTypeHooks {
     AssetTagHook tags = nullptr;
     AssetBuildDependencyHook buildDependencies = nullptr;
     AssetSettingsNormalizeHook normalizeSettings = nullptr;
+    AssetSourceRebuildHook rebuildSource = nullptr;
 };
 
 // 등록 handle이다. 소멸하거나 Release하면 표에서 그 항목을 지운다(모듈 등록 수명에 묶는다).
@@ -157,6 +211,12 @@ public:
     Result<void> NormalizeSettings(ObjectRegistry& registry, const ObjectAccessContext& access,
                                    ObjectHandle object, TypeId type, AssetId asset,
                                    Span<const StringView> assignedFields) const noexcept;
+    // object의 원본을 다시 만든다(가장 가까운 원본 재구성 hook 하나 — 없으면 아무것도 하지 않고
+    // 성공). 오류: hook의 오류, 타입 조회 오류.
+    Result<void> RebuildSource(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle object, TypeId type, AssetId asset,
+                               Span<const StringView> assignedFields,
+                               AssetSourceRebuildSink& sink) const noexcept;
 
     usize Count() const noexcept {
         return entries_.Size();
@@ -176,6 +236,7 @@ private:
         Tags,
         BuildDependencies,
         NormalizeSettings,
+        RebuildSource,
     };
 
     static bool HasHook(const AssetTypeHooks& hooks, HookKind kind) noexcept;

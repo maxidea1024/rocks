@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
+#include <AssetRuntime/AssetTypeHooks.h>
 #include <ImageCodec/ImageDecode.h>
 #include <Texture/TextureImportOptions.h>
 
@@ -41,6 +42,12 @@ Result<bool> ExtractCubeLayout(const image::DecodedImage& image, TextureCubeLayo
 // 넘으면 false. 오류: 할당 실패.
 Result<bool> ExtractVolumeTiles(const image::DecodedImage& image, uint32 tileX, uint32 tileY,
                                 uint32 maxSlices, Array<uint8>& out, uint32& slices) noexcept;
+
+// Texture2DArray·TextureCubeArray·VolumeTexture의 원본 재구성 hook을
+// 등록한다(Docs/Design/AssetSystem 12.14절 A5j2 — RegisterTextureTypeHooks가 부른다). 오류: 표
+// 등록의 오류, 할당 실패.
+Result<void> RegisterTextureSourceRebuildHooks(AssetTypeHookTable& table,
+                                               Array<AssetTypeHookRegistration>& tokens) noexcept;
 
 // 8비트 선형 float → sRGB 8비트다(UE FLinearColor::ToFColorSRGB — stb_image_resize 표 변환,
 // 시험용).

@@ -137,7 +137,10 @@ enum class AssetDiagnosticCode : uint16 {
     PreserveBorderWithWrap,
     // 쿠킹 너겟(AssetSystem 12.14절 — A5j): 같은 키에 다른 값이 이미 있다(NuggetConflict — 경고,
     // 처리기 비결정성·키 누락 진단, 9절 Put 판정. 이번 결과를 쓰고 기존 항목은 둔다).
-    NuggetConflict
+    NuggetConflict,
+    // 텍스처 원본 묶음(AssetSystem 12.14절 A5j2): 원본 재구성이 원본을 비웠다(SourceCleared — 경고,
+    // Volume 원본 2D·타일이 원본을 만들지 못함, UE와 같이 비우고 알린다).
+    SourceCleared
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

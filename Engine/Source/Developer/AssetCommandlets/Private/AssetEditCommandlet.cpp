@@ -318,14 +318,23 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
 
 // 편집 경고 이름이다(EditorWarningKind 순서).
 const char* WarningName(EditorWarningKind kind) noexcept {
-    constexpr const char* Names[] = {
-        "ExcludedDependency",   "UnresolvedImport",        "DroppedUnresolvedImport",
-        "NotDurable",           "OrphanNotDeleted",        "AliasResolved",
-        "AliasTableUnreadable", "AliasNotRestored",        "AliasRemoved",
-        "ImportRecordDropped",  "ImportWarning",           "OrphanedOutput",
-        "ClassDefaultsChanged", "ClassDefaultsUnavailable"};
+    constexpr const char* Names[] = {"ExcludedDependency",
+                                     "UnresolvedImport",
+                                     "DroppedUnresolvedImport",
+                                     "NotDurable",
+                                     "OrphanNotDeleted",
+                                     "AliasResolved",
+                                     "AliasTableUnreadable",
+                                     "AliasNotRestored",
+                                     "AliasRemoved",
+                                     "ImportRecordDropped",
+                                     "ImportWarning",
+                                     "OrphanedOutput",
+                                     "ClassDefaultsChanged",
+                                     "ClassDefaultsUnavailable",
+                                     "SourceRebuildWarning"};
     static_assert(sizeof(Names) / sizeof(Names[0]) ==
-                      static_cast<usize>(EditorWarningKind::ClassDefaultsUnavailable) + 1,
+                      static_cast<usize>(EditorWarningKind::SourceRebuildWarning) + 1,
                   "every editor warning needs a name");
     return Names[static_cast<usize>(kind)];
 }

@@ -1,3 +1,5 @@
+#include "TextureImportInternal.h"
+
 #include <Meta/GeneratedType.h>
 #include <Object/ObjectRegistry.h>
 #include <Texture/Texture.generated.h>
@@ -148,7 +150,8 @@ Result<void> RegisterTextureTypeHooks(void* state, AssetTypeHookTable& table,
     }
 
     (void)tokens.TryPushBack(rocks::Move(registered.Value()));
-    return Result<void>::Success();
+    // 원본 묶음 재구성(12.14절 A5j2).
+    return texture_import::RegisterTextureSourceRebuildHooks(table, tokens);
 }
 
 } // namespace rocks

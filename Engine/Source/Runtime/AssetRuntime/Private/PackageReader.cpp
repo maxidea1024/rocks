@@ -1073,6 +1073,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "PreserveBorderWithWrap";
     case AssetDiagnosticCode::NuggetConflict:
         return "NuggetConflict";
+    case AssetDiagnosticCode::SourceCleared:
+        return "SourceCleared";
     }
 
     return "Unknown";
@@ -1087,6 +1089,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::SrgbIgnored:
     case AssetDiagnosticCode::PreserveBorderWithWrap:
     case AssetDiagnosticCode::NuggetConflict:
+    case AssetDiagnosticCode::SourceCleared:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:

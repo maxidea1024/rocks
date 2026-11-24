@@ -117,6 +117,23 @@ Result<void> AssetTypeHookContext::CallBaseNormalizeSettings(
     return entry.Value()->hooks.normalizeSettings(next, assignedFields);
 }
 
+Result<void>
+AssetTypeHookContext::CallBaseRebuildSource(Span<const StringView> assignedFields,
+                                            AssetSourceRebuildSink& sink) const noexcept {
+    auto entry = table.Find(hookType, AssetTypeHookTable::HookKind::RebuildSource, true);
+    if (!entry) {
+        return Result<void>::Failure(entry.Error());
+    }
+
+    if (entry.Value() == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const AssetTypeHookContext next{registry, access, object, entry.Value()->type,
+                                    table,    types,  asset};
+    return entry.Value()->hooks.rebuildSource(next, assignedFields, sink);
+}
+
 AssetTypeHookRegistration::AssetTypeHookRegistration(AssetTypeHookRegistration&& other) noexcept
     : table_(other.table_), type(other.type) {
     other.table_ = nullptr;
@@ -159,8 +176,9 @@ AssetTypeHookTable::~AssetTypeHookTable() {
 Result<AssetTypeHookRegistration> AssetTypeHookTable::Register(TypeId type,
                                                                AssetTypeHooks hooks) noexcept {
     using Out = AssetTypeHookRegistration;
-    if (type == TypeId{} || (hooks.tags == nullptr && hooks.buildDependencies == nullptr &&
-                             hooks.normalizeSettings == nullptr)) {
+    if (type == TypeId{} ||
+        (hooks.tags == nullptr && hooks.buildDependencies == nullptr &&
+         hooks.normalizeSettings == nullptr && hooks.rebuildSource == nullptr)) {
         return Result<Out>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -197,6 +215,8 @@ bool AssetTypeHookTable::HasHook(const AssetTypeHooks& hooks, HookKind kind) noe
         return hooks.buildDependencies != nullptr;
     case HookKind::NormalizeSettings:
         return hooks.normalizeSettings != nullptr;
+    case HookKind::RebuildSource:
+        return hooks.rebuildSource != nullptr;
     }
 
     return false;
@@ -277,6 +297,25 @@ AssetTypeHookTable::NormalizeSettings(ObjectRegistry& registry, const ObjectAcce
     const AssetTypeHookContext context{registry, access,  object, entry.Value()->type,
                                        *this,    *types_, asset};
     return entry.Value()->hooks.normalizeSettings(context, assignedFields);
+}
+
+Result<void> AssetTypeHookTable::RebuildSource(ObjectRegistry& registry,
+                                               const ObjectAccessContext& access,
+                                               ObjectHandle object, TypeId type, AssetId asset,
+                                               Span<const StringView> assignedFields,
+                                               AssetSourceRebuildSink& sink) const noexcept {
+    auto entry = Find(type, HookKind::RebuildSource, false);
+    if (!entry) {
+        return Result<void>::Failure(entry.Error());
+    }
+
+    if (entry.Value() == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const AssetTypeHookContext context{registry, access,  object, entry.Value()->type,
+                                       *this,    *types_, asset};
+    return entry.Value()->hooks.rebuildSource(context, assignedFields, sink);
 }
 
 } // namespace rocks

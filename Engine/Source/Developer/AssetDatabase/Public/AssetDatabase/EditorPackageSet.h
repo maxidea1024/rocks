@@ -115,7 +115,10 @@ enum class EditorWarningKind : uint8 {
     // 열기: 지금 클래스 기본값 레코드를 만들 수 없는 export 클래스다(A5c — 진단 None, asset =
     // 패키지, related = 그 TypeId, text = 이유 이름). 그 클래스를 고치기 전까지 이 패키지는 저장할
     // 수 없다(차이 저장이 레코드를 요구한다).
-    ClassDefaultsUnavailable
+    ClassDefaultsUnavailable,
+    // 원본 재구성: 원본 묶음 hook의 경고다(진단 = 그 코드 — SourceCleared, asset = 그 에셋,
+    // detail — Docs/Design/AssetSystem 12.14절 A5j2).
+    SourceRebuildWarning
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
@@ -407,6 +410,17 @@ public:
     // 하지 않는다. 오류: 타입 조회 오류, hook의 오류.
     Result<void> NormalizeSettings(ObjectHandle object, AssetId asset,
                                    Span<const StringView> assignedFields) noexcept;
+    // object(열린 패키지 asset의 대표 에셋)의 원본을 묶음 필드에서 다시 만든다(타입 hook 표의 원본
+    // 재구성 hook — 12.14절 A5j2, UE UpdateSourceFromSourceTextures). 묶음 원소의 bulk는 그 원소가
+    // 속한 열린 패키지에서 읽고 새 원본은 asset 패키지의 저장 전 bulk로 더한다. 정규화보다 먼저
+    // 부른다. hook 표가 없거나 hook이 없으면 아무것도 하지 않는다. 경고는 warnings(있으면)에
+    // SourceRebuildWarning으로 붙는다. cause·changed는 sink의 Cause·ChangedSource다(changed는
+    // Propagate일 때 재임포트한 원소). 오류: asset이 열려 있지 않음 NotFound, 타입 조회 오류,
+    // hook의 오류(진단은 failure).
+    Result<void> RebuildSource(ObjectHandle object, AssetId asset,
+                               Span<const StringView> assignedFields, AssetSourceRebuildCause cause,
+                               ObjectHandle changed, Array<EditorWarning>* warnings,
+                               AssetDiagnostic* failure) noexcept;
 
     // 이동하는 열린 패키지의 경로를 바꿀 준비를 한다(7.1절 17 A2e2). 저장된 패키지는 fileName이
     // fromFile(Content 상대 OS 이름 — 파일 또는 디렉터리, 이동하는 실제 이름)과 같거나 그 아래면 그

@@ -1047,6 +1047,177 @@ TEST(AssetImport_NormalizeSettingsHook) {
     normalizeFails = false;
 }
 
+namespace {
+
+// 원본 재구성 hook 시험 상태다(12.14절 A5j2 — 서비스가 정규화 앞에서 부른다).
+struct RebuildRecord {
+    usize calls = 0;
+    AssetSourceRebuildCause cause = AssetSourceRebuildCause::Edit;
+    AssetId changed{};
+    bool importRecord = false;
+    char fields[64] = {};
+    usize fieldBytes = 0;
+    bool fails = false;
+
+    StringView Fields() const noexcept {
+        return StringView(fields, fieldBytes);
+    }
+};
+
+RebuildRecord rebuild;
+
+// 부른 까닭·바뀐 원소(대표 에셋 id)·필드를 남기고 value를 1 더한다. fails면
+// sink.Fail(InvalidSetting).
+Result<void> RecordingRebuild(const AssetTypeHookContext& context, Span<const StringView> fields,
+                              AssetSourceRebuildSink& sink) noexcept {
+    ++rebuild.calls;
+    rebuild.cause = sink.Cause();
+    rebuild.importRecord = sink.HasImportRecord();
+    rebuild.changed = AssetId{};
+    if (!sink.ChangedSource().IsNull()) {
+        auto borrowed = context.registry.Resolve<Asset>(context.access, sink.ChangedSource());
+        if (borrowed) {
+            auto value = borrowed.Value().Get();
+            rebuild.changed = value ? value.Value()->Id() : AssetId{};
+        }
+    }
+
+    rebuild.fieldBytes = 0;
+    for (StringView field : fields) {
+        for (usize at = 0;
+             at < field.ByteCount() && rebuild.fieldBytes + 1 < sizeof(rebuild.fields); ++at) {
+            rebuild.fields[rebuild.fieldBytes++] = field.Data()[at];
+        }
+
+        if (rebuild.fieldBytes + 1 < sizeof(rebuild.fields)) {
+            rebuild.fields[rebuild.fieldBytes++] = ',';
+        }
+    }
+
+    if (rebuild.fails) {
+        return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument, 7);
+    }
+
+    auto borrowed = context.registry.ResolveForWrite<TestAsset>(context.access, context.object);
+    if (!borrowed) {
+        return Result<void>::Failure(borrowed.Error());
+    }
+
+    auto value = borrowed.Value().Get();
+    if (!value) {
+        return Result<void>::Failure(value.Error());
+    }
+
+    value.Value()->value += 1;
+    return Result<void>::Success();
+}
+
+} // namespace
+
+// 원본 재구성 hook(12.14절 A5j2): 임포트는 부르지 않음, asset-new는 New 까닭·대입 필드로 부르고
+// 실패하면 패키지를 만들지 않음(같은 경로 New가 다시 됨), asset-set은 Edit 까닭으로 정규화 앞에서
+// 부르고 실패 진단(코드·detail·asset)을 그대로 남기며 저장하지 않음, 원소 재임포트는 EditorOnly로
+// 참조하는 에셋을 Propagate 까닭·바뀐 원소로 불러 함께 저장하고, 그 hook이 실패하면 재임포트가
+// 실패해 원소도 저장하지 않는다. ImportRecord 유무를 sink가 알려 준다.
+TEST(AssetImport_RebuildSourceHook) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-rebuild");
+    REQUIRE(scene.ready);
+    AssetTypeHooks hooks;
+    hooks.rebuildSource = &RecordingRebuild;
+    auto hook = scene.hooks.Register(IdOf<TestAsset>(), hooks);
+    REQUIRE(hook);
+    REQUIRE(scene.PutSource(RockSource, "value=5"));
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    AssetImportResult rock(env.allocator);
+    rebuild = RebuildRecord{};
+    REQUIRE(service.Import(scene.lock, "/Game/Rock", inputs, {}, {}, diagnostics, rock));
+    CHECK(rebuild.calls == 0);
+    REQUIRE(service.Packages().Close(rock.id));
+
+    // asset-new: New 까닭, 대입 필드, 저장 전 적용(value 0 + 1).
+    Assignments bundle(env.allocator);
+    bundle.Add("editorRef=/Game/Rock").Add("label=B");
+    auto made =
+        service.New(scene.lock, "TestAsset", "/Game/Bundle", bundle.list.View(), diagnostics);
+    REQUIRE(made);
+    CHECK(rebuild.calls == 1 && rebuild.cause == AssetSourceRebuildCause::New &&
+          rebuild.Fields() == "editorRef,label," && rebuild.changed.IsNull() &&
+          !rebuild.importRecord);
+    TestAsset* created = Representative(service.Packages(), made.Value());
+    REQUIRE(created != nullptr);
+    CHECK(created->value == 1);
+    REQUIRE(service.Packages().Close(made.Value()));
+
+    // asset-new 실패: 진단 그대로, 파일 없음, 같은 경로의 다음 New가 된다.
+    rebuild.fails = true;
+    AssetDiagnostic failure;
+    auto refused = service.New(scene.lock, "TestAsset", "/Game/Refused", bundle.list.View(),
+                               diagnostics, nullptr, &failure);
+    CHECK(!refused && refused.Error() == ErrorCode::InvalidArgument &&
+          failure.code == AssetDiagnosticCode::InvalidSetting && failure.detail == 7);
+    CHECK(!scene.files.Has("Content/Refused.rasset"));
+    rebuild.fails = false;
+    auto retried = service.New(scene.lock, "TestAsset", "/Game/Refused", {}, diagnostics);
+    CHECK(retried && rebuild.cause == AssetSourceRebuildCause::New && rebuild.Fields().IsEmpty());
+    if (retried) {
+        REQUIRE(service.Packages().Close(retried.Value()));
+    }
+
+    // asset-set: Edit 까닭, 실패는 진단 그대로·저장하지 않음.
+    Assignments edits(env.allocator);
+    edits.Add("label=C");
+    REQUIRE(service.Set(scene.lock, "/Game/Bundle", edits.list.View(), false, diagnostics, nullptr,
+                        nullptr));
+    CHECK(rebuild.cause == AssetSourceRebuildCause::Edit && rebuild.Fields() == "label,");
+    REQUIRE(service.Packages().Close(made.Value()));
+    Array<uint8> before(env.allocator);
+    REQUIRE(before.TryAppend(scene.files.Bytes("Content/Bundle.rasset")) && !before.IsEmpty());
+    rebuild.fails = true;
+    AssetDiagnostic setFailure;
+    CHECK(service
+              .Set(scene.lock, "/Game/Bundle", edits.list.View(), false, diagnostics, nullptr,
+                   &setFailure)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(setFailure.code == AssetDiagnosticCode::InvalidSetting && setFailure.detail == 7 &&
+          setFailure.asset == made.Value());
+    rebuild.fails = false;
+    REQUIRE(service.Packages().Close(made.Value()));
+    CHECK(SameBytes(scene.files.Bytes("Content/Bundle.rasset"), before.View()));
+
+    // 원소 재임포트 전파: Bundle(editorRef → Rock)을 Propagate·바뀐 원소 Rock으로 부르고 저장한다.
+    const usize calls = rebuild.calls;
+    AssetImportResult again(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, again));
+    CHECK(rebuild.calls == calls + 1 && rebuild.cause == AssetSourceRebuildCause::Propagate &&
+          rebuild.changed == rock.id && rebuild.Fields().IsEmpty());
+    CHECK(!SameBytes(scene.files.Bytes("Content/Bundle.rasset"), before.View()));
+
+    // 전파 hook 실패: 재임포트 실패, 원소·묶음 모두 저장하지 않는다.
+    Array<uint8> rockBefore(env.allocator);
+    REQUIRE(rockBefore.TryAppend(scene.files.Bytes("Content/Rock.rasset")));
+    Array<uint8> bundleBefore(env.allocator);
+    REQUIRE(bundleBefore.TryAppend(scene.files.Bytes("Content/Bundle.rasset")));
+    REQUIRE(scene.PutSource(RockSource, "value=9"));
+    rebuild.fails = true;
+    AssetDiagnostic reimportFailure;
+    CHECK(service
+              .Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, again, nullptr,
+                        &reimportFailure)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(reimportFailure.code == AssetDiagnosticCode::InvalidSetting);
+    rebuild.fails = false;
+    CHECK(SameBytes(scene.files.Bytes("Content/Rock.rasset"), rockBefore.View()) &&
+          SameBytes(scene.files.Bytes("Content/Bundle.rasset"), bundleBefore.View()));
+}
+
 // 추가 출력: Output 순서대로 `<path>_<key>`에 저장, 참조 기록(owner = 주 출력)·ImportOwner 의존,
 // 주 출력의 소유 기록 출력 목록(key 순 — 빈 key 먼저), 출력 사이 Hard 참조, 고아 없음, 경고(Warn)
 // ImportWarning(코드·detail·asset = 주 출력), AbsoluteSourcePath(Project를 다른 곳으로 — 원본은

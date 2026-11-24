@@ -1380,6 +1380,42 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
         }
     }
 
+    // 원본 재구성 → 설정 정규화(12.14절 A5j2 — UE 팩토리가 만든 뒤 UpdateSourceFromSourceTextures·
+    // ValidateSettingsAfterImportOrEdit를 부르는 것과 같다). 실패하면 만든 패키지를 저장하지 않고
+    // 닫는다(파일이 생기지 않는다 — 같은 경로의 다음 New가 막히지 않게).
+    {
+        auto representative = set_.Registry().FindChild(set_.Access(), created.Value(), "");
+        Array<StringView> assigned(*allocator_);
+        Result<void> finished = representative ? Result<void>::Success()
+                                               : Result<void>::Failure(representative.Error());
+        if (finished) {
+            finished = asset_database_detail::CollectAssignedFields(assignments, assigned);
+        }
+
+        if (finished && failure != nullptr) {
+            *failure = AssetDiagnostic{};
+        }
+
+        if (finished) {
+            finished =
+                set_.RebuildSource(representative.Value(), id, assigned.View(),
+                                   AssetSourceRebuildCause::New, ObjectHandle{}, warnings, failure);
+        }
+
+        if (finished) {
+            finished = set_.NormalizeSettings(representative.Value(), id, assigned.View());
+        }
+
+        if (!finished) {
+            (void)set_.Close(id);
+            if (failure != nullptr && failure->code == AssetDiagnosticCode::None) {
+                return FailAsset<AssetId>(failure, AssetDiagnosticCode::None, finished.Error());
+            }
+
+            return Result<AssetId>::Failure(finished.Error());
+        }
+    }
+
     EditorSaveOptions save;
     if (auto saved = set_.Save(id, lock, save, warnings, failure); !saved) {
         return Result<AssetId>::Failure(saved.Error());
@@ -1523,8 +1559,9 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
     set_.MergeOverrides(asset.Value(), pending);
     set_.RemoveOverridesUnder(asset.Value(), resetUnits);
 
-    // 설정 정규화(12.12절 — UE ValidateSettingsAfterImportOrEdit): 대입·되돌린 최상위 필드를
-    // 넘긴다. 실패는 바뀐 객체를 남기므로 dirty로 두고 저장하지 않는다.
+    // 원본 재구성(12.14절 A5j2 — UE UpdateSourceFromSourceTextures) → 설정 정규화(12.12절 — UE
+    // ValidateSettingsAfterImportOrEdit): 대입·되돌린 최상위 필드를 넘긴다. 실패는 바뀐 객체를
+    // 남기므로 dirty로 두고 저장하지 않는다(재구성 실패의 진단은 hook이 남긴 것 그대로).
     {
         Array<StringView> assigned(*allocator_);
         Result<void> normalized =
@@ -1533,12 +1570,28 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
             normalized = asset_database_detail::CollectAssignedFields(resets.View(), assigned);
         }
 
-        if (normalized) {
-            normalized = set_.NormalizeSettings(asset.Value(), id, assigned.View());
-        }
-
         if (!normalized) {
             return failApplied(normalized.Error());
+        }
+
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+        }
+
+        if (auto rebuilt = set_.RebuildSource(asset.Value(), id, assigned.View(),
+                                              AssetSourceRebuildCause::Edit, ObjectHandle{},
+                                              warnings, failure);
+            !rebuilt) {
+            (void)set_.MarkDirty(id);
+            if (failure != nullptr && failure->code == AssetDiagnosticCode::None) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, rebuilt.Error());
+            }
+
+            return rebuilt;
+        }
+
+        if (auto done = set_.NormalizeSettings(asset.Value(), id, assigned.View()); !done) {
+            return failApplied(done.Error());
         }
     }
 
