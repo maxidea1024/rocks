@@ -122,6 +122,11 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {module.Name}: unsupported WindowsSubsystem {module.WindowsSubsystem}.");
             }
 
+            if (module.AndroidPackage is { } package)
+            {
+                ValidateAndroidPackage(request, module, package);
+            }
+
             if (module.WindowsSubsystem != WindowsSubsystem.Console && module.Kind != NativeModuleKind.Executable)
             {
                 throw new ArgumentException($"Module {module.Name}: WindowsSubsystem applies only to executables.");
@@ -346,6 +351,36 @@ internal static class InputValidation
         if (request.Modules.FirstOrDefault(module => !module.ThirdParty && module.PrebuiltLibraries.Count != 0) is { } prebuilt)
         {
             throw new ArgumentException($"Module {prebuilt.Name}: Modular linking of prebuilt (installed SDK) modules is not supported yet; use Monolithic.");
+        }
+    }
+
+    // Android APK 실행 파일(Docs/Design/AndroidPlatform.ko.md 7절)은 Android 대상의 Monolithic 실행 파일만 받고, 패키지 이름은 Java 패키지
+    // 규칙(점으로 나눈 조각 둘 이상, 조각마다 영문자로 시작하는 영문자·숫자·밑줄)이다.
+    private static void ValidateAndroidPackage(NativeBuildRequest request, NativeModuleInput module, AndroidPackage package)
+    {
+        if (module.Kind != NativeModuleKind.Executable)
+        {
+            throw new ArgumentException($"Module {module.Name}: AndroidPackage applies only to executables.");
+        }
+
+        if (request.Toolchain.Platform != NativePlatform.Android)
+        {
+            throw new ArgumentException($"Module {module.Name}: AndroidPackage is Android-only, but the toolchain targets " +
+                $"{request.Toolchain.Platform}. Declare it only when BuildContext.Platform is Android.");
+        }
+
+        if (request.LinkType != NativeLinkType.Monolithic)
+        {
+            throw new ArgumentException($"Module {module.Name}: an AndroidPackage executable needs a Monolithic target.");
+        }
+
+        string[] segments = package.PackageName.Split('.');
+        bool valid = segments.Length >= 2 && segments.All(segment => segment.Length != 0 && char.IsAsciiLetter(segment[0]) &&
+            segment.All(value => char.IsAsciiLetterOrDigit(value) || value == '_'));
+        if (!valid)
+        {
+            throw new ArgumentException($"Module {module.Name}: invalid Android package name '{package.PackageName}' " +
+                "(two or more dot-separated segments of ASCII letters, digits and underscores, each starting with a letter).");
         }
     }
 

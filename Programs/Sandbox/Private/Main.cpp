@@ -147,13 +147,19 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
                   : RunSelfTest(context.DefaultAllocator(), context.Modules(), gpuValidation);
 }
 
+// Android APK를 런처에서 띄우면(Intent extra 없음) 창 모드 엔진을
+// 돌린다(Docs/Design/AndroidPlatform.ko.md 6절). 액티비티가 끝날 때(onDestroy) 종료 요청 다리로
+// 정상 종료한다.
+constexpr StringView AndroidDefaultArguments[] = {"--engine", "--window"};
+
 const rocks::launch::ApplicationDescription& Describe() noexcept {
     static constexpr rocks::launch::ApplicationDescription Description{
         .name = "Sandbox",
         .kind = rocks::launch::ApplicationKind::EngineHost,
         .settings = {.toolLogging = rocks::launch::ToolLogging::Stderr},
         .configure = &Configure,
-        .run = &Run};
+        .run = &Run,
+        .androidDefaultArguments = Span<const StringView>(AndroidDefaultArguments)};
     return Description;
 }
 

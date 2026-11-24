@@ -535,7 +535,10 @@ internal static class ActionGraph
                 ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
                 : "";
             string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
-            string executablePath = Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
+            // Android APK 실행 파일은 NativeActivity가 싣는 공유 라이브러리다(Docs/Design/AndroidPlatform.ko.md 3절).
+            string executablePath = module.AndroidPackage is not null
+                ? Path.Combine(output, "bin", AndroidPackage.LibraryFileName(module.Name))
+                : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
                 : sharedLibrary ? Path.Combine(LinkTypes.SharedLibraryDirectory(output, module, request.Toolchain.Platform), sharedFile)
                 : executablePath;
@@ -726,6 +729,14 @@ internal static class ActionGraph
                             {
                                 finalArguments.Add("-Wl,-u," + (mac ? "_" : "") + ModuleTables.EntryAnchorPrefix + anchor);
                             }
+                        }
+
+                        if (module.AndroidPackage is not null)
+                        {
+                            // APK 실행 파일: 공유 라이브러리로 링크하고 액티비티 진입 기호를 강제 참조한다(Launch Private/Android가 정의). 16 KB
+                            // 페이지 기기(Android 15)에서 .so를 APK에서 바로 mmap하려고 페이지 정렬을 16 KB로 둔다.
+                            finalArguments.AddRange(["-shared", "-Wl,-soname," + Path.GetFileName(finalPath),
+                                "-Wl,-u," + AndroidPackage.EntrySymbol, "-Wl,-z,max-page-size=16384"]);
                         }
 
                         if (request.LinkType == NativeLinkType.Modular)

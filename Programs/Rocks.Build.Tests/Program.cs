@@ -166,9 +166,13 @@ try
             case "ide-plan":
                 await IdePlanTests.RunAsync(request, root, Pass);
                 break;
+            case "android-package":
+                await AndroidPackageTests.RunAsync(request);
+                Pass("Android APK executables");
+                break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan, android-package.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -352,6 +356,9 @@ try
 
     ObjectiveCppTests.Run(request, root);
     Pass("Objective-C++ (.mm) translation units: language, ARC-off flags, Apple-only validation");
+
+    await AndroidPackageTests.RunAsync(request);
+    Pass("Android APK executables: validation, shared library link, APK define");
 
     await CLanguageTests.RunAsync(request, root);
     Pass("C17 translation units: C++ flag golden, C profile, real build, included .c invalidation");

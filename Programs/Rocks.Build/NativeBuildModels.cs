@@ -243,6 +243,24 @@ public sealed record SourceGroup(string Directory, string Target, IReadOnlyList<
     public IReadOnlyList<string> InternalModules => Internals ?? [];
 }
 
+/// <summary>
+/// Android APK로 묶는 실행 파일의 패키지 정보다(Docs/Design/AndroidPlatform.ko.md 7절). 그 실행 파일은 <c>bin/lib&lt;이름&gt;.so</c>
+/// 공유 라이브러리로 링크하고 define <see cref="ApkDefine"/>를 받는다(Launch EntryPoint.h가 main 대신 액티비티 진입을 만든다).
+/// </summary>
+/// <param name="PackageName">Android 패키지 이름이다(예: <c>com.rocks.sandbox</c>). 점으로 나눈 조각이 둘 이상이고 조각마다 영문자로
+/// 시작하는 영문자·숫자·밑줄이다.</param>
+public sealed record AndroidPackage(string PackageName)
+{
+    /// <summary>APK 실행 파일 모듈이 받는 define이다.</summary>
+    public const string ApkDefine = "ROCKS_ANDROID_APK=1";
+
+    /// <summary>링크가 강제 참조하는 액티비티 진입 기호다(NativeActivity가 dlsym으로 찾는다).</summary>
+    public const string EntrySymbol = "ANativeActivity_onCreate";
+
+    /// <summary>링크하는 공유 라이브러리 파일 이름이다(manifest <c>android.app.lib_name</c>은 앞의 lib·뒤의 .so를 뺀 모듈 이름).</summary>
+    public static string LibraryFileName(string module) => "lib" + module + ".so";
+}
+
 /// <summary>입력 경로는 request.RootDirectory 기준이다. dependency의 public 설정만 전파한다.</summary>
 public sealed record NativeModuleInput
 {
@@ -252,6 +270,10 @@ public sealed record NativeModuleInput
 
     // Windows 실행 파일의 subsystem이다(WindowsSubsystem). 실행 파일에만 뜻이 있고 dependency로 전파하지 않는다.
     public WindowsSubsystem WindowsSubsystem { get; init; } = WindowsSubsystem.Console;
+
+    // Android APK로 묶는 실행 파일이면 패키지 정보다(AndroidPackage). null이면 보통 실행 파일이다. Android 대상의 Monolithic 실행 파일만
+    // 받는다(입력 검증). dependency로 전파하지 않는다.
+    public AndroidPackage? AndroidPackage { get; init; }
 
     public IReadOnlyList<string> Sources { get; init; } = [];
 

@@ -25,6 +25,11 @@
 // 따로)을 정의한다. 이름이 다르므로 소스 매크로와 빌드 규칙의 subsystem이 맞지 않으면 Launch가
 // 기호를 찾지 못해 알린다.
 //
+// Android APK 프로그램(빌드 규칙 AndroidPackage가 ROCKS_ANDROID_APK=1을 준다 — Docs/Design/
+// AndroidPlatform.ko.md 3절)에서는 main을 만들지 않는다. 플랫폼 NativeActivity가 Launch의
+// ANativeActivity_onCreate를 부르고, 두 매크로는 그 진입이 찾는 export 함수
+// RocksAndroidApplicationDescription()을 정의한다.
+//
 // 사용 예:
 //   ROCKS_IMPLEMENT_APPLICATION(Describe)
 #if ROCKS_MODULE_SHARED_LIBRARY
@@ -45,6 +50,17 @@
     extern "C" ROCKS_DLLEXPORT const ::rocks::launch::ApplicationDescription* Symbol() noexcept {  \
         return &DescribeFunction();                                                                \
     }
+
+#elif ROCKS_PLATFORM_ANDROID && defined(ROCKS_ANDROID_APK) && ROCKS_ANDROID_APK
+
+#define ROCKS_IMPLEMENT_APPLICATION(DescribeFunction)                                              \
+    extern "C" ROCKS_DLLEXPORT const ::rocks::launch::ApplicationDescription*                      \
+    RocksAndroidApplicationDescription() noexcept {                                                \
+        return &DescribeFunction();                                                                \
+    }
+
+#define ROCKS_IMPLEMENT_WINDOWED_APPLICATION(DescribeFunction)                                     \
+    ROCKS_IMPLEMENT_APPLICATION(DescribeFunction)
 
 #elif ROCKS_PLATFORM_WINDOWS
 
