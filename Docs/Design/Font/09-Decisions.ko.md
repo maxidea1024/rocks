@@ -12,7 +12,7 @@
 | FD6 | 파일 경로 face | 두지 않음, 엔진 기본 글꼴도 FontFace 에셋. **예외**: 내장 UI 글꼴(7.5절)은 에셋 활성화 전에 필요하므로 원본 byte를 `FontFaceData`로 직접 등록 | UE `FFontData::FontFilename` | 모든 글꼴이 같은 쿠킹·너겟·의존 경로를 탄다. 내장 글꼴은 계획 9.6절이 "asset 활성화 전·에셋 너겟 없이"를 요구한다 |
 | FD7 | 미리 굽기 문자 키 | code point(`uint32`) | UE `uint16`(UTF-16 단위) | 보조 평면 문자(이모지·CJK 확장)를 굽는다 |
 | FD8 | 지연 원본 byte 위치 | 같은 패키지의 지연 bulk entry(geometry도 같은 로딩 방식). AssetSystem이 텍스처 스트리밍 덩어리를 별도 파일로 정하면 글꼴도 따른다 | UE `.ufont` 별도 파일 고정 | 스트리밍 데이터의 위치 규칙을 텍스처·메시·글꼴이 하나로 공유한다 |
-| FD9 | 컬러 비트맵 글리프 PNG | **확인 필요 — 권장:** libpng를 FreeType 전용 의존으로 들임(UE와 같다) | (a) ImageCodec PNG 디코더를 런타임으로 옮기고 FreeType `pngshim.c` 대체 (b) PNG 끔(컬러 이모지 미지원) | FreeType의 PNG 경로는 libpng API에 고정이라 (a)는 원본 수정이 된다(원본 보존 규칙). ImageCodec은 Developer 모듈이다. (b)는 UE 기능 미달. 대가: PNG 해제기가 둘(ImageCodec·libpng) |
+| FD9 | 컬러 비트맵 글리프 PNG | **확인 필요 — 권장:** libpng를 FreeType 전용 의존으로 들임(UE와 같다) | (a) ImageCodec PNG 디코더를 런타임으로 옮기고 FreeType `pngshim.c` 대체 (b) PNG 끔(컬러 이모지 미지원) | FreeType의 PNG 경로(`pngshim.c`)는 libpng API에 고정이다. (a)는 추적 가능한 수정으로 할 수는 있으나 런타임 PNG 디코더가 필요한데 ImageCodec은 Developer 모듈이라 런타임으로 옮겨야 하고, FreeType 판을 올릴 때마다 shim 수정을 다시 맞춰야 한다. (b)는 UE 기능 미달. 대가: PNG 해제기가 둘(ImageCodec·libpng) |
 | FD10 | WOFF·WOFF2 | 1단계 범위 밖, Rocks 추가 기능으로 FT8에서 받음(원본 byte 그대로, Stream 불가 — 열 때 전체 해제) | 처음부터 받음 / 받지 않음 | UE는 받지 않는다(UE FreeType은 Brotli도 연결하지 않는다). FreeType이 zlib·Brotli로 직접 연다(FT1에서 열기 시험만 한다) |
 | FD11 | 미리 굽기 입력 | FontFace 또는 글꼴 파일 + FreeType, 모든 플랫폼 같은 경로, 임포트 때 생성 | UE: 설치된 시스템 글꼴 이름 + Windows GDI | 결과가 기기·OS에 따라 달라지지 않는다(FR6·FR7) |
 | FD12 | ICU 데이터 | 공식 데이터 `.dat`를 `icupkg`로 부분집합 → 메모리 등록 | 전체 데이터(수십 MB) / ICU 데이터 빌드 도구로 소스에서 생성 | 크기, 그리고 원본 byte 보존(공식 바이너리 + 항목 목록만 Rocks 파일) |
