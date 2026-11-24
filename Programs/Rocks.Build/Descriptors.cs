@@ -303,15 +303,11 @@ public static class DescriptorReader
 
         var engineVersion = new ProjectEngineVersion(major, minor);
         IReadOnlyList<NativePlatform> platforms = root.TryGetProperty("targetPlatforms", out JsonElement value)
-            ? ReadPlatforms(path, value, "targetPlatforms")
+            ? ReadEnumValues<NativePlatform>(path, value, "targetPlatforms")
             : Enum.GetValues<NativePlatform>();
         IReadOnlyList<PluginReference> references = ReadReferences(path, root, requireEnabled: false);
         // 참조의 플랫폼 조건은 프로젝트가 대상으로 하는 플랫폼 안이어야 한다(Docs/Design/BuildTargets 3.6절).
-        if (references.FirstOrDefault(reference => reference.Platforms?.Any(platform => !platforms.Contains(platform)) == true) is { } outside)
-        {
-            throw new DescriptorException(path, $"plugin reference '{outside.Name}' lists a platform outside targetPlatforms " +
-                $"({string.Join(", ", platforms)}).");
-        }
+        RequireTargetPlatforms(path, "project", references, platforms);
 
         string? association = OptionalString(path, root, "engineAssociation");
         if (association is not null && association.Trim().Length == 0)
@@ -487,7 +483,7 @@ public static class DescriptorReader
                 ? RequiredEnum<LoadingPhase>(path, module, "loadingPhase")
                 : LoadingPhase.Default;
             IReadOnlyList<NativePlatform>? platforms = module.TryGetProperty("platforms", out JsonElement value)
-                ? ReadPlatforms(path, value, $"modules '{name}' platforms")
+                ? ReadEnumValues<NativePlatform>(path, value, $"modules '{name}' platforms")
                 : null;
             result.Add(new(name, type, phase, platforms));
         }
@@ -542,29 +538,29 @@ public static class DescriptorReader
         return result;
     }
 
-    // 선택 enum 이름 목록이다(없으면 null). 빈 목록·중복·모르는 이름(정확한 철자)은 오류다.
-    private static IReadOnlyList<T>? ReadEnumList<T>(string path, JsonElement owner, string key, string what) where T : struct, Enum
-    {
-        if (!owner.TryGetProperty(key, out JsonElement value))
-        {
-            return null;
-        }
+    // 선택 enum 이름 목록이다(owner의 key — 없으면 null).
+    private static IReadOnlyList<T>? ReadEnumList<T>(string path, JsonElement owner, string key, string what) where T : struct, Enum =>
+        owner.TryGetProperty(key, out JsonElement value) ? ReadEnumValues<T>(path, value, $"{what} '{key}'") : null;
 
-        RequireKind(path, value, JsonValueKind.Array, key);
+    // enum 이름 목록이다(플랫폼·타깃 종류·구성 — 기술자 읽기가 모두 이것을 쓴다). 빈 목록·중복·모르는 이름(정확한 철자 — 대소문자·숫자 철자는
+    // 받지 않는다)은 오류다.
+    private static IReadOnlyList<T> ReadEnumValues<T>(string path, JsonElement value, string what) where T : struct, Enum
+    {
+        RequireKind(path, value, JsonValueKind.Array, what);
         var result = new List<T>();
         foreach (JsonElement item in value.EnumerateArray())
         {
-            RequireKind(path, item, JsonValueKind.String, key + "[]");
+            RequireKind(path, item, JsonValueKind.String, what + "[]");
             string text = item.GetString()!;
             if (!Enum.TryParse(text, ignoreCase: false, out T parsed) || !Enum.IsDefined(parsed) ||
                 !string.Equals(parsed.ToString(), text, StringComparison.Ordinal))
             {
-                throw new DescriptorException(path, $"{what} '{key}' has unknown value '{text}' (expected {string.Join(", ", Enum.GetNames<T>())}).");
+                throw new DescriptorException(path, $"unknown value '{text}' in {what} (expected: {string.Join(", ", Enum.GetNames<T>())}).");
             }
 
             if (result.Contains(parsed))
             {
-                throw new DescriptorException(path, $"{what} '{key}' lists '{text}' twice.");
+                throw new DescriptorException(path, $"{what} lists '{text}' twice.");
             }
 
             result.Add(parsed);
@@ -572,10 +568,24 @@ public static class DescriptorReader
 
         if (result.Count == 0)
         {
-            throw new DescriptorException(path, $"{what} '{key}' must not be empty; leave the field out for all values.");
+            throw new DescriptorException(path, $"{what} must not be empty (leave the field out to allow every value).");
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 참조의 플랫폼 조건이 프로젝트 targetPlatforms 안인지 검사한다(Docs/Design/BuildTargets 3.6절 — 프로젝트 기술자와 게임 타깃 규칙 참조가
+    /// 같이 쓴다). 밖이면 DescriptorException이다.
+    /// </summary>
+    internal static void RequireTargetPlatforms(string? path, string label, IReadOnlyList<PluginReference> references,
+        IReadOnlyList<NativePlatform> targetPlatforms)
+    {
+        if (references.FirstOrDefault(reference => reference.Platforms?.Any(platform => !targetPlatforms.Contains(platform)) == true) is { } outside)
+        {
+            throw new DescriptorException(path, $"{label} plugin reference '{outside.Name}' lists a platform outside targetPlatforms " +
+                $"({string.Join(", ", targetPlatforms)}).");
+        }
     }
 
     private static IReadOnlyList<NativePlatform> ReadPlatforms(string path, JsonElement value, string what)
@@ -731,10 +741,10 @@ public static class PluginCatalog
     /// </code>
     /// context(Docs/Design/BuildTargets 3.6절 BS4)가 있으면 조건 있는 참조는 문맥이 맞을 때만 그 enabled이고 아니면 끈 것과 같다(이름을
     /// 차지하므로 enabledByDefault도 켜지 않는다). 이번 플랫폼을 지원하지 않는 플러그인(PluginDescriptor.Platforms)은 기본 활성으로만 켜질
-    /// 것이면 조용히 빼고, 참조가 켰거나 의존으로 요구되면 오류다. context가 없으면 조건과 지원 플랫폼을 보지 않는다(문맥 없는 검증).
+    /// 것이면 조용히 빼고, 참조가 켰거나 의존으로 요구되면 오류다. 문맥은 필수다(빠뜨리면 조건을 보지 않고 켜는 일이 없게).
     /// </summary>
     public static IReadOnlyList<PluginDescriptor> ResolveEnabled(IReadOnlyList<PluginReference> references, PluginReferrer referrer,
-        IReadOnlyList<PluginDescriptor> available, bool applyDefaults, PluginContext? context = null)
+        IReadOnlyList<PluginDescriptor> available, bool applyDefaults, PluginContext context)
     {
         var byName = new Dictionary<string, PluginDescriptor>(StringComparer.Ordinal);
         foreach (PluginDescriptor plugin in available)
@@ -755,7 +765,7 @@ public static class PluginCatalog
                 throw new DescriptorException(referrer.FilePath, $"{referrer.Label} references unknown plugin '{reference.Name}'.");
             }
 
-            bool matches = context is null || reference.Matches(context);
+            bool matches = reference.Matches(context);
             if (!explicitChoice.TryAdd(reference.Name, reference.Enabled && matches))
             {
                 throw new DescriptorException(referrer.FilePath, $"{referrer.Label} references plugin '{reference.Name}' more than once.");
@@ -768,7 +778,7 @@ public static class PluginCatalog
         }
 
         // 이번 플랫폼을 지원하는가(BD13 — 문맥 없으면 늘 참).
-        bool Supported(PluginDescriptor plugin) => context is null || plugin.Platforms is null || plugin.Platforms.Contains(context.Platform);
+        bool Supported(PluginDescriptor plugin) => plugin.Platforms is null || plugin.Platforms.Contains(context.Platform);
 
         // 1) 처음 켤 플러그인.
         var enabled = new HashSet<string>(StringComparer.Ordinal);
@@ -784,7 +794,7 @@ public static class PluginCatalog
                 }
 
                 throw new DescriptorException(referrer.FilePath, $"{referrer.Label} enables plugin '{plugin.Name}', which does not support " +
-                    $"{context!.Platform} (platforms in {plugin.FilePath}); add a platforms condition to the reference.");
+                    $"{context.Platform} (platforms in {plugin.FilePath}); add a platforms condition to the reference.");
             }
 
             if (on)
@@ -814,14 +824,16 @@ public static class PluginCatalog
             {
                 throw new DescriptorException(referrer.FilePath, offByCondition.TryGetValue(name, out PluginReference? conditioned)
                     ? $"plugin '{requiredBy.Name}' requires '{name}', but the {referrer.Label} enables '{name}' only for " +
-                        $"{conditioned.ConditionText} (this build: {context}); give the reference that enables '{requiredBy.Name}' the same conditions."
+                        $"{conditioned.ConditionText} (this build: {context}); " + (explicitChoice.ContainsKey(requiredBy.Name)
+                            ? $"give the reference that enables '{requiredBy.Name}' the same conditions."
+                            : $"'{requiredBy.Name}' is enabled by default or as a dependency, so add a reference for it with the same conditions.")
                     : $"plugin '{requiredBy.Name}' requires '{name}', but the {referrer.Label} disables it.");
             }
 
             if (requiredBy is not null && !Supported(plugin))
             {
                 throw new DescriptorException(plugin.FilePath,
-                    $"plugin '{requiredBy.Name}' requires '{name}', which does not support {context!.Platform}.");
+                    $"plugin '{requiredBy.Name}' requires '{name}', which does not support {context.Platform}.");
             }
 
             if (state.TryGetValue(name, out bool done))
