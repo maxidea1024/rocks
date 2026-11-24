@@ -34,7 +34,8 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 
 | 단계 | 범위 | 시험 |
 |---|---|---|
-| SH2a | ShaderCore: 공용 타입 이동·셰이더 타입 기술과 등록부·퍼뮤테이션·형식 사실·라이브러리 v1·`ShaderBindingLayout`·GLES 복사 표 형식·손으로 쓴 레이아웃 표·셰이더 전용 정렬 타입. `ShaderCompiler`의 job 열거와 `CookShaderLibraries`(파일 쓰기까지). 엔진 컴파일 프로필·키 7행 제거 | 12.2.1절 완료 기준 |
+| SH2a1 | ShaderCore 모듈: 공용 형식 타입 이동(12.2.1절 SSD1), 가상 경로 문법 이동(SC2 — 셰이더 타입 경로 검사와 ShaderCompiler가 같은 규칙을 쓴다), 셰이더 타입 기술·`nameHash`·소속 표지(SSD2), 등록부·`Freeze`(SSD3), 모듈 수명 객체 등록 도우미(호스트 서비스 `ShaderTypeRegistry`), 퍼뮤테이션 차원·ID(SSD4) | 12.2.1절 완료 기준의 등록·퍼뮤테이션 부분 |
+| SH2a2 | ShaderCore 나머지: 형식 사실·라이브러리 v1·`ShaderBindingLayout`·GLES 복사 표 형식·손으로 쓴 레이아웃 표·셰이더 전용 정렬 타입. `ShaderCompiler`의 job 열거와 `CookShaderLibraries`(파일 쓰기까지), 엔진 컴파일 프로필·키 7행 제거 | 12.2.1절 완료 기준의 나머지 |
 | SH2b | 워커 정규화 1: `ShaderBindingLayout`(D3D·SPIR-V 리플렉션), Vulkan 재배치·location 재작성, D3D11 SPIRV-Cross 재배정, Metal 인덱스, 오프셋·상한·시맨틱·짝·공유 샘플러·PS 진단 버퍼 규칙, 처리기 버전 2 | 7.3절 (a)·(b)·(e 컴파일)·(f)·(g)·(h 음성)·(j 컴파일)·(k) |
 | SH2c | 워커 정규화 2(GLES): 상수 버퍼 에뮬레이션 텍스트 재작성·복사 표·binding 재매김·combined sampler 이름·모바일 상한 | 7.3절 (i 컴파일)·GLES 부분의 (a)·(b)·(h) |
 | SH2e | 공급자와 메모리 라이브러리(SSD16), Graphics API 전환(4 backend `CreateShader`·파이프라인 layout), RB3 셰이더 집합, RB4 SH2분, 런타임 컴파일러 제거 | RenderBase SX10, 7.3절 (c)·(d)·(j 장치) |
@@ -56,7 +57,7 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 
 - **SSD18 Graphics API 모양.** 장치 셰이더를 파이프라인과 따로 만든다(UE `RHICreateVertexShader`·`RHICreatePixelShader` 뒤 PSO 초기화자가 handle을 받는 구조, `Runtime/RHI/Public/RHIResources.h:4440`). 셰이더 집합의 첫 사용 생성(RenderBase 9.2절)이 이 단위를 요구하기 때문이다. 버린 대안: `PipelineDesc`가 코드 byte를 직접 받기(같은 셰이더를 쓰는 파이프라인마다 장치 셰이더를 다시 만든다).
 - **SSD19 샘플 셰이더 위치.** Sandbox 원문은 `Programs/Sandbox/Shaders`를 `/Plugin/Sandbox`로 mount한다(SC2 `/Plugin/<이름>` 규칙 — 새 루트를 만들지 않는다). 소속은 `EnginePlugin`(루트 `/Plugin/Sandbox`)이지만 Sandbox 모듈만 등록하므로 쿠커의 모듈 집합에 들지 않고 쿠킹되지 않는다(Sandbox는 프로젝트가 없는 엔진 전용 실행이고 공급자로 받는다). 버린 대안: `Engine/Shaders`에 두기(엔진 계층에 샘플을 두지 않는다).
-- **SSD20 하위 단계 순서.** SH2a → SH2b → SH2c → SH2e → SH2f → SH2d → SH2g(선택). SH2b·SH2c는 런타임 변경 없이 쿠킹 산출물만 바꾸므로 먼저 하고, Graphics API 전환(SH2e)은 공급자·메모리 라이브러리가 준비된 뒤 한 번에 한다(네 backend self-test를 같은 변경에서 통과 — 결정 9). 쿠킹·매니페스트 연결(SH2d)은 에셋 세션의 AssetSystem 변경(TargetProfile·매니페스트 v2·훅)이 선행이라 마지막이다. 그 전에도 SH2e·SH2f는 공급자 경로와 완료 기준 2의 직접 호출로 쿠킹 라이브러리 형식을 확인한다.
+- **SSD20 하위 단계 순서.** SH2a1 → SH2a2 → SH2b → SH2c → SH2e → SH2f → SH2d → SH2g(선택). SH2b·SH2c는 런타임 변경 없이 쿠킹 산출물만 바꾸므로 먼저 하고, Graphics API 전환(SH2e)은 공급자·메모리 라이브러리가 준비된 뒤 한 번에 한다(네 backend self-test를 같은 변경에서 통과 — 결정 9). 쿠킹·매니페스트 연결(SH2d)은 에셋 세션의 AssetSystem 변경(TargetProfile·매니페스트 v2·훅)이 선행이라 마지막이다. 그 전에도 SH2e·SH2f는 공급자 경로와 완료 기준 2의 직접 호출로 쿠킹 라이브러리 형식을 확인한다.
 - **SSD21 SL0와 SH2(SLR3).** 엔진 셰이더 SL0(순수 함수 공통 라이브러리 1차, 엔진 셰이더 7장)는 SH2의 **선택 하위 단계 SH2g**로 두고 완료 기준도 SH2g 자체 기준으로 둔다. SH2e(쿠킹 셰이더로 VS·PS 그리기)와 A0-G 렌더 타깃·readback 뒤에 할 수 있다. 하지 않으면 엔진 셰이더 SL2에서 같은 범위를 한다(엔진 셰이더 6장). SL0의 원문 작성 범위(A01–A04 1차 수십 개 파일)가 SH2 규모와 맞먹어 SH2 완료를 막지 않게 했다. 시험 셰이더는 `/Plugin/EngineShaderTests`(SSD17)로 컴파일한다.
 - **SSD22 PS 진단 버퍼(SLR12).** 7.2절 12항대로 어휘·예약 위치·워커 예외를 SH2b에 넣는다. 런타임 버퍼 처리는 엔진 셰이더 SL2다.
 - **SSD23 공급자 시기(SX14).** RenderBase SX14는 공급자 interface를 SH1 산출물로 적었으나 SH1은 컴파일 쪽(관리자·`CompileNow`)만 만들었다. interface와 Development 등록은 SH2e에서 셰이더 집합과 함께 만든다.
@@ -67,6 +68,18 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 - **엔진 라이브러리 생산 시점.** 12.3절 원안(설치물 단계 `shader-compile --engine`)을 UE대로 프로젝트 쿠킹 산출물로 바꿨다(SSD11). RenderBase 9.2절 서술과 계획(EIP 9.6) 문구를 맞춰야 한다.
 - **렌더 세션.** Graphics API 전환(SSD18, 네 backend)과 RB3·RB4 SH2분·GX3 일부(R8 (가))는 backend와 RenderBase 모듈을 고친다. `DeviceCaps`의 장치 요구 비트(SSD15)는 GX1 쪽 일이다. 구현 주체와 순서를 렌더 세션과 정해야 한다.
 - **Commandlet 링크·모듈 적재.** 쿠커가 셰이더 타입을 정의하는 Runtime 모듈(렌더러)을 링크하고, 프로젝트·플러그인 타입은 BuildTargets BS4·모듈 로더 ML5b 뒤에 쿠킹한다(12.2.1절 SSD3). Commandlet 링크 규칙은 빌드 세션에 요청한다.
+
+**SH2a1 구현 메모(개정 34, 2026-11-24).** 12.2.1절 SSD1–SSD4의 등록·퍼뮤테이션 부분을 구현했다.
+
+- 모듈: `Engine/Source/Runtime/ShaderCore`(공개 의존 Core, 비공개 의존 ModuleLoader). `ShaderCompilerCommon`·`ShaderCompiler`가 공개 의존으로 쓴다.
+- 공용 형식 어휘(`ShaderCore/ShaderFormatTypes.h`): `ShaderBackend`·`ShaderStageBits`·`ShaderFeatureBits`(`AllShaderFeatures`·런타임 확인 묶음 포함)·`ShaderDeviceRequirementBits`·`ShaderVersion`·`ShaderFormatLimits`·`NoShaderLimit`·`ShaderBackendName`을 `ShaderFormatDefinition.h`에서 옮겼다(사본 없음, 같은 namespace). JSON 어휘 철자 표(읽기용)는 `ShaderCompilerCommon`에 남는다.
+- 가상 경로 문법(`ShaderCore/ShaderVirtualPath.h`): SC2 규칙과 상수(`MaxShaderVirtualPathBytes`·가상 루트 이름)를 옮겨 `CheckShaderVirtualPath`(루트·플러그인 이름·확장자·Shared 판정을 함께 돌려준다)·`CheckShaderVirtualDirectory`로 두었다. `ShaderCompiler`의 `ValidateShaderVirtualPath`·`ValidateShaderVirtualDirectory`는 같은 문구로 감싼다(규칙 하나).
+- 셰이더 타입 기술(`ShaderCore/ShaderType.h`): 정의는 매크로 대신 `constexpr` 함수 `MakeShaderTypeDesc(이름 상수, 경로, 엔트리, 단계, 소속)`로 만든다(매크로가 할 일이 없다). 공개 헤더용 `ROCKS_SHADER_TYPE_NAME(변수, "이름")`이 이름·해시 상수(`ShaderTypeName`)를 만든다. 해시는 CP7대로 `HashStringBytesIgnoringAsciiCase`라 대소문자만 다른 이름은 충돌로 거부된다. 손으로 쓴 레이아웃 표 칸은 그 형식을 정하는 SH2a2에서 더한다. 거르기 함수 서명은 형식 사실(SH2a2)을 전방 선언으로 받는다.
+- 등록부(`ShaderCore/ShaderTypeRegistry.h`): 호스트 서비스(`ROCKS_DECLARE_HOST_SERVICE`)다. 검사 위반·중복·해시 충돌은 `InvalidArgument`이고 목록 하나가 실패하면 그 목록 전체를 등록하지 않는다(`LastFailure`에 타입 이름과 영어 이유). `Freeze` 뒤 등록은 `ScopeClosed`(등록 창이 닫힘)다. `Find`는 `Freeze` 전 선형·뒤 이진 탐색이다. `Unregister`는 모듈 종료 단계에서 `Freeze` 뒤에도 된다. 타입 집합 SHA(`TypeSetDigest`)는 정렬된 해시를 little-endian 8 byte로 이은 SHA-256이다.
+- 모듈 등록 도우미 `ShaderTypeModuleRegistration`: 수명 객체 `Startup`에서 호스트 서비스의 등록부에 등록하고 등록한 동안 모듈 lease를 잡는다(RenderBase GPU trace 등록과 같은 방식). 등록부가 없는 호스트에서는 아무 일도 하지 않는다. 시험할 수 있게 `Attach(HostServices&, ModuleLease)`를 공개했다(`ModuleStartContext`는 로더만 만든다). 호스트 쪽(엔진 부트가 등록부를 올리고 렌더 lane 전에 `Freeze`)은 셰이더 집합과 함께 SH2e에서 연결한다.
+- 퍼뮤테이션(`ShaderCore/ShaderPermutation.h`): 차원 수 상한 16, 도메인 크기 상한 65,536. 차원 정의 이름은 식별자이고 `ROCKS_`·`__` 접두를 거부한다(SC10과 같다).
+- 시험(EngineTests `ShaderCore_*` 7건, `--filter Shader` 93건 통과): 가상 경로 문법 양성·음성과 길이 초과, 형식 어휘 이름, 퍼뮤테이션 UE 순서 golden(희소 정수의 첫 값이 가장 큰 value id)·전체 ID 왕복·끝에 더한 차원의 ID 보존·빈 도메인, 도메인 검사 음성 대조와 상한 경계(256 × 256)·차원 수 상한·개발 전용 판정, 등록 음성 대조 14종·중복·대소문자 충돌·null·목록 원자성, `Freeze`의 정렬·등록 순서 무관 SHA·`ScopeClosed`·해제, 모듈 도우미(등록부 없음·있음·두 번 붙기·다른 모듈의 중복 실패·소멸자 해제).
+- 남은 정합 문제(SH2a2에서 정한다): RenderBase CP7은 "저장·쿠킹 형식은 이름 문자열과 SHA-256을 쓰고 해시는 실행 중 조회용"이라 적었으나 SSD7 라이브러리 항목은 `nameHash`를 담는다. 라이브러리에 이름(이름 표)을 키로 두고 해시는 열 때 계산할지, 해시 함수를 형식의 일부로 고정할지 SH2a2 설계에서 정한다.
 
 SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
 - [x] 스파이크 `Programs/ShaderToolSpike`(Program 타깃, `ShaderToolSpike --out <디렉터리> [--sm 6_0]`). 도구는 P4 `ShaderToolSet`으로 사용자 저장소에서 연다. 산출물은 `<out>` 아래에 두고 저장소에는 이 요약만 남긴다. `manifest.json`(산출물 이름·크기·SHA-256, 결정성 비교용)과 `report.json`(검사·측정값)을 쓴다.

@@ -5,7 +5,8 @@ using Rocks.Build.Rules;
 /// Shader compiler code shared by the main process and the shader compile worker (Docs/Design/ShaderSystem sections 3 and 11.1 SC1): P6a format
 /// definition (<c>Engine/Config/ShaderFormats/&lt;id&gt;.json</c>) and engine compile profile reading, validation and SHA-256. Worker message formats,
 /// exit codes and the format compile interface (ShaderFormatBackend) are added in SH1c. It checks the tool names of format definitions against the
-/// tool table (ShaderToolTable) but never opens tool binaries (policy check shader-tool-binary-load).
+/// tool table (ShaderToolTable) but never opens tool binaries (policy check shader-tool-binary-load). The shared format vocabulary
+/// types (stages, features, device requirements, limits, backends) live in the runtime module ShaderCore (section 12.2.1 SSD1).
 /// </summary>
 public sealed class ShaderCompilerCommon : EngineModuleRules
 {
@@ -16,7 +17,7 @@ public sealed class ShaderCompilerCommon : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["ShaderToolTable", "PlatformBase", "Core"];
+    protected override string[] PublicDependencies => ["ShaderCore", "ShaderToolTable", "PlatformBase", "Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
     protected override string[] PrivateDependencies => ["DeterministicMath", "Serialization"];
