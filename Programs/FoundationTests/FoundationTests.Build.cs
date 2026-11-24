@@ -37,7 +37,7 @@ public abstract class TestsModule : ModuleRules
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
     // comparison test and the font library tests (Docs/Design/Font section 8.5, FT1). Headers enter only through this executable's Private includes
     // (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Icu"];
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Icu", "HarfBuzz", "Msdfgen"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone

@@ -4,6 +4,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
+#include <Graphics/ShaderCode.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/VertexFormat.h>
 
@@ -13,13 +14,6 @@
 // 개발 프로그램만 DeviceDesc::shaderCompiler로 넘긴다. Release 실행 파일에는 컴파일러가 들어가지
 // 않는다(ShaderSystem P4).
 namespace rocks::graphics {
-
-// 셰이더 단계다. 진입점 이름은 HLSL에서 VSMain·PSMain·CSMain이다.
-enum class ShaderStage : uint8 {
-    Vertex,
-    Pixel,
-    Compute
-};
 
 // 셰이더가 쓰는 descriptor 종류다. 값 순서가 binding 번호를 매기는 종류 순서다(ShaderSystem 7.2절
 // 3·4항: 상수 버퍼 → 구조화·raw 버퍼 → storage image → SRV 텍스처 → 샘플러).

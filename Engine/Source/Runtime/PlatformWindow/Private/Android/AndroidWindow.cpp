@@ -4,6 +4,7 @@
 #include <Platform/Atomics.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
+#include <Input/TouchIndexAllocator.h>
 #include <PlatformWindow/Window.h>
 
 #include <android/input.h>
@@ -17,8 +18,9 @@
 // 층의 listener로 창·포커스·입력 큐 콜백(UI 스레드)을 받는다. 입력은 이 창이 띄운 입력 스레드의
 // looper에서 읽어 고정 크기 큐에 넣고, 게임 스레드의 PumpEvents가 호스트 InputQueue로 옮긴다.
 //
-// 터치는 TouchInput TI1(터치 이벤트)이 오기 전까지 첫 손가락을 마우스 왼쪽 버튼으로 넘긴다(UE
-// bTouchFallbackToMouse와 같은 방향의 임시 경로 — 문서 5절).
+// 터치는 손가락마다 TouchBegan·TouchMoved·TouchEnded로 넘기고, 손가락 번호는 TouchIndexAllocator가
+// OS pointerId에 배정한다(Docs/Design/TouchInput.ko.md 3·4.2절). 마우스(AINPUT_SOURCE_MOUSE)는
+// 마우스 이벤트다.
 namespace rocks::platform {
 
 namespace {
@@ -89,6 +91,9 @@ input::Key KeyFromKeyCode(int32_t code) noexcept {
         return input::Key::LeftAlt;
     case AKEYCODE_ALT_RIGHT:
         return input::Key::RightAlt;
+    case AKEYCODE_BACK:
+        // 뒤로 가기는 소비하고 키 이벤트로만 넘긴다(앱을 끝내지 않는다 — UE와 같다).
+        return input::Key::Back;
     default:
         return input::Key::None;
     }
@@ -151,6 +156,10 @@ public:
             (void)queue.Push(input::InputEvent::FocusLost());
             overflowed_ = false;
         }
+
+        // 프레임 경계: 끝난 손가락 번호를 돌려받는다(이번에 옮긴 끝 이벤트의 번호는 다음 시작부터
+        // 다시 쓴다 — TouchIndexAllocator).
+        touches_.EndFrame();
     }
 
     bool IsCloseRequested() const noexcept override {
@@ -293,6 +302,9 @@ public:
         LockGuard guard(mutex_);
         focused_ = focused;
         if (!focused) {
+            // 닿아 있던 손가락은 FocusLost가 InputState에서 취소로 끝낸다. 배정기도 같이 비운다.
+            uint8 ended[input::MaxTouches];
+            (void)touches_.ReleaseAll(ended);
             PushLocked(input::InputEvent::FocusLost());
         }
     }
@@ -414,16 +426,11 @@ private:
     }
 
     // 입력 이벤트 하나를 큐에 넣고, 처리했으면 EventHandled다. 볼륨 키 등 모르는 키는 시스템에
-    // 넘긴다. Back은 소비한다(UE와 같다 — 앱을 끝내지 않는다). Key::Back은 TouchInput TI1에서
-    // 더한다.
+    // 넘긴다. Back은 Key::Back으로 넘기고 소비한다(UE와 같다 — 앱을 끝내지 않는다).
     int Convert(const AInputEvent* event) noexcept {
         const int32_t type = AInputEvent_getType(event);
         if (type == AINPUT_EVENT_TYPE_KEY) {
             const int32_t code = AKeyEvent_getKeyCode(event);
-            if (code == AKEYCODE_BACK) {
-                return EventHandled;
-            }
-
             const input::Key key = KeyFromKeyCode(code);
             if (key == input::Key::None) {
                 return EventNotHandled;
@@ -444,17 +451,84 @@ private:
             return EventNotHandled;
         }
 
-        // 임시 경로: 첫 손가락(포인터 index 0)을 마우스 왼쪽 버튼으로 넘긴다(TI1 전까지).
-        const int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+        const int32_t action = AMotionEvent_getAction(event);
+        const int32_t kind = action & AMOTION_EVENT_ACTION_MASK;
+        const auto pointer =
+            static_cast<size_t>((action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >>
+                                AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+        LockGuard guard(mutex_);
+        if ((AInputEvent_getSource(event) & AINPUT_SOURCE_MOUSE) == AINPUT_SOURCE_MOUSE) {
+            ConvertMouse(event, kind);
+            return EventHandled;
+        }
+
+        switch (kind) {
+        case AMOTION_EVENT_ACTION_DOWN:
+        case AMOTION_EVENT_ACTION_POINTER_DOWN: {
+            const uint8 index = touches_.Acquire(AMotionEvent_getPointerId(event, pointer));
+            if (index != input::NoTouchIndex) {
+                PushLocked(input::InputEvent::TouchBegan(index, AMotionEvent_getX(event, pointer),
+                                                         AMotionEvent_getY(event, pointer),
+                                                         Pressure(event, pointer), true));
+            }
+
+            break;
+        }
+        case AMOTION_EVENT_ACTION_MOVE: {
+            // 이 이벤트의 모든 포인터 이동이다(history 샘플은 최신 값만 쓴다 — UE와 같다).
+            const size_t count = AMotionEvent_getPointerCount(event);
+            for (size_t item = 0; item < count; ++item) {
+                const uint8 index = touches_.Find(AMotionEvent_getPointerId(event, item));
+                if (index != input::NoTouchIndex) {
+                    PushLocked(input::InputEvent::TouchMoved(index, AMotionEvent_getX(event, item),
+                                                             AMotionEvent_getY(event, item),
+                                                             Pressure(event, item), true));
+                }
+            }
+
+            break;
+        }
+        case AMOTION_EVENT_ACTION_UP:
+        case AMOTION_EVENT_ACTION_POINTER_UP: {
+            const uint8 index = touches_.Release(AMotionEvent_getPointerId(event, pointer));
+            if (index != input::NoTouchIndex) {
+                PushLocked(input::InputEvent::TouchEnded(index, AMotionEvent_getX(event, pointer),
+                                                         AMotionEvent_getY(event, pointer)));
+            }
+
+            break;
+        }
+        case AMOTION_EVENT_ACTION_CANCEL: {
+            // OS가 제스처를 가로챘다. 닿아 있던 손가락을 모두 취소로 끝낸다.
+            uint8 ended[input::MaxTouches];
+            const uint32 count = touches_.ReleaseAll(ended);
+            const float x = AMotionEvent_getX(event, 0);
+            const float y = AMotionEvent_getY(event, 0);
+            for (uint32 item = 0; item < count; ++item) {
+                PushLocked(input::InputEvent::TouchEnded(ended[item], x, y, true));
+            }
+
+            break;
+        }
+        default:
+            // ACTION_OUTSIDE는 시작이 없던 포인터라 무시한다(TouchInput TD15).
+            break;
+        }
+
+        return EventHandled;
+    }
+
+    // 마우스(데스크톱 마우스를 붙인 기기·에뮬레이터 마우스 모드)는 왼쪽 버튼 마우스 이벤트다.
+    void ConvertMouse(const AInputEvent* event, int32_t kind) noexcept {
         const float x = AMotionEvent_getX(event, 0);
         const float y = AMotionEvent_getY(event, 0);
-        LockGuard guard(mutex_);
-        switch (action) {
+        switch (kind) {
         case AMOTION_EVENT_ACTION_DOWN:
             PushLocked(input::InputEvent::MouseMove(x, y));
             PushLocked(input::InputEvent::MouseDown(input::MouseButton::Left));
             break;
         case AMOTION_EVENT_ACTION_MOVE:
+        case AMOTION_EVENT_ACTION_HOVER_MOVE:
             PushLocked(input::InputEvent::MouseMove(x, y));
             break;
         case AMOTION_EVENT_ACTION_UP:
@@ -465,8 +539,12 @@ private:
         default:
             break;
         }
+    }
 
-        return EventHandled;
+    // 0–1 압력이다(AMotionEvent_getPressure — 장치 단위가 1을 넘을 수 있어 자른다).
+    static float Pressure(const AInputEvent* event, size_t pointer) noexcept {
+        const float pressure = AMotionEvent_getPressure(event, pointer);
+        return pressure < 0.0f ? 0.0f : (pressure > 1.0f ? 1.0f : pressure);
     }
 
     // 창 상태·이벤트 큐·요청을 지킨다(UI 스레드·입력 스레드가 쓰고 게임 스레드가 읽는다).
@@ -481,6 +559,8 @@ private:
     uint32 height_ = 0;
     ANativeWindow* window_ = nullptr;
     AInputQueue* attachRequest_ = nullptr;
+    // 손가락 번호 배정이다(입력 스레드가 배정하고 게임 스레드 PumpEvents가 프레임 경계를 알린다).
+    input::TouchIndexAllocator touches_;
     AInputQueue* detachRequest_ = nullptr;
     // 창 파괴 gate다. 게임 스레드가 AcknowledgeSurfaceLost로, 소멸자가 closing으로 연다.
     ManualResetEvent surfaceReleased_{true};

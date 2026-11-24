@@ -11,6 +11,7 @@
 #include <Platform/File.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCore/ShaderLibrary.h>
+#include <ShaderCore/ShaderLibraryContents.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 
 // 셰이더 라이브러리 쿠킹이다(Docs/Design/ShaderSystem 12.2.1절 SSD5·SSD6·SSD28, UE
@@ -45,15 +46,6 @@
 //       for (const ShaderLibraryCookJobFailure& failure : report.failures) { ... }
 //   }
 namespace rocks::shader {
-
-// 정점 입력 타입 하나다(RenderBase 10절 등록부가 생기기 전에는 호출자가 준다).
-struct ShaderVertexInputType {
-    // 이름 해시(ShaderTypeNameHash(name))다. NoVertexInputType은 쓸 수 없다.
-    VertexInputTypeId id = NoVertexInputType;
-    StringView name;
-    // 거르기(null이면 늘 참)다.
-    ShaderVertexInputShouldCompileFunction shouldCompile = nullptr;
-};
 
 struct ShaderLibraryCookDesc {
     Allocator* allocator = nullptr;

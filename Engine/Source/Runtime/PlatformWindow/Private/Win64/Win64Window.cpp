@@ -1,7 +1,10 @@
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>
 #include <Platform/Win64/WideString.h>
+#include <Input/TouchIndexAllocator.h>
 #include <PlatformWindow/Window.h>
+
+#include "../Common/PointerTouchMapping.h"
 
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
@@ -318,6 +321,8 @@ public:
             DispatchMessageW(&message);
         }
         queue_ = nullptr;
+        // 프레임 경계: 이번 펌프에서 끝난 손가락 번호를 돌려받는다(TouchIndexAllocator).
+        touches_.EndFrame();
     }
 
     bool IsCloseRequested() const noexcept override {
@@ -407,17 +412,34 @@ private:
 
     void MouseButton(input::MouseButton button, bool down) noexcept {
         // 버튼을 누른 채 창 밖으로 나가도 놓기 이벤트를 받도록 캡처한다.
+        const uint32 bit = 1u << static_cast<uint32>(button);
         if (down) {
             if (capturedButtons_++ == 0) {
                 SetCapture(window_);
             }
+            heldButtons_ |= bit;
             Push(input::InputEvent::MouseDown(button));
         } else {
+            heldButtons_ &= ~bit;
             if (capturedButtons_ > 0 && --capturedButtons_ == 0) {
                 ReleaseCapture();
             }
             Push(input::InputEvent::MouseUp(button));
         }
+    }
+
+    // 버튼을 누른 채 다른 창·시스템이 capture를 가져갔다(WM_CAPTURECHANGED). 이 창에는 뗌이 오지
+    // 않으므로 눌린 버튼마다 MouseUp을 만들어 눌린 채 남지 않게 한다. 마지막 버튼을 떼며 부른
+    // ReleaseCapture가 보내는 WM_CAPTURECHANGED는 눌린 버튼이 없어 아무것도 하지 않는다.
+    void LoseCapture() noexcept {
+        for (uint32 index = 0; index < input::MouseButtonCount; ++index) {
+            if ((heldButtons_ & (1u << index)) != 0) {
+                Push(input::InputEvent::MouseUp(static_cast<input::MouseButton>(index)));
+            }
+        }
+
+        heldButtons_ = 0;
+        capturedButtons_ = 0;
     }
 
     LRESULT Handle(UINT message, WPARAM wParam, LPARAM lParam) noexcept {
@@ -434,11 +456,28 @@ private:
         case WM_SETFOCUS:
             focused_ = true;
             return 0;
-        case WM_KILLFOCUS:
+        case WM_KILLFOCUS: {
             focused_ = false;
             capturedButtons_ = 0;
+            heldButtons_ = 0;
+            // 닿아 있던 손가락은 FocusLost가 InputState에서 취소로 끝낸다. 배정기도 같이 비운다.
+            uint8 ended[input::MaxTouches];
+            (void)touches_.ReleaseAll(ended);
             Push(input::InputEvent::FocusLost());
             return 0;
+        }
+        case WM_POINTERDOWN:
+        case WM_POINTERUPDATE:
+        case WM_POINTERUP:
+        case WM_POINTERCAPTURECHANGED:
+            // 터치·펜은 처리하고 DefWindowProc에 넘기지 않는다. 그러면 OS가 마우스 메시지를 따로
+            // 만들지 않는다(UE 기본 — Docs/Design/TouchInput.ko.md 4.1절). 마우스 포인터는 아래로
+            // 넘겨 WM_MOUSE*가 그대로 온다.
+            if (HandlePointer(message, wParam)) {
+                return 0;
+            }
+
+            break;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN: {
             const Key key = KeyFromMessage(lParam);
@@ -483,6 +522,12 @@ private:
                                                    : input::MouseButton::X2,
                         message == WM_XBUTTONDOWN);
             return TRUE;
+        case WM_CAPTURECHANGED:
+            if (reinterpret_cast<HWND>(lParam) != window_) {
+                LoseCapture();
+            }
+
+            return 0;
         case WM_MOUSEWHEEL:
             Push(input::InputEvent::MouseWheel(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
                                                static_cast<float>(WHEEL_DELTA)));
@@ -491,6 +536,83 @@ private:
             break;
         }
         return DefWindowProcW(window_, message, wParam, lParam);
+    }
+
+    // WM_POINTER 터치·펜 메시지를 터치 이벤트로 바꾼다. 터치·펜이 아니면 false다(마우스는
+    // WM_MOUSE*).
+    bool HandlePointer(UINT message, WPARAM wParam) noexcept {
+        const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
+        POINTER_INPUT_TYPE type = PT_POINTER;
+        if (!GetPointerType(pointerId, &type) ||
+            !pointer::IsTouchPointerType(static_cast<uint32>(type))) {
+            return false;
+        }
+
+        POINTER_INFO info = {};
+        float force = 1.0f;
+        bool hasForce = false;
+        if (type == PT_TOUCH) {
+            POINTER_TOUCH_INFO touch = {};
+            if (!GetPointerTouchInfo(pointerId, &touch)) {
+                return false;
+            }
+
+            info = touch.pointerInfo;
+            if ((touch.touchMask & TOUCH_MASK_PRESSURE) != 0) {
+                force = pointer::NormalizePointerPressure(touch.pressure);
+                hasForce = true;
+            }
+        } else {
+            POINTER_PEN_INFO pen = {};
+            if (!GetPointerPenInfo(pointerId, &pen)) {
+                return false;
+            }
+
+            info = pen.pointerInfo;
+            if ((pen.penMask & PEN_MASK_PRESSURE) != 0) {
+                force = pointer::NormalizePointerPressure(pen.pressure);
+                hasForce = true;
+            }
+        }
+
+        POINT location = info.ptPixelLocation;
+        (void)ScreenToClient(window_, &location);
+        const auto x = static_cast<float>(location.x);
+        const auto y = static_cast<float>(location.y);
+        switch (pointer::TouchActionOf(message, static_cast<uint32>(info.pointerFlags))) {
+        case pointer::PointerTouchAction::Began: {
+            const uint8 index = touches_.Acquire(pointerId);
+            if (index != input::NoTouchIndex) {
+                Push(input::InputEvent::TouchBegan(index, x, y, force, hasForce));
+            }
+
+            break;
+        }
+        case pointer::PointerTouchAction::Moved: {
+            const uint8 index = touches_.Find(pointerId);
+            if (index != input::NoTouchIndex) {
+                Push(input::InputEvent::TouchMoved(index, x, y, force, hasForce));
+            }
+
+            break;
+        }
+        case pointer::PointerTouchAction::Ended:
+        case pointer::PointerTouchAction::Cancelled: {
+            const bool cancelled =
+                pointer::TouchActionOf(message, static_cast<uint32>(info.pointerFlags)) ==
+                pointer::PointerTouchAction::Cancelled;
+            const uint8 index = touches_.Release(pointerId);
+            if (index != input::NoTouchIndex) {
+                Push(input::InputEvent::TouchEnded(index, x, y, cancelled));
+            }
+
+            break;
+        }
+        case pointer::PointerTouchAction::None:
+            break;
+        }
+
+        return true;
     }
 
     static LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM wParam,
@@ -511,10 +633,14 @@ private:
     HWND window_ = nullptr;
     HINSTANCE instance_ = nullptr;
     input::InputQueue* queue_ = nullptr;
+    // 터치·펜 포인터의 손가락 번호 배정이다(창 스레드만 만진다).
+    input::TouchIndexAllocator touches_;
     uint32 width_ = 0;
     uint32 height_ = 0;
     uint32 highSurrogate_ = 0;
     uint32 capturedButtons_ = 0;
+    // 지금 눌린 마우스 버튼(MouseButton 비트)이다. capture를 잃으면 이 버튼들의 뗌을 만든다.
+    uint32 heldButtons_ = 0;
     bool closeRequested_ = false;
     bool resized_ = false;
     bool focused_ = false;

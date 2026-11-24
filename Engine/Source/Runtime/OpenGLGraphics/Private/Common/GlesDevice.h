@@ -305,6 +305,16 @@ public:
     void Retire(BufferViewHandle handle) noexcept override;
     void Retire(TextureHandle handle) noexcept override;
     void Retire(PipelineHandle handle) noexcept override;
+    // 쿠킹 코드 수신은 SH2e2에서 구현한다(ShaderSystem 16.1절 SSD43).
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override {
+        (void)desc;
+        return Result<ShaderHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    void Retire(ShaderHandle shader) noexcept override {
+        (void)shader;
+    }
+
     void Retire(SwapChainHandle handle) noexcept override;
     void ReclaimCompleted() noexcept override;
     Result<void> WaitIdle() noexcept override;
