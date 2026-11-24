@@ -79,6 +79,8 @@ Result<void> Controller::Possess(ObjectHandle pawn) noexcept {
     // 권한 확인(UE Possess — 서버·standalone만).
     auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
     if (gameplay != nullptr && !gameplay->HasAuthority()) {
+        Log::Warning(LogGameplay, "Possess denied in world {World}: no authority ({Code})",
+                     world.Name(), DiagPossessDeniedNoAuthority);
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

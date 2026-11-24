@@ -9,6 +9,8 @@
 #include <Gameplay/PlayerController.generated.h>
 #include <Gameplay/PlayerController.h>
 #include <World/Actor.generated.h>
+#include <World/SceneComponent.generated.h>
+#include <World/SceneComponent.h>
 
 namespace sandbox {
 
@@ -32,6 +34,16 @@ public:
     explicit SandboxPawn(Allocator& allocator) noexcept : Pawn(allocator) {
         autoPossessAi = AutoPossessAi::Disabled;
         PrimaryTick().tick = true;
+    }
+
+    // PlayerStart Transform이 붙을 root다(Spawn Transform은 root에 쓴다 — 17.3절).
+    Result<void> OnAwake() noexcept override {
+        auto root = GetWorld().AddComponent<SceneComponent>(Handle());
+        if (!root) {
+            return Result<void>::Failure(root.Error());
+        }
+
+        return SetRootComponent(root.Value());
     }
 
     void OnTick(const TickContext&) noexcept override {

@@ -94,6 +94,22 @@ struct TickPhaseFrame {
     bool paused = false;
 };
 
+// 진단용 Tick 항목 정보다(World::DumpTickGraph — Docs/Design/EngineRuntime 22.1절).
+struct TickEntryInfo {
+    TickTarget target;
+    // 요청 단계와 실효 단계다(다르면 선행 의존으로 늦춰졌다).
+    TickPhase requested = TickPhase::PrePhysics;
+    TickPhase effective = TickPhase::PrePhysics;
+    int32 priority = 0;
+    double intervalSeconds = 0.0;
+    bool enabled = true;
+    bool tickWhenPaused = false;
+    // 단계 순서 배열에 아직 들지 않았다(다음 단계 경계에 재구성해 넣는다).
+    bool pending = false;
+    // 같은 단계·다른 단계의 선행 handle이다(TargetOf로 대상을 찾는다). 순회 호출 동안만 유효하다.
+    Span<const TickHandle> prerequisites;
+};
+
 struct TickStats {
     uint32 registered = 0;
     uint32 enabled = 0;
@@ -104,6 +120,8 @@ struct TickStats {
     // 실효 단계 재계산이 할당 실패로 미뤄진 누적 횟수다. 그 프레임은 이전 실효 단계로 실행하고 다음
     // 프레임에 다시 계산한다.
     uint32 phaseRecomputeFailures = 0;
+    // 실효 단계가 요청 단계보다 늦춰진 항목 수다(마지막 재계산 기준).
+    uint32 demoted = 0;
 };
 
 namespace detail {
@@ -197,6 +215,43 @@ public:
 
     TickStats Stats() const noexcept;
 
+    // phase를 실효 단계로 둔 항목을 실행 순서대로 visitor(const TickEntryInfo&)에 넘긴다(진단 —
+    // 순서를 다시 만들지 않는다: 순서 배열에 아직 없는 항목은 끝에 pending으로 넘긴다). 해제된
+    // 항목은 넘기지 않는다. 순회 중 등록을 바꾸지 않는다.
+    template <class Visitor>
+    void ForEachInPhase(TickPhase phase, Visitor&& visitor) const noexcept {
+        const uint32 index = static_cast<uint32>(phase);
+        if (index >= TickPhaseCount) {
+            return;
+        }
+
+        const Array<TickHandle>& order = order_[index];
+        for (usize position = 0; position < order.Size(); ++position) {
+            const Entry* entry = entries_.Find(order[position].slot);
+            if (entry == nullptr || entry->removed || entry->effective != phase ||
+                entry->orderPosition != position) {
+                continue;
+            }
+
+            visitor(Describe(*entry, false));
+        }
+
+        for (const Entry& entry : entries_) {
+            if (!entry.removed && entry.effective == phase && entry.orderPosition == NoOrder) {
+                visitor(Describe(entry, true));
+            }
+        }
+    }
+
+    // phase의 순서 배열이 다음 실행 때 다시 만들어지는지다(진단 표시).
+    bool IsOrderStale(TickPhase phase) const noexcept {
+        const uint32 index = static_cast<uint32>(phase);
+        return index < TickPhaseCount && dirty_[index];
+    }
+
+    // 등록의 대상이다(진단 — 선행 handle을 이름으로 바꿀 때). 없으면 NotFound다.
+    Result<TickTarget> TargetOf(TickHandle handle) const noexcept;
+
 private:
     // 시험이 Reaches 방문 번호를 한 바퀴 끝 근처로 옮기고 선행 목록 길이를 본다
     // (Private/TickSchedulerTestAccess.h).
@@ -223,6 +278,21 @@ private:
     };
 
     static constexpr uint32 NoOrder = NumericLimits<uint32>::Max();
+
+    static TickEntryInfo Describe(const Entry& entry, bool pending) noexcept {
+        TickEntryInfo info;
+        info.target = entry.registration.target;
+        info.requested = entry.registration.phase;
+        info.effective = entry.effective;
+        info.priority = entry.registration.priority;
+        info.intervalSeconds = entry.registration.intervalSeconds;
+        info.enabled = entry.registration.enabled;
+        info.tickWhenPaused = entry.registration.tickWhenPaused;
+        info.pending = pending;
+        info.prerequisites =
+            Span<const TickHandle>(entry.prerequisites.Data(), entry.prerequisites.Size());
+        return info;
+    }
 
     Result<void> RebuildOrder(uint32 phase) noexcept;
     // 모든 항목의 실효 단계를 전체 그래프 위상 순서로 다시 계산하고, 바뀐 항목의 단계 배열을

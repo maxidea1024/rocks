@@ -509,6 +509,8 @@ uint32 RunEngineHostSelfTest() noexcept {
     const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
     const char* const expected[] = {
         "[Info][Engine] Engine initialized with ",
+        "[Info][Gameplay] Opened world Main",
+        "[Info][Sandbox.Game] Pawn possessed by the local player",
         "[Info][Engine] Engine run finished after 3 frames: MaxFrames",
         "[Info][Engine] Engine shutting down with 1 worlds after 3 frames",
         "[Info][Engine] Engine shut down"};

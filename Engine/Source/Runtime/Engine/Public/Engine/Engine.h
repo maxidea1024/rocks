@@ -176,6 +176,12 @@ public:
     virtual void OnWorldDestroyed(Engine&, World&) noexcept {
     }
 
+    // 진단 DumpSubsystems가 Engine 계층 다음에 부른다(Docs/Design/EngineRuntime 22.1절 — Engine이
+    // 모르는 계층, 예: GameInstance·LocalPlayer). out 끝에 붙인다. 오류: 할당 실패.
+    virtual Result<void> DescribeSubsystems(Engine&, String&) noexcept {
+        return Result<void>::Success();
+    }
+
 protected:
     ~EngineClient() = default;
 };
@@ -453,6 +459,17 @@ public:
     // 엔진이 World에 넣는 기본 바깥 조회 창이다(EngineSubsystem만).
     OuterSubsystemLookup SubsystemLookup() const noexcept;
 
+    // --- 진단(Docs/Design/EngineRuntime 22.1절) ---
+
+    // Subsystem 계층(Engine → client가 붙이는 계층(GameInstance·LocalPlayer) → World마다)의 초기화
+    // 순서와 생략 이유를 out 끝에 붙인다. 콘솔 명령 engine.dumpsubsystems가 쓴다. 오류: 할당 실패.
+    Result<void> DumpSubsystems(String& out) noexcept;
+
+    // World의 Tick 그래프를 out 끝에 붙인다(World::DumpTickGraph). world가 비면 모든 World, 아니면
+    // 이름이 같은 World만이다. 콘솔 명령 world.dumpticks [이름]이 쓴다. 오류: 이름이 없으면
+    // NotFound, 할당 실패.
+    Result<void> DumpTickGraphs(String& out, StringView world = {}) noexcept;
+
     EngineStats Stats() const noexcept;
 
 private:
@@ -501,6 +518,10 @@ private:
     Result<void> StartPostEngineInitModules() noexcept;
     // 엔진 묶음을 놓고 타입 등록기를 떼어 모듈 기록을 놓는다(TypeRegistry 종료 전).
     void DetachModuleTypes() noexcept;
+    // 진단 콘솔 명령(engine.dumpsubsystems·world.dumpticks)을 설정 문맥에 올리고 이 Engine에 묶는다
+    // (설정 문맥이 없으면 아무것도 하지 않는다). 실패는 Warning 하나다(진단이 없어도 엔진은 돈다).
+    void BindConsoleCommands() noexcept;
+    void UnbindConsoleCommands() noexcept;
 
     Allocator& allocator_;
     EngineConfig config_;
@@ -546,6 +567,8 @@ private:
     bool maxFramesReached_ = false;
     // 설정 Sync가 실패하고 있는지다(연속 실패는 첫 번째만 Error로 남긴다).
     bool settingsSyncFailing_ = false;
+    // 진단 콘솔 명령을 이 Engine에 묶었다(BindConsoleCommands).
+    bool consoleBound_ = false;
 };
 
 // World 안(WorldSubsystem 등)에서 EngineSubsystem을 찾는다(World의 바깥 조회 창 — 16.3절 ERD10).

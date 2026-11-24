@@ -7,6 +7,7 @@
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
+#include <World/WorldTypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -592,6 +593,53 @@ TEST(WorldTick_AttachmentAcrossActorsSurvivesParentActorDestroy) {
     REQUIRE(world.DestroyActor(x.Value()));
     REQUIRE(world.Tick(1.0 / 60.0));
     CHECK(fixture.Frame("cuYuclYl"));
+    REQUIRE(world.Shutdown());
+}
+
+namespace {
+
+bool Has(const String& text, const char* needle) noexcept {
+    const StringView view = text.View();
+    const usize length = strlen(needle);
+    for (usize at = 0; at + length <= view.ByteCount(); ++at) {
+        if (memcmp(view.Data() + at, needle, length) == 0) {
+            return true;
+        }
+    }
+
+    printf("  missing \"%s\" in:\n%.*s\n", needle, static_cast<int>(view.ByteCount()), view.Data());
+    return false;
+}
+
+} // namespace
+
+// 22.1절 DumpTickGraph: 단계마다 실행 순서대로 항목·선행·늦춰진 원래 단계·엔진 단계 자리를 쓴다.
+// 순서는 그대로 두고(다시 만들지 않는다) 통계의 늦춤 수가 같은 사실을 센다.
+TEST(WorldTick_DumpTickGraphListsOrderPrerequisitesAndDemotion) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectHandle a = fixture.Spawn('A', 0, TickPhase::PrePhysics);
+    const ObjectHandle b = fixture.Spawn('B', 0, TickPhase::PostPhysics, true, true);
+    REQUIRE(!a.IsNull() && !b.IsNull());
+    REQUIRE(world.AddTickPrerequisite({a}, {b}));
+    CHECK(fixture.Frame("BfBuAuAlBl"));
+    SystemAllocator allocator;
+    String text(allocator);
+    REQUIRE(world.DumpTickGraph(text));
+    CHECK(Has(text, "World Test tick graph"));
+    CHECK(Has(text, "OnTick priority=0 interval=0 demotedFrom=PrePhysics"));
+    CHECK(Has(text, "      after "));
+    CHECK(Has(text, "OnFixedTick"));
+    CHECK(Has(text, "OnLateTick"));
+    CHECK(Has(text, "[engine stage CameraUpdate empty]"));
+    CHECK(world.Stats().ticks.demoted == 1);
+
+    String subsystems(allocator);
+    REQUIRE(world.DumpSubsystems(subsystems));
+    CHECK(Has(subsystems, "World Test subsystems (0 initialized, 0 skipped)"));
     REQUIRE(world.Shutdown());
 }
 

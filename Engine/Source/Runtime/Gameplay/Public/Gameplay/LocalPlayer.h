@@ -112,6 +112,7 @@ public:
 
 private:
     friend class GameInstance;
+    friend class GameInstanceClient;
 
     ROCKS_NATIVE() ObjectHandle owner_;
     ROCKS_NATIVE() ObjectHandle playerController_;

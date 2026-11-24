@@ -39,6 +39,14 @@ public:
     void OnEngineTick(Engine& engine) noexcept override;
     void OnEngineShutdown(Engine& engine) noexcept override;
     void OnWorldDestroyed(Engine& engine, World& world) noexcept override;
+    // GameInstance·LocalPlayer 계층을 붙인다(Engine::DumpSubsystems가 부른다).
+    Result<void> DescribeSubsystems(Engine& engine, String& out) noexcept override;
+
+    // 게임플레이 프레임워크 상태를 사람이 읽는 줄로 out 끝에 붙인다(22.1절 DumpGameplay):
+    // GameInstance → LocalPlayer → PlayerController(state) → Pawn·PlayerState·CameraDirector(view
+    // target· CameraView), GameDirector·GameState(playerStates·hasBegunPlay). 콘솔 명령
+    // game.dumpframework가 쓴다. 오류: 시작 전·종료 뒤 StaleHandle, 할당 실패.
+    Result<void> DumpFramework(String& out) noexcept;
 
     // GameInstance handle이다(엔진 Registry, 시작 전·종료 뒤에는 null).
     ObjectHandle Instance() const noexcept {
@@ -60,11 +68,16 @@ public:
     }
 
 private:
+    // 진단 콘솔 명령(game.dumpframework)을 묶고 푼다(설정 문맥이 없으면 아무것도 하지 않는다).
+    void BindConsoleCommands(Engine& engine) noexcept;
+    void UnbindConsoleCommands() noexcept;
+
     const GameInstanceConfig& config_;
     // GameInstance Subsystem 묶음·조회 창 context다(Engine보다 오래 살아야 해서 client가 소유).
     detail::GameInstanceServices services_;
     Engine* engine_ = nullptr;
     RootRef<GameInstance> instance_;
+    config::ConfigContext* console_ = nullptr;
 };
 
 } // namespace rocks

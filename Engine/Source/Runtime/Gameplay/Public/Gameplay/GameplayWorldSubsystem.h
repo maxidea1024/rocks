@@ -44,6 +44,9 @@ public:
         return populating_;
     }
 
+    // 이 World의 Controller·PlayerController·Pawn·PlayerState 수다(파괴 대기 제외 — 22.1절 통계).
+    GameplayStats Stats(World& world) const noexcept;
+
     // 등록된 Controller다(PostAwake 순서, 파괴되면 빠진다).
     Span<const ObjectHandle> Controllers() const noexcept {
         return Span<const ObjectHandle>(controllers_.Data(), controllers_.Size());

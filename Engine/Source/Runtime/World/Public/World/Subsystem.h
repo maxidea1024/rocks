@@ -4,6 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Core/Text/StringView.h>
 #include <Core/TypeKey.h>
 
 // 소유자(Engine·World)와 수명을 같이하는 Subsystem 묶음이다. Subsystem은 의존을 선언하고, 묶음은
@@ -25,6 +26,8 @@
 //   // WorldDesc.subsystems = types; → Navigation이 먼저 초기화되고 나중에 정리된다.
 //   auto* navigation = world.GetSubsystem<NavigationSubsystem>();   // 없으면 nullptr
 namespace rocks {
+
+class String;
 
 // Subsystem 타입의 실행 중 식별 키다. 저장하지 않는다. 키는 TypeKeyOf<T>()다(Core/TypeKey.h, UE는
 // UClass* — Docs/Design/BuildTargets 3.8절 BS8e). 다른 모듈이 GetSubsystem<T>()·의존 목록으로
@@ -98,11 +101,19 @@ SubsystemType<Base> MakeSubsystemType(const char* name, Span<const SubsystemKey>
 
 // Base는 다음을 제공해야 한다: 가상 소멸자, `Result<void> Initialize(Owner&) noexcept`,
 // `void Deinitialize(Owner&) noexcept`.
+// 묶음 한 계층(초기화 순서·생략 이유)을 out 끝에 사람이 읽는 줄로 붙인다(진단 DumpSubsystems —
+// Docs/Design/EngineRuntime 22.1절). layer는 계층 이름("Engine"·"World Main" 등)이다. 오류: 할당
+// 실패.
+ROCKS_WORLD_API Result<void> AppendSubsystemLayer(String& out, StringView layer,
+                                                  Span<const char* const> initialized,
+                                                  Span<const SkippedSubsystem> skipped) noexcept;
+
 template <class Base, class Owner>
 class SubsystemCollection {
 public:
     explicit SubsystemCollection(Allocator& allocator) noexcept
-        : allocator_(allocator), instances_(allocator), keys_(allocator), skipped_(allocator) {
+        : allocator_(allocator), instances_(allocator), keys_(allocator), names_(allocator),
+          skipped_(allocator) {
     }
 
     SubsystemCollection(const SubsystemCollection&) = delete;
@@ -141,6 +152,10 @@ public:
             return reserved;
         }
         reserved = keys_.TryReserve(types.Size());
+        if (!reserved) {
+            return reserved;
+        }
+        reserved = names_.TryReserve(types.Size());
         if (!reserved) {
             return reserved;
         }
@@ -199,8 +214,10 @@ public:
             // 위에서 용량을 확보했으므로 실패하지 않는다.
             auto pushed = instances_.TryPushBack(Move(created.Value()));
             auto keyed = keys_.TryPushBack(type.key);
+            auto named = names_.TryPushBack(type.name);
             (void)pushed;
             (void)keyed;
+            (void)named;
         }
 
         initialized_ = true;
@@ -216,8 +233,10 @@ public:
             instances_[instances_.Size() - 1]->Deinitialize(owner);
             auto last = instances_.TryPopBack();
             auto key = keys_.TryPopBack();
+            auto name = names_.TryPopBack();
             (void)last;
             (void)key;
+            (void)name;
         }
     }
 
@@ -247,9 +266,21 @@ public:
         return instances_.Size();
     }
 
+    // 이 묶음을 out에 붙인다(AppendSubsystemLayer).
+    Result<void> Describe(String& out, StringView layer) const noexcept {
+        return AppendSubsystemLayer(
+            out, layer, Span<const char* const>(names_.Data(), names_.Size()), Skipped());
+    }
+
     // 초기화 순서의 index번째 Subsystem 이름 확인 등 진단용 순회다.
     Base* At(usize index) const noexcept {
         return index < instances_.Size() ? instances_[index].Get() : nullptr;
+    }
+
+    // 초기화 순서의 index번째 Subsystem 이름이다(SubsystemType::name, 범위 밖은 빈 문자열 — 진단
+    // DumpSubsystems).
+    const char* NameAt(usize index) const noexcept {
+        return index < names_.Size() ? names_[index] : "";
     }
 
 private:
@@ -336,6 +367,7 @@ private:
     Allocator& allocator_;
     Array<UniquePtr<Base>> instances_;
     Array<SubsystemKey> keys_;
+    Array<const char*> names_;
     Array<SkippedSubsystem> skipped_;
     bool initialized_ = false;
 };

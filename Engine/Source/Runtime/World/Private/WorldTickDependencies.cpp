@@ -2,12 +2,15 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Core/Math/MathUtility.h>
+#include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
 #include <World/SceneComponent.generated.h>
+#include <World/DiagnosticText.h>
 #include <World/World.h>
 #include <World/WorldLog.h>
+#include <Platform/Clock.h>
 
 namespace rocks {
 
@@ -224,8 +227,9 @@ void World::WarnTickCycle(const TickPoint& before, const TickPoint& after,
     if (automatic) {
         Log::Warning(
             LogWorldTick,
-            "Skipped automatic tick prerequisite {Before} -> {After}: would create a cycle",
-            beforeLabel.View(), afterLabel.View());
+            "Skipped automatic tick prerequisite {Before} -> {After}: would create a cycle "
+            "({Code})",
+            beforeLabel.View(), afterLabel.View(), DiagAutoTickPrerequisiteCycleSkipped);
     } else {
         Log::Warning(LogWorldTick,
                      "Rejected tick prerequisite {Before} -> {After}: would create a cycle",
@@ -633,12 +637,145 @@ Result<void> World::RunEngineStage(EngineStage stage, TickPhase phase,
     context.unscaledDeltaSeconds = frame.unscaledDeltaSeconds;
     context.frameIndex = frame.frameIndex;
     context.paused = frame.paused;
+    const uint64 started = platform::MonotonicNanoseconds();
     auto ran = slot.function(*this, context, slot.user);
+    engineStageNanoseconds_[static_cast<uint32>(stage)] =
+        platform::MonotonicNanoseconds() - started;
     if (!ran) {
         ++engineStageFailures_;
     }
 
     return ran;
+}
+
+namespace {
+
+const char* TickHookName(uint8 hook) noexcept {
+    switch (static_cast<TickHook>(hook)) {
+    case TickHook::Update:
+        return "OnTick";
+    case TickHook::Fixed:
+        return "OnFixedTick";
+    case TickHook::Late:
+        return "OnLateTick";
+    }
+
+    return "?";
+}
+
+// 그 단계 끝·시작의 엔진 단계 자리다(15.4절).
+bool StageBelongsTo(EngineStage stage, TickPhase phase) noexcept {
+    switch (stage) {
+    case EngineStage::PhysicsResults:
+    case EngineStage::SkeletalPhysicsFinalize:
+        return phase == TickPhase::Physics;
+    case EngineStage::Timers:
+    case EngineStage::TickableSubsystems:
+    case EngineStage::CameraUpdate:
+        return phase == TickPhase::LateUpdate;
+    case EngineStage::Count:
+        break;
+    }
+
+    return false;
+}
+
+} // namespace
+
+Result<void> World::DumpTickGraph(String& out) noexcept {
+    // 대상 이름은 "타입#slot"이다(Actor·Component에는 이름이 없다 — WarnTickCycle과 같다).
+    auto label = [this](ObjectHandle object, FixedStringBuilder& text) noexcept {
+        auto named = With<Object>(object, [&](Object& value) noexcept {
+            const TypeLease type = value.GetType();
+            (void)text.TryAppendFormat("{}#{}", type.Name(), object.slot);
+        });
+        if (!named) {
+            (void)text.TryAppendFormat("Object#{}", object.slot);
+        }
+    };
+
+    Result<void> written = AppendFormatted(out, "World {} tick graph\n", Name());
+    for (uint32 index = 0; written && index < TickPhaseCount; ++index) {
+        const auto phase = static_cast<TickPhase>(index);
+        written = AppendFormatted(out, "  {}{}:\n", TickPhaseName(phase),
+                                  ticks_.IsOrderStale(phase) ? " (order rebuilt at next run)" : "");
+        ticks_.ForEachInPhase(phase, [&](const TickEntryInfo& info) noexcept {
+            if (!written) {
+                return;
+            }
+
+            char storage[MaxTickLabelBytes];
+            FixedStringBuilder name{Span<char>(storage)};
+            label(info.target.object, name);
+            written = AppendFormatted(out, "    {} {} priority={} interval={}{}{}{}", name.View(),
+                                      TickHookName(info.target.hook), info.priority,
+                                      info.intervalSeconds, info.enabled ? "" : " disabled",
+                                      info.tickWhenPaused ? " whenPaused" : "",
+                                      info.pending ? " pending" : "");
+            if (written && info.requested != info.effective) {
+                written = AppendFormatted(out, " demotedFrom={}", TickPhaseName(info.requested));
+            }
+
+            if (written) {
+                written = out.TryAppend("\n");
+            }
+
+            for (TickHandle prerequisite : info.prerequisites) {
+                auto target = ticks_.TargetOf(prerequisite);
+                if (!written || !target) {
+                    continue;
+                }
+
+                char before[MaxTickLabelBytes];
+                FixedStringBuilder beforeName{Span<char>(before)};
+                label(target.Value().object, beforeName);
+                written = AppendFormatted(out, "      after {} {}\n", beforeName.View(),
+                                          TickHookName(target.Value().hook));
+            }
+        });
+        for (uint32 stage = 0; written && stage < EngineStageCount; ++stage) {
+            if (StageBelongsTo(static_cast<EngineStage>(stage), phase)) {
+                written = AppendFormatted(out, "    [engine stage {} {}]\n",
+                                          EngineStageName(static_cast<EngineStage>(stage)),
+                                          engineStages_[stage].function != nullptr ? "registered"
+                                                                                   : "empty");
+            }
+        }
+    }
+
+    return written;
+}
+
+Result<void> World::DumpSubsystems(String& out) const noexcept {
+    char storage[MaxTickLabelBytes];
+    FixedStringBuilder layer{Span<char>(storage)};
+    (void)layer.TryAppendFormat("World {}", Name());
+    return subsystems_.Describe(out, layer.View());
+}
+
+Result<void> AppendSubsystemLayer(String& out, StringView layer,
+                                  Span<const char* const> initialized,
+                                  Span<const SkippedSubsystem> skipped) noexcept {
+    Result<void> written = AppendFormatted(out, "{} subsystems ({} initialized, {} skipped)\n",
+                                           layer, static_cast<uint32>(initialized.Size()),
+                                           static_cast<uint32>(skipped.Size()));
+    for (usize index = 0; written && index < initialized.Size(); ++index) {
+        written = AppendFormatted(out, "  {}. {}\n", static_cast<uint32>(index + 1),
+                                  StringView(initialized[index]));
+    }
+
+    for (const SkippedSubsystem& item : skipped) {
+        if (!written) {
+            break;
+        }
+
+        written = item.reason == SubsystemSkipReason::MissingDependency
+                      ? AppendFormatted(out, "  skipped {}: dependency {} was not created\n",
+                                        StringView(item.name), StringView(item.missing))
+                      : AppendFormatted(out, "  skipped {}: not wanted\n", StringView(item.name));
+    }
+
+    return written;
 }
 
 } // namespace rocks

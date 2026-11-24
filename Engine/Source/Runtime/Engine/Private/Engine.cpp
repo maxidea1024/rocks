@@ -1,4 +1,6 @@
+#include <Base/InitializerList.h>
 #include <Base/Compiler.h>
+#include <Config/CVarCommand.h>
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -6,6 +8,8 @@
 #include <Core/ScopeExit.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
+#include <World/DiagnosticText.h>
+#include <World/WorldLog.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
@@ -86,6 +90,53 @@ RegistryOptions EngineRegistryOptions() noexcept {
     RegistryOptions options;
     options.permanentRegion = true;
     return options;
+}
+
+// 진단 콘솔 명령이다(Docs/Design/EngineRuntime 22.1절). 대상은 BindCommand로 묶은 Engine이다.
+Result<void> RunDumpSubsystems(cvar::CommandContext& context) noexcept;
+Result<void> RunDumpTicks(cvar::CommandContext& context, StringView world) noexcept;
+
+constinit cvar::ConsoleCommand EngineDumpSubsystemsCommand =
+    cvar::Command<&RunDumpSubsystems>("engine.dumpsubsystems")
+        .Help("Print every subsystem layer: initialization order and skipped subsystems");
+
+constinit cvar::ConsoleCommand WorldDumpTicksCommand =
+    cvar::Command<&RunDumpTicks>("world.dumpticks")
+        .Help("Print the tick graph of every world, or of the named world: world.dumpticks Main");
+
+// 진단 텍스트를 콘솔 sink에 쓰고 Info 로그로 남긴다.
+Result<void> Report(cvar::CommandContext& context, const LogCategory& category,
+                    const String& text) noexcept {
+    Log::Info(category, "{Dump}", text.View());
+    return context.Write(text.View());
+}
+
+Result<void> RunDumpSubsystems(cvar::CommandContext& context) noexcept {
+    Engine* engine = context.Target<Engine>();
+    if (engine == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    String text(context.GetAllocator());
+    if (auto dumped = engine->DumpSubsystems(text); !dumped) {
+        return dumped;
+    }
+
+    return Report(context, LogEngine, text);
+}
+
+Result<void> RunDumpTicks(cvar::CommandContext& context, StringView world) noexcept {
+    Engine* engine = context.Target<Engine>();
+    if (engine == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    String text(context.GetAllocator());
+    if (auto dumped = engine->DumpTickGraphs(text, world); !dumped) {
+        return dumped;
+    }
+
+    return Report(context, LogWorldTick, text);
 }
 
 } // namespace
@@ -286,8 +337,8 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
                 Log::Warning(
                     LogEngine,
                     "Skipped engine subsystem {Subsystem}: dependency {Dependency} was not "
-                    "created",
-                    skipped.name, skipped.missing);
+                    "created ({Code})",
+                    skipped.name, skipped.missing, DiagSubsystemSkippedMissingDependency);
             }
         }
 
@@ -334,6 +385,7 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     }
 
     state_ = EngineState::Running;
+    BindConsoleCommands();
     platform::SetRunPhase(platform::RunPhase::Running, EngineStageReady);
     WarnIfCrashFilterReplaced();
     lastClock_ = platform::MonotonicNanoseconds();
@@ -418,6 +470,88 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
     }
 
     initializedSteps_ = 0;
+}
+
+void Engine::BindConsoleCommands() noexcept {
+    if (config_.settings == nullptr || consoleBound_) {
+        return;
+    }
+
+    // 영역은 같은 문맥의 다른 Engine이 이미 더했을 수 있다(AlreadyExists는 성공으로 본다).
+    for (StringView region : {StringView("engine"), StringView("world")}) {
+        auto added = config_.settings->RegisterConsoleRegion(region);
+        if (!added && added.Error() != ErrorCode::AlreadyExists) {
+            Log::Warning(LogEngine, "Engine console region {Region} could not be added: {Error}",
+                         region, ErrorCodeName(added.Error()));
+            return;
+        }
+    }
+
+    auto registered =
+        config_.settings->Register(EngineDumpSubsystemsCommand, WorldDumpTicksCommand);
+    if (registered) {
+        registered = config_.settings->BindCommand(EngineDumpSubsystemsCommand, *this);
+    }
+
+    if (registered) {
+        registered = config_.settings->BindCommand(WorldDumpTicksCommand, *this);
+    }
+
+    if (!registered) {
+        Log::Warning(LogEngine, "Engine diagnostic console commands are unavailable: {Error}",
+                     ErrorCodeName(registered.Error()));
+        UnbindConsoleCommands();
+        return;
+    }
+
+    consoleBound_ = true;
+}
+
+void Engine::UnbindConsoleCommands() noexcept {
+    if (config_.settings == nullptr) {
+        return;
+    }
+
+    // 다른 Engine이 묶은 대상은 그대로 둔다(UnbindCommand는 대상이 같을 때만 푼다).
+    auto first = config_.settings->UnbindCommand(EngineDumpSubsystemsCommand, *this);
+    auto second = config_.settings->UnbindCommand(WorldDumpTicksCommand, *this);
+    (void)first;
+    (void)second;
+    consoleBound_ = false;
+}
+
+Result<void> Engine::DumpSubsystems(String& out) noexcept {
+    Result<void> written = subsystems_.Describe(out, "Engine");
+    if (written && config_.client != nullptr) {
+        ObjectAccessScope scope(objects_->OwnerAccess());
+        written = config_.client->DescribeSubsystems(*this, out);
+    }
+
+    for (usize index = 0; written && index < worlds_.Size(); ++index) {
+        written = worlds_[index].world->DumpSubsystems(out);
+    }
+
+    return written;
+}
+
+Result<void> Engine::DumpTickGraphs(String& out, StringView world) noexcept {
+    bool found = world.IsEmpty();
+    Result<void> written = Result<void>::Success();
+    for (usize index = 0; written && index < worlds_.Size(); ++index) {
+        World& candidate = *worlds_[index].world;
+        if (!world.IsEmpty() && candidate.Name() != world) {
+            continue;
+        }
+
+        found = true;
+        written = candidate.DumpTickGraph(out);
+    }
+
+    if (!written) {
+        return written;
+    }
+
+    return found ? Result<void>::Success() : Result<void>::Failure(ErrorCode::NotFound);
 }
 
 OuterSubsystemLookup Engine::SubsystemLookup() const noexcept {
@@ -814,6 +948,8 @@ Result<void> Engine::Shutdown() noexcept {
 
     shutdownRunning_ = true;
     auto running = MakeScopeExit([this]() noexcept { shutdownRunning_ = false; });
+    // 종료 중에는 진단 명령이 반쯤 정리된 상태를 읽지 않게 먼저 푼다.
+    UnbindConsoleCommands();
     if (state_ != EngineState::Stopping) {
         state_ = EngineState::Stopping;
     }
