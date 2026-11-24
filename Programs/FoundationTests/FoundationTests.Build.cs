@@ -35,9 +35,10 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
-    // comparison test and the font library tests (Docs/Design/Font section 8.5, FT1). Headers enter only through this executable's Private includes
+    // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1) and the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
+    // section 10.5, JL1). Headers enter only through this executable's Private includes
     // (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Icu", "HarfBuzz", "Msdfgen"];
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Icu", "HarfBuzz", "Msdfgen", "Jolt"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
@@ -73,6 +74,8 @@ public abstract class TestsModule : ModuleRules
         "Engine/Source/Runtime/RenderGraph/Tests/RenderGraphReuseTests.cpp",
         "Engine/Source/Runtime/RenderGraph/Tests/RenderGraphSharedDataTests.cpp",
         "Engine/Source/Runtime/World/Tests/WorldReflectionTests.cpp",
+        // Jolt headers bring STL headers and std names into the JPH namespace; keep them out of the unity batches of other tests.
+        "Programs/FoundationTests/Engine/ThirdPartyJoltTests.cpp",
         "Programs/FoundationTests/Private/LoggerProcessProbe.cpp",
         "Programs/FoundationTests/Private/NumberCorpus.cpp",
     ];
