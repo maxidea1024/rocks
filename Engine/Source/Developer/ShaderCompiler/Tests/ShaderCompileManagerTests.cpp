@@ -778,6 +778,20 @@ TEST(ShaderLibraryCook_CooksFiltersAndPublishes) {
     CHECK(entry.developmentOnly);
     REQUIRE(HasEntry(developmentView, CookPixelName, VertexInputAName.hash, 0, entry));
     CHECK(!entry.developmentOnly);
+    // 공급자 메모리 라이브러리(SSD16)는 같은 입력의 쿠킹 파일과 같은 byte다.
+    const ShaderFormatSnapshot* const onlyD3d12[] = {&test.d3d12};
+    ShaderLibraryCookDesc memoryDesc = desc;
+    memoryDesc.formats = onlyD3d12;
+    memoryDesc.outputDirectory = StringView();
+    ShaderLibraryCookReport memoryReport(TestAllocator());
+    Array<uint8> memory(TestAllocator());
+    REQUIRE(CompileShaderLibrary(memoryDesc, memoryReport, memory));
+    REQUIRE(memoryReport.formats.Size() == 1);
+    CHECK(memoryReport.formats[0].outcome == ShaderLibraryCookOutcome::Built &&
+          memoryReport.formats[0].path.IsEmpty());
+    CHECK(memory.Size() == developmentBytes.Size() &&
+          memcmp(memory.Data(), developmentBytes.Data(), memory.Size()) == 0);
+    CHECK(!CompileShaderLibrary(desc, memoryReport, memory));
     manager.Shutdown();
 }
 

@@ -483,6 +483,10 @@ inline constexpr Guid SampleDefaults = Id(18);
 inline constexpr Guid SampleDynamic = Id(19);
 inline constexpr Guid SampleUnknown = Id(20);
 inline constexpr Guid SampleInner = Id(30);
+// 하위 그래프 SampleCollapsed의 부모 Graph.Collapsed(주 그래프)와 경계 노드다(GI15·GI16, 10.1절).
+inline constexpr Guid SampleCollapsedNode = Id(21);
+inline constexpr Guid SampleInnerInput = Id(31);
+inline constexpr Guid SampleInnerOutput = Id(32);
 inline constexpr Guid SampleComment = Id(40);
 
 // 표본 문서와 배치다(정규 순서로 맞춘 뒤 돌려준다). 주 그래프:
@@ -529,7 +533,9 @@ struct Sample {
              main.nodes.TryPushBack(MakeNode(env, SampleStepB, env.typeSequence)) &&
              main.nodes.TryPushBack(Move(toggle)) && main.nodes.TryPushBack(Move(defaults)) &&
              main.nodes.TryPushBack(Move(dynamic)) &&
-             main.nodes.TryPushBack(MakeNode(env, SampleUnknown, env.typeUnknown));
+             main.nodes.TryPushBack(MakeNode(env, SampleUnknown, env.typeUnknown)) &&
+             main.nodes.TryPushBack(
+                 MakeNode(env, SampleCollapsedNode, env.registry.CollapsedType()));
         ok =
             ok &&
             main.edges.TryPushBack(MakeEdge(SampleParamA, env.pinValue, SampleAdd, env.pinA)) &&
@@ -548,7 +554,12 @@ struct Sample {
         Graph inner(env.allocator);
         inner.id = SampleCollapsed;
         inner.role = GraphRole::Collapsed;
-        ok = ok && inner.nodes.TryPushBack(MakeNode(env, SampleInner, env.typeAdd));
+        inner.ownerNode = SampleCollapsedNode;
+        ok = ok && inner.nodes.TryPushBack(MakeNode(env, SampleInner, env.typeAdd)) &&
+             inner.nodes.TryPushBack(
+                 MakeNode(env, SampleInnerInput, env.registry.GraphInputType())) &&
+             inner.nodes.TryPushBack(
+                 MakeNode(env, SampleInnerOutput, env.registry.GraphOutputType()));
         ok = ok && document.graphs.TryPushBack(Move(main)) &&
              document.graphs.TryPushBack(Move(inner));
 

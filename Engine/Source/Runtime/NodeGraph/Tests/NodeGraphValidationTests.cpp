@@ -271,7 +271,7 @@ TEST(NodeGraph_ValidateGI6LayoutMatchesDocument) {
     // 같은 노드 항목이 둘이다.
     Sample twice(env);
     NodeLayout copy(env.allocator);
-    copy.node = SampleUnknown;
+    copy.node = SampleCollapsedNode;
     REQUIRE(LayoutOf(twice, SampleMain).nodes.TryPushBack(Move(copy)));
     CHECK(Only(Run(env, twice), GraphInvariant::LayoutMatchesDocument, GraphSubject::LayoutNode));
 
@@ -412,19 +412,22 @@ TEST(NodeGraph_ValidateGI12DocumentHeader) {
     CHECK(missing.violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Document));
     CHECK(missing.violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
 
+    // graphs[1]은 Collapsed 하위 그래프라 역할을 바꾸면 GI15·GI16도 어긴다(10.1절) — GI12만 본다.
     Sample secondMain(env);
     secondMain.document.graphs[1].role = GraphRole::Main;
-    CHECK(Only(Run(env, secondMain), GraphInvariant::DocumentHeader, GraphSubject::Graph));
+    CHECK(Run(env, secondMain).violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
 
     Sample domainRole(env);
     domainRole.document.graphs[1].domainRole = 3;
     CHECK(Only(Run(env, domainRole), GraphInvariant::DocumentHeader, GraphSubject::Graph));
     domainRole.document.graphs[1].role = GraphRole::DomainDefined;
-    CHECK(Run(env, domainRole).error == ErrorCode::None);
+    const Checked domainDefined = Run(env, domainRole);
+    CHECK(!domainDefined.violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
+    CHECK(domainDefined.violations.Has(GraphInvariant::BoundaryInterface, GraphSubject::Graph));
 
     Sample badRole(env);
     badRole.document.graphs[1].role = static_cast<GraphRole>(9);
-    CHECK(Only(Run(env, badRole), GraphInvariant::DocumentHeader, GraphSubject::Graph));
+    CHECK(Run(env, badRole).violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
 }
 
 TEST(NodeGraph_ValidateGI13NodeTypeData) {

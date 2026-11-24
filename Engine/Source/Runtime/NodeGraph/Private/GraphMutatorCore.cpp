@@ -164,7 +164,7 @@ bool CoreSameOpKey(const GraphPatchOp& left, const GraphPatchOp& right) noexcept
 
 bool CoreSemanticSlot(GraphSlotKind kind) noexcept {
     return kind == GraphSlotKind::Graph || kind == GraphSlotKind::Node ||
-           kind == GraphSlotKind::Edge;
+           kind == GraphSlotKind::Edge || kind == GraphSlotKind::GraphBoundary;
 }
 
 } // namespace
@@ -1012,6 +1012,9 @@ Result<void> GraphMutatorCore::ApplyOp(GraphPatchOp& op, bool record) noexcept {
     case GraphSlotKind::Bookmark:
         applied = ApplyBookmarkOp(op, record);
         break;
+    case GraphSlotKind::GraphBoundary:
+        applied = ApplyBoundaryOp(op, record);
+        break;
     }
 
     if (applied && record && CoreSemanticSlot(op.kind)) {
@@ -1134,6 +1137,7 @@ Result<GraphPatch> GraphMutatorCore::Execute(uint64 source, uint64 expectedRevis
     work_.Clear();
     pending_.changes.Clear();
     pending_.semanticTouched = false;
+    boundaryTouched_ = false;
     const Span<const GraphCommand> list = commands.View();
     for (usize index = 0; index < list.Size(); ++index) {
         commandIndex_ = static_cast<uint32>(index);
@@ -1155,6 +1159,13 @@ Result<GraphPatch> GraphMutatorCore::Execute(uint64 source, uint64 expectedRevis
         work_.Clear();
         pending_.changes.Clear();
         return Result<GraphPatch>::Failure(retained.Error());
+    }
+
+    if (auto subgraphs = CheckSubgraphsAtEnd(list.IsEmpty() ? 0 : list.Size() - 1); !subgraphs) {
+        Revert(work_, work_.Size());
+        work_.Clear();
+        pending_.changes.Clear();
+        return Result<GraphPatch>::Failure(subgraphs.Error());
     }
 
     if (auto checked = CheckFullValidation(); !checked) {

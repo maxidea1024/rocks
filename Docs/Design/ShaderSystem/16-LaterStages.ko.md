@@ -92,6 +92,10 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
   - 값 2: 배열 표(버퍼 순번, 타입, vec4 수), 샘플러 표, 복사 표(같은 타입 배열로 이어지는 슬롯 구간마다 한 항목 — 원본 byte 오프셋·byte 수·대상 배열·대상 vec4 오프셋).
   - 모바일 상한(4항, 7.3절 (i) 컴파일): 형식에 `uniformVectors`가 있으면 단계의 상수 버퍼·루트 상수 vec4 합이 그 값 이하다(공용 규칙 — 에뮬레이션 형식만). OpenGL 형식은 VS·PS의 구조화 버퍼(storage block)를 받지 않는다(ES 3.2 최소 보장 0). 샘플러 16·varying·MRT는 기존 형식 상한 규칙이다.
   - 처리기 버전: OpenGL 2. 한계: `Load`만 쓰는 2D 텍스처(샘플러 없음)는 SPIRV-Cross가 dummy sampler 없이 ESSL로 내지 못해 아직 오류다(필요해지면 `build_dummy_sampler_for_combined_images`). 호출 수 계측(7.3절 (i) 런타임)은 SH2e GLES backend다.
+- **SSD43 SH2e 나눔(개정 43).** SH2e는 셋으로 나눈다. Graphics API 전환은 네 backend가 한 변경에서 함께 바뀌어야 하고(결정 9) Sandbox self-test 13개의 손으로 쓴 HLSL 파이프라인이 모두 그 API를 쓰므로 SH2f(샘플 전환)와 한 묶음으로 렌더 세션과 순서를 정한다(16.1절 범위 충돌).
+  - **SH2e1.** 공급자 메모리 라이브러리(SSD16): `CompileShaderLibrary` — `CookShaderLibraries`와 같은 본체(파일만 쓰지 않는다)라 같은 입력이면 쿠킹 파일과 같은 byte다.
+  - **SH2e2.** Graphics API(SSD18 `ShaderCodeKind`·`Device::CreateShader`·파이프라인 layout)와 D3D12·D3D11·Vulkan·OpenGL ES 네 backend 전환, `D3DCompile`·`ShaderSourceCompiler` 제거(Release 예외 삭제), Sandbox self-test 전환(SH2f와 함께).
+  - **SH2e3.** RenderBase RB3 셰이더 집합(라이브러리 열기·완결성·서명·타입 집합·첫 사용 생성·`TypedShader<T>`·공급자 interface)·RB4 SH2분, 파이프라인 생성의 `CheckShaderStageLink`.
 - **SSD23 공급자 시기(SX14).** RenderBase SX14는 공급자 interface를 SH1 산출물로 적었으나 SH1은 컴파일 쪽(관리자·`CompileNow`)만 만들었다. interface와 Development 등록은 SH2e에서 셰이더 집합과 함께 만든다.
 
 **범위 충돌(다른 세션·문서와 조정 — 14절 표).**
@@ -158,6 +162,8 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 - 처리기 버전 OpenGL 2(`GLES31_PC`·`GLES31_ANDROID`).
 - 한계: SSD42 한계 그대로(`Load`만 쓰는 2D 텍스처, 호출 수 계측은 SH2e). 행렬 값(`mat4(a[k..k+3])`)은 SH2f 픽셀 대조로 확인한다. GLES 미리보기의 Release 제외는 SH2f다.
 - 시험(EngineTests): `--filter Shader` 120ê±´ íµê³¼(Metal ëêµ¬ SKIP 1, ì´ ê¸°ê³ Windows). ì ìí 4ê±´ â GLES ë°°ì¹ golden(slotÂ·combined sampler ì´ë¦ê³¼ ì ëÂ·typed buffer bindingÂ·ê° 2 ë°°ì´Â·ìíë¬Â·ë³µì¬ íÂ·ë©¤ë² ì°¸ì¡° ë°ê¿ â íë ¬Â·ë²¡í°Â·ì ì swizzleÂ·ë£¨í¸ ììÂ·ë°°ì´ í¨ì), ESSL ì¬ìì±(ì ì¸ ë°ê¿Â·ìì¸ ì ì ì°¸ì¡°Â·swizzle ë¤ ë©¤ë²Â·íµì§¸ ì½ê¸° ì¤ë¥Â·ì ì¸ ìì ì¤ë¥), ëª¨ë°ì¼ ìí(ìë®¬ë ì´ì vec4 í© ê²½ê³Â·VS storage block ê±°ë¶Â·CS íì©), ì¤ì  ìì»¤ GLES31_PC VSÂ·PS(ê° 1Â·ì°ê²°Â·ESSLì vc0_hÂ·vu_h ë°°ì´ê³¼ ìë ì´ë¦ ììÂ·ps0Â·ps1Â·ê° 2 ë°°ì´Â·ë³µì¬ íÂ·ìíë¬ ì¶ì²).
+
+**SH2e1 구현 메모(개정 43, 2026-11-24).** `CompileShaderLibrary`(ShaderCompiler/ShaderLibraryCook.h)는 `CookShaderLibraries`와 본체(`RunLibraries`)를 함께 쓰고 결과 줄이 `Built`다(형식 하나, 출력 디렉터리 없음). 시험: 쿠킹 시험이 같은 입력의 메모리 byte와 쿠킹 파일 byte가 같음을 확인한다(완료 기준 2의 "공급자 메모리 라이브러리 byte = 그 파일 byte").
 
 SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
 - [x] 스파이크 `Programs/ShaderToolSpike`(Program 타깃, `ShaderToolSpike --out <디렉터리> [--sm 6_0]`). 도구는 P4 `ShaderToolSet`으로 사용자 저장소에서 연다. 산출물은 `<out>` 아래에 두고 저장소에는 이 요약만 남긴다. `manifest.json`(산출물 이름·크기·SHA-256, 결정성 비교용)과 `report.json`(검사·측정값)을 쓴다.

@@ -631,10 +631,75 @@ Result<void> ReadRole(Reader& reader, JsonValue value, GraphRole& role) noexcept
     return Result<void>::Success();
 }
 
+// 하위 그래프 경계 목록 하나다(10.1절 NG3c). 항목마다 key·kind·type·maxEdges가 모두 있어야 한다.
+Result<void> ReadBoundary(Reader& reader, JsonValue object, StringView key,
+                          Array<GraphBoundaryPin>& out) noexcept {
+    auto list = reader.Array(object, key);
+    if (!list) {
+        return Result<void>::Failure(list.Error());
+    }
+
+    static constexpr StringView Keys[] = {"key", "kind", "type", "maxEdges"};
+    for (usize index = 0; list.Value().IsValid() && index < list.Value().Size(); ++index) {
+        const JsonValue item = list.Value().At(index);
+        if (auto checked = reader.Object(item, Keys); !checked) {
+            return checked;
+        }
+
+        for (const StringView& required : Keys) {
+            if (auto present = reader.Require(item, required); !present) {
+                return Result<void>::Failure(present.Error());
+            }
+        }
+
+        GraphBoundaryPin pin;
+        if (auto read = reader.ReadName(item.Find("key"), pin.key); !read) {
+            return read;
+        }
+
+        StringView kind;
+        if (auto read = reader.ReadString(item.Find("kind"), kind); !read) {
+            return read;
+        }
+
+        if (kind == "Data") {
+            pin.kind = PinKind::Data;
+        } else if (kind == "Flow") {
+            pin.kind = PinKind::Flow;
+        } else if (kind == "Structural") {
+            pin.kind = PinKind::Structural;
+        } else {
+            return reader.Fail(GraphTextCode::InvalidValue, item.Find("kind"), "unknown pin kind");
+        }
+
+        if (auto read = reader.ReadName(item.Find("type"), pin.type); !read) {
+            return read;
+        }
+
+        uint32 maxEdges = 0;
+        if (auto read = reader.ReadU32(item.Find("maxEdges"), maxEdges); !read) {
+            return read;
+        }
+
+        if (maxEdges > NumericLimits<uint16>::Max()) {
+            return reader.Fail(GraphTextCode::InvalidValue, item.Find("maxEdges"),
+                               "maxEdges is out of range");
+        }
+
+        pin.maxEdges = static_cast<uint16>(maxEdges);
+        if (auto pushed = out.TryPushBack(pin); !pushed) {
+            return pushed;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> ReadGraph(Reader& reader, JsonValue value, Graph& graph,
                        GraphLayout& layout) noexcept {
-    static constexpr StringView Keys[] = {"id",    "role",  "domainRole", "title",
-                                          "nodes", "edges", "comments",   "bookmarks"};
+    static constexpr StringView Keys[] = {"id",     "role",     "domainRole", "ownerNode",
+                                          "inputs", "outputs",  "title",      "nodes",
+                                          "edges",  "comments", "bookmarks"};
     if (auto checked = reader.Object(value, Keys); !checked) {
         return checked;
     }
@@ -658,6 +723,21 @@ Result<void> ReadGraph(Reader& reader, JsonValue value, Graph& graph,
             value, "domainRole",
             [&](JsonValue v) noexcept { return reader.ReadU32(v, graph.domainRole); });
         !read) {
+        return read;
+    }
+
+    if (auto read = reader.Optional(
+            value, "ownerNode",
+            [&](JsonValue v) noexcept { return reader.ReadGuid(v, graph.ownerNode); });
+        !read) {
+        return read;
+    }
+
+    if (auto read = ReadBoundary(reader, value, "inputs", graph.inputs); !read) {
+        return read;
+    }
+
+    if (auto read = ReadBoundary(reader, value, "outputs", graph.outputs); !read) {
         return read;
     }
 

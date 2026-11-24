@@ -27,6 +27,9 @@ struct Graph {
     GraphId id;
     GraphRole role;                     // Main, Collapsed, DomainDefined
     uint32 domainRole;                  // DomainDefined일 때 도메인 정의 역할 번호, 그 밖에는 0
+    Guid ownerNode;                     // Collapsed: 이 그래프를 가리키는 부모의 Graph.Collapsed 노드(10.1절), 그 밖 0
+    Array<GraphBoundaryPin> inputs;     // Collapsed: 경계 입력, 그 밖 빈 목록
+    Array<GraphBoundaryPin> outputs;    // Collapsed: 경계 출력, 그 밖 빈 목록
     Array<GraphNode> nodes;             // NodeId 순 정렬
     Array<GraphEdge> edges;             // 정규 순서(GI5)
 };
@@ -120,7 +123,7 @@ struct NodeTypeDescriptor {
 - 표시 이름·도움말은 영어로 등록한다(런타임 메시지 규칙). 한도는 UiToolkit UD14·UD16의 상수를 쓴다(화면 단계 NG5에서 검사). 지역화 `Text`로 바꾸는 것은 화면이 한다.
 - 서술의 `StringView`·`Span`이 가리키는 data는 서술을 등록한 모듈의 것이고, 등록 때 넘긴 module lease가 수명을 지킨다. 등록표는 핀·통과 쌍 배열을 소유 복사한다(계획 14.6절). 동적 핀의 표시 이름은 복사하지 않는다(위 `dynamicPins` 항목). NG1에서 핀 목록 cache를 두면 속성 변경 때 그 노드 cache를 함께 무효화하므로 dangling이 생기지 않는다.
 - 등록 검사는 정적 핀과 동적 핀에 같은 핀 규칙을 쓴다: 키가 None이 아님, `maxEdges` ≥ 1, 방향·종류·값 정책이 정의된 값, `ordered`는 출력 핀만, 타입은 `UnresolvedPinType`이거나 도메인 타입 표 색인. 동적 핀은 `CollectPins`가 검사하고 위반이면 `InvalidArgument`다.
-- **공통 노드 종류.** 등록표가 모든 도메인에 대해 직접 등록한다. NG0은 재경유 `Graph.Reroute`(입력 `In` 하나·`maxEdges` 1, 출력 `Out` 무제한, 둘 다 Data·`UnresolvedPinType`·값 정책 Hidden, 속성 없음)를 둔다. 재경유는 입력 기본값과 고아 핀을 두지 않는다(의미 바이트에서 접히면 사라지므로 — GI13·GI14가 거부한다). `Graph.Input`·`Graph.Output`·`Graph.Collapsed`(GD25)는 NG3에서 더한다. 도메인은 `Graph.` 접두 이름을 등록할 수 없다.
+- **공통 노드 종류.** 등록표가 모든 도메인에 대해 직접 등록한다. NG0은 재경유 `Graph.Reroute`(입력 `In` 하나·`maxEdges` 1, 출력 `Out` 무제한, 둘 다 Data·`UnresolvedPinType`·값 정책 Hidden, 속성 없음)를 둔다. 재경유는 입력 기본값과 고아 핀을 두지 않는다(의미 바이트에서 접히면 사라지므로 — GI13·GI14가 거부한다). `Graph.Input`·`Graph.Output`·`Graph.Collapsed`(GD25)는 NG3c에서 더한다(10.1절 — 속성 없음, 핀은 하위 그래프 인터페이스에서 유도). 도메인은 `Graph.` 접두 이름을 등록할 수 없다.
 
 ### 6.3 정규 순서와 불변식
 

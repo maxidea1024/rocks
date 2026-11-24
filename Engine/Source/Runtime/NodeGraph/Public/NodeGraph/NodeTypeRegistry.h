@@ -39,6 +39,14 @@ inline constexpr StringView ReroutePinOut = "Out";
 // 지금 재경유 서술 버전이다.
 inline constexpr uint32 RerouteSchemaVersion = 1;
 
+// 하위 그래프 경계 공통 종류다(GD25, Docs/Design/NodeGraph 10.1절 NG3c). 속성이 없고 핀은 하위
+// 그래프 인터페이스(Graph::ownerNode·inputs·outputs)에서 유도한다. 핀 표시 이름은 비어 있다(화면은
+// 키 원문을 보인다).
+inline constexpr StringView GraphInputNodeTypeName = "Graph.Input";
+inline constexpr StringView GraphOutputNodeTypeName = "Graph.Output";
+inline constexpr StringView CollapsedNodeTypeName = "Graph.Collapsed";
+inline constexpr uint32 BoundarySchemaVersion = 1;
+
 // 등록 하나의 식별이다. 0은 없음이다.
 struct SchemaRegistrationId {
     uint64 value = 0;
@@ -142,6 +150,36 @@ public:
         return initialized_ && type == rerouteType_;
     }
 
+    // 하위 그래프 경계 종류 판정이다(NG3c).
+    bool IsGraphInput(Name type) const noexcept {
+        return initialized_ && type == graphInputType_;
+    }
+
+    bool IsGraphOutput(Name type) const noexcept {
+        return initialized_ && type == graphOutputType_;
+    }
+
+    bool IsCollapsed(Name type) const noexcept {
+        return initialized_ && type == collapsedType_;
+    }
+
+    // Graph.Input·Graph.Output이다(경계 노드 — 하위 그래프 안).
+    bool IsBoundary(Name type) const noexcept {
+        return IsGraphInput(type) || IsGraphOutput(type);
+    }
+
+    Name GraphInputType() const noexcept {
+        return graphInputType_;
+    }
+
+    Name GraphOutputType() const noexcept {
+        return graphOutputType_;
+    }
+
+    Name CollapsedType() const noexcept {
+        return collapsedType_;
+    }
+
     // 공통 종류("Graph." — 도메인 None으로 등록)인가. migration 1:1 교체 대상 검사에 쓴다(10.1절).
     bool IsCommonType(Name type) const noexcept {
         return LookupNodeType(Name(), type) != nullptr;
@@ -198,6 +236,13 @@ private:
     Name reroutePinIn_;
     Name reroutePinOut_;
     PinDescriptor reroutePins_[2];
+    Name graphInputType_;
+    Name graphOutputType_;
+    Name collapsedType_;
+
+    Result<void> RegisterBoundaryTypes() noexcept;
+    Result<void> CollectBoundaryPins(const GraphDocument& document, const Graph& graph,
+                                     const GraphNode& node, PinList& out) const noexcept;
     uint64 nextId_ = 1;
     bool initialized_ = false;
     Array<NodeTypeRegistryListener*> listeners_;

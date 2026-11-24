@@ -183,6 +183,15 @@ private:
                                Array<PinKeyRename>& renames) noexcept;
     void RevertTo(usize mark) noexcept;
     void ProcessPendingRefresh() noexcept;
+    // 하위 그래프 규칙(GraphMutatorSubgraph.cpp, 10.1절 NG3c).
+    Guid OwnedGraph(Guid collapsedNode) const noexcept;
+    Guid ParentGraph(const Graph& graph) const noexcept;
+    bool InsideTree(Guid graph, Guid root) const noexcept;
+    Result<void> CheckPlacement(Guid graph, const GraphNode& node) noexcept;
+    Result<void> SetGraphBoundary(const GraphCommand& command) noexcept;
+    Result<void> RemoveGraphTree(Guid graph) noexcept;
+    Result<void> CheckSubgraphsAtEnd(usize lastCommand) noexcept;
+    Result<void> ApplyBoundaryOp(GraphPatchOp& op, bool record) noexcept;
     Result<void> BuildIndexes(const GraphDocument& document, const GraphDocumentLayout& layout,
                               Array<Guid>& ids, Array<OutgoingEdge>& outgoing) const noexcept;
     Result<void> CloneNodeFor(const GraphNode& source, GraphNode& out) noexcept;
@@ -203,6 +212,8 @@ private:
     bool fullValidation_ = false;
     // RefreshNodeTypes 검사 실패 뒤 Reload 전까지 참이다(명령·undo·redo·migration 거부).
     bool broken_ = false;
+    // 이번 명령 목록이 그래프·경계 노드·Graph.Collapsed를 건드렸다(목록 끝 GI15·GI16 검사).
+    bool boundaryTouched_ = false;
     // bracket 중·통지 콜백 안에서 받아 미룬 등록표 변경이다(ProcessPendingRefresh).
     Array<NodeTypeKey> pendingRefresh_;
 

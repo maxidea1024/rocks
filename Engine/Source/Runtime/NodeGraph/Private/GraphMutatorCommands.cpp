@@ -86,6 +86,8 @@ Result<void> GraphMutatorCore::ExecuteCommand(const GraphCommand& command) noexc
         return RenameGraph(command);
     case GraphCommandKind::MoveNodesToGraph:
         return MoveNodesToGraph(command);
+    case GraphCommandKind::SetGraphBoundary:
+        return SetGraphBoundary(command);
     case GraphCommandKind::RemoveRetainedPin:
         return RemoveRetainedPin(command);
     case GraphCommandKind::InsertNode:
@@ -305,6 +307,11 @@ Result<void> GraphMutatorCore::AddNode(const GraphCommand& command) noexcept {
         return Fail(GraphCommandReason::ValueTooLarge, command.graph, source.id);
     }
 
+    // 하위 그래프 경계 종류의 자리 규칙(10.1절 NG3c).
+    if (auto placed = CheckPlacement(command.graph, source); !placed) {
+        return placed;
+    }
+
     if (IdExists(source.id)) {
         return Fail(GraphCommandReason::NodeExists, command.graph, source.id);
     }
@@ -403,6 +410,20 @@ Result<void> GraphMutatorCore::RemoveNodes(const GraphCommand& command) noexcept
         if (type != nullptr &&
             !HasCapability(type->descriptor.capabilities, NodeCapabilities::CanDelete)) {
             return Fail(GraphCommandReason::CannotDelete, command.graph, id);
+        }
+
+        // Graph.Collapsed면 가리키던 하위 그래프 나무를 먼저 지운다(10.1절, UE
+        // UK2Node_Composite::DestroyNode). 그래프 배열이 줄었으므로 graph를 다시 찾는다.
+        if (registry_.IsCollapsed(graph->nodes[index].type)) {
+            boundaryTouched_ = true;
+            if (const Guid owned = OwnedGraph(id); !CommandIsZero(owned)) {
+                if (auto removed = RemoveGraphTree(owned); !removed) {
+                    return removed;
+                }
+
+                graph = FindGraph(command.graph);
+                ROCKS_ASSERT(graph != nullptr);
+            }
         }
 
         // 닿은 간선을 빼고, 다른 노드의 ordered 출력 핀 순번을 다시 맞춘다.
@@ -785,6 +806,11 @@ Result<void> GraphMutatorCore::InsertNode(const GraphCommand& command) noexcept 
 
     if (CommandNameNone(source.type)) {
         return Fail(GraphCommandReason::TypeUnknown, command.graph, source.id);
+    }
+
+    // 하위 그래프 경계 종류의 자리 규칙(10.1절 NG3c).
+    if (auto placed = CheckPlacement(command.graph, source); !placed) {
+        return placed;
     }
 
     bool tooLarge = source.properties.bytes.Size() > MaxPropertyRecordBytes;
@@ -1669,11 +1695,21 @@ Result<void> GraphMutatorCore::AddGraph(const GraphCommand& command) noexcept {
         return Fail(GraphCommandReason::GraphRole, command.graph);
     }
 
+    // Collapsed는 부모 Graph.Collapsed 노드 id를 받는다(그 노드는 같은 목록의 뒤에서 더한다 — 목록
+    // 끝 GI16 검사). 다른 역할은 0이다. 같은 부모를 두 그래프가 가질 수 없다.
+    const bool collapsed = command.role == GraphRole::Collapsed;
+    if (collapsed == CommandIsZero(command.node) ||
+        (collapsed && !CommandIsZero(OwnedGraph(command.node)))) {
+        return Fail(GraphCommandReason::BoundaryNode, command.graph, command.node);
+    }
+
+    boundaryTouched_ = boundaryTouched_ || collapsed;
     GraphPatchOp op = MakeOp(GraphSlotKind::Graph, command.graph);
     op.hasValue = true;
     op.graphValue.id = command.graph;
     op.graphValue.role = command.role;
     op.graphValue.domainRole = command.domainRole;
+    op.graphValue.ownerNode = command.node;
     op.graphLayoutValue.graph = command.graph;
     if (auto copied = op.graphLayoutValue.title.TryAssign(command.title.View()); !copied) {
         return copied;
@@ -1693,80 +1729,13 @@ Result<void> GraphMutatorCore::RemoveGraph(const GraphCommand& command) noexcept
         return Fail(GraphCommandReason::MainGraph, command.graph);
     }
 
-    for (const GraphNode& node : graph->nodes) {
-        const RegisteredNodeType* type = registry_.FindNodeType(document_.domain, node.type);
-        if (type != nullptr &&
-            !HasCapability(type->descriptor.capabilities, NodeCapabilities::CanDelete)) {
-            return Fail(GraphCommandReason::CannotDelete, command.graph, node.id);
-        }
+    // 부모 Graph.Collapsed가 있는 하위 그래프는 노드를 지워야 한다(10.1절).
+    if (!CommandIsZero(graph->ownerNode) && IdExists(graph->ownerNode)) {
+        return Fail(GraphCommandReason::GraphReferenced, command.graph, graph->ownerNode);
     }
 
-    // 내용을 먼저 뺀다: 간선 → 노드 배치·노드 → 주석 → 북마크 → 그래프.
-    Array<GraphEdge> edges(allocator_);
-    if (auto copied = edges.TryAppend(graph->edges.View()); !copied) {
-        return copied;
-    }
-
-    for (const GraphEdge& edge : edges) {
-        if (auto erased = EraseEdge(command.graph, edge); !erased) {
-            return erased;
-        }
-    }
-
-    Array<Guid> nodes(allocator_);
-    for (const GraphNode& node : graph->nodes) {
-        if (auto pushed = nodes.TryPushBack(node.id); !pushed) {
-            return pushed;
-        }
-    }
-
-    for (const Guid& id : nodes) {
-        GraphPatchOp nodeLayout = MakeOp(GraphSlotKind::NodeLayout, command.graph);
-        nodeLayout.id = id;
-        if (auto emitted = Emit(Move(nodeLayout)); !emitted) {
-            return emitted;
-        }
-
-        GraphPatchOp node = MakeOp(GraphSlotKind::Node, command.graph);
-        node.id = id;
-        if (auto emitted = Emit(Move(node)); !emitted) {
-            return emitted;
-        }
-    }
-
-    Array<Guid> comments(allocator_);
-    Array<uint32> bookmarks(allocator_);
-    GraphLayout* current = FindLayoutGraph(command.graph);
-    for (const CommentBox& comment : current->comments) {
-        if (auto pushed = comments.TryPushBack(comment.id); !pushed) {
-            return pushed;
-        }
-    }
-
-    for (const Bookmark& bookmark : current->bookmarks) {
-        if (auto pushed = bookmarks.TryPushBack(bookmark.number); !pushed) {
-            return pushed;
-        }
-    }
-
-    for (const Guid& id : comments) {
-        GraphPatchOp op = MakeOp(GraphSlotKind::Comment, command.graph);
-        op.id = id;
-        if (auto emitted = Emit(Move(op)); !emitted) {
-            return emitted;
-        }
-    }
-
-    for (const uint32 number : bookmarks) {
-        GraphPatchOp op = MakeOp(GraphSlotKind::Bookmark, command.graph);
-        op.number = number;
-        if (auto emitted = Emit(Move(op)); !emitted) {
-            return emitted;
-        }
-    }
-
-    GraphPatchOp op = MakeOp(GraphSlotKind::Graph, command.graph);
-    return Emit(Move(op));
+    // 안의 Graph.Collapsed가 가리키는 하위 그래프도 연쇄로 지운다.
+    return RemoveGraphTree(command.graph);
 }
 
 Result<void> GraphMutatorCore::RenameGraph(const GraphCommand& command) noexcept {
@@ -1822,9 +1791,25 @@ Result<void> GraphMutatorCore::MoveNodesToGraph(const GraphCommand& command) noe
 
     // 노드가 원본에 있고, 옮기는 노드와 나머지 사이 간선이 없어야 한다. 그 사이 간선은 함께 옮긴다.
     Array<GraphEdge> internal(allocator_);
+    boundaryTouched_ = true;
     for (const Guid& id : command.nodes) {
-        if (NodeIndex(*source, id) == IndexNone) {
+        const usize index = NodeIndex(*source, id);
+        if (index == IndexNone) {
             return Fail(GraphCommandReason::NodeMissing, command.graph, id);
+        }
+
+        // 경계 노드는 옮기지 않고, Graph.Collapsed는 자기 하위 그래프 나무 안으로 옮기지 않는다
+        // (10.1절 NG3c).
+        const Name type = source->nodes[index].type;
+        if (registry_.IsBoundary(type)) {
+            return Fail(GraphCommandReason::BoundaryNode, command.graph, id);
+        }
+
+        if (registry_.IsCollapsed(type)) {
+            const Guid owned = OwnedGraph(id);
+            if (!CommandIsZero(owned) && InsideTree(command.target, owned)) {
+                return Fail(GraphCommandReason::CollapsedCycle, command.graph, id);
+            }
         }
 
         edgesA_.Clear();
