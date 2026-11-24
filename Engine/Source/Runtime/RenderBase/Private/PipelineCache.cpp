@@ -64,10 +64,15 @@ void PutNames(KeyWriter& key, const graphics::PipelineBindingNames& names) noexc
     }
 }
 
+// 키 종류 표지다(같은 epoch의 그래픽·compute 키가 섞이지 않게 맨 앞에 둔다).
+constexpr uint8 GraphicsKeyKind = 0;
+constexpr uint8 ComputeKeyKind = 1;
+
 bool BuildKey(const GraphicsPipelineRequest& request, Array<uint8>& out) noexcept {
     out.Clear();
     KeyWriter key(out);
     const graphics::PipelineDesc& state = request.state;
+    key.Put(GraphicsKeyKind);
     key.Put(request.set->Epoch());
     key.Put(request.vertexEntry);
     key.Put(request.pixelEntry);
@@ -123,6 +128,17 @@ bool BuildKey(const GraphicsPipelineRequest& request, Array<uint8>& out) noexcep
     return !key.Failed();
 }
 
+bool BuildKey(const ComputePipelineRequest& request, Array<uint8>& out) noexcept {
+    out.Clear();
+    KeyWriter key(out);
+    key.Put(ComputeKeyKind);
+    key.Put(request.set->Epoch());
+    key.Put(request.computeEntry);
+    key.Put(request.state.drawConstantBytes);
+    PutNames(key, request.state.bindings);
+    return !key.Failed();
+}
+
 uint64 HashKey(Span<const uint8> key) noexcept {
     uint64 hash = MixHash(key.Size());
     usize index = 0;
@@ -157,6 +173,41 @@ PipelineCache::~PipelineCache() noexcept {
     Clear();
 }
 
+const PipelineCache::Entry* PipelineCache::FindLocked(const Entry& candidate) const noexcept {
+    for (const Entry& entry : entries_) {
+        if (entry.hash == candidate.hash && SameKey(entry.key.View(), candidate.key.View())) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+template <class Create>
+Result<graphics::PipelineHandle> PipelineCache::InsertLocked(Entry&& candidate, ShaderSet& set,
+                                                             Create&& create) noexcept {
+    using Outcome = Result<graphics::PipelineHandle>;
+    if (!entries_.TryReserve(entries_.Size() + 1)) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    if (!set.TryAcquireLease()) {
+        return Outcome::Failure(ErrorCode::Destroyed);
+    }
+
+    auto pipeline = create();
+    if (!pipeline) {
+        set.ReleaseLease();
+        return pipeline;
+    }
+
+    candidate.epoch = set.Epoch();
+    candidate.set = &set;
+    candidate.pipeline = pipeline.Value();
+    (void)entries_.TryPushBack(Move(candidate));
+    return pipeline;
+}
+
 Result<graphics::PipelineHandle>
 PipelineCache::FindOrCreate(const GraphicsPipelineRequest& request) noexcept {
     using Outcome = Result<graphics::PipelineHandle>;
@@ -172,11 +223,9 @@ PipelineCache::FindOrCreate(const GraphicsPipelineRequest& request) noexcept {
 
     candidate.hash = HashKey(candidate.key.View());
     platform::LockGuard lock(gate_);
-    for (const Entry& entry : entries_) {
-        if (entry.hash == candidate.hash && SameKey(entry.key.View(), candidate.key.View())) {
-            ++hits_;
-            return Outcome::Success(entry.pipeline);
-        }
+    if (const Entry* found = FindLocked(candidate)) {
+        ++hits_;
+        return Outcome::Success(found->pipeline);
     }
 
     ++misses_;
@@ -213,28 +262,58 @@ PipelineCache::FindOrCreate(const GraphicsPipelineRequest& request) noexcept {
         return Outcome::Failure(pixel.Error());
     }
 
-    if (!entries_.TryReserve(entries_.Size() + 1)) {
+    return InsertLocked(Move(candidate), set, [&]() noexcept {
+        graphics::PipelineDesc desc = request.state;
+        desc.vertexShader = vertex.Value();
+        desc.pixelShader = pixel.Value();
+        return device_.CreatePipeline(desc);
+    });
+}
+
+Result<graphics::PipelineHandle>
+PipelineCache::FindOrCreate(const ComputePipelineRequest& request) noexcept {
+    using Outcome = Result<graphics::PipelineHandle>;
+    if (request.set == nullptr) {
+        return Outcome::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ShaderSet& set = *request.set;
+    Entry candidate(allocator_);
+    if (!BuildKey(request, candidate.key)) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
-    if (!set.TryAcquireLease()) {
+    candidate.hash = HashKey(candidate.key.View());
+    platform::LockGuard lock(gate_);
+    if (const Entry* found = FindLocked(candidate)) {
+        ++hits_;
+        return Outcome::Success(found->pipeline);
+    }
+
+    ++misses_;
+    if (set.State() == ShaderSetState::Retired) {
         return Outcome::Failure(ErrorCode::Destroyed);
     }
 
-    graphics::PipelineDesc desc = request.state;
-    desc.vertexShader = vertex.Value();
-    desc.pixelShader = pixel.Value();
-    auto pipeline = device_.CreatePipeline(desc);
-    if (!pipeline) {
-        set.ReleaseLease();
-        return pipeline;
+    const shader::ShaderLibraryEntry* computeEntry = set.Entry(request.computeEntry);
+    if (set.State() != ShaderSetState::Ready) {
+        return Outcome::Failure(ErrorCode::NotReady);
     }
 
-    candidate.epoch = set.Epoch();
-    candidate.set = &set;
-    candidate.pipeline = pipeline.Value();
-    (void)entries_.TryPushBack(Move(candidate));
-    return pipeline;
+    if (computeEntry == nullptr || computeEntry->stage != shader::ShaderStageCompute) {
+        return Outcome::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto compute = set.DeviceShader(request.computeEntry);
+    if (!compute) {
+        return Outcome::Failure(compute.Error());
+    }
+
+    return InsertLocked(Move(candidate), set, [&]() noexcept {
+        graphics::ComputePipelineDesc desc = request.state;
+        desc.computeShader = compute.Value();
+        return device_.CreateComputePipeline(desc);
+    });
 }
 
 void PipelineCache::RetireSet(const ShaderSet& set) noexcept {

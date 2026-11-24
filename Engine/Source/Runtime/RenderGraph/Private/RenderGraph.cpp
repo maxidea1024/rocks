@@ -160,6 +160,18 @@ GraphPassAccesses& GraphPassAccesses::TextureView(GraphTextureView view, Resourc
     return *this;
 }
 
+GraphPassAccesses& GraphPassAccesses::BufferView(GraphBufferView view, ResourceAccess access,
+                                                 GraphAccessFlags flags) noexcept {
+    GraphResourceAccess entry;
+    entry.kind = GraphResourceKind::Buffer;
+    entry.graph = view.graph;
+    entry.access = access;
+    entry.flags = flags;
+    entry.view = view.index;
+    Push(entry);
+    return *this;
+}
+
 GraphPassAccesses& GraphPassAccesses::Buffer(GraphBuffer buffer, ResourceAccess access,
                                              GraphAccessFlags flags) noexcept {
     GraphResourceAccess entry;
@@ -243,17 +255,17 @@ graphics::TextureHandle GraphPassContext::Texture(GraphTexture texture) const no
 
 namespace {
 
-// pass가 선언한 view의 기록이다(선언하지 않았거나 다른 그래프 handle이면 null).
-const ViewRecord* FindPassView(const GraphState& state, uint32 pass,
-                               GraphTextureView view) noexcept {
-    if (view.graph != state.serial || view.index >= state.views.Size()) {
+// pass가 선언한 view의 기록이다(선언하지 않았거나 다른 그래프·다른 종류 handle이면 null).
+const ViewRecord* FindPassView(const GraphState& state, uint32 pass, uint32 index, uint32 graph,
+                               GraphResourceKind kind) noexcept {
+    if (graph != state.serial || index >= state.views.Size() || state.views[index].kind != kind) {
         return nullptr;
     }
 
     const PassRecord& record = state.passes[pass];
-    for (uint32 index = record.firstView; index < record.firstView + record.viewCount; ++index) {
-        if (state.passViews[index] == view.index) {
-            return &state.views[view.index];
+    for (uint32 slot = record.firstView; slot < record.firstView + record.viewCount; ++slot) {
+        if (state.passViews[slot] == index) {
+            return &state.views[index];
         }
     }
 
@@ -263,13 +275,22 @@ const ViewRecord* FindPassView(const GraphState& state, uint32 pass,
 } // namespace
 
 graphics::TextureHandle GraphPassContext::View(GraphTextureView view) const noexcept {
-    const ViewRecord* record = FindPassView(*graph_.state_, pass_, view);
+    const ViewRecord* record =
+        FindPassView(*graph_.state_, pass_, view.index, view.graph, GraphResourceKind::Texture);
     return record != nullptr ? graphics::TextureHandle{record->device} : graphics::TextureHandle{};
+}
+
+graphics::BufferViewHandle GraphPassContext::View(GraphBufferView view) const noexcept {
+    const ViewRecord* record =
+        FindPassView(*graph_.state_, pass_, view.index, view.graph, GraphResourceKind::Buffer);
+    return record != nullptr ? graphics::BufferViewHandle{record->device}
+                             : graphics::BufferViewHandle{};
 }
 
 uint32 GraphPassContext::ViewBaseMip(GraphTextureView view) const noexcept {
     const GraphState& state = *graph_.state_;
-    const ViewRecord* record = FindPassView(state, pass_, view);
+    const ViewRecord* record =
+        FindPassView(state, pass_, view.index, view.graph, GraphResourceKind::Texture);
     if (record == nullptr) {
         return 0;
     }
@@ -530,7 +551,8 @@ RenderGraph::CreateTextureView(GraphTexture texture,
     }
 
     ViewRecord view;
-    view.texture = texture.index;
+    view.kind = GraphResourceKind::Texture;
+    view.resource = texture.index;
     view.desc = desc;
     view.range = range.Value();
     auto pushed = state.views.TryPushBack(arena_, view);
@@ -932,7 +954,14 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
             }
 
             const ViewRecord& view = state.views[access.view];
-            const bool write = view.desc.access == graphics::ViewAccess::ReadWrite;
+            if (view.kind != access.kind) {
+                return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                                 "pass '{}' declares a view of another resource "
+                                                 "kind",
+                                                 passName));
+            }
+
+            const bool write = view.Writable();
             const ResourceAccess allowed =
                 write ? graphics::UavAccessMask
                       : ResourceAccess::SrvGraphics | ResourceAccess::SrvCompute;
@@ -944,12 +973,15 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
                     state, ErrorCode::InvalidArgument, true,
                     "pass '{}' declares access {} through a {} view of '{}'", passName,
                     StringView(viewAccess), write ? "read-write" : "read",
-                    state.resources[view.texture].name));
+                    state.resources[view.resource].name));
             }
 
-            access.resource = view.texture;
-            access.range = {view.range.firstMip, view.range.mipCount, view.range.firstSlice,
-                            view.range.sliceCount};
+            access.resource = view.resource;
+            if (view.kind == GraphResourceKind::Texture) {
+                access.range = {view.range.firstMip, view.range.mipCount, view.range.firstSlice,
+                                view.range.sliceCount};
+            }
+
             bool listed = false;
             for (usize index = firstView; index < state.passViews.Size(); ++index) {
                 listed = listed || state.passViews[index] == access.view;
