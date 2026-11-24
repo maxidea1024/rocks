@@ -66,14 +66,13 @@ S13 구현(`Programs/Sandbox/Private/SandboxGame.*`):
 - `--engine`이 `GameInstanceClient`로 돈다. 기본 맵 "Main"에는 원점 PlayerStart가 있고, `SandboxDirector`가 첫 LocalPlayer에 `SandboxPawn`을 준다.
 - `SandboxPawn`은 Controller 입력 스냅숏에서 새로 눌린 W·A·S·D·Space와 마우스 왼쪽·오른쪽 버튼을 Info 로그(`Sandbox.Game`)로 남긴다.
 - `SandboxPawn`은 마우스 버튼의 로그에 커서 위치(창 client 픽셀)를 함께 남기고, 첫 게임패드의 South·East 버튼과 휠도 남긴다.
+- 시험은 `Engine/Source/Runtime/Gameplay/Tests/GameplayFlowTests.cpp`의 `GameplayFlow_FourteenStepScenario`·`GameplayFlow_WorldWithoutDirector`·`GameplayFlow_EngineDestroyWorldPassesTheReason`다.
 
 입력 연결(2026-11-24, 엔진 1차 목표 입력 확인):
 - 호스트의 엔진 루프 hook(`HostLoopBridge`)이 `input::InputQueue`(용량 256)와 `input::InputState`를 소유한다. 프레임 1단계 `PumpEvents`에서 순서대로: 종료 요청 다리 → 창 펌프(`Window::PumpEvents`) → 게임패드 폴링(`GamepadBackend::Poll`) → 시험 주입 → `InputState::BeginFrame(queue.Events())` → `queue.Clear()`. UE에서 `FEngineLoop::Tick`의 `PumpMessages`가 Slate 입력을 모은 뒤 World Tick의 `PlayerController::TickPlayerInput`이 읽는 순서와 같다.
 - `engine.Initialize` 뒤 `GameInstanceClient::WithInstance`로 첫 LocalPlayer에 `SetLocalPlayerInput(player, &state)`를 건다. LocalPlayer가 없으면(DedicatedServer) 걸지 않는다. 입력 원천은 엔진 `Shutdown`이 끝날 때까지 산다(hook과 같은 스택 범위).
 - `--window`면 `platform::Window`("Rocks Sandbox", 1280×720)를 만든다. 닫기 버튼은 `RequestExit`로 정상 종료한다. 렌더가 없어 present 대기가 없으므로 hook의 `EndFrame`이 프레임 간격을 약 60 Hz로 맞춘다(남은 시간만 `SleepFor` — UE `t.MaxFPS`와 같은 호스트 상한이다). 실제 시간 delta를 쓴다(`fixedFrameDeltaSeconds` 0). `--frames`를 주지 않으면 창이 닫힐 때까지 돈다.
-- 창을 만들지 못하면(데스크톱 없음 등) `WindowCreateReport`를 Warning으로 남기고 실패 코드 1로 끝난다. 게임패드 backend가 없으면 Info 한 줄만 남기고 키보드·마우스로 돈다.
+- 창을 만들지 못하면(데스크톱 없음 등) `WindowCreateReport`를 Error로 남기고 실패 코드 1로 끝난다. 게임패드 backend가 없으면 Info 한 줄만 남기고 키보드·마우스로 돈다.
 - 헤드리스 `--engine`도 같은 큐·상태를 쓴다(이벤트가 없을 뿐이다). 그래서 창 없이 입력 경로를 확인할 수 있다: 시험용 `--inject-key-at-frame N`은 N번째 `PumpEvents`에서 큐에 `KeyDown(W)`를 넣는다(창 펌프가 넣는 이벤트와 같은 자리). 순서는 프레임 번호로 정해진다(시간·경쟁 무관).
 - 자체 시험(`RunEngineHostSelfTest`)이 `--engine --frames 4 --inject-key-at-frame 2`를 띄워 "[Info][Sandbox.Game] Pawn received key W"를 확인한다. 실제 창·마우스·패드는 사람이 `Sandbox --engine --window`로 확인한다(자동 시험에서 OS 입력을 합성하지 않는다 — 포커스·데스크톱 상태에 따라 결과가 달라지므로).
 - 버린 대안: 엔진이 창을 소유하는 것. 창·swapchain 소유는 화면 마일스톤의 렌더 호스트(뷰포트 클라이언트) 몫이라 지금은 호스트 hook에 둔다. 그때 hook의 창 펌프가 뷰포트 쪽으로 옮겨 간다.
-
-- 시험은 `Engine/Source/Runtime/Gameplay/Tests/GameplayFlowTests.cpp`의 `GameplayFlow_FourteenStepScenario`·`GameplayFlow_WorldWithoutDirector`·`GameplayFlow_EngineDestroyWorldPassesTheReason`다.

@@ -129,8 +129,8 @@ public:
 
     // 창 모드면 프레임 간격을 WindowFrameNanoseconds로 맞춘다. OS sleep 해상도(Windows 기본 약
     // 15.6 ms)가 거칠어 프레임마다 남은 시간을 자면 간격이 해상도 배수로 늘어나므로, 누적
-    // deadline을 두고 deadline 전이면 남은 만큼 잔다(늦게 깬 프레임 다음은 자지 않아 평균이
-    // 맞는다). 한 간격 넘게 밀리면 deadline을 지금으로 다시 잡는다(밀린 프레임을 몰아 돌리지
+    // deadline을 두고 deadline 전이면 남은 만큼 잔다(늦게 깬 만큼 다음 프레임이 덜 자서
+    // 평균이 맞는다). 한 간격 넘게 밀리면 deadline을 지금으로 다시 잡는다(밀린 프레임을 몰아 돌리지
     // 않는다). 헤드리스는 기다리지 않는다.
     void EndFrame(Engine&) noexcept override {
         if (options_.window == nullptr) {
@@ -157,7 +157,7 @@ private:
     uint64 deadline_ = 0;
 };
 
-// 창 모드의 창을 만든다. 실패는 Warning을 남기고 그대로 돌려준다.
+// 창 모드의 창을 만든다. 실패는 Error를 남기고 그대로 돌려준다(호스트는 실패 코드로 끝난다).
 Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator) noexcept {
     platform::WindowDesc desc;
     desc.title = "Rocks Sandbox";
@@ -166,9 +166,9 @@ Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator) no
     platform::WindowCreateReport report;
     auto window = platform::Window::Create(allocator, desc, &report);
     if (!window) {
-        Log::Warning(platform::LogPlatformWindow,
-                     "Window creation failed at {Call}: {Error} (OS error {OsError})",
-                     StringView(report.call), ErrorCodeName(window.Error()), report.osError);
+        Log::Error(platform::LogPlatformWindow,
+                   "Window creation failed at {Call}: {Error} (OS error {OsError})",
+                   StringView(report.call), ErrorCodeName(window.Error()), report.osError);
     }
 
     return window;
