@@ -1,6 +1,6 @@
 # OpenGL ES 그래픽 backend(P11)
 
-기준일: 2026-11-18, 개정 2. [셰이더 시스템](ShaderSystem/README.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
+기준일: 2026-11-25, 개정 4. [셰이더 시스템](ShaderSystem/README.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
 
 UE 근거는 UE 5.8.4(로컬 클론, `release` 브랜치)의 `Engine/Source/Runtime/OpenGLDrv`이며, 아래 경로는 `Runtime/OpenGLDrv/Private/` 기준이다(셰이더 컴파일러는 `Developer/ShaderFormatOpenGL/Private/`). 레거시·deprecated 경로와 데스크톱 GL SM5 경로는 보지 않았다.
 
@@ -14,8 +14,8 @@ UE 근거는 UE 5.8.4(로컬 클론, `release` 브랜치)의 `Engine/Source/Runt
 | 공통 경로 | 장치 동작은 모두 ES 3.2 core 함수 표(`Private/Common/GlesApi.h`)로 한다. 플랫폼 GL 헤더를 include하지 않고 상수·형식을 직접 둔다 | 같은 공통 코드가 Windows·Android에서 컴파일되게 한다. UE도 공통 기반 `OpenGLBase.h` 위에 플랫폼 클래스를 둔다 |
 | 플랫폼 층 | context·current 전환·창 표면·present·fence 대기·클립 공간만 플랫폼 층(`GlesPlatform`, Win64 WGL·Android EGL)이 맡는다. 데스크톱 전용 호출(`glClipControl`, `GL_FRAMEBUFFER_SRGB` 켜기, WGL sRGB 픽셀 형식)은 Win64 층에만 있다 | 셰이더 시스템 5.2절 G2·P11 |
 | Windows context | ES profile(`WGL_EXT_create_context_es2_profile`) 우선, 안 되면 데스크톱 GL 4.3 core로 내려간다(`OpenGLContextProfile::Automatic`). 둘을 골라 쓸 수도 있다 | 측정 S12·2.2절. ES profile은 드라이버가 ES 밖 호출을 거부해 공통 경로를 검증한다. 데스크톱 core는 UE 방식(`Windows/WindowsOpenGLPlatform.cpp:200–205`)이고 형식 정의 `GLES31_PC`의 `deviceRequirements`와 같다 |
-| 셰이더 원문 | SH2 전에는 손으로 쓴 GLSL ES 3.20 원문을 런타임에 컴파일한다. 모양은 쿠킹된 `GLES31_PC` 출력과 같다(7절) | 7절 |
-| 그리기 상수 | 루트 상수 에뮬레이션 배열 `vu_h[N]`·`pu_h[N]`·`cu_h[N]`(그리기별 상수 n byte = vec4 n/16개, 파이프라인이 `drawConstantBytes`로 선언, RenderBase SX2)에 `glUniform4fv`로 그대로 올린다. 장치는 링크 뒤 배열의 active 크기를 읽어 선언보다 크면 생성을 거부하고, 그 크기만큼 올린다 | 셰이더 시스템 7.2절 4항, UE `OpenGLShaders.cpp:1983–2055`·`:3289–3412` |
+| 셰이더 코드 | 쿠킹된 ESSL 3.20(`GLES31_PC`·`GLES31_ANDROID`)과 GLES 바인딩 머리(값 2)를 장치 셰이더(`CreateShader`, `ShaderCodeKind::Essl`)로 받고 파이프라인을 만들 때 컴파일·link한다. HLSL → ESSL 변환은 셰이더 워커(`ShaderFormatOpenGL`)가 쿠킹 때 한다(7절) | 7절, ShaderSystem 16.1절 SSD42·SH2e2 메모 |
+| 그리기 상수 | 루트 상수는 쿠킹 ESSL의 에뮬레이션 배열(`vu_h`·`pu_h`·`cu_h` 등 `<단계>u_<타입>`)이다. 그리기별 상수 n byte는 파이프라인이 `drawConstantBytes`로 선언한다(RenderBase SX2). 장치는 link 때 값 2 복사 표(원본 byte 오프셋·byte 수·대상 배열·vec4 오프셋)를 uniform 위치(`<배열>[vec4 오프셋]`)로 바꾼다. 그리고 program이 바뀌거나 값이 바뀌면 `glUniform4fv`·`glUniform4iv`·`glUniform4uiv`로 올린다 | 셰이더 시스템 7.2절 4항 |
 | 화면 방향 | 모든 패스(스왑체인 포함)를 저장소 첫 행 = 이미지 위쪽인 색 텍스처에 그리고, present가 Y를 뒤집어 창에 blit한다 | 셰이더 시스템 7.2절 8항, UE `Windows/WindowsOpenGLPlatform.cpp:505–517`, Android `AndroidOpenGL.cpp:366–398` |
 | backend 이름 | Graphics `Backend::OpenGL`과 모듈 이름 `OpenGLGraphics`는 그대로 둔다. 이 backend가 곧 OpenGL ES다. 장치 정보의 adapter 이름 뒤에 context 종류(`OpenGL ES 3.2, WGL ES profile, GLES31_PC preview` 등)를 붙인다 | 셰이더 시스템 결정 9("OpenGLGraphics를 지우지 않고 GLES 미리보기로 전환"), 형식 정의 `"backend": "OpenGL"`, UE RHI 이름도 `OpenGL`(ES 포함) |
 
@@ -30,7 +30,7 @@ UE 근거는 UE 5.8.4(로컬 클론, `release` 브랜치)의 `Engine/Source/Runt
 | Windows context | 4.3 core·forward compatible, debug이면 debug bit(`Windows/WindowsOpenGLPlatform.cpp:200–205`, `:228–243`). ES profile 경로는 `EMULATE_ES31=0`이라 컴파일되지 않는다(`:244–252`, `Windows/WindowsOpenGL.h:9`) | ES profile 우선, 데스크톱 4.3 core 대체(1절) |
 | 함수 로딩 | Windows: GL 1.1은 `opengl32.dll` export, 나머지는 `wglGetProcAddress`(`WindowsOpenGLPlatform.cpp:771–800`). Android: ES 3.1 core는 직접 링크, ES 3.2·확장은 `eglGetProcAddress`(`OpenGLES.cpp:171–276`) | 모두 함수 표로 실행 시 얻는다. Windows는 같은 방식, Android는 `eglGetProcAddress`(없으면 `dlsym`) |
 | clip control | Windows·Linux에서 `GL_ARB_clip_control`이 있으면 `glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE)`(`OpenGLDrv.cpp:469–475`). Android는 쓰지 않는다. 컬 방향은 clip control 유무로 뒤집는다(`OpenGLState.cpp:46–54`) | 같다. ES profile은 같은 기능의 `GL_EXT_clip_control`을 쓴다. 컬 반전은 `glFrontFace`로 한 곳에서 한다(5.3절) |
-| 상수 버퍼 | OpenGL은 늘 에뮬레이션 UB다(`Runtime/RenderCore/Private/Shader.cpp:1695–1703`). 링크 때 `<단계>u_<타입>`·`<단계>c<N>_<타입>` 배열 위치를 찾고(`OpenGLShaders.cpp:1983–2055`) 그릴 때 `glUniform4fv/4iv/4uiv`로 올린다(`:3289–3412`) | 루트 상수(`vu_h`·`pu_h`)만 지금 구현. 상수 버퍼(`vc<N>_h` 등)와 복사 표는 SH2 |
+| 상수 버퍼 | OpenGL은 늘 에뮬레이션 UB다(`Runtime/RenderCore/Private/Shader.cpp:1695–1703`). 링크 때 `<단계>u_<타입>`·`<단계>c<N>_<타입>` 배열 위치를 찾고(`OpenGLShaders.cpp:1983–2055`) 그릴 때 `glUniform4fv/4iv/4uiv`로 올린다(`:3289–3412`) | 루트 상수는 값 2 복사 표로 올린다(SH2e2). 상수 버퍼 배열(`vc<N>_h` 등)은 쿠킹 ESSL과 복사 표에 있고, 장치의 상수 버퍼 묶기는 GX6이다 |
 | 텍스처·샘플러 | 저장소는 늘 `glTexStorage*` + `glTexSubImage*`(`OpenGLTexture.cpp:698–798`), 샘플러는 샘플러 객체 `glBindSampler`(`OpenGLCommands.cpp:607–613`, 생성 `OpenGLState.cpp:302–330`). PS 유닛 0부터, VS는 `MaxTextureImageUnits`부터(`OpenGLBase.h:128–131`) | 같다. VS 유닛은 16부터 컴파일 때 고정(셰이더 시스템 7.2절 4항) |
 | 정점 입력 | ES 3.1 vertex attrib binding(`glVertexAttribFormat`·`glVertexAttribIFormat`·`glVertexAttribBinding`·`glBindVertexBuffer`·`glVertexBindingDivisor`)과 context당 VAO 하나(`OpenGLCommands.cpp:1840–1964`) | 같은 API. VAO는 파이프라인마다 하나로 형식을 한 번 둔다 |
 | 버퍼·readback | 생성은 `glBufferData`, 갱신은 Windows `glBufferSubData`·Android map(`OpenGLCommands.cpp:44–48`). readback은 `GL_PIXEL_PACK_BUFFER` + `glReadPixels`(`OpenGLTexture.cpp:865–902`) | 같다. ES에 `glGetBufferSubData`가 없어 readback은 fence 뒤 `glMapBufferRange(GL_MAP_READ_BIT)` |
@@ -146,9 +146,9 @@ Engine/Source/Runtime/OpenGLGraphics/
 
 ### 5.5 셰이더·파이프라인
 
-- `glCreateProgram`·`glAttachShader`·`glLinkProgram`(separate shader object 없음). 컴파일·링크 실패는 `DependencyFailed`이고 info log가 `LastError`다.
-- 링크 뒤 active attribute로 정점 입력을 대조한다(RenderBase 10.4절).
-- 루트 상수 배열 위치(`vu_h`·`pu_h`)를 링크 때 한 번 찾는다. 없으면 그 단계는 상수를 읽지 않는다.
+- 장치 셰이더(`CreateShader`)는 ESSL·값 1·값 2의 CPU 사본이다. 파이프라인 생성이 단계마다 `glCreateShader`·`glCompileShader`로 컴파일한 뒤 `glCreateProgram`·`glAttachShader`·`glLinkProgram`으로 link하고(separate shader object 없음) GL shader 객체는 link 뒤 지운다. 컴파일·링크 실패는 `DependencyFailed`이고 info log가 `LastError`다.
+- 정점 입력은 값 1의 입력 마스크·attribute 타입으로 대조한다(RenderBase 10.4절, `MatchShaderVertexInputs`).
+- 루트 상수 uniform 위치는 link 때 값 2 복사 표로 한 번 찾는다. 텍스처 유닛·image 유닛·storage binding은 값 1 위치이고 쿠킹 ESSL의 `layout(binding = …)`과 같다.
 
 ### 5.6 스레드(GX10·GX11)
 
@@ -163,9 +163,9 @@ Engine/Source/Runtime/OpenGLGraphics/
 
 - 파이프라인 상태는 프로그램과 함께 기억했다가 `SetPipeline`이 건다: 타깃별 `glEnablei`·`glBlendFuncSeparatei`·`glBlendEquationSeparatei`·`glColorMaski`(ES 3.2 core), `GL_SAMPLE_ALPHA_TO_COVERAGE`, 컬, `glPolygonOffset`(상한은 `GL_EXT_polygon_offset_clamp`의 `glPolygonOffsetClampEXT`, 없으면 `depthBiasClamp` 거짓), 깊이 clamp(`GL_EXT_depth_clamp`), 깊이 시험·쓰기(쓰기만 켜면 `GL_ALWAYS` 시험), `glStencilFuncSeparate`·`glStencilOpSeparate`·`glStencilMaskSeparate`(기준 값은 `SetStencilReference`가 다시 건다), 기본도형.
 - `BeginPass`: 색 하나·깊이 없음은 텍스처의 framebuffer, 그 밖은 장치 framebuffer 하나에 attachment를 붙이고(`glDrawBuffers`, 완전하지 않으면 `Unsupported`) EndFrame이 뗀다. load 동작은 쓰기 mask·scissor를 기본값으로 돌린 뒤 `glClearBuffer{f,i,ui}v`·`glClearBufferfi`다. 패스 동안 scissor를 늘 켜고 대상 전체에서 시작한다(`GL_UPPER_LEFT` 클립 공간이라 창 좌표 y 0이 이미지 위쪽이므로 viewport·scissor 원점을 그대로 쓴다. Android `flip_vert_y` 경로는 SH6에서 다시 본다). present·패스 복사 blit 동안 scissor를 끈다.
-- compute: `#version 320 es` compute 셰이더, 그리기별 상수 `cu_h[N]`, 읽기 typed는 텍스처 유닛 1 + slot(`samplerBuffer`), 구조화·raw 읽기는 storage binding slot, 쓰기 typed는 image unit slot(`imageBuffer`, `glBindImageTexture`), 구조화·raw 쓰기는 storage binding 4 + slot(이름 접두사 `type_RWByteAddressBuffer`가 raw). 그래픽 단계 image uniform은 거부한다. dispatch 뒤 `glMemoryBarrier(GL_ALL_BARRIER_BITS)`(UE도 dispatch 앞뒤 전체 bit).
+- compute: 쿠킹된 `#version 320 es` compute 셰이더, 그리기별 상수 `cu_h`다. 읽기 typed(`samplerBuffer`, 텍스처 유닛)·구조화·raw 읽기와 쓰기(storage block binding)·쓰기 typed(`imageBuffer`, image 유닛, `glBindImageTexture`)의 위치는 모두 값 1 위치다. 그래픽 단계의 image uniform과 VS·PS storage block은 쿠킹 규칙(형식 `uavStages`·ES 3.2 최소 보장 상한)이 거부한다. dispatch 뒤 `glMemoryBarrier(GL_ALL_BARRIER_BITS)`(UE도 dispatch 앞뒤 전체 bit).
 - 간접 명령은 `GL_DRAW_INDIRECT_BUFFER`·`GL_DISPATCH_INDIRECT_BUFFER`를 묶어 `glDrawArraysIndirect`·`glDrawElementsIndirect`·`glDispatchComputeIndirect`다. GL index 간접 인자의 `firstIndex`는 index 버퍼 처음부터 세므로 index 버퍼 offset이 0이 아닌 `DrawIndexedIndirect`는 무시한다. 복사는 `glCopyBufferSubData`·`glCopyImageSubData`, UAV clear는 ES에 `glClearBufferSubData`가 없어 같은 값 묶음을 `glBufferSubData`로 덮어 쓴다.
-- 제약: ES 3.1 최소 보장 `GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS`는 4라 storage binding 4–7(compute 쓰기)을 못 쓰는 기기가 있을 수 있다(그때는 셰이더 링크가 실패한다, 기기 측정은 SH6).
+- 제약: ES 3.1 최소 보장 `GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS`는 4라 storage block을 4개보다 많이 쓰는 compute 셰이더는 그런 기기에서 링크가 실패할 수 있다(기기 측정은 SH6).
 
 ## 6. 공개 제약
 
@@ -181,16 +181,15 @@ Engine/Source/Runtime/OpenGLGraphics/
 | sRGB 쓰기 스위치도 sRGB 창 표면도 없는 Android 기기 | 창 표면 생성 `Unsupported`(P13에서 셰이더 present) |
 | 자원 생성 스레드 | `concurrentResourceCreation` false |
 
-## 7. 셰이더 원문 경로
+## 7. 셰이더 코드 경로
 
-선택: **(나) 손으로 쓴 GLSL ES 3.20 원문**이며 모양을 쿠킹된 `GLES31_PC` 출력에 맞춘다.
+선택이 바뀌었다(SH2e2, 2026-11-24): **쿠킹된 ESSL**이다. P11의 (나) 손으로 쓴 GLSL ES 3.20 원문(`ShaderSource::glsl`)은 Graphics의 `ShaderSource`와 함께 지웠다.
 
-- 원문: `#version 320 es`, `precision highp float/int`, 정점 입력 `layout(location = n) in ... in_var_ATTRIBUTEn`, 단계 사이 `layout(location = n) ... out_var_TEXCOORDn`/`in_var_TEXCOORDn`, PS 출력 `layout(location = 0) out vec4 out_var_SV_Target0`(SPIRV-Cross 이름), 그리기 상수 `uniform highp vec4 vu_h[5]`와 `#define transform mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3])`, 텍스처 `layout(binding = 0) uniform highp sampler2D ps0`. 클립 공간 보정은 없다(`fixupClipSpace`·`flipVertexY` false).
-- 근거:
-  1. 형식 정의와 맞는다: ESSL 320, 행 우선 byte(DXC `-Zpr`)를 열 우선 `mat4`로 읽어 `M * v`(셰이더 시스템 7.2절 6항), 클립 공간 보정 끔, 루트 상수 에뮬레이션 이름·텍스처 유닛(7.2절 4항).
-  2. 장치 쪽 경로가 SH2와 같다: 루트 상수 배열 위치 조회와 `glUniform4fv` 업로드, `binding`으로 고정한 유닛. SH2는 원문의 출처(쿠킹된 ESSL)와 상수 버퍼 복사 표만 더한다.
-  3. (가) DXC → SPIR-V → SPIRV-Cross를 런타임에 쓰면 Sandbox 실행 파일이 개발 도구 DLL을 열어야 하고(Release 배제 정책), 상수 버퍼를 vec4 배열로 바꾸는 텍스트 재작성은 SH2 워커(ShaderFormatOpenGL) 범위다. 지금 Sandbox HLSL도 SH 규약(register 없음, 샘플러 짝)을 따르지 않는다.
-- 한계: `GLES31_ANDROID` 원문(셰이더 쪽 y 반전)은 손으로 두지 않았다. Android 규약의 픽셀 대조는 SH6(쿠킹된 원문 + 기기)에서 한다.
+- 셰이더 워커(Developer `ShaderFormatOpenGL`)가 HLSL을 DXC → SPIR-V → SPIRV-Cross ESSL 320으로 바꾸고 상수 버퍼·루트 상수를 vec4 배열로 텍스트 재작성한다(ShaderSystem 16.1절 SSD42). 결과는 값 0 ESSL, 값 1 바인딩 layout, 값 2 GLES 바인딩 머리(배열 표·샘플러 표·복사 표)다.
+- 출력 모양: `#version 320 es`, 기본 정밀도 `highp`, 정점 입력 `in_var_ATTRIBUTEn`(location n), 단계 사이 `TEXCOORDn` location, PS 출력 `out_var_SV_Target0`(SPIRV-Cross 이름)이다. 루트 상수는 `uniform highp vec4 vu_h[N]` 같은 배열이고, 행렬은 `mat4(a[k..k+3])`로 행 우선 byte를 열 우선 `mat4`로 읽어 `M * v`다(셰이더 시스템 7.2절 6항). combined sampler는 `<v·p·c>s<n>`과 `layout(binding = 유닛)`이다. `GLES31_PC`는 클립 공간 보정을 끄고(`fixupClipSpace`·`flipVertexY` false) `GLES31_ANDROID`는 켠다.
+- 장치는 코드를 해석하지 않는다. 컴파일·link, 값 2로 uniform 위치 찾기, 값 1 위치에 자원 묶기만 한다. 장치 안 도우미(깊이·스텐실 readback)는 장치가 가진 고정 GLSL이다.
+- 개발 구성 Sandbox는 Development 공급자가 `GLES31_PC` 메모리 라이브러리를 만든다(RenderBase 9.2절). Release Windows Sandbox는 OpenGLGraphics를 링크하지 않는다(ShaderSystem 9절 — Android는 링크한다).
+- 한계: `GLES31_ANDROID` 픽셀 대조는 SH6(기기)다. 형식 상한(ES 3.2 최소 보장) 때문에 VS·PS storage block과 MRT 8은 `GLES31_PC`에서 쿠킹하지 않고, 그 Sandbox self-test는 NOT RUN이다.
 
 ## 8. 시험(2026-11-17)
 
@@ -198,18 +197,19 @@ Engine/Source/Runtime/OpenGLGraphics/
 - 독립 리뷰 1회 반영: ES 사양의 sRGB blit 의미(`rawSrgbBlit`), 표면 전환 실패 뒤 context 복구·손실 게시, EGL debug 속성, timestamp 조사 함수, 생성 보고의 첫 시도 원인·잘림 표시, 기록 중 회수 실패 때 창 표면 해제, 창 표면 전환 뒤 viewport 복원.
 - 음성 대조(임시 스위치, 확인 뒤 제거): present의 Y 반전을 빼면 두 context에서 창 경로 7건 불일치, 앞면을 `GL_CW`로 두면 컬 검사 6건 실패, present blit에서 sRGB 쓰기 스위치를 켜 두면 ES profile에서 창 경로 3건 불일치.
 - Android(`-p:RocksPlatform=android`) 교차 빌드에서 Common·Android 층이 컴파일·링크된다. 실행은 P13.
+- 위 결과는 손으로 쓴 GLSL 원문 시기다. 쿠킹 ESSL로 바꾼 뒤(SH2e2)의 self-test·픽셀 대조는 ShaderSystem 16.1절 SH2e2 메모에 있다(두 context 통과, D3D12와 대조 차이 0).
 
 ## 9. 셰이더 시스템 스펙과 다른 점
 
 - P11 행은 Windows 미리보기를 "GL 4.3 core 이상"으로 적었다. 구현은 ES profile을 우선하고 4.3 core를 대체로 둔다(측정 2.2절). 형식 정의 `GLES31_PC.json`의 `deviceRequirements`는 데스크톱 core 대체 경로의 요구로 남는다.
 - 7.2절 8항은 이 전환을 SH2에 두었다. 클립 공간·앞면·present Y 반전은 P11에서 구현했다.
-- 7.2절 4항 에뮬레이션은 루트 상수 배열만 P11에서 구현했다. 상수 버퍼 배열·복사 표·바인딩 머리는 SH2다.
+- 7.2절 4항 에뮬레이션은 루트 상수 배열만 P11에서 구현했고, 복사 표·바인딩 머리는 SH2e2에서 받는다. 상수 버퍼 묶기는 GX6이다.
 - P11 의존으로 A0-G(G2)를 적었지만 A0-G 형식 확장 전에 진행했다. 형식 표는 지금 형식만 두고 확장 조건 열을 미리 두었다(5.1절).
 
 ## 10. 후속
 
 - P13 Android 실행 기반: 앱 진입·`ANativeWindow` 수명·APK, 에뮬레이터·기기 실행(측정 S11), sRGB 스위치·sRGB 표면이 없는 기기의 셰이더 present.
-- SH2: 쿠킹된 ESSL과 바인딩 머리 받기, 상수 버퍼 에뮬레이션(`<단계>c<N>_<타입>`)·복사 표, `ShaderSource::glsl` 제거.
+- GX6: 상수 버퍼 배열(`<단계>c<N>_<타입>`)을 값 2 복사 표로 올리는 묶기(파라미터 묶음).
 - SH6: `GLES31_ANDROID` 픽셀 대조(앞면 `GL_CW`·y 반전), 기기 호환성(S12 기기 부분).
 - 픽셀 형식 전체 대응: GLES 형식 표에 PixelFormat 행을 더한다(PF1 뒤 다음 단계, 이름 맞춤은 끝났다).
 - LG7: 호출자 쪽 로그(생성 실패 선택자, 셰이더 컴파일 실패)와 관찰 스레드가 감지한 장치 손실의 로그.
@@ -232,3 +232,4 @@ Engine/Source/Runtime/OpenGLGraphics/
 - 개정 1(2026-11-17): 초안·P11 구현.
 - 개정 2(2026-11-18): RenderBase GX1·GX2 버퍼 1단계(5.1절 버퍼 view·장치 능력). texel buffer 형식 능력은 PixelFormat.ko.md 14.3절(RQ9).
 - 개정 3(2026-11-18): GX1·GX2 리뷰 반영(A8 texel buffer 능력 제외, 그래픽 단계 image uniform·유닛 0 밖 sampler 거부, 구조화 stride 대조, viewport 수 1)과 RenderBase GX3·GX4(5.8절).
+- 개정 4(2026-11-25): SH2e2 반영. 쿠킹된 ESSL을 장치 셰이더로 받고 파이프라인 생성 때 컴파일·link한다. 루트 상수는 값 2 복사 표로, 정점 입력·자원 위치는 값 1로 얻는다(1·2·5.5·5.8·7·8·9·10절). 손으로 쓴 GLSL 원문(`ShaderSource::glsl`) 경로 서술을 지웠다.

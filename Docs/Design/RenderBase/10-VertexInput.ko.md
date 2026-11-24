@@ -89,10 +89,7 @@
 - **셰이더 입력 대조**(파이프라인 생성 때):
   - 셰이더가 읽는 모든 location이 배치에 있어야 하고(배치 ⊇ 입력), 형식의 셰이더 타입 계열(float·int·uint)이 셰이더 입력 타입과 맞아야 한다. 위반은 `InvalidArgument`이고 진단 문자열에 location·형식·셰이더 타입을 적는다.
   - 셰이더가 읽지 않는 속성은 허용한다. 깊이 pass처럼 위치만 읽는 셰이더가 같은 배치를 쓰기 때문이다.
-  - 셰이더 시스템 SH2 전에는 다음으로 입력을 얻는다.
-    - D3D12: 컴파일한 VS 입력 signature(시맨틱 `ATTRIBUTE` 번호·성분 타입)
-    - OpenGL: 링크 뒤 active attribute(location·타입)
-  - SH2 뒤에는 쿠킹된 `ShaderBindingLayout`의 입력 마스크·타입을 쓴다(셰이더 시스템 7.2절 3·7항).
+  - 입력은 쿠킹된 `ShaderBindingLayout`(값 1 v3)의 입력 마스크와 int·uint attribute 마스크에서 얻는다(셰이더 시스템 7.2절 3·7항, Graphics `MatchShaderVertexInputs`). 네 backend가 같은 함수를 쓴다. SH2e2(2026-11-24) 전에는 D3D12가 컴파일한 VS 입력 signature를, OpenGL이 링크 뒤 active attribute를 읽었다.
 
 **버퍼와 그리기**(GX4 일부를 함께 당긴다).
 - 버퍼 용도에 index를 더한다. index 형식은 UInt16·UInt32다.
