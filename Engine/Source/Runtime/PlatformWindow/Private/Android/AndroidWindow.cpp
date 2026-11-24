@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Launch/AndroidActivity.h>
@@ -101,6 +102,227 @@ input::Key KeyFromKeyCode(int32_t code) noexcept {
     default:
         return input::Key::None;
     }
+}
+
+// 패드 버튼 비트다.
+uint32 ButtonBit(input::GamepadButton button) noexcept {
+    return 1u << static_cast<uint32>(button);
+}
+
+// 게임패드 키코드 → 버튼(UE AndroidGameControllerMapper 표준 배치). 패드 버튼이 아니면 false다.
+bool GamepadButtonFromKeyCode(int32_t code, input::GamepadButton& button) noexcept {
+    switch (code) {
+    case AKEYCODE_BUTTON_A:
+        button = input::GamepadButton::South;
+        return true;
+    case AKEYCODE_BUTTON_B:
+        button = input::GamepadButton::East;
+        return true;
+    case AKEYCODE_BUTTON_X:
+        button = input::GamepadButton::West;
+        return true;
+    case AKEYCODE_BUTTON_Y:
+        button = input::GamepadButton::North;
+        return true;
+    case AKEYCODE_BUTTON_L1:
+        button = input::GamepadButton::LeftShoulder;
+        return true;
+    case AKEYCODE_BUTTON_R1:
+        button = input::GamepadButton::RightShoulder;
+        return true;
+    case AKEYCODE_BUTTON_SELECT:
+        button = input::GamepadButton::Back;
+        return true;
+    case AKEYCODE_BUTTON_START:
+        button = input::GamepadButton::Start;
+        return true;
+    case AKEYCODE_BUTTON_THUMBL:
+        button = input::GamepadButton::LeftThumb;
+        return true;
+    case AKEYCODE_BUTTON_THUMBR:
+        button = input::GamepadButton::RightThumb;
+        return true;
+    case AKEYCODE_DPAD_UP:
+        button = input::GamepadButton::DPadUp;
+        return true;
+    case AKEYCODE_DPAD_DOWN:
+        button = input::GamepadButton::DPadDown;
+        return true;
+    case AKEYCODE_DPAD_LEFT:
+        button = input::GamepadButton::DPadLeft;
+        return true;
+    case AKEYCODE_DPAD_RIGHT:
+        button = input::GamepadButton::DPadRight;
+        return true;
+    default:
+        return false;
+    }
+}
+
+// 입력 스레드가 모으고 GamepadBackend::Poll(게임 스레드)이 읽는 패드 상태다(Docs/Design/
+// AndroidPlatform.ko.md 5절). 패드는 입력 장치 ID 순서로 가장 작은 빈 슬롯에 앉는다. 연결 해제
+// 감지는 InputManager 리스너(Java)가 필요해 후속이다 — 그때까지 앉은 패드는 연결된 채로 남는다.
+class AndroidGamepadStore {
+public:
+    // 장치의 슬롯이다. 처음 보는 장치면 빈 슬롯을 준다. 자리가 없으면 MaxGamepads다.
+    uint32 SlotLocked(int32_t deviceId) noexcept {
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            if (pads_[slot].used && pads_[slot].deviceId == deviceId) {
+                return slot;
+            }
+        }
+
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            if (!pads_[slot].used) {
+                pads_[slot].used = true;
+                pads_[slot].deviceId = deviceId;
+                pads_[slot].state.connected = true;
+                return slot;
+            }
+        }
+
+        return input::MaxGamepads;
+    }
+
+    void SetButton(int32_t deviceId, input::GamepadButton button, bool down) noexcept {
+        LockGuard guard(mutex_);
+        const uint32 slot = SlotLocked(deviceId);
+        if (slot == input::MaxGamepads) {
+            return;
+        }
+
+        Pad& pad = pads_[slot];
+        if (down) {
+            pad.state.buttons |= ButtonBit(button);
+            pad.latched |= ButtonBit(button);
+        } else {
+            pad.state.buttons &= ~ButtonBit(button);
+        }
+    }
+
+    // 축과 HAT(방향 버튼)을 갱신한다. 스틱 Y는 화면 아래가 +라 뒤집는다(위가 +).
+    void SetAxes(int32_t deviceId, const AInputEvent* event) noexcept {
+        auto axis = [event](int32_t code) noexcept {
+            return AMotionEvent_getAxisValue(event, code, 0);
+        };
+        const float leftX = axis(AMOTION_EVENT_AXIS_X);
+        const float leftY = -axis(AMOTION_EVENT_AXIS_Y);
+        const float rightX = axis(AMOTION_EVENT_AXIS_Z);
+        const float rightY = -axis(AMOTION_EVENT_AXIS_RZ);
+        const float leftTrigger =
+            Max(axis(AMOTION_EVENT_AXIS_LTRIGGER), axis(AMOTION_EVENT_AXIS_BRAKE));
+        const float rightTrigger =
+            Max(axis(AMOTION_EVENT_AXIS_RTRIGGER), axis(AMOTION_EVENT_AXIS_GAS));
+        const float hatX = axis(AMOTION_EVENT_AXIS_HAT_X);
+        const float hatY = axis(AMOTION_EVENT_AXIS_HAT_Y);
+        LockGuard guard(mutex_);
+        const uint32 slot = SlotLocked(deviceId);
+        if (slot == input::MaxGamepads) {
+            return;
+        }
+
+        Pad& pad = pads_[slot];
+        float* axes = pad.state.axes;
+        axes[static_cast<uint32>(input::GamepadAxis::LeftX)] = leftX;
+        axes[static_cast<uint32>(input::GamepadAxis::LeftY)] = leftY;
+        axes[static_cast<uint32>(input::GamepadAxis::RightX)] = rightX;
+        axes[static_cast<uint32>(input::GamepadAxis::RightY)] = rightY;
+        axes[static_cast<uint32>(input::GamepadAxis::LeftTrigger)] = leftTrigger;
+        axes[static_cast<uint32>(input::GamepadAxis::RightTrigger)] = rightTrigger;
+        const uint32 hatMask =
+            ButtonBit(input::GamepadButton::DPadUp) | ButtonBit(input::GamepadButton::DPadDown) |
+            ButtonBit(input::GamepadButton::DPadLeft) | ButtonBit(input::GamepadButton::DPadRight);
+        uint32 hat = 0;
+        hat |= hatX < -HatThreshold ? ButtonBit(input::GamepadButton::DPadLeft) : 0u;
+        hat |= hatX > HatThreshold ? ButtonBit(input::GamepadButton::DPadRight) : 0u;
+        hat |= hatY < -HatThreshold ? ButtonBit(input::GamepadButton::DPadUp) : 0u;
+        hat |= hatY > HatThreshold ? ButtonBit(input::GamepadButton::DPadDown) : 0u;
+        pad.latched |= hat & ~pad.state.buttons;
+        pad.state.buttons = (pad.state.buttons & ~hatMask) | hat;
+    }
+
+    // 바뀐 패드를 큐에 넣는다. 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 넣어 edge를
+    // 잃지 않는다(입력 스레드는 이벤트로 받지만 backend 계약은 폴링이다).
+    void Poll(input::InputQueue& queue,
+              input::GamepadSnapshot (&last)[input::MaxGamepads]) noexcept {
+        LockGuard guard(mutex_);
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            Pad& pad = pads_[slot];
+            if (!pad.used) {
+                continue;
+            }
+
+            const uint32 missed = pad.latched & ~pad.state.buttons;
+            pad.latched = 0;
+            if (missed != 0) {
+                input::GamepadSnapshot pressed = pad.state;
+                pressed.buttons |= missed;
+                (void)queue.Push(input::InputEvent::Gamepad(static_cast<uint8>(slot), pressed));
+                last[slot] = pressed;
+            }
+
+            if (!Same(pad.state, last[slot])) {
+                (void)queue.Push(input::InputEvent::Gamepad(static_cast<uint8>(slot), pad.state));
+                last[slot] = pad.state;
+            }
+        }
+    }
+
+private:
+    // HAT 축이 방향 버튼으로 눌렸다고 보는 경계다.
+    static constexpr float HatThreshold = 0.5f;
+
+    struct Pad {
+        bool used = false;
+        int32_t deviceId = 0;
+        uint32 latched = 0;
+        input::GamepadSnapshot state;
+    };
+
+    static float Max(float left, float right) noexcept {
+        return left > right ? left : right;
+    }
+
+    static bool Same(const input::GamepadSnapshot& left,
+                     const input::GamepadSnapshot& right) noexcept {
+        if (left.connected != right.connected || left.buttons != right.buttons) {
+            return false;
+        }
+
+        for (uint32 axis = 0; axis < input::GamepadAxisCount; ++axis) {
+            if (left.axes[axis] != right.axes[axis]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    Mutex mutex_;
+    Pad pads_[input::MaxGamepads];
+};
+
+// 프로세스에 하나다(창과 GamepadBackend가 같이 쓴다). 파괴하지 않는다.
+AndroidGamepadStore& GamepadStore() noexcept {
+    alignas(AndroidGamepadStore) static unsigned char storage[sizeof(AndroidGamepadStore)];
+    static AndroidGamepadStore* store = ::new (storage) AndroidGamepadStore();
+    return *store;
+}
+
+// 게임 스레드의 패드 backend다(Poll이 저장소를 읽는다).
+class AndroidGamepads final : public GamepadBackend {
+public:
+    void Poll(input::InputQueue& queue) noexcept override {
+        GamepadStore().Poll(queue, last_);
+    }
+
+private:
+    input::GamepadSnapshot last_[input::MaxGamepads];
+};
+
+bool IsGamepadSource(int32_t source) noexcept {
+    return (source & AINPUT_SOURCE_GAMEPAD) == AINPUT_SOURCE_GAMEPAD ||
+           (source & AINPUT_SOURCE_JOYSTICK) == AINPUT_SOURCE_JOYSTICK;
 }
 
 } // namespace
@@ -446,6 +668,31 @@ private:
     // 넘긴다. Back은 Key::Back으로 넘기고 소비한다(UE와 같다 — 앱을 끝내지 않는다).
     int Convert(const AInputEvent* event) noexcept {
         const int32_t type = AInputEvent_getType(event);
+        const int32_t source = AInputEvent_getSource(event);
+        // 게임패드 버튼·축은 패드 저장소로 간다(GamepadBackend::Poll이 읽는다).
+        if (type == AINPUT_EVENT_TYPE_KEY && IsGamepadSource(source)) {
+            input::GamepadButton button = input::GamepadButton::South;
+            if (GamepadButtonFromKeyCode(AKeyEvent_getKeyCode(event), button)) {
+                const int32_t keyAction = AKeyEvent_getAction(event);
+                if (keyAction == AKEY_EVENT_ACTION_DOWN || keyAction == AKEY_EVENT_ACTION_UP) {
+                    GamepadStore().SetButton(AInputEvent_getDeviceId(event), button,
+                                             keyAction == AKEY_EVENT_ACTION_DOWN);
+                }
+
+                return EventHandled;
+            }
+        }
+
+        if (type == AINPUT_EVENT_TYPE_MOTION &&
+            (source & AINPUT_SOURCE_JOYSTICK) == AINPUT_SOURCE_JOYSTICK) {
+            if ((AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK) ==
+                AMOTION_EVENT_ACTION_MOVE) {
+                GamepadStore().SetAxes(AInputEvent_getDeviceId(event), event);
+            }
+
+            return EventHandled;
+        }
+
         if (type == AINPUT_EVENT_TYPE_KEY) {
             const int32_t code = AKeyEvent_getKeyCode(event);
             const input::Key key = KeyFromKeyCode(code);
@@ -697,8 +944,19 @@ Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc&
 }
 
 // 게임패드는 AP5(Android 패드)에서 붙인다.
-Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator&) noexcept {
-    return Result<UniquePtr<GamepadBackend>>::Failure(ErrorCode::Unsupported);
+// 게임패드는 창의 입력 스레드가 모은 패드 저장소를 읽는다(창이 있어야 입력이 온다 — APK).
+Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) noexcept {
+    if (launch::android::CurrentActivity() == nullptr) {
+        return Result<UniquePtr<GamepadBackend>>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto created = UniquePtr<AndroidGamepads>::TryMake(allocator);
+    if (!created) {
+        return Result<UniquePtr<GamepadBackend>>::Failure(created.Error());
+    }
+
+    return Result<UniquePtr<GamepadBackend>>::Success(
+        UniquePtr<GamepadBackend>(Move(created.Value())));
 }
 
 DesktopSessionState QueryDesktopSessionState() noexcept {

@@ -110,7 +110,7 @@ mobile은 Android를 먼저 한다(PlatformLayer "모바일 플랫폼"). 지금 
 - `AInputQueue_finishEvent`에 처리한 이벤트는 1, 처리하지 않은 것은 0을 준다. 볼륨 키는 0이어서 OS가 처리한다. Back은 1(소비 — TouchInput 4.2절)이다.
 - `Window::PumpEvents`(게임 스레드)는 데스크톱과 같은 모양으로 큐를 호스트 `InputQueue`로 옮긴다. 넘쳐서 버린 수는 손실로 센다.
 - **터치(TI1 반영, 2026-11-24):** `ACTION_DOWN`·`POINTER_DOWN`은 `TouchIndexAllocator`가 `pointerId`에 번호를 배정해 `TouchBegan`, `MOVE`는 그 이벤트의 모든 포인터의 `TouchMoved`, `UP`·`POINTER_UP`은 `TouchEnded`, `CANCEL`은 닿아 있던 모든 손가락의 취소 끝이다. 배정기의 프레임 경계는 `PumpEvents`다. 압력은 `AMotionEvent_getPressure`를 0–1로 자른 값이다. `hasForce`는 입력 장치마다 한 번 `InputDevice.getDevice(id).getMotionRange(AXIS_PRESSURE)`를 JNI로 물어(입력 스레드를 JavaVM에 붙인다) 범위가 있고 폭이 0보다 크면 참이다. 결과는 장치 ID별로 8칸까지 기억한다. adb 주입 이벤트(장치 -1)는 거짓으로 판정되는 것을 확인했고, 실제 터치 장치는 사람 확인이 남았다. 마우스 소스(`AINPUT_SOURCE_MOUSE`)는 마우스 이벤트다. Back은 `Key::Back`으로 넘기고 소비한다.
-- 게임패드는 `GamepadBackend::Poll`이 입력 스레드가 모은 패드 상태를 읽는다. `AINPUT_SOURCE_GAMEPAD`·`JOYSTICK`의 키·축은 UE `AndroidGameControllerMapper` 표준 배치를 따른다.
+- 게임패드(2026-11-24 구현): 입력 스레드가 `AINPUT_SOURCE_GAMEPAD`·`JOYSTICK`의 버튼 키와 축을 프로세스 공용 패드 저장소에 모으고, `GamepadBackend::Poll`(게임 스레드)이 바뀐 패드만 `GamepadState`로 낸다(XInput과 같은 계약). 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 내 edge를 잃지 않는다. 배치는 UE `AndroidGameControllerMapper` 표준이다: A·B·X·Y → South·East·West·North, L1·R1, SELECT → Back, START, THUMBL·THUMBR, DPAD 키·HAT 축 → 방향 버튼, 스틱 X·Y와 Z·RZ(Y는 뒤집음), 트리거는 LTRIGGER·BRAKE와 RTRIGGER·GAS 중 큰 값. 슬롯은 장치 ID 순서다. 연결 해제 감지는 `InputManager` 리스너(Java)가 필요해 남았다 — 그때까지 앉은 패드는 연결된 채다. 에뮬레이터에서 `adb shell input gamepad keyevent KEYCODE_BUTTON_A/B`가 South·East로 Pawn까지 오는 것을 확인했다.
 
 ## 6. 로그·경로·명령줄
 
@@ -165,7 +165,7 @@ mobile은 Android를 먼저 한다(PlatformLayer "모바일 플랫폼"). 지금 
 진행(2026-11-24, x86_64 에뮬레이터 API 35에서 확인):
 - AP1·AP3·AP4: `Sandbox.apk`(Gradle 없이 aapt2·zipalign·apksigner)가 설치·실행되고, 게임 스레드에서 엔진이 돌며 로그가 logcat(tag Rocks)으로 나온다. extra 없이 띄우면 `--engine --window`다.
 - AP2: 창 listener·입력 스레드·창 파괴 gate(호스트 확인)·빈 프레임. 홈 → 복귀(pause·stop·start·resume)에서 gate 시간 초과와 ANR이 없다.
-- AP5 일부: 터치(TI1 — 탭은 한 프레임에 시작·끝, 스와이프는 시작·끝 위치)·Back·키가 Pawn까지 온다. 게임패드는 남았다.
+- AP5: 터치(TI1)·Back·키·게임패드 버튼이 Pawn까지 온다. 패드 연결 해제 감지(Java 리스너)만 남았다.
 - AP6(APK VFS)은 남았다.
 
 ShaderSystem P13이 막는 SH6(Android 셰이더·그래픽 실행)은 AP4까지 끝나면 시작할 수 있다.
