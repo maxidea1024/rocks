@@ -449,8 +449,8 @@ internal static class CppEmitter
         EmitVerifyGenerated(self, checks, Line, Body);
         Body($"const TypeSchema& {self}::Schema() noexcept {{");
         EmitFieldSchemas(type, Body);
-        string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}}};");
+        string fieldSpan = FieldSpan("FieldSchema", "fields", type.Fields);
+        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}{EditorOnlyIds(type)}}};");
         Body("return schema;");
         Body("}");
         // 클래스 생성 Trace다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a). 상속 필드를 포함한 모든 참조·struct·배열
@@ -469,9 +469,10 @@ internal static class CppEmitter
         else
         {
             Line($"static void Trace(const {native}& value, TraceVisitor& visitor) noexcept {{");
+            Unused(traced, Line, "value", "visitor");
             foreach (FieldModel field in traced)
             {
-                Line(TraceStatement(schema, field, "value", $"::{field.Owner}"));
+                Line(Guard(field, TraceStatement(schema, field, "value", $"::{field.Owner}")));
             }
 
             Line("}");
@@ -491,9 +492,10 @@ internal static class CppEmitter
             Body($"void {self}::ReferenceLayout(const {native}& value, detail::ReferenceLayoutBuilder& layout) noexcept {{");
             // struct 필드만 있으면 value를 쓰지 않는다(LayoutStructField는 형질만 본다).
             Body("(void)value;");
+            Unused(traced, Body, "layout");
             foreach (FieldModel field in traced)
             {
-                Body(LayoutStatement(schema, field, "value", $"::{field.Owner}"));
+                Body(Guard(field, LayoutStatement(schema, field, "value", $"::{field.Owner}")));
             }
 
             Body("}");
@@ -505,15 +507,26 @@ internal static class CppEmitter
         Body($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
         if (type.Fields.Count != 0)
         {
+            OpenFieldTable(type.Fields, Body);
             Body("static const RuntimeFieldOps fields[] = {");
             foreach (FieldModel field in type.Fields)
+            {
+                Guarded(field, Body, () => EmitFieldOps(field));
+            }
+
+            Body("};");
+            CloseFieldTable(type.Fields, Body);
+            Body($"ops.fields = {FieldSpan("RuntimeFieldOps", "fields", type.Fields)};");
+
+            // 필드 하나의 함수표 항목이다.
+            void EmitFieldOps(FieldModel field)
             {
                 Body(FieldComment(schema, field));
                 if (field.Bitfield)
                 {
                     // bitfield bool(리플렉션 B9m)은 멤버 포인터 대신 생성 접근자로 read·write·writeStaged·codec·경로를 낸다.
                     Body($"detail::BitfieldFieldOps<{native}, {BitfieldAccessors(schema, field)}, {(field.Spec.ReadOnly ? "true" : "false")}>({GuidValue(field.Id)}),");
-                    continue;
+                    return;
                 }
 
                 string member = $"&::{field.Owner}::{field.Name}";
@@ -527,7 +540,7 @@ internal static class CppEmitter
                     string mapValueNative = ValueNativeType(schema, field);
                     string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{schema.Find(field.KeyReference!).NativeName}>()" : "";
                     EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + keyNative, Body);
-                    continue;
+                    return;
                 }
 
                 if (field.IsAggregate)
@@ -539,7 +552,7 @@ internal static class CppEmitter
                     Body("nullptr, {}, nullptr,");
                     string valueNative = ValueNativeType(schema, field);
                     EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field), Body);
-                    continue;
+                    return;
                 }
 
                 Body("+[](ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, FieldValue& out) noexcept -> Result<void> {");
@@ -568,9 +581,6 @@ internal static class CppEmitter
                 string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()" : ", nullptr";
                 EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Body);
             }
-
-            Body("};");
-            Body($"ops.fields = Span<const RuntimeFieldOps>(fields, {type.Fields.Count});");
         }
 
         if (baseId is not null)
@@ -612,6 +622,7 @@ internal static class CppEmitter
         }
 
         Line($"template <class Visitor> static constexpr void VisitFields(const {native}& value, Visitor& visitor) noexcept {{");
+        Unused(type.Fields, Line, "value", "visitor");
         foreach (FieldModel field in DeclarationOrder(schema, type))
         {
             // bitfield는 멤버 포인터를 만들 수 없어 헤더 안에서 직접 읽는다. Get_ 정의는 생성 소스에 있어(GS2) 다른 모듈이
@@ -622,7 +633,7 @@ internal static class CppEmitter
                 : field.Bitfield
                 ? $"static_cast<bool>(static_cast<const ::{schema.Find(field.Owner).NativeName}&>(value).{field.Name} != 0)"
                 : $"value.*(&{string.Format(CultureInfo.InvariantCulture, ownerFormat, field.Owner)}::{field.Name})";
-            Line($"visitor.Field({Label(field.Name)}, {read});");
+            Line(Guard(field, $"visitor.Field({Label(field.Name)}, {read});"));
         }
 
         Line("}");
@@ -670,10 +681,17 @@ internal static class CppEmitter
     {
         foreach (FieldModel field in type.OwnFields.Where(field => field.Bitfield))
         {
-            Line($"static bool Get_{field.Name}(const {native}& value) noexcept;");
-            Line($"static void Set_{field.Name}({native}& value, bool bit) noexcept;");
-            Body($"bool GeneratedType<{native}>::Get_{field.Name}(const {native}& value) noexcept {{ return value.{field.Name} != 0; }}");
-            Body($"void GeneratedType<{native}>::Set_{field.Name}({native}& value, bool bit) noexcept {{ if (bit) {{ value.{field.Name} = 1; }} else {{ value.{field.Name} = 0; }} }}");
+            // 선언은 줄마다 낸다(모듈 API 매크로를 줄 단위로 붙인다 — ExportingLine).
+            Guarded(field, Line, () =>
+            {
+                Line($"static bool Get_{field.Name}(const {native}& value) noexcept;");
+                Line($"static void Set_{field.Name}({native}& value, bool bit) noexcept;");
+            });
+            Guarded(field, Body, () =>
+            {
+                Body($"bool GeneratedType<{native}>::Get_{field.Name}(const {native}& value) noexcept {{ return value.{field.Name} != 0; }}");
+                Body($"void GeneratedType<{native}>::Set_{field.Name}({native}& value, bool bit) noexcept {{ if (bit) {{ value.{field.Name} = 1; }} else {{ value.{field.Name} = 0; }} }}");
+            });
         }
     }
 
@@ -988,8 +1006,8 @@ internal static class CppEmitter
         foreach (FieldModel field in type.Binds.Length == 0 ? type.Fields : [])
         {
             string memberType = $"decltype({native}::{field.Name})";
-            checks.Add($"static_assert(ContainsStrongReference || !::rocks::IsNativeStrongReference<{memberType}>, \"ROCKS_STRUCT {type.Name}::{field.Name} holds a strong object reference; regenerate metadata\");");
-            checks.Add($"static_assert(ContainsReferenceArray || !::rocks::detail::RegistryContainer<{memberType}>::value, \"ROCKS_STRUCT {type.Name}::{field.Name} is a reference array; regenerate metadata\");");
+            checks.Add(Guard(field, $"static_assert(ContainsStrongReference || !::rocks::IsNativeStrongReference<{memberType}>, \"ROCKS_STRUCT {type.Name}::{field.Name} holds a strong object reference; regenerate metadata\");\n" +
+                $"static_assert(ContainsReferenceArray || !::rocks::detail::RegistryContainer<{memberType}>::value, \"ROCKS_STRUCT {type.Name}::{field.Name} is a reference array; regenerate metadata\");"));
         }
 
         // NATIVE 멤버는 스키마에 넣지 않는다. 강한 참조 금지(RMC2205)를 직접 타입에 대해 한 번 더 확인하고, WorldOnly
@@ -1010,9 +1028,11 @@ internal static class CppEmitter
         Line("static const TypeSchema& Schema() noexcept;");
         Body($"const TypeSchema& {self}::Schema() noexcept {{");
         EmitFieldSchemas(type, Body);
-        string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
+        string fieldSpan = FieldSpan("FieldSchema", "fields", type.Fields);
         string? structBaseId = type.Base.Length == 0 ? null : schema.Find(type.Base).Id;
-        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(structBaseId)}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
+        // struct는 Within이 없다(TypeId{}) — EditorOnly ID 목록이 있을 때만 그 칸까지 쓴다.
+        string structIds = EditorOnlyIds(type);
+        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(structBaseId)}, {type.Flags}u, {View(type.EffectiveToolName)}{(structIds.Length == 0 ? "" : ", TypeId{}" + structIds)}}};");
         Body("return schema;");
         Body("}");
         if (type.IsSettings)
@@ -1032,9 +1052,10 @@ internal static class CppEmitter
         else
         {
             Line($"static void Trace(const {native}& value, TraceVisitor& visitor) noexcept {{");
+            Unused(traced, Line, "value", "visitor");
             foreach (FieldModel field in traced)
             {
-                Line(TraceStatement(schema, field, "value", native));
+                Line(Guard(field, TraceStatement(schema, field, "value", native)));
             }
 
             Line("}");
@@ -1052,17 +1073,18 @@ internal static class CppEmitter
         Body("}");
         if (type.Fields.Count != 0)
         {
+            OpenFieldTable(type.Fields, Body);
             Body("static const RuntimeStructFieldOps fields[] = {");
             foreach (FieldModel field in type.Fields)
             {
-                Body(FieldComment(schema, field));
-                Body(field.Bitfield
+                Body(Guard(field, FieldComment(schema, field) + "\n" + (field.Bitfield
                     ? $"detail::BitfieldStructFieldOps<{native}, {BitfieldAccessors(schema, field)}>({GuidValue(field.Id)}),"
-                    : StructMemberOps(native, field));
+                    : StructMemberOps(native, field))));
             }
 
             Body("};");
-            Body($"ops.fields = Span<const RuntimeStructFieldOps>(fields, {type.Fields.Count});");
+            CloseFieldTable(type.Fields, Body);
+            Body($"ops.fields = {FieldSpan("RuntimeStructFieldOps", "fields", type.Fields)};");
         }
 
         if (type.ContainsStrongReference)
@@ -1118,10 +1140,10 @@ internal static class CppEmitter
     {
         string self = $"GeneratedType<{native}>";
         IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
-        string[] members = ownFields.Where(field => !field.Bitfield).Select(field => field.Name).ToArray();
+        FieldModel[] members = ownFields.Where(field => !field.Bitfield).ToArray();
         string hasHook = (type.HasValidate ? "true" : "false") +
             (baseNative is null ? "" : $" || GeneratedType<{baseNative}>::HasValidateTree") +
-            string.Concat(members.Select(member => $" || ::rocks::detail::ValueValidate<decltype({native}::{member})>::HasHook"));
+            string.Concat(members.Select(member => Guard(member, $" || ::rocks::detail::ValueValidate<decltype({native}::{member.Name})>::HasHook", inline: true)));
         Line($"static constexpr bool HasValidateTree = {hasHook};");
         // 자기 수준의 hook(RuntimeStructOps::validate — decode가 값을 다 채운 뒤 부른다)은 base 사슬의 Validate 다음 자기 Validate다. base의
         // hook을 물려받은 struct도 참조 없는 값이어야 한다(가져온 base는 C# 모델이 모르므로 static_assert로 본다).
@@ -1158,11 +1180,10 @@ internal static class CppEmitter
             Body("}");
         }
 
-        foreach (string member in members)
+        foreach (FieldModel member in members)
         {
-            Body($"if constexpr (::rocks::detail::ValueValidate<decltype({native}::{member})>::HasHook) {{");
-            Body($"if (auto checked = ::rocks::detail::ValueValidate<decltype({native}::{member})>::Run(value.{member}); !checked) {{ return checked; }}");
-            Body("}");
+            Body(Guard(member, $"if constexpr (::rocks::detail::ValueValidate<decltype({native}::{member.Name})>::HasHook) {{\n" +
+                $"if (auto checked = ::rocks::detail::ValueValidate<decltype({native}::{member.Name})>::Run(value.{member.Name}); !checked) {{ return checked; }}\n}}"));
         }
 
         Body(type.HasValidate
@@ -1181,16 +1202,18 @@ internal static class CppEmitter
         Body($"const SettingsSchema& {self}::Settings() noexcept {{");
         if (fields.Length != 0)
         {
+            OpenFieldTable(fields, Body);
             Body("static const SettingsFieldSchema settingsFields[] = {");
             foreach (FieldModel field in fields)
             {
-                Body($"{{{GuidValue(field.Id)}, {field.Spec.SettingsFlags}u, {View(field.Spec.ConsoleName)}}},");
+                Body(Guard(field, $"{{{GuidValue(field.Id)}, {field.Spec.SettingsFlags}u, {View(field.Spec.ConsoleName)}}},"));
             }
 
             Body("};");
+            CloseFieldTable(fields, Body);
         }
 
-        string span = fields.Length == 0 ? "Span<const SettingsFieldSchema>{}" : $"Span<const SettingsFieldSchema>(settingsFields, {fields.Length})";
+        string span = FieldSpan("SettingsFieldSchema", "settingsFields", fields);
         Body($"static const SettingsSchema settings{{{View(type.SettingsBranch)}, {View(type.SettingsSection)}, {span}}};");
         Body("return settings;");
         Body("}");
@@ -1210,9 +1233,11 @@ internal static class CppEmitter
     {
         string self = $"GeneratedType<{native}>";
         IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
-        string[] members = ownFields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
+        // (이름, EditorOnly)다. EditorOnly 필드는 에디터 데이터 조합에서만 멤버다(Docs/Design/BuildTargets 3.4절 BS2c).
+        (string Name, bool EditorOnly)[] members = [.. ownFields.Select(field => (field.Name, field.Spec.EditorOnly)),
+            .. type.NativeMembers.Select(member => (member.Name, false))];
         string supported = (baseNative is null ? "" : $" && GeneratedType<{baseNative}>::ValueCopyable") +
-            string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
+            string.Concat(members.Select(member => Guard(member.EditorOnly, $" && ::rocks::detail::ValueCopy<decltype({native}::{member.Name})>::Supported", inline: true)));
         Line($"static constexpr bool ValueCopyable = ::rocks::detail::IsPlainCopyV<{native}> || (::rocks::IsNothrowMoveAssignableV<{native}>{supported});");
         Line($"static Result<void> CopyValue({native}& destination, const {native}& source, Allocator& allocator) noexcept;");
         Line("template <class Self>");
@@ -1233,11 +1258,11 @@ internal static class CppEmitter
         // bitfield(PROPERTY bitfield bool·NATIVE 정수 bitfield — 리플렉션 B9m)는 참조를 만들 수 없으므로 대입한다(정수라 깊은 복사다).
         HashSet<string> bitfields = type.Fields.Where(field => field.Bitfield).Select(field => field.Name)
             .Concat(type.NativeMembers.Where(member => member.Bitfield).Select(member => member.Name)).ToHashSet(StringComparer.Ordinal);
-        foreach (string member in members)
+        foreach ((string member, bool editorOnly) in members)
         {
-            Body(bitfields.Contains(member)
+            Body(Guard(editorOnly, bitfields.Contains(member)
                 ? $"copy.{member} = source.{member};"
-                : $"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
+                : $"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}"));
         }
 
         Body("destination = Move(copy);");
@@ -1266,6 +1291,7 @@ internal static class CppEmitter
             return;
         }
 
+        OpenFieldTable(type.Fields, Line);
         Line("static const FieldSchema fields[] = {");
         foreach (FieldModel field in type.Fields)
         {
@@ -1278,14 +1304,92 @@ internal static class CppEmitter
             string bundles = field.Spec.AssetBundles.Length != 0 ? $", {View(field.Spec.AssetBundles)}" : "";
             const string NoType = "{ValueKind::Opaque, Guid{}}";
             string key = field.IsMap ? $", {{ValueKind::{field.KeyKind}, {GuidValue(keyId)}}}" : bundles.Length != 0 ? ", " + NoType : "";
-            Line(field.HasElement
+            Line(Guard(field, field.HasElement
                 ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u{key}{bundles}}},"
                 : bundles.Length != 0
                     ? $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}, {NoType}, 0u{key}{bundles}}},"
-                    : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},");
+                    : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},"));
         }
 
         Line("};");
+        CloseFieldTable(type.Fields, Line);
+        // EditorOnly 필드 ID 목록(TypeSchema::editorOnlyFieldIds)은 조합과 무관하게 같다.
+        string[] editorOnly = [.. type.Fields.Where(field => field.Spec.EditorOnly).Select(field => GuidValue(field.Id))];
+        if (editorOnly.Length != 0)
+        {
+            Line($"static const Guid editorOnlyFieldIds[] = {{{string.Join(", ", editorOnly)}}};");
+        }
+    }
+
+    // 에디터 데이터 조합에만 있는 생성 코드를 감싸는 조건이다(Docs/Design/BuildTargets 3.4절 BS2c, UE IF_WITH_EDITORONLY_DATA).
+    private const string EditorDataCondition = "ROCKS_WITH_EDITOR_DATA";
+
+    // field가 EditorOnly면 text(여러 줄이어도 된다)를 #if ROCKS_WITH_EDITOR_DATA … #endif로 감싼다. inline이면 식 조각이라 앞뒤에 줄을 바꾼다
+    // (생성 줄은 들여쓰기 없이 그대로 쓰이므로 지시문이 줄 첫머리에 온다).
+    private static string Guard(FieldModel field, string text, bool inline = false) => Guard(field.Spec.EditorOnly, text, inline);
+
+    private static string Guard(bool editorOnly, string text, bool inline = false) =>
+        !editorOnly ? text : inline ? $"\n#if {EditorDataCondition}\n{text}\n#endif\n" : $"#if {EditorDataCondition}\n{text}\n#endif";
+
+    // field가 EditorOnly면 emit이 쓰는 줄 앞뒤에 #if ROCKS_WITH_EDITOR_DATA … #endif를 쓴다(여러 줄을 내는 항목용).
+    private static void Guarded(FieldModel field, Action<string> line, Action emit)
+    {
+        if (field.Spec.EditorOnly)
+        {
+            line($"#if {EditorDataCondition}");
+        }
+
+        emit();
+        if (field.Spec.EditorOnly)
+        {
+            line("#endif");
+        }
+    }
+
+    // fields 중 EditorOnly가 아닌 필드 수다(게임 조합의 표 길이).
+    private static int GameCount(IReadOnlyCollection<FieldModel> fields) => fields.Count(field => !field.Spec.EditorOnly);
+
+    // 표의 원소가 모두 EditorOnly면 게임 조합에서 빈 배열이 되므로 표 선언 전체를 감싼다(CloseFieldTable과 짝).
+    private static void OpenFieldTable(IReadOnlyCollection<FieldModel> fields, Action<string> line)
+    {
+        if (fields.Count != 0 && GameCount(fields) == 0)
+        {
+            line($"#if {EditorDataCondition}");
+        }
+    }
+
+    private static void CloseFieldTable(IReadOnlyCollection<FieldModel> fields, Action<string> line)
+    {
+        if (fields.Count != 0 && GameCount(fields) == 0)
+        {
+            line("#endif");
+        }
+    }
+
+    // 필드 표의 Span 식이다. EditorOnly 필드가 있으면 길이가 조합마다 다르다(모두 EditorOnly면 게임 조합은 빈 Span).
+    private static string FieldSpan(string element, string array, IReadOnlyCollection<FieldModel> fields)
+    {
+        int game = GameCount(fields);
+        return fields.Count == 0 ? $"Span<const {element}>{{}}"
+            : game == fields.Count ? $"Span<const {element}>({array}, {fields.Count})"
+            : game != 0 ? $"Span<const {element}>({array}, {EditorDataCondition} ? {fields.Count} : {game})"
+            : $"\n#if {EditorDataCondition}\nSpan<const {element}>({array}, {fields.Count})\n#else\nSpan<const {element}>{{}}\n#endif\n";
+    }
+
+    // 스키마 초기화의 EditorOnly 필드 ID 칸이다(없으면 빈 문자열 — 기본값 그대로).
+    private static string EditorOnlyIds(ClassModel type)
+    {
+        int count = type.Fields.Count(field => field.Spec.EditorOnly);
+        return count == 0 ? "" : $", Span<const Guid>(editorOnlyFieldIds, {count})";
+    }
+
+    // 문장이 모두 EditorOnly일 수 있는 함수의 매개변수를 쓴 것으로 표시한다(게임 조합에서 경고가 나지 않게).
+    private static void Unused(IEnumerable<FieldModel> fields, Action<string> line, params string[] parameters)
+    {
+        if (fields.Any(field => field.Spec.EditorOnly))
+        {
+            line(string.Concat(parameters.Select(parameter => $"(void){parameter};")));
+        }
     }
 
     // 리플렉션 enum의 GeneratedType 특수화다: Id, Schema(EnumSchema), constexpr IsDeclared(쓰기·복원 검증),

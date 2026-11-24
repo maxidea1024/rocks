@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ArrayFixture.generated.h>
 #include <ReflectionTestFixtures/BitfieldFixture.generated.h>
 #include <ReflectionTestFixtures/CoreValueFixture.generated.h>
@@ -79,14 +80,25 @@ void FillHolder(StructHolder& holder) noexcept {
     CHECK(holder.middle.leaf.label.TryAssign("abc"));
     holder.middle.leaf.group = TextureGroup::EightBitData;
     holder.middle.offset = -5;
+#if ROCKS_WITH_EDITOR_DATA
     holder.middle.note = 7;
+#endif
     holder.middle.cache = 99; // NATIVE 멤버는 펼치지 않는다
     holder.flag = 1;
 }
 
+// note는 EditorOnly 멤버라 에디터 데이터 조합에만 있다(Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
+#define ROCKS_TEST_NOTE_TEXT ", note: 7"
+constexpr uint32 HolderSubtreeCount = 9;
+#else
+#define ROCKS_TEST_NOTE_TEXT ""
+constexpr uint32 HolderSubtreeCount = 8;
+#endif
+
 constexpr StringView HolderText =
     "StructHolder { target: null, middle: StructMiddle { leaf: StructLeaf { count: 3, label: "
-    "\"abc\", group: EightBitData }, offset: -5, note: 7 }, flag: 1 }";
+    "\"abc\", group: EightBitData }, offset: -5" ROCKS_TEST_NOTE_TEXT " }, flag: 1 }";
 
 struct JsonLine {
     char line[JsonLinesLogSink::BufferBytes]{};
@@ -134,7 +146,7 @@ TEST(LogStructureRoundTripsGeneratedStruct) {
     CHECK(top.kind == LogPropertyKind::Structure && top.typeTag == "StructHolder" &&
           top.name == "Holder");
     // target, middle(leaf(count, label, group), offset, note), flag
-    CHECK(top.subtreeCount == 9);
+    CHECK(top.subtreeCount == HolderSubtreeCount);
     const LogProperty& group = rendered.event.structureNodes[5];
     CHECK(group.name == "group" && group.text == "EightBitData" &&
           group.kind == LogPropertyKind::String && group.parent == 2);
@@ -399,7 +411,7 @@ TEST(LogStructureGeneratedStructThroughLogSystem) {
         CHECK(StringView(sink.text, sink.bytes) ==
               "StructHolder { target: null, middle: StructMiddle { "
               "leaf: StructLeaf { count: 3, label: \"abc\", "
-              "group: EightBitData }, offset: -5, note: 7 }, "
+              "group: EightBitData }, offset: -5" ROCKS_TEST_NOTE_TEXT " }, "
               "flag: 1 }\n");
         logs.Stop();
     }

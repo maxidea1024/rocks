@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/StructFixture.generated.h>
@@ -51,15 +52,25 @@ Result<RootRef<Object>> MakeGraph(ObjectRegistry& objects) noexcept {
     value.plain = 7;
     value.holder.flag = 3;
     value.holder.middle.offset = -5;
+#if ROCKS_WITH_EDITOR_DATA
     value.holder.middle.note = 11;
+#endif
     value.holder.middle.cache = 99;
     value.holder.middle.leaf.count = 42;
     value.holder.middle.leaf.group = TextureGroup::EightBitData;
+#if ROCKS_WITH_EDITOR_DATA
     value.extra.count = 9;
+#endif
     value.scratch.count = 1234;
-    if (!value.holder.middle.leaf.label.TryAssign("중첩") || !value.extra.label.TryAssign("편집")) {
+    if (!value.holder.middle.leaf.label.TryAssign("중첩")) {
         return Result<RootRef<Object>>::Failure(ErrorCode::OutOfMemory);
     }
+
+#if ROCKS_WITH_EDITOR_DATA
+    if (!value.extra.label.TryAssign("편집")) {
+        return Result<RootRef<Object>>::Failure(ErrorCode::OutOfMemory);
+    }
+#endif
 
     if (auto linked = transaction.SetReference(a.Value(), value.holder.target, b.Value());
         !linked) {
@@ -136,7 +147,7 @@ bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
 
 // 생성 특수화를 하나씩 등록하되 StructLeaf만 v1 스키마(마이그레이션 없음)로 등록한다 — 옛 빌드가 쓴
 // 데이터를 만든다.
-bool RegisterVersionOne(TypeRegistry& types) noexcept {
+[[maybe_unused]] bool RegisterVersionOne(TypeRegistry& types) noexcept {
     if (!GeneratedType<TextureGroup>::Register(types)) {
         return false;
     }
@@ -218,13 +229,17 @@ TEST(GeneratedStructGraph_ModuleRegistrationRoundTripsNestedReferenceStructs) {
                     CHECK(owner.plain == 7);
                     CHECK(owner.holder.flag == 3);
                     CHECK(owner.holder.middle.offset == -5);
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(owner.holder.middle.note == 11);
+#endif
                     CHECK(owner.holder.middle.cache == 0);
                     CHECK(owner.holder.middle.leaf.count == 42);
                     CHECK(owner.holder.middle.leaf.label.View() == StringView("중첩"));
                     CHECK(owner.holder.middle.leaf.group == TextureGroup::EightBitData);
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(owner.extra.count == 9);
                     CHECK(owner.extra.label.View() == StringView("편집"));
+#endif
                     CHECK(owner.scratch.count == 0);
                     CHECK(owner.holder.target.Handle() != ObjectHandle{});
                 }
@@ -251,6 +266,9 @@ TEST(GeneratedStructGraph_ModuleRegistrationRoundTripsNestedReferenceStructs) {
 
 // 관찰 hook: 생성 construct·destroy로 만든 scratch 값에 struct 등장마다 한 번 채워져 관찰된다(A의
 // 두 Leaf와 B의 두 Leaf).
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedStructGraph_ObservedStructsUseGeneratedConstructAndDestroy) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -291,10 +309,14 @@ TEST(GeneratedStructGraph_ObservedStructsUseGeneratedConstructAndDestroy) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // EditorOnly는 클래스의 struct 필드(extra)와 struct 안 멤버(StructMiddle::note) 모두 저장에서
 // 빠지고, 다시 읽으면 생성자 기본값이 남는다(누락 = 기준 — 쿠킹 로드 정책 excludedFlags로도 같다).
 // 쿠킹 로드는 EditorOnly 값이 있는 편집기 저장을 생성자 전에 InvalidArgument로 거부한다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndKeepDefaults) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -323,9 +345,11 @@ TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndKeepDefaults) {
                     const StructOwner& owner = *borrowed.Value().Get().Value();
                     CHECK(owner.holder.middle.leaf.count == 42);
                     CHECK(owner.holder.middle.offset == -5);
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(owner.holder.middle.note == 0);
                     CHECK(owner.extra.count == 0);
                     CHECK(owner.extra.label.ByteCount() == 0);
+#endif
                 }
 
                 auto editor = SaveFixture(allocator, source);
@@ -346,9 +370,13 @@ TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndKeepDefaults) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // 생성 Ops의 타입 마이그레이션 연결: StructLeaf만 Migrate를 가진다. 옛 버전(v1)으로 저장한 데이터를
 // 생성 등록(v2)으로 읽으면 Migrate가 struct 등장마다 한 번 불린다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedStructGraph_OlderStructVersionUsesGeneratedMigrate) {
     CHECK(GeneratedType<StructLeaf>::Ops().migrate == &StructLeaf::Migrate);
     CHECK(GeneratedType<StructMiddle>::Ops().migrate == nullptr);
@@ -381,7 +409,9 @@ TEST(GeneratedStructGraph_OlderStructVersionUsesGeneratedMigrate) {
                 const StructOwner& owner = *borrowed.Value().Get().Value();
                 CHECK(owner.holder.middle.leaf.count == 42);
                 CHECK(owner.holder.middle.leaf.label.View() == StringView("중첩"));
+#if ROCKS_WITH_EDITOR_DATA
                 CHECK(owner.extra.label.View() == StringView("편집"));
+#endif
             }
 
             REQUIRE(source.Shutdown(source.OwnerAccess()));
@@ -394,4 +424,5 @@ TEST(GeneratedStructGraph_OlderStructVersionUsesGeneratedMigrate) {
     CHECK(oldTypes.Shutdown());
     CHECK(newTypes.Shutdown());
 }
+#endif
 } // namespace generated_struct_graph_tests_file

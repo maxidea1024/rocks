@@ -9,5 +9,9 @@ public sealed class ShaderCompileWorkerTarget : TargetRules
     // Development tool (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
+    // Built as a companion of editor-data targets (EngineTests, Commandlet) with their target macros (Docs/Design/BuildTargets section 3.1 —
+    // companions share the host's macro combination), so it carries editor data too, like UE builds the worker for the editor.
+    public override bool WithEditorData => true;
+
     public override IReadOnlyList<string> Modules => ["ShaderCompileWorker"];
 }

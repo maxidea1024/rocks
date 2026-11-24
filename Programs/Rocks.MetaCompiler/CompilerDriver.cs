@@ -30,6 +30,8 @@ internal static class CompilerDriver
             }
         }
 
+        // 리플렉션 선언의 조건 블록 규칙(Docs/Design/BuildTargets 3.4절 BD6 — RMC2501)은 Clang 실행 전에 원문으로 본다.
+        ConditionalScan scan = ConditionalScan.Scan(options.Inputs);
         Dictionary<string, string?> environment = await NativeEnvironment.CreateAsync(options.Compiler);
         string compiler = NativeEnvironment.FindExecutable(options.Compiler ?? (OperatingSystem.IsWindows() ? "clang-cl" : "clang++"), environment);
         bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);
@@ -55,7 +57,9 @@ internal static class CompilerDriver
 
         await ValidateCompilerArgumentsAsync(options.ClangArguments, clangCl, root, environment);
         // 모듈 정의 헤더는 모든 Clang 실행(AST·탐침·검증 컴파일)에 강제 include한다 — native compile과 같은 파일이다.
-        List<string> clangArguments = [.. options.ClangArguments,
+        // 타깃 매크로는 메타 컴파일러가 정한다(Docs/Design/BuildTargets 3.4절 BS2c): 모든 Clang 실행이 에디터 조합이고, 두 변형 비교만 게임 조합으로
+        // 한 번 더 돈다. 그래서 생성물·descriptor·명세는 타깃과 무관한 합집합이다.
+        List<string> clangArguments = [.. options.ClangArguments, .. TargetMacroArguments(clangCl, editor: true),
             .. options.DefinitionsHeader is null ? [] : clangCl ? new[] { "/FI" + options.DefinitionsHeader } : ["-include", options.DefinitionsHeader]];
         foreach (ModuleInput input in options.Inputs)
         {
@@ -129,6 +133,19 @@ internal static class CompilerDriver
         try
         {
             Dictionary<string, ClassModel> declared = parser.Parse(compiled.StdOut);
+            // EditorOnly 필드와 #if ROCKS_WITH_EDITOR_DATA 블록의 양방향 일치(RMC2502)와 두 변형 비교(RMC2503 — 어휘 스캔을 빠져나간 조건을 잡는다).
+            CheckEditorOnlyPlacement(declared, scan);
+            List<string> gameArguments = [.. arguments.Select(argument => GameVariantArgument(argument, clangCl))];
+            ProcessResult gameCompiled = await ProcessRunner.RunAsync(new(compiler, gameArguments, root, environment, ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)));
+            if (gameCompiled.ExitCode != 0 || gameCompiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new MetadataException("Clang rejected reflection input without editor data (ROCKS_WITH_EDITOR=0, ROCKS_WITH_EDITOR_DATA=0):\n" +
+                    gameCompiled.StdErr, "RMC2503",
+                    "Put every use of an EditorOnly member in '#if ROCKS_WITH_EDITOR_DATA' (Docs/Design/BuildTargets section 3.4).");
+            }
+
+            CompareVariants(declared, new ClangAstParser(options.Inputs, manifest, imported, ResolveHeader, options.RequireGeneratedBody, options.Module)
+                .Parse(gameCompiled.StdOut));
             // 형식 철자는 첫 실행 JSON의 qualType·desugaredQualType이 아니라 정규 형식 탐침이 돌려준 Clang 정규 철자로 판단한다
             // (Docs/Design/ClangVersionSupport.ko.md 4절 — Clang 22는 한정 없이 쓴 비템플릿 레코드의 desugar 철자를 내지 않는다). 1단계는
             // PROPERTY·NATIVE 형식, C 배열 원소·크기, base이고, 레코드 닫힘은 NATIVE 멤버가 값으로 닿는 레코드를 따라가 강한 참조·WorldOnly
@@ -878,6 +895,93 @@ internal static class CompilerDriver
         }
     }
 
+    // 타깃 매크로 접두다(Rocks.Build TargetKind.MacroPrefix와 같다).
+    private const string TargetMacroPrefix = "ROCKS_WITH_";
+
+    // 메타 컴파일러가 정하는 타깃 매크로 넷이다(Docs/Design/BuildTargets 3.4절 BS2c). 에디터 조합은 에디터 코드·데이터가 있고, 게임 조합은 둘 다
+    // 없다. 서버·클라이언트 코드는 둘 다 있다(그 조건 안의 리플렉션 선언은 어휘 스캔이 막는다).
+    private static IEnumerable<string> TargetMacroArguments(bool clangCl, bool editor)
+    {
+        string prefix = clangCl ? "/D" : "-D";
+        string bit = editor ? "1" : "0";
+        return [prefix + "ROCKS_WITH_EDITOR=" + bit, prefix + "ROCKS_WITH_EDITOR_DATA=" + bit, prefix + "ROCKS_WITH_SERVER_CODE=1",
+            prefix + "ROCKS_WITH_CLIENT_CODE=1"];
+    }
+
+    // 에디터 조합 인자를 게임 조합으로 바꾼다(다른 인자는 그대로).
+    private static string GameVariantArgument(string argument, bool clangCl)
+    {
+        string prefix = clangCl ? "/D" : "-D";
+        return argument == prefix + "ROCKS_WITH_EDITOR=1" ? prefix + "ROCKS_WITH_EDITOR=0"
+            : argument == prefix + "ROCKS_WITH_EDITOR_DATA=1" ? prefix + "ROCKS_WITH_EDITOR_DATA=0"
+            : argument;
+    }
+
+    // 이 모듈이 선언한 타입의 자기 필드마다 EditorOnly 지정과 #if ROCKS_WITH_EDITOR_DATA 블록 위치가 같아야 한다(RMC2502 — 양방향). Binds 미러는
+    // 실제 타입과 1:1이므로 EditorOnly 필드를 둘 수 없다.
+    private static void CheckEditorOnlyPlacement(Dictionary<string, ClassModel> declared, ConditionalScan scan)
+    {
+        foreach (ClassModel type in declared.Values.Where(type => !type.IsEnum).OrderBy(type => type.Name, StringComparer.Ordinal))
+        {
+            foreach (FieldModel field in type.OwnFields)
+            {
+                bool inBlock = scan.InEditorDataBlock(field.Site.File, field.Site.Line);
+                if (inBlock == field.Spec.EditorOnly && !(field.Spec.EditorOnly && type.BindsSpelling.Length != 0))
+                {
+                    continue;
+                }
+
+                string problem = type.BindsSpelling.Length != 0 ? "is an EditorOnly field of a Binds mirror"
+                    : field.Spec.EditorOnly ? "is EditorOnly but not inside '#if ROCKS_WITH_EDITOR_DATA'"
+                    : "is inside '#if ROCKS_WITH_EDITOR_DATA' but not EditorOnly";
+                throw new MetadataException($"{type.Name}::{field.Name} {problem}", "RMC2502",
+                    "Write editor-only fields as ROCKS_PROPERTY(EditorOnly, ...) directly inside '#if ROCKS_WITH_EDITOR_DATA' ... '#endif', and every " +
+                    "other field outside it; a Binds mirror lists the real type's members without EditorOnly (Docs/Design/BuildTargets section 3.4).")
+                    .At(field.Site);
+            }
+        }
+    }
+
+    // 게임 조합의 결과가 에디터 조합 결과에서 EditorOnly 필드만 뺀 것과 같은지 본다(RMC2503): 타입 집합·종류·base, 나머지 자기 필드의 이름·순서·
+    // 형식 철자, enum 열거자 이름·값.
+    private static void CompareVariants(Dictionary<string, ClassModel> editor, Dictionary<string, ClassModel> game)
+    {
+        MetadataException Differs(ClassModel type, string what) => new MetadataException(
+            $"{type.Name}: {what} differs between the editor combination and the game combination (ROCKS_WITH_EDITOR_DATA=0)", "RMC2503",
+            "Only EditorOnly fields in '#if ROCKS_WITH_EDITOR_DATA' may differ; do not change types, bases, other fields or enumerators " +
+            "with target macros, even through an indirect macro (Docs/Design/BuildTargets section 3.4).").At(type.Site);
+
+        foreach (ClassModel type in editor.Values.OrderBy(type => type.Name, StringComparer.Ordinal))
+        {
+            if (!game.TryGetValue(type.Name, out ClassModel? other))
+            {
+                throw Differs(type, "the reflected type set");
+            }
+
+            if (type.IsEnum != other.IsEnum || type.IsStruct != other.IsStruct || type.Base != other.Base)
+            {
+                throw Differs(type, "the kind or base");
+            }
+
+            string[] editorFields = [.. type.OwnFields.Where(field => !field.Spec.EditorOnly).Select(field => field.Name + " " + field.NativeSpelling)];
+            string[] gameFields = [.. other.OwnFields.Select(field => field.Name + " " + field.NativeSpelling)];
+            if (!editorFields.SequenceEqual(gameFields, StringComparer.Ordinal))
+            {
+                throw Differs(type, "the field list");
+            }
+
+            if (!type.Enumerators.Select(value => (value.Name, value.Value)).SequenceEqual(other.Enumerators.Select(value => (value.Name, value.Value))))
+            {
+                throw Differs(type, "the enumerator list");
+            }
+        }
+
+        if (game.Keys.FirstOrDefault(name => !editor.ContainsKey(name)) is { } extra)
+        {
+            throw Differs(game[extra], "the reflected type set");
+        }
+    }
+
     private static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,
         string root, IReadOnlyDictionary<string, string?> environment)
     {
@@ -975,6 +1079,13 @@ internal static class CompilerDriver
                 string define = argument[prefix..];
                 int equals = define.IndexOf('=');
                 string name = equals < 0 ? define : define[..equals];
+                if (name.StartsWith(TargetMacroPrefix, StringComparison.Ordinal))
+                {
+                    throw new MetadataException($"{argument}: the metadata compiler sets the target macros itself", "RMC1000",
+                        "Do not pass ROCKS_WITH_* definitions; metadata is generated for the editor combination and compared with the game " +
+                        "combination (Docs/Design/BuildTargets section 3.4).");
+                }
+
                 if (name.Length != 0 && (char.IsAsciiLetter(name[0]) || name[0] == '_') &&
                     name.All(value => char.IsAsciiLetterOrDigit(value) || value == '_') &&
                     name is not ("_CRT_SECURE_NO_WARNINGS" or "_SCL_SECURE_NO_WARNINGS") &&

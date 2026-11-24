@@ -331,7 +331,8 @@ internal static partial class ModuleMetaTests
         {
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", Parent.Replace("ROCKS_CLASS()", "ROCKS_CLASS(WorldOnly)", StringComparison.Ordinal)
-                .Replace("ROCKS_PROPERTY()", "ROCKS_PROPERTY(Name=\"Amount\", EditorOnly)", StringComparison.Ordinal));
+                .Replace("ROCKS_PROPERTY() rocks::int32 value = 0;\n", "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(Name=\"Amount\", EditorOnly) rocks::int32 value = 0;\n#endif\n",
+                    StringComparison.Ordinal));
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
             ProcessResult upper = await layout.RunUpperAsync();
             Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);

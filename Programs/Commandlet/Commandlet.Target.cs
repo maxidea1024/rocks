@@ -8,6 +8,10 @@ public sealed class CommandletTarget : TargetRules
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
+    // Reads and writes editor data: test fixtures and asset tools keep EditorOnly fields (Docs/Design/BuildTargets section 3.4 BS2c — the
+    // ROCKS_WITH_EDITOR_DATA=1 test combination).
+    public override bool WithEditorData => true;
+
     public override IReadOnlyList<string> Modules => ["RocksCommandlet"];
 
     // Engine plugins linked into the commandlet (Docs/Design/BuildTargets section 3.9): UnrealExchange (the asset-import-unreal command,

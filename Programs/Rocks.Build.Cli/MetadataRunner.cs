@@ -150,11 +150,8 @@ public static class MetadataRunner
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                // 타깃 매크로 넷(Docs/Design/BuildTargets 3.2절 BS2a)은 native compile과 같은 값이다(ActionGraph.TargetCompileArguments).
-                foreach (string define in target.Kind.Defines)
-                {
-                    arguments.Add("--clang-arg=-D" + define);
-                }
+                // 타깃 매크로 넷은 넘기지 않는다: 메타 컴파일러가 에디터·게임 두 조합을 스스로 정한다(Docs/Design/BuildTargets 3.4절 BS2c — 메타데이터는
+                // 타깃과 무관한 합집합).
 
                 // 모듈 정의는 native compile과 같은 정의 헤더로 넘긴다(Docs/Design/UnityBuildPch.ko.md 8.2절 — AST와 compile의 정의가
                 // 갈라지지 않는다). 헤더는 여기서 쓰고, 빌드가 같은 내용을 다시 계산해 그대로 둔다.

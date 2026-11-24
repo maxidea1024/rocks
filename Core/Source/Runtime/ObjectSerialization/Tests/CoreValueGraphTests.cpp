@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <CoreTypeBindings/CoreValueTypes.generated.h>
 #include <ReflectionTestFixtures/CoreValueFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
@@ -61,8 +62,10 @@ void Fill(CoreValueFields& fields) noexcept {
     fields.cell.x = -1;
     fields.cell.y = 2;
     fields.cell.z = 2147483647;
+#if ROCKS_WITH_EDITOR_DATA
     fields.debugColor.r = 0.25f;
     fields.debugColor.a = -1.0f;
+#endif
     CoreValueBundle& bundle = fields.bundle;
     bundle.thresholds.x = 0.25;
     bundle.thresholds.y = 0.5;
@@ -211,7 +214,9 @@ TEST(CoreValueGraph_BoundCoreTypesRoundTripThroughGeneratedCode) {
                     REQUIRE(value);
                     const CoreValueFields& fields = *value.Value();
                     CHECK(Filled(fields));
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(fields.debugColor.r == 0.25f && fields.debugColor.a == -1.0f);
+#endif
                 }
 
                 auto resaved = SaveObjectGraph(allocator, target, target.OwnerAccess(),
@@ -260,15 +265,21 @@ TEST(CoreValueGraph_EditorOnlyCoreValueFieldIsExcludedAndKeepsDefault) {
                     REQUIRE(value);
                     const CoreValueFields& fields = *value.Value();
                     CHECK(Filled(fields));
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(fields.debugColor.r == 0.0f && fields.debugColor.g == 0.0f &&
                           fields.debugColor.b == 0.0f && fields.debugColor.a == 0.0f);
+#endif
                 }
 
+                // 에디터 데이터 없는 빌드는 EditorOnly 필드를 저장하지 않으므로 거부할 값이
+                // 없다(Docs/Design/ BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
                 auto editor = SaveFilled(allocator, source);
                 REQUIRE(editor);
                 CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       editor.Value().View(), load)
                           .Error() == ErrorCode::InvalidArgument);
+#endif
             }
 
             REQUIRE(source.Shutdown(source.OwnerAccess()));
