@@ -93,9 +93,13 @@ internal static class IdentityCompilerTests
             probe.Source(Source("ROCKS_CLASS()", multiline));
             await probe.Success("--identity-manifest", probe.ManifestPath);
             probe.Source(Prefix + "ROCKS_CLASS()\nclass Value : public rocks::Object {\n" +
+                "    ROCKS_GENERATED_BODY()\nprivate:\n    " + multiline + " rocks::int32 count = 7;\n};\n}\n");
+            await probe.Success("--identity-manifest", probe.ManifestPath);
+            // 조건 블록 안 PROPERTY는 어휘 스캔이 거부한다(Docs/Design/BuildTargets 3.4절 BD6 — RMC2501).
+            probe.Source(Prefix + "ROCKS_CLASS()\nclass Value : public rocks::Object {\n" +
                 "    ROCKS_GENERATED_BODY()\nprivate:\n#if 1\n    " + multiline +
                 " rocks::int32 count = 7;\n#endif\n};\n}\n");
-            await probe.Success("--identity-manifest", probe.ManifestPath);
+            await probe.Failure("inside a preprocessor conditional block", "--identity-manifest", probe.ManifestPath);
 
             probe.Source(Source("ROCKS_CLASS()", "ROCKS_PROPERTY()\n#if 1\n") + "\n#endif\n");
             await probe.FailureAt("direct prefix", 6, "--identity-manifest", probe.ManifestPath);

@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 형식 정의·엔진 컴파일 프로필 읽기(Docs/Design/ShaderSystem 12.1절)다. 모든 속성은 이름 표로
+// 형식 정의 읽기(Docs/Design/ShaderSystem 12.1절)다. 모든 속성은 이름 표로
 // 허용 목록을 두고, 표 밖 속성·어휘는 오류로 보고한다(첫 오류에서 멈춘다).
 namespace rocks::shader {
 
@@ -885,12 +885,6 @@ const char* ShaderFormatErrorName(ShaderFormatErrorCode code) noexcept {
         return "UnknownTool";
     case ShaderFormatErrorCode::IdMismatch:
         return "IdMismatch";
-    case ShaderFormatErrorCode::UnknownFormat:
-        return "UnknownFormat";
-    case ShaderFormatErrorCode::PlaceholderFormat:
-        return "PlaceholderFormat";
-    case ShaderFormatErrorCode::HostCannotProduce:
-        return "HostCannotProduce";
     case ShaderFormatErrorCode::TooMany:
         return "TooMany";
     }
@@ -1032,141 +1026,15 @@ ShaderFormatStatus LoadShaderFormatDefinition(const char* directory, StringView 
     return ParseShaderFormatDefinition(bytes.View(), id, out);
 }
 
-ShaderFormatStatus ParseEngineCompileProfile(Span<const uint8> bytes, StringView expectedId,
-                                             EngineCompileProfileDesc& out) noexcept {
-    ShaderFormatStatus status;
-    out = EngineCompileProfileDesc{};
-    SystemAllocator allocator;
-    JsonDocument document(allocator);
-    Reader reader(status);
-    if (!ParseDocument(bytes, document, reader, status)) {
-        return status;
-    }
-
-    const JsonValue root = document.Root();
-    static const char* const Keys[] = {"schema", "id", "host", "formats"};
-    if (!reader.CheckKeys(root, Span<const char* const>(Keys), "") ||
-        !ReadHeader(reader, root, expectedId, out.id) ||
-        !reader.ReadName(root, "", "host", Names(HostNames), out.host)) {
-        return status;
-    }
-
-    const JsonValue formats = reader.Require(root, "", "formats");
-    if (!formats.IsValid()) {
-        return status;
-    }
-
-    if (!formats.IsArray() || formats.Size() == 0) {
-        reader.Fail(formats.IsArray() ? ShaderFormatErrorCode::InvalidValue
-                                      : ShaderFormatErrorCode::WrongType,
-                    "", "formats", formats);
-        return status;
-    }
-
-    for (usize index = 0; index < formats.Size(); ++index) {
-        const JsonValue element = formats.At(index);
-        if (out.formatCount == MaxEngineProfileFormats) {
-            reader.Fail(ShaderFormatErrorCode::TooMany, "", "formats", element);
-            return status;
-        }
-
-        char (&id)[MaxShaderFormatIdBytes] = out.formats[out.formatCount];
-        if (!reader.ReadId(element, "", "formats", id)) {
-            return status;
-        }
-
-        for (usize seen = 0; seen < out.formatCount; ++seen) {
-            if (StringView(out.formats[seen]) == StringView(id)) {
-                reader.Fail(ShaderFormatErrorCode::DuplicateValue, "", "formats", element);
-                return status;
-            }
-        }
-
-        ++out.formatCount;
-    }
-
-    out.sha256 = Sha256::Hash(bytes);
-    return status;
-}
-
-ShaderFormatStatus ResolveEngineCompileProfile(const EngineCompileProfileDesc& desc,
-                                               Span<const ShaderFormatDefinition> definitions,
-                                               EngineCompileProfile& out) noexcept {
-    ShaderFormatStatus status;
-    out = EngineCompileProfile{};
-    memcpy(out.id, desc.id, sizeof(out.id));
-    out.host = desc.host;
-    out.sha256 = desc.sha256;
-    for (usize index = 0; index < desc.formatCount; ++index) {
-        const StringView id(desc.formats[index]);
-        const ShaderFormatDefinition* found = nullptr;
-        for (const ShaderFormatDefinition& definition : definitions) {
-            if (definition.Id() == id) {
-                found = &definition;
-            }
-        }
-
-        ShaderFormatErrorCode code = ShaderFormatErrorCode::None;
-        if (found == nullptr) {
-            code = ShaderFormatErrorCode::UnknownFormat;
-        } else if (found->state == ShaderFormatState::Placeholder) {
-            code = ShaderFormatErrorCode::PlaceholderFormat;
-        } else if (!found->CanProduceOn(desc.host)) {
-            code = ShaderFormatErrorCode::HostCannotProduce;
-        }
-
-        if (code != ShaderFormatErrorCode::None) {
-            status.code = code;
-            snprintf(status.path, sizeof(status.path), "formats[%zu] %s",
-                     static_cast<size_t>(index), desc.formats[index]);
-            return status;
-        }
-
-        out.formats[out.formatCount++] = *found;
-    }
-
-    return status;
-}
-
-ShaderFormatStatus LoadEngineCompileProfile(const char* directory, StringView profileId,
-                                            EngineCompileProfile& out) noexcept {
-    ShaderFormatStatus status;
-    SystemAllocator allocator;
-    Array<uint8> bytes(allocator);
-    if (!ReadConfigFile(directory, profileId, bytes, status)) {
-        return status;
-    }
-
-    EngineCompileProfileDesc desc;
-    status = ParseEngineCompileProfile(bytes.View(), profileId, desc);
-    if (!status) {
-        return status;
-    }
-
-    // 형식 정의는 커서 힙에 둔다(MaxEngineProfileFormats개).
-    Array<ShaderFormatDefinition> definitions(allocator);
-    if (!definitions.TryResize(desc.formatCount)) {
-        status.code = ShaderFormatErrorCode::TooMany;
-        snprintf(status.path, sizeof(status.path), "formats");
-        return status;
-    }
-
-    for (usize index = 0; index < desc.formatCount; ++index) {
-        status = LoadShaderFormatDefinition(directory, StringView(desc.formats[index]),
-                                            definitions[index]);
-        if (status.code == ShaderFormatErrorCode::ReadFailed) {
-            // 프로필이 가리킨 형식의 정의 파일이 없다.
-            status.code = ShaderFormatErrorCode::UnknownFormat;
-            snprintf(status.path, sizeof(status.path), "formats[%zu] %s",
-                     static_cast<size_t>(index), desc.formats[index]);
-        }
-
-        if (!status) {
-            return status;
-        }
-    }
-
-    return ResolveEngineCompileProfile(desc, definitions.View(), out);
+ShaderFormatFacts MakeShaderFormatFacts(const ShaderFormatDefinition& definition) noexcept {
+    ShaderFormatFacts facts;
+    (void)SetShaderFormatFactsId(facts, definition.Id());
+    facts.backend = definition.backend;
+    facts.shaderModel = definition.compiler.shaderModel;
+    facts.limits = definition.limits;
+    facts.features = definition.features;
+    facts.deviceRequirements = definition.deviceRequirements;
+    return facts;
 }
 
 } // namespace rocks::shader

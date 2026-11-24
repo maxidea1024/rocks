@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ClassRefFixture.generated.h>
 #include <ReflectionTestFixtures/MapFixture.generated.h>
 #include <ReflectionTestFixtures/OptionalFixture.generated.h>
@@ -556,13 +557,18 @@ TEST(StructRecord_NestedStructEnumAndTypeMigration) {
     middle.leaf.group = TextureGroup::EightBitData;
     REQUIRE(middle.leaf.label.TryAssign("leaf"));
     middle.offset = -40;
+#if ROCKS_WITH_EDITOR_DATA
     middle.note = 7;
+#endif
     auto bytes = env.Save(middle);
     REQUIRE(bytes);
     StructMiddle back(values);
     REQUIRE(env.Load(bytes.Value().View(), back));
     CHECK(back.leaf.count == 3 && back.leaf.group == TextureGroup::EightBitData &&
-          back.leaf.label.View() == "leaf" && back.offset == -40 && back.note == 7);
+          back.leaf.label.View() == "leaf" && back.offset == -40);
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(back.note == 7);
+#endif
     auto again = env.Save(back);
     REQUIRE(again);
     CHECK(test::graph::SameBytes(bytes.Value().View(), again.Value().View()));

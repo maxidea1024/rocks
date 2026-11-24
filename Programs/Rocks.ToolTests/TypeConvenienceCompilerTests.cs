@@ -74,6 +74,7 @@ internal static class TypeConvenienceCompilerTests
                 }
 
                 arguments.AddRange(options.ClangArguments);
+                arguments.AddRange(TargetMacroArguments.Of());
                 var compiled = await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment,
                     Timeout: TimeSpan.FromSeconds(60)));
                 Verify.Equal(0, compiled.ExitCode, name + " compile: " + compiled.StdOut + compiled.StdErr);
@@ -123,6 +124,7 @@ internal static class TypeConvenienceCompilerTests
                 }
 
                 arguments.AddRange(options.ClangArguments);
+                arguments.AddRange(TargetMacroArguments.Of());
                 return await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment,
                     Timeout: TimeSpan.FromSeconds(60)));
             }

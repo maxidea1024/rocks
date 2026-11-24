@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ArrayFixture.generated.h>
 #include <ReflectionTestFixtures/CoreValueFixture.generated.h>
 #include <ReflectionTestFixtures/PathFixture.generated.h>
@@ -35,7 +36,7 @@ ErrorCode ErrorOf(const Result<void>& result) noexcept {
     return result ? ErrorCode::None : result.Error();
 }
 
-bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
+[[maybe_unused]] bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
     if (left.Size() != right.Size()) {
         return false;
     }
@@ -337,8 +338,8 @@ void CheckMemberThunks(StructView view, usize& members, uint32 depth) noexcept {
 
 // 클래스 type의 모든 필드에 path thunk가 있고(단일 값 필드도 — 리플렉션 B9i3c0, staged·Detach·
 // Attach용) 그 struct의 모든 멤버에 thunk가 있는지 세며 확인한다.
-void CheckClassThunks(TypeRegistry& types, TypeId type, usize& paths, usize& scalars,
-                      usize& members) noexcept {
+[[maybe_unused]] void CheckClassThunks(TypeRegistry& types, TypeId type, usize& paths,
+                                       usize& scalars, usize& members) noexcept {
     auto lease = types.Acquire(type);
     REQUIRE(lease);
     const TypeSchema& schema = lease.Value().Schema();
@@ -430,7 +431,8 @@ void ExerciseStructArray(const Paths& paths, Allocator& allocator, const char* f
 }
 
 // StructOwner의 모든 단일 값 멤버(참조·enum·String·EditorOnly 포함)와 최상위 단일 값을 경로로 쓴다.
-void FillStructOwner(const Paths& paths, Allocator& allocator, ObjectHandle other) noexcept {
+[[maybe_unused]] void FillStructOwner(const Paths& paths, Allocator& allocator,
+                                      ObjectHandle other) noexcept {
     const TypeId group = TypeIdOf<TextureGroup>();
     Entry entries[] = {{"holder.target", Reference(allocator, other)},
                        {"holder.middle.leaf.count", Unsigned(allocator, ValueKind::UInt32, 42)},
@@ -449,16 +451,20 @@ void FillStructOwner(const Paths& paths, Allocator& allocator, ObjectHandle othe
 }
 
 // FillStructOwner가 쓴 값인지 본다(self는 그 객체 — holder.target은 다른 non-null 객체다).
-void CheckStructOwner(const StructOwner& value, ObjectHandle self) noexcept {
+[[maybe_unused]] void CheckStructOwner(const StructOwner& value, ObjectHandle self) noexcept {
     const ObjectHandle target = value.holder.target.Handle();
     CHECK(target != ObjectHandle{} && target != self);
     CHECK(value.holder.middle.leaf.count == 42);
     CHECK(value.holder.middle.leaf.label.View() == StringView("잎 경로"));
     CHECK(value.holder.middle.leaf.group == TextureGroup::EightBitData);
+#if ROCKS_WITH_EDITOR_DATA
     CHECK(value.holder.middle.offset == -5 && value.holder.middle.note == 65535);
+#endif
     CHECK(value.holder.flag == 200 && value.plain == 9);
+#if ROCKS_WITH_EDITOR_DATA
     CHECK(value.extra.count == 3 && value.extra.label.View() == StringView("extra"));
     CHECK(value.extra.group == TextureGroup::Reserved13);
+#endif
 }
 
 // ArrayChild의 모든 배열(상속 배열 필드·인라인 struct 안 컨테이너·원소 struct 안 배열 포함)을 경로
@@ -564,7 +570,7 @@ void CheckArrayChild(const ArrayChild& value, ObjectHandle self) noexcept {
 }
 
 // CoreValueFields의 Binds 미러 멤버(중첩 미러 Transform·사용자 struct 안 미러 포함)를 경로로 쓴다.
-void FillCoreValues(const Paths& paths, Allocator& allocator) noexcept {
+[[maybe_unused]] void FillCoreValues(const Paths& paths, Allocator& allocator) noexcept {
     Entry entries[] = {{"position.x", Float32(allocator, 1.5f)},
                        {"position.y", Float32(allocator, -2.25f)},
                        {"position.z", Float32(allocator, 3.0f)},
@@ -598,7 +604,7 @@ void FillCoreValues(const Paths& paths, Allocator& allocator) noexcept {
 
 // FillCoreValues가 쓴 값인지 본다(쓰지 않은 멤버는 생성자 기본값 — Quat w = 1, Transform·
 // Transform3 scale = 1). Atomic 미러(Transform3f·3d)도 경로 접근은 멤버 단위다.
-void CheckCoreValues(const CoreValueFields& value, ObjectHandle) noexcept {
+[[maybe_unused]] void CheckCoreValues(const CoreValueFields& value, ObjectHandle) noexcept {
     CHECK(value.position.x == 1.5f && value.position.y == -2.25f && value.position.z == 3.0f);
     CHECK(value.rotation.x == 0.0f && value.rotation.z == 0.75f && value.rotation.w == -0.5f);
     CHECK(value.tint.r == 255 && value.tint.g == 0 && value.tint.a == 200);
@@ -607,7 +613,9 @@ void CheckCoreValues(const CoreValueFields& value, ObjectHandle) noexcept {
     CHECK(value.placement.rotation.x == 0.5f && value.placement.rotation.w == 1.0f);
     CHECK(value.placement.scale.x == 1.0f && value.placement.scale.y == 3.0f);
     CHECK(value.cell.x == -1 && value.cell.y == 0 && value.cell.z == 2147483647);
+#if ROCKS_WITH_EDITOR_DATA
     CHECK(value.debugColor.a == -1.0f);
+#endif
     CHECK(value.bundle.thresholds.w == 1.0e-9 && value.bundle.uv.y == -1.0f);
     CHECK(value.bundle.uvPrecise.x == 1.0e12 + 0.5 && value.bundle.weights.w == 4.0f);
     CHECK(value.bundle.orientation.w == -0.5 && value.bundle.heading.pitch == -0.5f);
@@ -660,6 +668,9 @@ void CheckObject(ObjectRegistry& objects, ObjectHandle handle,
 // 모듈 집계 등록이 클래스의 모든 필드(Struct·Array·단일 값, 상속 필드 포함 — 단일 값은 리플렉션
 // B9i3c0부터)의 함수표에 path thunk를 싣고, 등록된 모든 struct 멤버(Binds 미러·원소 struct 포함)의
 // 함수표에 path thunk가 있다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedPath_ModuleRegistrationAttachesPathThunks) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -709,9 +720,13 @@ TEST(GeneratedPath_ModuleRegistrationAttachesPathThunks) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // StructFixture: 3단 중첩 struct의 모든 단일 값 멤버(참조·enum·String·EditorOnly)를 경로로 쓰고
 // 읽으며(옛 값 포함), 통째 struct 접근·값 오류·NATIVE 멤버 이름을 거부한다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedPath_StructFixtureMembers) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -799,6 +814,7 @@ TEST(GeneratedPath_StructFixtureMembers) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // ArrayFixture: 모든 원소 종류의 Array<E>와 ObjectRefArray(상속 배열 필드·인라인 struct 안
 // 컨테이너· 원소 struct 안 배열 멤버 포함)를 경로로 넣고 읽고 바꾸고 빼고 비우며, struct 원소
@@ -993,6 +1009,9 @@ TEST(GeneratedPath_ArrayFixtureElements) {
 // CoreValueFixture: Binds 미러 멤버를 경로로 쓴다 — 미러 이름이 아니라 실제 Core 타입의 멤버
 // thunk가 쓰고(placement.translation.x는 Transform → Vector3<double>), 사용자 struct 안의 다른 모듈
 // 미러도 같다. Format이 같은 문자열로 돌아오고 통째 미러 struct는 Unsupported다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedPath_CoreValueBindsMembers) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -1048,9 +1067,13 @@ TEST(GeneratedPath_CoreValueBindsMembers) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // 경로로만 쓴 객체(StructOwner·ArrayChild·CoreValueFields)를 그래프로 저장해 다른 Registry에
 // 복원하면 필드 값이 같고, 다시 저장한 byte가 처음과 같다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(GeneratedPath_PathWritesRoundTripThroughGraph) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -1101,6 +1124,7 @@ TEST(GeneratedPath_PathWritesRoundTripThroughGraph) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // PathFixture: 문자열 경로는 실효 도구 이름(Name 지정자)을 대소문자 무시로 받고 C++ 이름은 받지
 // 않으며(UnknownProperty의 단계·byte 위치), Format은 index가 낀 경로도 도구 이름으로 돌아온다.

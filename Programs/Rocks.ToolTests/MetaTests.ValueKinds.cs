@@ -20,7 +20,7 @@ internal static partial class MetaTests
                 "struct Holder { rocks::ObjectRef<rocks::Object> ref; Lease lease; };\n" +
                 "ROCKS_CLASS(WorldOnly, Version=2147483647)\nstruct Parent : public rocks::Object {};\n" +
                 "ROCKS_CLASS(Version=3)\nstruct Value : public Parent {\n" +
-                "ROCKS_PROPERTY(EditorOnly, Name=\"Hits\") rocks::int32 count = 0;\n" +
+                "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly, Name=\"Hits\") rocks::int32 count = 0;\n#endif\n" +
                 "ROCKS_PROPERTY(Required) rocks::ObjectRef<Value> next;\n" +
                 "ROCKS_PROPERTY(Name=\"other\") rocks::int32 other = 0;\n" +
                 "ROCKS_NATIVE() rocks::int32 cache = 0;\n" +

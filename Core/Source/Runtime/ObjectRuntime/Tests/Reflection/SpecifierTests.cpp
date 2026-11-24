@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/NativeMemberTraits.h>
@@ -57,13 +58,24 @@ TEST(ReflectionSpecifiers_VersionFlagsAndToolNamesReachTheSchema) {
     const TypeSchema& world = TypeOf<WorldFixture>();
     CHECK(world.version == 2);
     CHECK(HasFlag(world.flags, TypeFlags::WorldOnly));
-    // NATIVE 멤버(runtimeCache)는 스키마 필드가 아니다.
+    // NATIVE 멤버(runtimeCache)는 스키마 필드가 아니다. EditorOnly 필드(note)는 에디터 데이터
+    // 조합에서만 스키마 필드이고, 두 조합 모두 EditorOnly 필드 ID 목록에
+    // 있다(Docs/Design/BuildTargets 3.4절 BS2c).
+    REQUIRE(world.editorOnlyFieldIds.Size() == 1);
+#if ROCKS_WITH_EDITOR_DATA
     REQUIRE(world.fields.Size() == 2);
     const FieldSchema* note = FindField(world, "note");
-    const FieldSchema* target = FindField(world, "target");
-    REQUIRE(note && target);
+    REQUIRE(note);
     CHECK(HasFlag(note->flags, FieldFlags::EditorOnly));
+    CHECK(note->id == world.editorOnlyFieldIds[0]);
     CHECK(StringView(note->toolName.Data(), note->toolName.Size()) == StringView("Label"));
+#else
+    REQUIRE(world.fields.Size() == 1);
+    CHECK(FindField(world, "note") == nullptr &&
+          IsEditorOnlyFieldId(world, world.editorOnlyFieldIds[0]));
+#endif
+    const FieldSchema* target = FindField(world, "target");
+    REQUIRE(target);
     CHECK(HasFlag(target->flags, FieldFlags::Required));
     CHECK(target->kind == FieldKind::ObjectReference);
     CHECK(target->toolName.Size() == 0);
@@ -72,7 +84,9 @@ TEST(ReflectionSpecifiers_VersionFlagsAndToolNamesReachTheSchema) {
     const TypeSchema& child = TypeOf<WorldChild>();
     CHECK(child.version == 1);
     CHECK(HasFlag(child.flags, TypeFlags::WorldOnly));
-    CHECK(child.fields.Size() == 3);
+    // 상속한 EditorOnly 필드 ID도 목록에 있다.
+    CHECK(child.fields.Size() == (ROCKS_WITH_EDITOR_DATA ? 3u : 2u) &&
+          child.editorOnlyFieldIds.Size() == 1);
 }
 
 TEST(ReflectionSpecifiers_RegistryAcceptsGeneratedFlags) {

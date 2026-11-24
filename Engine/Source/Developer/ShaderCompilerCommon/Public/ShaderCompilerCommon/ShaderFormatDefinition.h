@@ -4,10 +4,11 @@
 #include <Core/Containers/Span.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Text/StringView.h>
+#include <ShaderCore/ShaderFormatFacts.h>
 #include <ShaderCore/ShaderFormatTypes.h>
 #include <ShaderToolTable/ShaderToolTable.h>
 
-// 셰이더 형식 정의와 엔진 컴파일 프로필이다(Docs/Design/ShaderSystem 12.1절, P6a).
+// 셰이더 형식 정의다(Docs/Design/ShaderSystem 12.1절, P6a).
 //
 // 형식 정의(Engine/Config/ShaderFormats/<id>.json)는 한 셰이더 형식(D3D12_SM6 등)을 만드는 데
 // 필요한 모든 값의 단일 출처다: 쓰는 도구 목록(job 키 3항의 정적 목록), HLSL 2021 기본값(결정 2),
@@ -16,38 +17,33 @@
 // 3항에 들어가므로(10절) 파일의 어떤 byte가 바뀌어도 그 형식의 키가 바뀐다(.gitattributes가
 // *.json을 LF로 고정한다).
 //
-// 엔진 컴파일 프로필(Engine-<호스트>.json)은 프로젝트 프로필 없이 하는 컴파일(엔진 내장 라이브러리,
-// Development 필요 시 컴파일)이 쓰는 호스트별 형식 목록이다. 런타임 backend 선택이 없으므로
-// TargetProfile과 스키마가 다르다.
+// 형식 목록과 순서는 TargetProfile이 정한다(엔진 컴파일 프로필은 개정 32에서 없앴다 — 12.3.1절
+// SSD24). 공용 어휘(단계·기능·상한·backend)는 ShaderCore(ShaderCore/ShaderFormatTypes.h)에 있다.
 //
 // 읽기 규칙: 모르는 속성·모르는 어휘·범위 밖 값은 오류다(조용히 무시하지 않는다). 도구 이름은 도구
 // 표(ShaderToolTable)에 있어야 한다. 자리만 둔 형식(status "placeholder",
-// VULKAN_ANDROID·METAL_IOS)은 schema·id·status·backend만 가지며 프로필에 넣을 수 없다.
+// VULKAN_ANDROID·METAL_IOS)은 schema·id·status·backend만 가진다.
 //
-// 사용 예(메인 프로세스, 엔진 내장 셰이더 컴파일):
-//   EngineCompileProfile profile;
+// 사용 예(메인 프로세스):
+//   ShaderFormatDefinition format;
 //   if (const ShaderFormatStatus loaded =
-//           LoadEngineCompileProfile(ShaderFormatDirectory, "Engine-Windows", profile);
+//           LoadShaderFormatDefinition(ShaderFormatDirectory, "D3D12_SM6", format);
 //       !loaded) {
 //       printf("%s: %s (line %u)\n", ShaderFormatErrorName(loaded.code), loaded.path, loaded.line);
 //   }
-//   for (const ShaderFormatDefinition& format : profile.Formats()) {
-//       // 상한은 job 형식마다 따로 검사한다(7.2절 4항): format.limits.
-//   }
+//   // 상한은 job 형식마다 따로 검사한다(7.2절 4항): format.limits.
 //
 // 스레드: 모든 함수는 재진입 가능하며 전역 상태를 쓰지 않는다. 결과 객체는 값 형식이고 도구 표
 // 항목(정적 수명)만 가리킨다.
 namespace rocks::shader {
 
-// 형식 정의·엔진 컴파일 프로필 스키마 버전이다("schema"). 다른 값은 UnsupportedSchema다.
+// 형식 정의 스키마 버전이다("schema"). 다른 값은 UnsupportedSchema다.
 inline constexpr uint32 ShaderFormatSchemaVersion = 1;
 // 저장소 루트 기준 형식 정의 디렉터리다.
 inline constexpr char ShaderFormatDirectory[] = "Engine/Config/ShaderFormats";
-// 형식 id·프로필 id의 최대 byte 수(NUL 포함)다.
-inline constexpr usize MaxShaderFormatIdBytes = 32;
+// 형식 id의 최대 byte 수(MaxShaderFormatIdBytes)는 ShaderCore에 있다(형식 사실이 쓴다).
 inline constexpr usize MaxShaderFormatTools = 8;
 inline constexpr usize MaxShaderFormatProducers = 4;
-inline constexpr usize MaxEngineProfileFormats = 8;
 // 오류 위치(JSON 경로 또는 파일 이름)의 최대 byte 수(NUL 포함)다. 넘는 부분은 잘린다.
 inline constexpr usize MaxShaderFormatErrorPathBytes = 96;
 // 루트 상수 크기 상한(7.2절 2항, Vulkan push constant 최소 보장 128 byte)이다.
@@ -174,29 +170,6 @@ struct ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatDefinition {
     const ShaderFormatProducer* Producer(ShaderHost host) const noexcept;
 };
 
-// 엔진 컴파일 프로필이다. formats는 파일 순서이고 모두 Supported이며 host에서 만들 수 있다.
-struct EngineCompileProfile {
-    char id[MaxShaderFormatIdBytes] = {};
-    ShaderHost host = ShaderHost::WindowsX64;
-    ShaderFormatDefinition formats[MaxEngineProfileFormats] = {};
-    usize formatCount = 0;
-    // 프로필 파일 byte의 SHA-256.
-    Sha256Digest sha256;
-
-    Span<const ShaderFormatDefinition> Formats() const noexcept {
-        return Span<const ShaderFormatDefinition>(formats, formatCount);
-    }
-};
-
-// 프로필 파일만 읽은 결과(형식 정의를 아직 찾지 않음)다.
-struct EngineCompileProfileDesc {
-    char id[MaxShaderFormatIdBytes] = {};
-    ShaderHost host = ShaderHost::WindowsX64;
-    char formats[MaxEngineProfileFormats][MaxShaderFormatIdBytes] = {};
-    usize formatCount = 0;
-    Sha256Digest sha256;
-};
-
 enum class ShaderFormatErrorCode : uint8 {
     None,
     // 파일을 열거나 읽지 못했다(path에 파일 이름).
@@ -218,12 +191,6 @@ enum class ShaderFormatErrorCode : uint8 {
     UnknownTool,
     // 파일 이름(기대 id)과 "id"가 다르다.
     IdMismatch,
-    // 프로필의 형식에 형식 정의가 없다.
-    UnknownFormat,
-    // 프로필에 자리만 둔 형식이 있다.
-    PlaceholderFormat,
-    // 프로필 호스트가 그 형식의 생산 호스트 규칙에 없다.
-    HostCannotProduce,
     // 목록이 고정 용량(MaxShaderFormatTools 등)을 넘는다.
     TooMany
 };
@@ -255,20 +222,11 @@ ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus ParseShaderFormatDefinition(
 ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus LoadShaderFormatDefinition(
     const char* directory, StringView id, ShaderFormatDefinition& out) noexcept;
 
-// 엔진 컴파일 프로필 파일 byte를 읽는다({schema, id, host, formats}). 형식 이름의 중복은 오류다.
-ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus ParseEngineCompileProfile(
-    Span<const uint8> bytes, StringView expectedId, EngineCompileProfileDesc& out) noexcept;
-
-// desc의 형식을 definitions에서 찾아 out을 채운다. 없으면 UnknownFormat, 자리만 둔 형식이면
-// PlaceholderFormat, 프로필 호스트가 생산 호스트가 아니면 HostCannotProduce다.
-ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus ResolveEngineCompileProfile(
-    const EngineCompileProfileDesc& desc, Span<const ShaderFormatDefinition> definitions,
-    EngineCompileProfile& out) noexcept;
-
-// directory/<profileId>.json과 그 프로필이 가리키는 형식 정의 파일들을 읽고 검증한다. 형식 정의
-// 파일이 없으면 UnknownFormat(path에 형식 id)이다.
-ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus LoadEngineCompileProfile(
-    const char* directory, StringView profileId, EngineCompileProfile& out) noexcept;
+// 형식 정의의 형식 사실이다(12.2.1절 SSD25 — 셰이더 타입 거르기와 라이브러리 머리가 쓴다).
+// id·backend· compiler.shaderModel·limits·features·deviceRequirements를 옮긴다. 정의는 읽기를
+// 통과한 값이어야 한다(id 철자가 형식 사실 규칙과 같다).
+ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatFacts
+MakeShaderFormatFacts(const ShaderFormatDefinition& definition) noexcept;
 
 // 어휘 이름 조회다(진단·시험용, 정적 수명). 범위 밖이면 "unknown". ShaderBackendName은
 // ShaderCore(ShaderCore/ShaderFormatTypes.h)에 있다.

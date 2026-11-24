@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Math/Color.h>
 #include <Core/Math/IntVector.h>
 #include <Core/Math/Rotator.h>
@@ -43,7 +44,9 @@ struct CoreValueFields final : Object {
     ROCKS_PROPERTY() Color tint;
     ROCKS_PROPERTY() Transform placement;
     ROCKS_PROPERTY() IntVec3 cell;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) LinearColor debugColor;
+#endif
     ROCKS_PROPERTY() CoreValueBundle bundle;
     ROCKS_PROPERTY() Transform3f pose;
     ROCKS_PROPERTY() Transform3d precisePose;
