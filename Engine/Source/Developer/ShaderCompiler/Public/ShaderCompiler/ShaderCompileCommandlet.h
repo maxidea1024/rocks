@@ -11,7 +11,7 @@
 // `-run=ShaderCompile` 계열 대응). 셰이더 관리자(ShaderCompileManager)로 job을 컴파일하고 결과를
 // 알린다. 명령 함수가 ShaderCompiler 모듈에 있어 EngineTests가 프로세스 안에서 부른다.
 //
-//   shader-compile [--project=<dir>] [--profile=<id>] [--format=<id>]...
+//   shader-compile [--project=<dir>] --format=<id> [--format=<id>]...
 //                  [--define=<NAME>=<VALUE>]... [--option=<name>=<value>]... [--out=<dir>]
 //                  [--workers=<n>] [--no-cache] [--keep-input]
 //                  <virtual path>:<entry>:<vertex|pixel|compute>...
@@ -19,9 +19,9 @@
 //   - 원문: `/Engine` = `<engine>/Shaders`, --project가 있으면 `/Project` = `<project>/Shaders`
 //     (있을 때)다. 너겟 root와 워커 작업 디렉터리 뿌리(`<root>/Intermediate/ShaderWorkers`)는
 //     project, 없으면 엔진 폴더다.
-//   - 프로필: 기본은 호스트의 엔진 컴파일 프로필(Windows `Engine-Windows`, macOS
-//     `Engine-MacOS`)이다. 형식: 기본은 프로필의 모든 형식, --format이 있으면 그 형식들
-//     (`<engine>/Config/ShaderFormats`)이다.
+//   - 형식: --format으로 준 형식들(`<engine>/Config/ShaderFormats`)이다. 하나 이상 있어야 한다
+//     (엔진 컴파일 프로필은 없앴다. 호스트 플랫폼 TargetProfile 기본값은 그 칸이 생긴 뒤 붙인다 —
+//     ShaderSystem 12.3.1절 SSD24).
 //   - 출력: job마다 표준 출력에 `shader-compile: <format> <path>:<entry>:<stage> <key> <hit|miss>
 //     <status>[ <file>]` 한 줄, 진단은 표준 오류다. --out이 있으면 성공한 코드를
 //     `<out>/<format>/<name>.<entry>.<stage>.<ext>`(name은 가상 경로의 `/`를 `+`로 바꾼 것, ext는

@@ -83,9 +83,6 @@ struct ShaderCompileManagerConfig {
     NuggetCache* cache = nullptr;
     // 너겟 일괄 요청의 scheduler다. null이면 동기 Get·Put이다.
     WorkerScheduler* scheduler = nullptr;
-    // 엔진 컴파일 프로필 id와 byte SHA-256(키 7행)이다.
-    StringView profileId{};
-    Sha256Digest profileSha256{};
     // 워커 실행 파일과 작업 디렉터리 뿌리(<root>/Intermediate/ShaderWorkers)다.
     StringView workerExecutable{};
     StringView workRoot{};

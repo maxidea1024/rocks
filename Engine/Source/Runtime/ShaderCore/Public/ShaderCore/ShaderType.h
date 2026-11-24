@@ -4,6 +4,7 @@
 #include <Core/Hash.h>
 #include <Core/Text/StringView.h>
 #include <ShaderCore/ShaderFormatTypes.h>
+#include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderPermutation.h>
 
 // 셰이더 타입 기술이다(Docs/Design/ShaderSystem 12.2.1절 SSD2, UE
@@ -104,9 +105,18 @@ struct ShaderTypeDesc {
     ShaderHlsl2021 hlsl2021 = ShaderHlsl2021::FormatDefault;
     // 퍼뮤테이션 도메인이다(차원이 없으면 퍼뮤테이션 하나).
     ShaderPermutationDomain permutation;
-    // 거르기 함수다(null이면 늘 참). 손으로 쓴 레이아웃 표(7.2절 5항) 칸은 SH2a2가 더한다.
+    // 거르기 함수다(null이면 늘 참).
     ShaderShouldCompileFunction shouldCompile = nullptr;
+    // 손으로 쓴 파라미터 레이아웃 표 목록이다(7.2절 5항, SSD27 — 0개 이상). 서명이 job 키 8행과
+    // 라이브러리 항목의 레이아웃 서명이다.
+    Span<const ShaderParameterLayout> parameterLayouts;
 };
+
+// 정점 입력 타입의 거르기 함수다(SSD5 (4) — 정점 입력 축 타입에만 부른다, 순수 함수). 정점 입력
+// 타입 등록부는 RenderBase 10절 몫이고 ShaderCore는 이 서명만 안다.
+using ShaderVertexInputShouldCompileFunction = bool (*)(const ShaderTypeDesc& type,
+                                                        uint32 permutationId,
+                                                        const ShaderFormatFacts& format) noexcept;
 
 // 이름·해시 상수에서 desc를 만든다(나머지 칸은 기본값 — 필요한 칸을 이어서 바꾼다).
 constexpr ShaderTypeDesc MakeShaderTypeDesc(ShaderTypeName name, StringView sourcePath,

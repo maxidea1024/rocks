@@ -97,9 +97,8 @@ Result<void> WriteShaderJobKeyBody(NuggetKeyWriter& writer,
     const ShaderKeyReflection& reflection = input.reflection;
     if (input.format == nullptr || input.format->state != ShaderFormatState::Supported ||
         !IsSingleStage(input.stage) || (input.format->stages & input.stage) == 0 ||
-        input.entry.IsEmpty() || input.profileId.IsEmpty() || input.options == nullptr ||
-        reflection.registry == nullptr || reflection.types == nullptr ||
-        reflection.allocator == nullptr) {
+        input.entry.IsEmpty() || input.options == nullptr || reflection.registry == nullptr ||
+        reflection.types == nullptr || reflection.allocator == nullptr) {
         return Fail(writer, ErrorCode::InvalidArgument);
     }
 
@@ -139,9 +138,6 @@ Result<void> WriteShaderJobKeyBody(NuggetKeyWriter& writer,
         writer.WriteNone();
     }
 
-    // 7행.
-    writer.WriteString(input.profileId);
-    writer.WriteDigest(input.profileSha256);
     return writer.Error();
 }
 

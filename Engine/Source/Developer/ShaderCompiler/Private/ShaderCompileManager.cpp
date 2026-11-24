@@ -234,9 +234,9 @@ Result<void> ShaderCompileManager::Start() noexcept {
     }
 
     if (config_.allocator == nullptr || config_.tree == nullptr ||
-        config_.reflection.types == nullptr || config_.profileId.IsEmpty() ||
-        config_.workerExecutable.IsEmpty() || config_.workRoot.IsEmpty() ||
-        config_.maxBatchJobs == 0 || config_.maxBatchSourceBytes == 0) {
+        config_.reflection.types == nullptr || config_.workerExecutable.IsEmpty() ||
+        config_.workRoot.IsEmpty() || config_.maxBatchJobs == 0 ||
+        config_.maxBatchSourceBytes == 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -499,8 +499,6 @@ private:
         input.options = &job.options;
         input.reflection = config_.reflection;
         input.layoutSignature = job.layoutSignature;
-        input.profileId = config_.profileId;
-        input.profileSha256 = config_.profileSha256;
         auto key = BuildShaderJobKey(input);
         if (!key) {
             Fail(index,
