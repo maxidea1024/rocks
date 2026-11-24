@@ -25,6 +25,11 @@ constexpr input::Key WatchedKeys[] = {input::Key::W, input::Key::A, input::Key::
                                       input::Key::Space};
 constexpr input::MouseButton WatchedButtons[] = {input::MouseButton::Left,
                                                  input::MouseButton::Right};
+constexpr input::GamepadButton WatchedGamepadButtons[] = {input::GamepadButton::South,
+                                                          input::GamepadButton::East};
+
+// 로그로 확인하는 게임패드 번호다(첫 패드).
+constexpr uint32 WatchedGamepad = 0;
 
 // Controller의 입력 스냅숏에서 이번 프레임 새로 눌린 것을 로그로 남기는 Pawn이다.
 class SandboxPawn final : public Pawn {
@@ -67,8 +72,20 @@ public:
 
         for (input::MouseButton button : WatchedButtons) {
             if (state.WasPressed(button)) {
-                Log::Info(LogSandboxGame, "Pawn received mouse button {Button}",
-                          button == input::MouseButton::Left ? "Left" : "Right");
+                Log::Info(LogSandboxGame, "Pawn received mouse button {Button} at ({X}, {Y})",
+                          button == input::MouseButton::Left ? "Left" : "Right", state.MouseX(),
+                          state.MouseY());
+            }
+        }
+
+        if (state.MouseWheel() != 0.0f) {
+            Log::Info(LogSandboxGame, "Pawn received mouse wheel {Wheel}", state.MouseWheel());
+        }
+
+        for (input::GamepadButton button : WatchedGamepadButtons) {
+            if (state.WasPressed(WatchedGamepad, button)) {
+                Log::Info(LogSandboxGame, "Pawn received gamepad button {Button}",
+                          button == input::GamepadButton::South ? "South" : "East");
             }
         }
     }

@@ -61,7 +61,7 @@ engine.Shutdown();
 - `Initialize` 안에서 순서는 이렇다: GameInstance 생성 → `OnInit` → GameInstance Subsystem → `OnPostInit` → 첫 LocalPlayer(입력 장치 0). Engine이 Running이 되면 `OnEngineReady`에서 기본 맵을 연 뒤 `OnStart`를 부른다.
 - 기본 맵을 열지 못하면 `Initialize`가 실패하고 Engine이 정상 종료 순서로 정리한다.
 - 전용 서버는 `game.netMode = NetMode::DedicatedServer`로 둔다. 이때 LocalPlayer·Login이 없다.
-- 실제 예는 Sandbox다(`Programs/Sandbox/Private/SandboxGame.*`, `Sandbox --engine`).
+- 실제 예는 Sandbox다(`Programs/Sandbox/Private/SandboxGame.*`). `Sandbox --engine`은 헤드리스, `Sandbox --engine --window`는 창을 열고 키보드·마우스·게임패드 입력이 Pawn 로그(`Sandbox.Game`)로 찍힌다. 호스트가 입력을 거는 법은 `Programs/Sandbox/Private/EngineHost.cpp`의 `RunEngine`(`SetLocalPlayerInput`)을 본다.
 
 GameInstance를 파생하면 hook을 쓸 수 있다.
 

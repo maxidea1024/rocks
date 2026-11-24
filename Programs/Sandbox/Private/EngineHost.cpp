@@ -9,12 +9,20 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
+#include <Gameplay/GameInstance.generated.h>
+#include <Gameplay/GameInstance.h>
+#include <Gameplay/GameInstanceClient.h>
 #include <HostConfig/HostSettings.h>
+#include <Input/InputEvent.h>
+#include <Input/InputState.h>
 #include <Launch/Application.h>
+#include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
 #include <LogHost/LogHost.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <Platform/Thread.h>
+#include <PlatformWindow/Window.h>
 #if SANDBOX_TRACE_ANALYSIS
 #include <TraceAnalysis/TraceModel.h>
 #endif
@@ -47,30 +55,136 @@ constexpr uint32 SelfTestTimeoutMilliseconds = 60000;
 // 자식 stderr를 모으는 버퍼 크기다.
 constexpr usize SelfTestOutputBytes = 64 * 1024;
 
-// 종료 요청 다리다(설계 20절). Ctrl-C·Ctrl-Break·SIGINT·SIGTERM 처리기는 launch::RequestTermination
-// 원자 표시만 남긴다. 게임 스레드가 프레임 첫 단계(PumpEvents)에서 그 표시를 보고
-// Engine::RequestExit를 불러 정상 종료로 잇는다. 프레임마다 원자 읽기 하나다.
-class TerminationRequestBridge final : public EngineLoopHooks {
+// 프레임 입력 큐 용량이다(한 프레임에 이보다 많은 이벤트는 버리고 DroppedCount로 센다).
+constexpr usize InputQueueCapacity = 256;
+
+// 창 모드의 프레임 간격 상한이다(약 60 Hz). 렌더가 없어 present 대기가 없으므로 호스트가 맞춘다.
+constexpr uint64 NanosecondsPerSecond = 1000000000ull;
+constexpr uint64 NanosecondsPerMillisecond = 1000000ull;
+constexpr uint64 WindowFramesPerSecond = 60;
+constexpr uint64 WindowFrameNanoseconds = NanosecondsPerSecond / WindowFramesPerSecond;
+
+// 창 크기다(client 영역 픽셀).
+constexpr uint32 WindowWidth = 1280;
+constexpr uint32 WindowHeight = 720;
+
+// 호스트 엔진 루프 hook이다(Docs/Design/EngineRuntime 21.5절). 프레임 첫 단계(PumpEvents)에서
+// 종료 요청 다리 → 창 펌프 → 게임패드 폴링 → 시험 주입 → InputState::BeginFrame 순으로 돈다.
+//
+// 종료 요청 다리(설계 20절): Ctrl-C·Ctrl-Break·SIGINT·SIGTERM 처리기는 launch::RequestTermination
+// 원자 표시만 남긴다. 게임 스레드가 여기서 그 표시를 보고 Engine::RequestExit를 불러 정상 종료로
+// 잇는다. 창 닫기 버튼도 같은 길로 끝낸다.
+class HostLoopBridge final : public EngineLoopHooks {
 public:
-    explicit TerminationRequestBridge(uint64 requestAtFrame) noexcept
-        : requestAtFrame_(requestAtFrame) {
+    struct Options {
+        // 시험용: 0이 아니면 이 번째 PumpEvents에서 종료 요청 표시를 남긴다.
+        uint64 requestTerminationAtFrame = 0;
+        // 시험용: 0이 아니면 이 번째 PumpEvents에서 큐에 KeyDown(W)를 넣는다.
+        uint64 injectKeyAtFrame = 0;
+        // 창(선택)과 게임패드 backend(선택)다. hook보다 오래 산다.
+        platform::Window* window = nullptr;
+        platform::GamepadBackend* gamepads = nullptr;
+    };
+
+    HostLoopBridge(input::InputQueue& queue, const Options& options) noexcept
+        : queue_(queue), options_(options) {
+    }
+
+    // 엔진 LocalPlayer가 읽는 입력 원천이다(GameInstance::SetLocalPlayerInput).
+    const input::InputState& Input() const noexcept {
+        return input_;
     }
 
     void PumpEvents(Engine& engine) noexcept override {
         ++pumped_;
-        if (requestAtFrame_ != 0 && pumped_ == requestAtFrame_) {
+        if (options_.requestTerminationAtFrame != 0 &&
+            pumped_ == options_.requestTerminationAtFrame) {
             launch::RequestTermination();
         }
 
         if (launch::IsTerminationRequested()) {
             engine.RequestExit();
         }
+
+        if (options_.window != nullptr) {
+            options_.window->PumpEvents(queue_);
+            if (options_.window->IsCloseRequested()) {
+                options_.window->ClearCloseRequest();
+                Log::Info(LogSandboxHost, "Window close requested");
+                engine.RequestExit();
+            }
+        }
+
+        if (options_.gamepads != nullptr) {
+            options_.gamepads->Poll(queue_);
+        }
+
+        if (options_.injectKeyAtFrame != 0 && pumped_ == options_.injectKeyAtFrame) {
+            (void)queue_.Push(input::InputEvent::KeyDown(input::Key::W));
+        }
+
+        input_.BeginFrame(queue_.Events());
+        queue_.Clear();
+    }
+
+    // 창 모드면 프레임 간격을 WindowFrameNanoseconds로 맞춘다. OS sleep 해상도(Windows 기본 약
+    // 15.6 ms)가 거칠어 프레임마다 남은 시간을 자면 간격이 해상도 배수로 늘어나므로, 누적
+    // deadline을 두고 deadline 전이면 남은 만큼 잔다(늦게 깬 프레임 다음은 자지 않아 평균이
+    // 맞는다). 한 간격 넘게 밀리면 deadline을 지금으로 다시 잡는다(밀린 프레임을 몰아 돌리지
+    // 않는다). 헤드리스는 기다리지 않는다.
+    void EndFrame(Engine&) noexcept override {
+        if (options_.window == nullptr) {
+            return;
+        }
+
+        const uint64 now = platform::MonotonicNanoseconds();
+        if (deadline_ == 0 || now > deadline_ + WindowFrameNanoseconds) {
+            deadline_ = now;
+        }
+
+        deadline_ += WindowFrameNanoseconds;
+        if (now < deadline_) {
+            platform::SleepFor(static_cast<uint32>((deadline_ - now) / NanosecondsPerMillisecond));
+        }
     }
 
 private:
-    uint64 requestAtFrame_;
+    input::InputQueue& queue_;
+    Options options_;
+    input::InputState input_;
     uint64 pumped_ = 0;
+    // 창 모드 다음 프레임 끝 목표 시각(MonotonicNanoseconds)이다. 0이면 아직 없다.
+    uint64 deadline_ = 0;
 };
+
+// 창 모드의 창을 만든다. 실패는 Warning을 남기고 그대로 돌려준다.
+Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator) noexcept {
+    platform::WindowDesc desc;
+    desc.title = "Rocks Sandbox";
+    desc.width = WindowWidth;
+    desc.height = WindowHeight;
+    platform::WindowCreateReport report;
+    auto window = platform::Window::Create(allocator, desc, &report);
+    if (!window) {
+        Log::Warning(platform::LogPlatformWindow,
+                     "Window creation failed at {Call}: {Error} (OS error {OsError})",
+                     StringView(report.call), ErrorCodeName(window.Error()), report.osError);
+    }
+
+    return window;
+}
+
+// 게임패드 backend를 만든다. 없으면 Info 한 줄만 남기고 null을 돌려준다(키보드·마우스로 돈다).
+UniquePtr<platform::GamepadBackend> CreateSandboxGamepads(Allocator& allocator) noexcept {
+    auto gamepads = platform::GamepadBackend::Create(allocator);
+    if (!gamepads) {
+        Log::Info(LogSandboxHost, "Gamepad input is not available: {Error}",
+                  ErrorCodeName(gamepads.Error()));
+        return UniquePtr<platform::GamepadBackend>();
+    }
+
+    return Move(gamepads.Value());
+}
 
 // 호스트 서비스를 등록한다(Docs/Design/ModuleLoader.ko.md 3.12절). 서비스는 선택이라 실패하면
 // Warning을 남기고 모듈은 서비스 없이 시작한다.
@@ -83,24 +197,64 @@ void RegisterHostService(HostServices& services, Service& service) noexcept {
     }
 }
 
-// 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 frames만큼
-// 돌린다(Docs/Design/EngineRuntime 21.5절). 실패 원인은 엔진이 한 번 기록한다(호스트는 다시
-// 기록하지 않는다).
-int RunEngine(Allocator& allocator, uint64 frames, uint64 requestTerminationAtFrame,
+// 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 돌린다
+// (Docs/Design/EngineRuntime 21.5절). 헤드리스는 고정 delta로 options.frames만큼, 창 모드는 실제
+// 시간으로 창이 닫히거나 frames(0이면 상한 없음)까지 돈다. 프레임 입력 상태를 첫 LocalPlayer의 입력
+// 원천으로 건다. 엔진 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지 않는다).
+int RunEngine(Allocator& allocator, const EngineHostOptions& options,
               config::ConfigContext& settings, ModuleLoader& modules) noexcept {
-    TerminationRequestBridge bridge(requestTerminationAtFrame);
+    UniquePtr<platform::Window> window;
+    UniquePtr<platform::GamepadBackend> gamepads;
+    if (options.window) {
+        auto created = CreateSandboxWindow(allocator);
+        if (!created) {
+            return 1;
+        }
+
+        window = Move(created.Value());
+        gamepads = CreateSandboxGamepads(allocator);
+    }
+
+    input::InputQueue queue(allocator);
+    if (auto initialized = queue.TryInitialize(InputQueueCapacity); !initialized) {
+        Log::Error(LogSandboxHost, "The input queue could not be allocated: {Error}",
+                   ErrorCodeName(initialized.Error()));
+        return 1;
+    }
+
+    HostLoopBridge::Options hookOptions;
+    hookOptions.requestTerminationAtFrame = options.requestTerminationAtFrame;
+    hookOptions.injectKeyAtFrame = options.injectKeyAtFrame;
+    hookOptions.window = window.Get();
+    hookOptions.gamepads = gamepads.Get();
+    HostLoopBridge bridge(queue, hookOptions);
     SandboxGame game;
     GameInstanceClient client(allocator, game.config);
     EngineConfig config;
     config.hooks = &bridge;
     config.client = &client;
     config.modules = &modules;
-    config.maxFrames = frames;
+    config.maxFrames = options.frames;
     config.settings = &settings;
-    config.fixedFrameDeltaSeconds = HeadlessFrameSeconds;
+    config.fixedFrameDeltaSeconds = options.window ? 0.0 : HeadlessFrameSeconds;
     config.registerTypes = &RegisterSandboxTypes;
     Engine engine(allocator);
     if (!engine.Initialize(config)) {
+        return 1;
+    }
+
+    // 첫 LocalPlayer(DedicatedServer면 없다)의 입력 원천이다. bridge는 엔진 Shutdown 뒤까지 산다.
+    auto attached = client.WithInstance([&](GameInstance& instance) noexcept -> Result<void> {
+        if (instance.LocalPlayerCount() == 0) {
+            return Result<void>::Success();
+        }
+
+        return instance.SetLocalPlayerInput(instance.LocalPlayerAt(0), &bridge.Input());
+    });
+    if (!attached) {
+        Log::Error(LogSandboxHost, "Local player input could not be attached: {Error}",
+                   ErrorCodeName(attached.Error()));
+        (void)engine.Shutdown();
         return 1;
     }
 
@@ -316,6 +470,25 @@ bool CheckTerminationRequestBridge() noexcept {
     return passed;
 }
 
+// 입력 경로: 자식을 4 프레임 돌리며 2번째 PumpEvents에서 큐에 KeyDown(W)를 넣게 한다. 큐 →
+// InputState → LocalPlayer 입력 원천 → PlayerController 스냅숏 → SandboxPawn 로그로 이어져야 한다
+// (창 펌프가 넣는 이벤트와 같은 자리, 순서는 프레임 번호로 정해진다).
+bool CheckInjectedInputReachesPawn() noexcept {
+    const platform::ProcessArgument arguments[] = {
+        {"--engine", 8}, {"--frames", 8}, {"4", 1}, {"--inject-key-at-frame", 21}, {"2", 1}};
+    static char errorText[SelfTestOutputBytes];
+    const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
+    const bool passed = child.exited && child.code == 0 &&
+                        child.stderrText.Contains("[Info][Sandbox.Game] Pawn received key W",
+                                                  StringComparison::CaseSensitive);
+    if (!passed) {
+        printf("    exit %u, stderr:\n%.*s\n", child.code,
+               static_cast<int>(child.stderrText.ByteCount()), child.stderrText.Data());
+    }
+
+    return passed;
+}
+
 // 장치 능력을 기기 특성으로 옮기면 품질 등급 요구(기기 조건)가 그 값으로 판정된다(설정 CF4 —
 // Config는 Graphics를 모르고 호스트가 특성을 채운다).
 bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
@@ -462,8 +635,7 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
 
             const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
             if (hostModules.IsOk()) {
-                exitCode = RunEngine(allocator, options.frames, options.requestTerminationAtFrame,
-                                     settings.Context(), modules);
+                exitCode = RunEngine(allocator, options, settings.Context(), modules);
             } else {
                 Log::Error(LogSandboxHost,
                            "Host module {Module} failed to start ({Code}) at {Stage}: {Message}",
@@ -547,8 +719,11 @@ uint32 RunEngineHostSelfTest() noexcept {
     const bool terminated = CheckTerminationRequestBridge();
     printf("  [%s] engine host: a termination request ends the engine run normally\n",
            terminated ? "PASS" : "FAIL");
+    const bool input = CheckInjectedInputReachesPawn();
+    printf("  [%s] engine host: a queued key reaches the possessed pawn through the local player\n",
+           input ? "PASS" : "FAIL");
     return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u) + (traits ? 0u : 1u) +
-           (terminated ? 0u : 1u);
+           (terminated ? 0u : 1u) + (input ? 0u : 1u);
 }
 
 } // namespace sandbox
