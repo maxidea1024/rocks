@@ -314,6 +314,11 @@ internal static class ActionGraph
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
                 arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language, request.LinkType));
+                // RTTI를 켜는 서드파티(NativeModuleInput.RuntimeTypeInformation)는 프로필의 RTTI 끔 뒤에 켬을 둔다(마지막 인자가 이긴다).
+                if (module.RuntimeTypeInformation && language == NativeLanguage.Cpp)
+                {
+                    arguments.Add(request.Toolchain.Platform == NativePlatform.Windows ? "/GR" : "-frtti");
+                }
                 // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
                 // Release에서도 일반 object로 남는다.
                 if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))

@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "IcuData",
+  "version": "79.1",
+  "upstreamDirectory": "icudata-79.1-rocks",
+  "source": {
+    "url": "https://github.com/unicode-org/icu/releases/download/release-79.1/icu4c-79.1-data-bin-l.zip",
+    "sha256": "72489fb316a60ae1c1da205866edd01b17e8fbf8354ad0615e6cc60f74e08811",
+    "verification": "Release asset of unicode-org/icu release-79.1: its SHA-256 matches the GitHub release asset digest and its SHA-512 matches the release SHASUM512.txt. LICENSE and the README are byte copies from the archive. icudt79l.dat is a subset generated from the archive's icudt79l.dat (SHA-256 208a8392975e81a351fd9e3759f7a2c7a5659c97ef258c7a7435e2d9c31a61ce, 4321 items) with the official icupkg.exe of icu4c-79.1-Win64-MSVC2026.zip (release asset, SHA-256 c4ae1cbadb4187007f76f8b1bcf3a10deb699395ab3c74df01362bfdfa0f1ac2 matching the release digest): 'icupkg -tl -r remove.txt icudt79l.dat <dir>/icudt79l.dat', where remove.txt lists every item of 'icupkg -l' except the kept items in the notes. The output file name must stay icudt79l.dat because icupkg prefixes the item names with the package name; with that name two runs produce the same bytes."
+  },
+  "licenses": [
+    {
+      "spdx": "Unicode-3.0",
+      "upstreamExpression": "LICENSE from the data archive (UNICODE LICENSE V3 and the third-party data licenses)",
+      "file": "icudata-79.1-rocks/LICENSE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "LICENSE": "e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d",
+    "icu4c-79.1-data-bin-l-README.md": "5f95d820c87c035d86249feb6a93ff68f1272afcbf6df43713c85d339beed82c",
+    "icudt79l.dat": "f74ceb9a43e74579fef29aac1dc610920f4236f24926c3735a1a2558fd099a7c"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "ICU data subset for text boundaries (Docs/Design/Font/08-ThirdParty.ko.md section 8.3): the font backend registers it with udata_setCommonData. Kept items (39): brkitr/burmesedict.dict, brkitr/char.brk, brkitr/cjdict.dict, brkitr/de.res, brkitr/el.res, brkitr/en.res, brkitr/en_US.res, brkitr/en_US_POSIX.res, brkitr/es.res, brkitr/fr.res, brkitr/it.res, brkitr/ja.res, brkitr/khmerdict.dict, brkitr/ko.res, brkitr/laodict.dict, brkitr/line.brk, brkitr/line_cj.brk, brkitr/line_loose.brk, brkitr/line_loose_cj.brk, brkitr/line_loose_phrase_cj.brk, brkitr/line_normal.brk, brkitr/line_normal_cj.brk, brkitr/line_normal_phrase_cj.brk, brkitr/line_phrase_cj.brk, brkitr/pt.res, brkitr/res_index.res, brkitr/root.res, brkitr/ru.res, brkitr/sent.brk, brkitr/sent_el.brk, brkitr/thaidict.dict, brkitr/title.brk, brkitr/word.brk, brkitr/word_POSIX.brk, brkitr/zh.res, brkitr/zh_Hant.res, nfkc.nrm, ulayout.icu, uemoji.icu.",
+    "brkitr holds the boundary rules, the locale break resources and the dictionaries (Thai, Lao, Khmer, Burmese, CJK); nfkc.nrm is used by the CJK dictionary engine; ulayout.icu and uemoji.icu are the layout and emoji properties ICU loads from data.",
+    "Staging next to the executables (Engine/Content/Internationalization) comes with the font backend (FT2); tests read the file from this folder."
+  ]
+}

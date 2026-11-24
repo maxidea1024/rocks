@@ -319,6 +319,12 @@ public sealed record NativeModuleInput
     // sanitizerInstrumentation)에 쓴다. dependency로 전파하지 않는다.
     public bool SanitizerInstrumentation { get; init; } = true;
 
+    // true이면 이 모듈의 C++ 번역 단위에 RTTI를 켠다(Windows clang-cl /GR을 /GR- 뒤에, 그 밖 -frtti를 -fno-rtti 뒤에). 서드파티
+    // 모듈만 가질 수 있고(ThirdParty.json rtti — 자기 클래스 계층에서 dynamic_cast·typeid를 쓰는 ICU4C), 아니면 입력 오류다
+    // (Docs/Design/Compression.ko.md 3.3절 C++ 서드파티). C 번역 단위와 dependency에는 영향이 없다. 모듈 인자로 RTTI를 켜는 것은
+    // 계속 거부한다(InputValidation).
+    public bool RuntimeTypeInformation { get; init; }
+
     // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
     // Docs/Design/ReflectionFoundations.ko.md 1.1·1.10절). 모듈 규칙은 쓰지 않는다 — MetadataLayout이 ModuleDirectory 안 include
     // 디렉터리의 표지(ROCKS_CLASS·ROCKS_STRUCT·ROCKS_ENUM) 헤더를 찾아 채우고(규칙이 채우면 거부한다), 생성 include 디렉터리
