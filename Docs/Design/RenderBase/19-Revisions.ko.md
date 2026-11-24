@@ -71,6 +71,7 @@
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 37(2026-11-25): GX3·GX4 compute 연결 구현(4.4절 "구현(2026-11-25, 개정 37)", 4.2절 GX3·GX4 행을 구현으로). 설계와 다르게 정한 것은 없다. 기록 장치에 compute·버퍼 view·dispatch 기록을 더했다. Sandbox self-test는 여덟 장치(lavapipe 포함)에서 결과가 같다.
 - 개정 36(2026-11-25): GX3·GX4 compute 연결 설계(4.4절 "GX3·GX4 compute 연결 설계", 4.2절 GX3·GX4 행, 7.5·9.7절 한 줄씩). 장치 쪽 compute는 2026-11-18에 구현되어 있으므로 렌더 쪽 빈자리만 정했다: 파이프라인 캐시의 compute 항목(같은 캐시·종류 표지 키), 그룹 수 도우미 `RenderBase/ComputeDispatch.h`(UE `FComputeShaderUtils` 대응, 한도 밖은 명시 실패), 그래프 버퍼 view `GraphBufferView`, 그래프 compute pass 도우미 `AddComputePass`(직접·간접, 간접 인자 `IndirectArgs` 자동 선언, 캐시 판은 선언 때 파이프라인을 정한다 — RG3 병렬 기록 때문에 UE의 실행 때 찾기는 버림). 후속: 접는 그룹 수, 그룹 수 콜백.
 - 개정 35(2026-11-25): 셰이더 시스템 SH2e2 반영. 장치 셰이더(`CreateShader`)와 slot 이름 표, 값 1·값 2에서 얻는 slot 배치·정점 입력·루트 상수 위치를 4.4절 GX2·GX3·GX4 구현 메모와 10.4·18.1절에 적고, 없앤 고정 register·런타임 리플렉션·원문 컴파일 서술을 고쳤다. 문서를 장별 폴더로 나눴다(5043a327, 내용 불변).
 - 개정 34(2026-11-22): RB1 설정 snapshot의 타입 표지를 Core `TypeKeyOf<T>()`로 바꾼 것(BuildTargets BS8e, 6e2553e0)을 12절 구현 메모에 반영했다. 변수 템플릿 주소 표지는 Modular에서 DLL마다 달라 버렸다.
