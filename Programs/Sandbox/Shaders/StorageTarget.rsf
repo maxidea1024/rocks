@@ -1,0 +1,34 @@
+// storage 대상 self-test 셰이더다(compute 열 쓰기·배열 층 채우기, discard 그리기).
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2D<float> Columns;
+
+[numthreads(4, 4, 1)]
+void ColumnsCS(uint3 id : SV_DispatchThreadID) {
+    if (id.x < 2) {
+        Columns[id.xy] = 0.5;
+    }
+}
+
+struct FillConstants {
+    float4 fill;
+};
+
+ROCKS_ROOT_CONSTANTS(FillConstants, Fill);
+
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2DArray<float> Layers;
+
+[numthreads(4, 4, 1)]
+void FillCS(uint3 id : SV_DispatchThreadID) {
+    if (Fill.fill.y >= 0.0 && id.z != (uint)Fill.fill.y) {
+        return;
+    }
+
+    Layers[id] = Fill.fill.x;
+}
+
+float4 DrawPS(float4 position : SV_Position) : SV_Target0 {
+    if (position.x < 3.0) {
+        discard;
+    }
+
+    return float4(0.75, 0.0, 0.0, 1.0);
+}

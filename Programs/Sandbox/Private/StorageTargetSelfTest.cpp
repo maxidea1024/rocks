@@ -1,4 +1,5 @@
 #include "StorageTargetSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
@@ -52,81 +53,7 @@ struct FillConstants {
     float values[4] = {};
 };
 
-#define STORAGE_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-
-// x < 2 열을 0.5로 덮는다(RenderTarget | Storage의 쓰기 view).
-constexpr char ColumnsHlsl[] = R"(
-RWTexture2D<float> target : register(u0);
-[numthreads(4, 4, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) { if (id.x < 2) { target[id.xy] = 0.5; } }
-)";
-
-constexpr char ColumnsGlsl[] = STORAGE_GLSL_HEAD R"(
-layout(local_size_x = 4, local_size_y = 4) in;
-layout(binding = 0, r32f) uniform highp writeonly image2D target;
-void main() {
-    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
-    if (p.x < 2) { imageStore(target, p, vec4(0.5)); }
-}
-)";
-
-// 면 2D 배열 쓰기 view의 층(SV_DispatchThreadID.z)에 상수 값을 쓴다. D3D·Vulkan은 cube 계열 쓰기
-// view가 2D 배열이라 셰이더 하나로 된다.
-constexpr char FillHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 fill; };
-RWTexture2DArray<float> target : register(u0);
-[numthreads(4, 4, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) {
-    if (fill.y >= 0.0 && id.z != (uint)fill.y) { return; }
-    target[id] = fill.x;
-}
-)";
-
-// OpenGL ES는 image 형식이 텍스처 target과 맞아야 한다: layered cube는 imageCube, layered cube
-// 배열은 imageCubeArray(z = 면 번호), 면 하나만 고른 view는 image2D다.
-#define STORAGE_FILL_GLSL(declaration, coordinate)                                                 \
-    STORAGE_GLSL_HEAD "layout(local_size_x = 4, local_size_y = 4) in;\n"                           \
-                      "uniform highp vec4 cu_h[1];\n"                                              \
-                      "layout(binding = 0, r32f) uniform highp writeonly " declaration             \
-                      " target;\n"                                                                 \
-                      "void main() {\n"                                                            \
-                      "    ivec3 id = ivec3(gl_GlobalInvocationID);\n"                             \
-                      "    if (cu_h[0].y >= 0.0 && id.z != int(cu_h[0].y)) { return; }\n"          \
-                      "    imageStore(target, " coordinate ", vec4(cu_h[0].x));\n"                 \
-                      "}\n"
-
-constexpr char FillCubeGlsl[] = STORAGE_FILL_GLSL("imageCube", "id");
-constexpr char FillCubeArrayGlsl[] = STORAGE_FILL_GLSL("imageCubeArray", "id");
-constexpr char FillFaceGlsl[] = STORAGE_FILL_GLSL("image2D", "id.xy");
-
-#undef STORAGE_FILL_GLSL
-
-// x ≥ 3 열에만 0.75를 그린다(load attachment 위).
-constexpr char DrawHlsl[] = "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"
-                            "    float2 uv = float2((id << 1) & 2, id & 2);\n"
-                            "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"
-                            "}\n"
-                            "float4 PSMain(float4 pos : SV_Position) : SV_Target {\n"
-                            "    if (pos.x < 3.0) { discard; }\n"
-                            "    return float4(0.75, 0.0, 0.0, 1.0);\n"
-                            "}\n";
-
-constexpr char DrawVertexGlsl[] = STORAGE_GLSL_HEAD R"(
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-constexpr char DrawPixelGlsl[] = STORAGE_GLSL_HEAD R"(
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    if (gl_FragCoord.x < 3.0) { discard; }
-    out_var_SV_Target0 = vec4(0.75, 0.0, 0.0, 1.0);
-}
-)";
-
-#undef STORAGE_GLSL_HEAD
+// 셰이더는 FullScreen.rsf·StorageTarget.rsf다.
 
 TextureDesc StorageDesc(TextureDimension dimension, TextureUsage usage, uint32 arraySize) noexcept {
     TextureDesc desc;
@@ -179,13 +106,12 @@ void RunRenderTargetStorage(Device& device, Allocator& allocator) noexcept {
 
     Check(texture.IsOk(), "RenderTarget | Storage R32Float texture");
     ComputePipelineDesc columnsDesc;
-    columnsDesc.shader = {Text(ColumnsHlsl), Text(ColumnsGlsl)};
-    auto columns = device.CreateComputePipeline(columnsDesc);
+    columnsDesc.bindings.writableTextures[0] = "Columns";
+    auto columns = shaders::CreateComputePipeline(device, shaders::StorageColumnsCS, columnsDesc);
     PipelineDesc drawDesc;
-    drawDesc.vertex = {Text(DrawHlsl), Text(DrawVertexGlsl)};
-    drawDesc.pixel = {Text(DrawHlsl), Text(DrawPixelGlsl)};
     drawDesc.colorFormats[0] = PixelFormat::R32Float;
-    auto draw = device.CreatePipeline(drawDesc);
+    auto draw = shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS,
+                                                shaders::StorageDrawPS, drawDesc);
     auto write = texture ? device.CreateTextureView(texture.Value(), WriteView(0, 1))
                          : Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     Check(columns && draw && write, "pipelines and the writable view of a render target");
@@ -286,11 +212,11 @@ bool FacesMatch(const Array<float>& values, uint32 slices, uint32 target, float 
     return true;
 }
 
-ComputePipelineDesc FillDesc(StringView glsl) noexcept {
+Result<PipelineHandle> FillPipeline(Device& device) noexcept {
     ComputePipelineDesc desc;
-    desc.shader = {Text(FillHlsl), glsl};
     desc.drawConstantBytes = sizeof(FillConstants);
-    return desc;
+    desc.bindings.writableTextures[0] = "Layers";
+    return shaders::CreateComputePipeline(device, shaders::StorageFillCS, desc);
 }
 
 // cube Storage: 모든 면 0 → 면 2만 2. cube 배열: 모든 면 0 → 면 6만 6.
@@ -301,6 +227,15 @@ void RunCubeStorage(Device& device, Allocator& allocator) noexcept {
         StorageDesc(TextureDimension::TextureCubeArray, TextureUsage::Storage, CubeArrayCubes);
     const bool capable = HasPixelFormatCaps(device.GetPixelFormatCaps(cubeDesc.format),
                                             RequiredPixelFormatCaps(cubeDesc));
+    if (device.Info().backend == Backend::OpenGL) {
+        // GLES image uniform 타입은 묶은 target과 같아야 한다(layered cube는 imageCube). 쿠킹
+        // ESSL은 HLSL RWTexture2DArray에서 image2DArray라 cube 쓰기를 표현하지 못한다(한계 — 16.1절
+        // SH2e2 메모).
+        printf("  [NOT RUN] OpenGL ES storage: cube Storage writes (GLES needs imageCube, cooked "
+               "ESSL has image2DArray)\n");
+        return;
+    }
+
     auto cube = device.CreateTexture(cubeDesc, {});
     if (!capable) {
         Check(cube.Error() == ErrorCode::Unsupported,
@@ -312,9 +247,11 @@ void RunCubeStorage(Device& device, Allocator& allocator) noexcept {
     auto cubeArray = device.CreateTexture(arrayDesc, {});
     Check(cubeArray.IsOk() || !device.Caps().features.textureCubeArray,
           "cube array Storage R32Float texture");
-    auto fillCube = device.CreateComputePipeline(FillDesc(Text(FillCubeGlsl)));
-    auto fillArray = device.CreateComputePipeline(FillDesc(Text(FillCubeArrayGlsl)));
-    auto fillFace = device.CreateComputePipeline(FillDesc(Text(FillFaceGlsl)));
+    // HLSL에는 cube 쓰기 타입이 없어 면·cube·cube 배열 모두 RWTexture2DArray로 쓴다(D3D·Vulkan은
+    // 배열 UAV view, ShaderSystem 7.2절).
+    auto fillCube = FillPipeline(device);
+    auto fillArray = FillPipeline(device);
+    auto fillFace = FillPipeline(device);
     Check(fillCube && fillArray && fillFace, "cube fill compute pipelines");
     if (!fillCube || !fillArray || !fillFace) {
         PrintLastError(device);

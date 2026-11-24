@@ -1,0 +1,64 @@
+// 텍스처 self-test 셰이더다(배열·3D·cube·cube 배열 읽기, mip 0 Load, 3D address W, 비교 샘플러).
+Texture2DArray<float4> Layers;
+
+// 열 x가 layer다(texel (1, 1)).
+float4 ArrayPS(float4 position : SV_Position) : SV_Target0 {
+    return Layers.Load(int4(1, 1, int(position.x), 0));
+}
+
+Texture3D<float4> Volume;
+
+// 열 x가 깊이 slice다(texel (1, 1)).
+float4 VolumePS(float4 position : SV_Position) : SV_Target0 {
+    return Volume.Load(int4(1, 1, int(position.x), 0));
+}
+
+// 면마다 두 방향이다(+X, -X, +Y, -Y, +Z, -Z).
+static const float3 Directions[12] = {
+    float3(1.0, 0.5, 0.5),   float3(1.0, -0.5, -0.5), float3(-1.0, 0.5, -0.5),
+    float3(-1.0, -0.5, 0.5), float3(-0.5, 1.0, -0.5), float3(0.5, 1.0, 0.5),
+    float3(-0.5, -1.0, 0.5), float3(0.5, -1.0, -0.5), float3(-0.5, 0.5, 1.0),
+    float3(0.5, -0.5, 1.0),  float3(0.5, 0.5, -1.0),  float3(-0.5, -0.5, -1.0)};
+
+TextureCube<float4> Cube;
+SamplerState CubeSampler;
+
+float4 CubePS(float4 position : SV_Position) : SV_Target0 {
+    return Cube.SampleLevel(CubeSampler, Directions[int(position.x)], 0.0);
+}
+
+TextureCubeArray<float4> Cubes;
+SamplerState CubesSampler;
+
+float4 CubeArrayPS(float4 position : SV_Position) : SV_Target0 {
+    uint column = uint(position.x);
+    float3 direction = Directions[(column % 6) * 2];
+    return Cubes.SampleLevel(CubesSampler, float4(direction, float(column / 6)), 0.0);
+}
+
+Texture2D<float4> Source;
+
+float4 LoadPS(float4 position : SV_Position) : SV_Target0 {
+    return Source.Load(int3(1, 1, 0));
+}
+
+Texture3D<float4> Wrapped;
+SamplerState WrappedSampler;
+
+float4 AddressWPS(float4 position : SV_Position) : SV_Target0 {
+    return Wrapped.SampleLevel(WrappedSampler, float3(0.5, 0.5, 1.25), 0.0);
+}
+
+Texture2D<float> Shadow;
+SamplerComparisonState ShadowSampler;
+
+float4 ComparePS(float4 position : SV_Position) : SV_Target0 {
+    float reference = position.x < 1.0 ? 0.25 : 0.75;
+    float result = Shadow.SampleCmpLevelZero(ShadowSampler, float2(0.5, 0.5), reference);
+    return float4(result, result, result, 1.0);
+}
+
+float4 CompareLinearPS(float4 position : SV_Position) : SV_Target0 {
+    float result = Shadow.SampleCmpLevelZero(ShadowSampler, float2(0.5, 0.5), 0.5);
+    return float4(result, result, result, 1.0);
+}

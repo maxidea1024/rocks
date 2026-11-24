@@ -251,16 +251,14 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
     // 패스 동안 scissor는 늘 켜고 대상 전체에서 시작한다(SetScissor).
     gl_.Enable(GL_SCISSOR_TEST);
     gl_.Scissor(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
-    const TextureRecord* white = textures_.Find(white_.slot);
-    if (white != nullptr) {
-        BindPassTexture(*white);
-    }
+    // 텍스처는 그리기·dispatch 때 파이프라인 텍스처 유닛에 건다(ApplySlots, 비면 흰색).
+    boundTexture_ = {};
 }
 
-void GlesDevice::BindPassTexture(const TextureRecord& record) noexcept {
-    gl_.ActiveTexture(GL_TEXTURE0 + PixelTextureUnit);
+void GlesDevice::BindPassTexture(const TextureRecord& record, GLuint unit) noexcept {
+    gl_.ActiveTexture(GL_TEXTURE0 + unit);
     gl_.BindTexture(record.target, record.texture);
-    gl_.BindSampler(PixelTextureUnit, record.sampler);
+    gl_.BindSampler(unit, record.sampler);
     // 깊이·스텐실 텍스처는 읽을 plane이 텍스처 객체 상태(ES 3.1 core)이므로 묶을 때 정한다. 한
     // 그리기에 텍스처 하나만 묶으므로 깊이 view와 스텐실 view가 서로 덮지 않는다.
     // 스텐실 plane은 다른 backend와 같이 값을 G 채널에서 읽는다(성분 대응 (R, R, 0, 1),
@@ -387,13 +385,7 @@ void GlesDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 
 
 void GlesDevice::SetTexture(TextureHandle handle) noexcept {
     const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || record->writable) {
-        record = textures_.Find(white_.slot);
-    }
-
-    if (record != nullptr) {
-        BindPassTexture(*record);
-    }
+    boundTexture_ = record == nullptr || record->writable ? white_.slot : handle.slot;
 }
 
 Result<void> GlesDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
@@ -458,20 +450,23 @@ void GlesDevice::ApplyConstants(const PipelineRecord& pipeline) noexcept {
         return;
     }
 
-    // 그리기별 상수 byte를 단계 배열의 active vec4 수만큼 그대로 올린다(루트 상수 에뮬레이션,
-    // ShaderSystem 7.2절 4항). 행렬은 행 우선 바이트 그대로이며 셰이더가 mat4(vu_h[0..3])로 읽어
-    // (열 우선 → Mᵀ) Mᵀ * v = v·M으로 쓴다. 전치하지 않는다(7.2절 6항).
-    const auto* vectors = reinterpret_cast<const GLfloat*>(constants_);
-    if (pipeline.vertexConstants >= 0) {
-        gl_.Uniform4fv(pipeline.vertexConstants, pipeline.vertexConstantVectors, vectors);
-    }
-
-    if (pipeline.pixelConstants >= 0) {
-        gl_.Uniform4fv(pipeline.pixelConstants, pipeline.pixelConstantVectors, vectors);
-    }
-
-    if (pipeline.computeConstants >= 0) {
-        gl_.Uniform4fv(pipeline.computeConstants, pipeline.computeConstantVectors, vectors);
+    // 그리기별 상수 byte를 복사 표대로 타입별 vec4 배열에 올린다(루트 상수 에뮬레이션,
+    // ShaderSystem 7.2절 4항·SSD42). 행렬은 행 우선 바이트 그대로이며 쿠킹된 ESSL이
+    // mat4(a[k..k+3])로 읽어(열 우선 → Mᵀ) Mᵀ * v = v·M으로 쓴다. 전치하지 않는다(7.2절 6항).
+    for (uint32 index = 0; index < pipeline.rootCopyCount; ++index) {
+        const GlesRootCopy& copy = pipeline.rootCopies[index];
+        const uint8* source = constants_ + copy.sourceOffset;
+        switch (copy.type) {
+        case shader::ShaderGlesUniformType::Float:
+            gl_.Uniform4fv(copy.location, copy.vectors, reinterpret_cast<const GLfloat*>(source));
+            break;
+        case shader::ShaderGlesUniformType::Int:
+            gl_.Uniform4iv(copy.location, copy.vectors, reinterpret_cast<const GLint*>(source));
+            break;
+        case shader::ShaderGlesUniformType::Uint:
+            gl_.Uniform4uiv(copy.location, copy.vectors, reinterpret_cast<const GLuint*>(source));
+            break;
+        }
     }
 
     constantsDirty_ = false;

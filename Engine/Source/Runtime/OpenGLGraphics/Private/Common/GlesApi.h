@@ -513,6 +513,8 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, UseProgram, (GLuint))                                                                  \
     X(GLint, GetUniformLocation, (GLuint, const GLchar*))                                          \
     X(void, Uniform4fv, (GLint, GLsizei, const GLfloat*))                                          \
+    X(void, Uniform4iv, (GLint, GLsizei, const GLint*))                                            \
+    X(void, Uniform4uiv, (GLint, GLsizei, const GLuint*))                                          \
     X(void, Uniform1i, (GLint, GLint))                                                             \
     X(void, GenTextures, (GLsizei, GLuint*))                                                       \
     X(void, DeleteTextures, (GLsizei, const GLuint*))                                              \

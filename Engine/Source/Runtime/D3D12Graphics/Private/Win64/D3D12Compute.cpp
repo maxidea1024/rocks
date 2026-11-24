@@ -230,7 +230,8 @@ Result<CommandContext*> D3D12Device::BeginComputeRecording() noexcept {
     target_ = {};
     presentTarget_ = {};
     // compute root signature와 shader-visible heap이다(dispatch가 root 인자를 건다).
-    list_->SetComputeRootSignature(computeRootSignature_.Get());
+    appliedGraphicsRoot_ = nullptr;
+    appliedComputeRoot_ = nullptr;
     ID3D12DescriptorHeap* heaps[] = {srvs_.Heap(), samplers_.Heap()};
     list_->SetDescriptorHeaps(2, heaps);
     return Result<CommandContext*>::Success(this);

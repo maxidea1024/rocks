@@ -137,6 +137,10 @@ struct SpirvCrossRequest {
     // ESSL: 자원 binding과 결합 sampler 이름·유닛(SSD42)이다.
     Span<const SpirvGlslBinding> glslBindings;
     Span<const SpirvGlslCombined> glslCombined;
+    // ESSL: 샘플러 없이 Load만 쓰는 텍스처(texelFetch)를 위해 dummy 샘플러를 만든다
+    // (build_dummy_sampler_for_combined_images, 16.1절 SH2e2 메모). glslCombined의 sampler가 빈
+    // 항목이 그 텍스처의 결합 sampler 이름·유닛이다.
+    bool glslDummySampler = false;
 };
 
 // SPIRV-Cross C API로 spirv를 target 원문으로 바꾼다. ESSL은 결합 sampler를 만들고 기본 float

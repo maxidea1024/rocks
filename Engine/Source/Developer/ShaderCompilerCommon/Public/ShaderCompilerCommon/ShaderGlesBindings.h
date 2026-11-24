@@ -71,6 +71,9 @@ struct GlesPlan {
     Array<GlesUniformBuffer> buffers;
     Array<GlesResourceBinding> bindings;
     Array<GlesCombinedSampler> samplers;
+    // 샘플러 없이 Load만 쓰는 텍스처가 있다(결합 항목의 sampler가 비었다 — SPIRV-Cross dummy
+    // 샘플러).
+    bool dummySampler = false;
     // 값 2 byte다.
     Array<uint8> header;
 };

@@ -40,7 +40,7 @@ public:
     virtual void SetIndexBuffer(BufferHandle buffer, IndexFormat format,
                                 uint64 offset = 0) noexcept = 0;
 
-    // 텍스처 슬롯 0에 묶는다(그래픽은 PS t0·s0, compute는 CS t0·s0, GLSL ES는 텍스처 유닛 0). null
+    // 텍스처 slot에 묶는다(파이프라인 이름 표 PipelineBindingNames::texture와 그 짝 샘플러). null
     // handle이면 1x1 흰색 텍스처를 쓴다. Read view(CreateTextureView)면 그 mip·slice 범위만 셰이더
     // 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로 함께 묶을 수 있다).
     // ReadWrite view는 흰 텍스처로 대신한다. 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는
@@ -48,13 +48,13 @@ public:
     // compute pass는 SetPipeline을 먼저 부른다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
 
-    // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 고정 배치, GX2).
+    // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 이름 표, GX2).
     // null handle이면 slot을 비운다. 그리기는 파이프라인이 읽는 slot마다 같은 종류(Typed는 같은 값
     // 계열)의 view가 묶였을 때만 실행하고, 아니면 무시하고 IgnoredDraws를 올린다
     // (DrawBufferSlotsSatisfied). 범위 밖 slot, stale handle, ReadWrite view(그래픽 단계 UAV는
     // 없다)도 그 slot을 비운다. 묶인 view의 버퍼를 Retire해도 view가 자원을 붙든다.
     //
-    // 사용 예(PS가 t1의 Buffer<float4>를 읽는다):
+    // 사용 예(PS가 Buffer<float4> Lights를 읽고 파이프라인 bindings.bufferViews[0] = "Lights"):
     //   commands.SetPipeline(pipeline);
     //   commands.SetBufferView(0, lightsView);
     //   commands.Draw(3);
@@ -73,7 +73,8 @@ public:
     // 그리기·dispatch는 묶인 파이프라인이 선언한 앞 drawConstantBytes byte를 읽는다. 그래서 같은
     // 크기 파이프라인으로 바꿔도 다시 올릴 필요가 없고, 올리지 않은 상수는 0이다.
     //
-    // 사용 예(셰이더 cbuffer DrawConstants { float4x4 transform; float4 color; }):
+    // 사용 예(셰이더 ROCKS_ROOT_CONSTANTS(DrawData, Draw), DrawData { float4x4 transform; float4
+    // color; }):
     //   struct ObjectConstants { float transform[16]; float color[4]; };   // 80 byte
     //   desc.drawConstantBytes = sizeof(ObjectConstants);                  // 파이프라인 생성
     //   ...
@@ -125,14 +126,14 @@ public:
     // Dispatch와 같은 조건에서 buffer[offset]의 DispatchIndirectArguments로 실행한다.
     virtual void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept = 0;
 
-    // compute 쓰기 버퍼 view slot(0 – MaxDrawBufferViews-1, HLSL u0–u3)에 ReadWrite view를 묶는다.
-    // null handle·Read view·stale handle은 slot을 비운다. 그래픽 단계에는 UAV가 없으므로 그리기는
-    // 이 slot을 쓰지 않는다.
+    // compute 쓰기 버퍼 view slot(0 – MaxDrawBufferViews-1, bindings.writableBuffers)에 ReadWrite
+    // view를 묶는다. null handle·Read view·stale handle은 slot을 비운다. 그래픽 단계에는 UAV가
+    // 없으므로 그리기는 이 slot을 쓰지 않는다.
     virtual void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
 
     // compute 쓰기 slot(0 – MaxDrawBufferViews-1)에 ReadWrite 텍스처 view(TextureViewDesc::access,
-    // Storage 텍스처의 mip 하나)를 묶는다. HLSL은 register u0–u3의 RWTexture2D·RWTexture2DArray·
-    // RWTexture3D, GLSL ES는 image unit slot의 image2D·image2DArray·image3D(형식 한정자 필요)다.
+    // Storage 텍스처의 mip 하나)를 묶는다. 셰이더는 bindings.writableTextures 이름의 RWTexture2D·
+    // RWTexture2DArray·RWTexture3D(형식은 ROCKS_IMAGE_FORMAT)다.
     // 쓰기 slot은 SetWritableBufferView와 같은 번호 공간이라 한 slot에는 나중에 묶은 하나만 남는다.
     // view의 범위만 UAV 상태로 바꾼다. null handle·Read view·stale handle은 slot을 비운다.
     // dispatch는 파이프라인이 텍스처로 쓰는 slot마다 텍스처 view가 묶였을 때만 실행한다(아니면
@@ -538,14 +539,15 @@ public:
     // 같다(DeviceInfo::concurrentResourceCreation).
     virtual Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept = 0;
 
-    // 셰이더를 컴파일하고 파이프라인을 만든다. 셰이더 컴파일 실패는 DependencyFailed다(진단 로그는
-    // LastError로 읽는다). 정점 배치 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는
-    // InvalidArgument, backend가 지원하지 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
+    // 장치 셰이더로 파이프라인을 만든다(PipelineDesc). 셰이더 handle·단계·연결·이름 표·정점 배치
+    // 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는 InvalidArgument(LastError), 장치가
+    // 코드를 거부하면 DependencyFailed(OpenGL ES 컴파일·링크 로그는 LastError), backend가 지원하지
+    // 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
     virtual Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept = 0;
 
     // compute 파이프라인을 만든다(ComputePipelineDesc, GX3). 돌려준 handle은 SetPipeline으로 묶고
-    // Dispatch로 실행하며 Retire로 놓는다. 실패: 원문 없음·배치 밖 자원 InvalidArgument, 컴파일
-    // 실패 DependencyFailed(LastError), compute가 없는 장치 Unsupported.
+    // Dispatch로 실행하며 Retire로 놓는다. 실패: 셰이더 handle·단계·이름 표 위반 InvalidArgument,
+    // 장치가 코드를 거부하면 DependencyFailed(LastError), compute가 없는 장치 Unsupported.
     virtual Result<PipelineHandle>
     CreateComputePipeline(const ComputePipelineDesc& desc) noexcept = 0;
 

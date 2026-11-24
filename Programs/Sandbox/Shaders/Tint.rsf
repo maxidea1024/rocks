@@ -1,0 +1,10 @@
+// 그리기별 상수 색 하나로 화면을 채운다(명령 기록·렌더 그래프 self-test).
+struct TintConstants {
+    float4 tint;
+};
+
+ROCKS_ROOT_CONSTANTS(TintConstants, Tint);
+
+float4 TintPS() : SV_Target0 {
+    return Tint.tint;
+}

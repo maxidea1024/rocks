@@ -7,7 +7,7 @@
 #include <Core/Encoding/ByteWriter.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 
-// 셰이더 바인딩 layout v1(Docs/Design/ShaderSystem 7.2절 3항, 12.2.1절 SSD26)이다. byte 형식과
+// 셰이더 바인딩 layout v3(Docs/Design/ShaderSystem 7.2절 3항, 12.2.1절 SSD26)이다. byte 형식과
 // 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
@@ -16,6 +16,74 @@ namespace binding_layout_detail {
 constexpr const char* KindNames[ShaderResourceKindCount] = {
     "ConstantBuffer",         "SampledTexture", "StorageBufferRead",
     "StorageBufferReadWrite", "StorageImage",   "Sampler"};
+
+constexpr const char* ShapeNames[ShaderResourceShapeCount] = {"None",
+                                                              "Texture1D",
+                                                              "Texture1DArray",
+                                                              "Texture2D",
+                                                              "Texture2DArray",
+                                                              "Texture2DMultisample",
+                                                              "Texture2DMultisampleArray",
+                                                              "Texture3D",
+                                                              "TextureCube",
+                                                              "TextureCubeArray",
+                                                              "TypedBuffer",
+                                                              "StructuredBuffer",
+                                                              "RawBuffer"};
+
+bool IsTextureShape(ShaderResourceShape shape) noexcept {
+    return shape >= ShaderResourceShape::Texture1D &&
+           shape <= ShaderResourceShape::TextureCubeArray;
+}
+
+// 종류·모양·원소 타입·원소 byte가 맞으면 null, 아니면 영어 이유다.
+const char* CheckShape(const ShaderBindingResource& resource) noexcept {
+    if (static_cast<uint32>(resource.shape) >= ShaderResourceShapeCount ||
+        static_cast<uint32>(resource.component) >= ShaderComponentTypeCount) {
+        return "binding layout resource shape or component type is outside the vocabulary";
+    }
+
+    const ShaderResourceShape shape = resource.shape;
+    const bool typed = IsTextureShape(shape) || shape == ShaderResourceShape::TypedBuffer;
+    bool fits = false;
+    switch (resource.kind) {
+    case ShaderResourceKind::ConstantBuffer:
+    case ShaderResourceKind::Sampler:
+        fits = shape == ShaderResourceShape::None;
+        break;
+    case ShaderResourceKind::SampledTexture:
+        fits = typed;
+        break;
+    case ShaderResourceKind::StorageImage:
+        fits = shape == ShaderResourceShape::Texture1D ||
+               shape == ShaderResourceShape::Texture1DArray ||
+               shape == ShaderResourceShape::Texture2D ||
+               shape == ShaderResourceShape::Texture2DArray ||
+               shape == ShaderResourceShape::Texture3D || shape == ShaderResourceShape::TypedBuffer;
+        break;
+    case ShaderResourceKind::StorageBufferRead:
+    case ShaderResourceKind::StorageBufferReadWrite:
+        fits = shape == ShaderResourceShape::StructuredBuffer ||
+               shape == ShaderResourceShape::RawBuffer;
+        break;
+    }
+
+    if (!fits) {
+        return "binding layout resource shape does not fit its kind";
+    }
+
+    if (typed != (resource.component != ShaderComponentType::None)) {
+        return "binding layout component type is only (and always) for typed resources";
+    }
+
+    const bool structured = shape == ShaderResourceShape::StructuredBuffer;
+    if (structured != (resource.structureStride != 0) || resource.structureStride % 4 != 0) {
+        return "binding layout structure stride is only (and always) for structured buffers and "
+               "is a multiple of 4";
+    }
+
+    return nullptr;
+}
 
 constexpr uint32 AttributeBits = (1u << MaxShaderVertexAttributes) - 1;
 constexpr uint32 RenderTargetBits = (1u << MaxShaderRenderTargets) - 1;
@@ -39,6 +107,13 @@ const char* CheckLayout(const ShaderBindingLayout& layout) noexcept {
     if ((layout.attributeMask & ~AttributeBits) != 0 ||
         (layout.attributeMask != 0 && layout.stage != ShaderStageVertex)) {
         return "binding layout attribute mask is only for vertex shaders (ATTRIBUTE0-15)";
+    }
+
+    if ((layout.attributeIntMask & ~layout.attributeMask) != 0 ||
+        (layout.attributeUintMask & ~layout.attributeMask) != 0 ||
+        (layout.attributeIntMask & layout.attributeUintMask) != 0) {
+        return "binding layout int and uint attribute masks must be disjoint parts of the "
+               "attribute mask";
     }
 
     if ((layout.renderTargetMask & ~RenderTargetBits) != 0 ||
@@ -101,6 +176,10 @@ const char* CheckLayout(const ShaderBindingLayout& layout) noexcept {
 
         if (resource.sharedSampler && resource.kind != ShaderResourceKind::Sampler) {
             return "binding layout shared sampler flag is only for samplers";
+        }
+
+        if (const char* shape = CheckShape(resource); shape != nullptr) {
+            return shape;
         }
 
         if (resource.firstMember != nextMember) {
@@ -194,6 +273,8 @@ Result<void> EncodeShaderBindingLayout(const ShaderBindingLayout& layout,
     writer.WriteU32LE(layout.stage);
     writer.WriteU32LE(layout.rootConstantBytes);
     writer.WriteU32LE(layout.attributeMask);
+    writer.WriteU32LE(layout.attributeIntMask);
+    writer.WriteU32LE(layout.attributeUintMask);
     writer.WriteU32LE(layout.renderTargetMask);
     writer.WriteU32LE(layout.interStageMask);
     writer.WriteU32LE(static_cast<uint32>(layout.resources.Size()));
@@ -204,6 +285,9 @@ Result<void> EncodeShaderBindingLayout(const ShaderBindingLayout& layout,
         writer.WriteU32LE(resource.constantBufferBytes);
         writer.WriteU8(static_cast<uint8>(resource.samplerSource));
         writer.WriteU8(resource.sharedSampler ? 1 : 0);
+        writer.WriteU8(static_cast<uint8>(resource.shape));
+        writer.WriteU8(static_cast<uint8>(resource.component));
+        writer.WriteU32LE(resource.structureStride);
         writer.WriteU16LE(static_cast<uint16>(resource.memberCount));
         for (const ShaderBindingMember& member : layout.MembersOf(resource)) {
             WriteName(writer, member.name);
@@ -232,12 +316,14 @@ ShaderReadStatus DecodeShaderBindingLayout(Span<const uint8> bytes,
     }
 
     if (version != ShaderBindingLayoutVersion) {
-        return ShaderReadStatus::Unsupported("binding layout version is not 2");
+        return ShaderReadStatus::Unsupported("binding layout version is not 3");
     }
 
     out.stage = reader.ReadU32LE();
     out.rootConstantBytes = reader.ReadU32LE();
     out.attributeMask = reader.ReadU32LE();
+    out.attributeIntMask = reader.ReadU32LE();
+    out.attributeUintMask = reader.ReadU32LE();
     out.renderTargetMask = reader.ReadU32LE();
     out.interStageMask = reader.ReadU32LE();
     const uint32 resourceCount = reader.ReadU32LE();
@@ -257,6 +343,9 @@ ShaderReadStatus DecodeShaderBindingLayout(Span<const uint8> bytes,
         resource.constantBufferBytes = reader.ReadU32LE();
         const uint8 source = reader.ReadU8();
         const uint8 shared = reader.ReadU8();
+        resource.shape = static_cast<ShaderResourceShape>(reader.ReadU8());
+        resource.component = static_cast<ShaderComponentType>(reader.ReadU8());
+        resource.structureStride = reader.ReadU32LE();
         resource.memberCount = reader.ReadU16LE();
         if (reader.Failed() || shared > 1 || source >= ShaderSamplerSourceCount ||
             resource.memberCount > MaxShaderBindingMembers) {
@@ -331,6 +420,27 @@ const char* ShaderResourceKindName(ShaderResourceKind kind) noexcept {
     using namespace binding_layout_detail;
     const uint32 index = static_cast<uint32>(kind);
     return index < ShaderResourceKindCount ? KindNames[index] : "unknown";
+}
+
+const char* ShaderResourceShapeName(ShaderResourceShape shape) noexcept {
+    using namespace binding_layout_detail;
+    const uint32 index = static_cast<uint32>(shape);
+    return index < ShaderResourceShapeCount ? ShapeNames[index] : "unknown";
+}
+
+ShaderComponentType ShaderAttributeComponent(const ShaderBindingLayout& layout,
+                                             uint32 location) noexcept {
+    if (location >= MaxShaderVertexAttributes || (layout.attributeMask & (1u << location)) == 0) {
+        return ShaderComponentType::None;
+    }
+
+    const uint32 bit = 1u << location;
+    if ((layout.attributeIntMask & bit) != 0) {
+        return ShaderComponentType::Int;
+    }
+
+    return (layout.attributeUintMask & bit) != 0 ? ShaderComponentType::Uint
+                                                 : ShaderComponentType::Float;
 }
 
 } // namespace rocks::shader

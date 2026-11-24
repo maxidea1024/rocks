@@ -1,0 +1,43 @@
+// view 차원 self-test 셰이더다(2D·배열 층·cube 배열 읽기, 면·cube 채우기).
+Texture2D<float4> Plane;
+
+float4 Read2DPS() : SV_Target0 {
+    return Plane.Load(int3(0, 0, 0));
+}
+
+Texture2DArray<float4> Layers;
+
+float4 ReadLayer0PS() : SV_Target0 {
+    return Layers.Load(int4(0, 0, 0, 0));
+}
+
+float4 ReadLayer4PS() : SV_Target0 {
+    return Layers.Load(int4(0, 0, 4, 0));
+}
+
+TextureCubeArray<float4> Cubes;
+SamplerState CubesSampler;
+
+float4 ReadCubeArrayPS() : SV_Target0 {
+    return Cubes.SampleLevel(CubesSampler, float4(1.0, 0.0, 0.0, 0.0), 0.0);
+}
+
+struct FillConstants {
+    float4 fill;
+};
+
+ROCKS_ROOT_CONSTANTS(FillConstants, Fill);
+
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2D<float> Face;
+
+[numthreads(4, 4, 1)]
+void FillFaceCS(uint3 id : SV_DispatchThreadID) {
+    Face[id.xy] = Fill.fill.x;
+}
+
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2DArray<float> Faces;
+
+[numthreads(4, 4, 1)]
+void FillCubeCS(uint3 id : SV_DispatchThreadID) {
+    Faces[id] = Fill.fill.x;
+}

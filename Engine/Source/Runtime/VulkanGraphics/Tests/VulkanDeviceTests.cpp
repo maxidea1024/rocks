@@ -32,12 +32,15 @@ TEST(VulkanDevice_LoadsTheSystemLoaderAndCreatesADevice) {
     CHECK(info.deviceEpoch != 0);
     CHECK(info.concurrentResourceCreation);
     CHECK(report.code == ErrorCode::None);
-    // 컴파일 훅이 없으면 파이프라인은 SH2 전까지 Unsupported로 공개한다.
+    // 장치는 SPIR-V만 받고(다른 종류는 InvalidArgument), 셰이더 없는 파이프라인은
+    // InvalidArgument다.
+    constexpr uint8 Code[] = {0x03, 0x02, 0x23, 0x07};
+    ShaderCodeDesc shader;
+    shader.kind = ShaderCodeKind::Dxil;
+    shader.code = Span<const uint8>(Code, sizeof(Code));
+    CHECK(device.CreateShader(shader).Error() == ErrorCode::InvalidArgument);
     PipelineDesc pipeline;
-    constexpr char Source[] = "float4 VSMain() : SV_Position { return 0; }";
-    pipeline.vertex.hlsl = StringView(Source, sizeof(Source) - 1);
-    pipeline.pixel.hlsl = pipeline.vertex.hlsl;
-    CHECK(device.CreatePipeline(pipeline).Error() == ErrorCode::Unsupported);
+    CHECK(device.CreatePipeline(pipeline).Error() == ErrorCode::InvalidArgument);
     // 빈 제출의 완료 지점과 회수(제출이 없어도 WaitIdle은 fence 지점을 남긴다).
     REQUIRE(device.WaitIdle());
     CHECK(!device.LastSubmittedFence().IsNull());

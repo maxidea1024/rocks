@@ -35,11 +35,14 @@ struct LevelConstants {
 // Storage R32Float Extent×Extent, mip Mips개다.
 rocks::graphics::TextureDesc PyramidDesc() noexcept;
 
-// mip 0을 x + y × 8로 채우는 compute(u0 쓰기 view, 8×8 그룹 하나)다.
-rocks::graphics::ComputePipelineDesc FillPipelineDesc() noexcept;
+// HZB mip 0 채우기 compute 파이프라인이다(쓰기 slot 0 = mip 0 쓰기 view).
+rocks::Result<rocks::graphics::PipelineHandle>
+CreateFillPipeline(rocks::graphics::Device& device) noexcept;
 
-// t0 읽기 view의 기준 mip에서 2×2 최댓값을 u0 쓰기 view에 쓰는 compute다(LevelConstants).
-rocks::graphics::ComputePipelineDesc ReducePipelineDesc() noexcept;
+// HZB mip 축소 compute 파이프라인이다(텍스처 = 읽을 mip view, 쓰기 slot 0 = 다음 mip, 그리기별
+// 상수 LevelConstants).
+rocks::Result<rocks::graphics::PipelineHandle>
+CreateReducePipeline(rocks::graphics::Device& device) noexcept;
 
 // pyramid의 모든 mip을 ReadTexture로 읽어 CPU 기댓값과 대조한다. 다른 mip 수를 돌려주고 다른
 // texel을 출력한다. GPU 작업이 끝난 뒤 부른다.

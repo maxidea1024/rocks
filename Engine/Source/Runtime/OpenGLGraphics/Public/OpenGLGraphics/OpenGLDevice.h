@@ -50,12 +50,10 @@ struct OpenGLDeviceOptions {
 //   }
 //
 // 구현 규약:
-// - 셰이더는 GLSL ES 3.20(`#version 320 es`) 원문이다(SH2 전 런타임 컴파일, 쿠킹된 ESSL과 같은
-//   모양). 정점 입력은 layout(location = N) in, 그리기별 상수는 루트 상수 에뮬레이션 배열
-//   `uniform highp vec4 vu_h[N]`(VS)·`pu_h[N]`(PS)·`cu_h[N]`(CS)로 받는다(ShaderSystem 7.2절 4항,
-//   N × 16 ≤ PipelineDesc::drawConstantBytes). 행렬은 행 우선 바이트를 그대로 올리므로 셰이더는
-//   mat4(vu_h[0], ..., vu_h[3]) * v로 쓴다(열 우선으로 읽은 Mᵀ와 v의 곱 = v·M). 텍스처는
-//   layout(binding = 0) uniform highp sampler2D ps0이다.
+// - 셰이더는 쿠킹된 ESSL 3.20과 GLES 바인딩 머리(GLES31_PC·GLES31_ANDROID, CreateShader)다.
+//   그리기별 상수는 루트 상수 에뮬레이션 배열(`<단계>u_<타입>`)이고 머리의 복사 표대로 올린다
+//   (ShaderSystem 7.2절 4항·SSD42). 행렬은 행 우선 바이트를 그대로 올린다(셰이더가
+//   mat4(a[k..k+3])로 읽는다). 텍스처·버퍼 유닛과 storage binding은 셰이더 layout의 위치다.
 // - RenderTarget 텍스처의 저장소 첫 행이 이미지 위쪽이다(D3D12와 같은 배치). 스왑체인도 같은 배치의
 //   offscreen 색 텍스처에 그리고 present 때 Y를 뒤집어 창에 blit한다(ShaderSystem 7.2절 8항).
 // - 샘플러(TextureDesc::sampler)는 텍스처마다 샘플러 객체 하나다. Anisotropic은

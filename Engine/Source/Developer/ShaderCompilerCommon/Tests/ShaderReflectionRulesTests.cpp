@@ -52,6 +52,23 @@ ShaderReflectedMember Matrix(const char* name, uint32 offset, uint32 rows = 4,
     return M(name, B::Float, columns, offset, 0, Top, rows);
 }
 
+// 종류의 기본 모양이다(값 1 v3 규칙 — 텍스처는 Texture2D float, 구조화는 raw).
+void DefaultShape(ShaderReflectedResource& resource) noexcept {
+    switch (resource.kind) {
+    case ShaderResourceKind::SampledTexture:
+    case ShaderResourceKind::StorageImage:
+        resource.shape = ShaderResourceShape::Texture2D;
+        resource.component = ShaderComponentType::Float;
+        break;
+    case ShaderResourceKind::StorageBufferRead:
+    case ShaderResourceKind::StorageBufferReadWrite:
+        resource.shape = ShaderResourceShape::RawBuffer;
+        break;
+    default:
+        break;
+    }
+}
+
 struct Case {
     explicit Case(uint32 stage) noexcept : reflection(TestAllocator()) {
         reflection.stage = stage;
@@ -62,6 +79,7 @@ struct Case {
         resource.kind = kind;
         resource.name = StringView(name);
         resource.slot = slot;
+        DefaultShape(resource);
         REQUIRE(reflection.resources.TryPushBack(resource));
     }
 
@@ -501,6 +519,11 @@ TEST(ShaderBindingRules_MetalIndicesAndImageFormats) {
         resource.kind = kind;
         resource.name = StringView(name);
         resource.slot = slot;
+        ShaderReflectedResource shaped;
+        shaped.kind = kind;
+        DefaultShape(shaped);
+        resource.shape = shaped.shape;
+        resource.component = shaped.component;
         resource.firstMember = static_cast<uint32>(layout.members.Size());
         if (kind == ShaderResourceKind::ConstantBuffer) {
             resource.constantBufferBytes = 16;

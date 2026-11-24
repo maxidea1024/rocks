@@ -8,7 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <ShaderCore/ShaderReadStatus.h>
 
-// 셰이더 바인딩 layout v2(셰이더 Record 값 1 BindingLayout)이다(Docs/Design/ShaderSystem 7.2절 3항,
+// 셰이더 바인딩 layout v3(셰이더 Record 값 1 BindingLayout)이다(Docs/Design/ShaderSystem 7.2절 3항,
 // 12.2.1절 SSD26, UE FShaderParameterMap·FVulkanShaderHeader 대응).
 //
 // 워커가 형식별 리플렉션을 이 공통 모양으로 바꿔 값 1로 내고(SH2b·SH2c), 장치가 파이프라인 layout을
@@ -17,11 +17,14 @@
 // byte 형식(모두 little-endian, 이 순서):
 //   u32 형식 버전(= ShaderBindingLayoutVersion), u32 단계(ShaderStageBits 한 비트),
 //   u32 루트 상수 byte 수(0 = 없음), u32 정점 입력 attribute 마스크(ATTRIBUTEn — VS만),
+//   u32 int attribute 마스크·u32 uint attribute 마스크(attribute 마스크의 부분, 서로 겹치지 않음 —
+//   나머지는 float, v3),
 //   u32 render target 마스크(SV_Target0–7 — PS만), u32 단계 사이 마스크(TEXCOORD0–15 — VS 출력·PS
 //   입력, v2), u32 자원 수, 자원 표. 자원 하나: u8 종류, u16 순번, u8 이름 byte 수, 이름 byte, u32
 //   상수 버퍼 byte 수(상수 버퍼만, 아니면 0), u8 샘플러 출처(SRV 텍스처만, 아니면 None), u8 공유
-//   샘플러 표시(샘플러만, 0·1), u16 멤버 수(상수 버퍼만), 멤버마다 (u8 이름 byte 수, 이름 byte, u32
-//   오프셋, u32 byte 수).
+//   샘플러 표시(샘플러만, 0·1), u8 모양(ShaderResourceShape, v3), u8 원소 타입(ShaderComponentType
+//   — typed 자원만, v3), u32 구조화 원소 byte(구조화 버퍼만, v3), u16 멤버 수(상수 버퍼만),
+//   멤버마다 (u8 이름 byte 수, 이름 byte, u32 오프셋, u32 byte 수).
 // 자원 표는 (종류, 순번) 오름차순이고 같은 (종류, 순번)은 하나다. 멤버는 오프셋 오름차순이고 겹치지
 // 않으며 상수 버퍼 안에 있다. 이름은 64 byte 이하 식별자다.
 //
@@ -31,7 +34,7 @@
 //   for (const ShaderBindingResource& resource : layout.resources) { ... }
 namespace rocks::shader {
 
-inline constexpr uint32 ShaderBindingLayoutVersion = 2;
+inline constexpr uint32 ShaderBindingLayoutVersion = 3;
 // 단계 하나의 최대 자원 수다(형식 상한 합보다 넉넉하다).
 inline constexpr usize MaxShaderBindingResources = 1024;
 // 상수 버퍼 하나의 최대 멤버 수다(ShaderParameterLayout과 같다).
@@ -72,6 +75,41 @@ enum class ShaderSamplerSource : uint8 {
 
 inline constexpr uint32 ShaderSamplerSourceCount = 4;
 
+// 자원 모양이다(v3, Docs/Design/ShaderSystem 16.1절 SH2e2 메모). 장치가 descriptor 종류(Vulkan
+// texel buffer·image)를 고르고 묶는 view의 종류를 검사한다(UE FVulkanShaderHeader의 binding 종류와
+// 같은 정보). 상수 버퍼·샘플러는 None이다. 값은 byte 형식에 들어가므로 바꾸지 않는다.
+enum class ShaderResourceShape : uint8 {
+    None = 0,
+    Texture1D = 1,
+    Texture1DArray = 2,
+    Texture2D = 3,
+    Texture2DArray = 4,
+    Texture2DMultisample = 5,
+    Texture2DMultisampleArray = 6,
+    Texture3D = 7,
+    TextureCube = 8,
+    TextureCubeArray = 9,
+    // typed buffer(Buffer<T>·RWBuffer<T>)
+    TypedBuffer = 10,
+    // StructuredBuffer<T>·RWStructuredBuffer<T>
+    StructuredBuffer = 11,
+    // ByteAddressBuffer·RWByteAddressBuffer
+    RawBuffer = 12
+};
+
+inline constexpr uint32 ShaderResourceShapeCount = 13;
+
+// typed 자원(텍스처·typed buffer·storage image)과 정점 입력의 원소 기본 타입이다(v3). unorm·snorm은
+// Float다.
+enum class ShaderComponentType : uint8 {
+    None = 0,
+    Float = 1,
+    Int = 2,
+    Uint = 3
+};
+
+inline constexpr uint32 ShaderComponentTypeCount = 4;
+
 // 상수 버퍼 멤버 하나다(5항 오프셋 검사의 입력).
 struct ShaderBindingMember {
     StringView name;
@@ -87,6 +125,13 @@ struct ShaderBindingResource {
     uint32 constantBufferBytes = 0;
     ShaderSamplerSource samplerSource = ShaderSamplerSource::None;
     bool sharedSampler = false;
+    // 모양·원소 타입·구조화 원소 byte다(v3). 종류마다 허용 값: SRV 텍스처는 텍스처
+    // 모양·TypedBuffer, storage image는 1D·1DArray·2D·2DArray·3D·TypedBuffer, 구조화 버퍼는
+    // StructuredBuffer(원소 byte > 0, 4의 배수)·RawBuffer(0)이고 원소 타입은 텍스처·typed 모양만
+    // None이 아니다.
+    ShaderResourceShape shape = ShaderResourceShape::None;
+    ShaderComponentType component = ShaderComponentType::None;
+    uint32 structureStride = 0;
     uint32 firstMember = 0;
     uint32 memberCount = 0;
 };
@@ -101,6 +146,9 @@ struct ROCKS_SHADERCORE_API ShaderBindingLayout {
     uint32 stage = 0;
     uint32 rootConstantBytes = 0;
     uint32 attributeMask = 0;
+    // attribute 가운데 int·uint 입력이다(v3, 나머지는 float).
+    uint32 attributeIntMask = 0;
+    uint32 attributeUintMask = 0;
     uint32 renderTargetMask = 0;
     // 단계 사이 변수(TEXCOORDn) 마스크다(VS 출력·PS 입력, 16.1절 SSD37).
     uint32 interStageMask = 0;
@@ -133,5 +181,12 @@ ROCKS_SHADERCORE_API bool CheckShaderStageLink(const ShaderBindingLayout& vertex
 
 // 종류 이름("ConstantBuffer" 등, 정적 수명)이다. 범위 밖이면 "unknown".
 ROCKS_SHADERCORE_API const char* ShaderResourceKindName(ShaderResourceKind kind) noexcept;
+
+// "Texture2D" 같은 이름이다. 범위 밖이면 "unknown"이다.
+ROCKS_SHADERCORE_API const char* ShaderResourceShapeName(ShaderResourceShape shape) noexcept;
+
+// attribute location의 원소 타입이다(마스크에 없으면 None).
+ROCKS_SHADERCORE_API ShaderComponentType ShaderAttributeComponent(const ShaderBindingLayout& layout,
+                                                                  uint32 location) noexcept;
 
 } // namespace rocks::shader

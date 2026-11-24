@@ -236,6 +236,7 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     cross.glslPlainUniforms = true;
     cross.glslBindings = glslBindings.View();
     cross.glslCombined = glslCombined.View();
+    cross.glslDummySampler = bound.gles.dummySampler;
     String essl(allocator);
     const ShaderToolOutcome crossed =
         CrossCompileSpirv(context.tools->SpirvCross(), cross, essl, diagnostics);

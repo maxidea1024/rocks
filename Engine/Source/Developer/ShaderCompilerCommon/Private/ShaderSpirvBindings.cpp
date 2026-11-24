@@ -81,6 +81,10 @@ StringView BuiltInSemantic(int builtIn) noexcept {
         return "SV_RenderTargetArrayIndex";
     case SpvBuiltInViewportIndex:
         return "SV_ViewportArrayIndex";
+    case SpvBuiltInPointSize:
+        // HLSL에는 점 크기 시스템 값이 없다(D3D10 이후 점은 늘 1 pixel). SPIR-V 형식의 VS가
+        // [[vk::builtin("PointSize")]]로 쓰는 출력이다(Vulkan·GLES 점 기본도형).
+        return "SV_PointSize";
     default:
         return StringView();
     }
@@ -303,6 +307,16 @@ private:
             return Compile(resource.name, "descriptor type is not supported");
         }
 
+        resource.shape = ShapeOf(binding, original);
+        if (resource.shape == ShaderResourceShape::StructuredBuffer) {
+            resource.structureStride = StructureStride(binding);
+        }
+
+        if (resource.kind == ShaderResourceKind::SampledTexture ||
+            resource.kind == ShaderResourceKind::StorageImage) {
+            resource.component = ComponentOf(binding.type_description);
+        }
+
         if (resource.kind == ShaderResourceKind::ConstantBuffer) {
             if (resource.name == GlobalsName) {
                 out_.hasGlobals = true;
@@ -319,6 +333,76 @@ private:
                                                     : Tool("out of memory");
     }
 
+    // 자원 모양이다(값 1 v3). 고쳐 쓰기 전 모듈(original)의 user type으로 구조화·raw를 가른다.
+    static ShaderResourceShape ShapeOf(const SpvReflectDescriptorBinding& binding,
+                                       const SpvReflectDescriptorBinding& original) noexcept {
+        switch (binding.descriptor_type) {
+        case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            return ShaderResourceShape::TypedBuffer;
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+            return original.user_type == SPV_REFLECT_USER_TYPE_BYTE_ADDRESS_BUFFER ||
+                           original.user_type == SPV_REFLECT_USER_TYPE_RW_BYTE_ADDRESS_BUFFER
+                       ? ShaderResourceShape::RawBuffer
+                       : ShaderResourceShape::StructuredBuffer;
+        case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            break;
+        default:
+            return ShaderResourceShape::None;
+        }
+
+        const bool arrayed = binding.image.arrayed != 0;
+        switch (binding.image.dim) {
+        case SpvDim1D:
+            return arrayed ? ShaderResourceShape::Texture1DArray : ShaderResourceShape::Texture1D;
+        case SpvDim2D:
+            if (binding.image.ms != 0) {
+                return arrayed ? ShaderResourceShape::Texture2DMultisampleArray
+                               : ShaderResourceShape::Texture2DMultisample;
+            }
+
+            return arrayed ? ShaderResourceShape::Texture2DArray : ShaderResourceShape::Texture2D;
+        case SpvDim3D:
+            return ShaderResourceShape::Texture3D;
+        case SpvDimCube:
+            return arrayed ? ShaderResourceShape::TextureCubeArray
+                           : ShaderResourceShape::TextureCube;
+        default:
+            return ShaderResourceShape::None;
+        }
+    }
+
+    // 구조화 버퍼 원소 byte다(DXC 블록 struct { T _m0[]; }의 런타임 배열 stride).
+    static uint32 StructureStride(const SpvReflectDescriptorBinding& binding) noexcept {
+        const SpvReflectTypeDescription* type = binding.type_description;
+        if (type != nullptr && type->member_count > 0 && type->members != nullptr &&
+            type->members[0].traits.array.stride != 0) {
+            return type->members[0].traits.array.stride;
+        }
+
+        if (binding.block.member_count == 0 || binding.block.members == nullptr) {
+            return 0;
+        }
+
+        return binding.block.members[0].array.stride;
+    }
+
+    // 원소 기본 타입이다(이미지의 sampled type — SPIRV-Reflect는 그 숫자 특성을 이미지 타입에
+    // 둔다).
+    static ShaderComponentType ComponentOf(const SpvReflectTypeDescription* type) noexcept {
+        if (type == nullptr || (type->type_flags & SPV_REFLECT_TYPE_FLAG_FLOAT) != 0) {
+            return ShaderComponentType::Float;
+        }
+
+        if ((type->type_flags & SPV_REFLECT_TYPE_FLAG_INT) != 0) {
+            return type->traits.numeric.scalar.signedness != 0 ? ShaderComponentType::Int
+                                                               : ShaderComponentType::Uint;
+        }
+
+        return ShaderComponentType::Float;
+    }
+
     bool AddSignature(SpvReflectInterfaceVariable** variables, uint32 count,
                       Array<ShaderReflectedSignature>& out) noexcept {
         for (uint32 index = 0; index < count; ++index) {
@@ -331,6 +415,7 @@ private:
                 }
             } else {
                 element = SplitShaderSemantic(Name(variable.semantic));
+                element.component = ComponentOf(variable.type_description);
             }
 
             if (!out.TryPushBack(element)) {

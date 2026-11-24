@@ -43,6 +43,23 @@ ShaderReflectedMember M(const char* name, B base, uint32 columns, uint32 offset,
     return member;
 }
 
+// 종류의 기본 모양이다(값 1 v3 규칙 — 텍스처는 Texture2D float, 구조화는 raw).
+void DefaultShape(ShaderReflectedResource& resource) noexcept {
+    switch (resource.kind) {
+    case ShaderResourceKind::SampledTexture:
+    case ShaderResourceKind::StorageImage:
+        resource.shape = ShaderResourceShape::Texture2D;
+        resource.component = ShaderComponentType::Float;
+        break;
+    case ShaderResourceKind::StorageBufferRead:
+    case ShaderResourceKind::StorageBufferReadWrite:
+        resource.shape = ShaderResourceShape::RawBuffer;
+        break;
+    default:
+        break;
+    }
+}
+
 void Buffer(ShaderReflection& reflection, const char* name, uint32 slot,
             std::initializer_list<ShaderReflectedMember> members, bool root = false) noexcept {
     ShaderReflectedResource resource;
@@ -65,6 +82,7 @@ void Resource(ShaderReflection& reflection, ShaderResourceKind kind, const char*
     resource.kind = kind;
     resource.name = StringView(name);
     resource.slot = slot;
+    DefaultShape(resource);
     REQUIRE(reflection.resources.TryPushBack(resource));
 }
 
@@ -85,6 +103,9 @@ struct Sample {
         Resource(reflection, ShaderResourceKind::SampledTexture, "Albedo", 1);
         Resource(reflection, ShaderResourceKind::SampledTexture, "Noise", 2);
         Resource(reflection, ShaderResourceKind::SampledTexture, "Lights", 3);
+        // Lights는 typed buffer(samplerBuffer)다 — 결합 sampler 목록 밖이다.
+        reflection.resources[reflection.resources.Size() - 1].shape =
+            ShaderResourceShape::TypedBuffer;
         Resource(reflection, ShaderResourceKind::Sampler, "AlbedoSampler", 4);
         Resource(reflection, ShaderResourceKind::Sampler, "SharedClampSampler", 5);
         reflection.hasSamplerUses = true;

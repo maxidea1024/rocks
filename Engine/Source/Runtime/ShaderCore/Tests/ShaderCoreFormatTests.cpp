@@ -114,11 +114,15 @@ void FillSampleLayout(ShaderBindingLayout& layout) noexcept {
     albedo.kind = ShaderResourceKind::SampledTexture;
     albedo.name = "Albedo";
     albedo.samplerSource = ShaderSamplerSource::Own;
+    albedo.shape = ShaderResourceShape::Texture2D;
+    albedo.component = ShaderComponentType::Float;
     albedo.firstMember = 3;
     ShaderBindingResource lights;
     lights.kind = ShaderResourceKind::StorageBufferRead;
     lights.slot = 2;
     lights.name = "Lights";
+    lights.shape = ShaderResourceShape::StructuredBuffer;
+    lights.structureStride = 32;
     lights.firstMember = 3;
     ShaderBindingResource sampler;
     sampler.kind = ShaderResourceKind::Sampler;
@@ -491,14 +495,17 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     FillSampleLayout(layout);
     Array<uint8> bytes(TestAllocator());
     REQUIRE(EncodeShaderBindingLayout(layout, bytes));
-    // 머리 golden(버전·단계·루트 상수·attribute·render target·자원 수).
-    // v2: 단계 사이 마스크(0 — 시험 layout은 정하지 않았다)가 render target 마스크 뒤에 있다.
-    const uint8 header[] = {2, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 0, 0,
-                            0, 0, 5, 0, 0, 0, 0, 0, 0,  0, 6, 0, 0, 0};
+    // 머리 golden(버전·단계·루트 상수·attribute·int·uint attribute·render target·단계 사이·자원
+    // 수). v2: 단계 사이 마스크(0 — 시험 layout은 정하지 않았다)가 render target 마스크 뒤에 있다.
+    // v3: attribute 마스크 뒤에 int·uint attribute 마스크가 있다.
+    const uint8 header[] = {3, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                            0, 0, 0, 0, 0, 0, 5, 0, 0,  0, 0, 0, 0, 0, 6, 0, 0, 0};
     REQUIRE(bytes.Size() > sizeof(header));
     CHECK(memcmp(bytes.Data(), header, sizeof(header)) == 0);
-    // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 출처 0, 공유 0, 멤버 2.
-    const uint8 first[] = {0, 0, 0, 4, 'V', 'i', 'e', 'w', 32, 0, 0, 0, 0, 0, 2, 0};
+    // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 출처 0, 공유 0, 모양 0, 원소 0, stride 0,
+    // 멤버 2.
+    const uint8 first[] = {0, 0, 0, 4, 'V', 'i', 'e', 'w', 32, 0, 0,
+                           0, 0, 0, 0, 0,   0,   0,   0,   0,  2, 0};
     CHECK(memcmp(bytes.Data() + sizeof(header), first, sizeof(first)) == 0);
 
     ShaderBindingLayout decoded(TestAllocator());
@@ -513,7 +520,9 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
         CHECK(a.kind == b.kind && a.slot == b.slot && a.name == b.name &&
               a.constantBufferBytes == b.constantBufferBytes &&
               a.samplerSource == b.samplerSource && a.sharedSampler == b.sharedSampler &&
-              a.firstMember == b.firstMember && a.memberCount == b.memberCount);
+              a.shape == b.shape && a.component == b.component &&
+              a.structureStride == b.structureStride && a.firstMember == b.firstMember &&
+              a.memberCount == b.memberCount);
     }
 
     for (usize index = 0; index < layout.members.Size(); ++index) {
@@ -544,10 +553,10 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::CorruptPackage);
     (void)bytes.TryResize(bytes.Size() - 1);
-    bytes[0] = 1;
+    bytes[0] = 2;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::UnsupportedVersion);
-    bytes[0] = 2;
+    bytes[0] = 3;
     // 종류 byte를 범위 밖으로(첫 자원).
     bytes[sizeof(header)] = 9;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
@@ -588,6 +597,65 @@ TEST(ShaderCore_BindingLayoutRules) {
     CHECK(EncodeRejects([](L& l) noexcept { l.resources[1].firstMember = 1; }));
     CHECK(EncodeRejects(
         [](L& l) noexcept { (void)l.members.TryPushBack(ShaderBindingMember{"x", 0, 4}); }));
+    // v3 모양 규칙: 종류에 맞는 모양, typed만 원소 타입, 구조화만 stride(4의 배수).
+    CHECK(EncodeRejects([](L& l) noexcept { l.resources[2].shape = ShaderResourceShape::None; }));
+    CHECK(EncodeRejects(
+        [](L& l) noexcept { l.resources[2].shape = ShaderResourceShape::RawBuffer; }));
+    CHECK(
+        EncodeRejects([](L& l) noexcept { l.resources[2].component = ShaderComponentType::None; }));
+    CHECK(EncodeRejects(
+        [](L& l) noexcept { l.resources[3].component = ShaderComponentType::Float; }));
+    CHECK(EncodeRejects([](L& l) noexcept { l.resources[3].structureStride = 0; }));
+    CHECK(EncodeRejects([](L& l) noexcept { l.resources[3].structureStride = 6; }));
+    CHECK(EncodeRejects(
+        [](L& l) noexcept { l.resources[3].shape = ShaderResourceShape::RawBuffer; }));
+    CHECK(EncodeRejects(
+        [](L& l) noexcept { l.resources[0].shape = ShaderResourceShape::Texture2D; }));
+    CHECK(EncodeRejects(
+        [](L& l) noexcept { l.resources[2].shape = static_cast<ShaderResourceShape>(13); }));
+    CHECK(EncodeRejects([](L& l) noexcept {
+        l.stage = ShaderStageVertex;
+        l.renderTargetMask = 0;
+        l.attributeMask = 0b11;
+        l.attributeIntMask = 0b1;
+        l.attributeUintMask = 0b1;
+    }));
+    CHECK(EncodeRejects([](L& l) noexcept {
+        l.stage = ShaderStageVertex;
+        l.renderTargetMask = 0;
+        l.attributeMask = 0b1;
+        l.attributeUintMask = 0b10;
+    }));
+    CHECK(!EncodeRejects([](L& l) noexcept {
+        l.stage = ShaderStageVertex;
+        l.renderTargetMask = 0;
+        l.attributeMask = 0b111;
+        l.attributeIntMask = 0b10;
+        l.attributeUintMask = 0b100;
+    }));
+    CHECK(!EncodeRejects([](L& l) noexcept {
+        l.resources[3].shape = ShaderResourceShape::RawBuffer;
+        l.resources[3].structureStride = 0;
+    }));
+    CHECK(!EncodeRejects([](L& l) noexcept {
+        l.resources[2].shape = ShaderResourceShape::TypedBuffer;
+        l.resources[2].component = ShaderComponentType::Uint;
+    }));
+    {
+        ShaderBindingLayout typed(TestAllocator());
+        typed.stage = ShaderStageVertex;
+        typed.attributeMask = 0b111;
+        typed.attributeIntMask = 0b10;
+        typed.attributeUintMask = 0b100;
+        CHECK(ShaderAttributeComponent(typed, 0) == ShaderComponentType::Float);
+        CHECK(ShaderAttributeComponent(typed, 1) == ShaderComponentType::Int);
+        CHECK(ShaderAttributeComponent(typed, 2) == ShaderComponentType::Uint);
+        CHECK(ShaderAttributeComponent(typed, 3) == ShaderComponentType::None);
+        CHECK(ShaderAttributeComponent(typed, 16) == ShaderComponentType::None);
+        CHECK(StringView(ShaderResourceShapeName(ShaderResourceShape::TextureCubeArray)) ==
+              "TextureCubeArray");
+    }
+
     // 정상 바꿈은 받는다(대조).
     CHECK(!EncodeRejects(
         [](L& l) noexcept { l.resources[2].samplerSource = ShaderSamplerSource::SharedClamp; }));

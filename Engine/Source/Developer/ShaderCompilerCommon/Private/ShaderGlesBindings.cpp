@@ -162,8 +162,26 @@ private:
             use = candidate.texture == resource.name ? &candidate : use;
         }
 
+        if (use == nullptr && resource.shape != ShaderResourceShape::TypedBuffer) {
+            // 샘플러 없이 Load만 쓰는 텍스처: dummy 샘플러와 결합한다(빈 샘플러 이름 —
+            // CrossCompileSpirv glslDummySampler). 출처는 None이다.
+            auto combined = out_.samplers.TryEmplaceBack(out_.header.GetAllocator());
+            char name[TextBytes];
+            (void)snprintf(name, sizeof(name), "%cs%u", StageLetter(stage), ordinal);
+            if (!combined || !combined.Value()->texture.TryAssign(resource.name) ||
+                !combined.Value()->name.TryAssign(StringView(name))) {
+                return Fail(diagnostics_, "out of memory");
+            }
+
+            combined.Value()->unit = unit;
+            out_.dummySampler = true;
+            return static_cast<bool>(samplers_.TryPushBack(ShaderGlesSampler{
+                       static_cast<uint16>(unit), StringView(), ShaderSamplerSource::None})) ||
+                   Fail(diagnostics_, "out of memory");
+        }
+
         if (use == nullptr) {
-            // typed buffer(samplerBuffer) 등 결합 목록 밖: SPIR-V binding을 유닛으로 바꾼다.
+            // typed buffer(samplerBuffer)는 결합 목록 밖: SPIR-V binding을 유닛으로 바꾼다.
             const bool pushed =
                 static_cast<bool>(
                     out_.bindings.TryPushBack(GlesResourceBinding{stageSet, binding, unit})) &&

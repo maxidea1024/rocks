@@ -23,7 +23,7 @@
 namespace rocks::shader {
 
 // 처리기 버전이다(형식 정의 processor.version).
-inline constexpr uint32 MetalShaderProcessorVersion = 2;
+inline constexpr uint32 MetalShaderProcessorVersion = 3;
 
 class ROCKS_SHADERFORMATMETAL_API MetalShaderFormatBackend final : public ShaderFormatBackend {
 public:
