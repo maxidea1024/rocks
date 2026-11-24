@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "TestFontNanumGothic",
+  "version": "06bfe0d62a98",
+  "upstreamDirectory": "google-fonts-06bfe0d62a98",
+  "source": {
+    "url": "https://raw.githubusercontent.com/google/fonts/06bfe0d62a98375cb09c942fa18e68bd32cff057/ofl/nanumgothic/NanumGothic-Regular.ttf",
+    "sha256": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31",
+    "verification": "Byte copy of ofl/nanumgothic/NanumGothic-Regular.ttf and OFL.txt at google/fonts commit 06bfe0d62a98375cb09c942fa18e68bd32cff057 (fetched 2026-11-24). NanumGothic is the Korean typeface UE 5.8 adds to the editor composite font (Docs/Design/UiToolkit.ko.md section 4.2)."
+  },
+  "licenses": [
+    {
+      "spdx": "OFL-1.1",
+      "upstreamExpression": "OFL.txt (SIL Open Font License 1.1)",
+      "file": "google-fonts-06bfe0d62a98/ofl/nanumgothic/OFL.txt",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "ofl/nanumgothic/NanumGothic-Regular.ttf": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31",
+    "ofl/nanumgothic/OFL.txt": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Fixed test font for the font library and font backend tests (Docs/Design/Font/08-ThirdParty.ko.md section 8.5): tests read the file from the repository and never use fonts installed on the machine. Not shipped in any product.",
+    "Korean (Hangul) coverage for face, metric, shaping and composite fallback tests."
+  ]
+}

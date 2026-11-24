@@ -165,4 +165,48 @@ TEST(ThirdParty_HarfBuzzShapesLigatureWithTestFont) {
     hb_blob_destroy(blob);
 }
 
+TEST(ThirdParty_HarfBuzzShapesArabicRightToLeft) {
+    SystemAllocator allocator;
+    Array<uint8> bytes(allocator);
+    CHECK(ReadFile("Engine/Source/ThirdParty/TestFontNotoNaskhArabic/google-fonts-06bfe0d62a98/ofl/"
+                   "notonaskharabic/NotoNaskhArabic-wght.ttf",
+                   bytes));
+    if (bytes.Size() == 0) {
+        return;
+    }
+
+    hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(bytes.Data()),
+                                     static_cast<unsigned int>(bytes.Size()),
+                                     HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+    hb_face_t* face = hb_face_create(blob, 0);
+    hb_font_t* font = hb_font_create(face);
+    // "سلام"(글자 4개). RTL 버퍼는 글리프를 시각 순서(왼쪽부터)로 내므로 첫 글리프의 cluster가
+    // 마지막 글자다. lam-alef를 글리프 하나로 합칠지는 글꼴 설계에 달려 있어(이 글꼴은 문맥형 두
+    // 글리프) 세지 않는다.
+    hb_buffer_t* buffer = hb_buffer_create();
+    hb_buffer_add_utf8(buffer, "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85", -1, 0, -1);
+    hb_buffer_guess_segment_properties(buffer);
+    CHECK(hb_buffer_get_direction(buffer) == HB_DIRECTION_RTL);
+    hb_shape(font, buffer, nullptr, 0);
+    unsigned int count = 0;
+    const hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, &count);
+    CHECK(count >= 3u && count <= 4u);
+    CHECK(count != 0 && infos[0].cluster > infos[count - 1].cluster);
+
+    // 문맥형: 단독 'س'와 낱말 첫머리 'س'는 다른 글리프다.
+    hb_buffer_t* alone = hb_buffer_create();
+    hb_buffer_add_utf8(alone, "\xD8\xB3", -1, 0, -1);
+    hb_buffer_guess_segment_properties(alone);
+    hb_shape(font, alone, nullptr, 0);
+    unsigned int aloneCount = 0;
+    const hb_glyph_info_t* aloneInfo = hb_buffer_get_glyph_infos(alone, &aloneCount);
+    CHECK(aloneCount == 1u && count != 0 && aloneInfo[0].codepoint != infos[count - 1].codepoint);
+
+    hb_buffer_destroy(alone);
+    hb_buffer_destroy(buffer);
+    hb_font_destroy(font);
+    hb_face_destroy(face);
+    hb_blob_destroy(blob);
+}
+
 } // namespace third_party_harfbuzz_tests_file

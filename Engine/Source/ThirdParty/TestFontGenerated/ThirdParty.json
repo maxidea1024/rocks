@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "TestFontGenerated",
+  "version": "2026-11-24",
+  "upstreamDirectory": "generated-2026-11-24",
+  "source": {
+    "url": "https://raw.githubusercontent.com/googlefonts/noto-emoji/e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e/2D/fonts/NotoColorEmoji.ttf",
+    "sha256": "15671215ab769fdc7162a045d56fd7d7e477c51b04e6b3c761d914d8fdd6cc44",
+    "verification": "Generated files (the originals are too large to import whole: the CBDT emoji font is 10.7 MB). Tool: fontTools 4.63.0 with brotli 1.2.0, Python 3.13. Inputs: NotoColorEmoji.ttf (CBDT/CBLC) at googlefonts/noto-emoji tag v2026-09-24-unicode18_0 (e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e, SHA-256 in source.sha256), TestFontRoboto Roboto-Regular.ttf (SHA-256 9f300202f482ad59f8b13bc3131a295744d14fd530fa3765a0a11ec87264d203) and TestFontNotoNaskhArabic NotoNaskhArabic[wght].ttf (SHA-256 67b5a525a661b607971fbd3f96a81b89d3a768e74534fca84f18ac97e6fab72f). Commands: NotoColorEmoji-U1F600.ttf = fontTools.subset of the emoji font to U+1F600 (layout_features=[], name_IDs=['*'], notdef_outline=True); Roboto-NotoNaskhArabic.ttc = TTCollection of [Roboto, Noto Naskh Arabic]; Roboto-Regular.woff and .woff2 = Roboto saved with flavor woff and woff2; every TTFont loaded with recalcTimestamp=False. Two runs produce the same bytes. The license texts are byte copies of the inputs' OFL files."
+  },
+  "licenses": [
+    {
+      "spdx": "OFL-1.1",
+      "upstreamExpression": "Noto Color Emoji OFL",
+      "file": "generated-2026-11-24/licenses/NotoColorEmoji-OFL.txt",
+      "binaryNoticeRequired": false
+    },
+    {
+      "spdx": "OFL-1.1",
+      "upstreamExpression": "Roboto OFL",
+      "file": "generated-2026-11-24/licenses/Roboto-OFL.txt",
+      "binaryNoticeRequired": false
+    },
+    {
+      "spdx": "OFL-1.1",
+      "upstreamExpression": "Noto Naskh Arabic OFL",
+      "file": "generated-2026-11-24/licenses/NotoNaskhArabic-OFL.txt",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "NotoColorEmoji-U1F600.ttf": "e60137a9b0659f21087b9bba18ca67e1b6bc9292afaa7c118dabe8c11fc65e84",
+    "Roboto-NotoNaskhArabic.ttc": "96d55a68ca4c2e9b8f730aa0079b4752d12c07f0332baf24d7a3e396132826a8",
+    "Roboto-Regular.woff": "d5dda8e5c63d58f5c94d47874ab3eb98b69631f7620c7870abb9e5387db6ade1",
+    "Roboto-Regular.woff2": "ac3397e2b18d4751ad0aac6fb456a5e5aabdf833dfca0b1d889d45cecde47965",
+    "licenses/NotoColorEmoji-OFL.txt": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+    "licenses/NotoNaskhArabic-OFL.txt": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af",
+    "licenses/Roboto-OFL.txt": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Fixed test font for the font library and font backend tests (Docs/Design/Font/08-ThirdParty.ko.md section 8.5): tests read the file from the repository and never use fonts installed on the machine. Not shipped in any product.",
+    "Colour bitmap glyph (CBDT PNG through libpng), font collection (two sub-faces) and WOFF/WOFF2 (FreeType zlib and Brotli paths) test inputs. The generation script is recorded in source.verification; regenerate with the same tool versions."
+  ]
+}
