@@ -286,7 +286,7 @@ internal static class DescriptorTests
         Check(Names(development.Apply(rules, ["Game", "GameTools"])).SequenceEqual(["Game", "GameTools", "Water"]),
             "Windows Development module selection");
         Check(development.EnabledPlugins.Select(plugin => plugin.Name).SequenceEqual(["Water"]), "enabled plugins");
-        // 기술자의 loadingPhase가 모듈 표 행의 단계로 넘어간다(Docs/Design/ModuleLoader.ko.md 3.2절). 적지 않으면 Default다.
+        // 기술자의 loadingPhase가 모듈 표 행의 단계로 넘어간다(Docs/Design/ModuleLoader 3.2절). 적지 않으면 Default다.
         Check(development.Apply(rules, ["Game"]).Select(module => module.LoadingPhase)
             .SequenceEqual([LoadingPhase.Default, LoadingPhase.Default, LoadingPhase.PostConfigInit]), "descriptor loading phases");
         // 켠 플러그인의 모듈은 타깃이 참조하지 않아도 빌드 대상에 더한다. 프로젝트 모듈은 더하지 않는다.
@@ -313,7 +313,7 @@ internal static class DescriptorTests
         NativeModuleInput[] usesWeather = [.. rules.Where(rule => rule.Name != "Game"), Rule("Game", "Weather")];
         ExpectFailure(() => development.Apply(usesWeather, ["Game"]), "included module depended on a disabled plugin module",
             "module 'Game' uses module 'Weather'");
-        // 실행 중 적재 관계(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 같은 type 검사를 받는다(Monolithic이 링크한다):
+        // 실행 중 적재 관계(DynamicModules — Docs/Design/ModuleLoader 3.8절)도 같은 type 검사를 받는다(Monolithic이 링크한다):
         // Runtime 모듈이 Editor 모듈을, Release에서 Developer 모듈을 적재 목록에 두면 거부한다. 들어가는 모듈을 두면 그대로 통과한다.
         NativeModuleInput[] WithGameDynamic(string dynamic) =>
             [.. rules.Where(rule => rule.Name != "Game"), Rule("Game", "Water", "ObjectRuntime") with { DynamicModules = [dynamic] }];

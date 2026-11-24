@@ -485,7 +485,7 @@ internal static partial class LaunchTests
             Verify.Equal(42, (await Run(windowed, "exit", "42")).ExitCode, "windowed exit 42");
         });
 
-        // 내장 진입은 Modular를 지원하지 않아 Modular 하니스에는 그 프로그램이 없다(Docs/Design/ModuleLoader.ko.md 3.14절, BuildTargets BS8d6).
+        // 내장 진입은 Modular를 지원하지 않아 Modular 하니스에는 그 프로그램이 없다(Docs/Design/ModuleLoader 3.14절, BuildTargets BS8d6).
         if (options.Modular)
         {
             return;

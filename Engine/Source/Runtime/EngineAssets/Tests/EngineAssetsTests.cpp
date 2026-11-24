@@ -955,7 +955,7 @@ TEST(EngineAssets_PumpBudgetVariables) {
 // 모듈 진입점(11.8절 1·3): 실행 파일 모듈 표의 EngineAssets 행에 RegisterSettings가
 // 있고(HostSettings가 부르는 경로), 그것이 asset.* CVar를 등록한다 — 등록 뒤 asset.cooked_root
 // 대입을 받는다. 표는 프로세스 로더의 것이다(Modular에는 정적 표가 없다 — 진입 기술은 EntryAt,
-// Docs/Design/ModuleLoader.ko.md 3.14절).
+// Docs/Design/ModuleLoader 3.14절).
 TEST(EngineAssets_ModuleEntryRegistersSettings) {
     const ModuleEntry* found = nullptr;
     ModuleLoader& modules = test::ProcessModules();

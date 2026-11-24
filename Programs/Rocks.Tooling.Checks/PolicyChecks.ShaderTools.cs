@@ -34,7 +34,7 @@ public static partial class PolicyChecks
     private static readonly Regex ShaderWorkerForbiddenInclude = Pattern("#\\s*include\\s*[<\"](?:ShaderCompiler|AssetNugget)/");
 
     // DynamicLibrary::Open(절대 경로 열기)을 불러도 되는 곳이다: 도구 로드 허용 위치와 API 구현·시험(PlatformBase·TestSupport), 모듈
-    // 로더의 Modular manifest 적재(Docs/Design/ModuleLoader.ko.md 3.13절 — 엔진 모듈 공유 라이브러리를 manifest 폴더의 절대 경로로 연다).
+    // 로더의 Modular manifest 적재(Docs/Design/ModuleLoader 3.13절 — 엔진 모듈 공유 라이브러리를 manifest 폴더의 절대 경로로 연다).
     // 그 밖(Runtime 모듈)은 OS 공급 라이브러리를 이름으로 여는 OpenSystem만 쓴다(Vulkan 로더·XInput).
     private static readonly string[] DynamicLibraryOpenUsers =
     [

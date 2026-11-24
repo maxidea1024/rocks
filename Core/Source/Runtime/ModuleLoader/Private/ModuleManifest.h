@@ -8,7 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <Platform/DynamicLibrary.h>
 
-// Modular 모듈 manifest의 해석과 바이너리 준비다(Docs/Design/ModuleLoader.ko.md 3.5·3.13·3.15절).
+// Modular 모듈 manifest의 해석과 바이너리 준비다(Docs/Design/ModuleLoader 3.5·3.13·3.15절).
 // 로더(ModuleLoader::TryCreateFromManifest)와 시험만 쓴다. 공개 API가 아니다.
 namespace rocks::detail {
 

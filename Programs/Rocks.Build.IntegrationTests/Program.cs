@@ -176,10 +176,10 @@ try
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
         // manifest 버전 10: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
-        // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 8은 리플렉션 전용
+        // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader 3.9절), 8은 리플렉션 전용
         // 라이브러리 표지를 없앴다(메타데이터 모듈도 진입점 모듈이다 — 3.10절). 9는 타입별 본문이 생성 헤더가 아니라 SDK 라이브러리에 있고
         // (Docs/Design/ReflectionGeneratedSources.ko.md 5절) 공유 PCH 제공 모듈의 SharedPchHeader를 싣는다(Docs/Design/UnityBuildPch.ko.md 8.4절).
-        // 10은 모듈마다 실행 중 적재 모듈 목록 DynamicModules를 싣는다(Docs/Design/ModuleLoader.ko.md 3.8절 — 엔진 모듈은 아직 쓰지 않아 비어 있다).
+        // 10은 모듈마다 실행 중 적재 모듈 목록 DynamicModules를 싣는다(Docs/Design/ModuleLoader 3.8절 — 엔진 모듈은 아직 쓰지 않아 비어 있다).
         // 11은 모듈마다 로딩 단계 LoadingPhase(이름)와 부트 표지 ProvidesLaunch를 싣는다(3.11절 — 부트 모듈 Core·ModuleLoader·Launch는
         // EarliestPossible, 다른 Core 층 모듈은 PostConfigInit — 층별 기본 단계).
         var sdkModules = engineManifest.RootElement.GetProperty("Configurations").GetProperty("Debug").GetProperty("Modules").EnumerateArray().ToArray();
@@ -343,7 +343,7 @@ try
         string.Join(", ", initial.Actions.Where(action => action.Kind == "Pch").Select(action => action.Module + " " + action.OutputPath)));
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
-    // 모듈 표(Docs/Design/ModuleLoader.ko.md 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
+    // 모듈 표(Docs/Design/ModuleLoader 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
     // 진입점과 게임 모듈 자신(템플릿의 SampleGameModule.cpp)을 참조하고 서드파티 모듈은 싣지 않는다. 링크가 성공했으므로 모든 진입점이 있다.
     // 리플렉션 생성 소스만으로 된 SDK 라이브러리(CoreTypeBindings)는 진입점이 없으므로 표에 들지 않는다.
     var gameTable = File.ReadAllText(Path.Combine(output, "GeneratedSources/SampleGame/SampleGame.ModuleTable.cpp"));
@@ -933,7 +933,7 @@ try
     Require(reflectionResult.ModuleOutputs.ContainsKey("GameCore") &&
         reflectionResult.Actions.Any(action => action.Module == "GameCore" && action.Kind == "Archive" && action.Executed),
         "A game module with only reflection headers was not built into an archive");
-    // 리플렉션 헤더만 가진 모듈도 진입점 모듈이다(Docs/Design/ModuleLoader.ko.md 3.10절): 게임 모듈 GameCore는 빌드가 만든 진입점 TU를
+    // 리플렉션 헤더만 가진 모듈도 진입점 모듈이다(Docs/Design/ModuleLoader 3.10절): 게임 모듈 GameCore는 빌드가 만든 진입점 TU를
     // 받고, SDK의 두 메타데이터 모듈은 SDK 라이브러리에 든 진입점으로 모듈 표에 든다.
     string reflectionTable = File.ReadAllText(Path.Combine(reflectionOutput, "GeneratedSources/SampleGame/SampleGame.ModuleTable.cpp"));
     Require(File.Exists(Path.Combine(reflectionOutput, "GeneratedSources/GameCore/GameCore.ModuleEntry.cpp")) &&
@@ -1189,7 +1189,7 @@ try
                 rejected.StdErr.Contains("Re-export", StringComparison.Ordinal), $"An SDK manifest with {name} was not rejected: " + rejected.StdErr);
         }
 
-        // 실행 중 적재 모듈 목록(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 SDK 안의 모듈 이름이어야 하고 칸이 있어야 한다.
+        // 실행 중 적재 모듈 목록(DynamicModules — Docs/Design/ModuleLoader 3.8절)도 SDK 안의 모듈 이름이어야 하고 칸이 있어야 한다.
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit, string expected) in
                  new (string, Action<System.Text.Json.Nodes.JsonObject>, string)[]
                  {

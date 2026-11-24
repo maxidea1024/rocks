@@ -14,7 +14,7 @@
 
 using namespace rocks;
 
-// Modular 모듈 manifest 적재(Docs/Design/ModuleLoader.ko.md 3.13·3.15절, ML4a·ML5a)를 검사한다.
+// Modular 모듈 manifest 적재(Docs/Design/ModuleLoader 3.13·3.15절, ML4a·ML5a)를 검사한다.
 // 해석·검사의 양성과 키·형식·의존 위반, 실행 파일 행만 있는 manifest로 만든 로더(OS 적재 없이 성공
 // 경로), 그리고 Prepare의 실패 경로(파일 없음·크기 다름·의존 DLL 없음·진입점 없음)를 본다. OS 적재
 // 실패 경로는 실행 중에 쓴 데이터 전용 시험 라이브러리(TestSupport/DynamicLibraryFixture.h)를

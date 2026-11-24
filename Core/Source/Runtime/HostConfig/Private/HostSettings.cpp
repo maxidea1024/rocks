@@ -268,7 +268,7 @@ config::ConfigContext& HostSettings::Context() noexcept {
 
 Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexcept {
     // 모듈 설정 등록은 프로세스 로더의 표를 쓴다(Modular에는 정적 모듈 표가 없다 —
-    // Docs/Design/ModuleLoader.ko.md 3.14절).
+    // Docs/Design/ModuleLoader 3.14절).
     if (options.modules == nullptr) {
         Log::Error(LogHostConfig, "Config setup needs the process module loader "
                                   "(HostSettingsOptions::modules)");
@@ -319,7 +319,7 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     }
 
     // 모든 모듈의 설정 등록(log.*·trace.*·기기 프로필 등 — 각 모듈 수명 객체의 static
-    // RegisterSettings)을 모듈 표 순서로 부른다(Docs/Design/ModuleLoader.ko.md 3.10절 MD22). 늦게
+    // RegisterSettings)을 모듈 표 순서로 부른다(Docs/Design/ModuleLoader 3.10절 MD22). 늦게
     // 시작하는 모듈의 이름도 파일·CompleteStartup 전에 등록되어 오타 경고가 나지 않는다.
     if (step) {
         stage = "settings registration";

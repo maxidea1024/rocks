@@ -75,7 +75,7 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             SanitizerInstrumentation = manifest.SanitizerInstrumentation,
             // Process-wide state limits direct consumers to one module (Docs/Design/BuildTargets section 3.8, BD29).
             HasGlobalState = manifest.GlobalState,
-            // Third-party code has no module lifetime object, so it stays out of the module table (Docs/Design/ModuleLoader.ko.md section 3.1).
+            // Third-party code has no module lifetime object, so it stays out of the module table (Docs/Design/ModuleLoader section 3.1).
             ThirdParty = true
         };
     }

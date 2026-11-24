@@ -9,7 +9,7 @@
 
 using namespace rocks;
 
-// 모듈 로더의 타입 등록기 연결(Docs/Design/ModuleLoader.ko.md 3.6·3.10절 MD15·MD16)과 남은 lease
+// 모듈 로더의 타입 등록기 연결(Docs/Design/ModuleLoader 3.6·3.10절 MD15·MD16)과 남은 lease
 // 진단을 검사한다. 로더는 타입 시스템을 모르므로 등록기는 시험용 기록기다: 등록·해제를 순서 기록에
 // 남기고 로더가 넘긴 lease를 복사해 붙잡는다(실제 등록기는 그 lease를 RuntimeTypeOps.module에
 // 넣는다). 등록 함수 포인터는 칸이 채워졌는지만 보므로 부르지 않는다.
