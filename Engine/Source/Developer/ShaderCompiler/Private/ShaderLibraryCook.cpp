@@ -1,6 +1,5 @@
 #include <ShaderCompiler/ShaderLibraryCook.h>
 
-#include <Core/Algorithms.h>
 #include <Core/FileError.h>
 #include <Core/FileRead.h>
 #include <Platform/Process.h>
@@ -21,14 +20,6 @@ constexpr usize DefineValueBytes = 16;
 constexpr usize FileShaPrefixHex = 16;
 // 임시 파일 접미 버퍼 byte 수(".<pid>.tmp" NUL 포함)다.
 constexpr usize TemporarySuffixBytes = 32;
-
-// 열거한 조합 하나다.
-struct JobPlan {
-    const ShaderTypeDesc* type = nullptr;
-    VertexInputTypeId vertexInputType = NoVertexInputType;
-    uint32 permutationId = 0;
-    bool developmentOnly = false;
-};
 
 // job 하나가 가리키는 정의 저장소다. 자기 배열을 가리키므로 만든 뒤 옮기지 않는다(Array를 미리
 // 예약).
@@ -77,74 +68,8 @@ ErrorCode OutcomeError(ShaderLibraryCookOutcome outcome, ErrorCode writeError) n
     return ErrorCode::InvalidArgument;
 }
 
-// 형식 하나의 조합을 결정적 순서로 열거한다(SSD5·SSD6).
-Result<void> EnumeratePlans(const ShaderLibraryCookDesc& desc,
-                            Span<const ShaderVertexInputType> inputs,
-                            const ShaderFormatFacts& facts, Array<JobPlan>& plans) noexcept {
-    plans.Clear();
-    for (const ShaderTypeDesc* type : desc.registry->Types()) {
-        if (ShaderLibraryKindOf(type->owner) != desc.library ||
-            (type->requiredFeatures & ~facts.features) != 0) {
-            continue;
-        }
-
-        const bool typeDevelopment = (type->flags & ShaderTypeDevelopmentOnly) != 0;
-        if (typeDevelopment && !desc.includeDevelopment) {
-            continue;
-        }
-
-        const Result<uint32> size = ValidateShaderPermutationDomain(type->permutation);
-        if (!size) {
-            return Fail(size.Error());
-        }
-
-        const bool axis = (type->flags & ShaderTypeVertexInputAxis) != 0;
-        const usize inputCount = axis ? inputs.Size() : 1;
-        for (usize input = 0; input < inputCount; ++input) {
-            const VertexInputTypeId vertexInput = axis ? inputs[input].id : NoVertexInputType;
-            for (uint32 permutation = 0; permutation < size.Value(); ++permutation) {
-                const bool development = typeDevelopment || IsDevelopmentOnlyShaderPermutation(
-                                                                type->permutation, permutation);
-                if (development && !desc.includeDevelopment) {
-                    continue;
-                }
-
-                // 개발 전용 PS 퍼뮤테이션은 진단 버퍼 기능을 요구한다(16.1절 SSD34).
-                if (development && type->stage == ShaderStagePixel &&
-                    (facts.features & ShaderFeatureDebugPixelUav) == 0) {
-                    continue;
-                }
-
-                if (type->shouldCompile != nullptr &&
-                    !type->shouldCompile(vertexInput, permutation, facts)) {
-                    continue;
-                }
-
-                if (axis && inputs[input].shouldCompile != nullptr &&
-                    !inputs[input].shouldCompile(*type, permutation, facts)) {
-                    continue;
-                }
-
-                if (auto pushed =
-                        plans.TryPushBack(JobPlan{type, vertexInput, permutation, development});
-                    !pushed) {
-                    return pushed;
-                }
-            }
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-// 조합의 요구 기능이다(타입 요구 기능 + 개발 전용 PS의 진단 버퍼 — 16.1절 SSD34·SSD35).
-uint32 PlanFeatures(const JobPlan& plan) noexcept {
-    const bool debugPixel = plan.developmentOnly && plan.type->stage == ShaderStagePixel;
-    return plan.type->requiredFeatures | (debugPixel ? ShaderFeatureDebugPixelUav : 0u);
-}
-
 // 조합의 정의를 storage에 채운다(차원 선언 순서 — SC10이 이름순으로 조립한다).
-Result<void> FillDefines(const JobPlan& plan, JobStorage& storage) noexcept {
+Result<void> FillDefines(const ShaderLibraryCombination& plan, JobStorage& storage) noexcept {
     const ShaderPermutationDomain& domain = plan.type->permutation;
     const usize dimensions = domain.dimensions.Size();
     uint32 valueIds[MaxShaderPermutationDimensions] = {};
@@ -338,33 +263,17 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
 
     // 정점 입력 타입은 id 순으로 열거한다.
     Array<ShaderVertexInputType> inputs(allocator);
-    if (!inputs.TryReserve(desc.vertexInputTypes.Size())) {
-        return Fail(ErrorCode::OutOfMemory);
+    if (auto sorted = SortShaderVertexInputTypes(desc.vertexInputTypes, inputs); !sorted) {
+        return sorted;
     }
 
-    for (const ShaderVertexInputType& input : desc.vertexInputTypes) {
-        if (input.id == NoVertexInputType || input.id != ShaderTypeNameHash(input.name)) {
-            return Fail(ErrorCode::InvalidArgument);
-        }
-
-        for (const ShaderVertexInputType& other : inputs) {
-            if (other.id == input.id) {
-                return Fail(ErrorCode::InvalidArgument);
-            }
-        }
-
-        (void)inputs.TryPushBack(input);
-    }
-
-    algo::Sort(inputs.View(), [](const ShaderVertexInputType& a,
-                                 const ShaderVertexInputType& b) noexcept { return a.id < b.id; });
     if (!report.formats.TryReserve(desc.formats.Size())) {
         return Fail(ErrorCode::OutOfMemory);
     }
 
     const Sha256Digest typeSet = desc.registry->TypeSetDigest();
     ErrorCode firstError = ErrorCode::None;
-    Array<JobPlan> plans(allocator);
+    Array<ShaderLibraryCombination> plans(allocator);
     for (const ShaderFormatSnapshot* snapshot : desc.formats) {
         if (snapshot == nullptr) {
             return Fail(ErrorCode::InvalidArgument);
@@ -374,7 +283,10 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         ShaderLibraryCookFormat& line = report.formats[report.formats.Size() - 1];
         CopyText(line.formatId, sizeof(line.formatId), snapshot->definition.Id());
         const ShaderFormatFacts facts = MakeShaderFormatFacts(snapshot->definition);
-        if (auto enumerated = EnumeratePlans(desc, inputs.View(), facts, plans); !enumerated) {
+        if (auto enumerated =
+                EnumerateShaderLibraryCombinations(desc.registry->Types(), inputs.View(), facts,
+                                                   desc.library, desc.includeDevelopment, plans);
+            !enumerated) {
             return enumerated;
         }
 
@@ -387,7 +299,7 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         }
 
         const ShaderCompileOptions defaults = DefaultShaderCompileOptions(snapshot->definition);
-        for (const JobPlan& plan : plans) {
+        for (const ShaderLibraryCombination& plan : plans) {
             (void)storage.TryPushBack(JobStorage{});
             JobStorage& defines = storage[storage.Size() - 1];
             if (auto filled = FillDefines(plan, defines); !filled) {
@@ -406,7 +318,7 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             }
 
             job.parameterLayouts = plan.type->parameterLayouts;
-            job.requiredFeatures = PlanFeatures(plan);
+            job.requiredFeatures = ShaderLibraryCombinationFeatures(plan);
             job.developmentOnly = plan.developmentOnly;
             (void)jobs.TryPushBack(job);
         }
@@ -451,17 +363,17 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         }
 
         for (usize index = 0; index < results.Size(); ++index) {
-            const JobPlan& plan = plans[index];
+            const ShaderLibraryCombination& plan = plans[index];
             (void)values.TryPushBack(EntryValues{});
             EntryValues& entryValues = values[values.Size() - 1];
             CollectValues(results[index].values, entryValues);
             ShaderLibraryBuildEntry entry;
-            entry.key =
-                ShaderLibraryKey{0, plan.type->nameHash, plan.vertexInputType, plan.permutationId};
+            entry.key = ShaderLibraryCombinationKey(plan);
             entry.typeName = plan.type->name;
             entry.stage = plan.type->stage;
             entry.developmentOnly = plan.developmentOnly;
-            entry.runtimeFeatures = PlanFeatures(plan) & RuntimeCheckedShaderFeatures;
+            entry.runtimeFeatures =
+                ShaderLibraryCombinationFeatures(plan) & RuntimeCheckedShaderFeatures;
             entry.layoutSignature = storage[index].signature;
             entry.values = Span<const ShaderLibraryValue>(entryValues.values, entryValues.count);
             (void)entries.TryPushBack(entry);

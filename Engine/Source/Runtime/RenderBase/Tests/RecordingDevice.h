@@ -272,6 +272,10 @@ public:
                       const graphics::TextureViewDesc& desc) noexcept override;
     Result<graphics::PipelineHandle>
     CreatePipeline(const graphics::PipelineDesc& desc) noexcept override;
+    // 어느 스레드에서나 부를 수 있다(셰이더 집합의 첫 사용 생성 경쟁 시험). 호출을 기록하지 않고
+    // CreatedShaders·RetiredShaders로 센다.
+    Result<graphics::ShaderHandle>
+    CreateShader(const graphics::ShaderCodeDesc& desc) noexcept override;
     Result<graphics::CommandContext*>
     BeginFrame(graphics::SwapChainHandle swapChain,
                const graphics::ClearColor& clear) noexcept override;
@@ -282,6 +286,7 @@ public:
     void Retire(graphics::BufferViewHandle view) noexcept override;
     void Retire(graphics::TextureHandle texture) noexcept override;
     void Retire(graphics::PipelineHandle pipeline) noexcept override;
+    void Retire(graphics::ShaderHandle shader) noexcept override;
     void Retire(graphics::SwapChainHandle swapChain) noexcept override;
     void ReclaimCompleted() noexcept override;
     Result<void> WaitIdle() noexcept override;
@@ -330,6 +335,23 @@ public:
     uint64 IgnoredDraws() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
+
+    // CreateShader를 arrivals번째 호출이 들어올 때까지 붙잡는다(명시 gate — 경쟁하는 생성이 모두
+    // 장치 생성까지 간 뒤에 게시하게 한다). 0이면 끈다.
+    void HoldShaderCreation(uint32 arrivals) noexcept;
+    // 만든·Retire한 장치 셰이더 수와 지금 살아 있는 수다.
+    uint64 CreatedShaders() const noexcept;
+    uint64 RetiredShaders() const noexcept;
+    usize LiveShaders() const noexcept;
+    // 마지막으로 만든 파이프라인의 VS handle이다.
+    graphics::ShaderHandle LastPipelineVertexShader() const noexcept {
+        return lastVertexShader_;
+    }
+
+    // CreatePipeline 호출 수(실패 포함)다.
+    uint64 PipelineCreateCalls() const noexcept {
+        return pipelineCreateCalls_;
+    }
 
 private:
     // 회수 대기 하나다: queue마다 마지막 사용 값과, 열린 기록이 그 queue였는지다.
@@ -502,6 +524,16 @@ private:
     // 묶인 파이프라인이다(stale·null이면 SetDrawConstants가 거부한다).
     graphics::PipelineHandle boundPipeline_;
     SlotArray<uint8> swapChains_;
+    // 장치 셰이더(단계)다. shaderGate_가 지킨다.
+    platform::Mutex shaderGate_;
+    SlotArray<uint8> shaders_;
+    platform::ManualResetEvent shaderRelease_{true};
+    uint32 shaderHold_ = 0;
+    uint32 shaderArrivals_ = 0;
+    uint64 createdShaders_ = 0;
+    uint64 retiredShaders_ = 0;
+    graphics::ShaderHandle lastVertexShader_;
+    uint64 pipelineCreateCalls_ = 0;
     Array<Retired> retired_;
     SlotArray<Readback> readbacks_;
     CpuStaging stagingSource_;

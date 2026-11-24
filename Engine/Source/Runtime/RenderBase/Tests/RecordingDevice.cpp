@@ -14,8 +14,8 @@ RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
       textureUses_(allocator), bufferUses_(allocator), heaps_(allocator),
       placedTextures_(allocator), placedBuffers_(allocator), buffers_(allocator),
       allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
-      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
-      readbacks_(allocator),
+      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), shaders_(allocator),
+      retired_(allocator), readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -648,7 +648,73 @@ Result<TextureHandle> RecordingDevice::CreateTextureView(TextureHandle texture,
     return Result<TextureHandle>::Success(TextureHandle{added.Value()});
 }
 
+Result<ShaderHandle> RecordingDevice::CreateShader(const ShaderCodeDesc& desc) noexcept {
+    if (desc.kind != graphics::ShaderCodeKindOf(Info().backend) || desc.code.IsEmpty()) {
+        return Result<ShaderHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    bool hold = false;
+    {
+        platform::LockGuard lock(shaderGate_);
+        if (shaderHold_ != 0) {
+            ++shaderArrivals_;
+            hold = shaderArrivals_ < shaderHold_;
+            if (!hold) {
+                shaderRelease_.Signal();
+            }
+        }
+    }
+
+    if (hold) {
+        (void)shaderRelease_.Wait();
+    }
+
+    platform::LockGuard lock(shaderGate_);
+    auto added = shaders_.TryAdd(static_cast<uint8>(desc.stage));
+    if (!added) {
+        return Result<ShaderHandle>::Failure(added.Error());
+    }
+
+    ++createdShaders_;
+    return Result<ShaderHandle>::Success(ShaderHandle{added.Value()});
+}
+
+void RecordingDevice::Retire(ShaderHandle shader) noexcept {
+    platform::LockGuard lock(shaderGate_);
+    if (shaders_.TryRemove(shader.slot)) {
+        ++retiredShaders_;
+    }
+}
+
+void RecordingDevice::HoldShaderCreation(uint32 arrivals) noexcept {
+    platform::LockGuard lock(shaderGate_);
+    shaderHold_ = arrivals;
+    shaderArrivals_ = 0;
+    if (arrivals == 0) {
+        shaderRelease_.Signal();
+    } else {
+        shaderRelease_.Reset();
+    }
+}
+
+uint64 RecordingDevice::CreatedShaders() const noexcept {
+    platform::LockGuard lock(const_cast<platform::Mutex&>(shaderGate_));
+    return createdShaders_;
+}
+
+uint64 RecordingDevice::RetiredShaders() const noexcept {
+    platform::LockGuard lock(const_cast<platform::Mutex&>(shaderGate_));
+    return retiredShaders_;
+}
+
+usize RecordingDevice::LiveShaders() const noexcept {
+    platform::LockGuard lock(const_cast<platform::Mutex&>(shaderGate_));
+    return shaders_.Size();
+}
+
 Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc) noexcept {
+    ++pipelineCreateCalls_;
+    lastVertexShader_ = desc.vertexShader;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<PipelineHandle>::Failure(owner.Error());
