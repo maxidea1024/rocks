@@ -166,7 +166,7 @@ mobile은 Android를 먼저 한다(PlatformLayer "모바일 플랫폼"). 지금 
 - AP1·AP3·AP4: `Sandbox.apk`(Gradle 없이 aapt2·zipalign·apksigner)가 설치·실행되고, 게임 스레드에서 엔진이 돌며 로그가 logcat(tag Rocks)으로 나온다. extra 없이 띄우면 `--engine --window`다.
 - AP2: 창 listener·입력 스레드·창 파괴 gate(호스트 확인)·빈 프레임. 홈 → 복귀(pause·stop·start·resume)에서 gate 시간 초과와 ANR이 없다.
 - AP5: 터치(TI1)·Back·키·게임패드 버튼이 Pawn까지 온다. 패드 연결 해제 감지(Java 리스너)만 남았다.
-- AP6(APK VFS)은 남았다.
+- AP6 플랫폼 층: `platform::ApkFileSystem()`(읽기 전용 — Open·Read·Seek·Size·FileExists·Stat·DirectoryExists·파일만 열거, 쓰기 Unsupported, Android 밖은 Unsupported)과 `RegisterApkAssetManager`(Launch 액티비티 층이 onCreate에서 등록), 패키저의 `AndroidPackage.AssetsDirectory` → `assets/` 비압축 저장. Sandbox가 `assets/SandboxProbe.txt`를 읽어 로그로 남기는 것을 확인했다. fd·오프셋 비동기 읽기(`AAsset_openFileDescriptor64`)와 쿠킹 데이터 연결(EngineAssets가 APK에서 매니페스트·패키지를 읽기)은 AssetSystem "VFS(APK)" 후속 항목이 맡는다.
 
 ShaderSystem P13이 막는 SH6(Android 셰이더·그래픽 실행)은 AP4까지 끝나면 시작할 수 있다.
 

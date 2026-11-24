@@ -249,7 +249,9 @@ public sealed record SourceGroup(string Directory, string Target, IReadOnlyList<
 /// </summary>
 /// <param name="PackageName">Android 패키지 이름이다(예: <c>com.rocks.sandbox</c>). 점으로 나눈 조각이 둘 이상이고 조각마다 영문자로
 /// 시작하는 영문자·숫자·밑줄이다.</param>
-public sealed record AndroidPackage(string PackageName)
+/// <param name="AssetsDirectory">APK <c>assets/</c>에 넣을 폴더(절대 경로, 선택)다. 아래 파일을 같은 상대 경로로 비압축 저장한다(실행 중
+/// <c>platform::ApkFileSystem</c>으로 읽는다).</param>
+public sealed record AndroidPackage(string PackageName, string? AssetsDirectory = null)
 {
     /// <summary>APK 실행 파일 모듈이 받는 define이다.</summary>
     public const string ApkDefine = "ROCKS_ANDROID_APK=1";
