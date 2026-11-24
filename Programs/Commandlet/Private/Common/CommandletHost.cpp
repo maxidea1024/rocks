@@ -14,6 +14,7 @@
 #include <Platform/File.h>
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
 #include <TraceAnalysis/TraceModel.h>
+#include <TextureTools/TextureImport.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <UnrealExchange/ExchangeCommand.h>
 
@@ -172,6 +173,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
+    // 텍스처 임포터·설정 정규화 hook·예약 인자 번역기다(Docs/Design/AssetSystem 12.12절 — 임포터
+    // 묶음은 명령보다 오래 산다).
+    TextureImporterSet textureImporters;
+    assetContext.importers = {&RegisterTextureImporters, &textureImporters};
+    assetContext.typeHooks = {&RegisterTextureTypeHooks, nullptr};
+    assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
     // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);

@@ -175,6 +175,11 @@ protected:
 // 저장 검증 scratch 크기다(VerifyPackageFile이 건너뛴 섹션을 이 크기 조각으로 훑는다).
 inline constexpr usize EditorSaveVerifyScratchBytes = 64 * 1024;
 
+// 에디터 패키지 bulk의 저장 codec이다(Docs/Design/AssetSystem 5절·12.12절 — UE FEditorBulkData처럼
+// 원본을 압축한다). 바뀌지 않은 entry는 다시 압축하지 않고 저장 byte를 복사한다
+// (PackageBulkSource::ReadStoredBulk).
+inline constexpr BulkCodec EditorPackageBulkCodec = BulkCodec::Zstd;
+
 // 열린 패키지 하나의 정보다.
 struct EditorPackageInfo {
     explicit EditorPackageInfo(Allocator& allocator) noexcept
@@ -396,6 +401,12 @@ public:
     void RemoveOverridesUnder(ObjectHandle object, const OverrideSet& prefixes) noexcept;
     // object의 override 집합이다(없으면 null — 객체의 패키지가 닫히면 무효).
     const OverrideSet* FindOverrides(ObjectHandle object) const noexcept;
+    // object(열린 패키지 asset의 대표 에셋)의 설정을 정규화한다(타입 hook 표의 정규화 hook —
+    // Docs/Design/AssetSystem 12.12절, UE ValidateSettingsAfterImportOrEdit). assignedFields는 이번
+    // 명령이 대입·되돌린 최상위 필드 이름이다. hook 표가 없거나 그 타입에 hook이 없으면 아무것도
+    // 하지 않는다. 오류: 타입 조회 오류, hook의 오류.
+    Result<void> NormalizeSettings(ObjectHandle object, AssetId asset,
+                                   Span<const StringView> assignedFields) noexcept;
 
     // 이동하는 열린 패키지의 경로를 바꿀 준비를 한다(7.1절 17 A2e2). 저장된 패키지는 fileName이
     // fromFile(Content 상대 OS 이름 — 파일 또는 디렉터리, 이동하는 실제 이름)과 같거나 그 아래면 그

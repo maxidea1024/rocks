@@ -123,18 +123,26 @@ bool IsOutputKey(StringView key) noexcept {
 }
 
 // 역할 목록(roleAt(i), i < count)을 임포터 역할 규칙(7.1절 18·19 A2f3b)으로 판정하고 원본 순서를
-// order에 둔다: 고정 역할(roles — 비면 DefaultImportSourceRole)은 정확히 한 번씩 roles 순, 그 밖은
-// 접두(rolePrefixes) 하나로 시작하고 접두 뒤가 비지 않으며 서로 다른 역할을 byte 순으로. 위반이면
+// order에 둔다: 고정 역할(roles — 비면 DefaultImportSourceRole, 가변만 받는 임포터는 없음)은
+// 정확히 한 번씩 roles 순, 그 밖은 접두(rolePrefixes) 하나로 시작하고 접두 뒤가 비지 않으며 서로
+// 다른 역할을 byte 순으로. 가변만 받는 임포터는 원본이 하나 이상이다(0개면 bad = 0). 위반이면
 // bad에 그 번호(빠진 고정 역할이면 count + 그 고정 역할 번호)를 두고 거짓이다. 오류: 할당 실패.
 template <class RoleAt>
 Result<bool> OrderImportRoles(Allocator& allocator, const AssetImporterInfo& info, usize count,
                               RoleAt roleAt, Array<usize>& order, usize& bad) noexcept {
     order.Clear();
     const StringView defaultRole = DefaultImportSourceRole;
-    const Span<const StringView> fixed =
-        info.roles.IsEmpty() ? Span<const StringView>(&defaultRole, 1) : info.roles;
+    const Span<const StringView> fixed = info.variableSourcesOnly ? Span<const StringView>()
+                                         : info.roles.IsEmpty()
+                                             ? Span<const StringView>(&defaultRole, 1)
+                                             : info.roles;
     if (count > MaxImportSources) {
         bad = MaxImportSources;
+        return Result<bool>::Success(false);
+    }
+
+    if (info.variableSourcesOnly && count == 0) {
+        bad = 0;
         return Result<bool>::Success(false);
     }
 
@@ -1449,6 +1457,22 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
         set_.MergeOverrides(main->asset, pending);
     }
 
+    // 설정 정규화(12.12절 — UE ValidateSettingsAfterImportOrEdit): 임포터의 기본값·재임포트 규칙과
+    // 사용자 설정 대입 뒤, 검증·저장 전이다(대입이 없어도 부른다).
+    {
+        Array<StringView> assigned(allocator);
+        Result<void> normalized =
+            asset_database_detail::CollectAssignedFields(settingAssignments.View(), assigned);
+        if (normalized) {
+            normalized = set_.NormalizeSettings(main->asset, run.mainId, assigned.View());
+        }
+
+        if (!normalized) {
+            return FailImport<void>(failure, AssetDiagnosticCode::None, normalized.Error(),
+                                    run.mainId);
+        }
+    }
+
     // 결과·기록 입력·소유 기록 byte를 만든다(저장 사이에 할당이 실패하지 않게).
     Result<void> step = run.recordSources.TryReserve(run.read.Size());
     if (step) {
@@ -1698,9 +1722,11 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
     usize badRole = 0;
     const bool single = overrides.Size() == 1 && overrides[0].role.IsEmpty();
     if (member.replaceSources) {
-        // 역할 없는 원본 하나(`--source=`)는 유일한 고정 역할이다(고정 역할이 하나일 때만).
+        // 역할 없는 원본 하나(`--source=`)는 유일한 고정 역할이다(고정 역할이 하나일 때만 —
+        // 가변만 받는 임포터는 고정 역할이 없다).
         const StringView defaultRole = DefaultImportSourceRole;
-        const StringView onlyRole = info.roles.IsEmpty()     ? defaultRole
+        const StringView onlyRole = info.variableSourcesOnly ? StringView()
+                                    : info.roles.IsEmpty()   ? defaultRole
                                     : info.roles.Size() == 1 ? info.roles[0]
                                                              : StringView();
         if (overrides.IsEmpty() || (single && onlyRole.IsEmpty())) {
@@ -1737,7 +1763,8 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
             return FailImport<void>(failure, AssetDiagnosticCode::None, checked.Error(), mainId);
         }
 
-        if (!checked.Value() || (single && recorded.sources.Size() != 1)) {
+        if (!checked.Value() ||
+            (single && (recorded.sources.Size() != 1 || info.variableSourcesOnly))) {
             return FailImport<void>(failure, AssetDiagnosticCode::InvalidImportOption,
                                     ErrorCode::InvalidArgument, mainId);
         }

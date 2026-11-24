@@ -129,9 +129,16 @@ Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& 
         return invalid();
     }
 
+    // 가변만 받는 임포터(A5h): 고정 역할이 없고 접두가 하나 이상이다.
+    if (info.variableSourcesOnly && (!info.roles.IsEmpty() || info.rolePrefixes.IsEmpty())) {
+        return invalid();
+    }
+
     const StringView defaultRole = DefaultImportSourceRole;
-    const Span<const StringView> fixedRoles =
-        info.roles.IsEmpty() ? Span<const StringView>(&defaultRole, 1) : info.roles;
+    const Span<const StringView> fixedRoles = info.variableSourcesOnly ? Span<const StringView>()
+                                              : info.roles.IsEmpty()
+                                                  ? Span<const StringView>(&defaultRole, 1)
+                                                  : info.roles;
     for (usize index = 0; index < info.rolePrefixes.Size(); ++index) {
         const StringView prefix = info.rolePrefixes[index];
         if (!IsRole(prefix)) {

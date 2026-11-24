@@ -692,6 +692,50 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
     Array<uint8> container(allocator);
     for (usize position = 0; position < drafts.Size(); ++position) {
         const BulkDraft& draft = drafts[position];
+        // 저장 byte 재사용(12.12절): 같은 codec의 이전 파일 entry는 다시 압축하지 않고 복사한다.
+        // 0 byte entry는 늘 None이라 쓰기 codec이 Zstd면 여기 오지 않는다(codec이 다르다).
+        auto stored = options.bulkSource->ReadStoredBulk(draft.original);
+        if (!stored && stored.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(stored.Error());
+        }
+
+        const BulkCodec wanted = draft.original.rawBytes == 0 ? BulkCodec::None : options.bulkCodec;
+        if (stored && stored.Value().codec == wanted &&
+            stored.Value().rawBytes == draft.original.rawBytes &&
+            stored.Value().sha256 == draft.original.sha256) {
+            const PackageStoredBulk& copy = stored.Value();
+            if (Crc32(copy.stored) != copy.crc32) {
+                return FailAsset<void>(
+                    failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, self,
+                    static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
+            }
+
+            if (position > 0) {
+                if (auto padded = out.Pad(alignment); !padded) {
+                    return padded;
+                }
+            }
+
+            PackageBulkEntry entry;
+            entry.bulkId = static_cast<uint32>(position + 1);
+            entry.flags = draft.editorOnly ? static_cast<uint32>(BulkEntryFlags::EditorOnly) : 0;
+            entry.offset = out.Position() - start;
+            entry.rawBytes = copy.rawBytes;
+            entry.sha256 = copy.sha256;
+            entry.storedBytes = copy.stored.Size();
+            entry.codec = copy.codec;
+            entry.crc32 = copy.crc32;
+            if (auto appended = out.Append(copy.stored); !appended) {
+                return appended;
+            }
+
+            if (auto pushed = index.TryPushBack(entry); !pushed) {
+                return pushed;
+            }
+
+            continue;
+        }
+
         auto raw = options.bulkSource->ReadBulk(draft.original);
         if (!raw) {
             return Result<void>::Failure(raw.Error());

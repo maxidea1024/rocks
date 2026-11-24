@@ -158,6 +158,15 @@ ImageFileFormat DetectImageFileFormat(Span<const uint8> file, StringView pathHin
     return ImageFileFormat::Unknown;
 }
 
+Result<TextureDimension> PeekImageDimension(Span<const uint8> file,
+                                            ImageDecodeFailure* failure) noexcept {
+    if (DetectImageFileFormat(file) != ImageFileFormat::Dds) {
+        return Result<TextureDimension>::Success(TextureDimension::Texture2D);
+    }
+
+    return detail::PeekDdsDimension(file, failure);
+}
+
 Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFileFormat format,
                          const ImageDecodeLimits& limits, ImageDecodeResult& out,
                          StringView pathHint) noexcept {

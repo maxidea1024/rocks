@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetDatabase/AssetDatabaseLock.h>
+#include <AssetDatabase/AssetImportArguments.h>
 #include <AssetDatabase/AssetService.h>
 #include <AssetDatabase/ProjectLayout.h>
 #include <AssetRuntime/AssetTypeHooks.h>
@@ -72,13 +73,26 @@ struct AssetImporterSetup {
     void* state = nullptr;
 };
 
+// 세션의 에셋 타입 hook 등록이다(Docs/Design/AssetSystem 12.12절 — 설정 정규화 hook 등, 임포터
+// 등록과 같은 때): table(세션 hook 표)에 hook을 등록하고 토큰을 tokens에 둔다(세션이 표보다 먼저
+// 해제한다). 실패하면 그 오류로 명령이 실패한다. 제품은 TextureTools RegisterTextureTypeHooks를
+// 건다.
+struct AssetTypeHookSetup {
+    Result<void> (*registerHooks)(void* state, AssetTypeHookTable& table,
+                                  Array<AssetTypeHookRegistration>& tokens) noexcept = nullptr;
+    void* state = nullptr;
+};
+
 // 에셋 명령의 문맥이다(commandlet_host::Run이 건다): 작업 메모리와 Launch의 프로세스 모듈 로더,
-// 에셋 타입 모듈 이름(비면 AssetTypeModules 전부 — 시험은 fixture 모듈), 임포터 등록.
+// 에셋 타입 모듈 이름(비면 AssetTypeModules 전부 — 시험은 fixture 모듈), 임포터 등록, 타입 hook
+// 등록, 임포트 예약 인자 번역기(12.12절 — 없으면 예약 인자는 사용법 오류).
 struct AssetCommandContext {
     Allocator* allocator = nullptr;
     ModuleLoader* modules = nullptr;
     StringView typeModule{};
     AssetImporterSetup importers{};
+    AssetTypeHookSetup typeHooks{};
+    AssetImportTranslator importTranslator{};
 };
 
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem 7.1절 15 A2c3b, ModuleLoader
@@ -172,9 +186,9 @@ struct EditSession {
     explicit EditSession(const AssetCommandContext& command) noexcept
         : context(&command), layout(*command.allocator), scan(*command.allocator),
           types(*command.allocator, *command.modules, command.typeModule),
-          hooks(*command.allocator, types.Types()), importers(*command.allocator, types.Types()),
-          importerTokens(*command.allocator), warnings(*command.allocator),
-          diagnostics(*command.allocator) {
+          hooks(*command.allocator, types.Types()), hookTokens(*command.allocator),
+          importers(*command.allocator, types.Types()), importerTokens(*command.allocator),
+          warnings(*command.allocator), diagnostics(*command.allocator) {
     }
 
     const AssetCommandContext* context;
@@ -183,6 +197,8 @@ struct EditSession {
     ScanScheduler scan;
     AssetCommandTypes types;
     AssetTypeHookTable hooks;
+    // hook 등록 토큰이다(표보다 먼저 사라진다 — 선언 순서).
+    Array<AssetTypeHookRegistration> hookTokens;
     // 임포터 표와 등록 토큰이다(토큰이 표보다, 서비스가 둘보다 먼저 사라진다).
     AssetImporterTable importers;
     Array<AssetImporterRegistration> importerTokens;

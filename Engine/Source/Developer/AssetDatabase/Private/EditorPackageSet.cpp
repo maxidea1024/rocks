@@ -2012,6 +2012,22 @@ void EditorPackageSet::MergeOverrides(ObjectHandle object, const OverrideSet& pe
     }
 }
 
+Result<void> EditorPackageSet::NormalizeSettings(ObjectHandle object, AssetId asset,
+                                                 Span<const StringView> assignedFields) noexcept {
+    if (registry_.Get() == nullptr || config_.hooks == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const ObjectAccessContext access = Access();
+    auto type = registry_->AcquireType(access, object);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    return config_.hooks->NormalizeSettings(*registry_, access, object, type.Value().Id(), asset,
+                                            assignedFields);
+}
+
 void EditorPackageSet::RemoveOverridesUnder(ObjectHandle object,
                                             const OverrideSet& prefixes) noexcept {
     for (EditorPackageInfo& info : open_) {
@@ -2096,6 +2112,7 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
     };
     PackageWriteOptions write;
     write.kind = PackageKind::Editor;
+    write.bulkCodec = EditorPackageBulkCodec;
     write.engineVersion = config_.writeEngineVersion.IsEmpty() ? build::CurrentEngineVersion()
                                                                : config_.writeEngineVersion;
     write.bulkSource = info.store;

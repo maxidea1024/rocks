@@ -10,6 +10,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/FilePackageBulkStore.h>
 #include <AssetRuntime/PackageReader.h>
+#include <Base/InitializerList.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Time/DateTime.h>
 #include <Serialization/Record.h>
@@ -507,7 +508,7 @@ TEST(AssetImport_Group) {
     ImportScene scene(env, sources, "import-group");
     REQUIRE(scene.ready);
     auto registration =
-        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr});
+        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr, nullptr});
     REQUIRE(registration);
     REQUIRE(scene.PutSource("SourceArt/A.trock", "value=1\nopenmember=1") &&
             scene.PutSource("SourceArt/B.trock", "value=2\nopenmember=0") &&
@@ -879,6 +880,171 @@ TEST(AssetImport_VariableSources) {
     CHECK(rejects(FixedBlob, BlobPrefixes, 22));
     static constexpr StringView Overlap[] = {"b", "blob:"};
     CHECK(rejects(AssetRoles, Overlap, 23));
+}
+
+// 가변만 받는 임포터(Docs/Design/AssetSystem 7.1절 18 개정·12.12절 A5h): 고정 역할 없이 `slice:`
+// 역할 여럿(문맥은 byte 순), 원본 0개는 InvalidImportOption(detail 0), 기록 그대로 재임포트, 역할
+// 없는 원본 하나(`--source=`)는 바꾸기·전체 교체 모두 InvalidImportOption.
+TEST(AssetImport_VariableSourcesOnly) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-variable-only");
+    REQUIRE(scene.ready);
+    static constexpr StringView SlicePrefixes[] = {"slice:"};
+    AssetImporterInfo info = TestImporterInfo();
+    info.id = Guid{0x494d50540001ull, 31};
+    info.name = "SliceImporter";
+    info.extensions = {};
+    info.optionsType = TypeId{};
+    info.rolePrefixes = SlicePrefixes;
+    info.variableSourcesOnly = true;
+    TestImporter slices(info);
+    auto registered = scene.importers.Register(slices);
+    REQUIRE(registered);
+    REQUIRE(scene.PutSource("SourceArt/S0.trock", "value=4") &&
+            scene.PutSource("SourceArt/S1.trock", "value=2"));
+    const String first = scene.Absolute(env.allocator, "SourceArt/S0.trock");
+    const String second = scene.Absolute(env.allocator, "SourceArt/S1.trock");
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    TextDiagnostics diagnostics(env.allocator);
+    AssetImportResult result(env.allocator);
+    const AssetImportSourceInput inputs[] = {{"slice:1", second.View()}, {"slice:0", first.View()}};
+    REQUIRE(service.Import(scene.lock, "/Game/Slices", inputs, "SliceImporter", {}, diagnostics,
+                           result));
+    CHECK(slices.LastRoles() == "slice:0,slice:1,");
+    TestAsset* imported = Representative(service.Packages(), result.id);
+    REQUIRE(imported != nullptr);
+    CHECK(imported->value == 6);
+
+    AssetImportResult empty(env.allocator);
+    AssetDiagnostic emptyFailure;
+    CHECK(service
+              .Import(scene.lock, "/Game/Empty", {}, "SliceImporter", {}, diagnostics, empty,
+                      nullptr, &emptyFailure)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(emptyFailure.code == AssetDiagnosticCode::InvalidImportOption &&
+          emptyFailure.detail == 0);
+
+    AssetImportResult again(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/Slices", {}, {}, diagnostics, again));
+    CHECK(slices.LastRoles() == "slice:0,slice:1,");
+    const AssetImportSourceInput single[] = {{{}, first.View()}};
+    for (bool replace : {false, true}) {
+        AssetDiagnostic failure;
+        CHECK(service
+                  .Reimport(scene.lock, "/Game/Slices", single, {}, diagnostics, again, nullptr,
+                            &failure, replace)
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(failure.code == AssetDiagnosticCode::InvalidImportOption);
+    }
+}
+
+namespace {
+
+// 설정 정규화 hook 시험 상태다(12.12절 — 서비스가 대입 뒤·저장 전에 부른다).
+usize normalizeCalls = 0;
+bool normalizeFails = false;
+char normalizeFields[64] = {};
+usize normalizeFieldBytes = 0;
+
+// 대입 필드 이름을 `a,b,` 꼴로 남기고 value를 1000 더한다(저장 전에 적용됐는지 본다).
+Result<void> CountingNormalize(const AssetTypeHookContext& context,
+                               Span<const StringView> fields) noexcept {
+    ++normalizeCalls;
+    normalizeFieldBytes = 0;
+    for (StringView field : fields) {
+        for (usize at = 0;
+             at < field.ByteCount() && normalizeFieldBytes + 1 < sizeof(normalizeFields); ++at) {
+            normalizeFields[normalizeFieldBytes++] = field.Data()[at];
+        }
+
+        if (normalizeFieldBytes + 1 < sizeof(normalizeFields)) {
+            normalizeFields[normalizeFieldBytes++] = ',';
+        }
+    }
+
+    if (normalizeFails) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    auto borrowed = context.registry.ResolveForWrite<TestAsset>(context.access, context.object);
+    if (!borrowed) {
+        return Result<void>::Failure(borrowed.Error());
+    }
+
+    auto value = borrowed.Value().Get();
+    if (!value) {
+        return Result<void>::Failure(value.Error());
+    }
+
+    value.Value()->value += 1000;
+    return Result<void>::Success();
+}
+
+StringView NormalizedFields() noexcept {
+    return StringView(normalizeFields, normalizeFieldBytes);
+}
+
+} // namespace
+
+// 설정 정규화 hook(12.12절): 새 임포트는 임포터·설정 대입 뒤 저장 전에 한 번(옵션 대입은 넘기지
+// 않는다 — 설정 최상위 필드만), 재임포트도 한 번(대입 없으면 빈 목록), asset-set은
+// 대입·되돌린 필드로 한 번. hook 실패는 임포트 실패(저장 없음)·asset-set 실패다.
+TEST(AssetImport_NormalizeSettingsHook) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-normalize");
+    REQUIRE(scene.ready);
+    AssetTypeHooks hooks;
+    hooks.normalizeSettings = &CountingNormalize;
+    auto hook = scene.hooks.Register(IdOf<TestAsset>(), hooks);
+    REQUIRE(hook);
+    REQUIRE(scene.PutSource(RockSource, "value=5"));
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    Assignments assignments(env.allocator);
+    assignments.Add("scale=2").Add("note=First").Add("label=L");
+    TextDiagnostics diagnostics(env.allocator);
+    AssetImportResult result(env.allocator);
+    normalizeCalls = 0;
+    REQUIRE(service.Import(scene.lock, "/Game/Rock", inputs, {}, assignments.list.View(),
+                           diagnostics, result));
+    CHECK(normalizeCalls == 1 && NormalizedFields() == "note,label,");
+    TestAsset* imported = Representative(service.Packages(), result.id);
+    REQUIRE(imported != nullptr);
+    CHECK(imported->value == 1010);
+    REQUIRE(service.Packages().Close(result.id));
+    auto read = ReadFile(env, scene, "Content/Rock.rasset");
+    REQUIRE(read);
+
+    AssetImportResult again(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, again));
+    CHECK(normalizeCalls == 2 && NormalizedFields().IsEmpty());
+
+    Assignments edits(env.allocator);
+    edits.Add("label=Edited");
+    REQUIRE(service.Set(scene.lock, "/Game/Rock", edits.list.View(), false, diagnostics, nullptr,
+                        nullptr));
+    CHECK(normalizeCalls == 3 && NormalizedFields() == "label,");
+
+    normalizeFails = true;
+    AssetImportResult refused(env.allocator);
+    CHECK(
+        service.Import(scene.lock, "/Game/Refused", inputs, {}, {}, diagnostics, refused).Error() ==
+        ErrorCode::Busy);
+    CHECK(!scene.files.Has("Content/Refused.rasset"));
+    CHECK(
+        service
+            .Set(scene.lock, "/Game/Rock", edits.list.View(), false, diagnostics, nullptr, nullptr)
+            .Error() == ErrorCode::Busy);
+    normalizeFails = false;
 }
 
 // 추가 출력: Output 순서대로 `<path>_<key>`에 저장, 참조 기록(owner = 주 출력)·ImportOwner 의존,
@@ -1315,7 +1481,7 @@ TEST(AssetImport_SaveFailures) {
     REQUIRE(scene.ready);
     REQUIRE(scene.PutSource(RockSource, "value=1\noutputs=extra"));
     auto registration =
-        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr});
+        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr, nullptr});
     REQUIRE(registration);
     AssetService service(env.allocator, scene.layout, scene.Config(env));
     REQUIRE(service.Initialize());
@@ -2187,7 +2353,7 @@ TEST(AssetReimport_PartialFailure) {
     ImportScene scene(env, sources, "reimport-partial");
     REQUIRE(scene.ready);
     auto registration =
-        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr});
+        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr, nullptr});
     REQUIRE(registration);
     REQUIRE(scene.PutSource(RockSource, "value=1\noutputs=extra"));
     const String source = scene.Absolute(env.allocator, RockSource);

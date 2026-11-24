@@ -184,6 +184,20 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
         return false;
     }
 
+    const AssetTypeHookSetup& hookSetup = session.context->typeHooks;
+    if (hookSetup.registerHooks != nullptr) {
+        if (auto registered =
+                hookSetup.registerHooks(hookSetup.state, session.hooks, session.hookTokens);
+            !registered) {
+            failure = registered.Error() == ErrorCode::OutOfMemory
+                          ? Result<int32>::Failure(registered.Error())
+                          : Fail(output, allocator, command, 1,
+                                 "{}: cannot register the asset type hooks",
+                                 ErrorCodeName(registered.Error()));
+            return false;
+        }
+    }
+
     const AssetImporterSetup& setup = session.context->importers;
     if (setup.registerImporters != nullptr) {
         if (auto registered =

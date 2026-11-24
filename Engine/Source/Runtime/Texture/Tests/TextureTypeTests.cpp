@@ -1,6 +1,5 @@
 #include <Texture/Texture.generated.h>
 #include <Texture/Texture.module.generated.h>
-#include <Core/Math/Math.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <Object/ModuleRegistration.h>

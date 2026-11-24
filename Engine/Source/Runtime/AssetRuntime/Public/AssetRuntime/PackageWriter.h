@@ -79,6 +79,16 @@ private:
     uint64 written_ = 0;
 };
 
+// 이전 패키지 파일 entry의 저장 byte다(PackageBulkSource::ReadStoredBulk — 다시 압축하지 않고
+// 복사한다, Docs/Design/AssetSystem 12.12절 저장 byte 재사용).
+struct PackageStoredBulk {
+    BulkCodec codec = BulkCodec::None;
+    uint32 crc32 = 0;
+    uint64 rawBytes = 0;
+    Sha256Digest sha256{};
+    Span<const uint8> stored{};
+};
+
 // writer가 bulk entry의 raw byte를 얻는 곳이다(AS 5.5절 — 객체가 메모리에 가진 raw 데이터이거나
 // 이전 패키지 파일의 entry). ref는 저장 전(옛) 값이다. 반환 span은 다음 호출이나 writer 반환까지
 // 유효해야 한다. writer가 크기·SHA-256을 ref와 대조한다(다르면 저장이 CorruptPackage로 실패 —
@@ -86,6 +96,16 @@ private:
 class PackageBulkSource {
 public:
     virtual Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept = 0;
+
+    // ref가 이전 패키지 파일의 entry면 그 저장 byte와 표 값을 준다(12.12절). writer는 codec이 쓰기
+    // codec과 같고 rawBytes·sha256이 ref와 같으면 crc32를 확인하고(다르면 CorruptPackage — 원래
+    // CRC를 옮기므로 손상이 세탁되지 않는다) 그대로 복사한다. 그 밖(codec이 다르거나 이 함수가
+    // 실패하면)은 ReadBulk로 raw를 얻어 부호화한다. 반환 span의 수명은 ReadBulk와 같다. 기본은
+    // NotFound(메모리 raw만 있는 저장소). 오류: 파일 entry가 아님 NotFound, 읽기 오류.
+    virtual Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept {
+        (void)ref;
+        return Result<PackageStoredBulk>::Failure(ErrorCode::NotFound);
+    }
 
 protected:
     ~PackageBulkSource() = default;

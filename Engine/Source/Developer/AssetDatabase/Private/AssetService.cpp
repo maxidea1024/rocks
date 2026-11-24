@@ -161,6 +161,35 @@ Result<void> PlanAssignmentOverrides(const TypeLease& lease,
     return Result<void>::Success();
 }
 
+Result<void> CollectAssignedFields(Span<const reflection_text::TextAssignment> assignments,
+                                   Array<StringView>& out) noexcept {
+    for (const reflection_text::TextAssignment& assignment : assignments) {
+        const StringView path = assignment.path;
+        usize end = path.ByteCount();
+        for (usize index = 0; index < path.ByteCount(); ++index) {
+            const char c = path.Data()[index];
+            if (c == '.' || c == '[') {
+                end = index;
+                break;
+            }
+        }
+
+        const StringView name = path.SliceBytes(0, end);
+        bool seen = false;
+        for (StringView other : out) {
+            seen = seen || other == name;
+        }
+
+        if (!seen) {
+            if (auto pushed = out.TryPushBack(name); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace asset_database_detail
 
 AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
@@ -1493,6 +1522,25 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
 
     set_.MergeOverrides(asset.Value(), pending);
     set_.RemoveOverridesUnder(asset.Value(), resetUnits);
+
+    // 설정 정규화(12.12절 — UE ValidateSettingsAfterImportOrEdit): 대입·되돌린 최상위 필드를
+    // 넘긴다. 실패는 바뀐 객체를 남기므로 dirty로 두고 저장하지 않는다.
+    {
+        Array<StringView> assigned(*allocator_);
+        Result<void> normalized =
+            asset_database_detail::CollectAssignedFields(texts.View(), assigned);
+        if (normalized) {
+            normalized = asset_database_detail::CollectAssignedFields(resets.View(), assigned);
+        }
+
+        if (normalized) {
+            normalized = set_.NormalizeSettings(asset.Value(), id, assigned.View());
+        }
+
+        if (!normalized) {
+            return failApplied(normalized.Error());
+        }
+    }
 
     // 열린 패키지다(MarkDirty는 실패하지 않는다).
     (void)set_.MarkDirty(id);

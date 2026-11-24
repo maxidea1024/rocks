@@ -680,7 +680,8 @@ TEST(EditorPackageSave_Refusals) {
     // 거부한다. 아무것도 쓰지 않는다.
     {
         AssetTypeHookTable hooks(env.allocator, env.types);
-        auto registration = hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, nullptr});
+        auto registration =
+            hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, nullptr, nullptr});
         REQUIRE(registration);
         EditorPackageSetConfig config = Config(env, scene.project);
         config.hooks = &hooks;
@@ -1049,7 +1050,8 @@ TEST(EditorPackageSave_DirtyAndHooks) {
     REQUIRE(scene.project.index.FindById(FixedId(HeroId)).Value()->tags.Size() == 1);
 
     AssetTypeHookTable hooks(env.allocator, env.types);
-    auto registration = hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, &TestBuild});
+    auto registration =
+        hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, &TestBuild, nullptr});
     REQUIRE(registration);
     EditorPackageSetConfig config = Config(env, scene.project);
     config.hooks = &hooks;
@@ -1209,7 +1211,8 @@ TEST(EditorPackageSave_AllocationFailures) {
         Sources sources(env.allocator);
         REQUIRE(MakeSources(env, sources));
         AssetTypeHookTable hooks(env.allocator, env.types);
-        auto registration = hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, &TestBuild});
+        auto registration =
+            hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, &TestBuild, nullptr});
         REQUIRE(registration);
         hookState = HookState{};
         uint32 failures = 0;

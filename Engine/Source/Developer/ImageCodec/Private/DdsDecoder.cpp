@@ -405,6 +405,60 @@ uint32 DdsMipDimension(uint32 dimension, uint32 level) noexcept {
 
 } // namespace
 
+Result<TextureDimension> PeekDdsDimension(Span<const uint8> file,
+                                          ImageDecodeFailure* failure) noexcept {
+    const auto invalid = [failure](uint64 offset) noexcept {
+        if (failure != nullptr) {
+            failure->code = AssetDiagnosticCode::InvalidSource;
+            failure->error = ErrorCode::InvalidArgument;
+            failure->offset = offset;
+        }
+
+        return Result<TextureDimension>::Failure(ErrorCode::InvalidArgument);
+    };
+    if (file.Size() < DdsDataOffset) {
+        return invalid(file.Size());
+    }
+
+    const uint32 pixelFlags = LoadLe32(file.Data() + DdsPixelFlagsOffset);
+    const bool dx10 = (pixelFlags & DdpfFourCc) != 0 &&
+                      LoadLe32(file.Data() + DdsFourCcOffset) == MakeFourCc('D', 'X', '1', '0');
+    uint32 dimension = 0;
+    bool cube = false;
+    uint32 arraySize = 1;
+    if (dx10) {
+        if (file.Size() < DdsDx10DataOffset) {
+            return invalid(file.Size());
+        }
+
+        const uint32 resourceDimension = LoadLe32(file.Data() + DdsResourceDimensionOffset);
+        if (resourceDimension < DdsResourceDimensionTexture1D ||
+            resourceDimension > DdsResourceDimensionTexture3D) {
+            return invalid(DdsResourceDimensionOffset);
+        }
+
+        dimension = resourceDimension - DdsResourceDimensionTexture1D + 1;
+        cube = (LoadLe32(file.Data() + DdsMiscFlagOffset) & DdsMiscTextureCube) != 0;
+        arraySize = LoadLe32(file.Data() + DdsArraySizeOffset);
+    } else {
+        const uint32 caps2 = LoadLe32(file.Data() + DdsCaps2Offset);
+        dimension = (caps2 & DdsCaps2Volume) != 0 ? 3 : 2;
+        cube = (caps2 & DdsCaps2Cubemap) != 0;
+    }
+
+    if (dimension == 3) {
+        return Result<TextureDimension>::Success(TextureDimension::Volume);
+    }
+
+    if (cube) {
+        return Result<TextureDimension>::Success(
+            arraySize <= 1 ? TextureDimension::TextureCube : TextureDimension::TextureCubeArray);
+    }
+
+    return Result<TextureDimension>::Success(arraySize > 1 ? TextureDimension::Texture2DArray
+                                                           : TextureDimension::Texture2D);
+}
+
 Result<void> DecodeDds(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept {
     (void)allocator;

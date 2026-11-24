@@ -209,7 +209,7 @@ TEST(AssetFixId_RewritesCopy) {
     REQUIRE(service.Initialize());
     CHECK(service.Index().FindById(FixedId(HeroId)).Error() == ErrorCode::AlreadyExists);
     auto registration =
-        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&FixTags, &FixBuild});
+        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&FixTags, &FixBuild, nullptr});
     REQUIRE(registration);
 
     AssetFixIdResult result(env.allocator);
@@ -536,7 +536,7 @@ TEST(AssetFixId_RejectsAndFailures) {
     // hook 실패(Tags): 아무것도 쓰지 않고 닫는다. 경고 자리 할당 실패도 같다.
     {
         auto registration =
-            scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&FixTags, &FixBuild});
+            scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&FixTags, &FixBuild, nullptr});
         REQUIRE(registration);
         failFixTags = true;
         failure = AssetDiagnostic{};
@@ -695,7 +695,7 @@ TEST(AssetFixId_AllocationFailures) {
                 scene.files.AddFile("Content/CycleA2.rasset", sources.cycleA.View()) &&
                 scene.files.AddFile(CopyFile, sources.hero.View()));
         auto registration =
-            scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&FixTags, &FixBuild});
+            scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&FixTags, &FixBuild, nullptr});
         REQUIRE(registration);
         const Array<uint8> original = scene.Snapshot(env.allocator, one.file);
         TaggedFailAllocator failing(env.allocator);

@@ -458,6 +458,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::TextureCubeFileOptions::cubeLayout",
+      "id": "e3ecf2a916ce4380a0356bbb58d3d135",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureCubeFileOptions::pngInfill",
+      "id": "14e33fbe421f4ac38bed238b278ef6b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::TextureDownscale::defaultValue",
       "id": "048b2ef27cca48ec8ce6546db0f8bf35",
       "aliases": [],
@@ -509,6 +523,13 @@
       "kind": "field",
       "name": "rocks::TextureFormatSettings::srgb",
       "id": "bd54d97a1b6c43cea61a75fdc5e6f515",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureImportOptions::pngInfill",
+      "id": "a303abb3d8bb43fbbc2d8137ecc51595",
       "aliases": [],
       "retired": false
     },
@@ -808,6 +829,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::TextureVolumeFileOptions::pngInfill",
+      "id": "589bae24b359438ba7bf35aa351de84f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureVolumeFileOptions::volumeTileX",
+      "id": "e5a095ce640f405c85ff1206ac9491c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureVolumeFileOptions::volumeTileY",
+      "id": "d98be1a4ecff416eb844e43055f5a76d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::VolumeTexture::addressMode",
       "id": "5fa772d30b6c4f70b41cea199b90ebc4",
       "aliases": [],
@@ -941,6 +983,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::TextureCubeFileOptions",
+      "id": "ad96327a40f348e7b73dbc37e972b211",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCubeLayout",
+      "id": "d4f8037c3c5b4b64ac41c6e446d9db63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::TextureDimension",
       "id": "6775d8aaa5074f208bf0e2f4ef979293",
       "aliases": [],
@@ -978,6 +1034,20 @@
       "kind": "type",
       "name": "rocks::TextureGroup",
       "id": "0c117d73481b41398d255816dbb7d0d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureImportOptions",
+      "id": "6e640e0d9b9a4544ad4de434224ae2c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureImportPngInfill",
+      "id": "f6c1c11319d241f0906d20585667de05",
       "aliases": [],
       "retired": false
     },
@@ -1069,6 +1139,13 @@
       "kind": "type",
       "name": "rocks::TextureSwizzle",
       "id": "585041a209d7408cb450d2a09480ba7f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureVolumeFileOptions",
+      "id": "b7a75021794846aaa256743706d1cd53",
       "aliases": [],
       "retired": false
     },

@@ -174,6 +174,9 @@ Result<void> DecodePng(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
 Result<void> DecodePsd(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
+// DDS 머리의 차원이다(PeekImageDimension — DecodeDds와 같은 규칙).
+Result<TextureDimension> PeekDdsDimension(Span<const uint8> file,
+                                          ImageDecodeFailure* failure) noexcept;
 Result<void> DecodeDds(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
 Result<void> DecodeTiff(Allocator& allocator, Span<const uint8> file,

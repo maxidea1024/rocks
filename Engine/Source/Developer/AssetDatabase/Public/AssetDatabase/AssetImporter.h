@@ -52,6 +52,12 @@ struct AssetImporterInfo {
     // 접두는 역할 문자 1–MaxImportRoleBytes byte이고, 고정 역할이 접두로 시작하거나 한 접두가 다른
     // 접두의 앞부분이면 등록 InvalidArgument다. 비면 가변 원본 없음.
     Span<const StringView> rolePrefixes{};
+    // 가변 원본만 받는지다(Docs/Design/AssetSystem 7.1절 18 — A5h 보강, 텍스처 slice처럼 모든
+    // 원본이 같은 종류인 임포터). 참이면 고정 역할이 없다(기본 DefaultImportSourceRole도 없음):
+    // roles가 비고 rolePrefixes가 하나 이상이어야 하고(아니면 등록 InvalidArgument), 임포트 원본은
+    // 접두 역할 하나 이상이다(0개는 InvalidImportOption). 재임포트의 역할 없는 원본 하나
+    // (`--source=`)는 받지 않는다(InvalidImportOption).
+    bool variableSourcesOnly = false;
     // 옵션 struct(등록 ROCKS_STRUCT)다. 0이면 옵션 없음. 필드 이름은 outputType의 노출 속성
     // 이름·ImportReservedNames와 겹칠 수 없다(대소문자 무시 — 옵션과 설정을 첫 이름으로 나눈다).
     TypeId optionsType{};

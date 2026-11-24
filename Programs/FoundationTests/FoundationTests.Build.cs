@@ -24,7 +24,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -32,7 +32,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "Material", "Texture", "ImageCodec", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "Material", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
     // comparison test and the ImageCodec tests that write EXR, TIFF and JPEG fixtures through OpenEXRCore, libtiff and libjpeg. Headers enter only through this
@@ -97,6 +97,8 @@ public abstract class TestsModule : ModuleRules
         ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
         ["ImageCodec"] = ["Compression"],
+        ["Texture"] = ["ObjectSerialization"],
+        ["TextureTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
         ["Material"] = ["AssetTestFixtures"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],

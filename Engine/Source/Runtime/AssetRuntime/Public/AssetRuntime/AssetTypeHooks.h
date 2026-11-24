@@ -7,7 +7,9 @@
 
 // 에셋 타입 hook 표다(Docs/Design/AssetSystem 7.1절 15, 16.2절 — A2c1). 에디터 저장이 대표
 // 에셋에 hook을 불러 Tags 섹션(태그 — UE UObject::GetAssetRegistryTags 대응)과 Build 의존(16.2절
-// DependencyDeclarer)을 만든다. 런타임은 쓰지 않는다(쿠커 A4가 Build hook을 쓴다).
+// DependencyDeclarer)을 만든다. 런타임은 쓰지 않는다(쿠커 A4가 Build hook을 쓴다). 에셋 서비스는
+// 설정을 바꾼 뒤(임포트·재임포트·asset-set) 설정 정규화 hook을 부른다(UE
+// UTexture::ValidateSettingsAfterImportOrEdit 대응 — Docs/Design/AssetSystem 12.12절).
 //
 // 조회: 대표 에셋 타입에서 base 사슬(TypeSchema::baseType)을 따라 가장 가까운 등록 hook 하나를
 // 부르고, hook은 CallBase로 그 위의 등록 hook을 부를 수 있다(UE Super::GetAssetRegistryTags —
@@ -18,7 +20,8 @@
 //       if (auto base = context.CallBaseTags(sink); !base) { return base; }
 //       return sink.Add("Texture.Format", "BC7");
 //   }
-//   auto registration = table.Register(GeneratedType<Texture2D>::Id(), {&TextureTags, nullptr});
+//   auto registration =
+//       table.Register(GeneratedType<Texture2D>::Id(), {&TextureTags, nullptr, nullptr});
 //
 // 스레드: 등록·조회는 한 스레드에서 한다(에디터 Registry 소유 스레드).
 namespace rocks {
@@ -82,17 +85,25 @@ struct ROCKS_ASSETRUNTIME_API AssetTypeHookContext {
     // 성공). 오류: 그 hook의 오류, 타입 조회 오류.
     Result<void> CallBaseTags(AssetTagSink& sink) const noexcept;
     Result<void> CallBaseBuildDependencies(AssetDependencySink& sink) const noexcept;
+    Result<void> CallBaseNormalizeSettings(Span<const StringView> assignedFields) const noexcept;
 };
 
 using AssetTagHook = Result<void> (*)(const AssetTypeHookContext& context,
                                       AssetTagSink& sink) noexcept;
 using AssetBuildDependencyHook = Result<void> (*)(const AssetTypeHookContext& context,
                                                   AssetDependencySink& sink) noexcept;
+// 설정 정규화 hook이다(12.12절). context.object의 설정을 UE와 같은 규칙으로 고쳐 쓴다(쓰기는
+// ObjectRegistry::ResolveForWrite). assignedFields는 이번 명령이 대입·되돌린 최상위 필드 이름이다
+// (새 임포트·재임포트에서 대입이 없으면 빈다). 두 번 불러도 결과가 같아야 한다. 오류: 객체 접근
+// 오류(실패하면 명령이 실패한다).
+using AssetSettingsNormalizeHook = Result<void> (*)(const AssetTypeHookContext& context,
+                                                    Span<const StringView> assignedFields) noexcept;
 
-// 타입 하나의 hook이다(둘 다 null일 수 있다 — null이면 그 종류는 base 사슬 위로 찾는다).
+// 타입 하나의 hook이다(모두 null일 수 있다 — null이면 그 종류는 base 사슬 위로 찾는다).
 struct AssetTypeHooks {
     AssetTagHook tags = nullptr;
     AssetBuildDependencyHook buildDependencies = nullptr;
+    AssetSettingsNormalizeHook normalizeSettings = nullptr;
 };
 
 // 등록 handle이다. 소멸하거나 Release하면 표에서 그 항목을 지운다(모듈 등록 수명에 묶는다).
@@ -126,7 +137,7 @@ public:
     AssetTypeHookTable(const AssetTypeHookTable&) = delete;
     AssetTypeHookTable& operator=(const AssetTypeHookTable&) = delete;
 
-    // type의 hook을 등록한다. 오류: 0 type·둘 다 null인 hooks InvalidArgument, 이미 등록한 type
+    // type의 hook을 등록한다. 오류: 0 type·모두 null인 hooks InvalidArgument, 이미 등록한 type
     // AlreadyExists, 할당 실패. 표는 등록 handle보다 오래 살아야 한다.
     Result<AssetTypeHookRegistration> Register(TypeId type, AssetTypeHooks hooks) noexcept;
 
@@ -141,6 +152,11 @@ public:
                                           const ObjectAccessContext& access, ObjectHandle object,
                                           TypeId type, AssetId asset,
                                           AssetDependencySink& sink) const noexcept;
+    // object의 설정을 정규화한다(가장 가까운 정규화 hook 하나 — 없으면 아무것도 하지 않고 성공).
+    // 오류: hook의 오류, 타입 조회 오류.
+    Result<void> NormalizeSettings(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                   ObjectHandle object, TypeId type, AssetId asset,
+                                   Span<const StringView> assignedFields) const noexcept;
 
     usize Count() const noexcept {
         return entries_.Size();
@@ -155,9 +171,18 @@ private:
         AssetTypeHooks hooks{};
     };
 
+    // hook 종류다(Find가 찾는 칸).
+    enum class HookKind : uint8 {
+        Tags,
+        BuildDependencies,
+        NormalizeSettings,
+    };
+
+    static bool HasHook(const AssetTypeHooks& hooks, HookKind kind) noexcept;
+
     // start부터(skipStart면 start의 base부터) base 사슬로 kind hook이 있는 가장 가까운 항목을
     // 찾는다(없으면 null). 오류: 사슬의 타입 조회 오류.
-    Result<const Entry*> Find(TypeId start, bool tags, bool skipStart) const noexcept;
+    Result<const Entry*> Find(TypeId start, HookKind kind, bool skipStart) const noexcept;
     void Remove(TypeId type) noexcept;
 
     TypeRegistry* types_;
