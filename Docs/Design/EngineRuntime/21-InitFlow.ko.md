@@ -76,4 +76,5 @@ S13 구현(`Programs/Sandbox/Private/SandboxGame.*`):
 - 헤드리스 `--engine`도 같은 큐·상태를 쓴다(이벤트가 없을 뿐이다). 그래서 창 없이 입력 경로를 확인할 수 있다: 시험용 `--inject-key-at-frame N`은 N번째 `PumpEvents`에서 큐에 `KeyDown(W)`를 넣는다(창 펌프가 넣는 이벤트와 같은 자리). 순서는 프레임 번호로 정해진다(시간·경쟁 무관).
 - 자체 시험(`RunEngineHostSelfTest`)이 `--engine --frames 4 --inject-key-at-frame 2`를 띄워 "[Info][Sandbox.Game] Pawn received key W"를 확인한다. 실제 창·마우스·패드는 사람이 `Sandbox --engine --window`로 확인한다(자동 시험에서 OS 입력을 합성하지 않는다 — 포커스·데스크톱 상태에 따라 결과가 달라지므로).
 - 사람 확인(2026-11-24, Windows): 키보드(W·A·S·D·Space)·마우스 왼쪽·오른쪽 버튼(커서 위치)·휠(한 프레임 여러 칸은 합산)이 Pawn까지 오고, 창 닫기로 정상 종료한다. 게임패드는 기기가 없어 아직 확인하지 않았다.
+- 마우스 capture(Windows): 버튼을 누르면 `SetCapture`, 모두 떼면 `ReleaseCapture`다. 버튼을 누른 채 다른 창·시스템이 capture를 가져가면(`WM_CAPTURECHANGED`) 눌린 버튼마다 MouseUp을 만들어 눌린 채 남지 않게 한다(2026-11-24). 커서 숨김·가두기·상대 이동(게임식 마우스 캡처)은 입력 I10·UiToolkit PW5 범위다.
 - 버린 대안: 엔진이 창을 소유하는 것. 창·swapchain 소유는 화면 마일스톤의 렌더 호스트(뷰포트 클라이언트) 몫이라 지금은 호스트 hook에 둔다. 그때 hook의 창 펌프가 뷰포트 쪽으로 옮겨 간다.

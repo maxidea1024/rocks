@@ -27,7 +27,8 @@ public sealed class PlatformWindow : EngineModuleRules
             // Windows uses Win32 windows and XInput, Android the activity window of the Launch activity layer
             // (Docs/Design/AndroidPlatform.ko.md); other platforms have no window backend yet and return Unsupported.
             // The entry point (Private/PlatformWindowModule.cpp) is built on every platform.
-            Sources = [ModuleEntrySource(context), .. context.Sources($"{backend}/{platformDirectory}")],
+            // Private/Common holds platform-neutral input conversions (tested on every platform).
+            Sources = [ModuleEntrySource(context), .. context.Sources($"{backend}/Common", $"{backend}/{platformDirectory}")],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             PublicDependencies = PublicDependencies,
             // The Android window listens to the Launch activity layer (launch::android::SetActivityListener).

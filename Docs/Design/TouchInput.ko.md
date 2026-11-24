@@ -95,7 +95,7 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
 
 ### 3.4 마우스로 터치 흉내 (데스크톱 시험)
 
-설정 `input.useMouseForTouch`(UE `bUseMouseForTouch`, 기본 false)를 켜면 왼쪽 버튼의 누름·이동·뗌이 손가락 0번 터치의 시작·이동·끝이 된다. 이때 그 버튼의 마우스 이벤트는 만들지 않는다. UE와 같고, 같은 입력을 게임이 두 번 처리하지 않게 하기 위해서다. 다른 버튼, 휠, 왼쪽 버튼을 누르지 않은 커서 이동은 마우스 이벤트로 남는다. 모바일 게임을 데스크톱 Tryout에서 시험하는 용도다.
+설정 `input.use_mouse_for_touch`(UE `bUseMouseForTouch`, 기본 false)를 켜면 왼쪽 버튼의 누름·이동·뗌이 손가락 0번 터치의 시작·이동·끝이 된다. 이때 그 버튼의 마우스 이벤트는 만들지 않는다. UE와 같고, 같은 입력을 게임이 두 번 처리하지 않게 하기 위해서다. 다른 버튼, 휠, 왼쪽 버튼을 누르지 않은 커서 이동은 마우스 이벤트로 남는다. 모바일 게임을 데스크톱 Tryout에서 시험하는 용도다.
 
 ## 4. OS backend (PlatformWindow)
 
@@ -133,7 +133,7 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
 
 ### 5.1 제스처 인식
 
-`Gameplay`의 `PlayerController`가 입력 스냅숏 다음에 `TouchGestureRecognizer`를 돌린다. UE `UPlayerInput`이 `FGestureRecognizer`를 부르는 자리와 같다. 설정 `input.enableGestureRecognizer`(UE `bEnableGestureRecognizer`, 기본 false)가 켜져 있을 때만 돈다.
+`Gameplay`의 `PlayerController`가 입력 스냅숏 다음에 `TouchGestureRecognizer`를 돌린다. UE `UPlayerInput`이 `FGestureRecognizer`를 부르는 자리와 같다. 설정 `input.enable_gesture_recognizer`(UE `bEnableGestureRecognizer`, 기본 false)가 켜져 있을 때만 돈다.
 
 | 제스처 | 판정(UE와 같다) | 값 |
 |---|---|---|
@@ -162,13 +162,13 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
   - 공통 값: 활성·비활성 불투명도, 비활성까지 시간, 재중심 시간, 활성 지연, 시작 지연, 재중심 금지.
   - 위치·크기 값의 규칙은 UE `SVirtualJoystick`과 같다. 음수면 오른쪽·아래 가장자리 기준, 절댓값 1 이하면 화면 비율, 1 초과면 DPI 배율을 곱한 픽셀이다.
 - 컨트롤은 게임패드 원천(왼쪽 스틱 축, South 버튼 등)을 만든다. 게임 코드는 패드와 같은 매핑으로 받는다. UE `SVirtualJoystick`이 게임패드 키를 보내는 것과 같다.
-- 그리기와 터치 판정은 UI Element(`VirtualJoystickElement`)가 맡는다. 표시는 설정 `input.defaultTouchControls`와 `input.alwaysShowTouchControls`(UE `DefaultTouchInterface`·`bAlwaysShowTouchInterface`)로 정한다. 기본은 터치 플랫폼에서만 보인다.
+- 그리기와 터치 판정은 UI Element(`VirtualJoystickElement`)가 맡는다. 표시는 설정 `input.default_touch_controls`와 `input.always_show_touch_controls`(UE `DefaultTouchInterface`·`bAlwaysShowTouchInterface`)로 정한다. 기본은 터치 플랫폼에서만 보인다.
 - UI 시스템(UiToolkit UiFramework·UiScreens)과 UI 터치 라우팅(TI7), 화면 출력이 선행이다.
 
 ### 5.4 UI 터치 라우팅
 
 - UiToolkit 3.8절 입력 라우팅에 터치를 마우스와 같은 포인터 이벤트로 넣는다. 포인터 이벤트에는 포인터 번호(손가락 0–9, 마우스 `MousePointerIndex`)와 "터치인지" 표지를 더한다.
-- Element가 터치를 처리하지 않으면 같은 위치의 마우스 이벤트로 다시 보낸다(UE `bTouchFallbackToMouse`, 기본 켬, 설정 `ui.touchFallbackToMouse`).
+- Element가 터치를 처리하지 않으면 같은 위치의 마우스 이벤트로 다시 보낸다(UE `bTouchFallbackToMouse`, 기본 켬, 설정 `ui.touch_fallback_to_mouse`).
 - UI가 처리한 터치는 게임 원천에서 빠진다(5.2절).
 - 이 절은 UiToolkit PW5(창별 입력 이벤트)·3.8절에 묶인다. 지금 UiToolkit 3.8절에는 터치가 없다(EngineImplementationPlan 21.4절은 3.8–3.10절에 터치가 있다고 적었다). UiToolkit은 500줄을 넘어 장별 분할 대상이라, 맡은 세션이 다음 수정 때 3.8절이 이 절을 가리키게 고친다.
 
@@ -192,6 +192,14 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
 | TI8 | Actor·Component 터치 이벤트 | TI1, RS0 ViewDesc, 물리 trace | World 시험(판정은 가짜 trace 주입) |
 | — | I08 replay schema에 터치 열 | TI1, I08 | IT21에 터치 열 |
 
+진행(2026-11-24): TI1을 구현했다. `InputEventType::TouchBegan`·`TouchMoved`·`TouchEnded`(`touchIndex`·`force`·`hasForce`·`cancelled`), `MaxTouches`·`MousePointerIndex`, `Key::Back`, `input::TouchIndexAllocator`(끝난 번호는 `EndFrame`까지 잡아 둠), `InputState` 터치 질의·FocusLost 취소·`BeginFrame(events, eventsLost)` 손실 복구·require-release, `InputState::SetMouseTouchEmulation`(설정 `input.use_mouse_for_touch`는 호스트가 프레임마다 넣는다 — 아래 설정 연결)이다. 시험은 `Input_Touch*`·`Input_MouseTouchEmulation`·`Input_TouchIndexAllocator`, Android 에뮬레이터에서 탭·스와이프·Back을 확인했다(AndroidPlatform 9절). Android 압력 지원 판정은 후속이다(그 문서 5절).
+
+TI2(2026-11-24): Win64 창이 `WM_POINTERDOWN`·`UPDATE`·`UP`·`CAPTURECHANGED`의 터치·펜을 `TouchIndexAllocator`로 번호를 매겨 터치 이벤트로 넘기고 `DefWindowProc`에 넘기지 않는다. 마우스 포인터는 그대로 `WM_MOUSE*`다. 메시지·플래그·압력 변환은 `PlatformWindow/Private/Common/PointerTouchMapping`(모든 플랫폼에서 시험 — `PointerTouchMapping_*`)이다. 터치 화면 없는 PC에서 `InjectTouchInput`으로 Sandbox 창에 가상 탭을 넣어 `Pawn received touch 0`·`ended`가 오고 마우스 흉내 클릭이 함께 오지 않는 것을 사람 확인했다. 실제 터치 화면·펜은 장비가 생기면 확인한다.
+
+TI3(2026-11-24): `input::TouchGestureRecognizer`(Input 모듈 — Gameplay 없이 시험)가 UE `FGestureRecognizer`와 같은 판정으로 Pinch(거리 제곱 비율)·Rotate(시작 각 대비)·Flick(0.25 s·100 px, 방향 각)을 만들고, 거리 임계에 `distanceScale`(TD14)을 곱한다. `PlayerController::SetGestureRecognizerEnabled`(기본 꺼짐)·`Gesture(TouchGesture)`가 입력 스냅숏 다음에 돈다(설정 연결은 아래). 시험은 `TouchGesture_*`, Android 에뮬레이터에서 빠른 스와이프가 Flick 0°(오른쪽)·90°(위)로 나오는 것을 확인했다. 두 손가락 Pinch·Rotate는 adb로 만들 수 없어 단위 시험으로만 확인했다.
+
+설정 연결(2026-11-24): Input 모듈이 `input.use_mouse_for_touch`·`input.enable_gesture_recognizer`(둘 다 기본 false, 실행 중 변경 가능한 CVar — Rocks 이름 관례대로 snake_case)를 등록한다(`Input/InputSettings.h`). 호스트(Sandbox)가 프레임마다 `InputState::SetMouseTouchEmulation(UseMouseForTouchSetting())`을, `GameInstanceClient::OnEngineTick`이 각 PlayerController에 `ApplyGestureRecognizerSetting`을 넣는다. `SetGestureRecognizerEnabled`로 명시한 컨트롤러는 설정보다 우선하고 `UseGestureRecognizerSetting`으로 되돌린다. GameInstanceClient는 엔진 시작 때 `input.*`를 멱등 등록해, 시험처럼 직접 만든 설정 문맥에서도 읽을 수 있게 한다. 시험은 `GameplayInputSettings_GestureRecognizerFollowsTheSetting`이다.
+
 TI1–TI3은 화면·UI와 무관하다. 그래도 계획 순서를 지켜 입력 상세 계획의 I 단계와 함께 착수한다. 이 문서는 그때 터치가 빠지지 않게 하려는 것이다.
 
 ## 7. Rocks 이름 대응
@@ -202,11 +210,11 @@ TI1–TI3은 화면·UI와 무관하다. 그래도 계획 순서를 지켜 입�
 | `ETouchIndex::CursorPointerIndex` | `MousePointerIndex` |
 | `OnTouchStarted`·`OnTouchMoved`·`OnTouchEnded`·`OnTouchForceChanged` | `TouchBegan`·`TouchMoved`(압력 포함)·`TouchEnded` |
 | `UE::FTouchState` | `InputState`의 손가락별 상태 |
-| `FGestureRecognizer`·`EKeys::Gesture_*`·`bEnableGestureRecognizer` | `TouchGestureRecognizer`·`GesturePinch` 등·`input.enableGestureRecognizer` |
+| `FGestureRecognizer`·`EKeys::Gesture_*`·`bEnableGestureRecognizer` | `TouchGestureRecognizer`·`GesturePinch` 등·`input.enable_gesture_recognizer` |
 | `EKeys::Android_Back` | `input::Key::Back` |
 | `UTouchInterface`·`SVirtualJoystick` | `TouchControlsAsset`·`VirtualJoystickElement` |
-| `bUseMouseForTouch`·`bTouchFallbackToMouse` | `input.useMouseForTouch`·`ui.touchFallbackToMouse` |
-| `DefaultTouchInterface`·`bAlwaysShowTouchInterface` | `input.defaultTouchControls`·`input.alwaysShowTouchControls` |
+| `bUseMouseForTouch`·`bTouchFallbackToMouse` | `input.use_mouse_for_touch`·`ui.touch_fallback_to_mouse` |
+| `DefaultTouchInterface`·`bAlwaysShowTouchInterface` | `input.default_touch_controls`·`input.always_show_touch_controls` |
 | `bEnableTouchEvents`·`bEnableTouchOverEvents` | `enableTouchEvents`·`enableTouchOverEvents` |
 
 ## 8. 결정

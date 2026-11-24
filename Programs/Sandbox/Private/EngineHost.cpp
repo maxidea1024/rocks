@@ -14,8 +14,10 @@
 #include <Gameplay/GameInstanceClient.h>
 #include <HostConfig/HostSettings.h>
 #include <Input/InputEvent.h>
+#include <Input/InputSettings.h>
 #include <Input/InputState.h>
 #include <Launch/Application.h>
+#include <Platform/ApkFile.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
 #include <LogHost/LogHost.h>
@@ -133,11 +135,19 @@ public:
             options_.gamepads->Poll(queue_);
         }
 
+        // input.use_mouse_for_touch(설정 문맥이 묶인 게임 스레드 —
+        // Docs/Design/TouchInput.ko.md 3.4절).
+        input_.SetMouseTouchEmulation(input::UseMouseForTouchSetting());
+
         if (options_.injectKeyAtFrame != 0 && pumped_ == options_.injectKeyAtFrame) {
             (void)queue_.Push(input::InputEvent::KeyDown(input::Key::W));
         }
 
-        input_.BeginFrame(queue_.Events());
+        // 이번 프레임 이벤트를 모으는 동안 큐가 버렸으면 손실 복구를
+        // 한다(Docs/Design/TouchInput.ko.md 3.3절).
+        const uint64 dropped = queue_.DroppedCount();
+        input_.BeginFrame(queue_.Events(), dropped != droppedSeen_);
+        droppedSeen_ = dropped;
         queue_.Clear();
     }
 
@@ -167,6 +177,8 @@ private:
     Options options_;
     input::InputState input_;
     uint64 pumped_ = 0;
+    // 지난 프레임까지 본 큐 손실 수다.
+    uint64 droppedSeen_ = 0;
     // 창 모드 다음 프레임 끝 목표 시각(MonotonicNanoseconds)이다. 0이면 아직 없다.
     uint64 deadline_ = 0;
 };
@@ -211,12 +223,47 @@ void RegisterHostService(HostServices& services, Service& service) noexcept {
     }
 }
 
+// APK 안 파일 확인이다(Android APK만 — Docs/Design/AndroidPlatform.ko.md 7절). 패키저가 넣은
+// assets/SandboxProbe.txt를 platform::ApkFileSystem으로 읽어 로그로 남긴다. APK가 없는 플랫폼은
+// Unsupported라 아무것도 하지 않는다.
+void LogApkProbe() noexcept {
+    constexpr char ProbePath[] = "SandboxProbe.txt";
+    constexpr usize ProbeBytes = sizeof(ProbePath) - 1;
+    platform::FileSystem& apk = platform::ApkFileSystem();
+    platform::FileHandle* handle = nullptr;
+    const platform::FileStatus opened =
+        apk.Open(ProbePath, ProbeBytes, platform::FileOpenMode::ReadExisting, handle);
+    if (opened.code == platform::FileCode::Unsupported) {
+        return;
+    }
+
+    if (!opened) {
+        Log::Warning(LogSandboxHost, "APK asset {Path} could not be opened", StringView(ProbePath));
+        return;
+    }
+
+    char text[64] = {};
+    const platform::FileTransfer read = handle->Read(text, sizeof(text) - 1);
+    uint64 size = 0;
+    (void)handle->Size(size);
+    (void)handle->Close();
+    handle->Destroy();
+    usize length = read.bytes;
+    while (length != 0 && (text[length - 1] == '\n' || text[length - 1] == '\r')) {
+        --length;
+    }
+
+    Log::Info(LogSandboxHost, "APK asset {Path} ({Size} bytes): {Text}", StringView(ProbePath),
+              size, StringView(text, length));
+}
+
 // 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 돌린다
 // (Docs/Design/EngineRuntime 21.5절). 헤드리스는 고정 delta로 options.frames만큼, 창 모드는 실제
 // 시간으로 창이 닫히거나 frames(0이면 상한 없음)까지 돈다. 프레임 입력 상태를 첫 LocalPlayer의 입력
 // 원천으로 건다. 엔진 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지 않는다).
 int RunEngine(Allocator& allocator, const EngineHostOptions& options,
               config::ConfigContext& settings, ModuleLoader& modules) noexcept {
+    LogApkProbe();
     UniquePtr<platform::Window> window;
     UniquePtr<platform::GamepadBackend> gamepads;
     if (options.window) {

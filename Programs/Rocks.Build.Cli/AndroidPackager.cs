@@ -59,10 +59,19 @@ internal static class AndroidPackager
         await RunAsync(Path.Combine(buildTools, Tool("aapt2")), link, work, null, cancellationToken);
 
         // NativeActivity가 APK 안의 .so를 바로 mmap하도록(extractNativeLibs=false) 비압축으로 넣는다.
+        // assets/는 비압축으로 넣는다(AAsset을 fd·오프셋으로도 읽을 수 있게 — AndroidPlatform 7절).
         using (ZipArchive archive = ZipFile.Open(unaligned, ZipArchiveMode.Update))
         {
             archive.CreateEntryFromFile(library, "lib/" + AndroidAbiDirectory(abi) + "/" + AndroidPackage.LibraryFileName(module.Name),
                 CompressionLevel.NoCompression);
+            if (package.AssetsDirectory is string assets && Directory.Exists(assets))
+            {
+                foreach (string file in Directory.GetFiles(assets, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+                {
+                    string relative = Path.GetRelativePath(assets, file).Replace('\\', '/');
+                    archive.CreateEntryFromFile(file, "assets/" + relative, CompressionLevel.NoCompression);
+                }
+            }
         }
 
         await RunAsync(Path.Combine(buildTools, Tool("zipalign")), ["-P", PageAlignmentKilobytes, "-f", ZipAlignment, unaligned, aligned],

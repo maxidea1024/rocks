@@ -2,6 +2,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Launch/AndroidActivity.h>
 #include <Launch/Application.h>
+#include <Platform/ApkFile.h>
 #include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 #include <Platform/Path.h>
@@ -368,6 +369,9 @@ extern "C" ROCKS_DLLEXPORT void ANativeActivity_onCreate(ANativeActivity* activi
     callbacks.onInputQueueDestroyed = &OnInputQueueDestroyed;
     callbacks.onConfigurationChanged = &OnConfigurationChanged;
     callbacks.onLowMemory = &OnLowMemory;
+
+    // APK 안 파일(assets/)을 읽는 관리자를 등록한다(Platform/ApkFile.h — AndroidPlatform 7절).
+    (void)platform::RegisterApkAssetManager(activity->assetManager);
 
     // 앱 저장소 경로(PlatformLayer RegisterApplicationDirectories)다.
     JNIEnv* env = activity->env;

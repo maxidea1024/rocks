@@ -536,6 +536,7 @@ internal static class DescriptorTests
                 }
             }
         }
+
         Check(Names(conditioned, TargetType.Client, NativePlatform.Android, NativeConfiguration.Debug).SequenceEqual(["Mobile"]),
             "a default plugin on its supported platform");
         Check(Names(conditioned, TargetType.Program, NativePlatform.Android, NativeConfiguration.Debug).Length == 0,

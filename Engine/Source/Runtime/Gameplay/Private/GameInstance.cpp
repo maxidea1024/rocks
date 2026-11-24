@@ -1,3 +1,4 @@
+#include <Input/InputSettings.h>
 #include <Config/CVarCommand.h>
 #include <Config/ConfigContext.h>
 #include <Core/Diagnostics/Log.h>
@@ -579,6 +580,14 @@ GameInstanceClient::~GameInstanceClient() {
 Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     engine_ = &engine;
     services_.engine = &engine;
+    // OnEngineTick이 input.*를 읽으므로 설정 문맥에 등록돼 있게 한다(호스트는 모듈
+    // RegisterSettings가 이미 했다 — 멱등. 시험처럼 직접 만든 문맥도 읽을 수 있게).
+    if (config::ConfigContext* settings = engine.Settings(); settings != nullptr) {
+        if (auto registered = input::RegisterInputSettings(*settings); !registered) {
+            return registered;
+        }
+    }
+
     // OpenWorld가 만드는 World의 Subsystem 목록이다: 설정 목록 + GameplayWorldSubsystem(19.5절 —
     // 설정에 이미 있으면 더하지 않는다).
     services_.worldSubsystems.Clear();
@@ -864,13 +873,35 @@ Result<void> GameInstanceClient::DumpFramework(String& out) noexcept {
     });
 }
 
-void GameInstanceClient::OnEngineTick(Engine&) noexcept {
-    auto ran = WithInstance([](GameInstance& game) noexcept {
+void GameInstanceClient::OnEngineTick(Engine& engine) noexcept {
+    // 설정 문맥이 있으면(엔진 프레임 — 게임 스레드에 묶였다) input.enable_gesture_recognizer를 각
+    // LocalPlayer의 PlayerController 기본값으로 넣는다(명시로 정한 컨트롤러는 그대로다).
+    const bool settings = engine.Settings() != nullptr;
+    const bool gestures = settings && input::GestureRecognizerSetting();
+    auto ran = WithInstance([settings, gestures](GameInstance& game) noexcept {
         game.inEngineTick_ = true;
         auto opened = game.RunPendingOpen();
         game.inEngineTick_ = false;
         // 실패는 OpenWorld가 기록했다. 현재 World는 없음이다.
         (void)opened;
+        World* world = game.CurrentWorld();
+        if (!settings || world == nullptr) {
+            return;
+        }
+
+        for (uint32 index = 0; index < game.LocalPlayerCount(); ++index) {
+            ObjectHandle controller;
+            (void)game.WithLocalPlayer(game.LocalPlayerAt(index),
+                                       [&](LocalPlayer& player) noexcept {
+                                           controller = player.PlayerControllerHandle();
+                                       });
+            if (!controller.IsNull() && world->HasActor(controller)) {
+                (void)world->With<PlayerController>(controller,
+                                                    [gestures](PlayerController& pc) noexcept {
+                                                        pc.ApplyGestureRecognizerSetting(gestures);
+                                                    });
+            }
+        }
     });
     (void)ran;
 }

@@ -88,6 +88,17 @@ enum class PinDirection : uint8 {
     Output = 1
 };
 
+// 핀 종류다(GD20): 공통 층은 구분만 하고 실행하지 않는다. 하위 그래프 경계 핀(GraphBoundaryPin)이
+// 저장하므로 리플렉션 enum이다.
+ROCKS_ENUM()
+enum class PinKind : uint8 {
+    Data = 0,
+    // 실행 흐름·trigger(예: MetaSounds형 그래프의 trigger 핀).
+    Flow = 1,
+    // 구조 관계(예: 상태 기계 전이).
+    Structural = 2
+};
+
 // 노드 속성·핀 값의 리플렉션 Record 바이트다(GD23): 비어 있거나 Record 하나(header schema = 값
 // struct ID, schema version = 저장 당시 struct 버전 — Serialization/Record.h). 해석은 도메인과
 // NodeGraphTools가 한다. 모르는 노드도 이 바이트를 그대로 보존한다(GD14).
@@ -164,18 +175,40 @@ struct GraphEdge {
     ROCKS_PROPERTY() uint32 order = 0;
 };
 
+// 하위 그래프(Collapsed) 경계 핀 하나다(Docs/Design/NodeGraph 10.1절 NG3c). Graph.Input의 출력
+// 핀·Graph.Output의 입력 핀·부모 Graph.Collapsed의 핀이 된다. 표시 이름은 키 원문이다.
+ROCKS_STRUCT()
+struct GraphBoundaryPin {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() Name key;
+    // Data·Flow(GI15).
+    ROCKS_PROPERTY() PinKind kind = PinKind::Data;
+    // 도메인 타입 표의 타입 이름(PinTypeInfo 이름)이다. 표에 없으면 UnresolvedPinType으로 셈한다.
+    ROCKS_PROPERTY() Name type;
+    // 받는 쪽 입력 핀(Collapsed 입력·Graph.Output 입력)의 간선 상한이다. 1 이상(GI15).
+    ROCKS_PROPERTY() uint16 maxEdges = 1;
+};
+
 // 노드·간선 묶음 하나다.
 ROCKS_STRUCT()
 struct Graph {
     ROCKS_GENERATED_BODY()
 
-    explicit Graph(Allocator& allocator) noexcept : nodes(allocator), edges(allocator) {
+    explicit Graph(Allocator& allocator) noexcept
+        : inputs(allocator), outputs(allocator), nodes(allocator), edges(allocator) {
     }
 
     ROCKS_PROPERTY() Guid id;
     ROCKS_PROPERTY() GraphRole role = GraphRole::Main;
     // role이 DomainDefined일 때 도메인 정의 역할 번호, 그 밖에는 0이다(GI12).
     ROCKS_PROPERTY() uint32 domainRole = 0;
+    // Collapsed 그래프의 인터페이스다(10.1절, GI15·GI16): 이 그래프를 가리키는 부모의
+    // Graph.Collapsed 노드와 경계 입력(바깥 → 안)·출력(안 → 바깥). 그 밖의 역할은 0·빈 목록이다.
+    // 목록 순서는 핀 순서라 정렬하지 않는다.
+    ROCKS_PROPERTY() Guid ownerNode;
+    ROCKS_PROPERTY() Array<GraphBoundaryPin> inputs;
+    ROCKS_PROPERTY() Array<GraphBoundaryPin> outputs;
     // NodeId 순, 중복 없음(GI5).
     ROCKS_PROPERTY() Array<GraphNode> nodes;
     // (입력 NodeId, 입력 PinKey, 출력 NodeId, 출력 PinKey) 순, 중복 없음(GI4·GI5).

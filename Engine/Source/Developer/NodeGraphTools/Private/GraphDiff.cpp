@@ -198,10 +198,40 @@ private:
         return nullptr;
     }
 
+    static bool SameBoundaryList(const Array<GraphBoundaryPin>& left,
+                                 const Array<GraphBoundaryPin>& right) noexcept {
+        if (left.Size() != right.Size()) {
+            return false;
+        }
+
+        for (usize index = 0; index < left.Size(); ++index) {
+            const GraphBoundaryPin& a = left[index];
+            const GraphBoundaryPin& b = right[index];
+            if (!(a.key == b.key) || a.kind != b.kind || !(a.type == b.type) ||
+                a.maxEdges != b.maxEdges) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static bool SameBoundary(const Graph& before, const Graph& after) noexcept {
+        return before.ownerNode == after.ownerNode &&
+               SameBoundaryList(before.inputs, after.inputs) &&
+               SameBoundaryList(before.outputs, after.outputs);
+    }
+
     Result<void> Graphs(const Graph& before, const GraphLayout* beforeLayout, const Graph& after,
                         const GraphLayout* afterLayout) noexcept {
         if (before.role != after.role || before.domainRole != after.domainRole) {
             if (auto added = Add(GraphDiffKind::GraphRole, after.id); !added) {
+                return added;
+            }
+        }
+
+        if (!SameBoundary(before, after)) {
+            if (auto added = Add(GraphDiffKind::GraphBoundary, after.id); !added) {
                 return added;
             }
         }
@@ -599,6 +629,8 @@ StringView KindText(GraphDiffKind kind) noexcept {
         return "graph-removed";
     case GraphDiffKind::GraphRole:
         return "graph-role";
+    case GraphDiffKind::GraphBoundary:
+        return "graph-boundary";
     case GraphDiffKind::GraphTitle:
         return "graph-title";
     case GraphDiffKind::NodeAdded:
@@ -714,6 +746,7 @@ Result<void> FormatGraphDiff(NamePool& names, Span<const GraphDiffEntry> entries
         case GraphDiffKind::GraphAdded:
         case GraphDiffKind::GraphRemoved:
         case GraphDiffKind::GraphRole:
+        case GraphDiffKind::GraphBoundary:
         case GraphDiffKind::GraphTitle:
         case GraphDiffKind::DocumentHeader:
             break;

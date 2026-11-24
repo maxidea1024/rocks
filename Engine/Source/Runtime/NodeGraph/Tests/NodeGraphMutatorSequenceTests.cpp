@@ -23,39 +23,6 @@ constexpr uint32 RandomCommandSteps = 10000;
 constexpr uint64 RandomCommandSeed = 0x4e4731534551ull;
 // 무작위 시험이 쥐는 undo 이력의 최대 길이다.
 constexpr usize RandomHistoryLimit = 48;
-// GT6 실패 주입의 시도 상한(이 안에 성공해야 한다).
-constexpr uint64 FailureAttemptLimit = 4096;
-
-// attempt번째부터 모든 할당이 실패하는 allocator다(0이면 실패하지 않는다).
-class FailFromAllocator final : public Allocator {
-public:
-    explicit FailFromAllocator(Allocator& inner) noexcept : inner_(inner) {
-    }
-
-    void FailFrom(uint64 attempt) noexcept {
-        attempts_ = 0;
-        failFrom_ = attempt;
-    }
-
-    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
-        ++attempts_;
-        if (failFrom_ != 0 && attempts_ >= failFrom_) {
-            return Result<void*>::Failure(ErrorCode::OutOfMemory);
-        }
-
-        return inner_.Allocate(bytes, alignment, tag);
-    }
-
-    Result<void> Deallocate(void* address) noexcept override {
-        return inner_.Deallocate(address);
-    }
-
-private:
-    Allocator& inner_;
-    uint64 attempts_ = 0;
-    uint64 failFrom_ = 0;
-};
-
 // ---- GT3 ----
 
 struct HistoryEntry {
@@ -195,7 +162,8 @@ private:
         case 11:
             switch (random_.NextUInt32Below(3)) {
             case 0:
-                return static_cast<bool>(list.AddGraph(NewId(), GraphRole::Collapsed, 0, "Sub"));
+                return static_cast<bool>(
+                    list.AddGraph(NewId(), GraphRole::DomainDefined, 1, "Sub"));
             case 1:
                 return static_cast<bool>(list.RemoveGraph(graph.id));
             default:
@@ -540,7 +508,7 @@ bool BuildFailureCommands(TestEnv& env, GraphCommandList& list) noexcept {
            list.SetInputDefault(SampleMain, SampleDefaults, env.pinB, value.View()) &&
            list.SetLayout(SampleMain, SampleAdd, MakeLayout(env, SampleAdd, 5, 6)) &&
            list.AddComment(SampleMain, comment) && list.SetBookmark(SampleMain, mark) &&
-           list.AddGraph(Id(90), GraphRole::Collapsed, 0, "Failing") &&
+           list.AddGraph(Id(90), GraphRole::DomainDefined, 1, "Failing") &&
            list.RenameGraph(SampleCollapsed, "R") &&
            list.RemoveNodes(SampleMain, Span<const Guid>(&removed, 1)) &&
            list.Disconnect(SampleMain,
@@ -557,14 +525,14 @@ bool BuildStructureFailureCommands(TestEnv& env, GraphCommandList& list) noexcep
     return FillRecord(dynamic, TestDynamicStruct, 3, 0) &&
            list.ReorderEdges(SampleMain, SampleSequence, env.pinThen,
                              Span<const GraphEdge>(swapped, 2)) &&
-           list.AddGraph(Id(90), GraphRole::Collapsed, 0, "Moved") &&
+           list.AddGraph(Id(90), GraphRole::DomainDefined, 1, "Moved") &&
            list.MoveNodesToGraph(SampleMain, Span<const Guid>(moved, 3), Id(90)) &&
            list.SetNodeProperties(SampleMain, SampleDynamic, dynamic.View()) &&
            list.Connect(SampleMain,
                         MakeEdge(SampleParamB, env.pinValue, SampleDynamic, env.pinItem0)) &&
            list.SetEnableState(SampleMain, SampleToggle, NodeEnableState::Enabled) &&
            list.RemoveRetainedPin(SampleMain, SampleAdd, env.pinGone) &&
-           list.RemoveGraph(SampleCollapsed);
+           list.RemoveNodes(SampleMain, Span<const Guid>(&SampleCollapsedNode, 1));
 }
 
 // list를 k번째 할당부터 실패시키며 성공할 때까지 실행한다. 실패마다 문서·revision·통지가

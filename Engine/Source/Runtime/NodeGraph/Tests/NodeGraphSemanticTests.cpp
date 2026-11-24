@@ -87,7 +87,7 @@ TEST(NodeGraph_SemanticDeterministicAndHash) {
 // 표본 문서(NodeGraphTestSupport.h Sample)의 semantic hash golden이다. 형식(8.4절)이나 표본을
 // 바꾸면 SemanticBytesFormatVersion을 올리고(형식일 때) 이 값을 함께 고친다.
 constexpr const char* NodeGraphSampleGoldenHash =
-    "4e54499baee462a1fb2e6574f96ffd3013c27776594c63d412526ed6d3dcdbf6";
+    "2166cfa861196d0b598873409150a11ed18accb369aa666c7dbcbef59e27a4f4";
 
 TEST(NodeGraph_SemanticGoldenHash) {
     TestEnv env;

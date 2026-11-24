@@ -316,12 +316,18 @@ void PlayerController::SetPlayer(ObjectHandle localPlayer,
     localPlayer_ = localPlayer;
     inputSource_ = source;
     playerInput_ = input::InputState();
+    gestures_.Reset();
 }
 
 void PlayerController::OnTick(const TickContext& context) noexcept {
     // ① TickPlayerInput → ② OnPlayerTick(pause 중 생략) → ③ OnControllerTick(UE
     // PlayerController.cpp:5504–5519, 5636–5685).
     playerInput_ = inputSource_ != nullptr ? *inputSource_ : input::InputState();
+    // 제스처 인식은 입력 스냅숏 다음이다(UE UPlayerInput이 FGestureRecognizer를 부르는 자리).
+    if (gestureRecognizerEnabled_) {
+        gestures_.Update(playerInput_, static_cast<float>(context.unscaledDeltaSeconds));
+    }
+
     if (!context.paused) {
         OnPlayerTick(context);
     }

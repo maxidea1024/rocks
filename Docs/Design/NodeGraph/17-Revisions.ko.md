@@ -63,3 +63,10 @@
   - `ResetInputDefault`는 핀 목록 없이 되므로 migration 전 노드에도 허용한다(알 수 없는 종류와 같다).
   - 코드 리뷰 1회 반영(필수 1·권장 3·참고 5): 연쇄·교환 키 재지정에서 간선이 사라지던 결함을 고쳤다(바뀌는 간선을 모두 지운 뒤 넣는다). `RefreshNodeTypes`는 검사 할당 실패도 `DependencyFailed` 상태로 두고, 재등록 이력 낡음을 통지 기록보다 먼저 한다. bracket 중·통지 콜백 안의 등록표 변경은 버리지 않고 미뤘다가 bracket이 끝날 때·통지가 끝날 때 반영한다. `Migrate`·`Reload`는 통지 콜백 안이면 `Busy`다. 시험을 더했다: 교환·연쇄·None 재지정, 자기 간선, 양 끝이 옮겨지는 간선, 교체 뒤 이어받기, 해제 뒤 undo·redo, 버전을 낮춘 재등록, bracket 중 미루기.
   - 남긴 것: migration 할당 실패 주입 시험(NG3c 무작위 시험과 함께), 해제 콜백 안 lease 생존 시험.
+- 개정 10(2026-11-24): NG3c를 구현했다.
+  - 설계 변경(10.1절): 경계 핀 목록을 노드 속성 Record가 아니라 하위 그래프의 필드(`Graph::ownerNode`·`inputs`·`outputs`, `GraphBoundaryPin`)로 옮겼다. 핀을 셀 때 Record 디코드(ObjectRegistry·소유 스레드·디코드 문자열 수명)가 필요 없고, 부모 참조가 `ownerNode` 한쪽에만 있다. 버린 대안은 10.1절에 적었다. GD25·6.1절을 고쳤다.
+  - 코드: 공통 종류 `Graph.Input`·`Graph.Output`·`Graph.Collapsed`(속성 없음, 등록표 `CollectPins`가 인터페이스에서 핀 계산), `PinKind` 리플렉션 enum, GI15·GI16 검사, 공통 명령 `SetGraphBoundary`(그래프 머리 op `GraphBoundary` — 적용 때 `GraphBoundaryChanged`·`NodePinsChanged`), `AddGraph`의 `ownerNode`, `RemoveNodes`·`RemoveGraph`의 하위 그래프 연쇄 삭제·`GraphReferenced`, 경계 종류 자리·순환 검사(`BoundaryNode`·`CollapsedCycle`)와 목록 끝 검사, `GraphFold.h` 접기·펼치기 도우미, 의미 바이트·Name 순위표·텍스트 codec·diff(`graph-boundary`)의 새 필드.
+  - 시험 표본의 Collapsed 그래프에 부모 `Graph.Collapsed`와 경계 노드를 더하고, 기존 시험(역할 바꾸기·그래프 지우기·실패 주입 목록·golden)을 맞췄다. 새 시험: GI15·GI16 양성·음성, `SetGraphBoundary` 고아 핀·undo·통지, 명령 규칙·연쇄 삭제, 접기·펼치기 왕복(의미 hash 동일·undo 바이트 동일), 텍스트 왕복, migration 할당 실패 주입.
+  - 남긴 것: 해제 콜백 안 lease 생존은 시험용 등록이 빈 lease라 관찰할 수 없어 순서 검사(통지 때 조회에서 빠짐)로 대신한다.
+  - 코드 리뷰 1회 반영(필수 2·권장 4·참고 4): 펼치기에서 그대로 지나는 경계 간선(Input → Output)을 바깥끼리 잇고, `Graph.Collapsed`·경계 노드의 고아 핀이 있으면 `Unsupported`로 거부한다(간선·값을 조용히 버리던 결함). 접기는 Structural 핀을 `Unsupported`로 거부한다(Data로 바꾸던 결함). 옮길 곳 없는 기본값을 모두 센다. 스펙의 순환 사유를 `CollapsedCycle`로, 표시 이름 문구를 실제 동작(빈 표시 이름, 화면이 키 원문)으로 고쳤다. 검증이 경계 타입 Name 유효성을 명령과 같게 본다. 이름 있는 상수. 시험을 더했다: 그대로 지나는 간선 펼치기, 고아 핀 거부, 기본값 옮기기·버리기 수, redo 바이트.
+  - 남긴 것: 무작위 명령열에 접기·펼치기 섞기와 경계 세 종류 붙여넣기 조각 시험(NG4 Transaction 시험과 함께), 경계 핀 타입 이름 → 색인 조회의 캐시(측정 뒤).

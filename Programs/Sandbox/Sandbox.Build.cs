@@ -25,7 +25,9 @@ public sealed class SandboxProgram : ModuleRules
             ModuleDirectory = "Programs/Sandbox",
             Kind = NativeModuleKind.Executable,
             // Android builds Sandbox as an APK program (lib Sandbox .so loaded by NativeActivity — Docs/Design/AndroidPlatform.ko.md).
-            AndroidPackage = context.Platform == NativePlatform.Android ? new AndroidPackage("com.rocks.sandbox") : null,
+            AndroidPackage = context.Platform == NativePlatform.Android
+                ? new AndroidPackage("com.rocks.sandbox", context.PathInRoot("Programs/Sandbox/AndroidAssets"))
+                : null,
             Sources = context.Sources("Programs/Sandbox/Private"),
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
             PrivateDefines = [$"SANDBOX_SHADER_PROVIDER={(shaderProvider ? 1 : 0)}",

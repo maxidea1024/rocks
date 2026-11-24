@@ -241,9 +241,105 @@ TEST(ThirdParty_FreeTypeRejectsNonFontBytes) {
 }
 
 TEST(ThirdParty_LibPngLinked) {
-    // FreeType의 컬러 비트맵 글리프 경로(sfnt/pngshim.c)가 쓰는 libpng가 링크된다. 실제 CBDT 글리프
-    // 해제 시험은 컬러 시험 글꼴과 함께 FT1e에서 더한다.
+    // FreeType의 컬러 비트맵 글리프 경로(sfnt/pngshim.c)가 쓰는 libpng가 링크된다.
     CHECK(png_access_version_number() == ExpectedLibPngVersion);
+}
+
+namespace {
+
+constexpr const char* GeneratedFonts =
+    "Engine/Source/ThirdParty/TestFontGenerated/generated-2026-11-24/";
+constexpr const char* NanumGothicPath =
+    "Engine/Source/ThirdParty/TestFontNanumGothic/"
+    "google-fonts-06bfe0d62a98/ofl/nanumgothic/NanumGothic-Regular.ttf";
+
+// 생성 시험 글꼴 하나를 열어 fn(face)를 부르고 정리한다. 열기 실패는 CHECK로 알린다.
+template <typename Function>
+void WithFace(const char* path, FT_Long faceIndex, Function&& fn) {
+    SystemAllocator allocator;
+    Array<uint8> bytes(allocator);
+    CHECK(ReadFile(path, bytes));
+    if (bytes.Size() == 0) {
+        return;
+    }
+
+    CountingMemory memory;
+    FT_Library library = nullptr;
+    CHECK(CreateLibrary(memory, library));
+    if (library == nullptr) {
+        return;
+    }
+
+    FT_Face face = nullptr;
+    CHECK(FT_New_Memory_Face(library, bytes.Data(), static_cast<FT_Long>(bytes.Size()), faceIndex,
+                             &face) == FT_Err_Ok);
+    if (face != nullptr) {
+        fn(face);
+        CHECK(FT_Done_Face(face) == FT_Err_Ok);
+    }
+
+    CHECK(FT_Done_Library(library) == FT_Err_Ok);
+    CHECK(memory.live == 0);
+}
+
+// 경로 앞부분과 파일 이름을 이은 경로다(시험 글꼴 경로용).
+constexpr usize PathCapacity = 256;
+
+const char* Join(char (&out)[PathCapacity], const char* directory, const char* name) {
+    const size_t used = strlen(directory);
+    memcpy(out, directory, used);
+    memcpy(out + used, name, strlen(name) + 1);
+    return out;
+}
+
+} // namespace
+
+TEST(ThirdParty_FreeTypeLoadsColorBitmapGlyph) {
+    // CBDT(PNG) 컬러 글리프: 고정 크기 strike를 고르고 FT_LOAD_COLOR로 읽으면 libpng가 PNG를 풀어
+    // BGRA 비트맵이 된다(Docs/Design/Font 6.5절).
+    char path[PathCapacity];
+    WithFace(Join(path, GeneratedFonts, "NotoColorEmoji-U1F600.ttf"), 0, [](FT_Face face) {
+        CHECK(FT_HAS_COLOR(face));
+        CHECK(!FT_IS_SCALABLE(face) && face->num_fixed_sizes > 0);
+        CHECK(FT_Select_Size(face, 0) == FT_Err_Ok);
+        const FT_UInt glyph = FT_Get_Char_Index(face, 0x1F600);
+        CHECK(glyph != 0);
+        CHECK(FT_Load_Glyph(face, glyph, FT_LOAD_COLOR) == FT_Err_Ok);
+        CHECK(face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
+        CHECK(face->glyph->bitmap.width > 0 && face->glyph->bitmap.rows > 0);
+    });
+}
+
+TEST(ThirdParty_FreeTypeOpensCollectionAndWebFonts) {
+    char path[PathCapacity];
+    // TTC 하위 face 둘(Roboto, Noto Naskh Arabic).
+    WithFace(Join(path, GeneratedFonts, "Roboto-NotoNaskhArabic.ttc"), 0, [](FT_Face face) {
+        CHECK(face->num_faces == 2);
+        CHECK(face->family_name != nullptr && strcmp(face->family_name, "Roboto") == 0);
+    });
+    WithFace(path, 1, [](FT_Face face) {
+        CHECK(face->family_name != nullptr && strcmp(face->family_name, "Noto Naskh Arabic") == 0);
+    });
+    // WOFF(zlib)·WOFF2(Brotli)는 FreeType이 열 때 sfnt로 푼다(Docs/Design/Font FD10, FT8).
+    WithFace(Join(path, GeneratedFonts, "Roboto-Regular.woff"), 0, [](FT_Face face) {
+        CHECK(face->family_name != nullptr && strcmp(face->family_name, "Roboto") == 0);
+        CHECK(FT_Get_Char_Index(face, 'A') != 0);
+    });
+    WithFace(Join(path, GeneratedFonts, "Roboto-Regular.woff2"), 0, [](FT_Face face) {
+        CHECK(face->family_name != nullptr && strcmp(face->family_name, "Roboto") == 0);
+        CHECK(FT_Get_Char_Index(face, 'A') != 0);
+    });
+}
+
+TEST(ThirdParty_FreeTypeOpensKoreanFont) {
+    WithFace(NanumGothicPath, 0, [](FT_Face face) {
+        // '한'(U+D55C)과 자모 'ㄱ'(U+3131)이 있다.
+        CHECK(FT_Get_Char_Index(face, 0xD55C) != 0);
+        CHECK(FT_Get_Char_Index(face, 0x3131) != 0);
+        CHECK(FT_Set_Char_Size(face, 0, TestCharSize, TestDpi, TestDpi) == FT_Err_Ok);
+        CHECK(FT_Load_Char(face, 0xD55C, FT_LOAD_RENDER) == FT_Err_Ok);
+        CHECK(face->glyph->bitmap.width > 0);
+    });
 }
 
 } // namespace third_party_font_library_tests_file
