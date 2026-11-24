@@ -53,11 +53,11 @@ T CubicInterp(const T& P0, const T& T0, const T& P1, const T& T1, const U& A) no
 // UnrealMath.cpp 1512–1573
 template <typename T>
 void FindBounds(T& OutMin, T& OutMax, T Start, T StartLeaveTan, float StartT, T End, T EndArriveTan,
-                float EndT, float Length, bool bCurve) noexcept {
+                float EndT, float Length, bool isCurve) noexcept {
     OutMin = Min(Start, End);
     OutMax = Max(Start, End);
 
-    if (bCurve) {
+    if (isCurve) {
         T Diff = Length; // UE: EndT - StartT(호출자가 넘긴다)
         StartLeaveTan *= Diff;
         EndArriveTan *= Diff;
@@ -109,7 +109,7 @@ struct Point {
     S OutVal[N] = {};
     S ArriveTangent[N] = {};
     S LeaveTangent[N] = {};
-    bool bCurve = false;
+    bool isCurve = false;
 };
 
 // UnrealMath.cpp 1575–1662: 성분마다 FindBounds 뒤 CurrentMin = Min(CurrentMin, OutMin),
@@ -122,7 +122,7 @@ void IntervalBounds(const Point<S, N>& Start, const Point<S, N>& End, float endI
         S OutMax;
         FindBounds(OutMin, OutMax, Start.OutVal[component], Start.LeaveTangent[component],
                    Start.InVal, End.OutVal[component], End.ArriveTangent[component], endInVal,
-                   length, Start.bCurve);
+                   length, Start.isCurve);
         CurrentMin[component] = Min(CurrentMin[component], OutMin);
         CurrentMax[component] = Max(CurrentMax[component], OutMax);
     }
@@ -131,7 +131,7 @@ void IntervalBounds(const Point<S, N>& Start, const Point<S, N>& End, float endI
 // InterpCurve.h 746–772(키 1개 이상). fixClosing이면 닫는 구간 끝 시간이 마지막 키 + offset, 길이가
 // offset 그대로이고 키 하나의 루프 커브도 닫는 구간을 본다.
 template <typename S, usize N>
-void CalcBounds(const Point<S, N>* Points, int32 NumPoints, bool bIsLooped, float LoopKeyOffset,
+void CalcBounds(const Point<S, N>* Points, int32 NumPoints, bool isLooped, float LoopKeyOffset,
                 bool fixClosing, S (&OutMin)[N], S (&OutMax)[N]) noexcept {
     for (usize component = 0; component < N; ++component) {
         OutMin[component] = Points[0].OutVal[component];
@@ -139,11 +139,11 @@ void CalcBounds(const Point<S, N>* Points, int32 NumPoints, bool bIsLooped, floa
     }
 
     // fixClosing이면 키 하나의 루프 커브도 닫는 구간 하나를 본다(Rocks — Eval과 같은 구간 수).
-    if (NumPoints == 1 && !(fixClosing && bIsLooped)) {
+    if (NumPoints == 1 && !(fixClosing && isLooped)) {
         return;
     }
 
-    const int32 NumSegments = bIsLooped ? NumPoints : (NumPoints - 1);
+    const int32 NumSegments = isLooped ? NumPoints : (NumPoints - 1);
 
     for (int32 Index = 0; Index < NumSegments; Index++) {
         const int32 NextIndex = (Index == NumPoints - 1) ? 0 : (Index + 1);
@@ -215,7 +215,7 @@ int32 RandomCurve(MathRandom& random, InterpCurve<T>& curve,
         CurveValueTraits<T>::Store(added.outValue, point.OutVal);
         CurveValueTraits<T>::Store(added.arriveTangent, point.ArriveTangent);
         CurveValueTraits<T>::Store(added.leaveTangent, point.LeaveTangent);
-        point.bCurve = added.IsCurveKey();
+        point.isCurve = added.IsCurveKey();
     }
 
     if (random.Next() % 2 == 0) {
@@ -371,7 +371,7 @@ TEST(InterpCurveBounds_HandVectors) {
     CHECK(platform::PlatformMath::Abs(loop.Eval(1.0f + 1.0f / 3.0f) + 4.0 / 9.0) < 1.0e-6);
 
     ue58bounds::Point<double, 1> reference[2];
-    reference[0].bCurve = reference[1].bCurve = true;
+    reference[0].isCurve = reference[1].isCurve = true;
     reference[1].InVal = 1.0f;
     reference[1].LeaveTangent[0] = -3.0;
     double ueMin[1];

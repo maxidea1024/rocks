@@ -96,22 +96,22 @@ inline Format FindCompressionFormat(const Array<RichKey>& Keys) noexcept {
     }
 
     const RichKey& RefKey = Keys[0];
-    bool bIsMixed = false;
-    bool bIsWeighted = false;
+    bool isMixed = false;
+    bool isWeighted = false;
     for (const RichKey& Key : Keys.View()) {
         if (Key.interp == Interp::Cubic) {
             if (Key.tangentWeight != Weight::None) {
-                bIsWeighted = true;
+                isWeighted = true;
                 break;
             }
         }
         if (Key.interp != RefKey.interp) {
-            bIsMixed = true;
+            isMixed = true;
         }
     }
-    if (bIsWeighted) {
+    if (isWeighted) {
         return Format::Weighted;
-    } else if (bIsMixed) {
+    } else if (isMixed) {
         return Format::Mixed;
     }
     switch (RefKey.interp) {
@@ -177,12 +177,12 @@ inline KeyFormat FindKeyFormat(const Array<RichKey>& Keys, float ErrorThreshold,
     const float InvDeltaTime = 1.0f / DeltaTime;
     const float SampleRateIncrement = 1.0f / SampleRate;
 
-    bool bFitsOn16Bits = true;
+    bool fitsOn16Bits = true;
 
     int32 CurrentLossyKey = 0;
     int32 CurrentRefKey = 0;
     float CurrentTime = MinTime;
-    while (CurrentTime <= MaxTime && bFitsOn16Bits) {
+    while (CurrentTime <= MaxTime && fitsOn16Bits) {
         if (CurrentTime > Keys[CurrentRefKey + 1].time) {
             CurrentRefKey++;
 
@@ -219,7 +219,7 @@ inline KeyFormat FindKeyFormat(const Array<RichKey>& Keys, float ErrorThreshold,
 
         const float Error_16 = platform::PlatformMath::Abs(Result_Ref - Result_16);
 
-        bFitsOn16Bits &= Error_16 <= ErrorThreshold;
+        fitsOn16Bits &= Error_16 <= ErrorThreshold;
 
         CurrentTime += SampleRateIncrement;
     }
@@ -234,7 +234,7 @@ inline KeyFormat FindKeyFormat(const Array<RichKey>& Keys, float ErrorThreshold,
     const int32 SizeUInt16 = Align(Align(SizeInterpMode, 2) + (NumKeys * 2), 4) + (2 * 4);
     const int32 SizeFloat32 = Align(SizeInterpMode, 4) + NumKeys * 4;
 
-    if (bFitsOn16Bits && SizeUInt16 < SizeFloat32) {
+    if (fitsOn16Bits && SizeUInt16 < SizeFloat32) {
         return KeyFormat::Uint16;
     } else {
         return KeyFormat::Float32;

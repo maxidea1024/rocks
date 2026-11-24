@@ -295,7 +295,7 @@ inline void AutoSetTangents(Array<RichKey>& Keys, float Tension) noexcept {
         float ArriveTangent = Key.arriveTangent;
         float LeaveTangent = Key.leaveTangent;
 
-        bool bNeedsComputeTangent = false;
+        bool needsComputeTangent = false;
         const RichKey* PrevKey = &Key;
         const RichKey* CurrentKey = &Key;
         const RichKey* NextKey = &Key;
@@ -310,7 +310,7 @@ inline void AutoSetTangents(Array<RichKey>& Keys, float Tension) noexcept {
 
                 if (Key.interp == Interp::Cubic && (Key.tangentMode == TangentMode::Auto)) {
                     NextKey = &Keys[KeyIndex + 1];
-                    bNeedsComputeTangent = true;
+                    needsComputeTangent = true;
                 } else if ((PrevKey->interp == Interp::Constant) ||
                            (Key.interp == Interp::Constant)) {
                     LeaveTangent = 0.0f;
@@ -326,7 +326,7 @@ inline void AutoSetTangents(Array<RichKey>& Keys, float Tension) noexcept {
             }
         }
 
-        if (bNeedsComputeTangent) {
+        if (needsComputeTangent) {
             ArriveTangent = ue58curve::ComputeCurveTangent(PrevKey->time, PrevKey->value,
                                                            CurrentKey->time, CurrentKey->value,
                                                            NextKey->time, NextKey->value, Tension);
@@ -342,7 +342,7 @@ inline void AutoSetTangents(Array<RichKey>& Keys, float Tension) noexcept {
 // RichCurve.cpp 303–339(키 핸들 빼고). 새 키의 index를 돌려준다.
 template <class K>
 int32 AddKey(Array<K>& Keys, const float InTime, const float InValue,
-             const bool bUnwindRotation) noexcept {
+             const bool unwindRotation) noexcept {
     int32 Index = 0;
     const int32 Num = static_cast<int32>(Keys.Size());
     if (Num == 0 || Keys[Num - 1].time < InTime) {
@@ -357,7 +357,7 @@ int32 AddKey(Array<K>& Keys, const float InTime, const float InValue,
     NewKey.value = InValue;
     static_cast<void>(Keys.TryInsert(NewKey, static_cast<usize>(Index)));
 
-    if (Index > 0 && bUnwindRotation) {
+    if (Index > 0 && unwindRotation) {
         const float OldValue = Keys[Index - 1].value;
         float NewValue = Keys[Index].value;
 
@@ -376,7 +376,7 @@ int32 AddKey(Array<K>& Keys, const float InTime, const float InValue,
 
 // RichCurve.cpp 376–400.
 template <class K>
-int32 UpdateOrAddKey(Array<K>& Keys, float InTime, float InValue, const bool bUnwindRotation,
+int32 UpdateOrAddKey(Array<K>& Keys, float InTime, float InValue, const bool unwindRotation,
                      float KeyTimeTolerance) noexcept {
     for (int32 KeyIndex = 0; KeyIndex < static_cast<int32>(Keys.Size()); ++KeyIndex) {
         float KeyTime = Keys[KeyIndex].time;
@@ -392,7 +392,7 @@ int32 UpdateOrAddKey(Array<K>& Keys, float InTime, float InValue, const bool bUn
         }
     }
 
-    return AddKey(Keys, InTime, InValue, bUnwindRotation);
+    return AddKey(Keys, InTime, InValue, unwindRotation);
 }
 
 // RichCurve.cpp 365–373.
@@ -482,11 +482,11 @@ inline void RemoveRedundantKeysInternal(Array<RichKey>& Keys, float Tolerance, i
 
         int32 MostRecentKeepKeyIndex = options.redundantStartFromKeep ? ActualStartKeepKey : 0;
 
-        const bool bTryRemoveUserTangentKeys = SampleRate.HasValue();
+        const bool tryRemoveUserTangentKeys = SampleRate.HasValue();
         for (int32 TestIndex = ActualStartKeepKey + 1; TestIndex < ActualEndKeepKey; ++TestIndex) {
-            bool bKeepKey = false;
+            bool keepKey = false;
 
-            if (bTryRemoveUserTangentKeys) {
+            if (tryRemoveUserTangentKeys) {
                 const FrameRate& Rate = SampleRate.Value();
                 const FrameTime KeyOneFrameTime =
                     Rate.AsFrameTime(Keys[MostRecentKeepKeyIndex].time);
@@ -510,7 +510,7 @@ inline void RemoveRedundantKeysInternal(Array<RichKey>& Keys, float Tolerance, i
                         ue58curve::EvalForTwoKeys(KeyOne, KeyTwo, SampleSeconds, options.math);
 
                     if (platform::PlatformMath::Abs(ValueWithoutKey - ValueWithKey) > Tolerance) {
-                        bKeepKey = true;
+                        keepKey = true;
                         break;
                     }
 
@@ -523,7 +523,7 @@ inline void RemoveRedundantKeysInternal(Array<RichKey>& Keys, float Tolerance, i
                            Key.tangentMode != TangentMode::Break;
                 };
 
-                bKeepKey = true;
+                keepKey = true;
                 if (IsNonUserTangentKey(Keys[MostRecentKeepKeyIndex]) &&
                     IsNonUserTangentKey(Keys[TestIndex + 1]) &&
                     IsNonUserTangentKey(Keys[TestIndex])) {
@@ -532,11 +532,11 @@ inline void RemoveRedundantKeysInternal(Array<RichKey>& Keys, float Tolerance, i
                         ue58curve::EvalForTwoKeys(Keys[MostRecentKeepKeyIndex], Keys[TestIndex + 1],
                                                   Keys[TestIndex].time, options.math);
 
-                    bKeepKey = platform::PlatformMath::Abs(ValueWithoutKey - KeyValue) > Tolerance;
+                    keepKey = platform::PlatformMath::Abs(ValueWithoutKey - KeyValue) > Tolerance;
                 }
             }
 
-            if (bKeepKey) {
+            if (keepKey) {
                 MostRecentKeepKeyIndex = TestIndex;
                 static_cast<void>(NewKeys.TryPushBack(Keys[TestIndex]));
             }
@@ -614,7 +614,7 @@ inline void SimpleRemoveRedundantKeysInternal(Array<SimpleKey>& Keys, Interp Int
     };
 
     for (;;) {
-        bool bSkippedKeys = false;
+        bool skippedKeys = false;
         const SimpleKey* EvalStartKey = &Keys[Last()];
         while (NextEvalIndex < ActualEndKeepKey) {
             const SimpleKey* EvalMiddleKey = &Keys[NextEvalIndex];
@@ -623,11 +623,11 @@ inline void SimpleRemoveRedundantKeysInternal(Array<SimpleKey>& Keys, Interp Int
                 break;
             }
             ++NextEvalIndex;
-            bSkippedKeys = true;
+            skippedKeys = true;
         }
 
-        if (bSkippedKeys) {
-            bool bRemovedKeys = false;
+        if (skippedKeys) {
+            bool removedKeys = false;
             while (Last() > ActualStartKeepKey) {
                 const usize NumKeepIndices = KeepIndices.Size();
                 EvalStartKey = &Keys[KeepIndices[NumKeepIndices - 2]];
@@ -637,9 +637,9 @@ inline void SimpleRemoveRedundantKeysInternal(Array<SimpleKey>& Keys, Interp Int
                     break;
                 }
                 static_cast<void>(KeepIndices.TryPopBack());
-                bRemovedKeys = true;
+                removedKeys = true;
             }
-            if (bRemovedKeys) {
+            if (removedKeys) {
                 continue;
             }
         }
