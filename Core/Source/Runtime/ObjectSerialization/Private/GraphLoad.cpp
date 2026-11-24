@@ -713,6 +713,13 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         }
 
         if (schemaIndex == schema.fields.Size()) {
+            // 에디터 데이터 없는 빌드에서 컴파일에서 빠진 EditorOnly 필드는 모르는 필드가 아니다:
+            // 진단 없이 건너뛴다(모르는 필드 정책이 Reject여도 — Docs/Design/BuildTargets 3.4절
+            // BS2c).
+            if (IsEditorOnlyFieldId(schema, field.Value().id)) {
+                continue;
+            }
+
             if (auto skipped = detail::SkipUnknownField(context, field.Value().id); !skipped) {
                 return skipped;
             }

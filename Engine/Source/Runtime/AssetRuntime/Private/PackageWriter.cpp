@@ -954,6 +954,13 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
                                         const PackageWriteOptions& options, PackageSink& sink,
                                         AssetDiagnostic* failure) noexcept {
     using Out = PackageWriteResult;
+    // 에디터 데이터 없는 빌드는 에디터 패키지를 쓰지 않는다: 컴파일에서 빠진 EditorOnly 값을 잃는다
+    // (Docs/Design/BuildTargets 3.4절 BD26·BS2c). 쿠킹 패키지는 EditorOnly 필드를 빼므로 쓸 수
+    // 있다.
+    if (options.kind == PackageKind::Editor && !ROCKS_WITH_EDITOR_DATA) {
+        return Result<Out>::Failure(ErrorCode::Unsupported);
+    }
+
     uint32 alignment = 0;
     if (auto valid = ValidateOptions(allocator, options, alignment); !valid) {
         return Result<Out>::Failure(valid.Error());

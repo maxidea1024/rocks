@@ -178,6 +178,7 @@ internal static class CompilerDriver
             await ResolveWithinAsync(declared,
                 extra => ProcessRunner.RunAsync(new(compiler, withinArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
             schema = SchemaValidator.Validate(declared, imported);
+            CheckEditorOnlyStructMembers(schema);
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
@@ -931,13 +932,38 @@ internal static class CompilerDriver
                     continue;
                 }
 
-                string problem = type.BindsSpelling.Length != 0 ? "is an EditorOnly field of a Binds mirror"
+                string problem = field.Spec.EditorOnly && type.BindsSpelling.Length != 0 ? "is an EditorOnly field of a Binds mirror"
                     : field.Spec.EditorOnly ? "is EditorOnly but not inside '#if ROCKS_WITH_EDITOR_DATA'"
                     : "is inside '#if ROCKS_WITH_EDITOR_DATA' but not EditorOnly";
                 throw new MetadataException($"{type.Name}::{field.Name} {problem}", "RMC2502",
                     "Write editor-only fields as ROCKS_PROPERTY(EditorOnly, ...) directly inside '#if ROCKS_WITH_EDITOR_DATA' ... '#endif', and every " +
                     "other field outside it; a Binds mirror lists the real type's members without EditorOnly (Docs/Design/BuildTargets section 3.4).")
                     .At(field.Site);
+            }
+        }
+    }
+
+    // struct의 EditorOnly 멤버는 struct 형질(강한 참조·Registry 컨테이너·Required·InstancedStruct·WorldOnly 소유자)을 더할 수 없다(RMC2504 —
+    // Docs/Design/BuildTargets 3.4절 BS2c). 형질은 struct의 등록 형태(trace 유무, 담는 컨테이너 — StructRefArray 등)를 정하는데, 게임 조합에서는
+    // 그 멤버가 빠져 Registry가 다시 계산한 형질과 생성 코드의 형질이 갈라진다. 클래스는 형질이 등록 형태를 바꾸지 않으므로 받는다.
+    private static void CheckEditorOnlyStructMembers(SchemaModel schema)
+    {
+        foreach (ClassModel type in schema.Ordered.Where(type => type.IsStruct && !type.Imported))
+        {
+            foreach (FieldModel field in type.OwnFields.Where(field => field.Spec.EditorOnly))
+            {
+                ClassModel? target = field.StructTarget && field.Reference is not null ? schema.Find(field.Reference) : null;
+                bool adds = field.Spec.Required || field.IsInstancedStruct || field.TargetKind == "InstancedStruct" ||
+                    field.TargetKind == "ObjectReference" || field.KeyKind == "ObjectReference" ||
+                    (target is not null && (target.ContainsStrongReference || target.ContainsReferenceArray || target.RequiresWorldOnlyOwner ||
+                        CppEmitter.ContainsRequired(schema, target) || CppEmitter.ContainsInstancedStruct(schema, target)));
+                if (adds)
+                {
+                    throw new MetadataException($"{type.Name}::{field.Name}: an EditorOnly struct member cannot hold object references, " +
+                        "reference containers, Required values, InstancedStruct values or WorldOnly-owner state", "RMC2504",
+                        "Move the member out of '#if ROCKS_WITH_EDITOR_DATA', or keep such values in an EditorOnly class field: the struct's " +
+                        "registration traits must be the same with and without editor data (Docs/Design/BuildTargets section 3.4).").At(field.Site);
+                }
             }
         }
     }

@@ -109,7 +109,9 @@ bool IsAsciiIdentifier(Span<const char> text) noexcept {
 
 Result<void> ValidateEditorOnlyFieldIds(Span<const FieldSchema> fields,
                                         Span<const Guid> ids) noexcept {
-    if (ids.Size() > 4096) {
+    // 필드 목록 상한(ValidateFieldList)과 같다.
+    constexpr usize MaxEditorOnlyFieldIds = 4096;
+    if (ids.Size() > MaxEditorOnlyFieldIds) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

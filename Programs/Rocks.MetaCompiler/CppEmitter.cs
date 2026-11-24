@@ -595,6 +595,11 @@ internal static class CppEmitter
         {
             Body("ops.hasStrongReferences = false;");
         }
+        else if (traced.All(field => field.Spec.EditorOnly))
+        {
+            // 방문할 필드가 모두 EditorOnly면 에디터 데이터 없는 조합에서는 잎 타입이다.
+            Body($"#if !{EditorDataCondition}\nops.hasStrongReferences = false;\n#endif");
+        }
 
         Body($"ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {{ Trace(static_cast<const {native}&>(object), visitor); }};");
         Body($"ops.referenceLayout = +[](const Object& object, detail::ReferenceLayoutBuilder& layout) noexcept {{ ReferenceLayout(static_cast<const {native}&>(object), layout); }};");
@@ -890,13 +895,13 @@ internal static class CppEmitter
     // 특수화를 내고 멤버 thunk·Trace·생성·소멸이 모두 실제 타입을 쓰며, 스키마 이름만 미러 이름이다.
     // struct가 InstancedStruct 값(단일·원소 배열·정적 배열·Map 값)을 (중첩 struct·원소·Optional·Map 값 struct까지) 담는지다(리플렉션
     // B9j — 런타임 등록 형질 StructView::ContainsInstancedStruct와 같은 규칙, Transient 멤버도 센다).
-    private static bool ContainsInstancedStruct(SchemaModel schema, ClassModel type) =>
+    internal static bool ContainsInstancedStruct(SchemaModel schema, ClassModel type) =>
         type.Fields.Any(field => field.TargetKind == "InstancedStruct" ||
             (field.StructTarget && ContainsInstancedStruct(schema, schema.Find(field.Reference!))));
 
     // struct가 Required 멤버를 (중첩 struct·원소 struct까지, Transient 멤버 아래는 빼고) 담는지다(리플렉션 B9j — 런타임 등록 형질
     // StructView::ContainsRequired와 같은 규칙).
-    private static bool ContainsRequired(SchemaModel schema, ClassModel type) =>
+    internal static bool ContainsRequired(SchemaModel schema, ClassModel type) =>
         type.Fields.Any(field => !field.Spec.Transient &&
             (field.Spec.Required || (field.StructTarget && ContainsRequired(schema, schema.Find(field.Reference!)))));
 

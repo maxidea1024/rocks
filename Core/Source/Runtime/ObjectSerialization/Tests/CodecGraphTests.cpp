@@ -322,6 +322,55 @@ TEST(Codec_UnknownFieldsReportOrReject) {
     CHECK(types.Shutdown());
 }
 
+// 에디터 데이터 없는 빌드(Docs/Design/BuildTargets 3.4절 BS2c)는 컴파일에서 빠진 EditorOnly
+// 필드(스키마 editorOnlyFieldIds)의 저장 값을 진단 없이 건너뛴다 — 모르는 필드 정책이 Reject여도
+// 받는다. 목록에 없는 ID는 그대로 모르는 필드다. 에디터 데이터 빌드에서는 그 필드가 스키마 필드다.
+TEST(Codec_EditorOnlyFieldIdsWithoutEditorData) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(RegisterWorldFixture(types));
+    const TypeSchema& schema = TypeOf<WorldChild>();
+    REQUIRE(schema.editorOnlyFieldIds.Size() == 1);
+    const Guid noteId = schema.editorOnlyFieldIds[0];
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(SchemaField(schema, "note").id == noteId);
+#else
+    {
+        ObjectRegistry target(allocator, types, {0x4344, 0x45});
+        ArchiveWriter payload(allocator);
+        REQUIRE(payload.WriteI64(41));
+        const Guid fields[] = {noteId, UnknownFieldId};
+        for (const Guid field : fields) {
+            auto record = OneFieldRecord(allocator, TypeIdOf<WorldChild>(), field, WireType::I64,
+                                         payload.View());
+            REQUIRE(record);
+            auto graph =
+                test::graph::Single(allocator, TypeIdOf<WorldChild>(), record.Value().View());
+            REQUIRE(graph);
+            RecordingHooks hooks;
+            ObjectGraphLoadOptions options;
+            options.hooks = &hooks;
+            options.policy.unknownField = UnknownFieldPolicy::Reject;
+            auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                          graph.Value().View(), options);
+            if (field == noteId) {
+                REQUIRE(loaded);
+                for (usize index = 0; index < hooks.diagnosticCount; ++index) {
+                    CHECK(hooks.diagnostics[index].kind != FieldDiagnosticKind::UnknownField);
+                }
+            } else {
+                CHECK(loaded.Error() == ErrorCode::InvalidArgument);
+            }
+        }
+
+        REQUIRE(target.Collect(target.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+    }
+#endif
+
+    CHECK(types.Shutdown());
+}
+
 // 저장 버전이 현재보다 높으면 migrate를 부르지 않는다. 기본은 Unsupported, 높은 버전 정책이면 아는
 // 필드만 읽고 NewerVersion을 보고한다.
 TEST(Codec_NewerRecordVersionPolicy) {

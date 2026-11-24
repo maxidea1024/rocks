@@ -158,11 +158,14 @@ struct PackageWriteResult {
 // 4. Dependencies: 외부 참조(Hard·EditorOnly)와 Soft 참조(Soft·EditorOnly), extraDependencies.
 // 5. Summary·Bulk(+BulkIndex)·섹션 표·헤더.
 //
-// 오류: 인자·옵션 위반 InvalidArgument, 대표 에셋 없음 InvalidArgument, 패키지에 속하지 않은 객체
-// 참조는 UnpackagedReference / InvalidArgument, bulk source의 byte가 ref와 다르면 CorruptPackage /
-// InvalidArgument, 그래프 저장의 오류(Required·외부 참조 거부 InvalidArgument, 한도
-// CapacityExceeded, 접근 WrongThread·WrongContext, 회수된 대상 StaleHandle·Destroyed)와 sink 오류는
-// 그대로다. 실패하면 sink에 쓴 byte는 정의되지 않는다(호출자가 버린다 — 파일 저장은 임시 파일).
+// 오류: 에디터 데이터 없는 빌드(ROCKS_WITH_EDITOR_DATA=0)의 에디터 패키지 Unsupported(컴파일에서
+// 빠진 EditorOnly 값을 잃는다 — Docs/Design/BuildTargets 3.4절 BD26, 에셋 도구는 WithEditorData
+// Program이다), 인자·옵션 위반 InvalidArgument, 대표 에셋 없음 InvalidArgument, 패키지에 속하지
+// 않은 객체 참조는 UnpackagedReference / InvalidArgument, bulk source의 byte가 ref와 다르면
+// CorruptPackage / InvalidArgument, 그래프 저장의 오류(Required·외부 참조 거부 InvalidArgument,
+// 한도 CapacityExceeded, 접근 WrongThread·WrongContext, 회수된 대상 StaleHandle·Destroyed)와 sink
+// 오류는 그대로다. 실패하면 sink에 쓴 byte는 정의되지 않는다(호출자가 버린다 — 파일 저장은 임시
+// 파일).
 //
 // 스레드: Registry 소유 스레드 전용이다(그래프 저장이 encode 고정을 쥔다).
 ROCKS_ASSETRUNTIME_API Result<PackageWriteResult>
