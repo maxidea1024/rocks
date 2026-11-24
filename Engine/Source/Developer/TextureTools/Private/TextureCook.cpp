@@ -2,6 +2,7 @@
 
 #include <AssetNugget/NuggetReflected.h>
 #include <AssetNugget/NuggetScc.h>
+#include <AssetRuntime/BulkStore.h>
 #include <Base/NumericLimits.h>
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
@@ -45,6 +46,12 @@ public:
     }
 
     Result<BulkDataRef> Add(Span<const uint8> bytes) noexcept {
+        // 내려가는 id가 저장하지 않은 bulk의 최상위 bit 범위로 내려오지 않게 한다(실제로는 mip 수 +
+        // 1개뿐이다).
+        if (entries_.Size() >= CookBulkIdFirst - UnsavedBulkIdBit) {
+            return Result<BulkDataRef>::Failure(ErrorCode::CapacityExceeded);
+        }
+
         if (auto pushed = entries_.TryPushBack(bytes); !pushed) {
             return Result<BulkDataRef>::Failure(pushed.Error());
         }
@@ -217,9 +224,20 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
     writer.WriteU32(source.numSlices);
     writer.WriteU32(source.numMips);
     writer.WriteU32(source.numLayers);
-    const AssignmentTarget target =
-        AssignmentTarget::Value(*context.registry, context.access, lease.Value(),
-                                const_cast<TextureBuildSettings*>(&settings), *context.allocator);
+    // 결과를 바꾸지 않는 칸은 사본에서 고정한다(12.14절 5번 — 주소는 mip 결과에 쓰이지 않고 경고는
+    // 너겟 밖에서 계산한다, norm16은 출력이 바뀔 때만).
+    TextureBuildSettings keyed = settings;
+    keyed.addressX = TextureAddress::Wrap;
+    keyed.addressY = TextureAddress::Wrap;
+    keyed.addressZ = TextureAddress::Wrap;
+    TextureBuildSettings other = settings;
+    other.norm16Supported = !settings.norm16Supported;
+    if (TextureBuildOutput(settings).pixelFormat == TextureBuildOutput(other).pixelFormat) {
+        keyed.norm16Supported = true;
+    }
+
+    const AssignmentTarget target = AssignmentTarget::Value(
+        *context.registry, context.access, lease.Value(), &keyed, *context.allocator);
     if (auto written = WriteReflected(writer, target); !written) {
         return Result<Sha256Digest>::Failure(written.Error());
     }
@@ -289,6 +307,17 @@ Result<bool> CookAcceptHit(const NuggetCacheGetResult& got, const TextureBuildSe
         (void)mips.TryPushBack(TextureCookMip{mip.sizeX, mip.sizeY, mip.sizeZ, value.bytes.View()});
     }
 
+    // 사슬 끝: NoMipmaps면 mip 하나, 아니면 1×1(×1)까지다(빌드는 위 mip만 버린다 — 잘린 사슬을
+    // 거른다).
+    const TextureCookMip& last = mips[mips.Size() - 1];
+    const bool complete = settings.mipGenSettings == TextureMipGenSettings::NoMipmaps
+                              ? mips.Size() == 1
+                              : last.sizeX == 1 && last.sizeY == 1 && last.sizeZ == 1;
+    if (!complete) {
+        mips.Clear();
+        return Result<bool>::Success(false);
+    }
+
     return Result<bool>::Success(true);
 }
 
@@ -345,6 +374,9 @@ Result<void> CookFillPlatformData(TexturePlatformData& data, TextureDimension di
     data.numSlices = output.numSlices;
     data.residentTailMips = resident;
     data.sampler = sampler;
+    // 앞 값이 남아 있어도 이번 mip만 둔다(되돌리기가 늘 기본값을 보장하지만 채우기가 그것에 기대지
+    // 않는다).
+    data.mips.Clear();
     if (auto reserved = data.mips.TryReserve(count); !reserved) {
         return reserved;
     }
@@ -644,6 +676,14 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
             }
 
             hit = accepted.Value();
+            // 받아들이지 못한 Record는 치운다(12.14절 6번 — 남기면 다시 만든 값의 Put이 늘
+            // Conflict다).
+            if (!hit) {
+                auto rejected = nuggets->Reject(NuggetBucketTexture, sccKey, got.digest);
+                if (!rejected && nuggets->IsRequired()) {
+                    return CookFail(context, AssetDiagnosticCode::None, rejected.Error());
+                }
+            }
         }
     }
 

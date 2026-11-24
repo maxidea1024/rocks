@@ -631,7 +631,9 @@ TEST(TextureCook_Streaming) {
         REQUIRE(data != nullptr);
         CHECK(data->residentTailMips == data->numMips &&
               BulkEntryCount(scene.allocator, out.sink.Bytes()) == 1);
-        CHECK(data->numMips == (condition == Condition::NoMipmaps ? 1u : 9u));
+        // CPU availability는 Texture2D에서 NoMipmaps가 된다(UE TextureDerivedData.cpp 1278–1285).
+        CHECK(data->numMips ==
+              (condition == Condition::NoMipmaps || condition == Condition::Cpu ? 1u : 9u));
     }
 
     // 비 2의 거듭제곱 X(256×192 — N 9).
@@ -925,10 +927,10 @@ TEST(TextureCook_Warnings) {
 }
 
 // 너겟(12.14절 5·6번): 미적중 → Put(SCC meta 구성원 0·ValueId 0..N) → 같은 키 적중(빌드 없음·같은
-// byte), 키 변이(유효 설정·원본·압축 기록·norm16 — 미적중), 키 밖 입력(샘플러 filter·neverStream·
-// 같은 값의 그룹·프로파일 id — 적중), verify 일치(빌드하고 Put 없음), 손상 적중(mip byte — verify
-// NuggetMismatch·아니면 그대로 씀, 머리 손상 — 미적중·Conflict 경고, 값 수·크기 사슬·형식 —
-// 미적중).
+// byte), 키 밖 입력(샘플러 filter·neverStream·같은 값의 그룹·프로파일 id·주소·8비트 원본의 norm16 —
+// 적중), 키 변이(LODBias·압축 기록·원본·16비트 원본의 norm16 — 미적중), verify 일치(빌드하고 Put
+// 없음), 손상 적중(mip byte — verify NuggetMismatch·아니면 그대로 씀, 머리·값 수·크기 사슬·잘린
+// 사슬·형식 — 미적중·Reject·다시 Put, 다음 쿠킹 적중).
 TEST(TextureCook_Nuggets) {
     CookScene scene;
     REQUIRE(scene.ready);
@@ -967,13 +969,25 @@ TEST(TextureCook_Nuggets) {
         Filter,
         NeverStream,
         Group,
-        ProfileId
+        ProfileId,
+        Address,
+        Norm16
     };
-    const Outside outside[] = {Outside::Filter, Outside::NeverStream, Outside::Group,
-                               Outside::ProfileId};
+    const Outside outside[] = {Outside::Filter,    Outside::NeverStream, Outside::Group,
+                               Outside::ProfileId, Outside::Address,     Outside::Norm16};
     for (Outside change : outside) {
         if (change == Outside::ProfileId) {
             REQUIRE(scene.profile.id.TryAssign("Other"));
+        } else if (change == Outside::Norm16) {
+            // 8비트 원본은 norm16과 무관하다(키 정규화 — Windows·Android가 너겟을 함께 쓴다).
+            scene.profile.textureNorm16Supported = false;
+        } else if (change == Outside::Address) {
+            // 주소는 mip 결과에 쓰이지 않는다(키 정규화 — 경고는 너겟 밖).
+            REQUIRE(scene.Edit([](Texture& texture) noexcept {
+                static_cast<Texture2D&>(texture).addressX = TextureAddress::Clamp;
+                static_cast<Texture2D&>(texture).addressY = TextureAddress::Mirror;
+                return true;
+            }));
         } else {
             REQUIRE(scene.Edit([&](Texture& texture) noexcept {
                 if (change == Outside::Filter) {
@@ -1000,16 +1014,12 @@ TEST(TextureCook_Nuggets) {
         LodBias,
         CacheId,
         NoAlpha,
-        Source,
-        Norm16
+        Source
     };
-    const Inside inside[] = {Inside::LodBias, Inside::CacheId, Inside::NoAlpha, Inside::Source,
-                             Inside::Norm16};
+    const Inside inside[] = {Inside::LodBias, Inside::CacheId, Inside::NoAlpha, Inside::Source};
     uint64 builds = processor.Builds();
     for (Inside change : inside) {
-        if (change == Inside::Norm16) {
-            scene.profile.textureNorm16Supported = false;
-        } else if (change == Inside::Source) {
+        if (change == Inside::Source) {
             const Array<uint8> other = Pattern(scene.allocator, 16 * 16, 77);
             auto ref = scene.sourceBulk.AddCopy(other.View());
             REQUIRE(ref);
@@ -1042,6 +1052,22 @@ TEST(TextureCook_Nuggets) {
 
         CHECK(distinct);
         REQUIRE(seen.TryPushBack(processor.LastNuggetKey()));
+    }
+
+    // 16비트 원본은 norm16이 출력을 바꾸므로 키가 다르다.
+    {
+        const Array<uint8> pixels = Pattern(scene.allocator, 4 * 4 * 2, 13);
+        REQUIRE(
+            scene.Make(3, TypeIdOf<Texture2D>(), TextureSourceFormat::G16, 4, 4, 1, pixels.View()));
+        scene.profile.textureNorm16Supported = true;
+        CookOut supported(scene.allocator);
+        REQUIRE(scene.Cook(processor, supported, nuggets.cache.Get()));
+        const Sha256Digest unorm = processor.LastNuggetKey();
+        scene.profile.textureNorm16Supported = false;
+        CookOut fallback(scene.allocator);
+        REQUIRE(scene.Cook(processor, fallback, nuggets.cache.Get()));
+        builds += 2;
+        CHECK(processor.Builds() == builds && !(processor.LastNuggetKey() == unorm));
     }
 
     // 처음 상태로 되돌린 새 텍스처(같은 id 패키지는 다시 만들 수 없어 처음 키를 다시 쓰려면 같은
@@ -1079,14 +1105,18 @@ TEST(TextureCook_Nuggets) {
         CHECK(processor.Builds() == ++builds && scene.EditorUntouched());
     }
 
-    // 미적중으로 다루는 손상: 머리 버전(Conflict 경고)·값 하나 빠짐·크기 사슬·형식 규칙.
+    // 미적중으로 다루는 손상: 머리 버전·값 하나 빠짐·크기 사슬·잘린 사슬(머리도 맞춘 — 사슬
+    // 끝)·형식 규칙. 처리기가 Record를 Reject하므로 다시 만든 값의 Put이 저장되고(Conflict 없음)
+    // 다음 쿠킹은 적중이다.
     enum class Broken {
         Header,
         MissingValue,
         Chain,
+        Truncated,
         Format
     };
-    const Broken broken[] = {Broken::Header, Broken::MissingValue, Broken::Chain, Broken::Format};
+    const Broken broken[] = {Broken::Header, Broken::MissingValue, Broken::Chain, Broken::Truncated,
+                             Broken::Format};
     for (Broken kind : broken) {
         Array<NuggetValue> values = CopyValues(scene.allocator, good);
         Array<uint8>& header = values[0].bytes;
@@ -1101,6 +1131,12 @@ TEST(TextureCook_Nuggets) {
             // mip 1의 sizeX(머리 21 + 20 byte 뒤)를 바꾼다.
             header[21 + 20] = static_cast<uint8>(header[21 + 20] + 1);
             break;
+        case Broken::Truncated:
+            // 마지막 mip(1×1)을 값과 머리 모두에서 뺀다(mip 수 byte 17, 항목 20 byte).
+            (void)values.TryPopBack();
+            header[17] = static_cast<uint8>(header[17] - 1);
+            REQUIRE(header.TryResize(header.Size() - 20));
+            break;
         case Broken::Format:
             header[4] = static_cast<uint8>(PixelFormat::R16Unorm);
             break;
@@ -1110,11 +1146,15 @@ TEST(TextureCook_Nuggets) {
         CookOut out(scene.allocator);
         REQUIRE(scene.Cook(processor, out, nuggets.cache.Get()));
         CHECK(processor.Builds() == ++builds);
-        // 다시 만든 결과의 Put은 디스크의 다른 값과 부딪힌다(경고 — 쿠킹은 성공).
-        CHECK(HasWarning(out.warnings, AssetDiagnosticCode::NuggetConflict));
+        CHECK(!HasWarning(out.warnings, AssetDiagnosticCode::NuggetConflict) &&
+              nuggets.cache->Stats().rejected == 1);
         CHECK(out.sink.Bytes().Size() == base.sink.Bytes().Size() &&
               platform::MemoryEquals(out.sink.Bytes().Data(), base.sink.Bytes().Data(),
                                      base.sink.Bytes().Size()));
+        REQUIRE(nuggets.Reopen());
+        CookOut again(scene.allocator);
+        REQUIRE(scene.Cook(processor, again, nuggets.cache.Get()));
+        CHECK(processor.Builds() == builds);
     }
 }
 

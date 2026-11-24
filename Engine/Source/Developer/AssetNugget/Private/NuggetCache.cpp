@@ -952,6 +952,38 @@ NuggetCacheGetResult NuggetCache::GetSccMember(StringView bucket, const Sha256Di
     return Get(NuggetCacheGet{bucket, sccKey, ids.View(), policy});
 }
 
+Result<bool> NuggetCache::Reject(StringView bucket, const Sha256Digest& key,
+                                 const Sha256Digest& digest) noexcept {
+    if (!opened_ || !IsEnabled()) {
+        return Result<bool>::Success(false);
+    }
+
+    {
+        platform::LockGuard lock(mutex_);
+        const Pin* pin = pins_.Find(key);
+        if (pin != nullptr && (pin->state == PinState::Regenerated ||
+                               pin->state == PinState::Uncached || !(pin->digest == digest))) {
+            return Result<bool>::Success(false);
+        }
+
+        if (const SlotHandle* found = index_.Find(key); found != nullptr) {
+            const MemoryEntry& entry = entries_[*found];
+            if (entry.pinned || !(entry.digest == digest) || !(entry.bucket.View() == bucket)) {
+                return Result<bool>::Success(false);
+            }
+
+            Evict(*found);
+        }
+
+        if (pin != nullptr) {
+            (void)pins_.Erase(key);
+        }
+    }
+
+    Count(stats_.rejected);
+    return backend_->Remove(key);
+}
+
 NuggetCacheStats NuggetCache::Stats() const noexcept {
     NuggetCacheStats out;
     auto load = [](const uint64& counter) noexcept {
@@ -969,6 +1001,7 @@ NuggetCacheStats NuggetCache::Stats() const noexcept {
     out.conflicts = load(stats_.conflicts);
     out.dropped = load(stats_.dropped);
     out.uncachedKeys = load(stats_.uncachedKeys);
+    out.rejected = load(stats_.rejected);
     platform::LockGuard lock(mutex_);
     out.memoryBytes = memoryBytes_;
     out.pinnedBytes = pinnedBytes_;
