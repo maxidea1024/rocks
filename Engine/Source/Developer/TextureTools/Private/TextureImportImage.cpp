@@ -790,10 +790,7 @@ Result<bool> ExtractVolumeTiles(const image::DecodedImage& image, uint32 tileX, 
         const usize originY = usize{slice / columns} * tileY;
         for (uint32 y = 0; y < tileY; ++y) {
             const uint8* source = image.pixels.Data() + (originY + y) * imageRow + originX * texel;
-            for (usize byte = 0; byte < tileRow; ++byte) {
-                target[byte] = source[byte];
-            }
-
+            platform::MemoryCopy(target, source, tileRow);
             target += tileRow;
         }
     }

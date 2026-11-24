@@ -990,7 +990,22 @@ Result<int32> RunImportCommand(void* context, Span<const StringView> args, Comma
             }
 
             // 번역 옵션 대입은 명령 대입 뒤 번호로 붙인다(진단의 대입 번호가 명령 줄 대입과 겹치지
-            // 않게).
+            // 않게). 명령 줄 대입과 같은 최상위 필드면 사용법 오류다(우선순위가 모호하다).
+            const usize commandAssignments = parsed.assignments.Size();
+            for (const reflection_text::TextAssignment& option : translation.options) {
+                for (usize index = 0; index < commandAssignments; ++index) {
+                    const StringView path = parsed.assignments[index].path;
+                    usize end = path.ByteCount();
+                    for (usize at = 0; at < path.ByteCount() && end == path.ByteCount(); ++at) {
+                        end = path.Data()[at] == '.' || path.Data()[at] == '[' ? at : end;
+                    }
+
+                    if (EqualsIgnoringAsciiCase(path.SliceBytes(0, end), option.path)) {
+                        return Write(output, CommandletStream::Error, usage, 2);
+                    }
+                }
+            }
+
             for (reflection_text::TextAssignment option : translation.options) {
                 option.sourceIndex = static_cast<uint32>(parsed.assignments.Size());
                 if (auto pushed = parsed.assignments.TryPushBack(option); !pushed) {

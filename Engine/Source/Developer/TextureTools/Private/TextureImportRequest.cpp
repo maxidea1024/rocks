@@ -441,7 +441,9 @@ Result<bool> TranslateTextureImportArguments(void* state, Allocator& allocator,
             ++index;
         }
 
-        if (found == IndexNone) {
+        // None(DDS Cube)은 `--importer=texture_cube_file`로 고른다 — `--cube-layout=`은 배치
+        // 셋만(13절).
+        if (found == IndexNone || found == static_cast<usize>(TextureCubeLayout::None)) {
             return Result<bool>::Success(false);
         }
 

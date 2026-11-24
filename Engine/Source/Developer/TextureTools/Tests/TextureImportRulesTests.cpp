@@ -223,7 +223,7 @@ TEST(TextureImport_NormalizeSettings) {
     for (TextureCompressionSettings kind : offKinds) {
         reset();
         texture.compressionSettings = kind;
-        NormalizeTextureSettings(texture, false, {});
+        NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
         CHECK(texture.srgb == 0 && texture.useLegacyGamma == 0);
     }
 
@@ -232,19 +232,19 @@ TEST(TextureImport_NormalizeSettings) {
           TextureCompressionSettings::VectorDisplacementmap}) {
         reset();
         texture.compressionSettings = kind;
-        NormalizeTextureSettings(texture, false, {});
+        NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
         CHECK(texture.srgb == 1 && texture.useLegacyGamma == 1);
     }
 
     // LUT 그룹: NoMipmaps·SRGB off(원본이 있을 때만).
     reset();
     texture.lodGroup = TextureGroup::ColorLookupTable;
-    NormalizeTextureSettings(texture, false, {});
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
     CHECK(texture.mipGenSettings == TextureMipGenSettings::NoMipmaps && texture.srgb == 0);
     reset();
     texture.lodGroup = TextureGroup::ColorLookupTable;
     texture.source.format = TextureSourceFormat::Invalid;
-    NormalizeTextureSettings(texture, false, {});
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
     CHECK(texture.mipGenSettings == TextureMipGenSettings::FromTextureGroup && texture.srgb == 1);
 
     // 최대 크기: 0 이하 → 0, 300 → 512, 20000 → 16384. cinematic mip은 0 이상.
@@ -253,42 +253,49 @@ TEST(TextureImport_NormalizeSettings) {
         reset();
         texture.maxTextureSize = size[0];
         texture.numCinematicMipLevels = -3;
-        NormalizeTextureSettings(texture, false, {});
+        NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
         CHECK(texture.maxTextureSize == size[1] && texture.numCinematicMipLevels == 0);
     }
+
+    // Volume 상한은 2048이다(UE UVolumeTexture::GetMaximumDimension).
+    reset();
+    texture.maxTextureSize = 3000;
+    texture.resizeDuringBuildX = 4096;
+    NormalizeTextureSettings(texture, TextureDimension::Volume, {});
+    CHECK(texture.maxTextureSize == 2048 && texture.resizeDuringBuildX == 2048);
 
     // 크기 조정: LeaveExistingMips와 함께면 None, Resize는 Texture2D만, resize 값은 [0, 16384].
     reset();
     texture.mipGenSettings = TextureMipGenSettings::LeaveExistingMips;
     texture.powerOfTwoMode = TexturePowerOfTwoSetting::PadToPowerOfTwo;
-    NormalizeTextureSettings(texture, true, {});
+    NormalizeTextureSettings(texture, TextureDimension::Texture2D, {});
     CHECK(texture.powerOfTwoMode == TexturePowerOfTwoSetting::None);
     reset();
     texture.powerOfTwoMode = TexturePowerOfTwoSetting::ResizeToSpecificResolution;
-    NormalizeTextureSettings(texture, true, {});
+    NormalizeTextureSettings(texture, TextureDimension::Texture2D, {});
     CHECK(texture.powerOfTwoMode == TexturePowerOfTwoSetting::ResizeToSpecificResolution);
-    NormalizeTextureSettings(texture, false, {});
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
     CHECK(texture.powerOfTwoMode == TexturePowerOfTwoSetting::None);
     reset();
     texture.resizeDuringBuildX = -2;
     texture.resizeDuringBuildY = 99999;
-    NormalizeTextureSettings(texture, true, {});
+    NormalizeTextureSettings(texture, TextureDimension::Texture2D, {});
     CHECK(texture.resizeDuringBuildX == 0 && texture.resizeDuringBuildY == 16384);
 
     // LODGroup 8BitData·16BitData: 대입했을 때만(대소문자 무시) 압축·SRGB·필터·mip을 바꾼다.
     const StringView assigned[] = {"LODGROUP"};
     reset();
     texture.lodGroup = TextureGroup::EightBitData;
-    NormalizeTextureSettings(texture, false, {});
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, {});
     CHECK(texture.compressionSettings == TextureCompressionSettings::Default && texture.srgb == 1);
-    NormalizeTextureSettings(texture, false, assigned);
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, assigned);
     CHECK(texture.compressionSettings == TextureCompressionSettings::VectorDisplacementmap &&
           texture.srgb == 0 && texture.filter == TextureFilter::Default &&
           texture.mipGenSettings == TextureMipGenSettings::FromTextureGroup);
     reset();
     texture.lodGroup = TextureGroup::SixteenBitData;
     texture.mipGenSettings = TextureMipGenSettings::NoMipmaps;
-    NormalizeTextureSettings(texture, false, assigned);
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, assigned);
     CHECK(texture.compressionSettings == TextureCompressionSettings::HDR && texture.srgb == 0 &&
           texture.mipGenSettings == TextureMipGenSettings::FromTextureGroup);
 
@@ -296,8 +303,8 @@ TEST(TextureImport_NormalizeSettings) {
     reset();
     texture.compressionSettings = TextureCompressionSettings::Normalmap;
     texture.maxTextureSize = 300;
-    NormalizeTextureSettings(texture, false, assigned);
-    NormalizeTextureSettings(texture, false, assigned);
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, assigned);
+    NormalizeTextureSettings(texture, TextureDimension::TextureCube, assigned);
     CHECK(texture.srgb == 0 && texture.maxTextureSize == 512);
 }
 
@@ -509,6 +516,7 @@ TEST(TextureImport_TranslateArguments) {
         {{"array", "a"}, {"cube-layout", "Strip6"}, false, {}},
         {{"array", "a"}, none, false, "texture"},
         {{"cube-layout", "Diagonal"}, none, true, {}},
+        {{"cube-layout", "None"}, none, true, {}},
         {{"cube-layout", "Strip6"}, none, false, {}},
         {{"cube-layout", "Strip6"}, {"volume-tile", "2x2"}, true, {}},
         {{"volume-tile", "2x"}, none, true, {}},

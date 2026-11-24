@@ -9,8 +9,10 @@
 namespace rocks {
 namespace {
 
-// UE RHIMaximumDimension(GetMaximumDimensionOfNonVT 16384로 자른 값)이다.
+// UE RHIMaximumDimension(GetMaximumDimension을 GetMaximumDimensionOfNonVT 16384로 자른 값)이다 —
+// Volume은 UVolumeTexture::GetMaximumDimension(GMaxVolumeTextureDimensions 2048, 12.5절 차원 최대).
 constexpr int32 MaxTextureDimension = 16384;
+constexpr int32 MaxVolumeTextureDimension = 2048;
 
 constexpr StringView LodGroupField = "lodGroup";
 
@@ -33,8 +35,8 @@ int64 RoundUpToPowerOfTwo(int64 value) noexcept {
     return power;
 }
 
-int32 ClampDimension(int32 value) noexcept {
-    return value < 0 ? 0 : (value > MaxTextureDimension ? MaxTextureDimension : value);
+int32 ClampDimension(int32 value, int32 maximum) noexcept {
+    return value < 0 ? 0 : (value > maximum ? maximum : value);
 }
 
 Result<void> NormalizeTextureHook(const AssetTypeHookContext& context,
@@ -44,7 +46,12 @@ Result<void> NormalizeTextureHook(const AssetTypeHookContext& context,
         return Result<void>::Failure(lease.Error());
     }
 
-    const bool isTexture2D = lease.Value().IsA(TypeIdOf<Texture2D>());
+    const TextureDimension dimension =
+        lease.Value().IsA(TypeIdOf<Texture2D>())          ? TextureDimension::Texture2D
+        : lease.Value().IsA(TypeIdOf<VolumeTexture>())    ? TextureDimension::Volume
+        : lease.Value().IsA(TypeIdOf<TextureCube>())      ? TextureDimension::TextureCube
+        : lease.Value().IsA(TypeIdOf<TextureCubeArray>()) ? TextureDimension::TextureCubeArray
+                                                          : TextureDimension::Texture2DArray;
     auto borrowed = context.registry.ResolveForWrite<Texture>(context.access, context.object);
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
@@ -55,14 +62,17 @@ Result<void> NormalizeTextureHook(const AssetTypeHookContext& context,
         return Result<void>::Failure(value.Error());
     }
 
-    NormalizeTextureSettings(*value.Value(), isTexture2D, assignedFields);
+    NormalizeTextureSettings(*value.Value(), dimension, assignedFields);
     return Result<void>::Success();
 }
 
 } // namespace
 
-void NormalizeTextureSettings(Texture& texture, bool isTexture2D,
+void NormalizeTextureSettings(Texture& texture, TextureDimension dimension,
                               Span<const StringView> assignedFields) noexcept {
+    const bool isTexture2D = dimension == TextureDimension::Texture2D;
+    const int32 maximum =
+        dimension == TextureDimension::Volume ? MaxVolumeTextureDimension : MaxTextureDimension;
     // 1. LODGroup 대입(UE PostEditChangeProperty — 그 필드를 바꿨을 때만).
     bool lodGroupAssigned = false;
     for (StringView field : assignedFields) {
@@ -91,8 +101,8 @@ void NormalizeTextureSettings(Texture& texture, bool isTexture2D,
             texture.powerOfTwoMode = TexturePowerOfTwoSetting::None;
         }
 
-        texture.resizeDuringBuildX = ClampDimension(texture.resizeDuringBuildX);
-        texture.resizeDuringBuildY = ClampDimension(texture.resizeDuringBuildY);
+        texture.resizeDuringBuildX = ClampDimension(texture.resizeDuringBuildX, maximum);
+        texture.resizeDuringBuildY = ClampDimension(texture.resizeDuringBuildY, maximum);
         if (texture.lodGroup == TextureGroup::ColorLookupTable) {
             texture.mipGenSettings = TextureMipGenSettings::NoMipmaps;
             texture.srgb = 0;
@@ -115,8 +125,7 @@ void NormalizeTextureSettings(Texture& texture, bool isTexture2D,
         texture.maxTextureSize = 0;
     } else {
         const int64 rounded = RoundUpToPowerOfTwo(texture.maxTextureSize);
-        texture.maxTextureSize =
-            static_cast<int32>(rounded < MaxTextureDimension ? rounded : MaxTextureDimension);
+        texture.maxTextureSize = static_cast<int32>(rounded < maximum ? rounded : maximum);
     }
 
     if (texture.numCinematicMipLevels < 0) {

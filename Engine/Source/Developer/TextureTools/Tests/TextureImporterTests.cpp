@@ -307,6 +307,23 @@ TEST(TextureImport_CubeFaces) {
     REQUIRE(Run(TextureImportKind::Cube, grayRun));
     CHECK(grayRun.context.Imported()->source.format == TextureSourceFormat::G8 &&
           grayRun.context.bulk.Size() == 6 * 4);
+
+    // 감지하지 않는 DDS 면(회색 RGBA8)이 섞이면 PNG 회색 면도 바꾸지 않는다(모두 RGBA8 — 성공).
+    uint8 grayTexels[16] = {};
+    for (usize texel = 0; texel < 4; ++texel) {
+        grayTexels[texel * 4] = 9;
+        grayTexels[texel * 4 + 1] = 9;
+        grayTexels[texel * 4 + 2] = 9;
+        grayTexels[texel * 4 + 3] = 255;
+    }
+
+    const Array<uint8> ddsFace =
+        MakeDds(env.allocator, 2, 2, 1, DxgiRgba8, DdsTexture2D, 0, 1, grayTexels);
+    allGray[2] = Source("py", ddsFace, "py.dds");
+    Imported ddsMixed(env, allGray, nullptr);
+    REQUIRE(Run(TextureImportKind::Cube, ddsMixed));
+    CHECK(ddsMixed.context.Imported()->source.format == TextureSourceFormat::RGBA8 &&
+          ddsMixed.context.bulk.Size() == 6 * 16);
 }
 
 // 가변 역할: Array는 번호 순(byte 순 `slice:10` < `slice:2`를 수로 정렬), 빈틈·앞 0·중복은 원본

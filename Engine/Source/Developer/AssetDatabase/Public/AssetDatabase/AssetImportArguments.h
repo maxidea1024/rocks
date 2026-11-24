@@ -33,7 +33,9 @@ struct AssetImportTranslation {
     StringView importer{};
     // 원본이다(비면 명령이 준 원본 그대로). 상대 경로는 명령이 작업 디렉터리 기준으로 푼다.
     Array<AssetImportSourceInput> sources;
-    // 옵션 대입이다(명령의 설정·옵션 대입 앞에 둔다 — 값 텍스트는 리플렉션 표기).
+    // 옵션 대입이다(값 텍스트는 리플렉션 표기). 명령은 명령 줄 대입 뒤에 붙인다. 명령 줄 대입과
+    // 같은 최상위 필드(대소문자 무시)면 사용법 오류다(예 `--cube-layout=`과 `--cubeLayout=` — 어느
+    // 쪽이 이기는지 모호하지 않게).
     Array<reflection_text::TextAssignment> options;
     // 위 값이 가리키는 소유 문자열이다(옮겨도 byte가 그대로인 String — 원소를 지우지 않는다).
     Array<String> strings;

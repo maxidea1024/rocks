@@ -110,9 +110,10 @@ RegisterTextureTypeHooks(void* state, AssetTypeHookTable& table,
 
 // texture의 설정을 UE와 같은 규칙으로 정규화한다(12.12절 설정 정규화 — UE PostEditChangeProperty의
 // LODGroup 처리(assignedFields에 lodGroup이 있을 때), ValidateSettingsAfterImportOrEdit).
-// isTexture2D는 출력 클래스가 Texture2D인지다(Resize 규칙). 두 번 불러도 결과가 같다.
+// dimension은 출력 클래스의 차원이다(Resize는 Texture2D만, 크기 상한은 UE RHIMaximumDimension —
+// Volume 2048, 그 밖 16384, 12.5절 차원 최대). 두 번 불러도 결과가 같다.
 ROCKS_TEXTURETOOLS_API void
-NormalizeTextureSettings(Texture& texture, bool isTexture2D,
+NormalizeTextureSettings(Texture& texture, TextureDimension dimension,
                          Span<const StringView> assignedFields) noexcept;
 
 // 텍스처 임포트 요청이다(서비스 API 구조 — 에디터·도구가 명령과 같은 규칙으로 쓴다).

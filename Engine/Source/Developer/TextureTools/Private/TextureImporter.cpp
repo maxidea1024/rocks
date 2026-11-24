@@ -3,6 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Meta/GeneratedType.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/Memory.h>
 #include <Texture/Texture.generated.h>
 #include <Texture/TextureImportOptions.generated.h>
 #include <TextureTools/TextureImport.h>
@@ -422,17 +423,20 @@ Result<void> TextureImporter::Import(AssetImportContext& context) noexcept {
         }
     }
 
-    // 2. 회색 자동 감지(PSD·DDS 밖 — 대상 형식인 원본이 모두 회색일 때만 모두 바꾼다).
+    // 2. 회색 자동 감지(PSD·DDS 밖 — 대상 형식인 원본이 모두 회색일 때만 모두 바꾼다). 감지하지
+    // 않는 PSD·DDS 원본이 RGBA8·GA8이면 그 원본은 그대로 남으므로 바꾸지 않는다(일부만 G8이 되어
+    // 형식 일치에 걸리지 않게).
     bool convert = false;
     bool blocked = false;
     for (const DecodedSource& one : decoded) {
         const TextureSourceFormat format = one.result.image.format;
-        if (one.file == image::ImageFileFormat::Psd || one.file == image::ImageFileFormat::Dds ||
-            (format != TextureSourceFormat::RGBA8 && format != TextureSourceFormat::GA8)) {
+        if (format != TextureSourceFormat::RGBA8 && format != TextureSourceFormat::GA8) {
             continue;
         }
 
-        if (texture_import::IsGrayConvertible(one.result.image)) {
+        if (one.file == image::ImageFileFormat::Psd || one.file == image::ImageFileFormat::Dds) {
+            blocked = true;
+        } else if (texture_import::IsGrayConvertible(one.result.image)) {
             convert = true;
         } else {
             blocked = true;
@@ -490,10 +494,7 @@ Result<void> TextureImporter::Import(AssetImportContext& context) noexcept {
         usize offset = 0;
         for (const DecodedSource& one : decoded) {
             const Array<uint8>& pixels = one.result.image.pixels;
-            for (usize byte = 0; byte < pixels.Size(); ++byte) {
-                composed.pixels[offset + byte] = pixels[byte];
-            }
-
+            platform::MemoryCopy(composed.pixels.Data() + offset, pixels.Data(), pixels.Size());
             offset += pixels.Size();
         }
 
