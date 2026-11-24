@@ -81,14 +81,16 @@ public:
     }
 
     // 호스트가 넘긴 프레임 입력 상태다(없으면 null — 헤드리스·서버). 포인터는 호스트가 바꾸거나
-    // 지울 때까지 유효하며 게임 스레드에서 읽는다.
+    // 지울 때까지 유효하며 게임 스레드에서 읽는다. 바꾸는 것은
+    // GameInstance::SetLocalPlayerInput이다 (현재 PlayerController의 입력 원천도 함께 바꾼다).
     const input::InputState* Input() const noexcept {
         return input_;
     }
 
-    // 입력 상태 읽기 창을 건다(null이면 뗀다). state는 다시 바꿀 때까지 살아 있어야 한다.
-    void SetInput(const input::InputState* state) noexcept {
-        input_ = state;
+    // 현재 World의 PlayerController다(없으면 null — Login 전, Client·편집 World). 게임 코드가 그
+    // PlayerController를 직접 파괴하면 낡은 handle일 수 있다(World::HasActor로 확인한다).
+    ObjectHandle PlayerControllerHandle() const noexcept {
+        return playerController_;
     }
 
     // 소유 GameInstance의 handle이다(엔진 Registry).
@@ -110,8 +112,10 @@ public:
 
 private:
     friend class GameInstance;
+    friend class GameInstanceClient;
 
     ROCKS_NATIVE() ObjectHandle owner_;
+    ROCKS_NATIVE() ObjectHandle playerController_;
     ROCKS_NATIVE() const input::InputState* input_ = nullptr;
     ROCKS_NATIVE() LocalPlayerSubsystems subsystems_;
     ROCKS_NATIVE() int32 controllerId_ = 0;

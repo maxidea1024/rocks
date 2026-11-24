@@ -136,12 +136,19 @@ public:
     // --- LocalPlayer(18.4절) ---
 
     // LocalPlayer를 만들어 목록 끝에 더하고 LocalPlayer Subsystem을 초기화한다(UE CreateLocalPlayer
-    // → PlayerAdded). 오류: DedicatedServer는 InvalidArgument(UE도 거부), 같은 controllerId가
-    // 있으면 AlreadyExists, 생성·Subsystem 초기화 실패는 그 오류(만들지 않은 것으로 되돌린다).
+    // → PlayerAdded). spawnPlayerController이고 현재 World가 Playing이며 GameDirector가 있으면 바로
+    // Login한다(21.2절 8–9단계). 오류: DedicatedServer는 InvalidArgument(UE도 거부), 같은
+    // controllerId가 있으면 AlreadyExists, 생성·Subsystem 초기화·Login 실패는 그 오류(만들지 않은
+    // 것으로 되돌린다).
     //
     // 사용 예:
     //   auto second = CreateLocalPlayer(1);    // 두 번째 패드
-    Result<ObjectHandle> CreateLocalPlayer(int32 controllerId) noexcept;
+    Result<ObjectHandle> CreateLocalPlayer(int32 controllerId,
+                                           bool spawnPlayerController = true) noexcept;
+
+    // LocalPlayer의 입력 원천을 바꾸고 현재 PlayerController에도 건다(20.8절). input은 다시 바꿀
+    // 때까지 살아 있어야 한다(null이면 뗀다). 없는 handle은 NotFound다.
+    Result<void> SetLocalPlayerInput(ObjectHandle player, const input::InputState* input) noexcept;
 
     // LocalPlayer를 목록에서 빼고 LocalPlayer Subsystem을 역순으로 정리한다(UE RemoveLocalPlayer →
     // PlayerRemoved). 뒤 LocalPlayer의 Index가 앞당겨진다. 없는 handle은 NotFound다.
@@ -225,8 +232,14 @@ private:
     // 조건(19.3절)이 맞으면 GameDirector를 Spawn한다(InitGame → FinishSpawning). stage는 실패한
     // 단계 이름을 받는다.
     Result<void> SpawnDirector(World& world, const MapDesc& map, const char*& stage) noexcept;
-    // 현재 World를 reason으로 끝내고 파괴를 요청한다(없으면 아무것도 하지 않는다).
+    // 현재 World를 reason으로 끝내고 파괴를 요청한다(없으면 아무것도 하지 않는다). 21.3절 정리를
+    // 먼저 한다.
     void CloseCurrentWorld(EndPlayReason reason) noexcept;
+    // 21.3절: LocalPlayer마다 Spawn된 Pawn → PlayerController를 파괴 대기에 넣는다(EndPlay가 그
+    // 순서로 정리한다 — Logout 포함). 배치 Pawn은 남는다.
+    void CleanupPlayers(World& world) noexcept;
+    // LocalPlayer 하나를 World에 Login시킨다(Director가 없으면 아무것도 하지 않는다).
+    Result<void> LoginPlayer(World& world, ObjectHandle player) noexcept;
     // LocalPlayer를 모두 역순으로 지운다(종료·시작 실패 되돌림).
     void RemoveAllLocalPlayers() noexcept;
     Result<void> RemoveLocalPlayerAt(usize index) noexcept;

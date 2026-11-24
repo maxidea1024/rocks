@@ -18,7 +18,7 @@
 | `SetEnableState(node, state)` | 노드 활성 전환(6.5절) | 옛 값 |
 | `AddGraph`·`RemoveGraph`·`RenameGraph` | 하위 그래프 | 반대 |
 | `MoveNodesToGraph(ids, target)` | 노드와 그 사이 간선을 다른 그래프로 옮김(접기·펼치기의 기본 연산) | 반대 |
-| `MigrateNode(node, 새 버전 데이터)` | migration 결과 적용(GD13) | 옛 노드 데이터 |
+| (내부 op) migration | migration 결과 적용(GD13). 공개 명령이 아니라 `GraphMutator::Migrate`의 내부 op이고 undo 이력 밖이다(10.1절) | — |
 | `RemoveRetainedPin(node, key)` | 고아 핀 제거(간선 포함) | 복원 |
 
 도메인 명령과 화면 명령은 이 명령들의 목록이다.
@@ -26,7 +26,7 @@
 - 변환 노드를 끼워 연결: `AddNode`, `Connect`(앞), `Connect`(뒤)
 - 재경유 삽입: `AddNode`, `Disconnect`(원 간선), `Connect`(앞), `Connect`(뒤)
 - 삭제 후 다시 잇기(UE `DeleteAndReconnectNodes`): 통과할 간선 `Connect` 목록과 `RemoveNodes`
-- 접기: `AddGraph`, 하위 그래프의 `GraphInput`·`GraphOutput` `AddNode`, `MoveNodesToGraph`, 부모의 `CollapsedGraph` `AddNode`, 경계 간선 `Disconnect`·`Connect`들
+- 접기: 경계 간선 `Disconnect`들, `AddGraph`, 하위 그래프의 `Graph.Input`·`Graph.Output` `AddNode`, `MoveNodesToGraph`, 부모의 `Graph.Collapsed` `AddNode`, 바깥·안쪽 `Connect`들(10.1절 `BuildCollapseCommands`)
 
 ### 8.2 적용 절차
 
@@ -68,7 +68,7 @@
 | `NodeTypesChanged` | 등록·해제로 해석이 바뀐 NodeTypeId 목록(문서 바이트·revision 불변, 10절) |
 | `DocumentReloaded` | 문서 전체 교체(파일 다시 읽기 등) |
 
-묶음에는 `{AssetId, 새 문서 revision, semanticTouched, 원인(Edit·Undo·Redo·Cancel·Migration·Reload·Registry), interactive}`가 붙는다. `Cancel`은 bracket 취소로 되돌린 묶음이다.
+묶음에는 `{AssetId, 새 문서 revision, semanticTouched, 원인(Edit·Undo·Redo·Cancel·Migration·Reload·Registry), interactive}`가 붙는다. `Cancel`은 bracket 취소로 되돌린 묶음이다. Migration·Reload·Registry는 10.1절이다. 종류·버전이 바뀐 노드(migration)는 늘 `NodePinsChanged`를 낸다.
 
 - `semanticTouched`는 이 묶음이 의미 데이터(`GraphDocument`)를 건드렸는지 나타낸다. 재경유만 바뀐 경우도 참이다.
 - 구독자의 반응은 다음과 같다.

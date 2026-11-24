@@ -439,8 +439,18 @@ TEST(NodeGraph_MutatorSetNodeProperties) {
                bad.SetNodeProperties(SampleMain, node, record.View()) && Rejects(m, bad, reason);
     };
 
-    // 간선이 있는 동적 핀(Item_1)이 사라진다.
-    CHECK(rejects(SampleDynamic, TestDynamicStruct, 1, GraphCommandReason::PinsDropped));
+    // 간선이 있는 동적 핀(Item_1)이 사라지면 고아 핀이 된다(10.1절 핀 재정리). 상태를 남기지 않게
+    // 따로 만든 환경에서 본다.
+    {
+        MutatorEnv orphan(env);
+        REQUIRE(orphan.ready);
+        REQUIRE(FillRecord(bytes, TestDynamicStruct, 1, 0));
+        GraphCommandList shrink(env.allocator);
+        REQUIRE(shrink.SetNodeProperties(SampleMain, SampleDynamic, bytes.View()));
+        const Kind shrinkKinds[] = {Kind::NodePropertiesChanged, Kind::NodePinsChanged,
+                                    Kind::RetainedPinChanged};
+        CHECK(RoundTrip(orphan, shrink, Kinds(shrinkKinds), true));
+    }
     CHECK(rejects(SampleParamA, TestValueStruct, 1, GraphCommandReason::PropertiesSchema));
     CHECK(rejects(SampleDynamic, TestDynamicStruct, TestDynamicFailVersion,
                   GraphCommandReason::PropertiesSchema));
@@ -454,7 +464,12 @@ TEST(NodeGraph_MutatorSetNodeProperties) {
                              MakeEdge(SampleParamA, env.pinValue, SampleDynamic, env.pinItem1)));
     REQUIRE(value.SetInputDefault(SampleMain, SampleDynamic, env.pinItem1, bytes.View()));
     REQUIRE(m.Run(value));
-    CHECK(rejects(SampleDynamic, TestDynamicStruct, 1, GraphCommandReason::PinsDropped));
+    REQUIRE(FillRecord(bytes, TestDynamicStruct, 1, 0));
+    GraphCommandList shrinkValue(env.allocator);
+    REQUIRE(shrinkValue.SetNodeProperties(SampleMain, SampleDynamic, bytes.View()));
+    const Kind valueKinds[] = {Kind::NodePropertiesChanged, Kind::NodePinsChanged,
+                               Kind::InputDefaultChanged, Kind::RetainedPinChanged};
+    CHECK(RoundTrip(m, shrinkValue, Kinds(valueKinds), true));
 }
 
 TEST(NodeGraph_MutatorInputDefaults) {

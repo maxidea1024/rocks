@@ -1,12 +1,23 @@
+#include <Config/CVarCommand.h>
+#include <Config/ConfigContext.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/ScopeExit.h>
+#include <Gameplay/Controller.generated.h>
 #include <Gameplay/GameDirector.generated.h>
 #include <Gameplay/GameDirector.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstanceClient.h>
+#include <Gameplay/GameState.generated.h>
+#include <Gameplay/GameState.h>
 #include <Gameplay/GameplayWorldSubsystem.h>
+#include <Gameplay/Pawn.generated.h>
+#include <Gameplay/Pawn.h>
+#include <Gameplay/PlayerController.generated.h>
+#include <Gameplay/PlayerController.h>
 #include <Gameplay/LocalPlayer.generated.h>
 #include <Platform/Fatal.h>
+#include <World/DiagnosticText.h>
+#include <World/WorldLog.h>
 
 // GameInstance·GameInstanceClient다(Docs/Design/EngineRuntime 18절).
 namespace rocks {
@@ -19,6 +30,44 @@ void LogOpenFailure(StringView map, const char* stage, ErrorCode error) noexcept
                ErrorCodeName(error));
 }
 
+Result<void> RunDumpFramework(cvar::CommandContext& context) noexcept;
+
+constinit cvar::ConsoleCommand GameDumpFrameworkCommand =
+    cvar::Command<&RunDumpFramework>("game.dumpframework")
+        .Help("Print the gameplay framework: game instance, local players, controllers, pawns, "
+              "director and game state");
+
+Result<void> RunDumpFramework(cvar::CommandContext& context) noexcept {
+    GameInstanceClient* client = context.Target<GameInstanceClient>();
+    if (client == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    String text(context.GetAllocator());
+    if (auto dumped = client->DumpFramework(text); !dumped) {
+        return dumped;
+    }
+
+    Log::Info(LogGameplay, "{Dump}", text.View());
+    return context.Write(text.View());
+}
+
+// "타입#slot" 이름표다.
+void AppendLabel(World& world, ObjectHandle object, FixedStringBuilder& out) noexcept {
+    if (object.IsNull()) {
+        (void)out.TryAppend("none");
+        return;
+    }
+
+    auto named = world.With<Object>(object, [&](Object& value) noexcept {
+        const TypeLease type = value.GetType();
+        (void)out.TryAppendFormat("{}#{}", type.Name(), object.slot);
+    });
+    if (!named) {
+        (void)out.TryAppendFormat("stale#{}", object.slot);
+    }
+}
+
 } // namespace
 
 GameInstance::GameInstance(Allocator& allocator) noexcept
@@ -27,7 +76,8 @@ GameInstance::GameInstance(Allocator& allocator) noexcept
 
 GameInstance::~GameInstance() noexcept = default;
 
-Result<ObjectHandle> GameInstance::CreateLocalPlayer(int32 controllerId) noexcept {
+Result<ObjectHandle> GameInstance::CreateLocalPlayer(int32 controllerId,
+                                                     bool spawnPlayerController) noexcept {
     // 전용 서버에는 LocalPlayer가 없다(UE GameInstance.cpp:854–861).
     if (IsDedicatedServer()) {
         return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
@@ -79,7 +129,114 @@ Result<ObjectHandle> GameInstance::CreateLocalPlayer(int32 controllerId) noexcep
         return Result<ObjectHandle>::Failure(initialized.Error());
     }
 
+    // 게임 중 추가면 바로 PlayerController를 만든다(UE SpawnPlayActor). 실패하면 LocalPlayer도
+    // 되돌린다(UE RemoveLocalPlayer).
+    if (spawnPlayerController && currentWorld_ != nullptr &&
+        currentWorld_->State() == WorldState::Playing) {
+        if (auto logged = LoginPlayer(*currentWorld_, handle); !logged) {
+            auto removed = RemoveLocalPlayer(handle);
+            (void)removed;
+            return Result<ObjectHandle>::Failure(logged.Error());
+        }
+    }
+
     return Result<ObjectHandle>::Success(handle);
+}
+
+Result<void> GameInstance::SetLocalPlayerInput(ObjectHandle player,
+                                               const input::InputState* input) noexcept {
+    ObjectHandle controller;
+    bool found = false;
+    for (ObjectHandle existing : localPlayers_.View()) {
+        found = found || existing == player;
+    }
+
+    if (!found) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    auto set = WithLocalPlayer(player, [&](LocalPlayer& local) noexcept {
+        local.input_ = input;
+        controller = local.playerController_;
+    });
+    if (!set) {
+        return set;
+    }
+
+    if (currentWorld_ != nullptr && !controller.IsNull() && currentWorld_->HasActor(controller)) {
+        auto changed = currentWorld_->With<PlayerController>(
+            controller, [input](PlayerController& value) noexcept { value.SetInputSource(input); });
+        (void)changed;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> GameInstance::LoginPlayer(World& world, ObjectHandle player) noexcept {
+    auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
+    if (gameplay == nullptr || gameplay->Director().IsNull()) {
+        return Result<void>::Success();
+    }
+
+    const ObjectHandle director = gameplay->Director();
+    const input::InputState* input = nullptr;
+    auto read =
+        WithLocalPlayer(player, [&input](LocalPlayer& local) noexcept { input = local.input_; });
+    if (!read) {
+        return read;
+    }
+
+    // 21.2절 8–9단계: Login → SetPlayer(양방향) → PostLogin(→ RestartPlayer → Possess).
+    auto controller = world.With<GameDirector>(
+        director, [player](GameDirector& value) noexcept { return value.Login(player); });
+    if (!controller) {
+        return Result<void>::Failure(controller.Error());
+    }
+
+    const ObjectHandle created = controller.Value();
+    auto linked =
+        world.With<PlayerController>(created, [player, input](PlayerController& value) noexcept {
+            value.SetPlayer(player, input);
+        });
+    if (!linked) {
+        return linked;
+    }
+
+    auto noted = WithLocalPlayer(
+        player, [created](LocalPlayer& local) noexcept { local.playerController_ = created; });
+    (void)noted;
+    return world.With<GameDirector>(
+        director, [created](GameDirector& value) noexcept { value.PostLogin(created); });
+}
+
+void GameInstance::CleanupPlayers(World& world) noexcept {
+    // 21.3절: Pawn을 먼저, 그다음 PlayerController를 대기에 넣는다(UE LoadMap — UnrealEngine.cpp
+    // :16245–16250). EndPlay가 넣은 순서대로 정리하므로 Logout이 PlayerController EndPlay 전에
+    // 돈다.
+    for (ObjectHandle player : localPlayers_.View()) {
+        ObjectHandle controller;
+        auto read = WithLocalPlayer(player, [&controller](LocalPlayer& local) noexcept {
+            controller = local.playerController_;
+            local.playerController_ = {};
+        });
+        if (!read || controller.IsNull() || !world.HasActor(controller)) {
+            continue;
+        }
+
+        auto pawn = world.With<Controller>(
+            controller, [](Controller& value) noexcept { return value.PawnHandle(); });
+        if (pawn && !pawn.Value().IsNull()) {
+            auto placed = world.With<Pawn>(
+                pawn.Value(), [](Pawn& value) noexcept { return value.IsPlacedInWorld(); });
+            if (placed && !placed.Value()) {
+                auto destroyed = world.DestroyActor(pawn.Value());
+                (void)destroyed;
+            }
+        }
+
+        auto destroyed = world.DestroyActor(controller);
+        (void)destroyed;
+    }
 }
 
 Result<void> GameInstance::RemoveLocalPlayer(ObjectHandle player) noexcept {
@@ -98,6 +255,23 @@ Result<void> GameInstance::RemoveLocalPlayerAt(usize index) noexcept {
     // 중에도 목록·Index는 그대로다.
     ObjectRegistry& objects = engine_->Objects();
     ObjectAccessScope scope(objects.OwnerAccess());
+    // 그 PlayerController를 끊고 파괴한다(UE RemoveLocalPlayer — 끊긴 PlayerController는 Pawn도
+    // 지운다, 20.5절).
+    ObjectHandle controller;
+    auto unlinked =
+        WithLocalPlayer(localPlayers_.View()[index], [&controller](LocalPlayer& player) noexcept {
+            controller = player.playerController_;
+            player.playerController_ = {};
+        });
+    (void)unlinked;
+    if (currentWorld_ != nullptr && !controller.IsNull() && currentWorld_->HasActor(controller)) {
+        auto cleared = currentWorld_->With<PlayerController>(
+            controller, [](PlayerController& value) noexcept { value.ClearPlayer(); });
+        (void)cleared;
+        auto destroyed = currentWorld_->DestroyActor(controller);
+        (void)destroyed;
+    }
+
     auto removed = WithLocalPlayer(localPlayers_.View()[index], [](LocalPlayer& player) noexcept {
         player.subsystems_.Deinitialize(player);
     });
@@ -229,8 +403,9 @@ void GameInstance::CloseCurrentWorld(EndPlayReason reason) noexcept {
 
     World* previous = currentWorld_;
     currentWorld_ = nullptr;
-    // PlayerController·Pawn 정리(21.3절)는 S12가 이 앞에 붙인다. EndPlay가 Actor를 정리하고
-    // OnWorldEndPlay를 부른다. 파괴는 World Tick 밖이므로 즉시다(Engine::DestroyWorld 규칙).
+    // 21.3절 정리 → EndPlay(대기 순서대로 Pawn → PlayerController → 나머지 → OnWorldEndPlay).
+    // 파괴는 World Tick 밖이므로 즉시다(Engine::DestroyWorld 규칙).
+    CleanupPlayers(*previous);
     auto ended = previous->EndPlay(reason);
     (void)ended;
     auto destroyed = engine_->DestroyWorld(previous, reason);
@@ -267,6 +442,12 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
         return Result<void>::Failure(error);
     };
 
+    // 권한(Client가 아니면)을 알린다. GameplayWorldSubsystem은 Preview·Inactive World에는 없다.
+    auto* gameplay = world->GetSubsystem<GameplayWorldSubsystem>();
+    if (gameplay != nullptr) {
+        gameplay->hasAuthority_ = netMode_ != NetMode::Client;
+    }
+
     // GameDirector는 배치 Actor보다 먼저다(21.2절 6단계).
     const char* stage = "Director";
     if (auto directed = SpawnDirector(*world, map, stage); !directed) {
@@ -274,19 +455,67 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     }
 
     if (map.populate != nullptr) {
-        if (auto populated = map.populate(*world, map.populateContext); !populated) {
+        // 이 동안 Spawn한 Pawn은 배치다(20.8절).
+        if (gameplay != nullptr) {
+            gameplay->populating_ = true;
+        }
+
+        auto populated = map.populate(*world, map.populateContext);
+        if (gameplay != nullptr) {
+            gameplay->populating_ = false;
+        }
+
+        if (!populated) {
             return fail("Populate", populated.Error());
+        }
+    }
+
+    // 21.2절 8–9단계: LocalPlayer마다 Login(Director가 있을 때만). 사용자 hook이 LocalPlayer를
+    // 더하거나 뺄 수 있으므로 handle을 복사해 돌고, 그 동안 현재 World로 둬 RemoveLocalPlayer가
+    // PlayerController를 지우게 한다. 실패하면 현재 World와 PlayerController 연결을 되돌린다.
+    currentWorld_ = world;
+    auto unwind = [&](const char* failedStage, ErrorCode error) noexcept {
+        currentWorld_ = nullptr;
+        for (ObjectHandle player : localPlayers_.View()) {
+            auto cleared = WithLocalPlayer(
+                player, [](LocalPlayer& local) noexcept { local.playerController_ = {}; });
+            (void)cleared;
+        }
+
+        return fail(failedStage, error);
+    };
+    Array<ObjectHandle> players(engine_->GetAllocator());
+    if (auto copied = players.TryReserve(LocalPlayerCount()); !copied) {
+        return unwind("Login", copied.Error());
+    }
+
+    for (ObjectHandle player : localPlayers_.View()) {
+        auto pushed = players.TryPushBack(player);
+        (void)pushed;
+    }
+
+    for (ObjectHandle player : players) {
+        bool present = false;
+        for (ObjectHandle current : localPlayers_.View()) {
+            present = present || current == player;
+        }
+
+        if (!present) {
+            continue;
+        }
+
+        if (auto logged = LoginPlayer(*world, player); !logged) {
+            return unwind("Login", logged.Error());
         }
     }
 
     // 편집·비활성 World는 시작하지 않는다(16.4절).
     if (map.kind != WorldKind::Editor && map.kind != WorldKind::Inactive) {
         if (auto begun = world->BeginPlay(); !begun) {
-            return fail("BeginPlay", begun.Error());
+            return unwind("BeginPlay", begun.Error());
         }
     }
 
-    currentWorld_ = world;
     Log::Info(LogGameplay, "Opened world {Map}", map.name);
     return Result<void>::Success();
 }
@@ -307,6 +536,9 @@ Result<void> GameInstance::SpawnDirector(World& world, const MapDesc& map,
     type = OverrideDirectorType(type);
     auto derived = engine_->Types().IsA(type, ObjectTypeIdOf<GameDirector>());
     if (!derived || !derived.Value()) {
+        Log::Error(LogGameplay,
+                   "OpenWorld {Map} chose a director type that is not a GameDirector ({Code})",
+                   map.name, DiagInvalidDirectorType);
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -361,8 +593,7 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     }
 
     if (listed && !hasGameplay) {
-        listed = services_.worldSubsystems.TryPushBack(
-            MakeSubsystemType<WorldSubsystem, GameplayWorldSubsystem>("Gameplay"));
+        listed = services_.worldSubsystems.TryPushBack(GameplayWorldSubsystem::Type());
     }
 
     if (!listed) {
@@ -383,6 +614,7 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     }
 
     instance_ = Move(created.Value());
+    BindConsoleCommands(engine);
     // 실패한 단계까지 한 것을 역순으로 되돌린다(엔진 초기화 실패 경로라 OnEngineShutdown은 없다).
     auto started = WithInstance([&](GameInstance& game) noexcept -> Result<void> {
         game.engine_ = &engine;
@@ -409,8 +641,8 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
             if (skipped.reason == SubsystemSkipReason::MissingDependency) {
                 Log::Warning(LogGameplay,
                              "Skipped game instance subsystem {Subsystem}: dependency "
-                             "{Dependency} was not created",
-                             skipped.name, skipped.missing);
+                             "{Dependency} was not created ({Code})",
+                             skipped.name, skipped.missing, DiagSubsystemSkippedMissingDependency);
             }
         }
 
@@ -436,6 +668,7 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
         return Result<void>::Success();
     });
     if (!started) {
+        UnbindConsoleCommands();
         instance_.Reset();
         engine_ = nullptr;
         return started;
@@ -476,6 +709,161 @@ void GameInstanceClient::OnWorldDestroyed(Engine&, World& world) noexcept {
     (void)cleared;
 }
 
+void GameInstanceClient::BindConsoleCommands(Engine& engine) noexcept {
+    config::ConfigContext* settings = engine.Settings();
+    if (settings == nullptr) {
+        return;
+    }
+
+    // 영역 "game"은 기본 표에 있다(Config ConsoleSettings.h).
+    auto registered = settings->Register(GameDumpFrameworkCommand);
+    if (registered) {
+        registered = settings->BindCommand(GameDumpFrameworkCommand, *this);
+    }
+
+    if (!registered) {
+        Log::Warning(LogGameplay, "Gameplay diagnostic console command is unavailable: {Error}",
+                     ErrorCodeName(registered.Error()));
+        return;
+    }
+
+    console_ = settings;
+}
+
+void GameInstanceClient::UnbindConsoleCommands() noexcept {
+    if (console_ != nullptr) {
+        auto unbound = console_->UnbindCommand(GameDumpFrameworkCommand, *this);
+        (void)unbound;
+        console_ = nullptr;
+    }
+}
+
+Result<void> GameInstanceClient::DescribeSubsystems(Engine&, String& out) noexcept {
+    if (!instance_.IsValid()) {
+        return Result<void>::Success();
+    }
+
+    Result<void> written = services_.subsystems.Describe(out, "GameInstance");
+    auto players = WithInstance([&](GameInstance& game) noexcept {
+        for (uint32 index = 0; written && index < game.LocalPlayerCount(); ++index) {
+            char storage[64];
+            FixedStringBuilder layer{Span<char>(storage)};
+            (void)layer.TryAppendFormat("LocalPlayer {}", index);
+            auto described =
+                game.WithLocalPlayer(game.LocalPlayerAt(index), [&](LocalPlayer& player) noexcept {
+                    return player.subsystems_.Describe(out, layer.View());
+                });
+            // 낡은 LocalPlayer는 건너뛰고 쓰기 실패(할당)만 전체 실패로 돌린다.
+            if (!described && described.Error() == ErrorCode::OutOfMemory) {
+                written = Move(described);
+            }
+        }
+    });
+    if (!players) {
+        return players;
+    }
+
+    return written;
+}
+
+Result<void> GameInstanceClient::DumpFramework(String& out) noexcept {
+    return WithInstance([&out](GameInstance& game) noexcept -> Result<void> {
+        World* world = game.CurrentWorld();
+        const TypeLease type = game.GetType();
+        Result<void> written = AppendFormatted(
+            out, "GameInstance {} netMode={} world={} localPlayers={}\n", type.Name(),
+            NetModeName(game.GetNetMode()), world != nullptr ? world->Name() : StringView("none"),
+            game.LocalPlayerCount());
+        for (uint32 index = 0; written && index < game.LocalPlayerCount(); ++index) {
+            ObjectHandle controller;
+            int32 controllerId = 0;
+            auto read =
+                game.WithLocalPlayer(game.LocalPlayerAt(index), [&](LocalPlayer& player) noexcept {
+                    controller = player.PlayerControllerHandle();
+                    controllerId = player.ControllerId();
+                });
+            (void)read;
+            written =
+                AppendFormatted(out, "  LocalPlayer {} controllerId={}\n", index, controllerId);
+            if (!written || world == nullptr || controller.IsNull() ||
+                !world->HasActor(controller)) {
+                continue;
+            }
+
+            auto described =
+                world->With<PlayerController>(controller, [&](PlayerController& pc) noexcept {
+                    char pcName[96];
+                    char pawnName[96];
+                    char stateName[96];
+                    char targetName[96];
+                    FixedStringBuilder pcLabel{Span<char>(pcName)};
+                    FixedStringBuilder pawnLabel{Span<char>(pawnName)};
+                    FixedStringBuilder stateLabel{Span<char>(stateName)};
+                    FixedStringBuilder targetLabel{Span<char>(targetName)};
+                    AppendLabel(*world, controller, pcLabel);
+                    AppendLabel(*world, pc.PawnHandle(), pawnLabel);
+                    AppendLabel(*world, pc.PlayerStateHandle(), stateLabel);
+                    auto line = AppendFormatted(
+                        out, "    PlayerController {} state={} pawn={} playerState={}\n",
+                        pcLabel.View(), ControllerStateName(pc.State()), pawnLabel.View(),
+                        stateLabel.View());
+                    if (!line) {
+                        return line;
+                    }
+
+                    auto camera = world->With<CameraDirector>(
+                        pc.CameraDirectorHandle(), [&](CameraDirector& value) noexcept {
+                            AppendLabel(*world, value.ViewTarget(), targetLabel);
+                            const CameraView& view = value.View();
+                            return AppendFormatted(
+                                out,
+                                "      CameraDirector viewTarget={} location=({}, {}, {}) "
+                                "rotation=({}, {}, {}) fov={}\n",
+                                targetLabel.View(), view.location.x, view.location.y,
+                                view.location.z, view.rotation.pitch, view.rotation.yaw,
+                                view.rotation.roll, view.fov);
+                        });
+                    // 없는 CameraDirector(낡은 handle)는 건너뛰고 쓰기 실패(할당)만 돌려준다.
+                    return !camera && camera.Error() == ErrorCode::OutOfMemory
+                               ? Result<void>::Failure(ErrorCode::OutOfMemory)
+                               : Result<void>::Success();
+                });
+            if (!described && described.Error() == ErrorCode::OutOfMemory) {
+                written = Move(described);
+            }
+        }
+
+        if (!written || world == nullptr) {
+            return Move(written);
+        }
+
+        auto* gameplay = world->GetSubsystem<GameplayWorldSubsystem>();
+        if (gameplay == nullptr) {
+            return AppendFormatted(out, "  World {} has no gameplay subsystem\n", world->Name());
+        }
+
+        char directorName[96];
+        FixedStringBuilder directorLabel{Span<char>(directorName)};
+        AppendLabel(*world, gameplay->Director(), directorLabel);
+        const GameplayStats stats = gameplay->Stats(*world);
+        written = AppendFormatted(out,
+                                  "  GameDirector {} controllers={} playerControllers={} pawns={} "
+                                  "playerStates={}\n",
+                                  directorLabel.View(), stats.controllers, stats.playerControllers,
+                                  stats.pawns, stats.playerStates);
+        if (!written || gameplay->GameStateHandle().IsNull()) {
+            return Move(written);
+        }
+
+        return world->With<GameState>(gameplay->GameStateHandle(), [&](GameState& state) noexcept {
+            return AppendFormatted(out,
+                                   "  GameState playerStates={} hasBegunPlay={} matchStarted={}\n",
+                                   static_cast<uint32>(state.PlayerStates().Size()),
+                                   state.HasBegunPlay(), state.HasMatchStarted());
+        });
+    });
+}
+
 void GameInstanceClient::OnEngineTick(Engine&) noexcept {
     auto ran = WithInstance([](GameInstance& game) noexcept {
         game.inEngineTick_ = true;
@@ -498,6 +886,8 @@ void GameInstanceClient::OnEngineShutdown(Engine&) noexcept {
         // 3) LocalPlayer 역순 제거 → 4) GameInstance Subsystem 정리(UE GameEngine.cpp:1374–1381,
         // GameInstance.cpp:147–177).
         if (game.currentWorld_ != nullptr) {
+            // 21.3절: Logout이 GameDirector가 살아 있을 때 돌도록 EndPlay(Quit) 전에 정리한다.
+            game.CleanupPlayers(*game.currentWorld_);
             auto ended = game.currentWorld_->EndPlay(EndPlayReason::Quit);
             (void)ended;
             game.currentWorld_ = nullptr;
@@ -511,6 +901,7 @@ void GameInstanceClient::OnEngineShutdown(Engine&) noexcept {
     });
     (void)stopped;
     // 5) 루트를 반환한다. 객체는 엔진 Registry 최종 GC가 회수한다.
+    UnbindConsoleCommands();
     instance_.Reset();
     engine_ = nullptr;
     Log::Info(LogGameplay, "GameInstance shut down");

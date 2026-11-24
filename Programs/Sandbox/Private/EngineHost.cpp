@@ -1,6 +1,7 @@
 #include "EngineHost.h"
 
 #include "GraphicsDeviceTraits.h"
+#include "SandboxGame.h"
 
 #include <Base/PlacementNew.h>
 #include <Core/Containers/Array.h>
@@ -82,26 +83,29 @@ void RegisterHostService(HostServices& services, Service& service) noexcept {
     }
 }
 
-// 엔진을 World 하나로 frames만큼 돌린다. 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지
-// 않는다).
+// 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 frames만큼
+// 돌린다(Docs/Design/EngineRuntime 21.5절). 실패 원인은 엔진이 한 번 기록한다(호스트는 다시
+// 기록하지 않는다).
 int RunEngine(Allocator& allocator, uint64 frames, uint64 requestTerminationAtFrame,
               config::ConfigContext& settings, ModuleLoader& modules) noexcept {
     TerminationRequestBridge bridge(requestTerminationAtFrame);
+    SandboxGame game;
+    GameInstanceClient client(allocator, game.config);
     EngineConfig config;
     config.hooks = &bridge;
+    config.client = &client;
     config.modules = &modules;
     config.maxFrames = frames;
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = HeadlessFrameSeconds;
+    config.registerTypes = &RegisterSandboxTypes;
     Engine engine(allocator);
     if (!engine.Initialize(config)) {
         return 1;
     }
 
     int exitCode = 0;
-    WorldCreateDesc world;
-    world.name = "Main";
-    if (!engine.CreateWorld(world) || !engine.Run()) {
+    if (!engine.Run()) {
         exitCode = 1;
     }
 
@@ -505,6 +509,8 @@ uint32 RunEngineHostSelfTest() noexcept {
     const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
     const char* const expected[] = {
         "[Info][Engine] Engine initialized with ",
+        "[Info][Gameplay] Opened world Main",
+        "[Info][Sandbox.Game] Pawn possessed by the local player",
         "[Info][Engine] Engine run finished after 3 frames: MaxFrames",
         "[Info][Engine] Engine shutting down with 1 worlds after 3 frames",
         "[Info][Engine] Engine shut down"};

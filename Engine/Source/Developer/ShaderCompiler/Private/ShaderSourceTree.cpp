@@ -10,142 +10,6 @@ namespace rocks::shader {
 
 namespace source_tree_detail {
 
-constexpr StringView EngineRootName("Engine");
-constexpr StringView ProjectRootName("Project");
-constexpr StringView PluginRootName("Plugin");
-constexpr StringView EntryExtension("rsf");
-constexpr StringView IncludeExtension("rsh");
-constexpr StringView SharedExtension("h");
-
-// 가상 경로 성분 문자다(ASCII [A-Za-z0-9_.-]).
-bool IsVirtualPathCharacter(char value) noexcept {
-    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
-           (value >= '0' && value <= '9') || value == '_' || value == '.' || value == '-';
-}
-
-// 플러그인 이름 문자다(가상 디렉터리에 '.'이 없어야 하므로 '.'를 뺀다).
-bool IsPluginNameCharacter(char value) noexcept {
-    return value != '.' && IsVirtualPathCharacter(value);
-}
-
-bool IsPluginName(StringView name) noexcept {
-    if (name.IsEmpty() || name.ByteCount() > MaxShaderPluginNameBytes) {
-        return false;
-    }
-
-    for (const char value : name) {
-        if (!IsPluginNameCharacter(value)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// '/' 뒤의 다음 성분을 잘라 낸다. cursor는 성분 시작 위치이며 다음 성분 시작으로 옮긴다.
-StringView NextComponent(StringView path, usize& cursor) noexcept {
-    const usize start = cursor;
-    while (cursor < path.ByteCount() && path.Data()[cursor] != '/') {
-        ++cursor;
-    }
-
-    const StringView component(path.Data() + start, cursor - start);
-    if (cursor < path.ByteCount()) {
-        ++cursor;
-    }
-
-    return component;
-}
-
-// 확장자(마지막 '.' 뒤)다. '.'이 없으면 빈 값이다.
-StringView ExtensionOf(StringView fileName) noexcept {
-    for (usize index = fileName.ByteCount(); index > 0; --index) {
-        if (fileName.Data()[index - 1] == '.') {
-            return StringView(fileName.Data() + index, fileName.ByteCount() - index);
-        }
-    }
-
-    return StringView();
-}
-
-// 가상 경로의 루트 성분 수(/Engine·/Project는 1, /Plugin/<이름>은 2)다. 잘못된 루트면 0이다.
-usize RootComponentCount(StringView first, StringView second) noexcept {
-    if (first == EngineRootName || first == ProjectRootName) {
-        return 1;
-    }
-
-    if (first == PluginRootName && IsPluginName(second)) {
-        return 2;
-    }
-
-    return 0;
-}
-
-// 가상 경로를 성분으로 나눈다. 성분은 MaxShaderVirtualPathBytes / 2개를 넘을 수 없다.
-constexpr usize MaxVirtualPathComponents = MaxShaderVirtualPathBytes / 2;
-
-struct VirtualPathParts {
-    StringView components[MaxVirtualPathComponents];
-    usize count = 0;
-    usize rootCount = 0;
-};
-
-ShaderSourceStatus SplitVirtualPath(StringView path, VirtualPathParts& parts) noexcept {
-    using source_detail::MakeSourceStatus;
-    if (path.IsEmpty() || path.Data()[0] != '/') {
-        return MakeSourceStatus(ShaderSourceError::InvalidPath, path, 0,
-                                "virtual shader path must start with '/'");
-    }
-
-    if (path.ByteCount() >= MaxShaderVirtualPathBytes) {
-        return MakeSourceStatus(ShaderSourceError::InvalidPath, StringView(), 0,
-                                "virtual shader path is too long");
-    }
-
-    usize cursor = 1;
-    while (true) {
-        const StringView component = NextComponent(path, cursor);
-        if (component.IsEmpty() || component == StringView(".") || component == StringView("..")) {
-            return MakeSourceStatus(ShaderSourceError::InvalidPath, path, 0,
-                                    "virtual shader path has an empty, '.' or '..' component");
-        }
-
-        for (const char value : component) {
-            if (!IsVirtualPathCharacter(value)) {
-                return MakeSourceStatus(
-                    ShaderSourceError::InvalidPath, path, 0,
-                    "virtual shader path characters are limited to [A-Za-z0-9_.-] and '/'");
-            }
-        }
-
-        parts.components[parts.count++] = component;
-        if (cursor >= path.ByteCount()) {
-            // 끝 '/'는 빈 성분이다.
-            if (path.Data()[path.ByteCount() - 1] == '/') {
-                return MakeSourceStatus(ShaderSourceError::InvalidPath, path, 0,
-                                        "virtual shader path must name a file");
-            }
-
-            break;
-        }
-    }
-
-    parts.rootCount = RootComponentCount(parts.components[0],
-                                         parts.count > 1 ? parts.components[1] : StringView());
-    if (parts.rootCount == 0) {
-        return MakeSourceStatus(
-            ShaderSourceError::InvalidPath, path, 0,
-            "virtual shader path must be under /Engine, /Project or /Plugin/<name>");
-    }
-
-    if (parts.count <= parts.rootCount) {
-        return MakeSourceStatus(ShaderSourceError::InvalidPath, path, 0,
-                                "virtual shader path must name a file under its root");
-    }
-
-    return ShaderSourceStatus{};
-}
-
 // 경로가 비었는지(디렉터리 아닌 파일이 없는지)와 관계없이 실제 디렉터리가 절대 경로인가.
 bool IsAbsoluteDirectory(StringView path) noexcept {
     const Result<PathRoot> root = Path::Root(path);
@@ -286,48 +150,27 @@ const char* ShaderSourceErrorName(ShaderSourceError code) noexcept {
 }
 
 ShaderSourceStatus ValidateShaderVirtualPath(StringView path) noexcept {
-    using namespace source_tree_detail;
-    VirtualPathParts parts;
-    if (const ShaderSourceStatus split = SplitVirtualPath(path, parts); !split) {
-        return split;
+    ShaderVirtualPathInfo info;
+    const ShaderVirtualPathCheck checked = CheckShaderVirtualPath(path, info);
+    if (checked) {
+        return ShaderSourceStatus{};
     }
 
-    const StringView fileName = parts.components[parts.count - 1];
-    const StringView extension = ExtensionOf(fileName);
-    const bool shared = parts.count > parts.rootCount + 1 &&
-                        parts.components[parts.rootCount] == StringView(SharedShaderDirectoryName);
-    if (shared) {
-        if (extension != SharedExtension) {
-            return source_detail::MakeSourceStatus(
-                ShaderSourceError::InvalidExtension, path, 0,
-                "only .h files are allowed under a Shared shader directory");
-        }
-    } else if (extension != EntryExtension && extension != IncludeExtension) {
-        return source_detail::MakeSourceStatus(ShaderSourceError::InvalidExtension, path, 0,
-                                               "shader source files must end with .rsf or .rsh");
-    }
-
-    return ShaderSourceStatus{};
+    return source_detail::MakeSourceStatus(checked.error == ShaderVirtualPathError::InvalidExtension
+                                               ? ShaderSourceError::InvalidExtension
+                                               : ShaderSourceError::InvalidPath,
+                                           checked.pathTooLong ? StringView() : path, 0,
+                                           checked.reason);
 }
 
 ShaderSourceStatus ValidateShaderVirtualDirectory(StringView directory) noexcept {
-    using namespace source_tree_detail;
-    if (directory == StringView(EngineShaderVirtualRoot) ||
-        directory == StringView(ProjectShaderVirtualRoot)) {
+    const ShaderVirtualPathCheck checked = CheckShaderVirtualDirectory(directory);
+    if (checked) {
         return ShaderSourceStatus{};
     }
 
-    const StringView prefix(PluginShaderVirtualPrefix);
-    if (directory.StartsWith(prefix, StringComparison::CaseSensitive) &&
-        IsPluginName(StringView(directory.Data() + prefix.ByteCount(),
-                                directory.ByteCount() - prefix.ByteCount()))) {
-        return ShaderSourceStatus{};
-    }
-
-    return source_detail::MakeSourceStatus(
-        ShaderSourceError::InvalidMount, directory, 0,
-        "virtual shader directory must be /Engine, /Project or /Plugin/<name> with "
-        "[A-Za-z0-9_-] names and no trailing '/'");
+    return source_detail::MakeSourceStatus(ShaderSourceError::InvalidMount, directory, 0,
+                                           checked.reason);
 }
 
 ShaderSourceTree::ShaderSourceTree(Allocator& allocator, platform::FileSystem& files) noexcept

@@ -394,6 +394,16 @@ TEST(WorldSubsystem_SkipChainsAndOptionalCycles) {
         CHECK(strcmp(skipped[1].name, "Beta") == 0 && strcmp(skipped[1].missing, "Alpha") == 0);
         CHECK(strcmp(skipped[2].name, "Gamma") == 0 && strcmp(skipped[2].missing, "Beta") == 0);
         CHECK(strcmp(skipped[3].name, "Delta") == 0 && strcmp(skipped[3].missing, "Gamma") == 0);
+        // 22.1절 DumpSubsystems: 생략 이유를 사람이 읽는 줄로 쓴다.
+        SystemAllocator dumpAllocator;
+        String dump(dumpAllocator);
+        REQUIRE(fixture.world->DumpSubsystems(dump));
+        const char* const expected = "World Test subsystems (0 initialized, 4 skipped)\n"
+                                     "  skipped Alpha: not wanted\n"
+                                     "  skipped Beta: dependency Alpha was not created\n"
+                                     "  skipped Gamma: dependency Beta was not created\n"
+                                     "  skipped Delta: dependency Gamma was not created\n";
+        CHECK(dump.View() == StringView(expected));
         REQUIRE(fixture.world->Shutdown());
     }
     {

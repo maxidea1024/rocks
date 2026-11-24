@@ -190,6 +190,10 @@ struct WorldStats {
     uint32 skippedTicks = 0;
     // 엔진 단계 콜백이 실패한 누적 수다.
     uint32 engineStageFailures = 0;
+    // 엔진 단계 자리마다 마지막 실행의 소요 시간(ns)이다(콜백이 없으면 0).
+    uint64 engineStageNanoseconds[static_cast<uint32>(EngineStage::Count)] = {};
+    // LifeSpan이 걸려 만료를 기다리는 Actor 수(시작 전에 건 것 포함)다.
+    uint32 pendingLifeSpans = 0;
     // Registry를 직접 조작해 우회 파괴된 Actor·Component·Level을 World가 발견해(Tick 실행·파괴
     // 요청 목록) 정리로 돌린 누적 수다.
     uint32 repairedBypasses = 0;

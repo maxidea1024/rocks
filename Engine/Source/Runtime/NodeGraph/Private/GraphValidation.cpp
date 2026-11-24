@@ -422,6 +422,12 @@ private:
         const NodeTypeDescriptor& descriptor = info.type->descriptor;
         bool dataValid =
             node.typeSchemaVersion != 0 && node.typeSchemaVersion <= descriptor.schemaVersion;
+        if (dataValid && node.typeSchemaVersion < descriptor.schemaVersion) {
+            // migration 전 노드: 속성·활성·핀은 옛 서술 기준이라 알 수 없는 종류처럼
+            // 검사한다(10.1절).
+            return Result<void>::Success();
+        }
+
         const Span<const uint8> properties = node.properties.bytes.View();
         if (ValidationIsZero(descriptor.propertiesStruct)) {
             dataValid = dataValid && properties.Size() == 0;

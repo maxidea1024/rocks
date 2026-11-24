@@ -240,8 +240,9 @@ Result<void> World::Initialize() noexcept {
             LogContextScope context("World", Name());
             Log::Warning(
                 LogWorld,
-                "Skipped world subsystem {Subsystem}: dependency {Dependency} was not created",
-                skipped.name, skipped.missing);
+                "Skipped world subsystem {Subsystem}: dependency {Dependency} was not created "
+                "({Code})",
+                skipped.name, skipped.missing, DiagSubsystemSkippedMissingDependency);
         }
     }
 
@@ -316,8 +317,10 @@ Result<void> World::BeginPlay() noexcept {
     }
 
     LogContextScope context("World", Name());
-    Log::Error(LogWorld, "BeginPlay dispatch contract violated: StartPlay returned without calling "
-                         "DispatchBeginPlay");
+    Log::Error(LogWorld,
+               "BeginPlay dispatch contract violated: StartPlay returned without calling "
+               "DispatchBeginPlay ({Code})",
+               DiagBeginPlayDispatchContractViolated);
     return Result<void>::Failure(ErrorCode::NotReady);
 }
 
@@ -325,8 +328,10 @@ Result<void> World::DispatchBeginPlay() noexcept {
     if (!dispatchingBeginPlay_ || beginPlayDispatched_ || state_ != WorldState::Initialized) {
         LogContextScope context("World", Name());
         Log::Warning(LogWorld,
-                     "BeginPlay dispatch contract violated: DispatchBeginPlay called {Where}",
-                     beginPlayDispatched_ ? "twice" : "outside StartPlay");
+                     "BeginPlay dispatch contract violated: DispatchBeginPlay called {Where} "
+                     "({Code})",
+                     beginPlayDispatched_ ? "twice" : "outside StartPlay",
+                     DiagBeginPlayDispatchContractViolated);
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
@@ -593,6 +598,15 @@ WorldStats World::Stats() const noexcept {
     stats.destroyedTotal = destroyedTotal_;
     stats.ticks = ticks_.Stats();
     stats.engineStageFailures = engineStageFailures_;
+    for (uint32 index = 0; index < EngineStageCount; ++index) {
+        stats.engineStageNanoseconds[index] = engineStageNanoseconds_[index];
+    }
+
+    for (const ActorRecord& record : actors_) {
+        if (record.lifeSpanSequence != 0 || record.pendingLifeSpan > 0.0) {
+            ++stats.pendingLifeSpans;
+        }
+    }
     for (uint32 index = 0; index < TickPhaseCount; ++index) {
         stats.phaseNanoseconds[index] = phaseNanoseconds_[index];
     }
