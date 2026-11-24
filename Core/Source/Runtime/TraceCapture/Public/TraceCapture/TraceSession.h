@@ -286,6 +286,6 @@ private:
 
 } // namespace rocks
 
-// 호스트 서비스다(Docs/Design/ModuleLoader.ko.md 3.12절). 엔진 호스트가 모듈 단계 실행 전에
+// 호스트 서비스다(Docs/Design/ModuleLoader 3.12절). 엔진 호스트가 모듈 단계 실행 전에
 // 등록하고 호스트 묶음을 내린 뒤 뗀다.
 ROCKS_DECLARE_HOST_SERVICE(rocks::TraceSession, ROCKS_TRACECAPTURE_API)

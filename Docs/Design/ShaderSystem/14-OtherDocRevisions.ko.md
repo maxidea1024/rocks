@@ -52,4 +52,4 @@
 | [엔진 런타임](../EngineRuntime/10-Graphics.ko.md) | 10.2절(D3D11) | D3D11의 쿠킹 DXBC 전환과 `D3DCompile` 제거를 SH5에서 SH2로(개정 32) |
 | [엔진 구현 계획](../EngineImplementationPlan.ko.md) | 9.6절 | 엔진 내장 셰이더 라이브러리를 만드는 단계(설치물 → 쿠킹, SSD11) |
 | [빌드 타깃](../BuildTargets/README.ko.md) | Commandlet 타깃 | 쿠커가 셰이더 타입 Runtime 모듈을 링크(SSD3), 프로젝트·플러그인 타입 쿠킹은 BS4 뒤 |
-| [모듈 로더](../ModuleLoader.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |
+| [모듈 로더](../ModuleLoader/README.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |

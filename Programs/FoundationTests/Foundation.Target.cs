@@ -76,7 +76,7 @@ public sealed class CoreTarget : TargetRules
 }
 
 // Modular build of the Foundation tests (Docs/Design/BuildTargets section 3.8 BD31, BS8d5): every non-third-party library module is a
-// shared library and the test executable starts through the Modular entry (Docs/Design/ModuleLoader.ko.md section 3.14). One executable only
+// shared library and the test executable starts through the Modular entry (Docs/Design/ModuleLoader section 3.14). One executable only
 // (a Modular target builds one executable: the Launch test programs are the companion targets in TestPrograms, BS8d6, and the embedded entry
 // program stays in the Monolithic targets). Tests stay in the FoundationTests host module and the module internals they call are exported.
 public sealed class FoundationModularTarget : TargetRules
@@ -102,7 +102,7 @@ internal static class LaunchTestPrograms
     public static readonly string[] Names = ["LaunchProbe", "LaunchWindowedProbe", "LaunchEmbeddedHost"];
 
     // Modular companion targets of the Modular test targets (Docs/Design/BuildTargets section 3.8 BS8d6). The embedded entry program has
-    // none: the embedded entry does not support Modular (Docs/Design/ModuleLoader.ko.md section 3.14).
+    // none: the embedded entry does not support Modular (Docs/Design/ModuleLoader section 3.14).
     public static readonly string[] ModularTargets = ["LaunchProbeModular", "LaunchWindowedProbeModular"];
 }
 
@@ -134,7 +134,7 @@ public sealed class LaunchWindowedProbeModularTarget : TargetRules
 
 // Modular build of the engine tests (Docs/Design/BuildTargets section 3.8 BS8e): the engine layer modules link as shared libraries and the
 // test executable starts through the Modular entry. The test module is EngineModularTests (the EngineTests sources). The enabled engine plugins
-// link into their plugin binaries folders with their own module manifests (Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
+// link into their plugin binaries folders with their own module manifests (Docs/Design/ModuleLoader section 3.15 ML5a).
 public sealed class EngineModularTarget : TargetRules
 {
     public override string Name => "EngineModular";

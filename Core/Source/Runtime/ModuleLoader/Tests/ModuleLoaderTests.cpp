@@ -12,7 +12,7 @@
 
 using namespace rocks;
 
-// 모듈 로더(Docs/Design/ModuleLoader.ko.md 3.3·3.4·3.7절, ML0)를 시험용 모듈 표로 검사한다. 시험
+// 모듈 로더(Docs/Design/ModuleLoader 3.3·3.4·3.7절, ML0)를 시험용 모듈 표로 검사한다. 시험
 // 모듈 ProbeModule<I>는 시작·PreUnload·Shutdown을 순서 기록(journal)에 남기고, 시험마다 behaviors로
 // 실패·재진입 적재·자동 종료 거부를 고른다. 시험은 한 스레드에서 차례로 돌며 다른 스레드는
 // WrongThread 시험이 명시적으로 Join한다(시간에 기대지 않는다).

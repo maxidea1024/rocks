@@ -8,7 +8,7 @@ using Rocks.Tooling.Common;
 /// 담는다. 확인하는 것:
 /// <list type="bullet">
 /// <item>손으로 쓴 소스가 없는 리플렉션 모듈이 archive(ModuleOutputs)가 되고, 실행 파일이 선언만 보고 부른 등록 함수가 링크·실행된다.</item>
-/// <item>리플렉션 생성 소스는 모듈 코드다(Docs/Design/ModuleLoader.ko.md 3.10절): 그런 모듈은 진입점 모듈이라 모듈 표에 들고
+/// <item>리플렉션 생성 소스는 모듈 코드다(Docs/Design/ModuleLoader 3.10절): 그런 모듈은 진입점 모듈이라 모듈 표에 들고
 /// ROCKS_MODULE_NAME과 자기 타입 표지 ROCKS_MODULE_TYPES=1을 받는다(진입점 TU는 MetadataLayout이 생성 소스로 더한다 — 픽스처는 그
 /// 모양을 직접 둔다). 리플렉션 생성 소스가 없는 진입점 모듈은 ROCKS_MODULE_TYPES=0이다.</item>
 /// <item>손으로 쓴 소스가 있는 모듈의 생성 소스는 그 모듈 소스와 같은 include·정의로 컴파일된다(compile_commands.json에도 실린다).</item>

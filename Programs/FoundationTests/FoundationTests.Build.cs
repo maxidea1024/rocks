@@ -151,7 +151,7 @@ public abstract class TestsModule : ModuleRules
     protected abstract string ExecutableName { get; }
 
     // Whether the runner also runs the PluginTestModules tests (and links those plugin modules): both engine layer runners do. The Modular one
-    // loads the plugin modules from their plugin binaries folders (Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
+    // loads the plugin modules from their plugin binaries folders (Docs/Design/ModuleLoader section 3.15 ML5a).
     private bool PluginTests => Layer == TestLayer.Engine;
 
     public override NativeModuleInput Configure(BuildContext context)
@@ -229,7 +229,7 @@ public abstract class TestsModule : ModuleRules
             PrivateDefines = ["ROCKS_TESTING=1"],
             // Third-party libraries the engine runner's adapter tests include directly (Docs/Design/BuildTargets section 3.5 BS3a).
             PrivateDependencies = Layer == TestLayer.Engine ? EngineThirdPartyHeaders : [],
-            // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader.ko.md section 3.8): it is linked into this
+            // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader section 3.8): it is linked into this
             // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.
             PublicDependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
             DynamicModules = ["DynamicModuleTestFixture"],
@@ -260,7 +260,7 @@ public sealed class EngineTests : TestsModule
 }
 
 // Engine layer runner of the Modular engine test target (EngineModular): the EngineTests sources, engine plugin tests included (Docs/Design/BuildTargets
-// section 3.8 BS8e, Docs/Design/ModuleLoader.ko.md section 3.15 ML5a).
+// section 3.8 BS8e, Docs/Design/ModuleLoader section 3.15 ML5a).
 public sealed class EngineModularTests : TestsModule
 {
     protected override TestLayer Layer => TestLayer.Engine;

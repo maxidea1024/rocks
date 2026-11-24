@@ -11,6 +11,6 @@ Result<void> RegisterCurvesTypes(ModuleRegistration& registration) noexcept {
 
 } // namespace rocks
 
-// Curves 모듈의 진입점이다(Docs/Design/ModuleLoader.ko.md 3.2절). 타입 등록은 ML2에서 진입 기술로
+// Curves 모듈의 진입점이다(Docs/Design/ModuleLoader 3.2절). 타입 등록은 ML2에서 진입 기술로
 // 옮긴다.
 ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, Curves)

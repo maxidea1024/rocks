@@ -54,7 +54,7 @@ int RunModuleLoaderShutdownDuringLoadControl() noexcept {
     return 0;
 }
 
-// 단계 실행의 계약 위반은 Fatal이다(Docs/Design/ModuleLoader.ko.md 3.11절). operation은 PhaseMisuse
+// 단계 실행의 계약 위반은 Fatal이다(Docs/Design/ModuleLoader 3.11절). operation은 PhaseMisuse
 // 값이다.
 int RunModuleLoaderPhaseMisuseControl(uint32 operation) noexcept {
     PrepareFatalTestProcess();

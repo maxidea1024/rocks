@@ -115,7 +115,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 - **id 발급**
   - 형 id는 등록 때 발급한다. 처음 쓸 때 지연 발급하지 않는다(UE `TL Private/Trace/EventNode.cpp:78–120`와 다르다).
   - 등록은 모듈 등록 함수에서 한다. 같은 이름의 다른 스키마를 등록하면 오류다.
-  - **다시 등록(개정 9)**: 모듈이 `Startup`에서 등록하고 `Shutdown`에서 푸는 형([모듈 로더](ModuleLoader.ko.md) 3.12절)은 같은 세션 동안 여러 번 등록될 수 있다(다음 Engine·실행 중 해제 뒤 재적재). 그래서 등록을 푼 형과 같은 이름·같은 스키마를 다시 등록하면 그 형 id와 이미 낸 스키마를 그대로 다시 쓴다(새 스키마를 내지 않고 형 id 상한을 소모하지 않는다). 같은 이름·다른 스키마는 그대로 `TypeMismatch`다. 형 id 재사용이 분석기에 안전한 이유는 같은 id의 스키마가 같기 때문이다. 버린 안: 새 id로 다시 등록(같은 이름 스키마가 둘이 되어 지금 규칙상 `TypeMismatch`가 나고, 등록·해제를 되풀이하면 형 id·채널 id 상한을 다 쓴다).
+  - **다시 등록(개정 9)**: 모듈이 `Startup`에서 등록하고 `Shutdown`에서 푸는 형([모듈 로더](ModuleLoader/03-Design/03.12-HostServices.ko.md) 3.12절)은 같은 세션 동안 여러 번 등록될 수 있다(다음 Engine·실행 중 해제 뒤 재적재). 그래서 등록을 푼 형과 같은 이름·같은 스키마를 다시 등록하면 그 형 id와 이미 낸 스키마를 그대로 다시 쓴다(새 스키마를 내지 않고 형 id 상한을 소모하지 않는다). 같은 이름·다른 스키마는 그대로 `TypeMismatch`다. 형 id 재사용이 분석기에 안전한 이유는 같은 id의 스키마가 같기 때문이다. 버린 안: 새 id로 다시 등록(같은 이름 스키마가 둘이 되어 지금 규칙상 `TypeMismatch`가 나고, 등록·해제를 되풀이하면 형 id·채널 id 상한을 다 쓴다).
   - **TR1 구현**: 같은 이름·같은 스키마라도 다른 객체면 `AlreadyExists`다(다른 스키마는 `TypeMismatch`). 머리(형 id·순서 번호)·고정부·가변 길이 칸의 합이 블록 하나(정의 형은 정의 기록 상한 16 KiB)에 들어가야 한다. 형 id 1–15는 세션 내부 형(`Trace.ChannelInfo`·`Trace.ChannelState`·`Trace.ThreadInfo`·`Trace.Loss`·`Trace.DefinitionLoss`)이고, 그 스키마도 다른 형처럼 스키마 스트림으로 나간다. 사용자 형은 16부터 4095까지다.
 - **자기 기술**
   - 스키마는 정의 기록으로 스트림에 낸다. 분석기는 사전 지식 없이 읽는다(UE `NewEvent`, `TL Private/Trace/EventNode.cpp:122–224`와 같다).
@@ -363,7 +363,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - 분석기는 오차를 표시한다(OB06 "clock 불확실성").
 - **변환할 수 없는 경우**: calibration이 없는 backend(GLES 확장 없음 등)의 GPU 구간은 기록하지 않는다. "GPU 시간 없음"을 정의 기록으로 공개한다(RenderBase 13.2절).
 - **CPU 쪽 상관**: 렌더 lane의 CPU 구간과 GPU 구간은 같은 pass 이름 id를 쓴다. 기록은 RB7 구현에 속하고, 이 문서는 형과 시간 규칙만 정한다.
-- **구현(2026-11-17, RB7).** 형 이름·배치는 `TraceStandardFormat`(`TraceCapture/TraceFormat.h`)에 두고, RenderBase `RegisterGpuTraceTypes`가 채널 `gpu`(꺼진 상태)와 함께 등록한다. 등록 주체는 RenderBase 모듈 `Startup`이다(호스트 trace 세션 서비스 — [모듈 로더](ModuleLoader.ko.md) 3.12절).
+- **구현(2026-11-17, RB7).** 형 이름·배치는 `TraceStandardFormat`(`TraceCapture/TraceFormat.h`)에 두고, RenderBase `RegisterGpuTraceTypes`가 채널 `gpu`(꺼진 상태)와 함께 등록한다. 등록 주체는 RenderBase 모듈 `Startup`이다(호스트 trace 세션 서비스 — [모듈 로더](ModuleLoader/03-Design/03.12-HostServices.ko.md) 3.12절).
   - `Trace.GpuQueue`(정의): u16 queue id · u8 종류(0 graphics) · u8 GPU 시간(0 없음, 1 있음), 가변 이름.
   - `Trace.GpuCalibration`(정의): u16 queue · u64 GPU tick · u64 CPU trace tick · u64 GPU 주파수 · u64 오차(ns).
   - `Trace.GpuScope`(스레드 스트림): u16 queue · u32 이름 id(`Trace.ScopeName`) · u32 깊이 · u64 프레임 · u64 시작 tick · u64 끝 tick. tick은 쓰기 전에 trace 시간축으로 바꾼 값이다.

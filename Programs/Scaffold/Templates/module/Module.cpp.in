@@ -8,5 +8,5 @@ const char* Name() noexcept {
 }
 }
 
-// Module entry point (Docs/Design/ModuleLoader.ko.md section 3.2). Every C++ module implements one.
+// Module entry point (Docs/Design/ModuleLoader section 3.2). Every C++ module implements one.
 ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, @NAME@)

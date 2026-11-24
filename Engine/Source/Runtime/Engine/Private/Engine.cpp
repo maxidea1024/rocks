@@ -1041,7 +1041,7 @@ Result<void> Engine::Shutdown() noexcept {
     // World·게임 타입은 Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의
     // dependent로 남아 Unregister가 Busy로 멈춘다. ModuleRegistration 파괴로 붙잡은 lease만 놓고
     // TypeRegistry::Shutdown이 남은 레코드를 dependent 순서로 반납한다. 모듈 타입 등록기는 그 전에
-    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader.ko.md 3.11절).
+    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader 3.11절).
     modules_.Reset();
     DetachModuleTypes();
     if (types_) {
@@ -1067,7 +1067,7 @@ Result<void> Engine::AttachModuleTypes() noexcept {
     ModuleLoader* loader = config_.modules;
     if (loader == nullptr) {
         Log::Error(LogEngine, "EngineConfig::modules is required: pass the process module loader "
-                              "(Docs/Design/ModuleLoader.ko.md section 3.11)");
+                              "(Docs/Design/ModuleLoader section 3.11)");
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
