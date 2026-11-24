@@ -2,12 +2,14 @@
 
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <Core/Containers/Array.h>
+#include <Core/Containers/OrderedMap.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/File.h>
 #include <ReflectionText/TextDiagnostics.h>
+#include <Texture/TextureEnums.h>
 
 // 쿠킹 설정이다(Docs/Design/AssetSystem 10절, 10.2절 결정 2·3 — A4a). 대상 프로파일
 // (TargetProfile — 엔진 `Engine/Config/TargetProfiles/<id>.json` 위에 프로젝트
@@ -35,13 +37,58 @@ enum class CookBulkCodec : uint8 {
     Zstd = 1
 };
 
-// 대상 프로파일이다(10.2절 결정 2). 텍스처 칸(형식 지원 표·LOD 그룹)은 A5가 더한다.
+// LOD 그룹의 min·mag 필터다(UE FTextureLODGroup MinMagFilter — FName point·linear·aniso,
+// Docs/Design/AssetSystem 12.14절).
+ROCKS_ENUM()
+enum class TextureLodMinMagFilter : uint8 {
+    Point = 0,
+    Linear = 1,
+    Aniso = 2
+};
+
+// LOD 그룹의 mip 필터다(UE MipFilter — point·linear).
+ROCKS_ENUM()
+enum class TextureLodMipFilter : uint8 {
+    Point = 0,
+    Linear = 1
+};
+
+// 텍스처 LOD 그룹 하나다(UE FTextureLODGroup — 12.4.5·12.14절, 기본값은 UE 멤버 기본값
+// TextureLODSettings.h). 표에 없는 그룹은 이 기본값이다.
+ROCKS_STRUCT()
+struct TextureLodGroup {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 minLodSize = 1;
+    ROCKS_PROPERTY() int32 maxLodSize = 4096;
+    ROCKS_PROPERTY() int32 lodBias = 0;
+    ROCKS_PROPERTY()
+    TextureMipGenSettings mipGenSettings = TextureMipGenSettings::SimpleAverage;
+    // 0이면 전역 값이다.
+    ROCKS_PROPERTY() int32 maxAniso = 0;
+    ROCKS_PROPERTY() bool highPriorityLoad = false;
+    ROCKS_PROPERTY()
+    TextureMipLoadOptions mipLoadOptions = TextureMipLoadOptions::AllMips;
+    ROCKS_PROPERTY() bool cookPlatformTilingDisabled = false;
+    ROCKS_PROPERTY()
+    TextureLodMinMagFilter minMagFilter = TextureLodMinMagFilter::Aniso;
+    ROCKS_PROPERTY() TextureLodMipFilter mipFilter = TextureLodMipFilter::Point;
+    // 계약 칸(저장·전달만 — 런타임 스트리밍 단계가 쓴다): 스트리밍 mip 수(-1 = 전부), UE 5.8 품질
+    // 등급별 상한(-1 = 없음).
+    ROCKS_PROPERTY() int32 numStreamedMips = -1;
+    ROCKS_PROPERTY() int32 maxLodSizeLow = -1;
+    ROCKS_PROPERTY() int32 maxLodSizeMedium = -1;
+    ROCKS_PROPERTY() int32 maxLodSizeHigh = -1;
+    ROCKS_PROPERTY() int32 maxLodSizeEpic = -1;
+};
+
+// 대상 프로파일이다(10.2절 결정 2). 텍스처 칸은 12.14절(A5j)이다.
 ROCKS_STRUCT()
 struct TargetProfile {
     ROCKS_GENERATED_BODY()
 
     explicit TargetProfile(Allocator& allocator) noexcept
-        : id(allocator), graphicsBackend(allocator) {
+        : id(allocator), graphicsBackend(allocator), textureLodGroups(allocator) {
     }
 
     // 프로파일 id다(파일 이름과 같다 — 파일에서 생략하면 읽기가 채운다).
@@ -51,7 +98,15 @@ struct TargetProfile {
     ROCKS_PROPERTY() CookBulkCodec bulkCodec = CookBulkCodec::None;
     // 쿠킹 패키지 bulk 정렬이다(0이면 쿠킹 기본 4096, 아니면 2의 거듭제곱 8–65536).
     ROCKS_PROPERTY() uint32 bulkAlignment = 0;
+    // 텍스처 LOD 그룹 표다(JSON은 키별 병합 — 프로젝트 파일이 그룹 하나의 칸 하나만 덮는다).
+    ROCKS_PROPERTY() OrderedMap<TextureGroup, TextureLodGroup> textureLodGroups;
+    // R16·RG16·RGBA16 Unorm 텍스처를 표본할 수 있는지다(false면 같은 채널 수의 16F — Android).
+    ROCKS_PROPERTY() bool textureNorm16Supported = true;
 };
+
+// group의 그룹 값이다(표에 없으면 기본값).
+ROCKS_ASSETCOOKER_API TextureLodGroup FindTextureLodGroup(const TargetProfile& profile,
+                                                          TextureGroup group) noexcept;
 
 // PrimaryAsset 규칙 하나다(UE FPrimaryAssetTypeInfo의 타입·Directories 대응): type(클래스 도구
 // 이름 — 그 타입 또는 파생)이고 directories(논리 디렉터리, 끝 '/', 하나 이상) 중 하나 아래인 에셋이
@@ -127,7 +182,10 @@ enum class CookConfigField : uint8 {
     AlwaysCook,
     NeverCook,
     PrimaryAssetType,
-    PrimaryAssetDirectory
+    PrimaryAssetDirectory,
+    // 텍스처 LOD 그룹(index = 그룹 값 — Min > Max·음수 크기·음수 maxAniso·계약
+    // mipGen·OnlyFirstMip).
+    TextureLodGroup
 };
 
 struct CookConfigFailure {
@@ -148,8 +206,9 @@ struct CookConfigFailure {
 // id 프로파일을 읽는다: 엔진 파일(필수) → 프로젝트 파일(있으면) 순으로 대입하고 검증한다. out은
 // 기본값에서 시작한다(id는 미리 채운다). 오류(InvalidArgument — failure의 code InvalidSetting):
 // id 형식(`[A-Za-z0-9_]`, 1–64 byte), 엔진 파일 없음(error NotFound도 InvalidSetting), JSON 문법,
-// 대입 진단(diagnostics), 파일의 id가 다름, bulkAlignment. 파일 크기 상한 초과 CapacityExceeded,
-// 읽기 오류는 그 오류, 할당 실패. 실패하면 out은 정해지지 않는다.
+// 대입 진단(diagnostics), 파일의 id가 다름, bulkAlignment, 텍스처 LOD 그룹(12.14절 검증). JSON의
+// Map은 키별 병합(MergeByKey)이다. 파일 크기 상한 초과 CapacityExceeded, 읽기 오류는 그 오류, 할당
+// 실패. 실패하면 out은 정해지지 않는다.
 ROCKS_ASSETCOOKER_API Result<void> ReadTargetProfile(const CookConfigContext& context,
                                                      StringView id, TargetProfile& out,
                                                      reflection_text::TextDiagnostics& diagnostics,

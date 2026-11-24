@@ -86,6 +86,8 @@ struct OutputFormat {
                                  TextureSwizzle::A};
     // HDR_Compressed는 데이터 알파 1이다.
     bool opaqueAlpha = false;
+    // norm16 대체(Unorm16 → 16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0을 적용한다(12.14절).
+    bool clampUnit = false;
 };
 
 SourceClass ClassOf(TextureSourceFormat format) noexcept {
@@ -142,8 +144,8 @@ void SetSwizzle(OutputFormat& out, TextureSwizzle r, TextureSwizzle g, TextureSw
 }
 
 // 12.4.3절 표다.
-OutputFormat OutputFor(TextureCompressionSettings compression,
-                       TextureSourceFormat format) noexcept {
+OutputFormat OutputForTable(TextureCompressionSettings compression,
+                            TextureSourceFormat format) noexcept {
     OutputFormat out;
     const SourceClass source = ClassOf(format);
     const auto single = [&out](OutputKind kind, bool replicate) noexcept {
@@ -209,6 +211,26 @@ OutputFormat OutputFor(TextureCompressionSettings compression,
     }
 
     return out;
+}
+
+// 12.4.3절 표 + 프로파일 norm16 대체(Unorm16 → 같은 채널 수의 16F — 12.14절)다.
+OutputFormat OutputFor(const TextureBuildSettings& settings) noexcept {
+    OutputFormat format = OutputForTable(settings.compression, settings.format);
+    if (format.kind == OutputKind::Unorm16 && !settings.norm16Supported) {
+        format.kind = OutputKind::Half;
+        format.clampUnit = true;
+    }
+
+    return format;
+}
+
+// 출력이 sRGB 부호화인지다(12.2절 3·4번 — 8비트 출력, 무시 종류·float → float 아님).
+bool OutputSrgb(const TextureBuildSettings& settings, const OutputFormat& format) noexcept {
+    const bool floatSource = ClassOf(settings.format) == SourceClass::Float;
+    const bool floatOutput = format.kind == OutputKind::Half || format.kind == OutputKind::Single;
+    const bool ignored =
+        TextureCompressionIgnoresSrgb(settings.compression) || (floatSource && floatOutput);
+    return settings.srgb && !ignored && format.kind == OutputKind::Unorm8;
 }
 
 PixelFormat PixelFormatOf(OutputKind kind, uint32 channels, bool srgb) noexcept {
@@ -910,7 +932,8 @@ Result<void> Encode(const Level& level, const OutputFormat& format, bool srgb, b
                 StoreLe16(target + c * 2, QuantizeUnorm16(value));
                 break;
             case OutputKind::Half:
-                StoreLe16(target + c * 2, QuantizeHalf(value));
+                StoreLe16(target + c * 2,
+                          QuantizeHalf(format.clampUnit ? Clamp01NansTo0(value) : value));
                 break;
             case OutputKind::Single:
                 StoreLe32(target + c * 4, platform::BitCast<uint32>(QuantizeSingle(value)));
@@ -1018,6 +1041,42 @@ bool TextureCompressionIgnoresSrgb(TextureCompressionSettings compression) noexc
     default:
         return false;
     }
+}
+
+usize TextureBuildWarnings(const TextureBuildSettings& settings,
+                           AssetDiagnosticCode (&out)[TextureBuildMaxWarnings]) noexcept {
+    usize count = 0;
+    const OutputFormat format = OutputFor(settings);
+    const bool floatSource = ClassOf(settings.format) == SourceClass::Float;
+    const bool floatOutput = format.kind == OutputKind::Half || format.kind == OutputKind::Single;
+    if (settings.srgb &&
+        (TextureCompressionIgnoresSrgb(settings.compression) || (floatSource && floatOutput))) {
+        out[count++] = AssetDiagnosticCode::SrgbIgnored;
+    }
+
+    // PreserveBorder Wrap(쓰는 축 — Volume은 Z도, mip이 없으면 테두리를 다시 쓰지 않는다).
+    const bool volume = settings.dimension == TextureDimension::Volume;
+    if (settings.preserveBorder && settings.mipGenSettings != TextureMipGenSettings::NoMipmaps &&
+        (settings.addressX == TextureAddress::Wrap || settings.addressY == TextureAddress::Wrap ||
+         (volume && settings.addressZ == TextureAddress::Wrap))) {
+        out[count++] = AssetDiagnosticCode::PreserveBorderWithWrap;
+    }
+
+    return count;
+}
+
+TextureBuildOutputInfo TextureBuildOutput(const TextureBuildSettings& settings) noexcept {
+    const OutputFormat format = OutputFor(settings);
+    const bool srgb = OutputSrgb(settings, format);
+    const bool expand = srgb && format.channels < 4;
+    TextureBuildOutputInfo info;
+    info.pixelFormat = PixelFormatOf(format.kind, expand ? 4 : format.channels, srgb);
+    info.srgb = srgb;
+    for (usize index = 0; index < 4; ++index) {
+        info.swizzle[index] = expand ? static_cast<TextureSwizzle>(index) : format.swizzle[index];
+    }
+
+    return info;
 }
 
 Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimension dimension,
@@ -1236,15 +1295,12 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
                     sourcePixels.Size());
     }
 
-    const OutputFormat format = OutputFor(settings.compression, settings.format);
-    const bool floatSource = ClassOf(settings.format) == SourceClass::Float;
-    const bool floatOutput = format.kind == OutputKind::Half || format.kind == OutputKind::Single;
-    const bool srgbIgnored =
-        settings.srgb &&
-        (TextureCompressionIgnoresSrgb(settings.compression) || (floatSource && floatOutput));
-    const bool srgb = settings.srgb && !srgbIgnored && format.kind == OutputKind::Unorm8;
-    if (srgbIgnored) {
-        if (auto warned = Warn(out, AssetDiagnosticCode::SrgbIgnored); !warned) {
+    const OutputFormat format = OutputFor(settings);
+    const bool srgb = OutputSrgb(settings, format);
+    AssetDiagnosticCode warnings[TextureBuildMaxWarnings];
+    const usize warningCount = TextureBuildWarnings(settings, warnings);
+    for (usize index = 0; index < warningCount; ++index) {
+        if (auto warned = Warn(out, warnings[index]); !warned) {
             return warned;
         }
     }
@@ -1318,15 +1374,7 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         }
     }
 
-    // PreserveBorder Wrap 경고(쓰는 축 — Volume은 Z도).
     const bool noMips = settings.mipGenSettings == TextureMipGenSettings::NoMipmaps;
-    if (settings.preserveBorder && !noMips &&
-        (settings.addressX == TextureAddress::Wrap || settings.addressY == TextureAddress::Wrap ||
-         (volume && settings.addressZ == TextureAddress::Wrap))) {
-        if (auto warned = Warn(out, AssetDiagnosticCode::PreserveBorderWithWrap); !warned) {
-            return warned;
-        }
-    }
 
     // 5. mip 사슬(Volume은 Z 포함 — NoMipmaps는 mip 0만).
     uint32 longest = level.width > level.height ? level.width : level.height;
@@ -1378,10 +1426,11 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         (void)out.mips.TryPushBack(rocks::Move(built));
     }
 
-    out.pixelFormat = PixelFormatOf(format.kind, expand ? 4 : format.channels, srgb);
-    out.srgb = srgb;
+    const TextureBuildOutputInfo info = TextureBuildOutput(settings);
+    out.pixelFormat = info.pixelFormat;
+    out.srgb = info.srgb;
     for (usize index = 0; index < 4; ++index) {
-        out.swizzle[index] = expand ? static_cast<TextureSwizzle>(index) : format.swizzle[index];
+        out.swizzle[index] = info.swizzle[index];
     }
 
     out.numSlices = volume ? 1 : settings.numSlices;

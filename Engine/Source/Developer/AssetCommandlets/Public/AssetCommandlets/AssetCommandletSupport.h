@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetCooker/CookProcessor.h>
 #include <AssetDatabase/AssetDatabaseLock.h>
 #include <AssetDatabase/AssetImportArguments.h>
 #include <AssetDatabase/AssetService.h>
@@ -83,9 +84,18 @@ struct AssetTypeHookSetup {
     void* state = nullptr;
 };
 
+// asset-cook의 쿠킹 처리기 등록이다(Docs/Design/AssetSystem 12.14절 — 표를 만든 뒤 부른다):
+// table(기본 처리기를 fallback으로 둔 세션 표)에 처리기를 등록한다. 처리기는 state가 소유하고 명령
+// 동안 산다. 실패하면 그 오류로 명령이 실패한다. 없으면 기본 처리기만 쓴다. 제품은 TextureTools
+// RegisterTextureCookProcessors를 건다.
+struct AssetCookProcessorSetup {
+    Result<void> (*registerProcessors)(void* state, CookProcessorTable& table) noexcept = nullptr;
+    void* state = nullptr;
+};
+
 // 에셋 명령의 문맥이다(commandlet_host::Run이 건다): 작업 메모리와 Launch의 프로세스 모듈 로더,
 // 에셋 타입 모듈 이름(비면 AssetTypeModules 전부 — 시험은 fixture 모듈), 임포터 등록, 타입 hook
-// 등록, 임포트 예약 인자 번역기(12.12절 — 없으면 예약 인자는 사용법 오류).
+// 등록, 임포트 예약 인자 번역기(12.12절 — 없으면 예약 인자는 사용법 오류), 쿠킹 처리기 등록.
 struct AssetCommandContext {
     Allocator* allocator = nullptr;
     ModuleLoader* modules = nullptr;
@@ -93,6 +103,7 @@ struct AssetCommandContext {
     AssetImporterSetup importers{};
     AssetTypeHookSetup typeHooks{};
     AssetImportTranslator importTranslator{};
+    AssetCookProcessorSetup cookProcessors{};
 };
 
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem 7.1절 15 A2c3b, ModuleLoader

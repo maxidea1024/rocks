@@ -184,6 +184,125 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::TargetProfile::textureLodGroups",
+      "id": "4118daef20044278bf424ac36b66c07d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TargetProfile::textureNorm16Supported",
+      "id": "96c1df6a2ef94a76bc3df7f690964668",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::cookPlatformTilingDisabled",
+      "id": "5b0bc29a08fe4e3fb3b2a99e4a64cdb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::highPriorityLoad",
+      "id": "1c9f2c9540f049f2abf67b1a4e1bb1af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::lodBias",
+      "id": "f2cf2deca99d48ac9d4bd87060385d63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::maxAniso",
+      "id": "4492b8f79c624e5d921c2465d94f3b2b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::maxLodSize",
+      "id": "8395e78d7187451eaaa8241d7ee11765",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::maxLodSizeEpic",
+      "id": "5926c6048da042cc86b764b30a8bde9b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::maxLodSizeHigh",
+      "id": "e8daa8c8e34d428abd65c4c897f1ea3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::maxLodSizeLow",
+      "id": "7cd3014e391242868ee7ed77cfc5a0ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::maxLodSizeMedium",
+      "id": "8c7a4057351848549910d69680d9bc15",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::minLodSize",
+      "id": "6155ab2c75934a1881d659deb3a167fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::minMagFilter",
+      "id": "33012cc227db4529a7ef58bdf96e8309",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::mipFilter",
+      "id": "1407fecb1b284f4fab7d81cce9125794",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::mipGenSettings",
+      "id": "1d9d1f68d82b4086ae9f35d12db7346a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::mipLoadOptions",
+      "id": "9c9bd7ec93d540a1886d487d4a1549e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureLodGroup::numStreamedMips",
+      "id": "6268cf69dba74ef1a5fc139250f8ac67",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::CookBulkCodec",
       "id": "bc73f60886ad445cb55dc3bf04117b37",
@@ -222,6 +341,27 @@
       "kind": "type",
       "name": "rocks::TargetProfile",
       "id": "cb135f16b75b4340be3ad4b2fddc4450",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureLodGroup",
+      "id": "a345762e450a42ea849feb5033c870d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureLodMinMagFilter",
+      "id": "aeded80d40f643039ef6029a834879f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureLodMipFilter",
+      "id": "0ff7358fde2b461e8477087553d67fc9",
       "aliases": [],
       "retired": false
     }

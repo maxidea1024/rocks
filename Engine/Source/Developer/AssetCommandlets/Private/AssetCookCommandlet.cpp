@@ -153,6 +153,10 @@ Result<void> AppendConfigField(StringBuilderBase& out, const CookConfigFailure& 
     case CookConfigField::PrimaryAssetDirectory:
         return out.TryAppendFormat("invalid primaryAssets[{}].directories[{}]", failure.index,
                                    failure.item);
+    case CookConfigField::TextureLodGroup:
+        // index는 TextureGroup 값이다(12.14절 검증 — 크기·mipGen·mipLoadOptions).
+        return out.TryAppendFormat("invalid textureLodGroups entry (TextureGroup value {})",
+                                   failure.index);
     case CookConfigField::None:
         break;
     }
@@ -458,6 +462,16 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
 
     DefaultCookProcessor processor;
     CookProcessorTable processors(allocator, session.types.Types(), processor);
+    if (command.cookProcessors.registerProcessors != nullptr) {
+        if (auto registered =
+                command.cookProcessors.registerProcessors(command.cookProcessors.state, processors);
+            !registered) {
+            return registered.Error() == ErrorCode::OutOfMemory
+                       ? Result<int32>::Failure(registered.Error())
+                       : Fail(output, allocator, CookName, 1, "{}: cannot register cook processors",
+                              ErrorCodeName(registered.Error()));
+        }
+    }
     CookProjectRequest request;
     request.files = &files;
     request.layout = &session.layout;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetCooker/CookConfig.h>
+#include <AssetCooker/CookTargets.h>
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetNugget/NuggetCache.h>
 #include <AssetNugget/NuggetKey.h>
@@ -40,6 +41,10 @@ struct CookContext {
     // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
     PackageSink* sink = nullptr;
     AssetDiagnostic* failure = nullptr;
+    // 처리기 경고를 받는 곳이다(null이면 버린다 — 12.14절 10번). 처리기는 warning = true·asset =
+    // 대상 id로 넣고, 실행기가 실행 진단으로 옮긴다(게시를 막지 않는다). push의 할당 실패는
+    // OutOfMemory로 돌려준다.
+    Array<CookDiagnostic>* warnings = nullptr;
 };
 
 // 처리기다. Cook의 기본은 에디터 객체 그래프를 그대로 쿠킹 패키지로 쓴다(UE가 패키지를 대상

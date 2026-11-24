@@ -7,6 +7,7 @@
 #include <Core/Result.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <Texture/Texture.h>
+#include <Texture/TextureBuildSettings.h>
 
 // 텍스처 빌드다(Docs/Design/AssetSystem 12.13절 — A5i, 규칙은 UE 5.8에 맞춘 12.5절·12.2절 1–5번·
 // 12.4.3절): 원본 정규 픽셀을 선형화 → flipGreen → PowerOfTwoMode → 최대 크기 → mip 사슬 →
@@ -34,39 +35,6 @@ struct TextureLodGroupValues {
 // 작업 단계 하나의 작업 픽셀 byte 상한이다(16384² RGBA32F — 넘으면 InvalidSource +
 // CapacityExceeded, 12.13절 규모).
 inline constexpr uint64 TextureBuildMaxWorkingBytes = uint64{4} << 30;
-
-// 유효 설정이다(텍스처 값 + 그룹 값 — ResolveTextureBuildSettings가 만든다, 시험은 직접 채운다).
-struct TextureBuildSettings {
-    TextureDimension dimension = TextureDimension::Texture2D;
-    TextureSourceFormat format = TextureSourceFormat::Invalid;
-    uint32 sizeX = 0;
-    uint32 sizeY = 0;
-    uint32 numSlices = 0;
-    TextureCompressionSettings compression = TextureCompressionSettings::Default;
-    bool srgb = true;
-    bool useLegacyGamma = false;
-    TextureSourceEncoding encodingOverride = TextureSourceEncoding::None;
-    bool flipGreenChannel = false;
-    TexturePowerOfTwoSetting powerOfTwoMode = TexturePowerOfTwoSetting::None;
-    Color paddingColor{0, 0, 0, 255};
-    bool padWithBorderColor = false;
-    uint32 resizeX = 0;
-    uint32 resizeY = 0;
-    // SimpleAverage·NoMipmaps·Unfiltered 하나다(FromTextureGroup은 그룹 값으로 바뀐 뒤).
-    TextureMipGenSettings mipGenSettings = TextureMipGenSettings::SimpleAverage;
-    bool preserveBorder = false;
-    // Normalmap일 때만 켠다(UE bNormalizeNormals && IsNormalMap()).
-    bool normalizeNormals = false;
-    // 축별 주소다(Cube·CubeArray는 Clamp — PreserveBorder Wrap 경고만 본다, 재표본은 늘 clamp).
-    TextureAddress addressX = TextureAddress::Wrap;
-    TextureAddress addressY = TextureAddress::Wrap;
-    TextureAddress addressZ = TextureAddress::Wrap;
-    // 쿠킹 편향(텍스처 + 그룹 LODBias)·최대 크기(0 = 없음)·그룹 크기 규칙이다(12.5절 4·7번).
-    int32 lodBias = 0;
-    int32 maxTextureSize = 0;
-    int32 minLodSize = 1;
-    int32 maxLodSize = 4096;
-};
 
 // 쿠킹 mip 하나다(slice·면을 차례로 이은 형식 texel — 행 사이 패딩 없음, 위에서 아래).
 struct TextureBuiltMip {
@@ -110,6 +78,30 @@ struct TextureBuildResult {
     Array<TextureBuildWarning> warnings;
     TextureBuildFailure failure;
 };
+
+// 빌드 규칙 버전이다(12.5·12.13절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
+inline constexpr uint32 TextureBuildVersion = 1;
+
+// 빌드 경고 수 상한이다(SrgbIgnored·PreserveBorderWithWrap).
+inline constexpr usize TextureBuildMaxWarnings = 2;
+
+// 출력 형식이다(12.4.3절 표·norm16 대체·sRGB 확장 — BuildTexture 결과와 같다).
+struct TextureBuildOutputInfo {
+    PixelFormat pixelFormat = PixelFormat::Unknown;
+    bool srgb = false;
+    TextureSwizzle swizzle[4] = {TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::B,
+                                 TextureSwizzle::A};
+};
+
+// settings의 빌드 경고를 out에 쓰고 수를 돌려준다(설정만으로 정한다 — 너겟 적중·미적중이 같다,
+// 12.14절). 순서: SrgbIgnored, PreserveBorderWithWrap.
+ROCKS_TEXTURETOOLS_API usize
+TextureBuildWarnings(const TextureBuildSettings& settings,
+                     AssetDiagnosticCode (&out)[TextureBuildMaxWarnings]) noexcept;
+
+// settings의 출력 형식·sRGB·swizzle이다(BuildTexture가 내는 값 — 쿠킹 너겟 적중 검증이 쓴다).
+ROCKS_TEXTURETOOLS_API TextureBuildOutputInfo
+TextureBuildOutput(const TextureBuildSettings& settings) noexcept;
 
 // 12.4.3절 SRGB 열이 "무시"인 종류인지다(Normalmap·Masks·Displacementmap·VectorDisplacementmap·
 // HDR·Alpha·DistanceFieldFont·HDR_Compressed·HalfFloat·SingleFloat·HDR_F32).

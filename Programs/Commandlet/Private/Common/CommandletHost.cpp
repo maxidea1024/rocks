@@ -14,6 +14,7 @@
 #include <Platform/File.h>
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
 #include <TraceAnalysis/TraceModel.h>
+#include <TextureTools/TextureCook.h>
 #include <TextureTools/TextureImport.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <UnrealExchange/ExchangeCommand.h>
@@ -179,6 +180,9 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     assetContext.importers = {&RegisterTextureImporters, &textureImporters};
     assetContext.typeHooks = {&RegisterTextureTypeHooks, nullptr};
     assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
+    // 텍스처 쿠킹 처리기다(12.14절 — asset-cook이 처리기 표에 등록한다).
+    TextureCookProcessor textureCook;
+    assetContext.cookProcessors = {&RegisterTextureCookProcessors, &textureCook};
     // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);

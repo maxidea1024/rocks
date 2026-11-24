@@ -5,7 +5,8 @@ using Rocks.Build.Rules;
 // and volume, from several files or one file), their new-import defaults (UE 5.8 UTextureFactory and
 // ApplyDefaultsForNewlyImportedTextures), the settings normalization hook (UE UTexture::ValidateSettingsAfterImportOrEdit), the
 // texture import request (TextureImportSpec) and the asset-import argument translator (--cube, --array, --cube-array, --volume,
-// --cube-layout, --volume-tile and the DDS dimension choice). The texture build (A5i) and cooking (A5j) are added here later.
+// --cube-layout, --volume-tile and the DDS dimension choice). It also holds the texture build (A5i) and the texture cook
+// processor (A5j).
 // Developer module: editor, cooker and tool programs link it, shipping runtime targets do not.
 public sealed class TextureTools : EngineModuleRules
 {
@@ -18,7 +19,9 @@ public sealed class TextureTools : EngineModuleRules
 
     // Texture for the asset classes and the import option types, AssetDatabase for the importer interface and the argument
     // translator types, AssetRuntime for the type hook table.
-    protected override string[] PublicDependencies => ["Core", "Texture", "AssetRuntime", "AssetDatabase"];
+    // AssetCooker for the cook processor interface and the target profile LOD group table, AssetNugget for the texture nugget
+    // records (section 12.14).
+    protected override string[] PublicDependencies => ["Core", "Texture", "AssetRuntime", "AssetDatabase", "AssetCooker", "AssetNugget"];
 
     // ImageCodec decodes the source files (sections 12.9-12.11). DeterministicMath gives the build the same bytes on every host
     // (sRGB and gamma curves — section 12.13).

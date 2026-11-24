@@ -86,7 +86,9 @@ Result<void> ApplyJsonFile(const CookConfigContext& context, StringView path,
         return Fail(failure, file, CookConfigField::Json, ErrorCode::InvalidArgument);
     }
 
+    // Map(텍스처 LOD 그룹 표)은 키별 병합이다(12.14절 — 쿠킹 규칙에는 Map이 없다).
     TextCodecOptions options;
+    options.mapMerge = reflection_text::MapMergeMode::MergeByKey;
     auto prepared = reflection_text::ImportJson(document.Root(), target, options, diagnostics);
     if (!prepared) {
         const ErrorCode error = prepared.Error();
@@ -223,7 +225,29 @@ Result<void> ReadTargetProfile(const CookConfigContext& context, StringView id, 
                     ErrorCode::InvalidArgument);
     }
 
+    // 텍스처 LOD 그룹(12.14절): 크기·maxAniso 0 이상·Min ≤ Max, mipGen은 SimpleAverage·NoMipmaps·
+    // Unfiltered, mipLoadOptions OnlyFirstMip은 계약.
+    for (const auto& entry : out.textureLodGroups) {
+        const TextureLodGroup& group = entry.value;
+        const TextureMipGenSettings mipGen = group.mipGenSettings;
+        const bool valid = group.minLodSize >= 0 && group.maxLodSize >= 0 && group.maxAniso >= 0 &&
+                           group.minLodSize <= group.maxLodSize &&
+                           (mipGen == TextureMipGenSettings::SimpleAverage ||
+                            mipGen == TextureMipGenSettings::NoMipmaps ||
+                            mipGen == TextureMipGenSettings::Unfiltered) &&
+                           group.mipLoadOptions != TextureMipLoadOptions::OnlyFirstMip;
+        if (!valid) {
+            return Fail(failure, CookConfigFile::None, CookConfigField::TextureLodGroup,
+                        ErrorCode::InvalidArgument, static_cast<uint32>(entry.key));
+        }
+    }
+
     return Result<void>::Success();
+}
+
+TextureLodGroup FindTextureLodGroup(const TargetProfile& profile, TextureGroup group) noexcept {
+    const TextureLodGroup* found = profile.textureLodGroups.Find(group);
+    return found != nullptr ? *found : TextureLodGroup{};
 }
 
 Result<void> ReadCookSettings(const CookConfigContext& context, CookSettings& out,

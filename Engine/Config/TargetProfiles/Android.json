@@ -1,3 +1,33 @@
 {
-  "graphicsBackend": ""
+  "graphicsBackend": "",
+  "textureNorm16Supported": false,
+  "textureLodGroups": {
+    "World": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "WorldNormalMap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "WorldSpecular": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Character": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "CharacterNormalMap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "CharacterSpecular": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Weapon": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "WeaponNormalMap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "WeaponSpecular": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Vehicle": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "VehicleNormalMap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "VehicleSpecular": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Cinematic": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Effects": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Linear", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "EffectsNotFiltered": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Skybox": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "UI": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "NoMipmaps"},
+    "Lightmap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Shadowmap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "numStreamedMips": 3, "mipGenSettings": "SimpleAverage"},
+    "RenderTarget": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "MobileFlattened": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Terrain_Heightmap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Terrain_Weightmap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "Bokeh": {"minLodSize": 1, "maxLodSize": 256, "lodBias": 0, "minMagFilter": "Linear", "mipFilter": "Linear", "mipGenSettings": "SimpleAverage"},
+    "Pixels2D": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Point", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
+    "8BitData": {"lodBias": 0, "minMagFilter": "Point", "mipFilter": "Point", "mipGenSettings": "NoMipmaps"},
+    "16BitData": {"lodBias": 0, "minMagFilter": "Point", "mipFilter": "Point", "mipGenSettings": "NoMipmaps"}
+  }
 }
