@@ -6,7 +6,7 @@ using Rocks.Build.Rules;
 // (TextureSourceFormat pixels, top row first) and the same diagnostics (InvalidSource, UnsupportedSourceFormat, LossySource and the
 // NonSrgbSource and IgnoredSourceChannels warnings). Developer module: the editor, cooker and tool programs link it, shipping runtime
 // targets do not (no source format code at run time — section 12.1). Texture supplies TextureSourceFormat, AssetRuntime the
-// diagnostic codes, and the private Compression dependency inflates PNG zlib streams. Encoders for texture export (PNG and the like)
+// diagnostic codes, the private Compression dependency inflates PNG zlib streams, and OpenExr and LibTiff decode EXR and TIFF. Encoders for texture export (PNG and the like)
 // join this module later (UE ImageWrapper also covers both directions).
 public sealed class ImageCodec : EngineModuleRules
 {
@@ -19,5 +19,13 @@ public sealed class ImageCodec : EngineModuleRules
 
     protected override string[] PublicDependencies => ["Core", "Texture", "AssetRuntime"];
 
-    protected override string[] PrivateDependencies => ["Compression"];
+    // OpenEXR (OpenEXRCore) and libtiff decode EXR and TIFF sources (section 12.10); their headers stay private to this module.
+    // LibTiff comes before Zlib so that a left-to-right static linker resolves its zlib references.
+    protected override string[] PrivateDependencies => ["Compression", "OpenExr", "LibTiff", "Zlib"];
+
+    protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
+        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "OpenExr", "LibTiff");
+
+    protected override IReadOnlyList<string> PrivateDefines(BuildContext context) =>
+        ThirdPartyModuleRules.ConsumerDefines(context, "OpenExr", "LibTiff");
 }

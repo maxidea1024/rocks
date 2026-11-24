@@ -125,7 +125,12 @@ enum class AssetDiagnosticCode : uint16 {
     // 채널(IgnoredSourceChannels — 경고, detail = 버린 수).
     LossySource,
     NonSrgbSource,
-    IgnoredSourceChannels
+    IgnoredSourceChannels,
+    // 텍스처 원본(AssetSystem 12.10절 — A5f 디코더): 버린 원본 mip(IgnoredSourceMips — 경고,
+    // detail = slice당 버린 mip 수 — mip 0만 쓴다), 버린 추가 이미지(IgnoredSourceImages — 경고,
+    // detail = 버린 수 — TIFF 다음 IFD·EXR 다른 part).
+    IgnoredSourceMips,
+    IgnoredSourceImages
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

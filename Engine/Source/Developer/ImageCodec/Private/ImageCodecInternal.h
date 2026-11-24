@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Base/NumericLimits.h>
+#include <Core/Math/MathUtility.h>
 #include <ImageCodec/ImageDecode.h>
+#include <Platform/Memory.h>
 
 // 디코더 공통부다(Docs/Design/AssetSystem 12.9절): 실패·경고 기록, 결과 할당(한도 판정), 정수 읽기.
 namespace rocks::image::detail {
@@ -37,26 +39,37 @@ inline Result<void> Warn(ImageDecodeResult& out, AssetDiagnosticCode code, uint3
     return Result<void>::Success();
 }
 
-// 결과를 정하고 0으로 채운 픽셀 버퍼를 잡는다. 한 변·결과 byte 한도는 할당 전에 본다.
+// 한도 초과다(InvalidSource/CapacityExceeded).
+inline Result<void> OverLimit(ImageDecodeResult& out, uint64 offset) noexcept {
+    return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::CapacityExceeded, offset);
+}
+
+// 결과를 정하고 0으로 채운 픽셀 버퍼를 잡는다(slice numSlices개). 한 변·slice 수·결과 byte 한도는
+// 할당 전에 본다.
 inline Result<void> AllocateImage(const ImageDecodeLimits& limits, TextureSourceFormat format,
-                                  uint32 width, uint32 height, ImageDecodeResult& out) noexcept {
-    if (width == 0 || height == 0) {
+                                  uint32 width, uint32 height, ImageDecodeResult& out,
+                                  uint32 numSlices = 1) noexcept {
+    if (width == 0 || height == 0 || numSlices == 0) {
         return Invalid(out, 0);
     }
 
-    if (width > limits.maxDimension || height > limits.maxDimension) {
-        return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::CapacityExceeded, 0);
+    if (width > limits.maxDimension || height > limits.maxDimension ||
+        numSlices > limits.maxSlices) {
+        return OverLimit(out, 0);
     }
 
-    const uint64 bytes = uint64{width} * height * TextureSourceTexelBytes(format);
-    if (bytes > limits.maxPixelBytes || bytes > NumericLimits<usize>::Max()) {
-        return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::CapacityExceeded, 0);
+    // 세 인자가 모두 2^32 미만이고 texel은 16 byte 이하라 곱이 넘치지 않는 단계로 나눠 본다.
+    const uint64 sliceBytes = uint64{width} * height * TextureSourceTexelBytes(format);
+    if (sliceBytes > limits.maxPixelBytes || sliceBytes * numSlices > limits.maxPixelBytes ||
+        sliceBytes * numSlices > NumericLimits<usize>::Max()) {
+        return OverLimit(out, 0);
     }
 
+    const uint64 bytes = sliceBytes * numSlices;
     out.image.format = format;
     out.image.width = width;
     out.image.height = height;
-    out.image.numSlices = 1;
+    out.image.numSlices = numSlices;
     out.image.pixels.Clear();
     if (auto sized = out.image.pixels.TryResize(static_cast<usize>(bytes)); !sized) {
         return Resource(out, sized.Error());
@@ -67,6 +80,36 @@ inline Result<void> AllocateImage(const ImageDecodeLimits& limits, TextureSource
     }
 
     return Result<void>::Success();
+}
+
+// float 원본의 NaN·Inf를 정리한다(12.2절): NaN → 0, ±Inf → ±float 최대 유한값.
+inline float SanitizeFloat(float value) noexcept {
+    if (math::IsNaN(value)) {
+        return 0.0f;
+    }
+
+    if (!math::IsFinite(value)) {
+        return value > 0 ? NumericLimits<float>::Max() : -NumericLimits<float>::Max();
+    }
+
+    return value;
+}
+
+// half 비트의 NaN·Inf를 같은 규칙으로 정리한다(NaN → +0, ±Inf → ±65504).
+inline uint16 SanitizeHalfBits(uint16 bits) noexcept {
+    constexpr uint16 HalfExponentMask = 0x7C00;
+    constexpr uint16 HalfMantissaMask = 0x03FF;
+    constexpr uint16 HalfSignMask = 0x8000;
+    constexpr uint16 HalfMaxFinite = 0x7BFF;
+    if ((bits & HalfExponentMask) != HalfExponentMask) {
+        return bits;
+    }
+
+    if ((bits & HalfMantissaMask) != 0) {
+        return 0;
+    }
+
+    return static_cast<uint16>((bits & HalfSignMask) | HalfMaxFinite);
 }
 
 constexpr uint16 LoadLe16(const uint8* data) noexcept {
@@ -96,6 +139,18 @@ inline void StoreLe16(uint8* data, uint16 value) noexcept {
     data[1] = static_cast<uint8>(value >> 8);
 }
 
+inline void StoreLe32(uint8* data, uint32 value) noexcept {
+    data[0] = static_cast<uint8>(value);
+    data[1] = static_cast<uint8>(value >> 8);
+    data[2] = static_cast<uint8>(value >> 16);
+    data[3] = static_cast<uint8>(value >> 24);
+}
+
+// float 하나를 정리해 little-endian으로 쓴다.
+inline void StoreSanitizedFloat(uint8* data, float value) noexcept {
+    StoreLe32(data, platform::BitCast<uint32>(SanitizeFloat(value)));
+}
+
 // w비트 값 v를 8비트로 넓힌다(v × 255 / (2^w − 1), round-half-up — 12.2절). w는 1–16이다.
 constexpr uint8 ExpandToByte(uint32 value, uint32 bits) noexcept {
     const uint32 maximum = bits >= 32 ? NumericLimits<uint32>::Max() : ((1u << bits) - 1u);
@@ -109,6 +164,14 @@ Result<void> DecodeTga(Allocator& allocator, Span<const uint8> file,
 Result<void> DecodePng(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
 Result<void> DecodePsd(Allocator& allocator, Span<const uint8> file,
+                       const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
+Result<void> DecodeDds(Allocator& allocator, Span<const uint8> file,
+                       const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
+Result<void> DecodeTiff(Allocator& allocator, Span<const uint8> file,
+                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
+Result<void> DecodeHdr(Allocator& allocator, Span<const uint8> file,
+                       const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
+Result<void> DecodeExr(Allocator& allocator, Span<const uint8> file,
                        const ImageDecodeLimits& limits, ImageDecodeResult& out) noexcept;
 
 } // namespace rocks::image::detail

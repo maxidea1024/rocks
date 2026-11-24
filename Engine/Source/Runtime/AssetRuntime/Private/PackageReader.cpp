@@ -1063,6 +1063,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "NonSrgbSource";
     case AssetDiagnosticCode::IgnoredSourceChannels:
         return "IgnoredSourceChannels";
+    case AssetDiagnosticCode::IgnoredSourceMips:
+        return "IgnoredSourceMips";
+    case AssetDiagnosticCode::IgnoredSourceImages:
+        return "IgnoredSourceImages";
     }
 
     return "Unknown";
@@ -1072,6 +1076,8 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     switch (code) {
     case AssetDiagnosticCode::NonSrgbSource:
     case AssetDiagnosticCode::IgnoredSourceChannels:
+    case AssetDiagnosticCode::IgnoredSourceMips:
+    case AssetDiagnosticCode::IgnoredSourceImages:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:

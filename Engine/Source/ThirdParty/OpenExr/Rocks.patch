@@ -1,0 +1,90 @@
+diff --git a/src/lib/OpenEXRCore/OpenEXRConfig.h b/src/lib/OpenEXRCore/OpenEXRConfig.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/OpenEXRConfig.h
+@@ -0,0 +1,38 @@
++/* Rocks configuration header for OpenEXRCore 3.4.3 (Docs/Design/AssetSystem section 12.10). The OpenEXR CMake build generates
++   this file from cmake/OpenEXRConfig.h.in. Rocks compiles only the C core as a static library, so it writes by hand the subset
++   OpenEXRCore uses: the version macros, empty export macros (no shared library, no visibility attributes) and the deprecation
++   macro. The C++ library macros (namespaces, Imath and OpenJPH versions) are not needed by the C core. */
++#ifndef INCLUDED_OPENEXR_CONFIG_H
++#define INCLUDED_OPENEXR_CONFIG_H 1
++
++#pragma once
++
++#ifndef INCLUDED_OPENEXR_VERSION_H
++#define OPENEXR_VERSION_MAJOR 3
++#define OPENEXR_VERSION_MINOR 4
++#define OPENEXR_VERSION_PATCH 3
++#endif
++
++#define OPENEXR_VERSION_STRING "3.4.3"
++#define OPENEXR_PACKAGE_STRING "OpenEXR 3.4.3"
++#define OPENEXR_VERSION_RELEASE_TYPE ""
++#define OPENEXR_VERSION_EXTRA ""
++#define OPENEXR_VERSION_HEX                                                                       \
++    (((OPENEXR_VERSION_MAJOR) << 24) | ((OPENEXR_VERSION_MINOR) << 16) |                          \
++     ((OPENEXR_VERSION_PATCH) << 8))
++
++#define OPENEXR_EXPORT
++#define OPENEXR_HIDDEN
++#define OPENEXR_EXPORT_TYPE
++#define OPENEXR_EXPORT_EXTERN_TEMPLATE
++#define OPENEXR_EXPORT_ENUM
++#define OPENEXR_EXPORT_TEMPLATE_TYPE
++#define OPENEXR_EXPORT_TEMPLATE_INSTANCE
++
++#if defined(__cplusplus) && (__cplusplus >= 201402L)
++#define OPENEXR_DEPRECATED(msg) [[deprecated(msg)]]
++#else
++#define OPENEXR_DEPRECATED(msg) __attribute__((deprecated(msg)))
++#endif
++
++#endif /* INCLUDED_OPENEXR_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/OpenEXRConfigInternal.h b/src/lib/OpenEXRCore/OpenEXRConfigInternal.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/OpenEXRConfigInternal.h
+@@ -0,0 +1,13 @@
++/* Rocks configuration header for OpenEXRCore 3.4.3 (Docs/Design/AssetSystem section 12.10), written by hand in place of the
++   file CMake generates from cmake/OpenEXRConfigInternal.h.in. Only the internal libdeflate copy is selected. The inline AVX
++   assembly probe (OPENEXR_IMF_HAVE_GCC_INLINE_ASM_AVX) stays undefined so that the DWA path uses its portable code, and
++   OPENEXR_MISSING_ARM_VLD1 stays undefined because every Rocks ARM compiler has the vld1q_*_x4 intrinsics. The other entries of
++   the template configure the C++ library and the threading pool, which Rocks does not build. */
++#ifndef INCLUDED_OPENEXR_INTERNAL_CONFIG_H
++#define INCLUDED_OPENEXR_INTERNAL_CONFIG_H 1
++
++#pragma once
++
++#define OPENEXR_USE_INTERNAL_DEFLATE 1
++
++#endif /* INCLUDED_OPENEXR_INTERNAL_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/IlmThreadConfig.h b/src/lib/OpenEXRCore/IlmThreadConfig.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/IlmThreadConfig.h
+@@ -0,0 +1,10 @@
++/* Rocks configuration header for OpenEXRCore 3.4.3 (Docs/Design/AssetSystem section 12.10). openexr_config.h includes the
++   IlmThread configuration, which CMake generates from cmake/IlmThreadConfig.h.in. OpenEXRCore tests the threading macro with
++   #ifdef, so Rocks defines nothing here: no context mutex, no POSIX file locking. ImageCodec uses one context from one thread
++   with memory read callbacks, which is safe without locks. */
++#ifndef INCLUDED_ILMTHREAD_CONFIG_H
++#define INCLUDED_ILMTHREAD_CONFIG_H 1
++
++#pragma once
++
++#endif /* INCLUDED_ILMTHREAD_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/ImathConfig.h b/src/lib/OpenEXRCore/ImathConfig.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/ImathConfig.h
+@@ -0,0 +1,9 @@
++/* Rocks stand-in for the Imath configuration header that openexr_config.h includes (Docs/Design/AssetSystem section 12.10). Imath
++   is not imported. The version macros stay undefined, so internal_coding.h uses the half conversion built into OpenEXRCore
++   instead of including the Imath half.h. */
++#ifndef INCLUDED_IMATH_CONFIG_H
++#define INCLUDED_IMATH_CONFIG_H 1
++
++#pragma once
++
++#endif /* INCLUDED_IMATH_CONFIG_H */

@@ -165,9 +165,12 @@ Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFile
     out.failure = ImageDecodeFailure{};
     out.image.pixels.Clear();
     out.image.format = TextureSourceFormat::Invalid;
+    out.image.dimension = TextureDimension::Texture2D;
+    out.image.encoding = ImageColorEncoding::Unknown;
     out.image.width = 0;
     out.image.height = 0;
     out.image.numSlices = 1;
+    out.image.sourceMips = 1;
     if (format == ImageFileFormat::Unknown) {
         format = DetectImageFileFormat(file, pathHint);
     }
@@ -186,16 +189,24 @@ Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFile
     case ImageFileFormat::Psd:
         decoded = detail::DecodePsd(allocator, file, limits, out);
         break;
+    case ImageFileFormat::Dds:
+        decoded = detail::DecodeDds(allocator, file, limits, out);
+        break;
+    case ImageFileFormat::Tiff:
+        decoded = detail::DecodeTiff(allocator, file, limits, out);
+        break;
+    case ImageFileFormat::Hdr:
+        decoded = detail::DecodeHdr(allocator, file, limits, out);
+        break;
+    case ImageFileFormat::Exr:
+        decoded = detail::DecodeExr(allocator, file, limits, out);
+        break;
     case ImageFileFormat::WebP:
         decoded = RejectWebP(file, out);
         break;
     case ImageFileFormat::Unknown:
-    case ImageFileFormat::Dds:
-    case ImageFileFormat::Tiff:
-    case ImageFileFormat::Hdr:
-    case ImageFileFormat::Exr:
     case ImageFileFormat::Jpeg:
-        // A5f·A5g 전에는 받지 않는다.
+        // JPEG은 A5g 전에는 받지 않는다.
         decoded = detail::Unsupported(out, 0);
         break;
     }
@@ -203,8 +214,12 @@ Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file, ImageFile
     if (!decoded) {
         out.image.pixels.Clear();
         out.image.format = TextureSourceFormat::Invalid;
+        out.image.dimension = TextureDimension::Texture2D;
+        out.image.encoding = ImageColorEncoding::Unknown;
         out.image.width = 0;
         out.image.height = 0;
+        out.image.numSlices = 1;
+        out.image.sourceMips = 1;
     }
 
     return decoded;

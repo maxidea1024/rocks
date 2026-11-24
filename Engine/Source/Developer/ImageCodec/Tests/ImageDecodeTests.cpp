@@ -727,7 +727,7 @@ TEST(ImageDecode_DetectionLimitsAndFailures) {
     SystemAllocator allocator;
     const uint8 dds[] = {'D', 'D', 'S', ' ', 0};
     CHECK(DetectImageFileFormat(dds) == ImageFileFormat::Dds);
-    CHECK(Fails(Decode(allocator, dds), AssetDiagnosticCode::UnsupportedSourceFormat));
+    CHECK(Fails(Decode(allocator, dds), AssetDiagnosticCode::InvalidSource));
     const uint8 jpeg[] = {0xFF, 0xD8, 0xFF, 0xE0};
     CHECK(DetectImageFileFormat(jpeg) == ImageFileFormat::Jpeg);
     const uint8 unknown[] = {1, 2, 3, 4};

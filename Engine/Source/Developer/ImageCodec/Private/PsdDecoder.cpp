@@ -72,18 +72,6 @@ bool PsdUnpackBits(const uint8* source, usize sourceBytes, uint8* dst, usize row
     return true;
 }
 
-float PsdSanitize(float value) noexcept {
-    if (math::IsNaN(value)) {
-        return 0.0f;
-    }
-
-    if (!math::IsFinite(value)) {
-        return value > 0 ? NumericLimits<float>::Max() : -NumericLimits<float>::Max();
-    }
-
-    return value;
-}
-
 } // namespace
 
 Result<void> DecodePsd(Allocator& allocator, Span<const uint8> file,
@@ -353,7 +341,7 @@ Result<void> DecodePsd(Allocator& allocator, Span<const uint8> file,
             // 32비트 float(big-endian) — 회색+알파는 RGBA32F(r = g = b).
             float values[4] = {0.0f, 0.0f, 0.0f, 1.0f};
             for (uint32 c = 0; c < used; ++c) {
-                values[c] = PsdSanitize(platform::BitCast<float>(LoadBe32(plane(c, x, y))));
+                values[c] = SanitizeFloat(platform::BitCast<float>(LoadBe32(plane(c, x, y))));
             }
 
             if (mode == PsdGrayscale && hasAlpha) {

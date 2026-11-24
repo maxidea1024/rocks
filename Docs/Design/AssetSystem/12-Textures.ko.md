@@ -372,7 +372,7 @@ BC·ASTC·ETC 인코더 없음, 렌더러는 비압축만. 쿠킹은 비압축�
 - 한도: `ImageDecodeLimits`에 `maxSlices`(2048 — D3D11 배열 크기·Volume 깊이 상한)를 더한다. `AllocateImage`는 결과 byte = w × h × texel × numSlices를 `maxPixelBytes`로 검사하도록 넓힌다. 깊이·배열 크기·면 수도 한도 대상이다(넘으면 `InvalidSource` + CapacityExceeded — 12.9절).
 
 **DDS**(자체 구현, UE ImageCore DDSFile.cpp 대조):
-- 헤더: `DDS ` + DDS_HEADER(크기 칸 124, 픽셀 형식 칸 32), FourCC `DX10`이면 DX10 확장(dxgiFormat·resourceDimension·miscFlag·arraySize).
+- 헤더: `DDS ` + DDS_HEADER(124 byte), FourCC `DX10`이면 DX10 확장(dxgiFormat·resourceDimension·miscFlag·arraySize). 헤더·픽셀 형식의 크기 칸(124·32)은 UE처럼 보지 않는다(구현 때 UE ParseHeader 대조 — 크기 칸이 틀린 작성기가 있다).
 - 형식(UE `DXGIRawFormatMap` 1289–1347·레거시 241–262 중 값의 의미가 보존되는 대응 — UE `bIsExactMatch`와 같지 않다. A8_UNORM·B8G8R8X8·R8G8·레거시 24비트·R8G8B8A8_UINT는 UE에서 비정확 표시지만 값을 보존해 옮길 수 있어 받는다):
   - G8: R8_UNORM·R8_TYPELESS·R8_UINT·A8_UNORM, 레거시 L8·A8.
   - RGBA8 (r, g, 0, 255): R8G8_UNORM·R8G8_TYPELESS·R8G8_UINT, 레거시 L8A8(마스크 두 변형 — UE와 같은 R8G8 규칙)(UE 1219–1240과 같다 — TextureSource에 2채널 색이 없다).
