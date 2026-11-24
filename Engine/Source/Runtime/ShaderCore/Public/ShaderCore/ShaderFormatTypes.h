@@ -54,17 +54,21 @@ enum ShaderFeatureBits : uint32 {
     ShaderFeatureVertexViewportLayerOutput = 1u << 2,
     // 형식 확장 typed UAV load(R32 밖 형식의 typed UAV 읽기, 11.1절 E8). 장치 보장 기능이며 D3D12는
     // 장치 요구 D3D12_TYPED_UAV_LOAD_ADDITIONAL_FORMATS로 보장한다.
-    ShaderFeatureTypedUavLoad = 1u << 3
+    ShaderFeatureTypedUavLoad = 1u << 3,
+    // 개발 전용 PS 진단 버퍼(7.2절 12항, 16.1절 SSD34). 런타임 확인 기능이다(Vulkan PS 쓰기가 선택
+    // 기능 fragmentStoresAndAtomics다).
+    ShaderFeatureDebugPixelUav = 1u << 4
 };
 
 // 모든 기능 비트다(SC10이 기능마다 ROCKS_FEATURE_<이름>을 정의한다 — 어휘를 더하면 이 값도 바꾼다).
 inline constexpr uint32 AllShaderFeatures = ShaderFeatureCompute | ShaderFeatureWaveOperations |
                                             ShaderFeatureVertexViewportLayerOutput |
-                                            ShaderFeatureTypedUavLoad;
+                                            ShaderFeatureTypedUavLoad | ShaderFeatureDebugPixelUav;
 
 // 런타임 확인 기능 비트 묶음이다. 나머지 기능은 장치 보장 기능이다. 셰이더 라이브러리 항목은
 // 요구 기능 가운데 이 비트만 담는다(12.2절).
-inline constexpr uint32 RuntimeCheckedShaderFeatures = ShaderFeatureVertexViewportLayerOutput;
+inline constexpr uint32 RuntimeCheckedShaderFeatures =
+    ShaderFeatureVertexViewportLayerOutput | ShaderFeatureDebugPixelUav;
 
 // feature 비트 하나가 런타임 확인 기능인가.
 constexpr bool IsRuntimeCheckedShaderFeature(uint32 feature) noexcept {

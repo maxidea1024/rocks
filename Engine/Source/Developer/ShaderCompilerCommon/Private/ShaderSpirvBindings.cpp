@@ -1,12 +1,20 @@
-#include "SpirvReflection.h"
+#include <ShaderCompilerCommon/ShaderSpirvBindings.h>
 
-#include <ShaderCompilerCommon/ShaderReflection.h>
+#include <Core/Algorithms.h>
 #include <spirv_reflect.h>
 
-// SPIR-V 리플렉션(Docs/Design/ShaderSystem 16.1절 SSD30·SSD33)이다.
+// SPIR-V 경로 바인딩 정규화(Docs/Design/ShaderSystem 16.1절 SSD30·SSD33·SSD34·SSD36·SSD39·SSD40)다.
+// 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
-namespace spirv_reflection_detail {
+namespace spirv_bindings_detail {
+
+// 변환 결과다.
+enum class ConvertOutcome : uint8 {
+    Success,
+    CompileError,
+    ToolError
+};
 
 // SPIRV-Reflect 모듈 수명이다.
 class Module {
@@ -38,6 +46,8 @@ private:
 
 // 열거 결과 칸 상한이다(셰이더 하나의 자원·입출력은 이보다 적다 — 넘으면 리플렉션 실패로 본다).
 constexpr uint32 MaxReflectedItems = 256;
+// texture 번호 사용 표시 비트 수(u32 — Metal texture 인덱스 상한 31보다 넉넉하다)다.
+constexpr uint32 MetalIndexMaskBits = 32;
 
 constexpr StringView GlobalsName("$Globals");
 
@@ -80,8 +90,8 @@ public:
         : out_(out), diagnostics_(diagnostics) {
     }
 
-    ShaderToolOutcome Run(const SpvReflectShaderModule& raw,
-                          const SpvReflectShaderModule& rewritten) noexcept {
+    ConvertOutcome Run(const SpvReflectShaderModule& raw,
+                       const SpvReflectShaderModule& rewritten) noexcept {
         SpvReflectDescriptorBinding* rawBindings[MaxReflectedItems] = {};
         uint32 rawCount = MaxReflectedItems;
         SpvReflectDescriptorBinding* bindings[MaxReflectedItems] = {};
@@ -103,8 +113,8 @@ public:
                 return Tool("rewritten SPIR-V binding has no source binding");
             }
 
-            const ShaderToolOutcome added = AddBinding(*bindings[index], *original);
-            if (added != ShaderToolOutcome::Success) {
+            const ConvertOutcome added = AddBinding(*bindings[index], *original);
+            if (added != ConvertOutcome::Success) {
                 return added;
             }
         }
@@ -139,7 +149,7 @@ public:
             return Tool("SPIR-V output reflection failed");
         }
 
-        return ShaderToolOutcome::Success;
+        return ConvertOutcome::Success;
     }
 
 private:
@@ -159,15 +169,15 @@ private:
         return name != nullptr ? StringView(name) : StringView();
     }
 
-    ShaderToolOutcome Tool(StringView message) noexcept {
+    ConvertOutcome Tool(StringView message) noexcept {
         (void)diagnostics_.TryAppend(message);
-        return ShaderToolOutcome::ToolError;
+        return ConvertOutcome::ToolError;
     }
 
-    ShaderToolOutcome Compile(StringView name, StringView message) noexcept {
+    ConvertOutcome Compile(StringView name, StringView message) noexcept {
         (void)(diagnostics_.TryAppend("resource '") && diagnostics_.TryAppend(name) &&
                diagnostics_.TryAppend("': ") && diagnostics_.TryAppend(message));
-        return ShaderToolOutcome::CompileError;
+        return ConvertOutcome::CompileError;
     }
 
     // 블록 멤버 하나와 (구조체면) 그 자식이다.
@@ -249,12 +259,13 @@ private:
         return true;
     }
 
-    ShaderToolOutcome AddBinding(const SpvReflectDescriptorBinding& binding,
-                                 const SpvReflectDescriptorBinding& original) noexcept {
+    ConvertOutcome AddBinding(const SpvReflectDescriptorBinding& binding,
+                              const SpvReflectDescriptorBinding& original) noexcept {
         ShaderReflectedResource resource;
         resource.name = Name(binding.name);
         resource.slot = binding.binding;
         resource.count = binding.count;
+        resource.debugBuffer = binding.set == SpirvDebugBufferSet;
         switch (binding.descriptor_type) {
         case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
             resource.kind = ShaderResourceKind::ConstantBuffer;
@@ -293,7 +304,7 @@ private:
         if (resource.kind == ShaderResourceKind::ConstantBuffer) {
             if (resource.name == GlobalsName) {
                 out_.hasGlobals = true;
-                return ShaderToolOutcome::Success;
+                return ConvertOutcome::Success;
             }
 
             resource.constantBufferBytes = binding.block.size;
@@ -302,7 +313,7 @@ private:
             }
         }
 
-        return out_.resources.TryPushBack(resource) ? ShaderToolOutcome::Success
+        return out_.resources.TryPushBack(resource) ? ConvertOutcome::Success
                                                     : Tool("out of memory");
     }
 
@@ -332,40 +343,250 @@ private:
     String& diagnostics_;
 };
 
-} // namespace spirv_reflection_detail
+} // namespace spirv_bindings_detail
 
-ShaderToolOutcome BuildSpirvBindingLayout(const ShaderFormatDefinition& format, uint32 stage,
-                                          Span<const ShaderParameterLayout> layouts,
-                                          Span<const uint32> raw, Span<const uint32> rewritten,
-                                          Array<uint8>& out, String& diagnostics) noexcept {
-    using namespace spirv_reflection_detail;
+bool AssignMetalBindingIndices(ShaderBindingLayout& layout, Array<MetalResourceBinding>& out,
+                               uint32& sizeIndex, String& diagnostics) noexcept {
+    using namespace spirv_bindings_detail;
     out.Clear();
+    sizeIndex = NoMetalIndex;
+    const uint32 stageSet = layout.stage == ShaderStagePixel ? 1u : 0u;
+    const uint32 maxBuffer =
+        layout.stage == ShaderStageCompute ? MetalComputeMaxBuffer : MetalGraphicsMaxBuffer;
+    const auto isDebug = [](const ShaderBindingResource& resource) noexcept {
+        return resource.kind == ShaderResourceKind::StorageBufferReadWrite &&
+               resource.name == StringView("RocksDebugBuffer");
+    };
+    const auto push = [&](uint32 set, uint32 binding, uint32 buffer, uint32 texture,
+                          uint32 sampler) noexcept {
+        return static_cast<bool>(
+            out.TryPushBack(MetalResourceBinding{set, binding, buffer, texture, sampler}));
+    };
+    if (layout.rootConstantBytes > 0 &&
+        !push(MetalPushConstantSet, 0, MetalRootConstantsBuffer, NoMetalIndex, NoMetalIndex)) {
+        return false;
+    }
+
+    // buffer: 1부터 UAV(texture 번호도 같은 값), 상수 버퍼, 구조화 SRV, 크기 side table.
+    uint32 nextBuffer = MetalRootConstantsBuffer + 1;
+    uint32 usedTextures = 0;
+    bool storage = false;
+    const ShaderResourceKind order[] = {
+        ShaderResourceKind::StorageBufferReadWrite, ShaderResourceKind::StorageImage,
+        ShaderResourceKind::ConstantBuffer, ShaderResourceKind::StorageBufferRead};
+    for (const ShaderResourceKind kind : order) {
+        for (ShaderBindingResource& resource : layout.resources) {
+            if (resource.kind != kind) {
+                continue;
+            }
+
+            const uint32 binding = resource.slot;
+            if (isDebug(resource)) {
+                if (!push(SpirvDebugBufferSet, binding, MetalDebugBuffer, NoMetalIndex,
+                          NoMetalIndex)) {
+                    return false;
+                }
+
+                resource.slot = static_cast<uint16>(MetalDebugBuffer);
+                continue;
+            }
+
+            const bool unordered = kind == ShaderResourceKind::StorageBufferReadWrite ||
+                                   kind == ShaderResourceKind::StorageImage;
+            storage = storage || kind == ShaderResourceKind::StorageBufferReadWrite ||
+                      kind == ShaderResourceKind::StorageBufferRead;
+            const uint32 buffer = nextBuffer++;
+            if (unordered && buffer < MetalIndexMaskBits) {
+                usedTextures |= 1u << buffer;
+            }
+
+            if (!push(stageSet, binding, buffer, unordered ? buffer : NoMetalIndex, NoMetalIndex)) {
+                return false;
+            }
+
+            resource.slot = static_cast<uint16>(buffer);
+        }
+    }
+
+    if (storage) {
+        sizeIndex = nextBuffer++;
+    }
+
+    const uint32 lastBuffer = nextBuffer - 1;
+    if (nextBuffer > MetalRootConstantsBuffer + 1 && lastBuffer > maxBuffer) {
+        (void)diagnostics.TryAppend(
+            "Metal buffer index exceeds the stage limit (vertex and pixel 21, "
+            "compute 30 — ShaderSystem 7.2 item 4)");
+        return false;
+    }
+
+    // texture: UAV가 차지한 번호를 비우고 SRV 텍스처는 0과 남은 가장 낮은 번호부터. sampler: 0부터.
+    uint32 nextTexture = 0;
+    uint32 nextSampler = 0;
+    for (ShaderBindingResource& resource : layout.resources) {
+        const uint32 binding = resource.slot;
+        if (resource.kind == ShaderResourceKind::SampledTexture) {
+            while (nextTexture < MetalIndexMaskBits && (usedTextures & (1u << nextTexture)) != 0) {
+                ++nextTexture;
+            }
+
+            if (!push(stageSet, binding, NoMetalIndex, nextTexture, NoMetalIndex)) {
+                return false;
+            }
+
+            resource.slot = static_cast<uint16>(nextTexture++);
+        } else if (resource.kind == ShaderResourceKind::Sampler) {
+            if (!push(stageSet, binding, NoMetalIndex, NoMetalIndex, nextSampler)) {
+                return false;
+            }
+
+            resource.slot = static_cast<uint16>(nextSampler++);
+        }
+    }
+
+    // storage image의 slot은 texture 번호(= buffer 번호)다. 값 1 규칙대로 (종류, slot) 순으로 다시
+    // 맞춘다.
+    layout.resources.Sort(
+        [](const ShaderBindingResource& a, const ShaderBindingResource& b) noexcept {
+            return a.kind < b.kind || (a.kind == b.kind && a.slot < b.slot);
+        });
+    // 멤버 범위는 자원 순서를 따라야 한다(firstMember를 다시 잇는다).
+    Array<ShaderBindingMember> members(layout.members.GetAllocator());
+    if (!members.TryReserve(layout.members.Size())) {
+        return false;
+    }
+
+    for (ShaderBindingResource& resource : layout.resources) {
+        const uint32 first = static_cast<uint32>(members.Size());
+        for (uint32 member = 0; member < resource.memberCount; ++member) {
+            (void)members.TryPushBack(layout.members[resource.firstMember + member]);
+        }
+
+        resource.firstMember = first;
+    }
+
+    layout.members = Move(members);
+    return true;
+}
+
+ShaderWorkerJobStatus BuildSpirvBindingLayout(const SpirvBindingRequest& request,
+                                              SpirvBindingResult& out,
+                                              String& diagnostics) noexcept {
+    using namespace spirv_bindings_detail;
+    out.bindingLayout.Clear();
+    out.metalBindings.Clear();
+    out.metalBufferSizeIndex = NoMetalIndex;
+    if (request.format == nullptr) {
+        (void)diagnostics.TryAppend("SPIR-V binding request has no format");
+        return ShaderWorkerJobStatus::ToolError;
+    }
+
     Module source;
     Module module;
-    if (!source.Open(raw) || !module.Open(rewritten)) {
+    if (!source.Open(request.raw) || !module.Open(request.rewritten)) {
         (void)diagnostics.TryAppend("SPIRV-Reflect could not parse the module");
-        return ShaderToolOutcome::ToolError;
+        return ShaderWorkerJobStatus::ToolError;
     }
 
-    ShaderReflection reflection(out.GetAllocator());
-    reflection.stage = stage;
+    Allocator& allocator = out.bindingLayout.GetAllocator();
+    ShaderReflection reflection(allocator);
+    reflection.stage = request.stage;
+    reflection.requiredFeatures = request.requiredFeatures;
+    if (request.hasUses) {
+        reflection.hasSamplerUses = true;
+        if (!reflection.samplerUses.TryAppend(request.uses)) {
+            return ShaderWorkerJobStatus::ToolError;
+        }
+    }
+
     Converter converter(reflection, diagnostics);
-    const ShaderToolOutcome converted = converter.Run(*source.Get(), *module.Get());
-    if (converted != ShaderToolOutcome::Success) {
-        return converted;
+    const ConvertOutcome converted = converter.Run(*source.Get(), *module.Get());
+    if (converted != ConvertOutcome::Success) {
+        return converted == ConvertOutcome::CompileError ? ShaderWorkerJobStatus::CompileError
+                                                         : ShaderWorkerJobStatus::ToolError;
     }
 
-    ShaderBindingLayout layout(out.GetAllocator());
-    if (!NormalizeShaderReflection(format, reflection, layouts, layout, diagnostics)) {
-        return ShaderToolOutcome::CompileError;
+    ShaderBindingLayout layout(allocator);
+    if (!NormalizeShaderReflection(*request.format, reflection, request.layouts, layout,
+                                   diagnostics)) {
+        return ShaderWorkerJobStatus::CompileError;
     }
 
-    if (!EncodeShaderBindingLayout(layout, out)) {
+    if (request.format->backend == ShaderBackend::Metal &&
+        !AssignMetalBindingIndices(layout, out.metalBindings, out.metalBufferSizeIndex,
+                                   diagnostics)) {
+        return ShaderWorkerJobStatus::CompileError;
+    }
+
+    if (!EncodeShaderBindingLayout(layout, out.bindingLayout)) {
         (void)diagnostics.TryAppend("binding layout encoding failed");
-        return ShaderToolOutcome::ToolError;
+        return ShaderWorkerJobStatus::ToolError;
     }
 
-    return ShaderToolOutcome::Success;
+    return ShaderWorkerJobStatus::Success;
+}
+
+bool CheckStorageImageFormats(StringView source, String& diagnostics) noexcept {
+    constexpr StringView Types[] = {"RWTexture1DArray", "RWTexture2DArray", "RWTexture1D",
+                                    "RWTexture2D",      "RWTexture3D",      "RWBuffer"};
+    constexpr StringView Attribute("[[vk::image_format(");
+    const char* text = source.Data();
+    const usize size = source.ByteCount();
+    const auto identifier = [](char value) noexcept {
+        return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') ||
+               (value >= '0' && value <= '9') || value == '_';
+    };
+    for (usize at = 0; at < size; ++at) {
+        if (!identifier(text[at]) || (at > 0 && identifier(text[at - 1]))) {
+            continue;
+        }
+
+        usize end = at;
+        while (end < size && identifier(text[end])) {
+            ++end;
+        }
+
+        const StringView word(text + at, end - at);
+        bool storage = false;
+        for (const StringView type : Types) {
+            storage = storage || word == type;
+        }
+
+        if (!storage) {
+            at = end - 1;
+            continue;
+        }
+
+        // 바로 앞(공백 제외)이 ]]이고 그 [[가 vk::image_format(으로 시작해야 한다.
+        usize before = at;
+        while (before > 0 && (text[before - 1] == ' ' || text[before - 1] == '\t' ||
+                              text[before - 1] == '\r' || text[before - 1] == '\n')) {
+            --before;
+        }
+
+        bool formatted = false;
+        if (before >= 2 && text[before - 1] == ']' && text[before - 2] == ']') {
+            usize open = before - 2;
+            while (open >= 2 && !(text[open - 1] == '[' && text[open - 2] == '[')) {
+                --open;
+            }
+
+            formatted = open >= 2 && StringView(text + open - 2, size - (open - 2))
+                                         .StartsWith(Attribute, StringComparison::CaseSensitive);
+        }
+
+        if (!formatted) {
+            (void)(diagnostics.TryAppend("storage image declaration '") &&
+                   diagnostics.TryAppend(word) &&
+                   diagnostics.TryAppend("' needs ROCKS_IMAGE_FORMAT(<format>) (ShaderSystem 7.2 "
+                                         "item 1)"));
+            return false;
+        }
+
+        at = end - 1;
+    }
+
+    return true;
 }
 
 } // namespace rocks::shader

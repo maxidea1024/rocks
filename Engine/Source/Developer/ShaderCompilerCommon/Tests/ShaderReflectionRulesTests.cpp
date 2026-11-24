@@ -2,6 +2,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderReflection.h>
+#include <ShaderCompilerCommon/ShaderSpirvBindings.h>
 #include <Base/InitializerList.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
@@ -395,6 +396,208 @@ TEST(ShaderBindingRules_SemanticsPairsAndCollisions) {
     CHECK(split.semantic == StringView("TEXCOORD") && split.index == 12);
     const ShaderReflectedSignature plain = SplitShaderSemantic("SV_Target");
     CHECK(plain.semantic == StringView("SV_Target") && plain.index == 0);
+}
+
+TEST(ShaderBindingRules_FeaturesOrderAndDebugBuffer) {
+    const Formats formats;
+    // VS layer·viewport 출력: job 요구 기능과 형식 기능 둘 다 있어야 한다(16.1절 SSD35).
+    Case layer(ShaderStageVertex);
+    layer.Out("SV_Position");
+    layer.Out("SV_RenderTargetArrayIndex");
+    layer.Out("SV_ViewportArrayIndex");
+    CHECK(Expect(formats.d3d12, layer, "vertexViewportLayerOutput"));
+    layer.reflection.requiredFeatures = ShaderFeatureVertexViewportLayerOutput;
+    CHECK(Expect(formats.d3d12, layer, nullptr));
+    CHECK(Expect(formats.vulkan, layer, nullptr));
+    CHECK(Expect(formats.gles, layer, "vertexViewportLayerOutput"));
+    Case pixelLayer(ShaderStagePixel);
+    pixelLayer.reflection.requiredFeatures = ShaderFeatureVertexViewportLayerOutput;
+    pixelLayer.In("SV_RenderTargetArrayIndex");
+    CHECK(Expect(formats.d3d12, pixelLayer, "pixel input semantic"));
+
+    // 단계 사이 마스크와 선언 순서(D3D signature — SSD37).
+    Case ordered(ShaderStageVertex);
+    ordered.Out("SV_Position");
+    ordered.Out("TEXCOORD", 2);
+    ordered.Out("TEXCOORD", 0);
+    CHECK(Expect(formats.vulkan, ordered, nullptr));
+    ordered.reflection.signatureOrdered = true;
+    CHECK(Expect(formats.d3d12, ordered, "ascending n order"));
+    Case ascending(ShaderStagePixel);
+    ascending.reflection.signatureOrdered = true;
+    ascending.In("SV_Position");
+    ascending.In("TEXCOORD", 0);
+    ascending.In("TEXCOORD", 2);
+    ascending.Out("SV_Target");
+    ShaderBindingLayout layout(TestAllocator());
+    String diagnostics(TestAllocator());
+    REQUIRE(
+        NormalizeShaderReflection(formats.d3d12, ascending.reflection, {}, layout, diagnostics));
+    CHECK(layout.interStageMask == 0b101);
+
+    // PS 진단 버퍼(SSD34): 예약 위치·이름, 형식 기능, PS만, 상한·UAV 단계에 세지 않는다.
+    const auto debugCase = [](uint32 stage, const char* name, bool reserved) noexcept {
+        Case test(stage);
+        if (stage == ShaderStagePixel) {
+            test.Out("SV_Target");
+        }
+
+        test.Resource(ShaderResourceKind::StorageBufferReadWrite, name, 0);
+        test.reflection.resources[0].debugBuffer = reserved;
+        return test;
+    };
+    CHECK(Expect(formats.d3d12, debugCase(ShaderStagePixel, "RocksDebugBuffer", true), nullptr));
+    CHECK(Expect(formats.vulkan, debugCase(ShaderStagePixel, "RocksDebugBuffer", true), nullptr));
+    CHECK(Expect(formats.d3d11, debugCase(ShaderStagePixel, "RocksDebugBuffer", true),
+                 "debugPixelUav"));
+    CHECK(Expect(formats.d3d12, debugCase(ShaderStageVertex, "RocksDebugBuffer", true),
+                 "debugPixelUav"));
+    CHECK(
+        Expect(formats.d3d12, debugCase(ShaderStagePixel, "RocksDebugBuffer", false), "reserved"));
+    CHECK(Expect(formats.d3d12, debugCase(ShaderStagePixel, "Other", true), "reserved"));
+    CHECK(Expect(formats.d3d12, debugCase(ShaderStagePixel, "Other", false), "uavStages"));
+}
+
+TEST(ShaderBindingRules_SpirvSamplerUses) {
+    const Formats formats;
+    const auto withUses = [](std::initializer_list<ShaderSamplerUse> uses) noexcept {
+        Case test(ShaderStagePixel);
+        test.Out("SV_Target");
+        test.Resource(ShaderResourceKind::SampledTexture, "Albedo", 0);
+        test.Resource(ShaderResourceKind::SampledTexture, "Noise", 1);
+        test.Resource(ShaderResourceKind::Sampler, "AlbedoSampler", 0);
+        test.Resource(ShaderResourceKind::Sampler, "SharedWrapSampler", 1);
+        test.Resource(ShaderResourceKind::Sampler, "SharedClampSampler", 2);
+        test.reflection.hasSamplerUses = true;
+        for (const ShaderSamplerUse& use : uses) {
+            CHECK(test.reflection.samplerUses.TryPushBack(use));
+        }
+
+        return test;
+    };
+    const Case good = withUses({{"Albedo", "AlbedoSampler"}, {"Noise", "SharedClampSampler"}});
+    ShaderBindingLayout layout(TestAllocator());
+    String diagnostics(TestAllocator());
+    REQUIRE(NormalizeShaderReflection(formats.vulkan, good.reflection, {}, layout, diagnostics));
+    CHECK(layout.resources[0].samplerSource == ShaderSamplerSource::Own &&
+          layout.resources[1].samplerSource == ShaderSamplerSource::SharedClamp);
+    CHECK(Expect(formats.vulkan,
+                 withUses({{"Albedo", "AlbedoSampler"}, {"Albedo", "SharedWrapSampler"}}),
+                 "exactly one sampler source"));
+    CHECK(Expect(formats.vulkan,
+                 withUses({{"Noise", "SharedWrapSampler"}, {"Noise", "SharedClampSampler"}}),
+                 "exactly one sampler source"));
+    CHECK(
+        Expect(formats.vulkan, withUses({{"Noise", "AlbedoSampler"}}), "neither its own XSampler"));
+}
+
+TEST(ShaderBindingRules_MetalIndicesAndImageFormats) {
+    // PS: 루트 상수, 구조화 UAV·storage image·상수 버퍼 둘·구조화 SRV, 텍스처 둘, 샘플러 둘(SSD39).
+    ShaderBindingLayout layout(TestAllocator());
+    layout.stage = ShaderStagePixel;
+    layout.rootConstantBytes = 16;
+    const auto add = [&](ShaderResourceKind kind, const char* name, uint16 slot) noexcept {
+        ShaderBindingResource resource;
+        resource.kind = kind;
+        resource.name = StringView(name);
+        resource.slot = slot;
+        resource.firstMember = static_cast<uint32>(layout.members.Size());
+        if (kind == ShaderResourceKind::ConstantBuffer) {
+            resource.constantBufferBytes = 16;
+            resource.memberCount = 1;
+            REQUIRE(layout.members.TryPushBack(ShaderBindingMember{StringView(name), 0, 16}));
+        }
+
+        REQUIRE(layout.resources.TryPushBack(resource));
+    };
+    add(ShaderResourceKind::ConstantBuffer, "View", 0);
+    add(ShaderResourceKind::ConstantBuffer, "Pass", 1);
+    add(ShaderResourceKind::SampledTexture, "Albedo", 5);
+    add(ShaderResourceKind::SampledTexture, "Noise", 6);
+    add(ShaderResourceKind::StorageBufferRead, "Lights", 2);
+    add(ShaderResourceKind::StorageBufferReadWrite, "Output", 3);
+    add(ShaderResourceKind::StorageImage, "Image", 4);
+    add(ShaderResourceKind::Sampler, "AlbedoSampler", 7);
+    add(ShaderResourceKind::Sampler, "SharedWrapSampler", 8);
+    Array<MetalResourceBinding> bindings(TestAllocator());
+    uint32 sizeIndex = 0;
+    String diagnostics(TestAllocator());
+    REQUIRE(AssignMetalBindingIndices(layout, bindings, sizeIndex, diagnostics));
+    // buffer: 0 루트 상수, 1 Output, 2 Image(texture 2도), 3·4 상수 버퍼, 5 Lights, 6 크기 side
+    // table.
+    CHECK(sizeIndex == 6);
+    const auto slotOf = [&](const char* name) noexcept {
+        for (const ShaderBindingResource& resource : layout.resources) {
+            if (resource.name == StringView(name)) {
+                return static_cast<uint32>(resource.slot);
+            }
+        }
+
+        return NoMetalIndex;
+    };
+    CHECK(slotOf("Output") == 1 && slotOf("Image") == 2 && slotOf("View") == 3 &&
+          slotOf("Pass") == 4 && slotOf("Lights") == 5);
+    // texture: UAV 번호(1·2)를 비우고 0, 3.
+    CHECK(slotOf("Albedo") == 0 && slotOf("Noise") == 3);
+    CHECK(slotOf("AlbedoSampler") == 0 && slotOf("SharedWrapSampler") == 1);
+    REQUIRE(bindings.Size() == 10);
+    CHECK(bindings[0].set == MetalPushConstantSet &&
+          bindings[0].buffer == MetalRootConstantsBuffer);
+    bool sawAlbedo = false;
+    for (const MetalResourceBinding& binding : bindings) {
+        if (binding.binding == 5) {
+            sawAlbedo = binding.set == 1 && binding.texture == 0 && binding.buffer == NoMetalIndex;
+        }
+    }
+
+    CHECK(sawAlbedo);
+    // 결과 layout은 값 규칙((종류, slot) 순·멤버 범위)을 지킨다.
+    Array<uint8> bytes(TestAllocator());
+    CHECK(EncodeShaderBindingLayout(layout, bytes));
+    // VS buffer 상한 21: 상수 버퍼 21개는 통과, 22개는 오류. CS는 30까지.
+    const auto buffers = [&](uint32 stage, uint32 count) noexcept {
+        ShaderBindingLayout many(TestAllocator());
+        many.stage = stage;
+        char names[40][8];
+        for (uint32 index = 0; index < count; ++index) {
+            snprintf(names[index], sizeof(names[index]), "B%u", index);
+            ShaderBindingResource resource;
+            resource.kind = ShaderResourceKind::ConstantBuffer;
+            resource.name = StringView(names[index]);
+            resource.slot = static_cast<uint16>(index);
+            resource.constantBufferBytes = 16;
+            CHECK(many.resources.TryPushBack(resource));
+        }
+
+        Array<MetalResourceBinding> out(TestAllocator());
+        uint32 side = 0;
+        String errors(TestAllocator());
+        return AssignMetalBindingIndices(many, out, side, errors);
+    };
+    CHECK(buffers(ShaderStageVertex, 21));
+    CHECK(!buffers(ShaderStageVertex, 22));
+    CHECK(buffers(ShaderStageCompute, 30));
+    CHECK(!buffers(ShaderStageCompute, 31));
+    // 진단 버퍼는 buffer 22다.
+    ShaderBindingLayout debug(TestAllocator());
+    debug.stage = ShaderStagePixel;
+    ShaderBindingResource buffer;
+    buffer.kind = ShaderResourceKind::StorageBufferReadWrite;
+    buffer.name = "RocksDebugBuffer";
+    REQUIRE(debug.resources.TryPushBack(buffer));
+    REQUIRE(AssignMetalBindingIndices(debug, bindings, sizeIndex, diagnostics));
+    CHECK(debug.resources[0].slot == MetalDebugBuffer && bindings[0].set == SpirvDebugBufferSet);
+
+    // ROCKS_IMAGE_FORMAT 원문 검사(SSD40).
+    String errors(TestAllocator());
+    CHECK(CheckStorageImageFormats("[[vk::image_format(\"rgba8\")]] RWTexture2D<float4> A;\n"
+                                   "[[vk::image_format(\"r32ui\")]]\n  RWBuffer<uint> B;\n"
+                                   "MyRWBuffer C; RWStructuredBuffer<uint> D;",
+                                   errors));
+    CHECK(!CheckStorageImageFormats("RWTexture2D<float4> A;", errors));
+    CHECK(strstr(errors.CStr(), "ROCKS_IMAGE_FORMAT") != nullptr);
+    CHECK(!CheckStorageImageFormats("[[vk::binding(0, 0)]] RWTexture3D<float> A;", errors));
+    CHECK(!CheckStorageImageFormats("void F(RWTexture2DArray<float4> t) {}", errors));
 }
 
 } // namespace shader_reflection_rules_tests_file

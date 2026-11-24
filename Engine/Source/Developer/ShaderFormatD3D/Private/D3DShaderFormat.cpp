@@ -2,6 +2,9 @@
 
 #include "D3DReflection.h"
 
+#include <Platform/Memory.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
+
 #include <ShaderToolLoader/ShaderToolCalls.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 
@@ -43,17 +46,28 @@ ShaderWorkerJobStatus D3DJobStatus(ShaderToolOutcome outcome) noexcept {
 
 // 리플렉션을 공용 규칙으로 정규화해 값 0(Code)·값 1(BindingLayout)을 둔다(16.1절 SSD33).
 void Succeed(D3DCodeKind kind, const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
-             const ShaderToolSet& tools, ShaderWorkerJobResult& result,
-             Array<uint8>& code) noexcept {
+             const ShaderToolSet& tools, ShaderWorkerJobResult& result, Array<uint8>& code,
+             const Array<SpirvSamplerUse>* pairs = nullptr) noexcept {
     ShaderParameterLayoutSet layouts(result.values.GetAllocator());
     if (!DecodeShaderJobLayouts(job, layouts, result)) {
         return;
     }
 
+    Array<ShaderSamplerUse> uses(result.values.GetAllocator());
+    if (pairs != nullptr) {
+        for (const SpirvSamplerUse& pair : *pairs) {
+            if (!uses.TryPushBack(ShaderSamplerUse{pair.texture.View(), pair.sampler.View()})) {
+                FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+                return;
+            }
+        }
+    }
+
     Array<uint8> binding(result.values.GetAllocator());
     String diagnostics(result.values.GetAllocator());
-    const ShaderToolOutcome normalized = BuildD3DBindingLayout(
-        kind, tools, format, job.stage, layouts.View(), code.View(), binding, diagnostics);
+    const ShaderToolOutcome normalized =
+        BuildD3DBindingLayout(kind, tools, format, job.stage, job.requiredFeatures, layouts.View(),
+                              uses.View(), pairs != nullptr, code.View(), binding, diagnostics);
     if (normalized != ShaderToolOutcome::Success) {
         FailShaderJob(result, D3DJobStatus(normalized), "shader binding rules", diagnostics.View());
         return;
@@ -112,10 +126,13 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     Succeed(D3DCodeKind::Dxil, format, job, tools, result, compiled.object);
 }
 
-// 대체 경로: DXC → SPIR-V → SPIRV-Cross HLSL 5.0 → FXC(E4). 실패하면 outcome과 diagnostics다.
+// 대체 경로: DXC(-fspv-reflect) → SPIR-V 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location) → SPIRV-Cross
+// HLSL 5.0(register 배정·ATTRIBUTEn, 16.1절 SSD38) → FXC(E4). 사용 쌍은 pairs에 둔다(SSD36).
+// 실패하면 outcome과 diagnostics다.
 ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
                                   const ShaderToolSet& tools, StringView fxcProfile,
-                                  Array<uint8>& object, String& diagnostics) noexcept {
+                                  Array<uint8>& object, Array<SpirvSamplerUse>& pairs,
+                                  String& diagnostics) noexcept {
     char spirvProfile[MaxShaderProfileBytes];
     if (!MakeShaderProfile(job.stage, FallbackSpirvModel, spirvProfile)) {
         (void)diagnostics.TryAppend("invalid shader stage");
@@ -129,15 +146,47 @@ ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const Sh
     spirvRequest.hlsl2021 = job.options.hlsl2021;
     spirvRequest.optimization = job.options.optimization;
     spirvRequest.dxPositionW = format.compiler.dxPositionW;
-    Array<uint8> spirv(object.GetAllocator());
-    const ShaderToolOutcome compiled = CompileHlslToSpirv(tools, spirvRequest, spirv, diagnostics);
+    spirvRequest.reflect = true;
+    Allocator& allocator = object.GetAllocator();
+    Array<uint8> raw(allocator);
+    const ShaderToolOutcome compiled = CompileHlslToSpirv(tools, spirvRequest, raw, diagnostics);
     if (compiled != ShaderToolOutcome::Success) {
         return compiled;
+    }
+
+    Array<uint32> words(allocator);
+    Array<uint32> rewritten(allocator);
+    Array<uint8> spirv(allocator);
+    if (raw.Size() % sizeof(uint32) != 0 || !words.TryResize(raw.Size() / sizeof(uint32))) {
+        (void)diagnostics.TryAppend("DXC produced a malformed SPIR-V module");
+        return ShaderToolOutcome::ToolError;
+    }
+
+    platform::MemoryCopy(words.Data(), raw.Data(), raw.Size());
+    SpirvRewriteOptions options;
+    options.stage = job.stage;
+    options.stageLocations = true;
+    if (!RewriteSpirv(words.View(), options, rewritten, diagnostics)) {
+        return ShaderToolOutcome::CompileError;
+    }
+
+    if (!spirv.TryResize(rewritten.Size() * sizeof(uint32))) {
+        (void)diagnostics.TryAppend("out of memory");
+        return ShaderToolOutcome::ToolError;
+    }
+
+    platform::MemoryCopy(spirv.Data(), rewritten.Data(), spirv.Size());
+    const ShaderToolOutcome queried =
+        QuerySpirvSamplerUses(tools.SpirvCross(), spirv.View(), pairs, diagnostics);
+    if (queried != ShaderToolOutcome::Success) {
+        return queried;
     }
 
     SpirvCrossRequest crossRequest;
     crossRequest.spirv = spirv.View();
     crossRequest.target = SpirvCrossTarget::Hlsl50;
+    crossRequest.stage = job.stage;
+    crossRequest.hlslAssignRegisters = true;
     String hlsl(object.GetAllocator());
     const ShaderToolOutcome crossed =
         CrossCompileSpirv(tools.SpirvCross(), crossRequest, hlsl, diagnostics);
@@ -195,10 +244,11 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     }
 
     String fallbackDiagnostics(allocator);
-    const ShaderToolOutcome fallback =
-        CompileFallback(format, job, tools, StringView(profile), object, fallbackDiagnostics);
+    Array<SpirvSamplerUse> pairs(allocator);
+    const ShaderToolOutcome fallback = CompileFallback(format, job, tools, StringView(profile),
+                                                       object, pairs, fallbackDiagnostics);
     if (fallback == ShaderToolOutcome::Success) {
-        Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object);
+        Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object, &pairs);
         return;
     }
 

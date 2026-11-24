@@ -77,6 +77,8 @@ struct ShaderReflectedResource {
     uint32 count = 1;
     // 루트 상수 블록인가(SSD32 — 자원 표에 넣지 않는다).
     bool rootConstants = false;
+    // PS 진단 버퍼의 예약 위치(D3D12 space 999, SPIR-V set 3)에 있는가(16.1절 SSD34).
+    bool debugBuffer = false;
     // 상수 버퍼 byte 수(리플렉션 값)다.
     uint32 constantBufferBytes = 0;
     // 멤버는 reflection.members[firstMember, firstMember + memberCount)다(구조체 자식 포함).
@@ -90,9 +92,16 @@ struct ShaderReflectedSignature {
     uint32 index = 0;
 };
 
+// (텍스처, 샘플러) 사용 쌍 하나다(SPIR-V 경로 — SPIRV-Cross 결합 sampler, 16.1절 SSD36).
+struct ShaderSamplerUse {
+    StringView texture;
+    StringView sampler;
+};
+
 struct ShaderReflection {
     explicit ShaderReflection(Allocator& allocator) noexcept
-        : resources(allocator), members(allocator), inputs(allocator), outputs(allocator) {
+        : resources(allocator), members(allocator), inputs(allocator), outputs(allocator),
+          samplerUses(allocator) {
     }
 
     uint32 stage = 0;
@@ -102,6 +111,13 @@ struct ShaderReflection {
     Array<ShaderReflectedSignature> outputs;
     // 이름 없는 전역 uniform($Globals)이 있었는가.
     bool hasGlobals = false;
+    // job의 셰이더 타입 요구 기능(ShaderFeatureBits — layer·viewport 출력 판정, 16.1절 SSD35)이다.
+    uint32 requiredFeatures = 0;
+    // inputs·outputs가 선언 순서인가(D3D signature — TEXCOORDn 오름차순 규칙, SSD37).
+    bool signatureOrdered = false;
+    // 사용 쌍(hasSamplerUses일 때만 — D3D 형식은 없다)이다.
+    Array<ShaderSamplerUse> samplerUses;
+    bool hasSamplerUses = false;
 };
 
 // "TEXCOORD3"을 (TEXCOORD, 3)으로 나눈다(끝 숫자가 없으면 index 0).

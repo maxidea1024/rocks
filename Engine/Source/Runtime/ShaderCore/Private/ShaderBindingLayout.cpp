@@ -19,6 +19,7 @@ constexpr const char* KindNames[ShaderResourceKindCount] = {
 
 constexpr uint32 AttributeBits = (1u << MaxShaderVertexAttributes) - 1;
 constexpr uint32 RenderTargetBits = (1u << MaxShaderRenderTargets) - 1;
+constexpr uint32 InterStageBits = (1u << MaxShaderInterStageVariables) - 1;
 
 bool IsName(StringView name) noexcept {
     return core_detail::IsShaderIdentifier(name, MaxShaderBindingNameBytes);
@@ -43,6 +44,12 @@ const char* CheckLayout(const ShaderBindingLayout& layout) noexcept {
     if ((layout.renderTargetMask & ~RenderTargetBits) != 0 ||
         (layout.renderTargetMask != 0 && layout.stage != ShaderStagePixel)) {
         return "binding layout render target mask is only for pixel shaders (SV_Target0-7)";
+    }
+
+    if ((layout.interStageMask & ~InterStageBits) != 0 ||
+        (layout.interStageMask != 0 && layout.stage == ShaderStageCompute)) {
+        return "binding layout inter-stage mask is only for vertex and pixel shaders "
+               "(TEXCOORD0-15)";
     }
 
     if (layout.resources.Size() > MaxShaderBindingResources) {
@@ -188,6 +195,7 @@ Result<void> EncodeShaderBindingLayout(const ShaderBindingLayout& layout,
     writer.WriteU32LE(layout.rootConstantBytes);
     writer.WriteU32LE(layout.attributeMask);
     writer.WriteU32LE(layout.renderTargetMask);
+    writer.WriteU32LE(layout.interStageMask);
     writer.WriteU32LE(static_cast<uint32>(layout.resources.Size()));
     for (const ShaderBindingResource& resource : layout.resources) {
         writer.WriteU8(static_cast<uint8>(resource.kind));
@@ -224,13 +232,14 @@ ShaderReadStatus DecodeShaderBindingLayout(Span<const uint8> bytes,
     }
 
     if (version != ShaderBindingLayoutVersion) {
-        return ShaderReadStatus::Unsupported("binding layout version is not 1");
+        return ShaderReadStatus::Unsupported("binding layout version is not 2");
     }
 
     out.stage = reader.ReadU32LE();
     out.rootConstantBytes = reader.ReadU32LE();
     out.attributeMask = reader.ReadU32LE();
     out.renderTargetMask = reader.ReadU32LE();
+    out.interStageMask = reader.ReadU32LE();
     const uint32 resourceCount = reader.ReadU32LE();
     if (reader.Failed() || resourceCount > MaxShaderBindingResources) {
         return ShaderReadStatus::Corrupt("binding layout header is truncated or out of range");
@@ -284,6 +293,38 @@ ShaderReadStatus DecodeShaderBindingLayout(Span<const uint8> bytes,
     }
 
     return ShaderReadStatus::Success();
+}
+
+bool CheckShaderStageLink(const ShaderBindingLayout& vertex, const ShaderBindingLayout& pixel,
+                          const char** reason) noexcept {
+    const auto fail = [&](const char* why) noexcept {
+        if (reason != nullptr) {
+            *reason = why;
+        }
+
+        return false;
+    };
+    if (vertex.stage != ShaderStageVertex || pixel.stage != ShaderStagePixel) {
+        return fail("stage link needs a vertex and a pixel binding layout");
+    }
+
+    if (pixel.interStageMask == 0) {
+        return true;
+    }
+
+    uint32 top = 0;
+    for (uint32 index = 0; index < MaxShaderInterStageVariables; ++index) {
+        top = (pixel.interStageMask & (1u << index)) != 0 ? index : top;
+    }
+
+    const uint32 prefix = (1u << (top + 1)) - 1;
+    if ((vertex.interStageMask & prefix) != pixel.interStageMask) {
+        return fail(
+            "pixel shader inputs must be the leading TEXCOORDn outputs of the vertex shader "
+            "(ShaderSystem 7.2 item 7)");
+    }
+
+    return true;
 }
 
 const char* ShaderResourceKindName(ShaderResourceKind kind) noexcept {

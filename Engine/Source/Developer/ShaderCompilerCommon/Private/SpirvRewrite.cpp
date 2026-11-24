@@ -1,9 +1,21 @@
 #include <Platform/Memory.h>
-#include <ShaderFormatVulkan/SpirvRewrite.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
 
 namespace rocks::shader {
 
-namespace {
+namespace spirv_rewrite_detail {
+
+// 다시 매기는 자원 종류다(이 순서가 binding 순서다 — 7.2절 4항).
+enum class RewriteKind : uint8 {
+    ConstantBuffer,
+    StorageBuffer,
+    StorageImage,
+    SampledImage,
+    Sampler
+};
+
+// PS 진단 버퍼의 예약 set이다(16.1절 SSD34 — 다시 매기지 않는다).
+constexpr uint32 ReservedDebugSet = 3;
 
 // SPIR-V 머리 크기와 magic이다(SPIR-V 사양 2.3절).
 constexpr usize HeaderWords = 5;
@@ -115,7 +127,7 @@ struct Insertion {
 
 struct Resource {
     uint32 id = 0;
-    graphics::ShaderBindingKind kind = graphics::ShaderBindingKind::ConstantBuffer;
+    RewriteKind kind = RewriteKind::ConstantBuffer;
     uint32 set = 0;
     uint32 binding = 0;
 };
@@ -624,9 +636,9 @@ private:
     }
 
     // 변수 타입이 가리키는 자원 종류다. 모르면 false다.
-    bool Classify(const Variable& variable, graphics::ShaderBindingKind& kind) const noexcept {
+    bool Classify(const Variable& variable, RewriteKind& kind) const noexcept {
         if (variable.storage == StorageStorageBuffer) {
-            kind = graphics::ShaderBindingKind::StorageBuffer;
+            kind = RewriteKind::StorageBuffer;
             return true;
         }
 
@@ -649,11 +661,11 @@ private:
 
         if (variable.storage == StorageUniform) {
             if (FindDecoration(type, DecorationBufferBlock) != nullptr) {
-                kind = graphics::ShaderBindingKind::StorageBuffer;
+                kind = RewriteKind::StorageBuffer;
                 return true;
             }
 
-            kind = graphics::ShaderBindingKind::ConstantBuffer;
+            kind = RewriteKind::ConstantBuffer;
             return FindDecoration(type, DecorationBlock) != nullptr;
         }
 
@@ -661,14 +673,14 @@ private:
         case OpTypeImage:
             kind = declaration->count > ImageSampledWord &&
                            input_[declaration->offset + ImageSampledWord] == ImageSampledStorage
-                       ? graphics::ShaderBindingKind::StorageImage
-                       : graphics::ShaderBindingKind::SampledImage;
+                       ? RewriteKind::StorageImage
+                       : RewriteKind::SampledImage;
             return true;
         case OpTypeSampledImage:
-            kind = graphics::ShaderBindingKind::SampledImage;
+            kind = RewriteKind::SampledImage;
             return true;
         case OpTypeSampler:
-            kind = graphics::ShaderBindingKind::Sampler;
+            kind = RewriteKind::Sampler;
             return true;
         default:
             return false;
@@ -686,7 +698,7 @@ private:
 
             const Decoration* set = FindDecoration(variable.id, DecorationDescriptorSet);
             const Decoration* binding = FindDecoration(variable.id, DecorationBinding);
-            if (set == nullptr || binding == nullptr) {
+            if (set == nullptr || binding == nullptr || input_[set->literal] == ReservedDebugSet) {
                 continue;
             }
 
@@ -790,23 +802,11 @@ private:
     bool hasEntryPoint_ = false;
 };
 
-} // namespace
-
-Result<void> RewriteSpirv(Span<const uint32> input, graphics::ShaderStage stage,
-                          StringView rootConstantsName, Array<uint32>& output,
-                          String& diagnostics) noexcept {
-    SpirvRewriteOptions options;
-    options.stage =
-        stage == graphics::ShaderStage::Vertex
-            ? ShaderStageVertex
-            : (stage == graphics::ShaderStage::Compute ? ShaderStageCompute : ShaderStagePixel);
-    options.rootConstantsName = rootConstantsName;
-    return RewriteSpirv(input, options, output, diagnostics);
-}
+} // namespace spirv_rewrite_detail
 
 Result<void> RewriteSpirv(Span<const uint32> input, const SpirvRewriteOptions& options,
                           Array<uint32>& output, String& diagnostics) noexcept {
-    Rewriter rewriter(output.GetAllocator(), input, diagnostics);
+    spirv_rewrite_detail::Rewriter rewriter(output.GetAllocator(), input, diagnostics);
     return rewriter.Run(options, output);
 }
 
