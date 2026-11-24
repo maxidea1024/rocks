@@ -37,6 +37,10 @@ StringView DiagnosticRuleMessage(GraphInvariant rule) noexcept {
         return "GI13: node data does not match its type";
     case GraphInvariant::InputDefaultPin:
         return "GI14: input default is not on an editable input pin";
+    case GraphInvariant::BoundaryInterface:
+        return "GI15: invalid subgraph boundary interface or boundary node";
+    case GraphInvariant::CollapsedOwner:
+        return "GI16: subgraph and collapsed node do not match one to one";
     }
 
     return "unknown graph invariant";

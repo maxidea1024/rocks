@@ -22,6 +22,8 @@ enum class GraphDiffKind : uint8 {
     GraphRemoved,
     // 그래프 역할·domainRole이 다르다.
     GraphRole,
+    // 하위 그래프 인터페이스(ownerNode·경계 목록)가 다르다(10.1절 NG3c).
+    GraphBoundary,
     // 그래프 제목이 다르다(배치).
     GraphTitle,
     NodeAdded,

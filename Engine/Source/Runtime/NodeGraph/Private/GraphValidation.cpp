@@ -234,6 +234,7 @@ public:
             return checked;
         }
 
+        CheckSubgraphs();
         if (layout_ != nullptr) {
             if (auto checked = CheckLayout(); !checked) {
                 return checked;
@@ -294,6 +295,145 @@ private:
             Report(GraphInvariant::DocumentHeader, GraphSubject::Document, ValidationNoId,
                    ValidationNoId, document_.mainGraph, Name(), 0);
         }
+    }
+
+    // GI15·GI16: 하위 그래프 인터페이스·경계 노드와 부모 Graph.Collapsed의 1:1, 가리킴
+    // 순환(10.1절).
+    void CheckSubgraphs() noexcept {
+        const Span<const Graph> graphs = document_.graphs.View();
+        for (usize index = 0; index < graphs.Size(); ++index) {
+            const Graph& graph = graphs[index];
+            const bool collapsed = graph.role == GraphRole::Collapsed;
+            if (!collapsed && (!ValidationIsZero(graph.ownerNode) || !graph.inputs.IsEmpty() ||
+                               !graph.outputs.IsEmpty())) {
+                Report(GraphInvariant::BoundaryInterface, GraphSubject::Graph, graph.id,
+                       ValidationNoId, graph.ownerNode, Name(), index);
+            }
+
+            if (collapsed) {
+                CheckBoundaryList(graph, index);
+            }
+
+            usize inputs = 0;
+            usize outputs = 0;
+            for (usize position = 0; position < graph.nodes.Size(); ++position) {
+                const GraphNode& node = graph.nodes[position];
+                const bool input = registry_.IsGraphInput(node.type);
+                const bool output = registry_.IsGraphOutput(node.type);
+                inputs += input ? 1 : 0;
+                outputs += output ? 1 : 0;
+                if (!collapsed && (input || output)) {
+                    Report(GraphInvariant::BoundaryInterface, GraphSubject::Node, graph.id, node.id,
+                           ValidationNoId, node.type, position);
+                }
+
+                if (registry_.IsCollapsed(node.type)) {
+                    CheckCollapsedNode(graph, node, position);
+                }
+            }
+
+            if (collapsed && (inputs != 1 || outputs != 1)) {
+                Report(GraphInvariant::BoundaryInterface, GraphSubject::Graph, graph.id,
+                       ValidationNoId, ValidationNoId, Name(), index);
+            }
+
+            if (collapsed) {
+                CheckOwner(graph, index);
+            }
+        }
+    }
+
+    // 경계 목록: 키는 None이 아니고 두 목록을 합쳐 겹치지 않으며, 합계·kind·maxEdges 규칙(GI15).
+    void CheckBoundaryList(const Graph& graph, usize graphIndex) noexcept {
+        const usize total = graph.inputs.Size() + graph.outputs.Size();
+        if (total > MaxPinsPerNode) {
+            Report(GraphInvariant::BoundaryInterface, GraphSubject::Graph, graph.id, ValidationNoId,
+                   ValidationNoId, Name(), graphIndex);
+            return;
+        }
+
+        const auto at = [&graph](usize position) noexcept -> const GraphBoundaryPin& {
+            return position < graph.inputs.Size() ? graph.inputs[position]
+                                                  : graph.outputs[position - graph.inputs.Size()];
+        };
+
+        for (usize position = 0; position < total; ++position) {
+            const GraphBoundaryPin& pin = at(position);
+            bool valid = !ValidationIsNoneName(pin.key) && pin.maxEdges >= 1 &&
+                         (pin.kind == PinKind::Data || pin.kind == PinKind::Flow);
+            for (usize other = 0; valid && other < position; ++other) {
+                valid = !(at(other).key == pin.key);
+            }
+
+            if (!valid) {
+                Report(GraphInvariant::BoundaryInterface, GraphSubject::Graph, graph.id,
+                       ValidationNoId, ValidationNoId, pin.key, position);
+            }
+        }
+    }
+
+    // Collapsed 그래프의 ownerNode가 다른 그래프의 Graph.Collapsed이고, 부모를 따라 올라가도 자기로
+    // 돌아오지 않는다(GI16).
+    void CheckOwner(const Graph& graph, usize graphIndex) noexcept {
+        usize parent = OwnerGraph(graph);
+        if (parent == IndexNone || parent == graphIndex) {
+            Report(GraphInvariant::CollapsedOwner, GraphSubject::Graph, graph.id, ValidationNoId,
+                   graph.ownerNode, Name(), graphIndex);
+            return;
+        }
+
+        // 그래프 수만큼 올라가면 끝나야 한다(나무의 깊이 ≤ 그래프 수).
+        const Span<const Graph> graphs = document_.graphs.View();
+        for (usize step = 0; step < graphs.Size(); ++step) {
+            if (parent == graphIndex) {
+                Report(GraphInvariant::CollapsedOwner, GraphSubject::Graph, graph.id,
+                       ValidationNoId, graph.ownerNode, Name(), graphIndex);
+                return;
+            }
+
+            if (graphs[parent].role != GraphRole::Collapsed) {
+                return;
+            }
+
+            parent = OwnerGraph(graphs[parent]);
+            if (parent == IndexNone) {
+                return;
+            }
+        }
+
+        Report(GraphInvariant::CollapsedOwner, GraphSubject::Graph, graph.id, ValidationNoId,
+               graph.ownerNode, Name(), graphIndex);
+    }
+
+    // Graph.Collapsed 노드마다 그것을 ownerNode로 갖는 Collapsed 그래프가 정확히 하나다(GI16).
+    void CheckCollapsedNode(const Graph& graph, const GraphNode& node, usize position) noexcept {
+        usize owned = 0;
+        for (const Graph& child : document_.graphs) {
+            owned += child.role == GraphRole::Collapsed && child.ownerNode == node.id ? 1 : 0;
+        }
+
+        if (owned != 1) {
+            Report(GraphInvariant::CollapsedOwner, GraphSubject::Node, graph.id, node.id,
+                   ValidationNoId, node.type, position);
+        }
+    }
+
+    // ownerNode가 Graph.Collapsed로 있는 그래프의 색인이다(없거나 종류가 다르면 IndexNone).
+    usize OwnerGraph(const Graph& graph) const noexcept {
+        if (ValidationIsZero(graph.ownerNode)) {
+            return IndexNone;
+        }
+
+        const Span<const Graph> graphs = document_.graphs.View();
+        for (usize index = 0; index < graphs.Size(); ++index) {
+            for (const GraphNode& node : graphs[index].nodes) {
+                if (node.id == graph.ownerNode) {
+                    return registry_.IsCollapsed(node.type) ? index : IndexNone;
+                }
+            }
+        }
+
+        return IndexNone;
     }
 
     uint32 FindInfo(const Guid& id) const noexcept {

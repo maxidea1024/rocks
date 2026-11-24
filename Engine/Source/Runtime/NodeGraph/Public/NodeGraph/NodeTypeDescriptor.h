@@ -37,15 +37,6 @@ inline constexpr uint16 UnlimitedEdges = NumericLimits<uint16>::Max();
 // 노드 하나의 핀 수 상한(정적 + 동적)이다.
 inline constexpr uint32 MaxPinsPerNode = 1024;
 
-// 핀 종류다(GD20): 공통 층은 구분만 하고 실행하지 않는다.
-enum class PinKind : uint8 {
-    Data = 0,
-    // 실행 흐름·trigger(예: MetaSounds형 그래프의 trigger 핀).
-    Flow = 1,
-    // 구조 관계(예: 상태 기계 전이).
-    Structural = 2
-};
-
 // 입력 기본값의 편집 정책이다.
 enum class PinValuePolicy : uint8 {
     Editable = 0,

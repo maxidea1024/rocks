@@ -244,6 +244,29 @@ public:
         End();
     }
 
+    // 하위 그래프 경계 핀 하나다(10.1절 NG3c): 키·종류·타입 이름·간선 상한을 늘 쓴다.
+    void Boundary(const GraphBoundaryPin& pin) noexcept {
+        Begin();
+        NameKey("key", pin.key);
+        String("kind", PinKindName(pin.kind));
+        NameKey("type", pin.type);
+        UInt("maxEdges", pin.maxEdges);
+        End();
+    }
+
+    static StringView PinKindName(PinKind kind) noexcept {
+        switch (kind) {
+        case PinKind::Data:
+            return "Data";
+        case PinKind::Flow:
+            return "Flow";
+        case PinKind::Structural:
+            return "Structural";
+        }
+
+        return "Unknown";
+    }
+
     void Bookmark(const rocks::nodegraph::Bookmark& bookmark) noexcept {
         Begin();
         UInt("number", bookmark.number);
@@ -377,6 +400,29 @@ Result<void> WriteGraphDocumentJson(GraphTextContext& context, const GraphDocume
         writer.String("role", RoleName(graph.role));
         if (graph.domainRole != 0) {
             writer.UInt("domainRole", graph.domainRole);
+        }
+
+        // 하위 그래프 인터페이스(Collapsed만 — 비어 있으면 쓰지 않는다).
+        if (graph.ownerNode.high != 0 || graph.ownerNode.low != 0) {
+            writer.GuidKey("ownerNode", graph.ownerNode);
+        }
+
+        if (!graph.inputs.IsEmpty()) {
+            writer.BeginArray("inputs");
+            for (const GraphBoundaryPin& pin : graph.inputs) {
+                writer.Boundary(pin);
+            }
+
+            writer.EndArray();
+        }
+
+        if (!graph.outputs.IsEmpty()) {
+            writer.BeginArray("outputs");
+            for (const GraphBoundaryPin& pin : graph.outputs) {
+                writer.Boundary(pin);
+            }
+
+            writer.EndArray();
         }
 
         if (graphLayout != nullptr && !graphLayout->title.IsEmpty()) {

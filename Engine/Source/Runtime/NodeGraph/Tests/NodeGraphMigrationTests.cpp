@@ -558,6 +558,52 @@ TEST(NodeGraph_MigrationRenameShapes) {
         ValidateGraphDocument(doc.document, &doc.layout, env.registry, env.allocator, violations));
 }
 
+// 할당 실패 주입(GT6과 같은 방식): k번째 할당부터 실패시키며 성공할 때까지 Migrate를 부른다.
+// 실패마다 OutOfMemory이고 문서·revision·통지·보고서가 그대로다.
+TEST(NodeGraph_MigrationFailureInjection) {
+    TestEnv env;
+    MigEnv mig(env);
+    REQUIRE(mig.ready);
+    MigDocument doc(env);
+    REQUIRE(BuildOldDocument(mig, doc));
+    FailFromAllocator failing(env.allocator);
+    GraphDocument document(failing);
+    GraphDocumentLayout layout(failing);
+    REQUIRE(CloneGraphDocument(doc.document, document));
+    REQUIRE(CloneGraphDocumentLayout(doc.layout, layout));
+    SeededGraphIdSource ids(TestIdSeed, Id(0xFA11));
+    GraphMutator mutator(document, layout, env.registry, ids);
+    REQUIRE(mutator.Initialize());
+    ChangeRecorder recorder(env.allocator);
+    REQUIRE(mutator.AddListener(recorder));
+    const Array<uint8> before = DocumentBytes(env, document, layout);
+
+    bool migrated = false;
+    uint64 failures = 0;
+    GraphMigrationReport report(env.allocator);
+    for (uint64 attempt = 1; attempt <= FailureAttemptLimit && !migrated; ++attempt) {
+        failing.FailFrom(attempt);
+        auto result = mutator.Migrate(TestSource, report);
+        failing.FailFrom(0);
+        if (result) {
+            migrated = true;
+            break;
+        }
+
+        ++failures;
+        CHECK(result.Error() == ErrorCode::OutOfMemory);
+        CHECK(SameBytes(DocumentBytes(env, document, layout), before));
+        CHECK(mutator.Revision() == 0 && recorder.batches.IsEmpty() && report.entries.IsEmpty());
+    }
+
+    REQUIRE(migrated);
+    CHECK(failures > 0);
+    REQUIRE(report.entries.Size() == 1);
+    CHECK(report.entries[0].failure == GraphCommandReason::None &&
+          report.entries[0].toVersion == 3);
+    CHECK(mutator.Revision() == 1);
+}
+
 TEST(NodeGraph_MigrationDisabledAndRegistration) {
     TestEnv env;
     MigEnv mig(env);

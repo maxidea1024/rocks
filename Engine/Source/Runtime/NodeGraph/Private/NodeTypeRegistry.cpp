@@ -150,7 +150,112 @@ Result<void> NodeTypeRegistry::Initialize() noexcept {
         return Result<void>::Failure(added.Error());
     }
 
+    if (auto boundary = RegisterBoundaryTypes(); !boundary) {
+        nodeTypes_.Clear();
+        RebuildTypeLookup();
+        rerouteType_ = Name();
+        return boundary;
+    }
+
     initialized_ = true;
+    return Result<void>::Success();
+}
+
+Result<void> NodeTypeRegistry::RegisterBoundaryTypes() noexcept {
+    const StringView names[] = {GraphInputNodeTypeName, GraphOutputNodeTypeName,
+                                CollapsedNodeTypeName};
+    Name* const targets[] = {&graphInputType_, &graphOutputType_, &collapsedType_};
+    for (usize index = 0; index < sizeof(names) / sizeof(names[0]); ++index) {
+        auto name = names_.TryIntern(names[index]);
+        if (!name) {
+            return Result<void>::Failure(name.Error());
+        }
+
+        NodeTypeDescriptor descriptor;
+        descriptor.type = name.Value();
+        descriptor.schemaVersion = BoundarySchemaVersion;
+        // 경계 노드는 지우기·복제·비활성이 안 되고, Collapsed는 지울 수만 있다(10.1절).
+        descriptor.capabilities = targets[index] == &collapsedType_ ? NodeCapabilities::CanDelete
+                                                                    : NodeCapabilities::None;
+        descriptor.menu.displayName = names[index];
+        descriptor.menu.category = "Organization";
+        if (auto added = AddNodeType(Name(), descriptor, ModuleLease()); !added) {
+            return Result<void>::Failure(added.Error());
+        }
+
+        *targets[index] = name.Value();
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> NodeTypeRegistry::CollectBoundaryPins(const GraphDocument& document,
+                                                   const Graph& graph, const GraphNode& node,
+                                                   PinList& out) const noexcept {
+    // 경계 핀 타입 이름을 문서 도메인 schema 표 색인으로 바꾼다(없으면 UnresolvedPinType).
+    const GraphSchema* schema = FindSchema(document.domain);
+    const auto typeIndex = [this, schema](Name type) noexcept -> PinTypeId {
+        if (schema == nullptr) {
+            return UnresolvedPinType;
+        }
+
+        const Span<const PinTypeInfo> types = schema->PinTypes().types;
+        for (usize index = 0; index < types.Size(); ++index) {
+            auto found = names_.TryFind(types[index].name);
+            if (found && found.Value() == type) {
+                return static_cast<PinTypeId>(index);
+            }
+        }
+
+        return UnresolvedPinType;
+    };
+
+    const auto add = [&out, &typeIndex](const GraphBoundaryPin& boundary,
+                                        PinDirection direction) noexcept {
+        PinDescriptor pin;
+        pin.key = boundary.key;
+        pin.direction = direction;
+        pin.kind = boundary.kind;
+        pin.type = typeIndex(boundary.type);
+        pin.maxEdges = direction == PinDirection::Input ? boundary.maxEdges : UnlimitedEdges;
+        return out.Add(pin);
+    };
+
+    // Graph.Input은 경계 입력마다 출력 핀, Graph.Output은 경계 출력마다 입력 핀이다.
+    if (node.type == graphInputType_ || node.type == graphOutputType_) {
+        const bool input = node.type == graphInputType_;
+        for (const GraphBoundaryPin& boundary : input ? graph.inputs : graph.outputs) {
+            if (auto added = add(boundary, input ? PinDirection::Output : PinDirection::Input);
+                !added) {
+                return added;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    // Graph.Collapsed는 자기를 ownerNode로 갖는 하위 그래프의 인터페이스다. 아직 없으면(목록 중간
+    // 상태) 핀이 없다 — 목록 끝 검사(GI16)가 잡는다.
+    for (const Graph& child : document.graphs) {
+        if (child.role != GraphRole::Collapsed || !(child.ownerNode == node.id)) {
+            continue;
+        }
+
+        for (const GraphBoundaryPin& boundary : child.inputs) {
+            if (auto added = add(boundary, PinDirection::Input); !added) {
+                return added;
+            }
+        }
+
+        for (const GraphBoundaryPin& boundary : child.outputs) {
+            if (auto added = add(boundary, PinDirection::Output); !added) {
+                return added;
+            }
+        }
+
+        break;
+    }
+
     return Result<void>::Success();
 }
 
@@ -482,6 +587,15 @@ Result<void> NodeTypeRegistry::CollectPins(const GraphDocument& document, const 
     // 서술과 버전이 다른 노드(migration 전)는 핀 목록을 모른다(10.1절).
     if (node.typeSchemaVersion != type->descriptor.schemaVersion) {
         return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    if (IsBoundary(node.type) || IsCollapsed(node.type)) {
+        if (auto collected = CollectBoundaryPins(document, graph, node, out); !collected) {
+            out.Clear();
+            return collected;
+        }
+
+        return Result<void>::Success();
     }
 
     for (const PinDescriptor& pin : type->descriptor.staticPins) {

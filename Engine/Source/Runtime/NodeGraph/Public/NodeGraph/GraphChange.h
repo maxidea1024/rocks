@@ -38,7 +38,10 @@ enum class GraphChangeKind : uint8 {
     // 등록·해제로 종류 해석이 바뀌었다(원인 Registry, 종류 Name은 pin 칸 — 10.1절).
     NodeTypesChanged,
     // 문서 전체를 바꿔 넣었다(원인 Reload).
-    DocumentReloaded
+    DocumentReloaded,
+    // 하위 그래프 경계 목록이 바뀌었다(graph 칸, 10.1절 NG3c). 경계 노드·부모 Graph.Collapsed의
+    // NodePinsChanged가 함께 온다.
+    GraphBoundaryChanged
 };
 
 // 통지 하나다. 칸의 뜻은 종류마다 다르고, 해당하지 않는 칸은 0·None이다.
