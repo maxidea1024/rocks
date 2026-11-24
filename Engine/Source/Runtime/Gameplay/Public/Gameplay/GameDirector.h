@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Math/Rotator.h>
 #include <Core/Text/String.h>
 #include <Gameplay/GameplayTypes.h>
 #include <Meta/Annotations.h>
@@ -44,7 +45,8 @@ private:
 // 게임 규칙을 정하는 서버·standalone 전용 Actor다(UE AGameModeBase 범위, 19.2절). GameInstance
 // OpenWorld가 배치 Actor보다 먼저 Spawn하고(배치하지 않는다), 자기 PreAwake에서 GameState를 만들며,
 // World BeginPlay를 StartPlay로 시작한다. 만들 클래스(gameStateType·playerStateType)는 파생
-// 생성자에서 정한다(비면 기본 클래스). Login·RestartPlayer·Logout은 S12가 더한다.
+// 생성자에서 정한다(비면 기본 클래스 — playerControllerType·defaultPawnType·aiControllerType도
+// 같다).
 //
 // 사용 예:
 //   class ArenaDirector final : public GameDirector {
@@ -109,6 +111,55 @@ public:
     // controller는 고르는 대상이다(S12, 기본 규칙은 쓰지 않는다).
     virtual ObjectHandle FindPlayerStart(ObjectHandle controller, StringView incomingName) noexcept;
 
+    // --- 플레이어 흐름(20.8절, UE GameModeBase — 21.2절 8–9단계) ---
+    // 각 단계는 virtual이고 기본 흐름은 GameDirector::이름으로 부른다. 대상은
+    // handle이다(World::With로 빌린다).
+
+    // PlayerController를 만든다(UE Login): playerControllerType(비면 PlayerController) 지연 Spawn →
+    // FinishSpawning(PlayerState·CameraDirector, Spectating) → InitNewPlayer. 실패하면 만든 것을
+    // 파괴하고 그 오류다.
+    virtual Result<ObjectHandle> Login(ObjectHandle localPlayer) noexcept;
+
+    // 새 플레이어 초기화다(UE InitNewPlayer). 기본은 아무것도 하지 않는다. 실패하면 Login이
+    // 실패한다.
+    virtual Result<void> InitNewPlayer(ObjectHandle playerController) noexcept;
+
+    // Login·SetPlayer 뒤다(UE PostLogin): HandleStartingNewPlayer.
+    virtual void PostLogin(ObjectHandle playerController) noexcept;
+
+    // 새 플레이어를 시작시킨다(UE HandleStartingNewPlayer): RestartPlayer.
+    virtual void HandleStartingNewPlayer(ObjectHandle playerController) noexcept;
+
+    // 플레이어에게 Pawn을 준다(UE RestartPlayer): FindPlayerStart → (Pawn이 없으면)
+    // SpawnDefaultPawnFor → FinishRestartPlayer. 파괴 대기 Controller는 하지 않고, Pawn이 있으면 그
+    // Pawn을 다시 쓴다. Pawn을 만들지 못하면 Controller는 그대로(Spectating)이고, 만든 Pawn을
+    // Possess하지 못하면 파괴한다.
+    virtual void RestartPlayer(ObjectHandle controller) noexcept;
+
+    // 기본 Pawn을 만든다(UE SpawnDefaultPawnFor): defaultPawnType(비면 Pawn)을 시작 위치(없으면
+    // 원점) Transform으로 Spawn한다(Instigator 없음).
+    virtual Result<ObjectHandle> SpawnDefaultPawnFor(ObjectHandle controller,
+                                                     ObjectHandle start) noexcept;
+
+    // Possess하고 controlRotation을 시작 방향(roll 0)으로 둔다(UE FinishRestartPlayer).
+    virtual void FinishRestartPlayer(ObjectHandle controller, ObjectHandle pawn,
+                                     const Rotator<double>& startRotation) noexcept;
+
+    // Controller가 파괴될 때 그 EndPlay 전에 불린다(UE Logout). 기본은 아무것도 하지 않는다.
+    virtual void Logout(ObjectHandle controller) noexcept;
+
+    TypeId PlayerControllerType() const noexcept {
+        return playerControllerType;
+    }
+
+    TypeId DefaultPawnType() const noexcept {
+        return defaultPawnType;
+    }
+
+    TypeId AiControllerType() const noexcept {
+        return aiControllerType;
+    }
+
 protected:
     // GameState를 Spawn하고 InitGameState(Director 타입 기록)한다(UE PreInitializeComponents).
     Result<void> OnFrameworkPreAwake() noexcept final;
@@ -118,13 +169,19 @@ protected:
 
     ROCKS_NATIVE() TypeId gameStateType;
     ROCKS_NATIVE() TypeId playerStateType;
+    ROCKS_NATIVE() TypeId playerControllerType;
+    ROCKS_NATIVE() TypeId defaultPawnType;
+    ROCKS_NATIVE() TypeId aiControllerType;
 
 private:
     friend class GameInstance;
+    friend class GameState;
 
     ROCKS_NATIVE() String options_;
     ROCKS_NATIVE() ObjectHandle gameState_;
     ROCKS_NATIVE() int32 nextPlayerId_ = 1;
+    // PostAwake까지 마쳤다(아니면 EndPlay가 PreAwake의 GameState를 되돌린다).
+    ROCKS_NATIVE() bool postAwake_ = false;
 };
 
 } // namespace rocks

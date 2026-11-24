@@ -1,9 +1,14 @@
 #include <Core/Diagnostics/Log.h>
+#include <Gameplay/Controller.generated.h>
 #include <Gameplay/GameDirector.generated.h>
 #include <Gameplay/GameDirector.h>
 #include <Gameplay/GameState.generated.h>
 #include <Gameplay/GameState.h>
 #include <Gameplay/GameplayWorldSubsystem.h>
+#include <Gameplay/Pawn.generated.h>
+#include <Gameplay/Pawn.h>
+#include <Gameplay/PlayerController.generated.h>
+#include <Gameplay/PlayerController.h>
 #include <World/Actor.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
@@ -16,10 +21,13 @@ namespace rocks {
 
 namespace {
 
-// 파괴 대기가 아닌 Actor인지다(프레임워크 목록·선택에서 뺀다).
+// 초기화를 마쳤고 파괴 대기가 아닌 Actor인지다(프레임워크 목록·선택 대상). 지연 Spawn
+// 중(Constructed)은 뺀다 — 아직 프레임워크 hook을 받지 않아 FinishSpawning 전에 파괴되면 정리
+// hook도 없다(그 Actor는 자기 PostAwake에서 스스로 들어온다).
 bool IsLiveActor(World& world, ObjectHandle actor) noexcept {
     auto state = world.GetActorState(actor);
-    return state && state.Value() != ActorState::PendingDestroy;
+    return state &&
+           (state.Value() == ActorState::Initialized || state.Value() == ActorState::Playing);
 }
 
 // Spawn 순번이다(레코드가 없으면 가장 큰 값 — 고르지 않는다).
@@ -32,9 +40,63 @@ uint64 SpawnOrderOf(World& world, ObjectHandle actor) noexcept {
 
 // --- GameplayWorldSubsystem ---
 
+WorldSubsystemType GameplayWorldSubsystem::Type() noexcept {
+    WorldSubsystemType type;
+    type.key = SubsystemKeyOf<GameplayWorldSubsystem>();
+    type.name = "Gameplay";
+    type.create = [](Allocator& allocator) noexcept -> Result<UniquePtr<WorldSubsystem>> {
+        auto created = UniquePtr<GameplayWorldSubsystem>::TryMake(allocator, allocator);
+        if (!created) {
+            return Result<UniquePtr<WorldSubsystem>>::Failure(created.Error());
+        }
+
+        return Result<UniquePtr<WorldSubsystem>>::Success(
+            UniquePtr<WorldSubsystem>(Move(created.Value())));
+    };
+    return type;
+}
+
 Result<void> GameplayWorldSubsystem::Initialize(World& world) noexcept {
-    // World BeginPlay의 시작을 맡는다(19.5절). Initialize는 BeginPlay 전이다.
-    return world.SetBeginPlayDispatcher(this);
+    // World BeginPlay의 시작을 맡는다(19.5절). Initialize는 BeginPlay 전이다. 카메라 갱신 자리도
+    // 맡는다(20.6절 — pause 중에는 World가 이 단계를 돌리지 않는다).
+    if (auto dispatched = world.SetBeginPlayDispatcher(this); !dispatched) {
+        return dispatched;
+    }
+
+    return world.SetEngineStage(EngineStage::CameraUpdate, &UpdateCameras, this);
+}
+
+void GameplayWorldSubsystem::Deinitialize(World& world) noexcept {
+    world.ClearEngineStage(EngineStage::CameraUpdate);
+}
+
+Result<void> GameplayWorldSubsystem::UpdateCameras(World& world, const TickContext& context,
+                                                   void* user) noexcept {
+    // PlayerController 등록 순서로 CameraDirector를 갱신한다. 목록은 index로 다시 읽는다(hook이
+    // Controller를 더할 수 있다).
+    auto& self = *static_cast<GameplayWorldSubsystem*>(user);
+    for (usize index = 0; index < self.controllers_.Size(); ++index) {
+        const ObjectHandle controller = self.controllers_[index];
+        auto state = world.GetActorState(controller);
+        if (!state || state.Value() == ActorState::PendingDestroy) {
+            continue;
+        }
+
+        auto camera =
+            world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+                return value.CameraDirectorHandle();
+            });
+        if (!camera || camera.Value().IsNull()) {
+            continue;
+        }
+
+        const double delta = context.deltaSeconds;
+        auto updated = world.With<CameraDirector>(
+            camera.Value(), [delta](CameraDirector& value) noexcept { value.UpdateCamera(delta); });
+        (void)updated;
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> GameplayWorldSubsystem::StartPlay(World& world) noexcept {
@@ -127,6 +189,164 @@ ObjectHandle GameDirector::FindPlayerStart(ObjectHandle, StringView incomingName
     return !named.IsNull() ? named : first;
 }
 
+namespace {
+
+// actor root의 월드 Transform이다(root가 없으면 NotFound).
+Result<Transform> StartTransform(World& world, ObjectHandle actor) noexcept {
+    auto root =
+        world.With<Actor>(actor, [](Actor& value) noexcept { return value.RootComponent(); });
+    if (!root) {
+        return Result<Transform>::Failure(root.Error());
+    }
+
+    if (root.Value().IsNull()) {
+        return Result<Transform>::Failure(ErrorCode::NotFound);
+    }
+
+    return world.With<SceneComponent>(
+        root.Value(), [](SceneComponent& scene) noexcept { return scene.TryWorldTransform(); });
+}
+
+} // namespace
+
+Result<ObjectHandle> GameDirector::Login(ObjectHandle) noexcept {
+    // UE Login(SpawnPlayerController → InitNewPlayer).
+    World& world = GetWorld();
+    const TypeId type = playerControllerType != TypeId{} ? playerControllerType
+                                                         : ObjectTypeIdOf<PlayerController>();
+    auto spawned = world.SpawnActorDeferred(type);
+    if (!spawned) {
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!world.With<PlayerController>(spawned.Value(), [](PlayerController&) noexcept {})) {
+        auto destroyed = world.DestroyActor(spawned.Value());
+        (void)destroyed;
+        Log::Error(LogGameplay, "GameDirector playerControllerType is not a PlayerController");
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto finished = world.FinishSpawning(spawned.Value()); !finished) {
+        return Result<ObjectHandle>::Failure(finished.Error());
+    }
+
+    if (auto initialized = InitNewPlayer(spawned.Value()); !initialized) {
+        auto destroyed = world.DestroyActor(spawned.Value());
+        (void)destroyed;
+        return Result<ObjectHandle>::Failure(initialized.Error());
+    }
+
+    return Result<ObjectHandle>::Success(spawned.Value());
+}
+
+Result<void> GameDirector::InitNewPlayer(ObjectHandle) noexcept {
+    return Result<void>::Success();
+}
+
+void GameDirector::PostLogin(ObjectHandle playerController) noexcept {
+    HandleStartingNewPlayer(playerController);
+}
+
+void GameDirector::HandleStartingNewPlayer(ObjectHandle playerController) noexcept {
+    RestartPlayer(playerController);
+}
+
+void GameDirector::RestartPlayer(ObjectHandle controller) noexcept {
+    // UE RestartPlayer → RestartPlayerAtPlayerStart: 파괴 대기 Controller는 하지 않고, Pawn이 이미
+    // 있으면 그 Pawn을 다시 Possess한다(새로 만들지 않는다).
+    World& world = GetWorld();
+    auto state = world.GetActorState(controller);
+    if (!state || state.Value() == ActorState::PendingDestroy) {
+        return;
+    }
+
+    auto existing = world.With<Controller>(
+        controller, [](Controller& value) noexcept { return value.PawnHandle(); });
+    if (!existing) {
+        return;
+    }
+
+    const ObjectHandle start = FindPlayerStart(controller, StringView());
+    const bool reuse = !existing.Value().IsNull();
+    auto pawn = reuse ? Result<ObjectHandle>::Success(existing.Value())
+                      : SpawnDefaultPawnFor(controller, start);
+    if (!pawn) {
+        Log::Warning(LogGameplay, "RestartPlayer could not spawn a pawn: {Error}",
+                     ErrorCodeName(pawn.Error()));
+        return;
+    }
+
+    Rotator<double> rotation;
+    if (!start.IsNull()) {
+        if (auto transform = StartTransform(GetWorld(), start)) {
+            auto rotator = Rotator<double>::TryFromQuaternion(transform.Value().rotation);
+            if (rotator) {
+                rotation = rotator.Value();
+            }
+        }
+    }
+
+    FinishRestartPlayer(controller, pawn.Value(), rotation);
+    // Possess하지 못했으면 새로 만든 Pawn을 남기지 않는다(UE FailedToRestartPlayer).
+    auto possessed = world.With<Controller>(
+        controller, [](Controller& value) noexcept { return value.PawnHandle(); });
+    if (!reuse && (!possessed || possessed.Value() != pawn.Value())) {
+        auto destroyed = world.DestroyActor(pawn.Value());
+        (void)destroyed;
+    }
+}
+
+Result<ObjectHandle> GameDirector::SpawnDefaultPawnFor(ObjectHandle, ObjectHandle start) noexcept {
+    World& world = GetWorld();
+    const TypeId type = defaultPawnType != TypeId{} ? defaultPawnType : ObjectTypeIdOf<Pawn>();
+    SpawnParams params;
+    if (!start.IsNull()) {
+        if (auto transform = StartTransform(world, start)) {
+            params = SpawnParams::At(transform.Value());
+        }
+    }
+
+    auto spawned = world.SpawnActorDeferred(type, params);
+    if (!spawned) {
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!world.With<Pawn>(spawned.Value(), [](Pawn&) noexcept {})) {
+        auto destroyed = world.DestroyActor(spawned.Value());
+        (void)destroyed;
+        Log::Error(LogGameplay, "GameDirector defaultPawnType is not a Pawn");
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto finished = world.FinishSpawning(spawned.Value()); !finished) {
+        return Result<ObjectHandle>::Failure(finished.Error());
+    }
+
+    return Result<ObjectHandle>::Success(spawned.Value());
+}
+
+void GameDirector::FinishRestartPlayer(ObjectHandle controller, ObjectHandle pawn,
+                                       const Rotator<double>& startRotation) noexcept {
+    // UE FinishRestartPlayer: Possess → controlRotation = 시작 방향(roll만 0).
+    const Rotator<double> facing(startRotation.pitch, startRotation.yaw, 0.0);
+    auto possessed =
+        GetWorld().With<Controller>(controller, [pawn, facing](Controller& value) noexcept {
+            auto result = value.Possess(pawn);
+            if (result) {
+                value.SetControlRotation(facing);
+            }
+
+            return result;
+        });
+    if (!possessed) {
+        Log::Warning(LogGameplay, "FinishRestartPlayer could not possess the pawn: {Error}",
+                     ErrorCodeName(possessed.Error()));
+    }
+}
+
+void GameDirector::Logout(ObjectHandle) noexcept {
+}
+
 Result<void> GameDirector::OnFrameworkPreAwake() noexcept {
     // GameState를 만들고 InitGameState(UE PreInitializeComponents — GameModeBase.cpp:116–144).
     World& world = GetWorld();
@@ -134,7 +354,10 @@ Result<void> GameDirector::OnFrameworkPreAwake() noexcept {
     const TypeId directorType = GetType().Id();
     auto spawned = world.SpawnActorDeferred(type);
     if (!spawned) {
-        return Result<void>::Failure(spawned.Error());
+        // Actor가 아니거나 등록되지 않은 타입이다(19.7절 — InvalidArgument).
+        Log::Error(LogGameplay, "GameDirector gameStateType could not be spawned: {Error}",
+                   ErrorCodeName(spawned.Error()));
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // World는 TypeRegistry를 내보이지 않으므로 빌림으로 파생을 판정한다(19.7절).
@@ -162,13 +385,24 @@ Result<void> GameDirector::OnFrameworkPostAwake() noexcept {
         gameplay->director_ = Handle();
     }
 
+    postAwake_ = true;
     return Result<void>::Success();
 }
 
 void GameDirector::OnFrameworkEndPlay(EndPlayReason) noexcept {
-    auto* gameplay = GetWorld().GetSubsystem<GameplayWorldSubsystem>();
+    World& world = GetWorld();
+    auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
     if (gameplay != nullptr && gameplay->director_ == Handle()) {
         gameplay->director_ = {};
+    }
+
+    // PreAwake가 만든 GameState를 Spawn 실패(PostAwake 전 실패)에서 되돌린다(17.8절 — 이 자리가
+    // 있는 이유). 정상 정리에서는 GameState가 자기 수명대로 남는다(UE도 GameMode 파괴가 GameState를
+    // 지우지 않는다).
+    if (!postAwake_ && !gameState_.IsNull()) {
+        auto destroyed = world.DestroyActor(gameState_);
+        (void)destroyed;
+        gameState_ = {};
     }
 }
 
@@ -200,6 +434,11 @@ void GameState::RemovePlayerState(ObjectHandle playerState) noexcept {
 }
 
 Result<void> GameState::HandleBeginPlay() noexcept {
+    // 이미 시작했으면 다시 시작하지 않는다(DispatchBeginPlay도 WrongContext다 — 상태 불변).
+    if (hasBegunPlay_) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
     // UE HandleBeginPlay(GameStateBase.cpp:205–211): bReplicatedHasBegunPlay → NotifyBeginPlay
     // (Actor DispatchBeginPlay) → NotifyMatchStarted.
     hasBegunPlay_ = true;
@@ -250,9 +489,26 @@ Result<void> GameState::OnFrameworkPostAwake() noexcept {
 }
 
 void GameState::OnFrameworkEndPlay(EndPlayReason) noexcept {
-    auto* gameplay = GetWorld().GetSubsystem<GameplayWorldSubsystem>();
-    if (gameplay != nullptr && gameplay->gameState_ == Handle()) {
+    World& world = GetWorld();
+    auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
+    if (gameplay == nullptr) {
+        return;
+    }
+
+    if (gameplay->gameState_ == Handle()) {
         gameplay->gameState_ = {};
+    }
+
+    // Director의 handle도 비운다(GameStateHandle "없으면 null" 계약).
+    const ObjectHandle self = Handle();
+    if (!gameplay->director_.IsNull()) {
+        auto cleared =
+            world.With<GameDirector>(gameplay->director_, [self](GameDirector& director) noexcept {
+                if (director.gameState_ == self) {
+                    director.gameState_ = {};
+                }
+            });
+        (void)cleared;
     }
 }
 

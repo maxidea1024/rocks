@@ -8,6 +8,7 @@
 #include <NodeGraph/GraphCommand.h>
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/GraphIdSource.h>
+#include <NodeGraph/GraphMigration.h>
 #include <NodeGraph/GraphPatch.h>
 #include <NodeGraph/GraphSchema.h>
 #include <NodeGraph/NodeTypeRegistry.h>
@@ -49,6 +50,10 @@ public:
                                GraphCommandFailure* failure) noexcept;
     Result<void> Undo(uint64 source, GraphPatch& patch) noexcept;
     Result<void> Redo(uint64 source, GraphPatch& patch) noexcept;
+    Result<void> Migrate(uint64 source, GraphMigrationReport& report) noexcept;
+    Result<void> RefreshNodeTypes(uint64 source, Span<const NodeTypeKey> keys) noexcept;
+    Result<void> Reload(uint64 source, GraphDocument&& document,
+                        GraphDocumentLayout&& layout) noexcept;
     Result<void> BeginInteraction(uint64 source) noexcept;
     Result<GraphPatch> EndInteraction(uint64 source) noexcept;
     Result<void> CancelInteraction(uint64 source) noexcept;
@@ -170,6 +175,16 @@ private:
     Result<void> NormalizeOutputOrder(Graph& graph, Guid fromNode, Name fromPin) noexcept;
     // node를 바꾼 사본(node 전체)으로 노드 값 바꾸기 op를 낸다.
     Result<void> ReplaceNode(Guid graph, GraphNode&& node) noexcept;
+    // 핀 재정리(10.1절)와 migration 계획이다(GraphMutatorReconcile.cpp).
+    GraphCommandReason UnknownReason(const GraphNode& node) const noexcept;
+    Result<void> ReconcileNode(Graph& graph, GraphNode&& changed, Span<const PinKeyRename> renames,
+                               const PinList* oldPins, uint32* retainedCreated) noexcept;
+    Result<void> PlanMigration(const Graph& graph, const GraphNode& node, GraphNode& out,
+                               Array<PinKeyRename>& renames) noexcept;
+    void RevertTo(usize mark) noexcept;
+    void ProcessPendingRefresh() noexcept;
+    Result<void> BuildIndexes(const GraphDocument& document, const GraphDocumentLayout& layout,
+                              Array<Guid>& ids, Array<OutgoingEdge>& outgoing) const noexcept;
     Result<void> CloneNodeFor(const GraphNode& source, GraphNode& out) noexcept;
 
     GraphDocument& document_;
@@ -186,6 +201,10 @@ private:
     bool notifying_ = false;
     bool initialized_ = false;
     bool fullValidation_ = false;
+    // RefreshNodeTypes 검사 실패 뒤 Reload 전까지 참이다(명령·undo·redo·migration 거부).
+    bool broken_ = false;
+    // bracket 중·통지 콜백 안에서 받아 미룬 등록표 변경이다(ProcessPendingRefresh).
+    Array<NodeTypeKey> pendingRefresh_;
 
     // 문서 안 id(GraphId·NodeId·주석 id) 정렬 배열이다(GI9).
     Array<Guid> idIndex_;

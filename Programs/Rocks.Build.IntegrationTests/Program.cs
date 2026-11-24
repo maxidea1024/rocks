@@ -532,8 +532,10 @@ try
     var reflectionProjectText = File.ReadAllText(reflectionProject);
     const string sampleModuleEntry = "{ \"name\": \"SampleGame\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }";
     Require(reflectionProjectText.Contains(sampleModuleEntry, StringComparison.Ordinal), "Game template descriptor changed; update the SDK descriptor fixture");
+    // GameCore는 SDK의 시험 fixture 모듈(ReflectionTestFixtures — Developer)에 의존하므로 Developer다(Docs/Design/BuildTargets 3.3절 BD25 — Runtime
+    // 모듈은 Developer 모듈에 의존할 수 없다). 이 게임 빌드는 Debug라 Developer 모듈이 들어간다.
     File.WriteAllText(reflectionProject, reflectionProjectText.Replace(sampleModuleEntry,
-        sampleModuleEntry + ",\n    { \"name\": \"GameCore\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }", StringComparison.Ordinal));
+        sampleModuleEntry + ",\n    { \"name\": \"GameCore\", \"type\": \"Developer\", \"loadingPhase\": \"Default\" }", StringComparison.Ordinal));
     var coreRules = Path.Combine(reflectionGame, "GameCore.Build.cs");
     const string coreRulesText = """
         using Rocks.Build;

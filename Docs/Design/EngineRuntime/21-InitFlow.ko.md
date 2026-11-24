@@ -61,3 +61,9 @@
 ### 21.5 Sandbox 연결
 
 Sandbox는 `GameInstanceClient`를 쓰도록 바꾼다: 기본 맵 = PlayerStart 하나와 기본 Pawn, 창 입력을 LocalPlayer `InputSource`로 넘긴다. 마우스·키보드로 Pawn이 받는 입력을 로그로 확인한다(엔진 1차 목표 입력 확인 — 화면 출력은 화면 마일스톤이 붙인다).
+
+S13 구현(`Programs/Sandbox/Private/SandboxGame.*`):
+- `--engine`이 `GameInstanceClient`로 돈다. 기본 맵 "Main"에는 원점 PlayerStart가 있고, `SandboxDirector`가 첫 LocalPlayer에 `SandboxPawn`을 준다.
+- `SandboxPawn`은 Controller 입력 스냅숏에서 새로 눌린 W·A·S·D·Space와 마우스 왼쪽·오른쪽 버튼을 Info 로그(`Sandbox.Game`)로 남긴다.
+- 지금 `--engine`은 헤드리스라 창 입력이 없다. 창 이벤트 펌프가 엔진 모드에 붙으면(화면 마일스톤) 호스트가 프레임 `InputState`를 `GameInstance::SetLocalPlayerInput`으로 넘긴다.
+- 시험은 `Engine/Source/Runtime/Gameplay/Tests/GameplayFlowTests.cpp`의 `GameplayFlow_FourteenStepScenario`·`GameplayFlow_WorldWithoutDirector`·`GameplayFlow_EngineDestroyWorldPassesTheReason`다.

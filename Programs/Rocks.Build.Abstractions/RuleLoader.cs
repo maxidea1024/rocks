@@ -34,11 +34,19 @@ public static class RuleLoader
     /// <exception cref="ArgumentException">규칙 생성·평가 실패, 같은 이름의 모듈·타깃, 없는 타깃, 모듈이 없는 타깃.</exception>
     public static LoadedRules Load(string assemblyPath, string targetName, BuildContext context)
     {
-        LoadedRuleSet set = LoadAll(assemblyPath, context);
+        return Select(LoadAll(assemblyPath, context), targetName, context.Platform);
+    }
+
+    /// <summary>
+    /// 규칙 모음에서 targetName 타깃을 고른다. 플랫폼 표(<see cref="ValidateTargetKind"/>)는 고른 타깃에만 한다 — 규칙 모음의 다른 플랫폼 전용
+    /// 타깃(예: Android 빌드 중의 Editor 타깃)은 이 빌드를 막지 않는다. 동반 타깃을 더한다(<see cref="WithCompanions"/>).
+    /// </summary>
+    /// <exception cref="ArgumentException">없는 타깃, 이 플랫폼에서 빌드하지 않는 종류, 모듈이 없는 타깃, 잘못된 동반 타깃.</exception>
+    public static LoadedRules Select(LoadedRuleSet set, string targetName, NativePlatform platform)
+    {
         var selected = set.Targets.SingleOrDefault(target => target.Name == targetName)
             ?? throw new ArgumentException($"Unknown target '{targetName}'. Available: {string.Join(", ", set.Targets.Select(target => target.Name))}");
-        // 플랫폼 표는 고른 타깃만 본다(규칙 모음에 다른 플랫폼 전용 타깃 — Editor·Server 등 — 이 있어도 이 타깃의 빌드는 막지 않는다).
-        ValidateTargetKind(selected, context.Platform);
+        ValidateTargetKind(selected, platform);
         if (selected.Modules.Count == 0)
         {
             throw new ArgumentException("A target must select at least one module.");
@@ -92,42 +100,6 @@ public static class RuleLoader
     };
 
     /// <summary>
-    /// type 사이 의존 규칙(Docs/Design/BuildTargets 3.3절 BD25, BS2b)을 검사한다. 실행 파일이 아닌 모듈 A의 두 의존 목록과 실행 중 적재
-    /// 모듈(<c>DynamicModules</c>)의 모듈 B마다 <see cref="ModuleTypeRules.MayDependOn"/>이어야 한다(A를 넣는 어떤 타깃에서 B가 빠지면
-    /// 빌드가 깨진다). 실행 파일은 한 타깃에만 들어가므로 빌드 입력의 도달 검사(<c>InputValidation</c>)가 대신 본다. 규칙 모음 밖의 이름은
-    /// 빌드 입력 검사가 알린다. 어기면 <see cref="ArgumentException"/>이다.
-    /// </summary>
-    public static void ValidateModuleTypeDependencies(IReadOnlyList<NativeModuleInput> modules)
-    {
-        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
-        foreach (NativeModuleInput module in modules)
-        {
-            byName.TryAdd(module.Name, module);
-        }
-
-        var violations = new List<string>();
-        foreach (NativeModuleInput module in modules.Where(module => module.Kind != NativeModuleKind.Executable).OrderBy(module => module.Name,
-                     StringComparer.Ordinal))
-        {
-            foreach (string name in module.AllDependencies.Concat(module.DynamicModules).Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                if (byName.TryGetValue(name, out NativeModuleInput? dependency) && !ModuleTypeRules.MayDependOn(module.Type, dependency.Type))
-                {
-                    violations.Add($"{module.Name} ({module.Type}) -> {dependency.Name} ({dependency.Type})");
-                }
-            }
-        }
-
-        if (violations.Count != 0)
-        {
-            string allowed = string.Join("; ", Enum.GetValues<Descriptors.ModuleType>().Select(type =>
-                $"{type} may depend on {string.Join(", ", ModuleTypeRules.DependableTypes(type))}"));
-            throw new ArgumentException($"Module type dependency rule violated: {string.Join(", ", violations)}. {allowed} " +
-                "(Docs/Design/BuildTargets section 3.3 BD25).");
-        }
-    }
-
-    /// <summary>
     /// 동반 타깃(<see cref="TargetRules.CompanionTargets"/>)의 모듈을 더한 타깃이다. 동반 타깃이 없으면 target 그대로다.
     /// </summary>
     /// <exception cref="ArgumentException">없는 동반 타깃, 자기 자신·중복, Program이 아니거나 Monolithic이 아니거나 플러그인·동반 타깃을 가진 동반
@@ -142,6 +114,13 @@ public static class RuleLoader
         if (target.LinkType != NativeLinkType.Monolithic)
         {
             throw new ArgumentException($"Target '{target.Name}' has companion targets but is not Monolithic.");
+        }
+
+        // 동반 모듈은 주 타깃의 종류·구성으로 type 검사를 받는다(빌드 요청 하나). 출시 타깃(Game·Client·Server)의 Release는 동반 Program의
+        // Developer 모듈을 거부하므로 동반은 Program 주 타깃만 둔다(Docs/Design/BuildTargets 3.1절, 실행 파일마다 다른 종류는 후속).
+        if (target.Type != TargetType.Program)
+        {
+            throw new ArgumentException($"Target '{target.Name}' is a {target.Type} target; only Program targets have companion targets.");
         }
 
         List<string> modules = [.. target.Modules];
@@ -245,7 +224,8 @@ public static class RuleLoader
             ValidateTargetProperties(target);
         }
 
-        ValidateModuleTypeDependencies(modules);
+        // type 사이 의존 규칙(Docs/Design/BuildTargets 3.3절 BD25)은 타깃과 무관하게 규칙 로드 때 본다.
+        ModuleTypeRules.ValidateDependencies(modules);
 
         // 공개 헤더 검사 표지는 빌드가 검사 모듈에만 채운다(Docs/Design/BuildTargets 3.5절 BS1b).
         if (modules.FirstOrDefault(module => module.PublicHeaderCheckOf is not null) is { } checker)

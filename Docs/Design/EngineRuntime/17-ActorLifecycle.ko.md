@@ -39,7 +39,7 @@ hook 이름과 Component·Actor 사이 호출 순서(World.h의 hook 순서)는 
 | 필드 | 뜻 | UE |
 |---|---|---|
 | `level` | 소속 Level(있음) | `OverrideLevel` |
-| `transform`·`hasTransform` | `hasTransform`이면 FinishSpawning이 Component 초기화(`OnFrameworkPostAwake`) 뒤, `OnEnable` 전에 root SceneComponent에 쓴다. root의 월드 Transform = root 상대 Transform(생성자·`OnAwake`에서 정한 기본 offset) × Spawn Transform이다(UE `PostSpawnInitialize`의 `MultiplyWithRoot` — `E/Private/Actor.cpp:4303–4323`). root에 부모가 있으면 부모 월드의 역으로 상대 Transform을 구한다. `OnAwake`에서 만든 root도 받는다. root가 없으면 무시한다(UE도 root 없으면 위치가 없다). 유효하지 않은 Transform(비유한 성분·단위가 아닌 회전, `Transform::IsValid`)은 Spawn 전에 `InvalidArgument`, 합성 실패는 Actor를 파괴하고 Spawn 실패다. `SpawnParams::At(transform, level)` 도우미 | `SpawnTransform` |
+| `transform`·`hasTransform` | `hasTransform`이면 FinishSpawning이 모든 Component `OnAwake` 뒤, `OnFrameworkPostAwake` 전에 root SceneComponent에 쓴다(UE도 `PostInitializeComponents` 전에 적용한다 — 자동 Possess가 Spawn 회전을 보도록, S12 리뷰). root의 월드 Transform = root 상대 Transform(생성자·`OnAwake`에서 정한 기본 offset) × Spawn Transform이다(UE `PostSpawnInitialize`의 `MultiplyWithRoot` — `E/Private/Actor.cpp:4303–4323`). root에 부모가 있으면 부모 월드의 역으로 상대 Transform을 구한다. `OnAwake`에서 만든 root도 받는다. root가 없으면 무시한다(UE도 root 없으면 위치가 없다). 유효하지 않은 Transform(비유한 성분·단위가 아닌 회전, `Transform::IsValid`)은 Spawn 전에 `InvalidArgument`, 합성 실패는 Actor를 파괴하고 Spawn 실패다. `SpawnParams::At(transform, level)` 도우미 | `SpawnTransform` |
 | `owner` | 소유 Actor(`ObjectHandle`) | `Owner` |
 | `instigator` | 원인 Pawn(`ObjectHandle`, 20절) | `Instigator` |
 

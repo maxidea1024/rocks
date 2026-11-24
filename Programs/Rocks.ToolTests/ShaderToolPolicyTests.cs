@@ -193,6 +193,12 @@ internal static class ShaderToolPolicyTests
             [new() { Name = "Probe", Type = Rocks.Build.Descriptors.ModuleType.ServerOnly }], runtimeDirectories);
         Verify.That(narrowed.Count == 1 && narrowed[0].Rule == "module-type-group", "a ServerOnly module in a Developer folder escaped");
 
+        // 평가 대상은 출시 타깃(Game·Client·Server)이고 그 종류가 빌드되는 플랫폼뿐이다(BD20 — Server는 Android 제외, Editor·Program 제외).
+        Verify.That(ReleaseExclusion.Evaluates(TargetType.Client, NativePlatform.Android) && ReleaseExclusion.Evaluates(TargetType.Server, NativePlatform.MacOS) &&
+            ReleaseExclusion.Evaluates(TargetType.Game, NativePlatform.Windows) && !ReleaseExclusion.Evaluates(TargetType.Server, NativePlatform.Android) &&
+            !ReleaseExclusion.Evaluates(TargetType.Editor, NativePlatform.Windows) && !ReleaseExclusion.Evaluates(TargetType.Program, NativePlatform.Windows),
+            "Release exclusion target filter");
+
         // Release 출시 타깃이 Editor 모듈에 닿으면 release-editor-module이다(BD20).
         NativeModuleInput[] withEditor = [.. modules.Where(module => module.Name != "Game"),
             modules.Single(module => module.Name == "Game") with { PrivateDependencies = ["Studio"] },

@@ -58,7 +58,7 @@ public:
     // World::DispatchBeginPlay(BeginPlay 전에 Spawn한 Actor 시작) → HasMatchStarted.
     // GameDirector::StartPlay가 부른다. 파생은 재정의해도 GameState::HandleBeginPlay를 불러야
     // 한다(아니면 World BeginPlay가 NotReady로 실패한다). 실패하면 HasBegunPlay를 되돌리고 그
-    // 오류를 돌려준다.
+    // 오류를 돌려준다. 이미 시작했으면 WrongContext다(상태 불변).
     virtual Result<void> HandleBeginPlay() noexcept;
 
 protected:
@@ -137,6 +137,8 @@ protected:
     void OnFrameworkEndPlay(EndPlayReason reason) noexcept final;
 
 private:
+    friend class Controller;
+
     ROCKS_NATIVE() String playerName_;
     ROCKS_NATIVE() ObjectHandle pawn_;
     ROCKS_NATIVE() int32 playerId_ = 0;

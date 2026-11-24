@@ -7,6 +7,7 @@
 #include <NodeGraph/GraphCommand.h>
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/GraphIdSource.h>
+#include <NodeGraph/GraphMigration.h>
 #include <NodeGraph/GraphPatch.h>
 #include <NodeGraph/GraphReadView.h>
 #include <NodeGraph/NodeTypeRegistry.h>
@@ -68,6 +69,32 @@ public:
 
     // 되돌린 patch를 다시 적용한다. 오류는 Undo와 같다(이미 적용된 patch면 InvalidArgument).
     Result<void> Redo(uint64 source, GraphPatch& patch) noexcept;
+
+    // 서술 버전보다 낮은 노드를 모두 현재 버전으로 옮긴다(GD13, Docs/Design/NodeGraph 10.1절).
+    // 노드마다 서술의 migrate를 버전이 닿을 때까지 거듭 부르고, 핀 재정리(고아 핀 생성·재결합·키
+    // 재지정)를 한다. 실패한 노드는 그대로 두고 report에 사유를 적는다. 옮긴 노드가 있으면
+    // revision을 하나 올리고 원인 Migration 통지를 보낸다. undo 이력에 넣지 않으므로 그 전 patch는
+    // 모두 낡는다 (StaleHandle). 옮길 노드가 없으면 아무것도 바꾸지 않는다. 오류: Initialize 전
+    // Unsupported, bracket이 열려 있으면 Busy, 할당 실패 OutOfMemory(문서 불변).
+    Result<void> Migrate(uint64 source, GraphMigrationReport& report) noexcept;
+
+    // 등록표 변경(NodeTypeRegistryListener 통지)을 문서에 반영한다(10.1절). 문서 도메인의 종류만
+    // 보고 문서 전체를 다시 검사한다. 통과하면 종류마다 NodeTypesChanged(원인 Registry)를 보낸다.
+    // revision·문서 바이트는 그대로다. 목록의 종류가 지금 등록돼 있으면(재등록) undo 이력을 낡게
+    // 한다. bracket이 열려 있거나 통지 콜백 안이면 미뤘다가 bracket이 끝날 때·통지가 끝날 때
+    // 반영한다(Success). 오류: Initialize 전 Unsupported, 검사 실패(같은 버전인데 핀이 다른 재등록,
+    // 버전을 낮춘 재등록) TypeMismatch, 검사·미루기 중 할당 실패 OutOfMemory — 두 경우 모두
+    // mutator는 Reload 전까지 명령·undo·redo·bracket·migration을 DependencyFailed로 거부한다.
+    Result<void> RefreshNodeTypes(uint64 source, Span<const NodeTypeKey> keys) noexcept;
+
+    // 문서·배치 전체를 바꿔 넣는다(파일 다시 읽기, 10.1절). 새 내용을 먼저 검사하고 색인을 만든 뒤
+    // 바꾸므로 실패하면 옛 내용이 그대로다. 성공하면 revision을 하나 올리고 undo 이력을 낡게 하며
+    // DependencyFailed 상태를 풀고, DocumentReloaded(원인 Reload)를 보낸다. migration은 따로
+    // 부른다. 넘긴 문서의 할당자를 그대로 쓰므로 그 할당자는 mutator보다 오래 살아야 한다.
+    // 오류: Unsupported, bracket 중·통지 콜백 안 Busy, 도메인이 다르면 TypeMismatch, 불변식 위반은
+    // 검사 오류, 할당 실패 OutOfMemory.
+    Result<void> Reload(uint64 source, GraphDocument&& document,
+                        GraphDocumentLayout&& layout) noexcept;
 
     // bracket을 연다(8.2절). 이미 열려 있으면 Busy다.
     Result<void> BeginInteraction(uint64 source) noexcept;

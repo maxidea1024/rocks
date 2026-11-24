@@ -1,10 +1,15 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/ScopeExit.h>
+#include <Gameplay/Controller.generated.h>
 #include <Gameplay/GameDirector.generated.h>
 #include <Gameplay/GameDirector.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstanceClient.h>
 #include <Gameplay/GameplayWorldSubsystem.h>
+#include <Gameplay/Pawn.generated.h>
+#include <Gameplay/Pawn.h>
+#include <Gameplay/PlayerController.generated.h>
+#include <Gameplay/PlayerController.h>
 #include <Gameplay/LocalPlayer.generated.h>
 #include <Platform/Fatal.h>
 
@@ -27,7 +32,8 @@ GameInstance::GameInstance(Allocator& allocator) noexcept
 
 GameInstance::~GameInstance() noexcept = default;
 
-Result<ObjectHandle> GameInstance::CreateLocalPlayer(int32 controllerId) noexcept {
+Result<ObjectHandle> GameInstance::CreateLocalPlayer(int32 controllerId,
+                                                     bool spawnPlayerController) noexcept {
     // 전용 서버에는 LocalPlayer가 없다(UE GameInstance.cpp:854–861).
     if (IsDedicatedServer()) {
         return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
@@ -79,7 +85,114 @@ Result<ObjectHandle> GameInstance::CreateLocalPlayer(int32 controllerId) noexcep
         return Result<ObjectHandle>::Failure(initialized.Error());
     }
 
+    // 게임 중 추가면 바로 PlayerController를 만든다(UE SpawnPlayActor). 실패하면 LocalPlayer도
+    // 되돌린다(UE RemoveLocalPlayer).
+    if (spawnPlayerController && currentWorld_ != nullptr &&
+        currentWorld_->State() == WorldState::Playing) {
+        if (auto logged = LoginPlayer(*currentWorld_, handle); !logged) {
+            auto removed = RemoveLocalPlayer(handle);
+            (void)removed;
+            return Result<ObjectHandle>::Failure(logged.Error());
+        }
+    }
+
     return Result<ObjectHandle>::Success(handle);
+}
+
+Result<void> GameInstance::SetLocalPlayerInput(ObjectHandle player,
+                                               const input::InputState* input) noexcept {
+    ObjectHandle controller;
+    bool found = false;
+    for (ObjectHandle existing : localPlayers_.View()) {
+        found = found || existing == player;
+    }
+
+    if (!found) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    auto set = WithLocalPlayer(player, [&](LocalPlayer& local) noexcept {
+        local.input_ = input;
+        controller = local.playerController_;
+    });
+    if (!set) {
+        return set;
+    }
+
+    if (currentWorld_ != nullptr && !controller.IsNull() && currentWorld_->HasActor(controller)) {
+        auto changed = currentWorld_->With<PlayerController>(
+            controller, [input](PlayerController& value) noexcept { value.SetInputSource(input); });
+        (void)changed;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> GameInstance::LoginPlayer(World& world, ObjectHandle player) noexcept {
+    auto* gameplay = world.GetSubsystem<GameplayWorldSubsystem>();
+    if (gameplay == nullptr || gameplay->Director().IsNull()) {
+        return Result<void>::Success();
+    }
+
+    const ObjectHandle director = gameplay->Director();
+    const input::InputState* input = nullptr;
+    auto read =
+        WithLocalPlayer(player, [&input](LocalPlayer& local) noexcept { input = local.input_; });
+    if (!read) {
+        return read;
+    }
+
+    // 21.2절 8–9단계: Login → SetPlayer(양방향) → PostLogin(→ RestartPlayer → Possess).
+    auto controller = world.With<GameDirector>(
+        director, [player](GameDirector& value) noexcept { return value.Login(player); });
+    if (!controller) {
+        return Result<void>::Failure(controller.Error());
+    }
+
+    const ObjectHandle created = controller.Value();
+    auto linked =
+        world.With<PlayerController>(created, [player, input](PlayerController& value) noexcept {
+            value.SetPlayer(player, input);
+        });
+    if (!linked) {
+        return linked;
+    }
+
+    auto noted = WithLocalPlayer(
+        player, [created](LocalPlayer& local) noexcept { local.playerController_ = created; });
+    (void)noted;
+    return world.With<GameDirector>(
+        director, [created](GameDirector& value) noexcept { value.PostLogin(created); });
+}
+
+void GameInstance::CleanupPlayers(World& world) noexcept {
+    // 21.3절: Pawn을 먼저, 그다음 PlayerController를 대기에 넣는다(UE LoadMap — UnrealEngine.cpp
+    // :16245–16250). EndPlay가 넣은 순서대로 정리하므로 Logout이 PlayerController EndPlay 전에
+    // 돈다.
+    for (ObjectHandle player : localPlayers_.View()) {
+        ObjectHandle controller;
+        auto read = WithLocalPlayer(player, [&controller](LocalPlayer& local) noexcept {
+            controller = local.playerController_;
+            local.playerController_ = {};
+        });
+        if (!read || controller.IsNull() || !world.HasActor(controller)) {
+            continue;
+        }
+
+        auto pawn = world.With<Controller>(
+            controller, [](Controller& value) noexcept { return value.PawnHandle(); });
+        if (pawn && !pawn.Value().IsNull()) {
+            auto placed = world.With<Pawn>(
+                pawn.Value(), [](Pawn& value) noexcept { return value.IsPlacedInWorld(); });
+            if (placed && !placed.Value()) {
+                auto destroyed = world.DestroyActor(pawn.Value());
+                (void)destroyed;
+            }
+        }
+
+        auto destroyed = world.DestroyActor(controller);
+        (void)destroyed;
+    }
 }
 
 Result<void> GameInstance::RemoveLocalPlayer(ObjectHandle player) noexcept {
@@ -98,6 +211,23 @@ Result<void> GameInstance::RemoveLocalPlayerAt(usize index) noexcept {
     // 중에도 목록·Index는 그대로다.
     ObjectRegistry& objects = engine_->Objects();
     ObjectAccessScope scope(objects.OwnerAccess());
+    // 그 PlayerController를 끊고 파괴한다(UE RemoveLocalPlayer — 끊긴 PlayerController는 Pawn도
+    // 지운다, 20.5절).
+    ObjectHandle controller;
+    auto unlinked =
+        WithLocalPlayer(localPlayers_.View()[index], [&controller](LocalPlayer& player) noexcept {
+            controller = player.playerController_;
+            player.playerController_ = {};
+        });
+    (void)unlinked;
+    if (currentWorld_ != nullptr && !controller.IsNull() && currentWorld_->HasActor(controller)) {
+        auto cleared = currentWorld_->With<PlayerController>(
+            controller, [](PlayerController& value) noexcept { value.ClearPlayer(); });
+        (void)cleared;
+        auto destroyed = currentWorld_->DestroyActor(controller);
+        (void)destroyed;
+    }
+
     auto removed = WithLocalPlayer(localPlayers_.View()[index], [](LocalPlayer& player) noexcept {
         player.subsystems_.Deinitialize(player);
     });
@@ -165,13 +295,20 @@ Result<void> GameInstance::OpenWorld(const MapDesc& map) noexcept {
     // 프레임 안(World Tick·loop hook)이면 다음 OnEngineTick으로 미룬다. OnEngineTick 안과 프레임
     // 밖에서는 바로 연다(World 전환은 프레임 사이에서만 — 18.5절).
     if (engine_->IsInFrame() && !inEngineTick_) {
-        if (auto copied = pendingName_.TryAssign(map.name); !copied) {
+        // 둘 다 복사한 뒤에만 바꾼다(앞 요청과 섞이지 않게).
+        String name(pendingName_.GetAllocator());
+        String options(pendingOptions_.GetAllocator());
+        auto copied = name.TryAssign(map.name);
+        if (copied) {
+            copied = options.TryAssign(map.options);
+        }
+
+        if (!copied) {
             return copied;
         }
 
-        if (auto copied = pendingOptions_.TryAssign(map.options); !copied) {
-            return copied;
-        }
+        pendingName_ = Move(name);
+        pendingOptions_ = Move(options);
 
         if (hasPendingOpen_) {
             Log::Warning(LogGameplay, "OpenWorld {Map} replaces an earlier pending request",
@@ -222,8 +359,9 @@ void GameInstance::CloseCurrentWorld(EndPlayReason reason) noexcept {
 
     World* previous = currentWorld_;
     currentWorld_ = nullptr;
-    // PlayerController·Pawn 정리(21.3절)는 S12가 이 앞에 붙인다. EndPlay가 Actor를 정리하고
-    // OnWorldEndPlay를 부른다. 파괴는 World Tick 밖이므로 즉시다(Engine::DestroyWorld 규칙).
+    // 21.3절 정리 → EndPlay(대기 순서대로 Pawn → PlayerController → 나머지 → OnWorldEndPlay).
+    // 파괴는 World Tick 밖이므로 즉시다(Engine::DestroyWorld 규칙).
+    CleanupPlayers(*previous);
     auto ended = previous->EndPlay(reason);
     (void)ended;
     auto destroyed = engine_->DestroyWorld(previous, reason);
@@ -260,6 +398,12 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
         return Result<void>::Failure(error);
     };
 
+    // 권한(Client가 아니면)을 알린다. GameplayWorldSubsystem은 Preview·Inactive World에는 없다.
+    auto* gameplay = world->GetSubsystem<GameplayWorldSubsystem>();
+    if (gameplay != nullptr) {
+        gameplay->hasAuthority_ = netMode_ != NetMode::Client;
+    }
+
     // GameDirector는 배치 Actor보다 먼저다(21.2절 6단계).
     const char* stage = "Director";
     if (auto directed = SpawnDirector(*world, map, stage); !directed) {
@@ -267,19 +411,67 @@ Result<void> GameInstance::OpenWorldNow(const MapDesc& map) noexcept {
     }
 
     if (map.populate != nullptr) {
-        if (auto populated = map.populate(*world, map.populateContext); !populated) {
+        // 이 동안 Spawn한 Pawn은 배치다(20.8절).
+        if (gameplay != nullptr) {
+            gameplay->populating_ = true;
+        }
+
+        auto populated = map.populate(*world, map.populateContext);
+        if (gameplay != nullptr) {
+            gameplay->populating_ = false;
+        }
+
+        if (!populated) {
             return fail("Populate", populated.Error());
+        }
+    }
+
+    // 21.2절 8–9단계: LocalPlayer마다 Login(Director가 있을 때만). 사용자 hook이 LocalPlayer를
+    // 더하거나 뺄 수 있으므로 handle을 복사해 돌고, 그 동안 현재 World로 둬 RemoveLocalPlayer가
+    // PlayerController를 지우게 한다. 실패하면 현재 World와 PlayerController 연결을 되돌린다.
+    currentWorld_ = world;
+    auto unwind = [&](const char* failedStage, ErrorCode error) noexcept {
+        currentWorld_ = nullptr;
+        for (ObjectHandle player : localPlayers_.View()) {
+            auto cleared = WithLocalPlayer(
+                player, [](LocalPlayer& local) noexcept { local.playerController_ = {}; });
+            (void)cleared;
+        }
+
+        return fail(failedStage, error);
+    };
+    Array<ObjectHandle> players(engine_->GetAllocator());
+    if (auto copied = players.TryReserve(LocalPlayerCount()); !copied) {
+        return unwind("Login", copied.Error());
+    }
+
+    for (ObjectHandle player : localPlayers_.View()) {
+        auto pushed = players.TryPushBack(player);
+        (void)pushed;
+    }
+
+    for (ObjectHandle player : players) {
+        bool present = false;
+        for (ObjectHandle current : localPlayers_.View()) {
+            present = present || current == player;
+        }
+
+        if (!present) {
+            continue;
+        }
+
+        if (auto logged = LoginPlayer(*world, player); !logged) {
+            return unwind("Login", logged.Error());
         }
     }
 
     // 편집·비활성 World는 시작하지 않는다(16.4절).
     if (map.kind != WorldKind::Editor && map.kind != WorldKind::Inactive) {
         if (auto begun = world->BeginPlay(); !begun) {
-            return fail("BeginPlay", begun.Error());
+            return unwind("BeginPlay", begun.Error());
         }
     }
 
-    currentWorld_ = world;
     Log::Info(LogGameplay, "Opened world {Map}", map.name);
     return Result<void>::Success();
 }
@@ -354,8 +546,7 @@ Result<void> GameInstanceClient::OnEngineStart(Engine& engine) noexcept {
     }
 
     if (listed && !hasGameplay) {
-        listed = services_.worldSubsystems.TryPushBack(
-            MakeSubsystemType<WorldSubsystem, GameplayWorldSubsystem>("Gameplay"));
+        listed = services_.worldSubsystems.TryPushBack(GameplayWorldSubsystem::Type());
     }
 
     if (!listed) {
@@ -491,6 +682,8 @@ void GameInstanceClient::OnEngineShutdown(Engine&) noexcept {
         // 3) LocalPlayer 역순 제거 → 4) GameInstance Subsystem 정리(UE GameEngine.cpp:1374–1381,
         // GameInstance.cpp:147–177).
         if (game.currentWorld_ != nullptr) {
+            // 21.3절: Logout이 GameDirector가 살아 있을 때 돌도록 EndPlay(Quit) 전에 정리한다.
+            game.CleanupPlayers(*game.currentWorld_);
             auto ended = game.currentWorld_->EndPlay(EndPlayReason::Quit);
             (void)ended;
             game.currentWorld_ = nullptr;

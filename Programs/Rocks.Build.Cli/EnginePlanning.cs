@@ -24,6 +24,8 @@ internal static class EnginePlanning
             toolchain.Platform, configuration, rules.Target.Kind);
         var ruleModules = pluginSet.LinkIntoPrimary(pluginSet.Apply(rules.Modules, rules.Target.Modules), rules.Target.Modules);
         string[] buildRoots = [.. rules.Target.Modules.Concat(pluginSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
+        // 모듈 type 도달 검사를 메타 생성보다 먼저 한다(Docs/Design/BuildTargets 3.3절 — 빠질 모듈의 메타·컴파일 오류보다 이유를 먼저 말한다).
+        ModuleTypeRules.ValidateReach(rules.Target.Kind, configuration, ruleModules, buildRoots);
         return new(pluginSet, MetadataLayout.Apply(context, ruleModules, buildRoots, createDirectories, rules.Modules), buildRoots);
     }
 
