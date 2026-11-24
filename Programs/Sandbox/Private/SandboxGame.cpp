@@ -94,8 +94,11 @@ public:
 
         for (uint32 touch = 0; touch < input::MaxTouches; ++touch) {
             if (state.WasTouchBegan(touch)) {
-                Log::Info(LogSandboxGame, "Pawn received touch {Index} at ({X}, {Y})", touch,
-                          state.TouchX(touch), state.TouchY(touch));
+                Log::Info(
+                    LogSandboxGame,
+                    "Pawn received touch {Index} at ({X}, {Y}) force {Force} reported {Reported}",
+                    touch, state.TouchX(touch), state.TouchY(touch), state.TouchForce(touch),
+                    state.TouchHasForce(touch));
             }
 
             if (state.WasTouchEnded(touch)) {

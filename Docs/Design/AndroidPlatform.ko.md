@@ -109,7 +109,7 @@ mobile은 Android를 먼저 한다(PlatformLayer "모바일 플랫폼"). 지금 
 - 입력 스레드가 looper에서 `AInputQueue_getEvent`·`AInputQueue_preDispatchEvent`로 꺼낸 `AInputEvent`를 TouchInput 4.2절 규칙으로 `input::InputEvent`로 바꿔 창 큐에 넣는다. 터치 번호 배정기는 게임 스레드의 `EndInputFrame`이 프레임 경계를 알릴 때까지 끝난 번호를 잡아 둔다.
 - `AInputQueue_finishEvent`에 처리한 이벤트는 1, 처리하지 않은 것은 0을 준다. 볼륨 키는 0이어서 OS가 처리한다. Back은 1(소비 — TouchInput 4.2절)이다.
 - `Window::PumpEvents`(게임 스레드)는 데스크톱과 같은 모양으로 큐를 호스트 `InputQueue`로 옮긴다. 넘쳐서 버린 수는 손실로 센다.
-- **터치(TI1 반영, 2026-11-24):** `ACTION_DOWN`·`POINTER_DOWN`은 `TouchIndexAllocator`가 `pointerId`에 번호를 배정해 `TouchBegan`, `MOVE`는 그 이벤트의 모든 포인터의 `TouchMoved`, `UP`·`POINTER_UP`은 `TouchEnded`, `CANCEL`은 닿아 있던 모든 손가락의 취소 끝이다. 배정기의 프레임 경계는 `PumpEvents`다. 압력은 `AMotionEvent_getPressure`를 0–1로 자른 값이고 `hasForce`는 늘 참으로 둔다(장치별 압력 축 유무 판정은 JNI `InputDevice`가 필요해 후속이다). 마우스 소스(`AINPUT_SOURCE_MOUSE`)는 마우스 이벤트다. Back은 `Key::Back`으로 넘기고 소비한다.
+- **터치(TI1 반영, 2026-11-24):** `ACTION_DOWN`·`POINTER_DOWN`은 `TouchIndexAllocator`가 `pointerId`에 번호를 배정해 `TouchBegan`, `MOVE`는 그 이벤트의 모든 포인터의 `TouchMoved`, `UP`·`POINTER_UP`은 `TouchEnded`, `CANCEL`은 닿아 있던 모든 손가락의 취소 끝이다. 배정기의 프레임 경계는 `PumpEvents`다. 압력은 `AMotionEvent_getPressure`를 0–1로 자른 값이다. `hasForce`는 입력 장치마다 한 번 `InputDevice.getDevice(id).getMotionRange(AXIS_PRESSURE)`를 JNI로 물어(입력 스레드를 JavaVM에 붙인다) 범위가 있고 폭이 0보다 크면 참이다. 결과는 장치 ID별로 8칸까지 기억한다. adb 주입 이벤트(장치 -1)는 거짓으로 판정되는 것을 확인했고, 실제 터치 장치는 사람 확인이 남았다. 마우스 소스(`AINPUT_SOURCE_MOUSE`)는 마우스 이벤트다. Back은 `Key::Back`으로 넘기고 소비한다.
 - 게임패드는 `GamepadBackend::Poll`이 입력 스레드가 모은 패드 상태를 읽는다. `AINPUT_SOURCE_GAMEPAD`·`JOYSTICK`의 키·축은 UE `AndroidGameControllerMapper` 표준 배치를 따른다.
 
 ## 6. 로그·경로·명령줄

@@ -13,6 +13,7 @@
 #include <android/native_activity.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
+#include <jni.h>
 
 // Android 창이다(Docs/Design/AndroidPlatform.ko.md 4·5절). 앱의 그 창 하나이며, Launch 액티비티
 // 층의 listener로 창·포커스·입력 큐 콜백(UI 스레드)을 받는다. 입력은 이 창이 띄운 입력 스레드의
@@ -42,6 +43,9 @@ constexpr int LooperIdInput = 1;
 constexpr uint32 OpaqueBlackRgba = 0xFF000000u;
 
 constexpr char InputThreadName[] = "InputThread";
+
+// 압력 지원 여부를 기억하는 입력 장치 수다(넘치면 가장 오래된 칸부터 덮는다).
+constexpr uint32 MaxPressureDevices = 8;
 
 // 입력 이벤트를 처리했다고(1) 또는 시스템에 넘긴다고(0) AInputQueue_finishEvent에 알리는 값이다.
 constexpr int EventHandled = 1;
@@ -360,6 +364,14 @@ private:
         // LaunchAndroid.cpp:970과 같다). 없으면 AInputQueue_attachLooper의 addFd가 실패해 입력이
         // 오지 않는다.
         self.looper_ = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
+        // 압력 지원 판정(InputDevice JNI)을 위해 이 스레드를 JavaVM에 붙인다. 실패하면 압력을
+        // 모르는 것으로 둔다.
+        ANativeActivity* activity = launch::android::CurrentActivity();
+        if (activity != nullptr &&
+            activity->vm->AttachCurrentThread(&self.env_, nullptr) != JNI_OK) {
+            self.env_ = nullptr;
+        }
+
         self.looperReady_.Signal();
         while (AtomicLoad(&self.stopInput_) == 0) {
             int events = 0;
@@ -375,6 +387,11 @@ private:
         if (self.queue_ != nullptr) {
             AInputQueue_detachLooper(self.queue_);
             self.queue_ = nullptr;
+        }
+
+        if (self.env_ != nullptr) {
+            (void)activity->vm->DetachCurrentThread();
+            self.env_ = nullptr;
         }
 
         self.detached_.Signal();
@@ -451,6 +468,8 @@ private:
             return EventNotHandled;
         }
 
+        // 압력 지원 여부는 잠금 밖에서 정한다(처음 보는 장치면 JNI를 부른다).
+        const bool hasForce = DeviceReportsPressure(AInputEvent_getDeviceId(event));
         const int32_t action = AMotionEvent_getAction(event);
         const int32_t kind = action & AMOTION_EVENT_ACTION_MASK;
         const auto pointer =
@@ -469,7 +488,7 @@ private:
             if (index != input::NoTouchIndex) {
                 PushLocked(input::InputEvent::TouchBegan(index, AMotionEvent_getX(event, pointer),
                                                          AMotionEvent_getY(event, pointer),
-                                                         Pressure(event, pointer), true));
+                                                         Pressure(event, pointer), hasForce));
             }
 
             break;
@@ -482,7 +501,7 @@ private:
                 if (index != input::NoTouchIndex) {
                     PushLocked(input::InputEvent::TouchMoved(index, AMotionEvent_getX(event, item),
                                                              AMotionEvent_getY(event, item),
-                                                             Pressure(event, item), true));
+                                                             Pressure(event, item), hasForce));
                 }
             }
 
@@ -541,6 +560,63 @@ private:
         }
     }
 
+    // 입력 장치가 압력을 보고하는지다(TouchInput 3.1절 hasForce). 처음 보는 장치는
+    // InputDevice.getDevice(id).getMotionRange(AXIS_PRESSURE)를 JNI로 묻고, 범위가 있고 폭이 0보다
+    // 크면 지원으로 본다. 입력 스레드만 부른다(결과 칸·env_는 입력 스레드 전용).
+    bool DeviceReportsPressure(int32_t deviceId) noexcept {
+        for (uint32 slot = 0; slot < pressureDeviceCount_; ++slot) {
+            if (pressureDevices_[slot].deviceId == deviceId) {
+                return pressureDevices_[slot].reportsPressure;
+            }
+        }
+
+        const bool reports = QueryDevicePressure(deviceId);
+        PressureDevice& entry = pressureDeviceCount_ < MaxPressureDevices
+                                    ? pressureDevices_[pressureDeviceCount_++]
+                                    : pressureDevices_[pressureDeviceNext_++ % MaxPressureDevices];
+        entry.deviceId = deviceId;
+        entry.reportsPressure = reports;
+        return reports;
+    }
+
+    bool QueryDevicePressure(int32_t deviceId) noexcept {
+        JNIEnv* env = env_;
+        constexpr jint LocalReferences = 8;
+        if (env == nullptr || env->PushLocalFrame(LocalReferences) != JNI_OK) {
+            return false;
+        }
+
+        bool reports = false;
+        jclass deviceClass = env->FindClass("android/view/InputDevice");
+        jmethodID getDevice =
+            deviceClass != nullptr
+                ? env->GetStaticMethodID(deviceClass, "getDevice", "(I)Landroid/view/InputDevice;")
+                : nullptr;
+        jmethodID getMotionRange =
+            deviceClass != nullptr ? env->GetMethodID(deviceClass, "getMotionRange",
+                                                      "(I)Landroid/view/InputDevice$MotionRange;")
+                                   : nullptr;
+        jobject device = getDevice != nullptr
+                             ? env->CallStaticObjectMethod(deviceClass, getDevice, deviceId)
+                             : nullptr;
+        jobject range = device != nullptr && getMotionRange != nullptr
+                            ? env->CallObjectMethod(device, getMotionRange,
+                                                    static_cast<jint>(AMOTION_EVENT_AXIS_PRESSURE))
+                            : nullptr;
+        if (range != nullptr && !env->ExceptionCheck()) {
+            jmethodID getRange = env->GetMethodID(env->GetObjectClass(range), "getRange", "()F");
+            reports = getRange != nullptr && env->CallFloatMethod(range, getRange) > 0.0f;
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            reports = false;
+        }
+
+        (void)env->PopLocalFrame(nullptr);
+        return reports;
+    }
+
     // 0–1 압력이다(AMotionEvent_getPressure — 장치 단위가 1을 넘을 수 있어 자른다).
     static float Pressure(const AInputEvent* event, size_t pointer) noexcept {
         const float pressure = AMotionEvent_getPressure(event, pointer);
@@ -566,6 +642,16 @@ private:
     ManualResetEvent surfaceReleased_{true};
     ManualResetEvent detached_{true};
     ManualResetEvent looperReady_;
+    // 입력 장치별 압력 지원 여부와 JNI env다(입력 스레드 전용).
+    struct PressureDevice {
+        int32_t deviceId = 0;
+        bool reportsPressure = false;
+    };
+
+    PressureDevice pressureDevices_[MaxPressureDevices];
+    uint32 pressureDeviceCount_ = 0;
+    uint32 pressureDeviceNext_ = 0;
+    JNIEnv* env_ = nullptr;
     uint32 closing_ = 0;
     uint32 stopInput_ = 0;
     // 입력 스레드만 만진다(looper_는 Start에서 준비된 뒤 읽기만 한다).
