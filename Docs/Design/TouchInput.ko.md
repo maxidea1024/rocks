@@ -192,6 +192,8 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
 | TI8 | Actor·Component 터치 이벤트 | TI1, RS0 ViewDesc, 물리 trace | World 시험(판정은 가짜 trace 주입) |
 | — | I08 replay schema에 터치 열 | TI1, I08 | IT21에 터치 열 |
 
+진행(2026-11-24): TI1을 구현했다. `InputEventType::TouchBegan`·`TouchMoved`·`TouchEnded`(`touchIndex`·`force`·`hasForce`·`cancelled`), `MaxTouches`·`MousePointerIndex`, `Key::Back`, `input::TouchIndexAllocator`(끝난 번호는 `EndFrame`까지 잡아 둠), `InputState` 터치 질의·FocusLost 취소·`BeginFrame(events, eventsLost)` 손실 복구·require-release, `InputState::SetMouseTouchEmulation`(설정 `input.useMouseForTouch` 연결은 입력 설정이 생길 때)이다. 시험은 `Input_Touch*`·`Input_MouseTouchEmulation`·`Input_TouchIndexAllocator`, Android 에뮬레이터에서 탭·스와이프·Back을 확인했다(AndroidPlatform 9절). Android 압력 지원 판정은 후속이다(그 문서 5절).
+
 TI1–TI3은 화면·UI와 무관하다. 그래도 계획 순서를 지켜 입력 상세 계획의 I 단계와 함께 착수한다. 이 문서는 그때 터치가 빠지지 않게 하려는 것이다.
 
 ## 7. Rocks 이름 대응

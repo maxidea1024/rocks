@@ -21,8 +21,8 @@ using namespace rocks;
 inline constexpr LogCategory LogSandboxGame{"Sandbox.Game"};
 
 // 로그로 확인하는 키다.
-constexpr input::Key WatchedKeys[] = {input::Key::W, input::Key::A, input::Key::S, input::Key::D,
-                                      input::Key::Space};
+constexpr input::Key WatchedKeys[] = {input::Key::W, input::Key::A,     input::Key::S,
+                                      input::Key::D, input::Key::Space, input::Key::Back};
 constexpr input::MouseButton WatchedButtons[] = {input::MouseButton::Left,
                                                  input::MouseButton::Right};
 constexpr input::GamepadButton WatchedGamepadButtons[] = {input::GamepadButton::South,
@@ -75,6 +75,19 @@ public:
                 Log::Info(LogSandboxGame, "Pawn received mouse button {Button} at ({X}, {Y})",
                           button == input::MouseButton::Left ? "Left" : "Right", state.MouseX(),
                           state.MouseY());
+            }
+        }
+
+        for (uint32 touch = 0; touch < input::MaxTouches; ++touch) {
+            if (state.WasTouchBegan(touch)) {
+                Log::Info(LogSandboxGame, "Pawn received touch {Index} at ({X}, {Y})", touch,
+                          state.TouchX(touch), state.TouchY(touch));
+            }
+
+            if (state.WasTouchEnded(touch)) {
+                Log::Info(LogSandboxGame, "Pawn touch {Index} ended at ({X}, {Y}){Cancelled}",
+                          touch, state.TouchX(touch), state.TouchY(touch),
+                          state.WasTouchCancelled(touch) ? " (cancelled)" : "");
             }
         }
 

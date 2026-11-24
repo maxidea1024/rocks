@@ -137,7 +137,11 @@ public:
             (void)queue_.Push(input::InputEvent::KeyDown(input::Key::W));
         }
 
-        input_.BeginFrame(queue_.Events());
+        // 이번 프레임 이벤트를 모으는 동안 큐가 버렸으면 손실 복구를
+        // 한다(Docs/Design/TouchInput.ko.md 3.3절).
+        const uint64 dropped = queue_.DroppedCount();
+        input_.BeginFrame(queue_.Events(), dropped != droppedSeen_);
+        droppedSeen_ = dropped;
         queue_.Clear();
     }
 
@@ -167,6 +171,8 @@ private:
     Options options_;
     input::InputState input_;
     uint64 pumped_ = 0;
+    // 지난 프레임까지 본 큐 손실 수다.
+    uint64 droppedSeen_ = 0;
     // 창 모드 다음 프레임 끝 목표 시각(MonotonicNanoseconds)이다. 0이면 아직 없다.
     uint64 deadline_ = 0;
 };
