@@ -1,7 +1,8 @@
 using Rocks.Build.Rules;
 
-// Shader compile worker (Docs/Design/ShaderSystem section 11.1 SC14). Targets that start workers build it as a companion target
-// (TargetRules.CompanionTargets) so it lands next to their executable with the same configuration.
+// Shader compile worker (Docs/Design/ShaderSystem section 11.1 SC14). Program targets that start workers build it as a companion target
+// (TargetRules.CompanionTargets) so it lands next to their executable with the same configuration. Game targets (Sandbox) build it first as a
+// prerequisite target with these rules and its own output (TargetRules.PrerequisiteTargets, Docs/Design/BuildTargets section 3.11).
 public sealed class ShaderCompileWorkerTarget : TargetRules
 {
     public override string Name => "ShaderCompileWorker";

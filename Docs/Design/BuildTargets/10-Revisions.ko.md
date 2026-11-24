@@ -37,3 +37,4 @@
 | 33 | 2026-11-24 | BS4 구현 세부(3.6절): 처리 순서는 이미 규칙 로드 뒤 `Resolve`(`TargetKind`)라 문맥을 `ResolveEnabled`로 넘김, `PluginReference`의 조건 칸과 `PluginConfiguration`(Asan·Coverage는 Debug), 값 검사(프로젝트·타깃 규칙, 의존 참조는 조건 금지), 플러그인 `platforms`, 시험 목록 |
 | 34 | 2026-11-24 | 3.10절 쿠커와 대상 타깃의 모듈 집합(렌더 세션 rocks-c1 요청 — 셰이더 시스템 개정 32 SSD3), BD43, 단계 BS10(SH2d와 함께) |
 | 35 | 2026-11-24 | 3.10절 1항 기준을 Engine 타깃(코어 묶음 — 셰이더 타입 모듈이 없어 늘 참)에서 엔진 저장소 출시 타깃(지금 Sandbox) 폐포로 고쳤다. Commandlet이 그래픽 backend까지 링크하게 되므로 SH2d에서 넣는다 |
+| 36 | 2026-11-25 | 3.11절 선행 타깃(렌더 세션 요청 — Sandbox Development 셰이더 공급자의 ShaderCompileWorker): `TargetRules.PrerequisiteTargets`와 조건 칸, `build`·`test`가 주 타깃 전에 자기 규칙으로 따로 빌드(후위 순서·형제 출력), 출시 타깃 Release 건너뜀, 규칙 로드 검사, IDE·UE(`PreBuildTargets`·`bEditorDependsOnShaderCompileWorker`) 근거, BD44, 단계 BS11, 7절 두 행. 3.1절 동반 타깃 문단에 선행 타깃을 적었다 |

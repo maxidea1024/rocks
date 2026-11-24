@@ -23,3 +23,5 @@
 | 플러그인을 켜는 타깃 목록 | `EnablePlugins`·`DisablePlugins`·`OptionalPlugins`·`BuildPlugins` 목록 넷 | `Plugins` 하나(`enabled` 값) | 프로젝트 `plugins[]`와 형식을 하나로 맞춘다 |
 | 플러그인의 지원 프로그램 | `.uplugin` `SupportedPrograms`에 없으면 Program이 무시 | 없음. 타깃이 켜면 들어간다 | 켜는 쪽 한 곳에서 정한다(이중 등록 없음) |
 | 끈 플러그인 모듈 의존 | 경고 | 오류 | 조용히 빌드되는 모듈을 막는다 |
+| 먼저 빌드할 타깃 | `PreBuildTargets`(플랫폼·구성을 담은 `TargetInfo`), 에디터의 워커는 VS 생성기 특례 `bEditorDependsOnShaderCompileWorker`(Development 고정) | `PrerequisiteTargets`(이름과 조건 칸), 구성·플랫폼은 주 타깃과 같고 출시 타깃 Release에서는 건너뜀, 워커도 타깃 규칙으로 적음 | 도구는 주 타깃과 같은 구성으로 확인하고, CLI·IDE·MSBuild가 같은 경로를 쓴다 |
+| 선행 타깃의 Clean | `CleanMode`가 `PreBuildTargets`도 지운다 | 주 타깃 출력만 비운다 | 선행 타깃은 자기 프로젝트가 있고, Rebuild마다 도구까지 처음부터 컴파일하지 않게 |
