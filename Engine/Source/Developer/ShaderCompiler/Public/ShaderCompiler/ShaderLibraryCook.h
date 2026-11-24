@@ -84,7 +84,9 @@ enum class ShaderLibraryCookOutcome : uint8 {
     // 라이브러리 byte를 만들지 못했다(같은 키 둘 등 — 입력 오류).
     BuildFailed,
     // 파일 쓰기·이동이 실패했다.
-    WriteFailed
+    WriteFailed,
+    // 메모리에 만들었다(CompileShaderLibrary — 파일을 쓰지 않는다).
+    Built
 };
 
 ROCKS_SHADERCOMPILER_API const char*
@@ -138,5 +140,13 @@ struct ShaderLibraryCookReport {
 // 할당 실패는 OutOfMemory다. Compile 자체의 오류(관리자 미시작 등)는 그대로 돌려준다.
 ROCKS_SHADERCOMPILER_API Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
                                                           ShaderLibraryCookReport& report) noexcept;
+
+// Development 공급자의 메모리 라이브러리다(Docs/Design/ShaderSystem 12.3.1절 SSD16, SH2e).
+// desc.formats는 하나여야 하고 outputDirectory는 쓰지 않는다. CookShaderLibraries와 같은
+// 열거·컴파일·만들기라 같은 형식· 등록부·includeDevelopment면 out은 쿠킹 파일과 같은 byte다(완료
+// 기준). 결과 줄은 Built다. 오류는 CookShaderLibraries와 같다(파일 오류 없음).
+ROCKS_SHADERCOMPILER_API Result<void> CompileShaderLibrary(const ShaderLibraryCookDesc& desc,
+                                                           ShaderLibraryCookReport& report,
+                                                           Array<uint8>& out) noexcept;
 
 } // namespace rocks::shader

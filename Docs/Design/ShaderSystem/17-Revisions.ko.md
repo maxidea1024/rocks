@@ -100,3 +100,4 @@
 - 개정 40(2026-11-24): SH2b2 구현 메모(16.1절 — 진단 버퍼·요구 기능·사용 쌍·값 1 v2·연결 검사·D3D11 대체 경로 재배정·Metal 인덱스·원문 검사, SPIR-V 고쳐 쓰기·SPIR-V 정규화의 ShaderCompilerCommon 이동, 메시지 버전 3·키 처리기 Guid 3·처리기 버전 D3D 3·Vulkan 3·Metal 2).
 - 개정 41(2026-11-24): SH2c 설계(SSD42 — GLES 처리기 흐름, 값 1의 GLES slot, 상수 버퍼 에뮬레이션 텍스트 재작성 규칙(배열 이름·슬롯 배치·행렬·배열 멤버 함수·남은 이름 오류), 값 2 내용, combined sampler 이름·유닛, 모바일 상한 규칙). GLES 미리보기 Release 제외는 SH2f 그대로다.
 - 개정 42(2026-11-24): SH2c 구현 메모(16.1절 — GLES 처리기 흐름, `BuildGlesPlan`·`RewriteGlesUniforms`, SPIRV-Cross ESSL 옵션, 모바일 상한 규칙, 처리기 버전 OpenGL 2).
+- 개정 43(2026-11-24): SH2e 나눔(SSD43 — SH2e1 공급자 메모리 라이브러리, SH2e2 Graphics API·4 backend `CreateShader`·D3DCompile 제거, SH2e3 RB3 셰이더 집합·RB4 SH2분·연결 검사), SH2e1 구현 메모.
