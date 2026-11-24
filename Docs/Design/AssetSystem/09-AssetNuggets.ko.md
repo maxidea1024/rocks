@@ -13,9 +13,9 @@
   | 색 공간 | `SRGB`·`bUseLegacyGamma`·`SourceColorSettings` 전체 |
   | mip 생성 | `MipGenSettings`·`bPreserveBorder`·`bNormalizeNormals`·`PowerOfTwoMode`·`PaddingColor`·`bPadWithBorderColor`·`ResizeDuringBuildX/Y`·`LODBias`·`MaxTextureSize`·`bFlipGreenChannel`과 프로파일 LOD 그룹 행 |
   | 압축 설정 | `CompressionSettings`·`CompressionNoAlpha`·`CompressionForceAlpha`·`CompressionNone`·`CompressionCacheId`(계약 설정도 값 그대로 — 기본값이 아니면 이미 거부되지만 키는 스키마 전체를 쓴다) |
-  | 주소·샘플러 | `AddressX/Y/Z`·`AddressMode`·Border 색(mip 생성 주소 방식이 결과를 바꾼다 — 12.5절), 그룹·텍스처에서 정한 Filter·MaxAniso(쿠킹 데이터의 샘플러) |
-  | 대상 플랫폼 | 프로파일 id·형식 지원 표·bulk 정렬·codec |
-  | 대상 픽셀 형식 | 12.4.3절 규칙으로 확정한 쿠킹 형식·sRGB 표시·swizzle(설정·프로파일에서 유도되지만 유도 규칙의 버그를 막기 위해 결과 형식도 넣는다) |
+  | 주소 | `AddressX/Y/Z`·`AddressMode`(mip 생성 주소 방식·PreserveBorder 경고가 결과를 바꾼다 — 12.5절). 샘플러(Filter·MaxAniso·Border 색)는 너겟 값에 들어가지 않아 키에 넣지 않는다(적중 뒤 계산 — 12.14절) |
+  | 대상 플랫폼 | 프로파일의 norm16 지원 표지(빌드 출력을 바꾸는 칸). 프로파일 id·bulk 정렬·codec은 패키지 단계 값이라 넣지 않는다(12.14절) |
+  | 대상 픽셀 형식 | 유효 빌드 설정(`TextureBuildSettings` — WriteReflected)이 정하므로 따로 넣지 않고, 유도 규칙의 버그는 빌드 버전 상수 `TextureBuildVersion`과 적중 검증(출력 규칙 대조)으로 막는다(12.14절) |
   | 처리기 버전 | 텍스처 처리기 Guid·버전 Guid |
   | 인코더 버전 | 블록 압축 인코더 라이브러리 이름·버전·품질 설정(비압축 단계에는 없음) |
 - 값: 키 하나의 결과 묶음은 **Record**(Rockpile 5.2절 `RockpileRecord` TLV — echo·값 표·소비 입력·meta)와 값 byte다. `NuggetFileSystemBackend`는 이것을 `.rnug` v2 파일 하나(`<AssetNuggets>/<key[0..2]>/<key>.rnug`)로 둔다(9.1절 A3a). 텍스처는 mip·slice가 값 하나씩이다(ValueId).
