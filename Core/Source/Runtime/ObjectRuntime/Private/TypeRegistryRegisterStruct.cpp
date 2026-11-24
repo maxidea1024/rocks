@@ -22,6 +22,7 @@ using detail::CarriesValueNativeType;
 using detail::ContainsInheritedFields;
 using detail::CopyBytes;
 using detail::RecordTag;
+using detail::ValidateEditorOnlyFieldIds;
 using detail::ValidateFieldList;
 
 // 클래스·struct가 받는 TypeFlags 비트다. 그 밖의 비트(클래스의 Atomic, struct의 Abstract·
@@ -197,6 +198,11 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (auto listed = ValidateEditorOnlyFieldIds(schema.fields, schema.editorOnlyFieldIds);
+        !listed) {
+        return Result<TypeRegistrationToken>::Failure(listed.Error());
+    }
+
     bool strongReference = false;
     bool required = false;
     bool referenceArray = false;
@@ -256,7 +262,11 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     // 값 대상과 키 대상(리플렉션 B9f2) 레코드 포인터를 이어 둔다.
     const usize typesEnd = typesOffset + 2 * schema.fields.Size() * sizeof(Record*);
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
-    usize bytes = orderOffset + schema.fields.Size() * sizeof(uint32);
+    // EditorOnly 필드 ID 목록(Guid 정렬)을 문자열보다 먼저 둔다.
+    const usize idsOffset =
+        (orderOffset + schema.fields.Size() * sizeof(uint32) + alignof(Guid) - 1) &
+        ~(alignof(Guid) - 1);
+    usize bytes = idsOffset + schema.editorOnlyFieldIds.Size() * sizeof(Guid);
     if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
@@ -392,7 +402,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     auto* fieldTypes = reinterpret_cast<Record**>(block + typesOffset);
     Record** fieldKeyTypes = fieldTypes + schema.fields.Size();
     auto* fieldOrder = reinterpret_cast<uint32*>(block + orderOffset);
-    uint8* cursor = reinterpret_cast<uint8*>(fieldOrder + schema.fields.Size());
+    uint8* cursor = static_cast<uint8*>(memory.Value()) + idsOffset;
     {
         // mutating_이 등록·해제를 막으므로 위에서 확인한 레코드가 그대로 있다.
         platform::LockGuard lock(gate_);
@@ -411,6 +421,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->schema.flags = schema.flags;
     record->schema.baseType = schema.baseType;
     record->base = base;
+    record->schema.editorOnlyFieldIds = CopyBytes(schema.editorOnlyFieldIds, cursor);
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};

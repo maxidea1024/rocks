@@ -19,9 +19,8 @@ inline constexpr LogCategory LogWorldTick{"World.Tick"};
 // - SubsystemSkippedMissingDependency: 필수 의존이 생성되지 않아 Subsystem을 생략했다(Warning).
 // - AutoTickPrerequisiteCycleSkipped: 자동 Tick 간선(부착·프레임워크)이 순환이라 걸지 않았다
 //   (Warning).
-// - BeginPlayDispatchContractViolated: BeginPlay dispatcher가 DispatchBeginPlay를 안 불렀거나 두
-// 번·
-//   밖에서 불렀다(Error·Warning).
+// - BeginPlayDispatchContractViolated: BeginPlay dispatcher가 DispatchBeginPlay를 부르지 않았거나,
+//   두 번 또는 StartPlay 밖에서 불렀다(Error·Warning).
 inline constexpr char DiagSubsystemSkippedMissingDependency[] = "SubsystemSkippedMissingDependency";
 inline constexpr char DiagAutoTickPrerequisiteCycleSkipped[] = "AutoTickPrerequisiteCycleSkipped";
 inline constexpr char DiagBeginPlayDispatchContractViolated[] = "BeginPlayDispatchContractViolated";

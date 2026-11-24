@@ -634,7 +634,7 @@ TEST(WorldTick_DumpTickGraphListsOrderPrerequisitesAndDemotion) {
     CHECK(Has(text, "      after "));
     CHECK(Has(text, "OnFixedTick"));
     CHECK(Has(text, "OnLateTick"));
-    CHECK(Has(text, "[engine stage CameraUpdate empty]"));
+    CHECK(Has(text, "[engine stage CameraUpdate at start empty]"));
     CHECK(world.Stats().ticks.demoted == 1);
 
     String subsystems(allocator);

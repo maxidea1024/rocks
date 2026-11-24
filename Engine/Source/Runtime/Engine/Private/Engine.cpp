@@ -500,6 +500,9 @@ void Engine::BindConsoleCommands() noexcept {
     if (!registered) {
         Log::Warning(LogEngine, "Engine diagnostic console commands are unavailable: {Error}",
                      ErrorCodeName(registered.Error()));
+        // 앞 명령만 묶였을 수 있다(다른 스레드 등 등록 자체가 거절된 경우는 묶인 것이 없다 — 풀기도
+        // 같은 이유로 거절되므로 묶었을 때만 푼다).
+        consoleBound_ = true;
         UnbindConsoleCommands();
         return;
     }
@@ -508,7 +511,8 @@ void Engine::BindConsoleCommands() noexcept {
 }
 
 void Engine::UnbindConsoleCommands() noexcept {
-    if (config_.settings == nullptr) {
+    // 묶지 않았으면 부르지 않는다(설정 문맥 소유 스레드가 다르면 풀기가 Fatal이다).
+    if (config_.settings == nullptr || !consoleBound_) {
         return;
     }
 

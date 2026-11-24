@@ -10,6 +10,10 @@ public sealed class FoundationTarget : TargetRules
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
+    // Reads and writes editor data: test fixtures and asset tools keep EditorOnly fields (Docs/Design/BuildTargets section 3.4 BS2c — the
+    // ROCKS_WITH_EDITOR_DATA=1 test combination).
+    public override bool WithEditorData => true;
+
     public override IReadOnlyList<string> Modules => ["FoundationTests", .. LaunchTestPrograms.Names];
 
     public override bool CheckPublicHeaders => true;
@@ -25,6 +29,10 @@ public sealed class EngineTestsTarget : TargetRules
 
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
+
+    // Reads and writes editor data: test fixtures and asset tools keep EditorOnly fields (Docs/Design/BuildTargets section 3.4 BS2c — the
+    // ROCKS_WITH_EDITOR_DATA=1 test combination).
+    public override bool WithEditorData => true;
 
     public override IReadOnlyList<string> Modules => ["EngineTests", .. LaunchTestPrograms.Names];
 
@@ -133,6 +141,10 @@ public sealed class EngineModularTarget : TargetRules
 
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
+
+    // Engine tests use EditorOnly asset fixture fields, so they run only with editor data (Docs/Design/BuildTargets section 3.4 BS2c). The
+    // ROCKS_WITH_EDITOR_DATA=0 run of the reflection and serialization tests is FoundationModular.
+    public override bool WithEditorData => true;
 
     public override Rocks.Build.NativeLinkType LinkType => Rocks.Build.NativeLinkType.Modular;
 

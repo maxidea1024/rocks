@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ObjectSerialization/ObjectGraph.h>
@@ -453,7 +454,9 @@ TEST(Codec_ExcludedFlagsOnSaveAndCookedLoad) {
                 auto borrowed =
                     source.Resolve<WorldChild>(source.OwnerAccess(), created.Value().Handle());
                 REQUIRE(borrowed);
+#if ROCKS_WITH_EDITOR_DATA
                 borrowed.Value().Get().Value()->note = 41;
+#endif
                 borrowed.Value().Get().Value()->depth = 3;
             }
 
@@ -473,17 +476,23 @@ TEST(Codec_ExcludedFlagsOnSaveAndCookedLoad) {
                 auto borrowed =
                     target.Resolve<WorldChild>(target.OwnerAccess(), loaded.Value().Handle());
                 REQUIRE(borrowed);
+#if ROCKS_WITH_EDITOR_DATA
                 CHECK(borrowed.Value().Get().Value()->note == 0);
+#endif
                 CHECK(borrowed.Value().Get().Value()->depth == 3);
             }
 
             REQUIRE(target.Collect(target.OwnerAccess()));
+            // 에디터 데이터 없는 빌드는 EditorOnly 필드를 저장하지 않으므로 거부할 값이
+            // 없다(Docs/Design/ BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
             auto editor =
                 SaveObjectGraph(allocator, source, source.OwnerAccess(), created.Value().Handle());
             REQUIRE(editor);
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   editor.Value().View(), loadOptions)
                       .Error() == ErrorCode::InvalidArgument);
+#endif
             CHECK(target.Stats().liveObjects == 0 && target.Stats().reservedObjects == 0);
         }
 

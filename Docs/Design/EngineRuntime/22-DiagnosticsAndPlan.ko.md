@@ -23,7 +23,8 @@ S14 구현:
 - `World::DumpTickGraph(String&)`는 TickScheduler의 실제 단계 순서 배열을 읽기만 한다(`TickScheduler::ForEachInPhase`). 덤프 때문에 순서를 다시 만들면 다음 단계 경계에 바뀔 변경이 앞당겨지기 때문이다. 아직 순서에 들지 않은 항목은 끝에 `pending`으로, 다음 실행 때 다시 만들 단계는 `(order rebuilt at next run)`으로 표시한다. 이름은 `타입#slot`이다(Actor·Component에는 이름이 없다).
 - `World::DumpSubsystems`·`Engine::DumpSubsystems`는 `SubsystemCollection::Describe`(이름 목록 `NameAt`)를 쓴다. Engine이 모르는 계층(GameInstance·LocalPlayer)은 `EngineClient::DescribeSubsystems`로 client가 붙인다.
 - `GameInstanceClient::DumpFramework`와 `GameplayStats`(`GameplayWorldSubsystem::Stats(world)`)를 둔다. `WorldStats`에는 `ticks.demoted`·`engineStageNanoseconds`·`pendingLifeSpans`를 더한다.
-- 콘솔 명령은 Engine이 설정 문맥에 `engine`·`world` 영역을 더하고 `engine.dumpsubsystems`·`world.dumpticks`를 묶는다. `game.dumpframework`는 GameInstanceClient가 묶는다(영역 `game`은 기본 표). 둘 다 종료 전에 푼다. 출력은 콘솔 sink와 Info 로그다.
+- 콘솔 명령은 Engine이 설정 문맥에 `engine`·`world` 영역을 더하고 `engine.dumpsubsystems`·`world.dumpticks`를 묶는다. `game.dumpframework`는 GameInstanceClient가 묶는다(영역 `game`은 기본 표). 둘 다 종료 전에 푼다. 출력은 콘솔 sink와 Info 로그다. 설정 문맥 하나를 Engine 여럿이 같이 쓰면 마지막에 묶은 Engine(과 그 client)이 명령 대상이다. 그 Engine이 먼저 끝나면 명령은 대상 없음(`NotReady`)이 된다. 대상 목록은 두지 않는다 — 한 프로세스에 Engine이 여럿인 것은 시험뿐이기 때문이다.
+- 리뷰 반영(S14): `TickStats.demoted`는 마지막 재계산 값이다. 덤프는 재계산 대기를 머리줄에 표시하고, 순서 배열에 없는 항목(재구성 할당 실패 포함)을 `pending`으로 빠짐없이 쓴다. 엔진 단계 자리는 실행 위치대로 쓴다(LateUpdate는 Tick 항목 앞 `at start`, Physics는 뒤 `at end`). 진단 덤프의 낡은 handle은 건너뛰고 할당 실패만 오류로 돌린다.
 - 진단 코드는 로그의 `{Code}` 속성으로 싣는다(World `WorldLog.h`, Gameplay `GameplayTypes.h` 상수). 따로 진단 수집기는 두지 않는다. 지금은 로그가 진단 경로이기 때문이다.
 - 시험: `WorldTick_DumpTickGraphListsOrderPrerequisitesAndDemotion`, `WorldSubsystem_SkipChainsAndOptionalCycles`(생략 줄), `GameplayDiagnostics_ConsoleDumpsDescribeEveryLayer`.
 

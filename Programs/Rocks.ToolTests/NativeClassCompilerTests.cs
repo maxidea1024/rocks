@@ -31,6 +31,7 @@ internal static class NativeClassCompilerTests
                 }
 
                 arguments.AddRange(options.ClangArguments);
+                arguments.AddRange(TargetMacroArguments.Of());
                 return await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment,
                     Timeout: TimeSpan.FromSeconds(60)));
             }

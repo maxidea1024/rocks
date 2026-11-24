@@ -109,8 +109,8 @@ TEST(GameplayDiagnostics_ConsoleDumpsDescribeEveryLayer) {
         CHECK(Contains(ticks, "rocks::PlayerController#"));
         CHECK(Contains(ticks, "OnTick priority=0 interval=0 whenPaused"));
         CHECK(Contains(ticks, "whenPaused"));
-        CHECK(Contains(ticks, "[engine stage CameraUpdate registered]"));
-        CHECK(Contains(ticks, "[engine stage Timers empty]"));
+        CHECK(Contains(ticks, "[engine stage CameraUpdate at start registered]"));
+        CHECK(Contains(ticks, "[engine stage Timers at start empty]"));
         String missing(allocator);
         CHECK(engine.DumpTickGraphs(missing, "Nowhere").Error() == ErrorCode::NotFound);
 
