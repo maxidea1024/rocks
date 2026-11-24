@@ -77,7 +77,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 
 ### 클래스 기본값 구현 명세 — A5a 레코드 (2026-11-23)
 
-'클래스 기본값 결정'이 "A5 구현 명세에서 정한다"고 남긴 표현 방식 가운데 레코드 부분이다(차이 쓰기·override 집합은 A5b, 지문 연결은 A5c — [AssetSystem](AssetSystem/12-Textures.ko.md) 12.7절). 근거 조사는 2026-11-23 현재 코드이고, 설계 교차 검증(필수 4 — ObjectRegistry 의존·Soft 검출·수동 함수표 표지·할당 소유)을 반영했다.
+'클래스 기본값 결정'이 "A5 구현 명세에서 정한다"고 남긴 표현 방식 가운데 레코드 부분이다(차이 쓰기·override 집합은 A5b, 지문 연결은 A5c — [AssetSystem](AssetSystem/12-Textures/12.7-Stages.ko.md) 12.7절). 근거 조사는 2026-11-23 현재 코드이고, 설계 교차 검증(필수 4 — ObjectRegistry 의존·Soft 검출·수동 함수표 표지·할당 소유)을 반영했다.
 
 **데이터와 자리.**
 - `ClassDefaults`(ObjectRuntime `Object/ClassDefaults.h`, 불변): `editorRecord`(그래프 저장과 같은 wire의 클래스 Record byte — 저장 정책 editor: Transient만 뺀다), `cookedRecord`(저장 정책 cooked: EditorOnly 실효 필드·멤버도 뺀다 — 쿠킹 저장과 같은 `excludedFlags`·`includeFlags`로 다시 인코딩한다), `editorFingerprint`·`cookedFingerprint`. 구성은 저장 정책의 제외 플래그 집합으로 식별한다. 다른 구성(예: 전용 서버 쿠킹의 클라이언트 전용 제외)이 생기면 구성을 더한다.
@@ -221,7 +221,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 
 ### 클래스 기본값 구현 명세 — A5c 지문 연결 (2026-11-24, 착수 전 — 교차 검증 1차 반영)
 
-'클래스 기본값 결정'의 지문과 쿠킹 문단을 패키지 형식·로드·쿠커·색인에 잇고, Tick 설정을 리플렉션으로 옮긴다([AssetSystem](AssetSystem/12-Textures.ko.md) 12.7절 A5c). 근거 조사는 2026-11-24 코드(PackageWriter·PackageReader Summary, CookKeys `CookLocalKey`·`HashTypeTable`, AssetIndexEntry, World `TickSettings`)다. 교차 검증(필수 3 — 문서 충돌, 레코드 없는 export 타입, 빌드 구성 간 지문)을 반영했다.
+'클래스 기본값 결정'의 지문과 쿠킹 문단을 패키지 형식·로드·쿠커·색인에 잇고, Tick 설정을 리플렉션으로 옮긴다([AssetSystem](AssetSystem/12-Textures/12.7-Stages.ko.md) 12.7절 A5c). 근거 조사는 2026-11-24 코드(PackageWriter·PackageReader Summary, CookKeys `CookLocalKey`·`HashTypeTable`, AssetIndexEntry, World `TickSettings`)다. 교차 검증(필수 3 — 문서 충돌, 레코드 없는 export 타입, 빌드 구성 간 지문)을 반영했다.
 
 **레코드 유무 분류**(아래 모든 곳이 같은 분류를 쓴다):
 - 레코드 있음 — 지문이 있다.
