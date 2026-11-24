@@ -32,7 +32,9 @@ enum class GraphSlotKind : uint8 {
     NodeLayout,
     Edge,
     Comment,
-    Bookmark
+    Bookmark,
+    // 하위 그래프 경계 목록(Graph::inputs·outputs — graphValue에 담는다, 10.1절 NG3c).
+    GraphBoundary
 };
 
 // op 하나다: 슬롯 키와 보관 값. 적용은 슬롯과 값을 맞바꾸고 hasValue를 뒤집는다(Title·값 바꾸기는

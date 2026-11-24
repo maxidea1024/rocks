@@ -1,16 +1,13 @@
 // ICU(Engine/Source/ThirdParty/Icu)와 데이터 부분집합(IcuData)의 연결 시험이다(Docs/Design/Font
-// 8.3·8.5절, FT1c). 데이터 등록(udata_setCommonData)과 할당 hook(u_setMemoryFunctions)은 프로세스
-// 전역이라, 데이터를 쓰는 확인은 시험 하나 안에서 등록 → 확인 → u_cleanup → 해제까지 끝낸다.
+// 8.3·8.5절, FT1c).
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/File.h>
 #include <TestSupport/Test.h>
-#include <stddef.h>
-#include <string.h>
+#include <new>
 #include <unicode/ubidi.h>
 #include <unicode/ubrk.h>
 #include <unicode/uchar.h>
-#include <unicode/uclean.h>
 #include <unicode/udata.h>
 #include <unicode/uscript.h>
 #include <unicode/ustring.h>
@@ -23,13 +20,6 @@ namespace {
 
 constexpr const char* IcuDataPath =
     "Engine/Source/ThirdParty/IcuData/icudata-79.1-rocks/icudt79l.dat";
-
-// ICU 블록 정렬(malloc과 같은 보장)이다.
-constexpr usize IcuBlockAlignment = alignof(max_align_t);
-
-// ICU realloc hook은 이전 크기를 주지 않으므로, 블록 앞에 크기를 적어 둔다(엔진 backend도 같은
-// 방식).
-constexpr usize IcuBlockHeader = alignof(max_align_t);
 
 bool ReadFile(const char* path, Array<uint8>& out) noexcept {
     platform::File file;
@@ -48,47 +38,26 @@ bool ReadFile(const char* path, Array<uint8>& out) noexcept {
     return ok && closed;
 }
 
-struct CountingMemory {
-    SystemAllocator allocator;
-    int64 live = 0;
-    int64 total = 0;
-};
+// 데이터 패키지를 프로세스에 한 번 등록한다. ICU는 등록한 메모리를 계속 쓰므로 버퍼는 프로세스
+// 끝까지 산다(소멸하지 않는 정적 저장소). 등록과 할당 hook(u_setMemoryFunctions)·u_cleanup은
+// 프로세스 전역이라 시험마다 바꾸지 않는다 — HarfBuzz(hb-icu)가 ICU 정규화 객체를 붙잡으므로
+// u_cleanup은 그것을 끊는다. hook 연결과 종료 정리는 글꼴 backend의 시작·종료 경로와 함께 FT2에서
+// 시험한다(Docs/Design/Font 8.5절).
+bool RegisterIcuData() noexcept {
+    alignas(SystemAllocator) static unsigned char storage[sizeof(SystemAllocator)];
+    static SystemAllocator* allocator = ::new (static_cast<void*>(storage)) SystemAllocator();
+    alignas(Array<uint8>) static unsigned char arrayStorage[sizeof(Array<uint8>)];
+    static Array<uint8>* data = ::new (static_cast<void*>(arrayStorage)) Array<uint8>(*allocator);
+    static const bool registered = [] {
+        if (!ReadFile(IcuDataPath, *data) || data->Size() == 0) {
+            return false;
+        }
 
-void* U_CALLCONV CountingAlloc(const void* context, size_t size) {
-    auto* counter = static_cast<CountingMemory*>(const_cast<void*>(context));
-    Result<void*> block = counter->allocator.Allocate(IcuBlockHeader + size, IcuBlockAlignment);
-    if (!block) {
-        return nullptr;
-    }
-
-    ++counter->live;
-    ++counter->total;
-    auto* bytes = static_cast<uint8*>(block.Value());
-    memcpy(bytes, &size, sizeof(size));
-    return bytes + IcuBlockHeader;
-}
-
-void U_CALLCONV CountingFree(const void* context, void* memory) {
-    auto* counter = static_cast<CountingMemory*>(const_cast<void*>(context));
-    if (memory == nullptr) {
-        return;
-    }
-
-    --counter->live;
-    (void)counter->allocator.Deallocate(static_cast<uint8*>(memory) - IcuBlockHeader);
-}
-
-void* U_CALLCONV CountingRealloc(const void* context, void* memory, size_t size) {
-    void* resized = CountingAlloc(context, size);
-    if (resized == nullptr || memory == nullptr) {
-        return resized;
-    }
-
-    size_t previous = 0;
-    memcpy(&previous, static_cast<uint8*>(memory) - IcuBlockHeader, sizeof(previous));
-    memcpy(resized, memory, previous < size ? previous : size);
-    CountingFree(context, memory);
-    return resized;
+        UErrorCode status = U_ZERO_ERROR;
+        udata_setCommonData(data->Data(), &status);
+        return U_SUCCESS(status) != 0;
+    }();
+    return registered;
 }
 
 // UTF-8 리터럴을 UTF-16 버퍼로 바꾼다(ICU 경계 API는 UTF-16을 받는다).
@@ -131,23 +100,11 @@ TEST(ThirdParty_IcuVersionAndBuiltInProperties) {
     UErrorCode status = U_ZERO_ERROR;
     CHECK(uscript_getScript(0xAC00, &status) == USCRIPT_HANGUL && U_SUCCESS(status));
     CHECK(u_charDirection(0x05D0) == U_RIGHT_TO_LEFT);
-    u_cleanup();
 }
 
 TEST(ThirdParty_IcuDataSubsetBoundariesAndBidi) {
-    SystemAllocator fileAllocator;
-    Array<uint8> data(fileAllocator);
-    CHECK(ReadFile(IcuDataPath, data));
-    if (data.Size() == 0) {
-        return;
-    }
-
-    CountingMemory memory;
+    CHECK(RegisterIcuData());
     UErrorCode status = U_ZERO_ERROR;
-    u_setMemoryFunctions(&memory, CountingAlloc, CountingRealloc, CountingFree, &status);
-    CHECK(U_SUCCESS(status));
-    udata_setCommonData(data.Data(), &status);
-    CHECK(U_SUCCESS(status));
 
     UChar text[TextCapacity];
     // 줄 경계: "hello world"는 공백 뒤와 끝에서 나눌 수 있다(경계 2개).
@@ -187,12 +144,6 @@ TEST(ThirdParty_IcuDataSubsetBoundariesAndBidi) {
         CHECK(ubidi_getDirection(bidi) == UBIDI_MIXED);
         ubidi_close(bidi);
     }
-
-    CHECK(memory.total > 0);
-    // u_cleanup은 ICU cache를 모두 놓고 데이터 등록·할당 hook도 되돌린다(뒤 시험이 다시 등록할 수
-    // 있다).
-    u_cleanup();
-    CHECK(memory.live == 0);
 }
 
 } // namespace third_party_icu_tests_file

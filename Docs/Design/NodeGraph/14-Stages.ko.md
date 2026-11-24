@@ -7,7 +7,7 @@
 | NG0 | 문서·배치 타입, 서술·등록표, 정규 순서, 불변식 검사, 의미 바이트 — **구현**(2026-11-23) | ObjectRuntime 리플렉션·Serialization(구현됨) | GT1 중 구조 사례(GI1–GI14 규칙마다 양성·음성), GT9 바이트 부분, GT14 의존 |
 | NG1 | `GraphMutator`·공통 명령·patch·파생 색인·통지·bracket·Guid 발급기 — **구현**(2026-11-23) | NG0 | GT1–GT4, GT6 |
 | NG2 | NodeGraphTools: 조각 JSON codec·붙여넣기·`graph-dump`·`graph-validate`·`graph-diff`(9.4절 NG2a–NG2d) — **구현**(2026-11-23) | NG1, ReflectionText(구현됨), 독립 struct Record(리플렉션 보강 26절 — NG2a) | GT5, GT10 |
-| NG3 | migration·고아 핀·자리 노드·등록 해제·하위 그래프 경계 노드(10.1절 NG3a–NG3c) — **NG3a·NG3b 구현**(2026-11-24), NG3c 남음 | NG1 | GT7·GT8, 접기·펼치기 왕복 |
+| NG3 | migration·고아 핀·자리 노드·등록 해제·하위 그래프 경계 노드(10.1절 NG3a–NG3c) — **구현**(2026-11-24, NG3a·NG3b·NG3c) | NG1 | GT7·GT8, 접기·펼치기 왕복 |
 | NG4 | EditorBackend Transaction·명령 schema 연결(계획 22.1절 RPC 포함), lane 소유 | NG1, EditorBackend Transaction(UT4 중 headless 부분) | Transaction 왕복·expected revision 충돌·`Busy` 시험 |
 | NG5 | `GraphCanvas`·기본 노드·핀 시각·기본값 편집기·연결선·선택·drag·연결 drag, 최소 노드 메뉴(검색 목록), 편집 명령 결합(복사·붙여넣기·복제·삭제·undo·redo) | NG4, NG2, UiToolkit UT3 | GT11 기본, GT12 |
 | NG6 | palette·주석·재경유·정렬·북마크·찾기·상하류 선택·2D 격자·성능 측정 | NG5, 공용 2D 격자(GR5) | GT11 전체, GT13 측정과 목표 확정 |

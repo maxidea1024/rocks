@@ -51,7 +51,11 @@ enum class GraphInvariant : uint8 {
     // GI13: 알려진 종류 노드의 버전·속성 schema·비활성 허용.
     NodeTypeData = 13,
     // GI14: 입력 기본값의 키가 현재 입력 핀이고 값이 비어 있지 않다.
-    InputDefaultPin = 14
+    InputDefaultPin = 14,
+    // GI15: 하위 그래프 인터페이스(경계 목록)와 경계 노드(Graph.Input·Graph.Output)가 맞다(10.1절).
+    BoundaryInterface = 15,
+    // GI16: 하위 그래프와 부모 Graph.Collapsed가 1:1이고 가리킴에 순환이 없다(10.1절).
+    CollapsedOwner = 16
 };
 
 // 위반이 가리키는 요소의 종류다.

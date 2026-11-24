@@ -109,6 +109,9 @@ enum class Key : uint8 {
     NumpadDivide,
     NumpadDecimal,
     NumpadEnter,
+    // 모바일 뒤로 가기(Android AKEYCODE_BACK, UE EKeys::Android_Back). 앱을 끝내지 않고 키
+    // 이벤트로만 온다(Docs/Design/TouchInput.ko.md 4.2절).
+    Back,
     Count
 };
 
@@ -154,6 +157,14 @@ enum class GamepadAxis : uint8 {
 
 // 동시에 다루는 게임패드 수다(XInput 사용자 슬롯 수와 같다).
 inline constexpr uint32 MaxGamepads = 4;
+
+// 동시에 추적하는 손가락 수다(UE ETouchIndex::Touch1–Touch10 — Docs/Design/TouchInput.ko.md 3.2절
+// TD1). 손가락 번호는 0..MaxTouches-1이다.
+inline constexpr uint32 MaxTouches = 10;
+
+// 마우스 커서의 포인터 번호다(UE ETouchIndex::CursorPointerIndex). UI 포인터 이벤트가 마우스와
+// 손가락을 한 번호 공간에서 가를 때 쓴다. 손가락 번호와 겹치지 않는다.
+inline constexpr uint32 MousePointerIndex = MaxTouches;
 
 inline constexpr uint32 KeyCount = static_cast<uint32>(Key::Count);
 inline constexpr uint32 MouseButtonCount = static_cast<uint32>(MouseButton::Count);

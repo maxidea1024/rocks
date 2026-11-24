@@ -140,6 +140,15 @@ inline constexpr StringView SampleDocumentGolden = R"golden({
             "x": 200.0,
             "y": -20.0
           }
+        },
+        {
+          "id": "00000000-0000-0000-0000-000000000015",
+          "type": "Graph.Collapsed",
+          "typeVersion": 1,
+          "layout": {
+            "x": 210.0,
+            "y": -20.0
+          }
         }
       ],
       "edges": [
@@ -260,6 +269,7 @@ inline constexpr StringView SampleDocumentGolden = R"golden({
     {
       "id": "00000000-0000-0000-0000-000000000002",
       "role": "Collapsed",
+      "ownerNode": "00000000-0000-0000-0000-000000000015",
       "nodes": [
         {
           "id": "00000000-0000-0000-0000-00000000001e",
@@ -267,6 +277,24 @@ inline constexpr StringView SampleDocumentGolden = R"golden({
           "typeVersion": 1,
           "layout": {
             "x": 300.0,
+            "y": -20.0
+          }
+        },
+        {
+          "id": "00000000-0000-0000-0000-00000000001f",
+          "type": "Graph.Input",
+          "typeVersion": 1,
+          "layout": {
+            "x": 310.0,
+            "y": -20.0
+          }
+        },
+        {
+          "id": "00000000-0000-0000-0000-000000000020",
+          "type": "Graph.Output",
+          "typeVersion": 1,
+          "layout": {
+            "x": 320.0,
             "y": -20.0
           }
         }
