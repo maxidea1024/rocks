@@ -12,7 +12,7 @@
 #include <Task/WorkerScheduler.h>
 #include <TraceCapture/TraceCpuScope.h>
 
-// 렌더 그래프다(Docs/Design/RenderBase.ko.md 7·8절 RG1·RG2, UE FRDGBuilder 대응).
+// 렌더 그래프다(Docs/Design/RenderBase 7·8절 RG1·RG2, UE FRDGBuilder 대응).
 namespace rocks::render {
 
 class RenderFrameContext;

@@ -126,7 +126,9 @@ struct ShaderBindingResource {
     ShaderSamplerSource samplerSource = ShaderSamplerSource::None;
     bool sharedSampler = false;
     // 모양·원소 타입·구조화 원소 byte다(v3). 종류마다 허용 값: SRV 텍스처는 텍스처
-    // 모양·TypedBuffer, storage image는 1D·1DArray·2D·2DArray·3D·TypedBuffer, 구조화 버퍼는
+    // 모양·TypedBuffer, storage image는 1D·1DArray·2D·2DArray·3D·Cube·CubeArray(GLES 형식의
+    // RWTextureCube·RWTextureCubeArray만 — 다른 형식은 2DArray, ShaderSystem 16.1절 SH2g)·
+    // TypedBuffer, 구조화 버퍼는
     // StructuredBuffer(원소 byte > 0, 4의 배수)·RawBuffer(0)이고 원소 타입은 텍스처·typed 모양만
     // None이 아니다.
     ShaderResourceShape shape = ShaderResourceShape::None;

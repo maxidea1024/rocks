@@ -23,7 +23,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 **관계 문서.**
 - [셰이더 시스템](ShaderSystem/README.ko.md)(개정 12): 원문 규약·바인딩 규약 7.2절·job 키·셰이더 타입과 퍼뮤테이션(P14)·파라미터 구조체(P7)·라이브러리. 이 문서는 그 위에 머티리얼이 만드는 원문과 layout을 얹는다. 충돌은 그 문서의 결정을 따르고, 고칠 곳은 16절에 모은다.
-- [렌더 기반](RenderBase.ko.md)(개정 9): 셰이더 집합·바인딩 지도·상수 블록·공유 상수 slot·파이프라인 캐시·정점 입력 타입.
+- [렌더 기반](RenderBase/README.ko.md)(개정 9): 셰이더 집합·바인딩 지도·상수 블록·공유 상수 slot·파이프라인 캐시·정점 입력 타입.
 - [에셋 시스템](AssetSystem/README.ko.md)(개정 8): 에셋·참조 종류·에셋 너겟 키·Cooker.
 - [텍스처 스트리밍](TextureStreaming.ko.md)(개정 3) 결정 T4: 재질 sampling scale 공급.
 - [Renderer](Renderer.ko.md)(개정 3): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`와 머티리얼 함수, shading model·블렌드 모드·영역 번호표, pass별 경로·퍼뮤테이션, 경계표, 이 문서 요구의 처리). 이 문서는 그 계약에 맞춘다(10.1절). 두 문서의 정합 결과는 10.4절이다. 이 문서에서 "Renderer 스펙"이라 부른다.
@@ -1103,7 +1103,7 @@ UE 대조:
 | MSR12 | 12.1절(형식 정의 `limits`) | 결정 MD4·RN13 개정. `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 장치 요구(`maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한)를 더함, `D3D11_SM5`는 128에서 16으로, GLES는 16 유지(Renderer RQ22 (1)과 같은 요구). **반영(셰이더 시스템 개정 13)**: D3D11 16은 12.1절과 형식 정의에 들어갔고, Vulkan은 GX1 측정 뒤 |
 | MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: 예약 이름 `SharedWrapSampler`·`SharedClampSampler`, 텍스처마다 출처 하나, SH2와 함께 구현 |
 
-**렌더 기반(RenderBase.ko.md)**
+**렌더 기반(RenderBase/README.ko.md)**
 
 | ID | 위치 | 요구 |
 |---|---|---|

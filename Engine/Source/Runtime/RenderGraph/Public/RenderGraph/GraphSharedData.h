@@ -5,7 +5,7 @@
 #include <RenderGraph/GraphTypes.h>
 
 // 그래프 공유 값(GraphSharedData)과 view 키
-// 표(GraphViewTable)다(Docs/Design/RenderBase.ko.md 7.5절, UE FRDGBlackboard 대응). 그래프 하나
+// 표(GraphViewTable)다(Docs/Design/RenderBase 7.5절, UE FRDGBlackboard 대응). 그래프 하나
 // 안에서 pass를 만드는 기능 함수들이 장면 텍스처 묶음 같은 값을 넘겨받는 자리다.
 namespace rocks::render {
 

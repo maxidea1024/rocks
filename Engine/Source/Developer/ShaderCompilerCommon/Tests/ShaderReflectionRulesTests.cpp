@@ -621,6 +621,15 @@ TEST(ShaderBindingRules_MetalIndicesAndImageFormats) {
     CHECK(strstr(errors.CStr(), "ROCKS_IMAGE_FORMAT") != nullptr);
     CHECK(!CheckStorageImageFormats("[[vk::binding(0, 0)]] RWTexture3D<float> A;", errors));
     CHECK(!CheckStorageImageFormats("void F(RWTexture2DArray<float4> t) {}", errors));
+    // 이어진 attribute 묶음 중 하나면 된다(RWTextureCube 표지, 16.1절 SH2g).
+    CHECK(CheckStorageImageFormats(
+        "[[vk::image_format(\"r32f\")]] [[vk::ext_decorate_string(5635, \"RocksTextureCube\")]]\n"
+        "  RWTexture2DArray<float> Sky;",
+        errors));
+    CHECK(!CheckStorageImageFormats(
+        "[[vk::binding(0, 0)]] [[vk::ext_decorate_string(5635, \"RocksTextureCube\")]] "
+        "RWTexture2DArray<float> Sky;",
+        errors));
 }
 
 } // namespace shader_reflection_rules_tests_file

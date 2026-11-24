@@ -3,7 +3,7 @@
 #include <Platform/Atomics.h>
 #include <string.h>
 
-// 바인딩 지도·상수 블록(Docs/Design/RenderBase.ko.md 9.3·9.4절)이다. 규칙은 공개 헤더 주석을
+// 바인딩 지도·상수 블록(Docs/Design/RenderBase 9.3·9.4절)이다. 규칙은 공개 헤더 주석을
 // 따른다.
 namespace rocks::render {
 

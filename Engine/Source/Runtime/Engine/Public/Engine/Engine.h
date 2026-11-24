@@ -76,7 +76,7 @@ using EngineSubsystemType = SubsystemType<EngineSubsystem>;
 // 실행 파일이 엔진 루프에 끼워 넣는 확장 지점이다. 창 이벤트 펌프·입력 수집·렌더 추출과 제출처럼
 // Engine이 직접 의존하지 않는 시스템을 연결한다. 헤드리스 실행은 hook 없이 돈다.
 //
-// 종료 단계 hook(CP6, Docs/Design/RenderBase.ko.md 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
+// 종료 단계 hook(CP6, Docs/Design/RenderBase 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
 // lane처럼 Engine이 모르는 실행기가 엔진 종료 순서에 끼어드는 자리다. Engine::Shutdown이 다음
 // 순서로 부른다(각 hook은 종료 중 한 번, DrainShutdownCleanup만 반복):
 //   BeginShutdown → client 종료·World 파괴 → CompleteInFlightWork → Subsystem 정리 → [최종 GC →

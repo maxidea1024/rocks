@@ -7,7 +7,7 @@
 
 namespace rocks::graphics {
 
-// 장치 소유 스레드 기록이다(Docs/Design/RenderBase.ko.md 5.4절 GX10·GX11). backend 장치가 하나씩
+// 장치 소유 스레드 기록이다(Docs/Design/RenderBase 5.4절 GX10·GX11). backend 장치가 하나씩
 // 갖고 소유 스레드 전용 호출의 검사와 소유권 이관(Release → Acquire)에 쓴다.
 //
 // 사용 예(backend 구현):

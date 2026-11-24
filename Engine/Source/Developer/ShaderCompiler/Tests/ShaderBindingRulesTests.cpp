@@ -111,7 +111,21 @@ constexpr char UnformattedSource[] = "RWTexture2D<float4> Unformatted;\n"
                                      "[numthreads(8, 8, 1)] void UnformattedCS(uint3 id : "
                                      "SV_DispatchThreadID) { Unformatted[id.xy] = 1; }\n";
 
+// cube storage image 원문이다(16.1절 SH2g — RWTextureCube·RWTextureCubeArray, 같은 원소 타입의
+// RWTexture2DArray와 이미지 타입을 공유한다).
+constexpr char CubeSource[] =
+    "ROCKS_IMAGE_FORMAT(r32f) RWTextureCube<float> Sky;\n"
+    "ROCKS_IMAGE_FORMAT(r32f) RWTextureCubeArray<float> Skies;\n"
+    "ROCKS_IMAGE_FORMAT(r32f) RWTexture2DArray<float> Plain;\n"
+    "[numthreads(4, 4, 1)] void CubesCS(uint3 id : SV_DispatchThreadID) {\n"
+    "    Sky[id] = 1.0; Skies[id] = 2.0; Plain[id] = 3.0;\n"
+    "}\n"
+    "[numthreads(4, 4, 1)] void SizedCS(uint3 id : SV_DispatchThreadID) {\n"
+    "    uint w, h, faces; Sky.GetDimensions(w, h, faces); Sky[id] = (float)(w + h + faces);\n"
+    "}\n";
+
 constexpr char BindEntry[] = "/Project/Bind.rsf";
+constexpr char CubeEntry[] = "/Project/Cube.rsf";
 constexpr char UnformattedEntry[] = "/Project/Unformatted.rsf";
 constexpr char MoreEntry[] = "/Project/More.rsf";
 constexpr char BadEntry[] = "/Project/Bad.rsf";
@@ -163,6 +177,7 @@ struct BindingCase {
         SHADER_MANAGER_TEST_REQUIRE(test.fixture.Write("Project/Shaders/More.rsf", MoreSource));
         SHADER_MANAGER_TEST_REQUIRE(
             test.fixture.Write("Project/Shaders/Unformatted.rsf", UnformattedSource));
+        SHADER_MANAGER_TEST_REQUIRE(test.fixture.Write("Project/Shaders/Cube.rsf", CubeSource));
         SHADER_MANAGER_TEST_REQUIRE(
             LoadShaderFormatSnapshot(ShaderFormatDirectory, "D3D11_SM5", d3d11));
         return true;
@@ -679,6 +694,68 @@ TEST(ShaderBindingRules_WorkerGlesEmulatesConstantBuffers) {
           pixelHeader.samplers[0].source == ShaderSamplerSource::Own);
     CHECK(pixelHeader.samplers[1].unit == 1 &&
           pixelHeader.samplers[1].source == ShaderSamplerSource::SharedWrap);
+}
+
+// cube storage image(16.1절 SH2g): GLES는 imageCube·imageCubeArray와 값 1 Cube·CubeArray 모양,
+// 같은 원소 타입의 2D 배열은 image2DArray 그대로, Vulkan·D3D12는 2DArray 모양, GLES에서
+// GetDimensions는 오류다.
+TEST(ShaderBindingRules_WorkerGlesCubeStorageImages) {
+    BindingCase binding;
+    const char* skip = nullptr;
+    if (!binding.Make("bindingcube", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderBindingRules_WorkerGlesCubeStorageImages: %s\n", skip);
+        }
+
+        return;
+    }
+
+    ShaderFormatSnapshot gles(TestAllocator());
+    REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, "GLES31_PC", gles));
+    Array<ShaderCompileJob> jobs(TestAllocator());
+    for (const ShaderFormatSnapshot* format : {&gles, &binding.test.vulkan, &binding.test.d3d12}) {
+        REQUIRE(jobs.TryPushBack(binding.Job(*format, CubeEntry, "CubesCS", ShaderStageCompute)));
+    }
+
+    REQUIRE(jobs.TryPushBack(binding.Job(gles, CubeEntry, "SizedCS", ShaderStageCompute)));
+    REQUIRE(jobs.TryPushBack(
+        binding.Job(binding.test.vulkan, CubeEntry, "SizedCS", ShaderStageCompute)));
+    Array<ShaderCompileJobResult> results(TestAllocator());
+    REQUIRE(Compile(binding, "CubeWork", jobs.View(), results));
+    PrintFailures(results, 3);
+    const ShaderResourceShape expected[3][3] = {
+        {ShaderResourceShape::TextureCube, ShaderResourceShape::TextureCubeArray,
+         ShaderResourceShape::Texture2DArray},
+        {ShaderResourceShape::Texture2DArray, ShaderResourceShape::Texture2DArray,
+         ShaderResourceShape::Texture2DArray},
+        {ShaderResourceShape::Texture2DArray, ShaderResourceShape::Texture2DArray,
+         ShaderResourceShape::Texture2DArray}};
+    const char* names[3] = {"Sky", "Skies", "Plain"};
+    for (usize format = 0; format < 3; ++format) {
+        ShaderBindingLayout layout(TestAllocator());
+        REQUIRE(ReadLayout(results[format], layout));
+        for (usize index = 0; index < 3; ++index) {
+            const ShaderBindingResource* resource = Named(layout, names[index]);
+            REQUIRE(resource != nullptr);
+            CHECK(resource->kind == ShaderResourceKind::StorageImage &&
+                  resource->shape == expected[format][index] &&
+                  resource->component == ShaderComponentType::Float);
+        }
+    }
+
+    const Array<uint8>& code = results[0].values.Part(ShaderNuggetValue::Code);
+    String essl(TestAllocator());
+    REQUIRE(essl.TryAssign(StringView(reinterpret_cast<const char*>(code.Data()), code.Size())));
+    const bool esslOk = strstr(essl.CStr(), "imageCube Sky;") != nullptr &&
+                        strstr(essl.CStr(), "imageCubeArray Skies;") != nullptr &&
+                        strstr(essl.CStr(), "image2DArray Plain;") != nullptr;
+    if (!esslOk) {
+        fprintf(stderr, "GLES cube ESSL:\n%s\n", essl.CStr());
+    }
+
+    CHECK(esslOk);
+    CHECK(Failed(results[3], "GetDimensions on RWTextureCube"));
+    CHECK(results[4].status == ShaderCompileStatus::Success);
 }
 
 } // namespace shader_binding_rules_tests_file

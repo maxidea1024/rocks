@@ -11,7 +11,7 @@
 
 namespace rocks::render::testing {
 
-// 기록 backend다(Docs/Design/RenderBase.ko.md 5.7절 "기록 backend 대조"). 장치 호출을 순서대로
+// 기록 backend다(Docs/Design/RenderBase 5.7절 "기록 backend 대조"). 장치 호출을 순서대로
 // 기록하고 GPU 완료를 시험이 정한다(HoldCompletions). 렌더 lane의 인라인·lane 모드 결과 비교, slot
 // 대기, 장치 손실 주입, 소유권 이관 중 표면 작업 시험에 쓴다.
 //

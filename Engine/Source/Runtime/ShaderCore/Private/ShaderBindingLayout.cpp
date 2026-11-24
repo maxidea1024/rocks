@@ -59,7 +59,10 @@ const char* CheckShape(const ShaderBindingResource& resource) noexcept {
                shape == ShaderResourceShape::Texture1DArray ||
                shape == ShaderResourceShape::Texture2D ||
                shape == ShaderResourceShape::Texture2DArray ||
-               shape == ShaderResourceShape::Texture3D || shape == ShaderResourceShape::TypedBuffer;
+               shape == ShaderResourceShape::Texture3D ||
+               shape == ShaderResourceShape::TextureCube ||
+               shape == ShaderResourceShape::TextureCubeArray ||
+               shape == ShaderResourceShape::TypedBuffer;
         break;
     case ShaderResourceKind::StorageBufferRead:
     case ShaderResourceKind::StorageBufferReadWrite:

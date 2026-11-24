@@ -424,6 +424,15 @@ void GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
                                 view->dimension == TextureDimension::Texture3D ||
                                 IsCubeDimension(view->dimension);
             const bool layered = layers && view->viewRange.sliceCount == view->slices;
+            // imageCube·imageCubeArray(RWTextureCube, ShaderSystem 16.1절 SH2g)는 모든 면을 묶어야
+            // 한다. 층 일부만 고른 view는 GLES가 그렇게 묶을 수 없으므로 비워 둔다(면 하나만 고른
+            // view는 그 층의 2D 이미지라 RWTexture2D로 쓴다).
+            const bool cubeImage = binding.shape == shader::ShaderResourceShape::TextureCube ||
+                                   binding.shape == shader::ShaderResourceShape::TextureCubeArray;
+            if (cubeImage && !layered) {
+                break;
+            }
+
             gl_.BindImageTexture(location, view->texture,
                                  static_cast<GLint>(view->viewRange.firstMip),
                                  layered ? GL_TRUE : GL_FALSE,

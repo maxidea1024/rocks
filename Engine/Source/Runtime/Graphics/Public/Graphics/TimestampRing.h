@@ -18,7 +18,7 @@ protected:
 };
 
 // timestamp query를 프레임 slot 링으로 나눠 쓰고, GPU 완료 뒤 비차단으로 회수하는
-// backend 공용 장부다(Docs/Design/RenderBase.ko.md 13.2절, GX9). query pool은 slot × queriesPerSlot
+// backend 공용 장부다(Docs/Design/RenderBase 13.2절, GX9). query pool은 slot × queriesPerSlot
 // 칸이며 slot 하나가 제출 하나(프레임)에 대응한다.
 //
 // 사용 예(backend):

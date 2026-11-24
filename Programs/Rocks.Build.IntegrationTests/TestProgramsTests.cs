@@ -43,10 +43,10 @@ internal static class TestProgramsTests
         Expect("has no rules", () => BuildCommand.TestPrograms(Runner("Missing"), Load));
 
         string root = Path.GetFullPath("rocks-root");
-        Require(BuildCommand.TestProgramOutput(null, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
+        Require(BuildCommand.SeparateTargetOutput(null, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
             EnginePlanning.DefaultOutput(root, "windows", "LaunchProbeModular", NativeConfiguration.Debug), "default companion output");
         string custom = Path.Combine(root, "out", "ci-modular");
-        Require(BuildCommand.TestProgramOutput(custom, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
+        Require(BuildCommand.SeparateTargetOutput(custom, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
             Path.Combine(root, "out", "ci-modular-launchprobemodular"), "companion output next to a custom test output");
         Console.WriteLine("PASS test programs: selection, duplicates, invalid companion targets, companion output");
     }

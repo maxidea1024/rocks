@@ -140,6 +140,13 @@ public static class RuleLoader
                 throw new ArgumentException($"Companion target '{name}' must be a Monolithic Program target without plugins or companions.");
             }
 
+            // 동반 타깃은 모듈만 이 빌드에 합쳐지므로 그 선행 타깃은 빌드되지 않는다(Docs/Design/BuildTargets 3.11절).
+            if (companion.PrerequisiteTargets.Count != 0)
+            {
+                throw new ArgumentException($"Companion target '{name}' has prerequisite targets; only its modules join the build of '{target.Name}', " +
+                    "so list them on that target instead.");
+            }
+
             // 동반 타깃은 주 타깃과 한 빌드로 컴파일되므로 타깃 매크로가 같아야 한다(Docs/Design/BuildTargets 3.1절 — 다른 조합이면 동반
             // 실행 파일이 주 타깃의 매크로로 컴파일된다).
             if (!companion.Kind.Defines.SequenceEqual(target.Kind.Defines))
@@ -181,6 +188,151 @@ public static class RuleLoader
         public override IReadOnlyList<string> TestPrograms => inner.TestPrograms;
 
         public override IReadOnlyList<string> CompanionTargets => inner.CompanionTargets;
+
+        public override IReadOnlyList<PrerequisiteTarget> PrerequisiteTargets => inner.PrerequisiteTargets;
+    }
+
+    /// <summary>
+    /// 이 타깃·구성이 선행 타깃을 빌드하는가다(Docs/Design/BuildTargets 3.11절). Developer 모듈을 빼는 구성(Game·Client·Server의 Release —
+    /// <see cref="ModuleTypeRules.Allows"/>)은 개발 도구를 빌드하지 않는다.
+    /// </summary>
+    public static bool BuildsPrerequisites(TargetKind target, NativeConfiguration configuration) =>
+        ModuleTypeRules.Allows(target, configuration, Descriptors.ModuleType.Developer);
+
+    /// <summary>
+    /// 모든 타깃의 선행 타깃(<see cref="TargetRules.PrerequisiteTargets"/>, Docs/Design/BuildTargets 3.11절)을 검사한다. 규칙 로드가 한다.
+    /// </summary>
+    /// <exception cref="ArgumentException">빈 이름, 없는 타깃, 자기 자신, 목록 안 중복, Program이 아닌 선행 타깃, 빈 조건 목록·값 중복·정의되지
+    /// 않은 값, 이 타깃이 선행 타깃을 빌드하지 않는 구성의 명시, 순환.</exception>
+    public static void ValidatePrerequisites(IReadOnlyList<TargetRules> targets)
+    {
+        var byName = targets.ToDictionary(target => target.Name, StringComparer.Ordinal);
+        foreach (TargetRules target in targets)
+        {
+            HashSet<string> seen = new(StringComparer.Ordinal);
+            foreach (PrerequisiteTarget prerequisite in target.PrerequisiteTargets)
+            {
+                if (string.IsNullOrWhiteSpace(prerequisite.Name))
+                {
+                    throw new ArgumentException($"Target '{target.Name}' lists a prerequisite target without a name.");
+                }
+
+                if (prerequisite.Name == target.Name || !seen.Add(prerequisite.Name))
+                {
+                    throw new ArgumentException($"Target '{target.Name}' lists prerequisite target '{prerequisite.Name}' twice or itself.");
+                }
+
+                if (!byName.TryGetValue(prerequisite.Name, out TargetRules? rules))
+                {
+                    throw new ArgumentException($"Target '{target.Name}' lists unknown prerequisite target '{prerequisite.Name}'.");
+                }
+
+                if (rules.Type != TargetType.Program)
+                {
+                    throw new ArgumentException($"Prerequisite target '{prerequisite.Name}' of '{target.Name}' is a {rules.Type} target; prerequisite " +
+                        "targets are Program targets (they take every module type in every configuration).");
+                }
+
+                ValidateCondition(target, prerequisite, "Platforms", prerequisite.Platforms);
+                ValidateCondition(target, prerequisite, "Configurations", prerequisite.Configurations);
+                NativeConfiguration[] skipped = [.. (prerequisite.Configurations ?? []).Where(configuration => !BuildsPrerequisites(target.Kind, configuration))];
+                if (skipped.Length != 0)
+                {
+                    throw new ArgumentException($"Target '{target.Name}' lists prerequisite target '{prerequisite.Name}' for {skipped[0]}, but a " +
+                        $"{skipped[0]} {target.Type} target leaves out Developer modules and builds no prerequisite targets (Docs/Design/BuildTargets " +
+                        "section 3.11).");
+                }
+            }
+        }
+
+        // 순환은 선행 타깃 그래프를 깊이 우선으로 훑어 찾는다(조건과 무관하게 — 어느 문맥에서든 순환이 생기지 않게).
+        Dictionary<string, bool> finished = new(StringComparer.Ordinal);
+        List<string> path = [];
+        foreach (TargetRules target in targets)
+        {
+            VisitPrerequisites(target, byName, finished, path);
+        }
+    }
+
+    private static void ValidateCondition<T>(TargetRules target, PrerequisiteTarget prerequisite, string field, IReadOnlyList<T>? values)
+        where T : struct, Enum
+    {
+        if (values is null)
+        {
+            return;
+        }
+
+        if (values.Count == 0 || values.Distinct().Count() != values.Count || values.Any(value => !Enum.IsDefined(value)))
+        {
+            throw new ArgumentException($"Target '{target.Name}': prerequisite target '{prerequisite.Name}' has an empty, duplicated, or unknown " +
+                $"{field} condition; leave it null for no condition.");
+        }
+    }
+
+    // finished[이름]이 false면 지금 경로 위에 있고(다시 만나면 순환), true면 끝까지 훑었다.
+    private static void VisitPrerequisites(TargetRules target, IReadOnlyDictionary<string, TargetRules> byName, Dictionary<string, bool> finished,
+        List<string> path)
+    {
+        if (finished.TryGetValue(target.Name, out bool done))
+        {
+            if (!done)
+            {
+                int start = path.IndexOf(target.Name);
+                throw new ArgumentException($"Prerequisite targets form a cycle: {string.Join(" -> ", path.Skip(start).Append(target.Name))}.");
+            }
+
+            return;
+        }
+
+        finished[target.Name] = false;
+        path.Add(target.Name);
+        foreach (PrerequisiteTarget prerequisite in target.PrerequisiteTargets)
+        {
+            VisitPrerequisites(byName[prerequisite.Name], byName, finished, path);
+        }
+
+        path.RemoveAt(path.Count - 1);
+        finished[target.Name] = true;
+    }
+
+    /// <summary>
+    /// target 전에 빌드할 선행 타깃의 규칙이다(Docs/Design/BuildTargets 3.11절). 깊이 우선 후위 순서(선행 타깃의 선행 타깃이 먼저)이고 같은
+    /// 타깃은 한 번만 나온다. 각 타깃은 자기 조건 칸(플랫폼·구성)과 자기 종류의 <see cref="BuildsPrerequisites"/>로 거른다. 돌려주는 규칙은
+    /// 선행 타깃 자기 것이다(매크로 조합·링크 방식·빌드 정보가 그 타깃 값이다). targets는 <see cref="ValidatePrerequisites"/>를 통과한 규칙
+    /// 모음이다.
+    /// </summary>
+    /// <exception cref="ArgumentException">targets에 없는 선행 타깃.</exception>
+    public static IReadOnlyList<TargetRules> PrerequisitesOf(TargetRules target, IReadOnlyList<TargetRules> targets, NativePlatform platform,
+        NativeConfiguration configuration)
+    {
+        var byName = targets.ToDictionary(candidate => candidate.Name, StringComparer.Ordinal);
+        List<TargetRules> ordered = [];
+        HashSet<string> added = new(StringComparer.Ordinal) { target.Name };
+        AddPrerequisites(target, byName, platform, configuration, added, ordered);
+        return ordered;
+    }
+
+    private static void AddPrerequisites(TargetRules owner, IReadOnlyDictionary<string, TargetRules> byName, NativePlatform platform,
+        NativeConfiguration configuration, HashSet<string> added, List<TargetRules> ordered)
+    {
+        if (!BuildsPrerequisites(owner.Kind, configuration))
+        {
+            return;
+        }
+
+        foreach (PrerequisiteTarget prerequisite in owner.PrerequisiteTargets.Where(value => value.Matches(platform, configuration)))
+        {
+            TargetRules rules = byName.GetValueOrDefault(prerequisite.Name)
+                ?? throw new ArgumentException($"Target '{owner.Name}' lists unknown prerequisite target '{prerequisite.Name}'.");
+            // added는 돌려줄 목록의 이름과 주 타깃이다. 검사를 통과한 규칙에는 순환이 없으므로 다시 만나는 이름은 이미 목록에 있다.
+            if (!added.Add(rules.Name))
+            {
+                continue;
+            }
+
+            AddPrerequisites(rules, byName, platform, configuration, added, ordered);
+            ordered.Add(rules);
+        }
     }
 
     /// <summary>
@@ -223,6 +375,8 @@ public static class RuleLoader
         {
             ValidateTargetProperties(target);
         }
+
+        ValidatePrerequisites(targets);
 
         // type 사이 의존 규칙(Docs/Design/BuildTargets 3.3절 BD25)은 타깃과 무관하게 규칙 로드 때 본다.
         ModuleTypeRules.ValidateDependencies(modules);

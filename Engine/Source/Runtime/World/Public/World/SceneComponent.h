@@ -266,6 +266,20 @@ protected:
     virtual void OnVisibilityChanged() noexcept {
     }
 
+    // 게임 World에서 초기화가 끝났는지다: 등록되어 있고 World가 Game·Tryout이며 소유 Actor가
+    // Initialized 이후다(23.3절 이동 검사와 같은 조건 — Spawn·OnAwake 안에서는 거짓).
+    bool IsPastGameInitialization() const noexcept;
+
+    // 데이터 변경의 Mobility 검사다(UE AreDynamicDataChangesAllowed — Docs/Design/EngineRuntime
+    // 24.2.3절). IsPastGameInitialization이고 Static이면(blockStationary면 Stationary도)
+    // InvalidArgument와 Warning 진단 StaticComponentDataChanged다. property는 진단 문구의 필드
+    // 이름이다.
+    Result<void> CheckDynamicDataChange(const char* property, bool blockStationary) const noexcept;
+
+    // 게임 World 초기화 뒤에는 바꿀 수 없는 데이터의 검사다(Mobility 무관 — 예: 광원
+    // affectsWorld). 막으면 InvalidArgument와 Warning 진단 ComponentDataLockedInGame이다.
+    Result<void> CheckChangeBeforeGameInitialization(const char* property) const noexcept;
+
 private:
     // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다.
     Result<void> CheckMovable(const char* action) const noexcept;

@@ -56,7 +56,7 @@ UE 대응표와 backend 대응 표가 형식마다 한 행씩이므로 분량이
 
 | 문서 | 위치 | 관계 |
 |---|---|---|
-| [렌더 기반](RenderBase.ko.md) | 4.4절 GX1(장치 능력) | 형식별 능력 질의는 이 문서 7·8절이 정한다. GX1의 나머지(셰이더 형식 목록·전역 한도·동작 표시)는 RenderBase에 남는다 |
+| [렌더 기반](RenderBase/README.ko.md) | 4.4절 GX1(장치 능력) | 형식별 능력 질의는 이 문서 7·8절이 정한다. GX1의 나머지(셰이더 형식 목록·전역 한도·동작 표시)는 RenderBase에 남는다 |
 | 〃 | 4.4절 GX2(자원 desc·view) | 깊이/스텐실 형식·view plane·sRGB 짝 view는 이 문서 9·10절, desc 구조는 GX2 |
 | 〃 | 6.5절 텍스처 플랫폼 데이터 입력 계약 | 블록 압축 크기 공식·고정 번호표·직렬화 이름은 이 문서 6·12절. "블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 압축 단계 착수 전에 확정"의 형식·가용성 부분을 이 문서가 확정한다. 인코더와 프로필별 형식 선택은 에셋 쪽 |
 | [에셋 시스템](AssetSystem/README.ko.md) | 1절 A0-G 행 | 형식 부분을 이 문서로 옮긴다. 개정안은 15절 |
@@ -837,7 +837,7 @@ Rocks MetalGraphics는 SH5에서 구현한다. 그때 UE 표(MTL:798–1046)를 
 | D3D12 `ResourceFormat(Format)` | `D3D12PixelFormats.cpp` 표 | `D3D12Device.cpp:116–123` |
 | OpenGL `InternalFormat(Format)` | `OpenGLPixelFormats.cpp` 표 | `OpenGLDevice.cpp:418–425` |
 
-사용처는 3절 표의 10개 파일 전부다. 문서 쪽 갱신 대상: `Docs/Design/EngineRuntime:35`(GraphicsTypes 설명), `Docs/Design/RenderBase.ko.md` 4.1절 "자원 종류" 행·11.2절 "크기 계산", `Docs/Design/ShaderSystem/04-CurrentCodebase.ko.md:16`(GraphicsTypes 현황 행). 헤더 이름 `GraphicsTypes/PixelFormat.h`는 그대로 둔다.
+사용처는 3절 표의 10개 파일 전부다. 문서 쪽 갱신 대상: `Docs/Design/EngineRuntime:35`(GraphicsTypes 설명), `Docs/Design/RenderBase` 4.1절 "자원 종류" 행·11.2절 "크기 계산", `Docs/Design/ShaderSystem/04-CurrentCodebase.ko.md:16`(GraphicsTypes 현황 행). 헤더 이름 `GraphicsTypes/PixelFormat.h`는 그대로 둔다.
 
 ## 14. 구현 단계
 
@@ -978,7 +978,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 > GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(…)·샘플러 W축 주소·필터 5종(…)·**깊이 비교 샘플러**(…), 쿠킹 데이터 샘플러 D3D12·OpenGL. 착수 전 반영할 셰이더·렌더 요구: …
 
 개정:
-> GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. **픽셀 형식은 [픽셀 형식](PixelFormat.ko.md) PF1–PF3(렌더 쪽, A0-G 전 완료)을 쓴다**: 번호표·정보 표·D3D12·OpenGL ES 형식 대응·형식 능력 질의. A0-G는 차원별 형식 능력(`Texture3D`·`TextureCube`)을 생성 검증에 쓰고, 차원 × 형식 조합의 self-test를 PF2 형식 순회에 차원 축으로 더한다. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem/05-Prerequisites.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability` — 형식 지원 표는 픽셀 형식 8절)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식은 픽셀 형식 8.6절 조건표, 필터 확장 `GL_EXT_texture_filter_anisotropic`)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2)
+> GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase/README.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. **픽셀 형식은 [픽셀 형식](PixelFormat.ko.md) PF1–PF3(렌더 쪽, A0-G 전 완료)을 쓴다**: 번호표·정보 표·D3D12·OpenGL ES 형식 대응·형식 능력 질의. A0-G는 차원별 형식 능력(`Texture3D`·`TextureCube`)을 생성 검증에 쓰고, 차원 × 형식 조합의 self-test를 PF2 형식 순회에 차원 축으로 더한다. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem/05-Prerequisites.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability` — 형식 지원 표는 픽셀 형식 8절)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식은 픽셀 형식 8.6절 조건표, 필터 확장 `GL_EXT_texture_filter_anisotropic`)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2)
 
 완료 기준 열은 "self-test 확장"에서 "self-test 확장(차원 × swizzle × 샘플러, 형식 축은 PF2 순회 재사용)"으로 개정한다.
 

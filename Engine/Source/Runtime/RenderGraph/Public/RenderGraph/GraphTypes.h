@@ -4,7 +4,7 @@
 #include <Graphics/DeviceTypes.h>
 #include <Graphics/ResourceAccess.h>
 
-// 렌더 그래프의 값 타입이다(Docs/Design/RenderBase.ko.md 7절). 그래프 자원 handle, pass 종류·표시,
+// 렌더 그래프의 값 타입이다(Docs/Design/RenderBase 7절). 그래프 자원 handle, pass 종류·표시,
 // 그래프 내부 접근 모델의 단위(GraphResourceAccess)와 진단 결과 타입을 둔다.
 namespace rocks::render {
 

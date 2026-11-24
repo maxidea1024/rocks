@@ -291,7 +291,7 @@ Templates/  Samples/VerticalSlice
 
 Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](../Guides/RepositoryLayout.ko.md)을 따른다.
 
-공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase.ko.md) 5.5절, CP6 구현 2026-11-17).
+공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase/05-RenderLane.ko.md) 5.5절, CP6 구현 2026-11-17).
 
 ### 3.3 수학 라이브러리·SIMD·정밀도 정책
 
@@ -724,7 +724,7 @@ Submit admission은 callable을 이동하기 전에 실행 node의 내장 cleanu
 |---|---|---|
 | Game | Object 가변 상태, World, 편집 transaction | 프레임 경계에서 결과 commit. 디스크·GPU 동기 wait 금지 |
 | Worker | 분할된 POD, immutable asset·pose | 자신의 output 범위만 쓰기. continuation 중심 실행 |
-| Render | RenderScene, GPU submission | Game 주소 없음. immutable packet과 resource handle 수신. 전용 스레드 lane(Core `DedicatedLane`) 위의 `RenderLane`이며 작업은 프레임 packet·자원 생성/갱신/Retire·표면·lane 표지 네 종류, 값은 명시 등록한 렌더 전달 가능 타입만 받는다([렌더 기반](RenderBase.ko.md) 5.2절, RB1 구현) |
+| Render | RenderScene, GPU submission | Game 주소 없음. immutable packet과 resource handle 수신. 전용 스레드 lane(Core `DedicatedLane`) 위의 `RenderLane`이며 작업은 프레임 packet·자원 생성/갱신/Retire·표면·lane 표지 네 종류, 값은 명시 등록한 렌더 전달 가능 타입만 받는다([렌더 기반](RenderBase/05-RenderLane.ko.md) 5.2절, RB1 구현) |
 | Physics | 해당 tick의 body state | command 적용 → step → snapshot publication |
 | IO | read request와 completion | 실제 IO는 OS async 경로. worker를 파일 대기로 점유하지 않음 |
 | AudioRT | 고정 voice·DSP 상태 | 동적 할당·lock·IO·일반 scheduler wait 금지 |
@@ -740,7 +740,7 @@ prerequisite 실패·취소는 기본적으로 dependent body를 실행하지 �
 
 입력 수집 → 네트워크 수신 적용 → 게임/AI 의도 → 애니메이션·kinematic 목표 → fixed physics → 결과·이벤트 반영 → transform hierarchy 확정 → render/audio/VFX snapshot 추출 순서를 기본으로 한다. 별도 frame에서 병렬 실행하는 경우에도 tick 번호와 snapshot version으로 동일 선행 관계를 표현한다.
 
-Render는 2–3개 in-flight frame slot을 사용하되 slot 재사용은 해당 slot의 모든 queue fence 완료로 판정한다. 단순히 ‘3프레임 경과’로 회수하지 않는다. 게임이 과도하게 선행하면 bounded queue가 backpressure를 제공한다. 게임 lane이 막히는 곳은 프레임 slot 확보뿐이며 대기 중에도 OS 메시지를 펌프한다. 예외는 표면 소실 handshake와 종료·장치 재생성·시험의 전체 비우기다([렌더 기반](RenderBase.ko.md) 5.3절). streaming, shader compile, GC, AI는 별도 budget과 priority aging을 사용하여 한 종류가 worker 전체를 점유하지 못하게 한다.
+Render는 2–3개 in-flight frame slot을 사용하되 slot 재사용은 해당 slot의 모든 queue fence 완료로 판정한다. 단순히 ‘3프레임 경과’로 회수하지 않는다. 게임이 과도하게 선행하면 bounded queue가 backpressure를 제공한다. 게임 lane이 막히는 곳은 프레임 slot 확보뿐이며 대기 중에도 OS 메시지를 펌프한다. 예외는 표면 소실 handshake와 종료·장치 재생성·시험의 전체 비우기다([렌더 기반](RenderBase/05-RenderLane.ko.md) 5.3절). streaming, shader compile, GC, AI는 별도 budget과 priority aging을 사용하여 한 종류가 worker 전체를 점유하지 못하게 한다.
 
 ### 8.3 가변·고정 tick과 시간 도메인
 
@@ -1144,7 +1144,7 @@ public:
 };
 ~~~
 
-Graphics `Device`가 이 계약을 진다([렌더 기반](RenderBase.ko.md) GX7 구현 2026-11-17): 제출(`EndFrame`)은 `GpuFencePoint`를 돌려주고, `Retire(handle)`는 handle만 받으며 last-use는 장치 내부 집계(기록 중 프레임이면 그 fence, 아니면 그때까지의 마지막 제출)가 정한다. 단일 graphics queue에서는 호출자 하한이 내부 집계보다 늦을 수 없어 받지 않는다. OpenGL도 fence sync로 같은 계약을 따른다. 렌더 lane의 게임 쪽 `Retire`는 `RenderHandle`만 받는 lane 작업이다. graph import/command recording 전에 RenderResourceLease를 원자적으로 획득한다(RB2·RG1에서 둔다). recording packet은 resource·descriptor allocation·upload range·PSO·vendor context·command allocator의 사용 집합을 소유한다. Retire는 신규 lease를 차단하되 이미 승인된 recording을 무효화하지 않는다. Submit 성공은 packet lease를 submission record와 fence retirement로 이관하며 호출자의 임시 Span을 보관하지 않는다. Retire도 fence 목록을 소유 저장소로 복사하되 호출자 목록은 그 시점의 하한이며 RHI 내부 last-use 집계가 최종 기준이다. Retire 이전에 승인된 recording의 늦은 Submit은 새 queue fence 등록과 recording lease 이관을 같은 동기화 경계에서 수행한다. fence 등록 전에 마지막 recording lease가 0이 되는 순간을 허용하지 않는다.
+Graphics `Device`가 이 계약을 진다([렌더 기반](RenderBase/README.ko.md) GX7 구현 2026-11-17): 제출(`EndFrame`)은 `GpuFencePoint`를 돌려주고, `Retire(handle)`는 handle만 받으며 last-use는 장치 내부 집계(기록 중 프레임이면 그 fence, 아니면 그때까지의 마지막 제출)가 정한다. 단일 graphics queue에서는 호출자 하한이 내부 집계보다 늦을 수 없어 받지 않는다. OpenGL도 fence sync로 같은 계약을 따른다. 렌더 lane의 게임 쪽 `Retire`는 `RenderHandle`만 받는 lane 작업이다. graph import/command recording 전에 RenderResourceLease를 원자적으로 획득한다(RB2·RG1에서 둔다). recording packet은 resource·descriptor allocation·upload range·PSO·vendor context·command allocator의 사용 집합을 소유한다. Retire는 신규 lease를 차단하되 이미 승인된 recording을 무효화하지 않는다. Submit 성공은 packet lease를 submission record와 fence retirement로 이관하며 호출자의 임시 Span을 보관하지 않는다. Retire도 fence 목록을 소유 저장소로 복사하되 호출자 목록은 그 시점의 하한이며 RHI 내부 last-use 집계가 최종 기준이다. Retire 이전에 승인된 recording의 늦은 Submit은 새 queue fence 등록과 recording lease 이관을 같은 동기화 경계에서 수행한다. fence 등록 전에 마지막 recording lease가 0이 되는 순간을 허용하지 않는다.
 
 graph compile/Close 실패나 미제출 취소는 recording worker가 종료된 뒤 lease를 해제한다. Submit 실패는 미제출·부분 제출·device lost를 구분하며 이미 제출되었거나 제출 여부가 불확실한 자원은 RHI 내부 recovery record에 보존한다. 오류 반환만으로 정상 pool에 재사용하지 않는다. 자원 재사용은 신규 사용 차단, CPU recording lease 0, 모든 제출 fence 완료를 함께 요구한다. D3D12 command list가 전달 객체의 참조를 유지하지 않는 제약과 별도로 엔진이 이 수명을 보장해야 한다. [S53](https://microsoft.github.io/DirectX-Specs/d3d/CPUEfficiency.html#reference-counting)
 
@@ -3058,7 +3058,7 @@ UE 5.8.4의 GC 구조도 대조하였다. 상세는 [GC 대규모 처리 보강 
 - RT GI는 DynamicGI의 하위 옵션이 아닌 독립 방식이다.
 - path tracing은 GI 방식이 아니라 별도 렌더 모드다(14.3·14.4절).
 
-UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바일 Forward의 클러스터 조명을 대조하였다. 렌더 기반 층은 [렌더 기반](RenderBase.ko.md)에 둔다. 개정 범위는 표지·11.1·14.3·14.4·33.16·34절(S97)이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
+UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바일 Forward의 클러스터 조명을 대조하였다. 렌더 기반 층은 [렌더 기반](RenderBase/README.ko.md)에 둔다. 개정 범위는 표지·11.1·14.3·14.4·33.16·34절(S97)이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
 ### 33.17 개정 1.12의 좌표·단위 UE 전환과 물리 Jolt 복귀
 

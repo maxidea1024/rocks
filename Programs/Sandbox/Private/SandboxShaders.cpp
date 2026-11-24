@@ -223,7 +223,7 @@ private:
         snprintf(formats_, sizeof(formats_), "%s/Config/ShaderFormats", engine);
         if (!FindWorker()) {
             Note("ShaderCompileWorker is neither next to Sandbox nor in the ShaderCompileWorker "
-                 "target output (build RocksTarget=ShaderCompileWorker)");
+                 "target output (the Sandbox build builds it first as a prerequisite target)");
             return false;
         }
 
@@ -272,8 +272,8 @@ private:
 
     // 워커는 실행 파일 옆, 없으면 같은 구성으로 빌드한 ShaderCompileWorker 타깃 출력
     // (out/<도구>-<플랫폼>-shadercompileworker-<구성>/bin)이다. Sandbox는 Game 타깃이라 워커를 동반
-    // 타깃으로 함께 빌드하지 못한다(동반 타깃은 Program 주 타깃만 —
-    // Docs/Design/BuildTargets 3.1절).
+    // 타깃으로 함께 빌드하지 못하고(동반 타깃은 Program 주 타깃만 — Docs/Design/BuildTargets
+    // 3.1절), Sandbox 빌드가 선행 타깃으로 그 출력에 먼저 빌드한다(3.11절).
     bool FindWorker() noexcept {
         usize bytes = 0;
         char executable[PathBytes] = {};

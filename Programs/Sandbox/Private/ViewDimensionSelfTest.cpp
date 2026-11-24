@@ -264,14 +264,6 @@ void RunFaceWriteView(Device& device, Allocator& allocator) noexcept {
         return;
     }
 
-    if (device.Info().backend == Backend::OpenGL) {
-        // GLES image uniform 타입은 묶은 target과 같아야 한다(layered cube는 imageCube). 쿠킹
-        // ESSL은 HLSL RWTexture2DArray에서 image2DArray다(한계 — ShaderSystem 16.1절 SH2e2 메모).
-        printf("  [NOT RUN] OpenGL ES view dimension: cube Storage face and layered writes "
-               "(GLES needs imageCube)\n");
-        return;
-    }
-
     auto cube = device.CreateTexture(desc, {});
     ComputePipelineDesc faceDesc;
     faceDesc.drawConstantBytes = sizeof(FillConstants);
