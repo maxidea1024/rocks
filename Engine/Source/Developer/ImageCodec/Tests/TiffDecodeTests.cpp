@@ -562,6 +562,9 @@ TEST(TiffDecode_ColorPaletteAlpha) {
 
     const uint8 rgbaa[] = {100, 50, 25, 128, 77};
     const uint16 twoExtra[] = {EXTRASAMPLE_UNASSALPHA, EXTRASAMPLE_UNSPECIFIED};
+    image = TiffImage{};
+    image.photometric = PHOTOMETRIC_RGB;
+    image.writeExtraSamples = true;
     image.samples = 5;
     image.extraSamples = twoExtra;
     image.raw = rgbaa;
