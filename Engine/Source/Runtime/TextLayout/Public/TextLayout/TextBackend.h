@@ -16,7 +16,7 @@ namespace rocks::text {
 
 // 열 face의 기술이다(4.2절 FontFace 설정의 실행 쪽).
 struct FontFaceDesc {
-    SharedPtr<const FontFaceData> data;
+    SharedPtr<const FontFaceData> data = {};
     // TTC·OTC의 하위 face 번호다.
     int32 subFaceIndex = 0;
     FontHinting hinting = FontHinting::Default;

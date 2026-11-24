@@ -90,6 +90,8 @@ public:
         out.scalable = FT_IS_SCALABLE(face_) != 0;
         out.color = FT_HAS_COLOR(face_) != 0;
         out.fixedSizeCount = face_->num_fixed_sizes;
+        out.bold = (face_->style_flags & FT_STYLE_FLAG_BOLD) != 0;
+        out.italic = (face_->style_flags & FT_STYLE_FLAG_ITALIC) != 0;
         return Result<void>::Success();
     }
 

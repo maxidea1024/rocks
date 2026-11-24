@@ -111,3 +111,8 @@ UiToolkit 3.4절 lane 모델을 따른다: 측정·shaping·cache 조회는 UI l
 - 오류: 글꼴이 아니거나 손상 `InvalidArgument`(원본 FreeType 오류 문구를 로그), 하위 face 번호 범위 밖 `InvalidArgument`, 초기화 전 `CreateTextBackend` `NotReady`, 할당 실패 `OutOfMemory`.
 - ICU·HarfBuzz를 직접 부르는 FT1 연결 시험(`ThirdPartyIcuTests`·`ThirdPartyHarfBuzzTests`)은 FT2a에서 지운다. 시험 실행 파일이 ICU를 직접 의존하면 전역 상태 소비 모듈이 둘(시험 실행 파일·`TextLayoutBackend`)이 되고, Modular 빌드에서는 ICU가 두 벌이 되어 backend가 초기화한 쪽과 시험이 부르는 쪽이 갈라진다(모듈 시험 묶음은 include 소유 검사만 바꾸고 컴파일 환경은 시험 실행 파일 것이다). 같은 검증(태국어 사전 경계, ZWJ grapheme, BiDi run, ICU 기본 유니코드 함수, 합자·아랍어 shaping)은 FT2b·FT2c에서 backend API로 다시 한다. FreeType·libpng·msdfgen 연결 시험은 전역 상태가 없어 그대로 둔다.
 - `TextLayoutBackend`는 내리지 않는 모듈이다(`SupportsUnload` = false — backend vtable과 라이브러리 할당 hook이 이 모듈 코드에 있다).
+
+**FT2b API(조합 글꼴 탐색, 6.3절).**
+- `TextLayout/CompositeFont.h`: 실행용 조합 기술 `CompositeFontSpec`(기본 typeface·fallback typeface와 배율·보조 typeface 목록·마지막 fallback face — 각 typeface는 이름 있는 `FontFaceDesc` entry 목록, 보조는 `CodePointRange` 구간과 culture 목록)을 받아 `ResolvedCompositeFont::TryCreate(allocator, backend, spec)`가 모든 face를 연다. `SetCulture(culture)`는 culture 우선 구간 표를 다시 만든다(culture와 그 부모 — `ko-KR` → `ko`, `-`·`_` 구분). `Select(codePoint, typefaceName, style, fallback)` → `FontSelection`(face·배율·글리프 번호·실제로 고른 code point).
+- 규칙(UE `FontCacheCompositeFont.cpp`와 같다): culture 우선 구간 → 일반 구간에서 보조 typeface 하나(겹치면 작은 구간, 같으면 선언 순서), 없으면 기본 typeface. typeface 안은 이름 → 속성(굵기·기울임 — face style 플래그) 일치 수 최대 → 첫 entry. 고른 face에 글리프가 없으면 기본 → fallback(글리프 검사 없이 받음) → `fallback` ≥ LastResort이면 마지막 fallback face. 그래도 글리프가 0이면 U+FFFD로 다시 고르고, 그것도 없으면 처음 선택(`.notdef`)을 준다.
+- cultures가 지정된 보조 typeface는 그 culture(또는 부모)일 때만 쓰고 다른 culture에서는 무시한다(UE `Cultures` 주석과 같다). 공백 처리와 grapheme 단위 선택은 FT2c(shaping)가 한다.
