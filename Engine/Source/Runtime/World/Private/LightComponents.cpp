@@ -5,6 +5,7 @@
 #include <World/DirectionalLightComponent.h>
 #include <World/LightComponent.generated.h>
 #include <World/LightComponent.h>
+#include <World/LightingChannels.generated.h>
 #include <World/PointLightComponent.generated.h>
 #include <World/PointLightComponent.h>
 #include <World/RectLightComponent.generated.h>
@@ -54,13 +55,6 @@ float InverseConeSolidAngle(float cosHalfConeAngle) noexcept {
 } // namespace
 
 // --- LightComponentBase ---
-
-void LightComponentBase::MarkRenderStateDirtyIfPresent() noexcept {
-    if (HasSystemState(SystemStateKind::Render)) {
-        auto marked = MarkSystemStateDirty(SystemStateKind::Render);
-        (void)marked;
-    }
-}
 
 Result<void> LightComponentBase::SetIntensity(float intensity) noexcept {
     // UE PostEditChangeProperty(LightComponent.cpp:781): EV가 아니면 0 이상.

@@ -11,7 +11,8 @@
 | 묶음 | 내용 | 시스템 연결(나중) |
 |---|---|---|
 | D1 | 광원 컴포넌트(Point·Spot·Rect·Directional·Sky)와 광원 Actor | 렌더 장면 등록(CR12 SceneChangeList·RS1·RS3) |
-| D2 | `PrimitiveComponent`·`MeshComponent`·`StaticMeshComponent`와 `StaticMeshActor` | 렌더 proxy(RS1), 충돌(CR16) |
+| D2 | `PrimitiveComponent`, Shape(`BoxComponent`·`SphereComponent`·`CapsuleComponent`)와 Trigger Actor | 렌더 proxy(RS1), 충돌·overlap(CR16) |
+| D2b | `MeshComponent`·`StaticMeshComponent`와 `StaticMeshActor`(24.3.1절 — StaticMesh 에셋 MA2b 뒤) | 렌더 proxy(RS1), 충돌(CR16) |
 | D3 | `SplineComponent`(끝까지 동작) | 없음 |
 | D4 | 이동(Movement·Rotating·Projectile·SpringArm·PathMover), sweep 없이 끝까지 동작 | sweep·충돌 응답(CR16) |
 | D5 | 대기·높이 안개·decal·후처리 볼륨·반사 캡처 데이터 | RS6·RS9 등 |
@@ -22,7 +23,7 @@
 - **시스템 연결**은 하지 않는다. 시스템 상태(23.2절 `WantsSystemState`)를 요청하지 않으므로 아무것도 그리지 않는다. setter는 Render 시스템 상태가 있을 때만 다시 보내기를 표시한다(`MarkSystemStateDirty(Render)` — 상태가 없으면 아무것도 하지 않는다). 그래서 RS 단계가 상태를 붙이면 setter를 고치지 않아도 된다.
 - 모듈은 World다(CameraComponent와 같은 자리 — 23.4절). 에셋 참조(텍스처·머티리얼)가 필요한 속성은 그 참조 필드 체계가 World에 들어올 때 넣는다(24.2.8절).
 
-D2–D5는 묶음마다 이 장에 절을 더해 설계한다(설계 → 구현 → 리뷰어 1명 → 커밋).
+D2–D5는 묶음마다 이 장에 절을 더해 설계한다(설계 → 구현 → 리뷰어 1명 → 커밋). D2는 24.3절이다.
 
 ### 24.2 D1 — 광원
 
@@ -220,3 +221,175 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
 | Spot 원뿔 경계 구(`ComputeBoundingSphereForCone`)·원뿔 `AffectsBounds` | 렌더 culling(RS1)과 함께 |
 | 색온도 색(`GetColorTemperature`·`GetColoredLightBrightness`) | 작업 색 공간(color management)이 생길 때 — 필드는 지금 넣는다 |
 | `ALight` `bEnabled` 복제 | 네트워크 단계(CR24) |
+
+### 24.3 D2 — PrimitiveComponent·Shape·Trigger
+
+#### 24.3.1 범위 조정
+
+- 원래 D2는 `PrimitiveComponent`·`MeshComponent`·`StaticMeshComponent`·`StaticMeshActor`였다.
+- 메시 쪽 셋은 **D2b**로 미룬다.
+  - `StaticMeshComponent`의 핵심 필드는 StaticMesh 에셋 참조인데, `StaticMesh` 에셋 클래스는 아직 없다([메시·애니메이션 에셋](../MeshAnimationAssets.ko.md) MA2b — 에셋 세션 작업).
+  - `MeshComponent`의 데이터는 머티리얼 override 배열(`MaterialBase` 참조)뿐이다.
+  - World는 에셋을 참조하지 않는다(3절 `World` 행). 그래서 둘 다 World와 에셋 모듈 위의 `WorldIntegration`(3절 — 렌더 컴포넌트 자리) 몫이다.
+  - D2b는 MA2b 뒤에 `WorldIntegration`을 만들며 넣는다. UE 값(조사 완료)은 그때 이 절에 더한다.
+- 대신 에셋 없이 완결되는 Primitive 파생을 넣는다: UE `UShapeComponent`(Box·Sphere·Capsule)와 Trigger Actor(`ATriggerBox`·`ATriggerSphere`·`ATriggerCapsule`)다.
+  - 기하 데이터와 bounds는 지금 끝까지 동작한다.
+  - overlap 이벤트·충돌은 물리(CR16) 때 붙는다.
+
+#### 24.3.2 클래스
+
+| Rocks(World) | UE | 부모 |
+|---|---|---|
+| `PrimitiveComponent`(Abstract) | `UPrimitiveComponent`(abstract) | `SceneComponent` |
+| `ShapeComponent`(Abstract) | `UShapeComponent` | `PrimitiveComponent` |
+| `BoxComponent`·`SphereComponent`·`CapsuleComponent` | `UBoxComponent` 등 | `ShapeComponent` |
+| `TriggerBase`(Abstract Actor) | `ATriggerBase` | `Actor` |
+| `TriggerBox`·`TriggerSphere`·`TriggerCapsule` | `ATriggerBox` 등 | `TriggerBase` |
+
+열거:
+- `CanBeCharacterBase : uint8 { No, Yes, Owner }`(UE `ECanBeCharacterBase` — `PrimitiveComponent.h:87`).
+- `RendererStencilMask : uint8 { Default, Mask255, Mask1, Mask2, Mask4, Mask8, Mask16, Mask32, Mask64, Mask128 }`(UE `ERendererStencilMask` — `:122`, 순번 값).
+- `LightingChannels`는 D1 구조체를 같이 쓴다(`World/LightingChannels.h`로 옮긴다).
+
+#### 24.3.3 PrimitiveComponent 필드
+
+생성자 `PrimitiveComponent.cpp:331–439`. Mobility는 바꾸지 않는다(Movable). 수치는 UE처럼 `float`·`int32`다.
+
+| 필드 | 기본 | 뜻 |
+|---|---|---|
+| `minDrawDistance`·`desiredMaxDrawDistance` | 0·0 (cm) | 그리기 최소 거리, 설계 최대 거리(UE `LDMaxDrawDistance`, 0 = 제한 없음). 0 이상 |
+| `neverDistanceCull`·`allowCullDistanceVolume` | 거짓·참 | 거리 culling 안 함, cull 거리 볼륨 허용 |
+| `castShadow` | **거짓**(UE `UPrimitiveComponent` 기본 — 메시 계열이 켠다) | 그림자 주 스위치 |
+| `castDynamicShadow`·`castStaticShadow`·`castContactShadow` | 참·참·참 | |
+| `castFarShadow`·`castInsetShadow`·`castHiddenShadow`·`castCinematicShadow`·`castShadowAsTwoSided`·`selfShadowOnly` | 모두 거짓 | |
+| `castVolumetricTranslucentShadow` | 거짓 | |
+| `affectDynamicIndirectLighting`·`affectDistanceFieldLighting` | 참·참 | |
+| `receiveMobileCsmShadows`·`singleSampleShadowFromStationaryLights` | 참·거짓 | |
+| `receivesDecals` | 참 | |
+| `renderInMainPass`·`renderInDepthPass` | 참·참 | |
+| `visibleInReflectionCaptures`·`visibleInRealTimeSkyCaptures` | 참·참 | |
+| `visibleInSceneCaptureOnly`·`hiddenInSceneCapture` | 거짓·거짓 | |
+| `ownerNoSee`·`onlyOwnerSee` | 거짓·거짓 | 소유자 시점에서 숨김·소유자만 보임 |
+| `holdout`·`treatAsBackgroundForOcclusion`·`useAsOccluder` | 거짓·거짓·**거짓**(메시 계열이 켠다) | |
+| `renderCustomDepth`·`customDepthStencilValue`·`customDepthStencilWriteMask` | 거짓·0·`Default` | 값은 [0, 255](UE setter clamp — `:5166`) |
+| `translucencySortPriority`·`translucencySortDistanceOffset` | 0·0 | |
+| `lightingChannels` | {참, 거짓, 거짓} | |
+| `boundsScale` | 1 | bounds 배율(UE UI 1–10, clamp 없음). 0보다 커야 한다. UE도 메시 계열의 `CalcBounds`만 곱한다(Shape는 쓰지 않는다 — `SkinnedMeshComponent.cpp:2300`) |
+| `generateOverlapEvents` | 참 | overlap 이벤트를 낸다(물리 때 쓴다) |
+| `canCharacterStepUpOn` | `Yes` | 캐릭터가 밟고 오를 수 있는지 |
+| `collisionProfileName` | 빈 값 = 클래스 기본 | 충돌 profile 이름(24.3.4절) |
+
+계산:
+- `EffectiveMaxDrawDistance()`: `neverDistanceCull`이면 0, 아니면 `desiredMaxDrawDistance`. UE `CachedMaxDrawDistance`(`:2485`)에서 cull 거리 볼륨·HLOD 부모를 뺀 값이다. 그 둘은 생기면 더한다.
+
+#### 24.3.4 충돌 profile
+
+- UE는 profile 이름(설정 파일 `BaseEngine.ini`의 표)으로 `CollisionEnabled`·object type·채널 응답을 정한다. 클래스 기본 profile은 다음과 같다.
+  - Primitive: "BlockAll"(`PrimitiveComponent.cpp:361`)
+  - Shape: "OverlapAllDynamic"(`ShapeComponent.cpp:48`)
+  - Trigger Actor의 shape: "Trigger"(`TriggerActors.cpp:21`)
+- Rocks는 profile 표가 물리(CR16) 몫이라 아직 없다. 이름만 데이터로 둔다.
+  - `collisionProfileName`은 영속 `String`이다. 빈 값이면 클래스 기본 이름(virtual `DefaultCollisionProfileName()`)을 쓴다.
+  - `CollisionProfileName()`은 실효 이름을 돌려준다.
+  - 생성자에서 할당하지 않으려고 빈 값을 기본으로 둔다. 할당 실패를 알릴 길이 없기 때문이다.
+- `SetCollisionProfileName(name)`: 이름이 클래스 기본과 같으면(ASCII 대소문자 무시 — UE `FName` 비교) 빈 값으로 둔다. 다른 이름은 철자 그대로 둔다. 오류는 할당 실패·잘못된 UTF-8이다(값 유지). UE처럼 Mobility를 보지 않는다. profile은 물리 데이터라 Render 다시 보내기를 표시하지 않는다.
+- 이름 상수: `PrimitiveComponent::PrimitiveCollisionProfileName`("BlockAll"), `ShapeComponent::ShapeCollisionProfileName`("OverlapAllDynamic"), `TriggerBase::TriggerCollisionProfileName`("Trigger").
+- `CollisionEnabled`·object type·응답 채널은 profile 표가 생길 때 들인다(24.3.8절).
+
+#### 24.3.5 setter와 Mobility
+
+- UE `UPrimitiveComponent` setter는 Mobility를 보지 않는다(`PrimitiveComponent.cpp:2088–2347`·`5147–5230`). Rocks도 막지 않는다.
+- 값 검증 실패는 `InvalidArgument`이고 값을 바꾸지 않는다.
+  - 거리는 비유한·음수를 거부한다. UE `SetCullDistance`는 음수를 무시한다.
+  - stencil 값은 [0, 255] 밖을 거부한다(UE는 clamp).
+  - `boundsScale`은 0 이하·비유한을 거부한다.
+  - enum은 범위 밖을 거부한다.
+- 값이 바뀌면 Render 시스템 상태 다시 보내기를 표시한다(24.1절). 기하가 바뀌는 setter(Shape 크기)는 bounds도 다시 계산하게 한다(SceneComponent bounds 캐시 무효화 — UE `UpdateBounds`).
+
+#### 24.3.6 Shape
+
+생성자: `ShapeComponent.cpp:45–67`, `BoxComponent.cpp:16`, `SphereComponent.cpp:16`, `CapsuleComponent.cpp:18`.
+
+| 클래스 | 필드(기본) | 비고 |
+|---|---|---|
+| `ShapeComponent` | `shapeColor`(223, 149, 157, 255), `lineThickness` 0, `dynamicObstacle` 거짓 | 생성자: `hiddenInGame` 참, `castDynamicShadow` 거짓, profile "OverlapAllDynamic" |
+| `BoxComponent` | `boxExtent`(32, 32, 32) cm, Vec3d | 반 크기 |
+| `SphereComponent` | `sphereRadius` 32 cm, `shapeColor`(255, 0, 0, 255) | |
+| `CapsuleComponent` | `capsuleRadius` 22, `capsuleHalfHeight` 44 (cm) | 반 높이는 반구 포함 |
+
+- setter: UE `SetBoxExtent`·`SetSphereRadius`는 검증이 없다.
+  - Rocks는 비유한·음수를 거부한다. 음수 크기는 상자 `(-E, E)`가 뒤집힌다.
+  - `SetCapsuleSize(radius, halfHeight)`는 UE처럼 반 높이를 반지름 이상으로 올린다(`max(halfHeight, radius)` — `CapsuleComponent.cpp:171`). 음수·비유한은 거부한다.
+  - `SetCapsuleRadius`·`SetCapsuleHalfHeight`는 `SetCapsuleSize`로 간다(UE와 같다).
+- scale 적용 값(UE inline):
+  - `ScaledBoxExtent()` = extent × 월드 scale(성분별).
+  - `ScaledSphereRadius()` = 반지름 × 최소 축 scale(절댓값 — UE `GetMinimumAxisScale`).
+  - `ScaledCapsuleRadius()` = 반지름 × min(scale.x, scale.y). `ScaledCapsuleHalfHeight()` = 반 높이 × scale.z.
+  - 반구 뺀 반 높이 `…HalfHeightWithoutHemisphere`가 있다. scaled·unscaled 둘 다다.
+  - 월드 scale은 `SceneComponent::WorldScale3D()`다. UE `GetComponentTransform().GetScale3D()`처럼 부모 사슬의 상대 scale·부착 socket scale을 성분별로 곱한다(회전과 무관, 부호 유지, `absoluteScale`이면 상대 값). 행렬 분해는 반사 부호를 X에 두므로 쓰지 않는다.
+- bounds:
+  - Shape는 `TryLocalBounds`(SceneComponent의 새 virtual)로 지역 bounds를 준다. `Bounds()`는 이것을 월드 행렬(`WorldMatrix()`)로 옮긴다. 월드 행렬이 TRS로 분해되지 않아도(0 scale 축·shear) 회전·scale을 잃지 않는다. `CalcBounds(Transform)`은 같은 지역 bounds를 그 Transform 행렬로 옮긴다(UE `CalcBounds(LocalToWorld)`).
+  - 지역 bounds를 월드 행렬로 옮긴다(UE `FBoxSphereBounds::TransformBy(FMatrix)` — `Core/Public/Math/BoxSphereBounds.h:498`).
+  - 지역 bounds:
+    - Box: (0, E, |E|) — UE `FBoxSphereBounds(FBox(-E, E))`.
+    - Sphere: (0, (R, R, R), R).
+    - Capsule: (0, (r, r, h), h) — `CapsuleComponent.cpp:104`.
+  - 옮기는 식:
+    - 중심은 행렬로 옮긴다.
+    - extent는 `|E.x·행0| + |E.y·행1| + |E.z·행2|`다.
+    - 구 반지름은 `min(R × 3×3 부분의 최대 열 길이, |새 extent|)`다. UE는 행 0–2를 성분별로 제곱해 더한 값(`m0² + m1² + m2²`)의 최댓값을 쓴다. 이는 행 길이가 아니라 열 길이다. 회전과 비균일 scale이 함께 있으면 둘이 다르므로 UE 값에 맞춘다.
+  - 이 변환은 `TransformComponentBounds(bounds, Mat4d)`로 SceneComponent.h에 공개한다. 메시 계열도 쓴다.
+  - Shape는 `boundsScale`을 곱하지 않는다(UE와 같다).
+
+#### 24.3.7 Trigger Actor
+
+UE `TriggerBase.cpp:12`, `TriggerActors.cpp:20–180`.
+
+- `TriggerBase`(Abstract)는 `CollisionComponentHandle()`(root)을 가진다.
+  - 파생은 PreAwake에서 shape root를 만든다. 광원 Actor와 같은 규칙이다: 같은 타입 root는 재사용하고, 다른 타입은 `InvalidArgument`다.
+- 만든 shape의 설정:
+  - 색 (100, 255, 100, 255)
+  - profile "Trigger"
+  - 크기: TriggerBox extent (40, 40, 40), TriggerSphere 반지름 40, TriggerCapsule (40, 80)
+- 가시성:
+  - UE는 Actor를 숨기고(`SetHidden(true)`) shape의 `bHiddenInGame`을 끈다.
+  - Rocks에는 Actor 숨김 플래그가 없다. 그래서 shape 기본(`hiddenInGame` 참)을 그대로 둔다. 게임에서 보이지 않는다는 결과가 같다.
+- Mobility는 바꾸지 않는다(Movable — UE도 정하지 않는다).
+
+#### 24.3.8 들이지 않은 UE 속성(사유)
+
+| UE | 사유 |
+|---|---|
+| `BodyInstance`(CollisionEnabled·ObjectType·응답 채널·물리 시뮬레이션·질량 등) | 물리 모듈·profile 표(CR16) |
+| overlap·hit 이벤트(`OnComponentBeginOverlap` 등)·`UpdateOverlaps` | CR7 이벤트 + 물리(CR16) |
+| `IndirectLightingCacheQuality`·`LightmapType`·`LightmassSettings` | 굽는 조명 체계 |
+| HLOD(`bEnableAutoLODGeneration`·`HLODBatchingPolicy`·`ExcludeFromHLODLevels`) | HLOD 체계 |
+| `bVisibleInRayTracing`·`bVisibleInReflections`·`RayTracingGroupCullingPriority` | 레이 트레이싱 경로 |
+| `FirstPersonPrimitiveType`·`bEmissiveLightSource`·`ShadowCacheInvalidationBehavior`·`DepthPriorityGroup` | 해당 렌더 기능(RS 단계) |
+| `VisibilityId`·`bLightAttachmentsAsGroup`·`bExcludeFromLightAttachmentGroup` | 미리 계산한 가시성·광원 그룹(RS 단계) |
+| 내비게이션(`bCanEverAffectNavigation`·`bHasCustomNavigableGeometry`·`bFillCollisionUnderneathForNavmesh`·Shape `bUseSystemDefaultObstacleAreaClass`·`AreaClass`) | 내비게이션 체계. `dynamicObstacle`만 데이터로 둔다 |
+| `AlwaysLoadOnClient`·`AlwaysLoadOnServer`·`bIsEditorOnly`·`bSelectable` | 쿠킹 규칙(CR5)·편집기 |
+| `bReplicatePhysicsToAutonomousProxy`·`bApplyImpulseOnDamage`·`bMultiBodyOverlap`·`bAlwaysCreatePhysicsState` | 물리·네트워크 |
+| Shape `ShapeBodySetup`·`bUseArchetypeBodySetup`·`GetCollisionShape`·`CalcBoundingCylinder` | 물리 body(CR16) |
+| Trigger Actor 편집기 sprite·`bCollideWhenPlacing`·Spawn 충돌 처리·`SetCanBeDamaged(false)` | 편집기·물리 질의(CR16)·피해 체계 |
+| `bAffectIndirectLightingWhileHidden`·`bCastDistanceFieldIndirectShadow`·`bLightAsIfStatic`·`OcclusionBoundsSlack`·`bStaticWhenNotMoveable` | 해당 렌더 기능(RS 단계) |
+| `CustomPrimitiveData`·`RuntimeVirtualTextures`·가상 텍스처 필드 | 머티리얼 데이터·가상 텍스처 체계 |
+| `bIgnoreRadialImpulse`·`bIgnoreRadialForce`·`MoveIgnoreActors` | 물리(CR16) |
+| Shape `bShouldCollideWhenPlacing`·`bAutoWeld`·`bUseEditorCompositing` | 편집기·물리 body |
+| Mesh 계열(`OverrideMaterials`·`OverlayMaterial`·`StaticMesh`·LOD·WPO·Nanite 플래그) | D2b(24.3.1절) |
+
+#### 24.3.9 결정·시험
+
+| ID | 항목 | 결정 | 근거 |
+|---|---|---|---|
+| ERD39 | 메시 컴포넌트 | D2b로 미루고 `WorldIntegration`에 둔다 | StaticMesh 에셋(MA2b) 없음, World 에셋 참조 금지(3절) |
+| ERD40 | 충돌 profile | 이름만 영속 데이터(빈 값 = 클래스 기본), 표는 CR16 | 생성자 할당 회피, 물리 전 데이터 |
+| ERD41 | Primitive setter | UE처럼 Mobility를 보지 않고 값만 검증 | UE `PrimitiveComponent` setter |
+
+시험 `World/Tests/WorldPrimitiveComponentTests.cpp`(`Primitive_` 접두):
+1. Primitive·Shape 기본값이 24.3.3·24.3.6절 표와 같다.
+2. setter 검증·값 유지, enum 범위, Mobility를 보지 않음(게임 World Static에서도 됨).
+3. 충돌 profile: 클래스 기본, override, 기본과 같은 이름(대소문자 무시)은 빈 값, 저장 왕복(override·빈 값 둘 다).
+4. Shape 크기 검증·캡슐 반 높이 올림, scaled 값(비균일·음수 scale — 부호가 원래 축에), bounds(회전·비균일 scale·0 scale 축 — UE 식 손계산 대조), 크기만 바꾼 뒤 bounds 갱신.
+5. Trigger Actor root·크기·색·profile, root 재사용·거부.
+6. 리플렉션 형태(Abstract·base·필드 수)와 저장 왕복.

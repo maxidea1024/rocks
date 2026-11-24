@@ -111,6 +111,13 @@ SceneComponent::CheckChangeBeforeGameInitialization(const char* property) const 
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+void SceneComponent::MarkRenderStateDirtyIfPresent() noexcept {
+    if (HasSystemState(SystemStateKind::Render)) {
+        auto marked = MarkSystemStateDirty(SystemStateKind::Render);
+        (void)marked;
+    }
+}
+
 Result<void> SceneComponent::CheckMovable(const char* action) const noexcept {
     // UE CheckStaticMobilityAndWarn(SceneComponent.cpp:3383): 등록된 게임 World Component이고 소유
     // Actor가 초기화된 뒤에만 막는다(Spawn·OnAwake 안의 배치는 된다).
@@ -331,6 +338,13 @@ void SceneComponent::ApplyVisibility(bool visible, bool hidden, bool setVisible,
 
 const ComponentBounds& SceneComponent::Bounds() const noexcept {
     if (boundsDirty_) {
+        ComponentBounds local;
+        if (TryLocalBounds(local)) {
+            bounds_ = TransformComponentBounds(local, WorldMatrix());
+            boundsDirty_ = false;
+            return bounds_;
+        }
+
         auto world = TryWorldTransform();
         Transform at = Transform::Identity();
         if (world) {
@@ -346,10 +360,62 @@ const ComponentBounds& SceneComponent::Bounds() const noexcept {
     return bounds_;
 }
 
+ComponentBounds TransformComponentBounds(const ComponentBounds& local,
+                                         const Mat4d& localToWorld) noexcept {
+    // UE TransformBy(FMatrix)와 같은 순서다.
+    const Vec3d axisX = localToWorld.GetScaledAxis(0);
+    const Vec3d axisY = localToWorld.GetScaledAxis(1);
+    const Vec3d axisZ = localToWorld.GetScaledAxis(2);
+    const Vec4d translation = localToWorld.Row(3);
+    ComponentBounds world;
+    world.origin = axisX * local.origin.x + axisY * local.origin.y + axisZ * local.origin.z +
+                   Vec3d(translation.x, translation.y, translation.z);
+    const Vec3d spanX = axisX * local.boxExtent.x;
+    const Vec3d spanY = axisY * local.boxExtent.y;
+    const Vec3d spanZ = axisZ * local.boxExtent.z;
+    world.boxExtent = Vec3d(math::Abs(spanX.x) + math::Abs(spanY.x) + math::Abs(spanZ.x),
+                            math::Abs(spanX.y) + math::Abs(spanY.y) + math::Abs(spanZ.y),
+                            math::Abs(spanX.z) + math::Abs(spanY.z) + math::Abs(spanZ.z));
+    // UE는 행 0–2를 성분별로 제곱해 더한다(m0² + m1² + m2²) — 3×3 부분의 열 길이 제곱이다. 그
+    // 최댓값을 쓴다.
+    const Vec3d columnSquared(axisX.x * axisX.x + axisY.x * axisY.x + axisZ.x * axisZ.x,
+                              axisX.y * axisX.y + axisY.y * axisY.y + axisZ.y * axisZ.y,
+                              axisX.z * axisX.z + axisY.z * axisY.z + axisZ.z * axisZ.z);
+    const double maxAxisSquared =
+        math::Max(math::Max(columnSquared.x, columnSquared.y), columnSquared.z);
+    // 비균일 scale에서는 box에서 얻은 구가 더 작다(UE 주석).
+    world.sphereRadius =
+        math::Min(math::Sqrt(maxAxisSquared) * local.sphereRadius, world.boxExtent.Length());
+    return world;
+}
+
 ComponentBounds SceneComponent::CalcBounds(const Transform& world) const noexcept {
     ComponentBounds bounds;
     bounds.origin = world.translation;
     return bounds;
+}
+
+Vec3d SceneComponent::WorldScale3D() const noexcept {
+    Vec3d scale = relative_.scale;
+    if (absoluteScale_ || parent_.IsNull() || !HasWorld()) {
+        return scale;
+    }
+
+    // 부착 socket scale(부모 기준)과 부모 월드 scale을 곱한다(UE Relative * Socket * Parent).
+    if (!attachSocket_.IsEmpty()) {
+        const StringView socket = attachSocket_.View();
+        auto socketLocal =
+            GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
+                return parent.GetSocketTransform(socket, TransformSpace::Component);
+            });
+        if (socketLocal) {
+            scale = scale * socketLocal.Value().scale;
+        }
+    }
+
+    auto parentScale = GetWorld().With<SceneComponent>(
+        parent_, [](SceneComponent& parent) noexcept { return parent.WorldScale3D(); });
+    return parentScale ? scale * parentScale.Value() : scale;
 }
 
 Result<Transform> SceneComponent::TryWorldTransform() const noexcept {
