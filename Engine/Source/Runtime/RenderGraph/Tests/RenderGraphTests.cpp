@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG1 완료 기준 (a)–(d)의 기록 backend 시험이다(Docs/Design/RenderBase.ko.md 8절).
+// RG1 완료 기준 (a)–(d)의 기록 backend 시험이다(Docs/Design/RenderBase 8절).
 using namespace rocks;
 namespace render_graph_tests_file {
 

@@ -68,7 +68,7 @@
   - 7.2절 7항: VS 출력 규칙을 layer·viewport 둘로 넓혀 어휘를 `vertexViewportLayerOutput` 하나로 했다. Renderer 결정 RN10 (가)의 2D atlas는 layer가 아니라 viewport 출력이 맞다. D3D12는 이 기능이 늘 된다(UE `D3D12Device.cpp:272`)는 점, ES는 `GL_NV_viewport_array2` 확장만 있고 Rocks·UE가 쓰지 않는다는 점, UE 조건의 두 범주(정적 표시 OR (설정 AND 장치 값))를 고쳐 적었다. Graphics `DeviceCaps` 이름·viewport 수·D3D12 값은 Graphics 쪽 일로 적었다. S14·시험 (j)·결정 12를 맞췄다.
   - 12.2절: 라이브러리 항목에 런타임 확인 기능 비트(RenderBase 9.2절이 대조), 형식 사실에 기능 등급 자리(머티리얼 시스템 MSR9).
 - 개정 18(2026-11-18): 12.1절 진척 두 항목(런타임 확인 기능 `vertexViewportLayerOutput`, `CommonLimits` 제거)을 SH2 전에 구현했다.
-- 개정 19(2026-11-18): [렌더 기반](../RenderBase.ko.md) SX2 반영. 7.2절 2항에 결정 R7 확정(루트 상수 배치는 선언 명시, 128 byte·16 byte 배수, 크기 기준 자동 배치는 버림)과 파이프라인 layout의 크기 선언(Graphics `drawConstantBytes`·`SetDrawConstants`)을 적었다. Graphics 고정 구조체 `DrawConstants`를 없앴으므로 7.2절 5항·6항과 13절의 해당 문구를 고쳤다(13절은 그리기별 상수도 파라미터 구조체 종류 표시로 선언).
+- 개정 19(2026-11-18): [렌더 기반](../RenderBase/README.ko.md) SX2 반영. 7.2절 2항에 결정 R7 확정(루트 상수 배치는 선언 명시, 128 byte·16 byte 배수, 크기 기준 자동 배치는 버림)과 파이프라인 layout의 크기 선언(Graphics `drawConstantBytes`·`SetDrawConstants`)을 적었다. Graphics 고정 구조체 `DrawConstants`를 없앴으므로 7.2절 5항·6항과 13절의 해당 문구를 고쳤다(13절은 그리기별 상수도 파라미터 구조체 종류 표시로 선언).
 - 개정 20(2026-11-19): 5.2절에 텍스처 스트리밍 결정 T6(명시 LOD·`Load` helper와 진단)의 셰이더 요구를 더했다([텍스처 스트리밍](../TextureStreaming.ko.md) 개정 4).
 - 개정 21(2026-11-20): SH0 남은 측정 S10·S13·S14(Windows) 결과를 5.4절에 적고 규칙에 반영했다. 남은 측정을 5.4절 끝과 16절 SH0 행에 정리했다.
   - S10 → 8절 2항: `d3dcompiler_47.dll`은 SDK REDIST 목록에 있어 고치지 않은 파일을 데스크톱 응용과 함께만 재배포할 수 있다. Runtime에는 넣지 않고, 개발 도구 묶음에는 넣을 수 있으며, DLL만 따로 게시하지 않는다. 고정 버전 10.0.22621.2428은 그대로다.

@@ -1,6 +1,6 @@
 #include "D3D12DeviceImpl.h"
 
-// async compute queue다(Docs/Design/RenderBase.ko.md 8절 "RG4 async compute 설계"). graphics
+// async compute queue다(Docs/Design/RenderBase 8절 "RG4 async compute 설계"). graphics
 // queue와 따로 도는 D3D12 compute queue에 compute 기록을 제출하고, queue 사이 순서는
 // ID3D12CommandQueue::Wait로 맞춘다(UE D3D12의 sync point 신호·대기와 같은 자리,
 // D3D12LegacyBarriers.cpp:1580–1635). compute 기록은 compute queue가 받는 상태 사이 전이만

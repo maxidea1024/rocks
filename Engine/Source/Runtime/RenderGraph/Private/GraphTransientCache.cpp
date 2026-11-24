@@ -1,7 +1,7 @@
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/GraphTypes.h>
 
-// 그래프 transient heap 캐시다(Docs/Design/RenderBase.ko.md 8절 "GX12·RG5 transient aliasing
+// 그래프 transient heap 캐시다(Docs/Design/RenderBase 8절 "GX12·RG5 transient aliasing
 // 설계"). heap은 그래프 사이에 남고, 그래프는 두 queue의 마지막 사용이 끝난 heap만 받는다. heap마다
 // 만든 placed 자원을 (offset, desc)로 다시 쓴다(UE RHICoreTransientResourceAllocator의 heap 캐시와
 // 자원 캐시와 같은 역할).

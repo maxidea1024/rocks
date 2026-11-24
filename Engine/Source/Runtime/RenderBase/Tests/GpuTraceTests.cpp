@@ -9,7 +9,7 @@
 #include <TraceAnalysis/TraceStreamDecoder.h>
 #include <TraceCapture/Tests/TraceCaptureTestSupport.h>
 
-// GPU 계측 시험이다(Docs/Design/RenderBase.ko.md 13.3절 RB7). GPU 완료는 기록 장치의 fence gate
+// GPU 계측 시험이다(Docs/Design/RenderBase 13.3절 RB7). GPU 완료는 기록 장치의 fence gate
 // (HoldCompletions·CompleteAll)로만 진행한다. sleep이나 시간 문턱이 없다.
 using namespace rocks;
 using namespace rocks::render;

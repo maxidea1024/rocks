@@ -7,7 +7,7 @@
 #include <Platform/Sync.h>
 #include <RenderBase/ShaderSet.h>
 
-// 파이프라인 캐시(Docs/Design/RenderBase.ko.md 9.7절 RB4의 SH2분, UE PipelineStateCache 대응)다.
+// 파이프라인 캐시(Docs/Design/RenderBase 9.7절 RB4의 SH2분, UE PipelineStateCache 대응)다.
 // 키는 셰이더 집합 epoch·VS·PS 항목과 고정 기능 상태 전체(정점 배치·출력 형식·블렌드·깊이·래스터·
 // 그리기별 상수 크기·slot 이름 표)다. 키가 같으면 같은 장치 파이프라인을 돌려준다. 항목은 셰이더
 // 집합의 lease를 잡고, 집합을 Retire할 때 RetireSet으로 그 epoch 항목을 함께 Retire한다(9.7절).

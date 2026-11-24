@@ -12,7 +12,7 @@
 #include <ShaderCore/ShaderLibraryContents.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 
-// 셰이더 집합(Docs/Design/RenderBase.ko.md 9.2절 RB3, UE FShaderMap·FShaderCodeLibrary 런타임 쪽
+// 셰이더 집합(Docs/Design/RenderBase 9.2절 RB3, UE FShaderMap·FShaderCodeLibrary 런타임 쪽
 // 대응)이다. 셰이더 라이브러리 하나(ShaderCore ShaderLibrary.h)를 열어 완결성·서명·타입 집합을
 // 검사하고, 항목마다 장치 셰이더를 처음 쓸 때 만든다(UE FShaderMapResource::GetShader와 같은 지연
 // 생성 — 경쟁하면 생성은 두 번일 수 있지만 게시는 한 번이고 진 쪽은 Retire한다).

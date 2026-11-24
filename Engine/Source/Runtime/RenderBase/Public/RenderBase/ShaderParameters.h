@@ -9,7 +9,7 @@
 #include <ShaderCore/ShaderBindingLayout.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 
-// 파라미터 바인딩 지도와 상수 블록(Docs/Design/RenderBase.ko.md 9.3·9.4절 RB4의 SH2분)이다. SH2는
+// 파라미터 바인딩 지도와 상수 블록(Docs/Design/RenderBase 9.3·9.4절 RB4의 SH2분)이다. SH2는
 // 손으로 쓴 레이아웃 표(ShaderSystem 7.2절 5항, ShaderCore ShaderParameterLayout.h)를 입력으로
 // 쓴다(생성 표는 SH3). 상수 버퍼(cbuffer)를 장치에 묶는 일은 파라미터 묶음(GX6)이라, SH2에서
 // 장치까지 가는 경로는 루트 상수(그리기별 상수, SetDrawConstants)뿐이다.

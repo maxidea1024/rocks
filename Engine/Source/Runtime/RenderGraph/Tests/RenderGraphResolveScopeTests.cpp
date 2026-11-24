@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG1 남은 것 설계 2 시험이다(Docs/Design/RenderBase.ko.md 8절): 그래프 attachment resolve(대상
+// RG1 남은 것 설계 2 시험이다(Docs/Design/RenderBase 8절): 그래프 attachment resolve(대상
 // ResolveDestination 접근, 장치가 낸 전이, 다음 읽기의 before)와 그래프 구간 GraphScope(중첩,
 // culled 구간 생략, 기록 경계의 marker 재push, 짝 검증).
 using namespace rocks;

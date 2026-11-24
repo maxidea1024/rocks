@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Device-bound render base (Docs/Design/RenderBase.ko.md, part of UE RenderCore): render lane, frame
+// Device-bound render base (Docs/Design/RenderBase, part of UE RenderCore): render lane, frame
 // slots and frame packet transfer, render-transferable type registration, completion notices, and the
 // RenderHandle reservation table. Sits on the Graphics device contract and does not know ObjectRuntime,
 // World or Engine (the executable and WorldIntegration connect the game side).

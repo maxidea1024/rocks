@@ -10,7 +10,7 @@
 | [컴포넌트 목록](../ComponentCatalog/04-Prerequisites.ko.md) | CR18 행 | 선행 문서를 이 문서 7.3절로, 단계 FT5·FT7 |
 | [머티리얼](../MaterialSystem.ko.md) | 파라미터 종류 "font — 후속" 행 | `FontSampleParameter`, 노드 단계 FT7 |
 | [압축](../Compression.ko.md) | 13절 "WOFF2 글꼴 importer는 글꼴 모듈의 몫" | FD10·FT8 연결 |
-| [렌더 기반](../RenderBase.ko.md) | "UI 글꼴" 행 | 7.5절 내장 UI 글꼴 연결 |
+| [렌더 기반](../RenderBase/README.ko.md) | "UI 글꼴" 행 | 7.5절 내장 UI 글꼴 연결 |
 
 해당 단계 착수 전에 고칠 것(그 문서 소유 세션이 반영):
 

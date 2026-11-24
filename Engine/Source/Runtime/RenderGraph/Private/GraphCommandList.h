@@ -2,7 +2,7 @@
 
 #include "RenderGraphInternal.h"
 
-// 그래프 병렬 기록의 기록 목록이다(Docs/Design/RenderBase.ko.md 8절 "RG3 병렬 기록 설계"). pass
+// 그래프 병렬 기록의 기록 목록이다(Docs/Design/RenderBase 8절 "RG3 병렬 기록 설계"). pass
 // 기록 함수가 worker에서 이 목록에 명령을 쌓고, 소유 스레드가 선언 순서로 장치 CommandContext에
 // 재생한다(UE FRHICommandList 기록 → RHI 번역 대응).
 namespace rocks::render::detail {

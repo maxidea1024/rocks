@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG2 B부 시험이다(Docs/Design/RenderBase.ko.md 8절 RG2): 분리 전이(begin·end)의 위치가 기대 열과
+// RG2 B부 시험이다(Docs/Design/RenderBase 8절 RG2): 분리 전이(begin·end)의 위치가 기대 열과
 // 같고, 분리를 켜고 끈 결과(장치 최종 상태·전이를 뺀 호출 열)가 같으며, 나누지 않는 경우(바로 다음
 // pass, 사이의 Raster pass, Immediate 모드)를 확인한다.
 using namespace rocks;

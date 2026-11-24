@@ -7,7 +7,7 @@
 
 // 그래프 실행이다: 그래프 시작 업로드, 첫 사용 pass 직전 할당(같은 그래프 안 재사용 자리 또는 풀),
 // Raster pass마다 장치 기록 열기, prologue 즉시 전이, pass 기록 함수와 CPU·GPU 구간, async compute
-// 기록과 fork·join 대기, 그래프 끝 마무리(Docs/Design/RenderBase.ko.md 7.1절 실행·업로드 행, 8절
+// 기록과 fork·join 대기, 그래프 끝 마무리(Docs/Design/RenderBase 7.1절 실행·업로드 행, 8절
 // RG2·RG4, UE RC/Private/RenderGraphBuilder.cpp:2098–2167, 2691–2837, 3424–3528).
 namespace rocks::render::detail {
 
