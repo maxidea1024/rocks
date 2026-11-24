@@ -698,7 +698,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 |---|---|---|---|---|
 | UD1 | 층 구조 | **확정(2026.11.16):** 비객체 Element 층 + Object Widget 층 | 한 층(초안 1.0) | 1.1절 |
 | UD2 | 배치 속성 위치 | **확정(2026.11.16):** slot 객체 | 자식 Widget 속성(초안 1.0) | 5.2절, UE와 같다 |
-| UD3 | 텍스트 library 구성 | **확정(2026.11.16):** UE와 같은 구성. FreeType(글리프 래스터)·HarfBuzz(shaping)·ICU(BiDi·문자·단어·줄 경계)·msdfgen(SDF)·nanosvg(SVG 래스터) | ICU 대신 Core 유니코드 표(UCD 18)를 확장하여 UAX #29·#14·#9 직접 구현 | UE와 줄바꿈·BiDi·shaping 결과를 맞추고 사전 기반 줄바꿈(태국어 등)을 지원한다. library 타입은 공개 API에 노출하지 않고 TextLayout·UiCore adapter로 격리한다. 버전은 UE 5.8 `Source/ThirdParty`의 구성을 대조해 정하고 Core `ThirdParty` 규칙(원본 보존·SHA-256 확인)으로 들인다. 구체 판·빌드 구성은 [글꼴 설계](Font/08-ThirdParty.ko.md) 8장이 정한다. 그 FD14 권장안(UE가 고른 판이 아니라 도입 시점 최신 안정판, 하한은 UE 트리 최신판)은 이 결정의 근거인 "UE와 결과 일치"와 판 차이만큼 어긋날 수 있어 사용자 확인 대상이다 |
+| UD3 | 텍스트 library 구성 | **확정(2026.11.16):** UE와 같은 구성. FreeType(글리프 래스터)·HarfBuzz(shaping)·ICU(BiDi·문자·단어·줄 경계)·msdfgen(SDF)·nanosvg(SVG 래스터) | ICU 대신 Core 유니코드 표(UCD 18)를 확장하여 UAX #29·#14·#9 직접 구현 | UE와 줄바꿈·BiDi·shaping 결과를 맞추고 사전 기반 줄바꿈(태국어 등)을 지원한다. library 타입은 공개 API에 노출하지 않고 TextLayout·UiCore adapter로 격리한다. 버전은 UE 5.8 `Source/ThirdParty`의 구성을 대조해 정하고 Core `ThirdParty` 규칙(원본 보존·SHA-256 확인)으로 들인다. 구체 판·빌드 구성은 [글꼴 설계](Font/08-ThirdParty.ko.md) 8장이 정한다. 판은 그 FD14(사용자 결정 2026-11-24)로 UE가 고른 판이 아니라 도입 시점 최신 안정판(하한은 UE 트리 최신판)이다. 판 차이로 UE와 shaping·줄바꿈 결과가 다른 사례는 글꼴 설계 10.3절의 차이 목록으로 남긴다 |
 | UD4 | 팝업 방식 | **확정(2026.11.16):** OS 창과 현재 창 overlay 모두 지원(UE `EPopupMethod`) | OS 창만 | 게임(전체 화면·콘솔)은 overlay, 에디터는 OS 창 |
 | UD5 | 선언적 생성 문법 | **확정(2026.11.16):** 일반 인자 구조체 + designated initializer 트리 + 형식에 사유를 둔 속성(3.2절). 매크로·연산자 체인·등록 함수·코드 생성 없음 | UE와 같은 형태(인자 매크로 + slot 연산자 체인 + 클래스별 속성 등록 함수) | UE 형태는 매크로와 연산자 오버로딩으로 읽기 어렵고 속성을 두 곳에 적는다. 확정안의 대가는 필드 선언 순서 제약 하나다 |
 | UD6 | UE 실행 대조 | **확정(2026.11.16):** 소스 근거 기준값을 기본으로 하고, UV1·UV3·UV4에 한해 UE 5.8로 빌드한 독립 덤프 프로그램의 결과를 1회 기준값으로 채택 | 소스 근거 기준값만 | 실행 대조는 경계 조건 누락을 줄이나 UE 빌드 환경이 필요하다. 저장소에는 덤프 결과만 넣는다 |
@@ -716,7 +716,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
-**초안 2.5(2026.11.24):** [글꼴 설계](Font/README.ko.md) 개정 1에 맞춰 2절 TextLayout 행의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮기고(서버 타깃 제외 — 빌드 타깃 BD25), 3.12절에 글꼴 상세의 소유 문서를 적고, UT2 행과 UD3에 글꼴 설계 단계·버전 결정(FD14, 사용자 확인 대상)을 연결했다.
+**초안 2.5(2026.11.24):** [글꼴 설계](Font/README.ko.md) 개정 1에 맞춰 2절 TextLayout 행의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮기고(서버 타깃 제외 — 빌드 타깃 BD25), 3.12절에 글꼴 상세의 소유 문서를 적고, UT2 행과 UD3에 글꼴 설계 단계·버전 결정(FD14, 사용자 결정 2026-11-24)을 연결했다.
 
 **초안 2.4(2026.11.22):** [노드 그래프](NodeGraph/README.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
 
