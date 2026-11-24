@@ -108,7 +108,7 @@ ROCKS_STRUCT() struct GraphBoundaryPin {
 //   Array<GraphBoundaryPin> outputs;      // Collapsed: 경계 출력(안 → 바깥), 그 밖 빈 목록
 ```
 
-- 핀: `Graph.Input`은 자기 그래프 `inputs`마다 출력 핀(무제한), `Graph.Output`은 `outputs`마다 입력 핀(`maxEdges`)이다. `Graph.Collapsed`는 `ownerNode`가 자기인 그래프를 찾아 그 `inputs`를 입력 핀(`maxEdges`)으로, `outputs`를 출력 핀(무제한)으로 갖는다. 표시 이름은 키 원문이다(Name pool이 소유 — 수명 문제가 없다). 값 정책은 Editable이다(Collapsed 입력 기본값의 뜻은 도메인 컴파일이 정한다). 등록표 `CollectPins`가 세 종류를 직접 계산한다(타입 이름 → 색인은 문서 도메인 schema 표).
+- 핀: `Graph.Input`은 자기 그래프 `inputs`마다 출력 핀(무제한), `Graph.Output`은 `outputs`마다 입력 핀(`maxEdges`)이다. `Graph.Collapsed`는 `ownerNode`가 자기인 그래프를 찾아 그 `inputs`를 입력 핀(`maxEdges`)으로, `outputs`를 출력 핀(무제한)으로 갖는다. 핀 서술의 표시 이름은 비워 두고 화면이 키 원문을 보인다(디코드한 임시 문자열이나 lease 없는 pool 문자열을 서술이 가리키지 않는다). 값 정책은 Editable이다(Collapsed 입력 기본값의 뜻은 도메인 컴파일이 정한다). 등록표 `CollectPins`가 세 종류를 직접 계산한다(타입 이름 → 색인은 문서 도메인 schema 표).
 - 이렇게 둔 이유: 핀 목록을 셀 때 Record를 디코드하지 않으므로 ObjectRegistry·소유 스레드가 필요 없고(검증·쿠커·붙여넣기 어디서나 같다), 디코드한 임시 문자열 수명 문제도 없다. 하위 그래프의 인터페이스가 그래프에 있으므로 경계 노드를 지우고 다시 만들어도 인터페이스가 남는다(MetaSound graph interface와 같은 방향). 타입을 이름으로 두어 도메인 타입 표 순서가 바뀌어도 문서가 안정하다.
 - 버린 대안: 경계 노드 속성 Record(+ ObjectRegistry 디코드 또는 전용 decoder) — 디코드 문맥·스레드 제약, 리플렉션 wire를 손으로 따라가는 decoder의 유지 비용. `Graph.Collapsed` 속성에 대상 GraphId — 같은 디코드 문제이고, 두 쪽 참조가 어긋날 수 있다(지금은 `ownerNode` 한쪽만 참조).
 - 경계 노드 capability: `Graph.Input`·`Graph.Output`은 삭제·복제·비활성 불가다(UE도 tunnel 그래프 안 경계 노드를 지울 수 없다 — `ED/BlueprintGraph/Private/K2Node_Tunnel.cpp:132–149`). `Graph.Collapsed`는 삭제 가능·복제 불가(붙여넣기 제외)·비활성 불가다.
@@ -120,13 +120,14 @@ ROCKS_STRUCT() struct GraphBoundaryPin {
   - 새 공통 명령 `SetGraphBoundary(graph, inputs, outputs)`: Collapsed 그래프의 경계 목록을 바꾼다. 같은 명령 안에서 그 그래프의 `Graph.Input`·`Graph.Output`과 부모 `Graph.Collapsed`를 핀 재정리한다(사라진 경계 핀에 닿은 간선·값은 고아 핀으로). 경계 목록은 그래프 머리 op 하나로 바뀌고, 그 op를 적용할 때(undo·redo 포함) `GraphBoundaryChanged`와 세 노드의 `NodePinsChanged`를 기록한다.
   - `RemoveNodes`가 `Graph.Collapsed`를 지우면 그 노드를 `ownerNode`로 갖는 하위 그래프(와 그 안의 하위 그래프)를 같은 patch에서 먼저 지운다(UE `UK2Node_Composite::DestroyNode` — `ED/BlueprintGraph/Private/K2Node_Composite.cpp:73–84`). 연쇄로 지우는 그래프 안의 경계 노드는 삭제 불가 검사에서 빼고, 그 밖의 노드에 삭제 불가가 있으면 `CannotDelete`다.
   - `RemoveGraph`는 `ownerNode`가 문서에 있는 그래프를 거부한다(`GraphReferenced` — 노드를 지워야 한다). 지우는 그래프 안에 `Graph.Collapsed`가 있으면 그 하위 그래프도 연쇄로 지운다(같은 삭제 불가 규칙).
-  - `AddNode`·`InsertNode`: `Graph.Input`·`Graph.Output`은 Collapsed 그래프에만 넣을 수 있다(`BoundaryNode`). `Graph.Collapsed`는 그 노드를 `ownerNode`로 갖는 그래프가 이미 있고(같은 목록의 앞 `AddGraph`), 넣는 그래프가 그 하위 그래프 나무 안이 아니어야 한다(`WouldCreateCycle`).
-  - `MoveNodesToGraph`는 경계 노드를 옮기지 않는다(`BoundaryNode`). `Graph.Collapsed`를 옮길 때 대상이 자기 하위 그래프 나무 안이면 거부한다(`WouldCreateCycle`).
+  - `AddNode`·`InsertNode`: `Graph.Input`·`Graph.Output`은 Collapsed 그래프에만 넣을 수 있다(`BoundaryNode`). `Graph.Collapsed`는 그 노드를 `ownerNode`로 갖는 그래프가 이미 있고(같은 목록의 앞 `AddGraph`), 넣는 그래프가 그 하위 그래프 나무 안이 아니어야 한다(`CollapsedCycle`).
+  - `MoveNodesToGraph`는 경계 노드를 옮기지 않는다(`BoundaryNode`). `Graph.Collapsed`를 옮길 때 대상이 자기 하위 그래프 나무 안이면 거부한다(`CollapsedCycle`).
   - GI15·GI16의 "정확히 하나"는 명령 목록 끝에 검사한다(`AddGraph` → 경계 노드 `AddNode` → 부모 `Graph.Collapsed` `AddNode` 목록이 중간 상태를 거치므로 — `InsertNode`의 GI7 목록 끝 검사와 같은 방식). 그래프·경계 노드·`Graph.Collapsed`를 건드린 목록만 검사한다. 어기면 목록 전체가 실패한다(`BoundaryNode`).
 - **접기·펼치기 도우미.** `GraphFold.h`의 두 함수가 공통 명령 목록을 만든다(8.1절 접기 행).
   - `BuildCollapseCommands(view, layout, graph, nodes, ids, out)`: 경계를 건너는 간선을 정규 순서로 모아 안쪽 핀마다 경계 핀 하나(키 `In<n>`·`Out<n>`, 안쪽 핀의 kind·타입 이름·`maxEdges`)를 만든다. 순서는 건너는 간선 `Disconnect` → `AddGraph`(Collapsed, `ownerNode` = 새 Collapsed 노드 id) → `SetGraphBoundary` → 경계 노드 `AddNode` → `MoveNodesToGraph` → `Graph.Collapsed` `AddNode`(옮긴 노드 배치의 중심) → 바깥·안쪽 `Connect`(`requireMake`)다. 경계 노드 배치는 옮긴 노드 경계 상자의 왼쪽·오른쪽이다.
   - `BuildExpandCommands(view, graph, collapsedNode, out, report)`: 반대 순서다. `Graph.Collapsed`·경계 노드에 닿은 간선 `Disconnect` → 경계 노드가 아닌 노드 `MoveNodesToGraph`(부모로) → `Graph.Collapsed` `RemoveNodes`(경계 노드만 남은 하위 그래프가 연쇄로 지워진다) → 경계 핀마다 바깥 끝 × 안쪽 끝 `Connect`(`requireMake`) → `Graph.Collapsed` 입력 기본값은 바깥 간선이 없던 경계 핀의 안쪽 끝 입력 핀에 `SetInputDefault`(Hidden이면 버리고 진단)다.
   - 다시 잇는 `Connect`는 `requireMake`다(schema의 Replace·Deny 판정이 접기 전에 있던 연결을 바꾸지 않게 — 거부되면 목록 전체 실패).
+  - 거부: 접기는 건너는 간선이 고아 핀·구조(Structural) 핀·핀 모르는 노드에 닿으면 `Unsupported`, 펼치기는 `Graph.Collapsed`·경계 노드에 고아 핀이 있으면 `Unsupported`다(그 간선·값을 이을 곳이 없다 — 조용히 버리지 않는다). 펼칠 때 `Graph.Input`에서 `Graph.Output`으로 바로 가는 간선은 바깥 시작 × 그 출력의 바깥 끝으로 잇는다. 옮길 곳 없는 입력 기본값은 `GraphFoldReport::droppedDefaults`로 센다.
   - 한계: 순번 있는 출력 핀을 건너는 간선은 다시 이을 때 끝에 붙는다(왕복 시험에서 뺀다). 하위 그래프 배치 좌표는 부모 좌표로 옮기지 않는다(화면 단계 NG7에서 정한다). 접기 대상에 경계 노드가 있으면 거부한다.
   - 머티리얼 MS1 컴파일이 Collapsed 그래프를 받는지는 MS1 착수 때 정한다(받지 않으면 도메인 검증 오류 — 공통 펼침 도우미는 그때).
 - **기존 데이터.** 노드 없는 Collapsed 그래프를 쓰는 시험 표본·텍스트 문서는 NG3c에서 GI15·GI16에 맞게 고친다. 텍스트 codec(9.4절)과 의미 바이트(8.4절)는 `Graph`의 새 필드를 쓴다.

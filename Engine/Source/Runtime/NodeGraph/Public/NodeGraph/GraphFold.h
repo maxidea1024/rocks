@@ -36,15 +36,17 @@ struct GraphFoldReport {
 // 정규 순서로 모아 안쪽 핀마다 경계 핀 하나(키 In<n>·Out<n>)를 만든다. 새 id(하위 그래프·
 // Graph.Collapsed·경계 노드 둘)는 ids에서 받는다. layout은 배치 위치 계산용이다(nullptr이면 원점).
 // 오류: 그래프·노드 없음 NotFound, nodes가 비었거나 같은 id 두 번·경계 노드 포함 InvalidArgument,
-// 핀을 셀 수 없는 노드(자리 노드·migration 전)에 건너는 간선이 닿음 Unsupported, 할당·발급 오류.
+// 핀을 셀 수 없는 노드(자리 노드·migration 전)·고아 핀·구조(Structural) 핀에 건너는 간선이 닿음
+// Unsupported, 할당·발급 오류.
 ROCKS_NODEGRAPH_API Result<void>
 BuildCollapseCommands(const GraphReadView& view, const GraphDocumentLayout* layout, Guid graph,
                       Span<const Guid> nodes, GraphIdSource& ids, GraphCommandList& out) noexcept;
 
 // graph의 Graph.Collapsed collapsedNode를 펼치는 목록을 out 끝에 더한다. 하위 그래프의 경계 노드가
 // 아닌 노드를 graph로 옮기고, 경계 핀마다 바깥 끝 × 안쪽 끝을 다시 잇는다(requireMake). 바깥 간선이
-// 없던 Collapsed 입력의 기본값은 안쪽 받는 핀에 옮긴다. 오류: 노드 없음·Collapsed 아님·하위 그래프
-// 없음 NotFound, 할당 오류.
+// 없던 Collapsed 입력의 기본값은 안쪽 받는 핀에 옮긴다(옮길 곳이 없으면 report에 센다). 오류: 노드
+// 없음·Collapsed 아님·하위 그래프 없음 NotFound, Graph.Collapsed·경계 노드에 고아 핀이 있음
+// Unsupported(그 간선·값을 이을 곳이 없다), 할당 오류.
 ROCKS_NODEGRAPH_API Result<void> BuildExpandCommands(const GraphReadView& view, Guid graph,
                                                      Guid collapsedNode, GraphCommandList& out,
                                                      GraphFoldReport* report = nullptr) noexcept;

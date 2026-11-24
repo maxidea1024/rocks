@@ -10,6 +10,8 @@ namespace rocks::nodegraph {
 namespace {
 
 // 경계 핀 키 "In<n>"·"Out<n>"이다.
+constexpr usize FoldKeyPrefixMaxBytes = 8;
+
 Result<Name> FoldKey(NamePool& names, StringView prefix, usize number) noexcept {
     constexpr usize MaxDigits = 20;
     char digits[MaxDigits];
@@ -19,9 +21,9 @@ Result<Name> FoldKey(NamePool& names, StringView prefix, usize number) noexcept 
         number /= 10;
     } while (number != 0 && count < MaxDigits);
 
-    char text[8 + MaxDigits];
+    char text[FoldKeyPrefixMaxBytes + MaxDigits];
     usize length = 0;
-    for (usize index = 0; index < prefix.ByteCount() && length < 8; ++index) {
+    for (usize index = 0; index < prefix.ByteCount() && length < FoldKeyPrefixMaxBytes; ++index) {
         text[length++] = prefix.Data()[index];
     }
 
@@ -105,7 +107,12 @@ Result<void> FoldDescribe(const GraphReadView& view, const Graph& graph, Guid no
     }
 
     out.key = key;
-    out.kind = descriptor->kind == PinKind::Flow ? PinKind::Flow : PinKind::Data;
+    // 구조 핀(상태 기계 전이 등)은 경계 핀 종류가 아니다(GI15).
+    if (descriptor->kind == PinKind::Structural) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    out.kind = descriptor->kind;
     out.maxEdges = input && descriptor->maxEdges != 0 ? descriptor->maxEdges : 1;
     out.type = Name();
     const GraphSchema* schema = view.Registry().FindSchema(view.Document().domain);
@@ -373,6 +380,18 @@ Result<void> BuildExpandCommands(const GraphReadView& view, Guid graphId, Guid c
         }
     }
 
+    // 고아 핀(경계에서 사라진 핀)의 간선·값은 이을 곳이 없으므로 펼치지 않는다(조용히 버리지
+    // 않는다).
+    if (!node->retainedPins.IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    for (const GraphNode& child : subgraph->nodes) {
+        if (registry.IsBoundary(child.type) && !child.retainedPins.IsEmpty()) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+    }
+
     // 끊을 간선: 부모 쪽 Graph.Collapsed 간선과 하위 그래프 쪽 경계 노드 간선.
     Array<GraphEdge> outsideEdges(allocator);
     Array<GraphEdge> insideEdges(allocator);
@@ -415,7 +434,23 @@ Result<void> BuildExpandCommands(const GraphReadView& view, Guid graphId, Guid c
         return added;
     }
 
-    // 경계 핀마다 바깥 끝 × 안쪽 끝을 다시 잇는다.
+    // 경계 핀마다 바깥 끝 × 안쪽 끝을 다시 잇는다. Graph.Input에서 Graph.Output으로 바로 가는 간선
+    // (그대로 지나는 경계)은 바깥 시작 × 그 출력 키의 바깥 끝으로 잇는다.
+    const auto connectThrough = [&](Guid from, Name fromPin,
+                                    Name outputKey) noexcept -> Result<void> {
+        for (const GraphEdge& outside : outsideEdges) {
+            if (outside.fromNode == collapsedNode && outside.fromPin == outputKey) {
+                if (auto added = out.Connect(
+                        graphId, FoldEdge(from, fromPin, outside.toNode, outside.toPin), true);
+                    !added) {
+                    return added;
+                }
+            }
+        }
+
+        return Result<void>::Success();
+    };
+
     for (const GraphBoundaryPin& boundary : subgraph->inputs) {
         bool linked = false;
         for (const GraphEdge& outside : outsideEdges) {
@@ -425,17 +460,25 @@ Result<void> BuildExpandCommands(const GraphReadView& view, Guid graphId, Guid c
 
             linked = true;
             for (const GraphEdge& inside : insideEdges) {
-                if (inside.fromNode == inputNode && inside.fromPin == boundary.key) {
-                    const GraphEdge edge =
-                        FoldEdge(outside.fromNode, outside.fromPin, inside.toNode, inside.toPin);
-                    if (auto added = out.Connect(graphId, edge, true); !added) {
-                        return added;
-                    }
+                if (!(inside.fromNode == inputNode) || !(inside.fromPin == boundary.key)) {
+                    continue;
+                }
+
+                const Result<void> added =
+                    inside.toNode == outputNode
+                        ? connectThrough(outside.fromNode, outside.fromPin, inside.toPin)
+                        : out.Connect(graphId,
+                                      FoldEdge(outside.fromNode, outside.fromPin, inside.toNode,
+                                               inside.toPin),
+                                      true);
+                if (!added) {
+                    return Result<void>::Failure(added.Error());
                 }
             }
         }
 
-        // 바깥 간선이 없던 입력의 기본값은 안쪽 받는 핀으로 옮긴다(Hidden이면 버린다).
+        // 바깥 간선이 없던 입력의 기본값은 안쪽 받는 핀으로 옮긴다. 받는 핀이 없거나 Hidden이거나
+        // 그대로 지나는 경계면 버리고 센다.
         const PinValueEntry* value = nullptr;
         for (const PinValueEntry& entry : node->inputDefaults) {
             if (entry.pin == boundary.key) {
@@ -447,8 +490,10 @@ Result<void> BuildExpandCommands(const GraphReadView& view, Guid graphId, Guid c
             continue;
         }
 
+        bool moved = false;
         for (const GraphEdge& inside : insideEdges) {
-            if (!(inside.fromNode == inputNode) || !(inside.fromPin == boundary.key)) {
+            if (!(inside.fromNode == inputNode) || !(inside.fromPin == boundary.key) ||
+                inside.toNode == outputNode) {
                 continue;
             }
 
@@ -460,10 +505,6 @@ Result<void> BuildExpandCommands(const GraphReadView& view, Guid graphId, Guid c
             }
 
             if (pin == nullptr || pin->valuePolicy == PinValuePolicy::Hidden) {
-                if (report != nullptr) {
-                    ++report->droppedDefaults;
-                }
-
                 continue;
             }
 
@@ -472,23 +513,26 @@ Result<void> BuildExpandCommands(const GraphReadView& view, Guid graphId, Guid c
                 !added) {
                 return added;
             }
+
+            moved = true;
+        }
+
+        if (!moved && report != nullptr) {
+            ++report->droppedDefaults;
         }
     }
 
     for (const GraphBoundaryPin& boundary : subgraph->outputs) {
         for (const GraphEdge& inside : insideEdges) {
-            if (!(inside.toNode == outputNode) || !(inside.toPin == boundary.key)) {
+            // 그대로 지나는 간선은 입력 쪽에서 이었다.
+            if (!(inside.toNode == outputNode) || !(inside.toPin == boundary.key) ||
+                inside.fromNode == inputNode) {
                 continue;
             }
 
-            for (const GraphEdge& outside : outsideEdges) {
-                if (outside.fromNode == collapsedNode && outside.fromPin == boundary.key) {
-                    const GraphEdge edge =
-                        FoldEdge(inside.fromNode, inside.fromPin, outside.toNode, outside.toPin);
-                    if (auto added = out.Connect(graphId, edge, true); !added) {
-                        return added;
-                    }
-                }
+            if (auto added = connectThrough(inside.fromNode, inside.fromPin, boundary.key);
+                !added) {
+                return added;
             }
         }
     }

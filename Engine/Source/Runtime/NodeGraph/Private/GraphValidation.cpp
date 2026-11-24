@@ -359,7 +359,8 @@ private:
 
         for (usize position = 0; position < total; ++position) {
             const GraphBoundaryPin& pin = at(position);
-            bool valid = !ValidationIsNoneName(pin.key) && pin.maxEdges >= 1 &&
+            bool valid = !ValidationIsNoneName(pin.key) && pin.type.IsValid() &&
+                         pin.maxEdges >= 1 &&
                          (pin.kind == PinKind::Data || pin.kind == PinKind::Flow);
             for (usize other = 0; valid && other < position; ++other) {
                 valid = !(at(other).key == pin.key);
