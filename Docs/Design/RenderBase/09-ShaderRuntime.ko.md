@@ -113,6 +113,7 @@
 - 항목은 셰이더 집합의 lease를 잡는다. 집합이 `Retire`되면 그 집합 epoch의 항목도 함께 `Retire`한다.
 - UE는 이 캐시를 RHI 모듈에 둔다(`RHI/Public/PipelineStateCache.h`). Rocks는 RenderBase에 둔다: Graphics는 만들기만 하고, 캐시·수명·통계는 렌더 쪽 일이다.
 - `PipelineDesc`의 원문 경로는 SH2에서 없어진다(셰이더 시스템 결정 9).
+- compute 파이프라인(CS 항목·그리기별 상수 크기·slot 이름 표)도 같은 캐시가 받는다(개정 36, 4.4절 "GX3·GX4 compute 연결 설계" (1)).
 - 후속: 비동기 미리 준비(`PipelinePrewarm`, 정점 입력 타입의 정적 배치를 쓴다, 10.2절), 사용 기록 파일과 시작 precompile, 드라이버 캐시 연계.
 
 ### 9.8 셰이더 교체
