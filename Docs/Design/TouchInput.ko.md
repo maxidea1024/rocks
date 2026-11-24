@@ -196,6 +196,8 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
 
 TI2(2026-11-24): Win64 창이 `WM_POINTERDOWN`·`UPDATE`·`UP`·`CAPTURECHANGED`의 터치·펜을 `TouchIndexAllocator`로 번호를 매겨 터치 이벤트로 넘기고 `DefWindowProc`에 넘기지 않는다. 마우스 포인터는 그대로 `WM_MOUSE*`다. 메시지·플래그·압력 변환은 `PlatformWindow/Private/Common/PointerTouchMapping`(모든 플랫폼에서 시험 — `PointerTouchMapping_*`)이다. 터치 화면 없는 PC에서 `InjectTouchInput`으로 Sandbox 창에 가상 탭을 넣어 `Pawn received touch 0`·`ended`가 오고 마우스 흉내 클릭이 함께 오지 않는 것을 사람 확인했다. 실제 터치 화면·펜은 장비가 생기면 확인한다.
 
+TI3(2026-11-24): `input::TouchGestureRecognizer`(Input 모듈 — Gameplay 없이 시험)가 UE `FGestureRecognizer`와 같은 판정으로 Pinch(거리 제곱 비율)·Rotate(시작 각 대비)·Flick(0.25 s·100 px, 방향 각)을 만들고, 거리 임계에 `distanceScale`(TD14)을 곱한다. `PlayerController::SetGestureRecognizerEnabled`(기본 꺼짐)·`Gesture(TouchGesture)`가 입력 스냅숏 다음에 돈다(설정 `input.enableGestureRecognizer` 연결은 입력 설정이 생길 때). 시험은 `TouchGesture_*`, Android 에뮬레이터에서 빠른 스와이프가 Flick 0°(오른쪽)·90°(위)로 나오는 것을 확인했다. 두 손가락 Pinch·Rotate는 adb로 만들 수 없어 단위 시험으로만 확인했다.
+
 TI1–TI3은 화면·UI와 무관하다. 그래도 계획 순서를 지켜 입력 상세 계획의 I 단계와 함께 착수한다. 이 문서는 그때 터치가 빠지지 않게 하려는 것이다.
 
 ## 7. Rocks 이름 대응

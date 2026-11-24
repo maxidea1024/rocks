@@ -412,17 +412,34 @@ private:
 
     void MouseButton(input::MouseButton button, bool down) noexcept {
         // 버튼을 누른 채 창 밖으로 나가도 놓기 이벤트를 받도록 캡처한다.
+        const uint32 bit = 1u << static_cast<uint32>(button);
         if (down) {
             if (capturedButtons_++ == 0) {
                 SetCapture(window_);
             }
+            heldButtons_ |= bit;
             Push(input::InputEvent::MouseDown(button));
         } else {
+            heldButtons_ &= ~bit;
             if (capturedButtons_ > 0 && --capturedButtons_ == 0) {
                 ReleaseCapture();
             }
             Push(input::InputEvent::MouseUp(button));
         }
+    }
+
+    // 버튼을 누른 채 다른 창·시스템이 capture를 가져갔다(WM_CAPTURECHANGED). 이 창에는 뗌이 오지
+    // 않으므로 눌린 버튼마다 MouseUp을 만들어 눌린 채 남지 않게 한다. 마지막 버튼을 떼며 부른
+    // ReleaseCapture가 보내는 WM_CAPTURECHANGED는 눌린 버튼이 없어 아무것도 하지 않는다.
+    void LoseCapture() noexcept {
+        for (uint32 index = 0; index < input::MouseButtonCount; ++index) {
+            if ((heldButtons_ & (1u << index)) != 0) {
+                Push(input::InputEvent::MouseUp(static_cast<input::MouseButton>(index)));
+            }
+        }
+
+        heldButtons_ = 0;
+        capturedButtons_ = 0;
     }
 
     LRESULT Handle(UINT message, WPARAM wParam, LPARAM lParam) noexcept {
@@ -442,6 +459,7 @@ private:
         case WM_KILLFOCUS: {
             focused_ = false;
             capturedButtons_ = 0;
+            heldButtons_ = 0;
             // 닿아 있던 손가락은 FocusLost가 InputState에서 취소로 끝낸다. 배정기도 같이 비운다.
             uint8 ended[input::MaxTouches];
             (void)touches_.ReleaseAll(ended);
@@ -504,6 +522,12 @@ private:
                                                    : input::MouseButton::X2,
                         message == WM_XBUTTONDOWN);
             return TRUE;
+        case WM_CAPTURECHANGED:
+            if (reinterpret_cast<HWND>(lParam) != window_) {
+                LoseCapture();
+            }
+
+            return 0;
         case WM_MOUSEWHEEL:
             Push(input::InputEvent::MouseWheel(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
                                                static_cast<float>(WHEEL_DELTA)));
@@ -615,6 +639,8 @@ private:
     uint32 height_ = 0;
     uint32 highSurrogate_ = 0;
     uint32 capturedButtons_ = 0;
+    // 지금 눌린 마우스 버튼(MouseButton 비트)이다. capture를 잃으면 이 버튼들의 뗌을 만든다.
+    uint32 heldButtons_ = 0;
     bool closeRequested_ = false;
     bool resized_ = false;
     bool focused_ = false;
