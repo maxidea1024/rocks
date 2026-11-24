@@ -2,10 +2,73 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Math/Transform.h>
+#include <Core/Text/String.h>
+#include <Object/ObjectRefs.h>
 #include <Meta/Annotations.h>
 #include <World/Component.h>
 
 namespace rocks {
+
+// 부착할 때 Transform 성분 하나를 다루는 규칙이다(UE EAttachmentRule — Docs/Design/EngineRuntime
+// 23.3절).
+enum class AttachmentRule : uint8 {
+    // 지금 상대 값을 새 부모 기준 상대 값으로 그대로 둔다.
+    KeepRelative,
+    // 붙이기 전 월드 값이 유지되도록 상대 값을 다시 계산한다.
+    KeepWorld,
+    // 부착점에 맞춘다(위치 0·회전 단위·scale 1).
+    SnapToTarget
+};
+
+// 위치·회전·scale 성분마다의 부착 규칙이다(UE FAttachmentTransformRules).
+struct AttachmentRules {
+    AttachmentRule location = AttachmentRule::KeepRelative;
+    AttachmentRule rotation = AttachmentRule::KeepRelative;
+    AttachmentRule scale = AttachmentRule::KeepRelative;
+
+    static constexpr AttachmentRules KeepRelativeTransform() noexcept {
+        return {};
+    }
+
+    static constexpr AttachmentRules KeepWorldTransform() noexcept {
+        return {AttachmentRule::KeepWorld, AttachmentRule::KeepWorld, AttachmentRule::KeepWorld};
+    }
+
+    // 위치·회전은 맞추고 scale은 월드 값을 유지한다(UE SnapToTargetNotIncludingScale).
+    static constexpr AttachmentRules SnapToTargetNotIncludingScale() noexcept {
+        return {AttachmentRule::SnapToTarget, AttachmentRule::SnapToTarget,
+                AttachmentRule::KeepWorld};
+    }
+
+    static constexpr AttachmentRules SnapToTargetIncludingScale() noexcept {
+        return {AttachmentRule::SnapToTarget, AttachmentRule::SnapToTarget,
+                AttachmentRule::SnapToTarget};
+    }
+};
+
+// SceneComponent가 움직일 수 있는지다(UE EComponentMobility). Static·Stationary는 게임 World에서
+// 초기화 뒤 옮길 수 없다(23.3절).
+ROCKS_ENUM()
+enum class ComponentMobility : uint8 {
+    Static,
+    Stationary,
+    Movable
+};
+
+// GetSocketTransform이 돌려줄 좌표계다.
+enum class TransformSpace : uint8 {
+    World,
+    // socket을 가진 Component 기준이다.
+    Component
+};
+
+// Component의 경계다(UE FBoxSphereBounds — 위치 cm). 상자는 origin ± boxExtent이고 구는 origin
+// 중심 반지름 sphereRadius다.
+struct ComponentBounds {
+    Vec3d origin;
+    Vec3d boxExtent;
+    double sphereRadius = 0.0;
+};
 
 // Transform 계층을 가진 Component다. 부모 기준 상대 Transform을 저장하고 월드 행렬은 필요할 때
 // 계산한다(dirty 플래그). 렌더·물리·카메라 Component의 기반이다.
@@ -50,7 +113,8 @@ class ROCKS_WORLD_API SceneComponent : public Component {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit SceneComponent(Allocator& allocator) noexcept : children_(allocator) {
+    explicit SceneComponent(Allocator& allocator) noexcept
+        : children_(allocator), attachSocket_(allocator) {
     }
 
     const Transform& RelativeTransform() const noexcept {
@@ -94,12 +158,122 @@ public:
     // 부모에서 뗀다. 부모가 없으면 성공이다. World 장부 밖 객체는 InvalidArgument다.
     Result<void> Detach() noexcept;
 
+    // --- 부착 규칙·socket(23.3절 CR2) ---
+
+    // parent의 socket(비면 parent 자신)에 rules로 붙인다(UE AttachToComponent). 오류: 위 AttachTo와
+    // 같고, 표현할 수 없는 KeepWorld 계산(scale 0·shear 분해 실패)은 InvalidArgument(바뀌지
+    // 않는다), Mobility 위반은 InvalidArgument(StaticComponentMoved). parent에 없는 socket 이름은
+    // UE처럼 받아 두고 parent 자신의 Transform을 쓴다.
+    Result<void> AttachTo(ObjectHandle parent, const AttachmentRules& rules,
+                          StringView socket = {}) noexcept;
+
+    // rule로 뗀다(KeepRelative는 상대 값을 월드 값으로 둔다 — 위 Detach와 같다, KeepWorld는 월드
+    // Transform을 유지한다). SnapToTarget은 InvalidArgument다(UE EDetachmentRule에 없다).
+    Result<void> Detach(AttachmentRule rule) noexcept;
+
+    // 부착한 socket 이름이다(없으면 빈 값).
+    StringView AttachSocketName() const noexcept {
+        return attachSocket_.View();
+    }
+
+    // name socket이 있는지다(기본은 없음 — 메시 계열이 재정의한다).
+    virtual bool HasSocket(StringView) const noexcept {
+        return false;
+    }
+
+    // socket의 Transform이다(UE GetSocketTransform). 이름이 비거나 없는 socket이면 Component
+    // 자신이다(space가 Component면 단위). 오류: 월드 Transform 분해 실패.
+    virtual Result<Transform> GetSocketTransform(StringView socket,
+                                                 TransformSpace space) const noexcept;
+
+    // --- 절대 Transform·Mobility(23.3절) ---
+
+    // 켠 성분은 부모를 무시하고 상대 값을 월드 값으로 쓴다(UE SetAbsolute). 오류: Mobility
+    // 위반(CheckMovable)은 InvalidArgument.
+    Result<void> SetAbsolute(bool location, bool rotation, bool scale) noexcept;
+
+    bool IsAbsoluteLocation() const noexcept {
+        return absoluteLocation_;
+    }
+
+    bool IsAbsoluteRotation() const noexcept {
+        return absoluteRotation_;
+    }
+
+    bool IsAbsoluteScale() const noexcept {
+        return absoluteScale_;
+    }
+
+    ComponentMobility Mobility() const noexcept {
+        return mobility_;
+    }
+
+    void SetMobility(ComponentMobility mobility) noexcept {
+        mobility_ = mobility;
+    }
+
+    // --- 가시성(23.3절) ---
+
+    // visible을 바꾼다(UE SetVisibility). propagateToChildren이면 자손에도 같은 값을 쓴다.
+    void SetVisibility(bool visible, bool propagateToChildren = false) noexcept;
+
+    // hiddenInGame을 바꾼다(UE SetHiddenInGame).
+    void SetHiddenInGame(bool hidden, bool propagateToChildren = false) noexcept;
+
+    bool GetVisibleFlag() const noexcept {
+        return visible_;
+    }
+
+    bool IsHiddenInGame() const noexcept {
+        return hiddenInGame_;
+    }
+
+    // 보이는지다: visible이고, 게임 World(Game·Tryout)면 hiddenInGame도 아니다(UE ShouldRender).
+    bool IsVisible() const noexcept;
+
+    // --- 속도·bounds(23.3절) ---
+
+    // Component 속도(cm/s, UE ComponentVelocity)다. 이동 컴포넌트가 쓴다.
+    const Vec3d& ComponentVelocity() const noexcept {
+        return velocity_;
+    }
+
+    void SetComponentVelocity(const Vec3d& velocity) noexcept {
+        velocity_ = velocity;
+    }
+
+    // 캐시한 경계다(월드 Transform이 바뀌면 다음 호출에서 CalcBounds로 다시 계산한다).
+    const ComponentBounds& Bounds() const noexcept;
+
+    // 월드 Transform에서 경계를 계산한다(UE CalcBounds). 기본은 위치의 점(extent·반지름 0).
+    virtual ComponentBounds CalcBounds(const Transform& world) const noexcept;
+
 private:
     friend class World;
 
     // 파괴 직전에 World가 부른다(등록 여부·파생 재정의와 무관). 부모에서 떼고 자식들을 루트로
     // 만든다(자식의 상대 Transform 유지, 월드 행렬은 다시 계산).
     void DetachForDestroy() noexcept;
+
+protected:
+    // 자신이나 조상의 Transform·부착이 바뀐 뒤 그 변경 호출이 끝날 때 한 번 불린다(UE
+    // OnUpdateTransform — 자신 → 자손 순). Render 시스템 상태가 있으면 다시 보내기는 엔진이
+    // 표시한다.
+    virtual void OnTransformUpdated() noexcept {
+    }
+
+    // 가시성(visible·hiddenInGame)이 바뀌었다.
+    virtual void OnVisibilityChanged() noexcept {
+    }
+
+private:
+    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다.
+    Result<void> CheckMovable(const char* action) const noexcept;
+    // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한다.
+    void NotifyTransformUpdated() noexcept;
+    // 링크만 바꾼다(검사·규칙 계산 뒤).
+    Result<void> LinkParent(ObjectHandle parent, StringView socket) noexcept;
+    void ApplyVisibility(bool visible, bool hidden, bool setVisible, bool propagate) noexcept;
 
     void MarkDirty() noexcept;
     Result<void> AddChild(ObjectHandle child) noexcept;
@@ -112,6 +286,19 @@ private:
     ROCKS_NATIVE() ObjectHandle parent_;
     // parent_에서 유도되는 값이다(UE AttachChildren처럼 Transient — 편입이 다시 만든다).
     ROCKS_NATIVE() Array<ObjectHandle> children_;
+    // 부착 부모·socket이다(영속 — 23.3절 CR3, 편입이 계층을 복원한다). parent_와 같은 값이다.
+    ROCKS_PROPERTY(ReadOnly, Name = "attachParent") WeakObjectRef<SceneComponent> attachParent_;
+    ROCKS_PROPERTY(ReadOnly, Name = "attachSocket") String attachSocket_;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation") bool absoluteLocation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation") bool absoluteRotation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale") bool absoluteScale_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "mobility")
+    ComponentMobility mobility_ = ComponentMobility::Movable;
+    ROCKS_PROPERTY(ReadOnly, Name = "visible") bool visible_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame") bool hiddenInGame_ = false;
+    ROCKS_NATIVE() Vec3d velocity_;
+    ROCKS_NATIVE() mutable ComponentBounds bounds_;
+    ROCKS_NATIVE() mutable bool boundsDirty_ = true;
 };
 
 } // namespace rocks

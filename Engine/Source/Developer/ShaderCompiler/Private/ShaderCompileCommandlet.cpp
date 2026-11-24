@@ -10,7 +10,6 @@
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
-#include <ShaderToolTable/ShaderToolTable.h>
 #include <Task/WorkerScheduler.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,18 +21,15 @@ namespace compile_command_detail {
 
 constexpr char CommandName[] = "shader-compile";
 constexpr char Usage[] =
-    "usage: shader-compile [--project=<dir>] [--profile=<id>] [--format=<id>]... "
+    "usage: shader-compile [--project=<dir>] --format=<id> [--format=<id>]... "
     "[--define=<NAME>=<VALUE>]... [--option=<name>=<value>]... [--out=<dir>] [--workers=<n>] "
     "[--no-cache] [--keep-input] <virtual path>:<entry>:<vertex|pixel|compute>...\n";
 // 경로 버퍼다.
 constexpr usize MaxCommandPathBytes = 4096;
 // 한 줄 출력 버퍼다(진단은 따로 나눠 쓴다).
 constexpr usize MaxCommandLineBytes = 1024;
-// 받는 형식 수 상한이다(프로필 상한과 같다).
-constexpr usize MaxCommandFormats = MaxEngineProfileFormats;
-// 엔진 이름 접두가 같은 호스트 키다.
-constexpr char WindowsHostPrefix[] = "windows";
-constexpr char MacosHostPrefix[] = "macos";
+// 받는 형식 수 상한이다(형식 정의 파일 수보다 넉넉하다).
+constexpr usize MaxCommandFormats = 16;
 // 종료 코드다.
 constexpr int32 ExitSucceeded = 0;
 constexpr int32 ExitFailed = 1;
@@ -86,7 +82,6 @@ struct Arguments {
     }
 
     StringView project;
-    StringView profile;
     StringView out;
     StringView workers;
     bool noCache = false;
@@ -137,8 +132,8 @@ bool Parse(Span<const StringView> args, Arguments& out, const char*& reason) noe
                 return false;
             }
 
-            StringView* const single[] = {&out.project, &out.profile, &out.out, &out.workers};
-            const char* const singleNames[] = {"--project", "--profile", "--out", "--workers"};
+            StringView* const single[] = {&out.project, &out.out, &out.workers};
+            const char* const singleNames[] = {"--project", "--out", "--workers"};
             bool matched = false;
             for (usize index = 0; index < sizeof(single) / sizeof(single[0]); ++index) {
                 if (name == StringView(singleNames[index])) {
@@ -206,6 +201,11 @@ bool Parse(Span<const StringView> args, Arguments& out, const char*& reason) noe
 
     if (!out.help && out.jobs.IsEmpty()) {
         reason = "no shader job";
+        return false;
+    }
+
+    if (!out.help && out.formats.IsEmpty()) {
+        reason = "no shader format (give --format=<id>)";
         return false;
     }
 
@@ -366,42 +366,9 @@ private:
         }
 
         snprintf(formats_, sizeof(formats_), "%s/Config/ShaderFormats", engine_);
-        const char* host = ShaderToolHostKey();
-        StringView profile = arguments_.profile;
-        if (profile.IsEmpty()) {
-            const StringView key(host);
-            profile = key.StartsWith(WindowsHostPrefix, StringComparison::CaseSensitive)
-                          ? StringView("Engine-Windows")
-                      : key.StartsWith(MacosHostPrefix, StringComparison::CaseSensitive)
-                          ? StringView("Engine-MacOS")
-                          : StringView();
-            if (profile.IsEmpty()) {
-                return Fail(output_, ExitFailed, "%s: no default profile for host '%s'\n",
-                            CommandName, host);
-            }
-        }
-
-        const ShaderFormatStatus loaded = LoadEngineCompileProfile(formats_, profile, profile_);
-        if (!loaded) {
-            char detail[MaxCommandLineBytes];
-            snprintf(detail, sizeof(detail), "%s %s", ShaderFormatErrorName(loaded.code),
-                     loaded.path);
-            return Fail(output_, ExitFailed, "shader-compile: cannot load the profile: %s\n",
-                        detail);
-        }
-
-        // 형식 snapshot이다(--format이 없으면 프로필 전체).
-        Array<StringView> ids(allocator_);
-        if (arguments_.formats.IsEmpty()) {
-            for (const ShaderFormatDefinition& format : profile_.Formats()) {
-                if (!ids.TryPushBack(format.Id())) {
-                    return Result<int32>::Failure(ErrorCode::OutOfMemory);
-                }
-            }
-        } else if (!ids.TryAppend(arguments_.formats.View())) {
-            return Result<int32>::Failure(ErrorCode::OutOfMemory);
-        }
-
+        // 형식 snapshot이다. TargetProfile shaderFormats(12.3.1절 SSD10)가 생기기 전까지 --format이
+        // 형식 목록의 유일한 출처다(SSD24).
+        const Span<const StringView> ids = arguments_.formats.View();
         for (const StringView id : ids) {
             auto memory =
                 allocator_.Allocate(sizeof(ShaderFormatSnapshot), alignof(ShaderFormatSnapshot));
@@ -505,8 +472,6 @@ private:
         config.tree = &tree;
         config.reflection = ShaderKeyReflection{&reflection.objects, reflection.access,
                                                 &reflection.types, &allocator_};
-        config.profileId = StringView(profile_.id);
-        config.profileSha256 = profile_.sha256;
         config.workerExecutable = StringView(worker_);
         config.workRoot = workRoot_.View();
         config.workerCount = workers;
@@ -694,7 +659,6 @@ private:
     char engine_[MaxCommandPathBytes] = {};
     char worker_[MaxCommandPathBytes] = {};
     char formats_[MaxCommandPathBytes] = {};
-    EngineCompileProfile profile_;
     Array<ShaderFormatSnapshot*> snapshots_;
     String root_;
     String workRoot_;

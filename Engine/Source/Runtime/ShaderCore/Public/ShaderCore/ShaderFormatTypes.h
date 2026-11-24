@@ -14,6 +14,9 @@
 //       (type.stage & ShaderStageCompute) != 0) { ... }
 namespace rocks::shader {
 
+// 형식 id의 최대 byte 수(NUL 포함)다.
+inline constexpr usize MaxShaderFormatIdBytes = 32;
+
 // 상한이 없다는 표지다(uavTotal이 없는 형식, uniform 에뮬레이션이 없는 형식의 uniformVectors).
 inline constexpr uint32 NoShaderLimit = NumericLimits<uint32>::Max();
 

@@ -25,22 +25,21 @@
 // 4. WriteU32(단계 — ShaderStageBits 한 비트), WriteString(엔트리).
 // 5. WriteDigest(전처리 결과 SHA-256).
 // 6. WriteReflected(ShaderCompileOptions), 레이아웃 서명 WriteDigest 또는 WriteNone.
-// 7. WriteString(프로필 id), WriteDigest(프로필 byte SHA-256).
+// (7행 — 프로필 id·byte SHA는 개정 32에서 지웠다: 형식 정의 SHA가 3행에 있고 프로필의 형식
+// 목록·순서는 출력 byte에 영향이 없다, 12.3.1절 SSD24.)
 //
-// 입력은 세션 시작 때 한 번 읽어 둔 snapshot이다(형식 정의·프로필의 sha256은 워커에 보내는 그
-// byte의 것). 키 함수는 디스크를 읽지 않고 도구를 열지 않는다.
+// 입력은 세션 시작 때 한 번 읽어 둔 snapshot이다(형식 정의의 sha256은 워커에 보내는 그 byte의
+// 것). 키 함수는 디스크를 읽지 않고 도구를 열지 않는다.
 //
 // 사용 예:
 //   ShaderJobKeyInput input;
 //   input.projectGeneration = cache.ProjectGeneration();
-//   input.format = &format;                     // 프로필 snapshot의 형식 정의
+//   input.format = &format;                     // 형식 정의 snapshot
 //   input.stage = ShaderStagePixel;
 //   input.entry = "PSMain";
 //   input.preprocessedSha256 = Sha256::Hash(...preprocessed text bytes...);
 //   input.options = &options;
 //   input.reflection = {&registry, access, &types, &allocator};
-//   input.profileId = profile.id;
-//   input.profileSha256 = profile.sha256;
 //   auto key = BuildShaderJobKey(input);        // Result<Sha256Digest>
 //
 // 스레드: 재진입 가능하다. 리플렉션 문맥(registry·types)의 스레드 계약을 따른다.
@@ -57,7 +56,7 @@ namespace rocks::shader {
 // processor.version이 3행 SHA로 키에 들어간다). 키 기록 순서·번호 표를 바꾸면 버전 Guid를 바꾼다.
 inline constexpr NuggetProcessorId ShaderJobProcessor{
     Guid{0x524f434b53534841ull, 0x4445524a4f420001ull},
-    Guid{0x524f434b53534841ull, 0x4445524b45590001ull}};
+    Guid{0x524f434b53534841ull, 0x4445524b45590002ull}};
 
 // system 도구 지문의 실행 파일 수(metal·metallib)다.
 inline constexpr usize ShaderSystemToolExecutables = 2;
@@ -99,9 +98,6 @@ struct ShaderJobKeyInput {
     ShaderKeyReflection reflection{};
     // 파라미터 레이아웃 서명(정규 인코딩 byte SHA-256)이다. 레이아웃이 없는 job은 null(WriteNone).
     const Sha256Digest* layoutSignature = nullptr;
-    // 엔진 컴파일 프로필 id와 그 파일 byte SHA-256이다(SH1).
-    StringView profileId{};
-    Sha256Digest profileSha256{};
 };
 
 // 키 2–7행을 writer에 쓴다(공통 머리 뒤). 시험이 공통 머리를 고정값으로 쓰는 기록 경로에도 쓴다.

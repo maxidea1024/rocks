@@ -22,6 +22,14 @@ inline constexpr LogCategory LogWorldTick{"World.Tick"};
 // - BeginPlayDispatchContractViolated: BeginPlay dispatcher가 DispatchBeginPlay를 부르지 않았거나,
 //   두 번 또는 StartPlay 밖에서 불렀다(Error·Warning).
 inline constexpr char DiagSubsystemSkippedMissingDependency[] = "SubsystemSkippedMissingDependency";
+// - SystemStateRecreateFailed: Component 시스템 상태 다시 만들기(MarkSystemStateDirty)가 실패해 그
+// 종류가
+//   없는 채로 남았다(Warning — 23.2절).
+inline constexpr char DiagSystemStateRecreateFailed[] = "SystemStateRecreateFailed";
+// - StaticComponentMoved: Static·Stationary SceneComponent를 게임 World에서 옮기려 해
+// 거부했다(Warning —
+//   23.3절, UE CheckStaticMobilityAndWarn).
+inline constexpr char DiagStaticComponentMoved[] = "StaticComponentMoved";
 inline constexpr char DiagAutoTickPrerequisiteCycleSkipped[] = "AutoTickPrerequisiteCycleSkipped";
 inline constexpr char DiagBeginPlayDispatchContractViolated[] = "BeginPlayDispatchContractViolated";
 

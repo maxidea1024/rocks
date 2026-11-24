@@ -63,7 +63,7 @@ constexpr char FixtureVulkan[] =
 
 // 리터럴 키 golden(공통 머리의 결정적 수학 버전 = GoldenMathVersion, 툴체인 지문 = 0x5a×32)이다.
 // 기록 순서·태그·번호 표를 바꾸면 이 값이 바뀐다(그때는 ShaderJobProcessor 버전 Guid도 바꾼다).
-constexpr char GoldenKey[] = "4e02c5b0a4a127223a064a17dc32da1cc1c84e954bd680e47b87c62ed80460ef";
+constexpr char GoldenKey[] = "7edf92b1bce2d1d62f3ab5beed2ff136f35aff1f1aea73cbb5fa108d81070202";
 constexpr uint32 GoldenMathVersion = 7;
 constexpr uint8 GoldenToolchainByte = 0x5a;
 
@@ -150,8 +150,6 @@ struct KeyCase {
         input.preprocessedSha256 = Digest(0x80);
         input.options = &options;
         input.reflection = env.Reflection();
-        input.profileId = "Engine-Windows";
-        input.profileSha256 = Digest(0x90);
     }
 
     bool Ready() const noexcept {
@@ -301,10 +299,6 @@ TEST(ShaderJobKey_EveryInputChangesTheKey) {
     }
 
     // 프로필 출력 설정(id·byte SHA).
-    CHECK(changes([](KeyCase& c) noexcept { c.input.profileId = "Engine-MacOS"; },
-                  [](KeyCase& c) noexcept { c.input.profileId = "Engine-Windows"; }));
-    CHECK(changes([](KeyCase& c) noexcept { c.input.profileSha256 = Digest(0x91); },
-                  [](KeyCase& c) noexcept { c.input.profileSha256 = Digest(0x90); }));
 }
 
 TEST(ShaderJobKey_SameInputsGiveTheSameKey) {
@@ -347,7 +341,6 @@ TEST(ShaderJobKey_SystemToolFingerprintIsAnInput) {
     input.entry = "CSMain";
     input.options = &options;
     input.reflection = env.Reflection();
-    input.profileId = "Engine-MacOS";
     CHECK(BuildShaderJobKey(input).Error() == ErrorCode::UnsupportedCapability);
     ShaderSystemToolFingerprint other;
     other.name = "OtherTool";
@@ -403,10 +396,8 @@ TEST(ShaderJobKey_TraceGolden) {
     GuidText(ShaderJobProcessor.version, version);
     char formatSha[Sha256Digest::HexBytes + 1];
     char preprocessed[Sha256Digest::HexBytes + 1];
-    char profile[Sha256Digest::HexBytes + 1];
     Hex(test.format.sha256, formatSha);
     Hex(test.input.preprocessedSha256, preprocessed);
-    Hex(test.input.profileSha256, profile);
     char expected[4096];
     const int written = snprintf(
         expected, sizeof(expected),
@@ -419,11 +410,9 @@ TEST(ShaderJobKey_TraceGolden) {
         "string\nVULKAN_SM5\ndigest %s\nu32 2\nstring\nPSMain\ndigest %s\n"
         // 6행: 옵션 리플렉션 기록(필드 이름 포함 — 순서는 리플렉션 순회 순서)과 레이아웃 없음.
         "struct\nfield\nmatrixLayout\ni64 0\nfield\nhlsl2021\nbool true\nfield\ndebugSymbols\nbool "
-        "false\nfield\noptimization\ni64 3\nend\nnone\n"
-        // 7행.
-        "string\nEngine-Windows\ndigest %s\n",
+        "false\nfield\noptimization\ni64 3\nend\nnone\n",
         NuggetKeyFormatVersion, engine, project, processor, version, deterministic::Version,
-        toolchain, formatSha, preprocessed, profile);
+        toolchain, formatSha, preprocessed);
     REQUIRE(written > 0 && static_cast<usize>(written) < sizeof(expected));
     if (trace.text.View() != StringView(expected)) {
         fprintf(stderr, "--- expected ---\n%s--- actual ---\n%.*s--- end ---\n", expected,
@@ -463,9 +452,6 @@ TEST(ShaderJobKey_RejectsInvalidInputs) {
     test.input.entry = StringView();
     CHECK(errorOf() == ErrorCode::InvalidArgument);
     test.input.entry = "PSMain";
-    test.input.profileId = StringView();
-    CHECK(errorOf() == ErrorCode::InvalidArgument);
-    test.input.profileId = "Engine-Windows";
     test.input.options = nullptr;
     CHECK(errorOf() == ErrorCode::InvalidArgument);
     test.input.options = &test.options;

@@ -27,6 +27,7 @@
 // - 엔트리 함수 이름이 식별자이고, 단계가 ShaderStageBits 한 비트이며, 요구 기능·표지가 어휘
 // 안이다.
 // - 퍼뮤테이션 도메인이 ValidateShaderPermutationDomain을 통과한다.
+// - 파라미터 레이아웃 표 목록이 ValidateShaderParameterLayouts를 통과한다(7.2절 5항, SSD27).
 // Freeze 뒤 등록은 ScopeClosed다(등록 창이 닫혔다).
 //
 // 사용 예(호스트):

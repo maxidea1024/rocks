@@ -16,6 +16,9 @@
 #include <Input/InputEvent.h>
 #include <TestSupport/Test.h>
 #include <World/Actor.generated.h>
+#include <World/CameraComponent.generated.h>
+#include <World/Component.generated.h>
+#include <World/CameraComponent.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 #include <stdio.h>
@@ -698,5 +701,58 @@ TEST(ControllerPawn_CreateLocalPlayerRollsBackWhenLoginFails) {
     CHECK(count.Value() == 1);
     REQUIRE(fixture.engine->RunFrame());
     CHECK(fixture.Gameplay().Controllers().Size() == 1);
+}
+
+// 23.4절 CM0c: view target Pawn에 켜진 CameraComponent가 있으면 CameraDirector가 그 view를 쓴다(UE
+// CalcCamera) — usePawnControlRotation이면 회전은 controlRotation이다. 꺼지면 기본 규칙(root 위치·
+// 기본 시야)으로 돌아간다.
+TEST(ControllerPawn_CameraDirectorPrefersCameraComponent) {
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    World& world = fixture.Current();
+    const ObjectHandle controller = fixture.PlayerControllerOf(0);
+    const ObjectHandle pawn = fixture.PawnOf(controller);
+    REQUIRE(!pawn.IsNull());
+    auto root =
+        world.With<Actor>(pawn, [](Actor& actor) noexcept { return actor.RootComponent(); });
+    REQUIRE(root && !root.Value().IsNull());
+    auto camera = world.AddComponent<CameraComponent>(pawn);
+    REQUIRE(camera);
+    REQUIRE(world.With<CameraComponent>(
+        camera.Value(), [&](CameraComponent& value) noexcept -> Result<void> {
+            value.SetUsePawnControlRotation(true);
+            if (auto fov = value.SetFieldOfView(100.0); !fov) {
+                return fov;
+            }
+
+            if (auto attached = value.AttachTo(root.Value()); !attached) {
+                return attached;
+            }
+
+            return value.SetRelativeLocation(Vec3d(0.0, 0.0, 60.0));
+        }));
+    REQUIRE(world.With<Controller>(controller, [](Controller& value) noexcept {
+        value.SetControlRotation(Rotator<double>(10.0, 45.0, 0.0));
+    }));
+    auto director = world.With<PlayerController>(
+        controller, [](PlayerController& value) noexcept { return value.CameraDirectorHandle(); });
+    REQUIRE(director);
+    auto view = [&]() noexcept {
+        return world
+            .With<CameraDirector>(director.Value(),
+                                  [](CameraDirector& value) noexcept { return value.View(); })
+            .Value();
+    };
+    REQUIRE(fixture.engine->RunFrame());
+    CameraView seen = view();
+    CHECK(seen.location.z == 60.0 && seen.fov == 100.0);
+    CHECK(seen.rotation.pitch > 9.999 && seen.rotation.pitch < 10.001);
+    CHECK(seen.rotation.yaw > 44.999 && seen.rotation.yaw < 45.001);
+
+    REQUIRE(world.With<Component>(
+        camera.Value(), [](Component& value) noexcept { return value.SetEnabled(false); }));
+    REQUIRE(fixture.engine->RunFrame());
+    seen = view();
+    CHECK(seen.location.z == 0.0 && seen.fov == CameraView::DefaultFov);
 }
 } // namespace gameplay_controller_pawn_tests_file

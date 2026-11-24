@@ -163,6 +163,12 @@ bool ShaderTypeRegistry::Check(const ShaderTypeDesc* desc, Span<const ShaderType
         return false;
     }
 
+    const char* layoutReason = "";
+    if (!ValidateShaderParameterLayouts(desc->parameterLayouts, &layoutReason)) {
+        Fail(ErrorCode::InvalidArgument, name, layoutReason);
+        return false;
+    }
+
     return true;
 }
 

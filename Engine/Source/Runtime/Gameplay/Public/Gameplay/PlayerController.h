@@ -2,6 +2,7 @@
 
 #include <Core/Math/Vector3.h>
 #include <Gameplay/Controller.h>
+#include <World/CameraComponent.h>
 #include <Input/InputState.h>
 
 namespace rocks {
@@ -14,6 +15,11 @@ struct CameraView {
     Vec3d location;
     Rotator<double> rotation;
     double fov = DefaultFov;
+    // view target의 CameraComponent가 정한 투영·직교 폭·종횡비다(없으면 기본 — 23.4절).
+    CameraProjection projection = CameraProjection::Perspective;
+    double orthoWidth = CameraComponent::DefaultOrthoWidth;
+    double aspectRatio = CameraComponent::DefaultAspectRatio;
+    bool constrainAspectRatio = false;
 };
 
 // 플레이어 카메라다(UE APlayerCameraManager 최소 범위, 20.6절). PlayerController가 만들고(Owner =
@@ -47,9 +53,11 @@ public:
         return view_;
     }
 
-    // view target으로 결과를 만든다: 위치는 root SceneComponent의 월드 위치(root가 없으면 직전 값),
+    // view target으로 결과를 만든다. 대상에 켜진 CameraComponent가 있으면 Component 순서로 첫 것의
+    // GetCameraView다(UE CalcCamera — usePawnControlRotation이고 대상이 Pawn이면 회전은
+    // GetControlRotation). 없으면 위치는 root SceneComponent의 월드 위치(root가 없으면 직전 값),
     // 회전은 대상이 Controller면 그 controlRotation, Pawn이면 Pawn의 GetControlRotation, 그 밖은
-    // root 회전 → OnUpdateView. 대상이 없거나 파괴됐으면 소유자로 되돌린다.
+    // root 회전이다 → OnUpdateView. 대상이 없거나 파괴됐으면 소유자로 되돌린다.
     void UpdateCamera(double deltaSeconds) noexcept;
 
 protected:
