@@ -168,7 +168,7 @@ public:
                           StringView socket = {}) noexcept;
 
     // rule로 뗀다(KeepRelative는 상대 값을 월드 값으로 둔다 — 위 Detach와 같다, KeepWorld는 월드
-    // Transform을 유지한다).
+    // Transform을 유지한다). SnapToTarget은 InvalidArgument다(UE EDetachmentRule에 없다).
     Result<void> Detach(AttachmentRule rule) noexcept;
 
     // 부착한 socket 이름이다(없으면 빈 값).
@@ -188,8 +188,9 @@ public:
 
     // --- 절대 Transform·Mobility(23.3절) ---
 
-    // 켠 성분은 부모를 무시하고 상대 값을 월드 값으로 쓴다(UE SetAbsolute).
-    void SetAbsolute(bool location, bool rotation, bool scale) noexcept;
+    // 켠 성분은 부모를 무시하고 상대 값을 월드 값으로 쓴다(UE SetAbsolute). 오류: Mobility
+    // 위반(CheckMovable)은 InvalidArgument.
+    Result<void> SetAbsolute(bool location, bool rotation, bool scale) noexcept;
 
     bool IsAbsoluteLocation() const noexcept {
         return absoluteLocation_;
@@ -270,8 +271,6 @@ private:
     Result<void> CheckMovable(const char* action) const noexcept;
     // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한다.
     void NotifyTransformUpdated() noexcept;
-    // 부모 socket의 월드 Transform이다(부모가 없으면 단위).
-    Result<Transform> ParentSocketWorld() const noexcept;
     // 링크만 바꾼다(검사·규칙 계산 뒤).
     Result<void> LinkParent(ObjectHandle parent, StringView socket) noexcept;
     void ApplyVisibility(bool visible, bool hidden, bool setVisible, bool propagate) noexcept;

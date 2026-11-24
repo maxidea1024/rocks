@@ -330,9 +330,12 @@ void World::FlushSystemStateUpdates() noexcept {
     }
 
     HookScope hooks(*this);
-    // hook이 다른 Component를 표시할 수 있어 크기를 매번 다시 읽는다(이번 지점에서 함께 처리한다).
-    for (usize position = 0; position < systemStateUpdates_.Size(); ++position) {
-        const ObjectHandle component = systemStateUpdates_[position];
+    // 목록을 떼어 처리한다. 처리 중 hook이 남긴 표시는 다음 갱신 지점(다음 프레임)이다 — 종류 사이
+    // 표시가 순환해도 한 지점에서 끝없이 돌지 않는다.
+    // 이동한 원본은 같은 allocator의 빈 배열로 남아 그대로 다시 쓴다.
+    Array<ObjectHandle> batch = Move(systemStateUpdates_);
+    for (usize position = 0; position < batch.Size(); ++position) {
+        const ObjectHandle component = batch[position];
         auto updated = With<Component>(component, [&](Component& value) noexcept {
             const uint8 dirty = value.dirtySystemStates_;
             value.dirtySystemStates_ = 0;
@@ -362,8 +365,6 @@ void World::FlushSystemStateUpdates() noexcept {
         });
         (void)updated;
     }
-
-    systemStateUpdates_.Clear();
 }
 
 Result<void> World::CheckComponentRules(ObjectHandle actor, ObjectHandle component) noexcept {
@@ -428,7 +429,11 @@ Result<void> World::CheckComponentRules(ObjectHandle actor, ObjectHandle compone
                     With<Component>(component, [existingType](Component& candidate) noexcept {
                         return candidate.GetType().IsA(existingType);
                     });
-                if (type.IsA(added.type) || (derived && derived.Value())) {
+                // 새 타입이 unique면 기존이 그 타입(파생)인지, 기존이 unique면 새 것이 기존
+                // 타입(파생) 인지 본다 — 기반 타입과는 겹치지 않는다.
+                const bool newCovers = rules.unique && type.IsA(added.type);
+                const bool existingCovers = existingUnique && derived && derived.Value();
+                if (newCovers || existingCovers) {
                     return Result<void>::Failure(ErrorCode::AlreadyExists);
                 }
             }

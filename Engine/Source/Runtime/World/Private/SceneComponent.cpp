@@ -15,6 +15,36 @@ namespace {
 // 부모 사슬 탐색 상한이다. 정상 계층은 이보다 훨씬 얕다(순환 검사의 안전장치).
 constexpr uint32 MaxHierarchyDepth = 4096;
 
+bool HasZeroComponent(const Vec3d& scale) noexcept {
+    return scale.x == 0.0 || scale.y == 0.0 || scale.z == 0.0;
+}
+
+// UE FTransform A * B(child 먼저, parent 나중)의 성분별 합성이다(shear를 버린다 — ERD31): 회전
+// Qp·Qc, scale Sc·Sp, 위치 Qp(Sp·Tc) + Tp.
+Transform ComposeTrs(const Transform& child, const Transform& parent) noexcept {
+    Transform world;
+    world.rotation = parent.rotation * child.rotation;
+    world.scale = child.scale * parent.scale;
+    world.translation =
+        parent.rotation.RotateVector(parent.scale * child.translation) + parent.translation;
+    return world;
+}
+
+// UE FTransform::GetRelativeTransform의 성분별 식이다: 회전 Qp⁻¹·Qc, scale Sc ÷ Sp, 위치
+// Qp⁻¹(Tc − Tp) ÷ Sp. 부모 scale에 0이 있으면 InvalidArgument다.
+Result<Transform> RelativeTrs(const Transform& world, const Transform& parent) noexcept {
+    if (HasZeroComponent(parent.scale)) {
+        return Result<Transform>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Transform local;
+    local.rotation = parent.rotation.Conjugate() * world.rotation;
+    local.scale = world.scale / parent.scale;
+    local.translation =
+        parent.rotation.UnrotateVector(world.translation - parent.translation) / parent.scale;
+    return Result<Transform>::Success(local);
+}
+
 } // namespace
 
 Result<void> SceneComponent::SetRelativeTransform(const Transform& transform) noexcept {
@@ -153,7 +183,16 @@ Mat4d SceneComponent::WorldMatrix() const noexcept {
     // 부모 행렬이 TRS로 분해되지 않으면 절대 성분 없이 행렬 곱이다).
     worldMatrix_ = relative_.ToMatrix() * parentMatrix;
     if ((absoluteLocation_ || absoluteRotation_ || absoluteScale_) && !parent_.IsNull()) {
+        // 곱을 TRS로 분해하고, shear로 실패하면 부모 TRS와 성분별로 합성한다(UE ComposeTransforms —
+        // 절대 성분은 shear 없는 TRS 의미다). 부모도 분해되지 않으면 절대 성분 없이 행렬 곱이다.
         auto composed = Transform::TryFromMatrix(worldMatrix_);
+        if (!composed) {
+            auto parentTrs = Transform::TryFromMatrix(parentMatrix);
+            if (parentTrs) {
+                composed = Result<Transform>::Success(ComposeTrs(relative_, parentTrs.Value()));
+            }
+        }
+
         if (composed) {
             Transform world = composed.Value();
             if (absoluteLocation_) {
@@ -186,24 +225,19 @@ Result<Transform> SceneComponent::GetSocketTransform(StringView,
     return TryWorldTransform();
 }
 
-Result<Transform> SceneComponent::ParentSocketWorld() const noexcept {
-    if (parent_.IsNull() || !HasWorld()) {
-        return Result<Transform>::Success(Transform::Identity());
+Result<void> SceneComponent::SetAbsolute(bool location, bool rotation, bool scale) noexcept {
+    // 월드 Transform이 바뀌므로 이동과 같은 Mobility 검사를 한다.
+    if (auto movable = CheckMovable("change absolute flags"); !movable) {
+        return movable;
     }
 
-    const StringView socket = attachSocket_.View();
-    return GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
-        return parent.GetSocketTransform(socket, TransformSpace::World);
-    });
-}
-
-void SceneComponent::SetAbsolute(bool location, bool rotation, bool scale) noexcept {
     absoluteLocation_ = location;
     absoluteRotation_ = rotation;
     absoluteScale_ = scale;
     worldDirty_ = false;
     MarkDirty();
     NotifyTransformUpdated();
+    return Result<void>::Success();
 }
 
 bool SceneComponent::IsVisible() const noexcept {
@@ -317,6 +351,15 @@ Result<void> SceneComponent::AttachTo(ObjectHandle parent, const AttachmentRules
 
     // 성분마다 새 상대 값을 정한다(UE AttachToComponent — KeepWorld는 새 부모 socket 기준으로 다시
     // 계산한다). 링크 전에 계산하고 실패하면 아무것도 바꾸지 않는다.
+    // Static은 Static 부모에만 붙는다(UE AttachToComponent — SceneComponent.cpp:2381).
+    if (mobility_ == ComponentMobility::Static && IsRegistered()) {
+        auto parentMobility = GetWorld().With<SceneComponent>(
+            parent, [](SceneComponent& component) noexcept { return component.Mobility(); });
+        if (parentMobility && parentMobility.Value() != ComponentMobility::Static) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     Transform relative = relative_;
     const bool keepWorld = rules.location == AttachmentRule::KeepWorld ||
                            rules.rotation == AttachmentRule::KeepWorld ||
@@ -331,39 +374,44 @@ Result<void> SceneComponent::AttachTo(ObjectHandle parent, const AttachmentRules
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        auto inverse = target.Value().TryInverse();
-        if (!inverse) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        // 정확한 역변환(Rocks 월드 행렬과 짝 — 월드 Transform을 그대로 지킨다)을 먼저 쓰고, 상대
+        // 값이 TRS로 표현되지 않으면(축에 맞지 않은 비균일 부모 — shear) UE GetRelativeTransform
+        // 식으로 계산한다(23.3절).
+        Result<Transform> exact = Result<Transform>::Failure(ErrorCode::InvalidArgument);
+        if (auto inverse = target.Value().TryInverse()) {
+            exact = Transform::TryMultiply(current.Value(), inverse.Value());
         }
 
-        auto local = Transform::TryMultiply(current.Value(), inverse.Value());
+        const bool useExact = exact.IsOk();
+        auto local = useExact ? Move(exact) : RelativeTrs(current.Value(), target.Value());
         if (!local) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 절대 성분은 부모를 보지 않으므로 현재 월드 값이 곧 상대 값이다(UE rule switch).
         if (rules.location == AttachmentRule::KeepWorld) {
-            relative.translation = local.Value().translation;
+            relative.translation =
+                absoluteLocation_ ? current.Value().translation : local.Value().translation;
         }
 
         if (rules.rotation == AttachmentRule::KeepWorld) {
-            relative.rotation = local.Value().rotation;
+            relative.rotation =
+                absoluteRotation_ ? current.Value().rotation : local.Value().rotation;
         }
 
-        // 분해한 상대 scale은 그 분해의 회전과 짝일 때만 월드 scale을 지킨다. 회전도 KeepWorld면 그
-        // 값을 쓰고, 아니면 UE GetRelativeTransform처럼 성분별로 월드 scale ÷ 부모
-        // scale이다(23.3절).
+        // 분해한 상대 scale은 그 분해의 회전과 짝일 때만 월드 scale을 지킨다. 회전도 KeepWorld이고
+        // 정확한 역변환이면 그 값을, 아니면 성분별로 월드 scale ÷ 부모 scale이다(UE).
         if (rules.scale == AttachmentRule::KeepWorld) {
-            if (rules.rotation == AttachmentRule::KeepWorld) {
+            if (absoluteScale_) {
+                relative.scale = current.Value().scale;
+            } else if (useExact && rules.rotation == AttachmentRule::KeepWorld) {
                 relative.scale = local.Value().scale;
             } else {
-                const Vec3d& parentScale = target.Value().scale;
-                const Vec3d& worldScale = current.Value().scale;
-                if (parentScale.x == 0.0 || parentScale.y == 0.0 || parentScale.z == 0.0) {
+                if (HasZeroComponent(target.Value().scale)) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);
                 }
 
-                relative.scale = Vec3d(worldScale.x / parentScale.x, worldScale.y / parentScale.y,
-                                       worldScale.z / parentScale.z);
+                relative.scale = current.Value().scale / target.Value().scale;
             }
         }
     }
@@ -475,7 +523,15 @@ Result<void> SceneComponent::Detach(AttachmentRule rule) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // UE EDetachmentRule은 KeepRelative·KeepWorld 둘이다.
+    if (rule == AttachmentRule::SnapToTarget) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (parent_.IsNull()) {
+        // 로드한 영속 필드만 남은 경우도 비운다.
+        attachParent_ = {};
+        attachSocket_.Clear();
         return Result<void>::Success();
     }
 
@@ -492,8 +548,6 @@ Result<void> SceneComponent::Detach(AttachmentRule rule) noexcept {
         }
 
         relative = current.Value();
-    } else if (rule == AttachmentRule::SnapToTarget) {
-        relative = Transform::Identity();
     }
 
     const ObjectHandle self = Handle();
@@ -543,6 +597,8 @@ void SceneComponent::DetachForDestroy() noexcept {
             component.attachSocket_.Clear();
             component.worldDirty_ = false;
             component.MarkDirty();
+            // 루트가 되어 월드 Transform이 바뀌었다(23.3절 통지).
+            component.NotifyTransformUpdated();
         });
         (void)orphaned;
     }

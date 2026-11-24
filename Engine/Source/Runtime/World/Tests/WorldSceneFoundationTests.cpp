@@ -269,12 +269,13 @@ TEST(SceneFoundation_DetachKeepWorldAndAbsoluteLocation) {
         child, [&](SceneComponent& value) noexcept { return value.AttachTo(parent); }));
     // 상대 (10, 0, 0): scale x2 → (20, 0, 0) → yaw 90 → (0, 20, 0) → + 부모.
     CHECK(NearVector(fixture.WorldOf(child).translation, 100.0, 20.0, 0.0));
-    REQUIRE(world.With<SceneComponent>(
-        child, [](SceneComponent& value) noexcept { value.SetAbsolute(true, false, false); }));
+    REQUIRE(world.With<SceneComponent>(child, [](SceneComponent& value) noexcept {
+        return value.SetAbsolute(true, false, false);
+    }));
     CHECK(NearVector(fixture.WorldOf(child).translation, 10.0, 0.0, 0.0));
     REQUIRE(world.With<SceneComponent>(child, [](SceneComponent& value) noexcept {
-        value.SetAbsolute(false, false, false);
-        return value.Detach(AttachmentRule::KeepWorld);
+        auto cleared = value.SetAbsolute(false, false, false);
+        return cleared ? value.Detach(AttachmentRule::KeepWorld) : Move(cleared);
     }));
     CHECK(NearVector(fixture.WorldOf(child).translation, 100.0, 20.0, 0.0));
     auto parentGone = world.With<SceneComponent>(
@@ -332,7 +333,9 @@ TEST(SceneFoundation_StaticMobilityRejectsMovesInGameWorlds) {
         auto other = fixture.AddScene(actor.Value(), Transform::Identity());
         auto attached = world.With<SceneComponent>(
             root.Value(), [&](SceneComponent& value) noexcept { return value.AttachTo(other); });
-        CHECK(game ? attached.Error() == ErrorCode::InvalidArgument : attached.IsOk());
+        // Static은 어느 World에서든 Static 부모에만 붙는다(UE SceneComponent.cpp:2381). 게임
+        // World는 Mobility 검사가 먼저 거부한다.
+        CHECK(attached.Error() == ErrorCode::InvalidArgument);
         // Movable로 바꾸면 된다.
         auto freed = world.With<SceneComponent>(root.Value(), [](SceneComponent& value) noexcept {
             value.SetMobility(ComponentMobility::Movable);
@@ -469,4 +472,62 @@ TEST(SceneFoundation_CameraComponentView) {
     REQUIRE(world.Shutdown());
 }
 
+// 리뷰 보강(23.3절): 축에 맞지 않은 비균일 부모(yaw 45, scale (2, 1, 1)) 아래에서도 KeepWorld가
+// 되고(정확한 역변환이 shear로 실패하면 UE 식 — 위치는 그대로), 절대 회전은 부모와 무관하다. 절대
+// 위치 자식의 KeepWorld는 월드 위치를 지킨다.
+TEST(SceneFoundation_SkewedParentKeepWorldAndAbsoluteRotation) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto actor = world.SpawnActor<EmptyActor>();
+    REQUIRE(actor);
+    const Transform skewed(Rotator<double>(0.0, 45.0, 0.0).ToQuaternion(), Vec3d(100.0, 0.0, 0.0),
+                           Vec3d(2.0, 1.0, 1.0));
+    const ObjectHandle parent = fixture.AddScene(actor.Value(), skewed);
+    const ObjectHandle child =
+        fixture.AddScene(actor.Value(), Transform(Rotator<double>(0.0, 30.0, 0.0).ToQuaternion(),
+                                                  Vec3d(0.0, 50.0, 0.0), Vec3d::One()));
+    REQUIRE(!parent.IsNull() && !child.IsNull());
+    REQUIRE(world.With<SceneComponent>(child, [&](SceneComponent& value) noexcept {
+        return value.AttachTo(parent, AttachmentRules::KeepWorldTransform());
+    }));
+    // 부모가 비균일이고 축이 어긋나 월드 행렬에 shear가 있다(TRS 분해 불가) — 위치는 행렬에서
+    // 읽는다.
+    auto location = world.With<SceneComponent>(
+        child, [](SceneComponent& value) noexcept { return value.WorldLocation(); });
+    CHECK(NearVector(location.Value(), 0.0, 50.0, 0.0));
+
+    // 절대 회전: 곱이 shear로 분해되지 않아도 상대 회전(yaw 30 — 위 KeepWorld가 다시 계산한 값과
+    // 무관하게 새로 준다)이 월드 회전이다.
+    REQUIRE(world.With<SceneComponent>(child, [](SceneComponent& value) noexcept -> Result<void> {
+        if (auto absolute = value.SetAbsolute(false, true, false); !absolute) {
+            return absolute;
+        }
+
+        return value.SetRelativeRotation(Rotator<double>(0.0, 30.0, 0.0).ToQuaternion());
+    }));
+    const Vec3d forward = fixture.WorldOf(child).rotation.RotateVector(Vec3d(1.0, 0.0, 0.0));
+    const double half = 0.8660254037844387;
+    CHECK(NearVector(forward, half, 0.5, 0.0));
+
+    // 절대 위치 자식의 KeepWorld 부착은 월드 위치를 지킨다(UE rule switch).
+    const ObjectHandle pinned = fixture.AddScene(
+        actor.Value(), Transform(Quatd::Identity(), Vec3d(10.0, 0.0, 0.0), Vec3d::One()));
+    REQUIRE(world.With<SceneComponent>(pinned, [&](SceneComponent& value) noexcept -> Result<void> {
+        if (auto absolute = value.SetAbsolute(true, false, false); !absolute) {
+            return absolute;
+        }
+
+        return value.AttachTo(parent, AttachmentRules::KeepWorldTransform());
+    }));
+    CHECK(NearVector(fixture.WorldOf(pinned).translation, 10.0, 0.0, 0.0));
+    CHECK(world
+              .With<SceneComponent>(pinned,
+                                    [](SceneComponent& value) noexcept {
+                                        return value.Detach(AttachmentRule::SnapToTarget);
+                                    })
+              .Error() == ErrorCode::InvalidArgument);
+    REQUIRE(world.Shutdown());
+}
 } // namespace world_scene_foundation_tests_file

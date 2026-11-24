@@ -43,6 +43,8 @@ public:
 - **만드는 때.** `OnRegister`가 성공하면 그 바로 뒤에 종류 순서(Render → Physics → Audio)대로, `WantsSystemState`가 참인 것만 만든다. 하나라도 실패하면 이미 만든 것을 역순으로 지우고 `OnUnregister`를 부른 뒤 등록을 실패로 돌린다(부분 등록 해제 — UE `RegisterComponentWithWorld` 실패 경로와 같은 짝 맞춤).
 - **지우는 때.** 등록 해제(파괴·Actor 정리)에서 `OnUnregister` 전에 역순으로 지운다. 꺼짐(`OnDisable`)은 시스템 상태를 지우지 않는다. 등록은 유지되기 때문이다. 다만 Render는 가시성으로 감춘다(23.4절).
 - **다시 보내기.** `MarkSystemStateDirty`는 World의 갱신 목록에 한 번만 넣는다(중복 무시). 처리 지점은 PreRender 단계 끝, 파괴 정리 전이다. UE `SendAllEndOfFrameUpdates`와 같은 자리다. 처리는 그 종류가 있으면 Destroy → Create이고, Create가 실패하면 그 종류가 없는 채로 둔다(Warning 진단 `SystemStateRecreateFailed`). 등록 전이거나 파괴 대기인 Component에서 부르면 아무것도 하지 않고 성공한다.
+- **처리 중 표시.** 다시 만들기 hook(Create·Destroy)이 다른 종류나 다른 Component를 표시하면, 그것은 다음 갱신 지점(다음 프레임)에 처리한다. 종류 사이의 표시가 순환해도 한 지점에서 끝없이 돌지 않게 하려는 것이다.
+- **한계 — 우회 파괴.** World API를 거치지 않고 `Object::Destroy`로 파괴된 Component는 World가 다음 정리에서 장부와 간선만 고친다(7.4절). 객체가 이미 죽어 hook을 부를 수 없으므로 시스템 상태를 지우지 못한다. 시스템 상태를 갖는 Component는 반드시 World API(`DestroyComponent`·Actor 파괴)로 지운다. 시스템 쪽 장부(렌더·물리)는 자기 쪽 handle 만료로 정리한다. 이 계약은 RS0·물리 연결 때 그 시스템 문서에 함께 적는다.
 - **대량 등록 묶음.** CR1의 대량 등록 묶음(UE `FRegisterComponentContext`)은 등록이 많은 렌더 경로가 생길 때(CM1a·RS0) 측정과 함께 더한다. 지금은 Component마다 바로 만든다.
 - 시스템 상태를 갖는 Component는 아직 없다. 시험용 파생으로 계약만 확인한다. 실제 사용처는 CM1a(정적 메시)·CM3(충돌)·CM4(오디오)다.
 
@@ -59,7 +61,7 @@ virtual ComponentTypeRules TypeRules() const noexcept { return {}; }
 ```
 
 - `AddComponent`는 객체를 만든 뒤, 등록하기 전에 소유 Actor의 기존 Component(파괴 대기 제외)에 규칙을 대 본다.
-  - `unique`인데 같은 타입(파생 포함)이 이미 있으면 `AlreadyExists`
+  - 새 타입이 `unique`이고 기존이 그 타입이나 그 파생이면, 또는 기존이 `unique`이고 새 것이 기존 타입이나 그 파생이면 `AlreadyExists`(기반 타입과는 겹치지 않는다)
   - `required`의 타입이 하나라도 없으면 `DependencyFailed`
   - 새 Component의 `excluded`나 기존 Component의 `excluded`에 걸리면 `InvalidArgument`
   - 실패하면 만든 객체를 정리하고 hook을 하나도 부르지 않는다.
@@ -90,6 +92,8 @@ Result<void> Detach(AttachmentRule rule = AttachmentRule::KeepWorld) noexcept;  
 ```
 
 - KeepRelative는 상대 Transform을 그대로 둔다. KeepWorld는 붙이기 전 월드 Transform을 유지하도록 상대를 다시 계산한다(새 부모 socket Transform의 역 × 현재 월드). SnapToTarget은 그 성분을 0(위치)·단위(회전)·1(scale)로 둔다.
+- KeepWorld는 정확한 역변환을 먼저 쓴다. Rocks 월드 행렬과 짝이 맞아 월드 Transform을 그대로 지키기 때문이다. 상대 값이 TRS로 표현되지 않으면(축에 맞지 않은 비균일 부모 — shear) UE `GetRelativeTransform` 식(회전 Qp⁻¹·Qc, scale Sc÷Sp, 위치 Qp⁻¹(Tc−Tp)÷Sp)으로 계산한다. 이 경우 월드 scale은 UE처럼 근사로 지켜진다. 절대 성분은 현재 월드 값을 상대 값으로 둔다(UE rule switch).
+- Static Component는 Static 부모에만 붙는다(UE `SceneComponent.cpp:2381` — `InvalidArgument`). `Detach`의 규칙은 KeepRelative·KeepWorld뿐이다(UE `EDetachmentRule`).
 - 성분마다 따로 적용한다. scale만 KeepWorld이고 회전은 아니면(예: SnapToTargetNotIncludingScale), scale은 성분별로 월드 scale ÷ 부모 socket scale이다(UE `FTransform::GetRelativeTransform`). 정확한 역변환에서 분해한 상대 scale은 그 분해의 회전과 짝일 때만 월드 scale을 지키기 때문이다. KeepWorld 계산은 TRS 합성으로 한다(부모가 비균일 scale이고 회전이 있으면 shear를 버린다 — UE `FTransform` 곱과 같다). 표현할 수 없으면(scale 0) 부착이 `InvalidArgument`로 실패하고 아무것도 바꾸지 않는다.
 - `AttachTo(parent)`의 기본 규칙은 지금처럼 KeepRelative다. 옛 호출의 의미는 그대로다.
 
@@ -98,7 +102,7 @@ Result<void> Detach(AttachmentRule rule = AttachmentRule::KeepWorld) noexcept;  
 - 메시 계열이 재정의한다(CM1a 정적 메시 socket, CM10 skeletal bone).
 - 부착 socket 이름은 `AttachSocketName()`이다. 월드 행렬 = 상대 × 부모의 socket Transform(Component 공간) × 부모 월드다.
 
-**절대 Transform(UE `bAbsoluteLocation`·`Rotation`·`Scale`).** `SetAbsolute(location, rotation, scale)`. 켜진 성분은 부모를 무시하고 상대 값을 월드 값으로 쓴다. 월드 행렬은 TRS로 합성한다: 위치는 절대면 상대 위치, 아니면 부모로 변환한 위치. 회전·scale도 같다. 셋 다 꺼져 있으면 지금처럼 행렬 곱 그대로다(shear 보존).
+**절대 Transform(UE `bAbsoluteLocation`·`Rotation`·`Scale`).** `SetAbsolute(location, rotation, scale)`. 켜진 성분은 부모를 무시하고 상대 값을 월드 값으로 쓴다. 월드 행렬은 TRS로 합성한다: 위치는 절대면 상대 위치, 아니면 부모로 변환한 위치. 회전·scale도 같다. 셋 다 꺼져 있으면 지금처럼 행렬 곱 그대로다(shear 보존). 곱이 TRS로 분해되지 않으면(shear) 부모 TRS와 성분별로 합성한 뒤(UE `ComposeTransforms`) 켜진 성분을 덮어쓴다. `SetAbsolute`도 Mobility 검사를 거친다.
 
 **Mobility(UE `EComponentMobility`).** `Mobility::Static`·`Stationary`·`Movable`(기본 Movable — UE `USceneComponent` 기본도 Movable). Static이나 Stationary Component에 다음 일을 하면 거부한다.
 - 대상 조건: 등록되어 있고 Game·Tryout World이며 소유 Actor가 Initialized 이후다.

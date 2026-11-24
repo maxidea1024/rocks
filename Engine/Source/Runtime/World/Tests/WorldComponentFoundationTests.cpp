@@ -93,6 +93,7 @@ public:
     }
 
     static inline bool wantPhysics = false;
+    static inline bool pingPong = false;
     static inline int32 failKind = -1;
     static inline uint32 failOnCreateCount = 0;
 
@@ -113,6 +114,14 @@ protected:
 
     Result<void> CreateSystemState(SystemStateKind kind) noexcept override {
         Record(StateEvent(true, kind));
+        // 다시 만들기 중 다른 종류를 표시한다(Render ↔ Physics 순환 — 처리 중 표시는 다음 지점).
+        if (pingPong && IsRegistered()) {
+            const SystemStateKind other = kind == SystemStateKind::Render ? SystemStateKind::Physics
+                                                                          : SystemStateKind::Render;
+            auto marked = MarkSystemStateDirty(other);
+            (void)marked;
+        }
+
         if (static_cast<int32>(kind) == failKind) {
             if (failOnCreateCount == 0) {
                 return Result<void>::Failure(ErrorCode::DependencyFailed);
@@ -174,6 +183,21 @@ public:
     }
 };
 
+// unique인 SceneComponent 파생이다(기반 SceneComponent와는 겹치지 않는다).
+class UniqueScene final : public SceneComponent {
+    ROCKS_NATIVE_TYPE(UniqueScene, SceneComponent, 0x3a6f1e9c0b5d2487ull, 0x8e4c7b2a1f0d9356ull)
+
+public:
+    explicit UniqueScene(Allocator& allocator) noexcept : SceneComponent(allocator) {
+    }
+
+    ComponentTypeRules TypeRules() const noexcept override {
+        ComponentTypeRules rules;
+        rules.unique = true;
+        return rules;
+    }
+};
+
 class EditorMarker final : public Component {
     ROCKS_NATIVE_TYPE(EditorMarker, Component, 0x5f19c0e84a7d2b36ull, 0x9b2d6e0f3c48a517ull)
 
@@ -189,7 +213,7 @@ struct Fixture {
         registered = RegisterWorldTypes(modules).IsOk() && Register<EmptyActor>() &&
                      Register<StatefulComponent>() && Register<UniqueComponent>() &&
                      Register<DerivedUnique>() && Register<NeedsScene>() && Register<Blocker>() &&
-                     Register<EditorMarker>();
+                     Register<EditorMarker>() && Register<UniqueScene>();
         WorldDesc desc;
         desc.name = "Test";
         desc.context = {0x434d3061ull, 1};
@@ -201,6 +225,7 @@ struct Fixture {
         }
 
         StatefulComponent::wantPhysics = false;
+        StatefulComponent::pingPong = false;
         StatefulComponent::failKind = -1;
         StatefulComponent::failOnCreateCount = 0;
     }
@@ -229,7 +254,7 @@ struct Fixture {
         return world->Tick(1.0 / 60.0).IsOk();
     }
 
-    static constexpr uint32 MaxTokens = 8;
+    static constexpr uint32 MaxTokens = 9;
     SystemAllocator allocator;
     TypeRegistry types;
     ModuleRegistration modules;
@@ -394,4 +419,73 @@ TEST(ComponentFoundation_EditorOnlyComponentsStayOutOfGameWorlds) {
     }
 }
 
+// 리뷰 보강(23.2절): unique는 기반 타입과 겹치지 않는다(기반이 먼저든 나중이든).
+TEST(ComponentFoundation_UniqueDoesNotCoverBaseTypes) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto first = world.SpawnActor<EmptyActor>();
+    auto second = world.SpawnActor<EmptyActor>();
+    REQUIRE(first && second);
+    REQUIRE(world.AddComponent<SceneComponent>(first.Value()));
+    REQUIRE(world.AddComponent<UniqueScene>(first.Value()));
+    CHECK(world.AddComponent<UniqueScene>(first.Value()).Error() == ErrorCode::AlreadyExists);
+    REQUIRE(world.AddComponent<UniqueScene>(second.Value()));
+    REQUIRE(world.AddComponent<SceneComponent>(second.Value()));
+    REQUIRE(world.Shutdown());
+}
+
+// 리뷰 보강(23.2절): 다시 만들기 hook이 다른 종류를 표시하면 다음 지점에 처리한다(순환해도
+// 프레임마다 한 번).
+TEST(ComponentFoundation_DirtyMarksDuringFlushWaitForTheNextFrame) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActor<EmptyActor>();
+    REQUIRE(actor);
+    StatefulComponent::wantPhysics = true;
+    StatefulComponent::pingPong = true;
+    auto component = world.AddComponent<StatefulComponent>(actor.Value());
+    REQUIRE(component);
+    REQUIRE(fixture.Frame());
+    REQUIRE(world.With<Component>(component.Value(), [](Component& value) noexcept {
+        return value.MarkSystemStateDirty(SystemStateKind::Render);
+    }));
+    ResetEvents();
+    REQUIRE(fixture.Frame());
+    const char* const first[] = {"destroy:Render", "create:Render"};
+    CHECK(EventsAre(first));
+    ResetEvents();
+    REQUIRE(fixture.Frame());
+    const char* const second[] = {"destroy:Physics", "create:Physics"};
+    CHECK(EventsAre(second));
+    StatefulComponent::pingPong = false;
+    REQUIRE(world.Shutdown());
+}
+
+// 리뷰 보강(23.2절): FinishSpawning의 Component 등록 루프에서도 시스템 상태 실패는 그 Component만
+// 되돌리고 Spawn은 성공한다.
+TEST(ComponentFoundation_SystemStateFailureDuringFinishSpawning) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto actor = world.SpawnActorDeferred<EmptyActor>();
+    REQUIRE(actor);
+    REQUIRE(world.AddComponent<StatefulComponent>(actor.Value()));
+    StatefulComponent::failKind = static_cast<int32>(SystemStateKind::Render);
+    ResetEvents();
+    REQUIRE(world.FinishSpawning(actor.Value()));
+    const char* const rolledBack[] = {"register", "create:Render", "unregister"};
+    CHECK(EventsAre(rolledBack));
+    REQUIRE(fixture.Frame());
+    auto components = world.With<Actor>(
+        actor.Value(), [](Actor& value) noexcept { return value.Components().Size(); });
+    CHECK(components.Value() == 0);
+    CHECK(world.GetActorState(actor.Value()).Value() == ActorState::Initialized);
+    REQUIRE(world.Shutdown());
+}
 } // namespace world_component_foundation_tests_file
