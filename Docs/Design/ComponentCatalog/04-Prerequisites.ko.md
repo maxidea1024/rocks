@@ -77,3 +77,30 @@
 | CM9 반사·캡처 | CM1b, CR15, RN RS7·RS10 |
 | CM10 정적 조명·가상 텍스처 | CM1b, 라이트맵 bake, 가상 텍스처 문서 |
 | CM11 큰 월드·후속 | 컴포넌트별: `StreamingSourceComponent`는 CR22, `InstancedSkinnedMeshComponent`는 CM7·CR19·애니메이션 bank, 볼륨 안개·구름 두 개는 볼륨 렌더 스펙, 나머지는 각 기능 문서 |
+
+### 4.7 셰이더 선행(SL 단계)
+
+컴포넌트 묶음마다 셰이더 영역과 단계를 함께 들인다. 정본은 [엔진 셰이더](../EngineShaders/05-ComponentCoverage.ko.md) 5장이고(SLR7), 이 표는 묶음 쪽에서 본 요약이다. 컴포넌트를 셰이더보다 먼저 만들지 않는다(5절 "동작하는 척하지 않는다"와 같다).
+
+| 묶음 | 셰이더 단계(기본 영역 — 5.1절) | 기본 영역 밖(5.2절, 그 기능 문서와 함께) |
+|---|---|---|
+| CM0 카메라 | SL1(화면 마일스톤 — `ViewConstants`·노출·tone map 최소). CM0 World 쪽은 2026-11-24에 앞당겨 구현됐고, 셰이더는 SL1과 함께다 | — |
+| CM1a 정적 메시 | SL2. custom depth·stencil 플래그는 SL8(SLR11 — RN에 단계 요구, 5.3절) | — |
+| CM1b 광원 | SL3·SL5 | light shaft → A25 |
+| CM2 시각화 | SL10(SL10e — 디버그 표시, 5.3절) | — |
+| CM3 충돌 형상 표시 | SL10 | — |
+| CM5 게임플레이 도구 | `TextRenderComponent`는 SL2 + SLU(글리프 표본 — SLU 뒤) | — |
+| CM6 인스턴싱·스플라인 메시 | SL6 | — |
+| CM7 skinned 계열 | A22(skinning 전체) | — |
+| CM8 대기·후처리·decal·rect | SL7(대기·안개)·SL8·SL9(decal·후처리)·SL10(rect light) | 볼륨 안개 선택 → A25 |
+| CM9 반사·캡처 | SL9·SL10 | — |
+| CM10 정적 조명·가상 텍스처 | — | A33(런타임 가상 텍스처) |
+| CM11 큰 월드·후속 | — | A25(볼륨 안개·구름·이종 볼륨), A22 후속 부분(애니메이션 bank) |
+| CM15 카메라 효과·시네마틱 | SL8(노출·필름백) | A24(DOF·움직임 흐림·지역 노출·렌즈 효과) |
+| CM17 위젯·미디어 | `WidgetComponent`는 SLU + SL2·SL7 | `MediaComponent` → A35·A18 후속 부분 |
+| CM18·CM19 지형·HLOD | 인스턴스 경로는 SL6 | A34(지형 정점 입력·컬링·layer, 풀 무게) |
+| CM20·CM28 동적·절차 메시·케이블·geometry cache | SL2(프레임 업로드 정점) | geometry cache → A34 |
+| CM21 효과 | — | Niagara 플러그인 셰이더(사용자 결정으로 후속) |
+
+- 거리장·capsule 그림자는 A27이다(광원 묶음의 해당 설정 — 그 전에는 설정을 켜면 `Unsupported`로 진단한다).
+- 셰이더 단계 순서와 묶음 순서가 다른 곳(custom depth, 디버그 표시, 글리프)은 엔진 셰이더 5.3절이 처리를 정한다.
