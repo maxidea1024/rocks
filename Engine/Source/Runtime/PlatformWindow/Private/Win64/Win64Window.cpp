@@ -720,4 +720,13 @@ DesktopSessionState QueryDesktopSessionState() noexcept {
     return state;
 }
 
+// 메인 스레드를 나누지 않는 플랫폼이다(Docs/Design/MacPlatform.ko.md 3절).
+int RunCocoaMainThreadHost(int (*body)(void*) noexcept, void* context) noexcept {
+    return body(context);
+}
+
+void RunOnMainThread(void (*function)(void*) noexcept, void* context) noexcept {
+    function(context);
+}
+
 } // namespace rocks::platform

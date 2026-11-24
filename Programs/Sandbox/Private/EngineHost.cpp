@@ -489,6 +489,43 @@ bool CheckInjectedInputReachesPawn() noexcept {
     return passed;
 }
 
+// 창 수명: 창을 만들고 몇 번 펌프하고 제목을 바꾼 뒤 파괴한다(macOS Cocoa 창의 메인 스레드 호출
+// 경로 — Docs/Design/MacPlatform.ko.md 7절). 창 backend가 없거나 데스크톱이 없으면 NOT
+// RUN이다(돌려준 값 2). 순서는 펌프 횟수로 정한다.
+int CheckWindowLifecycle(Allocator& allocator) noexcept {
+    constexpr uint32 PumpCount = 3;
+    platform::WindowDesc desc;
+    desc.title = "Rocks Sandbox self-test";
+    desc.width = WindowWidth;
+    desc.height = WindowHeight;
+    auto window = platform::Window::Create(allocator, desc);
+    if (!window) {
+        return window.Error() == ErrorCode::Unsupported ||
+                       window.Error() == ErrorCode::DependencyFailed
+                   ? 2
+                   : 1;
+    }
+
+    input::InputQueue queue(allocator);
+    if (!queue.TryInitialize(InputQueueCapacity)) {
+        return 1;
+    }
+
+    for (uint32 pump = 0; pump < PumpCount; ++pump) {
+        window.Value()->PumpEvents(queue);
+        queue.Clear();
+    }
+
+    const bool titled = static_cast<bool>(window.Value()->SetTitle("Rocks Sandbox self-test 2"));
+    const bool sized = window.Value()->Width() != 0 && window.Value()->Height() != 0;
+    const bool handle = window.Value()->NativeHandle().window != nullptr;
+    // overlong 2바이트 sequence다.
+    const bool invalidTitle =
+        window.Value()->SetTitle(StringView("\xC0\xAF")).Error() == ErrorCode::InvalidArgument;
+    window.Value().Reset();
+    return titled && sized && handle && invalidTitle ? 0 : 1;
+}
+
 // 장치 능력을 기기 특성으로 옮기면 품질 등급 요구(기기 조건)가 그 값으로 판정된다(설정 CF4 —
 // Config는 Graphics를 모르고 호스트가 특성을 채운다).
 bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
@@ -719,11 +756,20 @@ uint32 RunEngineHostSelfTest() noexcept {
     const bool terminated = CheckTerminationRequestBridge();
     printf("  [%s] engine host: a termination request ends the engine run normally\n",
            terminated ? "PASS" : "FAIL");
+    const int windowLifecycle = CheckWindowLifecycle(allocator);
+    if (windowLifecycle == 2) {
+        printf(
+            "  [NOT RUN] engine host: window lifecycle (no window backend or desktop session)\n");
+    } else {
+        printf("  [%s] engine host: a window is created, pumped, retitled and destroyed\n",
+               windowLifecycle == 0 ? "PASS" : "FAIL");
+    }
+
     const bool input = CheckInjectedInputReachesPawn();
     printf("  [%s] engine host: a queued key reaches the possessed pawn through the local player\n",
            input ? "PASS" : "FAIL");
     return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u) + (traits ? 0u : 1u) +
-           (terminated ? 0u : 1u) + (input ? 0u : 1u);
+           (terminated ? 0u : 1u) + (input ? 0u : 1u) + (windowLifecycle == 1 ? 1u : 0u);
 }
 
 } // namespace sandbox

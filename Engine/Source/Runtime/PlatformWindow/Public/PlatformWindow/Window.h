@@ -151,4 +151,24 @@ enum class DesktopSessionState : uint8 {
 //   }
 ROCKS_PLATFORMWINDOW_API DesktopSessionState QueryDesktopSessionState() noexcept;
 
+// 창 시스템 메인 스레드 호스트다(launch::MainThreadHostFunction 모양, Docs/Design/MacPlatform.ko.md
+// 3절). 창을 쓰는 프로그램이 Launch configure에서 ApplicationSettings::mainThreadHost에 넣는다.
+// - macOS: 이 스레드(프로세스 메인 스레드)에서 NSApplication을 만들고 run loop를 돌며, 본문은 게임
+//   스레드("GameThread", 큰 스택)에서 돈다. 본문이 끝나면 run loop를 멈추고 게임 스레드를 join한 뒤
+//   본문 반환값을 돌려준다. Cmd+Q·로그아웃은 launch::RequestTermination()으로 잇는다. 본문은
+//   돌아가기 전에 창을 모두 파괴해야 한다.
+// - 그 밖의 플랫폼: body(context)를 바로 부른다.
+//
+// 사용 예(configure에서):
+//   settings.mainThreadHost = &platform::RunCocoaMainThreadHost;
+ROCKS_PLATFORMWINDOW_API int RunCocoaMainThreadHost(int (*body)(void* context) noexcept,
+                                                    void* context) noexcept;
+
+// function(context)를 창 시스템 메인 스레드에서 돌리고 끝날 때까지 기다린다. macOS에서 Cocoa·Metal
+// layer를 만지는 코드(그래픽 backend의 CAMetalLayer 설정 등)가 쓴다. 메인 스레드에서 부르거나 다른
+// 플랫폼이면 바로 부른다. macOS 게임 스레드가 본문을 끝낸 뒤 부르면 Fatal이다(메인 스레드가 join
+// 중이라 교착한다).
+ROCKS_PLATFORMWINDOW_API void RunOnMainThread(void (*function)(void* context) noexcept,
+                                              void* context) noexcept;
+
 } // namespace rocks::platform

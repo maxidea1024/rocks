@@ -60,7 +60,11 @@ UE와 같이 메인 스레드와 게임 스레드를 나눈다(MD1). Cocoa는 �
   3. 메인 스레드는 `[NSApp run]`을 돈다.
   4. 본문이 돌아오면 게임 스레드는 "메인 스레드 닫힘" 표시를 세운다. 그다음 마지막 동작으로 메인 큐에 정지 블록(`[NSApp stop:]`와 빈 이벤트 하나)을 넣고 끝난다.
   5. 메인 스레드는 run loop를 빠져나와 게임 스레드를 join하고 본문 반환값을 돌려준다. 그 뒤 Launch 정리(모듈 내리기 등)는 메인 스레드에서 돈다.
-- **Quit:** Quit 메뉴(Cmd+Q)와 로그아웃·재시동의 `applicationShouldTerminate:`는 `launch::RequestTermination()`으로 잇고 `NSTerminateLater`를 돌려준다(UE `LaunchMac.cpp:229–242`). 게임 스레드가 끝나 run loop를 빠져나올 때 `replyToApplicationShouldTerminate:YES`를 부른다. `NSTerminateCancel`은 로그아웃을 취소시키므로 쓰지 않는다.
+- **Quit:**
+  - Quit 메뉴(Cmd+Q)는 `terminate:`가 아니라 delegate의 `requestQuit:`로 `launch::RequestTermination()`만 부른다. 엔진이 다음 프레임에 정상 종료하고, 호스트가 돌아온 뒤 Launch 정리까지 돈다.
+  - 시스템 종료 요청(로그아웃·재시동·Dock 종료)의 `applicationShouldTerminate:`는 종료 요청 다리로 잇고 늘 `NSTerminateLater`를 돌려준다(UE `LaunchMac.cpp:229–242`). AppKit은 응답을 모달 run loop에서 기다리므로 `[NSApp stop:]`으로는 바깥 run이 돌아오지 않는다. 그래서 본문이 끝나면 메인 큐의 정지 블록이 `replyToApplicationShouldTerminate:YES`로 응답하고, `applicationWillTerminate:`가 게임 스레드를 join한 뒤 본문 종료 코드로 `exit`한다.
+  - 이 시스템 종료 경로에서는 호스트 뒤의 Launch 정리(모듈 내리기·크래시 수집 떼기)가 돌지 않는다. AppKit이 프로세스를 끝내는 경로이고 UE도 같다. 엔진 호스트의 로그 flush는 본문 안에서 끝난다. 크래시 수집 도우미가 이 종료를 비정상으로 보지 않는지는 Mac 확인 항목이다.
+  - `NSTerminateCancel`은 로그아웃을 취소시키므로 쓰지 않는다.
 - **메인 스레드 호출:** `platform::RunOnMainThread(function, context)`(PlatformWindow 공개 API, 동기)를 둔다.
   - 구현은 `dispatch_sync_f(dispatch_get_main_queue(), …)`다. GCD 메인 큐는 run loop common modes에서 처리되므로 창 크기 조절 같은 모달 추적 중에도 막히지 않는다.
   - 메인 스레드에서 부르면 바로 실행한다. 다른 플랫폼에서도 바로 실행한다.
@@ -72,17 +76,18 @@ UE와 같이 메인 스레드와 게임 스레드를 나눈다(MD1). Cocoa는 �
 - **autorelease pool:**
   - 게임 스레드 본문 전체를 바깥 pool로 감싼다.
   - 프레임마다 `Window::PumpEvents`가 직전 프레임 pool을 비우고 새로 연다(`objc_autoreleasePoolPop`·`Push`). `[GCController controllers]`, 이후 `CAMetalLayer nextDrawable`처럼 autorelease 객체를 돌려주는 호출이 프레임마다 쌓이지 않게 한다.
+  - pool은 LIFO라 프레임 pool은 창마다 두지 않고 게임 스레드에 하나만 둔다(호스트 상태). 본문이 끝나면 호스트가 닫는다.
   - 메인 스레드는 `RunOnMainThread` 블록과 이벤트 처리를 각각 pool 안에서 돈다.
 - **크래시 수집:** POSIX 신호 처리기는 프로세스 전역이라 스레드가 둘이 되어도 경로가 같다(`RunWithCrashGuard`는 POSIX에서 그냥 부른다). 게임 스레드는 `platform::Thread`라 스레드 이름·보호 프레임이 같이 걸린다.
 
 ## 4. 창과 이벤트 (PlatformWindow `Private/Mac`)
 
 - **창 생성:** `Window::Create`는 게임 스레드에서 부른다. 내부에서 `RunOnMainThread`로 다음을 만든다.
-  - `NSWindow` 파생 `RocksCocoaWindow`, 내용 view `RocksCocoaView`(layer-backed, `acceptsFirstResponder`), delegate.
+  - `NSWindow`(파생 없음), 내용 view `RocksCocoaView`(layer-backed, `acceptsFirstResponder`), delegate `RocksCocoaWindowDelegate`.
   - 생성 뒤 `makeKeyAndOrderFront`와 앱 활성화를 한다. 활성화는 macOS 14 이상이면 `[NSApp activate]`, 그 전이면 `activateIgnoringOtherApps:YES`(14에서 deprecated)다. macOS 14의 협조적 활성화 때문에 터미널에서 띄우면 키 포커스를 못 얻을 수 있어, Mac 확인 항목에 넣는다.
   - `WindowDesc`의 크기는 픽셀이다. 점(point) 크기는 그 화면의 `backingScaleFactor`로 나눈다.
 - **이벤트 수집:** 메인 스레드의 view·delegate가 받은 것을 `input::InputEvent`로 바꿔 창이 가진 고정 크기 큐(mutex 보호, 용량은 이름 있는 상수, 넘치면 손실 수 증가)에 넣는다. UE `DeferEvent`와 같은 자리다.
-- **펌프:** `Window::PumpEvents(queue)`는 게임 스레드에서 그 큐를 꺼내 호스트 `InputQueue`로 옮긴다. 넘쳐서 버린 수는 `InputQueue` 손실과 같이 센다(TouchInput 3.3절의 손실 복구 규칙이 그대로 적용된다).
+- **펌프:** `Window::PumpEvents(queue)`는 게임 스레드에서 그 큐를 꺼내 호스트 `InputQueue`로 옮긴다. 창 큐가 넘쳐 이벤트를 버렸으면 옮긴 이벤트 뒤에 `FocusLost`를 넣는다. 그러면 눌린 키·버튼이 모두 놓인 중립 상태로 복구된다(입력 상세 계획 18.3절). 버린 수를 `InputQueue` 손실 수에 더하는 API는 없어서 세지 않는다.
 - **창 상태:** 닫기 요청·크기·포커스·최소화는 메인 스레드가 쓰고 게임 스레드가 읽는다(같은 mutex).
 
 | Cocoa 신호 | 상태·이벤트 |
@@ -91,7 +96,7 @@ UE와 같이 메인 스레드와 게임 스레드를 나눈다(MD1). Cocoa는 �
 | `windowDidResize:`·`windowDidChangeBackingProperties:` | 크기를 픽셀(`convertRectToBacking`)로 갱신, `ConsumeResize`가 알린다 |
 | `windowDidBecomeKey:`·`windowDidResignKey:` | 포커스, 잃으면 `FocusLost` 이벤트 |
 | `windowDidMiniaturize:`·`windowDidDeminiaturize:` | `IsMinimized` |
-| `NSApplicationDidBecomeActive`·`DidResignActive` | 앱 수명 `Activated`·`Deactivated`(PlatformLayer 앱 수명 절. 전달은 그 절의 큐) |
+| `NSApplicationDidBecomeActive`·`DidResignActive` | 앱 수명 `Activated`·`Deactivated`(PlatformLayer 앱 수명 절. 전달은 그 절의 큐). 오디오 AU3 때 연결하며 MW3에는 아직 없다 |
 
 - **소멸:** `Window` 소멸은 `RunOnMainThread`로 delegate를 떼고 창을 닫는다.
 - **수동 메모리 관리(MRC):** `RunOnMainThread` 블록과 메인 스레드 이벤트 처리는 `@autoreleasepool` 안에서 돈다. ARC는 쓰지 않는다(UE 기본과 같다 — MD4).
@@ -113,7 +118,7 @@ view 좌표(점, 좌하단 원점)를 `convertPointToBacking`으로 픽셀로 �
 - **modifier:** `flagsChanged:`의 `keyCode`(`kVK_Shift`·`kVK_RightShift` 등)로 바뀐 키를 정하고, 그 키의 장치 의존 비트(UE처럼 IOKit 이름 대신 비트 값 — `MacApplication.cpp:1893–1897`)가 켜졌는지로 down·up을 정한다.
   - CapsLock의 `flagsChanged`는 물리 down·up이 아니라 토글 상태다. 이벤트마다 down과 up을 함께 만든다.
 - **반복:** `[event isARepeat]`는 `repeat` 표지다.
-- **문자:** `keyDown:`에서 `[event characters]`의 각 code point를 `Text` 이벤트로 넣는다. 제어 문자(0x20 미만, 0x7F)와 함수 키 사적 영역(U+F700–U+F8FF)은 뺀다. 조합(한글·일본어)은 PW3에서 `NSTextInputClient`로 바꾼다(MD5).
+- **문자:** `keyDown:`에서 `[event characters]`의 각 code point를 `Text` 이벤트로 넣는다. Command·Control 조합(Cmd+C 등)은 문자 입력이 아니므로 넣지 않는다(Windows는 Ctrl 조합이 제어 문자로, Alt 조합이 `WM_SYSCHAR`로 빠지는 것과 맞춘다). 제어 문자(0x20 미만, 0x7F)와 함수 키 사적 영역(U+F700–U+F8FF)은 뺀다. 조합(한글·일본어)은 PW3에서 `NSTextInputClient`로 바꾼다(MD5).
 - **시스템 단축키:** Command 조합 중 메뉴가 처리한 Cmd+Q 외에는 view까지 오면 키 이벤트로 넘긴다.
 - **Command 중 keyUp:** Command를 누른 채 뗀 키의 keyUp은 NSApplication이 view로 보내지 않는다. 그대로 두면 키가 눌린 채 남는다. 앱 local monitor(`addLocalMonitorForEventsMatchingMask:NSEventMaskKeyUp`)가 Command가 켜진 keyUp을 key window의 view로 넘긴다.
 
@@ -156,8 +161,8 @@ view 좌표(점, 좌하단 원점)를 `convertPointToBacking`으로 픽셀로 �
 | 검증 | 방법 |
 |---|---|
 | 빌드 | Mac에서 Debug 빌드, 경고 0, format·policy 통과 |
-| 창 자체 시험 | `Sandbox --self-test`(Cocoa 모드)에 macOS 창 단계: 창 생성 → 펌프 → `SetTitle` → 크기 값 → 닫기 요청을 코드로 세움(`performClose:`) → 정상 종료. 순서는 펌프 횟수로 정한다 |
-| 입력 사람 확인 | `Sandbox --engine --window`: 터미널에서 띄웠을 때 키 포커스 획득, 키(W·A·S·D·Space, Command 조합 뒤 키가 눌린 채 남지 않음)·마우스 버튼 위치(Retina 픽셀)·휠·트랙패드 스크롤·창 크기 조절 중 프레임 유지·Cmd+Q 정상 종료 |
+| 창 자체 시험 | `Sandbox --self-test`(메인 스레드 호스트를 건다)의 엔진 호스트 단계 "a window is created, pumped, retitled and destroyed": 창 생성 → 펌프 3번 → `SetTitle`(정상·잘못된 UTF-8) → 크기·핸들 확인 → 파괴. 창 backend나 데스크톱이 없으면 NOT RUN이다. Windows에서도 같은 단계가 돈다(2026-11-24 Windows PASS) |
+| 입력 사람 확인 | `Sandbox --engine --window`: 터미널에서 띄웠을 때 키 포커스 획득, 로그아웃·Dock 종료 시 정상 종료와 크래시 기록 없음, 키(W·A·S·D·Space, Command 조합 뒤 키가 눌린 채 남지 않음)·마우스 버튼 위치(Retina 픽셀)·휠·트랙패드 스크롤·창 크기 조절 중 프레임 유지·Cmd+Q 정상 종료 |
 | 게임패드 | 패드가 있으면 South·East 로그, 없으면 NOT RUN |
 | 변환 단위 시험 | `kVK_*` → Key 표, modifier 플래그 차이, 좌표 변환은 Cocoa 없이 도는 순수 함수로 분리해 EngineTests에서 돌린다(Windows에서도 컴파일되는 C++ 부분) |
 

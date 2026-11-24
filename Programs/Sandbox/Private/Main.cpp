@@ -2,6 +2,7 @@
 #include "GraphicsSelfTest.h"
 
 #include <Launch/EntryPoint.h>
+#include <PlatformWindow/Window.h>
 #include <Platform/Memory.h>
 #include <stdio.h>
 
@@ -81,13 +82,25 @@ int RunSelfTest(rocks::Allocator& allocator, rocks::ModuleLoader& modules,
 // 엔진 실행(--engine)이면 Launch 도구 로그를 쓰지 않고(LogHost가 설정으로 로그를 만든다), 첫
 // Ctrl-C·Ctrl-Break·SIGINT·SIGTERM을 종료 요청 표시로 받는다(엔진 PumpEvents의 다리가 정상 종료로
 // 잇는다. 두 번째 요청은 OS 기본 동작으로 바로 끝난다).
+// 창을 쓰는 실행(--window, 창을 띄우는 자체 검사)은 창 시스템 메인 스레드 호스트를 건다(macOS는
+// Cocoa run loop가 메인 스레드를 쓰고 본문은 게임 스레드에서 돈다 — Docs/Design/MacPlatform.ko.md
+// 3절. 다른 플랫폼은 본문을 바로 부른다).
 void Configure(Span<const StringView> arguments,
                rocks::launch::ApplicationSettings& settings) noexcept {
+    bool engine = false;
+    bool window = false;
     for (const StringView argument : arguments) {
         if (Is(argument, "--engine")) {
+            engine = true;
             settings.toolLogging = rocks::launch::ToolLogging::None;
             settings.handleTerminationRequests = true;
+        } else if (Is(argument, "--window")) {
+            window = true;
         }
+    }
+
+    if (!engine || window) {
+        settings.mainThreadHost = &rocks::platform::RunCocoaMainThreadHost;
     }
 }
 
