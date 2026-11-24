@@ -61,7 +61,7 @@ engine.Shutdown();
 - `Initialize` 안에서 순서는 이렇다: GameInstance 생성 → `OnInit` → GameInstance Subsystem → `OnPostInit` → 첫 LocalPlayer(입력 장치 0). Engine이 Running이 되면 `OnEngineReady`에서 기본 맵을 연 뒤 `OnStart`를 부른다.
 - 기본 맵을 열지 못하면 `Initialize`가 실패하고 Engine이 정상 종료 순서로 정리한다.
 - 전용 서버는 `game.netMode = NetMode::DedicatedServer`로 둔다. 이때 LocalPlayer·Login이 없다.
-- 실제 예는 Sandbox다(`Programs/Sandbox/Private/SandboxGame.*`, `Sandbox --engine`).
+- 실제 예는 Sandbox다(`Programs/Sandbox/Private/SandboxGame.*`). `Sandbox --engine`은 헤드리스, `Sandbox --engine --window`는 창을 열고 키보드·마우스·게임패드 입력이 Pawn 로그(`Sandbox.Game`)로 찍힌다. 호스트가 입력을 거는 법은 `Programs/Sandbox/Private/EngineHost.cpp`의 `RunEngine`(`SetLocalPlayerInput`)을 본다.
 
 GameInstance를 파생하면 hook을 쓸 수 있다.
 
@@ -176,6 +176,18 @@ protected:
 - PlayerController가 만들고, LateUpdate 시작(엔진 단계 `CameraUpdate`)에서 갱신한다. pause 중에는 갱신하지 않고 단일 스텝 프레임에는 갱신한다.
 - 결과는 `View()`(`CameraView{location, rotation, fov = 90}`)다. 기본 view target은 PlayerController이고, Possess하면 Pawn으로 바뀐다. 위치는 대상 root의 월드 위치, 회전은 controlRotation이다.
 - 결과를 바꾸려면 `OnUpdateView(CameraView&)`를 재정의한다(CameraDirector 파생).
+- view target Actor에 켜진 `CameraComponent`(World 모듈)가 있으면 Component 순서로 첫 것의 `GetCameraView`를 쓴다(UE `CalcCamera`). 위치·회전은 그 Component의 월드 Transform이고, 시야·투영·직교 폭·종횡비는 그 필드다. `SetUsePawnControlRotation(true)`면 회전은 Pawn의 controlRotation이다(1인칭).
+
+```cpp
+// Pawn OnAwake: 눈높이 카메라
+auto camera = GetWorld().AddComponent<CameraComponent>(Handle());
+GetWorld().With<CameraComponent>(camera.Value(), [&](CameraComponent& value) noexcept {
+    value.SetUsePawnControlRotation(true);
+    auto attached = value.AttachTo(RootComponent());
+    auto eye = value.SetRelativeLocation(Vec3d(0.0, 0.0, 64.0));
+    return attached && eye ? value.SetFieldOfView(100.0) : Result<void>::Failure(ErrorCode::InvalidArgument);
+});
+```
 
 ## 6. Subsystem 계층
 

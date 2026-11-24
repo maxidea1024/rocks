@@ -621,7 +621,8 @@ UE는 에디터에서 사용 플래그를 자동으로 켜고 패키지를 dirty
 | Collection 참조 | 컬렉션 에셋 | static 변형(layout이 원문에 들어간다) | MAT2 |
 | Layer Stack | 레이어·혼합 함수 목록 | static 변형 | MAT3 |
 | Double Vector(절대 위치 등) | double4 | 없음 | 후속(`WorldPosition` 파라미터가 필요할 때) |
-| 가상 텍스처·텍스처 컬렉션·sparse volume·font | — | — | 후속(UE 종류는 대응표에만) |
+| 가상 텍스처·텍스처 컬렉션·sparse volume | — | — | 후속(UE 종류는 대응표에만) |
+| font | — | — | 파라미터 노드 `FontSampleParameter`, 값은 (미리 구운 Font, 페이지). 함께 들일 비파라미터 노드 `FontSample`·`FontSignedDistance`, 단계 FT7 — [글꼴 설계](Font/07-Consumers.ko.md) 7.4절 |
 
 ### 9.4 상수 식 프로그램과 상수 블록
 

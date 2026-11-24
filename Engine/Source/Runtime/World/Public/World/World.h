@@ -856,6 +856,15 @@ private:
     bool QueueBypassedComponent(ObjectHandle component) noexcept;
     // Component를 색인에서 빼고 사본 Tick 등록을 해제한다(World 정리가 회수 요청 직전에 부른다).
     void ForgetComponent(ObjectHandle component) noexcept;
+    // OnRegister → 시스템 상태 생성(23.2절). 실패하면 만든 것을 되돌리고 OnUnregister(OnRegister가
+    // 성공했으면)까지 한 뒤 그 오류다 — 호출자가 Component를 파괴한다.
+    Result<void> RegisterComponentNow(ObjectHandle component) noexcept;
+    // 있는 시스템 상태를 역순으로 지운다(해제 직전).
+    void DestroySystemStates(Component& component) noexcept;
+    // 다시 만들 표시가 있는 Component의 시스템 상태를 다시 만든다(PreRender 단계 끝).
+    void FlushSystemStateUpdates() noexcept;
+    // AddComponent의 타입 규칙·EditorOnly 검사다(등록 전).
+    Result<void> CheckComponentRules(ObjectHandle actor, ObjectHandle component) noexcept;
 
     // --- Tick 의존 선언(WorldTickDependencies.cpp) ---
 
@@ -1009,6 +1018,8 @@ private:
     Array<TickPoint> tickDeclarationStack_{allocator_};
     EngineStageSlot engineStages_[EngineStageCount];
     uint32 engineStageFailures_ = 0;
+    // 시스템 상태를 다시 만들 Component다(MarkSystemStateDirty — 23.2절).
+    Array<ObjectHandle> systemStateUpdates_{allocator_};
     uint64 engineStageNanoseconds_[EngineStageCount] = {};
 };
 

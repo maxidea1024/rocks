@@ -14,8 +14,13 @@ public sealed record BuildContext(string RootDirectory, string OutputDirectory,
 
     public string PathInRoot(string path) => Path.GetFullPath(path, RootDirectory);
 
+    /// <summary>
+    /// 폴더 아래 C++ 원본(<c>.cpp</c>)과 Objective-C++ 원본(<c>.mm</c> — Apple backend 폴더에만 둔다, Docs/Design/MacPlatform.ko.md 6절)을
+    /// 이름 순으로 모은다. <c>.mm</c>을 Apple 밖 대상에 넘기면 입력 검증이 거부한다.
+    /// </summary>
     public IReadOnlyList<string> Sources(params string[] directories) => directories
-        .SelectMany(directory => Directory.GetFiles(PathInRoot(directory), "*.cpp", SearchOption.AllDirectories))
+        .SelectMany(directory => Directory.GetFiles(PathInRoot(directory), "*.cpp", SearchOption.AllDirectories)
+            .Concat(Directory.GetFiles(PathInRoot(directory), "*.mm", SearchOption.AllDirectories)))
         .Order(StringComparer.Ordinal).ToArray();
 
     /// <summary>

@@ -417,3 +417,5 @@ TEST(LogStructureGeneratedStructThroughLogSystem) {
     }
 }
 } // namespace log_structure_reflection_tests_file
+
+#undef ROCKS_TEST_NOTE_TEXT

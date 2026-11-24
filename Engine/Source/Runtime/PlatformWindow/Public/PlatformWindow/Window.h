@@ -113,7 +113,7 @@ public:
 // 사용 예:
 //   auto gamepads = platform::GamepadBackend::Create(allocator);
 //   gamepads.Value()->Poll(queue);               // 프레임마다 입력 수집 단계에서
-class GamepadBackend {
+class ROCKS_PLATFORMWINDOW_API GamepadBackend {
 public:
     // Windows는 XInput(최대 4개, 시스템 DLL을 실행 시 로드)이다. DLL을 찾지 못하면
     // DependencyFailed, 게임패드 backend가 없는 플랫폼은 Unsupported다.

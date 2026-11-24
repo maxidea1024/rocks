@@ -171,6 +171,15 @@ internal static class InputValidation
                     $"{request.Toolchain.Platform}. Declare them only when BuildContext.Platform is MacOS.");
             }
 
+            // Objective-C++(.mm)는 Apple 대상만 컴파일한다(Docs/Design/MacPlatform.ko.md 6절 MD2). 다른 대상에 넘어오면 Apple backend
+            // 폴더를 잘못 고른 규칙이다.
+            string? objectiveCpp = module.Sources.FirstOrDefault(source => ActionGraph.LanguageOf(source) == NativeLanguage.ObjectiveCpp);
+            if (objectiveCpp is not null && request.Toolchain.Platform != NativePlatform.MacOS)
+            {
+                throw new ArgumentException($"Module {module.Name}: Objective-C++ source '{objectiveCpp}' is Apple-only, but the toolchain " +
+                    $"targets {request.Toolchain.Platform}. List .mm sources only when BuildContext.Platform is MacOS.");
+            }
+
             foreach (string define in module.PublicDefines.Concat(module.PrivateDefines).Concat(module.ConsumerDefines))
             {
                 string name = define.Split('=')[0];

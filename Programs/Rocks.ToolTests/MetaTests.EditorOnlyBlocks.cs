@@ -85,6 +85,15 @@ internal static partial class MetaTests
             Preamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" + EditorDataOpen + "ROCKS_PROPERTY(EditorOnly) rocks::int32 hidden = 0;\n" +
                 EditorDataClose + "rocks::int32 Hidden() const noexcept { return hidden; }\n};\n}\n"],
             "RMC2503", "editor");
+        // struct의 EditorOnly 멤버는 struct 형질(강한 참조·컨테이너·Required·InstancedStruct)을 더할 수 없다(RMC2504). 값 멤버는 받는다(위 Slot).
+        AddRejectGroup(context, "Meta.EditorOnlyStructMembersKeepStructTraits", [
+            Preamble + "ROCKS_STRUCT()\nstruct Slot {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 codes = 0;\n" + EditorDataOpen +
+                "ROCKS_PROPERTY(EditorOnly) rocks::ObjectRef<rocks::Object> target;\n" + EditorDataClose + "};\n}\n",
+            Preamble + "ROCKS_STRUCT()\nstruct Slot {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::ObjectRef<rocks::Object> target;\n};\n" +
+                "ROCKS_STRUCT()\nstruct Value {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 count = 0;\n" + EditorDataOpen +
+                "ROCKS_PROPERTY(EditorOnly) Slot slot;\n" + EditorDataClose + "};\n}\n"],
+            "RMC2504", "cannot hold object references");
+
         // 타깃 매크로는 메타 컴파일러가 정한다: --clang-arg로 넘기면 RMC1000이다.
         suite.Add("Meta.TargetMacrosAreReserved", async () =>
         {

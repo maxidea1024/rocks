@@ -40,6 +40,12 @@ void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
         const bool registered = value.registered_;
         value.registered_ = false;
         UnregisterTicks(value.ticks_);
+        // 시스템 상태는 OnUnregister 전에 역순으로 지운다(23.2절).
+        if (registered) {
+            DestroySystemStates(value);
+        }
+
+        value.dirtySystemStates_ = 0;
         return registered;
     });
     if (unregistering && unregistering.Value()) {

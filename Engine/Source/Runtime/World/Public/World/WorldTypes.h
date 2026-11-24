@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Meta/TypeSchema.h>
 #include <World/TickScheduler.h>
 
 namespace rocks {
@@ -171,6 +172,44 @@ const char* EngineStageName(EngineStage stage) noexcept;
 // 않는다). 실패는 그 프레임 Tick의 실패로 돌아가고 WorldStats::engineStageFailures에 센다.
 using EngineStageFunction = Result<void> (*)(World& world, const TickContext& context,
                                              void* user) noexcept;
+
+// Component가 엔진 시스템에 두는 상태의 종류다(Docs/Design/EngineRuntime 23.2절 — UE render·physics
+// state). 등록 직후 이 순서로 만들고 해제 직전 역순으로 지운다.
+enum class SystemStateKind : uint8 {
+    Render,
+    Physics,
+    Audio,
+    Count
+};
+
+inline constexpr uint32 SystemStateKindCount = static_cast<uint32>(SystemStateKind::Count);
+
+ROCKS_WORLD_API const char* SystemStateKindName(SystemStateKind kind) noexcept;
+
+// Component 타입 규칙이다(23.2절 CR6 — Unity DisallowMultipleComponent·RequireComponent 대응,
+// UE에는 없다). AddComponent가 등록 전에 소유 Actor의 기존 Component(파괴 대기 제외)에 대 본다.
+// 타입 비교는 파생을 포함한다. Span이 가리키는 배열은 정적 저장 기간이어야 한다.
+//
+// 사용 예:
+//   ComponentTypeRules TypeRules() const noexcept override {
+//       static const TypeId needs[] = {ObjectTypeIdOf<SceneComponent>()};
+//       ComponentTypeRules rules;
+//       rules.unique = true;
+//       rules.required = needs;
+//       return rules;
+//   }
+// ComponentTypeRules::required에 둘 수 있는 타입 수 상한이다(넘으면 AddComponent가
+// InvalidArgument).
+inline constexpr usize MaxRequiredComponentTypes = 16;
+
+struct ComponentTypeRules {
+    // Actor당 하나다(같은 타입·파생이 이미 있으면 AlreadyExists).
+    bool unique = false;
+    // 먼저 있어야 하는 타입이다(없으면 DependencyFailed — 자동으로 더하지 않는다).
+    Span<const TypeId> required;
+    // 함께 있을 수 없는 타입이다(어느 쪽 규칙이든 걸리면 InvalidArgument).
+    Span<const TypeId> excluded;
+};
 
 // World 진단 수치다. 값은 호출 시점 스냅샷이다.
 struct WorldStats {

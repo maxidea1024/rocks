@@ -28,8 +28,8 @@
 | P9 | Vulkan 선행 | 이 문서·[VulkanGraphics](../VulkanGraphics.ko.md) | **구현**(Windows. VulkanGraphics 개정 1, Android는 교차 빌드만) | SH2 | P3, P10 | 5.3 |
 | P10 | 동적 라이브러리 API | PlatformLayer | **구현** | P4, P9, P13, SH0, SH2 | — | 5.3 |
 | P11 | OpenGL ES 선행(OpenGLGraphics를 UE `OpenGLDrv` 방식으로) | [OpenGL ES backend](../OpenGLESGraphics.ko.md)·이 문서 | **구현**(2026-11-17, Windows 미리보기. Android는 컴파일만, 실행은 P13) | P13, SH2, SH6 | A0-G | 5.3 |
-| P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
-| P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
+| P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | [macOS 실행 기반](../MacPlatform.ko.md)·Rocks.Build | 설계(2026-11-24, 구현은 `feature/platform-mac`, Mac 기기 확인 대기) | P15, SH5 | P3 | 5.3 |
+| P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | [Android 실행 기반](../AndroidPlatform.ko.md) | 설계(2026-11-24) | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
 | P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 확정(개정 31, 12.2.1절) | SH2, P6b | P6a | 12절 |
 | P15 | D3D11Graphics·MetalGraphics 설계 | EngineRuntime | D3D11 **구현**(10.2절), Metal 미설계 | SH5 | P12(Metal) | 5.3 |
 
@@ -130,14 +130,14 @@
 - 의존: A0-G(G2). 막는 것: SH2(미리보기), SH6(Android).
 - 달성(2026-11-17, `feature/gles-graphics`, 설계·상태는 [OpenGL ES backend](../OpenGLESGraphics.ko.md)): 장치 동작을 ES 3.2 core 함수 표로 하는 공통 층과 플랫폼 층(Windows WGL, Android EGL)으로 나눴다. 데스크톱 전용 호출(`glClipControl`·`GL_FRAMEBUFFER_SRGB` 켜기·WGL sRGB 픽셀 형식)은 Windows 층에만 있고 DSA는 없앴다. Windows 미리보기는 ES 3.2 profile context를 먼저 쓰고 데스크톱 GL 4.3 core로 내려갈 수 있다(위 "GL 4.3 core 이상"과 다른 점, 측정은 그 문서 2.2절). 클립 공간은 창·RenderTarget 모두 `GL_UPPER_LEFT`이고 스왑체인은 offscreen 텍스처에 그린 뒤 Y 반전 blit으로 표시한다(7.2절 8항을 SH2보다 앞당겼다). 그리기 상수는 루트 상수 에뮬레이션 배열(`vu_h`·`pu_h`, 7.2절 4항)로 올리고 Sandbox 원문은 쿠킹된 `GLES31_PC`와 같은 모양의 GLSL ES 3.20이다. Sandbox self-test가 두 context에서 통과하고 D3D12와 픽셀 차이 0이다. Android 교차 빌드에서 EGL 층이 컴파일·링크된다. A0-G 형식 확장 전이라 형식 표는 지금 형식만 두고 확장 조건 열을 미리 두었다.
 
-**P12 macOS 실행 기반 — 미설계.**
+**P12 macOS 실행 기반 — 설계([macOS 실행 기반](../MacPlatform.ko.md) 개정 1, 2026-11-24). 아래는 설계 전 정리다.**
 - 현재: PlatformWindow는 Win32만 있다. Rocks.Build 언어는 C·C++뿐이다(`NativeBuildModels.cs:57`, `ActionGraph.cs:373–374`). framework 링크 필드는 있다(`NativeBuildModels.cs:145`). macOS는 CI에서만 빌드·시험한다.
 - UE 5.8: Apple 대상 C++ 원본을 Objective-C++로 컴파일하고(`Programs/UnrealBuildTool/Platform/Apple/AppleToolChain.cs:461,474`), MetalRHI는 `.cpp`에서 metal-cpp(`ThirdParty/MetalCPP`)를 쓰며, 창은 Cocoa다(`Runtime/ApplicationCore/Private/Mac/CocoaWindow.cpp`).
 - 산출물: Rocks.Build의 Apple Objective-C++ 컴파일(정책 검사와의 관계 포함), metal-cpp 공급(`kind: headers`), PlatformWindow Mac backend(Cocoa 창·`CAMetalLayer`·입력), macOS 실행 검증 경로(실기기 또는 CI의 Metal 장치).
 - 완료 기준: macOS에서 창 생성·이벤트 펌프·크기 변경·닫기 시험, `CAMetalLayer`에 지운 색 한 장 표시, Objective-C++ 원본의 경고 0과 정책 검사 통과, macOS CI 실행.
 - 막는 것: SH5의 MetalGraphics(P15).
 
-**P13 Android 실행 기반 — 미설계(PlatformLayer 모바일 절).**
+**P13 Android 실행 기반 — 설계([Android 실행 기반](../AndroidPlatform.ko.md) 개정 1, 2026-11-24). 아래는 설계 전 정리다.**
 - 현재: Android는 시험 실행 파일을 에뮬레이터에 올려 실행만 한다(PlatformLayer 모바일 절). 앱 껍데기·창·surface·수명·APK 패키징이 없고, APK 안 데이터 읽기(VFS)는 AssetSystem 2절에서 후속이다.
 - 산출물: 앱 진입(NativeActivity 계열), `ANativeWindow` surface와 생성·소실·재생성 수명, APK 패키징(manifest `glEsVersion` 0x00030002, UE와 같다), 에뮬레이터·실기기 실행 경로(측정 S11). APK 안 쿠킹 데이터 읽기(VFS)는 AssetSystem이 맡는 선행 작업이다(14절).
 - 완료 기준: 앱 시작·종료, 백그라운드 전환 때 surface 소실·재생성 시험, EGL ES 3.2 context로 지운 색 한 장 표시, 에뮬레이터 또는 실기기 실행 기록.

@@ -129,6 +129,8 @@ private:
     // 보호 프레임 안의 본문이다(인라인되지 않는 별도 함수, D34).
     static int GuardedStages(void* context) noexcept;
     static int RunBody(ApplicationRunner& runner) noexcept;
+    // 본문(description_.run)이다. 메인 스레드 호스트가 다른 스레드에서 부를 수 있게 void* 모양이다.
+    static int RunDescription(void* context) noexcept;
 
     static bool StartCommandLine(ApplicationRunner& runner) noexcept;
     static bool StartSettings(ApplicationRunner& runner) noexcept;
@@ -521,10 +523,18 @@ int ApplicationRunner::RunBody(ApplicationRunner& runner) noexcept {
 
     context.toolLog_ = runner.toolLog_;
     context.settings_ = &runner.settings_;
-    const int exitCode = runner.description_.run(context);
+    // 메인 스레드 호스트가 있으면 본문을 그 호스트가 만든 스레드에서 돌린다(MacPlatform 3절).
+    const MainThreadHostFunction host =
+        runner.embedded_ ? nullptr : runner.settings_.mainThreadHost;
+    const int exitCode = host != nullptr ? host(&RunDescription, &runner) : RunDescription(&runner);
     context.toolLog_ = nullptr;
     context.modules_ = nullptr;
     return exitCode;
+}
+
+int ApplicationRunner::RunDescription(void* context) noexcept {
+    ApplicationRunner& runner = *static_cast<ApplicationRunner*>(context);
+    return runner.description_.run(runner.context_);
 }
 
 ROCKS_NOINLINE int ApplicationRunner::GuardedStages(void* context) noexcept {

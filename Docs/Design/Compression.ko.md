@@ -1257,7 +1257,7 @@ brotli==1.1.0`, google/brotli 1.1.0의 공식 binding)가 만든 13개(합 4,107
 ### 13.8 후속
 
 - macOS ARM64·Android 실기기 실행.
-- WOFF2 글꼴 importer(표 변환 복원)는 글꼴 모듈의 몫이다.
+- WOFF2 글꼴 importer(표 변환 복원)는 글꼴 모듈의 몫이다. [글꼴 설계](Font/09-Decisions.ko.md) FD10: FreeType이 이 Brotli로 직접 열며, 임포트는 FT8(Rocks 추가 기능)이다.
 - Brotli 압축(`c/enc`)과 사용자 사전·large window는 수요가 생기면 다룬다.
 
 ## 14. 형식 플러그인 등록 (7차, 교차검증 반영)

@@ -143,6 +143,11 @@ try
             case "ownership":
                 await IncludeOwnershipTests.RunAsync(request, root, Pass);
                 break;
+            case "c-language":
+                ObjectiveCppTests.Run(request, root);
+                await CLanguageTests.RunAsync(request, root);
+                Pass("C and Objective-C++ translation units");
+                break;
             case "target-kinds":
                 await TargetKindTests.RunAsync(request, root, repository, Pass);
                 ModuleTypeTests.Run(request, Pass);
@@ -344,6 +349,9 @@ try
 
     await BuildConfigurationTests.RunAsync(request, root);
     Pass("build configurations, ThinLTO, and per-module optimization overrides");
+
+    ObjectiveCppTests.Run(request, root);
+    Pass("Objective-C++ (.mm) translation units: language, ARC-off flags, Apple-only validation");
 
     await CLanguageTests.RunAsync(request, root);
     Pass("C17 translation units: C++ flag golden, C profile, real build, included .c invalidation");
