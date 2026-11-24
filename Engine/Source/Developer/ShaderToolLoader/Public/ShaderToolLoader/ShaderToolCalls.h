@@ -94,6 +94,22 @@ struct SpirvMslBinding {
 inline constexpr uint32 SpirvMslNoIndex = NumericLimits<uint32>::Max();
 inline constexpr uint32 SpirvMslPushConstantSet = NumericLimits<uint32>::Max();
 
+// ESSL 자원 binding 하나다(SPIR-V (set, binding) → GLES binding — storage block·image·typed
+// buffer).
+struct SpirvGlslBinding {
+    uint32 set = 0;
+    uint32 binding = 0;
+    uint32 glBinding = 0;
+};
+
+// ESSL 결합 sampler 하나의 이름과 텍스처 유닛이다((텍스처, 샘플러) 변수 이름으로 찾는다).
+struct SpirvGlslCombined {
+    StringView texture;
+    StringView sampler;
+    StringView name;
+    uint32 unit = 0;
+};
+
 struct SpirvCrossRequest {
     Span<const uint8> spirv;
     SpirvCrossTarget target = SpirvCrossTarget::Essl;
@@ -116,6 +132,11 @@ struct SpirvCrossRequest {
     // SpirvMslNoIndex)다.
     Span<const SpirvMslBinding> mslBindings;
     uint32 mslBufferSizeIndex = SpirvMslNoIndex;
+    // ESSL: 상수 버퍼를 plain uniform 구조체로 낸다(GLES 에뮬레이션 재작성의 입력 — 16.1절 SSD42).
+    bool glslPlainUniforms = false;
+    // ESSL: 자원 binding과 결합 sampler 이름·유닛(SSD42)이다.
+    Span<const SpirvGlslBinding> glslBindings;
+    Span<const SpirvGlslCombined> glslCombined;
 };
 
 // SPIRV-Cross C API로 spirv를 target 원문으로 바꾼다. ESSL은 결합 sampler를 만들고 기본 float

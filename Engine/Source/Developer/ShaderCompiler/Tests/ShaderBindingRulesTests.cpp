@@ -4,6 +4,7 @@
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCompiler/ShaderNugget.h>
 #include <ShaderCore/ShaderBindingLayout.h>
+#include <ShaderCore/ShaderGlesBindingHeader.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderParameterTypes.h>
 #include <Base/InitializerList.h>
@@ -602,6 +603,82 @@ TEST(ShaderBindingRules_WorkerFeaturesPairsAndFallback) {
           Named(pixel, "AlbedoSampler")->slot == 0 && Named(pixel, "SharedWrapSampler")->slot == 1);
     CHECK(Named(pixel, "Noise")->samplerSource == ShaderSamplerSource::SharedWrap);
     CHECK(CheckShaderStageLink(vertex, pixel));
+}
+
+TEST(ShaderBindingRules_WorkerGlesEmulatesConstantBuffers) {
+    BindingCase binding;
+    const char* skip = nullptr;
+    if (!binding.Make("bindinggles", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderBindingRules_WorkerGlesEmulatesConstantBuffers: %s\n", skip);
+        }
+
+        return;
+    }
+
+    ShaderFormatSnapshot gles(TestAllocator());
+    REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, "GLES31_PC", gles));
+    Array<ShaderCompileJob> jobs(TestAllocator());
+    REQUIRE(
+        jobs.TryPushBack(binding.Job(gles, BindEntry, "MainVS", ShaderStageVertex, BindLayouts)));
+    REQUIRE(
+        jobs.TryPushBack(binding.Job(gles, BindEntry, "MainPS", ShaderStagePixel, BindLayouts)));
+    Array<ShaderCompileJobResult> results(TestAllocator());
+    REQUIRE(Compile(binding, "GlesWork", jobs.View(), results));
+    PrintFailures(results, results.Size());
+    ShaderBindingLayout vertex(TestAllocator());
+    ShaderBindingLayout pixel(TestAllocator());
+    REQUIRE(ReadLayout(results[0], vertex));
+    REQUIRE(ReadLayout(results[1], pixel));
+    // 값 1: 루트 상수 80 byte, View는 상수 버퍼 순번 0, 텍스처 유닛 PS 0·1, 연결.
+    CHECK(vertex.rootConstantBytes == sizeof(DrawConstantsCpp) && Named(vertex, "View")->slot == 0);
+    CHECK(Named(pixel, "Albedo")->slot == 0 && Named(pixel, "Noise")->slot == 1);
+    CHECK(CheckShaderStageLink(vertex, pixel));
+    // 값 0: 상수 버퍼·루트 상수가 vec4 배열이 되고 원래 이름이 남지 않는다(SSD42).
+    const Array<uint8>& vertexCode = results[0].values.Part(ShaderNuggetValue::Code);
+    const Array<uint8>& pixelCode = results[1].values.Part(ShaderNuggetValue::Code);
+    String vertexText(TestAllocator());
+    String pixelText(TestAllocator());
+    REQUIRE(vertexText.TryAssign(
+        StringView(reinterpret_cast<const char*>(vertexCode.Data()), vertexCode.Size())));
+    REQUIRE(pixelText.TryAssign(
+        StringView(reinterpret_cast<const char*>(pixelCode.Data()), pixelCode.Size())));
+    const bool vertexOk = strstr(vertexText.CStr(), "uniform highp vec4 vc0_h[6];") != nullptr &&
+                          strstr(vertexText.CStr(), "uniform highp vec4 vu_h[5];") != nullptr &&
+                          strstr(vertexText.CStr(), "View.") == nullptr &&
+                          strstr(vertexText.CStr(), "Draw.") == nullptr;
+    if (!vertexOk) {
+        fprintf(stderr, "GLES vertex ESSL:\n%s\n", vertexText.CStr());
+    }
+
+    CHECK(vertexOk);
+    const bool pixelOk =
+        strstr(pixelText.CStr(), "ps0") != nullptr && strstr(pixelText.CStr(), "ps1") != nullptr;
+    if (!pixelOk) {
+        fprintf(stderr, "GLES pixel ESSL:\n%s\n", pixelText.CStr());
+    }
+
+    CHECK(pixelOk);
+    // 값 2: VS 배열·복사 표, PS 샘플러 유닛과 출처.
+    REQUIRE(results[0].values.Has(ShaderNuggetValue::GlesCopyTable));
+    ShaderGlesBindingHeader vertexHeader(TestAllocator());
+    REQUIRE(DecodeShaderGlesBindingHeader(
+        results[0].values.Part(ShaderNuggetValue::GlesCopyTable).View(), vertexHeader));
+    REQUIRE(vertexHeader.arrays.Size() == 2);
+    CHECK(vertexHeader.arrays[0].buffer == 0 && vertexHeader.arrays[0].vec4Count == 6 &&
+          vertexHeader.arrays[1].buffer == ShaderGlesRootConstantsBuffer &&
+          vertexHeader.arrays[1].vec4Count == 5 && vertexHeader.attributeMask == 0b1001);
+    REQUIRE(vertexHeader.copies.Size() == 2);
+    CHECK(vertexHeader.copies[0].bytes == sizeof(ViewCpp) &&
+          vertexHeader.copies[1].bytes == sizeof(DrawConstantsCpp));
+    ShaderGlesBindingHeader pixelHeader(TestAllocator());
+    REQUIRE(DecodeShaderGlesBindingHeader(
+        results[1].values.Part(ShaderNuggetValue::GlesCopyTable).View(), pixelHeader));
+    REQUIRE(pixelHeader.samplers.Size() == 2);
+    CHECK(pixelHeader.samplers[0].unit == 0 && pixelHeader.samplers[0].name == StringView("ps0") &&
+          pixelHeader.samplers[0].source == ShaderSamplerSource::Own);
+    CHECK(pixelHeader.samplers[1].unit == 1 &&
+          pixelHeader.samplers[1].source == ShaderSamplerSource::SharedWrap);
 }
 
 } // namespace shader_binding_rules_tests_file

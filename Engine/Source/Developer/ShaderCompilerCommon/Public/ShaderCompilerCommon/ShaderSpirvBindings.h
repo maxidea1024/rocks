@@ -8,6 +8,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
+#include <ShaderCompilerCommon/ShaderGlesBindings.h>
 #include <ShaderCompilerCommon/ShaderReflection.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 #include <ShaderCore/ShaderBindingLayout.h>
@@ -76,7 +77,7 @@ struct SpirvBindingRequest {
 
 struct SpirvBindingResult {
     explicit SpirvBindingResult(Allocator& allocator) noexcept
-        : bindingLayout(allocator), metalBindings(allocator) {
+        : bindingLayout(allocator), metalBindings(allocator), gles(allocator) {
     }
 
     // 값 1 byte다.
@@ -84,6 +85,8 @@ struct SpirvBindingResult {
     // Metal 형식의 배정(그 밖은 비어 있다)이다.
     Array<MetalResourceBinding> metalBindings;
     uint32 metalBufferSizeIndex = NoMetalIndex;
+    // OpenGL 형식의 GLES 계획(16.1절 SSD42 — 그 밖은 비어 있다)이다.
+    GlesPlan gles;
 };
 
 // 위 설명대로 값 1을 만든다. 결과: Success, CompileError(규칙 위반·Metal 상한), ToolError(리플렉션

@@ -1,5 +1,7 @@
 #include <ShaderToolLoader/ShaderToolCalls.h>
 
+#include <Base/InitializerList.h>
+
 #include <spirv-tools/libspirv.h>
 #include <spirv_cross_c.h>
 #include <stdio.h>
@@ -336,6 +338,88 @@ bool AssignMslBindings(const SpirvCrossFunctions& cross, spvc_compiler compiler,
     return true;
 }
 
+// ESSL binding·결합 sampler 이름(SSD42)이다. 결합 sampler를 만든 뒤 부른다.
+bool AssignGlslBindings(const SpirvCrossFunctions& cross, spvc_compiler compiler,
+                        const SpirvCrossRequest& request) noexcept {
+    using namespace tool_calls_detail;
+    using Index = SpirvCrossFunctions;
+    const auto createResources = ToolFunction<decltype(&spvc_compiler_create_shader_resources)>(
+        cross, Index::CompilerCreateShaderResources);
+    const auto listFor = ToolFunction<decltype(&spvc_resources_get_resource_list_for_type)>(
+        cross, Index::ResourcesGetResourceListForType);
+    const auto decoration =
+        ToolFunction<decltype(&spvc_compiler_get_decoration)>(cross, Index::CompilerGetDecoration);
+    const auto setDecoration =
+        ToolFunction<decltype(&spvc_compiler_set_decoration)>(cross, Index::CompilerSetDecoration);
+    const auto setName =
+        ToolFunction<decltype(&spvc_compiler_set_name)>(cross, Index::CompilerSetName);
+    const auto combined = ToolFunction<decltype(&spvc_compiler_get_combined_image_samplers)>(
+        cross, Index::CompilerGetCombinedImageSamplers);
+    const auto nameOf =
+        ToolFunction<decltype(&spvc_compiler_get_name)>(cross, Index::CompilerGetName);
+    if (createResources == nullptr || listFor == nullptr || setDecoration == nullptr ||
+        setName == nullptr || combined == nullptr || nameOf == nullptr) {
+        return false;
+    }
+
+    if (!request.glslBindings.IsEmpty()) {
+        spvc_resources resources = nullptr;
+        if (createResources(compiler, &resources) != SPVC_SUCCESS) {
+            return false;
+        }
+
+        for (const spvc_resource_type type :
+             {SPVC_RESOURCE_TYPE_STORAGE_BUFFER, SPVC_RESOURCE_TYPE_STORAGE_IMAGE,
+              SPVC_RESOURCE_TYPE_SEPARATE_IMAGE, SPVC_RESOURCE_TYPE_SAMPLED_IMAGE}) {
+            const spvc_reflected_resource* list = nullptr;
+            size_t size = 0;
+            if (listFor(resources, type, &list, &size) != SPVC_SUCCESS) {
+                return false;
+            }
+
+            for (size_t index = 0; index < size; ++index) {
+                const unsigned set = decoration(
+                    compiler, list[index].id,
+                    static_cast<SpvDecoration>(cross_binding_detail::DecorationDescriptorSet));
+                const unsigned binding =
+                    decoration(compiler, list[index].id,
+                               static_cast<SpvDecoration>(cross_binding_detail::DecorationBinding));
+                for (const SpirvGlslBinding& entry : request.glslBindings) {
+                    if (entry.set == set && entry.binding == binding) {
+                        setDecoration(
+                            compiler, list[index].id,
+                            static_cast<SpvDecoration>(cross_binding_detail::DecorationBinding),
+                            entry.glBinding);
+                    }
+                }
+            }
+        }
+    }
+
+    const spvc_combined_image_sampler* pairs = nullptr;
+    size_t count = 0;
+    if (combined(compiler, &pairs, &count) != SPVC_SUCCESS) {
+        return false;
+    }
+
+    for (size_t index = 0; index < count; ++index) {
+        const char* texture = nameOf(compiler, pairs[index].image_id);
+        const char* sampler = nameOf(compiler, pairs[index].sampler_id);
+        for (const SpirvGlslCombined& entry : request.glslCombined) {
+            if (texture != nullptr && sampler != nullptr && entry.texture == StringView(texture) &&
+                entry.sampler == StringView(sampler)) {
+                // set_name은 NUL 종료 문자열을 받는다(이름 버퍼는 호출자가 NUL로 끝낸다).
+                setName(compiler, pairs[index].combined_id, entry.name.Data());
+                setDecoration(compiler, pairs[index].combined_id,
+                              static_cast<SpvDecoration>(cross_binding_detail::DecorationBinding),
+                              entry.unit);
+            }
+        }
+    }
+
+    return true;
+}
+
 } // namespace cross_binding_detail
 
 ShaderToolOutcome QuerySpirvSamplerUses(const SpirvCrossFunctions& cross, Span<const uint8> spirv,
@@ -485,6 +569,11 @@ ShaderToolOutcome CrossCompileSpirv(const SpirvCrossFunctions& cross,
         }
     }
 
+    if (ok && request.target == SpirvCrossTarget::Essl && request.glslPlainUniforms) {
+        ok = setBool(options, SPVC_COMPILER_OPTION_GLSL_EMIT_UNIFORM_BUFFER_AS_PLAIN_UNIFORMS,
+                     SPVC_TRUE) == SPVC_SUCCESS;
+    }
+
     if (ok && request.target == SpirvCrossTarget::Msl &&
         request.mslBufferSizeIndex != SpirvMslNoIndex) {
         ok = setUint(options, SPVC_COMPILER_OPTION_MSL_BUFFER_SIZE_BUFFER_INDEX,
@@ -504,6 +593,11 @@ ShaderToolOutcome CrossCompileSpirv(const SpirvCrossFunctions& cross,
     // ESSL에는 분리 texture·sampler가 없으므로 결합 sampler를 만든다(UE GL 경로와 같다).
     if (ok && backend == SPVC_BACKEND_GLSL) {
         ok = combine(compiler) == SPVC_SUCCESS;
+    }
+
+    if (ok && backend == SPVC_BACKEND_GLSL &&
+        (!request.glslBindings.IsEmpty() || !request.glslCombined.IsEmpty())) {
+        ok = AssignGlslBindings(cross, compiler, request);
     }
 
     const char* source = nullptr;

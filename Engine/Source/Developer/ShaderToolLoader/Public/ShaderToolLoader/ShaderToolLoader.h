@@ -228,6 +228,8 @@ struct SpirvCrossFunctions {
         CompilerHlslAddVertexAttributeRemap,
         MslResourceBindingInit2,
         CompilerMslAddResourceBinding2,
+        CompilerSetDecoration,
+        CompilerSetName,
         Count
     };
 
@@ -254,7 +256,9 @@ struct SpirvCrossFunctions {
                                                    "spvc_compiler_hlsl_add_resource_binding",
                                                    "spvc_compiler_hlsl_add_vertex_attribute_remap",
                                                    "spvc_msl_resource_binding_init_2",
-                                                   "spvc_compiler_msl_add_resource_binding_2"};
+                                                   "spvc_compiler_msl_add_resource_binding_2",
+                                                   "spvc_compiler_set_decoration",
+                                                   "spvc_compiler_set_name"};
     void* address[Count] = {};
 };
 

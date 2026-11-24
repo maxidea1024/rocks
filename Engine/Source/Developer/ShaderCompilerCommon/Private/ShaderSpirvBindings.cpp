@@ -1,5 +1,7 @@
 #include <ShaderCompilerCommon/ShaderSpirvBindings.h>
 
+#include "ShaderCompilerCommonInternal.h"
+
 #include <Core/Algorithms.h>
 #include <spirv_reflect.h>
 
@@ -446,14 +448,18 @@ bool AssignMetalBindingIndices(ShaderBindingLayout& layout, Array<MetalResourceB
 
     // storage image의 slot은 texture 번호(= buffer 번호)다. 값 1 규칙대로 (종류, slot) 순으로 다시
     // 맞춘다.
+    SortShaderBindingResources(layout);
+    return true;
+}
+
+void SortShaderBindingResources(ShaderBindingLayout& layout) noexcept {
     layout.resources.Sort(
         [](const ShaderBindingResource& a, const ShaderBindingResource& b) noexcept {
             return a.kind < b.kind || (a.kind == b.kind && a.slot < b.slot);
         });
-    // 멤버 범위는 자원 순서를 따라야 한다(firstMember를 다시 잇는다).
     Array<ShaderBindingMember> members(layout.members.GetAllocator());
     if (!members.TryReserve(layout.members.Size())) {
-        return false;
+        return;
     }
 
     for (ShaderBindingResource& resource : layout.resources) {
@@ -466,7 +472,6 @@ bool AssignMetalBindingIndices(ShaderBindingLayout& layout, Array<MetalResourceB
     }
 
     layout.members = Move(members);
-    return true;
 }
 
 ShaderWorkerJobStatus BuildSpirvBindingLayout(const SpirvBindingRequest& request,
@@ -509,6 +514,11 @@ ShaderWorkerJobStatus BuildSpirvBindingLayout(const SpirvBindingRequest& request
     ShaderBindingLayout layout(allocator);
     if (!NormalizeShaderReflection(*request.format, reflection, request.layouts, layout,
                                    diagnostics)) {
+        return ShaderWorkerJobStatus::CompileError;
+    }
+
+    if (request.format->backend == ShaderBackend::OpenGL &&
+        !BuildGlesPlan(reflection, layout, request.uses, out.gles, diagnostics)) {
         return ShaderWorkerJobStatus::CompileError;
     }
 

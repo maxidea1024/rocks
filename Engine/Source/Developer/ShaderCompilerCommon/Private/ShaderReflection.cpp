@@ -801,6 +801,31 @@ private:
             return Over("render target count", renderTargets, limits.renderTargets);
         }
 
+        // 상수 버퍼 에뮬레이션 형식의 단계 vec4 합(4항 모바일 상한, 16.1절 SSD42)이다.
+        const usize stageIndex = reflection_.stage == ShaderStageVertex
+                                     ? 0
+                                     : (reflection_.stage == ShaderStagePixel ? 1 : 2);
+        if (limits.uniformVectors[stageIndex] != NoShaderLimit) {
+            uint64 vectors = out_.rootConstantBytes / SlotBytes;
+            for (const ShaderBindingResource& binding : pending_) {
+                vectors += binding.kind == ShaderResourceKind::ConstantBuffer
+                               ? binding.constantBufferBytes / SlotBytes
+                               : 0;
+            }
+
+            if (vectors > limits.uniformVectors[stageIndex]) {
+                return Over("emulated uniform vector count", vectors,
+                            limits.uniformVectors[stageIndex]);
+            }
+        }
+
+        // ES 3.2의 VS·PS storage block 최소 보장은 0이다(4항 모바일 상한).
+        if (format_.backend == ShaderBackend::OpenGL && reflection_.stage != ShaderStageCompute &&
+            storage > 0) {
+            return Fail("OpenGL ES vertex and pixel shaders cannot use structured or raw buffers "
+                        "(ShaderSystem 7.2 item 4)");
+        }
+
         if (interStage_ > limits.interStageVectors) {
             return Over("inter-stage vector count", interStage_, limits.interStageVectors);
         }
