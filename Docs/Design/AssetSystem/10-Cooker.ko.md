@@ -21,6 +21,8 @@
 
 ### 10.1 구현에서 정한 점(A1b — 쿠킹 매니페스트 v1)
 
+v1은 A4f에서 v2(backend 표·비에셋 산출물 표 — 10.3절 4항)로 바뀐다. 아래 v1 규칙은 v2에서도 그대로이고 v2는 칸을 더한다.
+
 10절 매니페스트 v1 서술에서 비어 있던 곳을 다음처럼 정했다. 애매한 곳은 UE 5.8 IoStore(container TOC `FIoStoreTocHeader`·`FIoStoreTocEntryMeta`, container header `FIoContainerHeader`의 패키지별 import 목록·soft 참조 목록)와 asset registry 쿠킹 산출물(PrimaryAsset·청크 표시)을 따랐고, 이름은 Rocks식이다(대응표는 아래 끝).
 
 1. **물리 배치**: 모든 정수는 little-endian, 문자열은 `u64 길이 + UTF-8 byte`(종단 NUL 없음 — Serialization `ArchiveWriter`와 같은 표기), Guid는 high·low u64다. 패딩이 없어 같은 모델이면 같은 byte다(결정성).
@@ -72,8 +74,8 @@
 10절을 구체화한다. 애매한 곳은 UE 5.8 Cook(`UCookOnTheFlyServer`·`FPackageData`·`UAssetManager` PrimaryAsset 규칙·`FAssetBundleData`·증분 쿠킹의 TargetDomain 키)을 따르고 이름은 Rocks식이다.
 
 1. **모듈** `Engine/Source/Developer/AssetCooker`(Developer — 에디터·도구만). 의존 `AssetDatabase`(색인·EditorPackageSet)·`AssetRuntime`(WritePackage·CookedManifest)·`AssetNugget`(키 writer·SCC 키·NuggetCache)·`ReflectionText`(설정 codec)·`ObjectRuntime`. 명령은 `AssetCommandlets`의 `asset-cook`.
-2. **TargetProfile**(리플렉션 struct): `id`(String — 파일 이름과 같아야 함), `graphicsBackend`(String — A4는 기록만), `bulkCodec`(enum None·Zstd, 기본 None — 10절), `bulkAlignment`(u32, 0이면 쿠킹 기본 4096). 텍스처 칸(형식 지원 표·LOD 그룹 — LOD 그룹 Map은 `MergeByKey`)은 A5가 더한다. 엔진 파일 `Engine/Config/TargetProfiles/<id>.json`(엔진 기본 `Windows`·`Android`) 위에 프로젝트 `Config/TargetProfiles/<id>.json`을 ReflectionText `ImportJson`으로 덮는다 — 의미는 codec 기본: struct는 재귀 멤버 병합, 배열은 통째 교체(10절의 "그룹 단위"를 이것으로 확정). 엔진 파일이 없는 id는 `InvalidSetting`(엔진 플랫폼 목록이 기준 — 프로젝트만의 프로파일은 받지 않는다). **프로파일 출력 설정 SHA-256** = 병합한 TargetProfile을 `NuggetKeyWriter`의 `WriteReflected`로 흘린 SHA-256(필드 이름·타입·값 — 칸을 더하면 바뀐다).
-3. **CookSettings**(리플렉션 struct, `Config/CookSettings.json`, 없으면 기본값): `alwaysCook`·`neverCook`(Array<String> — 논리 경로 `/Game/A/B` 또는 디렉터리 `/Game/A/`(끝 `/`)), `primaryAssets`(Array<`PrimaryAssetRule{type: 클래스 도구 이름, directories: Array<String>}`>), `cookSoftReferences`(bool, 기본 false). 경로는 LogicalPath 규칙으로 검증(위반 `InvalidSetting`). **CookSettings SHA-256**도 같은 방식. bundle은 규칙이 아니라 필드 지정자에서 온다(결정 9 — 10절 문장을 고친다).
+2. **TargetProfile**(리플렉션 struct): `id`(String — 파일 이름과 같아야 함), `graphicsBackend`(String — A4는 기록만, A4f에서 `graphicsBackends`·`shaderFormats`로 바뀐다 — 10.3절 1항), `bulkCodec`(enum None·Zstd, 기본 None — 10절), `bulkAlignment`(u32, 0이면 쿠킹 기본 4096). 텍스처 칸(형식 지원 표·LOD 그룹 — LOD 그룹 Map은 `MergeByKey`)은 A5가 더한다. 엔진 파일 `Engine/Config/TargetProfiles/<id>.json`(엔진 기본 `Windows`·`Android`) 위에 프로젝트 `Config/TargetProfiles/<id>.json`을 ReflectionText `ImportJson`으로 덮는다 — 의미는 codec 기본: struct는 재귀 멤버 병합, 배열은 통째 교체(10절의 "그룹 단위"를 이것으로 확정). 엔진 파일이 없는 id는 `InvalidSetting`(엔진 플랫폼 목록이 기준 — 프로젝트만의 프로파일은 받지 않는다). **프로파일 출력 설정 SHA-256** = 병합한 TargetProfile을 `NuggetKeyWriter`의 `WriteReflected`로 흘린 SHA-256(필드 이름·타입·값 — 칸을 더하면 바뀐다).
+3. **CookSettings**(리플렉션 struct, `Config/CookSettings.json`, 없으면 기본값): `alwaysCook`·`neverCook`(Array<String> — 논리 경로 `/Game/A/B` 또는 디렉터리 `/Game/A/`(끝 `/`)), `primaryAssets`(Array<`PrimaryAssetRule{type: 클래스 도구 이름, directories: Array<String>}`>), `cookSoftReferences`(bool, 기본 false), `cookDevelopmentShaders`(bool, 기본 false — A4f, 10.3절 2항). 경로는 LogicalPath 규칙으로 검증(위반 `InvalidSetting`). **CookSettings SHA-256**도 같은 방식. bundle은 규칙이 아니라 필드 지정자에서 온다(결정 9 — 10절 문장을 고친다).
 4. **대상 계산**(색인만 — 패키지를 열지 않는다, UE가 AssetRegistry로 쿠킹 대상을 세는 것과 같다):
    - 뿌리: 전체 쿠킹은 alwaysCook이 가리키는 에셋(디렉터리는 재귀) ∪ PrimaryAsset(규칙 타입 또는 그 파생 타입이며 규칙 디렉터리 아래). 부분 쿠킹은 인자 경로(에셋·디렉터리).
    - 폐포: Hard 의존(+ cookSoftReferences면 Soft) + bundle 구성원(결정 9 — 색인 태그, cookSoftReferences와 무관). EditorOnly·Build·ImportOwner 간선은 따라가지 않는다.
@@ -282,3 +284,61 @@
   - 거부는 `InvalidArgument` + `CookConfigFailure{code InvalidSetting, file, field, index, line, column}`, codec 진단은 호출자의 `TextDiagnostics`에 남는다. 읽기·할당 오류는 code None + 그 오류(규칙 위반과 구분 — 경로 판정 `ClassifyCookPath`도 할당 실패를 `OutOfMemory`로 돌려준다, 처음 구현은 규칙 위반으로 바꿨다).
   - 경로: 에셋은 LogicalPath 규칙, 디렉터리는 끝 '/'를 뗀 것이 마운트(`/Game/` — 대소문자 무시)이거나 논리 경로다. 마운트 없는 `/Game`(끝 '/' 없음)은 거부(에셋 경로에는 이름이 필요하다).
   - 설정 파일 상한 `CookConfigMaxFileBytes` 1 MiB.
+
+### 10.3 A4f 셰이더 라이브러리 연동 설계(2026-11-24 — ShaderSystem 개정 32 SSD10–SSD15의 에셋 쪽)
+
+렌더 세션(SH2 — [ShaderSystem](../ShaderSystem/12-FormatDefinitionsCooking.ko.md) 12.3.1절, 14절 개정 요구)이 에셋 쪽에 요구한 것을 정한다. 셰이더 쪽은 `CookShaderLibraries`와 아래 훅 구현만 맡고(ShaderSystem 16.1절 범위), 이 절의 TargetProfile 칸·매니페스트 v2·비에셋 산출물 단계·`--engine`은 에셋 세션이 구현한다(A4f). 하위호환은 두지 않는다(옛 프로필·v1 매니페스트는 다시 쿠킹한다). 애매한 곳은 UE 5.8과 같게 했다 — UE는 엔진 전역 셰이더 라이브러리("Global")도 프로젝트 쿠킹이 만들고(ShaderCodeLibrary.cpp:2272) backend별 형식 목록을 플랫폼 설정에 둔다(`D3D12TargetedShaderFormats` — WindowsDynamicRHI.cpp:624–626).
+
+**구현 시점**: SH2d(셰이더 쪽 마지막 단계 — 순서 SH2a → b → c → e → f → d) 착수 전에 끝낸다. 사용자가 정한 에셋 순서(A5 → A6 → 화면 마일스톤)를 바꾸지 않으므로 끼울 자리는 사용자와 정한다.
+
+1. **TargetProfile 칸**(SSD10 — 10.2절 2항의 `graphicsBackend`를 바꾼다):
+   - `graphicsBackends`(`Array<String>`): 런타임이 시도하는 backend 순서. 병합은 ReflectionText 기본(배열 통째 교체).
+   - `shaderFormats`(`Map<String, Array<String>>`): backend → 선호 순서 형식 id 목록. 병합은 **Replace**(프로젝트 파일에 있으면 Map 전체를 바꾼다 — 키별 병합을 쓰지 않는다). backend 목록과 형식 목록이 반쪽만 덮여 엇갈리지 않게 한다. 리플렉션 필드 지정자로 Map의 병합 의미를 Replace로 둔다(10.2절 2항 "LOD 그룹 Map은 `MergeByKey`"와 같은 방식 — 지정자 이름은 리플렉션 쪽 기존 것을 쓴다, 구현 때 확인).
+   - 두 칸은 프로파일 출력 설정 SHA-256에 들어간다(`WriteReflected` — 칸이 바뀌면 전체를 다시 쿠킹한다).
+   - 구조 검증(AssetCooker `ReadTargetProfile` — 위반 `InvalidSetting`, `CookConfigFailure` 필드·index): backend 이름이 고정 어휘(`D3D12`·`D3D11`·`Vulkan`·`Metal`·`OpenGL` — 구현 여부와 무관) 밖, `graphicsBackends` 중복, 목록의 backend에 형식 목록이 없거나 비었음, 목록에 없는 backend 키, 형식 id 문법(`[A-Z0-9_]` 1–64 byte) 위반, 한 backend 안 중복 형식. `graphicsBackends`가 비어 있으면 셰이더 없는 프로필이다(비에셋 산출물 단계가 셰이더 라이브러리를 만들지 않는다 — 형식 목록도 비어야 한다).
+   - 형식 정의 대조(형식 id가 형식 정의 디렉터리에 있는지·자리만 둔 형식·형식 정의의 backend가 키와 같은지·`GLES31_PC` 금지)는 형식 정의를 아는 쪽, 곧 비에셋 산출물 단계(3항 — ShaderCompiler 구현)가 단계 시작 때 한다(위반은 같은 `InvalidSetting`, 진단 sink로). AssetCooker는 ShaderCompiler에 의존하지 않는다.
+   - 엔진 파일(`Engine/Config/TargetProfiles/`): `Windows`(`graphicsBackends` [`D3D12`, `D3D11`, `Vulkan`], `shaderFormats` {`D3D12`: [`D3D12_SM6`], `D3D11`: [`D3D11_SM5`], `Vulkan`: [`VULKAN_SM5`]}), `Android`(`OpenGL`: [`GLES31_ANDROID`] — SH6에서 `Vulkan`: [`VULKAN_ANDROID`]을 앞에 더한다), `MacOS`(새 파일 — `Metal`: [`METAL_SM5`]). 프로필 id `MacOS`는 11.8절 `asset.runtime_profile` 기본 `Mac`과 다르다 — A4f에서 기본 이름을 프로필 id와 같게 `MacOS`로 바꾼다.
+   - 호스트 플랫폼 TargetProfile(SSD24): `shader-compile`의 기본 형식 목록과 Development 공급자는 호스트 플랫폼 프로필(Windows 호스트 `Windows`, macOS 호스트 `MacOS` — 프로젝트 재정의를 합친 결과)을 쓴다. 이를 위해 AssetCooker의 `ReadTargetProfile`을 셰이더 도구가 부를 수 있는 위치로 공개한다(같은 함수 — 출처를 하나로 둔다).
+2. **CookSettings**: `cookDevelopmentShaders`(bool, 기본 false — SSD11). 참이면 비에셋 산출물 단계가 개발 전용 퍼뮤테이션을 라이브러리에 넣는다. CookSettings SHA-256에 들어간다(`WriteReflected` 그대로).
+3. **비에셋 산출물 단계 훅**(SSD11): 에셋 쿠킹(10.2절 7항) 뒤, 게시(10.2절 10항) 전에 실행하는 단계다.
+   - AssetCooker가 interface를 둔다: `CookArtifactStage{정체성 NuggetProcessorId, Run(const CookArtifactRequest&, CookArtifactSink&)}`. 요청은 병합한 TargetProfile·CookSettings·쿠킹 루트·staging 디렉터리·NuggetCache·진단 sink·엔진 전용 여부·이전 매니페스트의 같은 종류 산출물 항목(재사용 판정용)이고, sink는 산출물 항목(4항 artifact 칸 + staging 파일 경로)과 보고서 절을 받는다.
+   - 등록: 모듈 수명 객체가 시작 때 AssetCooker의 단계 표(`CookArtifactStageTable` — 종류별 하나, 같은 종류 두 번 등록은 오류)에 넣는다(ShaderSystem 12.2.1절 SSD3의 등록 방식과 같다). `asset-cook`을 실행하는 Commandlet이 ShaderCompiler를 링크하므로 표에 셰이더 단계가 있다. AssetCooker → ShaderCompiler 의존은 없다(의존 방향: ShaderCompiler → AssetCooker interface).
+   - 프로필의 `graphicsBackends`가 비어 있지 않은데 `ShaderLibrary` 단계가 등록되지 않았으면 쿠킹 실패 `UnsupportedCapability`(셰이더 없는 쿠킹 결과를 게시하지 않는다 — 런타임이 `IncompatibleCook`으로 늦게 실패한다).
+   - 단계의 job 실패(컴파일 오류·상한)는 에셋 오류처럼 보고서에 모으고 하나라도 있으면 게시하지 않는다(10절). 이 호스트가 만들 수 없는 형식(macOS의 DXBC 등)은 `UnsupportedCapability` 진단으로 쿠킹 실패다(셰이더 쪽 판정).
+   - 순서: 단계는 에셋 쿠킹 뒤에 돈다 — 머티리얼 셰이더 항목은 머티리얼 쿠킹(에셋 처리기)이 남긴 입력을 `Project` 라이브러리에 더한다(머티리얼 시스템, 후속).
+4. **매니페스트 v2**(SSD13 — 10.1절 v1을 대체, formatVersion 2, v1 reader는 두지 않는다 — v1 파일은 `UnsupportedVersion`):
+   ```
+   magic "RMAN" | formatVersion u32 = 2 | entryCount u32
+   | profileId string | profileSettingsSha256 (32) | cookSettingsSha256 (32) | cookerVersion u32
+   | cookedByEngineVersion: major u32, minor u32, patch u32
+   | backendCount u32 | backend × backendCount
+   | entry × entryCount
+   | artifactCount u32 | artifact × artifactCount
+   | crc32 u32
+   backend  = name string | formatCount u32 | formatId string × formatCount
+   artifact = kind u8 | name string | formatId string | path string | bytes u64 | sha256 (32) | cookKey (32)
+   ```
+   - 머리의 backend 표는 쿠킹한 프로필의 `graphicsBackends` 순서와 backend마다 `shaderFormats` 순서다(런타임 형식 선택 SSD15가 실행 파일 설정이 아니라 쿠킹 결과를 기준으로 고른다). 셰이더 없는 프로필은 backendCount 0.
+   - artifact 칸 규칙(10.1절 2항 판정 방식 — 위반은 `CorruptPackage`, 새 `CookedManifestField` 칸 `Backend`·`ShaderFormat`·`ArtifactKind`·`ArtifactName`·`ArtifactFormat`·`ArtifactPath`·`ArtifactBytes`·`ArtifactOrder`, detail = artifact 번호): kind는 알려진 값(`CookArtifactKind::ShaderLibrary` = 1), 이름은 `Engine`·`Project`(엔진 전용 쿠킹은 `Engine`만), formatId는 머리 backend 표에 있는 형식, path는 정확히 `Shaders/<이름>-<formatId>-<sha256 앞 16 hex 소문자>.rshl`(내용 주소 — SSD12, 다른 철자는 손상), bytes는 1 이상 `CookedArtifactMaxBytes`(4 GiB) 이하, 표는 (kind, 이름, formatId) 엄격 오름차순(중복 없음).
+   - 머리 규칙: backend 이름은 고정 어휘, 중복 없음, backend마다 형식 1개 이상, 형식 id 문법, 매니페스트 전체에서 형식 id 중복 없음(형식은 backend 하나에 속한다).
+   - 상한(이름 있는 상수): `CookedManifestMaxBackends` 8, `CookedManifestMaxFormatsPerBackend` 16, `CookedManifestMaxArtifacts` 4096. 개수 칸은 남은 byte로 담을 수 있는 최소 크기보다 크면 읽기 전에 거부한다(10.1절 3항과 같은 규칙).
+   - `CheckCookedManifestMerge`는 그대로다 — backend 표는 프로파일 출력 설정 SHA-256에 이미 담긴다. 병합은 artifact 표를 (kind, 이름, formatId)로 합친다(이번 쿠킹이 만든 항목이 이긴다).
+   - golden byte·14.1.3 대조표·로더 시험의 픽스처를 v2로 다시 만든다.
+5. **게시와 정리**(SSD12 — 10.2절 10항과 같은 규칙): 단계가 staging에 쓴 파일을 `Shaders/<이름>`으로 `Move(no-replace)` → 있으면 크기·SHA-256 대조(같으면 임시 삭제, 다르면 `CorruptEntry` 경고 + `Replace`) → `SyncDirectory` → 매니페스트 `Replace`(전환점은 매니페스트 하나 — 패키지와 같은 거래). 전체 쿠킹은 새 매니페스트가 가리키지 않는 `Shaders/` 파일을 지우고(못 지우면 경고) 부분 쿠킹은 지우지 않는다.
+6. **부분 쿠킹 재사용**(10.2절 8항 규칙 그대로): 단계가 cookKey(셰이더 쪽 정의 — 라이브러리 형식 버전·형식 정의 SHA-256·셰이더 타입 집합·항목 표·job 키 목록, SSD13)를 계산하고, 이전 매니페스트의 같은 (kind, 이름, formatId) 항목이 cookKey가 같고 `Shaders/`의 그 파일 크기·SHA-256이 매니페스트와 같을 때만 그 파일을 재사용한다(sink에 기존 항목을 그대로 넘긴다). job 키 계산은 늘 한다(너겟 적중이면 컴파일하지 않는다).
+7. **엔진 전용 쿠킹 `asset-cook --engine --profile=<id>`**(SSD11):
+   - 프로젝트 없이 실행한다(`--project`와 함께 쓰면 사용법 오류). 에셋 대상은 없다(entryCount 0) — 비에셋 산출물 단계만 엔진 전용 요청으로 돌아 `Engine` 라이브러리만 만든다.
+   - 쿠킹 루트 `Engine/Saved/Cooked/<Profile>/`, 너겟 root는 엔진 폴더(셰이더 쪽 `ResolveShaderNuggetRoot` — Saved 아래 너겟 디렉터리), 프로필은 엔진 파일만(프로젝트 재정의 없음), CookSettings는 기본값.
+   - 잠금·색인: 에셋 DB를 열지 않는다(색인 없음 — 대상이 없다). 동시 쿠킹을 막는 쓰기 잠금은 쿠킹 루트의 잠금 파일(`<쿠킹 루트>/.lock` — 8절 에셋 DB 잠금과 같은 플랫폼 잠금 원시, `--wait` 의미도 같다)이다. 프로젝트 쿠킹도 같은 쿠킹 루트 잠금을 에셋 DB 잠금 안에서 함께 쥐어 루트 단위로 직렬화한다.
+   - 엔진만 쓰는 실행(Sandbox·엔진 시험·설치 SDK의 엔진 전용 실행)은 `asset.cooked_root`를 엔진 쿠킹 루트로 둔다(11.8절). 설치 SDK 패키징은 그 결과를 복사한다.
+8. **런타임 열기**(SSD14 — 11절 로더 시작): 로더 시작이 매니페스트를 연 뒤 모델의 backend 표와 artifact 표를 공개한다(`CookedManifest::Backends()`·`Artifacts()`·`FindArtifact(kind, 이름, formatId)`). RenderBase 셰이더 집합이 실행 장치에 맞는 형식(SSD15 — 셰이더 쪽)의 `Engine`·`Project` 항목을 찾아 연다. 파일 크기·SHA-256 대조는 패키지와 같은 코드로 한다 — 새 함수 `CheckCookedArtifactFile`(다르면 `CorruptPackage`, section = `ArtifactBytes`·`ArtifactSha256`). 항목이 없으면 셰이더 쪽이 `IncompatibleCook`이다.
+9. **손상 코드**(SSD12·SSD14): 게시 때 같은 이름의 다른 파일 `CorruptEntry`(경고), 런타임 크기·SHA-256 불일치 `CorruptPackage` — 새 코드를 만들지 않는다.
+
+| Rocks | UE 5.8 |
+|---|---|
+| TargetProfile `graphicsBackends`·`shaderFormats` | 플랫폼 설정 `D3D12TargetedShaderFormats` 등 backend별 형식 목록 |
+| 비에셋 산출물 단계(`CookArtifactStage`) | 쿠커가 ShaderCodeLibrary를 열고 닫는 단계(`UCookOnTheFlyServer` — `ShaderCodeLibrary` 저장) |
+| `Shaders/<이름>-<형식>-<hash>.rshl` | `ShaderArchive-<Library>-<Format>-<Platform>.ushaderbytecode` |
+| `asset-cook --engine` | (UE는 프로젝트 쿠킹이 Global 라이브러리를 만든다 — 엔진 전용 실행용 Rocks 추가) |
+
+**시험(A4f — 14.1절 대조표는 구현 때)**: TargetProfile 구조 검증 각 위반·Replace 병합(프로젝트가 한 backend만 적어도 Map 전체 교체)·SHA 변화, CookSettings `cookDevelopmentShaders` SHA, 단계 표 등록(중복 오류)·미등록 `UnsupportedCapability`·셰이더 없는 프로필, 시험 단계(가짜 `CookArtifactStage`)로 게시·`CorruptEntry`·전체 쿠킹 정리·부분 쿠킹 재사용(cookKey·파일 대조)·job 실패 시 게시 안 함, 매니페스트 v2 왕복·golden·각 칸 손상·상한·v1 `UnsupportedVersion`·병합, `--engine`(프로젝트 없음·잠금·`Engine` 항목만·`--project` 함께 사용 오류), 로더 `FindArtifact`·`CheckCookedArtifactFile` 불일치 `CorruptPackage`.
