@@ -271,6 +271,8 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 
 컴파일 인자는 desktop과 같은 경고·언어 규칙에 `--target=<abi>-linux-android<api>`·`-fPIC`·`-DROCKS_PLATFORM_ANDROID=1`을 더하고, 링크는 `-static-libstdc++`다(엔진은 STL을 쓰지 않지만 compiler runtime이 필요). 메타컴파일러는 같은 NDK clang으로 AST를 만들며 검토한 대상 인자만 허용한다. `test`는 실행 파일을 `/data/local/tmp/rocks-test`에 올려 실행하고 보고서를 회수하며, host에서 자식 프로세스를 띄우는 harness(Fatal 음성 대조)·self·meta 검사는 Android에서 아직 실행하지 않는다. Android ASan과 Installed SDK 내보내기는 거부한다. Windows host에서 x86_64는 빌드·에뮬레이터 테스트 662건 통과, arm64는 Release 빌드만 확인했다. macOS host 교차 빌드와 macOS 자체 빌드는 하지 않았다.
 
+Android 창·입력(UE처럼 NativeActivity 상속 액티비티와 `android_native_app_glue`, 터치·마우스·키·패드·뒤로 가기)은 아직 없다(`PlatformWindow`는 Android에서 Unsupported). 설계는 [터치 입력](TouchInput.ko.md) 4.2절·TI5이고, 선행은 APK 패키징과 Android 그래픽 backend다.
+
 ## 플랫폼 선택과 실패 정책
 
 - 지원 대상, 호스트, 타깃, 아키텍처 및 필수 구현 목록을 빌드 규칙에서 명시한다. 알 수 없는 플랫폼은 타 플랫폼으로 대체하지 않고 진단과 함께 빌드를 중단한다. cross-compilation 지원 전에는 지원된다고 가정하지 않는다.
