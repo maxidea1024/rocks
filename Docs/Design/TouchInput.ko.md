@@ -194,6 +194,8 @@ UE 5.8 소스(`C:\github\UnrealEngine`, 경로는 `Engine/Source` 기준)에서 
 
 진행(2026-11-24): TI1을 구현했다. `InputEventType::TouchBegan`·`TouchMoved`·`TouchEnded`(`touchIndex`·`force`·`hasForce`·`cancelled`), `MaxTouches`·`MousePointerIndex`, `Key::Back`, `input::TouchIndexAllocator`(끝난 번호는 `EndFrame`까지 잡아 둠), `InputState` 터치 질의·FocusLost 취소·`BeginFrame(events, eventsLost)` 손실 복구·require-release, `InputState::SetMouseTouchEmulation`(설정 `input.useMouseForTouch` 연결은 입력 설정이 생길 때)이다. 시험은 `Input_Touch*`·`Input_MouseTouchEmulation`·`Input_TouchIndexAllocator`, Android 에뮬레이터에서 탭·스와이프·Back을 확인했다(AndroidPlatform 9절). Android 압력 지원 판정은 후속이다(그 문서 5절).
 
+TI2(2026-11-24): Win64 창이 `WM_POINTERDOWN`·`UPDATE`·`UP`·`CAPTURECHANGED`의 터치·펜을 `TouchIndexAllocator`로 번호를 매겨 터치 이벤트로 넘기고 `DefWindowProc`에 넘기지 않는다. 마우스 포인터는 그대로 `WM_MOUSE*`다. 메시지·플래그·압력 변환은 `PlatformWindow/Private/Common/PointerTouchMapping`(모든 플랫폼에서 시험 — `PointerTouchMapping_*`)이다. 터치 화면 없는 PC에서 `InjectTouchInput`으로 Sandbox 창에 가상 탭을 넣어 `Pawn received touch 0`·`ended`가 오고 마우스 흉내 클릭이 함께 오지 않는 것을 사람 확인했다. 실제 터치 화면·펜은 장비가 생기면 확인한다.
+
 TI1–TI3은 화면·UI와 무관하다. 그래도 계획 순서를 지켜 입력 상세 계획의 I 단계와 함께 착수한다. 이 문서는 그때 터치가 빠지지 않게 하려는 것이다.
 
 ## 7. Rocks 이름 대응
