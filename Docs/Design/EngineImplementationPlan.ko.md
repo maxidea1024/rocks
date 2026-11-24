@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.23 · 개정 1.19 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.25 · 개정 1.20 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -39,6 +39,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph/README.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
 **1.19 엔진 컴포넌트:** UE 5.8 컴포넌트를 들이는 범위·선행·순서를 [컴포넌트 도입](ComponentCatalog/README.ko.md)에 둔다. 1부는 `Engine/Classes/Components`(필수 58, 선행 CR1–CR26, 묶음 CM0–CM11), 2부는 그 밖의 Engine 폴더·Runtime 모듈(필수 56, 선행 CR27–CR39, 묶음 CM12–CM21), 3부는 엔진 플러그인(필수 31·필수(실험 기반) 25, 선행 CR40–CR54, 묶음 CM22–CM31, 가상 제작·방송 계열은 범위 밖)이다. BSP(`UModelComponent`·`UBrushComponent`)와 폐기 계열은 제외하고 volume 형상은 공용 `VolumeShape`로 대체한다. 20.2절 tick group 문장을 [엔진 런타임](EngineRuntime/08-TickScheduler.ko.md) 8절의 구현된 단계 기준으로 고치고, 옛 그룹 PhysicsSync·AnimationFinalize를 Physics phase 끝의 엔진 단계로 바꾼다(UE 대응은 엔진 런타임 8절). 15.1·16.1·19·20.5·21·24.1·33.2절에 컴포넌트 쪽 링크와 결정(캐릭터 이동 CD15, Chaos 파괴 계열 CD14, VFX 효과 CD16, CameraDirector = 카메라 시스템 정본, 실험 플러그인 CD20, 범위 밖 CD22)을 더한다. 개정 범위는 표지·15.1·16.1·19·20.2·20.5·21·24.1·33.2절이다.
+
+**1.20 Jolt 확인과 반입:** 사용자 결정(2026-11-25)으로 Jolt 스펙 확정과 라이브러리 반입을 계획 순서와 무관하게 앞당긴다. 물리 모듈·어댑터 구현은 M4 순서 그대로다. [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 개정 3이 Jolt v5.7.0 소스로 검증 항목 J1–J21과 UE 소스로 U1·U3을 확인했고, 라이브러리 반입(JL1, 같은 문서 10절)의 판·범위·빌드 설정을 정했다. 16.1·16.4절을 개정한다.
 
 ## 1. 목표와 실행 전략
 
@@ -1543,7 +1545,7 @@ M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 �
 
 ### 16.1 통합 구조
 
-물리 middleware는 모든 대상 플랫폼에서 단일 고정 commit의 Jolt Physics를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다(개정 1.12 — 2026-11-17 사용자 결정으로 PhysX 5에서 되돌림). [S10](https://github.com/jrouwe/JoltPhysics) Jolt는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. Rocks(UE 5.8과 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, cm)와 Jolt 사이의 축 사상, 극성·축성 벡터·quaternion·winding·heightfield 변환, 물리량별 단위 변환은 adapter 경계에서만 하며 계약과 검증 항목은 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다. 아래에서 Jolt API의 이름·동작으로 적은 것 중 확인하지 않은 것은 어댑터 경계 문서 8절의 검증 항목이다.
+물리 middleware는 모든 대상 플랫폼에서 단일 고정 commit의 Jolt Physics를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다(개정 1.12 — 2026-11-17 사용자 결정으로 PhysX 5에서 되돌림). [S10](https://github.com/jrouwe/JoltPhysics) Jolt는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. Rocks(UE 5.8과 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, cm)와 Jolt 사이의 축 사상, 극성·축성 벡터·quaternion·winding·heightfield 변환, 물리량별 단위 변환은 adapter 경계에서만 하며 계약과 검증 항목은 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다. Jolt API의 이름·동작은 어댑터 경계 문서 개정 3이 Jolt v5.7.0 소스로 확인했다(8절 결과표).
 
 Collision은 raycast·sweep·overlap·trigger·filter, Dynamics는 rigid body·constraint·sleep·CCD를 담당한다. query-only collider를 지원한다. Sphere·Capsule·Box·Convex·Compound·TriangleMesh·Heightfield를 우선하며 dynamic body는 convex/compound를 기본으로 한다. 고밀도 virtual geometry와 collision mesh·nav geometry는 별도 cook 산출물이다.
 
@@ -1594,23 +1596,23 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 
 ### 16.4 Jolt 버전·빌드·결정성 범위
 
-개정 1.12(2026-11-17 사용자 결정)로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌렸다. 개정 1.6에서 PhysX 5에 대해 정한 계약(O3DE fork·CUDA·`Px*` 수명·`PxSerialization`·NEON 추정 경로)은 33.11절에 이력으로만 남긴다. 아래에서 Jolt의 build 옵션·API 이름·동작으로 적은 것은 S82(개정 1.6 검토 때 확인)를 빼면 이 개정에서 다시 확인하지 않았으며, 착수 전 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 8절 검증 항목(J1–J15)으로 확인한다.
+개정 1.12(2026-11-17 사용자 결정)로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌렸다. 개정 1.6에서 PhysX 5에 대해 정한 계약(O3DE fork·CUDA·`Px*` 수명·`PxSerialization`·NEON 추정 경로)은 33.11절에 이력으로만 남긴다. 아래에서 Jolt의 build 옵션·API 이름·동작으로 적은 것은 개정 1.20에서 Jolt v5.7.0 소스로 확인했다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 8절 J1–J21). 판·반입 범위·build 정의의 정본은 같은 문서 10절(JL1)이다.
 
 **단일 버전.** Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS ARM64, Android ARM64/x86_64는 모두 같은 고정 commit의 Jolt를 source에서 빌드한다. [S10](https://github.com/jrouwe/JoltPhysics) 플랫폼별로 다른 version을 섞지 않는다.
 
 **version manifest.** target별로 version·commit·patch 목록·build flag·physics system 기본 설정(길이 차원 설정값은 cm 설정을 adapter가 변환한 값)·cook parameter·축 사상·license와 NOTICE를 기록하며, gameplay에 영향을 주는 항목은 모든 target에서 같은 값이어야 한다. prebuilt binary와 build 시 package 자동 다운로드는 사용하지 않는다.
 
-**빌드 설정 통일.** Jolt는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. 예외·RTTI는 끈다. 결정성·정밀도에 관한 build 옵션(플랫폼 간 결정성 build, double 위치 build)은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다.
+**빌드 설정 통일.** Jolt는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. 예외·RTTI는 끈다. 결정성·정밀도에 관한 build 옵션(플랫폼 간 결정성 build, double 위치 build)은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다. 반입 기본값은 플랫폼 간 결정성 build 켬, double 위치 build 끔, assert 모든 구성 켬이다(어댑터 경계 10.2절).
 
 **cook.** 너겟 key에 Jolt version·commit·cook parameter·adapter cook schema·축 사상과 단위 변환 version을 포함하고, 불일치는 load 시 거부한다. Jolt 형상 직렬화 결과가 플랫폼·version에 따라 달라지는지 확인하기 전에는 cook 결과를 플랫폼 사이에 공유하지 않는다. runtime cooking은 editor·개발 build에 한정한다. navigation은 Jolt blob이 아니라 중립 collision source에서 생성한다.
 
-**결과 차이의 범위.** Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) 이 build의 채택은 비용과 PC04 결과로 정하며, 채택 전과 Android·iOS hash 확인 전에는 플랫폼 간 결정성으로 표기하지 않는다. 결정성 범위를 넓혀도 플랫폼 간 결과 정합의 기본은 서버 권한과 field별 보정(17.2절)이다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
+**결과 차이의 범위.** Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) 이 build는 반입 기본값으로 켜고(어댑터 경계 10.2절 결정), 비용과 PC04 결과가 정당화하지 못하면 끄며, 채택 전과 Android·iOS hash 확인 전에는 플랫폼 간 결정성으로 표기하지 않는다. 결정성 범위를 넓혀도 플랫폼 간 결과 정합의 기본은 서버 권한과 field별 보정(17.2절)이다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
 
 **수명·callback.** process 공유 자원(할당 연결·형상 등록 등)과 World·Tryout session마다 분리한 physics system을 둔다. 종료는 진행 중 step 완료 → session physics system 해제 → asset lease 종료 후 공유 형상 해제 → process 공유 자원 해제 순서다(대응 Jolt 객체는 J14). 할당 hook은 Physics tag와 정렬 요구로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. 로그·assert hook은 구조화 로그에 연결하며 assert 실패는 시험 실패로 판정한다. 두 hook에서 lock 획득과 게임 코드 실행을 금지한다.
 
 **좌표·단위.** Rocks 값은 UE 5.8과 같은 cm·kg·초, 왼손 +X 전방·+Y 오른쪽·+Z 위다. adapter는 행렬식 +1 축 사상과 물리량별 단위 함수(Core `UnitConversion.h`)로만 바꾸며, 거울 사상을 쓰지 않는다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 2–4절).
 
-**라이선스.** Jolt는 MIT 라이선스다(33.11절 S82 검토 때 확인, 고정 commit에서 다시 확인 — J15). target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
+**라이선스.** Jolt는 MIT 라이선스다(v5.7.0 commit `cf16769b`에서 확인 — J15). target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
 
 | ID | 수용 시험 | 판정 기준(제안) |
 |---|---|---|
@@ -1622,9 +1624,9 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 | PC06 | 수명·job 연결: node pool 포화, Tryout 2 session, 종료 중 실행 작업 | 누수 0건, 작업 유실 0건, 종료 정지 0건 |
 | PC07 | 큰 월드: region 경계 이동·원점 이동·서버 다중 physics system handoff, double 위치 build와의 비용 비교 | 정밀도 허용 오차 충족, epoch 위반 0건, handoff 중 접촉 누락 0건, double build 비용 기록 |
 | PC08 | 혼합 플랫폼 네트워크: Linux 서버와 Windows·macOS·iOS·Android client, B6 network profile | client별 correction 빈도 기록, ARM64 client의 보정 빈도가 x64 client의 1.5배 이하 |
-| PC09 | 좌표·단위 경계: [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 9절 PA01–PA10 | 전부 통과 |
+| PC09 | 좌표·단위 경계: [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 9절 PA01–PA13 | 전부 통과 |
 
-M4 물리 착수 전 gate(PJG)는 어댑터 경계 문서의 검증 항목 J1–J15·U1 확인과 문서 갱신, PC01·PC02·PC05·PC06·PC09 통과, manifest·license 고지다.
+M4 물리 착수 전 gate(PJG)는 어댑터 경계 문서의 검증 항목 J1–J21·U1·U3 확인과 문서 갱신(개정 3에서 완료), 라이브러리 반입 JL1 완료(manifest·license 고지·연결 시험, 같은 문서 10.5절)다. PC01·PC02·PC05·PC06·PC09는 물리 모듈이 있어야 돌릴 수 있으므로 착수 gate가 아니라 M4 물리 단계의 완료 조건이다(개정 1.20에서 순환을 정정). PC01의 Linux 클라이언트·iOS는 그 플랫폼 층이 생기기 전에는 통과할 수 없으므로(빌드 타깃 BS6 보류, iOS 플랫폼 층 없음) M4 판정 때 범위를 다시 정한다.
 
 ### 16.5 큰 월드와 PhysicsRegion
 
