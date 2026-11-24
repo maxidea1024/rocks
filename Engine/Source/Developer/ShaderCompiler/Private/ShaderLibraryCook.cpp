@@ -108,6 +108,12 @@ Result<void> EnumeratePlans(const ShaderLibraryCookDesc& desc,
                     continue;
                 }
 
+                // 개발 전용 PS 퍼뮤테이션은 진단 버퍼 기능을 요구한다(16.1절 SSD34).
+                if (development && type->stage == ShaderStagePixel &&
+                    (facts.features & ShaderFeatureDebugPixelUav) == 0) {
+                    continue;
+                }
+
                 if (type->shouldCompile != nullptr &&
                     !type->shouldCompile(vertexInput, permutation, facts)) {
                     continue;
@@ -128,6 +134,12 @@ Result<void> EnumeratePlans(const ShaderLibraryCookDesc& desc,
     }
 
     return Result<void>::Success();
+}
+
+// 조합의 요구 기능이다(타입 요구 기능 + 개발 전용 PS의 진단 버퍼 — 16.1절 SSD34·SSD35).
+uint32 PlanFeatures(const JobPlan& plan) noexcept {
+    const bool debugPixel = plan.developmentOnly && plan.type->stage == ShaderStagePixel;
+    return plan.type->requiredFeatures | (debugPixel ? ShaderFeatureDebugPixelUav : 0u);
 }
 
 // 조합의 정의를 storage에 채운다(차원 선언 순서 — SC10이 이름순으로 조립한다).
@@ -387,6 +399,8 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
             }
 
             job.parameterLayouts = plan.type->parameterLayouts;
+            job.requiredFeatures = PlanFeatures(plan);
+            job.developmentOnly = plan.developmentOnly;
             (void)jobs.TryPushBack(job);
         }
 
@@ -440,7 +454,7 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
             entry.typeName = plan.type->name;
             entry.stage = plan.type->stage;
             entry.developmentOnly = plan.developmentOnly;
-            entry.runtimeFeatures = plan.type->requiredFeatures & RuntimeCheckedShaderFeatures;
+            entry.runtimeFeatures = PlanFeatures(plan) & RuntimeCheckedShaderFeatures;
             entry.layoutSignature = storage[index].signature;
             entry.values = Span<const ShaderLibraryValue>(entryValues.values, entryValues.count);
             (void)entries.TryPushBack(entry);

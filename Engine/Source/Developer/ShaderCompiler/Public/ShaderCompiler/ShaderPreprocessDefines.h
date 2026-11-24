@@ -59,7 +59,7 @@ public:
 private:
     friend ROCKS_SHADERCOMPILER_API ShaderSourceStatus BuildShaderPreprocessDefines(
         const ShaderFormatDefinition& format, uint32 stage, bool hlsl2021,
-        Span<const ShaderDefine> jobDefines, ShaderDefineSet& out) noexcept;
+        Span<const ShaderDefine> jobDefines, bool debugBuffer, ShaderDefineSet& out) noexcept;
 
     struct Entry {
         usize nameOffset = 0;
@@ -80,5 +80,11 @@ private:
 ROCKS_SHADERCOMPILER_API ShaderSourceStatus
 BuildShaderPreprocessDefines(const ShaderFormatDefinition& format, uint32 stage, bool hlsl2021,
                              Span<const ShaderDefine> jobDefines, ShaderDefineSet& out) noexcept;
+
+// 위와 같되 debugBuffer가 참이고 PS면 ROCKS_DEBUG_BUFFER = 1을 더한다(개발 전용 PS job의 진단 버퍼
+// — 7.2절 12항, 16.1절 SSD34).
+ROCKS_SHADERCOMPILER_API ShaderSourceStatus BuildShaderPreprocessDefines(
+    const ShaderFormatDefinition& format, uint32 stage, bool hlsl2021,
+    Span<const ShaderDefine> jobDefines, bool debugBuffer, ShaderDefineSet& out) noexcept;
 
 } // namespace rocks::shader

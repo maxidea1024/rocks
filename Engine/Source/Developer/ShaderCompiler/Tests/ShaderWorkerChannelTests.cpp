@@ -350,14 +350,14 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
         }
     }
 
-    // 처리기 버전: 형식 정의 processor.version을 3으로 올린 요청은 워커의 D3D 처리기(2)와 다르다.
+    // 처리기 버전: 형식 정의 processor.version을 4로 올린 요청은 워커의 D3D 처리기(3)와 다르다.
     {
         RequestBuilder builder;
         auto format = builder.request.formats.TryEmplaceBack(TestAllocator());
         REQUIRE(format && format.Value()->id.TryAssign("D3D12_SM6"));
         Array<uint8> original(TestAllocator());
         REQUIRE(ReadConfig("D3D12_SM6", original));
-        const char needle[] = "\"version\": 2";
+        const char needle[] = "\"version\": 3";
         const char* text = reinterpret_cast<const char*>(original.Data());
         usize at = IndexNone;
         for (usize index = 0; index + sizeof(needle) - 1 <= original.Size(); ++index) {
@@ -369,10 +369,10 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
 
         REQUIRE(at != IndexNone);
         REQUIRE(format.Value()->bytes.TryAppend(original.View()));
-        format.Value()->bytes[at + sizeof(needle) - 2] = '3';
+        format.Value()->bytes[at + sizeof(needle) - 2] = '4';
         ShaderFormatDefinition definition;
         REQUIRE(ParseShaderFormatDefinition(format.Value()->bytes.View(), "D3D12_SM6", definition));
-        REQUIRE(definition.moduleVersion == 3);
+        REQUIRE(definition.moduleVersion == 4);
         const ShaderFormatDefinition* pointers[] = {&definition};
         REQUIRE(MakeShaderWorkerHeader(pointers, builder.request.header));
         Array<uint8> bytes(TestAllocator());

@@ -22,7 +22,8 @@
 //    순서로 이은 byte(Symbols·Notice 제외), system 도구(Apple MetalToolchain)는 호출자가 준
 //    지문(버전 줄· Target: 줄, metal·metallib SHA-256 64 byte — 워커 도구 조회 SC11이 채운다).
 // 3. WriteString(형식 id), WriteDigest(형식 정의 byte SHA-256).
-// 4. WriteU32(단계 — ShaderStageBits 한 비트), WriteString(엔트리).
+// 4. WriteU32(단계 — ShaderStageBits 한 비트), WriteString(엔트리), WriteU32(요구 기능 —
+//    ShaderFeatureBits, 16.1절 SSD35).
 // 5. WriteDigest(전처리 결과 SHA-256).
 // 6. WriteReflected(ShaderCompileOptions), 레이아웃 서명 WriteDigest 또는 WriteNone.
 // (7행 — 프로필 id·byte SHA는 개정 32에서 지웠다: 형식 정의 SHA가 3행에 있고 프로필의 형식
@@ -56,7 +57,7 @@ namespace rocks::shader {
 // processor.version이 3행 SHA로 키에 들어간다). 키 기록 순서·번호 표를 바꾸면 버전 Guid를 바꾼다.
 inline constexpr NuggetProcessorId ShaderJobProcessor{
     Guid{0x524f434b53534841ull, 0x4445524a4f420001ull},
-    Guid{0x524f434b53534841ull, 0x4445524b45590002ull}};
+    Guid{0x524f434b53534841ull, 0x4445524b45590003ull}};
 
 // system 도구 지문의 실행 파일 수(metal·metallib)다.
 inline constexpr usize ShaderSystemToolExecutables = 2;
@@ -92,6 +93,8 @@ struct ShaderJobKeyInput {
     // ShaderStageBits 한 비트(SC8)다.
     uint32 stage = 0;
     StringView entry{};
+    // 셰이더 타입 요구 기능(ShaderFeatureBits)이다.
+    uint32 requiredFeatures = 0;
     // PreprocessShader 결과 text byte의 SHA-256이다.
     Sha256Digest preprocessedSha256{};
     const ShaderCompileOptions* options = nullptr;

@@ -34,10 +34,10 @@ public abstract class TestsModule : ModuleRules
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
     private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools"];
 
-    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine) and the MeshTools MikkTSpace reference
-    // comparison test. Headers enter only through this executable's Private includes (adapter approach) and must produce zero warnings under the engine
-    // warning rules (Docs/Design/ShaderSystem section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace"];
+    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
+    // comparison test and the font library tests (Docs/Design/Font section 8.5, FT1). Headers enter only through this executable's Private includes
+    // (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8).
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone

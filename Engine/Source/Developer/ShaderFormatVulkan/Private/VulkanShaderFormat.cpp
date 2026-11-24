@@ -1,16 +1,16 @@
 #include <ShaderFormatVulkan/VulkanShaderFormat.h>
 
-#include "SpirvReflection.h"
-
 #include <Platform/Memory.h>
-#include <ShaderFormatVulkan/SpirvRewrite.h>
+#include <ShaderCompilerCommon/ShaderSpirvBindings.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
 #include <ShaderToolLoader/ShaderToolCalls.h>
 
 // Vulkan 형식 처리기(Docs/Design/ShaderSystem 11.1절 SC1)다. 규칙은 공개 헤더 주석을 따른다.
 // DXC 호출과 spirv-val은 공용 도구 호출(CompileHlslToSpirv, SH1e E2)이다. SH2b1(16.1절 SSD29):
 // -fspv-reflect로 컴파일하고, 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location, set = 단계·binding = 종류
 // 순서, 리플렉션 장식 제거) 뒤 spirv-val로 다시 검증하고, 리플렉션을 공용 규칙으로 정규화해 값 1을
-// 낸다.
+// 낸다. SH2b2(SSD34–SSD36·SSD40): storage image 형식 지정 원문 검사, SPIRV-Cross 사용 쌍, job 요구
+// 기능, PS 진단 버퍼(set 3은 다시 매기지 않는다).
 namespace rocks::shader {
 
 namespace vulkan_format_detail {
@@ -75,6 +75,12 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
 
     Array<uint8> spirv(allocator);
     String diagnostics(allocator);
+    if (!CheckStorageImageFormats(job.source.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "shader binding rules",
+                      diagnostics.View());
+        return;
+    }
+
     const ShaderToolOutcome compiled =
         CompileHlslToSpirv(*context.tools, request, spirv, diagnostics);
     if (compiled != ShaderToolOutcome::Success) {
@@ -114,16 +120,40 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
-    Array<uint8> binding(allocator);
-    const ShaderToolOutcome normalized = BuildSpirvBindingLayout(
-        format, job.stage, layouts.View(), raw.View(), rewritten.View(), binding, diagnostics);
-    if (normalized != ShaderToolOutcome::Success) {
-        FailShaderJob(result, VulkanJobStatus(normalized), "shader binding rules",
+    Array<SpirvSamplerUse> pairs(allocator);
+    const ShaderToolOutcome queried =
+        QuerySpirvSamplerUses(context.tools->SpirvCross(), code.View(), pairs, diagnostics);
+    if (queried != ShaderToolOutcome::Success) {
+        FailShaderJob(result, VulkanJobStatus(queried), "SPIR-V sampler use query",
                       diagnostics.View());
         return;
     }
 
-    SucceedShaderJob(result, code, binding);
+    Array<ShaderSamplerUse> uses(allocator);
+    for (const SpirvSamplerUse& pair : pairs) {
+        if (!uses.TryPushBack(ShaderSamplerUse{pair.texture.View(), pair.sampler.View()})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
+    SpirvBindingRequest binding;
+    binding.format = &format;
+    binding.stage = job.stage;
+    binding.requiredFeatures = job.requiredFeatures;
+    binding.layouts = layouts.View();
+    binding.raw = raw.View();
+    binding.rewritten = rewritten.View();
+    binding.uses = uses.View();
+    binding.hasUses = true;
+    SpirvBindingResult bound(allocator);
+    const ShaderWorkerJobStatus normalized = BuildSpirvBindingLayout(binding, bound, diagnostics);
+    if (normalized != ShaderWorkerJobStatus::Success) {
+        FailShaderJob(result, normalized, "shader binding rules", diagnostics.View());
+        return;
+    }
+
+    SucceedShaderJob(result, code, bound.bindingLayout);
 }
 
 } // namespace rocks::shader

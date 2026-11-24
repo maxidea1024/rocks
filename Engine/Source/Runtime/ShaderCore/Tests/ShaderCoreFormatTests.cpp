@@ -492,8 +492,9 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     Array<uint8> bytes(TestAllocator());
     REQUIRE(EncodeShaderBindingLayout(layout, bytes));
     // 머리 golden(버전·단계·루트 상수·attribute·render target·자원 수).
-    const uint8 header[] = {1, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0,
-                            0, 0, 0, 0, 5, 0, 0, 0, 6,  0, 0, 0};
+    // v2: 단계 사이 마스크(0 — 시험 layout은 정하지 않았다)가 render target 마스크 뒤에 있다.
+    const uint8 header[] = {2, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 0, 0,
+                            0, 0, 5, 0, 0, 0, 0, 0, 0,  0, 6, 0, 0, 0};
     REQUIRE(bytes.Size() > sizeof(header));
     CHECK(memcmp(bytes.Data(), header, sizeof(header)) == 0);
     // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 출처 0, 공유 0, 멤버 2.
@@ -543,10 +544,10 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::CorruptPackage);
     (void)bytes.TryResize(bytes.Size() - 1);
-    bytes[0] = 2;
+    bytes[0] = 1;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::UnsupportedVersion);
-    bytes[0] = 1;
+    bytes[0] = 2;
     // 종류 byte를 범위 밖으로(첫 자원).
     bytes[sizeof(header)] = 9;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
@@ -591,6 +592,41 @@ TEST(ShaderCore_BindingLayoutRules) {
     CHECK(!EncodeRejects(
         [](L& l) noexcept { l.resources[2].samplerSource = ShaderSamplerSource::SharedClamp; }));
     CHECK(!EncodeRejects([](L& l) noexcept { l.rootConstantBytes = 0; }));
+}
+
+TEST(ShaderCore_StageLinkUsesLeadingInterStageOutputs) {
+    ShaderBindingLayout vertex(TestAllocator());
+    ShaderBindingLayout pixel(TestAllocator());
+    vertex.stage = ShaderStageVertex;
+    pixel.stage = ShaderStagePixel;
+    vertex.interStageMask = 0b111;
+    const char* reason = nullptr;
+    for (const uint32 mask : {0u, 0b1u, 0b11u, 0b111u}) {
+        pixel.interStageMask = mask;
+        CHECK(CheckShaderStageLink(vertex, pixel));
+    }
+
+    // 앞부분이 아니면(빠진 n, VS에 없는 n) 연결되지 않는다(D3D register가 선언 순서다).
+    for (const uint32 mask : {0b101u, 0b10u, 0b1000u, 0b1111u}) {
+        pixel.interStageMask = mask;
+        CHECK(!CheckShaderStageLink(vertex, pixel, &reason));
+    }
+
+    CHECK(strstr(reason, "leading TEXCOORDn") != nullptr);
+    CHECK(!CheckShaderStageLink(pixel, vertex, &reason));
+    // 값 규칙: CS에는 단계 사이 마스크가 없고 TEXCOORD0–15만이다.
+    ShaderBindingLayout compute(TestAllocator());
+    compute.stage = ShaderStageCompute;
+    compute.interStageMask = 1;
+    Array<uint8> bytes(TestAllocator());
+    CHECK(!EncodeShaderBindingLayout(compute, bytes));
+    vertex.interStageMask = 1u << 16;
+    CHECK(!EncodeShaderBindingLayout(vertex, bytes));
+    vertex.interStageMask = 0b1011;
+    REQUIRE(EncodeShaderBindingLayout(vertex, bytes));
+    ShaderBindingLayout decoded(TestAllocator());
+    REQUIRE(DecodeShaderBindingLayout(bytes.View(), decoded));
+    CHECK(decoded.interStageMask == 0b1011);
 }
 
 TEST(ShaderCore_GlesBindingHeaderRoundTripAndRules) {
