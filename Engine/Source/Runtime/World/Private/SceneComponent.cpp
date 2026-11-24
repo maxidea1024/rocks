@@ -340,7 +340,7 @@ const ComponentBounds& SceneComponent::Bounds() const noexcept {
     if (boundsDirty_) {
         ComponentBounds local;
         if (TryLocalBounds(local)) {
-            bounds_ = TransformComponentBounds(local, WorldMatrix());
+            bounds_ = TransformComponentBounds(local, WorldMatrix(), LocalBoundsSphereRule());
             boundsDirty_ = false;
             return bounds_;
         }
@@ -360,8 +360,8 @@ const ComponentBounds& SceneComponent::Bounds() const noexcept {
     return bounds_;
 }
 
-ComponentBounds TransformComponentBounds(const ComponentBounds& local,
-                                         const Mat4d& localToWorld) noexcept {
+ComponentBounds TransformComponentBounds(const ComponentBounds& local, const Mat4d& localToWorld,
+                                         BoundsSphereRule rule) noexcept {
     // UE TransformBy(FMatrix)와 같은 순서다.
     const Vec3d axisX = localToWorld.GetScaledAxis(0);
     const Vec3d axisY = localToWorld.GetScaledAxis(1);
@@ -376,6 +376,11 @@ ComponentBounds TransformComponentBounds(const ComponentBounds& local,
     world.boxExtent = Vec3d(math::Abs(spanX.x) + math::Abs(spanY.x) + math::Abs(spanZ.x),
                             math::Abs(spanX.y) + math::Abs(spanY.y) + math::Abs(spanZ.y),
                             math::Abs(spanX.z) + math::Abs(spanY.z) + math::Abs(spanZ.z));
+    if (rule == BoundsSphereRule::BoxExtent) {
+        world.sphereRadius = world.boxExtent.Length();
+        return world;
+    }
+
     // UE는 행 0–2를 성분별로 제곱해 더한다(m0² + m1² + m2²) — 3×3 부분의 열 길이 제곱이다. 그
     // 최댓값을 쓴다.
     const Vec3d columnSquared(axisX.x * axisX.x + axisY.x * axisY.x + axisZ.x * axisZ.x,
@@ -416,6 +421,29 @@ Vec3d SceneComponent::WorldScale3D() const noexcept {
     auto parentScale = GetWorld().With<SceneComponent>(
         parent_, [](SceneComponent& parent) noexcept { return parent.WorldScale3D(); });
     return parentScale ? scale * parentScale.Value() : scale;
+}
+
+Quatd SceneComponent::WorldQuaternion() const noexcept {
+    Quatd rotation = relative_.rotation;
+    if (absoluteRotation_ || parent_.IsNull() || !HasWorld()) {
+        return rotation;
+    }
+
+    // UE Relative * Socket * Parent: 회전은 Parent.rot × Socket.rot × Relative.rot이다.
+    if (!attachSocket_.IsEmpty()) {
+        const StringView socket = attachSocket_.View();
+        auto socketLocal =
+            GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
+                return parent.GetSocketTransform(socket, TransformSpace::Component);
+            });
+        if (socketLocal) {
+            rotation = socketLocal.Value().rotation * rotation;
+        }
+    }
+
+    auto parentRotation = GetWorld().With<SceneComponent>(
+        parent_, [](SceneComponent& parent) noexcept { return parent.WorldQuaternion(); });
+    return parentRotation ? parentRotation.Value() * rotation : rotation;
 }
 
 Result<Transform> SceneComponent::TryWorldTransform() const noexcept {

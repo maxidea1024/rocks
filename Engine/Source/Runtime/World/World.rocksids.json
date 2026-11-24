@@ -927,6 +927,76 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SplineComponent::closedLoop_",
+      "id": "e22e3f5dd45342e082fd1f4f938bc70f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::defaultUpVector_",
+      "id": "97e1768f7c624fcc8bc1b69800269c3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::duration_",
+      "id": "568db81151a441f6b897d38dbf223123",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::loopPositionOverride_",
+      "id": "b4dc659970134a02b0dff9228b85f08d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::loopPosition_",
+      "id": "3bbbd153a5304fb1af4c8326cd9501d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::position_",
+      "id": "20ab1a65dba640a5a0d693e2483ae5a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::reparamStepsPerSegment_",
+      "id": "649d748eb5c448daabdc7d84b2539651",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::rotation_",
+      "id": "c7bab9913d0945d0b2903758d5117d9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::scale_",
+      "id": "0d9f514bc04d4f74b6a878111e1a2284",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::stationaryEndpoints_",
+      "id": "53905d30cd8445eab4c30fac9ef019ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SpotLightComponent::innerConeAngle_",
       "id": "c5bdf3b106c1401cbde4e2e8beedde61",
       "aliases": [],
@@ -1139,6 +1209,27 @@
       "kind": "type",
       "name": "rocks::SphereComponent",
       "id": "e044c78cc3ec4a7681171711856baf2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SplineComponent",
+      "id": "262c9a119fb94f91b084b55b4458c999",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SplineCoordinateSpace",
+      "id": "582d1248aa434c31a0b5190d024801c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SplinePointType",
+      "id": "5b159010027b435397aec2f4a916eb26",
       "aliases": [],
       "retired": false
     },
