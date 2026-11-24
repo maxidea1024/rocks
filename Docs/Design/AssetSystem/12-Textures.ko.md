@@ -36,7 +36,7 @@
 
 2026-11-13 사용자 결정: DDS(비압축)·TIFF(무손실)·Radiance HDR·무손실 OpenEXR 디코더를 A5 범위에 넣는다(HDR·EXR은 처음에 "후속"이었다). PCX는 UE가 받지만 쓰이지 않으므로 지원하지 않는다. IES(조명 프로파일)는 텍스처 원본이 아니라 별도 에셋 종류라 조명 단계, UDIM은 가상 텍스처(12.4절 계약)와 함께 다룬다. 블록 압축(BC·ASTC·ETC)은 원본이 아니라 쿠킹 결과 형식이며 텍스처 파이프라인의 압축 단계(화면 마일스톤 뒤, 사용자 결정 순서)에서 인코더와 함께 구현한다.
 
-2026-11-23 사용자 결정(2026-11-20 결정을 대체): JPEG 원본을 UE처럼 받는다. UE 5.8은 JPEG를 임포트할 때 기본 설정(`[TextureImporter] RetainJpegFormat` = True — BaseEditor.ini)에서 JPEG 바이트를 원본으로 보관하고 빌드 때 푼다(EditorFactories.cpp 2960–3006). Rocks는 받는 범위를 UE와 같게 하되 저장은 12.1절 원칙대로 **임포트 때 풀어 정규 픽셀로** 둔다 — 근거: 디코더 버전과 무관한 동일 빌드 입력, 빌드·쿠킹 경로에 원본 형식 코드가 없음(결정성 — 10절). 대가는 원본 크기(JPEG보다 크다 — Zstd로 줄인다)이고, JPEG 바이트 보관(UE `RetainJpegFormat` 대응 — 빌드가 결정적 정수 IDCT로 푼다)은 크기가 문제가 될 때의 후속 선택이다. 디코더는 외부 라이브러리 libjpeg-turbo다(ThirdParty, 버전 고정 — UE ImageWrapper와 같은 구현. 사용자 결정 2026-11-23: 구현 난이도가 큰 것은 외부 라이브러리, 간단한 것은 자체 구현 — progressive·Huffman·IDCT·업샘플링·마커 변형을 직접 만들고 검증하는 비용이 크다). 정수 IDCT `JDCT_ISLOW`, SIMD 없이 C 경로로 빌드한다(NASM 빌드 의존을 두지 않는다 — 임포트 때 한 번 푸는 용도라 속도보다 빌드 단순성, 결과는 정수 산술이라 호스트와 무관하다). ImageCore가 libjpeg-turbo 호출을 감싸 다른 원본 디코더와 같은 결과 형식(G8·RGBA8)·진단(`InvalidSource`·`UnsupportedSourceFormat`)으로 낸다. 다른 원본 디코더(BMP·TGA·PNG·PSD·DDS·TIFF·HDR·EXR)는 자체 구현 그대로다(zlib 등 범용 압축은 Core Compression). [Unreal 교환 형식](../UnrealExchange.ko.md)(4.3절)으로 가져오는 JPEG·UEJPEG 원본 텍스처도 옵션 없이 받는다(해제한 픽셀 — `--allow-lossy-origin`·`LossyOriginAccepted`는 없앴다).
+2026-11-23 사용자 결정(2026-11-20 결정을 대체): JPEG 원본을 UE처럼 받는다. UE 5.8은 JPEG를 임포트할 때 기본 설정(`[TextureImporter] RetainJpegFormat` = True — BaseEditor.ini)에서 JPEG 바이트를 원본으로 보관하고 빌드 때 푼다(EditorFactories.cpp 2960–3006). Rocks는 받는 범위를 UE와 같게 하되 저장은 12.1절 원칙대로 **임포트 때 풀어 정규 픽셀로** 둔다 — 근거: 디코더 버전과 무관한 동일 빌드 입력, 빌드·쿠킹 경로에 원본 형식 코드가 없음(결정성 — 10절). 대가는 원본 크기(JPEG보다 크다 — Zstd로 줄인다)이고, JPEG 바이트 보관(UE `RetainJpegFormat` 대응 — 빌드가 결정적 정수 IDCT로 푼다)은 크기가 문제가 될 때의 후속 선택이다. 디코더는 외부 라이브러리 libjpeg-turbo다(ThirdParty, 버전 고정 — UE ImageWrapper와 같은 구현. 사용자 결정 2026-11-23: 구현 난이도가 큰 것은 외부 라이브러리, 간단한 것은 자체 구현 — progressive·Huffman·IDCT·업샘플링·마커 변형을 직접 만들고 검증하는 비용이 크다). 정수 IDCT `JDCT_ISLOW`, SIMD 없이 C 경로로 빌드한다(NASM 빌드 의존을 두지 않는다 — 임포트 때 한 번 푸는 용도라 속도보다 빌드 단순성, 결과는 정수 산술이라 호스트와 무관하다). ImageDecoders가 libjpeg-turbo 호출을 감싸 다른 원본 디코더와 같은 결과 형식(G8·RGBA8)·진단(`InvalidSource`·`UnsupportedSourceFormat`)으로 낸다. 다른 원본 디코더(BMP·TGA·PNG·PSD·DDS·TIFF·HDR·EXR)는 자체 구현 그대로다(zlib 등 범용 압축은 Core Compression). [Unreal 교환 형식](../UnrealExchange.ko.md)(4.3절)으로 가져오는 JPEG·UEJPEG 원본 텍스처도 옵션 없이 받는다(해제한 픽셀 — `--allow-lossy-origin`·`LossyOriginAccepted`는 없앴다).
 
 원본별 규칙:
 
@@ -261,9 +261,9 @@ BC·ASTC·ETC 인코더 없음, 렌더러는 비압축만. 쿠킹은 비압축�
 | A5b | (A5b1 차이 쓰기·override 집합 → A5b2 되돌리기 — RuntimeClassMetadata 'A5b' 명세) 차이 쓰기와 override 집합: 차이 형식은 호출자 옵션(패키지 저장만 — undo·스냅샷·복제·세이브는 전부 저장 + 집합 기록), 저장 값 = override 집합 ∪ 기준과 인코딩이 다른 값, struct 멤버 단위·Atomic 통째·배열 통째, 차이 형식 로드가 파일의 값 경로로 집합을 채움, 경로 쓰기(`asset-set`)가 기록, 되돌리기(단일 값·원소·멤버, Atomic 통째), 같음 = wire byte(참조는 대상 정체성) | ObjectSerialization·AssetRuntime·AssetDatabase |
 | A5c | 지문 연결과 이주: 패키지 Summary 타입 표 클래스 행 지문 열(A1 형식 개정), cookKey 지역 입력의 export 구체 클래스별 (TypeId, 지문) 목록(A4 개정), 쿠킹 패키지 로드의 지문 불일치 `UnsupportedVersion`·에디터 패키지 진단, `TickSettings` 리플렉션 이동, fixture·바이트 헤더 재생성 | AssetRuntime·AssetCooker·Engine |
 | A5d | 텍스처 타입: `StreamableRenderAsset`(AssetRuntime), `Texture`와 차원 클래스 다섯, 설정 enum(12.4절 — TextureGroup 82종 등), `TextureSource`·`TexturePlatformData`, 계약 설정 `UnsupportedSetting`·숨김 값 `InvalidSetting` 판정 | Texture(새 Runtime 모듈)·AssetRuntime |
-| A5e | 원본 디코더 1: 결과 형식(TextureSource 형식 10종)·진단 공통부, BMP·TGA·PNG(15절)·PSD(12.2절 규칙) | ImageCore(새 Developer 모듈) |
-| A5f | 원본 디코더 2: DDS 비압축·TIFF 무손실·Radiance HDR·무손실 OpenEXR | ImageCore |
-| A5g | JPEG: libjpeg-turbo를 ThirdParty로(`Engine/Source/ThirdParty/LibJpegTurbo` — 버전 고정 `ThirdParty.json`, C 경로·`JDCT_ISLOW`·NASM 없음, CMake가 만드는 설정 헤더는 손으로 쓴다), ImageCore가 감싸 G8·RGBA8과 같은 진단으로 낸다(CMYK·YCCK·12비트·lossless `UnsupportedSourceFormat`) | ThirdParty·ImageCore |
+| A5e | 원본 디코더 1: 결과 형식(TextureSource 형식 10종)·진단 공통부, BMP·TGA·PNG(15절)·PSD(12.2절 규칙) | ImageDecoders(새 Developer 모듈) |
+| A5f | 원본 디코더 2: DDS 비압축·TIFF 무손실·Radiance HDR·무손실 OpenEXR | ImageDecoders |
+| A5g | JPEG: libjpeg-turbo를 ThirdParty로(`Engine/Source/ThirdParty/LibJpegTurbo` — 버전 고정 `ThirdParty.json`, C 경로·`JDCT_ISLOW`·NASM 없음, CMake가 만드는 설정 헤더는 손으로 쓴다), ImageDecoders가 감싸 G8·RGBA8과 같은 진단으로 낸다(CMYK·YCCK·12비트·lossless `UnsupportedSourceFormat`) | ThirdParty·ImageDecoders |
 | A5h | 임포터: TextureTools 임포터(A2f 프레임워크 — 차원 구성마다 역할·접두 역할, 12.3절 원본 구성과 Cube 배치 3종·Volume 타일), `TextureImportSpec`, 명령 문법(`--cube`·`--cube-layout`·`--array`·`--cube-array`·`--volume`·`--volume-tile` — 13절 예약 이름), 저장 설정 편의(12.2절 4번), 원본 정규 픽셀 bulk(Zstd) | TextureTools(새 Developer 모듈) |
 | A5i | 빌드: 12.5절 전부(선형화·`bFlipGreenChannel`·PowerOfTwoMode·Lanczos3·mip 규칙·PreserveBorder·NormalizeNormals·출력 부호화·양자화·swizzle·LOD 합성)와 기준값 표 시험 | TextureTools |
 | A5j | 쿠킹: TargetProfile 텍스처 칸(형식 지원 표·LOD 그룹 Map `MergeByKey`, 엔진 `Windows`·`Android` 기본값 — 10.2절 2번), 텍스처 `CookProcessor`(너겟 키 = 처리기가 읽은 유효 설정·원본 SHA-256·그룹 값), `TexturePlatformData`(mip 덩어리·상주 꼬리 R·샘플러 — 12.5.1절), 에셋 원본 묶음(`SourceTextures`·`Source2DTexture` — Build 의존), 비스트리밍 조건 | TextureTools·AssetCooker |
@@ -313,11 +313,13 @@ BC·ASTC·ETC 인코더 없음, 렌더러는 비압축만. 쿠킹은 비압축�
 
 ### 12.9 A5e 구현 명세 — 원본 디코더 1(2026-11-24, 착수 전 — 교차 검증 1차 반영: 진단 등록, UE 대조와 결과 차이)
 
+모듈 이름은 `ImageDecoders`다(2026-11-24 사용자 결정 — 처음 이름 ImageCore를 바꿨다).
+
 12.2절 표·원본별 규칙과 15절(PNG)을 디코더로 만든다(12.7절 A5e — BMP·TGA·PNG·PSD, 결과 형식·진단 공통부). DDS·TIFF·HDR·EXR은 A5f, JPEG는 A5g다. 시제품 브랜치 `prototype/texture-importer`의 AssetTools 디코더(RGBA8 전용)는 참고만 한다.
 
-**모듈**: 새 Developer 모듈 `ImageCore`(Engine/Source/Developer/ImageCore — 공개 의존 Texture(`TextureSourceFormat`)·AssetRuntime(`AssetDiagnosticCode`), 비공개 의존 Compression(zlib)). 에디터 도구 전용이다(쿠킹 산출물·런타임에 원본 형식 코드가 없다 — 12.1절).
+**모듈**: 새 Developer 모듈 `ImageDecoders`(Engine/Source/Developer/ImageDecoders — 공개 의존 Texture(`TextureSourceFormat`)·AssetRuntime(`AssetDiagnosticCode`), 비공개 의존 Compression(zlib)). 에디터 도구 전용이다(쿠킹 산출물·런타임에 원본 형식 코드가 없다 — 12.1절).
 
-**API**(`ImageCore/ImageDecode.h`, 이름공간 `rocks::image`):
+**API**(`ImageDecoders/ImageDecode.h`, 이름공간 `rocks::image`):
 - `ImageFileFormat` = Unknown·Bmp·Tga·Png·Psd·Dds·Tiff·Hdr·Exr·Jpeg·WebP. `DetectImageFileFormat(Span<const uint8> file, StringView pathHint) → ImageFileFormat` — 서명으로 판별하고 서명이 없는 TGA만 TGA 2.0 footer 또는 확장자(`.tga`·`.icb`·`.vda`·`.vst`, 대소문자 무시)로 판별한다.
 - `DecodedImage{TextureSourceFormat format, uint32 width, height, numSlices = 1, Array<uint8> pixels}` — 행 순서는 위에서 아래, 행 사이 패딩 없음, 채널은 형식 순서(G·GA·RGBA), 16비트 정수와 float는 little-endian, slice는 차례로 이어 붙인다(A5f DDS의 배열·Cube·Volume — mip은 원본에서 버리고 0번만 둔다, 12.4.4절 NumMips = 1). A5e 형식은 늘 1이다.
 - `ImageDecodeLimits{maxDimension = 16384, maxPixelBytes = 4 GiB}` — 한 변이 넘으면 `InvalidSource`·`CapacityExceeded`, 결과 byte가 넘으면 같다(할당 전에 판정). 16384² RGBA32F가 정확히 4 GiB다. 임포트 원본 파일 합 한도(`MaxImportTotalSourceBytes` 2 GiB — A2f)는 입력 파일 byte이고 이 한도는 디코딩한 픽셀이라 따로 본다.

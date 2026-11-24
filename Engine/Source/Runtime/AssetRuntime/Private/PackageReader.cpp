@@ -1057,6 +1057,12 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "NuggetMismatch";
     case AssetDiagnosticCode::InvalidClassDefaults:
         return "InvalidClassDefaults";
+    case AssetDiagnosticCode::LossySource:
+        return "LossySource";
+    case AssetDiagnosticCode::NonSrgbSource:
+        return "NonSrgbSource";
+    case AssetDiagnosticCode::IgnoredSourceChannels:
+        return "IgnoredSourceChannels";
     }
 
     return "Unknown";
@@ -1064,6 +1070,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
 
 bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     switch (code) {
+    case AssetDiagnosticCode::NonSrgbSource:
+    case AssetDiagnosticCode::IgnoredSourceChannels:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:

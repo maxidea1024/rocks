@@ -119,7 +119,13 @@ enum class AssetDiagnosticCode : uint16 {
     // 없다(타입 계약 위반 — 비결정 생성자·non-null 참조 기본값 등, related = 그 TypeId). 그
     // 클래스를 쓰는 대상의 cookKey 오류, 쓰는 대상이 없으면 쿠킹 보고서 경고다(다시 쿠킹으로 풀리지
     // 않는다 — UnsupportedVersion과 나눈다).
-    InvalidClassDefaults
+    InvalidClassDefaults,
+    // 텍스처 원본(AssetSystem 12.2·12.9절 — A5e 디코더): 손실 원본 형식(LossySource — 오류, JPEG
+    // 밖의 손실 형식), sRGB가 아닌 색 표시(NonSrgbSource — 경고, 변환하지 않는다), 버린 추가
+    // 채널(IgnoredSourceChannels — 경고, detail = 버린 수).
+    LossySource,
+    NonSrgbSource,
+    IgnoredSourceChannels
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은
