@@ -23,7 +23,7 @@ asset-alias-prune
 asset-orphans-list
 asset-orphans-delete <path>
 asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote] [--json]
-asset-cook --engine --profile=<id> [--json]   (A4f — 프로젝트 없이 엔진 셰이더 라이브러리만, 쿠킹 루트 Engine/Saved/Cooked/<id>, 잠금은 쿠킹 루트 잠금 파일 — 10.3절 7항)
+asset-cook --engine --profile=<id> [--json]   (A4f — 프로젝트 없이 엔진 셰이더 라이브러리만, 쿠킹 루트 Engine/Saved/Cooked/<id>, 잠금은 Engine/Saved/Locks/Cooked-<id>.lock, --project·경로 인자와 함께 쓰면 사용법 오류 — 10.3절 7항)
 asset-load-cooked --profile=<id> <AssetId|경로 힌트>
 nugget-gc --max-bytes=<n> --unused-days=<n>   (Rockpile backend면 `rockpile gc`로 위임 — --max-bytes → maxBytes, --unused-days → maxUnusedDays)
 공통 옵션: --project=<dir>(기본: 현재 디렉터리에서 위로 *.rocksproject 탐색), --wait=<초>(쓰기 잠금 대기, 기본 0)
