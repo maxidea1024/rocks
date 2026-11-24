@@ -25,7 +25,7 @@
 | 〃 | 2절 사전 조사 "VFS(APK) → 후속" | APK 안 데이터 읽기 후속 | P13(SH6)의 선행 작업으로 단계를 정한다 |
 | 〃 | 4.6절 진단 표(:115) | `IncompatibleCook`은 부분 쿠킹 병합 불가·런타임 프로파일 불일치 | 필요한 셰이더 형식·셰이더가 쿠킹 결과에 없음을 더한다(2절, 12절) |
 | 〃 | 9절(:267–292) | 에셋 중심 키(TypeId·입력 bulk·의존 목록, SCC 식) | N1–N3(5.2절) |
-| 〃 | 10절 TargetProfile(:296)·cookKey(:299)·매니페스트(:307)·결정성(:311) | 그래픽 backend 단일 항목, 기본 프로필 Windows·Android, 매니페스트 v1 | K1–K3(5.2절), 12절 `graphicsBackends`·`shaderFormats`·`MacOS` 프로필. 결정성 규칙은 그대로 셰이더에 적용한다(10절) |
+| 〃 | 10절 TargetProfile(:296)·cookKey(:299)·매니페스트(:307)·결정성(:311) | 그래픽 backend 단일 항목, 기본 프로필 Windows·Android, 매니페스트 v1 | K1–K3(5.2절), 12절 `graphicsBackends`·`shaderFormats`·`Mac` 프로필. 결정성 규칙은 그대로 셰이더에 적용한다(10절) |
 | ReflectionFoundations | 3절 값 종류, 4절 struct | — | 셰이더 파라미터 종류가 `ROCKS_STRUCT` 경로를 쓰고 셰이더 자원 값 종류를 더한다(13절, 결정 4) |
 | PlatformLayer | P1 표 "동적 모듈", 모바일 절 | 동적 모듈 구현(P10, "동적 라이브러리" 절), Android는 시험 실행만 | P13 Android 실행 기반, P12 macOS 창(PlatformWindow) |
 | RepositoryLayout | 트리(:14·:29)·:52–56 | Engine에 Shaders·Config 없음, ThirdParty는 Core만 원본(:14 목록도 낡음) | 3절 구조와 8절 루트·`binary`·`headers` 종류 |
@@ -46,10 +46,10 @@
 | [렌더러](../Renderer.ko.md) | 13절 지원표 | PS 진단 버퍼 행(7.2절 12항 — PS만, D3D11·GLES no-op, Vulkan `fragmentStoresAndAtomics`) |
 | [엔진 셰이더](../EngineShaders/09-LimitsAndFollowups.ko.md) | SLR3·SLR12 | SLR3은 16.1절 SSD21(선택 하위 단계 SH2g, 자체 완료 기준), SLR12는 7.2절 12항(SSD22)으로 반영됨 |
 | [엔진 셰이더](../EngineShaders/07-CommonLibraryFirstScope.ko.md) | :21 `ShaderAssert.rsh` | VS·PS 판정을 `ROCKS_FEATURE_DEBUG_PIXEL_UAV`가 아니라 `ROCKS_DEBUG_BUFFER`(PS 개발 전용 퍼뮤테이션에서만 정의)로. VS는 늘 빈 매크로, CS는 일반 UAV 경로 |
-| [엔진 셰이더](../EngineShaders/06-Stages.ko.md) | SL0 행 "(C) 모든 엔진 컴파일 프로필 형식" | 엔진 컴파일 프로필 폐지(SSD24)에 따라 "호스트 플랫폼 TargetProfile(`Windows`·`MacOS`)의 `shaderFormats` 형식 + `GLES31_PC`"로 |
+| [엔진 셰이더](../EngineShaders/06-Stages.ko.md) | SL0 행 "(C) 모든 엔진 컴파일 프로필 형식" | 엔진 컴파일 프로필 폐지(SSD24)에 따라 "호스트 플랫폼 TargetProfile(`Windows`·`Mac`)의 `shaderFormats` 형식 + `GLES31_PC`"로 |
 | [VulkanGraphics](../VulkanGraphics.ko.md) | :131–133, :221 | 파이프라인 layout을 개발 컴파일 훅 리플렉션 대신 `ShaderBindingLayout`에서(SSD18), `PipelineDesc`의 HLSL 원문·`DeviceDesc::shaderCompiler` 제거 |
 | [OpenGL ES backend](../OpenGLESGraphics.ko.md) | :212 | SH2 항목에 바인딩 머리를 ShaderCore 형식(GLES 복사 표)으로 받는다는 것과 Release 제외 |
 | [엔진 런타임](../EngineRuntime/10-Graphics.ko.md) | 10.2절(D3D11) | D3D11의 쿠킹 DXBC 전환과 `D3DCompile` 제거를 SH5에서 SH2로(개정 32) |
 | [엔진 구현 계획](../EngineImplementationPlan.ko.md) | 9.6절 | 엔진 내장 셰이더 라이브러리를 만드는 단계(설치물 → 쿠킹, SSD11) |
 | [빌드 타깃](../BuildTargets/README.ko.md) | Commandlet 타깃 | 쿠커가 셰이더 타입 Runtime 모듈을 링크(SSD3), 프로젝트·플러그인 타입 쿠킹은 BS4 뒤 |
-| [모듈 로더](../ModuleLoader.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |
+| [모듈 로더](../ModuleLoader/README.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |

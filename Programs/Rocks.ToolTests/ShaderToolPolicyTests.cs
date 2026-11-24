@@ -129,7 +129,7 @@ internal static class ShaderToolPolicyTests
         IReadOnlyList<ReleaseViolation> reached = Analyze(["Game", "Cooker"], NativePlatform.Android);
         Verify.That(reached.Count == 1 && reached[0].Rule == "release-developer-module" && reached[0].Module == "Cooker",
             "Developer module reached by a Release target escaped: " + string.Join('\n', reached));
-        // 실행 중 적재 관계(DynamicModules)로만 닿아도 Monolithic 실행 파일에 링크되므로 같은 위반이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+        // 실행 중 적재 관계(DynamicModules)로만 닿아도 Monolithic 실행 파일에 링크되므로 같은 위반이다(Docs/Design/ModuleLoader 3.8절).
         NativeModuleInput[] dynamicModules = [.. modules.Select(module => module.Name == "Engine" ? module with { DynamicModules = ["Cooker"] } : module)];
         IReadOnlyList<ReleaseViolation> loaded = ReleaseExclusion.Analyze(dynamicModules, developer, [("Game", ["Game"])], NativePlatform.Windows);
         Verify.That(loaded.Count == 1 && loaded[0].Rule == "release-developer-module" && loaded[0].Module == "Cooker",

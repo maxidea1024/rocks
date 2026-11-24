@@ -23,6 +23,9 @@
 // - ROCKS_ROOT_CONSTANTS(Type, Name): 그리기별 상수(루트 상수, 7.2절 2항·16.1절 SSD32). 셰이더 하나에
 //   하나다. D3D12는 register(b0, space3)의 ConstantBuffer<Type>, D3D11은 register(b13)의 cbuffer,
 //   SPIR-V 형식은 push constant다. Type 크기는 128 byte 이하·16 byte 배수다(워커가 검사한다).
+// - RocksDebugBuffer: 개발 전용 PS job에서 정의 조립이 ROCKS_DEBUG_BUFFER = 1을 넣으면 예약 위치의
+//   RWByteAddressBuffer로 선언된다(7.2절 12항, 16.1절 SSD34 — D3D12 register(u0, space999), SPIR-V
+//   형식 set 3·binding 0). 진단 버퍼 기능이 없는 형식(D3D11·GLES)에서는 오류다.
 //
 // 사용 예:
 //   ROCKS_IMAGE_FORMAT(rgba8) RWTexture2D<float4> Output;
@@ -67,4 +70,14 @@
 #define ROCKS_ROOT_CONSTANTS(Type, Name) ConstantBuffer<Type> Name : register(b0, space3)
 #else
 #define ROCKS_ROOT_CONSTANTS(Type, Name) cbuffer Name##RootConstants : register(b13) { Type Name; }
+#endif
+
+#if defined(ROCKS_DEBUG_BUFFER)
+#if defined(ROCKS_BACKEND_D3D11) || defined(ROCKS_BACKEND_GLES)
+#error "ROCKS_DEBUG_BUFFER needs the debugPixelUav format feature (not on D3D11 and GLES)"
+#elif ROCKS_SPIRV
+[[vk::binding(0, 3)]] RWByteAddressBuffer RocksDebugBuffer;
+#else
+RWByteAddressBuffer RocksDebugBuffer : register(u0, space999);
+#endif
 #endif

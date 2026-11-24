@@ -40,7 +40,7 @@ public abstract class SourceModuleRules : ModuleRules
 
     /// <summary>
     /// Modules loaded at run time with <c>ModuleLoader::Load(name)</c> instead of being linked as dependencies (counterpart of UE
-    /// ModuleRules.DynamicallyLoadedModuleNames, Docs/Design/ModuleLoader.ko.md section 3.8). Their headers are not on this module's include
+    /// ModuleRules.DynamicallyLoadedModuleNames, Docs/Design/ModuleLoader section 3.8). Their headers are not on this module's include
     /// path; code reaches them through an interface in a linked module and <c>Find&lt;T&gt;(name)</c>. A monolithic executable that reaches this
     /// module links them too. A listed module may depend back on this module. Example:
     /// <code>
@@ -50,7 +50,7 @@ public abstract class SourceModuleRules : ModuleRules
     protected virtual string[] DynamicModules => [];
 
     /// <summary>
-    /// Loading phase of this module (counterpart of UE ELoadingPhase, Docs/Design/ModuleLoader.ko.md sections 3.3 and 3.11). The module loader starts
+    /// Loading phase of this module (counterpart of UE ELoadingPhase, Docs/Design/ModuleLoader sections 3.3 and 3.11). The module loader starts
     /// the module when that phase runs: EarliestPossible right after the loader is created (boot modules), PostConfigInit after the host
     /// settings and log start, PreDefault, Default and PostDefault inside Engine::Initialize, PostEngineInit after the engine client starts,
     /// None only when code calls ModuleLoader::Load. A dependency must not use a later phase than this module (None is allowed). The layer rules
@@ -138,7 +138,7 @@ public abstract class SourceModuleRules : ModuleRules
 
     /// <summary>
     /// Absolute path of the module entry point source <c>Private/&lt;ModuleName&gt;Module.cpp</c>, which holds the module's
-    /// <c>ROCKS_IMPLEMENT_MODULE</c> (Docs/Design/ModuleLoader.ko.md section 3.2). Rules that compile only platform subdirectories of
+    /// <c>ROCKS_IMPLEMENT_MODULE</c> (Docs/Design/ModuleLoader section 3.2). Rules that compile only platform subdirectories of
     /// Private/ add it so that the entry point is built on every platform:
     /// <code>
     /// Sources = [ModuleEntrySource(context), .. context.Sources($"{ModuleDirectory}/Private/Win64")],
@@ -224,7 +224,7 @@ public abstract class CoreModuleRules : SourceModuleRules
 {
     protected override string Layer => "Core";
 
-    // Core modules start in the host group, after the host settings and the log (UE LoadCoreModules, Docs/Design/ModuleLoader.ko.md
+    // Core modules start in the host group, after the host settings and the log (UE LoadCoreModules, Docs/Design/ModuleLoader
     // section 3.11), so host service modules live across engines and PostConfigInit modules may depend on them.
     protected override LoadingPhase LoadingPhase => LoadingPhase.PostConfigInit;
 }
@@ -234,7 +234,7 @@ public abstract class EngineModuleRules : SourceModuleRules
 {
     protected override string Layer => "Engine";
 
-    // Engine modules start first in the engine group, before game and plugin Default modules (UE LoadPreInitModules, Docs/Design/ModuleLoader.ko.md
+    // Engine modules start first in the engine group, before game and plugin Default modules (UE LoadPreInitModules, Docs/Design/ModuleLoader
     // section 3.11), so a PreDefault game or plugin module may depend on them.
     protected override LoadingPhase LoadingPhase => LoadingPhase.PreDefault;
 }

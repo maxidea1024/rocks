@@ -176,7 +176,7 @@ internal static class ActionGraph
             Visit(target);
         }
 
-        // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
+        // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
         // 관계는 순환 검사의 참조 사슬이 아니다. 그 모듈을 링크하는 실행 파일은 그 archive 뒤에 계획해야 하므로 실행 파일을 끝으로 옮긴다
         // (실행 파일은 누구의 의존도 아니다). 동적 모듈이 없으면 순서가 바뀌지 않는다. 실행 파일에 링크하는 켠 플러그인 모듈
         // (PluginModules — Docs/Design/BuildTargets 3.9절 BD36)도 같은 방식으로 빌드하고 실행 파일 앞에 계획한다.
@@ -220,7 +220,7 @@ internal static class ActionGraph
         // 생성 TU 디렉터리는 header 디렉터리 목록에 넣지 않는다 — 공용 디렉터리의 header 확장자 파일 하나가 모든 실행 파일 TU를
         // 다시 컴파일하게 만들지 않는다(생성 TU의 key는 cpp 내용이다).
         string buildInfo = Path.TrimEndingDirectorySeparator(BuildInfoGenerator.DirectoryOf(output));
-        // 진입점 모듈(모듈 표에 드는 C++ 모듈)은 소스에 ROCKS_MODULE_NAME=<이름>을 받는다(Docs/Design/ModuleLoader.ko.md 3.2절). 진입점 매크로가
+        // 진입점 모듈(모듈 표에 드는 C++ 모듈)은 소스에 ROCKS_MODULE_NAME=<이름>을 받는다(Docs/Design/ModuleLoader 3.2절). 진입점 매크로가
         // 이 값과 매크로 인자를 static_assert로 대조한다. 모듈 표 제공 모듈이 없는 빌드(시험 fixture 등)에서는 아무 모듈도 받지 않는다.
         HashSet<string> entryModules = ModuleTables.EntryModules(modules);
         foreach (var module in ordered)
@@ -314,6 +314,11 @@ internal static class ActionGraph
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
                 arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language, request.LinkType));
+                // RTTI를 켜는 서드파티(NativeModuleInput.RuntimeTypeInformation)는 프로필의 RTTI 끔 뒤에 켬을 둔다(마지막 인자가 이긴다).
+                if (module.RuntimeTypeInformation && language == NativeLanguage.Cpp)
+                {
+                    arguments.Add(request.Toolchain.Platform == NativePlatform.Windows ? "/GR" : "-frtti");
+                }
                 // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
                 // Release에서도 일반 object로 남는다.
                 if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))
@@ -525,7 +530,7 @@ internal static class ActionGraph
             // Modular(Docs/Design/BuildTargets 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
             // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 두고, 플러그인 모듈은 플러그인
             // binaries 폴더에 둔다(LinkTypes.SharedLibraryDirectory — ModuleLoader 3.15절). Windows import 라이브러리는 lib 폴더다. 모듈 표 제공 모듈에 닿는 Modular 실행 파일의 모듈은 호스트 모듈이다 — 공유 라이브러리로 링크하고, 실행 파일은
-            // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b).
+            // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader 3.14절 ML4b).
             bool entryModule = entryModules.Contains(module.Name);
             bool host = LinkTypes.IsHostModule(module, request.LinkType, entryModule);
             bool sharedLibrary = LinkTypes.CompilesAsSharedLibrary(module, request.LinkType, entryModule);
@@ -535,7 +540,10 @@ internal static class ActionGraph
                 ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
                 : "";
             string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
-            string executablePath = Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
+            // Android APK 실행 파일은 NativeActivity가 싣는 공유 라이브러리다(Docs/Design/AndroidPlatform.ko.md 3절).
+            string executablePath = module.AndroidPackage is not null
+                ? Path.Combine(output, "bin", AndroidPackage.LibraryFileName(module.Name))
+                : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
                 : sharedLibrary ? Path.Combine(LinkTypes.SharedLibraryDirectory(output, module, request.Toolchain.Platform), sharedFile)
                 : executablePath;
@@ -726,6 +734,14 @@ internal static class ActionGraph
                             {
                                 finalArguments.Add("-Wl,-u," + (mac ? "_" : "") + ModuleTables.EntryAnchorPrefix + anchor);
                             }
+                        }
+
+                        if (module.AndroidPackage is not null)
+                        {
+                            // APK 실행 파일: 공유 라이브러리로 링크하고 액티비티 진입 기호를 강제 참조한다(Launch Private/Android가 정의). 16 KB
+                            // 페이지 기기(Android 15)에서 .so를 APK에서 바로 mmap하려고 페이지 정렬을 16 KB로 둔다.
+                            finalArguments.AddRange(["-shared", "-Wl,-soname," + Path.GetFileName(finalPath),
+                                "-Wl,-u," + AndroidPackage.EntrySymbol, "-Wl,-z,max-page-size=16384"]);
                         }
 
                         if (request.LinkType == NativeLinkType.Modular)

@@ -4,6 +4,7 @@
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCompiler/ShaderNugget.h>
 #include <ShaderCore/ShaderBindingLayout.h>
+#include <ShaderCore/ShaderGlesBindingHeader.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderParameterTypes.h>
 #include <Base/InitializerList.h>
@@ -39,8 +40,8 @@ constexpr char BindSource[] =
     "Texture2D Noise;\n"
     "SamplerState SharedWrapSampler;\n"
     "struct VertexInput { float3 position : ATTRIBUTE0; float2 uv : ATTRIBUTE3; };\n"
-    "struct Varyings { float4 position : SV_Position; float4 color : TEXCOORD1; float2 uv : "
-    "TEXCOORD0; };\n"
+    "struct Varyings { float4 position : SV_Position; float2 uv : TEXCOORD0; float4 color : "
+    "TEXCOORD1; };\n"
     "Varyings MainVS(VertexInput input) {\n"
     "    Varyings output;\n"
     "    output.position = mul(float4(input.position, 1.0), mul(Draw.transform, viewProjection));\n"
@@ -72,7 +73,47 @@ constexpr char BadSource[] =
     "Colored ColorVS(float3 p : ATTRIBUTE0) { Colored o; o.position = p.xyzz; o.color = 1.0; "
     "return o; }\n";
 
+// SH2b2 원문이다(SSD34–SSD36·SSD38·SSD40).
+constexpr char MoreSource[] =
+    "struct Reversed { float4 position : SV_Position; float4 b : TEXCOORD2; float4 a : TEXCOORD0; "
+    "};\n"
+    "Reversed ReversedVS(float3 p : ATTRIBUTE0) { Reversed o; o.position = p.xyzz; o.a = 1; o.b = "
+    "2; return o; }\n"
+    "struct Layered { float4 position : SV_Position; uint layer : SV_RenderTargetArrayIndex; };\n"
+    "Layered LayerVS(float3 p : ATTRIBUTE0, uint id : SV_InstanceID) {\n"
+    "    Layered o; o.position = p.xyzz; o.layer = id; return o;\n"
+    "}\n"
+    "float4 DebugPS(float4 p : SV_Position) : SV_Target0 {\n"
+    "#if defined(ROCKS_DEBUG_BUFFER)\n"
+    "    RocksDebugBuffer.Store(0, 1u);\n"
+    "#endif\n"
+    "    return p;\n"
+    "}\n"
+    "RWByteAddressBuffer Stray;\n"
+    "float4 StrayPS(float4 p : SV_Position) : SV_Target0 { Stray.Store(0, 1u); return p; }\n"
+    "Texture2D Albedo;\n"
+    "SamplerState AlbedoSampler;\n"
+    "SamplerState SharedWrapSampler;\n"
+    "SamplerState SharedClampSampler;\n"
+    "Texture2D Noise;\n"
+    "float4 TwoSourcesPS(float4 p : SV_Position) : SV_Target0 {\n"
+    "    return Albedo.Sample(AlbedoSampler, p.xy) + Albedo.Sample(SharedWrapSampler, p.xy);\n"
+    "}\n"
+    "float4 SharedPS(float4 p : SV_Position) : SV_Target0 {\n"
+    "    return Albedo.Sample(AlbedoSampler, p.xy) + Noise.Sample(SharedClampSampler, p.xy);\n"
+    "}\n"
+    "ROCKS_IMAGE_FORMAT(rgba8) RWTexture2D<float4> Formatted;\n"
+    "[numthreads(8, 8, 1)] void FormattedCS(uint3 id : SV_DispatchThreadID) { Formatted[id.xy] = "
+    "1; }\n";
+
+// 형식 지정 없는 storage image는 원문 전체 검사라 따로 둔다(SSD40).
+constexpr char UnformattedSource[] = "RWTexture2D<float4> Unformatted;\n"
+                                     "[numthreads(8, 8, 1)] void UnformattedCS(uint3 id : "
+                                     "SV_DispatchThreadID) { Unformatted[id.xy] = 1; }\n";
+
 constexpr char BindEntry[] = "/Project/Bind.rsf";
+constexpr char UnformattedEntry[] = "/Project/Unformatted.rsf";
+constexpr char MoreEntry[] = "/Project/More.rsf";
 constexpr char BadEntry[] = "/Project/Bad.rsf";
 
 // C++ 쪽 구조체와 손으로 쓴 표(7.2절 5항 — static_assert로 맞춘다)다.
@@ -119,6 +160,9 @@ struct BindingCase {
 
         SHADER_MANAGER_TEST_REQUIRE(test.fixture.Write("Project/Shaders/Bind.rsf", BindSource));
         SHADER_MANAGER_TEST_REQUIRE(test.fixture.Write("Project/Shaders/Bad.rsf", BadSource));
+        SHADER_MANAGER_TEST_REQUIRE(test.fixture.Write("Project/Shaders/More.rsf", MoreSource));
+        SHADER_MANAGER_TEST_REQUIRE(
+            test.fixture.Write("Project/Shaders/Unformatted.rsf", UnformattedSource));
         SHADER_MANAGER_TEST_REQUIRE(
             LoadShaderFormatSnapshot(ShaderFormatDirectory, "D3D11_SM5", d3d11));
         return true;
@@ -282,8 +326,11 @@ TEST(ShaderBindingRules_WorkerLayoutsMatchCxxOnEveryFormat) {
         const ShaderBindingResource* shared = Named(pixel, "SharedWrapSampler");
         REQUIRE(albedo != nullptr && noise != nullptr && shared != nullptr &&
                 Named(pixel, "AlbedoSampler") != nullptr);
+        // 출처: D3D는 이름 규칙까지(Noise는 None), SPIR-V 형식은 사용 쌍으로 SharedWrap이다(SSD36).
+        const ShaderSamplerSource noiseSource =
+            format == 2 ? ShaderSamplerSource::SharedWrap : ShaderSamplerSource::None;
         CHECK(albedo->samplerSource == ShaderSamplerSource::Own &&
-              noise->samplerSource == ShaderSamplerSource::None && shared->sharedSampler);
+              noise->samplerSource == noiseSource && shared->sharedSampler);
         if (format == 2) {
             // Vulkan binding은 종류 순서(텍스처 → 샘플러)로 0부터 잇는다(7.2절 4항).
             CHECK(albedo->slot == 0 && noise->slot == 1 &&
@@ -294,7 +341,17 @@ TEST(ShaderBindingRules_WorkerLayoutsMatchCxxOnEveryFormat) {
         }
     }
 
-    // Vulkan: 단계 사이 location은 선언 순서가 아니라 TEXCOORDn이다(7.2절 7항, 7.3절 (g)).
+    // VS·PS 연결(SSD37): 모든 형식에서 PS 입력이 VS 출력의 앞부분이다.
+    for (usize format = 0; format < 3; ++format) {
+        ShaderBindingLayout vertex(TestAllocator());
+        ShaderBindingLayout pixel(TestAllocator());
+        REQUIRE(ReadLayout(results[format * 2], vertex));
+        REQUIRE(ReadLayout(results[format * 2 + 1], pixel));
+        CHECK(vertex.interStageMask == 0b11 && pixel.interStageMask == 0b11);
+        CHECK(CheckShaderStageLink(vertex, pixel));
+    }
+
+    // Vulkan: 단계 사이 location은 TEXCOORDn이다(7.2절 7항, 7.3절 (g)).
     const Array<uint8>& vulkanVertex = results[4].values.Part(ShaderNuggetValue::Code);
     const Array<uint8>& vulkanPixel = results[5].values.Part(ShaderNuggetValue::Code);
     CHECK(SpirvLocation(vulkanVertex, "TEXCOORD0") == 0 &&
@@ -426,6 +483,202 @@ TEST(ShaderBindingRules_WorkerRejectsCounterexamplesAndNarrowFormats) {
     CHECK(
         Failed(results[wideFirst + 1], "sampled texture count 17 exceeds the D3D11_SM5 limit 16"));
     CHECK(ReadLayout(results[wideFirst + 2], layout));
+}
+
+TEST(ShaderBindingRules_WorkerFeaturesPairsAndFallback) {
+    BindingCase binding;
+    const char* skip = nullptr;
+    if (!binding.Make("bindingmore", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderBindingRules_WorkerFeaturesPairsAndFallback: %s\n", skip);
+        }
+
+        return;
+    }
+
+    const ShaderFormatSnapshot& d3d12 = binding.test.d3d12;
+    const ShaderFormatSnapshot& d3d11 = binding.d3d11;
+    const ShaderFormatSnapshot& vulkan = binding.test.vulkan;
+    Array<ShaderCompileJob> jobs(TestAllocator());
+    const auto add = [&](const ShaderFormatSnapshot& format, const char* point, uint32 stage,
+                         uint32 features = 0, bool development = false) noexcept {
+        ShaderCompileJob job = binding.Job(format, MoreEntry, point, stage);
+        job.requiredFeatures = features;
+        job.developmentOnly = development;
+        REQUIRE(jobs.TryPushBack(job));
+    };
+    // 0–2: 거꾸로 선언한 단계 사이 변수 — D3D는 순서 오류, Vulkan은 location = n.
+    add(d3d12, "ReversedVS", ShaderStageVertex);
+    add(d3d11, "ReversedVS", ShaderStageVertex);
+    add(vulkan, "ReversedVS", ShaderStageVertex);
+    // 3–6: layer 출력 — 요구 기능이 있으면 D3D12·Vulkan 통과, 없으면 오류(SSD35, 7.3절 (j) 컴파일).
+    const uint32 layerFeature = ShaderFeatureVertexViewportLayerOutput;
+    add(d3d12, "LayerVS", ShaderStageVertex, layerFeature);
+    add(vulkan, "LayerVS", ShaderStageVertex, layerFeature);
+    add(d3d12, "LayerVS", ShaderStageVertex);
+    add(vulkan, "LayerVS", ShaderStageVertex);
+    // 7–10: PS 진단 버퍼(SSD34, 7.3절 (k)) — 개발 전용 PS는 예약 위치, D3D11은 전처리 오류, 진단
+    // 퍼뮤테이션이 아니면 선언이 없다.
+    const uint32 debugFeature = ShaderFeatureDebugPixelUav;
+    add(d3d12, "DebugPS", ShaderStagePixel, debugFeature, true);
+    add(vulkan, "DebugPS", ShaderStagePixel, debugFeature, true);
+    add(d3d11, "DebugPS", ShaderStagePixel, debugFeature, true);
+    add(d3d12, "DebugPS", ShaderStagePixel);
+    // 11–12: 진단 버퍼가 아닌 PS UAV는 오류.
+    add(d3d12, "StrayPS", ShaderStagePixel, debugFeature, true);
+    add(vulkan, "StrayPS", ShaderStagePixel);
+    // 13–16: 사용 쌍(SSD36) — Vulkan만 쌍을 본다.
+    add(vulkan, "TwoSourcesPS", ShaderStagePixel);
+    add(d3d12, "TwoSourcesPS", ShaderStagePixel);
+    add(vulkan, "SharedPS", ShaderStagePixel);
+    add(d3d12, "SharedPS", ShaderStagePixel);
+    // 17–19: ROCKS_IMAGE_FORMAT 원문 검사(SSD40) — SPIR-V 형식만.
+    for (const ShaderFormatSnapshot* format : {&vulkan, &d3d12}) {
+        REQUIRE(jobs.TryPushBack(
+            binding.Job(*format, UnformattedEntry, "UnformattedCS", ShaderStageCompute)));
+    }
+
+    add(vulkan, "FormattedCS", ShaderStageCompute);
+    // 20–21: D3D11 대체 경로(HLSL 2021 — SSD38)의 register·ATTRIBUTEn·루트 상수.
+    for (const char* point : {"MainVS", "MainPS"}) {
+        ShaderCompileJob job =
+            binding.Job(d3d11, BindEntry, point,
+                        point[4] == 'V' ? ShaderStageVertex : ShaderStagePixel, BindLayouts);
+        job.options.hlsl2021 = true;
+        REQUIRE(jobs.TryPushBack(job));
+    }
+
+    Array<ShaderCompileJobResult> results(TestAllocator());
+    REQUIRE(Compile(binding, "MoreWork", jobs.View(), results));
+    CHECK(Failed(results[0], "ascending n order"));
+    CHECK(Failed(results[1], "ascending n order"));
+    REQUIRE(results[2].status == ShaderCompileStatus::Success);
+    const Array<uint8>& reversed = results[2].values.Part(ShaderNuggetValue::Code);
+    CHECK(SpirvLocation(reversed, "TEXCOORD0") == 0 && SpirvLocation(reversed, "TEXCOORD2") == 2);
+    ShaderBindingLayout layout(TestAllocator());
+    REQUIRE(ReadLayout(results[2], layout));
+    CHECK(layout.interStageMask == 0b101);
+
+    CHECK(results[3].status == ShaderCompileStatus::Success);
+    CHECK(results[4].status == ShaderCompileStatus::Success);
+    CHECK(Failed(results[5], "vertexViewportLayerOutput"));
+    CHECK(Failed(results[6], "vertexViewportLayerOutput"));
+
+    for (const usize index : {7u, 8u}) {
+        REQUIRE(ReadLayout(results[index], layout));
+        const ShaderBindingResource* debug = Named(layout, "RocksDebugBuffer");
+        REQUIRE(debug != nullptr);
+        CHECK(debug->kind == ShaderResourceKind::StorageBufferReadWrite && debug->slot == 0);
+    }
+
+    CHECK(results[9].status == ShaderCompileStatus::PreprocessError &&
+          strstr(results[9].diagnostics.CStr(), "debugPixelUav") != nullptr);
+    REQUIRE(ReadLayout(results[10], layout));
+    CHECK(Named(layout, "RocksDebugBuffer") == nullptr);
+    CHECK(Failed(results[11], "uavStages"));
+    CHECK(Failed(results[12], "uavStages"));
+
+    CHECK(Failed(results[13], "exactly one sampler source"));
+    CHECK(results[14].status == ShaderCompileStatus::Success);
+    REQUIRE(ReadLayout(results[15], layout));
+    CHECK(Named(layout, "Noise")->samplerSource == ShaderSamplerSource::SharedClamp &&
+          Named(layout, "Albedo")->samplerSource == ShaderSamplerSource::Own);
+    REQUIRE(ReadLayout(results[16], layout));
+    CHECK(Named(layout, "Noise")->samplerSource == ShaderSamplerSource::None);
+
+    CHECK(Failed(results[17], "ROCKS_IMAGE_FORMAT"));
+    CHECK(results[18].status == ShaderCompileStatus::Success);
+    CHECK(results[19].status == ShaderCompileStatus::Success);
+
+    // 대체 경로도 FXC 직접 경로와 같은 위치·크기다(register 선언 순서, 루트 상수 b13 → 값 1 밖).
+    ShaderBindingLayout vertex(TestAllocator());
+    ShaderBindingLayout pixel(TestAllocator());
+    REQUIRE(ReadLayout(results[20], vertex));
+    REQUIRE(ReadLayout(results[21], pixel));
+    CHECK(vertex.attributeMask == 0b1001 && vertex.rootConstantBytes == sizeof(DrawConstantsCpp));
+    const ShaderBindingResource* view = Named(vertex, "View");
+    REQUIRE(view != nullptr);
+    CHECK(view->slot == 0 && view->constantBufferBytes == sizeof(ViewCpp));
+    CHECK(Named(pixel, "Albedo")->slot == 0 && Named(pixel, "Noise")->slot == 1 &&
+          Named(pixel, "AlbedoSampler")->slot == 0 && Named(pixel, "SharedWrapSampler")->slot == 1);
+    CHECK(Named(pixel, "Noise")->samplerSource == ShaderSamplerSource::SharedWrap);
+    CHECK(CheckShaderStageLink(vertex, pixel));
+}
+
+TEST(ShaderBindingRules_WorkerGlesEmulatesConstantBuffers) {
+    BindingCase binding;
+    const char* skip = nullptr;
+    if (!binding.Make("bindinggles", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderBindingRules_WorkerGlesEmulatesConstantBuffers: %s\n", skip);
+        }
+
+        return;
+    }
+
+    ShaderFormatSnapshot gles(TestAllocator());
+    REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, "GLES31_PC", gles));
+    Array<ShaderCompileJob> jobs(TestAllocator());
+    REQUIRE(
+        jobs.TryPushBack(binding.Job(gles, BindEntry, "MainVS", ShaderStageVertex, BindLayouts)));
+    REQUIRE(
+        jobs.TryPushBack(binding.Job(gles, BindEntry, "MainPS", ShaderStagePixel, BindLayouts)));
+    Array<ShaderCompileJobResult> results(TestAllocator());
+    REQUIRE(Compile(binding, "GlesWork", jobs.View(), results));
+    PrintFailures(results, results.Size());
+    ShaderBindingLayout vertex(TestAllocator());
+    ShaderBindingLayout pixel(TestAllocator());
+    REQUIRE(ReadLayout(results[0], vertex));
+    REQUIRE(ReadLayout(results[1], pixel));
+    // 값 1: 루트 상수 80 byte, View는 상수 버퍼 순번 0, 텍스처 유닛 PS 0·1, 연결.
+    CHECK(vertex.rootConstantBytes == sizeof(DrawConstantsCpp) && Named(vertex, "View")->slot == 0);
+    CHECK(Named(pixel, "Albedo")->slot == 0 && Named(pixel, "Noise")->slot == 1);
+    CHECK(CheckShaderStageLink(vertex, pixel));
+    // 값 0: 상수 버퍼·루트 상수가 vec4 배열이 되고 원래 이름이 남지 않는다(SSD42).
+    const Array<uint8>& vertexCode = results[0].values.Part(ShaderNuggetValue::Code);
+    const Array<uint8>& pixelCode = results[1].values.Part(ShaderNuggetValue::Code);
+    String vertexText(TestAllocator());
+    String pixelText(TestAllocator());
+    REQUIRE(vertexText.TryAssign(
+        StringView(reinterpret_cast<const char*>(vertexCode.Data()), vertexCode.Size())));
+    REQUIRE(pixelText.TryAssign(
+        StringView(reinterpret_cast<const char*>(pixelCode.Data()), pixelCode.Size())));
+    const bool vertexOk = strstr(vertexText.CStr(), "uniform highp vec4 vc0_h[6];") != nullptr &&
+                          strstr(vertexText.CStr(), "uniform highp vec4 vu_h[5];") != nullptr &&
+                          strstr(vertexText.CStr(), "View.") == nullptr &&
+                          strstr(vertexText.CStr(), "Draw.") == nullptr;
+    if (!vertexOk) {
+        fprintf(stderr, "GLES vertex ESSL:\n%s\n", vertexText.CStr());
+    }
+
+    CHECK(vertexOk);
+    const bool pixelOk =
+        strstr(pixelText.CStr(), "ps0") != nullptr && strstr(pixelText.CStr(), "ps1") != nullptr;
+    if (!pixelOk) {
+        fprintf(stderr, "GLES pixel ESSL:\n%s\n", pixelText.CStr());
+    }
+
+    CHECK(pixelOk);
+    // 값 2: VS 배열·복사 표, PS 샘플러 유닛과 출처.
+    REQUIRE(results[0].values.Has(ShaderNuggetValue::GlesCopyTable));
+    ShaderGlesBindingHeader vertexHeader(TestAllocator());
+    REQUIRE(DecodeShaderGlesBindingHeader(
+        results[0].values.Part(ShaderNuggetValue::GlesCopyTable).View(), vertexHeader));
+    REQUIRE(vertexHeader.arrays.Size() == 2);
+    CHECK(vertexHeader.arrays[0].buffer == 0 && vertexHeader.arrays[0].vec4Count == 6 &&
+          vertexHeader.arrays[1].buffer == ShaderGlesRootConstantsBuffer &&
+          vertexHeader.arrays[1].vec4Count == 5 && vertexHeader.attributeMask == 0b1001);
+    REQUIRE(vertexHeader.copies.Size() == 2);
+    CHECK(vertexHeader.copies[0].bytes == sizeof(ViewCpp) &&
+          vertexHeader.copies[1].bytes == sizeof(DrawConstantsCpp));
+    ShaderGlesBindingHeader pixelHeader(TestAllocator());
+    REQUIRE(DecodeShaderGlesBindingHeader(
+        results[1].values.Part(ShaderNuggetValue::GlesCopyTable).View(), pixelHeader));
+    REQUIRE(pixelHeader.samplers.Size() == 2);
+    CHECK(pixelHeader.samplers[0].unit == 0 && pixelHeader.samplers[0].name == StringView("ps0") &&
+          pixelHeader.samplers[0].source == ShaderSamplerSource::Own);
+    CHECK(pixelHeader.samplers[1].unit == 1 &&
+          pixelHeader.samplers[1].source == ShaderSamplerSource::SharedWrap);
 }
 
 } // namespace shader_binding_rules_tests_file

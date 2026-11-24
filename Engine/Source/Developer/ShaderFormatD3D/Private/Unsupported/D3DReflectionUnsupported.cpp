@@ -4,8 +4,9 @@
 namespace rocks::shader {
 
 ShaderToolOutcome BuildD3DBindingLayout(D3DCodeKind, const ShaderToolSet&,
-                                        const ShaderFormatDefinition&, uint32,
-                                        Span<const ShaderParameterLayout>, Span<const uint8>,
+                                        const ShaderFormatDefinition&, uint32, uint32,
+                                        Span<const ShaderParameterLayout>,
+                                        Span<const ShaderSamplerUse>, bool, Span<const uint8>,
                                         Array<uint8>& out, String& diagnostics) noexcept {
     out.Clear();
     (void)diagnostics.TryAppend("D3D shader reflection is only available on Windows");

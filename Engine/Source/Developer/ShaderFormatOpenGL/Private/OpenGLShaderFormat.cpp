@@ -1,9 +1,13 @@
 #include <ShaderFormatOpenGL/OpenGLShaderFormat.h>
 
+#include <Platform/Memory.h>
+#include <ShaderCompilerCommon/ShaderSpirvBindings.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
 #include <ShaderToolLoader/ShaderToolCalls.h>
 #include <string.h>
 
-// OpenGL ES 형식 처리기(Docs/Design/ShaderSystem 11.1절 SH1e E5)다. 규칙은 공개 헤더 주석을 따른다.
+// OpenGL ES 형식 처리기(Docs/Design/ShaderSystem 11.1절 SH1e E5, 16.1절 SSD42 SH2c)다. 규칙은 공개
+// 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace opengl_format_detail {
@@ -107,8 +111,20 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     request.hlsl2021 = job.options.hlsl2021;
     request.optimization = job.options.optimization;
     request.dxPositionW = format.compiler.dxPositionW;
+    request.reflect = true;
+    ShaderParameterLayoutSet layouts(allocator);
+    if (!DecodeShaderJobLayouts(job, layouts, result)) {
+        return;
+    }
+
     Array<uint8> spirv(allocator);
     String diagnostics(allocator);
+    if (!CheckStorageImageFormats(job.source.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "shader binding rules",
+                      diagnostics.View());
+        return;
+    }
+
     const ShaderToolOutcome compiled =
         CompileHlslToSpirv(*context.tools, request, spirv, diagnostics);
     if (compiled != ShaderToolOutcome::Success) {
@@ -125,12 +141,101 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
+    // 고쳐 쓰기·검증·사용 쌍·값 1과 GLES 계획(16.1절 SSD36·SSD42)이다.
+    Array<uint32> raw(allocator);
+    Array<uint32> rewritten(allocator);
+    Array<uint8> rewrittenBytes(allocator);
+    if (spirv.Size() % sizeof(uint32) != 0 || !raw.TryResize(spirv.Size() / sizeof(uint32))) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "DXC produced a malformed SPIR-V module");
+        return;
+    }
+
+    platform::MemoryCopy(raw.Data(), spirv.Data(), spirv.Size());
+    SpirvRewriteOptions rewrite;
+    rewrite.stage = job.stage;
+    rewrite.stageLocations = true;
+    if (!RewriteSpirv(raw.View(), rewrite, rewritten, diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "SPIR-V binding rules",
+                      diagnostics.View());
+        return;
+    }
+
+    if (!rewrittenBytes.TryResize(rewritten.Size() * sizeof(uint32))) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    platform::MemoryCopy(rewrittenBytes.Data(), rewritten.Data(), rewrittenBytes.Size());
+    if (!ValidateSpirv(context.tools->SpirvTools(), rewrittenBytes.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "spirv-val rejected the rewritten SPIR-V", diagnostics.View());
+        return;
+    }
+
+    Array<SpirvSamplerUse> pairs(allocator);
+    const ShaderToolOutcome queried = QuerySpirvSamplerUses(
+        context.tools->SpirvCross(), rewrittenBytes.View(), pairs, diagnostics);
+    if (queried != ShaderToolOutcome::Success) {
+        FailShaderJob(result, OpenGLJobStatus(queried), "SPIR-V sampler use query",
+                      diagnostics.View());
+        return;
+    }
+
+    Array<ShaderSamplerUse> uses(allocator);
+    for (const SpirvSamplerUse& pair : pairs) {
+        if (!uses.TryPushBack(ShaderSamplerUse{pair.texture.View(), pair.sampler.View()})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
+    SpirvBindingRequest bindingRequest;
+    bindingRequest.format = &format;
+    bindingRequest.stage = job.stage;
+    bindingRequest.requiredFeatures = job.requiredFeatures;
+    bindingRequest.layouts = layouts.View();
+    bindingRequest.raw = raw.View();
+    bindingRequest.rewritten = rewritten.View();
+    bindingRequest.uses = uses.View();
+    bindingRequest.hasUses = true;
+    SpirvBindingResult bound(allocator);
+    const ShaderWorkerJobStatus normalized =
+        BuildSpirvBindingLayout(bindingRequest, bound, diagnostics);
+    if (normalized != ShaderWorkerJobStatus::Success) {
+        FailShaderJob(result, normalized, "shader binding rules", diagnostics.View());
+        return;
+    }
+
+    Array<SpirvGlslBinding> glslBindings(allocator);
+    Array<SpirvGlslCombined> glslCombined(allocator);
+    for (const GlesResourceBinding& entry : bound.gles.bindings) {
+        if (!glslBindings.TryPushBack(
+                SpirvGlslBinding{entry.set, entry.binding, entry.glBinding})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
+    for (const GlesCombinedSampler& entry : bound.gles.samplers) {
+        if (!glslCombined.TryPushBack(SpirvGlslCombined{entry.texture.View(), entry.sampler.View(),
+                                                        StringView(entry.name.CStr()),
+                                                        entry.unit})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
     SpirvCrossRequest cross;
-    cross.spirv = spirv.View();
+    cross.spirv = rewrittenBytes.View();
     cross.target = SpirvCrossTarget::Essl;
     cross.esslVersion = format.compiler.esslVersion;
     cross.fixupClipSpace = format.compiler.fixupClipSpace;
     cross.flipVertexY = format.compiler.flipVertexY;
+    cross.stage = job.stage;
+    cross.glslPlainUniforms = true;
+    cross.glslBindings = glslBindings.View();
+    cross.glslCombined = glslCombined.View();
     String essl(allocator);
     const ShaderToolOutcome crossed =
         CrossCompileSpirv(context.tools->SpirvCross(), cross, essl, diagnostics);
@@ -139,17 +244,20 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
-    result.status = ShaderWorkerJobStatus::Success;
-    result.diagnostics.Clear();
-    result.values.Clear();
-    auto code = result.values.TryEmplaceBack(allocator);
-    if (!code || !code.Value()->bytes.TryAppend(Span<const uint8>(
-                     reinterpret_cast<const uint8*>(essl.Data()), essl.ByteCount()))) {
+    if (!RewriteGlesUniforms(essl, bound.gles, diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "GLES constant buffer emulation",
+                      diagnostics.View());
+        return;
+    }
+
+    Array<uint8> code(allocator);
+    if (!code.TryAppend(
+            Span<const uint8>(reinterpret_cast<const uint8*>(essl.Data()), essl.ByteCount()))) {
         FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
         return;
     }
 
-    code.Value()->id = 0;
+    SucceedShaderJob(result, code, bound.bindingLayout, bound.gles.header);
 }
 
 } // namespace rocks::shader

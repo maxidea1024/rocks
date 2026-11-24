@@ -31,7 +31,7 @@
 | BD27 | 빌드가 모듈마다 `ROCKS_<MODULE>_API`를 정의한다. `Monolithic`이면 빈 값, `Modular`이면 자기 모듈은 export·다른 모듈은 import다(UE `<MODULE>_API`). 가시성·rpath 옵션은 UE와 같다. 규칙 파일은 이 매크로를 정의할 수 없고, 다른 모듈의 API 매크로를 붙이면 정책 오류다. 다른 모듈이 상속하는 클래스는 클래스 단위 export가 필요하다(메타 컴파일러 진단) | 권장안 |
 | BD28 | 메타 컴파일러는 생성 `.cpp`(UE `.gen.cpp` — 리플렉션 헤더마다 하나, 모듈마다 등록용 하나: [리플렉션 생성 소스](../ReflectionGeneratedSources.ko.md) GSD2)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
 | BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다 | 권장안 |
-| BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](../ModuleLoader.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
+| BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](../ModuleLoader/README.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
 | BD31 | Editor보다 먼저 `Modular` Program 시험 빌드(FoundationTests — 타깃 `FoundationModular`)를 검사 체인에 넣어 export 누락과 공유 상태 위반을 잡는다(Windows·macOS). 개정 22(사용자 결정): 시험은 시험 실행 파일 모듈(호스트) 하나에 두고 시험이 부르는 모듈 내부 선언에 그 모듈의 API 매크로를 붙인다(비공개 헤더는 정책 허용 목록). 처음 안(모듈 `Private/` 시험 묶음을 그 모듈 공유 라이브러리에 링크 — UE `Private/Tests`)은 6개 모듈의 시험이 그 모듈에 의존하는 fixture·모듈을 써서 순환이 생겨 버렸다. 시험 등록 표는 호스트에 한 벌이다 | 확정(사용자 결정) |
 | BD32 | 엔진 저장소의 규칙 평가는 `Engine/Plugins`를 늘 찾고, 끈 플러그인까지 기술자 검증·규칙 대조를 한다(3.9절) | 권장안 |
 | BD33 | 타깃 규칙 `Plugins`(프로젝트 `plugins[]`와 같은 형식), 타깃 참조가 프로젝트 참조를 이긴다. 버린 안: 문자열 목록 둘(형식이 둘이 됨), 플러그인 쪽 지원 프로그램 목록(UE `SupportedPrograms` — 이중 등록) | 권장안 |
@@ -44,4 +44,4 @@
 | BD40 | 플러그인 시험은 `<플러그인>/Source/<모듈>/Tests/`에 두고 EngineTests가 `PluginTestModules`로 모은다. 버린 안: 플러그인마다 시험 실행 파일 | 권장안 |
 | BD41 | SDK export 타깃의 엔진 플러그인 켜기 거부. `Modular` 타깃의 플러그인은 ML5a(모듈 로더 MD23 — 플러그인 binaries 폴더·manifest)부터 허용(개정 26, 그 전에는 거부) | 권장안 |
 | BD42 | 정책 경로에 `Engine/Plugins` 모양 추가(`crt-number-conversion`·시험 소스·fixture 판정), 새 검사 `plugin-module-rules-base` | 권장안 |
-| BD43 | 쿠커(Commandlet)의 모듈 집합은 쿠킹 대상 출시 타깃(Game·Client, Release)의 모듈 집합과 같아야 한다: 엔진 몫은 Commandlet이 Engine 타깃 폐포의 Runtime·ClientOnly 모듈을 링크(정책 `cooker-module-set`), 프로젝트·플러그인 몫은 ML5b 뒤 모듈 로더로 적재, 쿠커가 이름으로 대조(3.10절, 렌더 세션 요청 — 셰이더 시스템 SSD3). 버린 안: 대상 타깃마다 쿠커 링크, 모듈 없이 셰이더 타입 manifest로 쿠킹 | 권장안 |
+| BD43 | 쿠커(Commandlet)의 모듈 집합은 쿠킹 대상 출시 타깃(Game·Client, Release)의 모듈 집합과 같아야 한다: 엔진 몫은 Commandlet이 엔진 저장소 출시 타깃(지금 Sandbox) 폐포의 Runtime·ClientOnly 엔진 모듈을 링크(정책 `cooker-module-set`), 프로젝트·플러그인 몫은 ML5b 뒤 모듈 로더로 적재, 쿠커가 이름으로 대조(3.10절, 렌더 세션 요청 — 셰이더 시스템 SSD3). 버린 안: 대상 타깃마다 쿠커 링크, 모듈 없이 셰이더 타입 manifest로 쿠킹 | 권장안 |

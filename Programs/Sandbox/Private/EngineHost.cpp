@@ -108,6 +108,20 @@ public:
 
         if (options_.window != nullptr) {
             options_.window->PumpEvents(queue_);
+            // 렌더가 아직 없으므로 잃은 surface를 곧바로 놓았다고 알린다(Android 창 파괴 gate —
+            // Docs/Design/ AndroidPlatform.ko.md 4절).
+            if (options_.window->ConsumeSurfaceLost()) {
+                options_.window->AcknowledgeSurfaceLost();
+            }
+
+            // 새 surface에는 빈 프레임을 낸다(렌더러가 없다 — Android는 첫 프레임 전까지 입력을
+            // 보내지 않는다).
+            uint32 width = 0;
+            uint32 height = 0;
+            if (options_.window->ConsumeResize(width, height)) {
+                options_.window->PresentBlankFrame();
+            }
+
             if (options_.window->IsCloseRequested()) {
                 options_.window->ClearCloseRequest();
                 Log::Info(LogSandboxHost, "Window close requested");
@@ -186,7 +200,7 @@ UniquePtr<platform::GamepadBackend> CreateSandboxGamepads(Allocator& allocator) 
     return Move(gamepads.Value());
 }
 
-// 호스트 서비스를 등록한다(Docs/Design/ModuleLoader.ko.md 3.12절). 서비스는 선택이라 실패하면
+// 호스트 서비스를 등록한다(Docs/Design/ModuleLoader 3.12절). 서비스는 선택이라 실패하면
 // Warning을 남기고 모듈은 서비스 없이 시작한다.
 template <class Service>
 void RegisterHostService(HostServices& services, Service& service) noexcept {
@@ -521,7 +535,7 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
 
 } // namespace
 
-// 엔진 호스트 본문이다(Docs/Design/ModuleLoader.ko.md 3.11절). Launch가 소유한 프로세스 모듈
+// 엔진 호스트 본문이다(Docs/Design/ModuleLoader 3.11절). Launch가 소유한 프로세스 모듈
 // 로더(부트 모듈이 시작해 있다)로 설정(HostSettings — 모든 모듈의 RegisterSettings) → LogHost·trace
 // → PostConfigInit 단계 → 엔진(엔진 단계) → 호스트 묶음 종료를 돈다. 프로세스 묶음은 Launch가
 // 내린다. 멈춘 로그 출력 스레드를 포기했으면 LogHost·설정 문맥을 파괴하지 않고 정적 소멸 없이

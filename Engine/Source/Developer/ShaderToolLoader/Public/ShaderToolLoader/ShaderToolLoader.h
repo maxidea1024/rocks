@@ -219,6 +219,17 @@ struct SpirvCrossFunctions {
         CompilerGetCombinedImageSamplers,
         CompilerGetName,
         CompilerCompile,
+        CompilerCreateShaderResources,
+        ResourcesGetResourceListForType,
+        CompilerGetDecoration,
+        CompilerGetMemberDecoration,
+        HlslResourceBindingInit,
+        CompilerHlslAddResourceBinding,
+        CompilerHlslAddVertexAttributeRemap,
+        MslResourceBindingInit2,
+        CompilerMslAddResourceBinding2,
+        CompilerSetDecoration,
+        CompilerSetName,
         Count
     };
 
@@ -236,7 +247,18 @@ struct SpirvCrossFunctions {
                                                    "spvc_compiler_build_combined_image_samplers",
                                                    "spvc_compiler_get_combined_image_samplers",
                                                    "spvc_compiler_get_name",
-                                                   "spvc_compiler_compile"};
+                                                   "spvc_compiler_compile",
+                                                   "spvc_compiler_create_shader_resources",
+                                                   "spvc_resources_get_resource_list_for_type",
+                                                   "spvc_compiler_get_decoration",
+                                                   "spvc_compiler_get_member_decoration",
+                                                   "spvc_hlsl_resource_binding_init",
+                                                   "spvc_compiler_hlsl_add_resource_binding",
+                                                   "spvc_compiler_hlsl_add_vertex_attribute_remap",
+                                                   "spvc_msl_resource_binding_init_2",
+                                                   "spvc_compiler_msl_add_resource_binding_2",
+                                                   "spvc_compiler_set_decoration",
+                                                   "spvc_compiler_set_name"};
     void* address[Count] = {};
 };
 

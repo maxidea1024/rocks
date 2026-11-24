@@ -11,7 +11,7 @@ namespace Rocks.Build.Cli;
 // 있는 모듈의 descriptor(<M>.rocksmeta.json)와 identity 명세의 SDK 상대 경로다(없으면 둘 다 null). 게임 빌드는 이 모듈을
 // 다시 생성하지 않고 descriptor를 import하며 명세를 명세 집합 검증에 넣는다. ProvidesBuildInfo는 NativeModuleInput과 같은 표지다
 // (엔진 Core — 게임 실행 파일이 이 모듈에 닿으면 빌드가 BuildInfo 정의 TU를 더한다). ProvidesModuleTable·ThirdParty도 NativeModuleInput과 같은
-// 표지다(Docs/Design/ModuleLoader.ko.md 3.9절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 진입점을 참조하고 서드파티 모듈은 뺀다).
+// 표지다(Docs/Design/ModuleLoader 3.9절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 진입점을 참조하고 서드파티 모듈은 뺀다).
 // 손으로 쓴 소스가 없던 메타데이터 모듈(CoreTypeBindings 등)의 라이브러리도 진입점 TU를 담으므로 다른 모듈과 같은 판정을 받는다
 // (3.10절). SDK는 생성 소스 자체는 싣지 않는다(생성 헤더와 라이브러리만). DynamicModules는 NativeModuleInput과 같은 실행 중 적재 모듈
 // 목록이다(3.8절 — 게임 실행 파일이 SDK 모듈을 링크하면 그 동적 모듈도 링크하고 모듈 표에 싣는다). LoadingPhase(단계 이름 —
@@ -44,21 +44,21 @@ public static class InstalledSdk
     // 2: SdkModule에 SystemLibraries·Frameworks 추가. 3: Descriptor·IdentityManifest 추가. 4: ProvidesBuildInfo 추가, AbiIdentity를
     // effective triple로 계산(B7 — B7 이전 SDK는 생성 TU의 Core/Build/BuildInfo.h include가 깨지는 대신 버전 불일치로 거부한다).
     // 5: EngineVersion {Major, Minor, Patch} 추가(엔진 버전 단일 출처 — 생성 TU의 CurrentEngineVersion 정의에 필요하다).
-    // 6: SdkModule에 ProvidesModuleTable·ThirdParty 추가(게임 실행 파일의 모듈 표 — Docs/Design/ModuleLoader.ko.md 3.2절).
+    // 6: SdkModule에 ProvidesModuleTable·ThirdParty 추가(게임 실행 파일의 모듈 표 — Docs/Design/ModuleLoader 3.2절).
     // 7: SdkModule에 ReflectionOnlyLibrary 추가. 손으로 쓴 소스가 없던 리플렉션 모듈이 모듈 생성 소스 때문에 라이브러리를 갖는다
     // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절 — 이전 SDK의 모듈 생성 헤더는 등록 함수를 inline으로 정의해 새 도구의 선언과
     // 맞지 않으므로 버전 불일치로 거부한다).
     // 8: ReflectionOnlyLibrary 제거. 메타데이터 모듈이 모두 진입점 모듈이 되고 진입 기술이 자기 타입 등록 함수를 싣는다
-    // (Docs/Design/ModuleLoader.ko.md 3.10절 — 이전 SDK의 그런 모듈 라이브러리에는 진입점이 없어 게임 모듈 표가 링크되지 않으므로
+    // (Docs/Design/ModuleLoader 3.10절 — 이전 SDK의 그런 모듈 라이브러리에는 진입점이 없어 게임 모듈 표가 링크되지 않으므로
     // 버전 불일치로 거부한다).
     // 9: 타입별 생성 헤더가 본문을 정의하지 않고(선언·형질·inline Trace만 — 본문은 SDK 라이브러리에 든 타입별 생성 소스의 object다,
     // Docs/Design/ReflectionGeneratedSources.ko.md 5절) SdkModule에 SharedPchHeader가 더해졌다(공유 PCH 제공 모듈의 헤더 철자 —
     // Docs/Design/UnityBuildPch.ko.md 8.4절. 게임 빌드가 SDK 헤더로 공유 PCH를 자기 출력에 직접 만들고, 공유 정의는 Defines에서 다시
     // 계산한다). 이전 SDK는 생성 헤더가 본문을 inline으로 정의하고 동봉한 MetaCompiler가 타입별 생성 소스·정의 헤더 옵션
     // (--jobs·--definitions-header)을 모르므로 버전 불일치로 거부한다.
-    // 10: SdkModule에 DynamicModules 추가(실행 중 적재 모듈 — Docs/Design/ModuleLoader.ko.md 3.8절. 게임 실행 파일이 SDK 모듈을 링크하면
+    // 10: SdkModule에 DynamicModules 추가(실행 중 적재 모듈 — Docs/Design/ModuleLoader 3.8절. 게임 실행 파일이 SDK 모듈을 링크하면
     // 그 동적 모듈도 함께 링크하고 모듈 표에 싣는다).
-    // 11: SdkModule에 LoadingPhase·ProvidesLaunch 추가(로딩 단계 — Docs/Design/ModuleLoader.ko.md 3.11절. 이전 SDK의 Core·ModuleLoader·
+    // 11: SdkModule에 LoadingPhase·ProvidesLaunch 추가(로딩 단계 — Docs/Design/ModuleLoader 3.11절. 이전 SDK의 Core·ModuleLoader·
     // Launch는 단계가 없어 게임 실행 파일의 부트 모듈이 EarliestPossible에 시작하지 않으므로 버전 불일치로 거부한다).
     // 12: SdkModule의 Dependencies를 PublicDependencies·PrivateDependencies로 나눴다(Docs/Design/BuildTargets 3.5절 BS0 — 이전 SDK는
     // 두 목록이 없어 게임 빌드가 공개 환경을 계산할 수 없으므로 버전 불일치로 거부한다).
@@ -78,7 +78,7 @@ public static class InstalledSdk
     public static IReadOnlyList<NativeModuleInput> Reachable(IReadOnlyList<NativeModuleInput> modules, IEnumerable<string> targets)
     {
         var byName = modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
-        // 실행 중 적재 모듈도 SDK에 싣는다(게임 실행 파일이 함께 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절).
+        // 실행 중 적재 모듈도 SDK에 싣는다(게임 실행 파일이 함께 링크한다 — Docs/Design/ModuleLoader 3.8절).
         HashSet<string> reached = LinkClosure.Reachable(targets, byName);
         return modules.Where(module => reached.Contains(module.Name)).ToArray();
     }

@@ -37,7 +37,7 @@ namespace Rocks.Build.Descriptors;
 public enum ModuleType { Runtime, Developer, Editor, ServerOnly, ClientOnly }
 
 /// <summary>
-/// 모듈을 올리는 시점이다(UE ELoadingPhase의 일부, Docs/Design/ModuleLoader.ko.md 3.3절). 기본은 Default다. 값 순서가 단계 순서이고 Core
+/// 모듈을 올리는 시점이다(UE ELoadingPhase의 일부, Docs/Design/ModuleLoader 3.3절). 기본은 Default다. 값 순서가 단계 순서이고 Core
 /// <c>rocks::LoadingPhase</c>와 같다. None은 자동으로 올리지 않는다(코드가 Load로 올린다).
 /// </summary>
 public enum LoadingPhase { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault, PostEngineInit, None }

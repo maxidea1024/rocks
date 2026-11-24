@@ -100,7 +100,7 @@ public static class ModularExports
                 continue;
             }
 
-            // 플러그인 모듈은 플러그인 binaries 폴더다(Docs/Design/ModuleLoader.ko.md 3.15절).
+            // 플러그인 모듈은 플러그인 binaries 폴더다(Docs/Design/ModuleLoader 3.15절).
             string path = Path.Combine(LinkTypes.SharedLibraryDirectory(request.OutputDirectory, module, request.Toolchain.Platform),
                 LinkTypes.SharedLibraryFileName(target, module.Name, request.Toolchain.Platform, request.Configuration));
             if (!File.Exists(path))

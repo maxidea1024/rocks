@@ -148,7 +148,7 @@ public:
     //   Array<int32> values(memory);
     Allocator& DefaultAllocator() noexcept;
 
-    // Launch가 소유한 프로세스 모듈 로더다(Docs/Design/ModuleLoader.ko.md 3.9·3.11절, UE
+    // Launch가 소유한 프로세스 모듈 로더다(Docs/Design/ModuleLoader 3.9·3.11절, UE
     // FModuleManager의 자리 — 전역 접근자는 없다). 본문 수명 동안 유효하다. Monolithic은 범용
     // 할당자로 이 실행 파일의 모듈 표(GeneratedModuleTable)에서, Modular는 Launch의 Modular 진입이
     // 시동 할당자(SystemAllocator)로 모듈 manifest에서 만들었다(3.14절 — 범용 할당자의 종류를
@@ -207,7 +207,7 @@ private:
 inline constexpr int CommandLineFailureExitCode = 1;
 
 // 모듈 로더를 만들지 못했거나 부트 모듈이 시작하지 못했을 때의 종료 코드다(Launch가 Error로 원인을
-// 한 번 기록한다 — Docs/Design/ModuleLoader.ko.md 3.11절).
+// 한 번 기록한다 — Docs/Design/ModuleLoader 3.11절).
 inline constexpr int ModuleStartupFailureExitCode = 1;
 
 // 실행 파일 설명이다. 보통 정적 상수로 두고 Describe 함수가 돌려준다.
@@ -227,6 +227,10 @@ struct ApplicationDescription {
     // 명령줄 캡처 실패(잘못된 인코딩·상한 초과)의 종료 코드다. 사용법 오류를 따로 정한 도구가
     // 바꾼다(예: Commandlet은 2).
     int commandLineFailureExitCode = CommandLineFailureExitCode;
+    // Android APK가 Intent extra(rocks.args) 없이 시작했을 때의 프로그램 인자다(실행 파일 이름
+    // 제외, Docs/Design/AndroidPlatform.ko.md 6절). 런처 아이콘으로 띄우면 extra가 없다. 다른
+    // 플랫폼은 쓰지 않는다.
+    Span<const StringView> androidDefaultArguments{};
 };
 
 // 진입점 공통 본문이다. 실행 파일은 직접 부르지 않고 EntryPoint.h의 매크로를 쓴다.
@@ -272,7 +276,7 @@ ROCKS_LAUNCH_API bool IsTerminationRequested() noexcept;
 } // namespace rocks::launch
 
 #if !ROCKS_MONOLITHIC
-// Modular 실행 파일의 진입이다(Docs/Design/ModuleLoader.ko.md 3.14절). 빌드가 만든 실행 파일 진입
+// Modular 실행 파일의 진입이다(Docs/Design/ModuleLoader 3.14절). 빌드가 만든 실행 파일 진입
 // TU(<모듈>.Launcher.cpp)만 부른다. 실행 파일 폴더의 manifest(manifest — 파일 이름)로 모든 모듈
 // 공유 라이브러리를 싣는 로더를 시동 할당자에서 만들고, 호스트 모듈이 export한 앱 기술로
 // RunApplication과 같은 흐름을 돈다("Launch.Modules"는 이 로더로 부트 모듈만 시작한다). 로더는 실행

@@ -62,6 +62,7 @@ ErrorCode OutcomeError(ShaderLibraryCookOutcome outcome, ErrorCode writeError) n
     switch (outcome) {
     case ShaderLibraryCookOutcome::Written:
     case ShaderLibraryCookOutcome::Unchanged:
+    case ShaderLibraryCookOutcome::Built:
         return ErrorCode::None;
     case ShaderLibraryCookOutcome::JobsFailed:
         return ErrorCode::DependencyFailed;
@@ -108,6 +109,12 @@ Result<void> EnumeratePlans(const ShaderLibraryCookDesc& desc,
                     continue;
                 }
 
+                // 개발 전용 PS 퍼뮤테이션은 진단 버퍼 기능을 요구한다(16.1절 SSD34).
+                if (development && type->stage == ShaderStagePixel &&
+                    (facts.features & ShaderFeatureDebugPixelUav) == 0) {
+                    continue;
+                }
+
                 if (type->shouldCompile != nullptr &&
                     !type->shouldCompile(vertexInput, permutation, facts)) {
                     continue;
@@ -128,6 +135,12 @@ Result<void> EnumeratePlans(const ShaderLibraryCookDesc& desc,
     }
 
     return Result<void>::Success();
+}
+
+// 조합의 요구 기능이다(타입 요구 기능 + 개발 전용 PS의 진단 버퍼 — 16.1절 SSD34·SSD35).
+uint32 PlanFeatures(const JobPlan& plan) noexcept {
+    const bool debugPixel = plan.developmentOnly && plan.type->stage == ShaderStagePixel;
+    return plan.type->requiredFeatures | (debugPixel ? ShaderFeatureDebugPixelUav : 0u);
 }
 
 // 조합의 정의를 storage에 채운다(차원 선언 순서 — SC10이 이름순으로 조립한다).
@@ -294,18 +307,24 @@ const char* ShaderLibraryCookOutcomeName(ShaderLibraryCookOutcome outcome) noexc
         return "BuildFailed";
     case ShaderLibraryCookOutcome::WriteFailed:
         return "WriteFailed";
+    case ShaderLibraryCookOutcome::Built:
+        return "Built";
     }
 
     return "unknown";
 }
 
-Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
-                                 ShaderLibraryCookReport& report) noexcept {
-    using namespace library_cook_detail;
+namespace library_cook_detail {
+
+// 쿠킹과 공급자 메모리 라이브러리(SSD16)가 함께 쓰는 본체다. memory가 null이 아니면 파일을 쓰지
+// 않고 (형식 하나의) v1 byte를 memory에 둔다 — 같은 입력이면 쿠킹 파일과 같은 byte다.
+Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookReport& report,
+                          Array<uint8>* memory) noexcept {
     report.formats.Clear();
     report.failures.Clear();
     if (desc.allocator == nullptr || desc.registry == nullptr || desc.manager == nullptr ||
-        desc.outputDirectory.IsEmpty()) {
+        (memory == nullptr && desc.outputDirectory.IsEmpty()) ||
+        (memory != nullptr && desc.formats.Size() != 1)) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
@@ -387,6 +406,8 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
             }
 
             job.parameterLayouts = plan.type->parameterLayouts;
+            job.requiredFeatures = PlanFeatures(plan);
+            job.developmentOnly = plan.developmentOnly;
             (void)jobs.TryPushBack(job);
         }
 
@@ -440,7 +461,7 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
             entry.typeName = plan.type->name;
             entry.stage = plan.type->stage;
             entry.developmentOnly = plan.developmentOnly;
-            entry.runtimeFeatures = plan.type->requiredFeatures & RuntimeCheckedShaderFeatures;
+            entry.runtimeFeatures = PlanFeatures(plan) & RuntimeCheckedShaderFeatures;
             entry.layoutSignature = storage[index].signature;
             entry.values = Span<const ShaderLibraryValue>(entryValues.values, entryValues.count);
             (void)entries.TryPushBack(entry);
@@ -475,6 +496,12 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
         line.fileSha256 = view.FileSha256();
         line.entries = view.EntryCount();
         line.codes = view.CodeCount();
+        if (memory != nullptr) {
+            *memory = Move(bytes);
+            line.outcome = ShaderLibraryCookOutcome::Built;
+            continue;
+        }
+
         if (auto pathed = BuildPath(desc, snapshot->definition.Id(), line.fileSha256, line.path);
             !pathed) {
             return pathed;
@@ -500,6 +527,19 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
     }
 
     return firstError == ErrorCode::None ? Result<void>::Success() : Fail(firstError);
+}
+
+} // namespace library_cook_detail
+
+Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
+                                 ShaderLibraryCookReport& report) noexcept {
+    return library_cook_detail::RunLibraries(desc, report, nullptr);
+}
+
+Result<void> CompileShaderLibrary(const ShaderLibraryCookDesc& desc,
+                                  ShaderLibraryCookReport& report, Array<uint8>& out) noexcept {
+    out.Clear();
+    return library_cook_detail::RunLibraries(desc, report, &out);
 }
 
 } // namespace rocks::shader

@@ -180,7 +180,7 @@ public static class ReleaseExclusion
         var violations = new List<ReleaseViolation>();
         foreach ((string target, IReadOnlyList<string> selected) in gameTargets)
         {
-            // 실행 중 적재 모듈도 Monolithic 실행 파일에 링크되므로 배제 정책의 도달 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+            // 실행 중 적재 모듈도 Monolithic 실행 파일에 링크되므로 배제 정책의 도달 집합이다(Docs/Design/ModuleLoader 3.8절).
             var reached = new SortedSet<string>(LinkClosure.Reachable(selected, byName,
                 (name, _) => throw new ArgumentException($"target {target}: unknown module {name}")), StringComparer.Ordinal);
 
