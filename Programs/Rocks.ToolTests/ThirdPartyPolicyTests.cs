@@ -557,6 +557,30 @@ internal static class ThirdPartyPolicyTests
                 Verify.That(ThirdPartyManifest.Read(fixture.FilePath(Library)).GlobalState, "globalState true parsed");
             }
 
+            // C++ 번역 단위(.cpp·.cc)를 받고, rtti는 C++ 번역 단위가 있는 code 라이브러리에서 true만 적는다(Docs/Design/Compression.ko.md
+            // 3.3절 C++ 서드파티 — ICU4C).
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteFixture(fixture);
+                fixture.Write(Upstream + "/fake.cpp", "int FakeCpp() { return 1; }\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"fake-1.0/fake.c\"", "\"fake-1.0/fake.c\", \"fake-1.0/fake.cpp\""));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                Verify.That(!ThirdPartyManifest.Read(fixture.FilePath(Library)).RuntimeTypeInformation, "rtti defaults to false");
+                WriteManifest(fixture, manifest => Replace(Replace(manifest, "\"fake-1.0/fake.c\"", "\"fake-1.0/fake.c\", \"fake-1.0/fake.cpp\""),
+                    "\"notes\":", "\"rtti\": true, \"notes\":"));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                Verify.That(ThirdPartyManifest.Read(fixture.FilePath(Library)).RuntimeTypeInformation, "rtti true parsed");
+            }
+
+            ExpectFailure("rtti without C++ translation units", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"rtti\": true, \"notes\":")));
+            ExpectFailure("rtti false", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"rtti\": false, \"notes\":")));
+            ExpectFailure("translation unit with an unknown extension", fixture =>
+            {
+                fixture.Write(Upstream + "/fake.cxx", "int FakeCxx() { return 1; }\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"fake-1.0/fake.c\"", "\"fake-1.0/fake.c\", \"fake-1.0/fake.cxx\""));
+            });
             ExpectFailure("globalState missing in a code library", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"globalState\": false,", "")));
             ExpectFailure("globalState string", fixture =>

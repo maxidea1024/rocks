@@ -108,6 +108,20 @@ public:
 
         if (options_.window != nullptr) {
             options_.window->PumpEvents(queue_);
+            // 렌더가 아직 없으므로 잃은 surface를 곧바로 놓았다고 알린다(Android 창 파괴 gate —
+            // Docs/Design/ AndroidPlatform.ko.md 4절).
+            if (options_.window->ConsumeSurfaceLost()) {
+                options_.window->AcknowledgeSurfaceLost();
+            }
+
+            // 새 surface에는 빈 프레임을 낸다(렌더러가 없다 — Android는 첫 프레임 전까지 입력을
+            // 보내지 않는다).
+            uint32 width = 0;
+            uint32 height = 0;
+            if (options_.window->ConsumeResize(width, height)) {
+                options_.window->PresentBlankFrame();
+            }
+
             if (options_.window->IsCloseRequested()) {
                 options_.window->ClearCloseRequest();
                 Log::Info(LogSandboxHost, "Window close requested");

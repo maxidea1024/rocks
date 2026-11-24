@@ -122,6 +122,11 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {module.Name}: unsupported WindowsSubsystem {module.WindowsSubsystem}.");
             }
 
+            if (module.AndroidPackage is { } package)
+            {
+                ValidateAndroidPackage(request, module, package);
+            }
+
             if (module.WindowsSubsystem != WindowsSubsystem.Console && module.Kind != NativeModuleKind.Executable)
             {
                 throw new ArgumentException($"Module {module.Name}: WindowsSubsystem applies only to executables.");
@@ -140,6 +145,13 @@ internal static class InputValidation
             {
                 throw new ArgumentException($"Module {module.Name}: a C++ module must have a C identifier name (letters, digits and '_', not " +
                     "starting with a digit) — it names ROCKS_<MODULE>_API.");
+            }
+
+            // RTTI는 엔진 모듈에서 금지다. 서드파티 C++ 라이브러리만 ThirdParty.json rtti로 켤 수 있다(Docs/Design/Compression.ko.md
+            // 3.3절 C++ 서드파티).
+            if (module.RuntimeTypeInformation && !module.ThirdParty)
+            {
+                throw new ArgumentException($"Module {module.Name}: RuntimeTypeInformation is only for a third-party module (ThirdParty.json rtti).");
             }
 
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
@@ -349,6 +361,36 @@ internal static class InputValidation
         }
     }
 
+    // Android APK 실행 파일(Docs/Design/AndroidPlatform.ko.md 7절)은 Android 대상의 Monolithic 실행 파일만 받고, 패키지 이름은 Java 패키지
+    // 규칙(점으로 나눈 조각 둘 이상, 조각마다 영문자로 시작하는 영문자·숫자·밑줄)이다.
+    private static void ValidateAndroidPackage(NativeBuildRequest request, NativeModuleInput module, AndroidPackage package)
+    {
+        if (module.Kind != NativeModuleKind.Executable)
+        {
+            throw new ArgumentException($"Module {module.Name}: AndroidPackage applies only to executables.");
+        }
+
+        if (request.Toolchain.Platform != NativePlatform.Android)
+        {
+            throw new ArgumentException($"Module {module.Name}: AndroidPackage is Android-only, but the toolchain targets " +
+                $"{request.Toolchain.Platform}. Declare it only when BuildContext.Platform is Android.");
+        }
+
+        if (request.LinkType != NativeLinkType.Monolithic)
+        {
+            throw new ArgumentException($"Module {module.Name}: an AndroidPackage executable needs a Monolithic target.");
+        }
+
+        string[] segments = package.PackageName.Split('.');
+        bool valid = segments.Length >= 2 && segments.All(segment => segment.Length != 0 && char.IsAsciiLetter(segment[0]) &&
+            segment.All(value => char.IsAsciiLetterOrDigit(value) || value == '_'));
+        if (!valid)
+        {
+            throw new ArgumentException($"Module {module.Name}: invalid Android package name '{package.PackageName}' " +
+                "(two or more dot-separated segments of ASCII letters, digits and underscores, each starting with a letter).");
+        }
+    }
+
     // 리플렉션 생성 소스 목록(NativeModuleInput.ReflectionSources)은 MetaCompiler가 낸 C++ 번역 단위의 경로다. 빈 경로·NUL·.cpp가 아닌
     // 확장자를 거부한다(C로 컴파일되는 .c나 header가 들어오지 않게).
     private static void ValidateReflectionSources(NativeModuleInput module)
@@ -424,14 +466,38 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {library.Name}: HasGlobalState is only for a third-party module (ThirdParty.json globalState).");
             }
 
-            string[] consumers = modules.Where(module => module.AllDependencies.Contains(library.Name, StringComparer.OrdinalIgnoreCase))
-                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            // 소비 모듈은 직접 의존하거나 서드파티 모듈만 거쳐 닿는 Rocks 모듈이다. 서드파티 정적 라이브러리는 그것을 쓰는 Rocks 모듈에
+            // 함께 링크되므로(ICU를 쓰는 HarfBuzz) 서드파티 모듈 자체는 세지 않는다(Docs/Design/BuildTargets 3.8절 BD29).
+            string[] consumers = GlobalStateConsumers(modules, library.Name);
             if (consumers.Length > 1)
             {
                 throw new ArgumentException($"Module {library.Name} has process-wide state (ThirdParty.json globalState), so only one module may " +
                     $"depend on it directly; found {string.Join(", ", consumers)}. Route the others through the owning module's API.");
             }
         }
+    }
+
+    // library에 직접, 또는 서드파티 모듈만 거쳐 의존하는 Rocks 모듈 이름이다(정렬).
+    private static string[] GlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules, string library)
+    {
+        var thirdParty = modules.Where(module => module.ThirdParty).ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        var reaching = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { library };
+        bool grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (NativeModuleInput module in thirdParty.Values)
+            {
+                if (!reaching.Contains(module.Name) && module.AllDependencies.Any(reaching.Contains))
+                {
+                    reaching.Add(module.Name);
+                    grew = true;
+                }
+            }
+        }
+
+        return modules.Where(module => !module.ThirdParty && module.AllDependencies.Any(reaching.Contains))
+            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
     }
 
     // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets 3.9절 BD36)이다. 빌드가

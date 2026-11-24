@@ -45,6 +45,7 @@ public static class ModuleDefinitions
     {
         NativeModuleInput[] visible = dependencies.ToArray();
         string[] defines = module.PublicDefines.Concat(module.PrivateDefines)
+            .Concat(module.AndroidPackage is null ? [] : [AndroidPackage.ApkDefine])
             .Concat(visible.SelectMany(value => value.PublicDefines.Concat(value.ConsumerDefines)))
             .Concat(new[] { module }.Concat(visible).Where(value => !value.ThirdParty)
                 .Select(value => LinkTypes.ApiDefine(value, ReferenceEquals(value, module), linkType, platform)))

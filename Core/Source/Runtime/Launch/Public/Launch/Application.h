@@ -227,6 +227,10 @@ struct ApplicationDescription {
     // 명령줄 캡처 실패(잘못된 인코딩·상한 초과)의 종료 코드다. 사용법 오류를 따로 정한 도구가
     // 바꾼다(예: Commandlet은 2).
     int commandLineFailureExitCode = CommandLineFailureExitCode;
+    // Android APK가 Intent extra(rocks.args) 없이 시작했을 때의 프로그램 인자다(실행 파일 이름
+    // 제외, Docs/Design/AndroidPlatform.ko.md 6절). 런처 아이콘으로 띄우면 extra가 없다. 다른
+    // 플랫폼은 쓰지 않는다.
+    Span<const StringView> androidDefaultArguments{};
 };
 
 // 진입점 공통 본문이다. 실행 파일은 직접 부르지 않고 EntryPoint.h의 매크로를 쓴다.

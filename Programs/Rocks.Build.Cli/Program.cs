@@ -442,6 +442,18 @@ namespace Rocks.Build.Cli
                         InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
                 }
 
+                // Android APK 프로그램(AndroidPackage)은 링크한 lib<이름>.so를 APK로 묶는다(Docs/Design/AndroidPlatform.ko.md 7절).
+                if (android)
+                {
+                    foreach (NativeModuleInput apkModule in modules.Where(module => module.AndroidPackage is not null &&
+                                 result.ModuleOutputs.ContainsKey(module.Name)))
+                    {
+                        string apk = await AndroidPackager.PackageAsync(apkModule, result.ModuleOutputs[apkModule.Name], output, androidAbi,
+                            androidApi, configuration, cancellationToken);
+                        Console.WriteLine($"Android package: {apk}");
+                    }
+                }
+
                 if (args[0] == "test")
                 {
                     if (rules.Target.TestExecutable is null)

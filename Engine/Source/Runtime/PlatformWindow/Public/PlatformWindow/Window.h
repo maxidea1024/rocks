@@ -105,6 +105,28 @@ public:
     // 제목을 바꾼다(UTF-8, WindowDesc::title과 같은 자름 규칙). 잘못된 UTF-8은 InvalidArgument이고
     // 제목은 그대로다. OS 실패는 DependencyFailed다.
     virtual Result<void> SetTitle(StringView title) noexcept = 0;
+
+    // 렌더 surface를 잃었는지다(Android: 창이 사라진다 — Docs/Design/AndroidPlatform.ko.md 4절).
+    // true를 돌려받은 호스트는 그 창의 swapchain·EGL window surface를 놓고 AcknowledgeSurfaceLost를
+    // 부른다. 그 전까지 OS 콜백이 기다린다(제한 시간 4초). 데스크톱은 늘 false다. 게임 스레드에서
+    // 부른다.
+    virtual bool ConsumeSurfaceLost() noexcept {
+        return false;
+    }
+
+    // 렌더가 잃은 surface를 놓았다고 알린다(ConsumeSurfaceLost 뒤). 데스크톱은 아무것도 하지
+    // 않는다.
+    virtual void AcknowledgeSurfaceLost() noexcept {
+    }
+
+    // 렌더러가 없는 호스트(Sandbox 헤드리스 창·시험)가 창에 빈(검은) 프레임 한 장을 낸다. Android는
+    // 창 surface에 한 번도 프레임이 오지 않으면 창을 그려지지 않은 것으로 보고 입력을 보내지 않아
+    // ANR이 되므로(Docs/Design/AndroidPlatform.ko.md 4절), 새 surface마다(ConsumeResize가 true일
+    // 때) 부른다. Android는 CPU로 그리므로 그 surface에는 뒤에 GPU swapchain을 만들 수 없다 —
+    // 렌더러가 있는 호스트는 부르지 않는다. 데스크톱은 아무것도 하지 않는다. 게임 스레드에서
+    // 부른다.
+    virtual void PresentBlankFrame() noexcept {
+    }
 };
 
 // 게임패드 입력 backend다. 폴링 결과를 GamepadState 이벤트로 큐에 넣는다. 상태가 바뀐
