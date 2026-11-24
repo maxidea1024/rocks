@@ -370,8 +370,10 @@ Result<void> GraphMutatorCore::ApplyBoundaryOp(GraphPatchOp& op, bool record) no
     }
 
     if (record) {
-        // 기록할 자리를 먼저 잡아 바꾼 뒤에는 실패하지 않게 한다(그래프 + 경계 노드들 + 부모).
-        usize changes = 2;
+        // 기록할 자리를 먼저 잡아 바꾼 뒤에는 실패하지 않게 한다(그래프 하나 + 부모 하나 + 경계
+        // 노드들).
+        constexpr usize GraphAndParentChanges = 2;
+        usize changes = GraphAndParentChanges;
         for (const GraphNode& node : graph->nodes) {
             changes += registry_.IsBoundary(node.type) ? 1 : 0;
         }

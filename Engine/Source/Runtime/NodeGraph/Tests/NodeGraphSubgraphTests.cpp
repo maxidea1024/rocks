@@ -163,6 +163,7 @@ TEST(NodeGraph_SubgraphSetBoundary) {
                                     Span<const GraphBoundaryPin>(outputs, 1)));
     auto shrunk = m.Run(shrink);
     REQUIRE(shrunk);
+    const Array<uint8> shrunkBytes = m.Bytes();
     const GraphNode& parent = m.sample.Node(SampleCollapsedNode);
     REQUIRE(parent.retainedPins.Size() == 1);
     CHECK(parent.retainedPins[0].key == env.pinA &&
@@ -184,7 +185,15 @@ TEST(NodeGraph_SubgraphSetBoundary) {
     }
 
     CHECK(boundaryNoticed);
+    // redo는 shrink 직후 바이트를 다시 만든다.
     REQUIRE(m.mutator.Redo(TestSource, shrunk.Value()));
+    CHECK(SameBytes(m.Bytes(), shrunkBytes));
+
+    // 고아 핀이 남은 Graph.Collapsed는 펼치지 않는다(간선·값을 이을 곳이 없다).
+    GraphCommandList expandRetained(env.allocator);
+    auto refusedExpand =
+        BuildExpandCommands(m.mutator.View(), SampleMain, SampleCollapsedNode, expandRetained);
+    CHECK(!refusedExpand && refusedExpand.Error() == ErrorCode::Unsupported);
 
     // 틀린 목록·Collapsed 아닌 그래프.
     GraphCommandFailure failure;
@@ -318,6 +327,57 @@ TEST(NodeGraph_SubgraphFoldRoundTrip) {
     auto refused = BuildCollapseCommands(m.mutator.View(), &m.sample.layout, SampleCollapsed,
                                          Span<const Guid>(&SampleInnerInput, 1), m.ids, bad);
     CHECK(!refused && refused.Error() == ErrorCode::InvalidArgument);
+    CHECK(!m.recorder.failed);
+}
+
+// 펼치기: 그대로 지나는 경계 간선(Input → Output)은 바깥끼리, Collapsed 입력 기본값은 안쪽 받는
+// 핀으로 옮기고 옮길 곳이 없으면 센다.
+TEST(NodeGraph_SubgraphExpandPassThroughAndDefaults) {
+    TestEnv env;
+    REQUIRE(env.ready);
+    MutatorEnv m(env);
+    REQUIRE(m.ready);
+    const GraphBoundaryPin inputs[] = {Boundary(env, env.pinA), Boundary(env, env.pinB),
+                                       Boundary(env, env.pinOther)};
+    const GraphBoundaryPin outputs[] = {Boundary(env, env.pinResult)};
+    Array<uint8> value(env.allocator);
+    REQUIRE(FillRecord(value, TestValueStruct, 1, 6));
+    GraphCommandList setup(env.allocator);
+    REQUIRE(setup.SetGraphBoundary(SampleCollapsed, Span<const GraphBoundaryPin>(inputs, 3),
+                                   Span<const GraphBoundaryPin>(outputs, 1)));
+    // A: 바깥 ParamA → A, 안쪽 Input.A → Output.Result(그대로 지남), 바깥 Result → Dynamic.Item_0.
+    REQUIRE(setup.Connect(SampleMain,
+                          MakeEdge(SampleParamA, env.pinValue, SampleCollapsedNode, env.pinA)));
+    REQUIRE(setup.Connect(SampleCollapsed,
+                          MakeEdge(SampleInnerInput, env.pinA, SampleInnerOutput, env.pinResult)));
+    REQUIRE(setup.Connect(
+        SampleMain, MakeEdge(SampleCollapsedNode, env.pinResult, SampleDynamic, env.pinItem0)));
+    // B: 바깥 간선 없이 기본값, 안쪽 Input.B → Inner.B로 옮겨진다.
+    REQUIRE(setup.Connect(SampleCollapsed,
+                          MakeEdge(SampleInnerInput, env.pinB, SampleInner, env.pinB)));
+    REQUIRE(setup.SetInputDefault(SampleMain, SampleCollapsedNode, env.pinB, value.View()));
+    // Other: 기본값만 있고 받는 핀이 없다(버리고 센다).
+    REQUIRE(setup.SetInputDefault(SampleMain, SampleCollapsedNode, env.pinOther, value.View()));
+    REQUIRE(m.Run(setup));
+
+    GraphCommandList expand(env.allocator);
+    GraphFoldReport report;
+    REQUIRE(
+        BuildExpandCommands(m.mutator.View(), SampleMain, SampleCollapsedNode, expand, &report));
+    REQUIRE(m.Run(expand));
+    CHECK(report.droppedDefaults == 1);
+    CHECK(m.sample.document.graphs.Size() == 1);
+    bool through = false;
+    for (const GraphEdge& edge : m.sample.Main().edges) {
+        through = through || (edge.fromNode == SampleParamA && edge.toNode == SampleDynamic &&
+                              edge.toPin == env.pinItem0);
+    }
+
+    CHECK(through);
+    const GraphNode& inner = m.sample.Node(SampleInner);
+    REQUIRE(inner.inputDefaults.Size() == 1);
+    CHECK(inner.inputDefaults[0].pin == env.pinB &&
+          SameBytes(inner.inputDefaults[0].value.bytes, value));
     CHECK(!m.recorder.failed);
 }
 

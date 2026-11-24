@@ -307,6 +307,31 @@ TEST(GraphPaste_ExternalEdges) {
 }
 
 // 값 없는 고아 핀은 붙는 간선이 남지 않으면 뺀다(GI7). 값 있는 고아 핀은 남는다.
+// 하위 그래프 경계 세 종류는 복제 불가라 복사에서 빠진다(10.1절 NG3c — GI15·GI16이 붙여넣기로
+// 깨지지 않는다). 그 노드와의 간선은 바깥 간선이 된다.
+TEST(GraphPaste_ExcludesBoundaryNodes) {
+    ToolsEnv tools;
+    REQUIRE(tools.ready);
+    TestEnv& env = tools.env;
+    MutatorEnv m(env);
+    REQUIRE(m.ready);
+    GraphFragment fragment(env.allocator);
+    const Guid main[] = {SampleCollapsedNode, SampleAdd};
+    REQUIRE(CopyGraphFragment(m.sample.document, &m.sample.layout, env.registry, SampleMain,
+                              Span<const Guid>(main, 2), Span<const Guid>(), SourceAsset,
+                              fragment));
+    REQUIRE(fragment.nodes.Size() == 1);
+    CHECK(fragment.nodes[0].node.id == SampleAdd);
+
+    GraphFragment inner(env.allocator);
+    const Guid boundary[] = {SampleInnerInput, SampleInnerOutput, SampleInner};
+    REQUIRE(CopyGraphFragment(m.sample.document, &m.sample.layout, env.registry, SampleCollapsed,
+                              Span<const Guid>(boundary, 3), Span<const Guid>(), SourceAsset,
+                              inner));
+    REQUIRE(inner.nodes.Size() == 1);
+    CHECK(inner.nodes[0].node.id == SampleInner);
+}
+
 TEST(GraphPaste_PrunesValuelessRetainedPins) {
     ToolsEnv tools;
     REQUIRE(tools.ready);
