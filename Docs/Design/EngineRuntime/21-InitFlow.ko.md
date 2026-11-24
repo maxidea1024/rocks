@@ -75,4 +75,5 @@ S13 구현(`Programs/Sandbox/Private/SandboxGame.*`):
 - 창을 만들지 못하면(데스크톱 없음 등) `WindowCreateReport`를 Error로 남기고 실패 코드 1로 끝난다. 게임패드 backend가 없으면 Info 한 줄만 남기고 키보드·마우스로 돈다.
 - 헤드리스 `--engine`도 같은 큐·상태를 쓴다(이벤트가 없을 뿐이다). 그래서 창 없이 입력 경로를 확인할 수 있다: 시험용 `--inject-key-at-frame N`은 N번째 `PumpEvents`에서 큐에 `KeyDown(W)`를 넣는다(창 펌프가 넣는 이벤트와 같은 자리). 순서는 프레임 번호로 정해진다(시간·경쟁 무관).
 - 자체 시험(`RunEngineHostSelfTest`)이 `--engine --frames 4 --inject-key-at-frame 2`를 띄워 "[Info][Sandbox.Game] Pawn received key W"를 확인한다. 실제 창·마우스·패드는 사람이 `Sandbox --engine --window`로 확인한다(자동 시험에서 OS 입력을 합성하지 않는다 — 포커스·데스크톱 상태에 따라 결과가 달라지므로).
+- 사람 확인(2026-11-24, Windows): 키보드(W·A·S·D·Space)·마우스 왼쪽·오른쪽 버튼(커서 위치)·휠(한 프레임 여러 칸은 합산)이 Pawn까지 오고, 창 닫기로 정상 종료한다. 게임패드는 기기가 없어 아직 확인하지 않았다.
 - 버린 대안: 엔진이 창을 소유하는 것. 창·swapchain 소유는 화면 마일스톤의 렌더 호스트(뷰포트 클라이언트) 몫이라 지금은 호스트 hook에 둔다. 그때 hook의 창 펌프가 뷰포트 쪽으로 옮겨 간다.
