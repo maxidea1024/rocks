@@ -65,6 +65,15 @@ enum class DefaultAllocatorKind : uint8 {
     System, // SystemAllocator 그대로(DefaultAllocator()가 SystemAllocator()와 같은 객체다)
 };
 
+// 본문을 돌리는 스레드를 정하는 호스트다(Docs/Design/MacPlatform.ko.md 3절). body(context)를 다른
+// 스레드(게임 스레드)에서 돌리고, 부른 스레드(프로세스 메인 스레드)는 OS 이벤트 루프에 내준 뒤
+// body가 끝나면 그 반환값을 돌려준다. body를 정확히 한 번 부르고 끝날 때까지 기다려야 한다.
+//
+// macOS 창 프로그램은 Cocoa가 창·이벤트를 메인 스레드에서만 받으므로 PlatformWindow의
+// platform::RunCocoaMainThreadHost를 넣는다(UE MAC_SEPARATE_GAME_THREAD). 그 함수는 다른
+// 플랫폼에서 body를 바로 부른다.
+using MainThreadHostFunction = int (*)(int (*body)(void* context) noexcept, void* context) noexcept;
+
 // 실행 설정이다. ApplicationDescription::settings가 기본값이고, configure가 명령줄을 본 뒤 고칠 수
 // 있다.
 struct ApplicationSettings {
@@ -99,6 +108,13 @@ struct ApplicationSettings {
     // 범용 할당자(ApplicationContext::DefaultAllocator)의 종류다. 범용 할당자를 만들기 전에(본문
     // 전에) 정해지므로 description의 기본값이나 configure에서 바꾼다.
     DefaultAllocatorKind defaultAllocator = DefaultAllocatorKind::Binned;
+    // 본문을 다른 스레드에서 돌리는 호스트다(MainThreadHostFunction). nullptr이면 본문을 이
+    // 스레드에서 바로 부른다(기본). 호스트가 있으면 ApplicationContext는 본문 스레드에서 쓴다. 내장
+    // 진입은 호스트의 메인 스레드를 바꾸지 않으려고 무시한다.
+    //
+    // 사용 예(configure에서):
+    //   settings.mainThreadHost = &platform::RunCocoaMainThreadHost;
+    MainThreadHostFunction mainThreadHost = nullptr;
 };
 
 // 본문이 받는 실행 문맥이다. Launch가 만들고 본문이 돌아갈 때까지 유효하다(복사하지 않는다). 본문을

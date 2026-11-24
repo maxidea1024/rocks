@@ -149,7 +149,11 @@ public enum CodeOptimization { Default, Never, Always }
 /// C는 고정 버전 외부 라이브러리 원본(Core/Source/ThirdParty)용이며 경고·FP·구성 프로필은 C++와 같다.
 /// C++ 전용 플래그(RTTI·예외 끄기, __cplusplus 보고)만 빠진다.
 /// </summary>
-public enum NativeLanguage { Cpp, C }
+/// <summary>
+/// 번역 단위 언어다. <see cref="ObjectiveCpp"/>는 Apple 대상의 <c>.mm</c>(Objective-C++, Docs/Design/MacPlatform.ko.md 6절 MD2)이며
+/// C++와 같은 언어 인자에 Objective-C 런타임 인자를 더한다.
+/// </summary>
+public enum NativeLanguage { Cpp, C, ObjectiveCpp }
 
 /// <summary>호스트 실행 도구와 target SDK/ABI 신원을 분리하여 전달한다.</summary>
 public sealed record NativeToolchain

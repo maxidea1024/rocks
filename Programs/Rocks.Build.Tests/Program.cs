@@ -345,6 +345,9 @@ try
     await BuildConfigurationTests.RunAsync(request, root);
     Pass("build configurations, ThinLTO, and per-module optimization overrides");
 
+    ObjectiveCppTests.Run(request, root);
+    Pass("Objective-C++ (.mm) translation units: language, ARC-off flags, Apple-only validation");
+
     await CLanguageTests.RunAsync(request, root);
     Pass("C17 translation units: C++ flag golden, C profile, real build, included .c invalidation");
 

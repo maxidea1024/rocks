@@ -342,9 +342,11 @@ internal static class ActionGraph
             string[] Forced(string? file) => file is null ? [] : windows ? ["/FI" + file] : ["-include", file];
             // macOS·Android의 compiler는 clang++ driver라서 C 소스에는 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가
             // 된다).
+            // Objective-C++(.mm)는 Apple 대상만 받는다(입력 검증) — UE AppleToolChain과 같이 -x objective-c++로 언어를 명시한다.
             string[] TranslationUnit(string file, NativeLanguage language) =>
                 windows ? ["/c", language == NativeLanguage.C ? "/TC" : "/TP", file, "/Fo{OUTPUT0}"]
                 : language == NativeLanguage.C ? ["-c", "-x", "c", file, "-o", "{OUTPUT0}"]
+                : language == NativeLanguage.ObjectiveCpp ? ["-c", "-x", "objective-c++", file, "-o", "{OUTPUT0}"]
                 : ["-c", file, "-o", "{OUTPUT0}"];
             // 물리 action은 depfile을 쓰게 한다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절). 논리 명령(compile DB·
             // BuildInfo)에는 넣지 않는다. clang-cl은 -MD·-MF를 /clang:로만 받는다(실측).
@@ -856,9 +858,16 @@ internal static class ActionGraph
     internal static bool UsesThinLto(NativeConfiguration configuration, CodeOptimization optimization) =>
         configuration == NativeConfiguration.Release && Optimizes(configuration, optimization);
 
-    /// <summary>확장자가 정확히 소문자 <c>.c</c>인 소스만 C다. 대문자 <c>.C</c>는 관례상 C++이므로 C로 보지 않는다.</summary>
-    internal static NativeLanguage LanguageOf(string source) =>
-        Path.GetExtension(source).Equals(".c", StringComparison.Ordinal) ? NativeLanguage.C : NativeLanguage.Cpp;
+    /// <summary>
+    /// 확장자가 정확히 소문자 <c>.c</c>인 소스만 C이고 소문자 <c>.mm</c>은 Objective-C++다. 대문자 <c>.C</c>는 관례상 C++이므로 C로 보지
+    /// 않는다.
+    /// </summary>
+    internal static NativeLanguage LanguageOf(string source) => Path.GetExtension(source) switch
+    {
+        ".c" => NativeLanguage.C,
+        ".mm" => NativeLanguage.ObjectiveCpp,
+        _ => NativeLanguage.Cpp,
+    };
 
     internal static IEnumerable<string> CompileFlags(NativeToolchain toolchain, NativeConfiguration configuration,
         CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp,
@@ -926,6 +935,12 @@ internal static class ActionGraph
             foreach (string flag in languageFlags)
             {
                 yield return flag;
+            }
+
+            if (language == NativeLanguage.ObjectiveCpp)
+            {
+                // 수동 참조 계수(MRC)다. UE 모듈 규칙의 기본(bEnableObjCAutomaticReferenceCounting = false)과 같다(MacPlatform MD4).
+                yield return "-fno-objc-arc";
             }
 
             if (toolchain.Platform == NativePlatform.Android)
