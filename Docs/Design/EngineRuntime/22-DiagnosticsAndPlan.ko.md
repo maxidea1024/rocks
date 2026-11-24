@@ -17,7 +17,15 @@
 | 진단 코드 | `SubsystemSkippedMissingDependency`, `AutoTickPrerequisiteCycleSkipped`, `BeginPlayDispatchContractViolated`, `InvalidDirectorType`, `PossessDeniedNoAuthority` | 로그 + Result 오류 |
 
 - 콘솔 명령은 CVar 시스템의 명령 등록([CVar 시스템](../CVarSystem.ko.md))으로 둔다. 로그 문구는 영어다.
-- 문서: [게임플레이 작업 안내](../../Guides/GameplayWorkflowGuide.ko.md)에 GameInstance·GameDirector·Controller·Pawn 사용법과 14단계 흐름 요약을 더한다.
+- 문서: GameInstance·GameDirector·Controller·Pawn 사용법과 14단계 흐름 요약은 새 안내 [게임 프레임워크 안내](../../Guides/GameFrameworkGuide.ko.md)에 둔다. [게임플레이 작업 안내](../../Guides/GameplayWorkflowGuide.ko.md)는 이미 500줄을 넘었다. 그 문서를 고치면 장별 분리 이동을 먼저 해야 하는데([문서 배치 규칙](../../Guides/DocumentLayout.ko.md) 4절), 그 문서는 다른 세션과 같이 쓴다. 그래서 내용은 새 안내에 두고 서로 링크한다.
+
+S14 구현:
+- `World::DumpTickGraph(String&)`는 TickScheduler의 실제 단계 순서 배열을 읽기만 한다(`TickScheduler::ForEachInPhase`). 덤프 때문에 순서를 다시 만들면 다음 단계 경계에 바뀔 변경이 앞당겨지기 때문이다. 아직 순서에 들지 않은 항목은 끝에 `pending`으로, 다음 실행 때 다시 만들 단계는 `(order rebuilt at next run)`으로 표시한다. 이름은 `타입#slot`이다(Actor·Component에는 이름이 없다).
+- `World::DumpSubsystems`·`Engine::DumpSubsystems`는 `SubsystemCollection::Describe`(이름 목록 `NameAt`)를 쓴다. Engine이 모르는 계층(GameInstance·LocalPlayer)은 `EngineClient::DescribeSubsystems`로 client가 붙인다.
+- `GameInstanceClient::DumpFramework`와 `GameplayStats`(`GameplayWorldSubsystem::Stats(world)`)를 둔다. `WorldStats`에는 `ticks.demoted`·`engineStageNanoseconds`·`pendingLifeSpans`를 더한다.
+- 콘솔 명령은 Engine이 설정 문맥에 `engine`·`world` 영역을 더하고 `engine.dumpsubsystems`·`world.dumpticks`를 묶는다. `game.dumpframework`는 GameInstanceClient가 묶는다(영역 `game`은 기본 표). 둘 다 종료 전에 푼다. 출력은 콘솔 sink와 Info 로그다.
+- 진단 코드는 로그의 `{Code}` 속성으로 싣는다(World `WorldLog.h`, Gameplay `GameplayTypes.h` 상수). 따로 진단 수집기는 두지 않는다. 지금은 로그가 진단 경로이기 때문이다.
+- 시험: `WorldTick_DumpTickGraphListsOrderPrerequisitesAndDemotion`, `WorldSubsystem_SkipChainsAndOptionalCycles`(생략 줄), `GameplayDiagnostics_ConsoleDumpsDescribeEveryLayer`.
 
 ### 22.2 결정(권장안)
 

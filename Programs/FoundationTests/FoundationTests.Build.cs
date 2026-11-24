@@ -97,6 +97,8 @@ public abstract class TestsModule : ModuleRules
         ["Crypto"] = ["Compression"],
         ["Curves"] = ["CoreTypeBindings", "CurvesTestFixtures", "ObjectSerialization", "ReflectionText"],
         ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
+        // Gameplay diagnostics tests drive the console commands through the Config test fixture context.
+        ["Gameplay"] = ["ConfigTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
         ["Material"] = ["AssetTestFixtures"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],

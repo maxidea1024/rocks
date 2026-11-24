@@ -36,13 +36,19 @@ constexpr uint32 MaxEvents = 128;
 const char* events[MaxEvents] = {};
 uint32 eventCount = 0;
 
+bool eventsOverflowed = false;
+
 void Record(const char* text) noexcept {
     if (eventCount < MaxEvents) {
         events[eventCount++] = text;
+    } else {
+        eventsOverflowed = true;
     }
 }
 
 void ResetEvents() noexcept {
+    CHECK(!eventsOverflowed);
+    eventsOverflowed = false;
     eventCount = 0;
 }
 
@@ -252,6 +258,15 @@ public:
 
     void OnTick(const TickContext&) noexcept override {
         Record("pawn.tick");
+        // 카메라 갱신(LateUpdate 시작)이 같은 프레임의 Pawn Tick 뒤라는 것을 보이려고 옮긴다.
+        if (moveOnTick) {
+            auto root = RootComponent();
+            auto moved = GetWorld().With<SceneComponent>(root, [](SceneComponent& scene) noexcept {
+                const Vec3d at = scene.RelativeTransform().translation;
+                return scene.SetRelativeLocation(Vec3d(at.x + 10.0, at.y, at.z));
+            });
+            (void)moved;
+        }
     }
 
     void OnDestroy(EndPlayReason) noexcept override {
@@ -260,6 +275,7 @@ public:
 
     static inline AutoPossessAi nextMode = AutoPossessAi::Disabled;
     static inline bool nextTick = true;
+    static inline bool moveOnTick = false;
 
 protected:
     void OnPossessed(ObjectHandle) noexcept override {
@@ -528,18 +544,25 @@ TEST(GameplayFlow_FourteenStepScenario) {
             controller, [](Controller& value) noexcept { return value.PawnHandle(); });
         REQUIRE(pawn && !pawn.Value().IsNull());
 
-        // 11단계: 프레임 — PlayerTick → Pawn Tick → 카메라(Pawn 위치 = PlayerStart).
-        ResetEvents();
-        REQUIRE(engine.RunFrame());
-        const char* const frame[] = {"pc.playertick", "pawn.tick"};
-        CHECK(EventsAre(frame));
+        // 11단계: 프레임 — PlayerTick → Pawn Tick(10 cm 이동) → 카메라(LateUpdate 시작 — 같은
+        // 프레임의 이동이 보인다. Pawn 시작 위치 = PlayerStart 100).
         auto camera =
             arena.With<PlayerController>(controller, [](PlayerController& value) noexcept {
                 return value.CameraDirectorHandle();
             });
+        REQUIRE(camera && !camera.Value().IsNull());
+        auto target = arena.With<CameraDirector>(
+            camera.Value(), [](CameraDirector& value) noexcept { return value.ViewTarget(); });
+        CHECK(target && target.Value() == pawn.Value());
+        FlowPawn::moveOnTick = true;
+        ResetEvents();
+        REQUIRE(engine.RunFrame());
+        FlowPawn::moveOnTick = false;
+        const char* const frame[] = {"pc.playertick", "pawn.tick"};
+        CHECK(EventsAre(frame));
         auto view = arena.With<CameraDirector>(
             camera.Value(), [](CameraDirector& value) noexcept { return value.View().location.x; });
-        CHECK(view.Value() == 100.0);
+        CHECK(view && view.Value() == 110.0);
 
         // 12단계: 게임 중 Pawn 파괴 → Controller Inactive(PlayerState 유지) → RestartPlayer.
         REQUIRE(arena.DestroyActor(pawn.Value()));

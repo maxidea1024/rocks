@@ -37,7 +37,7 @@
 | 13 | World 전환 `OpenWorld(다음 맵)`: 21.3절 정리(spawn한 Pawn 파괴 → PlayerController 파괴 — `Logout`·PlayerState 제거) → `EndPlay(LevelTransition)`(LevelScript 먼저 Actor 정리 → `OnWorldEndPlay`) → World 즉시 파괴(`PreDeinitialize` → `Deinitialize` 역순) → 새 World에서 5–10단계. LocalPlayer·GameInstance Subsystem은 유지 | `Director.Logout`, `EndPlay(LevelTransition)`, 새 `Director.InitGame` |
 | 14 | 종료: `Engine::RequestExit` → `OnEngineShutdown`: 21.3절 정리(`Logout` 포함) → `EndPlay(Quit)` → `OnShutdown` → LocalPlayer 역순 제거(LocalPlayer Subsystem 정리) → GameInstance Subsystem 정리 → Engine이 World 파괴 → EngineSubsystem 정리(역순) | `GameInstance.OnShutdown`, …, `EngineSubsystem.Deinitialize` |
 
-시험 `GameplayFlow_FourteenStepScenario`가 위 사건 로그 전체를 순서대로 단언한다(순서 이외의 시각·경쟁에 기대지 않는다 — 단계마다 명시 호출과 프레임 수).
+시험 `GameplayFlow_FourteenStepScenario`가 위 사건 로그를 순서대로 단언한다(순서 이외의 시각·경쟁에 기대지 않는다 — 단계마다 명시 호출과 프레임 수). 1–12단계는 사건 로그 전체를 정확히 비교한다. 13·14단계는 그 단계의 사건을 순서 부분열로 비교한다. 정리 경로가 Actor 수만큼 사건을 내고, 그중 이 표가 정한 것은 순서뿐이기 때문이다. 관찰하지 않는 것은 이렇다. 4단계의 OpenWorld(begin)는 5단계 사건이 ClientReady 안에서 나는 것으로 대신한다. 8단계의 CameraDirector.Awake는 타입이 고정이라 사건이 없고, 핸들과 view target으로 확인한다. 11단계의 카메라 순서는 Pawn Tick이 옮긴 위치가 같은 프레임 카메라 결과에 보이는 것으로 확인한다. Pawn Tick이 Controller Tick 뒤라는 간선 자체는 `ControllerPawn_SetPawnOrdersPawnTickAfterController`가 확인한다(시나리오에서는 PlayerController가 먼저 Spawn되어 등록 순서만으로도 통과한다).
 
 ### 21.3 종료·전환 정리 규칙
 

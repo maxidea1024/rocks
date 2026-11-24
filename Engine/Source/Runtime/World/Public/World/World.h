@@ -405,7 +405,9 @@ public:
 
     Result<ObjectHandle> SpawnActor(TypeId type, const SpawnParams& params = {}) noexcept;
 
-    // 파괴를 요청한다. 이미 요청됐으면 성공, 이 World의 Actor가 아니면 StaleHandle이다.
+    // 파괴를 요청한다. 이미 요청됐으면 성공, 이 World의 Actor가 아니면 StaleHandle이다. 대기 중인
+    // 파괴는 요청한 순서대로 정리한다(안전 지점·EndPlay — EndPlay는 남은 Actor를 대기 뒤에
+    // 붙인다. 21.3절 전환 정리가 이 순서에 기댄다).
     Result<void> DestroyActor(ObjectHandle actor) noexcept;
 
     // 이 World에 레코드가 있는 Actor인지다(Constructed·파괴 대기 포함, 정리 완료 후 false).
@@ -474,6 +476,22 @@ public:
 
     // 엔진 단계 자리를 비운다(비어 있어도 성공).
     void ClearEngineStage(EngineStage stage) noexcept;
+
+    // --- 진단(Docs/Design/EngineRuntime 22.1절) ---
+
+    // Tick 그래프를 사람이 읽는 줄로 out 끝에 붙인다: 단계마다 실행 순서대로 항목(타입#slot·hook·
+    // priority·interval·켜짐·pause 중 실행·아직 순서에 없음·늦춰진 경우 원래 단계)과 선행 목록, 그
+    // 단계의 엔진 단계 자리 등록 여부. 순서를 다시 만들지 않는다(다음 경계에 바뀌는 단계는
+    // 표시한다). 오류: 할당 실패(그때까지 붙인 줄은 남는다).
+    //
+    // 사용 예:
+    //   String text(allocator);
+    //   if (world.DumpTickGraph(text)) { Log::Info(LogWorldTick, "{Graph}", text.View()); }
+    Result<void> DumpTickGraph(String& out) noexcept;
+
+    // WorldSubsystem 초기화 순서와 생략 이유를 out 끝에 붙인다(계층 "World <이름>"). 오류: 할당
+    // 실패.
+    Result<void> DumpSubsystems(String& out) const noexcept;
 
     // actor가 속한 Level이다. 이 World의 Actor가 아니면 StaleHandle이다.
     Result<ObjectHandle> GetActorLevel(ObjectHandle actor) const noexcept;
@@ -991,6 +1009,7 @@ private:
     Array<TickPoint> tickDeclarationStack_{allocator_};
     EngineStageSlot engineStages_[EngineStageCount];
     uint32 engineStageFailures_ = 0;
+    uint64 engineStageNanoseconds_[EngineStageCount] = {};
 };
 
 } // namespace rocks

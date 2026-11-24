@@ -15,6 +15,20 @@ namespace rocks {
 //   Log::Info(LogGameplay, "Opened world {Map}", name);
 inline constexpr LogCategory LogGameplay{"Gameplay"};
 
+// 진단 코드다(Docs/Design/EngineRuntime 22.1절 — 로그 {Code} 속성).
+// - InvalidDirectorType: OpenWorld가 고른 GameDirector 타입이 GameDirector 파생이 아니다(Error).
+// - PossessDeniedNoAuthority: 권한 없는(Client) World에서 Possess를 거부했다(Warning).
+inline constexpr char DiagInvalidDirectorType[] = "InvalidDirectorType";
+inline constexpr char DiagPossessDeniedNoAuthority[] = "PossessDeniedNoAuthority";
+
+// 게임플레이 프레임워크 통계다(22.1절). 호출 시점의 World 하나 기준 값이다.
+struct GameplayStats {
+    uint32 controllers = 0;
+    uint32 playerControllers = 0;
+    uint32 pawns = 0;
+    uint32 playerStates = 0;
+};
+
 // 실행 모드다(UE ENetMode, Docs/Design/EngineRuntime 18.3절). 네트워크가 없는 지금은
 // Standalone과 DedicatedServer(LocalPlayer 없음)만 실행 경로가 있다.
 enum class NetMode : uint8 {

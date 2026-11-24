@@ -56,6 +56,27 @@ WorldSubsystemType GameplayWorldSubsystem::Type() noexcept {
     return type;
 }
 
+GameplayStats GameplayWorldSubsystem::Stats(World& world) const noexcept {
+    GameplayStats stats;
+    world.ForEachActor([&](ObjectHandle actor) noexcept {
+        if (!IsLiveActor(world, actor)) {
+            return;
+        }
+
+        if (world.With<Controller>(actor, [](Controller&) noexcept {})) {
+            ++stats.controllers;
+            if (world.With<PlayerController>(actor, [](PlayerController&) noexcept {})) {
+                ++stats.playerControllers;
+            }
+        } else if (world.With<Pawn>(actor, [](Pawn&) noexcept {})) {
+            ++stats.pawns;
+        } else if (world.With<PlayerState>(actor, [](PlayerState&) noexcept {})) {
+            ++stats.playerStates;
+        }
+    });
+    return stats;
+}
+
 Result<void> GameplayWorldSubsystem::Initialize(World& world) noexcept {
     // World BeginPlay의 시작을 맡는다(19.5절). Initialize는 BeginPlay 전이다. 카메라 갱신 자리도
     // 맡는다(20.6절 — pause 중에는 World가 이 단계를 돌리지 않는다).
