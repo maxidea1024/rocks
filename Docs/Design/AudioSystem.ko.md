@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 26(3.15.2절 AudioGameplayVolume 컴포넌트 대응·submix send·효과 교체 영역 속성, 9.1절 Synthesis 신스 — [컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9절 CR54). 개정 25(3.15.2절 리버브 존 영역 형상을 공용 `VolumeShape`로 — [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR17). 개정 24(3.31절 리뷰 반영 — 끝 무음 덧붙이기로 끝 frame 보장, 블록 처리, 할당 전 PCM 상한, 위치 변환 Result, 겹침 거부, 시험 보강). 개정 23: 3.31절 AU5 앞당김 C2 — 쿠킹 리샘플러, ThirdParty SampleRate 반입. 개정 22: 3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외. 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-24, 개정 27(3.32절 AU5 앞당김 C3 — Opus 인코더·AudioOpus 디코더, 품질 1–100, codec 머리, 판을 먼저 보는 Open 순서, BeginChunk 패킷 길이 검사, 순차 재생은 `ContinueChunk`로 디코더 상태를 잇고 pre-roll은 측정으로 320 ms). 개정 26(3.15.2절 AudioGameplayVolume 컴포넌트 대응·submix send·효과 교체 영역 속성, 9.1절 Synthesis 신스 — [컴포넌트 도입](ComponentCatalog/09-Plugins.ko.md) 9절 CR54). 개정 25(3.15.2절 리버브 존 영역 형상을 공용 `VolumeShape`로 — [컴포넌트 도입](ComponentCatalog/04-Prerequisites.ko.md) CR17). 개정 24(3.31절 리뷰 반영 — 끝 무음 덧붙이기로 끝 frame 보장, 블록 처리, 할당 전 PCM 상한, 위치 변환 Result, 겹침 거부, 시험 보강). 개정 23: 3.31절 AU5 앞당김 C2 — 쿠킹 리샘플러, ThirdParty SampleRate 반입. 개정 22: 3.30절 설계 교차 검증 반영 — 청크 가운데 시작, HostServices 경유 등록, 단위 framing, 메타·payload 분리, 채널 마스크·bitstream 판, 정렬, 재생 정책 칸 제외. 개정 21: 3.30절 AU5 앞당김 C1 — 플랫폼 데이터 형식·청크 표·인코더/디코더 인터페이스, 디코더 표 등록 방식. 개정 20: 3.29절 리뷰 반영 — Vorbis·Opus 다채널을 내부 순서로, OpusHead 사전 확인, op_pcm_total 길이 대조, libm 결정성·hardening 한계, 시험 보강. 개정 19: 3.29절 Opus 원본 디코드, ThirdParty Opus·OpusFile 반입. 개정 18: 3.27절 리뷰 반영 — LOST_SYNC 뒤 audio 거부, frame 연속성, 미리 잡기 상한, 시험 보강; 3.28절 Vorbis 원본 디코드, ThirdParty Ogg·Vorbis 반입. 개정 17: 3.27절 FLAC 원본 디코드, ThirdParty Flac 반입. 개정 16: 3.26절 리뷰 반영 — 디코드 단계 형식 재확인, frame당 표본 수로 무음 채움, minimp3_ex식 gapless 길이, 한계. 개정 15: 3.26절 MP3 원본 디코드, ThirdParty Minimp3 반입. 개정 14: 3.25절 리뷰 반영 — RIFX GUID 끝 방향, cue dwPosition, 잘린 파일 허용, float 비유한 거부, 실패 시 비움, AIFF 1–32비트. 개정 13: 3.25절 WAV·AIFF 원본 디코드. 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -21,7 +21,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 | 엔진 수명 | `EngineSubsystem`의 `Initialize`·`OnFrameBegin`·`OnFrameEnd`·`BeginShutdown`·`CompleteInFlightWork`·`Deinitialize`(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:46–70`). 종료 2단계 주석에 "audio epoch" 대기 | `CompleteInFlightWork` 실패는 `KeepFirst`로 누적되고 정리가 이어진다. 장치 콜백이 살아 있는 채 소유자가 풀릴 수 있다(3.8.6절) |
 | 명령줄 | AppInfo 개정 4가 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`를 설계했다(미구현 — AP1) | 판정 값이 아직 코드에 없다(3.8.4절) |
 | 설정 | 콘솔 영역 `"audio"`(`Core/Source/Runtime/Config/Public/Config/ConsoleSettings.h:66`), `audio.master.volume` 시험 사용 | 오디오 CVar가 없다 |
-| 빌드 대상 | [빌드 타깃](BuildTargets/README.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | 빌드 코드에 `ClientOnly`가 없다. 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
+| 빌드 대상 | [빌드 타깃](BuildTargets/README.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | BS2(0d9c3a8b)로 빌드 코드에 `ClientOnly`가 생겼고 `AudioOpus`가 쓴다(C3). 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
 | 에셋 | A1 구현, A2a–A2e 구현, A2f 임포트 프레임워크는 A2f1a 구현(진단 등록·원본 루트·원본 읽기·임포터 표)·A2f1b·A2f2 설계(`AssetImporter`·`AssetImporterTable`, AssetSystem 7.1절 18), A3 AssetNugget·A4 AssetCooker 설계. `ReadyMask { Cpu, Render }`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/AssetManager.h:36`) | 오디오 재생 구간이 준비됐는지 표현할 수단이 없다(3.12.4절) |
 | Sparks | 스키마 `Engine/Source/Developer/SparksTestHost/Schema/Engine.sparkbind.json`에 `SoundAsset`·`AudioSystem.PlayAt/StartLoop`·`World.Audio`. [Sparks 엔진 통합](SparksEngineIntegration.ko.md) SE-G7·EI5는 모듈 없음으로 대기 | — |
 | policy | `PolicyChecks.WindowsMacroLeak.cs`가 `xaudio2.h`·`mmdeviceapi.h`·`audioclient.h`를 Windows 매크로 누출 헤더로 안다 | 장치 헤더는 backend 모듈의 Private에만 둔다 |
@@ -444,7 +444,7 @@ Opus 48 kHz 리샘플의 결과:
 - 헤더: 형식 버전, 코덱 id·버전, 채널 레이아웃, 인코딩 rate, 유효 PCM frame 수, loop 구간(인코딩 rate 기준), encoder delay·끝 padding, 청크 수, 로딩 동작, 첫 청크 상주 여부. (개정 22: 3.30.1절이 대체 — 채널 레이아웃은 채널 마스크, 로딩 동작·첫 청크 상주는 `SoundClip` 쿠킹 필드)
 - 청크 표: 청크마다 payload 위치·크기, 첫 frame·frame 수, 독립 디코드 시작 여부, 필요한 pre-roll frame, SHA-256(서명 프로필에서 manifest가 덮는다).
 - 청크 크기: 목표 `TargetChunkBytes`(= 256 KiB, 플랫폼 프로필로 바꿈). 청크 경계는 코덱 프레임 경계다.
-- 청크 독립성: 모든 청크는 그 청크만으로 디코드를 시작할 수 있다. Opus는 앞 청크 끝의 패킷을 `OpusPreRollMs`(= 80 ms, RFC 7845 권장값)만큼 이 청크 앞에 **복제**해 두고, 디코더는 그 구간을 디코드해 버린다(`preRollFrames`). 앞 청크를 읽지 않아도 seek·재시작이 되며, 대가는 청크마다 약 80 ms 분량의 byte다. ADPCM·PCM은 블록 독립이라 pre-roll이 없다.
+- 청크 독립성: 모든 청크는 그 청크만으로 디코드를 시작할 수 있다. Opus는 앞 청크 끝의 패킷을 `OpusPreRollMs`(= 320 ms — 개정 27에서 80 ms(RFC 7845 최소 권장값)를 측정으로 늘림, 3.32.4절)만큼 이 청크 앞에 **복제**해 두고, 디코더는 그 구간을 디코드해 버린다(`preRollFrames`). 앞 청크를 읽지 않아도 seek·재시작이 되며, 대가는 청크마다 약 80 ms 분량의 byte다. ADPCM·PCM은 블록 독립이라 pre-roll이 없다.
 - loop 이음매: loop 끝에서 처음으로 돌아갈 때 디코더가 pre-roll을 다시 디코드하면 그 블록에 출력이 늦는다. 그래서 looping clip은 재생 시작 때 loop 머리 `LoopHeadFrames`(= pre-roll + 2 × Q 이상) PCM을 디코드해 voice 링 옆에 두고, 디코드 worker는 loop 끝에 닿기 전에 loop 시작 청크로 미리 seek한다.
 - 플랫폼 재정의(UE `FPlatformAudioCookOverrides`): rate 상한 표(최대·높음·중간·낮음·최소 — PCM·ADPCM만), 품질 배수, 자동 스트리밍 길이 임계, 첫 청크 인라인.
 
@@ -481,10 +481,10 @@ UE `ESoundWaveLoadingBehavior`(`Source/Runtime/Engine/Classes/Sound/SoundWaveLoa
 
 #### 3.12.3 디코드
 
-- voice마다 PCM 링(원본 rate frame 단위). 용량 = `2 × max(디코더 최대 출력 단위, ceil(Q × MaxPitchScale × srcRate / mixRate))`. Opus 최대 출력 단위는 패킷 최대 길이 120 ms = 5760 frame, ADPCM은 블록 frame 수, PCM16은 단위 1024 frame이다(디코더 `MaxFramesPerCall`, 3.30.2절). `MaxPitchScale` = 2.0(UE `GlobalMaxPitchScale` 기본 — `Source/Runtime/Engine/Private/AudioSettings.cpp:30`). 디코드 worker가 다음 구간을 채운다. 시작 water mark·재충전 water mark는 품질 프로필 값이다.
+- voice마다 PCM 링(원본 rate frame 단위). 용량 = `2 × max(디코더 최대 출력 단위, ceil(Q × MaxPitchScale × srcRate / mixRate))`. Opus 최대 출력 단위는 bitstream 1 패킷 길이 20 ms = 960 frame(개정 27, 3.32.4절 — 처음엔 패킷 최대 길이 120 ms = 5760), ADPCM은 블록 frame 수, PCM16은 단위 1024 frame이다(디코더 `MaxFramesPerCall`, 3.30.2절). `MaxPitchScale` = 2.0(UE `GlobalMaxPitchScale` 기본 — `Source/Runtime/Engine/Private/AudioSettings.cpp:30`). 디코드 worker가 다음 구간을 채운다. 시작 water mark·재충전 water mark는 품질 프로필 값이다.
 - 디코더 인스턴스 하나에 작업 하나만 돈다. seek·stop 뒤 늦게 끝난 디코드는 (voice generation, seek 번호) 불일치로 버린다.
 - AudioRT는 디코드를 기다리지 않는다. 링이 비면 무음을 넣고 굶음을 센다. 음악은 굶은 동안 transport를 진행할지(건너뜀) 멈출지(이어 재생)를 `SoundClip` 설정으로 정한다.
-- 예산 예: 48 kHz 스테레오 float32는 초당 384,000 B다. 3분 곡을 풀면 69.12 MB다. Opus 48 kHz 스테레오 스트림의 PCM 링은 2 × max(5760, 512) = 11,520 frame × 2채널 × 4 B = 92,160 B이고, 스트리밍 voice 8개면 737,280 B(720 KiB)다. 여기에 디코더 상태·압축 청크·IO 진행분이 더해진다.
+- 예산 예: 48 kHz 스테레오 float32는 초당 384,000 B다. 3분 곡을 풀면 69.12 MB다. Opus 48 kHz 스테레오 스트림의 PCM 링은 2 × max(960, 512) = 1,920 frame × 2채널 × 4 B = 15,360 B이고, 스트리밍 voice 8개면 122,880 B(120 KiB)다. 여기에 디코더 상태·압축 청크·IO 진행분이 더해진다.
 
 #### 3.12.4 재생 준비
 
@@ -1429,10 +1429,10 @@ ffmpeg flac 파일은 메타데이터 뒤에 8 KiB PADDING이 있어 손상 시�
 |---|---|
 | C1(이 절) | `Audio`: 플랫폼 데이터 형식·검증, `AudioDecoder`·`AudioDecoderTable`, PCM16·ADPCM 디코더, 전체 디코드 도우미. `AudioTools`: `AudioEncoder`, PCM16·ADPCM 인코더, 청크 나누기(pre-roll 복제)·플랫폼 데이터 쓰기 |
 | C2 | 쿠킹 리샘플러: UE와 같이 libsamplerate `SRC_SINC_BEST_QUALITY`(UE `AudioPlatformConfiguration/Private/AudioResampler.cpp`, `AudioDerivedData.cpp:1597` `ResampleWaveData`) — ThirdParty 반입, 판을 너겟 키에 |
-| C3 | Opus 인코더(`AudioTools`, multistream family 1)·Opus 디코더(`AudioOpus`, 아래 등록 방식). codec 머리 = mapping family 1, stream 수, coupled 수, mapping 표, output gain 0. pre-skip은 머리 encoder delay와 같아야 한다 |
+| C3 | Opus 인코더(`AudioTools`, multistream family 1)·Opus 디코더(`AudioOpus`, 아래 등록 방식). codec 머리 = mapping family 1, stream 수, coupled 수, mapping 표, output gain 0. pre-skip은 머리 encoder delay와 같아야 한다 — 3.32절 |
 | AU5 나머지 | 쿠킹 처리기·AssetNugget 키(A4c 뒤), sidecar 게시·청크 캐시(AU6) |
 
-모듈 경계(빌드 세션 조언, BuildTargets BD25): Runtime 모듈은 ClientOnly 모듈에 링크로 의존할 수 없다. 그래서 `Audio`(Runtime)는 코덱 구현 모듈을 링크하지 않고 `AudioDecoderTable`로 조회만 한다(3.30.2절 등록 경로). `AudioOpus`는 BS2(모듈 유형)가 들어올 때까지 일반 Engine 모듈로 둔다. 그 뒤 유형만 ClientOnly로 바꾼다. `AudioTools`(Developer)가 Opus 왕복 시험에 `AudioOpus`를 링크해도 되는지(Developer → ClientOnly, BD25)는 C3 전에 BuildTargets 3.3절 표로 확인한다.
+모듈 경계(빌드 세션 조언, BuildTargets BD25): Runtime 모듈은 ClientOnly 모듈에 링크로 의존할 수 없다. 그래서 `Audio`(Runtime)는 코덱 구현 모듈을 링크하지 않고 `AudioDecoderTable`로 조회만 한다(3.30.2절 등록 경로). `AudioOpus`는 BS2(모듈 유형)가 들어올 때까지 일반 Engine 모듈로 둔다. 그 뒤 유형만 ClientOnly로 바꾼다. `AudioTools`(Developer)가 Opus 왕복 시험에 `AudioOpus`를 링크해도 되는지(Developer → ClientOnly, BD25)는 3.32.5절에서 닫았다 — 링크하는 것은 시험 실행 파일이고 `AudioTools` 모듈은 의존하지 않는다.
 
 #### 3.30.1 플랫폼 데이터 형식(`Audio/AudioPlatformData.h`, little endian)
 
@@ -1504,15 +1504,20 @@ public:
     // 청크를 startCodecFrame(∈ [첫 codec frame, 끝))부터 디코드할 준비를 한다. 상태를 비우고, payload 단위 경계와 크기를 먼저
     // 검사하고, pre-roll과 startCodecFrame 앞 frame을 디코드해 버린다(내지 않는다). payload는 청크를 다 낼 때까지 살아 있어야 한다.
     virtual Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload, uint64 startCodecFrame) noexcept = 0;
+    // 앞 청크를 끝까지 낸 뒤(DecodeNext가 0) 바로 다음 청크(첫 frame = 앞 청크 끝)를 상태를 이어 연다(개정 27). 복제 pre-roll은
+    // 디코드하지 않고 건너뛴다. payload 검사는 BeginChunk와 같고, 앞 청크를 다 내지 않았거나 이어지지 않으면 InvalidArgument다.
+    // 기본 구현은 청크 사이 상태가 없는 codec(PCM16·ADPCM)용으로 BeginChunk(chunk.firstFrame)를 부른다.
+    virtual Result<void> ContinueChunk(const AudioChunkEntry& chunk, Span<const uint8> payload) noexcept;
     // 다음 단위를 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수, 청크 끝이면 0.
     virtual Result<uint32> DecodeNext(PlanarView out) noexcept = 0;
-    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수(out 용량 하한). PCM16 1024, ADPCM 1012, Opus 5760.
+    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수(out 용량 하한). PCM16 1024, ADPCM 1012, Opus 960(bitstream 1, 3.32.4절).
     virtual uint32 MaxFramesPerCall() const noexcept = 0;
 };
 ```
 
-- 청크 경계 규칙: 순차 재생도 청크마다 상태를 비우고 pre-roll부터 디코드한다(앞 청크 상태를 이어 쓰지 않는다). 그래서 처음부터 재생·seek 시작·전체 디코드 도우미가 같은 표본을 낸다. Opus는 80 ms pre-roll 뒤에도 연속 디코드와 bit가 같지 않으므로, 기준은 "청크별 디코드"다.
-- 청크 가운데 시작: PCM16·ADPCM은 단위로 바로 건너뛴다. Opus는 길이 접두를 훑어 (startCodecFrame − pre-roll 요구량) 이전의 패킷부터 디코드한다. 그 지점이 청크 머리 앞이면 복제 pre-roll 구간부터 쓴다.
+- 청크 경계 규칙(개정 27에서 고침): 순차 재생은 앞 청크를 끝까지 낸 뒤 `ContinueChunk`로 디코더 상태를 이어 다음 청크를 연다(복제 pre-roll은 건너뛴다). 그래서 처음부터 재생·전체 디코드 도우미는 청크를 어떻게 나눴든 연속 디코드(청크 하나)와 bit까지 같다. 상태를 비우고 pre-roll부터 디코드하는 것은 시작·seek(`BeginChunk`)뿐이다. 디코드 worker(3.12.3절)도 바로 이어지는 다음 청크는 `ContinueChunk`로 연다.
+  - 버린 처음 규칙("순차 재생도 청크마다 상태를 비우고 pre-roll부터 디코드, 기준은 청크별 디코드"): C3 측정에서 Opus는 80 ms pre-roll 뒤에도 연속 디코드와 최대 0.055(진폭 0.3 순음의 18%) 어긋났고 청크 경계마다 파형 기울기가 끊겼다(클릭). 20 ms frame CELT의 frame 사이 에너지 예측이 frame마다 절반씩만 수렴하기 때문이다(3.32.4절 측정 표). UE도 순차 재생은 디코더 상태를 이어 쓴다.
+- 청크 가운데 시작: PCM16·ADPCM은 단위로 바로 건너뛴다. Opus는 길이 접두를 훑어 (startCodecFrame − pre-roll 요구량) 이전의 패킷부터 디코드한다. 그 지점이 청크 머리 앞이면 복제 pre-roll 구간부터 쓴다(3.32.4절).
 - `out` 채널 수가 머리 채널 수와 다르거나 frame 용량이 `MaxFramesPerCall()`보다 작으면 `InvalidArgument`, `BeginChunk` 전·`Open` 전 호출은 `InvalidArgument`다.
 - 손상 판정: 단위 경계·크기(PCM16·ADPCM byte 수, Opus 길이 접두 합)는 `BeginChunk`에서 먼저 검사한다(이미 낸 PCM이 voice에 나간 뒤 실패하지 않게). `DecodeNext`의 실패는 실제 디코드 오류뿐이다.
 - `AudioDecoderTable`: codec id(1–`MaxAudioCodecs` − 1, `MaxAudioCodecs` = 8)마다 factory(`Result<UniquePtr<AudioDecoder>> (*)(Allocator&)`) 하나다. `Register`(이미 있으면 `AlreadyExists`, 범위 밖 `InvalidArgument`), `Create(codec, allocator)`(없으면 `NotFound`, factory 실패는 그 오류). 전역 표·전역 생성자는 없다.
@@ -1533,7 +1538,7 @@ struct EncodedAudio {           // 인코더 출력: codec 단위 목록
     AudioCodecId codec; uint32 bitstreamVersion; uint32 encoderVersion;   // encoderVersion은 너겟 키용(머리에 넣지 않는다)
     uint32 channels; uint32 channelMask; uint32 sampleRate;
     uint64 frames; uint32 encoderDelay; uint32 endPadding;
-    uint32 preRollFrames;       // 청크 앞에 둘 최소 pre-roll codec frame(Opus 80 ms = 3840, 그 밖 0)
+    uint32 preRollFrames;       // 청크 앞에 둘 최소 pre-roll codec frame(Opus 320 ms = 15360, 그 밖 0)
     Array<uint8> codecHeader; Array<uint8> payload; Array<EncodedAudioUnit> units;   // 단위 = {payload 위치, byte 수, codec frame 수}, 단위 byte는 3.30.1절 framing
 };
 class AudioEncoder {
@@ -1628,6 +1633,79 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | 결정성 | 같은 입력 두 번 같은 byte, golden SHA(정수로 만든 입력) — x86-64 값을 단언하고 ARM64는 두 번 같은지만 본다(사칙연산뿐이라 같을 것으로 보지만 macOS에서 잰 뒤 넣는다) |
 | 위치 변환 | `CookResampledPosition`·`CookResampledFrames` 경계값(0, 2^32, 동률)과 거부(rate 범위 밖, 2^32 초과) |
 
+### 3.32 AU5 앞당김 — 코덱 계층 C3: Opus 인코더·`AudioOpus` 디코더(개정 27)
+
+3.30절 C3이다. 쿠킹용 Opus 인코더(`AudioTools`)와 런타임 Opus 디코더(`AudioOpus`)를 만든다. UE 근거: 인코더 `Developer/AudioFormatOpus/Private/AudioFormatOpus.cpp`(`Cook`·`CookSurround`·`GetBitRateFromQuality`), 디코더 `Runtime/OpusAudioDecoder/Module/Private/OpusAudioInfo.cpp`.
+
+#### 3.32.1 품질 설정
+
+- `AudioEncodeSettings::quality`를 `uint32` [1, 100]으로 바꾼다(지금의 `float` 1.0 칸을 대체). 기본 `DefaultAudioCompressionQuality` = 80이다(UE `USoundWave::CompressionQuality` 기본 80 — `SoundWave.cpp:1057`, `ClampMin` 1·`ClampMax` 100). 1이 가장 많이 압축하고 100이 가장 좋은 품질이다.
+- Opus 인코더는 범위 밖을 `InvalidArgument`로 거부한다(UE는 편집기와 `GetBitRateFromQuality`가 1–100으로 clamp한다. Rocks는 쿠킹 입력을 고치지 않고 거부한다). PCM16·ADPCM 인코더는 품질을 보지 않는다(UE도 무시한다).
+- 비트레이트 `OpusBitrateForQuality(quality, channels)` = (16000 + (quality − 1) × 80000 / 99, 내림) × channels bps다. UE `GetBitRateFromQuality`(`GetMappedRangeValueClamped([1, 100] → [16000, 96000])`를 float로 계산해 int로 자름)와 1–100 전부 같은 값이다(시험이 UE식 float 계산과 대조한다).
+
+#### 3.32.2 codec 머리(16 byte)
+
+| 위치 | 크기 | 필드 |
+|---|---|---|
+| 0 | 1 | mapping family = 1(RFC 7845 5.1.1.2, Vorbis 채널 배치) |
+| 1 | 1 | stream 수(1 이상) |
+| 2 | 1 | coupled stream 수(stream 수 이하, stream + coupled = 채널 수 — libopus `vorbis_mappings`. 이 규칙이 없으면 1채널 머리에 stream 255를 적어 디코더 상태를 수 MB 잡게 할 수 있다) |
+| 3 | 1 | 0 |
+| 4 | 2 | pre-skip(= 머리 encoder delay) |
+| 6 | 2 | output gain = 0 |
+| 8 | 8 | mapping 표(채널마다 1 byte, 값 < 채널 수. 채널 수 뒤 칸은 0) |
+
+- family 1은 Vorbis 채널 배치만 나타내므로 머리 채널 마스크는 그 채널 수의 기본 배치(`DefaultAudioChannelMask`)여야 한다.
+- 디코더 출력 채널 i는 Vorbis 순서 i번째이고, mapping 표는 그 채널이 어느 coded 채널에서 오는지만 정한다. 그래서 내부 순서로 바꾸는 표(`VorbisChannelOrder`)는 mapping 표와 상관없이 채널 수로만 정한다.
+
+#### 3.32.3 인코더(`AudioTools/OpusAudioEncoder.h`)
+
+- `OpusAudioEncoder`: codec Opus, 이름 `Opus`, 인코더 판 1, bitstream 판 1, rate 48000만, 채널 1–8.
+- libopus `opus_multistream_surround_encoder_init`(family 1, `OPUS_APPLICATION_AUDIO`)를 채널 1–8 모두에 쓴다. UE는 1–2채널에 단일 stream 인코더를, 3채널 이상에 surround 인코더를 쓴다. libopus surround 인코더는 1–2채널이면 surround 분석을 하지 않고 stream 하나라, 결과가 단일 stream 인코더와 같은 패킷 형식(표준 Opus 패킷)이므로 한 경로로 둔다. byte까지 같다는 보장은 없다(multistream 경로의 비트 배분·재포장). 인코더 상태는 Rocks allocator로 잡는다(`opus_multistream_surround_encoder_get_size`).
+- 설정은 `OPUS_SET_BITRATE`(3.32.1절)만 하고 나머지는 libopus 기본(VBR, complexity)이다. UE와 같다. libopus 판이 바뀌면 인코더 판을 올린다(너겟 키).
+- 패킷은 20 ms = `OpusPacketFrames`(960) codec frame이다(UE `kOpusFrameSizeMs` = 20). encoder delay = `OPUS_GET_LOOKAHEAD`(48 kHz `AUDIO`에서 312)이고 codec 머리 pre-skip과 같다.
+- 입력 배치: 원본 frame 0부터 넣고 끝 뒤는 0이다. codec frame 합 = ceil((frames + delay) / 960) × 960, 끝 padding = 합 − delay − frames. UE도 끝에 lookahead만큼 0을 붙이고 마지막 패킷을 0으로 채운다. UE는 앞에도 80 ms 무음을 넣고(`NumSilentSamplesAtBeginning`) 디코더가 건너뛰는데, Rocks는 넣지 않는다. 시작 수렴은 pre-skip(= encoder delay, RFC 7845 4.2절)이 맡고, 청크 0은 pre-roll 없이 디코더 초기 상태에서 시작한다.
+- 입력은 float로 넣는다(`opus_multistream_encode_float`). UE는 int16으로 바꿔 넣지만 Rocks 원본 PCM은 float라(3.25절) 정밀도를 지킨다.
+- 채널 순서: 내부 순서 planar를 Vorbis 순서 교차로 바꿔 넣는다. 3.29.2절 표(`VorbisChannelOrder`)를 `Audio/VorbisChannelOrder.h`로 옮겨 `AudioTools`(원본 디코드·인코더)와 `AudioOpus`(디코더)가 같이 쓴다.
+- 단위 = `[u16 LE 길이][multistream 패킷]`(3.30.1절), 단위 codec frame 960. 패킷 버퍼는 `OpusMaxPacketBytes` = 1277 × 8 byte(stream마다 최대 1275 byte + 자기 구분 길이 2 byte)다.
+- `preRollFrames` = 15360(320 ms = 16 패킷, `OpusPreRollMs`, 3.32.4절 측정).
+- 오류: rate ≠ 48000·채널 0·9·마스크 bit 수 불일치·frame 0·비유한 표본·품질 범위 밖은 `InvalidArgument`(다른 rate는 쿠킹 처리기가 C2로 먼저 바꾼다), 마스크가 기본 배치가 아니면 `Unsupported`(그런 원본을 어떻게 쿠킹할지는 AU5 나머지가 정한다), 할당 실패 `OutOfMemory`, libopus 오류 `Unsupported`다. 실패하면 out을 비운다.
+- 결정성: libopus float 인코더는 libm(분석·SILK float)을 부르므로 byte는 아키텍처·OS별로 고정이다(3.29.1절과 같은 한계). 같은 쿠커 호스트 종류면 같은 입력·설정에 같은 byte다.
+
+#### 3.32.4 디코더(`AudioOpus/OpusAudioDecoder.h`)
+
+- 모듈 `Engine/Source/Runtime/AudioOpus`: type ClientOnly(BS2 0d9c3a8b, AD24 — Server 타깃에서 빠지고 Runtime 모듈은 의존할 수 없다, 3.30절). 의존은 `Audio`(Public)와 ThirdParty `Opus`(Private)다.
+- 등록: `RegisterOpusAudioDecoder(AudioDecoderTable&)`(이미 있으면 `AlreadyExists`)를 공개한다. 지금은 표를 만드는 쪽(시험·도구)이 직접 부른다. 모듈 `Startup`에서 `HostServices`로 factory를 내놓는 연결(3.30.2절 등록 경로)은 표를 만드는 AU3 `AudioEngineSubsystem`과 같이 넣는다.
+- `Open`: codec이 Opus가 아니면 `InvalidArgument`, 그다음 bitstream 판 ≠ 1이면 `Unsupported`다(다른 규칙보다 먼저 — 새 판이 codec 머리·rate 규칙을 바꿔도 손상이 아니라 모르는 판으로 알린다. PCM16·ADPCM도 같은 순서로 고친다). 그 뒤 채널 1–8·rate 48000·codec 머리(3.32.2절 규칙 전부, pre-skip = 머리 encoder delay)·채널 마스크 = 기본 배치를 보고 다르면 `InvalidArgument`다. 디코더 상태(`opus_multistream_decoder_get_size(streams, coupled)`)와 scratch(960 × 채널 float)를 allocator로 잡는다(이미 잡은 크기로 충분하면 다시 쓴다). 실패하면 앞 상태를 비운다.
+- `BeginChunk`: 먼저 검사한다 — payload byte 수 = 청크 표 값, 청크 codec frame 수·pre-roll이 960 배수, startCodecFrame 범위, 길이 접두를 끝까지 훑어 길이가 1 이상이고 합이 payload와 정확히 같으며, 패킷마다 첫 stream TOC가 나타내는 길이(`opus_packet_get_nb_samples`)가 960이고, 패킷 수 × 960 = pre-roll + codec frame 수. 어긋나면 `InvalidArgument`다(이미 낸 PCM이 voice에 나간 뒤 길이 때문에 실패하지 않게). 그 뒤 상태를 비우고(`OPUS_RESET_STATE`) 시작 패킷보다 `OpusPreRollMs`(320 ms = 16 패킷) 앞 패킷부터 디코드해 startCodecFrame 앞을 버린다. 그 지점이 payload 머리 앞이면 머리(복제 pre-roll 포함)부터다. 시작 패킷은 scratch에 디코드해 두고 나머지를 `DecodeNext`가 낸다.
+  - 스트림 머리(청크 0의 앞 16 패킷 안)에서 시작하면 디코더 초기 상태에서 스트림 첫 패킷부터라 연속 디코드와 bit까지 같다(loop 시작 0인 loop 머리도 같다). 그 밖의 시작은 pre-roll로 수렴한 근사다. 같은 시작 위치는 언제나 같은 표본을 내므로 loop 머리 PCM(3.11.3절)은 loop마다 같다. seek 비용은 패킷 17개 디코드로 고정이다.
+  - pre-roll 길이 측정(스테레오 300·500 Hz 순음 진폭 0.3, 품질 80, 48 kHz, 1–2 s 지점 seek 4곳, 연속 디코드와 비교): 4 패킷(80 ms) 최대 오차 0.053·SNR 23 dB, 8 패킷 0.0049·45 dB, 12 패킷 3.6e-4·68 dB, 16 패킷(320 ms) 2.5e-5·91 dB, 25 패킷 1.5e-7(float 오차 수준). 오차는 패킷 4개마다 약 21 dB씩 준다. 20 ms CELT의 frame 사이 에너지 예측(계수 0.5)이 초기화된 상태를 frame마다 절반씩만 잊기 때문이다. 순음은 intra frame이 드물어 나쁜 쪽 경우다. 16비트 1 LSB(3.1e-5) 아래인 320 ms로 정했다. 대가는 청크마다 복제 byte(품질 80 스테레오로 약 6.4 KB — 256 KiB 청크의 2.5%)와 seek 때 패킷 16개 더 디코드다.
+  - 버린 대안: (가) 80 ms(RFC 7845 4.6절 최소 권장) — 위 측정으로 loop 이음매·seek 직후에 들리는 어긋남. (나) 청크 머리부터 디코드해 bit를 맞춤 — seek 한 번에 최대 청크 하나(256 KiB, 품질 80 스테레오로 약 13 s) 디코드라 `LoopHeadFrames`(pre-roll + 2 × Q) 계산과 PCM 링 크기(3.12.3절)가 깨진다.
+  - UE 대응: UE `FOpusAudioInfo::SeekToFrame`(`Runtime/OpusAudioDecoder/Module/Private/OpusAudioInfo.cpp:357`)과 스트리밍 seek(`AudioDecompress.cpp`)는 대상 패킷으로 바로 건너뛰고 그 패킷 안 표본만 버린다. 디코더 리셋·pre-roll이 없다. Rocks는 리셋 뒤 pre-roll을 디코드한다.
+- `ContinueChunk`(개정 27, 3.30.2절 청크 경계 규칙): 앞 청크를 끝까지 냈고(`DecodeNext`가 0) 새 청크 첫 frame = 앞 청크 끝이어야 한다(아니면 `InvalidArgument`, 열린 청크도 닫는다). payload 검사는 `BeginChunk`와 같다. 상태를 비우지 않고 복제 pre-roll 패킷은 디코드하지 않고 건너뛴다. 그래서 처음부터 순차로 낸 결과는 청크 하나로 디코드한 결과와 bit까지 같다.
+- `DecodeNext`: scratch에 남은 표본을 먼저 내고, 없으면 다음 패킷을 `opus_multistream_decode_float`(frame 960, FEC 없음)로 풀어 Vorbis 순서 교차 → 내부 순서 planar로 쓴다. 결과가 960이 아니거나 오류면 `InvalidArgument`(손상)이고 청크를 닫는다(손상된 libopus 상태로 이어 디코드하지 않게. 다시 `BeginChunk`해야 한다). 청크 끝이면 0이다. output gain은 0만 받으므로 적용하지 않는다.
+- `MaxFramesPerCall` = 960이다. bitstream 1은 모든 패킷이 20 ms라서다. 3.30.2절의 Opus 5760(패킷 최대 120 ms)은 bitstream 1에서 960으로 고친다.
+- 할당은 `Open`만 한다. libopus는 `VAR_ARRAYS`(스택 가변 배열)라 디코드 중 힙 할당이 없다. 대신 스택을 쓰므로 디코드 worker 스택은 libopus 요구(수십 KB)를 넘어야 한다(AU6에서 정한다).
+- 결정성: 디코더도 libm을 부르므로 골든 해시는 아키텍처·OS별이다(3.29.1절).
+
+#### 3.32.5 시험(`AudioTools/Tests/OpusCodecTests.cpp`)
+
+시험은 `AudioTools/Tests`에 두고 `AudioOpus` 디코더를 쓴다. 링크하는 것은 시험 실행 파일(Program)이고 `AudioTools` 모듈은 `AudioOpus`에 의존하지 않는다. 그래서 BD25(Developer → ClientOnly 금지)와 부딪히지 않는다. 3.30절의 확인 항목은 이것으로 닫는다.
+
+| 대상 | 확인 |
+|---|---|
+| 품질 | `OpusBitrateForQuality` 1·40·80·100과 UE식 float 계산 1–100 전부 대조, 품질이 높으면 byte가 많음 |
+| 왕복 | 1·2·3·4·5·6·7·8채널, 채널마다 다른 주파수 sine: 쓰기 → 검증 → 전체 디코드, frame 수 = 원본, 각 채널의 주파수가 같은 자리(채널 순서), 가장자리를 뺀 구간 SNR 하한 |
+| 머리 | codec Opus·rate 48000·delay = lookahead·padding = 합 − delay − frames·codec 머리 필드(family 1, stream·coupled·mapping = libopus Vorbis mapping, pre-skip)·청크 k > 0 pre-roll 3840(앞쪽 청크는 frame 0까지만) |
+| 채널 순서 표 | `InterleaveVorbisOrder`·`DeinterleaveVorbisOrder`를 1–8채널 고정 기대값(Vorbis 슬롯)과 직접 비교 — 인코더·디코더가 같은 표를 써서 왕복으로는 표 오류가 드러나지 않기 때문 |
+| 청크 | 작은 목표로 여러 청크: 전체 디코드(청크 0 `BeginChunk`, 뒤는 `ContinueChunk`) = 같은 인코드를 청크 하나로 쓴 디코드(bit 같음). 모든 청크의 머리·패킷 경계 앞뒤·가운데·끝 직전에서 seek해 다음 청크로 이어 읽기: 스트림 머리 16 패킷 안의 시작은 연속 디코드와 bit 같음, 그 밖은 SNR ≥ 80 dB, 같은 시작 두 번은 bit 같음 |
+| 청크 잇기 | `ContinueChunk`: `Open` 전·청크 없음·앞 청크를 다 내지 않음·이어지지 않는 청크·payload 손상 `InvalidArgument`(열린 청크도 닫힘), 청크 가운데 seek 뒤 끝까지 낸 다음 잇기 성공 |
+| codec 머리 음성 | 크기 ≠ 16, family ≠ 1, stream 0, coupled > stream, stream + coupled ≠ 채널 수, mapping 범위 밖, 뒤 칸·예약 칸 ≠ 0, gain ≠ 0, pre-skip ≠ delay, rate ≠ 48000, 마스크가 기본 배치 아님: `InvalidArgument`, bitstream 판 ≠ 1(codec 머리 크기가 달라도): `Unsupported`. Open → BeginChunk → 실패한 Open 뒤 `DecodeNext` `InvalidArgument`. 같은 디코더를 2 → 8 → 1채널로 다시 열어 새 디코더와 같은 결과 |
+| 청크 손상 | 길이 0, 길이 접두가 payload 밖, 남는 byte, 패킷 수 불일치, frame 수가 960 배수 아님, 첫 패킷 TOC를 10 ms·40 ms(2 frame)로 바꿈: `BeginChunk`에서 `InvalidArgument`. 패킷 byte 무작위 교체: 오류 또는 성공(멈추거나 범위 밖을 읽지 않음) |
+| 인코더 음성 | rate 44100·채널 0·9·마스크 불일치 `InvalidArgument`, 기본 배치 아닌 마스크 `Unsupported`, 비유한 표본·품질 0·101 `InvalidArgument`, 성공 인코드로 채운 out이 실패 뒤 빔 |
+| 디코더 계약 | out 채널 수 불일치·용량 < 960, `Open`·`BeginChunk` 전 호출 `InvalidArgument`, 등록 중복 `AlreadyExists` |
+| 결정성 | 같은 입력 두 번 같은 byte, 플랫폼 데이터 golden SHA·디코드 golden SHA — x86-64 값(Windows UCRT에서 잼)을 단언하고 다른 곳은 두 번 같은지만 본다(macOS에서 잰 뒤 넣는다. 3.29절 시험과 같은 조건이라 Linux x86-64가 CI에 들어오면 함께 나눈다) |
+
 ## 4. 결정 요약
 
 - 모듈: `Audio`(믹서·DSP·backend 인터페이스) / `AudioMiniaudio`(장치, ClientOnly) / `AudioOpus` / `EngineAudio`(Object 세계) / `AudioTools`(임포트·쿠킹). 의존은 단방향.
@@ -1670,7 +1748,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | AD25 | 에디터·Tryout은 쿠킹하지 않은 clip을 재생할 때 실행 플랫폼 데이터를 만든다(UE DDC 방식). AU4는 PCM 변환만, AU5부터 AssetNugget 경유 | 권장안 |
 | AD26 | 장치 콜백 → AudioRT 깨우기는 잠금 없는 단일 대기자 신호(`RealtimeWakeSignal`: Windows `WaitOnAddress`, Android futex, macOS Mach semaphore) | 권장안 |
 | AD27 | 리버브 bypass·없음으로 전환해도 꼬리 에너지가 임계 아래로 머문 뒤에 끄고 이력을 지운다(UE는 즉시 지움) | 권장안 |
-| AD28 | Opus 청크는 앞 청크 끝 80 ms 패킷을 복제해 독립 디코드, looping clip은 loop 머리 PCM을 미리 디코드해 둔다 | 권장안 |
+| AD28 | Opus 청크는 앞 청크 끝 320 ms(개정 27, 처음 80 ms) 패킷을 복제해 독립 디코드, looping clip은 loop 머리 PCM을 미리 디코드해 둔다 | 권장안 |
 
 ## 6. 단계
 
@@ -1684,7 +1762,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | PR21 | 무잠금 깨우기 신호 `RealtimeWakeSignal`(AD26) | 설계(Synchronization 개정 3 9.6절, D34, SY12) | SY0 → SY12 구현 | AU2 |
 | PR4 | `SerialTaskChain`·`WorkerScheduler`·`TaskLane::Audio` | 구현 | 없음 | — |
 | PR5 | ThirdParty 반입 | 절차 구현, 오디오 라이브러리 없음 | miniaudio(AU2), libFLAC·libvorbis·libogg·libopus·libopusfile·minimp3(AU4), 런타임 libopus(AU5) | AU2, AU4, AU5 |
-| PR6 | 모듈 유형 `ClientOnly`, Server 대상 오디오 제외 | 설계 | BuildTargets 구현 | AU2(서버 빌드 확인은 AU3) |
+| PR6 | 모듈 유형 `ClientOnly`, Server 대상 오디오 제외 | 완료(BS2 0d9c3a8b) | BuildTargets 구현 | AU2(서버 빌드 확인은 AU3) |
 | PR7 | `RunTraits::audioOutput`·`audioMuted` | 설계(AppInfo 개정 4, 10.2절) | AppInfo AP1 구현 또는 AU3 임시 판정 | AU3 |
 | PR8 | Engine 종료 재시도 게이트 | 설계(EngineRuntime 6절, CrashHandlingAndLaunch 개정 13 20절) | 구현(Engine `Shutdown`의 `Busy` 처리·호스트 재시도) | AU3 |
 | PR9 | 앱 수명 이벤트(활성·비활성·백그라운드·오디오 포커스) | 데스크톱 창 포커스는 구현(PlatformWindow), 앱 수준 이벤트는 설계(PlatformLayer "앱 수명 이벤트" 절) | Windows·macOS 활성 이벤트는 AU3과, Android는 AU9와 함께 구현 | AU9 |

@@ -942,6 +942,10 @@ TEST(Audio_Codec_DecoderReopenAndBounds) {
     AudioPlatformDataHeader newer = view.Value().Header();
     newer.bitstreamVersion = Pcm16BitstreamVersion + 1;
     CHECK(decoder.Open(newer, Span<const uint8>()).Error() == ErrorCode::Unsupported);
+    // 새 판이 codec 머리를 두더라도 손상(InvalidArgument)이 아니라 모르는 판이다.
+    const uint8 newerCodecHeader[AudioCodecHeaderAlignment] = {};
+    CHECK(decoder.Open(newer, Span<const uint8>(newerCodecHeader, AudioCodecHeaderAlignment))
+              .Error() == ErrorCode::Unsupported);
     Array<float> scratch(allocator);
     REQUIRE(scratch.TryResize(2 * Pcm16UnitFrames));
     PlanarView out;

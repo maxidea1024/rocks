@@ -34,12 +34,13 @@ public:
         // 실패하면 앞 상태(열린 청크)를 남기지 않는다.
         open_ = false;
         payload_ = Span<const uint8>();
-        if (!BuiltInHeaderValid(header, AudioCodecId::Pcm16) || codecHeader.Size() != 0) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        // 판은 codec 다음, 다른 규칙보다 먼저 본다(새 판의 규칙 변화를 손상으로 알리지 않게).
+        if (header.codec == AudioCodecId::Pcm16 && header.bitstreamVersion != Pcm16BitstreamVersion) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        if (header.bitstreamVersion != Pcm16BitstreamVersion) {
-            return Result<void>::Failure(ErrorCode::Unsupported);
+        if (!BuiltInHeaderValid(header, AudioCodecId::Pcm16) || codecHeader.Size() != 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         channels_ = header.channels;
@@ -108,12 +109,13 @@ public:
         // 실패하면 앞 상태(열린 청크)를 남기지 않는다.
         open_ = false;
         payload_ = Span<const uint8>();
-        if (!BuiltInHeaderValid(header, AudioCodecId::Adpcm) || codecHeader.Size() != 0) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        // 판은 codec 다음, 다른 규칙보다 먼저 본다(새 판의 규칙 변화를 손상으로 알리지 않게).
+        if (header.codec == AudioCodecId::Adpcm && header.bitstreamVersion != AdpcmBitstreamVersion) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        if (header.bitstreamVersion != AdpcmBitstreamVersion) {
-            return Result<void>::Failure(ErrorCode::Unsupported);
+        if (!BuiltInHeaderValid(header, AudioCodecId::Adpcm) || codecHeader.Size() != 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         channels_ = header.channels;
@@ -302,9 +304,13 @@ Result<void> DecodeAllInto(const AudioPlatformDataView& view, const AudioDecoder
     float* planar = allocated.Value();
     const uint64 validStart = header.encoderDelay;
     const uint64 validEnd = header.encoderDelay + header.frames;
+    // 청크 0은 BeginChunk로 열고, 그 뒤 청크는 ContinueChunk로 상태를 이어 연다(처음부터 재생과
+    // 같다 — 3.30.2절 청크 경계 규칙).
     for (uint32 index = 0; index < header.chunkCount; ++index) {
         const AudioChunkEntry chunk = view.Chunk(index);
-        if (auto begun = decoder.BeginChunk(chunk, view.ChunkPayload(index), chunk.firstFrame);
+        const Span<const uint8> payload = view.ChunkPayload(index);
+        if (auto begun = index == 0 ? decoder.BeginChunk(chunk, payload, chunk.firstFrame)
+                                    : decoder.ContinueChunk(chunk, payload);
             !begun) {
             return begun;
         }

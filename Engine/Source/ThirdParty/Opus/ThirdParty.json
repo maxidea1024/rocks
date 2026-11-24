@@ -396,7 +396,7 @@
     }
   ],
   "notes": [
-    "Opus codec (float build) for the Ogg Opus source decoder of the audio importer (Docs/Design/AudioSystem.ko.md section 3.29); the Opus encoder for cooking and the client runtime decoder (AudioOpus) will link the same library later.",
+    "Opus codec (float build) for the Ogg Opus source decoder of the audio importer (Docs/Design/AudioSystem.ko.md section 3.29); the Opus platform data encoder for cooking (AudioTools, section 3.32.3) and the runtime decoder (AudioOpus, section 3.32.4) link the same library.",
     "No SIMD sources and no runtime CPU detection (OPUS_X86_MAY_HAVE_* and OPUS_HAVE_RTCD are not defined), so decoded samples are fixed per architecture and compiler flags (section 3.10.1).",
     "Defines follow the upstream CMake defaults: VAR_ARRAYS (C99 variable-length arrays instead of alloca), HAVE_LRINTF and HAVE_LRINT, and ENABLE_HARDENING (cheap invariant checks that stay on in release builds). PACKAGE_VERSION is not defined, so opus_get_version_string reports 'libopus unknown'.",
     "Opus.Build.cs adds the library-internal include directories (celt, silk, silk/float, src) to the library build only, so that headers with common names (debug.h, errors.h, main.h) do not reach consuming modules through includeDirectories."

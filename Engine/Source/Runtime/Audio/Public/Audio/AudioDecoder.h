@@ -16,7 +16,8 @@
 //   RegisterBuiltInAudioDecoders(table);
 //   auto decoder = table.Create(view.Header().codec, allocator);
 //   decoder.Value()->Open(view.Header(), view.CodecHeader());
-//   decoder.Value()->BeginChunk(chunk, payload, chunk.firstFrame);
+//   decoder.Value()->BeginChunk(chunk, payload, chunk.firstFrame);   // 시작·seek: 상태를 비운다
+//   // ... 청크를 끝까지 낸 뒤 다음 청크는 ContinueChunk(next, nextPayload)로 상태를 잇는다.
 //   while (true) {
 //       auto written = decoder.Value()->DecodeNext(out);
 //       if (!written || written.Value() == 0) { break; }
@@ -30,7 +31,8 @@ public:
     virtual ~AudioDecoder() = default;
 
     // 머리와 codec 머리를 확인한다(codec·채널 1–8·rate·bitstream 판). 다르면 InvalidArgument(판은
-    // Unsupported)다. 실패하면 앞 상태(열린 청크)를 남기지 않는다.
+    // Unsupported — codec 다음, 다른 규칙보다 먼저 본다)다. 실패하면 앞 상태(열린 청크)를 남기지
+    // 않는다.
     virtual Result<void> Open(const AudioPlatformDataHeader& header,
                               Span<const uint8> codecHeader) noexcept = 0;
 
@@ -40,12 +42,23 @@ public:
     virtual Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload,
                                     uint64 startCodecFrame) noexcept = 0;
 
+    // 앞 청크를 끝까지 낸 뒤(DecodeNext가 0) 바로 다음 청크(첫 frame = 앞 청크 끝)를 상태를 이어
+    // 연다. 복제 pre-roll은 디코드하지 않고 건너뛴다. 그래서 처음부터 순차로 낸 결과는 연속
+    // 디코드와 같다(3.30.2절 청크 경계 규칙). payload 검사는 BeginChunk와 같고, 앞 청크를 다 내지
+    // 않았거나 이어지지 않으면 InvalidArgument다. 기본 구현은 청크 사이 상태가 없는 codec(PCM16·
+    // ADPCM)용으로 BeginChunk(chunk.firstFrame)를 부른다.
+    virtual Result<void> ContinueChunk(const AudioChunkEntry& chunk,
+                                       Span<const uint8> payload) noexcept {
+        return BeginChunk(chunk, payload, chunk.firstFrame);
+    }
+
     // 다음 단위를 out에 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수,
     // 청크 끝이면 0이다. out 채널 수가 다르거나 frame 용량이 MaxFramesPerCall보다 작거나
     // Open·BeginChunk 전이면 InvalidArgument다.
     virtual Result<uint32> DecodeNext(const PlanarView& out) noexcept = 0;
 
-    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수다(PCM16 1024, ADPCM 1012, Opus 5760).
+    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수다(PCM16 1024, ADPCM 1012,
+    // Opus 960(bitstream 1)).
     virtual uint32 MaxFramesPerCall() const noexcept = 0;
 };
 
