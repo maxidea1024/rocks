@@ -108,6 +108,10 @@ public:
     // 경고를 남긴다. 오류: 할당 실패.
     virtual Result<void> Warn(AssetDiagnosticCode code, uint64 detail) noexcept = 0;
 
+    // hook이 대상의 원본(또는 묶음 칸)을 실제로 다시 썼음을 알린다(서비스가 전파 대상 중 바뀐 것만
+    // 정규화·저장한다 — 12.14절).
+    virtual void MarkRebuilt() noexcept = 0;
+
 protected:
     ~AssetSourceRebuildSink() = default;
 };

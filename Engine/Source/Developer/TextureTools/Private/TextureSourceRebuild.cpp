@@ -113,16 +113,18 @@ Result<void> AppendMip0(AssetSourceRebuildSink& sink, ObjectHandle element,
         return sink.Fail(AssetDiagnosticCode::InvalidSource, read.Error(), index);
     }
 
-    if (read.Value().Size() < bytes) {
+    // numMips 1(판정에서 거른다)이므로 bulk는 정확히 mip 0이다.
+    if (read.Value().Size() != bytes) {
         return sink.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, index);
     }
 
     return out.TryAppend(read.Value().Slice(0, static_cast<usize>(bytes)));
 }
 
-// 자기 텍스처를 쓰기 Borrow로 fn에 준다.
+// 자기 텍스처를 쓰기 Borrow로 fn에 주고 sink에 다시 썼음을 알린다.
 template <class Fn>
-Result<void> WriteSelf(const AssetTypeHookContext& context, Fn&& fn) noexcept {
+Result<void> WriteSelf(const AssetTypeHookContext& context, AssetSourceRebuildSink& sink,
+                       Fn&& fn) noexcept {
     auto borrowed = context.registry.ResolveForWrite<Texture>(context.access, context.object);
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
@@ -134,6 +136,7 @@ Result<void> WriteSelf(const AssetTypeHookContext& context, Fn&& fn) noexcept {
     }
 
     fn(*value.Value());
+    sink.MarkRebuilt();
     return Result<void>::Success();
 }
 
@@ -202,11 +205,17 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
             return Result<void>::Success();
         }
 
-        return WriteSelf(context, [](Texture& self) noexcept { self.source = TextureSource{}; });
+        return WriteSelf(context, sink,
+                         [](Texture& self) noexcept { self.source = TextureSource{}; });
     }
 
-    // 임포트한 배열 보호(UE bSourceGeneratedFromSourceTexturesArray).
+    // 임포트한 배열 보호(UE bSourceGeneratedFromSourceTexturesArray). 전파는 실패시키지 않고
+    // 둔다(교환 임포트가 묶음 칸을 옮긴 에셋 — 원소 재임포트가 막히지 않게).
     if (sink.HasImportRecord()) {
+        if (sink.Cause() == AssetSourceRebuildCause::Propagate) {
+            return Result<void>::Success();
+        }
+
         return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument, 0);
     }
 
@@ -238,7 +247,7 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
             return sink.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, index);
         }
 
-        if (element.source.numLayers != 1) {
+        if (element.source.numLayers != 1 || element.source.numMips != 1) {
             return sink.Fail(AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported,
                              index);
         }
@@ -285,9 +294,10 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
     }
 
     const BulkDataRef ref = added.Value();
-    // 5. 처음 만들기 설정(대입한 칸은 둔다).
-    const bool creating = selfEmpty;
-    return WriteSelf(context, [&](Texture& self) noexcept {
+    // 5. 처음 만들기 설정(대입한 칸은 둔다 — 전파는 설정을 바꾸지 않는다, UE
+    // UpdateSourceFromSourceTextures(false)).
+    const bool creating = selfEmpty && sink.Cause() != AssetSourceRebuildCause::Propagate;
+    return WriteSelf(context, sink, [&](Texture& self) noexcept {
         TextureSource source;
         source.format = first.source.format;
         source.sizeX = first.source.sizeX;
@@ -406,7 +416,7 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
         }
 
         const BulkDataRef ref = added.Value();
-        return WriteSelf(context, [&](Texture& self) noexcept {
+        return WriteSelf(context, sink, [&](Texture& self) noexcept {
             TextureSource placeholder;
             placeholder.format = TextureSourceFormat::RGBA8;
             placeholder.sizeX = 1;
@@ -420,7 +430,7 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
     // 파일로 임포트한 Volume(ImportRecord)은 원본 2D가 없으면 묶음이 원본을 정하지 않는다(타일만
     // 고쳐도 원본을 지우지 않는다), 원본 2D를 대입하면 거부한다.
     if (sink.HasImportRecord()) {
-        if (source2D.IsNull()) {
+        if (source2D.IsNull() || cause == AssetSourceRebuildCause::Propagate) {
             return Result<void>::Success();
         }
 
@@ -437,6 +447,12 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
 
         element = read.Value();
         valid = HasSource(element.source);
+        // 디코더 한도 밖의 크기는 기본 타일 계산이 넘치므로 거부한다(패키지·교환 값은 상한을
+        // 보장하지 않는다).
+        if (valid && (element.source.sizeX > image::ImageDecodeLimits::DefaultMaxDimension ||
+                      element.source.sizeY > image::ImageDecodeLimits::DefaultMaxDimension)) {
+            return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::CapacityExceeded, 0);
+        }
     }
 
     // 1. 원본 2D를 대입하고 타일을 대입하지 않았으면 기본 타일(UE SetDefaultSource2DTileSize).
@@ -466,7 +482,7 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
 
     if (depth == 0) {
         // 3. 원본을 만들 수 없으면 비운다(UE와 같다 — 경고를 더한다).
-        if (auto written = WriteSelf(context,
+        if (auto written = WriteSelf(context, sink,
                                      [&](Texture& self) noexcept {
                                          auto& volume = static_cast<VolumeTexture&>(self);
                                          volume.source = TextureSource{};
@@ -480,7 +496,7 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
         return sink.Warn(AssetDiagnosticCode::SourceCleared, 0);
     }
 
-    if (element.source.numLayers != 1) {
+    if (element.source.numLayers != 1 || element.source.numMips != 1) {
         return sink.Fail(AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported, 0);
     }
 
@@ -499,9 +515,9 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
         return sink.Fail(AssetDiagnosticCode::InvalidSource, read.Error(), 0);
     }
 
-    // 원본 2D의 첫 slice만 쓴다(UE GetMipData(0)의 앞 — Texture2D는 slice 1).
+    // 원본 2D는 mip 하나·slice 하나다(Texture2D — bulk가 정확히 그 byte다).
     const uint64 rowBytes = uint64{element.source.sizeX} * texel;
-    if (read.Value().Size() < uint64{element.source.sizeY} * rowBytes) {
+    if (read.Value().Size() != plane) {
         return sink.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, 0);
     }
 
@@ -531,7 +547,7 @@ Result<void> RebuildVolumeTexture(const AssetTypeHookContext& context,
 
     const BulkDataRef ref = added.Value();
     const TextureSourceFormat format = element.source.format;
-    return WriteSelf(context, [&](Texture& self) noexcept {
+    return WriteSelf(context, sink, [&](Texture& self) noexcept {
         auto& volume = static_cast<VolumeTexture&>(self);
         TextureSource source;
         source.format = format;

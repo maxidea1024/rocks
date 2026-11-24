@@ -2065,6 +2065,14 @@ public:
         return changed_;
     }
 
+    void MarkRebuilt() noexcept override {
+        rebuilt_ = true;
+    }
+
+    bool Rebuilt() const noexcept {
+        return rebuilt_;
+    }
+
     Result<void> Fail(AssetDiagnosticCode code, ErrorCode error, uint64 detail) noexcept override {
         if (failure_ != nullptr) {
             *failure_ = AssetDiagnostic{};
@@ -2101,6 +2109,7 @@ private:
     const EditorPackageInfo& target_;
     AssetSourceRebuildCause cause_;
     ObjectHandle changed_;
+    bool rebuilt_ = false;
     Array<EditorWarning>* warnings_;
     AssetDiagnostic* failure_;
 };
@@ -2111,7 +2120,11 @@ Result<void> EditorPackageSet::RebuildSource(ObjectHandle object, AssetId asset,
                                              Span<const StringView> assignedFields,
                                              AssetSourceRebuildCause cause, ObjectHandle changed,
                                              Array<EditorWarning>* warnings,
-                                             AssetDiagnostic* failure) noexcept {
+                                             AssetDiagnostic* failure, bool* rebuilt) noexcept {
+    if (rebuilt != nullptr) {
+        *rebuilt = false;
+    }
+
     if (registry_.Get() == nullptr || config_.hooks == nullptr) {
         return Result<void>::Success();
     }
@@ -2128,8 +2141,13 @@ Result<void> EditorPackageSet::RebuildSource(ObjectHandle object, AssetId asset,
     }
 
     RebuildSink sink(*registry_, access, open_.View(), *target, cause, changed, warnings, failure);
-    return config_.hooks->RebuildSource(*registry_, access, object, type.Value().Id(), asset,
-                                        assignedFields, sink);
+    Result<void> done = config_.hooks->RebuildSource(*registry_, access, object, type.Value().Id(),
+                                                     asset, assignedFields, sink);
+    if (rebuilt != nullptr) {
+        *rebuilt = sink.Rebuilt();
+    }
+
+    return done;
 }
 
 Result<void> EditorPackageSet::NormalizeSettings(ObjectHandle object, AssetId asset,

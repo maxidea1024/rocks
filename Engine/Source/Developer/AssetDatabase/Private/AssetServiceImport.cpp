@@ -876,9 +876,19 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
     }
 
     // 원소 재임포트 전파(Docs/Design/AssetSystem 12.14절 A5j2 — UE UReimportTextureFactory):
-    // 재임포트한 주 출력을 EditorOnly로 참조하는 에셋을 열어 원본을 다시 만들고 정규화한다. 저장
-    // 전에 하므로 묶음 hook이 실패하면 아무것도 저장하지 않는다. 저장은 원소 뒤다(아래).
+    // 재임포트한 주 출력을 EditorOnly로 참조하는 에셋을 열어 원본 재구성 hook을 Propagate로 부른다.
+    // hook이 원본을 실제로 다시 쓴 에셋만 정규화하고 원소 뒤에 저장한다(묶음과 무관한 참조자 —
+    // compositeTexture 등 — 는 바꾸지도 저장하지도 않는다). 저장 전에 하므로 hook 실패·저장할 수
+    // 없는 대상(읽기 전용· 미해결 import)·저장하지 않은 편집이 있는 열린 대상(Busy)이면 아무것도
+    // 저장하지 않는다.
     Array<AssetId> propagated(allocator);
+    // 일 전부터 열려 있던 전파 대상이다(실패하면 메모리 값이 디스크와 달라지므로 dirty로 둔다).
+    Array<AssetId> propagatedOpen(allocator);
+    auto markOpenDirty = [&]() noexcept {
+        for (AssetId id : propagatedOpen) {
+            (void)set_.MarkDirty(id);
+        }
+    };
     for (current = 0; current < runs.Size(); ++current) {
         ImportRun& run = *runs[current];
         if (!run.member->reimport) {
@@ -894,6 +904,7 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
         if (auto listed = index_.Referencers(
                 run.mainId, DependencyKindBit(PackageDependencyKind::EditorOnly), referencers);
             !listed) {
+            markOpenDirty();
             return abandon(FailImport<void>(failure, AssetDiagnosticCode::None, listed.Error()));
         }
 
@@ -912,6 +923,20 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
                 continue;
             }
 
+            // 일 전부터 열려 있고 저장하지 않은 편집이 있으면 그 편집까지 저장하게 되므로 Busy다
+            // (재임포트 구성원의 Busy 규칙과 같다).
+            const usize at =
+                algo::LowerBound(before, referencer->id, [](AssetId left, AssetId key) noexcept {
+                    return GuidLess(left.value, key.value);
+                });
+            const bool wasOpen = at < before.Size() && before[at] == referencer->id;
+            const EditorPackageInfo* openInfo = set_.Find(referencer->id);
+            if (wasOpen && openInfo != nullptr && openInfo->dirty) {
+                markOpenDirty();
+                return abandon(FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::Busy,
+                                                referencer->id));
+            }
+
             AssetDiagnostic diagnostic;
             auto opened = set_.Open(referencer->id, warnings, &diagnostic);
             if (!opened) {
@@ -919,37 +944,63 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
                     *failure = diagnostic;
                 }
 
+                markOpenDirty();
                 return abandon(Result<void>::Failure(opened.Error()));
             }
 
             auto representative = set_.Registry().FindChild(set_.Access(), opened.Value(), "");
-            Result<void> rebuilt = representative ? Result<void>::Success()
-                                                  : Result<void>::Failure(representative.Error());
-            if (rebuilt) {
-                rebuilt = set_.RebuildSource(representative.Value(), referencer->id, {},
-                                             AssetSourceRebuildCause::Propagate, changed, warnings,
-                                             &diagnostic);
+            Result<void> step = representative ? Result<void>::Success()
+                                               : Result<void>::Failure(representative.Error());
+            bool rebuilt = false;
+            if (step) {
+                step = set_.RebuildSource(representative.Value(), referencer->id, {},
+                                          AssetSourceRebuildCause::Propagate, changed, warnings,
+                                          &diagnostic, &rebuilt);
             }
 
-            if (rebuilt) {
-                rebuilt = set_.NormalizeSettings(representative.Value(), referencer->id, {});
+            if (step && rebuilt) {
+                if (wasOpen) {
+                    step = propagatedOpen.TryPushBack(referencer->id);
+                }
+
+                // 저장할 수 없는 대상은 지금 거부한다(Save와 같은 진단 — 원소를 저장하기 전에).
+                const EditorPackageInfo* info = set_.Find(referencer->id);
+                if (step && info != nullptr && info->readOnly) {
+                    diagnostic = AssetDiagnostic{};
+                    diagnostic.code = AssetDiagnosticCode::NewerVersion;
+                    diagnostic.error = ErrorCode::Unsupported;
+                    diagnostic.asset = referencer->id;
+                    step = Result<void>::Failure(ErrorCode::Unsupported);
+                } else if (step && info != nullptr && !info->unresolved.IsEmpty()) {
+                    diagnostic = AssetDiagnostic{};
+                    diagnostic.code = AssetDiagnosticCode::MissingDependency;
+                    diagnostic.error = ErrorCode::InvalidArgument;
+                    diagnostic.asset = referencer->id;
+                    diagnostic.related = info->unresolved[0].target;
+                    step = Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                if (step) {
+                    step = set_.NormalizeSettings(representative.Value(), referencer->id, {});
+                }
+
+                if (step) {
+                    step = propagated.TryPushBack(referencer->id);
+                }
             }
 
-            if (rebuilt) {
-                rebuilt = propagated.TryPushBack(referencer->id);
-            }
-
-            if (!rebuilt) {
+            if (!step) {
                 if (failure != nullptr) {
                     *failure = diagnostic.code != AssetDiagnosticCode::None ? diagnostic
                                                                             : AssetDiagnostic{};
                     if (diagnostic.code == AssetDiagnosticCode::None) {
-                        failure->error = rebuilt.Error();
+                        failure->error = step.Error();
                         failure->asset = referencer->id;
                     }
                 }
 
-                return abandon(Result<void>::Failure(rebuilt.Error()));
+                markOpenDirty();
+                return abandon(Result<void>::Failure(step.Error()));
             }
         }
     }
@@ -993,6 +1044,7 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
     // 저장 실패의 되돌리기: 연 패키지를 닫고, 기존 파일을 교체하기 전이면 이번에 쓴 새 파일을
     // 지운다(못 지우면 경고 OrphanNotDeleted).
     auto rollback = [&](const AssetDiagnostic& diagnostic) noexcept {
+        markOpenDirty();
         (void)set_.CloseOpened(before.View());
         for (usize index = 0; index < savedFiles.Size() && !existingSaved; ++index) {
             target.Clear();

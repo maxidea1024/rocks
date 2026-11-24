@@ -62,6 +62,10 @@ public:
         return warnings.TryPushBack(texture_import_test::SeenWarning{code, detail});
     }
 
+    void MarkRebuilt() noexcept override {
+        ++rebuilds;
+    }
+
     MemoryBulkSource bulk;
     Array<texture_import_test::SeenWarning> warnings;
     bool importRecord = false;
@@ -72,6 +76,7 @@ public:
     uint64 failDetail = 0;
     usize reads = 0;
     usize adds = 0;
+    usize rebuilds = 0;
 };
 
 // 텍스처 타입·hook 표·객체를 가진 장면이다.
@@ -349,6 +354,12 @@ TEST(TextureSourceRebuild_ArrayChecks) {
         texture.source.numLayers = 2;
         return true;
     }));
+    const ObjectHandle mipped =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 9, true);
+    REQUIRE(scene.Edit(mipped, [](Texture& texture) noexcept {
+        texture.source.numMips = 3;
+        return true;
+    }));
     struct Case {
         ObjectHandle second;
         AssetDiagnosticCode code;
@@ -361,6 +372,7 @@ TEST(TextureSourceRebuild_ArrayChecks) {
         {rgba, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
         {legacy, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
         {layered, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported},
+        {mipped, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported},
     };
     for (const Case& item : cases) {
         const ObjectHandle array = scene.Make(TypeIdOf<Texture2DArray>());
@@ -441,11 +453,25 @@ TEST(TextureSourceRebuild_Propagate) {
     REQUIRE(scene.SetList(array, false, list));
     sink.cause = AssetSourceRebuildCause::Propagate;
     sink.changed = other;
+    const usize rebuilds = sink.rebuilds;
     REQUIRE(scene.Rebuild(array, {}, sink));
-    CHECK(scene.Read(array)->source.bulk.IsEmpty());
+    CHECK(scene.Read(array)->source.bulk.IsEmpty() && sink.rebuilds == rebuilds);
     sink.changed = a;
     REQUIRE(scene.Rebuild(array, {}, sink));
-    CHECK(scene.Read(array)->source.numSlices == 1 && !scene.Read(array)->source.bulk.IsEmpty());
+    CHECK(scene.Read(array)->source.numSlices == 1 && !scene.Read(array)->source.bulk.IsEmpty() &&
+          sink.rebuilds == rebuilds + 1);
+    // 전파는 처음 만들기 설정을 바꾸지 않는다(원본이 비어 있던 배열이어도 — UE
+    // UpdateSourceFromSourceTextures(false)).
+    CHECK(scene.Read(array)->mipGenSettings != TextureMipGenSettings::NoMipmaps &&
+          scene.Read(array)->neverStream == 0);
+
+    // ImportRecord가 있는 묶음은 전파에서 실패시키지 않고 둔다.
+    const ObjectHandle imported = scene.Make(TypeIdOf<Texture2DArray>());
+    REQUIRE(scene.SetList(imported, false, list));
+    sink.importRecord = true;
+    REQUIRE(scene.Rebuild(imported, {}, sink));
+    CHECK(scene.Read(imported)->source.bulk.IsEmpty());
+    sink.importRecord = false;
 }
 
 // Volume: 기본 타일(8×8 → 타일 4×4·깊이 4, 10×27 → 타일 5×13·깊이 4 — 정수 나눗셈 경계), 타일 순서
@@ -521,6 +547,22 @@ TEST(TextureSourceRebuild_Volume) {
     auto texel = sink.bulk.ReadBulk(placeholder->source.bulk);
     REQUIRE(texel && texel.Value().Size() == 4);
     CHECK(texel.Value()[0] == 0 && texel.Value()[3] == 255);
+
+    // 디코더 한도(16384)를 넘는 원본 2D는 기본 타일 계산 전에 거부한다.
+    {
+        const ObjectHandle wide = scene.Element(sink, plane, TextureSourceFormat::G8, 1, 1, 1, 0);
+        REQUIRE(scene.Edit(wide, [](Texture& texture) noexcept {
+            texture.source.sizeX = 16385;
+            return true;
+        }));
+        const ObjectHandle huge = scene.Make(TypeIdOf<VolumeTexture>());
+        REQUIRE(scene.SetSource2D(huge, wide, 0, 0));
+        sink.cause = AssetSourceRebuildCause::Edit;
+        sink.failCode = AssetDiagnosticCode::None;
+        CHECK(scene.Rebuild(huge, Source2D, sink).Error() == ErrorCode::CapacityExceeded &&
+              sink.failCode == AssetDiagnosticCode::InvalidSetting);
+        sink.cause = AssetSourceRebuildCause::New;
+    }
 
     // 임포트한 Volume: 원본 2D가 없으면 타일 대입이 원본을 지우지 않고, 원본 2D 대입은 거부한다.
     sink.cause = AssetSourceRebuildCause::Edit;

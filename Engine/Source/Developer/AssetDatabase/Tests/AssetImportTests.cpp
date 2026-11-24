@@ -1058,6 +1058,8 @@ struct RebuildRecord {
     char fields[64] = {};
     usize fieldBytes = 0;
     bool fails = false;
+    // 원본을 다시 썼다고 알릴지다(false면 묶음과 무관한 참조자처럼 아무것도 바꾸지 않는다).
+    bool mark = true;
 
     StringView Fields() const noexcept {
         return StringView(fields, fieldBytes);
@@ -1097,6 +1099,12 @@ Result<void> RecordingRebuild(const AssetTypeHookContext& context, Span<const St
     if (rebuild.fails) {
         return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument, 7);
     }
+
+    if (!rebuild.mark) {
+        return Result<void>::Success();
+    }
+
+    sink.MarkRebuilt();
 
     auto borrowed = context.registry.ResolveForWrite<TestAsset>(context.access, context.object);
     if (!borrowed) {
@@ -1199,6 +1207,36 @@ TEST(AssetImport_RebuildSourceHook) {
     CHECK(rebuild.calls == calls + 1 && rebuild.cause == AssetSourceRebuildCause::Propagate &&
           rebuild.changed == rock.id && rebuild.Fields().IsEmpty());
     CHECK(!SameBytes(scene.files.Bytes("Content/Bundle.rasset"), before.View()));
+
+    // 원본을 다시 쓰지 않은 참조자(묶음과 무관 — compositeTexture처럼)는 저장하지 않는다.
+    {
+        Array<uint8> untouched(env.allocator);
+        REQUIRE(untouched.TryAppend(scene.files.Bytes("Content/Bundle.rasset")));
+        rebuild.mark = false;
+        AssetImportResult quiet(env.allocator);
+        REQUIRE(service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, quiet));
+        CHECK(rebuild.cause == AssetSourceRebuildCause::Propagate &&
+              SameBytes(scene.files.Bytes("Content/Bundle.rasset"), untouched.View()));
+        rebuild.mark = true;
+    }
+
+    // 일 전부터 열려 있고 저장하지 않은 편집이 있는 참조자는 Busy(아무것도 저장하지 않는다).
+    {
+        Array<uint8> rockBytes(env.allocator);
+        REQUIRE(rockBytes.TryAppend(scene.files.Bytes("Content/Rock.rasset")));
+        REQUIRE(service.Packages().Open(made.Value()));
+        REQUIRE(service.Packages().MarkDirty(made.Value()));
+        REQUIRE(scene.PutSource(RockSource, "value=11"));
+        AssetImportResult busy(env.allocator);
+        AssetDiagnostic busyFailure;
+        CHECK(service
+                  .Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, busy, nullptr,
+                            &busyFailure)
+                  .Error() == ErrorCode::Busy);
+        CHECK(busyFailure.asset == made.Value() &&
+              SameBytes(scene.files.Bytes("Content/Rock.rasset"), rockBytes.View()));
+        REQUIRE(service.Packages().Close(made.Value()));
+    }
 
     // 전파 hook 실패: 재임포트 실패, 원소·묶음 모두 저장하지 않는다.
     Array<uint8> rockBefore(env.allocator);
