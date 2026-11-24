@@ -53,6 +53,9 @@ struct SpirvCompileRequest {
     uint32 optimization = ShaderOptimizationLevels - 1;
     // -fvk-use-dx-position-w(7.2절 8항)다.
     bool dxPositionW = false;
+    // -fspv-reflect(시맨틱·user type 장식 — 셰이더 워커 VULKAN_SM5가 리플렉션에 쓰고 고쳐 쓰기에서
+    // 지운다, ShaderSystem 16.1절 SSD29)다.
+    bool reflect = false;
 };
 
 // DXC로 SPIR-V(-spirv -fspv-target-env=vulkan1.1, -Zpr, -WX)를 만들고 spirv-val(Vulkan 1.1)로

@@ -386,8 +386,7 @@ Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
                 job.options.hlsl2021 = plan.type->hlsl2021 == ShaderHlsl2021::On;
             }
 
-            job.layoutSignature =
-                plan.type->parameterLayouts.IsEmpty() ? nullptr : &defines.signature;
+            job.parameterLayouts = plan.type->parameterLayouts;
             (void)jobs.TryPushBack(job);
         }
 

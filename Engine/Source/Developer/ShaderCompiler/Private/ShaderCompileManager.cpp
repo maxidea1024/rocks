@@ -481,6 +481,13 @@ private:
             return;
         }
 
+        const char* layoutReason = nullptr;
+        if (!ValidateShaderParameterLayouts(job.parameterLayouts, &layoutReason)) {
+            Fail(index, ShaderCompileStatus::InvalidJob, "shader parameter layout is invalid",
+                 StringView(layoutReason));
+            return;
+        }
+
         if (HasSystemTool(job.format->definition) && !QueryTools()) {
             Fail(index, ShaderCompileStatus::ToolError, "shader tool query failed");
             return;
@@ -498,7 +505,8 @@ private:
                               result.preprocessed.text.ByteCount()));
         input.options = &job.options;
         input.reflection = config_.reflection;
-        input.layoutSignature = job.layoutSignature;
+        const Sha256Digest layoutSignature = ShaderParameterLayoutSignature(job.parameterLayouts);
+        input.layoutSignature = job.parameterLayouts.IsEmpty() ? nullptr : &layoutSignature;
         auto key = BuildShaderJobKey(input);
         if (!key) {
             Fail(index,
@@ -787,6 +795,15 @@ private:
                 !worker.entry.TryAssign(job.entryPoint) ||
                 !worker.source.TryAssign(out_[index].preprocessed.text.View())) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+
+            // 레이아웃 표 정규 byte다(Prepare가 검사했다 — SSD31).
+            if (!job.parameterLayouts.IsEmpty()) {
+                if (auto encoded =
+                        EncodeShaderParameterLayouts(job.parameterLayouts, worker.layout);
+                    !encoded) {
+                    return encoded;
+                }
             }
         }
 

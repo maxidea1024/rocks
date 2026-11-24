@@ -3,10 +3,11 @@ using Rocks.Build.Rules;
 
 /// <summary>
 /// Shader compiler code shared by the main process and the shader compile worker (Docs/Design/ShaderSystem sections 3 and 11.1 SC1): P6a format
-/// definition (<c>Engine/Config/ShaderFormats/&lt;id&gt;.json</c>) and engine compile profile reading, validation and SHA-256. Worker message formats,
+/// definition (<c>Engine/Config/ShaderFormats/&lt;id&gt;.json</c>) reading, validation and SHA-256. Worker message formats,
 /// exit codes and the format compile interface (ShaderFormatBackend) are added in SH1c. It checks the tool names of format definitions against the
 /// tool table (ShaderToolTable) but never opens tool binaries (policy check shader-tool-binary-load). The shared format vocabulary
-/// types (stages, features, device requirements, limits, backends) live in the runtime module ShaderCore (section 12.2.1 SSD1).
+/// types (stages, features, device requirements, limits, backends) live in the runtime module ShaderCore (section 12.2.1 SSD1). The shared
+/// reflection model and binding rules (ShaderReflection, section 16.1 SSD33) let every format processor produce the binding layout value the same way.
 /// </summary>
 public sealed class ShaderCompilerCommon : EngineModuleRules
 {

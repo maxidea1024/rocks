@@ -4,6 +4,8 @@
 
 #include <Base/Endian.h>
 #include <Base/NumericLimits.h>
+#include <Core/Encoding/ByteReader.h>
+#include <Core/Encoding/ByteWriter.h>
 
 // 손으로 쓴 파라미터 레이아웃 표(Docs/Design/ShaderSystem 7.2절 5항, 12.2.1절 SSD27)다. 규칙은 공개
 // 헤더 주석을 따른다.
@@ -227,6 +229,129 @@ Sha256Digest ShaderParameterLayoutSignature(Span<const ShaderParameterLayout> la
     }
 
     return hasher.Finish();
+}
+
+Result<void> EncodeShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
+                                          Array<uint8>& out) noexcept {
+    if (auto valid = ValidateShaderParameterLayouts(layouts); !valid) {
+        return valid;
+    }
+
+    const usize start = out.Size();
+    ByteWriter writer(out);
+    const auto writeName = [&](StringView name) noexcept {
+        writer.WriteU8(static_cast<uint8>(name.ByteCount()));
+        writer.WriteBytes(
+            Span<const uint8>(reinterpret_cast<const uint8*>(name.Data()), name.ByteCount()));
+    };
+    writer.WriteU32LE(static_cast<uint32>(layouts.Size()));
+    for (const ShaderParameterLayout& layout : layouts) {
+        writeName(layout.name);
+        writer.WriteU8(layout.rootConstants ? 1 : 0);
+        writer.WriteU32LE(layout.totalBytes);
+        writer.WriteU32LE(static_cast<uint32>(layout.members.Size()));
+        for (const ShaderParameterMember& member : layout.members) {
+            writeName(member.name);
+            writer.WriteU8(static_cast<uint8>(member.type));
+            writer.WriteU32LE(member.offset);
+            writer.WriteU32LE(member.arrayCount);
+        }
+    }
+
+    if (auto written = writer.Status(); !written) {
+        (void)out.TryResize(start);
+        return written;
+    }
+
+    return Result<void>::Success();
+}
+
+const ShaderParameterLayout* ShaderParameterLayoutSet::Find(StringView name) const noexcept {
+    for (const ShaderParameterLayout& layout : layouts) {
+        if (layout.name == name) {
+            return &layout;
+        }
+    }
+
+    return nullptr;
+}
+
+ShaderReadStatus DecodeShaderParameterLayouts(Span<const uint8> bytes,
+                                              ShaderParameterLayoutSet& out) noexcept {
+    out.layouts.Clear();
+    out.members.Clear();
+    if (bytes.IsEmpty()) {
+        return ShaderReadStatus::Success();
+    }
+
+    ByteReader reader(bytes);
+    const auto readName = [&]() noexcept {
+        const uint8 length = reader.ReadU8();
+        const Span<const uint8> name = reader.Take(length);
+        return StringView(reinterpret_cast<const char*>(name.Data()), name.Size());
+    };
+    // 멤버 범위(표마다 첫 멤버·수)를 먼저 모으고 끝에 Span을 잇는다(멤버 배열이 자랄 수 있다).
+    struct Range {
+        usize first;
+        usize count;
+    };
+
+    Range ranges[MaxShaderParameterLayouts] = {};
+    const uint32 count = reader.ReadU32LE();
+    if (reader.Failed() || count == 0 || count > MaxShaderParameterLayouts) {
+        return ShaderReadStatus::Corrupt("parameter layout list is truncated or has a bad count");
+    }
+
+    for (uint32 index = 0; index < count; ++index) {
+        ShaderParameterLayout layout;
+        layout.name = readName();
+        const uint8 root = reader.ReadU8();
+        layout.totalBytes = reader.ReadU32LE();
+        const uint32 memberCount = reader.ReadU32LE();
+        if (reader.Failed() || root > 1 || memberCount > MaxShaderParameterMembers) {
+            return ShaderReadStatus::Corrupt("parameter layout is truncated or out of range");
+        }
+
+        layout.rootConstants = root != 0;
+        ranges[index] = Range{out.members.Size(), memberCount};
+        for (uint32 member = 0; member < memberCount; ++member) {
+            ShaderParameterMember value;
+            value.name = readName();
+            const uint8 type = reader.ReadU8();
+            value.offset = reader.ReadU32LE();
+            value.arrayCount = reader.ReadU32LE();
+            if (reader.Failed() ||
+                ShaderParameterTypeBytes(static_cast<ShaderParameterType>(type)) == 0) {
+                return ShaderReadStatus::Corrupt("parameter layout member is truncated or has an "
+                                                 "unknown type");
+            }
+
+            value.type = static_cast<ShaderParameterType>(type);
+            if (!out.members.TryPushBack(value)) {
+                return ShaderReadStatus::Corrupt("out of memory reading parameter layouts");
+            }
+        }
+
+        if (!out.layouts.TryPushBack(layout)) {
+            return ShaderReadStatus::Corrupt("out of memory reading parameter layouts");
+        }
+    }
+
+    if (!reader.AtEnd()) {
+        return ShaderReadStatus::Corrupt("parameter layout list has trailing bytes");
+    }
+
+    for (uint32 index = 0; index < count; ++index) {
+        out.layouts[index].members =
+            out.members.View().Slice(ranges[index].first, ranges[index].count);
+    }
+
+    const char* reason = nullptr;
+    if (!ValidateShaderParameterLayouts(out.View(), &reason)) {
+        return ShaderReadStatus::Corrupt(reason);
+    }
+
+    return ShaderReadStatus::Success();
 }
 
 } // namespace rocks::shader
