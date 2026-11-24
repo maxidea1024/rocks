@@ -24,6 +24,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::BoxComponent::boxExtent_",
+      "id": "ee5c772194b0417a8854272022dfcf44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::CameraComponent::aspectRatio_",
       "id": "56b30aa61c3b4f81a8b79fd5cac57b4d",
       "aliases": [],
@@ -61,6 +68,20 @@
       "kind": "field",
       "name": "rocks::CameraComponent::usePawnControlRotation_",
       "id": "4fd834321b7843b6a33478a5f3781bd5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CapsuleComponent::capsuleHalfHeight_",
+      "id": "a029742bcfa8449190b22189d3aeb3da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CapsuleComponent::capsuleRadius_",
+      "id": "11c6f88a49ab446a9bc90799e9404dbb",
       "aliases": [],
       "retired": false
     },
@@ -444,6 +465,293 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PrimitiveComponent::affectDistanceFieldLighting_",
+      "id": "ac52b7f8451b47328b4b76e9d4f16f42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::affectDynamicIndirectLighting_",
+      "id": "248e40d119ac45569a63f530a835c5ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::allowCullDistanceVolume_",
+      "id": "900a1581967f46f695063485db82e988",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::boundsScale_",
+      "id": "8ce354f0861a490b8a343205d4afc53a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::canCharacterStepUpOn_",
+      "id": "240fba52d59f42249902748b4fe5f79b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castCinematicShadow_",
+      "id": "fae9fefcbb3246ae9a61f39185e700c1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castContactShadow_",
+      "id": "35a84f3585d4489e9726480e49471c6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castDynamicShadow_",
+      "id": "9d1db026f2304b8d978ee3b41280a5c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castFarShadow_",
+      "id": "0bd78d2ecfa94e21b734f15857e9e32e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castHiddenShadow_",
+      "id": "423a10cceb3749a5a0fcc9cb87587d76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castInsetShadow_",
+      "id": "9f440e27091f49fc82faeca1ffd0ed44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castShadowAsTwoSided_",
+      "id": "8d1badc0cca34f3cb4453d61ef329fec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castShadow_",
+      "id": "d0f638d070944b0ea6b9dfbd693b4c43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castStaticShadow_",
+      "id": "8c148e88d27c4e5ba6fb2f404637780e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castVolumetricTranslucentShadow_",
+      "id": "eb206c4ef56244f29231c657c2b1ef0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::collisionProfileName_",
+      "id": "eafa8eafb6a2466ca4e3cf640df6e942",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::customDepthStencilValue_",
+      "id": "b60114d1b64b4747800443869a8c447e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::customDepthStencilWriteMask_",
+      "id": "a10b15b33a7c4272a8c60c9077d0a29c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::desiredMaxDrawDistance_",
+      "id": "52a18e8a74074c07b169b73c331d93da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::generateOverlapEvents_",
+      "id": "fe66f2756dd7462fa13ae353dc287e74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::hiddenInSceneCapture_",
+      "id": "1df677de51c94e71827ca6c393017942",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::holdout_",
+      "id": "adc86527095b449ab696debe65461e48",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::lightingChannels_",
+      "id": "165915b85233497d8d7b9083a5f6a59c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::minDrawDistance_",
+      "id": "0059f80b791c4fb4a0501bbd39b45450",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::neverDistanceCull_",
+      "id": "a04b7ba841e843709c244c795e97e653",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::onlyOwnerSee_",
+      "id": "4ade484315ca4c17b61c74c44cb3b192",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::ownerNoSee_",
+      "id": "3ca9630825c944b28fa4410c4dd0b6aa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::receiveMobileCsmShadows_",
+      "id": "9aed1f2130294451ac5fca01c849d650",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::receivesDecals_",
+      "id": "d11fa597f47c488cbb6131a61d9ffc11",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::renderCustomDepth_",
+      "id": "fa0ed36f01144d6eb6208cc66fc392f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::renderInDepthPass_",
+      "id": "ba8d497949f24ba1bfd148b5f82bd20b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::renderInMainPass_",
+      "id": "d0d1991ca5da4ff7aefd9c1bbd5a01a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::selfShadowOnly_",
+      "id": "b3c64d9fa5714f4399a0eced903b04be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::singleSampleShadowFromStationaryLights_",
+      "id": "728bc4d6bd4f45f4a8f9d8222fb153cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::translucencySortDistanceOffset_",
+      "id": "4d6fe33d6c8345ff90ceacf01b4d5dd3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::translucencySortPriority_",
+      "id": "fc81dacc09ae4b0e8b274980119b4960",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::treatAsBackgroundForOcclusion_",
+      "id": "06a1ad4bede74b0b856e8663417fabd4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::useAsOccluder_",
+      "id": "7b093e8b8f6849debb576cc3a6e75275",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::visibleInRealTimeSkyCaptures_",
+      "id": "47a3761fd4974a97a722e1c83900e3a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::visibleInReflectionCaptures_",
+      "id": "67d2fff53b2e442ab9f99e0eeae2eb8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::visibleInSceneCaptureOnly_",
+      "id": "b5be9aba905049a1b574ee95b8552382",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::RectLightComponent::barnDoorAngle_",
       "id": "0bfa81c2117146ecae667a2ec07a56a2",
       "aliases": [],
@@ -535,6 +843,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ShapeComponent::dynamicObstacle_",
+      "id": "15da756fde0949e49c8bf767c9367e0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ShapeComponent::lineThickness_",
+      "id": "8342cf668e1a49a6999572c25f4a105c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ShapeComponent::shapeColor_",
+      "id": "650d1038c19549bf885bbf40ccdfd312",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SkyLightComponent::captureEmissiveOnly_",
       "id": "86ccae9893f74b0c93fea491cad7727d",
       "aliases": [],
@@ -591,6 +920,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SphereComponent::sphereRadius_",
+      "id": "cfd3211c564443eb807ffb5dd5ef85ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SpotLightComponent::innerConeAngle_",
       "id": "c5bdf3b106c1401cbde4e2e8beedde61",
       "aliases": [],
@@ -612,6 +948,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::BoxComponent",
+      "id": "deb5da638ae349c7aaf671c170d6679a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::CameraComponent",
       "id": "fc5c14c217674f1ba2f77cdc74d591d1",
       "aliases": [],
@@ -621,6 +964,20 @@
       "kind": "type",
       "name": "rocks::CameraProjection",
       "id": "1fcc7761e5fa4ca2b4095aa29d3a2b26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CanBeCharacterBase",
+      "id": "638932133a734c46a01f3647f8c0a59f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CapsuleComponent",
+      "id": "a9de7850236242b1bd23c0cab62edc8a",
       "aliases": [],
       "retired": false
     },
@@ -717,6 +1074,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::PrimitiveComponent",
+      "id": "2d42900e5f19486798e9c7ea993e5179",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::RectLight",
       "id": "c08929e2a39845efba1c3c15c2f9a46d",
       "aliases": [],
@@ -731,8 +1095,22 @@
     },
     {
       "kind": "type",
+      "name": "rocks::RendererStencilMask",
+      "id": "bbe4015df93a46128a63a879cd172283",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::SceneComponent",
       "id": "15541c1170f742ab9e8beacde7ab7926",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ShapeComponent",
+      "id": "188d293d9e53478198d77bdf8e1f82f5",
       "aliases": [],
       "retired": false
     },
@@ -759,6 +1137,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::SphereComponent",
+      "id": "e044c78cc3ec4a7681171711856baf2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::SpotLight",
       "id": "0c0f6672fe77410cbeabda3fadd71457",
       "aliases": [],
@@ -768,6 +1153,34 @@
       "kind": "type",
       "name": "rocks::SpotLightComponent",
       "id": "a57a8972a5484855b44e499b280bd39e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerBase",
+      "id": "2eaaddbceccc4e0c85f379fd49f0858d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerBox",
+      "id": "b04b5a2460b14e4885adc7338ebb78b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerCapsule",
+      "id": "44fd5af7801e45409e0a2f10b63e78b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerSphere",
+      "id": "6ebfb23671bf45fa9c112a60e4e21d16",
       "aliases": [],
       "retired": false
     }
