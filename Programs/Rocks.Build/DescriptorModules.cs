@@ -123,7 +123,7 @@ public sealed class DescriptorModuleSet
         }
 
         IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(owner.Plugins, owner.Referrer, available,
-            applyDefaults: target.Type != TargetType.Program);
+            applyDefaults: target.Type != TargetType.Program, new PluginContext(target.Type, platform, configuration));
         var enabledNames = enabled.Select(plugin => plugin.Name).ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, DescribedModule>(StringComparer.OrdinalIgnoreCase);
 

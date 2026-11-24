@@ -16,6 +16,7 @@ internal static class DescriptorTests
         DiscoversPluginFolders(directory);
         SelectsModulesForBuild(directory);
         SelectsModulesByTargetKind(directory);
+        ResolvesPluginConditions(directory);
 
         // 저장소의 게임 템플릿 기술자도 형식에 맞아야 한다.
         if (repository is not null)
@@ -463,6 +464,106 @@ internal static class DescriptorTests
         Check(server.Apply(rules, ["GameServer"]).Single(module => module.Name == "GameServer").Type == ModuleType.ServerOnly &&
             server.WithDescriptorTypes(rules).Select(module => module.Type).SequenceEqual([ModuleType.Runtime, ModuleType.ServerOnly, ModuleType.ClientOnly,
                 ModuleType.Editor, ModuleType.Runtime]), "descriptor types reach the module inputs");
+    }
+
+    // 플러그인 활성 조건이다(Docs/Design/BuildTargets 3.6절 BS4): 값 검사, 타깃·플랫폼·구성 조건 해석(UE 의미론 — 조건이 맞지 않으면 끈 것과
+    // 같고 이름을 차지한다), Asan·Coverage는 Debug, 플러그인 지원 플랫폼(기본 활성은 조용히 빼고 명시·의존은 오류), 조건으로 꺼진 의존 요구.
+    private static void ResolvesPluginConditions(string directory)
+    {
+        string root = Path.Combine(directory, "conditions");
+        PluginDescriptor Plugin(string name, bool byDefault, string extra = "", params string[] dependencies)
+        {
+            string references = string.Join(", ", dependencies.Select(d => $"{{ \"name\": \"{d}\", \"enabled\": true }}"));
+            string path = Write(root, $"{name}/{name}.rocksplugin",
+                $"{{ \"fileVersion\": 1, \"version\": 1, \"versionName\": \"1\", \"friendlyName\": \"{name}\", " +
+                $"\"enabledByDefault\": {(byDefault ? "true" : "false")}{extra}, \"plugins\": [ {references} ] }}");
+            return DescriptorReader.ReadPlugin(path);
+        }
+
+        int projects = 0;
+        ProjectDescriptor Project(string plugins)
+        {
+            string name = "Conditions" + (++projects);
+            string path = Write(root, $"Projects/{name}/{name}.rocksproject",
+                $"{{ \"fileVersion\": 1, \"engineVersion\": \"0.1\", \"plugins\": [ {plugins} ], " +
+                "\"targetPlatforms\": [\"Windows\", \"MacOS\", \"Android\"] }");
+            return DescriptorReader.ReadProject(path);
+        }
+
+        PluginDescriptor tools = Plugin("Tools", true);
+        PluginDescriptor steam = Plugin("Steam", false);
+        PluginDescriptor net = Plugin("Net", false, "", "Steam");
+        PluginDescriptor mobile = Plugin("Mobile", true, ", \"platforms\": [\"Android\"]");
+        PluginDescriptor desktop = Plugin("Desktop", false, ", \"platforms\": [\"Windows\", \"MacOS\"]");
+        PluginDescriptor wrapper = Plugin("Wrapper", false, "", "Desktop");
+        PluginDescriptor[] all = [tools, steam, net, mobile, desktop, wrapper];
+        Check(mobile.Platforms!.SequenceEqual([NativePlatform.Android]) && tools.Platforms is null, "plugin platforms");
+
+        ProjectDescriptor conditioned = Project("{ \"name\": \"Tools\", \"enabled\": true, \"targets\": [\"Editor\"] }, " +
+            "{ \"name\": \"Steam\", \"enabled\": true, \"platforms\": [\"Windows\"], \"configurations\": [\"Development\", \"Release\"] }");
+        Check(conditioned.Plugins[0].Targets!.SequenceEqual([TargetType.Editor]) &&
+            conditioned.Plugins[1].Configurations!.SequenceEqual([PluginConfiguration.Development, PluginConfiguration.Release]), "reference conditions read");
+        string[] Names(ProjectDescriptor project, TargetType type, NativePlatform platform, NativeConfiguration configuration) =>
+            [.. PluginCatalog.ResolveEnabled(project.Plugins, PluginReferrer.Of(project), all, type != TargetType.Program,
+                new PluginContext(type, platform, configuration)).Select(plugin => plugin.Name)];
+
+        // enabledByDefault 플러그인을 targets: [Editor]로 적으면 Editor에서만 켜진다. 지원하지 않는 플랫폼의 기본 활성(Mobile)은 조용히 빠진다.
+        Check(Names(conditioned, TargetType.Editor, NativePlatform.Windows, NativeConfiguration.Debug).SequenceEqual(["Tools"]), "Editor Windows Debug");
+        Check(Names(conditioned, TargetType.Game, NativePlatform.Windows, NativeConfiguration.Development).SequenceEqual(["Steam"]),
+            "a Game target does not get an Editor-only enabledByDefault plugin");
+        Check(Names(conditioned, TargetType.Game, NativePlatform.Windows, NativeConfiguration.Asan).Length == 0 &&
+            Names(conditioned, TargetType.Game, NativePlatform.Windows, NativeConfiguration.Coverage).Length == 0, "Asan and Coverage count as Debug");
+        Check(Names(conditioned, TargetType.Game, NativePlatform.MacOS, NativeConfiguration.Release).Length == 0, "a platform condition");
+        Check(Names(conditioned, TargetType.Client, NativePlatform.Android, NativeConfiguration.Debug).SequenceEqual(["Mobile"]),
+            "a default plugin on its supported platform");
+        Check(Names(conditioned, TargetType.Program, NativePlatform.Android, NativeConfiguration.Debug).Length == 0,
+            "Program targets get no enabledByDefault plugins");
+
+        // 조건으로 꺼진 플러그인을 켜진 플러그인이 요구하면 조건을 안내하는 오류다.
+        ProjectDescriptor requiring = Project("{ \"name\": \"Net\", \"enabled\": true }, " +
+            "{ \"name\": \"Steam\", \"enabled\": true, \"platforms\": [\"Windows\"] }");
+        Check(Names(requiring, TargetType.Game, NativePlatform.Windows, NativeConfiguration.Debug).SequenceEqual(["Steam", "Net", "Tools"]),
+            "the dependency is on where its condition matches");
+        ExpectFailure(() => Names(requiring, TargetType.Game, NativePlatform.MacOS, NativeConfiguration.Debug), "a conditioned-off dependency",
+            "only for platforms [Windows]");
+        // 지원하지 않는 플랫폼에서 명시해 켜거나 의존으로 요구하면 오류다.
+        ExpectFailure(() => Names(Project("{ \"name\": \"Desktop\", \"enabled\": true }"), TargetType.Game, NativePlatform.Android,
+            NativeConfiguration.Debug), "an explicitly enabled unsupported plugin", "does not support Android");
+        ExpectFailure(() => Names(Project("{ \"name\": \"Wrapper\", \"enabled\": true }"), TargetType.Game, NativePlatform.Android,
+            NativeConfiguration.Debug), "a dependency on an unsupported plugin", "which does not support Android");
+
+        // 값 검사(문맥 무관).
+        foreach ((string reference, string expected) in new[]
+                 {
+                     ("{ \"name\": \"Steam\", \"enabled\": false, \"targets\": [\"Game\"] }", "conditions apply only to enabled references"),
+                     ("{ \"name\": \"Steam\", \"enabled\": true, \"targets\": [] }", "must not be empty"),
+                     ("{ \"name\": \"Steam\", \"enabled\": true, \"platforms\": [\"Windows\", \"Windows\"] }", "twice"),
+                     ("{ \"name\": \"Steam\", \"enabled\": true, \"configurations\": [\"Shipping\"] }", "unknown value 'Shipping'"),
+                     ("{ \"name\": \"Steam\", \"enabled\": true, \"targets\": [\"game\"] }", "unknown value 'game'"),
+                     ("{ \"name\": \"Steam\", \"enabled\": true, \"platforms\": [\"Linux\"] }", "unknown value 'Linux'")
+                 })
+        {
+            ExpectFailure(() => Project(reference), "reference condition " + expected, expected);
+        }
+
+        string narrow = Write(root, "Projects/Narrow/Narrow.rocksproject", "{ \"fileVersion\": 1, \"engineVersion\": \"0.1\", " +
+            "\"plugins\": [ { \"name\": \"Steam\", \"enabled\": true, \"platforms\": [\"Android\"] } ], \"targetPlatforms\": [\"Windows\"] }");
+        ExpectFailure(() => DescriptorReader.ReadProject(narrow), "a platform outside targetPlatforms", "outside targetPlatforms");
+        string dependency = Write(root, "Dependent/Dependent.rocksplugin", "{ \"fileVersion\": 1, \"version\": 1, \"versionName\": \"1\", " +
+            "\"friendlyName\": \"Dependent\", \"plugins\": [ { \"name\": \"Steam\", \"enabled\": true, \"targets\": [\"Game\"] } ] }");
+        ExpectFailure(() => DescriptorReader.ReadPlugin(dependency), "a condition on a plugin dependency", "targets");
+        string emptyPlatforms = Write(root, "EmptyPlatforms/EmptyPlatforms.rocksplugin", "{ \"fileVersion\": 1, \"version\": 1, " +
+            "\"versionName\": \"1\", \"friendlyName\": \"EmptyPlatforms\", \"platforms\": [] }");
+        ExpectFailure(() => DescriptorReader.ReadPlugin(emptyPlatforms), "empty plugin platforms", "must not be empty");
+
+        // 타깃 규칙 참조(BD33)도 같은 조건 규칙이다.
+        ExpectFailure(() => TargetPluginReferences.Validate("Tool", [new PluginReference("Steam", false) { Targets = [TargetType.Editor] }]),
+            "a disabled target reference with conditions", "conditions apply only to enabled references");
+        ExpectFailure(() => TargetPluginReferences.Validate("Tool", [new PluginReference("Steam", true) { Platforms = [] }]),
+            "an empty target reference condition", "must not be empty");
+        Check(PluginCatalog.ResolveEnabled(TargetPluginReferences.Combine([new PluginReference("Steam", true) { Targets = [TargetType.Editor] }], []),
+            PluginReferrer.OfTarget("Tool"), all, applyDefaults: false, new PluginContext(TargetType.Program, NativePlatform.Windows,
+                NativeConfiguration.Debug)).Count == 0, "a target rule reference condition");
     }
 
     // 설치 SDK 게임 빌드의 Game 타깃(타깃 참조 없음)이다.
