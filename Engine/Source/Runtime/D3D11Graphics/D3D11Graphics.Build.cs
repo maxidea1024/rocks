@@ -30,9 +30,8 @@ public sealed class D3D11Graphics : EngineModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             PublicDependencies = PublicDependencies,
             PrivateDependencies = PrivateDependencies,
-            // Shaders are compiled at run time with D3DCompile (d3dcompiler_47, a system DLL) until cooked
-            // D3D11_SM5 code arrives in SH5.
-            SystemLibraries = windows ? ["d3d11", "dxgi", "d3dcompiler", "user32"] : []
+            // Shaders arrive cooked (DXBC from the shader library, ShaderSystem SH2e2); there is no run-time compiler.
+            SystemLibraries = windows ? ["d3d11", "dxgi", "user32"] : []
         };
     }
 }

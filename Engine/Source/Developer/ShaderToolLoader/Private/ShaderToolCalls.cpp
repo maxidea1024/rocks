@@ -340,7 +340,7 @@ bool AssignMslBindings(const SpirvCrossFunctions& cross, spvc_compiler compiler,
 
 // ESSL binding·결합 sampler 이름(SSD42)이다. 결합 sampler를 만든 뒤 부른다.
 bool AssignGlslBindings(const SpirvCrossFunctions& cross, spvc_compiler compiler,
-                        const SpirvCrossRequest& request) noexcept {
+                        const SpirvCrossRequest& request, spvc_variable_id dummySampler) noexcept {
     using namespace tool_calls_detail;
     using Index = SpirvCrossFunctions;
     const auto createResources = ToolFunction<decltype(&spvc_compiler_create_shader_resources)>(
@@ -404,7 +404,8 @@ bool AssignGlslBindings(const SpirvCrossFunctions& cross, spvc_compiler compiler
 
     for (size_t index = 0; index < count; ++index) {
         const char* texture = nameOf(compiler, pairs[index].image_id);
-        const char* sampler = nameOf(compiler, pairs[index].sampler_id);
+        const bool dummy = dummySampler != 0 && pairs[index].sampler_id == dummySampler;
+        const char* sampler = dummy ? "" : nameOf(compiler, pairs[index].sampler_id);
         for (const SpirvGlslCombined& entry : request.glslCombined) {
             if (texture != nullptr && sampler != nullptr && entry.texture == StringView(texture) &&
                 entry.sampler == StringView(sampler)) {
@@ -460,10 +461,21 @@ ShaderToolOutcome QuerySpirvSamplerUses(const SpirvCrossFunctions& cross, Span<c
     bool ok = parse(context, reinterpret_cast<const SpvId*>(spirv.Data()),
                     spirv.Size() / SpirvWordBytes, &ir) == SPVC_SUCCESS &&
               createCompiler(context, SPVC_BACKEND_GLSL, ir, SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
-                             &compiler) == SPVC_SUCCESS &&
-              combine(compiler) == SPVC_SUCCESS &&
-              combined(compiler, &pairs, &pairCount) == SPVC_SUCCESS;
+                             &compiler) == SPVC_SUCCESS;
+    // 샘플러 없이 Load만 쓰는 텍스처는 dummy 샘플러와 결합해야 목록을 만들 수 있다. dummy 쌍은 사용
+    // 쌍이 아니다(그 텍스처의 샘플러 출처는 없음).
+    const auto dummy =
+        ToolFunction<decltype(&spvc_compiler_build_dummy_sampler_for_combined_images)>(
+            cross, Index::CompilerBuildDummySamplerForCombinedImages);
+    spvc_variable_id dummySampler = 0;
+    ok = ok && dummy != nullptr && dummy(compiler, &dummySampler) == SPVC_SUCCESS &&
+         combine(compiler) == SPVC_SUCCESS &&
+         combined(compiler, &pairs, &pairCount) == SPVC_SUCCESS;
     for (size_t index = 0; ok && index < pairCount; ++index) {
+        if (dummySampler != 0 && pairs[index].sampler_id == dummySampler) {
+            continue;
+        }
+
         const char* texture = nameOf(compiler, pairs[index].image_id);
         const char* sampler = nameOf(compiler, pairs[index].sampler_id);
         auto use = out.TryEmplaceBack(out.GetAllocator());
@@ -590,14 +602,23 @@ ShaderToolOutcome CrossCompileSpirv(const SpirvCrossFunctions& cross,
     if (ok && request.target == SpirvCrossTarget::Msl && !request.mslBindings.IsEmpty()) {
         ok = AssignMslBindings(cross, compiler, request.stage, request.mslBindings);
     }
-    // ESSL에는 분리 texture·sampler가 없으므로 결합 sampler를 만든다(UE GL 경로와 같다).
+    // ESSL에는 분리 texture·sampler가 없으므로 결합 sampler를 만든다(UE GL 경로와 같다). Load만
+    // 쓰는 텍스처는 dummy 샘플러와 결합한다(texelFetch도 sampler 타입을 받는다).
+    spvc_variable_id dummySampler = 0;
+    if (ok && backend == SPVC_BACKEND_GLSL && request.glslDummySampler) {
+        const auto dummy =
+            ToolFunction<decltype(&spvc_compiler_build_dummy_sampler_for_combined_images)>(
+                cross, Index::CompilerBuildDummySamplerForCombinedImages);
+        ok = dummy != nullptr && dummy(compiler, &dummySampler) == SPVC_SUCCESS;
+    }
+
     if (ok && backend == SPVC_BACKEND_GLSL) {
         ok = combine(compiler) == SPVC_SUCCESS;
     }
 
     if (ok && backend == SPVC_BACKEND_GLSL &&
         (!request.glslBindings.IsEmpty() || !request.glslCombined.IsEmpty())) {
-        ok = AssignGlslBindings(cross, compiler, request);
+        ok = AssignGlslBindings(cross, compiler, request, dummySampler);
     }
 
     const char* source = nullptr;

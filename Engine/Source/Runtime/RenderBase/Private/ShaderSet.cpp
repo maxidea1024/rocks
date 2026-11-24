@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 셰이더 집합(Docs/Design/RenderBase.ko.md 9.2절 RB3)이다. 규칙은 공개 헤더 주석을 따른다.
+// 셰이더 집합(Docs/Design/RenderBase 9.2절 RB3)이다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::render {
 
 namespace shader_set_detail {

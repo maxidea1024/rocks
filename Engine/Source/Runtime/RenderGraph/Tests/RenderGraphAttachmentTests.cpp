@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG1 남은 것 A부(attachment 기록과 풀 desc 확장) 시험이다(Docs/Design/RenderBase.ko.md 8절):
+// RG1 남은 것 A부(attachment 기록과 풀 desc 확장) 시험이다(Docs/Design/RenderBase 8절):
 // MRT·깊이·mip·slice attachment, attachment load의 생산 전 읽기 검사, 렌더 타깃 없는
 // Compute·Copy pass의 기록, 깊이·Storage·MSAA 그래프 텍스처와 풀 키.
 using namespace rocks;

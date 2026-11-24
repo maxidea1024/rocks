@@ -176,28 +176,29 @@ Result<void> D3D11Device::CreatePipelineStates(const PipelineDesc& desc,
 Result<PipelineHandle>
 D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
-        auto failed = Fail("compute pipeline needs HLSL source and valid drawConstantBytes");
+    if (!ValidateComputePipelineDesc(desc)) {
+        auto failed = Fail("compute pipeline needs valid drawConstantBytes");
         (void)failed;
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    ComRef<ID3DBlob> code;
-    auto compiled = Compile(desc.shader.hlsl, "CSMain", "cs_5_0", code);
-    if (!compiled) {
-        return Result<PipelineHandle>::Failure(compiled.Error());
-    }
-
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* shader = nullptr;
     PipelineRecord record;
     record.drawConstantBytes = desc.drawConstantBytes;
-    auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
-                                     record.bufferSlots, &record.writeSlots, &record.writeTextures);
-    if (!reflected) {
-        return Result<PipelineHandle>::Failure(reflected.Error());
+    if (!FindComputeShader(shaders_, desc, shader, error) ||
+        !ResolvePipelineSlots(Span<const DeviceShaderCode* const>(&shader, 1), desc.bindings,
+                              desc.drawConstantBytes, record.slots, error)) {
+        auto failed = Fail(error);
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
+    record.bufferSlots = record.slots.bufferSlots;
+    record.writeSlots = record.slots.writeSlots;
+    record.writeTextures = record.slots.writeTextures;
     const HRESULT result = device_->CreateComputeShader(
-        code->GetBufferPointer(), code->GetBufferSize(), nullptr, record.computeShader.Out());
+        shader->Code().Data(), shader->Code().Size(), nullptr, record.computeShader.Out());
     if (FAILED(result)) {
         return FailWith<PipelineHandle>("CreateComputeShader", result);
     }
@@ -413,6 +414,74 @@ void D3D11Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
     boundWriteViews_[slot] = {};
 }
 
+void D3D11Device::ApplySlots(const PipelineRecord& pipeline) noexcept {
+    const TextureRecord* texture = textures_.Find(boundTexture_);
+    if (texture == nullptr || !texture->srv) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    for (uint32 index = 0; index < pipeline.slots.count; ++index) {
+        const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
+        const UINT location = binding.location;
+        ID3D11ShaderResourceView* view = nullptr;
+        ID3D11SamplerState* sampler = nullptr;
+        ID3D11UnorderedAccessView* unordered = nullptr;
+        switch (binding.role) {
+        case PipelineSlotRole::Texture:
+            view = texture->srv.Get();
+            break;
+        case PipelineSlotRole::Sampler:
+            sampler = texture->sampler;
+            break;
+        case PipelineSlotRole::BufferView: {
+            const BufferViewRecord* record = bufferViews_.Find(boundViews_[binding.slot].slot);
+            view = record != nullptr ? record->srv.Get() : nullptr;
+            break;
+        }
+        case PipelineSlotRole::WritableBuffer: {
+            const BufferViewRecord* record = bufferViews_.Find(boundWriteViews_[binding.slot].slot);
+            unordered = record != nullptr ? record->uav.Get() : nullptr;
+            deferred_->CSSetUnorderedAccessViews(location, 1, &unordered, nullptr);
+            continue;
+        }
+        case PipelineSlotRole::WritableTexture: {
+            const TextureRecord* record = textures_.Find(boundWriteTextures_[binding.slot].slot);
+            unordered = record != nullptr ? record->uav.Get() : nullptr;
+            deferred_->CSSetUnorderedAccessViews(location, 1, &unordered, nullptr);
+            continue;
+        }
+        }
+
+        if (binding.role == PipelineSlotRole::Sampler) {
+            switch (binding.stage) {
+            case ShaderStage::Vertex:
+                deferred_->VSSetSamplers(location, 1, &sampler);
+                break;
+            case ShaderStage::Pixel:
+                deferred_->PSSetSamplers(location, 1, &sampler);
+                break;
+            case ShaderStage::Compute:
+                deferred_->CSSetSamplers(location, 1, &sampler);
+                break;
+            }
+
+            continue;
+        }
+
+        switch (binding.stage) {
+        case ShaderStage::Vertex:
+            deferred_->VSSetShaderResources(location, 1, &view);
+            break;
+        case ShaderStage::Pixel:
+            deferred_->PSSetShaderResources(location, 1, &view);
+            break;
+        case ShaderStage::Compute:
+            deferred_->CSSetShaderResources(location, 1, &view);
+            break;
+        }
+    }
+}
+
 bool D3D11Device::PrepareDraw(bool indexed) noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
     if (!recording_ || pipeline == nullptr || pipeline->compute ||
@@ -442,27 +511,10 @@ bool D3D11Device::PrepareDraw(bool indexed) noexcept {
                                         static_cast<UINT>(boundIndex_.offset));
         }
 
-        const TextureRecord* texture = textures_.Find(boundTexture_);
-        if (texture == nullptr) {
-            texture = textures_.Find(white_.slot);
-        }
-
-        if (texture != nullptr) {
-            ID3D11ShaderResourceView* textureView = texture->srv.Get();
-            deferred_->PSSetShaderResources(0, 1, &textureView);
-        }
-
         inputsDirty_ = false;
     }
 
-    ID3D11ShaderResourceView* views[MaxDrawBufferViews] = {};
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
-        views[slot] = view != nullptr ? view->srv.Get() : nullptr;
-    }
-
-    deferred_->VSSetShaderResources(1, MaxDrawBufferViews, views);
-    deferred_->PSSetShaderResources(1, MaxDrawBufferViews, views);
+    ApplySlots(*pipeline);
     return true;
 }
 
@@ -500,38 +552,21 @@ bool D3D11Device::PrepareDispatch() noexcept {
         uavs[slot] = view->uav.Get();
     }
 
-    // 그래픽 단계의 SRV(텍스처 t0 포함)를 먼저 풀어 같은 자원을 UAV로 묶을 때의 hazard를 없앤다.
-    // 다음 그리기가 다시 묶는다(inputsDirty_).
-    ID3D11ShaderResourceView* none[MaxDrawBufferViews + 1] = {};
-    deferred_->VSSetShaderResources(1, MaxDrawBufferViews, none);
-    deferred_->PSSetShaderResources(0, MaxDrawBufferViews + 1, none);
-    const TextureRecord* texture = textures_.Find(boundTexture_);
-    if (texture == nullptr) {
-        texture = textures_.Find(white_.slot);
-    }
-
-    if (texture != nullptr) {
-        ID3D11ShaderResourceView* textureView = texture->srv.Get();
-        deferred_->CSSetShaderResources(0, 1, &textureView);
-        deferred_->CSSetSamplers(0, 1, &texture->sampler);
-    }
-    ID3D11ShaderResourceView* reads[MaxDrawBufferViews] = {};
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
-        reads[slot] = view != nullptr ? view->srv.Get() : nullptr;
-    }
-
-    deferred_->CSSetShaderResources(1, MaxDrawBufferViews, reads);
-    deferred_->CSSetUnorderedAccessViews(0, MaxDrawBufferViews, uavs, nullptr);
+    // 그래픽 단계의 SRV를 먼저 풀어 같은 자원을 UAV로 묶을 때의 hazard를 없앤다. 다음 그리기가
+    // 다시 묶는다(inputsDirty_).
+    ID3D11ShaderResourceView* none[MaxBoundShaderResources] = {};
+    deferred_->VSSetShaderResources(0, MaxBoundShaderResources, none);
+    deferred_->PSSetShaderResources(0, MaxBoundShaderResources, none);
+    ApplySlots(*pipeline);
     inputsDirty_ = true;
     return true;
 }
 
 void D3D11Device::FinishDispatch() noexcept {
-    ID3D11UnorderedAccessView* noUavs[MaxDrawBufferViews] = {};
-    ID3D11ShaderResourceView* noViews[MaxDrawBufferViews + 1] = {};
-    deferred_->CSSetUnorderedAccessViews(0, MaxDrawBufferViews, noUavs, nullptr);
-    deferred_->CSSetShaderResources(0, MaxDrawBufferViews + 1, noViews);
+    ID3D11UnorderedAccessView* noUavs[MaxBoundUnorderedViews] = {};
+    ID3D11ShaderResourceView* noViews[MaxBoundShaderResources] = {};
+    deferred_->CSSetUnorderedAccessViews(0, MaxBoundUnorderedViews, noUavs, nullptr);
+    deferred_->CSSetShaderResources(0, MaxBoundShaderResources, noViews);
 }
 
 ID3D11Buffer* D3D11Device::IndirectArguments(BufferHandle arguments, uint64 offset,

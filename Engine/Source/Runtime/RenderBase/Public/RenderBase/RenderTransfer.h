@@ -5,7 +5,7 @@
 #include <Core/Result.h>
 #include <Meta/GeneratedType.h>
 
-// 게임 lane → 렌더 lane으로 넘기는 값의 "렌더 전달 가능" 표시다(Docs/Design/RenderBase.ko.md 5.2절,
+// 게임 lane → 렌더 lane으로 넘기는 값의 "렌더 전달 가능" 표시다(Docs/Design/RenderBase 5.2절,
 // 계획 8.1절 Render lane "Game 주소 없음"). 렌더 lane 작업(RenderLane::SubmitFrame·PostResource·
 // PostSurface)은 이 표시를 명시 등록한 값 타입만 받는다. 등록하지 않은 타입을 넘기면 컴파일 오류다
 // (작업 함수의 제약을 만족하는 overload가 없다).

@@ -30,6 +30,11 @@ struct SpirvRewriteOptions {
     // 단계 사이 변수(VS 출력·PS 입력)의 location을 시맨틱 TEXCOORDn의 n으로 바꾼다(7.2절 7항). 켜면
     // TEXCOORDn(n ≤ 15)이 아닌 단계 사이 변수와 겹치는 n은 InvalidArgument다.
     bool stageLocations = false;
+    // RWTextureCube·RWTextureCubeArray 표지(Platform.rsh)를 단 storage image를 cube·cube 배열
+    // 이미지(Dim Cube)로 바꾼다(16.1절 SH2g — GLES imageCube·imageCubeArray). 끄면 2D 배열
+    // 그대로다(D3D·Vulkan·Metal은 cube 쓰기 view를 면 단위 2D 배열로 묶는다). 켜면 배열로 선언한
+    // 표지 이미지와 그 이미지의 GetDimensions(OpImageQuerySize)는 InvalidArgument다.
+    bool cubeStorageImages = false;
 };
 
 // DXC SPIR-V(-fspv-reflect)를 Rocks 규약으로 고쳐 쓴다(ShaderSystem 7.2절 2·4·7항): 정점 입력

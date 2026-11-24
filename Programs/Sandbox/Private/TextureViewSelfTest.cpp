@@ -1,4 +1,5 @@
 #include "TextureViewSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
@@ -45,102 +46,7 @@ bool Near(uint8 actual, int expected) noexcept {
     return delta <= ColorTolerance && delta >= -ColorTolerance;
 }
 
-#define TEXTURE_VIEW_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-
-// mip 0을 x + y × 8로 채운다.
-constexpr char FillHlsl[] = R"(
-RWTexture2D<float> target : register(u0);
-[numthreads(8, 8, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) { target[id.xy] = id.x + id.y * 8.0; }
-)";
-
-constexpr char FillGlsl[] = TEXTURE_VIEW_GLSL_HEAD R"(
-layout(local_size_x = 8, local_size_y = 8) in;
-layout(binding = 0, r32f) uniform highp writeonly image2D target;
-void main() {
-    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
-    imageStore(target, p, vec4(float(p.x + p.y * 8)));
-}
-)";
-
-// 읽기 view(t0)의 기준 mip에서 2×2 최댓값을 쓰기 view(u0)에 쓴다.
-constexpr char ReduceHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 level; };
-Texture2D<float> source : register(t0);
-RWTexture2D<float> target : register(u0);
-[numthreads(4, 4, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= (uint)level.y || id.y >= (uint)level.y) { return; }
-    int lod = (int)level.x;
-    int2 p = int2(id.xy) * 2;
-    float a = max(source.Load(int3(p, lod)), source.Load(int3(p + int2(1, 0), lod)));
-    float b = max(source.Load(int3(p + int2(0, 1), lod)), source.Load(int3(p + int2(1, 1), lod)));
-    target[id.xy] = max(a, b);
-}
-)";
-
-constexpr char ReduceGlsl[] = TEXTURE_VIEW_GLSL_HEAD R"(
-layout(local_size_x = 4, local_size_y = 4) in;
-uniform highp vec4 cu_h[1];
-layout(binding = 0) uniform highp sampler2D source;
-layout(binding = 0, r32f) uniform highp writeonly image2D target;
-void main() {
-    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
-    int size = int(cu_h[0].y);
-    if (id.x >= size || id.y >= size) { return; }
-    int lod = int(cu_h[0].x);
-    ivec2 p = id * 2;
-    float a = max(texelFetch(source, p, lod).r, texelFetch(source, p + ivec2(1, 0), lod).r);
-    float b = max(texelFetch(source, p + ivec2(0, 1), lod).r, texelFetch(source, p + ivec2(1, 1), lod).r);
-    imageStore(target, id, vec4(max(a, b)));
-}
-)";
-
-#define TEXTURE_VIEW_FULL_SCREEN_HLSL                                                              \
-    "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"                                       \
-    "    float2 uv = float2((id << 1) & 2, id & 2);\n"                                             \
-    "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"                                               \
-    "}\n"
-
-constexpr char FullScreenGlsl[] = TEXTURE_VIEW_GLSL_HEAD R"(
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-// 읽기 view의 기준 mip texel (0, 0)을 64로 나눠 빨강으로 낸다.
-constexpr char LevelHlsl[] =
-    "cbuffer DrawConstants : register(b0) { float4 level; };\n"
-    "Texture2D<float> source : register(t0);\n" TEXTURE_VIEW_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target {\n"
-    "    float v = source.Load(int3(0, 0, (int)level.x));\n"
-    "    return float4(v / 64.0, 0.0, 0.0, 1.0);\n"
-    "}\n";
-
-constexpr char LevelGlsl[] = TEXTURE_VIEW_GLSL_HEAD R"(
-uniform highp vec4 pu_h[1];
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    float v = texelFetch(ps0, ivec2(0, 0), int(pu_h[0].x)).r;
-    out_var_SV_Target0 = vec4(v / 64.0, 0.0, 0.0, 1.0);
-}
-)";
-
-// 2D 배열 view의 층 0 texel (0, 0)을 낸다.
-constexpr char LayerHlsl[] =
-    "Texture2DArray<float4> source : register(t0);\n" TEXTURE_VIEW_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target { return source.Load(int4(0, 0, 0, 0)); }\n";
-
-constexpr char LayerGlsl[] = TEXTURE_VIEW_GLSL_HEAD R"(
-layout(binding = 0) uniform highp sampler2DArray ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = texelFetch(ps0, ivec3(0, 0, 0), 0); }
-)";
-
-#undef TEXTURE_VIEW_GLSL_HEAD
-#undef TEXTURE_VIEW_FULL_SCREEN_HLSL
+// 셰이더는 FullScreen.rsf·TextureView.rsf다.
 
 // mip level의 CPU 기댓값이다: mip 0은 x + y × 8, 위 mip은 아래 mip 2×2의 최댓값(= 오른쪽 아래
 // texel).
@@ -174,13 +80,13 @@ struct Canvas {
         return created.IsOk();
     }
 
-    Result<PipelineHandle> Pipeline(StringView hlsl, StringView glsl, uint32 constants) noexcept {
+    Result<PipelineHandle> Pipeline(const shaders::ShaderTypeDesc& pixel, const char* texture,
+                                    uint32 constants) noexcept {
         PipelineDesc desc;
-        desc.vertex = {hlsl, Text(FullScreenGlsl)};
-        desc.pixel = {hlsl, glsl};
+        desc.bindings.texture = texture;
         desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         desc.drawConstantBytes = constants;
-        return device.CreatePipeline(desc);
+        return shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, pixel, desc);
     }
 
     // texture를 묶고 그려 pixel에 읽는다. constants가 있으면 그리기별 상수로 올린다.
@@ -222,8 +128,8 @@ TextureViewDesc MipView(uint32 mip, ViewAccess access) noexcept {
 // mip 0을 채우고 mip k → k + 1로 줄인 뒤 모든 mip을 읽어 대조한다. pyramid는 만든 Storage
 // 텍스처다.
 void RunPyramid(Device& device, Allocator& allocator, TextureHandle pyramid) noexcept {
-    auto fill = device.CreateComputePipeline(hzb::FillPipelineDesc());
-    auto reduce = device.CreateComputePipeline(hzb::ReducePipelineDesc());
+    auto fill = hzb::CreateFillPipeline(device);
+    auto reduce = hzb::CreateReducePipeline(device);
     Check(fill && reduce, "fill and reduce compute pipelines");
     if (!fill || !reduce) {
         PrintLastError(device);
@@ -287,7 +193,7 @@ void RunPyramid(Device& device, Allocator& allocator, TextureHandle pyramid) noe
     Canvas canvas(device);
     auto levelPipeline =
         canvas.Initialize()
-            ? canvas.Pipeline(Text(LevelHlsl), Text(LevelGlsl), sizeof(LevelConstants))
+            ? canvas.Pipeline(shaders::TextureViewLevelPS, "Source", sizeof(LevelConstants))
             : Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     TextureViewDesc upper;
     upper.firstMip = 2;
@@ -356,7 +262,7 @@ void RunLayerView(Device& device) noexcept {
     } else {
         Canvas canvas(device);
         auto pipeline = canvas.Initialize()
-                            ? canvas.Pipeline(Text(LayerHlsl), Text(LayerGlsl), 0)
+                            ? canvas.Pipeline(shaders::TextureViewLayerPS, "Layers", 0)
                             : Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
         Check(view && pipeline && canvas.Draw(pipeline.Value(), view.Value(), nullptr) &&
                   Near(canvas.pixel[0], 0) && Near(canvas.pixel[1], 255),
@@ -390,17 +296,18 @@ TextureDesc PyramidDesc() noexcept {
     return desc;
 }
 
-ComputePipelineDesc FillPipelineDesc() noexcept {
+Result<PipelineHandle> CreateFillPipeline(Device& device) noexcept {
     ComputePipelineDesc desc;
-    desc.shader = {Text(FillHlsl), Text(FillGlsl)};
-    return desc;
+    desc.bindings.writableTextures[0] = "Target";
+    return shaders::CreateComputePipeline(device, shaders::TextureViewFillCS, desc);
 }
 
-ComputePipelineDesc ReducePipelineDesc() noexcept {
+Result<PipelineHandle> CreateReducePipeline(Device& device) noexcept {
     ComputePipelineDesc desc;
-    desc.shader = {Text(ReduceHlsl), Text(ReduceGlsl)};
     desc.drawConstantBytes = sizeof(LevelConstants);
-    return desc;
+    desc.bindings.texture = "Source";
+    desc.bindings.writableTextures[0] = "Target";
+    return shaders::CreateComputePipeline(device, shaders::TextureViewReduceCS, desc);
 }
 
 uint32 CountMismatchedMips(Device& device, Allocator& allocator, TextureHandle pyramid) noexcept {

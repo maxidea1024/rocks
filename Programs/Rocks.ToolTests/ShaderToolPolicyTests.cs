@@ -20,10 +20,8 @@ internal static class ShaderToolPolicyTests
         {
             ReleaseExclusionResult result = ReleaseExclusion.Check(options.Root, ReleaseExclusion.DefaultRulesAssembly(options.Root));
             NoFailures(result.Failures);
-            // 알려진 예외 두 건(D3D12Graphics d3dcompiler, Windows OpenGLGraphics)은 SH2까지 실제로 걸리고 알림으로 나온다.
-            Verify.That(result.Notices.Any(notice => notice.Contains("d3dcompiler", StringComparison.Ordinal)) &&
-                result.Notices.Any(notice => notice.Contains("release-windows-opengl", StringComparison.Ordinal)),
-                "known Release exceptions were not reported: " + string.Join('\n', result.Notices));
+            // SH2에서 알려진 예외(D3D12·D3D11 d3dcompiler, Windows OpenGLGraphics)를 모두 지웠다(ShaderSystem 16.1절 SH2e2).
+            Verify.That(result.Notices.Count == 0, "unexpected Release exception notices: " + string.Join('\n', result.Notices));
         });
         suite.Add("Policy.ReleaseExclusionControls", ReleaseControls);
     }

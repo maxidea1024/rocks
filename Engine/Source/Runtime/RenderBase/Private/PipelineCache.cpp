@@ -4,7 +4,7 @@
 #include <ShaderCore/ShaderBindingLayout.h>
 #include <string.h>
 
-// 파이프라인 캐시(Docs/Design/RenderBase.ko.md 9.7절)다. 규칙은 공개 헤더 주석을 따른다.
+// 파이프라인 캐시(Docs/Design/RenderBase 9.7절)다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::render {
 
 namespace pipeline_cache_detail {

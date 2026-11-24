@@ -155,6 +155,7 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     SpirvRewriteOptions rewrite;
     rewrite.stage = job.stage;
     rewrite.stageLocations = true;
+    rewrite.cubeStorageImages = true;
     if (!RewriteSpirv(raw.View(), rewrite, rewritten, diagnostics)) {
         FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "SPIR-V binding rules",
                       diagnostics.View());
@@ -236,6 +237,7 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     cross.glslPlainUniforms = true;
     cross.glslBindings = glslBindings.View();
     cross.glslCombined = glslCombined.View();
+    cross.glslDummySampler = bound.gles.dummySampler;
     String essl(allocator);
     const ShaderToolOutcome crossed =
         CrossCompileSpirv(context.tools->SpirvCross(), cross, essl, diagnostics);

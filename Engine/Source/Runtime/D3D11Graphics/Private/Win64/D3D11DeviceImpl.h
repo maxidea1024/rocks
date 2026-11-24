@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Graphics/ShaderBindings.h>
+
 #include "D3D11Common.h"
 
 #include <Core/Containers/Array.h>
@@ -9,7 +11,6 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
-#include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
@@ -18,7 +19,6 @@
 
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
-#include <d3dcompiler.h>
 #include <dxgidebug.h>
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
@@ -102,6 +102,8 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
 }
 
 struct PipelineRecord {
+    // 고정 slot 표(셰이더 layout의 단계별 slot)다.
+    PipelineSlots slots;
     ComRef<ID3D11VertexShader> vertexShader;
     ComRef<ID3D11PixelShader> pixelShader;
     // 정점 입력이 없는 배치면 비어 있다.
@@ -272,15 +274,8 @@ public:
     void Retire(BufferViewHandle view) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
-    // 쿠킹 코드 수신은 SH2e2에서 구현한다(ShaderSystem 16.1절 SSD43).
-    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override {
-        (void)desc;
-        return Result<ShaderHandle>::Failure(ErrorCode::Unsupported);
-    }
-
-    void Retire(ShaderHandle shader) noexcept override {
-        (void)shader;
-    }
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
+    void Retire(ShaderHandle shader) noexcept override;
 
     void Retire(SwapChainHandle swapChain) noexcept override;
     void ReclaimCompleted() noexcept override;
@@ -510,20 +505,12 @@ private:
     // --- 자원(D3D11Resources.cpp) ---
 
     Result<ID3D11SamplerState*> SamplerFor(const SamplerDesc& desc) noexcept;
-    Result<void> Compile(StringView source, const char* entry, const char* target,
-                         ComRef<ID3DBlob>& code) noexcept;
-    Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept;
+    // 파이프라인 slot 표의 자원을 지금 기록의 단계 slot에 건다(그리기·dispatch 직전).
+    void ApplySlots(const PipelineRecord& pipeline) noexcept;
     // --- 버퍼 view(D3D11Buffers.cpp) ---
-    // 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
-    // slots에, CS 쓰기 slot을 writeSlots에 더한다.
-    // b0 cbuffer가 drawConstantBytes보다 크면 InvalidArgument다(작은 것은 허용).
     Result<TextureHandle> CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
                                                     const ResolvedSubresourceRange& range,
                                                     TextureDimension dimension) noexcept;
-    // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
-    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
-                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots,
-                                 uint32* writeTextures = nullptr) noexcept;
     // 지금 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(잠금 안).
     bool BufferViewsBound() const noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
@@ -684,6 +671,8 @@ private:
     uint32 markerDepth_ = 0;
     // 기록 중 열린 분리 전이 짝이다.
     SplitTransitionTracker splits_;
+    // 장치 셰이더(CreateShader — 코드와 layout의 CPU 사본)다.
+    DeviceShaderTable shaders_;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

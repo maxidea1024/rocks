@@ -8,7 +8,7 @@
 #include <TraceCapture/TraceCpuScope.h>
 #include <TraceCapture/TraceSession.h>
 
-// GPU 계측이다(Docs/Design/RenderBase.ko.md 13절 RB7, Docs/Design/TraceSystem.ko.md 9절). 이름 구간
+// GPU 계측이다(Docs/Design/RenderBase 13절 RB7, Docs/Design/TraceSystem.ko.md 9절). 이름 구간
 // 하나가 debug marker(캡처 도구)와 timestamp 한 쌍을 함께 기록하고, GPU 완료 뒤 완료 통지 큐로 받은
 // timestamp를 calibration 쌍으로 trace tick에 옮겨 trace(채널 "gpu")에 쓴다.
 namespace rocks::render {

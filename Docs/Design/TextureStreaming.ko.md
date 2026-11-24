@@ -9,7 +9,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보지 않았다. UE 이름은 근거 열과 "UE 5.8 방식" 절에만 적는다.
 
 관계 문서:
-- [렌더 기반](RenderBase.ko.md)("RenderBase"): 5절 렌더 lane·완료 통지, 6절 자원 수명·`RenderHandle`·`Retire`, 6.5절 텍스처 플랫폼 데이터 입력 계약, 4.4절 GX 항목, 7.4절 그래프 자원 수명, 18.1절 화면 마일스톤.
+- [렌더 기반](RenderBase/README.ko.md)("RenderBase"): 5절 렌더 lane·완료 통지, 6절 자원 수명·`RenderHandle`·`Retire`, 6.5절 텍스처 플랫폼 데이터 입력 계약, 4.4절 GX 항목, 7.4절 그래프 자원 수명, 18.1절 화면 마일스톤.
 - [에셋 시스템](AssetSystem/README.ko.md): 12.4–12.5절 텍스처 설정과 LOD bias.
 
 상태: **설계**. 착수는 화면 마일스톤 뒤다(RenderBase 18.1절, 이 문서 10절). 화면 마일스톤은 상주 꼬리와 전체 상주만 쓴다.

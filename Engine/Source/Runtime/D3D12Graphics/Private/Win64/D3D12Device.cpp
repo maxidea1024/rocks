@@ -13,7 +13,8 @@ D3D12Device::D3D12Device(Allocator& allocator) noexcept
       computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
       computeAllocators_(allocator), computeTimestamps_(allocator), allocator_(allocator),
       readbacks_(allocator), ring_(allocator), timestamps_(allocator), touchedTextures_(allocator),
-      bufferViews_(allocator), cpuUavs_(allocator), bufferStates_(allocator), splits_(allocator) {
+      bufferViews_(allocator), cpuUavs_(allocator), bufferStates_(allocator), splits_(allocator),
+      rootSignatures_(allocator), shaders_(allocator) {
 }
 
 D3D12Device::~D3D12Device() {
@@ -221,11 +222,6 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     nullDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
     nullDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     device_->CreateShaderResourceView(nullptr, &nullDesc, srvs_.Cpu(nullBufferSrv_));
-
-    auto signature = CreateRootSignature();
-    if (!signature) {
-        return signature;
-    }
 
     auto compute = CreateComputeObjects();
     if (!compute) {

@@ -26,17 +26,17 @@ class Device {
 }
 ```
 
-- 자원은 slot+generation 핸들이다. `Retire`는 마지막으로 사용한 제출의 fence(`GpuFencePoint`: device epoch·queue·value)가 끝난 뒤 자원과 descriptor를 해제한다. OpenGL도 `glFenceSync`로 같은 규칙을 따른다(즉시 삭제하지 않는다). fence 완료는 다른 스레드에서 기다리거나 통지·작업 이벤트(`Graphics/GpuFenceEvent.h`)로 받는다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다([렌더 기반](../RenderBase.ko.md) GX7).
-- 장치 스레드 모델([렌더 기반](../RenderBase.ko.md) 5.4절 GX11·GX10): 소유 스레드 하나가 제출·present·상태 변경·생성(지금은 생성도 — `DeviceInfo::concurrentResourceCreation` false)을 하고, 소유권은 `ReleaseOwnership`·`AcquireOwnership`으로 넘긴다. 소유 스레드 밖 호출은 Debug·Development에서 `WrongThread`다. 엔진 실행 때는 렌더 lane(RenderBase)이 장치를 소유한다.
-- 정점 배치([렌더 기반](../RenderBase.ko.md) 10.4절 GX3a): 정점 원소 형식 20종(`GraphicsTypes/VertexFormat.h`), 속성(location·형식·stream·offset)·stream(stride·정점/인스턴스), index 버퍼(UInt16·UInt32), `Draw`·`DrawIndexed`(인스턴스 수), 정점 버퍼 없는 그리기. 셰이더 정점 입력 시맨틱은 `ATTRIBUTEn`이다.
-- 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, D3D11: 같은 HLSL을 SM 5.0, OpenGL ES: GLSL ES 3.20, 쿠킹된 `GLES31_PC` 출력과 같은 모양, Vulkan: 같은 HLSL을 개발용 컴파일 훅 `DeviceDesc::shaderCompiler`가 DXC로 SPIR-V로, 10.3절). 오프라인 셰이더 쿠킹은 후속이다.
-- 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL ES 루트 상수 에뮬레이션 배열 `vu_h`·`pu_h`, Vulkan push constant).
+- 자원은 slot+generation 핸들이다. `Retire`는 마지막으로 사용한 제출의 fence(`GpuFencePoint`: device epoch·queue·value)가 끝난 뒤 자원과 descriptor를 해제한다. OpenGL도 `glFenceSync`로 같은 규칙을 따른다(즉시 삭제하지 않는다). fence 완료는 다른 스레드에서 기다리거나 통지·작업 이벤트(`Graphics/GpuFenceEvent.h`)로 받는다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다([렌더 기반](../RenderBase/README.ko.md) GX7).
+- 장치 스레드 모델([렌더 기반](../RenderBase/05-RenderLane.ko.md) 5.4절 GX11·GX10): 소유 스레드 하나가 제출·present·상태 변경·생성(지금은 생성도 — `DeviceInfo::concurrentResourceCreation` false)을 하고, 소유권은 `ReleaseOwnership`·`AcquireOwnership`으로 넘긴다. 소유 스레드 밖 호출은 Debug·Development에서 `WrongThread`다. 엔진 실행 때는 렌더 lane(RenderBase)이 장치를 소유한다.
+- 정점 배치([렌더 기반](../RenderBase/10-VertexInput.ko.md) 10.4절 GX3a): 정점 원소 형식 20종(`GraphicsTypes/VertexFormat.h`), 속성(location·형식·stream·offset)·stream(stride·정점/인스턴스), index 버퍼(UInt16·UInt32), `Draw`·`DrawIndexed`(인스턴스 수), 정점 버퍼 없는 그리기. 셰이더 정점 입력 시맨틱은 `ATTRIBUTEn`이다.
+- 셰이더는 쿠킹된 코드를 장치 셰이더(`Device::CreateShader`)로 받고 `PipelineDesc`·`ComputePipelineDesc`가 그 handle을 받는다(D3D12: DXIL `D3D12_SM6`, D3D11: DXBC `D3D11_SM5`, Vulkan: SPIR-V `VULKAN_SM5`, OpenGL ES: ESSL `GLES31_*`와 GLES 바인딩 머리, [셰이더 시스템](../ShaderSystem/16-LaterStages.ko.md) 16.1절 SSD18·SH2e2 메모). 장치는 실행 중 셰이더 컴파일러를 갖지 않는다(2026-11-24 `D3DCompile`·`ShaderSource`·Vulkan 컴파일 훅 제거). 개발 구성은 Development 공급자가 형식별 메모리 라이브러리를 만들고 셰이더 집합이 연다([렌더 기반](../RenderBase/09-ShaderRuntime.ko.md) 9.2절).
+- 그리기별 상수는 파이프라인이 선언한 0–128 byte(`drawConstantBytes`, RenderBase SX2)다(D3D12 root constants `b0 space3`, D3D11 `b13` 상수 버퍼, OpenGL ES 루트 상수 에뮬레이션 배열 `vu_h`·`pu_h`·`cu_h`, Vulkan push constant).
 - 좌표 규약: 2026-11-17 사용자 결정으로 좌표계·단위·행렬 규약을 UE 5.8과 같게 바꾼다(행 벡터 `p·M`·행 우선 저장, 셰이더 `mul(v, M)`·행 우선 packing, 앞면은 화면 반시계, [셰이더 시스템](../ShaderSystem/07-BindingConventions.ko.md) 7.2절 6·8항). 메모리 배치는 전과 같아 GPU로 가는 바이트는 바뀌지 않는다. 렌더 코드는 C7에서 반영했다(2026-11-17): `DrawConstants::transform`은 행 우선, 샘플 렌더러 셰이더는 `mul(float4(position, 1), transform)`, D3D12는 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일하고 OpenGL ES는 행 우선 byte를 vec4 배열로 그대로 올려 GLSL ES가 `mat4(vu_h[0..3]) * v`로 쓴다(P11). `PipelineDesc::cullMode`(None·Back·Front, 기본 None)가 컬을 정하고 앞면은 화면 반시계다(D3D12 `FrontCounterClockwise = TRUE`, OpenGL ES는 클립 공간 규약에 맞춘 `glFrontFace`를 장치가 정한다). 샘플 렌더러는 뒤면을 컬하고, 물체 world·view 행렬식 가운데 하나만 음수면 앞면 컬 파이프라인으로 바꾼다. OpenGL ES Windows 미리보기는 모든 패스를 `glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE)`으로 그리고 스왑체인도 offscreen 텍스처에 그린 뒤 present가 Y를 뒤집어 창에 blit한다(P11, 2026-11-17). 그래서 RenderTarget·스왑체인 모두 첫 행이 이미지 위쪽이다(샘플링·readback 모두 D3D12와 같은 배치). Android는 셰이더가 클립 공간을 보정하고 앞면이 `GL_CW`다([OpenGL ES backend](../OpenGLESGraphics.ko.md) 5.3절). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
 - 동시에 진행하는 프레임 수는 렌더 lane 프레임 slot(2–3개)이 정하고, slot 재사용은 그 프레임의 모든 제출 fence 완료로 판정한다. D3D12는 끝난 제출의 기록 저장소를 다시 쓴다. 디버그 구성은 디버그 레이어를 켠다.
 
 ### 10.2 D3D11Graphics(P15 D3D11 부분)
 
-D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준을 받지 못하는 구형 GPU·드라이버를 위한 Windows 대체 경로이고 셰이더 형식은 `D3D11_SM5`(FXC → DXBC SM 5.0)다. 2026-11-17 사용자 결정으로 SH5보다 앞당겨 구현했다. SH2 전이므로 셰이더는 D3D12와 같이 `PipelineDesc`의 HLSL 원문을 실행 중 `D3DCompile`(`vs_5_0`·`ps_5_0`)로 받고, 쿠킹된 셰이더는 SH2·SH5에서 잇는다. 근거는 UE 5.8 `Runtime/Windows/D3D11RHI`다(아래 경로는 그 아래 기준).
+D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준을 받지 못하는 구형 GPU·드라이버를 위한 Windows 대체 경로이고 셰이더 형식은 `D3D11_SM5`(FXC → DXBC SM 5.0)다. 2026-11-17 사용자 결정으로 SH5보다 앞당겨 구현했다. 셰이더는 쿠킹된 DXBC(FXC, 대체 경로는 SPIRV-Cross HLSL 5.0 → FXC)를 장치 셰이더로 받는다(SH2e2부터 — 그 전에는 HLSL 원문을 실행 중 `D3DCompile`로 받았다). 근거는 UE 5.8 `Runtime/Windows/D3D11RHI`다(아래 경로는 그 아래 기준).
 
 **장치.**
 - feature level은 11_1·11_0을 요청하고 11_0을 최소로 둔다(UE `Private/Windows/WindowsD3D11Device.cpp:247–259`).
@@ -67,7 +67,7 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 - 생성 초기 데이터는 `D3D11_SUBRESOURCE_DATA`로 생성 호출 안에서 올린다(장치 호출이라 스레드 안전, 생성 즉시 내용이 정해진다).
 - staging에서 올리는 경로는 행 정렬 요구가 없어 언제나 그대로 올린다. D3D12처럼 ring으로 다시 옮기는 경로가 없다.
 - readback: `D3D11_USAGE_STAGING` 텍스처로 `CopyResource`하고 fence가 끝난 뒤에만 `Map(READ)`으로 읽는다(UE `Private/D3D11RenderTarget.cpp:520–563`과 같은 staging 경로). `D3D11_MAP_FLAG_DO_NOT_WAIT`은 쓰지 않는다. 하드웨어 드라이버(GTX 1060)에서 runtime의 자원 사용 추적이 fence보다 늦게 풀려, 끝난 복사에도 `DXGI_ERROR_WAS_STILL_DRAWING`을 돌려주는 것을 확인했다. fence 뒤의 map은 GPU를 기다리지 않는다.
-- 그리기별 상수(D3D12 루트 상수 대응, RenderBase 결정 R7·SX2)는 128 byte 동적 상수 버퍼(b0, VS·PS·CS) 하나다. 파이프라인이 선언한 크기(`drawConstantBytes`)만 셰이더가 읽고, `SetDrawConstants`마다 CPU 사본 전체를 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. SH2·P2의 b13 그리기 상수(셰이더 시스템 7.2절 4항)로 옮기는 것은 SH5다.
+- 그리기별 상수(D3D12 루트 상수 대응, RenderBase 결정 R7·SX2)는 128 byte 동적 상수 버퍼(b0, VS·PS·CS) 하나다. 파이프라인이 선언한 크기(`drawConstantBytes`)만 셰이더가 읽고, `SetDrawConstants`마다 CPU 사본 전체를 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. register는 SH2e2부터 셰이더 시스템 7.2절 2항 전개의 `b13`이다.
 
 **장치 능력·버퍼(GX1·GX2, 2026-11-18).**
 - `DeviceCaps`는 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음, 11.1 이상은 UAV 64·모든 단계 UAV), `D3D11_FEATURE_D3D11_OPTIONS3`(VS 층 출력), DXGI 출력 HDR 색 공간이다. 64 bit atomic·multi draw indirect는 거짓이다. MSAA 표본 수는 `CheckMultisampleQualityLevels`다.
@@ -94,8 +94,8 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 
 **파이프라인·정점 배치(GX3a).**
 - 입력 layout은 파이프라인마다 VS 바이트코드로 만든다. 시맨틱은 `ATTRIBUTEn`, `InputSlot`은 stream이고, 인스턴스 stream은 `D3D11_INPUT_PER_INSTANCE_DATA`·간격 1이다(UE `Private/D3D11VertexDeclaration.cpp:57–62`). 속성이 없으면 입력 layout을 묶지 않는다.
-- 셰이더 입력 대조는 `ID3D11ShaderReflection`으로 D3D12와 같은 규칙을 적용한다. `Bgra8Unorm`은 `CheckFormatSupport`의 IA 정점 버퍼 지원이 없으면 `Unsupported`다.
-- 래스터: `FrontCounterClockwise = TRUE`(UE `Private/D3D11State.cpp:211`, D3D12와 같다), 깊이 clip 켬, scissor 끔. 컬 모드(`PipelineDesc::cullMode`)마다 래스터 상태를 하나씩 만들어 파이프라인이 고른다. HLSL은 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일한다(D3D12와 같은 행 우선 규약).
+- 셰이더 입력 대조는 값 1(쿠킹된 바인딩 layout)의 입력 마스크·attribute 타입으로 D3D12와 같은 규칙을 적용한다(SH2e2 전에는 `ID3D11ShaderReflection`). `Bgra8Unorm`은 `CheckFormatSupport`의 IA 정점 버퍼 지원이 없으면 `Unsupported`다.
+- 래스터: `FrontCounterClockwise = TRUE`(UE `Private/D3D11State.cpp:211`, D3D12와 같다), 깊이 clip 켬, scissor 끔. 컬 모드(`PipelineDesc::cullMode`)마다 래스터 상태를 하나씩 만들어 파이프라인이 고른다. 셰이더는 쿠킹 때 행 우선 packing으로 컴파일된다(D3D12와 같은 행 우선 규약).
 - `CopyPassTarget`은 deferred context의 `CopyResource`다(백버퍼 `R8G8B8A8_UNORM`과 RenderTarget sRGB는 같은 typeless 묶음).
 - 블렌드·래스터·깊이 상태 객체는 장치가 한 번 만들어 파이프라인끼리 공유한다.
 - 자원 전이(GX5)는 없다. D3D11 runtime이 hazard를 추적한다.
@@ -123,7 +123,7 @@ Vulkan은 모바일 주력이자 필수 backend다. ShaderSystem P9의 산출물
 - 완료 추적은 제출마다 `VkFence`이고, render pass는 `VkRenderPass`, 메모리는 자체 페이지 할당기(Graphics `GpuPageAllocator`)다.
 - 창 출력은 중간 RGBA8 이미지에 그리고 `EndFrame`에서 swapchain 이미지에 blit한다(UE 기본 경로와 같다).
 - 앞면은 음수 viewport 높이 + `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → BACK_BIT`다. UE 매핑(`CLOCKWISE`·`CM_CW → FRONT_BIT`)은 `SV_IsFrontFace`가 D3D12와 반대라 따르지 않는다.
-- 셰이더는 실행 중 컴파일러가 없으므로 개발 프로그램이 Developer `ShaderFormatVulkan`(DXC `VULKAN_SM5` 옵션과 SPIR-V 재작성)을 `DeviceDesc::shaderCompiler`로 넘긴다. Release 실행 파일에는 컴파일러가 없다(SH2 전에는 Vulkan 파이프라인이 `Unsupported`).
+- 셰이더는 쿠킹된 `VULKAN_SM5` SPIR-V를 장치 셰이더로 받는다(SPIR-V 재작성은 셰이더 워커의 `ShaderFormatVulkan`이 쿠킹 때 한다). 실행 파일에는 컴파일러가 없다(VulkanGraphics 13절).
 - 확인: Sandbox self-test 전체가 GTX 1060과 lavapipe(소프트웨어 ICD, 측정 S4)에서 통과하고 D3D12와 픽셀 대조가 차이 0이다(VulkanGraphics 17절).
 
 ### 10.4 범위 밖

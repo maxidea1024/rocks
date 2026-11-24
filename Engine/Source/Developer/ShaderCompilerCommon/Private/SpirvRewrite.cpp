@@ -26,6 +26,7 @@ constexpr usize BoundWord = 3;
 constexpr uint32 OpName = 5;
 constexpr uint32 OpExtension = 10;
 constexpr uint32 OpEntryPoint = 15;
+constexpr uint32 OpCapability = 17;
 constexpr uint32 OpTypeImage = 25;
 constexpr uint32 OpTypeSampler = 26;
 constexpr uint32 OpTypeSampledImage = 27;
@@ -34,11 +35,14 @@ constexpr uint32 OpTypeRuntimeArray = 29;
 constexpr uint32 OpTypeStruct = 30;
 constexpr uint32 OpTypePointer = 32;
 constexpr uint32 OpVariable = 59;
+constexpr uint32 OpLoad = 61;
 constexpr uint32 OpAccessChain = 65;
 constexpr uint32 OpInBoundsAccessChain = 66;
 constexpr uint32 OpPtrAccessChain = 67;
 constexpr uint32 OpInBoundsPtrAccessChain = 70;
 constexpr uint32 OpDecorate = 71;
+constexpr uint32 OpImageQuerySizeLod = 103;
+constexpr uint32 OpImageQuerySize = 104;
 constexpr uint32 OpDecorateId = 332;
 constexpr uint32 OpDecorateString = 5632;
 constexpr uint32 OpMemberDecorateString = 5633;
@@ -64,9 +68,24 @@ constexpr uint32 ExecutionModelVertex = 0;
 constexpr uint32 ExecutionModelFragment = 4;
 constexpr uint32 ExecutionModelGLCompute = 5;
 
-// OpTypeImage의 Sampled 피연산자 위치와 storage image 값이다.
+// OpTypeImage의 피연산자 위치(Dim·Arrayed·MS·Sampled)와 값이다(SPIR-V 사양 3.8 Dim).
+constexpr usize ImageDimWord = 3;
+constexpr usize ImageArrayedWord = 5;
+constexpr usize ImageMultisampledWord = 6;
 constexpr usize ImageSampledWord = 7;
 constexpr uint32 ImageSampledStorage = 2;
+constexpr uint32 Dim2D = 1;
+constexpr uint32 DimCube = 3;
+// cube 배열 storage image가 요구하는 capability다(SPIR-V 사양 3.31 ImageCubeArray).
+constexpr uint32 CapabilityImageCubeArray = 34;
+
+// Platform.rsh의 RWTextureCube·RWTextureCubeArray가 RWTexture2DArray 변수에 다는 표지(UserSemantic
+// 장식 문자열)다(Docs/Design/ShaderSystem 16.1절 SH2g).
+constexpr const char* TextureCubeSemantic = "RocksTextureCube";
+constexpr const char* TextureCubeArraySemantic = "RocksTextureCubeArray";
+
+// 끼워 넣는 명령의 최대 word 수다(OpTypeImage + access qualifier).
+constexpr usize MaxInsertionWords = 10;
 
 // 정점 입력 location 상한(ATTRIBUTE0–15)이다(Graphics MaxVertexAttributes와 같다).
 constexpr uint32 MaxAttributeLocations = 16;
@@ -122,7 +141,23 @@ struct Named {
 
 struct Insertion {
     usize after = 0;
-    uint32 words[4] = {};
+    uint32 count = 0;
+    uint32 words[MaxInsertionWords] = {};
+};
+
+struct Load {
+    uint32 id = 0;
+    uint32 pointer = 0;
+    // 결과 타입 피연산자의 word 위치다.
+    usize typeWord = 0;
+};
+
+// cube로 바꾼 이미지 타입 하나다(원래 2D 배열 이미지 타입 + cube 배열 여부가 열쇠).
+struct CubeImage {
+    uint32 source = 0;
+    bool array = false;
+    uint32 image = 0;
+    uint32 pointer = 0;
 };
 
 struct Resource {
@@ -221,8 +256,8 @@ public:
         : input_(input), diagnostics_(diagnostics), instructions_(allocator),
           decorations_(allocator), pointers_(allocator), variables_(allocator),
           accesses_(allocator), names_(allocator), semantics_(allocator), types_(allocator),
-          removed_(allocator), insertions_(allocator), resources_(allocator), pushIds_(allocator),
-          words_(allocator) {
+          loads_(allocator), queries_(allocator), removed_(allocator), insertions_(allocator),
+          resources_(allocator), pushIds_(allocator), cubes_(allocator), words_(allocator) {
     }
 
     Result<void> Run(const SpirvRewriteOptions& options, Array<uint32>& output) noexcept {
@@ -269,6 +304,13 @@ public:
             return bound;
         }
 
+        if (options.cubeStorageImages) {
+            auto cubed = RewriteCubeImages();
+            if (!cubed) {
+                return cubed;
+            }
+        }
+
         return Emit(output);
     }
 
@@ -313,6 +355,18 @@ private:
             }
 
             break;
+        case OpCapability:
+            if (count >= 2) {
+                if (!hasCapability_) {
+                    hasCapability_ = true;
+                    firstCapability_ = index;
+                }
+
+                hasCubeArrayCapability_ =
+                    hasCubeArrayCapability_ || input_[offset + 1] == CapabilityImageCubeArray;
+            }
+
+            break;
         case OpEntryPoint:
             if (count >= 2 && !hasEntryPoint_) {
                 hasEntryPoint_ = true;
@@ -342,6 +396,19 @@ private:
             if (count >= 4) {
                 return variables_.TryPushBack(Variable{input_[offset + 2], input_[offset + 1],
                                                        input_[offset + 3], offset + 1, offset + 3});
+            }
+
+            break;
+        case OpLoad:
+            if (count >= 4) {
+                return loads_.TryPushBack(Load{input_[offset + 2], input_[offset + 3], offset + 1});
+            }
+
+            break;
+        case OpImageQuerySize:
+        case OpImageQuerySizeLod:
+            if (count >= 4) {
+                return queries_.TryPushBack(input_[offset + 3]);
             }
 
             break;
@@ -541,6 +608,7 @@ private:
         const uint32 id = bound_++;
         Insertion insertion;
         insertion.after = anchor;
+        insertion.count = 4;
         insertion.words[0] = (4u << 16) | OpTypePointer;
         insertion.words[1] = id;
         insertion.words[2] = StoragePushConstant;
@@ -742,9 +810,140 @@ private:
         return Result<void>::Success();
     }
 
+    // 표지 단 storage image(RWTextureCube·RWTextureCubeArray)의 타입을 cube 이미지로 바꾼다(GLES
+    // imageCube·imageCubeArray — ShaderSystem 16.1절 SH2g). 원래 2D 배열 타입은 다른 변수가 같이 쓸
+    // 수 있으므로 Dim만 다른 새 이미지·포인터 타입을 만들어 변수와 그 OpLoad 결과 타입을 옮긴다.
+    // 좌표는 그대로다(cube storage 좌표도 (x, y, 면), cube 배열은 (x, y, cube × 6 + 면)).
+    Result<void> RewriteCubeImages() noexcept {
+        bool needsCubeArray = false;
+        for (const Variable& variable : variables_) {
+            const StringView semantic = FindString(semantics_, variable.id);
+            const bool cube = semantic == StringView(TextureCubeSemantic);
+            const bool array = semantic == StringView(TextureCubeArraySemantic);
+            if (!cube && !array) {
+                continue;
+            }
+
+            const Pointer* pointer = FindPointer(variable.type);
+            const Instruction* image = pointer != nullptr ? FindType(pointer->pointee) : nullptr;
+            if (variable.storage != StorageUniformConstant || image == nullptr ||
+                image->opcode != OpTypeImage || image->count <= ImageSampledWord ||
+                input_[image->offset + ImageDimWord] != Dim2D ||
+                input_[image->offset + ImageArrayedWord] != 1 ||
+                input_[image->offset + ImageMultisampledWord] != 0 ||
+                input_[image->offset + ImageSampledWord] != ImageSampledStorage) {
+                return Reject(
+                    diagnostics_,
+                    StringView("RWTextureCube and RWTextureCubeArray must declare one "
+                               "global storage image (arrays of them are not supported)"));
+            }
+
+            auto replaced = CubeImageFor(*image, pointer->instruction, array);
+            if (!replaced) {
+                return Result<void>::Failure(replaced.Error());
+            }
+
+            const CubeImage made = replaced.Value();
+            words_[variable.typeWord] = made.pointer;
+            for (const Load& load : loads_) {
+                if (load.pointer != variable.id) {
+                    continue;
+                }
+
+                if (queries_.Contains(load.id)) {
+                    return Reject(diagnostics_,
+                                  StringView("GetDimensions on RWTextureCube or RWTextureCubeArray "
+                                             "is not supported (cube image sizes have no face "
+                                             "count); pass the size in constants"));
+                }
+
+                words_[load.typeWord] = made.image;
+            }
+
+            needsCubeArray = needsCubeArray || array;
+        }
+
+        if (needsCubeArray && !hasCubeArrayCapability_) {
+            if (!hasCapability_) {
+                return Reject(diagnostics_, StringView("SPIR-V module declares no capability"));
+            }
+
+            Insertion insertion;
+            insertion.after = firstCapability_;
+            insertion.count = 2;
+            insertion.words[0] = (2u << 16) | OpCapability;
+            insertion.words[1] = CapabilityImageCubeArray;
+            auto inserted = insertions_.TryPushBack(insertion);
+            if (!inserted) {
+                return inserted;
+            }
+
+            hasCubeArrayCapability_ = true;
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 2D 배열 이미지 source의 cube(array면 cube 배열) 사본과 그 UniformConstant 포인터다. 같은
+    // 열쇠는 한 번만 만든다. 새 이미지는 source 뒤, 포인터는 원래 포인터(pointerAnchor) 뒤에
+    // 넣는다.
+    Result<CubeImage> CubeImageFor(const Instruction& source, usize pointerAnchor,
+                                   bool array) noexcept {
+        const uint32 sourceId = input_[source.offset + 1];
+        for (const CubeImage& made : cubes_) {
+            if (made.source == sourceId && made.array == array) {
+                return Result<CubeImage>::Success(made);
+            }
+        }
+
+        if (source.count > MaxInsertionWords) {
+            return Result<CubeImage>::Failure(
+                Reject(diagnostics_, StringView("SPIR-V image type is too long")).Error());
+        }
+
+        CubeImage made;
+        made.source = sourceId;
+        made.array = array;
+        made.image = bound_++;
+        made.pointer = bound_++;
+        Insertion image;
+        image.after = static_cast<usize>(&source - instructions_.Data());
+        image.count = source.count;
+        for (uint32 word = 0; word < source.count; ++word) {
+            image.words[word] = input_[source.offset + word];
+        }
+
+        image.words[1] = made.image;
+        image.words[ImageDimWord] = DimCube;
+        image.words[ImageArrayedWord] = array ? 1u : 0u;
+        Insertion pointer;
+        pointer.after = pointerAnchor;
+        pointer.count = 4;
+        pointer.words[0] = (4u << 16) | OpTypePointer;
+        pointer.words[1] = made.pointer;
+        pointer.words[2] = StorageUniformConstant;
+        pointer.words[3] = made.image;
+        auto first = insertions_.TryPushBack(image);
+        if (!first) {
+            return Result<CubeImage>::Failure(first.Error());
+        }
+
+        auto second = insertions_.TryPushBack(pointer);
+        if (!second) {
+            return Result<CubeImage>::Failure(second.Error());
+        }
+
+        auto recorded = cubes_.TryPushBack(made);
+        if (!recorded) {
+            return Result<CubeImage>::Failure(recorded.Error());
+        }
+
+        return Result<CubeImage>::Success(made);
+    }
+
     Result<void> Emit(Array<uint32>& output) noexcept {
         output.Clear();
-        auto reserved = output.TryReserve(words_.Size() + insertions_.Size() * 4);
+        auto reserved = output.TryReserve(words_.Size() + insertions_.Size() * MaxInsertionWords);
         if (!reserved) {
             return reserved;
         }
@@ -767,7 +966,8 @@ private:
 
             for (const Insertion& insertion : insertions_) {
                 if (insertion.after == index) {
-                    auto inserted = output.TryAppend(Span<const uint32>(insertion.words, 4));
+                    auto inserted =
+                        output.TryAppend(Span<const uint32>(insertion.words, insertion.count));
                     if (!inserted) {
                         return inserted;
                     }
@@ -789,17 +989,25 @@ private:
     Array<Named> semantics_;
     // 기록한 타입 선언 명령의 위치다.
     Array<usize> types_;
+    Array<Load> loads_;
+    // OpImageQuerySize·OpImageQuerySizeLod의 이미지 피연산자 id다.
+    Array<uint32> queries_;
     Array<bool> removed_;
     Array<Insertion> insertions_;
     Array<Resource> resources_;
     // push constant로 바뀐 변수와 그것에서 나온 포인터다.
     Array<uint32> pushIds_;
+    Array<CubeImage> cubes_;
     // 고쳐 쓰는 사본(입력과 같은 배치)이다.
     Array<uint32> words_;
     uint32 bound_ = 0;
     uint32 rootId_ = 0;
     uint32 executionModel_ = 0;
+    // 첫 OpCapability 명령의 색인이다(새 capability를 그 뒤에 넣는다).
+    usize firstCapability_ = 0;
     bool hasEntryPoint_ = false;
+    bool hasCapability_ = false;
+    bool hasCubeArrayCapability_ = false;
 };
 
 } // namespace spirv_rewrite_detail

@@ -5,7 +5,7 @@
 #include <Base/Types.h>
 #include <Core/TypeKey.h>
 
-// 프레임 packet의 렌더 설정 snapshot 참조다(Docs/Design/RenderBase.ko.md 12절, ConfigSystem.ko.md
+// 프레임 packet의 렌더 설정 snapshot 참조다(Docs/Design/RenderBase 12절, ConfigSystem.ko.md
 // 5.3절 — RB1 설정 snapshot). 게임 lane이 sync 지점 뒤 얻은 "렌더 읽기" 설정 snapshot(Config
 // `ConfigSnapshot`)을 프레임 slot에 담고, 렌더 lane은 그 프레임의 snapshot만 읽는다(설정 registry는
 // 읽지 않는다). UE는 렌더 스레드 사본 주소에 쓰는 명령으로 전파하지만, Rocks는 불변 snapshot을

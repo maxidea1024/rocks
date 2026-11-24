@@ -3,7 +3,7 @@
   "id": "GLES31_PC",
   "status": "supported",
   "backend": "OpenGL",
-  "processor": { "module": "ShaderFormatOpenGL", "version": 2 },
+  "processor": { "module": "ShaderFormatOpenGL", "version": 4 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler", "SpirvTools", "SpirvCross"],
   "language": { "hlsl2021": false },

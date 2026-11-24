@@ -44,7 +44,7 @@ D3D11Device::D3D11Device(Allocator& allocator) noexcept
       textures_(allocator), pipelines_(allocator), swapChains_(allocator), readbacks_(allocator),
       bufferViews_(allocator), retired_(allocator), dedicated_(allocator), uploadOps_(allocator),
       messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-      ring_(allocator), timestamps_(allocator), splits_(allocator) {
+      ring_(allocator), timestamps_(allocator), splits_(allocator), shaders_(allocator) {
 }
 
 D3D11Device::~D3D11Device() {

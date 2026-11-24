@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG1 남은 것 B부(GraphTextureView) 시험이다(Docs/Design/RenderBase.ko.md 7.5절 mip view 그래프
+// RG1 남은 것 B부(GraphTextureView) 시험이다(Docs/Design/RenderBase 7.5절 mip view 그래프
 // 자원): 장치 view로 낮추기, mip k 읽기 + mip k + 1 쓰기 한 pass 통과, 범위가 겹치는 pass와 view
 // 규칙 위반 거부, view 기준 mip.
 using namespace rocks;

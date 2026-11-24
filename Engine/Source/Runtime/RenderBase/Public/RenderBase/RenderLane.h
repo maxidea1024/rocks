@@ -10,7 +10,7 @@
 #include <RenderBase/RenderSettings.h>
 #include <Task/DedicatedLane.h>
 
-// 렌더 lane이다(Docs/Design/RenderBase.ko.md 5절 RB1, UE 렌더 스레드 대응). 전용 스레드 하나(CP1
+// 렌더 lane이다(Docs/Design/RenderBase 5절 RB1, UE 렌더 스레드 대응). 전용 스레드 하나(CP1
 // DedicatedLane)가 렌더 일을 직렬 FIFO로 처리하고, 게임 lane은 등록된 값 묶음(프레임 packet)과 렌더
 // handle만 넘긴다. 게임 lane이 막히는 곳은 프레임 slot 확보뿐이다(결정 R3).
 namespace rocks::render {

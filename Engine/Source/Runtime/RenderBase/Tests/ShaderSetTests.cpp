@@ -12,7 +12,7 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
-// 셰이더 집합·파이프라인 캐시·바인딩 지도 시험이다(Docs/Design/RenderBase.ko.md 9.10절 RB3·RB4
+// 셰이더 집합·파이프라인 캐시·바인딩 지도 시험이다(Docs/Design/RenderBase 9.10절 RB3·RB4
 // SH2분, SX10). 라이브러리는 ShaderCore BuildShaderLibrary로 메모리에 만들고 장치는 기록 장치다. 첫
 // 사용 생성 경쟁은 기록 장치의 명시 gate(HoldShaderCreation)로 두 생성이 모두 장치에 닿은 뒤
 // 게시하게 한다(sleep 없음).

@@ -2,7 +2,7 @@
 
 기준일: 2026-11-20, 개정 9. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
 
-[렌더 기반](RenderBase.ko.md)의 선행 작업 CP5(다중 스레드 CPU 구간 계측·카운터·GPU 상관)이고 RB7(`GpuScope`, RenderBase 13절)의 기반이다. 요구는 다음 문서에서 온다.
+[렌더 기반](RenderBase/README.ko.md)의 선행 작업 CP5(다중 스레드 CPU 구간 계측·카운터·GPU 상관)이고 RB7(`GpuScope`, RenderBase 13절)의 기반이다. 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.1절(계측 체계), 29.4절(필수 로깅·프로파일러), 29.5절(OB01–OB06)
 - [입력 상세 계획](CoreObjectInputDetailedPlan.ko.md) C18(loss-aware trace·headless report)
 

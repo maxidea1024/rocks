@@ -155,6 +155,9 @@ private:
                        (IsSemantic(element, "SV_RenderTargetArrayIndex") ||
                         IsSemantic(element, "SV_ViewportArrayIndex"))) {
                 continue;
+            } else if (!pixelInput && IsSemantic(element, "SV_PointSize")) {
+                // 점 크기(SPIR-V BuiltIn PointSize, 값 1 고정 규약)는 단계 사이 변수가 아니다.
+                continue;
             } else if (!IsSemantic(element, "SV_Position") &&
                        !(pixelInput && IsSemantic(element, "SV_IsFrontFace"))) {
                 return RejectSemantic(where, element);
@@ -170,6 +173,8 @@ private:
         switch (reflection_.stage) {
         case ShaderStageVertex: {
             uint32 used = 0;
+            uint32 ints = 0;
+            uint32 uints = 0;
             for (const ShaderReflectedSignature& element : reflection_.inputs) {
                 if (IsSemantic(element, "SV_VertexID") || IsSemantic(element, "SV_InstanceID")) {
                     continue;
@@ -182,9 +187,14 @@ private:
                 if (!CheckIndexed(element, used, "vertex input")) {
                     return false;
                 }
+
+                ints |= element.component == ShaderComponentType::Int ? 1u << element.index : 0u;
+                uints |= element.component == ShaderComponentType::Uint ? 1u << element.index : 0u;
             }
 
             out_.attributeMask = used;
+            out_.attributeIntMask = ints;
+            out_.attributeUintMask = uints;
             if (!CheckInterStage(reflection_.outputs.View(), "vertex output", false, interStage)) {
                 return false;
             }
@@ -579,6 +589,9 @@ private:
             binding.kind = resource.kind;
             binding.slot = static_cast<uint16>(resource.slot);
             binding.name = resource.name;
+            binding.shape = resource.shape;
+            binding.component = resource.component;
+            binding.structureStride = resource.structureStride;
             if (constantBuffer) {
                 binding.firstMember = static_cast<uint32>(members_.Size());
                 if (!CheckConstantBuffer(resource, binding.constantBufferBytes)) {
@@ -935,7 +948,7 @@ bool NormalizeShaderReflection(const ShaderFormatDefinition& format,
     Array<uint8> probe(out.resources.GetAllocator());
     if (!EncodeShaderBindingLayout(out, probe)) {
         (void)diagnostics.TryAppend("binding layout breaks the value 1 rules (resource or member "
-                                    "names must be identifiers of at most 64 bytes)");
+                                    "names, resource shapes or structure strides)");
         return false;
     }
 

@@ -1,5 +1,7 @@
 #include "GlesDevice.h"
 
+#include <stdio.h>
+
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -52,7 +54,8 @@ GlesDevice::GlesDevice(Allocator& allocator) noexcept
     : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
       pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
       bufferViews_(allocator), orphanBuffers_(allocator), timestamps_(allocator),
-      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), splits_(allocator) {
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), splits_(allocator),
+      shaders_(allocator) {
     stagingSource_.allocator = &allocator;
 }
 
@@ -727,8 +730,7 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    if (desc.vertex.glsl.ByteCount() == 0 || desc.pixel.glsl.ByteCount() == 0 ||
-        !ValidatePipelineDesc(desc)) {
+    if (!ValidatePipelineDesc(desc)) {
         Diagnostic message;
         message.Text("pipeline description breaks the pipeline rules");
         auto rejected = Reject(message, ErrorCode::InvalidArgument);
@@ -795,42 +797,32 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return FailWith<PipelineHandle>("cannot make the OpenGL context current");
     }
 
-    auto vertex = CompileShader(GL_VERTEX_SHADER, desc.vertex.glsl);
-    if (!vertex) {
-        return Result<PipelineHandle>::Failure(vertex.Error());
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* vertex = nullptr;
+    const DeviceShaderCode* pixel = nullptr;
+    PipelineRecord record;
+    record.drawConstantBytes = desc.drawConstantBytes;
+    if (!FindPipelineShaders(shaders_, desc, vertex, pixel, error)) {
+        Diagnostic message;
+        message.Text(error);
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        return Result<PipelineHandle>::Failure(rejected.Error());
     }
 
-    auto pixel = CompileShader(GL_FRAGMENT_SHADER, desc.pixel.glsl);
-    if (!pixel) {
-        gl_.DeleteShader(vertex.Value());
-        return Result<PipelineHandle>::Failure(pixel.Error());
+    const DeviceShaderCode* stages[] = {vertex, pixel};
+    if (!MatchShaderVertexInputs(vertex->Layout(), desc.layout, error) ||
+        !ResolvePipelineSlots(stages, desc.bindings, desc.drawConstantBytes, record.slots, error)) {
+        Diagnostic message;
+        message.Text(error);
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        return Result<PipelineHandle>::Failure(rejected.Error());
     }
 
     // separate shader object를 쓰지 않고 VS·PS를 한 프로그램으로 잇는다(UE OpenGLBase.h:283–287).
-    PipelineRecord record;
-    record.program = gl_.CreateProgram();
-    gl_.AttachShader(record.program, vertex.Value());
-    gl_.AttachShader(record.program, pixel.Value());
-    gl_.LinkProgram(record.program);
-    gl_.DeleteShader(vertex.Value());
-    gl_.DeleteShader(pixel.Value());
-    GLint linked = GL_FALSE;
-    gl_.GetProgramiv(record.program, GL_LINK_STATUS, &linked);
-    if (linked != GL_TRUE) {
-        StoreLog(record.program, false);
-        gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
-    }
-
-    // 루트 상수 에뮬레이션 배열 위치·크기는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
-    record.drawConstantBytes = desc.drawConstantBytes;
-    auto matched = MatchVertexInputs(record.program, desc.layout);
-    auto reflected =
-        matched ? ReflectBufferSlots(record.program, record.bufferSlots, nullptr) : Move(matched);
-    auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
-    if (!constants) {
-        gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(constants.Error());
+    record.bufferSlots = record.slots.bufferSlots;
+    auto linked = LinkProgram(stages, record);
+    if (!linked) {
+        return Result<PipelineHandle>::Failure(linked.Error());
     }
 
     switch (desc.topology) {
@@ -1441,57 +1433,103 @@ Result<void> GlesDevice::UploadImages(const TextureRecord& record, GLenum target
     return Result<void>::Success();
 }
 
-Result<void> GlesDevice::MatchVertexInputs(GLuint program, const VertexLayout& layout) noexcept {
-    // 링크한 프로그램의 active attribute를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조).
-    // gl_로 시작하는 내장 입력은 건너뛴다. 셰이더가 읽지 않는 속성은 허용한다.
-    GLint count = 0;
-    gl_.GetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &count);
-    for (GLint index = 0; index < count; ++index) {
-        char name[128] = {};
-        GLsizei length = 0;
-        GLint size = 0;
-        GLenum type = 0;
-        gl_.GetActiveAttrib(program, static_cast<GLuint>(index), sizeof(name), &length, &size,
-                            &type, name);
-        if (length >= 3 && name[0] == 'g' && name[1] == 'l' && name[2] == '_') {
-            continue;
-        }
-
-        const GLint location = gl_.GetAttribLocation(program, name);
+Result<ShaderHandle> GlesDevice::CreateShader(const ShaderCodeDesc& desc) noexcept {
+    const char* reason = "";
+    auto created = shaders_.Create(desc, ShaderCodeKind::Essl, &reason);
+    if (!created && created.Error() == ErrorCode::InvalidArgument) {
         Diagnostic message;
-        VertexShaderType shaderType = VertexShaderType::Float;
-        if (location < 0 || location >= static_cast<GLint>(MaxVertexAttributes) ||
-            !ShaderTypeOf(type, shaderType)) {
-            message.Text("vertex shader input ")
-                .Text(name)
-                .Text(" needs layout(location = 0-15) and a float, int or uint type");
-            return Reject(message, ErrorCode::InvalidArgument);
+        message.Text(reason);
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        (void)rejected;
+    }
+
+    return created;
+}
+
+void GlesDevice::Retire(ShaderHandle shader) noexcept {
+    shaders_.Retire(shader);
+}
+
+Result<void> GlesDevice::LinkProgram(Span<const DeviceShaderCode* const> stages,
+                                     PipelineRecord& record) noexcept {
+    GLuint shaders[2] = {};
+    usize compiled = 0;
+    const auto release = [&]() noexcept {
+        for (usize index = 0; index < compiled; ++index) {
+            gl_.DeleteShader(shaders[index]);
+        }
+    };
+    for (const DeviceShaderCode* code : stages) {
+        const GLenum stage =
+            code->Stage() == ShaderStage::Vertex
+                ? GL_VERTEX_SHADER
+                : (code->Stage() == ShaderStage::Pixel ? GL_FRAGMENT_SHADER : GL_COMPUTE_SHADER);
+        const Span<const uint8> text = code->Code();
+        auto shader = CompileShader(
+            stage, StringView(reinterpret_cast<const char*>(text.Data()), text.Size()));
+        if (!shader) {
+            release();
+            return Result<void>::Failure(shader.Error());
         }
 
-        const VertexAttribute* attribute = nullptr;
-        for (const VertexAttribute& candidate : layout.attributes) {
-            if (candidate.location == static_cast<uint32>(location)) {
-                attribute = &candidate;
+        shaders[compiled++] = shader.Value();
+    }
+
+    record.program = gl_.CreateProgram();
+    for (usize index = 0; index < compiled; ++index) {
+        gl_.AttachShader(record.program, shaders[index]);
+    }
+
+    gl_.LinkProgram(record.program);
+    release();
+    GLint linked = GL_FALSE;
+    gl_.GetProgramiv(record.program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        StoreLog(record.program, false);
+        gl_.DeleteProgram(record.program);
+        record.program = 0;
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    // 루트 상수 복사 표다(ShaderSystem 7.2절 4항 — 배열 위치는 링크 때 이름으로 한 번 찾는다).
+    // 셰이더가 쓰지 않아 최적화로 빠진 배열 원소는 위치가 -1이라 건너뛴다.
+    for (const DeviceShaderCode* code : stages) {
+        const shader::ShaderGlesBindingHeader& header = code->GlesHeader();
+        for (const shader::ShaderGlesCopy& copy : header.copies) {
+            if (copy.buffer != shader::ShaderGlesRootConstantsBuffer ||
+                copy.arrayIndex >= header.arrays.Size()) {
+                continue;
             }
-        }
 
-        if (attribute == nullptr) {
-            message.Text("vertex shader reads location ")
-                .Number(static_cast<uint32>(location))
-                .Text(" which the vertex layout does not provide");
-            return Reject(message, ErrorCode::InvalidArgument);
-        }
+            const shader::ShaderGlesUniformArray& array = header.arrays[copy.arrayIndex];
+            char base[shader::ShaderGlesArrayNameBytes] = {};
+            char element[shader::ShaderGlesArrayNameBytes + 16] = {};
+            if (!shader::ShaderGlesUniformArrayName(header.stage, array, base)) {
+                continue;
+            }
 
-        if (VertexFormatShaderType(attribute->format) != shaderType) {
-            message.Text("vertex input location ")
-                .Number(static_cast<uint32>(location))
-                .Text(": format ")
-                .Text(VertexFormatName(attribute->format))
-                .Text(" feeds ")
-                .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
-                .Text(" but the shader reads ")
-                .Text(VertexShaderTypeName(shaderType));
-            return Reject(message, ErrorCode::InvalidArgument);
+            snprintf(element, sizeof(element), "%s[%u]", base, copy.vec4Offset);
+            const GLint location = gl_.GetUniformLocation(record.program, element);
+            const uint64 end = static_cast<uint64>(copy.sourceOffset) + copy.bytes;
+            if (location < 0 || end > record.drawConstantBytes) {
+                continue;
+            }
+
+            if (record.rootCopyCount == MaxGlesRootCopies) {
+                gl_.DeleteProgram(record.program);
+                record.program = 0;
+                Diagnostic message;
+                message.Text("pipeline has more root constant copies than the OpenGL ES device "
+                             "keeps");
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+
+            GlesRootCopy& out = record.rootCopies[record.rootCopyCount++];
+            out.location = location;
+            out.vectors = static_cast<GLsizei>((copy.bytes + RootConstantVectorBytes - 1) /
+                                               RootConstantVectorBytes);
+            out.sourceOffset = copy.sourceOffset;
+            out.type = array.type;
         }
     }
 

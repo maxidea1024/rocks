@@ -8,7 +8,6 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
-#include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
@@ -21,14 +20,14 @@
 
 #include <Windows.h>
 #include <d3d12.h>
-#include <d3d12shader.h>
-#include <d3dcompiler.h>
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
 
 #include <Platform/Atomics.h>
+
+#include <Graphics/ShaderBindings.h>
 
 #include "D3D12Caps.h"
 #include "D3D12PixelFormats.h"
@@ -81,12 +80,12 @@ constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
 static_assert(MaxDrawConstantBytes % sizeof(uint32) == 0,
               "Draw constants must be a whole number of root constants");
-// root signature 매개변수 번호다: 그리기 상수(b0), PS 텍스처(t0)·샘플러(s0) table, 버퍼 view slot
-// table(t1–t4, 단계 모두, PipelineDesc 고정 배치).
+// root signature 매개변수 번호다: 0은 그리기별 상수(루트 상수 b0 space3 — ShaderSystem SSD32), 그
+// 뒤는 파이프라인 slot 표(PipelineSlots)의 자원마다 table 하나다(RootFirstTable + 자원 순번).
 constexpr UINT RootConstants = 0;
-constexpr UINT RootTexture = 1;
-constexpr UINT RootSampler = 2;
-constexpr UINT RootBufferViews = 3;
+constexpr UINT RootFirstTable = 1;
+// 루트 상수의 register space다(UE 예약 space 3과 같은 번호).
+constexpr UINT RootConstantsSpace = 3;
 
 // COM 참조는 PlatformBase 공용 도구를 쓴다(Platform/Win64/ComRef.h).
 using platform::windows::ComRef;
@@ -261,6 +260,9 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
 
 struct PipelineRecord {
     ComRef<ID3D12PipelineState> state;
+    // 이 파이프라인 layout의 root signature(장치 캐시가 소유를 나눈다)와 고정 slot 표다.
+    ComRef<ID3D12RootSignature> rootSignature;
+    PipelineSlots slots;
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
@@ -641,15 +643,8 @@ public:
     void RetireTextureRecord(SlotHandle slot, TextureRecord& record) noexcept;
 
     void Retire(PipelineHandle handle) noexcept override;
-    // 쿠킹 코드 수신은 SH2e2에서 구현한다(ShaderSystem 16.1절 SSD43).
-    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override {
-        (void)desc;
-        return Result<ShaderHandle>::Failure(ErrorCode::Unsupported);
-    }
-
-    void Retire(ShaderHandle shader) noexcept override {
-        (void)shader;
-    }
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
+    void Retire(ShaderHandle shader) noexcept override;
 
     void Retire(SwapChainHandle handle) noexcept override;
 
@@ -907,24 +902,15 @@ private:
     // 작다).
     Result<uint32> SamplerFor(const SamplerDesc& desc) noexcept;
 
-    // 컴파일한 VS 입력 signature를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조). 사용자
-    // 입력은 시맨틱 ATTRIBUTEn만 받고, n이 배치에 있어야 하며 성분 타입 계열이 형식의 셰이더 타입과
-    // 같아야 한다. 셰이더가 읽지 않는 속성은 허용한다.
-    Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept;
+    // 파이프라인 slot 표의 root signature다(ShaderSystem 7.2절 4항 — 파이프라인 layout마다 하나를
+    // 캐시한다). 같은 (단계, 범위 종류, register) 목록이면 같은 객체를 돌려준다. 호출자는 gate_를
+    // 잡고 있어야 한다.
+    Result<ComRef<ID3D12RootSignature>> RootSignatureFor(const PipelineSlots& slots,
+                                                         bool compute) noexcept;
 
-    // 셰이더가 선언한 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에
-    // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
-    // 종류로 읽거나 배치 밖 자원(UAV 포함)이거나 b0 cbuffer가 drawConstantBytes보다 크면
-    // InvalidArgument다.
-    // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
-    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
-                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots,
-                                 uint32* writeTextures = nullptr) noexcept;
-
-    // 셰이더 단계의 그리기별 상수 블록(shaderBytes)이 파이프라인 선언보다 큰 경우의
-    // InvalidArgument다(LastError에 두 크기).
-    Result<void> RejectDrawConstants(ShaderStage stage, uint32 shaderBytes,
-                                     uint32 drawConstantBytes) noexcept;
+    // 묶인 파이프라인의 root signature·루트 상수·slot table을 지금 기록에 건다(그리기·dispatch
+    // 직전).
+    void ApplyRootBindings(const PipelineRecord& pipeline) noexcept;
 
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
@@ -938,12 +924,8 @@ private:
     // 묶인 파이프라인이 선언한 stream에 모두 유효한 버퍼가 있는지다.
     bool StreamsBound() const noexcept;
 
-    Result<void> CreateRootSignature() noexcept;
-    // compute root signature와 간접 명령 signature를 만든다(D3D12Commands.cpp).
+    // 간접 명령 signature와 compute 쓰기 기본 칸을 만든다(D3D12Commands.cpp).
     Result<void> CreateComputeObjects() noexcept;
-
-    Result<void> Compile(StringView source, const char* entry, const char* target,
-                         ComRef<ID3DBlob>& code) noexcept;
 
     Result<void> CreateSwapChainViews(SwapChainRecord& record) noexcept;
 
@@ -1213,9 +1195,7 @@ private:
     // 지금 기록의 list다(graphicsList_ 또는 computeList_가 소유한다, RG4).
     ID3D12GraphicsCommandList* list_ = nullptr;
     ComRef<ID3D12GraphicsCommandList> uploadList_;
-    ComRef<ID3D12RootSignature> rootSignature_;
-    // compute root signature(b0 상수, t1–t4 SRV table, u0–u3 UAV table)와 간접 명령 signature다.
-    ComRef<ID3D12RootSignature> computeRootSignature_;
+    // 간접 명령 signature다.
     ComRef<ID3D12CommandSignature> drawSignature_;
     ComRef<ID3D12CommandSignature> drawIndexedSignature_;
     ComRef<ID3D12CommandSignature> dispatchSignature_;
@@ -1304,6 +1284,21 @@ private:
     Array<BufferState> bufferStates_;
     // 기록 중 열린 분리 전이 짝이다.
     SplitTransitionTracker splits_;
+    // root signature 캐시다(키는 slot 표의 (단계, 종류, register) 목록과 compute 여부).
+    struct RootSignatureEntry {
+        explicit RootSignatureEntry(Allocator& allocator) noexcept : key(allocator) {
+        }
+
+        Array<uint8> key;
+        ComRef<ID3D12RootSignature> signature;
+    };
+
+    Array<RootSignatureEntry> rootSignatures_;
+    // 지금 기록에 건 root signature다(기록·패스마다 비운다).
+    ID3D12RootSignature* appliedGraphicsRoot_ = nullptr;
+    ID3D12RootSignature* appliedComputeRoot_ = nullptr;
+    // 장치 셰이더(CreateShader — 코드와 layout의 CPU 사본)다.
+    DeviceShaderTable shaders_;
     bool recording_ = false;
     bool validation_ = false;
     // GPU 기반 검증이 켜졌다(DeviceDesc::enableGpuValidation). 검증 queue가 경고도 저장한다.

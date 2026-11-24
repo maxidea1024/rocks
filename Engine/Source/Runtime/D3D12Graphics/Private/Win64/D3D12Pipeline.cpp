@@ -122,10 +122,27 @@ D3D12_DEPTH_STENCILOP_DESC StencilFaceOf(const StencilFace& face) noexcept {
 } // namespace
 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
+Result<ShaderHandle> D3D12Device::CreateShader(const ShaderCodeDesc& desc) noexcept {
+    platform::LockGuard lock(gate_);
+    const char* reason = "";
+    auto created = shaders_.Create(desc, ShaderCodeKind::Dxil, &reason);
+    if (!created && created.Error() == ErrorCode::InvalidArgument) {
+        return FailCode<ShaderHandle>(ErrorCode::InvalidArgument, reason);
+    }
+
+    return created;
+}
+
+void D3D12Device::Retire(ShaderHandle shader) noexcept {
+    platform::LockGuard lock(gate_);
+    shaders_.Retire(shader);
+}
+
+// 쿠킹된 DXIL과 정규화 layout으로 만든다(ShaderSystem 16.1절 SSD18). root signature는 두 단계의
+// slot 표로 만들고 캐시한다(7.2절 4항).
 Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        !ValidatePipelineDesc(desc)) {
+    if (!ValidatePipelineDesc(desc)) {
         return FailCode<PipelineHandle>(ErrorCode::InvalidArgument,
                                         "pipeline description breaks the pipeline rules");
     }
@@ -152,37 +169,27 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
 
     auto layoutChecked = ValidateVertexLayout(desc.layout);
     if (!layoutChecked) {
-        auto failed = Fail("vertex layout is invalid (RenderBase 10.4 limits)");
-        (void)failed;
-        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        return FailCode<PipelineHandle>(ErrorCode::InvalidArgument,
+                                        "vertex layout is invalid (RenderBase 10.4 limits)");
     }
 
-    ComRef<ID3DBlob> vertexCode;
-    ComRef<ID3DBlob> pixelCode;
-    auto vertex = Compile(desc.vertex.hlsl, "VSMain", "vs_5_1", vertexCode);
-    if (!vertex) {
-        return Result<PipelineHandle>::Failure(vertex.Error());
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* vertex = nullptr;
+    const DeviceShaderCode* pixel = nullptr;
+    PipelineSlots slots;
+    if (!FindPipelineShaders(shaders_, desc, vertex, pixel, error)) {
+        return FailCode<PipelineHandle>(ErrorCode::InvalidArgument, error);
     }
 
-    auto matched = MatchVertexInputs(vertexCode.Get(), desc.layout);
-    if (!matched) {
-        return Result<PipelineHandle>::Failure(matched.Error());
+    const DeviceShaderCode* stages[] = {vertex, pixel};
+    if (!MatchShaderVertexInputs(vertex->Layout(), desc.layout, error) ||
+        !ResolvePipelineSlots(stages, desc.bindings, desc.drawConstantBytes, slots, error)) {
+        return FailCode<PipelineHandle>(ErrorCode::InvalidArgument, error);
     }
 
-    auto pixel = Compile(desc.pixel.hlsl, "PSMain", "ps_5_1", pixelCode);
-    if (!pixel) {
-        return Result<PipelineHandle>::Failure(pixel.Error());
-    }
-
-    DrawBufferSlots bufferSlots;
-    auto vertexBindings = ReflectBindings(vertexCode.Get(), ShaderStage::Vertex,
-                                          desc.drawConstantBytes, bufferSlots, nullptr);
-    auto pixelBindings = vertexBindings
-                             ? ReflectBindings(pixelCode.Get(), ShaderStage::Pixel,
-                                               desc.drawConstantBytes, bufferSlots, nullptr)
-                             : Move(vertexBindings);
-    if (!pixelBindings) {
-        return Result<PipelineHandle>::Failure(pixelBindings.Error());
+    auto root = RootSignatureFor(slots, false);
+    if (!root) {
+        return Result<PipelineHandle>::Failure(root.Error());
     }
 
     D3D12_INPUT_ELEMENT_DESC elements[MaxVertexAttributes] = {};
@@ -201,9 +208,9 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
     }
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC state = {};
-    state.pRootSignature = rootSignature_.Get();
-    state.VS = {vertexCode->GetBufferPointer(), vertexCode->GetBufferSize()};
-    state.PS = {pixelCode->GetBufferPointer(), pixelCode->GetBufferSize()};
+    state.pRootSignature = root.Value().Get();
+    state.VS = {vertex->Code().Data(), vertex->Code().Size()};
+    state.PS = {pixel->Code().Data(), pixel->Code().Size()};
     state.BlendState.AlphaToCoverageEnable = desc.alphaToCoverage ? TRUE : FALSE;
     state.BlendState.IndependentBlendEnable = TRUE;
     for (uint32 index = 0; index < desc.colorTargetCount; ++index) {
@@ -252,7 +259,9 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
     state.RasterizerState.MultisampleEnable = desc.sampleCount > 1 ? TRUE : FALSE;
 
     PipelineRecord record;
-    record.bufferSlots = bufferSlots;
+    record.rootSignature = Move(root.Value());
+    record.slots = slots;
+    record.bufferSlots = slots.bufferSlots;
     record.drawConstantBytes = desc.drawConstantBytes;
     record.topology = TopologyOf(desc.topology);
     record.writesDepthStencil = PipelineWritesDepthStencil(desc);
@@ -278,209 +287,6 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
     return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
 }
 
-// 컴파일한 VS 입력 signature를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조). 사용자
-// 입력은 시맨틱 ATTRIBUTEn만 받고, n이 배치에 있어야 하며 성분 타입 계열이 형식의 셰이더 타입과
-// 같아야 한다. 셰이더가 읽지 않는 속성은 허용한다.
-Result<void> D3D12Device::MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept {
-    ComRef<ID3D12ShaderReflection> reflection;
-    if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
-                          IID_PPV_ARGS(reflection.Out())))) {
-        return Fail("D3DReflect failed on the vertex shader");
-    }
-
-    D3D12_SHADER_DESC shader = {};
-    if (FAILED(reflection->GetDesc(&shader))) {
-        return Fail("vertex shader reflection description failed");
-    }
-
-    for (UINT index = 0; index < shader.InputParameters; ++index) {
-        D3D12_SIGNATURE_PARAMETER_DESC input = {};
-        if (FAILED(reflection->GetInputParameterDesc(index, &input))) {
-            return Fail("vertex shader input description failed");
-        }
-
-        if (input.SystemValueType != D3D_NAME_UNDEFINED) {
-            continue; // SV_VertexID·SV_InstanceID 등
-        }
-
-        Diagnostic message;
-        if (input.SemanticName == nullptr || !IsAttributeSemantic(input.SemanticName) ||
-            input.SemanticIndex >= MaxVertexAttributes) {
-            message.Text("vertex shader input ")
-                .Text(input.SemanticName != nullptr ? input.SemanticName : "?")
-                .Number(input.SemanticIndex)
-                .Text(" must use semantic ATTRIBUTE0-15");
-            return Reject(message);
-        }
-
-        const VertexAttribute* attribute = nullptr;
-        for (const VertexAttribute& candidate : layout.attributes) {
-            if (candidate.location == input.SemanticIndex) {
-                attribute = &candidate;
-            }
-        }
-
-        if (attribute == nullptr) {
-            message.Text("vertex shader reads location ")
-                .Number(input.SemanticIndex)
-                .Text(" which the vertex layout does not provide");
-            return Reject(message);
-        }
-
-        VertexShaderType shaderType = VertexShaderType::Float;
-        if (input.ComponentType == D3D_REGISTER_COMPONENT_SINT32) {
-            shaderType = VertexShaderType::Int;
-        } else if (input.ComponentType == D3D_REGISTER_COMPONENT_UINT32) {
-            shaderType = VertexShaderType::Uint;
-        }
-
-        if (VertexFormatShaderType(attribute->format) != shaderType) {
-            message.Text("vertex input location ")
-                .Number(input.SemanticIndex)
-                .Text(": format ")
-                .Text(VertexFormatName(attribute->format))
-                .Text(" feeds ")
-                .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
-                .Text(" but the shader reads ")
-                .Text(VertexShaderTypeName(shaderType));
-            return Reject(message);
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-// 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
-// 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV, compute의 u0–u3 버퍼 UAV(writeSlots)만
-// 받는다. 두 단계가 같은 slot을 다른 종류로 읽거나 배치 밖 자원이면 InvalidArgument다.
-Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
-                                          uint32 drawConstantBytes, DrawBufferSlots& slots,
-                                          DrawBufferSlots* writeSlots,
-                                          uint32* writeTextures) noexcept {
-    ComRef<ID3D12ShaderReflection> reflection;
-    D3D12_SHADER_DESC shader = {};
-    if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
-                          IID_PPV_ARGS(reflection.Out()))) ||
-        FAILED(reflection->GetDesc(&shader))) {
-        return Fail("shader resource reflection failed");
-    }
-
-    const bool pixel = stage == ShaderStage::Pixel;
-    // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
-    const bool textureStage = pixel || stage == ShaderStage::Compute;
-    for (UINT index = 0; index < shader.BoundResources; ++index) {
-        D3D12_SHADER_INPUT_BIND_DESC resource = {};
-        if (FAILED(reflection->GetResourceBindingDesc(index, &resource))) {
-            return Fail("shader resource binding description failed");
-        }
-
-        const bool single = resource.BindCount == 1 && resource.Space == 0;
-        const uint32 slot = resource.BindPoint - 1;
-        const bool viewSlot = resource.BindPoint >= 1 && slot < MaxDrawBufferViews;
-        const bool writeSlot = writeSlots != nullptr && resource.BindPoint < MaxDrawBufferViews;
-        const PixelShaderType type =
-            resource.ReturnType == D3D_RETURN_TYPE_SINT
-                ? PixelShaderType::Int
-                : (resource.ReturnType == D3D_RETURN_TYPE_UINT ? PixelShaderType::Uint
-                                                               : PixelShaderType::Float);
-        bool fits = false;
-        switch (resource.Type) {
-        case D3D_SIT_CBUFFER: {
-            fits = single && resource.BindPoint == 0;
-            // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
-            ID3D12ShaderReflectionConstantBuffer* block =
-                fits ? reflection->GetConstantBufferByName(resource.Name) : nullptr;
-            D3D12_SHADER_BUFFER_DESC blockDesc = {};
-            if (block != nullptr && SUCCEEDED(block->GetDesc(&blockDesc)) &&
-                blockDesc.Size > drawConstantBytes) {
-                return RejectDrawConstants(stage, blockDesc.Size, drawConstantBytes);
-            }
-
-            break;
-        }
-        case D3D_SIT_SAMPLER:
-            fits = single && textureStage && resource.BindPoint == 0;
-            break;
-        case D3D_SIT_TEXTURE:
-            if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
-                fits = single && textureStage && resource.BindPoint == 0;
-                break;
-            }
-
-            fits =
-                single && viewSlot && AddDrawBufferSlot(slots, slot, BufferViewKind::Typed, type);
-            break;
-        case D3D_SIT_STRUCTURED:
-        case D3D_SIT_BYTEADDRESS:
-            // 구조화 버퍼의 NumSamples는 원소 stride다(D3D12_SHADER_INPUT_BIND_DESC).
-            fits =
-                single && viewSlot &&
-                AddDrawBufferSlot(slots, slot,
-                                  resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
-                                                                      : BufferViewKind::Raw,
-                                  PixelShaderType::None,
-                                  resource.Type == D3D_SIT_STRUCTURED ? resource.NumSamples : 0u);
-            break;
-        case D3D_SIT_UAV_RWTYPED:
-            if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
-                // 텍스처 UAV(RWTexture2D·2DArray·3D)는 SetWritableTexture slot이다.
-                const bool textureDimension =
-                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2D ||
-                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2DARRAY ||
-                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE3D;
-                fits = single && writeSlot && writeTextures != nullptr && textureDimension;
-                if (fits) {
-                    *writeTextures |= 1u << resource.BindPoint;
-                }
-
-                break;
-            }
-
-            fits = single && writeSlot &&
-                   AddDrawBufferSlot(*writeSlots, resource.BindPoint, BufferViewKind::Typed, type);
-            break;
-        case D3D_SIT_UAV_RWSTRUCTURED:
-        case D3D_SIT_UAV_RWBYTEADDRESS:
-            fits = single && writeSlot &&
-                   AddDrawBufferSlot(
-                       *writeSlots, resource.BindPoint,
-                       resource.Type == D3D_SIT_UAV_RWSTRUCTURED ? BufferViewKind::Structured
-                                                                 : BufferViewKind::Raw,
-                       PixelShaderType::None,
-                       resource.Type == D3D_SIT_UAV_RWSTRUCTURED ? resource.NumSamples : 0u);
-            break;
-        default:
-            break;
-        }
-
-        if (!fits) {
-            Diagnostic message;
-            message.Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
-                .Text(" shader resource ")
-                .Text(resource.Name != nullptr ? resource.Name : "?")
-                .Text(" is outside the fixed layout (b0, pixel and compute t0 and s0, buffer "
-                      "views t1-t4, compute buffer or texture UAVs u0-u3; no UAVs in graphics "
-                      "stages)");
-            return Reject(message);
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-Result<void> D3D12Device::RejectDrawConstants(ShaderStage stage, uint32 shaderBytes,
-                                              uint32 drawConstantBytes) noexcept {
-    Diagnostic message;
-    message
-        .Text(stage == ShaderStage::Pixel ? "pixel"
-                                          : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
-        .Text(" shader reads ")
-        .Number(shaderBytes)
-        .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
-        .Number(drawConstantBytes);
-    return Reject(message);
-}
-
 Result<void> D3D12Device::RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                                  uint32 drawConstantBytes) noexcept {
     Diagnostic message;
@@ -504,96 +310,150 @@ Result<void> D3D12Device::Reject(const Diagnostic& message) noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
-Result<void> D3D12Device::CreateRootSignature() noexcept {
-    D3D12_DESCRIPTOR_RANGE range = {};
-    range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    range.NumDescriptors = 1;
-    range.BaseShaderRegister = 0;
-    range.OffsetInDescriptorsFromTableStart = 0;
-    D3D12_DESCRIPTOR_RANGE samplerRange = {};
-    samplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-    samplerRange.NumDescriptors = 1;
-    samplerRange.BaseShaderRegister = 0;
-    samplerRange.OffsetInDescriptorsFromTableStart = 0;
-    // 버퍼 view slot n은 register t(n + 1)이고 VS·PS 모두 읽는다(PipelineDesc 고정 배치).
-    // slot마다 table 하나라 view의 descriptor 칸을 그대로 가리킨다(descriptor 복사 없음).
-    D3D12_DESCRIPTOR_RANGE viewRanges[MaxDrawBufferViews] = {};
-    D3D12_ROOT_PARAMETER parameters[RootBufferViews + MaxDrawBufferViews] = {};
+Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const PipelineSlots& slots,
+                                                                  bool compute) noexcept {
+    using Outcome = Result<ComRef<ID3D12RootSignature>>;
+    // 키: compute 여부, 자원마다 (단계, 종류, register).
+    Array<uint8> key(allocator_);
+    if (!key.TryPushBack(compute ? 1 : 0)) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (uint32 index = 0; index < slots.count; ++index) {
+        const PipelineSlotBinding& binding = slots.bindings[index];
+        const uint8 entry[4] = {static_cast<uint8>(binding.stage), static_cast<uint8>(binding.kind),
+                                static_cast<uint8>(binding.location & 0xFF),
+                                static_cast<uint8>(binding.location >> 8)};
+        if (!key.TryAppend(Span<const uint8>(entry, sizeof(entry)))) {
+            return Outcome::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    for (const RootSignatureEntry& entry : rootSignatures_) {
+        if (entry.key.Size() == key.Size() &&
+            memcmp(entry.key.Data(), key.Data(), key.Size()) == 0) {
+            return Outcome::Success(entry.signature.Share());
+        }
+    }
+
+    // 0: 루트 상수(b0 space3, 모든 단계), 그 뒤 자원마다 descriptor 하나짜리 table이다.
+    D3D12_DESCRIPTOR_RANGE ranges[MaxPipelineSlotBindings] = {};
+    D3D12_ROOT_PARAMETER parameters[RootFirstTable + MaxPipelineSlotBindings] = {};
     parameters[RootConstants].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[RootConstants].Constants.ShaderRegister = 0;
+    parameters[RootConstants].Constants.RegisterSpace = RootConstantsSpace;
     parameters[RootConstants].Constants.Num32BitValues = ConstantCount;
     parameters[RootConstants].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    parameters[RootTexture].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[RootTexture].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[RootTexture].DescriptorTable.pDescriptorRanges = &range;
-    parameters[RootTexture].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-    parameters[RootSampler].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[RootSampler].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[RootSampler].DescriptorTable.pDescriptorRanges = &samplerRange;
-    parameters[RootSampler].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        viewRanges[slot].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        viewRanges[slot].NumDescriptors = 1;
-        viewRanges[slot].BaseShaderRegister = slot + 1;
-        D3D12_ROOT_PARAMETER& parameter = parameters[RootBufferViews + slot];
+    for (uint32 index = 0; index < slots.count; ++index) {
+        const PipelineSlotBinding& binding = slots.bindings[index];
+        D3D12_DESCRIPTOR_RANGE& range = ranges[index];
+        switch (binding.role) {
+        case PipelineSlotRole::Sampler:
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+            break;
+        case PipelineSlotRole::WritableBuffer:
+        case PipelineSlotRole::WritableTexture:
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+            break;
+        default:
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            break;
+        }
+
+        range.NumDescriptors = 1;
+        range.BaseShaderRegister = binding.location;
+        D3D12_ROOT_PARAMETER& parameter = parameters[RootFirstTable + index];
         parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         parameter.DescriptorTable.NumDescriptorRanges = 1;
-        parameter.DescriptorTable.pDescriptorRanges = &viewRanges[slot];
-        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        parameter.DescriptorTable.pDescriptorRanges = &range;
+        parameter.ShaderVisibility =
+            binding.stage == ShaderStage::Vertex
+                ? D3D12_SHADER_VISIBILITY_VERTEX
+                : (binding.stage == ShaderStage::Pixel ? D3D12_SHADER_VISIBILITY_PIXEL
+                                                       : D3D12_SHADER_VISIBILITY_ALL);
     }
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};
-    desc.NumParameters = RootBufferViews + MaxDrawBufferViews;
+    desc.NumParameters = RootFirstTable + slots.count;
     desc.pParameters = parameters;
-    desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    desc.Flags = compute ? D3D12_ROOT_SIGNATURE_FLAG_NONE
+                         : D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
     ComRef<ID3DBlob> blob;
     ComRef<ID3DBlob> errors;
+    RootSignatureEntry entry(allocator_);
     if (FAILED(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, blob.Out(),
                                            errors.Out())) ||
         FAILED(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
-                                            IID_PPV_ARGS(rootSignature_.Out())))) {
-        return Fail("root signature creation failed");
+                                            IID_PPV_ARGS(entry.signature.Out())))) {
+        return FailWith<ComRef<ID3D12RootSignature>>("root signature creation failed");
     }
 
-    return Result<void>::Success();
+    entry.key = Move(key);
+    ComRef<ID3D12RootSignature> signature = entry.signature.Share();
+    if (!rootSignatures_.TryPushBack(Move(entry))) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    return Outcome::Success(Move(signature));
 }
 
-Result<void> D3D12Device::Compile(StringView source, const char* entry, const char* target,
-                                  ComRef<ID3DBlob>& code) noexcept {
-    ComRef<ID3DBlob> errors;
-    // 행렬은 행 우선으로 담는다(그리기별 상수의 행렬 규약, ShaderSystem 7.2절 6항 FXC /Zpr). UE도
-    // 같은 플래그로 컴파일한다(D3DShaderCompiler.cpp:1337–1339).
-    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
-    if (validation_) {
-        flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-    } else {
-        flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
-    }
-
-    const HRESULT compiled = D3DCompile(source.Data(), source.ByteCount(), "RocksShader", nullptr,
-                                        nullptr, entry, target, flags, 0, code.Out(), errors.Out());
-    if (FAILED(compiled)) {
-        // 파이프라인을 만드는 호출자가 LastError로 기록한다(LoggingSystem 13절). 진단은 앞쪽
-        // MaxShaderDiagnosticLogBytes까지 싣는다.
-        StringView diagnostics("no compiler output");
-        if (errors) {
-            diagnostics = StringView(static_cast<const char*>(errors->GetBufferPointer()),
-                                     errors->GetBufferSize())
-                              .LeftBytesAtCodePoint(MaxShaderDiagnosticLogBytes);
+void D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
+    const bool compute = pipeline.compute;
+    ID3D12RootSignature* root = pipeline.rootSignature.Get();
+    if (compute) {
+        if (appliedComputeRoot_ != root) {
+            list_->SetComputeRootSignature(root);
+            appliedComputeRoot_ = root;
         }
 
-        char storage[MaxShaderDiagnosticLogBytes + 128];
-        FixedStringBuilder text{Span<char>(storage)};
-        (void)text.TryAppendFormat("Shader {} ({}) failed to compile (HRESULT {:#x}): {}", entry,
-                                   target, static_cast<uint32>(compiled), diagnostics);
-        auto assigned = lastError_.TryAssign(text.View());
-        (void)assigned;
-        failureTruncated_ = CopyStage("D3DCompile");
-        failureResult_ = compiled;
-        return Result<void>::Failure(ErrorCode::DependencyFailed);
+        list_->SetComputeRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
+    } else {
+        if (appliedGraphicsRoot_ != root) {
+            list_->SetGraphicsRootSignature(root);
+            appliedGraphicsRoot_ = root;
+        }
+
+        list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
     }
 
-    return Result<void>::Success();
+    const TextureRecord* texture = textures_.Find(boundTexture_);
+    if (texture == nullptr || !texture->hasSrv || texture->writable) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    for (uint32 index = 0; index < pipeline.slots.count; ++index) {
+        const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
+        D3D12_GPU_DESCRIPTOR_HANDLE table = srvs_.Gpu(nullBufferSrv_);
+        switch (binding.role) {
+        case PipelineSlotRole::Texture:
+            table = srvs_.Gpu(texture->srv);
+            break;
+        case PipelineSlotRole::Sampler:
+            table = samplers_.Gpu(texture->sampler);
+            break;
+        case PipelineSlotRole::BufferView: {
+            const BufferViewRecord* view = bufferViews_.Find(boundViews_[binding.slot].slot);
+            table = srvs_.Gpu(view != nullptr ? view->descriptor : nullBufferSrv_);
+            break;
+        }
+        case PipelineSlotRole::WritableBuffer: {
+            const BufferViewRecord* view = bufferViews_.Find(boundWriteViews_[binding.slot].slot);
+            table = srvs_.Gpu(view != nullptr ? view->descriptor : nullBufferUav_);
+            break;
+        }
+        case PipelineSlotRole::WritableTexture: {
+            const TextureRecord* view = textures_.Find(boundWriteTextures_[binding.slot].slot);
+            table = srvs_.Gpu(view != nullptr ? view->srv : nullBufferUav_);
+            break;
+        }
+        }
+
+        if (compute) {
+            list_->SetComputeRootDescriptorTable(RootFirstTable + index, table);
+        } else {
+            list_->SetGraphicsRootDescriptorTable(RootFirstTable + index, table);
+        }
+    }
 }
 
 } // namespace rocks::graphics::d3d12

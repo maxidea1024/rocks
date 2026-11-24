@@ -20,6 +20,13 @@
 //   [[vk::image_format]] 철자(rgba8·rgba8snorm·rgba16f·r11g11b10f·r32f·r32ui·unknown 등)다. SPIR-V
 //   형식은 [[vk::image_format("Format")]]으로, D3D 형식은 빈 것으로 전개한다(DXIL은 이 attribute를
 //   무시하며 경고를 내므로 남기지 않는다 — SH0 확인).
+// - RWTextureCube<T>·RWTextureCubeArray<T>: cube·cube 배열 storage image(16.1절 SH2g, UE
+//   Platform.ush의 RWTextureCube와 같은 철자). HLSL에는 쓰기 cube가 없어 RWTexture2DArray로 전개하고
+//   좌표는 (x, y, 면)이다(cube 배열은 (x, y, cube × 6 + 면)). SPIR-V 형식은 변수에 표지(UserSemantic
+//   장식)를 달아 GLES 처리기가 imageCube·imageCubeArray로 낸다(D3D·Vulkan·Metal은 면 단위 2D 배열
+//   그대로). 전역 자원 선언에만 쓴다(자원 배열·함수 인자 불가). GLES에서는 GetDimensions를 쓸 수
+//   없고(오류), 쓰기 view가 cube 전체(cube 배열은 모든 층)를 덮어야 한다(GLES는 층 일부를 묶지
+//   못한다 — GLES에서 면 하나만 고른 쓰기 view는 그 층의 2D 이미지라 RWTexture2D로 쓴다).
 // - ROCKS_ROOT_CONSTANTS(Type, Name): 그리기별 상수(루트 상수, 7.2절 2항·16.1절 SSD32). 셰이더 하나에
 //   하나다. D3D12는 register(b0, space3)의 ConstantBuffer<Type>, D3D11은 register(b13)의 cbuffer,
 //   SPIR-V 형식은 push constant다. Type 크기는 128 byte 이하·16 byte 배수다(워커가 검사한다).
@@ -29,6 +36,7 @@
 //
 // 사용 예:
 //   ROCKS_IMAGE_FORMAT(rgba8) RWTexture2D<float4> Output;
+//   ROCKS_IMAGE_FORMAT(rgba16f) RWTextureCube<float4> Sky;   // Sky[uint3(x, y, face)]
 //   struct DrawConstants { float4x4 transform; float4 color; };
 //   ROCKS_ROOT_CONSTANTS(DrawConstants, Draw);   // Draw.color
 //   #if ROCKS_SHADER_MODEL_MAJOR >= 6
@@ -62,6 +70,16 @@
 #define ROCKS_IMAGE_FORMAT(Format) [[vk::image_format(#Format)]]
 #else
 #define ROCKS_IMAGE_FORMAT(Format)
+#endif
+
+// 5635는 SPIR-V UserSemantic 장식이다(SPV_GOOGLE_hlsl_functionality1 — DXC -fspv-reflect가 선언한다).
+// 표지 문자열은 SpirvRewrite.cpp TextureCubeSemantic·TextureCubeArraySemantic과 같아야 한다.
+#if ROCKS_SPIRV
+#define RWTextureCube [[vk::ext_decorate_string(5635, "RocksTextureCube")]] RWTexture2DArray
+#define RWTextureCubeArray [[vk::ext_decorate_string(5635, "RocksTextureCubeArray")]] RWTexture2DArray
+#else
+#define RWTextureCube RWTexture2DArray
+#define RWTextureCubeArray RWTexture2DArray
 #endif
 
 #if ROCKS_SPIRV

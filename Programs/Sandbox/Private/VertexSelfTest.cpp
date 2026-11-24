@@ -1,4 +1,5 @@
 #include "VertexSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Core/Math/VertexPacking.h>
@@ -17,148 +18,8 @@ constexpr uint32 TargetSize = 8;
 // 기대 색과 읽은 색의 허용 차이(8-bit 단위)다.
 constexpr int ColorTolerance = 2;
 
-// 정점 셰이더 입력 계열별 원문이다. 위치(ATTRIBUTE0)와 값(ATTRIBUTE1)을 읽어 값의 rgb를 색으로
-// 낸다. 정수 계열은 값을 255로 나눠 낸다.
-constexpr char FloatHlsl[] = R"(
-struct VSInput { float2 position : ATTRIBUTE0; float4 value : ATTRIBUTE1; };
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(VSInput input) {
-    VSOutput output;
-    output.position = float4(input.position, 0.5, 1.0);
-    output.color = float4(input.value.rgb, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-constexpr char IntHlsl[] = R"(
-struct VSInput { float2 position : ATTRIBUTE0; int4 value : ATTRIBUTE1; };
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(VSInput input) {
-    VSOutput output;
-    output.position = float4(input.position, 0.5, 1.0);
-    output.color = float4(float3(input.value.rgb) / 255.0, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-constexpr char UintHlsl[] = R"(
-struct VSInput { float2 position : ATTRIBUTE0; uint4 value : ATTRIBUTE1; };
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(VSInput input) {
-    VSOutput output;
-    output.position = float4(input.position, 0.5, 1.0);
-    output.color = float4(float3(input.value.rgb) / 255.0, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-constexpr char FloatVertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) in vec2 in_var_ATTRIBUTE0;
-layout(location = 1) in vec4 in_var_ATTRIBUTE1;
-layout(location = 0) out vec4 out_var_TEXCOORD0;
-void main() {
-    gl_Position = vec4(in_var_ATTRIBUTE0, 0.5, 1.0);
-    out_var_TEXCOORD0 = vec4(in_var_ATTRIBUTE1.rgb, 1.0);
-}
-)";
-
-constexpr char IntVertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) in vec2 in_var_ATTRIBUTE0;
-layout(location = 1) in ivec4 in_var_ATTRIBUTE1;
-layout(location = 0) out vec4 out_var_TEXCOORD0;
-void main() {
-    gl_Position = vec4(in_var_ATTRIBUTE0, 0.5, 1.0);
-    out_var_TEXCOORD0 = vec4(vec3(in_var_ATTRIBUTE1.rgb) / 255.0, 1.0);
-}
-)";
-
-constexpr char UintVertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) in vec2 in_var_ATTRIBUTE0;
-layout(location = 1) in uvec4 in_var_ATTRIBUTE1;
-layout(location = 0) out vec4 out_var_TEXCOORD0;
-void main() {
-    gl_Position = vec4(in_var_ATTRIBUTE0, 0.5, 1.0);
-    out_var_TEXCOORD0 = vec4(vec3(in_var_ATTRIBUTE1.rgb) / 255.0, 1.0);
-}
-)";
-
-constexpr char ColorPixelGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) in vec4 in_var_TEXCOORD0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = in_var_TEXCOORD0;
-}
-)";
-
-// 인스턴스 stream: 위치(정점), 인스턴스별 offset·색이다.
-constexpr char InstanceHlsl[] = R"(
-struct VSInput { float2 position : ATTRIBUTE0; float2 offset : ATTRIBUTE1; float4 color : ATTRIBUTE2; };
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(VSInput input) {
-    VSOutput output;
-    output.position = float4(input.position + input.offset, 0.5, 1.0);
-    output.color = float4(input.color.rgb, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-constexpr char InstanceVertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) in vec2 in_var_ATTRIBUTE0;
-layout(location = 1) in vec2 in_var_ATTRIBUTE1;
-layout(location = 2) in vec4 in_var_ATTRIBUTE2;
-layout(location = 0) out vec4 out_var_TEXCOORD0;
-void main() {
-    gl_Position = vec4(in_var_ATTRIBUTE0 + in_var_ATTRIBUTE1, 0.5, 1.0);
-    out_var_TEXCOORD0 = vec4(in_var_ATTRIBUTE2.rgb, 1.0);
-}
-)";
-
-// 정점 버퍼 없이 정점 번호로 화면을 덮는 삼각형을 만든다.
-constexpr char NoInputHlsl[] = R"(
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    float2 uv = float2((id << 1) & 2, id & 2);
-    output.position = float4(uv * 2.0 - 1.0, 0.5, 1.0);
-    output.color = float4(0.25, 0.5, 0.75, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-constexpr char NoInputVertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) out vec4 out_var_TEXCOORD0;
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-    out_var_TEXCOORD0 = vec4(0.25, 0.5, 0.75, 1.0);
-}
-)";
-
-StringView Text(const char* text, usize bytes) noexcept {
-    return StringView(text, bytes - 1);
-}
-
-template <usize Count>
-StringView Text(const char (&text)[Count]) noexcept {
-    return Text(text, Count);
-}
+// 셰이더는 Vertex.rsf다(위치 ATTRIBUTE0과 값 ATTRIBUTE1을 읽어 값의 rgb를 색으로 낸다. 정수 계열은
+// 값을 255로 나눈다).
 
 uint32 failures = 0;
 const char* backendName = "";
@@ -357,14 +218,12 @@ struct Bench {
         return device->CreateBuffer(desc, Span<const uint8>(static_cast<const uint8*>(data), size));
     }
 
-    Result<PipelineHandle> Pipeline(StringView hlsl, StringView vertexGlsl,
+    Result<PipelineHandle> Pipeline(const shaders::ShaderTypeDesc& vertex,
                                     const VertexLayout& layout) noexcept {
         PipelineDesc desc;
-        desc.vertex = {hlsl, vertexGlsl};
-        desc.pixel = {hlsl, Text(ColorPixelGlsl)};
         desc.layout = layout;
         desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
-        return device->CreatePipeline(desc);
+        return shaders::CreateGraphicsPipeline(*device, vertex, shaders::VertexColorPS, desc);
     }
 
     // draw가 기록을 채운 프레임 하나를 그리고 읽는다.
@@ -387,19 +246,16 @@ constexpr float FullScreen[6][2] = {{-1, -1}, {-1, 1}, {1, 1}, {-1, -1}, {1, 1},
 
 void RunFormat(Bench& bench, VertexFormat format, bool openGl) noexcept {
     const VertexShaderType shaderType = VertexFormatShaderType(format);
-    StringView hlsl = Text(FloatHlsl);
-    StringView glsl = Text(FloatVertexGlsl);
+    const shaders::ShaderTypeDesc* vertex = &shaders::VertexFloatVS;
     if (shaderType == VertexShaderType::Int) {
-        hlsl = Text(IntHlsl);
-        glsl = Text(IntVertexGlsl);
+        vertex = &shaders::VertexIntVS;
     } else if (shaderType == VertexShaderType::Uint) {
-        hlsl = Text(UintHlsl);
-        glsl = Text(UintVertexGlsl);
+        vertex = &shaders::VertexUintVS;
     }
 
     const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0}, {1, format, 0, 8}};
     const VertexStream streams[] = {{24, VertexStepRate::Vertex}};
-    auto pipeline = bench.Pipeline(hlsl, glsl, {attributes, streams});
+    auto pipeline = bench.Pipeline(*vertex, {attributes, streams});
     if (openGl && format == VertexFormat::Bgra8Unorm) {
         // ES 공통 API에 BGRA 정점 배열이 없어 미지원이다(음성 대조).
         CheckFormat(pipeline.Error() == ErrorCode::Unsupported, format,
@@ -450,7 +306,7 @@ void RunBufferUpdates(Bench& bench) noexcept {
     const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
                                           {1, VertexFormat::UByte4Unorm, 1, 0}};
     const VertexStream streams[] = {{8, VertexStepRate::Vertex}, {4, VertexStepRate::Vertex}};
-    auto pipeline = bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+    auto pipeline = bench.Pipeline(shaders::VertexFloatVS, {attributes, streams});
     uint8 colors[6][4] = {};
     auto positions = bench.Buffer(FullScreen, sizeof(FullScreen));
     auto colorBuffer = bench.Buffer(colors, sizeof(colors));
@@ -520,7 +376,7 @@ void RunStreams(Bench& bench) noexcept {
     const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
                                           {1, VertexFormat::UByte4Unorm, 1, 0}};
     const VertexStream streams[] = {{8, VertexStepRate::Vertex}, {4, VertexStepRate::Vertex}};
-    auto pipeline = bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+    auto pipeline = bench.Pipeline(shaders::VertexFloatVS, {attributes, streams});
     uint8 colors[7][4] = {};
     for (uint32 vertex = 1; vertex < 7; ++vertex) {
         colors[vertex][0] = 64;
@@ -572,8 +428,7 @@ void RunInstances(Bench& bench) noexcept {
                                           {1, VertexFormat::Float2, 1, 0},
                                           {2, VertexFormat::UByte4Unorm, 1, 8}};
     const VertexStream streams[] = {{8, VertexStepRate::Vertex}, {12, VertexStepRate::Instance}};
-    auto pipeline =
-        bench.Pipeline(Text(InstanceHlsl), Text(InstanceVertexGlsl), {attributes, streams});
+    auto pipeline = bench.Pipeline(shaders::VertexInstanceVS, {attributes, streams});
     const float half[6][2] = {{-1, -1}, {-1, 1}, {0, 1}, {-1, -1}, {0, 1}, {0, -1}};
     struct Instance {
         float offset[2];
@@ -611,7 +466,7 @@ void RunIndexed(Bench& bench, IndexFormat format) noexcept {
     const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
                                           {1, VertexFormat::UByte4Unorm, 0, 8}};
     const VertexStream streams[] = {{12, VertexStepRate::Vertex}};
-    auto pipeline = bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+    auto pipeline = bench.Pipeline(shaders::VertexFloatVS, {attributes, streams});
     const uint8 shade = format == IndexFormat::UInt16 ? 96 : 160;
     struct Corner {
         float position[2];
@@ -654,7 +509,7 @@ void RunIndexed(Bench& bench, IndexFormat format) noexcept {
 }
 
 void RunNoInput(Bench& bench) noexcept {
-    auto pipeline = bench.Pipeline(Text(NoInputHlsl), Text(NoInputVertexGlsl), {});
+    auto pipeline = bench.Pipeline(shaders::VertexNoInputVS, {});
     bool drawn = pipeline && bench.Render([&](CommandContext& commands) noexcept {
         commands.SetPipeline(pipeline.Value());
         commands.Draw(3);
@@ -672,8 +527,7 @@ void RunNegative(Bench& bench) noexcept {
     {
         const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0}};
         const VertexStream streams[] = {{8, VertexStepRate::Vertex}};
-        auto pipeline =
-            bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+        auto pipeline = bench.Pipeline(shaders::VertexFloatVS, {attributes, streams});
         Check(pipeline.Error() == ErrorCode::InvalidArgument &&
                   bench.device->LastError().ByteCount() != 0,
               "missing shader input location is rejected with a diagnostic");
@@ -684,7 +538,7 @@ void RunNegative(Bench& bench) noexcept {
         const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
                                               {1, VertexFormat::UByte4Unorm, 0, 8}};
         const VertexStream streams[] = {{12, VertexStepRate::Vertex}};
-        auto pipeline = bench.Pipeline(Text(IntHlsl), Text(IntVertexGlsl), {attributes, streams});
+        auto pipeline = bench.Pipeline(shaders::VertexIntVS, {attributes, streams});
         Check(pipeline.Error() == ErrorCode::InvalidArgument,
               "normalized format feeding an int input is rejected");
     }
@@ -694,8 +548,7 @@ void RunNegative(Bench& bench) noexcept {
         const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
                                               {1, VertexFormat::UShort4, 0, 8}};
         const VertexStream streams[] = {{16, VertexStepRate::Vertex}};
-        auto pipeline =
-            bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+        auto pipeline = bench.Pipeline(shaders::VertexFloatVS, {attributes, streams});
         Check(pipeline.Error() == ErrorCode::InvalidArgument,
               "integer format feeding a float input is rejected");
     }
@@ -705,8 +558,7 @@ void RunNegative(Bench& bench) noexcept {
         const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
                                               {0, VertexFormat::Float4, 0, 8}};
         const VertexStream streams[] = {{24, VertexStepRate::Vertex}};
-        auto pipeline =
-            bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+        auto pipeline = bench.Pipeline(shaders::VertexFloatVS, {attributes, streams});
         Check(pipeline.Error() == ErrorCode::InvalidArgument,
               "invalid layout is rejected at pipeline creation");
     }

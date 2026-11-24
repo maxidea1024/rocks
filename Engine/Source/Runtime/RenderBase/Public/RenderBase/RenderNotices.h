@@ -7,7 +7,7 @@
 
 namespace rocks::render {
 
-// 렌더 lane이 게임 lane에 돌려주는 결과 종류다(Docs/Design/RenderBase.ko.md 5.2절 완료 통지 큐).
+// 렌더 lane이 게임 lane에 돌려주는 결과 종류다(Docs/Design/RenderBase 5.2절 완료 통지 큐).
 enum class RenderNoticeKind : uint8 {
     // 프레임 하나의 lane 처리와 GPU 실행이 끝났다(frame 번호, 실패면 error).
     FrameCompleted,

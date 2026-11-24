@@ -335,23 +335,13 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
         list_->RSSetScissorRects(1, &scissor);
     }
 
-    list_->SetGraphicsRootSignature(rootSignature_.Get());
-    list_->SetComputeRootSignature(computeRootSignature_.Get());
+    // root signature·table은 그리기·dispatch 직전에 묶인 파이프라인 것으로 건다(ApplyRootBindings).
+    appliedGraphicsRoot_ = nullptr;
+    appliedComputeRoot_ = nullptr;
     ID3D12DescriptorHeap* heaps[] = {srvs_.Heap(), samplers_.Heap()};
     list_->SetDescriptorHeaps(2, heaps);
     list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     list_->OMSetStencilRef(0);
-    const TextureRecord* white = textures_.Find(white_.slot);
-    if (white != nullptr) {
-        list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(white->srv));
-        list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(white->sampler));
-    }
-
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot, srvs_.Gpu(nullBufferSrv_));
-    }
-
-    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
 }
 
 void D3D12Device::SetPipeline(PipelineHandle handle) noexcept {
@@ -459,14 +449,8 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
             TrackTransition(*owner, ownerSlot, range, ShaderReadStates);
         }
 
+        // table은 그리기·dispatch 직전에 건다(ApplyRootBindings).
         boundTexture_ = slot;
-        // compute 기록에는 graphics root가 없다(compute t0·s0는 dispatch 때 건다, RG4).
-        if (computeRecording_) {
-            return;
-        }
-
-        list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
-        list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
     }
 }
 
@@ -482,15 +466,8 @@ Result<void> D3D12Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
         return Result<void>::Success();
     }
 
-    // 그래픽 root에는 바로 올리고(compute 파이프라인이 묶여 있어도 다음 그리기가 같은 값을 본다),
-    // compute는 dispatch 때 같은 값을 compute root 상수로 올린다.
+    // 값은 그리기·dispatch 직전에 root 상수로 올린다(ApplyRootBindings).
     platform::MemoryCopy(constants_, bytes.Data(), bytes.Size());
-    if (computeRecording_) {
-        return Result<void>::Success();
-    }
-
-    list_->SetGraphicsRoot32BitConstants(
-        RootConstants, static_cast<UINT>(bytes.Size() / sizeof(uint32)), constants_, 0);
     return Result<void>::Success();
 }
 
@@ -504,12 +481,6 @@ void D3D12Device::SetBufferView(uint32 slot, BufferViewHandle handle) noexcept {
     const BufferViewRecord* view = bufferViews_.Find(handle.slot);
     const bool readable = view != nullptr && view->access == ViewAccess::Read;
     boundViews_[slot] = readable ? handle : BufferViewHandle{};
-    if (computeRecording_) {
-        return;
-    }
-
-    list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot,
-                                          srvs_.Gpu(readable ? view->descriptor : nullBufferSrv_));
 }
 
 // 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(DrawBufferSlotsSatisfied).

@@ -81,6 +81,10 @@ struct ShaderReflectedResource {
     bool debugBuffer = false;
     // 상수 버퍼 byte 수(리플렉션 값)다.
     uint32 constantBufferBytes = 0;
+    // 모양·원소 타입·구조화 원소 byte다(값 1 v3 — ShaderCore ShaderBindingResource와 같은 규칙).
+    ShaderResourceShape shape = ShaderResourceShape::None;
+    ShaderComponentType component = ShaderComponentType::None;
+    uint32 structureStride = 0;
     // 멤버는 reflection.members[firstMember, firstMember + memberCount)다(구조체 자식 포함).
     uint32 firstMember = 0;
     uint32 memberCount = 0;
@@ -90,6 +94,8 @@ struct ShaderReflectedResource {
 struct ShaderReflectedSignature {
     StringView semantic;
     uint32 index = 0;
+    // 원소 기본 타입이다(VS 입력 attribute 마스크 v3에 쓴다).
+    ShaderComponentType component = ShaderComponentType::Float;
 };
 
 // (텍스처, 샘플러) 사용 쌍 하나다(SPIR-V 경로 — SPIRV-Cross 결합 sampler, 16.1절 SSD36).

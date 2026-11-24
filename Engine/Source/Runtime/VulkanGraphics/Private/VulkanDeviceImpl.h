@@ -12,7 +12,7 @@
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/ResourceAccess.h>
-#include <Graphics/ShaderSourceCompiler.h>
+#include <Graphics/ShaderBindings.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
@@ -483,15 +483,8 @@ public:
     void Retire(BufferViewHandle view) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
-    // 쿠킹 코드 수신은 SH2e2에서 구현한다(ShaderSystem 16.1절 SSD43).
-    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override {
-        (void)desc;
-        return Result<ShaderHandle>::Failure(ErrorCode::Unsupported);
-    }
-
-    void Retire(ShaderHandle shader) noexcept override {
-        (void)shader;
-    }
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
+    void Retire(ShaderHandle shader) noexcept override;
 
     void Retire(SwapChainHandle swapChain) noexcept override;
     void ReclaimCompleted() noexcept override;
@@ -774,14 +767,10 @@ private:
     Result<VkRenderPass> RenderPassFor(const RenderPassKey& key) noexcept;
     // 색 하나·깊이 없는 render pass다(swapchain 중간 이미지).
     Result<VkRenderPass> RenderPassFor(VkFormat format, bool load) noexcept;
-    Result<void> MatchVertexInputs(const CompiledShader& vertex,
-                                   const VertexLayout& layout) noexcept;
-    // 단계들의 리플렉션을 고정 배치(PipelineDesc·ComputePipelineDesc)와 대조하고 set
-    // layout·파이프라인 layout·binding 표를 record에 만든다. 단계의 push constant 블록이
-    // record.drawConstantBytes보다 크면 InvalidArgument다. compute면 pixel은 null이다. 실패하면
-    // 만든 객체를 파괴한다.
-    Result<void> BuildPipelineLayout(const CompiledShader& first, const CompiledShader* pixel,
-                                     bool compute, PipelineRecord& record) noexcept;
+    // slot 표(PipelineSlots — 셰이더 layout의 set = 단계·binding)로 set layout·파이프라인 layout·
+    // binding 표를 record에 만든다. 실패하면 만든 객체를 파괴한다.
+    Result<void> BuildPipelineLayout(const PipelineSlots& slots, bool compute,
+                                     PipelineRecord& record) noexcept;
     void DestroyPipelineLayout(PipelineRecord& record) noexcept;
     Result<void> Reject(const char* message) noexcept;
     // 패스 끝 MSAA resolve다(EndFrame, render pass를 닫은 뒤, 잠금 안).
@@ -789,7 +778,10 @@ private:
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                         uint32 drawConstantBytes) noexcept;
-    Result<VkShaderModule> CreateShaderModule(const CompiledShader& shader) noexcept;
+    // 장치 셰이더의 SPIR-V module과 진입점 이름(OpEntryPoint)이다. 진입점이 없으면
+    // InvalidArgument다.
+    Result<VkShaderModule> CreateShaderModule(const DeviceShaderCode& shader,
+                                              char (&entry)[64]) noexcept;
 
     // --- VulkanCommands.cpp ---
     Result<void> BeginRecording() noexcept;
@@ -982,7 +974,6 @@ private:
     uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
     bool validation_ = false;
     bool software_ = false;
-    ShaderSourceCompiler* shaderCompiler_ = nullptr;
 
     // 메모리 할당기와 그 잠금이다. 장치 잠금·staging pool 잠금 안에서 잡는 가장 안쪽 잠금이다(이
     // 잠금을 쥔 채 다른 잠금을 잡지 않는다).
@@ -1081,6 +1072,8 @@ private:
     VkQueryPool queryPool_ = VK_NULL_HANDLE;
     TimestampSourceImpl timestampSource_;
     TimestampRing timestamps_;
+    // 장치 셰이더(CreateShader — 코드와 layout의 CPU 사본)다.
+    DeviceShaderTable shaders_;
     uint64 timestampFrequency_ = 0;
     uint64 timestampMask_ = 0;
     // 초기화가 필요한 slot(bit)과 이번 기록이 초기화한·쓴 slot이다.

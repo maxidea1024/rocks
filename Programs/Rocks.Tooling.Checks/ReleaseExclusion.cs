@@ -38,18 +38,9 @@ public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures
 public static class ReleaseExclusion
 {
     /// <summary>
-    /// 알려진 예외다. D3D12Graphics·OpenGLGraphics 건은 SH2(쿠킹된 셰이더를 받는 Graphics API, OpenGLGraphics의 GLES 미리보기 전환),
-    /// D3D11Graphics 건은 SH5(쿠킹된 D3D11_SM5 코드 연결)에서 없어진다.
+    /// 알려진 예외다. SH2에서 D3D12·D3D11 런타임 컴파일러와 Windows GLES 미리보기 예외를 모두 지웠다(ShaderSystem 16.1절 SH2e2) — 지금은 없다.
     /// </summary>
-    public static readonly IReadOnlyList<ReleaseException> KnownExceptions =
-    [
-        new("release-shader-compiler", NativePlatform.Windows, "D3D12Graphics", "d3dcompiler", "SH2",
-            "D3D12Graphics compiles its shaders at run time with D3DCompile (ShaderSystem 4: d3dcompiler link and runtime D3DCompile are removed in SH2)"),
-        new("release-shader-compiler", NativePlatform.Windows, "D3D11Graphics", "d3dcompiler", "SH5",
-            "D3D11Graphics compiles its shaders at run time with D3DCompile until cooked D3D11_SM5 code arrives (ShaderSystem P15/SH5)"),
-        new("release-windows-opengl", NativePlatform.Windows, "OpenGLGraphics", "OpenGLGraphics", "SH2",
-            "Sandbox links the OpenGL ES (GLES31_PC preview) backend for its D3D12/OpenGL ES self-test (ShaderSystem 9: the preview backend is kept out of Release Windows executables in SH2)")
-    ];
+    public static readonly IReadOnlyList<ReleaseException> KnownExceptions = [];
 
     // 검사하는 대상 플랫폼과 아키텍처다(개발 호스트 두 곳과 모바일).
     private static readonly (NativePlatform Platform, NativeArchitecture Architecture)[] Platforms =

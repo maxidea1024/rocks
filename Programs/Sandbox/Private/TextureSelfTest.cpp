@@ -1,4 +1,5 @@
 #include "TextureSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
@@ -31,15 +32,6 @@ void PrintLastError(Device& device) noexcept {
            device.LastError().Data());
 }
 
-StringView Text(const char* text, usize bytes) noexcept {
-    return StringView(text, bytes - 1);
-}
-
-template <usize Count>
-StringView Text(const char (&text)[Count]) noexcept {
-    return Text(text, Count);
-}
-
 bool Near(uint8 actual, int expected) noexcept {
     const int delta = static_cast<int>(actual) - expected;
     return delta <= ColorTolerance && delta >= -ColorTolerance;
@@ -62,194 +54,7 @@ void FillBytes(Span<uint8> bytes, uint32 seed) noexcept {
 // --- 셰이더 ---
 // 정점 버퍼 없이 화면을 덮는 삼각형이다. 픽셀 셰이더는 대상의 열(x)로 읽을 자리를 고른다.
 
-constexpr char FullScreenGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-#define ROCKS_FULL_SCREEN_HLSL                                                                     \
-    "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"                                       \
-    "    float2 uv = float2((id << 1) & 2, id & 2);\n"                                             \
-    "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"                                               \
-    "}\n"
-
-// 2D 배열: 열 x가 layer다(texel (1, 1)).
-constexpr char ArrayHlsl[] =
-    "Texture2DArray<float4> source : register(t0);\n" ROCKS_FULL_SCREEN_HLSL
-    "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-    "    return source.Load(int4(1, 1, int(position.x), 0));\n"
-    "}\n";
-
-constexpr char ArrayGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler2DArray ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = texelFetch(ps0, ivec3(1, 1, int(gl_FragCoord.x)), 0);
-}
-)";
-
-// 3D: 열 x가 깊이 면이다(texel (1, 1)).
-constexpr char VolumeHlsl[] = "Texture3D<float4> source : register(t0);\n" ROCKS_FULL_SCREEN_HLSL
-                              "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-                              "    return source.Load(int4(1, 1, int(position.x), 0));\n"
-                              "}\n";
-
-constexpr char VolumeGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler3D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = texelFetch(ps0, ivec3(1, 1, int(gl_FragCoord.x)), 0);
-}
-)";
-
-// cube: 열 x = 면 × 2 + k. 면마다 k = 0은 texel (0, 0), k = 1은 texel (1, 1)로 가는 방향이다.
-// 방향은 D3D·OpenGL ES가 같은 cube 면 선택 표(major axis와 sc·tc, ES 3.2 표 8.19)에서 고른 값이다:
-// +X(sc = −z, tc = −y), −X(+z, −y), +Y(+x, +z), −Y(+x, −z), +Z(+x, −y), −Z(−x, −y). v = 0이 첫
-// 행이다.
-#define ROCKS_CUBE_DIRECTIONS(T)                                                                   \
-    T "(1.0, 0.5, 0.5), " T "(1.0, -0.5, -0.5), " T "(-1.0, 0.5, -0.5), " T                        \
-      "(-1.0, -0.5, 0.5),\n" T "(-0.5, 1.0, -0.5), " T "(0.5, 1.0, 0.5), " T                       \
-      "(-0.5, -1.0, 0.5), " T "(0.5, -1.0, -0.5),\n" T "(-0.5, 0.5, 1.0), " T                      \
-      "(0.5, -0.5, 1.0), " T "(0.5, 0.5, -1.0), " T "(-0.5, -0.5, -1.0)"
-
-constexpr char CubeHlsl[] =
-    "TextureCube<float4> source : register(t0);\n"
-    "SamplerState sourceSampler : register(s0);\n"
-    "static const float3 Directions[12] = {\n" ROCKS_CUBE_DIRECTIONS(
-        "float3") "};\n" ROCKS_FULL_SCREEN_HLSL
-                  "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-                  "    return source.SampleLevel(sourceSampler, "
-                  "Directions[int(position.x)], 0.0);\n"
-                  "}\n";
-
-constexpr char CubeGlsl[] = "#version 320 es\n"
-                            "precision highp float;\n"
-                            "precision highp int;\n"
-                            "layout(binding = 0) uniform highp samplerCube ps0;\n"
-                            "layout(location = 0) out vec4 out_var_SV_Target0;\n"
-                            "const vec3 Directions[12] = vec3[12](\n" ROCKS_CUBE_DIRECTIONS(
-                                "vec3") ");\n"
-                                        "void main() {\n"
-                                        "    out_var_SV_Target0 = textureLod(ps0, "
-                                        "Directions[int(gl_FragCoord.x)], 0.0);\n"
-                                        "}\n";
-
-// cube 배열: 열 x = cube × 6 + 면, 면마다 texel (0, 0) 방향(위 표의 k = 0)이다.
-constexpr char CubeArrayHlsl[] =
-    "TextureCubeArray<float4> source : register(t0);\n"
-    "SamplerState sourceSampler : register(s0);\n"
-    "static const float3 Directions[12] = {\n" ROCKS_CUBE_DIRECTIONS(
-        "float3") "};\n" ROCKS_FULL_SCREEN_HLSL
-                  "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-                  "    int column = int(position.x);\n"
-                  "    float3 direction = Directions[(column % 6) * 2];\n"
-                  "    return source.SampleLevel(sourceSampler, "
-                  "float4(direction, float(column / 6)), 0.0);\n"
-                  "}\n";
-
-constexpr char CubeArrayGlsl[] = "#version 320 es\n"
-                                 "precision highp float;\n"
-                                 "precision highp int;\n"
-                                 "layout(binding = 0) uniform highp samplerCubeArray ps0;\n"
-                                 "layout(location = 0) out vec4 out_var_SV_Target0;\n"
-                                 "const vec3 Directions[12] = vec3[12](\n" ROCKS_CUBE_DIRECTIONS(
-                                     "vec3") ");\n"
-                                             "void main() {\n"
-                                             "    int column = int(gl_FragCoord.x);\n"
-                                             "    vec3 direction = Directions[(column % 6) * 2];\n"
-                                             "    out_var_SV_Target0 = textureLod(ps0, "
-                                             "vec4(direction, float(column / 6)), 0.0);\n"
-                                             "}\n";
-
-// 2D load: texel (1, 1)을 그대로 낸다(swizzle 시험).
-constexpr char LoadHlsl[] = "Texture2D<float4> source : register(t0);\n" ROCKS_FULL_SCREEN_HLSL
-                            "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-                            "    return source.Load(int3(1, 1, 0));\n"
-                            "}\n";
-
-constexpr char LoadGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = texelFetch(ps0, ivec2(1, 1), 0);
-}
-)";
-
-// 3D W축: (0.5, 0.5, 1.25)를 표본한다. Wrap이면 w = 0.25(깊이 면 0), Clamp면 면 1이다.
-constexpr char AddressWHlsl[] =
-    "Texture3D<float4> source : register(t0);\n"
-    "SamplerState sourceSampler : register(s0);\n" ROCKS_FULL_SCREEN_HLSL
-    "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-    "    return source.SampleLevel(sourceSampler, "
-    "float3(0.5, 0.5, 1.25), 0.0);\n"
-    "}\n";
-
-constexpr char AddressWGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler3D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = textureLod(ps0, vec3(0.5, 0.5, 1.25), 0.0);
-}
-)";
-
-// 깊이 비교: 열 0은 비교 값 0.25, 열 1은 0.75로 (0.5, 0.5)를 비교 표본한다.
-constexpr char CompareHlsl[] =
-    "Texture2D<float> source : register(t0);\n"
-    "SamplerComparisonState sourceSampler : register(s0);\n" ROCKS_FULL_SCREEN_HLSL
-    "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-    "    float reference = position.x < 1.0 ? 0.25 : 0.75;\n"
-    "    float result = source.SampleCmpLevelZero(sourceSampler, "
-    "float2(0.5, 0.5), reference);\n"
-    "    return float4(result, result, result, 1.0);\n"
-    "}\n";
-
-constexpr char CompareGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler2DShadow ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    float reference = gl_FragCoord.x < 1.0 ? 0.25 : 0.75;
-    float result = textureLod(ps0, vec3(0.5, 0.5, reference), 0.0);
-    out_var_SV_Target0 = vec4(result, result, result, 1.0);
-}
-)";
-
-// 깊이 비교 선형 필터(PCF): (0.5, 0.5)를 비교 값 0.5로 표본한다.
-constexpr char CompareLinearHlsl[] =
-    "Texture2D<float> source : register(t0);\n"
-    "SamplerComparisonState sourceSampler : register(s0);\n" ROCKS_FULL_SCREEN_HLSL
-    "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
-    "    float result = source.SampleCmpLevelZero(sourceSampler, "
-    "float2(0.5, 0.5), 0.5);\n"
-    "    return float4(result, result, result, 1.0);\n"
-    "}\n";
-
-constexpr char CompareLinearGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler2DShadow ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    float result = textureLod(ps0, vec3(0.5, 0.5, 0.5), 0.0);
-    out_var_SV_Target0 = vec4(result, result, result, 1.0);
-}
-)";
-
-#undef ROCKS_FULL_SCREEN_HLSL
-#undef ROCKS_CUBE_DIRECTIONS
+// 셰이더는 FullScreen.rsf·Texture.rsf다(텍스처 이름은 파이프라인 이름 표 bindings.texture).
 
 // 대상 하나와 파이프라인 하나로 텍스처를 그려 대상 픽셀을 읽는다(대상은 columns × 1 RGBA8Unorm).
 struct Bench {
@@ -259,7 +64,8 @@ struct Bench {
     uint32 columns = 0;
     uint8 pixels[16 * 4] = {};
 
-    bool Initialize(Device& owner, uint32 width, StringView hlsl, StringView glsl) noexcept {
+    bool Initialize(Device& owner, uint32 width, const shaders::ShaderTypeDesc& pixel,
+                    const char* texture) noexcept {
         device = &owner;
         columns = width;
         TextureDesc desc;
@@ -269,10 +75,10 @@ struct Bench {
         desc.usage = TextureUsage::RenderTarget;
         auto created = owner.CreateTexture(desc, {});
         PipelineDesc pipelineDesc;
-        pipelineDesc.vertex = {hlsl, Text(FullScreenGlsl)};
-        pipelineDesc.pixel = {hlsl, glsl};
+        pipelineDesc.bindings.texture = texture;
         pipelineDesc.colorFormats[0] = PixelFormat::RGBA8Unorm;
-        auto made = owner.CreatePipeline(pipelineDesc);
+        auto made =
+            shaders::CreateGraphicsPipeline(owner, shaders::FullScreenVS, pixel, pipelineDesc);
         if (created) {
             target = created.Value();
         }
@@ -412,7 +218,7 @@ void RunArray(Device& device, Allocator& allocator) noexcept {
 
     // mip 1은 위 갱신으로 바뀌었으므로 mip 0만 셰이더로 본다.
     Bench bench;
-    if (bench.Initialize(device, Layers, Text(ArrayHlsl), Text(ArrayGlsl))) {
+    if (bench.Initialize(device, Layers, shaders::TextureArrayPS, "Layers")) {
         Check(bench.Render(texture.Value()), "2D array draw");
         for (uint32 layer = 0; layer < Layers; ++layer) {
             Check(NearColor(bench.Pixel(layer), 40 + static_cast<int>(layer) * 60,
@@ -479,7 +285,7 @@ void RunVolume(Device& device, Allocator& allocator) noexcept {
     }
     RunRoundTrip(device, texture.Value(), desc, data.View(), "3D", allocator);
     Bench bench;
-    if (bench.Initialize(device, Extent, Text(VolumeHlsl), Text(VolumeGlsl))) {
+    if (bench.Initialize(device, Extent, shaders::TextureVolumePS, "Volume")) {
         Check(bench.Render(texture.Value()), "3D draw");
         for (uint32 z = 0; z < Extent; ++z) {
             Check(NearColor(bench.Pixel(z), 30 + static_cast<int>(z) * 50, 90,
@@ -496,7 +302,7 @@ void RunVolume(Device& device, Allocator& allocator) noexcept {
     slab.height = 1;
     const uint8 texels[8] = {255, 0, 0, 255, 0, 255, 0, 255};
     Bench address;
-    if (!address.Initialize(device, 1, Text(AddressWHlsl), Text(AddressWGlsl))) {
+    if (!address.Initialize(device, 1, shaders::TextureAddressWPS, "Wrapped")) {
         Check(false, "W address bench resources are created");
         return;
     }
@@ -564,7 +370,7 @@ void RunCube(Device& device, Allocator& allocator) noexcept {
     auto cube = device.CreateTexture(small, Span<const uint8>(faces, sizeof(faces)));
     Check(cube.IsOk(), "2x2 cube texture is created");
     Bench bench;
-    if (cube && bench.Initialize(device, 12, Text(CubeHlsl), Text(CubeGlsl))) {
+    if (cube && bench.Initialize(device, 12, shaders::TextureCubePS, "Cube")) {
         Check(bench.Render(cube.Value()), "cube draw");
         for (uint32 face = 0; face < CubeFaceCount; ++face) {
             const int red = static_cast<int>(face) * 40 + 10;
@@ -613,7 +419,7 @@ void RunCubeArray(Device& device, Allocator& allocator) noexcept {
     Check(cubes.IsOk(), "2x2 cube array texture is created");
     Bench bench;
     if (cubes &&
-        bench.Initialize(device, Cubes * CubeFaceCount, Text(CubeArrayHlsl), Text(CubeArrayGlsl))) {
+        bench.Initialize(device, Cubes * CubeFaceCount, shaders::TextureCubeArrayPS, "Cubes")) {
         Check(bench.Render(cubes.Value()), "cube array draw");
         for (uint32 cube = 0; cube < Cubes; ++cube) {
             for (uint32 face = 0; face < CubeFaceCount; ++face) {
@@ -671,7 +477,7 @@ void RunSwizzle(Device& device) noexcept {
 
     Check(swizzled.IsOk(), "swizzled texture is created");
     Bench bench;
-    if (!swizzled || !bench.Initialize(device, 1, Text(LoadHlsl), Text(LoadGlsl))) {
+    if (!swizzled || !bench.Initialize(device, 1, shaders::TextureLoadPS, "Source")) {
         if (swizzled) {
             device.Retire(swizzled.Value());
         }
@@ -728,7 +534,7 @@ void RunCompare(Device& device) noexcept {
         return;
     }
     Bench bench;
-    if (!bench.Initialize(device, 2, Text(CompareHlsl), Text(CompareGlsl))) {
+    if (!bench.Initialize(device, 2, shaders::TextureComparePS, "Shadow")) {
         Check(false, "comparison bench resources are created");
         return;
     }
@@ -920,7 +726,7 @@ void RunSwizzleIsolation(Device& device) noexcept {
         return;
     }
     Bench bench;
-    if (!bench.Initialize(device, 1, Text(LoadHlsl), Text(LoadGlsl))) {
+    if (!bench.Initialize(device, 1, shaders::TextureLoadPS, "Source")) {
         Check(false, "swizzle isolation bench resources are created");
         return;
     }
@@ -985,7 +791,7 @@ void RunCompareLinear(Device& device) noexcept {
         return;
     }
     Bench bench;
-    if (!bench.Initialize(device, 1, Text(CompareLinearHlsl), Text(CompareLinearGlsl))) {
+    if (!bench.Initialize(device, 1, shaders::TextureCompareLinearPS, "Shadow")) {
         Check(false, "PCF bench resources are created");
         return;
     }

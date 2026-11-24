@@ -22,7 +22,7 @@
 
 `Editor/`로 시작하는 경로는 `Engine/Source/Editor/` 기준이다. Rocks 경로는 저장소 루트 기준이고 `44bb1d2`(형식 정의 JSON은 `origin/feature/engine-runtime` `6eeba23`)에서 확인했다. 확인하지 못한 사실은 그 자리에 **미확인**으로 적고 19.2절에 모은다.
 
-**상태.** 이 문서는 **설계**다. 정식 렌더러는 화면 마일스톤 다음 단계다([렌더 기반](RenderBase.ko.md) 18.1절 "범위 밖" 첫 항목). 상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음).
+**상태.** 이 문서는 **설계**다. 정식 렌더러는 화면 마일스톤 다음 단계다([렌더 기반](RenderBase/18-ScreenMilestone.ko.md) 18.1절 "범위 밖" 첫 항목). 상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음).
 
 **용어 방침.** UE 구조는 따르되 이름은 Rocks 이름을 쓴다. UE 타입·함수·설정 변수 이름은 용어 대응(2절)과 "UE 5.8 방식" 표·근거 열에만 적는다. GBuffer·Forward+·clustered·light grid·HZB·CSM·shadow atlas·PCF·TAA·tone mapping처럼 업계에서 함께 쓰는 말은 그대로 쓴다. 계획·RenderBase에 이미 있는 Rocks 이름(`RenderPath`·`ViewDesc`·`RenderInstanceId`·`StaticLighting`·`DynamicGiMethod`·`RenderMode`·`Upscaler`·`RayScene`·`GpuScope`·`FramePacket`·`RenderHandle`)은 그대로 쓴다.
 

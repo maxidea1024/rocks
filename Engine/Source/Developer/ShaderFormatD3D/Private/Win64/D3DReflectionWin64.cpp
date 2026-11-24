@@ -128,6 +128,59 @@ bool KindOf(D3D_SHADER_INPUT_TYPE type, ShaderResourceKind& kind) noexcept {
     }
 }
 
+// 자원 모양이다(값 1 v3). 모르는 차원이면 None이다(규칙이 거부한다).
+ShaderResourceShape ShapeOf(D3D_SHADER_INPUT_TYPE type, D3D_SRV_DIMENSION dimension) noexcept {
+    switch (type) {
+    case D3D_SIT_STRUCTURED:
+    case D3D_SIT_UAV_RWSTRUCTURED:
+        return ShaderResourceShape::StructuredBuffer;
+    case D3D_SIT_BYTEADDRESS:
+    case D3D_SIT_UAV_RWBYTEADDRESS:
+        return ShaderResourceShape::RawBuffer;
+    case D3D_SIT_TEXTURE:
+    case D3D_SIT_UAV_RWTYPED:
+        break;
+    default:
+        return ShaderResourceShape::None;
+    }
+
+    switch (dimension) {
+    case D3D_SRV_DIMENSION_BUFFER:
+        return ShaderResourceShape::TypedBuffer;
+    case D3D_SRV_DIMENSION_TEXTURE1D:
+        return ShaderResourceShape::Texture1D;
+    case D3D_SRV_DIMENSION_TEXTURE1DARRAY:
+        return ShaderResourceShape::Texture1DArray;
+    case D3D_SRV_DIMENSION_TEXTURE2D:
+        return ShaderResourceShape::Texture2D;
+    case D3D_SRV_DIMENSION_TEXTURE2DARRAY:
+        return ShaderResourceShape::Texture2DArray;
+    case D3D_SRV_DIMENSION_TEXTURE2DMS:
+        return ShaderResourceShape::Texture2DMultisample;
+    case D3D_SRV_DIMENSION_TEXTURE2DMSARRAY:
+        return ShaderResourceShape::Texture2DMultisampleArray;
+    case D3D_SRV_DIMENSION_TEXTURE3D:
+        return ShaderResourceShape::Texture3D;
+    case D3D_SRV_DIMENSION_TEXTURECUBE:
+        return ShaderResourceShape::TextureCube;
+    case D3D_SRV_DIMENSION_TEXTURECUBEARRAY:
+        return ShaderResourceShape::TextureCubeArray;
+    default:
+        return ShaderResourceShape::None;
+    }
+}
+
+ShaderComponentType ReturnComponent(D3D_RESOURCE_RETURN_TYPE type) noexcept {
+    switch (type) {
+    case D3D_RETURN_TYPE_SINT:
+        return ShaderComponentType::Int;
+    case D3D_RETURN_TYPE_UINT:
+        return ShaderComponentType::Uint;
+    default:
+        return ShaderComponentType::Float;
+    }
+}
+
 template <class Traits>
 class Walker {
 public:
@@ -216,6 +269,11 @@ private:
         element.semantic =
             parameter.SemanticName != nullptr ? StringView(parameter.SemanticName) : StringView();
         element.index = parameter.SemanticIndex;
+        element.component = parameter.ComponentType == D3D_REGISTER_COMPONENT_SINT32
+                                ? ShaderComponentType::Int
+                                : (parameter.ComponentType == D3D_REGISTER_COMPONENT_UINT32
+                                       ? ShaderComponentType::Uint
+                                       : ShaderComponentType::Float);
         return element;
     }
 
@@ -277,6 +335,14 @@ private:
         resource.name = name;
         resource.slot = bind.BindPoint;
         resource.count = bind.BindCount;
+        resource.shape = ShapeOf(bind.Type, bind.Dimension);
+        const bool typed = resource.shape != ShaderResourceShape::None &&
+                           resource.shape != ShaderResourceShape::StructuredBuffer &&
+                           resource.shape != ShaderResourceShape::RawBuffer;
+        resource.component = typed ? ReturnComponent(bind.ReturnType) : ShaderComponentType::None;
+        // 구조화 버퍼의 NumSamples는 원소 stride다(D3D12_SHADER_INPUT_BIND_DESC).
+        resource.structureStride =
+            resource.shape == ShaderResourceShape::StructuredBuffer ? bind.NumSamples : 0u;
         const bool constantBuffer = resource.kind == ShaderResourceKind::ConstantBuffer;
         const UINT space = Traits::Space(bind);
         if (kind_ == D3DCodeKind::Dxil) {

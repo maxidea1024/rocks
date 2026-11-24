@@ -7,7 +7,7 @@
 // 수명 동안 바꾸지 않는다(Device::Caps, 잠금 없이 여러 스레드가 읽는다). 픽셀 형식별 능력은
 // Device::GetPixelFormatCaps·GetPixelFormatSampleCounts다(PixelFormat.ko.md 7·8절).
 //
-// 값의 출처는 backend마다 다르다(Docs/Design/RenderBase.ko.md 4.4절 GX1 "구현" 표).
+// 값의 출처는 backend마다 다르다(Docs/Design/RenderBase 4.4절 GX1 "구현" 표).
 // - D3D12·D3D11: API 상수(d3d12.h·d3d11.h의 D3D*_REQ_*·COMMONSHADER_*)와 CheckFeatureSupport.
 // - Vulkan: VkPhysicalDeviceLimits·기능 질의(장치가 켠 기능만 참이다).
 // - OpenGL ES: glGetIntegerv 한도와 확장 문자열.
