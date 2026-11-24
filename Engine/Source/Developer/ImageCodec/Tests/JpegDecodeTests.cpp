@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <jpeglib.h>
 #include <rocksjpeg.h>
+#include <setjmp.h>
 
 // JPEG 디코더 시험이다(Docs/Design/AssetSystem 12.11절 A5g — libjpeg-turbo). 파일은 libjpeg 부호화
 // API로 시험 안에서 만든다: 회색·YCbCr 4:4:4·4:2:0·RGB(Adobe transform 0)·progressive·산술
@@ -48,6 +49,23 @@ public:
 private:
     const RocksJpegAllocator* previous_;
 };
+
+// ---- 부호화 오류: error_exit가 EncodeJpeg로 longjmp한다(기본 처리기의 exit()로 실행기를 끝내지
+// 않는다) ----
+
+// longjmp는 libjpeg(C) 프레임과 이 처리기만 건너뛴다 — setjmp를 둔 EncodeJpeg 프레임의 비자명
+// 소멸자 객체는 setjmp 앞에 만들어 건너뛰지 않는다.
+struct TestJpegError {
+    jpeg_error_mgr manager;
+    jmp_buf jump;
+};
+
+[[noreturn]] void TestJpegErrorExit(j_common_ptr cinfo) noexcept {
+    longjmp(reinterpret_cast<TestJpegError*>(cinfo->err)->jump, 1);
+}
+
+void TestJpegOutputMessage(j_common_ptr) noexcept {
+}
 
 // ---- 메모리 목적지 ----
 
@@ -107,8 +125,18 @@ Array<uint8> EncodeJpeg(Allocator& allocator, const JpegSpec& spec) noexcept {
     TestJpegBinding binding;
     Array<uint8> out(allocator);
     jpeg_compress_struct cinfo{};
-    jpeg_error_mgr error{};
-    cinfo.err = jpeg_std_error(&error);
+    TestJpegError error{};
+    cinfo.err = jpeg_std_error(&error.manager);
+    error.manager.error_exit = TestJpegErrorExit;
+    error.manager.output_message = TestJpegOutputMessage;
+    if (setjmp(error.jump) != 0) {
+        // 부호화 실패는 시험 실패로 보고하고 빈 결과를 돌려준다.
+        jpeg_destroy_compress(&cinfo);
+        CHECK(false);
+        out.Clear();
+        return out;
+    }
+
     jpeg_create_compress(&cinfo);
     MemoryDestination destination{};
     destination.manager.init_destination = DestinationInit;
@@ -405,7 +433,8 @@ TEST(JpegDecode_RejectionsAndDamage) {
     const Decoded limited = Decode(allocator, file.View(), tight);
     CHECK(!limited.ok && limited.result.failure.error == ErrorCode::CapacityExceeded);
 
-    // scan 상한: DC 14 scan + 성분마다 계수 63개 × (첫 scan + 다듬기 13) = 2660 scan.
+    // scan 상한: DC 11 scan + 성분마다 계수 63개 × (첫 scan + 다듬기 10) = 2090 scan(8비트 Ah·Al
+    // 상한 10 — jcmaster.c 357).
     Array<jpeg_scan_info> scans(allocator);
     const auto add = [&scans](int count, int component, int ss, int se, int ah, int al) noexcept {
         jpeg_scan_info scan{};
@@ -420,7 +449,7 @@ TEST(JpegDecode_RejectionsAndDamage) {
         scan.Al = al;
         CHECK(scans.TryPushBack(scan));
     };
-    constexpr int MaxSuccessiveApproximation = 13;
+    constexpr int MaxSuccessiveApproximation = 10;
     add(3, -1, 0, 0, 0, MaxSuccessiveApproximation);
     for (int al = MaxSuccessiveApproximation - 1; al >= 0; --al) {
         add(3, -1, 0, 0, al + 1, al);

@@ -5,6 +5,7 @@
 #include "jpegint.h"
 #include "rocksjpeg.h"
 
+#include <limits.h>
 #include <setjmp.h>
 
 typedef struct RocksJpegError {
@@ -64,6 +65,10 @@ static void rocksJpegInitError(RocksJpegError* error)
 
 RocksJpegResult RocksJpegReadInfo(const unsigned char* data, size_t size, RocksJpegInfo* info)
 {
+  /* jpeg_mem_src takes an unsigned long (32 bits on Windows). */
+  if (size > ULONG_MAX)
+    return ROCKS_JPEG_ERROR;
+
   struct jpeg_decompress_struct cinfo;
   RocksJpegError error;
   rocksJpegInitError(&error);
@@ -90,6 +95,9 @@ RocksJpegResult RocksJpegReadInfo(const unsigned char* data, size_t size, RocksJ
 RocksJpegResult RocksJpegDecode(const unsigned char* data, size_t size, int grayscale, unsigned maxScans,
                                 unsigned char* pixels, size_t rowBytes)
 {
+  if (size > ULONG_MAX)
+    return ROCKS_JPEG_ERROR;
+
   struct jpeg_decompress_struct cinfo;
   RocksJpegError error;
   RocksJpegProgress progress;
