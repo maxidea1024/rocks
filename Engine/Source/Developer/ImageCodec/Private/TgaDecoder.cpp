@@ -1,4 +1,4 @@
-#include "ImageDecodersInternal.h"
+#include "ImageCodecInternal.h"
 
 #include <Core/Math/MathUtility.h>
 

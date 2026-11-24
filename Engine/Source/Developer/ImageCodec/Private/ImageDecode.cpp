@@ -1,9 +1,9 @@
-#include "ImageDecodersInternal.h"
+#include "ImageCodecInternal.h"
 
 #include <Core/Module/ModuleEntry.h>
 
-// ImageDecoders 모듈 진입점과 판별·분기다(Docs/Design/AssetSystem 12.9절).
-ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, ImageDecoders)
+// ImageCodec 모듈 진입점과 판별·분기다(Docs/Design/AssetSystem 12.9절).
+ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, ImageCodec)
 
 namespace rocks::image {
 namespace {

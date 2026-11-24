@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Base/NumericLimits.h>
-#include <ImageDecoders/ImageDecode.h>
+#include <ImageCodec/ImageDecode.h>
 
 // 디코더 공통부다(Docs/Design/AssetSystem 12.9절): 실패·경고 기록, 결과 할당(한도 판정), 정수 읽기.
 namespace rocks::image::detail {

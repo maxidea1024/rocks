@@ -20,9 +20,9 @@
 의존 방향(→는 의존):
 
 ```
-Programs/Commandlet → TextureTools → { AssetCooker, AssetDatabase, AssetNugget, ImageDecoders, Texture }
+Programs/Commandlet → TextureTools → { AssetCooker, AssetDatabase, AssetNugget, ImageCodec, Texture }
 AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase(Developer) → { AssetRuntime, HostConfig }
-Texture(Runtime) → { AssetRuntime, GraphicsTypes }       ImageDecoders(Developer) → { Core, Compression }
+Texture(Runtime) → { AssetRuntime, GraphicsTypes }       ImageCodec(Developer) → { Core, Compression }
 AssetRuntime → { ObjectSerialization, ObjectRuntime, Serialization, Task, Compression }
 EngineAssets(Runtime, 신규) → { Engine, AssetRuntime }   — AssetManager를 EngineSubsystem으로 붙이는 연결 모듈
 MeshSource(Runtime) → { AssetRuntime }                  Animation(Runtime) → { AssetRuntime, Curves }      (설계, MeshAnimationAssets 8절)

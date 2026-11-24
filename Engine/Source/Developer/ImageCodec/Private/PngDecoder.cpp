@@ -1,4 +1,4 @@
-#include "ImageDecodersInternal.h"
+#include "ImageCodecInternal.h"
 
 #include <Compression/Compression.h>
 #include <Core/Encoding/Crc32.h>

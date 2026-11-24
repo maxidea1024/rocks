@@ -1,7 +1,7 @@
 #include <Compression/Compression.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
-#include <ImageDecoders/ImageDecode.h>
+#include <ImageCodec/ImageDecode.h>
 #include <Platform/Memory.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>

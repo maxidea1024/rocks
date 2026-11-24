@@ -29,12 +29,12 @@ enum class ImageFileFormat : uint8 {
 };
 
 // 형식 이름("Bmp" 등 — 진단·시험용)이다.
-ROCKS_IMAGEDECODERS_API const char* ImageFileFormatName(ImageFileFormat format) noexcept;
+ROCKS_IMAGECODEC_API const char* ImageFileFormatName(ImageFileFormat format) noexcept;
 
 // 서명으로 형식을 판별한다. 서명이 없는 TGA는 TGA 2.0 footer("TRUEVISION-XFILE.") 또는 pathHint
 // 확장자(.tga·.icb·.vda·.vst, 대소문자 무시)로 판별한다. 모르면 Unknown이다.
-ROCKS_IMAGEDECODERS_API ImageFileFormat DetectImageFileFormat(Span<const uint8> file,
-                                                              StringView pathHint = {}) noexcept;
+ROCKS_IMAGECODEC_API ImageFileFormat DetectImageFileFormat(Span<const uint8> file,
+                                                           StringView pathHint = {}) noexcept;
 
 // 디코딩한 이미지다. pixels는 width × height × numSlices × (형식의 texel byte)이고 행 순서는 위에서
 // 아래, 행 사이 패딩 없음, 채널은 형식 순서(G·GA·RGBA), 16비트 정수와 float는 little-endian이다.
@@ -95,10 +95,10 @@ struct ImageDecodeResult {
 //   auto done = image::DecodeImage(allocator, bytes.View(), image::ImageFileFormat::Unknown, {},
 //                                  decoded);
 //   if (!done) { /* decoded.failure.code로 진단 */ }
-ROCKS_IMAGEDECODERS_API Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file,
-                                                 ImageFileFormat format,
-                                                 const ImageDecodeLimits& limits,
-                                                 ImageDecodeResult& out,
-                                                 StringView pathHint = {}) noexcept;
+ROCKS_IMAGECODEC_API Result<void> DecodeImage(Allocator& allocator, Span<const uint8> file,
+                                              ImageFileFormat format,
+                                              const ImageDecodeLimits& limits,
+                                              ImageDecodeResult& out,
+                                              StringView pathHint = {}) noexcept;
 
 } // namespace rocks::image

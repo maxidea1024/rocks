@@ -1,4 +1,4 @@
-#include "ImageDecodersInternal.h"
+#include "ImageCodecInternal.h"
 
 // BMP 디코더다(Docs/Design/AssetSystem 12.2·12.9절): BITMAPINFOHEADER(40)·V2(52)·V3(56)·V4(108)·
 // V5(124), 1·4·8비트 색표(BI_RGB·RLE8·RLE4), 16·24·32비트 BI_RGB·BITFIELDS·ALPHABITFIELDS. 결과는
