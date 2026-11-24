@@ -438,6 +438,13 @@ public static class InstalledSdk
 
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, (options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project)), context);
+        // 게임 규칙의 선행 타깃은 SDK가 싣는 프로그램 타깃이 있어야 한다(Docs/Design/BuildTargets 3.11절 — 후속).
+        if (rules.Target.PrerequisiteTargets.Count != 0)
+        {
+            throw new ArgumentException($"Target {rules.Target.Name}: game builds against an installed SDK do not build prerequisite targets yet " +
+                "(Docs/Design/BuildTargets section 3.11).");
+        }
+
         GameLayout layout = GamePlanning.Layout(rules, projectDescriptor, availablePlugins, context, toolchain, configuration, sdk, sdkModules,
             createDirectories: true);
         string[] targets = layout.Targets;

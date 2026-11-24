@@ -154,6 +154,7 @@ try
                 break;
             case "descriptors":
                 CompanionTargetTests.Run();
+                PrerequisiteTargetTests.Run();
                 DescriptorTests.Run(root, repository);
                 Pass("project and plugin descriptors parse strictly and resolve plugins");
                 break;
@@ -188,6 +189,9 @@ try
 
     CompanionTargetTests.Run();
     Pass("companion targets merge program modules and reject invalid companions");
+
+    PrerequisiteTargetTests.Run();
+    Pass("prerequisite targets keep their own rules, build first and once, skip unmatched and Release shipping builds, and reject invalid lists");
 
     EngineVersionTests.Run(root, repository);
     Pass(repository is null
