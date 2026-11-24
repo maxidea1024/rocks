@@ -212,11 +212,13 @@ bool FacesMatch(const Array<float>& values, uint32 slices, uint32 target, float 
     return true;
 }
 
-Result<PipelineHandle> FillPipeline(Device& device) noexcept {
+// 쓰기 텍스처 하나(name)를 채우는 compute 파이프라인이다.
+Result<PipelineHandle> FillPipeline(Device& device, const shaders::ShaderTypeDesc& type,
+                                    const char* name) noexcept {
     ComputePipelineDesc desc;
     desc.drawConstantBytes = sizeof(FillConstants);
-    desc.bindings.writableTextures[0] = "Layers";
-    return shaders::CreateComputePipeline(device, shaders::StorageFillCS, desc);
+    desc.bindings.writableTextures[0] = name;
+    return shaders::CreateComputePipeline(device, type, desc);
 }
 
 // cube Storage: 모든 면 0 → 면 2만 2. cube 배열: 모든 면 0 → 면 6만 6.
@@ -227,15 +229,6 @@ void RunCubeStorage(Device& device, Allocator& allocator) noexcept {
         StorageDesc(TextureDimension::TextureCubeArray, TextureUsage::Storage, CubeArrayCubes);
     const bool capable = HasPixelFormatCaps(device.GetPixelFormatCaps(cubeDesc.format),
                                             RequiredPixelFormatCaps(cubeDesc));
-    if (device.Info().backend == Backend::OpenGL) {
-        // GLES image uniform 타입은 묶은 target과 같아야 한다(layered cube는 imageCube). 쿠킹
-        // ESSL은 HLSL RWTexture2DArray에서 image2DArray라 cube 쓰기를 표현하지 못한다(한계 — 16.1절
-        // SH2e2 메모).
-        printf("  [NOT RUN] OpenGL ES storage: cube Storage writes (GLES needs imageCube, cooked "
-               "ESSL has image2DArray)\n");
-        return;
-    }
-
     auto cube = device.CreateTexture(cubeDesc, {});
     if (!capable) {
         Check(cube.Error() == ErrorCode::Unsupported,
@@ -247,11 +240,15 @@ void RunCubeStorage(Device& device, Allocator& allocator) noexcept {
     auto cubeArray = device.CreateTexture(arrayDesc, {});
     Check(cubeArray.IsOk() || !device.Caps().features.textureCubeArray,
           "cube array Storage R32Float texture");
-    // HLSL에는 cube 쓰기 타입이 없어 면·cube·cube 배열 모두 RWTexture2DArray로 쓴다(D3D·Vulkan은
-    // 배열 UAV view, ShaderSystem 7.2절).
-    auto fillCube = FillPipeline(device);
-    auto fillArray = FillPipeline(device);
-    auto fillFace = FillPipeline(device);
+    // cube·cube 배열은 RWTextureCube·RWTextureCubeArray(D3D·Vulkan·Metal은 면 단위 2D 배열 view,
+    // GLES는 imageCube·imageCubeArray — ShaderSystem 16.1절 SH2g). 면 하나만 고른 view는
+    // D3D·Vulkan이 1층 2D 배열 view(RWTexture2DArray)이고 GLES는 그 층을 2D로 묶는다(RWTexture2D —
+    // GLES는 층 일부를 배열로 묶지 못한다).
+    const bool gles = device.Info().backend == Backend::OpenGL;
+    auto fillCube = FillPipeline(device, shaders::StorageFillCubeCS, "Cube");
+    auto fillArray = FillPipeline(device, shaders::StorageFillCubeArrayCS, "CubeArray");
+    auto fillFace = gles ? FillPipeline(device, shaders::StorageFillFaceCS, "Face")
+                         : FillPipeline(device, shaders::StorageFillFaceLayerCS, "FaceLayer");
     Check(fillCube && fillArray && fillFace, "cube fill compute pipelines");
     if (!fillCube || !fillArray || !fillFace) {
         PrintLastError(device);

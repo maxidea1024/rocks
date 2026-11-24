@@ -155,6 +155,7 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     SpirvRewriteOptions rewrite;
     rewrite.stage = job.stage;
     rewrite.stageLocations = true;
+    rewrite.cubeStorageImages = true;
     if (!RewriteSpirv(raw.View(), rewrite, rewritten, diagnostics)) {
         FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "SPIR-V binding rules",
                       diagnostics.View());

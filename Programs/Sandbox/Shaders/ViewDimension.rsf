@@ -35,7 +35,7 @@ void FillFaceCS(uint3 id : SV_DispatchThreadID) {
     Face[id.xy] = Fill.fill.x;
 }
 
-ROCKS_IMAGE_FORMAT(r32f) RWTexture2DArray<float> Faces;
+ROCKS_IMAGE_FORMAT(r32f) RWTextureCube<float> Faces;
 
 [numthreads(4, 4, 1)]
 void FillCubeCS(uint3 id : SV_DispatchThreadID) {

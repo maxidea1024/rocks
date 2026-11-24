@@ -652,22 +652,31 @@ bool CheckStorageImageFormats(StringView source, String& diagnostics) noexcept {
             continue;
         }
 
-        // 바로 앞(공백 제외)이 ]]이고 그 [[가 vk::image_format(으로 시작해야 한다.
-        usize before = at;
-        while (before > 0 && (text[before - 1] == ' ' || text[before - 1] == '\t' ||
-                              text[before - 1] == '\r' || text[before - 1] == '\n')) {
-            --before;
-        }
+        // 바로 앞(공백 제외)에 이어진 [[…]] 묶음 중 하나가 vk::image_format(으로 시작해야 한다
+        // (RWTextureCube는 표지 attribute를 하나 더 단다 — Platform.rsh).
+        const auto skipSpace = [text](usize position) noexcept {
+            while (position > 0 && (text[position - 1] == ' ' || text[position - 1] == '\t' ||
+                                    text[position - 1] == '\r' || text[position - 1] == '\n')) {
+                --position;
+            }
 
+            return position;
+        };
+        usize before = skipSpace(at);
         bool formatted = false;
-        if (before >= 2 && text[before - 1] == ']' && text[before - 2] == ']') {
+        while (!formatted && before >= 2 && text[before - 1] == ']' && text[before - 2] == ']') {
             usize open = before - 2;
             while (open >= 2 && !(text[open - 1] == '[' && text[open - 2] == '[')) {
                 --open;
             }
 
-            formatted = open >= 2 && StringView(text + open - 2, size - (open - 2))
-                                         .StartsWith(Attribute, StringComparison::CaseSensitive);
+            if (open < 2) {
+                break;
+            }
+
+            formatted = StringView(text + open - 2, size - (open - 2))
+                            .StartsWith(Attribute, StringComparison::CaseSensitive);
+            before = skipSpace(open - 2);
         }
 
         if (!formatted) {

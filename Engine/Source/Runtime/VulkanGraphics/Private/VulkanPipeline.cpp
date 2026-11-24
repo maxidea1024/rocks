@@ -351,8 +351,9 @@ Result<void> VulkanDevice::RejectDrawConstantSize(bool pipelineBound, usize byte
     return Reject(message.CStr());
 }
 
-// 컴파일 훅의 정점 입력 리플렉션을 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조, D3D12와
-// 같은 규칙과 진단 문구).
+// 정점 입력은 쿠킹 값 1의 정점 입력(attribute 마스크·int·uint 마스크)을 배치와 대조한다(공용
+// MatchShaderVertexInputs — Docs/Design/RenderBase 10.4절 셰이더 입력 대조, 모든 backend가 같은
+// 규칙과 진단 문구).
 namespace {
 
 // slot 표의 자원 하나를 descriptor binding으로 옮긴다(set = 단계 — VS 0·PS 1·CS 0, binding = layout

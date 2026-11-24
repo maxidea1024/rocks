@@ -45,7 +45,10 @@ SANDBOX_PIXEL(SliceHalfPS, "SliceAttachment.rsf", "HalfPS")
 SANDBOX_PIXEL(SliceMsaaLayerPS, "SliceAttachment.rsf", "MsaaLayerPS")
 
 SANDBOX_COMPUTE(StorageColumnsCS, "StorageTarget.rsf", "ColumnsCS")
-SANDBOX_COMPUTE(StorageFillCS, "StorageTarget.rsf", "FillCS")
+SANDBOX_COMPUTE(StorageFillCubeCS, "StorageTarget.rsf", "FillCubeCS")
+SANDBOX_COMPUTE(StorageFillCubeArrayCS, "StorageTarget.rsf", "FillCubeArrayCS")
+SANDBOX_COMPUTE(StorageFillFaceLayerCS, "StorageTarget.rsf", "FillFaceLayerCS")
+SANDBOX_COMPUTE(StorageFillFaceCS, "StorageTarget.rsf", "FillFaceCS")
 SANDBOX_PIXEL(StorageDrawPS, "StorageTarget.rsf", "DrawPS")
 
 SANDBOX_PIXEL(TextureArrayPS, "Texture.rsf", "ArrayPS")

@@ -641,6 +641,19 @@ TEST(ShaderCore_BindingLayoutRules) {
         l.resources[2].shape = ShaderResourceShape::TypedBuffer;
         l.resources[2].component = ShaderComponentType::Uint;
     }));
+    // storage image는 cube·cube 배열을 받고(GLES RWTextureCube, ShaderSystem 16.1절 SH2g)
+    // multisample은 받지 않는다.
+    for (const ShaderResourceShape shape :
+         {ShaderResourceShape::TextureCube, ShaderResourceShape::TextureCubeArray,
+          ShaderResourceShape::Texture2DMultisample}) {
+        const bool rejected = EncodeRejects([shape](L& l) noexcept {
+            l.resources[3].kind = ShaderResourceKind::StorageImage;
+            l.resources[3].shape = shape;
+            l.resources[3].component = ShaderComponentType::Float;
+            l.resources[3].structureStride = 0;
+        });
+        CHECK(rejected == (shape == ShaderResourceShape::Texture2DMultisample));
+    }
     {
         ShaderBindingLayout typed(TestAllocator());
         typed.stage = ShaderStageVertex;

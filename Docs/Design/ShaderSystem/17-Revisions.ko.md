@@ -103,3 +103,4 @@
 - 개정 43(2026-11-24): SH2e 나눔(SSD43 — SH2e1 공급자 메모리 라이브러리, SH2e2 Graphics API·4 backend `CreateShader`·D3DCompile 제거, SH2e3 RB3 셰이더 집합·RB4 SH2분·연결 검사), SH2e1 구현 메모.
 - 개정 44(2026-11-24): SH2e3 구현 메모(16.1절 — 조합 열거 ShaderCore 공용화, RenderBase 셰이더 집합·공급자 interface·바인딩 지도·상수 블록·업로드 판단·파이프라인 캐시, Graphics 장치 셰이더 API와 slot 이름 표).
 - 개정 45(2026-11-24): SH2e2·SH2f 구현 메모(16.1절 — Graphics API 전환·장치 셰이더 CPU 사본(SSD18과 다른 점), 값 1 v3(모양·원소 타입·stride·attribute 타입), 네 backend 쿠킹 코드 수신, 런타임 컴파일러·Graphics 컴파일 훅·Release 예외 제거, 워커 PointSize·dummy 샘플러, Sandbox 셰이더 `/Plugin/Sandbox`·Development 공급자, 픽셀 대조 결과와 GLES NOT RUN 항목).
+- 개정 46(2026-11-25): SH2g 구현 메모(16.1절 — `RWTextureCube`·`RWTextureCubeArray`, GLES 처리기 cube storage image 고쳐 쓰기·처리기 버전 OpenGL 4, 값 1 storage image cube 모양, GLES cube 쓰기 slot 묶기).
