@@ -21,6 +21,6 @@ public sealed class TextureTools : EngineModuleRules
     protected override string[] PublicDependencies => ["Core", "Texture", "AssetRuntime", "AssetDatabase"];
 
     // ImageCodec decodes the source files (sections 12.9-12.11). DeterministicMath gives the build the same bytes on every host
-    // (Lanczos, sRGB and gamma curves — section 12.13).
+    // (sRGB and gamma curves — section 12.13).
     protected override string[] PrivateDependencies => ["ImageCodec", "DeterministicMath"];
 }

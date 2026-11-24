@@ -274,9 +274,9 @@ TEST(TextureBuild_PowerOfTwoMode) {
 }
 
 // AdaptiveSharp 재표본 기준값(Python 같은 식 — 14.1.99절, 가장자리 clamp): [0, 1] 2 → 4 확대
-// Catmull-Rom (0, 52, 203, 255 — 음수 lobe를 0으로 자른다), [0, 1, 0, 1, 0] 5 → 4 축소 Mitchell
-// (63, 144, 144, 63), 같은 길이 축은 Mitchell(4 → 4: 14, 227, 28, 241 — Y만 1 → 2로 늘린다), float
-// 출력은 음수를 남긴다.
+// Catmull-Rom (0, 52, 203, 255 — 출력 양자화가 음수 lobe를 0으로), [0, 1, 0, 1, 0] 5 → 4 축소
+// Mitchell (63, 144, 144, 63), 같은 길이 축은 복사, 재표본 넘침은 mip 평균까지 남고, float 출력은
+// 음수를 남긴다.
 TEST(TextureBuild_AdaptiveSharp) {
     SystemAllocator allocator;
     const auto resize = [&allocator](Span<const uint8> pixels, uint32 sourceX, uint32 targetX,
@@ -297,12 +297,22 @@ TEST(TextureBuild_AdaptiveSharp) {
     REQUIRE(resize(wave, 5, 4, 1, built));
     const uint8 down[4] = {63, 144, 144, 63};
     CHECK(memcmp(built.result.mips[0].bytes.Data(), down, 4) == 0);
+    // 같은 길이 축은 point 표본(복사 — UE FilterIsNopWhenSameSize): 4 → 4는 그대로, Y만 1 → 2.
     const uint8 same[4] = {0, 255, 0, 255};
     REQUIRE(resize(same, 4, 4, 2, built));
-    const uint8 blurred[4] = {14, 227, 28, 241};
     CHECK(built.result.mips[0].sizeY == 2 &&
-          memcmp(built.result.mips[0].bytes.Data(), blurred, 4) == 0 &&
-          memcmp(built.result.mips[0].bytes.Data() + 4, blurred, 4) == 0);
+          memcmp(built.result.mips[0].bytes.Data(), same, 4) == 0 &&
+          memcmp(built.result.mips[0].bytes.Data() + 4, same, 4) == 0);
+
+    // 재표본은 자르지 않는다: 2 → 4 확대의 넘침(−0.0703, 1.0703)이 mip 평균에 들어간다(mip 1 = 17,
+    // 238 — 잘랐다면 26, 229), mip 2 = 128.
+    TextureBuildSettings overshoot = Gray(2, 1);
+    overshoot.powerOfTwoMode = TexturePowerOfTwoSetting::ResizeToSpecificResolution;
+    overshoot.resizeX = 4;
+    REQUIRE(Build(allocator, overshoot, step, built));
+    REQUIRE(built.result.mips.Size() == 3);
+    CHECK(built.result.mips[1].bytes[0] == 17 && built.result.mips[1].bytes[1] == 238 &&
+          built.result.mips[2].bytes[0] == 128);
 
     TextureBuildSettings floating = Gray(2, 1);
     floating.compression = TextureCompressionSettings::HalfFloat;
@@ -581,7 +591,8 @@ TEST(TextureBuild_Quantization) {
     CHECK(built.result.mips[0].bytes[0] == 0 && built.result.mips[0].bytes[1] == 255 &&
           built.result.mips[0].bytes[3] == 0);
 
-    // round-half-up: (k + 0.5) / 255은 k + 1이다(float 0.5/255 근처).
+    // UE float 식 (uint8)(0.5f + v × 255.0f): 0.5/255는 1, 그 바로 아래 float도 1(0.5 +
+    // 0.49999997이 float로 1.0 — UE와 같다), 0.49/255는 0.
     const float half = static_cast<float>(0.5 / 255.0);
     uint8 edge[4];
     platform::MemoryCopy(edge, &half, sizeof(half));
@@ -591,6 +602,14 @@ TEST(TextureBuild_Quantization) {
     gray.srgb = false;
     REQUIRE(Build(allocator, gray, edge, built));
     CHECK(built.result.mips[0].bytes[0] == 1);
+    const float below = platform::BitCast<float>(platform::BitCast<uint32>(half) - 1);
+    platform::MemoryCopy(edge, &below, sizeof(below));
+    REQUIRE(Build(allocator, gray, edge, built));
+    CHECK(built.result.mips[0].bytes[0] == 1);
+    const float under = static_cast<float>(0.49 / 255.0);
+    platform::MemoryCopy(edge, &under, sizeof(under));
+    REQUIRE(Build(allocator, gray, edge, built));
+    CHECK(built.result.mips[0].bytes[0] == 0);
 }
 
 // PreserveBorder(UE GenerateMipBorder — 테두리 texel을 직전 mip 2×2 발자국의 원본 테두리 평균으로,
@@ -798,6 +817,156 @@ TEST(TextureBuild_DeterminismAndAllocation) {
     }
 
     CHECK(failures > 0);
+}
+
+// flipGreen(UE — Pad·최대 크기 뒤 g → 1 − Clamp(g, 0, 1)): Pad 채움 색의 G도 뒤집히고(0 → 255),
+// float 원본의 범위 밖 G는 잘린 뒤 뒤집힌다(2 → 0, −1 → 1). Pad 채움 알파는 a / 255(128 → 128).
+TEST(TextureBuild_FlipGreenOrder) {
+    SystemAllocator allocator;
+    {
+        const uint8 pixels[4] = {10, 64, 30, 255};
+        TextureBuildSettings settings = Gray(1, 1);
+        settings.format = TextureSourceFormat::RGBA8;
+        settings.flipGreenChannel = true;
+        settings.powerOfTwoMode = TexturePowerOfTwoSetting::PadToSquarePowerOfTwo;
+        settings.paddingColor = Color(0, 0, 0, 128);
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        // 1×1은 이미 2의 거듭제곱 — 채움이 없다. 3×1로 다시 본다.
+        const uint8 row[12] = {10, 64, 30, 255, 10, 64, 30, 255, 10, 64, 30, 255};
+        TextureBuildSettings padded = settings;
+        padded.sizeX = 3;
+        REQUIRE(Build(allocator, padded, row, built));
+        const Array<uint8>& top = built.result.mips[0].bytes;
+        CHECK(built.result.mips[0].sizeX == 4 && top[1] == 191 && top[3 * 4 + 1] == 255 &&
+              top[3 * 4 + 3] == 128);
+    }
+
+    {
+        const float texels[8] = {0.0f, 2.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f, 1.0f};
+        uint8 pixels[32];
+        platform::MemoryCopy(pixels, texels, sizeof(texels));
+        TextureBuildSettings settings = Gray(2, 1);
+        settings.format = TextureSourceFormat::RGBA32F;
+        settings.compression = TextureCompressionSettings::HDR;
+        settings.flipGreenChannel = true;
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(Le16(built.result.mips[0].bytes, 2) == 0x0000 &&
+              Le16(built.result.mips[0].bytes, 8 + 2) == 0x3c00);
+    }
+}
+
+// 최대 크기의 2×2 단계 경로(PreserveBorder·Volume — UE GenerateMipChain): PreserveBorder 4×4 →
+// 2×2는 테두리 평균, Volume Unfiltered는 (2i, 2j)·slice 2z 표본(mipGen을 따른다).
+TEST(TextureBuild_MaxSizeStepPath) {
+    SystemAllocator allocator;
+    {
+        uint8 pixels[16];
+        for (uint32 y = 0; y < 4; ++y) {
+            for (uint32 x = 0; x < 4; ++x) {
+                pixels[y * 4 + x] = x == 0 || y == 0 || x == 3 || y == 3 ? 200 : 0;
+            }
+        }
+
+        TextureBuildSettings settings = Gray(4, 4);
+        settings.preserveBorder = true;
+        settings.addressX = TextureAddress::Clamp;
+        settings.addressY = TextureAddress::Clamp;
+        settings.maxTextureSize = 2;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.mips[0].sizeX == 2 && built.result.mips[0].bytes[0] == 200 &&
+              built.result.mips[0].bytes[3] == 200);
+    }
+
+    {
+        uint8 voxels[32];
+        for (usize index = 0; index < 32; ++index) {
+            voxels[index] = static_cast<uint8>(index);
+        }
+
+        TextureBuildSettings settings = Gray(4, 4, 2);
+        settings.dimension = TextureDimension::Volume;
+        settings.mipGenSettings = TextureMipGenSettings::Unfiltered;
+        settings.maxTextureSize = 2;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, voxels, built));
+        const Array<uint8>& top = built.result.mips[0].bytes;
+        CHECK(built.result.mips[0].sizeX == 2 && built.result.mips[0].sizeZ == 1 && top[0] == 0 &&
+              top[1] == 2 && top[2] == 8 && top[3] == 10);
+    }
+}
+
+// Cube·CubeArray 성공 빌드(면마다 mip — slice 수 유지), 직접 채운 설정의 검사(Cube slice 수·계약
+// mipGen), Volume Unfiltered mip(slice 2z만), NormalizeNormals 제곱합 1 유지.
+TEST(TextureBuild_CubeAndChecks) {
+    SystemAllocator allocator;
+    uint8 faces[6 * 4];
+    for (usize index = 0; index < sizeof(faces); ++index) {
+        faces[index] = static_cast<uint8>(index * 4);
+    }
+
+    TextureBuildSettings cube = Gray(2, 2, 6);
+    cube.dimension = TextureDimension::TextureCube;
+    Built built(allocator);
+    REQUIRE(Build(allocator, cube, faces, built));
+    REQUIRE(built.result.mips.Size() == 2);
+    CHECK(built.result.numSlices == 6 && built.result.mips[1].bytes.Size() == 6 &&
+          built.result.mips[1].bytes[5] == 86);
+    TextureBuildSettings five = Gray(2, 2, 5);
+    five.dimension = TextureDimension::TextureCube;
+    uint8 fiveFaces[5 * 4] = {};
+    CHECK(!Build(allocator, five, fiveFaces, built) &&
+          built.result.failure.code == AssetDiagnosticCode::InvalidSource);
+    TextureBuildSettings sharpen = Gray(2, 2);
+    sharpen.mipGenSettings = TextureMipGenSettings::Sharpen3;
+    const uint8 plain[4] = {};
+    CHECK(!Build(allocator, sharpen, plain, built) &&
+          built.result.failure.code == AssetDiagnosticCode::UnsupportedSetting);
+
+    const uint8 voxels[8] = {1, 2, 3, 4, 50, 60, 70, 80};
+    TextureBuildSettings volume = Gray(2, 2, 2);
+    volume.dimension = TextureDimension::Volume;
+    volume.mipGenSettings = TextureMipGenSettings::Unfiltered;
+    REQUIRE(Build(allocator, volume, voxels, built));
+    CHECK(built.result.mips[1].bytes[0] == 1);
+
+    // (1, 0.5, 0.5) float → v = (1, 0, 0), 제곱합 정확히 1 → 그대로.
+    const float normal[4] = {1.0f, 0.5f, 0.5f, 1.0f};
+    uint8 normalBytes[16];
+    platform::MemoryCopy(normalBytes, normal, sizeof(normal));
+    TextureBuildSettings normals = Gray(1, 1);
+    normals.format = TextureSourceFormat::RGBA32F;
+    normals.compression = TextureCompressionSettings::Normalmap;
+    normals.normalizeNormals = true;
+    REQUIRE(Build(allocator, normals, normalBytes, built));
+    CHECK(Le16(built.result.mips[0].bytes, 0) == 0x3c00 &&
+          Le16(built.result.mips[0].bytes, 2) == 0x3800 &&
+          Le16(built.result.mips[0].bytes, 4) == 0x3800);
+}
+
+// Float16 변환(12.13절 결정성): 하드웨어(F16C)·소프트웨어 경로가 같은 bit여야 하는 경계 —
+// subnormal·가장 작은 정규수·반올림 동률·NaN을 RGBA16F 출력에서 고정 bit로 본다.
+TEST(TextureBuild_HalfConversion) {
+    SystemAllocator allocator;
+    const float values[4] = {
+        platform::BitCast<float>(0x33800000u),  // 2^-24 = 가장 작은 subnormal half
+        platform::BitCast<float>(0x38800000u),  // 2^-14 = 가장 작은 정규 half
+        platform::BitCast<float>(0x3f801000u),  // 1 + 2^-11 = 동률 → 짝수 0x3c00
+        platform::BitCast<float>(0x7fc00001u)}; // NaN → 0
+    uint8 pixels[16];
+    platform::MemoryCopy(pixels, values, sizeof(values));
+    TextureBuildSettings settings = Gray(1, 1);
+    settings.format = TextureSourceFormat::RGBA32F;
+    settings.compression = TextureCompressionSettings::HDR;
+    Built built(allocator);
+    REQUIRE(Build(allocator, settings, pixels, built));
+    const Array<uint8>& bytes = built.result.mips[0].bytes;
+    CHECK(Le16(bytes, 0) == 0x0001 && Le16(bytes, 2) == 0x0400 && Le16(bytes, 4) == 0x3c00 &&
+          Le16(bytes, 6) == 0x0000);
 }
 
 } // namespace texture_build_tests_file

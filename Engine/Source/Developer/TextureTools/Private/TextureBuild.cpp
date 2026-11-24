@@ -2,6 +2,8 @@
 #include <Core/Math/Float16.h>
 #include <DeterministicMath/DeterministicMath.h>
 #include <Platform/Memory.h>
+#include "TextureImportInternal.h"
+
 #include <TextureTools/TextureBuild.h>
 #include <TextureTools/TextureImport.h>
 
@@ -443,8 +445,33 @@ struct AxisFilter {
     usize stride = 0;
 };
 
-// AdaptiveSharp: 확대면 Catmull-Rom, 같은 길이·축소면 Mitchell(UE ImageCore MapFilterToStb).
+// AdaptiveSharp: 확대면 Catmull-Rom, 축소면 Mitchell, 같은 길이 축은 point 표본(복사 — UE ImageCore
+// MapFilterToStb의 FilterIsNopWhenSameSize).
 Result<void> MakeAxisFilter(uint32 source, uint32 target, AxisFilter& out) noexcept {
+    if (source == target) {
+        out.stride = 1;
+        Result<void> step = out.starts.TryResize(target);
+        if (step) {
+            step = out.counts.TryResize(target);
+        }
+
+        if (step) {
+            step = out.weights.TryResize(target);
+        }
+
+        if (!step) {
+            return step;
+        }
+
+        for (uint32 i = 0; i < target; ++i) {
+            out.starts[i] = i;
+            out.counts[i] = 1;
+            out.weights[i] = 1.0;
+        }
+
+        return Result<void>::Success();
+    }
+
     const CubicKernel& kernel = source < target ? CatmullRom : Mitchell;
     const double ratio = static_cast<double>(source) / static_cast<double>(target);
     const double scale = target < source ? static_cast<double>(target) / source : 1.0;
@@ -494,9 +521,8 @@ int64 ClampIndex(int64 index, int64 n) noexcept {
 }
 
 // level의 각 평면(layer·깊이 slice)을 (targetX, targetY)로 재표본한다(X 먼저, 그다음 Y, 가장자리
-// clamp). clampUnit이면 결과를 [0, 1]로 자른다(정수 출력 — 12.5절).
-Result<void> Resample(Allocator& allocator, Level& level, uint32 targetX, uint32 targetY,
-                      bool clampUnit) noexcept {
+// clamp). 결과를 자르지 않는다(UE float 재표본 — 자르기는 출력 양자화 한 번뿐).
+Result<void> Resample(Allocator& allocator, Level& level, uint32 targetX, uint32 targetY) noexcept {
     if (targetX == level.width && targetY == level.height) {
         return Result<void>::Success();
     }
@@ -540,6 +566,8 @@ Result<void> Resample(Allocator& allocator, Level& level, uint32 targetX, uint32
         }
     }
 
+    // X 단계가 끝났으니 원본을 놓는다(작업 메모리가 상한의 두 배를 넘지 않게).
+    level.texels = Array<float>(allocator);
     Level tall(allocator);
     if (auto made = tall.Allocate(targetX, targetY, level.depth, level.layers); !made) {
         return made;
@@ -562,12 +590,7 @@ Result<void> Resample(Allocator& allocator, Level& level, uint32 targetX, uint32
 
                     float* target = tall.At(layer, z, y, x);
                     for (usize channel = 0; channel < Channels; ++channel) {
-                        float value = static_cast<float>(sum[channel]);
-                        if (clampUnit) {
-                            value = value > 0.0f ? (value < 1.0f ? value : 1.0f) : 0.0f;
-                        }
-
-                        target[channel] = value;
+                        target[channel] = static_cast<float>(sum[channel]);
                     }
                 }
             }
@@ -774,16 +797,19 @@ void NormalizeNormals(Level& level) noexcept {
 
 // ---- 6. 출력(12.2절 3·5번) ----
 
+// UE FColor::QuantizeUNormFloatTo8·16이다((uint)(0.5f + Clamp01NansTo0(v) × 최대) — float 식).
+float Clamp01NansTo0(float value) noexcept {
+    return value > 0.0f ? (value < 1.0f ? value : 1.0f) : 0.0f;
+}
+
 uint8 QuantizeUnorm8(float value) noexcept {
-    const double clamped = value > 0.0f ? (value < 1.0f ? static_cast<double>(value) : 1.0) : 0.0;
-    const double scaled = clamped * Unorm8Max;
-    return static_cast<uint8>(floor(scaled + 0.5));
+    const float scaled = Clamp01NansTo0(value) * 255.0f;
+    return static_cast<uint8>(0.5f + scaled);
 }
 
 uint16 QuantizeUnorm16(float value) noexcept {
-    const double clamped = value > 0.0f ? (value < 1.0f ? static_cast<double>(value) : 1.0) : 0.0;
-    const double scaled = clamped * Unorm16Max;
-    return static_cast<uint16>(floor(scaled + 0.5));
+    const float scaled = Clamp01NansTo0(value) * 65535.0f;
+    return static_cast<uint16>(0.5f + scaled);
 }
 
 uint16 QuantizeHalf(float value) noexcept {
@@ -878,7 +904,7 @@ Result<void> Encode(const Level& level, const OutputFormat& format, bool srgb, b
             switch (format.kind) {
             case OutputKind::Unorm8:
                 target[c] =
-                    srgb && !alpha ? deterministic::LinearToSrgbByte(value) : QuantizeUnorm8(value);
+                    srgb && !alpha ? texture_import::LinearToSrgb8(value) : QuantizeUnorm8(value);
                 break;
             case OutputKind::Unorm16:
                 StoreLe16(target + c * 2, QuantizeUnorm16(value));
@@ -937,9 +963,12 @@ uint32 CookDroppedMips(const TextureBuildSettings& settings, uint32 width, uint3
     }
 
     const int32 textureMaxLod = static_cast<int32>(FloorLog2(width > height ? width : height));
-    const int32 bias = settings.lodBias;
-    int32 wanted =
-        UeClamp(textureMaxLod - bias, CeilLog2(settings.minLodSize), CeilLog2(settings.maxLodSize));
+    // textureMaxLod − bias를 int64로 구해 int32 범위로 자른다(넘침 없이).
+    const int64 lowered = int64{textureMaxLod} - settings.lodBias;
+    const int32 target = lowered > NumericLimits<int32>::Max()   ? NumericLimits<int32>::Max()
+                         : lowered < NumericLimits<int32>::Min() ? NumericLimits<int32>::Min()
+                                                                 : static_cast<int32>(lowered);
+    int32 wanted = UeClamp(target, CeilLog2(settings.minLodSize), CeilLog2(settings.maxLodSize));
     wanted = UeClamp(wanted, 0, textureMaxLod);
     const uint32 dropped = static_cast<uint32>(textureMaxLod - wanted);
     return dropped < chain - 1 ? dropped : chain - 1;
@@ -1071,7 +1100,11 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     out.preserveBorder = texture.preserveBorder != 0;
     out.normalizeNormals = texture.normalizeNormals != 0 &&
                            texture.compressionSettings == TextureCompressionSettings::Normalmap;
-    out.lodBias = texture.lodBias + group.lodBias;
+    // 합은 int32 범위로 자른다(넘침 없이 — 편향은 사슬 길이로 다시 잘린다).
+    const int64 bias = int64{texture.lodBias} + group.lodBias;
+    out.lodBias = bias > NumericLimits<int32>::Max()   ? NumericLimits<int32>::Max()
+                  : bias < NumericLimits<int32>::Min() ? NumericLimits<int32>::Min()
+                                                       : static_cast<int32>(bias);
     out.maxTextureSize = texture.maxTextureSize;
     out.minLodSize = group.minLodSize;
     out.maxLodSize = group.maxLodSize;
@@ -1139,6 +1172,24 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
                     settings.sizeX);
     }
 
+    // 직접 채운 설정도 Resolve와 같은 규칙을 지킨다(slice 수·mipGen 셋).
+    const uint32 slices = settings.numSlices;
+    const bool slicesOk =
+        settings.dimension == TextureDimension::Texture2D          ? slices == 1
+        : settings.dimension == TextureDimension::TextureCube      ? slices == TextureCubeFaces
+        : settings.dimension == TextureDimension::TextureCubeArray ? slices % TextureCubeFaces == 0
+                                                                   : true;
+    if (!slicesOk) {
+        return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, slices);
+    }
+
+    if (settings.mipGenSettings != TextureMipGenSettings::SimpleAverage &&
+        settings.mipGenSettings != TextureMipGenSettings::NoMipmaps &&
+        settings.mipGenSettings != TextureMipGenSettings::Unfiltered) {
+        return Fail(out, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported,
+                    static_cast<uint64>(settings.mipGenSettings));
+    }
+
     // PowerOfTwoMode 대상 크기(UE GetPowerOfTwoTargetTextureSize — 작업 byte를 먼저 판정한다).
     const TexturePowerOfTwoSetting mode = settings.powerOfTwoMode;
     const uint32 depth = volume ? settings.numSlices : 1;
@@ -1204,15 +1255,7 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         return Fail(out, AssetDiagnosticCode::None, decoded.Error(), 0);
     }
 
-    // 2. flipGreen.
-    if (settings.flipGreenChannel) {
-        for (usize index = 0; index < level.texels.Size(); index += Channels) {
-            level.texels[index + Green] = 1.0f - level.texels[index + Green];
-        }
-    }
-
     // 3. PowerOfTwoMode.
-    const bool clampUnit = !floatOutput;
     if (targetX != level.width || targetY != level.height || targetZ != level.depth) {
         Result<void> changed = Result<void>::Success();
         if (pad) {
@@ -1225,7 +1268,7 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
             changed =
                 Pad(allocator, level, targetX, targetY, targetZ, settings.padWithBorderColor, fill);
         } else {
-            changed = Resample(allocator, level, targetX, targetY, clampUnit);
+            changed = Resample(allocator, level, targetX, targetY);
         }
 
         if (!changed) {
@@ -1233,6 +1276,7 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         }
     }
 
+    const bool unfiltered = settings.mipGenSettings == TextureMipGenSettings::Unfiltered;
     // 4. 최대 크기(UE MaxTextureResolution — X·Y만 본다).
     uint64 maximum = MaxDimension2D;
     if (settings.maxTextureSize > 0 && static_cast<uint64>(settings.maxTextureSize) < maximum) {
@@ -1248,13 +1292,13 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         }
 
         if (!volume && !settings.preserveBorder) {
-            if (auto resized = Resample(allocator, level, fitX, fitY, clampUnit); !resized) {
+            if (auto resized = Resample(allocator, level, fitX, fitY); !resized) {
                 return Fail(out, AssetDiagnosticCode::None, resized.Error(), 0);
             }
         } else {
             while (level.width > maximum || level.height > maximum) {
                 Level next(allocator);
-                if (auto made = NextMip(level, volume, false, next); !made) {
+                if (auto made = NextMip(level, volume, unfiltered, next); !made) {
                     return Fail(out, AssetDiagnosticCode::None, made.Error(), 0);
                 }
 
@@ -1264,6 +1308,13 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
 
                 level = rocks::Move(next);
             }
+        }
+    }
+
+    // flipGreen(UE — Pad·Stretch·최대 크기를 거친 mip 0에서 G = 1 − Clamp(G, 0, 1)).
+    if (settings.flipGreenChannel) {
+        for (usize index = 0; index < level.texels.Size(); index += Channels) {
+            level.texels[index + Green] = 1.0f - Clamp01NansTo0(level.texels[index + Green]);
         }
     }
 
@@ -1286,7 +1337,6 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         return Fail(out, AssetDiagnosticCode::None, reserved.Error(), 0);
     }
 
-    const bool unfiltered = settings.mipGenSettings == TextureMipGenSettings::Unfiltered;
     Array<Level> mips(allocator);
     if (auto reserved = mips.TryReserve(chain); !reserved) {
         return Fail(out, AssetDiagnosticCode::None, reserved.Error(), 0);
