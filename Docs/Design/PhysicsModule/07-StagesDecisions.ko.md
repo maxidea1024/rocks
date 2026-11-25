@@ -74,6 +74,35 @@ PH2는 크기가 커서 넷으로 나눈다(사용자 지시 "순서대로" — 
 | PA07 heightfield | 지형(CM18) | heightfield 쿠킹 |
 | PA12 좌우 바퀴·조향 | 차량 단계(개별 모듈) | 차량 constraint |
 
+### 7.1.3 PH2b 구현 세부(2026-11-26)
+
+runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는다. Actor.h는 건드리지 않는다.
+
+**World 쪽 타입**(`World/Physics/`, Jolt 없음 — 파일마다 타입 하나):
+
+| 파일 | 내용 |
+|---|---|
+| `PhysicsBodyHandle.h` | `PhysicsBodyHandle { uint32 index; uint32 generation; }`(0 세대 = 없음 — 계획 16.1절) |
+| `BodyGeometryKind.h`·`BodyGeometry.h` | `BodyGeometryKind { None, Box, Sphere, Capsule }`와 `BodyGeometry`(scale 전 값 cm: box 반폭, 구 반경, 캡슐 반경·반높이 **반구 포함**(UE `CapsuleHalfHeight`)) |
+| `BodyMotion.h` | `BodyMotion { Static, Kinematic, Dynamic }`(2.5절) |
+| `TeleportMode.h` | `TeleportMode { None, TeleportPhysics, ResetPhysics }`(1.3절) |
+| `BodyCreateDesc.h` | 형상, 월드 `Transform`(scale 포함), 운동 종류, 실효 충돌(`ResolvedCollision`), `const BodySettings*`, 깨어서 시작할지 |
+| `BodyKinematics.h` | 위치(body 원점 cm)·회전·선속도(cm/s)·각속도(rad/s)·깨어 있음 |
+
+`PhysicsScene`에 `CreateBody(const BodyCreateDesc&) → Result<PhysicsBodyHandle>`, `DestroyBody(handle)`, `SetBodyTransform(handle, const Transform&, TeleportMode)`, `ReadKinematics(handle) → Result<BodyKinematics>`를 더한다(2.2절의 이름 그대로). 없는 handle·옛 세대는 `StaleHandle`(Destroy는 무시)이다.
+
+**형상**: `PrimitiveComponent`의 가상 `BuildBodyGeometry(BodyGeometry&) const`(기본 거짓 — 형상 없음)를 Box·Sphere·Capsule 컴포넌트가 채운다(2.4절의 `BuildCollisionGeometry`를 PH2b는 형상 하나로 줄인 것 — compound는 PH6 메시 단순 충돌 때 넓힌다). Physics가 scale을 UE 규칙으로 형상 크기에 굽는다(어댑터 경계 4절): box 반폭 × |scale| 축별·구 반경 × min |scale|(둘 다 최소 `KindaSmallNumber`), 캡슐은 반높이 = 반높이 × |Z|(최소 0.1 cm)·반경 = 반경 × max(|X|, |Y|)를 [0.1, 반높이]로 clamp·원통 길이 = 2·(반높이 − 반경)(최소 0.1 cm — UE `FKSphylElem`과 같다). 0인 scale 축은 `KindaSmallNumber`로 바꾼다(2.3절). 크기 0은 거부하지 않는다(UE도 body를 만든다). body transform은 행렬 분해 없이 월드 위치·회전·scale을 따로 쓴다(0 scale·shear·반사에서도 값이 있다 — UE `GetComponentTransform`). 컴포넌트 캡슐 반높이는 반경 이상으로 올린다. 형상 공유 캐시는 PH6에서(지금은 body마다 만든다).
+
+**body 값**(PH2b 몫 — 나머지 6.5절 표는 PH5): 운동 종류, object 층(채널 = object type, 운동 묶음 = Static·Moving, 실효 충돌 켬이 QueryOnly면 QueryOnly 묶음, 참여 표지 physics·query·probe는 실효 충돌 켬에서, 응답 묶음 색인 0 — 표는 PH3), `enableGravity`(중력 배율 1·0), `linearDamping`·`angularDamping`(값 그대로 — Jolt 기본 0.05에 맡기지 않는다), 질량은 형상 밀도(UE 기본 물리 재질 밀도 1 g/cm³ — Jolt 기본 1000 kg/m³와 같다). 질량 덮어쓰기·배율·질량 중심·관성 배율은 PH5.
+
+**컴포넌트 수명**(2.3절): `PrimitiveComponent::WantsSystemState(Physics)` = World에 장면이 있음 && 형상이 있음 && 실효 충돌 켬 ≠ `NoCollision`(2.3절의 `alwaysCreatePhysicsState`는 `BodySettings`에 아직 없다 — 그 필드가 생기는 PH5). `CreateSystemState(Physics)`가 실효 충돌을 해석하고(`TryResolveCollision`) `BodyCreateDesc`를 채워 `CreateBody`, handle은 NATIVE 필드다. 시작 잠듦: `startAwake`가 거짓이고 소유 Actor가 시작(OnStart) 전이면 잠든 채 넣는다. `DestroySystemState(Physics)`가 `DestroyBody`. Static mobility에 `simulatePhysics`면 Warning `SimulateOnStaticBody`(2.5절)와 Static.
+
+**setter**: `SetSimulatePhysics(bool)`(UE 이름 — 2.6절)를 PH2b에 미리 둔다. 지금은 값만 바꾸고, body가 있을 때의 즉시 전환은 PH2d다. `startAwake` 등 다른 body 값 setter는 PH5다(시작 잠듦 시험도 PH5로 옮긴다).
+
+**transform**: `PrimitiveComponent::OnTransformUpdated`가 body가 있으면 `SetBodyTransform(월드 transform, TeleportMode::None)`을 부른다(3.3절). PH2b의 `SetBodyTransform`은 모든 운동 종류를 즉시 옮기고(`SetPositionAndRotation`, Dynamic 속도 유지) 잠든 Dynamic을 깨운다(UE `SetGlobalPose`). Kinematic의 `MoveKinematic` 경로·결과 반영의 skip 표지는 PH2c, scale 변화의 형상 갱신은 PH2d(재생성 표)다.
+
+**시험**(World·컴포넌트 공개 API만 — Modular에서도 돈다): 등록·파괴의 body 수, NoCollision·장면 없는 World는 body 없음, mobility·simulate → 운동 종류(Static에 simulate면 경고 뒤 Static), 떨어지는 구의 `ReadKinematics`, PA10을 `CapsuleComponent` 경로로(반구 포함 반높이 의미), box scale을 바닥 위 구의 정지 높이로 확인, 컴포넌트 이동이 Kinematic body를 옮김, 옮긴 잠든 Dynamic이 깨어남, 크기·scale 0 형상과 비균일 scale 부모 아래 회전한 자식도 body가 생김. 한계: World 물리 장면 교체(`SetPhysicsScene` null → 새 장면) 뒤 남은 컴포넌트 handle은 새 장면의 같은 칸을 가리킬 수 있다 — 교체는 지금 Subsystem 수명 안에서만 일어나 남은 컴포넌트가 없다. 등록된 body가 있으면 교체를 거부하는 검사는 PH2d(재생성)에서 더한다. 등록 실패 되돌림 시험(용량 초과)은 PH5(설정 문맥 시험 기반)에서.
+
 ## 7.2 시험 원칙
 
 - 각 단계 시험은 UE 원본 동작을 기대값으로 둔다(행 인용). 수치 적분은 step 크기에서 유도한 허용 오차, 방향·단위 사상은 정확 일치(어댑터 경계 9절).
@@ -123,6 +152,7 @@ PH2는 크기가 커서 넷으로 나눈다(사용자 지시 "순서대로" — 
 
 ## 7.6 개정 이력
 
+- 개정 8(2026-11-26): PH2a 완료(fcfe9ad4), PH2b 구현 세부(7.1.3절).
 - 개정 7(2026-11-26): PH1 완료(PhysicsSimulate 연결·Sandbox 등록), PH2 하위 단계와 PA 시험 배정(7.1.2절).
 - 개정 6(2026-11-25): PH1 착수 — 구현 세부(7.1.1절), PMD20–PMD22.
 - 개정 5(2026-11-25): PMU3·PMU4를 UE 원본으로 닫았다. `maxLinearVelocity` 기본은 사실상 없음(PMD18), DOF 잠금 기준은 월드 축·생성 시점(PMD19, 한계 둘). 미확인 항목이 없다.

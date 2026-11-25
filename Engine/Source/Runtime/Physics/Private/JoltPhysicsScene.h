@@ -4,6 +4,7 @@
 #include "JoltRuntime.h"
 #include "TaskJobSystem.h"
 
+#include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Physics/PhysicsSettings.h>
 #include <World/Physics/PhysicsScene.h>
@@ -37,6 +38,11 @@ public:
     ~JoltPhysicsScene() override;
 
     PhysicsSceneStats Stats() const noexcept override;
+    Result<PhysicsBodyHandle> CreateBody(const BodyCreateDesc& desc) noexcept override;
+    void DestroyBody(PhysicsBodyHandle body) noexcept override;
+    void SetBodyTransform(PhysicsBodyHandle body, const Transform& worldTransform,
+                          TeleportMode mode) noexcept override;
+    Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept override;
 
     // 한 step(seconds초, collision step 1)을 진행한다. 오류: seconds가 양의 유한값이 아님
     // (InvalidArgument), Jolt 용량 초과(CapacityExceeded — step은 진행했고 경고 로그를 남긴다).
@@ -56,10 +62,19 @@ public:
     }
 
     // UniquePtr::TryMake가 부르는 생성자다(Create만 쓴다).
-    JoltPhysicsScene(JoltRuntimeLease&& runtime, const PhysicsSettings& settings,
-                     WorkerScheduler* scheduler) noexcept;
+    JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runtime,
+                     const PhysicsSettings& settings, WorkerScheduler* scheduler) noexcept;
 
 private:
+    // body 칸이다. 세대 0은 쓰지 않는다(PhysicsBodyHandle의 "없음").
+    struct BodySlot {
+        JPH::BodyID body;
+        uint32 generation = 1;
+        bool live = false;
+    };
+
+    const BodySlot* FindSlot(PhysicsBodyHandle body) const noexcept;
+
     // 멤버 순서가 수명 순서다: Jolt 공유 자원 참조가 가장 먼저 생기고 가장 늦게 사라진다.
     JoltRuntimeLease runtime_;
     BroadPhaseLayers broadPhaseLayers_;
@@ -70,6 +85,10 @@ private:
     JPH::PhysicsSystem system_;
     uint64 steps_ = 0;
     uint64 floatingPointCorrections_ = 0;
+    // 지역 원점(cm — 큰 월드 PhysicsRegion은 계획 16.5절 PC07 뒤, 지금은 월드 원점).
+    Vec3d origin_ = Vec3d::Zero();
+    Array<BodySlot> slots_;
+    Array<uint32> freeSlots_;
 };
 
 } // namespace physics
