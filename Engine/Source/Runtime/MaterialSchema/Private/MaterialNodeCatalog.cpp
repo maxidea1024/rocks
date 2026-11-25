@@ -1,0 +1,315 @@
+#include <MaterialSchema/MaterialGraphSchema.h>
+#include <MaterialSchema/MaterialNodeCatalog.h>
+#include <Core/Move.h>
+#include <Meta/TypeSchema.h>
+
+// 머티리얼 노드 정의의 등록과 조회다(Docs/Design/MaterialSystem 5.2·19.7절).
+namespace rocks::material {
+
+namespace {
+
+constexpr uint32 MaxDefaultComponents = 4;
+
+bool SameText(Span<const char> left, StringView right) noexcept {
+    if (left.Size() != right.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.Size(); ++index) {
+        if (left[index] != right.Data()[index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool SchemaHasField(const TypeSchema& schema, StringView name) noexcept {
+    for (const FieldSchema& field : schema.fields) {
+        if (SameText(field.name, name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Result<void> ValidatePins(Span<const MaterialPinDefinition> pins) noexcept {
+    for (usize index = 0; index < pins.Size(); ++index) {
+        const MaterialPinDefinition& pin = pins[index];
+        if (pin.key.IsEmpty() || static_cast<uint32>(pin.type) >= MaterialPinTypeCount ||
+            (static_cast<uint8>(pin.flags) & ~MaterialPinFlagMask) != 0 ||
+            pin.defaultValue.componentCount > MaxDefaultComponents) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (pin.direction != nodegraph::PinDirection::Input &&
+            pin.direction != nodegraph::PinDirection::Output) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (pin.direction == nodegraph::PinDirection::Output &&
+            (pin.defaultValue.componentCount != 0 || pin.flags != MaterialPinFlags::None ||
+             pin.type == MaterialPinType::TextureAny)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (usize other = 0; other < index; ++other) {
+            if (pins[other].key == pin.key) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ValidateDefinition(const MaterialNodeDefinition& definition) noexcept {
+    if (definition.type.IsEmpty() ||
+        (static_cast<uint8>(definition.flags) & ~MaterialNodeFlagMask) != 0 ||
+        definition.stages == 0 || (definition.stages & ~AllMaterialStages) != 0 ||
+        (definition.graphKinds & ~AllMaterialGraphKinds) != 0 ||
+        (definition.features & ~AllMaterialContextFeatures) != 0 ||
+        static_cast<uint32>(definition.prerequisite) >= MaterialPrerequisiteCount) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const bool missing = definition.status == MaterialNodeStatus::PrerequisiteMissing;
+    const bool implemented = definition.status == MaterialNodeStatus::Implemented;
+    if (!missing && !implemented) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (missing == (definition.prerequisite == MaterialPrerequisite::None)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!definition.nonSemanticFields.IsEmpty()) {
+        if (definition.propertiesSchema == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const TypeSchema& schema = definition.propertiesSchema();
+        for (StringView field : definition.nonSemanticFields) {
+            if (!SchemaHasField(schema, field)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
+    return ValidatePins(definition.pins);
+}
+
+nodegraph::PinValuePolicy ValuePolicyOf(const MaterialPinDefinition& pin) noexcept {
+    return HasPinFlag(pin.flags, MaterialPinFlags::HideValue) ? nodegraph::PinValuePolicy::Hidden
+                                                              : nodegraph::PinValuePolicy::Editable;
+}
+
+} // namespace
+
+MaterialNodeCatalog::MaterialNodeCatalog(Allocator& allocator) noexcept
+    : allocator_(allocator), entries_(allocator), groups_(allocator), lookup_(allocator) {
+}
+
+void MaterialNodeCatalog::RebuildLookup() noexcept {
+    lookup_.Clear();
+    lookupComplete_ = true;
+    for (const Entry& entry : entries_) {
+        if (auto added = lookup_.FindOrAdd(entry.type, entry.definition); !added) {
+            lookupComplete_ = false;
+            return;
+        }
+    }
+}
+
+Result<MaterialNodeGroupId> MaterialNodeCatalog::Register(
+    nodegraph::NodeTypeRegistry& registry, const MaterialGraphSchema& schema,
+    Span<const MaterialNodeDefinition> definitions, ModuleLease lease) noexcept {
+    const Span<const MaterialNodeDefinition> one[] = {definitions};
+    return RegisterGroups(registry, schema, one, Move(lease));
+}
+
+Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
+    nodegraph::NodeTypeRegistry& registry, const MaterialGraphSchema& schema,
+    Span<const Span<const MaterialNodeDefinition>> groups, ModuleLease lease) noexcept {
+    using Failure = Result<MaterialNodeGroupId>;
+    if (!schema.Ready() || registry.FindSchema(schema.Domain()) != &schema) {
+        return Failure::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize groupIndex = 0; groupIndex < groups.Size(); ++groupIndex) {
+        const Span<const MaterialNodeDefinition> definitions = groups[groupIndex];
+        for (usize index = 0; index < definitions.Size(); ++index) {
+            if (auto valid = ValidateDefinition(definitions[index]); !valid) {
+                return Failure::Failure(valid.Error());
+            }
+
+            for (usize otherGroup = 0; otherGroup <= groupIndex; ++otherGroup) {
+                const Span<const MaterialNodeDefinition> others = groups[otherGroup];
+                const usize end = otherGroup == groupIndex ? index : others.Size();
+                for (usize other = 0; other < end; ++other) {
+                    if (others[other].type == definitions[index].type) {
+                        return Failure::Failure(ErrorCode::InvalidArgument);
+                    }
+                }
+            }
+        }
+    }
+
+    if (auto reserved = groups_.TryReserve(groups_.Size() + 1); !reserved) {
+        return Failure::Failure(reserved.Error());
+    }
+
+    const MaterialNodeGroupId group{nextGroup_};
+    const usize firstEntry = entries_.Size();
+    const MaterialGraphKindMask kind = ToMask(schema.Kind());
+    NamePool& names = registry.Names();
+    Array<nodegraph::PinDescriptor> pins(allocator_);
+    Result<void> status = Result<void>::Success();
+
+    for (const Span<const MaterialNodeDefinition> definitions : groups) {
+        if (!status) {
+            break;
+        }
+
+        for (const MaterialNodeDefinition& definition : definitions) {
+            if ((definition.graphKinds & kind) == 0) {
+                continue;
+            }
+
+            auto type = names.TryIntern(definition.type);
+            if (!type) {
+                status = Result<void>::Failure(type.Error());
+                break;
+            }
+
+            pins.Clear();
+            if (auto reserved = pins.TryReserve(definition.pins.Size()); !reserved) {
+                status = Move(reserved);
+                break;
+            }
+
+            for (const MaterialPinDefinition& pin : definition.pins) {
+                auto key = names.TryIntern(pin.key);
+                if (!key) {
+                    status = Result<void>::Failure(key.Error());
+                    break;
+                }
+
+                nodegraph::PinDescriptor descriptor =
+                    pin.direction == nodegraph::PinDirection::Input
+                        ? nodegraph::InputPin(key.Value(), ToPinTypeId(pin.type), pin.displayName)
+                        : nodegraph::OutputPin(key.Value(), ToPinTypeId(pin.type), pin.displayName);
+                descriptor.advanced = HasPinFlag(pin.flags, MaterialPinFlags::Advanced);
+                descriptor.valuePolicy = ValuePolicyOf(pin);
+                // 용량을 미리 잡았으므로 실패하지 않는다.
+                (void)pins.TryPushBack(descriptor);
+            }
+
+            if (!status) {
+                break;
+            }
+
+            nodegraph::NodeTypeDescriptor descriptor;
+            descriptor.type = type.Value();
+            descriptor.schemaVersion = definition.schemaVersion;
+            if (definition.propertiesSchema != nullptr) {
+                descriptor.propertiesStruct = definition.propertiesSchema().id;
+            }
+
+            descriptor.staticPins = pins.View();
+            descriptor.dynamicPins = definition.dynamicPins;
+            descriptor.passThrough = definition.passThrough;
+            descriptor.menu = definition.menu;
+            descriptor.capabilities = definition.capabilities;
+            descriptor.migrate = definition.migrate;
+
+            auto registered = registry.RegisterNodeType(schema.Domain(), descriptor, lease);
+            if (!registered) {
+                status = Result<void>::Failure(registered.Error());
+                break;
+            }
+
+            Entry entry;
+            entry.type = type.Value();
+            entry.definition = &definition;
+            entry.group = group;
+            entry.registration = registered.Value();
+            if (auto pushed = entries_.TryPushBack(entry); !pushed) {
+                (void)registry.UnregisterNodeType(registered.Value());
+                status = Move(pushed);
+                break;
+            }
+        }
+    }
+
+    if (!status) {
+        // 이 묶음에서 등록한 것을 역순으로 되돌린다.
+        while (entries_.Size() > firstEntry) {
+            (void)registry.UnregisterNodeType(entries_[entries_.Size() - 1].registration);
+            (void)entries_.TryPopBack();
+        }
+
+        RebuildLookup();
+        return Failure::Failure(status.Error());
+    }
+
+    // 용량을 미리 잡았으므로 실패하지 않는다.
+    (void)groups_.TryPushBack(group.value);
+    ++nextGroup_;
+    RebuildLookup();
+    return Result<MaterialNodeGroupId>::Success(group);
+}
+
+Result<void> MaterialNodeCatalog::Unregister(nodegraph::NodeTypeRegistry& registry,
+                                             MaterialNodeGroupId id) noexcept {
+    usize groupIndex = groups_.Size();
+    for (usize index = 0; index < groups_.Size(); ++index) {
+        if (groups_[index] == id.value) {
+            groupIndex = index;
+            break;
+        }
+    }
+
+    if (groupIndex == groups_.Size()) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    for (usize index = entries_.Size(); index > 0; --index) {
+        const usize at = index - 1;
+        if (entries_[at].group.value != id.value) {
+            continue;
+        }
+
+        if (auto removed = registry.UnregisterNodeType(entries_[at].registration); !removed) {
+            RebuildLookup();
+            return removed;
+        }
+
+        (void)entries_.TryRemoveAt(at);
+    }
+
+    (void)groups_.TryRemoveAt(groupIndex);
+    RebuildLookup();
+    return Result<void>::Success();
+}
+
+const MaterialNodeDefinition* MaterialNodeCatalog::Find(Name type) const noexcept {
+    if (const MaterialNodeDefinition* const* found = lookup_.Find(type); found != nullptr) {
+        return *found;
+    }
+
+    if (lookupComplete_) {
+        return nullptr;
+    }
+
+    for (const Entry& entry : entries_) {
+        if (entry.type == type) {
+            return entry.definition;
+        }
+    }
+
+    return nullptr;
+}
+
+} // namespace rocks::material
