@@ -148,6 +148,14 @@ void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
     }
 }
 
+} // namespace detail
+
+bool TryGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
+    return detail::PosixGetCurrentThreadPriority(priority);
+}
+
+namespace detail {
+
 ThreadStatus StartNativeThread(ThreadState& state) noexcept {
     static_assert(sizeof(pthread_t) <= sizeof(state.native));
     static_assert(alignof(pthread_t) <= alignof(ThreadState));

@@ -98,6 +98,18 @@ ROCKS_PLATFORMBASE_API void SleepFor(uint32 milliseconds) noexcept;
 // MaxThreadNameBytes + 1 byte buffer면 Thread::Start로 붙인 이름을 모두 받는다. 진단·시험용이다.
 ROCKS_PLATFORMBASE_API usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
 ROCKS_PLATFORMBASE_API void YieldThread() noexcept;
+
+// 현재 스레드에 실제로 적용된 OS 우선순위를 가장 가까운 ThreadPriority 단계로 읽는다. 조회하면
+// true이고 priority에 쓴다(실패하면 false, priority는 그대로). ThreadOptions::priority는 OS가
+// 거부해도 Start가 성공하므로(권한 부족 등) 실제 값을 진단 로그에 남길 때 쓴다(오디오 AudioRT —
+// Docs/Design/ AudioSystem 3.2절). OS 값은 ThreadPriority의 OS별 대응(위 표)과 같은 눈금으로
+// 비교한다.
+//
+// 사용 예:
+//   ThreadPriority applied = ThreadPriority::Normal;
+//   if (TryGetCurrentThreadPriority(applied) && applied != ThreadPriority::Highest) { /* 거부됨 */
+//   }
+ROCKS_PLATFORMBASE_API bool TryGetCurrentThreadPriority(ThreadPriority& priority) noexcept;
 // 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상 — affinity·컨테이너 제한을 따른다). 작업
 // 스레드 수의 기본값을 정할 때 쓴다(예: 엔진 GC 표식 scheduler의 worker 수). OS가 알려 주지 않으면
 // 1이다. Android는 sched_getaffinity, Apple은 sysconf, Windows는 활성 프로세서 수와 프로세스

@@ -213,6 +213,32 @@ void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
     static_cast<void>(SetThreadPriority(GetCurrentThread(), priority));
 }
 
+} // namespace detail
+
+// GetThreadPriority의 값을 가장 가까운 단계로 바꾼다(TIME_CRITICAL·IDLE도 양 끝 단계로).
+bool TryGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
+    const int value = GetThreadPriority(GetCurrentThread());
+    if (value == THREAD_PRIORITY_ERROR_RETURN) {
+        return false;
+    }
+
+    if (value >= THREAD_PRIORITY_HIGHEST) {
+        priority = ThreadPriority::Highest;
+    } else if (value >= THREAD_PRIORITY_ABOVE_NORMAL) {
+        priority = ThreadPriority::AboveNormal;
+    } else if (value >= THREAD_PRIORITY_NORMAL) {
+        priority = ThreadPriority::Normal;
+    } else if (value >= THREAD_PRIORITY_BELOW_NORMAL) {
+        priority = ThreadPriority::BelowNormal;
+    } else {
+        priority = ThreadPriority::Lowest;
+    }
+
+    return true;
+}
+
+namespace detail {
+
 ThreadStatus StartNativeThread(ThreadState& state) noexcept {
     static_assert(sizeof(HANDLE) <= sizeof(state.native));
     static_assert(alignof(HANDLE) <= alignof(ThreadState));

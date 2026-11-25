@@ -6,8 +6,8 @@
 |---|---|---|---|---|
 | PR1 | 이 스펙 | 개정 1 | 교차 검증 반영 | AU1 이상 |
 | PR2 | 스레드 우선순위 | 구현(`Highest`) | 없음. 실시간 등급은 AU9 측정 뒤 PlatformLayer 개정 | — |
-| PR3 | Core 동시 컨테이너 SY7(`BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`) | 설계(선행 SY0·SY1·SY2) | SY0→SY1→SY2→SY7 구현 | AU2(개정 8: 믹서가 명령을 인자로 받아 AU1에서 옮김 — 3.22.1절) |
-| PR21 | 무잠금 깨우기 신호 `RealtimeWakeSignal`(AD26) | 설계(Synchronization 개정 3 9.6절, D34, SY12) | SY0 → SY12 구현 | AU2 |
+| PR3 | Core 동시 컨테이너 SY7(`BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`) | 완료(46dd9f81, 2026-11-25) | SY0→SY1→SY2→SY7 구현 | AU2(개정 8: 믹서가 명령을 인자로 받아 AU1에서 옮김 — 3.22.1절) |
+| PR21 | 무잠금 깨우기 신호 `RealtimeWakeSignal`(AD26) | 완료(SY12, 46dd9f81) | SY0 → SY12 구현 | AU2 |
 | PR4 | `SerialTaskChain`·`WorkerScheduler`·`TaskLane::Audio` | 구현 | 없음 | — |
 | PR5 | ThirdParty 반입 | 절차 구현, 오디오 라이브러리 없음 | miniaudio(AU2), libFLAC·libvorbis·libogg·libopus·libopusfile·minimp3(AU4), 런타임 libopus(AU5) | AU2, AU4, AU5 |
 | PR6 | 모듈 유형 `ClientOnly`, Server 대상 오디오 제외 | 완료(BS2 0d9c3a8b) | BuildTargets 구현 | AU2(서버 빌드 확인은 AU3) |
@@ -31,7 +31,7 @@
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
 | AU1 | `Audio` 모듈: 형식·채널 레이아웃·PCM 버퍼, voice pool, 명령(인자 전달)·파라미터 seqlock·stop mailbox·장치 stop-all epoch·ACK·시작/terminal 슬롯(Mixer2, scene epoch는 AU3), mix clock·블록 안 예약, 리샘플러, source LPF/HPF, gain ramp, 2D·equal-power 패너, 거리 곡선, 마스터 limiter, `OfflineAudioRender`, 메모리 PCM clip | PR1 | 3.19절 PCM·예약·리샘플·click·수명·seqlock 시험(Inline), AudioRT 할당 0 |
-| AU2 | `AudioOutputBackend`, AudioRT 스레드·명령 링(`BoundedSpscQueue`)·정렬 pending 배열(3.22.1절)·출력 링(칸 수 계산)·`RealtimeWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR3, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
+| AU2 | (개정 28: AU2a Audio 모듈 장치 경로 → AU2b miniaudio·`AudioMiniaudio`, 3.33절) `AudioOutputBackend`, AudioRT 스레드·명령 링(`BoundedSpscQueue`)·정렬 pending 배열(3.22.1절)·출력 링(칸 수 계산)·`RealtimeWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR3, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
 | AU3 | `EngineAudio`: `AudioEngineSubsystem`·`AudioWorldSubsystem`·제어 pipe·`AudioDeviceContext`, `SoundSource`·`SoundClip`(메모리 PCM)·`AttenuationSettings`(거리), `AudioComponent`, 재생 API·결과, 리스너, CVar(비활성 창 볼륨 포함), 무음 실행·서버, 종료 drain, Tryout 정리 계약 | AU2, PR7, PR8 | Sandbox에서 키 입력으로 UI음·움직이는 부착 루프, 좌우 방향, 맵 교체·컴포넌트 파괴·GC 뒤 stale voice·lease 0, 서버 빌드에 `AudioMiniaudio` 미링크 |
 | AU3b | Sparks 바인딩 | AU3, PR18 | Sparks 시험: 재생·정지·`LoopHandle` 수명, 서버 `Ignored` |
 | AU4 | `AudioTools`: `SoundClipImporter`, WAV·AIFF 파서, FLAC·Vorbis·Opus·MP3 디코드(SIMD 고정), ThirdParty 디코더, 에디터 재생용 PCM 플랫폼 데이터 변환(AD25) | AU3, PR10, PR5 | 3.19절 임포트 시험, 디코드 SHA 고정값, 재생 중 재임포트 시 새 재생부터 새 revision |
