@@ -101,6 +101,13 @@ struct ROCKS_INPUTACTIONS_API InputKey {
     friend constexpr bool operator==(const InputKey&, const InputKey&) noexcept = default;
 };
 
+// 키 하나의 고정 번호 수다(키 집합 비트 — 평가기의 "눌려 있던 키" 기록, 할당 없음).
+inline constexpr uint32 InputKeySlotCount = KeyCount + MouseButtonCount + MouseAxisKeyCount +
+                                            GamepadButtonCount + GamepadAxisKeyCount + MaxTouches;
+
+// key의 고정 번호(0 … InputKeySlotCount − 1)다. 잘못된 키는 InputKeySlotCount다.
+ROCKS_INPUTACTIONS_API uint32 InputKeySlot(InputKey key) noexcept;
+
 // state에서 key를 읽는다. gamepad는 패드 키가 읽을 패드 번호다. 잘못된 키는 빈 표본이다.
 ROCKS_INPUTACTIONS_API KeySample ReadKey(const InputState& state, uint32 gamepad,
                                          InputKey key) noexcept;
