@@ -7,6 +7,7 @@
 #include <D3D12Graphics/D3D12Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/GpuPageAllocator.h>
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/SubresourceStates.h>
@@ -27,6 +28,7 @@
 
 #include <Platform/Atomics.h>
 
+#include <Graphics/RootBudget.h>
 #include <Graphics/ShaderBindings.h>
 
 #include "D3D12Caps.h"
@@ -67,9 +69,9 @@ constexpr uint32 MaxMipLevels = 16;
 constexpr uint64 TexturePlacementAlignment = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
 // 업로드 ring 안 버퍼 복사 원본 정렬이다.
 constexpr uint64 BufferUploadAlignment = 16;
-// 그리기별 상수 b0의 루트 상수 수다. 파이프라인 크기와 무관하게 계약 최대(32개)를 둬 root
-// signature를 하나로 유지한다(RenderBase 4.4절 GX4 SX2 구현).
-constexpr uint32 ConstantCount = MaxDrawConstantBytes / sizeof(uint32);
+// 기록 하나가 그리기 때 table을 복사해 넣는 shader-visible descriptor ring의 칸 수다(queue마다,
+// RenderBase 9.11절 5항). 같은 원본 목록은 다시 복사하지 않는다.
+constexpr uint32 OnlineDescriptorsPerQueue = 131'072;
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
 // 소멸 때까지 놓지 않을 retire 항목의 fence 값이다. 정상 동작 중의 완료 값은 이 값에 닿지
@@ -80,12 +82,10 @@ constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
 static_assert(MaxDrawConstantBytes % sizeof(uint32) == 0,
               "Draw constants must be a whole number of root constants");
-// root signature 매개변수 번호다: 0은 그리기별 상수(루트 상수 b0 space3 — ShaderSystem SSD32), 그
-// 뒤는 파이프라인 slot 표(PipelineSlots)의 자원마다 table 하나다(RootFirstTable + 자원 순번).
-constexpr UINT RootConstants = 0;
-constexpr UINT RootFirstTable = 1;
-// 루트 상수의 register space다(UE 예약 space 3과 같은 번호).
+// 루트 상수의 register space다(UE 예약 space 3과 같은 번호 — ShaderSystem SSD32).
 constexpr UINT RootConstantsSpace = 3;
+// PS 진단 버퍼 root UAV의 register space다(u0 space999, ShaderSystem 7.2절 12항).
+constexpr UINT DebugBufferSpace = 999;
 
 // COM 참조는 PlatformBase 공용 도구를 쓴다(Platform/Win64/ComRef.h).
 using platform::windows::ComRef;
@@ -174,8 +174,8 @@ struct BufferRecord {
     SlotHandle heap;
 };
 
-// 버퍼 view(GX2)다. 버퍼 자원 참조를 쥐므로 버퍼를 먼저 놓아도 산다. descriptor는 shader-visible
-// SRV heap(CBV_SRV_UAV)의 칸이다(UAV view도 같은 heap, compute 묶기는 GX3·GX4).
+// 버퍼 view(GX2)다. 버퍼 자원 참조를 쥐므로 버퍼를 먼저 놓아도 산다. descriptor는 CPU 전용
+// SRV heap(CBV_SRV_UAV)의 칸이다(UAV view도 같은 heap, 그리기 때 shader-visible ring으로 복사한다).
 struct BufferViewRecord {
     ComRef<ID3D12Resource> resource;
     uint32 descriptor = 0;
@@ -258,10 +258,41 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
     return image * depth * record.slices;
 }
 
+// 단계 하나의 root table 배치다(RenderBase 9.11절 5항). 매개변수 번호가 -1이면 그 table이 없다.
+// srvBindings·uavBindings는 PipelineSlots::bindings 색인이고 table 안 순서다.
+struct RootStageTables {
+    ShaderStage stage = ShaderStage::Vertex;
+    int32 srvParam = -1;
+    uint32 srvCount = 0;
+    uint8 srvBindings[MaxPipelineSlotBindings] = {};
+    int32 samplerParam = -1;
+    uint8 samplerBinding = 0;
+    int32 uavParam = -1;
+    uint32 uavCount = 0;
+    uint8 uavBindings[MaxPipelineSlotBindings] = {};
+    // 넘친 CBV table의 range [cbvFirst, cbvFirst + cbvCount)다.
+    int32 cbvParam = -1;
+    uint32 cbvFirst = 0;
+    uint32 cbvCount = 0;
+};
+
+// 파이프라인 하나의 root signature 배치다. root CBV는 rootCbvParam부터 plan.rootOrder 순서다.
+struct RootLayout {
+    RootStageTables stages[MaxRootBudgetStages];
+    uint32 stageCount = 0;
+    RootBudgetPlan plan;
+    uint32 rootCbvParam = 0;
+    int32 debugParam = -1;
+    int32 constantsParam = -1;
+    uint32 constantDwords = 0;
+    uint32 parameterCount = 0;
+};
+
 struct PipelineRecord {
     ComRef<ID3D12PipelineState> state;
-    // 이 파이프라인 layout의 root signature(장치 캐시가 소유를 나눈다)와 고정 slot 표다.
+    // 이 파이프라인 layout의 root signature(장치 캐시가 소유를 나눈다)와 그 배치, 고정 slot 표다.
     ComRef<ID3D12RootSignature> rootSignature;
+    RootLayout root;
     PipelineSlots slots;
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
@@ -278,6 +309,39 @@ struct PipelineRecord {
     D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
     bool writesDepthStencil = false;
+};
+
+// 상수 버퍼 handle 저장소 page다(upload heap 버퍼 하나를 계속 map, 9.11절 2항).
+struct ConstantPage {
+    explicit ConstantPage(Allocator& allocator) noexcept : ranges(allocator) {
+    }
+
+    ComRef<ID3D12Resource> resource;
+    uint8* data = nullptr;
+    D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+    GpuPageAllocator ranges;
+};
+
+struct ConstantBufferRecord {
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    uint32 bytes = 0;
+    uint32 page = 0;
+    GpuPageAllocation block;
+};
+
+// queue 하나의 기록 명령 상수 ring과 shader-visible descriptor ring이다(9.11절 2·5항). 묶음은 그
+// queue의 제출 fence로 닫는다.
+struct TransientRings {
+    explicit TransientRings(Allocator& allocator) noexcept
+        : constants(allocator), descriptors(allocator) {
+    }
+
+    UploadRingAllocator constants;
+    ComRef<ID3D12Resource> buffer;
+    uint8* data = nullptr;
+    D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+    UploadRingAllocator descriptors;
+    uint32 descriptorBase = 0;
 };
 
 struct SwapChainRecord {
@@ -308,6 +372,9 @@ struct Retired {
     int64 srv = -1;
     int64 rtv = -1;
     int64 dsv = -1;
+    // 상수 버퍼 page 구간이다(Retire·UpdateConstantBuffer의 옛 자리, 9.11절 2항).
+    int64 constantPage = -1;
+    GpuPageAllocation constantBlock;
     // placed 자원·placed 버퍼 view의 heap이다. 자원을 놓은 뒤 heap의 placed 수를 줄인다
     // (ReleasePlacement, GX12).
     SlotHandle heap;
@@ -531,8 +598,8 @@ public:
     Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                       Span<const uint8> initial) noexcept override;
 
-    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). descriptor는 shader-visible SRV
-    // heap 칸 하나다(SRV·UAV 모두, GX2).
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). descriptor는 CPU 전용 SRV
+    // heap 칸 하나다(SRV·UAV 모두, GX2 — 그리기 때 shader-visible ring으로 복사한다).
     Result<BufferViewHandle> CreateBufferView(BufferHandle handle,
                                               const BufferViewDesc& desc) noexcept override;
 
@@ -636,6 +703,15 @@ public:
     void Retire(BufferHandle handle) noexcept override;
 
     void Retire(BufferViewHandle handle) noexcept override;
+
+    // --- 상수 버퍼(RenderBase 9.11절 GX6, D3D12Constants.cpp) ---
+
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 내용은 upload page 구간이다.
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
 
     void Retire(TextureHandle handle) noexcept override;
 
@@ -905,12 +981,42 @@ private:
     // 파이프라인 slot 표의 root signature다(ShaderSystem 7.2절 4항 — 파이프라인 layout마다 하나를
     // 캐시한다). 같은 (단계, 범위 종류, register) 목록이면 같은 객체를 돌려준다. 호출자는 gate_를
     // 잡고 있어야 한다.
-    Result<ComRef<ID3D12RootSignature>> RootSignatureFor(const PipelineSlots& slots,
-                                                         bool compute) noexcept;
+    // slot 표의 root 배치(9.11절 5항)와 그 root signature다(캐시). 실패: 예산 계획 실패
+    // InvalidArgument, 직렬화·생성 실패 DependencyFailed.
+    Result<ComRef<ID3D12RootSignature>> RootSignatureFor(const PipelineSlots& slots, bool compute,
+                                                         uint32 drawConstantBytes,
+                                                         RootLayout& layout) noexcept;
+
+    // --- 상수 버퍼 내부(D3D12Constants.cpp, 잠금 안) ---
+
+    Result<void> InitializeConstants() noexcept;
+    // page에서 bytes(256 올림)를 잡는다. 자리가 없으면 page를 하나 더 만든다.
+    Result<void> AllocateConstantBlock(uint64 bytes, uint32& page,
+                                       GpuPageAllocation& block) noexcept;
+    // 옛 구간을 마지막 사용 fence 뒤 돌려주도록 회수 목록에 넣는다.
+    void RetireConstantBlock(uint32 page, const GpuPageAllocation& block) noexcept;
+    TransientRings& ActiveRings() noexcept;
+    // 지금 기록 queue의 ring에서 자리를 잡는다(꽉 차면 끝난 제출을 회수하고 가장 오래된 묶음을
+    // 기다린다). 이 기록만으로 찼으면 CapacityExceeded다.
+    Result<uint64> AllocateTransient(UploadRingAllocator& ring, uint64 size,
+                                     uint64 alignment) noexcept;
+    // shader-visible ring에서 count칸을 잡아 첫 칸의 CPU·GPU handle을 준다.
+    bool AllocateOnline(uint32 count, D3D12_CPU_DESCRIPTOR_HANDLE& cpu,
+                        D3D12_GPU_DESCRIPTOR_HANDLE& gpu) noexcept;
+    // 기록이 끝났다: 그 queue ring의 열린 묶음을 fence로 닫는다.
+    void CloseTransientRings(bool compute, uint64 fence) noexcept;
+    // 묶인 (단계, slot)의 GPU 주소와 byte 수다(없으면 0).
+    D3D12_GPU_VIRTUAL_ADDRESS BoundConstantAddress(uint32 stage, uint32 slot,
+                                                   uint32& bytes) const noexcept;
+    // 파이프라인이 읽는 상수 버퍼가 모두 묶였는지다(ConstantBuffersSatisfied).
+    bool ConstantsBound(const PipelineRecord& pipeline) const noexcept;
+    // table 하나를 원본 목록(srvs_ 칸)으로 채운다. 바로 앞 같은 목록이면 그 구간을 다시 쓴다.
+    bool CopyTable(uint32 cacheStage, uint32 cacheKind, const uint32* sources, uint32 count,
+                   D3D12_GPU_DESCRIPTOR_HANDLE& gpu) noexcept;
 
     // 묶인 파이프라인의 root signature·루트 상수·slot table을 지금 기록에 건다(그리기·dispatch
     // 직전).
-    void ApplyRootBindings(const PipelineRecord& pipeline) noexcept;
+    bool ApplyRootBindings(const PipelineRecord& pipeline) noexcept;
 
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
@@ -1078,6 +1184,12 @@ private:
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
 
     void SetBufferView(uint32 slot, BufferViewHandle handle) noexcept override;
+
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
 
     // --- GX3·GX4(D3D12Commands.cpp) ---
 
@@ -1294,6 +1406,43 @@ private:
     };
 
     Array<RootSignatureEntry> rootSignatures_;
+    // 상수 버퍼(9.11절): handle 표, upload page, queue별 기록 명령 ring, shader-visible descriptor
+    // ring(srvs_는 CPU 전용 원본 heap이다), 넘친 CBV table의 빈 칸이 가리킬 0 구간, PS 진단 버퍼.
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    Array<UniquePtr<ConstantPage>> constantPages_;
+    TransientRings graphicsRings_;
+    TransientRings computeRings_;
+    ComRef<ID3D12DescriptorHeap> online_;
+    uint32 onlineIncrement_ = 0;
+    D3D12_GPU_VIRTUAL_ADDRESS zeroConstants_ = 0;
+    ComRef<ID3D12Resource> debugBuffer_;
+    struct BoundConstant {
+        SlotHandle handle;
+        // SetConstantData 자리(handle이 null일 때)다.
+        D3D12_GPU_VIRTUAL_ADDRESS data = 0;
+        uint32 bytes = 0;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    // 단계(VS·PS·CS)와 종류(SRV·UAV)마다 바로 앞에 복사한 table 원본 목록과 그 구간이다(기록마다
+    // 비운다).
+    struct TableCache {
+        bool valid = false;
+        uint32 count = 0;
+        uint32 sources[MaxPipelineSlotBindings] = {};
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
+    };
+    TableCache tableCache_[ConstantBufferStageCount][2] = {};
+    // 단계마다 바로 앞에 만든 넘친 CBV table(range 첫 slot·칸 수·주소 목록)과 그 구간이다.
+    struct CbvTableCache {
+        bool valid = false;
+        uint32 first = 0;
+        uint32 count = 0;
+        D3D12_GPU_VIRTUAL_ADDRESS addresses[MaxConstantBufferSlots] = {};
+        UINT sizes[MaxConstantBufferSlots] = {};
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
+    };
+    CbvTableCache cbvTableCache_[ConstantBufferStageCount] = {};
+    bool onlineExhaustedLogged_ = false;
     // 지금 기록에 건 root signature다(기록·패스마다 비운다).
     ID3D12RootSignature* appliedGraphicsRoot_ = nullptr;
     ID3D12RootSignature* appliedComputeRoot_ = nullptr;

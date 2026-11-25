@@ -143,6 +143,13 @@ struct SwapChainRecord {
     bool broken = false;
 };
 
+// 상수 버퍼 handle 하나다(RenderBase 9.11절 — SingleFrame IMMUTABLE, MultiFrame DEFAULT).
+struct ConstantBufferRecord {
+    ComRef<ID3D11Buffer> buffer;
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    uint32 bytes = 0;
+};
+
 // 비동기 readback 하나다. fence가 끝나면 staging 텍스처에 있다.
 struct ReadbackRecord {
     ComRef<ID3D11Texture2D> staging;
@@ -272,6 +279,13 @@ public:
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
     void Retire(BufferViewHandle view) noexcept override;
+    // 상수 버퍼(D3D11Constants.cpp, RenderBase 9.11절)다. 다른 스레드에서도 부를 수 있다
+    // (concurrentResourceCreation — 기록 중 갱신은 소유 스레드만 기록 순서를 지킨다).
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
     Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
@@ -378,6 +392,10 @@ private:
     void SetTexture(TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -412,6 +430,10 @@ private:
     bool PrepareDraw(bool indexed) noexcept;
     // dispatch 직전 조건을 보고 CS 상수·읽기 view·쓰기 view를 묶는다.
     bool PrepareDispatch() noexcept;
+    // 파이프라인이 읽는 상수 버퍼(D3D11Constants.cpp)를 묶는다. 하나라도 없거나 작으면 거짓이다.
+    bool ApplyConstants(const PipelineRecord& pipeline) noexcept;
+    // 묶인 (단계, slot)의 버퍼와 byte 수다(없으면 null·0).
+    ID3D11Buffer* BoundConstantBuffer(uint32 stage, uint32 slot, uint32& bytes) const noexcept;
     // dispatch 뒤 CS view를 풀어 다음 그리기가 같은 버퍼를 읽을 수 있게 한다.
     void FinishDispatch() noexcept;
     // 간접 인자 버퍼(Indirect 용도, offset 4 byte 배수, 범위 안)다. 아니면 null이다.
@@ -614,6 +636,17 @@ private:
     // 기록 시작 때 0이고 SetDrawConstants가 앞부분을 바꾼다.
     ComRef<ID3D11Buffer> constants_;
     alignas(16) uint8 constantValues_[MaxDrawConstantBytes] = {};
+    // 상수 버퍼(9.11절): handle 표, 기록 명령의 (단계, slot)별 DYNAMIC 버퍼와 그 크기, 묶음이다.
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    ComRef<ID3D11Buffer> transientConstants_[ConstantBufferStageCount][MaxConstantBufferSlots];
+    uint32 transientBytes_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    struct BoundConstant {
+        SlotHandle handle;
+        // 참이면 기록 명령 버퍼(transientConstants_)다.
+        bool data = false;
+        uint32 bytes = 0;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
     Target target_;
     SwapChainHandle presentTarget_;
     TextureHandle white_;

@@ -29,7 +29,7 @@
 | barrier·queue wait | begin·end 분리, cross-pipe fence | 같다. native split이 없는 backend는 end 지점에서 낮춘다(GX5) |
 | transient alias | 지원 RHI만, 없으면 풀 | 같다(RG5). alias를 끈 1차에도 **풀**이 필요하다(계획에 없던 단계) |
 | copy queue → compute overlap → alias 순서 | 그래프 pipe는 그래픽·async compute 둘뿐. Copy pass는 그래픽 pipe. 업로드는 그래프 앞 lock | copy queue 위치는 결정 R6(확정: 그래프 밖 업로드·스트리밍 계층, UE 그래프에 copy pipe가 없는 것과 같다). compute overlap은 RG4(8절) |
-| 계획에 없음 | render pass 병합(tiled GPU 전용) | OpenGL ES·Android가 필수이므로 RG3에 넣는다(GX13) |
+| 계획에 없음 | render pass 병합(tiled GPU 전용) | OpenGL ES·Android가 필수이므로 RG3에 넣는다(같은 attachment 연속 pass 병합 — subpass가 필요 없어 GX13과 무관, 개정 40) |
 | 계획에 없음 | 병렬 기록·람다 형태에 따른 실행 방식 | RG3 |
 | D3D11/OpenGL 직렬 lowering(11.5) | OpenGL 전이는 빈 함수, dispatch 앞뒤 memory barrier | 같다(GX5) |
 | enhanced barriers(11.3) | RHI 안에서 고른다 | 그래프 쪽 접근 상태는 하나, backend가 lowering(GX5) |

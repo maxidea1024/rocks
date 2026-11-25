@@ -2,6 +2,7 @@
 
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
+#include <Graphics/ConstantBuffer.h>
 #include <Graphics/DeviceCaps.h>
 #include <Graphics/DeviceTypes.h>
 #include <Graphics/ResourceAccess.h>
@@ -14,7 +15,7 @@ namespace rocks::graphics {
 //
 // async compute 기록(PassDesc::queue = AsyncCompute, RenderBase 8절 RG4)은 compute 명령만 받는다:
 // SetPipeline(compute 파이프라인)·SetTexture·SetBufferView·SetWritableBufferView·
-// SetWritableTexture·SetDrawConstants·Dispatch·DispatchIndirect·ClearWritableBufferView·CopyBuffer·
+// SetWritableTexture·SetDrawConstants·SetConstantBuffer·SetConstantData·Dispatch·DispatchIndirect·ClearWritableBufferView·CopyBuffer·
 // 전이(IsComputeQueueAccess 상태 사이, 분리 전이 포함)·WriteTimestamp·PushMarker·PopMarker. 그 밖의
 // 호출(그리기·viewport·scissor·스텐실 기준·graphics 파이프라인·그 밖 상태의 전이)은 무시하고
 // IgnoredDraws를 올린다. 값을 돌려주는 CopyTexture·CopyPassTarget은 InvalidArgument다. 장치가
@@ -85,6 +86,39 @@ public:
     // 실패: 기록 중 아님·묶인 파이프라인 없음·크기가 선언과 다름 InvalidArgument(LastError에 두
     // 크기). 실패하면 값은 그대로다.
     virtual Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept = 0;
+
+    // --- 상수 버퍼(RenderBase 9.11절 GX6) ---
+    //
+    // slot은 그 단계 셰이더 바인딩 layout(값 1)의 상수 버퍼 slot(backend 위치, 0 –
+    // MaxConstantBufferSlots-1)이다. 형식마다 다르므로 값 1에서 얻는다(RenderBase
+    // ShaderBindingMap의 단계별 자리, 또는 FindConstantBufferSlot). 묶음은 단계마다 따로이고 기록
+    // 안에서 SetPipeline을 넘어 유지되며 기록 시작 때 모두 빈다. 그리기·dispatch는 파이프라인이
+    // 읽는 (단계, slot)마다 셰이더 선언 크기 이상의 버퍼가 묶였을 때만 실행하고, 아니면 무시하고
+    // IgnoredDraws를 올린다 (ConstantBuffersSatisfied). 버퍼는 CPU 가시 메모리이고 GPU가 읽기만
+    // 하므로 전이가 없다.
+
+    // handle을 묶는다. null·stale handle은 slot을 비우고, 범위 밖 stage·slot은 무시한다. handle은
+    // 그리기 때 그 순간의 내용으로 푼다: UpdateConstantBuffer 앞에 기록한 그리기는 옛 내용, 뒤의
+    // 그리기는 새 내용을 읽는다. Retire된 handle은 빈 slot이다(이미 기록한 그리기는 그대로 읽는다).
+    //
+    // 사용 예(PS cbuffer Material):
+    //   auto material = device.CreateConstantBuffer(ConstantBufferLifetime::MultiFrame,
+    //                                                ConstantBufferBytes(values));
+    //   commands.SetConstantBuffer(ShaderStage::Pixel, materialSlot, material.Value());
+    //   commands.Draw(3);
+    virtual void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                                   ConstantBufferHandle buffer) noexcept = 0;
+
+    // bytes를 이 기록의 상수 ring에 복사해 묶는다(UE SingleDraw, handle 없음). 값은 다시 묶거나
+    // 기록이 끝날 때까지 유효하고, 호출 뒤 bytes를 버려도 된다. 그리기마다 바뀌는 작은 cbuffer에
+    // 쓴다(더 작은 값은 SetDrawConstants).
+    //
+    // 실패: 기록 중 아님·범위 밖 stage·slot·크기 규칙 위반(IsValidConstantBufferBytes)
+    // InvalidArgument(그 slot의 앞 묶음은 그대로다), ring이 이 기록만으로 찼으면
+    // CapacityExceeded, 메모리·API 실패는 그 오류다. InvalidArgument가 아닌 실패는 그 slot을
+    // 비운다(뒤 그리기는 무시된다).
+    virtual Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                         Span<const uint8> bytes) noexcept = 0;
 
     // 기본도형을 그린다(파이프라인 topology, 정점 vertexCount개 × 인스턴스 instanceCount개,
     // firstVertex부터). base
@@ -389,6 +423,25 @@ public:
     virtual Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
                                                       const BufferViewDesc& desc) noexcept = 0;
 
+    // 상수 버퍼를 만들고 contents를 복사한다(RenderBase 9.11절 1항, UE RHICreateUniformBuffer).
+    // contents는 셰이더 cbuffer와 같은 배치(ShaderSystem 7.2절 5항)이고 크기는
+    // IsValidConstantBufferBytes 안이다. 묶을 때 셰이더 선언 크기 이상이어야 그린다. SingleFrame은
+    // 내용을 바꿀 수 없고 쓰는 쪽이 프레임 끝에 Retire한다. MultiFrame은 UpdateConstantBuffer로
+    // 바꾼다. 다른 스레드 생성 규칙은 DeviceInfo::concurrentResourceCreation이다.
+    //
+    // 실패: 모르는 lifetime·크기 규칙 위반 InvalidArgument, 메모리·API 실패는 그 오류다.
+    virtual Result<ConstantBufferHandle>
+    CreateConstantBuffer(ConstantBufferLifetime lifetime, Span<const uint8> contents) noexcept = 0;
+
+    // MultiFrame 상수 버퍼의 내용을 바꾼다(UE RHIUpdateUniformBuffer). 기록 중이면 그 뒤에 기록하는
+    // 그리기부터 새 내용을 읽는다(앞 그리기는 옛 내용 — backend는 새 자리를 받아 옮기고 옛 자리는
+    // 마지막 사용 fence 뒤 돌려준다). 스레드 규칙은 생성과 같다.
+    //
+    // 실패: stale StaleHandle, SingleFrame·크기가 만들 때와 다름 InvalidArgument, 메모리 실패는 그
+    // 오류다.
+    virtual Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                              Span<const uint8> contents) noexcept = 0;
+
     // 버퍼 [offset, offset + out.Size())를 out으로 읽는다. 앞서 쌓인 업로드 뒤에 복사하고 GPU
     // 완료를 기다린다(시험·캡처용, 프레임 경로에서 쓰지 않는다). 실패: stale StaleHandle, 기록 중
     // Busy, 빈 out·범위 밖 InvalidArgument.
@@ -608,6 +661,7 @@ public:
     // 자원을 회수 대기로 넘긴다(위 "제출·완료·회수"). 모르는·이미 회수한 handle은 무시한다.
     virtual void Retire(BufferHandle buffer) noexcept = 0;
     virtual void Retire(BufferViewHandle view) noexcept = 0;
+    virtual void Retire(ConstantBufferHandle buffer) noexcept = 0;
     virtual void Retire(TextureHandle texture) noexcept = 0;
     virtual void Retire(PipelineHandle pipeline) noexcept = 0;
     virtual void Retire(ShaderHandle shader) noexcept = 0;

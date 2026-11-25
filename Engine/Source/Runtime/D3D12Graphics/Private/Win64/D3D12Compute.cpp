@@ -232,7 +232,7 @@ Result<CommandContext*> D3D12Device::BeginComputeRecording() noexcept {
     // compute root signature와 shader-visible heap이다(dispatch가 root 인자를 건다).
     appliedGraphicsRoot_ = nullptr;
     appliedComputeRoot_ = nullptr;
-    ID3D12DescriptorHeap* heaps[] = {srvs_.Heap(), samplers_.Heap()};
+    ID3D12DescriptorHeap* heaps[] = {online_.Get(), samplers_.Heap()};
     list_->SetDescriptorHeaps(2, heaps);
     return Result<CommandContext*>::Success(this);
 }
@@ -263,6 +263,7 @@ Result<GpuFencePoint> D3D12Device::EndComputeRecording() noexcept {
     auto uploads = FlushUploadsLocked();
     const auto abandon = [&]() noexcept {
         allocator.fenceValue = computeFenceValue_;
+        CloseTransientRings(true, computeFenceValue_);
         AssignPendingComputeRetires(computeFenceValue_);
         computeTimestamps_.Close(computeFenceValue_, false);
         SettleTracking(false);
@@ -295,6 +296,7 @@ Result<GpuFencePoint> D3D12Device::EndComputeRecording() noexcept {
     if (FAILED(signaled)) {
         DetectLost(signaled);
         allocator.fenceValue = RetainUntilDestructionFence;
+        CloseTransientRings(true, RetainUntilDestructionFence);
         AssignPendingComputeRetires(RetainUntilDestructionFence);
         computeTimestamps_.Close(RetainUntilDestructionFence, false);
         DrainValidationMessages();
@@ -304,6 +306,7 @@ Result<GpuFencePoint> D3D12Device::EndComputeRecording() noexcept {
     computeFenceValue_ = value;
     computeTimeline_.Submitted(value, nullptr);
     allocator.fenceValue = value;
+    CloseTransientRings(true, value);
     AssignPendingComputeRetires(value);
     computeTimestamps_.Close(value, true);
     ProcessRetired();

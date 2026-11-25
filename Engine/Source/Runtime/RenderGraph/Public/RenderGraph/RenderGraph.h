@@ -7,6 +7,7 @@
 #include <RenderBase/GpuTrace.h>
 #include <RenderBase/PipelineCache.h>
 #include <RenderBase/RenderHandle.h>
+#include <RenderBase/ShaderParameters.h>
 #include <RenderGraph/GraphPassAccesses.h>
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/GraphSharedData.h>
@@ -47,6 +48,20 @@ public:
     // 이 pass가 BufferView로 선언한 버퍼 view의 장치 view다(읽기는 SetBufferView, 쓰기는
     // SetWritableBufferView로 묶는다). 선언하지 않은 view는 null이다.
     graphics::BufferViewHandle View(GraphBufferView view) const noexcept;
+
+    // 그래프 상수(RenderGraph::CreateConstants)의 장치 상수 버퍼다. 다른 그래프의 handle이면
+    // null이다. 어느 pass에서나 읽을 수 있다(접근 선언 없음, Docs/Design/RenderBase 9.11절 8항).
+    graphics::ConstantBufferHandle Constants(GraphConstantBuffer constants) const noexcept;
+
+    // 그래프 상수를 바인딩 지도의 단계 자리마다 묶는다(ApplyConstantBuffer). 실패: 다른 그래프의
+    // handle·루트 상수 표 InvalidArgument.
+    //
+    // 사용 예:
+    //   auto view = graph.CreateConstants(viewBlock, "View");      // 선언(소유 스레드)
+    //   ... AddPass(..., [=](GraphPassContext& pass) noexcept { pass.SetConstants(viewMap,
+    //   view.Value()); ... });
+    Result<void> SetConstants(const ShaderBindingMap& map,
+                              GraphConstantBuffer constants) const noexcept;
 
     // view의 기준 mip이다(graphics::TextureViewBaseMip: 범위 view를 지원하는 장치는 0, OpenGL ES는
     // view의 첫 mip). 셰이더는 이 값을 그리기별 상수로 받아 명시 LOD로 읽는다(7.5절). 선언하지 않은
@@ -296,6 +311,19 @@ public:
     //   auto itemsWrite = graph.CreateBufferView(items, write);
     Result<GraphBufferView> CreateBufferView(GraphBuffer buffer,
                                              const graphics::BufferViewDesc& desc) noexcept;
+
+    // --- 그래프 상수(Docs/Design/RenderBase 9.11절 8항, UE CreateUniformBuffer 대응) ---
+
+    // 그래프 수명 상수 버퍼를 선언한다. bytes는 이 호출 안에서 프레임 arena에 복사한다. 장치
+    // SingleFrame 상수 버퍼는 실행 시작(Immediate는 이 호출)에 만들고 그래프 끝에 Retire한다.
+    // pass는 GraphPassContext::Constants·SetConstants로 묶는다. name은 정적 수명 문자열(진단)이다.
+    // 실패: 크기 규칙 위반(graphics::IsValidConstantBufferBytes) InvalidArgument(검증 오류),
+    // Execute 뒤 Busy, arena 할당 실패는 그 오류, 장치 생성 실패는 그 오류(그래프 오류 — Execute가
+    // 돌려준다).
+    Result<GraphConstantBuffer> CreateConstants(Span<const uint8> bytes, const char* name) noexcept;
+    // 상수 블록의 지금 값으로 선언한다(블록의 장치 버퍼는 쓰지 않는다).
+    Result<GraphConstantBuffer> CreateConstants(const ConstantBlock& block,
+                                                const char* name) noexcept;
 
     // --- 그래프 안 업로드(RG2, UE QueueBufferUpload 대응) ---
     //

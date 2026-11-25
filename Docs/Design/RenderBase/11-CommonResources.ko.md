@@ -37,3 +37,33 @@
 ### 11.3 완료 기준(RB6)
 
 전체화면 pass 픽셀 대조, 상태 프리셋의 backend 대조(컬링·깊이·블렌드 픽셀), RenderBase 경로의 null 텍스처 바인딩 0건(Development 계수), 11.1절 1차 팩으로 BR01–BR02 판정.
+
+### 11.4 RB6 구현 설계(개정 40)
+
+18.3절 RR1–RR3·RR7·RR11이다. 결정은 권장안으로 확정했다.
+
+1. **상태 프리셋(`RenderBase/PipelineStatePresets.h`).** Graphics 값 타입을 돌려주는 constexpr 함수다(캐시 없음 — 상태는 파이프라인에 들어간다).
+   - 블렌드: `OpaqueBlend`(끔)·`AlphaBlend`(소스 알파, 알파는 `One`·`InverseSourceAlpha`)·`AdditiveBlend`(`One`·`One`, 알파도 같다)·`PremultipliedAlphaBlend`(`One`·`InverseSourceAlpha`). 모든 색 타깃에 같은 블렌드를 넣는 `SetBlend(desc, blend)`. Graphics의 `AlphaBlend()`는 지우고 이것으로 옮긴다(하위호환 없음 — 프리셋은 렌더 쪽 일이다).
+   - 래스터: `NoCull`·`BackFaceCull`·`FrontFaceCull`(음수 행렬식 반전용).
+   - 깊이: `DepthDisabled`·`DepthRead`(시험 `GreaterEqual`, 쓰기 끔)·`DepthReadWrite`(시험 `GreaterEqual`, 쓰기 켬). reversed-Z에서 `GreaterEqual`이 "가깝거나 같음"이다(UE `CF_DepthNearOrEqual`).
+   - UE 대응: `RC/Public/RHIStaticStates.h:20–53`의 정적 상태 템플릿(기본값이 불투명·컬 없음·깊이 `CF_DepthNearOrEqual` 쓰기 켬).
+2. **엔진 셰이더 타입(`RenderBase/EngineShaderTypes.h`).** RenderBase 모듈이 등록하는 엔진 셰이더다(UE도 화면 VS·clear·복사 같은 유틸리티 셰이더를 RenderCore가 등록한다). 공개 헤더에는 이름·해시 상수(`ROCKS_SHADER_TYPE_NAME`)와 등록 목록 함수 `EngineShaderTypes()`·`EngineVertexInputTypes()`만 둔다(desc는 cpp — 셰이더 시스템 SSD2 정의 자리). 모듈 수명 객체가 `ShaderTypeModuleRegistration`으로 호스트 등록부에 넣고, 등록부를 직접 만드는 호스트(Sandbox·시험)는 목록 함수로 넣는다.
+   - `FullscreenTriangleVertex`: `/Engine/Private/Utility/FullscreenTriangle.rsf`. 정점 번호 0·1·2 → clip (−1,−1)·(3,−1)·(−1,3), z = 0(reversed-Z 원평면 — UE 화면 VS도 z = 0, `Engine/Shaders/Private/Tools/FullscreenVertexShader.usf:50`), `TEXCOORD0` UV는 화면 UV 규약(왼쪽 위 (0,0), 엔진 셰이더 3.4절). 화면에서 반시계라 앞면이다.
+   - `CopyTexturePixel`: `/Engine/Private/Utility/CopyTexture.rsf`. 2D 텍스처 `Source`를 UV로 표본해 그대로 낸다(엔진 셰이더 A18 `CopyTexture`의 2D 부분만 — 나머지는 SL1).
+   - `BuiltinMeshVertex`(정점 입력 축, 거르기는 `BuiltinVertexInput`만)·`BuiltinMeshPixel`: `/Engine/Private/Utility/BuiltinMesh.rsf`. 루트 상수 `BuiltinMeshConstants{LocalToClip float4x4, Color float4}` 80 byte(손으로 쓴 레이아웃 표), PS는 `Texture2D Albedo` 표본 × 정점 색 × `Color`. fallback 메시 셰이더다(계획 9.6절).
+   - 정점 입력 타입 `BuiltinVertexInput`(10.6절 3항).
+3. **전체화면 pass 도우미.** UE `FPixelShaderUtils::AddFullscreenPass`(`RC/Public/PixelShaderUtils.h:155`)에 해당한다.
+   - RenderBase `RenderBase/FullscreenPass.h`: `FullscreenPipelineRequest(set, pixelEntry, colorFormat)` — VS는 집합의 `FullscreenTriangleVertex`, 정점 배치 없음, `OpaqueBlend`·`NoCull`·`DepthDisabled`를 채운 `GraphicsPipelineRequest`(쓰는 쪽이 상태를 바꿀 수 있다). `DrawFullscreenTriangle(commands)` = `Draw(3)`(정점 버퍼 없음).
+   - RenderGraph `RenderGraph::AddFullscreenPass(name, flags, accesses, pipeline, bind)`: Raster pass를 넣고 실행 때 `SetPipeline(pipeline)` → `bind(pass)` → `Draw(3)`. 렌더 타깃은 accesses의 attachment 선언이다(없으면 `AddPass`와 같은 검증 오류). 파이프라인이 null이면 검증 오류다(`AddComputePass`와 같은 규칙).
+4. **null 텍스처 바인딩 계수(RR3).** `Device::NullTextureBindings()` — `SetTexture`에 null handle이 온 횟수(장치 수명 누적, 모든 구성). 장치는 지금처럼 흰 텍스처로 대신 묶는다(빈 바인딩 방지, 11.1절 끝). RenderBase 경로(팩·대체 자원)는 null을 묶지 않으므로 그 경로의 그리기 전후로 계수가 같아야 한다(11.3절). Development만 세는 안은 버렸다: Release Sandbox에서도 같은 단언을 하려면 늘 세야 하고 비용은 정수 하나다.
+5. **내장 자원 팩(`RenderBase/BuiltinResources.h` `BuiltinResources`).** 1차 내용(11.1절 표의 화면 마일스톤 몫):
+   - 텍스처(1×1, 선형, 샘플러 point·wrap — UE와 같다): `White2D`(1,1,1,1)·`Black2D`(0,0,0,1)·`Transparent2D`(0,0,0,0) `RGBA8Unorm`, `FlatNormal2D` `RGBA8Unorm`(128,128,255,255 — unorm `n·0.5+0.5` 인코딩의 (0,0,1)), 차원별 대체 `White2DArray`(층 1)·`White3D`(1×1×1)·`BlackCube`(면 6, (0,0,0,1))·`BlackCubeArray`(cube 1, (0,0,0,0) — 장치에 cube array 능력이 있을 때만, 없으면 그 자리는 null이고 그 대체 요청은 `Unsupported`), `ZeroUint2D`(`R32Uint` 0), `FarDepth2D`(`D32Float` 0 — reversed-Z 원평면, 깊이 SRV 대체).
+   - 버퍼(typed SRV view 함께): `ZeroFloat4`(`RGBA32Float` 원소 1, 0 — UE `GBlackFloat4VertexBufferWithSRV`), `OneFloat4`(1 — UE `GWhiteVertexBufferWithSRV`), `ZeroUint`(`R32Uint` 원소 1), `IdentityAffine`(`RGBA32Float` 원소 3 = 행 벡터 4×3 affine 행렬 하나의 열 셋 (1,0,0,0)·(0,1,0,0)·(0,0,1,0), 결정 R18의 본 행렬 배치 — 9.6절 identity 버퍼, zero 버퍼로 대신하지 않는다).
+   - 기본 메시(`BuiltinVertexInput` 배치, `UInt16` index): `Cube` 한 변 100 cm·원점 중심·면마다 정점 4(24·36), `Plane` 100 × 100 cm·XY 평면·법선 +Z(4·6). UE 기본 도형(`/Engine/BasicShapes/Cube`·`Plane`, 100 cm)과 같은 크기·축이다. 감김은 바깥에서 보아 화면 반시계(앞면)다: 바깥 법선 n에 대해 cross(b − a, c − a)·n < 0(왼손 좌표에서 화면 반시계 = 보는 방향 쪽 외적).
+   - fallback 셰이더: 엔진 셰이더 집합에서 `BuiltinMeshVertex`(`BuiltinVertexInput`)·`BuiltinMeshPixel`·`FullscreenTriangleVertex`·`CopyTexturePixel` 항목을 찾고 장치 셰이더를 만든다(첫 사용 생성을 팩 생성 때 앞당긴다 — 실패가 시작 실패여야 하므로).
+   - 생성 `Create(device, engineShaders)`: 렌더 lane 시작 단계(`RenderLaneProcessor::OnLaneStart`, 5.5절)에서 부른다. 초기 데이터는 생성 업로드(GX8)이고, 반환 뒤 RenderLane이 제출 fence를 기다린 다음 `BuiltinReady`를 게시한다. 하나라도 실패하면 만든 것을 모두 Retire하고 실패를 돌려준다(그 이름을 영어 진단에 남긴다) — 준비 완료가 게시되지 않는다(6.3절). 두 번째 `Create`는 `Busy`(장치 세대마다 한 번, BR03). 장치 재생성(RR18)은 새 팩을 만든다.
+   - 수명: `Retire(device)`는 종료 4단계(`OnLaneStop`)에서 모두 Retire한다. 팩은 스트리밍 예산 밖이다(계획 9.6절 pin).
+6. **대체 자원(RB2 6.2절, RR7).**
+   - `FallbackTexture(shape, component)`: 셰이더 자원 모양(값 1 v3 `ShaderResourceShape` — Texture2D·2DArray·3D·Cube·CubeArray)과 원소 계열(float·uint)로 typed 대체를 고른다. float 2D는 `White2D`, 2D 배열 `White2DArray`, 3D `White3D`, cube `BlackCube`, cube array `BlackCubeArray`, uint 2D `ZeroUint2D`다. 맞는 대체가 없는 조합(MSAA·buffer 모양, uint의 2D 밖, cube array 능력 없음)은 `Unsupported`다 — 2D white를 cube·uint slot에 넣지 않는다(계획 9.6절, BR02).
+   - `ResolveTexture(handles, handle, fallback)`: handle이 `Ready`면 그 장치 텍스처, `Pending`·`Failed`면 fallback을 돌려주고 대체 계수 `FallbackUses()`를 올린다(원자 — 렌더 lane과 기록 worker가 함께 부른다). `Retired`·모르는 handle은 `StaleHandle`(대체하지 않는다 — 회수된 자원을 쓰려는 것은 호출자 오류다). 깊이·스텐실 대체는 깊이 SRV 자리에서 `FarDepth2D`를 호출자가 직접 고른다.
+7. **완료 기준(11.3절 판정).** EngineTests(기록 장치): 프리셋 값, 팩 생성 내용(자원 수·desc·초기 byte·메시 감김 규칙), 셰이더 항목이 없는 집합의 생성 실패와 Retire 0 누수, 두 번째 생성 `Busy`, 대체 선택표와 `Unsupported`, `ResolveTexture` 상태별 결과·계수, 그래프 `AddFullscreenPass`의 기록 열(파이프라인·`Draw(3)`·attachment), `NullTextureBindings`. Sandbox `--self-test`(D3D12·D3D11·Vulkan·OpenGL ES, 소프트웨어 장치 포함): 팩 텍스처·버퍼 값 readback(BR02 기준 값), 전체화면 복사 픽셀, 프리셋 픽셀(뒤면·앞면 컬, 깊이 읽기·읽기쓰기, 불투명·알파·가산·premultiplied 블렌드), 기본 메시를 fallback 셰이더로 그린 픽셀(`BuiltinVertexInput` 정점 입력 축 — 10.6절 4항), RenderBase 경로 그리기 전후 `NullTextureBindings` 같음. 장치 사이 픽셀이 같아야 한다.

@@ -69,6 +69,11 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
     }
 
     boundTexture_ = white_.slot;
+    for (auto& stage : boundConstants_) {
+        for (BoundConstant& bound : stage) {
+            bound = {};
+        }
+    }
 
     stencilReference_ = 0;
     inputsDirty_ = false;

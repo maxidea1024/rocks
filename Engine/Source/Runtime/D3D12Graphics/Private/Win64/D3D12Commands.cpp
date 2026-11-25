@@ -93,7 +93,8 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
         return FailCode<PipelineHandle>(ErrorCode::InvalidArgument, error);
     }
 
-    auto root = RootSignatureFor(slots, true);
+    RootLayout rootLayout;
+    auto root = RootSignatureFor(slots, true, desc.drawConstantBytes, rootLayout);
     if (!root) {
         return Result<PipelineHandle>::Failure(root.Error());
     }
@@ -109,6 +110,7 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     }
 
     record.rootSignature = Move(root.Value());
+    record.root = rootLayout;
     record.slots = slots;
     record.bufferSlots = slots.bufferSlots;
     record.writeSlots = slots.writeSlots;
@@ -429,7 +431,8 @@ bool D3D12Device::PrepareDraw(bool indexed) noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
     if (!recording_ || pipeline == nullptr || pipeline->compute ||
         (target_.colorCount == 0 && target_.depth.IsNull()) || !StreamsBound() ||
-        !BufferViewsBound() || (target_.depthReadOnly && pipeline->writesDepthStencil)) {
+        !BufferViewsBound() || !ConstantsBound(*pipeline) ||
+        (target_.depthReadOnly && pipeline->writesDepthStencil)) {
         return false;
     }
 
@@ -461,13 +464,13 @@ bool D3D12Device::PrepareDraw(bool indexed) noexcept {
         }
     }
 
-    ApplyRootBindings(*pipeline);
-    return true;
+    return ApplyRootBindings(*pipeline);
 }
 
 bool D3D12Device::PrepareDispatch() noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
-    if (!recording_ || pipeline == nullptr || !pipeline->compute || !BufferViewsBound()) {
+    if (!recording_ || pipeline == nullptr || !pipeline->compute || !BufferViewsBound() ||
+        !ConstantsBound(*pipeline)) {
         return false;
     }
 
@@ -517,8 +520,7 @@ bool D3D12Device::PrepareDispatch() noexcept {
         }
     }
 
-    ApplyRootBindings(*pipeline);
-    return true;
+    return ApplyRootBindings(*pipeline);
 }
 
 ID3D12Resource* D3D12Device::IndirectArguments(BufferHandle arguments, uint64 offset,
@@ -730,9 +732,19 @@ Result<void> D3D12Device::ClearWritableBufferView(BufferViewHandle view, uint32 
                               "only raw and R32Uint or R32Sint typed views can be cleared");
     }
 
+    // GPU handle은 shader-visible ring의 사본이다(srvs_는 CPU 전용 heap, RenderBase 9.11절 5항).
+    D3D12_CPU_DESCRIPTOR_HANDLE online = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
+    if (!AllocateOnline(1, online, gpu)) {
+        return FailCode<void>(ErrorCode::CapacityExceeded,
+                              "the shader-visible descriptor ring of this recording is full");
+    }
+
+    device_->CopyDescriptorsSimple(1, online, srvs_.Cpu(record->descriptor),
+                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     RequireBufferState(record->resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     const UINT values[4] = {value, value, value, value};
-    list_->ClearUnorderedAccessViewUint(srvs_.Gpu(record->descriptor),
+    list_->ClearUnorderedAccessViewUint(gpu,
                                         cpuUavs_.Cpu(static_cast<uint32>(record->cpuDescriptor)),
                                         record->resource.Get(), values, 0, nullptr);
     return Result<void>::Success();

@@ -56,7 +56,8 @@ inline constexpr uint32 MaxDescriptorPoolsPerRecord = 8;
 inline constexpr uint32 MaxSplitEventsPerRecord = 64;
 // 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4,
 // compute는 읽기 4 + 쓰기 4).
-inline constexpr uint32 MaxPipelineBindings = 2 + 2 * MaxDrawBufferViews;
+inline constexpr uint32 MaxPipelineBindings =
+    2 + 2 * MaxDrawBufferViews + 2 * MaxConstantBufferSlots;
 // framebuffer 하나의 attachment 수 상한이다(색 MaxColorTargets + 깊이 1).
 inline constexpr uint32 MaxPassAttachments = MaxColorTargets + 1;
 // 그리기별 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
@@ -213,7 +214,9 @@ enum class BindingSource : uint8 {
     // SetWritableBufferView slot(compute u0–u3)
     WritableBufferView,
     // SetWritableTexture slot(compute u0–u3의 storage image)
-    WritableTexture
+    WritableTexture,
+    // SetConstantBuffer·SetConstantData의 (단계, slot)(RenderBase 9.11절 — slot은 binding 번호)
+    ConstantBuffer
 };
 
 struct PipelineBinding {
@@ -222,6 +225,26 @@ struct PipelineBinding {
     VkDescriptorType type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     BindingSource source = BindingSource::Texture;
     uint32 slot = 0;
+    // 상수 버퍼의 셰이더 선언 byte 수(descriptor range)와 묶음 표 단계 색인이다.
+    uint32 range = 0;
+    uint32 stage = 0;
+};
+
+// 상수 버퍼 handle 저장소 page다(host-visible 버퍼 하나, 9.11절 2항).
+struct ConstantPage {
+    explicit ConstantPage(Allocator& allocator) noexcept : ranges(allocator) {
+    }
+
+    VkBuffer buffer = VK_NULL_HANDLE;
+    MemoryAllocation memory;
+    GpuPageAllocator ranges;
+};
+
+struct ConstantBufferRecord {
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    uint32 bytes = 0;
+    uint32 page = 0;
+    GpuPageAllocation block;
 };
 
 // 파이프라인과 그 layout이다. set 0(VS, compute면 CS)·1(PS) layout은 셰이더 리플렉션에서 만들고
@@ -344,6 +367,9 @@ struct Retired {
     VkDescriptorSetLayout setLayouts[2] = {};
     VkBufferView bufferView = VK_NULL_HANDLE;
     MemoryAllocation memory;
+    // 상수 버퍼 page 구간이다(Retire·UpdateConstantBuffer의 옛 자리, 9.11절 2항).
+    int64 constantPage = -1;
+    GpuPageAllocation constantBlock;
     // placed 자원의 heap이다. 자원을 파괴한 뒤 heap의 placed 수를 줄인다(ReleasePlacement).
     SlotHandle heap;
     // 회수한 transient heap의 메모리다(placed 자원이 모두 파괴된 뒤 heap의 마지막 사용 fence 뒤).
@@ -481,6 +507,12 @@ public:
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
     void Retire(BufferViewHandle view) noexcept override;
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, VulkanConstants.cpp).
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
     Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
@@ -548,6 +580,10 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     void Transition(Span<const ResourceTransition> transitions) noexcept override;
     // 분리 전이다(Device.h). synchronization2가 있으면 begin은 vkCmdSetEvent2, end는
     // vkCmdWaitEvents2(UE VulkanBarriers.cpp:661–663, 1405–1414), 없으면 end에서 Transition처럼
@@ -902,6 +938,17 @@ private:
     Result<VkSemaphore> TakeAcquireSemaphore() noexcept;
     void ReturnAcquireSemaphore(VkSemaphore semaphore, uint64 fenceValue) noexcept;
 
+    // --- VulkanConstants.cpp(잠금 안) ---
+    Result<void> InitializeConstants() noexcept;
+    void DestroyConstants() noexcept;
+    Result<void> AllocateConstantBlock(uint64 bytes, uint32& page,
+                                       GpuPageAllocation& block) noexcept;
+    void RetireConstantBlock(uint32 page, const GpuPageAllocation& block) noexcept;
+    uint8* ConstantData(uint32 page, const GpuPageAllocation& block) const noexcept;
+    // 묶인 (단계, slot)의 버퍼·구간 위치·byte 수다(없으면 null).
+    VkBuffer ResolveConstant(uint32 stage, uint32 slot, VkDeviceSize& offset,
+                             uint32& bytes) const noexcept;
+
     // --- VulkanUpload.cpp ---
     Result<void> CreateUploadRing(const DeviceDesc& desc) noexcept;
     Result<void> OpenUploadList() noexcept;
@@ -1036,6 +1083,24 @@ private:
     // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
     TextureHandle boundWriteTextures_[MaxDrawBufferViews];
     bool descriptorsDirty_ = true;
+    // 상수 버퍼(9.11절): handle 표·page, 기록 명령 ring, (단계, slot) 묶음, 지금 set과 그 set에 쓴
+    // 상수 버퍼(binding 색인마다 VkBuffer·offset — 동적 binding은 버퍼만 대조한다).
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    Array<UniquePtr<ConstantPage>> constantPages_;
+    UploadRingAllocator constantRing_;
+    VkBuffer constantRingBuffer_ = VK_NULL_HANDLE;
+    MemoryAllocation constantRingMemory_;
+    struct BoundConstant {
+        SlotHandle handle;
+        // 참이면 ring 구간(offset)이다.
+        bool data = false;
+        VkDeviceSize offset = 0;
+        uint32 bytes = 0;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    VkDescriptorSet currentSets_[2] = {};
+    VkBuffer writtenConstantBuffers_[MaxPipelineBindings] = {};
+    VkDeviceSize writtenConstantOffsets_[MaxPipelineBindings] = {};
     // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
     uint64 descriptorExhaustions_ = 0;
     uint64 ignoredDraws_ = 0;

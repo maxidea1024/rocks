@@ -131,6 +131,12 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
         view = {};
     }
 
+    for (auto& stage : boundConstants_) {
+        for (BoundConstant& bound : stage) {
+            bound = {};
+        }
+    }
+
     descriptorsDirty_ = true;
     ResetTimestampSlots();
     return Result<void>::Success();
@@ -279,6 +285,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         }
 
         commands_[frameRecord_].fenceValue = fenceValue_;
+        constantRing_.CloseBatch(fenceValue_);
         AssignPendingRetires(fenceValue_);
         timestamps_.Close(fenceValue_, false);
         dirtySlots_ |= usedThisFrame_;
@@ -310,6 +317,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         }
 
         commands_[frameRecord_].fenceValue = RetainUntilDestructionFence;
+        constantRing_.CloseBatch(RetainUntilDestructionFence);
         AssignPendingRetires(RetainUntilDestructionFence);
         timestamps_.Close(RetainUntilDestructionFence, false);
         dirtySlots_ |= usedThisFrame_;
@@ -319,6 +327,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
 
     const uint64 value = signaled.Value();
     commands_[frameRecord_].fenceValue = value;
+    constantRing_.CloseBatch(value);
     AssignPendingRetires(value);
     timestamps_.Close(value, true);
     dirtySlots_ = (dirtySlots_ & ~resetThisFrame_) | usedThisFrame_;

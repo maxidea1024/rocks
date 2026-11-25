@@ -83,8 +83,25 @@ public:
         // value는 DispatchValue(x, y, z)다.
         Dispatch,
         // value는 인자 offset이다.
-        DispatchIndirect
+        DispatchIndirect,
+        // 상수 버퍼(Docs/Design/RenderBase 9.11절 GX6)다. Create의 value는 (수명 << 32) | byte 수,
+        // Update의 value는 새 내용의 첫 32 bit, Set의 value는 ConstantValue(단계, slot, 묶은 내용의
+        // 첫 32 bit — 빈 slot이면 UnboundConstantWord)다.
+        CreateConstantBuffer,
+        UpdateConstantBuffer,
+        RetireConstantBuffer,
+        SetConstantBuffer,
+        SetConstantData
     };
+
+    // Op::SetConstantBuffer·SetConstantData의 value다.
+    static constexpr uint64 ConstantValue(graphics::ShaderStage stage, uint32 slot,
+                                          uint32 word) noexcept {
+        return (static_cast<uint64>(stage) << 40) | (static_cast<uint64>(slot) << 32) | word;
+    }
+
+    // 빈 slot을 묶은 SetConstantBuffer의 내용 칸이다.
+    static constexpr uint32 UnboundConstantWord = 0xFFFF'FFFFu;
 
     // Op::Dispatch value다(축마다 21 bit).
     static constexpr uint64 DispatchValue(uint32 x, uint32 y, uint32 z) noexcept {
@@ -304,6 +321,17 @@ public:
     Result<void> ReadPixels(graphics::TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(graphics::BufferHandle buffer) noexcept override;
     void Retire(graphics::BufferViewHandle view) noexcept override;
+    Result<graphics::ConstantBufferHandle>
+    CreateConstantBuffer(graphics::ConstantBufferLifetime lifetime,
+                         Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(graphics::ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(graphics::ConstantBufferHandle buffer) noexcept override;
+
+    // 살아 있는 상수 버퍼 수다(시험).
+    usize LiveConstantBuffers() const noexcept {
+        return constantBuffers_.Size();
+    }
     void Retire(graphics::TextureHandle texture) noexcept override;
     void Retire(graphics::PipelineHandle pipeline) noexcept override;
     void Retire(graphics::ShaderHandle shader) noexcept override;
@@ -430,6 +458,13 @@ private:
         graphics::ViewAccess access = graphics::ViewAccess::Read;
     };
 
+    // 상수 버퍼 하나다(내용은 첫 32 bit만 기억한다).
+    struct ConstantState {
+        graphics::ConstantBufferLifetime lifetime = graphics::ConstantBufferLifetime::SingleFrame;
+        uint32 bytes = 0;
+        uint32 word = 0;
+    };
+
     // view를 묶을 때 원 버퍼 상태가 allowed 가운데 하나인지 본다(아니면 검증 오류). 묶은 view가
     // 유효하면 true다.
     bool CheckBufferView(graphics::BufferViewHandle view, graphics::ViewAccess access,
@@ -502,6 +537,10 @@ private:
                         uint64 offset) noexcept override;
     void SetTexture(graphics::TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
+    void SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
+                           graphics::ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(graphics::ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     void SetWritableBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     void SetWritableTexture(uint32 slot, graphics::TextureHandle view) noexcept override;
     void DrawIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
@@ -584,6 +623,7 @@ private:
     graphics::ShaderHandle lastVertexShader_;
     graphics::ShaderHandle lastComputeShader_;
     SlotArray<BufferViewState> bufferViews_;
+    SlotArray<ConstantState> constantBuffers_;
     uint64 pipelineCreateCalls_ = 0;
     Array<Retired> retired_;
     SlotArray<Readback> readbacks_;

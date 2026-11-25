@@ -2,6 +2,7 @@
 #include "BufferSelfTest.h"
 #include "CommandSelfTest.h"
 #include "ComputeSelfTest.h"
+#include "ConstantSelfTest.h"
 #include "CullingSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
@@ -728,6 +729,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
     // 렌더 쪽 compute(GX3·GX4 compute 연결): 파이프라인 캐시·그래프 버퍼 view·직접·간접 dispatch.
     failures += RunComputeChecks(name, device, result.triangle.GetAllocator());
+    // 상수 버퍼 묶기(GX6, RenderBase 9.11절): handle 두 수명·기록 명령·갱신 순서·D3D12 root 예산.
+    failures += RunConstantChecks(name, device, result.triangle.GetAllocator());
     // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.
     failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.

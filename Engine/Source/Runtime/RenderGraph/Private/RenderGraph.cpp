@@ -1288,6 +1288,11 @@ Result<void> RenderGraph::Execute() noexcept {
         outcome = Result<void>::Failure(state.failure);
     } else if (state.mode == GraphMode::Deferred) {
         outcome = CompileGraph(arena_, state);
+        // 그래프 상수의 장치 버퍼를 만든다(병렬 기록 전, 소유 스레드 — 9.11절 8항).
+        if (outcome) {
+            outcome = CreateGraphConstants(state);
+        }
+
         // 업로드는 첫 pass 앞에서 한다(UE SubmitBufferUploads와 같은 자리, 기록이 열리기 전).
         if (outcome) {
             outcome = ExecuteUploads(arena_, state);

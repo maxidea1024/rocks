@@ -350,7 +350,11 @@ Result<VkDescriptorSet> VulkanDevice::AllocateFrameSet(VkDescriptorSetLayout lay
                 {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, sets},
                 {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 2},
                 // compute 쓰기 텍스처 slot(SetWritableTexture, 텍스처 GX2 A부)이다.
-                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, sets}};
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, sets},
+                // 상수 버퍼(RenderBase 9.11절)다. set 하나가 단계의 상수 버퍼 전부(최대
+                // MaxConstantBufferSlots)를 담는다.
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, sets * MaxConstantBufferSlots},
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sets * MaxConstantBufferSlots}};
             VkDescriptorPoolCreateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             info.maxSets = sets;
@@ -462,7 +466,58 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
         }
     }
 
-    if (!descriptorsDirty_) {
+    // 상수 버퍼를 푼다(9.11절 4항). 선언 크기보다 작거나 없으면 그리지 않는다. 동적 binding은
+    // 버퍼(VkBuffer)가 바뀔 때만, 일반 binding은 구간이 바뀔 때도 set을 다시 쓴다. 그 밖은 같은
+    // set을 새 동적 offset으로 다시 묶는다.
+    VkBuffer constantBuffers[MaxPipelineBindings] = {};
+    VkDeviceSize constantOffsets[MaxPipelineBindings] = {};
+    bool constantsChanged = false;
+    bool dynamicConstants = false;
+    for (uint32 index = 0; index < pipeline->bindingCount; ++index) {
+        const PipelineBinding& binding = pipeline->bindings[index];
+        if (binding.source != BindingSource::ConstantBuffer) {
+            continue;
+        }
+
+        uint32 bytes = 0;
+        constantBuffers[index] =
+            ResolveConstant(binding.stage, binding.slot, constantOffsets[index], bytes);
+        if (constantBuffers[index] == VK_NULL_HANDLE || bytes < binding.range) {
+            return false;
+        }
+
+        const bool dynamic = binding.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        dynamicConstants = dynamicConstants || dynamic;
+        constantsChanged = constantsChanged ||
+                           writtenConstantBuffers_[index] != constantBuffers[index] ||
+                           (!dynamic && writtenConstantOffsets_[index] != constantOffsets[index]);
+    }
+
+    const auto bindSets = [&]() noexcept {
+        for (uint32 set = 0; set < 2; ++set) {
+            if ((pipeline->setMask & (1u << set)) == 0) {
+                continue;
+            }
+
+            uint32 offsets[MaxPipelineBindings] = {};
+            uint32 offsetCount = 0;
+            for (uint32 index = 0; index < pipeline->bindingCount; ++index) {
+                const PipelineBinding& binding = pipeline->bindings[index];
+                if (binding.set == set &&
+                    binding.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) {
+                    offsets[offsetCount++] = static_cast<uint32>(constantOffsets[index]);
+                }
+            }
+
+            functions_.vkCmdBindDescriptorSets(frame_, bindPoint, pipeline->layout, set, 1,
+                                               &currentSets_[set], offsetCount, offsets);
+        }
+    };
+    if (!descriptorsDirty_ && !constantsChanged) {
+        if (dynamicConstants) {
+            bindSets();
+        }
+
         return true;
     }
 
@@ -508,6 +563,13 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
                 images[count] = {texture != nullptr ? texture->sampler : VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
                 write.pImageInfo = &images[count];
+            } else if (binding.source == BindingSource::ConstantBuffer) {
+                const bool dynamic = binding.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+                buffers[count] = {constantBuffers[index], dynamic ? 0 : constantOffsets[index],
+                                  binding.range};
+                write.pBufferInfo = &buffers[count];
+                writtenConstantBuffers_[index] = constantBuffers[index];
+                writtenConstantOffsets_[index] = constantOffsets[index];
             } else if (binding.source == BindingSource::WritableTexture) {
                 images[count] = {VK_NULL_HANDLE, writeTextures[binding.slot]->view,
                                  VK_IMAGE_LAYOUT_GENERAL};
@@ -530,11 +592,10 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
         }
 
         functions_.vkUpdateDescriptorSets(device_, count, writes, 0, nullptr);
-        const VkDescriptorSet descriptorSet = allocated.Value();
-        functions_.vkCmdBindDescriptorSets(frame_, bindPoint, pipeline->layout, set, 1,
-                                           &descriptorSet, 0, nullptr);
+        currentSets_[set] = allocated.Value();
     }
 
+    bindSets();
     descriptorsDirty_ = false;
     return true;
 }

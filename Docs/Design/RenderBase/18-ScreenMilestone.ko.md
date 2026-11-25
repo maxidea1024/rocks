@@ -46,7 +46,7 @@
    - GX7 → GX11 → GX10. GX8·GX9는 GX7 뒤 언제든.
    - A0-G 뒤 GX1·GX2.
    - 셰이더 SH2 뒤 GX3 → GX4 → GX5. GX6은 P2·SH2 뒤.
-   - 후속: GX12(GX5 뒤), GX13(GX4·GX5 뒤).
+   - 후속: GX12(GX5 뒤), GX13(모바일 렌더러·SH6과 함께 — 4.4절 GX13 결정, 개정 40).
 3. RenderBase:
    - RB1(CP1·CP6·GX7·GX10·GX11, 설정 snapshot은 CP4 뒤)
    - RB2(GX2·GX7·GX8·GX11)
@@ -55,4 +55,32 @@
    - RB5(P14·SX4·GX3·GX4)
    - RB6(GX3·GX4·RB2)
    - RB7(GX9·CP5)
-4. RenderGraph: RG1(RB4·RB7·GX1·GX2·GX4·GX5·CP3) → RG2(GX8) → RG3(CP2·GX11, 병합은 GX13) → RG4(GX1) → RG5(GX12).
+4. RenderGraph: RG1(RB4·RB7·GX1·GX2·GX4·GX5·CP3) → RG2(GX8) → RG3(CP2·GX11, 같은 attachment 연속 pass 병합은 GX13과 무관 — 개정 40) → RG4(GX1) → RG5(GX12).
+
+### 18.3 RB3–RB6 남은 항목(개정 40, 2026-11-25)
+
+SH2e3(RB3 셰이더 집합·RB4의 SH2분)·GX3·GX4(개정 37)·GX6(개정 39) 뒤에 스펙(5·6·9–11절)과 코드(`Engine/Source/Runtime/RenderBase`·`RenderGraph`·`Graphics`)를 대조한 결과다. "결정"은 권장안으로 확정했고(애매하면 UE 5.8), "순서"는 화면 마일스톤(18.1절)에 필요한 순서다. 1–4는 이 개정에서 구현한다.
+
+| ID | 단계 | 항목 | 지금 | 결정 | 순서 |
+|---|---|---|---|---|---|
+| RR1 | RB6 | 상태 프리셋(11.2절) | 없음(`AlphaBlend()` 하나) | 구현(11.4절 1항) | 1 |
+| RR2 | RB6 | 전체화면 pass: 엔진 셰이더 `FullscreenTriangle`·RenderBase 그리기 도우미·그래프 `AddFullscreenPass`(11.2절) | Sandbox 시험 셰이더만 있음 | 구현(11.4절 2·3항) | 1 |
+| RR3 | RB6 | RenderBase 경로 null 텍스처 바인딩 0건 계수(11.3절) | 장치가 null을 흰 텍스처로 바꿀 뿐 세지 않음 | 구현: 장치 계수 `NullTextureBindings`(11.4절 4항) | 1 |
+| RR4 | RB5 | 정점 입력 타입 등록(늦은 등록 거부·결정성, 10.2·10.3절) | 등록부 없음 — 셰이더 집합·쿠커가 호출자 목록을 받음 | 구현: 셰이더 타입 등록부에 함께 둔다(10.6절 1항) | 2 |
+| RR5 | RB5 | include 연결 `/Engine/Generated/VertexInput.rsh`(10.2절) | 없음 — job이 정점 입력 타입을 받지 않아 축이 컴파일에 반영되지 않음 | 구현(10.6절 2항, 셰이더 시스템 개정 48) | 2 |
+| RR6 | RB5 | 엔진 기본 정점 입력 타입(10.2절 (2)) | 없음 | 구현(10.6절 3항) | 2 |
+| RR7 | RB6·RB2 | 내장 자원 팩 1차(11.1절 — 2D 넷·차원별 대체·0·1·identity 버퍼·기본 메시·fallback 셰이더), `Pending`·`Failed` handle의 대체 자원과 계수(6.2·6.4절) | 없음(`OnLaneStart` hook만) | 구현(11.4절 5–7항) | 3 |
+| RR8 | RB4 | 셰이더 교체(9.8절) | 없음 | 구현(9.8절 "구현 설계") — SH4 감시 재컴파일이 이것을 부른다 | 4 |
+| RR9 | RB3 | 엔진 → 프로젝트 라이브러리 조회 순서·중복 키 오류(9.2절) | 집합 하나가 라이브러리 하나 | 후속: 프로젝트 라이브러리는 머티리얼 시스템이 연다(MS 단계). 마일스톤에는 프로젝트 셰이더가 없다 | — |
+| RR10 | RB3 | 로드 때 일괄 생성 선택(9.2절) | 없음 | 버림: SH2e2부터 장치 셰이더는 검사·복사·decode만 하는 CPU 사본이다(셰이더 시스템 16.1절 SH2e2 메모). 비용은 파이프라인 생성이며 그 미리 준비는 9.7절 후속이다 | — |
+| RR11 | RB3 | 엔진 셰이더 집합을 렌더 lane 시작 단계에서 열기(5.5·9.2절) | Sandbox 장치별 집합만 | 부분: RenderBase가 엔진 셰이더 타입을 등록하고(11.4절 2항) 팩이 엔진 셰이더 집합을 받는다(11.4절 5항). 엔진 호스트의 등록부·공급자 연결은 엔진 호스트가 렌더 lane을 쓰는 단계(EngineRuntime)에서 한다 | 3 |
+| RR12 | RB4 | `ParameterBatch` 자원 부분(단계별 여러 텍스처·샘플러·버퍼 view, null·종류 불일치 검증, 9.3절) | 장치는 텍스처 slot 하나·이름 표 개발 경로 | 후속(렌더러 RS0 전): 장치 쪽 다중 텍스처 slot이 함께 필요하다. 마일스톤 텍스처 표시는 pass마다 텍스처 하나다 | — |
+| RR13 | RB4 | 공유 상수 slot 표(9.5절) | 없음 | 후속(렌더러 RS0): 바인딩 layout의 구조체 identity(SX8)와 렌더러 slot 등록이 먼저다(9.11절 9항과 같다) | — |
+| RR14 | RB4 | 바인딩 지도를 MetaSchema 스키마로 만들기(결정 R11) | 손으로 쓴 레이아웃 표 | 후속(SH3·P7) | — |
+| RR15 | RB5 | 정적 정점 배치 등록·PSO 미리 준비(10.2·9.7절) | 없음 | 후속(9.7절 미리 준비와 함께). 엔진 기본 정점 입력 타입의 배치는 RenderBase 상수다(10.6절 3항) | — |
+| RR16 | RB5 | 메시 정점 입력 `.rsh` 함수 인터페이스(10.2·10.5절) | 없음 | 후속(렌더러 RS0) | — |
+| RR17 | RB6 | viewport 부분 clear·UAV clear 셰이더, (값, 형식, 차원) 기본 텍스처 캐시(11.1·11.2절) | 없음 | 후속(스펙 그대로 — 엔진 셰이더 SL1 `ClearResources`) | — |
+| RR18 | RB2 | 장치 재생성(6.2절, BR04의 device loss) | 없음 | 후속(장치 손실 복구 단계) | — |
+| RR19 | GX13 | subpass·framebuffer fetch 검토 | 후속 | 후속 확정(4.4절 GX13 결정) | — |
+
+이미 끝난 것(대조 결과): RB3 9.10절 완료 기준(SH2e3), RB4의 바인딩 지도(상수)·상수 블록·파이프라인 캐시(그래픽·compute)·GLES 업로드 판단·상수 버퍼 묶기(GX6 — `PerFrame` 블록 회수는 마지막 사용 fence, 9.11절), RB5의 정점 배치 ⊇ 입력 마스크·형식 계열 검사(`MatchShaderVertexInputs`, SH2e2)와 다중·인스턴스 stream 픽셀 대조(GX3a `VertexSelfTest`), RB6의 attachment load clear.

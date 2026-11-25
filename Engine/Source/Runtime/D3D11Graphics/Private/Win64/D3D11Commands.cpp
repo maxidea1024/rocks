@@ -194,6 +194,13 @@ D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (record.slots.constantSlots.usedMask[ConstantBufferStageIndex(ShaderStage::Compute)] &
+        (1u << RootConstantsRegister)) {
+        auto failed = Fail("constant buffer register b13 is reserved for root constants on D3D11");
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
     record.bufferSlots = record.slots.bufferSlots;
     record.writeSlots = record.slots.writeSlots;
     record.writeTextures = record.slots.writeTextures;
@@ -486,7 +493,8 @@ bool D3D11Device::PrepareDraw(bool indexed) noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
     if (!recording_ || pipeline == nullptr || pipeline->compute ||
         (target_.colorCount == 0 && target_.depth.IsNull()) || !StreamsBound() ||
-        !BufferViewsBound() || (target_.depthReadOnly && pipeline->writesDepthStencil)) {
+        !BufferViewsBound() || (target_.depthReadOnly && pipeline->writesDepthStencil) ||
+        !ApplyConstants(*pipeline)) {
         return false;
     }
 
@@ -520,7 +528,8 @@ bool D3D11Device::PrepareDraw(bool indexed) noexcept {
 
 bool D3D11Device::PrepareDispatch() noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
-    if (!recording_ || pipeline == nullptr || !pipeline->compute || !BufferViewsBound()) {
+    if (!recording_ || pipeline == nullptr || !pipeline->compute || !BufferViewsBound() ||
+        !ApplyConstants(*pipeline)) {
         return false;
     }
 

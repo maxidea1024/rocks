@@ -41,6 +41,7 @@ namespace {
 #define SANDBOX_COMPUTE(Variable, File, Entry) &Variable,
 #define SANDBOX_VERTEX_IF(Variable, File, Entry, Filter) &Variable,
 #define SANDBOX_PIXEL_IF(Variable, File, Entry, Filter) &Variable,
+#define SANDBOX_PIXEL_DEV_IF(Variable, File, Entry, Filter) &Variable,
 const ShaderTypeDesc* const Types[] = {
 #include "SandboxShaderTypes.inl"
 };
@@ -49,6 +50,7 @@ const ShaderTypeDesc* const Types[] = {
 #undef SANDBOX_COMPUTE
 #undef SANDBOX_VERTEX_IF
 #undef SANDBOX_PIXEL_IF
+#undef SANDBOX_PIXEL_DEV_IF
 
 // 경로 버퍼 byte 수다.
 constexpr usize PathBytes = 1024;
@@ -356,6 +358,9 @@ private:
         desc.formats = formats;
         desc.vertexInputTypes = request.vertexInputTypes;
         desc.library = request.library;
+        // Development 공급자는 개발 전용 타입도 만든다(진단 버퍼 퍼뮤테이션 — ShaderSystem 7.2절
+        // 12항, RenderBase 9.11절 6항의 D3D12 root 예산 시험).
+        desc.includeDevelopment = true;
         desc.manager = manager_;
         shader::ShaderLibraryCookReport report(allocator_);
         if (!libraries_.TryReserve(libraries_.Size() + 1)) {
@@ -471,6 +476,15 @@ bool Has(const ShaderTypeDesc& type) noexcept {
 
 render::ShaderSet* ActiveSet() noexcept {
     return active;
+}
+
+const shader::ShaderBindingLayout* Layout(const ShaderTypeDesc& type) noexcept {
+    if (active == nullptr) {
+        return nullptr;
+    }
+
+    auto entry = active->FindEntry(type.nameHash);
+    return entry ? active->BindingLayout(entry.Value()) : nullptr;
 }
 
 Result<graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept {

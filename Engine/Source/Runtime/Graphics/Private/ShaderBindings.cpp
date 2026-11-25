@@ -214,9 +214,19 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
             const char* why = "is not in the pipeline binding names";
             switch (resource.kind) {
             case ShaderResourceKind::ConstantBuffer:
-                why = "is a constant buffer (pipelines bind only draw constants until parameter "
-                      "batches, RenderBase GX6)";
-                break;
+                // 이름 표 밖이다: 값 1 slot이 곧 SetConstantBuffer의 slot이다(9.11절 3항).
+                if (!AddConstantBufferSlot(out.constantSlots, stage, resource.slot,
+                                           resource.constantBufferBytes)) {
+                    return Reject(error,
+                                  "%s shader constant buffer %.*s uses slot %u or %u bytes outside "
+                                  "the constant buffer rules (slots 0-%u, 16-byte multiples up to "
+                                  "%u bytes)",
+                                  stageName, NameLength(name), name.Data(), resource.slot,
+                                  resource.constantBufferBytes, MaxConstantBufferSlots - 1,
+                                  MaxConstantBufferBytes);
+                }
+
+                continue;
             case ShaderResourceKind::SampledTexture: {
                 if (!names.texture.IsEmpty() && name == names.texture) {
                     binding.role = PipelineSlotRole::Texture;
@@ -267,6 +277,13 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
             }
             case ShaderResourceKind::StorageBufferReadWrite:
             case ShaderResourceKind::StorageImage: {
+                if (stage == ShaderStage::Pixel &&
+                    resource.kind == ShaderResourceKind::StorageBufferReadWrite &&
+                    name == StringView(PixelDebugBufferName)) {
+                    out.debugBuffer = true;
+                    continue;
+                }
+
                 if (!compute) {
                     why = "is a UAV in a graphics stage (UAVs are compute only)";
                     break;
@@ -325,6 +342,17 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
     }
 
     return Result<void>::Success();
+}
+
+Result<uint32> FindConstantBufferSlot(const shader::ShaderBindingLayout& layout,
+                                      StringView name) noexcept {
+    for (const shader::ShaderBindingResource& resource : layout.resources) {
+        if (resource.kind == ShaderResourceKind::ConstantBuffer && resource.name == name) {
+            return Result<uint32>::Success(resource.slot);
+        }
+    }
+
+    return Result<uint32>::Failure(ErrorCode::NotFound);
 }
 
 Result<void> MatchShaderVertexInputs(const shader::ShaderBindingLayout& vertex,

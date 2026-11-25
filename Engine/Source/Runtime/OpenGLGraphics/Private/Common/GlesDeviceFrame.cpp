@@ -202,6 +202,13 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
     stencilReference_ = 0;
     constantsDirty_ = true;
     platform::MemoryZero(constants_, sizeof(constants_));
+    for (auto& stage : boundConstants_) {
+        for (BoundConstant& bound : stage) {
+            bound = {};
+        }
+    }
+
+    transientConstants_.Clear();
     gl_.BindFramebuffer(GL_FRAMEBUFFER, pass_.framebuffer);
     gl_.Viewport(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
     gl_.DepthRangef(0.0f, 1.0f);

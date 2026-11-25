@@ -375,8 +375,9 @@ bool ShaderSet::RuntimeFeaturesSupported(uint32 features) const noexcept {
         return false;
     }
 
-    // PS 진단 버퍼의 런타임 처리는 엔진 셰이더 SL2다(16.1절 SSD22). 그 전에는 장치가 받지 않는다.
-    return (features & shader::ShaderFeatureDebugPixelUav) == 0;
+    // PS 진단 버퍼는 그 자리를 묶는 장치만 받는다(RenderBase 9.11절 6항 — 읽기·비우기는 엔진 셰이더
+    // SL2).
+    return (features & shader::ShaderFeatureDebugPixelUav) == 0 || device.pixelDebugBuffer;
 }
 
 Result<graphics::ShaderHandle> ShaderSet::DeviceShader(uint32 entry) noexcept {

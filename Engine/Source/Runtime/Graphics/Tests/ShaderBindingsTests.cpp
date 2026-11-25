@@ -177,7 +177,8 @@ TEST(ShaderBindings_ResolveNamesToBackendSlots) {
 }
 
 TEST(ShaderBindings_RejectsStageRulesAndMatchesVertexInputs) {
-    // VS가 텍스처를 읽음, 상수 버퍼, 그래픽 단계 UAV, 같은 slot을 단계마다 다른 값 계열로 읽음.
+    // VS가 텍스처를 읽음, 상수 버퍼(이제 받는다), 그래픽 단계 UAV, 같은 slot을 단계마다 다른 값
+    // 계열로 읽음.
     Stage vertex(shader::ShaderStageVertex);
     REQUIRE(vertex.Add(Resource(ShaderResourceKind::SampledTexture, 0, "Albedo",
                                 ShaderResourceShape::Texture2D, ShaderComponentType::Float)));
@@ -197,8 +198,10 @@ TEST(ShaderBindings_RejectsStageRulesAndMatchesVertexInputs) {
     REQUIRE(constants.Add(view));
     REQUIRE(constants.Load(ShaderStage::Pixel));
     const DeviceShaderCode* buffer[] = {&constants.code};
-    CHECK(!ResolvePipelineSlots(buffer, names, 0, slots, error));
-    CHECK(strstr(error, "constant buffer") != nullptr);
+    // 상수 버퍼는 이름 표 없이 값 1 slot으로 받는다(RenderBase 9.11절 GX6).
+    REQUIRE(ResolvePipelineSlots(buffer, names, 0, slots, error));
+    CHECK(slots.constantSlots.usedMask[ConstantBufferStageIndex(ShaderStage::Pixel)] == 1u &&
+          slots.constantSlots.bytes[ConstantBufferStageIndex(ShaderStage::Pixel)][0] == 16);
 
     Stage uav(shader::ShaderStagePixel);
     REQUIRE(uav.Add(Resource(ShaderResourceKind::StorageBufferReadWrite, 0, "Output",

@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-25, 개정 8(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem/README.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime/10-Graphics.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-25, 개정 9(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem/README.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime/10-Graphics.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -129,7 +129,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 **descriptor.**
 - 파이프라인 layout은 파이프라인마다 만든다(개정 6). 장치 셰이더의 값 1(자원 이름·종류, slot = Vulkan binding, 자원 모양(텍스처 차원·typed·구조화·raw), 원소 타입)을 파이프라인의 slot 이름 표(`PipelineDesc::bindings`)로 고정 slot에 잇고(`ResolvePipelineSlots`) set 0(VS·CS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 값 1 slot). binding이 없는 단계는 장치 공용 빈 layout이다.
-  - SRV 텍스처 → `SAMPLED_IMAGE`(SetTexture), 그 짝 샘플러 → `SAMPLER`, 버퍼 view(SetBufferView slot 0–3) → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`, compute 쓰기 → typed는 `STORAGE_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`, 텍스처는 `STORAGE_IMAGE`. 이름 표에 없는 자원(상수 버퍼 묶기는 GX6)은 생성이 `InvalidArgument`다.
+  - SRV 텍스처 → `SAMPLED_IMAGE`(SetTexture), 그 짝 샘플러 → `SAMPLER`, 버퍼 view(SetBufferView slot 0–3) → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`, compute 쓰기 → typed는 `STORAGE_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`, 텍스처는 `STORAGE_IMAGE`. 이름 표에 없는 자원은 생성이 `InvalidArgument`다. 상수 버퍼는 이름 표 없이 binding = 값 1 slot이고 `UNIFORM_BUFFER_DYNAMIC`(`maxDescriptorSetUniformBuffersDynamic`까지, 넘는 것은 `UNIFORM_BUFFER`)이다(GX6, RenderBase 9.11절 4항 — 버퍼가 같으면 set을 다시 쓰지 않고 동적 offset만 바꿔 다시 묶는다).
   - 그리기별 상수 push constant 범위는 계약 최대 128 byte(VS·PS·CS, 7.2절 2항, RenderBase SX2)로 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같다. 그래서 공용 layout으로 파이프라인이 선언한 n byte(`drawConstantBytes`)만 올리고, 파이프라인을 바꿔도 값과 descriptor set이 유지된다(사양 "Pipeline Layout Compatibility").
 - 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개이고 첫 pool이 set 1024개, 다음 pool은 앞 pool의 두 배다. 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 1024 × (2^8 − 1) = 261120번을 넘으면 그 뒤 그리기는 무시되고(`IgnoredDraws`, LastError) 처음 한 번 Warning 로그를 남긴다(GX1·GX2 리뷰 반영).
 
@@ -285,7 +285,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 18. 남은 일
 
-- GX6: 상수 버퍼 묶기(파라미터 묶음). 지금 장치는 루트 상수(push constant)와 이름 표의 고정 slot만 묶는다. compute 파이프라인 캐시는 GX3다.
+- GX6 남은 것: 파라미터 묶음의 자원 부분과 PS 진단 버퍼 자리(set 3, 엔진 셰이더 SL2 — 그때까지 진단 파이프라인 생성은 `Unsupported`). 상수 버퍼 묶기는 구현했다(RenderBase 9.11절). compute 파이프라인 캐시는 GX3다.
 - SH6·P13: Android 실행(surface 수명, `ANativeWindow`, 회전 `preTransform`).
 - 멀티 큐(async compute·copy)와 timeline semaphore 경로, 동적 렌더링·sync2 선택 경로(장치가 주면).
 - 파이프라인 캐시 파일 저장(RenderBase 9.7절), 메모리 예산 확장, 객체 debug 이름.
@@ -304,3 +304,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 6(2026-11-18): RenderBase GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 1단계. 버퍼 용도·버퍼 view·`ReadBuffer`(6절), 파이프라인별 layout과 기록 단위 descriptor pool(6절 descriptor, 개정 5의 텍스처별 고정 set 대체), 켜는 장치 기능·확장, 업로드 끝 barrier에 간접 인자·상수·compute 단계를 더했다.
 - 개정 7(2026-11-18): GX1·GX2 리뷰 반영(업로드 묶음 RAW barrier, descriptor pool 두 배 증가·경고, `atomic64`의 `shaderInt64`, `apiVersion` 실효 판, ray tracing 확장 공개, VS layer·viewport 출력과 `multiViewport`·viewport 수)과 RenderBase GX3·GX4(10.1절): render pass 열쇠·framebuffer 캐시·깊이 attachment view, 파이프라인 고정 기능 상태, compute 파이프라인과 쓰기 view, 간접 그리기·dispatch, 버퍼 쓰기 명령 barrier, 복사·UAV clear.
 - 개정 8(2026-11-25): SH2e2 반영. 셰이더는 쿠킹된 SPIR-V를 장치 셰이더(`CreateShader`)로 받고 파이프라인 layout·셰이더 입력 대조는 값 1과 slot 이름 표에서 얻는다(1·6·7·10.1·11·13·14·15·16·18절). 개발용 컴파일 훅(`ShaderSourceCompiler`·`DeviceDesc::shaderCompiler`) 서술을 지웠다.
+- 개정 9(2026-11-25): RenderBase GX6 반영 — 상수 버퍼 binding(`UNIFORM_BUFFER_DYNAMIC` 우선, 같은 버퍼면 동적 offset만 다시 묶기), 진단 버퍼 파이프라인은 SL2까지 `Unsupported`(6·18절).

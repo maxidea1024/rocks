@@ -207,8 +207,8 @@ Result<BufferHandle> D3D12Device::CreateBufferIn(const BufferDesc& desc, Span<co
     return Result<BufferHandle>::Success(BufferHandle{added.Value()});
 }
 
-// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). descriptor는 shader-visible SRV
-// heap 칸 하나다(SRV·UAV 모두, GX2).
+// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). descriptor는 CPU 전용 SRV
+// heap 칸 하나다(SRV·UAV 모두, GX2 — 그리기 때 shader-visible ring으로 복사한다).
 Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
                                                        const BufferViewDesc& desc) noexcept {
     platform::LockGuard lock(gate_);

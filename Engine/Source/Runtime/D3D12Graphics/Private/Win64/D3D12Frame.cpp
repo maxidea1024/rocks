@@ -100,6 +100,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
     auto uploads = FlushUploadsLocked();
     if (!uploads) {
         allocators_[recordingAllocator_].fenceValue = fenceValue_;
+        CloseTransientRings(false, fenceValue_);
         AssignPendingRetires(fenceValue_);
         timestamps_.Close(fenceValue_, false);
         (void)list_->Close();
@@ -110,6 +111,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
     if (FAILED(list_->Close())) {
         // 아무것도 제출하지 않았다. 이 기록만 참조하던 자원은 지금까지의 제출 뒤에 놓아도 된다.
         allocators_[recordingAllocator_].fenceValue = fenceValue_;
+        CloseTransientRings(false, fenceValue_);
         AssignPendingRetires(fenceValue_);
         timestamps_.Close(fenceValue_, false);
         SettleTracking(false);
@@ -137,6 +139,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원·기록 저장소는 소멸 때까지
         // 놓지 않는다.
         allocators_[recordingAllocator_].fenceValue = RetainUntilDestructionFence;
+        CloseTransientRings(false, RetainUntilDestructionFence);
         AssignPendingRetires(RetainUntilDestructionFence);
         timestamps_.Close(RetainUntilDestructionFence, false);
         DrainValidationMessages();
@@ -145,6 +148,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
 
     const uint64 value = signaled.Value();
     allocators_[recordingAllocator_].fenceValue = value;
+    CloseTransientRings(false, value);
     AssignPendingRetires(value);
     timestamps_.Close(value, true);
     ProcessRetired();
@@ -238,6 +242,23 @@ void D3D12Device::ResetBindings() noexcept {
 
     boundTexture_ = white_.slot;
 
+    for (auto& stage : boundConstants_) {
+        for (BoundConstant& bound : stage) {
+            bound = {};
+        }
+    }
+
+    for (auto& stage : tableCache_) {
+        for (TableCache& cache : stage) {
+            cache.valid = false;
+        }
+    }
+
+    for (CbvTableCache& cache : cbvTableCache_) {
+        cache.valid = false;
+    }
+
+    onlineExhaustedLogged_ = false;
     bufferStates_.Clear();
     platform::MemoryZero(constants_, sizeof(constants_));
     stencilReference_ = 0;
@@ -338,7 +359,7 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     // root signature·table은 그리기·dispatch 직전에 묶인 파이프라인 것으로 건다(ApplyRootBindings).
     appliedGraphicsRoot_ = nullptr;
     appliedComputeRoot_ = nullptr;
-    ID3D12DescriptorHeap* heaps[] = {srvs_.Heap(), samplers_.Heap()};
+    ID3D12DescriptorHeap* heaps[] = {online_.Get(), samplers_.Heap()};
     list_->SetDescriptorHeaps(2, heaps);
     list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     list_->OMSetStencilRef(0);

@@ -139,7 +139,7 @@ void D3D12Device::Retire(ShaderHandle shader) noexcept {
 }
 
 // 쿠킹된 DXIL과 정규화 layout으로 만든다(ShaderSystem 16.1절 SSD18). root signature는 두 단계의
-// slot 표로 만들고 캐시한다(7.2절 4항).
+// slot 표·상수 버퍼·진단 버퍼로 만들고 캐시한다(7.2절 4항, RenderBase 9.11절 5항).
 Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
     if (!ValidatePipelineDesc(desc)) {
@@ -187,7 +187,8 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
         return FailCode<PipelineHandle>(ErrorCode::InvalidArgument, error);
     }
 
-    auto root = RootSignatureFor(slots, false);
+    RootLayout rootLayout;
+    auto root = RootSignatureFor(slots, false, desc.drawConstantBytes, rootLayout);
     if (!root) {
         return Result<PipelineHandle>::Failure(root.Error());
     }
@@ -260,6 +261,7 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
 
     PipelineRecord record;
     record.rootSignature = Move(root.Value());
+    record.root = rootLayout;
     record.slots = slots;
     record.bufferSlots = slots.bufferSlots;
     record.drawConstantBytes = desc.drawConstantBytes;
@@ -310,12 +312,201 @@ Result<void> D3D12Device::Reject(const Diagnostic& message) noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+namespace {
+
+D3D12_SHADER_VISIBILITY VisibilityOf(ShaderStage stage) noexcept {
+    switch (stage) {
+    case ShaderStage::Vertex:
+        return D3D12_SHADER_VISIBILITY_VERTEX;
+    case ShaderStage::Pixel:
+        return D3D12_SHADER_VISIBILITY_PIXEL;
+    case ShaderStage::Compute:
+        break;
+    }
+
+    return D3D12_SHADER_VISIBILITY_ALL;
+}
+
+uint32 LowestBit(uint32 mask) noexcept {
+    uint32 bit = 0;
+    while ((mask & (1u << bit)) == 0) {
+        ++bit;
+    }
+
+    return bit;
+}
+
+uint32 HighestBit(uint32 mask) noexcept {
+    uint32 bit = 31;
+    while ((mask & (1u << bit)) == 0) {
+        --bit;
+    }
+
+    return bit;
+}
+
+// root signature 매개변수 수의 상한이다(table 8 + root CBV 28 + 진단 UAV 1 + 루트 상수 1보다
+// 넉넉하다).
+constexpr uint32 MaxRootParameters = MaxRootSignatureDwords;
+// descriptor range 수의 상한이다(SRV·UAV는 자원마다 하나, Sampler·CBV는 단계마다 하나).
+constexpr uint32 MaxRootRanges = MaxPipelineSlotBindings + 2 * MaxRootBudgetStages;
+
+} // namespace
+
+// 단계별 table과 예산 계획으로 root 배치를 정하고(RenderBase 9.11절 5항) 같은 배치의 root
+// signature를 다시 쓴다.
 Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const PipelineSlots& slots,
-                                                                  bool compute) noexcept {
+                                                                  bool compute,
+                                                                  uint32 drawConstantBytes,
+                                                                  RootLayout& layout) noexcept {
     using Outcome = Result<ComRef<ID3D12RootSignature>>;
-    // 키: compute 여부, 자원마다 (단계, 종류, register).
+    layout = RootLayout{};
+    layout.stageCount = compute ? 1 : 2;
+    layout.stages[0].stage = compute ? ShaderStage::Compute : ShaderStage::Vertex;
+    layout.stages[1].stage = ShaderStage::Pixel;
+    bool samplers[MaxRootBudgetStages] = {};
+    for (uint32 index = 0; index < slots.count; ++index) {
+        const PipelineSlotBinding& binding = slots.bindings[index];
+        const uint32 stage = !compute && binding.stage == ShaderStage::Pixel ? 1u : 0u;
+        RootStageTables& tables = layout.stages[stage];
+        switch (binding.role) {
+        case PipelineSlotRole::Texture:
+        case PipelineSlotRole::BufferView:
+            tables.srvBindings[tables.srvCount++] = static_cast<uint8>(index);
+            break;
+        case PipelineSlotRole::Sampler:
+            tables.samplerBinding = static_cast<uint8>(index);
+            samplers[stage] = true;
+            break;
+        case PipelineSlotRole::WritableBuffer:
+        case PipelineSlotRole::WritableTexture:
+            tables.uavBindings[tables.uavCount++] = static_cast<uint8>(index);
+            break;
+        }
+    }
+
+    RootBudgetInput input;
+    input.stageCount = layout.stageCount;
+    input.rootConstantDwords = drawConstantBytes / sizeof(uint32);
+    input.debugUav = slots.debugBuffer && !compute;
+    for (uint32 stage = 0; stage < layout.stageCount; ++stage) {
+        const RootStageTables& tables = layout.stages[stage];
+        input.stages[stage].tables = (tables.srvCount != 0 ? 1u : 0u) +
+                                     (samplers[stage] ? 1u : 0u) + (tables.uavCount != 0 ? 1u : 0u);
+        input.stages[stage].constantMask =
+            slots.constantSlots.usedMask[ConstantBufferStageIndex(tables.stage)];
+    }
+
+    auto planned = PlanRootBudget(input);
+    if (!planned) {
+        return FailCode<ComRef<ID3D12RootSignature>>(
+            ErrorCode::InvalidArgument, "pipeline bindings do not fit the 64 DWORD root signature");
+    }
+
+    layout.plan = planned.Value();
+    layout.constantDwords = input.rootConstantDwords;
+
+    // 매개변수: 단계마다 SRV·Sampler·UAV·CBV table → root CBV → 진단 root UAV → 루트 상수.
+    D3D12_DESCRIPTOR_RANGE ranges[MaxRootRanges] = {};
+    D3D12_ROOT_PARAMETER parameters[MaxRootParameters] = {};
+    uint32 rangeCount = 0;
+    uint32 count = 0;
+    const auto table = [&](D3D12_SHADER_VISIBILITY visibility, uint32 first,
+                           uint32 number) noexcept -> int32 {
+        D3D12_ROOT_PARAMETER& parameter = parameters[count];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameter.DescriptorTable.NumDescriptorRanges = number;
+        parameter.DescriptorTable.pDescriptorRanges = &ranges[first];
+        parameter.ShaderVisibility = visibility;
+        return static_cast<int32>(count++);
+    };
+    for (uint32 stage = 0; stage < layout.stageCount; ++stage) {
+        RootStageTables& tables = layout.stages[stage];
+        const D3D12_SHADER_VISIBILITY visibility = VisibilityOf(tables.stage);
+        if (tables.srvCount != 0) {
+            const uint32 first = rangeCount;
+            for (uint32 entry = 0; entry < tables.srvCount; ++entry) {
+                D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount++];
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                range.NumDescriptors = 1;
+                range.BaseShaderRegister = slots.bindings[tables.srvBindings[entry]].location;
+                range.OffsetInDescriptorsFromTableStart = entry;
+            }
+
+            tables.srvParam = table(visibility, first, tables.srvCount);
+        }
+
+        if (samplers[stage]) {
+            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+            range.NumDescriptors = 1;
+            range.BaseShaderRegister = slots.bindings[tables.samplerBinding].location;
+            tables.samplerParam = table(visibility, rangeCount++, 1);
+        }
+
+        if (tables.uavCount != 0) {
+            const uint32 first = rangeCount;
+            for (uint32 entry = 0; entry < tables.uavCount; ++entry) {
+                D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount++];
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+                range.NumDescriptors = 1;
+                range.BaseShaderRegister = slots.bindings[tables.uavBindings[entry]].location;
+                range.OffsetInDescriptorsFromTableStart = entry;
+            }
+
+            tables.uavParam = table(visibility, first, tables.uavCount);
+        }
+
+        const uint32 overflow = layout.plan.tableMask[stage];
+        if (overflow != 0) {
+            tables.cbvFirst = LowestBit(overflow);
+            tables.cbvCount = HighestBit(overflow) - tables.cbvFirst + 1;
+            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+            range.NumDescriptors = tables.cbvCount;
+            range.BaseShaderRegister = tables.cbvFirst;
+            tables.cbvParam = table(visibility, rangeCount++, 1);
+        }
+    }
+
+    layout.rootCbvParam = count;
+    for (uint32 entry = 0; entry < layout.plan.rootCbvCount; ++entry) {
+        D3D12_ROOT_PARAMETER& parameter = parameters[count++];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        parameter.Descriptor.ShaderRegister = layout.plan.rootOrderSlot[entry];
+        parameter.Descriptor.RegisterSpace = 0;
+        parameter.ShaderVisibility =
+            VisibilityOf(layout.stages[layout.plan.rootOrderStage[entry]].stage);
+    }
+
+    if (input.debugUav) {
+        D3D12_ROOT_PARAMETER& parameter = parameters[count];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        parameter.Descriptor.ShaderRegister = 0;
+        parameter.Descriptor.RegisterSpace = DebugBufferSpace;
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        layout.debugParam = static_cast<int32>(count++);
+    }
+
+    if (layout.constantDwords != 0) {
+        D3D12_ROOT_PARAMETER& parameter = parameters[count];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        parameter.Constants.ShaderRegister = 0;
+        parameter.Constants.RegisterSpace = RootConstantsSpace;
+        parameter.Constants.Num32BitValues = layout.constantDwords;
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        layout.constantsParam = static_cast<int32>(count++);
+    }
+
+    layout.parameterCount = count;
+
+    // 키: compute 여부, 루트 상수 DWORD, 진단 UAV, 자원마다 (단계, 종류, register), 단계별 상수
+    // 버퍼 마스크. 배치는 이 값들로만 정해진다.
     Array<uint8> key(allocator_);
-    if (!key.TryPushBack(compute ? 1 : 0)) {
+    const uint8 head[3] = {static_cast<uint8>(compute ? 1 : 0),
+                           static_cast<uint8>(layout.constantDwords),
+                           static_cast<uint8>(input.debugUav ? 1 : 0)};
+    if (!key.TryAppend(Span<const uint8>(head, sizeof(head)))) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -329,6 +520,14 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
         }
     }
 
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        const uint32 mask = slots.constantSlots.usedMask[stage];
+        const uint8 entry[2] = {static_cast<uint8>(mask & 0xFF), static_cast<uint8>(mask >> 8)};
+        if (!key.TryAppend(Span<const uint8>(entry, sizeof(entry)))) {
+            return Outcome::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
     for (const RootSignatureEntry& entry : rootSignatures_) {
         if (entry.key.Size() == key.Size() &&
             memcmp(entry.key.Data(), key.Data(), key.Size()) == 0) {
@@ -336,45 +535,8 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
         }
     }
 
-    // 0: 루트 상수(b0 space3, 모든 단계), 그 뒤 자원마다 descriptor 하나짜리 table이다.
-    D3D12_DESCRIPTOR_RANGE ranges[MaxPipelineSlotBindings] = {};
-    D3D12_ROOT_PARAMETER parameters[RootFirstTable + MaxPipelineSlotBindings] = {};
-    parameters[RootConstants].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[RootConstants].Constants.ShaderRegister = 0;
-    parameters[RootConstants].Constants.RegisterSpace = RootConstantsSpace;
-    parameters[RootConstants].Constants.Num32BitValues = ConstantCount;
-    parameters[RootConstants].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    for (uint32 index = 0; index < slots.count; ++index) {
-        const PipelineSlotBinding& binding = slots.bindings[index];
-        D3D12_DESCRIPTOR_RANGE& range = ranges[index];
-        switch (binding.role) {
-        case PipelineSlotRole::Sampler:
-            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-            break;
-        case PipelineSlotRole::WritableBuffer:
-        case PipelineSlotRole::WritableTexture:
-            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-            break;
-        default:
-            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-            break;
-        }
-
-        range.NumDescriptors = 1;
-        range.BaseShaderRegister = binding.location;
-        D3D12_ROOT_PARAMETER& parameter = parameters[RootFirstTable + index];
-        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        parameter.DescriptorTable.NumDescriptorRanges = 1;
-        parameter.DescriptorTable.pDescriptorRanges = &range;
-        parameter.ShaderVisibility =
-            binding.stage == ShaderStage::Vertex
-                ? D3D12_SHADER_VISIBILITY_VERTEX
-                : (binding.stage == ShaderStage::Pixel ? D3D12_SHADER_VISIBILITY_PIXEL
-                                                       : D3D12_SHADER_VISIBILITY_ALL);
-    }
-
     D3D12_ROOT_SIGNATURE_DESC desc = {};
-    desc.NumParameters = RootFirstTable + slots.count;
+    desc.NumParameters = count;
     desc.pParameters = parameters;
     desc.Flags = compute ? D3D12_ROOT_SIGNATURE_FLAG_NONE
                          : D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -397,63 +559,164 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
     return Outcome::Success(Move(signature));
 }
 
-void D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
+// root 인자를 건다(그리기·dispatch 직전). SRV·UAV table은 CPU 전용 heap의 원본을 shader-visible
+// ring으로 복사하고(바로 앞 같은 목록이면 다시 쓴다), 넘친 CBV table은 ring에 CBV를 만든다. ring이
+// 다 찼으면 거짓이다(그리기를 무시한다).
+bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
     const bool compute = pipeline.compute;
-    ID3D12RootSignature* root = pipeline.rootSignature.Get();
+    ID3D12RootSignature* signature = pipeline.rootSignature.Get();
     if (compute) {
-        if (appliedComputeRoot_ != root) {
-            list_->SetComputeRootSignature(root);
-            appliedComputeRoot_ = root;
+        if (appliedComputeRoot_ != signature) {
+            list_->SetComputeRootSignature(signature);
+            appliedComputeRoot_ = signature;
         }
-
-        list_->SetComputeRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
-    } else {
-        if (appliedGraphicsRoot_ != root) {
-            list_->SetGraphicsRootSignature(root);
-            appliedGraphicsRoot_ = root;
-        }
-
-        list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
+    } else if (appliedGraphicsRoot_ != signature) {
+        list_->SetGraphicsRootSignature(signature);
+        appliedGraphicsRoot_ = signature;
     }
 
+    const auto setTable = [&](int32 parameter, D3D12_GPU_DESCRIPTOR_HANDLE handle) noexcept {
+        if (compute) {
+            list_->SetComputeRootDescriptorTable(static_cast<UINT>(parameter), handle);
+        } else {
+            list_->SetGraphicsRootDescriptorTable(static_cast<UINT>(parameter), handle);
+        }
+    };
     const TextureRecord* texture = textures_.Find(boundTexture_);
     if (texture == nullptr || !texture->hasSrv || texture->writable) {
         texture = textures_.Find(white_.slot);
     }
 
-    for (uint32 index = 0; index < pipeline.slots.count; ++index) {
-        const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
-        D3D12_GPU_DESCRIPTOR_HANDLE table = srvs_.Gpu(nullBufferSrv_);
-        switch (binding.role) {
-        case PipelineSlotRole::Texture:
-            table = srvs_.Gpu(texture->srv);
-            break;
-        case PipelineSlotRole::Sampler:
-            table = samplers_.Gpu(texture->sampler);
-            break;
-        case PipelineSlotRole::BufferView: {
-            const BufferViewRecord* view = bufferViews_.Find(boundViews_[binding.slot].slot);
-            table = srvs_.Gpu(view != nullptr ? view->descriptor : nullBufferSrv_);
-            break;
-        }
-        case PipelineSlotRole::WritableBuffer: {
-            const BufferViewRecord* view = bufferViews_.Find(boundWriteViews_[binding.slot].slot);
-            table = srvs_.Gpu(view != nullptr ? view->descriptor : nullBufferUav_);
-            break;
-        }
-        case PipelineSlotRole::WritableTexture: {
-            const TextureRecord* view = textures_.Find(boundWriteTextures_[binding.slot].slot);
-            table = srvs_.Gpu(view != nullptr ? view->srv : nullBufferUav_);
-            break;
-        }
+    const RootLayout& root = pipeline.root;
+    uint32 sources[MaxPipelineSlotBindings] = {};
+    for (uint32 stage = 0; stage < root.stageCount; ++stage) {
+        const RootStageTables& tables = root.stages[stage];
+        const uint32 stageIndex = ConstantBufferStageIndex(tables.stage);
+        D3D12_GPU_DESCRIPTOR_HANDLE handle = {};
+        if (tables.srvParam >= 0) {
+            for (uint32 entry = 0; entry < tables.srvCount; ++entry) {
+                const PipelineSlotBinding& binding =
+                    pipeline.slots.bindings[tables.srvBindings[entry]];
+                if (binding.role == PipelineSlotRole::Texture) {
+                    sources[entry] = texture->srv;
+                } else {
+                    const BufferViewRecord* view =
+                        bufferViews_.Find(boundViews_[binding.slot].slot);
+                    sources[entry] = view != nullptr ? view->descriptor : nullBufferSrv_;
+                }
+            }
+
+            if (!CopyTable(stageIndex, 0, sources, tables.srvCount, handle)) {
+                return false;
+            }
+
+            setTable(tables.srvParam, handle);
         }
 
-        if (compute) {
-            list_->SetComputeRootDescriptorTable(RootFirstTable + index, table);
-        } else {
-            list_->SetGraphicsRootDescriptorTable(RootFirstTable + index, table);
+        if (tables.samplerParam >= 0) {
+            setTable(tables.samplerParam, samplers_.Gpu(texture->sampler));
+        }
+
+        if (tables.uavParam >= 0) {
+            for (uint32 entry = 0; entry < tables.uavCount; ++entry) {
+                const PipelineSlotBinding& binding =
+                    pipeline.slots.bindings[tables.uavBindings[entry]];
+                if (binding.role == PipelineSlotRole::WritableTexture) {
+                    const TextureRecord* view =
+                        textures_.Find(boundWriteTextures_[binding.slot].slot);
+                    sources[entry] = view != nullptr ? view->srv : nullBufferUav_;
+                } else {
+                    const BufferViewRecord* view =
+                        bufferViews_.Find(boundWriteViews_[binding.slot].slot);
+                    sources[entry] = view != nullptr ? view->descriptor : nullBufferUav_;
+                }
+            }
+
+            if (!CopyTable(stageIndex, 1, sources, tables.uavCount, handle)) {
+                return false;
+            }
+
+            setTable(tables.uavParam, handle);
+        }
+
+        if (tables.cbvParam >= 0) {
+            // 셰이더가 읽지 않는 사이 slot은 0 구간을 가리킨다. 바로 앞 table과 주소 목록이 같으면
+            // 그 구간을 다시 쓴다(그리기마다 ring을 쓰지 않게).
+            const uint32 overflow = root.plan.tableMask[stage];
+            D3D12_CONSTANT_BUFFER_VIEW_DESC views[MaxConstantBufferSlots] = {};
+            CbvTableCache& cache = cbvTableCache_[stageIndex];
+            bool same =
+                cache.valid && cache.first == tables.cbvFirst && cache.count == tables.cbvCount;
+            for (uint32 entry = 0; entry < tables.cbvCount; ++entry) {
+                const uint32 slot = tables.cbvFirst + entry;
+                views[entry] = {zeroConstants_, ConstantBufferAlignment};
+                if ((overflow & (1u << slot)) != 0) {
+                    uint32 bytes = 0;
+                    views[entry].BufferLocation = BoundConstantAddress(stageIndex, slot, bytes);
+                    views[entry].SizeInBytes = static_cast<UINT>(AlignConstantBufferBytes(bytes));
+                }
+
+                same = same && cache.addresses[entry] == views[entry].BufferLocation &&
+                       cache.sizes[entry] == views[entry].SizeInBytes;
+            }
+
+            if (same) {
+                handle = cache.gpu;
+            } else {
+                D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
+                if (!AllocateOnline(tables.cbvCount, cpu, handle)) {
+                    cache.valid = false;
+                    return false;
+                }
+
+                for (uint32 entry = 0; entry < tables.cbvCount; ++entry) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE destination = cpu;
+                    destination.ptr += static_cast<SIZE_T>(entry) * onlineIncrement_;
+                    device_->CreateConstantBufferView(&views[entry], destination);
+                    cache.addresses[entry] = views[entry].BufferLocation;
+                    cache.sizes[entry] = views[entry].SizeInBytes;
+                }
+
+                cache.valid = true;
+                cache.first = tables.cbvFirst;
+                cache.count = tables.cbvCount;
+                cache.gpu = handle;
+            }
+
+            setTable(tables.cbvParam, handle);
         }
     }
+
+    for (uint32 entry = 0; entry < root.plan.rootCbvCount; ++entry) {
+        const uint32 stageIndex =
+            ConstantBufferStageIndex(root.stages[root.plan.rootOrderStage[entry]].stage);
+        uint32 bytes = 0;
+        const D3D12_GPU_VIRTUAL_ADDRESS address =
+            BoundConstantAddress(stageIndex, root.plan.rootOrderSlot[entry], bytes);
+        const UINT parameter = root.rootCbvParam + entry;
+        if (compute) {
+            list_->SetComputeRootConstantBufferView(parameter, address);
+        } else {
+            list_->SetGraphicsRootConstantBufferView(parameter, address);
+        }
+    }
+
+    if (root.debugParam >= 0) {
+        list_->SetGraphicsRootUnorderedAccessView(static_cast<UINT>(root.debugParam),
+                                                  debugBuffer_->GetGPUVirtualAddress());
+    }
+
+    if (root.constantsParam >= 0) {
+        if (compute) {
+            list_->SetComputeRoot32BitConstants(static_cast<UINT>(root.constantsParam),
+                                                root.constantDwords, constants_, 0);
+        } else {
+            list_->SetGraphicsRoot32BitConstants(static_cast<UINT>(root.constantsParam),
+                                                 root.constantDwords, constants_, 0);
+        }
+    }
+
+    return true;
 }
 
 } // namespace rocks::graphics::d3d12

@@ -9,10 +9,10 @@
 #include <ShaderCore/ShaderBindingLayout.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 
-// 파라미터 바인딩 지도와 상수 블록(Docs/Design/RenderBase 9.3·9.4절 RB4의 SH2분)이다. SH2는
-// 손으로 쓴 레이아웃 표(ShaderSystem 7.2절 5항, ShaderCore ShaderParameterLayout.h)를 입력으로
-// 쓴다(생성 표는 SH3). 상수 버퍼(cbuffer)를 장치에 묶는 일은 파라미터 묶음(GX6)이라, SH2에서
-// 장치까지 가는 경로는 루트 상수(그리기별 상수, SetDrawConstants)뿐이다.
+// 파라미터 바인딩 지도와 상수 블록(Docs/Design/RenderBase 9.3·9.4절 RB4)이다. 입력은 손으로 쓴
+// 레이아웃 표다(ShaderSystem 7.2절 5항, ShaderCore ShaderParameterLayout.h — 생성 표는 SH3). 장치로
+// 가는 경로는 둘이다: 루트 상수 표는 그리기별 상수(ApplyDrawConstants), 그 밖의 표는 상수 버퍼
+// (ConstantBlock::Commit·ApplyConstantBlock, 9.11절 GX6).
 namespace rocks::render {
 
 // 레이아웃 표 하나가 셰이더 단계마다 놓이는 곳이다(9.3절 바인딩 지도의 상수 부분).
@@ -64,16 +64,32 @@ private:
     usize count_ = 0;
 };
 
-// 상수 블록의 수명이다(9.4절). PerFrame 회수(프레임 slot GPU 완료)와 GPU 버퍼 표현은 GX6·GX8과
-// 함께 한다 — SH2의 블록은 CPU 사본이다.
+// 바인딩 지도 자리의 단계 비트(ShaderCore ShaderStageBits)를 Graphics 단계로 바꾼다. 한 비트가
+// 아니면 Compute다(지도는 한 비트만 만든다).
+ROCKS_RENDERBASE_API graphics::ShaderStage ShaderStageOfBit(uint32 stage) noexcept;
+
+// 상수 블록의 수명이다(9.4절). 장치 표현은 9.11절 1항: PerDraw는 장치 버퍼 없이 그리기마다
+// SetConstantData, PerFrame은 SingleFrame 상수 버퍼(주인이 프레임 끝에 Release — 회수는 마지막
+// 사용 fence), Persistent는 MultiFrame 상수 버퍼(바뀐 version만 Update)다.
 enum class ConstantBlockLifetime : uint8 {
     PerDraw,
     PerFrame,
     Persistent
 };
 
-// 레이아웃 표 하나의 CPU 상수 블록이다. identity는 프로세스 안 고유하고 version은 값을 바꿀 때마다
-// 오른다(GLES 업로드 판단 — 9.4절).
+// 레이아웃 표 하나의 상수 블록이다(CPU 사본과, PerFrame·Persistent면 장치 상수 버퍼). identity는
+// 프로세스 안 고유하고 version은 값을 바꿀 때마다 오른다(GLES 업로드 판단 — 9.4절).
+//
+// 사용 예(뷰 상수 — 프레임마다):
+//   ConstantBlock view(allocator, ViewLayout, ConstantBlockLifetime::PerFrame);
+//   view.Initialize();
+//   view.SetValue("viewToClip", matrix);
+//   view.Commit(device);                           // SingleFrame 상수 버퍼를 만든다
+//   ApplyConstantBlock(commands, viewMap, view);   // 지도의 단계마다 SetConstantBuffer
+//   ... 프레임 끝 ...
+//   view.Release(device);                          // 마지막 사용 fence 뒤 해제된다
+//
+// 수명: 장치 버퍼는 소멸자가 놓지 않는다(장치를 모른다). 주인이 Release한다.
 class ROCKS_RENDERBASE_API ConstantBlock {
 public:
     ConstantBlock(Allocator& allocator, const shader::ShaderParameterLayout& layout,
@@ -113,12 +129,35 @@ public:
         return version_;
     }
 
+    // 지금 값을 장치 상수 버퍼에 올린다(9.11절 7항). PerDraw는 아무것도 하지 않는다. 이미 지금
+    // version이면 아무것도 하지 않는다. PerFrame은 SingleFrame 버퍼를 만든다(값이 바뀐 뒤면 새로
+    // 만들고 옛것을 Retire한다 — SingleFrame은 바꿀 수 없다). Persistent는 MultiFrame 버퍼를
+    // 만들거나 UpdateConstantBuffer한다. 실패: Initialize 전 InvalidArgument, 장치 오류는 그 오류다
+    // (그때 commit된 version은 그대로다).
+    Result<void> Commit(graphics::Device& device) noexcept;
+
+    // 장치 버퍼를 Retire한다(없으면 아무것도 하지 않는다). 다시 Commit하면 새로 만든다.
+    void Release(graphics::Device& device) noexcept;
+
+    // commit된 장치 버퍼다(PerDraw·Commit 전·Release 뒤는 null).
+    graphics::ConstantBufferHandle Buffer() const noexcept {
+        return buffer_;
+    }
+
+    // 장치 버퍼가 지금 값을 담는가(PerDraw는 늘 참 — 장치 버퍼가 없다).
+    bool IsCommitted() const noexcept {
+        return lifetime_ == ConstantBlockLifetime::PerDraw ||
+               (!buffer_.IsNull() && committedVersion_ == version_);
+    }
+
 private:
     const shader::ShaderParameterLayout* layout_;
     ConstantBlockLifetime lifetime_;
     Array<uint8> bytes_;
     uint64 identity_ = 0;
     uint64 version_ = 0;
+    graphics::ConstantBufferHandle buffer_;
+    uint64 committedVersion_ = 0;
 };
 
 // 루트 상수 블록을 그리기별 상수로 올린다(9.4절 그리기별 상수). map이 루트 상수 표가 아니거나
@@ -126,6 +165,20 @@ private:
 ROCKS_RENDERBASE_API Result<void> ApplyDrawConstants(graphics::CommandContext& commands,
                                                      const ShaderBindingMap& map,
                                                      const ConstantBlock& block) noexcept;
+
+// 상수 버퍼 표의 블록을 지도의 단계 자리마다 묶는다(9.11절 7항): PerDraw는 SetConstantData(값
+// 복사), 그 밖은 commit된 버퍼를 SetConstantBuffer. 실패(InvalidArgument): map이 루트 상수 표,
+// block의 표가 map의 표와 다름, PerFrame·Persistent인데 지금 값이 commit되지 않음.
+// SetConstantData의 실패는 그 오류다(앞 자리는 이미 묶였을 수 있다).
+ROCKS_RENDERBASE_API Result<void> ApplyConstantBlock(graphics::CommandContext& commands,
+                                                     const ShaderBindingMap& map,
+                                                     const ConstantBlock& block) noexcept;
+
+// 상수 버퍼 handle(그래프 상수 등)을 지도의 상수 버퍼 자리마다 묶는다. map이 루트 상수 표면
+// InvalidArgument다.
+ROCKS_RENDERBASE_API Result<void>
+ApplyConstantBuffer(graphics::CommandContext& commands, const ShaderBindingMap& map,
+                    graphics::ConstantBufferHandle buffer) noexcept;
 
 // GLES 업로드 판단(9.4절)이다: (program, 상수 버퍼 순번)마다 마지막으로 올린 (블록 identity,
 // version)을 기억하고, 그리기 때 다를 때만 올리라고 답한다. program을 바꾸면 같은 블록도 그

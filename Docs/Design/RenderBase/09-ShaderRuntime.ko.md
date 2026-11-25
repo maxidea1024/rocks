@@ -122,6 +122,12 @@
 - 새 셰이더는 새 셰이더 집합(새 epoch)으로 연다. 완결성·서명 검사를 통과해야 교체 후보가 된다.
 - 교체는 프레임 경계의 lane 작업이다. 이전 집합은 `Retire`되고, 진행 중 프레임은 이전 집합 lease로 끝까지 그린다. 파이프라인 캐시 항목은 epoch 키 때문에 섞이지 않는다.
 - 검사가 실패하면 이전 집합을 유지하고 진단을 낸다.
+- **구현 설계(개정 40, 18.3절 RR8).** RenderBase `ShaderSetSlot`(`RenderBase/ShaderSetSlot.h`)이 한 종류(엔진·묶음)의 현재 집합과 교체 후보를 가진다. UE는 셰이더 맵을 새로 만들어 끼우고 옛 맵은 참조가 사라질 때 지운다(재컴파일 뒤 `FShaderMapBase` 교체). Rocks는 그 시점을 lease와 프레임 경계로 명시한다.
+  - `Install(set)`: 첫 집합. `Ready`가 아니면 거부(`DependencyFailed`)하고 비어 있다.
+  - `Propose(set)`: 후보를 받는다(어느 스레드에서나 — SH4 감시 재컴파일이 부른다). 이미 후보가 있으면 옛 후보를 버린다(마지막 것이 이긴다). `Failed`면 바로 거부하고 현재를 유지한다(거부 수·영어 진단).
+  - `ApplyPending(cache)`: 프레임 경계의 렌더 lane 작업에서 부른다(프레임 packet 작업 맨 앞). 후보가 `WaitingForProvider`면 다음 경계로 미룬다. `Ready`면 교체한다: 옛 집합의 캐시 항목을 `PipelineCache::RetireSet`, 옛 집합 `Retire`, 새 집합이 현재가 된다(epoch가 다르므로 캐시 항목이 섞이지 않는다). `Failed`면 버리고 현재를 유지한다. 돌려주는 값은 교체했는지다.
+  - `CollectRetired()`: Retire한 옛 집합 가운데 lease가 0인 것을 파괴한다(진행 중 프레임의 기록 packet·그래프가 잡은 lease가 풀린 뒤). 종료 4단계(5.5절)는 `Shutdown`이 현재 집합까지 Retire하고 lease가 남으면 `Busy`다(closure 실패 — 강제 해제하지 않는다).
+  - 통계: 교체 수·거부 수·대기 중인 옛 집합 수.
 
 ### 9.9 셰이더 시스템 문서 개정(SX)
 
@@ -198,3 +204,15 @@
 9. **이 절 밖.** 공유 상수 slot 표(9.5절 — 바인딩 layout의 구조체 identity SX8과 렌더러 slot 등록이 먼저다), `ParameterBatch`의 자원 묶음, D3D11 크기별 pool·ring 크기 조정은 측정 뒤다.
 
 **완료 기준(9.10절 RB4의 GX6분).** EngineTests: 예산 계획(보장값 13·12·14, 경계 하나 위에서 table로 내림, 64 DWORD 이하, 결정적 배치), 값 1 상수 버퍼 수용·slot 범위·`ConstantBuffersSatisfied`, 기록 장치의 묶기·commit·갱신 순서, 그래프 상수의 생성·Retire·병렬 기록 재생. Sandbox `--self-test`(D3D12·D3D11·Vulkan·OpenGL ES, 각 소프트웨어 장치 포함): handle 두 수명과 기록 명령으로 그린 픽셀, 기록 순서 갱신(그리기 1은 옛 값·그리기 2는 새 값), 파이프라인 전환 뒤 묶음 유지, 안 묶은·작은 버퍼의 무시 계수, 상수 버퍼를 읽는 compute 결과, 단계마다 상수 버퍼 12개(D3D12는 14개와 진단 퍼뮤테이션)를 쓰는 그리기의 픽셀 — 장치 사이 결과가 같아야 한다.
+
+**구현(2026-11-25, 개정 39).** 위 결정 그대로다.
+- 파일: Graphics `Graphics/ConstantBuffer.h`(수명·handle·`ConstantBufferAlignment`·`MaxConstantBufferSlots`·`ConstantBufferSlots`·`ConstantBuffersSatisfied`·`ConstantBufferBytes`), `Graphics/RootBudget.h`(`PlanRootBudget` — 예산 계획을 API 객체 없이 계산해 CPU 시험으로 확인한다), `Graphics/ShaderBindings.h`(`PipelineSlots::constantSlots`·`debugBuffer`, `FindConstantBufferSlot`), `Device.h`(`CreateConstantBuffer`·`UpdateConstantBuffer`·`Retire`, `SetConstantBuffer`·`SetConstantData`), `DeviceFeatures::pixelDebugBuffer`. backend는 `D3D12Constants.cpp`·`D3D11Constants.cpp`·`VulkanConstants.cpp`·`GlesDeviceConstants.cpp`, D3D12 root 배치는 `D3D12Pipeline.cpp`. RenderBase `ConstantBlock::Commit`·`Release`·`IsCommitted`, `ApplyConstantBlock`·`ApplyConstantBuffer`·`ShaderStageOfBit`. RenderGraph `GraphConstantBuffer`, `RenderGraph::CreateConstants`(바이트·`ConstantBlock` 두 판), `GraphPassContext::Constants`·`SetConstants`, 기록 목록의 `SetConstantBuffer`·`SetConstantData` 재생.
+- D3D12: SRV·UAV 원본 descriptor heap(`srvs_`)을 CPU 전용으로 바꾸고, shader-visible heap은 queue마다 131072칸인 ring(`OnlineDescriptorsPerQueue`, `UploadRingAllocator`)이다. SRV·UAV table 복사와 넘친 CBV table은 단계마다 바로 앞 원본 목록(CBV는 주소·크기 목록)과 같으면 그 구간을 다시 쓰고, 기록마다 비운다. `ClearWritableBufferView`의 GPU handle도 ring 사본이다. 넘친 CBV table의 빈 slot은 장치의 0 구간(256 byte)을 가리킨다.
+- 스펙과 다르게 정한 것:
+  1. D3D11 handle은 `DYNAMIC`이 아니라 SingleFrame `IMMUTABLE`·MultiFrame `DEFAULT`다. 기록은 deferred context이고 deferred context의 `DYNAMIC` 내용은 그 기록에서 `WRITE_DISCARD`로 쓰기 전까지 정해지지 않기 때문이다. 기록 중 소유 스레드의 갱신은 기록 context의 `UpdateSubresource`, 다른 스레드의 기록 중 갱신은 새 `DEFAULT` 버퍼로 옮기고(옛것은 그 기록 fence 뒤 회수), 기록 밖 갱신은 업로드 기록이다 — 어느 경우도 기록 순서를 지킨다. 기록 명령은 결정대로 (단계, slot)별 `DYNAMIC` 버퍼다.
+  2. D3D12 Sampler table은 복사하지 않고 영구 descriptor를 가리킨다(개발 경로는 단계당 짝 샘플러 하나).
+  3. 장치 능력 `DeviceFeatures::pixelDebugBuffer`를 더했다(D3D12만 참). 셰이더 집합이 `debugPixelUav` 런타임 확인 기능을 이것과 대조한다(9.2절 — 전에는 늘 거부).
+  4. Sandbox Development 공급자가 개발 전용 타입도 만든다(`includeDevelopment`) — 진단 퍼뮤테이션 그리기 시험이 쓴다.
+- 시험 결과: EngineTests `ConstantBuffer_SizeRulesAndSlotBookkeeping`·`ConstantBuffer_PipelineSlotsTakeConstantBuffersByLocation`·`ConstantBuffer_RootBudgetGuaranteesAndOverflow`(보장값 13·12·14, 경계 하나 위에서 넘친 단계 table, 루트 상수 없으면 28개 모두 root, 결정적 배치, 음성 입력)·`ConstantBlock_*` 2건·`RenderGraph_Constants*` 2건·`RenderGraph_ParallelRecordingReplaysConstantCommands` 통과, 기존 `ShaderBindings`·`ShaderSet`·`PipelineCache`·`ComputeDispatch`·`RenderGraph`·`RenderLane`·`GpuTrace` 묶음도 통과(`ShaderBindings`의 상수 버퍼 거부 대조는 수용 대조로 바꿨다). Sandbox `--self-test`의 `RunConstantChecks`(Programs/Sandbox/Private/ConstantSelfTest.cpp, 셰이더 Constant.rsf·ConstantMany.rsf·ConstantWide.rsf): D3D12(GTX 1060)·D3D12 WARP·D3D11(GTX 1060)·D3D11 WARP·OpenGL ES(ES 3.2 context)·GL 4.3 core·Vulkan(GTX 1060)·lavapipe 모두 0 failures — 기록 순서 갱신(왼쪽 옛 값·오른쪽 새 값), SetConstantData, 파이프라인 전환 뒤 묶음 유지, 안 묶은·작은(32 byte 선언에 16 byte) 버퍼 그리기 무시 2건, 정수 상수 버퍼 compute(handle·기록 명령), 단계마다 12개 그리기의 slot별 픽셀 16개. D3D12·WARP는 단계마다 14개 그리기와 그 진단 퍼뮤테이션(root UAV)도 같은 픽셀이고, 둘 다 루트 상수 32 DWORD를 선언해 넘친 CBV table 경로를 지난다(28개 중 root 15·진단 14). 그 밖 장치에서 14개는 형식 정의 상한 때문에 쿠킹하지 않는다(NOT RUN). 검증 계층 오류 0, 장치 사이 기존 픽셀 대조도 그대로 0 differing channels다.
+- 리뷰 반영(같은 날): D3D11 다른 스레드 갱신 rename, GLES 생성·갱신의 소유 스레드 검사, D3D12 ring 크기(32768 → 131072)와 넘친 CBV table 재사용, Vulkan pool의 UBO 칸(set당 `MaxConstantBufferSlots`), `SetConstantData` 실패 계약(InvalidArgument만 앞 묶음 유지, 그 밖 실패는 slot을 비운다). 반영 뒤 self-test 여덟 장치 다시 0 failures.
+- 남은 것: 9항(공유 상수 slot 표·`ParameterBatch` 자원 부분·D3D11 크기별 pool·ring 크기 조정), Vulkan·Metal 진단 버퍼 자리(SL2).

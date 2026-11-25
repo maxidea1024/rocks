@@ -755,6 +755,18 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // D3D11 형식에는 PS 진단 버퍼가 없고(ShaderSystem 7.2절 12항), b13은 루트 상수 자리다.
+    const uint32 rootBit = 1u << RootConstantsRegister;
+    if (record.slots.debugBuffer ||
+        ((record.slots.constantSlots.usedMask[ConstantBufferStageIndex(ShaderStage::Vertex)] |
+          record.slots.constantSlots.usedMask[ConstantBufferStageIndex(ShaderStage::Pixel)]) &
+         rootBit) != 0) {
+        auto failed = Fail("the pixel debug buffer and constant buffer register b13 are not "
+                           "available on D3D11");
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
     auto formats = CheckVertexFormats(desc.layout);
     if (!formats) {
         return Result<PipelineHandle>::Failure(formats.Error());
