@@ -111,9 +111,10 @@ public:
 
     // LocalPlayer와 잇는다(UE SetPlayer — GameInstance Login이 부른다). source는 그 LocalPlayer의
     // 입력 원천이다(null이면 입력 없음). gamepad는 그 LocalPlayer의 패드 번호(ControllerId)다.
-    // 스냅숏을 비운다.
-    void SetPlayer(ObjectHandle localPlayer, const input::InputState* source,
-                   uint32 gamepad) noexcept;
+    // userSettings는 그 LocalPlayer의 키 설정이다(입력 액션 평가기에 붙는다 — null이면 없음,
+    // ClearPlayer 전까지 살아 있어야 한다). 스냅숏을 비운다.
+    void SetPlayer(ObjectHandle localPlayer, const input::InputState* source, uint32 gamepad,
+                   input::InputUserSettings* userSettings = nullptr) noexcept;
 
     // 이 플레이어의 입력 액션 평가기다(컨텍스트 추가·주입 — Docs/Design/InputActions 4절). OnTick이
     // 평가한다.
@@ -184,6 +185,7 @@ public:
         localPlayer_ = {};
         inputSource_ = nullptr;
         gamepad_ = 0;
+        actionInput_.SetUserSettings(nullptr);
     }
 
 protected:

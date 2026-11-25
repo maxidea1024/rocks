@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Gameplay/GameplayTypes.h>
+#include <InputActions/InputUserSettings.h>
 #include <Meta/Annotations.h>
 #include <Object/NativeClass.h>
 #include <World/Subsystem.h>
@@ -87,6 +88,17 @@ public:
         return input_;
     }
 
+    // 이 플레이어의 키 리바인딩 설정이다(Docs/Design/InputActions 5.2절 — UE
+    // EnhancedInputLocalPlayerSubsystem의 UserSettings). 현재 PlayerController의 입력 액션 평가기에
+    // 붙어 있다(SetPlayer). 저장 파일 위치·시점은 게임이 정한다(Save·Load — 5.3절).
+    input::InputUserSettings& InputSettings() noexcept {
+        return inputSettings_;
+    }
+
+    const input::InputUserSettings& InputSettings() const noexcept {
+        return inputSettings_;
+    }
+
     // 현재 World의 PlayerController다(없으면 null — Login 전, Client·편집 World). 게임 코드가 그
     // PlayerController를 직접 파괴하면 낡은 handle일 수 있다(World::HasActor로 확인한다).
     ObjectHandle PlayerControllerHandle() const noexcept {
@@ -118,6 +130,7 @@ private:
     ROCKS_NATIVE() ObjectHandle playerController_;
     ROCKS_NATIVE() const input::InputState* input_ = nullptr;
     ROCKS_NATIVE() LocalPlayerSubsystems subsystems_;
+    ROCKS_NATIVE() input::InputUserSettings inputSettings_;
     ROCKS_NATIVE() int32 controllerId_ = 0;
     ROCKS_NATIVE() uint32 index_ = 0;
 };
