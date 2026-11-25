@@ -47,8 +47,9 @@ class FakeImportContext final : public AssetImportContext {
 public:
     FakeImportContext(TextureEnv& env, Span<const AssetImportSource> sources, const void* options,
                       ObjectHandle existing = {}) noexcept
-        : bulk(env.allocator), warnings(env.allocator), env_(&env), access_(env.objects.OwnerAccess()),
-          sources_(sources), options_(options), existing_(existing), roots_(env.allocator) {
+        : bulk(env.allocator), warnings(env.allocator), env_(&env),
+          access_(env.objects.OwnerAccess()), sources_(sources), options_(options),
+          existing_(existing), roots_(env.allocator) {
     }
 
     Span<const AssetImportSource> Sources() const noexcept override {

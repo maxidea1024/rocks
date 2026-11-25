@@ -929,10 +929,9 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
 
             // 일 전부터 열려 있고 저장하지 않은 편집이 있으면 그 편집까지 저장하게 되므로 Busy다
             // (재임포트 구성원의 Busy 규칙과 같다).
-            const usize at =
-                algo::LowerBound(before.View(), referencer->id, [](AssetId left, AssetId key) noexcept {
-                    return GuidLess(left.value, key.value);
-                });
+            const usize at = algo::LowerBound(
+                before.View(), referencer->id,
+                [](AssetId left, AssetId key) noexcept { return GuidLess(left.value, key.value); });
             const bool wasOpen = at < before.Size() && before[at] == referencer->id;
             const EditorPackageInfo* openInfo = set_.Find(referencer->id);
             if (wasOpen && openInfo != nullptr && openInfo->dirty) {
@@ -1317,8 +1316,7 @@ Result<void> AssetService::PrepareImport(ImportRun& run, AssetDiagnostic* failur
     Array<usize> order(allocator);
     usize badRole = 0;
     auto roleCheck = OrderImportRoles(
-        info, sources.Size(), [&](usize at) noexcept { return sources[at].role; }, order,
-        badRole);
+        info, sources.Size(), [&](usize at) noexcept { return sources[at].role; }, order, badRole);
     if (!roleCheck) {
         return FailImport<void>(failure, AssetDiagnosticCode::None, roleCheck.Error());
     }
