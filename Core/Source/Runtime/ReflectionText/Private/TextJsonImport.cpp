@@ -533,7 +533,10 @@ Result<void> Importer::Entries(const TextSlot& slot, JsonValue value) noexcept {
     const bool structValue = field.element.kind == ValueKind::Struct;
     // InstancedStruct 값(리플렉션 B9j)은 항목마다 통째 교체다(MergeByKey여도 그 항목은 교체).
     const bool instancedValue = field.element.kind == ValueKind::InstancedStruct;
-    const bool merge = Context().Options().mapMerge == MapMergeMode::MergeByKey;
+    // 옵션 MergeByKey는 모든 Map을, 필드 플래그 TextMapMergeByKey는 그 Map만 키별로
+    // 병합한다(플래그는 전파하지 않는다 — 자기 필드의 flags만 본다).
+    const bool merge = Context().Options().mapMerge == MapMergeMode::MergeByKey ||
+                       HasFlag(field.flags, FieldFlags::TextMapMergeByKey);
     // 통째 교체: struct 값 Map은 비운 뒤 항목마다 펼치고, 단일 값 Map은 항목 목록 대입 하나다.
     TextValue entries(state.allocator);
     if ((structValue || instancedValue) && !merge) {

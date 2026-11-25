@@ -651,6 +651,13 @@ internal static partial class SchemaValidator
                         "Remove MaxElements; it limits the element count of reflected array, map and set fields (a static array T name[N] always holds exactly N elements).").At(field.Site);
                 }
 
+                // TextMapMergeByKey(AssetSystem 10.3.1절)는 Map 필드에만 쓴다(JSON import의 Map 병합 의미다).
+                if (field.Spec.TextMapMergeByKey && !field.IsMap)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: TextMapMergeByKey applies only to map fields", "RMC2202",
+                        "Remove TextMapMergeByKey; it makes JSON import merge a reflected map field by key instead of replacing it.").At(field.Site);
+                }
+
                 // AssetBundles(에셋 A4e2a)는 소프트 참조·struct·InstancedStruct 값에만, EditorOnly가 아닌 필드에만 쓴다 — 쿠킹 패키지에서
                 // 빠지는 참조는 bundle 구성원(그 항목의 런타임 의존)이 될 수 없다. EditorOnly struct 필드 안 멤버의 목록은 막지 않는다(같은 struct를
                 // 다른 자리에 쓸 수 있고 Registry도 볼 수 없다) — 태그 수집이 EditorOnly 경로를 건너뛴다(A4e2b).

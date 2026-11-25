@@ -475,6 +475,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignKeyedShelf::keyed",
+      "id": "77508255170845349e2a738d590f1e9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignKeyedShelf::plain",
+      "id": "7ea8bf4730084ff1b09daa652ba0b199",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignMixed::link",
       "id": "7c1081763b9f402d887864c21c4ad339",
       "aliases": [],
@@ -4231,6 +4245,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::AssignInner",
       "id": "7660e1184e79432d92c9f18e0f21a997",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AssignKeyedShelf",
+      "id": "6335f980adcb4850a17f167d24b91e60",
       "aliases": [],
       "retired": false
     },

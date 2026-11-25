@@ -80,7 +80,10 @@ enum class FieldFlags : uint32 {
     DuplicateTransient = 16,
     NonTryoutDuplicateTransient = 32,
     SaveGame = 64,
-    TextExportTransient = 128
+    TextExportTransient = 128,
+    // JSON import가 이 Map 필드를 키별로 병합한다(TextCodecOptions::mapMerge가 Replace여도 — Map
+    // 필드만, 바깥·안쪽으로 전파하지 않는다, Docs/Design/AssetSystem 10.3.1절).
+    TextMapMergeByKey = 256
 };
 
 constexpr bool HasFlag(uint32 flags, TypeFlags flag) noexcept {

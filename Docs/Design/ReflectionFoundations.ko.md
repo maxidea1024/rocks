@@ -157,7 +157,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 
 설정 계층(CF1)이 설정 struct 직접 멤버의 설정 지정자 `UserConfig`·`ConsoleName="…"`·`RestartRequired`·`StartupOnly`·`RenderRead`·`DevelopmentOnly`를 더한다(`FieldFlags`가 아니라 `SettingsFieldSchema`에 실린다 — [설정 계층](ConfigSystem.ko.md) 7절, RMC2210·RMC2202). 출시 제외 `ShippingExcluded`는 쿠킹(CF5) 때 더한다.
 
-리플렉션 B9가 `DuplicateTransient`·`NonTryoutDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너(B9d2에서 ClassRef 필드·`Array<ClassRef>` 구현)·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절).
+리플렉션 B9가 `DuplicateTransient`·`NonTryoutDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너(B9d2에서 ClassRef 필드·`Array<ClassRef>` 구현)·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절). AssetSystem A4f1이 `TextMapMergeByKey`(256 — Map 필드 JSON import 키별 병합, 전파 없음)를 더한다(RX 10.4절).
 
 계약 설정(기본값이 아니면 `UnsupportedSetting`, 12.4절)과 필드 기본값 조회(빌드 키의 "기본값 포함")는 클래스 기본값 레코드(RuntimeClassMetadata '클래스 기본값 결정')가 필요하므로 텍스처 설정 단계(A5)에서 구현한다(11절).
 

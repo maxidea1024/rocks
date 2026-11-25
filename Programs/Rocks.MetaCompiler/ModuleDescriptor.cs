@@ -245,7 +245,7 @@ internal static class ModuleDescriptor
             // 필드 플래그(리플렉션 B9h1)는 비트 순서로 적는다.
             foreach ((bool set, string flag) in new[] { (field.Spec.DuplicateTransient, "DuplicateTransient"),
                 (field.Spec.NonTryoutDuplicateTransient, "NonTryoutDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
-                (field.Spec.TextExportTransient, "TextExportTransient") })
+                (field.Spec.TextExportTransient, "TextExportTransient"), (field.Spec.TextMapMergeByKey, "TextMapMergeByKey") })
             {
                 if (set)
                 {
@@ -647,7 +647,7 @@ internal static class ModuleDescriptor
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
                 if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or
-                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient")) ||
+                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient" or "TextMapMergeByKey")) ||
                     fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
@@ -712,6 +712,7 @@ internal static class ModuleDescriptor
                         NonTryoutDuplicateTransient = fieldFlags.Contains("NonTryoutDuplicateTransient"),
                         SaveGame = fieldFlags.Contains("SaveGame"),
                         TextExportTransient = fieldFlags.Contains("TextExportTransient"),
+                        TextMapMergeByKey = fieldFlags.Contains("TextMapMergeByKey"),
                         ToolName = toolName == fieldName ? "" : toolName,
                         // 정적 배열의 maxElements는 지정자가 아니라 N이다(리플렉션 B9g).
                         MaxElements = fixedArray ? 0 : maxElements,

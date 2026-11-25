@@ -173,10 +173,10 @@ internal sealed class FieldModel
     public bool IsObjectRefMap => IsMap && ElementKind == "ObjectReference";
 
     // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8, DuplicateTransient 16, NonTryoutDuplicateTransient 32, SaveGame 64,
-    // TextExportTransient 128(리플렉션 B9h1).
+    // TextExportTransient 128(리플렉션 B9h1), TextMapMergeByKey 256(AssetSystem 10.3.1절).
     public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u) |
         (Spec.DuplicateTransient ? 16u : 0u) | (Spec.NonTryoutDuplicateTransient ? 32u : 0u) | (Spec.SaveGame ? 64u : 0u) |
-        (Spec.TextExportTransient ? 128u : 0u);
+        (Spec.TextExportTransient ? 128u : 0u) | (Spec.TextMapMergeByKey ? 256u : 0u);
 
     // 도구 이름(지정하지 않았으면 필드 이름)이다. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203).
     public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;

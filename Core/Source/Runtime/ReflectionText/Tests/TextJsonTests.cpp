@@ -246,6 +246,54 @@ TEST(TextJson_ImportMergesStructsAndReplacesContainers) {
     CHECK(*holder->scores.Find(StringView("d")) == 6);
 }
 
+// 필드 플래그 TextMapMergeByKey(AssetSystem 10.3.1절): 옵션이 Replace여도 플래그 단 Map은 키별
+// 병합(있던 항목은 멤버 병합 — 그 안의 플래그 없는 Map은 통째 교체, 없던 항목은 기본값 뒤 병합,
+// 없는 키는 유지), 플래그 없는 Map은 통째 교체다. 옵션 MergeByKey면 둘 다 키별이다.
+TEST(TextJson_FieldMapMergeByKey) {
+    SystemAllocator system;
+    Fixture fixture(system);
+    auto shelfType = fixture.types.AcquireValueType(GeneratedType<AssignKeyedShelf>::Schema().id,
+                                                    TypeKind::Struct);
+    REQUIRE(shelfType);
+    AssignKeyedShelf shelf(system);
+    auto fill = [&](StringView key, StringView inner, int32 x) noexcept {
+        AssignShelf value(system);
+        String innerKey(system);
+        String outerKey(system);
+        CHECK(innerKey.TryAssign(inner) && outerKey.TryAssign(key));
+        AssignPoint point;
+        point.x = x;
+        CHECK(value.byKey.InsertOrAssign(Move(innerKey), point));
+        CHECK(shelf.keyed.InsertOrAssign(Move(outerKey), Move(value)));
+    };
+    fill("a", "p", 1);
+    fill("b", "p", 2);
+    String one(system);
+    String two(system);
+    REQUIRE(one.TryAssign("a") && two.TryAssign("b"));
+    REQUIRE(shelf.plain.InsertOrAssign(Move(one), 1) && shelf.plain.InsertOrAssign(Move(two), 2));
+    const AssignmentTarget target = AssignmentTarget::Value(fixture.objects, fixture.Access(),
+                                                            shelfType.Value(), &shelf, system);
+    fixture.options.mapMerge = MapMergeMode::Replace;
+    const char* text =
+        R"({"keyed": {"a": {"byKey": {"q": {"y": 5}}}, "c": {}}, "plain": {"c": 3}})";
+    REQUIRE(Publishes(Import(system, text, target, fixture.options, fixture.diagnostics)));
+    CHECK(shelf.keyed.Count() == 3 && shelf.keyed.Find(StringView("b")) != nullptr &&
+          shelf.keyed.Find(StringView("c")) != nullptr);
+    const AssignShelf* a = shelf.keyed.Find(StringView("a"));
+    REQUIRE(a != nullptr);
+    CHECK(a->byKey.Count() == 1 && a->byKey.Find(StringView("q")) != nullptr &&
+          a->byKey.Find(StringView("q"))->y == 5);
+    CHECK(shelf.plain.Count() == 1 && *shelf.plain.Find(StringView("c")) == 3);
+
+    // 옵션 MergeByKey는 플래그 없는 Map도 키별이다.
+    fixture.options.mapMerge = MapMergeMode::MergeByKey;
+    REQUIRE(Publishes(
+        Import(system, R"({"plain": {"d": 4}})", target, fixture.options, fixture.diagnostics)));
+    CHECK(shelf.plain.Count() == 2 && *shelf.plain.Find(StringView("d")) == 4);
+    fixture.options.mapMerge = MapMergeMode::Replace;
+}
+
 // 엄격성: 모르는 키·대소문자만 다른 키·JSON 종류 불일치·ReadOnly·Deprecated 클래스·배열 원소 형식을
 // 모두 모아 JSON 위치(line·column)와 경로로 보고하고 아무것도 게시하지 않는다. Deprecated 클래스의
 // 같은 값은 무동작이다.
