@@ -181,7 +181,11 @@ public static class MetadataRunner
                 // 리플렉션 클래스·struct의 표지(ROCKS_GENERATED_BODY)를 요구한다(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절).
                 arguments.Add("--require-generated-body");
 
-                var generated = await ProcessRunner.RunAsync(new("dotnet", arguments, context.RootDirectory,
+                // 인자는 응답 파일로 넘긴다: 헤더가 많은 모듈은 --input·--include 쌍만으로 Windows 명령줄 상한(32,767자)을 넘는다
+                // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 파일은 한 줄에 인자 하나이고 stage 안에 둔다.
+                string responseFile = Path.Combine(StageRoot(run.Name), "metacompiler.rsp");
+                File.WriteAllText(responseFile, string.Join('\n', arguments.Skip(1)) + "\n", new System.Text.UTF8Encoding(false));
+                var generated = await ProcessRunner.RunAsync(new("dotnet", [compilerTool, "@" + responseFile], context.RootDirectory,
                     toolchain.Environment, Timeout: TimeSpan.FromMinutes(3)), cancellationToken);
                 Console.Write(generated.StdOut);
                 Console.Error.Write(generated.StdErr);

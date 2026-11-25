@@ -3,6 +3,146 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::material::ActorPositionProperties::originType",
+      "id": "a97f1d7c44a7412da2e8c870bbe6d089",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AggregateProperties::attributeNames",
+      "id": "0b2ef30c43e04b9fa527396b85e7d7c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AggregateProperties::kind",
+      "id": "026f81b392bd4d6682c3ffd062f7adcd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AggregateProperties::userAggregate",
+      "id": "c5ba926c1ae0443992b1306e15a1a85b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::automaticViewMipBias",
+      "id": "e165a2844a5c4b0980981e55d7a0ca87",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::channel",
+      "id": "3129344512914052845273b4f84809f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::channelNames",
+      "id": "1a0d91894ec04172a00104c1b86a5321",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::constCoordinate",
+      "id": "7ba140db658d45f983ca96d7974e1172",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::constMipValue",
+      "id": "39f6e84355e74205a844d3fa1f706e5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::gatherMode",
+      "id": "1825548568d74b1c9c87e321d86a2185",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::group",
+      "id": "59ae0ae157c6453b953cd9d33a1f9f44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::isDefaultMeshpaintTexture",
+      "id": "f9305acad756438990a845c2993f3e37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::mipValueMode",
+      "id": "9eab7549351f4eeaaf4787b4a869050c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::parameterId",
+      "id": "6502e1bf383741fe83a4faa6d456e0ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::parameterName",
+      "id": "9172480ba23e4becb63d29de638195c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::samplerSource",
+      "id": "930808f24b0047fba565818514e591c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::samplerType",
+      "id": "9010b5cf06724b92b0d9d42417833f6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::sortPriority",
+      "id": "809b568480ab4508abc9b0e44c95e8d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::texture",
+      "id": "81a1b89de69a4ce4a368f88ceace0f0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::threshold",
+      "id": "e5d18157458c4baa8cc184ecb4a7ef4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::AssetParameterOverride::key",
       "id": "c7ea6ca31a9b4d838b0ace97bce670c3",
       "aliases": [],
@@ -12,6 +152,580 @@
       "kind": "field",
       "name": "rocks::material::AssetParameterOverride::value",
       "id": "9b69b10e91de471ca21caa94e47da496",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::AttributeLayersProperties::defaultLayers",
+      "id": "a5cfc791c9444cf19902a037479e0ed5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BlendAttributesProperties::pixelAttributeBlendType",
+      "id": "ea2aa77da1df423dbc214a18f935f9a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BlendAttributesProperties::vertexAttributeBlendType",
+      "id": "328ba0be1c794abe8dcf70fb9611f5c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BlendProperties::pixelAttributesBlendMode",
+      "id": "e1edcc69b07a4a2d96a6a7e62cfa302f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BlendProperties::vertexAttributesBlendMode",
+      "id": "a68e50c9d3fe42dd9d6272dbd0031a44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BoundsProperties::type",
+      "id": "da0872e9a5b44c88854c67c10b9877dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BumpOffsetProperties::constCoordinate",
+      "id": "5a95cba256e54df8abf0723b41a22bec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::BumpOffsetProperties::referencePlane",
+      "id": "f103063a3de445b29f5c280c649f8bae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::channelNames",
+      "id": "d17ea185504a4f94930d58bdd560afa5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::defaultValue",
+      "id": "3e05961a77a04999828bdf29dba72b60",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::group",
+      "id": "b8e85261f4284879a7d1ef912a6719fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::maskChannel",
+      "id": "76605e65ecc24aaabe051287d97db7ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::parameterId",
+      "id": "c30f58b0e9564e158a87e7973a7f28e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::parameterName",
+      "id": "7125429521564781ad2050ba4d37f33e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::primitiveDataIndex",
+      "id": "9f42bd99203548a2ae5bcf5f612b5292",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::sortPriority",
+      "id": "01d64bfa9de24f7d8ac5593fce3a8897",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::useCustomPrimitiveData",
+      "id": "d9d56e9fcb924212bb1ea02718eeb1d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ClampProperties::clampMode",
+      "id": "cb4b0d1b5a8845c78999ff09aff852db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ColorRampProperties::colorCurve",
+      "id": "63de2f1c1efc482c80a60b63ab510afe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ComponentMaskProperties::a",
+      "id": "46561864c98d42e1bec49ec13fc5262a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ComponentMaskProperties::b",
+      "id": "1fa3691bd8f34a50b6429805d8b15ca3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ComponentMaskProperties::g",
+      "id": "7088f4891fc041959a9e33f0f887a981",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ComponentMaskProperties::r",
+      "id": "70b0996d13bd4b17aea4fcc15d21e7e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::Constant2Properties::g",
+      "id": "e88c98b9d3644524b3cbc3b556252bbf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::Constant2Properties::r",
+      "id": "0ba4c249dfe94c9883c13a593887682c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::Constant3Properties::constant",
+      "id": "4faa4340cfc8465d82ac61c9a0a371b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::Constant4Properties::constant",
+      "id": "74662b9d1f3f45ceaa210c470e788d6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConstantBiasScaleProperties::bias",
+      "id": "62822fcf4ba94902b2ffd5d159b40b2f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConstantBiasScaleProperties::scale",
+      "id": "ff8a64e759e04db7aa2f1e067933c65b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConstantDoubleProperties::value",
+      "id": "eea0f39b9c604eb7b467bb68808b5cc3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConstantProperties::r",
+      "id": "06c1fd99ca0241929acc2fadb4618f0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertInput::defaultValue",
+      "id": "8190e5fb1a294fdbb7a61130ea6da255",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertInput::type",
+      "id": "19d0b43484c844e0b79227316aad4a3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertMapping::inputComponentIndex",
+      "id": "34e5b31722fa475fbace6759a560d84a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertMapping::inputIndex",
+      "id": "38768550383e4eb69079fa653301f3d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertMapping::outputComponentIndex",
+      "id": "78572fb0bb3d40848c7c39d578da84ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertMapping::outputIndex",
+      "id": "29603b14637d4f10afb91584afa3780b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertOutput::defaultValue",
+      "id": "84fccb4d72b4482487871b17d92f008b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertOutput::type",
+      "id": "6c6fa730ab584426ac60af7772b29efb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertProperties::convertInputs",
+      "id": "4dc0cc2980344502bdf57913c011dd9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertProperties::convertMappings",
+      "id": "76d9823105034f77a58e0120ceb5956a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertProperties::convertOutputs",
+      "id": "44fc15302d4349abbb039b24f6005476",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ConvertProperties::nodeName",
+      "id": "d03984d20998454cb86963f49533ca1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CosineProperties::period",
+      "id": "3399eaa24ce34c319e76d0b0a400af66",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::atlas",
+      "id": "0d539e93723f4af18b1a6153077c910e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::controlType",
+      "id": "244f4607d31840eab2a7db76bc22b8a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::curve",
+      "id": "1693a3f85fdc47d1bdce2b2b889110c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::defaultValue",
+      "id": "37bb0c1cf6f14ff2ac2928d106216140",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::enumeration",
+      "id": "ff02b8ff2a4b4abdb480b71340a26d72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::enumerationIndex",
+      "id": "7978c03037a44866a5303300e57ff38f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::group",
+      "id": "1dfc42c3d47649df869ec6e13fa796c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::parameterId",
+      "id": "add65b230850489fa0f315a79fc1802e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::parameterName",
+      "id": "46597f916c5f447fb1ceed667ac899ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::primitiveDataIndex",
+      "id": "de4fb482a4854154940e2dd4b805b30c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::sliderMax",
+      "id": "e7f15d6ad5104d238e5e0379bbf54e82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::sliderMin",
+      "id": "cf18071ef49b47bab44b48035f8df75c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::sortPriority",
+      "id": "2de1207155c643ddbc74ceb3cbe7619a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::useCustomPrimitiveData",
+      "id": "aecd4b3bd63e441abb44261bb360c03c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomDefine::defineName",
+      "id": "911ec5649e5e46cba52f2ebe1f03b094",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomDefine::defineValue",
+      "id": "da685a813b9b47c1927f35dc72e20e72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::additionalDefines",
+      "id": "100af37033e84529a96007f8d9c98d7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::additionalOutputs",
+      "id": "45a7f89b08c0456e98efe9222bef1fa8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::code",
+      "id": "8f5ed428c4b849edaf01358663be74e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::containsClipInstruction",
+      "id": "2912239bf7da41dfa618c2d5ddd6d63e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::description",
+      "id": "bc0ef2af2ed44cbaaf503e63326f374c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::includeFilePaths",
+      "id": "e1b98baf94db42969265e418d62b6e1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::inputs",
+      "id": "44559871504a4865a3cff14ba1891567",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::outputType",
+      "id": "f9142e604ee043ff905ecbd86e1c1a42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomHlslProperties::showCode",
+      "id": "8b7f4abdd2ea41558cd3e922b30e0eda",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomInput::inputName",
+      "id": "9aefbdfe6397453e8b8df0333537caf8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomOutput::outputName",
+      "id": "1a99208d268546f1ae08ad85c63326b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::CustomOutput::outputType",
+      "id": "aa4a8befe07b4ffaa8ae1188afbaf42b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DecalBufferTextureProperties::dBufferTextureId",
+      "id": "f70fbc8449f243eaaa3e8060a69effcd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DecalMipmapLevelProperties::constHeight",
+      "id": "050bc049c9fd413b8080d9dd98b9ccc5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DecalMipmapLevelProperties::constWidth",
+      "id": "37dfbbc81a704c798c1ec7245bf09c3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DepthOfFieldFunctionProperties::functionValue",
+      "id": "5ecbd015d6d344f5a8e4b80b55595f75",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DesaturationProperties::luminanceFactors",
+      "id": "8cc638bbd0cb4647b17a996d617e672d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DistanceFieldApproxAoProperties::numSteps",
+      "id": "1fd32e49497646c58d6788d697949280",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DistanceFieldApproxAoProperties::stepScaleDefault",
+      "id": "2d4a9c07a0ef46d7b20531400e5cc009",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DistanceFieldApproxAoProperties::worldPositionOriginType",
+      "id": "77157bb2f1ce4a0faad2685d018798ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DistanceFieldGradientProperties::worldPositionOriginType",
+      "id": "3bbb5277eeae4a89863c03f33bb833ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DistanceToNearestSurfaceProperties::worldPositionOriginType",
+      "id": "482d93cdd1624aef9de9b9a9faf140ac",
       "aliases": [],
       "retired": false
     },
@@ -52,6 +766,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::DoubleVectorParameterProperties::defaultValue",
+      "id": "076baa92c797403ca681d66f3c15e2b5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DoubleVectorParameterProperties::group",
+      "id": "f72cc2e4a3234b54be6a0ee3c17ffdfc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DoubleVectorParameterProperties::parameterId",
+      "id": "38e16703c79b4040a19eadf6ed2eaf3d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DoubleVectorParameterProperties::parameterName",
+      "id": "e66e2e0c165242b9ac77b7cbe5f77aab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DoubleVectorParameterProperties::sortPriority",
+      "id": "838dd20821ea4a17a7897403d64d913b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::DynamicBoolParameterOverride::key",
       "id": "bdb42783a1f04a46aa83d45ea3b9ca1d",
       "aliases": [],
@@ -61,6 +810,76 @@
       "kind": "field",
       "name": "rocks::material::DynamicBoolParameterOverride::value",
       "id": "a73c8f15d16e468894d65ada39e9f11f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DynamicParameterProperties::defaultValue",
+      "id": "a49c7e85dea246ac9a4de3dbee51c5af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DynamicParameterProperties::paramNames",
+      "id": "1d07354137ca47a9822c0d3643c19587",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::DynamicParameterProperties::parameterIndex",
+      "id": "dab785c1938f4194b56a753dc65fd1dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::EvaluatePhysicsIntegerFieldProperties::fieldTarget",
+      "id": "d5f8e82ece4842b0be8706c5b039bb3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::EvaluatePhysicsIntegerFieldProperties::worldPositionOriginType",
+      "id": "3461d33eadef4975bbaa61f530851abe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::EvaluatePhysicsScalarFieldProperties::fieldTarget",
+      "id": "547baedfeaca495696256e10d15d2cc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::EvaluatePhysicsScalarFieldProperties::worldPositionOriginType",
+      "id": "a7140010e2bb432388ee4bd5a5b25f13",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::EvaluatePhysicsVectorFieldProperties::fieldTarget",
+      "id": "706f97d72bbc4e35b856caea840321ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::EvaluatePhysicsVectorFieldProperties::worldPositionOriginType",
+      "id": "3171dc968361485f90664c2c5d6b7fde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FloatToUIntProperties::mode",
+      "id": "b41704dc46354ff380efd41888981c9b",
       "aliases": [],
       "retired": false
     },
@@ -87,6 +906,398 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::font",
+      "id": "db2b51180a574f4e95f37de29b18e076",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::fontTexturePage",
+      "id": "6e1dddf2db52450ab166be62c77e3527",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::group",
+      "id": "5257df36b8fc43d38705e3b1dcf10fd9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::parameterId",
+      "id": "39d2dd6852f94572ab0670e827a93ca8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::parameterName",
+      "id": "22455883fd564c7786b1b36eb2b8b1bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::sortPriority",
+      "id": "ca038b0e9a894e0f9edd40c34a33d951",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleProperties::font",
+      "id": "954dcf50367e495d8ec0f3c10cd9ab34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleProperties::fontTexturePage",
+      "id": "f050ceb1dca2493e9e72412f69fc47fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FormatFactInput::inputName",
+      "id": "e51ed43e270e4f97b9b03220c6ce20b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FormatFactInput::propertyCondition",
+      "id": "e2e1247abe3a498996602763494568d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FormatFactSwitchProperties::ddspiPropertyNames",
+      "id": "e2f1c75d834b4783b6c3b8e032f0d609",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallInput::id",
+      "id": "e9f33680e83f445091f036c7bce84b9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallInput::inputName",
+      "id": "985ecc96ed6b46b5ab774a54342dae6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallInput::inputType",
+      "id": "d33957522d304e0da0ef5f8d93120600",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallInput::usePreviewValueAsDefault",
+      "id": "b7db30a618ef4c89b6b9eec2ae7e853a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallOutput::id",
+      "id": "c06c59b624ad48fea086291661386093",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallOutput::outputName",
+      "id": "268dac462ab745999f90ac8488269fb8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallProperties::inputs",
+      "id": "5c21953c5d90458bb838b16898fd9f3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallProperties::materialFunction",
+      "id": "37a5f8c583744178878a44c70209362f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionCallProperties::outputs",
+      "id": "ce472e633a874f378fe340fffb757599",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::blendInputRelevance",
+      "id": "696728c59fef46fa99232b44780d8dcf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::description",
+      "id": "78b6d8f7e1df41ce8701fbbe1be951f4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::id",
+      "id": "9c274ba4ad4b4ae58ff61b3295e4443f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::inputName",
+      "id": "936e1cd90cbf4e52b9741bd46c630ed0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::inputType",
+      "id": "089e10dc81a84679aa02f2876278f6cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::previewValue",
+      "id": "0eee574b983b4a6688a33c2007e59a7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::sortPriority",
+      "id": "a8995f34504348a98e7467665bb2a6fd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionInputProperties::usePreviewValueAsDefault",
+      "id": "096a96cdc972451aab70941255d733e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionOutputProperties::description",
+      "id": "1166407e626c48f9866894b6708f70e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionOutputProperties::id",
+      "id": "c9df287becec4fae85b267719bd706ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionOutputProperties::outputName",
+      "id": "6383cfe928264f46ab37185d5ced2436",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FunctionOutputProperties::sortPriority",
+      "id": "8a30227c0e914af6901df620299ffc53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::GetAttributesProperties::attributeGetTypes",
+      "id": "883787a867344a4ba647d89e322f671d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::HairAttributesProperties::useTangentSpace",
+      "id": "8556f4c7ec1a4a0c9875127c97965426",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::IfProperties::equalsThreshold",
+      "id": "f5c5f85d84794f20b484479366ead738",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::InverseLinearInterpolateProperties::clampResult",
+      "id": "b81ef8e3f9384c5cac9c7177de475b13",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerOutputProperties::description",
+      "id": "8a36f63022c84f528b9c245356ecefc6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerOutputProperties::id",
+      "id": "0dbc9a91fd9346aea0cf8310c68624f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerOutputProperties::outputName",
+      "id": "f0142ff52b20406dabdb7ce72b0a6968",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerOutputProperties::sortPriority",
+      "id": "13137528cb0b4d69a2781135fb1989ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackDefaults::layers",
+      "id": "ee75f37f9cf545adbb7347164f213ae6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackInput::inputName",
+      "id": "c9ba6f0c35444589b24fa0bce189b090",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackInput::inputType",
+      "id": "776140e675224af6abc037ecf99a0a10",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::blend",
+      "id": "bd4653a9ff034b2a9bbbc3dfcd7a1832",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::displayName",
+      "id": "ee26c18cc9cb4126962a985265062637",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::layer",
+      "id": "c1f7fffeaed74665b74fcd5c788514be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::layerId",
+      "id": "769b3d6565114b3e8c64790e07650f8b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::restrictToBlendRelatives",
+      "id": "49b08a2e572e4e18b6b6495a3547a288",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::restrictToLayerRelatives",
+      "id": "6e5f7e9593764b6f9bcacdff5ed0fbb3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackLayer::visible",
+      "id": "53c042bc34ff433f96b06d0a50b03da8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackProperties::availableBlends",
+      "id": "a5146dff4f19460aa5b09c077d6c9420",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackProperties::availableLayers",
+      "id": "f6e64b1a275a4537852bc70b6c7659a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackProperties::defaultLayers",
+      "id": "5222342ddca94330aa7fc58e356f46ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LayerStackProperties::layerInputs",
+      "id": "a53376dc146e445383ee2f5d155b8b6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LocalPositionProperties::includedOffsets",
+      "id": "d0386f2c180843238d4e71066b42ac29",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::LocalPositionProperties::localOrigin",
+      "id": "40c7b7bf80504735964f1db49d93b10b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialAssetReference::assetId",
       "id": "43140e6f14134d958646553b444939c6",
       "aliases": [],
@@ -96,6 +1307,41 @@
       "kind": "field",
       "name": "rocks::material::MaterialAssetReference::expectedClass",
       "id": "753a17eab09449e48504183ff00ff8aa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialCacheAttribute::decoration",
+      "id": "bb4e4fc46307402f813dd3934f9bf621",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialCacheAttribute::valueType",
+      "id": "abcf45fa957840d39a9a3336a6f51240",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialCacheOutputProperties::attributes",
+      "id": "c9bb7c5b195b413b8879ea8db9c7b153",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialCacheOutputProperties::isSample",
+      "id": "10291b06a0604836b809c16da7b121b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialCacheOutputProperties::tag",
+      "id": "b8fa02de0bfa409faf3ad4a36204a809",
       "aliases": [],
       "retired": false
     },
@@ -250,6 +1496,13 @@
       "kind": "field",
       "name": "rocks::material::MaterialPostProcessTraits::userTextureDivisorY",
       "id": "5e99a21f190e40b0bfd5002bd6d5fc1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialSampleProperties::materialReference",
+      "id": "df99cce76b564f64acea3ac0c9cc42be",
       "aliases": [],
       "retired": false
     },
@@ -899,6 +2152,251 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::NamedRerouteDeclarationProperties::name",
+      "id": "8982a805b0644c17a87f878d78a8cfc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NamedRerouteDeclarationProperties::nodeColor",
+      "id": "9f7343cf3c0c47fa8c912b3053024241",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NamedRerouteUsageProperties::declaration",
+      "id": "abd2d4cc05a949a7b8ed8f27b737142d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NeuralNetworkInputProperties::neuralIndexType",
+      "id": "d5097e87f79f4cdc9ea65c23a362b468",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NeuralNetworkOutputProperties::neuralIndexType",
+      "id": "26756176d8f14480a06028619bfae491",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::levelScale",
+      "id": "eedc070990ab4992be0ee02c65a44c06",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::levels",
+      "id": "bc7158f89bd2449c8e450d384b2699b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::noiseFunction",
+      "id": "13a051c2478142028f3864d1e2f0626d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::outputMax",
+      "id": "514ec628f04d4414be3516ef776f2d7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::outputMin",
+      "id": "54acbf79c643464ba0fe796dad4d7237",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::quality",
+      "id": "febbc7b1adb24fe09435e50f62f86629",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::repeatSize",
+      "id": "8aef14885087460eb52eda4159ae6239",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::scale",
+      "id": "865bf518eb2f4256b0488be6b00fcabf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::tiling",
+      "id": "f3ef9ea55d1848beb87ab89131a4e8b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::turbulence",
+      "id": "edfcc6688a11458f851a448dde091c20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::NoiseProperties::worldPositionOriginType",
+      "id": "2b48815ceffe49029af863134e600dcb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ObjectPositionProperties::originType",
+      "id": "941b4da703834d01b0aef42ee61c54c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::OperatorInput::constValue",
+      "id": "86132e2c08c8433489e5f8f06ae5a120",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::OperatorProperties::dynamicInputs",
+      "id": "a38dd13ac21d4fb9897be6b56bcd96b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::OperatorProperties::operatorKind",
+      "id": "8d1d641df2984cd3b3811fe15501a9ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::PannerProperties::constCoordinate",
+      "id": "228d190e83764a3ea9fcb8fdf849871c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::PannerProperties::fractionalPart",
+      "id": "f5ec310599a44843924fdcb4eb57b736",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::PannerProperties::speedX",
+      "id": "013191ff84b546c9b06d2dd2a6e6fafa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterChannelNames::a",
+      "id": "d58ff3f1e0c847b28526266c00ba52c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterChannelNames::b",
+      "id": "903f283da20a4bdba74e028638f88a3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterChannelNames::g",
+      "id": "ad14d043eade4262b416716a1193daf9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterChannelNames::r",
+      "id": "b15e46dee9c44a0ea7b8dc8f5410418e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionTransformProperties::collection",
+      "id": "7c123d629f4f438faa2087907c5dd67c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionTransformProperties::parameterName",
+      "id": "7a76ea847dc24bb49a038474b30042e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionTransformProperties::transformType",
+      "id": "8fb43614c43c4f40b50b6c1cc39aac02",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionValueProperties::collection",
+      "id": "04461ce978754f6e8643e4e9ff676049",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionValueProperties::group",
+      "id": "aa5b067b432b4c09bf3e870dbdfbf2f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionValueProperties::parameterId",
+      "id": "7d8f663051da4ccb86434340892d7304",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionValueProperties::parameterName",
+      "id": "eca7c66017ac442cab3dc56aed77364f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParameterCollectionValueProperties::sortPriority",
+      "id": "4b72329231f14f82b56c4d699ce1add6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::ParameterKey::ownerAssetId",
       "id": "72c57febddcd4c91bb5f91cb0930d021",
       "aliases": [],
@@ -936,6 +2434,335 @@
       "kind": "field",
       "name": "rocks::material::ParameterScope::layer",
       "id": "1d95b0cf4cea4925857093337be652f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticlePositionProperties::originType",
+      "id": "f701106f1cf44edb843117ecb9399425",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::automaticViewMipBias",
+      "id": "1082c9cd39d248e1a357f5d1c5374e13",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::blend",
+      "id": "6426f850c3d74b558b2acc2fa63bff2b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::channelNames",
+      "id": "958bfee359aa47e18a953307ecdc020a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::constCoordinate",
+      "id": "d668bb4848fb478f952bf4393c2b2ab1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::constMipValue",
+      "id": "64097b214ad743339ecff47bac0b8d54",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::gatherMode",
+      "id": "10ca7cc22fb0436087bc1d60161ff083",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::isDefaultMeshpaintTexture",
+      "id": "f298afe71241420aa56fb0f98f602be1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::mipValueMode",
+      "id": "c0c26e26188647a9b8dbaadd8a3a577b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::samplerSource",
+      "id": "a9c4af1b0ff940c487a43284f0e40612",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::samplerType",
+      "id": "07211bd9dd0a4ce5bf18f9142deafcc0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ParticleSubUvProperties::texture",
+      "id": "aa369b890f2a4ecaa254cfb612f69259",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::PerInstanceCustomData3Properties::dataIndex",
+      "id": "26ed1fb44d27468b8bfd838347834273",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::PerInstanceCustomDataProperties::dataIndex",
+      "id": "20ecee76aae848f9a0f055b2af494c26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ReflectionVectorProperties::normalizeCustomWorldNormal",
+      "id": "4d054f4ad5074bca8ef709ba1f9aea94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RotateAboutAxisProperties::period",
+      "id": "c76d18bdf9484563a3b07fc379cdc66d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RotatorProperties::centerX",
+      "id": "affed0ec394743d59cb01633f2b26037",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RotatorProperties::centerY",
+      "id": "61eb247474fe4d64a2e33c75e92287e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RotatorProperties::constCoordinate",
+      "id": "e7b1b78b80e04c12886f38762ce81092",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RotatorProperties::speed",
+      "id": "bd5a35ead34b44d3966094366736148e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::adaptive",
+      "id": "2d87a61610184df2b5b1f1835292c56e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::enableFeedback",
+      "id": "3ce33f14fe0245c18dd3a87c2a35ac3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::group",
+      "id": "5643453d757645829b87d4a4f5695dc0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::materialType",
+      "id": "3b484fb9ca8c484793e70c9ad389decf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::mipValueMode",
+      "id": "e0b4e00652e64359bef790babcc9a1ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::parameterId",
+      "id": "b60b44641347440d90444fc4ce30d472",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::parameterName",
+      "id": "4f12ead8acc341f396c3b00bd44d6a02",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::singlePhysicalSpace",
+      "id": "c22324d876a94faabc685f0151752859",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::sortPriority",
+      "id": "9043691675bf429bbf47d56b98e4b4d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::textureAddressMode",
+      "id": "600f8e3c382d4a869c70381cbc7035b5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::virtualTexture",
+      "id": "516784b8e7a448fc8806ccbf4592a36f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::worldPositionOriginType",
+      "id": "0f90c48f78644202a1e2a1906427fbdc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::adaptive",
+      "id": "b2f0a66e7d4a4213aee65b5c82796620",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::enableFeedback",
+      "id": "036c1f2c82154261aeb662a84b9f5e9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::materialType",
+      "id": "a21784f9e3c64399ab31bee0098e088c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::mipValueMode",
+      "id": "be81b53f0d394820bc7986d8e618a7a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::singlePhysicalSpace",
+      "id": "ae309a2a242a4a5e912ae234a2c9c8c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::textureAddressMode",
+      "id": "112a791477a14a2ea8b193e4595ef507",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::virtualTexture",
+      "id": "80836e2b3f0441f689111b89e44acc59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties::worldPositionOriginType",
+      "id": "7d8e40f850454a39b015d03cfe7006dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplePhysicsIntegerFieldProperties::fieldTarget",
+      "id": "0e66e8c38f0547a3b3a5dca050edb757",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplePhysicsIntegerFieldProperties::worldPositionOriginType",
+      "id": "c917a799481749b9a094876eea2e4dd9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplePhysicsScalarFieldProperties::fieldTarget",
+      "id": "8910db83dd1e4b0fa2900fda03e4cb6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplePhysicsScalarFieldProperties::worldPositionOriginType",
+      "id": "2d81b1ccd5554f199045b8659351b2a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplePhysicsVectorFieldProperties::fieldTarget",
+      "id": "582029a1b5b74f898f02d2893c13430b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplePhysicsVectorFieldProperties::worldPositionOriginType",
+      "id": "bf67975cb9b345ce997fbebc6fa31209",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SamplerBudgetSwitchProperties::requiredSamplers",
+      "id": "1bf8eb67cecb43ac9203596bf6e8ff32",
       "aliases": [],
       "retired": false
     },
@@ -990,6 +2817,398 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::controlType",
+      "id": "b0a7bd1c4c374dd8b5035883c21e83b5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::defaultValue",
+      "id": "2eeceb4f9f2a4f49b2d1159f9b060de6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::enumeration",
+      "id": "c57eee32e95747c6be85bdfeb24d03a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::enumerationIndex",
+      "id": "b15c192e23004c36a87df65905ef2eb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::group",
+      "id": "e6ec608ed3654836b8894041f6adde0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::parameterId",
+      "id": "f247e30dc6fc44179f2dade73e65bca8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::parameterName",
+      "id": "830807cca26d449fb60b95d93dc6d404",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::primitiveDataIndex",
+      "id": "61b6a330694c49ec83e24bf7d54fa9b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::sliderMax",
+      "id": "f35263e556b34f348c08e68f70a10ec5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::sliderMin",
+      "id": "0f226b909de9476191014cbe7704e559",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::sortPriority",
+      "id": "b90ea43b540144029bf81e114b554612",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::useCustomPrimitiveData",
+      "id": "7f6c91ed0ede47039f53e2e1d6342363",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SceneColorProperties::inputMode",
+      "id": "f4b9357577af40809166f76f577e0928",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SceneDepthProperties::inputMode",
+      "id": "23ddc14988b24275ae30e641b3ae1948",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SceneDepthWithoutWaterProperties::fallbackDepth",
+      "id": "8a0689a8710f4f469dc25991267e9361",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SceneDepthWithoutWaterProperties::inputMode",
+      "id": "0ab3afa9a45e46ee9ab5acb4dc629c8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SceneTextureProperties::filtered",
+      "id": "485fbac43b4245c481112b124faed197",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SceneTextureProperties::sceneTextureId",
+      "id": "08bf79a67d3a46b992806df7d65787f1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SetAttributesProperties::attributeSetTypes",
+      "id": "a9ccbfdc80c14df898e55bc6c06c0172",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ShadingModelProperties::shadingModel",
+      "id": "174b5c23b3d14d1e97d7dcb556f9eb43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SineProperties::period",
+      "id": "d8a614d16fea4ccf80932ef9d6a9eec5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SkyAtmosphereAerialPerspectiveProperties::worldPositionOriginType",
+      "id": "62ff08c50a5741e4bc302d8b7f9acdde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SkyAtmosphereLightDirectionProperties::lightIndex",
+      "id": "ef06b8dbfca5452d8bdd9435fb7b346a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SkyAtmosphereLightDiskLuminanceProperties::lightIndex",
+      "id": "7fcd8de7ba8848038c10f9b7d4224e05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SkyAtmosphereLightIlluminanceOnGroundProperties::lightIndex",
+      "id": "b44c2a68d9c04ab39a4b8c2d8f4f7d03",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SkyAtmosphereLightIlluminanceProperties::lightIndex",
+      "id": "3dc25da8b0194188953a25489c47e1da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SkyAtmosphereLightIlluminanceProperties::worldPositionOriginType",
+      "id": "40c0a3f7b0ec4b85ae917cfacdfc2874",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SobolProperties::constSeed",
+      "id": "1aa091c0e2ac4faa9da076a3939d7d49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::group",
+      "id": "f5ac3b364aa6472dad6523a62f3b1e5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::parameterId",
+      "id": "6d6098df0baa40e086cb63a97fd5e63f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::parameterName",
+      "id": "1213c266e3de44119779e8e32e49e98f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::sortPriority",
+      "id": "208862eccadb43638320891d50743e2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::sparseVolumeTexture",
+      "id": "d4505679662746c3a471f205b8a10447",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectProperties::sparseVolumeTexture",
+      "id": "3dbfcfabe39e4c988f2a91ed58b43f2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::constMipValue",
+      "id": "fd4099a3068c4d5eb5dba8e6a1716e55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::group",
+      "id": "053350f9280c4b7a98a808fca7325173",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::mipValueMode",
+      "id": "94d33c30f1c142bd90a0cf36df2bacd3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::parameterId",
+      "id": "d01ce350526743c5a645da5eff01af04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::parameterName",
+      "id": "1d49b50437d84990b688dfe392447555",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::samplerSource",
+      "id": "30186b05c0064facb64a81f89766f7f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::sortPriority",
+      "id": "b25f108c47cd48ef8a502430c9960cef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::sparseVolumeTexture",
+      "id": "ee2b988c629840b396c2bffdb1da8383",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleProperties::constMipValue",
+      "id": "16eea6de0a504b76a327b742d969488d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleProperties::mipValueMode",
+      "id": "84784efee11b47008153460f7b61450e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleProperties::samplerSource",
+      "id": "3b2a81308ef7483ea705a525ff76e4c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleProperties::sparseVolumeTexture",
+      "id": "42ba5b7109914e0b90e57fc8505ba6fd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SpeedTreeProperties::accurateWindVelocities",
+      "id": "ad0176852e334e62896cd66976b6ed1e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SpeedTreeProperties::geometryType",
+      "id": "bf128fef09804811a8c0a6e2d6271bde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SpeedTreeProperties::lodType",
+      "id": "ed323bb276004c5480f3d53973d39961",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SpeedTreeProperties::windType",
+      "id": "d4fb0824feee45e2847e922a363a2b21",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticBoolParameterProperties::defaultValue",
+      "id": "d7f6eb63785e4366b4de7b82633dfd8d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticBoolParameterProperties::group",
+      "id": "ba4343521ff144629be8bdbaea6327bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticBoolParameterProperties::parameterId",
+      "id": "fc61d6b350ab4eea93d2f10a0bab5ef0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticBoolParameterProperties::parameterName",
+      "id": "7716d872d47843adb9df54d7e6fd818f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticBoolParameterProperties::sortPriority",
+      "id": "4999a98d2bb24d96a173f915bb006a3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticBoolProperties::value",
+      "id": "e1162d3239f84da98b0f30868c278655",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::StaticComponentMaskOverride::a",
       "id": "53ec9b0f18994c32a4d691e882bc51e3",
       "aliases": [],
@@ -1025,6 +3244,62 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::defaultA",
+      "id": "8c5e5b6c5e5c4401876437ab6bd58928",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::defaultB",
+      "id": "df571f3d43ee42deb93dc3db95b676f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::defaultG",
+      "id": "c42d2414d15a4b45ac64fa9e187f43f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::defaultR",
+      "id": "5c3d3ef498664ef88b536ccf1b26945c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::group",
+      "id": "47a3f39bd6ed4185b391f7e14f983cd2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::parameterId",
+      "id": "a5cc901c28e4425dbfe8018ef4a517af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::parameterName",
+      "id": "73fcbfcd8c854ad8a94bd4698df3ac9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::sortPriority",
+      "id": "24bb4c420419407a92bee35821f046f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::StaticEnumOverride::key",
       "id": "5d0cb040b309434287b1548c134635f7",
       "aliases": [],
@@ -1048,6 +3323,1091 @@
       "kind": "field",
       "name": "rocks::material::StaticSwitchOverride::value",
       "id": "e61f7e76a38441c69c6aeb3bf11c14d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchParameterProperties::defaultValue",
+      "id": "9e409b9379a949568808d6b18ae3c04d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchParameterProperties::group",
+      "id": "81881701d4544d5a877f31accda686ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchParameterProperties::parameterId",
+      "id": "68e56e72015747e38dc849ab8b9da252",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchParameterProperties::parameterName",
+      "id": "535df57f9d4544e7985438a987372cf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchParameterProperties::sortPriority",
+      "id": "3f16185f24dc4bff98ba107b036ce923",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchProperties::defaultValue",
+      "id": "37c6cecf5cee448d97bfcba46c039cfa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceAddProperties::useParameterBlending",
+      "id": "61917300a58e4396be687a548a35ec94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceEyeProperties::subsurfaceProfile",
+      "id": "43e78237b982423e97fda024353f23cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceFromAttributesProperties::shadingModelOverride",
+      "id": "47f8b157ce6444e4992907e67adbb2de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceFromAttributesProperties::subsurfaceProfile",
+      "id": "c53ad489714545b89e888d30b4f0cdee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceFromShadingModelProperties::shadingModelOverride",
+      "id": "7ac08786fee840098492fb331459ebda",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceFromShadingModelProperties::subsurfaceProfile",
+      "id": "2f0f97c3c4dd4d3ba6b517f87a7f4513",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceHorizontalMixProperties::useParameterBlending",
+      "id": "f4988056943e4943b94b0f4a45051817",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceSelectProperties::threshold",
+      "id": "13eac00f41574b2f84703d72d14df4b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceSlabProperties::specularProfile",
+      "id": "2cf1ba1a1ad8422992a3c01555bad622",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceSlabProperties::subSurfaceType",
+      "id": "1ba97a5e343e42efaddb96119231c022",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceSlabProperties::subsurfaceProfile",
+      "id": "c2ab4cfa2ac84834992f0d8ac005d302",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceToonProperties::toonProfile",
+      "id": "390b1fb41ec54fe88ed5f8707eeba282",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SurfaceVerticalLayerProperties::useParameterBlending",
+      "id": "2f67fd9f2fff4cdcaa0ba61d1f4ac96c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SwitchInput::inputName",
+      "id": "ce52d650925343078d68377c7c04a2ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SwitchProperties::description",
+      "id": "12254f34ef8848789f65900476518ba7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SwitchProperties::inputs",
+      "id": "8af92bbac1724697aa3953d6fbdf2303",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TangentProperties::period",
+      "id": "62066a4c1c22447db141aa8cd4531f3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TemporalSobolProperties::constSeed",
+      "id": "e092cc268a524cd28ad6ce90568aa0ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCollectionParameterProperties::group",
+      "id": "8bcf7442904342b8b5226d68de2e8bf8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCollectionParameterProperties::parameterId",
+      "id": "105e1f759dd54c2096a8fffaf12d94e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCollectionParameterProperties::parameterName",
+      "id": "5c2fccc03d5a4e1b8695cb76da5f00d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCollectionParameterProperties::sortPriority",
+      "id": "15a3ebed2c834a3dab10c50bbd00820d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCollectionParameterProperties::textureCollection",
+      "id": "cabba7976baa497c92774f759e3ed9a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCollectionProperties::textureCollection",
+      "id": "e89037d6d5364607b91ffd7da87d1294",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCoordinateProperties::coordinateIndex",
+      "id": "4cf2364b174642eba8cb1b9b4f1d4977",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCoordinateProperties::uTiling",
+      "id": "794205ba7be94b9c82a0cfd369eb02fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCoordinateProperties::unMirrorU",
+      "id": "50465a49e75b49f0b524334a4f37d1bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCoordinateProperties::unMirrorV",
+      "id": "e964815e6ad748d6b04cc1f12185b882",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureCoordinateProperties::vTiling",
+      "id": "6f3a453eb72243e38796e3d6d38ac01d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectFromCollectionProperties::textureCollectionObject",
+      "id": "5392d9dcdd7144c1b9cb8f98e8995252",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectFromCollectionProperties::textureType",
+      "id": "81c1a10282e0406682f0f2634b2e283b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::channelNames",
+      "id": "e498680020504a0588131add0b7af6fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::group",
+      "id": "cfe45c0bf0a544d39a3045cff14c91a9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::parameterId",
+      "id": "628227d0674544cf9c0f836c0cc3bfc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::parameterName",
+      "id": "9d936beb87aa45f3852c15888348c660",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::samplerType",
+      "id": "125b0fe6db32452496b9162d687a48c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::sortPriority",
+      "id": "083add43eb6e4e61a3f90984f56f508a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::texture",
+      "id": "b46a2d579a7b446bb69e766d04950b0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectProperties::isDefaultMeshpaintTexture",
+      "id": "5e22629cae4f4de6b2f25f2a93de2b11",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectProperties::samplerType",
+      "id": "db98e412fee244e29361369eee7fb89d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectProperties::texture",
+      "id": "a10543558a4f4d43a922720f5284fdda",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TexturePropertyProperties::property",
+      "id": "84a8cbfc0ad94c5d9500937cb85a04bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::automaticViewMipBias",
+      "id": "04cd052f2dbe4ed7affed515628a60ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::channelNames",
+      "id": "959817465f574fceb4bab36a4e9d64f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::constCoordinate",
+      "id": "670797b1fd054ca39866cf50f0e01def",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::constMipValue",
+      "id": "b72f7e94b27840a79bfa754660240d59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::gatherMode",
+      "id": "799ea34da5d04e0f856235d00d3d3b44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::group",
+      "id": "191a8b85bce543258e4508e1380e4361",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::isDefaultMeshpaintTexture",
+      "id": "6c4fee67cdfb4289bd9ac5d8724a059a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::mipValueMode",
+      "id": "9b331d001c9d4815a2cfe7001fddad74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::parameterId",
+      "id": "2b262df7b0d24b018b46df7a88600adf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::parameterName",
+      "id": "8cf68d2da4b54fd7ba7a5d37823fb55a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::samplerSource",
+      "id": "3d91645e473a458fa62b517fe729b7f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::samplerType",
+      "id": "38c44d5808a24d64a2def3e007f20097",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::sortPriority",
+      "id": "114210b5db8e4db2a92447720f52806c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::texture",
+      "id": "719c581a92aa4e819df1fa13313babc6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::automaticViewMipBias",
+      "id": "cf1923136e284a8ab4792e1fa5fed2f4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::channelNames",
+      "id": "f1c0b0c3a9a441a9967ce0cea2e1df62",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::constCoordinate",
+      "id": "a34c2bacb0fc487c855bdaf163fd9efa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::constMipValue",
+      "id": "c21a794ba8af495db6c0b4df3f4e030b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::gatherMode",
+      "id": "24697444c9c14cc295b71e19cdc2f8c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::group",
+      "id": "8a35f0db48d94ad0b316c71d48901c5a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::isDefaultMeshpaintTexture",
+      "id": "bc6818a543234b859bb27a0a8039fc9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::mipValueMode",
+      "id": "9333e192fb87447db7f49747080ef3f4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::parameterId",
+      "id": "5e6b10467ce140f693c090b7f36ae587",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::parameterName",
+      "id": "936b22382c2049dbbff92f9609bae7e4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::samplerSource",
+      "id": "62366236928247ef8927a41da6954ed7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::samplerType",
+      "id": "07e3d07562f74524a64d37fe169e172a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::sortPriority",
+      "id": "2c53ef426ee94098a6f65bbb19aca724",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::texture",
+      "id": "9987d1760bb546e5a224c0674d555621",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::automaticViewMipBias",
+      "id": "b4ce5cb67c9448a7893d541dc2beb8b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::channelNames",
+      "id": "a34899f0a81f46939fc3ef04e14918b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::constCoordinate",
+      "id": "f732ee3bb9df40cfb91187b943853ca5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::constMipValue",
+      "id": "79add11c78fe4b71b7a66adba8cd6a63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::gatherMode",
+      "id": "43b979f48c1f4f5e9f1b7307858a577e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::group",
+      "id": "c593460607264a0fa984af9eefb0d224",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::isDefaultMeshpaintTexture",
+      "id": "69fcbaf080fa4f22af22c893d9e09304",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::mipValueMode",
+      "id": "b6e363a6f85b42d2807a0391e0d606a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::parameterId",
+      "id": "f2ae5bfd6729498eab55edeb5a0c43eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::parameterName",
+      "id": "e8d04009bd10409f8045db4a64b23cd0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::samplerSource",
+      "id": "6a0c6503e1a2429585def520b113aca5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::samplerType",
+      "id": "d39c6f9a92b744febe77523e86ae5c5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::sortPriority",
+      "id": "2dcb1a4b7c6040f481701a305c636649",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::texture",
+      "id": "057f279b916c4f88bf12017ad5479f66",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::automaticViewMipBias",
+      "id": "b8575ead2bcc48578e7b2a755eb07e41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::channelNames",
+      "id": "041c50e2d7c94664be64d44ba748e463",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::constCoordinate",
+      "id": "2a152ede9e994e9f8728b27e9026f69d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::constMipValue",
+      "id": "b72fc61a270240b79befff4aedd4b485",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::gatherMode",
+      "id": "5b06487703714739b4ccd6e5a75577a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::group",
+      "id": "115636a64d3340089fb22bc920c454ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::isDefaultMeshpaintTexture",
+      "id": "bb8f90c30ecc493ba14ecfdf34d18f91",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::mipValueMode",
+      "id": "169d1cae0717483cb6f49970f45b8580",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::parameterId",
+      "id": "2047c38f13fb47068739f59a118343e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::parameterName",
+      "id": "e59e12dcde3a4e0ab77046fdef84f364",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::samplerSource",
+      "id": "d0ec7c4263a6411ba391dc93cfd16407",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::samplerType",
+      "id": "081fa5dbf4c9426d926fcc8e7cf8edf9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::sortPriority",
+      "id": "f8f9020fe28d4f70ab2ac99efdd0c2d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::texture",
+      "id": "b1b9580937754cb5bd2fa7e8cc1b98b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::automaticViewMipBias",
+      "id": "e93b48bee6b64ea0a3e7bb10e6702e97",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::blend",
+      "id": "89f51c08f9ef410a848f9b617b60c431",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::channelNames",
+      "id": "ba11efc29b1741b8b2fcbe06e24c0f62",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::constCoordinate",
+      "id": "7bdf7bcf38314c05980a51220f230f1a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::constMipValue",
+      "id": "e192cf8f3a4340cdb53d6b55fe8663ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::gatherMode",
+      "id": "2142c3a6e4b44477b2a00cb2232a1078",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::group",
+      "id": "be886e1b1d7c4e2893d251f4cb0a6868",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::isDefaultMeshpaintTexture",
+      "id": "ee52dab00bbf42c784a747000769f980",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::mipValueMode",
+      "id": "597d19fca907402aaba5c20813518375",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::parameterId",
+      "id": "655ccf9ecb494ea6954744730ec38e53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::parameterName",
+      "id": "60356895c82a41f8a1b0d10152a5280b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::samplerSource",
+      "id": "e128fc7b63c645fbb626f7be7009a163",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::samplerType",
+      "id": "2f59051dfc5547c3bb667e8d3b935b70",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::sortPriority",
+      "id": "9510b3abf1a242c99bd999705d56b58d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::texture",
+      "id": "1d327867e4004caf9fd7517414ee7764",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::automaticViewMipBias",
+      "id": "10a5b5cacd14422b800213c05c0b0fa1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::channelNames",
+      "id": "7a059bf6cb744c4cb65467fcd3e8c899",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::constCoordinate",
+      "id": "a78958d20fbf4901ae69cf45abed05ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::constMipValue",
+      "id": "8077d556483542a298419d7ca4c9e685",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::gatherMode",
+      "id": "5b21d6743cee4ec78cae40f58f82e84c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::group",
+      "id": "ccd017685fb04c4b919f578d77e53425",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::isDefaultMeshpaintTexture",
+      "id": "edc8eee9cd4e473d8f6df262ade6db26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::mipValueMode",
+      "id": "103359253cac42ce93318449f9aa9a03",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::parameterId",
+      "id": "b0d22b74665d4996a6acc4490894fb1e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::parameterName",
+      "id": "3208220442d94b47b36f1621d5a04ccb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::samplerSource",
+      "id": "49c6fdd9bce448b4b570d2d2cd4d2a43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::samplerType",
+      "id": "8e31d58cf1cb4afea44662eadde94b28",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::sortPriority",
+      "id": "6f9435a0e6454225a468c0bf8e17056f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::texture",
+      "id": "c49658f001244db88bce7cb22fccae5d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::automaticViewMipBias",
+      "id": "926e1983e573406c9c70255409f51597",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::channelNames",
+      "id": "301539d8959042f4858869bffedec7a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::constCoordinate",
+      "id": "a4814fb941164eb8bcdb7ca654f880a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::constMipValue",
+      "id": "9bfdc18c70394b3f8835a117d792b49f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::gatherMode",
+      "id": "0fa7c451030940da831f7f63488fc613",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::isDefaultMeshpaintTexture",
+      "id": "9cdbd36244754950aa25047f7947c19d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::mipValueMode",
+      "id": "99b75c3660f34d8db436ace20a661efa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::samplerSource",
+      "id": "c1bf71b2bc7941f99c57fecc61db79f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::samplerType",
+      "id": "7af9bcb52d3942909a2e3eeb9d21a925",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleProperties::texture",
+      "id": "da4ba454af2e4491b4d429d54a51100b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TimeProperties::ignorePause",
+      "id": "3047d315f8614befbaaede31a2b1ebfc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TimeProperties::override_Period",
+      "id": "6a597423e7784b449f96e706d6603f50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TimeProperties::period",
+      "id": "be05304dd99d4d2cbf14ec42c35a70e4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TransformPositionProperties::constFirstPersonInterpolationAlpha",
+      "id": "b4bad080d43349d686b1ddc4b9e68d87",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TransformPositionProperties::constPeriodicWorldTileSize",
+      "id": "5ae755a8c23b42fba38c9de727798884",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TransformPositionProperties::transformSourceType",
+      "id": "2d36dc28ec174f388fd7fd013875960b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TransformPositionProperties::transformType",
+      "id": "3c0e654d71f64c92adc34180a85e9dae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TransformVectorProperties::transformSourceType",
+      "id": "30552b8ae1394497937fb88f921bbd15",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TransformVectorProperties::transformType",
+      "id": "f20992af8d6045f5aae17a3c2da8a41a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::UserSceneTextureProperties::clamped",
+      "id": "9f092a382eee4f02a8cf35e90af47f1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::UserSceneTextureProperties::filtered",
+      "id": "3671bd65a48541769a7635dc6582f71e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::UserSceneTextureProperties::userSceneTexture",
+      "id": "22e2292a0ef841a09c8c5c6f01c08242",
       "aliases": [],
       "retired": false
     },
@@ -1088,6 +4448,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::VectorNoiseProperties::noiseFunction",
+      "id": "5caad92cb6fe40bba326890c02cc33be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorNoiseProperties::quality",
+      "id": "26ef912a156746f6bda73af7fc0a7061",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorNoiseProperties::tileSize",
+      "id": "5d07db2ac4b14d45bdbd5e347f3557de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorNoiseProperties::tiling",
+      "id": "834f91b26679438caa199b186d25465c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorNoiseProperties::worldPositionOriginType",
+      "id": "12a24d420df448bc9f709cb373c58571",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::VectorParameterOverride::key",
       "id": "4d8f147563284519ac8ba599c358b517",
       "aliases": [],
@@ -1102,8 +4497,183 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::channelNames",
+      "id": "3b3c99cf2823410e92d8368ac13fe7a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::defaultValue",
+      "id": "58db7b513d674efbbd385d6df7f694a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::group",
+      "id": "46c5ee09f4c64096b0d1f909acdfb8ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::parameterId",
+      "id": "661ecde21a79478590794db8cb4ca1a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::parameterName",
+      "id": "df96e83068d941b488a705909a14c2f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::primitiveDataIndex",
+      "id": "25a70619ff9a4b4ba8090afc1abd12d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::sortPriority",
+      "id": "a872e37491124b158c28e8ef9199f445",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::useCustomPrimitiveData",
+      "id": "6f74048807934e8596027638e734338a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::VertexInputUsage::vertexInputs",
       "id": "9be8a7aa57c14e4dbbdaf88a70751975",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ViewPropertyProperties::property",
+      "id": "004fe57d70324608aca258bdee96befd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::clampMultiScatteringContribution",
+      "id": "efb84564e9f04ab9a7a31a2d2af9a29b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::constMultiScatteringContribution",
+      "id": "4ed43f96f2db4f748252f9717b89b3ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::constMultiScatteringEccentricity",
+      "id": "a28ac75a79684e66b9a13ea35976bb49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::constMultiScatteringOcclusion",
+      "id": "954e255a44634b638cef27d361ba6a97",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::constPhaseG",
+      "id": "83bafaa0a520446f982f944371e383f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::constPhaseG2",
+      "id": "1b612fb0ba4c448b9e549988d8befd6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::grayScaleMaterial",
+      "id": "d23945359c014195bced3071b65241fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::groundContribution",
+      "id": "7c4b890a22454405b3b361db49c20c2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::multiScatteringApproximationOctaveCount",
+      "id": "f7cacdfc17d44e998ea9963b8789686a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::perSamplePhaseEvaluation",
+      "id": "f55bb7c9de174fba805f3d8caa200bc0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties::rayMarchVolumeShadow",
+      "id": "cb9c530977b34a339e7178b2270d20d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::WorldPositionProperties::worldPositionShaderOffset",
+      "id": "d939ca6dcbb34600af29186fec22b534",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ActorPositionProperties",
+      "id": "9edc21381da64771bad60ea6e36fc8b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::AggregateKind",
+      "id": "28f4043854e34a449525c727931f9c85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::AggregateProperties",
+      "id": "fe7f5d4f1e4f4ab8a0e1bb20c4674c22",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::AntialiasedTextureMaskProperties",
+      "id": "4719fd4c02dd4424bef52b70eda2c325",
       "aliases": [],
       "retired": false
     },
@@ -1116,8 +4686,260 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::AttributeLayersProperties",
+      "id": "812719948c72429f8f067d1c14aa88f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::BlendAttributesProperties",
+      "id": "bfbe7c87db744b4ab2be217090c65b03",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::BlendInputRelevance",
+      "id": "fe18925e2bb64020a1ad7a17e5e42cb2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::BlendProperties",
+      "id": "19b3b1a2d81642b88c952a17936b72cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::BlendableLocation",
       "id": "b700e992be344f93aefbabb012464312",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::BoundsProperties",
+      "id": "60ba8df94c2245f8b4a95df87b784d94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::BoundsType",
+      "id": "d4190959a024430eae7e6c23f33c3e91",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::BumpOffsetProperties",
+      "id": "c5a545442aa644d88fed2832fe3f0d54",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ChannelMaskParameterColor",
+      "id": "d91cebc1880445dcb35b6eb3789feb09",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ChannelMaskParameterProperties",
+      "id": "916d750fdd16411c96b09069a07364f4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ClampMode",
+      "id": "5f703b85f83d41cba3b89da1deb8fe34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ClampProperties",
+      "id": "119f62d71a634698bb351c6f4af5765c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CollectionTransformType",
+      "id": "81930a7cd413448cb2919d758265e7e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ColorRampProperties",
+      "id": "959de1042ef24dd48772b3730044bdec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ComponentMaskProperties",
+      "id": "da3122ad785f4798811322045ef95b4f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::Constant2Properties",
+      "id": "85c8d3bb14314b5ea586eb3b4d7c69b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::Constant3Properties",
+      "id": "ad23f1ece2ba46c29ddfa32c4cd93eb0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::Constant4Properties",
+      "id": "e69b21c4ffb24d909cd6dec5d9a3be25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConstantBiasScaleProperties",
+      "id": "bf51b75aac234e5ea0e5ee4230530fc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConstantDoubleProperties",
+      "id": "59b051a86a2248bf80f36d4f98038907",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConstantProperties",
+      "id": "9a3a849f655443d7bb85117e2879b47b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConvertInput",
+      "id": "de6cb0a9065b47d9858eea8ab5208adb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConvertMapping",
+      "id": "9cf74ae54dee4533b946507e19cb4a7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConvertOutput",
+      "id": "49a32a55ee1a4c40a5ae0acf63da173b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConvertProperties",
+      "id": "b986cce5cda44cbe801f38cc4d5fef3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ConvertValueType",
+      "id": "576745f062714ec7ba482be9c5145a40",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CosineProperties",
+      "id": "b7427aa228fd4220a8894a030331c87f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CurveAtlasRowParameterProperties",
+      "id": "7eb314b1430a4603bf362ae387f6b9cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CustomClipInstruction",
+      "id": "f7d3df97f774479e8c89bc9d2cb5f205",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CustomDefine",
+      "id": "0c3aed65438e46109bb63a903b1f9c85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CustomHlslProperties",
+      "id": "e886744d1a9a42b9931b2ed276bb46e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CustomInput",
+      "id": "908e02412436460584502538d30035b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CustomOutput",
+      "id": "4b2e25dc3d1543a085428308db6096e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::CustomOutputType",
+      "id": "151fd6259b2345a1ae664d249cdb18aa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DecalBufferTextureId",
+      "id": "8c9afd551c8f48209873cddb2076e274",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DecalBufferTextureProperties",
+      "id": "34b9b764d7294b70ad830942c95c2214",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DecalMipmapLevelProperties",
+      "id": "d4916208225d43abae2498bc4a5b353d",
       "aliases": [],
       "retired": false
     },
@@ -1130,8 +4952,57 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::DepthOfFieldFunctionProperties",
+      "id": "51e8d059baca4fb8b1ac4f631b18bede",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DepthOfFieldFunctionValue",
+      "id": "62c712ce4b59457f9a4e564d0dfe656d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DesaturationProperties",
+      "id": "e76ed06b1d5b4080acf58e4eccf75e0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DistanceFieldApproxAoProperties",
+      "id": "1ee09402dce1410ea43d418f9f9b0b67",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DistanceFieldGradientProperties",
+      "id": "aa443446237c43cfb02ce140474b552d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DistanceToNearestSurfaceProperties",
+      "id": "8926242accca45d28f97bfdd3e00d927",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::DoubleVectorParameterOverride",
       "id": "3d49a398ce9c4e7b88b045c34a96e1d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::DoubleVectorParameterProperties",
+      "id": "6749eed1bfe04fc695831fcf2dc270ef",
       "aliases": [],
       "retired": false
     },
@@ -1144,6 +5015,62 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::DynamicParameterProperties",
+      "id": "ba292eae6e8240c69b5fff35e5b892a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::EvaluatePhysicsIntegerFieldProperties",
+      "id": "c2c5640bda444c5c9e64a6cb66cd0c15",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::EvaluatePhysicsScalarFieldProperties",
+      "id": "8be01f9ae2ee431cb8a6e7efd9531af2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::EvaluatePhysicsVectorFieldProperties",
+      "id": "75ab6bab333940988103c53bf679ab8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ExposedTextureProperty",
+      "id": "027069ac0e20459ea9b8b391b924356c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ExposedViewProperty",
+      "id": "4a73a28f62ed48d5a3f1698aee85dcfa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FloatToIntMode",
+      "id": "b1a7c6b0067b4fe19d8d76fb14a4d94e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FloatToUIntProperties",
+      "id": "7b7fd3d26a60463aa422999483ee8dc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::FontParameterOverride",
       "id": "09aec539b0dc4a5a92360e9edf80bb1a",
       "aliases": [],
@@ -1151,8 +5078,190 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::FontSampleParameterProperties",
+      "id": "53be1b6099534289a86921aa560268a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FontSampleProperties",
+      "id": "44de1d415e3146d88ec8912ee2548a01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FormatFactCondition",
+      "id": "fde70ca11ad04ba09b48cefe40b194fd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FormatFactInput",
+      "id": "641b284c6f71423bab7dd56c743e13b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FormatFactSwitchProperties",
+      "id": "a9ba1b84c2c04526b2d42a393cd57222",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FunctionCallInput",
+      "id": "f45308ca8f394587ba5373e85ce123d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FunctionCallOutput",
+      "id": "aa246a4a557c4413aac279cfa9c37030",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FunctionCallProperties",
+      "id": "0e7002f6101d458297e327164f77e82d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FunctionInputProperties",
+      "id": "35b03dfab4714483b7b88e14c09a24d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FunctionInputType",
+      "id": "9c584d77b8c94c1ab25c7d18c1ad83d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FunctionOutputProperties",
+      "id": "0c3b7894f78d4f95894562b27516a3d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::GetAttributesProperties",
+      "id": "e0b8c6e2d4af44e4893f2cab775cb55e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::HairAttributesProperties",
+      "id": "86971cde701947ccadfa63bc458d14bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::IfProperties",
+      "id": "03083eace4454fb38eea6be8ccddea3d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::InverseLinearInterpolateProperties",
+      "id": "df5ae75d483349d89ec3245c52538f55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LayerBlendMode",
+      "id": "0362c06418054eb3a4bf87aed9ca6923",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LayerOutputProperties",
+      "id": "c0252dfe5593489abe370d1d2a801ec3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LayerStackDefaults",
+      "id": "4d34149509b1469787132a9a973be960",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LayerStackInput",
+      "id": "3596b43a65a74820a9f3e0cbc73ceb99",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LayerStackLayer",
+      "id": "c80e9e6aa9274cffacf2d0cd023b8704",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LayerStackProperties",
+      "id": "8c88f49cc12b4465ad23e97c91e7a012",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LocalPositionOrigin",
+      "id": "a21affeece424eeaaa816af4201966f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::LocalPositionProperties",
+      "id": "63e83baa9b4b440e969041873233077d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialAssetReference",
       "id": "bf66c7a40e3c4d518748ae4a03eb168d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialAttributeBlend",
+      "id": "b0e7752414204ffa88d7e7c222b8c4ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialCacheAttribute",
+      "id": "1c3e7d88aa78433a8d175d7f18c0ed01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialCacheOutputProperties",
+      "id": "0d83840b55e140c2846850bfc9fbf581",
       "aliases": [],
       "retired": false
     },
@@ -1181,6 +5290,13 @@
       "kind": "type",
       "name": "rocks::material::MaterialPostProcessTraits",
       "id": "64cb9b67d60f4c38bee7a03ab49e9a56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialSampleProperties",
+      "id": "1c47acbcc9714389a8dc42d449bc7f37",
       "aliases": [],
       "retired": false
     },
@@ -1221,6 +5337,111 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::NamedRerouteDeclarationProperties",
+      "id": "024563a96ec645acad6eb3c4906f6377",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::NamedRerouteUsageProperties",
+      "id": "e2b95e3dd01f4eddad4d4b837ee10e59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::NeuralIndexType",
+      "id": "22d3fc010eef40adb095e20f94b8caa5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::NeuralNetworkInputProperties",
+      "id": "1fbbb35f5a9940f092e67aa07c8098c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::NeuralNetworkOutputProperties",
+      "id": "90996e70450449f78e0f1e7cc9109951",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::NoiseFunction",
+      "id": "ae016004f8da41959d1c201179a9d0d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::NoiseProperties",
+      "id": "9cee2d56b78f4544bfe16366868e32e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ObjectPositionProperties",
+      "id": "d0ff0f143e9b4ab3bfcb5ad0b9fc567e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::OperatorInput",
+      "id": "e1b2ed77a4ab4099a9c9f8bcdd6258b5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::OperatorKind",
+      "id": "0d1a07a1f32d4651ba7534dd7798c6a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::OperatorProperties",
+      "id": "b46d8e94d94f496d89ac4d7877e2f137",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PannerProperties",
+      "id": "e3b7f01ca0314275a95a77751f451030",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ParameterChannelNames",
+      "id": "400d153bf3c549668366f93651b0e9e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ParameterCollectionTransformProperties",
+      "id": "29e3e33b9fc5435abfd51633918b43e4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ParameterCollectionValueProperties",
+      "id": "c467bde947104861a5826bd61018f1eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::ParameterKey",
       "id": "c30170917b644c7092b33fdb47b390af",
       "aliases": [],
@@ -1242,8 +5463,85 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::ParticlePositionProperties",
+      "id": "b91186a135f041b3b564289a3e4da4fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ParticleSubUvProperties",
+      "id": "2fc85a74784b4ee187b7be6706fd5d41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PerInstanceCustomData3Properties",
+      "id": "3c0706dc8b004602970d536df8cb15f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PerInstanceCustomDataProperties",
+      "id": "e5096d8ec53447a79b5a311dd93094db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PhysicsFieldIntegerType",
+      "id": "4446f41282164fd8909c9b9e60560e43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PhysicsFieldScalarType",
+      "id": "26cfdf245fd5446681454276f4ac8772",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PhysicsFieldVectorType",
+      "id": "6788aaa65ab84246b5d75ab89c213b96",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::PixelDepthOffsetMode",
       "id": "66fd234a0a77422c90e672efc095b895",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PositionIncludedOffsets",
+      "id": "78fadbf2da8244b69f763ce46fcb5392",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PositionOrigin",
+      "id": "b41dc778e2b74a80b1fc875c0889d0ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PositionTransformSpace",
+      "id": "92bcd37ec246478b9be0ded7b33b45f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ReflectionVectorProperties",
+      "id": "f6d1ac607d7446a6820d2ee3088d1e39",
       "aliases": [],
       "retired": false
     },
@@ -1263,6 +5561,97 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::RotateAboutAxisProperties",
+      "id": "1d9e4b5dc500407aa5926549274ea348",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::RotatorProperties",
+      "id": "cdffad5cc54b4c95a668390251aecf36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::RuntimeVirtualTextureAddressMode",
+      "id": "9e7c127008e24f50bce667ffe9526f23",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::RuntimeVirtualTextureMaterialType",
+      "id": "c9e1d3177a9d4cd2aaefaebbcccf02e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::RuntimeVirtualTextureMipValueMode",
+      "id": "5811e544bba04688b305b71a494cc582",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties",
+      "id": "8b7e770922d94524bd3f94878e483bcc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::RuntimeVirtualTextureSampleProperties",
+      "id": "b9ed9c2df2b24c46876100af21af3b67",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SamplePhysicsIntegerFieldProperties",
+      "id": "af82783188ee415bab08552fa1a8d2a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SamplePhysicsScalarFieldProperties",
+      "id": "587ea4feec0f43c48cc27033a449d000",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SamplePhysicsVectorFieldProperties",
+      "id": "691d611540c04c5582fa37a680cdb748",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SamplerBudgetSwitchProperties",
+      "id": "6e87700843f54024b02cfd333e08ba40",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SamplerSourceMode",
+      "id": "fa62a84183b046658c446db6ab8b93ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SamplerType",
+      "id": "c2eda28ada144cc6b6580124af1f8487",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::ScalarCollectionBaseOverride",
       "id": "d0efbbd72e6b4c50b127d0f3b569cd6f",
       "aliases": [],
@@ -1277,8 +5666,71 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::ScalarParameterControlType",
+      "id": "8938cbfbbd3646ffb4e0ae9f9469aaa4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::ScalarParameterOverride",
       "id": "83811125f39e4c8bb2fd6c178aea1348",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ScalarParameterProperties",
+      "id": "629022a61c0746d394622738bf6ecacc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SceneAttributeInputMode",
+      "id": "9bfee2eb5d804a9f9cf3e404194f1af7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SceneColorProperties",
+      "id": "be2e1b0621354fa6a0c9418e966ed3cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SceneDepthProperties",
+      "id": "c99becb662ef4632b87214362d5a5067",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SceneDepthWithoutWaterProperties",
+      "id": "187c88071a974347a4971ed64080ff76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SceneTextureId",
+      "id": "3b84adf9b73944cb80bae2d3e732163b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SceneTextureProperties",
+      "id": "2dbba8334e8249eb9d219e4eec95db4d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SetAttributesProperties",
+      "id": "cc4668406d2e4191b62dc288274e2de8",
       "aliases": [],
       "retired": false
     },
@@ -1291,8 +5743,141 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::ShadingModelProperties",
+      "id": "a3af264b961b4a47b5f4859380ce84b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SineProperties",
+      "id": "1aa87a42d8c1437788a7ccae8cfe04ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SkyAtmosphereAerialPerspectiveProperties",
+      "id": "466cfa73595a4e8e9d531d0ae863420a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SkyAtmosphereLightDirectionProperties",
+      "id": "d13f1503f6df45bbb358dfa5f2d029d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SkyAtmosphereLightDiskLuminanceProperties",
+      "id": "af5ae3d295e645a282093b8dee6bf2eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SkyAtmosphereLightIlluminanceOnGroundProperties",
+      "id": "c73a5a15c09e4f4eaaca9a435eec419e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SkyAtmosphereLightIlluminanceProperties",
+      "id": "1d28c453b02549fab045ccfe8879d505",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SobolProperties",
+      "id": "95781d198c064a32bf63d3eee501e5a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties",
+      "id": "aa08966d9f4242089f078a2fd369e28d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SparseVolumeTextureObjectProperties",
+      "id": "d60a1a3cb4d7422c8c734e3fa12e0b1a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties",
+      "id": "0aa12972cf76458db6b024dd1ff75f2f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SparseVolumeTextureSampleProperties",
+      "id": "bf399d437f1f457bac9cd804722e0654",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SpeedTreeGeometryType",
+      "id": "7af81a8d0f3f464da4258f4615f7813a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SpeedTreeLodType",
+      "id": "bbe1321c5934496bab2afffed7b03411",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SpeedTreeProperties",
+      "id": "5ce767006a294ee2a6edfef22abc0654",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SpeedTreeWindType",
+      "id": "92bf7acb88294b54a1b54b127eca4a2b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::StaticBoolParameterProperties",
+      "id": "0a568ad450834d12877824141f07c856",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::StaticBoolProperties",
+      "id": "7ac67a6102a4415eb236e212f271050a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::StaticComponentMaskOverride",
       "id": "896dd3e78fcf46de8053255bdc5f9996",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::StaticComponentMaskParameterProperties",
+      "id": "31530e85c3204968a621c96854352f1c",
       "aliases": [],
       "retired": false
     },
@@ -1312,8 +5897,267 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::StaticSwitchParameterProperties",
+      "id": "02af4ad9a24e43a1ae2135b9eecd13c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::StaticSwitchProperties",
+      "id": "332f4943b55a4520a11f155d5473ff0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::StencilCompare",
       "id": "29eb3784618f479d80bd54e3d6697592",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SubsurfaceType",
+      "id": "232577a30de84b8c82d74bd24599a85c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceAddProperties",
+      "id": "9c4a61aee88e47bab1b5dddf2666c9c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceEyeProperties",
+      "id": "e89ab339b1214cb093a3d08fc1de96cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceFromAttributesProperties",
+      "id": "d9ca86d9c32042a8aa5a36e0e2dd97fc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceFromShadingModelProperties",
+      "id": "cd36c762a9984d2ab4f423bc48c51cf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceHorizontalMixProperties",
+      "id": "aa1426ab39c24463bf9df1d7a43ee066",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceSelectProperties",
+      "id": "0efe184c04fa4977a7b65f0f7e6efb2c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceSlabProperties",
+      "id": "5cfb5bfac7d1437ea4fd38eb0916e37d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceToonProperties",
+      "id": "61b9ea58266441a18bbe7ff47deed088",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SurfaceVerticalLayerProperties",
+      "id": "67d9f79a0d114acabc28d6e692b4e6e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SwitchInput",
+      "id": "383ad1886b904876b4667d26dc3c19d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::SwitchProperties",
+      "id": "311371e90d5743a8b8c75417f83d955c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TangentProperties",
+      "id": "f2390df1330d4becb420832b7a6b1ba5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TemporalSobolProperties",
+      "id": "91337889754a4d78b1753e56a9f27ef5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureCollectionMemberType",
+      "id": "d741dca21e124999b2cedf94963d7ab2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureCollectionParameterProperties",
+      "id": "4bc6694180f24199b0bdd7c60b38b65a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureCollectionProperties",
+      "id": "3733a7b28f144f5ab5a19f8d12ad823f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureColorChannel",
+      "id": "559e0513dd534dc8bbeab192cd64479c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureCoordinateProperties",
+      "id": "1c990b9947ed420fbbed3f490c03a1a9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureGatherMode",
+      "id": "63d1e3751efa463ca8bdae33375c6d36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureMipValueMode",
+      "id": "9a370d8f509a497e8577b3db5db83957",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureObjectFromCollectionProperties",
+      "id": "00ca396367b84e74b824b0b3c08630c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureObjectParameterProperties",
+      "id": "da7f1e451b324a04bb3fe4b3ca01bf16",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureObjectProperties",
+      "id": "8d3ce7eb91d445c79d9565164f2a9110",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TexturePropertyProperties",
+      "id": "506e027804af4423bd22755d41f788f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties",
+      "id": "975bdcaf3be9488eb5c5bf112935ec53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleParameter2DProperties",
+      "id": "2a4cd98c4bc54887bd910282794d71e4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties",
+      "id": "567c0970c975459497d6c82661c00911",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleParameterCubeProperties",
+      "id": "2306c32579154d9b832a982d8a7e77db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties",
+      "id": "c60a0e68693940e3885d7407a4532411",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties",
+      "id": "dcace780d4c744f4b30624d16f4885b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TextureSampleProperties",
+      "id": "fdb6d7fe660a456fb11946a16d9b3211",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TimeProperties",
+      "id": "fc4cfdec305a4957957e802eeb036c94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TransformPositionProperties",
+      "id": "72d8ba55ea65421fb1111e1ade024f8d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::TransformVectorProperties",
+      "id": "7aa979f04d1a4010b475e219267c89a3",
       "aliases": [],
       "retired": false
     },
@@ -1333,6 +6177,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::UserSceneTextureProperties",
+      "id": "40b7e203236246f2996a16fc389eeb10",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::VectorCollectionBaseOverride",
       "id": "b12e9bb51b89489dac7ac20d2cfc7f0f",
       "aliases": [],
@@ -1347,6 +6198,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::VectorNoiseFunction",
+      "id": "51700ba0cc7147408a54ce691056dc5c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::VectorNoiseProperties",
+      "id": "eefa9cab91184feea6697d46b6c4637d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::VectorParameterOverride",
       "id": "786ea368554246d18235fc9cdd377cf5",
       "aliases": [],
@@ -1354,8 +6219,57 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::VectorParameterProperties",
+      "id": "12c22a522c164189b2ea61295fe27268",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::VectorTransformDestination",
+      "id": "4488e1fab98843818d13e0fc808f93dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::VectorTransformSource",
+      "id": "89b33ca507694d0fb38a9538b73d6ff9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::VertexInputUsage",
       "id": "6526b30115ee4eeea46560a386d9e74c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::ViewPropertyProperties",
+      "id": "3c4f44389e5e477aa2258893b4702e1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::VolumetricAdvancedOutputProperties",
+      "id": "9cbef49b99b141db931ca9a5099bb578",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::WorldPositionIncludedOffsets",
+      "id": "da1e9ae52d2946049068aaf04d81b509",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::WorldPositionProperties",
+      "id": "9973b6c71d944f7e9936162edff877bb",
       "aliases": [],
       "retired": false
     }

@@ -2,6 +2,7 @@
 #include <Core/Move.h>
 #include <MaterialSchema/NodePropertyReader.h>
 #include <Serialization/Archive.h>
+#include <Serialization/ValueArray.h>
 
 // 노드 속성 Record의 필드 읽기다(Docs/Design/MaterialSystem 19.13.3절).
 namespace rocks::material {
@@ -17,6 +18,17 @@ Result<Guid> FieldId(const TypeSchema& schema, StringView field) noexcept {
     }
 
     return Result<Guid>::Failure(ErrorCode::NotFound);
+}
+
+// 배열 필드의 원소 수 상한이다(schema의 maxElements — 0이면 배열 필드가 아니다).
+uint32 FieldMaxElements(const TypeSchema& schema, StringView field) noexcept {
+    for (const FieldSchema& entry : schema.fields) {
+        if (StringView(entry.name.Data(), entry.name.Size()) == field) {
+            return entry.maxElements;
+        }
+    }
+
+    return 0;
 }
 
 } // namespace
@@ -147,6 +159,28 @@ Result<float> NodePropertyReader::ReadFloat(StringView field, float fallback) no
     return value.Value().ReadF32();
 }
 
+Result<Guid> NodePropertyReader::ReadGuid(StringView field, Guid fallback) noexcept {
+    auto found = Find(field);
+    if (!found) {
+        return Result<Guid>::Failure(found.Error());
+    }
+
+    if (!found.Value()) {
+        return Result<Guid>::Success(fallback);
+    }
+
+    if (found.Value()->wireType != static_cast<uint32>(WireType::Guid)) {
+        return Result<Guid>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    auto value = record_->OpenValue(*found.Value());
+    if (!value) {
+        return Result<Guid>::Failure(value.Error());
+    }
+
+    return value.Value().ReadGuid();
+}
+
 Result<StringView> NodePropertyReader::ReadText(StringView field) noexcept {
     auto found = Find(field);
     if (!found) {
@@ -189,6 +223,88 @@ Result<NodePropertyList> NodePropertyReader::OpenStructArray(StringView field,
 
     list.list_.Emplace(Move(opened.Value()));
     return Result<NodePropertyList>::Success(Move(list));
+}
+
+Result<NodePropertyReader> NodePropertyReader::OpenStruct(StringView field,
+                                                          const TypeSchema& element) noexcept {
+    auto found = Find(field);
+    if (!found) {
+        return Result<NodePropertyReader>::Failure(found.Error());
+    }
+
+    NodePropertyReader reader(*allocator_, element);
+    if (!found.Value()) {
+        return Result<NodePropertyReader>::Success(Move(reader));
+    }
+
+    auto nested = record_->OpenRecordField(*allocator_, *found.Value(), element.id, 1,
+                                           element.version, RecordLimits{}.maxFields);
+    if (!nested) {
+        return Result<NodePropertyReader>::Failure(nested.Error());
+    }
+
+    reader.record_.Emplace(Move(nested.Value()));
+    return Result<NodePropertyReader>::Success(Move(reader));
+}
+
+Result<void> NodePropertyReader::ReadGuidArray(StringView field, Array<Guid>& out) noexcept {
+    auto found = Find(field);
+    if (!found) {
+        return Result<void>::Failure(found.Error());
+    }
+
+    if (!found.Value()) {
+        return Result<void>::Success();
+    }
+
+    auto array = ValueArrayReader::OpenField(*record_, *found.Value(), WireType::Guid,
+                                             FieldMaxElements(*schema_, field));
+    if (!array) {
+        return Result<void>::Failure(array.Error());
+    }
+
+    for (uint32 index = 0; index < array.Value().Count(); ++index) {
+        auto value = array.Value().Elements().ReadGuid();
+        if (!value) {
+            return Result<void>::Failure(value.Error());
+        }
+
+        if (auto pushed = out.TryPushBack(value.Value()); !pushed) {
+            return pushed;
+        }
+    }
+
+    return array.Value().Finish();
+}
+
+Result<void> NodePropertyReader::ReadTextArray(StringView field, Array<StringView>& out) noexcept {
+    auto found = Find(field);
+    if (!found) {
+        return Result<void>::Failure(found.Error());
+    }
+
+    if (!found.Value()) {
+        return Result<void>::Success();
+    }
+
+    auto array = ValueArrayReader::OpenField(*record_, *found.Value(), WireType::String,
+                                             FieldMaxElements(*schema_, field));
+    if (!array) {
+        return Result<void>::Failure(array.Error());
+    }
+
+    for (uint32 index = 0; index < array.Value().Count(); ++index) {
+        auto value = array.Value().Elements().ReadStringView();
+        if (!value) {
+            return Result<void>::Failure(value.Error());
+        }
+
+        if (auto pushed = out.TryPushBack(value.Value()); !pushed) {
+            return pushed;
+        }
+    }
+
+    return array.Value().Finish();
 }
 
 usize NodePropertyList::Count() const noexcept {

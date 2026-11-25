@@ -1,3 +1,7 @@
+#include <Core/Text/String.h>
+#include <Core/Text/Json.h>
+#include <Core/FileRead.h>
+#include <Core/Error.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
 #include <MaterialSchema/MaterialAttributeTable.h>
@@ -1008,6 +1012,158 @@ TEST(MaterialSchema_CatalogChecksTextDefaults) {
     REQUIRE(found->textDefaults.Size() == 1);
     CHECK(found->textDefaults[0].text == StringView("Moss"));
     CHECK(env.catalog.Unregister(env.registry, group.Value()));
+}
+
+// 엔진 노드 정의마다 따로 등록해 본다(19.13.6절): 묶음 등록이 실패해도 어느 정의가 무슨 오류로
+// 거부되는지 이름으로 보고한다.
+TEST(MaterialSchema_EveryBuiltinDefinitionRegisters) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    usize count = 0;
+    for (Span<const MaterialNodeDefinition> group : BuiltinMaterialNodeGroups()) {
+        for (const MaterialNodeDefinition& definition : group) {
+            const MaterialGraphSchema& schema =
+                (definition.graphKinds & ToMask(MaterialGraphKind::Material)) != 0 ? env.material
+                                                                                   : env.function;
+            auto registered = env.catalog.Register(
+                env.registry, schema, Span<const MaterialNodeDefinition>(&definition, 1),
+                ModuleLease());
+            if (!registered) {
+                char message[256];
+                const usize length =
+                    definition.type.ByteCount() < 160 ? definition.type.ByteCount() : 160;
+                usize at = 0;
+                for (; at < length; ++at) {
+                    message[at] = definition.type.Data()[at];
+                }
+
+                const char* error = ErrorCodeName(registered.Error());
+                message[at++] = ':';
+                message[at++] = ' ';
+                for (usize i = 0; error[i] != '\0' && at + 1 < sizeof(message); ++i) {
+                    message[at++] = error[i];
+                }
+
+                message[at] = '\0';
+                test::RecordFailure(message, __FILE__, __LINE__);
+                continue;
+            }
+
+            ++count;
+            CHECK(env.catalog.Unregister(env.registry, registered.Value()));
+        }
+    }
+
+    CHECK(count > 0);
+}
+
+namespace {
+
+// 목록 파일(MaterialNodeCatalog.json)의 최대 크기다(지금 약 100 KiB).
+constexpr uint64 MaxCatalogFileBytes = 4u * 1024u * 1024u;
+
+// 목록 파일의 범주 이름을 메뉴 범주 표시로 바꾼다(19.13.4절 — 생성 규칙과 같다).
+StringView CategoryTitle(StringView category) noexcept {
+    struct Rename {
+        StringView from;
+        StringView to;
+    };
+
+    static constexpr Rename renames[] = {
+        {"MaterialAttributes", "Material Attributes"},
+        {"PostProcess", "Post Process"},
+        {"DistanceFields", "Distance Fields"},
+        {"VirtualTexture", "Virtual Texture"},
+        {"MeshPaint", "Mesh Paint"},
+        {"PhysicsField", "Physics Field"},
+    };
+    for (const Rename& rename : renames) {
+        if (rename.from == category) {
+            return rename.to;
+        }
+    }
+
+    return category;
+}
+
+// 이 소스 파일이 있는 모듈 폴더의 목록 파일 경로다(시험은 소스 트리에서 돈다 — __FILE__ 기준).
+bool CatalogPath(String& out) noexcept {
+    const StringView source(__FILE__);
+    usize cut = source.ByteCount();
+    usize separators = 0;
+    while (cut > 0 && separators < 2) {
+        --cut;
+        const char c = source.Data()[cut];
+        if (c == '/' || c == '\\') {
+            ++separators;
+        }
+    }
+
+    return separators == 2 && out.TryAssign(StringView(source.Data(), cut + 1)) &&
+           out.TryAppend("MaterialNodeCatalog.json");
+}
+
+} // namespace
+
+// MS-T12 (a)(19.2.2·19.13.6절): 등록되는 엔진 노드 정의의 (id, 상태, 선행, 범주)가 단일 원본
+// MaterialNodeCatalog.json의 "구현"·"TODO" 행과 같고, 그 행이 모두 정의되어 있다.
+TEST(MaterialSchema_DefinitionsMatchCatalogFile) {
+    SystemAllocator allocator;
+    String path(allocator);
+    REQUIRE(CatalogPath(path));
+    Array<uint8> bytes(allocator);
+    bool existed = false;
+    REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), path.View(), MaxCatalogFileBytes, bytes,
+                          existed));
+    REQUIRE(existed);
+    JsonDocument document(allocator);
+    REQUIRE(document.Parse(StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()))
+                .code == JsonErrorCode::None);
+    const JsonValue entries = document.Root().Find("entries");
+    REQUIRE(entries.IsArray());
+
+    usize rows = 0;
+    for (usize index = 0; index < entries.Size(); ++index) {
+        const JsonValue entry = entries.At(index);
+        const StringView status = entry.Find("status").GetString();
+        const bool implemented = status == StringView("Implemented");
+        if (!implemented && status != StringView("PrerequisiteMissing")) {
+            continue;
+        }
+
+        ++rows;
+        const StringView node = entry.Find("node").GetString();
+        const MaterialNodeDefinition* found = nullptr;
+        usize matches = 0;
+        for (Span<const MaterialNodeDefinition> group : BuiltinMaterialNodeGroups()) {
+            for (const MaterialNodeDefinition& definition : group) {
+                if (definition.type == node) {
+                    found = &definition;
+                    ++matches;
+                }
+            }
+        }
+
+        CHECK(matches == 1);
+        if (found == nullptr) {
+            test::RecordFailure("catalog row without definition", __FILE__, __LINE__);
+            continue;
+        }
+
+        CHECK((found->status == MaterialNodeStatus::Implemented) == implemented);
+        CHECK(MaterialPrerequisiteId(found->prerequisite) ==
+              entry.Find("prerequisite").GetString());
+        CHECK(found->menu.category == CategoryTitle(entry.Find("category").GetString()));
+    }
+
+    // 정의는 목록 행과 출력 노드(Material.Output — 19.8절, 목록 밖)뿐이다.
+    usize definitions = 0;
+    for (Span<const MaterialNodeDefinition> group : BuiltinMaterialNodeGroups()) {
+        definitions += group.Size();
+    }
+
+    CHECK(rows > 0);
+    CHECK(definitions == rows + 1);
 }
 
 } // namespace material_schema_tests_file

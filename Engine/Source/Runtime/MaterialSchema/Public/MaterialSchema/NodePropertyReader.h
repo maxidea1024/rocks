@@ -1,6 +1,8 @@
 #pragma once
 
+#include <Base/Guid.h>
 #include <Base/Types.h>
+#include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Optional.h>
 #include <Core/Result.h>
@@ -53,11 +55,23 @@ public:
     Result<int64> ReadInteger(StringView field, int64 fallback) noexcept;
     Result<bool> ReadBool(StringView field, bool fallback) noexcept;
     Result<float> ReadFloat(StringView field, float fallback) noexcept;
+    Result<Guid> ReadGuid(StringView field, Guid fallback) noexcept;
     // String·Name 필드의 원문이다(입력 바이트를 빌린다). 기록되지 않았으면 빈 문자열이다.
     Result<StringView> ReadText(StringView field) noexcept;
 
     // struct 배열 필드를 연다(원소 schema는 element). 기록되지 않았으면 원소 0개다.
     Result<NodePropertyList> OpenStructArray(StringView field, const TypeSchema& element) noexcept;
+
+    // struct 필드를 연다(schema는 element). 기록되지 않았으면 모든 멤버가 기본값인 reader다.
+    Result<NodePropertyReader> OpenStruct(StringView field, const TypeSchema& element) noexcept;
+
+    // Guid 배열 필드의 원소를 out 끝에 더한다. 기록되지 않았으면 더하지 않는다. 오류: wire가 Guid
+    // 원소 배열이 아니면 TypeMismatch, 원소 수가 필드 상한을 넘으면 CapacityExceeded, 할당 실패.
+    Result<void> ReadGuidArray(StringView field, Array<Guid>& out) noexcept;
+
+    // String·Name 배열 필드의 원소 원문을 out 끝에 더한다(입력 바이트를 빌린다). 오류는
+    // ReadGuidArray와 같다(원소 wire는 String).
+    Result<void> ReadTextArray(StringView field, Array<StringView>& out) noexcept;
 
 private:
     friend class NodePropertyList;
