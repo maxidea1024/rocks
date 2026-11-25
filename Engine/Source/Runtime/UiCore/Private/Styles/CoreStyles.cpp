@@ -1,65 +1,8 @@
-#include <UiCore/Style.h>
+#include <UiCore/Styles/CoreStyles.h>
 
 // Element 스타일 형식과 UE 5.8 에디터 핵심 스타일 기본값이다(Docs/Design/UiToolkit 9.1절 UW3b,
 // 14장). RB(채움, 반경, 외곽선, 두께)는 UE FSlateRoundedBoxBrush다.
 namespace rocks::ui {
-
-StringView TypefaceName(Typeface typeface) noexcept {
-    switch (typeface) {
-    case Typeface::Bold:
-        return "Bold";
-    case Typeface::Italic:
-        return "Italic";
-    case Typeface::BoldItalic:
-        return "BoldItalic";
-    case Typeface::Light:
-        return "Light";
-    case Typeface::Regular:
-    default:
-        return "Regular";
-    }
-}
-
-StyleBrush StyleBrush::None() noexcept {
-    return {};
-}
-
-StyleBrush StyleBrush::RoundedBox(ThemeSlot fill, float radius, ThemeSlot outline,
-                                  float outlineWidth) noexcept {
-    StyleBrush brush;
-    brush.mode = BrushMode::RoundedBox;
-    brush.fill = ColorRef::FromTheme(fill);
-    brush.outlineColor = ColorRef::FromTheme(outline);
-    brush.outlineWidth = outlineWidth;
-    brush.cornerRadii = {radius, radius, radius, radius};
-    return brush;
-}
-
-StyleBrush StyleBrush::RoundedBox(ThemeSlot fill, float radius) noexcept {
-    StyleBrush brush = RoundedBox(fill, radius, ThemeSlot::Black, 0.0f);
-    brush.outlineColor = ColorRef::Specified({0, 0, 0, 0});
-    return brush;
-}
-
-StyleBrush StyleBrush::Color(ThemeSlot fill) noexcept {
-    StyleBrush brush;
-    brush.mode = BrushMode::Box;
-    brush.fill = ColorRef::FromTheme(fill);
-    return brush;
-}
-
-Brush StyleBrush::Resolve(const ThemeColors& theme,
-                          const StyleColorContext& context) const noexcept {
-    Brush brush;
-    brush.mode = mode;
-    brush.tint = fill.Resolve(theme, context);
-    brush.resource = resource;
-    brush.imageSize = imageSize;
-    brush.margin = margin;
-    brush.tint.a *= opacity;
-    brush.outline = {cornerRadii, outlineColor.Resolve(theme, context), outlineWidth, rounding};
-    return brush;
-}
 
 const ButtonStyle& DefaultButtonStyle() noexcept {
     // StarshipCoreStyle.cpp 1460–1470행: RB(Secondary·Hover·Header, 4, Input, 1), 비활성
