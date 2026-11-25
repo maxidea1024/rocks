@@ -24,15 +24,6 @@
 //   }
 namespace rocks::shader {
 
-// 정점 입력 타입 하나다(RenderBase 10절 등록부가 생기기 전에는 호출자가 준다).
-struct ShaderVertexInputType {
-    // 이름 해시(ShaderTypeNameHash(name))다. NoVertexInputType은 쓸 수 없다.
-    VertexInputTypeId id = NoVertexInputType;
-    StringView name;
-    // 거르기(null이면 늘 참)다.
-    ShaderVertexInputShouldCompileFunction shouldCompile = nullptr;
-};
-
 // 열거한 조합 하나다.
 struct ShaderLibraryCombination {
     const ShaderTypeDesc* type = nullptr;
@@ -42,17 +33,12 @@ struct ShaderLibraryCombination {
     bool developmentOnly = false;
 };
 
-// 정점 입력 타입 목록을 id 순으로 out에 담는다. 실패: id가 NoVertexInputType이거나 이름 해시와
-// 다름·id 중복 InvalidArgument, 할당 실패 OutOfMemory.
-ROCKS_SHADERCORE_API Result<void>
-SortShaderVertexInputTypes(Span<const ShaderVertexInputType> inputs,
-                           Array<ShaderVertexInputType>& out) noexcept;
-
 // types(등록부 순서 — 이름 해시 순) 가운데 library 소속이고 형식 facts에서 컴파일되는 조합을 결정적
 // 순서(타입 → 정점 입력 타입 → 퍼뮤테이션 ID)로 out에 담는다. 거르기: (1) 요구 기능 ⊆ 형식 기능,
 // (2) 개발 전용 타입·퍼뮤테이션은 includeDevelopment일 때만, 개발 전용 PS는 형식에 debugPixelUav가
 // 있을 때만(16.1절 SSD34), (3) 타입 거르기, (4) 정점 입력 축이면 정점 입력 타입 거르기. inputs는
-// SortShaderVertexInputTypes 결과다. 실패: 퍼뮤테이션 도메인 위반은 그 오류, 할당 실패 OutOfMemory.
+// 등록부의 VertexInputTypes()(Freeze 뒤 id 순)다. 실패: 퍼뮤테이션 도메인 위반은 그 오류, 할당 실패
+// OutOfMemory.
 ROCKS_SHADERCORE_API Result<void> EnumerateShaderLibraryCombinations(
     Span<const ShaderTypeDesc* const> types, Span<const ShaderVertexInputType> inputs,
     const ShaderFormatFacts& facts, ShaderLibraryKind library, bool includeDevelopment,

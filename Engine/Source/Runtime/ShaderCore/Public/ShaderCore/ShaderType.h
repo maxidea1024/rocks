@@ -75,7 +75,8 @@ enum class ShaderHlsl2021 : uint8 {
     Off
 };
 
-// 정점 입력 타입 id(이름 해시, 없음 = 0)다. 정점 입력 타입 등록부는 RenderBase 10절 몫이다.
+// 정점 입력 타입 id(이름 해시, 없음 = 0)다. 정점 입력 타입은 셰이더 타입 등록부가 함께 받는다
+// (ShaderTypeRegistry::RegisterVertexInputTypes — RenderBase 10.6절 1항).
 using VertexInputTypeId = uint64;
 inline constexpr VertexInputTypeId NoVertexInputType = 0;
 
@@ -112,11 +113,50 @@ struct ShaderTypeDesc {
     Span<const ShaderParameterLayout> parameterLayouts;
 };
 
-// 정점 입력 타입의 거르기 함수다(SSD5 (4) — 정점 입력 축 타입에만 부른다, 순수 함수). 정점 입력
-// 타입 등록부는 RenderBase 10절 몫이고 ShaderCore는 이 서명만 안다.
+// 정점 입력 타입의 거르기 함수다(SSD5 (4) — 정점 입력 축 타입에만 부른다, 순수 함수).
 using ShaderVertexInputShouldCompileFunction = bool (*)(const ShaderTypeDesc& type,
                                                         uint32 permutationId,
                                                         const ShaderFormatFacts& format) noexcept;
+
+// 정점 입력 축 셰이더가 include하는 고정 가상 경로다(RenderBase 10.6절 2항). 셰이더 컴파일러가 정점
+// 입력 축 job마다 그 정점 입력 타입의 sourcePath로 잇는다(실제 파일이 아니다 — 연결 없는 job의
+// include는 GeneratedSource 오류).
+inline constexpr char VertexInputGeneratedIncludePath[] = "/Engine/Generated/VertexInput.rsh";
+
+// 정점 입력 타입 기술이다(RenderBase 10.2·10.6절, UE FVertexFactoryType 대응 — 셰이더 쪽 부분만:
+// 장치 쪽 정적 정점 배치는 RenderBase가 가진다). 읽기 전용 값이며 가리키는 문자열은 정적 수명이다.
+// MakeShaderVertexInputType으로 만든다. ShaderTypeRegistry::RegisterVertexInputTypes가 검사한다.
+//
+// 사용 예:
+//   ROCKS_SHADER_TYPE_NAME(BuiltinVertexInputName, "BuiltinVertexInput");
+//   constexpr ShaderVertexInputType Inputs[] = {MakeShaderVertexInputType(
+//       BuiltinVertexInputName, "/Engine/Private/VertexInput/BuiltinVertexInput.rsh",
+//       ShaderTypeOwner::Engine)};
+struct ShaderVertexInputType {
+    // 이름 해시(ShaderTypeNameHash(name))다. NoVertexInputType은 쓸 수 없다.
+    VertexInputTypeId id = NoVertexInputType;
+    // 이름(셰이더 타입 이름과 같은 문법)이다.
+    StringView name;
+    // 원문(.rsh 가상 경로)이다. 정점 입력 축 job의 VertexInputGeneratedIncludePath가 이 파일이다.
+    StringView sourcePath;
+    // 소속이다(셰이더 타입과 같은 루트 규칙).
+    ShaderTypeOwner owner = ShaderTypeOwner::Engine;
+    // 거르기(null이면 늘 참)다.
+    ShaderVertexInputShouldCompileFunction shouldCompile = nullptr;
+};
+
+// 이름·해시 상수에서 정점 입력 타입 desc를 만든다.
+constexpr ShaderVertexInputType
+MakeShaderVertexInputType(ShaderTypeName name, StringView sourcePath, ShaderTypeOwner owner,
+                          ShaderVertexInputShouldCompileFunction shouldCompile = nullptr) noexcept {
+    ShaderVertexInputType input;
+    input.id = name.hash;
+    input.name = name.name;
+    input.sourcePath = sourcePath;
+    input.owner = owner;
+    input.shouldCompile = shouldCompile;
+    return input;
+}
 
 // 이름·해시 상수에서 desc를 만든다(나머지 칸은 기본값 — 필요한 칸을 이어서 바꾼다).
 constexpr ShaderTypeDesc MakeShaderTypeDesc(ShaderTypeName name, StringView sourcePath,

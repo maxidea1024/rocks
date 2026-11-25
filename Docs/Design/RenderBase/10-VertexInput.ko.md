@@ -190,3 +190,10 @@
    - `.rsh` 인터페이스(이 타입만 — 메시 정점 입력 인터페이스는 RR16): 입력 구조체 `VertexInputAttributes`, `GetVertexInputLocalPosition`·`GetVertexInputTexCoord`·`GetVertexInputColor`.
    - 정적 정점 배치를 등록 desc에 넣지 않는다(ShaderCore는 Graphics 타입을 모른다). 일반 정적 배치 표는 PSO 미리 준비와 함께 RR15다.
 4. **완료 기준(10.3절 중 이 개정 몫).** EngineTests: 등록 결정성(두 순서로 등록해 같은 목록·같은 라이브러리 byte), 늦은 등록 `ScopeClosed`, 검사 음성 대조(이름·해시·경로·확장자·소속·중복), 생성 include 연결(같은 셰이더 타입·퍼뮤테이션의 두 정점 입력 타입이 다른 코드·다른 키, 연결 없는 include의 `GeneratedSource`), 등록부 목록으로 쿠킹·셰이더 집합 열기 왕복. Sandbox: 기본 정점 입력 타입으로 그린 내장 메시 픽셀(11.4절 7항).
+
+**구현(2026-11-25, 개정 42 — 1·2항).** 위 결정대로다. 3항(엔진 기본 정점 입력 타입)은 그것을 쓰는 fallback 메시 셰이더와 함께 개정 43(11.4절 5항)에서 넣는다.
+- ShaderCore: `ShaderVertexInputType`을 `ShaderType.h`로 옮기고 `sourcePath`·`owner`를 더했다(`MakeShaderVertexInputType`, 고정 경로 상수 `VertexInputGeneratedIncludePath`). `ShaderTypeRegistry::RegisterVertexInputTypes`·`UnregisterVertexInputTypes`·`VertexInputTypes`·`FindVertexInputType`, `ShaderTypeModuleRegistration(types, vertexInputs)`(정점 입력 타입 등록이 실패하면 앞서 등록한 셰이더 타입을 거둔다). `SortShaderVertexInputTypes`는 지웠다(등록부가 Freeze 때 id 순으로 정렬한다).
+- ShaderCompiler: `ShaderCompileJob::vertexInputSource`, `PreprocessShader`의 생성 include 표(`ShaderGeneratedInclude`), 쿠커는 등록부 목록으로 열거하고 축 job에 원문 경로를 넣는다. `ShaderLibraryCookDesc::vertexInputTypes`를 지웠다.
+- RenderBase: `ShaderSetDesc`·`ShaderProvisionRequest`의 `vertexInputTypes`를 지우고 등록부 목록으로 완결성을 검사한다.
+- 스펙과 다르게 정한 것: 경로 검사에 `Shared` 아래(`.h` 전용)와 `<루트>/Generated/` 아래 거부를 더했다(연결 대상이 다시 생성 경로이면 순환이다).
+- 시험: `ShaderCore_RegistryVertexInputTypes`(두 순서 등록의 같은 id 순, 조회, 타입 집합 SHA 불변, Freeze 뒤 `ScopeClosed`, 해제, 음성 9종·대소문자 충돌·목록 원자성, 모듈 도우미의 실패 되돌림), `ShaderPreprocessor_GeneratedIncludeReadsTheMappedSource`(연결 대상 읽기·폐포·`#line`, 연결 없음 `GeneratedSource`, 대상 경로 규칙 위반 `InvalidPath`), `ShaderLibraryCook_VertexInputIncludeSelectsTheTypeSource`(같은 PS 타입의 두 정점 입력 타입이 다른 코드 — D3D12 job 2·항목 2·코드 2, 축 없는 타입의 같은 include는 `PreprocessError`·`GeneratedSource`), 기존 쿠킹 시험은 등록부로 정점 입력 타입을 넣는다.

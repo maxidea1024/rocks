@@ -53,7 +53,6 @@ struct ShaderLibraryCookDesc {
     const ShaderTypeRegistry* registry = nullptr;
     // 형식 snapshot이다(이 순서로 쿠킹하고 보고한다).
     Span<const ShaderFormatSnapshot* const> formats;
-    Span<const ShaderVertexInputType> vertexInputTypes;
     ShaderLibraryKind library = ShaderLibraryKind::Engine;
     // 개발 전용 타입·퍼뮤테이션을 담는가(SSD11 cookDevelopmentShaders).
     bool includeDevelopment = false;

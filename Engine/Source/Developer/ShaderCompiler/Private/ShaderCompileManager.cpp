@@ -9,6 +9,7 @@
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
+#include <ShaderCore/ShaderType.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 #include <stdio.h>
 #include <string.h>
@@ -471,8 +472,14 @@ private:
             return;
         }
 
+        const ShaderGeneratedInclude vertexInput{StringView(VertexInputGeneratedIncludePath),
+                                                 job.vertexInputSource};
+        const Span<const ShaderGeneratedInclude> generated =
+            job.vertexInputSource.IsEmpty() ? Span<const ShaderGeneratedInclude>()
+                                            : Span<const ShaderGeneratedInclude>(&vertexInput, 1);
         const ShaderSourceStatus preprocessed =
-            PreprocessShader(*config_.tree, job.entryPath, defines.Defines(), result.preprocessed);
+            PreprocessShader(*config_.tree, job.entryPath, defines.Defines(), result.preprocessed,
+                             ShaderPreprocessLimits{}, generated);
         if (!preprocessed) {
             char location[MaxShaderVirtualPathBytes + 64];
             snprintf(location, sizeof(location), "%s:%u: %s", preprocessed.path, preprocessed.line,
