@@ -16,7 +16,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 | 설계 계약 | 계획 §18(1673–1706행): AudioRT 금지 목록, `AudioVoiceHandle{index,generation}`, `AudioCommand{sampleTime,voice,op,data}`, `RenderAudioBlock(float*, frames) noexcept`, 불변 graph plan 교체·epoch ACK, 48 kHz·256/512 frame, underrun 0·callback p99.9 ≤ 블록 50%. 마일스톤 M4 기본 오디오, M7 audio graph(§30.1) | 콜백에서 직접 믹스하는 모양으로 적혀 있다. UE 구조(전용 렌더 스레드 + 출력 링)와 다르다(3.2절, AD2) |
 | Task | `TaskLane::Audio`, `DedicatedLane`(FIFO 작업 lane, Thread·Inline 모드), `SerialTaskChain`(`Core/Source/Runtime/Task`) | `DedicatedLane::Post`는 `Function<void()>` 작업 노드를 받는다. 블록마다 작업을 게시하는 모양은 AudioRT의 무할당 계약과 맞지 않는다(3.2절) |
 | 스레드 우선순위 | `ThreadPriority { Lowest, BelowNormal, Normal, AboveNormal, Highest }`(`Core/Source/Runtime/PlatformBase/Public/Platform/Thread.h:23`). Windows `Highest` = `THREAD_PRIORITY_HIGHEST`(`Private/Win64/Concurrency.cpp:232`) | UE 오디오 렌더 스레드도 `TPri_Highest`다(3.2절). 실시간 등급은 없지만 UE와 같은 수준은 있다 |
-| 동시 컨테이너 | `BoundedMpscQueue`(구현). `BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`는 [동기화](Synchronization.ko.md) SY7 설계만 | `BoundedMpscQueue`는 생산자가 예약 슬롯을 게시하기 전에 선점되면 소비자 `TryPop`이 실패할 수 있다. AudioRT 입력은 SPSC여야 한다(Synchronization D27) |
+| 동시 컨테이너 | `BoundedMpscQueue`(구현). `BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`는 [동기화](Synchronization/15-Phases.ko.md) SY7 설계만 | `BoundedMpscQueue`는 생산자가 예약 슬롯을 게시하기 전에 선점되면 소비자 `TryPop`이 실패할 수 있다. AudioRT 입력은 SPSC여야 한다(Synchronization D27) |
 | 깨우기 수단 | `ManualResetEvent`·`Semaphore`는 Signal·Release 안에서 `Mutex`를 잡는다(`Core/Source/Runtime/PlatformBase/Public/Platform/Sync.h:86–108`, `Private/Common/Sync.cpp:61–68`). SY0 `WaiterSignal` 설계는 Windows `WaitOnAddress`, Android futex, macOS `pthread_mutex_t`+`pthread_cond_t`(Synchronization 350행) | 장치 콜백이 AudioRT를 깨울 때 잠금을 공유하면 우선순위 역전이 생긴다. 무잠금 깨우기가 없다(3.2절, PR21) |
 | 엔진 수명 | `EngineSubsystem`의 `Initialize`·`OnFrameBegin`·`OnFrameEnd`·`BeginShutdown`·`CompleteInFlightWork`·`Deinitialize`(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:46–70`). 종료 2단계 주석에 "audio epoch" 대기 | `CompleteInFlightWork` 실패는 `KeepFirst`로 누적되고 정리가 이어진다. 장치 콜백이 살아 있는 채 소유자가 풀릴 수 있다(3.8.6절) |
 | 명령줄 | AppInfo 개정 4가 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`를 설계했다(미구현 — AP1) | 판정 값이 아직 코드에 없다(3.8.4절) |
@@ -107,7 +107,7 @@ Rocks도 세 문맥으로 둔다.
 
 AudioRT 규칙(계획 §18 그대로): Object 접근, 파일 IO, 동적 할당·해제, mutex·조건 변수, 일반 task 대기, 문자열 로그를 하지 않는다. 기다리는 것은 렌더 깨우기 신호 하나뿐이다(출력 링이 찼을 때). trace는 사전 할당 숫자 링에만 쓴다. 실제 적용된 스레드 우선순위를 장치 열기 로그에 남긴다(`SetThreadPriority` 실패는 지금 무시된다 — `Private/Win64/Concurrency.cpp:237`).
 
-렌더 깨우기 신호(`RealtimeWakeSignal` — [동기화](Synchronization.ko.md) 9.6절, AD26): 장치 콜백이 Signal하고 AudioRT가 Wait하는 단일 대기자 자동 리셋 신호다. Signal은 잠금을 잡지 않는다: Windows `WakeByAddressSingle`(또는 auto-reset event), Android futex wake, macOS Mach `semaphore_signal`. 기존 `ManualResetEvent`·`Semaphore`(내부 Mutex)와 SY0 `WaiterSignal` macOS 구현(pthread 조건 변수)은 쓰지 않는다. 이 신호는 [동기화](Synchronization.ko.md) 개정으로 PlatformBase에 둔다(선행 PR21).
+렌더 깨우기 신호(`RealtimeWakeSignal` — [동기화](Synchronization/09-Signals.ko.md) 9.6절, AD26): 장치 콜백이 Signal하고 AudioRT가 Wait하는 단일 대기자 자동 리셋 신호다. Signal은 잠금을 잡지 않는다: Windows `WakeByAddressSingle`(또는 auto-reset event), Android futex wake, macOS Mach `semaphore_signal`. 기존 `ManualResetEvent`·`Semaphore`(내부 Mutex)와 SY0 `WaiterSignal` macOS 구현(pthread 조건 변수)은 쓰지 않는다. 이 신호는 [동기화](Synchronization/README.ko.md) 개정으로 PlatformBase에 둔다(선행 PR21).
 
 출력 링: 블록 단위 칸 `bufferCount`개. 장치 열기는 `callbackFrames` = Q를 요청하고(3.7.1절), 협상 결과로 칸 수를 정한다.
 - `bufferCount = max(MinOutputBufferCount, ceil(callbackFrames / Q) + 1, audio.mixer.buffercount)`, `MinOutputBufferCount` = 2(UE와 같다), 상한 `MaxOutputBufferCount` = 16.
@@ -1756,7 +1756,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 | 문서 | 고친 것 | 남음 |
 |---|---|---|
 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 개정 1.17 | 18절: 전용 AudioRT 스레드 + 출력 링(AD2), 이 문서 링크, 표지 1.17 항목 | — |
-| [동기화](Synchronization.ko.md) 개정 3 | 9.6절 `RealtimeWakeSignal`, D34, 단계 SY12(AD26). D27(AudioRT SPSC 입력)은 그대로 | — |
+| [동기화](Synchronization/README.ko.md) 개정 3 | 9.6절 `RealtimeWakeSignal`, D34, 단계 SY12(AD26). D27(AudioRT SPSC 입력)은 그대로 | — |
 | [AppInfo·명령줄](AppInfoCommandLine.ko.md) 개정 4 | `RunTraits::audioOutput`·`audioMuted`, `--no-sound`·`--mute-audio`·`--allow-commandlet-audio`, 8.6절 볼륨 CVar | — |
 | [엔진 런타임](EngineRuntime/06-Engine.ko.md) 6절 | 종료 게이트(`Busy`면 멈춤·이어 부르기, AD23) | — |
 | [크래시 처리·실행](CrashHandlingAndLaunch.ko.md) 개정 13 | 20절 호스트 재시도·Fatal | — |

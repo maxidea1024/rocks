@@ -13,7 +13,7 @@
 - [앱 정보와 명령줄](AppInfoCommandLine.ko.md) 개정 3: `ProcessCommandLine`·대화상자 억제 API(AP1의 일부)를 이번에 구현했다. 나머지 경계는 21절에 적었다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(크래시 수집은 사전 확보 저장소·제한 시간·불완전 표시), 종료 코드 계약(2479행).
 - [플랫폼 계층](PlatformLayer.ko.md): OS 경계와 자식 프로세스.
-- [동기화](Synchronization.ko.md): 설계만 있다. 크래시 경로는 그 잠금을 쓰지 않는다(OS 이벤트·원자 변수만 쓴다).
+- [동기화](Synchronization/README.ko.md): 설계만 있다. 크래시 경로는 그 잠금을 쓰지 않는다(OS 이벤트·원자 변수만 쓴다).
 - [모듈 로더](ModuleLoader/README.ko.md) 개정 2(ML0 병합 `77cb1817`): 모든 C++ 모듈·실행 파일의 모듈 진입점. Launch 통합은 그 문서의 ML1이다(21절).
 - [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)(GS1 병합 `493f9a0d`): 모듈 생성 헤더는 등록 함수 선언만 담는다. 이 구현의 새 소스는 모듈 생성 헤더를 include하지 않는다.
 
@@ -1458,7 +1458,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **ML1(그 문서, 이 구현 병합 뒤).** Launch가 로더를 소유한다(`ApplicationContext`, 전역 접근자 없음, MD4). 8.1절 7단계(도구 로그) 뒤·8단계(본문) 전에 로더 생성·`Prepare`·부트 모듈(Launch 의존 폐포)과 `EarliestPossible` 시작, 9단계에서 도구 로그 정리 전에 프로세스 묶음 종료를 넣는다. 실패 정리는 Launch 단계 실행기의 "시작한 단계만 역순"을 그대로 쓴다. Launch 모듈 규칙에 `ModuleLoader` 의존을 더한다. 이 문서 8.1·8.2절과 7.4절(`ApplicationContext`)의 고침은 ML1에서 한다(그 문서 8절).
   - **경계.** 크래시 수집 설치(1단계)와 명령줄 캡처(3단계)는 로더보다 먼저다. 모듈 `Startup`의 크래시도 그래서 보고된다. 로더는 크래시 경로에 끼지 않는다.
 - **[플랫폼 계층](PlatformLayer.ko.md)**: "크래시 수집과 프로세스 진입" 절(공개 헤더·구현 파일·OS 경계·capability 표·동기화 primitive를 쓰지 않는 규칙)과 UE 대조 후속 목록의 크래시 처리 행을 더했다(LC8).
-- **[동기화](Synchronization.ko.md)**: 크래시 경로는 그 잠금을 쓰지 않는다. `WaiterSignal`·주소 대기가 생겨도 크래시 경로는 OS 이벤트·세마포어를 유지한다. 크래시 때 사용자 공간 대기열 상태를 믿지 않기 위해서다.
+- **[동기화](Synchronization/README.ko.md)**: 크래시 경로는 그 잠금을 쓰지 않는다. `WaiterSignal`·주소 대기가 생겨도 크래시 경로는 OS 이벤트·세마포어를 유지한다. 크래시 때 사용자 공간 대기열 상태를 믿지 않기 위해서다.
 - **breadcrumb(계획 29.4절 "사전 확보 breadcrumb 저장소")**: 이번 범위 밖이다. 연관 파일 칸(`SetCrashAnnotation`)을 그 시작점으로 둔다.
 
 ## 22. 결정
