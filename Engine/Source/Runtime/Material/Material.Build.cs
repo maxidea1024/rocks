@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Material assets (Docs/Design/MaterialSystem.ko.md section 4.2, stage MS3a): the abstract MaterialBase (UE UMaterialInterface) and the
+// Material assets (Docs/Design/MaterialSystem section 4.2, stage MS3a): the abstract MaterialBase (UE UMaterialInterface) and the
 // Material class, without fields yet. Mesh material slots need the reference type before the material schema and compiler exist
 // (MeshAnimationAssets.ko.md section 4.3, user decision 2026-11-23). Stage MS3 adds the section 4.2 fields, MaterialInstance and cooking,
 // and the MaterialSchema and MaterialRuntime dependencies (section 3.2).

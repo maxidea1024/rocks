@@ -3,7 +3,7 @@
 기준일: 2026-11-23, 개정 17(10.4절 14번 SCC를 Core 공용 `algo::ForEachStrongComponent`로 — 중복 유틸리티 제거, 동작 같음). 개정 16(UX1c 설계 — 임포트 계획·`--only` 닫힘·기존 에셋 조회·종류별 임포터 표·`asset-import-unreal`, 10.5절; A2f 프레임워크에 없는 네 가지를 요구 UXR8–UXR11로 넘김, 13절). 개정 15(UX 묶음 리뷰 반영 — 퇴화 다각형 자기 변, 옛 경로 soft 참조, 원본 복제 실패·스킨 inline reduction·영향 12개 초과, golden 묶음 12.3절, 리더 상한·일반 파일·플러그인 error). 개정 14(UX4를 UX4a·UX4b로 나눔, UX4a 머티리얼 계열 추출 — 8.6절). 개정 13(UX8을 UX8a·UX8b로 나눔, UX8a 애니메이션 클립 추출 — 7.1절). 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
-- 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem/12-Textures/README.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
+- 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem/12-Textures/README.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem/README.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`). 경로 약어: `E/` = `Engine/Source/Runtime/Engine`, `EP/` = `E/Public`, `RT/` = `Engine/Source/Runtime`, `Ed/` = `Engine/Source/Editor/UnrealEd`, `Dev/` = `Engine/Source/Developer`.
 - 좌표·단위는 UE와 Rocks가 같다(왼손, +Z 위, cm, 도). 교환 경로 어디에도 좌표 변환을 두지 않는다.
 - 착수 시점은 사용자가 정한다. Rocks 쪽 임포트는 받는 에셋 타입의 단계(A5 텍스처, MA 메시·애니메이션, MaterialSystem MS3·MS6)가 끝나야 가능하다(14절). UE 플러그인은 Rocks 구현 순서와 무관한 별도 코드다.
@@ -629,7 +629,7 @@ RocksExport로 만든 실제 묶음 `Engine/Plugins/Importers/UnrealExchange/Tes
 | UXR1 | [에셋 시스템](AssetSystem/12-Textures/12.1-TypesAndSources.ko.md) 12.2절 | (2026-11-23 대체) JPEG 원본 허용 — 파일·Unreal 교환 모두 옵션 없이 받는다, 처음의 `--allow-lossy-origin`·`LossyOriginAccepted`·ImportRecord `lossyOrigin` 표시 | 반영(AssetSystem 개정 10, 12.2절) |
 | UXR2 | 에셋 시스템 7절(AssetIndex)·5.2절 Tags | 임포터가 정하는 태그 키(`UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths`)를 기록하고 검색할 수 있게 한다 | 반영(AssetSystem 개정 10, 7절 — 임포터 키는 `<임포터 이름>.` 접두) |
 | UXR3 | 에셋 시스템 4.6절 | 10.3절 진단 코드 등록 | 반영(AssetSystem 개정 10, 4.6절) |
-| UXR4 | [머티리얼 시스템](MaterialSystem.ko.md) 5.4·9.2절 | 같은 이름 파라미터 병합·함수 global 파라미터 끌어올리기(8.5절)를 번역 결과가 V8을 통과하는 형태로 받는지 확인. 엔진 내장 "구운 표면" 부모 머티리얼 정의(엔진 콘텐츠 `/Engine` 마운트는 후속이므로 그 전까지 두는 곳 포함) | 반영(MaterialSystem 개정 6, 9.2·11.3절) |
+| UXR4 | [머티리얼 시스템](MaterialSystem/README.ko.md) 5.4·9.2절 | 같은 이름 파라미터 병합·함수 global 파라미터 끌어올리기(8.5절)를 번역 결과가 V8을 통과하는 형태로 받는지 확인. 엔진 내장 "구운 표면" 부모 머티리얼 정의(엔진 콘텐츠 `/Engine` 마운트는 후속이므로 그 전까지 두는 곳 포함) | 반영(MaterialSystem 개정 6, 9.2·11.3절) |
 | UXR5 | 정책 검사(Rocks.Tooling.Checks) | `Extras/` 아래에 Rocks 모듈 규칙·서술자가 없음을 확인 | 구현(2026-11-20, 11.1절 `foreign-engine-boundary`) |
 | UXR6 | 에셋 시스템 시험 기반 | 결정적 AssetId 발급기 주입 지점(시험 전용) | 반영(AssetSystem 개정 10, 14.1절) |
 | UXR7 | [빌드 대상](BuildTargets/README.ko.md) | 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`의 서술자·종류(Developer)·Shipping 제외 | 반영(BuildTargets 개정 3, 3.6절) |

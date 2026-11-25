@@ -3,7 +3,7 @@
 #include <AssetRuntime/Package.h>
 #include <Object/ModuleRegistration.h>
 
-// 머티리얼 에셋 클래스다(Docs/Design/MaterialSystem.ko.md 2절·4.2절, 단계 MS3a). 지금은 골격만
+// 머티리얼 에셋 클래스다(Docs/Design/MaterialSystem 2절·4.2절, 단계 MS3a). 지금은 골격만
 // 있다: 메시 머티리얼 슬롯(ObjectRef<MaterialBase> — MeshAnimationAssets 4.3절)이 참조할 타입이
 // 머티리얼 schema·컴파일러보다 먼저 필요해서다(사용자 결정 2026-11-23). 그래프·기본 속성·사용
 // 플래그 같은 4.2절 필드와 MaterialInstance·MaterialFunction·ParameterCollection은 MS3·MS6이

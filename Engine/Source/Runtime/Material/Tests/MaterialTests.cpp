@@ -3,7 +3,7 @@
 #include <Material/Material.h>
 #include <TestSupport/Test.h>
 
-// 머티리얼 에셋 클래스 골격 시험이다(Docs/Design/MaterialSystem.ko.md 4.2절, 단계 MS3a): 등록과
+// 머티리얼 에셋 클래스 골격 시험이다(Docs/Design/MaterialSystem 4.2절, 단계 MS3a): 등록과
 // 상속 관계(Material은 MaterialBase·Asset), MaterialBase는 추상이라 만들 수 없음, 에디터 패키지
 // 저장·로드·재저장 왕복과 결정성.
 using namespace rocks;
