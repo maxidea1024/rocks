@@ -740,6 +740,8 @@ Result<void> CookPublisher::Finish(const CookedManifest* merge,
         algo::Sort(manifest.entries.View(), EntryLess);
         // artifact 표: 이번 쿠킹이 만든 항목(A4f3 단계 — 지금은 없다)이 이기고, 같은 (kind, 이름,
         // formatId)가 없는 이전 항목은 남는다. 파일 대조는 A4f3 6항이다(10.3.1절 A4f2 8번 한계).
+        // 이진 탐색 전에 이번 구간을 정렬한다(단계가 넣은 순서와 무관하게 — 2026-11-25 리뷰 A).
+        algo::Sort(manifest.artifacts.View(), CookedArtifactLess);
         const usize freshArtifacts = manifest.artifacts.Size();
         for (const CookedManifestArtifact& old : merge->artifacts) {
             const bool replaced = algo::BinarySearch(Span<const CookedManifestArtifact>(
