@@ -8,6 +8,9 @@
 #include <Core/FileRead.h>
 #include <HostConfig/HostSettings.h>
 #include <AssetNugget/NuggetCacheSettings.h>
+#include <AssetNugget/NuggetFileSystemBackend.h>
+#include <AssetNugget/NuggetRecord.h>
+#include <AssetRuntime/CookedManifest.h>
 #include <Base/InitializerList.h>
 #include <Platform/File.h>
 #include <TestSupport/Test.h>
@@ -42,6 +45,16 @@ struct Run {
         captured.error.Clear();
         CommandletOutput output = captured.Output();
         auto ran = RunAssetCookCommand(&context, args, output);
+        return ran ? ran.Value() : -1;
+    }
+
+    // 다른 명령 함수를 같은 문맥으로 부른다(asset-load-cooked·nugget-gc).
+    int32 Call(Result<int32> (*command)(void*, Span<const StringView>, CommandletOutput&),
+               Span<const StringView> args) noexcept {
+        captured.out.Clear();
+        captured.error.Clear();
+        CommandletOutput output = captured.Output();
+        auto ran = command(&context, args, output);
         return ran ? ran.Value() : -1;
     }
 
@@ -586,6 +599,191 @@ TEST(AssetCookCommand_OutputFailures) {
     REQUIRE(cook.scene.WriteFile("Config/AssetNuggets.json",
                                  "{\"localPath\": \"Rock.trock/nuggets\"}"));
     CHECK(cook.Cook() == -1);
+}
+
+namespace {
+
+// 쿠킹한 Windows 매니페스트를 읽는다.
+Result<CookedManifest> ReadCooked(Allocator& allocator, CookScene& cook) noexcept {
+    StringBuilder<512> path(allocator);
+    Array<uint8> bytes(allocator);
+    bool existed = false;
+    if (!path.TryAppendFormat("{}/Saved/Cooked/Windows/{}", cook.scene.root.Root(),
+                              CookedManifestFileName) ||
+        !ReadWholeFile(platform::PhysicalFileSystem(), path.View(), CookedManifestMaxFileBytes,
+                       bytes, existed) ||
+        !existed) {
+        return Result<CookedManifest>::Failure(ErrorCode::NotFound);
+    }
+
+    return ReadCookedManifest(allocator, bytes.View());
+}
+
+} // namespace
+
+// asset-load-cooked(13.1절 A6): 쿠킹한 프로젝트에서 경로 힌트(대소문자 다르게)·AssetId로 로드하면
+// 성공 줄(Rock과 Hard 의존 Rock_extra — packages 2)이다. 없는 경로 NotFound, 패키지 손상
+// CorruptPackage, 다른 프로필의 매니페스트 없음, 프로필이 다른 매니페스트 IncompatibleCook, 사용법
+// 오류(대상 없음·둘·잘못된 AssetId·프로필 없음).
+TEST(AssetLoadCookedCommand_LoadsAndRejects) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene cook(env.allocator, "load-cooked-command");
+    REQUIRE(cook.ready);
+    REQUIRE(cook.Cook() == 0);
+    StringBuilder<512> project(env.allocator);
+    REQUIRE(project.TryAppendFormat("--project={}", cook.scene.root.Root()));
+    const auto load = [&](std::initializer_list<StringView> extra) noexcept {
+        StringView args[8] = {project.View()};
+        usize count = 1;
+        for (StringView one : extra) {
+            args[count++] = one;
+        }
+
+        return cook.run.Call(&RunAssetLoadCookedCommand, Span<const StringView>(args, count));
+    };
+    CHECK(load({"--profile=Windows", "/game/rock"}) == 0);
+    CHECK(cook.run.Out("asset-load-cooked: Windows loaded ") &&
+          cook.run.Out(" (/Game/Rock) packages 2\n"));
+
+    auto manifest = ReadCooked(env.allocator, cook);
+    REQUIRE(manifest);
+    const CookedManifestEntry* rock = nullptr;
+    for (const CookedManifestEntry& entry : manifest.Value().entries) {
+        if (entry.pathHint.View() == "/Game/Rock") {
+            rock = &entry;
+        }
+    }
+
+    REQUIRE(rock != nullptr);
+    StringBuilder<64> id(env.allocator);
+    REQUIRE(id.TryAppendFormat("{}", rock->asset));
+    CHECK(load({"--profile=Windows", id.View()}) == 0);
+    CHECK(cook.run.Out(" (/Game/Rock) packages 2\n"));
+
+    CHECK(load({"--profile=Windows", "/Game/Nope"}) == 1);
+    CHECK(cook.run.Error("asset-load-cooked: NotFound: /Game/Nope: error NotFound\n"));
+    CHECK(load({"--profile=Android", "/Game/Rock"}) == 1);
+    CHECK(cook.run.Error("asset-load-cooked: NotFound: ") &&
+          cook.run.Error("cannot read the cooked manifest"));
+
+    // 프로필이 다른 매니페스트(Windows 쿠킹 결과를 Android 자리에 둠)는 IncompatibleCook이다.
+    StringBuilder<512> windows(env.allocator);
+    Array<uint8> bytes(env.allocator);
+    bool existed = false;
+    REQUIRE(windows.TryAppendFormat("{}/Saved/Cooked/Windows/{}", cook.scene.root.Root(),
+                                    CookedManifestFileName) &&
+            ReadWholeFile(platform::PhysicalFileSystem(), windows.View(),
+                          CookedManifestMaxFileBytes, bytes, existed) &&
+            existed);
+    REQUIRE(cook.scene.MakeDirectory("Saved/Cooked/Android") &&
+            cook.scene.WriteFile(
+                "Saved/Cooked/Android/CookedManifest.rman",
+                StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size())));
+    CHECK(load({"--profile=Android", "/Game/Rock"}) == 1);
+    CHECK(cook.run.Error("asset-load-cooked: IncompatibleCook: "));
+
+    // 패키지 손상: Rock 패키지 파일의 한 byte를 바꾸면 CorruptPackage다.
+    StringBuilder<256> package(env.allocator);
+    REQUIRE(package.TryAppend("Saved/Cooked/Windows/") &&
+            AppendCookedPackagePath(package, rock->asset, rock->packageSha256));
+    StringBuilder<512> packagePath(env.allocator);
+    REQUIRE(packagePath.TryAppendFormat("{}/{}", cook.scene.root.Root(), package.View()));
+    Array<uint8> packageBytes(env.allocator);
+    REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), packagePath.View(), 64 * 1024 * 1024,
+                          packageBytes, existed) &&
+            existed && packageBytes.Size() > 100);
+    packageBytes[100] ^= 1;
+    REQUIRE(cook.scene.WriteFile(
+        package.View(),
+        StringView(reinterpret_cast<const char*>(packageBytes.Data()), packageBytes.Size())));
+    CHECK(load({"--profile=Windows", "/Game/Rock"}) == 1);
+    CHECK(cook.run.Error("asset-load-cooked: CorruptPackage: /Game/Rock: error "));
+
+    const auto usage = [&](std::initializer_list<StringView> extra) noexcept {
+        return load(extra) == 2 && cook.run.Error("usage: asset-load-cooked");
+    };
+    CHECK(usage({"--profile=Windows"}));
+    CHECK(usage({"--profile=Windows", "/Game/A", "/Game/B"}));
+    CHECK(usage({"--profile=Windows", "1234"}));
+    CHECK(usage({"/Game/Rock"}));
+    CHECK(usage({"--profile=Windows", "--profile=Windows", "/Game/Rock"}));
+}
+
+// nugget-gc(13.1절 A6): 로컬 backend에 너겟 하나를 둔 뒤 큰 상한(바이트 최대·일수 포화)은 남기고,
+// --max-bytes=0은 지운다(바이트 상한이 결정적으로 보장 — 시계에 기대지 않는다). off·rockpile 설정
+// 줄, 읽기 전용 루트(tmp 자리가 파일) 줄, 사용법 오류(빠짐·문법·u32 넘침·두 번).
+TEST(NuggetGcCommand_CollectsAndRejects) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CommandScene scene("nugget-gc-command");
+    REQUIRE(scene.ready);
+    ImporterState state;
+    Run run(env.allocator, state);
+    StringBuilder<512> project(env.allocator);
+    StringBuilder<512> nuggets(env.allocator);
+    REQUIRE(project.TryAppendFormat("--project={}", scene.root.Root()) &&
+            nuggets.TryAppendFormat("{}/{}", scene.root.Root(), NuggetDefaultLocalPath));
+    {
+        NuggetSystemClock clock;
+        NuggetFileSystemBackend backend(env.allocator, platform::PhysicalFileSystem(),
+                                        nuggets.View(), clock);
+        REQUIRE(backend.Open());
+        const uint8 value[] = {1, 2, 3, 4};
+        const NuggetPutValue values[] = {{0, value}};
+        Sha256Digest key;
+        for (usize index = 0; index < Sha256Digest::Bytes; ++index) {
+            key.bytes[index] = static_cast<uint8>(index + 1);
+        }
+
+        REQUIRE(backend.Put(NuggetBackendPut{NuggetBucketTexture, key, values}).status ==
+                NuggetStatus::Stored);
+    }
+
+    const auto gc = [&](std::initializer_list<StringView> extra) noexcept {
+        StringView args[8] = {project.View()};
+        usize count = 1;
+        for (StringView one : extra) {
+            args[count++] = one;
+        }
+
+        return run.Call(&RunNuggetGcCommand, Span<const StringView>(args, count));
+    };
+    CHECK(gc({"--max-bytes=18446744073709551615", "--unused-days=4294967295"}) == 0);
+    CHECK(run.Out("nugget-gc: removed 0 (0 bytes) kept 1 ("));
+    CHECK(gc({"--max-bytes=0", "--unused-days=4294967295"}) == 0);
+    CHECK(run.Out("nugget-gc: removed 1 (") && run.Out(" kept 0 (0 bytes) skipped 0"));
+
+    REQUIRE(scene.MakeDirectory("Config") &&
+            scene.WriteFile("Config/AssetNuggets.json", "{\"backend\": \"off\"}"));
+    CHECK(gc({"--max-bytes=0", "--unused-days=0"}) == 0);
+    CHECK(run.Out("nugget-gc: the nugget cache is off\n"));
+    REQUIRE(scene.WriteFile("Config/AssetNuggets.json", "{\"backend\": \"rockpile\"}"));
+    CHECK(gc({"--max-bytes=0", "--unused-days=0"}) == 1);
+    CHECK(run.Error(
+        "nugget-gc: Unsupported: rockpile: the Rockpile nugget backend is not available"));
+    REQUIRE(scene.WriteFile("Config/AssetNuggets.json", "{"));
+    CHECK(gc({"--max-bytes=0", "--unused-days=0"}) == 1);
+    CHECK(run.Error("nugget-gc: InvalidSetting: ") && run.Error("cannot read the nugget settings"));
+
+    // 읽기 전용: 로컬 루트의 tmp 자리를 파일로 두면 tmp를 만들 수 없다.
+    REQUIRE(scene.WriteFile("Config/AssetNuggets.json",
+                            "{\"backend\": \"filesystem\", \"localPath\": \"Shared\"}") &&
+            scene.MakeDirectory("Shared") && scene.WriteFile("Shared/tmp", "file"));
+    CHECK(gc({"--max-bytes=0", "--unused-days=0"}) == 1);
+    CHECK(run.Error("nugget-gc: Unsupported: ") && run.Error("the nugget cache is read-only"));
+
+    const auto usage = [&](std::initializer_list<StringView> extra) noexcept {
+        return gc(extra) == 2 && run.Error("usage: nugget-gc");
+    };
+    CHECK(usage({"--max-bytes=0"}));
+    CHECK(usage({"--unused-days=0"}));
+    CHECK(usage({"--max-bytes=1x", "--unused-days=0"}));
+    CHECK(usage({"--max-bytes=-1", "--unused-days=0"}));
+    CHECK(usage({"--max-bytes=0", "--unused-days=4294967296"}));
+    CHECK(usage({"--max-bytes=18446744073709551616", "--unused-days=0"}));
+    CHECK(usage({"--max-bytes=0", "--max-bytes=0", "--unused-days=0"}));
+    CHECK(usage({"--max-bytes=0", "--unused-days=0", "extra"}));
 }
 
 } // namespace asset_cook_commandlet_tests_file

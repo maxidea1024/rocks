@@ -280,6 +280,19 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         return 1;
     }
 
+    registered = registry.Register({"asset-load-cooked",
+                                    "Load one cooked asset from the cooked manifest to check it.",
+                                    &RunAssetLoadCookedCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered = registry.Register({"nugget-gc", "Collect unused asset nuggets of the project.",
+                                    &RunNuggetGcCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
     registered = registry.Register({"shader-compile", "Compile shaders through the shader workers.",
                                     &shader::RunShaderCompileCommand, &shaderContext});
     if (!registered) {
