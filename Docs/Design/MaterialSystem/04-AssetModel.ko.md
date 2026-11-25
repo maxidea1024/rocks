@@ -75,6 +75,7 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 | `MaterialBase.h` | `MaterialBase`(Abstract) | `subsurfaceProfiles`·`specularProfiles`·`toonProfiles`(TODO)·`neuralProfile`(TODO)·`lightBakeSettings`(TODO)·`textureSamplingScales`(19.11절) |
 | `Material.h` | `Material` | `graph : MaterialGraph`(EditorOnly)·`layout : GraphDocumentLayout`(EditorOnly)·`traits : MaterialTraitsDesc`·`usage : VertexInputUsage`·`physicalMaterial`·`physicalMaterialMask`·`renderTracePhysicalMaterials`(TODO)·`virtualizedGeometryOverride`(TODO)·`preview : MaterialPreviewSettings`(EditorOnly) |
 | `MaterialInstance.h` | `MaterialInstance` | `parent`·종류별 override 배열·`staticOverrides`·`traitOverrides : MaterialTraitOverrides`·`layerStackOverrides`·물리 재질·profile override(19.11절) |
+| `MaterialFunctionBase.h` | `MaterialFunctionBase`(Abstract, UE `UMaterialFunctionInterface`) | — |
 | `MaterialFunction.h` | `MaterialFunction` | `graph`·`layout`(EditorOnly)·`usage : MaterialFunctionUsage {General, Layer, LayerBlend}`·`exposeToLibrary`(EditorOnly)·`libraryCategories`(EditorOnly)·`description`(EditorOnly) |
 | `MaterialFunctionInstance.h` | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunction>`·파라미터 override 배열 |
 | `ParameterCollection.h` | `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>` |
@@ -83,7 +84,7 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 
 | 파일 | 타입 | 내용 |
 |---|---|---|
-| `MaterialTraitsDesc.h` | `MaterialTraitsDesc` | 19.9절 "필드" 행 전부. 렌더러 묶음은 하위 struct `MaterialTranslucencyTraits`·`MaterialForwardTraits`·`MaterialPostProcessTraits`(각 파일) |
+| `MaterialTraitsDesc.h` | `MaterialTraitsDesc` | 19.9절 "필드" 행 전부. 하위 struct `MaterialTranslucencyTraits`·`MaterialForwardTraits`·`MaterialPostProcessTraits`·`MaterialDisplacementTraits`(각 파일) |
 | `MaterialTraitOverrides.h` | `MaterialTraitOverrides` | 19.11절 base property override 16개(`Optional<값>`) |
 | `MaterialTraitEnums.h` | `DecalResponse`·`TranslucencyPass`·`TranslucencyLightingMode`·`RefractionMethod`·`RefractionCoverageMode`·`PixelDepthOffsetMode`·`MaterialShadingRate`·`BlendableLocation`·`StencilCompare`·`MaterialFunctionUsage` | 값은 UE enum과 같은 순서·같은 뜻이다(UE `EMaterialDecalResponse` 등, 근거는 각 enum 주석). UE의 숨은 별칭·deprecated 값(예: `BL_BeforeTranslucency`)은 넣지 않는다 |
 | `ParameterKey.h` | `ParameterKey`·`ParameterScope` | 9.2절 |
@@ -93,3 +94,23 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 
 - **번호표.** 영역·블렌드 모드·shading model 열거는 Renderer 스펙이 정의 권한을 가지며 C++ 정의는 `RenderData` 모듈에 둔다(Renderer 3.2·14.2절, 결정 RN5). `RenderData`가 아직 없으므로 MS3b에서 번호표 세 열거만 가진 `RenderData` 모듈을 만든다. 장면 기술 값 타입 등 나머지는 Renderer RS0이 더한다. 리플렉션 열거라 ObjectRuntime에 의존한다(16절 MRD15). `TranslucentColoredTransmittance`는 Renderer 14.2절이 넣지 않기로 했지만, 머티리얼 쪽은 UE 값 전부를 받는 사용자 지시에 따라 TODO 값으로 끝에 둔다(`MPQ-ColoredTransmittance`, 16절 MRD15).
 - **TODO 필드.** 대상 에셋 클래스가 없는 참조 필드는 `MaterialAssetReference`(19.4.3절)로 두어, 클래스가 생겨도 migration이 없다. 기본값이 아닌 값이 있으면 쿠킹 진단 `PrerequisiteMissing`이다(19.9절).
+
+#### 4.6.1 MS3b 리뷰 반영(개정 11)
+
+MS3b 코드 리뷰(필수 4·권장 8·참고 4)를 다음과 같이 반영한다.
+
+- **함수 참조(필수).** UE는 레이어·혼합·함수 인스턴스 부모를 `UMaterialFunctionInterface`로 둔다(`RE/Public/Materials/MaterialLayersFunctions.h`, `MaterialFunctionInstance.h` `Parent`). Rocks도 추상 기반 `MaterialFunctionBase`(파일 `MaterialFunctionBase.h`)를 두고 `MaterialFunction`·`MaterialFunctionInstance`가 상속한다. 함수 참조(`MaterialLayerEntry.layer`·`blend`, `MaterialFunctionInstance.parent`)는 `ObjectRef<MaterialFunctionBase>`이고 **EditorOnly**다. 그래서 쿠킹 패키지에 Hard 간선이 생기지 않는다(4.4절 "Build"). Build 의존은 Material 모듈의 `DependencyDeclarer` hook(`RegisterMaterialAssetHooks`, AssetSystem 16.2절)이 선언한다: 인스턴스 → 부모·레이어 스택 함수, 함수 인스턴스 → 부모. 머티리얼 그래프 안 함수 호출의 Build 의존은 함수 호출 노드 속성이 생기는 MS2e에서 같은 hook에 더한다. `MaterialInstance.layerStack`·`overridesLayerStack`도 EditorOnly다(레이어 스택은 static 변형 번역의 입력일 뿐 실행 때 필요 없다).
+- **Static Enum override(필수).** `StaticEnumOverride { key, int32 value }`와 `staticEnumOverrides` 배열을 `MaterialInstance`·`MaterialFunctionInstance`에 둔다(9.3절 Static Enum).
+- **Font override(필수).** UE `FFontParameterValue`(`FontValue`·`FontPage`)와 같게 `FontParameterOverride { key, font : MaterialAssetReference, page : int32 }`를 둔다.
+- **사용 대상 override(필수).** UE `bOverride_UsageFlags`는 플래그별로 덮고 나머지는 부모 값을 물려받는다(`RE/Private/Materials/MaterialInstance.cpp:2676–2680`). `MaterialTraitOverrides`는 `addedVertexInputs`·`removedVertexInputs` 두 집합을 둔다. 결과 = (부모 ∪ added) − removed다.
+- **null로 덮기(참고 16).** 물리 재질·profile·가상화 geometry 대체 override는 `Optional<MaterialAssetReference>`다. 값이 없으면 부모 값을 쓰고, 값이 null 참조면 "없음으로 덮기"다(UE `bOverride*` = true + null과 같다).
+- **조명 굽기(권장 7).** `MPQ-LightBake`(정적 조명 굽기 도구)를 19.4.1절에 더한다. `MaterialBase.lightBakeSettings`가 기본값과 다르면 TODO 진단이다. 인스턴스는 `lightBakeOverrides : MaterialLightBakeOverrides`(값마다 `Optional`, UE `bOverride*` 넷과 같다)를 둔다.
+- **함수 인스턴스 override(권장 8).** `MaterialFunctionInstance`도 UE처럼(`MaterialFunctionInstance.h:26–74`) 컬렉션·텍스처 컬렉션·글꼴·RVT·SVT override를 가진다. TODO 검사 오버로드를 더한다.
+- **파라미터 컬렉션 상속(권장 9).** UE 5.8 컬렉션 상속(`MaterialParameterCollection.h:217–228` `Base`·`ScalarParameterBaseOverrides`·`VectorParameterBaseOverrides`)을 들인다. `ParameterCollection.base : ObjectRef<ParameterCollection>`(Hard — 실행 때 layout과 기본값이 부모에서 온다), `scalarBaseOverrides`·`vectorBaseOverrides : Array<{ parameterId : Guid, value }>`. UE `BaseStateId`는 Rocks에서 layout 서명으로 대신한다(12.2절).
+- **shading model preset(권장 10).** 인스턴스의 shading model override는 Renderer 번호표가 아니라 UE `EMaterialShadingModel` 값 전부를 가진 `ShadingModelPreset`(MaterialSchema)이다. `PreintegratedSkin`·`FromMaterialExpression`도 받는다. `SurfaceFromShadingModel`이 번호표로 바꾼다(10.3절).
+- **컬렉션 Hard 참조(권장 11).** `Material.parameterCollections : ObjectRefArray<ParameterCollection>`(Hard)를 둔다. 그래프의 컬렉션 노드에서 번역이 채우고, 실행 때 컬렉션 layout·기본값을 함께 로드한다(4.4절). 함수 Build 의존은 위 hook이다.
+- **물리 재질 표(권장 6).** UE `PhysicalMaterialMap[8]`(`Material.h:470`, MIC에도 있음)을 `physicalMaterialMap : MaterialAssetReference[8]`로 둔다(TODO `MPQ-PhysicalMaterial`).
+- **texture sampling scale(참고 14).** 기본값을 UE `FMaterialTextureInfo`와 같게 한다: `samplingScale` 0, `uvChannel` −1(`NoUvChannel`). UE는 텍스처 이름·참조로 잇고 Rocks는 번역 결과 텍스처 slot 번호로 잇는다(12.5절).
+- **사용 대상 집합(참고 15).** `VertexInputUsage`는 선언 순서를 보존하고 중복이 없다. `AddVertexInput`·`ContainsVertexInput` 도우미로만 넣는다.
+- **레이어 EditorOnly 칸(참고 17).** UE `FMaterialLayersFunctionsEditorOnlyData`의 `LayerStates`·`LayerNames`·`RestrictToLayerRelatives`·`RestrictToBlendRelatives`·`LayerGuids`·`LayerLinkStates`·`DeletedParentLayerGuids`를 들인다. 레이어마다 `visible`·`displayName`·`restrictToLayerRelatives`·`restrictToBlendRelatives`·`layerId`·`linkState : MaterialLayerLinkState`이고, 스택에 `deletedParentLayerIds`가 있다. `MaterialFunction`에 UE `UserExposedCaption`(EditorOnly)을 `userExposedCaption`으로 더한다.
+- **이름.** 19.9·19.11절 표의 필드 이름을 코드에 맞춘다(아래 표 고침).

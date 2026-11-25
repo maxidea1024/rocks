@@ -175,6 +175,7 @@ UE는 형식·플랫폼에 따라 갈리는 스위치를 플랫폼별 번역 때
 | `MPQ-PhysicalMaterial` | 물리 재질·마스크 에셋(PhysicsModule) | 머티리얼 속성 `physicalMaterial`·`physicalMaterialMask`·`renderTracePhysicalMaterials` | [물리 모듈](../../PhysicsModule/README.ko.md) |
 | `MPQ-VirtualizedGeometry` | 가상화 geometry·테셀레이션 pass | 속성 displacement·tessellation·override 머티리얼(19.9절) | 후속(스펙 없음) |
 | `MPQ-ColoredTransmittance` | dual-source blending 반투명 경로 | 블렌드 모드 `TranslucentColoredTransmittance` | Renderer RS5 뒤 |
+| `MPQ-LightBake` | 정적 조명 굽기 도구 | 머티리얼 속성 `lightBakeSettings`·인스턴스 `lightBakeOverrides`(19.11·19.12절) | 조명 굽기 단계(스펙 없음) |
 | `MPQ-AlphaHoldout` | holdout pass | 블렌드 모드 `AlphaHoldout`(10.3절) | Renderer 후속 값(14.2절) |
 
 #### 19.4.2 원본 공급 interface(`src:`)

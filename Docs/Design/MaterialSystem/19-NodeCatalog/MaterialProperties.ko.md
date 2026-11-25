@@ -21,14 +21,15 @@
 |---|---|---|---|---|
 | `PhysMaterial` | 462 | `physicalMaterial : SoftAssetRef` | 필드 + TODO | MPQ-PhysicalMaterial(PhysicsModule 물리 재질 에셋) |
 | `PhysMaterialMask` | 466 | `physicalMaterialMask : SoftAssetRef` | 필드 + TODO | MPQ-PhysicalMaterial |
-| `RenderTracePhysicalMaterialOutputs` | 470 | `renderTracePhysicalMaterials` | 필드 + TODO | MPQ-PhysicalMaterial, RenderTrace 플러그인 출력 노드와 짝 |
+| `PhysicalMaterialMap` | 470 | `physicalMaterialMap : MaterialAssetReference[8]` | 필드 + TODO | MPQ-PhysicalMaterial |
+| `RenderTracePhysicalMaterialOutputs` | 474 | `renderTracePhysicalMaterials` | 필드 + TODO | MPQ-PhysicalMaterial, RenderTrace 플러그인 출력 노드와 짝 |
 | `MaterialDomain` | 481 | `traits.domain` | 필드 | Renderer 14.2 영역 번호표 |
 | `BlendMode` | 485 | `traits.blendMode` | 필드 | TranslucentColoredTransmittance·AlphaHoldout은 TODO(19.4.1 MPQ-ColoredTransmittance·MPQ-AlphaHoldout) |
 | `DecalBlendMode` | 488 | — | 제외 | deprecated |
 | `MaterialDecalResponse` | 495 | `traits.decalResponse` | 필드(효과는 Renderer) | Renderer RS7 |
 | `NaniteOverrideMaterial` | 499 | `virtualizedGeometryOverride` | 필드 + TODO | MPQ-VirtualizedGeometry |
-| `DisplacementScaling` | 502 | `traits.displacementScaling` | 필드 + TODO | MPQ-VirtualizedGeometry(displacement를 쓰는 pass) |
-| `DisplacementFadeRange` | 505 | `traits.displacementFadeRange` | 필드 + TODO | MPQ-VirtualizedGeometry |
+| `DisplacementScaling` | 502 | `traits.displacement.magnitude`·`center` | 필드 + TODO | MPQ-VirtualizedGeometry(displacement를 쓰는 pass) |
+| `DisplacementFadeRange` | 505 | `traits.displacement.fadeStartSizePixels`·`fadeEndSizePixels` | 필드 + TODO | MPQ-VirtualizedGeometry |
 | `ShadingModel` | 510 | — | 다른 곳 | 고전 단일 shading model 값. Rocks는 Surface 그래프가 정한다(MD1). UE 변환은 SurfaceFromShadingModel로 옮긴다 |
 | `bCastDynamicShadowAsMasked` | 515 | `traits.castDynamicShadowAsMasked` | 필드(효과는 Renderer) | Renderer 그림자 pass |
 | `ShadingModels` | 519 | — | 다른 곳 | 번역 결과(MATERIAL_SHADING_MODELS)로 계산 |
@@ -44,11 +45,11 @@
 | `DitherOpacityMask` | 572 | `traits.ditherOpacityMask` | 필드 | Masked + TAA dither |
 | `bAllowNegativeEmissiveColor` | 576 | `traits.allowNegativeEmissive` | 필드 | 번역이 emissive를 max(0)로 자르지 않는다 |
 | `bHasPixelAnimation` | 582 | `traits.hasPixelAnimation` | 필드(효과는 Renderer) | Renderer velocity |
-| `bEnableTessellation` | 586 | `traits.enableTessellation` | 필드 + TODO | MPQ-VirtualizedGeometry |
-| `bEnableDisplacementFade` | 590 | `traits.enableDisplacementFade` | 필드 + TODO | MPQ-VirtualizedGeometry |
-| `TranslucencyPass` | 597 | `traits.translucencyPass` | 필드(효과는 Renderer) | Renderer RS5 |
-| `TranslucencyLightingMode` | 601 | `traits.translucencyLightingMode` | 필드(효과는 Renderer) | Renderer RS5 |
-| `bEnableMobileSeparateTranslucency` | 605 | `traits.mobileSeparateTranslucency` | 필드(효과는 Renderer) | Renderer RS5 |
+| `bEnableTessellation` | 586 | `traits.displacement.enableTessellation` | 필드 + TODO | MPQ-VirtualizedGeometry |
+| `bEnableDisplacementFade` | 590 | `traits.displacement.enableFade` | 필드 + TODO | MPQ-VirtualizedGeometry |
+| `TranslucencyPass` | 597 | `traits.translucency.pass` | 필드(효과는 Renderer) | Renderer RS5 |
+| `TranslucencyLightingMode` | 601 | `traits.translucency.lightingMode` | 필드(효과는 Renderer) | Renderer RS5 |
+| `bEnableMobileSeparateTranslucency` | 605 | `traits.translucency.mobileSeparateTranslucency` | 필드(효과는 Renderer) | Renderer RS5 |
 | `NumCustomizedUVs` | 609 | `traits.customizedUvCount` | 필드 | MATERIAL_NUM_TEXCOORDS·보간 예산(V9) |
 | `TranslucencyDirectionalLightingIntensity` | 616 | `traits.translucency.directionalLightingIntensity` | 필드(효과는 Renderer) | Renderer RS5 |
 | `TranslucentShadowDensityScale` | 620 | `traits.translucency.shadowDensityScale` | 필드(효과는 Renderer) | Renderer RS5 |
@@ -113,7 +114,7 @@
 | `BlendableLocation` | 1126 | `traits.postProcess.location` | 필드(효과는 Renderer) | PostProcess 영역 삽입 위치(계획 26절) |
 | `BlendableOutputAlpha` | 1130 | `traits.postProcess.outputAlpha` | 필드(효과는 Renderer) | 같음 |
 | `UserSceneTexture` | 1134 | `traits.postProcess.userSceneTexture` | 필드(효과는 Renderer) | 같음, 공급 scene |
-| `UserTextureDivisor` | 1138 | `traits.postProcess.userTextureDivisor` | 필드(효과는 Renderer) | 같음 |
+| `UserTextureDivisor` | 1138 | `traits.postProcess.userTextureDivisorX`·`Y` | 필드(효과는 Renderer) | 같음 |
 | `ResolutionRelativeToInput` | 1142 | `traits.postProcess.resolutionRelativeToInput` | 필드(효과는 Renderer) | 같음 |
 | `bDisablePreExposureScale` | 1151 | `traits.postProcess.disablePreExposureScale` | 필드(효과는 Renderer) | 같음 |
 | `bEnableStencilTest` | 1168 | `traits.postProcess.stencilTest` | 필드(효과는 Renderer) | 같음 |
@@ -138,7 +139,7 @@
 | `ParameterGroupData_DEPRECATED` | 2147 | — | 제외 | deprecated |
 | 고전 입력 22개(DiffuseColor·SpecularColor·BaseColor·Metallic·Specular·Roughness·Anisotropy·Normal·Tangent·EmissiveColor·Opacity·OpacityMask·WorldPositionOffset·SubsurfaceColor·ClearCoat·ClearCoatRoughness·AmbientOcclusion·Refraction·MaterialAttributes·PixelDepthOffset·ShadingModelFromMaterialExpression·FrontMaterial(_DEPRECATED)) | 2150–2216 | — | 제외 | deprecated. 그래프 출력 노드·Surface로 옮겨졌다(UE도 같다) |
 
-수치: 대응 117행 + 고전 입력 묶음 22 + 사용 플래그 28(19.10절) = 167(UE 리플렉션 속성 전부).
+수치: 대응 118행 + 고전 입력 묶음 22 + 사용 플래그 28(19.10절) = 167(UE 리플렉션 속성 전부).
 
 ### 19.10 사용 플래그
 
@@ -188,7 +189,7 @@ UE는 정점 입력 타입마다 `bUsedWith*`를 둔다(`Material.h:703–911`, 
 | `SpecularProfiles` | 389 | `specularProfiles` | 필드 + TODO | MPQ-SpecularProfile |
 | `ToonProfiles` | 393 | `toonProfiles` | 필드 + TODO | MPQ-ToonShading |
 | `NeuralProfile` | 397 | `neuralProfile` | 필드 + TODO | MPQ-NeuralProfile |
-| `LightmassSettings` | 410 | `lightBakeSettings` | 필드 + TODO | 조명 굽기 도구(19.12절) |
+| `LightmassSettings` | 410 | `lightBakeSettings` | 필드 + TODO | MPQ-LightBake(19.12절) |
 | `bTextureStreamingDataSorted`·`TextureStreamingDataVersion`·`TextureStreamingData` | 415–422 | `textureSamplingScales` | 필드 | 12.5절(TextureStreaming T4) |
 | `ReferencedDefaultTextures` | 426 | — | 다른 곳 | 텍스처 Hard 참조 보고(4.4절) |
 | `AssetUserData` | 430 | — | 다른 곳 | 에셋 공통 기능(AssetSystem) |
@@ -203,20 +204,23 @@ UE는 정점 입력 타입마다 `bUsedWith*`를 둔다(`Material.h:703–911`, 
 | `TextureCollectionParameterValues` | `textureCollectionOverrides` | 필드 + TODO(MPQ-TextureCollection) |
 | `RuntimeVirtualTextureParameterValues` | `virtualTextureOverrides` | 필드 + TODO(MPQ-VirtualTexture) |
 | `SparseVolumeTextureParameterValues` | `sparseVolumeTextureOverrides` | 필드 + TODO(MPQ-SparseVolumeTexture) |
-| `FontParameterValues` | `fontOverrides` | 필드 + TODO(MPQ-Font) |
+| `FontParameterValues` | `fontOverrides : Array<FontParameterOverride>`(글꼴 + page) | 필드 + TODO(MPQ-Font) |
 | `UserSceneTextureOverrides` | `userSceneTextureOverrides` | 필드(효과는 Renderer 후처리) |
 | `EnumerationObjects` | — | 다른 곳(스칼라 파라미터의 열거 표시는 파라미터 노드 속성) |
-| `StaticParametersRuntime`·`bHasStaticPermutationResource` | `staticOverrides`, static 변형 유무는 계산 | 필드 |
+| `StaticParametersRuntime`·`bHasStaticPermutationResource` | `staticSwitchOverrides`·`staticComponentMaskOverrides`·`staticEnumOverrides`, static 변형 유무는 계산 | 필드 |
 | `BasePropertyOverrides` | `traitOverrides : MaterialTraitOverrides`(아래) | 필드 |
-| `PhysMaterial`·`bOverridePhysMaterial`, MIC `PhysMaterialMask` | `physicalMaterialOverride`·`physicalMaterialMaskOverride` | 필드 + TODO(MPQ-PhysicalMaterial) |
+| (UE `LightmassSettings`의 `bOverride*`) | `lightBakeOverrides : MaterialLightBakeOverrides` | 필드 + TODO(MPQ-LightBake) |
+| (9.3절 Static Enum) | `staticEnumOverrides` | 필드 |
+| `PhysicalMaterialMap`(MIC) | `physicalMaterialMapOverride : Optional<MaterialAssetReference>[8]` | 필드 + TODO(MPQ-PhysicalMaterial) |
+| `PhysMaterial`·`bOverridePhysMaterial`, MIC `PhysMaterialMask` | `physicalMaterialOverride`·`physicalMaterialMaskOverride : Optional<MaterialAssetReference>` | 필드 + TODO(MPQ-PhysicalMaterial) |
 | `NaniteOverrideMaterial` | `virtualizedGeometryOverride` | 필드 + TODO(MPQ-VirtualizedGeometry) |
-| `bOverrideSubsurfaceProfile`·`SpecularProfileOverride`·`ToonProfileOverride`와 bool들 | `profileOverrides` | 필드 + TODO(profile MPQ) |
-| `bOverrideBlendableLocation`·`BlendableLocationOverride`·`bOverrideBlendablePriority`·`BlendablePriorityOverride` | `traitOverrides.postProcess` | 필드(효과는 Renderer) |
+| `bOverrideSubsurfaceProfile`·`SpecularProfileOverride`·`ToonProfileOverride`와 bool들 | `subsurfaceProfileOverride`·`specularProfileOverride`·`toonProfileOverride : Optional<MaterialAssetReference>` | 필드 + TODO(profile MPQ) |
+| `bOverrideBlendableLocation`·`BlendableLocationOverride`·`bOverrideBlendablePriority`·`BlendablePriorityOverride` | `traitOverrides.blendableLocation`·`blendablePriority` | 필드(효과는 Renderer) |
 | `ReferencedTextureGuids`, MIC `ParameterStateId` | — | 다른 곳(Hard 참조 보고, 번역 키) |
 | `bOverrideBaseProperties_DEPRECATED`·`StaticParameters_DEPRECATED`·`bSavedCachedData_DEPRECATED` | — | 제외 |
 
 **base property override**(UE `FMaterialInstanceBasePropertyOverrides`, `MaterialInstanceBasePropertyOverrides.h:12–141`). 값 16개와 그 `bOverride_*` 16개다. Rocks는 `MaterialTraitOverrides`의 `Optional<값>` 필드 16개로 둔다. UE의 bool 짝을 Optional 하나로 합친 것이다.
-- 대상 값: opacityMaskClipValue·blendMode·shadingModel(Rocks에서는 static 변형 → Surface preset 값)·ditheredLodTransition·castDynamicShadowAsMasked·twoSided·thinSurface·outputTranslucentVelocity·hasPixelAnimation·enableTessellation(TODO)·displacementScaling(TODO)·enableDisplacementFade(TODO)·displacementFadeRange(TODO)·maxWorldPositionOffset·surfaceCacheSharing·usage.
+- 대상 값: opacityMaskClipValue·blendMode·shadingModel(`ShadingModelPreset` — UE 값 전부, Rocks에서는 static 변형 → Surface preset 값)·ditheredLodTransition·castDynamicShadowAsMasked·twoSided·thinSurface·outputTranslucentVelocity·hasPixelAnimation·enableTessellation(TODO)·displacementScaling(TODO)·enableDisplacementFade(TODO)·displacementFadeRange(TODO)·maxWorldPositionOffset·surfaceCacheSharing·usage(`addedVertexInputs`·`removedVertexInputs` — 4.6.1절).
 - 값을 덮으면 static 변형이 생긴다. 실행 중 인스턴스(DynamicMaterialInstance)는 덮을 수 없다(4.2절, `UnsupportedSetting`).
 
 ### 19.12 custom attribute·플랫폼 품질 설정·조명 굽기 설정
