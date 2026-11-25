@@ -229,6 +229,30 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
   - self-test: 엔진 쿠킹 매니페스트가 있으면 장치마다 쿠킹 라이브러리 화면 검사를 한 번 더 돈다 — 시험 호스트와 따로 RenderBase 엔진 타입만 등록한 엔진 셰이더 호스트(Freeze)에 `CookedManifestShaderLibraries`를 붙이고 화면 검사(18.5절 SM5 픽셀 단언)를 그 호스트로 돌린다. 집합이 쿠킹 원천으로 열렸는지와 고른 형식을 확인한다. 매니페스트가 없으면 `[NOT RUN]`("run asset-cook --engine --profile=<host>")이다.
 - 완료 기준(12.3.1절 완료 기준 가운데 SH2d 몫): EngineTests — 단계 등록(시작 hook·중복 공존), cookKey 재사용과 변화(`cookDevelopmentShaders` 토글·형식 정의 변경), 형식 정의 대조 음성(`InvalidSetting` 넷), 만들 수 없는 형식 `UnsupportedCapability`, 런타임 열기(정상·크기·SHA 불일치 `CorruptPackage`·항목 없음 공급자·셰이더 없는 쿠킹 `Unsupported`), 형식 선택 순서(첫 형식 한도 미달·장치 요구 미달 → 다음 형식, 모두 미달 `Unsupported`, backend 없음 `NotFound`). C# 명령 시험 — `asset-cook --engine --profile=Windows`가 `Shaders/Engine-<형식>-<hash>.rshl` 셋을 게시하고 두 번째는 재사용. Sandbox self-test — 그 라이브러리로 D3D12(WARP 포함)·D3D11·Vulkan(lavapipe 포함)에서 화면 검사 PASS.
 
+**SH2d 구현 메모(개정 53, 2026-11-25).** SSD44–SSD48을 구현했다. 설계와 다르게 정하거나 더한 것은 아래에 적는다.
+
+- **파일.**
+  - ShaderCompiler: `ShaderLibraryCookStage.h`(단계·`ShaderLibraryCookStageId`·`ShaderCookSourceDirectory`), `ShaderCookRegistrySource.h`(등록부 원천 interface), `ModuleShaderCookRegistrySource.h`(제품 원천 — BuildTargets 3.10절 4항), `Private/ShaderLibraryCookStage.cpp`, `Private/ModuleShaderCookRegistrySource.cpp`, `Private/ShaderCompilerModule.cpp`(모듈 수명 객체 — 단계 등록), `Private/ShaderCompileReflection.h`(명령·단계가 함께 쓰는 키 리플렉션 문맥·워커 찾기 — `shader-compile` 사본을 옮겼다). `ShaderLibraryCook.h`에 `ShaderLibraryCookerGuid`·`ShaderLibraryCookKeyVersion`과 결과 줄의 `cookKey`·`hasCookKey`·`cacheHits`를 더했다(`CookShaderLibraries`·`CompileShaderLibrary`가 함께 계산한다).
+  - Graphics: `DeviceFeatures::shaderDeviceRequirements`와 네 backend(D3D12 `D3D12Caps`·D3D11 `D3D11Caps`·Vulkan `QueryDeviceCaps`·GLES `QueryDeviceCaps`)의 값.
+  - RenderBase: `CookedShaderFormat.h`(`SelectCookedShaderFormat`·`CheckShaderFormatFitsDevice`·`CookedShaderFormatChoice`), `CookedManifestShaderLibraries.h`, `EngineShaderHost.h`의 interface 확장·`EngineRenderResources::FormatId`. AssetRuntime을 비공개 의존으로 더했다.
+  - 빌드: Commandlet 링크 목록·호스트의 `asset-cook` 감싸기(ShaderCompiler `Load`), 정책 `cooker-module-set`(`Rocks.Tooling.Checks/CookerModuleSet.cs`), `.gitignore`의 `/Engine/Saved/`(엔진 전용 쿠킹 루트·잠금).
+  - Sandbox: `SandboxShaderScope`(엔진 실행은 시험 타입 없음), EngineAssets 의존·`SetEngineOnlyDirectory`·엔진 쿠킹이 있을 때만 EngineAssets Subsystem, 쿠킹 원천 연결(`CookedShaderAttachment`), 매니페스트 순서 장치 생성(`CreateScreenDeviceInOrder`), 셰이더 없는 쿠킹의 장치 생략, self-test 쿠킹 화면 검사(`CookedSelfTestShaders`·`RunCookedScreenChecks`)와 `--cooked-shader-self-test`.
+- **더한 것.**
+  - 생산 호스트 사전 판정: 형식 정의의 `producers`에 이 호스트(HostConfig 플랫폼 이름 — macOS는 arm64)가 없으면 컴파일하지 않고 `code None, error UnsupportedCapability`다. 생산 호스트이지만 system 도구가 없는 경우(Windows의 `METAL_SM5` — Apple Metal for Windows 없음)는 job 키 2행이 `UnsupportedCapability`로 판정해 같은 진단이 된다(SSD45 6번).
+  - 쿠킹 단계 시험은 실제 저장소 `Engine/Saved`·엔진 너겟을 건드리지 않게 config의 엔진 폴더·워커·원문 디렉터리를 받는다(제품은 비워 둔다 — FindEngineDirectory·실행 파일 옆 워커).
+  - 원천 `ReadLibrary`는 매니페스트 크기를 읽기 상한으로 써서, 큰 파일은 끝까지 읽지 않고 `ArtifactBytes` 손상으로 판정한다.
+- **한계.**
+  - 재사용도 job 키 계산과 너겟 조회를 한다(SSD46 그대로). 너겟이 비었으면 다시 컴파일한 뒤 재사용한다.
+  - verify 대조는 라이브러리 단위다(다른 job 이름은 로그에 없다).
+  - Sandbox의 엔진 쿠킹 판정은 `asset.cooked_root` 설정을 보지 않는다(엔진 전용 기본 루트만).
+  - 공급자 경로의 형식은 backend 고정 표 그대로다(SSD47).
+  - Development 실행 파일은 DevelopmentShaderProvider → ShaderCompiler → AssetCooker 의존으로 AssetCooker·AssetDatabase를 링크한다(SSD44 의존 방향의 결과 — Release는 Developer 모듈이 없다).
+- 시험:
+  - EngineTests: `ShaderLibraryCookStage_ProducesReusesAndRekeys`(형식 목록 순서 Produce·라이브러리 머리·같은 cookKey Reuse·`cookDevelopmentShaders` 토글로 cookKey만 바뀜(byte 같음)·형식 정의 변경은 그 형식만·verify 진단 없음·단계 표 중복 `AlreadyExists`), `ShaderLibraryCookStage_RejectsFormatsAgainstDefinitions`(없는 형식·자리만 둔 형식·backend 다름·`GLES31_PC` 넷 `InvalidSetting`, 등록부를 받지 않음), `ShaderLibraryCookStage_DiagnosesUnavailableFormatsAndJobs`(Windows `METAL_SM5` `UnsupportedCapability`·다른 형식은 게시, job 실패 `DependencyFailed`, 프로젝트 소속 타입 `Unsupported`, 원천 실패 `DependencyFailed`·Release 안 부름, 요청 결함 `InvalidArgument`), `RenderBase_CookedManifestShaderLibrariesReadsAndChecks`(backend·형식 사본, 정상 읽기, 항목 없음 `NotFound`, SHA·큼·작음·파일 없음 `CorruptPackage`), `RenderBase_SelectCookedShaderFormatFollowsManifestOrder`(장치 요구·render target 미달 → 다음 형식, 채우면 앞 형식, 한도 대조, 모두 미달 `Unsupported`와 형식별 이유, backend 없음 `NotFound`, 셰이더 없는 쿠킹), `RenderBase_EngineRenderResourcesOpenCookedManifest`(쿠킹 열기·`FormatId`, 손상 `InvalidArgument`·CorruptPackage 진단, 셰이더 없는 쿠킹 `Unsupported`), `RenderBase_EngineRenderResourcesPreferCookedLibraries` 갱신(backend 없음은 공급자, backend는 있는데 라이브러리 없음은 `Unsupported`). `--filter Shader` 143·`RenderBase_` 13·`CookArtifact` 7·`AssetCookCommand` 12 통과(Metal SKIP — 이 기계 Windows).
+  - 명령: Rocks.Commandlet.Tests `asset-cook --engine` 두 줄(임시 엔진 배치 — 게시 셋·두 번째 셋 다 `reused`) 포함 426 PASS. 저장소에서 `asset-cook --engine --profile=Windows`가 30 job(형식마다 엔진 타입 10)으로 `Engine-D3D12_SM6`·`Engine-D3D11_SM5`·`Engine-VULKAN_SM5`를 게시한다.
+  - 정책: `cooker-module-set`(저장소 통과·음성 대조 `Policy.CookerModuleSetControls`), ToolTests self 168 통과, policy·format 통과.
+  - Sandbox(Debug): `--cooked-shader-self-test`에서 D3D12·D3D12 WARP·D3D11·D3D11 WARP·Vulkan(GTX 1060)·Vulkan software(lavapipe) 쿠킹 화면 검사 PASS(형식 D3D12_SM6·D3D11_SM5·VULKAN_SM5, 두 lane 모드 픽셀 동일·CPU tone map 대조), OpenGL ES 둘은 쿠킹에 없는 backend라 NOT RUN. `--engine --window`가 EngineAssets와 쿠킹 라이브러리로 D3D12에서 그린다. 전체 `--self-test`(공급자 경로 그대로 + 장치마다 쿠킹 화면 검사)도 여덟 장치 PASS, 엔진 호스트 자식 여섯 항목 PASS(엔진 쿠킹이 있는 트리에서 `--engine` 자식이 EngineAssets로 시작).
+
 SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
 - [x] 스파이크 `Programs/ShaderToolSpike`(Program 타깃, `ShaderToolSpike --out <디렉터리> [--sm 6_0]`). 도구는 P4 `ShaderToolSet`으로 사용자 저장소에서 연다. 산출물은 `<out>` 아래에 두고 저장소에는 이 요약만 남긴다. `manifest.json`(산출물 이름·크기·SHA-256, 결정성 비교용)과 `report.json`(검사·측정값)을 쓴다.
 - [x] 형식별 산출(내장 Renderer VS·PS): DXIL `vs_6_0`·`ps_6_0`(`-Qstrip_reflect`), SPIR-V(`-spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-position-w`), DXBC(FXC 고정본 `vs_5_0`·`ps_5_0`), MSL 2.1 macOS, ESSL `#version 320 es`의 `GLES31_ANDROID`(`fixup_clipspace`·`flip_vert_y` 켬)와 `GLES31_PC`(끔), HLSL 5.0. HLSL 5.0 출력은 FXC로 다시 컴파일된다(D3D11 대체 경로 확인).
