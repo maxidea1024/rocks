@@ -121,24 +121,26 @@ struct JpegSpec {
     Span<const uint8> pixels;
 };
 
-Array<uint8> EncodeJpeg(Allocator& allocator, const JpegSpec& spec) noexcept {
-    TestJpegBinding binding;
-    Array<uint8> out(allocator);
-    jpeg_compress_struct cinfo{};
-    TestJpegError error{};
-    cinfo.err = jpeg_std_error(&error.manager);
-    error.manager.error_exit = TestJpegErrorExit;
-    error.manager.output_message = TestJpegOutputMessage;
-    if (setjmp(error.jump) != 0) {
-        // 부호화 실패는 시험 실패로 보고하고 빈 결과를 돌려준다.
+// setjmp와 longjmp 사이에 libjpeg가 건드리는 상태다. setjmp를 부르는 함수의 지역 변수로 두면 그
+// 사이에 바뀐 값이 longjmp 뒤 불확정이므로(C17 7.13.2.1 — rocksjpeg.c와 같은 이유, Docs/Design/
+// AssetSystem 12.11절) EncodeJpeg가 갖고 EncodeJpegWith는 참조로만 다룬다.
+struct TestJpegEncoder {
+    jpeg_compress_struct cinfo;
+    TestJpegError error;
+    MemoryDestination destination;
+};
+
+// spec을 out에 부호화한다. 부호화 오류(error_exit의 longjmp)면 거짓이다. 이 함수의 지역 변수는
+// setjmp 뒤 바뀌어도 오류 경로에서 읽지 않는다.
+bool EncodeJpegWith(TestJpegEncoder& encoder, const JpegSpec& spec, Array<uint8>& out) noexcept {
+    jpeg_compress_struct& cinfo = encoder.cinfo;
+    if (setjmp(encoder.error.jump) != 0) {
         jpeg_destroy_compress(&cinfo);
-        CHECK(false);
-        out.Clear();
-        return out;
+        return false;
     }
 
     jpeg_create_compress(&cinfo);
-    MemoryDestination destination{};
+    MemoryDestination& destination = encoder.destination;
     destination.manager.init_destination = DestinationInit;
     destination.manager.empty_output_buffer = DestinationEmpty;
     destination.manager.term_destination = DestinationTerm;
@@ -183,7 +185,7 @@ Array<uint8> EncodeJpeg(Allocator& allocator, const JpegSpec& spec) noexcept {
     if (spec.tablesOnly) {
         jpeg_write_tables(&cinfo);
         jpeg_destroy_compress(&cinfo);
-        return out;
+        return true;
     }
 
     jpeg_start_compress(&cinfo, TRUE);
@@ -203,6 +205,22 @@ Array<uint8> EncodeJpeg(Allocator& allocator, const JpegSpec& spec) noexcept {
 
     jpeg_finish_compress(&cinfo);
     jpeg_destroy_compress(&cinfo);
+    return true;
+}
+
+Array<uint8> EncodeJpeg(Allocator& allocator, const JpegSpec& spec) noexcept {
+    TestJpegBinding binding;
+    Array<uint8> out(allocator);
+    TestJpegEncoder encoder{};
+    encoder.cinfo.err = jpeg_std_error(&encoder.error.manager);
+    encoder.error.manager.error_exit = TestJpegErrorExit;
+    encoder.error.manager.output_message = TestJpegOutputMessage;
+    if (!EncodeJpegWith(encoder, spec, out)) {
+        // 부호화 실패는 시험 실패로 보고하고 빈 결과를 돌려준다.
+        CHECK(false);
+        out.Clear();
+    }
+
     return out;
 }
 

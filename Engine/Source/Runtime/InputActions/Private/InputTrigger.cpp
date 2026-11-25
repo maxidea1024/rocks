@@ -127,7 +127,8 @@ TriggerState UpdateInputTrigger(const InputTrigger& trigger, InputTriggerState& 
         // 놓는 평가에서도 이번 dt를 더한 시간으로 본다(UE cpp:212-214).
         const double tickHeld = state.heldDuration + TriggerTimedDelta(trigger, context);
         TriggerState base = TriggerTimedBase(trigger, state, value, context);
-        if (tickHeld >= static_cast<double>(trigger.holdTime) && base == TriggerState::None) {
+        if (tickHeld >= static_cast<double>(trigger.holdAndReleaseTime) &&
+            base == TriggerState::None) {
             base = TriggerState::Triggered;
         }
 

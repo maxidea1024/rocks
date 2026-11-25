@@ -38,7 +38,7 @@ public sealed class CommandletHost : ModuleRules
         // on every platform: Windows shipping targets do not have it, but the rule is a superset and Android and macOS shipping targets do.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
             "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "Collision",
-            "Engine", "Gameplay", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
+            "Engine", "Gameplay", "Physics", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
             "VulkanGraphics", "OpenGLGraphics"]
     };
 }

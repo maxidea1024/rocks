@@ -30,46 +30,6 @@ void AlignedFree(void* address) noexcept {
     free(address);
 }
 
-Mutex::Mutex() noexcept {
-    // SDK 타입은 private에서만 해석하며 공개 opaque storage의 ABI 전제를 검사한다.
-    static_assert(sizeof(pthread_mutex_t) <= sizeof(storage_));
-    static_assert(alignof(pthread_mutex_t) <= alignof(Mutex));
-    if (pthread_mutex_init(reinterpret_cast<pthread_mutex_t*>(storage_), nullptr) != 0) {
-        Fatal("pthread_mutex_init failed");
-    }
-}
-
-Mutex::~Mutex() noexcept {
-    if (pthread_mutex_destroy(reinterpret_cast<pthread_mutex_t*>(storage_)) != 0) {
-        Fatal("Destroying a busy mutex");
-    }
-}
-
-void Mutex::Lock() noexcept {
-    if (pthread_mutex_lock(reinterpret_cast<pthread_mutex_t*>(storage_)) != 0) {
-        Fatal("pthread_mutex_lock failed");
-    }
-}
-
-bool Mutex::TryLock() noexcept {
-    const int result = pthread_mutex_trylock(reinterpret_cast<pthread_mutex_t*>(storage_));
-    if (result == 0) {
-        return true;
-    }
-
-    if (result != EBUSY) {
-        Fatal("pthread_mutex_trylock failed");
-    }
-
-    return false;
-}
-
-void Mutex::Unlock() noexcept {
-    if (pthread_mutex_unlock(reinterpret_cast<pthread_mutex_t*>(storage_)) != 0) {
-        Fatal("pthread_mutex_unlock failed");
-    }
-}
-
 // 원천은 OS hook이 고른다(Apple mach_absolute_time, Android CLOCK_MONOTONIC). ns 변환
 // (MonotonicNanoseconds)은 플랫폼 공통 Private/Common/Clock.cpp가 이 두 값으로 한다.
 uint64 MonotonicTicks() noexcept {

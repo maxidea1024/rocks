@@ -25,6 +25,7 @@
 #include <Input/InputSettings.h>
 #include <Input/InputState.h>
 #include <Launch/Application.h>
+#include <Physics/PhysicsSettings.h>
 #include <Platform/ApkFile.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
@@ -807,6 +808,15 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
            compute.number == 1.0;
 }
 
+// 설정 struct를 RegisterSettings로 올리는 엔진 모듈(Collision·Physics)의 리플렉션 타입을 등록한다.
+Result<void> RegisterSandboxSettingsTypes(ModuleRegistration& registration) noexcept {
+    if (auto collision = RegisterCollisionTypes(registration); !collision) {
+        return collision;
+    }
+
+    return RegisterPhysicsTypes(registration);
+}
+
 } // namespace
 
 // 엔진 호스트 본문이다(Docs/Design/ModuleLoader 3.11절). Launch가 소유한 프로세스 모듈
@@ -823,9 +833,10 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
     boot.modules = &modules;
     // 설정 struct를 RegisterSettings로 올리는 엔진 모듈의 리플렉션 타입을 설정 문맥의 타입 등록에
     // 넣는다(HostSettings는 Config·TraceControl 타입만 스스로 넣는다). Collision 모듈의
-    // CollisionSettings(Engine branch Collision 섹션, Docs/Design/CollisionData.ko.md 3절)다 —
-    // 없으면 모듈 설정 등록이 NotFound로 실패한다.
-    boot.registerModuleTypes = &RegisterCollisionTypes;
+    // CollisionSettings(Engine branch Collision 섹션, Docs/Design/CollisionData.ko.md 3절)와
+    // Physics 모듈의 PhysicsSettings(Physics 섹션, Docs/Design/PhysicsModule 6.8절)다 — 없으면 모듈
+    // 설정 등록이 NotFound로 실패한다.
+    boot.registerModuleTypes = &RegisterSandboxSettingsTypes;
     if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
         boot.engineDir = StringView(engineDir, found.Value());
     } else {

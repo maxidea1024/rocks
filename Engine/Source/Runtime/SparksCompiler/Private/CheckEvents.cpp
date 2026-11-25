@@ -1,4 +1,3 @@
-#include <Core/Text/EditDistance.h>
 #include <SparksCompiler/LanguageCatalog.h>
 
 #include "CompilationChecker.h"
@@ -17,9 +16,6 @@ namespace {
 // 재진입 표시 attribute 이름이다(SD11).
 constexpr StringView SkipWhileBusyAttribute = "skipWhileBusy";
 constexpr StringView RestartAttribute = "restart";
-
-// hook 이름 제안의 편집 거리 상한이다.
-constexpr usize MaxHookSuggestionDistance = 2;
 
 } // namespace
 
@@ -344,16 +340,7 @@ void TypeChecker::CheckHook(const CheckContext& context, uint32 handler, uint32 
             return;
         }
 
-        StringView best;
-        usize bestDistance = MaxHookSuggestionDistance + 1;
-        for (const LanguageHook& entry : LanguageHooks()) {
-            const usize distance = EditDistance(name, entry.name, MaxHookSuggestionDistance,
-                                                EditDistanceCase::AsciiInsensitive);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = entry.name;
-            }
-        }
+        const StringView best = SimilarHook(name);
 
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.AppendFormat("'{}' is not a lifecycle hook.", name);

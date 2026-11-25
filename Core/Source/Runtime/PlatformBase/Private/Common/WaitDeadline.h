@@ -1,16 +1,18 @@
 #pragma once
 
-#include <Platform/Clock.h>
-#include <Platform/Sync.h>
+#include <Platform/Sync/WaitTypes.h>
+
+#include "Sync/SyncSeams.h"
 
 namespace rocks::platform::detail {
 
 // spurious wake마다 원래 timeout을 재시작하지 않는다. 절대 wall clock 대신 elapsed monotonic을
-// 쓴다.
+// 쓴다. 시계는 동기화 시험이 바꿀 수 있는 SyncMonotonicNanoseconds다(Docs/Design/Synchronization
+// 14.2절).
 class WaitDeadline {
 public:
     explicit WaitDeadline(uint32 timeoutMs) noexcept
-        : started_(MonotonicNanoseconds()), timeoutMs_(timeoutMs) {
+        : started_(SyncMonotonicNanoseconds()), timeoutMs_(timeoutMs) {
     }
 
     uint32 RemainingMilliseconds() const noexcept {
@@ -19,7 +21,7 @@ public:
         }
         constexpr uint64 nanosecondsPerMillisecond = 1000000;
         const uint64 duration = static_cast<uint64>(timeoutMs_) * nanosecondsPerMillisecond;
-        const uint64 elapsed = MonotonicNanoseconds() - started_;
+        const uint64 elapsed = SyncMonotonicNanoseconds() - started_;
         if (elapsed >= duration) {
             return 0;
         }

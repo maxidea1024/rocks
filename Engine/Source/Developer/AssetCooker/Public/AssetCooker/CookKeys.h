@@ -45,7 +45,7 @@ struct CookClassDefaultsTable {
     }
 
     // type의 행이다(없으면 null — 미등록·클래스가 아님·추상).
-    const CookClassDefaults* Find(TypeId type) const noexcept;
+    ROCKS_ASSETCOOKER_API const CookClassDefaults* Find(TypeId type) const noexcept;
 
     Array<CookClassDefaults> rows;
 };

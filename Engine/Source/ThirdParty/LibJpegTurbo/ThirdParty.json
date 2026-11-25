@@ -232,7 +232,7 @@
     "src/jstdhuff.c": "79e2cbf605326ce6349a60f58695b97d574510662f8b089474f30c07bf06be28",
     "src/jutils.c": "70c0ba2953ca8f4abd6858d8ed71aa3266f37d529313b8e0cdfa0d1a43e31b2e",
     "src/jversion.h": "387db38edeb0f39f008d4342f72f7d857671dd82eced97f008063df2980dbf0c",
-    "src/rocksjpeg.c": "c79e78135cd121f3260df00f0d733f2ab146b9d66c5a0b68faed5f2a1664b2d4",
+    "src/rocksjpeg.c": "d7696a8ee9d66996a0f6a26e8e7fee13139a5438e12d8a165b2b91a0ca84d50b",
     "src/rocksjpeg.h": "864c3340cfbe8d666bfd884e79f4eb077581807131cdc31155e48c5d387518eb",
     "src/wrapper/jcapistd-12.c": "b8e55367564c0814c71caf56c3de83b6edf07d253680be0e22f91fac561fe213",
     "src/wrapper/jcapistd-16.c": "f7a0949a2d8f8f3912f03dee7e4fb25689d121e3c5f4a354a846858fb8bcb653",

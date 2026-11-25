@@ -272,10 +272,18 @@ internal_exr_revert_add_part (
     }
     else if (ncount == 1)
     {
-        if (part == &(ctxt->first_part)) ctxt->first_part = *(ctxt->parts[1]);
+        /* Rocks: free the allocated part struct that leaves the table (the reverted part, or the
+         * second part copied into first_part), not only its contents (Rocks.patch) */
+        exr_priv_part_t gone = part;
+        if (part == &(ctxt->first_part))
+        {
+            gone             = ctxt->parts[1];
+            ctxt->first_part = *gone;
+        }
         ctxt->init_part = &(ctxt->first_part);
         ctxt->free_fn (ctxt->parts);
         ctxt->parts = &(ctxt->init_part);
+        ctxt->free_fn (gone);
     }
     else
     {
@@ -286,6 +294,8 @@ internal_exr_revert_add_part (
             ctxt->parts[np] = ctxt->parts[p];
             ++np;
         }
+        /* Rocks: free the allocated part struct too (Rocks.patch) */
+        if (part != &(ctxt->first_part)) ctxt->free_fn (part);
     }
     ctxt->num_parts = ncount;
 }

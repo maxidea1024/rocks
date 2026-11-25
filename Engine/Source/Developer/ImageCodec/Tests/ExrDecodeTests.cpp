@@ -1,3 +1,5 @@
+#include "LiveCountingAllocator.h"
+
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
@@ -14,6 +16,8 @@
 using namespace rocks;
 using namespace rocks::image;
 namespace exr_decode_tests_file {
+
+using image_codec_test::LiveCountingAllocator;
 
 namespace {
 
@@ -415,6 +419,80 @@ TEST(ExrDecode_DamageAndAllocation) {
     }
 
     CHECK(failures > 0);
+}
+
+// 쓰기 할당 실패 전수(12.10.1절 — 14.1.119 후속 1번): EncodeExr의 n번째 할당(OpenEXRCore 묶음, 출력
+// 파일, 0 버퍼 — 출력 Array도 같은 Allocator)이 실패하면 OutOfMemory이고 out은 비며 받은 블록이
+// 모두 돌아온다. 실패가 없으면 기준과 같은 byte다. 구성: Zip scanline, Piz tile mip level, part 둘
+// RLE.
+TEST(ExrEncode_AllocationFailures) {
+    SystemAllocator allocator;
+    constexpr int32 Size = 16;
+    uint16 halves[Size * Size] = {};
+    for (int32 index = 0; index < Size * Size; ++index) {
+        halves[index] = Float16::FromFloat(static_cast<float>(index % 11) * 0.25f).bits;
+    }
+
+    const Span<const uint8> bytes(reinterpret_cast<const uint8*>(halves), sizeof(halves));
+    const ExrChannelWrite channels[] = {{"R", ExrPixelType::Half, bytes},
+                                        {"G", ExrPixelType::Half, bytes}};
+    ExrWriteImage images[3];
+    for (ExrWriteImage& image : images) {
+        image.width = Size;
+        image.height = Size;
+        image.channels = channels;
+    }
+
+    images[0].compression = ExrCompression::Zip;
+    images[1].compression = ExrCompression::Piz;
+    images[1].storage = ExrStorage::Tiled;
+    images[1].tileWidth = 8;
+    images[1].tileHeight = 8;
+    images[1].levels = ExrLevelMode::MipmapLevels;
+    images[2].compression = ExrCompression::Rle;
+    images[2].parts = 2;
+    for (const ExrWriteImage& image : images) {
+        Array<uint8> reference(allocator);
+        REQUIRE(EncodeExr(allocator, image, reference));
+        uint32 failures = 0;
+        uint64 firstLeak = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            LiveCountingAllocator counted(allocator);
+            test::NFailAllocator failing(counted);
+            bool exhausted = false;
+            bool ok = false;
+            bool expected = true;
+            {
+                Array<uint8> out(failing);
+                failing.FailOnAttempt(attempt);
+                const Result<void> encoded = EncodeExr(failing, image, out);
+                exhausted = failing.Attempts() < attempt;
+                failing.DisableFailure();
+                ok = encoded.IsOk();
+                expected =
+                    ok ? out.Size() == reference.Size() &&
+                             platform::MemoryEquals(out.Data(), reference.Data(), reference.Size())
+                       : encoded.Error() == ErrorCode::OutOfMemory && out.IsEmpty();
+            }
+
+            if (counted.Live() != 0 && firstLeak == 0) {
+                firstLeak = attempt;
+            }
+
+            CHECK(expected);
+            if (!ok) {
+                ++failures;
+            }
+
+            if (exhausted) {
+                CHECK(ok);
+                break;
+            }
+        }
+
+        CHECK(firstLeak == 0);
+        CHECK(failures > 0);
+    }
 }
 
 } // namespace exr_decode_tests_file

@@ -51,6 +51,97 @@ new file mode 100644
 +#endif
 +
 +#endif /* ROCKS_TIF_CONFIG_H */
+diff --git a/libtiff/tif_dir.c b/libtiff/tif_dir.c
+--- a/libtiff/tif_dir.c
++++ b/libtiff/tif_dir.c
+@@ -183,6 +183,14 @@
+ 
+     td->td_extrasamples = (uint16_t)*v;
+     _TIFFsetShortArrayExt(tif, &td->td_sampleinfo, va, td->td_extrasamples);
++    /* Rocks: a failed copy (allocation failure) leaves no extra samples, not a count without
++     * values that the directory writer would read (Rocks.patch) */
++    if (td->td_extrasamples > 0 && td->td_sampleinfo == NULL)
++    {
++        td->td_extrasamples = 0;
++        TIFFClrFieldBit(tif, FIELD_EXTRASAMPLES);
++        return 0;
++    }
+     return 1;
+ 
+ #undef EXTRASAMPLE_COREL_UNASSALPHA
+@@ -454,6 +462,21 @@
+                                   va_arg(ap, uint16_t *), v32);
+             _TIFFsetShortArrayExt(tif, &td->td_colormap[2],
+                                   va_arg(ap, uint16_t *), v32);
++            /* Rocks: a failed copy (allocation failure) leaves no colormap and fails the set,
++             * not a set tag with null arrays that the directory writer would read (Rocks.patch) */
++            if (td->td_colormap[0] == NULL || td->td_colormap[1] == NULL ||
++                td->td_colormap[2] == NULL)
++            {
++                for (v32 = 0; v32 < 3; v32++)
++                {
++                    if (td->td_colormap[v32] != NULL)
++                        _TIFFfreeExt(tif, td->td_colormap[v32]);
++                    td->td_colormap[v32] = NULL;
++                }
++                TIFFClrFieldBit(tif, FIELD_COLORMAP);
++                status = 0;
++                goto end;
++            }
+             break;
+         case TIFFTAG_EXTRASAMPLES:
+             if (!setExtraSamples(tif, ap, &v))
+@@ -465,6 +488,14 @@
+             {
+                 uint16_t sv = EXTRASAMPLE_ASSOCALPHA;
+                 _TIFFsetShortArrayExt(tif, &td->td_sampleinfo, &sv, 1);
++                /* Rocks: a failed copy leaves no extra samples (Rocks.patch) */
++                if (td->td_sampleinfo == NULL)
++                {
++                    td->td_extrasamples = 0;
++                    TIFFClrFieldBit(tif, FIELD_EXTRASAMPLES);
++                    status = 0;
++                    goto end;
++                }
+             }
+             break;
+         case TIFFTAG_TILEWIDTH:
+@@ -576,12 +607,35 @@
+             for (i = 0; i < v; i++)
+                 _TIFFsetShortArrayExt(tif, &td->td_transferfunction[i],
+                                       va_arg(ap, uint16_t *), count);
++            /* Rocks: a failed copy (allocation failure) leaves no transfer function and fails the
++             * set, not a set tag with null arrays (Rocks.patch) */
++            for (i = 0; i < v && td->td_transferfunction[i] != NULL; i++)
++                ;
++            if (i < v)
++            {
++                for (i = 0; i < 3; i++)
++                {
++                    if (td->td_transferfunction[i] != NULL)
++                        _TIFFfreeExt(tif, td->td_transferfunction[i]);
++                    td->td_transferfunction[i] = NULL;
++                }
++                TIFFClrFieldBit(tif, FIELD_TRANSFERFUNCTION);
++                status = 0;
++                goto end;
++            }
+             break;
+         }
+         case TIFFTAG_REFERENCEBLACKWHITE:
+             /* XXX should check for null range */
+             _TIFFsetFloatArrayExt(tif, &td->td_refblackwhite,
+                                   va_arg(ap, float *), 6);
++            /* Rocks: a failed copy leaves no reference black and white (Rocks.patch) */
++            if (td->td_refblackwhite == NULL)
++            {
++                TIFFClrFieldBit(tif, FIELD_REFBLACKWHITE);
++                status = 0;
++                goto end;
++            }
+             break;
+         case TIFFTAG_INKNAMES:
+         {
 diff --git a/libtiff/tif_dirinfo.c b/libtiff/tif_dirinfo.c
 --- a/libtiff/tif_dirinfo.c
 +++ b/libtiff/tif_dirinfo.c
