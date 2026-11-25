@@ -21,6 +21,8 @@
 | MSR11 | 12.3절(`shader-compile --engine`) | 엔진 기본 머티리얼 에셋을 번역해 엔진 내장 라이브러리에 넣는 경로(11.3절) |
 | MSR12 | 12.1절(형식 정의 `limits`) | 결정 MD4·RN13 개정. `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 장치 요구(`maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한)를 더함, `D3D11_SM5`는 128에서 16으로, GLES는 16 유지(Renderer RQ22 (1)과 같은 요구). **반영(셰이더 시스템 개정 13)**: D3D11 16은 12.1절과 형식 정의에 들어갔고, Vulkan은 GX1 측정 뒤 |
 | MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: 예약 이름 `SharedWrapSampler`·`SharedClampSampler`, 텍스처마다 출처 하나, SH2와 함께 구현 |
+| MSR14 | 13절(`ShaderParameterLayout`) | (개정 10) 이름을 소유하는 동적 layout builder, 텍스처·샘플러 자원 slot 표(7.4절 서명의 자원 순번), 머티리얼별 layout을 job 키 8행·라이브러리 항목 레이아웃 서명에 넣는 경로. 지금 형식은 cbuffer 멤버·정적 수명뿐이다 |
+| MSR15 | 12.2절(셰이더 타입·거르기) | (개정 10) 셰이더 타입의 문맥 공급 기능 선언과 `MaterialShaderTraits`를 받는 거르기 서명(MSR5의 실제 서명). 지금 `ShaderType.h:87–89`에는 traits가 없다 |
 
 **렌더 기반(RenderBase/README.ko.md)**
 
@@ -34,6 +36,7 @@
 | MRB6 | 9.7절(파이프라인 캐시) | `PipelinePrewarm`에 (머티리얼 셰이더 집합, 정점 입력 타입, pass) 목록 입력(후속) |
 | MRB7 | 9.4절(상수 블록) | 머티리얼 렌더 상태의 `Persistent` 블록 교체·`Retire` 규칙 |
 | MRB8 | 10.2절(등록) | 정점 입력 타입 선언(이름·`.rsh` 경로·거르기·정적 배치)을 장치 없는 모듈(ShaderCore 또는 그와 같은 층)에 두어 쿠커가 RenderBase 없이 거르기를 실행할 수 있게 한다(8.3절) |
+| MRB9 | 10.2절(정점 입력 타입) | (개정 10) 정점 입력 타입이 채우는 문맥 공급 기능 집합(vertex·skin·particle·speedtree·instance)을 선언한다. 판정은 파이프라인(pass ∪ 정점 입력) 단위다(19.3.1절) |
 
 **Renderer 스펙(Renderer.ko.md)** — 개정 3이 모두 처리했다. 처리 내용은 Renderer 14.7절이다.
 
@@ -44,13 +47,15 @@
 | MRD3 | 10.4절 D3: 결정 RN13의 재검토 조건(측정 MM5) | 사용자 결정으로 RN13 개정(Renderer 7.4·19.1절) |
 | MRD4 | 10.4절 D4: `AlphaHoldout` 처리 명시 | 반영(Renderer 14.2절, 후속 값) |
 | MRD5 | 10.4절 D5: pass 거르기 인자를 `MaterialShaderTraits`로 | 반영(Renderer 14.3·15.3절) |
-| MRD6 | view 상수의 translated world 기준과 절대 위치 표현(`WorldPosition` 타입, 5.3절) | 반영(Renderer 5.1·14.7절, 상위·하위 두 부분) |
+| MRD6 | view 상수의 translated world 기준과 절대 위치 표현(`Double3` 타입, 5.3절) | 반영(Renderer 5.1·14.7절, 상위·하위 두 부분) |
 | MRD7 | instance 데이터 계약(머티리얼 `Instance` 빈도 입력, 이전 프레임 변환) | 이전 변환은 반영(Renderer 4.2·5.1절). custom data 슬롯은 Renderer RS0 GPU Scene 배치 때 |
 | MRD8 | 기본 머티리얼 대체 표시 방식 | 반영(Renderer 14.7·16.2절, 덧칠 없음·계수) |
 | MRD9 | 10.4절 D7: pass별 경로 전용·공통 구분과 렌더 경로·기능 등급 정의 이름 | 반영(Renderer 14.3절 `RENDER_PATH_*`). 기능 등급 이름은 MSR9 |
 | MRD10 | Deferred·Forward+ 기준 영상 허용 오차(MS-T6) | 반영(Renderer RS2 (a), 채널 ±8·2%로 시작) |
 | MRD11 | 10.4절 D8: Depth·ShadowDepth pass가 마스크 전용 함수를 부름 | 반영(Renderer 14.1·14.3절) |
 | MRD12 | DeferredDecal이 쓰는 속성, 반투명 scene color·depth 입력, PostProcess 위치(5.6절) | 자리 반영(Renderer 14.7절): decal 속성은 RS7, 반투명 입력은 RS5, PostProcess 위치는 계획 26절 스펙 |
+| MRD13 | (개정 10) pass 셰이더 타입이 채우는 문맥 공급 기능 집합(previous 부분 포함)과 기능별 렌더러 자원 수를 선언한다. pass는 자기가 부르는 진입점의 `MATERIAL_<진입점>_USES_*` 합집합으로 `MATERIAL_CONTEXT_<기능>`을 정의하고 그 필드를 채운다. 공급하지 않는 기능은 문맥 값 표의 UE 기본값을 쓴다(19.3.1절, 결정 MD15) | 미처리(Renderer 담당) |
+| MRD14 | (개정 10) Toon shading model(UE `SubstrateToonBSDF`·`UToonProfile`)을 14.2절 목록에 둘지와 GBuffer 배치. 정해지면 `MPQ-ToonShading`을 푼다 | 미처리(Renderer 담당) |
 
 **에셋 시스템(AssetSystem)**
 

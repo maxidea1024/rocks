@@ -66,11 +66,11 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 ### 10.3 Rocks 표면 모델(결정 MD1)
 
 **그래프 모델은 Substrate형이고, 렌더러에는 `SurfaceAttributes`로 내보낸다.**
-- 출력 노드의 `Surface` 입력은 BSDF 트리다. BSDF 노드는 `SurfaceSlab`·`HairBsdf`·`EyeBsdf`·`WaterBsdf`·`UnlitBsdf`이고, 연산 노드는 `SurfaceMix`(수평)·`SurfaceStack`(수직)·`SurfaceAdd`·`SurfaceCoverage`·`SurfaceSelect`다.
-- **shading preset 노드**는 Renderer 스펙 14.2절의 shading model마다 하나다: `Unlit`·`DefaultLit`·`ClearCoat`·`Subsurface`·`SubsurfaceProfile`·`TwoSidedFoliage`·`Cloth`·`Eye`·`ThinTranslucent`·`SingleLayerWater`(`Hair`는 P3). 고전 입력(baseColor·metallic·specular·roughness 등)을 받아 BSDF 트리를 낸다. UE 변환 노드와 역할이 같다. 새 머티리얼의 기본 그래프는 `DefaultLit` preset 하나가 출력에 이어진 모양이라 고전 사용 경험과 같다.
+- 출력 노드의 `Surface` 입력은 BSDF 트리다. BSDF 노드는 `SurfaceSlab`·`SurfaceSimpleClearCoat`·`SurfaceHair`·`SurfaceEye`·`SurfaceSingleLayerWater`·`SurfaceUnlit`·`SurfaceToon`(TODO)·`SurfaceVolumetricFogCloud`이고, 연산 노드는 `SurfaceHorizontalMix`(수평)·`SurfaceVerticalLayer`(수직)·`SurfaceAdd`·`SurfaceWeight`·`SurfaceSelect`다. 영역 표면 노드는 `SurfaceLightFunction`·`SurfacePostProcess`·`SurfaceUserInterface`·`SurfaceToDecal`이다(이름은 19장).
+- **shading preset 노드**는 `SurfaceFromShadingModel` 하나다(UE `SubstrateShadingModels`와 같다). shading model은 속성으로 고르거나 `ShadingModel` 입력으로 픽셀마다 고른다. 고를 수 있는 값은 Renderer 스펙 14.2절 목록이다: `Unlit`·`DefaultLit`·`ClearCoat`·`Subsurface`·`SubsurfaceProfile`·`TwoSidedFoliage`·`Cloth`·`Eye`·`ThinTranslucent`·`SingleLayerWater`(`Hair`는 P3). 고전 입력(baseColor·metallic·specular·roughness 등)을 받아 BSDF 트리를 낸다. 새 머티리얼의 기본 그래프는 `DefaultLit`인 `SurfaceFromShadingModel` 하나가 출력에 이어진 모양이라 고전 사용 경험과 같다. 머티리얼 속성 집합은 `SurfaceFromAttributes`가 받는다.
 - **내보내기.** 번역기의 마지막 단계가 IR의 `Surface` 값을 Renderer 스펙 14.1절 `SurfaceAttributes`(baseColor·metallic·specular·roughness·normal·emissive·ambientOcclusion·opacity·opacityMask·shadingModel·customData0·customData1·tangent·anisotropy)로 낮춘다.
   - preset 노드의 고전 입력은 변환 없이 그대로 지나간다. UE도 고전 변환 머티리얼은 고전 GBuffer 데이터를 그대로 넘기는 표지를 둔다(`RE/Public/Rendering/SubstrateMaterialShared.h:180–237`의 컴파일 출력).
-  - `SurfaceSlab`의 직접 입력(DiffuseAlbedo·F0·F90)을 고전 값으로 바꾸는 변환은 UE Blendable의 내보내기(`SH/Private/Substrate/SubstrateExport.ush:1058`, 호출 `SH/Private/BasePassPixelShader.usf:1927–1948`)에 대응한다. 변환식은 SF3에서 정한다. 그 전에는 preset 노드만 연다.
+  - `SurfaceSlab`의 직접 입력(DiffuseAlbedo·F0·F90)을 고전 값으로 바꾸는 변환은 UE Blendable의 내보내기(`SH/Private/Substrate/SubstrateExport.ush:1058`, 호출 `SH/Private/BasePassPixelShader.usf:1927–1948`)에 대응한다. 변환식은 UE `SubstrateExport.ush`와 같게 MS2d에서 정한다. 번역(MS2d)은 모든 표면 노드를 받는다. 렌더러가 그 shading model을 그리는 단계(아래 SF 단계)가 오기 전에는 그 조합이 거르기에서 빠진다(V6).
   - `customData0`·`customData1`의 shading model별 의미는 Renderer 스펙이 정한다(14.1절 "clear coat 강도·roughness 등").
   - 노멀 핀은 tangent 공간이 기본이고(6.4절 공간 분석), 내보낼 때 문맥의 기저로 world 공간으로 바꿔 정규화한다. `SurfaceAttributes.normal`은 world 공간 정규화 값이다(Renderer 14.1절).
   - WPO·PDO·마스크는 `SurfaceAttributes`로 내보내지 않고 각자의 진입점 함수로 낸다(7.3절, Renderer 14.1절).
@@ -78,22 +78,26 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 
 | 접은 BSDF·기능 | shading model(Renderer 14.2절) |
 |---|---|
-| `UnlitBsdf` | `Unlit` |
+| `SurfaceUnlit` | `Unlit` |
 | slab(추가 기능 없음) | `DefaultLit` |
-| slab + 2차 반사 | `ClearCoat` |
+| slab + 2차 반사, `SurfaceSimpleClearCoat` | `ClearCoat` |
 | slab + SSS wrap | `Subsurface` |
 | slab + SSS profile | `SubsurfaceProfile` |
 | slab + 양면 wrap | `TwoSidedFoliage` |
 | slab + fuzz | `Cloth` |
 | slab + 얇은 투과 | `ThinTranslucent` |
-| `EyeBsdf` | `Eye` |
-| `WaterBsdf` | `SingleLayerWater` |
-| `HairBsdf` | `Hair`(P3, 계획 11.1절) |
+| `SurfaceEye` | `Eye` |
+| `SurfaceSingleLayerWater` | `SingleLayerWater` |
+| `SurfaceHair` | `Hair`(P3, 계획 11.1절) |
+| `SurfaceToon` | 없음(TODO `MPQ-ToonShading`, 16절 MRD14) |
+| `SurfaceVolumetricFogCloud` | shading model 아님: Volume 영역 출력(albedo·extinction·emissive·AO) |
+| `SurfaceLightFunction`·`SurfacePostProcess`·`SurfaceUserInterface` | shading model 아님: 그 영역의 출력(5.6절) |
+| `SurfaceToDecal` | DeferredDecal 영역의 쓰는 속성(Renderer RS7) |
 
 - **shading model이 하나인 머티리얼.** 트리가 static으로 shading model 하나로 정해지면 생성 원문에 `MATERIAL_SINGLE_SHADING_MODEL`을 내고, Renderer는 그 분기만 컴파일한다(Renderer 14.4절). 실행 중 선택(`SurfaceSelect`의 dynamic 입력)이면 픽셀마다 `shadingModel` 값을 쓴다.
 - **여러 closure 저장은 계획 14.4절 연구 gate**다(Renderer 7.1절도 Blendable과 같은 고정 배치로 시작한다). IR의 `Surface` 타입은 처음부터 트리이므로, gate를 통과하면 접기·내보내기 단계만 기능 등급별로 바꾸면 된다. 그래프·에셋 migration은 필요 없다.
 
-**블렌드 모드.** Renderer 스펙 14.2절 목록(`Opaque`·`Masked`·`Translucent`·`Additive`·`Modulate`·`AlphaComposite`)을 쓴다. UE 5.8의 `AlphaHoldout`(활성)은 Renderer 14.2절에 후속 값으로 있고, 그 단계 전에는 `Unsupported`로 진단한다. 들일 때 UE처럼 `Unlit` 전용 검사를 V5에 더한다(UE `RE/Private/Materials/MaterialShared.cpp:6378–6382`). Substrate 전용 색 투과 반투명은 목록에 없다(10.4절 D4).
+**블렌드 모드.** Renderer 스펙 14.2절 목록(`Opaque`·`Masked`·`Translucent`·`Additive`·`Modulate`·`AlphaComposite`)을 쓴다. UE 5.8의 `AlphaHoldout`(활성)은 Renderer 14.2절에 후속 값으로 있다. 필드 값은 지금 두고 그 단계 전에는 TODO 진단(`MPQ-AlphaHoldout`)이다. 들일 때 UE처럼 `Unlit` 전용 검사를 V5에 더한다(UE `RE/Private/Materials/MaterialShared.cpp:6378–6382`). Substrate 전용 색 투과 반투명(`TranslucentColoredTransmittance`)도 필드 값은 지금 두고 TODO 진단(`MPQ-ColoredTransmittance` — dual-source blending 경로)이다(10.4절 D4).
 
 **GBufferD가 필요한 shading model.** `ClearCoat` 등은 GBufferD를 쓰므로 Deferred에서는 MRT 8 형식에서만 지원된다(Renderer 7.1절, 결정 RN3·RN4). GLES Deferred에서는 `Unsupported`이고 Forward+에서는 지원된다. 한 경로만 되는 조합은 그 경로의 쿠킹 오류다(Renderer 14.2절). 머티리얼 컴파일러는 이 조건을 V6 capability 검사로 진단한다.
 
@@ -104,8 +108,10 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 | SF1 | `DefaultLit`·`Unlit` preset, `Opaque`·`Masked` | MAT0–MAT1(M3), Renderer RS0(`Unlit`)·RS1(Forward+ `DefaultLit`)·RS2(Deferred) |
 | SF2 | `Translucent`·`Additive`·`Modulate`·`AlphaComposite` | MAT2–MAT3, Renderer RS5 |
 | SF3 | `ClearCoat`·`Subsurface`·`SubsurfaceProfile`·`TwoSidedFoliage`·`Cloth`·`Eye`·`ThinTranslucent`·`SingleLayerWater` preset, `SurfaceSlab` 직접 입력, 표면 연산(parameter blending) | MAT4, 계획 11.1절 "M6–M8 고급 공통 재질", Renderer RS9 |
-| Hair | `Hair` preset·`HairBsdf` | 계획 11.1절 P3 별도 gate, Renderer 14.2절 |
+| Hair | `Hair` preset 값·`SurfaceHair` | 계획 11.1절 P3 별도 gate, Renderer 14.2절 |
 | SF4 | 여러 closure 저장(기능 등급 SM6 형식만), glint·rough refraction | 계획 14.4절 연구 gate |
+
+SF 단계는 **렌더러가 그 표면을 그리는** 단계다. 번역은 단계 MS2d에서 모든 표면 노드·preset 값·연산을 받는다(19장, 개정 10). SF 단계 전의 조합은 V6로 거르기에서 빠지므로, MS2d 산출물은 SF 단계를 기다리지 않는다.
 
 **결정 전 대안 (가)(고전 enum).** 출력 노드가 baseColor·metallic·specular·roughness·normal·shadingModel 핀을 직접 가지는 방식이다. 지금 렌더러 계약(`SurfaceAttributes`)과는 바로 맞지만, 이후 Substrate형으로 옮기려면 UE처럼 에셋 변환이 필요하다(UE `RE/Private/Materials/Material.cpp:3522–3569`). 결정 MD1은 (나)이다.
 

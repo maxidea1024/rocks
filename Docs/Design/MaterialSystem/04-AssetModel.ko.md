@@ -16,7 +16,7 @@
 | 레이어 목록 | `RE/Public/Materials/MaterialLayersFunctions.h:131–139` | `Layers`·`Blends`, 에디터 데이터에 `LayerGuids`(`:62–81`) |
 | `UMaterialParameterCollection` | `RE/Public/Materials/MaterialParameterCollection.h:77–94` | `ScalarParameters`·`VectorParameters` |
 
-UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병렬 배열로 캐시한다(`RE/Public/MaterialCachedData.h:209, 340–373`). 레이어 스택 노드의 일반화판(`UMaterialExpressionLayerStack`)은 Experimental이다(`RE/Public/Materials/MaterialExpressionLayerStack.h:30–31`). 이 문서는 따르지 않는다.
+UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병렬 배열로 캐시한다(`RE/Public/MaterialCachedData.h:209, 340–373`). 레이어 스택 노드의 일반화판(`UMaterialExpressionLayerStack`)은 Experimental이다(`RE/Public/Materials/MaterialExpressionLayerStack.h:30–31`). Experimental은 레거시가 아니므로 노드 `Material.LayerStack`으로 들인다(19장, 결정 MD11).
 
 ### 4.2 Rocks 에셋 클래스
 
@@ -24,9 +24,9 @@ UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병
 
 | 클래스 | 필드(EditorOnly 표시) | 쿠킹 데이터 |
 |---|---|---|
-| `MaterialBase`(Abstract) | — | — |
-| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(영역·블렌드 모드·양면·마스크 기준값 등 기본 속성), `usage : VertexInputUsage`, `functionRefs`(EditorOnly, Build 의존)·`collectionRefs`(Hard + Build, 4.4절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
-| `MaterialInstance` | `parent : ObjectRef<MaterialBase>`(Hard), 종류별 override 배열(4.3절), `staticOverrides`, `traitOverrides : Optional<MaterialTraitsDesc>`, `layerStackOverrides` | static 변형이 있으면 자기 `MaterialArtifact`, 없으면 평탄화한 override 값만 |
+| `MaterialBase`(Abstract) | profile 목록·조명 굽기 설정·텍스처 sampling scale(19.11절) | sampling scale |
+| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(UE `UMaterial` 속성 대응 전부 — 19.9절), 물리 재질 필드(19.9절, TODO MPQ-PhysicalMaterial), `usage : VertexInputUsage`, `functionRefs`(EditorOnly, Build 의존)·`collectionRefs`(Hard + Build, 4.4절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
+| `MaterialInstance` | `parent : ObjectRef<MaterialBase>`(Hard), 종류별 override 배열(4.3절, 19.11절), `staticOverrides`, `traitOverrides : MaterialTraitOverrides`(값마다 Optional, 19.11절), `layerStackOverrides` | static 변형이 있으면 자기 `MaterialArtifact`, 없으면 평탄화한 override 값만 |
 | `MaterialFunction` | `graph`(EditorOnly), `usage : {General, Layer, LayerBlend}`, `exposeToLibrary`(EditorOnly), 입출력 선언 | 없다(쿠킹 런타임에 함수는 필요 없다. 함수를 쓰는 머티리얼에 펼쳐져 들어간다) |
 | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunction>`, 파라미터 기본값 override | 없다 |
 | `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>`(`ParameterId`·이름·기본값) | layout과 기본값(World 상태가 쓴다) |

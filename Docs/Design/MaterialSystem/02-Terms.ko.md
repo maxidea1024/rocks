@@ -37,8 +37,8 @@
 | 표면 속성 `SurfaceAttributes`(Renderer 14.1절 소유) | `FPixelMaterialInputs`·GBuffer 데이터 | pass 셰이더가 읽는 픽셀 표면 값 |
 | 머티리얼 입력 `MaterialInputs`·`MaterialVertexInputs` | `FMaterialPixelParameters`·`FMaterialVertexParameters` | 생성 함수가 받는 픽셀·정점 문맥 |
 | 표면 층 노드 `SurfaceSlab` | Substrate Slab | 기본 BSDF 노드 |
-| 표면 연산 노드 `SurfaceMix`·`SurfaceStack`·`SurfaceAdd`·`SurfaceCoverage`·`SurfaceSelect` | Horizontal Blend·Vertical Layer·Add·Coverage Weight·Select | BSDF 결합 |
-| shading preset 노드 | Substrate Shading Models(legacy 변환 노드)·`EMaterialShadingModel` | 고전 shading model 입력을 BSDF로 바꾸는 노드 |
+| 표면 연산 노드 `SurfaceHorizontalMix`·`SurfaceVerticalLayer`·`SurfaceAdd`·`SurfaceWeight`·`SurfaceSelect` | Horizontal Mixing·Vertical Layering·Add·Weight·Select | BSDF 결합(19장 이름) |
+| shading preset 노드 `SurfaceFromShadingModel` | Substrate Shading Models(legacy 변환 노드)·`EMaterialShadingModel` | 고전 shading model 입력을 BSDF로 바꾸는 노드 하나(shading model은 속성·입력으로 고른다) |
 | 기본 머티리얼 `DefaultMaterial`(영역별) | `UMaterial::GetDefaultMaterial` | 대체 머티리얼 |
 | 컴파일 조정자 `CompileCoordinator`(계획 14.6) | 머티리얼 에디터 갱신 + 셰이더 맵 컴파일 | 편집 → 컴파일 요청 관리 |
 | 미리보기 세션 `PreviewSession`(계획 14.6) | 머티리얼 에디터 preview·`FMatExpressionPreview` | 미리보기 렌더 |

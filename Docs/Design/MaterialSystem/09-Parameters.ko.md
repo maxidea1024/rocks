@@ -42,9 +42,9 @@
 | Static Enum(preset 선택 등) | 정수 | static 변형 | MAT2 |
 | Collection 참조 | 컬렉션 에셋 | static 변형(layout이 원문에 들어간다) | MAT2 |
 | Layer Stack | 레이어·혼합 함수 목록 | static 변형 | MAT3 |
-| Double Vector(절대 위치 등) | double4 | 없음 | 후속(`WorldPosition` 파라미터가 필요할 때) |
-| 가상 텍스처·텍스처 컬렉션·sparse volume | — | — | 후속(UE 종류는 대응표에만) |
-| font | — | — | 파라미터 노드 `FontSampleParameter`, 값은 (미리 구운 Font, 페이지). 함께 들일 비파라미터 노드 `FontSample`·`FontSignedDistance`, 단계 FT7 — [글꼴 설계](../Font/07-Consumers.ko.md) 7.4절 |
+| Double Vector(절대 위치 등) | `Double4`(5.3절 — uniform은 double high·low 두 slot) | 없음 | MS2c(19장) |
+| 가상 텍스처·텍스처 컬렉션·sparse volume·커브 atlas | 해당 에셋 참조 | 없음 | TODO — 노드 서술과 속성은 MS1b, lowering은 선행(19.4.1절 `MPQ-RuntimeVirtualTexture`·`MPQ-TextureCollection`·`MPQ-SparseVolumeTexture`·`MPQ-CurveAsset`) 뒤 |
+| font | — | — | TODO(`MPQ-Font`, 19.4.1절). 파라미터 노드 `FontSampleParameter`, 값은 (미리 구운 Font, 페이지). 함께 들일 비파라미터 노드 `FontSample`·`FontSignedDistance`, 단계 FT7 — [글꼴 설계](../Font/07-Consumers.ko.md) 7.4절 |
 
 ### 9.4 상수 식 프로그램과 상수 블록
 

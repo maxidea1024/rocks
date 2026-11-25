@@ -34,8 +34,9 @@
 | `Int1`–`Int4`, `UInt1`–`UInt4` | 32-bit 정수 벡터 | 상수 블록에서는 float와 다른 16 byte slot에 둔다(7.2절 5항) |
 | `Bool` | 실행 중 bool | 상수 블록에는 uint 비트로 담는다(UE도 32비트 단위 비트 패킹, `RE/Private/Materials/HLSLMaterialTranslator.cpp:3792–3822`) |
 | `Float3x3`, `Float4x4` | 행렬 | 상수 블록에는 `Float4x4`만 둔다(7.2절 5항). `Float3x3`는 IR 안에서만 쓴다 |
-| `WorldPosition` | 절대 world 위치(타일 + 오프셋, `Float3` 둘) | cm 단위. 셰이더 안 기본 위치는 카메라 상대 world(translated world)이고, 절대 위치가 필요한 노드만 이 타입을 쓴다. 표현은 Renderer 스펙의 view 상수(16절 MRD6)를 따른다. UE는 LWC 타입을 쓰고 기본으로 켠다(`RE/Private/Materials/HLSLMaterialTranslator.cpp:150–178` `r.MaterialEditor.LWCEnabled`) |
-| `Texture2D`·`Texture2DArray`·`TextureCube`·`TextureCubeArray`·`Texture3D` | 텍스처 자원 | 가상 텍스처·외부(영상) 텍스처는 후속 |
+| `Double1`–`Double4` | 큰 좌표 값(LWC, 셰이더 안에서는 타일 + 오프셋 `Float` 벡터 둘) | 절대 world 위치(`Double3`, cm)·`ConstantDouble`(`Double1`)·`DoubleVectorParameter`(`Double4`). UE `MCT_LWCScalar`–`MCT_LWCVector4`와 같다(`HLSLMaterialTranslator.cpp:511, 2539`). uniform 값은 double의 high·low 두 slot이다(`MaterialUniformExpressions.cpp:1344–1365`). Float로의 변환은 명시 노드(`TruncateWorldPosition`)나 translated world 변환으로만 한다. 셰이더 안 기본 위치는 카메라 상대 world(translated world)이고, 절대 위치가 필요한 노드만 이 타입을 쓴다. 표현은 Renderer 스펙의 view 상수(16절 MRD6)를 따른다. UE는 LWC 타입을 쓰고 기본으로 켠다(`RE/Private/Materials/HLSLMaterialTranslator.cpp:150–178` `r.MaterialEditor.LWCEnabled`) |
+| `Texture2D`·`Texture2DArray`·`TextureCube`·`TextureCubeArray`·`Texture3D` | 텍스처 자원 | `TextureAny`는 이 다섯을 받는 입력 전용 타입(UE `MCT_Texture`) |
+| `TextureExternal`·`TextureVirtual`·`SparseVolumeTexture`·`TextureCollection`·`TextureMeshPaint`·`TextureMaterialCache` | 자원 종류가 아직 없는 텍스처 | 선언만 한다(19.4.1절 `MPQ-ExternalTexture`·`MPQ-VirtualTexture`·`MPQ-SparseVolumeTexture`·`MPQ-TextureCollection`). UE `MaterialValueType.h:38–40, 67–69`. 같은 타입끼리만 잇는다 |
 | `StaticBool`·`StaticInt`·`StaticEnum` | 번역 때 정해지는 값 | static switch·component mask·preset 선택 |
 | `Surface` | BSDF 트리(10절) | 출력 노드의 표면 입력 |
 | `MaterialAttributes` | 속성 집합(표면 입력 + 등록된 custom attribute) | 레이어·혼합 함수의 입출력 |
@@ -89,20 +90,20 @@
 
 | 영역 | 출력 핀 | 단계 | 비고 |
 |---|---|---|---|
-| Surface | `Surface`(BSDF), `Opacity`, `OpacityMask`, `AmbientOcclusion`, `PixelDepthOffset`, `WorldPositionOffset`, `CustomizedUv0`–`7`, 이름 있는 custom 출력 | 픽셀·정점 | 블렌드 모드에 따라 `Opacity`·`OpacityMask`가 활성화된다(V5). `Refraction`·`Displacement`는 후속 |
+| Surface | `Surface`(BSDF), `Opacity`, `OpacityMask`, `AmbientOcclusion`, `PixelDepthOffset`, `WorldPositionOffset`, `CustomizedUv0`–`7`, `Refraction`, `SurfaceThickness`, `Displacement`, `Attributes`(머티리얼 속성 사용 표시일 때), 추가 출력 노드 | 픽셀·정점 | 블렌드 모드에 따라 `Opacity`·`OpacityMask`·`Refraction`이 활성화된다(V5). UE `EMaterialProperty` 대응은 19.8절 |
 | DeferredDecal | `Surface`(쓰는 속성 부분집합), `Opacity` | 픽셀 | 쓰는 속성(색·노멀·거칠기·발광)은 Renderer 스펙의 decal 계약이 정한다(16절 MRD12) |
 | LightFunction | `LightColor`(Float3) | 픽셀 | |
 | PostProcess | `Color`(Float4), scene texture 입력 노드 | 픽셀 | 삽입 위치는 계획 26절의 HDR·tone-map 위치 |
 | UserInterface | `Color`(Float3), `Opacity`, `OpacityMask` | 픽셀 | UI 정점 입력 타입(UiToolkit) |
-| Volume | `Albedo`·`Extinction`·`Emissive` | 픽셀 | 후속(Renderer volumetric fog 단계) |
+| Volume | `Surface`(`SurfaceVolumetricFogCloud`: `Albedo`·`Extinction`·`Emissive`·`AmbientOcclusion`), 고급 volume 출력 노드 | 픽셀 | 번역은 MS2d. 그리는 pass는 Renderer volumetric fog 단계(공급 `volume`, 19.3절) |
 
-UE의 RuntimeVirtualTexture 영역은 deprecated이며 로드 때 Surface + RVT 출력 노드로 바뀐다(`RE/Public/MaterialDomain.h:26–27`, `RE/Private/Materials/Material.cpp:3259–3333`). Rocks는 이것을 영역으로 두지 않는다. 가상 텍스처 단계에서 Surface의 custom 출력으로 정한다(후속).
+UE의 RuntimeVirtualTexture 영역은 deprecated이며 로드 때 Surface + RVT 출력 노드로 바뀐다(`RE/Public/MaterialDomain.h:26–27`, `RE/Private/Materials/Material.cpp:3259–3333`). Rocks는 이것을 영역으로 두지 않는다. Surface의 추가 출력 노드 `RuntimeVirtualTextureOutput`이다(19.6절, 공급 `rvt`).
 
-영역은 Renderer가 준비될 때까지 `Unsupported`로 표시한다(계획 14.7절). M3 기준은 Surface(Opaque·Masked)와 `DefaultLit`·`Unlit` preset이다. 영역 이름은 Renderer 14.2절을 따른다.
+번역은 모든 영역을 받는다. 그 영역을 그리는 pass가 아직 없으면 그 조합은 거르기에서 빠지고 쿠킹 보고서에 남는다(계획 14.7절 `Unsupported`, V6·19.3절). M3 기준은 Surface(Opaque·Masked)와 `DefaultLit`·`Unlit` preset이다. 영역 이름은 Renderer 14.2절을 따른다.
 
-### 5.7 노드 묶음(1차 범위)
+### 5.7 노드 묶음
 
-계획 14.5절 "기본 표현식"과 MAT0–MAT2 범위다. 아래 이름은 기능을 가리키는 가칭이다. 구현 때 Rocks 이름으로 정하고, UE 대응은 노드 descriptor 문서에 둔다.
+**전체 목록은 [19장](19-NodeCatalog/README.ko.md)이다(개정 10).** UE 5.8 노드 클래스 360개를 전부 대응시키고 노드마다 상태·단계·공급 조건을 정했다(결정 MD11). 아래 표는 개정 9까지의 "1차 범위"(계획 14.5절 "기본 표현식", MAT0–MAT2)다. 이 범위는 19장 단계 MS2a–MS2c·MS2e에 들어 있고, 이름은 19장 표가 정한다.
 
 | 묶음 | 노드 |
 |---|---|
