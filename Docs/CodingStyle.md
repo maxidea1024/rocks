@@ -116,7 +116,7 @@ C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검�
 - 대상: 선언 목록 안에서 선언이 바로 앞 선언 뒤에 올 때, **앞 선언의 마지막 줄 바로 다음 줄이 빈 줄**이어야 한다(공백만 있는 줄도 빈 줄이다). MS C# 규칙의 "메서드·속성 정의 사이에 빈 줄"을 모든 멤버로 넓힌 것이다.
   - 선언 목록: 형식 본문(class·struct·record·interface)의 멤버, namespace 본문(file-scoped 포함)과 컴파일 단위의 형식·대리자·namespace 선언.
   - 멤버: 메서드·생성자·소멸자·속성·인덱서·이벤트·연산자·변환 연산자·중첩 형식·대리자·필드. 인터페이스의 본문 없는 선언과 한 줄 자동 속성도 대상이다.
-  - 대상 아님: 레코드 위치 매개변수·primary constructor 매개변수(매개변수 목록), 객체 초기화자·익명 형식 멤버(editorconfig new_line 규칙 몫), 지역 함수(문장 — IDE2003 몫).
+  - 대상 아님: 레코드 위치 매개변수·primary constructor 매개변수(매개변수 목록), 객체 초기화자·익명 형식 멤버(editorconfig new_line 규칙 몫), 지역 함수와 최상위 문장(top-level statements — `GlobalStatementSyntax`, 문장이라 IDE2003 몫. 최상위 문장 바로 뒤의 선언도 보지 않는다).
 - 예외:
   - 필드(`const` 포함)와 이벤트 필드가 연속하면 빈 줄 없이 묶어도 된다(.NET 런타임 관례 — 필드 무리).
   - 열거형 멤버는 대상이 아니다.
@@ -135,6 +135,7 @@ C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검�
   1. 검사기·시험 커밋과 기계적 `--write` 수정 커밋(동작 불변)으로 나눈다.
   2. 수정 커밋 전에 `git status`로 다른 세션이 고치고 있는 `.cs`를 확인한다. 겹치면 worktree에서 커밋해 update-ref로 반영하거나, 그 파일은 그 세션에 알리고 빼 둔다.
   3. 두 커밋은 함께 push한다(CI format 검사가 중간에 실패하지 않게).
+  - 도입 때(2026-11-25) 저장소 C# 소스의 위반은 0곳이었다(처음 센 52곳은 최상위 문장 오탐 — 대상에서 뺐다). 그래서 수정 커밋 없이 검사기 커밋 하나로 켰다.
 - 시험(Rocks.ToolTests, 결정적 입력 문자열): 예외마다 양성·음성 쌍, 주석·특성 위치(위의 모호한 사례 포함), namespace·컴파일 단위 목록, 구문 오류 보고, 지시문 사이, CRLF·LF 보존, `--write` 뒤 재검사 0과 IDE2000 없음.
 
 빌드 시 공개 헤더를 각각 단독 include한 번역 단위로 컴파일한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .`(PolicyChecks.Runtime)는 런타임 소스(Core·Engine·플러그인·프로그램, 모듈 `Tests/` 제외)의 금지 include와 `std::` 사용, 날 형식 한계 리터럴(`raw-limit-literal`)을 검사한다. 이 검사는 외부 SDK 내부나 최종 바이너리의 모든 의존성을 증명하는 검사는 아니다.
