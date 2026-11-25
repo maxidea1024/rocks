@@ -57,24 +57,24 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 | 선가속도·중력 | cm/s² | m/s² | A | `CentimetersPerSecondSquaredToMetersPerSecondSquared` |
 | 각속도 | rad/s(축성) | rad/s | A | 없음(길이 차원 없음). 도/초 API는 Rocks 공개 API 층에서 rad/s로 바꾼 뒤 어댑터에 들어온다 |
 | 질량 | kg | kg | — | 없음 |
-| 밀도 | g/cm³(UE `UPhysicalMaterial::Density`, `PhysicsCore/Public/PhysicalMaterials/PhysicalMaterial.h:145-147`) | kg/m³(`ConvexShapeSettings::mDensity`, 기본 1000) | — | ×1000. `UnitConversion.h`에 함수가 없다(K1) |
+| 밀도 | g/cm³(UE `UPhysicalMaterial::Density`, `PhysicsCore/Public/PhysicalMaterials/PhysicalMaterial.h:145-147`) | kg/m³(`ConvexShapeSettings::mDensity`, 기본 1000) | — | ×1000. `GramsPerCubicCentimeterToKilogramsPerCubicMeter`(K1) |
 | 힘 | kg·cm/s²(U1 확인) | N | A | `KilogramCentimetersPerSecondSquaredToNewtons` |
 | 선형 충격량 | kg·cm/s(U1 확인) | N·s | A | `KilogramCentimetersPerSecondToNewtonSeconds` |
 | 토크 | kg·cm²/s²(U1 확인) | N·m | A | `KilogramCentimetersSquaredPerSecondSquaredToNewtonMeters` |
-| 각충격량·각운동량 | kg·cm²/s | kg·m²/s | A | 계수 10000. 함수가 없다(K1) |
+| 각충격량·각운동량 | kg·cm²/s | kg·m²/s | A | `KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond`(K1) |
 | 관성 텐서 | kg·cm²(UE `Engine/Classes/Components/PrimitiveComponent.h:2863`) | kg·m² | A·I·Aᵀ | `KilogramSquareCentimetersToKilogramSquareMeters` |
 | 회전 | 단위 quaternion (x, y, z, w) | 단위 quaternion (x, y, z, w)(J4) | (A·v, w) | 없음 |
 | 법선(접촉·hit·평면) | 단위 벡터 | 단위 벡터 | A, 부호 규약은 5절 | 없음 |
 | 평면 상수 | cm | m | — | `CentimetersToMeters` |
 | 선형 스프링 강성·감쇠 계수 | kg/s²·kg/s(= N/m·N·s/m) | 같음(Jolt 문서 Architecture.md:524) | — | 없음(길이 차원이 약분된다) |
-| 각 스프링 강성·감쇠 | kg·cm²/s²/rad·kg·cm²/s/rad | N·m/rad·N·m·s/rad | — | 계수 10000. 함수가 없다(K1) |
+| 각 스프링 강성·감쇠 | kg·cm²/s²/rad·kg·cm²/s/rad | N·m/rad·N·m·s/rad | — | `KilogramSquareCentimetersPerSecondSquaredPerRadianToNewtonMetersPerRadian`·`…PerSecondPerRadianToNewtonMeterSecondsPerRadian`(K1) |
 | 주파수 지정 스프링(`ESpringMode::FrequencyAndDamping`) | Hz·무차원 | 같음 | — | 없음 |
 | 마찰·반발 계수, 감쇠 비율, 시간 | 무차원·초 | 같음 | — | 없음 |
 | 관절 각도 한계 | 도(UE `Engine/Classes/PhysicsEngine/ConstraintTypes.h:77`·`:105` `Swing1LimitDegrees`·`TwistLimitDegrees`) | rad | — | 도 → rad는 Rocks 공개 API 층 |
 
 - 기본 중력: Rocks 월드 기본값은 UE 프로젝트 설정 기본값과 같은 (0, 0, −980) cm/s²다(UE `PhysicsCore/Private/PhysicsSettingsCore.cpp:29` `DefaultGravityZ`). Chaos solver 자체 기본값 (0, 0, −980.665)(`Experimental/Chaos/Public/Chaos/PerParticleGravity.h:17`)은 설정이 적용되기 전 값이므로 따르지 않는다. Jolt 기본값 (0, −9.81, 0)(`Physics/PhysicsSystem.h:392`)에 맡기지 않고 어댑터가 `SetGravity`로 (0, −9.8, 0) m/s²를 넣는다.
 - 정밀도: cm → m는 정확한 정수 계수로 한 번 나눈다(`UnitConversion.h` 계약). 같은 값을 m → cm → m로 왕복하면 비트가 같다는 보장이 없으므로, 한 필드의 값은 한쪽만 소유한다(6절).
-- K1: 밀도, 각충격량·각운동량, 각 스프링 강성 변환 함수는 범용 단위 변환이므로 물리 모듈에 따로 두지 않고 Core `UnitConversion.h`에 더한다(물리 모듈 착수 전 Core 작업, 남음).
+- K1: 밀도, 각충격량·각운동량, 각 스프링 강성·감쇠 변환 함수는 범용 단위 변환이므로 물리 모듈에 따로 두지 않고 Core `UnitConversion.h`에 더했다(2026-11-25 구현 — [수학 구현](../Implementation/Math.ko.md) 2절 표).
 - 밀도 기본값: Jolt 기본 1000 kg/m³(물)와 UE `UPhysicalMaterial` 기본 밀도가 다르면 Rocks 물리 재질 기본값(UE와 같음)을 변환해 넣는다. Jolt 기본값에 맡기지 않는다.
 
 ## 4. 기하·형상
@@ -157,7 +157,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 | U2 | UE 에디터 물리량 표시 단위 | 미확인 | — | Rocks 에디터 단계(물리 착수 gate와 무관) |
 | U3 | UE landscape 충돌 칸 대각선 | (x, y)–(x + 1, y + 1), Jolt와 같다 | `Experimental/Chaos/Public/Chaos/HeightField.h:501-513`, `Experimental/Chaos/Private/Chaos/HeightField.cpp:1817-1820` | 4절 |
 
-남은 항목: U2(물리 gate와 무관), K1(Core 함수 추가).
+남은 항목: U2(물리 gate와 무관). K1은 2026-11-25에 구현했다.
 
 ## 9. 수용 시험(미구현)
 

@@ -15,6 +15,8 @@ TEST(MathUnitConversion_FactorsMatchUe) {
     CHECK(math::CentimetersPerMeter<float> == 100.0f);
     CHECK(math::SquareCentimetersPerSquareMeter<double> == 10000.0);
     CHECK(math::SquareCentimetersPerSquareMeter<float> == 10000.0f);
+    CHECK(math::KilogramsPerCubicMeterPerGramPerCubicCentimeter<double> == 1000.0);
+    CHECK(math::KilogramsPerCubicMeterPerGramPerCubicCentimeter<float> == 1000.0f);
 }
 
 TEST(MathUnitConversion_LengthGolden) {
@@ -81,6 +83,34 @@ TEST(MathUnitConversion_TorqueAndInertiaUseSquareFactor) {
     CHECK(math::KilogramSquareMetersToKilogramSquareCentimeters(0.004) == 40.0);
     CHECK(math::KilogramSquareCentimetersToKilogramSquareMeters(Vec3d(40.0, 40.0, 25000.0)) ==
           Vec3d(0.004, 0.004, 2.5));
+}
+
+// 각충격량·각 스프링도 길이 2차(10000)다(Docs/Design/PhysicsJoltAdapter.ko.md 3절 K1).
+TEST(MathUnitConversion_AngularImpulseAndSpringUseSquareFactor) {
+    CHECK(math::KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond(25000.0) == 2.5);
+    CHECK(math::KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond(25000.0f) ==
+          2.5f);
+    CHECK(math::KilogramSquareMetersPerSecondToKilogramSquareCentimetersPerSecond(2.5) == 25000.0);
+    CHECK(math::KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond(
+              Vec3d(10000.0, -20000.0, 0.0)) == Vec3d(1.0, -2.0, 0.0));
+    CHECK(math::KilogramSquareCentimetersPerSecondSquaredPerRadianToNewtonMetersPerRadian(5000.0) ==
+          0.5);
+    CHECK(math::NewtonMetersPerRadianToKilogramSquareCentimetersPerSecondSquaredPerRadian(0.5) ==
+          5000.0);
+    CHECK(math::KilogramSquareCentimetersPerSecondPerRadianToNewtonMeterSecondsPerRadian(300.0f) ==
+          0.03f);
+    CHECK(math::NewtonMeterSecondsPerRadianToKilogramSquareCentimetersPerSecondPerRadian(0.03) ==
+          300.0);
+}
+
+// 밀도는 g/cm³ → kg/m³에 1000을 곱한다(UE UnitConversion.cpp:803-806). 물 1 g/cm³ = 1000 kg/m³,
+// 알루미늄 2.7 g/cm³ = 2700 kg/m³.
+TEST(MathUnitConversion_DensityGolden) {
+    CHECK(math::GramsPerCubicCentimeterToKilogramsPerCubicMeter(1.0) == 1000.0);
+    CHECK(math::GramsPerCubicCentimeterToKilogramsPerCubicMeter(1.0f) == 1000.0f);
+    CHECK(math::GramsPerCubicCentimeterToKilogramsPerCubicMeter(2.7) == 2700.0);
+    CHECK(math::KilogramsPerCubicMeterToGramsPerCubicCentimeter(2700.0) == 2.7);
+    CHECK(math::KilogramsPerCubicMeterToGramsPerCubicCentimeter(1000.0f) == 1.0f);
 }
 
 TEST(MathUnitConversion_NonFiniteIsPreserved) {
