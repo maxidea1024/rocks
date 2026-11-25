@@ -4,6 +4,7 @@
 #include <Core/Move.h>
 #include <Graphics/Device.h>
 #include <RenderBase/ComputeDispatch.h>
+#include <RenderBase/FullscreenPass.h>
 #include <RenderBase/GpuTrace.h>
 #include <RenderBase/PipelineCache.h>
 #include <RenderBase/RenderHandle.h>
@@ -425,6 +426,34 @@ public:
                                      const ComputePipelineRequest& request,
                                      GraphComputeDispatch dispatch, Bind&& bind) noexcept;
 
+    // 전체화면 pass를 넣는다(UE FPixelShaderUtils::AddFullscreenPass, Docs/Design/RenderBase 11.4절
+    // 3항). Raster pass이고 기록 순서는 SetPipeline → bind(pass) → Draw(3)(정점 버퍼 없음 — VS는
+    // 엔진 셰이더 FullscreenTriangleVertex, RenderBase/FullscreenPass.h)다. 렌더 타깃은 accesses의
+    // attachment 선언이다. bind는 void(GraphPassContext&) noexcept 람다이며 텍스처·상수를 묶는다.
+    // 실패(검증 오류, 그 뒤 Execute는 InvalidArgument): pipeline null, accesses에 렌더 타깃이 없음.
+    // 그 밖은 AddPass와 같다.
+    //
+    // 사용 예(HDR 장면 색을 출력에 복사한다):
+    //   GraphPassAccesses accesses(graph);
+    //   accesses.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
+    //       .RenderTarget(output, GraphLoadAction::DontCare);
+    //   graph.AddFullscreenPass(CopyName, GraphPassFlags::None, accesses, cache, copyRequest,
+    //                           [=](GraphPassContext& pass) noexcept {
+    //                               pass.Commands().SetTexture(pass.Texture(sceneColor));
+    //                           });
+    template <class Bind>
+    Result<GraphPass> AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                                        const GraphPassAccesses& accesses,
+                                        graphics::PipelineHandle pipeline, Bind&& bind) noexcept;
+
+    // 위의 캐시 판이다: 이 자리(소유 스레드)에서 cache.FindOrCreate(request)로 파이프라인을 얻는다.
+    // 파이프라인 실패는 그 오류를 돌려주고 그래프 오류로 남긴다.
+    template <class Bind>
+    Result<GraphPass> AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                                        const GraphPassAccesses& accesses, PipelineCache& cache,
+                                        const GraphicsPipelineRequest& request,
+                                        Bind&& bind) noexcept;
+
     // 그래프를 실행한다(Deferred: culling·수명·전이 계산 → 선언 순서 실행, Immediate: 마무리).
     // 마지막 전이·제출(EndFrame), 풀 반환·export handle 연결·lease 반환·풀 축출까지 한다. 한 번만
     // 부른다. 실패: 앞선 검증 오류 InvalidArgument, 다시 부르면 Busy, 장치 실패는 그 오류(그래도
@@ -481,6 +510,11 @@ private:
                                       GraphPassAccesses& accesses) noexcept;
     // 캐시 판의 파이프라인 실패를 그래프 오류로 남기고 code를 돌려준다.
     ErrorCode RecordComputePipelineFailure(TraceScopeName& name, ErrorCode code) noexcept;
+    // AddFullscreenPass의 검사다(실패는 검증 오류로 남긴다).
+    Result<void> CheckFullscreenPass(TraceScopeName& name, const GraphPassAccesses& accesses,
+                                     graphics::PipelineHandle pipeline) noexcept;
+    // 전체화면 캐시 판의 파이프라인 실패를 그래프 오류로 남기고 code를 돌려준다.
+    ErrorCode RecordFullscreenPipelineFailure(TraceScopeName& name, ErrorCode code) noexcept;
 
     FrameArena& arena_;
     detail::GraphState* state_ = nullptr;
@@ -593,6 +627,38 @@ Result<GraphPass> RenderGraph::AddComputePass(TraceScopeName& name, GraphPassKin
 
     dispatch.pipeline = pipeline.Value();
     return AddComputePass(name, kind, flags, accesses, dispatch, Forward<Bind>(bind));
+}
+
+template <class Bind>
+Result<GraphPass> RenderGraph::AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                                                 const GraphPassAccesses& accesses,
+                                                 graphics::PipelineHandle pipeline,
+                                                 Bind&& bind) noexcept {
+    auto checked = CheckFullscreenPass(name, accesses, pipeline);
+    if (!checked) {
+        return Result<GraphPass>::Failure(checked.Error());
+    }
+
+    return AddPass(name, GraphPassKind::Raster, flags, accesses,
+                   [pipeline, bound = Forward<Bind>(bind)](GraphPassContext& pass) noexcept {
+                       graphics::CommandContext& commands = pass.Commands();
+                       commands.SetPipeline(pipeline);
+                       bound(pass);
+                       DrawFullscreenTriangle(commands);
+                   });
+}
+
+template <class Bind>
+Result<GraphPass>
+RenderGraph::AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                               const GraphPassAccesses& accesses, PipelineCache& cache,
+                               const GraphicsPipelineRequest& request, Bind&& bind) noexcept {
+    auto pipeline = cache.FindOrCreate(request);
+    if (!pipeline) {
+        return Result<GraphPass>::Failure(RecordFullscreenPipelineFailure(name, pipeline.Error()));
+    }
+
+    return AddFullscreenPass(name, flags, accesses, pipeline.Value(), Forward<Bind>(bind));
 }
 
 } // namespace rocks::render

@@ -1446,6 +1446,10 @@ uint64 RecordingDevice::IgnoredDraws() const noexcept {
     return ignoredDraws_;
 }
 
+uint64 RecordingDevice::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
+}
+
 uint64 RecordingDevice::ValidationErrorCount() const noexcept {
     return validationErrors_;
 }
@@ -1725,6 +1729,11 @@ void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
                 break;
             }
         }
+    }
+
+    // 실제 장치처럼 흰 텍스처로 대신 묶는 경우(null·stale·ReadWrite view)를 센다.
+    if (state == nullptr || (state->view && state->access != ViewAccess::Read)) {
+        ++nullTextureBindings_;
     }
 
     Record(Op::SetTexture, state != nullptr ? 1u : 0u);

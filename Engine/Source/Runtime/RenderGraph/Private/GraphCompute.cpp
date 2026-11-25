@@ -2,8 +2,8 @@
 
 #include <RenderGraph/RenderGraph.h>
 
-// 그래프 버퍼 view와 compute pass 도우미다(Docs/Design/RenderBase 4.4절 "GX3·GX4 compute 연결 설계"
-// (3)·(4)). 규칙은 공개 헤더 주석을 따른다.
+// 그래프 버퍼 view와 compute pass 도우미(Docs/Design/RenderBase 4.4절 "GX3·GX4 compute 연결 설계"
+// (3)·(4)), 전체화면 pass 검사(11.4절 3항)다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::render {
 
 using namespace detail;
@@ -144,6 +144,45 @@ ErrorCode RenderGraph::RecordComputePipelineFailure(TraceScopeName& name, ErrorC
 
     return RecordGraphError(*state_, code, false,
                             "compute pass '{}' could not get its pipeline from the cache ({})",
+                            ComputeTraceName(name), ErrorCodeName(code));
+}
+
+Result<void> RenderGraph::CheckFullscreenPass(TraceScopeName& name,
+                                              const GraphPassAccesses& accesses,
+                                              graphics::PipelineHandle pipeline) noexcept {
+    if (state_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    GraphState& state = *state_;
+    if (state.executed) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    const char* passName = ComputeTraceName(name);
+    if (pipeline.IsNull()) {
+        return Result<void>::Failure(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                                      "fullscreen pass '{}' has no pipeline",
+                                                      passName));
+    }
+
+    if (accesses.Target().kind == GraphTargetKind::None) {
+        return Result<void>::Failure(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                                      "fullscreen pass '{}' has no render target",
+                                                      passName));
+    }
+
+    return Result<void>::Success();
+}
+
+ErrorCode RenderGraph::RecordFullscreenPipelineFailure(TraceScopeName& name,
+                                                       ErrorCode code) noexcept {
+    if (state_ == nullptr) {
+        return code;
+    }
+
+    return RecordGraphError(*state_, code, false,
+                            "fullscreen pass '{}' could not get its pipeline from the cache ({})",
                             ComputeTraceName(name), ErrorCodeName(code));
 }
 

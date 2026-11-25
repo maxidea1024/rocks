@@ -381,6 +381,7 @@ public:
     uint64 RejectedCalls() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
 
@@ -607,6 +608,8 @@ private:
     Array<PendingTransition> pendingSplits_;
     uint64 validationErrors_ = 0;
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     // 파이프라인마다 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
     SlotArray<uint32> pipelines_;
     // 묶인 파이프라인이다(stale·null이면 SetDrawConstants가 거부한다).

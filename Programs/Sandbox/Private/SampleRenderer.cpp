@@ -3,6 +3,7 @@
 
 #include <Core/Diagnostics/Log.h>
 #include <Graphics/GraphicsLog.h>
+#include <RenderBase/PipelineStatePresets.h>
 
 #include <Base/Compiler.h>
 
@@ -62,7 +63,7 @@ Result<void> Renderer::Initialize(graphics::Device& device,
     pipeline.layout = {attributes, streams};
     pipeline.drawConstantBytes = sizeof(ObjectConstants);
     pipeline.colorFormats[0] = colorFormat;
-    pipeline.blend[0] = graphics::AlphaBlend();
+    pipeline.blend[0] = render::AlphaBlend();
     pipeline.raster.cullMode = graphics::CullMode::Back;
     // 파이프라인 실패를 결정하는 곳이 여기다. 장치는 원인을 LastError에만 남긴다(셰이더는
     // Sample.rsf의 쿠킹 코드 — ShaderSystem 16.1절 SSD19).

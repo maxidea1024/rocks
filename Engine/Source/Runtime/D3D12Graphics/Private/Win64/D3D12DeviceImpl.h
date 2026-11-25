@@ -754,6 +754,7 @@ public:
     StringView LastError() const noexcept override;
 
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
 
     usize CollectTimestamps(Span<TimestampSample> out) noexcept override;
 
@@ -1326,6 +1327,8 @@ private:
     BoundVertexBuffer boundVertex_[MaxVertexStreams];
     BoundIndexBuffer boundIndex_;
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     ComRef<IDXGIInfoQueue> dxgiInfoQueue_;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;

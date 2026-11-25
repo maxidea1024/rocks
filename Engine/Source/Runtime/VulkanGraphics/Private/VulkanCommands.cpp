@@ -453,6 +453,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     if (record == nullptr || record->view == VK_NULL_HANDLE || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
+        ++nullTextureBindings_;
     }
 
     if (record == nullptr) {
