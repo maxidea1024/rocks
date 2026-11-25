@@ -3,6 +3,13 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::CookReport::artifacts",
+      "id": "3043297f7fc74254bc8d574a67881f12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::CookReport::bytesWritten",
       "id": "8a7c11bb317d4b9db11f271095117f6b",
       "aliases": [],
@@ -59,6 +66,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::CookReport::stageStats",
+      "id": "bc6091b6bb8a4a7f89546216d3a49618",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::CookReport::targets",
       "id": "35afb71b07bc4302bc1687fee6cf91be",
       "aliases": [],
@@ -68,6 +82,48 @@
       "kind": "field",
       "name": "rocks::CookReport::toolBuildId",
       "id": "87366d1789ee4f64a1e9470f04ca9f8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportArtifact::bytes",
+      "id": "366d51e49e0846c4a0761f8dc0a8e532",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportArtifact::format",
+      "id": "7e178ad3232a464e8ae269964167d7a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportArtifact::kind",
+      "id": "286e784688b841f8937f2d45b24c6710",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportArtifact::name",
+      "id": "b56fa92fe2934122bb88eab9368336dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportArtifact::reused",
+      "id": "ac405ac5ef39445793c0efa78e6b8aaf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportArtifact::sha256",
+      "id": "d4b6b95b0d5749b6a1a2aaff07cecc14",
       "aliases": [],
       "retired": false
     },
@@ -115,8 +171,36 @@
     },
     {
       "kind": "field",
+      "name": "rocks::CookReportStat::name",
+      "id": "7ad594f42ee148aaac06edc9f1d29c72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportStat::stage",
+      "id": "fae1c564b05d42e9a963e78236072fc3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookReportStat::value",
+      "id": "91e60355449147279da4f72148744c8b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::CookSettings::alwaysCook",
       "id": "e1efd776e8a7454e9f2333f721a7ca73",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CookSettings::cookDevelopmentShaders",
+      "id": "cc71b9127b1f42ed9e5155ddbc067b7b",
       "aliases": [],
       "retired": false
     },
@@ -164,8 +248,22 @@
     },
     {
       "kind": "type",
+      "name": "rocks::CookReportArtifact",
+      "id": "680951dc4f4e419297e37a6a2197f2a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::CookReportDiagnostic",
       "id": "62beb24a79864c1d988e6ccd52903892",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CookReportStat",
+      "id": "7960f126a124478b92708b15c7be5007",
       "aliases": [],
       "retired": false
     },

@@ -494,12 +494,24 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
     request.cookedBy = build::CurrentEngineVersion();
     request.nuggets = &nuggets;
     request.verifyNuggets = parsed.verify;
+    // 비에셋 산출물 단계(셰이더 라이브러리 — 구현 모듈이 시작 hook에서 등록, 10.3.1절 A4f3 6번)다.
+    request.stages = &CookArtifactStages();
     CookProjectResult result(allocator);
     if (auto cooked = CookProject(allocator, request, result); !cooked) {
-        return cooked.Error() == ErrorCode::OutOfMemory
-                   ? Result<int32>::Failure(cooked.Error())
-                   : Fail(output, allocator, CookName, 1, "{}: {}: the cook failed",
-                          ErrorCodeName(cooked.Error()), root.View());
+        if (cooked.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(cooked.Error());
+        }
+
+        // 단계가 멈췄으면 그 정체성·호출·형식을 적는다(교차 검증 3 — 보고서가 없다).
+        const CookArtifactFailure& stage = result.stageFailure;
+        if (stage.call != CookArtifactCall::None) {
+            return Fail(output, allocator, CookName, 1, "{}: {}: stage {} {}({}): the cook failed",
+                        ErrorCodeName(cooked.Error()), root.View(), stage.stage,
+                        CookArtifactCallName(stage.call), stage.formatId.View());
+        }
+
+        return Fail(output, allocator, CookName, 1, "{}: {}: the cook failed",
+                    ErrorCodeName(cooked.Error()), root.View());
     }
 
     if (auto written = WriteDiagnostics(output, allocator, session.service->Index(), result,

@@ -22,6 +22,8 @@ inline constexpr StringView CookedDirectoryName = "Cooked";
 inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
 inline constexpr StringView CookStagingDirectoryName = ".staging";
 inline constexpr StringView CookPackagesDirectoryName = "Packages";
+// 비에셋 산출물(셰이더 라이브러리) 디렉터리다(AssetSystem 10.3절 4항 — AppendCookedArtifactPath).
+inline constexpr StringView CookShadersDirectoryName = "Shaders";
 // 패키지 파일 대조를 흘려 읽는 조각 크기다.
 inline constexpr usize CookHashChunkBytes = 64 * 1024;
 
@@ -54,7 +56,8 @@ public:
     CookPublisher(const CookPublisher&) = delete;
     CookPublisher& operator=(const CookPublisher&) = delete;
 
-    // 쿠킹 루트·`.staging`·`Packages`를 만들고 `.staging` 안의 고아 파일을 지운다(못 지우면 경고).
+    // 쿠킹 루트·`.staging`·`Packages`·`Shaders`를 만들고 `.staging` 안의 고아 파일을 지운다(못
+    // 지우면 경고).
     // 오류: 설정 null·두 번째 호출 InvalidArgument, lock이 이 프로젝트의 잡은 쓰기 잠금이 아니면
     // InvalidArgument, 디렉터리 만들기·열거 IO 오류, 할당 실패.
     Result<void> Begin(const AssetDatabaseLock& lock) noexcept;
@@ -71,13 +74,37 @@ public:
     Result<void> Reuse(const CookedManifestEntry& existing, const CookTarget& target,
                        StringView pathHint) noexcept;
 
+    // 단계가 staging에 쓴 artifact 파일을 게시한다(10.3.1절 A4f3 4번): 파일을 흘려 읽어
+    // 크기·SHA-256을 직접 계산하고, `Shaders/<이름>-<형식>-<hash>.rshl`로 덮어쓰지 않고 옮긴다.
+    // 같은 이름이 있으면 크기·SHA-256을 대조해 같으면 staging 파일을 지우고, 다르면 경고
+    // CorruptEntry(asset null) 뒤 교체한다. 성공하면 placed가 추가한 항목을 가리킨다(다음
+    // PutArtifact·ReuseArtifact까지 유효). 오류: Begin 전 InvalidArgument, 파일 0
+    // byte·CookedArtifactMaxBytes 초과·칸 문법 위반 InvalidArgument(staging 파일은 지운다), 파일 IO
+    // 오류, 할당 실패.
+    Result<void> PutArtifact(CookArtifactKind kind, StringView name, StringView formatId,
+                             const Sha256Digest& cookKey, StringView stagingFile,
+                             const CookedManifestArtifact** placed = nullptr) noexcept;
+
+    // 재사용 artifact 항목을 그대로 더한다(10.3절 6항). 오류: Begin 전 InvalidArgument, 할당 실패.
+    Result<void> ReuseArtifact(const CookedManifestArtifact& artifact) noexcept;
+
+    // 게시된 artifact 파일의 크기·SHA-256이 항목과 같은지 본다(재사용 후보 판정 — 파일이 없거나
+    // 읽을 수 없으면 거짓). 오류: Begin 전 InvalidArgument, 할당 실패.
+    Result<bool> ArtifactFileMatches(const CookedManifestArtifact& artifact) noexcept;
+
+    // 이번 쿠킹의 artifact 항목(PutArtifact·ReuseArtifact 순 — Finish 전)이다.
+    Span<const CookedManifestArtifact> Artifacts() const noexcept {
+        return artifacts_.View();
+    }
+
     // 게시를 끝낸다: 바뀐 디렉터리를 안쪽부터 동기화하고(NotDurable 경고) 매니페스트를 만들어 원자
-    // 교체한다. merge가 있으면 부분 쿠킹이다 — merge의 항목 중 이번 항목도 removed도 아닌 것을
+    // 교체한다. artifact 표는 이번 항목과(부분 쿠킹이면) merge의 같은 키가 없는 항목이다. merge가
+    // 있으면 부분 쿠킹이다 — merge의 항목 중 이번 항목도 removed도 아닌 것을
     // 더하고, CheckCookedManifestMerge가 다르면 오류 진단 IncompatibleCook을 남기고 게시하지
-    // 않는다. merge가 없으면 전체 쿠킹이다 — 게시 뒤 새 매니페스트가 가리키지 않는 `Packages/`
-    // 파일을 지운다(못 지우면 경고). 매니페스트 검증 위반은 그 진단 코드로 오류 진단을 남기고
-    // 게시하지 않는다. 오류: Begin 전·두 번째 호출 InvalidArgument, 동기화·쓰기·교체·열거 IO 오류,
-    // 할당 실패.
+    // 않는다. merge가 없으면 전체 쿠킹이다 — 게시 뒤 새 매니페스트가 가리키지 않는 `Packages/`·
+    // `Shaders/` 파일을 지운다(못 지우면 경고). 매니페스트 검증 위반은 그 진단 코드로 오류 진단을
+    // 남기고 게시하지 않는다. 오류: Begin 전·두 번째 호출 InvalidArgument, 동기화·쓰기·교체·열거 IO
+    // 오류, 할당 실패.
     Result<void> Finish(const CookedManifest* merge, Span<const AssetId> removed) noexcept;
 
     // 쿠킹 루트 경로다(Begin 뒤).
@@ -103,6 +130,11 @@ public:
 
 private:
     Result<void> AddEntry(const CookedPackage& package) noexcept;
+    // temp를 target으로 덮어쓰지 않고 옮긴다(target 디렉터리를 만들고, 같은 이름이 있으면 크기·
+    // SHA-256 대조 — 같으면 temp를 지우고 wrote 거짓, 다르면 CorruptEntry 경고 뒤 교체). 실패하면
+    // temp를 지운다.
+    Result<void> PlaceStaged(StringView temp, StringView target, usize directoryBytes, uint64 bytes,
+                             const Sha256Digest& digest, AssetId asset, bool& wrote) noexcept;
     Result<void> RememberDirectory(StringView directory) noexcept;
     Result<void> SyncDirectories() noexcept;
     Result<void> RemoveUnreferenced(const CookedManifest& manifest) noexcept;
@@ -114,6 +146,7 @@ private:
     CookPublishConfig config_;
     String root_;
     Array<CookedManifestEntry> entries_;
+    Array<CookedManifestArtifact> artifacts_;
     // 동기화할 디렉터리(전체 경로, 중복 없음)다.
     Array<String> directories_;
     Array<CookDiagnostic> diagnostics_;

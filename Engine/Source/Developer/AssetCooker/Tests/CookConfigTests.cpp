@@ -405,6 +405,8 @@ TEST(CookConfig_Hashes) {
         "{\"alwaysCook\": [\"/Game/B\", \"/Game/A\"]}",
         "{\"neverCook\": [\"/Game/A\"]}",
         "{\"cookSoftReferences\": true}",
+        // 셰이더 라이브러리 개발 전용 퍼뮤테이션(10.3.1절 A4f3 1번).
+        "{\"cookDevelopmentShaders\": true}",
         "{\"primaryAssets\": [{\"type\": \"TestAsset\", \"directories\": [\"/Game/\"]}]}",
         "{\"primaryAssets\": [{\"type\": \"TestAsset\", \"directories\": [\"/Game/A/\"]}]}",
     };

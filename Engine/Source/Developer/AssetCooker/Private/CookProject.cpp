@@ -41,6 +41,377 @@ Result<void> AssignId(String& out, AssetId id) noexcept {
     return Result<void>::Success();
 }
 
+// artifact 종류 이름이다(보고서 kind).
+StringView ArtifactKindName(CookArtifactKind kind) noexcept {
+    return kind == CookArtifactKind::ShaderLibrary ? StringView("ShaderLibrary") : StringView("");
+}
+
+// 보고서 artifact·단계 값 줄을 채운다.
+Result<void> FillArtifactReport(Allocator& allocator, const CookProjectResult& result,
+                                CookReport& report) noexcept {
+    if (auto reserved = report.artifacts.TryReserve(result.artifacts.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const CookArtifactRow& row : result.artifacts) {
+        CookReportArtifact line(allocator);
+        line.bytes = row.bytes;
+        line.reused = row.reused;
+        char hex[Sha256Digest::HexBytes + 1];
+        row.sha256.ToHex(hex);
+        Result<void> filled = line.kind.TryAssign(ArtifactKindName(row.kind));
+        if (filled) {
+            filled = line.name.TryAssign(row.name.View());
+        }
+
+        if (filled) {
+            filled = line.format.TryAssign(row.formatId.View());
+        }
+
+        if (filled) {
+            filled = line.sha256.TryAssign(StringView(hex));
+        }
+
+        if (!filled) {
+            return filled;
+        }
+
+        (void)report.artifacts.TryPushBack(Move(line));
+    }
+
+    if (auto reserved = report.stageStats.TryReserve(result.stats.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const CookArtifactStatRow& row : result.stats) {
+        CookReportStat line(allocator);
+        line.value = row.value;
+        auto stage = TryFormat(allocator, "{}", row.stage);
+        Result<void> filled =
+            stage ? Result<void>::Success() : Result<void>::Failure(stage.Error());
+        if (filled) {
+            line.stage = Move(stage.Value());
+        }
+
+        if (filled) {
+            filled = line.name.TryAssign(row.name.View());
+        }
+
+        if (!filled) {
+            return filled;
+        }
+
+        (void)report.stageStats.TryPushBack(Move(line));
+    }
+
+    return Result<void>::Success();
+}
+
+// 셰이더 형식이 프로필 backend 표(graphicsBackends의 shaderFormats)에 있는지 본다.
+bool ProfileHasShaderFormat(const TargetProfile& profile, StringView id) noexcept {
+    for (const String& backend : profile.graphicsBackends) {
+        const ShaderFormatList* list = profile.shaderFormats.Find(backend);
+        if (list == nullptr) {
+            continue;
+        }
+
+        for (const String& format : list->formats) {
+            if (format.View() == id) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+Result<void> CopyArtifactTo(const CookedManifestArtifact& source,
+                            Array<CookedManifestArtifact>& out, Allocator& allocator) noexcept {
+    CookedManifestArtifact copy(allocator);
+    copy.kind = source.kind;
+    copy.bytes = source.bytes;
+    copy.sha256 = source.sha256;
+    copy.cookKey = source.cookKey;
+    if (auto assigned = copy.name.TryAssign(source.name.View()); !assigned) {
+        return assigned;
+    }
+
+    if (auto assigned = copy.formatId.TryAssign(source.formatId.View()); !assigned) {
+        return assigned;
+    }
+
+    return out.TryPushBack(Move(copy));
+}
+
+// staging 파일 이름의 앞뒤다(`<staging>/artifact-<번호>.tmp` — 패키지 임시 이름
+// `<A>-<h>.rpkg.tmp`와 겹치지 않는다).
+constexpr StringView ArtifactStagingPrefix = "artifact-";
+constexpr StringView ArtifactStagingSuffix = ".tmp";
+
+// 단계의 출력 sink다(10.3.1절 A4f3 2·3번): 단계 계약을 확인하고 게시기에 넘기며, 보고서 줄을
+// 모은다. 처음 실패한 호출을 result.stageFailure에 적는다.
+class ArtifactStageSink final : public CookArtifactSink {
+public:
+    ArtifactStageSink(Allocator& allocator, CookPublisher& publisher,
+                      const CookArtifactRequest& request, const CookArtifactStage& stage,
+                      CookProjectResult& result) noexcept
+        : allocator_(allocator), publisher_(publisher), request_(request), kind_(stage.Kind()),
+          stage_(stage.Identity().processor), result_(result), issued_(allocator),
+          used_(allocator) {
+    }
+
+    Result<void> NewStagingPath(StringBuilderBase& out) noexcept override {
+        StringBuilder<CookProjectInlineBytes> path(allocator_);
+        Result<void> made =
+            path.TryAppendFormat("{}/{}{}{}", request_.stagingDirectory, ArtifactStagingPrefix,
+                                 issued_.Size(), ArtifactStagingSuffix);
+        String copy(allocator_);
+        if (made) {
+            made = copy.TryAssign(path.View());
+        }
+
+        if (made) {
+            made = issued_.TryReserve(issued_.Size() + 1);
+        }
+
+        if (made) {
+            made = used_.TryReserve(used_.Size() + 1);
+        }
+
+        if (made) {
+            made = out.TryAppend(path.View());
+        }
+
+        if (!made) {
+            return Fail(CookArtifactCall::NewStagingPath, StringView(), made.Error());
+        }
+
+        // 예약했다.
+        (void)issued_.TryPushBack(Move(copy));
+        (void)used_.TryPushBack(0);
+        return Result<void>::Success();
+    }
+
+    Result<void> Produce(const CookArtifactOutput& output) noexcept override {
+        const usize slot = FindIssued(output.stagingFile);
+        const bool valid = IsArtifactName(output.name) && IsValidShaderFormatId(output.formatId) &&
+                           ProfileHasShaderFormat(*request_.profile, output.formatId) &&
+                           (!request_.engineOnly || output.name == CookedArtifactEngineName) &&
+                           !Seen(output.name, output.formatId) && slot != algo::NotFound &&
+                           used_[slot] == 0;
+        if (!valid) {
+            return Fail(CookArtifactCall::Produce, output.formatId, ErrorCode::InvalidArgument);
+        }
+
+        used_[slot] = 1;
+        const CookedManifestArtifact* placed = nullptr;
+        if (auto put = publisher_.PutArtifact(kind_, output.name, output.formatId, output.cookKey,
+                                              output.stagingFile, &placed);
+            !put) {
+            return Fail(CookArtifactCall::Produce, output.formatId, put.Error());
+        }
+
+        return AddRow(CookArtifactCall::Produce, *placed, false);
+    }
+
+    Result<void> Reuse(const CookedManifestArtifact& artifact) noexcept override {
+        bool candidate = false;
+        for (const CookedManifestArtifact& offered : request_.reusable) {
+            if (offered.kind == artifact.kind && offered.name.View() == artifact.name.View() &&
+                offered.formatId.View() == artifact.formatId.View() &&
+                offered.bytes == artifact.bytes && offered.sha256 == artifact.sha256 &&
+                offered.cookKey == artifact.cookKey) {
+                candidate = true;
+                break;
+            }
+        }
+
+        const StringView format = artifact.formatId.View();
+        if (!candidate || Seen(artifact.name.View(), format)) {
+            return Fail(CookArtifactCall::Reuse, format, ErrorCode::InvalidArgument);
+        }
+
+        if (auto reused = publisher_.ReuseArtifact(artifact); !reused) {
+            return Fail(CookArtifactCall::Reuse, format, reused.Error());
+        }
+
+        return AddRow(CookArtifactCall::Reuse, artifact, true);
+    }
+
+    Result<void> Report(const CookDiagnostic& diagnostic) noexcept override {
+        if (auto pushed = result_.diagnostics.TryPushBack(diagnostic); !pushed) {
+            return Fail(CookArtifactCall::Report, StringView(), pushed.Error());
+        }
+
+        return Result<void>::Success();
+    }
+
+    Result<void> ReportStat(StringView name, uint64 value) noexcept override {
+        CookArtifactStatRow row(allocator_);
+        row.stage = stage_;
+        row.value = value;
+        Result<void> added = row.name.TryAssign(name);
+        if (added) {
+            added = result_.stats.TryPushBack(Move(row));
+        }
+
+        if (!added) {
+            return Fail(CookArtifactCall::ReportStat, StringView(), added.Error());
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 처음 실패를 적고 그 오류를 돌려준다(Run 자체의 오류도 여기로 적는다).
+    Result<void> Fail(CookArtifactCall call, StringView format, ErrorCode error) noexcept {
+        CookArtifactFailure& failure = result_.stageFailure;
+        if (failure.call == CookArtifactCall::None) {
+            failure.call = call;
+            failure.stage = stage_;
+            failure.error = error;
+            // 형식 id 복사 실패(할당)는 빈 칸으로 둔다 — 원인 오류는 그대로 돌려준다.
+            (void)failure.formatId.TryAssign(format);
+        }
+
+        return Result<void>::Failure(error);
+    }
+
+private:
+    static bool IsArtifactName(StringView name) noexcept {
+        return name == CookedArtifactEngineName || name == CookedArtifactProjectName;
+    }
+
+    usize FindIssued(StringView path) const noexcept {
+        for (usize index = 0; index < issued_.Size(); ++index) {
+            if (issued_[index].View() == path) {
+                return index;
+            }
+        }
+
+        return algo::NotFound;
+    }
+
+    // 이번 실행에 같은 (이름, 형식)이 이미 있는지 본다.
+    bool Seen(StringView name, StringView format) const noexcept {
+        for (const CookArtifactRow& row : result_.artifacts) {
+            if (row.kind == kind_ && row.name.View() == name && row.formatId.View() == format) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    Result<void> AddRow(CookArtifactCall call, const CookedManifestArtifact& artifact,
+                        bool reused) noexcept {
+        CookArtifactRow row(allocator_);
+        row.kind = artifact.kind;
+        row.bytes = artifact.bytes;
+        row.sha256 = artifact.sha256;
+        row.reused = reused;
+        Result<void> added = row.name.TryAssign(artifact.name.View());
+        if (added) {
+            added = row.formatId.TryAssign(artifact.formatId.View());
+        }
+
+        if (added) {
+            added = result_.artifacts.TryPushBack(Move(row));
+        }
+
+        if (!added) {
+            return Fail(call, artifact.formatId.View(), added.Error());
+        }
+
+        return Result<void>::Success();
+    }
+
+    Allocator& allocator_;
+    CookPublisher& publisher_;
+    const CookArtifactRequest& request_;
+    CookArtifactKind kind_;
+    Guid stage_;
+    CookProjectResult& result_;
+    // NewStagingPath가 준 경로와 Produce가 쓴 표지(0·1)다.
+    Array<String> issued_;
+    Array<uint8> used_;
+};
+
+// 비에셋 산출물 단계를 돈다(10.3.1절 A4f3 3번 — CookPackages 뒤, Finish 전). 셰이더 없는 프로필은
+// 단계를 부르지 않고, 단계가 없으면 오류 진단(code None, UnsupportedCapability)을 남긴다.
+Result<void> RunArtifactStages(Allocator& allocator, const CookProjectRequest& request,
+                               StringView root, const CookedManifest* previous,
+                               CookPublisher& publisher, CookProjectResult& result) noexcept {
+    const TargetProfile& profile = *request.profile;
+    if (profile.graphicsBackends.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    CookArtifactStage* stage =
+        request.stages != nullptr ? request.stages->Find(CookArtifactKind::ShaderLibrary) : nullptr;
+    if (stage == nullptr) {
+        return result.diagnostics.TryPushBack(CookDiagnostic{
+            AssetDiagnosticCode::None, false, {}, {}, 0, ErrorCode::UnsupportedCapability});
+    }
+
+    // 재사용 후보(10.3절 6항): PlanCookReuse와 같은 머리 조건에서 게시 파일이 맞는 같은 종류 항목.
+    Array<CookedManifestArtifact> reusable(allocator);
+    if (previous != nullptr && !request.verifyNuggets &&
+        previous->profileId.View() == profile.id.View() &&
+        previous->profileSettings == request.profileSettings &&
+        previous->cookerVersion == request.cookerVersion) {
+        for (const CookedManifestArtifact& old : previous->artifacts) {
+            if (old.kind != stage->Kind()) {
+                continue;
+            }
+
+            auto same = publisher.ArtifactFileMatches(old);
+            if (!same) {
+                return Result<void>::Failure(same.Error());
+            }
+
+            if (!same.Value()) {
+                continue;
+            }
+
+            if (auto copied = CopyArtifactTo(old, reusable, allocator); !copied) {
+                return copied;
+            }
+        }
+    }
+
+    StringBuilder<CookProjectInlineBytes> staging(allocator);
+    const StringView stagingPieces[] = {root, "/", CookStagingDirectoryName};
+    if (auto built = staging.TryAppendJoin(stagingPieces, ""); !built) {
+        return built;
+    }
+
+    CookArtifactRequest artifactRequest;
+    artifactRequest.allocator = &allocator;
+    artifactRequest.files = request.files;
+    artifactRequest.profile = request.profile;
+    artifactRequest.settings = request.settings;
+    artifactRequest.cookedRoot = root;
+    artifactRequest.stagingDirectory = staging.View();
+    artifactRequest.nuggets = request.nuggets;
+    artifactRequest.engineOnly = false;
+    artifactRequest.verifyNuggets = request.verifyNuggets;
+    artifactRequest.reusable = reusable.View();
+    ArtifactStageSink sink(allocator, publisher, artifactRequest, *stage, result);
+    Result<void> ran = Result<void>::Success();
+    {
+        // 단계가 도는 동안 표 등록·해제는 Busy다(10.3.1절 A4f3 2번).
+        CookArtifactStageUse use(*request.stages);
+        ran = stage->Run(artifactRequest, sink);
+    }
+
+    if (!ran) {
+        // sink가 이미 적었으면 그 호출이 남는다(처음 실패).
+        return sink.Fail(CookArtifactCall::Run, StringView(), ran.Error());
+    }
+
+    return Result<void>::Success();
+}
+
 // 보고서를 만들어 쿠킹 루트에 원자 교체로 쓴다.
 Result<void> WriteReport(Allocator& allocator, const CookProjectRequest& request,
                          const CookProjectResult& result, StringView root) noexcept {
@@ -99,6 +470,10 @@ Result<void> WriteReport(Allocator& allocator, const CookProjectRequest& request
         (void)report.diagnostics.TryPushBack(Move(line));
     }
 
+    if (auto filled = FillArtifactReport(allocator, result, report); !filled) {
+        return filled;
+    }
+
     auto lease = request.types->AcquireValueType(GeneratedType<CookReport>::Id(), TypeKind::Struct);
     if (!lease) {
         return Result<void>::Failure(lease.Error());
@@ -139,6 +514,12 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     result.bytesWritten = 0;
     result.partial = false;
     result.published = false;
+    result.artifacts.Clear();
+    result.stats.Clear();
+    result.stageFailure.call = CookArtifactCall::None;
+    result.stageFailure.stage = Guid{};
+    result.stageFailure.formatId.Clear();
+    result.stageFailure.error = ErrorCode::None;
     if (request.files == nullptr || request.layout == nullptr || request.lock == nullptr ||
         request.index == nullptr || request.packages == nullptr || request.types == nullptr ||
         request.processors == nullptr || request.profile == nullptr ||
@@ -350,6 +731,14 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
 
     if (!merged) {
         return merged;
+    }
+
+    // 비에셋 산출물 단계는 에셋 오류가 있어도 돈다(보고서가 오류를 한 번에 모은다 — 10.3.1절 A4f3
+    // 3번).
+    if (auto staged =
+            RunArtifactStages(allocator, request, root.View(), previous, publisher, result);
+        !staged) {
+        return staged;
     }
 
     // 오류 진단이 하나라도 있으면 게시하지 않는다(10절).

@@ -59,6 +59,9 @@ struct CookSettings {
     ROCKS_PROPERTY() Array<PrimaryAssetRule> primaryAssets;
     // Soft 참조도 쿠킹 대상 폐포에 넣는다(기본 false — bundle 구성원은 이것과 무관하다).
     ROCKS_PROPERTY() bool cookSoftReferences = false;
+    // 참이면 셰이더 라이브러리 단계가 개발 전용 퍼뮤테이션을 넣는다(기본 false — AssetSystem 10.3절
+    // 2항). CookSettings SHA-256에 들어가고, 단계의 cookKey도 이 값을 담는다(10.3.1절 A4f3 1번).
+    ROCKS_PROPERTY() bool cookDevelopmentShaders = false;
 };
 
 // 설정 파일 크기 상한이다(TargetProfiles 설정 JSON 층과 같다).

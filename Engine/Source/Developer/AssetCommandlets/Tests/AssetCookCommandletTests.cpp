@@ -2,9 +2,11 @@
 
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
+#include <AssetCooker/CookArtifacts.h>
 #include <AssetCooker/CookConfig.h>
 #include <AssetNugget/NuggetCacheSettings.h>
 #include <Base/InitializerList.h>
+#include <Platform/File.h>
 #include <TestSupport/Test.h>
 
 // asset-cook 명령 시험이다(Docs/Design/AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1):
@@ -12,7 +14,8 @@
 // 주고, 에셋은 asset-import로 만든다. 엔진 설정은 저장소 `Engine/Config`(FindEngineDirectory)다.
 // 전체·재사용·verify·JSON·부분 쿠킹, 진단 줄(경로·AssetId·related·alwaysCook 순번·인자 경로·
 // 원인 오류), 설정 거부(프로파일·쿠킹 규칙·너겟 설정 칸마다), 너겟 캐시 끔 경고·required 실패,
-// 쿠킹 함수 오류, 출력 실패, 사용법.
+// 쿠킹 함수 오류, 출력 실패, 사용법. Windows 프로필은 셰이더가 있어 가짜 셰이더 라이브러리 단계를
+// 프로세스 표에 RAII로 등록해 돈다(10.3.1절 A4f3 6번) — 미등록 문구·단계 실패 줄도 본다.
 using namespace rocks;
 namespace asset_cook_commandlet_tests_file {
 
@@ -59,12 +62,107 @@ struct Run {
 
 constexpr StringView AlwaysAll = "{\"alwaysCook\": [\"/Game/\"]}\n";
 
+constexpr Guid CommandStageGuid{0xA4F3000000000002ull, 0x434d445354470001ull};
+// staging 경로 조립 버퍼의 인라인 크기다.
+constexpr usize CommandStagingBytes = 64;
+
+// 명령 시험의 가짜 셰이더 라이브러리 단계다: 형식마다 `Engine` 파일 하나(내용 = 형식 id), cookKey =
+// SHA-256(형식 id). 같은 키 후보는 Reuse한다. badFormat이면 소문자 형식을 넘긴다(계약 위반).
+class CommandStage final : public CookArtifactStage {
+public:
+    CookArtifactKind Kind() const noexcept override {
+        return CookArtifactKind::ShaderLibrary;
+    }
+
+    NuggetProcessorId Identity() const noexcept override {
+        return NuggetProcessorId{CommandStageGuid, Guid{1, 1}};
+    }
+
+    Result<void> Run(const CookArtifactRequest& request, CookArtifactSink& sink) noexcept override {
+        const TargetProfile& profile = *request.profile;
+        for (const String& backend : profile.graphicsBackends) {
+            const ShaderFormatList* list = profile.shaderFormats.Find(backend);
+            if (list == nullptr) {
+                continue;
+            }
+
+            for (const String& format : list->formats) {
+                const StringView id = format.View();
+                const Sha256Digest key = Sha256::Hash(
+                    Span<const uint8>(reinterpret_cast<const uint8*>(id.Data()), id.ByteCount()));
+                bool reused = false;
+                for (const CookedManifestArtifact& candidate : request.reusable) {
+                    if (!reused && candidate.formatId.View() == id && candidate.cookKey == key) {
+                        if (auto taken = sink.Reuse(candidate); !taken) {
+                            return taken;
+                        }
+
+                        reused = true;
+                    }
+                }
+
+                if (reused) {
+                    continue;
+                }
+
+                StringBuilder<CommandStagingBytes> path(*request.allocator);
+                if (auto issued = sink.NewStagingPath(path); !issued) {
+                    return issued;
+                }
+
+                platform::File file;
+                if (!file.Open(*request.files, path.View().Data(), path.View().ByteCount(),
+                               platform::FileOpenMode::CreateAlways)) {
+                    return Result<void>::Failure(ErrorCode::IoError);
+                }
+
+                const platform::FileTransfer written =
+                    file.WriteAll(reinterpret_cast<const uint8*>(id.Data()), id.ByteCount());
+                if (!file.Close() || !written.status) {
+                    return Result<void>::Failure(ErrorCode::IoError);
+                }
+
+                const StringView sent = badFormat ? StringView("d3d12_sm6") : id;
+                if (auto produced = sink.Produce(
+                        CookArtifactOutput{CookedArtifactEngineName, sent, key, path.View()});
+                    !produced) {
+                    return produced;
+                }
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    bool badFormat = false;
+};
+
+// 프로세스 단계 표 등록 구간이다(다른 시험으로 새지 않게 소멸에서 해제한다).
+struct StageRegistration {
+    explicit StageRegistration(CookArtifactStage& stage) noexcept : registered(stage) {
+        ok = static_cast<bool>(CookArtifactStages().Register(stage));
+    }
+
+    ~StageRegistration() {
+        if (ok) {
+            (void)CookArtifactStages().Unregister(registered);
+        }
+    }
+
+    StageRegistration(const StageRegistration&) = delete;
+    StageRegistration& operator=(const StageRegistration&) = delete;
+
+    CookArtifactStage& registered;
+    bool ok = false;
+};
+
 // 쿠킹할 프로젝트다: Rock(Hard 참조 → Rock_extra)과 Rock_extra, 쿠킹 규칙(전부).
 struct CookScene {
     CookScene(Allocator& allocator, const char* tag) noexcept
         : scene(tag), run(allocator, state), project(Span<char>(projectText)),
-          source(Span<char>(sourceText)) {
-        ready = scene.ready && project.TryAppendFormat("--project={}", scene.root.Root()) &&
+          source(Span<char>(sourceText)), registration(stage) {
+        ready = scene.ready && registration.ok &&
+                project.TryAppendFormat("--project={}", scene.root.Root()) &&
                 source.TryAppendFormat("{}/Rock.trock", scene.root.Root()) &&
                 scene.WriteFile("Rock.trock", "value=2\noutputs=extra\nreference=extra") &&
                 scene.MakeDirectory("Config") && Settings(AlwaysAll);
@@ -94,6 +192,8 @@ struct CookScene {
     char sourceText[512] = {};
     FixedStringBuilder project;
     FixedStringBuilder source;
+    CommandStage stage;
+    StageRegistration registration;
     bool ready = false;
 };
 
@@ -182,6 +282,37 @@ TEST(AssetCookCommand_DuplicateId) {
     CHECK(cook.Cook() == 1);
     CHECK(cook.run.Error("asset-cook: DuplicateAssetId: ") && cook.run.Error(": error\n") &&
           !cook.run.Error("/Game/Rock: error") && cook.run.Out("not published"));
+}
+
+// 비에셋 산출물 단계(10.3.1절 A4f3): 가짜 단계로 게시하면 Shaders 파일과 보고서 artifacts가 있다.
+// 단계가 없으면 `UnsupportedCapability: <루트>: error` 줄로 게시하지 않는다. 계약 위반(소문자
+// 형식)은 실패 줄에 단계 정체성·호출·형식을 적는다(보고서 없음).
+TEST(AssetCookCommand_ArtifactStage) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene cook(env.allocator, "cook-command-stage");
+    REQUIRE(cook.ready);
+    CHECK(cook.Cook({"--json"}) == 0);
+    CHECK(cook.run.Out("asset-cook: Windows published") && cook.run.Out("\"ShaderLibrary\"") &&
+          cook.run.Out("\"format\": \"D3D12_SM6\"") &&
+          cook.scene.Exists("Saved/Cooked/Windows/Shaders"));
+
+    REQUIRE(CookArtifactStages().Unregister(cook.stage));
+    cook.registration.ok = false;
+    CHECK(cook.Cook() == 1);
+    CHECK(cook.run.Error("asset-cook: UnsupportedCapability: ") &&
+          cook.run.Error("Saved/Cooked/Windows: error\n") && cook.run.Out("not published"));
+
+    REQUIRE(CookArtifactStages().Register(cook.stage));
+    cook.registration.ok = true;
+    cook.stage.badFormat = true;
+    REQUIRE(cook.scene.RemoveFile("Saved/Cooked/Windows/CookedManifest.rman"));
+    CHECK(cook.Cook() == 1);
+    CHECK(
+        cook.run.Error("asset-cook: InvalidArgument: ") &&
+        cook.run.Error(": stage a4f30000-0000-0002-434d-445354470001 Produce(d3d12_sm6): the cook "
+                       "failed\n") &&
+        cook.run.captured.out.IsEmpty());
 }
 
 // 쿠킹 함수 오류: 쿠킹 루트의 Packages 자리가 파일이면 게시가 실패한다(실패 줄 1 — 보고서 없음).
