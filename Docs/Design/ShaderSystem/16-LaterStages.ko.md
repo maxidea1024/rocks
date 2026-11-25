@@ -41,7 +41,7 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 | SH2e | 공급자와 메모리 라이브러리(SSD16), Graphics API 전환(4 backend `CreateShader`·파이프라인 layout), RB3 셰이더 집합, RB4 SH2분, 런타임 컴파일러 제거 | RenderBase SX10, 7.3절 (c)·(d)·(j 장치) |
 | SH2f | 샘플 렌더러 전환·Sandbox self-test(D3D12·D3D11·Vulkan·GLES 미리보기)·Release 제외 정책·측정 S5 | 아래 완료 기준 1·4·5 |
 | SH2d | P6b: `CookShaderLibraries`를 비에셋 산출물 훅에 붙임·`--engine`·`cookDevelopmentShaders`, 런타임 열기·형식 선택. 선행: 에셋 세션의 TargetProfile 칸·매니페스트 v2·훅 | 12.3.1절 완료 기준 |
-| SH2g(선택) | 엔진 셰이더 SL0(SSD21) | SH2g 완료 기준(아래) |
+| SH2g(선택) | 엔진 셰이더 SL0(SSD21). 이 문서의 "SH2g 구현 메모(개정 46)"는 GLES cube storage 쓰기를 고친 다른 일이다 — SL0은 "SH2g(SL0)"로 적는다(개정 50) | SH2g 완료 기준(아래) |
 
 **완료 기준(위 표 SH2 행을 대신한다).**
 
@@ -51,7 +51,7 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 4. 행렬 옵션·앞면 매핑 기록(측정 S5), A0-G 범위를 Vulkan이 받음(G3).
 5. Release 구성에 셰이더 컴파일러·GLES 미리보기 없음(9절 정책, `release-shader-compiler`의 D3D12·D3D11 항과 `release-windows-opengl` 예외 삭제).
 
-**SH2g 완료 기준(선택, SLR3).** 엔진 셰이더 7.7절 1–3·5(SL0 컴파일 행렬 — 형식은 호스트 플랫폼 TargetProfile의 형식(SSD24)·CPU 대조·정수 golden·coverage 사유). SH2 완료 기준에 들지 않는다.
+**SH2g(SL0) 완료 기준(선택, SLR3).** 엔진 셰이더 7.7절 1–3·5(SL0 컴파일 행렬·CPU 대조·정수 golden·coverage 사유). SH2 완료 기준에 들지 않는다. 컴파일 행렬 형식은 형식 정의 전부(`Engine/Config/ShaderFormats` — 호스트 TargetProfile 형식과 `GLES31_PC`·Android 형식을 모두 덮는다, 도구 없는 Metal은 SKIP)이고 EngineTests가 실제 워커로 컴파일한다. GPU probe는 Sandbox self-test가 공급자 셰이더로 돌린다(엔진 셰이더 7.6절·결정 SLD19, 개정 50). 시험 루트 `/Plugin/EngineShaderTests`는 `Programs/Sandbox/EngineShaderTests`이고 Sandbox 호스트 원문 디렉터리로 들어가 공급자 라이브러리에 들어간다(쿠킹하지 않는다 — SSD17).
 
 **결정.**
 
