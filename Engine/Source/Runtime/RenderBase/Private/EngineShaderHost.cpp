@@ -287,6 +287,12 @@ void EngineRenderResources::Retire(graphics::Device& device) noexcept {
     builtins_.Retire(device);
     set_->Retire();
     ready_ = false;
+    // 집합은 공급자가 만든 저장소를 붙잡으므로 lane 종료 단계 안에서 놓는다(엔진 묶음의 공급자
+    // 모듈이 엔진 종료 끝에서 내려가기 전 — Docs/Design/RenderBase 9.12절 2항). lease가 남았으면
+    // 파괴자에 맡긴다.
+    if (set_->LeaseCount() == 0) {
+        set_.Reset();
+    }
 }
 
 } // namespace rocks::render

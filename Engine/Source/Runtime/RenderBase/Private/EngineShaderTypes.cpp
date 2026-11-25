@@ -44,12 +44,61 @@ constexpr shader::ShaderTypeDesc MakeBuiltinMeshPixel() noexcept {
     return desc;
 }
 
+// TonemapConstants의 손으로 쓴 레이아웃 표다(C++ 구조체는 RenderBase/EngineShaderTypes.h).
+constexpr shader::ShaderParameterMember TonemapMembers[] = {
+    {"exposure", shader::ShaderParameterType::Float4, 0, 0},
+    {"film", shader::ShaderParameterType::Float4, 16, 0},
+    {"filmWhite", shader::ShaderParameterType::Float4, 32, 0}};
+constexpr shader::ShaderParameterLayout TonemapLayouts[] = {
+    {"TonemapConstants", true, sizeof(TonemapConstants), TonemapMembers}};
+
+constexpr shader::ShaderTypeDesc MakeTonemapPixel() noexcept {
+    shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
+        TonemapPixelType, "/Engine/Private/PostProcess/TonemapPass.rsf", "TonemapPixel",
+        shader::ShaderStagePixel, shader::ShaderTypeOwner::Engine);
+    desc.parameterLayouts = TonemapLayouts;
+    return desc;
+}
+
+// TextureInspectorConstants의 손으로 쓴 레이아웃 표다.
+constexpr shader::ShaderParameterMember TextureInspectorMembers[] = {
+    {"exposure", shader::ShaderParameterType::Float4, 0, 0},
+    {"film", shader::ShaderParameterType::Float4, 16, 0},
+    {"filmWhite", shader::ShaderParameterType::Float4, 32, 0},
+    {"selection", shader::ShaderParameterType::Float4, 48, 0}};
+constexpr shader::ShaderParameterLayout TextureInspectorLayouts[] = {
+    {"TextureInspectorConstants", true, sizeof(TextureInspectorConstants),
+     TextureInspectorMembers}};
+
+constexpr shader::ShaderTypeDesc MakeTextureInspector(shader::ShaderTypeName name,
+                                                      StringView entry) noexcept {
+    shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
+        name, "/Engine/Private/Debug/TextureInspector.rsf", entry, shader::ShaderStagePixel,
+        shader::ShaderTypeOwner::Engine);
+    desc.parameterLayouts = TextureInspectorLayouts;
+    return desc;
+}
+
+constexpr shader::ShaderTypeDesc TextureInspector2DDesc =
+    MakeTextureInspector(TextureInspector2DPixelType, "TextureInspector2DPixel");
+constexpr shader::ShaderTypeDesc TextureInspector2DArrayDesc =
+    MakeTextureInspector(TextureInspector2DArrayPixelType, "TextureInspector2DArrayPixel");
+constexpr shader::ShaderTypeDesc TextureInspectorCubeDesc =
+    MakeTextureInspector(TextureInspectorCubePixelType, "TextureInspectorCubePixel");
+constexpr shader::ShaderTypeDesc TextureInspectorCubeArrayDesc =
+    MakeTextureInspector(TextureInspectorCubeArrayPixelType, "TextureInspectorCubeArrayPixel");
+constexpr shader::ShaderTypeDesc TextureInspectorVolumeDesc =
+    MakeTextureInspector(TextureInspectorVolumePixelType, "TextureInspectorVolumePixel");
+
 constexpr shader::ShaderTypeDesc BuiltinMeshVertexDesc = MakeBuiltinMeshVertex();
 constexpr shader::ShaderTypeDesc BuiltinMeshPixelDesc = MakeBuiltinMeshPixel();
+constexpr shader::ShaderTypeDesc TonemapPixelDesc = MakeTonemapPixel();
 
-constexpr const shader::ShaderTypeDesc* Types[] = {&FullscreenTriangleVertexDesc,
-                                                   &CopyTexturePixelDesc, &BuiltinMeshVertexDesc,
-                                                   &BuiltinMeshPixelDesc};
+constexpr const shader::ShaderTypeDesc* Types[] = {
+    &FullscreenTriangleVertexDesc, &CopyTexturePixelDesc, &BuiltinMeshVertexDesc,
+    &BuiltinMeshPixelDesc, &TonemapPixelDesc, &TextureInspector2DDesc,
+    &TextureInspector2DArrayDesc, &TextureInspectorCubeDesc, &TextureInspectorCubeArrayDesc,
+    &TextureInspectorVolumeDesc};
 
 constexpr shader::ShaderVertexInputType VertexInputs[] = {shader::MakeShaderVertexInputType(
     BuiltinVertexInputName, "/Engine/Private/VertexInput/BuiltinVertexInput.rsh",

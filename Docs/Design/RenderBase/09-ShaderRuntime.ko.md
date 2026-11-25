@@ -239,7 +239,7 @@
    5. `WaitUntilSettled`. `Ready`가 아니면 Error 로그(형식·집합 문제 이름·설명)와 함께 실패다(`NoProvider`는 `UnsupportedCapability`, 나머지는 `DependencyFailed`).
    6. `BuiltinResources::Create`(11.4절 5항). 실패하면 집합을 Retire하고 Error 로그(팩 `LastFailure` — 빠진 fallback 셰이더 이름)와 함께 그 오류다. 엔진 셰이더 타입을 등록하는 모듈이 시작하지 않았으면(등록 누락) 여기서 `NotFound`로 드러난다.
    - 반환 뒤 RenderLane이 제출 fence를 기다려 `BuiltinReady`를 게시한다(기존 5.5절). 실패하면 준비 완료가 없고 프레임 slot 확보가 그 오류다.
-   - `Retire(device)`: 팩 → 집합 순(5.5절 종료 4단계). 집합 객체는 `EngineRenderResources`가 파괴될 때(또는 다음 `Open`에서) 부순다 — 파이프라인 캐시 lease는 그 전에 주인이 비운다.
+   - `Retire(device)`: 팩 → 집합 순(5.5절 종료 4단계). lease가 남지 않았으면 집합 객체도 이 자리에서 부순다(개정 46). 집합이 공급자가 만든 저장소를 붙잡으므로, 엔진 묶음의 공급자 모듈(`DevelopmentShaderProvider`)이 `Engine::Shutdown` 끝에서 내려가기 전에(lane 종료 단계 안에서) 돌려줘야 한다. 파이프라인 캐시 lease는 그 전에 주인이 비운다. lease가 남았으면 `EngineRenderResources` 파괴 때 부순다.
 3. **쿠킹 라이브러리 원천 `CookedShaderLibrarySource`**(interface만). `ReadLibrary(formatId, library, out)` — 그 형식·종류의 라이브러리 byte를 넘기거나 `NotFound`. 매니페스트 v2·`.rshl`(셰이더 시스템 SSD11·SSD13) 구현은 에셋 쪽이 push된 뒤 붙인다(호스트 `AttachCookedLibraries`). 지금은 원천이 없으므로 모든 형식이 공급자 경로다.
 4. **Development 공급자 모듈 `DevelopmentShaderProvider`**(Developer). Sandbox의 공급자를 옮겼다. 모듈 수명 객체 `Startup`이 `EngineShaderHost` 서비스를 찾아 공급자를 붙이고 `Shutdown`에서 떼고 워커를 멈춘다. 서비스가 없으면 아무 일도 하지 않고, 이미 다른 공급자가 붙어 있으면(호스트가 직접 붙인 공급자·시험) 붙이지 않고 Info만 남긴다. 실행 파일은 Release 밖에서만 이 모듈을 링크한다(Build.cs) — Runtime 모듈은 이 모듈을 모르고(SX14) 실행 파일 소스에도 `#if`가 없다.
    - 첫 요청에서 준비한다: `/Engine` = `<engine>/Shaders`와 호스트 원문 디렉터리 mount, 형식 정의 `<engine>/Config/ShaderFormats`, 워커(실행 파일 옆, 없으면 같은 출력 뿌리의 ShaderCompileWorker 타깃 출력 — 출력 폴더 이름 `<도구>-<플랫폼>-<타깃>-<구성>`의 타깃 자리를 `shadercompileworker`로, 빌드 타깃 3.11절), 너겟 캐시, 관리자.
