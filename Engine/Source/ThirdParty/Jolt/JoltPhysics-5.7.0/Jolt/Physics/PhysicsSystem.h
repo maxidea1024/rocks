@@ -5,6 +5,7 @@
 #pragma once
 
 #include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Body/BodyLock.h> // Rocks modification: GetAppliedContactImpulse
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Constraints/ContactConstraintManager.h>
@@ -249,6 +250,20 @@ public:
 	/// - During the ContactListener::OnContactAdded callback this function can be used to determine if a different contact pair between the bodies was active in the previous simulation step (function returns true) or if this is the first step that the bodies are touching (function returns false).
 	/// - During the ContactListener::OnContactRemoved callback this function can be used to determine if this is the last contact pair between the bodies (function returns false) or if there are other contacts still present (function returns true).
 	bool						WereBodiesInContact(const BodyID &inBody1ID, const BodyID &inBody2ID) const { return mContactManager.WereBodiesInContact(inBody1ID, inBody2ID); }
+
+	/// Rocks modification: world space sum of the non-penetration impulses that the contact solver applied to inBody2ID from inBody1ID during the last collision step of the last PhysicsSystem::Update, see ContactConstraintManager::GetAppliedContactImpulse.
+	/// Call it only when PhysicsSystem::Update is not running (during contact callbacks the read cache still holds the previous step). An Update with a zero time step does not step and leaves the previous value.
+	bool						GetAppliedContactImpulse(const BodyID &inBody1ID, const BodyID &inBody2ID, Vec3 &outImpulseOnBody2, uint &outNumContactPoints) const
+	{
+		BodyLockRead lock(mBodyLockInterfaceLocking, inBody1ID < inBody2ID? inBody2ID : inBody1ID);
+		if (!lock.Succeeded())
+		{
+			outImpulseOnBody2 = Vec3::sZero();
+			outNumContactPoints = 0;
+			return false;
+		}
+		return mContactManager.GetAppliedContactImpulse(inBody1ID, inBody2ID, lock.GetBody().GetRotation(), outImpulseOnBody2, outNumContactPoints);
+	}
 
 	/// Get the bounding box of all bodies in the physics system.
 	/// Deprecated: Use GetBroadPhaseQuery().GetBounds() instead.

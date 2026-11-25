@@ -4,6 +4,7 @@
 #include "ComputeSelfTest.h"
 #include "ConstantSelfTest.h"
 #include "CullingSelfTest.h"
+#include "EngineShaderSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
 #include "RenderUtilitySelfTest.h"
@@ -95,6 +96,11 @@ struct BackendResult {
 };
 
 uint32 failures = 0;
+// 엔진 셰이더 probe만 도는 실행인가(--engine-shader-self-test).
+bool engineShadersOnly = false;
+// 쿠킹 엔진 셰이더 라이브러리 화면 검사만 도는 실행인가(--cooked-shader-self-test, ShaderSystem
+// 16.1절 SSD48).
+bool cookedShadersOnly = false;
 // 렌더 lane 검사의 엔진이 쓰는 프로세스 모듈 로더다(RunGraphicsSelfTest 동안 유효).
 ModuleLoader* selfTestModules = nullptr;
 
@@ -477,6 +483,15 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.gpuValidationEnabled ? ", GPU-based validation" : "",
            info.software ? ", software" : "");
 
+    if (cookedShadersOnly) {
+        // 쿠킹 엔진 라이브러리 화면 검사만 돈다(공급자 없이 — Release 실행 파일에서도 된다).
+        failures +=
+            RunCookedScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+        return;
+    }
+
     // 장치 형식의 셰이더 집합이다(ShaderSystem 16.1절 SSD19 — Development 공급자). 열지 못하면 그
     // backend의 그리기 검사를 하지 않는다(Release 실행 파일은 공급자가 없다).
     shaders::DeviceShaders deviceShaders(result.triangle.GetAllocator(), device);
@@ -485,6 +500,14 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         printf("  [NOT RUN] %s: shaders unavailable: %.*s\n", name,
                static_cast<int>(problem.ByteCount()), problem.Data());
         result.ran = false;
+        return;
+    }
+
+    // 엔진 셰이더 SL0 GPU probe(Docs/Design/EngineShaders 7.6절): CPU 기준 대조와 장치 사이 기록.
+    failures += RunEngineShaderChecks(name, device, result.triangle.GetAllocator());
+    if (engineShadersOnly) {
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
         return;
     }
 
@@ -783,6 +806,9 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     // 엔진 창 렌더 경로(RenderBase 18.5절 SM1–SM5): 엔진 장면 → tone map → 스왑체인, CPU 기준 대조.
     failures += RunScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+    // 같은 화면 경로를 쿠킹 엔진 셰이더 라이브러리로(SSD48 — 엔진 쿠킹 결과가 없으면 NOT RUN).
+    failures +=
+        RunCookedScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
 }
@@ -898,8 +924,12 @@ void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendRe
 
 } // namespace
 
-int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuValidation) noexcept {
+int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuValidation,
+                        GraphicsSelfTestScope scope) noexcept {
     selfTestModules = &modules;
+    engineShadersOnly = scope == GraphicsSelfTestScope::EngineShaders;
+    cookedShadersOnly = scope == GraphicsSelfTestScope::CookedShaders;
+    ResetEngineShaderRecords();
     // 검증 계층이 프로세스를 끝내도 그때까지의 진행이 남도록 출력 버퍼를 쓰지 않는다.
     setvbuf(stdout, nullptr, _IONBF, 0);
     printf("Graphics self-test\n");
@@ -928,12 +958,18 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software, &report), warp,
                &report);
-    RunD3D12CreateReportProbe(allocator);
+    if (!engineShadersOnly) {
+        RunD3D12CreateReportProbe(allocator);
+    }
+
     RunBackend("D3D11", graphics::CreateD3D11Device(allocator, desc, &report), d3d11, &report);
     RunBackend("D3D11 WARP", graphics::CreateD3D11Device(allocator, software, &report), d3d11Warp,
                &report);
-    RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
-    RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
+    if (!engineShadersOnly) {
+        RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
+        RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
+    }
+
     // OpenGL ES 3.2 미리보기(GLES31_PC)를 두 context에서 돌린다: 진짜 ES 3.2 context(드라이버가 ES
     // 밖 호출을 거부)와 UE 방식의 데스크톱 GL 4.3 core context.
 #if SANDBOX_OPENGL
@@ -951,6 +987,18 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
            "executables\n");
 #endif
     RunVulkan(allocator, desc, vulkan, vulkanSoftware);
+    // 엔진 셰이더 probe의 장치 사이 대조(Docs/Design/EngineShaders 8.5절)와 coverage 사유.
+    failures += ReportEngineShaderCrossDevice();
+    if (engineShadersOnly || cookedShadersOnly) {
+        const bool ranAny = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran ||
+                            glesProfile.ran || glesDesktop.ran || vulkan.ran || vulkanSoftware.ran;
+        printf("%s self-test: %s (%u failure%s)\n",
+               engineShadersOnly ? "Engine shader" : "Cooked shader",
+               failures == 0 && ranAny ? "PASS" : (ranAny ? "FAIL" : "NOT RUN"), failures,
+               failures == 1 ? "" : "s");
+        return failures == 0 ? 0 : 1;
+    }
+
     // 카메라 입력(RenderBase 18.5절 4항): 헤드리스 엔진에 W·오른쪽 화살표를 넣는다.
     failures += RunPawnInputChecks(allocator, modules);
     Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");

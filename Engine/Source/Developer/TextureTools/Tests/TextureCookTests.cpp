@@ -19,6 +19,7 @@
 #include <Object/ObjectRegistryOptions.h>
 #include <Platform/File.h>
 #include <Platform/Memory.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <TextureTools/TextureCook.h>
@@ -177,10 +178,10 @@ struct CookScene {
 
     Result<void> Cook(const TextureCookProcessor& processor, CookOut& out,
                       NuggetCache* nuggets = nullptr, bool verify = false,
-                      PackageSink* sink = nullptr) noexcept {
+                      PackageSink* sink = nullptr, Allocator* scratch = nullptr) noexcept {
         entry.id = asset;
         CookContext context;
-        context.allocator = &allocator;
+        context.allocator = scratch != nullptr ? scratch : &allocator;
         context.registry = editor.Get();
         context.access = EditorAccess();
         context.package = package.Handle();
@@ -934,6 +935,53 @@ TEST(TextureCook_FailuresKeepEditorObject) {
         CookOut out(scene.allocator);
         CHECK(!scene.Cook(processor, out));
     }
+}
+
+// 할당 실패 전수(14.1.101 — 빌드 때 더한 것): 쿠킹 문맥 Allocator의 n번째 할당이 실패하면 쿠킹은
+// OutOfMemory(진단 None)이고 에디터 객체는 그대로다. 실패가 없으면(시도가 다 쓰이면) 기준과 같은
+// byte다. 너겟 캐시가 있는 쿠킹(미적중 → Put, 적중 → Get)도 같다.
+TEST(TextureCook_AllocationFailures) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    TextureCookProcessor processor;
+    REQUIRE(scene.MakeGray(1, 64, 32));
+    CookOut reference(scene.allocator);
+    REQUIRE(scene.Cook(processor, reference));
+    const auto sweep = [&](NuggetCache* nuggets) noexcept {
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(scene.allocator);
+            failing.FailOnAttempt(attempt);
+            CookOut out(scene.allocator);
+            auto cooked = scene.Cook(processor, out, nuggets, false, nullptr, &failing);
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (exhausted) {
+                CHECK(cooked);
+                CHECK(out.sink.Bytes().Size() == reference.sink.Bytes().Size() &&
+                      platform::MemoryEquals(out.sink.Bytes().Data(), reference.sink.Bytes().Data(),
+                                             reference.sink.Bytes().Size()));
+                break;
+            }
+
+            if (cooked) {
+                continue;
+            }
+
+            ++failures;
+            CHECK(cooked.Error() == ErrorCode::OutOfMemory &&
+                  out.failure.code == AssetDiagnosticCode::None);
+            CHECK(scene.EditorUntouched());
+        }
+
+        return failures;
+    };
+    CHECK(sweep(nullptr) > 0);
+    NuggetScene nuggets(scene.allocator, "texture-cook-allocation");
+    REQUIRE(nuggets.ready);
+    // 첫 sweep의 성공 시도가 너겟을 Put하므로 둘째 sweep은 적중(Get) 경로다.
+    CHECK(sweep(nuggets.cache.Get()) > 0);
+    CHECK(sweep(nuggets.cache.Get()) > 0);
 }
 
 // 빌드 경고(12.14절 10번): SrgbIgnored(Masks + SRGB)·PreserveBorderWithWrap가 대상 id의 경고로

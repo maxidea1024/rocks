@@ -158,6 +158,13 @@ public:
 	/// Uses the read collision cache to determine if 2 bodies are in contact.
 	bool						WereBodiesInContact(const BodyID &inBody1ID, const BodyID &inBody2ID) const;
 
+	/// Rocks modification: sum the non-penetration impulses that the contact solver applied between 2 bodies during the last collision step, as a world space vector acting on inBody2ID (impulse * contact normal per contact point).
+	/// Uses the read collision cache like WereBodiesInContact: StoreAppliedImpulses writes the total lambda of every contact point into the write cache and the step makes it the read cache.
+	/// The cache stores contact normals in the local space of the body with the larger BodyID, so inRotationOfLargerBody must be the current rotation of that body (the same rotation the next step uses to reuse the cache).
+	/// The value is kg m/s when the contact listener leaves the inverse mass scales at 1. Impulses that continuous collision detection applies (JobResolveCCDContacts) are not stored and not included, also when the pair has discrete contacts in the same step.
+	/// Returns false (zero impulse, no contact points) when the pair had no contact manifold, for example when both bodies are asleep.
+	bool						GetAppliedContactImpulse(const BodyID &inBody1ID, const BodyID &inBody2ID, QuatArg inRotationOfLargerBody, Vec3 &outImpulseOnBody2, uint &outNumContactPoints) const;
+
 	/// Get the number of contact constraints that were found
 	uint32						GetNumConstraints() const											{ return min<uint32>(uint32(mNumConstraintsAndNextConstraintOffset.load(memory_order_relaxed)), mMaxConstraints); }
 

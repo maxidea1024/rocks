@@ -106,6 +106,52 @@ internal static class DependencyScopeTests
                 "unexpected message for two direct consumers of a global-state module: " + error.Message);
         }
 
+        // Monolithic 시험 실행 파일(GlobalStateTestConsumer)은 소유 모듈과 함께 직접 소비해도 세지 않는다(3.8절 시험 실행 파일 예외 —
+        // 개정 38). 실행 파일이 아니거나 Modular이면 표지 자체를 거부한다.
+        NativeModuleInput[] withTestRunner = [.. stateful, new NativeModuleInput
+        {
+            Name = "Runner", Kind = NativeModuleKind.Executable, PrivateDependencies = ["Root"], GlobalStateTestConsumer = true
+        }];
+        InputValidation.Validate(build with { Modules = withTestRunner });
+        try
+        {
+            InputValidation.Validate(build with
+            {
+                Modules = withTestRunner.Select(module => module.Name == "Runner" ? module with { GlobalStateTestConsumer = false } : module).ToArray()
+            });
+            Check(false, "a test executable without GlobalStateTestConsumer still counts as a consumer");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("found Base, Runner", StringComparison.Ordinal),
+                "unexpected message for an unmarked test executable consumer: " + error.Message);
+        }
+
+        try
+        {
+            InputValidation.Validate(build with
+            {
+                Modules = stateful.Select(module => module.Name == "Mid" ? module with { GlobalStateTestConsumer = true } : module).ToArray()
+            });
+            Check(false, "GlobalStateTestConsumer on a library module must be rejected");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("GlobalStateTestConsumer is only for a test executable", StringComparison.Ordinal),
+                "unexpected message for GlobalStateTestConsumer on a library: " + error.Message);
+        }
+
+        try
+        {
+            InputValidation.Validate(build with { Modules = withTestRunner, LinkType = NativeLinkType.Modular, TargetName = "Scope" });
+            Check(false, "GlobalStateTestConsumer in a Modular link must be rejected");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("GlobalStateTestConsumer is only allowed with LinkType Monolithic", StringComparison.Ordinal),
+                "unexpected message for GlobalStateTestConsumer in a Modular link: " + error.Message);
+        }
+
         try
         {
             InputValidation.Validate(build with

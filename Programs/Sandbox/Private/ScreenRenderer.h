@@ -175,6 +175,16 @@ public:
         return opened_;
     }
 
+    // 연 엔진 셰이더 집합이 쿠킹 라이브러리였는가와 그 셰이더 형식 id다(ShaderSystem 16.1절
+    // SSD48 — lane이 끝난 뒤 읽는다).
+    bool OpenedCookedShaders() const noexcept {
+        return resources_.OpenedFromCookedLibrary();
+    }
+
+    StringView ShaderFormat() const noexcept {
+        return resources_.FormatId();
+    }
+
 private:
     friend void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noexcept;
     friend void CreateSurface(render::RenderLaneContext& context, SurfaceCreate& value) noexcept;

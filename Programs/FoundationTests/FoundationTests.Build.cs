@@ -24,7 +24,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/InputActions", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/InputActions", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/Physics", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -32,7 +32,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "InputActions", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Physics", "InputActions", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
     // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1), the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
@@ -41,6 +41,18 @@ public abstract class TestsModule : ModuleRules
     // OpenEXRCore have process-wide state, so only ImageCodec depends on them (BD29) and the TIFF and EXR tests write fixtures through the ImageCodec
     // encode API (Docs/Design/AssetSystem section 12.10.1).
     private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Msdfgen", "Jolt", "LibJpegTurbo"];
+
+    // Third-party libraries with process-wide state (ThirdParty.json globalState) among EngineThirdPartyHeaders, and the test sources that use them
+    // directly. Physics owns Jolt; only the Monolithic engine runner may consume it beside its owner (GlobalStateTestConsumer — Docs/Design/BuildTargets
+    // section 3.8 BD29 test executable exception, revision 38). The Modular runner leaves the library off and skips these sources (the Monolithic runner
+    // runs them).
+    private static readonly string[] GlobalStateThirdPartyHeaders = ["Jolt"];
+
+    private static readonly string[] GlobalStateDirectSources =
+    [
+        "Programs/FoundationTests/Engine/ThirdPartyJoltTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsSceneTests.cpp"
+    ];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
@@ -130,7 +142,8 @@ public abstract class TestsModule : ModuleRules
             "Serialization", "TraceAnalysis", "World"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
-        ["ShaderCompiler"] = ["DeterministicMath"],
+        // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers.
+        ["ShaderCompiler"] = ["DeterministicMath", "RenderBase"],
         ["SparksCompiler"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTestHost"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTools"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
@@ -164,6 +177,9 @@ public abstract class TestsModule : ModuleRules
     protected abstract TestLayer Layer { get; }
 
     protected abstract string ExecutableName { get; }
+
+    // Whether this runner belongs to a Modular target (every library module a shared library).
+    protected virtual bool Modular => false;
 
     // Whether the runner also runs the PluginTestModules tests (and links those plugin modules): both engine layer runners do. The Modular one
     // loads the plugin modules from their plugin binaries folders (Docs/Design/ModuleLoader section 3.15 ML5a).
@@ -208,6 +224,12 @@ public abstract class TestsModule : ModuleRules
         // POSIX platforms use the shared test support implementation.
         directories.Add(context.Platform == NativePlatform.Windows ? $"{support}/Private/Win64" : $"{support}/Private/Posix");
         var sources = context.Sources(directories.ToArray()).ToList();
+        if (Layer == TestLayer.Engine && Modular)
+        {
+            var skipped = GlobalStateDirectSources.Select(context.PathInRoot).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            sources.RemoveAll(skipped.Contains);
+        }
+
         sources.Add(context.PathInRoot(context.Configuration == NativeConfiguration.Asan
             ? $"{support}/Private/Asan/Enabled.cpp" : $"{support}/Private/Asan/Disabled.cpp"));
         string[] dependencies = Layer switch
@@ -243,7 +265,9 @@ public abstract class TestsModule : ModuleRules
                 .. (PluginTests ? PluginTestModules.Select(module => context.PathInRoot(PluginSourceDirectory(module))).ToArray() : Array.Empty<string>())],
             PrivateDefines = ["ROCKS_TESTING=1"],
             // Third-party libraries the engine runner's adapter tests include directly (Docs/Design/BuildTargets section 3.5 BS3a).
-            PrivateDependencies = Layer == TestLayer.Engine ? EngineThirdPartyHeaders : [],
+            PrivateDependencies = Layer != TestLayer.Engine ? [] :
+                Modular ? EngineThirdPartyHeaders.Except(GlobalStateThirdPartyHeaders).ToArray() : EngineThirdPartyHeaders,
+            GlobalStateTestConsumer = Layer == TestLayer.Engine && !Modular,
             // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader section 3.8): it is linked into this
             // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.
             PublicDependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
@@ -281,4 +305,6 @@ public sealed class EngineModularTests : TestsModule
     protected override TestLayer Layer => TestLayer.Engine;
 
     protected override string ExecutableName => "EngineModularTests";
+
+    protected override bool Modular => true;
 }

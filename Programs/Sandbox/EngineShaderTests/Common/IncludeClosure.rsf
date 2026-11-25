@@ -1,0 +1,86 @@
+// 엔진 셰이더 SL0 include 폐포 시험이다(Docs/Design/EngineShaders 7.6·7.7절 1항). SL0 파일 전부를 한
+// 원문에 include하고 VS·PS·CS 엔트리가 각 영역 함수를 하나 이상 부른다. 컴파일 행렬(EngineTests
+// EngineShaderCompileMatrixTests)이 모든 형식에서 컴파일해 이름 충돌·#pragma once·HLSL 2018 문법·워커
+// 규칙(자원 선언 없음)을 확인한다.
+#include "/Engine/Private/Common/ShaderPrelude.rsh"
+#include "/Engine/Private/Common/ScalarArrays.rsh"
+#include "/Engine/Private/Common/StageOutputs.rsh"
+#include "/Engine/Private/Math/BitPacking.rsh"
+#include "/Engine/Private/Math/DitheredQuantization.rsh"
+#include "/Engine/Private/Math/ExtendedPrecision.rsh"
+#include "/Engine/Private/Math/FastApproximations.rsh"
+#include "/Engine/Private/Math/IntegerHash.rsh"
+#include "/Engine/Private/Math/LowDiscrepancy.rsh"
+#include "/Engine/Private/Math/MatrixMath.rsh"
+#include "/Engine/Private/Math/MortonOrder.rsh"
+#include "/Engine/Private/Math/Quaternion.rsh"
+#include "/Engine/Private/Math/RandomNumbers.rsh"
+#include "/Engine/Private/Math/RayIntersection.rsh"
+#include "/Engine/Private/Math/SampleWarping.rsh"
+#include "/Engine/Private/Math/ScreenNoise.rsh"
+#include "/Engine/Private/Math/SphericalHarmonics.rsh"
+#include "/Engine/Private/Math/UnitVectorEncoding.rsh"
+#include "/Engine/Private/Math/VectorMath.rsh"
+#include "/Engine/Private/Color/ChromaticAdaptation.rsh"
+#include "/Engine/Private/Color/ColorSpaces.rsh"
+#include "/Engine/Private/Color/FilmicToneCurve.rsh"
+#include "/Engine/Private/Color/TransferFunctions.rsh"
+#include "/Engine/Private/Shading/DiffuseTerms.rsh"
+#include "/Engine/Private/Shading/EnvironmentBrdf.rsh"
+#include "/Engine/Private/Shading/MicrofacetTerms.rsh"
+#include "/Engine/Private/Shading/SurfaceAttributes.rsh"
+#include "/Engine/Private/Shading/SurfaceShading.rsh"
+#include "/Engine/Shared/ReservedBindingSpaces.h"
+#include "/Engine/Shared/ShaderStaticAssert.h"
+#include "/Engine/Shared/ShaderTypeAliases.h"
+
+ROCKS_SHADER_STATIC_ASSERT(ReservedRootConstantsSpace == 3u, "root constants live in space 3");
+
+ROCKS_SHADER_SHARED_BEGIN
+struct IncludeClosureRecord {
+    float4 value;
+    uint4 flags;
+};
+ROCKS_SHADER_SHARED_END
+
+ROCKS_PIXEL_OUTPUT_2(IncludeClosurePixelOutput, float4, uint)
+
+// 정점 번호로 함수를 부른다(상수 접기로 빠지지 않게 입력에 기댄다).
+float4 IncludeClosureValue(uint seed) {
+    const float u = UintToUnitFloat(HashPcg(seed));
+    const float3 direction = UniformSphere(float2(u, RadicalInverseBase2(seed)));
+    float3 tangent;
+    float3 bitangent;
+    BuildOrthonormalBasis(direction, tangent, bitangent);
+    const float3 decoded = DecodeOctahedral(EncodeOctahedral(direction));
+    const float4 q = EncodeTangentFrame(tangent, bitangent, direction);
+    const float3 color = LinearToSrgb(mul(XyzToRec709, mul(Rec709ToXyz, decoded * 0.5 + 0.5)));
+    const float d = DistributionGgx(RoughnessToAlpha(u), saturate(direction.z));
+    const float2 env = EnvironmentBrdfApprox(saturate(direction.z), u);
+    const SphericalHarmonics3 sh = ProjectDirectionSH3(direction, u);
+    float t;
+    const bool hit = RayPlaneIntersection(float3(0.0, 0.0, 0.0), direction, float4(0.0, 0.0, 1.0, 1.0), t);
+    const ShadingParameters shading = MakeShadingParameters(DefaultSurfaceAttributes());
+    return float4(color + shading.f0, d + env.x + EvaluateSH3(sh, direction) + q.w + (hit ? t : 0.0) +
+                                          FastAtan2(direction.y, direction.x));
+}
+
+float4 IncludeClosureVertex(uint vertexId : SV_VertexID) : SV_Position {
+    return float4(IncludeClosureValue(vertexId).xyz, 1.0);
+}
+
+IncludeClosurePixelOutput IncludeClosurePixel(float4 position : SV_Position) {
+    IncludeClosurePixelOutput output;
+    const uint seed = (uint)position.x + ((uint)position.y << 16);
+    output.target0 = IncludeClosureValue(seed);
+    output.target1 = MortonEncode2D(uint2(position.xy)) ^ PackRGB9E5Ufloat(output.target0.rgb) ^
+                     PackHalf2(output.target0.xy);
+    return output;
+}
+
+RWStructuredBuffer<float4> IncludeClosureOutput;
+
+[numthreads(64, 1, 1)]
+void IncludeClosureCompute(uint3 id : SV_DispatchThreadID) {
+    IncludeClosureOutput[id.x] = IncludeClosureValue(id.x) + float4(UnpackRGB10A2Unorm(id.x).xyz, 0.0);
+}

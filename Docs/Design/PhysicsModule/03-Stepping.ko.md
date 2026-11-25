@@ -8,7 +8,7 @@
 
 | 자리 | 언제 | 하는 일 | UE |
 |---|---|---|---|
-| **PhysicsSimulate**(새 — 7.4절 요청) | Physics 단계의 고정 스텝마다, 사용자 Fixed hook 뒤 | (1) Kinematic 목표 적용과 목표 없는 Kinematic 정지(3.3절) (2) Jolt `PhysicsSystem::Update(fixedStep, collisionSteps 1)` (3) 이번 스텝의 활성 body·접촉·잠듦 기록을 스텝 번호와 함께 버퍼에 쌓음(3.4절) | `FStartPhysicsTickFunction` → `StartFrame` → `AdvanceAndDispatch`(`E/Private/PhysicsEngine/PhysLevel.cpp:239–245`, `PC/Private/ChaosScene.cpp:363–386`) |
+| **PhysicsSimulate**(새 — 7.4절 요청) | Physics 단계의 고정 스텝마다, 사용자 Fixed hook 뒤 | (1) Kinematic 목표 적용과 목표 없는 Kinematic 정지(3.3절) (2) Jolt `PhysicsSystem::Update(fixedStep, collisionSteps 1)` (3) 이번 스텝 접촉의 solver 충격량을 읽고(6.4절) 활성 body·접촉·잠듦 기록을 스텝 번호와 함께 버퍼에 쌓음(3.4절) | `FStartPhysicsTickFunction` → `StartFrame` → `AdvanceAndDispatch`(`E/Private/PhysicsEngine/PhysLevel.cpp:239–245`, `PC/Private/ChaosScene.cpp:363–386`) |
 | **PhysicsResults**(있음 — 엔진 런타임 15.4절 표 첫 칸) | Physics 단계 끝, 프레임에 한 번 | (1) 이번 프레임에 움직인 Dynamic body의 transform을 컴포넌트에 반영(3.4절) (2) 쌓인 hit 이벤트를 결정적 순서로 발행(5.4절) (3) 잠듦·깨움 이벤트 발행(step 밖 깨움 포함) | `FEndPhysicsTickFunction` → `EndFrame`·`OnSyncBodies`·충돌 통지(`PhysLevel.cpp:257–279`, `ChaosScene.cpp:500–576`, `E/Private/PhysicsEngine/Experimental/PhysScene_Chaos.cpp:2452–2727`) |
 
 - 고정 스텝이 0번인 프레임(누적이 한 스텝에 못 미침)은 PhysicsSimulate가 없다. PhysicsResults는 그래도 돈다 — 게임 lane API(`WakeRigidBody` 등)가 step 밖에서 낸 깨움·잠듦 이벤트가 남아 있을 수 있다.

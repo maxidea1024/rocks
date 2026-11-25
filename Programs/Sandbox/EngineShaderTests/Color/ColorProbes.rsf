@@ -1,0 +1,165 @@
+// A03 색 probe다(Docs/Design/EngineShaders 7.4·7.6절). ColorFloatProbePixel이 RGBA32Float 타깃에 사례마다
+// 결과를 쓴다. 기대값은 Sandbox EngineShaderReferenceColor.cpp(CPU double)다.
+#include "/Engine/Private/Common/ShaderPrelude.rsh"
+#include "/Engine/Private/Color/ChromaticAdaptation.rsh"
+#include "/Engine/Private/Color/ColorSpaces.rsh"
+#include "/Engine/Private/Color/FilmicToneCurve.rsh"
+#include "/Engine/Private/Color/TransferFunctions.rsh"
+#include "/Plugin/EngineShaderTests/Common/ProbeCommon.rsh"
+
+// 행렬 번호(ProbeMatrix*)의 행렬이다.
+float3x3 SelectColorMatrix(uint index) {
+    switch (index) {
+    case 0u:
+        return Rec709ToXyz;
+    case 1u:
+        return XyzToRec709;
+    case 2u:
+        return Rec2020ToXyz;
+    case 3u:
+        return XyzToRec2020;
+    case 4u:
+        return DisplayP3ToXyz;
+    case 5u:
+        return XyzToDisplayP3;
+    case 6u:
+        return AP0ToXyz;
+    case 7u:
+        return XyzToAP0;
+    case 8u:
+        return AP1ToXyz;
+    case 9u:
+        return XyzToAP1;
+    case 10u:
+        return AP0ToAP1;
+    case 11u:
+        return AP1ToAP0;
+    case 12u:
+        return Rec709ToRec2020;
+    case 13u:
+        return Rec2020ToRec709;
+    case 14u:
+        return BradfordD65ToD60;
+    default:
+        return BradfordD60ToD65;
+    }
+}
+
+// PQ 표준 값 표(nit)다.
+static const float ProbePqNits[8] = {0.0, 0.1, 1.0, 100.0, 203.0, 1000.0, 4000.0, 10000.0};
+
+float4 ColorFloatProbePixel(float4 position : SV_Position) : SV_Target0 {
+    const uint f = ProbeFunction();
+    const uint s = ProbeSelector();
+    const uint c = ProbeCase(position);
+    const float3 color = float3(ProbeUnit(c, 0u), ProbeUnit(c, 1u), ProbeUnit(c, 2u));
+    if (f == ProbeColorMatrix) {
+        return float4(mul(SelectColorMatrix(s), color * 2.0 - 1.0), 0.0);
+    }
+
+    if (f == ProbeColorMatrixRows) {
+        return float4(SelectColorMatrix(c / 3u)[c % 3u], 0.0);
+    }
+
+    if (f == ProbeColorFunctions) {
+        switch (s) {
+        case 0u:
+            return float4(Luminance(color), XyzToXyY(color));
+        case 1u:
+            return float4(XyYToXyz(float3(color.xy * 0.5 + 0.1, color.z)), 0.0);
+        case 2u:
+            return float4(RgbToYCoCg(color), 0.0);
+        case 3u:
+            return float4(YCoCgToRgb(RgbToYCoCg(color)), 0.0);
+        case 4u:
+            return float4(RgbToHsv(color), 0.0);
+        case 5u:
+            return float4(HsvToRgb(color), 0.0);
+        case 6u:
+            return float4(LinearRgbToOklab(color * 2.0), 0.0);
+        default:
+            return float4(OklabToLinearRgb(LinearRgbToOklab(color * 2.0)), 0.0);
+        }
+    }
+
+    if (f == ProbeAdaptation) {
+        const float2 source = Probe.parameters.xy;
+        const float2 destination = Probe.parameters.zw;
+        if (c < 3u) {
+            return float4(BradfordAdaptation(source, destination)[c], 0.0);
+        }
+
+        if (c < 6u) {
+            return float4(Cat02Adaptation(source, destination)[c - 3u], 0.0);
+        }
+
+        return float4(XyToXyz(source), 0.0);
+    }
+
+    if (f == ProbeWhiteBalance) {
+        if (c < 3u) {
+            return float4(WhiteBalanceMatrix(Probe.parameters.x, Probe.parameters.y)[c], 0.0);
+        }
+
+        return float4(WhiteBalanceWhiteXy(Probe.parameters.x, Probe.parameters.y),
+                      XyToUv1960(Uv1960ToXy(color.xy * 0.4 + 0.1)));
+    }
+
+    if (f == ProbeColorTemperature) {
+        const float kelvin = Probe.parameters.x + (float)c * Probe.parameters.y;
+        return float4(PlanckianLocusXy(kelvin), ColorTemperatureToXy(kelvin, true));
+    }
+
+    if (f == ProbeTransfer) {
+        // x = c · 2^-12 ∈ [0, 1](4097 사례 — 끝 1 포함).
+        const float x = (float)c * ProbePowerOfTwo(-12);
+        if (s == 0u) {
+            return float4(LinearToSrgb(x), SrgbToLinear(x), LinearToRec709(x), Rec1886ToLinear(float3(x, x, x)).x);
+        }
+
+        if (s == 1u) {
+            return float4(LinearToPq(x * 16384.0), PqToLinear(x), LinearToHlg(x), HlgToLinear(x));
+        }
+
+        if (s == 2u) {
+            return float4(LinearToLutLog(float3(x * 32.0, x, x)).x, LutLogToLinear(float3(x, x, x)).x,
+                          LinearToGamma(float3(x, x, x), 2.2).x, GammaToLinear(float3(x, x, x), 2.2).x);
+        }
+
+        return float4(LinearToSrgb(float3(x, x * 0.5, x * 0.25)).yz, SrgbToLinear(float3(x, x * 0.5, x * 0.25)).yz);
+    }
+
+    if (f == ProbeSrgbRoundTrip) {
+        const float encoded = (float)(c & 0xffu) / 255.0;
+        const float decoded = SrgbToLinear(encoded);
+        return float4(decoded, LinearToSrgb(decoded), encoded, 0.0);
+    }
+
+    if (f == ProbePqStandard) {
+        const float nits = ProbePqNits[c & 7u];
+        const float signal = LinearToPq(nits);
+        return float4(signal, PqToLinear(signal), nits, 0.0);
+    }
+
+    // ProbeFilmic: 파라미터는 values 앞 두 행(slope, toe, shoulder, blackClip / whiteClip, blueCorrection,
+    // expandGamut, toneCurveAmount)이다.
+    RocksFilmicParameters film;
+    film.slope = Probe.values[0].x;
+    film.toe = Probe.values[0].y;
+    film.shoulder = Probe.values[0].z;
+    film.blackClip = Probe.values[0].w;
+    film.whiteClip = Probe.values[1].x;
+    film.blueCorrection = Probe.values[1].y;
+    film.expandGamut = Probe.values[1].z;
+    film.toneCurveAmount = Probe.values[1].w;
+    if (s == 0u) {
+        const uint3 scales = uint3(ProbeBits(c, 3u), ProbeBits(c, 4u), ProbeBits(c, 5u)) % 9u;
+        const float3 scene = color * float3(ProbePowerOfTwo((int)scales.x - 3), ProbePowerOfTwo((int)scales.y - 3),
+                                            ProbePowerOfTwo((int)scales.z - 3));
+        return float4(RocksFilmicDisplayColor(scene, film), 0.0);
+    }
+
+    // 회색 사다리 x = c · 2^-8.
+    const float gray = (float)c * ProbePowerOfTwo(-8);
+    return float4(RocksFilmicDisplayColor(float3(gray, gray, gray), film), gray);
+}

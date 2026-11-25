@@ -150,6 +150,43 @@ Result<UniquePtr<graphics::Device>> CreateScreenDevice(Allocator& allocator, Scr
     return created;
 }
 
+Result<UniquePtr<graphics::Device>> CreateScreenDeviceInOrder(Allocator& allocator,
+                                                              Span<const graphics::Backend> order,
+                                                              bool validation) noexcept {
+    Result<UniquePtr<graphics::Device>> created =
+        Result<UniquePtr<graphics::Device>>::Failure(ErrorCode::Unsupported);
+    for (const graphics::Backend backend : order) {
+        ScreenBackend screen = ScreenBackend::Auto;
+        switch (backend) {
+        case graphics::Backend::D3D12:
+            screen = ScreenBackend::D3D12;
+            break;
+        case graphics::Backend::D3D11:
+            screen = ScreenBackend::D3D11;
+            break;
+        case graphics::Backend::Vulkan:
+            screen = ScreenBackend::Vulkan;
+            break;
+        case graphics::Backend::OpenGL:
+            screen = ScreenBackend::OpenGL;
+            break;
+        case graphics::Backend::Metal:
+            break;
+        }
+
+        if (screen == ScreenBackend::Auto) {
+            continue;
+        }
+
+        created = CreateScreenDevice(allocator, screen, validation);
+        if (created) {
+            break;
+        }
+    }
+
+    return created;
+}
+
 bool CanOpenEngineShaders(const render::EngineShaderHost& host) noexcept {
     return host.Provider() != nullptr || host.CookedLibraries() != nullptr;
 }
