@@ -2,6 +2,7 @@
 #include <Core/Math/Float16.h>
 #include <DeterministicMath/DeterministicMath.h>
 #include <Platform/Memory.h>
+#include "TextureBuildInternal.h"
 #include "TextureImportInternal.h"
 
 #include <TextureTools/TextureBuild.h>
@@ -16,11 +17,12 @@
 namespace rocks {
 namespace {
 
-constexpr usize Channels = 4;
-constexpr usize Red = 0;
-constexpr usize Green = 1;
-constexpr usize Blue = 2;
-constexpr usize Alpha = 3;
+using texture_build_detail::Alpha;
+using texture_build_detail::Blue;
+using texture_build_detail::Channels;
+using texture_build_detail::Green;
+using texture_build_detail::Level;
+using texture_build_detail::Red;
 // 최대 크기 상한이다(12.5절 4번 — UE GetMaximumDimensionOfNonVT).
 constexpr uint32 MaxDimension2D = 16384;
 // 16비트 정수·16F 상한이다.
@@ -30,39 +32,6 @@ constexpr float Half16Max = 65504.0f;
 // 숨김 CompressionSettings다(UE TC_LQ·TC_EncodedReflectionCapture — 12.4.1절).
 constexpr uint8 HiddenCompressionLq = 13;
 constexpr uint8 HiddenCompressionReflection = 14;
-
-// 한 mip 단계의 작업 픽셀이다: layers(2DArray·Cube 면 — Volume은 1) × depth(Volume 깊이 — 그 밖 1)
-// × height × width × RGBA.
-struct Level {
-    explicit Level(Allocator& allocator) noexcept : texels(allocator) {
-    }
-
-    uint32 width = 0;
-    uint32 height = 0;
-    uint32 depth = 1;
-    uint32 layers = 1;
-    Array<float> texels;
-
-    usize PlaneTexels() const noexcept {
-        return usize{width} * height;
-    }
-
-    float* At(uint32 layer, uint32 z, uint32 y, uint32 x) noexcept {
-        return texels.Data() + ((((usize{layer} * depth + z) * height + y) * width + x) * Channels);
-    }
-
-    const float* At(uint32 layer, uint32 z, uint32 y, uint32 x) const noexcept {
-        return texels.Data() + ((((usize{layer} * depth + z) * height + y) * width + x) * Channels);
-    }
-
-    Result<void> Allocate(uint32 w, uint32 h, uint32 d, uint32 l) noexcept {
-        width = w;
-        height = h;
-        depth = d;
-        layers = l;
-        return texels.TryResize(usize{w} * h * d * l * Channels);
-    }
-};
 
 // 원본 종류다(12.4.3절 열).
 enum class SourceClass : uint8 {
@@ -336,20 +305,19 @@ float DecodeChannel(uint32 value, double maximum, Decode decode) noexcept {
     return static_cast<float>(encoded);
 }
 
-Result<void> DecodeSource(const TextureBuildSettings& settings, Span<const uint8> pixels,
+// format 원본 byte를 decode 방식으로 푼다(UE CopyImage 원본 → RGBA32F — 12.14절 A5j2b 2번). out은
+// width × height × depth × layers다.
+Result<void> DecodeFormat(TextureSourceFormat format, Decode decode, uint32 width, uint32 height,
+                          uint32 depth, uint32 layers, Span<const uint8> pixels,
                           Level& out) noexcept {
-    const bool volume = settings.dimension == TextureDimension::Volume;
-    if (auto made = out.Allocate(settings.sizeX, settings.sizeY, volume ? settings.numSlices : 1,
-                                 volume ? 1 : settings.numSlices);
-        !made) {
+    if (auto made = out.Allocate(width, height, depth, layers); !made) {
         return made;
     }
 
-    const SourceClass source = ClassOf(settings.format);
-    const Decode decode = DecodeFor(settings, source);
-    const uint32 channels = ChannelsOf(settings.format);
+    const SourceClass source = ClassOf(format);
+    const uint32 channels = ChannelsOf(format);
     const usize texels = out.texels.Size() / Channels;
-    const usize texelBytes = TextureSourceTexelBytes(settings.format);
+    const usize texelBytes = TextureSourceTexelBytes(format);
     // 8비트 색 표(디코딩 방식마다 256개 — 같은 값이면 같은 float).
     float table[256];
     if (source == SourceClass::Unorm8) {
@@ -384,8 +352,8 @@ Result<void> DecodeSource(const TextureBuildSettings& settings, Span<const uint8
 
             break;
         case SourceClass::Float: {
-            const bool half = settings.format == TextureSourceFormat::R16F ||
-                              settings.format == TextureSourceFormat::RGBA16F;
+            const bool half =
+                format == TextureSourceFormat::R16F || format == TextureSourceFormat::RGBA16F;
             for (uint32 channel = 0; channel < channels; ++channel) {
                 color[channel] = half ? Float16::FromBits(LoadLe16(texel + channel * 2)).ToFloat()
                                       : platform::BitCast<float>(LoadLe32(texel + channel * 4));
@@ -395,8 +363,9 @@ Result<void> DecodeSource(const TextureBuildSettings& settings, Span<const uint8
         }
         }
 
-        // 회색은 r = g = b다.
-        if (channels <= 2) {
+        // 회색(G8·GA8·G16·GA16)은 r = g = b다. R16F·R32F는 (v, 0, 0, 1)이다(UE CopyImage — 12.14절
+        // A5j2b에서 고쳤다).
+        if (channels <= 2 && source != SourceClass::Float) {
             color[Green] = color[Red];
             color[Blue] = color[Red];
         }
@@ -408,6 +377,15 @@ Result<void> DecodeSource(const TextureBuildSettings& settings, Span<const uint8
     }
 
     return Result<void>::Success();
+}
+
+Result<void> DecodeSource(const TextureBuildSettings& settings, Span<const uint8> pixels,
+                          Level& out) noexcept {
+    const bool volume = settings.dimension == TextureDimension::Volume;
+    const Decode decode = DecodeFor(settings, ClassOf(settings.format));
+    return DecodeFormat(settings.format, decode, settings.sizeX, settings.sizeY,
+                        volume ? settings.numSlices : 1, volume ? 1 : settings.numSlices, pixels,
+                        out);
 }
 
 // ---- 3. PowerOfTwoMode·재표본(12.5절 3번·크기 조정 필터) ----
@@ -1436,5 +1414,43 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     out.numSlices = volume ? 1 : settings.numSlices;
     return Result<void>::Success();
 }
+
+namespace texture_build_detail {
+
+Result<void> DecodeTexels(TextureSourceFormat format, TexelGamma gamma, uint32 width, uint32 height,
+                          uint32 depth, uint32 layers, Span<const uint8> pixels,
+                          Level& out) noexcept {
+    const uint64 texelBytes = TextureSourceTexelBytes(format);
+    const uint64 texels = uint64{width} * height * depth * layers;
+    if (texelBytes == 0 || pixels.Size() != texels * texelBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 감마는 8비트 정수 원본에만 뜻이 있다(16비트·float는 선형 — DecodeFormat이 본다).
+    const Decode decode = gamma == TexelGamma::Srgb    ? Decode::Srgb
+                          : gamma == TexelGamma::Pow22 ? Decode::Gamma22
+                                                       : Decode::Linear;
+    return DecodeFormat(format, ClassOf(format) == SourceClass::Unorm8 ? decode : Decode::Linear,
+                        width, height, depth, layers, pixels, out);
+}
+
+Result<void> ResampleLevel(Allocator& allocator, Level& level, uint32 targetX,
+                           uint32 targetY) noexcept {
+    return Resample(allocator, level, targetX, targetY);
+}
+
+uint8 QuantizeUnorm8Value(float value) noexcept {
+    return QuantizeUnorm8(value);
+}
+
+uint16 QuantizeUnorm16Value(float value) noexcept {
+    return QuantizeUnorm16(value);
+}
+
+bool WithinTextureWorkingBytes(uint64 x, uint64 y, uint64 z, uint64 layers) noexcept {
+    return WithinWorkingBytes(x, y, z, layers);
+}
+
+} // namespace texture_build_detail
 
 } // namespace rocks

@@ -330,8 +330,9 @@ TEST(TextureSourceRebuild_CubeArray) {
           sink.failCode == AssetDiagnosticCode::InvalidSetting && sink.failDetail == 42);
 }
 
-// 원소 판정: null·원본 없음·크기·형식·sRGB 여부(legacy gamma는 sRGB가 아님, G16 + SRGB on은
-// 선형이라 G16과 같다)·numLayers·byte 한도(할당 전), 빈 목록 → 빈 원본, 임포트한 배열 보호.
+// 원소 판정: null·원본 없음·numLayers·numMips·byte 한도(할당 전), 빈 목록 → 빈 원본, 임포트한 배열
+// 보호. 크기·형식·감마가 다른 원소는 거부하지 않고 A5j2b 변환을
+// 탄다(TextureSourceRebuild_ArrayConversion).
 TEST(TextureSourceRebuild_ArrayChecks) {
     RebuildScene scene;
     REQUIRE(scene.ready);
@@ -339,15 +340,6 @@ TEST(TextureSourceRebuild_ArrayChecks) {
     const TypeId plane = TypeIdOf<Texture2D>();
     const ObjectHandle good = scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 1, true);
     const ObjectHandle empty = scene.Make(plane);
-    const ObjectHandle wide = scene.Element(sink, plane, TextureSourceFormat::G8, 8, 4, 1, 2, true);
-    const ObjectHandle rgba =
-        scene.Element(sink, plane, TextureSourceFormat::RGBA8, 4, 4, 1, 3, true);
-    const ObjectHandle legacy =
-        scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 4, true);
-    REQUIRE(scene.Edit(legacy, [](Texture& texture) noexcept {
-        texture.useLegacyGamma = 1;
-        return true;
-    }));
     const ObjectHandle layered =
         scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 5, true);
     REQUIRE(scene.Edit(layered, [](Texture& texture) noexcept {
@@ -368,9 +360,6 @@ TEST(TextureSourceRebuild_ArrayChecks) {
     const Case cases[] = {
         {ObjectHandle{}, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
         {empty, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument},
-        {wide, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
-        {rgba, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
-        {legacy, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
         {layered, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported},
         {mipped, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported},
     };
@@ -437,6 +426,158 @@ TEST(TextureSourceRebuild_ArrayChecks) {
     CHECK(scene.Rebuild(cleared, SourceTextures, sink).Error() == ErrorCode::InvalidArgument &&
           sink.failCode == AssetDiagnosticCode::InvalidSetting);
     sink.importRecord = false;
+}
+
+namespace {
+
+// 배열을 만들어 list로 재구성하고 결과 원본과 byte를 돌려준다(실패면 null).
+const Texture* Rebuilt(RebuildScene& scene, FakeSink& sink, bool cube,
+                       Span<const ObjectHandle> list, Array<uint8>& bytes) noexcept {
+    const ObjectHandle array =
+        scene.Make(cube ? TypeIdOf<TextureCubeArray>() : TypeIdOf<Texture2DArray>());
+    if (array.IsNull() || !scene.SetList(array, cube, list) ||
+        !scene.Rebuild(array, SourceTextures, sink)) {
+        return nullptr;
+    }
+
+    const Texture* made = scene.Read(array);
+    if (made == nullptr) {
+        return nullptr;
+    }
+
+    auto read = sink.bulk.ReadBulk(made->source.bulk);
+    if (!read || !bytes.TryAppend(read.Value())) {
+        return nullptr;
+    }
+
+    return made;
+}
+
+} // namespace
+
+// A5j2b 변환(12.14절): 형식이 다른 원소는 공통 형식(G8 + RGBA8 → RGBA8, 첫 원소는 (L, L, L, 255)
+// 복제, 둘째는 byte 그대로), sRGB와 legacy gamma(Pow22)가 섞이면 RGBA32F 선형(SRGB off), 둘 다
+// sRGB가 아니면 같은 형식은 byte 그대로(legacy 원소도), G16 선형 + RGBA8 sRGB → RGBA32F, R16F +
+// RGBA16F → RGBA16F의 (v, 0, 0, 1), 크기가 다른 2DArray 원소는 최대 X·Y(같은 크기 원소는 byte
+// 그대로). CubeArray는 형식이 달라도 받고 크기가 다르면 InvalidSetting이다.
+TEST(TextureSourceRebuild_ArrayConversion) {
+    RebuildScene scene;
+    REQUIRE(scene.ready);
+    FakeSink sink(scene.env.allocator);
+    const TypeId plane = TypeIdOf<Texture2D>();
+    const ObjectHandle gray =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 10, true);
+    const ObjectHandle rgba =
+        scene.Element(sink, plane, TextureSourceFormat::RGBA8, 2, 2, 1, 50, true);
+    {
+        const ObjectHandle list[] = {gray, rgba};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA8 && made->srgb == 1 &&
+              bytes.Size() == 2 * 2 * 4 * 2);
+        for (uint32 texel = 0; texel < 4; ++texel) {
+            const uint8 value = static_cast<uint8>(10 + texel);
+            CHECK(bytes[texel * 4] == value && bytes[texel * 4 + 1] == value &&
+                  bytes[texel * 4 + 2] == value && bytes[texel * 4 + 3] == 255);
+        }
+
+        for (uint32 index = 0; index < 16; ++index) {
+            CHECK(bytes[16 + index] == static_cast<uint8>(50 + index));
+        }
+    }
+
+    // sRGB + Pow22: 감마가 갈려 RGBA32F 선형이다.
+    const ObjectHandle legacy =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 20, true);
+    REQUIRE(scene.Edit(legacy, [](Texture& texture) noexcept {
+        texture.useLegacyGamma = 1;
+        return true;
+    }));
+    {
+        const ObjectHandle list[] = {gray, legacy};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA32F && made->srgb == 0 &&
+              bytes.Size() == 2 * 2 * 16 * 2);
+    }
+
+    // Pow22 + 선형: 둘 다 sRGB가 아니라 같은 형식은 byte 그대로(UE memcpy), SRGB off.
+    const ObjectHandle plain = scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 30);
+    {
+        const ObjectHandle list[] = {legacy, plain};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::G8 && made->srgb == 0 &&
+              bytes.Size() == 8 && bytes[0] == 20 && bytes[3] == 23 && bytes[4] == 30);
+    }
+
+    // G16 선형 + RGBA8 sRGB → RGBA32F.
+    const ObjectHandle wide16 = scene.Element(sink, plane, TextureSourceFormat::G16, 2, 2, 1, 40);
+    {
+        const ObjectHandle list[] = {wide16, rgba};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA32F && made->srgb == 0);
+    }
+
+    // R16F + RGBA16F → RGBA16F: R16F 원소는 (v, 0, 0, 1)이다.
+    const ObjectHandle red = scene.Element(sink, plane, TextureSourceFormat::R16F, 2, 2, 1, 0);
+    const ObjectHandle half4 = scene.Element(sink, plane, TextureSourceFormat::RGBA16F, 2, 2, 1, 0);
+    {
+        const ObjectHandle list[] = {red, half4};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr && made->source.format == TextureSourceFormat::RGBA16F);
+        constexpr uint16 HalfOne = 0x3C00;
+        for (uint32 texel = 0; texel < 4; ++texel) {
+            const uint8* out = bytes.Data() + texel * 8;
+            const uint16 r = static_cast<uint16>(out[0] | (out[1] << 8));
+            const uint16 expected = static_cast<uint16>(texel * 2 | ((texel * 2 + 1) << 8));
+            CHECK(r == expected && out[2] == 0 && out[3] == 0 && out[4] == 0 && out[5] == 0 &&
+                  static_cast<uint16>(out[6] | (out[7] << 8)) == HalfOne);
+        }
+    }
+
+    // 크기가 다른 2DArray 원소: 최대 X·Y로, 같은 크기 원소는 byte 그대로.
+    const ObjectHandle wide =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 4, 2, 1, 60, true);
+    {
+        const ObjectHandle list[] = {gray, wide};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::G8 && made->source.sizeX == 4 &&
+              made->source.sizeY == 2 && made->srgb == 1 && bytes.Size() == 4 * 2 * 2);
+        for (uint32 index = 0; index < 8; ++index) {
+            CHECK(bytes[8 + index] == static_cast<uint8>(60 + index));
+        }
+    }
+
+    // CubeArray: 형식이 달라도 받고(G8 + RGBA8 → RGBA8), 크기가 다르면 거부한다.
+    const ObjectHandle cubeGray =
+        scene.Element(sink, TypeIdOf<TextureCube>(), TextureSourceFormat::G8, 2, 2, 6, 1, true);
+    const ObjectHandle cubeRgba =
+        scene.Element(sink, TypeIdOf<TextureCube>(), TextureSourceFormat::RGBA8, 2, 2, 6, 2, true);
+    const ObjectHandle cubeWide =
+        scene.Element(sink, TypeIdOf<TextureCube>(), TextureSourceFormat::G8, 4, 4, 6, 3, true);
+    {
+        const ObjectHandle list[] = {cubeGray, cubeRgba};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, true, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA8 && made->source.numSlices == 12 &&
+              bytes.Size() == 2 * 2 * 4 * 12);
+        const ObjectHandle bad = scene.Make(TypeIdOf<TextureCubeArray>());
+        const ObjectHandle mixed[] = {cubeGray, cubeWide};
+        REQUIRE(scene.SetList(bad, true, mixed));
+        sink.failCode = AssetDiagnosticCode::None;
+        CHECK(scene.Rebuild(bad, SourceTextures, sink).Error() == ErrorCode::InvalidArgument &&
+              sink.failCode == AssetDiagnosticCode::InvalidSetting && sink.failDetail == 1);
+    }
 }
 
 // Propagate: 바뀐 원소를 가리키는 배열만 다시 복사하고(대입 필드 없이), 가리키지 않으면 그대로다.
