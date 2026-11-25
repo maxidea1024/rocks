@@ -5,8 +5,11 @@
 #include <Core/Containers/Span.h>
 #include <Core/Text/StringView.h>
 #include <MaterialSchema/MaterialContextFeature.h>
+#include <MaterialSchema/MaterialGraphKind.h>
+#include <MaterialSchema/MaterialPinDefinition.h>
 #include <MaterialSchema/MaterialPinType.h>
 #include <MaterialSchema/MaterialPrerequisite.h>
+#include <MaterialSchema/MaterialStageMask.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
 namespace rocks {
@@ -33,119 +36,11 @@ struct TypeSchema;
 //           .Menu("Multiply", "Math", "*", "Multiplies two values component-wise.");
 namespace rocks::material {
 
-// 핀 기본값의 최대 성분 수다(float4).
-inline constexpr uint8 MaxMaterialPinDefaultComponents = 4;
-
-// 입력 핀을 연결하지 않고 사용자 값도 없을 때의 값이다. componentCount 0은 기본값 없음이다(연결이
-// 없으면 필수 입력 오류 또는 노드가 정한 동작).
-struct MaterialPinDefault {
-    float values[MaxMaterialPinDefaultComponents] = {0.0f, 0.0f, 0.0f, 0.0f};
-    uint8 componentCount = 0;
-
-    static constexpr MaterialPinDefault Scalar(float x) noexcept {
-        return MaterialPinDefault{{x, 0.0f, 0.0f, 0.0f}, 1};
-    }
-
-    static constexpr MaterialPinDefault Vector2(float x, float y) noexcept {
-        return MaterialPinDefault{{x, y, 0.0f, 0.0f}, 2};
-    }
-
-    static constexpr MaterialPinDefault Vector3(float x, float y, float z) noexcept {
-        return MaterialPinDefault{{x, y, z, 0.0f}, 3};
-    }
-
-    static constexpr MaterialPinDefault Vector4(float x, float y, float z, float w) noexcept {
-        return MaterialPinDefault{{x, y, z, w}, 4};
-    }
-};
-
-// 입력 핀 표지 비트다.
-enum class MaterialPinFlags : uint8 {
-    None = 0,
-    // 연결이 없으면 번역 오류다(기본값이 있어도 쓰지 않는다).
-    Required = 1u << 0,
-    // static 값만 받는다(V7).
-    StaticOnly = 1u << 1,
-    // 고급 표시 묶음이다(NodeGraph PinDescriptor::advanced).
-    Advanced = 1u << 2,
-    // 사용자 기본값 편집을 숨긴다(NodeGraph PinValuePolicy::Hidden).
-    HideValue = 1u << 3
-};
-
-constexpr MaterialPinFlags operator|(MaterialPinFlags left, MaterialPinFlags right) noexcept {
-    return static_cast<MaterialPinFlags>(static_cast<uint8>(left) | static_cast<uint8>(right));
-}
-
-constexpr bool HasPinFlag(MaterialPinFlags set, MaterialPinFlags flag) noexcept {
-    return (static_cast<uint8>(set) & static_cast<uint8>(flag)) == static_cast<uint8>(flag);
-}
-
-// 정의된 핀 표지 비트 전체다.
-inline constexpr uint8 MaterialPinFlagMask = (1u << 4) - 1;
-
-// 핀 하나의 정의다.
-struct MaterialPinDefinition {
-    // 안정 키다(PinKey 원문). 19.5절: UE 입력 이름을 기본으로 쓴다.
-    StringView key;
-    nodegraph::PinDirection direction = nodegraph::PinDirection::Input;
-    MaterialPinType type = MaterialPinType::Numeric;
-    // 영어 표시 이름이다.
-    StringView displayName;
-    MaterialPinDefault defaultValue;
-    MaterialPinFlags flags = MaterialPinFlags::None;
-};
-
-constexpr MaterialPinDefinition
-MaterialInput(StringView key, MaterialPinType type, StringView displayName,
-              MaterialPinDefault defaultValue = {},
-              MaterialPinFlags flags = MaterialPinFlags::None) noexcept {
-    MaterialPinDefinition pin;
-    pin.key = key;
-    pin.direction = nodegraph::PinDirection::Input;
-    pin.type = type;
-    pin.displayName = displayName;
-    pin.defaultValue = defaultValue;
-    pin.flags = flags;
-    return pin;
-}
-
-constexpr MaterialPinDefinition MaterialOutput(StringView key, MaterialPinType type,
-                                               StringView displayName) noexcept {
-    MaterialPinDefinition pin;
-    pin.key = key;
-    pin.direction = nodegraph::PinDirection::Output;
-    pin.type = type;
-    pin.displayName = displayName;
-    return pin;
-}
-
 // 비활성 노드의 통과 쌍 정의다(NodeGraph PassThroughPair의 정적 형식 — 키는 등록 때 intern한다).
 struct MaterialPassThrough {
     StringView input;
     StringView output;
 };
-
-// 노드가 들어갈 수 있는 그래프 종류다(UE UMaterialExpression::IsAllowedIn 대응).
-enum class MaterialGraphKind : uint8 {
-    Material = 0,
-    Function = 1
-};
-
-using MaterialGraphKindMask = uint8;
-
-constexpr MaterialGraphKindMask ToMask(MaterialGraphKind kind) noexcept {
-    return static_cast<MaterialGraphKindMask>(1u << static_cast<uint32>(kind));
-}
-
-inline constexpr MaterialGraphKindMask AllMaterialGraphKinds =
-    ToMask(MaterialGraphKind::Material) | ToMask(MaterialGraphKind::Function);
-
-// 노드 값이 계산될 수 있는 셰이더 단계다(V4). 비트 0 정점, 비트 1 픽셀.
-using MaterialStageMask = uint8;
-
-inline constexpr MaterialStageMask MaterialVertexStage = 1u << 0;
-inline constexpr MaterialStageMask MaterialPixelStage = 1u << 1;
-inline constexpr MaterialStageMask AllMaterialStages = MaterialVertexStage | MaterialPixelStage;
 
 // 노드 표지 비트다.
 enum class MaterialNodeFlags : uint8 {

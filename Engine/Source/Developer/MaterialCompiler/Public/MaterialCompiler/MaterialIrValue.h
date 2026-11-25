@@ -1,10 +1,9 @@
 #pragma once
 
-#include <Base/Guid.h>
 #include <Base/NumericLimits.h>
 #include <Base/Types.h>
-#include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialIrOp.h>
+#include <MaterialCompiler/MaterialIrSite.h>
 #include <MaterialCompiler/MaterialIrType.h>
 
 // 머티리얼 IR 값 하나다(Docs/Design/MaterialSystem 6.2·6.8절).
@@ -30,13 +29,6 @@ enum class IrFrequency : uint8 {
     Instance = 3,
     Vertex = 4,
     Pixel = 5
-};
-
-// 값을 처음 낸 그래프 위치다(진단·원문 위치 지도 — 7.6절). pin은 출력 핀 키의 정적 원문이다.
-// hash-consing 키에 넣지 않는다.
-struct IrSite {
-    Guid node;
-    StringView pin;
 };
 
 struct IrValue {

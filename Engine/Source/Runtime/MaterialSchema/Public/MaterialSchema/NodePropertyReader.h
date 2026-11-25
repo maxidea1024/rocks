@@ -7,9 +7,9 @@
 #include <Core/Optional.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <MaterialSchema/NodePropertyList.h>
 #include <Meta/TypeSchema.h>
 #include <Serialization/Record.h>
-#include <Serialization/RecordList.h>
 
 // 노드 속성 Record의 필드 읽기다(Docs/Design/MaterialSystem 19.13.3절, NodeGraph 6.2절). 동적 핀
 // 함수(nodegraph::DynamicPinsFn)는 문서 view와 NamePool만 받으므로 객체 Registry 없이 속성 바이트를
@@ -30,8 +30,6 @@
 //       auto name = element.Value().ReadText("inputName");
 //   }
 namespace rocks::material {
-
-class NodePropertyList;
 
 class ROCKS_MATERIALSCHEMA_API NodePropertyReader {
 public:
@@ -83,31 +81,6 @@ private:
     Allocator* allocator_;
     const TypeSchema* schema_;
     Optional<RecordReader> record_;
-};
-
-// struct 배열 필드의 원소들이다(NodePropertyReader::OpenStructArray).
-class ROCKS_MATERIALSCHEMA_API NodePropertyList {
-public:
-    NodePropertyList(NodePropertyList&&) noexcept = default;
-    NodePropertyList& operator=(NodePropertyList&&) noexcept = default;
-    NodePropertyList(const NodePropertyList&) = delete;
-    NodePropertyList& operator=(const NodePropertyList&) = delete;
-
-    usize Count() const noexcept;
-
-    // 원소 index를 읽는 reader다. 오류: index가 범위 밖이면 InvalidArgument, 원소 Record 오류.
-    Result<NodePropertyReader> Element(usize index) noexcept;
-
-private:
-    friend class NodePropertyReader;
-
-    NodePropertyList(Allocator& allocator, const TypeSchema& element) noexcept
-        : allocator_(&allocator), element_(&element) {
-    }
-
-    Allocator* allocator_;
-    const TypeSchema* element_;
-    Optional<RecordListReader> list_;
 };
 
 } // namespace rocks::material
