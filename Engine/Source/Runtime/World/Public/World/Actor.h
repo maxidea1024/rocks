@@ -10,6 +10,10 @@
 
 namespace rocks {
 
+namespace detail {
+struct LevelGraphTestAccess;
+}
+
 class SceneComponent;
 
 // World에 배치되는 게임플레이 객체의 기반이다. World가 생성하고 Level이 소유하며, Actor는 자기
@@ -214,6 +218,8 @@ protected:
 
 private:
     friend class World;
+    // 편입 시험이 장부 밖 그래프를 손상시킨다(Private/LevelGraphTestAccess.h — Tests/ 전용).
+    friend struct detail::LevelGraphTestAccess;
 
 protected:
     // --- 프레임워크 내부 hook(Docs/Design/EngineRuntime 17.8절 ERD19) ---

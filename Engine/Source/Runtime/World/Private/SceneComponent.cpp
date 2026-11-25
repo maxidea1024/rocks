@@ -12,9 +12,6 @@ namespace rocks {
 
 namespace {
 
-// 부모 사슬 탐색 상한이다. 정상 계층은 이보다 훨씬 얕다(순환 검사의 안전장치).
-constexpr uint32 MaxHierarchyDepth = 4096;
-
 bool HasZeroComponent(const Vec3d& scale) noexcept {
     return scale.x == 0.0 || scale.y == 0.0 || scale.z == 0.0;
 }
