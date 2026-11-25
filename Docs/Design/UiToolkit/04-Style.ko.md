@@ -24,7 +24,7 @@
 
 - **테마 색:** 기본값은 `Runtime/SlateCore/Private/Styling/StyleColors.cpp:82-114`에 있다(예: 배경 `#151515`, 패널 `#242424`, 주색 `#0070E0`, 전경 `#C0C0C0`). 값 표는 sRGB hex로 기록하고, UE와 같이 linear로 변환하여 사용한다(`StyleColors.h:25`). 엔진 기본 테마 파일(UE `Engine/Content/Slate/Themes/Dark.json`)에 해당하는 Rocks 기본 테마 파일을 둔다.
 - **글꼴:** UE 기본 조합 글꼴은 Roboto 계열(Regular·Italic·Bold·BoldItalic·BoldCondensed·BoldCondensedItalic·Black·BlackItalic·Medium·Light, VeryLight는 Light 파일), Mono는 DroidSansMono, fallback은 DroidSansFallback이다. 보조 typeface는 박스 그리기 등 문자 범위에 DroidSansFallback, 아랍어에 NotoNaskhArabicUI를 둔다(`SlateCore/Private/Fonts/LegacySlateFontInfoCache.cpp:111-148`). 에디터에서만 일본어(GenEiGothicPro, `ja`), 중국어 간체(DroidSansFallback, `zh-Hans`), 한국어(NanumGothic 계열, `ko`), Devanagari·Gurmukhi(Noto) 보조 typeface를 더한다(152–260행). 즉 UE 게임 runtime의 한글은 fallback인 DroidSansFallback이 그린다. 모두 공개 라이선스 글꼴이므로 원 배포처에서 받아 같은 구성으로 둔다. Rocks 게임 runtime에 한국어 보조 typeface를 둘지는 이 기본값 구현 후 별도로 정한다.
-- **아이콘:** Epic 저작 자원이므로 포함하지 않는다. 클론에는 `Engine/Content`가 없어, 원본을 확인하려면 의존성을 내려받아야 한다. 공개 라이선스 아이콘 세트로 시작하고(UD10), style 키 이름과 크기 격자(16·20 px 등)는 UE 구성과 1:1로 맞춘다.
+- **아이콘:** Epic 저작 자원이므로 포함하지 않는다. 클론에는 `Engine/Content`가 없어, 원본을 확인하려면 의존성을 내려받아야 한다. 아이콘은 Rocks가 SVG로 직접 그리고(UD10 개정 2026-11-26, 17장), 묶음과 크기 격자(16·20 px 등)는 UE 구성을 따른다.
 - **검증:** 기본 값 표의 Rocks 값과 UE 출처 행을 시험으로 대조한다(UV8). 같은 구성 화면을 UE와 나란히 놓은 비교 캡처를 기록한다.
 
 이후 Rocks 고유 룩으로의 변경은 이 기본값이 구현·검증된 뒤 별도 개정으로 다룬다.

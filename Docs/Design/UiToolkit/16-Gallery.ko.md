@@ -28,10 +28,12 @@ UiDemo가 보여 주는 UI 갤러리의 페이지 구성이다(9.1절 UW4의 상
 | Layout | (없음 — Rocks 추가) | 16.6절 | UW4a·UW4c |
 | Behavior | (없음 — Rocks 추가) | Element 공통 기능과 앱 기능(16.9.2): 렌더 변환·불투명도·자르기·가시성 5종·전경색 상속·커서 11종·초점 이동 규칙·접근성 트리·타이머·속성 바인딩 | UW4a(초점 표시가 필요한 행은 UW4b) |
 | Effects | (없음 — Rocks 추가) | 표면·캐시·흐림: CachePanel(캐시 통계 레이블), RetainerBox(phase·tint), BackgroundBlur(강도·반경·저품질 대체), PostBufferUpdate(채널), Viewport(절차 생성 장면 텍스처) | UW4a |
+| Icons | "Icons" | 등록한 SVG 아이콘 전부를 16·20·32 px로 키 문자열과 함께 보이고 tint(Foreground·Primary·Warning)를 바꿔 본다(17.4절). UE 탭은 엔진 아이콘 폴더 PNG 목록이지만 Rocks는 자체 제작 SVG 세트를 보인다 | UW4s |
+| Drag & Drop | (없음 — Rocks 추가) | 드래그·드롭 틀(9.1절 UW4g)의 견본: 목록 행 → drop 칸(형식이 맞으면 받음·안 맞으면 거부 표시), 같은 목록 안 순서 바꾸기(끼워 넣을 자리 표시), 커서 옆 장식(아이콘 + "Move"/"Copy" 문구, Ctrl로 복사 전환), 문턱(5 px) 전 놓기 = 클릭, Escape 취소, 창 밖 놓기 취소, 받은 결과 레이블 | UW4g |
 | Editor Parts | (없음 — Rocks 추가) | 16.7절 | UW4d1–UW4d3, 그 뒤 |
 | Game UI | (없음 — Rocks 추가) | Widget 층 전용 부품과 UiScreens(16.10절): 화면 스택·대기열·전환·탭 목록, 입력 장치별 보이기, safe zone, 캐러셀 점 막대, 동적 항목 상자(원형 배치), UserWidget 애니메이션, MVVM 바인딩. 에디터 우선이라 맨 뒤에 두되 무엇이 있는지 알 수 있게 한다. 월드 위젯은 3D 장면이 필요해 갤러리에서 빼고 WorldWidgetSelfTest를 가리킨다 | UW4a2 |
 
-UE "Icons" 탭(엔진 아이콘 폴더 PNG 목록)은 두지 않는다. SVG·아이콘 이름표가 없다(15장). SVG 단계가 끝나면 이 탭을 다시 넣는다. 탭 역할은 UE 갤러리처럼 Panel이다.
+Icons 탭은 SVG 경로(17장, UW4s)가 생기며 넣는다. 탭 역할은 UE 갤러리처럼 Panel이다.
 
 ### 16.3 Text
 
@@ -158,6 +160,13 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 #### 16.9.2 공통 기능(Behavior 탭)
 
 비활성(행 체크 상자 — Widgets), 렌더 변환(회전·배율·기울기·pivot과 변환 뒤 hit — 각도 슬라이더로 돌린 버튼을 계속 누를 수 있음), 불투명도, 자르기, 가시성 5종(자리 차지·hit 차이), 전경색 상속(올린 버튼·흐린 전경), 커서 11종, 초점 이동 규칙(Wrap·Stop·Explicit — 초점 표시 UW4b 뒤), 접근성 트리 표, 타이머 카운터, 속성 바인딩(Bind로 슬라이더 → 색·진행 값), volatile·캐시(Effects), 테마 전환(Colors), 명령(Editor Parts), 오른쪽에서 왼쪽 흐름(Layout·Text), 배율(Layout), 터치 팬·게임패드(설명과 사람 확인 목록).
+
+### 16.9a 빠진 행(UW4b 리뷰 2026-11-26)
+
+16.4·16.6절 표에 "있음"인데 아직 갤러리에 없는 행이다. UW4b 2차(콤보·숫자 입력·tooltip·토글·라디오)를 넣을 때 함께 넣는다.
+- Widgets: 선형 throbber(UE SThrobber — 조각 이미지는 UW4s 뒤), Combo Button(`MenuAnchor`), No Border Button, Button Click Methods(누름·뗌·정확한 클릭), 세로·단계 슬라이더, 진행 방향 7종·Mask 채움, 값 레이블(슬라이더·원형 슬라이더·타임라인·체크 상자 — 16.1절), 타임라인 눈금·마커 설정.
+- Effects: PostBufferUpdate 행, CachePanel 캐시 통계 레이블, RetainerBox phase.
+- Layout: SizeBox(최소·최대·비율), Frame(SBorder), SlotPresenter, StackPanel 오른쪽에서 왼쪽, 도킹 역할(Panel·Document)과 배치 JSON 견본.
 
 ### 16.10 막힌 것과 푸는 방법
 
