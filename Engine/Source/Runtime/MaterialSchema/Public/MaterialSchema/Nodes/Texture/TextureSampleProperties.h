@@ -28,7 +28,7 @@ struct TextureSampleProperties {
     ROCKS_PROPERTY() bool automaticViewMipBias = true;
     ROCKS_PROPERTY() ParameterChannelNames channelNames;
     ROCKS_PROPERTY() uint8 constCoordinate = 0;
-    ROCKS_PROPERTY() int32 constMipValue {};
+    ROCKS_PROPERTY() int32 constMipValue = -1;
 };
 
 } // namespace rocks::material

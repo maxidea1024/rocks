@@ -2,10 +2,6 @@
 
 #include <MaterialSchema/Nodes/Noise/NoiseProperties.generated.h>
 #include <MaterialSchema/Nodes/Noise/NoiseProperties.h>
-#include <MaterialSchema/Nodes/Noise/SobolProperties.generated.h>
-#include <MaterialSchema/Nodes/Noise/SobolProperties.h>
-#include <MaterialSchema/Nodes/Noise/TemporalSobolProperties.generated.h>
-#include <MaterialSchema/Nodes/Noise/TemporalSobolProperties.h>
 #include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.generated.h>
 #include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
@@ -38,11 +34,15 @@ constexpr MaterialPinDefinition ScalarBlueNoisePins[] = {
 constexpr MaterialPinDefinition SobolPins[] = {
     MaterialInput("Cell", MaterialPinType::Numeric, "Cell", {}, MaterialPinFlags::HideValue),
     MaterialInput("Index", MaterialPinType::Numeric, "Index", MaterialPinDefault::Scalar(0.0f)),
+    MaterialInput("Seed", MaterialPinType::Numeric, "Seed",
+                  MaterialPinDefault::Vector2(0.0f, 0.0f)),
     MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
 constexpr MaterialPinDefinition TemporalSobolPins[] = {
     MaterialInput("Index", MaterialPinType::Numeric, "Index", MaterialPinDefault::Scalar(0.0f)),
+    MaterialInput("Seed", MaterialPinType::Numeric, "Seed",
+                  MaterialPinDefault::Vector2(0.0f, 0.0f)),
     MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
@@ -59,12 +59,8 @@ constexpr MaterialNodeDefinition NoiseDefinitions[] = {
         .Pins(ScalarBlueNoisePins)
         .Menu("Scalar Blue Noise", "Noise", "Noise", "Scalar Blue Noise.")
         .Features(ToMask(MaterialContextFeature::View)),
-    MaterialNode("Material.Sobol")
-        .Properties(&GeneratedType<SobolProperties>::Schema)
-        .Pins(SobolPins)
-        .Menu("Sobol", "Noise", "Utility", "Sobol."),
+    MaterialNode("Material.Sobol").Pins(SobolPins).Menu("Sobol", "Noise", "Utility", "Sobol."),
     MaterialNode("Material.TemporalSobol")
-        .Properties(&GeneratedType<TemporalSobolProperties>::Schema)
         .Pins(TemporalSobolPins)
         .Menu("Temporal Sobol", "Noise", "Utility", "Temporal Sobol.")
         .Features(ToMask(MaterialContextFeature::View)),

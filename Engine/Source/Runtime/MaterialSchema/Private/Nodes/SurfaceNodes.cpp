@@ -20,6 +20,8 @@
 #include <MaterialSchema/Nodes/Surface/SurfaceToonProperties.h>
 #include <MaterialSchema/Nodes/Surface/SurfaceVerticalLayerProperties.generated.h>
 #include <MaterialSchema/Nodes/Surface/SurfaceVerticalLayerProperties.h>
+#include <MaterialSchema/Nodes/Surface/SurfaceVolumetricFogCloudProperties.generated.h>
+#include <MaterialSchema/Nodes/Surface/SurfaceVolumetricFogCloudProperties.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
 
 // Surface 범주 노드 정의다(Docs/Design/MaterialSystem 19.6·19.13절). 핀 키와 순서는
@@ -57,9 +59,9 @@ constexpr MaterialPinDefinition SurfaceSlabPins[] = {
                   MaterialPinFlags::HideValue),
     MaterialInput("FuzzColor", MaterialPinType::Float3, "Fuzz Color", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("GlintValue", MaterialPinType::Numeric, "GlintValue", {},
+    MaterialInput("GlintValue", MaterialPinType::Numeric, "Glint Density", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("GlintUV", MaterialPinType::Float2, "GlintUV", {}, MaterialPinFlags::HideValue),
+    MaterialInput("GlintUV", MaterialPinType::Float2, "Glint UVs", {}, MaterialPinFlags::HideValue),
     MaterialOutput("Result", MaterialPinType::Surface, ""),
 };
 
@@ -214,11 +216,11 @@ constexpr MaterialPinDefinition SurfaceFromShadingModelPins[] = {
                   MaterialPinFlags::HideValue),
     MaterialInput("Normal", MaterialPinType::Float3, "Normal", {}, MaterialPinFlags::HideValue),
     MaterialInput("Tangent", MaterialPinType::Float3, "Tangent", {}, MaterialPinFlags::HideValue),
-    MaterialInput("SubSurfaceColor", MaterialPinType::Float3, "SubSurfaceColor", {},
+    MaterialInput("SubSurfaceColor", MaterialPinType::Float3, "Subsurface Color", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("ClearCoat", MaterialPinType::Float1, "ClearCoat", {},
+    MaterialInput("ClearCoat", MaterialPinType::Float1, "Clear Coat", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("ClearCoatRoughness", MaterialPinType::Float1, "ClearCoatRoughness", {},
+    MaterialInput("ClearCoatRoughness", MaterialPinType::Float1, "Clear Coat Roughness", {},
                   MaterialPinFlags::HideValue),
     MaterialInput("Opacity", MaterialPinType::Float1, "Opacity", {}, MaterialPinFlags::HideValue),
     MaterialInput("TransmittanceColor", MaterialPinType::Float3,
@@ -231,14 +233,14 @@ constexpr MaterialPinDefinition SurfaceFromShadingModelPins[] = {
                   MaterialPinFlags::HideValue),
     MaterialInput("ColorScaleBehindWater", MaterialPinType::Float3, "Color Scale BehindWater", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("ClearCoatNormal", MaterialPinType::Float3, "ClearCoatNormal", {},
+    MaterialInput("ClearCoatNormal", MaterialPinType::Float3, "Clear Coat Bottom Normal", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("CustomTangent", MaterialPinType::Float3, "CustomTangent", {},
+    MaterialInput("CustomTangent", MaterialPinType::Float3, "Custom Tangent", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("ShadingModel", MaterialPinType::ShadingModel,
+    MaterialInput("ThinTranslucentSurfaceCoverage", MaterialPinType::Float1,
                   "Thin Translucent Surface Coverage", {}, MaterialPinFlags::HideValue),
-    MaterialInput("ThinTranslucentSurfaceCoverage", MaterialPinType::Float1, "Single Shading Model",
-                  {}, MaterialPinFlags::HideValue),
+    MaterialInput("ShadingModel", MaterialPinType::ShadingModel, "Single Shading Model", {},
+                  MaterialPinFlags::HideValue),
     MaterialOutput("Result", MaterialPinType::Surface, ""),
 };
 
@@ -386,6 +388,7 @@ constexpr MaterialNodeDefinition SurfaceDefinitions[] = {
         .Menu("Surface Single Layer Water", "Surface", "SubstrateSingleLayerWaterBSDF",
               "Surface Single Layer Water."),
     MaterialNode("Material.SurfaceVolumetricFogCloud")
+        .Properties(&GeneratedType<SurfaceVolumetricFogCloudProperties>::Schema)
         .Pins(SurfaceVolumetricFogCloudPins)
         .Menu("Surface Volumetric Fog Cloud", "Surface", "SubstrateVolumetricFogCloudBSDF",
               "Surface Volumetric Fog Cloud."),

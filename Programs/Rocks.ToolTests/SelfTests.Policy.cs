@@ -182,11 +182,13 @@ internal static partial class SelfTests
                 "  { \"unrealClass\": \"UMaterialExpressionFontSample\", \"node\": \"Material.FontSample\", \"status\": \"PrerequisiteMissing\",",
                 "    \"stage\": \"MS2c\", \"category\": \"Font\", \"supply\": \"\", \"source\": \"\", \"prerequisite\": \"MPQ-Font\", \"propertyPrerequisites\": [] },",
                 "  { \"unrealClass\": \"UMaterialExpressionMissingRow\", \"node\": \"Material.MissingRow\", \"status\": \"Implemented\", \"stage\": \"MS2a\",",
+                "    \"category\": \"Math\", \"supply\": \"\", \"source\": \"\", \"prerequisite\": \"\", \"propertyPrerequisites\": [] },",
+                "  { \"unrealClass\": \"UMaterialExpressionAdd\", \"node\": \"Material.AddAgain\", \"status\": \"Implemented\", \"stage\": \"MS2a\",",
                 "    \"category\": \"Math\", \"supply\": \"\", \"source\": \"\", \"prerequisite\": \"\", \"propertyPrerequisites\": [] }",
                 "] }") + "\n");
             temporary.Write("Docs/Design/MaterialSystem/19-NodeCatalog/README.ko.md", string.Join('\n',
                 "| ID | 없는 것 | 막는 것 | 생기는 곳 |", "|---|---|---|---|", "| `MPQ-Font` | 글꼴 | 노드 | 글꼴 |",
-                "| `MPQ-Unused` | 없음 | 없음 | 없음 |") + "\n");
+                "| `MPQ-Unused` | 없음 | 없음 | 없음 |", "| `MPQ-Tier2` | 등급 | 노드 | 등급 |") + "\n");
             temporary.Write("Docs/Design/MaterialSystem/19-NodeCatalog/NodeTableCore.ko.md", string.Join('\n',
                 "| UE 5.8 | Rocks 노드 | 상태 | 단계 | 공급·선행 | 비고 |", "|---|---|---|---|---|---|",
                 "| `UMaterialExpressionAdd` | `Material.Add` | 구현 | MS2a | — |  |",
@@ -197,7 +199,8 @@ internal static partial class SelfTests
                 "| `UMaterialExpressionFontSample` | `Material.FontSample` | TODO | MS2c | `MPQ-Font` |  |",
                 "| `UMaterialExpressionAdd` | `Material.Add` | 구현 | MS2a | — |  |") + "\n");
             temporary.Write("Engine/Source/Runtime/MaterialSchema/Private/Notes.cpp", string.Join('\n',
-                "// TODO(MPQ-Font): fine", "// TODO: plain note", "// TODO(MPQ-Nothing): unknown id", "int value = 0; // TODO(fix)") + "\n");
+                "// TODO(MPQ-Font): fine", "// TODO: plain note", "// TODO(MPQ-Nothing): unknown id", "int value = 0; // TODO(fix)",
+                "// TODO (MPQ-Font): spaced", "// TODO 노드는 산문이다", "// TODO(MPQ-Tier2): digits") + "\n");
             temporary.Write("Engine/Source/Runtime/Other/Private/Other.cpp", "// TODO: other modules keep their own style\n");
             var failures = PolicyChecks.MaterialNodeCatalog(temporary.Root);
             var expected = new HashSet<(string, int, string)>
@@ -207,13 +210,18 @@ internal static partial class SelfTests
                 ("Docs/Design/MaterialSystem/19-NodeCatalog/NodeTableCore.ko.md", 5, "material-catalog"),
                 ("Docs/Design/MaterialSystem/19-NodeCatalog/NodeTableRendering.ko.md", 4, "material-catalog"),
                 ("Engine/Source/Runtime/MaterialSchema/MaterialNodeCatalog.json", 1, "material-catalog"),
-                // 표에 없는 ID, 형식이 다른 TODO(, 쓰이지 않는 표의 ID. 괄호 없는 TODO: 문장은 대상이 아니다.
+                // 형식이 다른 TODO:·TODO(·TODO (, 표에 없는 ID, 쓰이지 않는 표의 ID. 뒤에 낱말이 오는 TODO(산문)와 숫자가 든 ID는 통과한다.
+                ("Engine/Source/Runtime/MaterialSchema/Private/Notes.cpp", 2, "material-todo"),
                 ("Engine/Source/Runtime/MaterialSchema/Private/Notes.cpp", 3, "material-todo"),
                 ("Engine/Source/Runtime/MaterialSchema/Private/Notes.cpp", 4, "material-todo"),
+                ("Engine/Source/Runtime/MaterialSchema/Private/Notes.cpp", 5, "material-todo"),
                 ("Docs/Design/MaterialSystem/19-NodeCatalog/README.ko.md", 1, "material-prerequisite"),
             };
             var actual = failures.Select(failure => (failure.Path, failure.Line, failure.Rule)).ToHashSet();
             Verify.That(actual.SetEquals(expected), "material catalog failures: " + string.Join("; ", failures));
+            // 목록 파일의 같은 UE 클래스 두 행(줄 1에 함께 묶이므로 문구로 본다).
+            Verify.That(failures.Any(failure => failure.Message.Contains("more than one catalog entry", StringComparison.Ordinal)),
+                "duplicate catalog class: " + string.Join("; ", failures));
         });
         suite.Add("Policy.NodeGraphBoundary", () =>
         {

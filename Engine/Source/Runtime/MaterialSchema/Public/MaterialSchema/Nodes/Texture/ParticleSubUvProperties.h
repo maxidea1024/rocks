@@ -6,7 +6,7 @@
 #include <MaterialSchema/Nodes/Texture/TextureNodeEnums.h>
 #include <Meta/Annotations.h>
 
-// Particle Sub Uv 노드의 속성이다(Docs/Design/MaterialSystem 19.6·19.13절, UE
+// Particle SubUV 노드의 속성이다(Docs/Design/MaterialSystem 19.6·19.13절, UE
 // UMaterialExpressionParticleSubUV — RE/Public/Materials/MaterialExpressionParticleSubUV.h).
 // 이름·기본값은 UE와 같다(b 접두를 떼고 camelCase).
 namespace rocks::material {
@@ -28,7 +28,7 @@ struct ParticleSubUvProperties {
     ROCKS_PROPERTY() bool automaticViewMipBias = true;
     ROCKS_PROPERTY() ParameterChannelNames channelNames;
     ROCKS_PROPERTY() uint8 constCoordinate = 0;
-    ROCKS_PROPERTY() int32 constMipValue {};
+    ROCKS_PROPERTY() int32 constMipValue = -1;
     ROCKS_PROPERTY() bool blend = true;
 };
 

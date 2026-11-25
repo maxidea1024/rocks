@@ -24,57 +24,60 @@ constexpr MaterialPinDefinition StaticSwitchPins[] = {
 };
 
 constexpr MaterialPinDefinition QualitySwitchPins[] = {
-    MaterialInput("Default", MaterialPinType::Numeric, "Default", {},
+    MaterialInput("Default", MaterialPinType::Any, "Default", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("Low", MaterialPinType::Numeric, "Low", {}, MaterialPinFlags::HideValue),
-    MaterialInput("High", MaterialPinType::Numeric, "High", {}, MaterialPinFlags::HideValue),
-    MaterialInput("Medium", MaterialPinType::Numeric, "Medium", {}, MaterialPinFlags::HideValue),
-    MaterialInput("Epic", MaterialPinType::Numeric, "Epic", {}, MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialInput("Low", MaterialPinType::Any, "Low", {}, MaterialPinFlags::HideValue),
+    MaterialInput("High", MaterialPinType::Any, "High", {}, MaterialPinFlags::HideValue),
+    MaterialInput("Medium", MaterialPinType::Any, "Medium", {}, MaterialPinFlags::HideValue),
+    MaterialInput("Epic", MaterialPinType::Any, "Epic", {}, MaterialPinFlags::HideValue),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition RenderPathSwitchPins[] = {
-    MaterialInput("Default", MaterialPinType::Numeric, "Default", {},
+    MaterialInput("Default", MaterialPinType::Any, "Default", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("Deferred", MaterialPinType::Numeric, "Deferred", {},
-                  MaterialPinFlags::HideValue),
-    MaterialInput("Forward", MaterialPinType::Numeric, "Forward+", {}, MaterialPinFlags::HideValue),
-    MaterialInput("Mobile", MaterialPinType::Numeric, "Mobile", {}, MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialInput("Deferred", MaterialPinType::Any, "Deferred", {}, MaterialPinFlags::HideValue),
+    MaterialInput("Forward", MaterialPinType::Any, "Forward+", {}, MaterialPinFlags::HideValue),
+    MaterialInput("Mobile", MaterialPinType::Any, "Mobile", {}, MaterialPinFlags::HideValue),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition CapabilityTierSwitchPins[] = {
-    MaterialInput("Default", MaterialPinType::Numeric, "Default", {},
+    MaterialInput("Default", MaterialPinType::Any, "Default", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("ES3_1", MaterialPinType::Numeric, "Mobile", {}, MaterialPinFlags::HideValue),
-    MaterialInput("SM5", MaterialPinType::Numeric, "SM5", {}, MaterialPinFlags::HideValue),
-    MaterialInput("SM6", MaterialPinType::Numeric, "SM6", {}, MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialInput("ES3_1", MaterialPinType::Any, "Mobile", {}, MaterialPinFlags::HideValue),
+    MaterialInput("SM5", MaterialPinType::Any, "SM5", {}, MaterialPinFlags::HideValue),
+    MaterialInput("SM6", MaterialPinType::Any, "SM6", {}, MaterialPinFlags::HideValue),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition StageSwitchPins[] = {
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialInput("PixelShader", MaterialPinType::Numeric, "PixelShader", {},
+                  MaterialPinFlags::Required | MaterialPinFlags::HideValue),
+    MaterialInput("VertexShader", MaterialPinType::Numeric, "VertexShader", {},
+                  MaterialPinFlags::Required | MaterialPinFlags::HideValue),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition FormatFactSwitchPins[] = {
-    MaterialInput("InputTrue", MaterialPinType::Numeric, "True", {}, MaterialPinFlags::HideValue),
-    MaterialInput("InputFalse", MaterialPinType::Numeric, "False", {}, MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialInput("InputTrue", MaterialPinType::Any, "True", {}, MaterialPinFlags::HideValue),
+    MaterialInput("InputFalse", MaterialPinType::Any, "False", {}, MaterialPinFlags::HideValue),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition SamplerBudgetSwitchPins[] = {
-    MaterialInput("InputTrue", MaterialPinType::Numeric, "Within platform limit", {},
+    MaterialInput("InputTrue", MaterialPinType::Any, "Within platform limit", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("InputFalse", MaterialPinType::Numeric, "Over platform limit", {},
+    MaterialInput("InputFalse", MaterialPinType::Any, "Over platform limit", {},
                   MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition BindlessFeatureSwitchPins[] = {
     MaterialInput("Default", MaterialPinType::Numeric, "Default", {}, MaterialPinFlags::HideValue),
     MaterialInput("Bindless", MaterialPinType::Numeric, "Bindless", {},
                   MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition PreviousFrameSwitchPins[] = {
@@ -90,7 +93,7 @@ constexpr MaterialPinDefinition ReflectionCaptureSwitchPins[] = {
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialInput("Reflection", MaterialPinType::Numeric, "Reflection", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition ShadowPassSwitchPins[] = {
@@ -98,7 +101,7 @@ constexpr MaterialPinDefinition ShadowPassSwitchPins[] = {
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialInput("Shadow", MaterialPinType::Numeric, "Shadow", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition RayTracingQualitySwitchPins[] = {
@@ -118,16 +121,16 @@ constexpr MaterialPinDefinition PathTracingQualitySwitchPins[] = {
 };
 
 constexpr MaterialPinDefinition PathTracingRayTypeSwitchPins[] = {
-    MaterialInput("Main", MaterialPinType::Numeric, "Main", {},
+    MaterialInput("Main", MaterialPinType::Any, "Main", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("Shadow", MaterialPinType::Numeric, "Shadow", {}, MaterialPinFlags::HideValue),
-    MaterialInput("IndirectDiffuse", MaterialPinType::Numeric, "IndirectDiffuse", {},
+    MaterialInput("Shadow", MaterialPinType::Any, "Shadow", {}, MaterialPinFlags::HideValue),
+    MaterialInput("IndirectDiffuse", MaterialPinType::Any, "IndirectDiffuse", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("IndirectSpecular", MaterialPinType::Numeric, "IndirectSpecular", {},
+    MaterialInput("IndirectSpecular", MaterialPinType::Any, "IndirectSpecular", {},
                   MaterialPinFlags::HideValue),
-    MaterialInput("IndirectVolume", MaterialPinType::Numeric, "IndirectVolume", {},
+    MaterialInput("IndirectVolume", MaterialPinType::Any, "IndirectVolume", {},
                   MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition GlobalIlluminationPassSwitchPins[] = {
@@ -137,7 +140,7 @@ constexpr MaterialPinDefinition GlobalIlluminationPassSwitchPins[] = {
                   MaterialPinFlags::HideValue),
     MaterialInput("DynamicIndirect", MaterialPinType::Numeric, "DynamicIndirect", {},
                   MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition LightBakePassSwitchPins[] = {
@@ -145,15 +148,15 @@ constexpr MaterialPinDefinition LightBakePassSwitchPins[] = {
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialInput("Lightmass", MaterialPinType::Numeric, "LightBake", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition ProxyBakePassSwitchPins[] = {
-    MaterialInput("Realtime", MaterialPinType::Numeric, "Realtime", {},
+    MaterialInput("Realtime", MaterialPinType::Any, "Realtime", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("MaterialProxy", MaterialPinType::Numeric, "MaterialProxy", {},
+    MaterialInput("MaterialProxy", MaterialPinType::Any, "MaterialProxy", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition VirtualizedGeometryPassSwitchPins[] = {
@@ -161,31 +164,31 @@ constexpr MaterialPinDefinition VirtualizedGeometryPassSwitchPins[] = {
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialInput("Nanite", MaterialPinType::Numeric, "VirtualizedGeometry", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition DistanceFieldFeatureSwitchPins[] = {
-    MaterialInput("No", MaterialPinType::Numeric, "No", {},
+    MaterialInput("No", MaterialPinType::Any, "No", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("Yes", MaterialPinType::Numeric, "Yes", {},
+    MaterialInput("Yes", MaterialPinType::Any, "Yes", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition VirtualTextureFeatureSwitchPins[] = {
-    MaterialInput("No", MaterialPinType::Numeric, "No", {},
+    MaterialInput("No", MaterialPinType::Any, "No", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("Yes", MaterialPinType::Numeric, "Yes", {},
+    MaterialInput("Yes", MaterialPinType::Any, "Yes", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition RuntimeVirtualTexturePassSwitchPins[] = {
-    MaterialInput("Default", MaterialPinType::Numeric, "Default", {},
+    MaterialInput("Default", MaterialPinType::Any, "Default", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialInput("VirtualTextureOutput", MaterialPinType::Numeric, "VirtualTextureOutput", {},
+    MaterialInput("VirtualTextureOutput", MaterialPinType::Any, "VirtualTextureOutput", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition MeshPaintTextureSwitchPins[] = {
@@ -193,7 +196,7 @@ constexpr MaterialPinDefinition MeshPaintTextureSwitchPins[] = {
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialInput("MeshPaintTexture", MaterialPinType::Numeric, "MeshPaintTexture", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialNodeDefinition SwitchesDefinitions[] = {
@@ -237,7 +240,7 @@ constexpr MaterialNodeDefinition SwitchesDefinitions[] = {
               "Reflection Capture Switch."),
     MaterialNode("Material.ShadowPassSwitch")
         .Pins(ShadowPassSwitchPins)
-        .Menu("Shadow Pass Switch", "Switches", "Utility ShadowReplace", "Shadow Pass Switch."),
+        .Menu("ShadowPassSwitch", "Switches", "Utility ShadowReplace", "ShadowPassSwitch."),
     MaterialNode("Material.RayTracingQualitySwitch")
         .Pins(RayTracingQualitySwitchPins)
         .Menu("RayTracingQualitySwitchReplace", "Switches", "Utility",

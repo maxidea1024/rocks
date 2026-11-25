@@ -16,16 +16,17 @@ public static partial class PolicyChecks
     [
         "Engine/Source/Runtime/Material",
         "Engine/Source/Runtime/MaterialSchema",
-        "Engine/Source/Runtime/MaterialCompiler",
+        "Engine/Source/Developer/MaterialCompiler",
         "Engine/Source/Runtime/RenderData",
     ];
 
     // 선행 표(19.4.1절)의 행이다: | `MPQ-<이름>` | …
-    private static readonly Regex MaterialPrerequisiteRow = Pattern("^\\|\\s*`(MPQ-[A-Za-z]+)`\\s*\\|");
+    private static readonly Regex MaterialPrerequisiteRow = Pattern("^\\|\\s*`(MPQ-[A-Za-z0-9]+)`\\s*\\|");
 
-    // 코드의 TODO 표기다. 형식은 TODO(MPQ-<이름>) 하나다.
-    private static readonly Regex MaterialTodoAny = Pattern("TODO\\(");
-    private static readonly Regex MaterialTodoValid = Pattern("^TODO\\((MPQ-[A-Za-z]+)\\)");
+    // 코드의 TODO 표기다. 형식은 TODO(MPQ-<이름>) 하나다. 괄호·쌍점이 붙은 표기(TODO(·TODO (·TODO:)는 모두 표기로 보고, 뒤에 낱말이
+    // 오는 것("TODO 노드" — 상태 이름)은 산문이라 보지 않는다.
+    private static readonly Regex MaterialTodoAny = Pattern("TODO(?=\\s*[(:])");
+    private static readonly Regex MaterialTodoValid = Pattern("^TODO\\((MPQ-[A-Za-z0-9]+)\\)");
 
     // 노드 표 행이다(첫 칸이 UE 클래스).
     private static readonly Regex MaterialTableRow = Pattern("^\\|\\s*`(U\\w+)`\\s*\\|");
@@ -44,7 +45,8 @@ public static partial class PolicyChecks
     /// <summary>
     /// 머티리얼 노드 목록 대조다(rule id material-catalog·material-todo·material-prerequisite, Docs/Design/MaterialSystem
     /// 19.2.1·19.2.2절). (1) 19.6절 노드 표의 (UE 클래스, 노드, 상태, 단계, 공급·선행) 열이 목록 파일과 같고 목록의 행이 표에 한 번씩
-    /// 있다(플러그인 표는 클래스·노드, 노드가 아닌 클래스 표는 클래스·상태). (2) 머티리얼 층 모듈 소스(시험 포함)의 <c>TODO(</c> 표기가
+    /// 있다(플러그인 표는 클래스·노드, 노드가 아닌 클래스 표는 클래스·상태). 목록 파일의 UE 클래스는 한 번씩이다. (2) 머티리얼 층 모듈 소스(시험
+    /// 포함)의 <c>TODO(</c>·<c>TODO:</c> 표기가
     /// <c>TODO(MPQ-&lt;이름&gt;)</c>이고 이름이 19.4.1절 표에 있다. (3) 표의 MPQ ID마다 코드 표기나 목록 파일의 선행(노드·속성)이 하나
     /// 이상 있다. 목록 파일이나 문서 폴더가 없으면 검사하지 않는다.
     /// </summary>
@@ -62,7 +64,11 @@ public static partial class PolicyChecks
         var entries = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (JsonElement entry in catalog.RootElement.GetProperty("entries").EnumerateArray())
         {
-            entries[entry.GetProperty("unrealClass").GetString()!] = entry;
+            string unrealClass = entry.GetProperty("unrealClass").GetString()!;
+            if (!entries.TryAdd(unrealClass, entry))
+            {
+                failures.Add(new(MaterialNodeCatalogPath, 1, "material-catalog", $"'{unrealClass}' has more than one catalog entry"));
+            }
         }
 
         // (1) 노드 표.

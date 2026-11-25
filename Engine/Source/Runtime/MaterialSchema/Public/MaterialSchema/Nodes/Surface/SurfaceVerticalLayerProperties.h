@@ -12,7 +12,7 @@ ROCKS_STRUCT()
 struct SurfaceVerticalLayerProperties {
     ROCKS_GENERATED_BODY()
 
-    ROCKS_PROPERTY() bool useParameterBlending {};
+    ROCKS_PROPERTY() bool useParameterBlending = false;
 };
 
 } // namespace rocks::material

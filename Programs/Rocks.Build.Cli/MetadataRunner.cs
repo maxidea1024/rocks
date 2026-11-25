@@ -182,8 +182,9 @@ public static class MetadataRunner
                 arguments.Add("--require-generated-body");
 
                 // 인자는 응답 파일로 넘긴다: 헤더가 많은 모듈은 --input·--include 쌍만으로 Windows 명령줄 상한(32,767자)을 넘는다
-                // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 파일은 한 줄에 인자 하나이고 stage 안에 둔다.
-                string responseFile = Path.Combine(StageRoot(run.Name), "metacompiler.rsp");
+                // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 파일은 한 줄에 인자 하나이고 모듈 출력 루트 밖(stage 바로
+                // 아래)에 둔다 — 출력 루트 안이면 --check의 남는 파일 검사와 게시 대상에 섞인다.
+                string responseFile = Path.Combine(stage, run.Name + ".metacompiler.rsp");
                 File.WriteAllText(responseFile, string.Join('\n', arguments.Skip(1)) + "\n", new System.Text.UTF8Encoding(false));
                 var generated = await ProcessRunner.RunAsync(new("dotnet", [compilerTool, "@" + responseFile], context.RootDirectory,
                     toolchain.Environment, Timeout: TimeSpan.FromMinutes(3)), cancellationToken);

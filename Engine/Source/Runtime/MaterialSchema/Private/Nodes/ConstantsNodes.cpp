@@ -31,24 +31,24 @@ constexpr MaterialPinDefinition ConstantPins[] = {
 
 constexpr MaterialPinDefinition Constant2Pins[] = {
     MaterialOutput("Result", MaterialPinType::Float2, ""),
-    MaterialOutput("R", MaterialPinType::Float1, ""),
-    MaterialOutput("G", MaterialPinType::Float1, ""),
+    MaterialOutput("R", MaterialPinType::Float2, ""),
+    MaterialOutput("G", MaterialPinType::Float2, ""),
 };
 
 constexpr MaterialPinDefinition Constant3Pins[] = {
     MaterialOutput("Result", MaterialPinType::Float3, ""),
-    MaterialOutput("R", MaterialPinType::Float1, ""),
-    MaterialOutput("G", MaterialPinType::Float1, ""),
-    MaterialOutput("B", MaterialPinType::Float1, ""),
+    MaterialOutput("R", MaterialPinType::Float3, ""),
+    MaterialOutput("G", MaterialPinType::Float3, ""),
+    MaterialOutput("B", MaterialPinType::Float3, ""),
 };
 
 constexpr MaterialPinDefinition Constant4Pins[] = {
     MaterialOutput("RGBA", MaterialPinType::Float4, "RGBA"),
-    MaterialOutput("R", MaterialPinType::Float1, "R"),
-    MaterialOutput("G", MaterialPinType::Float1, "G"),
-    MaterialOutput("B", MaterialPinType::Float1, "B"),
-    MaterialOutput("A", MaterialPinType::Float1, "A"),
-    MaterialOutput("RGB", MaterialPinType::Float3, "RGB"),
+    MaterialOutput("R", MaterialPinType::Float4, "R"),
+    MaterialOutput("G", MaterialPinType::Float4, "G"),
+    MaterialOutput("B", MaterialPinType::Float4, "B"),
+    MaterialOutput("A", MaterialPinType::Float4, "A"),
+    MaterialOutput("RGB", MaterialPinType::Float4, "RGB"),
 };
 
 constexpr MaterialPinDefinition ConstantDoublePins[] = {
@@ -173,7 +173,7 @@ constexpr MaterialNodeDefinition ConstantsDefinitions[] = {
         .Features(ToMask(MaterialContextFeature::Primitive)),
     MaterialNode("Material.PrecomputedAoMask")
         .Pins(PrecomputedAoMaskPins)
-        .Menu("Precomputed Ao Mask", "Constants", "Constants PrecomputedAOMask",
+        .Menu("PrecomputedAOMask", "Constants", "Constants PrecomputedAOMask",
               "A material expression that allows access to the precomputed AO mask generated when "
               "bGenerateAmbientOcclusionMaterialMask is enabled in LightBake World settings.")
         .Features(ToMask(MaterialContextFeature::Lightmap)),

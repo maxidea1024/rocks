@@ -2,8 +2,6 @@
 
 #include <MaterialSchema/Nodes/Decals/DecalBufferTextureProperties.generated.h>
 #include <MaterialSchema/Nodes/Decals/DecalBufferTextureProperties.h>
-#include <MaterialSchema/Nodes/Decals/DecalMipmapLevelProperties.generated.h>
-#include <MaterialSchema/Nodes/Decals/DecalMipmapLevelProperties.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
 
 // Decals 범주 노드 정의다(Docs/Design/MaterialSystem 19.6·19.13절). 핀 키와 순서는
@@ -40,6 +38,8 @@ constexpr MaterialPinDefinition DecalLifetimeOpacityPins[] = {
 };
 
 constexpr MaterialPinDefinition DecalMipmapLevelPins[] = {
+    MaterialInput("TextureSize", MaterialPinType::Numeric, "TextureSize",
+                  MaterialPinDefault::Vector2(256.0f, 256.0f)),
     MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
@@ -62,7 +62,6 @@ constexpr MaterialNodeDefinition DecalsDefinitions[] = {
         .Menu("Decal Lifetime Opacity", "Decals", "Decals", "Decal Lifetime Opacity.")
         .Features(ToMask(MaterialContextFeature::Decal)),
     MaterialNode("Material.DecalMipmapLevel")
-        .Properties(&GeneratedType<DecalMipmapLevelProperties>::Schema)
         .Pins(DecalMipmapLevelPins)
         .Menu("Decal Mipmap Level", "Decals", "Decals", "Decal Mipmap Level.")
         .Features(ToMask(MaterialContextFeature::Decal)),

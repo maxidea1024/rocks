@@ -20,5 +20,6 @@
 | E12 | 의존 추적(이 함수를 쓰는 머티리얼, 이 머티리얼의 인스턴스) | AssetIndex 역방향 의존 | 14.5 "재사용" |
 | E13 | 모르는 노드 자리 표시·migration 결과 보고 | NodeGraph(자리 노드·migration 실행, 노드 그래프 10절) + MaterialSchema(migration 함수) | 14.6, MT10 |
 | E14 | headless 번역·쿠킹 명령(`material-compile`·`asset-cook`) | MaterialCook·Programs/Commandlet | MT08 |
+| E15 | 새 노드 초기 배열 원소(UE 생성자가 더하는 Custom 입력 하나, Operator `Arity`개, Switch 입력 하나 — 정적 정의에는 배열 기본값이 없다, 19.13.3절) | EditorMaterial(노드 추가 명령이 정의별 초기 원소를 채운다) | 14.5 "node 검색·palette" |
 
 화면 코드는 shader 의미·검증을 다시 구현하지 않는다(계획 14.6절). E3·E4는 화면이 부르는 유일한 검증 경로다.

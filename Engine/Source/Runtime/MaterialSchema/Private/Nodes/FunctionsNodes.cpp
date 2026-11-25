@@ -25,15 +25,13 @@ constexpr MaterialPropertyTextDefault FunctionOutputTextDefaults[] = {{"outputNa
 constexpr MaterialPinDefinition FunctionOutputPins[] = {
     MaterialInput("A", MaterialPinType::Any, "A", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
 constexpr MaterialPropertyTextDefault LayerOutputTextDefaults[] = {
     {"outputName", "Material Attributes"}};
 constexpr MaterialPinDefinition LayerOutputPins[] = {
-    MaterialInput("A", MaterialPinType::Any, "A", {},
+    MaterialInput("A", MaterialPinType::MaterialAttributes, "A", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
 constexpr MaterialPinDefinition MaterialSamplePins[] = {

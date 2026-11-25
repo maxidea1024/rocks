@@ -104,6 +104,7 @@ enum class OperatorKind : uint8 {
     Distance = 62,
     Dot = 63,
     Fmod = 64,
+    Max = 65,
     Min = 66,
     Pow = 67,
     Step = 68,

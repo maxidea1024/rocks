@@ -5,6 +5,8 @@
 #include <MaterialSchema/Nodes/Texture/AntialiasedTextureMaskProperties.h>
 #include <MaterialSchema/Nodes/Texture/ParticleSubUvProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/ParticleSubUvProperties.h>
+#include <MaterialSchema/Nodes/Texture/PathTracingBufferTextureProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/PathTracingBufferTextureProperties.h>
 #include <MaterialSchema/Nodes/Texture/SceneColorProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/SceneColorProperties.h>
 #include <MaterialSchema/Nodes/Texture/SceneTextureProperties.generated.h>
@@ -182,7 +184,7 @@ constexpr MaterialPinDefinition RecordTextureStreamingInfoPins[] = {
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialInput("Coordinates", MaterialPinType::Float2, "Coordinates", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
-    MaterialOutput("Tex", MaterialPinType::Numeric, "Tex"),
+    MaterialOutput("Tex", MaterialPinType::Texture2D, "Tex"),
 };
 
 constexpr MaterialPinDefinition TextureCollectionPins[] = {
@@ -229,7 +231,7 @@ constexpr MaterialPinDefinition SceneTexturePins[] = {
 
 constexpr MaterialPinDefinition SceneColorPins[] = {
     MaterialInput("Input", MaterialPinType::Numeric, "Input",
-                  MaterialPinDefault::Vector2(2.0f, 0.0f)),
+                  MaterialPinDefault::Vector2(0.0f, 0.0f)),
     MaterialOutput("RGB", MaterialPinType::Float3, "RGB"),
     MaterialOutput("A", MaterialPinType::Float1, "A"),
 };
@@ -265,6 +267,8 @@ constexpr StringView SparseVolumeTextureSampleParameterNonSemantic[] = {"sparseV
                                                                         "group", "sortPriority"};
 constexpr MaterialPinDefinition SparseVolumeTextureSampleParameterPins[] = {
     MaterialInput("Coordinates", MaterialPinType::Float3, "Coordinates", {},
+                  MaterialPinFlags::HideValue),
+    MaterialInput("TextureObject", MaterialPinType::SparseVolumeTexture, "TextureObject", {},
                   MaterialPinFlags::HideValue),
     MaterialOutput("Attributes A", MaterialPinType::Float4, "Attributes A"),
     MaterialOutput("Attributes B", MaterialPinType::Float4, "Attributes B"),
@@ -383,7 +387,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Properties(&GeneratedType<ParticleSubUvProperties>::Schema)
         .Pins(ParticleSubUvPins)
         .DynamicPins(&TextureSampleMipPins<ParticleSubUvProperties>)
-        .Menu("Particle Sub Uv", "Texture", "Texture Particles ParticleSubUV", "Particle Sub Uv.")
+        .Menu("Particle SubUV", "Texture", "Texture Particles ParticleSubUV", "Particle SubUV.")
         .Features(ToMask(MaterialContextFeature::Particle)),
     MaterialNode("Material.SceneTexture")
         .Properties(&GeneratedType<SceneTextureProperties>::Schema)
@@ -431,6 +435,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Flags(MaterialNodeFlags::Parameter)
         .Missing(MaterialPrerequisite::SparseVolumeTexture),
     MaterialNode("Material.PathTracingBufferTexture")
+        .Properties(&GeneratedType<PathTracingBufferTextureProperties>::Schema)
         .Pins(PathTracingBufferTexturePins)
         .Menu("Path Tracing Buffer Texture", "Texture", "PathTracing",
               "Path tracing buffer is only accessable in postprocess material.")

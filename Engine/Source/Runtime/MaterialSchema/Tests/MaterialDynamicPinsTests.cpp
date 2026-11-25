@@ -28,9 +28,13 @@
 #include <MaterialSchema/Nodes/Outputs/MaterialCacheOutputProperties.h>
 #include <MaterialSchema/Nodes/Particles/DynamicParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Particles/DynamicParameterProperties.h>
+#include <MaterialSchema/Nodes/Texture/SparseVolumeTextureSampleProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/SparseVolumeTextureSampleProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectFromCollectionProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectFromCollectionProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.h>
@@ -43,6 +47,8 @@
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
 #include <ObjectSerialization/StructRecord.h>
+#include <Serialization/Archive.h>
+#include <Serialization/Record.h>
 #include <TestSupport/Test.h>
 
 // 엔진 노드 동적 핀 시험이다(Docs/Design/MaterialSystem 19.13.3·19.13.6절, 단계 MS1b2): 속성
@@ -155,6 +161,38 @@ bool IsPin(PinEnv& env, const nodegraph::PinDescriptor& pin, StringView key,
 constexpr nodegraph::PinDirection In = nodegraph::PinDirection::Input;
 constexpr nodegraph::PinDirection Out = nodegraph::PinDirection::Output;
 
+// 어떤 노드 enum에도 없는 값이다(uint8 enum의 마지막 값 — 동적 핀 함수가 거부해야 한다).
+constexpr int64 UnknownEnumValue = 0xFF;
+
+// schema의 정수 필드 하나만 value로 쓴 Record다. 리플렉션 codec은 enum에 없는 값을 저장하지
+// 않으므로 (저장 검사) 손상·다른 판의 속성 바이트를 이렇게 만든다. 필드가 없거나 쓰기가 실패하면 빈
+// 배열이다.
+Array<uint8> IntegerFieldRecord(Allocator& allocator, const TypeSchema& schema, StringView field,
+                                int64 value) noexcept {
+    Guid id{};
+    for (const FieldSchema& candidate : schema.fields) {
+        if (StringView(candidate.name.Data(), candidate.name.Size()) == field) {
+            id = candidate.id;
+        }
+    }
+
+    ArchiveWriter writer(allocator);
+    auto record = RecordWriter::Begin(writer, schema.id, schema.version);
+    if (id == Guid{} || !record) {
+        return Array<uint8>(allocator);
+    }
+
+    RecordWriter& out = record.Value();
+    if (!out.BeginField(id) || !writer.WriteI64(value) || !out.EndField(WireType::I64) ||
+        !out.End()) {
+        return Array<uint8>(allocator);
+    }
+
+    return writer.TakeBytes();
+}
+// Operator 시험 입력 수다(문자 A–Z 26개를 넘겨 Input<n> 키까지 본다).
+constexpr usize OperatorTestInputs = 28;
+
 } // namespace
 
 // 텍스처 샘플: MipValueMode에 따라 MipValue 또는 DX·DY가 생기고 None이면 없다(UE GetInput).
@@ -197,6 +235,37 @@ TEST(MaterialDynamicPins_TextureSampleMipInputs) {
     CHECK(empty.Size() == 0);
 }
 
+// SVT 샘플: 텍스처 샘플과 같은 mip 입력 규칙이다(UE UMaterialExpressionSparseVolumeTextureSample).
+TEST(MaterialDynamicPins_SparseVolumeTextureMipInputs) {
+    PinEnv env;
+    REQUIRE(env.ready);
+    NodeFixture fixture(env.allocator);
+    SparseVolumeTextureSampleProperties properties;
+    nodegraph::PinList none(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.SparseVolumeTextureSample", env.Save(properties),
+                               fixture, none));
+    CHECK(none.Size() == 0);
+
+    properties.mipValueMode = TextureMipValueMode::Derivative;
+    nodegraph::PinList derivative(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.SparseVolumeTextureSample", env.Save(properties),
+                               fixture, derivative));
+    REQUIRE(derivative.Size() == 2);
+    CHECK(IsPin(env, derivative.View()[0], "CoordinatesDX", In, MaterialPinType::Numeric,
+                "DDX(UVs)"));
+    CHECK(IsPin(env, derivative.View()[1], "CoordinatesDY", In, MaterialPinType::Numeric,
+                "DDY(UVs)"));
+
+    // 모르는 mip 모드는 거부한다.
+    const Array<uint8> bytes = IntegerFieldRecord(
+        env.allocator, GeneratedType<SparseVolumeTextureSampleProperties>::Schema(), "mipValueMode",
+        UnknownEnumValue);
+    REQUIRE(!bytes.IsEmpty());
+    nodegraph::PinList bad(env.allocator);
+    CHECK(CollectDynamicPins(env, "Material.SparseVolumeTextureSample", bytes, fixture, bad)
+              .Error() == ErrorCode::InvalidArgument);
+}
+
 // RVT 샘플: 미분 모드는 UV·World 이름이 다르다.
 TEST(MaterialDynamicPins_RuntimeVirtualTextureMipInputs) {
     PinEnv env;
@@ -237,6 +306,22 @@ TEST(MaterialDynamicPins_TextureObjectOutputType) {
     REQUIRE(cube.Size() == 1);
     CHECK(IsPin(env, cube.View()[0], "Result", Out, MaterialPinType::TextureCube, ""));
 
+    // 파라미터 노드도 같은 규칙이다(VolumeTexture는 Texture3D).
+    TextureObjectParameterProperties parameter(env.allocator);
+    parameter.texture.expectedClass = env.Intern("VolumeTexture");
+    nodegraph::PinList parameterPins(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.TextureObjectParameter", env.Save(parameter), fixture,
+                               parameterPins));
+    REQUIRE(parameterPins.Size() == 1);
+    CHECK(IsPin(env, parameterPins.View()[0], "Result", Out, MaterialPinType::Texture3D, ""));
+
+    parameter.texture.expectedClass = env.Intern("Texture2DArray");
+    nodegraph::PinList arrayPins(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.TextureObjectParameter", env.Save(parameter), fixture,
+                               arrayPins));
+    REQUIRE(arrayPins.Size() == 1);
+    CHECK(IsPin(env, arrayPins.View()[0], "Result", Out, MaterialPinType::Texture2DArray, ""));
+
     TextureObjectFromCollectionProperties collection;
     collection.textureType = TextureCollectionMemberType::Texture3D;
     nodegraph::PinList volume(env.allocator);
@@ -244,10 +329,27 @@ TEST(MaterialDynamicPins_TextureObjectOutputType) {
                                fixture, volume));
     REQUIRE(volume.Size() == 1);
     CHECK(IsPin(env, volume.View()[0], "Result", Out, MaterialPinType::Texture3D, ""));
+
+    collection.textureType = TextureCollectionMemberType::TextureCubeArray;
+    nodegraph::PinList cubeArray(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.TextureObjectFromCollection", env.Save(collection),
+                               fixture, cubeArray));
+    REQUIRE(cubeArray.Size() == 1);
+    CHECK(IsPin(env, cubeArray.View()[0], "Result", Out, MaterialPinType::TextureCubeArray, ""));
+
+    // 모르는 멤버 종류는 거부한다.
+    const Array<uint8> bytes = IntegerFieldRecord(
+        env.allocator, GeneratedType<TextureObjectFromCollectionProperties>::Schema(),
+        "textureType", UnknownEnumValue);
+    REQUIRE(!bytes.IsEmpty());
+    nodegraph::PinList bad(env.allocator);
+    CHECK(CollectDynamicPins(env, "Material.TextureObjectFromCollection", bytes, fixture, bad)
+              .Error() == ErrorCode::InvalidArgument);
 }
 
 // Custom: 이름 있는 입력은 그 이름, 빈 이름은 Input<n>이고, 출력 Result 타입은 outputType,
-// 추가 출력은 이름·타입대로다.
+// 추가 출력은 이름·타입대로다. 추가 출력이 있으면 주 출력 표시가 "return"이고 이름 없는 추가 출력은
+// 핀이 없다(UE RebuildOutputs). 이미 있는 키와 같은 출력 키는 Out을 붙인다.
 TEST(MaterialDynamicPins_CustomInputsAndOutputs) {
     PinEnv env;
     REQUIRE(env.ready);
@@ -260,17 +362,50 @@ TEST(MaterialDynamicPins_CustomInputsAndOutputs) {
     CustomOutput extra;
     extra.outputName = env.Intern("Mask");
     extra.outputType = CustomOutputType::Float4;
+    CustomOutput anonymous;
+    CustomOutput sameAsInput;
+    sameAsInput.outputName = env.Intern("Tint");
+    sameAsInput.outputType = CustomOutputType::Float1;
+    CustomOutput sameAsResult;
+    sameAsResult.outputName = env.Intern("Result");
+    sameAsResult.outputType = CustomOutputType::Float3;
     REQUIRE(properties.inputs.TryPushBack(named));
     REQUIRE(properties.inputs.TryPushBack(unnamed));
     REQUIRE(properties.additionalOutputs.TryPushBack(extra));
+    REQUIRE(properties.additionalOutputs.TryPushBack(anonymous));
+    REQUIRE(properties.additionalOutputs.TryPushBack(sameAsInput));
+    REQUIRE(properties.additionalOutputs.TryPushBack(sameAsResult));
     nodegraph::PinList pins(env.allocator);
     REQUIRE(CollectDynamicPins(env, "Material.CustomHlsl", env.Save(properties), fixture, pins));
-    REQUIRE(pins.Size() == 4);
+    REQUIRE(pins.Size() == 6);
     CHECK(IsPin(env, pins.View()[0], "Tint", In, MaterialPinType::Any, "Tint"));
     CHECK(IsPin(env, pins.View()[1], "Input1", In, MaterialPinType::Any, ""));
-    CHECK(IsPin(env, pins.View()[2], "Result", Out, MaterialPinType::Float2, ""));
+    CHECK(IsPin(env, pins.View()[2], "Result", Out, MaterialPinType::Float2, "return"));
     CHECK(IsPin(env, pins.View()[3], "Mask", Out, MaterialPinType::Float4, "Mask"));
+    CHECK(IsPin(env, pins.View()[4], "TintOut", Out, MaterialPinType::Float1, "Tint"));
+    CHECK(IsPin(env, pins.View()[5], "ResultOut", Out, MaterialPinType::Float3, "Result"));
     CHECK(pins.View()[0].valuePolicy == nodegraph::PinValuePolicy::Hidden);
+
+    // 이름 있는 입력 "Result"면 주 출력 키가 ResultOut이다.
+    CustomHlslProperties resultInput(env.allocator);
+    CustomInput result;
+    result.inputName = env.Intern("Result");
+    REQUIRE(resultInput.inputs.TryPushBack(result));
+    nodegraph::PinList renamed(env.allocator);
+    REQUIRE(
+        CollectDynamicPins(env, "Material.CustomHlsl", env.Save(resultInput), fixture, renamed));
+    REQUIRE(renamed.Size() == 2);
+    CHECK(IsPin(env, renamed.View()[0], "Result", In, MaterialPinType::Any, "Result"));
+    CHECK(IsPin(env, renamed.View()[1], "ResultOut", Out, MaterialPinType::Float3, ""));
+
+    // 모르는 출력 종류는 거부한다.
+    const Array<uint8> badBytes =
+        IntegerFieldRecord(env.allocator, GeneratedType<CustomHlslProperties>::Schema(),
+                           "outputType", UnknownEnumValue);
+    REQUIRE(!badBytes.IsEmpty());
+    nodegraph::PinList bad(env.allocator);
+    CHECK(CollectDynamicPins(env, "Material.CustomHlsl", badBytes, fixture, bad).Error() ==
+          ErrorCode::InvalidArgument);
 
     // 기본 속성: 입력 없음, 출력 Result는 UE 기본 Float3.
     nodegraph::PinList empty(env.allocator);
@@ -306,14 +441,14 @@ TEST(MaterialDynamicPins_SwitchOperatorConvert) {
     CHECK(IsPin(env, switchPins.View()[1], "Input1", In, MaterialPinType::Numeric, ""));
 
     OperatorProperties operatorProperties(env.allocator);
-    for (usize index = 0; index < 28; ++index) {
+    for (usize index = 0; index < OperatorTestInputs; ++index) {
         REQUIRE(operatorProperties.dynamicInputs.TryPushBack(OperatorInput{}));
     }
 
     nodegraph::PinList operatorPins(env.allocator);
     REQUIRE(CollectDynamicPins(env, "Material.Operator", env.Save(operatorProperties), fixture,
                                operatorPins));
-    REQUIRE(operatorPins.Size() == 28);
+    REQUIRE(operatorPins.Size() == OperatorTestInputs);
     CHECK(IsPin(env, operatorPins.View()[0], "A", In, MaterialPinType::Numeric, "A"));
     CHECK(IsPin(env, operatorPins.View()[25], "Z", In, MaterialPinType::Numeric, "Z"));
     CHECK(IsPin(env, operatorPins.View()[26], "Input27", In, MaterialPinType::Numeric, ""));
@@ -394,18 +529,31 @@ TEST(MaterialDynamicPins_FunctionCallAndInput) {
     base.id = Guid{0x0123456789abcdefull, 0x00000000000000ffull};
     base.inputName = env.Intern("Base");
     base.inputType = FunctionInputType::Scalar;
+    FunctionCallInput mask;
+    mask.id = Guid{3, 4};
+    mask.inputName = env.Intern("Mask");
+    mask.inputType = FunctionInputType::Texture2D;
     FunctionCallOutput result;
     result.id = Guid{1, 2};
     result.outputName = env.Intern("Out");
+    FunctionCallOutput alpha;
+    alpha.id = Guid{0xfedcba9876543210ull, 0};
+    alpha.outputName = env.Intern("Alpha");
     REQUIRE(call.inputs.TryPushBack(base));
+    REQUIRE(call.inputs.TryPushBack(mask));
     REQUIRE(call.outputs.TryPushBack(result));
+    REQUIRE(call.outputs.TryPushBack(alpha));
     nodegraph::PinList callPins(env.allocator);
     REQUIRE(CollectDynamicPins(env, "Material.FunctionCall", env.Save(call), fixture, callPins));
-    REQUIRE(callPins.Size() == 2);
+    REQUIRE(callPins.Size() == 4);
     CHECK(IsPin(env, callPins.View()[0], "P_0123456789abcdef00000000000000ff", In,
                 MaterialPinType::Float1, "Base"));
-    CHECK(IsPin(env, callPins.View()[1], "P_00000000000000010000000000000002", Out,
+    CHECK(IsPin(env, callPins.View()[1], "P_00000000000000030000000000000004", In,
+                MaterialPinType::Texture2D, "Mask"));
+    CHECK(IsPin(env, callPins.View()[2], "P_00000000000000010000000000000002", Out,
                 MaterialPinType::Any, "Out"));
+    CHECK(IsPin(env, callPins.View()[3], "P_fedcba98765432100000000000000000", Out,
+                MaterialPinType::Any, "Alpha"));
 
     FunctionInputProperties input(env.allocator);
     nodegraph::PinList vector3(env.allocator);
@@ -413,6 +561,15 @@ TEST(MaterialDynamicPins_FunctionCallAndInput) {
     REQUIRE(vector3.Size() == 2);
     CHECK(IsPin(env, vector3.View()[0], "Preview", In, MaterialPinType::Float3, "Preview"));
     CHECK(IsPin(env, vector3.View()[1], "Result", Out, MaterialPinType::Float3, ""));
+
+    // 모르는 입력 종류는 거부한다(함수 호출·레이어 입력 원소도 같은 검사다).
+    const Array<uint8> badInput =
+        IntegerFieldRecord(env.allocator, GeneratedType<FunctionInputProperties>::Schema(),
+                           "inputType", UnknownEnumValue);
+    REQUIRE(!badInput.IsEmpty());
+    nodegraph::PinList bad(env.allocator);
+    CHECK(CollectDynamicPins(env, "Material.FunctionInput", badInput, fixture, bad).Error() ==
+          ErrorCode::InvalidArgument);
 
     input.inputType = FunctionInputType::Surface;
     nodegraph::PinList surface(env.allocator);
@@ -440,39 +597,60 @@ TEST(MaterialDynamicPins_AttributeNodes) {
     CHECK(IsPin(env, getPins.View()[1], "A_00000000000000070000000000000007", Out,
                 MaterialPinType::Any, ""));
 
-    SetAttributesProperties set(env.allocator);
-    REQUIRE(set.attributeSetTypes.TryPushBack(baseColor.id));
-    nodegraph::PinList setPins(env.allocator);
-    REQUIRE(CollectDynamicPins(env, "Material.SetAttributes", env.Save(set), fixture, setPins));
-    REQUIRE(setPins.Size() == 1);
-    CHECK(IsPin(env, setPins.View()[0], "A_69b8d33616ed4d499aa497292f050f7a", In,
-                MaterialPinType::Float3, "BaseColor"));
-
-    AggregateProperties aggregate(env.allocator);
-    REQUIRE(aggregate.attributeNames.TryPushBack(env.Intern("BaseColor")));
-    nodegraph::PinList aggregatePins(env.allocator);
-    auto aggregated =
-        CollectDynamicPins(env, "Material.Aggregate", env.Save(aggregate), fixture, aggregatePins);
-    if (!aggregated) {
-        test::RecordFailure(ErrorCodeName(aggregated.Error()), __FILE__, __LINE__);
+    const MaterialAttributeDefinition* metallic = nullptr;
+    for (const MaterialAttributeDefinition& definition : BuiltinMaterialAttributes()) {
+        if (definition.name == StringView("Metallic")) {
+            metallic = &definition;
+        }
     }
 
-    REQUIRE(aggregated);
-    REQUIRE(aggregatePins.Size() == 2);
+    REQUIRE(metallic != nullptr);
+    SetAttributesProperties set(env.allocator);
+    REQUIRE(set.attributeSetTypes.TryPushBack(baseColor.id));
+    REQUIRE(set.attributeSetTypes.TryPushBack(metallic->id));
+    nodegraph::PinList setPins(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.SetAttributes", env.Save(set), fixture, setPins));
+    REQUIRE(setPins.Size() == 2);
+    CHECK(IsPin(env, setPins.View()[0], "A_69b8d33616ed4d499aa497292f050f7a", In,
+                MaterialPinType::Float3, "BaseColor"));
+    CHECK(setPins.View()[1].direction == In);
+    CHECK(setPins.View()[1].type == ToPinTypeId(MaterialPinType::Float1));
+    CHECK(setPins.View()[1].displayName == StringView("Metallic"));
+
+    // 같은 속성 id 둘은 핀 키가 겹쳐 거부된다.
+    REQUIRE(set.attributeSetTypes.TryPushBack(baseColor.id));
+    nodegraph::PinList twice(env.allocator);
+    CHECK(
+        CollectDynamicPins(env, "Material.SetAttributes", env.Save(set), fixture, twice).Error() ==
+        ErrorCode::InvalidArgument);
+
+    // Aggregate: 이름마다 입력·출력(키 + Out), 빈 이름은 핀이 없다.
+    AggregateProperties aggregate(env.allocator);
+    REQUIRE(aggregate.attributeNames.TryPushBack(env.Intern("BaseColor")));
+    REQUIRE(aggregate.attributeNames.TryPushBack(Name()));
+    REQUIRE(aggregate.attributeNames.TryPushBack(env.Intern("Metallic")));
+    nodegraph::PinList aggregatePins(env.allocator);
+    REQUIRE(
+        CollectDynamicPins(env, "Material.Aggregate", env.Save(aggregate), fixture, aggregatePins));
+    REQUIRE(aggregatePins.Size() == 4);
     CHECK(
         IsPin(env, aggregatePins.View()[0], "BaseColor", In, MaterialPinType::Float3, "BaseColor"));
     CHECK(IsPin(env, aggregatePins.View()[1], "BaseColorOut", Out, MaterialPinType::Float3,
                 "BaseColor"));
+    CHECK(IsPin(env, aggregatePins.View()[2], "Metallic", In, MaterialPinType::Float1, "Metallic"));
+    CHECK(IsPin(env, aggregatePins.View()[3], "MetallicOut", Out, MaterialPinType::Float1,
+                "Metallic"));
 
     // 사용자 aggregate(TODO MPQ-MaterialAggregate)의 속성은 타입을 모른다(Any).
     aggregate.kind = AggregateKind::UserDefined;
     nodegraph::PinList user(env.allocator);
     REQUIRE(CollectDynamicPins(env, "Material.Aggregate", env.Save(aggregate), fixture, user));
-    REQUIRE(user.Size() == 2);
+    REQUIRE(user.Size() == 4);
     CHECK(user.View()[0].type == ToPinTypeId(MaterialPinType::Any));
 }
 
-// LayerStack·MaterialCache: 사본 목록대로이고, MaterialCache는 표본 여부로 방향이 바뀐다.
+// LayerStack·MaterialCache: 목록대로다. MaterialCache 출력은 늘 속성마다 있고, 입력은 견본이
+// 아니면 속성마다, 견본이면 Primitive·UV다(UE GetInput·ConstructOutputs).
 TEST(MaterialDynamicPins_LayerStackAndMaterialCache) {
     PinEnv env;
     REQUIRE(env.ready);
@@ -481,31 +659,43 @@ TEST(MaterialDynamicPins_LayerStackAndMaterialCache) {
     LayerStackInput wet;
     wet.inputName = env.Intern("Wetness");
     wet.inputType = FunctionInputType::Scalar;
+    LayerStackInput unnamedLayer;
+    unnamedLayer.inputType = FunctionInputType::MaterialAttributes;
     REQUIRE(stack.layerInputs.TryPushBack(wet));
+    REQUIRE(stack.layerInputs.TryPushBack(unnamedLayer));
     nodegraph::PinList stackPins(env.allocator);
     REQUIRE(CollectDynamicPins(env, "Material.LayerStack", env.Save(stack), fixture, stackPins));
-    REQUIRE(stackPins.Size() == 1);
+    REQUIRE(stackPins.Size() == 2);
     CHECK(IsPin(env, stackPins.View()[0], "Wetness", In, MaterialPinType::Float1, "Wetness"));
+    CHECK(IsPin(env, stackPins.View()[1], "Input1", In, MaterialPinType::MaterialAttributes, ""));
 
     MaterialCacheOutputProperties cache(env.allocator);
     MaterialCacheAttribute color(env.allocator);
     REQUIRE(color.decoration.TryAssign("Color"));
     color.valueType = static_cast<uint32>(MaterialPinType::Float3);
+    MaterialCacheAttribute roughness(env.allocator);
+    REQUIRE(roughness.decoration.TryAssign("Roughness"));
+    roughness.valueType = static_cast<uint32>(MaterialPinType::Float1);
     REQUIRE(cache.attributes.TryPushBack(Move(color)));
+    REQUIRE(cache.attributes.TryPushBack(Move(roughness)));
     nodegraph::PinList write(env.allocator);
     REQUIRE(
         CollectDynamicPins(env, "Material.MaterialCacheOutput", env.Save(cache), fixture, write));
-    REQUIRE(write.Size() == 1);
+    REQUIRE(write.Size() == 4);
     CHECK(IsPin(env, write.View()[0], "Color", In, MaterialPinType::Float3, "Color"));
+    CHECK(IsPin(env, write.View()[1], "Roughness", In, MaterialPinType::Float1, "Roughness"));
+    CHECK(IsPin(env, write.View()[2], "ColorOut", Out, MaterialPinType::Float3, "Color"));
+    CHECK(IsPin(env, write.View()[3], "RoughnessOut", Out, MaterialPinType::Float1, "Roughness"));
 
     cache.isSample = true;
     nodegraph::PinList sample(env.allocator);
     REQUIRE(
         CollectDynamicPins(env, "Material.MaterialCacheOutput", env.Save(cache), fixture, sample));
-    REQUIRE(sample.Size() == 3);
+    REQUIRE(sample.Size() == 4);
     CHECK(IsPin(env, sample.View()[0], "Primitive", In, MaterialPinType::UInt1, "Primitive"));
     CHECK(IsPin(env, sample.View()[1], "UV", In, MaterialPinType::Float2, "UV"));
     CHECK(IsPin(env, sample.View()[2], "Color", Out, MaterialPinType::Float3, "Color"));
+    CHECK(IsPin(env, sample.View()[3], "Roughness", Out, MaterialPinType::Float1, "Roughness"));
 
     // 범위 밖 핀 타입 번호는 거부한다.
     cache.attributes[0].valueType = MaterialPinTypeCount;

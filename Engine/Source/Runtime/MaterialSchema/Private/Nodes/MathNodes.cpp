@@ -367,10 +367,10 @@ constexpr MaterialPinDefinition IfPins[] = {
 
 constexpr MaterialPropertyTextDefault SwitchTextDefaults[] = {{"description", "Switch"}};
 constexpr MaterialPinDefinition SwitchPins[] = {
-    MaterialInput("SwitchValue", MaterialPinType::Numeric, "SwitchValue",
+    MaterialInput("SwitchValue", MaterialPinType::Any, "SwitchValue",
                   MaterialPinDefault::Scalar(0.0f)),
-    MaterialInput("Default", MaterialPinType::Numeric, "Default", MaterialPinDefault::Scalar(0.0f)),
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialInput("Default", MaterialPinType::Any, "Default", MaterialPinDefault::Scalar(0.0f)),
+    MaterialOutput("Result", MaterialPinType::Any, ""),
 };
 
 constexpr MaterialPinDefinition FloatToUIntPins[] = {
@@ -597,8 +597,8 @@ constexpr MaterialNodeDefinition MathDefinitions[] = {
         .Pins(OperatorPins)
         .DynamicPins(&OperatorDynamicPins)
         .Menu("Operator", "Math", "operator Math", "Operator."),
-    MaterialNode("Material.Ddx").Pins(DdxPins).Menu("Ddx", "Math", "Utility DDX", "Ddx."),
-    MaterialNode("Material.Ddy").Pins(DdyPins).Menu("Ddy", "Math", "Utility DDY", "Ddy."),
+    MaterialNode("Material.Ddx").Pins(DdxPins).Menu("DDX", "Math", "Utility DDX", "DDX."),
+    MaterialNode("Material.Ddy").Pins(DdyPins).Menu("DDY", "Math", "Utility DDY", "DDY."),
     MaterialNode("Material.RotateAboutAxis")
         .Properties(&GeneratedType<RotateAboutAxisProperties>::Schema)
         .Pins(RotateAboutAxisPins)

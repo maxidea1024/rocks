@@ -984,6 +984,7 @@ TEST(MaterialSchema_CatalogChecksTextDefaults) {
     static constexpr MaterialPropertyTextDefault label[] = {{"label", "Moss"}};
     static constexpr MaterialPropertyTextDefault notText[] = {{"count", "1"}};
     static constexpr MaterialPropertyTextDefault unknown[] = {{"missing", "x"}};
+    static constexpr MaterialPropertyTextDefault twice[] = {{"label", "Moss"}, {"label", "Fern"}};
     static constexpr MaterialNodeDefinition valid[] = {
         MaterialNode("Material.TestText").Properties(&ReaderSchema).TextDefaults(label).Pins(pins),
     };
@@ -997,6 +998,10 @@ TEST(MaterialSchema_CatalogChecksTextDefaults) {
             .TextDefaults(unknown)
             .Pins(pins),
         MaterialNode("Material.TestTextNoSchema").TextDefaults(label).Pins(pins),
+        MaterialNode("Material.TestTextTwice")
+            .Properties(&ReaderSchema)
+            .TextDefaults(twice)
+            .Pins(pins),
     };
     for (const MaterialNodeDefinition& definition : invalid) {
         CHECK(env.catalog
@@ -1014,6 +1019,10 @@ TEST(MaterialSchema_CatalogChecksTextDefaults) {
     CHECK(env.catalog.Unregister(env.registry, group.Value()));
 }
 
+// 등록 실패 보고 문구 버퍼와 그 안에 담는 노드 타입 이름의 최대 byte다(뒤에 오류 이름이 붙는다).
+constexpr usize FailureMessageBytes = 256;
+constexpr usize FailureTypeBytes = 160;
+
 // 엔진 노드 정의마다 따로 등록해 본다(19.13.6절): 묶음 등록이 실패해도 어느 정의가 무슨 오류로
 // 거부되는지 이름으로 보고한다.
 TEST(MaterialSchema_EveryBuiltinDefinitionRegisters) {
@@ -1029,9 +1038,10 @@ TEST(MaterialSchema_EveryBuiltinDefinitionRegisters) {
                 env.registry, schema, Span<const MaterialNodeDefinition>(&definition, 1),
                 ModuleLease());
             if (!registered) {
-                char message[256];
-                const usize length =
-                    definition.type.ByteCount() < 160 ? definition.type.ByteCount() : 160;
+                char message[FailureMessageBytes];
+                const usize length = definition.type.ByteCount() < FailureTypeBytes
+                                         ? definition.type.ByteCount()
+                                         : FailureTypeBytes;
                 usize at = 0;
                 for (; at < length; ++at) {
                     message[at] = definition.type.Data()[at];

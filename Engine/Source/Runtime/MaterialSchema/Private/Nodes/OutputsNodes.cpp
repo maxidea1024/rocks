@@ -19,11 +19,11 @@ namespace rocks::material::detail {
 namespace {
 
 constexpr MaterialPinDefinition BentNormalOutputPins[] = {
-    MaterialInput("Input", MaterialPinType::Numeric, "Input", {}, MaterialPinFlags::HideValue),
+    MaterialInput("Input", MaterialPinType::Float3, "Input", {}, MaterialPinFlags::HideValue),
 };
 
 constexpr MaterialPinDefinition ClearCoatNormalOutputPins[] = {
-    MaterialInput("Input", MaterialPinType::Numeric, "Input", {}, MaterialPinFlags::HideValue),
+    MaterialInput("Input", MaterialPinType::Float3, "Input", {}, MaterialPinFlags::HideValue),
 };
 
 constexpr MaterialPinDefinition TangentOutputPins[] = {
@@ -60,8 +60,18 @@ constexpr MaterialPinDefinition SingleLayerWaterOutputPins[] = {
 };
 
 constexpr MaterialPinDefinition VolumetricAdvancedOutputPins[] = {
+    MaterialInput("PhaseG", MaterialPinType::Numeric, "PhaseG", MaterialPinDefault::Scalar(0.0f)),
+    MaterialInput("PhaseG2", MaterialPinType::Numeric, "PhaseG2", MaterialPinDefault::Scalar(0.0f)),
     MaterialInput("PhaseBlend", MaterialPinType::Numeric, "PhaseBlend",
                   MaterialPinDefault::Scalar(0.0f)),
+    MaterialInput("MultiScatteringContribution", MaterialPinType::Numeric,
+                  "MultiScatteringContribution", MaterialPinDefault::Scalar(0.5f)),
+    MaterialInput("MultiScatteringOcclusion", MaterialPinType::Numeric, "MultiScatteringOcclusion",
+                  MaterialPinDefault::Scalar(0.5f)),
+    MaterialInput("MultiScatteringEccentricity", MaterialPinType::Numeric,
+                  "MultiScatteringEccentricity", MaterialPinDefault::Scalar(0.5f)),
+    MaterialInput("ConservativeDensity", MaterialPinType::Numeric, "ConservativeDensity", {},
+                  MaterialPinFlags::HideValue),
 };
 
 constexpr MaterialPinDefinition VolumetricAdvancedInputPins[] = {
@@ -81,6 +91,11 @@ constexpr MaterialPinDefinition CloudSampleAttributePins[] = {
 constexpr MaterialPinDefinition VolumetricCloudEmptySpaceSkippingInputPins[] = {
     MaterialOutput("Sphere Center", MaterialPinType::Numeric, "Sphere Center"),
     MaterialOutput("Sphere Radius", MaterialPinType::Numeric, "Sphere Radius"),
+};
+
+constexpr MaterialPinDefinition VolumetricCloudEmptySpaceSkippingOutputPins[] = {
+    MaterialInput("ContainsMatter", MaterialPinType::Numeric, "ContainsMatter", {},
+                  MaterialPinFlags::HideValue),
 };
 
 constexpr MaterialPinDefinition FirstPersonOutputPins[] = {
@@ -180,6 +195,7 @@ constexpr MaterialNodeDefinition OutputsDefinitions[] = {
               "Volumetric Cloud Empty Space Skipping Input <Experimental>.")
         .Features(ToMask(MaterialContextFeature::Volume)),
     MaterialNode("Material.VolumetricCloudEmptySpaceSkippingOutput")
+        .Pins(VolumetricCloudEmptySpaceSkippingOutputPins)
         .Menu("Volumetric Cloud Empty Space Skipping Output", "Outputs", "Volume",
               "USed to help the cloud system to fast skip empty space areas when ray marching.")
         .Features(ToMask(MaterialContextFeature::Volume)),

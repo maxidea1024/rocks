@@ -50,8 +50,15 @@ using nodegraph::PinList;
 
 // 색인 키 버퍼 길이다("Output" + uint32 10진 10자리, 또는 "P_" + 32자 hex).
 constexpr usize KeyBufferBytes = 40;
+// 색인 키의 진법이다.
+constexpr usize DecimalBase = 10;
 // Guid 하나의 16진 자릿수다.
 constexpr usize GuidHexDigits = 32;
+// 16진 한 자리의 bit 수와 mask다.
+constexpr int HexDigitBits = 4;
+constexpr uint64 HexDigitMask = 0xF;
+// Guid 반쪽(uint64)의 16진 자릿수다.
+constexpr int HalfHexDigits = static_cast<int>(sizeof(uint64) * 8) / HexDigitBits;
 // 문자로 이름을 붙이는 Operator 입력 수다(A–Z, UE GetInputName).
 constexpr usize OperatorLetterInputs = 26;
 
@@ -60,16 +67,17 @@ constexpr StringView OperatorLetters[OperatorLetterInputs] = {
     "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
 };
 
-// DynamicParameter의 기본 출력 이름이다(UE 생성자 ParamNames).
-constexpr StringView DynamicParameterDefaultNames[] = {"Param1", "Param2", "Param3", "Param4"};
+// DynamicParameter의 성분 출력 수와 기본 출력 이름이다(UE 생성자 ParamNames).
+constexpr usize DynamicParameterOutputs = 4;
+constexpr StringView DynamicParameterDefaultNames[DynamicParameterOutputs] = {"Param1", "Param2",
+                                                                              "Param3", "Param4"};
 
 Result<Name> Intern(NamePool& names, StringView text) noexcept {
     return names.TryIntern(text);
 }
 
-// prefix 뒤에 index 10진을 붙인 키다("Input0").
-Result<Name> IndexedKey(NamePool& names, StringView prefix, usize index) noexcept {
-    char buffer[KeyBufferBytes];
+// prefix 뒤에 index 10진을 붙인 키 글자다("Input0"). buffer를 가리킨다.
+StringView IndexedText(char (&buffer)[KeyBufferBytes], StringView prefix, usize index) noexcept {
     usize length = 0;
     for (; length < prefix.ByteCount() && length < KeyBufferBytes; ++length) {
         buffer[length] = prefix.Data()[length];
@@ -78,15 +86,21 @@ Result<Name> IndexedKey(NamePool& names, StringView prefix, usize index) noexcep
     char digits[KeyBufferBytes];
     usize count = 0;
     do {
-        digits[count++] = static_cast<char>('0' + index % 10);
-        index /= 10;
+        digits[count++] = static_cast<char>('0' + index % DecimalBase);
+        index /= DecimalBase;
     } while (index != 0 && count < KeyBufferBytes);
 
     while (count > 0 && length < KeyBufferBytes) {
         buffer[length++] = digits[--count];
     }
 
-    return names.TryIntern(StringView(buffer, length));
+    return StringView(buffer, length);
+}
+
+// prefix 뒤에 index 10진을 붙인 키다("Input0").
+Result<Name> IndexedKey(NamePool& names, StringView prefix, usize index) noexcept {
+    char buffer[KeyBufferBytes];
+    return names.TryIntern(IndexedText(buffer, prefix, index));
 }
 
 // prefix 뒤에 Guid 32자 hex(high, low 순 — 소문자)를 붙인 키다("P_…", NodeGraph GD2).
@@ -100,8 +114,8 @@ Result<Name> GuidKey(NamePool& names, StringView prefix, Guid id) noexcept {
 
     const uint64 halves[] = {id.high, id.low};
     for (uint64 half : halves) {
-        for (int shift = 60; shift >= 0; shift -= 4) {
-            buffer[length++] = hex[(half >> shift) & 0xF];
+        for (int digit = HalfHexDigits - 1; digit >= 0; --digit) {
+            buffer[length++] = hex[(half >> (digit * HexDigitBits)) & HexDigitMask];
         }
     }
 
@@ -144,6 +158,42 @@ Result<void> AddNamedOutput(const DynamicPinsInput& input, PinList& out, StringV
 Result<Name> UserKey(const DynamicPinsInput& input, StringView text, StringView prefix,
                      usize index) noexcept {
     return text.IsEmpty() ? IndexedKey(input.names, prefix, index) : Intern(input.names, text);
+}
+
+// 출력 키다. keyText인 핀(입력 포함)이 이미 있으면 뒤에 Out을 붙인다(핀 키는 방향과 상관없이
+// 유일 — 19.13.3절). 붙인 키도 있으면 Add가 InvalidArgument를 낸다.
+Result<Name> OutputKey(const DynamicPinsInput& input, const PinList& out,
+                       StringView keyText) noexcept {
+    auto key = Intern(input.names, keyText);
+    if (!key || out.Find(key.Value()) == nullptr) {
+        return key;
+    }
+
+    SystemAllocator scratch;
+    String text(scratch);
+    if (auto assigned = text.TryAssign(keyText); !assigned) {
+        return Result<Name>::Failure(assigned.Error());
+    }
+
+    if (auto appended = text.TryAppend("Out"); !appended) {
+        return Result<Name>::Failure(appended.Error());
+    }
+
+    return Intern(input.names, text.View());
+}
+
+// 사용자 이름 출력 핀이다. 이름이 있으면 그 이름, 비면 prefix<index>를 키로 하고 OutputKey 규칙을
+// 따른다.
+Result<void> AddUserOutput(const DynamicPinsInput& input, PinList& out, StringView text,
+                           StringView prefix, usize index, MaterialPinType type) noexcept {
+    char buffer[KeyBufferBytes];
+    const StringView keyText = text.IsEmpty() ? IndexedText(buffer, prefix, index) : text;
+    auto key = OutputKey(input, out, keyText);
+    if (!key) {
+        return Result<void>::Failure(key.Error());
+    }
+
+    return AddOutput(out, key.Value(), type, text);
 }
 
 Result<NodePropertyReader> Open(Allocator& scratch, const DynamicPinsInput& input,
@@ -439,14 +489,23 @@ Result<void> CustomDynamicPins(const DynamicPinsInput& input, PinList& out) noex
         return Result<void>::Failure(resultType.Error());
     }
 
-    if (auto added = AddNamedOutput(input, out, "Result", resultType.Value(), ""); !added) {
-        return added;
-    }
-
     auto outputs =
         reader.Value().OpenStructArray("additionalOutputs", GeneratedType<CustomOutput>::Schema());
     if (!outputs) {
         return Result<void>::Failure(outputs.Error());
+    }
+
+    // UE RebuildOutputs: 추가 출력이 있으면 주 출력 이름이 "return"이고 이름을 보인다. 키는 늘
+    // Result다(연결이 추가 출력 수에 따라 바뀌지 않는다).
+    const StringView mainDisplay =
+        outputs.Value().Count() == 0 ? StringView() : StringView("return");
+    auto mainKey = OutputKey(input, out, "Result");
+    if (!mainKey) {
+        return Result<void>::Failure(mainKey.Error());
+    }
+
+    if (auto added = AddOutput(out, mainKey.Value(), resultType.Value(), mainDisplay); !added) {
+        return added;
     }
 
     for (usize index = 0; index < outputs.Value().Count(); ++index) {
@@ -462,13 +521,18 @@ Result<void> CustomDynamicPins(const DynamicPinsInput& input, PinList& out) noex
             return Result<void>::Failure(!text ? text.Error() : kind.Error());
         }
 
-        auto type = CustomOutputPinType(kind.Value());
-        auto key = UserKey(input, text.Value(), "Output", index);
-        if (!type || !key) {
-            return Result<void>::Failure(!type ? type.Error() : key.Error());
+        // UE RebuildOutputs는 이름 없는 추가 출력을 핀으로 만들지 않는다.
+        if (text.Value().IsEmpty()) {
+            continue;
         }
 
-        if (auto added = AddOutput(out, key.Value(), type.Value(), text.Value()); !added) {
+        auto type = CustomOutputPinType(kind.Value());
+        if (!type) {
+            return Result<void>::Failure(type.Error());
+        }
+
+        if (auto added = AddUserOutput(input, out, text.Value(), "Output", index, type.Value());
+            !added) {
             return added;
         }
     }
@@ -690,7 +754,7 @@ Result<void> DynamicParameterOutputPins(const DynamicPinsInput& input, PinList& 
         return read;
     }
 
-    for (usize index = 0; index < 4; ++index) {
+    for (usize index = 0; index < DynamicParameterOutputs; ++index) {
         const StringView display =
             index < names.Size() ? names[index] : DynamicParameterDefaultNames[index];
         if (auto added = AddNamedOutput(input, out, DynamicParameterDefaultNames[index],
@@ -830,6 +894,11 @@ Result<void> AggregateDynamicPins(const DynamicPinsInput& input, PinList& out) n
 
     const bool builtin = kind.Value() == static_cast<int64>(AggregateKind::MaterialAttributes);
     for (StringView name : names) {
+        // 이름 없는 속성은 핀을 만들지 않는다(편집기가 진단한다).
+        if (name.IsEmpty()) {
+            continue;
+        }
+
         const MaterialAttributeDefinition* definition =
             builtin ? FindBuiltinAttribute(name) : nullptr;
         // TODO(MPQ-MaterialAggregate): 사용자 aggregate 에셋이 생기면 그 속성 타입을 쓴다.
@@ -971,15 +1040,36 @@ Result<void> MaterialCacheDynamicPins(const DynamicPinsInput& input, PinList& ou
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        auto key = UserKey(input, text.Value(), "Attribute", index);
-        if (!key) {
-            return Result<void>::Failure(key.Error());
+        const MaterialPinType type = static_cast<MaterialPinType>(kind.Value());
+        if (!sample.Value()) {
+            auto key = UserKey(input, text.Value(), "Attribute", index);
+            if (!key) {
+                return Result<void>::Failure(key.Error());
+            }
+
+            if (auto added = AddInput(out, key.Value(), type, text.Value()); !added) {
+                return added;
+            }
+        }
+    }
+
+    // UE ConstructOutputs: 출력은 견본 여부와 상관없이 속성마다 하나다. 같은 키의 입력이 있으면
+    // 출력 키에 Out을 붙인다.
+    for (usize index = 0; index < attributes.Value().Count(); ++index) {
+        auto element = attributes.Value().Element(index);
+        if (!element) {
+            return Result<void>::Failure(element.Error());
         }
 
-        const MaterialPinType type = static_cast<MaterialPinType>(kind.Value());
-        auto added = sample.Value() ? AddOutput(out, key.Value(), type, text.Value())
-                                    : AddInput(out, key.Value(), type, text.Value());
-        if (!added) {
+        auto text = element.Value().ReadText("decoration");
+        auto kind = element.Value().ReadInteger("valueType", 0);
+        if (!text || !kind) {
+            return Result<void>::Failure(!text ? text.Error() : kind.Error());
+        }
+
+        if (auto added = AddUserOutput(input, out, text.Value(), "Attribute", index,
+                                       static_cast<MaterialPinType>(kind.Value()));
+            !added) {
             return added;
         }
     }

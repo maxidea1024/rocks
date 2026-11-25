@@ -65,7 +65,7 @@ constexpr StringView ChannelMaskParameterNonSemantic[] = {"group", "sortPriority
 constexpr MaterialPropertyTextDefault ChannelMaskParameterTextDefaults[] = {
     {"parameterName", "Param"}};
 constexpr MaterialPinDefinition ChannelMaskParameterPins[] = {
-    MaterialInput("Input", MaterialPinType::Numeric, "Input", {},
+    MaterialInput("Input", MaterialPinType::Float4, "Input", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
     MaterialOutput("Result", MaterialPinType::Float1, ""),
 };
@@ -74,7 +74,7 @@ constexpr StringView StaticBoolParameterNonSemantic[] = {"group", "sortPriority"
 constexpr MaterialPropertyTextDefault StaticBoolParameterTextDefaults[] = {
     {"parameterName", "Param"}};
 constexpr MaterialPinDefinition StaticBoolParameterPins[] = {
-    MaterialOutput("Result", MaterialPinType::Numeric, ""),
+    MaterialOutput("Result", MaterialPinType::StaticBool, ""),
 };
 
 constexpr StringView StaticSwitchParameterNonSemantic[] = {"group", "sortPriority"};

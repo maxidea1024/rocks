@@ -15,6 +15,7 @@ struct SpeedTreeProperties {
     ROCKS_PROPERTY() SpeedTreeGeometryType geometryType = SpeedTreeGeometryType::Branch;
     ROCKS_PROPERTY() SpeedTreeWindType windType = SpeedTreeWindType::None;
     ROCKS_PROPERTY() SpeedTreeLodType lodType = SpeedTreeLodType::Pop;
+    ROCKS_PROPERTY() float billboardThreshold = 0.9f;
     ROCKS_PROPERTY() bool accurateWindVelocities = false;
 };
 

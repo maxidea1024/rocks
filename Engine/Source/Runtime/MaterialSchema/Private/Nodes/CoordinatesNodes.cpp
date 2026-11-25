@@ -56,7 +56,8 @@ constexpr MaterialPinDefinition PannerPins[] = {
     MaterialInput("Coordinate", MaterialPinType::Numeric, "Coordinate", {},
                   MaterialPinFlags::HideValue),
     MaterialInput("Time", MaterialPinType::Numeric, "Time", {}, MaterialPinFlags::HideValue),
-    MaterialInput("Speed", MaterialPinType::Numeric, "Speed", MaterialPinDefault::Scalar(0.0f)),
+    MaterialInput("Speed", MaterialPinType::Numeric, "Speed",
+                  MaterialPinDefault::Vector2(0.0f, 0.0f)),
     MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
@@ -136,7 +137,7 @@ constexpr MaterialNodeDefinition CoordinatesDefinitions[] = {
               "Truncate World Position."),
     MaterialNode("Material.LightmapUvs")
         .Pins(LightmapUvsPins)
-        .Menu("Lightmap Uvs", "Coordinates", "Coordinates LightmapUVs",
+        .Menu("LightmapUVs", "Coordinates", "Coordinates LightmapUVs",
               "A material expression that routes LightmapUVs to the material.")
         .Features(ToMask(MaterialContextFeature::Lightmap)),
     MaterialNode("Material.ObjectRadius")

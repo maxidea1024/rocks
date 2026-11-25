@@ -668,20 +668,6 @@
     },
     {
       "kind": "field",
-      "name": "rocks::material::DecalMipmapLevelProperties::constHeight",
-      "id": "050bc049c9fd413b8080d9dd98b9ccc5",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::DecalMipmapLevelProperties::constWidth",
-      "id": "37dfbbc81a704c798c1ec7245bf09c3c",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
       "name": "rocks::material::DepthOfFieldFunctionProperties::functionValue",
       "id": "5ecbd015d6d344f5a8e4b80b55595f75",
       "aliases": [],
@@ -2306,13 +2292,6 @@
     },
     {
       "kind": "field",
-      "name": "rocks::material::PannerProperties::speedX",
-      "id": "013191ff84b546c9b06d2dd2a6e6fafa",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
       "name": "rocks::material::ParameterChannelNames::a",
       "id": "d58ff3f1e0c847b28526266c00ba52c3",
       "aliases": [],
@@ -2518,6 +2497,13 @@
       "kind": "field",
       "name": "rocks::material::ParticleSubUvProperties::texture",
       "id": "aa369b890f2a4ecaa254cfb612f69259",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::PathTracingBufferTextureProperties::pathTracingBufferTextureId",
+      "id": "bdb960ff1f6242bb8956bf77c8020f3b",
       "aliases": [],
       "retired": false
     },
@@ -3006,13 +2992,6 @@
     },
     {
       "kind": "field",
-      "name": "rocks::material::SobolProperties::constSeed",
-      "id": "1aa091c0e2ac4faa9da076a3939d7d49",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
       "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::group",
       "id": "f5ac3b364aa6472dad6523a62f3b1e5b",
       "aliases": [],
@@ -3141,6 +3120,13 @@
       "kind": "field",
       "name": "rocks::material::SpeedTreeProperties::accurateWindVelocities",
       "id": "ad0176852e334e62896cd66976b6ed1e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SpeedTreeProperties::billboardThreshold",
+      "id": "500124a5baa94d8cbff93edaad2f2b1c",
       "aliases": [],
       "retired": false
     },
@@ -3461,6 +3447,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::SurfaceVolumetricFogCloudProperties::emissiveOnly",
+      "id": "e6d7d2cabfc14a18b00ca3466a1e7310",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::SwitchInput::inputName",
       "id": "ce52d650925343078d68377c7c04a2ae",
       "aliases": [],
@@ -3484,13 +3477,6 @@
       "kind": "field",
       "name": "rocks::material::TangentProperties::period",
       "id": "62066a4c1c22447db141aa8cd4531f3c",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::TemporalSobolProperties::constSeed",
-      "id": "e092cc268a524cd28ad6ce90568aa0ef",
       "aliases": [],
       "retired": false
     },
@@ -4574,41 +4560,6 @@
     },
     {
       "kind": "field",
-      "name": "rocks::material::VolumetricAdvancedOutputProperties::constMultiScatteringContribution",
-      "id": "4ed43f96f2db4f748252f9717b89b3ea",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::VolumetricAdvancedOutputProperties::constMultiScatteringEccentricity",
-      "id": "a28ac75a79684e66b9a13ea35976bb49",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::VolumetricAdvancedOutputProperties::constMultiScatteringOcclusion",
-      "id": "954e255a44634b638cef27d361ba6a97",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::VolumetricAdvancedOutputProperties::constPhaseG",
-      "id": "83bafaa0a520446f982f944371e383f7",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::VolumetricAdvancedOutputProperties::constPhaseG2",
-      "id": "1b612fb0ba4c448b9e549988d8befd6c",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
       "name": "rocks::material::VolumetricAdvancedOutputProperties::grayScaleMaterial",
       "id": "d23945359c014195bced3071b65241fb",
       "aliases": [],
@@ -4933,13 +4884,6 @@
       "kind": "type",
       "name": "rocks::material::DecalBufferTextureProperties",
       "id": "34b9b764d7294b70ad830942c95c2214",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
-      "name": "rocks::material::DecalMipmapLevelProperties",
-      "id": "d4916208225d43abae2498bc4a5b353d",
       "aliases": [],
       "retired": false
     },
@@ -5477,6 +5421,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::PathTracingBufferTextureId",
+      "id": "891244dd6571474cb0b8a4100fe95377",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::PathTracingBufferTextureProperties",
+      "id": "838b701ef9264d9d96c2975dd4a709e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::PerInstanceCustomData3Properties",
       "id": "3c0706dc8b004602970d536df8cb15f2",
       "aliases": [],
@@ -5792,13 +5750,6 @@
     },
     {
       "kind": "type",
-      "name": "rocks::material::SobolProperties",
-      "id": "95781d198c064a32bf63d3eee501e5a8",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
       "name": "rocks::material::SparseVolumeTextureObjectParameterProperties",
       "id": "aa08966d9f4242089f078a2fd369e28d",
       "aliases": [],
@@ -5988,6 +5939,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::SurfaceVolumetricFogCloudProperties",
+      "id": "e3f0480b9e3e4818b3b051db9b7b539e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::SwitchInput",
       "id": "383ad1886b904876b4667d26dc3c19d3",
       "aliases": [],
@@ -6004,13 +5962,6 @@
       "kind": "type",
       "name": "rocks::material::TangentProperties",
       "id": "f2390df1330d4becb420832b7a6b1ba5",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
-      "name": "rocks::material::TemporalSobolProperties",
-      "id": "91337889754a4d78b1753e56a9f27ef5",
       "aliases": [],
       "retired": false
     },

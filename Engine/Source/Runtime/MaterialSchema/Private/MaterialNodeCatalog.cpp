@@ -141,10 +141,18 @@ Result<void> ValidateDefinition(const MaterialNodeDefinition& definition) noexce
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 필드마다 기본값 하나다(같은 필드가 두 번이면 어느 값이 이기는지 정해지지 않는다).
         const TypeSchema& schema = definition.propertiesSchema();
-        for (const MaterialPropertyTextDefault& entry : definition.textDefaults) {
-            if (!IsTextField(schema, entry.field)) {
+        const Span<const MaterialPropertyTextDefault> entries = definition.textDefaults;
+        for (usize index = 0; index < entries.Size(); ++index) {
+            if (!IsTextField(schema, entries[index].field)) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            for (usize earlier = 0; earlier < index; ++earlier) {
+                if (entries[earlier].field == entries[index].field) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
             }
         }
     }
@@ -192,19 +200,6 @@ Result<void> BuildDescriptorArrays(NamePool& names, const MaterialNodeDefinition
         descriptor.valuePolicy = ValuePolicyOf(pin);
         // 용량을 미리 잡았으므로 실패하지 않는다.
         (void)pins.TryPushBack(descriptor);
-    }
-
-    if (!definition.textDefaults.IsEmpty()) {
-        if (definition.propertiesSchema == nullptr) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        const TypeSchema& schema = definition.propertiesSchema();
-        for (const MaterialPropertyTextDefault& entry : definition.textDefaults) {
-            if (!IsTextField(schema, entry.field)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-        }
     }
 
     for (const MaterialPassThrough& pair : definition.passThrough) {

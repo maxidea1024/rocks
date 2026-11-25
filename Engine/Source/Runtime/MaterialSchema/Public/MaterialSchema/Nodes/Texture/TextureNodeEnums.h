@@ -16,6 +16,17 @@ enum class ExposedTextureProperty : uint8 {
     TexelSize = 1
 };
 
+// PathTracingBufferTextureId 값이다(UE EPathTracingBufferTextureId —
+// RE/Public/Materials/MaterialExpressionPathTracingBufferTexture.h).
+ROCKS_ENUM()
+enum class PathTracingBufferTextureId : uint8 {
+    Radiance = 0,
+    DenoisedRadiance = 1,
+    Albedo = 2,
+    Normal = 3,
+    Variance = 4
+};
+
 // SamplerSourceMode 값이다(UE ESamplerSourceMode — RE/Classes/Engine/EngineTypes.h).
 ROCKS_ENUM()
 enum class SamplerSourceMode : uint8 {

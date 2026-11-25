@@ -91,7 +91,7 @@ constexpr MaterialNodeDefinition ParticlesDefinitions[] = {
         .Features(ToMask(MaterialContextFeature::Particle)),
     MaterialNode("Material.ParticleMacroUv")
         .Pins(ParticleMacroUvPins)
-        .Menu("Particle Macro Uv", "Particles", "Particles ParticleMacroUV",
+        .Menu("Particle MacroUV", "Particles", "Particles ParticleMacroUV",
               "This UV node generates texture coordinates in view space centered on the particle "
               "system's MacroUVPosition, with tiling controlled by the particle system's "
               "MacroUVRadius. It is useful for mapping a 'macro' noise texture in a continuous "
@@ -136,8 +136,8 @@ constexpr MaterialNodeDefinition ParticlesDefinitions[] = {
         .Features(ToMask(MaterialContextFeature::Particle)),
     MaterialNode("Material.ParticleSubUvProperties")
         .Pins(ParticleSubUvPropertiesPins)
-        .Menu("Particle Sub Uv Properties", "Particles",
-              "Particles Coordinates ParticleSubUVProperties", "Particle Sub Uv Properties.")
+        .Menu("Particle SubUV Properties", "Particles",
+              "Particles Coordinates ParticleSubUVProperties", "Particle SubUV Properties.")
         .Features(ToMask(MaterialContextFeature::Particle)),
     MaterialNode("Material.SphericalParticleOpacity")
         .Pins(SphericalParticleOpacityPins)

@@ -3,7 +3,7 @@
 #include <MaterialSchema/Nodes/Vectors/VectorsNodeEnums.h>
 #include <Meta/Annotations.h>
 
-// Distance Field Approx Ao 노드의 속성이다(Docs/Design/MaterialSystem 19.6·19.13절, UE
+// DistanceFieldApproxAO 노드의 속성이다(Docs/Design/MaterialSystem 19.6·19.13절, UE
 // UMaterialExpressionDistanceFieldApproxAO —
 // RE/Public/Materials/MaterialExpressionDistanceFieldApproxAO.h). 이름·기본값은 UE와 같다(b 접두를
 // 떼고 camelCase).

@@ -47,16 +47,16 @@ MS1b는 19.6절 표의 "구현"·"TODO" 노드 297개의 정의(핀·속성 stru
 
 #### 19.13.3 핀
 
-- **키와 순서**: UE 입력 멤버 선언 순서(부모 클래스부터)와 이름이다(19.5절). 출력은 UE 생성자의 `Outputs` 목록 순서와 이름이다. 이름 없는 출력 하나는 키 `Result`다(UE는 빈 이름).
+- **키와 순서**: UE 입력 멤버 선언 순서(부모 클래스부터)와 이름이다(19.5절). 출력은 UE 생성자의 `Outputs` 목록 순서와 이름이다. 이름 없는 출력은 첫 출력이면 키 `Result`, 그 뒤 출력이면 마스크 성분 글자(`R`·`G`·`B`·`A`·`RGB` 등 — UE는 마스크 색으로 보인다)이고 표시 이름은 빈 채다. 마스크도 없으면 `Result`이며 키가 겹치면 정의 생성이 실패한다(손 대응 대상).
 - **입력 타입**: UE `GetInputValueType`의 값이다. 함수가 없으면 UE 기본 `MCT_Float`이다. 입력 struct 종류가 정하는 타입은 그것을 쓴다: `FMaterialAttributesInput` → `MaterialAttributes`, `FSubstrateMaterialInput` → `Surface`, `FShadingModelMaterialInput` → `ShadingModel`.
 - **출력 타입**: UE `GetOutputValueType`의 값이다. 없으면 출력 마스크로 정한다. 마스크가 켠 성분이 1·2·3·4개면 `Float1`–`Float4`, 마스크가 없으면 `Numeric`(입력 폭을 따른다 — 5.3절)이다.
-- **UE 값 타입 대응**: `MCT_Float` → `Numeric`, `MCT_Float1..4` → `Float1..4`, `MCT_LWCScalar..LWCVector4` → `Double1..4`, `MCT_UInt1..4` → `UInt1..4`, `MCT_Bool` → `Bool`, `MCT_StaticBool` → `StaticBool`, `MCT_Texture` → `TextureAny`, `MCT_Texture2D`·`Texture2DArray`·`TextureCube`·`TextureCubeArray`·`VolumeTexture` → 같은 이름(`VolumeTexture`는 `Texture3D`), `MCT_TextureExternal` → `TextureExternal`, `MCT_TextureVirtual` → `TextureVirtual`, `MCT_SparseVolumeTexture` → `SparseVolumeTexture`, `MCT_TextureCollection` → `TextureCollection`, `MCT_TextureMeshPaint` → `TextureMeshPaint`, `MCT_TextureMaterialCache` → `TextureMaterialCache`, `MCT_MaterialAttributes` → `MaterialAttributes`, `MCT_Substrate` → `Surface`, `MCT_ShadingModel` → `ShadingModel`, `MCT_Unknown` → `Numeric`.
+- **UE 값 타입 대응**: `MCT_Float` → `Numeric`, `MCT_Float1..4` → `Float1..4`, `MCT_LWCScalar..LWCVector4` → `Double1..4`, `MCT_UInt1..4` → `UInt1..4`, `MCT_Bool` → `Bool`, `MCT_StaticBool` → `StaticBool`, `MCT_Texture` → `TextureAny`, `MCT_Texture2D`·`Texture2DArray`·`TextureCube`·`TextureCubeArray`·`VolumeTexture` → 같은 이름(`VolumeTexture`는 `Texture3D`), `MCT_TextureExternal` → `TextureExternal`, `MCT_TextureVirtual` → `TextureVirtual`, `MCT_SparseVolumeTexture` → `SparseVolumeTexture`, `MCT_TextureCollection` → `TextureCollection`, `MCT_TextureMeshPaint` → `TextureMeshPaint`, `MCT_TextureMaterialCache` → `TextureMaterialCache`, `MCT_MaterialAttributes` → `MaterialAttributes`, `MCT_Substrate` → `Surface`, `MCT_ShadingModel` → `ShadingModel`, `MCT_Unknown` → `Any`(통과 핀 — 아래), `MCT_LWCMatrix`·`MCT_Float4x4` → `Float4x4`(행렬 LWC 값은 핀에서 구분하지 않는다 — 문맥 값 표의 행렬만 쓰고 번역이 LWC 행렬을 Double 행렬로 다룬다, 6.8절), `MCT_Float3x3` → `Float3x3`.
 - **조건부 핀**: UE가 속성에 따라 입력·출력을 숨기면(`GetInputValueType`·`GetInputs`의 분기, 예: `TextureSample`의 `MipValueMode`) 같은 조건의 동적 핀 함수를 둔다. 정적 핀 목록에는 늘 있는 핀만 둔다.
 - **동적 핀 함수**(`Private/Nodes/MaterialDynamicPins.cpp`)는 UE가 속성에 따라 핀을 바꾸는 노드에 둔다. 동적 핀은 입력 기본값이 없다(연결이 없을 때의 값은 UE처럼 Const 속성이 준다 — 예: TransformPosition의 `constPeriodicWorldTileSize`).
 
   | 노드 | 핀 | 키 |
   |---|---|---|
-  | CustomHlsl | 입력 `inputs`(타입 Any — UE도 텍스처 객체를 HLSL 인자로 받는다), 출력 Result(`outputType`)·`additionalOutputs` | 사용자 이름, 비면 `Input<n>`·`Output<n>` |
+  | CustomHlsl | 입력 `inputs`(타입 Any — UE도 텍스처 객체를 HLSL 인자로 받는다), 출력 Result(`outputType`)·`additionalOutputs`(이름 없는 추가 출력은 핀이 없다, 추가 출력이 있으면 Result 표시 이름이 "return" — UE `RebuildOutputs`) | 입력은 사용자 이름, 비면 `Input<n>`. 출력은 Result·사용자 이름(키 충돌 규칙) |
   | Switch | `inputs` 분기 입력(정적 SwitchValue·Default 뒤) | 사용자 이름, 비면 `Input<n>` |
   | Convert | `convertInputs`·`convertOutputs`(성분 폭 타입) | `Input<n>`·`Output<n>` |
   | Operator | `dynamicInputs` | A–Z, 27번째부터 `Input<n>`(표시 이름 없음 — UE는 "Input <n>") |
@@ -68,17 +68,23 @@ MS1b는 19.6절 표의 "구현"·"TODO" 노드 297개의 정의(핀·속성 stru
   | DynamicParameter | 출력 Param1–Param4(표시 이름 `paramNames`)·RGB·RGBA | Param1–Param4 |
   | FunctionCall | 함수 입출력 사본 `inputs`·`outputs`(UE `FunctionInputs`·`FunctionOutputs` — 함수가 바뀌면 에디터가 다시 채운다) | `P_<입출력 노드 id 32자 hex>`(NodeGraph GD2) |
   | FunctionInput | Preview 입력과 Result 출력(타입 `inputType`) | Preview·Result |
-  | Aggregate | `attributeNames`마다 입력·출력 한 쌍(MaterialAttributes 종류면 내장 속성 타입, 사용자 종류는 Any — TODO MPQ-MaterialAggregate) | 입력은 속성 이름, 출력은 `<이름>Out`(키 충돌 규칙) |
+  | Aggregate | `attributeNames`마다 입력·출력 한 쌍(MaterialAttributes 종류면 내장 속성 타입, 사용자 종류는 Any — TODO MPQ-MaterialAggregate). 빈 이름은 핀이 없다 | 입력은 속성 이름, 출력은 늘 `<이름>Out` |
   | GetAttributes·SetAttributes | `attributeGetTypes`·`attributeSetTypes`마다 출력·입력(내장 속성 표의 이름·타입, custom 속성은 표시 없음·Any) | `A_<속성 id 32자 hex>` |
   | LayerStack | 레이어 함수 입력 사본 `layerInputs`(UE `LayerInputs`) | 입력 이름 |
-  | MaterialCacheOutput | 표본(`isSample`)이면 Primitive·UV 입력과 `attributes` 출력, 아니면 `attributes` 입력 | 속성 표시 이름 |
+  | MaterialCacheOutput | 출력은 늘 `attributes`마다 하나(UE `ConstructOutputs`). 입력은 견본(`isSample`)이면 Primitive·UV, 아니면 `attributes`마다 하나(UE `GetInput`) | 속성 표시 이름(비면 `Attribute<n>`), 출력은 키 충돌 규칙 |
 
 - UE가 계속 저장하지만 편집 지정자가 없는 칸 중 핀을 정하는 사본(FunctionCall 입출력, LayerStack 입력, MaterialCache 속성, Convert 성분 대응 `convertMappings`, NamedRerouteUsage `declaration`, 함수 입출력 노드 `id`)은 속성에 넣는다(19.13.2절 예외).
-- **UE와 다른 점**: UE Custom 생성자는 이름 없는 입력 하나를 더하지만 Rocks 새 노드는 입력이 없다(배열 기본값은 정적 data로 주지 않는다). Operator 27번째 이후 입력의 표시 이름이 없다. 속성에 따라 바뀌는 정적 핀 표시 이름은 대표 이름 하나다.
+- **UE와 다른 점**:
+  - UE Custom 생성자는 이름 없는 입력 하나를 더하지만 Rocks 새 노드는 입력이 없다(배열 기본값은 정적 data로 주지 않는다). Operator·Switch의 기본 입력 배열도 비어 있다(UE 생성자는 Operator에 `Arity`개, Switch에 이름 없는 입력 하나를 더한다). 에디터의 노드 추가 명령이 UE와 같은 수를 채운다(14장 E15).
+  - Operator 27번째 이후 입력의 표시 이름이 없다. 속성에 따라 바뀌는 정적 핀 표시 이름은 대표 이름 하나다.
+  - TextureObjectParameter 출력은 UE `MCT_Texture`(아무 텍스처)가 아니라 `texture`의 기대 클래스로 좁힌 타입이다(TextureObject와 같은 규칙). 연결 검사가 텍스처 종류를 미리 본다.
+  - 동적 입력에는 `Required`가 없다(`PinDescriptor`에 필수 표지가 없다). 연결이 없을 때 오류인지는 lowering(MS2)이 속성을 보고 UE `Compile`대로 판정한다.
+  - Custom 추가 출력의 타입은 이름 있는 추가 출력 각자의 `outputType`이다. UE `GetOutputValueType`은 이름 없는 출력을 건너뛴 뒤에도 원래 색인으로 찾아 타입이 어긋날 수 있다. Rocks는 핀과 원소를 바로 잇는다.
+  - Switch 사용자 입력 이름이 정적 핀 키(SwitchValue·Default)나 다른 입력과 같으면 동적 핀 계산이 `InvalidArgument`로 실패하고 에디터가 진단한다(UE는 이름이 같아도 색인으로 구분한다). Custom 입력 이름이 같을 때도 같다. 출력만 키 충돌 규칙(`Out`)으로 피한다.
 - **필수 입력**(`Required` — 연결이 없으면 번역 오류)은 UE `Compile`이 연결 없음을 오류로 내는 입력이다(`if (!X.GetTracedInput().Expression) return Compiler->Errorf(...)` 꼴, 가장 가까운 조상의 `Compile`). UE `meta=(RequiredInput)`·`IsInputConnectionRequired`는 편집기 표시(굵은 핀)일 뿐이라 근거로 쓰지 않는다. 예: Substrate BSDF 입력은 메타가 없어 표시는 필수지만 `Compile`이 기본값을 넣으므로 Rocks에서는 필수가 아니다. 입력 배열 스위치(Quality·RenderPath·CapabilityTier)의 Default는 UE `IsInputConnectionRequired`와 `Compile`이 함께 요구하므로 필수다. 각 노드의 lowering 단계(MS2)가 `Compile`을 옮기며 이 표를 다시 확인한다.
 - static 전용 입력은 `StaticOnly`(핀 타입 StaticBool·StaticInt·StaticEnum), UE `meta=(AdvancedDisplay)` 입력은 `Advanced`다. 기본값이 없는 입력은 값 편집을 숨긴다(`HideValue` — UE도 입력 덮기 상수가 없는 입력에는 칸이 없다).
 - **표시 이름**은 UE `GetInputName`이다. 재정의가 없으면 UE 기본 규칙대로 입력 멤버 이름 그대로이고(띄어쓰기 없음), C 배열 입력은 `<이름>_<색인>`이다(UE `UMaterialExpression::GetInputName`). UE가 속성에 따라 바꾸는 표시 이름(world 위치 원점에 따른 "Absolute World Position" 등, Substrate shading model별 이름)은 정적 핀에서는 대표 이름 하나로 둔다. 동적 핀은 UE와 같게 바꾼다.
-- **키 충돌**: 입력과 출력이 같은 이름이면(UE `SubstrateTransmittanceToMFP`의 `Thickness`, `GetMaterialAttributes`의 `MaterialAttributes`) 출력 키에 `Out`을 붙인다. NodeGraph 핀 키는 방향과 상관없이 노드 안에서 유일하다. 표시 이름은 UE 그대로다. UnrealExchange는 이 규칙으로 출력 이름을 잇는다.
+- **키 충돌**: 입력과 출력이 같은 이름이면(UE `SubstrateTransmittanceToMFP`의 `Thickness`, `GetMaterialAttributes`의 `MaterialAttributes`) 출력 키에 `Out`을 붙인다. 동적 출력도 같다: 키가 이미 있는 핀(정적·동적, 방향 무관)과 같으면 `Out`을 붙이고, 붙인 키도 있으면 계산이 `InvalidArgument`로 실패한다. NodeGraph 핀 키는 방향과 상관없이 노드 안에서 유일하다. 표시 이름은 UE 그대로다. UnrealExchange는 이 규칙으로 출력 이름을 잇는다.
 - **입력 배열 노드**: UE `FExpressionInput Inputs[N]`(QualitySwitch·ShadingPathSwitch·FeatureLevelSwitch)는 UE `GetInputName`의 이름을 키로 한 정적 핀이다. QualitySwitch는 Default·Low·High·Medium·Epic, RenderPathSwitch는 Default·Deferred·Forward(표시 Forward+)·Mobile, CapabilityTierSwitch는 Default·ES3_1(표시 Mobile)·SM5·SM6이다. UE의 제거된 기능 등급(ES2_REMOVED·SM4_REMOVED) 칸은 두지 않는다.
 - **동적 핀 함수의 속성 읽기**: `nodegraph::DynamicPinsFn`은 문서 view와 NamePool만 받는다(객체 Registry가 없다). 그래서 `NodePropertyReader`가 속성 Record를 공용 `RecordReader`로 직접 읽는다. 필드는 리플렉션 schema의 필드 이름으로 찾고 id는 schema가 준다. 기록되지 않은 필드는 기본값이다(누락 = 기준). 읽은 문자열은 속성 바이트를 빌린다. NodeGraph 6.2절이 동적 핀 표시 이름을 노드 속성 바이트에 두도록 허용한다. 버린 대안: `DynamicPinsInput`에 객체 Registry를 넣어 `LoadStructRecord`로 struct 전체를 해석하는 것. NodeGraph 서술 계약을 바꾸고, 핀 계산마다 struct 전체 할당과 2단계 해석을 하게 된다.
 - **통과 핀 타입 `Any`**: UE `MCT_Unknown` 입출력(static switch·reroute·조건 스위치 값)은 `MaterialPinType::Any`다(5.3절). 연결 때 막지 않고 번역이 연결된 값의 타입으로 정한다.
@@ -95,14 +101,15 @@ MS1b는 19.6절 표의 "구현"·"TODO" 노드 297개의 정의(핀·속성 stru
 #### 19.13.5 문맥 값 표
 
 - `MaterialContextValue`는 19.3.2절 항목을 데이터로 가진다: 이름, 반환 타입(`MaterialPinType`), 형태(필드·함수와 인자 수), 공급 기능(`MaterialContextFeature`), 허용 영역 mask(`MaterialDomain`), 단계 mask, 최소 기능 등급, 미분(`Zero`·`Valid`·`NotAware`), 공급하지 않았을 때의 UE 기본값(scalar 4개), previous 변형 여부.
-- 원본은 UE `BaseMaterialExpressions.ini`의 외부 코드 선언 101개와 템플릿 필드다. 이름은 Rocks 이름 규칙(19.5절)으로 바꾸고 UE 이름은 주석에 둔다.
+- 원본은 UE `BaseMaterialExpressions.ini`의 외부 코드 선언 101개와 템플릿 필드다. 이름은 Rocks 이름 규칙(19.5절)으로 바꾸고 UE 이름은 `unrealName`에 둔다. UE 함수형 이름의 `Get` 접두는 뗀다(`GetActorWorldPosition` → `ActorWorldPosition`). 떼면 다른 UE 이름과 같아지는 것(`GetParticleToWorld`와 `ParticleToWorld`)은 그대로 둔다. 반환 타입 `MCT_LWCMatrix`는 `Float4x4`다(위 대응).
 - HLSL 정의 문자열은 표에 두지 않는다. 그것은 생성 원문의 일이라 MS2b가 `MaterialCommon.rsh` 쪽에 둔다.
 - 공급 기능은 UE 환경 정의(`NEEDS_PARTICLE_*`·`USES_*`)와 원천 데이터로 정한다(19.3.1절).
 
 #### 19.13.6 시험(MS-T12 (a))
 
-- 등록된 정의마다 (id, 상태, 선행, 범주)가 목록 파일의 행과 같고, 목록의 구현·TODO 행이 모두 등록되어 있다. 목록 파일은 시험 데이터로 빌드에 넣는다.
+- 등록된 정의마다 (id, 상태, 선행, 범주)가 목록 파일의 행과 같고, 목록의 구현·TODO 행이 모두 등록되어 있다. 시험은 목록 파일을 빌드 산출물로 복사하지 않고 소스 트리에서 읽는다(시험 소스의 `__FILE__`에서 모듈 폴더를 찾아 `MaterialNodeCatalog.json`을 연다). 소스 트리가 없는 실행에서는 시험이 실패한다(목록과 코드가 어긋난 채 통과하지 않는다).
 - 정의마다: 핀 키가 겹치지 않음, 기본값 성분 수가 핀 타입 폭 이하, 속성 schema가 리플렉션에 등록됨, `nonSemanticFields`가 schema 필드임(등록 검사가 이미 한다).
-- 동적 핀 함수마다 속성 값 둘 이상(기본값과 바꾼 값)으로 핀 목록을 확인한다.
+- 동적 핀 함수마다 속성 값 둘 이상(기본값과 바꾼 값, 배열은 원소 둘 이상과 빈 이름)으로 핀 목록을 확인하고, 모르는 enum 값과 키 충돌은 `InvalidArgument`인지 본다.
+- `textDefaults`는 속성 schema의 최상위 String·Name 필드이고 필드마다 하나다(등록 검사).
 - 문맥 값 표: 이름이 겹치지 않음, 101개 UE 선언이 모두 대응됨, 공급 기능이 유효함.
 - policy: `TODO(` 표기가 `TODO(MPQ-<이름>)` 형식이고 이름이 19.4.1절 표에 있다.

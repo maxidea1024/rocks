@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 16(초안) | 2026-11-26 | MS1b 리뷰 반영(19.13절): `MCT_Unknown` → `Any`, `MCT_LWCMatrix` → `Float4x4`, 이름 없는 출력 여럿의 키(마스크 글자), 동적 출력 키 충돌 규칙, Custom 추가 출력(이름 없는 것 생략·"return"), Aggregate 빈 이름 생략, MaterialCache 출력은 늘 속성마다, UE와 다른 점 다섯(기본 입력 배열·TextureObjectParameter 출력 타입·동적 입력 Required 없음·Custom 출력 타입·Switch 이름 충돌 진단), 문맥 값 `Get` 접두 규칙, 목록 파일 읽기 방식, `textDefaults` 필드마다 하나. 14절 E15(새 노드 초기 배열 원소). 6.6·6.8절: 값 번호는 깊이 우선 후위 순, `sqrt`는 아직 접지 않음 |
 | 15(초안) | 2026-11-26 | MS2a 구현 세부를 6.8·7.7절에 적었다: 세 묶음(MS2a1 IR 핵심·MS2a2 번역기·MS2a3 HLSL 생성), IR 타입·연산·값·빌더·상수 접기 범위·대수 단순화·DCE·IR hash, lowering 표와 `NotYetLowered`, 입력 값·암묵 변환·폭 규칙, MS2a 진단 범위, 생성 원문 리터럴·연산 철자·DynamicBranch·원문 위치 지도 |
 | 14(초안) | 2026-11-26 | MS1b2 구현 규칙을 19.13.3절에 적었다: 필수 입력은 UE `Compile`의 연결 없음 오류가 근거(메타 `RequiredInput`은 표시용), 표시 이름은 UE `GetInputName`(기본은 멤버 이름 그대로), 입출력 같은 이름은 출력 키에 `Out`, 입력 배열 스위치의 정적 핀, 동적 핀 노드 표, UE와 다른 점 셋 |
 | 13(초안) | 2026-11-26 | 19.13절(노드 정의 코드 — MS1b 파일 배치·UE 변환 규칙·동적 핀 속성 읽기 `NodePropertyReader`·새 노드 문자열 기본값 `textDefaults`·문맥 값 표 형식)을 더했다. 5.3절에 `Numeric`·`Any`·`ShadingModel` 행을 더했다(`Any`는 UE `MCT_Unknown` 통과 핀) |

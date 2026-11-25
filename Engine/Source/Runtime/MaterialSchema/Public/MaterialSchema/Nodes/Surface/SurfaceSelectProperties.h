@@ -11,7 +11,7 @@ ROCKS_STRUCT()
 struct SurfaceSelectProperties {
     ROCKS_GENERATED_BODY()
 
-    ROCKS_PROPERTY() float threshold {};
+    ROCKS_PROPERTY() float threshold = 0.5f;
 };
 
 } // namespace rocks::material

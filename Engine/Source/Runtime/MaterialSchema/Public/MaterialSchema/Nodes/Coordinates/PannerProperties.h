@@ -11,7 +11,6 @@ ROCKS_STRUCT()
 struct PannerProperties {
     ROCKS_GENERATED_BODY()
 
-    ROCKS_PROPERTY() float speedX {};
     ROCKS_PROPERTY() uint32 constCoordinate = 0;
     ROCKS_PROPERTY() bool fractionalPart {};
 };

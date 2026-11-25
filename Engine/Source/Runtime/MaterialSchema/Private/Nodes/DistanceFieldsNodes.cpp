@@ -51,8 +51,8 @@ constexpr MaterialNodeDefinition DistanceFieldsDefinitions[] = {
     MaterialNode("Material.DistanceFieldApproxAo")
         .Properties(&GeneratedType<DistanceFieldApproxAoProperties>::Schema)
         .Pins(DistanceFieldApproxAoPins)
-        .Menu("Distance Field Approx Ao", "Distance Fields", "Utility DistanceFieldApproxAO",
-              "Distance Field Approx Ao.")
+        .Menu("DistanceFieldApproxAO", "Distance Fields", "Utility DistanceFieldApproxAO",
+              "DistanceFieldApproxAO.")
         .Features(ToMask(MaterialContextFeature::DistanceField)),
 };
 

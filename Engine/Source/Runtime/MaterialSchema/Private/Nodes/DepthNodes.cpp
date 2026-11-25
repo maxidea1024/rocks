@@ -13,12 +13,12 @@ namespace {
 
 constexpr MaterialPinDefinition SceneDepthPins[] = {
     MaterialInput("Input", MaterialPinType::Numeric, "Input",
-                  MaterialPinDefault::Vector2(2.0f, 0.0f)),
+                  MaterialPinDefault::Vector2(0.0f, 0.0f)),
     MaterialOutput("Result", MaterialPinType::Float1, ""),
 };
 
 constexpr MaterialPinDefinition DepthFadePins[] = {
-    MaterialInput("InOpacity", MaterialPinType::Numeric, "InOpacity",
+    MaterialInput("InOpacity", MaterialPinType::Numeric, "Opacity",
                   MaterialPinDefault::Scalar(1.0f)),
     MaterialInput("FadeDistance", MaterialPinType::Numeric, "FadeDistance",
                   MaterialPinDefault::Scalar(100.0f)),

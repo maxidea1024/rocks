@@ -11,7 +11,7 @@ ROCKS_STRUCT()
 struct SurfaceAddProperties {
     ROCKS_GENERATED_BODY()
 
-    ROCKS_PROPERTY() bool useParameterBlending {};
+    ROCKS_PROPERTY() bool useParameterBlending = false;
 };
 
 } // namespace rocks::material

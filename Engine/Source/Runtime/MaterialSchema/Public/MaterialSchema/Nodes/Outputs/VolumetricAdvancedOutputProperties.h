@@ -12,13 +12,8 @@ ROCKS_STRUCT()
 struct VolumetricAdvancedOutputProperties {
     ROCKS_GENERATED_BODY()
 
-    ROCKS_PROPERTY() float constPhaseG = 0.0f;
-    ROCKS_PROPERTY() float constPhaseG2 = 0.0f;
     ROCKS_PROPERTY() bool perSamplePhaseEvaluation = false;
     ROCKS_PROPERTY() uint32 multiScatteringApproximationOctaveCount = 0;
-    ROCKS_PROPERTY() float constMultiScatteringContribution = 0.5f;
-    ROCKS_PROPERTY() float constMultiScatteringOcclusion = 0.5f;
-    ROCKS_PROPERTY() float constMultiScatteringEccentricity = 0.5f;
     ROCKS_PROPERTY() bool groundContribution = false;
     ROCKS_PROPERTY() bool grayScaleMaterial = false;
     ROCKS_PROPERTY() bool rayMarchVolumeShadow = true;

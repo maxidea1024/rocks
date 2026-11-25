@@ -96,7 +96,7 @@ constexpr MaterialPinDefinition MakeAttributesPins[] = {
 
 constexpr MaterialPinDefinition BreakAttributesPins[] = {
     MaterialInput("MaterialAttributes", MaterialPinType::MaterialAttributes, "Attr", {},
-                  MaterialPinFlags::Required | MaterialPinFlags::HideValue),
+                  MaterialPinFlags::HideValue),
     MaterialOutput("BaseColor", MaterialPinType::Float3, "BaseColor"),
     MaterialOutput("Metallic", MaterialPinType::Float1, "Metallic"),
     MaterialOutput("Specular", MaterialPinType::Float1, "Specular"),
@@ -128,7 +128,7 @@ constexpr MaterialPinDefinition BreakAttributesPins[] = {
 
 constexpr MaterialPinDefinition GetAttributesPins[] = {
     MaterialInput("MaterialAttributes", MaterialPinType::MaterialAttributes, "MaterialAttributes",
-                  {}, MaterialPinFlags::Required | MaterialPinFlags::HideValue),
+                  {}, MaterialPinFlags::HideValue),
     MaterialOutput("MaterialAttributesOut", MaterialPinType::MaterialAttributes,
                    "MaterialAttributes"),
 };

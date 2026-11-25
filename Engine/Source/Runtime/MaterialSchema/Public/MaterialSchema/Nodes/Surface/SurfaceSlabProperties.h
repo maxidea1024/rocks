@@ -19,7 +19,7 @@ struct SurfaceSlabProperties {
     // TODO(MPQ-SpecularProfile): 대상 에셋 클래스가 생기면 그 클래스로 검사한다(19.4.3절).
     // 기대 클래스는 SpecularProfile다(19.4.3절).
     ROCKS_PROPERTY() MaterialAssetReference specularProfile;
-    ROCKS_PROPERTY() SubsurfaceType subSurfaceType = SubsurfaceType::None;
+    ROCKS_PROPERTY() SubsurfaceType subSurfaceType = SubsurfaceType::Diffusion;
 };
 
 } // namespace rocks::material
