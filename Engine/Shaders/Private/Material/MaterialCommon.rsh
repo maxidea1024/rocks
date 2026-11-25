@@ -153,13 +153,15 @@ float4 MaterialAtan2Fast(float4 y, float4 x) {
 
 // HLSL에 없는 역쌍곡 함수다(로그 식 — UE IR 연산 ACosh·ASinh·ATanh와 같은 뜻).
 float MaterialAcosh(float x) {
-    return log(x + sqrt(x * x - 1.0));
+    return log(x + sqrt((x - 1.0) * (x + 1.0)));
 }
 
 MATERIAL_COMPONENTWISE_UNARY(MaterialAcosh)
 
+// 음수에서 x + sqrt(x² + 1)의 상쇄(큰 음수면 log(0))를 피하려고 |x|로 계산하고 부호를 붙인다.
 float MaterialAsinh(float x) {
-    return log(x + sqrt(x * x + 1.0));
+    const float magnitude = abs(x);
+    return sign(x) * log(magnitude + sqrt(magnitude * magnitude + 1.0));
 }
 
 MATERIAL_COMPONENTWISE_UNARY(MaterialAsinh)

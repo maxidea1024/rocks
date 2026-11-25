@@ -341,7 +341,12 @@ Result<Span<const nodegraph::PinDescriptor>> LoweringContext::DynamicPins() noex
 }
 
 Result<IrValueId> LoweringContext::Connected(Name name, bool& connected) noexcept {
-    return translator_.LowerConnection(node_, name, connected);
+    auto value = translator_.LowerConnection(node_, name, connected);
+    if (value && connected && value.Value() == NoIrValue) {
+        poisoned_ = true;
+    }
+
+    return value;
 }
 
 Result<bool> LoweringContext::IsConnected(StringView key) noexcept {
@@ -352,19 +357,15 @@ Result<bool> LoweringContext::IsConnected(StringView key) noexcept {
                                                    : Result<bool>::Failure(name.Error());
     }
 
-    // 간선이 있는지만 본다(비활성 노드의 끊김은 Input이 다룬다).
-    for (const nodegraph::GraphEdge& edge : translator_.Graph().edges) {
-        if (edge.toNode == node_.id && edge.toPin == name.Value()) {
-            return Result<bool>::Success(true);
-        }
-    }
-
-    return Result<bool>::Success(false);
+    return Result<bool>::Success(translator_.HasConnection(node_, name.Value()));
 }
 
 Result<IrValueId> LoweringContext::PinValue(const MaterialPinDefinition& pin, Name name) noexcept {
+    // 값 편집을 숨긴 핀(HideValue)은 사용자 값을 갖지 않는다(남아 있으면 무시 — NodeGraph도 쓰지
+    // 않는다).
+    const bool editable = !HasPinFlag(pin.flags, MaterialPinFlags::HideValue);
     for (const nodegraph::PinValueEntry& entry : node_.inputDefaults) {
-        if (!(entry.pin == name)) {
+        if (!editable || !(entry.pin == name)) {
             continue;
         }
 
@@ -410,7 +411,15 @@ Result<IrValueId> LoweringContext::PinValue(const MaterialPinDefinition& pin, Na
             return Result<IrValueId>::Success(NoIrValue);
         }
 
-        return FloatConstant(Span<const float>(components, static_cast<usize>(count)), pin.key);
+        auto constant =
+            FloatConstant(Span<const float>(components, static_cast<usize>(count)), pin.key);
+        if (!constant || constant.Value() == NoIrValue || !hasWidth ||
+            typed.scalar == IrScalar::Float) {
+            return constant;
+        }
+
+        // 정수·Bool 핀의 값은 float로 담겨 있으므로 핀 타입으로 바꾼다(5.3절).
+        return Convert(constant.Value(), typed.scalar);
     }
 
     if (pin.defaultValue.componentCount > 0) {
@@ -524,13 +533,24 @@ Result<IrValueId> LoweringContext::NodeOutput(Guid node, StringView expectedType
         return Result<IrValueId>::Success(NoIrValue);
     }
 
+    if (translator_.IsCut(node_.id, Name())) {
+        // 계획 때 순환(V2)으로 진단하고 끊은 의존이다.
+        poisoned_ = true;
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
     found = true;
     auto name = PinName(pin);
     if (!name) {
         return Result<IrValueId>::Failure(name.Error());
     }
 
-    return translator_.LowerNodeOutput(*target, name.Value());
+    auto value = translator_.LowerNodeOutput(*target, name.Value());
+    if (value && value.Value() == NoIrValue) {
+        poisoned_ = true;
+    }
+
+    return value;
 }
 
 IrType LoweringContext::TypeOf(IrValueId value) const noexcept {
@@ -780,6 +800,59 @@ Result<IrValueId> LoweringContext::Cast(IrValueId value, IrType type) noexcept {
     return Splat(converted.Value(), type.components);
 }
 
+Result<IrValueId> LoweringContext::CoerceTo(IrValueId value, IrType target,
+                                            StringView pin) noexcept {
+    if (value == NoIrValue) {
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    const IrType source = TypeOf(value);
+    StringView problem;
+    if (source.IsMatrix() || target.IsMatrix()) {
+        problem = "Matrix value cannot be used here";
+    } else if ((source.scalar == IrScalar::Bool) != (target.scalar == IrScalar::Bool)) {
+        problem = "Boolean and numeric values do not convert implicitly";
+    } else if (source.components != target.components && source.components != 1 &&
+               target.components != 1) {
+        // UE CastValue: 스칼라가 아닌 대상으로는 자르지 않는다("Cannot cast from larger type").
+        problem = "Cannot cast between vectors of different widths";
+    }
+
+    if (!problem.IsEmpty()) {
+        String text(scratch_);
+        Result<void> built = text.TryAssign(problem);
+        const StringView parts[] = {" (", LoweringTypeName(source), " to ",
+                                    LoweringTypeName(target), ")"};
+        for (StringView part : parts) {
+            if (built) {
+                built = text.TryAppend(part);
+            }
+        }
+
+        if (!built) {
+            return Result<IrValueId>::Failure(built.Error());
+        }
+
+        if (auto reported = Error(MaterialDiagnosticCode::TypeMismatch, pin, text.View());
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    auto converted = Convert(value, target.scalar);
+    if (!converted || converted.Value() == NoIrValue) {
+        return converted;
+    }
+
+    if (target.components == 1) {
+        return Prefix(converted.Value(), 1);
+    }
+
+    return Splat(converted.Value(), target.components);
+}
+
 Result<IrValueId> LoweringContext::Unary(IrOp op, IrValueId value, NumberRule rule) noexcept {
     if (value == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
@@ -942,6 +1015,11 @@ Result<IrValueId> LoweringContext::Select(IrValueId condition, IrValueId whenTru
         return Result<IrValueId>::Success(NoIrValue);
     }
 
+    bool constant = false;
+    if (ConstantBool(condition, constant)) {
+        return Result<IrValueId>::Success(constant ? a.Value() : b.Value());
+    }
+
     return LoweringBuilt(*this, Builder().Select(condition, a.Value(), b.Value()));
 }
 
@@ -977,6 +1055,11 @@ Result<IrValueId> LoweringContext::Branch(IrValueId condition, IrValueId whenTru
 
     if (a.Value() == NoIrValue || b.Value() == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    bool constant = false;
+    if (ConstantBool(condition, constant)) {
+        return Result<IrValueId>::Success(constant ? a.Value() : b.Value());
     }
 
     return LoweringBuilt(*this, Builder().Branch(condition, a.Value(), b.Value()));

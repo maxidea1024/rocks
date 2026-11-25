@@ -735,6 +735,15 @@ Result<void> SourceWriter::CheckSupported() noexcept {
         }
 
         unsupported_ = true;
+        bool reportedNode = false;
+        for (const nodegraph::GraphDiagnostic& diagnostic : out_.diagnostics.items) {
+            reportedNode = reportedNode || diagnostic.node == value.site.node;
+        }
+
+        if (reportedNode) {
+            continue;
+        }
+
         if (auto reported = out_.diagnostics.Add(
                 nodegraph::GraphDiagnosticSeverity::Error,
                 ToDiagnosticCode(MaterialDiagnosticCode::NotYetLowered), asset_, graph_,

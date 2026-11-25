@@ -51,6 +51,14 @@ public:
     // 주 그래프의 노드다. 없으면 nullptr이다.
     const nodegraph::GraphNode* FindNode(Guid id) const noexcept;
 
+    // consumer 노드 입력 pin에 실제 연결이 있는가. 비활성 노드는 통과 쌍을 따라가고 쌍이 없으면
+    // 끊긴 것이다(NodeGraph 6.5절).
+    bool HasConnection(const nodegraph::GraphNode& consumer, Name pin) const noexcept;
+
+    // (node, pin) 입력·의존이 계획 때 순환(V2)으로 끊겼는가(pin None은 간선 없는 의존 — 이름 있는
+    // 재경유).
+    bool IsCut(Guid node, Name pin) const noexcept;
+
     // 노드 출력 하나를 기록한다(같은 핀을 두 번 기록하면 InvalidArgument — lowering 함수의 잘못).
     Result<void> RecordOutput(Guid node, Name pin, IrValueId value) noexcept;
 
@@ -133,6 +141,9 @@ private:
     HashMap<PinKey, IrValueId, PinKeyHash> outputs_;
     HashMap<Guid, NodeState> states_;
     HashMap<Name, LoweringFn> lowerings_;
+    // 노드 색인마다 들어오는 간선 색인이다(CSR — incomingStart_[i]…incomingStart_[i + 1]).
+    Array<usize> incomingStart_;
+    Array<usize> incoming_;
     // 순환으로 끊은 (노드, 입력 핀)이다(V2는 계획 때 한 번 진단했다).
     HashMap<PinKey, bool, PinKeyHash> cutInputs_;
     Name namedRerouteUsage_;

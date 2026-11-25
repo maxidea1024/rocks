@@ -93,12 +93,61 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
                        MaterialTranslation& out) noexcept
     : allocator_(allocator), input_(input), out_(out), builder_(allocator), nodes_(allocator),
       edges_(allocator), outputs_(allocator), states_(allocator), lowerings_(allocator),
-      cutInputs_(allocator), results_(allocator) {
+      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
     const usize* index = nodes_.Find(id);
     return index == nullptr ? nullptr : &graph_->nodes[*index];
+}
+
+bool Translator::IsCut(Guid node, Name pin) const noexcept {
+    return cutInputs_.Contains(PinKey{node, pin});
+}
+
+bool Translator::HasConnection(const nodegraph::GraphNode& consumer, Name pin) const noexcept {
+    const nodegraph::GraphNode* current = &consumer;
+    Name currentPin = pin;
+    // 비활성 노드 사슬을 따라간다. 사슬은 노드 수를 넘을 수 없으므로 그만큼에서 멈춘다(순환 보호).
+    for (usize step = 0; step <= graph_->nodes.Size(); ++step) {
+        const usize* edgeIndex = edges_.Find(PinKey{current->id, currentPin});
+        if (edgeIndex == nullptr) {
+            return false;
+        }
+
+        const nodegraph::GraphEdge& edge = graph_->edges[*edgeIndex];
+        const nodegraph::GraphNode* source = FindNode(edge.fromNode);
+        if (source == nullptr) {
+            return false;
+        }
+
+        if (source->enableState != nodegraph::NodeEnableState::Disabled) {
+            return true;
+        }
+
+        const MaterialNodeDefinition* definition = input_.catalog.Find(source->type);
+        if (definition == nullptr) {
+            return false;
+        }
+
+        bool passed = false;
+        for (const MaterialPassThrough& pair : definition->passThrough) {
+            auto output = input_.names.TryFind(pair.output);
+            auto inputPin = input_.names.TryFind(pair.input);
+            if (output && inputPin && output.Value() == edge.fromPin) {
+                current = source;
+                currentPin = inputPin.Value();
+                passed = true;
+                break;
+            }
+        }
+
+        if (!passed) {
+            return false;
+        }
+    }
+
+    return false;
 }
 
 LoweringFn Translator::FindLowering(Name type) const noexcept {
@@ -142,6 +191,43 @@ Result<void> Translator::BuildIndex() noexcept {
         const nodegraph::GraphEdge& edge = graph_->edges[index];
         if (auto added = edges_.Insert(PinKey{edge.toNode, edge.toPin}, index); !added) {
             return Result<void>::Failure(added.Error());
+        }
+    }
+
+    // 들어오는 간선 인접 목록(CSR)이다. 간선 저장 순서를 그대로 둔다.
+    if (auto sized = incomingStart_.TryResize(graph_->nodes.Size() + 1); !sized) {
+        return sized;
+    }
+
+    for (usize& start : incomingStart_) {
+        start = 0;
+    }
+
+    for (const nodegraph::GraphEdge& edge : graph_->edges) {
+        if (const usize* target = nodes_.Find(edge.toNode)) {
+            ++incomingStart_[*target + 1];
+        }
+    }
+
+    for (usize index = 1; index < incomingStart_.Size(); ++index) {
+        incomingStart_[index] += incomingStart_[index - 1];
+    }
+
+    if (auto sized = incoming_.TryResize(incomingStart_[graph_->nodes.Size()]); !sized) {
+        return sized;
+    }
+
+    {
+        SystemAllocator scratch;
+        Array<usize> cursor(scratch);
+        if (auto copied = cursor.TryAppend(incomingStart_.View()); !copied) {
+            return copied;
+        }
+
+        for (usize index = 0; index < graph_->edges.Size(); ++index) {
+            if (const usize* target = nodes_.Find(graph_->edges[index].toNode)) {
+                incoming_[cursor[*target]++] = index;
+            }
         }
     }
 
@@ -315,6 +401,8 @@ Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcep
     }
 
     const uint32 errorsBefore = errorCount_;
+    // 연결된 입력이 값 없이 들어오면(위쪽 오류) 이 노드도 실패다 — 받는 쪽이 다시 진단하지 않는다.
+    bool poisoned = false;
     Result<void> lowered = Result<void>::Success();
     if (!(rerouteType_ == Name()) && node.type == rerouteType_) {
         // 공통 재경유(Graph.Reroute)는 입력을 그대로 넘긴다.
@@ -326,7 +414,9 @@ Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcep
             lowered = Report(nodegraph::GraphDiagnosticSeverity::Error,
                              MaterialDiagnosticCode::MissingInput, node.id, rerouteIn_,
                              "Reroute has no input");
-        } else if (value.Value() != NoIrValue) {
+        } else if (value.Value() == NoIrValue) {
+            poisoned = true;
+        } else {
             lowered = RecordOutput(node.id, rerouteOut_, value.Value());
         }
     } else if (const MaterialNodeDefinition* definition = input_.catalog.Find(node.type);
@@ -357,13 +447,15 @@ Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcep
     } else {
         LoweringContext context(*this, node, *definition);
         lowered = fn(context);
+        poisoned = context.Poisoned();
     }
 
     if (!lowered) {
         return lowered;
     }
 
-    const NodeState state = errorCount_ == errorsBefore ? NodeState::Done : NodeState::Failed;
+    const NodeState state =
+        errorCount_ == errorsBefore && !poisoned ? NodeState::Done : NodeState::Failed;
     if (auto marked = states_.InsertOrAssign(node.id, state); !marked) {
         return Result<void>::Failure(marked.Error());
     }
@@ -374,9 +466,26 @@ Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcep
 Result<void> Translator::CollectDependencies(usize node, Array<Dependency>& out) noexcept {
     out.Clear();
     const nodegraph::GraphNode& consumer = graph_->nodes[node];
-    for (const nodegraph::GraphEdge& edge : graph_->edges) {
-        if (!(edge.toNode == consumer.id)) {
-            continue;
+    const MaterialNodeDefinition* consumerDefinition =
+        consumer.enableState == nodegraph::NodeEnableState::Disabled
+            ? input_.catalog.Find(consumer.type)
+            : nullptr;
+    for (usize at = incomingStart_[node]; at < incomingStart_[node + 1]; ++at) {
+        const nodegraph::GraphEdge& edge = graph_->edges[incoming_[at]];
+        if (consumer.enableState == nodegraph::NodeEnableState::Disabled) {
+            // 비활성 노드는 통과 쌍의 입력만 넘긴다(그 밖의 위쪽은 번역하지 않는다 —
+            // NodeGraph 6.5절).
+            bool passes = false;
+            if (consumerDefinition != nullptr) {
+                for (const MaterialPassThrough& pair : consumerDefinition->passThrough) {
+                    auto inputPin = input_.names.TryFind(pair.input);
+                    passes = passes || (inputPin && inputPin.Value() == edge.toPin);
+                }
+            }
+
+            if (!passes) {
+                continue;
+            }
         }
 
         if (const usize* source = nodes_.Find(edge.fromNode)) {

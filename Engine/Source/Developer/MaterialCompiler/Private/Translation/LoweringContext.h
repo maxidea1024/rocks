@@ -56,6 +56,12 @@ public:
 
     IrBuilder& Builder() noexcept;
 
+    // 연결된 입력이 값 없이(오류가 이미 난 위쪽 노드) 들어왔는가. 그러면 이 노드는 실패로 끝나고,
+    // 받는 쪽은 "값 없음"을 다시 진단하지 않는다(오류가 한 번만 남는다).
+    bool Poisoned() const noexcept {
+        return poisoned_;
+    }
+
     // 속성 reader다. 정의에 속성이 없거나 Record를 읽지 못하면(InvalidProperty 진단) nullptr이다.
     Result<NodePropertyReader*> Properties() noexcept;
 
@@ -72,7 +78,7 @@ public:
     // InvalidProperty를 진단하고 비어 있다.
     Result<Span<const nodegraph::PinDescriptor>> DynamicPins() noexcept;
 
-    // 정적 입력 key가 연결되어 있는가.
+    // 정적 입력 key에 실제 연결이 있는가(비활성 노드는 통과 쌍을 따라간다 — 끊기면 연결 없음).
     Result<bool> IsConnected(StringView key) noexcept;
 
     // 정적 입력 key의 값이다: 연결 → 핀 사용자 값 → 정의 기본값(Float 상수). 셋 다 없으면 필수
@@ -138,6 +144,11 @@ public:
     // value를 type으로 맞춘다(스칼라 복제 + 수 종류 변환 — CommonType 결과용).
     Result<IrValueId> Cast(IrValueId value, IrType type) noexcept;
 
+    // UE CoerceParameter와 같은 맞춤이다(6.8절 "첫 인자 타입"): 수 종류를 target으로 바꾸고, 폭은
+    // 같으면 그대로, 스칼라는 복제, target이 스칼라면 첫 성분이다. 그 밖(다른 폭의 두 벡터)과
+    // Bool·수 섞임은 V1을 pin 위치에 진단하고 NoIrValue다.
+    Result<IrValueId> CoerceTo(IrValueId value, IrType target, StringView pin) noexcept;
+
     // 값이 Float 스칼라 상수면 그 값이다.
     bool ConstantFloat(IrValueId value, float& out) const noexcept;
     // 값이 Bool 스칼라 상수면 그 값이다.
@@ -160,6 +171,7 @@ private:
     bool propertiesOpened_ = false;
     nodegraph::PinList dynamicPins_;
     bool dynamicPinsComputed_ = false;
+    bool poisoned_ = false;
 };
 
 } // namespace rocks::material::detail

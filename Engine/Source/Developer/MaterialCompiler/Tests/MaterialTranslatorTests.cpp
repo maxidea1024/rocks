@@ -134,7 +134,7 @@ TEST(MaterialTranslator_PinValues) {
         MaterialTranslation rejected(env.allocator);
         REQUIRE(Translate(bad, Traits(), rejected));
         CHECK(!rejected.succeeded);
-        CHECK(HasErrorAt(rejected, MaterialDiagnosticCode::InvalidPinValue, OutputNodeId));
+        CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::InvalidPinValue, OutputNodeId));
         CHECK(rejected.module.Results().IsEmpty());
     }
 
@@ -193,7 +193,7 @@ TEST(MaterialTranslator_OutputCoercion) {
     MaterialTranslation shorter(env.allocator);
     REQUIRE(Translate(narrow, Traits(), shorter));
     CHECK(!shorter.succeeded);
-    CHECK(HasErrorAt(shorter, MaterialDiagnosticCode::TypeMismatch, OutputNodeId));
+    CHECK(HasOnlyErrorAt(shorter, MaterialDiagnosticCode::TypeMismatch, OutputNodeId));
 }
 
 // 상수 노드의 성분 출력: Constant2·3·4의 R·G·B·A는 성분 하나, RGB는 앞 셋이다(UE 출력 마스크).
@@ -254,7 +254,7 @@ TEST(MaterialTranslator_GraphErrors) {
         MaterialTranslation out(env.allocator);
         REQUIRE(Translate(fixture, Traits(), out));
         CHECK(!out.succeeded);
-        CHECK(HasErrorAt(out, MaterialDiagnosticCode::MissingInput, sine));
+        CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::MissingInput, sine));
     }
 
     {
@@ -282,6 +282,7 @@ TEST(MaterialTranslator_GraphErrors) {
         MaterialTranslation out(env.allocator);
         REQUIRE(Translate(fixture, Traits(), out));
         CHECK(!out.succeeded);
+        CHECK(CountErrors(out) == 2);
         CHECK(HasErrorAt(out, MaterialDiagnosticCode::UnknownNode, unknown));
         CHECK(HasErrorAt(out, MaterialDiagnosticCode::NotYetLowered, time));
     }
@@ -321,7 +322,7 @@ TEST(MaterialTranslator_InactiveAndPendingOutputs) {
     MaterialTranslation notYet(env.allocator);
     REQUIRE(Translate(pending, Traits(), notYet));
     CHECK(!notYet.succeeded);
-    CHECK(HasErrorAt(notYet, MaterialDiagnosticCode::NotYetLowered, OutputNodeId));
+    CHECK(HasOnlyErrorAt(notYet, MaterialDiagnosticCode::NotYetLowered, OutputNodeId));
 }
 
 // 주기 있는 삼각 함수: 입력 × (2π / period), period ≤ 0이면 입력 그대로(UE IR Build — 6.8절).
@@ -453,7 +454,7 @@ TEST(MaterialTranslator_Switch) {
     REQUIRE(missing.ready);
     MaterialTranslation absent(env.allocator);
     REQUIRE(Translate(missing, Traits(), absent));
-    CHECK(HasErrorAt(absent, MaterialDiagnosticCode::MissingInput, node));
+    CHECK(HasOnlyErrorAt(absent, MaterialDiagnosticCode::MissingInput, node));
 }
 
 // Operator: Add·Multiply는 입력 전부를 접고, 연결 없는 입력은 constValue다. 비교는 Bool, 모르는
@@ -491,7 +492,7 @@ TEST(MaterialTranslator_Operator) {
     REQUIRE(compare.ready);
     MaterialTranslation boolean(env.allocator);
     REQUIRE(Translate(compare, Traits(), boolean));
-    CHECK(HasErrorAt(boolean, MaterialDiagnosticCode::TypeMismatch, OutputNodeId));
+    CHECK(HasOnlyErrorAt(boolean, MaterialDiagnosticCode::TypeMismatch, OutputNodeId));
 
     // 인자가 모자라면 InvalidProperty, LWC 타일은 NotYetLowered다.
     GraphFixture shortList(env);
@@ -503,7 +504,7 @@ TEST(MaterialTranslator_Operator) {
     REQUIRE(shortList.ready);
     MaterialTranslation tooFew(env.allocator);
     REQUIRE(Translate(shortList, Traits(), tooFew));
-    CHECK(HasErrorAt(tooFew, MaterialDiagnosticCode::InvalidProperty, fewer));
+    CHECK(HasOnlyErrorAt(tooFew, MaterialDiagnosticCode::InvalidProperty, fewer));
 
     GraphFixture tile(env);
     OperatorProperties lwc(env.allocator);
@@ -514,7 +515,7 @@ TEST(MaterialTranslator_Operator) {
     REQUIRE(tile.ready);
     MaterialTranslation lwcOut(env.allocator);
     REQUIRE(Translate(tile, Traits(), lwcOut));
-    CHECK(HasErrorAt(lwcOut, MaterialDiagnosticCode::NotYetLowered, tiled));
+    CHECK(HasOnlyErrorAt(lwcOut, MaterialDiagnosticCode::NotYetLowered, tiled));
 }
 
 // If: AEqualsB가 있으면 select(abs(A − B) > t, select(A ≥ B, G, L), E), 없으면 select(A ≥ B, G, L).
@@ -611,7 +612,7 @@ TEST(MaterialTranslator_DynamicBranch) {
     MaterialTranslation failed(env.allocator);
     REQUIRE(Translate(unchosen, Traits(), failed));
     CHECK(!failed.succeeded);
-    CHECK(HasErrorAt(failed, MaterialDiagnosticCode::MissingInput, broken));
+    CHECK(HasOnlyErrorAt(failed, MaterialDiagnosticCode::MissingInput, broken));
 
     GraphFixture dynamic(env);
     OperatorProperties less(env.allocator);
@@ -653,7 +654,7 @@ TEST(MaterialTranslator_WidthRules) {
     MaterialTranslation out(env.allocator);
     REQUIRE(Translate(fixture, Traits(), out));
     CHECK(!out.succeeded);
-    CHECK(HasErrorAt(out, MaterialDiagnosticCode::TypeMismatch, add));
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::TypeMismatch, add));
 
     // Append float2 + float1 = float3, ComponentMask g·b.
     GraphFixture append(env);
@@ -694,6 +695,7 @@ TEST(MaterialTranslator_WidthRules) {
     REQUIRE(overflow.ready);
     MaterialTranslation rejected(env.allocator);
     REQUIRE(Translate(overflow, Traits(), rejected));
+    CHECK(CountErrors(rejected) == 2);
     CHECK(HasErrorAt(rejected, MaterialDiagnosticCode::TypeMismatch, tooLong));
     CHECK(HasErrorAt(rejected, MaterialDiagnosticCode::TypeMismatch, alphaMask));
 }
@@ -741,7 +743,7 @@ TEST(MaterialTranslator_InverseLinearInterpolate) {
     REQUIRE(same.ready);
     MaterialTranslation out(env.allocator);
     REQUIRE(Translate(same, Traits(), out));
-    CHECK(HasErrorAt(out, MaterialDiagnosticCode::DivideByZero, node));
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::DivideByZero, node));
 }
 
 // Convert: 대응이 있는 성분은 입력 성분, 없으면 출력 기본값이다. 잘못된 색인은 InvalidProperty다.
@@ -791,7 +793,7 @@ TEST(MaterialTranslator_Convert) {
     REQUIRE(bad.ready);
     MaterialTranslation rejected(env.allocator);
     REQUIRE(Translate(bad, Traits(), rejected));
-    CHECK(HasErrorAt(rejected, MaterialDiagnosticCode::InvalidProperty, broken));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::InvalidProperty, broken));
 }
 
 // 재경유: 공통 Graph.Reroute와 이름 있는 재경유(선언·쓰임)는 값을 그대로 넘긴다. 없는 선언은
@@ -824,7 +826,7 @@ TEST(MaterialTranslator_Reroutes) {
     REQUIRE(invalid.ready);
     MaterialTranslation rejected(env.allocator);
     REQUIRE(Translate(invalid, Traits(), rejected));
-    CHECK(HasErrorAt(rejected, MaterialDiagnosticCode::InvalidProperty, lost));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::InvalidProperty, lost));
 
     GraphFixture disabled(env);
     const Guid off = AddConstant(disabled, 0.25f);
@@ -854,7 +856,7 @@ TEST(MaterialTranslator_ParameterNameConflict) {
     MaterialTranslation out(env.allocator);
     REQUIRE(Translate(fixture, Traits(), out));
     CHECK(!out.succeeded);
-    CHECK(HasErrorAt(out, MaterialDiagnosticCode::ParameterConflict, clash));
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::ParameterConflict, clash));
 
     GraphFixture shared(env);
     (void)shared.Add("Material.ScalarParameter", env.Save(scalar));
@@ -877,7 +879,7 @@ TEST(MaterialTranslator_NonFiniteProperty) {
     MaterialTranslation out(env.allocator);
     REQUIRE(Translate(fixture, Traits(), out));
     CHECK(!out.succeeded);
-    CHECK(HasErrorAt(out, MaterialDiagnosticCode::NonFiniteConstant, nan));
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::NonFiniteConstant, nan));
 }
 
 // 결정성(6.6절): 노드·간선 저장 순서만 다른 두 문서는 같은 IR hash다.

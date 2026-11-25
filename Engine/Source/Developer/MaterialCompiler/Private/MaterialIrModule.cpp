@@ -36,6 +36,16 @@ void WriteText(Sha256& hasher, StringView text) noexcept {
 
 } // namespace
 
+namespace {
+
+// 실패 결과를 돌려주기 전에 out을 비운다(반쯤 찬 모듈을 남기지 않는다).
+Result<void> FailBuild(IrModule& out, Result<void> error) noexcept {
+    out.Clear();
+    return error;
+}
+
+} // namespace
+
 Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> results,
                            IrModule& out) noexcept {
     out.values_.Clear();
@@ -45,13 +55,13 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     for (usize index = 0; index < results.Size(); ++index) {
         if (results[index].value >= source.Size() ||
             static_cast<uint32>(results[index].entry) >= IrEntryCount) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return FailBuild(out, Result<void>::Failure(ErrorCode::InvalidArgument));
         }
 
         for (usize other = 0; other < index; ++other) {
             if (results[other].entry == results[index].entry &&
                 results[other].slot == results[index].slot) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return FailBuild(out, Result<void>::Failure(ErrorCode::InvalidArgument));
             }
         }
     }
@@ -62,7 +72,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         for (const IrResult& result : results) {
             if (static_cast<uint32>(result.entry) == entry) {
                 if (auto pushed = ordered.TryPushBack(result); !pushed) {
-                    return pushed;
+                    return FailBuild(out, Move(pushed));
                 }
             }
         }
@@ -71,7 +81,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     // 깊이 우선 후위 순으로 새 번호를 매긴다(피연산자가 먼저 — 6.6·6.8절).
     Array<IrValueId> remap(out.values_.GetAllocator());
     if (auto sized = remap.TryResize(source.Size()); !sized) {
-        return sized;
+        return FailBuild(out, Move(sized));
     }
 
     for (IrValueId& slot : remap) {
@@ -82,7 +92,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     for (IrResult& result : ordered) {
         if (remap[result.value] == NoIrValue) {
             if (auto pushed = stack.TryPushBack(Visit{result.value, 0}); !pushed) {
-                return pushed;
+                return FailBuild(out, Move(pushed));
             }
         }
 
@@ -94,7 +104,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
                 // IR은 순환이 없으므로 아직 번호가 없는 피연산자는 스택 위 조상이 아니다.
                 if (remap[operand] == NoIrValue) {
                     if (auto pushed = stack.TryPushBack(Visit{operand, 0}); !pushed) {
-                        return pushed;
+                        return FailBuild(out, Move(pushed));
                     }
                 }
 
@@ -115,7 +125,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
             remap[visited] = static_cast<IrValueId>(out.values_.Size());
             if (auto pushed = out.values_.TryPushBack(copy); !pushed) {
                 out.values_.Clear();
-                return pushed;
+                return FailBuild(out, Move(pushed));
             }
         }
 

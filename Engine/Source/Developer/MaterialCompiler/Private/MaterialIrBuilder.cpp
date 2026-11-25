@@ -477,6 +477,16 @@ Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
     value.frequency = value.op == IrOp::Constant ? value.frequency : frequency;
     Key key{value};
     if (const IrValueId* found = lookup_.Find(key)) {
+        // 같은 값을 다른 노드가 다시 만들면 원인 위치는 NodeId가 가장 작은 쪽이다. 번역 순서(간선
+        // 저장 순서)와 상관없이 원문 위치 지도가 같다(7.7절). site는 hash-consing 키·IR hash에 들지
+        // 않는다.
+        IrSite& site = values_[*found].site;
+        const bool smaller = site_.node.high < site.node.high ||
+                             (site_.node.high == site.node.high && site_.node.low < site.node.low);
+        if (!(site_.node == Guid{}) && (site.node == Guid{} || smaller)) {
+            site = site_;
+        }
+
         return Result<IrValueId>::Success(*found);
     }
 

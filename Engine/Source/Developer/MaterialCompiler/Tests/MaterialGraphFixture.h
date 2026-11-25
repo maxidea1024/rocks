@@ -226,6 +226,22 @@ inline bool HasErrorAt(const MaterialTranslation& out, MaterialDiagnosticCode co
     return false;
 }
 
+// 오류 진단 수다.
+inline usize CountErrors(const MaterialTranslation& out) noexcept {
+    usize count = 0;
+    for (const nodegraph::GraphDiagnostic& diagnostic : out.diagnostics.items) {
+        count += diagnostic.severity == nodegraph::GraphDiagnosticSeverity::Error ? 1 : 0;
+    }
+
+    return count;
+}
+
+// 오류가 정확히 하나이고 그것이 node 위치의 code인가(오류가 아래로 번지지 않는다 — 6.8절).
+inline bool HasOnlyErrorAt(const MaterialTranslation& out, MaterialDiagnosticCode code,
+                           Guid node) noexcept {
+    return CountErrors(out) == 1 && HasErrorAt(out, code, node);
+}
+
 inline Guid AddConstant(GraphFixture& fixture, float value) noexcept {
     ConstantProperties properties;
     properties.r = value;

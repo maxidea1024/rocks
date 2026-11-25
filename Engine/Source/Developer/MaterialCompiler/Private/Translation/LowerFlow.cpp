@@ -33,7 +33,8 @@ Result<void> FlowEmit(LoweringContext& context, StringView key, Result<IrValueId
 }
 
 Result<void> LowerDynamicBranch(LoweringContext& context) noexcept {
-    // UE Build IfThenElse: 조건은 bool 스칼라(수는 bool로 바꾼다), 상수 조건이면 고른 입력만 쓴다.
+    // UE IfThenElse: 조건은 bool 스칼라(수는 bool로 바꾼다 — IR Build CastToBool), 결과는 두 값의
+    // 공통 타입이다.
     auto condition = context.Input("Condition");
     if (!condition || condition.Value() == NoIrValue) {
         return condition ? Result<void>::Success() : Result<void>::Failure(condition.Error());
@@ -50,16 +51,8 @@ Result<void> LowerDynamicBranch(LoweringContext& context) noexcept {
         return asBool ? Result<void>::Success() : Result<void>::Failure(asBool.Error());
     }
 
-    bool constant = false;
-    if (context.ConstantBool(asBool.Value(), constant)) {
-        auto chosen = context.Input(constant ? StringView("True") : StringView("False"));
-        if (!chosen) {
-            return Result<void>::Failure(chosen.Error());
-        }
-
-        return context.Output("Result", chosen.Value());
-    }
-
+    // 상수 조건도 두 값의 공통 타입으로 맞춘 고른 값이다(UE 기본 번역기는 ResultType으로
+    // ForceCast한 뒤 고른다 — HLSLMaterialTranslator.cpp:6473–6503). Branch가 상수 조건을 접는다.
     auto whenTrue = context.Input("True");
     auto whenFalse = context.Input("False");
     if (!whenTrue || !whenFalse) {
@@ -474,7 +467,8 @@ Result<void> LowerConvert(LoweringContext& context) noexcept {
     }
 
     if (inputKeys.Size() != inputs.Size() || outputKeys.Size() != outputs.Size()) {
-        return Result<void>::Success();
+        return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                             "Convert pins do not match its properties");
     }
 
     Array<IrValueId> compiled(scratch);
@@ -540,6 +534,14 @@ Result<void> LowerConvert(LoweringContext& context) noexcept {
             components[link.outputComponent] = picked.Value();
         }
 
+        IrScalar scalar = IrScalar::Float;
+        for (uint8 index = 0; index < side.components; ++index) {
+            if (components[index] != NoIrValue &&
+                context.TypeOf(components[index]).scalar == IrScalar::Double) {
+                scalar = IrScalar::Double;
+            }
+        }
+
         IrValueId result = NoIrValue;
         for (uint8 index = 0; index < side.components; ++index) {
             IrValueId component = components[index];
@@ -552,7 +554,7 @@ Result<void> LowerConvert(LoweringContext& context) noexcept {
                 component = constant.Value();
             }
 
-            auto asFloat = context.Convert(component, IrScalar::Float);
+            auto asFloat = context.Convert(component, scalar);
             if (!asFloat) {
                 return Result<void>::Failure(asFloat.Error());
             }
@@ -741,12 +743,18 @@ Result<void> LowerOperator(LoweringContext& context) noexcept {
         if (index < list.Value().Count()) {
             auto element = list.Value().Element(index);
             if (!element) {
-                return Result<void>::Failure(element.Error());
+                return element.Error() == ErrorCode::OutOfMemory
+                           ? Result<void>::Failure(element.Error())
+                           : context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                           "Operator inputs cannot be read");
             }
 
             auto read = element.Value().ReadFloat("constValue", DefaultOperatorConstant);
             if (!read) {
-                return Result<void>::Failure(read.Error());
+                return read.Error() == ErrorCode::OutOfMemory
+                           ? Result<void>::Failure(read.Error())
+                           : context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                           "Operator inputs cannot be read");
             }
 
             constant = read.Value();
@@ -833,15 +841,8 @@ Result<void> LowerOperator(LoweringContext& context) noexcept {
         const uint8 leftWidth = context.TypeOf(left).components;
         const uint8 rightWidth = context.TypeOf(right).components;
         if (leftWidth > 1 && rightWidth > 1 && leftWidth != rightWidth) {
-            const uint8 width = leftWidth < rightWidth ? leftWidth : rightWidth;
-            auto l = context.Prefix(left, width);
-            auto r = context.Prefix(right, width);
-            if (!l || !r) {
-                return Result<void>::Failure(!l ? l.Error() : r.Error());
-            }
-
-            left = l.Value();
-            right = r.Value();
+            return context.Error(MaterialDiagnosticCode::TypeMismatch, StringView(),
+                                 "Cannot cast between vectors of different widths");
         }
 
         return FlowEmit(context, "Result", context.Binary(rule.op, left, right, rule.rule));

@@ -54,9 +54,9 @@ SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {
     const float m18 = pow(m14, 2.0);
     const float m19 = MaterialSelect(m16, 0.0, m18);
     const float m20 = MaterialAsinFast(m19);
-    const float m22 = min(max(m20, 0.0), 1.0);
+    const float m21 = saturate(m20);
     s.ambientOcclusion = m13;
-    s.opacityMask = m22;
+    s.opacityMask = m21;
     return s;
 }
 
@@ -74,8 +74,8 @@ float EvaluateMaterialOpacityMask(in MaterialInputs c) {
     const float m18 = pow(m14, 2.0);
     const float m19 = MaterialSelect(m16, 0.0, m18);
     const float m20 = MaterialAsinFast(m19);
-    const float m22 = min(max(m20, 0.0), 1.0);
-    return m22;
+    const float m21 = saturate(m20);
+    return m21;
 }
 
 float EvaluateMaterialPixelDepthOffset(in MaterialInputs c) {

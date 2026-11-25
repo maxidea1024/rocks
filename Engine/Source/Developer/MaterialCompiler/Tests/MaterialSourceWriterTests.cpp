@@ -336,4 +336,156 @@ TEST(MaterialSourceWriter_RejectsDoubleValues) {
     CHECK(found);
 }
 
+// 연산 철자(7.7절): 비트 검사·논리 매크로·부정·역수·sign 감싸기·빠른 역삼각·역쌍곡·uint 변환·-0.0
+// 리터럴·MaterialSelect가 원문에 그대로 나온다.
+TEST(MaterialSourceWriter_OperatorSpellings) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid wave = AddVarying(fixture, 0.5f);
+    const auto unary = [&](OperatorKind kind, Guid input) noexcept {
+        OperatorProperties properties(env.allocator);
+        properties.operatorKind = kind;
+        (void)properties.dynamicInputs.TryPushBack(OperatorInput{});
+        const Guid node = fixture.Add("Material.Operator", env.Save(properties));
+        fixture.Connect(input, "Result", node, "A");
+        return node;
+    };
+    const auto binary = [&](OperatorKind kind, Guid left, Guid right) noexcept {
+        OperatorProperties properties(env.allocator);
+        properties.operatorKind = kind;
+        (void)properties.dynamicInputs.TryPushBack(OperatorInput{});
+        (void)properties.dynamicInputs.TryPushBack(OperatorInput{});
+        const Guid node = fixture.Add("Material.Operator", env.Save(properties));
+        fixture.Connect(left, "Result", node, "A");
+        fixture.Connect(right, "Result", node, "B");
+        return node;
+    };
+
+    const Guid nan = unary(OperatorKind::IsNan, wave);
+    const Guid notNan = unary(OperatorKind::Not, nan);
+    const Guid below = binary(OperatorKind::LessThan, wave, AddConstant(fixture, 1.0f));
+    const Guid both = binary(OperatorKind::And, notNan, below);
+    const Guid either = binary(OperatorKind::Or, both, nan);
+    OperatorProperties select(env.allocator);
+    select.operatorKind = OperatorKind::Select;
+    for (usize index = 0; index < 3; ++index) {
+        (void)select.dynamicInputs.TryPushBack(OperatorInput{});
+    }
+
+    const Guid chosen = fixture.Add("Material.Operator", env.Save(select));
+    fixture.Connect(either, "Result", chosen, "A");
+    fixture.Connect(unary(OperatorKind::Reciprocal, wave), "Result", chosen, "B");
+    fixture.Connect(unary(OperatorKind::Sign, wave), "Result", chosen, "C");
+
+    OperatorProperties sum(env.allocator);
+    sum.operatorKind = OperatorKind::Add;
+    for (usize index = 0; index < 6; ++index) {
+        (void)sum.dynamicInputs.TryPushBack(OperatorInput{});
+    }
+
+    const Guid total = fixture.Add("Material.Operator", env.Save(sum));
+    const Guid toUInt = fixture.Add("Material.FloatToUInt");
+    fixture.Connect(wave, "Result", toUInt, "Input");
+    const Guid toFloat = fixture.Add("Material.UIntToFloat");
+    fixture.Connect(toUInt, "Result", toFloat, "Input");
+    const Guid sources[] = {chosen,
+                            unary(OperatorKind::ACosFast, wave),
+                            unary(OperatorKind::ATanFast, wave),
+                            unary(OperatorKind::ACosh, wave),
+                            toFloat,
+                            AddConstant(fixture, -0.0f)};
+    const StringView keys[] = {"A", "B", "C", "D", "E", "F"};
+    for (usize index = 0; index < 6; ++index) {
+        fixture.Connect(sources[index], "Result", total, keys[index]);
+    }
+
+    fixture.Connect(total, "Result", OutputNodeId, "AmbientOcclusion");
+    Generated generated(env.allocator);
+    REQUIRE(Generate(fixture, Traits(), generated));
+    const StringView text = generated.source.text.View();
+    const StringView expected[] = {"MaterialIsNan(m",
+                                   "(!m",
+                                   "MaterialAnd(m",
+                                   "MaterialOr(m",
+                                   "(1.0 / m",
+                                   "float(sign(m",
+                                   "MaterialSelect(m",
+                                   "MaterialAcosFast(m",
+                                   "MaterialAtanFast(m",
+                                   "MaterialAcosh(m",
+                                   "uint(m",
+                                   "float(m",
+                                   " + -0.0)",
+                                   "trunc(m"};
+    for (StringView part : expected) {
+        CHECK(Contains(text, part));
+    }
+}
+
+// 원문 위치 지도도 노드·간선 저장 순서와 무관하다(같은 값을 여러 노드가 만들면 가장 작은 NodeId
+// — 7.7절).
+TEST(MaterialSourceWriter_LocationsAreDeterministic) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture first(env);
+    BuildMathGraph(first);
+    GraphFixture second(env);
+    BuildMathGraph(second);
+    nodegraph::Graph& graph = second.Main();
+    for (usize low = 0, high = graph.edges.Size() - 1; low < high; ++low, --high) {
+        const nodegraph::GraphEdge swap = graph.edges[low];
+        graph.edges[low] = graph.edges[high];
+        graph.edges[high] = swap;
+    }
+
+    Generated a(env.allocator);
+    Generated b(env.allocator);
+    REQUIRE(Generate(first, Traits(BlendMode::Masked), a));
+    REQUIRE(Generate(second, Traits(BlendMode::Masked), b));
+    REQUIRE(a.source.locations.Size() == b.source.locations.Size());
+    for (usize index = 0; index < a.source.locations.Size(); ++index) {
+        CHECK(a.source.locations[index].line == b.source.locations[index].line);
+        CHECK(a.source.locations[index].node == b.source.locations[index].node);
+    }
+
+    // sin 줄의 원인은 Sine 노드다.
+    const StringView text = a.source.text.View();
+    for (const MaterialSourceLocation& location : a.source.locations) {
+        uint32 line = 1;
+        usize at = 0;
+        while (at < text.ByteCount() && line < location.line) {
+            line += text.Data()[at] == '\n' ? 1 : 0;
+            ++at;
+        }
+
+        const usize length = text.ByteCount() - at < 40 ? text.ByteCount() - at : 40;
+        if (Contains(StringView(text.Data() + at, length), "= sin(")) {
+            const nodegraph::GraphNode* node = first.Find(location.node);
+            REQUIRE(node != nullptr);
+            CHECK(node->type == env.Intern("Material.Sine"));
+        }
+    }
+}
+
+// 접히지 않는 깊은 사슬(4096 단계)도 번역·모듈·원문 생성이 재귀 없이 끝난다.
+TEST(MaterialSourceWriter_DeepVaryingChain) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    constexpr usize ChainLength = 4096;
+    GraphFixture fixture(env);
+    Guid previous = AddVarying(fixture, 0.5f);
+    for (usize index = 0; index < ChainLength; ++index) {
+        const Guid next = fixture.Add("Material.OneMinus");
+        fixture.Connect(previous, "Result", next, "Input");
+        previous = next;
+    }
+
+    fixture.Connect(previous, "Result", OutputNodeId, "AmbientOcclusion");
+    Generated generated(env.allocator);
+    REQUIRE(Generate(fixture, Traits(), generated));
+    // sin 하나 + 1 − x 4096개가 표면 함수에 나온다.
+    CHECK(generated.source.locations.Size() >= ChainLength + 1);
+}
+
 } // namespace material_source_writer_tests_file
