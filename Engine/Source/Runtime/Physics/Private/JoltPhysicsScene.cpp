@@ -1,6 +1,8 @@
 // PhysicsScene의 Jolt 구현(Docs/Design/PhysicsModule 2장·3.1절, 7.1.1절).
 #include "JoltPhysicsScene.h"
 
+#include "JoltConversions.h"
+
 #include "PhysicsLog.h"
 
 #include <Core/Math/MathUtility.h>
@@ -10,9 +12,6 @@
 namespace rocks::physics {
 
 namespace {
-
-// cm → m(어댑터 경계 3절 — 변환 함수 묶음은 PH2).
-constexpr float MetersPerCentimeter = 0.01f;
 
 // 한 step의 collision step 수다(3.1절 — 고정 스텝마다 1).
 constexpr int CollisionStepsPerStep = 1;
@@ -29,8 +28,8 @@ JoltPhysicsScene::JoltPhysicsScene(JoltRuntimeLease&& runtime, const PhysicsSett
     system_.Init(settings.maxBodies, BodyMutexCount, settings.maxBodyPairs,
                  settings.maxContactConstraints, broadPhaseLayers_, objectVsBroadPhase_,
                  layerPairs_);
-    // 축 A: Rocks Z → Jolt Y(어댑터 경계 2절).
-    system_.SetGravity(JPH::Vec3(0.0f, settings.defaultGravityZ * MetersPerCentimeter, 0.0f));
+    system_.SetGravity(
+        ToJoltAcceleration(Vec3d(0.0, 0.0, static_cast<double>(settings.defaultGravityZ))));
 }
 
 JoltPhysicsScene::~JoltPhysicsScene() {

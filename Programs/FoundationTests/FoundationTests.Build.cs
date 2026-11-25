@@ -51,6 +51,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] GlobalStateDirectSources =
     [
         "Programs/FoundationTests/Engine/ThirdPartyJoltTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsAdapterTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsSceneTests.cpp"
     ];
 
