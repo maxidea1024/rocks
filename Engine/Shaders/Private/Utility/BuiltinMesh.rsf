@@ -1,0 +1,39 @@
+// 내장 자원 팩의 fallback 메시 셰이더다(Docs/Design/RenderBase 11.4절 2항, 계획 9.6절).
+//
+// BuiltinMeshVertex는 정점 입력 축 셰이더다(정점 입력 타입은 BuiltinVertexInput만). 변환은 그리기별
+// 상수의 local → clip 행렬이다(행 벡터 mul(v, M), 셰이더 시스템 7.2절 6항). BuiltinMeshPixel은
+// Albedo 표본 × 정점 색 × 그리기 색을 낸다. PS는 정점 입력 축이 없으므로(정점 입력 연결이 없는
+// job) 생성 include와 VS는 VS 단계에서만 읽는다.
+#if defined(ROCKS_VERTEX_SHADER)
+#include "/Engine/Generated/VertexInput.rsh"
+#endif
+
+struct BuiltinMeshConstants {
+    float4x4 localToClip;
+    float4 color;
+};
+
+ROCKS_ROOT_CONSTANTS(BuiltinMeshConstants, Draw);
+
+struct BuiltinMeshVaryings {
+    float4 position : SV_Position;
+    float2 texCoord : TEXCOORD0;
+    float4 color : TEXCOORD1;
+};
+
+Texture2D Albedo;
+SamplerState AlbedoSampler;
+
+#if defined(ROCKS_VERTEX_SHADER)
+BuiltinMeshVaryings BuiltinMeshVertex(VertexInputAttributes input) {
+    BuiltinMeshVaryings output;
+    output.position = mul(float4(GetVertexInputLocalPosition(input), 1.0), Draw.localToClip);
+    output.texCoord = GetVertexInputTexCoord(input);
+    output.color = GetVertexInputColor(input) * Draw.color;
+    return output;
+}
+#endif
+
+float4 BuiltinMeshPixel(BuiltinMeshVaryings input) : SV_Target0 {
+    return Albedo.Sample(AlbedoSampler, input.texCoord) * input.color;
+}

@@ -1,0 +1,62 @@
+// storage 대상 self-test 셰이더다(compute 열 쓰기·cube·cube 배열·면 채우기, discard 그리기).
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2D<float> Columns;
+
+[numthreads(4, 4, 1)]
+void ColumnsCS(uint3 id : SV_DispatchThreadID) {
+    if (id.x < 2) {
+        Columns[id.xy] = 0.5;
+    }
+}
+
+struct FillConstants {
+    float4 fill;
+};
+
+ROCKS_ROOT_CONSTANTS(FillConstants, Fill);
+
+// cube·cube 배열 쓰기다(Platform.rsh RWTextureCube — 좌표 z는 면, cube 배열은 cube × 6 + 면).
+ROCKS_IMAGE_FORMAT(r32f) RWTextureCube<float> Cube;
+
+[numthreads(4, 4, 1)]
+void FillCubeCS(uint3 id : SV_DispatchThreadID) {
+    if (Fill.fill.y >= 0.0 && id.z != (uint)Fill.fill.y) {
+        return;
+    }
+
+    Cube[id] = Fill.fill.x;
+}
+
+ROCKS_IMAGE_FORMAT(r32f) RWTextureCubeArray<float> CubeArray;
+
+[numthreads(4, 4, 1)]
+void FillCubeArrayCS(uint3 id : SV_DispatchThreadID) {
+    if (Fill.fill.y >= 0.0 && id.z != (uint)Fill.fill.y) {
+        return;
+    }
+
+    CubeArray[id] = Fill.fill.x;
+}
+
+// cube 면 하나만 고른 쓰기 view(1층)를 채운다. D3D·Vulkan·Metal은 1층 2D 배열 view라
+// RWTexture2DArray, GLES는 그 층을 2D로 묶으므로(층 일부를 배열로 묶지 못한다) RWTexture2D다.
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2DArray<float> FaceLayer;
+
+[numthreads(4, 4, 1)]
+void FillFaceLayerCS(uint3 id : SV_DispatchThreadID) {
+    FaceLayer[id] = Fill.fill.x;
+}
+
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2D<float> Face;
+
+[numthreads(4, 4, 1)]
+void FillFaceCS(uint3 id : SV_DispatchThreadID) {
+    Face[id.xy] = Fill.fill.x;
+}
+
+float4 DrawPS(float4 position : SV_Position) : SV_Target0 {
+    if (position.x < 3.0) {
+        discard;
+    }
+
+    return float4(0.75, 0.0, 0.0, 1.0);
+}

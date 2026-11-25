@@ -1,4 +1,5 @@
 #include "SliceAttachmentSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <stdio.h>
@@ -51,62 +52,13 @@ struct LevelConstants {
     float values[4] = {};
 };
 
-#define SLICE_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-#define SLICE_FULL_SCREEN_HLSL                                                                     \
-    "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"                                       \
-    "    float2 uv = float2((id << 1) & 2, id & 2);\n"                                             \
-    "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"                                               \
-    "}\n"
+// 셰이더는 FullScreen.rsf·SliceAttachment.rsf다.
 
-constexpr char FullScreenGlsl[] = SLICE_GLSL_HEAD R"(
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-// 흰색으로 채운다(깊이 0.5).
-constexpr char WhiteHlsl[] =
-    SLICE_FULL_SCREEN_HLSL "float4 PSMain() : SV_Target { return float4(1.0, 1.0, 1.0, 1.0); }\n";
-
-constexpr char WhitePixelGlsl[] = SLICE_GLSL_HEAD R"(
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = vec4(1.0); }
-)";
-
-// 읽기 view의 기준 mip texel (0, 0)의 절반을 낸다.
-constexpr char HalfHlsl[] = "cbuffer DrawConstants : register(b0) { float4 level; };\n"
-                            "Texture2D<float4> source : register(t0);\n" SLICE_FULL_SCREEN_HLSL
-                            "float4 PSMain() : SV_Target {\n"
-                            "    return source.Load(int3(0, 0, (int)level.x)) * 0.5;\n"
-                            "}\n";
-
-constexpr char HalfPixelGlsl[] = SLICE_GLSL_HEAD R"(
-uniform highp vec4 pu_h[1];
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = texelFetch(ps0, ivec2(0, 0), int(pu_h[0].x)) * 0.5; }
-)";
-
-// MSAA 2D 배열 층 1의 표본 0을 낸다(텍스처 GX2 나머지 C부).
-constexpr char MsaaLayerHlsl[] =
-    "Texture2DMSArray<float4> source : register(t0);\n" SLICE_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target { return source.Load(int3(0, 0, 1), 0); }\n";
-
-constexpr char MsaaLayerPixelGlsl[] = SLICE_GLSL_HEAD R"(
-layout(binding = 0) uniform highp sampler2DMSArray ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = texelFetch(ps0, ivec3(0, 0, 1), 0); }
-)";
-
-#undef SLICE_GLSL_HEAD
-#undef SLICE_FULL_SCREEN_HLSL
-
-Result<PipelineHandle> MakePipeline(Device& device, StringView hlsl, StringView pixelGlsl,
-                                    uint32 constants, PixelFormat depth) noexcept {
+Result<PipelineHandle> MakePipeline(Device& device, const shaders::ShaderTypeDesc& pixel,
+                                    uint32 constants, PixelFormat depth,
+                                    const char* texture = nullptr) noexcept {
     PipelineDesc desc;
-    desc.vertex = {hlsl, Text(FullScreenGlsl)};
-    desc.pixel = {hlsl, pixelGlsl};
+    desc.bindings.texture = texture != nullptr ? StringView(texture) : StringView();
     desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
     desc.drawConstantBytes = constants;
     desc.depthFormat = depth;
@@ -115,7 +67,7 @@ Result<PipelineHandle> MakePipeline(Device& device, StringView hlsl, StringView 
         desc.depthStencil.depthTest = true;
     }
 
-    return device.CreatePipeline(desc);
+    return shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, pixel, desc);
 }
 
 TextureDesc ColorDesc(TextureDimension dimension, uint32 extent, uint32 layers, uint32 depth,
@@ -408,8 +360,7 @@ void RunMsaaArray(Device& device, Allocator& allocator) noexcept {
     auto msaa = device.CreateTexture(msaaDesc, {});
     auto layers = device.CreateTexture(arrayDesc, {});
     auto color = device.CreateTexture(ColorDesc(TextureDimension::Texture2D, 2, 1, 1, 1), {});
-    auto read = MakePipeline(device, Text(MsaaLayerHlsl), Text(MsaaLayerPixelGlsl), 0,
-                             PixelFormat::Unknown);
+    auto read = MakePipeline(device, shaders::SliceMsaaLayerPS, 0, PixelFormat::Unknown, "Layers");
     Check(msaa && layers && color && read, "MSAA 2D array, resolve target and reader");
     if (msaa && layers && color && read) {
         const bool cleared =
@@ -476,18 +427,16 @@ uint32 RunSliceAttachmentChecks(const char* name, Device& device, Allocator& all
     failures = 0;
     backendName = name;
     const uint64 validationBefore = device.ValidationErrorCount();
-    auto white =
-        MakePipeline(device, Text(WhiteHlsl), Text(WhitePixelGlsl), 0, PixelFormat::Unknown);
-    auto half = MakePipeline(device, Text(HalfHlsl), Text(HalfPixelGlsl), sizeof(LevelConstants),
-                             PixelFormat::Unknown);
-    auto depthWhite =
-        MakePipeline(device, Text(WhiteHlsl), Text(WhitePixelGlsl), 0, PixelFormat::D32Float);
+    auto white = MakePipeline(device, shaders::SliceWhitePS, 0, PixelFormat::Unknown);
+    auto half = MakePipeline(device, shaders::SliceHalfPS, sizeof(LevelConstants),
+                             PixelFormat::Unknown, "Source");
+    auto depthWhite = MakePipeline(device, shaders::SliceWhitePS, 0, PixelFormat::D32Float);
     // 다중 plane 깊이(D24S8) 파이프라인은 그 형식이 깊이 attachment일 때만 만든다.
     const bool stencilDepth = HasPixelFormatCaps(
         device.GetPixelFormatCaps(PixelFormat::D24UnormS8Uint), PixelFormatCaps::DepthStencil);
-    auto stencilWhite = stencilDepth ? MakePipeline(device, Text(WhiteHlsl), Text(WhitePixelGlsl),
-                                                    0, PixelFormat::D24UnormS8Uint)
-                                     : Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+    auto stencilWhite =
+        stencilDepth ? MakePipeline(device, shaders::SliceWhitePS, 0, PixelFormat::D24UnormS8Uint)
+                     : Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
     Check(white && half && depthWhite && (!stencilDepth || stencilWhite),
           "slice attachment pipelines");
     if (white && half && depthWhite) {

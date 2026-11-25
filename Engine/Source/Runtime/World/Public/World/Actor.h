@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Math/Rotator.h>
 #include <Meta/Annotations.h>
 #include <Object/NativeClass.h>
 #include <Object/ObjectRefArray.h>
@@ -169,6 +170,14 @@ public:
         return true;
     }
 
+    // 바라보는 회전(도)을 줄 수 있으면 out에 채우고 참이다(UE APawn::GetViewRotation의 자리 —
+    // Docs/Design/EngineRuntime 26.2절). 기본은 거짓이다. Gameplay Pawn이 control rotation으로
+    // 재정의하고, SpringArm의 usePawnControlRotation이 쓴다(World는 Pawn을 모른다).
+    virtual bool TryGetViewRotation(Rotator<double>& out) noexcept {
+        (void)out;
+        return false;
+    }
+
     // 초기화 hook이다. 실패를 반환하면 Spawn이 실패하고 Actor는 OnDestroy 없이 정리된다.
     virtual Result<void> OnAwake() noexcept {
         return Result<void>::Success();
@@ -209,7 +218,8 @@ private:
 protected:
     // --- 프레임워크 내부 hook(Docs/Design/EngineRuntime 17.8절 ERD19) ---
     // Gameplay 모듈의 프레임워크 클래스(GameDirector·GameState·PlayerState·Controller·Pawn·
-    // CameraDirector)만 재정의하고 final로 닫는다. 게임 코드는 OnAwake·OnDestroy를 쓴다.
+    // CameraDirector)와 엔진 Actor 클래스(광원 Actor 등 — 24.2.5절)만 재정의하고 final로 닫는다.
+    // 게임 코드는 OnAwake·OnDestroy를 쓴다.
 
     // Component OnRegister 뒤, Actor OnAwake 전(UE PreInitializeComponents). 실패는 OnAwake 실패와
     // 같다(Spawn 실패, OnDestroy 없음).

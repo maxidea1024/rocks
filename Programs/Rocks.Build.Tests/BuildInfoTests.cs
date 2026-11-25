@@ -777,7 +777,8 @@ internal static class BuildInfoTests
             !source.Contains('\r') && source.All(char.IsAscii) && source.Contains("0x" + fingerprint[..2] + ", 0x" + fingerprint[2..4], StringComparison.Ordinal) &&
             source.Contains("\n\nEngineVersion CurrentEngineVersion() noexcept {\n    return {3, 7, 11};\n}\n\n", StringComparison.Ordinal) &&
             // 타깃 종류(기본 요청 = Program)와 타깃 매크로의 일치 검사(Docs/Design/BuildTargets 3.2절 BS2a).
-            source.Contains("static_assert(ROCKS_WITH_SERVER_CODE == 1 && ROCKS_WITH_CLIENT_CODE == 1, ", StringComparison.Ordinal) &&
+            source.Contains("static_assert(ROCKS_WITH_EDITOR == 0 && ROCKS_WITH_EDITOR_DATA == 0 && ROCKS_WITH_SERVER_CODE == 1 && " +
+                "ROCKS_WITH_CLIENT_CODE == 1, ", StringComparison.Ordinal) &&
             source.Contains("\nTargetType CurrentTargetType() noexcept {\n    return TargetType::Program;\n}\n\n} // namespace rocks::build\n",
                 StringComparison.Ordinal),
             "generated TU shape:\n" + source);

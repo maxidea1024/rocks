@@ -109,10 +109,11 @@ VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
       readbacks_(allocator), bufferViews_(allocator), heaps_(allocator), orphanBuffers_(allocator),
       retired_(allocator), renderPasses_(allocator), framebuffers_(allocator),
       attachmentViews_(allocator), volumeAttachmentImages_(allocator),
-      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), constantBuffers_(allocator),
+      constantPages_(allocator), constantRing_(allocator), touchedTextures_(allocator),
       splits_(allocator), pendingSplits_(allocator), splitImageBarriers_(allocator),
       splitMemoryBarriers_(allocator), acquireSemaphores_(allocator), orphanSemaphores_(allocator),
-      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator) {
+      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator), shaders_(allocator) {
     stagingSource_.owner = this;
     timestampSource_.owner = this;
 }
@@ -265,6 +266,7 @@ VulkanDevice::~VulkanDevice() {
         }
 
         FreeMemoryLocked(ringMemory_);
+        DestroyConstants();
         DestroySubmissionObjects();
         {
             platform::LockGuard memoryLock(memoryGate_);
@@ -337,7 +339,6 @@ void VulkanDevice::DetectLost(VkResult result) noexcept {
 
 Result<void> VulkanDevice::Initialize(const DeviceDesc& desc, DeviceCreateReport* report) noexcept {
     report_ = report;
-    shaderCompiler_ = desc.shaderCompiler;
     const char* missing = nullptr;
     const platform::FileStatus opened = loader_.Load(functions_, missing);
     if (!opened) {
@@ -565,7 +566,7 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     }
 
     // ASTC HDR 형식(VK_FORMAT_ASTC_*_SFLOAT_BLOCK)은 확장 형식이다. 확장과 기능을 켜지 않으면 그
-    // 형식을 묻거나 쓸 수 없다(PixelFormat.ko.md 14.2절).
+    // 형식을 묻거나 쓸 수 없다(Docs/Design/PixelFormat 14.2절).
     const bool astcHdrExtension = HasExtension(extensions, extensionCount,
                                                VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
     // multi-planar 이미지(NV12·P010)를 만들려면 samplerYcbcrConversion 기능을 켜야 한다(Vulkan 1.1
@@ -790,6 +791,11 @@ Result<void> VulkanDevice::CreateSharedObjects(const DeviceDesc& desc) noexcept 
             return ring;
         }
 
+        auto constants = InitializeConstants();
+        if (!constants) {
+            return constants;
+        }
+
         const uint64 stagingBudget =
             desc.stagingBudgetBytes != 0 ? desc.stagingBudgetBytes : DefaultStagingBudgetBytes;
         auto staging =
@@ -897,6 +903,10 @@ StringView VulkanDevice::LastError() const noexcept {
 
 uint64 VulkanDevice::IgnoredDraws() const noexcept {
     return ignoredDraws_;
+}
+
+uint64 VulkanDevice::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
 }
 
 uint64 VulkanDevice::ValidationErrorCount() const noexcept {

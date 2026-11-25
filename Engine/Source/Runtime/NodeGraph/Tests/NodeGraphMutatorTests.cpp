@@ -1,6 +1,6 @@
 #include "NodeGraphMutatorTestSupport.h"
 
-// GraphMutator 명령별 시험이다(Docs/Design/NodeGraph.ko.md 8.6절, 13절 GT1·GT2): 명령마다 성공
+// GraphMutator 명령별 시험이다(Docs/Design/NodeGraph 8.6절, 13절 GT1·GT2): 명령마다 성공
 // 사례는 통지 종류· semanticTouched·revision이 맞고 undo가 원래 바이트, redo가 적용 바이트를
 // 만든다. 위반 사례는 정확한 사유로 거부되고 문서 바이트·revision이 그대로이며 통지가 없다. 목록의
 // 뒤 명령이 실패하면 앞 명령도 되돌린다.
@@ -439,8 +439,18 @@ TEST(NodeGraph_MutatorSetNodeProperties) {
                bad.SetNodeProperties(SampleMain, node, record.View()) && Rejects(m, bad, reason);
     };
 
-    // 간선이 있는 동적 핀(Item_1)이 사라진다.
-    CHECK(rejects(SampleDynamic, TestDynamicStruct, 1, GraphCommandReason::PinsDropped));
+    // 간선이 있는 동적 핀(Item_1)이 사라지면 고아 핀이 된다(10.1절 핀 재정리). 상태를 남기지 않게
+    // 따로 만든 환경에서 본다.
+    {
+        MutatorEnv orphan(env);
+        REQUIRE(orphan.ready);
+        REQUIRE(FillRecord(bytes, TestDynamicStruct, 1, 0));
+        GraphCommandList shrink(env.allocator);
+        REQUIRE(shrink.SetNodeProperties(SampleMain, SampleDynamic, bytes.View()));
+        const Kind shrinkKinds[] = {Kind::NodePropertiesChanged, Kind::NodePinsChanged,
+                                    Kind::RetainedPinChanged};
+        CHECK(RoundTrip(orphan, shrink, Kinds(shrinkKinds), true));
+    }
     CHECK(rejects(SampleParamA, TestValueStruct, 1, GraphCommandReason::PropertiesSchema));
     CHECK(rejects(SampleDynamic, TestDynamicStruct, TestDynamicFailVersion,
                   GraphCommandReason::PropertiesSchema));
@@ -454,7 +464,12 @@ TEST(NodeGraph_MutatorSetNodeProperties) {
                              MakeEdge(SampleParamA, env.pinValue, SampleDynamic, env.pinItem1)));
     REQUIRE(value.SetInputDefault(SampleMain, SampleDynamic, env.pinItem1, bytes.View()));
     REQUIRE(m.Run(value));
-    CHECK(rejects(SampleDynamic, TestDynamicStruct, 1, GraphCommandReason::PinsDropped));
+    REQUIRE(FillRecord(bytes, TestDynamicStruct, 1, 0));
+    GraphCommandList shrinkValue(env.allocator);
+    REQUIRE(shrinkValue.SetNodeProperties(SampleMain, SampleDynamic, bytes.View()));
+    const Kind valueKinds[] = {Kind::NodePropertiesChanged, Kind::NodePinsChanged,
+                               Kind::InputDefaultChanged, Kind::RetainedPinChanged};
+    CHECK(RoundTrip(m, shrinkValue, Kinds(valueKinds), true));
 }
 
 TEST(NodeGraph_MutatorInputDefaults) {
@@ -627,10 +642,16 @@ TEST(NodeGraph_MutatorGraphs) {
                          MakeLayout(env, Id(91), 0, 0)));
     REQUIRE(fill.Connect(SampleCollapsed, MakeEdge(Id(91), env.pinResult, SampleInner, env.pinA)));
     REQUIRE(m.Run(fill));
+    // 부모 Graph.Collapsed가 있는 하위 그래프는 RemoveGraph로 지우지 못한다(10.1절).
+    GraphCommandList referenced(env.allocator);
+    REQUIRE(referenced.RemoveGraph(SampleCollapsed));
+    CHECK(Rejects(m, referenced, GraphCommandReason::GraphReferenced));
+    // 부모 노드를 지우면 하위 그래프(경계 노드 포함)를 먼저 연쇄로 지운다.
     GraphCommandList remove(env.allocator);
-    REQUIRE(remove.RemoveGraph(SampleCollapsed));
-    const Kind removeKinds[] = {Kind::EdgeRemoved,    Kind::NodeRemoved,     Kind::NodeRemoved,
-                                Kind::CommentChanged, Kind::BookmarkChanged, Kind::GraphRemoved};
+    REQUIRE(remove.RemoveNodes(SampleMain, Span<const Guid>(&SampleCollapsedNode, 1)));
+    const Kind removeKinds[] = {Kind::EdgeRemoved,     Kind::NodeRemoved,  Kind::NodeRemoved,
+                                Kind::NodeRemoved,     Kind::NodeRemoved,  Kind::CommentChanged,
+                                Kind::BookmarkChanged, Kind::GraphRemoved, Kind::NodeRemoved};
     CHECK(RoundTrip(m, remove, Kinds(removeKinds), true));
 
     auto rejects = [&](GraphCommandList& bad, GraphCommandReason reason) noexcept {
@@ -676,7 +697,8 @@ TEST(NodeGraph_MutatorMoveNodesToGraph) {
         Kind::NodeAdded,   Kind::NodeRemoved, Kind::NodeAdded,   Kind::EdgeAdded, Kind::EdgeAdded};
     CHECK(RoundTrip(m, move, Kinds(moveKinds), true));
     // redo 뒤 하위 그래프에 노드 넷(원래 하나 + 셋)과 간선 둘이 있다.
-    CHECK(m.sample.document.graphs[1].nodes.Size() == 4);
+    // (원래 셋 — 안쪽 노드와 경계 노드 둘 — 더하기 셋)
+    CHECK(m.sample.document.graphs[1].nodes.Size() == 6);
     CHECK(m.sample.document.graphs[1].edges.Size() == 2);
 
     auto rejects = [&](Guid source, Span<const Guid> nodes, Guid target,

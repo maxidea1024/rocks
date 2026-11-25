@@ -9,7 +9,7 @@
 #include <TraceAnalysis/TraceStreamDecoder.h>
 #include <TraceCapture/Tests/TraceCaptureTestSupport.h>
 
-// GPU 계측 시험이다(Docs/Design/RenderBase.ko.md 13.3절 RB7). GPU 완료는 기록 장치의 fence gate
+// GPU 계측 시험이다(Docs/Design/RenderBase 13.3절 RB7). GPU 완료는 기록 장치의 fence gate
 // (HoldCompletions·CompleteAll)로만 진행한다. sleep이나 시간 문턱이 없다.
 using namespace rocks;
 using namespace rocks::render;
@@ -428,9 +428,9 @@ TEST(GpuTrace_SettingsAndDisjointSamples) {
 }
 
 // 정적 모듈 표로 새 로더를 만드는 시험이라 Monolithic에서만 돈다(Modular에는 정적 표가 없다 —
-// Docs/Design/ModuleLoader.ko.md 3.14절, Docs/Design/BuildTargets 3.8절 BS8e).
+// Docs/Design/ModuleLoader 3.14절, Docs/Design/BuildTargets 3.8절 BS8e).
 #if ROCKS_MONOLITHIC
-// RenderBase 모듈(Docs/Design/ModuleLoader.ko.md 3.12절): 호스트가 실행 중인 trace 세션을 서비스로
+// RenderBase 모듈(Docs/Design/ModuleLoader 3.12절): 호스트가 실행 중인 trace 세션을 서비스로
 // 등록하면 모듈 Startup이 GPU 채널·형을 등록하고 모듈 lease를 잡으며, 묶음 종료가 등록을 풀고
 // lease를 놓는다. 같은 세션에서 엔진 묶음을 다시 시작하면 다시 등록된다(세션이 같은 이름 채널·같은
 // 스키마 형의 id를 다시 쓴다 — TraceSystem 개정 9). 서비스가 없으면 아무것도 등록하지 않는다. 이미

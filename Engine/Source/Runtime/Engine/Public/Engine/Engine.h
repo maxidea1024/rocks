@@ -76,7 +76,7 @@ using EngineSubsystemType = SubsystemType<EngineSubsystem>;
 // 실행 파일이 엔진 루프에 끼워 넣는 확장 지점이다. 창 이벤트 펌프·입력 수집·렌더 추출과 제출처럼
 // Engine이 직접 의존하지 않는 시스템을 연결한다. 헤드리스 실행은 hook 없이 돈다.
 //
-// 종료 단계 hook(CP6, Docs/Design/RenderBase.ko.md 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
+// 종료 단계 hook(CP6, Docs/Design/RenderBase 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
 // lane처럼 Engine이 모르는 실행기가 엔진 종료 순서에 끼어드는 자리다. Engine::Shutdown이 다음
 // 순서로 부른다(각 hook은 종료 중 한 번, DrainShutdownCleanup만 반복):
 //   BeginShutdown → client 종료·World 파괴 → CompleteInFlightWork → Subsystem 정리 → [최종 GC →
@@ -170,6 +170,18 @@ public:
     virtual void OnEngineShutdown(Engine&) noexcept {
     }
 
+    // World가 정리(EndPlay·Shutdown)를 마치고 저장소를 놓기 직전이다(UE
+    // FWorldDelegates::OnPreWorldFinishDestroy 자리 — 누가 DestroyWorld를 불렀든, 엔진 종료
+    // 포함). World 포인터를 든 쪽이 여기서 비운다. 이 안의 DestroyWorld는 5단계로 미뤄진다.
+    virtual void OnWorldDestroyed(Engine&, World&) noexcept {
+    }
+
+    // 진단 DumpSubsystems가 Engine 계층 다음에 부른다(Docs/Design/EngineRuntime 22.1절 — Engine이
+    // 모르는 계층, 예: GameInstance·LocalPlayer). out 끝에 붙인다. 오류: 할당 실패.
+    virtual Result<void> DescribeSubsystems(Engine&, String&) noexcept {
+        return Result<void>::Success();
+    }
+
 protected:
     ~EngineClient() = default;
 };
@@ -194,7 +206,7 @@ struct EngineConfig {
     double fixedFrameDeltaSeconds = 0.0;
     // 0이 아니면 Run이 이 프레임 수를 실행한 뒤 스스로 종료 요청한다.
     uint64 maxFrames = 0;
-    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader.ko.md 3.11절 — 보통
+    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader 3.11절 — 보통
     // launch::ApplicationContext::Modules(), 시험은 test::ProcessModules()). Initialize가 엔진
     // TypeRegistry의 타입 등록기(ModuleTypeRegistrations)를 이 로더에 붙여 이미 시작한 모듈의
     // 리플렉션 타입을 시작 순서로 등록하고(로더가 발급한 모듈 lease로), 엔진 묶음
@@ -447,9 +459,23 @@ public:
     // 엔진이 World에 넣는 기본 바깥 조회 창이다(EngineSubsystem만).
     OuterSubsystemLookup SubsystemLookup() const noexcept;
 
+    // --- 진단(Docs/Design/EngineRuntime 22.1절) ---
+
+    // Subsystem 계층(Engine → client가 붙이는 계층(GameInstance·LocalPlayer) → World마다)의 초기화
+    // 순서와 생략 이유를 out 끝에 붙인다. 콘솔 명령 engine.dumpsubsystems가 쓴다. 오류: 할당 실패.
+    Result<void> DumpSubsystems(String& out) noexcept;
+
+    // World의 Tick 그래프를 out 끝에 붙인다(World::DumpTickGraph). world가 비면 모든 World, 아니면
+    // 이름이 같은 World만이다. 콘솔 명령 world.dumpticks [이름]이 쓴다. 오류: 이름이 없으면
+    // NotFound, 할당 실패.
+    Result<void> DumpTickGraphs(String& out, StringView world = {}) noexcept;
+
     EngineStats Stats() const noexcept;
 
 private:
+    // 파괴를 아직 시도하지 않은 WorldContext의 destroyAttemptFrame이다.
+    static constexpr uint64 NoDestroyAttempt = NumericLimits<uint64>::Max();
+
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
@@ -459,6 +485,8 @@ private:
         bool destroyWarned = false;
         ErrorCode destroyError = ErrorCode::None;
         uint64 destroyDeferredFrame = 0;
+        // 5단계에서 마지막으로 파괴를 시도한 프레임이다(한 프레임에 한 번만 시도한다).
+        uint64 destroyAttemptFrame = NoDestroyAttempt;
         // 연속 Tick 실패다. 첫 실패만 Error로 남기고 뒤따른 실패는 세어 두었다가 회복·파괴 때 한 번
         // 요약한다.
         bool tickFailing = false;
@@ -474,6 +502,8 @@ private:
     Result<void> CloseAfterSubsystems(const char*& failedStage) noexcept;
     Result<void> DestroyWorldNow(usize index) noexcept;
     void ProcessDeferred() noexcept;
+    // 미룬 파괴가 WorldDestroyWarnFrames를 넘도록 남으면 한 번 경고한다.
+    void WarnLongDeferredDestroy(WorldContext& context) noexcept;
     // World Tick 결과를 반영한다. 연속 실패는 첫 번째만 Error로 남긴다.
     void NoteWorldTick(WorldContext& context, const Result<void>& ticked) noexcept;
     // 연속 Tick 실패를 끝낸다. 첫 실패 뒤 더 실패한 것이 있으면 한 번 요약한다.
@@ -488,6 +518,10 @@ private:
     Result<void> StartPostEngineInitModules() noexcept;
     // 엔진 묶음을 놓고 타입 등록기를 떼어 모듈 기록을 놓는다(TypeRegistry 종료 전).
     void DetachModuleTypes() noexcept;
+    // 진단 콘솔 명령(engine.dumpsubsystems·world.dumpticks)을 설정 문맥에 올리고 이 Engine에 묶는다
+    // (설정 문맥이 없으면 아무것도 하지 않는다). 실패는 Warning 하나다(진단이 없어도 엔진은 돈다).
+    void BindConsoleCommands() noexcept;
+    void UnbindConsoleCommands() noexcept;
 
     Allocator& allocator_;
     EngineConfig config_;
@@ -533,6 +567,8 @@ private:
     bool maxFramesReached_ = false;
     // 설정 Sync가 실패하고 있는지다(연속 실패는 첫 번째만 Error로 남긴다).
     bool settingsSyncFailing_ = false;
+    // 진단 콘솔 명령을 이 Engine에 묶었다(BindConsoleCommands).
+    bool consoleBound_ = false;
 };
 
 // World 안(WorldSubsystem 등)에서 EngineSubsystem을 찾는다(World의 바깥 조회 창 — 16.3절 ERD10).

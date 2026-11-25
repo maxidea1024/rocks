@@ -5,7 +5,7 @@
 #include <Core/Text/Name.h>
 #include <Core/Text/StringView.h>
 
-// 노드 그래프의 정규 순서다(Docs/Design/NodeGraph.ko.md 6.1·6.3절).
+// 노드 그래프의 정규 순서다(Docs/Design/NodeGraph 6.1·6.3절).
 //
 // - Guid(GraphId·NodeId·주석 id)는 high, low의 부호 없는 사전 순이다.
 // - Name(DomainId·NodeTypeId·PinKey)은 원문 순이다. None이 맨 앞이고, 그다음은 번호 접미를 뗀

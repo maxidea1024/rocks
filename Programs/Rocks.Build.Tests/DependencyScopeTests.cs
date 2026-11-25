@@ -120,7 +120,53 @@ internal static class DependencyScopeTests
                 "unexpected message for HasGlobalState on an engine module: " + error.Message);
         }
 
+        // 서드파티 모듈만 거쳐 닿는 Rocks 모듈도 소비 모듈이고, 서드파티 모듈 자체는 세지 않는다(BD29 — ICU를 쓰는 HarfBuzz). Base를
+        // 서드파티로 두면 Base는 세지 않고 Base를 의존하는 Mid·Pub이 둘 다 Root에 닿아 거부한다.
+        try
+        {
+            InputValidation.Validate(build with
+            {
+                Modules = stateful.Select(module => module.Name == "Base" ? module with { ThirdParty = true } : module).ToArray()
+            });
+            Check(false, "two Rocks modules reaching a global-state module through a third-party module must be rejected");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("Module Root has process-wide state", StringComparison.Ordinal) &&
+                error.Message.Contains("found Mid, Pub", StringComparison.Ordinal),
+                "unexpected message for consumers through a third-party chain: " + error.Message);
+        }
+
         pass("dependency scope: a global-state module accepts one direct consumer and rejects two");
+
+        // RTTI는 서드파티 모듈만 켤 수 있고(ThirdParty.json rtti — ICU4C), 켠 모듈의 C++ 번역 단위만 프로필의 RTTI 끔 뒤에 켬을 받는다
+        // (Docs/Design/Compression.ko.md 3.3절 C++ 서드파티).
+        bool windows = request.Toolchain.Platform == NativePlatform.Windows;
+        string rttiOff = windows ? "/GR-" : "-fno-rtti";
+        string rttiOn = windows ? "/GR" : "-frtti";
+        NativeModuleInput[] rttiModules = modules.Select(module => module.Name == "Root" ? module with { ThirdParty = true, RuntimeTypeInformation = true } : module).ToArray();
+        NativePlan rttiPlan = ActionGraph.Create(build with { Modules = rttiModules });
+        IReadOnlyList<string> rootArguments = rttiPlan.Actions.Single(action => action.Kind == "Compile" && action.Module == "Root").Arguments;
+        IReadOnlyList<string> baseArguments = rttiPlan.Actions.Single(action => action.Kind == "Compile" && action.Module == "Base").Arguments;
+        int offIndex = rootArguments.ToList().LastIndexOf(rttiOff);
+        int onIndex = rootArguments.ToList().LastIndexOf(rttiOn);
+        Check(offIndex >= 0 && onIndex > offIndex, "an RTTI third-party module must turn RTTI on after the profile turns it off: " + string.Join(" ", rootArguments));
+        Check(!baseArguments.Contains(rttiOn), "a module without RuntimeTypeInformation keeps RTTI off: " + string.Join(" ", baseArguments));
+        try
+        {
+            InputValidation.Validate(build with
+            {
+                Modules = modules.Select(module => module.Name == "Root" ? module with { RuntimeTypeInformation = true } : module).ToArray()
+            });
+            Check(false, "RuntimeTypeInformation on a non-third-party module must be rejected");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("RuntimeTypeInformation is only for a third-party module", StringComparison.Ordinal),
+                "unexpected message for RuntimeTypeInformation on an engine module: " + error.Message);
+        }
+
+        pass("dependency scope: only a third-party module turns RTTI on, for its own C++ sources");
 
         // 공유 PCH 제공 모듈(Mid)의 closure는 공개 환경이다(비공개 의존 Base는 넣지 않는다). 도달 closure를 쓰면 소비자 OnlyMid의 include에
         // Base가 없어 "cannot use the shared PCH"로 계획이 실패한다.

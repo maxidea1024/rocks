@@ -317,7 +317,7 @@ internal static class GameProjectFiles
             GameLayout layout = GamePlanning.Layout(rules, descriptor, plugins, context, toolchain, configuration, sdk,
                 manifest.Configurations[configuration.ToString()].Modules, createDirectories: false);
             IdePlan plan = IdePlanner.Plan(GamePlanning.Request(toolchain, configuration, project, output, layout.Metadata.Modules, layout.Targets, sdk,
-                engineVersion, 1));
+                engineVersion, 1, rules.Target.Kind));
             (string directory, string definitionName) = definitions[target.Name];
             plans[index] = new(target.Name, directory, target.Type.ToString(), configuration.ToString(), plan, definitionName);
             string? primary = plan.ModuleOutputs.GetValueOrDefault(rules.Target.Modules[0]);

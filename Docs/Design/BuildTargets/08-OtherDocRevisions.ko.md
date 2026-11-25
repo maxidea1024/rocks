@@ -7,6 +7,7 @@
 - [셰이더 시스템](../ShaderSystem/09-ToolLoadingReleaseExclusion.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.
 - [AppInfo·CommandLine](../AppInfoCommandLine.ko.md) 307·565행 `build::TargetType`: 다섯 값으로 고쳤다. `HostKind`(304행)는 Editor·Server 타깃이 생길 때 더한다.
 - [UI 툴킷](../UiToolkit.ko.md) 7.3절 (g) `MinimalAPI`·`*_API` 행(개정 2): BD27·BD28로 정했다고 고쳤다.
+- [셰이더 시스템](../ShaderSystem/16-LaterStages.ko.md) 16.1절 SSD19(개정 36): Sandbox의 워커를 선행 타깃(3.11절)으로 먼저 빌드한다고 고쳤다.
 
 구현 때 고칠 문서:
 - [전체 계획](../EngineImplementationPlan.ko.md) 282행 "공개/비공개 의존성": 이 문서 3.5절이 구현 스펙이다(링크만 더한다).

@@ -1,0 +1,40 @@
+// 텍스처 view self-test 셰이더다(mip 0 채우기, mip 축소, mip 읽기, 배열 층 읽기).
+ROCKS_IMAGE_FORMAT(r32f) RWTexture2D<float> Target;
+
+[numthreads(8, 8, 1)]
+void FillCS(uint3 id : SV_DispatchThreadID) {
+    Target[id.xy] = id.x + id.y * 8.0;
+}
+
+struct LevelConstants {
+    // x 읽을 mip, y 쓸 크기다.
+    float4 level;
+};
+
+ROCKS_ROOT_CONSTANTS(LevelConstants, Level);
+
+Texture2D<float> Source;
+
+[numthreads(4, 4, 1)]
+void ReduceCS(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= (uint)Level.level.y || id.y >= (uint)Level.level.y) {
+        return;
+    }
+
+    int lod = (int)Level.level.x;
+    int2 p = int2(id.xy) * 2;
+    float a = max(Source.Load(int3(p, lod)), Source.Load(int3(p + int2(1, 0), lod)));
+    float b = max(Source.Load(int3(p + int2(0, 1), lod)), Source.Load(int3(p + int2(1, 1), lod)));
+    Target[id.xy] = max(a, b);
+}
+
+float4 LevelPS() : SV_Target0 {
+    float v = Source.Load(int3(0, 0, (int)Level.level.x));
+    return float4(v / 64.0, 0.0, 0.0, 1.0);
+}
+
+Texture2DArray<float4> Layers;
+
+float4 LayerPS() : SV_Target0 {
+    return Layers.Load(int4(0, 0, 0, 0));
+}

@@ -4,6 +4,7 @@
 #include <Platform/File.h>
 #include <Platform/Path.h>
 #include <Platform/Process.h>
+#include <ShaderToolLoader/MetalToolchain.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 #include <TestSupport/DynamicLibraryFixture.h>
 #include <TestSupport/ProcessProbe.h>
@@ -631,4 +632,53 @@ TEST(ShaderToolLoader_IgnoresWorkingDirectoryAndPath) {
     REQUIRE(WriteFixture(besideA, nullptr));
     CHECK(RunOpenProbe(store.path, key, nameA, digestA, sizeA, elsewhere.path, nullptr) == 0);
 }
+
+// metal -v 버전 줄 읽기(SH1e E7): 버전 줄과 Target 줄만, 설치 경로 줄은 뺀다.
+TEST(ShaderToolLoader_ParsesMetalVersion) {
+    char version[MaxMetalVersionBytes];
+    CHECK(
+        ParseMetalVersion("Apple metal version 32023.155 (metalfe-32023.155)\r\n"
+                          "Target: air64-apple-darwin23.5.0\r\n"
+                          "Thread model: posix\r\n"
+                          "InstalledDir: C:\\Program Files\\Metal Developer Tools\\metal\\bin\r\n",
+                          version));
+    CHECK(StringView(version) ==
+          "Apple metal version 32023.155 (metalfe-32023.155)\nTarget: air64-apple-darwin23.5.0");
+
+    // Target 줄이 없어도 버전 줄만으로 된다. 앞의 다른 줄은 건너뛴다.
+    CHECK(ParseMetalVersion("warning: something\nApple LLVM version 902.11 (metalfe-902.11.1)\n",
+                            version));
+    CHECK(StringView(version) == "Apple LLVM version 902.11 (metalfe-902.11.1)");
+
+    // 버전 줄이 없거나 너무 길면 실패다.
+    CHECK(!ParseMetalVersion("Target: air64-apple-darwin23.5.0\n", version));
+    CHECK(!ParseMetalVersion("", version));
+    char longLine[MaxMetalVersionBytes + 32];
+    const int bytes = snprintf(longLine, sizeof(longLine), "Apple metal version %0*d",
+                               static_cast<int>(MaxMetalVersionBytes), 1);
+    REQUIRE(bytes > 0 && static_cast<usize>(bytes) < sizeof(longLine));
+    CHECK(!ParseMetalVersion(StringView(longLine, static_cast<usize>(bytes)), version));
+}
+
+// 이 기계의 Metal 도구 찾기는 결정적이다(찾으면 경로·버전·SHA가 있고, 못 찾으면 전부 비었다).
+TEST(ShaderToolLoader_LocatesMetalToolchainConsistently) {
+    MetalToolchain first;
+    MetalToolchain second;
+    LocateMetalToolchain(first);
+    LocateMetalToolchain(second);
+    CHECK(first.found == second.found);
+    if (!first.found) {
+        printf("[SKIP] ShaderToolLoader_LocatesMetalToolchainConsistently: no Metal toolchain "
+               "(macOS xcrun or Metal Developer Tools for Windows) on this host\n");
+        CHECK(first.version[0] == '\0' && first.executables[MetalCompilerIndex][0] == '\0' &&
+              first.sha256[MetalCompilerIndex] == Sha256Digest{});
+        return;
+    }
+
+    CHECK(StringView(first.version) == StringView(second.version));
+    CHECK(first.sha256[MetalCompilerIndex] == second.sha256[MetalCompilerIndex] &&
+          first.sha256[MetalLibrarianIndex] == second.sha256[MetalLibrarianIndex]);
+    CHECK(first.executables[MetalLibrarianIndex][0] != '\0');
+}
+
 } // namespace shader_tool_loader_tests_file

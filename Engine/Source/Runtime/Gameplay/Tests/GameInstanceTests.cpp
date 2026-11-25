@@ -4,6 +4,7 @@
 #include <Gameplay/GameInstanceClient.h>
 #include <Gameplay/LocalPlayer.generated.h>
 #include <TestSupport/Test.h>
+#include <World/Actor.generated.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -131,7 +132,9 @@ protected:
 
     void OnStart() noexcept override {
         Record("gi.start");
-        CHECK(CurrentWorld() != nullptr && CurrentWorld()->State() == WorldState::Playing);
+        // Editor 종류는 BeginPlay하지 않는다(16.4절).
+        CHECK(CurrentWorld() != nullptr && (CurrentWorld()->State() == WorldState::Playing ||
+                                            CurrentWorld()->Kind() == WorldKind::Editor));
     }
 
     void OnShutdown() noexcept override {
@@ -186,9 +189,48 @@ Result<void> PopulateRecord(World& world, void* context) noexcept {
     return fail ? Result<void>::Failure(ErrorCode::DependencyFailed) : Result<void>::Success();
 }
 
+MapDesc tickMap;
+
+// 첫 Tick에서 OpenWorld를 요청하는 Actor다(World Tick 안의 요청은 다음 OnEngineTick으로 미뤄진다).
+class RequestingActor final : public Actor {
+    ROCKS_NATIVE_TYPE(RequestingActor, Actor, 0x2c6d8e1f4a7b9035ull, 0x93e5a10b7c2d4f68ull)
+
+public:
+    explicit RequestingActor(Allocator& allocator) noexcept : Actor(allocator) {
+        PrimaryTick().tick = true;
+    }
+
+    void OnTick(const TickContext&) noexcept override {
+        if (requested || activeClient == nullptr) {
+            return;
+        }
+
+        requested = true;
+        Record("actor.request");
+        auto opened = activeClient->WithInstance(
+            [](GameInstance& game) noexcept { return game.OpenWorld(tickMap); });
+        CHECK(opened.IsOk());
+        auto pending = activeClient->WithInstance(
+            [](GameInstance& game) noexcept { return game.HasPendingOpen(); });
+        CHECK(pending.Value());
+    }
+
+    bool requested = false;
+};
+
+Result<void> PopulateRequesting(World& world, void*) noexcept {
+    auto spawned = world.SpawnActor<RequestingActor>();
+    return spawned ? Result<void>::Success() : Result<void>::Failure(spawned.Error());
+}
+
 Result<void> RegisterTestTypes(TypeRegistry& types) noexcept {
     auto registered = RegisterNativeClass<TestGameInstance>(types);
-    return registered ? Result<void>::Success() : Result<void>::Failure(registered.Error());
+    if (!registered) {
+        return Result<void>::Failure(registered.Error());
+    }
+
+    auto actor = RegisterNativeClass<RequestingActor>(types);
+    return actor ? Result<void>::Success() : Result<void>::Failure(actor.Error());
 }
 
 const EngineSubsystemType engineSubsystems[] = {
@@ -216,9 +258,25 @@ public:
         requests = 0;
     }
 
+    // 6단계(프레임 끝)의 요청도 다음 OnEngineTick으로 미뤄진다.
+    void EndFrame(Engine&) noexcept override {
+        if (!endFrameRequest) {
+            return;
+        }
+
+        endFrameRequest = false;
+        auto requested = client->WithInstance(
+            [this](GameInstance& game) noexcept { return game.OpenWorld(maps[0]); });
+        CHECK(requested.IsOk());
+        auto pending =
+            client->WithInstance([](GameInstance& game) noexcept { return game.HasPendingOpen(); });
+        CHECK(pending.Value());
+    }
+
     GameInstanceClient* client = nullptr;
     MapDesc maps[1];
     uint32 requests = 0;
+    bool endFrameRequest = false;
 };
 
 struct Fixture {
@@ -240,7 +298,7 @@ struct Fixture {
 
     // 엔진을 시작한다(client는 이 때 만든다 — game 설정을 고친 뒤에 부른다).
     Result<void> Start() noexcept {
-        auto madeClient = UniquePtr<GameInstanceClient>::TryMake(allocator, game);
+        auto madeClient = UniquePtr<GameInstanceClient>::TryMake(allocator, allocator, game);
         if (!madeClient) {
             return Result<void>::Failure(madeClient.Error());
         }
@@ -518,4 +576,75 @@ TEST(GameInstance_OpenWorldFailureAndReentry) {
     CHECK(EventsAre(recovered));
 }
 
+// 리뷰 보강(18.6절): 누가 Engine::DestroyWorld로 현재 World를 지워도 GameInstance가 비운다
+// (OnWorldDestroyed). 그 뒤 OpenWorld·종료가 지운 World를 건드리지 않는다.
+TEST(GameInstance_ExternallyDestroyedCurrentWorldIsForgotten) {
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    World* const arena = fixture.engine->WorldAt(0);
+    ResetEvents();
+    REQUIRE(fixture.engine->DestroyWorld(arena));
+    const char* const destroyed[] = {"ws.endplay:Arena", "ws.deinit"};
+    CHECK(EventsAre(destroyed));
+    auto forgotten = fixture.With(
+        [](TestGameInstance& game) noexcept { return game.CurrentWorld() == nullptr; });
+    CHECK(forgotten.Value());
+    ResetEvents();
+    auto reopened = fixture.With([](TestGameInstance& game) noexcept {
+        MapDesc map;
+        map.name = "Again";
+        return game.OpenWorld(map);
+    });
+    CHECK(reopened.IsOk());
+    const char* const again[] = {"ws.init:lookup", "ws.beginplay"};
+    CHECK(EventsAre(again));
+    ResetEvents();
+    REQUIRE(fixture.engine->Shutdown());
+    const char* const stopped[] = {"ws.endplay", "gi.shutdown", "lps.deinit:0",
+                                   "gis.deinit", "ws.deinit",   "es.deinit"};
+    CHECK(EventsAre(stopped));
+}
+
+// 18.5절: World Tick(Actor OnTick)·프레임 끝(EndFrame)의 요청도 다음 OnEngineTick에서 실행한다.
+TEST(GameInstance_OpenWorldRequestedFromWorldTickAndFrameEndIsDeferred) {
+    Fixture fixture;
+    fixture.game.defaultMap.populate = &PopulateRequesting;
+    tickMap.name = "FromTick";
+    fixture.hooks.maps[0].name = "FromEndFrame";
+    REQUIRE(fixture.Start());
+    ResetEvents();
+    REQUIRE(fixture.engine->RunFrame());
+    // 요청한 프레임에는 World가 그대로다.
+    const char* const requested[] = {"actor.request"};
+    CHECK(EventsAre(requested));
+    CHECK(fixture.engine->WorldAt(0)->Name() == StringView("Arena"));
+    ResetEvents();
+    fixture.hooks.endFrameRequest = true;
+    REQUIRE(fixture.engine->RunFrame());
+    const char* const opened[] = {"ws.endplay:Arena", "ws.deinit", "ws.init:lookup",
+                                  "ws.beginplay"};
+    CHECK(EventsAre(opened));
+    CHECK(fixture.engine->WorldAt(0)->Name() == StringView("FromTick"));
+    ResetEvents();
+    REQUIRE(fixture.engine->RunFrame());
+    const char* const reopened[] = {"ws.endplay", "ws.deinit", "ws.init:lookup", "ws.beginplay"};
+    CHECK(EventsAre(reopened));
+    CHECK(fixture.engine->WorldAt(0)->Name() == StringView("FromEndFrame"));
+}
+
+// 리뷰 보강(16.3·18.6절): Editor 종류 현재 World는 EndPlay가 없어 조회 창이 Shutdown까지 열려 있다.
+// GameInstance Subsystem은 정리 전에 창에서 감춰지므로 World 정리는 그것을 보지 않는다.
+TEST(GameInstance_EditorCurrentWorldShutsDownAfterGameInstance) {
+    Fixture fixture;
+    fixture.game.defaultMap.kind = WorldKind::Editor;
+    REQUIRE(fixture.Start());
+    const char* const started[] = {"gi.init",        "gis.init", "gi.postinit", "lps.init:0",
+                                   "ws.init:lookup", "populate", "gi.start"};
+    CHECK(EventsAre(started));
+    ResetEvents();
+    REQUIRE(fixture.engine->Shutdown());
+    const char* const stopped[] = {"gi.shutdown", "lps.deinit:0", "gis.deinit", "ws.deinit",
+                                   "es.deinit"};
+    CHECK(EventsAre(stopped));
+}
 } // namespace gameplay_game_instance_tests_file

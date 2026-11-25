@@ -350,7 +350,7 @@ constexpr ModuleTableRow LateRows[] = {
 
 namespace host_settings_tests_file {
 
-// 설정 등록 시점(Docs/Design/ModuleLoader.ko.md 3.5·3.10절 MD22): HostSettings는 설정 파일을 읽기
+// 설정 등록 시점(Docs/Design/ModuleLoader 3.5·3.10절 MD22): HostSettings는 설정 파일을 읽기
 // 전에 로더의 모듈 표에 있는 모든 모듈의 RegisterSettings를 부른다. 그래서 아직 시작하지 않은 늦은
 // 단계 모듈의 CVar도 파일 값을 받고 ReportUnresolved가 그 이름을 오타로 알리지 않는다(정말 없는
 // 이름만 센다). 문맥은 설정을 등록한 모듈의 lease를 맡아 문맥이 사는 동안 그 모듈 코드를 붙잡는다.

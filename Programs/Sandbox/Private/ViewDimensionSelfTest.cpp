@@ -1,4 +1,5 @@
 #include "ViewDimensionSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
@@ -66,80 +67,7 @@ bool Near(const uint8* actual, const uint8* expected) noexcept {
     return true;
 }
 
-#define VIEW_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-#define VIEW_FULL_SCREEN_HLSL                                                                      \
-    "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"                                       \
-    "    float2 uv = float2((id << 1) & 2, id & 2);\n"                                             \
-    "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"                                               \
-    "}\n"
-#define VIEW_PIXEL_GLSL(declaration, read)                                                         \
-    VIEW_GLSL_HEAD "layout(binding = 0) uniform highp " declaration " ps0;\n"                      \
-                   "layout(location = 0) out vec4 out_var_SV_Target0;\n"                           \
-                   "void main() { out_var_SV_Target0 = " read "; }\n"
-
-constexpr char FullScreenGlsl[] = VIEW_GLSL_HEAD R"(
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-constexpr char Read2DHlsl[] =
-    "Texture2D<float4> source : register(t0);\n" VIEW_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target { return source.Load(int3(0, 0, 0)); }\n";
-constexpr char Read2DGlsl[] = VIEW_PIXEL_GLSL("sampler2D", "texelFetch(ps0, ivec2(0), 0)");
-
-constexpr char ReadLayer0Hlsl[] =
-    "Texture2DArray<float4> source : register(t0);\n" VIEW_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target { return source.Load(int4(0, 0, 0, 0)); }\n";
-constexpr char ReadLayer0Glsl[] =
-    VIEW_PIXEL_GLSL("sampler2DArray", "texelFetch(ps0, ivec3(0, 0, 0), 0)");
-
-constexpr char ReadLayer4Hlsl[] =
-    "Texture2DArray<float4> source : register(t0);\n" VIEW_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target { return source.Load(int4(0, 0, 4, 0)); }\n";
-constexpr char ReadLayer4Glsl[] =
-    VIEW_PIXEL_GLSL("sampler2DArray", "texelFetch(ps0, ivec3(0, 0, 4), 0)");
-
-// cube 배열 view의 cube 0을 +X(면 0) 방향으로 표본한다.
-constexpr char ReadCubeArrayHlsl[] =
-    "TextureCubeArray<float4> source : register(t0);\n"
-    "SamplerState sourceSampler : register(s0);\n" VIEW_FULL_SCREEN_HLSL
-    "float4 PSMain() : SV_Target {\n"
-    "    return source.SampleLevel(sourceSampler, float4(1.0, 0.0, 0.0, 0.0), 0.0);\n"
-    "}\n";
-constexpr char ReadCubeArrayGlsl[] =
-    VIEW_PIXEL_GLSL("samplerCubeArray", "textureLod(ps0, vec4(1.0, 0.0, 0.0, 0.0), 0.0)");
-
-// 쓰기 view 하나(2D)에 상수 값을 쓴다. layered 채우기는 cube 면 2D 배열(GLSL imageCube)이다.
-constexpr char FillFaceHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 fill; };
-RWTexture2D<float> target : register(u0);
-[numthreads(4, 4, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) { target[id.xy] = fill.x; }
-)";
-constexpr char FillFaceGlsl[] = VIEW_GLSL_HEAD R"(
-layout(local_size_x = 4, local_size_y = 4) in;
-uniform highp vec4 cu_h[1];
-layout(binding = 0, r32f) uniform highp writeonly image2D target;
-void main() { imageStore(target, ivec2(gl_GlobalInvocationID.xy), vec4(cu_h[0].x)); }
-)";
-constexpr char FillCubeHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 fill; };
-RWTexture2DArray<float> target : register(u0);
-[numthreads(4, 4, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) { target[id] = fill.x; }
-)";
-constexpr char FillCubeGlsl[] = VIEW_GLSL_HEAD R"(
-layout(local_size_x = 4, local_size_y = 4) in;
-uniform highp vec4 cu_h[1];
-layout(binding = 0, r32f) uniform highp writeonly imageCube target;
-void main() { imageStore(target, ivec3(gl_GlobalInvocationID), vec4(cu_h[0].x)); }
-)";
-
-#undef VIEW_PIXEL_GLSL
-#undef VIEW_FULL_SCREEN_HLSL
-#undef VIEW_GLSL_HEAD
+// 셰이더는 FullScreen.rsf·ViewDimension.rsf다.
 
 struct FillConstants {
     float values[4] = {};
@@ -169,12 +97,13 @@ struct Canvas {
     }
 
     // texture를 묶고 그 PS로 그린 픽셀을 pixel에 읽는다.
-    bool Draw(StringView hlsl, StringView glsl, TextureHandle texture) noexcept {
+    bool Draw(const shaders::ShaderTypeDesc& shader, const char* name,
+              TextureHandle texture) noexcept {
         PipelineDesc desc;
-        desc.vertex = {hlsl, Text(FullScreenGlsl)};
-        desc.pixel = {hlsl, glsl};
+        desc.bindings.texture = name;
         desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
-        auto pipeline = device.CreatePipeline(desc);
+        auto pipeline =
+            shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, shader, desc);
         if (!pipeline) {
             PrintLastError(device);
             return false;
@@ -235,7 +164,8 @@ Result<TextureHandle> ColoredTexture(Device& device, Allocator& allocator,
 // view를 만들어 PS로 읽은 색이 slice 색과 같은지 본다. 범위 view가 없는 장치는 Unsupported를
 // 단언한다.
 void ExpectView(Device& device, Canvas& canvas, TextureHandle texture, const TextureViewDesc& desc,
-                StringView hlsl, StringView glsl, uint32 slice, const char* what) noexcept {
+                const shaders::ShaderTypeDesc& pixel, const char* name, uint32 slice,
+                const char* what) noexcept {
     auto view = device.CreateTextureView(texture, desc);
     if (!device.Caps().features.textureViewRanges) {
         char message[128];
@@ -252,7 +182,7 @@ void ExpectView(Device& device, Canvas& canvas, TextureHandle texture, const Tex
 
     uint8 expected[4] = {};
     SliceColor(slice, expected);
-    Check(canvas.Draw(hlsl, glsl, view.Value()) && Near(canvas.pixel, expected), what);
+    Check(canvas.Draw(pixel, name, view.Value()) && Near(canvas.pixel, expected), what);
     device.Retire(view.Value());
 }
 
@@ -267,14 +197,15 @@ void RunReadViews(Device& device, Allocator& allocator) noexcept {
     Check(canvas.Initialize() && array && cube, "canvas and colored textures");
     if (array && cube && !canvas.target.IsNull()) {
         ExpectView(device, canvas, array.Value(),
-                   DimensionView(TextureViewDimension::Texture2D, 0, 1), Text(Read2DHlsl),
-                   Text(Read2DGlsl), 0, "layer 0 of a 2D array as a Texture2D view");
+                   DimensionView(TextureViewDimension::Texture2D, 0, 1), shaders::ViewRead2DPS,
+                   "Plane", 0, "layer 0 of a 2D array as a Texture2D view");
         ExpectView(device, canvas, array.Value(),
-                   DimensionView(TextureViewDimension::Texture2DArray, 1, 1), Text(ReadLayer0Hlsl),
-                   Text(ReadLayer0Glsl), 1, "layer 1 of a 2D array as a one layer 2D array view");
+                   DimensionView(TextureViewDimension::Texture2DArray, 1, 1),
+                   shaders::ViewReadLayer0PS, "Layers", 1,
+                   "layer 1 of a 2D array as a one layer 2D array view");
         ExpectView(device, canvas, cube.Value(),
-                   DimensionView(TextureViewDimension::Texture2DArray, 0, 0), Text(ReadLayer4Hlsl),
-                   Text(ReadLayer4Glsl), ReadFace,
+                   DimensionView(TextureViewDimension::Texture2DArray, 0, 0),
+                   shaders::ViewReadLayer4PS, "Layers", ReadFace,
                    "cube face 4 through a 2D array view of the faces");
         // 2D view의 첫 slice 밖은 규칙 위반이다(모든 장치).
         Check(device.CreateTextureView(array.Value(),
@@ -287,7 +218,7 @@ void RunReadViews(Device& device, Allocator& allocator) noexcept {
         ExpectView(device, canvas, cubeArray.Value(),
                    DimensionView(TextureViewDimension::TextureCubeArray, SecondCubeFirstFace,
                                  CubeFaceCount),
-                   Text(ReadCubeArrayHlsl), Text(ReadCubeArrayGlsl), SecondCubeFirstFace,
+                   shaders::ViewReadCubeArrayPS, "Cubes", SecondCubeFirstFace,
                    "the second cube through a one cube cube array view");
         device.Retire(cubeArray.Value());
     }
@@ -335,13 +266,13 @@ void RunFaceWriteView(Device& device, Allocator& allocator) noexcept {
 
     auto cube = device.CreateTexture(desc, {});
     ComputePipelineDesc faceDesc;
-    faceDesc.shader = {Text(FillFaceHlsl), Text(FillFaceGlsl)};
     faceDesc.drawConstantBytes = sizeof(FillConstants);
+    faceDesc.bindings.writableTextures[0] = "Face";
     ComputePipelineDesc cubeDesc;
-    cubeDesc.shader = {Text(FillCubeHlsl), Text(FillCubeGlsl)};
     cubeDesc.drawConstantBytes = sizeof(FillConstants);
-    auto fillFace = device.CreateComputePipeline(faceDesc);
-    auto fillCube = device.CreateComputePipeline(cubeDesc);
+    cubeDesc.bindings.writableTextures[0] = "Faces";
+    auto fillFace = shaders::CreateComputePipeline(device, shaders::ViewFillFaceCS, faceDesc);
+    auto fillCube = shaders::CreateComputePipeline(device, shaders::ViewFillCubeCS, cubeDesc);
     TextureViewDesc allDesc;
     allDesc.access = ViewAccess::ReadWrite;
     allDesc.mipCount = 1;

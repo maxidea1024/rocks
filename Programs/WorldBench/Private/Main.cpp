@@ -105,7 +105,7 @@ int Measure(ModuleLoader& modules, uint32 actors, bool ticking) noexcept {
     BenchAllocator memory;
     int status = 0;
     {
-        // World 리플렉션 타입은 모듈 로더가 등록한다(Docs/Design/ModuleLoader.ko.md 3.11절):
+        // World 리플렉션 타입은 모듈 로더가 등록한다(Docs/Design/ModuleLoader 3.11절):
         // Launch의 프로세스 로더에서 World 모듈(의존 폐포)을 시작하고(처음 한 번, 프로세스 묶음) 이
         // 레지스트리의 타입 등록기를 붙인다. 등록기는 레지스트리보다 먼저 뗀다(detach).
         if (!modules.Load("World").IsOk()) {

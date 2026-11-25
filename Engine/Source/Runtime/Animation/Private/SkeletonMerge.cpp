@@ -1,4 +1,5 @@
 #include "AnimationInternal.h"
+#include <Base/Compiler.h>
 
 #include <Animation/SkeletonMerge.h>
 
@@ -153,10 +154,13 @@ Result<void> MergeBoneHierarchy(const BoneHierarchy& skeleton, const BoneHierarc
             BoneInfo& target = result.bones.bones[existing];
             // 대소문자만 다른 이름(같은 토큰 id, 다른 표시)은 메시 표시로 바꾼다(UE Rename).
             if (target.name.displayId != bone.name.displayId) {
+                // 원래 이름(exportName)은 에디터 데이터다(Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
                 if (auto assigned = target.exportName.TryAssign(bone.exportName.View());
                     !assigned) {
                     return assigned;
                 }
+#endif
 
                 target.name = bone.name;
                 ++result.renamedBones;
@@ -171,9 +175,11 @@ Result<void> MergeBoneHierarchy(const BoneHierarchy& skeleton, const BoneHierarc
         copy.parentIndex = bone.parentIndex == NoParentBone
                                ? NoParentBone
                                : result.meshToMerged[static_cast<usize>(bone.parentIndex)];
+#if ROCKS_WITH_EDITOR_DATA
         if (auto assigned = copy.exportName.TryAssign(bone.exportName.View()); !assigned) {
             return assigned;
         }
+#endif
 
         result.meshToMerged[meshBone] = static_cast<int32>(result.bones.bones.Size());
         if (auto pushed = result.bones.bones.TryPushBack(Move(copy)); !pushed) {

@@ -20,10 +20,8 @@ internal static class ShaderToolPolicyTests
         {
             ReleaseExclusionResult result = ReleaseExclusion.Check(options.Root, ReleaseExclusion.DefaultRulesAssembly(options.Root));
             NoFailures(result.Failures);
-            // 알려진 예외 두 건(D3D12Graphics d3dcompiler, Windows OpenGLGraphics)은 SH2까지 실제로 걸리고 알림으로 나온다.
-            Verify.That(result.Notices.Any(notice => notice.Contains("d3dcompiler", StringComparison.Ordinal)) &&
-                result.Notices.Any(notice => notice.Contains("release-windows-opengl", StringComparison.Ordinal)),
-                "known Release exceptions were not reported: " + string.Join('\n', result.Notices));
+            // SH2에서 알려진 예외(D3D12·D3D11 d3dcompiler, Windows OpenGLGraphics)를 모두 지웠다(ShaderSystem 16.1절 SH2e2).
+            Verify.That(result.Notices.Count == 0, "unexpected Release exception notices: " + string.Join('\n', result.Notices));
         });
         suite.Add("Policy.ReleaseExclusionControls", ReleaseControls);
     }
@@ -55,11 +53,6 @@ internal static class ShaderToolPolicyTests
             "#include <Platform/DynamicLibrary.h>\nvoid G(platform::DynamicLibrary& l) { (void)l.OpenSystem(\"vulkan-1.dll\"); }\n" +
             "// #include <ShaderToolTable/ShaderToolTable.h> and l.Open(path) in a comment are not code\n");
         temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// depends on \"ShaderToolTable\" only in a comment\nPublicDependencies => [\"Core\"];\n");
-        // SH0 도구 스파이크는 워커가 생기기 전에 도구를 직접 여는 측정 프로그램이다.
-        temporary.Write("Programs/ShaderToolSpike/ShaderToolSpike.Build.cs",
-            "PublicDependencies = [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
-        temporary.Write("Programs/ShaderToolSpike/Private/Win64/Dxc.cpp",
-            "#include <ShaderToolLoader/ShaderToolLoader.h>\n#include <dxc/dxcapi.h>\n");
         NoFailures(Run());
 
         (string File, string Content, string Rule)[] cases =
@@ -76,8 +69,8 @@ internal static class ShaderToolPolicyTests
                 "shader-tool-binary-load"),
             // 이름이 비슷한 폴더는 형식 모듈이 아니다.
             ("Engine/Source/Developer/ShaderFormat/Private/Load.cpp", "#include <ShaderToolLoader/ShaderToolLoader.h>\n", "shader-tool-binary-load"),
-            // 스파이크와 이름만 비슷한 프로그램 폴더는 허용 위치가 아니다.
-            ("Programs/ShaderToolSpikeOld/Private/Dxc.cpp", "#include <dxc/dxcapi.h>\n", "shader-tool-binary-load"),
+            // SH0 도구 스파이크는 SH1e에서 지웠다 — 그 폴더도 이제 허용 위치가 아니다.
+            ("Programs/ShaderToolSpike/Private/Dxc.cpp", "#include <dxc/dxcapi.h>\n", "shader-tool-binary-load"),
             // 워커 쪽은 메인 프로세스 전용 모듈(ShaderCompiler)과 에셋 너겟에 닿지 않는다(shader-worker-isolation).
             ("Engine/Source/Developer/ShaderWorker/ShaderWorker.Build.cs", "PublicDependencies => [\"ShaderCompilerCommon\", \"ShaderCompiler\"];\n",
                 "shader-worker-isolation"),
@@ -134,7 +127,7 @@ internal static class ShaderToolPolicyTests
         IReadOnlyList<ReleaseViolation> reached = Analyze(["Game", "Cooker"], NativePlatform.Android);
         Verify.That(reached.Count == 1 && reached[0].Rule == "release-developer-module" && reached[0].Module == "Cooker",
             "Developer module reached by a Release target escaped: " + string.Join('\n', reached));
-        // 실행 중 적재 관계(DynamicModules)로만 닿아도 Monolithic 실행 파일에 링크되므로 같은 위반이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+        // 실행 중 적재 관계(DynamicModules)로만 닿아도 Monolithic 실행 파일에 링크되므로 같은 위반이다(Docs/Design/ModuleLoader 3.8절).
         NativeModuleInput[] dynamicModules = [.. modules.Select(module => module.Name == "Engine" ? module with { DynamicModules = ["Cooker"] } : module)];
         IReadOnlyList<ReleaseViolation> loaded = ReleaseExclusion.Analyze(dynamicModules, developer, [("Game", ["Game"])], NativePlatform.Windows);
         Verify.That(loaded.Count == 1 && loaded[0].Rule == "release-developer-module" && loaded[0].Module == "Cooker",
@@ -181,6 +174,37 @@ internal static class ShaderToolPolicyTests
             "type and group mismatch escaped: " + string.Join('\n', mismatches));
         NoFailures(ReleaseExclusion.GroupMismatches([.. typed.Where(module => module.Name != "Cooker"),
             new() { Name = "Cooker", Type = Rocks.Build.Descriptors.ModuleType.Developer }], directories));
+
+        // Runtime 폴더의 모듈은 규칙이 ServerOnly·ClientOnly로 좁힐 수 있다(Docs/Design/BuildTargets 3.3절 BS2b). Developer 폴더는 그대로 Developer다.
+        var runtimeDirectories = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Net"] = "Engine/Source/Runtime/Net",
+            ["Hud"] = "Engine/Source/Runtime/Hud",
+            ["Probe"] = "Engine/Source/Developer/Probe"
+        };
+        NoFailures(ReleaseExclusion.GroupMismatches(
+        [
+            new() { Name = "Net", Type = Rocks.Build.Descriptors.ModuleType.ServerOnly },
+            new() { Name = "Hud", Type = Rocks.Build.Descriptors.ModuleType.ClientOnly }
+        ], runtimeDirectories));
+        IReadOnlyList<CheckFailure> narrowed = ReleaseExclusion.GroupMismatches(
+            [new() { Name = "Probe", Type = Rocks.Build.Descriptors.ModuleType.ServerOnly }], runtimeDirectories);
+        Verify.That(narrowed.Count == 1 && narrowed[0].Rule == "module-type-group", "a ServerOnly module in a Developer folder escaped");
+
+        // 평가 대상은 출시 타깃(Game·Client·Server)이고 그 종류가 빌드되는 플랫폼뿐이다(BD20 — Server는 Android 제외, Editor·Program 제외).
+        Verify.That(ReleaseExclusion.Evaluates(TargetType.Client, NativePlatform.Android) && ReleaseExclusion.Evaluates(TargetType.Server, NativePlatform.MacOS) &&
+            ReleaseExclusion.Evaluates(TargetType.Game, NativePlatform.Windows) && !ReleaseExclusion.Evaluates(TargetType.Server, NativePlatform.Android) &&
+            !ReleaseExclusion.Evaluates(TargetType.Editor, NativePlatform.Windows) && !ReleaseExclusion.Evaluates(TargetType.Program, NativePlatform.Windows),
+            "Release exclusion target filter");
+
+        // Release 출시 타깃이 Editor 모듈에 닿으면 release-editor-module이다(BD20).
+        NativeModuleInput[] withEditor = [.. modules.Where(module => module.Name != "Game"),
+            modules.Single(module => module.Name == "Game") with { PrivateDependencies = ["Studio"] },
+            new() { Name = "Studio", Type = Rocks.Build.Descriptors.ModuleType.Editor }];
+        IReadOnlyList<ReleaseViolation> editor = ReleaseExclusion.Analyze(withEditor, ReleaseExclusion.DeveloperModules(withEditor), [("Game", ["Game"])],
+            NativePlatform.Windows);
+        Verify.That(editor.Any(violation => violation.Rule == "release-editor-module" && violation.Module == "Studio"),
+            "an Editor module reached by a Release target escaped: " + string.Join('\n', editor));
     }
 
     private static void NoFailures(IReadOnlyList<CheckFailure> failures) => Verify.That(failures.Count == 0, string.Join('\n', failures));

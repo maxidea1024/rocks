@@ -37,7 +37,7 @@
 | 13 | World 전환 `OpenWorld(다음 맵)`: 21.3절 정리(spawn한 Pawn 파괴 → PlayerController 파괴 — `Logout`·PlayerState 제거) → `EndPlay(LevelTransition)`(LevelScript 먼저 Actor 정리 → `OnWorldEndPlay`) → World 즉시 파괴(`PreDeinitialize` → `Deinitialize` 역순) → 새 World에서 5–10단계. LocalPlayer·GameInstance Subsystem은 유지 | `Director.Logout`, `EndPlay(LevelTransition)`, 새 `Director.InitGame` |
 | 14 | 종료: `Engine::RequestExit` → `OnEngineShutdown`: 21.3절 정리(`Logout` 포함) → `EndPlay(Quit)` → `OnShutdown` → LocalPlayer 역순 제거(LocalPlayer Subsystem 정리) → GameInstance Subsystem 정리 → Engine이 World 파괴 → EngineSubsystem 정리(역순) | `GameInstance.OnShutdown`, …, `EngineSubsystem.Deinitialize` |
 
-시험 `GameplayFlow_FourteenStepScenario`가 위 사건 로그 전체를 순서대로 단언한다(순서 이외의 시각·경쟁에 기대지 않는다 — 단계마다 명시 호출과 프레임 수).
+시험 `GameplayFlow_FourteenStepScenario`가 위 사건 로그를 순서대로 단언한다(순서 이외의 시각·경쟁에 기대지 않는다 — 단계마다 명시 호출과 프레임 수). 1–12단계는 사건 로그 전체를 정확히 비교한다. 13·14단계는 그 단계의 사건을 순서 부분열로 비교한다. 정리 경로가 Actor 수만큼 사건을 내고, 그중 이 표가 정한 것은 순서뿐이기 때문이다. 관찰하지 않는 것은 이렇다. 4단계의 OpenWorld(begin)는 5단계 사건이 ClientReady 안에서 나는 것으로 대신한다. 8단계의 CameraDirector.Awake는 타입이 고정이라 사건이 없고, 핸들과 view target으로 확인한다. 11단계의 카메라 순서는 Pawn Tick이 옮긴 위치가 같은 프레임 카메라 결과에 보이는 것으로 확인한다. Pawn Tick이 Controller Tick 뒤라는 간선 자체는 `ControllerPawn_SetPawnOrdersPawnTickAfterController`가 확인한다(시나리오에서는 PlayerController가 먼저 Spawn되어 등록 순서만으로도 통과한다).
 
 ### 21.3 종료·전환 정리 규칙
 
@@ -61,3 +61,20 @@
 ### 21.5 Sandbox 연결
 
 Sandbox는 `GameInstanceClient`를 쓰도록 바꾼다: 기본 맵 = PlayerStart 하나와 기본 Pawn, 창 입력을 LocalPlayer `InputSource`로 넘긴다. 마우스·키보드로 Pawn이 받는 입력을 로그로 확인한다(엔진 1차 목표 입력 확인 — 화면 출력은 화면 마일스톤이 붙인다).
+
+S13 구현(`Programs/Sandbox/Private/SandboxGame.*`):
+- `--engine`이 `GameInstanceClient`로 돈다. 기본 맵 "Main"에는 원점 PlayerStart가 있고, `SandboxDirector`가 첫 LocalPlayer에 `SandboxPawn`을 준다.
+- `SandboxPawn`은 Controller 입력 스냅숏에서 새로 눌린 W·A·S·D·Space와 마우스 왼쪽·오른쪽 버튼을 Info 로그(`Sandbox.Game`)로 남긴다.
+- `SandboxPawn`은 마우스 버튼의 로그에 커서 위치(창 client 픽셀)를 함께 남기고, 첫 게임패드의 South·East 버튼과 휠도 남긴다.
+- 시험은 `Engine/Source/Runtime/Gameplay/Tests/GameplayFlowTests.cpp`의 `GameplayFlow_FourteenStepScenario`·`GameplayFlow_WorldWithoutDirector`·`GameplayFlow_EngineDestroyWorldPassesTheReason`다.
+
+입력 연결(2026-11-24, 엔진 1차 목표 입력 확인):
+- 호스트의 엔진 루프 hook(`HostLoopBridge`)이 `input::InputQueue`(용량 256)와 `input::InputState`를 소유한다. 프레임 1단계 `PumpEvents`에서 순서대로: 종료 요청 다리 → 창 펌프(`Window::PumpEvents`) → 게임패드 폴링(`GamepadBackend::Poll`) → 시험 주입 → `InputState::BeginFrame(queue.Events())` → `queue.Clear()`. UE에서 `FEngineLoop::Tick`의 `PumpMessages`가 Slate 입력을 모은 뒤 World Tick의 `PlayerController::TickPlayerInput`이 읽는 순서와 같다.
+- `engine.Initialize` 뒤 `GameInstanceClient::WithInstance`로 첫 LocalPlayer에 `SetLocalPlayerInput(player, &state)`를 건다. LocalPlayer가 없으면(DedicatedServer) 걸지 않는다. 입력 원천은 엔진 `Shutdown`이 끝날 때까지 산다(hook과 같은 스택 범위).
+- `--window`면 `platform::Window`("Rocks Sandbox", 1280×720)를 만든다. 닫기 버튼은 `RequestExit`로 정상 종료한다. 렌더가 없어 present 대기가 없으므로 hook의 `EndFrame`이 프레임 간격을 약 60 Hz로 맞춘다(남은 시간만 `SleepFor` — UE `t.MaxFPS`와 같은 호스트 상한이다). 실제 시간 delta를 쓴다(`fixedFrameDeltaSeconds` 0). `--frames`를 주지 않으면 창이 닫힐 때까지 돈다.
+- 창을 만들지 못하면(데스크톱 없음 등) `WindowCreateReport`를 Error로 남기고 실패 코드 1로 끝난다. 게임패드 backend가 없으면 Info 한 줄만 남기고 키보드·마우스로 돈다.
+- 헤드리스 `--engine`도 같은 큐·상태를 쓴다(이벤트가 없을 뿐이다). 그래서 창 없이 입력 경로를 확인할 수 있다: 시험용 `--inject-key-at-frame N`은 N번째 `PumpEvents`에서 큐에 `KeyDown(W)`를 넣는다(창 펌프가 넣는 이벤트와 같은 자리). 순서는 프레임 번호로 정해진다(시간·경쟁 무관).
+- 자체 시험(`RunEngineHostSelfTest`)이 `--engine --frames 4 --inject-key-at-frame 2`를 띄워 "[Info][Sandbox.Game] Pawn received key W"를 확인한다. 실제 창·마우스·패드는 사람이 `Sandbox --engine --window`로 확인한다(자동 시험에서 OS 입력을 합성하지 않는다 — 포커스·데스크톱 상태에 따라 결과가 달라지므로).
+- 사람 확인(2026-11-24, Windows): 키보드(W·A·S·D·Space)·마우스 왼쪽·오른쪽 버튼(커서 위치)·휠(한 프레임 여러 칸은 합산)이 Pawn까지 오고, 창 닫기로 정상 종료한다. 게임패드는 기기가 없어 아직 확인하지 않았다.
+- 마우스 capture(Windows): 버튼을 누르면 `SetCapture`, 모두 떼면 `ReleaseCapture`다. 버튼을 누른 채 다른 창·시스템이 capture를 가져가면(`WM_CAPTURECHANGED`) 눌린 버튼마다 MouseUp을 만들어 눌린 채 남지 않게 한다(2026-11-24). 커서 숨김·가두기·상대 이동(게임식 마우스 캡처)은 입력 I10·UiToolkit PW5 범위다.
+- 버린 대안: 엔진이 창을 소유하는 것. 창·swapchain 소유는 화면 마일스톤의 렌더 호스트(뷰포트 클라이언트) 몫이라 지금은 호스트 hook에 둔다. 그때 hook의 창 펌프가 뷰포트 쪽으로 옮겨 간다.

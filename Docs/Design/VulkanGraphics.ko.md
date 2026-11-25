@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-18, 개정 6(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem/README.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime/10-Graphics.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-25, 개정 9(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem/README.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime/10-Graphics.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -21,7 +21,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 메모리 | 자체 페이지 할당기. VMA를 쓰지 않는다 | UE도 자체 할당기다(`P/VulkanMemory.cpp:437–441, 2236–2251`) |
 | 창 출력 | 중간 color 이미지에 그리고 `EndFrame`에서 swapchain 이미지를 얻어 blit 후 present | UE 기본(`r.Vulkan.DelayAcquireBackBuffer=1`, `P/VulkanDevice.cpp:86–93`, `P/VulkanViewport.cpp:745–756`). swapchain 형식(BGRA·RGBA)과 상관없이 파이프라인이 `RGBA8UnormSrgb` 하나로 호환된다 |
 | 좌표·앞면 | 음수 viewport 높이와 `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → BACK_BIT`(D3D12와 같은 매핑). UE 매핑(`CLOCKWISE`·`CM_CW → FRONT_BIT`)은 컬링은 같지만 `SV_IsFrontFace`가 D3D12와 반대라 따르지 않는다(11절) | ShaderSystem 7.2절 8항, UE `P/VulkanPendingState.cpp:500–506`, `P/VulkanPipeline.cpp:936`, `P/VulkanState.cpp:186–188`, `Engine/Shaders/Private/MaterialTemplate.ush:4641–4648` |
-| 셰이더 | SH2 전에는 개발용 컴파일 훅(`ShaderSourceCompiler`)이 HLSL 원문을 SPIR-V로 바꾼다. 구현은 Developer `ShaderFormatVulkan`(DXC). Release에는 넣지 않는다 | ShaderSystem P4(Release 배제), 9절 |
+| 셰이더 | 쿠킹된 `VULKAN_SM5` SPIR-V를 장치 셰이더(`Device::CreateShader`, `ShaderCodeKind::Spirv`)로 받고 파이프라인이 그 handle을 받는다. 코드와 값 1(바인딩 layout)은 셰이더 라이브러리 항목 그대로다. 장치는 실행 중 컴파일러를 갖지 않는다(13절) | ShaderSystem 16.1절 SSD18·SH2e2 메모, P4(Release 배제) |
 | 검증 | `enableValidation`이면 `VK_LAYER_KHRONOS_validation`과 `VK_EXT_debug_utils` messenger. ERROR 심각도의 validation 메시지를 `ValidationErrorCount`가 센다(로더 GENERAL 메시지는 로그만) | UE `P/VulkanLayers.cpp:48,410`, `P/VulkanDebug.cpp:195–198`. UE는 세지 않고 로그만 남긴다 |
 
 ## 2. UE 5.8 VulkanRHI 조사
@@ -118,7 +118,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 크기 상한은 min(16384, `maxImageDimension2D`)이다.
 - 장치를 만들 때 1×1 흰색 Sampled 텍스처와 그 descriptor set을 만든다. 패스 시작과 `SetTexture(null)`·stale handle이 그것을 묶는다(D3D12와 같다).
 - `ReadPixels`는 기록 중이면 `Busy`, RenderTarget이 아니거나 크기가 다르면 `InvalidArgument`다(D3D12와 같다). 비동기 readback과 같은 경로로 제출하고 그 fence를 기다린다.
-- 형식 표(`Private/VulkanFormats.cpp`)는 `switch` 하나로 둔다. 대응 형식을 늘릴 때 행만 더하면 되도록 `PixelFormat` → (`VkFormat`, 필요한 형식 기능 bit)를 한 곳에서 정한다. 지금(PF1)은 아래 두 형식뿐이다. 장치 능력(`GetPixelFormatCaps`, PF3)은 생성 때 표의 형식마다 `vkGetPhysicalDeviceFormatProperties`의 optimal tiling 기능으로 정하고, 이 backend가 만들 수 있는 것(`Sampled`·`Mipmaps`·`Filterable`·`RenderTarget`·`Blendable`)만 공개한다(3D·cube·MSAA·storage·깊이는 기능이 있어도 공개하지 않는다, PF4). 텍스처·파이프라인 생성은 이 능력으로 판정하므로 "능력 있음 ⇔ 생성 성공"이다. 표에 없는 유효 형식과 능력 밖 용도(예: `DepthStencil`)는 생성이 `Unsupported`이며 `LastError`에 형식 이름을 남긴다(다른 형식으로 대체하지 않는다, PixelFormat.ko.md 8.3절). 업로드·readback 크기는 `PixelFormatImageBytes`·블록 크기로 계산한다. 형식을 넓힐 때의 Vulkan 주의점(BC1은 RGBA 블록, V8U8은 SNORM, A8은 R8 + swizzle)은 PixelFormat.ko.md 15·17절이다.
+- 형식 표(`Private/VulkanFormats.cpp`)는 `switch` 하나로 둔다. 대응 형식을 늘릴 때 행만 더하면 되도록 `PixelFormat` → (`VkFormat`, 필요한 형식 기능 bit)를 한 곳에서 정한다. 지금(PF1)은 아래 두 형식뿐이다. 장치 능력(`GetPixelFormatCaps`, PF3)은 생성 때 표의 형식마다 `vkGetPhysicalDeviceFormatProperties`의 optimal tiling 기능으로 정하고, 이 backend가 만들 수 있는 것(`Sampled`·`Mipmaps`·`Filterable`·`RenderTarget`·`Blendable`)만 공개한다(3D·cube·MSAA·storage·깊이는 기능이 있어도 공개하지 않는다, PF4). 텍스처·파이프라인 생성은 이 능력으로 판정하므로 "능력 있음 ⇔ 생성 성공"이다. 표에 없는 유효 형식과 능력 밖 용도(예: `DepthStencil`)는 생성이 `Unsupported`이며 `LastError`에 형식 이름을 남긴다(다른 형식으로 대체하지 않는다, [PixelFormat](PixelFormat/08-BackendMapping.ko.md) 8.3절). 업로드·readback 크기는 `PixelFormatImageBytes`·블록 크기로 계산한다. 형식을 넓힐 때의 Vulkan 주의점(BC1은 RGBA 블록, V8U8은 SNORM, A8은 R8 + swizzle)은 [PixelFormat](PixelFormat/15-A0G.ko.md) 15·17절이다.
 
   | Rocks | Vulkan |
   |---|---|
@@ -128,8 +128,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 **샘플러.** `SamplerDesc` 조합마다 `VkSampler` 하나를 만들어 장치 수명 동안 공유한다(D3D12 샘플러 칸과 같은 규칙, 상한 256). Nearest: NEAREST·NEAREST·mip NEAREST, Bilinear: LINEAR·mip NEAREST, Trilinear: LINEAR·mip LINEAR, Anisotropic: Trilinear + `anisotropyEnable`(`maxAnisotropy`를 `maxSamplerAnisotropy`로 자르고 1이거나 기능이 없으면 끈다). 주소 Wrap → REPEAT, Clamp → CLAMP_TO_EDGE, Mirror → MIRRORED_REPEAT, Border → CLAMP_TO_BORDER. border 색은 세 고정 값이 Vulkan 내장 색과 일대일이다(`FLOAT_TRANSPARENT_BLACK`·`FLOAT_OPAQUE_BLACK`·`FLOAT_OPAQUE_WHITE`). `maxLod = VK_LOD_CLAMP_NONE`.
 
 **descriptor.**
-- 파이프라인 layout은 파이프라인마다 만든다(개정 6). 개발 컴파일 훅의 리플렉션(set·binding·종류에 더해 원문 register·space, 자원 모양(이미지·texel buffer·구조화·raw·상수·샘플러), 원소 타입, 쓰기 여부)을 PipelineDesc 고정 배치와 대조해 set 0(VS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 종류 순서). binding이 없는 단계는 장치 공용 빈 layout이다.
-  - PS t0 이미지 → `SAMPLED_IMAGE`(SetTexture), PS s0 → `SAMPLER`(그 텍스처의 샘플러), 단계 모두의 t1–t4 → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`(SetBufferView slot 0–3). 그 밖(다른 register·space, 상수 버퍼, 쓰기 자원)은 생성이 `InvalidArgument`다.
+- 파이프라인 layout은 파이프라인마다 만든다(개정 6). 장치 셰이더의 값 1(자원 이름·종류, slot = Vulkan binding, 자원 모양(텍스처 차원·typed·구조화·raw), 원소 타입)을 파이프라인의 slot 이름 표(`PipelineDesc::bindings`)로 고정 slot에 잇고(`ResolvePipelineSlots`) set 0(VS·CS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 값 1 slot). binding이 없는 단계는 장치 공용 빈 layout이다.
+  - SRV 텍스처 → `SAMPLED_IMAGE`(SetTexture), 그 짝 샘플러 → `SAMPLER`, 버퍼 view(SetBufferView slot 0–3) → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`, compute 쓰기 → typed는 `STORAGE_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`, 텍스처는 `STORAGE_IMAGE`. 이름 표에 없는 자원은 생성이 `InvalidArgument`다. 상수 버퍼는 이름 표 없이 binding = 값 1 slot이고 `UNIFORM_BUFFER_DYNAMIC`(`maxDescriptorSetUniformBuffersDynamic`까지, 넘는 것은 `UNIFORM_BUFFER`)이다(GX6, RenderBase 9.11절 4항 — 버퍼가 같으면 set을 다시 쓰지 않고 동적 offset만 바꿔 다시 묶는다).
   - 그리기별 상수 push constant 범위는 계약 최대 128 byte(VS·PS·CS, 7.2절 2항, RenderBase SX2)로 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같다. 그래서 공용 layout으로 파이프라인이 선언한 n byte(`drawConstantBytes`)만 올리고, 파이프라인을 바꿔도 값과 descriptor set이 유지된다(사양 "Pipeline Layout Compatibility").
 - 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개이고 첫 pool이 set 1024개, 다음 pool은 앞 pool의 두 배다. 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 1024 × (2^8 − 1) = 261120번을 넘으면 그 뒤 그리기는 무시되고(`IgnoredDraws`, LastError) 처음 한 번 Warning 로그를 남긴다(GX1·GX2 리뷰 반영).
 
@@ -140,7 +140,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 파이프라인 상태: 삼각형 목록, viewport·scissor 동적 상태, 깊이 없음, 블렌드는 D3D12와 같은 식, 래스터는 11절. 정점 입력은 `VertexLayout` 그대로(stream = binding, 인스턴스 stream은 `VK_VERTEX_INPUT_RATE_INSTANCE`, 간격 1)다.
 - stride는 파이프라인에 들어가므로 파이프라인을 바꾸면 이미 묶은 정점 버퍼가 새 stride로 읽힌다(계약 "새 파이프라인 배치의 stride로 다시 묶인다"를 Vulkan이 그대로 만족한다).
 - 정점 형식 대응은 RenderBase 10.4절 표의 Vulkan 열이다. 장치가 그 형식의 `VERTEX_BUFFER` 기능을 주지 않으면 파이프라인 생성이 `Unsupported`다(OpenGL의 `Bgra8Unorm`과 같은 공개 방식).
-- 셰이더 입력 대조: 컴파일 훅이 돌려준 리플렉션(정점 입력 location·셰이더 타입, descriptor binding, push constant 크기)으로 D3D12와 같은 규칙과 같은 진단 문구를 쓴다. 고정 배치 밖 binding이나 파이프라인이 선언한 `drawConstantBytes`보다 큰 push constant는 `InvalidArgument`다.
+- 셰이더 입력 대조: 값 1의 정점 입력 마스크·attribute 타입(v3)으로 D3D12와 같은 규칙과 같은 진단 문구를 쓴다(`MatchShaderVertexInputs`). 이름 표 밖 자원이나 파이프라인이 선언한 `drawConstantBytes`보다 큰 루트 상수는 `InvalidArgument`다. 진입점 이름은 SPIR-V `OpEntryPoint`에서 읽는다(DXC가 HLSL 엔트리 이름을 그대로 둔다).
 - `VkPipelineCache` 하나를 장치 안에서 공유한다(메모리 안, 파일 저장은 RenderBase 9.7절 파이프라인 캐시에서).
 - index 버퍼 offset이 index 크기 배수가 아니거나 정점 버퍼 offset이 4 byte 배수가 아니면 묶지 않은 것으로 보고 그리기를 무시한다(`IgnoredDraws`). Vulkan은 index offset을 그 크기 배수로만 받고(`vkCmdBindIndexBuffer`), 속성 주소가 성분 크기 배수여야 한다(사양 "Vertex Input Address Calculation", 속성 offset은 이미 4 배수다). 이식 규칙으로 `Device.h`의 두 호출 주석에 적는다.
 
@@ -189,14 +189,14 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - framebuffer는 attachment view 묶음(크기 포함)으로 캐시하고, attachment 텍스처를 놓을 때 그 view를 쓰는 framebuffer를 회수 목록으로 넘긴다(텍스처마다 framebuffer를 두던 방식을 없앴다). 스텐실이 있는 깊이 타깃은 깊이·스텐실 aspect 둘의 attachment view를 따로 만든다(기본 view는 깊이 aspect만 읽는다).
 - 전이·dispatch·복사로 render pass를 닫으면 모든 attachment를 LOAD로 다시 연다. attachment가 attachment 상태를 떠났으면 열지 않는다.
 - 파이프라인 상태: 타깃별 블렌드(`independentBlend`가 없으면 같아야 한다), alpha-to-coverage, 깊이 bias(`depthBiasClamp` 기능), `depthClampEnable`, 깊이·스텐실 상태, 기본도형, 동적 viewport·scissor·스텐실 기준. `SetViewport`는 음수 높이로 뒤집는다.
-- compute: 개발 훅이 `CSMain`을 `cs_6_0`으로 컴파일하고 set 0에 읽기(t1–t4)·쓰기(u0–u3, storage buffer·storage texel buffer) binding을 둔다. 모든 파이프라인 layout의 push constant 범위는 VS·PS·CS다. dispatch는 render pass 밖에서 기록하고 descriptor set은 compute bind point에 묶는다. 프레임 descriptor pool에 storage texel buffer 크기를 더했다.
+- compute: `ComputePipelineDesc::computeShader`(장치 셰이더)로 만들고 set 0에 값 1의 읽기(버퍼 view·텍스처)·쓰기(storage buffer·storage texel buffer·storage image) binding을 둔다. 모든 파이프라인 layout의 push constant 범위는 VS·PS·CS다. dispatch는 render pass 밖에서 기록하고 descriptor set은 compute bind point에 묶는다. 프레임 descriptor pool에 storage texel buffer 크기를 더했다.
 - 버퍼 쓰기 명령(dispatch·`vkCmdCopyBuffer`·UAV clear의 `vkCmdFillBuffer`) 앞에는 앞선 읽기와의 실행 의존(WAR), 뒤에는 모든 버퍼 읽기·쓰기 단계(간접 인자·정점·index·셰이더·전송)로 가는 메모리 barrier를 둔다. 렌더 그래프 밖 기록의 보수적 순서이고 렌더 그래프가 버퍼 전이를 내면 좁힐 수 있다.
 - `CopyTexture`는 두 mip 0을 복사 원본·대상 상태로 바꿔 `vkCmdCopyImage`(이미지 aspect 그대로)다.
 
 ## 11. 좌표·앞면·컬(C7, ShaderSystem 7.2절 8항)
 
 - viewport는 `y = 높이`, `height = -높이`다(D3D와 같은 NDC y 위를 화면 위로). 깊이 범위 [0, 1]은 Vulkan 기본이다.
-- 셰이더는 `-fvk-use-dx-position-w`로 컴파일한다(ShaderSystem 7.2절 8항).
+- 셰이더는 쿠킹 때 `-fvk-use-dx-position-w`로 컴파일된다(`VULKAN_SM5` 형식 정의, ShaderSystem 7.2절 8항).
 - 행렬은 `-Zpr`(행 우선)이고 push constant의 `transform`은 Core `Mat4` 저장 순서 그대로다(전치 없음).
 - 앞면·컬: `frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE`, `CullMode::Back` → `VK_CULL_MODE_BACK_BIT`, `CullMode::Front` → `VK_CULL_MODE_FRONT_BIT`, `None` → `VK_CULL_MODE_NONE`이다(D3D12 `FrontCounterClockwise = TRUE`와 같은 모양).
   - 근거: 사양 "Basic Polygon Rasterization"의 면적 a = −½Σ(x_f^i·y_f^{i+1} − x_f^{i+1}·y_f^i)는 framebuffer 좌표(y 아래)로 잰다. 음수 viewport 높이로 clip y = +1이 framebuffer 위쪽이 되므로 framebuffer는 표시 화면과 같고, 화면 반시계 삼각형은 a > 0, 곧 Vulkan의 "반시계"다.
@@ -217,15 +217,11 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 **스레드.** D3D12와 같다. `concurrentResourceCreation`은 참이다: 생성은 Vulkan 객체 생성(스레드 안전)과 내부 잠금 아래 업로드 기록이고, queue·명령 버퍼·pool은 잠금 안에서만 만진다. 제출·present·fence 신호는 소유 스레드만 한다. Vulkan 객체는 스레드에 묶이지 않으므로 소유권 이관은 검사만 바꾼다.
 
-**셰이더(SH2 전 개발 경로).**
-- `PipelineDesc`는 HLSL 원문을 담는다. Vulkan 장치는 실행 중 컴파일러를 갖지 않고(P4 Release 배제), `DeviceDesc::shaderCompiler`(Graphics `ShaderSourceCompiler`)로 받은 개발용 컴파일 훅을 부른다. 훅이 없으면 `CreatePipeline`이 `Unsupported`이고 `LastError`가 SH2 쿠킹 경로가 아직 없음을 알린다.
-- 훅 구현은 Developer `ShaderFormatVulkan`(정책상 도구를 열 수 있는 `ShaderFormat*` 모듈)이다. DXC를 ShaderToolLoader로 사용자 저장소에서 열고 `-spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-position-w -Zpr -fspv-reflect`(`VULKAN_SM5` 옵션 + 시맨틱 정보)로 컴파일한 뒤 SPIR-V를 다시 쓴다.
-  - 정점 입력 location을 시맨틱 `ATTRIBUTEn`의 n으로 바꾼다(7.2절 7항, DXC 기본은 선언 순서).
-  - 그리기 상수 블록(`cbuffer DrawConstants`, 7.2절 2항 `ROCKS_ROOT_CONSTANTS`의 SH2 전 대역)을 push constant로 바꾼다(storage class와 그 포인터 타입, binding 장식 제거).
-  - 나머지 자원의 set·binding을 7.2절 4항(set = 단계, 종류 순서로 0부터)으로 다시 매긴다.
-  - `-fspv-reflect`가 남긴 `SPV_GOOGLE_*` 확장·장식을 지운다.
-  - 결과를 SPIRV-Tools `spirv-val`(vulkan1.1)로 검증하고 SPIRV-Reflect로 리플렉션을 만든다.
-- Sandbox는 Release가 아닌 구성에서만 이 모듈을 링크한다. Release Sandbox의 Vulkan은 장치 생성까지만 되고 파이프라인은 `Unsupported`다(SH2가 쿠킹된 SPIR-V로 바꾼다).
+**셰이더(SH2e2 뒤, 2026-11-24).**
+- `CreateShader`는 코드 종류(`Spirv`)·4 byte 배수·값 1 decode와 단계를 검사하고 코드·값 1의 CPU 사본을 둔다. `VkShaderModule`은 파이프라인을 만들 때 만들고 만든 뒤 버린다(파이프라인이 module을 붙잡지 않는다). `Retire(ShaderHandle)`은 바로 지운다(GPU가 쓰지 않는다 — ShaderSystem 16.1절 SH2e2 메모 "장치 셰이더는 CPU 사본이다").
+- SPIR-V는 셰이더 워커의 Developer `ShaderFormatVulkan`(`VULKAN_SM5`)이 쿠킹 때 만든다. DXC `-spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-position-w -Zpr -fspv-reflect`로 컴파일하고 정점 입력·단계 사이 location(`ATTRIBUTEn`·`TEXCOORDn`)과 set·binding(set = 단계, binding = 종류 순서)을 다시 매긴다. 이어서 `SPV_GOOGLE_*`를 지우고 `spirv-val`(vulkan1.1)로 검증한 뒤 SPIRV-Reflect로 값 1을 만든다(ShaderSystem 16.1절 SSD29·SSD33). 그리기별 상수는 원문의 `ROCKS_ROOT_CONSTANTS`(push constant)다.
+- Graphics·장치에는 HLSL 원문(`ShaderSource`)과 개발용 컴파일 훅(`ShaderSourceCompiler`·`DeviceDesc::shaderCompiler`)이 없다. SH2e2에서 Graphics 쪽 훅(`VulkanShaderCompiler`·`SpirvRewriteGraphics`·`DxcSpirv`)과 함께 지웠다.
+- Sandbox는 개발 구성에서 Development 공급자가 `VULKAN_SM5` 메모리 라이브러리를 만들어 장치마다 셰이더 집합을 연다(RenderBase 9.2절). Release Sandbox에는 공급자가 없어 장치 생성까지만 되고 그리기 self-test는 NOT RUN이다.
 
 ## 14. 공개하는 제약(가짜 값 없음)
 
@@ -238,7 +234,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | timestamp 불가(`timestampValidBits` 0) | `timestamps` false, `WriteTimestamp` `Unsupported` |
 | calibration 확장·domain이 없다 | `clockCalibration` false, `CalibrateClocks` `Unsupported` |
 | debug utils가 없다 | `debugMarkers` false |
-| 컴파일 훅이 없다(Release·SH2 전) | `CreatePipeline` `Unsupported` |
+| 코드 종류가 `Spirv`가 아니거나 값 1이 단계와 맞지 않는 장치 셰이더 | `CreateShader` `InvalidArgument` |
 
 ## 15. UE 대응표
 
@@ -256,12 +252,12 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 중간 이미지 + blit present | `DelayAcquireBackBuffer` 경로(`FVulkanViewport`) |
 | 검증 messenger 계수 | `DebugUtilsCallback`(로그만) |
 | `CalibrateClocks` | `FVulkanDevice::GetCalibrationTimestamp` |
-| 개발용 컴파일 훅·`ShaderFormatVulkan` | `VulkanShaderFormat`(쿠킹) |
+| 장치 셰이더(`CreateShader`, CPU 사본)·`ShaderFormatVulkan`(쿠킹) | `FVulkanShader`·`VulkanShaderFormat` |
 
 ## 16. 시험과 측정
 
 - Graphics `GpuPageAllocator` CPU 시험(EngineTests): 정렬, first-fit, 이웃 병합, 가득 참, 빈 페이지 판정.
-- `ShaderFormatVulkan` 시험(EngineTests, DXC·SPIRV-Tools가 저장소에 없으면 SKIP): location 재작성, push constant 전환, binding 재배치, `SPV_GOOGLE` 제거, `spirv-val` 통과, 잘못된 시맨틱 거부.
+- 셰이더 워커 시험(EngineTests `--filter Shader`, DXC·SPIRV-Tools가 저장소에 없으면 SKIP): 쿠킹 경로의 location 재작성·push constant·binding 재배치·`SPV_GOOGLE` 제거·`spirv-val` 통과·잘못된 시맨틱 거부(ShaderSystem 16.1절). 장치 쪽은 `ShaderBindings_*`(장치 셰이더 검사·이름 표·정점 입력 타입)와 `VulkanDevice_*`의 코드 종류 거부다.
 - Sandbox self-test(`--self-test`): D3D12가 통과하는 모든 검사(픽셀·GX7 fence·GX10/11 소유권·swapchain·C7 컬링(창·offscreen)·GX3a 정점 형식 20종·GX8 업로드·GX9 계측·렌더 lane)를 Vulkan 하드웨어에서 돌리고 D3D12와 픽셀 대조(채널 ±8·2%)한다. 검증 오류 집계는 형식이 다른 render pass에 파이프라인을 쓰는 의도적 오류로 확인한다.
 - 측정 S4(ShaderSystem 5.4절): 검증 층 공급과 GPU 없는 환경의 소프트웨어 ICD. 결과는 17절.
 
@@ -276,7 +272,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | GX5 전이·렌더 그래프 RG1(8절, origin 병합 뒤) | 두 장치에서 Sandbox 렌더 그래프 self-test(그래프 텍스처 → SRV 합성, culling, history export → import, 명시 전이)가 검증 오류 0(before 불일치 포함)으로 통과하고 풀 생성 2·재사용 1이다. 전체 self-test 대상 D3D12·WARP·D3D11·D3D11 WARP·OpenGL ES 두 context·Vulkan 두 장치가 모두 통과하고 D3D12 vs Vulkan·Vulkan software 픽셀 차이 0이다 |
 | 동기화 검증(`VK_LAYER_ENABLES`의 synchronization validation) | 두 장치 모두 `SYNC-HAZARD` 0건(GX5 전이 뒤에도 0건) |
 | Android 교차 빌드(arm64, NDK 29, `-p:RocksPlatform=android`, EngineTests) | VulkanGraphics Android 구현(`libvulkan.so`, `VK_KHR_android_surface`, CLOCK_MONOTONIC domain)과 ShaderFormatVulkan 미지원 구현이 경고 0으로 컴파일된다. 기기 실행은 SH6·P13이다 |
-| EngineTests | `GpuPageAllocator` 3건, `VulkanShaderCompiler` 2건(DXC·SPIRV-Tools 실제 호출), `VulkanDevice` 1건(로더 동적 로드·검증 층·빈 제출 fence) 통과, 전체 2135건 통과 |
+| EngineTests | `GpuPageAllocator` 3건, `VulkanShaderCompiler` 2건(DXC·SPIRV-Tools 실제 호출 — SH2e2에서 컴파일 훅과 함께 지웠다), `VulkanDevice` 1건(로더 동적 로드·검증 층·빈 제출 fence) 통과, 전체 2135건 통과 |
 | 드라이버 언로드 경쟁(3절 드라이버 상주) | 상주 전: EngineTests 전체가 간헐적으로 비정상 종료(하네스 2회, 직접 실행 6회 중 1회). cdb에서 `--filter Vulkan`을 반복해 10번째에 잡았다. 장치 수명 동안 NVIDIA가 만든 스레드 7개 중 하나가 `vkDestroyInstance`의 nvoglv64.dll 언로드 뒤에도 남아 `<Unloaded_nvoglv64.dll>+0xe76052`에서 접근 위반. 우리 fence watcher 스레드는 그 전에 끝났다. 상주 뒤: cdb 로그에 프로세스 끝까지 nvoglv64.dll·vulkan-1.dll 언로드 이벤트가 없고(결정적 확인), `--filter Vulkan` 직접 60회·cdb 20회와 EngineTests 전체 직접 8회가 모두 통과 |
 | lavapipe 창 경로와 데스크톱 세션(2026-11-18) | 사용자가 원격 세션을 끊은 뒤(session 1 `Disc`) lavapipe의 swapchain·컬링 창 경로·렌더 lane 검사가 `VK_ERROR_MEMORY_MAP_FAILED`로 실패했다. 원인: mesa 26.2.7 `src/vulkan/wsi/wsi_common_win32.cpp`의 소프트웨어 present는 `GetDC(hwnd)`로 얻은 창 DC에 `StretchBlt`하고 실패하면 이 오류를 swapchain 상태로 남긴다(823–832행, 뒤 acquire도 같은 오류, 736행). 같은 경로를 흉내 낸 GDI 프로브: 끊긴 세션에서 숨긴 창으로의 `StretchBlt`는 FALSE, 보이는 창은 TRUE. 우리 코드와 무관함: 23:59에 통과한 리뷰 수정·드라이버 상주 이전 코드를 같은 끊긴 세션에서 다시 빌드해 돌리면 같은 항목이 같은 오류로 실패한다. 하드웨어 Vulkan·D3D12·D3D11·OpenGL ES의 창 경로는 끊긴 세션에서도 통과한다. 처리: `platform::QueryDesktopSessionState()`(PlatformWindow, WTSConnectState)가 `Disconnected`이고 장치가 lavapipe(소프트웨어, 이름 `llvmpipe`)면 Sandbox가 그 창 경로 검사를 근거를 단 NOT RUN으로 출력한다(`Programs/Sandbox/Private/SelfTestEnvironment.*`). 연결된 세션에서는 전부 돌린다 |
 | best practices 검증 | 열거를 두 번 부르기로 고친 뒤 남는 경고는 RenderTarget 생성 때 UNDEFINED → SHADER_READ_ONLY 전이 하나다(D3D12도 생성 직후 내용이 정해지지 않는다. 오류로 세지 않는다) |
@@ -289,7 +285,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 18. 남은 일
 
-- SH2: 쿠킹된 `VULKAN_SM5` SPIR-V와 리플렉션 머리(UE `FVulkanShaderHeader` 대응)를 받는 Graphics API. 그때 개발용 컴파일 훅과 `cbuffer DrawConstants` 이름 규칙이 `ROCKS_ROOT_CONSTANTS`로 바뀐다.
+- GX6 남은 것: 파라미터 묶음의 자원 부분과 PS 진단 버퍼 자리(set 3, 엔진 셰이더 SL2 — 그때까지 진단 파이프라인 생성은 `Unsupported`). 상수 버퍼 묶기는 구현했다(RenderBase 9.11절). compute 파이프라인 캐시는 GX3다.
 - SH6·P13: Android 실행(surface 수명, `ANativeWindow`, 회전 `preTransform`).
 - 멀티 큐(async compute·copy)와 timeline semaphore 경로, 동적 렌더링·sync2 선택 경로(장치가 주면).
 - 파이프라인 캐시 파일 저장(RenderBase 9.7절), 메모리 예산 확장, 객체 debug 이름.
@@ -307,3 +303,5 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 5(2026-11-18): lavapipe 창 경로가 끊긴 데스크톱 세션에서 실패하는 원인을 mesa WSI 소스·GDI 프로브·이전 코드 대조로 확정하고, 세션 연결 판정(`QueryDesktopSessionState`)으로 그 경우만 근거를 단 NOT RUN으로 바꿨다(17절).
 - 개정 6(2026-11-18): RenderBase GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 1단계. 버퍼 용도·버퍼 view·`ReadBuffer`(6절), 파이프라인별 layout과 기록 단위 descriptor pool(6절 descriptor, 개정 5의 텍스처별 고정 set 대체), 켜는 장치 기능·확장, 업로드 끝 barrier에 간접 인자·상수·compute 단계를 더했다.
 - 개정 7(2026-11-18): GX1·GX2 리뷰 반영(업로드 묶음 RAW barrier, descriptor pool 두 배 증가·경고, `atomic64`의 `shaderInt64`, `apiVersion` 실효 판, ray tracing 확장 공개, VS layer·viewport 출력과 `multiViewport`·viewport 수)과 RenderBase GX3·GX4(10.1절): render pass 열쇠·framebuffer 캐시·깊이 attachment view, 파이프라인 고정 기능 상태, compute 파이프라인과 쓰기 view, 간접 그리기·dispatch, 버퍼 쓰기 명령 barrier, 복사·UAV clear.
+- 개정 8(2026-11-25): SH2e2 반영. 셰이더는 쿠킹된 SPIR-V를 장치 셰이더(`CreateShader`)로 받고 파이프라인 layout·셰이더 입력 대조는 값 1과 slot 이름 표에서 얻는다(1·6·7·10.1·11·13·14·15·16·18절). 개발용 컴파일 훅(`ShaderSourceCompiler`·`DeviceDesc::shaderCompiler`) 서술을 지웠다.
+- 개정 9(2026-11-25): RenderBase GX6 반영 — 상수 버퍼 binding(`UNIFORM_BUFFER_DYNAMIC` 우선, 같은 버퍼면 동적 offset만 다시 묶기), 진단 버퍼 파이프라인은 SL2까지 `Unsupported`(6·18절).

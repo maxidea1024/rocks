@@ -50,6 +50,31 @@ StringView StageDefine(uint32 stage) noexcept {
     }
 }
 
+// 형식 기능 정의(SC10, 개정 29)다. 기능마다 늘 0·1로 정의한다.
+struct FeatureDefine {
+    uint32 bit;
+    const char* name;
+};
+
+constexpr FeatureDefine FeatureDefines[] = {
+    {ShaderFeatureCompute, "ROCKS_FEATURE_COMPUTE"},
+    {ShaderFeatureWaveOperations, "ROCKS_FEATURE_WAVE_OPERATIONS"},
+    {ShaderFeatureVertexViewportLayerOutput, "ROCKS_FEATURE_VERTEX_VIEWPORT_LAYER_OUTPUT"},
+    {ShaderFeatureTypedUavLoad, "ROCKS_FEATURE_TYPED_UAV_LOAD"},
+    {ShaderFeatureDebugPixelUav, "ROCKS_FEATURE_DEBUG_PIXEL_UAV"}};
+
+constexpr uint32 DefinedFeatures() noexcept {
+    uint32 bits = 0;
+    for (const FeatureDefine& feature : FeatureDefines) {
+        bits |= feature.bit;
+    }
+
+    return bits;
+}
+
+static_assert(DefinedFeatures() == AllShaderFeatures,
+              "every shader feature needs a ROCKS_FEATURE_ define (SC10)");
+
 bool IsIdentifier(StringView name) noexcept {
     if (name.IsEmpty() || name.ByteCount() > MaxShaderDefineNameBytes) {
         return false;
@@ -107,6 +132,12 @@ void ShaderDefineSet::Reset() noexcept {
 ShaderSourceStatus BuildShaderPreprocessDefines(const ShaderFormatDefinition& format, uint32 stage,
                                                 bool hlsl2021, Span<const ShaderDefine> jobDefines,
                                                 ShaderDefineSet& out) noexcept {
+    return BuildShaderPreprocessDefines(format, stage, hlsl2021, jobDefines, false, out);
+}
+
+ShaderSourceStatus BuildShaderPreprocessDefines(const ShaderFormatDefinition& format, uint32 stage,
+                                                bool hlsl2021, Span<const ShaderDefine> jobDefines,
+                                                bool debugBuffer, ShaderDefineSet& out) noexcept {
     using namespace preprocess_defines_detail;
     using source_detail::MakeSourceStatus;
     out.Reset();
@@ -169,6 +200,16 @@ ShaderSourceStatus BuildShaderPreprocessDefines(const ShaderFormatDefinition& fo
         Decimal(format.compiler.shaderModel.minor, minor));
     add(StringView(), "ROCKS_HLSL2021", hlsl2021 ? StringView("1") : StringView("0"));
     add(StringView(), stageName, "1");
+    // 개발 전용 PS job의 진단 버퍼(7.2절 12항, 16.1절 SSD34 — 작성자 정의가 아니라 SC10이 넣는다).
+    if (debugBuffer && stage == ShaderStagePixel) {
+        add(StringView(), "ROCKS_DEBUG_BUFFER", "1");
+    }
+
+    for (const FeatureDefine& feature : FeatureDefines) {
+        add(StringView(), StringView(feature.name),
+            (format.features & feature.bit) != 0 ? StringView("1") : StringView("0"));
+    }
+
     for (const ShaderDefine& define : jobDefines) {
         add(StringView(), define.name, define.value);
     }

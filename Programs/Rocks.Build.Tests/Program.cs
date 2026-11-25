@@ -143,10 +143,18 @@ try
             case "ownership":
                 await IncludeOwnershipTests.RunAsync(request, root, Pass);
                 break;
+            case "c-language":
+                ObjectiveCppTests.Run(request, root);
+                await CLanguageTests.RunAsync(request, root);
+                Pass("C and Objective-C++ translation units");
+                break;
             case "target-kinds":
                 await TargetKindTests.RunAsync(request, root, repository, Pass);
+                ModuleTypeTests.Run(request, Pass);
                 break;
             case "descriptors":
+                CompanionTargetTests.Run();
+                PrerequisiteTargetTests.Run();
                 DescriptorTests.Run(root, repository);
                 Pass("project and plugin descriptors parse strictly and resolve plugins");
                 break;
@@ -159,9 +167,13 @@ try
             case "ide-plan":
                 await IdePlanTests.RunAsync(request, root, Pass);
                 break;
+            case "android-package":
+                await AndroidPackageTests.RunAsync(request);
+                Pass("Android APK executables");
+                break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan, android-package.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -177,6 +189,9 @@ try
 
     CompanionTargetTests.Run();
     Pass("companion targets merge program modules and reject invalid companions");
+
+    PrerequisiteTargetTests.Run();
+    Pass("prerequisite targets keep their own rules, build first and once, skip unmatched and Release shipping builds, and reject invalid lists");
 
     EngineVersionTests.Run(root, repository);
     Pass(repository is null
@@ -343,6 +358,12 @@ try
     await BuildConfigurationTests.RunAsync(request, root);
     Pass("build configurations, ThinLTO, and per-module optimization overrides");
 
+    ObjectiveCppTests.Run(request, root);
+    Pass("Objective-C++ (.mm) translation units: language, ARC-off flags, Apple-only validation");
+
+    await AndroidPackageTests.RunAsync(request);
+    Pass("Android APK executables: validation, shared library link, APK define");
+
     await CLanguageTests.RunAsync(request, root);
     Pass("C17 translation units: C++ flag golden, C profile, real build, included .c invalidation");
 
@@ -370,6 +391,7 @@ try
     await ModularManifestTests.RunAsync(request, root, Pass);
     await IncludeOwnershipTests.RunAsync(request, root, Pass);
     await TargetKindTests.RunAsync(request, root, repository, Pass);
+    ModuleTypeTests.Run(request, Pass);
 
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);

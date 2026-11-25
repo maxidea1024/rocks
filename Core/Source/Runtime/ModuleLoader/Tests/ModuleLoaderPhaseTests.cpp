@@ -8,7 +8,7 @@
 
 using namespace rocks;
 
-// 모듈 로더의 단계 실행과 묶음(Docs/Design/ModuleLoader.ko.md 3.3·3.11절, ML1)을 시험용 모듈 표로
+// 모듈 로더의 단계 실행과 묶음(Docs/Design/ModuleLoader 3.3·3.11절, ML1)을 시험용 모듈 표로
 // 검사한다. 시험 모듈 PhaseProbe<I>는 시작·PreUnload·Shutdown을 순서 기록에 남긴다. 표는 단계마다
 // 모듈 하나와, 단계 실행이 건너뛰는 None 모듈·요청 시 적재 모듈을 담는다.
 namespace module_loader_phase_tests_file {

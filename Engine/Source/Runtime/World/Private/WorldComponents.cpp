@@ -4,6 +4,9 @@
 #include <World/Level.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
+#include <World/WorldLog.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogContext.h>
 
 namespace rocks {
 
@@ -71,6 +74,11 @@ Result<ObjectHandle> World::AddComponent(ObjectHandle actor, TypeId type) noexce
         return rollback(attached.Error());
     }
 
+    // 타입 규칙·EditorOnly(23.2절) — 등록 전이라 hook을 하나도 부르지 않는다.
+    if (auto allowed = CheckComponentRules(actor, handle); !allowed) {
+        return rollback(allowed.Error());
+    }
+
     ComponentRecord entry;
     entry.component = handle;
     entry.actor = actor;
@@ -118,17 +126,11 @@ Result<void> World::AdvanceComponent(ObjectHandle actor, ObjectHandle component)
     }
 
     if (needsRegister.Value()) {
-        auto registered = With<Component>(
-            component, [](Component& value) noexcept { return value.OnRegister(); });
-        if (!registered) {
+        if (auto registered = RegisterComponentNow(component); !registered) {
             auto destroyed = DestroyComponent(component);
             (void)destroyed;
             return registered;
         }
-
-        auto marked =
-            With<Component>(component, [](Component& value) noexcept { value.registered_ = true; });
-        (void)marked;
     }
 
     // 2) OnAwake와 Tick 설정 검증.
@@ -234,6 +236,249 @@ Result<void> World::DestroyComponent(ObjectHandle component) noexcept {
         value.state_ = ComponentState::PendingDestroy;
         UnregisterTicks(value.ticks_);
     });
+}
+
+const char* SystemStateKindName(SystemStateKind kind) noexcept {
+    switch (kind) {
+    case SystemStateKind::Render:
+        return "Render";
+    case SystemStateKind::Physics:
+        return "Physics";
+    case SystemStateKind::Audio:
+        return "Audio";
+    case SystemStateKind::Count:
+        break;
+    }
+
+    return "Unknown";
+}
+
+Result<void> Component::MarkSystemStateDirty(SystemStateKind kind) noexcept {
+    const uint32 index = static_cast<uint32>(kind);
+    if (index >= SystemStateKindCount) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 등록 전·해제 뒤·파괴 대기·그 종류 없음은 할 일이 없다.
+    if (world_ == nullptr || !registered_ || state_ == ComponentState::PendingDestroy ||
+        (systemStates_ & (1u << index)) == 0) {
+        return Result<void>::Success();
+    }
+
+    // 처음 표시할 때만 목록에 넣는다(한 Component는 목록에 많아야 한 번 — 23.2절).
+    if (dirtySystemStates_ == 0) {
+        if (auto queued = world_->systemStateUpdates_.TryPushBack(Handle()); !queued) {
+            return queued;
+        }
+    }
+
+    dirtySystemStates_ = static_cast<uint8>(dirtySystemStates_ | (1u << index));
+    return Result<void>::Success();
+}
+
+Result<void> World::RegisterComponentNow(ObjectHandle component) noexcept {
+    auto registered =
+        With<Component>(component, [](Component& value) noexcept { return value.OnRegister(); });
+    if (!registered) {
+        return registered;
+    }
+
+    // 시스템 상태(23.2절): Render → Physics → Audio. 실패하면 만든 것을 역순으로 지우고
+    // OnUnregister.
+    return With<Component>(component, [](Component& value) noexcept -> Result<void> {
+        for (uint32 index = 0; index < SystemStateKindCount; ++index) {
+            const auto kind = static_cast<SystemStateKind>(index);
+            if (!value.WantsSystemState(kind)) {
+                continue;
+            }
+
+            if (auto created = value.CreateSystemState(kind); !created) {
+                for (uint32 back = index; back > 0; --back) {
+                    const auto made = static_cast<SystemStateKind>(back - 1);
+                    if (value.HasSystemState(made)) {
+                        value.DestroySystemState(made);
+                    }
+                }
+
+                value.systemStates_ = 0;
+                value.OnUnregister();
+                return created;
+            }
+
+            value.systemStates_ = static_cast<uint8>(value.systemStates_ | (1u << index));
+        }
+
+        value.registered_ = true;
+        return Result<void>::Success();
+    });
+}
+
+void World::DestroySystemStates(Component& component) noexcept {
+    for (uint32 index = SystemStateKindCount; index > 0; --index) {
+        const auto kind = static_cast<SystemStateKind>(index - 1);
+        if (component.HasSystemState(kind)) {
+            component.DestroySystemState(kind);
+        }
+    }
+
+    component.systemStates_ = 0;
+}
+
+void World::FlushSystemStateUpdates() noexcept {
+    if (systemStateUpdates_.Size() == 0) {
+        return;
+    }
+
+    HookScope hooks(*this);
+    // 목록을 떼어 처리한다. 처리 중 hook이 남긴 표시는 다음 갱신 지점(다음 프레임)이다 — 종류 사이
+    // 표시가 순환해도 한 지점에서 끝없이 돌지 않는다.
+    // 이동한 원본은 같은 allocator의 빈 배열로 남아 그대로 다시 쓴다.
+    Array<ObjectHandle> batch = Move(systemStateUpdates_);
+    for (usize position = 0; position < batch.Size(); ++position) {
+        const ObjectHandle component = batch[position];
+        auto updated = With<Component>(component, [&](Component& value) noexcept {
+            const uint8 dirty = value.dirtySystemStates_;
+            value.dirtySystemStates_ = 0;
+            if (!value.registered_ || value.state_ == ComponentState::PendingDestroy) {
+                return;
+            }
+
+            for (uint32 index = 0; index < SystemStateKindCount; ++index) {
+                const auto kind = static_cast<SystemStateKind>(index);
+                if ((dirty & (1u << index)) == 0 || !value.HasSystemState(kind)) {
+                    continue;
+                }
+
+                value.DestroySystemState(kind);
+                value.systemStates_ = static_cast<uint8>(value.systemStates_ & ~(1u << index));
+                if (auto created = value.CreateSystemState(kind); created) {
+                    value.systemStates_ = static_cast<uint8>(value.systemStates_ | (1u << index));
+                } else {
+                    LogContextScope context("World", Name());
+                    Log::Warning(LogWorld,
+                                 "Component system state {Kind} could not be recreated: {Error} "
+                                 "({Code})",
+                                 SystemStateKindName(kind), ErrorCodeName(created.Error()),
+                                 DiagSystemStateRecreateFailed);
+                }
+            }
+        });
+        (void)updated;
+    }
+}
+
+Result<void> World::CheckComponentRules(ObjectHandle actor, ObjectHandle component) noexcept {
+    struct Candidate {
+        TypeId type;
+        ComponentTypeRules rules;
+        bool editorOnly = false;
+    };
+
+    auto read = With<Component>(component, [](Component& value) noexcept {
+        Candidate candidate;
+        candidate.type = value.GetType().Id();
+        candidate.rules = value.TypeRules();
+        candidate.editorOnly = value.IsEditorOnly();
+        return candidate;
+    });
+    if (!read) {
+        return Result<void>::Failure(read.Error());
+    }
+
+    const Candidate added = read.Value();
+    // 편집 전용은 게임 World에 만들지 않는다(UE 게임 World에 EditorOnly Component가 없다).
+    if (added.editorOnly && (Kind() == WorldKind::Game || Kind() == WorldKind::Tryout)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    const ComponentTypeRules& rules = added.rules;
+    if (rules.required.Size() > MaxRequiredComponentTypes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const ActorRecord* record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    bool missing[MaxRequiredComponentTypes] = {};
+    const usize requiredCount = rules.required.Size();
+    for (usize index = 0; index < requiredCount; ++index) {
+        missing[index] = true;
+    }
+
+    Result<void> verdict = Result<void>::Success();
+    for (ObjectHandle existing : record->components) {
+        if (existing == component || !verdict) {
+            continue;
+        }
+
+        auto checked = With<Component>(existing, [&](Component& value) noexcept -> Result<void> {
+            if (value.state_ == ComponentState::PendingDestroy) {
+                return Result<void>::Success();
+            }
+
+            // unique는 같은 타입과 그 파생을 한 묶음으로 본다(Unity DisallowMultipleComponent —
+            // 기존이 새 타입의 파생이거나 새 것이 기존 타입의 파생이면 겹친다). 기존 Component의
+            // unique도 본다.
+            const TypeLease type = value.GetType();
+            const TypeId existingType = type.Id();
+            const bool existingUnique = value.TypeRules().unique;
+            if (rules.unique || existingUnique) {
+                auto derived =
+                    With<Component>(component, [existingType](Component& candidate) noexcept {
+                        return candidate.GetType().IsA(existingType);
+                    });
+                // 새 타입이 unique면 기존이 그 타입(파생)인지, 기존이 unique면 새 것이 기존
+                // 타입(파생) 인지 본다 — 기반 타입과는 겹치지 않는다.
+                const bool newCovers = rules.unique && type.IsA(added.type);
+                const bool existingCovers = existingUnique && derived && derived.Value();
+                if (newCovers || existingCovers) {
+                    return Result<void>::Failure(ErrorCode::AlreadyExists);
+                }
+            }
+
+            for (usize index = 0; index < requiredCount; ++index) {
+                if (type.IsA(rules.required[index])) {
+                    missing[index] = false;
+                }
+            }
+
+            for (const TypeId& forbidden : rules.excluded) {
+                if (type.IsA(forbidden)) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
+
+            // 기존 Component의 excluded에 새 타입이 걸리는지는 새 객체의 타입으로 본다.
+            const ComponentTypeRules other = value.TypeRules();
+            for (const TypeId& forbidden : other.excluded) {
+                auto hit = With<Component>(component, [&](Component& candidate) noexcept {
+                    return candidate.GetType().IsA(forbidden);
+                });
+                if (hit && hit.Value()) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
+
+            return Result<void>::Success();
+        });
+        if (!checked) {
+            verdict = Move(checked);
+        }
+    }
+
+    if (!verdict) {
+        return verdict;
+    }
+
+    for (usize index = 0; index < requiredCount; ++index) {
+        if (missing[index]) {
+            return Result<void>::Failure(ErrorCode::DependencyFailed);
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace rocks

@@ -5,7 +5,7 @@
 #include <Core/Text/String.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 되돌릴 수 있는 문서 변경 기록이다(Docs/Design/NodeGraph.ko.md 8.6절 "op와 patch"). GraphMutator가
+// 되돌릴 수 있는 문서 변경 기록이다(Docs/Design/NodeGraph 8.6절 "op와 patch"). GraphMutator가
 // 명령· bracket마다 만들고, undo·redo는 같은 mutator가 이 patch를 다시 적용한다. 내용(op)은 mutator
 // 전용이다.
 //
@@ -32,7 +32,9 @@ enum class GraphSlotKind : uint8 {
     NodeLayout,
     Edge,
     Comment,
-    Bookmark
+    Bookmark,
+    // 하위 그래프 경계 목록(Graph::inputs·outputs — graphValue에 담는다, 10.1절 NG3c).
+    GraphBoundary
 };
 
 // op 하나다: 슬롯 키와 보관 값. 적용은 슬롯과 값을 맞바꾸고 hasValue를 뒤집는다(Title·값 바꾸기는

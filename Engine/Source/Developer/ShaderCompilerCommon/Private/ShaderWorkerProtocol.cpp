@@ -53,6 +53,7 @@ constexpr Guid JobDebugField = FieldId(28);
 constexpr Guid JobMatrixField = FieldId(29);
 constexpr Guid JobLayoutField = FieldId(30);
 constexpr Guid JobHookField = FieldId(31);
+constexpr Guid JobFeaturesField = FieldId(32);
 // 응답.
 constexpr Guid ResultsField = FieldId(40);
 constexpr Guid ToolsField = FieldId(41);
@@ -353,6 +354,10 @@ Result<void> EncodeJob(Allocator& allocator, const ShaderWorkerJob& job,
     }
 
     if (step) {
+        step = fields.U32(JobFeaturesField, job.requiredFeatures);
+    }
+
+    if (step) {
         step = fields.Text(JobEntryField, job.entry.View());
     }
 
@@ -399,11 +404,12 @@ Result<void> EncodeJob(Allocator& allocator, const ShaderWorkerJob& job,
 Result<void> DecodeJob(RecordReader& item, ShaderWorkerJob& job) noexcept {
     auto kind = ReadU32(item, JobKindField);
     auto stage = ReadU32(item, JobStageField);
+    auto features = ReadU32(item, JobFeaturesField);
     auto hlsl = ReadBool(item, JobHlslField);
     auto optimization = ReadU32(item, JobOptimizationField);
     auto debug = ReadBool(item, JobDebugField);
     auto matrix = ReadU32(item, JobMatrixField);
-    if (!kind || !stage || !hlsl || !optimization || !debug || !matrix ||
+    if (!kind || !stage || !features || !hlsl || !optimization || !debug || !matrix ||
         kind.Value() > static_cast<uint32>(ShaderWorkerJobKind::Assert) ||
         optimization.Value() > 3 || matrix.Value() != 0) {
         return Failure(ErrorCode::InvalidArgument);
@@ -411,6 +417,7 @@ Result<void> DecodeJob(RecordReader& item, ShaderWorkerJob& job) noexcept {
 
     job.kind = static_cast<ShaderWorkerJobKind>(kind.Value());
     job.stage = stage.Value();
+    job.requiredFeatures = features.Value();
     job.options.hlsl2021 = hlsl.Value();
     job.options.optimization = static_cast<uint8>(optimization.Value());
     job.options.debugSymbols = debug.Value();

@@ -222,7 +222,7 @@ FormatMapping MappingOf(PixelFormat format) noexcept {
         return Video(DXGI_FORMAT_NV12, DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8_UNORM);
     case PF::P010:
         return Video(DXGI_FORMAT_P010, DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16G16_UNORM);
-    // DXGI에 장치 형식이 없다(PixelFormat.ko.md 8.4절).
+    // DXGI에 장치 형식이 없다(Docs/Design/PixelFormat 8.4절).
     case PF::Unknown:
     case PF::R8UnormSrgb:
     case PF::RG8UnormSrgb:

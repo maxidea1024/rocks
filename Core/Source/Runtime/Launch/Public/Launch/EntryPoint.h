@@ -19,11 +19,16 @@
 // 이 헤더는 <Windows.h>를 넣지 않는다. wWinMain은 선언만으로 쓴다(HINSTANCE는 struct HINSTANCE__*).
 //
 // Modular 호스트 모듈(빌드가 ROCKS_MODULE_SHARED_LIBRARY=1로 알린다 —
-// Docs/Design/ModuleLoader.ko.md 3.14절)에서는 플랫폼 진입점을 만들지 않는다. 실행 파일은 빌드가
+// Docs/Design/ModuleLoader 3.14절)에서는 플랫폼 진입점을 만들지 않는다. 실행 파일은 빌드가
 // 만든 진입 TU이고 Launch의 Modular 진입이 이 모듈을 적재해 앱 기술을 찾는다. 그래서 두 매크로는
 // export 함수 RocksApplicationDescription()·RocksWindowedApplicationDescription()(창 — Windows만
 // 따로)을 정의한다. 이름이 다르므로 소스 매크로와 빌드 규칙의 subsystem이 맞지 않으면 Launch가
 // 기호를 찾지 못해 알린다.
+//
+// Android APK 프로그램(빌드 규칙 AndroidPackage가 ROCKS_ANDROID_APK=1을 준다 — Docs/Design/
+// AndroidPlatform.ko.md 3절)에서는 main을 만들지 않는다. 플랫폼 NativeActivity가 Launch의
+// ANativeActivity_onCreate를 부르고, 두 매크로는 그 진입이 찾는 export 함수
+// RocksAndroidApplicationDescription()을 정의한다.
 //
 // 사용 예:
 //   ROCKS_IMPLEMENT_APPLICATION(Describe)
@@ -45,6 +50,17 @@
     extern "C" ROCKS_DLLEXPORT const ::rocks::launch::ApplicationDescription* Symbol() noexcept {  \
         return &DescribeFunction();                                                                \
     }
+
+#elif ROCKS_PLATFORM_ANDROID && defined(ROCKS_ANDROID_APK) && ROCKS_ANDROID_APK
+
+#define ROCKS_IMPLEMENT_APPLICATION(DescribeFunction)                                              \
+    extern "C" ROCKS_DLLEXPORT const ::rocks::launch::ApplicationDescription*                      \
+    RocksAndroidApplicationDescription() noexcept {                                                \
+        return &DescribeFunction();                                                                \
+    }
+
+#define ROCKS_IMPLEMENT_WINDOWED_APPLICATION(DescribeFunction)                                     \
+    ROCKS_IMPLEMENT_APPLICATION(DescribeFunction)
 
 #elif ROCKS_PLATFORM_WINDOWS
 

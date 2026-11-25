@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Graphics/ShaderBindings.h>
+
 #include "D3D11Common.h"
 
 #include <Core/Containers/Array.h>
@@ -9,7 +11,6 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
-#include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
@@ -18,7 +19,6 @@
 
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
-#include <d3dcompiler.h>
 #include <dxgidebug.h>
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
@@ -102,6 +102,8 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
 }
 
 struct PipelineRecord {
+    // 고정 slot 표(셰이더 layout의 단계별 slot)다.
+    PipelineSlots slots;
     ComRef<ID3D11VertexShader> vertexShader;
     ComRef<ID3D11PixelShader> pixelShader;
     // 정점 입력이 없는 배치면 비어 있다.
@@ -139,6 +141,13 @@ struct SwapChainRecord {
     // ResizeBuffers·버퍼 재취득이 실패해 버퍼가 없는 상태다. 다음 Resize가 성공할 때까지
     // BeginFrame은 DependencyFailed다.
     bool broken = false;
+};
+
+// 상수 버퍼 handle 하나다(RenderBase 9.11절 — SingleFrame IMMUTABLE, MultiFrame DEFAULT).
+struct ConstantBufferRecord {
+    ComRef<ID3D11Buffer> buffer;
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    uint32 bytes = 0;
 };
 
 // 비동기 readback 하나다. fence가 끝나면 staging 텍스처에 있다.
@@ -255,7 +264,7 @@ public:
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
-    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(PixelFormat.ko.md PF4).
+    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(Docs/Design/PixelFormat PF4).
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
@@ -270,8 +279,18 @@ public:
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
     void Retire(BufferViewHandle view) noexcept override;
+    // 상수 버퍼(D3D11Constants.cpp, RenderBase 9.11절)다. 다른 스레드에서도 부를 수 있다
+    // (concurrentResourceCreation — 기록 중 갱신은 소유 스레드만 기록 순서를 지킨다).
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
+    void Retire(ShaderHandle shader) noexcept override;
+
     void Retire(SwapChainHandle swapChain) noexcept override;
     void ReclaimCompleted() noexcept override;
     Result<void> WaitIdle() noexcept override;
@@ -308,6 +327,7 @@ public:
     uint64 RejectedCalls() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
 
@@ -373,6 +393,10 @@ private:
     void SetTexture(TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -407,6 +431,10 @@ private:
     bool PrepareDraw(bool indexed) noexcept;
     // dispatch 직전 조건을 보고 CS 상수·읽기 view·쓰기 view를 묶는다.
     bool PrepareDispatch() noexcept;
+    // 파이프라인이 읽는 상수 버퍼(D3D11Constants.cpp)를 묶는다. 하나라도 없거나 작으면 거짓이다.
+    bool ApplyConstants(const PipelineRecord& pipeline) noexcept;
+    // 묶인 (단계, slot)의 버퍼와 byte 수다(없으면 null·0).
+    ID3D11Buffer* BoundConstantBuffer(uint32 stage, uint32 slot, uint32& bytes) const noexcept;
     // dispatch 뒤 CS view를 풀어 다음 그리기가 같은 버퍼를 읽을 수 있게 한다.
     void FinishDispatch() noexcept;
     // 간접 인자 버퍼(Indirect 용도, offset 4 byte 배수, 범위 안)다. 아니면 null이다.
@@ -500,20 +528,12 @@ private:
     // --- 자원(D3D11Resources.cpp) ---
 
     Result<ID3D11SamplerState*> SamplerFor(const SamplerDesc& desc) noexcept;
-    Result<void> Compile(StringView source, const char* entry, const char* target,
-                         ComRef<ID3DBlob>& code) noexcept;
-    Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept;
+    // 파이프라인 slot 표의 자원을 지금 기록의 단계 slot에 건다(그리기·dispatch 직전).
+    void ApplySlots(const PipelineRecord& pipeline) noexcept;
     // --- 버퍼 view(D3D11Buffers.cpp) ---
-    // 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
-    // slots에, CS 쓰기 slot을 writeSlots에 더한다.
-    // b0 cbuffer가 drawConstantBytes보다 크면 InvalidArgument다(작은 것은 허용).
     Result<TextureHandle> CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
                                                     const ResolvedSubresourceRange& range,
                                                     TextureDimension dimension) noexcept;
-    // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
-    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
-                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots,
-                                 uint32* writeTextures = nullptr) noexcept;
     // 지금 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(잠금 안).
     bool BufferViewsBound() const noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
@@ -617,6 +637,17 @@ private:
     // 기록 시작 때 0이고 SetDrawConstants가 앞부분을 바꾼다.
     ComRef<ID3D11Buffer> constants_;
     alignas(16) uint8 constantValues_[MaxDrawConstantBytes] = {};
+    // 상수 버퍼(9.11절): handle 표, 기록 명령의 (단계, slot)별 DYNAMIC 버퍼와 그 크기, 묶음이다.
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    ComRef<ID3D11Buffer> transientConstants_[ConstantBufferStageCount][MaxConstantBufferSlots];
+    uint32 transientBytes_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    struct BoundConstant {
+        SlotHandle handle;
+        // 참이면 기록 명령 버퍼(transientConstants_)다.
+        bool data = false;
+        uint32 bytes = 0;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
     Target target_;
     SwapChainHandle presentTarget_;
     TextureHandle white_;
@@ -640,6 +671,8 @@ private:
     // 정점·index 버퍼를 다시 묶는다.
     bool inputsDirty_ = false;
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;
     // 검증 메시지 원문을 ID마다 한 번만 남긴다(DrainValidationMessages가 쓴다).
@@ -674,6 +707,8 @@ private:
     uint32 markerDepth_ = 0;
     // 기록 중 열린 분리 전이 짝이다.
     SplitTransitionTracker splits_;
+    // 장치 셰이더(CreateShader — 코드와 layout의 CPU 사본)다.
+    DeviceShaderTable shaders_;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

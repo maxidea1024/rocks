@@ -350,14 +350,14 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
         }
     }
 
-    // 처리기 버전: 형식 정의 processor.version을 2로 올린 요청은 워커의 D3D 처리기(1)와 다르다.
+    // 처리기 버전: 형식 정의 processor.version을 5로 올린 요청은 워커의 D3D 처리기(4)와 다르다.
     {
         RequestBuilder builder;
         auto format = builder.request.formats.TryEmplaceBack(TestAllocator());
         REQUIRE(format && format.Value()->id.TryAssign("D3D12_SM6"));
         Array<uint8> original(TestAllocator());
         REQUIRE(ReadConfig("D3D12_SM6", original));
-        const char needle[] = "\"version\": 1";
+        const char needle[] = "\"version\": 4";
         const char* text = reinterpret_cast<const char*>(original.Data());
         usize at = IndexNone;
         for (usize index = 0; index + sizeof(needle) - 1 <= original.Size(); ++index) {
@@ -369,10 +369,10 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
 
         REQUIRE(at != IndexNone);
         REQUIRE(format.Value()->bytes.TryAppend(original.View()));
-        format.Value()->bytes[at + sizeof(needle) - 2] = '2';
+        format.Value()->bytes[at + sizeof(needle) - 2] = '5';
         ShaderFormatDefinition definition;
         REQUIRE(ParseShaderFormatDefinition(format.Value()->bytes.View(), "D3D12_SM6", definition));
-        REQUIRE(definition.moduleVersion == 2);
+        REQUIRE(definition.moduleVersion == 5);
         const ShaderFormatDefinition* pointers[] = {&definition};
         REQUIRE(MakeShaderWorkerHeader(pointers, builder.request.header));
         Array<uint8> bytes(TestAllocator());
@@ -431,16 +431,6 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
     // hook job은 진행 줄을 쓰지 않는다(SC4 — Compile job만).
     CHECK(test.result.reportedJobs == 0);
 
-    // 아직 처리기가 없는 형식(GLES)은 UnsupportedCapability다(도구와 무관).
-    RequestBuilder gles;
-    REQUIRE(gles.AddFormat("GLES31_PC"));
-    REQUIRE(
-        gles.AddJob(ShaderWorkerJobKind::Compile, "GLES31_PC", ShaderStageCompute, ComputeSource));
-    REQUIRE(test.Run(gles));
-    REQUIRE(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
-    CHECK(test.result.response.jobs[0].status == ShaderWorkerJobStatus::UnsupportedCapability);
-    CHECK(test.result.reportedJobs == 1);
-
     if (!bootstrapped) {
         printf("[SKIP] ShaderWorkerChannel_QueriesToolsAndCompiles: shader tool store is not "
                "bootstrapped (dotnet msbuild Rocks.proj /t:ThirdPartyBootstrap)\n");
@@ -472,19 +462,22 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
                 static_cast<int>(spirv.diagnostics.ByteCount()), spirv.diagnostics.Data());
     }
 
-    REQUIRE(dxil.status == ShaderWorkerJobStatus::Success && dxil.values.Size() == 1);
+    REQUIRE(dxil.status == ShaderWorkerJobStatus::Success && dxil.values.Size() == 2 &&
+            dxil.values[1].id == 1);
     CHECK(dxil.values[0].id == 0 && dxil.values[0].bytes.Size() > 20 &&
           memcmp(dxil.values[0].bytes.Data(), "DXBC", 4) == 0 && dxil.diagnostics.IsEmpty());
-    REQUIRE(spirv.status == ShaderWorkerJobStatus::Success && spirv.values.Size() == 1);
+    REQUIRE(spirv.status == ShaderWorkerJobStatus::Success && spirv.values.Size() == 2 &&
+            spirv.values[1].id == 1);
     CHECK(spirv.values[0].bytes.Size() % 4 == 0 && spirv.values[0].bytes[0] == 0x03 &&
           spirv.values[0].bytes[1] == 0x02 && spirv.values[0].bytes[2] == 0x23 &&
           spirv.values[0].bytes[3] == 0x07);
-    // 컴파일 오류는 진단과 함께 CompileError, FXC 경로(D3D11_SM5)는 SH1e까지
-    // UnsupportedCapability다.
+    // 컴파일 오류는 진단과 함께 CompileError, FXC 경로(D3D11_SM5)는 DXBC다(SH1e).
     CHECK(test.result.response.jobs[2].status == ShaderWorkerJobStatus::CompileError &&
           test.result.response.jobs[2].values.IsEmpty() &&
           strstr(test.result.response.jobs[2].diagnostics.Data(), "undefined_name_c") != nullptr);
-    CHECK(test.result.response.jobs[3].status == ShaderWorkerJobStatus::UnsupportedCapability);
+    CHECK(test.result.response.jobs[3].status == ShaderWorkerJobStatus::Success &&
+          test.result.response.jobs[3].values.Size() == 2 &&
+          memcmp(test.result.response.jobs[3].values[0].bytes.Data(), "DXBC", 4) == 0);
 
     // 같은 입력은 같은 byte다(워커를 새로 띄워도).
     Array<uint8> first(TestAllocator());
@@ -496,6 +489,161 @@ TEST(ShaderWorkerChannel_QueriesToolsAndCompiles) {
     REQUIRE(again.result.outcome == ShaderWorkerBatchOutcome::Completed);
     const Array<uint8>& second = again.result.response.jobs[0].values[0].bytes;
     CHECK(second.Size() == first.Size() && memcmp(second.Data(), first.Data(), first.Size()) == 0);
+}
+
+// 지금 묶음 결과의 job 하나다(진단을 찍고 상태를 대조한다).
+bool JobIs(const ShaderWorkerBatchResult& result, usize index, ShaderWorkerJobStatus status,
+           const char* what) noexcept {
+    if (index >= result.response.jobs.Size()) {
+        fprintf(stderr, "%s: job %zu is missing\n", what, index);
+        return false;
+    }
+
+    const ShaderWorkerJobResult& job = result.response.jobs[index];
+    if (job.status != status) {
+        fprintf(stderr, "%s: status %u, diagnostics %.*s\n", what,
+                static_cast<unsigned>(job.status), static_cast<int>(job.diagnostics.ByteCount()),
+                job.diagnostics.Data());
+        return false;
+    }
+
+    return true;
+}
+
+StringView CodeText(const ShaderWorkerJobResult& job) noexcept {
+    return job.values.IsEmpty()
+               ? StringView()
+               : StringView(reinterpret_cast<const char*>(job.values[0].bytes.Data()),
+                            job.values[0].bytes.Size());
+}
+
+TEST(ShaderWorkerChannel_CompilesRemainingFormats) {
+    ChannelCase test;
+    bool ready = false;
+    if (!test.Make("workerformats", false, ready)) {
+        printf("[SKIP] ShaderWorkerChannel_CompilesRemainingFormats: ShaderCompileWorker is not "
+               "next to the test executable\n");
+        return;
+    }
+
+    REQUIRE(ready);
+    RequestBuilder query;
+    query.request.kind = ShaderWorkerRequestKind::ToolQuery;
+    REQUIRE(test.Run(query));
+    REQUIRE(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
+    bool bootstrapped = !test.result.response.tools.IsEmpty();
+    for (const ShaderWorkerToolCheck& tool : test.result.response.tools) {
+        bootstrapped = bootstrapped && tool.state == ShaderWorkerToolState::Ready;
+    }
+
+    // Metal 도구 지문(SH1e E7): 찾았으면 버전과 두 실행 파일 SHA가 있다.
+    bool metalFound = false;
+    for (const ShaderWorkerSystemTool& tool : test.result.response.systemTools) {
+        if (tool.name.View() == StringView(MetalToolName)) {
+            metalFound = tool.found;
+            CHECK(!tool.found ||
+                  (!tool.version.IsEmpty() && !(tool.executables[0] == Sha256Digest{}) &&
+                   !(tool.executables[1] == Sha256Digest{})));
+        }
+    }
+
+    if (!bootstrapped) {
+        printf("[SKIP] ShaderWorkerChannel_CompilesRemainingFormats: shader tool store is not "
+               "bootstrapped (dotnet msbuild Rocks.proj /t:ThirdPartyBootstrap)\n");
+        return;
+    }
+
+    // FXC가 받지 않는 원문(namespace)은 대체 경로(DXC → SPIR-V → HLSL 5.0 → FXC)로 DXBC가 된다.
+    constexpr char NamespaceSource[] =
+        "namespace Util { uint Twice(uint v) { return v * 2; } }\n"
+        "RWStructuredBuffer<uint> Output;\n"
+        "[numthreads(4, 1, 1)]\n"
+        "void main(uint3 id : SV_DispatchThreadID) { Output[id.x] = Util::Twice(id.x); }\n";
+    constexpr char VertexSource[] = "float4 main(uint id : SV_VertexID) : SV_Position {\n"
+                                    "    return float4(float(id), 0.0, 0.5, 1.0);\n"
+                                    "}\n";
+    // ESSL 320은 r11g11b10f storage image를 받지 않는다(형식 unsupportedImageFormats).
+    constexpr char PackedImageSource[] =
+        "[[vk::image_format(\"r11g11b10f\")]] RWTexture2D<float3> Image;\n"
+        "[numthreads(1, 1, 1)]\n"
+        "void main(uint3 id : SV_DispatchThreadID) { Image[id.xy] = float3(1.0, 0.0, 0.0); }\n";
+    RequestBuilder compile;
+    REQUIRE(compile.AddFormat("D3D11_SM5") && compile.AddFormat("GLES31_ANDROID") &&
+            compile.AddFormat("GLES31_PC") && compile.AddFormat("METAL_SM5"));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "D3D11_SM5", ShaderStageCompute,
+                           ComputeSource));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "D3D11_SM5", ShaderStageCompute,
+                           ComputeSource));
+    compile.request.jobs[1].options.hlsl2021 = true;
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "D3D11_SM5", ShaderStageCompute,
+                           NamespaceSource));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "D3D11_SM5", ShaderStageCompute,
+                           BrokenSource));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "GLES31_ANDROID", ShaderStageCompute,
+                           ComputeSource));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "GLES31_ANDROID", ShaderStageVertex,
+                           VertexSource));
+    REQUIRE(
+        compile.AddJob(ShaderWorkerJobKind::Compile, "GLES31_PC", ShaderStageVertex, VertexSource));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "GLES31_PC", ShaderStageCompute,
+                           PackedImageSource));
+    REQUIRE(compile.AddJob(ShaderWorkerJobKind::Compile, "METAL_SM5", ShaderStageCompute,
+                           ComputeSource));
+    REQUIRE(test.Run(compile));
+    REQUIRE(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
+    REQUIRE(test.result.response.jobs.Size() == 9);
+    CHECK(test.result.reportedJobs == 9);
+    const auto& jobs = test.result.response.jobs;
+
+    // D3D11: FXC 직접, HLSL 2021(대체 경로), FXC 오류 뒤 대체 경로 성공, 두 경로 모두 실패.
+    for (usize index = 0; index < 3; ++index) {
+        REQUIRE(JobIs(test.result, index, ShaderWorkerJobStatus::Success, "D3D11_SM5"));
+        CHECK(jobs[index].values.Size() == 2 && jobs[index].values[0].bytes.Size() > 20 &&
+              memcmp(jobs[index].values[0].bytes.Data(), "DXBC", 4) == 0);
+    }
+
+    CHECK(JobIs(test.result, 3, ShaderWorkerJobStatus::CompileError, "D3D11_SM5 broken"));
+    CHECK(strstr(jobs[3].diagnostics.Data(), "FXC: ") != nullptr &&
+          strstr(jobs[3].diagnostics.Data(), "fallback") != nullptr &&
+          strstr(jobs[3].diagnostics.Data(), "undefined_name_c") != nullptr);
+
+    // ESSL: #version 320 es, Android만 clip space 보정(fixup_clipspace·flip_vert_y).
+    for (usize index = 4; index < 7; ++index) {
+        REQUIRE(JobIs(test.result, index, ShaderWorkerJobStatus::Success, "GLES"));
+        CHECK(CodeText(jobs[index]).StartsWith("#version 320 es", StringComparison::CaseSensitive));
+    }
+
+    CHECK(CodeText(jobs[5]).Contains("gl_Position.y = -gl_Position.y",
+                                     StringComparison::CaseSensitive));
+    CHECK(!CodeText(jobs[6]).Contains("gl_Position.y = -gl_Position.y",
+                                      StringComparison::CaseSensitive));
+    CHECK(JobIs(test.result, 7, ShaderWorkerJobStatus::CompileError, "GLES r11g11b10f") &&
+          strstr(jobs[7].diagnostics.Data(), "r11g11b10f") != nullptr);
+
+    // Metal: 도구가 없으면 MSL만 내고 성공하지 않는다(UnsupportedCapability).
+    if (metalFound) {
+        CHECK(JobIs(test.result, 8, ShaderWorkerJobStatus::Success, "METAL_SM5"));
+    } else {
+        CHECK(JobIs(test.result, 8, ShaderWorkerJobStatus::UnsupportedCapability, "METAL_SM5") &&
+              jobs[8].values.IsEmpty());
+    }
+
+    // 같은 입력은 같은 byte다(워커를 새로 띄워도 — ESSL·DXBC).
+    Array<uint8> dxbc(TestAllocator());
+    Array<uint8> essl(TestAllocator());
+    REQUIRE(dxbc.TryAppend(jobs[2].values[0].bytes.View()) &&
+            essl.TryAppend(jobs[5].values[0].bytes.View()));
+    test.channel.Shutdown();
+    ChannelCase again;
+    REQUIRE(again.Make("workerformats2", false, ready) && ready);
+    REQUIRE(again.Run(compile));
+    REQUIRE(again.result.outcome == ShaderWorkerBatchOutcome::Completed);
+    const auto& repeated = again.result.response.jobs;
+    REQUIRE(repeated.Size() == 9 && !repeated[2].values.IsEmpty() && !repeated[5].values.IsEmpty());
+    CHECK(repeated[2].values[0].bytes.Size() == dxbc.Size() &&
+          memcmp(repeated[2].values[0].bytes.Data(), dxbc.Data(), dxbc.Size()) == 0);
+    CHECK(repeated[5].values[0].bytes.Size() == essl.Size() &&
+          memcmp(repeated[5].values[0].bytes.Data(), essl.Data(), essl.Size()) == 0);
 }
 
 TEST(ShaderWorkerChannel_TerminatesHeldWorker) {

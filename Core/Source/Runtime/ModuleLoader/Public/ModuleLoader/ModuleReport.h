@@ -5,7 +5,7 @@
 
 namespace rocks {
 
-// 적재 요청의 결과 코드다(Docs/Design/ModuleLoader.ko.md 3.4절, UE EModuleLoadResult 대응).
+// 적재 요청의 결과 코드다(Docs/Design/ModuleLoader 3.4절, UE EModuleLoadResult 대응).
 // NotFound·Incompatible·OsLoadFailed·EntryMissing은 Modular 적재(ML4)에서 쓰며 Monolithic에서는
 // 표에 없는 이름만 NotFound다.
 enum class ModuleLoadCode : uint8 {

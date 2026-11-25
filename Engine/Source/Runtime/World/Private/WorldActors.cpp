@@ -135,7 +135,7 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     record.spawnTransform = params.transform;
     created.Value().Reset();
     FindLevelRecord(level)->actorCount += 1;
-    ++spawnedTotal_;
+    record.spawnOrder = ++spawnedTotal_;
 
     // 소유자·원인은 위에서 검사했다(새 Actor는 아무도 소유하지 않아 고리가 생길 수 없다).
     if (!params.owner.IsNull() || !params.instigator.IsNull()) {
@@ -435,13 +435,7 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
             continue;
         }
 
-        auto registered = With<Component>(
-            component, [](Component& value) noexcept { return value.OnRegister(); });
-        if (registered) {
-            auto marked = With<Component>(
-                component, [](Component& value) noexcept { value.registered_ = true; });
-            (void)marked;
-        } else {
+        if (!RegisterComponentNow(component)) {
             auto destroyed = DestroyComponent(component);
             (void)destroyed;
         }
@@ -503,7 +497,24 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
         return finish(Result<void>::Success());
     }
 
-    // 4) 프레임워크 PostAwake(UE PostInitializeComponents — 모든 Component OnAwake 뒤). 실패하면
+    // 4) Spawn 인자의 Transform을 root에 쓴다. OnAwake에서 만든 root도 받도록 Component 초기화 뒤,
+    //    프레임워크 PostAwake 전에 한다 — UE는 PostInitializeComponents(자동 Possess 등) 전에 이미
+    //    Transform을 적용한다(PostSpawnInitialize — Actor.cpp:4303–4323). UE
+    //    기본(MultiplyWithRoot)처럼 root 상대 Transform × Spawn Transform을 root의 월드
+    //    Transform으로 둔다. 표현할 수 없는 합성(shear)이면 Spawn이 실패한다.
+    auto placed = ApplySpawnTransform(actor);
+    record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return finish(Result<void>::Failure(ErrorCode::Destroyed));
+    }
+
+    if (!placed) {
+        auto destroyed = DestroyActor(actor);
+        (void)destroyed;
+        return finish(Result<void>::Failure(placed.Error()));
+    }
+
+    // 5) 프레임워크 PostAwake(UE PostInitializeComponents — 모든 Component OnAwake 뒤). 실패하면
     //    Spawn이 실패하고, OnAwake가 성공했으므로 정리에서 OnDestroy를 받는다.
     auto posted =
         With<Actor>(actor, [](Actor& value) noexcept { return value.OnFrameworkPostAwake(); });
@@ -516,22 +527,6 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
         auto destroyed = DestroyActor(actor);
         (void)destroyed;
         return finish(Result<void>::Failure(posted.Error()));
-    }
-
-    // 5) Spawn 인자의 Transform을 root에 쓴다. OnAwake에서 만든 root도 받도록 Component 초기화 뒤에
-    //    한다. UE 기본(MultiplyWithRoot)처럼 root 상대 Transform × Spawn Transform을 root의 월드
-    //    Transform으로 둔다(PostSpawnInitialize — Actor.cpp:4312–4324). 표현할 수 없는
-    //    합성(shear)이면 Spawn이 실패한다.
-    auto placed = ApplySpawnTransform(actor);
-    record = FindActorRecord(actor);
-    if (record == nullptr) {
-        return finish(Result<void>::Failure(ErrorCode::Destroyed));
-    }
-
-    if (!placed) {
-        auto destroyed = DestroyActor(actor);
-        (void)destroyed;
-        return finish(Result<void>::Failure(placed.Error()));
     }
 
     if (record->state == ActorState::PendingDestroy) {

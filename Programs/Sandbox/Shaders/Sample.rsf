@@ -1,0 +1,34 @@
+// 샘플 렌더러 셰이더다(변환한 텍스처 메시에 그리기 색을 곱한다).
+struct ObjectConstants {
+    float4x4 transform;
+    float4 color;
+};
+
+ROCKS_ROOT_CONSTANTS(ObjectConstants, Object);
+
+struct VSInput {
+    float3 position : ATTRIBUTE0;
+    float2 uv : ATTRIBUTE1;
+    float4 color : ATTRIBUTE2;
+};
+
+struct VSOutput {
+    float4 position : SV_Position;
+    float2 uv : TEXCOORD0;
+    float4 color : TEXCOORD1;
+};
+
+Texture2D Albedo;
+SamplerState AlbedoSampler;
+
+VSOutput VSMain(VSInput input) {
+    VSOutput output;
+    output.position = mul(float4(input.position, 1.0), Object.transform);
+    output.uv = input.uv;
+    output.color = input.color * Object.color;
+    return output;
+}
+
+float4 PSMain(VSOutput input) : SV_Target0 {
+    return Albedo.Sample(AlbedoSampler, input.uv) * input.color;
+}

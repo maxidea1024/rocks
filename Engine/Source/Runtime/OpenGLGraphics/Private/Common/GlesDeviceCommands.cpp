@@ -219,9 +219,23 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    if (desc.shader.glsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
+    if (!ValidateComputePipelineDesc(desc)) {
         Diagnostic message;
-        message.Text("compute pipeline needs GLSL ES source and valid drawConstantBytes");
+        message.Text("compute pipeline needs valid drawConstantBytes");
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        return Result<PipelineHandle>::Failure(rejected.Error());
+    }
+
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* shader = nullptr;
+    PipelineRecord record;
+    record.compute = true;
+    record.drawConstantBytes = desc.drawConstantBytes;
+    if (!FindComputeShader(shaders_, desc, shader, error) ||
+        !ResolvePipelineSlots(Span<const DeviceShaderCode* const>(&shader, 1), desc.bindings,
+                              desc.drawConstantBytes, record.slots, error)) {
+        Diagnostic message;
+        message.Text(error);
         auto rejected = Reject(message, ErrorCode::InvalidArgument);
         return Result<PipelineHandle>::Failure(rejected.Error());
     }
@@ -230,32 +244,12 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
         return FailWith<PipelineHandle>("cannot make the OpenGL context current");
     }
 
-    auto shader = CompileShader(GL_COMPUTE_SHADER, desc.shader.glsl);
-    if (!shader) {
-        return Result<PipelineHandle>::Failure(shader.Error());
-    }
-
-    PipelineRecord record;
-    record.compute = true;
-    record.program = gl_.CreateProgram();
-    gl_.AttachShader(record.program, shader.Value());
-    gl_.LinkProgram(record.program);
-    gl_.DeleteShader(shader.Value());
-    GLint linked = GL_FALSE;
-    gl_.GetProgramiv(record.program, GL_LINK_STATUS, &linked);
-    if (linked != GL_TRUE) {
-        StoreLog(record.program, false);
-        gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
-    }
-
-    record.drawConstantBytes = desc.drawConstantBytes;
-    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots,
-                                        &record.writeTextures);
-    auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
-    if (!constants) {
-        gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(constants.Error());
+    record.bufferSlots = record.slots.bufferSlots;
+    record.writeSlots = record.slots.writeSlots;
+    record.writeTextures = record.slots.writeTextures;
+    auto linked = LinkProgram(Span<const DeviceShaderCode* const>(&shader, 1), record);
+    if (!linked) {
+        return Result<PipelineHandle>::Failure(linked.Error());
     }
 
     auto added = pipelines_.TryAdd(record);
@@ -528,8 +522,12 @@ const PipelineRecord* GlesDevice::PrepareDraw(bool indexed) noexcept {
         }
     }
 
+    if (!ApplyConstantBuffers(boundPipeline_.slot)) {
+        return nullptr;
+    }
+
     ApplyConstants(*pipeline);
-    ApplyBufferViews(*pipeline);
+    ApplySlots(*pipeline);
     return pipeline;
 }
 
@@ -559,44 +557,12 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
         }
     }
 
+    if (!ApplyConstantBuffers(boundPipeline_.slot)) {
+        return nullptr;
+    }
+
     ApplyConstants(*pipeline);
-    ApplyBufferViews(*pipeline);
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        if ((pipeline->writeSlots.usedMask & (1u << slot)) == 0) {
-            continue;
-        }
-
-        const BufferViewRecord* view = bufferViews_.Find(boundWriteViews_[slot].slot);
-        if (view->kind == BufferViewKind::Typed) {
-            const GlesTextureFormat* format = FindTextureFormat(view->format);
-            gl_.BindImageTexture(slot, view->texture, 0, GL_FALSE, 0, GL_READ_WRITE,
-                                 format->internalFormat);
-        } else {
-            gl_.BindBufferRange(GL_SHADER_STORAGE_BUFFER, WritableStorageBindingBase + slot,
-                                view->buffer, static_cast<GLintptr>(view->offset),
-                                static_cast<GLsizeiptr>(view->size));
-        }
-    }
-
-    // 쓰기 텍스처 view는 level 하나를 image unit slot에 묶는다(배열·cube·3D는 layered로 모든 층,
-    // 층 하나만 고른 view는 그 층).
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        if ((pipeline->writeTextures & (1u << slot)) == 0) {
-            continue;
-        }
-
-        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
-        const GlesTextureFormat* format = FindTextureFormat(view->format);
-        const bool layers = view->dimension == TextureDimension::Texture2DArray ||
-                            view->dimension == TextureDimension::Texture3D ||
-                            IsCubeDimension(view->dimension);
-        const bool layered = layers && view->viewRange.sliceCount == view->slices;
-        gl_.BindImageTexture(slot, view->texture, static_cast<GLint>(view->viewRange.firstMip),
-                             layered ? GL_TRUE : GL_FALSE,
-                             layered ? 0 : static_cast<GLint>(view->viewRange.firstSlice),
-                             GL_READ_WRITE, format->internalFormat);
-    }
-
+    ApplySlots(*pipeline);
     return pipeline;
 }
 

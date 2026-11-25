@@ -5,7 +5,7 @@
 
 namespace rocks::test {
 
-// 실행 중 적재 시험 모듈의 공개 interface다(Docs/Design/ModuleLoader.ko.md 3.8절). 시험 실행
+// 실행 중 적재 시험 모듈의 공개 interface다(Docs/Design/ModuleLoader 3.8절). 시험 실행
 // 파일은 그 모듈을 DynamicModules로 두므로 그 헤더를 볼 수 없다. 그래서 이 interface와 로더의
 // Find<DynamicProbe>(ModuleName)으로 수명 객체를 쓴다(UE에서 공개 interface를 별도 모듈에 두고
 // FModuleManager::GetModuleChecked<T>로 얻는 방식).

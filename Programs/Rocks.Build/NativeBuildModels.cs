@@ -149,7 +149,11 @@ public enum CodeOptimization { Default, Never, Always }
 /// C는 고정 버전 외부 라이브러리 원본(Core/Source/ThirdParty)용이며 경고·FP·구성 프로필은 C++와 같다.
 /// C++ 전용 플래그(RTTI·예외 끄기, __cplusplus 보고)만 빠진다.
 /// </summary>
-public enum NativeLanguage { Cpp, C }
+/// <summary>
+/// 번역 단위 언어다. <see cref="ObjectiveCpp"/>는 Apple 대상의 <c>.mm</c>(Objective-C++, Docs/Design/MacPlatform.ko.md 6절 MD2)이며
+/// C++와 같은 언어 인자에 Objective-C 런타임 인자를 더한다.
+/// </summary>
+public enum NativeLanguage { Cpp, C, ObjectiveCpp }
 
 /// <summary>호스트 실행 도구와 target SDK/ABI 신원을 분리하여 전달한다.</summary>
 public sealed record NativeToolchain
@@ -219,7 +223,7 @@ public sealed record NativeToolchain
 }
 
 /// <summary>
-/// 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader.ko.md 3.15절). <paramref name="Name"/>은 플러그인 이름(C 식별자),
+/// 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader 3.15절). <paramref name="Name"/>은 플러그인 이름(C 식별자),
 /// <paramref name="Directory"/>는 플러그인 루트(엔진 저장소 <c>Engine/Plugins</c>, 프로젝트 <c>Plugins</c>) 기준 플러그인 폴더다(<c>/</c> 구분,
 /// 예 <c>Importers/UnrealExchange</c>).
 /// </summary>
@@ -239,6 +243,26 @@ public sealed record SourceGroup(string Directory, string Target, IReadOnlyList<
     public IReadOnlyList<string> InternalModules => Internals ?? [];
 }
 
+/// <summary>
+/// Android APK로 묶는 실행 파일의 패키지 정보다(Docs/Design/AndroidPlatform.ko.md 7절). 그 실행 파일은 <c>bin/lib&lt;이름&gt;.so</c>
+/// 공유 라이브러리로 링크하고 define <see cref="ApkDefine"/>를 받는다(Launch EntryPoint.h가 main 대신 액티비티 진입을 만든다).
+/// </summary>
+/// <param name="PackageName">Android 패키지 이름이다(예: <c>com.rocks.sandbox</c>). 점으로 나눈 조각이 둘 이상이고 조각마다 영문자로
+/// 시작하는 영문자·숫자·밑줄이다.</param>
+/// <param name="AssetsDirectory">APK <c>assets/</c>에 넣을 폴더(절대 경로, 선택)다. 아래 파일을 같은 상대 경로로 비압축 저장한다(실행 중
+/// <c>platform::ApkFileSystem</c>으로 읽는다).</param>
+public sealed record AndroidPackage(string PackageName, string? AssetsDirectory = null)
+{
+    /// <summary>APK 실행 파일 모듈이 받는 define이다.</summary>
+    public const string ApkDefine = "ROCKS_ANDROID_APK=1";
+
+    /// <summary>링크가 강제 참조하는 액티비티 진입 기호다(NativeActivity가 dlsym으로 찾는다).</summary>
+    public const string EntrySymbol = "ANativeActivity_onCreate";
+
+    /// <summary>링크하는 공유 라이브러리 파일 이름이다(manifest <c>android.app.lib_name</c>은 앞의 lib·뒤의 .so를 뺀 모듈 이름).</summary>
+    public static string LibraryFileName(string module) => "lib" + module + ".so";
+}
+
 /// <summary>입력 경로는 request.RootDirectory 기준이다. dependency의 public 설정만 전파한다.</summary>
 public sealed record NativeModuleInput
 {
@@ -248,6 +272,10 @@ public sealed record NativeModuleInput
 
     // Windows 실행 파일의 subsystem이다(WindowsSubsystem). 실행 파일에만 뜻이 있고 dependency로 전파하지 않는다.
     public WindowsSubsystem WindowsSubsystem { get; init; } = WindowsSubsystem.Console;
+
+    // Android APK로 묶는 실행 파일이면 패키지 정보다(AndroidPackage). null이면 보통 실행 파일이다. Android 대상의 Monolithic 실행 파일만
+    // 받는다(입력 검증). dependency로 전파하지 않는다.
+    public AndroidPackage? AndroidPackage { get; init; }
 
     public IReadOnlyList<string> Sources { get; init; } = [];
 
@@ -276,7 +304,7 @@ public sealed record NativeModuleInput
     // (보임은 ModuleVisibility).
     public IEnumerable<string> AllDependencies => PublicDependencies.Concat(PrivateDependencies);
 
-    // 실행 중에 ModuleLoader::Load(이름)으로 적재하는 모듈이다(UE DynamicallyLoadedModuleNames 대응, Docs/Design/ModuleLoader.ko.md 3.8절
+    // 실행 중에 ModuleLoader::Load(이름)으로 적재하는 모듈이다(UE DynamicallyLoadedModuleNames 대응, Docs/Design/ModuleLoader 3.8절
     // MD11). 이 모듈의 컴파일에 그 모듈의 include·정의를 넣지 않는다(쓰는 쪽은 별도 모듈의 interface와 Find<T>(이름)로 쓴다). 빌드는
     // 그 모듈과 링크 폐포를 타깃에 넣어 빌드하고, 이 모듈에 닿는 실행 파일이 함께 링크하며(Monolithic) 실행 파일 모듈 표에 행을 싣는다.
     // 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — Engine이 적재하는 모듈이 Engine에 링크 의존해도 된다). 두 의존 목록과 겹치거나
@@ -315,6 +343,12 @@ public sealed record NativeModuleInput
     // sanitizerInstrumentation)에 쓴다. dependency로 전파하지 않는다.
     public bool SanitizerInstrumentation { get; init; } = true;
 
+    // true이면 이 모듈의 C++ 번역 단위에 RTTI를 켠다(Windows clang-cl /GR을 /GR- 뒤에, 그 밖 -frtti를 -fno-rtti 뒤에). 서드파티
+    // 모듈만 가질 수 있고(ThirdParty.json rtti — 자기 클래스 계층에서 dynamic_cast·typeid를 쓰는 ICU4C), 아니면 입력 오류다
+    // (Docs/Design/Compression.ko.md 3.3절 C++ 서드파티). C 번역 단위와 dependency에는 영향이 없다. 모듈 인자로 RTTI를 켜는 것은
+    // 계속 거부한다(InputValidation).
+    public bool RuntimeTypeInformation { get; init; }
+
     // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
     // Docs/Design/ReflectionFoundations.ko.md 1.1·1.10절). 모듈 규칙은 쓰지 않는다 — MetadataLayout이 ModuleDirectory 안 include
     // 디렉터리의 표지(ROCKS_CLASS·ROCKS_STRUCT·ROCKS_ENUM) 헤더를 찾아 채우고(규칙이 채우면 거부한다), 생성 include 디렉터리
@@ -341,7 +375,7 @@ public sealed record NativeModuleInput
     // 쓰지 않는 공개 의존을 알린다. 규칙은 채우지 않는다.
     public string? PublicHeaderCheckOf { get; init; }
 
-    // 이 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader.ko.md 3.15절 MD23). 기술자 모듈 처리(DescriptorModuleSet.Apply)가 플러그인
+    // 이 모듈을 선언한 플러그인이다(Docs/Design/ModuleLoader 3.15절 MD23). 기술자 모듈 처리(DescriptorModuleSet.Apply)가 플러그인
     // 모듈에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). Modular에서 그 공유 라이브러리와 플러그인 manifest의 폴더를 정한다
     // (LinkTypes.SharedLibraryDirectory). 엔진·프로젝트 모듈은 null이다.
     public ModulePlugin? Plugin { get; init; }
@@ -356,7 +390,7 @@ public sealed record NativeModuleInput
     // include·정의·프로필로 컴파일해 모듈의 archive(실행 파일 모듈이면 그 실행 파일)에 넣는다. 그래서 손으로 쓴 소스가 없는 리플렉션
     // 모듈도 정적 라이브러리가 되어 ModuleOutputs에 실린다.
     // Sources와 따로 두는 이유: 진입점 모듈의 자기 타입 표지(ROCKS_MODULE_TYPES=1 — 모듈 생성 소스가 RegisterModuleOwnTypes를 정의한다)를
-    // 이 목록으로 정한다(Docs/Design/ModuleLoader.ko.md 3.10절). 모듈 진입점 판정(ModuleTables.EntryModules)에서는 모듈 코드로 센다 —
+    // 이 목록으로 정한다(Docs/Design/ModuleLoader 3.10절). 모듈 진입점 판정(ModuleTables.EntryModules)에서는 모듈 코드로 센다 —
     // 손으로 쓴 소스가 없는 메타데이터 모듈은 MetadataLayout이 진입점 TU를 GeneratedSources로 더한다. 설치 SDK 모듈은 이 목록이 비어
     // 있다(object가 SDK 라이브러리에 들어 있다).
     public IReadOnlyList<string> ReflectionSources { get; init; } = [];
@@ -373,14 +407,14 @@ public sealed record NativeModuleInput
     // 않으므로 엔진 밖 프로젝트의 같은 이름 모듈은 대상이 아니다.
     public bool ProvidesBuildInfo { get; init; }
 
-    // 이 모듈이 Core/Module/ModuleEntry.h(모듈 진입점 매크로 ROCKS_IMPLEMENT_MODULE과 모듈 표 형식)를 제공한다는 표지다(Docs/Design/ModuleLoader.ko.md
+    // 이 모듈이 Core/Module/ModuleEntry.h(모듈 진입점 매크로 ROCKS_IMPLEMENT_MODULE과 모듈 표 형식)를 제공한다는 표지다(Docs/Design/ModuleLoader
     // 3.2·3.9절). 이 모듈에 닿는 실행 파일마다 빌드가 모듈 표 TU(<out>/GeneratedSources/<실행 파일>/<실행 파일>.ModuleTable.cpp)를 만들어 그
     // 실행 파일 소스에 더하고, 이 모듈에 닿는 C++ 모듈(서드파티·header-only 제외)의 소스에 ROCKS_MODULE_NAME=<이름>을 정의한다. 엔진 Core
     // 규칙이 켜고 설치 SDK가 함께 나른다. 이름 "Core"로 판정하지 않는다.
     public bool ProvidesModuleTable { get; init; }
 
     // 서드파티 라이브러리 모듈 표지다(ThirdPartyModuleRules가 켠다). C++ 모듈 코드가 없으므로 모듈 표에 들지 않고 ROCKS_MODULE_NAME을 받지
-    // 않는다(Docs/Design/ModuleLoader.ko.md 3.1절 면제). 설치 SDK가 함께 나른다.
+    // 않는다(Docs/Design/ModuleLoader 3.1절 면제). 설치 SDK가 함께 나른다.
     public bool ThirdParty { get; init; }
 
     // 프로세스 전역 상태가 있는 서드파티 모듈 표지다(ThirdPartyModuleRules가 ThirdParty.json globalState로 켠다 — Docs/Design/BuildTargets
@@ -388,12 +422,12 @@ public sealed record NativeModuleInput
     // 소비 모듈의 공유 라이브러리마다 링크되므로 상태가 두 벌이 된다. 다른 모듈은 그 소비 모듈의 Rocks API를 거친다.
     public bool HasGlobalState { get; init; }
 
-    // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
+    // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 모듈 표를 만들 때 행의 의존이 이 단계보다 늦으면
     // 오류다(MD6 — None 의존은 허용).
     public Descriptors.LoadingPhase LoadingPhase { get; init; } = Descriptors.LoadingPhase.Default;
 
-    // 이 모듈이 공통 실행 진입점(Launch — 프로세스 모듈 로더를 소유한다)이라는 표지다(Docs/Design/ModuleLoader.ko.md 3.9·3.11절). 이 모듈의
+    // 이 모듈이 공통 실행 진입점(Launch — 프로세스 모듈 로더를 소유한다)이라는 표지다(Docs/Design/ModuleLoader 3.9·3.11절). 이 모듈의
     // 링크 폐포에 든 진입점 모듈이 부트 모듈이고, 모듈 표를 만들 때 그 모듈들의 단계가 EarliestPossible이 아니면 오류다. 엔진 Launch 규칙이
     // 켜고 설치 SDK가 함께 나른다. 이름 "Launch"로 판정하지 않는다.
     public bool ProvidesLaunch { get; init; }
@@ -504,7 +538,7 @@ public static class LinkTypes
         linkType == NativeLinkType.Monolithic || configuration is NativeConfiguration.Debug or NativeConfiguration.Development;
 
     /// <summary>
-    /// Modular 호스트 모듈인가(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b): Modular에서 모듈 표 제공 모듈에 닿는(진입점 모듈인) 실행 파일
+    /// Modular 호스트 모듈인가(Docs/Design/ModuleLoader 3.14절 ML4b): Modular에서 모듈 표 제공 모듈에 닿는(진입점 모듈인) 실행 파일
     /// 모듈이다. 공유 라이브러리로 링크하고 실행 파일은 빌드 생성 진입 TU와 Launch만 링크한다. 입력 검사가 그런 실행 파일이 Launch에 닿게 한다.
     /// </summary>
     public static bool IsHostModule(NativeModuleInput module, NativeLinkType linkType, bool entryModule) =>
@@ -542,7 +576,7 @@ public static class LinkTypes
     };
 
     /// <summary>
-    /// Modular 공유 라이브러리의 폴더다(Docs/Design/ModuleLoader.ko.md 3.15절 MD23). 엔진·프로젝트 모듈은 <c>&lt;출력&gt;/bin</c>, 플러그인 모듈
+    /// Modular 공유 라이브러리의 폴더다(Docs/Design/ModuleLoader 3.15절 MD23). 엔진·프로젝트 모듈은 <c>&lt;출력&gt;/bin</c>, 플러그인 모듈
     /// (<see cref="NativeModuleInput.Plugin"/>)은 <c>&lt;출력&gt;/Plugins/&lt;플러그인 폴더&gt;/Binaries/&lt;Platform&gt;</c>이다. 링크 출력·
     /// manifest·export 수 진단이 이 함수 하나를 쓴다. 사용 예: UnrealExchange 플러그인 모듈의 Windows 폴더는
     /// <c>&lt;출력&gt;/Plugins/Importers/UnrealExchange/Binaries/Win64</c>다.

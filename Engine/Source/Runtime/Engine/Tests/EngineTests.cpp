@@ -285,7 +285,7 @@ TEST(Engine_HeadlessRunExecutesFramesInDocumentedOrder) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 엔진 묶음(Docs/Design/ModuleLoader.ko.md 3.11절, ML1): Engine은 시험 실행기의 프로세스 로더로
+// 엔진 묶음(Docs/Design/ModuleLoader 3.11절, ML1): Engine은 시험 실행기의 프로세스 로더로
 // 엔진 단계 모듈(World·Engine 등)을 시작하고 PostEngineInit 단계를 돈 뒤, Shutdown에서 엔진 묶음을
 // 내리고 자기 타입 등록기를 뗀다. 한 프로세스에서 Engine을 차례로 만들면 매번 시작·종료하고, 동시에
 // 둘이면 처음 Engine이 시작하고 마지막 Engine이 내린다(참조 수, 등록기는 Engine마다).
@@ -634,7 +634,7 @@ bool Registered(TypeId type) noexcept {
 }
 
 // 리플렉션 모듈 등록: World 타입은 이미 있고(모듈 로더가 World 모듈의 자기 ModuleRegistration에
-// 등록했다 — Docs/Design/ModuleLoader.ko.md 3.10절) fixture 모듈은 아직 없다. 이
+// 등록했다 — Docs/Design/ModuleLoader 3.10절) fixture 모듈은 아직 없다. 이
 // ModuleRegistration에 World를 다시 등록하면 타입은 이미 있어 건너뛰고 모듈 키 기록만 남는다. 같은
 // ModuleRegistration에 한 번 더 부르면 기록이 늘지 않는다(멱등). fixture 모듈 등록도 World를 다시
 // 등록하지 않는다.
@@ -1910,6 +1910,23 @@ TEST(Engine_DestroyWorldDefersOnlyDuringWorldTickAndWorldTeardown) {
         ResetSteps();
         REQUIRE(engine.RunFrame());
         CHECK(stepCount == 0);
+        CHECK(engine.WorldCount() == 0);
+
+        // 5단계에서 파괴하는 World의 정리 hook이 뒤에 만든 World 파괴를 요청해도 같은 5단계에서
+        // 끝난다(리뷰 보강 — 한 바퀴 뒤 다시 돈다).
+        desc.name = "First";
+        auto first = engine.CreateWorld(desc);
+        desc.name = "Second";
+        desc.subsystems = {};
+        auto second = engine.CreateWorld(desc);
+        REQUIRE(first && second);
+        REQUIRE(first.Value()->SpawnActor<TickingActor>());
+        TickingActor::destroyEngine = &engine;
+        TickingActor::destroyTarget = first.Value();
+        TeardownDestroyerSubsystem::engine = &engine;
+        TeardownDestroyerSubsystem::target = second.Value();
+        REQUIRE(engine.RunFrame());
+        CHECK(TeardownDestroyerSubsystem::engine == nullptr);
         CHECK(engine.WorldCount() == 0);
         REQUIRE(engine.Shutdown());
     }

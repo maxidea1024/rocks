@@ -3,7 +3,7 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 
-// 정점 원소 형식이다(Docs/Design/RenderBase.ko.md 10.4절 GX3a, UE 5.8 EVertexElementType 20종
+// 정점 원소 형식이다(Docs/Design/RenderBase 10.4절 GX3a, UE 5.8 EVertexElementType 20종
 // 대응). 메시 에셋이 직렬화하므로 장치 계약(Graphics)이 아니라 GraphicsTypes에 둔다.
 namespace rocks::graphics {
 

@@ -1,0 +1,6 @@
+// Sandbox self-test가 함께 쓰는 화면 덮는 삼각형 VS다.
+#include "/Plugin/Sandbox/Common.rsh"
+
+float4 VSMain(uint id : SV_VertexID) : SV_Position {
+    return FullScreenPosition(id);
+}

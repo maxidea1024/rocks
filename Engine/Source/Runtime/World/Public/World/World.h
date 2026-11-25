@@ -405,13 +405,20 @@ public:
 
     Result<ObjectHandle> SpawnActor(TypeId type, const SpawnParams& params = {}) noexcept;
 
-    // 파괴를 요청한다. 이미 요청됐으면 성공, 이 World의 Actor가 아니면 StaleHandle이다.
+    // 파괴를 요청한다. 이미 요청됐으면 성공, 이 World의 Actor가 아니면 StaleHandle이다. 대기 중인
+    // 파괴는 요청한 순서대로 정리한다(안전 지점·EndPlay — EndPlay는 남은 Actor를 대기 뒤에
+    // 붙인다. 21.3절 전환 정리가 이 순서에 기댄다).
     Result<void> DestroyActor(ObjectHandle actor) noexcept;
 
     // 이 World에 레코드가 있는 Actor인지다(Constructed·파괴 대기 포함, 정리 완료 후 false).
     bool HasActor(ObjectHandle actor) const noexcept;
 
     Result<ActorState> GetActorState(ObjectHandle actor) const noexcept;
+
+    // Actor의 Spawn 순번이다(이 World에서 Spawn할 때마다 1씩 커지는 번호 — 먼저 Spawn한 것이 작다).
+    // Level의 Actor 배열은 순서를 정하지 않으므로(7.2절) 만든 순서가 필요한 곳(PlayerStart 선택 —
+    // Docs/Design/EngineRuntime 19.2절)은 이 번호를 쓴다. 레코드가 없으면 StaleHandle이다.
+    Result<uint64> GetSpawnOrder(ObjectHandle actor) const noexcept;
 
     // 레코드가 있는 모든 Actor(Constructed·파괴 대기 포함)의 handle을 visitor(ObjectHandle)로
     // 넘긴다. 순회 중 Spawn·Destroy 요청은 허용하며 새 Actor는 이번 순회에 포함되지 않을 수 있다.
@@ -469,6 +476,22 @@ public:
 
     // 엔진 단계 자리를 비운다(비어 있어도 성공).
     void ClearEngineStage(EngineStage stage) noexcept;
+
+    // --- 진단(Docs/Design/EngineRuntime 22.1절) ---
+
+    // Tick 그래프를 사람이 읽는 줄로 out 끝에 붙인다: 단계마다 실행 순서대로 항목(타입#slot·hook·
+    // priority·interval·켜짐·pause 중 실행·아직 순서에 없음·늦춰진 경우 원래 단계)과 선행 목록, 그
+    // 단계의 엔진 단계 자리 등록 여부. 순서를 다시 만들지 않는다(다음 경계에 바뀌는 단계는
+    // 표시한다). 오류: 할당 실패(그때까지 붙인 줄은 남는다).
+    //
+    // 사용 예:
+    //   String text(allocator);
+    //   if (world.DumpTickGraph(text)) { Log::Info(LogWorldTick, "{Graph}", text.View()); }
+    Result<void> DumpTickGraph(String& out) noexcept;
+
+    // WorldSubsystem 초기화 순서와 생략 이유를 out 끝에 붙인다(계층 "World <이름>"). 오류: 할당
+    // 실패.
+    Result<void> DumpSubsystems(String& out) const noexcept;
 
     // actor가 속한 Level이다. 이 World의 Actor가 아니면 StaleHandle이다.
     Result<ObjectHandle> GetActorLevel(ObjectHandle actor) const noexcept;
@@ -697,6 +720,8 @@ private:
         // Spawn 인자의 Transform이다(FinishSpawning이 root에 쓴다).
         bool hasSpawnTransform = false;
         Transform spawnTransform;
+        // Spawn 순번이다(GetSpawnOrder — spawnedTotal_로 매긴다).
+        uint64 spawnOrder = 0;
         // 마지막 SetLifeSpan의 번호다(0이면 없음 — 힙의 오래된 항목은 번호가 달라 무시한다).
         uint64 lifeSpanSequence = 0;
         // 시작 전에 건 LifeSpan(초)이다. 시작할 때 건다(0이면 없음).
@@ -831,6 +856,15 @@ private:
     bool QueueBypassedComponent(ObjectHandle component) noexcept;
     // Component를 색인에서 빼고 사본 Tick 등록을 해제한다(World 정리가 회수 요청 직전에 부른다).
     void ForgetComponent(ObjectHandle component) noexcept;
+    // OnRegister → 시스템 상태 생성(23.2절). 실패하면 만든 것을 되돌리고 OnUnregister(OnRegister가
+    // 성공했으면)까지 한 뒤 그 오류다 — 호출자가 Component를 파괴한다.
+    Result<void> RegisterComponentNow(ObjectHandle component) noexcept;
+    // 있는 시스템 상태를 역순으로 지운다(해제 직전).
+    void DestroySystemStates(Component& component) noexcept;
+    // 다시 만들 표시가 있는 Component의 시스템 상태를 다시 만든다(PreRender 단계 끝).
+    void FlushSystemStateUpdates() noexcept;
+    // AddComponent의 타입 규칙·EditorOnly 검사다(등록 전).
+    Result<void> CheckComponentRules(ObjectHandle actor, ObjectHandle component) noexcept;
 
     // --- Tick 의존 선언(WorldTickDependencies.cpp) ---
 
@@ -984,6 +1018,9 @@ private:
     Array<TickPoint> tickDeclarationStack_{allocator_};
     EngineStageSlot engineStages_[EngineStageCount];
     uint32 engineStageFailures_ = 0;
+    // 시스템 상태를 다시 만들 Component다(MarkSystemStateDirty — 23.2절).
+    Array<ObjectHandle> systemStateUpdates_{allocator_};
+    uint64 engineStageNanoseconds_[EngineStageCount] = {};
 };
 
 } // namespace rocks

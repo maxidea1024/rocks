@@ -9,7 +9,7 @@
 #include <NodeGraph/GraphSchema.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
-// 그래프 schema·노드 종류 등록표다(Docs/Design/NodeGraph.ko.md 6.2·10절, GD11).
+// 그래프 schema·노드 종류 등록표다(Docs/Design/NodeGraph 6.2·10절, GD11).
 //
 // 도메인마다 schema 하나와 노드 종류 여럿을 module lease와 함께 등록한다. 공통 노드 종류(지금은
 // 재경유 Graph.Reroute)는 Initialize가 모든 도메인에 대해 등록한다. 조회는 공통 종류가 먼저다.
@@ -39,6 +39,14 @@ inline constexpr StringView ReroutePinOut = "Out";
 // 지금 재경유 서술 버전이다.
 inline constexpr uint32 RerouteSchemaVersion = 1;
 
+// 하위 그래프 경계 공통 종류다(GD25, Docs/Design/NodeGraph 10.1절 NG3c). 속성이 없고 핀은 하위
+// 그래프 인터페이스(Graph::ownerNode·inputs·outputs)에서 유도한다. 핀 표시 이름은 비어 있다(화면은
+// 키 원문을 보인다).
+inline constexpr StringView GraphInputNodeTypeName = "Graph.Input";
+inline constexpr StringView GraphOutputNodeTypeName = "Graph.Output";
+inline constexpr StringView CollapsedNodeTypeName = "Graph.Collapsed";
+inline constexpr uint32 BoundarySchemaVersion = 1;
+
 // 등록 하나의 식별이다. 0은 없음이다.
 struct SchemaRegistrationId {
     uint64 value = 0;
@@ -46,6 +54,24 @@ struct SchemaRegistrationId {
 
 struct NodeTypeRegistrationId {
     uint64 value = 0;
+};
+
+// 등록·해제된 노드 종류 하나다(도메인·종류 이름).
+struct NodeTypeKey {
+    Name domain;
+    Name type;
+};
+
+// 노드 종류 등록·해제 통지를 받는다(Docs/Design/NodeGraph 10.1절). 등록표 소유 lane에서 불린다.
+// 콜백 안에서 등록표를 바꾸면 Busy로 거부된다. 해제 통지 때는 그 종류가 이미 조회에서 빠졌고
+// lease는 콜백이 끝난 뒤 놓인다: 구독자는 콜백 안에서 그 종류 서술에서 얻은 값(핀 목록의 표시
+// 이름 등 모듈 데이터를 가리키는 것)을 버린다. 문서 mutator는 GraphMutator::RefreshNodeTypes로
+// 잇는다(연결은 문서 소유자 몫).
+class NodeTypeRegistryListener {
+public:
+    virtual ~NodeTypeRegistryListener() noexcept = default;
+
+    virtual void OnNodeTypesChanged(Span<const NodeTypeKey> keys) noexcept = 0;
 };
 
 // 등록된 노드 종류다. descriptor의 staticPins·passThrough는 등록표가 소유한 사본을 가리킨다.
@@ -91,8 +117,14 @@ public:
     Result<NodeTypeRegistrationId>
     RegisterNodeType(Name domain, const NodeTypeDescriptor& descriptor, ModuleLease lease) noexcept;
 
-    // 노드 종류 등록을 해제한다(lease를 놓는다). 없는 id면 NotFound다. drain·통지는 NG3에서 더한다.
+    // 노드 종류 등록을 해제한다. 순서는 조회에서 빼기 → 통지 → lease 놓기다(10절). 없는 id면
+    // NotFound, 통지 콜백 안이면 Busy다.
     Result<void> UnregisterNodeType(NodeTypeRegistrationId id) noexcept;
+
+    // 등록·해제 통지 구독이다. 같은 구독자를 두 번 넣으면 AlreadyExists, 할당 실패 OutOfMemory다.
+    // RemoveListener는 없는 구독자면 아무것도 하지 않는다(콜백 안에서도 부를 수 있다).
+    Result<void> AddListener(NodeTypeRegistryListener& listener) noexcept;
+    void RemoveListener(NodeTypeRegistryListener& listener) noexcept;
 
     // domain의 schema다. 없으면 nullptr이다.
     const GraphSchema* FindSchema(Name domain) const noexcept;
@@ -116,6 +148,41 @@ public:
 
     bool IsReroute(Name type) const noexcept {
         return initialized_ && type == rerouteType_;
+    }
+
+    // 하위 그래프 경계 종류 판정이다(NG3c).
+    bool IsGraphInput(Name type) const noexcept {
+        return initialized_ && type == graphInputType_;
+    }
+
+    bool IsGraphOutput(Name type) const noexcept {
+        return initialized_ && type == graphOutputType_;
+    }
+
+    bool IsCollapsed(Name type) const noexcept {
+        return initialized_ && type == collapsedType_;
+    }
+
+    // Graph.Input·Graph.Output이다(경계 노드 — 하위 그래프 안).
+    bool IsBoundary(Name type) const noexcept {
+        return IsGraphInput(type) || IsGraphOutput(type);
+    }
+
+    Name GraphInputType() const noexcept {
+        return graphInputType_;
+    }
+
+    Name GraphOutputType() const noexcept {
+        return graphOutputType_;
+    }
+
+    Name CollapsedType() const noexcept {
+        return collapsedType_;
+    }
+
+    // 공통 종류("Graph." — 도메인 None으로 등록)인가. migration 1:1 교체 대상 검사에 쓴다(10.1절).
+    bool IsCommonType(Name type) const noexcept {
+        return LookupNodeType(Name(), type) != nullptr;
     }
 
     NamePool& Names() const noexcept {
@@ -169,8 +236,19 @@ private:
     Name reroutePinIn_;
     Name reroutePinOut_;
     PinDescriptor reroutePins_[2];
+    Name graphInputType_;
+    Name graphOutputType_;
+    Name collapsedType_;
+
+    Result<void> RegisterBoundaryTypes() noexcept;
+    Result<void> CollectBoundaryPins(const GraphDocument& document, const Graph& graph,
+                                     const GraphNode& node, PinList& out) const noexcept;
     uint64 nextId_ = 1;
     bool initialized_ = false;
+    Array<NodeTypeRegistryListener*> listeners_;
+    bool notifying_ = false;
+
+    void NotifyListeners(NodeTypeKey key) noexcept;
 };
 
 } // namespace rocks::nodegraph

@@ -1,4 +1,6 @@
 #include "VulkanDeviceImpl.h"
+
+#include <string.h>
 #include "VulkanFormats.h"
 
 // render pass·파이프라인 layout·파이프라인이다(Docs/Design/VulkanGraphics.ko.md 6·7·11절).
@@ -349,171 +351,155 @@ Result<void> VulkanDevice::RejectDrawConstantSize(bool pipelineBound, usize byte
     return Reject(message.CStr());
 }
 
-// 컴파일 훅의 정점 입력 리플렉션을 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조, D3D12와
-// 같은 규칙과 진단 문구).
-Result<void> VulkanDevice::MatchVertexInputs(const CompiledShader& vertex,
-                                             const VertexLayout& layout) noexcept {
-    for (const ShaderVertexInput& input : vertex.vertexInputs) {
-        Diagnostic message;
-        if (input.location >= MaxVertexAttributes) {
-            message.Text("vertex shader input location ")
-                .Number(input.location)
-                .Text(" must use semantic ATTRIBUTE0-15");
-            return Reject(message.CStr());
-        }
-
-        const VertexAttribute* attribute = nullptr;
-        for (const VertexAttribute& candidate : layout.attributes) {
-            if (candidate.location == input.location) {
-                attribute = &candidate;
-            }
-        }
-
-        if (attribute == nullptr) {
-            message.Text("vertex shader reads location ")
-                .Number(input.location)
-                .Text(" which the vertex layout does not provide");
-            return Reject(message.CStr());
-        }
-
-        if (VertexFormatShaderType(attribute->format) != input.type) {
-            message.Text("vertex input location ")
-                .Number(input.location)
-                .Text(": format ")
-                .Text(VertexFormatName(attribute->format))
-                .Text(" feeds ")
-                .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
-                .Text(" but the shader reads ")
-                .Text(VertexShaderTypeName(input.type));
-            return Reject(message.CStr());
-        }
-    }
-
-    return Result<void>::Success();
-}
-
+// 정점 입력은 쿠킹 값 1의 정점 입력(attribute 마스크·int·uint 마스크)을 배치와 대조한다(공용
+// MatchShaderVertexInputs — Docs/Design/RenderBase 10.4절 셰이더 입력 대조, 모든 backend가 같은
+// 규칙과 진단 문구).
 namespace {
 
-// 리플렉션 binding 하나를 고정 배치(PipelineDesc·ComputePipelineDesc)의 입력에 잇는다. PS의 t0
-// 이미지와 s0 샘플러, 단계 모두의 t1–t4 버퍼 SRV(typed·구조화·raw), compute의 u0–u3 버퍼 UAV만
-// 받는다. 그 밖 (상수 버퍼, 다른 register, space, 그래픽 단계의 쓰기 자원)이면 거짓이다.
-bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding& out,
-                DrawBufferSlots& slots, DrawBufferSlots& writeSlots,
-                uint32& writeTextures) noexcept {
-    if (binding.sourceSpace != 0 || (binding.writable && stage != ShaderStage::Compute)) {
-        return false;
-    }
-
-    out.binding = binding.binding;
-    out.set = binding.set;
-    // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
-    const bool textureStage = stage == ShaderStage::Pixel || stage == ShaderStage::Compute;
-    if (binding.shape == ShaderResourceShape::Image &&
-        binding.kind == ShaderBindingKind::SampledImage) {
+// slot 표의 자원 하나를 descriptor binding으로 옮긴다(set = 단계 — VS 0·PS 1·CS 0, binding = layout
+// slot, ShaderSystem 7.2절 4항 Vulkan).
+PipelineBinding MapBinding(const PipelineSlotBinding& slot) noexcept {
+    PipelineBinding out;
+    out.set = slot.stage == ShaderStage::Pixel ? 1u : 0u;
+    out.binding = slot.location;
+    out.slot = slot.slot;
+    const bool typed = slot.shape == shader::ShaderResourceShape::TypedBuffer;
+    switch (slot.role) {
+    case PipelineSlotRole::Texture:
         out.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         out.source = BindingSource::Texture;
-        return textureStage && binding.sourceRegister == 0;
-    }
-
-    if (binding.shape == ShaderResourceShape::Sampler) {
+        break;
+    case PipelineSlotRole::Sampler:
         out.type = VK_DESCRIPTOR_TYPE_SAMPLER;
         out.source = BindingSource::Sampler;
-        return textureStage && binding.sourceRegister == 0;
-    }
-
-    // compute 쓰기 slot의 storage image(RWTexture*)는 SetWritableTexture slot이다.
-    if (binding.shape == ShaderResourceShape::Image &&
-        binding.kind == ShaderBindingKind::StorageImage) {
+        break;
+    case PipelineSlotRole::BufferView:
+        out.type =
+            typed ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        out.source = BindingSource::BufferView;
+        break;
+    case PipelineSlotRole::WritableBuffer:
+        out.type =
+            typed ? VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        out.source = BindingSource::WritableBufferView;
+        break;
+    case PipelineSlotRole::WritableTexture:
         out.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         out.source = BindingSource::WritableTexture;
-        out.slot = binding.sourceRegister;
-        if (!binding.writable || binding.sourceRegister >= MaxDrawBufferViews ||
-            (writeSlots.usedMask & (1u << binding.sourceRegister)) != 0) {
+        break;
+    }
+
+    return out;
+}
+
+// SPIR-V의 첫 OpEntryPoint 이름이다(literal string은 NUL 종료 word 열). 없으면 false다.
+bool SpirvEntryPoint(Span<const uint8> code, char (&out)[64]) noexcept {
+    constexpr uint32 HeaderWords = 5;
+    constexpr uint32 OpEntryPoint = 15;
+    constexpr uint32 NameWord = 3;
+    const usize words = code.Size() / sizeof(uint32);
+    usize at = HeaderWords;
+    while (at < words) {
+        uint32 instruction = 0;
+        memcpy(&instruction, code.Data() + at * sizeof(uint32), sizeof(uint32));
+        const uint32 count = instruction >> 16;
+        if (count == 0 || at + count > words) {
             return false;
         }
 
-        writeTextures |= 1u << binding.sourceRegister;
-        return true;
+        if ((instruction & 0xFFFF) == OpEntryPoint && count > NameWord) {
+            const char* name =
+                reinterpret_cast<const char*>(code.Data() + (at + NameWord) * sizeof(uint32));
+            const usize limit = (count - NameWord) * sizeof(uint32);
+            usize length = 0;
+            while (length < limit && name[length] != '\0') {
+                ++length;
+            }
+
+            if (length == 0 || length >= sizeof(out) || length == limit) {
+                return false;
+            }
+
+            memcpy(out, name, length);
+            out[length] = '\0';
+            return true;
+        }
+
+        at += count;
     }
 
-    // 쓰기 자원은 register u(slot), 읽기는 t(slot + 1)이다.
-    const uint32 slot = binding.writable ? binding.sourceRegister : binding.sourceRegister - 1;
-    if ((!binding.writable && binding.sourceRegister == 0) || slot >= MaxDrawBufferViews) {
-        return false;
-    }
-
-    BufferViewKind kind = BufferViewKind::Typed;
-    if (binding.shape == ShaderResourceShape::TexelBuffer) {
-        out.type = binding.writable ? VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
-                                    : VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-    } else if (binding.shape == ShaderResourceShape::StructuredBuffer ||
-               binding.shape == ShaderResourceShape::RawBuffer) {
-        out.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        kind = binding.shape == ShaderResourceShape::StructuredBuffer ? BufferViewKind::Structured
-                                                                      : BufferViewKind::Raw;
-    } else {
-        return false;
-    }
-
-    out.source = binding.writable ? BindingSource::WritableBufferView : BindingSource::BufferView;
-    out.slot = slot;
-    const PixelShaderType type =
-        kind == BufferViewKind::Typed ? binding.sampledType : PixelShaderType::None;
-    return AddDrawBufferSlot(binding.writable ? writeSlots : slots, slot, kind, type,
-                             binding.structureStride);
+    return false;
 }
 
 } // namespace
 
-Result<void> VulkanDevice::BuildPipelineLayout(const CompiledShader& first,
-                                               const CompiledShader* pixel, bool compute,
+Result<void> VulkanDevice::BuildPipelineLayout(const PipelineSlots& slots, bool compute,
                                                PipelineRecord& record) noexcept {
-    // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
-    const CompiledShader* stages[2] = {&first, pixel};
-    for (uint32 stage = 0; stage < 2; ++stage) {
-        if (stages[stage] != nullptr &&
-            stages[stage]->rootConstantBytes > record.drawConstantBytes) {
-            Diagnostic message;
-            message.Text(compute ? "compute" : (stage == 0 ? "vertex" : "pixel"))
-                .Text(" shader reads ")
-                .Number(stages[stage]->rootConstantBytes)
-                .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
-                .Number(record.drawConstantBytes);
-            return Reject(message.CStr());
-        }
+    // PS 진단 버퍼 자리(set 3)는 엔진 셰이더 SL2에서 만든다(RenderBase 9.11절 6항).
+    if (slots.debugBuffer) {
+        return FailCode("CreatePipeline", ErrorCode::Unsupported,
+                        "the pixel debug buffer binding is not available on Vulkan yet");
     }
 
-    // set = 단계다: VS(compute면 CS) 0, PS 1(ShaderSystem 7.2절).
-    const CompiledShader* shaders[2] = {&first, pixel};
     const uint32 stageCount = compute ? 1u : 2u;
     VkDescriptorSetLayoutBinding layoutBindings[2][MaxPipelineBindings] = {};
     uint32 layoutCounts[2] = {};
-    for (uint32 stage = 0; stage < stageCount; ++stage) {
-        const ShaderStage shaderStage =
-            compute ? ShaderStage::Compute
-                    : (stage == 0 ? ShaderStage::Vertex : ShaderStage::Pixel);
-        for (const ShaderBinding& binding : shaders[stage]->bindings) {
-            PipelineBinding mapped;
-            if (binding.set != stage || record.bindingCount == MaxPipelineBindings ||
-                !MapBinding(binding, shaderStage, mapped, record.bufferSlots, record.writeSlots,
-                            record.writeTextures)) {
-                Diagnostic message;
-                message.Text(compute ? "compute" : (stage == 0 ? "vertex" : "pixel"))
-                    .Text(" shader resource at register ")
-                    .Number(binding.sourceRegister)
-                    .Text(" is outside the fixed layout (pixel t0 and s0, buffer views t1-t4, "
-                          "compute buffer UAVs u0-u3; no UAVs in graphics stages)");
-                return Reject(message.CStr());
+    record.bufferSlots = slots.bufferSlots;
+    record.writeSlots = slots.writeSlots;
+    record.writeTextures = slots.writeTextures;
+    for (uint32 index = 0; index < slots.count; ++index) {
+        const PipelineBinding mapped = MapBinding(slots.bindings[index]);
+        if (record.bindingCount == MaxPipelineBindings || mapped.set >= stageCount) {
+            return Reject("pipeline has more descriptor bindings than the Vulkan device keeps");
+        }
+
+        record.bindings[record.bindingCount++] = mapped;
+        VkDescriptorSetLayoutBinding& entry =
+            layoutBindings[mapped.set][layoutCounts[mapped.set]++];
+        entry.binding = mapped.binding;
+        entry.descriptorType = mapped.type;
+        entry.descriptorCount = 1;
+        entry.stageFlags = compute           ? VK_SHADER_STAGE_COMPUTE_BIT
+                           : mapped.set == 0 ? VK_SHADER_STAGE_VERTEX_BIT
+                                             : VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+
+    // 상수 버퍼는 단계 set의 binding = slot이다(9.11절 4항). 동적 UBO는 layout 전체에서
+    // maxDescriptorSetUniformBuffersDynamic까지이고(UE와 같다), 넘는 것은 일반 UBO다. set 안
+    // 동적 offset 순서가 binding 순서와 같도록 slot 오름차순으로 더한다.
+    uint32 dynamicCount = 0;
+    const uint32 dynamicLimit = properties_.limits.maxDescriptorSetUniformBuffersDynamic;
+    for (uint32 set = 0; set < stageCount; ++set) {
+        const ShaderStage stage =
+            compute ? ShaderStage::Compute : (set == 0 ? ShaderStage::Vertex : ShaderStage::Pixel);
+        const uint32 stageIndex = ConstantBufferStageIndex(stage);
+        for (uint32 slot = 0; slot < MaxConstantBufferSlots; ++slot) {
+            if ((slots.constantSlots.usedMask[stageIndex] & (1u << slot)) == 0) {
+                continue;
             }
 
+            if (record.bindingCount == MaxPipelineBindings) {
+                return Reject("pipeline has more descriptor bindings than the Vulkan device keeps");
+            }
+
+            PipelineBinding mapped;
+            mapped.set = set;
+            mapped.binding = slot;
+            mapped.slot = slot;
+            mapped.stage = stageIndex;
+            mapped.range = slots.constantSlots.bytes[stageIndex][slot];
+            mapped.source = BindingSource::ConstantBuffer;
+            mapped.type = dynamicCount < dynamicLimit ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+                                                      : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            dynamicCount += mapped.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ? 1u : 0u;
             record.bindings[record.bindingCount++] = mapped;
-            VkDescriptorSetLayoutBinding& entry = layoutBindings[stage][layoutCounts[stage]++];
+            VkDescriptorSetLayoutBinding& entry = layoutBindings[set][layoutCounts[set]++];
             entry.binding = mapped.binding;
             entry.descriptorType = mapped.type;
             entry.descriptorCount = 1;
-            entry.stageFlags = compute      ? VK_SHADER_STAGE_COMPUTE_BIT
-                               : stage == 0 ? VK_SHADER_STAGE_VERTEX_BIT
-                                            : VK_SHADER_STAGE_FRAGMENT_BIT;
+            entry.stageFlags = compute    ? VK_SHADER_STAGE_COMPUTE_BIT
+                               : set == 0 ? VK_SHADER_STAGE_VERTEX_BIT
+                                          : VK_SHADER_STAGE_FRAGMENT_BIT;
         }
     }
 
@@ -575,11 +561,17 @@ void VulkanDevice::DestroyPipelineLayout(PipelineRecord& record) noexcept {
     }
 }
 
-Result<VkShaderModule> VulkanDevice::CreateShaderModule(const CompiledShader& shader) noexcept {
+Result<VkShaderModule> VulkanDevice::CreateShaderModule(const DeviceShaderCode& shader,
+                                                        char (&entry)[64]) noexcept {
+    if (!SpirvEntryPoint(shader.Code(), entry)) {
+        auto failed = Reject("SPIR-V shader has no entry point");
+        return Result<VkShaderModule>::Failure(failed.Error());
+    }
+
     VkShaderModuleCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = shader.code.Size() * sizeof(uint32);
-    info.pCode = shader.code.Data();
+    info.codeSize = shader.Code().Size();
+    info.pCode = reinterpret_cast<const uint32*>(shader.Code().Data());
     VkShaderModule module = VK_NULL_HANDLE;
     const VkResult result = functions_.vkCreateShaderModule(device_, &info, nullptr, &module);
     if (result != VK_SUCCESS) {
@@ -589,12 +581,27 @@ Result<VkShaderModule> VulkanDevice::CreateShaderModule(const CompiledShader& sh
     return Result<VkShaderModule>::Success(module);
 }
 
-// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다. 컴파일
-// 훅도 이 잠금 안에서 부른다).
+Result<ShaderHandle> VulkanDevice::CreateShader(const ShaderCodeDesc& desc) noexcept {
+    platform::LockGuard lock(gate_);
+    const char* reason = "";
+    auto created = shaders_.Create(desc, ShaderCodeKind::Spirv, &reason);
+    if (!created && created.Error() == ErrorCode::InvalidArgument) {
+        auto failed = Reject(reason);
+        (void)failed;
+    }
+
+    return created;
+}
+
+void VulkanDevice::Retire(ShaderHandle shader) noexcept {
+    platform::LockGuard lock(gate_);
+    shaders_.Retire(shader);
+}
+
+// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
 Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        !ValidatePipelineDesc(desc)) {
+    if (!ValidatePipelineDesc(desc)) {
         auto failed = Reject("pipeline description breaks the pipeline rules");
         return Result<PipelineHandle>::Failure(failed.Error());
     }
@@ -662,31 +669,20 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
         attributes[index].offset = attribute.offset;
     }
 
-    if (shaderCompiler_ == nullptr) {
-        auto failed = FailCode("CreatePipeline", ErrorCode::Unsupported,
-                               "Vulkan needs cooked SPIR-V (ShaderSystem SH2) or a development "
-                               "shader compiler (DeviceDesc::shaderCompiler)");
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* vertex = nullptr;
+    const DeviceShaderCode* pixel = nullptr;
+    PipelineSlots slots;
+    if (!FindPipelineShaders(shaders_, desc, vertex, pixel, error)) {
+        auto failed = Reject(error);
         return Result<PipelineHandle>::Failure(failed.Error());
     }
 
-    CompiledShader vertex(allocator_);
-    CompiledShader pixel(allocator_);
-    lastError_.Clear();
-    auto vertexCompiled =
-        shaderCompiler_->CompileSpirv(ShaderStage::Vertex, desc.vertex.hlsl, vertex, lastError_);
-    if (!vertexCompiled) {
-        return Result<PipelineHandle>::Failure(vertexCompiled.Error());
-    }
-
-    auto pixelCompiled =
-        shaderCompiler_->CompileSpirv(ShaderStage::Pixel, desc.pixel.hlsl, pixel, lastError_);
-    if (!pixelCompiled) {
-        return Result<PipelineHandle>::Failure(pixelCompiled.Error());
-    }
-
-    auto matched = MatchVertexInputs(vertex, desc.layout);
-    if (!matched) {
-        return Result<PipelineHandle>::Failure(matched.Error());
+    const DeviceShaderCode* shaderStages[] = {vertex, pixel};
+    if (!MatchShaderVertexInputs(vertex->Layout(), desc.layout, error) ||
+        !ResolvePipelineSlots(shaderStages, desc.bindings, desc.drawConstantBytes, slots, error)) {
+        auto failed = Reject(error);
+        return Result<PipelineHandle>::Failure(failed.Error());
     }
 
     auto renderPass = RenderPassFor(passKey);
@@ -701,18 +697,20 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
 
     PipelineRecord record;
     record.drawConstantBytes = desc.drawConstantBytes;
-    auto layout = BuildPipelineLayout(vertex, &pixel, false, record);
+    auto layout = BuildPipelineLayout(slots, false, record);
     if (!layout) {
         return Result<PipelineHandle>::Failure(layout.Error());
     }
 
-    auto vertexModule = CreateShaderModule(vertex);
+    char vertexEntry[64] = {};
+    char pixelEntry[64] = {};
+    auto vertexModule = CreateShaderModule(*vertex, vertexEntry);
     if (!vertexModule) {
         DestroyPipelineLayout(record);
         return Result<PipelineHandle>::Failure(vertexModule.Error());
     }
 
-    auto pixelModule = CreateShaderModule(pixel);
+    auto pixelModule = CreateShaderModule(*pixel, pixelEntry);
     if (!pixelModule) {
         functions_.vkDestroyShaderModule(device_, vertexModule.Value(), nullptr);
         DestroyPipelineLayout(record);
@@ -723,11 +721,11 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
     stages[0].module = vertexModule.Value();
-    stages[0].pName = "VSMain";
+    stages[0].pName = vertexEntry;
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = pixelModule.Value();
-    stages[1].pName = "PSMain";
+    stages[1].pName = pixelEntry;
 
     VkVertexInputBindingDescription bindings[MaxVertexStreams] = {};
     for (usize index = 0; index < desc.layout.streams.Size(); ++index) {

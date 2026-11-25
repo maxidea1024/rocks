@@ -4,7 +4,7 @@
 #include <Core/Memory/Allocator.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 문서 변경 통지다(Docs/Design/NodeGraph.ko.md 8.3·8.6절). GraphMutator가 명령·undo·redo·bracket
+// 문서 변경 통지다(Docs/Design/NodeGraph 8.3·8.6절). GraphMutator가 명령·undo·redo·bracket
 // 취소 하나마다 묶음 하나를 구독자에게 보낸다.
 //
 // 사용 예:
@@ -34,7 +34,14 @@ enum class GraphChangeKind : uint8 {
     GraphAdded,
     GraphRemoved,
     GraphRenamed,
-    RetainedPinChanged
+    RetainedPinChanged,
+    // 등록·해제로 종류 해석이 바뀌었다(원인 Registry, 종류 Name은 pin 칸 — 10.1절).
+    NodeTypesChanged,
+    // 문서 전체를 바꿔 넣었다(원인 Reload).
+    DocumentReloaded,
+    // 하위 그래프 경계 목록이 바뀌었다(graph 칸, 10.1절 NG3c). 경계 노드·부모 Graph.Collapsed의
+    // NodePinsChanged가 함께 온다.
+    GraphBoundaryChanged
 };
 
 // 통지 하나다. 칸의 뜻은 종류마다 다르고, 해당하지 않는 칸은 0·None이다.
@@ -58,7 +65,13 @@ enum class GraphChangeCause : uint8 {
     Undo,
     Redo,
     // bracket 취소로 되돌렸다.
-    Cancel
+    Cancel,
+    // 옛 버전 노드를 옮겼다(GraphMutator::Migrate — undo 이력 밖, 10.1절).
+    Migration,
+    // 문서 전체를 바꿔 넣었다(GraphMutator::Reload).
+    Reload,
+    // 노드 종류 등록·해제로 해석이 바뀌었다(GraphMutator::RefreshNodeTypes — 문서 바이트 불변).
+    Registry
 };
 
 // 명령 하나(또는 undo·redo·취소·bracket 확정)의 통지 묶음이다.

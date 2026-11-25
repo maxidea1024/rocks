@@ -16,7 +16,7 @@ public sealed class ObjectRuntime : CoreModuleRules
     // Serialization: field codecs (FieldCodec.h and GeneratedFieldCodec.h) use the Archive and Record formats
     // (Docs/Design/ReflectionFoundations.ko.md section 6.4).
     // Localization: rocks::Text field values (Docs/Design/ReflectionExtensions.ko.md section 13).
-    // ModuleLoader: ModuleTypeRegistrations implements the module loader's type registrar (Docs/Design/ModuleLoader.ko.md section 3.10).
+    // ModuleLoader: ModuleTypeRegistrations implements the module loader's type registrar (Docs/Design/ModuleLoader section 3.10).
     protected override string[] PublicDependencies => ["MetaSchema", "Serialization", "Localization", "ModuleLoader"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).

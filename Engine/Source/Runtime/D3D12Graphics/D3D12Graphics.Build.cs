@@ -29,8 +29,8 @@ public sealed class D3D12Graphics : EngineModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             PublicDependencies = PublicDependencies,
             PrivateDependencies = PrivateDependencies,
-            // Shaders are compiled at run time with D3DCompile (d3dcompiler_47, system DLL). Offline DXC cooking comes later.
-            SystemLibraries = windows ? ["d3d12", "dxgi", "d3dcompiler", "user32"] : []
+            // Shaders arrive cooked (DXIL from the shader library, ShaderSystem SH2e2); there is no run-time compiler.
+            SystemLibraries = windows ? ["d3d12", "dxgi", "user32"] : []
         };
     }
 }

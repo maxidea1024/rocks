@@ -1,4 +1,5 @@
 #include "MsaaSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <stdio.h>
 
@@ -35,57 +36,7 @@ StringView Text(const char (&text)[Count]) noexcept {
     return StringView(text, Count - 1);
 }
 
-#define MSAA_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-
-// 정점 6개로 x ∈ [-1, -0.25], y ∈ [-1, 1] 사각형을 그리고 흰색을 낸다.
-constexpr char CoverHlsl[] = R"(
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    const float2 corners[6] = {float2(-1, -1), float2(-1, 1), float2(-0.25, -1),
-                               float2(-0.25, -1), float2(-1, 1), float2(-0.25, 1)};
-    return float4(corners[id], 0.5, 1.0);
-}
-float4 PSMain() : SV_Target { return float4(1.0, 1.0, 1.0, 1.0); }
-)";
-
-constexpr char CoverVertexGlsl[] = MSAA_GLSL_HEAD R"(
-void main() {
-    const vec2 corners[6] = vec2[6](vec2(-1, -1), vec2(-1, 1), vec2(-0.25, -1),
-                                    vec2(-0.25, -1), vec2(-1, 1), vec2(-0.25, 1));
-    gl_Position = vec4(corners[gl_VertexID], 0.5, 1.0);
-}
-)";
-
-constexpr char CoverPixelGlsl[] = MSAA_GLSL_HEAD R"(
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = vec4(1.0); }
-)";
-
-// 화면을 덮고 MSAA 텍스처의 같은 픽셀 표본 0을 낸다.
-constexpr char LoadHlsl[] = R"(
-Texture2DMS<float4> msaa : register(t0);
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 uv = float2((id << 1) & 2, id & 2);
-    return float4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-float4 PSMain(float4 position : SV_Position) : SV_Target {
-    return msaa.Load(int2(position.xy), 0);
-}
-)";
-
-constexpr char LoadVertexGlsl[] = MSAA_GLSL_HEAD R"(
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-constexpr char LoadPixelGlsl[] = MSAA_GLSL_HEAD R"(
-layout(binding = 0) uniform highp sampler2DMS ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = texelFetch(ps0, ivec2(gl_FragCoord.xy), 0); }
-)";
-
-#undef MSAA_GLSL_HEAD
+// 셰이더는 Msaa.rsf다(왼쪽 흰 사각형 MsaaCover, 표본 0 읽기 MsaaLoadPS).
 
 TextureDesc TargetDesc(uint32 samples, TextureUsage usage, PixelFormat format) noexcept {
     TextureDesc desc;
@@ -97,14 +48,13 @@ TextureDesc TargetDesc(uint32 samples, TextureUsage usage, PixelFormat format) n
     return desc;
 }
 
-Result<PipelineHandle> MakePipeline(Device& device, StringView hlsl, StringView vertexGlsl,
-                                    StringView pixelGlsl, uint32 samples) noexcept {
+Result<PipelineHandle> MakePipeline(Device& device, const shaders::ShaderTypeDesc& vertex,
+                                    const shaders::ShaderTypeDesc& pixel, uint32 samples) noexcept {
     PipelineDesc desc;
-    desc.vertex = {hlsl, vertexGlsl};
-    desc.pixel = {hlsl, pixelGlsl};
+    desc.bindings.texture = "Source";
     desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
     desc.sampleCount = samples;
-    return device.CreatePipeline(desc);
+    return shaders::CreateGraphicsPipeline(device, vertex, pixel, desc);
 }
 
 // 4x MSAA에 그리고 resolve한 픽셀과, PS가 표본을 읽은 픽셀을 대조한다.
@@ -113,9 +63,8 @@ void RunResolve(Device& device, TextureHandle msaa) noexcept {
         TargetDesc(1, TextureUsage::RenderTarget, PixelFormat::RGBA8Unorm), {});
     auto loaded = device.CreateTexture(
         TargetDesc(1, TextureUsage::RenderTarget, PixelFormat::RGBA8Unorm), {});
-    auto cover =
-        MakePipeline(device, Text(CoverHlsl), Text(CoverVertexGlsl), Text(CoverPixelGlsl), Samples);
-    auto load = MakePipeline(device, Text(LoadHlsl), Text(LoadVertexGlsl), Text(LoadPixelGlsl), 1);
+    auto cover = MakePipeline(device, shaders::MsaaCoverVS, shaders::MsaaCoverPS, Samples);
+    auto load = MakePipeline(device, shaders::FullScreenVS, shaders::MsaaLoadPS, 1);
     Check(resolved && loaded && cover && load, "resolve targets and MSAA pipelines");
     if (!resolved || !loaded || !cover || !load) {
         PrintLastError(device);

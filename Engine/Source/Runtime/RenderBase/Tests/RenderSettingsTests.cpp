@@ -3,7 +3,7 @@
 #include <Config/Tests/ConfigTestSupport.h>
 #include <RenderBase/RenderLane.h>
 
-// 렌더 설정 snapshot 시험이다(Docs/Design/RenderBase.ko.md 12절, ConfigSystem.ko.md 5.3절 — RB1
+// 렌더 설정 snapshot 시험이다(Docs/Design/RenderBase 12절, ConfigSystem.ko.md 5.3절 — RB1
 // 설정 snapshot). 게임 lane이 sync 지점 뒤 snapshot을 프레임 slot에 담고, 렌더 lane은 그 프레임
 // 작업 안에서 담긴 값만 읽는다. GPU 완료는 기록 장치 gate(HoldCompletions·CompleteAll)로만
 // 진행한다.

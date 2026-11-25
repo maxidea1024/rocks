@@ -79,6 +79,9 @@ enum class SignalReadiness : uint8 {
 // signal-* mode가 그 환경에서 시험할 수 없을 때의 종료 코드다(C#이 명시적으로 다룬다).
 inline constexpr int SignalIgnoredExitCode = 65;
 inline constexpr int SharedConsoleExitCode = 66;
+// host-thread 모드가 메인 스레드 호스트가 만든 스레드에서 돌았을 때의 종료 코드다(호스트가 본문
+// 반환값을 그대로 넘기는지 본다 — Docs/Design/MacPlatform.ko.md 3절).
+inline constexpr int HostedBodyExitCode = 67;
 
 // 물려받은 SIGINT 무시를 기본 동작으로 되돌린다(--reset-sigint, configure에서 Launch 설치 전에
 // 부른다). Windows는 할 일이 없다.

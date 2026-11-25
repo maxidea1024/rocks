@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Render graph (Docs/Design/RenderBase.ko.md sections 7 and 8, UE RenderCore RDG counterpart). Collects passes with
+// Render graph (Docs/Design/RenderBase sections 7 and 8, UE RenderCore RDG counterpart). Collects passes with
 // their resource access lists, culls unused passes, computes resource lifetimes and state transitions, executes
 // passes in declaration order and keeps a frame-to-frame resource pool. Sits on RenderBase (render lane, frame
 // arena, RenderHandle table and leases, GpuTrace) and the Graphics device contract (GX5 transitions).

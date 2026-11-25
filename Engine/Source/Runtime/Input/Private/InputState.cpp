@@ -9,6 +9,9 @@ constexpr uint32 ToIndex(Key key) noexcept {
     return static_cast<uint32>(key);
 }
 
+// 마우스로 터치 흉내가 쓰는 손가락 번호다(UE와 같이 Touch1 — Docs/Design/TouchInput.ko.md 3.4절).
+constexpr uint8 EmulatedTouchIndex = 0;
+
 constexpr uint32 Bit(uint32 index) noexcept {
     return uint32(1) << index;
 }
@@ -139,7 +142,8 @@ const char* KeyName(Key key) noexcept {
                                             "NumpadMultiply",
                                             "NumpadDivide",
                                             "NumpadDecimal",
-                                            "NumpadEnter"};
+                                            "NumpadEnter",
+                                            "Back"};
     static_assert(sizeof(names) / sizeof(names[0]) == KeyCount, "KeyName table is out of sync");
     const uint32 index = ToIndex(key);
     return index < KeyCount ? names[index] : "Unknown";
@@ -182,7 +186,14 @@ Result<void> InputState::SetGamepadDeadZone(const GamepadDeadZone& deadZone) noe
     return Result<void>::Success();
 }
 
-void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
+void InputState::SetMouseTouchEmulation(bool enabled) noexcept {
+    if (enabled != mouseTouchEmulation_) {
+        mouseTouchEmulation_ = enabled;
+        cancelEmulatedTouch_ = true;
+    }
+}
+
+void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noexcept {
     keysPressed_ = {};
     keysReleased_ = {};
     mousePressed_ = 0;
@@ -194,6 +205,25 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
     for (Gamepad& gamepad : gamepads_) {
         gamepad.pressed = 0;
         gamepad.released = 0;
+    }
+
+    for (Touch& touch : touches_) {
+        touch.began = false;
+        touch.ended = false;
+        touch.cancelled = false;
+        touch.deltaX = 0.0f;
+        touch.deltaY = 0.0f;
+    }
+
+    // 흉내 설정이 바뀌었으면 흉내 중이던 터치(손가락 0)를 취소로 끝낸다.
+    if (cancelEmulatedTouch_) {
+        cancelEmulatedTouch_ = false;
+        Touch& emulated = touches_[EmulatedTouchIndex];
+        if (emulated.down) {
+            emulated.down = false;
+            emulated.ended = true;
+            emulated.cancelled = true;
+        }
     }
 
     for (const InputEvent& event : events) {
@@ -232,6 +262,10 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
             if (!math::IsFinite(event.x) || !math::IsFinite(event.y)) {
                 break;
             }
+
+            if (mouseTouchEmulation_ && touches_[EmulatedTouchIndex].down) {
+                ApplyTouch(InputEvent::TouchMoved(EmulatedTouchIndex, event.x, event.y));
+            }
             if (mouseDeltaValid_) {
                 mouseDeltaX_ += event.x - mouseX_;
                 mouseDeltaY_ += event.y - mouseY_;
@@ -246,6 +280,11 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
             if (index >= MouseButtonCount) {
                 break;
             }
+
+            if (mouseTouchEmulation_ && event.mouseButton == MouseButton::Left) {
+                ApplyTouch(InputEvent::TouchBegan(EmulatedTouchIndex, mouseX_, mouseY_));
+                break;
+            }
             if ((mouseDown_ & Bit(index)) == 0) {
                 mousePressed_ |= Bit(index);
             }
@@ -255,6 +294,11 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
         case InputEventType::MouseUp: {
             const uint32 index = static_cast<uint32>(event.mouseButton);
             if (index >= MouseButtonCount) {
+                break;
+            }
+
+            if (mouseTouchEmulation_ && event.mouseButton == MouseButton::Left) {
+                ApplyTouch(InputEvent::TouchEnded(EmulatedTouchIndex, mouseX_, mouseY_));
                 break;
             }
             if ((mouseDown_ & Bit(index)) != 0) {
@@ -273,10 +317,79 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
                 ApplyGamepad(event.gamepadIndex, event.gamepad);
             }
             break;
+        case InputEventType::TouchBegan:
+        case InputEventType::TouchMoved:
+        case InputEventType::TouchEnded:
+            ApplyTouch(event);
+            break;
         case InputEventType::FocusLost:
             ReleaseAll();
             break;
         }
+    }
+
+    if (eventsLost) {
+        ReleaseAll();
+    }
+}
+
+void InputState::ApplyTouch(const InputEvent& event) noexcept {
+    if (event.touchIndex >= MaxTouches || !math::IsFinite(event.x) || !math::IsFinite(event.y)) {
+        return;
+    }
+
+    Touch& touch = touches_[event.touchIndex];
+    float force = 1.0f;
+    if (event.hasForce && math::IsFinite(event.force)) {
+        force = event.force < 0.0f ? 0.0f : (event.force > 1.0f ? 1.0f : event.force);
+    }
+
+    switch (event.type) {
+    case InputEventType::TouchBegan:
+        // 이미 닿아 있는 번호의 시작은 이동으로 본다(배정기가 막지만 잘못된 backend에 대비한다).
+        if (!touch.down) {
+            touch.began = true;
+            touch.startX = event.x;
+            touch.startY = event.y;
+        } else {
+            touch.deltaX += event.x - touch.x;
+            touch.deltaY += event.y - touch.y;
+        }
+
+        touch.down = true;
+        touch.x = event.x;
+        touch.y = event.y;
+        touch.force = force;
+        touch.hasForce = event.hasForce;
+        break;
+    case InputEventType::TouchMoved:
+        // 시작 없이 오는 이동은 무시한다(require-release).
+        if (!touch.down) {
+            break;
+        }
+
+        touch.deltaX += event.x - touch.x;
+        touch.deltaY += event.y - touch.y;
+        touch.x = event.x;
+        touch.y = event.y;
+        touch.force = force;
+        touch.hasForce = event.hasForce;
+        break;
+    case InputEventType::TouchEnded:
+        if (!touch.down) {
+            break;
+        }
+
+        touch.deltaX += event.x - touch.x;
+        touch.deltaY += event.y - touch.y;
+        touch.x = event.x;
+        touch.y = event.y;
+        touch.down = false;
+        touch.ended = true;
+        touch.cancelled = event.cancelled;
+        break;
+    default:
+        break;
     }
 }
 
@@ -320,6 +433,14 @@ void InputState::ReleaseAll() noexcept {
 
     mouseReleased_ |= mouseDown_;
     mouseDown_ = 0;
+    for (Touch& touch : touches_) {
+        if (touch.down) {
+            touch.down = false;
+            touch.ended = true;
+            touch.cancelled = true;
+        }
+    }
+
     // 포커스를 다시 얻은 뒤 첫 위치는 이전 위치와의 차이를 이동량으로 쓰지 않는다.
     mouseDeltaValid_ = false;
 }
@@ -371,6 +492,63 @@ bool InputState::WasReleased(uint32 gamepad, GamepadButton button) const noexcep
     const uint32 index = static_cast<uint32>(button);
     return gamepad < MaxGamepads && index < GamepadButtonCount &&
            (gamepads_[gamepad].released & Bit(index)) != 0;
+}
+
+bool InputState::IsTouchDown(uint32 index) const noexcept {
+    return index < MaxTouches && touches_[index].down;
+}
+
+bool InputState::WasTouchBegan(uint32 index) const noexcept {
+    return index < MaxTouches && touches_[index].began;
+}
+
+bool InputState::WasTouchEnded(uint32 index) const noexcept {
+    return index < MaxTouches && touches_[index].ended;
+}
+
+bool InputState::WasTouchCancelled(uint32 index) const noexcept {
+    return index < MaxTouches && touches_[index].cancelled;
+}
+
+float InputState::TouchX(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].x : 0.0f;
+}
+
+float InputState::TouchY(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].y : 0.0f;
+}
+
+float InputState::TouchStartX(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].startX : 0.0f;
+}
+
+float InputState::TouchStartY(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].startY : 0.0f;
+}
+
+float InputState::TouchDeltaX(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].deltaX : 0.0f;
+}
+
+float InputState::TouchDeltaY(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].deltaY : 0.0f;
+}
+
+float InputState::TouchForce(uint32 index) const noexcept {
+    return index < MaxTouches ? touches_[index].force : 1.0f;
+}
+
+bool InputState::TouchHasForce(uint32 index) const noexcept {
+    return index < MaxTouches && touches_[index].hasForce;
+}
+
+uint32 InputState::TouchCount() const noexcept {
+    uint32 count = 0;
+    for (const Touch& touch : touches_) {
+        count += touch.down ? 1u : 0u;
+    }
+
+    return count;
 }
 
 float InputState::GamepadAxisValue(uint32 gamepad, GamepadAxis axis) const noexcept {

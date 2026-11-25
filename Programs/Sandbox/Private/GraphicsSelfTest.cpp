@@ -1,9 +1,12 @@
 #include "GraphicsSelfTest.h"
 #include "BufferSelfTest.h"
 #include "CommandSelfTest.h"
+#include "ComputeSelfTest.h"
+#include "ConstantSelfTest.h"
 #include "CullingSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
+#include "RenderUtilitySelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
 #include "FormatSelfTest.h"
@@ -25,16 +28,16 @@
 #include <D3D12Graphics/D3D12Device.h>
 #include <Graphics/GpuFenceEvent.h>
 #include <Graphics/GraphicsLog.h>
+#if SANDBOX_OPENGL
 #include <OpenGLGraphics/OpenGLDevice.h>
+#endif
 #include <PlatformWindow/Window.h>
 #include <VulkanGraphics/VulkanDevice.h>
 #include "SampleRenderer.h"
+#include "SandboxShaders.h"
 #include "SelfTestEnvironment.h"
 #include <stdio.h>
 #include <Platform/Memory.h>
-#if SANDBOX_SHADER_SOURCE_COMPILER
-#include <ShaderFormatVulkan/VulkanShaderCompiler.h>
-#endif
 
 namespace sandbox {
 
@@ -473,6 +476,17 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.gpuValidationEnabled ? ", GPU-based validation" : "",
            info.software ? ", software" : "");
 
+    // 장치 형식의 셰이더 집합이다(ShaderSystem 16.1절 SSD19 — Development 공급자). 열지 못하면 그
+    // backend의 그리기 검사를 하지 않는다(Release 실행 파일은 공급자가 없다).
+    shaders::DeviceShaders deviceShaders(result.triangle.GetAllocator(), device);
+    if (!deviceShaders.IsReady()) {
+        const StringView problem = deviceShaders.Problem();
+        printf("  [NOT RUN] %s: shaders unavailable: %.*s\n", name,
+               static_cast<int>(problem.ByteCount()), problem.Data());
+        result.ran = false;
+        return;
+    }
+
     sample::Renderer renderer;
     auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
     if (!initialized) {
@@ -714,6 +728,12 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 렌더 쪽 compute(GX3·GX4 compute 연결): 파이프라인 캐시·그래프 버퍼 view·직접·간접 dispatch.
+    failures += RunComputeChecks(name, device, result.triangle.GetAllocator());
+    // 상수 버퍼 묶기(GX6, RenderBase 9.11절): handle 두 수명·기록 명령·갱신 순서·D3D12 root 예산.
+    failures += RunConstantChecks(name, device, result.triangle.GetAllocator());
+    // RenderBase 그리기 유틸리티(RB6, RenderBase 11.4절): 엔진 셰이더 전체화면 복사(장치·그래프).
+    failures += RunRenderUtilityChecks(name, device, result.triangle.GetAllocator());
     // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.
     failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
@@ -861,46 +881,16 @@ void Compare(const BackendResult& left, const BackendResult& right, const char* 
     printf("  [%s] %s (%u differing channels)\n", same ? "PASS" : "FAIL", name, different);
 }
 
-#if SANDBOX_SHADER_SOURCE_COMPILER
-// Vulkan 장치를 만들어 돌린다. 생성 실패는 다른 backend와 같이 report의 단계·원본 VkResult로
-// 경고하고 NOT RUN으로 알린다(RunBackend).
-void RunVulkanDevice(const char* name, Allocator& allocator, const graphics::DeviceDesc& desc,
-                     BackendResult& result) noexcept {
-    graphics::DeviceCreateReport report;
-    RunBackend(name, graphics::CreateVulkanDevice(allocator, desc, &report), result, &report);
-}
-#endif
-
-// Vulkan 하드웨어와 소프트웨어 ICD(lavapipe·SwiftShader, 측정 S4)를 돌린다. 실행 중 컴파일러가
-// 없으므로 개발용 컴파일 훅(ShaderFormatVulkan)이 있어야 한다(Release Sandbox는 NOT RUN).
+// Vulkan 하드웨어와 소프트웨어 ICD(lavapipe·SwiftShader, 측정 S4)를 돌린다. 셰이더는 다른 backend와
+// 같이 공급자가 만든 쿠킹 SPIR-V다(ShaderSystem 16.1절 SH2e2).
 void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendResult& hardware,
                BackendResult& software) noexcept {
-#if SANDBOX_SHADER_SOURCE_COMPILER
-    String diagnostics(allocator);
-    auto compiler = shader::VulkanShaderCompiler::Create(allocator, diagnostics);
-    if (!compiler) {
-        Log::Warning(graphics::LogGraphics,
-                     "Vulkan development shader compiler is unavailable: {Diagnostics}; skipping "
-                     "Vulkan",
-                     diagnostics.CStr());
-        printf("  [NOT RUN] Vulkan: development shader compiler unavailable: %s\n",
-               diagnostics.CStr());
-        return;
-    }
-
+    graphics::DeviceCreateReport report;
+    RunBackend("Vulkan", graphics::CreateVulkanDevice(allocator, base, &report), hardware, &report);
     graphics::DeviceDesc desc = base;
-    desc.shaderCompiler = compiler.Value().Get();
-    RunVulkanDevice("Vulkan", allocator, desc, hardware);
     desc.preferSoftware = true;
-    RunVulkanDevice("Vulkan software", allocator, desc, software);
-#else
-    (void)allocator;
-    (void)base;
-    (void)hardware;
-    (void)software;
-    printf("  [NOT RUN] Vulkan: Release builds carry no shader compiler (cooked SPIR-V is "
-           "ShaderSystem SH2)\n");
-#endif
+    RunBackend("Vulkan software", graphics::CreateVulkanDevice(allocator, desc, &report), software,
+               &report);
 }
 
 } // namespace
@@ -937,6 +927,7 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
     // OpenGL ES 3.2 미리보기(GLES31_PC)를 두 context에서 돌린다: 진짜 ES 3.2 context(드라이버가 ES
     // 밖 호출을 거부)와 UE 방식의 데스크톱 GL 4.3 core context.
+#if SANDBOX_OPENGL
     graphics::OpenGLDeviceOptions esProfile;
     esProfile.contextProfile = graphics::OpenGLContextProfile::EsProfile;
     RunBackend("OpenGL ES", graphics::CreateOpenGLDevice(allocator, desc, esProfile, &report),
@@ -946,6 +937,10 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     RunBackend("OpenGL ES on GL core",
                graphics::CreateOpenGLDevice(allocator, desc, desktopCore, &report), glesDesktop,
                &report);
+#else
+    printf("  [NOT RUN] OpenGL ES: the GLES31_PC preview is kept out of Release Windows "
+           "executables\n");
+#endif
     RunVulkan(allocator, desc, vulkan, vulkanSoftware);
     Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");
     Compare(d3d12, glesDesktop, "D3D12 vs OpenGL ES on GL core");
@@ -962,6 +957,7 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
                    "No graphics backend could create a device (D3D12, D3D11, OpenGL ES, Vulkan and "
                    "their software fallbacks all failed); see the warnings above for each stage");
     }
+    shaders::ShutdownProvider();
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");

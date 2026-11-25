@@ -808,6 +808,15 @@ Result<void> TickScheduler::RunPhase(TickPhase phase, const TickPhaseFrame& fram
     return Result<void>::Success();
 }
 
+Result<TickTarget> TickScheduler::TargetOf(TickHandle handle) const noexcept {
+    const Entry* entry = entries_.Find(handle.slot);
+    if (entry == nullptr || entry->removed) {
+        return Result<TickTarget>::Failure(ErrorCode::NotFound);
+    }
+
+    return Result<TickTarget>::Success(entry->registration.target);
+}
+
 TickStats TickScheduler::Stats() const noexcept {
     TickStats stats;
     for (const Entry& entry : entries_) {
@@ -823,6 +832,7 @@ TickStats TickScheduler::Stats() const noexcept {
     stats.executedThisFrame = executedThisFrame_;
     stats.pendingChanges = pendingRemovals_ + (phasesDirty_ ? 1u : 0u);
     stats.phaseRecomputeFailures = recomputeFailures_;
+    stats.demoted = demoted_;
     for (bool dirty : dirty_) {
         stats.pendingChanges += dirty ? 1u : 0u;
     }

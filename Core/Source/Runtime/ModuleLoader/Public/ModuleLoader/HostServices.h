@@ -8,7 +8,7 @@
 
 namespace rocks {
 
-// 엔진 호스트가 모듈 단계 실행 전에 등록하는 호스트 서비스 표다(Docs/Design/ModuleLoader.ko.md 3.1·
+// 엔진 호스트가 모듈 단계 실행 전에 등록하는 호스트 서비스 표다(Docs/Design/ModuleLoader 3.1·
 // 3.12절, 지금은 LogSystem·ConfigContext·TraceSession). 모듈은 전역 접근자 대신
 // ModuleStartContext::Services() 로 찾는다. 로더가 하나를 소유한다(ModuleLoader::Services()).
 //

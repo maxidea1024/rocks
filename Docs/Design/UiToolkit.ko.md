@@ -2,7 +2,7 @@
 
 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)를 Rocks Core 위에 재구현
 
-**설계 기준일 2026.11.22 · 초안 2.4 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD15는 `NotPlaceable`만 확정, UD13–UD17 권장안 · 미구현(UI 코드 없음, 스펙만 존재)**
+**설계 기준일 2026.11.22 · 초안 2.5 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD15는 `NotPlaceable`만 확정, UD13–UD17 권장안 · 미구현(UI 코드 없음, 스펙만 존재)**
 
 Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용한다. 구조는 UE 5.8의 UI 체계를 그대로 따른다. 하위 층은 Object가 아닌 경량 Element로 레이아웃·그리기·입력·focus·텍스트를 처리하고, 상위 층은 `rocks::Object`인 Widget이 Element를 감싸 에셋·리플렉션·GC·자체 언어 바인딩·Designer 편집을 제공한다. 에디터는 Element 층을 직접 사용하고, 게임 UI는 Widget 층으로 작성한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8의 기본값을 따른다(4.2절).
 
@@ -59,13 +59,13 @@ B를 채택하는 근거는 다음과 같다.
 |---|---|---|---|---|
 | UiCore | `Runtime/SlateCore` | `Engine/Source/Runtime/UiCore` | Core·Task·TextLayout(글꼴 계약) | Element·slot·자식 목록·속성·무효화·Geometry·그리기 목록·clip·cache root·hit grid·스타일·`ui::Window`·renderer 계약·batcher. Object·Graphics·PlatformWindow 의존 금지 |
 | UiFramework | `Runtime/Slate` | `Engine/Source/Runtime/UiFramework` | UiCore·TextLayout·Input(이벤트 형식) | `ui::Application`(입력 라우팅·사용자·focus·navigation·drag/drop·tooltip·menu·modal), 표준 Element(패널·텍스트·편집·목록 가상화·스크롤·메뉴·`RetainedPanel`), 명령·단축키, 독 배치와 저장. Object·UiRender 의존 금지 |
-| TextLayout | `SlateCore/Fonts` + `Slate/Framework/Text` + Core ICU | `Engine/Source/Runtime/TextLayout` | Core·Localization·FreeType·HarfBuzz·ICU·msdfgen adapter | 글꼴·조합 글꼴·shaping·BiDi·줄/grapheme 경계·글리프 캐시·SDF·텍스트 레이아웃 모델. library 타입 비공개 |
+| TextLayout | `SlateCore/Fonts` + `Slate/Framework/Text` + Core ICU | `Engine/Source/Runtime/TextLayout` | Core·Localization(없는 동안 culture 주입). FreeType·HarfBuzz·ICU·msdfgen은 ClientOnly `TextLayoutBackend`가 쓰고 backend 표로 연결한다([글꼴 설계](Font/03-Modules.ko.md) 3장 — 서버 타깃 제외, BD25) | 글꼴·조합 글꼴·shaping·BiDi·줄/grapheme 경계·글리프 캐시·SDF·텍스트 레이아웃 모델. library 타입 비공개 |
 | UiRender | `Runtime/SlateRHIRenderer` · `SlateNullRenderer` | `Engine/Source/Runtime/UiRender` | UiCore renderer 계약·Graphics(RHI)·Task | batch 데이터의 Render lane 제출·atlas texture·render target·viewport 합성·SVG 래스터 결과 업로드. 빈 renderer(headless) 포함. Element 순회 금지 |
 | UiWidget | `Runtime/UMG` + `Runtime/FieldNotification` + MVVM 플러그인 | `Engine/Source/Runtime/UiWidget` | ObjectRuntime·MetaSchema·UiFramework | Widget·slot 객체·UserWidget·WidgetTree·WidgetAsset·Widget 풀·바인딩·UI 애니메이션·화면 layer 등록 interface. World·LocalPlayer 의존 금지 |
 | UiScreens | CommonUI · CommonInput 플러그인 | `Engine/Source/Runtime/UiScreens` | UiWidget·Input(action) | 화면 스택·입력 라우터·입력 모드·뒤로 가기·focus 복원·입력 장치 종류 전환·플랫폼별 버튼 아이콘. UE에서 플러그인인 만큼 선택 모듈이며, 게임이 쓰지 않으면 링크하지 않는다 |
 | PlatformWindow | `Runtime/ApplicationCore` | 기존 모듈 확장 | Core·PlatformBase·window SDK | 다중 창·DPI·IME·clipboard·cursor·OS drag/drop·접근성 provider(PW1–PW8) |
 | EditorFramework | `Editor/UnrealEd` 일부 · `PropertyEditor` · `EditorStyle` · `Developer/ToolMenus` | `Engine/Source/Editor/Framework` | UiFramework·UiWidget·EditorBackend | 셸·자산 편집기 host·메뉴 등록·Inspector·Transaction 연결·에디터 스타일·EditorViewport·곡선/타임라인 Element. 그래프 편집 화면은 GraphView 모듈이다. Shipping 링크 금지 |
-| GraphView | `Editor/GraphEditor` | `Engine/Source/Editor/GraphView` | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자) | 노드 그래프 편집 화면: 캔버스·노드·핀 시각·연결선·노드 메뉴·주석·diff 화면([노드 그래프](NodeGraph.ko.md) 11절). 그래프 데이터·변경·undo·복사는 `NodeGraph`(Runtime)·`NodeGraphTools`(Developer) 소유이고, 도메인 schema·노드 서술은 각 도구 소유다. 도메인 모듈 의존 금지, Shipping 링크 금지 |
+| GraphView | `Editor/GraphEditor` | `Engine/Source/Editor/GraphView` | UiFramework·EditorFramework·NodeGraph·NodeGraphTools·SpatialIndex(2D 격자) | 노드 그래프 편집 화면: 캔버스·노드·핀 시각·연결선·노드 메뉴·주석·diff 화면([노드 그래프](NodeGraph/11-ModulesAndView.ko.md) 11절). 그래프 데이터·변경·undo·복사는 `NodeGraph`(Runtime)·`NodeGraphTools`(Developer) 소유이고, 도메인 schema·노드 서술은 각 도구 소유다. 도메인 모듈 의존 금지, Shipping 링크 금지 |
 | WorldIntegration | `UWidgetComponent` · `UGameViewportSubsystem` · `SGameLayerManager` | 기존 계획 | World·UiWidget | game viewport의 화면 layer와 LocalPlayer별 layer, World 정리 연동, 월드 공간 Widget·가상 사용자 상호작용, 기본 입력 모드 |
 
 모듈 의존 방향은 전체 계획 3.1절을 따른다. UiCore·UiFramework는 Object·Graphics·World·PlatformWindow에 직접 의존하지 않는다. OS 창·clipboard·cursor·IME는 `ui::Platform` 계약(UE `GenericApplication` 대응)으로 주입받으며 CPU 시험에서는 가짜 구현을 주입한다. UE에서는 독·명령·layout 저장이 런타임 `Slate` 모듈에 있고 Rocks도 같은 위치(UiFramework)에 둔다. 도구 프로그램(Rocks Lens 등)이 에디터 없이 독을 사용하기 때문이다. Shipping 게임은 독·명령 코드를 참조하지 않으므로 링크에서 제외된다.
@@ -285,6 +285,8 @@ UE `FSlateApplication`의 라우팅 정책 4종(직접·최하위·tunnel(루트
 
 ### 3.12 텍스트
 
+글꼴 에셋(FontFace·Font)·임포트·쿠킹·로딩 방식과 아래 표의 글꼴 정보·조합 글꼴·글리프 cache·shaping·SDF 행의 상세(face·metric·조합 탐색·래스터·거리장·cache)는 [글꼴 설계](Font/README.ko.md)가 정한다. 이 절의 레이아웃 모델·BiDi·Element·IME·지역화 행은 이 문서 소유다.
+
 | 영역 | Rocks(TextLayout) | UE 5.8 대응 | 계약 |
 |---|---|---|---|
 | 글꼴 정보 | `FontInfo` | `FSlateFontInfo` | 글꼴·typeface 이름·크기·자간·기울임·fallback 수준·외곽선 |
@@ -455,7 +457,7 @@ UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 �
 | viewport | `EditorViewport` · viewport client | `SEditorViewport` · `FEditorViewportClient` · `FSceneViewport` | 에디터 viewport는 별도 render target 합성, Tryout은 viewport 교체 또는 새 창. 마우스 capture 모드(없음·영구·누름 중 등)와 capture 해제 명령(UE 기본 Shift+F1) |
 | 에디터 스타일 | 에디터 `StyleSet` · 테마 · 앱 배율 | `FStarshipEditorStyle` · `USlateThemeManager` · `UEditorStyleSettings::ApplicationScale` | 4.2절 기본값 |
 | 자산 선택 | asset picker · path picker | `IContentBrowserSingleton::CreateAssetPicker` | 필터·선택 모드 |
-| 그래프 편집 | `GraphView` 모듈(Editor 계층, EditorFramework와 별도) · 도메인 시각 등록 · overlay | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | [노드 그래프](NodeGraph.ko.md) 11절. 머티리얼(전체 계획 14.5절)·오디오·애니메이션 등 그래프 편집기가 함께 쓰는 화면이다. 데이터 모델·변경·undo는 `NodeGraph`, 도메인은 schema·노드 서술과 시각 등록·overlay만 넣는다. 화면은 노드 시각을 `NodeId`로 찾고 통지 단위로 증분 갱신한다 |
+| 그래프 편집 | `GraphView` 모듈(Editor 계층, EditorFramework와 별도) · 도메인 시각 등록 · overlay | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | [노드 그래프](NodeGraph/11-ModulesAndView.ko.md) 11절. 머티리얼(전체 계획 14.5절)·오디오·애니메이션 등 그래프 편집기가 함께 쓰는 화면이다. 데이터 모델·변경·undo는 `NodeGraph`, 도메인은 schema·노드 서술과 시각 등록·overlay만 넣는다. 화면은 노드 시각을 `NodeId`로 찾고 통지 단위로 증분 갱신한다 |
 | 곡선·타임라인 | 곡선 편집기 · 컷씬 타임라인 | `FCurveEditor` · `FCurveModel` · `SCurveEditorPanel` · `ISequencer` | 곡선 편집기를 타임라인이 재사용(UE와 같다) |
 | 로그·검사 | 로그 패널 · UI 트리 검사기 | `OutputLog` · `SlateReflector` | UI 트리 검사기는 Element 트리·geometry·무효화 사유를 표시하며 개발 빌드 전용 |
 
@@ -669,13 +671,13 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 |---|---|---|---|---|
 | UT0 | Core 계약 CU1–CU9, Core 보강 CB1–CB3 | 현재 Core 작업 | 리플렉션 하네스에서 사용 예제·음성 대조·직렬화 왕복 통과 | M1–M2 |
 | UT1 | UiCore·UiFramework 기반: Element·slot·자식 목록·속성·무효화·Geometry·레이아웃 Element·그리기 목록·clip·cache root·hit grid·`ui::Application` 라우팅·사용자·focus·navigation·drag·menu stack·주입 시계·스타일 체계·batcher·빈 renderer·가짜 `ui::Platform` | CB2 | UV1–UV4, UV6의 CPU 부분 통과 | Foundation Gate 직후 |
-| UT2 | 출력: PW1–PW7, TextLayout(FreeType·HarfBuzz·ICU·msdfgen adapter, CB4·CU7), UiRender(Render lane 제출·atlas·render target·viewport 합성), SVG, 기본 핵심·게임 스타일(4.2절) | UT1, RHI 기본 | UV5, UV6 픽셀 비교, UV8 핵심·게임 스타일, 한국어 IME 조합 | M3 |
+| UT2 | 출력: PW1–PW7, TextLayout(FreeType·HarfBuzz·ICU·msdfgen adapter, CB4·CU7 — 글꼴 부분은 [글꼴 설계](Font/10-Stages.ko.md) FT2·FT6, 서드파티 도입 FT1은 먼저 할 수 있다), UiRender(Render lane 제출·atlas·render target·viewport 합성), SVG, 기본 핵심·게임 스타일(4.2절) | UT1, RHI 기본 | UV5, UV6 픽셀 비교, UV8 핵심·게임 스타일, 한국어 IME 조합 | M3 |
 | UT3 | 표준 Element: 텍스트 편집·목록/트리 가상화·스크롤·콤보·숫자 입력·색 선택·메뉴·tooltip·알림·viewport Element·독 배치와 저장·명령 | UT2 | 에디터 규모 Element 수에서 레이아웃·그리기 예산 측정(UR3), UV9 독·명령 부분 | M3 |
 | UT4 | EditorFramework: 셸·자산 편집기 host·메뉴 등록·Inspector(CU1·CU6)·Transaction 연결·에디터 스타일·EditorViewport. 전체 계획 22.2절의 M3 기능(Outliner·Inspector·Asset Browser·viewport·gizmo·log) | UT3, UT0 | M3 gate 「import→edit→save→cook→run」을 Windows·macOS에서 통과, UV8 에디터 스타일 | M3 |
 | UT5 | UiWidget·UiScreens: Widget·slot 객체·UserWidget·WidgetTree·WidgetAsset·결합 표·검증·Widget 풀·화면 layer(WorldIntegration 연동)·화면 스택·입력 라우터·입력 장치 전환, Designer 기초(palette·hierarchy·canvas·Inspector 재사용) | UT4, CB1·CB3 | UV7, UV9 화면 부분, 전체 계획 21.5절 HUD·menu·설정 sample | M3 착수 · M4 완료 |
 | UT6 | 완성: ViewModel 바인딩·UI 애니메이션·서식 텍스트·Widget 층 엔트리 목록·월드 공간 Widget·cache/retained panel 활용·곡선·타임라인 Element·코드 편집 Element·접근성(PW8)·전문 Designer | UT5 | 전체 계획 21.5절 필수 sample 5종·14.9절 MAT 시험·B12 | M5–M6 |
 
-그래프 편집 화면은 [노드 그래프](NodeGraph.ko.md) 단계 NG5–NG7이다. NG5는 UT3과 EditorBackend Transaction(UT4의 headless 부분, 노드 그래프 NG4) 뒤에, NG6은 공용 2D 격자([공간 색인](SpatialIndex.ko.md) 5.3절) 뒤에 착수한다.
+그래프 편집 화면은 [노드 그래프](NodeGraph/14-Stages.ko.md) 단계 NG5–NG7이다. NG5는 UT3과 EditorBackend Transaction(UT4의 headless 부분, 노드 그래프 NG4) 뒤에, NG6은 공용 2D 격자([공간 색인](SpatialIndex.ko.md) 5.3절) 뒤에 착수한다.
 
 ## 10. 위험과 대응
 
@@ -696,7 +698,7 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 |---|---|---|---|---|
 | UD1 | 층 구조 | **확정(2026.11.16):** 비객체 Element 층 + Object Widget 층 | 한 층(초안 1.0) | 1.1절 |
 | UD2 | 배치 속성 위치 | **확정(2026.11.16):** slot 객체 | 자식 Widget 속성(초안 1.0) | 5.2절, UE와 같다 |
-| UD3 | 텍스트 library 구성 | **확정(2026.11.16):** UE와 같은 구성. FreeType(글리프 래스터)·HarfBuzz(shaping)·ICU(BiDi·문자·단어·줄 경계)·msdfgen(SDF)·nanosvg(SVG 래스터) | ICU 대신 Core 유니코드 표(UCD 18)를 확장하여 UAX #29·#14·#9 직접 구현 | UE와 줄바꿈·BiDi·shaping 결과를 맞추고 사전 기반 줄바꿈(태국어 등)을 지원한다. library 타입은 공개 API에 노출하지 않고 TextLayout·UiCore adapter로 격리한다. 버전은 UE 5.8 `Source/ThirdParty`의 구성을 대조해 정하고 Core `ThirdParty` 규칙(원본 보존·SHA-256 확인)으로 들인다 |
+| UD3 | 텍스트 library 구성 | **확정(2026.11.16):** UE와 같은 구성. FreeType(글리프 래스터)·HarfBuzz(shaping)·ICU(BiDi·문자·단어·줄 경계)·msdfgen(SDF)·nanosvg(SVG 래스터) | ICU 대신 Core 유니코드 표(UCD 18)를 확장하여 UAX #29·#14·#9 직접 구현 | UE와 줄바꿈·BiDi·shaping 결과를 맞추고 사전 기반 줄바꿈(태국어 등)을 지원한다. library 타입은 공개 API에 노출하지 않고 TextLayout·UiCore adapter로 격리한다. 버전은 UE 5.8 `Source/ThirdParty`의 구성을 대조해 정하고 Core `ThirdParty` 규칙(원본 보존·SHA-256 확인)으로 들인다. 구체 판·빌드 구성은 [글꼴 설계](Font/08-ThirdParty.ko.md) 8장이 정한다. 판은 그 FD14(사용자 결정 2026-11-24)로 UE가 고른 판이 아니라 도입 시점 최신 안정판(하한은 UE 트리 최신판)이다. 판 차이로 UE와 shaping·줄바꿈 결과가 다른 사례는 글꼴 설계 10.3절의 차이 목록으로 남긴다 |
 | UD4 | 팝업 방식 | **확정(2026.11.16):** OS 창과 현재 창 overlay 모두 지원(UE `EPopupMethod`) | OS 창만 | 게임(전체 화면·콘솔)은 overlay, 에디터는 OS 창 |
 | UD5 | 선언적 생성 문법 | **확정(2026.11.16):** 일반 인자 구조체 + designated initializer 트리 + 형식에 사유를 둔 속성(3.2절). 매크로·연산자 체인·등록 함수·코드 생성 없음 | UE와 같은 형태(인자 매크로 + slot 연산자 체인 + 클래스별 속성 등록 함수) | UE 형태는 매크로와 연산자 오버로딩으로 읽기 어렵고 속성을 두 곳에 적는다. 확정안의 대가는 필드 선언 순서 제약 하나다 |
 | UD6 | UE 실행 대조 | **확정(2026.11.16):** 소스 근거 기준값을 기본으로 하고, UV1·UV3·UV4에 한해 UE 5.8로 빌드한 독립 덤프 프로그램의 결과를 1회 기준값으로 채택 | 소스 근거 기준값만 | 실행 대조는 경계 조건 누락을 줄이나 UE 빌드 환경이 필요하다. 저장소에는 덤프 결과만 넣는다 |
@@ -714,7 +716,9 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
-**초안 2.4(2026.11.22):** [노드 그래프](NodeGraph.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
+**초안 2.5(2026.11.24):** [글꼴 설계](Font/README.ko.md) 개정 1에 맞춰 2절 TextLayout 행의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮기고(서버 타깃 제외 — 빌드 타깃 BD25), 3.12절에 글꼴 상세의 소유 문서를 적고, UT2 행과 UD3에 글꼴 설계 단계·버전 결정(FD14, 사용자 결정 2026-11-24)을 연결했다.
+
+**초안 2.4(2026.11.22):** [노드 그래프](NodeGraph/README.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
 
 **초안 2.3(2026.11.20):** UD15의 확정 범위를 레벨 스크립트가 실제로 쓰는 CLASS 지정자 `NotPlaceable` 하나로 좁혔다. 나머지 표시 메타·편집 메타는 권장안으로 되돌렸다(사용자 결정).
 

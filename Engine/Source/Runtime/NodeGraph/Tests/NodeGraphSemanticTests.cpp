@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-// 의미 바이트·semantic hash 시험이다(Docs/Design/NodeGraph.ko.md 8.4절, 13절 GT9 바이트 부분):
+// 의미 바이트·semantic hash 시험이다(Docs/Design/NodeGraph 8.4절, 13절 GT9 바이트 부분):
 // 결정성, 재경유 접기 (사슬·원천 없는 재경유·순번 출력 핀을 거친 순번), 배치·표시 대소문자와
 // 무관함, 의미 필드마다 바이트가 바뀜, 도메인 정규화의 적용과 계약 위반, 순환·입력 둘인 재경유의
 // 거부, 형식 머리와 golden hash.
@@ -87,7 +87,7 @@ TEST(NodeGraph_SemanticDeterministicAndHash) {
 // 표본 문서(NodeGraphTestSupport.h Sample)의 semantic hash golden이다. 형식(8.4절)이나 표본을
 // 바꾸면 SemanticBytesFormatVersion을 올리고(형식일 때) 이 값을 함께 고친다.
 constexpr const char* NodeGraphSampleGoldenHash =
-    "4e54499baee462a1fb2e6574f96ffd3013c27776594c63d412526ed6d3dcdbf6";
+    "2166cfa861196d0b598873409150a11ed18accb369aa666c7dbcbef59e27a4f4";
 
 TEST(NodeGraph_SemanticGoldenHash) {
     TestEnv env;

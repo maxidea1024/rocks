@@ -1,6 +1,6 @@
 #include "NodeGraphTestSupport.h"
 
-// 문서 정규화와 불변식 검사 시험이다(Docs/Design/NodeGraph.ko.md 6.3절, 13절 GT1 구조 사례): 표본
+// 문서 정규화와 불변식 검사 시험이다(Docs/Design/NodeGraph 6.3절, 13절 GT1 구조 사례): 표본
 // 문서는 통과하고, 규칙(GI1–GI14)마다 하나씩 어긴 문서는 정확히 그 규칙·요소로 거부된다. 검사는
 // 문서를 바꾸지 않는다. 알 수 없는 종류의 검사 범위, 정규화의 결과·멱등성, 위반 상한.
 using namespace rocks;
@@ -271,7 +271,7 @@ TEST(NodeGraph_ValidateGI6LayoutMatchesDocument) {
     // 같은 노드 항목이 둘이다.
     Sample twice(env);
     NodeLayout copy(env.allocator);
-    copy.node = SampleUnknown;
+    copy.node = SampleCollapsedNode;
     REQUIRE(LayoutOf(twice, SampleMain).nodes.TryPushBack(Move(copy)));
     CHECK(Only(Run(env, twice), GraphInvariant::LayoutMatchesDocument, GraphSubject::LayoutNode));
 
@@ -412,19 +412,22 @@ TEST(NodeGraph_ValidateGI12DocumentHeader) {
     CHECK(missing.violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Document));
     CHECK(missing.violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
 
+    // graphs[1]은 Collapsed 하위 그래프라 역할을 바꾸면 GI15·GI16도 어긴다(10.1절) — GI12만 본다.
     Sample secondMain(env);
     secondMain.document.graphs[1].role = GraphRole::Main;
-    CHECK(Only(Run(env, secondMain), GraphInvariant::DocumentHeader, GraphSubject::Graph));
+    CHECK(Run(env, secondMain).violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
 
     Sample domainRole(env);
     domainRole.document.graphs[1].domainRole = 3;
     CHECK(Only(Run(env, domainRole), GraphInvariant::DocumentHeader, GraphSubject::Graph));
     domainRole.document.graphs[1].role = GraphRole::DomainDefined;
-    CHECK(Run(env, domainRole).error == ErrorCode::None);
+    const Checked domainDefined = Run(env, domainRole);
+    CHECK(!domainDefined.violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
+    CHECK(domainDefined.violations.Has(GraphInvariant::BoundaryInterface, GraphSubject::Graph));
 
     Sample badRole(env);
     badRole.document.graphs[1].role = static_cast<GraphRole>(9);
-    CHECK(Only(Run(env, badRole), GraphInvariant::DocumentHeader, GraphSubject::Graph));
+    CHECK(Run(env, badRole).violations.Has(GraphInvariant::DocumentHeader, GraphSubject::Graph));
 }
 
 TEST(NodeGraph_ValidateGI13NodeTypeData) {

@@ -58,7 +58,7 @@ struct HostSettingsOptions {
     StringView platform{};
     // 호스트·게임 모듈의 리플렉션 타입 등록(선택)이다. TraceControl 다음에 부른다.
     Result<void> (*registerModuleTypes)(ModuleRegistration&) noexcept = nullptr;
-    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader.ko.md 3.10절 MD22·3.14절 — 없으면
+    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader 3.10절 MD22·3.14절 — 없으면
     // Initialize가 InvalidArgument). Initialize는 설정 파일을 읽기 전에 로더 표의 순서(의존 순서)로
     // 모든 모듈의 registerSettings(모듈 수명 객체의 static RegisterSettings — log.*·trace.*·기기
     // 프로필 등)를 부르고 각 모듈의 lease를 설정 문맥에 맡긴다(ConfigContext::RetainModule — 로더는

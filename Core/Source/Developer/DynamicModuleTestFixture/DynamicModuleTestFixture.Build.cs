@@ -1,6 +1,6 @@
 using Rocks.Build.Rules;
 
-// Test module loaded at run time (Docs/Design/ModuleLoader.ko.md section 3.8, ML3). The test executables list it in DynamicModules: the build
+// Test module loaded at run time (Docs/Design/ModuleLoader section 3.8, ML3). The test executables list it in DynamicModules: the build
 // links it into the monolithic executable and adds its module table row, but Load of the executable does not start it and the tests do not see its
 // headers. Tests start it with ModuleLoader::Load and use it through the DynamicProbe interface (DynamicModuleTestApi). It is not part of the
 // game runtime.

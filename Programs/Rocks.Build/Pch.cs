@@ -45,6 +45,7 @@ public static class ModuleDefinitions
     {
         NativeModuleInput[] visible = dependencies.ToArray();
         string[] defines = module.PublicDefines.Concat(module.PrivateDefines)
+            .Concat(module.AndroidPackage is null ? [] : [AndroidPackage.ApkDefine])
             .Concat(visible.SelectMany(value => value.PublicDefines.Concat(value.ConsumerDefines)))
             .Concat(new[] { module }.Concat(visible).Where(value => !value.ThirdParty)
                 .Select(value => LinkTypes.ApiDefine(value, ReferenceEquals(value, module), linkType, platform)))
@@ -58,7 +59,7 @@ public static class ModuleDefinitions
         }
 
         // 진입점 모듈은 자기 이름과 자기 타입 표지를 받는다. 표지는 리플렉션 생성 소스(모듈 생성 소스 — RegisterModuleOwnTypes 정의)가
-        // 있는지로 정한다(Docs/Design/ModuleLoader.ko.md 3.10절).
+        // 있는지로 정한다(Docs/Design/ModuleLoader 3.10절).
         // 공유 라이브러리 표지는 Modular에서 공유 라이브러리가 되는 모듈(서드파티가 아닌 라이브러리 모듈과 호스트 모듈)이면 1이다(BuildTargets
         // BS8d1, ModuleLoader 3.14절).
         bool sharedLibrary = LinkTypes.CompilesAsSharedLibrary(module, linkType, entryModule);

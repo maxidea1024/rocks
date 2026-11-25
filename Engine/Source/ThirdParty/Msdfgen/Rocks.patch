@@ -1,0 +1,75 @@
+diff --git a/core/MSDFErrorCorrection.cpp b/core/MSDFErrorCorrection.cpp
+index 940db3d..89a4a12 100644
+--- a/core/MSDFErrorCorrection.cpp
++++ b/core/MSDFErrorCorrection.cpp
+@@ -39,7 +39,7 @@ public:
+         return 0;
+     }
+     /// Returns true if the combined results of the tests performed on the median value m interpolated at t indicate an artifact.
+-    inline bool evaluate(double t, float m, int flags) const {
++    inline bool evaluate(double /*t*/, float /*m*/, int flags) const {
+         return (flags&2) != 0;
+     }
+ private:
+@@ -55,7 +55,7 @@ public:
+     public:
+         inline ArtifactClassifier(ShapeDistanceChecker *parent, const Vector2 &direction, double span) : BaseArtifactClassifier(span, parent->protectedFlag), parent(parent), direction(direction) { }
+         /// Returns true if the combined results of the tests performed on the median value m interpolated at t indicate an artifact.
+-        inline bool evaluate(double t, float m, int flags) const {
++        inline bool evaluate(double t, float /*m*/, int flags) const {
+             if (flags&CLASSIFIER_FLAG_CANDIDATE) {
+                 // Skip expensive distance evaluation if the point has already been classified as an artifact by the base classifier.
+                 if (flags&CLASSIFIER_FLAG_ARTIFACT)
+diff --git a/core/edge-coloring.cpp b/core/edge-coloring.cpp
+index 9ae843d..8f53419 100644
+--- a/core/edge-coloring.cpp
++++ b/core/edge-coloring.cpp
+@@ -163,7 +163,7 @@ void edgeColoringInkTrap(Shape &shape, double angleThreshold, unsigned long long
+             int index = 0;
+             for (std::vector<EdgeHolder>::const_iterator edge = contour->edges.begin(); edge != contour->edges.end(); ++edge, ++index) {
+                 if (isCorner(prevDirection.normalize(), (*edge)->direction(0).normalize(), crossThreshold)) {
+-                    Corner corner = { index, splineLength };
++                    Corner corner = { index, splineLength, false, BLACK };
+                     corners.push_back(corner);
+                     splineLength = 0;
+                 }
+diff --git a/core/edge-segments.cpp b/core/edge-segments.cpp
+index 582c6f8..ee1f985 100644
+--- a/core/edge-segments.cpp
++++ b/core/edge-segments.cpp
+@@ -118,7 +118,7 @@ Point2 CubicSegment::point(double param) const {
+     return mix(mix(mix(p[0], p[1], param), p12, param), mix(p12, mix(p[2], p[3], param), param), param);
+ }
+ 
+-Vector2 LinearSegment::direction(double param) const {
++Vector2 LinearSegment::direction(double /*param*/) const {
+     return p[1]-p[0];
+ }
+ 
+@@ -138,11 +138,11 @@ Vector2 CubicSegment::direction(double param) const {
+     return tangent;
+ }
+ 
+-Vector2 LinearSegment::directionChange(double param) const {
++Vector2 LinearSegment::directionChange(double /*param*/) const {
+     return Vector2();
+ }
+ 
+-Vector2 QuadraticSegment::directionChange(double param) const {
++Vector2 QuadraticSegment::directionChange(double /*param*/) const {
+     return (p[2]-p[1])-(p[1]-p[0]);
+ }
+ 
+diff --git a/core/edge-selectors.cpp b/core/edge-selectors.cpp
+index f3559ea..b02adf2 100644
+--- a/core/edge-selectors.cpp
++++ b/core/edge-selectors.cpp
+@@ -16,7 +16,7 @@ void TrueDistanceSelector::reset(const Point2 &p) {
+     this->p = p;
+ }
+ 
+-void TrueDistanceSelector::addEdge(EdgeCache &cache, const EdgeSegment *prevEdge, const EdgeSegment *edge, const EdgeSegment *nextEdge) {
++void TrueDistanceSelector::addEdge(EdgeCache &cache, const EdgeSegment * /*prevEdge*/, const EdgeSegment *edge, const EdgeSegment * /*nextEdge*/) {
+     double delta = DISTANCE_DELTA_FACTOR*(p-cache.point).length();
+     if (cache.absDistance-delta <= fabs(minDistance.distance)) {
+         double dummy;

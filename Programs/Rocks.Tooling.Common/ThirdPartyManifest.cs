@@ -124,6 +124,13 @@ public sealed partial record ThirdPartyManifest(
     /// </summary>
     public bool GlobalState { get; init; }
 
+    /// <summary>
+    /// 이 라이브러리의 C++ 번역 단위만 RTTI를 켜고 컴파일할지다(manifest <c>rtti</c>, 생략하면 false — Docs/Design/Compression.ko.md
+    /// 3.3절 C++ 서드파티). 자기 클래스 계층에서 <c>dynamic_cast</c>·<c>typeid</c>를 쓰는 upstream(ICU4C common)에만 쓴다. 모듈 규칙이
+    /// <c>NativeModuleInput.RuntimeTypeInformation</c>으로 옮긴다. C++ 번역 단위가 없는데 true면 manifest 오류다.
+    /// </summary>
+    public bool RuntimeTypeInformation { get; init; }
+
     /// <summary>원본 디렉터리에 적용한 추적 가능한 수정 목록이다(manifest <c>modifications</c>). 비어 있으면 원본 그대로다.</summary>
     public IReadOnlyList<ThirdPartyModification> Modifications { get; init; } = [];
 
@@ -260,6 +267,9 @@ public sealed partial record ThirdPartyManifest(
     private static readonly Regex Sha256Text = new("^[0-9a-f]{64}$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     private static readonly Regex DefineName = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
+    // 번역 단위로 받는 확장자다(.c는 C17, 나머지는 C++23).
+    private static readonly string[] TranslationUnitExtensions = [".c", ".cpp", ".cc"];
+
     private static readonly string[] TopLevel =
     [
         "schema", "name", "version", "upstreamDirectory", "source", "licenses", "translationUnits", "includeDirectories",
@@ -268,7 +278,7 @@ public sealed partial record ThirdPartyManifest(
 
     // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
     private static readonly string[] OptionalTopLevel =
-        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch", "globalState"];
+        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch", "globalState", "rtti"];
 
     // licenses 항목의 필수·선택 필드다.
     private static readonly string[] LicenseFields = ["spdx", "upstreamExpression", "file", "binaryNoticeRequired"];
@@ -466,11 +476,12 @@ public sealed partial record ThirdPartyManifest(
         }
 
         IReadOnlyList<string> translationUnits = Paths(fields["translationUnits"], "translationUnits", nonEmpty: kind == ThirdPartyKind.Code);
+        // .c는 C17, .cpp·.cc는 엔진과 같은 C++23(RTTI·예외 끔)으로 컴파일한다(Docs/Design/Compression.ko.md 3.3절).
         foreach (string unit in translationUnits)
         {
-            if (!unit.EndsWith(".c", StringComparison.Ordinal))
+            if (!TranslationUnitExtensions.Any(extension => unit.EndsWith(extension, StringComparison.Ordinal)))
             {
-                throw new FormatException($"translationUnits: '{unit}' must be a .c file (third-party sources build as C17)");
+                throw new FormatException($"translationUnits: '{unit}' must be a .c (C17), .cpp or .cc (C++23) file");
             }
         }
 
@@ -581,6 +592,22 @@ public sealed partial record ThirdPartyManifest(
         }
 
         bool linkTimeOptimization = OptionalFalse(fields, "linkTimeOptimization");
+        bool runtimeTypeInformation = false;
+        if (fields.TryGetValue("rtti", out JsonElement rttiElement))
+        {
+            if (rttiElement.ValueKind != JsonValueKind.True)
+            {
+                throw new FormatException("rtti: only true is allowed (omit the field for the default, RTTI off)");
+            }
+
+            if (kind != ThirdPartyKind.Code || !translationUnits.Any(unit => !unit.EndsWith(".c", StringComparison.Ordinal)))
+            {
+                throw new FormatException("rtti: only a code library with C++ translation units (.cpp, .cc) declares it");
+            }
+
+            runtimeTypeInformation = true;
+        }
+
         bool sanitizerInstrumentation = OptionalFalse(fields, "sanitizerInstrumentation");
         // code 라이브러리는 전역 상태 여부를 반드시 밝힌다(BuildTargets BD29 — 기본값으로 넘어가지 않게).
         bool globalState = false;
@@ -704,6 +731,7 @@ public sealed partial record ThirdPartyManifest(
             LinkTimeOptimization = linkTimeOptimization,
             SanitizerInstrumentation = sanitizerInstrumentation,
             GlobalState = globalState,
+            RuntimeTypeInformation = runtimeTypeInformation,
             Modifications = modifications,
             Patch = patch
         };

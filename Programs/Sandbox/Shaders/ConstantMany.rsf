@@ -1,0 +1,164 @@
+// 단계마다 상수 버퍼 12개(형식 정의 최소인 Vulkan·GLES 12)를 읽는 self-test 셰이더다
+// (Docs/Design/RenderBase 9.11절). PS는 픽셀 x마다 slot 하나를 그대로 내고, x ≥ 12는 VS 합이다.
+#include "/Plugin/Sandbox/Common.rsh"
+
+struct VSOutput {
+    float4 position : SV_Position;
+    float4 color : TEXCOORD0;
+};
+
+cbuffer V0 {
+    float4 v0;
+};
+
+cbuffer V1 {
+    float4 v1;
+};
+
+cbuffer V2 {
+    float4 v2;
+};
+
+cbuffer V3 {
+    float4 v3;
+};
+
+cbuffer V4 {
+    float4 v4;
+};
+
+cbuffer V5 {
+    float4 v5;
+};
+
+cbuffer V6 {
+    float4 v6;
+};
+
+cbuffer V7 {
+    float4 v7;
+};
+
+cbuffer V8 {
+    float4 v8;
+};
+
+cbuffer V9 {
+    float4 v9;
+};
+
+cbuffer V10 {
+    float4 v10;
+};
+
+cbuffer V11 {
+    float4 v11;
+};
+
+VSOutput ConstantManyVS(uint id : SV_VertexID) {
+    VSOutput output;
+    output.position = FullScreenPosition(id);
+    output.color = float4((v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11).xyz, 1.0);
+    return output;
+}
+
+cbuffer P0 {
+    float4 p0;
+};
+
+cbuffer P1 {
+    float4 p1;
+};
+
+cbuffer P2 {
+    float4 p2;
+};
+
+cbuffer P3 {
+    float4 p3;
+};
+
+cbuffer P4 {
+    float4 p4;
+};
+
+cbuffer P5 {
+    float4 p5;
+};
+
+cbuffer P6 {
+    float4 p6;
+};
+
+cbuffer P7 {
+    float4 p7;
+};
+
+cbuffer P8 {
+    float4 p8;
+};
+
+cbuffer P9 {
+    float4 p9;
+};
+
+cbuffer P10 {
+    float4 p10;
+};
+
+cbuffer P11 {
+    float4 p11;
+};
+
+float4 ConstantManyPS(VSOutput input) : SV_Target0 {
+    const uint index = (uint)input.position.x;
+    if (index == 0u) {
+        return p0;
+    }
+
+    if (index == 1u) {
+        return p1;
+    }
+
+    if (index == 2u) {
+        return p2;
+    }
+
+    if (index == 3u) {
+        return p3;
+    }
+
+    if (index == 4u) {
+        return p4;
+    }
+
+    if (index == 5u) {
+        return p5;
+    }
+
+    if (index == 6u) {
+        return p6;
+    }
+
+    if (index == 7u) {
+        return p7;
+    }
+
+    if (index == 8u) {
+        return p8;
+    }
+
+    if (index == 9u) {
+        return p9;
+    }
+
+    if (index == 10u) {
+        return p10;
+    }
+
+    if (index == 11u) {
+        return p11;
+    }
+
+    return input.color;
+}

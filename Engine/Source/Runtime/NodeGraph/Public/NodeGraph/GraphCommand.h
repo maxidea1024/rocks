@@ -7,7 +7,7 @@
 #include <Core/Text/String.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 그래프 공통 명령과 명령 목록이다(Docs/Design/NodeGraph.ko.md 8.1·8.6절). 명령은 데이터다 — 메뉴
+// 그래프 공통 명령과 명령 목록이다(Docs/Design/NodeGraph 8.1·8.6절). 명령은 데이터다 — 메뉴
 // 항목·RPC· headless 시험이 같은 목록을 만들어 GraphMutator::Execute에 넘긴다. 도메인 명령(변환
 // 노드 끼우기 등)은 이 명령들의 목록이다.
 //
@@ -44,14 +44,16 @@ enum class GraphCommandKind : uint8 {
     MoveNodesToGraph,
     RemoveRetainedPin,
     InsertNode,
-    InsertEdge
+    InsertEdge,
+    SetGraphBoundary
 };
 
 // 명령 하나다. 칸은 종류마다 쓰는 것만 본다(GraphCommandList의 함수 주석).
 struct ROCKS_NODEGRAPH_API GraphCommand {
     explicit GraphCommand(Allocator& allocator) noexcept
         : nodeData(allocator), layout(allocator), nodes(allocator), edges(allocator),
-          bytes(allocator), comment(allocator), title(allocator) {
+          bytes(allocator), comment(allocator), title(allocator), inputs(allocator),
+          outputs(allocator) {
     }
 
     GraphCommandKind kind = GraphCommandKind::AddNode;
@@ -74,6 +76,9 @@ struct ROCKS_NODEGRAPH_API GraphCommand {
     GraphRole role = GraphRole::Collapsed;
     uint32 domainRole = 0;
     String title;
+    // SetGraphBoundary의 경계 목록이다(10.1절 NG3c).
+    Array<GraphBoundaryPin> inputs;
+    Array<GraphBoundaryPin> outputs;
 };
 
 // 명령 목록이다. 함수마다 명령 하나를 끝에 더한다(값을 복사한다). 할당 실패는 그 오류이고 목록은
@@ -125,8 +130,17 @@ public:
 
     Result<void> SetEnableState(Guid graph, Guid node, NodeEnableState state) noexcept;
 
-    // 하위 그래프를 더한다(역할 Collapsed·DomainDefined, 배치 제목 title).
-    Result<void> AddGraph(Guid graph, GraphRole role, uint32 domainRole, StringView title) noexcept;
+    // 하위 그래프를 더한다(역할 Collapsed·DomainDefined, 배치 제목 title). Collapsed는 부모
+    // Graph.Collapsed 노드 id(ownerNode, 같은 목록 뒤에서 AddNode)를 받고, 그 밖의 역할은 0이다
+    // (10.1절 NG3c). 경계 목록은 빈 채로 시작한다(SetGraphBoundary).
+    Result<void> AddGraph(Guid graph, GraphRole role, uint32 domainRole, StringView title,
+                          Guid ownerNode = Guid{}) noexcept;
+
+    // Collapsed 그래프의 경계 목록을 바꾼다. 같은 명령 안에서 그 그래프의
+    // Graph.Input·Graph.Output과 부모 Graph.Collapsed의 핀을 재정리한다(사라진 경계 핀의 간선·값은
+    // 고아 핀으로, 10.1절).
+    Result<void> SetGraphBoundary(Guid graph, Span<const GraphBoundaryPin> inputs,
+                                  Span<const GraphBoundaryPin> outputs) noexcept;
 
     Result<void> RemoveGraph(Guid graph) noexcept;
 
@@ -138,7 +152,7 @@ public:
     Result<void> RemoveRetainedPin(Guid graph, Guid node, Name key) noexcept;
 
     // 완성된 노드 데이터(입력 기본값·고아 핀·활성 상태 포함, 등록되지 않은 종류 — 자리 노드 — 도
-    // 된다)를 graph에 넣는다(붙여넣기·template — Docs/Design/NodeGraph.ko.md 9.4절). layout.node는
+    // 된다)를 graph에 넣는다(붙여넣기·template — Docs/Design/NodeGraph 9.4절). layout.node는
     // node.id로 맞춘다. 입력 기본값·고아 핀 목록은 넣을 때 정규 순서로 맞춘다.
     Result<void> InsertNode(Guid graph, const GraphNode& node, const NodeLayout& layout) noexcept;
 
@@ -196,7 +210,6 @@ enum class GraphCommandReason : uint8 {
     ConversionInvalid,
     NotOrdered,
     OrderMismatch,
-    PinsDropped,
     ValueHidden,
     ValueEmpty,
     DefaultMissing,
@@ -207,12 +220,23 @@ enum class GraphCommandReason : uint8 {
     RetainedMissing,
     // 명령 목록에 같은 노드 id가 두 번 있다.
     DuplicateNode,
-    // 새 핀 목록에 고아 핀과 같은 키가 생긴다(GI8 — 재결합은 NG3).
+    // 새 핀 목록에 고아 핀과 같은 키가 반대 방향으로 생긴다(GI8 — 같은 방향이면
+    // 재결합한다, 10.1절).
     RetainedShadowed,
     // 재경유 사슬에 순환이 생긴다(GI10).
     RerouteCycle,
     // 값 바이트가 MaxPropertyRecordBytes를 넘는다.
     ValueTooLarge,
+    // 하위 그래프 경계 노드 규칙(10.1절 GI15·GI16): 경계 노드를 Collapsed가 아닌 그래프에
+    // 넣음·옮김, Graph.Collapsed의 하위 그래프 없음, 목록 끝에 경계 노드가 각각 하나가 아님·부모가
+    // 없음.
+    BoundaryNode,
+    // SetGraphBoundary 목록이 틀렸다: 키 None·겹침, kind가 Data·Flow 아님, maxEdges 0, 합계 상한.
+    BoundaryInvalid,
+    // 부모 Graph.Collapsed가 있는 하위 그래프를 RemoveGraph로 지우려 했다(노드를 지운다).
+    GraphReferenced,
+    // Graph.Collapsed를 자기 하위 그래프 나무 안에 두려 했다(GI16 순환).
+    CollapsedCycle,
     // 그래프의 노드·간선 수가 상한(MaxGraphNodes·MaxGraphEdges)에 이르렀다.
     GraphFull,
     // 명령 뒤 전체 불변식 검사(SetFullValidation)가 실패했다 — mutator 결함이다.
@@ -220,7 +244,10 @@ enum class GraphCommandReason : uint8 {
     // 넣는 노드 데이터가 틀렸다(InsertNode): 입력 기본값 핀·고아 핀 키가 겹치거나 None이다, 고아 핀
     // 방향이 정의되지 않았다, 재경유 노드에 고아 핀이 있다, 목록 끝에 값도 간선도 없는 고아 핀이
     // 남았다(GI7).
-    NodeDataInvalid
+    NodeDataInvalid,
+    // migration 결과가 틀렸다: 버전을 올리지 않았다, 결과 종류·속성 schema가 틀렸다, 서로 다른 두
+    // 키를 같은 키로 재지정했다, 단계 상한을 넘었다(10.1절).
+    MigrationInvalid
 };
 
 ROCKS_NODEGRAPH_API const char* GraphCommandReasonName(GraphCommandReason reason) noexcept;

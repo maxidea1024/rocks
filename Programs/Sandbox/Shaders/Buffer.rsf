@@ -1,0 +1,64 @@
+// 버퍼 view self-test 셰이더다(VS·PS가 typed·구조화·raw view를 읽는다).
+#include "/Plugin/Sandbox/Common.rsh"
+
+struct VSOutput {
+    float4 position : SV_Position;
+    float4 color : TEXCOORD0;
+};
+
+float4 Unpack(uint v) {
+    return float4(v & 255, (v >> 8) & 255, (v >> 16) & 255, 255) / 255.0;
+}
+
+VSOutput BlackVS(uint id : SV_VertexID) {
+    VSOutput output;
+    output.position = FullScreenPosition(id);
+    output.color = float4(0.0, 0.0, 0.0, 1.0);
+    return output;
+}
+
+float4 ColorPS(VSOutput input) : SV_Target0 {
+    return input.color;
+}
+
+Buffer<float4> Lights;
+
+float4 TypedPS(VSOutput input) : SV_Target0 {
+    return Lights.Load(0);
+}
+
+Buffer<uint> Codes;
+
+VSOutput TypedVS(uint id : SV_VertexID) {
+    VSOutput output;
+    output.position = FullScreenPosition(id);
+    output.color = Unpack(Codes.Load(0));
+    return output;
+}
+
+struct Item {
+    float4 color;
+    float4 unused;
+};
+
+StructuredBuffer<Item> Items;
+
+float4 StructuredPS(VSOutput input) : SV_Target0 {
+    return Items[1].color;
+}
+
+ByteAddressBuffer Words;
+
+VSOutput RawVS(uint id : SV_VertexID) {
+    VSOutput output;
+    output.position = FullScreenPosition(id);
+    output.color = Unpack(Words.Load(4));
+    return output;
+}
+
+// 파이프라인 이름 표에 없는 자원이다(음성 대조).
+Buffer<float4> Outside;
+
+float4 OutsidePS(VSOutput input) : SV_Target0 {
+    return Outside.Load(0);
+}

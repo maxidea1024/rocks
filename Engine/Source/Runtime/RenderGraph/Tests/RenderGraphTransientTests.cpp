@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG5 transient aliasing 시험이다(Docs/Design/RenderBase.ko.md 8절 "GX12·RG5 transient aliasing
+// RG5 transient aliasing 시험이다(Docs/Design/RenderBase 8절 "GX12·RG5 transient aliasing
 // 설계"). 기록 장치에 transient heap을 공개하고 할당 순서·aliasing·획득·heap 재사용을 결정적으로
 // 단언한다. 기록 장치는 비활성 placed 자원 사용(획득 빠짐, 다른 자원이 같은 구간을 획득한 뒤의
 // 사용)을 검증 오류로 센다.

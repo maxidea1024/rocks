@@ -19,6 +19,13 @@
 // 쓴다. D3D12Graphics에도 같은 모양의 DXGI 형식 표가 있으며 합치는 것은 후속이다.
 namespace rocks::graphics::d3d11 {
 
+// 그리기별 상수(루트 상수)의 상수 버퍼 register다(ShaderSystem 7.2절 2항 D3D11 전개 b13, SSD32).
+inline constexpr UINT RootConstantsRegister = 13;
+// dispatch 앞뒤로 풀어 주는 단계 SRV·CS UAV slot 수다(D3D11_SM5 형식 상한 — SRV 텍스처 16과
+// 구조화 4가 t를 나누고, UAV는 구조화 4 + storage image 4).
+inline constexpr UINT MaxBoundShaderResources = 32;
+inline constexpr UINT MaxBoundUnorderedViews = 8;
+
 // 기록 중 그릴 수 있는 스왑체인 버퍼 수다(flip model 최소 2).
 inline constexpr uint32 SwapChainBufferCount = 2;
 // 서로 다른 SamplerDesc 조합 수의 상한이다(D3D12와 같다. D3D11 자체 한도는 4096개).

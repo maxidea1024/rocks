@@ -190,7 +190,7 @@ Result<BufferHandle> D3D11Device::CreateBuffer(const BufferDesc& desc,
 Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
     // 형식·용도·차원 지원은 장치 능력으로 판정한다(다른 형식으로 대신하지 않는다,
-    // PixelFormat.ko.md 8.3절). 크기 검사보다 먼저 본다.
+    // Docs/Design/PixelFormat 8.3절). 크기 검사보다 먼저 본다.
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(FormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
         platform::LockGuard lock(gate_);
@@ -532,7 +532,8 @@ PixelFormatCaps D3D11Device::GetPixelFormatCaps(PixelFormat format) const noexce
     return FormatCaps(format);
 }
 
-// 원 텍스처의 자원을 공유하는 SRV view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수 있다.
+// 원 텍스처의 자원을 공유하는 SRV view다(Docs/Design/PixelFormat 9–11절). 다른 스레드에서도 부를 수
+// 있다.
 Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
                                                      const TextureViewDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
@@ -681,10 +682,28 @@ Result<TextureHandle> D3D11Device::CreateWritableTextureView(const TextureRecord
 }
 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
+Result<ShaderHandle> D3D11Device::CreateShader(const ShaderCodeDesc& desc) noexcept {
+    platform::LockGuard lock(gate_);
+    const char* reason = "";
+    auto created = shaders_.Create(desc, ShaderCodeKind::Dxbc, &reason);
+    if (!created && created.Error() == ErrorCode::InvalidArgument) {
+        auto failed = Fail(reason);
+        (void)failed;
+    }
+
+    return created;
+}
+
+void D3D11Device::Retire(ShaderHandle shader) noexcept {
+    platform::LockGuard lock(gate_);
+    shaders_.Retire(shader);
+}
+
+// 쿠킹된 DXBC(D3D11_SM5 — FXC 또는 SPIRV-Cross 경로)와 정규화 layout으로 만든다(ShaderSystem 16.1절
+// SSD18). 단계별 slot은 layout이 준 register다.
 Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        !ValidatePipelineDesc(desc)) {
+    if (!ValidatePipelineDesc(desc)) {
         auto failed = Fail("pipeline description breaks the pipeline rules");
         (void)failed;
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
@@ -718,16 +737,35 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    ComRef<ID3DBlob> vertexCode;
-    ComRef<ID3DBlob> pixelCode;
-    auto vertex = Compile(desc.vertex.hlsl, "VSMain", "vs_5_0", vertexCode);
-    if (!vertex) {
-        return Result<PipelineHandle>::Failure(vertex.Error());
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* vertex = nullptr;
+    const DeviceShaderCode* pixel = nullptr;
+    PipelineRecord record;
+    record.drawConstantBytes = desc.drawConstantBytes;
+    if (!FindPipelineShaders(shaders_, desc, vertex, pixel, error)) {
+        auto failed = Fail(error);
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto matched = MatchVertexInputs(vertexCode.Get(), desc.layout);
-    if (!matched) {
-        return Result<PipelineHandle>::Failure(matched.Error());
+    const DeviceShaderCode* stages[] = {vertex, pixel};
+    if (!MatchShaderVertexInputs(vertex->Layout(), desc.layout, error) ||
+        !ResolvePipelineSlots(stages, desc.bindings, desc.drawConstantBytes, record.slots, error)) {
+        auto failed = Fail(error);
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // D3D11 형식에는 PS 진단 버퍼가 없고(ShaderSystem 7.2절 12항), b13은 루트 상수 자리다.
+    const uint32 rootBit = 1u << RootConstantsRegister;
+    if (record.slots.debugBuffer ||
+        ((record.slots.constantSlots.usedMask[ConstantBufferStageIndex(ShaderStage::Vertex)] |
+          record.slots.constantSlots.usedMask[ConstantBufferStageIndex(ShaderStage::Pixel)]) &
+         rootBit) != 0) {
+        auto failed = Fail("the pixel debug buffer and constant buffer register b13 are not "
+                           "available on D3D11");
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
     auto formats = CheckVertexFormats(desc.layout);
@@ -735,36 +773,19 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
         return Result<PipelineHandle>::Failure(formats.Error());
     }
 
-    auto pixel = Compile(desc.pixel.hlsl, "PSMain", "ps_5_0", pixelCode);
-    if (!pixel) {
-        return Result<PipelineHandle>::Failure(pixel.Error());
-    }
-
-    PipelineRecord record;
-    record.drawConstantBytes = desc.drawConstantBytes;
-    auto vertexBindings = ReflectBindings(vertexCode.Get(), ShaderStage::Vertex,
-                                          desc.drawConstantBytes, record.bufferSlots, nullptr);
-    auto pixelBindings = vertexBindings
-                             ? ReflectBindings(pixelCode.Get(), ShaderStage::Pixel,
-                                               desc.drawConstantBytes, record.bufferSlots, nullptr)
-                             : Move(vertexBindings);
-    if (!pixelBindings) {
-        return Result<PipelineHandle>::Failure(pixelBindings.Error());
-    }
-
+    record.bufferSlots = record.slots.bufferSlots;
     auto states = CreatePipelineStates(desc, record);
     if (!states) {
         return Result<PipelineHandle>::Failure(states.Error());
     }
-    HRESULT result =
-        device_->CreateVertexShader(vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
-                                    nullptr, record.vertexShader.Out());
+    HRESULT result = device_->CreateVertexShader(vertex->Code().Data(), vertex->Code().Size(),
+                                                 nullptr, record.vertexShader.Out());
     if (FAILED(result)) {
         return FailWith<PipelineHandle>("CreateVertexShader", result);
     }
 
-    result = device_->CreatePixelShader(pixelCode->GetBufferPointer(), pixelCode->GetBufferSize(),
-                                        nullptr, record.pixelShader.Out());
+    result = device_->CreatePixelShader(pixel->Code().Data(), pixel->Code().Size(), nullptr,
+                                        record.pixelShader.Out());
     if (FAILED(result)) {
         return FailWith<PipelineHandle>("CreatePixelShader", result);
     }
@@ -787,8 +808,8 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
 
     if (desc.layout.attributes.Size() != 0) {
         result = device_->CreateInputLayout(
-            elements, static_cast<UINT>(desc.layout.attributes.Size()),
-            vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(), record.inputLayout.Out());
+            elements, static_cast<UINT>(desc.layout.attributes.Size()), vertex->Code().Data(),
+            vertex->Code().Size(), record.inputLayout.Out());
         if (FAILED(result)) {
             return FailWith<PipelineHandle>("CreateInputLayout", result);
         }
@@ -855,119 +876,6 @@ Result<ID3D11SamplerState*> D3D11Device::SamplerFor(const SamplerDesc& desc) noe
     entry.desc = desc;
     ++samplerCount_;
     return Result<ID3D11SamplerState*>::Success(entry.state.Get());
-}
-
-Result<void> D3D11Device::Compile(StringView source, const char* entry, const char* target,
-                                  ComRef<ID3DBlob>& code) noexcept {
-    ComRef<ID3DBlob> errors;
-    // 행렬은 행 우선으로 담는다(그리기별 상수의 행렬 규약, ShaderSystem 7.2절 6항 FXC /Zpr).
-    // D3D12와 UE도 같은 플래그다(D3DShaderCompiler.cpp:1337–1339).
-    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
-    if (validation_) {
-        flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-    } else {
-        flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
-    }
-
-    const HRESULT compiled = D3DCompile(source.Data(), source.ByteCount(), "RocksShader", nullptr,
-                                        nullptr, entry, target, flags, 0, code.Out(), errors.Out());
-    if (FAILED(compiled)) {
-        // 파이프라인을 만드는 호출자가 LastError로 기록한다(LoggingSystem 13절). 진단은 앞쪽
-        // MaxShaderDiagnosticLogBytes까지 싣는다.
-        auto failed = Fail("D3DCompile", compiled);
-        (void)failed;
-        StringView diagnostics("no compiler output");
-        if (errors) {
-            diagnostics = StringView(static_cast<const char*>(errors->GetBufferPointer()),
-                                     errors->GetBufferSize())
-                              .LeftBytesAtCodePoint(MaxShaderDiagnosticLogBytes);
-        }
-
-        char storage[MaxShaderDiagnosticLogBytes + 128];
-        FixedStringBuilder text{Span<char>(storage)};
-        (void)text.TryAppendFormat("Shader {} ({}) failed to compile (HRESULT {:#x}): {}", entry,
-                                   target, static_cast<uint32>(compiled), diagnostics);
-        auto assigned = lastError_.TryAssign(text.View());
-        (void)assigned;
-        return Result<void>::Failure(ErrorCode::DependencyFailed);
-    }
-
-    return Result<void>::Success();
-}
-
-// 컴파일한 VS 입력 signature를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조). 사용자 입력은
-// 시맨틱 ATTRIBUTEn만 받고, n이 배치에 있어야 하며 성분 타입 계열이 형식의 셰이더 타입과 같아야
-// 한다. 셰이더가 읽지 않는 속성은 허용한다.
-Result<void> D3D11Device::MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept {
-    ComRef<ID3D11ShaderReflection> reflection;
-    HRESULT result =
-        D3DReflect(code->GetBufferPointer(), code->GetBufferSize(), IID_PPV_ARGS(reflection.Out()));
-    if (FAILED(result)) {
-        return Fail("D3DReflect (vertex shader)", result);
-    }
-
-    D3D11_SHADER_DESC shader = {};
-    result = reflection->GetDesc(&shader);
-    if (FAILED(result)) {
-        return Fail("ID3D11ShaderReflection::GetDesc", result);
-    }
-
-    for (UINT index = 0; index < shader.InputParameters; ++index) {
-        D3D11_SIGNATURE_PARAMETER_DESC input = {};
-        result = reflection->GetInputParameterDesc(index, &input);
-        if (FAILED(result)) {
-            return Fail("ID3D11ShaderReflection::GetInputParameterDesc", result);
-        }
-
-        if (input.SystemValueType != D3D_NAME_UNDEFINED) {
-            continue; // SV_VertexID·SV_InstanceID 등
-        }
-
-        Diagnostic message;
-        if (input.SemanticName == nullptr || !IsAttributeSemantic(input.SemanticName) ||
-            input.SemanticIndex >= MaxVertexAttributes) {
-            message.Text("vertex shader input ")
-                .Text(input.SemanticName != nullptr ? input.SemanticName : "?")
-                .Number(input.SemanticIndex)
-                .Text(" must use semantic ATTRIBUTE0-15");
-            return Reject(message);
-        }
-
-        const VertexAttribute* attribute = nullptr;
-        for (const VertexAttribute& candidate : layout.attributes) {
-            if (candidate.location == input.SemanticIndex) {
-                attribute = &candidate;
-            }
-        }
-
-        if (attribute == nullptr) {
-            message.Text("vertex shader reads location ")
-                .Number(input.SemanticIndex)
-                .Text(" which the vertex layout does not provide");
-            return Reject(message);
-        }
-
-        VertexShaderType shaderType = VertexShaderType::Float;
-        if (input.ComponentType == D3D_REGISTER_COMPONENT_SINT32) {
-            shaderType = VertexShaderType::Int;
-        } else if (input.ComponentType == D3D_REGISTER_COMPONENT_UINT32) {
-            shaderType = VertexShaderType::Uint;
-        }
-
-        if (VertexFormatShaderType(attribute->format) != shaderType) {
-            message.Text("vertex input location ")
-                .Number(input.SemanticIndex)
-                .Text(": format ")
-                .Text(VertexFormatName(attribute->format))
-                .Text(" feeds ")
-                .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
-                .Text(" but the shader reads ")
-                .Text(VertexShaderTypeName(shaderType));
-            return Reject(message);
-        }
-    }
-
-    return Result<void>::Success();
 }
 
 // 장치가 정점 입력으로 읽을 수 없는 형식은 Unsupported다(feature level 11_0에서 선택 기능인

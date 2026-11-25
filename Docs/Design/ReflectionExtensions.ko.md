@@ -1743,7 +1743,7 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 
 ## 26. 독립 struct Record(NodeGraph NG2a)
 
-[노드 그래프](NodeGraph.ko.md) GD23은 노드 속성·입력 기본값을 struct Record 바이트(InstancedStruct 내용과 같은 wire)로 보관한다. NodeGraphTools의 조각 텍스트(노드 그래프 9.2절)는 그 바이트를 리플렉션 텍스트(`ExportJson`·`ImportJson`, 10.5절)로 바꾸고, 도메인은 struct 값을 바이트로 만든다(`SetNodeProperties`). 지금 struct codec(`EncodeStructRecord`·`DecodeStructValue`)이 쓰는 문맥은 객체 그래프 저장·복원(ObjectSerialization Private) 안에만 있어서, 값 하나를 그래프 없이 쓰고 읽는 공개 API를 둔다. UE는 `FInstancedStruct::Serialize`가 담긴 struct를 객체 없이 아카이브에 직접 쓴다(CoreUObject `StructUtils/InstancedStruct.cpp:122` — 같은 타입 기본값이 없으면 기본 생성 임시 값을 기준으로 둔다) — 같은 역할을 Rocks wire 규칙으로 둔다.
+[노드 그래프](NodeGraph/05-Decisions.ko.md) GD23은 노드 속성·입력 기본값을 struct Record 바이트(InstancedStruct 내용과 같은 wire)로 보관한다. NodeGraphTools의 조각 텍스트(노드 그래프 9.2절)는 그 바이트를 리플렉션 텍스트(`ExportJson`·`ImportJson`, 10.5절)로 바꾸고, 도메인은 struct 값을 바이트로 만든다(`SetNodeProperties`). 지금 struct codec(`EncodeStructRecord`·`DecodeStructValue`)이 쓰는 문맥은 객체 그래프 저장·복원(ObjectSerialization Private) 안에만 있어서, 값 하나를 그래프 없이 쓰고 읽는 공개 API를 둔다. UE는 `FInstancedStruct::Serialize`가 담긴 struct를 객체 없이 아카이브에 직접 쓴다(CoreUObject `StructUtils/InstancedStruct.cpp:122` — 같은 타입 기본값이 없으면 기본 생성 임시 값을 기준으로 둔다) — 같은 역할을 Rocks wire 규칙으로 둔다.
 
 **API**(ObjectSerialization `ObjectSerialization/StructRecord.h`).
 - `SaveStructRecord(Allocator&, ObjectRegistry&, const ObjectAccessContext&, const TypeLease& type, const void* value, const StructRecordOptions& = {}) -> Result<Array<uint8>>`: struct 값 하나를 Record(header schema = struct ID, version = struct 버전, 멤버 TLV)로 쓴다.
