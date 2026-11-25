@@ -1,5 +1,6 @@
 #include <RenderBase/CookedTexture.h>
 
+#include <Base/NumericLimits.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Move.h>
 #include <Platform/Memory.h>
@@ -239,14 +240,14 @@ Result<RenderBlob> PackCookedTexturePixels(Allocator& allocator,
 
     uint64 total = 0;
     for (const CookedTextureMip& mip : source.mips) {
-        if (mip.byteSize > ~uint64{0} - total) {
+        if (mip.byteSize > NumericLimits<uint64>::Max() - total) {
             return Result<RenderBlob>::Failure(ErrorCode::Overflow);
         }
 
         total += mip.byteSize;
     }
 
-    if (total > static_cast<uint64>(~usize{0})) {
+    if (total > static_cast<uint64>(NumericLimits<usize>::Max())) {
         return Result<RenderBlob>::Failure(ErrorCode::Overflow);
     }
 

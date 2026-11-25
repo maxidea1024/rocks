@@ -64,6 +64,9 @@ public:
     // 올린 항목의 표시 목록 index다(i번째 요청 — 못 올렸으면 ScreenHost::NoInspectorEntry).
     uint32 EntryOf(uint32 request) const noexcept;
 
+    // i번째 요청이 실패했으면 그 오류다(로드·변환·검사 — 성공·진행 중이면 None).
+    ErrorCode FailureOf(uint32 request) const noexcept;
+
     // i번째 요청의 경로 힌트다.
     StringView PathOf(uint32 request) const noexcept;
 
@@ -95,6 +98,7 @@ private:
         LoadTicket ticket;
         AssetLease lease;
         State state = State::Requested;
+        ErrorCode error = ErrorCode::None;
         uint32 inspector = screen::ScreenHost::NoInspectorEntry;
     };
 
