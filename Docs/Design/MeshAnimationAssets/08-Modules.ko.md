@@ -4,7 +4,7 @@
 |---|---|---|---|
 | `MeshSource` | Engine Runtime | `MeshSourceData`·`MeshSource`, 속성 이름 상수, `ValidateMeshSource`, 위상 조회(다각형의 삼각형·코너 등) | AssetRuntime(`BulkDataRef`·`Package`)·Core·MetaSchema·Serialization |
 | `Animation` | Engine Runtime | `BoneHierarchy`·`Skeleton`·`AnimationAsset`·`AnimationClip`·쿠킹 데이터, 클립 샘플링(원본·쿠킹) | AssetRuntime·Curves·Core |
-| `Mesh` | Engine Runtime | `StaticMesh`·`SkinnedAsset`·`SkeletalMesh`, 슬롯·섹션·소켓·단순 충돌·빌드 설정 값 타입, 쿠킹 렌더 데이터 구조 | AssetRuntime·MeshSource·Animation·Material·GraphicsTypes |
+| `Mesh` | Engine Runtime | `StaticMesh`·`SkinnedAsset`·`SkeletalMesh`, 슬롯·섹션·소켓·단순 충돌·빌드 설정 값 타입, 쿠킹 렌더 데이터 구조, 로드 검증 | AssetRuntime·MeshSource·Animation·Material·GraphicsTypes(MA2b1 — Animation은 MA5b) |
 | `MeshTools` | Engine Developer | 빌드(5.2·6.3절), 법선·tangent·MikkTSpace, 용접, 쿠킹 처리기, 메시 임포트 서비스 | Mesh·MeshSource·AssetCooker·AssetDatabase·AssetNugget·ThirdParty MikkTSpace(패치) |
 | `AnimationTools` | Engine Developer | 클립 빌드·재샘플링·쿠킹 처리기, 스켈레톤 병합, 임포트 서비스 | Animation·AssetCooker·AssetDatabase·AssetNugget |
 

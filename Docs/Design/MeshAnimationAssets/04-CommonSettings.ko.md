@@ -21,7 +21,7 @@ UE `DistanceFieldReplacementMesh`(:3024)는 객체 참조라 빌드 설정 struc
 
 필드는 UE `FMeshReductionSettings`(MeshReductionSettings.h:40-110)와 같은 이름 집합을 갖는다: `percentTriangles`, `maxTriangles`, `percentVertices`, `maxVertices`, `maxDeviation`, `pixelError`, `weldingThreshold`, `hardAngleThreshold`, `baseLod`, 중요도 넷(`silhouetteImportance`·`textureImportance`·`shadingImportance`·`vertexColorImportance`), `recalculateNormals`, `generateUniqueLightmapUVs`, `keepSymmetry`, `visibilityAided`, `cullOccluded`, `terminationCriterion`, `visibilityAggressiveness`. 전부 **보존**이다. 축소기는 후속 단계다.
 
-생성 LOD 판정: UE는 `!IsMeshDescriptionValid(i) || IsReductionActive(i)`다(E/Private/StaticMesh.cpp:9772-9773). UE의 "축소 활성"은 축소 모듈이 있어야 하고, LOD 그룹이 덮어쓴 설정과 캐시된 정점·삼각형 수로 판정한다(StaticMesh.cpp:3532-3550). Rocks는 축소기가 없는 동안 "`hasSource`가 거짓이거나 축소 설정이 기본값이 아님"으로 근사한다. 생성 LOD는 축소기가 생길 때까지 빌드에서 빠지고 `UnsupportedSetting` 경고를 낸다. 단, 임포터가 다른 엔진에서 만든 결과 메시를 함께 준 경우(`bakedSource`, 5.1절)는 그것을 쓴다.
+생성 LOD 판정: UE는 `!IsMeshDescriptionValid(i) || IsReductionActive(i)`다(E/Private/StaticMesh.cpp:9772-9773). UE의 "축소 활성"은 축소 모듈이 있어야 하고, LOD 그룹이 덮어쓴 설정과 캐시된 정점·삼각형 수로 판정한다(StaticMesh.cpp:3532-3550). Rocks는 UE 기본 축소기의 판정식을 그대로 쓴다(5.5.1절 5·6 — LOD 그룹 덮어쓰기는 메시 LOD 그룹 표가 생길 때). 축소기가 없는 동안 생성 LOD는 임포터가 준 결과 메시(`bakedSource`, 5.1절)가 있으면 그것을, 없고 원본이 있으면 원본을 축소 없이 빌드하고 `UnsupportedSetting` 경고를 낸다. 둘 다 없으면 그 LOD를 뺀다(5.5.2절 5).
 
 ### 4.3 머티리얼 슬롯 `MeshMaterialSlot`
 
@@ -40,7 +40,8 @@ struct MeshMaterialSlot {                                            // 참조 s
 ```
 
 - 다각형 묶음 → 슬롯 대응은 `importedSlotName` 일치로 정한다. 일치하는 슬롯이 없으면 묶음 번호와 같은 번호의 슬롯을 쓰고 `MaterialSlotFallback` 경고를 낸다. UE는 묶음 ID 값으로 대체한다(StaticMeshBuilder.cpp:1613-1623).
-- `MeshUvDensity`는 UE `FMeshUVChannelInfo`(bInitialized·bOverrideDensities·LocalUVDensities[4])에 대응한다. 빌드가 계산하고, [텍스처 스트리밍](../TextureStreaming.ko.md)이 AssetSystem에 남긴 메시 UV 밀도 요구를 채운다.
+- `MeshUvDensity`는 UE `FMeshUVChannelInfo`(bInitialized·bOverrideDensities·LocalUVDensities[4])에 대응한다. 계산은 [텍스처 스트리밍](../TextureStreaming.ko.md) 단계에서 한다(소비자와 함께 — 5.5.1절 4). 그때까지 빌드는 값을 바꾸지 않는다.
+- 섹션의 슬롯 번호가 슬롯 수 밖이면(슬롯 대체·섹션 정보 덮어쓰기) 엔진 기본 머티리얼로 그린다(UE와 같다 — 5.5.1절 9).
 
 ### 4.4 섹션 정보 `MeshSectionInfo`
 
@@ -74,7 +75,7 @@ StaticMesh: simpleCollision, complexity CollisionComplexity { Default, SimpleAnd
 
 ### 4.7 LOD 화면 크기와 플랫폼별 값
 
-LOD 화면 크기(UE `FPerPlatformFloat ScreenSize`, StaticMeshSourceData.h:177-182)와 최소 LOD는 플랫폼별 값이다. 텍스처의 플랫폼별 설정과 같은 장치(기본값 + TargetProfile 이름별 덮어쓰기 표, AssetSystem 12.4절)를 쓴다. `autoComputeLodScreenSize`(UE `GetAutoComputeLODScreenSize()` — 멤버 직접 접근은 5.7부터 deprecated, StaticMesh.h:720)와 `lodGroup Name`도 둔다. 메시 LOD 그룹 표는 TargetProfile에 텍스처 LOD 그룹과 나란히 둔다(요구 MR9).
+LOD 화면 크기(UE `FPerPlatformFloat ScreenSize` — Rocks `PerPlatformFloat`, 5.5.1절 2, StaticMeshSourceData.h:177-182)와 최소 LOD는 플랫폼별 값이다. 텍스처의 플랫폼별 설정과 같은 장치(기본값 + TargetProfile 이름별 덮어쓰기 표, AssetSystem 12.4절)를 쓴다. `autoComputeLodScreenSize`(UE `GetAutoComputeLODScreenSize()` — 멤버 직접 접근은 5.7부터 deprecated, StaticMesh.h:720)와 `lodGroup Name`도 둔다. 메시 LOD 그룹 표는 TargetProfile에 텍스처 LOD 그룹과 나란히 둔다(요구 MR9).
 
 ### 4.8 구현에서 정한 점(MA3a)
 
