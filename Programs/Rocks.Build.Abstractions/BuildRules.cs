@@ -14,8 +14,13 @@ public sealed record BuildContext(string RootDirectory, string OutputDirectory,
 
     public string PathInRoot(string path) => Path.GetFullPath(path, RootDirectory);
 
+    /// <summary>
+    /// 폴더 아래 C++ 원본(<c>.cpp</c>)과 Objective-C++ 원본(<c>.mm</c> — Apple backend 폴더에만 둔다, Docs/Design/MacPlatform.ko.md 6절)을
+    /// 이름 순으로 모은다. <c>.mm</c>을 Apple 밖 대상에 넘기면 입력 검증이 거부한다.
+    /// </summary>
     public IReadOnlyList<string> Sources(params string[] directories) => directories
-        .SelectMany(directory => Directory.GetFiles(PathInRoot(directory), "*.cpp", SearchOption.AllDirectories))
+        .SelectMany(directory => Directory.GetFiles(PathInRoot(directory), "*.cpp", SearchOption.AllDirectories)
+            .Concat(Directory.GetFiles(PathInRoot(directory), "*.mm", SearchOption.AllDirectories)))
         .Order(StringComparer.Ordinal).ToArray();
 
     /// <summary>
@@ -64,10 +69,28 @@ public abstract class TargetRules
 
     /// <summary>
     /// 링크 방식이다(Docs/Design/BuildTargets 3.8절 BD17, UE TargetRules.LinkType). Monolithic은 모든 모듈을 실행 파일 하나에 링크하고,
-    /// Modular는 모듈마다 공유 라이브러리를 만든다. Editor 타깃(BS2)은 Modular가 기본이 되고, 지금 타깃 종류는 모두 Monolithic이다.
+    /// Modular는 모듈마다 공유 라이브러리를 만든다. Editor 타깃은 Modular가 기본이고(UE와 같다) 나머지 종류는 Monolithic이 기본이다.
     /// Android와 Asan·Coverage·Release 구성은 Modular를 거부한다.
     /// </summary>
-    public virtual NativeLinkType LinkType => NativeLinkType.Monolithic;
+    public virtual NativeLinkType LinkType => Type == TargetType.Editor ? NativeLinkType.Modular : NativeLinkType.Monolithic;
+
+    /// <summary>
+    /// Program만: 에디터 모듈을 링크하는 도구다(Docs/Design/BuildTargets 3.1절, UE <c>bCompileAgainstEditor</c>). 켜면
+    /// <c>ROCKS_WITH_EDITOR=1</c>·<c>ROCKS_WITH_EDITOR_DATA=1</c>이다. 다른 종류가 켜면 규칙 로드 오류다. 사용 예:
+    /// <code>
+    /// public override bool CompileWithEditor => true;
+    /// </code>
+    /// </summary>
+    public virtual bool CompileWithEditor => false;
+
+    /// <summary>
+    /// Program만: 에디터 전용 데이터를 읽는 에셋 도구다(Docs/Design/BuildTargets 3.1절 BD19). 켜면 <c>ROCKS_WITH_EDITOR_DATA=1</c>이다.
+    /// 다른 종류가 켜면 규칙 로드 오류다.
+    /// </summary>
+    public virtual bool WithEditorData => false;
+
+    /// <summary>이 타깃의 종류·Program 속성과 타깃 매크로다(<see cref="TargetKind"/>).</summary>
+    public TargetKind Kind => new(Type, CompileWithEditor, WithEditorData);
 
     /// <summary>
     /// 로그 컴파일 하한의 타깃 재정의다(UE <c>COMPILED_IN_MINIMUM_VERBOSITY</c> 대응). null(기본)이면 구성 기본값(Debug: Trace,
@@ -106,4 +129,36 @@ public abstract class TargetRules
     /// </code>
     /// </summary>
     public virtual IReadOnlyList<string> CompanionTargets => [];
+
+    /// <summary>
+    /// 이 타깃 전에 따로 빌드하는 타깃이다(Docs/Design/BuildTargets 3.11절 BD44, UE <c>TargetRules.PreBuildTargets</c>). <c>build</c>·<c>test</c>가
+    /// 주 타깃의 메타 생성 전에 각 선행 타깃을 그 타깃 자기 규칙(종류·매크로·링크 방식·빌드 정보)으로, 같은 구성·도구 체인·빌드 방식으로
+    /// 빌드한다. 출력은 선행 타깃 자기 기본 출력 디렉터리다(<c>--output</c>을 주면 그 경로의 형제). 선행 타깃의 선행 타깃을 먼저 빌드하고
+    /// 같은 타깃은 한 번만 빌드한다. 조건 칸에 맞지 않는 문맥과, 이 타깃이 Developer 모듈을 빼는 구성(Game·Client·Server의 Release)에서는
+    /// 빌드하지 않는다. <see cref="CompanionTargets"/>(모듈을 이 빌드에 합친다)와 다르다. 선행 타깃은 Program이어야 하고, 없는 이름·자기
+    /// 자신·중복·순환은 규칙 로드 오류다. 사용 예:
+    /// <code>
+    /// public override IReadOnlyList&lt;PrerequisiteTarget&gt; PrerequisiteTargets =&gt;
+    ///     [new("ShaderCompileWorker") { Configurations = [NativeConfiguration.Debug, NativeConfiguration.Development] }];
+    /// </code>
+    /// </summary>
+    public virtual IReadOnlyList<PrerequisiteTarget> PrerequisiteTargets => [];
+}
+
+/// <summary>
+/// 선행 타깃 하나다(<see cref="TargetRules.PrerequisiteTargets"/>, Docs/Design/BuildTargets 3.11절). <see cref="Name"/>은 타깃 이름(대소문자까지
+/// 구별)이고, 조건 칸 <see cref="Platforms"/>·<see cref="Configurations"/>는 null이면 조건이 없다. 구성 값은 빌드 구성 그대로다(Asan·Coverage도
+/// 따로 적는다 — 선행 타깃은 같은 구성으로 빌드된다). 빈 목록·값 중복은 규칙 로드 오류다.
+/// </summary>
+public sealed record PrerequisiteTarget(string Name)
+{
+    /// <summary>선행 타깃을 빌드하는 플랫폼이다(null = 모두).</summary>
+    public IReadOnlyList<NativePlatform>? Platforms { get; init; }
+
+    /// <summary>선행 타깃을 빌드하는 구성이다(null = 모두).</summary>
+    public IReadOnlyList<NativeConfiguration>? Configurations { get; init; }
+
+    /// <summary>이 플랫폼·구성이 조건 칸에 맞는가다(조건 없는 선행 타깃은 늘 맞다).</summary>
+    public bool Matches(NativePlatform platform, NativeConfiguration configuration) =>
+        (Platforms is null || Platforms.Contains(platform)) && (Configurations is null || Configurations.Contains(configuration));
 }

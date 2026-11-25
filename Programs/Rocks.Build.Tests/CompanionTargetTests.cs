@@ -26,13 +26,17 @@ internal static class CompanionTargetTests
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Missing"] }, [worker], "unknown companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker", "Worker"] }, [worker], "duplicate companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["A"] }, [worker], "self companion");
-        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Game"] }, [new FixtureTarget("Game", ["G"]) { Kind = TargetType.Game }],
+        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Game"] }, [new FixtureTarget("Game", ["G"]) { Declared = TargetType.Game }],
             "game companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Shared"] },
             [new FixtureTarget("Shared", ["S"]) { Link = NativeLinkType.Modular }], "modular companion");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Nested"] }, [new FixtureTarget("Nested", ["N"]) { Companions = ["Worker"] }, worker],
             "companion with companions");
         Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker"], Link = NativeLinkType.Modular }, [worker], "modular target");
+        // 동반 타깃은 주 타깃과 같은 매크로로 컴파일되므로 조합이 다르면 거부한다(Server 주 타깃의 ROCKS_WITH_CLIENT_CODE=0).
+        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker"], Declared = TargetType.Server }, [worker], "companion of a Server target");
+        // Game은 Program과 매크로 조합이 같아도 동반을 둘 수 없다(동반 Program의 Developer 모듈이 Release Game의 type 검사에 걸린다).
+        Rejects(new FixtureTarget("A", ["A"]) { Companions = ["Worker"], Declared = TargetType.Game }, [worker], "companion of a Game target");
     }
 
     private static void Rejects(TargetRules target, TargetRules[] others, string what)
@@ -61,7 +65,7 @@ internal static class CompanionTargetTests
     {
         public IReadOnlyList<string> Companions { get; init; } = [];
 
-        public TargetType Kind { get; init; } = TargetType.Program;
+        public TargetType Declared { get; init; } = TargetType.Program;
 
         public NativeLinkType Link { get; init; } = NativeLinkType.Monolithic;
 
@@ -73,7 +77,7 @@ internal static class CompanionTargetTests
 
         public override IReadOnlyList<string> Modules => modules;
 
-        public override TargetType Type => Kind;
+        public override TargetType Type => Declared;
 
         public override NativeLinkType LinkType => Link;
 

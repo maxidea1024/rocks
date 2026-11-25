@@ -1,4 +1,5 @@
 #include "BufferSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
@@ -29,184 +30,7 @@ void Check(bool condition, const char* what) noexcept {
     }
 }
 
-StringView Text(const char* text, usize bytes) noexcept {
-    return StringView(text, bytes - 1);
-}
-
-template <usize Count>
-StringView Text(const char (&text)[Count]) noexcept {
-    return Text(text, Count);
-}
-
-// --- 셰이더(PipelineDesc 고정 배치: buffer view slot n = HLSL t(n + 1)) ---
-
-// 정점 번호로 화면을 덮는 삼각형을 만드는 공통 VS 머리다.
-#define BUFFER_TEST_VS_OUTPUT                                                                      \
-    "struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };\n"                 \
-    "float4 FullScreen(uint id) {\n"                                                               \
-    "    float2 uv = float2((id << 1) & 2, id & 2);\n"                                             \
-    "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"                                               \
-    "}\n"
-
-// slot 0 typed float SRV를 PS가 읽는다.
-constexpr char TypedPixelHlsl[] = BUFFER_TEST_VS_OUTPUT R"(
-Buffer<float4> lights : register(t1);
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = FullScreen(id);
-    output.color = float4(0.0, 0.0, 0.0, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return lights.Load(0); }
-)";
-
-// slot 1 typed uint SRV를 VS가 읽는다.
-constexpr char TypedVertexHlsl[] = BUFFER_TEST_VS_OUTPUT R"(
-Buffer<uint> codes : register(t2);
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = FullScreen(id);
-    uint v = codes.Load(0);
-    output.color = float4(v & 255, (v >> 8) & 255, (v >> 16) & 255, 255) / 255.0;
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-// slot 2 구조화 SRV를 PS가 읽는다.
-constexpr char StructuredPixelHlsl[] = BUFFER_TEST_VS_OUTPUT R"(
-struct Item { float4 color; float4 unused; };
-StructuredBuffer<Item> items : register(t3);
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = FullScreen(id);
-    output.color = float4(0.0, 0.0, 0.0, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return items[1].color; }
-)";
-
-// slot 3 raw SRV를 VS가 읽는다.
-constexpr char RawVertexHlsl[] = BUFFER_TEST_VS_OUTPUT R"(
-ByteAddressBuffer words : register(t4);
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = FullScreen(id);
-    uint v = words.Load(4);
-    output.color = float4(v & 255, (v >> 8) & 255, (v >> 16) & 255, 255) / 255.0;
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-// 배치 밖 register(t5)를 읽는다(음성 대조).
-constexpr char OutsideHlsl[] = BUFFER_TEST_VS_OUTPUT R"(
-Buffer<float4> outside : register(t5);
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = FullScreen(id);
-    output.color = float4(0.0, 0.0, 0.0, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return outside.Load(0); }
-)";
-
-// PS가 UAV에 쓴다(그래픽 단계 UAV 거부, 음성 대조).
-constexpr char PixelUavHlsl[] = BUFFER_TEST_VS_OUTPUT R"(
-RWBuffer<float4> output : register(u1);
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput result;
-    result.position = FullScreen(id);
-    result.color = float4(0.0, 0.0, 0.0, 1.0);
-    return result;
-}
-float4 PSMain(VSOutput input) : SV_Target {
-    output[0] = input.color;
-    return input.color;
-}
-)";
-
-#undef BUFFER_TEST_VS_OUTPUT
-
-#define BUFFER_TEST_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-
-constexpr char BlackVertexGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(location = 0) out vec4 out_var_COLOR0;
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-    out_var_COLOR0 = vec4(0.0, 0.0, 0.0, 1.0);
-}
-)";
-
-constexpr char ColorPixelGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(location = 0) in vec4 in_var_COLOR0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = in_var_COLOR0; }
-)";
-
-// PS typed slot 0은 텍스처 유닛 1이다.
-constexpr char TypedPixelGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(binding = 1) uniform highp samplerBuffer lights;
-layout(location = 0) in vec4 in_var_COLOR0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = texelFetch(lights, 0); }
-)";
-
-// VS typed slot 1은 텍스처 유닛 17 + 1이다.
-constexpr char TypedVertexGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(binding = 18) uniform highp usamplerBuffer codes;
-layout(location = 0) out vec4 out_var_COLOR0;
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-    uint v = texelFetch(codes, 0).x;
-    out_var_COLOR0 = vec4(float(v & 255u), float((v >> 8u) & 255u), float((v >> 16u) & 255u),
-                          255.0) / 255.0;
-}
-)";
-
-// 구조화 slot 2는 storage block binding 2다.
-constexpr char StructuredPixelGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-struct Item { vec4 color; vec4 unused; };
-layout(std430, binding = 2) readonly buffer type_StructuredBuffer_Item { Item data[]; } items;
-layout(location = 0) in vec4 in_var_COLOR0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = items.data[1].color; }
-)";
-
-// raw slot 3은 storage block binding 3이다(이름 접두사로 raw view를 고른다).
-constexpr char RawVertexGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(std430, binding = 3) readonly buffer type_ByteAddressBuffer { uint data[]; } words;
-layout(location = 0) out vec4 out_var_COLOR0;
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-    uint v = words.data[1];
-    out_var_COLOR0 = vec4(float(v & 255u), float((v >> 8u) & 255u), float((v >> 16u) & 255u),
-                          255.0) / 255.0;
-}
-)";
-
-// PS가 image buffer에 쓴다(그래픽 단계 UAV 거부, 음성 대조).
-constexpr char PixelUavGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(binding = 0, rgba32f) uniform highp writeonly imageBuffer outputs;
-layout(location = 0) in vec4 in_var_COLOR0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    imageStore(outputs, 0, in_var_COLOR0);
-    out_var_SV_Target0 = in_var_COLOR0;
-}
-)";
-
-constexpr char OutsidePixelGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
-layout(binding = 6) uniform highp samplerBuffer outside;
-layout(location = 0) in vec4 in_var_COLOR0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = texelFetch(outside, 0); }
-)";
-
-#undef BUFFER_TEST_GLSL_HEAD
+// 셰이더는 Buffer.rsf다(버퍼 view slot은 파이프라인 이름 표 bindings.bufferViews로 잇는다).
 
 struct Expected {
     uint8 r = 0;
@@ -248,13 +72,14 @@ struct Bench {
         return device->CreateBufferView(buffer, desc);
     }
 
-    Result<PipelineHandle> Pipeline(StringView hlsl, StringView vertexGlsl,
-                                    StringView pixelGlsl) noexcept {
+    // slot의 버퍼 view를 name 자원으로 읽는 파이프라인이다.
+    Result<PipelineHandle> Pipeline(const shaders::ShaderTypeDesc& vertex,
+                                    const shaders::ShaderTypeDesc& pixel, uint32 slot,
+                                    StringView name) noexcept {
         PipelineDesc desc;
-        desc.vertex = {hlsl, vertexGlsl};
-        desc.pixel = {hlsl, pixelGlsl};
+        desc.bindings.bufferViews[slot] = name;
         desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
-        return device->CreatePipeline(desc);
+        return shaders::CreateGraphicsPipeline(*device, vertex, pixel, desc);
     }
 
     // view를 slot에 묶고 화면을 덮는 삼각형 하나를 그린 뒤 대상을 읽는다.
@@ -553,9 +378,10 @@ void RunViewNegatives(Device& device, Bench& bench) noexcept {
 
 struct DrawCase {
     const char* label;
-    StringView hlsl;
-    StringView vertexGlsl;
-    StringView pixelGlsl;
+    const shaders::ShaderTypeDesc* vertex;
+    const shaders::ShaderTypeDesc* pixel;
+    // 셰이더 자원 이름이다(파이프라인 이름 표).
+    const char* name;
     uint32 slot;
     BufferViewKind kind;
     PixelFormat format;
@@ -597,14 +423,15 @@ void RunDraws(Device& device, Bench& bench) noexcept {
 
     const Expected lightColor = offsetView ? Expected{64, 128, 191} : Expected{255, 0, 0};
     const DrawCase cases[] = {
-        {"pixel shader reads a typed float view", Text(TypedPixelHlsl), Text(BlackVertexGlsl),
-         Text(TypedPixelGlsl), 0, BufferViewKind::Typed, PixelFormat::RGBA32Float, false},
-        {"vertex shader reads a typed uint view", Text(TypedVertexHlsl), Text(TypedVertexGlsl),
-         Text(ColorPixelGlsl), 1, BufferViewKind::Typed, PixelFormat::R32Uint, true},
-        {"pixel shader reads a structured view", Text(StructuredPixelHlsl), Text(BlackVertexGlsl),
-         Text(StructuredPixelGlsl), 2, BufferViewKind::Structured, PixelFormat::Unknown, false},
-        {"vertex shader reads a raw view", Text(RawVertexHlsl), Text(RawVertexGlsl),
-         Text(ColorPixelGlsl), 3, BufferViewKind::Raw, PixelFormat::Unknown, true}};
+        {"pixel shader reads a typed float view", &shaders::BufferBlackVS, &shaders::BufferTypedPS,
+         "Lights", 0, BufferViewKind::Typed, PixelFormat::RGBA32Float, false},
+        {"vertex shader reads a typed uint view", &shaders::BufferTypedVS, &shaders::BufferColorPS,
+         "Codes", 1, BufferViewKind::Typed, PixelFormat::R32Uint, true},
+        {"pixel shader reads a structured view", &shaders::BufferBlackVS,
+         &shaders::BufferStructuredPS, "Items", 2, BufferViewKind::Structured, PixelFormat::Unknown,
+         false},
+        {"vertex shader reads a raw view", &shaders::BufferRawVS, &shaders::BufferColorPS, "Words",
+         3, BufferViewKind::Raw, PixelFormat::Unknown, true}};
     const BufferViewHandle views[] = {lightView.Value(), codeView.Value(), itemView.Value(),
                                       wordView.Value()};
     const Expected colors[] = {lightColor, {64, 128, 192}, {128, 64, 255}, {128, 192, 64}};
@@ -612,14 +439,16 @@ void RunDraws(Device& device, Bench& bench) noexcept {
     for (uint32 index = 0; index < 4; ++index) {
         const DrawCase& draw = cases[index];
         const StageResourceLimits& stage = draw.vertexStage ? limits.vertex : limits.pixel;
-        if (openGl && draw.kind != BufferViewKind::Typed && stage.storageBuffers == 0) {
+        if (!shaders::Has(*draw.vertex) || !shaders::Has(*draw.pixel) ||
+            (openGl && draw.kind != BufferViewKind::Typed && stage.storageBuffers == 0)) {
             // ES 3.2의 VS·PS storage block 최소 보장은 0이다(장치 한도로 공개, 대체하지 않는다).
+            // GLES31_PC 형식은 그 상한으로 이 셰이더를 쿠킹하지 않는다(ShaderSystem 7.2절 4항).
             printf("  [NOT RUN] %s buffer: %s (no %s storage blocks)\n", backendName, draw.label,
                    draw.vertexStage ? "vertex" : "pixel");
             continue;
         }
 
-        auto pipeline = bench.Pipeline(draw.hlsl, draw.vertexGlsl, draw.pixelGlsl);
+        auto pipeline = bench.Pipeline(*draw.vertex, *draw.pixel, draw.slot, draw.name);
         if (!pipeline) {
             Check(false, draw.label);
             PrintLastError(device);
@@ -686,13 +515,11 @@ void RunDraws(Device& device, Bench& bench) noexcept {
         device.Retire(typedPixel);
     }
 
-    // 배치 밖 register와 그래픽 단계 UAV는 파이프라인 생성에서 거부한다.
-    auto outside = bench.Pipeline(Text(OutsideHlsl), Text(BlackVertexGlsl), Text(OutsidePixelGlsl));
+    // 이름 표에 없는 자원은 파이프라인 생성에서 거부한다. 그래픽 단계 UAV는 쿠킹 규칙이 거부한다
+    // (ShaderSystem 7.2절 4항·12항 — 워커 시험이 확인한다).
+    auto outside = bench.Pipeline(shaders::BufferBlackVS, shaders::BufferOutsidePS, 0, "Lights");
     Check(outside.Error() == ErrorCode::InvalidArgument && device.LastError().ByteCount() != 0,
-          "shader resources outside the fixed layout are rejected");
-    auto pixelUav = bench.Pipeline(Text(PixelUavHlsl), Text(BlackVertexGlsl), Text(PixelUavGlsl));
-    Check(pixelUav.Error() == ErrorCode::InvalidArgument,
-          "pixel shader UAVs are rejected (UAVs are compute only)");
+          "shader resources outside the pipeline binding names are rejected");
 
     device.Retire(lightView.Value());
     device.Retire(codeView.Value());

@@ -3,7 +3,7 @@
 #include "TypeChecker.h"
 #include <Core/Graph/StrongComponents.h>
 
-// 선언 규칙이다(Docs/Design/SparksLanguage.ko.md 3.11절): `?` 없는 객체 필드(S0428), 상수식(S0510)·
+// 선언 규칙이다(Docs/Design/SparksLanguage 3.11절): `?` 없는 객체 필드(S0428), 상수식(S0510)·
 // const 순환(S0511)·const 타입(S0512), core 프로필의 full 문법(S1113). LC2d 단계(Flow)에서만 돈다.
 
 namespace rocks::sparks::detail {

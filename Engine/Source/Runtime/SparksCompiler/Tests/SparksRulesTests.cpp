@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 문맥·수명 규칙 시험이다(Docs/Design/SparksLanguage.ko.md 3.12절, S0413·S08xx). 규칙별 양성·음성
+// 문맥·수명 규칙 시험이다(Docs/Design/SparksLanguage 3.12절, S0413·S08xx). 규칙별 양성·음성
 // 사례와 위치는 corpus `Conformance/Rules`가 맡고, 여기서는 진단 문장과 수정 예, 단계(Flow까지면
 // 규칙 진단이 없다), 결정성, 할당 실패를 본다.
 using namespace rocks;

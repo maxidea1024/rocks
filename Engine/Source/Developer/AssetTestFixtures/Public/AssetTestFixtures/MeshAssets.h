@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <AssetRuntime/Package.h>
 #include <Core/Containers/Array.h>
 #include <Meta/Annotations.h>
@@ -17,12 +18,19 @@ struct TestMeshAsset final : Asset {
     ROCKS_GENERATED_BODY()
 
     explicit TestMeshAsset(Allocator& allocator) noexcept
-        : mesh(allocator), lods(allocator), editorMesh(allocator) {
+        : mesh(allocator), lods(allocator)
+#if ROCKS_WITH_EDITOR_DATA
+          ,
+          editorMesh(allocator)
+#endif
+    {
     }
 
     ROCKS_PROPERTY() MeshSourceData mesh;
     ROCKS_PROPERTY() Array<MeshSourceData> lods;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) MeshSourceData editorMesh;
+#endif
 };
 
 // 단순 충돌 시험 에셋이다(Docs/Design/MeshAnimationAssets 4.8절·12.6절). 정적 메시의
@@ -33,13 +41,20 @@ struct TestCollisionAsset final : Asset {
     ROCKS_GENERATED_BODY()
 
     explicit TestCollisionAsset(Allocator& allocator) noexcept
-        : collision(allocator), variants(allocator), editorCollision(allocator) {
+        : collision(allocator), variants(allocator)
+#if ROCKS_WITH_EDITOR_DATA
+          ,
+          editorCollision(allocator)
+#endif
+    {
     }
 
     ROCKS_PROPERTY() SimpleCollision collision;
     ROCKS_PROPERTY() CollisionComplexity complexity = CollisionComplexity::Default;
     ROCKS_PROPERTY() Array<SimpleCollision> variants;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) SimpleCollision editorCollision;
+#endif
 };
 
 } // namespace rocks::asset_fixture

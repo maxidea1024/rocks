@@ -1389,13 +1389,6 @@
     },
     {
       "kind": "type",
-      "name": "rocks::CollisionEnabled",
-      "id": "041328a687324cb897f0163b32d7a286",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
       "name": "rocks::CollisionSphere",
       "id": "888ac344a199415991fcfa719c1d2c39",
       "aliases": [],

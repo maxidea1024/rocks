@@ -14,11 +14,8 @@ public sealed class CompressionTraining : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["Core", "Compression", .. Codecs];
+    protected override string[] PublicDependencies => ["Core", "Compression"];
 
-    protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, Codecs);
-
-    protected override IReadOnlyList<string> PrivateDefines(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerDefines(context, Codecs);
+    // The codec library is visible only to this module's sources (Docs/Design/BuildTargets section 3.5 BS3a).
+    protected override string[] PrivateDependencies => Codecs;
 }

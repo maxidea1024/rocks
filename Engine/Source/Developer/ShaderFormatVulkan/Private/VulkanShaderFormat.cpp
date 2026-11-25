@@ -1,64 +1,40 @@
 #include <ShaderFormatVulkan/VulkanShaderFormat.h>
 
-#include <ShaderToolLoader/ShaderToolLoader.h>
-#include <spirv-tools/libspirv.h>
+#include <Platform/Memory.h>
+#include <ShaderCompilerCommon/ShaderSpirvBindings.h>
+#include <ShaderCompilerCommon/SpirvRewrite.h>
+#include <ShaderToolLoader/ShaderToolCalls.h>
 
 // Vulkan 형식 처리기(Docs/Design/ShaderSystem 11.1절 SC1)다. 규칙은 공개 헤더 주석을 따른다.
+// DXC 호출과 spirv-val은 공용 도구 호출(CompileHlslToSpirv, SH1e E2)이다. SH2b1(16.1절 SSD29):
+// -fspv-reflect로 컴파일하고, 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location, set = 단계·binding = 종류
+// 순서, 리플렉션 장식 제거) 뒤 spirv-val로 다시 검증하고, 리플렉션을 공용 규칙으로 정규화해 값 1을
+// 낸다. SH2b2(SSD34–SSD36·SSD40): storage image 형식 지정 원문 검사, SPIRV-Cross 사용 쌍, job 요구
+// 기능, PS 진단 버퍼(set 3은 다시 매기지 않는다).
 namespace rocks::shader {
 
 namespace vulkan_format_detail {
 
-// 고정 DXC 인자 수의 상한이다.
-constexpr usize MaxFormatDxcArguments = 16;
-
-constexpr StringView FormatOptimizationFlags[] = {"-O0", "-O1", "-O2", "-O3"};
-
-template <class Function>
-Function SpirvFunction(const SpirvToolsFunctions& tools, usize index) noexcept {
-    return reinterpret_cast<Function>(tools.address[index]);
-}
-
-// spirv-val(Vulkan 1.1 환경)이다. 실패하면 diagnostics에 검증기 문구를 둔다.
-bool ValidateSpirvWords(const SpirvToolsFunctions& tools, Span<const uint8> code,
-                        String& diagnostics) noexcept {
-    using Index = SpirvToolsFunctions;
-    const auto contextCreate =
-        SpirvFunction<decltype(&spvContextCreate)>(tools, Index::ContextCreate);
-    const auto contextDestroy =
-        SpirvFunction<decltype(&spvContextDestroy)>(tools, Index::ContextDestroy);
-    const auto optionsCreate =
-        SpirvFunction<decltype(&spvValidatorOptionsCreate)>(tools, Index::ValidatorOptionsCreate);
-    const auto optionsDestroy =
-        SpirvFunction<decltype(&spvValidatorOptionsDestroy)>(tools, Index::ValidatorOptionsDestroy);
-    const auto validate =
-        SpirvFunction<decltype(&spvValidateWithOptions)>(tools, Index::ValidateWithOptions);
-    const auto diagnosticDestroy =
-        SpirvFunction<decltype(&spvDiagnosticDestroy)>(tools, Index::DiagnosticDestroy);
-    if (contextCreate == nullptr || validate == nullptr || code.Size() % sizeof(uint32) != 0) {
-        (void)diagnostics.TryAppend("spirv-val is not available or the module is not word aligned");
-        return false;
+ShaderWorkerJobStatus VulkanJobStatus(ShaderToolOutcome outcome) noexcept {
+    switch (outcome) {
+    case ShaderToolOutcome::Success:
+        return ShaderWorkerJobStatus::Success;
+    case ShaderToolOutcome::CompileError:
+        return ShaderWorkerJobStatus::CompileError;
+    case ShaderToolOutcome::UnsupportedHost:
+        return ShaderWorkerJobStatus::UnsupportedCapability;
+    case ShaderToolOutcome::ToolError:
+        break;
     }
 
-    spv_context context = contextCreate(SPV_ENV_VULKAN_1_1);
-    spv_validator_options options = optionsCreate();
-    spv_const_binary_t binary{reinterpret_cast<const uint32*>(code.Data()),
-                              code.Size() / sizeof(uint32)};
-    spv_diagnostic diagnostic = nullptr;
-    const spv_result_t validated = validate(context, options, &binary, &diagnostic);
-    if (validated != SPV_SUCCESS && diagnostic != nullptr && diagnostic->error != nullptr) {
-        (void)diagnostics.TryAppend(StringView(diagnostic->error));
-    }
-
-    diagnosticDestroy(diagnostic);
-    optionsDestroy(options);
-    contextDestroy(context);
-    return validated == SPV_SUCCESS;
+    return ShaderWorkerJobStatus::ToolError;
 }
 
 } // namespace vulkan_format_detail
 
 void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
-                                        const ShaderWorkerJob& job, const ShaderToolSet* tools,
+                                        const ShaderWorkerJob& job,
+                                        const ShaderBackendContext& context,
                                         ShaderWorkerJobResult& result) noexcept {
     using namespace vulkan_format_detail;
     if (format.compiler.path != ShaderCompilerPath::DxcSpirv ||
@@ -70,75 +46,114 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
-    if (tools == nullptr || !tools->IsOpen()) {
+    if (context.tools == nullptr || !context.tools->IsOpen()) {
         FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "shader tools are not available");
         return;
     }
 
     char profile[MaxShaderProfileBytes];
     if (!MakeShaderProfile(job.stage, format.compiler.shaderModel, profile) ||
-        job.options.optimization >=
-            sizeof(FormatOptimizationFlags) / sizeof(FormatOptimizationFlags[0])) {
+        job.options.optimization >= ShaderOptimizationLevels) {
         FailShaderJob(result, ShaderWorkerJobStatus::CompileError,
                       "invalid shader stage or options");
         return;
     }
 
-    StringView arguments[MaxFormatDxcArguments] = {
-        "-E",
-        job.entry.View(),
-        "-T",
-        StringView(profile),
-        "-HV",
-        job.options.hlsl2021 ? StringView("2021") : StringView("2018"),
-        FormatOptimizationFlags[job.options.optimization],
-        "-Zpr",
-        "-WX",
-        "-spirv",
-        "-fspv-target-env=vulkan1.1"};
-    usize count = 11;
-    if (format.compiler.dxPositionW) {
-        arguments[count++] = "-fvk-use-dx-position-w";
-    }
-
-    DxcCompileRequest request;
+    SpirvCompileRequest request;
     request.source = job.source.View();
-    request.arguments = Span<const StringView>(arguments, count);
-    DxcCompileResult compiled(result.values.GetAllocator());
-    const ShaderToolLoadStatus ran = CompileWithDxc(tools->Dxc(), request, compiled);
-    if (!ran) {
-        FailShaderJob(result,
-                      ran.code == ShaderToolLoadCode::UnsupportedHost
-                          ? ShaderWorkerJobStatus::UnsupportedCapability
-                          : ShaderWorkerJobStatus::ToolError,
-                      "DXC call failed", StringView(ShaderToolLoadCodeName(ran.code)));
+    request.entry = job.entry.View();
+    request.profile = StringView(profile);
+    request.hlsl2021 = job.options.hlsl2021;
+    request.optimization = job.options.optimization;
+    request.dxPositionW = format.compiler.dxPositionW;
+    request.reflect = true;
+    Allocator& allocator = result.values.GetAllocator();
+    ShaderParameterLayoutSet layouts(allocator);
+    if (!DecodeShaderJobLayouts(job, layouts, result)) {
         return;
     }
 
-    if (!compiled.compiled) {
-        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "DXC compile failed",
-                      compiled.diagnostics.View());
+    Array<uint8> spirv(allocator);
+    String diagnostics(allocator);
+    if (!CheckStorageImageFormats(job.source.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "shader binding rules",
+                      diagnostics.View());
         return;
     }
 
-    String validation(result.values.GetAllocator());
-    if (!ValidateSpirvWords(tools->SpirvTools(), compiled.object.View(), validation)) {
-        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "spirv-val rejected the SPIR-V",
-                      validation.View());
+    const ShaderToolOutcome compiled =
+        CompileHlslToSpirv(*context.tools, request, spirv, diagnostics);
+    if (compiled != ShaderToolOutcome::Success) {
+        FailShaderJob(result, VulkanJobStatus(compiled), diagnostics.View());
         return;
     }
 
-    result.status = ShaderWorkerJobStatus::Success;
-    result.diagnostics.Clear();
-    result.values.Clear();
-    auto code = result.values.TryEmplaceBack(result.values.GetAllocator());
-    if (!code) {
+    // byte → word(SPIR-V는 4 byte 단위다 — DXC 출력은 늘 4의 배수다).
+    Array<uint32> raw(allocator);
+    if (spirv.Size() % sizeof(uint32) != 0 || !raw.TryResize(spirv.Size() / sizeof(uint32))) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "DXC produced a malformed SPIR-V module");
+        return;
+    }
+
+    platform::MemoryCopy(raw.Data(), spirv.Data(), spirv.Size());
+    SpirvRewriteOptions options;
+    options.stage = job.stage;
+    options.stageLocations = true;
+    Array<uint32> rewritten(allocator);
+    if (auto done = RewriteSpirv(raw.View(), options, rewritten, diagnostics); !done) {
+        FailShaderJob(result, ShaderWorkerJobStatus::CompileError, "SPIR-V binding rules",
+                      diagnostics.View());
+        return;
+    }
+
+    Array<uint8> code(allocator);
+    if (!code.TryResize(rewritten.Size() * sizeof(uint32))) {
         FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
         return;
     }
 
-    code.Value()->id = 0;
-    code.Value()->bytes = Move(compiled.object);
+    platform::MemoryCopy(code.Data(), rewritten.Data(), code.Size());
+    if (!ValidateSpirv(context.tools->SpirvTools(), code.View(), diagnostics)) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "spirv-val rejected the rewritten SPIR-V", diagnostics.View());
+        return;
+    }
+
+    Array<SpirvSamplerUse> pairs(allocator);
+    const ShaderToolOutcome queried =
+        QuerySpirvSamplerUses(context.tools->SpirvCross(), code.View(), pairs, diagnostics);
+    if (queried != ShaderToolOutcome::Success) {
+        FailShaderJob(result, VulkanJobStatus(queried), "SPIR-V sampler use query",
+                      diagnostics.View());
+        return;
+    }
+
+    Array<ShaderSamplerUse> uses(allocator);
+    for (const SpirvSamplerUse& pair : pairs) {
+        if (!uses.TryPushBack(ShaderSamplerUse{pair.texture.View(), pair.sampler.View()})) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+            return;
+        }
+    }
+
+    SpirvBindingRequest binding;
+    binding.format = &format;
+    binding.stage = job.stage;
+    binding.requiredFeatures = job.requiredFeatures;
+    binding.layouts = layouts.View();
+    binding.raw = raw.View();
+    binding.rewritten = rewritten.View();
+    binding.uses = uses.View();
+    binding.hasUses = true;
+    SpirvBindingResult bound(allocator);
+    const ShaderWorkerJobStatus normalized = BuildSpirvBindingLayout(binding, bound, diagnostics);
+    if (normalized != ShaderWorkerJobStatus::Success) {
+        FailShaderJob(result, normalized, "shader binding rules", diagnostics.View());
+        return;
+    }
+
+    SucceedShaderJob(result, code, bound.bindingLayout);
 }
 
 } // namespace rocks::shader

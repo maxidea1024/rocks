@@ -325,7 +325,7 @@ Result<BufferHandle> VulkanDevice::CreateBufferIn(const BufferDesc& desc, Span<c
     return Result<BufferHandle>::Success(BufferHandle{added.Value()});
 }
 
-// 형식마다 능력을 한 번 채운다(논리 장치 생성 직후, PixelFormat.ko.md 7절 Vulkan 열).
+// 형식마다 능력을 한 번 채운다(논리 장치 생성 직후, Docs/Design/PixelFormat 7절 Vulkan 열).
 void VulkanDevice::QueryFormatCaps() noexcept {
     constexpr VkFormatFeatureFlags Transfer =
         VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
@@ -392,8 +392,8 @@ void VulkanDevice::QueryFormatCaps() noexcept {
                 caps = caps | PixelFormatCaps::Filterable;
             }
 
-            // gather는 UE와 같이 shaderImageGatherExtended 기능으로 판정한다(PixelFormat.ko.md
-            // 7절).
+            // gather는 UE와 같이 shaderImageGatherExtended 기능으로 판정한다
+            // (Docs/Design/PixelFormat 7절).
             if (gather_) {
                 caps = caps | PixelFormatCaps::Gather;
             }
@@ -528,8 +528,8 @@ PixelFormatCaps VulkanDevice::GetPixelFormatCaps(PixelFormat format) const noexc
 VulkanDevice::TextureDescCheck VulkanDevice::CheckTextureDesc(const TextureDesc& desc,
                                                               usize pixelBytes) const noexcept {
     TextureDescCheck check;
-    // 형식·용도·차원 지원은 장치 능력으로 판정한다(PixelFormat.ko.md 8.3절). 대응하지 않으면 다른
-    // 형식으로 바꾸지 않고 Unsupported다. 다른 인자 검사보다 먼저 본다.
+    // 형식·용도·차원 지원은 장치 능력으로 판정한다(Docs/Design/PixelFormat 8.3절). 대응하지 않으면
+    // 다른 형식으로 바꾸지 않고 Unsupported다. 다른 인자 검사보다 먼저 본다.
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
         check.code = ErrorCode::Unsupported;
@@ -707,8 +707,8 @@ Result<TextureHandle> VulkanDevice::CreateTextureIn(const TextureDesc& desc,
     cleanup.image = record.image;
     cleanup.memory = record.memory;
     cleanup.heap = record.heap;
-    // 기본 view: 깊이·스텐실은 깊이 aspect, 비디오는 plane 0(휘도)이다(PixelFormat.ko.md 10·11절).
-    // 성분 대응은 형식 흉내(A8 등)의 대응 위에 TextureDesc::swizzle을 합성한다.
+    // 기본 view: 깊이·스텐실은 깊이 aspect, 비디오는 plane 0(휘도)이다(Docs/Design/PixelFormat
+    // 10·11절). 성분 대응은 형식 흉내(A8 등)의 대응 위에 TextureDesc::swizzle을 합성한다.
     const ViewFormatInfo viewFormat = ViewFormat(desc.format, 0, desc.format);
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -840,7 +840,8 @@ void VulkanDevice::Retire(BufferHandle handle) noexcept {
     (void)removed;
 }
 
-// 원 텍스처의 이미지를 공유하는 view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수 있다.
+// 원 텍스처의 이미지를 공유하는 view다(Docs/Design/PixelFormat 9–11절). 다른 스레드에서도 부를 수
+// 있다.
 Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
                                                       const TextureViewDesc& desc) noexcept {
     platform::LockGuard lock(gate_);

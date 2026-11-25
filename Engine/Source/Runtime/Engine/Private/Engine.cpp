@@ -1,4 +1,6 @@
+#include <Base/InitializerList.h>
 #include <Base/Compiler.h>
+#include <Config/CVarCommand.h>
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -6,6 +8,8 @@
 #include <Core/ScopeExit.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
+#include <World/DiagnosticText.h>
+#include <World/WorldLog.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
@@ -43,12 +47,13 @@ enum class InitStage : uint8 {
     PermanentRegion,
     ClientStart,
     PostEngineInit,
+    ClientReady,
     Count
 };
 
 constexpr const char* InitStageNames[] = {
     "TypeRegistry", "ModuleRegistration", "RegisterTypes", "ObjectRegistry", "GcScheduler",
-    "Subsystems",   "PermanentRegion",    "ClientStart",   "PostEngineInit",
+    "Subsystems",   "PermanentRegion",    "ClientStart",   "PostEngineInit", "ClientReady",
 };
 
 static_assert(sizeof(InitStageNames) / sizeof(InitStageNames[0]) ==
@@ -85,6 +90,53 @@ RegistryOptions EngineRegistryOptions() noexcept {
     RegistryOptions options;
     options.permanentRegion = true;
     return options;
+}
+
+// 진단 콘솔 명령이다(Docs/Design/EngineRuntime 22.1절). 대상은 BindCommand로 묶은 Engine이다.
+Result<void> RunDumpSubsystems(cvar::CommandContext& context) noexcept;
+Result<void> RunDumpTicks(cvar::CommandContext& context, StringView world) noexcept;
+
+constinit cvar::ConsoleCommand EngineDumpSubsystemsCommand =
+    cvar::Command<&RunDumpSubsystems>("engine.dumpsubsystems")
+        .Help("Print every subsystem layer: initialization order and skipped subsystems");
+
+constinit cvar::ConsoleCommand WorldDumpTicksCommand =
+    cvar::Command<&RunDumpTicks>("world.dumpticks")
+        .Help("Print the tick graph of every world, or of the named world: world.dumpticks Main");
+
+// 진단 텍스트를 콘솔 sink에 쓰고 Info 로그로 남긴다.
+Result<void> Report(cvar::CommandContext& context, const LogCategory& category,
+                    const String& text) noexcept {
+    Log::Info(category, "{Dump}", text.View());
+    return context.Write(text.View());
+}
+
+Result<void> RunDumpSubsystems(cvar::CommandContext& context) noexcept {
+    Engine* engine = context.Target<Engine>();
+    if (engine == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    String text(context.GetAllocator());
+    if (auto dumped = engine->DumpSubsystems(text); !dumped) {
+        return dumped;
+    }
+
+    return Report(context, LogEngine, text);
+}
+
+Result<void> RunDumpTicks(cvar::CommandContext& context, StringView world) noexcept {
+    Engine* engine = context.Target<Engine>();
+    if (engine == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    String text(context.GetAllocator());
+    if (auto dumped = engine->DumpTickGraphs(text, world); !dumped) {
+        return dumped;
+    }
+
+    return Report(context, LogWorldTick, text);
 }
 
 } // namespace
@@ -280,6 +332,16 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
             return fail(InitStage::Subsystems, subsystems.Error());
         }
 
+        for (const SkippedSubsystem& skipped : subsystems_.Skipped()) {
+            if (skipped.reason == SubsystemSkipReason::MissingDependency) {
+                Log::Warning(
+                    LogEngine,
+                    "Skipped engine subsystem {Subsystem}: dependency {Dependency} was not "
+                    "created ({Code})",
+                    skipped.name, skipped.missing, DiagSubsystemSkippedMissingDependency);
+            }
+        }
+
         initializedSteps_ = StepSubsystems;
     }
 
@@ -323,12 +385,39 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     }
 
     state_ = EngineState::Running;
+    BindConsoleCommands();
     platform::SetRunPhase(platform::RunPhase::Running, EngineStageReady);
     WarnIfCrashFilterReplaced();
     lastClock_ = platform::MonotonicNanoseconds();
     Log::Info(LogEngine, "Engine initialized with {SubsystemCount} subsystems in {Ms:.2f} ms",
               static_cast<uint32>(subsystems_.Count()),
               static_cast<double>(lastClock_ - started) * 1.0e-6);
+
+    // Running에서 client가 시작 일(기본 맵 열기 등 — CreateWorld가 필요한 일)을 한다(UE
+    // UGameEngine::Start, Docs/Design/EngineRuntime 18.2절). 실패하면 이미 연 World까지 정상 종료
+    // 순서로 정리하고 Failed로 끝낸다.
+    if (config_.client != nullptr) {
+        Result<void> ready = Result<void>::Success();
+        {
+            InitStageContext stage(InitStage::ClientReady);
+            ObjectAccessScope scope(objects_->OwnerAccess());
+            ready = config_.client->OnEngineReady(*this);
+        }
+
+        if (!ready) {
+            Log::Error(LogEngine, "Engine initialization failed at {Stage}: {Error}",
+                       InitStageName(InitStage::ClientReady), ErrorCodeName(ready.Error()));
+            auto stopped = Shutdown();
+            if (!stopped && state_ == EngineState::Stopping) {
+                // 외부 보유권으로 끝내지 못했다. Stopping에 남겨 소멸자·호출자가 다시 정리한다.
+                return Result<void>::Failure(ready.Error());
+            }
+
+            state_ = EngineState::Failed;
+            return Result<void>::Failure(ready.Error());
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -383,6 +472,102 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
     initializedSteps_ = 0;
 }
 
+void Engine::BindConsoleCommands() noexcept {
+    if (config_.settings == nullptr || consoleBound_) {
+        return;
+    }
+
+    // 영역은 같은 문맥의 다른 Engine이 이미 더했을 수 있다(AlreadyExists는 성공으로 본다).
+    for (StringView region : {StringView("engine"), StringView("world")}) {
+        auto added = config_.settings->RegisterConsoleRegion(region);
+        if (!added && added.Error() != ErrorCode::AlreadyExists) {
+            Log::Warning(LogEngine, "Engine console region {Region} could not be added: {Error}",
+                         region, ErrorCodeName(added.Error()));
+            return;
+        }
+    }
+
+    auto registered =
+        config_.settings->Register(EngineDumpSubsystemsCommand, WorldDumpTicksCommand);
+    if (registered) {
+        registered = config_.settings->BindCommand(EngineDumpSubsystemsCommand, *this);
+    }
+
+    if (registered) {
+        registered = config_.settings->BindCommand(WorldDumpTicksCommand, *this);
+    }
+
+    if (!registered) {
+        Log::Warning(LogEngine, "Engine diagnostic console commands are unavailable: {Error}",
+                     ErrorCodeName(registered.Error()));
+        // 앞 명령만 묶였을 수 있다(다른 스레드 등 등록 자체가 거절된 경우는 묶인 것이 없다 — 풀기도
+        // 같은 이유로 거절되므로 묶었을 때만 푼다).
+        consoleBound_ = true;
+        UnbindConsoleCommands();
+        return;
+    }
+
+    consoleBound_ = true;
+}
+
+void Engine::UnbindConsoleCommands() noexcept {
+    // 묶지 않았으면 부르지 않는다(설정 문맥 소유 스레드가 다르면 풀기가 Fatal이다).
+    if (config_.settings == nullptr || !consoleBound_) {
+        return;
+    }
+
+    // 다른 Engine이 묶은 대상은 그대로 둔다(UnbindCommand는 대상이 같을 때만 푼다).
+    auto first = config_.settings->UnbindCommand(EngineDumpSubsystemsCommand, *this);
+    auto second = config_.settings->UnbindCommand(WorldDumpTicksCommand, *this);
+    (void)first;
+    (void)second;
+    consoleBound_ = false;
+}
+
+Result<void> Engine::DumpSubsystems(String& out) noexcept {
+    Result<void> written = subsystems_.Describe(out, "Engine");
+    if (written && config_.client != nullptr) {
+        ObjectAccessScope scope(objects_->OwnerAccess());
+        written = config_.client->DescribeSubsystems(*this, out);
+    }
+
+    for (usize index = 0; written && index < worlds_.Size(); ++index) {
+        written = worlds_[index].world->DumpSubsystems(out);
+    }
+
+    return written;
+}
+
+Result<void> Engine::DumpTickGraphs(String& out, StringView world) noexcept {
+    bool found = world.IsEmpty();
+    Result<void> written = Result<void>::Success();
+    for (usize index = 0; written && index < worlds_.Size(); ++index) {
+        World& candidate = *worlds_[index].world;
+        if (!world.IsEmpty() && candidate.Name() != world) {
+            continue;
+        }
+
+        found = true;
+        written = candidate.DumpTickGraph(out);
+    }
+
+    if (!written) {
+        return written;
+    }
+
+    return found ? Result<void>::Success() : Result<void>::Failure(ErrorCode::NotFound);
+}
+
+OuterSubsystemLookup Engine::SubsystemLookup() const noexcept {
+    OuterSubsystemLookup lookup;
+    lookup.context = this;
+    lookup.find = [](const void* context, SubsystemKey key) noexcept -> void* {
+        // 조회 창은 EngineSubsystem* 를 void*로 넘긴다(GetEngineSubsystem이 되돌린다).
+        return static_cast<const Engine*>(context)->FindSubsystem(key);
+    };
+    return lookup;
+}
+
 Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     if (state_ != EngineState::Running) {
         return Result<World*>::Failure(ErrorCode::InvalidArgument);
@@ -402,6 +587,9 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.gcSchedule = desc.gcSchedule;
     worldDesc.gcScheduler = desc.gcScheduler != nullptr ? desc.gcScheduler : gcScheduler_.Get();
     worldDesc.subsystems = desc.subsystems;
+    worldDesc.kind = desc.kind;
+    worldDesc.outerSubsystems =
+        desc.outerSubsystems.find != nullptr ? desc.outerSubsystems : SubsystemLookup();
     // World가 엔진 설정 문맥에 자기 CVar 범위를 만든다(CVarSystem 14.2절).
     worldDesc.settings = config_.settings;
     auto created = UniquePtr<World>::TryMake(allocator_, allocator_, *types_, worldDesc);
@@ -441,8 +629,26 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
 }
 
 Result<void> Engine::DestroyWorldNow(usize index) noexcept {
+    // 정리 hook이 부른 DestroyWorld는 5단계로 미룬다(이 World를 배열에서 빼는 중이다).
+    const bool deferring = deferWorldDestroy_;
+    deferWorldDestroy_ = true;
+    World* target = worlds_[index].world.Get();
+    const EndPlayReason reason = worlds_[index].endReason;
+    // 게임 진행 중이면 정리 이유로 먼저 끝낸다(Shutdown은 그다음 — 17.6절).
+    auto ended = target->EndPlay(reason);
+    (void)ended;
+    auto finished = target->Shutdown(reason);
+    // 저장소를 놓기 직전에 client에 알린다(UE OnPreWorldFinishDestroy 자리 — World 포인터를 든
+    // GameInstance가 비운다, Docs/Design/EngineRuntime 18.6절). 이 안의 DestroyWorld도 미룬다.
+    if (finished && config_.client != nullptr) {
+        ObjectAccessScope scope(objects_->OwnerAccess());
+        config_.client->OnWorldDestroyed(*this, *target);
+    }
+
+    deferWorldDestroy_ = deferring;
+    // 정리 hook이 다른 World를 미룬 파괴에 넣었어도 배열 자리는 그대로다(만들기만 하면 뒤에
+    // 붙는다).
     WorldContext& context = worlds_[index];
-    auto finished = context.world->Shutdown();
     if (!finished) {
         // 외부가 Borrow·RootRef를 보유하고 있다. 지연 작업에서 다시 시도한다.
         context.pendingDestroy = true;
@@ -480,13 +686,18 @@ Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> Engine::DestroyWorld(World* world) noexcept {
+Result<void> Engine::DestroyWorld(World* world, EndPlayReason reason) noexcept {
     for (usize index = 0; index < worlds_.Size(); ++index) {
         if (worlds_[index].world.Get() != world) {
             continue;
         }
 
-        if (inFrame_) {
+        // 이미 미룬 파괴면 먼저 정한 이유를 유지한다.
+        if (!worlds_[index].pendingDestroy) {
+            worlds_[index].endReason = reason;
+        }
+
+        if (deferWorldDestroy_) {
             worlds_[index].pendingDestroy = true;
             return Result<void>::Success();
         }
@@ -498,26 +709,38 @@ Result<void> Engine::DestroyWorld(World* world) noexcept {
 }
 
 void Engine::ProcessDeferred() noexcept {
-    for (usize index = worlds_.Size(); index > 0; --index) {
-        if (!worlds_[index - 1].pendingDestroy) {
-            continue;
-        }
+    // 파괴 중(정리 hook)에 새로 미룬 파괴도 이번 5단계에서 끝낸다: 한 바퀴에 하나라도 파괴했으면
+    // 다시 돈다. 이번 프레임에 시도해 실패한 것(외부 보유권)은 다시 시도하지 않는다 — 바퀴마다 하나
+    // 이상 줄어드므로 끝난다.
+    bool progressed = true;
+    while (progressed) {
+        progressed = false;
+        for (usize index = worlds_.Size(); index > 0; --index) {
+            WorldContext& candidate = worlds_[index - 1];
+            if (!candidate.pendingDestroy || candidate.destroyAttemptFrame == time_.frameIndex) {
+                continue;
+            }
 
-        auto destroyed = DestroyWorldNow(index - 1);
-        if (destroyed) {
-            continue;
-        }
+            candidate.destroyAttemptFrame = time_.frameIndex;
+            if (DestroyWorldNow(index - 1)) {
+                progressed = true;
+                continue;
+            }
 
-        // 오래 남으면 사람이 봐야 한다(외부가 보유권을 놓지 않음). 한 번만 경고한다.
-        WorldContext& context = worlds_[index - 1];
-        const uint64 frames = time_.frameIndex - context.destroyDeferredFrame;
-        if (!context.destroyWarned && frames > WorldDestroyWarnFrames) {
-            context.destroyWarned = true;
-            Log::Warning(LogEngine,
-                         "World {World} destroy still deferred after {Frames} frames: {Error}; "
-                         "something outside still holds its objects",
-                         context.world->Name(), frames, ErrorCodeName(context.destroyError));
+            WarnLongDeferredDestroy(worlds_[index - 1]);
         }
+    }
+}
+
+void Engine::WarnLongDeferredDestroy(WorldContext& context) noexcept {
+    // 오래 남으면 사람이 봐야 한다(외부가 보유권을 놓지 않음). 한 번만 경고한다.
+    const uint64 frames = time_.frameIndex - context.destroyDeferredFrame;
+    if (!context.destroyWarned && frames > WorldDestroyWarnFrames) {
+        context.destroyWarned = true;
+        Log::Warning(LogEngine,
+                     "World {World} destroy still deferred after {Frames} frames: {Error}; "
+                     "something outside still holds its objects",
+                     context.world->Name(), frames, ErrorCodeName(context.destroyError));
     }
 }
 
@@ -628,11 +851,15 @@ Result<void> Engine::RunFrame() noexcept {
         }
     }
 
-    // 4) World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다.
+    // 4) World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다. 이 동안의
+    // DestroyWorld는
+    //    5단계로 미룬다.
     Result<void> outcome = Move(synced);
     const uint64 worldStart = platform::MonotonicNanoseconds();
+    deferWorldDestroy_ = true;
     for (usize index = 0; index < worlds_.Size(); ++index) {
-        if (worlds_[index].pendingDestroy) {
+        // 비활성 World는 Tick하지 않는다(16.4절).
+        if (worlds_[index].pendingDestroy || worlds_[index].world->Kind() == WorldKind::Inactive) {
             continue;
         }
 
@@ -650,6 +877,7 @@ Result<void> Engine::RunFrame() noexcept {
         }
     }
 
+    deferWorldDestroy_ = false;
     worldTickNanoseconds_ = platform::MonotonicNanoseconds() - worldStart;
 
     // 5) 지연 작업.
@@ -724,6 +952,8 @@ Result<void> Engine::Shutdown() noexcept {
 
     shutdownRunning_ = true;
     auto running = MakeScopeExit([this]() noexcept { shutdownRunning_ = false; });
+    // 종료 중에는 진단 명령이 반쯤 정리된 상태를 읽지 않게 먼저 푼다.
+    UnbindConsoleCommands();
     if (state_ != EngineState::Stopping) {
         state_ = EngineState::Stopping;
     }
@@ -811,7 +1041,7 @@ Result<void> Engine::Shutdown() noexcept {
     // World·게임 타입은 Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의
     // dependent로 남아 Unregister가 Busy로 멈춘다. ModuleRegistration 파괴로 붙잡은 lease만 놓고
     // TypeRegistry::Shutdown이 남은 레코드를 dependent 순서로 반납한다. 모듈 타입 등록기는 그 전에
-    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader.ko.md 3.11절).
+    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader 3.11절).
     modules_.Reset();
     DetachModuleTypes();
     if (types_) {
@@ -837,7 +1067,7 @@ Result<void> Engine::AttachModuleTypes() noexcept {
     ModuleLoader* loader = config_.modules;
     if (loader == nullptr) {
         Log::Error(LogEngine, "EngineConfig::modules is required: pass the process module loader "
-                              "(Docs/Design/ModuleLoader.ko.md section 3.11)");
+                              "(Docs/Design/ModuleLoader section 3.11)");
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

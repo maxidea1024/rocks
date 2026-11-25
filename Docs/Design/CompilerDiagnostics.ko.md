@@ -65,7 +65,7 @@ Rocks 도구가 사용자에게 보이는 진단 코드의 대역이다(2026-11-
 | 접두사·대역 | 도구 | 정본 |
 |---|---|---|
 | `RMC1000`–`RMC4999` | 메타 컴파일러(`Programs/Rocks.MetaCompiler`) | [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md) |
-| `S0100`–`S1199` | Sparks 컴파일러. 대역 안의 배정(S01xx 어휘 … S11xx 패키지·reload·backend)은 Sparks 문서 8.1절 | [Sparks 언어](SparksLanguage.ko.md) 8.1절 |
+| `S0100`–`S1199` | Sparks 컴파일러. 대역 안의 배정(S01xx 어휘 … S11xx 패키지·reload·backend)은 Sparks 문서 8.1절 | [Sparks 언어](SparksLanguage/08-ErrorHandling.ko.md) 8.1절 |
 | (예약) UI 검증 | `rocks validate --ui`(UiToolkit). 접두사는 구현 때 이 표에 등록한다 | [UI 툴킷](UiToolkit.ko.md) |
 
 새 도구가 진단 코드를 내면 접두사와 대역을 이 표에 먼저 등록한다.

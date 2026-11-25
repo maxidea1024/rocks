@@ -6,7 +6,8 @@ using Rocks.Build.Rules;
 // identifiers that build diagnostics name (MeshBuildSettingField), plus SkinnedMeshBuildSettings (section 6.3, stage MA5a — the
 // reflected derived struct adding the six skinned build fields of UE FSkeletalMeshBuildSettings), and the simple collision value
 // types (section 4.6/4.8, stage MA3a — CollisionSphere/Box/Capsule/TaperedCapsule/Cylinder/Convex, CollisionEnabled, CollisionComplexity,
-// SimpleCollision) with validation and convex bulk store/load. Stage MA2b1 (section 5.5.1) adds the StaticMesh asset class with its parts under
+// SimpleCollision) with validation and convex bulk store/load; CollisionEnabled itself comes from the Collision module
+// (Docs/Design/CollisionData.ko.md). Stage MA2b1 (section 5.5.1) adds the StaticMesh asset class with its parts under
 // Mesh/Common (material slots, section info, sockets, reduction and virtual geometry settings, cooked render streams and sections) and
 // Mesh/StaticMesh (source LOD, cooked render LOD and render data, load validation), depending on MeshSource, Material and GraphicsTypes.
 // Engine Runtime module: ObjectRuntime for reflection, CoreTypeBindings for the Vec3d, Rotator<double> and Transform mirrors and
@@ -20,5 +21,5 @@ public sealed class Mesh : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "AssetRuntime", "MeshSource", "Material", "GraphicsTypes"];
+    protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "AssetRuntime", "Collision", "MeshSource", "Material", "GraphicsTypes"];
 }

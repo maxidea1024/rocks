@@ -95,7 +95,7 @@ internal static partial class ModuleMetaTests
             string publicBody = compactSource[..privateDefinition];
             string privateBody = compactSource[privateDefinition..ownDefinition];
             // 모듈 로더가 부르는 자기 타입 함수는 의존 모듈·모듈 키 없이 이 모듈 타입만 public 다음 private 순서로 등록한다
-            // (Docs/Design/ModuleLoader.ko.md 3.10절). 두 모듈 생성 헤더가 같은 선언을 둔다.
+            // (Docs/Design/ModuleLoader 3.10절). 두 모듈 생성 헤더가 같은 선언을 둔다.
             string ownBody = compactSource[ownDefinition..];
             int ownValue = ownBody.IndexOf("GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
             int ownLeaf = ownBody.IndexOf("GeneratedType<::probe::Leaf>::Schema()", StringComparison.Ordinal);
@@ -331,7 +331,8 @@ internal static partial class ModuleMetaTests
         {
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", Parent.Replace("ROCKS_CLASS()", "ROCKS_CLASS(WorldOnly)", StringComparison.Ordinal)
-                .Replace("ROCKS_PROPERTY()", "ROCKS_PROPERTY(Name=\"Amount\", EditorOnly)", StringComparison.Ordinal));
+                .Replace("ROCKS_PROPERTY() rocks::int32 value = 0;\n", "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(Name=\"Amount\", EditorOnly) rocks::int32 value = 0;\n#endif\n",
+                    StringComparison.Ordinal));
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
             ProcessResult upper = await layout.RunUpperAsync();
             Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);

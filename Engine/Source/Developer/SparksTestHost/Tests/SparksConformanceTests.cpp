@@ -14,7 +14,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Sparks conformance 실행기 시험이다(Docs/Design/SparksLanguage.ko.md 13.1절 "`.expect` 형식"):
+// Sparks conformance 실행기 시험이다(Docs/Design/SparksLanguage 13.1절 "`.expect` 형식"):
 // 기대값 해석과 형식 오류, 사례 일치·불일치 보고, 그리고 저장소 corpus 전체 실행.
 using namespace rocks;
 using namespace rocks::sparks;

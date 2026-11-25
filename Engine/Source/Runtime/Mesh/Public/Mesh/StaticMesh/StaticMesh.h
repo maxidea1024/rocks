@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <AssetRuntime/PerPlatformInt32.h>
 #include <AssetRuntime/StreamableRenderAsset.h>
 #include <Core/Containers/Array.h>
@@ -47,13 +48,17 @@ class ROCKS_MESH_API StaticMesh final : public StreamableRenderAsset {
 
 public:
     explicit StaticMesh(Allocator& allocator) noexcept
-        : sourceLods(allocator), sectionInfo(allocator), materialSlots(allocator),
-          sockets(allocator), simpleCollision(allocator), minLod(allocator),
-          numStreamedLods(allocator), renderData(allocator) {
+        :
+#if ROCKS_WITH_EDITOR_DATA
+          sourceLods(allocator), sectionInfo(allocator),
+#endif
+          materialSlots(allocator), sockets(allocator), simpleCollision(allocator),
+          minLod(allocator), numStreamedLods(allocator), renderData(allocator) {
         numStreamedLods.defaultValue = StaticMeshGroupStreamedLods;
     }
 
     // ---- 에디터 데이터(UE WITH_EDITORONLY_DATA) ----
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) Array<StaticMeshSourceLod> sourceLods;
     // 섹션 정보 표다((lod, section) 엄격 증가 — UE SectionInfoMap).
     ROCKS_PROPERTY(EditorOnly) Array<MeshSectionInfoEntry> sectionInfo;
@@ -66,6 +71,7 @@ public:
     ROCKS_PROPERTY(EditorOnly) ObjectRef<StaticMesh> complexCollisionMesh;
     // distance field 대체 메시다(UE DistanceFieldReplacementMesh — 보존, GI 단계에서 Build 의존).
     ROCKS_PROPERTY(EditorOnly) ObjectRef<StaticMesh> distanceFieldReplacementMesh;
+#endif
 
     // ---- 저장(쿠킹에도 남음) ----
     ROCKS_PROPERTY() StructRefArray<MeshMaterialSlot> materialSlots;

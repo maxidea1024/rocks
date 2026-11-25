@@ -1,6 +1,6 @@
 #include <NodeGraph/GraphClone.h>
 
-// 문서·배치 값의 깊은 복사다(Docs/Design/NodeGraph.ko.md GD24·8.6절).
+// 문서·배치 값의 깊은 복사다(Docs/Design/NodeGraph GD24·8.6절).
 namespace rocks::nodegraph {
 
 namespace {
@@ -68,6 +68,17 @@ Result<void> CloneGraph(const Graph& source, Graph& out) noexcept {
     out.id = source.id;
     out.role = source.role;
     out.domainRole = source.domainRole;
+    out.ownerNode = source.ownerNode;
+    out.inputs.Clear();
+    out.outputs.Clear();
+    if (auto inputs = out.inputs.TryAppend(source.inputs.View()); !inputs) {
+        return inputs;
+    }
+
+    if (auto outputs = out.outputs.TryAppend(source.outputs.View()); !outputs) {
+        return outputs;
+    }
+
     if (auto nodes = CloneArray(source.nodes, out.nodes,
                                 [](const GraphNode& item, GraphNode& copy) noexcept {
                                     return CloneGraphNode(item, copy);

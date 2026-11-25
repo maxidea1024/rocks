@@ -4,7 +4,7 @@
 #include <Graphics/DeviceTypes.h>
 #include <Graphics/ResourceAccess.h>
 
-// 렌더 그래프의 값 타입이다(Docs/Design/RenderBase.ko.md 7절). 그래프 자원 handle, pass 종류·표시,
+// 렌더 그래프의 값 타입이다(Docs/Design/RenderBase 7절). 그래프 자원 handle, pass 종류·표시,
 // 그래프 내부 접근 모델의 단위(GraphResourceAccess)와 진단 결과 타입을 둔다.
 namespace rocks::render {
 
@@ -58,6 +58,33 @@ struct GraphTextureView {
     }
 
     bool operator==(const GraphTextureView&) const noexcept = default;
+};
+
+// 그래프 버퍼 view handle이다(UE FRDGBufferSRVRef·FRDGBufferUAVRef 대응, Docs/Design/RenderBase
+// 4.4절 "GX3·GX4 compute 연결 설계" (3)). (버퍼, view 종류·형식·범위, 읽기·쓰기)이며
+// RenderGraph::CreateBufferView가 만든다. 만든 그래프 안에서만 의미가 있다.
+struct GraphBufferView {
+    uint32 index = GraphIndexNone;
+    uint32 graph = 0;
+
+    bool IsNull() const noexcept {
+        return index == GraphIndexNone;
+    }
+
+    bool operator==(const GraphBufferView&) const noexcept = default;
+};
+
+// 그래프 상수 handle이다(RenderGraph::CreateConstants, Docs/Design/RenderBase 9.11절 8항 — UE
+// FRDGBuilder::CreateUniformBuffer 대응). 만든 그래프 안에서만 의미가 있다.
+struct GraphConstantBuffer {
+    uint32 index = GraphIndexNone;
+    uint32 graph = 0;
+
+    bool IsNull() const noexcept {
+        return index == GraphIndexNone;
+    }
+
+    bool operator==(const GraphConstantBuffer&) const noexcept = default;
 };
 
 // 그래프에 넣은 pass handle이다. index는 선언 순서(0부터)이며 진단(culling·수명·전이)에 쓴다.
@@ -162,7 +189,8 @@ struct GraphResourceAccess {
     graphics::SubresourceRange range;
     graphics::ResourceAccess access = graphics::ResourceAccess::Unknown;
     GraphAccessFlags flags = GraphAccessFlags::None;
-    // GraphTextureView 선언이면 그 view 번호다(resource·range는 AddPass가 view에서 채운다).
+    // GraphTextureView(kind Texture)·GraphBufferView(kind Buffer) 선언이면 그 view 번호다
+    // (resource·range는 AddPass가 view에서 채운다).
     uint32 view = GraphIndexNone;
 };
 

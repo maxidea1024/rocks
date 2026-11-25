@@ -19,6 +19,8 @@
 //   __SHADER_TARGET_* 대신)
 // - ROCKS_HLSL2021 = 0·1 (job 옵션, 기본은 형식 정의 language.hlsl2021)
 // - ROCKS_VERTEX_SHADER·ROCKS_PIXEL_SHADER·ROCKS_COMPUTE_SHADER 가운데 job 단계 하나 = 1
+// - 형식 기능마다 ROCKS_FEATURE_<이름> = 0·1 (형식 정의 features — COMPUTE·WAVE_OPERATIONS·
+//   VERTEX_VIEWPORT_LAYER_OUTPUT·TYPED_UAV_LOAD, 개정 29)
 // - job 정의. 이름이 ROCKS_·__로 시작하면 ReservedDefine, 같은 이름이 두 번이면 DuplicateDefine,
 //   이름이 식별자가 아니거나 값에 줄바꿈이 있으면 InvalidDefine이다.
 // 결과는 이름 byte 순이다. 형식·컴파일러 매크로의 파생(ROCKS_SPIRV, ROCKS_IMAGE_FORMAT)은
@@ -57,7 +59,7 @@ public:
 private:
     friend ROCKS_SHADERCOMPILER_API ShaderSourceStatus BuildShaderPreprocessDefines(
         const ShaderFormatDefinition& format, uint32 stage, bool hlsl2021,
-        Span<const ShaderDefine> jobDefines, ShaderDefineSet& out) noexcept;
+        Span<const ShaderDefine> jobDefines, bool debugBuffer, ShaderDefineSet& out) noexcept;
 
     struct Entry {
         usize nameOffset = 0;
@@ -78,5 +80,11 @@ private:
 ROCKS_SHADERCOMPILER_API ShaderSourceStatus
 BuildShaderPreprocessDefines(const ShaderFormatDefinition& format, uint32 stage, bool hlsl2021,
                              Span<const ShaderDefine> jobDefines, ShaderDefineSet& out) noexcept;
+
+// 위와 같되 debugBuffer가 참이고 PS면 ROCKS_DEBUG_BUFFER = 1을 더한다(개발 전용 PS job의 진단 버퍼
+// — 7.2절 12항, 16.1절 SSD34).
+ROCKS_SHADERCOMPILER_API ShaderSourceStatus BuildShaderPreprocessDefines(
+    const ShaderFormatDefinition& format, uint32 stage, bool hlsl2021,
+    Span<const ShaderDefine> jobDefines, bool debugBuffer, ShaderDefineSet& out) noexcept;
 
 } // namespace rocks::shader

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Text/Name.h>
 #include <Material/Material.h>
 #include <Mesh/Common/MeshUvDensity.h>
@@ -23,8 +24,10 @@ struct MeshMaterialSlot {
 
     // 사용자에게 보이는 이름이다(UE MaterialSlotName — 게임 코드가 슬롯을 이름으로 찾는다).
     ROCKS_PROPERTY() Name slotName;
+#if ROCKS_WITH_EDITOR_DATA
     // 임포트한 원본의 슬롯 키다(UE ImportedMaterialSlotName — 재임포트가 슬롯 순서를 맞춘다).
     ROCKS_PROPERTY(EditorOnly) Name importedSlotName;
+#endif
     // 머티리얼이다(Hard). 비면 엔진 기본 머티리얼이다.
     ROCKS_PROPERTY() ObjectRef<MaterialBase> material;
     // 겹쳐 그리는 머티리얼이다(Hard, UE OverlayMaterialInterface). 비어도 된다.

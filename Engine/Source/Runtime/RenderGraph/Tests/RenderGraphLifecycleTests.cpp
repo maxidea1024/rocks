@@ -5,7 +5,7 @@
 #include <TestSupport/Test.h>
 
 // RG1 완료 기준 (e) 음성 검증, (f) 풀 축출 fence gate와 import lease·export·GpuScope·렌더 lane 연결
-// 시험이다(Docs/Design/RenderBase.ko.md 7.4·8절).
+// 시험이다(Docs/Design/RenderBase 7.4·8절).
 using namespace rocks;
 using namespace rocks::render;
 using namespace rocks::render::testing;

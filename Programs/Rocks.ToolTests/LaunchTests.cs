@@ -33,6 +33,8 @@ internal static partial class LaunchTests
     private const int SignalIgnoredExitCode = 65;
 
     private const int SharedConsoleExitCode = 66;
+    // 메인 스레드 호스트 시험의 본문 종료 코드다(LaunchProbe.h HostedBodyExitCode).
+    private const int HostedBodyExitCode = 67;
 
     // POSIX 셸 종료 코드(128 + 신호 번호)다. SIGBUS는 macOS 10, Linux·Android 7이다.
     private const int PosixInterruptExitCode = 128 + 2;
@@ -266,6 +268,22 @@ internal static partial class LaunchTests
                 "no-teardown exit destroyed the default allocator\n" + skipped.StdErr);
         });
 
+        // 메인 스레드 호스트(ApplicationSettings.mainThreadHost, Docs/Design/MacPlatform.ko.md 3절): 본문이 호스트가 만든 스레드에서 돌고,
+        // 호스트가 join한 뒤 본문의 종료 코드를 그대로 돌려준다. 호스트가 없으면 본문은 메인 스레드에서 돈다.
+        suite.Add("Native.Launch.main-thread-host", async () =>
+        {
+            LaunchResult hosted = await Run(console, "--crash-off", "--thread-host", "host-thread");
+            Verify.Equal(HostedBodyExitCode, hosted.ExitCode, "hosted body exit\n" + hosted.StdErr);
+            Verify.Contains("LAUNCH HOST STARTED", hosted.StdErr, "host was called");
+            Verify.Contains("LAUNCH BODY ON HOSTED THREAD", hosted.StdErr, "body ran on the hosted thread");
+            Verify.Contains("LAUNCH HOST JOINED", hosted.StdErr, "host joined the body thread");
+            LaunchResult hostedExit = await Run(console, "--crash-off", "--thread-host", "exit", "42");
+            Verify.Equal(42, hostedExit.ExitCode, "host must return the body exit code\n" + hostedExit.StdErr);
+            LaunchResult direct = await Run(console, "--crash-off", "host-thread");
+            Verify.Equal(1, direct.ExitCode, "body without a host\n" + direct.StdErr);
+            Verify.Contains("LAUNCH BODY ON MAIN THREAD", direct.StdErr, "without a host the body runs on the main thread");
+        });
+
         // 명령줄 캡처 실패(초기화 실패)는 본문을 부르지 않고 종료 코드 1과 원인 한 줄이다. 시작한 단계(이른 크래시 수집)만 정리한다.
         suite.Add("Native.Launch.command-line-failure", async () =>
         {
@@ -467,7 +485,7 @@ internal static partial class LaunchTests
             Verify.Equal(42, (await Run(windowed, "exit", "42")).ExitCode, "windowed exit 42");
         });
 
-        // 내장 진입은 Modular를 지원하지 않아 Modular 하니스에는 그 프로그램이 없다(Docs/Design/ModuleLoader.ko.md 3.14절, BuildTargets BS8d6).
+        // 내장 진입은 Modular를 지원하지 않아 Modular 하니스에는 그 프로그램이 없다(Docs/Design/ModuleLoader 3.14절, BuildTargets BS8d6).
         if (options.Modular)
         {
             return;

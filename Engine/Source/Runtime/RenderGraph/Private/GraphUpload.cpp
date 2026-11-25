@@ -1,6 +1,6 @@
 #include "RenderGraphInternal.h"
 
-// 그래프 안 업로드 선언이다(Docs/Design/RenderBase.ko.md 8절 RG2, UE FRDGBuilder::QueueBufferUpload
+// 그래프 안 업로드 선언이다(Docs/Design/RenderBase 8절 RG2, UE FRDGBuilder::QueueBufferUpload
 // RC/Public/RenderGraphBuilder.h:309–333, RC/Private/RenderGraphBuilder.cpp:2691–2837). 데이터는
 // 선언 때 프레임 arena에 복사해 두고, Deferred는 그래프 시작(첫 기록을 열기 전)에, Immediate는 그
 // 자원의 첫 pass 직전에 장치 업로드 경로(Device::UpdateBuffer·UpdateTexture, 업로드 ring)로 올린다.

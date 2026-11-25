@@ -2,7 +2,7 @@
 
 #include <TestSupport/Test.h>
 
-// RG3 병렬 기록 시험이다(Docs/Design/RenderBase.ko.md 8절 "RG3 병렬 기록 설계"): worker에서 기록한
+// RG3 병렬 기록 시험이다(Docs/Design/RenderBase 8절 "RG3 병렬 기록 설계"): worker에서 기록한
 // 기록 목록을 소유 스레드가 선언 순서로 재생하면 장치 호출 열(자원 생성 제외)이 직렬 실행과 같다.
 // 순서는 ParallelFor join과 재생 순서로만 정해진다(시간에 기대지 않는다).
 using namespace rocks;

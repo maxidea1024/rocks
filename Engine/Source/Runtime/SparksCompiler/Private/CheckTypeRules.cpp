@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 타입 표기의 타입 인자 제약이다(Docs/Design/SparksLanguage.ko.md 3.10절 "타입 인자 제약"). 이름
+// 타입 표기의 타입 인자 제약이다(Docs/Design/SparksLanguage 3.10절 "타입 인자 제약"). 이름
 // 해석이 정한 모든 타입 표기(매개변수·필드·지역·반환·이벤트 매개변수·식 안의 타입 인자·`as?`
 // 대상)를 원문 순서로 한 번씩 보며, 위반은 그 타입 인자의 표기 자리에 하나다(바깥 표기는 다시 보지
 // 않는다).

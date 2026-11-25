@@ -9,7 +9,7 @@
 
 #include "PreludeMembers.h"
 
-// 이름 해석(LC2b)이다(Docs/Design/SparksLanguage.ko.md 3.9절, S0306–S0325, schema S1120의 이름
+// 이름 해석(LC2b)이다(Docs/Design/SparksLanguage 3.9절, S0306–S0325, schema S1120의 이름
 // 부분). Compilation::Check가 import 해석 뒤에 부른다. 기능별 파일로 나뉜다:
 //   BindSetup.cpp         진단·심볼·이름 공간·타입 intern, 언어 이름, 엔진 schema 선언과 해석
 //   BindDeclarations.cpp  모듈 선언·import 이름·선언 타입·기반·상속·멤버 검사·override·interface·

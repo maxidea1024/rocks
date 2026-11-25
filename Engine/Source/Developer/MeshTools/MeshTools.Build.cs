@@ -21,10 +21,4 @@ public sealed class MeshTools : EngineModuleRules
     protected override string[] PublicDependencies => ["MeshSource", "Mesh", "Animation", "AssetRuntime", "AssetCooker", "AssetNugget"];
 
     protected override string[] PrivateDependencies => ["DeterministicMath", "MikkTSpace"];
-
-    protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "MikkTSpace");
-
-    protected override IReadOnlyList<string> PrivateDefines(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerDefines(context, "MikkTSpace");
 }

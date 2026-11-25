@@ -3,7 +3,7 @@
   "name": "OpenEXR",
   "version": "3.4.3",
   "upstreamDirectory": "openexr-3.4.3",
-  "globalState": true,
+  "globalState": false,
   "source": {
     "url": "https://github.com/AcademySoftwareFoundation/openexr/archive/refs/tags/v3.4.3.tar.gz",
     "sha256": "06494da42eb91c47265ffbad02d0c73cf65d8ad7f24683b801f34d842c4ecb6d",
@@ -367,6 +367,7 @@
     "OpenEXR source decoder for the texture importer (Docs/Design/AssetSystem section 12.10, stage A5f). Developer only: ImageCodec links it, runtime targets do not.",
     "compression.c includes the libdeflate sources itself (external/deflate/lib/*.c through relative paths, OPENEXR_USE_INTERNAL_DEFLATE), so they are not translation units and the upstream folder layout is kept. libdeflate selects its x86 and ARM SIMD paths at run time (cpu_features); the decoded bytes are the same on every path.",
     "HTJ2K (HTJ2K256 and HTJ2K32) is deferred: upstream implements it in internal_ht.cpp on OpenJPH, and both need C++ exceptions, which the Rocks build disables. OpenExrHtStub.c defines internal_exr_apply_ht and internal_exr_undo_ht returning EXR_ERR_FEATURE_NOT_IMPLEMENTED; ImageCodec rejects HTJ2K parts from the header before decoding.",
+    "Process state (globalState false): every consumer (ImageCodec, and the EngineTests EXR fixture writer) passes its allocator in each exr_context_initializer_t and never sets the process-wide defaults, so a second static copy in a Modular build keeps no state another copy depends on (Docs/Design/BuildTargets section 3.8 BD29).",
     "Allocation: ImageCodec passes alloc_fn and free_fn in every exr_context_initializer_t, and the internal libdeflate objects take the context allocator (EXR_USE_CONFIG_DEFLATE_STRUCT, automatic for libdeflate newer than 1.18). The process-wide defaults (exr_set_default_memory_routines, libdeflate_set_memory_allocator) are never set. The malloc and free fallbacks in memory.c remain in the object for contexts created without allocator functions; ImageCodec never creates one.",
     "Messages: ImageCodec passes error_handler_fn in every context, so the default handler in internal_structs.c that prints to stderr is never used. No threading macro is defined (IlmThreadConfig.h), so contexts have no mutex; each context is used from one thread.",
     "The four configuration headers in src/lib/OpenEXRCore (OpenEXRConfig.h, OpenEXRConfigInternal.h, IlmThreadConfig.h, ImathConfig.h) are Rocks files recorded as added modifications."

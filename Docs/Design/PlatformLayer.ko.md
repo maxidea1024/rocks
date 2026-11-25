@@ -271,6 +271,8 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 
 컴파일 인자는 desktop과 같은 경고·언어 규칙에 `--target=<abi>-linux-android<api>`·`-fPIC`·`-DROCKS_PLATFORM_ANDROID=1`을 더하고, 링크는 `-static-libstdc++`다(엔진은 STL을 쓰지 않지만 compiler runtime이 필요). 메타컴파일러는 같은 NDK clang으로 AST를 만들며 검토한 대상 인자만 허용한다. `test`는 실행 파일을 `/data/local/tmp/rocks-test`에 올려 실행하고 보고서를 회수하며, host에서 자식 프로세스를 띄우는 harness(Fatal 음성 대조)·self·meta 검사는 Android에서 아직 실행하지 않는다. Android ASan과 Installed SDK 내보내기는 거부한다. Windows host에서 x86_64는 빌드·에뮬레이터 테스트 662건 통과, arm64는 Release 빌드만 확인했다. macOS host 교차 빌드와 macOS 자체 빌드는 하지 않았다.
 
+Android 창·입력(UE처럼 NativeActivity 상속 액티비티와 `android_native_app_glue`, 터치·마우스·키·패드·뒤로 가기)은 아직 없다(`PlatformWindow`는 Android에서 Unsupported). 설계는 [Android 실행 기반](AndroidPlatform.ko.md)(앱 진입·창·수명·APK)과 [터치 입력](TouchInput.ko.md) 4.2절(입력 변환)이다. macOS 창·입력은 [macOS 실행 기반](MacPlatform.ko.md)이다.
+
 ## 플랫폼 선택과 실패 정책
 
 - 지원 대상, 호스트, 타깃, 아키텍처 및 필수 구현 목록을 빌드 규칙에서 명시한다. 알 수 없는 플랫폼은 타 플랫폼으로 대체하지 않고 진단과 함께 빌드를 중단한다. cross-compilation 지원 전에는 지원된다고 가정하지 않는다.
@@ -314,7 +316,7 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 
 UE 5.8은 `FCoreDelegates`의 `ApplicationWillDeactivateDelegate`·`ApplicationHasReactivatedDelegate`·`ApplicationWillEnterBackgroundDelegate`·`ApplicationHasEnteredForegroundDelegate`·`GetApplicationWillTerminateDelegate`(`Engine/Source/Runtime/Core/Public/Misc/CoreDelegates.h:349–366`)로 알리고, Android 오디오 포커스는 `GameActivity`의 `onAudioFocusChange`(`Engine/Build/Android/Java/src/com/epicgames/unreal/GameActivity.java.template:5074`)가 받는다.
 
-- 이벤트: `platform::AppLifecycleEvent { Activated, Deactivated, EnteredBackground, EnteredForeground, WillTerminate, AudioFocusLost, AudioFocusLostTransient, AudioFocusDuck, AudioFocusGained }`.
+- 이벤트: `platform::AppLifecycleEvent { Activated, Deactivated, EnteredBackground, EnteredForeground, WillTerminate, AudioFocusLost, AudioFocusLostTransient, AudioFocusDuck, AudioFocusGained, LowMemory }`. `LowMemory`는 Android `APP_CMD_LOW_MEMORY`다([Android 실행 기반](AndroidPlatform.ko.md) 4절, 2026-11-24 추가). Android 창 생성·파괴(`APP_CMD_INIT_WINDOW`·`TERM_WINDOW`)는 수명 이벤트가 아니라 창 신호이며 같은 문서 4절이 정한다.
 - 전달: OS 콜백 스레드는 고정 크기 큐에 넣기만 한다. 엔진 호스트가 `PumpEvents`에서 게임 스레드로 꺼내 전달한다. UE처럼 OS 스레드에서 delegate를 바로 부르지 않는다(콜백 안에서 게임 상태를 만지지 않게). 큐가 차면 같은 종류는 합치고 버린 수를 센다.
 - Windows·macOS: 앱의 어느 창도 포커스가 없으면 `Deactivated`, 하나라도 얻으면 `Activated`(`WM_ACTIVATEAPP`·`NSApplicationDidResignActiveNotification`/`DidBecomeActive`). 백그라운드·오디오 포커스 이벤트는 없다.
 - Android: `onPause`·`onResume` → `EnteredBackground`·`EnteredForeground`, `AudioManager` 포커스 변경 → 오디오 포커스 이벤트. iOS는 보류 플랫폼이라 정하지 않는다(오디오 세션 인터럽션은 iOS 착수 때).

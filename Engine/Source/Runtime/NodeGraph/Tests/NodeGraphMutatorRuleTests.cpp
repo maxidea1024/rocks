@@ -1,6 +1,6 @@
 #include "NodeGraphMutatorTestSupport.h"
 
-// GraphMutator 명령 규칙의 경계 사례 시험이다(Docs/Design/NodeGraph.ko.md 6.4·8.6절, 13절 GT1·GT2):
+// GraphMutator 명령 규칙의 경계 사례 시험이다(Docs/Design/NodeGraph 6.4·8.6절, 13절 GT1·GT2):
 // 중복 id, 고아 핀 자동 정리(GI7), 고아 핀 가림(GI8), 재경유 순환(GI10), 값·그래프 크기 상한, undo
 // 순서(LIFO) 위반, 통지 중 구독 해제, bracket 중 undo, 변환 노드의 문서당 하나, 같은 바이트
 // 속성(무동작), 출력 핀 단위 순번 통지.
@@ -113,7 +113,8 @@ TEST(NodeGraph_RulePrunesRetainedPins) {
     CHECK(HasRetained(m.sample.Node(SampleAdd), env.pinGone));
 }
 
-// 새 핀 목록에 고아 핀과 같은 키가 생기면 거부한다(GI8 — 재결합은 NG3).
+// 새 핀 목록에 고아 핀과 같은 키가 같은 방향으로 생기면 재결합한다(GI8, 10.1절): 값은 입력
+// 기본값으로 돌아오고 고아 핀은 사라진다.
 TEST(NodeGraph_RuleRetainedShadowed) {
     TestEnv env;
     REQUIRE(env.ready);
@@ -128,7 +129,11 @@ TEST(NodeGraph_RuleRetainedShadowed) {
     REQUIRE(FillRecord(bytes, TestDynamicStruct, 3, 0));
     GraphCommandList grow(env.allocator);
     REQUIRE(grow.SetNodeProperties(SampleMain, SampleDynamic, bytes.View()));
-    CHECK(Rejects(m, grow, GraphCommandReason::RetainedShadowed));
+    REQUIRE(m.Run(grow));
+    const GraphNode& node = m.sample.Node(SampleDynamic);
+    CHECK(!HasRetained(node, env.Intern("Item_2")));
+    REQUIRE(node.inputDefaults.Size() == 1);
+    CHECK(node.inputDefaults[0].pin == env.Intern("Item_2"));
 }
 
 // 재경유 사슬 순환(GI10)과 재경유 자기 간선을 거부한다.

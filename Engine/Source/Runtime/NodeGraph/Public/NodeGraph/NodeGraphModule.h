@@ -2,7 +2,7 @@
 
 #include <Core/Result.h>
 
-// NodeGraph 모듈의 리플렉션 타입 등록이다(Docs/Design/NodeGraph.ko.md 6.1절).
+// NodeGraph 모듈의 리플렉션 타입 등록이다(Docs/Design/NodeGraph 6.1절).
 namespace rocks {
 
 class ModuleRegistration;

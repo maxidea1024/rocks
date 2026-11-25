@@ -19,6 +19,10 @@ public sealed class ShaderToolLoader : EngineModuleRules
 
     protected override string[] PublicDependencies => ["ShaderToolTable", "PlatformBase", "Core"];
 
+    // Tool headers seen only by this module's sources (BS3a): DXC dxcapi.h (Windows implementation), and the SPIRV-Tools and SPIRV-Cross C APIs
+    // used by the shared format tool calls (ShaderToolCalls.h, Docs/Design/ShaderSystem section 11.1 SH1e E2).
+    protected override string[] PrivateDependencies => ["DirectXShaderCompiler", "SpirvTools", "SpirvCross"];
+
     public override NativeModuleInput Configure(BuildContext context)
     {
         string backend = $"{ModuleDirectory}/Private";
@@ -31,10 +35,7 @@ public sealed class ShaderToolLoader : EngineModuleRules
         return base.Configure(context) with
         {
             Sources = [.. Directory.GetFiles(context.PathInRoot(backend), "*.cpp").Order(StringComparer.Ordinal),
-                .. context.Sources($"{backend}/{platform}")],
-            // Only the Windows implementation includes the DXC public header (dxcapi.h). External headers are visible only to this module's sources (adapter approach).
-            PrivateIncludeDirectories = ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "DirectXShaderCompiler"),
-            PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, "DirectXShaderCompiler")
+                .. context.Sources($"{backend}/{platform}")]
         };
     }
 }

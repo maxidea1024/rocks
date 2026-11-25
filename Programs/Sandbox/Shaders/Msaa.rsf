@@ -1,0 +1,16 @@
+// MSAA self-test 셰이더다(왼쪽 흰 사각형, 표본 0 읽기).
+float4 CoverVS(uint id : SV_VertexID) : SV_Position {
+    const float2 corners[6] = {float2(-1, -1), float2(-1, 1), float2(-0.25, -1),
+                               float2(-0.25, -1), float2(-1, 1), float2(-0.25, 1)};
+    return float4(corners[id], 0.5, 1.0);
+}
+
+float4 CoverPS() : SV_Target0 {
+    return float4(1.0, 1.0, 1.0, 1.0);
+}
+
+Texture2DMS<float4> Source;
+
+float4 LoadPS(float4 position : SV_Position) : SV_Target0 {
+    return Source.Load(int2(position.xy), 0);
+}

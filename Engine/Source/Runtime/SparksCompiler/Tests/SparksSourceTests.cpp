@@ -5,7 +5,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Sparks 원문 관리 시험이다(Docs/Design/SparksLanguage.ko.md 8.1절 "위치"·"원문 검사"): 줄·열 계산
+// Sparks 원문 관리 시험이다(Docs/Design/SparksLanguage 8.1절 "위치"·"원문 검사"): 줄·열 계산
 // (code point 단위, BOM, CRLF), 원문 검사 S0101·S0102·S0103과 그때의 IsUsable, 실패 원자성.
 // CRLF·잘못된 UTF-8·BOM은 저장소가 줄 끝을 정규화하므로 corpus 파일이 아니라 여기서 시험한다.
 using namespace rocks;

@@ -10,7 +10,8 @@ namespace rocks::math {
 //
 // 계수는 물리량의 길이 차원에 따라 다르다. 일괄 100배가 아니다:
 //   길이·속도·가속도·힘·선형 충격량(길이 1차)   cm 계열 = m 계열 × 100
-//   넓이·토크·관성 모멘트(길이 2차)              cm 계열 = m 계열 × 10000
+//   넓이·토크·관성 모멘트·각충격량·각 스프링(길이 2차)  cm 계열 = m 계열 × 10000
+//   밀도(길이 −3차, 질량 g → kg 포함)             g/cm³ = kg/m³ × 0.001(kg/m³ = g/cm³ × 1000)
 //   질량(kg)·시간(초)·각도·각속도(rad/s)        바꾸지 않는다(길이 차원이 없다)
 // UE 근거(5.8.4): Core/Public/Math/UnrealMathUtility.h:177-183(UE_CM_TO_M·UE_M_TO_CM·
 // UE_CM2_TO_M2·UE_M2_TO_CM2), Core/Private/Math/UnitConversion.cpp:723(cm → m 0.01)·:752-753
@@ -45,6 +46,11 @@ inline constexpr T CentimetersPerMeter = static_cast<T>(100);
 template <typename T>
     requires IsFloatingPointV<T>
 inline constexpr T SquareCentimetersPerSquareMeter = static_cast<T>(10000);
+
+// 1 g/cm³ = 1000 kg/m³. 밀도의 계수다(UE UnitConversion.cpp:803-806 — g/cm³ 1, kg/m³ 0.001).
+template <typename T>
+    requires IsFloatingPointV<T>
+inline constexpr T KilogramsPerCubicMeterPerGramPerCubicCentimeter = static_cast<T>(1000);
 
 namespace detail {
 
@@ -100,6 +106,18 @@ constexpr V DivideBySquareFactor(const V& value) noexcept {
 template <typename V>
 constexpr V MultiplyBySquareFactor(const V& value) noexcept {
     return value * SquareCentimetersPerSquareMeter<UnitScalar<V>>;
+}
+
+// g/cm³ → kg/m³: 밀도(cm 계열 → m 계열인데 곱한다 — 길이 −3차라 방향이 반대다).
+template <typename V>
+constexpr V MultiplyByDensityFactor(const V& value) noexcept {
+    return value * KilogramsPerCubicMeterPerGramPerCubicCentimeter<UnitScalar<V>>;
+}
+
+// kg/m³ → g/cm³.
+template <typename V>
+constexpr V DivideByDensityFactor(const V& value) noexcept {
+    return value / KilogramsPerCubicMeterPerGramPerCubicCentimeter<UnitScalar<V>>;
 }
 
 } // namespace detail
@@ -240,6 +258,78 @@ template <typename V>
 constexpr V
 KilogramSquareMetersToKilogramSquareCentimeters(const V& kilogramSquareMeters) noexcept {
     return detail::MultiplyBySquareFactor(kilogramSquareMeters);
+}
+
+// ---- 각충격량·각운동량 ----
+
+// kg·cm²/s → kg·m²/s. UE AddAngularImpulseInRadians의 단위(Docs/Design/PhysicsJoltAdapter.ko.md
+// U1)를 물리 엔진 단위로 바꾼다. 예: 10000 kg·cm²/s → 1 kg·m²/s.
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond(
+    const V& kilogramSquareCentimetersPerSecond) noexcept {
+    return detail::DivideBySquareFactor(kilogramSquareCentimetersPerSecond);
+}
+
+// kg·m²/s → kg·cm²/s.
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V KilogramSquareMetersPerSecondToKilogramSquareCentimetersPerSecond(
+    const V& kilogramSquareMetersPerSecond) noexcept {
+    return detail::MultiplyBySquareFactor(kilogramSquareMetersPerSecond);
+}
+
+// ---- 각 스프링 강성·감쇠 ----
+
+// kg·cm²/s²/rad → N·m/rad(각 스프링 강성 — 토크/rad).
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V KilogramSquareCentimetersPerSecondSquaredPerRadianToNewtonMetersPerRadian(
+    const V& stiffness) noexcept {
+    return detail::DivideBySquareFactor(stiffness);
+}
+
+// N·m/rad → kg·cm²/s²/rad.
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V NewtonMetersPerRadianToKilogramSquareCentimetersPerSecondSquaredPerRadian(
+    const V& stiffness) noexcept {
+    return detail::MultiplyBySquareFactor(stiffness);
+}
+
+// kg·cm²/s/rad → N·m·s/rad(각 스프링 감쇠 — 토크·초/rad).
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V KilogramSquareCentimetersPerSecondPerRadianToNewtonMeterSecondsPerRadian(
+    const V& damping) noexcept {
+    return detail::DivideBySquareFactor(damping);
+}
+
+// N·m·s/rad → kg·cm²/s/rad.
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V NewtonMeterSecondsPerRadianToKilogramSquareCentimetersPerSecondPerRadian(
+    const V& damping) noexcept {
+    return detail::MultiplyBySquareFactor(damping);
+}
+
+// ---- 밀도 ----
+
+// g/cm³ → kg/m³. UE 물리 재질 밀도(UPhysicalMaterial::Density)를 물리 엔진 단위로 바꾼다.
+// 예: 1 g/cm³(물) → 1000 kg/m³.
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V
+GramsPerCubicCentimeterToKilogramsPerCubicMeter(const V& gramsPerCubicCentimeter) noexcept {
+    return detail::MultiplyByDensityFactor(gramsPerCubicCentimeter);
+}
+
+// kg/m³ → g/cm³.
+template <typename V>
+    requires detail::IsUnitValueV<V>
+constexpr V
+KilogramsPerCubicMeterToGramsPerCubicCentimeter(const V& kilogramsPerCubicMeter) noexcept {
+    return detail::DivideByDensityFactor(kilogramsPerCubicMeter);
 }
 
 } // namespace rocks::math

@@ -6,7 +6,7 @@
 #include <SparksCompiler/Lexer.h>
 
 // 구문 분석기의 바탕이다: 토큰 분류·토큰 읽기·노드 만들기·진단·복구·깊이 상한(SyntaxTreeBuilder.h
-// 설명, Docs/Design/SparksLanguage.ko.md 8.1절 "복구").
+// 설명, Docs/Design/SparksLanguage 8.1절 "복구").
 
 namespace rocks::sparks::detail {
 

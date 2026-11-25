@@ -1,4 +1,5 @@
 #include "AnimationInternal.h"
+#include <Base/Compiler.h>
 
 // 클립 설정·이벤트·동기 마커·커브 검증과 정렬, 클립 진단 이름이다
 // (Docs/Design/MeshAnimationAssets 7.1·7.3·7.5절, UE FAnimNotifyEvent::operator<·
@@ -63,8 +64,8 @@ Result<void> CheckCurveNames(Span<const Curve> curves, Allocator& scratch,
     return Result<void>::Success();
 }
 
-Result<void> ValidateClipCurves(const ClipSourceData& source, Allocator& scratch,
-                                ClipDiagnostic* failure) noexcept {
+[[maybe_unused]] Result<void> ValidateClipCurves(const ClipSourceData& source, Allocator& scratch,
+                                                 ClipDiagnostic* failure) noexcept {
     if (auto checked = CheckCurveNames(source.curves.View(), scratch, failure); !checked) {
         return checked;
     }
@@ -86,7 +87,13 @@ Result<void> ValidateClipCurves(const ClipSourceData& source, Allocator& scratch
 
 Result<void> ValidateEvents(const AnimationClip& clip, double length,
                             ClipDiagnostic* failure) noexcept {
+    // 트랙 이름(eventTracks)은 에디터 데이터다(Docs/Design/BuildTargets 3.4절 BS2c). 없는 빌드는
+    // 트랙 범위를 보지 않는다(ValidTrack — 트랙 목록이 비면 0 이상만 본다).
+#if ROCKS_WITH_EDITOR_DATA
     const usize tracks = clip.eventTracks.Size();
+#else
+    const usize tracks = 0;
+#endif
     for (uint32 index = 0; index < clip.events.Size(); ++index) {
         const ClipEvent& event = clip.events[index];
         if (!InClip(event.time, length)) {
@@ -143,6 +150,9 @@ FrameRate PlatformFrameRate::Resolve(Name platform) const noexcept {
 
 Result<void> ValidateAnimationClip(const AnimationClip& clip, Allocator& scratch,
                                    ClipDiagnostic* failure) noexcept {
+    // 원본(source — EditorOnly)이 없는 빌드(Docs/Design/BuildTargets 3.4절 BS2c)는 원본 검사를 하지
+    // 않고 이벤트 시간은 길이 상한 없이 본다. 원본 검사는 임포트·쿠킹(에디터 데이터 빌드)이 한다.
+#if ROCKS_WITH_EDITOR_DATA
     const ClipSourceData& source = clip.source;
     if (source.frameRate.AsDecimal() > ClipMaxFrameRate) {
         return animation_detail::ClipInvalid(failure, ClipIssue::FrameRateTooHigh);
@@ -159,6 +169,10 @@ Result<void> ValidateAnimationClip(const AnimationClip& clip, Allocator& scratch
 
     const double length =
         source.frameRate.AsSeconds(FrameTime(FrameNumber(static_cast<int32>(source.frameCount))));
+#else
+    (void)scratch;
+    const double length = NumericLimits<double>::Max();
+#endif
     if (auto valid = ValidateEvents(clip, length, failure); !valid) {
         return valid;
     }

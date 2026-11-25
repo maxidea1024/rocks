@@ -107,8 +107,12 @@ internal static partial class MetaTests
             BundlePreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY(AssetBundles = \"UI\") rocks::AssetId id{};\n};\n}\n"],
             "RMC2202", "AssetBundles applies only");
         AddRejectGroup(context, "Meta.AssetBundlesRejectEditorOnlyFields", [
-            BundlePreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept : soft(a) {}\n" +
-                "ROCKS_PROPERTY(EditorOnly, AssetBundles = \"UI\") rocks::SoftObjectRef<rocks::Object> soft;\n};\n}\n"],
+            BundlePreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept\n#if ROCKS_WITH_EDITOR_DATA\n: soft(a)\n#endif\n{ (void)a; }\n" +
+                "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly, AssetBundles = \"UI\") rocks::SoftObjectRef<rocks::Object> soft;\n#endif\n};\n}\n",
+            BundlePreamble + "ROCKS_STRUCT()\nstruct Slot {\nROCKS_GENERATED_BODY()\nexplicit Slot(rocks::Allocator& a) noexcept : icon(a) {}\n" +
+                "ROCKS_PROPERTY(AssetBundles = \"UI\") rocks::SoftObjectRef<rocks::Object> icon;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept\n#if ROCKS_WITH_EDITOR_DATA\n: slot(a)\n#endif\n{ (void)a; }\n" +
+                "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly) Slot slot;\n#endif\n};\n}\n"],
             "RMC2202", "inside an EditorOnly field");
         AddRejectGroup(context, "Meta.AssetBundlesRejectBadLists", [
             BundleField("\"\""), BundleField("\"UI,,Game\""), BundleField("\"UI,UI\""), BundleField("\"1UI\""),

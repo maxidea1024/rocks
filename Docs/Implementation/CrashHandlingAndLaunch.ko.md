@@ -34,7 +34,7 @@ ROCKS_IMPLEMENT_APPLICATION(Describe)
 ```
 
 - 빌드 규칙(`*.Build.cs`)의 `Dependencies`에 `Launch`를 넣는다. 게임 템플릿(`Templates/Game/Foundation`)이 예다.
-- 실행 파일도 C++ 모듈이므로 모듈 진입점 `ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, MyTool)`을 담은 `*Module.cpp`가 따로 있어야 한다([모듈 로더](../Design/ModuleLoader.ko.md) 3.2절, 빠지면 모듈 표 링크 오류). 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과는 다른 것이고 둘 다 필요하다. 같은 소스를 여러 실행 파일이 컴파일하면 이름 자리에 `ROCKS_MODULE_NAME`을 쓴다.
+- 실행 파일도 C++ 모듈이므로 모듈 진입점 `ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, MyTool)`을 담은 `*Module.cpp`가 따로 있어야 한다([모듈 로더](../Design/ModuleLoader/03-Design/03.02-EntryPoint.ko.md) 3.2절, 빠지면 모듈 표 링크 오류). 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과는 다른 것이고 둘 다 필요하다. 같은 소스를 여러 실행 파일이 컴파일하면 이름 자리에 `ROCKS_MODULE_NAME`을 쓴다.
 - Windows GUI 프로그램은 `ROCKS_IMPLEMENT_WINDOWED_APPLICATION`과 빌드 규칙 `WindowsSubsystem = Windows`를 함께 쓴다. 둘이 어긋나면 진입 기호가 없어 링크가 실패한다.
 - Windows 진입점은 `wmain`·`wWinMain`뿐이다. 인자는 CRT가 나눈 넓은 문자 argv를 UTF-8로 바꾼 값이다. POSIX는 `main`이고 인자가 UTF-8이 아니면 시작하지 않는다.
 - 명령줄을 캡처하지 못하면(잘못된 인코딩, 인자 32768개·2 MiB 초과) stderr에 한 줄을 남기고 `commandLineFailureExitCode`(기본 1)로 끝난다.

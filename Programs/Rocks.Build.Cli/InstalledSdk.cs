@@ -11,19 +11,20 @@ namespace Rocks.Build.Cli;
 // 있는 모듈의 descriptor(<M>.rocksmeta.json)와 identity 명세의 SDK 상대 경로다(없으면 둘 다 null). 게임 빌드는 이 모듈을
 // 다시 생성하지 않고 descriptor를 import하며 명세를 명세 집합 검증에 넣는다. ProvidesBuildInfo는 NativeModuleInput과 같은 표지다
 // (엔진 Core — 게임 실행 파일이 이 모듈에 닿으면 빌드가 BuildInfo 정의 TU를 더한다). ProvidesModuleTable·ThirdParty도 NativeModuleInput과 같은
-// 표지다(Docs/Design/ModuleLoader.ko.md 3.9절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 진입점을 참조하고 서드파티 모듈은 뺀다).
+// 표지다(Docs/Design/ModuleLoader 3.9절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 진입점을 참조하고 서드파티 모듈은 뺀다).
 // 손으로 쓴 소스가 없던 메타데이터 모듈(CoreTypeBindings 등)의 라이브러리도 진입점 TU를 담으므로 다른 모듈과 같은 판정을 받는다
 // (3.10절). SDK는 생성 소스 자체는 싣지 않는다(생성 헤더와 라이브러리만). DynamicModules는 NativeModuleInput과 같은 실행 중 적재 모듈
 // 목록이다(3.8절 — 게임 실행 파일이 SDK 모듈을 링크하면 그 동적 모듈도 링크하고 모듈 표에 싣는다). LoadingPhase(단계 이름 —
 // Descriptors.LoadingPhase)·ProvidesLaunch는 NativeModuleInput과 같은 칸이다(3.11절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 단계로 단계
 // 순서·부트 모듈 검사를 소스 빌드와 같게 한다). PublicDependencies·PrivateDependencies는 NativeModuleInput과 같은 두 의존 목록이다
 // (Docs/Design/BuildTargets 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다). HasGlobalState는 NativeModuleInput과
-// 같은 서드파티 표지다(3.8절 BD29 — 게임 모듈이 SDK의 전역 상태 서드파티를 직접 의존하면 소비 모듈이 둘이 되어 거부된다).
+// 같은 서드파티 표지다(3.8절 BD29 — 게임 모듈이 SDK의 전역 상태 서드파티를 직접 의존하면 소비 모듈이 둘이 되어 거부된다). Type은
+// 모듈 type 이름(Descriptors.ModuleType)이다(3.3절 BS2b — 게임 빌드가 SDK 모듈도 타깃·구성의 type 검사를 받는다).
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] PublicDependencies, string[] PrivateDependencies,
     string[] Libraries,
     string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo,
     bool ProvidesModuleTable, bool ThirdParty, string? SharedPchHeader, string[] DynamicModules, string? LoadingPhase,
-    bool ProvidesLaunch, bool HasGlobalState);
+    bool ProvidesLaunch, bool HasGlobalState, string? Type);
 
 // SDK를 만든 엔진 버전이다(Build/Build.version 값 — 그 파일은 SDK에 복사하지 않는다, Docs/Design/ReflectionFoundations.ko.md 8.2절).
 // 게임 빌드는 저장소 파일을 읽지 않고 이 값만 쓴다(BuildInfo 생성 TU·.rocksproject engineVersion 대조). 위치 record는 JSON에서 빠진
@@ -43,21 +44,21 @@ public static class InstalledSdk
     // 2: SdkModule에 SystemLibraries·Frameworks 추가. 3: Descriptor·IdentityManifest 추가. 4: ProvidesBuildInfo 추가, AbiIdentity를
     // effective triple로 계산(B7 — B7 이전 SDK는 생성 TU의 Core/Build/BuildInfo.h include가 깨지는 대신 버전 불일치로 거부한다).
     // 5: EngineVersion {Major, Minor, Patch} 추가(엔진 버전 단일 출처 — 생성 TU의 CurrentEngineVersion 정의에 필요하다).
-    // 6: SdkModule에 ProvidesModuleTable·ThirdParty 추가(게임 실행 파일의 모듈 표 — Docs/Design/ModuleLoader.ko.md 3.2절).
+    // 6: SdkModule에 ProvidesModuleTable·ThirdParty 추가(게임 실행 파일의 모듈 표 — Docs/Design/ModuleLoader 3.2절).
     // 7: SdkModule에 ReflectionOnlyLibrary 추가. 손으로 쓴 소스가 없던 리플렉션 모듈이 모듈 생성 소스 때문에 라이브러리를 갖는다
     // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절 — 이전 SDK의 모듈 생성 헤더는 등록 함수를 inline으로 정의해 새 도구의 선언과
     // 맞지 않으므로 버전 불일치로 거부한다).
     // 8: ReflectionOnlyLibrary 제거. 메타데이터 모듈이 모두 진입점 모듈이 되고 진입 기술이 자기 타입 등록 함수를 싣는다
-    // (Docs/Design/ModuleLoader.ko.md 3.10절 — 이전 SDK의 그런 모듈 라이브러리에는 진입점이 없어 게임 모듈 표가 링크되지 않으므로
+    // (Docs/Design/ModuleLoader 3.10절 — 이전 SDK의 그런 모듈 라이브러리에는 진입점이 없어 게임 모듈 표가 링크되지 않으므로
     // 버전 불일치로 거부한다).
     // 9: 타입별 생성 헤더가 본문을 정의하지 않고(선언·형질·inline Trace만 — 본문은 SDK 라이브러리에 든 타입별 생성 소스의 object다,
     // Docs/Design/ReflectionGeneratedSources.ko.md 5절) SdkModule에 SharedPchHeader가 더해졌다(공유 PCH 제공 모듈의 헤더 철자 —
     // Docs/Design/UnityBuildPch.ko.md 8.4절. 게임 빌드가 SDK 헤더로 공유 PCH를 자기 출력에 직접 만들고, 공유 정의는 Defines에서 다시
     // 계산한다). 이전 SDK는 생성 헤더가 본문을 inline으로 정의하고 동봉한 MetaCompiler가 타입별 생성 소스·정의 헤더 옵션
     // (--jobs·--definitions-header)을 모르므로 버전 불일치로 거부한다.
-    // 10: SdkModule에 DynamicModules 추가(실행 중 적재 모듈 — Docs/Design/ModuleLoader.ko.md 3.8절. 게임 실행 파일이 SDK 모듈을 링크하면
+    // 10: SdkModule에 DynamicModules 추가(실행 중 적재 모듈 — Docs/Design/ModuleLoader 3.8절. 게임 실행 파일이 SDK 모듈을 링크하면
     // 그 동적 모듈도 함께 링크하고 모듈 표에 싣는다).
-    // 11: SdkModule에 LoadingPhase·ProvidesLaunch 추가(로딩 단계 — Docs/Design/ModuleLoader.ko.md 3.11절. 이전 SDK의 Core·ModuleLoader·
+    // 11: SdkModule에 LoadingPhase·ProvidesLaunch 추가(로딩 단계 — Docs/Design/ModuleLoader 3.11절. 이전 SDK의 Core·ModuleLoader·
     // Launch는 단계가 없어 게임 실행 파일의 부트 모듈이 EarliestPossible에 시작하지 않으므로 버전 불일치로 거부한다).
     // 12: SdkModule의 Dependencies를 PublicDependencies·PrivateDependencies로 나눴다(Docs/Design/BuildTargets 3.5절 BS0 — 이전 SDK는
     // 두 목록이 없어 게임 빌드가 공개 환경을 계산할 수 없으므로 버전 불일치로 거부한다).
@@ -66,7 +67,9 @@ public static class InstalledSdk
     // 14: 다중 구성 SDK. Configuration·Modules를 Configurations(구성 이름 → 모듈 선언·구성 파일 목록)로 바꾸고 구성마다 다른 파일을
     // Configurations/<구성>/ 아래에 둔다(Docs/Design/ProjectFiles.ko.md 10.3절 — 이전 SDK는 구성 목록이 없어 게임 솔루션이 구성을 알 수 없으므로
     // 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 14;
+    // 15: SdkModule에 Type 추가(Docs/Design/BuildTargets 3.3절 BS2b — 이전 SDK는 모듈 type이 없어 게임 빌드가 Developer 모듈의 Release
+    // 도달 같은 type 검사를 할 수 없으므로 버전 불일치로 거부한다).
+    internal const int ManifestVersion = 15;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -75,7 +78,7 @@ public static class InstalledSdk
     public static IReadOnlyList<NativeModuleInput> Reachable(IReadOnlyList<NativeModuleInput> modules, IEnumerable<string> targets)
     {
         var byName = modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
-        // 실행 중 적재 모듈도 SDK에 싣는다(게임 실행 파일이 함께 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절).
+        // 실행 중 적재 모듈도 SDK에 싣는다(게임 실행 파일이 함께 링크한다 — Docs/Design/ModuleLoader 3.8절).
         HashSet<string> reached = LinkClosure.Reachable(targets, byName);
         return modules.Where(module => reached.Contains(module.Name)).ToArray();
     }
@@ -101,7 +104,9 @@ public static class InstalledSdk
             foreach (var directory in module.PublicIncludeDirectories)
             {
                 var relative = $"Headers/{module.Name}/{includes.Count}";
-                CopyTree(directory, Path.Combine(stage, relative));
+                // 소스에서 빌드하는 서드파티는 소스 폴더가 공개 include 루트라(Docs/Design/BuildTargets 3.5절 BS3a) 번역 단위가 섞여 있다.
+                // SDK는 라이브러리를 object로 싣고 헤더만 내보낸다.
+                CopyTree(directory, Path.Combine(stage, relative), entry => File.Exists(entry) && SourceExtensions.Contains(Path.GetExtension(entry)));
                 includes.Add(relative);
             }
 
@@ -143,12 +148,14 @@ public static class InstalledSdk
                 throw new InvalidOperationException($"SDK module '{module.Name}' provides BuildInfo but exports no Core/Build/BuildInfo.h.");
             }
 
-            packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
+            // 서드파티 소비자 정의(ConsumerDefines)는 라이브러리 자신의 compile에는 빠지지만, SDK에서는 라이브러리가 이미 빌드되어 있어
+            // 소비자에게 공개 정의와 같다(BS3a).
+            packaged.Add(new(module.Name, includes.ToArray(), [.. module.PublicDefines, .. module.ConsumerDefines],
                 module.PublicDependencies.ToArray(), module.PrivateDependencies.ToArray(), libraries.ToArray(),
                 module.SystemLibraries.ToArray(),
                 module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo, module.ProvidesModuleTable,
                 module.ThirdParty, module.SharedPchHeader, module.DynamicModules.ToArray(), module.LoadingPhase.ToString(),
-                module.ProvidesLaunch, module.HasGlobalState));
+                module.ProvidesLaunch, module.HasGlobalState, module.Type.ToString()));
         }
         // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
         // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
@@ -431,6 +438,13 @@ public static class InstalledSdk
 
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, (options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project)), context);
+        // 게임 규칙의 선행 타깃은 SDK가 싣는 프로그램 타깃이 있어야 한다(Docs/Design/BuildTargets 3.11절 — 후속).
+        if (rules.Target.PrerequisiteTargets.Count != 0)
+        {
+            throw new ArgumentException($"Target {rules.Target.Name}: game builds against an installed SDK do not build prerequisite targets yet " +
+                "(Docs/Design/BuildTargets section 3.11).");
+        }
+
         GameLayout layout = GamePlanning.Layout(rules, projectDescriptor, availablePlugins, context, toolchain, configuration, sdk, sdkModules,
             createDirectories: true);
         string[] targets = layout.Targets;
@@ -449,12 +463,12 @@ public static class InstalledSdk
         if (options.TryGetValue(SingleFileCommand.Option, out string? files))
         {
             return await SingleFileCommand.RunAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk, engineVersion,
-                BuildCommand.Jobs(options)), files, project, cancellationToken, SingleFileCommand.GameTargets(project, sdk, rulesPath, rules.Target.Name,
+                BuildCommand.Jobs(options), rules.Target.Kind), files, project, cancellationToken, SingleFileCommand.GameTargets(project, sdk, rulesPath, rules.Target.Name,
                 projectDescriptor, availablePlugins, toolchain, configuration, sdkModules, engineVersion));
         }
 
         var result = await new NativeBuildEngine().BuildAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk,
-            engineVersion, BuildCommand.Jobs(options)) with
+            engineVersion, BuildCommand.Jobs(options), rules.Target.Kind) with
         {
             Unity = BuildCommand.Switch(options, BuildCommand.UnityOption),
             Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
@@ -623,7 +637,8 @@ public static class InstalledSdk
         {
             if (module.Includes is null || module.Libraries is null || module.PublicDependencies is null ||
                 module.PrivateDependencies is null || module.Defines is null ||
-                module.SystemLibraries is null || module.Frameworks is null || module.DynamicModules is null || module.LoadingPhase is null)
+                module.SystemLibraries is null || module.Frameworks is null || module.DynamicModules is null || module.LoadingPhase is null ||
+                module.Type is null)
             {
                 throw new InvalidDataException($"SDK module '{module.Name}' has incomplete declarations.");
             }
@@ -632,6 +647,11 @@ public static class InstalledSdk
             if (!Enum.IsDefined(typeof(Descriptors.LoadingPhase), module.LoadingPhase))
             {
                 throw new InvalidDataException($"SDK module '{module.Name}' has an unknown loading phase '{module.LoadingPhase}'.");
+            }
+
+            if (!Enum.IsDefined(typeof(Descriptors.ModuleType), module.Type))
+            {
+                throw new InvalidDataException($"SDK module '{module.Name}' has an unknown module type '{module.Type}'.");
             }
 
             foreach (var include in module.Includes)
@@ -788,6 +808,9 @@ public static class InstalledSdk
 
         return false;
     }
+
+    // SDK 헤더 복사에서 빼는 번역 단위 확장자다(.c를 include하는 라이브러리도 SDK에는 빌드된 라이브러리로 실린다).
+    private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase) { ".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm" };
 
     private static void CopyTree(string source, string destination, Func<string, bool>? skip = null)
     {

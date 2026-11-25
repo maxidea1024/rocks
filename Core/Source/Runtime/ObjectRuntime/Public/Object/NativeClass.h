@@ -293,6 +293,9 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
         // 스키마의 flags는 상속한 비트를 포함한다).
         const TypeSchema& reflected = GeneratedType<Reflected>::Schema();
         schema.fields = reflected.fields;
+        // 에디터 데이터 없는 빌드에서 컴파일에서 빠진 EditorOnly 필드 ID도 물려받는다(로드가 그
+        // 값을 건너뛴다 — Docs/Design/BuildTargets 3.4절 BS2c).
+        schema.editorOnlyFieldIds = reflected.editorOnlyFieldIds;
         schema.flags |= reflected.flags & InheritedTypeFlags;
         ops.fields = GeneratedType<Reflected>::Ops().fields;
         ops.completeFieldLayout = false;

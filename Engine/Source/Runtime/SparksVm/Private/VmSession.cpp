@@ -567,6 +567,32 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
         return Result<VmCallResult>::Success(skipped);
     }
 
+    return Enter(instance, module, function, scalars,
+                 Span<const uint64>(refArguments, refs.Size() + 1), buffers);
+}
+
+Result<VmCallResult> VmSession::CallFunction(const VmLinkedModule& module, uint32 function,
+                                             Span<const uint64> scalars, Span<const uint64> refs,
+                                             Span<VmBuffer* const> buffers) noexcept {
+    if (closed_ || execution_.running_ || function >= module.Module().functions.Size()) {
+        return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 메서드(이름 `Owner.Name` — this를 받는다)는 instance 없이 부르지 않는다.
+    const BytecodeFunction& shape = module.Module().functions[function];
+    if (module.Module().String(shape.name).Contains(".", StringComparison::CaseSensitive) ||
+        scalars.Size() != shape.parameters[0] || refs.Size() != shape.parameters[1] ||
+        buffers.Size() != shape.parameters[2]) {
+        return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Enter(NoBytecodeIndex, module, function, scalars, refs, buffers);
+}
+
+Result<VmCallResult> VmSession::Enter(uint32 instance, const VmLinkedModule& module,
+                                      uint32 function, Span<const uint64> scalars,
+                                      Span<const uint64> refs,
+                                      Span<VmBuffer* const> buffers) noexcept {
     BeginEntry();
     execution_.keepLogs_ = true;
     struct KeepLogs {
@@ -576,9 +602,7 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
         }
     } keepLogs{execution_};
     currentInstance_ = instance;
-    auto called = execution_.Call(module, function, scalars,
-                                  Span<const uint64>(refArguments, refs.Size() + 1), buffers,
-                                  FragmentLimits(false));
+    auto called = execution_.Call(module, function, scalars, refs, buffers, FragmentLimits(false));
     currentInstance_ = NoBytecodeIndex;
     SettleWaits(called);
     if (!called) {

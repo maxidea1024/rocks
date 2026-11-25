@@ -1,7 +1,9 @@
 #include "SampleRenderer.h"
+#include "SandboxShaders.h"
 
 #include <Core/Diagnostics/Log.h>
 #include <Graphics/GraphicsLog.h>
+#include <RenderBase/PipelineStatePresets.h>
 
 #include <Base/Compiler.h>
 
@@ -14,75 +16,6 @@ struct Vertex {
     float uv[2];
     float color[4];
 };
-
-constexpr char ShaderHlsl[] = R"(
-cbuffer DrawConstants : register(b0) {
-    float4x4 transform;
-    float4 color;
-};
-
-struct VSInput {
-    float3 position : ATTRIBUTE0;
-    float2 uv : ATTRIBUTE1;
-    float4 color : ATTRIBUTE2;
-};
-
-struct VSOutput {
-    float4 position : SV_Position;
-    float2 uv : TEXCOORD0;
-    float4 color : COLOR0;
-};
-
-Texture2D albedo : register(t0);
-SamplerState linearClamp : register(s0);
-
-VSOutput VSMain(VSInput input) {
-    VSOutput output;
-    output.position = mul(float4(input.position, 1.0), transform);
-    output.uv = input.uv;
-    output.color = input.color * color;
-    return output;
-}
-
-float4 PSMain(VSOutput input) : SV_Target {
-    return albedo.Sample(linearClamp, input.uv) * input.color;
-}
-)";
-
-// OpenGL ES 3.2 원문(GLSL ES 3.20)이다. SH2 전 런타임 경로이지만 쿠킹된 GLES31_PC 출력과 같은
-// 모양으로 쓴다(ShaderSystem 7.2절 4항): 정점 입력은 ATTRIBUTEn location, 단계 사이 변수는
-// TEXCOORDn location, 그리기별 상수는 루트 상수 에뮬레이션 배열 vu_h(ObjectConstants의 vec4 5개),
-// 텍스처는 combined sampler ps0(유닛 0). 행렬은 행 우선 byte를 그대로 받아 mat4(열 우선)로 읽으므로
-// Mᵀ * v = v·M이다(HLSL mul(v, transform)과 같다, 7.2절 6항).
-constexpr char VertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-uniform highp vec4 vu_h[5];
-#define transform mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3])
-#define color vu_h[4]
-layout(location = 0) in vec3 in_var_ATTRIBUTE0;
-layout(location = 1) in vec2 in_var_ATTRIBUTE1;
-layout(location = 2) in vec4 in_var_ATTRIBUTE2;
-layout(location = 0) out vec2 out_var_TEXCOORD0;
-layout(location = 1) out vec4 out_var_TEXCOORD1;
-void main() {
-    gl_Position = transform * vec4(in_var_ATTRIBUTE0, 1.0);
-    out_var_TEXCOORD0 = in_var_ATTRIBUTE1;
-    out_var_TEXCOORD1 = in_var_ATTRIBUTE2 * color;
-}
-)";
-
-constexpr char PixelGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) in vec2 in_var_TEXCOORD0;
-layout(location = 1) in vec4 in_var_TEXCOORD1;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = texture(ps0, in_var_TEXCOORD0) * in_var_TEXCOORD1;
-}
-)";
 
 // 로컬 Y(오른쪽)-Z(위) 평면의 단위 크기 메시다. +X를 바라보면 화면에서 오른쪽이 +Y다. 삼각형마다
 // 꼭짓점 A·B·C는 화면에서 반시계(앞면)이며 법선 (C−A)×(B−A)가 -X(카메라 쪽)다.
@@ -109,18 +42,6 @@ Span<const uint8> Bytes(const Vertex (&vertices)[Count]) noexcept {
 
 } // namespace
 
-StringView BuiltinShaderHlsl() noexcept {
-    return StringView(ShaderHlsl, sizeof(ShaderHlsl) - 1);
-}
-
-StringView BuiltinVertexGlsl() noexcept {
-    return StringView(VertexGlsl, sizeof(VertexGlsl) - 1);
-}
-
-StringView BuiltinPixelGlsl() noexcept {
-    return StringView(PixelGlsl, sizeof(PixelGlsl) - 1);
-}
-
 Renderer::~Renderer() {
     Shutdown();
 }
@@ -138,15 +59,14 @@ Result<void> Renderer::Initialize(graphics::Device& device,
     };
     const graphics::VertexStream streams[] = {{sizeof(Vertex), graphics::VertexStepRate::Vertex}};
     graphics::PipelineDesc pipeline;
-    pipeline.vertex = {BuiltinShaderHlsl(), BuiltinVertexGlsl()};
-    pipeline.pixel = {BuiltinShaderHlsl(), BuiltinPixelGlsl()};
+    pipeline.bindings.texture = "Albedo";
     pipeline.layout = {attributes, streams};
     pipeline.drawConstantBytes = sizeof(ObjectConstants);
     pipeline.colorFormats[0] = colorFormat;
-    pipeline.blend[0] = graphics::AlphaBlend();
+    pipeline.blend[0] = render::AlphaBlend();
     pipeline.raster.cullMode = graphics::CullMode::Back;
-    // 파이프라인(셰이더 컴파일 포함)의 실패를 결정하는 곳이 여기다. 장치는 원인을 LastError에만
-    // 남긴다(셰이더 컴파일 실패면 "Shader <entry> (<target>) failed to compile ...").
+    // 파이프라인 실패를 결정하는 곳이 여기다. 장치는 원인을 LastError에만 남긴다(셰이더는
+    // Sample.rsf의 쿠킹 코드 — ShaderSystem 16.1절 SSD19).
     const auto logPipelineFailure = [&device](const char* variant, ErrorCode error) noexcept {
         Log::Error(graphics::LogShader,
                    "Sample renderer {Variant} pipeline could not be built on {Backend}: {Error}: "
@@ -154,13 +74,15 @@ Result<void> Renderer::Initialize(graphics::Device& device,
                    variant, graphics::BackendName(device.Info().backend), ErrorCodeName(error),
                    device.LastError().LeftBytesAtCodePoint(graphics::MaxShaderDiagnosticLogBytes));
     };
-    auto createdPipeline = device.CreatePipeline(pipeline);
+    auto createdPipeline =
+        shaders::CreateGraphicsPipeline(device, shaders::SampleVS, shaders::SamplePS, pipeline);
     if (!createdPipeline) {
         logPipelineFailure("back-face culling", createdPipeline.Error());
         return Result<void>::Failure(createdPipeline.Error());
     }
     pipeline.raster.cullMode = graphics::CullMode::Front;
-    auto reversedPipeline = device.CreatePipeline(pipeline);
+    auto reversedPipeline =
+        shaders::CreateGraphicsPipeline(device, shaders::SampleVS, shaders::SamplePS, pipeline);
     if (!reversedPipeline) {
         logPipelineFailure("front-face culling", reversedPipeline.Error());
         device.Retire(createdPipeline.Value());

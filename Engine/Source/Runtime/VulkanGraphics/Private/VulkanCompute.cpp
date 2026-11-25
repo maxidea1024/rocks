@@ -23,24 +23,19 @@ constexpr VkAccessFlags BufferAccess =
 Result<PipelineHandle>
 VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
-        auto failed = Reject("compute pipeline needs HLSL source and valid drawConstantBytes");
+    if (!ValidateComputePipelineDesc(desc)) {
+        auto failed = Reject("compute pipeline needs valid drawConstantBytes");
         return Result<PipelineHandle>::Failure(failed.Error());
     }
 
-    if (shaderCompiler_ == nullptr) {
-        auto failed = FailCode("CreateComputePipeline", ErrorCode::Unsupported,
-                               "Vulkan needs cooked SPIR-V (ShaderSystem SH2) or a development "
-                               "shader compiler (DeviceDesc::shaderCompiler)");
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* shader = nullptr;
+    PipelineSlots slots;
+    if (!FindComputeShader(shaders_, desc, shader, error) ||
+        !ResolvePipelineSlots(Span<const DeviceShaderCode* const>(&shader, 1), desc.bindings,
+                              desc.drawConstantBytes, slots, error)) {
+        auto failed = Reject(error);
         return Result<PipelineHandle>::Failure(failed.Error());
-    }
-
-    CompiledShader shader(allocator_);
-    lastError_.Clear();
-    auto compiled =
-        shaderCompiler_->CompileSpirv(ShaderStage::Compute, desc.shader.hlsl, shader, lastError_);
-    if (!compiled) {
-        return Result<PipelineHandle>::Failure(compiled.Error());
     }
 
     auto reserved = ReserveRetireCapacity(1);
@@ -51,12 +46,13 @@ VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     PipelineRecord record;
     record.compute = true;
     record.drawConstantBytes = desc.drawConstantBytes;
-    auto layout = BuildPipelineLayout(shader, nullptr, true, record);
+    auto layout = BuildPipelineLayout(slots, true, record);
     if (!layout) {
         return Result<PipelineHandle>::Failure(layout.Error());
     }
 
-    auto module = CreateShaderModule(shader);
+    char entry[64] = {};
+    auto module = CreateShaderModule(*shader, entry);
     if (!module) {
         DestroyPipelineLayout(record);
         return Result<PipelineHandle>::Failure(module.Error());
@@ -67,7 +63,7 @@ VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     info.stage.module = module.Value();
-    info.stage.pName = "CSMain";
+    info.stage.pName = entry;
     info.layout = record.layout;
     const VkResult result = functions_.vkCreateComputePipelines(device_, pipelineCache_, 1, &info,
                                                                 nullptr, &record.pipeline);

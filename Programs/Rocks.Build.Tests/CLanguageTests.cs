@@ -82,10 +82,12 @@ internal static class CLanguageTests
             string prefixMap = (windows ? "/clang:" : "") + "-fmacro-prefix-map=" +
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.RootDirectory)) + Path.DirectorySeparatorChar + "=";
             string logMinimum = (windows ? "/D" : "-D") + "ROCKS_LOG_COMPILED_MINIMUM=" + (configuration == NativeConfiguration.Release ? "2" : "0");
-            string[] expected = [.. toolchain.CompileArguments, .. profile, logMinimum, prefixMap, .. tail];
+            // 타깃 매크로 넷(Docs/Design/BuildTargets 3.2절 BS2a — 요청 기본은 Program 조합)은 로그 하한 바로 뒤다.
+            string[] targetMacros = [.. request.Target.Defines.Select(define => (windows ? "/D" : "-D") + define)];
+            string[] expected = [.. toolchain.CompileArguments, .. profile, logMinimum, .. targetMacros, prefixMap, .. tail];
             Check(action.Arguments.SequenceEqual(expected),
                 $"{configuration} C++ compile action changed:\n{string.Join(' ', action.Arguments)}\nexpected:\n{string.Join(' ', expected)}");
-            string[] logical = [.. toolchain.CompileArguments, .. profile, logMinimum, prefixMap, .. logicalTail];
+            string[] logical = [.. toolchain.CompileArguments, .. profile, logMinimum, .. targetMacros, prefixMap, .. logicalTail];
             LogicalCompile logicalCompile = plan.LogicalCompiles.Single(candidate => candidate.Module == "Engine");
             Check(logicalCompile.Arguments.SequenceEqual(logical) && logicalCompile.Source == engineSource && logicalCompile.Action == action.Id &&
                 logicalCompile.Object == action.Outputs[0],

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Collision/CollisionTypes.h>
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <AssetRuntime/BulkData.h>
 #include <AssetRuntime/MemoryBulkSource.h>
@@ -30,16 +31,8 @@ inline constexpr double CollisionRotationNormalizedTolerance = 0.01;
 inline constexpr usize CollisionVertexBytes = 3 * sizeof(double);
 inline constexpr usize CollisionIndexBytes = sizeof(uint32);
 
-// 형상이 물리 엔진에서 하는 일이다(UE ECollisionEnabled — 같은 번호).
-ROCKS_ENUM()
-enum class CollisionEnabled : uint8 {
-    NoCollision = 0,
-    QueryOnly = 1,
-    PhysicsOnly = 2,
-    QueryAndPhysics = 3,
-    ProbeOnly = 4,
-    QueryAndProbe = 5
-};
+// 형상이 물리 엔진에서 하는 일은 Collision 모듈의 CollisionEnabled다(UE ECollisionEnabled — 같은
+// 번호, Docs/Design/CollisionData.ko.md 2.2절). 컴포넌트 body와 같은 타입을 쓴다.
 
 // 단순·복잡 충돌의 쓰임이다(UE ECollisionTraceFlag — 4.6절).
 ROCKS_ENUM()

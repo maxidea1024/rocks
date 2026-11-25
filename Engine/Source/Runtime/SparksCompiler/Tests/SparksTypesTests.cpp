@@ -9,7 +9,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 타입 검사 시험이다(Docs/Design/SparksLanguage.ko.md 3.10절, S0326·S0401–S0425·S0501–S0509·S0109).
+// 타입 검사 시험이다(Docs/Design/SparksLanguage 3.10절, S0326·S0401–S0425·S0501–S0509·S0109).
 // 규칙별 양성·음성 사례와 위치, 식 타입은 corpus `Conformance/Types`(`.expect`·`.types`)가 맡고,
 // 여기서는 API(ExpressionType·AppendTypeDump·단계), 진단 문장과 설명·수정 예, 결정성, 할당 실패,
 // 무작위로 망가뜨린 원문에서의 견고함을 본다.

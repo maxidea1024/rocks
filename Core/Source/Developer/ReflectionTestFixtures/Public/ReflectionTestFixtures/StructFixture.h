@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ReflectionFixture.h>
 #include <Serialization/Record.h>
 
@@ -44,7 +45,9 @@ struct StructMiddle {
 
     ROCKS_PROPERTY() StructLeaf leaf;
     ROCKS_PROPERTY() int64 offset = 0;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) uint16 note = 0;
+#endif
     // 저장하지 않는 런타임 값이다(struct의 NATIVE 멤버).
     ROCKS_NATIVE() uint32 cache = 0;
 };
@@ -66,7 +69,11 @@ struct StructOwner final : Object {
     ROCKS_GENERATED_BODY()
 
     explicit StructOwner(Allocator& allocator) noexcept
-        : holder(allocator), extra(allocator), scratch(allocator) {
+        : holder(allocator),
+#if ROCKS_WITH_EDITOR_DATA
+          extra(allocator),
+#endif
+          scratch(allocator) {
         ++constructed;
     }
 
@@ -75,7 +82,9 @@ struct StructOwner final : Object {
     ROCKS_REFLECTIONTESTFIXTURES_API static uint32 constructed;
     ROCKS_PROPERTY() StructHolder holder;
     ROCKS_PROPERTY() uint32 plain = 0;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) StructLeaf extra;
+#endif
     // NATIVE 멤버로 둔 리플렉션 struct다(저장하지 않는다 — 생성 코드가 struct 형질로 RMC2205를
     // 확인한다).
     ROCKS_NATIVE() StructLeaf scratch;

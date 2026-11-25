@@ -9,6 +9,7 @@
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
+#include <ShaderCore/ShaderType.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 #include <stdio.h>
 #include <string.h>
@@ -234,9 +235,9 @@ Result<void> ShaderCompileManager::Start() noexcept {
     }
 
     if (config_.allocator == nullptr || config_.tree == nullptr ||
-        config_.reflection.types == nullptr || config_.profileId.IsEmpty() ||
-        config_.workerExecutable.IsEmpty() || config_.workRoot.IsEmpty() ||
-        config_.maxBatchJobs == 0 || config_.maxBatchSourceBytes == 0) {
+        config_.reflection.types == nullptr || config_.workerExecutable.IsEmpty() ||
+        config_.workRoot.IsEmpty() || config_.maxBatchJobs == 0 ||
+        config_.maxBatchSourceBytes == 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -463,21 +464,35 @@ private:
         }
 
         ShaderDefineSet defines(state_.allocator);
-        const ShaderSourceStatus built = BuildShaderPreprocessDefines(
-            job.format->definition, job.stage, job.options.hlsl2021, job.defines, defines);
+        const ShaderSourceStatus built =
+            BuildShaderPreprocessDefines(job.format->definition, job.stage, job.options.hlsl2021,
+                                         job.defines, job.developmentOnly, defines);
         if (!built) {
             Fail(index, ShaderCompileStatus::InvalidJob, StringView(built.message));
             return;
         }
 
+        const ShaderGeneratedInclude vertexInput{StringView(VertexInputGeneratedIncludePath),
+                                                 job.vertexInputSource};
+        const Span<const ShaderGeneratedInclude> generated =
+            job.vertexInputSource.IsEmpty() ? Span<const ShaderGeneratedInclude>()
+                                            : Span<const ShaderGeneratedInclude>(&vertexInput, 1);
         const ShaderSourceStatus preprocessed =
-            PreprocessShader(*config_.tree, job.entryPath, defines.Defines(), result.preprocessed);
+            PreprocessShader(*config_.tree, job.entryPath, defines.Defines(), result.preprocessed,
+                             ShaderPreprocessLimits{}, generated);
         if (!preprocessed) {
             char location[MaxShaderVirtualPathBytes + 64];
             snprintf(location, sizeof(location), "%s:%u: %s", preprocessed.path, preprocessed.line,
                      ShaderSourceErrorName(preprocessed.code));
             Fail(index, ShaderCompileStatus::PreprocessError, StringView(location),
                  StringView(preprocessed.message));
+            return;
+        }
+
+        const char* layoutReason = nullptr;
+        if (!ValidateShaderParameterLayouts(job.parameterLayouts, &layoutReason)) {
+            Fail(index, ShaderCompileStatus::InvalidJob, "shader parameter layout is invalid",
+                 StringView(layoutReason));
             return;
         }
 
@@ -493,14 +508,14 @@ private:
         input.systemTools = state_.systemTools.View();
         input.stage = job.stage;
         input.entry = job.entryPoint;
+        input.requiredFeatures = job.requiredFeatures;
         input.preprocessedSha256 = Sha256::Hash(
             Span<const uint8>(reinterpret_cast<const uint8*>(result.preprocessed.text.Data()),
                               result.preprocessed.text.ByteCount()));
         input.options = &job.options;
         input.reflection = config_.reflection;
-        input.layoutSignature = job.layoutSignature;
-        input.profileId = config_.profileId;
-        input.profileSha256 = config_.profileSha256;
+        const Sha256Digest layoutSignature = ShaderParameterLayoutSignature(job.parameterLayouts);
+        input.layoutSignature = job.parameterLayouts.IsEmpty() ? nullptr : &layoutSignature;
         auto key = BuildShaderJobKey(input);
         if (!key) {
             Fail(index,
@@ -781,6 +796,7 @@ private:
             worker.kind = job.testHook;
             worker.key = out_[index].key;
             worker.stage = job.stage;
+            worker.requiredFeatures = job.requiredFeatures;
             worker.options.hlsl2021 = job.options.hlsl2021;
             worker.options.optimization = static_cast<uint8>(job.options.optimization);
             worker.options.debugSymbols = job.options.debugSymbols;
@@ -789,6 +805,15 @@ private:
                 !worker.entry.TryAssign(job.entryPoint) ||
                 !worker.source.TryAssign(out_[index].preprocessed.text.View())) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+
+            // 레이아웃 표 정규 byte다(Prepare가 검사했다 — SSD31).
+            if (!job.parameterLayouts.IsEmpty()) {
+                if (auto encoded =
+                        EncodeShaderParameterLayouts(job.parameterLayouts, worker.layout);
+                    !encoded) {
+                    return encoded;
+                }
             }
         }
 

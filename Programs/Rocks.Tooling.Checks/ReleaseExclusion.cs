@@ -5,8 +5,8 @@ using Rocks.Build.Rules;
 namespace Rocks.Tooling.Checks;
 
 /// <summary>
-/// Release 배제 위반 하나다. Rule은 <c>release-developer-module</c>·<c>release-shader-compiler</c>·<c>release-windows-opengl</c>이고
-/// Item은 위반 대상(Developer 모듈 이름, 링크 입력 이름, OpenGLGraphics)이다.
+/// Release 배제 위반 하나다. Rule은 <c>release-developer-module</c>·<c>release-editor-module</c>·<c>release-shader-compiler</c>·
+/// <c>release-windows-opengl</c>이고 Item은 위반 대상(Developer·Editor 모듈 이름, 링크 입력 이름, OpenGLGraphics)이다.
 /// </summary>
 public sealed record ReleaseViolation(string Rule, NativePlatform Platform, string Target, string Module, string Item)
 {
@@ -23,10 +23,12 @@ public sealed record ReleaseException(string Rule, NativePlatform Platform, stri
 public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures, IReadOnlyList<string> Notices);
 
 /// <summary>
-/// Release 배제 정책이다(Docs/Design/ShaderSystem 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
-/// 각 플랫폼(Windows x64·macOS arm64·Android arm64)으로 규칙 평가해 다음을 거부한다.
+/// Release 배제 정책이다(Docs/Design/ShaderSystem 9절, Docs/Design/BuildTargets 3.3절 BD20). 출시 타깃(Game·Client·Server, UE Shipping
+/// 대상)을 Release 구성의 각 플랫폼(Windows x64·macOS arm64·Android arm64 가운데 그 타깃 종류가 빌드되는 곳 — Server는 Android 제외)으로
+/// 규칙 평가해 다음을 거부한다.
 /// <list type="bullet">
 /// <item><c>release-developer-module</c>: 모듈 도달 집합(켠 플러그인 모듈 포함)에 Developer 모듈(<see cref="NativeModuleInput.Type"/>)이 있다.</item>
+/// <item><c>release-editor-module</c>: 도달 집합에 Editor 모듈이 있다(Release가 아닌 구성은 빌드 입력의 type 검사가 막는다).</item>
 /// <item><c>release-shader-compiler</c>: 도달 모듈의 시스템 라이브러리·prebuilt 라이브러리·링크 인자에 d3dcompiler·dxcompiler가 있다.</item>
 /// <item><c>release-windows-opengl</c>: Windows 대상이 OpenGLGraphics에 닿는다(GLES31_PC는 개발용 미리보기, UE와 같다). Android는 GLES
 /// backend로 링크한다.</item>
@@ -36,18 +38,9 @@ public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures
 public static class ReleaseExclusion
 {
     /// <summary>
-    /// 알려진 예외다. D3D12Graphics·OpenGLGraphics 건은 SH2(쿠킹된 셰이더를 받는 Graphics API, OpenGLGraphics의 GLES 미리보기 전환),
-    /// D3D11Graphics 건은 SH5(쿠킹된 D3D11_SM5 코드 연결)에서 없어진다.
+    /// 알려진 예외다. SH2에서 D3D12·D3D11 런타임 컴파일러와 Windows GLES 미리보기 예외를 모두 지웠다(ShaderSystem 16.1절 SH2e2) — 지금은 없다.
     /// </summary>
-    public static readonly IReadOnlyList<ReleaseException> KnownExceptions =
-    [
-        new("release-shader-compiler", NativePlatform.Windows, "D3D12Graphics", "d3dcompiler", "SH2",
-            "D3D12Graphics compiles its shaders at run time with D3DCompile (ShaderSystem 4: d3dcompiler link and runtime D3DCompile are removed in SH2)"),
-        new("release-shader-compiler", NativePlatform.Windows, "D3D11Graphics", "d3dcompiler", "SH5",
-            "D3D11Graphics compiles its shaders at run time with D3DCompile until cooked D3D11_SM5 code arrives (ShaderSystem P15/SH5)"),
-        new("release-windows-opengl", NativePlatform.Windows, "OpenGLGraphics", "OpenGLGraphics", "SH2",
-            "Sandbox links the OpenGL ES (GLES31_PC preview) backend for its D3D12/OpenGL ES self-test (ShaderSystem 9: the preview backend is kept out of Release Windows executables in SH2)")
-    ];
+    public static readonly IReadOnlyList<ReleaseException> KnownExceptions = [];
 
     // 검사하는 대상 플랫폼과 아키텍처다(개발 호스트 두 곳과 모바일).
     private static readonly (NativePlatform Platform, NativeArchitecture Architecture)[] Platforms =
@@ -93,14 +86,14 @@ public static class ReleaseExclusion
             }
 
             var targets = new List<(string Name, IReadOnlyList<string> Modules)>();
-            foreach (TargetRules target in rules.Targets.Where(target => target.Type == TargetType.Game))
+            foreach (TargetRules target in rules.Targets.Where(target => Evaluates(target.Type, platform)))
             {
                 // 켠 플러그인 모듈은 타깃이 참조하지 않아도 주 실행 파일에 링크된다(Docs/Design/BuildTargets 3.9절 BD36·BD38). 해석
                 // 오류(끈 플러그인·빠진 모듈 사용)도 이 타깃의 Release 빌드를 막으므로 정책 실패로 알린다.
                 try
                 {
                     var set = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine(target.Name, target.Plugins, root), rules.Plugins, platform,
-                        NativeConfiguration.Release, target.Type);
+                        NativeConfiguration.Release, target.Kind);
                     set.Apply(rules.Modules, target.Modules);
                     targets.Add((target.Name, [.. target.Modules, .. set.IncludedPluginModules]));
                 }
@@ -116,6 +109,13 @@ public static class ReleaseExclusion
         ReleaseExclusionResult result = Apply(violations, KnownExceptions);
         return result with { Failures = [.. failures, .. result.Failures] };
     }
+
+    /// <summary>
+    /// 이 타깃 종류를 이 플랫폼의 Release로 평가하는가다(Docs/Design/BuildTargets 3.3절 BD20): 출시 타깃(Game·Client·Server)이고 그 종류가 이
+    /// 플랫폼에서 빌드된다(3.1절 표 — Server는 Android가 아니다). Editor·Program은 대상이 아니다.
+    /// </summary>
+    public static bool Evaluates(TargetType type, NativePlatform platform) =>
+        type is TargetType.Game or TargetType.Client or TargetType.Server && RuleLoader.SupportsPlatform(type, platform);
 
     /// <summary>
     /// 모듈 종류(<see cref="NativeModuleInput.Type"/>)가 Developer인 모듈 이름이다(Docs/Design/BuildTargets 3.9절 BD38). 엔진 모듈은
@@ -148,7 +148,9 @@ public static class ReleaseExclusion
                 "Editor" => ModuleType.Editor,
                 _ => ModuleType.Runtime
             } : ModuleType.Runtime;
-            if (module.Type != expected)
+            // Runtime 폴더의 모듈은 규칙이 ServerOnly·ClientOnly로 좁힐 수 있다(BS2b).
+            bool narrowed = expected == ModuleType.Runtime && module.Type is ModuleType.ServerOnly or ModuleType.ClientOnly;
+            if (module.Type != expected && !narrowed)
             {
                 failures.Add(new($"module {module.Name}", 0, "module-type-group",
                     $"module {module.Name} in {directory} has type {module.Type}, expected {expected}; start an overridden Configure from base.Configure"));
@@ -169,7 +171,7 @@ public static class ReleaseExclusion
         var violations = new List<ReleaseViolation>();
         foreach ((string target, IReadOnlyList<string> selected) in gameTargets)
         {
-            // 실행 중 적재 모듈도 Monolithic 실행 파일에 링크되므로 배제 정책의 도달 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+            // 실행 중 적재 모듈도 Monolithic 실행 파일에 링크되므로 배제 정책의 도달 집합이다(Docs/Design/ModuleLoader 3.8절).
             var reached = new SortedSet<string>(LinkClosure.Reachable(selected, byName,
                 (name, _) => throw new ArgumentException($"target {target}: unknown module {name}")), StringComparer.Ordinal);
 
@@ -179,6 +181,11 @@ public static class ReleaseExclusion
                 if (developerModules.Contains(name))
                 {
                     violations.Add(new("release-developer-module", platform, target, name, name));
+                }
+
+                if (module.Type == ModuleType.Editor)
+                {
+                    violations.Add(new("release-editor-module", platform, target, name, name));
                 }
 
                 IEnumerable<string> links = module.SystemLibraries.Concat(module.PrebuiltLibraries.Select(Path.GetFileName))

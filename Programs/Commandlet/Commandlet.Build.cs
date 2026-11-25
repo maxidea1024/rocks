@@ -26,7 +26,7 @@ public sealed class CommandletHost : ModuleRules
         // Launch: the common entry point (command line capture, crash reporting and the tool log, Docs/Design/CrashHandlingAndLaunch.ko.md).
         // UnrealExchange (plugin enabled by the Commandlet target): the asset-import-unreal command (Docs/Design/UnrealExchange.ko.md section
         // 10.5; a Program may depend on the modules of plugins its target enables, Docs/Design/BuildTargets BD39).
-        // NodeGraphTools (Developer): the graph-dump, graph-validate and graph-diff commands (Docs/Design/NodeGraph.ko.md section 9.4).
+        // NodeGraphTools (Developer): the graph-dump, graph-validate and graph-diff commands (Docs/Design/NodeGraph section 9.4).
         // ShaderCompiler (Developer): the shader-compile command (Docs/Design/ShaderSystem section 11.1 SC13).
         // TextureTools (Developer): the texture importers, the settings normalization hook and the asset-import argument translator
         // (Docs/Design/AssetSystem section 12.12).

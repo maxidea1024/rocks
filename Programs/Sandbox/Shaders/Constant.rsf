@@ -1,0 +1,57 @@
+// 상수 버퍼(cbuffer) self-test 셰이더다(Docs/Design/RenderBase 9.11절 GX6). 원문은 register를
+// 적지 않는다 — slot은 장치 형식마다 다른 값 1 위치이고 self-test가 layout에서 찾는다.
+#include "/Plugin/Sandbox/Common.rsh"
+
+struct VSOutput {
+    float4 position : SV_Position;
+    float4 color : TEXCOORD0;
+};
+
+cbuffer Placement {
+    float4 shift;
+};
+
+VSOutput ConstantVS(uint id : SV_VertexID) {
+    VSOutput output;
+    output.position = FullScreenPosition(id);
+    output.color = shift;
+    return output;
+}
+
+cbuffer Material {
+    float4 color;
+};
+
+// 32 byte다(16 byte 버퍼를 묶으면 그리기를 무시하는지 본다).
+cbuffer Lighting {
+    float4 scale;
+    float4 bias;
+};
+
+struct TintConstants {
+    float4 tint;
+};
+
+ROCKS_ROOT_CONSTANTS(TintConstants, Tint);
+
+float4 ConstantPS(VSOutput input) : SV_Target0 {
+    return input.color + color * scale + bias + Tint.tint;
+}
+
+// 같은 상수 버퍼를 같은 순서로 읽는 다른 PS다(파이프라인을 바꿔도 묶음이 남는지).
+float4 ConstantAltPS(VSOutput input) : SV_Target0 {
+    return input.color + color * 0.5 + bias;
+}
+
+// 정수 상수 버퍼를 읽어 raw 버퍼에 쓴다(GLES는 uvec4 배열).
+cbuffer Params {
+    uint4 values;
+    uint4 more;
+};
+
+RWByteAddressBuffer Output;
+
+[numthreads(4, 1, 1)]
+void ConstantCS(uint3 id : SV_DispatchThreadID) {
+    Output.Store(id.x * 4, values[id.x] * 3u + more[id.x]);
+}

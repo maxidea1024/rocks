@@ -14,12 +14,17 @@ RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
       textureUses_(allocator), bufferUses_(allocator), heaps_(allocator),
       placedTextures_(allocator), placedBuffers_(allocator), buffers_(allocator),
       allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
-      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), shaders_(allocator),
+      bufferViews_(allocator), constantBuffers_(allocator), retired_(allocator),
       readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
     tickSource_.pool = &timestampPool_;
+    // compute 그룹 수 한도는 D3D12와 같은 축별 65535다(SetComputeGroupLimit로 바꾼다).
+    for (uint32& limit : caps_.limits.computeGroupCount) {
+        limit = DefaultComputeGroupLimit;
+    }
 }
 
 TimestampReadState RecordingDevice::TickSource::ReadTimestamps(uint32 first, uint32 count,
@@ -648,7 +653,73 @@ Result<TextureHandle> RecordingDevice::CreateTextureView(TextureHandle texture,
     return Result<TextureHandle>::Success(TextureHandle{added.Value()});
 }
 
+Result<ShaderHandle> RecordingDevice::CreateShader(const ShaderCodeDesc& desc) noexcept {
+    if (desc.kind != graphics::ShaderCodeKindOf(Info().backend) || desc.code.IsEmpty()) {
+        return Result<ShaderHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    bool hold = false;
+    {
+        platform::LockGuard lock(shaderGate_);
+        if (shaderHold_ != 0) {
+            ++shaderArrivals_;
+            hold = shaderArrivals_ < shaderHold_;
+            if (!hold) {
+                shaderRelease_.Signal();
+            }
+        }
+    }
+
+    if (hold) {
+        (void)shaderRelease_.Wait();
+    }
+
+    platform::LockGuard lock(shaderGate_);
+    auto added = shaders_.TryAdd(static_cast<uint8>(desc.stage));
+    if (!added) {
+        return Result<ShaderHandle>::Failure(added.Error());
+    }
+
+    ++createdShaders_;
+    return Result<ShaderHandle>::Success(ShaderHandle{added.Value()});
+}
+
+void RecordingDevice::Retire(ShaderHandle shader) noexcept {
+    platform::LockGuard lock(shaderGate_);
+    if (shaders_.TryRemove(shader.slot)) {
+        ++retiredShaders_;
+    }
+}
+
+void RecordingDevice::HoldShaderCreation(uint32 arrivals) noexcept {
+    platform::LockGuard lock(shaderGate_);
+    shaderHold_ = arrivals;
+    shaderArrivals_ = 0;
+    if (arrivals == 0) {
+        shaderRelease_.Signal();
+    } else {
+        shaderRelease_.Reset();
+    }
+}
+
+uint64 RecordingDevice::CreatedShaders() const noexcept {
+    platform::LockGuard lock(const_cast<platform::Mutex&>(shaderGate_));
+    return createdShaders_;
+}
+
+uint64 RecordingDevice::RetiredShaders() const noexcept {
+    platform::LockGuard lock(const_cast<platform::Mutex&>(shaderGate_));
+    return retiredShaders_;
+}
+
+usize RecordingDevice::LiveShaders() const noexcept {
+    platform::LockGuard lock(const_cast<platform::Mutex&>(shaderGate_));
+    return shaders_.Size();
+}
+
 Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc) noexcept {
+    ++pipelineCreateCalls_;
+    lastVertexShader_ = desc.vertexShader;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<PipelineHandle>::Failure(owner.Error());
@@ -920,9 +991,42 @@ uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noe
 
 Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,
                                                            const BufferViewDesc& desc) noexcept {
-    (void)buffer;
-    (void)desc;
-    return Result<BufferViewHandle>::Failure(ErrorCode::Unsupported);
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<BufferViewHandle>::Failure(owner.Error());
+    }
+
+    if (!buffers_.IsValid(buffer.slot)) {
+        return Result<BufferViewHandle>::Failure(ErrorCode::StaleHandle);
+    }
+
+    BufferViewState state;
+    state.buffer = buffer.slot;
+    state.access = desc.access;
+    auto added = bufferViews_.TryAdd(state);
+    if (!added) {
+        return Result<BufferViewHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateBufferView, (desc.access == ViewAccess::ReadWrite ? 1ull << 32 : 0ull) |
+                                     static_cast<uint32>(desc.kind));
+    return Result<BufferViewHandle>::Success(BufferViewHandle{added.Value()});
+}
+
+bool RecordingDevice::CheckBufferView(BufferViewHandle view, ViewAccess access,
+                                      ResourceAccess allowed) noexcept {
+    const BufferViewState* state = bufferViews_.Find(view.slot);
+    if (state == nullptr) {
+        return false;
+    }
+
+    const ResourceAccess* tracked = buffers_.Find(state->buffer);
+    if (state->access != access || tracked == nullptr || !HasAnyAccess(*tracked, allowed)) {
+        ++validationErrors_;
+    }
+
+    TouchBuffer(state->buffer);
+    return true;
 }
 
 Result<void> RecordingDevice::ReadBuffer(BufferHandle buffer, uint64 offset,
@@ -934,24 +1038,127 @@ Result<void> RecordingDevice::ReadBuffer(BufferHandle buffer, uint64 offset,
 }
 
 void RecordingDevice::Retire(BufferViewHandle view) noexcept {
-    (void)view;
+    if (!ownership_.Check() || !bufferViews_.TryRemove(view.slot)) {
+        return;
+    }
+
+    Defer();
+    Record(Op::RetireBufferView);
 }
 
+namespace {
+
+uint32 ConstantFirstWord(Span<const uint8> bytes) noexcept {
+    uint32 word = 0;
+    if (bytes.Size() >= sizeof(word)) {
+        platform::MemoryCopy(&word, bytes.Data(), sizeof(word));
+    }
+
+    return word;
+}
+
+} // namespace
+
+// 실제 장치와 같은 규칙(크기·수명·갱신 대상)으로 검사한다.
+Result<ConstantBufferHandle>
+RecordingDevice::CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                      Span<const uint8> contents) noexcept {
+    if ((lifetime != ConstantBufferLifetime::SingleFrame &&
+         lifetime != ConstantBufferLifetime::MultiFrame) ||
+        !graphics::IsValidConstantBufferBytes(contents.Size())) {
+        return Result<ConstantBufferHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ConstantState state;
+    state.lifetime = lifetime;
+    state.bytes = static_cast<uint32>(contents.Size());
+    state.word = ConstantFirstWord(contents);
+    auto added = constantBuffers_.TryAdd(state);
+    if (!added) {
+        return Result<ConstantBufferHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateConstantBuffer, (static_cast<uint64>(lifetime) << 32) | state.bytes);
+    return Result<ConstantBufferHandle>::Success(ConstantBufferHandle{added.Value()});
+}
+
+Result<void> RecordingDevice::UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                                   Span<const uint8> contents) noexcept {
+    ConstantState* state = constantBuffers_.Find(buffer.slot);
+    if (state == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (state->lifetime != ConstantBufferLifetime::MultiFrame || contents.Size() != state->bytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    state->word = ConstantFirstWord(contents);
+    Record(Op::UpdateConstantBuffer, state->word);
+    return Result<void>::Success();
+}
+
+void RecordingDevice::Retire(ConstantBufferHandle buffer) noexcept {
+    if (!ownership_.Check() || !constantBuffers_.TryRemove(buffer.slot)) {
+        return;
+    }
+
+    Defer();
+    Record(Op::RetireConstantBuffer);
+}
+
+void RecordingDevice::SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
+                                        ConstantBufferHandle buffer) noexcept {
+    const ConstantState* state = constantBuffers_.Find(buffer.slot);
+    Record(Op::SetConstantBuffer,
+           ConstantValue(stage, slot, state != nullptr ? state->word : UnboundConstantWord));
+}
+
+Result<void> RecordingDevice::SetConstantData(graphics::ShaderStage stage, uint32 slot,
+                                              Span<const uint8> bytes) noexcept {
+    if (!recording_ || slot >= graphics::MaxConstantBufferSlots ||
+        !graphics::IsValidConstantBufferBytes(bytes.Size())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Record(Op::SetConstantData, ConstantValue(stage, slot, ConstantFirstWord(bytes)));
+    return Result<void>::Success();
+}
+
+// 읽기 view는 셰이더 읽기(그래픽·compute) 상태여야 한다.
 void RecordingDevice::SetBufferView(uint32 slot, BufferViewHandle view) noexcept {
-    (void)slot;
-    (void)view;
+    const bool valid = CheckBufferView(view, ViewAccess::Read,
+                                       ResourceAccess::SrvGraphics | ResourceAccess::SrvCompute);
+    Record(Op::SetBufferView, (static_cast<uint64>(slot) << 1) | (valid ? 1u : 0u));
 }
 
-// 아래 GX3·GX4 명령은 기록 장치가 쓰지 않는다(렌더 그래프 시험 범위 밖).
+// compute 파이프라인은 그리기별 상수 크기만 기억한다(SetDrawConstants 검사, 그래픽과 같은 표).
 Result<PipelineHandle>
 RecordingDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
-    (void)desc;
-    return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+    ++pipelineCreateCalls_;
+    lastComputeShader_ = desc.computeShader;
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<PipelineHandle>::Failure(owner.Error());
+    }
+
+    if (!graphics::ValidateComputePipelineDesc(desc)) {
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto added = pipelines_.TryAdd(desc.drawConstantBytes);
+    if (!added) {
+        return Result<PipelineHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateComputePipeline, desc.drawConstantBytes);
+    return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
 }
 
+// 쓰기 view는 UAV 상태여야 한다.
 void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {
-    (void)slot;
-    (void)view;
+    const bool valid = CheckBufferView(view, ViewAccess::ReadWrite, UavAccessMask);
+    Record(Op::SetWritableBufferView, (static_cast<uint64>(slot) << 1) | (valid ? 1u : 0u));
 }
 
 void RecordingDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
@@ -996,16 +1203,38 @@ void RecordingDevice::DrawIndexedIndirect(BufferHandle arguments, uint64 offset)
     (void)offset;
 }
 
+// 그룹 수가 한도 밖이거나 파이프라인이 없으면 실제 장치처럼 무시한다(IgnoredDraws).
 void RecordingDevice::Dispatch(uint32 groupCountX, uint32 groupCountY,
                                uint32 groupCountZ) noexcept {
-    (void)groupCountX;
-    (void)groupCountY;
-    (void)groupCountZ;
+    const uint32 counts[3] = {groupCountX, groupCountY, groupCountZ};
+    bool inside = recording_ && pipelines_.IsValid(boundPipeline_.slot);
+    for (uint32 axis = 0; axis < 3; ++axis) {
+        inside = inside && counts[axis] <= caps_.limits.computeGroupCount[axis];
+    }
+
+    if (!inside) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    Record(Op::Dispatch, DispatchValue(groupCountX, groupCountY, groupCountZ));
 }
 
+// 인자 버퍼는 IndirectArgs 상태여야 한다(아니면 검증 오류, 렌더 그래프가 전이를 낸다).
 void RecordingDevice::DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept {
-    (void)arguments;
-    (void)offset;
+    const ResourceAccess* tracked = buffers_.Find(arguments.slot);
+    if (!recording_ || tracked == nullptr || !pipelines_.IsValid(boundPipeline_.slot) ||
+        offset % sizeof(uint32) != 0) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    if (!HasAnyAccess(*tracked, ResourceAccess::IndirectArgs)) {
+        ++validationErrors_;
+    }
+
+    TouchBuffer(arguments.slot);
+    Record(Op::DispatchIndirect, offset);
 }
 
 void RecordingDevice::SetViewport(const Viewport& viewport) noexcept {
@@ -1215,6 +1444,10 @@ StringView RecordingDevice::LastError() const noexcept {
 
 uint64 RecordingDevice::IgnoredDraws() const noexcept {
     return ignoredDraws_;
+}
+
+uint64 RecordingDevice::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
 }
 
 uint64 RecordingDevice::ValidationErrorCount() const noexcept {
@@ -1496,6 +1729,11 @@ void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
                 break;
             }
         }
+    }
+
+    // 실제 장치처럼 흰 텍스처로 대신 묶는 경우(null·stale·ReadWrite view)를 센다.
+    if (state == nullptr || (state->view && state->access != ViewAccess::Read)) {
+        ++nullTextureBindings_;
     }
 
     Record(Op::SetTexture, state != nullptr ? 1u : 0u);

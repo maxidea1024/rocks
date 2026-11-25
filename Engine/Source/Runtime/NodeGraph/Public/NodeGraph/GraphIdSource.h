@@ -3,7 +3,7 @@
 #include <Base/Guid.h>
 #include <Core/Result.h>
 
-// 그래프 id(GraphId·NodeId·주석 id) 발급기다(Docs/Design/NodeGraph.ko.md 8.5·8.6절).
+// 그래프 id(GraphId·NodeId·주석 id) 발급기다(Docs/Design/NodeGraph 8.5·8.6절).
 //
 // 사용 예:
 //   RandomGraphIdSource random;                       // 에디터

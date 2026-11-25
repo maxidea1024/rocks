@@ -3,7 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Graphics/DeviceTypes.h>
 
-// 명시 접근 상태와 전이다(Docs/Design/RenderBase.ko.md 4.4절 GX5, UE ERHIAccess·FRHITransitionInfo
+// 명시 접근 상태와 전이다(Docs/Design/RenderBase 4.4절 GX5, UE ERHIAccess·FRHITransitionInfo
 // 대응). 렌더 그래프가 pass마다 자원 접근을 모아 전이를 계산하고, 장치는 그 전이를 자기 API로
 // 낮춘다(CommandContext::Transition, 분리 전이는 BeginTransitions·EndTransitions). async compute
 // 기록(QueueKind::AsyncCompute)에서는 IsComputeQueueAccess인 상태 사이 전이만 낸다(RG4). queue 사이

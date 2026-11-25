@@ -245,15 +245,18 @@ internal static partial class MetaTests
                 }
             }
         });
-        suite.Add("Meta.PrefixClassSupportsNestedScopesCommentsAndConditionalBlock", async () =>
+        // 중첩 범위·주석 안 지시문 철자는 prefix를 끊지 않는다. 조건 블록 안 선언은 어휘 스캔이 거부한다(Docs/Design/BuildTargets 3.4절 BD6 —
+        // RMC2501).
+        suite.Add("Meta.PrefixClassSupportsNestedScopesAndComments", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             string marker = "ROCKS_CLASS()";
-            string valid = Preamble + "struct Outer { public:\n#if 1\n" + marker +
-                "\n// #if 0 is only a comment\n/* #include <ignored> */\n" +
-                "class Inner : public rocks::Object { public: Inner() noexcept = default; };\n#endif\n};\n}\n";
-            await probe.GenerateAsync(valid);
+            string nested = marker + "\n// #if 0 is only a comment\n/* #include <ignored> */\n" +
+                "class Inner : public rocks::Object { public: Inner() noexcept = default; };\n";
+            await probe.GenerateAsync(Preamble + "struct Outer { public:\n" + nested + "};\n}\n");
             Verify.Contains("probe::Outer::Inner", probe.GeneratedText(), "nested prefix CLASS");
+            await probe.RejectAsync(Preamble + "struct Outer { public:\n#if 1\n" + nested + "#endif\n};\n}\n", "RMC2501",
+                "inside a preprocessor conditional block");
         });
         suite.Add("Meta.PrefixClassNeverBindsAcrossTokensOrPreprocessing", async () =>
         {

@@ -5,7 +5,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Sparks 진단 시험이다(Docs/Design/SparksLanguage.ko.md 8.1절 "형식"·"출력 세부"·"순서"): 출력
+// Sparks 진단 시험이다(Docs/Design/SparksLanguage 8.1절 "형식"·"출력 세부"·"순서"): 출력
 // golden, 밑줄 폭(code point·최소 1·줄 끝 자름), 표시 정리(tab·CR·잘못된 UTF-8), 파일 전체 진단,
 // 정렬, 코드 표.
 using namespace rocks;

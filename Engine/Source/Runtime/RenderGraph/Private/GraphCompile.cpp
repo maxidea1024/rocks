@@ -1,7 +1,7 @@
 #include "RenderGraphInternal.h"
 
 // 그래프 컴파일이다: 미사용 제거(culling), 참조 수 수명, async compute fork·join과 수명 연장, 같은
-// 그래프 안 재사용 계획, subresource 상태 추적과 전이 계산(Docs/Design/RenderBase.ko.md 7.1절
+// 그래프 안 재사용 계획, subresource 상태 추적과 전이 계산(Docs/Design/RenderBase 7.1절
 // culling·컴파일·barrier·수명 행, 8절 RG2·RG4, UE RC/Private/RenderGraphBuilder.cpp:1160–1325,
 // 1562–1667, 3128–3175, 3632–3646, 3783–3928, RC/Private/RenderGraphResources.cpp:69–152).
 namespace rocks::render::detail {

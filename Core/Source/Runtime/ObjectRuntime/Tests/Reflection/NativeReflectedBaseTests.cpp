@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Base/TypeTraits.h>
 #include <CoreTypeBindings/CoreTypeBindings.module.generated.h>
 #include <CoreTypeBindings/CoreValueTypes.generated.h>
@@ -218,14 +219,14 @@ FieldValue Signed(Allocator& allocator, int64 value) noexcept {
     return result;
 }
 
-FieldValue Float64(Allocator& allocator, double value) noexcept {
+[[maybe_unused]] FieldValue Float64(Allocator& allocator, double value) noexcept {
     FieldValue result(allocator);
     result.kind = ValueKind::Float64;
     result.float64 = value;
     return result;
 }
 
-FieldValue Reference(Allocator& allocator, ObjectHandle handle) noexcept {
+[[maybe_unused]] FieldValue Reference(Allocator& allocator, ObjectHandle handle) noexcept {
     FieldValue result(allocator);
     result.kind = ValueKind::ObjectReference;
     result.reference = handle;
@@ -337,7 +338,11 @@ TEST(NativeReflectedBase_RegistersBorrowedFieldsAndInheritsWorldOnly) {
             // 리플렉션 조상의 필드를 같은 순서·ID로 담고 함수표도 같은 필드마다 있다.
             const auto& actorSchema = actor.Value().Schema();
             REQUIRE(actorSchema.fields.Size() == world.Schema().fields.Size());
-            CHECK(actorSchema.fields.Size() == 2);
+            // 에디터 데이터 없는 조합에서는 EditorOnly 필드(note)가 빠지고 그 ID 목록을
+            // 물려받는다(Docs/Design/ BuildTargets 3.4절 BS2c).
+            CHECK(actorSchema.fields.Size() == (ROCKS_WITH_EDITOR_DATA ? 2u : 1u));
+            CHECK(actorSchema.editorOnlyFieldIds.Size() == 1 &&
+                  actorSchema.editorOnlyFieldIds[0] == world.Schema().editorOnlyFieldIds[0]);
             for (usize index = 0; index < actorSchema.fields.Size(); ++index) {
                 CHECK(actorSchema.fields[index].id == world.Schema().fields[index].id);
                 CHECK(actor.Value().FieldOps(index) != nullptr);
@@ -375,7 +380,7 @@ TEST(NativeReflectedBase_RegistersBorrowedFieldsAndInheritsWorldOnly) {
             CHECK(sceneSchema.baseType == TypeIdOf<SceneFixture>());
             CHECK(sceneSchema.flags == static_cast<uint32>(TypeFlags::WorldOnly));
             REQUIRE(sceneSchema.fields.Size() == sceneBase.Value().Schema().fields.Size());
-            CHECK(sceneSchema.fields.Size() == 3);
+            CHECK(sceneSchema.fields.Size() == (ROCKS_WITH_EDITOR_DATA ? 3u : 2u));
             const Guid relativeId = SchemaField(TypeOf<SceneFixture>(), "relative").id;
             const usize relative = scene.Value().FieldIndex(relativeId);
             REQUIRE(relative != TypeLease::NoField);
@@ -415,6 +420,9 @@ TEST(NativeReflectedBase_RegistersBorrowedFieldsAndInheritsWorldOnly) {
 // base 필드 읽기·쓰기·경로 접근: 빌린 생성 thunk(Resolve<R>·IsNativeA 판정)가 native 파생 객체의
 // base 필드를 정적 타입으로 다룬다. 파생 lease·base lease 어느 쪽의 함수표·경로로도 같은 필드를
 // 가리킨다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(NativeReflectedBase_BaseFieldsReadWriteAndPathAccess) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -459,7 +467,9 @@ TEST(NativeReflectedBase_BaseFieldsReadWriteAndPathAccess) {
                     REQUIRE(borrowed);
                     NativeWorldActor* pointer = Get(borrowed.Value());
                     REQUIRE(pointer != nullptr);
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(pointer->note == 41);
+#endif
                     CHECK(pointer->target.Handle() == node.Value().Handle());
                 }
 
@@ -501,7 +511,9 @@ TEST(NativeReflectedBase_BaseFieldsReadWriteAndPathAccess) {
                     NativeSceneActor* pointer = Get(borrowed.Value());
                     REQUIRE(pointer != nullptr);
                     CHECK(pointer->relative.translation.x == 2.5);
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(pointer->note == 9);
+#endif
                 }
 
                 // struct 필드를 통째로 읽는 것은 리플렉션 클래스와 같이 Unsupported다.
@@ -520,6 +532,7 @@ TEST(NativeReflectedBase_BaseFieldsReadWriteAndPathAccess) {
 
     CHECK(types.Shutdown());
 }
+#endif
 
 // Trace: native 사슬의 손 Trace(U·T)와 리플렉션 조상의 생성 Trace(R — 상속 필드 포함)를 모두
 // 부르고, 각 간선을 한 번씩만 방문한다. 간선으로만 닿는 객체는 수집 뒤에도 산다.

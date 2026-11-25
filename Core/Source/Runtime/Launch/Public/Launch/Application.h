@@ -65,6 +65,15 @@ enum class DefaultAllocatorKind : uint8 {
     System, // SystemAllocator 그대로(DefaultAllocator()가 SystemAllocator()와 같은 객체다)
 };
 
+// 본문을 돌리는 스레드를 정하는 호스트다(Docs/Design/MacPlatform.ko.md 3절). body(context)를 다른
+// 스레드(게임 스레드)에서 돌리고, 부른 스레드(프로세스 메인 스레드)는 OS 이벤트 루프에 내준 뒤
+// body가 끝나면 그 반환값을 돌려준다. body를 정확히 한 번 부르고 끝날 때까지 기다려야 한다.
+//
+// macOS 창 프로그램은 Cocoa가 창·이벤트를 메인 스레드에서만 받으므로 PlatformWindow의
+// platform::RunCocoaMainThreadHost를 넣는다(UE MAC_SEPARATE_GAME_THREAD). 그 함수는 다른
+// 플랫폼에서 body를 바로 부른다.
+using MainThreadHostFunction = int (*)(int (*body)(void* context) noexcept, void* context) noexcept;
+
 // 실행 설정이다. ApplicationDescription::settings가 기본값이고, configure가 명령줄을 본 뒤 고칠 수
 // 있다.
 struct ApplicationSettings {
@@ -99,6 +108,13 @@ struct ApplicationSettings {
     // 범용 할당자(ApplicationContext::DefaultAllocator)의 종류다. 범용 할당자를 만들기 전에(본문
     // 전에) 정해지므로 description의 기본값이나 configure에서 바꾼다.
     DefaultAllocatorKind defaultAllocator = DefaultAllocatorKind::Binned;
+    // 본문을 다른 스레드에서 돌리는 호스트다(MainThreadHostFunction). nullptr이면 본문을 이
+    // 스레드에서 바로 부른다(기본). 호스트가 있으면 ApplicationContext는 본문 스레드에서 쓴다. 내장
+    // 진입은 호스트의 메인 스레드를 바꾸지 않으려고 무시한다.
+    //
+    // 사용 예(configure에서):
+    //   settings.mainThreadHost = &platform::RunCocoaMainThreadHost;
+    MainThreadHostFunction mainThreadHost = nullptr;
 };
 
 // 본문이 받는 실행 문맥이다. Launch가 만들고 본문이 돌아갈 때까지 유효하다(복사하지 않는다). 본문을
@@ -132,7 +148,7 @@ public:
     //   Array<int32> values(memory);
     Allocator& DefaultAllocator() noexcept;
 
-    // Launch가 소유한 프로세스 모듈 로더다(Docs/Design/ModuleLoader.ko.md 3.9·3.11절, UE
+    // Launch가 소유한 프로세스 모듈 로더다(Docs/Design/ModuleLoader 3.9·3.11절, UE
     // FModuleManager의 자리 — 전역 접근자는 없다). 본문 수명 동안 유효하다. Monolithic은 범용
     // 할당자로 이 실행 파일의 모듈 표(GeneratedModuleTable)에서, Modular는 Launch의 Modular 진입이
     // 시동 할당자(SystemAllocator)로 모듈 manifest에서 만들었다(3.14절 — 범용 할당자의 종류를
@@ -191,7 +207,7 @@ private:
 inline constexpr int CommandLineFailureExitCode = 1;
 
 // 모듈 로더를 만들지 못했거나 부트 모듈이 시작하지 못했을 때의 종료 코드다(Launch가 Error로 원인을
-// 한 번 기록한다 — Docs/Design/ModuleLoader.ko.md 3.11절).
+// 한 번 기록한다 — Docs/Design/ModuleLoader 3.11절).
 inline constexpr int ModuleStartupFailureExitCode = 1;
 
 // 실행 파일 설명이다. 보통 정적 상수로 두고 Describe 함수가 돌려준다.
@@ -211,6 +227,10 @@ struct ApplicationDescription {
     // 명령줄 캡처 실패(잘못된 인코딩·상한 초과)의 종료 코드다. 사용법 오류를 따로 정한 도구가
     // 바꾼다(예: Commandlet은 2).
     int commandLineFailureExitCode = CommandLineFailureExitCode;
+    // Android APK가 Intent extra(rocks.args) 없이 시작했을 때의 프로그램 인자다(실행 파일 이름
+    // 제외, Docs/Design/AndroidPlatform.ko.md 6절). 런처 아이콘으로 띄우면 extra가 없다. 다른
+    // 플랫폼은 쓰지 않는다.
+    Span<const StringView> androidDefaultArguments{};
 };
 
 // 진입점 공통 본문이다. 실행 파일은 직접 부르지 않고 EntryPoint.h의 매크로를 쓴다.
@@ -256,7 +276,7 @@ ROCKS_LAUNCH_API bool IsTerminationRequested() noexcept;
 } // namespace rocks::launch
 
 #if !ROCKS_MONOLITHIC
-// Modular 실행 파일의 진입이다(Docs/Design/ModuleLoader.ko.md 3.14절). 빌드가 만든 실행 파일 진입
+// Modular 실행 파일의 진입이다(Docs/Design/ModuleLoader 3.14절). 빌드가 만든 실행 파일 진입
 // TU(<모듈>.Launcher.cpp)만 부른다. 실행 파일 폴더의 manifest(manifest — 파일 이름)로 모든 모듈
 // 공유 라이브러리를 싣는 로더를 시동 할당자에서 만들고, 호스트 모듈이 export한 앱 기술로
 // RunApplication과 같은 흐름을 돈다("Launch.Modules"는 이 로더로 부트 모듈만 시작한다). 로더는 실행

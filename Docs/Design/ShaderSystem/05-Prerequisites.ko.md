@@ -22,15 +22,15 @@
 | P4 | 도구 표 생성·binary 의존 정책·Release 배제 검사 | 이 문서 | **구현**(Windows. macOS 미검증, 알려진 Release 예외 2건은 SH2까지) | SH0, SH2 | P3, P10 | 9절 |
 | P5 | 셰이더 job 키 | 이 문서 | 설계(개정 23, A3 API에 맞춤) — 구현은 SH1b | SH1 | A2, A3, P6a | 10절 |
 | P6a | 형식 정의 스키마와 파일, 엔진 컴파일 프로필 | 이 문서 | **구현**(2026-11-17, Windows 시험) | P5, P14, P6b, SH1 | A0-C(JSON), 결정 2·3·5(결정됨) | 12.1절 |
-| P6b | TargetProfile 필드·매니페스트 v2·엔진 내장 셰이더 라이브러리 | 이 문서 | 설계 | SH2 | A1, A4, P6a, P14 | 12.3절 |
+| P6b | TargetProfile 필드·매니페스트 v2·엔진 내장 셰이더 라이브러리 | 이 문서 | 설계 확정(개정 31, 12.3.1절) | SH2 | A1, A4, P6a, P14 | 12.3절 |
 | P7 | MetaCompiler 셰이더 파라미터 | 이 문서 | 설계 | SH3 | B1–B8 | 13절 |
 | P8 | 다른 문서 개정 | 이 문서 | 목록 | 모든 단계의 기준 | 결정별 기한(15절) | 14절 |
 | P9 | Vulkan 선행 | 이 문서·[VulkanGraphics](../VulkanGraphics.ko.md) | **구현**(Windows. VulkanGraphics 개정 1, Android는 교차 빌드만) | SH2 | P3, P10 | 5.3 |
 | P10 | 동적 라이브러리 API | PlatformLayer | **구현** | P4, P9, P13, SH0, SH2 | — | 5.3 |
 | P11 | OpenGL ES 선행(OpenGLGraphics를 UE `OpenGLDrv` 방식으로) | [OpenGL ES backend](../OpenGLESGraphics.ko.md)·이 문서 | **구현**(2026-11-17, Windows 미리보기. Android는 컴파일만, 실행은 P13) | P13, SH2, SH6 | A0-G | 5.3 |
-| P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
-| P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
-| P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 | SH2, P6b | P6a | 12절 |
+| P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | [macOS 실행 기반](../MacPlatform.ko.md)·Rocks.Build | 설계(2026-11-24, 구현은 `feature/platform-mac`, Mac 기기 확인 대기) | P15, SH5 | P3 | 5.3 |
+| P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | [Android 실행 기반](../AndroidPlatform.ko.md) | 설계(2026-11-24) | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
+| P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 확정(개정 31, 12.2.1절) | SH2, P6b | P6a | 12절 |
 | P15 | D3D11Graphics·MetalGraphics 설계 | EngineRuntime | D3D11 **구현**(10.2절), Metal 미설계 | SH5 | P12(Metal) | 5.3 |
 
 선행 작업 뒤 첫 단계인 SH0(16절)은 **Windows 부분 구현**(2026-11-17, `feature/shader-tools`, `Programs/ShaderToolSpike`)이다. 형식별 산출·검증·리플렉션 덤프·`ROCKS_IMAGE_FORMAT` 확인과 Windows에서 할 수 있는 측정(S2·S3·S6·S8·S12 데스크톱)을 마쳤고, macOS 측정(S1 macOS DXC 서명, S3 호스트 사이, S9)이 남았다. 결과는 5.4절, 진척은 16절이다.
@@ -58,7 +58,7 @@
   - N2. 값은 여러 부분(`.rnug` 부분 구조)이다: 바이트코드·정규화 바인딩 layout·GLES 복사 표·진단·디버그 심볼.
   - N3. Rockpile이 요구한 AssetSystem 9절 개정(`Rockpile.ko.md` 17절: 키의 에셋 너겟 세대 Guid 11.4절, `.rnug` v2 5.2절, 일괄·비동기 API 12.2절)이 A3에 반영되면 셰이더 키·값도 그대로 따른다. 셰이더 bucket은 `shader`다(`Rockpile.ko.md` 5.1절).
 - **A4**
-  - K1. TargetProfile에 `graphicsBackends`(복수, 순서 = 런타임 선택 순서)·`shaderFormats`(backend마다 선호 순서가 있는 형식 목록) 필드와 엔진 기본 `MacOS` 프로필을 둔다(12절). 지금 AssetSystem 10절은 "그래픽 backend"를 이름 없는 단일 항목으로 적고 기본 프로필은 Windows·Android뿐이다.
+  - K1. TargetProfile에 `graphicsBackends`(복수, 순서 = 런타임 선택 순서)·`shaderFormats`(backend마다 선호 순서가 있는 형식 목록) 필드와 엔진 기본 `Mac` 프로필을 둔다(12절). 지금 AssetSystem 10절은 "그래픽 backend"를 이름 없는 단일 항목으로 적고 기본 프로필은 Windows·Android뿐이다.
   - K2. 쿠킹 매니페스트 v2에 에셋이 아닌 산출물 항목을 둔다(12절). v1 항목은 AssetId 단위다(AssetSystem 10절).
   - K3. 엔진 내장 셰이더 라이브러리를 프로젝트·너겟·네트워크 없이 제공하는 경로를 둔다. 계획 9.6절이 "에셋 너겟·네트워크·프로젝트 없는 설치에서도 최소 자원을 제공한다"고 요구한다. 라이브러리를 만들 때 쓰는 엔진 컴파일 프로필은 P6a가 정하고(12.1절), A4는 설치물에 라이브러리를 두고 여는 경로만 맡는다(12.3절).
 
@@ -130,14 +130,14 @@
 - 의존: A0-G(G2). 막는 것: SH2(미리보기), SH6(Android).
 - 달성(2026-11-17, `feature/gles-graphics`, 설계·상태는 [OpenGL ES backend](../OpenGLESGraphics.ko.md)): 장치 동작을 ES 3.2 core 함수 표로 하는 공통 층과 플랫폼 층(Windows WGL, Android EGL)으로 나눴다. 데스크톱 전용 호출(`glClipControl`·`GL_FRAMEBUFFER_SRGB` 켜기·WGL sRGB 픽셀 형식)은 Windows 층에만 있고 DSA는 없앴다. Windows 미리보기는 ES 3.2 profile context를 먼저 쓰고 데스크톱 GL 4.3 core로 내려갈 수 있다(위 "GL 4.3 core 이상"과 다른 점, 측정은 그 문서 2.2절). 클립 공간은 창·RenderTarget 모두 `GL_UPPER_LEFT`이고 스왑체인은 offscreen 텍스처에 그린 뒤 Y 반전 blit으로 표시한다(7.2절 8항을 SH2보다 앞당겼다). 그리기 상수는 루트 상수 에뮬레이션 배열(`vu_h`·`pu_h`, 7.2절 4항)로 올리고 Sandbox 원문은 쿠킹된 `GLES31_PC`와 같은 모양의 GLSL ES 3.20이다. Sandbox self-test가 두 context에서 통과하고 D3D12와 픽셀 차이 0이다. Android 교차 빌드에서 EGL 층이 컴파일·링크된다. A0-G 형식 확장 전이라 형식 표는 지금 형식만 두고 확장 조건 열을 미리 두었다.
 
-**P12 macOS 실행 기반 — 미설계.**
+**P12 macOS 실행 기반 — 설계([macOS 실행 기반](../MacPlatform.ko.md) 개정 1, 2026-11-24). 아래는 설계 전 정리다.**
 - 현재: PlatformWindow는 Win32만 있다. Rocks.Build 언어는 C·C++뿐이다(`NativeBuildModels.cs:57`, `ActionGraph.cs:373–374`). framework 링크 필드는 있다(`NativeBuildModels.cs:145`). macOS는 CI에서만 빌드·시험한다.
 - UE 5.8: Apple 대상 C++ 원본을 Objective-C++로 컴파일하고(`Programs/UnrealBuildTool/Platform/Apple/AppleToolChain.cs:461,474`), MetalRHI는 `.cpp`에서 metal-cpp(`ThirdParty/MetalCPP`)를 쓰며, 창은 Cocoa다(`Runtime/ApplicationCore/Private/Mac/CocoaWindow.cpp`).
 - 산출물: Rocks.Build의 Apple Objective-C++ 컴파일(정책 검사와의 관계 포함), metal-cpp 공급(`kind: headers`), PlatformWindow Mac backend(Cocoa 창·`CAMetalLayer`·입력), macOS 실행 검증 경로(실기기 또는 CI의 Metal 장치).
 - 완료 기준: macOS에서 창 생성·이벤트 펌프·크기 변경·닫기 시험, `CAMetalLayer`에 지운 색 한 장 표시, Objective-C++ 원본의 경고 0과 정책 검사 통과, macOS CI 실행.
 - 막는 것: SH5의 MetalGraphics(P15).
 
-**P13 Android 실행 기반 — 미설계(PlatformLayer 모바일 절).**
+**P13 Android 실행 기반 — 설계([Android 실행 기반](../AndroidPlatform.ko.md) 개정 1, 2026-11-24). 아래는 설계 전 정리다.**
 - 현재: Android는 시험 실행 파일을 에뮬레이터에 올려 실행만 한다(PlatformLayer 모바일 절). 앱 껍데기·창·surface·수명·APK 패키징이 없고, APK 안 데이터 읽기(VFS)는 AssetSystem 2절에서 후속이다.
 - 산출물: 앱 진입(NativeActivity 계열), `ANativeWindow` surface와 생성·소실·재생성 수명, APK 패키징(manifest `glEsVersion` 0x00030002, UE와 같다), 에뮬레이터·실기기 실행 경로(측정 S11). APK 안 쿠킹 데이터 읽기(VFS)는 AssetSystem이 맡는 선행 작업이다(14절).
 - 완료 기준: 앱 시작·종료, 백그라운드 전환 때 surface 소실·재생성 시험, EGL ES 3.2 context로 지운 색 한 장 표시, 에뮬레이터 또는 실기기 실행 기록.
@@ -176,4 +176,4 @@
 | S13 | SPIRV-Cross가 HLSL `Buffer<T>`·`RWBuffer<T>`(typed buffer)를 ESSL `samplerBuffer`·`isamplerBuffer`·`usamplerBuffer`와 `texelFetch`, `imageBuffer`와 `imageLoad`·`imageStore`로 내는지, 결합 sampler 목록에 typed buffer SRV가 들어가는지 | 7.2절 4항 GLES typed buffer 규칙(Renderer RQ10) | Windows(2026-11-20, SPIRV-Cross C API 0.68.0, `TypedBuffer.ps`·`TypedBuffer.cs` fixture): ESSL 320(`GLES31_PC`·`GLES31_ANDROID` 같음)에서 `Buffer<float4>`·`Buffer<int4>`·`Buffer<uint>`가 `samplerBuffer`·`isamplerBuffer`·`usamplerBuffer`와 `texelFetch`로, `RWBuffer<float4>`(rgba8 지정)·`RWBuffer<uint>`가 `layout(rgba8) writeonly imageBuffer`·`layout(r32ui) uimageBuffer`와 `imageLoad`·`imageStore`로 나온다(읽지 않는 UAV에 `writeonly`가 붙는다). 결합 sampler 목록(`spvc_compiler_get_combined_image_samplers`)에는 텍스처·샘플러 짝(`albedo`·`albedoSampler`)만 있고 typed buffer SRV는 **들어가지 않는다**. typed buffer는 SPIR-V binding을 그대로 단 `layout(binding = n)`으로, 결합 sampler는 binding 없이 id 이름(`_57`)으로 나온다. MSL 2.1은 기본값이면 `texture2d`와 좌표 변환 함수로 흉내 내고 `texture_buffer_native`를 켜면 `texture_buffer<T>`(UAV는 `access::write`·`access::read_write`)다. DXIL·SPIR-V(`spirv-val`) 모두 통과. 결론은 7.2절 4항 |
 | S14 | VS 출력 `SV_RenderTargetArrayIndex`·`SV_ViewportArrayIndex`의 변환: DXC DXIL(SM 6.6), DXC SPIR-V(target env 1.1에서 `ShaderViewportIndexLayerEXT` capability·`SPV_EXT_shader_viewport_index_layer` 확장으로 나오는지), SPIRV-Cross MSL(`[[render_target_array_index]]`·`[[viewport_array_index]]`), FXC `vs_5_0`이 받는지 | 7.2절 7항 VS layer·viewport 출력 규칙의 형식별 `vertexViewportLayerOutput`(Renderer RQ14), `D3D11_SM5` 포함 여부 | Windows(2026-11-20, `LayerViewport.vs` fixture: layer·viewport를 함께 낸다): DXC DXIL은 SM 6.6과 6.0 모두 받고 서명되며 요구 플래그 `D3D_SHADER_REQUIRES_VIEWPORT_AND_RT_ARRAY_INDEX_FROM_ANY_SHADER_FEEDING_RASTERIZER`(0x2000)가 선다. DXC SPIR-V(vulkan1.1)는 capability `ShaderViewportIndexLayerEXT`(5254)와 확장 `SPV_EXT_shader_viewport_index_layer`를 내고 `spirv-val`을 통과한다. SPIRV-Cross MSL 2.1은 `[[render_target_array_index]]`·`[[viewport_array_index]]`, HLSL 5.0은 `SV_RenderTargetArrayIndex`·`SV_ViewportArrayIndex`다. ESSL은 만들어지지만 `#extension GL_NV_viewport_array2 : require`가 붙는다. FXC `vs_5_0`은 원문과 SPIRV-Cross HLSL 5.0 출력을 모두 받고 같은 요구 플래그를 세운다. 결론은 7.2절 7항(`D3D11_SM5`에도 넣는다, 개정 21) |
 
-SH0 남은 측정(2026-11-20): Windows에서 할 수 있는 측정은 모두 끝났다. 남은 것은 macOS가 필요한 S1(macOS DXC 서명)·S3(Windows–macOS 사이 byte 비교)·S9, 기계가 하나라 못 잰 S2(Windows 10 요건)·S3(FMA3 유무·OS 버전)·S12(다른 GPU 공급자), 다른 단계 몫인 S5(Vulkan·GLES 미리보기 쿠킹 경로와 루트 상수 대응, SH2)·S7(SH1 완료 기준)·S11(SH6, P13 미설계)·S12(기기, SH6)다.
+SH0 남은 측정(2026-11-20): Windows에서 할 수 있는 측정은 모두 끝났다. 남은 것은 macOS가 필요한 S1(macOS DXC 서명)·S3(Windows–macOS 사이 byte 비교)·S9, 기계가 하나라 못 잰 S2(Windows 10 요건)·S3(FMA3 유무·OS 버전)·S12(다른 GPU 공급자), 다른 단계 몫인 S5(Vulkan·GLES 미리보기 쿠킹 경로와 루트 상수 대응, SH2)·S7(SH1 완료 기준)·S11(SH6, P13 미설계)·S12(기기, SH6)다. 개정 29: macOS 측정(S1·S3·S9)의 절차는 스파이크 대신 `shader-compile`로 옮겼다(11.1절 E10). macOS에서 DXC를 여는 일(P3 macOS 산출물)이 먼저다.

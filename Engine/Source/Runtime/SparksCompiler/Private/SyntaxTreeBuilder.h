@@ -9,7 +9,7 @@
 #include <SparksCompiler/SyntaxTree.h>
 #include <SparksCompiler/Token.h>
 
-// Sparks 구문 분석기의 내부 선언이다(ParseFile만 쓴다, Docs/Design/SparksLanguage.ko.md 3.6절 EBNF,
+// Sparks 구문 분석기의 내부 선언이다(ParseFile만 쓴다, Docs/Design/SparksLanguage 3.6절 EBNF,
 // 8.1절 "구문 분석"·"복구"·"문법 세부"). 재귀 하강이며 함수 하나가 EBNF 생산 규칙 하나를 맡는다.
 // 구현은 기능별 파일로 나뉜다:
 //   ParserSupport.cpp       토큰 읽기·노드 만들기·진단·복구·깊이 상한

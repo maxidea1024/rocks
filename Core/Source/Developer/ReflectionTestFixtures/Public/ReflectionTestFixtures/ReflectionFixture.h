@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
@@ -124,7 +125,9 @@ ROCKS_CLASS(Version = 2, WorldOnly)
 struct WorldFixture : Object {
     ROCKS_GENERATED_BODY()
 
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly, Name = "Label") int32 note = 0;
+#endif
     ROCKS_PROPERTY(Required) ObjectRef<Node> target;
     ROCKS_NATIVE() int32 runtimeCache = 0;
 };

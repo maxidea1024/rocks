@@ -79,6 +79,9 @@ UE와 의도적으로 다른 점(규약이 아니라 안전성·정확도 정책
 | 선형 충격량 | `KilogramCentimetersPerSecondToNewtonSeconds` / 반대 | 100 | 차원(kg·cm/s = 0.01 N·s). UE EUnit에는 kg·cm/s가 없고 충격량 표시 단위는 N·s(`UnitConversion.cpp:590`) |
 | 토크 | `KilogramCentimetersSquaredPerSecondSquaredToNewtonMeters` / 반대 | 10000 | `UnitConversion.cpp:828` |
 | 관성 모멘트 | `KilogramSquareCentimetersToKilogramSquareMeters` / 반대 | 10000 | `Engine/Classes/Components/PrimitiveComponent.h:2863`(관성 텐서 kg·cm²) |
+| 각충격량·각운동량 | `KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond` / 반대 | 10000 | 차원(kg·cm²/s = 0.0001 kg·m²/s). UE `AddAngularImpulseInRadians`(`PrimitiveComponent.h:1802-1813`)가 kg·cm²/s를 받는다([물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md) U1) |
+| 각 스프링 강성·감쇠 | `KilogramSquareCentimetersPerSecondSquaredPerRadianToNewtonMetersPerRadian`·`KilogramSquareCentimetersPerSecondPerRadianToNewtonMeterSecondsPerRadian` / 반대 | 10000 | 차원(토크/rad·토크·초/rad). Jolt 단위 N·m/rad·N·m·s/rad(Jolt `Docs/Architecture.md:524`) |
+| 밀도 | `GramsPerCubicCentimeterToKilogramsPerCubicMeter` / 반대 | 1000(cm 계열 → m 계열에 **곱한다**) | `Private/Math/UnitConversion.cpp:803-806`(g/cm³ 1, kg/m³ 0.001), UE `UPhysicalMaterial::Density` g/cm³(`PhysicsCore/Public/PhysicalMaterials/PhysicalMaterial.h:145-147`) |
 | 질량·시간·각도·각속도 | 변환 없음(길이 차원 없음, 각속도는 API 이름의 rad/s·deg/s를 따른다) | — | `PrimitiveComponent.h:2852-2857`(kg), `:1860-1873`(InRadians/InDegrees) |
 
 함수는 float·double·`Vector3<float/double>`(성분별)을 받는다. m → cm는 정확한 정수 계수를 한 번 곱하고 cm → m는 같은 계수로 한 번 나누므로 결과는 정확한 값을 한 번 반올림한 값이다. UE 매크로 `UE_CM_TO_M`은 float `0.01f`라 double 값에 곱하면 상대 오차 약 2.2e-8이 생기는데 Rocks는 이를 따르지 않는다(정확도 정책 — 규약과 무관). 비유한 입력은 그대로 전파하고 범위 초과는 ±Inf다. UE `UnitConversion.h`의 `EUnit` 표시·파싱·자동 단위 선택 체계는 구현하지 않았다(에디터 표시 단위 단계). UE 물리 API(AddForce·AddImpulse·AddTorque)가 받는 단위가 위 cm 계열인지는 UE 소스에 표기가 없어(추론만) [물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md) 8절의 검증 항목 U1이다. 밀도(UE g/cm³)·각충격량·각 스프링 강성 변환 함수는 아직 없다(같은 문서 K1). 극성·축성 벡터·quaternion의 축 사상은 이 함수의 범위가 아니며 같은 문서 2절이 정한다.
@@ -119,7 +122,7 @@ UE와 의도적으로 다른 점(오류·정확도 정책, 요구 3절 "규약�
 | `Rect.h` | `Box2<T>`(UE FBox2D), `IntRect`(UE FIntRect) | Box2는 닫힌 집합(`Contains`=UE IsInsideOrOn, `ContainsStrictly`=IsInside), 무효 플래그 대신 `TryMake`/`TryFromPoints`. IntRect는 반열린 픽셀 구간, 넓이 int64 |
 | `Interval.h` | `Interval<T>`(UE TInterval) | 닫힌 구간, 무효 상태 대신 `TryMake`. 교집합이 없으면 NotFound, NaN을 포함하면 무효로 드러남 |
 | `Float16.h` | `Float16`(UE FFloat16) | RTNE, 크기 65520 이상은 ±Inf, NaN 유지. `FromFloatClamped`는 ±65504로 포화하되 NaN은 NaN(UE SetClamped는 NaN을 최댓값으로 만들 수 있음). 변환은 `PlatformMath::FloatToHalf/HalfToFloat`(Generic 정확 구현, ARM64는 fcvtn/fcvtl, x64는 F16C가 baseline이 아니어서 Generic) |
-| `UnitConversion.h` | cm 계열 ↔ m 계열 경계 변환(길이·넓이·속도·가속도·힘·선형 충격량·토크·관성), `CentimetersPerMeter`·`SquareCentimetersPerSquareMeter` | 위 "단위 경계 변환" 표. 정확한 정수 계수로 곱하거나 나누기 한 번, 검사 없음(비유한 전파) |
+| `UnitConversion.h` | cm 계열 ↔ m 계열 경계 변환(길이·넓이·속도·가속도·힘·선형 충격량·토크·관성·각충격량·각 스프링·밀도), `CentimetersPerMeter`·`SquareCentimetersPerSquareMeter`·`KilogramsPerCubicMeterPerGramPerCubicCentimeter` | 위 "단위 경계 변환" 표. 정확한 정수 계수로 곱하거나 나누기 한 번, 검사 없음(비유한 전파) |
 | `MathBatch.h` | `math::TransformPoints/TransformVectors` | 행 벡터 `p · M`. 원소 수 불일치·부분 겹침은 Fatal, 정확한 in-place 허용, 결과는 원소별 Mat4 변환과 동일 |
 | `Color.h` | `Color`(8-bit), `LinearColor`(float, 선형 sRGB 원색) | 아래 3절 |
 | `RandomStream.h` | PCG32 결정적 난수 | 아래 4절 |
@@ -146,6 +149,13 @@ Cylinder(CY1): `{start, end, radius}`(Capsule과 같은 표현)이며 선분 × 
 UE 5.8 원본과의 차이(원본 확인 — `Math/Sphere.h`·`CapsuleShape.h`·`Box.h`·`Plane.h`·`Ray.h`·`OrientedBox.h`·`Private/Math/UnrealMath.cpp`, 5.6과 견줘 인라인 지시어·로그 매크로만 바뀌었다): `TSphere::Intersects/IsInside`와 `FCapsuleShape::IsInside`는 기본 1e-4 허용치를, `LineBoxIntersection`·`LineExtentBoxIntersection`은 `BOX_SIDE_THRESHOLD=0.1`을, `SegmentPlaneIntersection`은 ±1e-4 t 허용치를, `SegmentDistToSegment*`는 절대 1e-4 임계값을 쓴다. UE `TPlane(A,B,C)`는 일직선 점에서 영 법선 평면을 만들지만 Rocks `TryFromPoints`는 실패한다. `Ray` 기본 방향은 UE `TRay`와 같은 +Z다(3단계 전에는 +X였다). UE `FOrientedBox`에는 교차 함수가 없다.
 
 검증: 13개 도형 테스트와 33개 판정 테스트(리뷰 회귀 5개 포함)가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. Cylinder·Capsule 보강은 `IntersectionCylinderTests.cpp`의 18개 테스트(float·double)가 확인한다(정확 산술은 `TestSupport/ExactArithmetic.h`, 황금분할·SDF ray oracle은 `TestSupport/GeometryOracles.h`로 공용화해 `IntersectionTests.cpp`도 같은 것을 쓴다): 경계 포함은 표본 점이 아니라 정확 산술 oracle(모든 double을 공통 2의 거듭제곱으로 정수화해 간격 g ≥ 0, g²·|D|² ≥ r²·(D_j² + D_k²)를 큰 정수로 판정)로 고정 사례(리뷰 반례 start (0, 0, 0)·end (1000, 1e−6, 0)·r 1e4, 원점 10⁹ cm, 큰 반경, 축 비율이 비정규인 (1, 1e−310, 0)·r 1e30, 최소 비정규 반경)와 무작위 dyadic 1,500건×2를 판정하고 꽉 맞는 경계보다 상대 32ε와 몇 ulp 이상 넓지 않음도 본다. 점 포함·최근접·거리·구 겹침은 외적 기반 독립 SDF oracle과 3,000건×2, 광선·선분은 SDF 근 찾기 oracle과 2,000건×2, 평면·볼록 영역 분류는 중심 ± √ 꼴 support oracle과 3,000건×2를 대조하며, 고정 사례로 거의 평행한 normal(support 1e−5)·비단위 normal·긴 축(H 1e9, r 1)의 수직 거리·축 평행·끝면 평면 안 스침·시작점 안/경계·maxDistance가 정확히 진입 거리·모서리 동률 끝면 법선·radius 0·퇴화 거부·모든 겹침 쌍 대칭을 고정한다. 리뷰 반영 시험은 경계 근처 점 4,000건×2(좌표 double 1e9·float 1e4 cm, 축 평행·거의 평행 축, radius 0 포함)에서 위 판정 일치를, 접선 ray 3,000건×2에서 hit point의 표면 거리·normal 근사와 maxDistance = 정확한 진입 거리(Hit, 한 ulp 짧으면 Miss)를 확인하고, 리뷰 반례 두 건과 underflow 진입을 고정한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle, Cylinder 대 Box·OrientedBox·Capsule·Cylinder·Triangle 겹침·구 sweep·선분 거리(설계 결정 1).
+
+## 2.2 이동·카메라 보조 함수
+
+2026-11-25 추가([엔진 런타임](../Design/EngineRuntime/26-MovementComponents.ko.md) 26.2절 — 이동 컴포넌트·SpringArm). UE 식을 그대로 옮기고 `Core/Tests/MotionMathTests.cpp`에서 대조한다.
+
+- `Core/Math/InterpTo.h`: `math::VInterpTo`(UE `FMath::VInterpTo` — speed ≤ 0이거나 거리² < 1e-4면 target, 아니면 비율 clamp(dt·speed, 0, 1)), `math::QInterpTo`(UE `QInterpTo` — speed ≤ 0이거나 부호 무시 성분 차 ≤ 1e-4면 target, 아니면 `CurveSlerp` = UE `FQuat::Slerp`). 스칼라 `math::InterpTo`(MathUtility.h)와 달리 UE의 "도착" 판정이 있다.
+- `Core/Math/VectorUtility.h`: `ClampedToMaxSize`(UE `GetClampedToMaxSize` — max < 1e-4면 0), `VectorPlaneProject`·`PointPlaneProject`(단위 법선 전제), `ToOrientationRotator`(yaw = atan2(y, x), pitch = atan2(z, √(x² + y²)), roll 0)·`ToOrientationQuat`(UE 반각 식 — 같은 회전).
 
 ## 3. 색
 

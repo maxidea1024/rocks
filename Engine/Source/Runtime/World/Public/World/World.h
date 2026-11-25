@@ -1,8 +1,10 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
+#include <Collision/CollisionProfileTable.h>
 #include <Config/CVarDefinition.h>
 #include <Core/Containers/HashMap.h>
+#include <Core/Math/Transform.h>
 #include <Core/Text/String.h>
 #include <Core/Time/GameClock.h>
 #include <Core/Traits.h>
@@ -36,14 +38,71 @@ public:
         return Result<void>::Success();
     }
 
+    // 모든 Subsystem의 Initialize가 끝난 뒤 같은 순서로 호출된다(다른 Subsystem의 초기화 결과를
+    // 쓰는 자리 — UE PostInitialize).
+    virtual void PostInitialize(World&) noexcept {
+    }
+
     // World BeginPlay 안에서 Actor의 OnStart보다 먼저 호출된다(엔진 내부 단계 이름 BeginPlay가
     // Actor hook OnStart에 대응한다).
     virtual void OnWorldBeginPlay(World&) noexcept {
     }
 
+    // 게임 진행이 끝날 때(Actor 정리 뒤) 초기화 역순으로 호출된다(UE OnWorldEndPlay — UE는
+    // 정방향). 바깥 계층 Subsystem을 쓰는 정리는 여기서 끝낸다(이 뒤로 GetOuterSubsystem은
+    // nullptr).
+    virtual void OnWorldEndPlay(World&) noexcept {
+    }
+
+    // 모든 Deinitialize 전에 초기화 역순으로 한 번씩 호출된다(UE PreDeinitialize).
+    virtual void PreDeinitialize(World&) noexcept {
+    }
+
     // World 종료 중(모든 Actor 정리 후) 초기화 역순으로 호출된다.
     virtual void Deinitialize(World&) noexcept {
     }
+
+    // 참이면 매 프레임 LateUpdate 시작의 엔진 단계 TickableSubsystems에서 OnTick을 받는다(초기화
+    // 순서, 15.4절 — UE UTickableWorldSubsystem). 초기화 뒤 바뀌지 않아야 한다.
+    virtual bool IsTickable() const noexcept {
+        return false;
+    }
+
+    // 참이면 pause 중에도 unscaled delta로 OnTick을 받는다(UE IsTickableWhenPaused).
+    virtual bool TickWhenPaused() const noexcept {
+        return false;
+    }
+
+    virtual void OnTick(World&, const TickContext&) noexcept {
+    }
+};
+
+// World BeginPlay의 시작을 위임받는 쪽이다(Gameplay의 GameplayWorldSubsystem — 19.5절).
+// World::BeginPlay가 Subsystem OnWorldBeginPlay 뒤 StartPlay를 부르고, StartPlay는 정확히 한 번
+// World::DispatchBeginPlay를 불러야 한다(GameDirector StartPlay → GameState HandleBeginPlay →
+// DispatchBeginPlay — UE StartPlay).
+class BeginPlayDispatcher {
+public:
+    virtual Result<void> StartPlay(World& world) noexcept = 0;
+
+protected:
+    ~BeginPlayDispatcher() = default;
+};
+
+// World보다 바깥 계층(Engine·GameInstance)의 Subsystem을 키로 찾는 창이다. World는 해석하지 않는다
+// (World 모듈은 Engine·Gameplay를 모른다 — 3절). 타입 있는 도우미는 바깥 모듈의 자유 함수다
+// (GetEngineSubsystem<T> — Engine.h, GetGameInstanceSubsystem<T> — Gameplay). 16.3절 ERD10.
+// 계약:
+// - find는 찾은 Subsystem을 **그 계층 묶음의 Base
+// 포인터**(EngineSubsystem*·GameInstanceSubsystem*)를
+//   void*로 바꿔 돌려준다(도우미가 Base*로 되돌린 뒤 T*로 내린다 — 최파생·T* 포인터를 넣으면 다중
+//   상속에서 주소가 어긋난다). 여러 계층을 잇는 창은 키가 맞는 계층의 Base 포인터를 돌려준다.
+// - context(와 그 Subsystem)는 이 World의 Shutdown이 끝날 때까지 살아 있어야 한다. 엔진이 넣는 기본
+//   창은 Engine이 World를 먼저 파괴하므로 지켜진다. 엔진 밖에서 만든 World에 엔진 창을 넣으면 그
+//   World를 엔진보다 먼저 Shutdown해야 한다.
+struct OuterSubsystemLookup {
+    void* (*find)(const void* context, SubsystemKey key) noexcept = nullptr;
+    const void* context = nullptr;
 };
 
 using WorldSubsystemType = SubsystemType<WorldSubsystem>;
@@ -109,6 +168,22 @@ struct SpawnParams {
     // 소속 Level이다. null이면 영구 Level이다. 파괴 대기 중인 Level이면 Spawn이 Destroyed로
     // 실패한다.
     ObjectHandle level;
+    // hasTransform이면 FinishSpawning이 root SceneComponent의 상대 Transform으로 쓴다(root에 부모가
+    // 없으면 월드 Transform — UE SpawnTransform, 17.3절). root가 없으면 무시한다.
+    Transform transform;
+    bool hasTransform = false;
+    // 소유 Actor·원인(Actor::SetOwner·SetInstigator와 같은 검사 — 실패하면 Spawn이 실패한다).
+    ObjectHandle owner;
+    ObjectHandle instigator;
+
+    // 위치·회전만 정한 Spawn 인자다(scale 1).
+    static SpawnParams At(const Transform& at, ObjectHandle level = {}) noexcept {
+        SpawnParams params;
+        params.level = level;
+        params.transform = at;
+        params.hasTransform = true;
+        return params;
+    }
 };
 
 // World 생성 설정이다.
@@ -130,6 +205,10 @@ struct WorldDesc {
     WorkerScheduler* gcScheduler = nullptr;
     // 초기화할 WorldSubsystem 종류다. 배열은 Initialize가 끝날 때까지 살아 있어야 한다.
     Span<const WorldSubsystemType> subsystems;
+    // World 종류다(Subsystem 기본 생성 판정 — 16.4절).
+    WorldKind kind = WorldKind::Game;
+    // 바깥 계층 Subsystem 조회 창이다(없으면 조회가 언제나 nullptr).
+    OuterSubsystemLookup outerSubsystems;
     // Level마다 GC 클러스터를 만든다(기본 — Docs/Design/GarbageCollectionScale.ko.md 13.3절).
     // Level이 클러스터 루트이고 SpawnActor·AddComponent로 만든 리플렉션 Actor·Component가 가입한다.
     // 끄는 것은 측정 비교와 객체 단위 표식 순서를 보는 시험용이다.
@@ -197,7 +276,8 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // hook 순서(Actor A, Component C):
 //   생성: C.OnRegister -> A.OnAwake -> C.OnAwake -> A.OnEnable -> C.OnEnable
 //   시작: C.OnStart -> A.OnStart(BeginPlay 전 Spawn은 BeginPlay 안, 이후 Spawn은 다음 프레임 시작)
-//   Tick: 같은 단계에서 A의 Tick 뒤에 C의 Tick
+//   Tick: 같은 단계에서 (priority, 등록 순서) — 같은 priority면 먼저 등록되는 A가 C보다 먼저(자동
+//   의존은 없다. 부착된 SceneComponent는 부모 뒤, 그 밖의 순서는 AddTickPrerequisite)
 //   정리: C.OnDisable -> A.OnDisable -> C.OnDestroy -> A.OnDestroy -> C.OnUnregister
 //   비활성 객체는 활성화될 때까지 OnStart를 미룬다. OnDestroy는 OnAwake가 성공한 객체만 받는다.
 //
@@ -254,8 +334,9 @@ public:
 
     // 모든 Actor·Level을 정리하고 Subsystem·Registry를 닫는다. 여러 번 호출해도 안전하다(완료 후
     // Success). Tick·hook 안이면 Busy. 외부가 Borrow·RootRef를 보유해 회수할 수 없으면 그 오류이며
-    // TearingDown에 머문다(반환 후 다시 호출).
-    Result<void> Shutdown() noexcept;
+    // TearingDown에 머문다(반환 후 다시 호출). reason은 정리 이유다: Playing이면 EndPlay(reason)를
+    // 먼저 부르고, 남은 Actor(EndPlay 뒤 Spawn·Play하지 않은 World)도 이 이유로 정리한다.
+    Result<void> Shutdown(EndPlayReason reason = EndPlayReason::Quit) noexcept;
 
     // STW 병렬 전체 수집을 요청한다(일정 방식과 무관 — 레벨 전환·로딩 화면·메모리 압박). 요청은
     // 다음 GC 단계(Tick 끝)에서 소비된다: Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면
@@ -281,6 +362,14 @@ public:
 
     WorldState State() const noexcept {
         return state_;
+    }
+
+    // 충돌 profile 표다(Docs/Design/CollisionData.ko.md 9절 CD2): Initialize가 설정 문맥의
+    // CollisionSettings로 만든다. 문맥이 없거나 CollisionSettings가 등록되지 않았으면 빈 표다(모든
+    // 이름이 profileMissing — PrimitiveComponent가 사용자 지정 값으로 해석한다). 참조는 World 수명
+    // 동안 유효하고, Initialize가 표를 바꾸므로 그 전에 얻은 profile 포인터는 쓰지 않는다.
+    const CollisionProfileTable& CollisionProfiles() const noexcept {
+        return collisionProfiles_;
     }
 
     StringView Name() const noexcept {
@@ -325,13 +414,20 @@ public:
 
     Result<ObjectHandle> SpawnActor(TypeId type, const SpawnParams& params = {}) noexcept;
 
-    // 파괴를 요청한다. 이미 요청됐으면 성공, 이 World의 Actor가 아니면 StaleHandle이다.
+    // 파괴를 요청한다. 이미 요청됐으면 성공, 이 World의 Actor가 아니면 StaleHandle이다. 대기 중인
+    // 파괴는 요청한 순서대로 정리한다(안전 지점·EndPlay — EndPlay는 남은 Actor를 대기 뒤에
+    // 붙인다. 21.3절 전환 정리가 이 순서에 기댄다).
     Result<void> DestroyActor(ObjectHandle actor) noexcept;
 
     // 이 World에 레코드가 있는 Actor인지다(Constructed·파괴 대기 포함, 정리 완료 후 false).
     bool HasActor(ObjectHandle actor) const noexcept;
 
     Result<ActorState> GetActorState(ObjectHandle actor) const noexcept;
+
+    // Actor의 Spawn 순번이다(이 World에서 Spawn할 때마다 1씩 커지는 번호 — 먼저 Spawn한 것이 작다).
+    // Level의 Actor 배열은 순서를 정하지 않으므로(7.2절) 만든 순서가 필요한 곳(PlayerStart 선택 —
+    // Docs/Design/EngineRuntime 19.2절)은 이 번호를 쓴다. 레코드가 없으면 StaleHandle이다.
+    Result<uint64> GetSpawnOrder(ObjectHandle actor) const noexcept;
 
     // 레코드가 있는 모든 Actor(Constructed·파괴 대기 포함)의 handle을 visitor(ObjectHandle)로
     // 넘긴다. 순회 중 Spawn·Destroy 요청은 허용하며 새 Actor는 이번 순회에 포함되지 않을 수 있다.
@@ -342,17 +438,69 @@ public:
         }
     }
 
-    // dependent Actor의 주 Tick(OnTick)이 prerequisite Actor의 OnTick 뒤에 실행되게 한다(UE
-    // AActor::AddTickPrerequisiteActor 대응, 주 Tick만). 두 Actor 모두 시작해 OnTick을 등록한
-    // 상태여야 한다(등록 전이면 InvalidArgument). 순서는 다음 단계 경계부터 반영된다.
-    // - 오류: 이 World의 Actor가 아니면 StaleHandle, 자기 자신·다른 Tick 단계는 InvalidArgument,
-    //   순환이 생기면 CycleDetected다. 순환은 상태를 바꾸지 않고 Warning을 한 번 남긴다(World.Tick
-    //   카테고리, 두 Actor를 "타입#slot"으로). 이미 있는 의존은 성공이다.
+    // --- Tick 의존·설정(Docs/Design/EngineRuntime 15절) ---
+
+    // dependent hook이 prerequisite hook 뒤에 실행되게 한다(UE AddTickPrerequisiteActor·Component).
+    // Actor·Component 어느 쪽이든, hook 세 종류 어느 것이든 된다. 시작 전(Spawn 직후·AddComponent
+    // 직후)에도 선언할 수 있고, 양쪽이 Tick을 등록할 때 적용한다. 선행이 더 늦은 단계면 dependent가
+    // 그 단계로 늦춰진다(다음 프레임부터). 순서는 다음 단계 경계부터 반영된다.
+    // - 판정은 선언 시점의 TickSettings다: 그 hook을 켜지 않은 대상은 InvalidArgument(생성자에서
+    // 정한다).
+    // - 오류: 이 World의 Actor·Component가 아니면 StaleHandle, 파괴 대기면 Destroyed, 정의되지 않은
+    // 출처·같은 hook 자신·Fixed hook과 다른 hook
+    //   사이 의존은 InvalidArgument, 사용자 간선이 순환을 만들면 CycleDetected(상태 불변,
+    //   World.Tick Warning — 시작 전 선언을 포함한 선언 전체에서 검사한다). 자동
+    //   출처(Attachment·Framework)는 순환이면 걸지 않고 Warning 뒤 성공이다. 이미 있는 의존은
+    //   성공(출처만 더한다)이다.
     //
     // 사용 예:
-    //   world.AddActorTickPrerequisite(turret, vehicle);   // vehicle이 먼저 Tick
-    Result<void> AddActorTickPrerequisite(ObjectHandle dependent,
-                                          ObjectHandle prerequisite) noexcept;
+    //   world.AddTickPrerequisite({turret}, {vehicle});                    // vehicle OnTick 먼저
+    //   world.AddTickPrerequisite({arm, TickHook::Late}, {body, TickHook::Late});
+    Result<void> AddTickPrerequisite(TickPoint dependent, TickPoint prerequisite,
+                                     TickEdgeSource source = TickEdgeSource::User) noexcept;
+
+    // 그 출처의 의존을 뗀다. 모든 출처가 떼면 간선이 없어진다. 없으면 NotFound다.
+    Result<void> RemoveTickPrerequisite(TickPoint dependent, TickPoint prerequisite,
+                                        TickEdgeSource source = TickEdgeSource::User) noexcept;
+
+    // OnTick 단계를 바꾼다(PrePhysics·PostPhysics·PreRender). 시작 뒤면 다음 프레임부터다. OnTick을
+    // 받지 않는 대상·Physics·LateUpdate는 InvalidArgument, 이 World의 대상이 아니면
+    // StaleHandle이다.
+    Result<void> SetTickPhase(ObjectHandle object, TickPhase phase) noexcept;
+
+    // 같은 단계 안 순서 값(모든 hook 공통)을 바꾼다. 시작 뒤면 다음 단계 경계부터다.
+    Result<void> SetTickPriority(ObjectHandle object, int32 priority) noexcept;
+
+    // 실행 간격(초, 모든 hook 공통)을 바꾸고 누적을 0으로 되돌린다. 음수·비유한 값은
+    // InvalidArgument다.
+    Result<void> SetTickInterval(ObjectHandle object, double intervalSeconds) noexcept;
+
+    // hook이 지금 실행되는 단계(늦춤 반영)다. Tick을 등록하지 않았으면 NotFound다.
+    Result<TickPhase> GetTickEffectivePhase(TickPoint point) const noexcept;
+
+    // 엔진 단계 자리에 콜백을 둔다(자리마다 하나 — 이미 있으면 AlreadyExists, null·범위 밖은
+    // InvalidArgument). 물리·애니메이션·Gameplay 모듈이 World를 만든 뒤 등록한다.
+    Result<void> SetEngineStage(EngineStage stage, EngineStageFunction function,
+                                void* user) noexcept;
+
+    // 엔진 단계 자리를 비운다(비어 있어도 성공).
+    void ClearEngineStage(EngineStage stage) noexcept;
+
+    // --- 진단(Docs/Design/EngineRuntime 22.1절) ---
+
+    // Tick 그래프를 사람이 읽는 줄로 out 끝에 붙인다: 단계마다 실행 순서대로 항목(타입#slot·hook·
+    // priority·interval·켜짐·pause 중 실행·아직 순서에 없음·늦춰진 경우 원래 단계)과 선행 목록, 그
+    // 단계의 엔진 단계 자리 등록 여부. 순서를 다시 만들지 않는다(다음 경계에 바뀌는 단계는
+    // 표시한다). 오류: 할당 실패(그때까지 붙인 줄은 남는다).
+    //
+    // 사용 예:
+    //   String text(allocator);
+    //   if (world.DumpTickGraph(text)) { Log::Info(LogWorldTick, "{Graph}", text.View()); }
+    Result<void> DumpTickGraph(String& out) noexcept;
+
+    // WorldSubsystem 초기화 순서와 생략 이유를 out 끝에 붙인다(계층 "World <이름>"). 오류: 할당
+    // 실패.
+    Result<void> DumpSubsystems(String& out) const noexcept;
 
     // actor가 속한 Level이다. 이 World의 Actor가 아니면 StaleHandle이다.
     Result<ObjectHandle> GetActorLevel(ObjectHandle actor) const noexcept;
@@ -373,6 +521,23 @@ public:
     // 정리되면 Level을 회수한다(Tick 밖에서 비어 있으면 즉시). 영구 Level은 InvalidArgument, 이미
     // 요청됐으면 성공, 모르는 handle은 StaleHandle이다.
     Result<void> DestroyLevel(ObjectHandle level) noexcept;
+
+    // 로드한 Level 그래프를 장부에 넣고 수명 단계로 진행한다(Docs/Design/EngineRuntime 29절 — 레벨
+    // 편입). loaded는 호출자가 이 World registry(Objects()·Access())에 LoadObjectGraph로 읽은 Level
+    // 루트다. 검증(장부 밖 객체, 유효한 relativeTransform, 부착 순환 없음, Component 중복 없음)을
+    // 통과하면 null·root 밖 원소를 정리하고, Actor·Component 레코드를 만들고, attachParent에서 부착
+    // 계층을 다시 만든 뒤 Actor마다 FinishSpawning한다. 실패한 Actor는 Spawn 실패처럼 정리되고
+    // failedActors에 센다. 성공하면 loaded의 소유가 World로 넘어온다.
+    // 오류: Created World(InvalidArgument)·종료 중(ShuttingDown)·hook 안(Busy), 루트가 Level이 아님
+    // (TypeMismatch), 이미 장부에 있는 Level(AlreadyExists), 검증 실패(InvalidArgument), 타입 규칙
+    // 위반(그 오류)·할당 실패(OutOfMemory). 오류면 만든 레코드를 되돌려 아무것도 바꾸지
+    // 않는다(그래프 정리는 성공이 확정된 뒤에 한다).
+    //
+    // 사용 예:
+    //   auto root = LoadObjectGraph(allocator, world.Objects(), types, world.Access(), bytes);
+    //   auto adopted = world.AdoptLevel(Move(root.Value()));
+    //   // adopted.Value().level은 CreateLevel로 만든 Level처럼 쓴다
+    Result<LevelAdoption> AdoptLevel(RootRef<Object>&& loaded) noexcept;
 
     // 이 World에 레코드가 있는 Level인지다(파괴 대기 포함).
     bool HasLevel(ObjectHandle level) const noexcept;
@@ -518,6 +683,37 @@ public:
 
     WorldStats Stats() const noexcept;
 
+    WorldKind Kind() const noexcept {
+        return kind_;
+    }
+
+    // 게임 진행을 끝낸다(17.6절 ERD17): 모든 Actor를 reason으로 정리(즉시) → WorldSubsystem
+    // OnWorldEndPlay(역순) → 바깥 조회 창 닫기 → Initialized로 돌아간다. Playing이 아니면 아무것도
+    // 하지 않고 성공이다(두 번째 호출 포함). Tick·hook 안이면 Busy다. Shutdown은 Playing이면
+    // EndPlay(Quit)를 먼저 부른다.
+    Result<void> EndPlay(EndPlayReason reason) noexcept;
+
+    // BeginPlay의 시작을 위임한다(BeginPlay 전에만 — Created·Initialized가 아니면 InvalidArgument).
+    // null이면 위임을 없앤다(BeginPlay가 바로 DispatchBeginPlay — Director 없는 World, 21.4절).
+    Result<void> SetBeginPlayDispatcher(BeginPlayDispatcher* dispatcher) noexcept;
+
+    // 상태를 Playing으로 바꾸고 BeginPlay 전에 Spawn한 Actor를 시작한다. dispatcher의 StartPlay
+    // 안에서 한 번만 부른다(밖·두 번째는 WrongContext). StartPlay가 부르지 않으면 BeginPlay가
+    // NotReady다.
+    Result<void> DispatchBeginPlay() noexcept;
+
+    // 바깥 계층 Subsystem을 키로 찾는다. 조회 창은 게임 진행이 끝날 때(Shutdown 시작) 닫히므로
+    // PreDeinitialize·Deinitialize 안에서는 nullptr이다(바깥 Subsystem이 먼저 정리될 수 있다
+    // — 16.3절).
+    void* FindOuterSubsystem(SubsystemKey key) const noexcept {
+        return outerOpen_ && outer_.find != nullptr ? outer_.find(outer_.context, key) : nullptr;
+    }
+
+    // 이 World Subsystem 묶음이 마지막 초기화에서 생략한 것이다(진단용).
+    Span<const SkippedSubsystem> SkippedSubsystems() const noexcept {
+        return subsystems_.Skipped();
+    }
+
     template <class T>
     T* GetSubsystem() const noexcept {
         return subsystems_.template Get<T>();
@@ -529,6 +725,7 @@ private:
 
     friend class Actor;
     friend class Component;
+    friend class SceneComponent;
 
     // World가 관리하는 Actor 수명 기록이다. Actor 저장소는 Level이, Component는 Actor가 소유한다.
     struct ActorRecord {
@@ -542,6 +739,19 @@ private:
         // 둔다(Docs/Design/GarbageCollectionScale.ko.md 13.3절 — 고아 소속 방지).
         Array<ObjectHandle> components;
         ActorState state = ActorState::Constructed;
+        // 정리 이유다(파괴 대기로 바꿀 때 정한다 — 17.2절).
+        EndPlayReason endReason = EndPlayReason::Destroyed;
+        // OnFrameworkPreAwake가 성공했다(OnFrameworkEndPlay를 받는다 — OnAwake가 실패해도).
+        bool frameworkAwake = false;
+        // Spawn 인자의 Transform이다(FinishSpawning이 root에 쓴다).
+        bool hasSpawnTransform = false;
+        Transform spawnTransform;
+        // Spawn 순번이다(GetSpawnOrder — spawnedTotal_로 매긴다).
+        uint64 spawnOrder = 0;
+        // 마지막 SetLifeSpan의 번호다(0이면 없음 — 힙의 오래된 항목은 번호가 달라 무시한다).
+        uint64 lifeSpanSequence = 0;
+        // 시작 전에 건 LifeSpan(초)이다. 시작할 때 건다(0이면 없음).
+        double pendingLifeSpan = 0.0;
         // Level 클러스터의 소속이다(Component도 같은 클러스터에 넣는다).
         bool clustered = false;
         bool awake = false;
@@ -604,7 +814,7 @@ private:
     void FinishLevelDestroys() noexcept;
     void ReleaseLevel(usize index) noexcept;
     // 모든 Actor를 파괴 대기로 만들고 정리한다(hook 포함). 종료·초기화 실패 경로에서 쓴다.
-    void DestroyAllActors() noexcept;
+    void DestroyAllActors(EndPlayReason reason) noexcept;
 
     // actor의 index번째 Component와 지금의 Component 수다. 순회는 count로 끝을 판정하고 null
     // component(로드된 목록의 null 원소)는 건너뛴다 — null을 끝 표지로 쓰지 않는다. hook이 목록을
@@ -634,6 +844,8 @@ private:
     Result<void> SetComponentEnabled(ObjectHandle component, bool enabled) noexcept;
     Result<void> SetActorTickEnabled(ObjectHandle actor, bool enabled) noexcept;
     Result<void> SetComponentTickEnabled(ObjectHandle component, bool enabled) noexcept;
+    // Initialize: 설정 문맥에서 충돌 profile 표를 만든다(없으면 빈 표). 오류: 할당 실패.
+    Result<void> BuildWorldCollisionProfiles() noexcept;
     void RegisterTicks(ObjectHandle object, uint8 kind, const TickSettings& settings, bool enabled,
                        TickHandle (&handles)[detail::TickHookCount]) noexcept;
     void UnregisterTicks(TickHandle (&handles)[detail::TickHookCount]) noexcept;
@@ -672,6 +884,85 @@ private:
     bool QueueBypassedComponent(ObjectHandle component) noexcept;
     // Component를 색인에서 빼고 사본 Tick 등록을 해제한다(World 정리가 회수 요청 직전에 부른다).
     void ForgetComponent(ObjectHandle component) noexcept;
+    // OnRegister → 시스템 상태 생성(23.2절). 실패하면 만든 것을 되돌리고 OnUnregister(OnRegister가
+    // 성공했으면)까지 한 뒤 그 오류다 — 호출자가 Component를 파괴한다.
+    Result<void> RegisterComponentNow(ObjectHandle component) noexcept;
+    // 있는 시스템 상태를 역순으로 지운다(해제 직전).
+    void DestroySystemStates(Component& component) noexcept;
+    // 다시 만들 표시가 있는 Component의 시스템 상태를 다시 만든다(PreRender 단계 끝).
+    void FlushSystemStateUpdates() noexcept;
+    // AddComponent의 타입 규칙·EditorOnly 검사다(등록 전).
+    Result<void> CheckComponentRules(ObjectHandle actor, ObjectHandle component) noexcept;
+
+    // --- Tick 의존 선언(WorldTickDependencies.cpp) ---
+
+    struct TickDependency {
+        TickPoint point;
+        uint8 sources = 0;
+    };
+
+    // (객체, hook) 하나의 선언이다. 등록 여부와 무관하게 의존 선언 전체를 담아 순환 검사와 늦은
+    // 등록의 적용에 쓴다. 해제된 객체를 가리키는 항목은 다음 선언·적용 때 지운다.
+    struct TickDeclarations {
+        explicit TickDeclarations(Allocator& allocator) noexcept
+            : prerequisites(allocator), dependents(allocator) {
+        }
+
+        TickPoint self;
+        Array<TickDependency> prerequisites;
+        Array<TickPoint> dependents;
+        uint32 mark = 0;
+    };
+
+    struct EngineStageSlot {
+        EngineStageFunction function = nullptr;
+        void* user = nullptr;
+    };
+
+    static uint64 TickPointKey(const TickPoint& point) noexcept;
+    bool IsTickPointAlive(const TickPoint& point) const noexcept;
+    TickHandle RegisteredTick(const TickPoint& point) const noexcept;
+    // 이 World의 Actor·Component의 Tick 설정을 읽는다(아니면 StaleHandle).
+    Result<TickSettings> ReadTickSettings(ObjectHandle object) noexcept;
+    Result<void> WriteTickSettings(ObjectHandle object, const TickSettings& settings) noexcept;
+    void PruneTickDeclarations(TickDeclarations& node) noexcept;
+    Result<bool> TickDeclarationReaches(const TickPoint& from, const TickPoint& to) noexcept;
+    void WarnTickCycle(const TickPoint& before, const TickPoint& after, bool automatic) noexcept;
+    // 막 등록한 hook에 선언된 의존(양방향)을 스케줄러에 건다. handles는 그 객체의 등록 중인
+    // 배열이다(같은 객체의 다른 hook을 여기서 찾는다).
+    void ApplyTickDeclarations(ObjectHandle object, uint8 hook,
+                               const TickHandle (&handles)[detail::TickHookCount]) noexcept;
+    // 파괴 대기(PendingDestroy)인 Actor·Component다.
+    bool IsTickTargetDestroying(ObjectHandle object) noexcept;
+    // 파괴되는 객체의 선언을 지운다(다른 선언의 참조는 다음 정리 때 지운다).
+    void ForgetTickDeclarations(ObjectHandle object) noexcept;
+    // SceneComponent 부모가 바뀌었다(자식 hook → 부모 같은 hook 간선, UE AttachToComponent).
+    void UpdateAttachmentTicks(ObjectHandle child, ObjectHandle oldParent,
+                               ObjectHandle newParent) noexcept;
+    Result<void> RunEngineStage(EngineStage stage, TickPhase phase,
+                                const TickPhaseFrame& frame) noexcept;
+    static void CloseOuterSubsystems(World& world) noexcept;
+    // Spawn 인자 Transform을 root에 쓴다(FinishSpawning — UE MultiplyWithRoot).
+    Result<void> ApplySpawnTransform(ObjectHandle actor) noexcept;
+    // Actor::SetOwner·SetInstigator·SetLifeSpan 구현이다.
+    Result<void> SetActorOwner(ObjectHandle actor, ObjectHandle owner) noexcept;
+    Result<void> SetActorInstigator(ObjectHandle actor, ObjectHandle instigator) noexcept;
+    Result<void> SetActorLifeSpan(ObjectHandle actor, double seconds) noexcept;
+    // 만료된 LifeSpan Actor를 파괴한다(엔진 단계 Timers의 World 부분).
+    void ExpireLifeSpans() noexcept;
+    // 켜진 Component가 모두 시작 준비됐는지다.
+    bool ComponentsReadyToStart(ObjectHandle actor) noexcept;
+
+    struct LifeSpanEntry {
+        double expiry = 0.0;
+        uint64 sequence = 0;
+        ObjectHandle actor;
+    };
+
+    // 정리 이유를 주는 DestroyActor다(먼저 정한 이유를 유지).
+    Result<void> DestroyActorFor(ObjectHandle actor, EndPlayReason reason) noexcept;
+    // tickable WorldSubsystem의 OnTick을 부른다(엔진 단계 TickableSubsystems의 World 부분).
+    void RunTickableSubsystems(const TickPhaseFrame& frame) noexcept;
     // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor·Component·Level을 찾아 World
     // 파괴로 돌린다(Actor는 DestroyActor, Component는 파괴 큐, Level은 DestroyLevel — 영구 Level은
     // Fatal). 하나라도 있으면 참.
@@ -691,6 +982,19 @@ private:
     GameClock clock_;
     TickScheduler ticks_;
     SubsystemCollection<WorldSubsystem, World> subsystems_;
+    WorldKind kind_ = WorldKind::Game;
+    OuterSubsystemLookup outer_;
+    bool outerOpen_ = false;
+    BeginPlayDispatcher* beginPlayDispatcher_ = nullptr;
+    bool dispatchingBeginPlay_ = false;
+    bool beginPlayDispatched_ = false;
+    // EndPlay로 게임 진행을 끝냈다(다시 BeginPlay하지 않는다).
+    bool endedPlay_ = false;
+    // LifeSpan 만료 최소 힙((만료 게임 시각, 설정 번호) 순 — 같은 시각은 먼저 설정한 것부터).
+    Array<LifeSpanEntry> lifeSpans_{allocator_};
+    uint64 lifeSpanCounter_ = 0;
+    // IsTickable()이 참인 Subsystem이다(초기화 순서, Deinitialize 전에 비운다).
+    Array<WorldSubsystem*> tickables_{allocator_};
     Span<const WorldSubsystemType> subsystemTypes_;
     TimeStepPolicy timeStep_;
     SlotArray<ActorRecord> actors_;
@@ -712,6 +1016,7 @@ private:
     // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
     config::ConfigContext* settings_ = nullptr;
     cvar::CVarScopeId cvarScope_{};
+    CollisionProfileTable collisionProfiles_;
     StepPlan lastStep_;
     WorldState state_ = WorldState::Created;
     uint32 hookDepth_ = 0;
@@ -736,6 +1041,15 @@ private:
     uint64 tickNanoseconds_ = 0;
     uint32 skippedTicks_ = 0;
     uint32 repairedBypasses_ = 0;
+    // (객체 slot × 4 + hook) → 선언이다. 순환 검사 방문 번호와 탐색 스택은 재사용한다.
+    HashMap<uint64, TickDeclarations> tickDeclarations_{allocator_};
+    uint32 tickDeclarationMark_ = 0;
+    Array<TickPoint> tickDeclarationStack_{allocator_};
+    EngineStageSlot engineStages_[EngineStageCount];
+    uint32 engineStageFailures_ = 0;
+    // 시스템 상태를 다시 만들 Component다(MarkSystemStateDirty — 23.2절).
+    Array<ObjectHandle> systemStateUpdates_{allocator_};
+    uint64 engineStageNanoseconds_[EngineStageCount] = {};
 };
 
 } // namespace rocks

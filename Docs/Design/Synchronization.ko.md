@@ -61,7 +61,7 @@ UE 이름은 3절 근거 문장과 6절 대응표에만 쓴다.
   - GC 규모 작업 GC-S1·GC-S4는 `Atomic` 표식과 블록 work-stealing을 요구한다(`Docs/Design/GarbageCollectionScale.ko.md` 152–195행).
   - CVar·Config는 snapshot 포인터 게시와 다중 생산자 쓰기 큐를 쓴다(`CVarSystem.ko.md` 294·353–354행).
   - 앱 정보 D4는 프레임마다 게시하는 refcount 묶음을 worker에 넘긴다(`AppInfoCommandLine.ko.md` 1307행).
-  - 렌더 기반은 완료 통지 큐와 lane 간 전달을 쓴다(`RenderBase.ko.md` 47·52·160행).
+  - 렌더 기반은 완료 통지 큐와 lane 간 전달을 쓴다(`Docs/Design/RenderBase` 2·5.2절).
   - 에셋 lease 해제 큐는 "미리 할당한 큐 항목"을 요구한다(`AssetSystem` 337행). 이것은 호출자 소유 노드의 MPSC 큐다.
   - 텍스처 스트리밍은 IO 완료 worker가 단계를 넘긴다(`TextureStreaming.ko.md` 274–275행).
 - 모듈이 각자 만든 spin·free list·세대 대기를 공용 장치로 바꿀 근거를 둔다(4.5절).
@@ -617,7 +617,7 @@ bool IsDone(const OnceFlag& flag) noexcept;
 - 실행 중인 스레드가 같은 flag로 다시 부르면 교착이다. Debug는 실행하는 동안 그 flag 주소를 보유 스택(13.2절)에 종류 `Once`로 올려 두고, 같은 주소를 다시 만나면 Fatal로 잡는다. 1 byte flag 안에 스레드 ID를 둘 자리는 쓰지 않는다.
 - 대기 표시(10.3절): 대기자는 bit 7을 bucket 밖에서 세우고 `CanWait`가 "실행 중이고 bit 7 있음"을 다시 확인한다. 실행한 스레드는 bit 7을 보존한 채 결과 상태를 release CAS로 쓴 뒤 bit 7이 있었으면 콜백 있는 `WakeAll`을 부르고, 콜백에서 bit 7을 지운다. `CallOnceUntilSuccess`의 실패는 상태를 0으로 되돌린 뒤 같은 방식으로 깨운다.
 - 실패를 기억하는 이유: 4.5절 9번(`AsyncCrypto`)처럼 "열기 실패"를 모든 대기자가 같은 결과로 봐야 하는 곳이 있다. 재시도가 필요한 곳은 `CallOnceUntilSuccess`를 고른다(D13).
-- "경쟁에서 진 쪽이 버리는" 지연 생성(렌더 셰이더, `RenderBase.ko.md` 694행 SX10·1101행)은 Once가 아니라 `Atomic<T*>::CompareExchangeStrong`이다. 생성이 비싸거나 부작용이 있으면 Once를 쓴다.
+- "경쟁에서 진 쪽이 버리는" 지연 생성(렌더 셰이더, `Docs/Design/RenderBase` 9.2절·9.9절 SX10)은 Once가 아니라 `Atomic<T*>::CompareExchangeStrong`이다. 생성이 비싸거나 부작용이 있으면 Once를 쓴다.
 
 ### 9.5 대기 시간과 결과
 
@@ -1073,7 +1073,7 @@ UE 쪽:
 - 잠금 순서 검사기·교착 검출기는 `Public/Async`·`Private/Async`·`Public/HAL`·`Private/HAL`에서 문자열 검색으로 찾지 못했다. 다른 모듈(예: 진단 도구)에 있을 수 있다.
 - UE race detector(`Private/Sanitizer/RaceDetectorWindows.cpp`)가 어떤 컴파일러 계측을 요구하는지 읽지 않았다.
 - 3.11절 사용 수는 문자열 하한이다. namespace 안 무접두 사용은 빠졌다.
-- 렌더 스레드 "지연 기록 명령 목록"(`RenderCore/Public/RenderingThread.h` 725–740행)의 lock-free 구현 방식은 다시 읽지 않았다(`RenderBase.ko.md` 270행 인용만).
+- 렌더 스레드 "지연 기록 명령 목록"(`RenderCore/Public/RenderingThread.h` 725–740행)의 lock-free 구현 방식은 다시 읽지 않았다(`Docs/Design/RenderBase` 5.1절 인용만).
 
 Rocks·도구 쪽:
 - Android NDK의 ThreadSanitizer 지원 범위를 확인하지 못했다(확신 낮음, 공식 지원이 아닌 것으로 안다).

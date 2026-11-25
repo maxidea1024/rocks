@@ -5,7 +5,7 @@
 #include <NodeGraph/GraphSemantic.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// schema·노드 종류 등록표, 핀 목록, schema 기본 정규화다(Docs/Design/NodeGraph.ko.md 6.2·7·10절).
+// schema·노드 종류 등록표, 핀 목록, schema 기본 정규화다(Docs/Design/NodeGraph 6.2·7·10절).
 namespace rocks::nodegraph {
 
 namespace {
@@ -102,7 +102,7 @@ const PinDescriptor* PinList::Find(Name key) const noexcept {
 
 NodeTypeRegistry::NodeTypeRegistry(Allocator& allocator, NamePool& names) noexcept
     : allocator_(allocator), names_(names), schemas_(allocator), nodeTypes_(allocator),
-      typeLookup_(allocator) {
+      typeLookup_(allocator), listeners_(allocator) {
 }
 
 NodeTypeRegistry::~NodeTypeRegistry() noexcept = default;
@@ -150,7 +150,112 @@ Result<void> NodeTypeRegistry::Initialize() noexcept {
         return Result<void>::Failure(added.Error());
     }
 
+    if (auto boundary = RegisterBoundaryTypes(); !boundary) {
+        nodeTypes_.Clear();
+        RebuildTypeLookup();
+        rerouteType_ = Name();
+        return boundary;
+    }
+
     initialized_ = true;
+    return Result<void>::Success();
+}
+
+Result<void> NodeTypeRegistry::RegisterBoundaryTypes() noexcept {
+    const StringView names[] = {GraphInputNodeTypeName, GraphOutputNodeTypeName,
+                                CollapsedNodeTypeName};
+    Name* const targets[] = {&graphInputType_, &graphOutputType_, &collapsedType_};
+    for (usize index = 0; index < sizeof(names) / sizeof(names[0]); ++index) {
+        auto name = names_.TryIntern(names[index]);
+        if (!name) {
+            return Result<void>::Failure(name.Error());
+        }
+
+        NodeTypeDescriptor descriptor;
+        descriptor.type = name.Value();
+        descriptor.schemaVersion = BoundarySchemaVersion;
+        // 경계 노드는 지우기·복제·비활성이 안 되고, Collapsed는 지울 수만 있다(10.1절).
+        descriptor.capabilities = targets[index] == &collapsedType_ ? NodeCapabilities::CanDelete
+                                                                    : NodeCapabilities::None;
+        descriptor.menu.displayName = names[index];
+        descriptor.menu.category = "Organization";
+        if (auto added = AddNodeType(Name(), descriptor, ModuleLease()); !added) {
+            return Result<void>::Failure(added.Error());
+        }
+
+        *targets[index] = name.Value();
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> NodeTypeRegistry::CollectBoundaryPins(const GraphDocument& document,
+                                                   const Graph& graph, const GraphNode& node,
+                                                   PinList& out) const noexcept {
+    // 경계 핀 타입 이름을 문서 도메인 schema 표 색인으로 바꾼다(없으면 UnresolvedPinType).
+    const GraphSchema* schema = FindSchema(document.domain);
+    const auto typeIndex = [this, schema](Name type) noexcept -> PinTypeId {
+        if (schema == nullptr) {
+            return UnresolvedPinType;
+        }
+
+        const Span<const PinTypeInfo> types = schema->PinTypes().types;
+        for (usize index = 0; index < types.Size(); ++index) {
+            auto found = names_.TryFind(types[index].name);
+            if (found && found.Value() == type) {
+                return static_cast<PinTypeId>(index);
+            }
+        }
+
+        return UnresolvedPinType;
+    };
+
+    const auto add = [&out, &typeIndex](const GraphBoundaryPin& boundary,
+                                        PinDirection direction) noexcept {
+        PinDescriptor pin;
+        pin.key = boundary.key;
+        pin.direction = direction;
+        pin.kind = boundary.kind;
+        pin.type = typeIndex(boundary.type);
+        pin.maxEdges = direction == PinDirection::Input ? boundary.maxEdges : UnlimitedEdges;
+        return out.Add(pin);
+    };
+
+    // Graph.Input은 경계 입력마다 출력 핀, Graph.Output은 경계 출력마다 입력 핀이다.
+    if (node.type == graphInputType_ || node.type == graphOutputType_) {
+        const bool input = node.type == graphInputType_;
+        for (const GraphBoundaryPin& boundary : input ? graph.inputs : graph.outputs) {
+            if (auto added = add(boundary, input ? PinDirection::Output : PinDirection::Input);
+                !added) {
+                return added;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    // Graph.Collapsed는 자기를 ownerNode로 갖는 하위 그래프의 인터페이스다. 아직 없으면(목록 중간
+    // 상태) 핀이 없다 — 목록 끝 검사(GI16)가 잡는다.
+    for (const Graph& child : document.graphs) {
+        if (child.role != GraphRole::Collapsed || !(child.ownerNode == node.id)) {
+            continue;
+        }
+
+        for (const GraphBoundaryPin& boundary : child.inputs) {
+            if (auto added = add(boundary, PinDirection::Input); !added) {
+                return added;
+            }
+        }
+
+        for (const GraphBoundaryPin& boundary : child.outputs) {
+            if (auto added = add(boundary, PinDirection::Output); !added) {
+                return added;
+            }
+        }
+
+        break;
+    }
+
     return Result<void>::Success();
 }
 
@@ -207,7 +312,8 @@ NodeTypeRegistry::ValidateDescriptor(const GraphSchema* schema,
                                      const NodeTypeDescriptor& descriptor) const noexcept {
     if (!descriptor.type.IsValid() || descriptor.type.IsNone() || descriptor.schemaVersion == 0 ||
         descriptor.staticPins.Size() > MaxPinsPerNode ||
-        (static_cast<uint32>(descriptor.capabilities) & ~NodeCapabilityMask) != 0) {
+        (static_cast<uint32>(descriptor.capabilities) & ~NodeCapabilityMask) != 0 ||
+        (descriptor.schemaVersion > 1 && descriptor.migrate == nullptr)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -371,21 +477,84 @@ NodeTypeRegistry::RegisterNodeType(Name domain, const NodeTypeDescriptor& descri
         return Result<NodeTypeRegistrationId>::Failure(ErrorCode::AlreadyExists);
     }
 
-    return AddNodeType(domain, descriptor, Move(lease));
+    if (notifying_) {
+        return Result<NodeTypeRegistrationId>::Failure(ErrorCode::Busy);
+    }
+
+    auto added = AddNodeType(domain, descriptor, Move(lease));
+    if (added) {
+        NotifyListeners(NodeTypeKey{domain, descriptor.type});
+    }
+
+    return added;
 }
 
 Result<void> NodeTypeRegistry::UnregisterNodeType(NodeTypeRegistrationId id) noexcept {
+    if (notifying_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     for (usize index = 0; index < nodeTypes_.Size(); ++index) {
         // 공통 종류(도메인 None)는 해제할 수 없다.
         if (id.value != 0 && nodeTypes_[index].id.value == id.value &&
             !nodeTypes_[index].registered.domain.IsNone()) {
-            auto removed = nodeTypes_.TryRemoveAt(index);
+            // 조회에서 빼기 → 통지 → lease 놓기(10절). 항목을 꺼내 두어 통지가 끝날 때까지 서술
+            // 데이터와 lease가 살아 있게 한다.
+            NodeTypeEntry removed(Move(nodeTypes_[index]));
+            if (auto erased = nodeTypes_.TryRemoveAt(index); !erased) {
+                nodeTypes_[index] = Move(removed);
+                return erased;
+            }
+
             RebuildTypeLookup();
-            return removed;
+            NotifyListeners(
+                NodeTypeKey{removed.registered.domain, removed.registered.descriptor.type});
+            return Result<void>::Success();
         }
     }
 
     return Result<void>::Failure(ErrorCode::NotFound);
+}
+
+Result<void> NodeTypeRegistry::AddListener(NodeTypeRegistryListener& listener) noexcept {
+    for (NodeTypeRegistryListener* existing : listeners_) {
+        if (existing == &listener) {
+            return Result<void>::Failure(ErrorCode::AlreadyExists);
+        }
+    }
+
+    return listeners_.TryPushBack(&listener);
+}
+
+void NodeTypeRegistry::RemoveListener(NodeTypeRegistryListener& listener) noexcept {
+    for (usize index = 0; index < listeners_.Size(); ++index) {
+        if (listeners_[index] == &listener) {
+            // 콜백 중이면 자리만 비운다(반복 중 배열이 줄지 않게).
+            if (notifying_) {
+                listeners_[index] = nullptr;
+            } else {
+                static_cast<void>(listeners_.TryRemoveAt(index));
+            }
+
+            return;
+        }
+    }
+}
+
+void NodeTypeRegistry::NotifyListeners(NodeTypeKey key) noexcept {
+    notifying_ = true;
+    for (usize index = 0; index < listeners_.Size(); ++index) {
+        if (listeners_[index] != nullptr) {
+            listeners_[index]->OnNodeTypesChanged(Span<const NodeTypeKey>(&key, 1));
+        }
+    }
+
+    notifying_ = false;
+    for (usize index = listeners_.Size(); index > 0; --index) {
+        if (listeners_[index - 1] == nullptr) {
+            static_cast<void>(listeners_.TryRemoveAt(index - 1));
+        }
+    }
 }
 
 const GraphSchema* NodeTypeRegistry::FindSchema(Name domain) const noexcept {
@@ -413,6 +582,20 @@ Result<void> NodeTypeRegistry::CollectPins(const GraphDocument& document, const 
     const RegisteredNodeType* type = FindNodeType(document.domain, node.type);
     if (type == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    // 서술과 버전이 다른 노드(migration 전)는 핀 목록을 모른다(10.1절).
+    if (node.typeSchemaVersion != type->descriptor.schemaVersion) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    if (IsBoundary(node.type) || IsCollapsed(node.type)) {
+        if (auto collected = CollectBoundaryPins(document, graph, node, out); !collected) {
+            out.Clear();
+            return collected;
+        }
+
+        return Result<void>::Success();
     }
 
     for (const PinDescriptor& pin : type->descriptor.staticPins) {

@@ -1,7 +1,7 @@
 #include <NodeGraph/GraphDiagnostic.h>
 #include <NodeGraph/GraphValidation.h>
 
-// 그래프 진단(Docs/Design/NodeGraph.ko.md GD19)과 불변식 위반의 진단 변환이다.
+// 그래프 진단(Docs/Design/NodeGraph GD19)과 불변식 위반의 진단 변환이다.
 namespace rocks::nodegraph {
 
 namespace {
@@ -37,6 +37,10 @@ StringView DiagnosticRuleMessage(GraphInvariant rule) noexcept {
         return "GI13: node data does not match its type";
     case GraphInvariant::InputDefaultPin:
         return "GI14: input default is not on an editable input pin";
+    case GraphInvariant::BoundaryInterface:
+        return "GI15: invalid subgraph boundary interface or boundary node";
+    case GraphInvariant::CollapsedOwner:
+        return "GI16: subgraph and collapsed node do not match one to one";
     }
 
     return "unknown graph invariant";

@@ -2,7 +2,7 @@
 
 #include <Core/Text/StringView.h>
 
-// 문자열 리터럴 원문의 escape를 푸는 읽개다(Docs/Design/SparksLanguage.ko.md 3.6절). switch의
+// 문자열 리터럴 원문의 escape를 푸는 읽개다(Docs/Design/SparksLanguage 3.6절). switch의
 // 문자열 비교(CheckStatements.cpp)와 bytecode 문자열 표(LC4b)가 쓴다.
 
 namespace rocks::sparks::detail {

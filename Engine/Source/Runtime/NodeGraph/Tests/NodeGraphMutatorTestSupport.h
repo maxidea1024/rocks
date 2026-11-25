@@ -2,10 +2,11 @@
 
 #include "NodeGraphTestSupport.h"
 
+#include <Base/InitializerList.h>
 #include <NodeGraph/GraphClone.h>
 #include <NodeGraph/GraphMutator.h>
 
-// GraphMutator 시험 공용 도우미다(Docs/Design/NodeGraph.ko.md 13절 GT1–GT4·GT6): 문서 전체(의미 +
+// GraphMutator 시험 공용 도우미다(Docs/Design/NodeGraph 13절 GT1–GT4·GT6): 문서 전체(의미 +
 // 배치) 바이트로 같음 판정, 통지 기록기, 표본 문서 위 mutator 환경.
 namespace rocks::nodegraph_test {
 
@@ -40,8 +41,17 @@ inline Array<uint8> DocumentBytes(TestEnv& env, const GraphDocument& document,
               writer.WriteU32(static_cast<uint32>(document.graphs.Size()));
     for (const Graph& graph : document.graphs) {
         ok = ok && writer.WriteGuid(graph.id) && writer.WriteU8(static_cast<uint8>(graph.role)) &&
-             writer.WriteU32(graph.domainRole) &&
-             writer.WriteU32(static_cast<uint32>(graph.nodes.Size()));
+             writer.WriteU32(graph.domainRole) && writer.WriteGuid(graph.ownerNode);
+        for (const Array<GraphBoundaryPin>* list : {&graph.inputs, &graph.outputs}) {
+            ok = ok && writer.WriteU32(static_cast<uint32>(list->Size()));
+            for (const GraphBoundaryPin& pin : *list) {
+                ok = ok && WriteNameToken(writer, pin.key) &&
+                     writer.WriteU8(static_cast<uint8>(pin.kind)) &&
+                     WriteNameToken(writer, pin.type) && writer.WriteU32(pin.maxEdges);
+            }
+        }
+
+        ok = ok && writer.WriteU32(static_cast<uint32>(graph.nodes.Size()));
         for (const GraphNode& node : graph.nodes) {
             ok = ok && writer.WriteGuid(node.id) && WriteNameToken(writer, node.type) &&
                  writer.WriteU32(node.typeSchemaVersion) &&
@@ -197,6 +207,39 @@ struct MutatorEnv {
     GraphMutator mutator;
     ChangeRecorder recorder;
     bool ready = false;
+};
+
+// GT6 실패 주입의 시도 상한(이 안에 성공해야 한다).
+inline constexpr uint64 FailureAttemptLimit = 4096;
+
+// attempt번째부터 모든 할당이 실패하는 allocator다(0이면 실패하지 않는다).
+class FailFromAllocator final : public Allocator {
+public:
+    explicit FailFromAllocator(Allocator& inner) noexcept : inner_(inner) {
+    }
+
+    void FailFrom(uint64 attempt) noexcept {
+        attempts_ = 0;
+        failFrom_ = attempt;
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        ++attempts_;
+        if (failFrom_ != 0 && attempts_ >= failFrom_) {
+            return Result<void*>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return inner_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return inner_.Deallocate(address);
+    }
+
+private:
+    Allocator& inner_;
+    uint64 attempts_ = 0;
+    uint64 failFrom_ = 0;
 };
 
 // 노드 배치 하나를 만든다.

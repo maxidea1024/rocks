@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Base/TypeTraits.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/StructFixture.generated.h>
@@ -257,7 +258,9 @@ TEST(ValueCopy_GeneratedStructCopiesNativeMembers) {
     StructMiddle source(allocator);
     source.leaf = MakeLeaf(allocator, 8, "leaf");
     source.offset = -3;
+#if ROCKS_WITH_EDITOR_DATA
     source.note = 2;
+#endif
     source.cache = 99;
 
     // 등록 함수표의 copy(타입 무관)로 복사한다 — NATIVE 멤버 cache도 복사된다.
@@ -266,7 +269,9 @@ TEST(ValueCopy_GeneratedStructCopiesNativeMembers) {
     CHECK(ops.copy(&copy, &source, allocator));
     CHECK(SameLeaf(copy.leaf, source.leaf));
     CHECK(copy.leaf.label.View().Data() != source.leaf.label.View().Data());
+#if ROCKS_WITH_EDITOR_DATA
     CHECK(copy.offset == -3 && copy.note == 2 && copy.cache == 99);
+#endif
 
     // 등록한 레코드도 같은 copy·swap을 싣는다.
     TypeRegistry types(allocator);

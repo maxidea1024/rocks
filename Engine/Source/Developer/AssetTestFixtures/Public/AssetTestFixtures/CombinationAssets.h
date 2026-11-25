@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <AssetRuntime/BulkData.h>
 #include <AssetRuntime/Package.h>
 #include <Core/Containers/Array.h>
@@ -702,11 +703,16 @@ struct ComboEditorAsset final : Asset {
     ROCKS_GENERATED_BODY()
 
     explicit ComboEditorAsset(Allocator& allocator) noexcept
+#if ROCKS_WITH_EDITOR_DATA
         : fString(allocator), fSoft(allocator), fStruct(allocator), fArray(allocator),
           fMap(allocator), fSet(allocator), fRefArray(allocator), fRefMap(allocator),
-          fLinks(allocator), values(allocator), refs(allocator) {
+          fLinks(allocator), values(allocator), refs(allocator)
+#endif
+    {
+        (void)allocator;
     }
 
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) bool fBool = false;
     ROCKS_PROPERTY(EditorOnly) uint8 fUInt8 = 0;
     ROCKS_PROPERTY(EditorOnly) uint16 fUInt16 = 0;
@@ -749,6 +755,7 @@ struct ComboEditorAsset final : Asset {
     ROCKS_PROPERTY(EditorOnly) ComboRefLink fLinkFixed[2];
     ROCKS_PROPERTY(EditorOnly) ComboValues values;
     ROCKS_PROPERTY(EditorOnly) ComboObjectRefs refs;
+#endif
 };
 
 // Required 멤버를 담은 값 struct(ClassRef·Soft)와 참조 struct(ObjectRef)다.

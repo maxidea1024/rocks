@@ -2,7 +2,7 @@
 #include <Core/Guid.h>
 #include <NodeGraph/GraphIdSource.h>
 
-// 그래프 id 발급기다(Docs/Design/NodeGraph.ko.md 8.5절).
+// 그래프 id 발급기다(Docs/Design/NodeGraph 8.5절).
 namespace rocks::nodegraph {
 
 namespace {

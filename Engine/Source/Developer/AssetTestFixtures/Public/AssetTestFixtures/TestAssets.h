@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <AssetRuntime/BulkData.h>
 #include <AssetRuntime/Package.h>
 #include <Core/Text/String.h>
@@ -18,7 +19,12 @@ struct TestAsset final : Asset {
     ROCKS_GENERATED_BODY()
 
     explicit TestAsset(Allocator& allocator) noexcept
-        : label(allocator), hardList(allocator), soft(allocator), note(allocator) {
+        : label(allocator), hardList(allocator), soft(allocator)
+#if ROCKS_WITH_EDITOR_DATA
+          ,
+          note(allocator)
+#endif
+    {
     }
 
     ROCKS_PROPERTY() int32 value = 0;
@@ -27,9 +33,11 @@ struct TestAsset final : Asset {
     ROCKS_PROPERTY() ObjectRef<Asset> hard;
     ROCKS_PROPERTY() ObjectRefArray<Object> hardList;
     ROCKS_PROPERTY() SoftObjectRef<Asset> soft;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) String note;
     ROCKS_PROPERTY(EditorOnly) BulkDataRef source;
     ROCKS_PROPERTY(EditorOnly) ObjectRef<Asset> editorRef;
+#endif
     // 기대 타입이 TestAsset인 Hard 참조다(import 선언 타입이 기대 타입보다 넓은 Asset일 때 연결
     // 단계의 타입 대조 시험).
     ROCKS_PROPERTY() ObjectRef<TestAsset> typed;

@@ -13,7 +13,9 @@ D3D12Device::D3D12Device(Allocator& allocator) noexcept
       computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
       computeAllocators_(allocator), computeTimestamps_(allocator), allocator_(allocator),
       readbacks_(allocator), ring_(allocator), timestamps_(allocator), touchedTextures_(allocator),
-      bufferViews_(allocator), cpuUavs_(allocator), bufferStates_(allocator), splits_(allocator) {
+      bufferViews_(allocator), cpuUavs_(allocator), bufferStates_(allocator), splits_(allocator),
+      rootSignatures_(allocator), constantBuffers_(allocator), constantPages_(allocator),
+      graphicsRings_(allocator), computeRings_(allocator), shaders_(allocator) {
 }
 
 D3D12Device::~D3D12Device() {
@@ -187,16 +189,23 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
 
     auto rtvs = rtvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RtvCapacity, false);
     auto dsvs = dsvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, DsvCapacity, false);
+    // SRV·UAV 원본 descriptor는 CPU 전용 heap에 두고 그리기 때 shader-visible ring으로 복사한다
+    // (RenderBase 9.11절 5항).
     auto srvs =
-        srvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, SrvCapacity, true);
+        srvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, SrvCapacity, false);
     auto samplers = samplers_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
                                          SamplerCapacity, true);
     if (!rtvs || !dsvs || !srvs || !samplers) {
         return Fail("descriptor heap creation failed");
     }
 
+    auto constants = InitializeConstants();
+    if (!constants) {
+        return constants;
+    }
+
     // 장치 능력(GX1)과 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해
-    // 둔다(PixelFormat.ko.md PF3). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
+    // 둔다(Docs/Design/PixelFormat PF3). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
     caps_ = d3d12::QueryDeviceCaps(device_.Get(), adapter.Get(), featureLevel_);
     for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
         const PixelFormat format = static_cast<PixelFormat>(number);
@@ -221,11 +230,6 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     nullDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
     nullDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     device_->CreateShaderResourceView(nullptr, &nullDesc, srvs_.Cpu(nullBufferSrv_));
-
-    auto signature = CreateRootSignature();
-    if (!signature) {
-        return signature;
-    }
 
     auto compute = CreateComputeObjects();
     if (!compute) {
@@ -414,6 +418,10 @@ StringView D3D12Device::LastError() const noexcept {
 
 uint64 D3D12Device::IgnoredDraws() const noexcept {
     return ignoredDraws_;
+}
+
+uint64 D3D12Device::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
 }
 
 uint64 D3D12Device::ValidationErrorCount() const noexcept {
@@ -711,7 +719,7 @@ void D3D12Device::RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv, 
 // GPU 사용 중인 자원을 놓는 경로를 없앤다.
 Result<void> D3D12Device::ReserveRetireCapacity(usize extra) noexcept {
     const usize live = buffers_.Size() + bufferViews_.Size() + textures_.Size() +
-                       pipelines_.Size() + readbacks_.Size() +
+                       pipelines_.Size() + readbacks_.Size() + constantBuffers_.Size() +
                        swapChains_.Size() * SwapChainRetireEntries + heaps_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
@@ -729,6 +737,10 @@ void D3D12Device::ProcessRetired() noexcept {
     const uint64 completed = fence_->GetCompletedValue();
     const uint64 computeCompleted = ComputeCompletedValue();
     ring_.Reclaim(completed);
+    graphicsRings_.constants.Reclaim(completed);
+    graphicsRings_.descriptors.Reclaim(completed);
+    computeRings_.constants.Reclaim(computeCompleted);
+    computeRings_.descriptors.Reclaim(computeCompleted);
     staging_->Reclaim(completed);
     for (usize index = retired_.Size(); index > 0; --index) {
         Retired& entry = retired_[index - 1];
@@ -744,6 +756,10 @@ void D3D12Device::ProcessRetired() noexcept {
         }
         if (entry.dsv >= 0) {
             dsvs_.Free(static_cast<uint32>(entry.dsv));
+        }
+        if (entry.constantPage >= 0) {
+            constantPages_[static_cast<usize>(entry.constantPage)]->ranges.Free(
+                entry.constantBlock);
         }
         // placed 자원을 놓은 뒤 heap의 placed 수를 줄인다(GX12, 마지막이면 heap도 놓는다).
         const SlotHandle heap = entry.heap;

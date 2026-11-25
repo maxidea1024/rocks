@@ -1,4 +1,5 @@
 #include "AnimationInternal.h"
+#include <Base/Compiler.h>
 
 #include <Core/Algorithms.h>
 
@@ -110,9 +111,12 @@ Result<void> AppendBone(Array<BoneInfo>& to, const BoneInfo& bone) noexcept {
     BoneInfo copy(to.GetAllocator());
     copy.name = bone.name;
     copy.parentIndex = bone.parentIndex;
+    // 원래 이름(exportName)은 에디터 데이터다(Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
     if (auto assigned = copy.exportName.TryAssign(bone.exportName.View()); !assigned) {
         return assigned;
     }
+#endif
 
     return to.TryPushBack(Move(copy));
 }

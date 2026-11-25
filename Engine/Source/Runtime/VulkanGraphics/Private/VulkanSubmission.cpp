@@ -330,7 +330,8 @@ void VulkanDevice::AssignPendingUploads(uint64 value) noexcept {
 Result<void> VulkanDevice::ReserveRetireCapacity(usize extra) noexcept {
     const usize live = buffers_.Size() + bufferViews_.Size() + orphanBuffers_.Size() +
                        textures_.Size() + pipelines_.Size() + readbacks_.Size() +
-                       swapChains_.Size() + framebuffers_.Size() + heaps_.Size();
+                       swapChains_.Size() + framebuffers_.Size() + heaps_.Size() +
+                       constantBuffers_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 
@@ -397,6 +398,10 @@ void VulkanDevice::DestroyRetired(Retired& entry) noexcept {
     }
 
     FreeMemoryLocked(entry.memory);
+    if (entry.constantPage >= 0) {
+        constantPages_[static_cast<usize>(entry.constantPage)]->ranges.Free(entry.constantBlock);
+    }
+
     // placed 자원은 메모리를 heap이 가진다. 자원을 파괴했으므로 heap의 placed 수를 줄인다.
     if (!entry.heap.IsNull()) {
         ReleasePlacement(entry.heap);
@@ -426,6 +431,7 @@ void VulkanDevice::ProcessRetired() noexcept {
     PollCompleted();
     const uint64 completed = CompletedValue();
     ring_.Reclaim(completed);
+    constantRing_.Reclaim(completed);
     if (staging_) {
         staging_->Reclaim(completed);
     }

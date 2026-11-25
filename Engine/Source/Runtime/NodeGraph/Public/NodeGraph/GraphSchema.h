@@ -7,7 +7,7 @@
 #include <NodeGraph/GraphReadView.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
-// 도메인 그래프 schema다(Docs/Design/NodeGraph.ko.md 7·8.6절). schema는 정책만 맡는다(GD9). 지금
+// 도메인 그래프 schema다(Docs/Design/NodeGraph 7·8.6절). schema는 정책만 맡는다(GD9). 지금
 // 있는 것: 도메인 식별·핀 타입 표·의미 정규화(NG0), 연결 판정·기본 노드·검증(NG1). 붙여넣기 허용은
 // NG2, 메뉴·drop은 NG5에서 더한다(14절).
 namespace rocks::nodegraph {

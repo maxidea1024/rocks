@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Animation/AnimationDiagnostic.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Transform.h>
@@ -30,14 +31,21 @@ ROCKS_STRUCT()
 struct BoneInfo {
     ROCKS_GENERATED_BODY()
 
-    explicit BoneInfo(Allocator& allocator) noexcept : exportName(allocator) {
+    explicit BoneInfo(Allocator& allocator) noexcept
+#if ROCKS_WITH_EDITOR_DATA
+        : exportName(allocator)
+#endif
+    {
+        (void)allocator;
     }
 
     ROCKS_PROPERTY() Name name;
     // 부모 본 번호다. 루트만 NoParentBone이고 나머지는 자기 번호보다 작다.
     ROCKS_PROPERTY() int32 parentIndex = NoParentBone;
     // 대소문자를 보존한 원래 이름이다(UE ExportName). 검사하지 않는다(6.4절).
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) String exportName;
+#endif
 };
 
 // 원본 본 계층이다(가상 본은 담지 않는다 — 스켈레톤이 따로 갖는다). bones와 referencePose는 같은

@@ -1,5 +1,6 @@
 #include <ReflectionTestFixtures/ClassDefaultsFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <Base/Compiler.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/PropertyPath.h>
@@ -143,22 +144,31 @@ TEST(ClassDefaultsRevert_SingleValuesAndStructs) {
             holder.mode = DefaultsMode::Third;
             CHECK(holder.label.TryAssign("changed"));
             holder.point.x = 30;
+#if ROCKS_WITH_EDITOR_DATA
             holder.point.note = 40;
+#endif
             holder.pair.u = 70;
             holder.nest.inner.y = 9.0f;
             holder.nest.depth = 20;
             holder.maybe.Reset();
             holder.kind = ClassRef<DefaultsAbstractBase>::Of<DefaultsHolder>();
+#if ROCKS_WITH_EDITOR_DATA
             holder.editorValue = 110;
             holder.editorPoint.x = 33;
+#endif
             holder.lit = 0;
             holder.dim = 1;
         });
         CHECK(!MatchesDefaults(allocator, fixture, objects, handle, type));
-        const StringView paths[] = {
-            "baseValue", "count", "scale", "precise", "enabled",     "mode",       "label", "point",
-            "pair",      "nest",  "maybe", "caption", "payload",     "tag",        "kind",  "link",
-            "weak",      "soft",  "lit",   "dim",     "editorValue", "editorPoint"};
+        // EditorOnly 필드(editorValue·editorPoint)는 에디터 데이터가 있는 조합에만 있다.
+        const StringView paths[] = {"baseValue",   "count",      "scale",   "precise", "enabled",
+                                    "mode",        "label",      "point",   "pair",    "nest",
+                                    "maybe",       "caption",    "payload", "tag",     "kind",
+                                    "link",        "weak",       "soft",    "lit",     "dim",
+#if ROCKS_WITH_EDITOR_DATA
+                                    "editorValue", "editorPoint"
+#endif
+        };
         for (StringView text : paths) {
             CHECK(Revert(allocator, fixture, objects, handle, type, text));
         }
@@ -173,14 +183,20 @@ TEST(ClassDefaultsRevert_SingleValuesAndStructs) {
         EditNative<DefaultsHolder>(objects, handle, [](DefaultsHolder& holder) noexcept {
             holder.nest.inner.x = 50;
             holder.nest.depth = 21;
+#if ROCKS_WITH_EDITOR_DATA
             holder.point.note = 41;
+#endif
         });
         CHECK(Revert(allocator, fixture, objects, handle, type, "nest.inner.x"));
+#if ROCKS_WITH_EDITOR_DATA
         CHECK(Revert(allocator, fixture, objects, handle, type, "point.note"));
+#endif
         EditNative<DefaultsHolder>(objects, handle, [](DefaultsHolder& holder) noexcept {
             CHECK(holder.nest.inner.x == 3);
             CHECK(holder.nest.depth == 21);
+#if ROCKS_WITH_EDITOR_DATA
             CHECK(holder.point.note == 4);
+#endif
         });
         created.Value().Reset();
         CHECK(objects.Shutdown(objects.OwnerAccess()));
@@ -226,14 +242,19 @@ TEST(ClassDefaultsRevert_BitsOptionalsAndBitfields) {
             CHECK(value.bits.on == 1 && value.bits.off == 0 && value.bits.level == 6);
             // set인 기준 위의 다른 값도 기본 값으로 바뀐다(이미 set이어도 Emplace가 기본 값).
             value.preview.Value().x = 99;
+#if ROCKS_WITH_EDITOR_DATA
             value.preview.Value().note = 98;
+#endif
             value.bits.off = 1;
             value.bits.level = 60;
         });
         CHECK(Revert(allocator, fixture, objects, handle, type, "preview"));
         CHECK(Revert(allocator, fixture, objects, handle, type, "bits.off"));
         EditNative<DefaultsRevert>(objects, handle, [](DefaultsRevert& value) noexcept {
-            CHECK(value.preview.Value().x == 13 && value.preview.Value().note == 4);
+            CHECK(value.preview.Value().x == 13);
+#if ROCKS_WITH_EDITOR_DATA
+            CHECK(value.preview.Value().note == 4);
+#endif
             CHECK(value.bits.off == 0 && value.bits.level == 60);
         });
         created.Value().Reset();
@@ -350,6 +371,9 @@ TEST(ClassDefaultsRevert_TypeWithoutRecord) {
     }
 }
 
+// DefaultsPoint 멤버 Write 수다(x·y, 에디터 데이터가 있으면 EditorOnly note까지).
+constexpr usize PreviewMemberWrites = ROCKS_WITH_EDITOR_DATA ? 3 : 2;
+
 // 계획은 값을 바꾸지 않고 연산 목록을 만든다: 기준 set인 Optional<struct>는 EmplaceOptional 뒤 멤버
 // Write 셋(x·y·EditorOnly note — Editor 레코드), 기준 unset은 ResetOptional 하나, InstancedStruct는
 // ClearInstanced, 비Atomic struct는 잎 멤버 Write(경로는 필드 → 멤버). 실패한 계획은 비어 있다.
@@ -368,7 +392,8 @@ TEST(ClassDefaultsRevert_PlanOperations) {
         const PropertyPathBuffer preview = fixture.Path(type, "preview");
         REQUIRE(PlanRevert(objects, objects.OwnerAccess(), handle, preview, allocator, plan));
         CHECK(plan.object == handle);
-        REQUIRE(plan.operations.Size() == 4);
+        // 멤버 Write는 x·y와 EditorOnly note(에디터 데이터가 있는 조합에만 있다)다.
+        REQUIRE(plan.operations.Size() == 1 + PreviewMemberWrites);
         CHECK(plan.operations[0].kind == RevertOperation::Kind::EmplaceOptional);
         CHECK(plan.operations[0].stepCount == 1);
         for (usize index = 1; index < plan.operations.Size(); ++index) {

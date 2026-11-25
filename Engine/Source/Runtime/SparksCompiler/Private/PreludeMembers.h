@@ -3,7 +3,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Text/StringView.h>
 
-// 언어 소유 멤버 표다(Docs/Design/SparksLanguage.ko.md 3.8절 "부록 B 시그니처", SD67). 컴파일러는
+// 언어 소유 멤버 표다(Docs/Design/SparksLanguage 3.8절 "부록 B 시그니처", SD67). 컴파일러는
 // 이 목록을 그대로 가지며 타입 검사(LC2c)가 멤버 접근과 호출을 이 표로 해석한다.
 //
 // 시그니처 표기: `(이름: 타입, ...): 반환`(반환이 없으면 void). 타입은 3.6절 `Type`과 같은

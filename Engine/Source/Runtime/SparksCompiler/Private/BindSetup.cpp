@@ -3,7 +3,7 @@
 #include "NameBinder.h"
 #include "TypeChecker.h"
 
-// 이름 해석의 공통 부분과 언어 이름·엔진 schema 선언·해석이다(Docs/Design/SparksLanguage.ko.md
+// 이름 해석의 공통 부분과 언어 이름·엔진 schema 선언·해석이다(Docs/Design/SparksLanguage
 // 3.9절 "이름의 출처"·"타입 표기 해석", 10.2절).
 
 namespace rocks::sparks::detail {

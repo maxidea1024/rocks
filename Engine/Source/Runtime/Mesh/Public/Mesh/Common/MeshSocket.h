@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Math/Rotator.h>
 #include <Core/Math/Vector3.h>
 #include <Core/Text/Name.h>
@@ -32,8 +33,10 @@ struct MeshSocket {
     ROCKS_PROPERTY() Rotator<double> relativeRotation {};
     ROCKS_PROPERTY() Vec3d relativeScale = Vec3d(1.0, 1.0, 1.0);
     ROCKS_PROPERTY() String tag;
+#if ROCKS_WITH_EDITOR_DATA
     // 임포트가 만든 소켓인지다(UE bSocketCreatedAtImport — 재임포트는 임포트 소켓만 바꾼다).
     ROCKS_PROPERTY(EditorOnly) bool createdAtImport = false;
+#endif
 };
 
 } // namespace rocks

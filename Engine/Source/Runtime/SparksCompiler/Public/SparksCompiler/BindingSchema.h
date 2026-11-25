@@ -8,7 +8,7 @@
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/Source.h>
 
-// 엔진 binding schema 파일(`<모듈>.sparkbind.json`)이다(Docs/Design/SparksLanguage.ko.md 10.2절
+// 엔진 binding schema 파일(`<모듈>.sparkbind.json`)이다(Docs/Design/SparksLanguage 10.2절
 // "binding schema 파일 형식", 18.1절, 진단 S1120).
 //
 // 사용 예:
@@ -102,7 +102,7 @@ struct SchemaTypeParameter {
     SourceSpan constraintSpan; // `constraint` 값(없으면 빈 범위)
 };
 
-// 엔진 함수의 효과 표시(schema `effects` — Docs/Design/SparksLanguage.ko.md 3.13절)다.
+// 엔진 함수의 효과 표시(schema `effects` — Docs/Design/SparksLanguage 3.13절)다.
 struct SchemaEffects {
     static constexpr uint8 Spawn = 1u << 0;     // Actor 생성(`World.Spawn`)
     static constexpr uint8 Acquire = 1u << 1;   // 유지 자원 획득(`Start*`)

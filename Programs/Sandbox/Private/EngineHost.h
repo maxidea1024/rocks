@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ScreenHost.h"
+
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/StringView.h>
@@ -7,10 +9,14 @@
 
 namespace sandbox {
 
-// 헤드리스 엔진 호스트 설정이다(Sandbox --engine).
+// 엔진 호스트 설정이다(Sandbox --engine [--window]).
 struct EngineHostOptions {
-    // 실행할 프레임 수다(EngineConfig::maxFrames).
+    // 실행할 프레임 수다(EngineConfig::maxFrames). 0이면 상한이 없다(창 모드 기본 — 창을 닫거나
+    // Ctrl-C로 끝낸다).
     rocks::uint64 frames = 60;
+    // 창을 열고 키보드·마우스·게임패드 입력을 첫 LocalPlayer로 넘긴다(Docs/Design/EngineRuntime
+    // 21.5절). 실제 시간 delta로 돈다.
+    bool window = false;
     // Engine branch 설정 파일(JSON)이다. 엔진 층 파일 다음 Project 층으로 읽는다(log.*는 "Settings"
     // 섹션). null이면 읽지 않는다.
     const char* configPath = nullptr;
@@ -21,6 +27,13 @@ struct EngineHostOptions {
     // 시험용: 0이 아니면 이 번째 PumpEvents에서 launch::RequestTermination()을 부른다(Ctrl-C
     // 처리기가 남기는 것과 같은 표시). 종료 요청 다리가 그 표시를 보고 정상 종료로 잇는지 확인한다.
     rocks::uint64 requestTerminationAtFrame = 0;
+    // 시험용: 0이 아니면 이 번째 PumpEvents에서 입력 큐에 KeyDown(W)를 넣는다(창 펌프와 같은 자리).
+    rocks::uint64 injectKeyAtFrame = 0;
+    // 창 모드의 렌더 경로다(Docs/Design/RenderBase 18.5절 1항, `--graphics=`·`--no-render`).
+    bool render = true;
+    screen::ScreenBackend graphics = screen::ScreenBackend::Auto;
+    // API 검증 계층을 켠다(`--graphics-validation`).
+    bool graphicsValidation = false;
 };
 
 // 헤드리스 엔진 실행이다(Docs/Design/LoggingSystem.ko.md 5.1절 — tick이 있는 엔진 호스트는 Async,

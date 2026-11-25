@@ -4,7 +4,7 @@
 #include <TestSupport/Test.h>
 #include <TraceCapture/TraceSession.h>
 
-// RG4 async compute 시험이다(Docs/Design/RenderBase.ko.md 8절 "RG4 async compute 설계"). 기록
+// RG4 async compute 시험이다(Docs/Design/RenderBase 8절 "RG4 async compute 설계"). 기록
 // 장치에 compute queue를 공개하고 fork·join 구조(QueueWait 열, compute 기록, fork 전이 자리, 넓힌
 // 수명)를 결정적으로 단언한다. 기록 장치는 queue 사이 경쟁(기다리지 않은 다른 queue의 앞 접근)과
 // compute 기록의 graphics 상태 전이를 검증 오류로 센다.

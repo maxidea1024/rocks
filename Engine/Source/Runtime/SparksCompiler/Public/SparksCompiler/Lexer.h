@@ -6,7 +6,7 @@
 #include <SparksCompiler/Source.h>
 #include <SparksCompiler/Token.h>
 
-// Sparks 어휘 분석이다(Docs/Design/SparksLanguage.ko.md 8.1절 "어휘 분석", 3.1·3.6절).
+// Sparks 어휘 분석이다(Docs/Design/SparksLanguage 8.1절 "어휘 분석", 3.1·3.6절).
 //
 // 사용 예:
 //   Array<Token> tokens(allocator);

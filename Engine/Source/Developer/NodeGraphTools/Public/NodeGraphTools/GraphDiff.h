@@ -3,7 +3,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <NodeGraph/GraphDocument.h>
 
-// 문서 diff다(Docs/Design/NodeGraph.ko.md 9.4절 "diff"). 두 문서(배치 선택)를 GraphId·NodeId·간선
+// 문서 diff다(Docs/Design/NodeGraph 9.4절 "diff"). 두 문서(배치 선택)를 GraphId·NodeId·간선
 // 키· 주석 id·북마크 번호로 맞춰 차이 항목을 만든다. 두 문서는 같은 NamePool의 Name 토큰을 쓴다.
 //
 // 사용 예:
@@ -22,6 +22,8 @@ enum class GraphDiffKind : uint8 {
     GraphRemoved,
     // 그래프 역할·domainRole이 다르다.
     GraphRole,
+    // 하위 그래프 인터페이스(ownerNode·경계 목록)가 다르다(10.1절 NG3c).
+    GraphBoundary,
     // 그래프 제목이 다르다(배치).
     GraphTitle,
     NodeAdded,

@@ -14,15 +14,15 @@ internal static partial class MetaTests
         "static rocks::Result<rocks::Array<rocks::uint8>> Migrate(rocks::Allocator& allocator, rocks::TypeId, rocks::uint32, rocks::uint32, " +
         "rocks::Span<const rocks::uint8>) noexcept { return rocks::Result<rocks::Array<rocks::uint8>>::Success(rocks::Array<rocks::uint8>(allocator)); }\n};\n" +
         "ROCKS_STRUCT()\nstruct Middle {\nexplicit Middle(rocks::Allocator& allocator) noexcept : leaf(allocator) {}\n" +
-        "ROCKS_PROPERTY() Leaf leaf;\nROCKS_PROPERTY(EditorOnly) rocks::int64 offset = 0;\nROCKS_NATIVE() rocks::uint32 cache = 0;\n};\n" +
+        "ROCKS_PROPERTY() Leaf leaf;\n#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly) rocks::int64 offset = 0;\n#endif\nROCKS_NATIVE() rocks::uint32 cache = 0;\n};\n" +
         "ROCKS_STRUCT()\nclass Holder {\nROCKS_GENERATED_BODY()\npublic:\nexplicit Holder(rocks::Allocator& allocator) noexcept : middle(allocator) {}\n" +
         "rocks::uint8 Flag() const noexcept { return flag; }\nROCKS_PROPERTY(Required) rocks::ObjectRef<Value> target;\nROCKS_PROPERTY() Middle middle;\n" +
         "private:\nROCKS_PROPERTY() rocks::uint8 flag = 0;\n};\n" +
         "ROCKS_STRUCT()\nstruct Outer {\nexplicit Outer(rocks::Allocator& allocator) noexcept : holder(allocator) {}\nROCKS_PROPERTY() Holder holder;\n};\n" +
         "ROCKS_STRUCT()\nstruct WorldBits {\nROCKS_NATIVE() Lease lease;\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
         "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
-        "explicit Value(rocks::Allocator& allocator) noexcept : holder(allocator), extra(allocator), scratch(allocator) {}\n" +
-        "ROCKS_PROPERTY() Holder holder;\nROCKS_PROPERTY() rocks::uint32 plain = 0;\nROCKS_PROPERTY(EditorOnly) Leaf extra;\nROCKS_NATIVE() Leaf scratch;\n};\n" +
+        "explicit Value(rocks::Allocator& allocator) noexcept : holder(allocator),\n#if ROCKS_WITH_EDITOR_DATA\nextra(allocator),\n#endif\nscratch(allocator) {}\n" +
+        "ROCKS_PROPERTY() Holder holder;\nROCKS_PROPERTY() rocks::uint32 plain = 0;\n#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly) Leaf extra;\n#endif\nROCKS_NATIVE() Leaf scratch;\n};\n" +
         "ROCKS_CLASS(WorldOnly)\nstruct WorldValue : public rocks::Object {\nROCKS_PROPERTY() WorldBits bits;\n};\n}\n";
 
     private const string StructLeaf = "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n";

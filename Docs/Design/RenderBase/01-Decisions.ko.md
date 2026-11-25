@@ -1,0 +1,16 @@
+## 1. 결정 요약
+
+| 항목 | 결정 | 근거 |
+|---|---|---|
+| 모듈 배치 | UE RenderCore 하나를 넷으로 나눈다. **ShaderCore**(장치 없는 셰이더 메타데이터, 셰이더 시스템 3절), **RenderBase**(장치에 묶인 렌더 기반), **RenderGraph**(계획 3.1절에 이미 있는 모듈), **Graphics 확장**(UE RHI가 하는 일 중 지금 Graphics에 없는 것). 디버그 도구는 Developer 모듈로 뺀다 | UE RenderCore는 셰이더 컴파일 쪽 타입(`RC/Public/ShaderCore.h`·`ShaderCompilerCore.h`)과 렌더 그래프(`RC/Public/RenderGraph*.h`)를 한 모듈에 둔다. Rocks 셰이더 컴파일러(Developer)는 장치 없이 쓰는 부분만 필요하다(셰이더 시스템 3절). 렌더 그래프는 셰이더 파라미터에 기대지만 반대 방향 의존은 없다 |
+| 렌더 실행 | 전용 스레드 하나가 직렬 FIFO로 일을 처리하는 **렌더 lane**. 헤드리스·시험용 **인라인 모드**(같은 스레드에서 실행하되 큐 순서는 lane 모드와 같다)를 둔다 | UE도 전용 스레드 하나(`RC/Private/RenderingThread.cpp:321, 227–262`)와 스레드 없는 실행 경로(`RC/Public/RenderingThread.h:149, 504–525`)를 둔다. 계획 8.4절 "lane을 줄여도 진행 가능한 순차 기준 실행기" |
+| 게임 → 렌더 전달 | 불변 값 묶음 **프레임 packet**과 handle만 넘긴다. 전달 가능한 타입은 명시 등록한다 | 계획 8.1절 Render lane "Game 주소 없음". UE는 게임 소유 객체 포인터를 캡처한다(`RC/Private/RenderResource.cpp:290–296`). 이 점은 따르지 않는다 |
+| 게임 대기 | 게임 lane이 막히는 곳은 **프레임 slot 확보**다(backpressure). 대기 중에도 OS 메시지를 펌프한다. 예외는 표면 소실 handshake(Android)와 종료·장치 재생성·시험의 전체 비우기다 | 계획 8.1절 "Game/Render 상호 동기 wait 금지", 8.2절 backpressure. UE는 대기 중 메시지를 펌프한다(`RC/Private/RenderingThread.cpp:1158–1257`) |
+| 장치 스레드 모델 | 기록 객체는 스레드마다, 제출은 렌더 lane 전용, 자원 생성의 스레드 안전 여부는 backend가 `DeviceCaps`로 공개한다(OpenGL ES는 lane에서만). 게임 lane의 handle 예약은 RenderBase 표가 맡는다 | 5.4절. 지금 `Device`는 "생성한 스레드에서만 사용"이고(`Engine/Source/Runtime/Graphics/Public/Graphics/Device.h:43`) backend에는 스레드 검사가 없다 |
+| 자원 수명 | 계획 11.2절의 lease·`Retire`·모든 queue fence 확인 방식이다. UE의 "큐 순서 + 프레임 끝 동기 한 번 뒤 delete"는 쓰지 않는다 | UE `RC/Private/RenderingThread.cpp:1323–1419`. 계획 11.2절은 lease 원자 획득·Retire의 새 lease 차단·last-use fence 집계를 요구한다 |
+| 내장 자원 | 엔진 셰이더 집합 검사 → 내장 자원 팩 생성·업로드 → fence → `BuiltinReady`를 렌더 lane이 명시적으로 실행한다. 정적 초기화에 기대지 않는다 | 계획 9.6절. UE 전역 자원은 정적 생성과 단계 목록에 기대고(`RC/Public/RenderResource.h:43–48, 446–505`) 준비 완료 gate와 생성 실패 경로가 없다 |
+| 렌더 그래프 | pass를 선언 순서대로 실행하고 재배치하지 않는다. 1차는 단일 graphics queue·aliasing 끔·병합 끔이다 | UE 실행 루프(`RC/Private/RenderGraphBuilder.cpp:2104–2167`). 계획 11.3절 1차 범위 |
+| 파라미터 구조체 | 한 구조체가 셰이더 상수·자원 바인딩과 렌더 그래프 의존 선언을 함께 맡는다(결정 R4) | UE 파라미터 매크로(`RC/Public/ShaderParameterMacros.h:1697–1760, 1868–1900`)와 그래프 수집(`RC/Private/RenderGraphBuilder.cpp:2384–2532`) |
+| 셰이더 런타임 | 셰이더 라이브러리(셰이더 시스템 12절) 위에 **셰이더 집합**을 둔다. 장치 셰이더는 처음 쓸 때 만들고 게시는 한 번이다. frozen memory image는 들이지 않는다 | UE `RC/Public/Shader.h:405–417`, `RC/Private/ShaderResource.cpp:579–657`. memory image(`Core/Public/Serialization/MemoryLayout.h`)는 C++ 객체 배치를 굽는 장치이고 Rocks는 정규화 표를 Archive·Record로 읽는다 |
+| 설정 변수 | Core에 **콘솔 설정**과 Config 계층을 선행 작업으로 둔다. 렌더 lane에는 프레임 packet 안 snapshot으로 넘긴다 | RenderCore에 콘솔 변수 정의가 약 190줄 있다(`git grep -c` 줄 수). UE는 렌더 쪽 사본 주소에 쓰는 명령으로 전파한다(`RC/Private/RenderingThread.cpp:493–530`). Rocks에는 체계가 없다(UnrealCoreFeatureAudit UE-C21·C29 **후속**) |
+| 좌표·행렬 규약 | UE 5.8과 같다(2026-11-17 사용자 결정): 행 벡터(`p·M`)·행 우선 저장, 셰이더 `mul(v, M)`과 행 우선 packing, view space +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면 원근(수평 반각), 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전. 렌더 코드 반영은 C7에서 했다(Graphics `CullMode`·`DrawConstants` 행 우선, 샘플 렌더러 반전 컬, Sandbox 컬링·행렬 시험) | [셰이더 시스템](../ShaderSystem/07-BindingConventions.ko.md) 7.2절 6·8항, [엔진 구현 계획](../EngineImplementationPlan.ko.md) 2.2절. UE `LocalPlayer.cpp:1241–1245`(view 축), `PerspectiveMatrix.h:135–153`(투영), `D3D12State.cpp:33–35, 353`(앞면) |

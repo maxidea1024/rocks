@@ -118,3 +118,7 @@ class Errors : ScriptableComponent {
 @test fn WithInput(value: int) {
     _ = value;
 }
+
+@test fn WithResult(): Result<int> {
+    return 1;
+}

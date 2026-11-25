@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Animation/Skeleton.h>
 #include <AssetRuntime/BulkData.h>
 #include <Core/Containers/OrderedMap.h>
@@ -241,13 +242,21 @@ class AnimationClip final : public AnimationAsset {
 
 public:
     explicit AnimationClip(Allocator& allocator) noexcept
-        : source(allocator), eventTracks(allocator), events(allocator), syncMarkers(allocator),
-          targetFrameRate(allocator), playback(allocator) {
+        :
+#if ROCKS_WITH_EDITOR_DATA
+          source(allocator), eventTracks(allocator),
+#endif
+          events(allocator), syncMarkers(allocator), targetFrameRate(allocator),
+          playback(allocator) {
     }
 
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) ClipSourceData source;
+#endif
     // 이벤트 트랙 이름이다(UE AnimNotifyTracks).
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) Array<Name> eventTracks;
+#endif
     ROCKS_PROPERTY() Array<ClipEvent> events;
     ROCKS_PROPERTY() Array<ClipSyncMarker> syncMarkers;
     ROCKS_PROPERTY() ClipInterpolation interpolation = ClipInterpolation::Linear;

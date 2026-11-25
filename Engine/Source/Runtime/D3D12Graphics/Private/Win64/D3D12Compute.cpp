@@ -1,6 +1,6 @@
 #include "D3D12DeviceImpl.h"
 
-// async compute queue다(Docs/Design/RenderBase.ko.md 8절 "RG4 async compute 설계"). graphics
+// async compute queue다(Docs/Design/RenderBase 8절 "RG4 async compute 설계"). graphics
 // queue와 따로 도는 D3D12 compute queue에 compute 기록을 제출하고, queue 사이 순서는
 // ID3D12CommandQueue::Wait로 맞춘다(UE D3D12의 sync point 신호·대기와 같은 자리,
 // D3D12LegacyBarriers.cpp:1580–1635). compute 기록은 compute queue가 받는 상태 사이 전이만
@@ -230,8 +230,9 @@ Result<CommandContext*> D3D12Device::BeginComputeRecording() noexcept {
     target_ = {};
     presentTarget_ = {};
     // compute root signature와 shader-visible heap이다(dispatch가 root 인자를 건다).
-    list_->SetComputeRootSignature(computeRootSignature_.Get());
-    ID3D12DescriptorHeap* heaps[] = {srvs_.Heap(), samplers_.Heap()};
+    appliedGraphicsRoot_ = nullptr;
+    appliedComputeRoot_ = nullptr;
+    ID3D12DescriptorHeap* heaps[] = {online_.Get(), samplers_.Heap()};
     list_->SetDescriptorHeaps(2, heaps);
     return Result<CommandContext*>::Success(this);
 }
@@ -262,6 +263,7 @@ Result<GpuFencePoint> D3D12Device::EndComputeRecording() noexcept {
     auto uploads = FlushUploadsLocked();
     const auto abandon = [&]() noexcept {
         allocator.fenceValue = computeFenceValue_;
+        CloseTransientRings(true, computeFenceValue_);
         AssignPendingComputeRetires(computeFenceValue_);
         computeTimestamps_.Close(computeFenceValue_, false);
         SettleTracking(false);
@@ -294,6 +296,7 @@ Result<GpuFencePoint> D3D12Device::EndComputeRecording() noexcept {
     if (FAILED(signaled)) {
         DetectLost(signaled);
         allocator.fenceValue = RetainUntilDestructionFence;
+        CloseTransientRings(true, RetainUntilDestructionFence);
         AssignPendingComputeRetires(RetainUntilDestructionFence);
         computeTimestamps_.Close(RetainUntilDestructionFence, false);
         DrainValidationMessages();
@@ -303,6 +306,7 @@ Result<GpuFencePoint> D3D12Device::EndComputeRecording() noexcept {
     computeFenceValue_ = value;
     computeTimeline_.Submitted(value, nullptr);
     allocator.fenceValue = value;
+    CloseTransientRings(true, value);
     AssignPendingComputeRetires(value);
     computeTimestamps_.Close(value, true);
     ProcessRetired();

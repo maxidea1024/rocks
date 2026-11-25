@@ -13,7 +13,7 @@ public static partial class PolicyChecks
     /// </summary>
     public static readonly IReadOnlyList<string> NodeGraphIncludePrefixes = ["Base/", "Core/", "Meta/", "Serialization/", "NodeGraph/"];
 
-    /// <summary>NodeGraph.Build.cs가 둘 수 있는 의존 모듈이다(Docs/Design/NodeGraph.ko.md 11.1절).</summary>
+    /// <summary>NodeGraph.Build.cs가 둘 수 있는 의존 모듈이다(Docs/Design/NodeGraph 11.1절).</summary>
     public static readonly IReadOnlyList<string> NodeGraphAllowedDependencies = ["ObjectRuntime", "CoreTypeBindings"];
 
     // Object 층의 객체·lease 타입 이름이다(원칙 1 — 객체를 만들거나 쥐지 않고 TypeLease를 잡지 않는다).
@@ -24,7 +24,7 @@ public static partial class PolicyChecks
     private static readonly Regex NodeGraphDependencyList = Pattern("\\b(?:PublicDependencies|PrivateDependencies|DynamicModules)\\s*=>");
 
     /// <summary>
-    /// NodeGraph 모듈의 경계다(rule id nodegraph-boundary, Docs/Design/NodeGraph.ko.md 원칙 1·GD17·GT14):
+    /// NodeGraph 모듈의 경계다(rule id nodegraph-boundary, Docs/Design/NodeGraph 원칙 1·GD17·GT14):
     /// 의존(PublicDependencies·PrivateDependencies·DynamicModules, 여러 줄 목록 포함)은 ObjectRuntime·CoreTypeBindings뿐이고
     /// (도메인·UI·장치 모듈 의존 금지), 손으로 쓴 소스(시험 제외)는
     /// <see cref="NodeGraphIncludePrefixes"/> 밖의 헤더를 include하지 않으며 InstancedStruct·TypeLease·ObjectHandle·

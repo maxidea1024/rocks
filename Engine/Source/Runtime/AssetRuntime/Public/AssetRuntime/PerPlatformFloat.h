@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/Name.h>
@@ -27,15 +28,23 @@ ROCKS_STRUCT()
 struct ROCKS_ASSETRUNTIME_API PerPlatformFloat {
     ROCKS_GENERATED_BODY()
 
-    explicit PerPlatformFloat(Allocator& allocator) noexcept : perPlatform(allocator) {
+    explicit PerPlatformFloat(Allocator& allocator) noexcept
+#if ROCKS_WITH_EDITOR_DATA
+        : perPlatform(allocator)
+#endif
+    {
+        (void)allocator;
     }
 
     ROCKS_PROPERTY() float defaultValue = 0.0f;
+#if ROCKS_WITH_EDITOR_DATA
     // 프로파일별 덮어쓰기다(EditorOnly — 쿠킹 패키지에는 defaultValue만 남는다, UE PerPlatform 맵과
     // 같다).
     ROCKS_PROPERTY(EditorOnly) OrderedMap<Name, float> perPlatform;
+#endif
 
-    // profile의 값이다(덮어쓰기 표에 없거나 None이면 기본값).
+    // profile의 값이다(덮어쓰기 표에 없거나 None이면 기본값 — 에디터 데이터가 없는 빌드는 늘
+    // 기본값이다: 쿠킹이 대상 프로파일 값을 defaultValue에 남긴다).
     float Resolve(Name profile) const noexcept;
 };
 

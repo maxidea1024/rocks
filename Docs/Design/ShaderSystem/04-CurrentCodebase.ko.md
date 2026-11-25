@@ -24,4 +24,4 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | 에셋 | A0-O·A0-G·A1–A6 미착수(AssetRuntime·AssetNugget 모듈 없음), `ProjectLayout`은 이름만(AssetSystem 1절 A2) | A1–A4 → P5·P6b |
 | 셰이더 원문·설정 | `Engine/Shaders`·`Engine/Config` 없음, 셰이더 파일 없음 | SH1·P6a·P14 |
 
-다른 설계 문서 상태: A0-P·A0-C·A0-B는 구현되었고 A0-O·A0-G·A1–A6은 착수 전이다. "화면 마일스톤"의 범위는 2026-11-16 [렌더 기반](../RenderBase.ko.md) 18.1절에 정의했다(셰이더 구현과 렌더 기반을 함께 세우는 단계, 결정 11 (나)).
+다른 설계 문서 상태: A0-P·A0-C·A0-B는 구현되었고 A0-O·A0-G·A1–A6은 착수 전이다. "화면 마일스톤"의 범위는 2026-11-16 [렌더 기반](../RenderBase/18-ScreenMilestone.ko.md) 18.1절에 정의했다(셰이더 구현과 렌더 기반을 함께 세우는 단계, 결정 11 (나)).
