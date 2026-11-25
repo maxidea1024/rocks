@@ -1,6 +1,6 @@
 ## 15. 구현 단계
 
-단계 기호는 SY다. 크기 S·M·L은 상대값이다.
+단계 기호는 SY다. 크기 S·M·L은 상대값이다. 진행(개정 4): SY0·SY1·SY2·SY7·SY12는 2026-11-25 착수(오디오 세션, 브랜치 `feature/synchronization`), 나머지는 미착수다. SY0에서 기존 자유 함수(`AtomicLoad` 등)는 공개 그대로 두고 그 위에 `Atomic<T>`·`AtomicRef<T>`를 얹었다. `platform::detail`로 내리는 것과 호출 옮기기·정책 `atomic-detail`은 SY6이다(D15).
 
 | 단계 | 내용 | 선행 | 크기 |
 |---|---|---|---|

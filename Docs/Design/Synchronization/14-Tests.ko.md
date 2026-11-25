@@ -15,6 +15,7 @@
   - 단조 시계 함수 포인터(`WaitDeadline`이 쓴다).
   - `WaiterSignal`의 시한 대기 함수 포인터. 가짜 대기는 OS를 부르지 않고 시험의 `TestGate`를 기다린다. 시험이 "시간이 지났다"를 정하면(가짜 시계를 deadline 뒤로 옮기고 gate를 연다) `TimedOut`으로 돌아간다. 깨우기가 먼저 오면 `Signaled`다. 무한 대기는 seam을 거치지 않는다.
   - 그래서 시한 시험은 실제 시간을 쓰지 않고, "시한 전 깨움"과 "시한 뒤 시간 초과"를 각각 정해진 순서로 만든다.
+  - **구현(개정 4).** seam은 `Private/Common/Sync/SyncSeams.h`(설치 함수)와 `SyncTestAccess.h`(시험 통로)다. 가짜 시한 대기는 받은 대상 `WaiterSignal`을 무한으로 기다린다. 시험이 "시간이 지났다"를 정하면 표시를 세운 뒤 그 신호를 `Notify`하고, 깬 가짜 대기는 표시를 보고 `Reset`한 뒤 시간 초과를 돌려준다. 신호를 바꾸지 않고 깨우는 별도 OS 경로를 두면 깨우기가 대기보다 먼저 올 때 사라지므로(주소 대기는 값이 같으면 잔다) 두지 않았다. `WaitDeadline`은 `SyncMonotonicNanoseconds()`(가짜 시계가 있으면 그것)를 쓴다. `InfiniteTimeout`·`WaitResult`는 SY0에서 `Platform/Sync/WaitTypes.h`로 옮겼다(7.4절, `Sync.h`가 include한다).
 - 시험 목록(SY1–SY4):
   - ParkingLot: 콜백 있는 `WakeOne`·`WakeMultiple`·`WakeAll`의 `mayHaveMoreWaiters` 값, 표 키우기 중 대기자 보존, **TLS 파괴 뒤 대기**(스레드 종료 중 다른 `thread_local` 소멸자에서 경합 대기 → 임시 레코드로 잠들고 깨어 반환됨, 그 뒤 영구 풀의 레코드 수가 원래대로임, D31).
   - Mutex: 잠든 대기자 깨움, `TryLockFor` 시한(가짜 OS 대기), `InitiallyLocked`(다른 스레드의 첫 해제가 보유 스택 검사에 걸리지 않음).

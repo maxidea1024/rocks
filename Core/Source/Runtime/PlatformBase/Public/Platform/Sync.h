@@ -1,17 +1,9 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Platform/Sync/WaitTypes.h>
 
 namespace rocks::platform {
-
-// 대기 시간 단위는 millisecond다. 0은 즉시 검사이며 아래 값만 무한 대기를 뜻한다.
-inline constexpr uint32 InfiniteTimeout = NumericLimits<uint32>::Max();
-
-enum class WaitResult {
-    Signaled,
-    TimedOut,
-    Failed
-};
 
 // 할당 없는 native mutex wrapper이며 같은 thread의 재귀 Lock은 지원하지 않는다.
 // 잠근 thread가 Unlock해야 하며, 모든 사용자와 대기자가 끝난 뒤에만 파괴한다.

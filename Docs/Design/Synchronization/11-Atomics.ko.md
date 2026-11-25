@@ -68,6 +68,7 @@ public:
 
 - `Atomics.h`에 `void CpuPause() noexcept`를 둔다. x86-64는 `__builtin_ia32_pause()`, ARM64는 `__builtin_arm_isb(15)`(UE와 같은 `isb`)다. 정책 `compiler-builtin`의 `Atomics.h` 허용 목록에 이 두 builtin을 더한다.
 - `YieldThread()`(OS 양보)와 이름으로 구분한다.
+- `SpinBackoff::Pause`의 양보는 내보낸 함수 `detail::YieldAfterSpin()`을 부른다(개정 4). `Platform/Thread.h`가 `Platform/Sync.h`를 include하고 `Sync.h`가 `Atomics.h`를 쓰므로 `Atomics.h`가 `Thread.h`를 include하면 순환이다. `CpuPause` 부분은 inline이다.
 - `SpinBackoff`(D8): 반복 하나의 상태(횟수)다. `Pause()`는 처음 `PauseLimit`번(기본 40)은 `CpuPause()`, 그 뒤로는 `YieldThread()`다. 시간이 아니라 횟수로 넘어간다. 잠금 밖에서 "값이 바뀔 때까지 짧게 도는" 모든 반복이 이것을 쓴다(8.5절).
 
 ```cpp
@@ -90,10 +91,10 @@ private:
 | 연산 | 뜻 | 대체하는 곳 |
 |---|---|---|
 | `FetchMax(value)` | 현재 값보다 크면 바꾼다. 이전 값을 돌려준다 | `TraceBuffers.cpp` 102–110행 |
-| `TryFetchAddBounded(value, limit)` | 더해도 `limit` 이하일 때만 더한다. 성공이면 `Optional<T>`(이전 값), 아니면 빈 값 | `TraceBuffers.cpp` 189–200행, `DynamicLibrary.cpp` 185–194행 |
+| `TryFetchAddBounded(value, limit, previous)` | 더해도 `limit` 이하일 때만 더한다(감김도 넘는 것으로 본다). 성공이면 true이고 `previous`에 이전 값을 쓴다. 아니면 false이고 아무것도 바꾸지 않는다(개정 4: PlatformBase에는 `Optional`이 없어 출력 인자로) | `TraceBuffers.cpp` 189–200행, `DynamicLibrary.cpp` 185–194행 |
 | `FetchAddSaturating(value, limit)` | 넘으면 `limit`에 멈춘다 | `Archive.cpp` 242–262행 |
-| `TryIncrementIfNonZero()` | 0이 아닐 때만 1 올린다(약한 참조 승격) | `SharedPtr.h` 52–62행 |
-| `TakeUniqueNumber()` | 0을 쓰지 않는 단조 번호를 CAS로 하나 받는다. 소진되면 빈 `Optional`(호출자가 Fatal 또는 오류) | `StackAllocator.cpp` 13–20행, `TypeRegistry.cpp` 18–25행, `Name.cpp` 9–20행 |
+| `TryIncrementIfNonZero()` | 0이 아닐 때만 1 올린다(약한 참조 승격). 최댓값에서도 넘치지 않게 false다 | `SharedPtr.h` 52–62행 |
+| `TakeUniqueNumber(number)` | 0을 쓰지 않는 단조 번호(1부터 최댓값까지)를 CAS로 하나 받는다. 받으면 true이고 `number`에 쓴다. 소진되면 false(호출자가 Fatal 또는 오류, 개정 4: 출력 인자) | `StackAllocator.cpp` 13–20행, `TypeRegistry.cpp` 18–25행, `Name.cpp` 9–20행 |
 | `FetchUpdate(function)` | 현재 값에 함수(`T → T`, noexcept)를 적용한 결과를 CAS 반복으로 쓴다. 이전 값을 돌려준다. 함수는 부작용이 없어야 한다(여러 번 불릴 수 있다) | `TraceEvents.cpp` 133–139행(double을 `uint64` bit 표현으로 더하기) |
 
 - 원자 참조 계수 전용 타입(UE `TAtomicRefCount`)은 두지 않는다. UE 타입의 실질은 AutoRTFM 처리이고(2.3절), Rocks에서는 `Atomic<uint32>` + `FetchSub<AcquireRelease>` + 위 보조 연산이면 된다(D16).

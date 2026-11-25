@@ -7,6 +7,7 @@
 - 빌드에 `-Wthread-safety`를 켜고 경고를 오류로 둔다. Windows(clang-cl)를 포함한 모든 대상에서 컴파일 때 돈다. 실행 시간 운에 기대지 않는 유일한 경쟁 검사다.
   - **실측(2026-11-18, clang-cl 21.1.6).** clang-cl이 `-Wthread-safety`를 접두 그대로 받는다. `/W4 /WX`와 함께 주면 보호 변수 쓰기가 `error: writing variable 'v' requires holding mutex 'm' exclusively [-Werror,-Wthread-safety-analysis]`로 막힌다. `/W4`만으로는 켜지지 않는다.
   - **빌드 변경(SY0).** `Programs/Rocks.Build/ActionGraph.cs`의 Windows 인자(430행 `/W4`·`/WX` 옆)와 POSIX 언어 인자(471–472행)에 `-Wthread-safety`를 더한다. MetaCompiler는 네이티브 프로필 인자만 `--clang-arg`로 받는다. 허용 목록을 늘릴 때 AST 동등성 검토와 회귀 검사를 먼저 둔다는 규칙이 있다(`Build/README.md` 140행). 그래서 이 경고 인자를 허용 목록에 더하고 회귀 검사를 함께 둔다. 경고 인자라 AST는 바뀌지 않는다.
+  - **구현(개정 4).** `-Wthread-safety`는 AST 프로필(`NativeCompileProfile`, MetaCompiler 입력)이 아니라 번역 단위 공통 인자(`ActionGraph.cs` `Common`, ThinLTO·coverage 인자와 같은 자리)에 넣었다. 경고 인자라 AST가 바뀌지 않으므로 MetaCompiler가 볼 필요가 없고, 그래서 `--clang-arg` 허용 목록과 그 회귀 검사를 바꾸지 않는다. 오류화는 프로필의 `/WX`·`-Werror`가 한다.
   - **범위(D32).** 외부 라이브러리(ThirdParty manifest로 빌드하는 모듈)에는 걸지 않는다. Rocks 모듈만이다.
 - 매크로는 SY0에서 `Base/Compiler.h`에 둔다. 주석 달기는 SY2부터 새 타입·새 코드에 하고, 기존 필드는 SY6에서 옮기며 단다. 분석이 표현하지 못하는 곳(조건부 잠금, 잠금 넘겨주기, 상태 word 안의 `IntrusiveMutex`)은 `ROCKS_NO_THREAD_SAFETY_ANALYSIS`와 이유 주석이다(D20).
 

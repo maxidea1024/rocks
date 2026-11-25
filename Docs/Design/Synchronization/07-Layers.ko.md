@@ -27,7 +27,7 @@ UE는 OS wrapper를 `HAL/`, parking lot 계열을 `Async/`에 두지만 둘 다 
 | 플랫폼 | 수단 | 근거·이유 |
 |---|---|---|
 | Windows | `WaitOnAddress`·`WakeByAddressSingle`(Synchronization.lib) | UE와 같다. 시간 제한은 남은 millisecond로 다시 부른다. 링크는 `PlatformBase.Build.cs`의 Windows 분기에 `SystemLibraries = ["Synchronization"]`을 넣어 한다. 빌드 도구가 이 칸을 검사하고 `.lib`로 넘긴다(`Programs/Rocks.Build/InputValidation.cs` 136행, `ActionGraph.cs` 280–281행). 기본 링크 목록(`ActionGraph.cs` 318행)에는 없다(D32) |
-| Android(API 26 이상) | `syscall(SYS_futex, FUTEX_WAIT_BITSET_PRIVATE)`(절대 monotonic 시한), `FUTEX_WAKE_PRIVATE` | UE와 같다. `EINTR`·`EAGAIN`은 다시 검사한다 |
+| Android(API 26 이상) | `syscall(SYS_futex, FUTEX_WAIT_PRIVATE)`(상대 시한, CLOCK_MONOTONIC 기준), `FUTEX_WAKE_PRIVATE` | UE는 절대 시한 `FUTEX_WAIT_BITSET_PRIVATE`다. Rocks는 호출자(`WaiterSignal::WaitFor`)가 깰 때마다 최초 시한의 남은 시간을 다시 계산하므로 상대 시한으로 같은 뜻이 된다(개정 4). `EINTR`·`EAGAIN`·`ETIMEDOUT`은 다시 검사한다 |
 | macOS(최소 13.0, `Programs/Rocks.Build/Toolchain.cs` 131–134행) | `pthread_mutex_t`+`pthread_cond_t`(스레드 레코드마다 하나) | `os_sync_wait_on_address`는 14.4부터라 최소 버전 13.0에서 늘 쓸 수 없다. `__ulock_wait`는 비공개 API라 쓰지 않는다. UE도 Apple은 조건 변수판이다. 14.4 이상에서 `__builtin_available`로 바꾸는 것은 측정 뒤(D4) |
 
 `WaiterSignal`은 스레드 레코드와 `detail::QueueMutex` 대기 노드 안에만 있고 대기자는 늘 그 스레드 하나다. 그래서 OS 쪽 요구는 "값이 0인 동안 잠들기, 1로 바꾸고 깨우기, 시한"뿐이다. 모든 잠금의 OS 의존은 이 타입 하나다.

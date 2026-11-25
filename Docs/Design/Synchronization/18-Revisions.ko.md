@@ -12,3 +12,4 @@
   - 사실 정정: UE ParkingLot `Reserve` 시점·재진입 검사 줄·scratch 할당기·TLS 파괴 경로, `FAAArrayQueue` 사용처(`LocalWorkQueue.h`), 사용 수 재계산, `EV` 36행, `TQueue`·`TCircularQueue` 제외 목록, IntrusiveMutex 대기 bit 해제 시점. Rocks 쪽은 D3D11·D3D12 줄 번호, TraceCapture Mutex 파일 수, `DeviceOwnership` 분류, RenderBase 인용 줄, 빠진 중복(`FrameArena`, `LogSystem` 소비자 spin·`WaitForSpace`, `TraceEvents` double 더하기, 시험의 폴링 반복).
   - Task 설계 문서가 없음을 적고 work-stealing·overflow·oversubscription을 "Task 설계(후속 문서)"로 남겼다(D33).
 - 개정 3(2026-11-22): 실시간 깨우기 `RealtimeWakeSignal`(9.6절, D34, 단계 SY12)과 6절 대응표 한 줄. [오디오 시스템](../AudioSystem.ko.md) AD26·PR21의 요구다.
+- 개정 4(2026-11-25): 착수 기록. 사용자 결정으로 오디오 세션이 SY0·SY1·SY2·SY7·SY12를 별도 브랜치에서 구현한다(머리말·15절). 문서를 장 파일로 나눴다(문서 배치 규칙).
