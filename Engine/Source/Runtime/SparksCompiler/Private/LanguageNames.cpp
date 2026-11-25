@@ -1,5 +1,7 @@
 #include "LanguageNames.h"
 
+#include <SparksCompiler/LanguageCatalog.h>
+
 namespace rocks::sparks::detail {
 
 namespace {
@@ -72,19 +74,6 @@ constexpr StringView EngineReservedNames[] = {
     "Collider",    "World",        "Connection",       "PlaySession",    "Hit",
     "Error"};
 
-constexpr StringView HookNames[] = {
-    "Awake",          "Enable",        "Start",   "Tick",         "FixedTick",
-    "LateTick",       "Disable",       "Destroy", "TriggerEnter", "TriggerExit",
-    "CollisionEnter", "CollisionExit", "Validate"};
-
-struct UnityHook {
-    StringView name;
-    StringView hook;
-};
-
-constexpr UnityHook UnityHooks[] = {
-    {"Update", "Tick"}, {"FixedUpdate", "FixedTick"}, {"LateUpdate", "LateTick"}};
-
 constexpr StringView OnPrefix = "On";
 
 } // namespace
@@ -130,7 +119,8 @@ bool IsReservedName(StringView name) noexcept {
 }
 
 StringView HookForMemberName(StringView name) noexcept {
-    for (const StringView hook : HookNames) {
+    for (const LanguageHook& entry : LanguageHooks()) {
+        const StringView hook = entry.name;
         if (hook == name) {
             return hook;
         }
@@ -142,9 +132,9 @@ StringView HookForMemberName(StringView name) noexcept {
         }
     }
 
-    for (const UnityHook& unity : UnityHooks) {
-        if (unity.name == name) {
-            return unity.hook;
+    for (const UnityAlias& unity : UnityAliases()) {
+        if (unity.hook && unity.unity == name) {
+            return unity.rocks;
         }
     }
 

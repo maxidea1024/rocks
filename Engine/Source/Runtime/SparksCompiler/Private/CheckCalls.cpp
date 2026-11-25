@@ -53,29 +53,6 @@ bool TypeChecker::HasIncompleteMembers(uint32 type) const noexcept {
     return false;
 }
 
-bool TypeChecker::MemberAvailable(uint32 member, uint32 receiver) const noexcept {
-    const Symbol& entry = compilation_.symbols_[member];
-    if (entry.kind != SymbolKind::LanguageField && entry.kind != SymbolKind::LanguageFunction) {
-        return true;
-    }
-
-    const uint32 element = receiver == NoType ? NoType : Argument(receiver, 0);
-    switch (static_cast<PreludeCondition>(entry.index)) {
-    case PreludeCondition::Equatable:
-        return IsEquatable(element);
-    case PreludeCondition::Ordered:
-        return IsOrdered(element);
-    case PreludeCondition::ValueElement:
-        return !IsObjectType(element);
-    case PreludeCondition::ObjectElement:
-        return IsObjectType(element);
-    case PreludeCondition::NotVoid:
-        return element != voidType_;
-    default:
-        return true;
-    }
-}
-
 ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 node) noexcept {
     // 재귀 경로(`a.b.c ...`)의 frame에는 받는 값만 둔다(CheckBinary 참고).
     const ExpressionValue receiver =
@@ -356,10 +333,6 @@ void TypeChecker::ReportStaleRead(const CheckContext& context, uint32 objectNode
                "object can be destroyed while the function waits.",
                fix.View());
     }
-}
-
-bool TypeChecker::IsObjectType(uint32 type) const noexcept {
-    return type != NoType && IsReference(type) && !IsAssetType(type);
 }
 
 ExpressionValue TypeChecker::CheckCall(const CheckContext& context, uint32 node,
