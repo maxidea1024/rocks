@@ -1,0 +1,177 @@
+// A04 셰이딩 probe다(Docs/Design/EngineShaders 4.4·7.5·7.6절). ShadingFloatProbePixel이 RGBA32Float 타깃에
+// 사례마다 결과를 쓴다: BRDF 항 값(CPU double 대조), 상반성, 반구 격자 위 값(CPU가 적분 — 정규화·백색
+// 노 시험), VNDF 표본(통계 시험)과 pdf 격자. 기대값은 Sandbox EngineShaderReferenceShading.cpp다.
+//
+// 반구 격자: 열 x는 φ = 2π(x + ½)/W, 행 y는 s = (y + ½)/H이고 cos θ = 1 − s²다(θ = 0 근처를 촘촘히 —
+// dω = 2s ds dφ). VNDF 표본은 Math/SampleWarping, 분포·마스킹은 Shading/MicrofacetTerms다.
+#include "/Engine/Private/Common/ShaderPrelude.rsh"
+#include "/Engine/Private/Math/SampleWarping.rsh"
+#include "/Engine/Private/Shading/DiffuseTerms.rsh"
+#include "/Engine/Private/Shading/EnvironmentBrdf.rsh"
+#include "/Engine/Private/Shading/MicrofacetTerms.rsh"
+#include "/Engine/Private/Shading/SurfaceAttributes.rsh"
+#include "/Engine/Private/Shading/SurfaceShading.rsh"
+#include "/Plugin/EngineShaderTests/Common/ProbeCommon.rsh"
+
+// 반구 격자 방향이다(위 머리 주석의 사상). height는 행 수다.
+float3 ProbeHemisphereGridDirection(uint caseIndex, uint height) {
+    const uint2 xy = ProbeCoordinates(caseIndex);
+    const float s = ((float)xy.y + 0.5) / (float)height;
+    const float cosTheta = 1.0 - s * s;
+    const float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    const float phi = ((float)xy.x + 0.5) * (TwoPi / (float)ProbeWidth());
+    return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+}
+
+// 위 반구 방향(z > 0)이다.
+float3 ProbeUpperDirection(uint caseIndex, uint stream) {
+    const float3 d = ProbeDirection(caseIndex, stream);
+    return normalize(float3(d.xy, abs(d.z) + 0.01));
+}
+
+// GGX 반사 BRDF(F = 1) D · Vis다.
+float SpecularGgx(float alpha, float3 l, float3 v) {
+    const float3 h = normalize(l + v);
+    return DistributionGgx(alpha, saturate(h.z)) * VisibilitySmithJointGgx(alpha, saturate(v.z), saturate(l.z));
+}
+
+float4 ShadingFloatProbePixel(float4 position : SV_Position) : SV_Target0 {
+    const uint f = ProbeFunction();
+    const uint s = ProbeSelector();
+    const uint c = ProbeCase(position);
+    const float roughness = ProbeUnit(c, 0u) * 0.98 + 0.02;
+    const float alpha = roughness * roughness;
+    const float mu = ProbeUnit(c, 1u);
+    if (f == ProbeDistributions) {
+        const float3 h = ProbeUpperDirection(c, 2u);
+        const float alphaY = ProbeUnit(c, 5u) * 0.98 + 0.02;
+        return float4(DistributionGgx(alpha, mu), DistributionGgxAniso(alpha, alphaY, h.z, h.x, h.y),
+                      DistributionCharlie(roughness, mu), DistributionInverseGgx(alpha, mu));
+    }
+
+    if (f == ProbeDistributionGrid) {
+        // 행 묶음마다 α = (묶음 + 1) / 16(16 묶음, 묶음 하나는 parameters.x 행).
+        const uint rowsPerAlpha = (uint)Probe.parameters.x;
+        const uint2 xy = ProbeCoordinates(c);
+        const uint band = xy.y / rowsPerAlpha;
+        const float bandAlpha = (float)(band + 1u) / 16.0;
+        const uint local = (xy.y % rowsPerAlpha) * ProbeWidth() + xy.x;
+        const float3 h = ProbeHemisphereGridDirection(local, rowsPerAlpha);
+        return float4(DistributionGgx(bandAlpha, h.z) * h.z, DistributionCharlie(bandAlpha, h.z) * h.z,
+                      DistributionInverseGgx(bandAlpha, h.z) * h.z, DistributionGgxAniso(bandAlpha, bandAlpha * 0.5, h.z, h.x, h.y) * h.z);
+    }
+
+    if (f == ProbeVisibility) {
+        const float nl = ProbeUnit(c, 2u);
+        const float3 v = ProbeUpperDirection(c, 3u);
+        if (s == 0u) {
+            return float4(VisibilitySmithJointGgx(alpha, mu, nl), VisibilitySmithJointGgxApprox(alpha, mu, nl),
+                          SmithG1Ggx(alpha, mu), SmithG1GgxAniso(v, float2(alpha, ProbeUnit(c, 6u) * 0.98 + 0.02)));
+        }
+
+        return float4(SmithLambdaGgx(alpha, mu + 0.001), 0.0, 0.0, 0.0);
+    }
+
+    if (f == ProbeFresnel) {
+        const float f0 = ProbeUnit(c, 2u);
+        const float eta = 1.0 + ProbeUnit(c, 3u) * 2.0;
+        const float etaInverse = (ProbeBits(c, 4u) & 1u) != 0u ? 1.0 / eta : eta;
+        return float4(FresnelSchlick(f0, 1.0, mu), FresnelSchlick(float3(f0, f0 * 0.5, 0.04), ProbeUnit(c, 5u), mu).y,
+                      FresnelDielectric(etaInverse, mu), RoughnessToAlpha(roughness * roughness));
+    }
+
+    if (f == ProbeReciprocity) {
+        const float3 l = ProbeUpperDirection(c, 2u);
+        const float3 v = ProbeUpperDirection(c, 5u);
+        const float3 h = normalize(l + v);
+        const float3 white = float3(1.0, 1.0, 1.0);
+        if (s == 0u) {
+            return float4(SpecularGgx(alpha, l, v), SpecularGgx(alpha, v, l),
+                          DiffuseBurley(white, roughness, v.z, l.z, dot(l, h)).x,
+                          DiffuseBurley(white, roughness, l.z, v.z, dot(v, h)).x);
+        }
+
+        return float4(DiffuseChan(white, roughness, v.z, l.z, dot(v, h), h.z).x,
+                      DiffuseChan(white, roughness, l.z, v.z, dot(l, h), h.z).x, 0.0, 0.0);
+    }
+
+    if (f == ProbeFurnace) {
+        // 그리기마다 보는 방향 cos(parameters.x)와 roughness(parameters.y), 격자는 빛 방향이다.
+        const float viewCos = Probe.parameters.x;
+        const float drawRoughness = Probe.parameters.y;
+        const float drawAlpha = drawRoughness * drawRoughness;
+        const float3 v = float3(sqrt(max(1.0 - viewCos * viewCos, 0.0)), 0.0, viewCos);
+        const float3 l = ProbeHemisphereGridDirection(c, (uint)Probe.parameters.z);
+        const float3 h = normalize(l + v);
+        const float3 white = float3(1.0, 1.0, 1.0);
+        return float4(SpecularGgx(drawAlpha, l, v) * l.z, DiffuseBurley(white, drawRoughness, v.z, l.z, dot(l, h)).x * l.z,
+                      DiffuseChan(white, drawRoughness, v.z, l.z, dot(v, h), h.z).x * l.z, DiffuseLambert(white).x * l.z);
+    }
+
+    if (f == ProbeDiffuse) {
+        const float3 l = ProbeUpperDirection(c, 2u);
+        const float3 v = ProbeUpperDirection(c, 5u);
+        const float3 h = normalize(l + v);
+        const float3 albedo = float3(ProbeUnit(c, 8u), 0.5, 1.0);
+        return float4(DiffuseLambert(albedo).x, DiffuseBurley(albedo, roughness, v.z, l.z, dot(l, h)).x,
+                      DiffuseChan(albedo, roughness, v.z, l.z, dot(v, h), h.z).x, WrapLighting(ProbeSigned(c, 9u, 0), mu));
+    }
+
+    if (f == ProbeEnvironmentBrdf) {
+        const float2 scaleBias = EnvironmentBrdfApprox(mu, roughness);
+        const float3 f0 = float3(ProbeUnit(c, 2u), 0.04, 1.0);
+        return float4(scaleBias, EnvironmentBrdfApproxSpecular(f0, ProbeUnit(c, 3u), mu, roughness).xy);
+    }
+
+    if (f == ProbeSurfaceDefaults) {
+        const SurfaceAttributes surface = DefaultSurfaceAttributes();
+        switch (c) {
+        case 0u:
+            return float4(surface.baseColor, surface.metallic);
+        case 1u:
+            return float4(surface.specular, surface.roughness, surface.ambientOcclusion, surface.opacity);
+        case 2u:
+            return float4(surface.normal, surface.opacityMask);
+        case 3u:
+            return float4(surface.emissive, (float)surface.shadingModel);
+        case 4u:
+            return float4(surface.customData0, surface.customData1, surface.anisotropy, 0.0);
+        default:
+            return float4(surface.tangent, 0.0);
+        }
+    }
+
+    if (f == ProbeShadingParameters) {
+        SurfaceAttributes surface = DefaultSurfaceAttributes();
+        surface.baseColor = float3(ProbeUnit(c, 2u), ProbeUnit(c, 3u), ProbeUnit(c, 4u));
+        const uint pick = ProbeBits(c, 5u);
+        surface.metallic = (pick & 3u) == 0u ? 0.0 : ((pick & 3u) == 1u ? 1.0 : ProbeUnit(c, 6u));
+        surface.specular = ((pick >> 2) & 1u) == 0u ? 0.5 : ProbeUnit(c, 7u);
+        surface.roughness = ProbeUnit(c, 8u);
+        surface.shadingModel = (pick >> 3) % 4u;
+        const ShadingParameters shading = MakeShadingParameters(surface);
+        if (s == 0u) {
+            return float4(shading.diffuseColor, shading.f90);
+        }
+
+        if (s == 1u) {
+            return float4(shading.f0, shading.alpha);
+        }
+
+        return float4(shading.roughness, (float)shading.shadingModel, shading.supported ? 1.0 : 0.0, 0.0);
+    }
+
+    // VNDF: 보는 방향은 values[0].xyz(국소, z > 0), α는 parameters.xy다.
+    const float3 view = Probe.values[0].xyz;
+    const float2 vndfAlpha = Probe.parameters.xy;
+    if (f == ProbeVndfSample) {
+        const float2 u = float2(ProbeUnit(c, 0u), ProbeUnit(c, 1u));
+        return float4(SampleGgxVisibleNormal(view, vndfAlpha, u), 0.0);
+    }
+
+    // ProbeVndfPdfGrid
+    const float3 h = ProbeHemisphereGridDirection(c, (uint)Probe.parameters.z);
+    const float distribution = DistributionGgxAniso(vndfAlpha.x, vndfAlpha.y, h.z, h.x, h.y);
+    const float pdf = GgxVisibleNormalPdf(SmithG1GgxAniso(view, vndfAlpha), dot(view, h), distribution, view.z);
+    return float4(pdf, distribution, h.z, 0.0);
+}
