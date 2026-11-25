@@ -10,8 +10,12 @@
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Move.h>
+#include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
+#include <AssetRuntime/CookedManifest.h>
 #include <Engine/Engine.h>
+#include <EngineAssets/EngineAssetsSubsystem.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstance.h>
 #include <Gameplay/GameInstanceClient.h>
@@ -28,6 +32,7 @@
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
 #include <PlatformWindow/Window.h>
+#include <RenderBase/CookedManifestShaderLibraries.h>
 #if SANDBOX_TRACE_ANALYSIS
 #include <TraceAnalysis/TraceModel.h>
 #endif
@@ -318,13 +323,86 @@ void LogApkProbe() noexcept {
               size, StringView(text, length));
 }
 
+// 엔진 전용 쿠킹 결과(`asset-cook --engine --profile=<실행 프로파일>`)의 매니페스트가 있는가다
+// (ShaderSystem 16.1절 SSD48). 쿠킹 루트는 EngineAssets와 같은 규칙(asset.cooked_root 비었을 때의
+// 엔진 전용 기본값)이다. 한계: asset.cooked_root를 설정으로 바꾼 실행은 보지 않는다.
+bool HasEngineCook(Allocator& allocator, StringView engineDirectory) noexcept {
+    char executable[4096];
+    usize executableBytes = 0;
+    if (engineDirectory.IsEmpty() ||
+        !platform::GetExecutablePath(executable, sizeof(executable), executableBytes)) {
+        return false;
+    }
+
+    String root(allocator);
+    if (!ResolveCookedRoot(StringView(), engineDirectory, ResolveRuntimeProfile(StringView()),
+                           ExecutableDirectoryOf(StringView(executable, executableBytes)), root) ||
+        !root.TryAppend("/") || !root.TryAppend(CookedManifestFileName)) {
+        return false;
+    }
+
+    bool exists = false;
+    return platform::PhysicalFileSystem().FileExists(root.CStr(), root.View().ByteCount(),
+                                                     exists) &&
+           exists;
+}
+
+// 엔진 셰이더 호스트에 붙인 쿠킹 라이브러리 원천이다(SSD48). 파괴하면 떼고 놓는다 — 렌더 장치·
+// lane(ScreenHost)보다 먼저 선언해 그 뒤에 파괴한다.
+class CookedShaderAttachment {
+public:
+    explicit CookedShaderAttachment(render::EngineShaderHost& host) noexcept : host_(host) {
+    }
+
+    ~CookedShaderAttachment() noexcept {
+        if (source_) {
+            host_.DetachCookedLibraries(*source_);
+        }
+    }
+
+    CookedShaderAttachment(const CookedShaderAttachment&) = delete;
+    CookedShaderAttachment& operator=(const CookedShaderAttachment&) = delete;
+
+    // 엔진 에셋 Subsystem의 매니페스트(backend·셰이더 라이브러리 행 사본)로 원천을 만들어 붙인다.
+    void Attach(Allocator& allocator, const EngineAssetsSubsystem& assets) noexcept {
+        auto created = render::CookedManifestShaderLibraries::TryCreate(
+            allocator, platform::PhysicalFileSystem(), assets.Manifest(), assets.CookedRoot());
+        if (!created || !host_.AttachCookedLibraries(*created.Value())) {
+            Log::Warning(LogSandboxHost,
+                         "The cooked engine shader libraries could not be attached; the shader "
+                         "provider is used");
+            return;
+        }
+
+        source_ = Move(created.Value());
+        Log::Info(LogSandboxHost, "Engine shaders come from the cooked engine libraries at {Root}",
+                  assets.CookedRoot());
+    }
+
+    const render::CookedShaderLibrarySource* Source() const noexcept {
+        return source_.Get();
+    }
+
+private:
+    render::EngineShaderHost& host_;
+    UniquePtr<render::CookedManifestShaderLibraries> source_;
+};
+
 // 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 돌린다
 // (Docs/Design/EngineRuntime 21.5절). 헤드리스는 고정 delta로 options.frames만큼, 창 모드는 실제
 // 시간으로 창이 닫히거나 frames(0이면 상한 없음)까지 돈다. 프레임 입력 상태를 첫 LocalPlayer의 입력
 // 원천으로 건다. 엔진 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지 않는다).
 int RunEngine(Allocator& allocator, const EngineHostOptions& options,
-              config::ConfigContext& settings, ModuleLoader& modules) noexcept {
+              config::ConfigContext& settings, ModuleLoader& modules,
+              StringView engineDirectory) noexcept {
     LogApkProbe();
+    // 엔진 전용 실행의 쿠킹 루트(SSD48 — EngineAssets 10.3.1절 A4f4 5번)다. 엔진 쿠킹 매니페스트가
+    // 있을 때만 EngineAssets Subsystem을 넣는다(없으면 그 초기화가 NotFound로 엔진 시작을 막는다 —
+    // 개발 트리는 쿠킹 없이 공급자로 돈다).
+    EngineAssetsSubsystem::SetEngineOnlyDirectory(engineDirectory);
+    const bool engineCook = HasEngineCook(allocator, engineDirectory);
+    const EngineSubsystemType engineAssets[] = {EngineAssetsSubsystemType()};
+    CookedShaderAttachment cooked(shaders::Host());
     UniquePtr<platform::Window> window;
     UniquePtr<platform::GamepadBackend> gamepads;
     // 창 렌더 경로(Docs/Design/RenderBase 18.5절 1항)다. 엔진보다 먼저 선언해 엔진 Shutdown 뒤에
@@ -365,9 +443,17 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = options.window ? 0.0 : HeadlessFrameSeconds;
     config.registerTypes = &RegisterSandboxTypes;
+    if (engineCook) {
+        config.subsystems = Span<const EngineSubsystemType>(engineAssets);
+    }
+
     Engine engine(allocator);
     if (!engine.Initialize(config)) {
         return 1;
+    }
+
+    if (const EngineAssetsSubsystem* assets = engine.GetSubsystem<EngineAssetsSubsystem>()) {
+        cooked.Attach(allocator, *assets);
     }
 
     // 엔진 묶음·PostEngineInit 모듈이 셰이더 타입을 등록했다. 렌더 lane 시작 전 자리에서 등록부를
@@ -380,11 +466,24 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     // 창 모드면 장치와 렌더 lane을 시작한다. 엔진 셰이더를 열 원천이 없거나(Release·Android)
     // 장치·lane을 만들지 못하면 렌더 없이 계속한다(빈 프레임 경로, 18.5절 1항).
     if (window && options.render) {
-        if (!screen::CanOpenEngineShaders(shaders::Host())) {
+        // 쿠킹 원천이 있으면 그 backend 순서로 장치를 고르고(auto), 셰이더 없는 쿠킹이면 장치를
+        // 만들지 않는다(SSD48 — UE 전용 서버의 NullDrv 자리).
+        const render::CookedShaderLibrarySource* source = cooked.Source();
+        const bool shaderless = source != nullptr && source->Backends().IsEmpty();
+        auto create = [&]() noexcept {
+            return source != nullptr && options.graphics == screen::ScreenBackend::Auto
+                       ? screen::CreateScreenDeviceInOrder(allocator, source->Backends(),
+                                                           options.graphicsValidation)
+                       : screen::CreateScreenDevice(allocator, options.graphics,
+                                                    options.graphicsValidation);
+        };
+        if (shaderless) {
+            Log::Warning(LogSandboxHost, "Screen rendering is not available (Unsupported): this "
+                                         "cook has no shader formats");
+        } else if (!screen::CanOpenEngineShaders(shaders::Host())) {
             Log::Info(LogSandboxHost, "Screen rendering is not available: no shader provider or "
                                       "cooked shader libraries");
-        } else if (auto created = screen::CreateScreenDevice(allocator, options.graphics,
-                                                             options.graphicsValidation)) {
+        } else if (auto created = create()) {
             device = Move(created.Value());
             auto host = UniquePtr<screen::ScreenHost>::TryMake(allocator, allocator, *device,
                                                                shaders::Host());
@@ -794,11 +893,12 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
             // 엔진 셰이더 호스트(Docs/Design/RenderBase 9.12절): Sandbox 타입·원문 디렉터리를 넣고
             // 등록부와 함께 서비스로 올린다. 모듈이 Startup에서 엔진 셰이더 타입·공급자를 넣는다.
             // 실패하면 Error를 남기고 모듈은 등록부 없이 시작한다.
-            (void)shaders::AttachHost(modules);
+            (void)shaders::AttachHost(modules, shaders::SandboxShaderScope::Engine);
 
             const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
             if (hostModules.IsOk()) {
-                exitCode = RunEngine(allocator, options, settings.Context(), modules);
+                exitCode =
+                    RunEngine(allocator, options, settings.Context(), modules, boot.engineDir);
             } else {
                 Log::Error(LogSandboxHost,
                            "Host module {Module} failed to start ({Code}) at {Stage}: {Message}",

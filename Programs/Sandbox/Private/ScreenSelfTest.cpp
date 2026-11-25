@@ -1,5 +1,6 @@
 #include "ScreenSelfTest.h"
 
+#include "CookedSelfTestShaders.h"
 #include "SandboxGame.h"
 #include "ScreenHost.h"
 #include "SandboxShaders.h"
@@ -25,6 +26,8 @@ using namespace rocks;
 // 창(=capture) 크기와 프레임 수다. 16:9이고 수평 FOV 90°다.
 constexpr uint32 ScreenWidth = 160;
 constexpr uint32 ScreenHeight = 90;
+// 쿠킹 화면 검사 이름("<장치> cooked") 버퍼 byte 수다.
+constexpr usize MaxCookedLabelBytes = 96;
 // 프레임마다 그릴 view다(프레임 번호 1부터 — capture 자리는 프레임 번호 − 1). 1은 장면, 나머지는
 // 텍스처 표시(18.5절 6항)다.
 struct FrameView {
@@ -494,8 +497,11 @@ void CheckInspector(const screen::ScreenRenderer& renderer, const char* name,
 }
 
 // 한 모드를 돌리고 capture를 out에 남긴다. 돌리지 못했으면 false다.
+// host는 엔진 셰이더를 열 호스트다(시험 호스트 또는 쿠킹 호스트 — expectCooked면 쿠킹 라이브러리로
+// 열렸는지도 단언한다).
 bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& device,
-             Allocator& allocator, ModuleLoader& modules, Array<uint8>& out) noexcept {
+             Allocator& allocator, ModuleLoader& modules, const render::EngineShaderHost& host,
+             bool expectCooked, Array<uint8>& out) noexcept {
     const char* modeName = mode == render::RenderLaneMode::Thread ? "thread" : "inline";
     platform::WindowDesc windowDesc;
     windowDesc.title = "Rocks screen self-test";
@@ -512,7 +518,7 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
     const uint64 validationBefore = device.ValidationErrorCount();
     SandboxGame game;
     GameInstanceClient client(allocator, game.config);
-    screen::ScreenHost screen(allocator, device, shaders::Host());
+    screen::ScreenHost screen(allocator, device, host);
     ScreenTestHooks hooks(screen, *window.Value(), queue, client);
     auto started = screen.Start(*window.Value(), mode, hooks.Pump());
     ScreenCheck(started.IsOk(), name, modeName, "render lane starts with the engine render path");
@@ -554,6 +560,15 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
                 "device ownership returned with nothing pending");
     ScreenCheck(device.ValidationErrorCount() == validationBefore, name, modeName,
                 "no validation errors from screen frames");
+    if (expectCooked) {
+        // 쿠킹 엔진 라이브러리(ShaderSystem 16.1절 SSD48)로 열었고 매니페스트 순서의 형식이다.
+        const StringView format = screen.Renderer().ShaderFormat();
+        ScreenCheck(screen.Renderer().OpenedCookedShaders(), name, modeName,
+                    "the engine shader set opens from the cooked engine library");
+        printf("  %s screen (%s): cooked shader format %.*s\n", name, modeName,
+               static_cast<int>(format.ByteCount()), format.Data());
+    }
+
     const Array<uint8>& pixels = screen.Renderer().CapturedPixels(0);
     if (rendered.captures == 0 || !HasCapture(pixels)) {
         return false;
@@ -630,6 +645,32 @@ private:
 
 } // namespace
 
+namespace {
+
+// 두 lane 모드를 host로 돌리고 픽셀이 같은지 본다. 실패 수를 돌려준다.
+uint32 RunScreenModes(const char* name, graphics::Device& device, Allocator& allocator,
+                      ModuleLoader& modules, const render::EngineShaderHost& host,
+                      bool expectCooked) noexcept {
+    Array<uint8> thread(allocator);
+    Array<uint8> inline_(allocator);
+    const bool threadRan = RunMode(name, render::RenderLaneMode::Thread, device, allocator, modules,
+                                   host, expectCooked, thread);
+    const bool inlineRan = RunMode(name, render::RenderLaneMode::Inline, device, allocator, modules,
+                                   host, expectCooked, inline_);
+    if (threadRan && inlineRan) {
+        bool same = thread.Size() == inline_.Size();
+        for (usize index = 0; same && index < thread.Size(); ++index) {
+            same = thread[index] == inline_[index];
+        }
+
+        ScreenCheck(same, name, "both", "thread and inline lane modes produce the same pixels");
+    }
+
+    return screenFailures;
+}
+
+} // namespace
+
 uint32 RunScreenChecks(const char* name, graphics::Device& device, Allocator& allocator,
                        ModuleLoader& modules) noexcept {
     screenFailures = 0;
@@ -643,22 +684,38 @@ uint32 RunScreenChecks(const char* name, graphics::Device& device, Allocator& al
         return 0;
     }
 
-    Array<uint8> thread(allocator);
-    Array<uint8> inline_(allocator);
-    const bool threadRan =
-        RunMode(name, render::RenderLaneMode::Thread, device, allocator, modules, thread);
-    const bool inlineRan =
-        RunMode(name, render::RenderLaneMode::Inline, device, allocator, modules, inline_);
-    if (threadRan && inlineRan) {
-        bool same = thread.Size() == inline_.Size();
-        for (usize index = 0; same && index < thread.Size(); ++index) {
-            same = thread[index] == inline_[index];
-        }
+    return RunScreenModes(name, device, allocator, modules, shaders::Host(), false);
+}
 
-        ScreenCheck(same, name, "both", "thread and inline lane modes produce the same pixels");
+uint32 RunCookedScreenChecks(const char* name, graphics::Device& device, Allocator& allocator,
+                             ModuleLoader& modules) noexcept {
+    screenFailures = 0;
+    if (const char* reason = WindowPresentUnavailableReason(device)) {
+        printf("  [NOT RUN] %s cooked screen: %s\n", name, reason);
+        return 0;
     }
 
-    return screenFailures;
+    CookedSelfTestShaders& cooked = CookedSelfTestShaders::Get();
+    if (!cooked.IsReady()) {
+        printf("  [NOT RUN] %s cooked screen: %s\n", name, cooked.Reason());
+        return 0;
+    }
+
+    // 쿠킹에 없는 backend(Windows의 OpenGL ES 미리보기 — GLES31_PC는 쿠킹하지 않는다)는 공급자
+    // 경로라 이 검사의 대상이 아니다.
+    if (!cooked.Cooks(device.Info().backend)) {
+        printf("  [NOT RUN] %s cooked screen: the engine cook has no format for this backend\n",
+               name);
+        return 0;
+    }
+
+    char label[MaxCookedLabelBytes];
+    snprintf(label, sizeof(label), "%s cooked", name);
+    const uint32 failures = RunScreenModes(label, device, allocator, modules, cooked.Host(), true);
+    printf("  [%s] %s cooked screen: the engine render path draws with the cooked engine "
+           "shader library\n",
+           failures == 0 ? "PASS" : "FAIL", name);
+    return failures;
 }
 
 uint32 RunPawnInputChecks(Allocator& allocator, ModuleLoader& modules) noexcept {
