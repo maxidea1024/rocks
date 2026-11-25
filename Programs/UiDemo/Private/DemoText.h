@@ -47,8 +47,8 @@ public:
 private:
     Result<void> LoadFace(StringView relativePath,
                           SharedPtr<const text::FontFaceData>& out) noexcept;
-    Result<void> Shape(TextLabel& label, StringView value, float size,
-                       StringView typeface) noexcept;
+    Result<void> Shape(TextLabel& label, StringView value, float size, StringView typeface,
+                       int32 letterSpacing) noexcept;
 
     Allocator& allocator_;
     GlyphCacheTextures textures_;

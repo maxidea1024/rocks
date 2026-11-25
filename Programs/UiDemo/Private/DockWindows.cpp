@@ -343,7 +343,10 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
         return Result<bool>::Failure(uploaded.Error());
     }
 
-    auto frame = device_.BeginFrame(host.chain, {0.025f, 0.03f, 0.04f, 1});
+    // 창 바탕은 테마 Background다(내용이 덮지 않는 틈에 보인다).
+    const LinearColor background = host.app.Theme().Get(ThemeSlot::Background);
+    auto frame =
+        device_.BeginFrame(host.chain, {background.r, background.g, background.b, background.a});
     if (!frame) {
         return Result<bool>::Failure(frame.Error());
     }

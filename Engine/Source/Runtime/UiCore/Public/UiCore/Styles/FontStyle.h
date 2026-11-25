@@ -8,6 +8,8 @@ namespace rocks::ui {
 struct FontStyle {
     Typeface typeface = Typeface::Regular;
     float size = 10.0f;
+    // 1/1000 em 자간이다(UE FSlateFontInfo::LetterSpacing).
+    int32 letterSpacing = 0;
     bool operator==(const FontStyle&) const noexcept = default;
 };
 

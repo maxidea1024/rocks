@@ -1,11 +1,10 @@
 #include "DemoText.h"
 
+#include "DemoFiles.h"
+
 #include <Core/Diagnostics/Log.h>
-#include <HostConfig/HostSettings.h>
-#include <Platform/File.h>
 #include <TextLayout/TextShaper.h>
 #include <TextLayoutBackend/TextLayoutBackend.h>
-#include <stdio.h>
 
 // 데모 레이블 텍스트다(Docs/Design/UiToolkit 9.1절 UW2).
 namespace rocks::ui {
@@ -14,28 +13,33 @@ namespace {
 
 inline constexpr LogCategory LogUiDemo{"UiDemo"};
 
-// 경로 버퍼 byte 수다.
-constexpr usize PathBytes = 1024;
-
 // 엔진 폴더 기준 ICU 데이터·시험 글꼴 경로다(Engine/Source/ThirdParty).
 constexpr char IcuDataPath[] = "Source/ThirdParty/IcuData/icudata-79.1-rocks/icudt79l.dat";
-// UE 기본 글꼴(Roboto)의 typeface다(LegacySlateFontInfoCache.cpp 111–122행과 같은 이름).
+// UE 기본 합성 글꼴의 typeface다(LegacySlateFontInfoCache.cpp 111–122행과 같은 이름). VeryLight는
+// UE처럼 Light 파일이고(UE는 hinting만 다르다), BoldCondensed는 Roboto 3의 RobotoCondensed-Bold다.
 struct LatinFace {
     const char* typeface;
     const char* path;
 };
-constexpr LatinFace LatinFaces[] = {
-    {"Regular",
-     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Regular.ttf"},
-    {"Bold",
-     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Bold.ttf"},
-    {"Italic",
-     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Italic.ttf"},
-    {"BoldItalic", "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/"
-                   "Roboto-BoldItalic.ttf"},
-    {"Light",
-     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Light.ttf"}};
+constexpr char RobotoDirectory[] =
+    "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/";
+constexpr LatinFace LatinFaces[] = {{"Regular", "Roboto-Regular.ttf"},
+                                    {"Medium", "Roboto-Medium.ttf"},
+                                    {"Light", "Roboto-Light.ttf"},
+                                    {"VeryLight", "Roboto-Light.ttf"},
+                                    {"Bold", "Roboto-Bold.ttf"},
+                                    {"Black", "Roboto-Black.ttf"},
+                                    {"Italic", "Roboto-Italic.ttf"},
+                                    {"BoldItalic", "Roboto-BoldItalic.ttf"},
+                                    {"BlackItalic", "Roboto-BlackItalic.ttf"},
+                                    {"BoldCondensed", "RobotoCondensed-Bold.ttf"},
+                                    {"BoldCondensedItalic", "RobotoCondensed-BoldItalic.ttf"}};
+// UE Mono typeface(DroidSansMono)다.
+constexpr char MonoFontPath[] =
+    "Source/ThirdParty/TestFontDroidSansMono/aosp-android-4.4_r1/DroidSansMono.ttf";
 constexpr usize LatinFaceCount = sizeof(LatinFaces) / sizeof(LatinFaces[0]);
+// 경로 버퍼 byte 수다.
+constexpr usize FacePathBytes = 256;
 constexpr char HangulFontPath[] = "Source/ThirdParty/TestFontNanumGothic/google-fonts-06bfe0d62a98/"
                                   "ofl/nanumgothic/NanumGothic-Regular.ttf";
 constexpr char ArabicFontPath[] = "Source/ThirdParty/TestFontNotoNaskhArabic/"
@@ -55,34 +59,6 @@ constexpr char LineFeed = '\n';
 
 // 기준 글자(줄 metric을 읽을 face를 고른다)다.
 constexpr uint32 MetricsCodePoint = 'A';
-
-bool ReadFile(const char* path, Array<uint8>& out) noexcept {
-    platform::File file;
-    if (!file.Open(path, platform::FileOpenMode::ReadExisting)) {
-        return false;
-    }
-
-    uint64 size = 0;
-    bool ok = static_cast<bool>(file.Size(size)) &&
-              static_cast<bool>(out.TryResize(static_cast<usize>(size)));
-    if (ok && size != 0) {
-        ok = static_cast<bool>(file.ReadExact(out.Data(), static_cast<usize>(size)).status);
-    }
-
-    const bool closed = static_cast<bool>(file.Close());
-    return ok && closed;
-}
-
-bool EnginePath(StringView relative, char (&out)[PathBytes]) noexcept {
-    char engine[PathBytes] = {};
-    if (!FindEngineDirectory(Span<char>(engine, sizeof(engine)))) {
-        return false;
-    }
-
-    const int written = snprintf(out, sizeof(out), "%s/%.*s", engine,
-                                 static_cast<int>(relative.ByteCount()), relative.Data());
-    return written > 0 && static_cast<usize>(written) < sizeof(out);
-}
 
 // 정렬된 경계 목록에서 byte 위치가 경계인지 본다.
 bool IsBoundary(Span<const usize> boundaries, usize offset) noexcept {
@@ -134,9 +110,8 @@ DemoText::~DemoText() noexcept {
 
 Result<void> DemoText::LoadFace(StringView relativePath,
                                 SharedPtr<const text::FontFaceData>& out) noexcept {
-    char path[PathBytes];
     Array<uint8> bytes(allocator_);
-    if (!EnginePath(relativePath, path) || !ReadFile(path, bytes)) {
+    if (!ReadEngineFile(relativePath, bytes)) {
         Log::Error(LogUiDemo, "Font file not found: {Path}", relativePath);
         return Result<void>::Failure(ErrorCode::NotFound);
     }
@@ -153,8 +128,7 @@ Result<void> DemoText::LoadFace(StringView relativePath,
 Result<void> DemoText::Initialize() noexcept {
     // ICU 데이터는 프로세스 끝까지 살아야 한다(InitializeTextLibraries 계약) — 이 객체가 main
     // 수명이다.
-    char path[PathBytes];
-    if (!EnginePath(IcuDataPath, path) || !ReadFile(path, icuData_) || icuData_.Size() == 0) {
+    if (!ReadEngineFile(IcuDataPath, icuData_) || icuData_.Size() == 0) {
         Log::Error(LogUiDemo, "ICU data not found: {Path}", StringView(IcuDataPath));
         return Result<void>::Failure(ErrorCode::NotFound);
     }
@@ -170,13 +144,27 @@ Result<void> DemoText::Initialize() noexcept {
 
     backend_ = Move(backend.Value());
     SharedPtr<const text::FontFaceData> latin[LatinFaceCount];
+    SharedPtr<const text::FontFaceData> mono;
     SharedPtr<const text::FontFaceData> hangul;
     SharedPtr<const text::FontFaceData> arabic;
     SharedPtr<const text::FontFaceData> emoji;
     for (usize i = 0; i < LatinFaceCount; ++i) {
-        if (auto loaded = LoadFace(LatinFaces[i].path, latin[i]); !loaded) {
+        char path[FacePathBytes] = {};
+        usize length = 0;
+        const char* parts[] = {RobotoDirectory, LatinFaces[i].path};
+        for (const char* part : parts) {
+            for (const char* c = part; *c != '\0' && length + 1 < FacePathBytes; ++c) {
+                path[length++] = *c;
+            }
+        }
+
+        if (auto loaded = LoadFace(StringView(path, length), latin[i]); !loaded) {
             return loaded;
         }
+    }
+
+    if (auto loaded = LoadFace(MonoFontPath, mono); !loaded) {
+        return loaded;
     }
 
     if (auto loaded = LoadFace(HangulFontPath, hangul); !loaded) {
@@ -191,10 +179,12 @@ Result<void> DemoText::Initialize() noexcept {
         return loaded;
     }
 
-    text::CompositeTypefaceEntry latinFace[LatinFaceCount];
+    text::CompositeTypefaceEntry latinFace[LatinFaceCount + 1];
     for (usize i = 0; i < LatinFaceCount; ++i) {
         latinFace[i] = {LatinFaces[i].typeface, {.data = latin[i]}};
     }
+
+    latinFace[LatinFaceCount] = {"Mono", {.data = mono}};
 
     const text::CompositeTypefaceEntry hangulFace[] = {{"Regular", {.data = hangul}}};
     const text::CompositeTypefaceEntry arabicFace[] = {{"Regular", {.data = arabic}}};
@@ -230,7 +220,7 @@ Result<void> DemoText::SetText(TextLabel& label, StringView value, int32 pixelHe
     const float size = static_cast<float>(pixelHeight) *
                        static_cast<float>(text::FontPointsPerInch) /
                        static_cast<float>(text::FontRenderDpi);
-    return Shape(label, value, size, "Regular");
+    return Shape(label, value, size, "Regular", 0);
 }
 
 Result<void> DemoText::SetText(TextLabel& label, StringView value, const FontStyle& font) noexcept {
@@ -238,18 +228,19 @@ Result<void> DemoText::SetText(TextLabel& label, StringView value, const FontSty
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return Shape(label, value, font.size, TypefaceName(font.typeface));
+    return Shape(label, value, font.size, TypefaceName(font.typeface), font.letterSpacing);
 }
 
-Result<void> DemoText::Shape(TextLabel& label, StringView value, float size,
-                             StringView typeface) noexcept {
+Result<void> DemoText::Shape(TextLabel& label, StringView value, float size, StringView typeface,
+                             int32 letterSpacing) noexcept {
     if (font_.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
     Array<text::ShapedGlyph> shaped(allocator_);
-    if (auto made =
-            text::ShapeText(*backend_, *font_, value, {.size = size, .typeface = typeface}, shaped);
+    if (auto made = text::ShapeText(
+            *backend_, *font_, value,
+            {.size = size, .typeface = typeface, .letterSpacing = letterSpacing}, shaped);
         !made) {
         return made;
     }
@@ -326,6 +317,12 @@ Result<void> DemoText::Shape(TextLabel& label, StringView value, float size,
         }
 
         const usize cluster = ClusterOf(graphemes.View(), glyph.cluster);
+        // 강제 줄바꿈 클러스터는 그리지 않고 폭도 없다(UE FTextLayout은 줄을 먼저 나누고 shaping한다 —
+        // TextLabel은 줄바꿈 클러스터의 글리프를 받지 않는다).
+        if (clusters[cluster].hardBreak) {
+            continue;
+        }
+
         auto cached = cache_->FindOrAdd(
             {.face = glyph.face, .glyphIndex = glyph.glyphIndex, .size = size, .scale = 1.0f});
         if (!cached) {

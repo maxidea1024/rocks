@@ -1,7 +1,10 @@
 #include "DemoShaders.h"
 #include "DockWindows.h"
-#include "OrbitWorkspace.h"
-#include "WorkspaceCapture.h"
+#include "GameHud.h"
+#include "Gallery/GalleryCapture.h"
+#include "Gallery/GallerySelfTest.h"
+#include "Gallery/GalleryTextures.h"
+#include "Gallery/GalleryWindow.h"
 #include "SurfaceSelfTest.h"
 
 #include <AssetDatabase/AtomicFileWrite.h>
@@ -14,6 +17,16 @@ namespace {
 
 using namespace rocks;
 using namespace rocks::ui;
+
+// UI 갤러리 창 크기다(Docs/Design/UiToolkit 16장).
+constexpr uint32 GalleryWidth = 1280;
+constexpr uint32 GalleryHeight = 800;
+// 탭 배치 저장 파일과 형식 판이다(갤러리 탭 ID가 바뀌면 판을 올린다).
+constexpr uint32 LayoutVersion = 1;
+constexpr StringView LayoutDirectory = "Saved/UiDemo";
+constexpr StringView LayoutFile = "Gallery.v1.json";
+constexpr StringView LayoutPath = "Saved/UiDemo/Gallery.v1.json";
+constexpr usize LayoutFileLimit = 1024 * 1024;
 
 int Run(launch::ApplicationContext& context) noexcept {
     auto& allocator = context.DefaultAllocator();
@@ -93,90 +106,69 @@ int Run(launch::ApplicationContext& context) noexcept {
         device.Retire(mask.Value());
     };
 
-    auto map = OrbitView::CreateMap(allocator, device);
-    if (!map) {
-        return 3;
-    }
-
-    ROCKS_ON_SCOPE_EXIT {
-        device.Retire(map.Value());
-    };
     SlotArray<BrushTexture> textures(allocator);
-    auto resource = textures.TryAdd({map.Value(), image.Value()});
-    if (!resource) {
-        return 3;
-    }
-
     DemoText font(allocator, device, textures, mask.Value(), image.Value());
     if (!font.Initialize()) {
         return 4;
     }
 
-    TypeRegistry types(allocator);
-    ModuleRegistration modules(types, allocator);
-    if (!RegisterWidgetTypes(modules)) {
-        return 5;
+    // 이미지·9분할·장면 견본용 절차 생성 텍스처다(UiToolkit 16.10절).
+    gallery::GalleryTextures sampleTextures(device, textures, image.Value());
+    if (!sampleTextures.Create(allocator)) {
+        return 3;
     }
 
-    ObjectRegistry objects(allocator, types, {0x554944454d4full, 1});
-    ObjectAccessScope scope(objects.OwnerAccess());
-    OrbitWorkspace workspace(allocator, objects, font);
-    auto area = workspace.Create(resource.Value());
+    gallery::GalleryWindow gallery(allocator, font, sampleTextures);
+    auto area = gallery.Create();
     if (!area) {
         return 6;
     }
 
-    platform::WindowDesc desc;
-    desc.title = "Rocks UI  |  Orbit workspace";
-    desc.width = 1120;
-    desc.height = 680;
     if (selfTest) {
-        return VerifyWorkspaceInput(allocator, area.Value(), workspace.Commands());
+        return gallery::VerifyGallery(allocator, gallery, area.Value());
     }
 
     if (snapshot) {
-        return CaptureWorkspace(allocator, device, solid.Value(), textures, area.Value(),
-                                desc.width, desc.height)
+        const StringView tabs[] = {
+            gallery::GalleryWindow::ColorsTab,   gallery::GalleryWindow::TextTab,
+            gallery::GalleryWindow::WidgetsTab,  gallery::GalleryWindow::LayoutTab,
+            gallery::GalleryWindow::BehaviorTab, gallery::GalleryWindow::EffectsTab};
+        return gallery::CaptureGallery(allocator, device, solid.Value(), textures, area.Value(),
+                                       tabs, GalleryWidth, GalleryHeight)
                    ? 0
                    : 7;
     }
 
+    platform::WindowDesc desc;
+    desc.title = "Rocks UI Gallery";
+    desc.width = GalleryWidth;
+    desc.height = GalleryHeight;
     auto window = platform::Window::Create(allocator, desc);
     if (!window) {
         return 8;
     }
 
-    constexpr uint32 layoutVersion = 2;
-    constexpr StringView directory = "Saved/UiDemo";
-    constexpr StringView layoutFile = "Workspace.v2.json";
     auto& files = platform::PhysicalFileSystem();
     Array<uint8> layoutBytes(allocator);
     bool exists = false;
-    auto read =
-        ReadWholeFile(files, "Saved/UiDemo/Workspace.v2.json", 1024 * 1024, layoutBytes, exists);
-    if (read && exists) {
-        (void)area.Value()->RestoreLayout(layoutVersion, layoutBytes.View());
-    } else if (read && !exists) {
-        auto legacy = ReadWholeFile(files, "Saved/UiDemo/Workspace.v2.layout", 1024 * 1024,
-                                    layoutBytes, exists);
-        if (legacy && exists) {
-            (void)area.Value()->RestoreLegacyLayout(layoutVersion, layoutBytes.View());
-        }
+    if (ReadWholeFile(files, LayoutPath, LayoutFileLimit, layoutBytes, exists) && exists) {
+        (void)area.Value()->RestoreLayout(LayoutVersion, layoutBytes.View());
     }
 
     {
-        DockWindows windows(allocator, device, solid.Value(), textures, workspace.Commands());
+        DockWindows windows(allocator, device, solid.Value(), textures, gallery.Commands());
         if (!windows.Run(Move(window.Value()), area.Value())) {
             return 9;
         }
     }
 
-    if (!area.Value()->SaveLayout(layoutVersion, layoutBytes)) {
+    if (!area.Value()->SaveLayout(LayoutVersion, layoutBytes)) {
         return 10;
     }
 
-    return WriteFileAtomically(files, allocator, directory, layoutFile, layoutBytes.View()) ? 0
-                                                                                            : 10;
+    return WriteFileAtomically(files, allocator, LayoutDirectory, LayoutFile, layoutBytes.View())
+               ? 0
+               : 10;
 }
 
 const launch::ApplicationDescription& Describe() noexcept {

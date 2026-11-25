@@ -12,7 +12,8 @@ UiDemo가 보여 주는 UI 갤러리의 페이지 구성이다(9.1절 UW4의 상
 - 모든 위젯 행에 활성 체크 상자를 둔다(UE `NextSlot`). 끄면 그 행을 `SetEnabled(false)`로 바꿔 UE 비활성 효과(알파 0.45, 비활성 전용 brush)를 보인다.
 - 이름 열은 위에 UE 이름표(UE 갤러리 문구), 아래에 Rocks 이름(작은 글꼴, 흰색 25%)을 둔다. 예: "Primary Button" / `Button + PrimaryButtonStyle()`.
 - 상태가 있는 부품은 상태를 나란히 보인다(체크 상자 해제·체크·미정, 진행 막대 값·marquee).
-- 동작은 실제로 된다. 누르면 눌리고, 고르면 바뀌고, 끌면 움직인다. 바뀐 값은 옆 레이블에 보인다(UE 갤러리의 콤보 레이블처럼).
+- 동작은 실제로 된다. 누르면 눌리고, 고르면 바뀌고, 끌면 움직인다. 값이 있는 부품(슬라이더·숫자 입력·체크 상자·원형 슬라이더·타임라인·키 선택·콤보)은 바뀐 값을 옆 레이블에 보인다(UE 갤러리의 콤보 레이블처럼).
+- **구현된 것은 모두 보인다**(사용자 요청 2026-11-25 — "구현해 놓고 몰라서 안 쓰는 것은 낭비"). 기준은 16.9절 전수 목록이고, 목록의 모든 행이 갤러리 행이거나 "못 보이는 이유와 푸는 단계"를 가진다. Widget 층(UMG 대응) 부품은 같은 Element를 감싼 것이면 Rocks 이름 칸에 "Widget: XWidget"을 함께 적고, Widget 층에만 있는 것은 Widget 호스트(16.10절)로 보인다.
 
 ### 16.2 탭
 
@@ -20,12 +21,15 @@ UiDemo가 보여 주는 UI 갤러리의 페이지 구성이다(9.1절 UW4의 상
 
 | 탭 | UE 대응 | 내용 | 단계 |
 |---|---|---|---|
-| Colors | "Colors" | 테마 slot 견본(BASE·FOREGROUND·ACCENT, 이름·sRGB 16진) | UW4a |
+| Colors | "Colors" | 테마 slot 견본(BASE·FOREGROUND·ACCENT는 UE 그대로, Rocks가 STATUS(Warning·Error·Success·Notifications)·OUTLINES(Panel·InputOutline·DropdownOutline)·USER(User1–16) 묶음을 더해 61 slot 전부), BRUSHES 묶음(둥근 상자 단일·네 반경, 알약, 외곽선 두께, 단색, 9분할 Box·Border — 절차 생성 텍스처), 테마 전환(다크 기본 ↔ 시험 JSON) | UW4a |
 | Text | "Text"(확장) | 16.3절 | UW4a |
 | Widgets | "Starship Widgets" | 16.4절 | UW4a–UW4d |
 | Lists | "List Widgets" | 16.5절 | UW4a·UW4c |
 | Layout | (없음 — Rocks 추가) | 16.6절 | UW4a·UW4c |
+| Behavior | (없음 — Rocks 추가) | Element 공통 기능과 앱 기능(16.9.2): 렌더 변환·불투명도·자르기·가시성 5종·전경색 상속·커서 11종·초점 이동 규칙·접근성 트리·타이머·속성 바인딩 | UW4a(초점 표시가 필요한 행은 UW4b) |
+| Effects | (없음 — Rocks 추가) | 표면·캐시·흐림: CachePanel(캐시 통계 레이블), RetainerBox(phase·tint), BackgroundBlur(강도·반경·저품질 대체), PostBufferUpdate(채널), Viewport(절차 생성 장면 텍스처) | UW4a |
 | Editor Parts | (없음 — Rocks 추가) | 16.7절 | UW4d1–UW4d3, 그 뒤 |
+| Game UI | (없음 — Rocks 추가) | Widget 층 전용 부품과 UiScreens(16.10절): 화면 스택·대기열·전환·탭 목록, 입력 장치별 보이기, safe zone, 캐러셀 점 막대, 동적 항목 상자(원형 배치), UserWidget 애니메이션, MVVM 바인딩. 에디터 우선이라 맨 뒤에 두되 무엇이 있는지 알 수 있게 한다. 월드 위젯은 3D 장면이 필요해 갤러리에서 빼고 WorldWidgetSelfTest를 가리킨다 | UW4a2 |
 
 UE "Icons" 탭(엔진 아이콘 폴더 PNG 목록)은 두지 않는다. SVG·아이콘 이름표가 없다(15장). SVG 단계가 끝나면 이 탭을 다시 넣는다. 탭 역할은 UE 갤러리처럼 Panel이다.
 
@@ -38,7 +42,8 @@ UE 에디터 글꼴 지정(14장 2절)을 모두 견본으로 보인다. 한 행
 - **용도별**: ToolTip.Font 9, HintText(Italic 8, 흐린 전경색), MonospacedText 10·Log 9(Mono), Menu.Heading(Bold 7, 자간 250, White25), Menu.Keybinding 8, PrimaryButtonText(Bold 10), NotificationList Bold·Light 12, PropertyWindow Small·SmallBold 8, DetailsView.Category SmallBold 8, DetailsView.Name 11(흰색).
 - **typeface 목록**: UE 기본 합성 글꼴의 typeface(Regular·Medium·Light·VeryLight·Bold·Black·Italic·BoldItalic·BlackItalic·BoldCondensed·BoldCondensedItalic·Mono)를 14 크기로 한 줄씩.
 - **문자 체계**: 라틴, 한글(나눔고딕 보조 typeface), 아랍 문자(오른쪽에서 왼쪽, Noto Naskh), 섞인 방향(BiDi), 이모지(마지막 fallback).
-- **문단 기능**: 줄바꿈 폭, 정렬(왼쪽·가운데·오른쪽), 말줄임, 밑줄·취소선, 그림자, 자간.
+- **문단 기능**: 줄바꿈 폭·정책(Word·WordOrCluster), 정렬(왼쪽·가운데·오른쪽), 말줄임, 밑줄·취소선·구간별 장식 색(`LabelDecoration`), 그림자, 자간, 문단 여백·줄 높이 배율(`ParagraphMetrics`), 최소 폭(`SetMinDesiredWidth`).
+- **Rich text**(Widget 층 `RichTextBlockWidget` — Widget 호스트로 지금 보인다): `<tag>…</>` 구간 tint·밑줄·취소선, escape, `<img id/>` 인라인 이미지(절차 생성 텍스처).
 - **원래 UE 텍스트 탭**의 세 열(Normal·Small / Bold 두 크기 / 보조 typeface "SUB-TYPEFACES - MATH"·이모지, 591–605행)은 위쪽에 그대로 두고, Rocks 데모 글꼴의 한글·아랍 문자 열을 넷째 열로 더한다.
 - **편집·강조**: rich text(굵게·기울임·색 구간 — Widget 층 `RichTextBlockWidget`, Element 층 공개 단계에서), 편집 텍스트의 선택 영역·caret·힌트 텍스트, 검색어 강조(NormalText HighlightShape = AccentGreen, 1257행), Mono 로그 견본(Log.Normal Mono 9, 901–906행, 수준별 색).
 - 견본 문장(한글·아랍 문자·이모지 포함)은 소스 문자열이 아니라 데모 문자열 파일에서 읽는다(소스 문자열 영어 정책 — UW5).
@@ -60,11 +65,11 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | SegmentedControl / Alt | `SSegmentedControl` | 없음 | UW4c |
 | Check Box | `SCheckBox` "Checkbox" | `CheckBox` + `DefaultCheckBoxStyle()` | 있음 |
 | Radio Button | "RadioButton" | `CheckBox` + 라디오 스타일 | UW4b |
-| SimpleComboBox / ComboBox | `SComboBox` | `ComboBox` | UW4b 스타일 |
+| SimpleComboBox / ComboBox | `SComboBox`·`STextComboBox` | `ComboBox`, Widget: `ComboBoxStringWidget`·`ComboBoxKeyWidget` | UW4b 스타일 |
 | SHeader | `SHeader` | 없음 | UW4c |
 | SHyperlink | `SHyperlink` | 없음 | UW4c |
 | SBreadcrumbTrail | `SBreadcrumbTrail` | 없음 | UW4c |
-| SCircularThrobber | `SCircularThrobber` | `ActivityIndicator` | UW4b 스타일 |
+| SCircularThrobber / SThrobber | `SCircularThrobber`·`SThrobber` | `ActivityIndicator`(원형 `circular = true`·선형) | UW4b 스타일 |
 | SColorBlock | `SColorBlock` | 없음 | UW4c |
 | SProgressBar / marquee | `SProgressBar` | `ProgressBar` | UW4b 스타일 |
 | SSeparator | `SSeparator` | 없음 | UW4c |
@@ -72,7 +77,7 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | SSpacer | `SSpacer` | `SizeBox` | 있음 |
 | SSpinBox | `SSpinBox` | `SpinBox` | UW4b 스타일 |
 | SNumericEntryBox / No Spin | `SNumericEntryBox` | 없음 | UW4c |
-| SEditableText / Box, MultiLine / Box | `SEditableText(Box)` | Widget 층 `EditableTextElement` | UW4b(Element 층 공개 + 스타일) |
+| SEditableText / Box, MultiLine / Box | `SEditableText(Box)` | Widget 층 `EditableTextWidget`·`EditableTextBoxWidget`·`MultiLineEditableText(Box)Widget`(내부 `EditableTextElement`는 UiWidget private이고 모델에 묶여 있다) | UW4a2 Widget 호스트로 행(힌트·오류 caption·비밀번호·읽기 전용·Esc 되돌리기·IME·undo), Element 공개(모델 분리)와 UE 스타일은 UW4b |
 | SInlineEditableText | `SInlineEditableTextBlock` | 없음 | UW4c |
 | SSearchBox | `SSearchBox` | 없음 | UW4c |
 | Menu Bar / Toolbar / Toolbar 2 | `FMenuBarBuilder`·`FToolBarBuilder` | 없음 — Editor Parts 탭 16.7절 | UW4d1 |
@@ -81,7 +86,11 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | (Rocks) Icon + Label Button | UE 갤러리 `LeftRightLabel` 아이콘 변형 | 없음(SVG 의존) | SVG 단계 |
 | (Rocks) Editable / Text Combo, Suggestion Text Box | `SEditableComboBox`·`STextComboBox`·`SSuggestionTextBox` | 없음 | UW4c |
 | (Rocks) Error Text / Warning Box | `SErrorText`·`SWarningOrErrorBox` | 없음 | UW4c |
-| (Rocks) Focus Rectangle | "FocusRectangle"·InputFocus 4/1 | 없음(초점 표시 없음) | UW4b |
+| (Rocks) Focus Rectangle | "FocusRectangle"·InputFocus 4/1 | 없음(초점 표시 없음 — `FocusOutlineRadius`·`ControlOutlineThickness` 상수만 있다) | UW4b |
+| (Rocks) No Border Button | "NoBorder" | `Button` + `NoBorderButtonStyle()` | 있음 |
+| (Rocks) Button Click Methods | `EButtonClickMethod`·`EButtonPressMethod` | `Button` 클릭·터치·누름 방식(누른 횟수 레이블) | 있음 |
+| (Rocks) Slider vertical / step | `SSlider` Orientation·StepSize | `Slider::SetVertical`·`SetStep`·`SetSnapToStep` | 있음 |
+| (Rocks) Progress directions / mask fill | `SProgressBar` BarFillType | `ProgressBar` 방향 7종·채움 Scale·Mask | 있음 |
 | (Rocks) Input Key Selector | `SInputKeySelector` | `InputKeySelector` | UW4b 스타일 |
 | (Rocks) Radial Slider | `SRadialSlider`(Runtime/AdvancedWidgets) | `RadialSlider` | UW4b 스타일 |
 | (Rocks) Timeline | `STimeSlider`(Editor/Sequencer — 직접 대응은 아님) | `Timeline` | UW4b 스타일 |
@@ -95,10 +104,13 @@ UW4a는 "있음"과 "UW4b 스타일" 행을 모두 넣는다(아직 UE 룩이 �
 
 UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔다.
 
+선행(UW4a2): 지금 `ListView`·`TreeView`·`TileView`는 생성자에서 `Application&`를 받아 들고 있다(초점 이동, Shift·Ctrl 상태). 갤러리 탭처럼 창보다 먼저 만들어지거나 다른 창으로 옮겨지는 내용에서는 쓸 수 없고, 에디터에서도 같은 문제다(분리 창으로 옮긴 Outliner가 원래 창의 Application을 본다). UE는 어디서든 `FSlateApplication::Get()`으로 찾는다. Rocks는 전역 등록부를 두지 않으므로(4.1절), `Application::SetRoot`가 루트에 자기를 연결하고 요소가 부모를 따라 루트의 Application을 찾게 한다(`Element::FindApplication()`, 트리에 붙지 않았으면 없음). 같은 문제가 있는 API를 모두 이 방식으로 바꾼다: `ListView`·`TreeView`·`TileView` 생성자, `MenuAnchor::OpenFocused(Application&)`, `ListViewBaseWidget::SetSource(app, …)`, UiScreens `ScreenContainer` 생성자, `CarouselWidget::BeginAutoScrolling(app, …)`, `UserWidget::StartAnimation(…, app)`. Lists 탭과 Game UI 탭은 이 수정과 함께 넣는다(UW4a2).
+
 - 행 상태: 보통·올림·선택·비활성 창의 선택·부모 선택(Colors 탭 SELECT·SELECT HOVER·SELECT INACTIVE·SELECT PARENT slot), 선택 방식(없음·하나·하나 토글·여럿), 키보드 이동.
 - 트리: 펼침 화살표와 들여쓰기 선(UE `SExpanderArrow` — UW4c), 모두 펼치기·접기.
 - 행 끌어 놓기 표시, 행 문맥 메뉴(UW4d1).
 - 열 머리(UE `SHeaderRow`·`SMultiColumnTableRow` — 정렬 화살표, 열 크기 조정·숨기기): 없음, UW4c 행으로 예약.
+- 그 밖에 보일 것: 행 재사용(`TableRowSource::BindRow`·`ReleaseRow`·`SetRowSelected`), 이동하면 선택(`SetSelectOnNavigation`), ScrollIntoView 정렬 4종(`ScrollIntoViewAlignment`), ScrollToEnd, 휠 배수.
 
 ### 16.6 Layout
 
@@ -106,8 +118,8 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 
 - 가로·세로 상자(`HorizontalStack`·`VerticalStack` — Auto·Fill 비율, 정렬), 격자(`Grid` — 칸 합치기·채움 비율), 균등 격자(`UniformGrid`), 줄바꿈(`WrapStack` — 창 크기에 따라 줄이 바뀐다), 겹치기(`Overlay`), 크기 상자(`SizeBox` — 최소·최대·비율), 비율 맞춤(`FitBox`·`ScaleLayer`), 스크롤(`ScrollView` 가로·세로), 전환(`Switcher` — 단추로 바꾼다), 캐러셀(`Carousel`).
 - 도킹(`DockManager`): 탭 묶음 셋을 좌우·상하로 나눈 영역. 분할선 끌기, 탭 끌어 다른 묶음·가장자리에 놓기, 창 밖에 놓아 분리 창을 연다(옛 궤도 화면 self-test가 보던 동작을 여기서 잇는다).
-- 그 밖의 있는 부품: 앵커 배치(`AnchorCanvas` — UE `SConstraintCanvas`), 한 축 배치(`StackPanel`), 테두리 상자(`Frame` — UE `SBorder`), 캐시 영역(`CachePanel` — UE `SInvalidationPanel`), 리테이너(`RetainerBox`), 배경 흐림(`BackgroundBlur`), viewport(`Viewport` — UE `SViewport`), 제목 표시줄 영역(`WindowTitleBarArea`).
-- UW4c에서 분할기(`SSplitter`)·펼침 영역(`SExpandableArea`)을 더한다.
+- 그 밖의 있는 부품: 앵커 배치(`AnchorCanvas` — UE `SConstraintCanvas`, 점·늘이기 앵커·autoSize), 한 축 배치(`StackPanel` — FlowDirection 오른쪽에서 왼쪽, FillContent·shrinkWeight·min·max), 테두리 상자(`Frame` — UE `SBorder`), 슬롯 래퍼(`SlotPresenter` — 정렬 4×4), 캐러셀 lazy 페이지(`CarouselPage`), 제목 표시줄 영역(`WindowTitleBarArea`), 도킹 역할(Major·Panel·Global·Document)과 배치 저장·복원 JSON 견본. 표면·효과 부품은 Effects 탭에 둔다.
+- 펼침 영역은 Widget 층 `ExpandableAreaWidget`이 이미 있으므로 Widget 호스트로 지금 보이고, UW4c에서 Element로 옮긴다. 분할기(`SSplitter`)는 UW4c에서 더한다.
 
 ### 16.7 Editor Parts
 
@@ -116,6 +128,7 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 - **디테일 패널**(UE `SDetailsView`·`IDetailCustomization`): 검색 상자, 범주 머리(펼침), 이름·값 두 열과 그 사이 분할선, 행 종류(bool 체크 상자, 정수·실수 숫자 입력, 벡터·회전(축 색 띠 X 빨강·Y 초록·Z 파랑), 색(색 막대 + 컬러 피커 열기), 열거(콤보), 문자열(편집 상자), 객체 참조(이름 + 고르기 단추), 배열 머리(개수, 더하기·비우기)), 값을 기본값으로 되돌리기 화살표, 여러 객체 값이 다를 때 표시(Undetermined).
 - **컬러 피커**(UE `SColorPicker`): 색 바퀴·색 스펙트럼, 명도·알파 막대, RGB·HSV 숫자 입력, sRGB 16진 입력, 이전·새 색 견본, 확인·취소. 스포이트는 화면 캡처가 필요해 빈칸으로 둔다.
 - **메뉴·툴바**: 메뉴 막대(펼침 메뉴, 하위 메뉴, 단축키 표시, 체크 항목, 구분선, 머리글), 툴바(아이콘·레이블 단추, 토글, 콤보 단추, 구분선), 오른쪽 클릭 문맥 메뉴.
+- **명령·단축키(지금 가능)**: `CommandSet`·`BindingManager`·`CommandList`로 명령 표(주·보조 chord, 실행 횟수), `InputKeySelector`로 다시 지정, 기본값 되돌리기, 저장·불러오기 — UE `SInputChord`·단축키 편집기의 앞 단계다.
 - **예약 행(부품이 생기면 이 자리)**: Output Log(Mono, 수준별 색, 필터, 자동 완성 콘솔 입력), 알림 toast(진행·성공·실패, 버튼·하이퍼링크 — ProgressReporting 설계), 모달 대화상자(`SCustomDialog`·`SMessageDialog`), Content Browser 조각(썸네일 타일, 경로 트리, breadcrumb, 필터 칩 `SBasicFilterBar`), 열 있는 Outliner 트리, Transform 행(`SAdvancedTransformInputBox` — 잠금·기본값 되돌리기), 객체·클래스 고르기(`SObjectPropertyEntryBox` — 썸네일·드롭다운 picker), 단축키 편집(`SInputChord` — 충돌 표시), 창 틀(제목 표시줄, 상태 표시줄·drawer `SStatusBar`·`SWidgetDrawer`, 탭 sidebar `STabDrawer`, Major 탭 스타일 `Docking.MajorTab` 1902–1923행·탭 문맥 메뉴), viewport 위 도구 모음, 커브 편집기·NodeGraph `GraphView`(NG5–NG7)·시간 막대(각 설계 문서를 가리킨다).
 
 ### 16.8 확인
@@ -123,3 +136,36 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 - `--self-test`: 탭 전환(탭 머리를 실제 좌표로 누름), 행 비활성(활성 체크 상자를 누르면 행이 비활성 brush·전경색으로 그려짐), 올림 상태 전경색(단순 버튼 레이블), 도킹 분할선 끌기·탭 이동을 단언한다.
 - `--snapshot`: 탭마다 `Saved/UiDemo/Gallery-<탭>.ppm`을 쓴다.
 - 사람 확인: UE 5.8 갤러리(SlateViewer 프로그램이 기본으로 연다 — Programs/SlateViewer/Private/SlateViewerApp.cpp 75–78행 `RestoreStarshipSuite`, 또는 Unreal Insights 메뉴 "Starship Test Suite" — InsightsMenuBuilder.cpp 161–171행)와 나란히 보고 다른 점을 이 장이나 15장에 적는다.
+
+### 16.9 전수 목록
+
+갤러리가 빠짐없이 덮어야 하는 구현 부품과 기능의 목록이다(리뷰어 전수 조사 2026-11-25 — UiCore·UiFramework·UiWidget·UiScreens·WorldIntegration·UiRender·TextLayout 공개 헤더 전부). 행을 고르는 기준이고, 부품이 생기거나 없어지면 이 목록을 먼저 고친다.
+
+#### 16.9.1 부품
+
+- **UiCore**: Brush(모드 None·Image·Box·Border·RoundedBox, 네 반경, 알약, 외곽선, mirror, uv), StyleBrush, ThemeColors(61 slot, JSON 세 단계 Load), ColorRef(Specified·Theme·Foreground·SubduedForeground·Style), ButtonStyle·CheckBoxStyle·DockTabStyle·TextStyle·FontStyle(자간)·Typeface 12종, StyleSet·AddCoreStyles(UE 키 8개), 선언형 Make·Build·Bind·Bindable·ElementAttribute, KeyChord, NavigationRule, HitGrid(회전된 요소 hit), CacheRoot·PaintCacheStats, WidgetSurface·WidgetSurfaceScene.
+- **UiFramework 컨트롤**: Button(클릭·터치·누름 방식, 상태 이벤트, tint·전경·내용 여백), CheckBox, ComboBox, MenuAnchor(배치 13종·창 안 맞춤·Esc·바깥 누름), ActivityIndicator(원형·선형, 조각 수·반경·주기·축·brush), ProgressBar(방향 7종, Scale·Mask, marquee, BindValue), Slider(세로·step·snap·잠금·컨트롤러 잠금·손잡이 들여쓰기), SpinBox(범위·소수 자릿수·드래그 끄기·확정 사유), InputKeySelector(보조 키·게임패드·Esc 취소), RadialSlider(각·오프셋·손잡이·바늘), Timeline(눈금·마커), ScrollBar, Image, tooltip(대화형·지연·등장 시간).
+- **텍스트**: TextLabel(줄바꿈 정책·정렬·말줄임·장식·그림자·자간·ParagraphMetrics·최소 폭·HitText·CaretPosition), 문자 체계(라틴·한글·아랍 RTL·BiDi·이모지·수학), 글꼴 렌더링 선택(방향·shaping 방식·hinting — 데모가 노출할 때).
+- **목록**: ListView(선택 방식 넷, 행 높이, 휠, 포인터 스크롤, 이동 선택, ScrollIntoView, ScrollToEnd, 터치 팬), TreeView(펼침·모두), TileView(타일 너비), TableRowSource.
+- **배치**: HorizontalStack·VerticalStack·StackPanel, Grid(span·layer·nudge·채움 비율), UniformGrid, WrapStack(줄바꿈 선택 사항), Overlay, SizeBox(최소·최대·고정·종횡비), Frame, SlotPresenter, AnchorCanvas, FitBox(맞춤 7 × 방향 3), ScaleLayer, ScrollView(휠 정책·막대·scroll padding·터치·오른쪽 드래그), Switcher, Carousel·CarouselPage, DockManager(역할·분할·탭 끌기·분리 창·spawner·배치 JSON), WindowTitleBarArea.
+- **표면·효과**: CachePanel, RetainerBox, BackgroundBlur, PostBufferUpdate, Viewport.
+- **앱·입력·명령**: CommandSet·BindingManager·CommandList·SetCommands, 타이머(StartTimer·StartFrameTimer), 초점(SetFocus·MoveFocus·Navigate·게임패드), tooltip 상태, AccessibleTree, 커서(SetCursorOverride), SetTheme, InputAdapter·TouchPan.
+- **Widget 층 전용**: RichTextBlockWidget(+RichTextStyle·Decorator·ImageDecorator), EditableText·EditableTextBox·MultiLineEditableText(Box)Widget, ExpandableAreaWidget, ComboBoxString·KeyWidget, CarouselWidget(자동 넘김)·CarouselNavBarWidget, SafeZoneWidget, DynamicEntryBoxWidget(+RadialBoxSettings — 원형 배치는 private `EntryPatternPanel`), ListViewWidget::UseObjectItems·WidgetPool, UserWidget·UserWidgetAnimation·WidgetAnimation(채널·재생 방식), WidgetTransform, Widget 공통(SetToolTipText·SetAccessibleText·SetNavigationRule·SetCursor), MVVM 바인딩(WidgetFieldBindings·WidgetModelSource·WidgetPropertyBinding·WidgetEventBinding).
+- **Widget 층 감싼 것(이름 대응)**: Button·CheckBox·ComboBox·MenuAnchor·Image·ProgressBar·Slider·SpinBox·RadialSlider·ScrollBar·InputKeySelector·Throbber·CircularThrobber·TextLabel·Border(Frame)·SizeBox·Spacer·NamedSlot·NativeWidgetHost·Overlay·CanvasPanel(AnchorCanvas)·GridPanel·UniformGridPanel·HorizontalBox·VerticalBox·StackPanel·StackBox·WrapBox·ScaleBox(FitBox)·WidgetSwitcher·ScrollBox·InvalidationBox(CachePanel)·RetainerBox·BackgroundBlur·PostBufferUpdate·Viewport·WindowTitleBarArea·ListView·TileView·TreeView Widget.
+- **UiScreens**: Screen(입력 모드), ScreenStack·Queue·Switcher(초점 복구·플레이어별 초점)와 Widget 판, ScreenTabListWidget, HardwareVisibilityWidget, ScreenInputRouter·ScreenDeviceState.
+- **WorldIntegration·UiRender**: 월드 위젯(갤러리 밖 — WorldWidgetSelfTest), 렌더 기반(Effects가 간접으로 보인다).
+
+#### 16.9.2 공통 기능(Behavior 탭)
+
+비활성(행 체크 상자 — Widgets), 렌더 변환(회전·배율·기울기·pivot과 변환 뒤 hit — 각도 슬라이더로 돌린 버튼을 계속 누를 수 있음), 불투명도, 자르기, 가시성 5종(자리 차지·hit 차이), 전경색 상속(올린 버튼·흐린 전경), 커서 11종, 초점 이동 규칙(Wrap·Stop·Explicit — 초점 표시 UW4b 뒤), 접근성 트리 표, 타이머 카운터, 속성 바인딩(Bind로 슬라이더 → 색·진행 값), volatile·캐시(Effects), 테마 전환(Colors), 명령(Editor Parts), 오른쪽에서 왼쪽 흐름(Layout·Text), 배율(Layout), 터치 팬·게임패드(설명과 사람 확인 목록).
+
+### 16.10 막힌 것과 푸는 방법
+
+| 대상 | 막힌 이유 | 방법 | 단계 |
+|---|---|---|---|
+| 목록 셋, MenuAnchor 열기, 화면 컨테이너, 캐러셀 자동 넘김, UserWidget 애니메이션, 타이머·접근성 트리·테마 견본 | `Application`을 생성자·인자로 받는다 | `Element::FindApplication()`(16.5절) | UW4a2 |
+| Widget 층 전용 부품 | Element 공개판이 없고, Widget 층은 ObjectRegistry·WidgetTree·`WidgetTextShaper`가 필요하다 | 갤러리 Widget 호스트: GalleryContext에 ObjectRegistry·WidgetTree를 두고, DemoText로 `WidgetTextShaper`를 구현해 `TakeElement` 결과를 행에 넣는다 | UW4a2 |
+| 이미지·9분할 Box·Border·ProgressBar Mask·throbber 조각 brush·rich text 이미지·Viewport 장면 | 등록된 텍스처가 없다 | 시작할 때 절차 생성 텍스처(체크무늬·9분할 테두리)를 BrushTexture 표에 넣어 GalleryContext로 넘긴다 | UW4a |
+| 초점 이동·Focus Rectangle | 초점 표시가 없다 | 초점 외곽선(4/1) | UW4b |
+| CachePanel 효과 | 캐시 통계를 읽을 길이 없다 | 호스트가 `CacheRoot::LastUpdate()`를 레이블로 넘기는 콜백 | UW4a |
+| 터치 팬·게임패드 컨트롤러 잠금 | 기기가 필요하다 | 행에 설명, 사람 확인 목록 | — |

@@ -1,0 +1,14 @@
+# UiDemo gallery sample strings (UTF-8, Docs/Design/UiToolkit section 16.3).
+# One entry per line: key = value. "\n" in a value is a line break. Lines starting with # are comments.
+pangram.latin = The quick brown fox jumps over the lazy dog.
+pangram.latin.caps = THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789
+pangram.hangul = 다람쥐 헌 쳇바퀴에 타고파
+sample.hangul = 에디터 부품 미리보기 — 한글 보조 글꼴(나눔고딕)
+sample.arabic = مرحبا بالعالم — نص من اليمين إلى اليسار
+sample.bidi = Level 3 — المستوى الثالث — 레벨 3
+sample.emoji = Emoji fallback 😀 last resort
+sample.math = ∑ ∫ √ ∞ ≠ ≤ ≥ ± × ÷ ° µ π Ω
+sample.mono = 0O 1lI | {} [] () <> => != == // log.Info("Ready");
+sample.log = [2026.11.25-09.30.00:000][  0]LogInit: Display: Engine version: 5.8.4
+sample.wrap = Long text wraps at the allotted width and keeps whole words together where it can, so a narrow column still reads naturally.
+sample.ellipsis = Ellipsis cuts a line that does not fit and ends it with a marker instead of overflowing the box.
