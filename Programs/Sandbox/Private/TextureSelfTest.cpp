@@ -668,7 +668,7 @@ void RunStagingUploads(Device& device, Allocator& allocator) noexcept {
 }
 
 // 블록 압축(BC1) 배열·cube·3D 왕복이다. OpenGL ES는 블록 압축 텍스처를 읽지 못한다(ReadTexture
-// Unsupported, PixelFormat.ko.md 14.2절).
+// Unsupported, Docs/Design/PixelFormat 14.2절).
 void RunCompressed(Device& device, Allocator& allocator) noexcept {
     const PixelFormat format = PixelFormat::BC1Unorm;
     const PixelFormatCaps caps = device.GetPixelFormatCaps(format);

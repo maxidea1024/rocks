@@ -39,8 +39,8 @@ constexpr GlesTextureFormat Compressed(PF format, GLenum internal, F sample) noe
     return Row(format, internal, 0, 0, TF | Comp, R::None, sample);
 }
 
-// 픽셀 형식 표다(PixelFormat.ko.md 8.6절, ES 3.2 Table 8.10·8.11·8.17·8.26과 확장 사양). 표에 없는
-// 형식은 Unsupported다(다른 형식으로 대신하지 않는다, 8.3절):
+// 픽셀 형식 표다(Docs/Design/PixelFormat 8.6절, ES 3.2 Table 8.10·8.11·8.17·8.26과 확장 사양). 표에
+// 없는 형식은 Unsupported다(다른 형식으로 대신하지 않는다, 8.3절):
 // - BGRA8UnormSrgb: ES에 BGRA sRGB 내부 형식이 없다(UE의 R·B swizzle은 렌더 타깃 쓰기가 달라 따르지
 //   않는다).
 // - R64Uint: ES에 64-bit 정수 텍스처가 없다.

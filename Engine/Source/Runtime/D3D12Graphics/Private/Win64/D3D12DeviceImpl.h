@@ -608,7 +608,7 @@ public:
     Result<void> ReadBuffer(BufferHandle handle, uint64 offset, Span<uint8> out) noexcept override;
 
     // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
-    // 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(PixelFormat.ko.md 8.3절).
+    // 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(Docs/Design/PixelFormat 8.3절).
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
 
@@ -643,8 +643,8 @@ public:
 
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
 
-    // 원 텍스처의 자원을 공유하는 SRV view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수
-    // 있다.
+    // 원 텍스처의 자원을 공유하는 SRV view다(Docs/Design/PixelFormat 9–11절). 다른 스레드에서도
+    // 부를 수 있다.
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
 
@@ -960,7 +960,7 @@ private:
     }
 
     // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로
-    // 실패한다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
+    // 실패한다(Docs/Design/PixelFormat 8.3절). 호출자는 gate_를 잡고 있어야 한다.
     template <class T>
     Result<T> UnsupportedFormat(PixelFormat format) noexcept {
         constexpr const char* Prefix = "pixel format ";

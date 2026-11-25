@@ -16,8 +16,7 @@ public sealed class UiDemoProgram : ModuleRules
             ModuleDirectory = "Programs/UiDemo",
             Kind = NativeModuleKind.Executable,
             Sources = context.Sources("Programs/UiDemo/Private"),
-            PrivateDefines = [$"UIDEMO_SHADER_PROVIDER={(shaderProvider ? 1 : 0)}"],
-            PublicDependencies = ["Launch", "PlatformWindow", "D3D11Graphics", "UiFramework", "UiRender", "UiWidget", "RenderBase", "ShaderCore",
+            PublicDependencies = ["Launch", "PlatformWindow", "D3D11Graphics", "UiFramework", "UiRender", "UiWidget", "RenderBase", "ShaderCore", "ModuleLoader",
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>())],
             PrivateDependencies = ["AssetDatabase", "WorldIntegration"]
         };

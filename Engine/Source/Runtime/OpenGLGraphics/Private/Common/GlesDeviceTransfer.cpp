@@ -449,7 +449,7 @@ uint64 GlesDevice::RejectedCalls() const noexcept {
 
 // 텍스처 mip 하나의 plane 하나를 읽는다. 색 렌더 타깃 형식은 framebuffer로, 깊이·스텐실 plane은
 // 셰이더로 옮겨 읽는다. ES는 블록 압축 텍스처를 읽을 수 없고(glGetCompressedTexImage 없음) 색 렌더
-// 타깃이 아닌 형식은 framebuffer에 붙일 수 없으므로 Unsupported다(PixelFormat.ko.md 14.2절).
+// 타깃이 아닌 형식은 framebuffer에 붙일 수 없으므로 Unsupported다(Docs/Design/PixelFormat 14.2절).
 Result<void> GlesDevice::ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
                                      Span<uint8> out) noexcept {
     auto owner = ownership_.Check();

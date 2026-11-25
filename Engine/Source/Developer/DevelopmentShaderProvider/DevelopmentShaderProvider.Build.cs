@@ -2,10 +2,11 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 /// <summary>
-/// Development shader provider (Docs/Design/ShaderSystem/16-LaterStages.ko.md, SSD19 and its 2026-11-25 sharing note). Hosts without a cooked
-/// shader library (Sandbox, UiDemo) hand it to a shader set: it mounts /Engine plus the host's own source roots, builds each device format's
-/// library once with CompileShaderLibrary (shader nugget cache, development types included) and returns the bytes. Release Game targets must not
-/// reach Developer modules, so hosts link this module outside Release only.
+/// Development shader provider (Docs/Design/RenderBase section 9.12 item 4, ShaderSystem section 12.3.1 SSD16): implements the RenderBase shader
+/// provider interface with the Developer shader compiler (CompileShaderLibrary, the shader compile worker and the shader nugget cache) and builds
+/// each requested format's engine library in memory. Its module lifetime object attaches the provider to the host's EngineShaderHost service at
+/// Startup and detaches it at Shutdown, so an executable gets on-demand shader compiling by linking this module outside Release (Runtime modules
+/// never depend on it — RenderBase SX14). HostConfig: the engine folder that holds Shaders and Config/ShaderFormats.
 /// </summary>
 public sealed class DevelopmentShaderProvider : EngineModuleRules
 {
@@ -16,9 +17,9 @@ public sealed class DevelopmentShaderProvider : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["RenderBase", "Graphics", "Core"];
+    protected override string[] PublicDependencies => ["RenderBase", "Core"];
 
-    // Not used by the public header, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
+    // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
     protected override string[] PrivateDependencies => ["ShaderCompiler", "ShaderCompilerCommon", "ShaderCore", "AssetNugget", "ObjectRuntime", "Task", "HostConfig",
-        "PlatformBase"];
+        "ModuleLoader", "PlatformBase"];
 }

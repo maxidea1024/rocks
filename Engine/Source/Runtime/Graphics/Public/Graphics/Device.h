@@ -460,8 +460,8 @@ public:
     virtual Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                                 Span<const uint8> pixels) noexcept = 0;
 
-    // 이 장치에서 format이 가진 능력이다(PixelFormat.ko.md 7·8절, 장치 생성 때 정해지고 바뀌지
-    // 않는다). backend가 대응하지 않는 형식은 None이다. 스레드 안전.
+    // 이 장치에서 format이 가진 능력이다(Docs/Design/PixelFormat 7·8절, 장치 생성 때 정해지고
+    // 바뀌지 않는다). backend가 대응하지 않는 형식은 None이다. 스레드 안전.
     //
     // 사용 예:
     //   if (HasPixelFormatCaps(device.GetPixelFormatCaps(PixelFormat::BC7Unorm),

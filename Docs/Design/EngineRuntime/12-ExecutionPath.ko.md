@@ -10,3 +10,5 @@
 4. 삼각형 Actor(매 Tick 회전)와 SpriteComponent를 가진 Actor(텍스처 에셋)를 Spawn한다. 텍스처는 `RenderHandle`을 예약하고 lane의 자원 작업이 만든다.
 5. 매 프레임 `FrameEnd` hook이 프레임 slot을 확보하고(빈 slot이 없으면 가장 오래된 slot의 GPU 완료를 창 메시지를 펌프하며 기다린다), World에서 추출한 그리기 항목을 slot 프레임 arena에 담아 프레임 packet으로 넘긴다. 렌더러는 렌더 lane 안에서 그린다(지금은 Sandbox 샘플 렌더러, 이후 정식 Renderer).
 6. 창을 닫으면 `RequestExit` → Engine 종료 hook(CP6)이 렌더 lane 종료 순서를 실행한다([렌더 기반](../RenderBase/05-RenderLane.ko.md) 5.5절): 새 프레임 차단 → World 파괴 → 진행 중 프레임 GPU 완료 → 최종 GC와 Retire drain 반복 → 내장 자원·스왑체인 Retire와 closure 확인 → lane Drain·장치 소유권 반납·Join → 장치 `WaitIdle`·소멸 → 창 파괴.
+
+엔진 셰이더(2026-11-25, [렌더 기반](../RenderBase/09-ShaderRuntime.ko.md) 9.12절): 셰이더 타입 등록부는 호스트 서비스 `EngineShaderHost`이고 각 모듈이 `Startup`에서 등록하므로, 호스트는 엔진 묶음 모듈이 시작한 뒤(`Engine::Initialize` 뒤) 등록부를 Freeze하고 그다음 렌더 lane을 시작한다. lane 시작 단계(`OnLaneStart`)가 `EngineRenderResources`로 엔진 셰이더 집합과 내장 자원 팩을 연다. 지금 Sandbox `--engine`은 장치가 없어 Freeze까지 한다.

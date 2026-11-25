@@ -31,6 +31,9 @@ public:
     // 오류: 비유한·음수 성분(UE는 검증하지 않는다 — 음수는 상자가 뒤집힌다).
     Result<void> SetBoxExtent(const Vec3d& extent) noexcept;
 
+    // 반 크기 |extent × scale|의 회전 상자다(28.3절).
+    Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
+
 protected:
     // 지역 (0, E, |E|)다(UE BoxComponent.cpp:122).
     bool TryLocalBounds(ComponentBounds& local) const noexcept override;

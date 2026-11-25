@@ -25,7 +25,7 @@
 - **수명.** 셰이더 집합은 `DeviceResourceOwner`다. 쓰는 쪽(파이프라인 캐시 항목, 기록 packet)은 집합의 lease를 잡는다. `Retire`된 집합은 새 lease와 새 장치 셰이더 생성을 막는다.
 - **장치 셰이더 생성.** 처음 쓸 때 만든다. 만드는 스레드는 GX11 규칙을 따른다: 스레드 안전 생성 backend는 요청한 스레드에서, OpenGL ES는 렌더 lane 작업으로. 경쟁 시 생성이 두 번 일어날 수 있으나 게시는 한 번이고 진 쪽은 `Retire`한다(UE와 같다, `ShaderResource.cpp:579–657`). 만든 뒤 코드 바이트를 놓는다. 로드 때 일괄 생성 선택을 콘솔 설정으로 두며 병렬 일괄 생성은 CP2를 쓴다.
 - **런타임 확인 기능(개정 16).** 셰이더 시스템 7.2절 7항의 런타임 확인 기능(`vertexViewportLayerOutput`)을 요구하는 셰이더는 라이브러리 항목에 그 기능 비트가 있다(셰이더 시스템 12.2절). 셰이더 집합은 장치 셰이더를 만들기 전에 이 비트를 `DeviceCaps.features`와 대조하고, 없으면 만들지 않고 `Unsupported`를 돌려준다. 그 셰이더를 쓰는 파이프라인 캐시 항목도 만들지 않는다. 완결성 검사(아래)는 장치와 무관하게 그 항목이 라이브러리에 있는지 본다(쿠킹은 형식 기준이다). 호출자는 능력을 먼저 확인해 대체 경로를 고른다.
-- **엔진 셰이더 집합과 완결성 검사.** 렌더 lane 시작 단계(5.5절)에서 엔진 셰이더 집합을 연다. 형식마다 공급 경로가 둘이다.
+- **엔진 셰이더 집합과 완결성 검사.** 렌더 lane 시작 단계(5.5절)에서 엔진 셰이더 집합을 연다(엔진 호스트 연결은 9.12절). 형식마다 공급 경로가 둘이다.
   - **쿠킹 라이브러리 형식**(셰이더 시스템 12.3절 엔진 내장 라이브러리): 등록된 엔진 셰이더 타입 × 정점 입력 타입 × 그 형식에서 컴파일되는 퍼뮤테이션(P14 거르기 결과) 전체가 라이브러리에 있는지 검사한다. 하나라도 없으면 시작이 `IncompatibleCook`으로 실패한다. UE는 엔진 셰이더 맵이 없으면 종료하고(창 지원 플랫폼은 오류 대화상자 뒤 종료 요청, 9.1절) 개별 셰이더는 로드 때 오류다. Rocks는 정적 등록으로 전체를 알 수 있으므로 시작 때 결정적으로 실패시킨다.
   - **필요 시 컴파일 형식**(`GLES31_PC`, 개발 트리에서 내장 라이브러리가 없는 형식, 셰이더 시스템 12.3절): Runtime 모듈은 Developer 셰이더 컴파일러에 의존할 수 없으므로 RenderBase가 **셰이더 공급자** interface를 정의하고, Development 실행 파일이 Developer/ShaderCompiler 구현을 등록한다(SX14). 집합은 "공급 대기" 상태로 열리고, 공급자가 엔진 셰이더 전체를 컴파일해 완료 통지를 보내면 같은 완결성 검사를 한 뒤 `Ready`가 된다. 공급자가 없는 실행 파일(Release)에서 이 형식이 선택되면 `UnsupportedCapability`다.
 - **타입 있는 셰이더 참조** `TypedShader<T>`: (셰이더 타입, 집합)의 쌍. 렌더 그래프 pass와 그리기 유틸리티가 이것으로 셰이더를 고른다.
@@ -128,6 +128,7 @@
   - `ApplyPending(cache)`: 프레임 경계의 렌더 lane 작업에서 부른다(프레임 packet 작업 맨 앞). 후보가 `WaitingForProvider`면 다음 경계로 미룬다. `Ready`면 교체한다: 옛 집합의 캐시 항목을 `PipelineCache::RetireSet`, 옛 집합 `Retire`, 새 집합이 현재가 된다(epoch가 다르므로 캐시 항목이 섞이지 않는다). `Failed`면 버리고 현재를 유지한다. 돌려주는 값은 교체했는지다.
   - `CollectRetired()`: Retire한 옛 집합 가운데 lease가 0인 것을 파괴한다(진행 중 프레임의 기록 packet·그래프가 잡은 lease가 풀린 뒤). 종료 4단계(5.5절)는 `Shutdown`이 현재 집합까지 Retire하고 lease가 남으면 `Busy`다(closure 실패 — 강제 해제하지 않는다).
   - 통계: 교체 수·거부 수·대기 중인 옛 집합 수.
+  - **구현(2026-11-25, 개정 44).** `RenderBase/ShaderSetSlot.h`(`ShaderSetSlot` — `Install`·`Propose`·`ApplyPending`·`CollectRetired`·`Shutdown`, 통계 `Swaps`·`Rejections`·`RetiredCount`·`LastRejection`). 집합은 `UniquePtr<ShaderSet>`으로 넘긴다. 스펙과 다르게 정한 것: 공급 대기 후보를 버릴 때(새 후보가 오거나 종료) 그 공급이 끝날 때까지 기다린다(`WaitUntilSettled` — 공급자가 파괴된 집합에 `CompleteProvision`을 부르지 않게). 시험 `ShaderSetSlot_SwapsAtFrameBoundaryAndKeepsTheCurrentOnFailure`(첫 집합 null·실패·중복 거부, 실패 후보의 거부와 현재 유지, lease를 잡은 채 교체 — 옛 집합의 캐시 항목 0·Retired·새 lease 거부·회수 대기, 새 epoch 캐시 미적중, lease가 풀린 뒤 파괴, 종료의 Busy와 성공, 마지막 후보 우선)·`ShaderSetSlot_DefersWaitingCandidatesAndRejectsFailedProvision`(공급 대기 후보는 미루고 공급 완료 뒤 교체, 공급 실패 후보는 적용 때 버리고 현재 유지). 감시 재컴파일(SH4)이 `Propose`를 부르는 연결은 SH4에서 한다.
 
 ### 9.9 셰이더 시스템 문서 개정(SX)
 
@@ -216,3 +217,46 @@
 - 시험 결과: EngineTests `ConstantBuffer_SizeRulesAndSlotBookkeeping`·`ConstantBuffer_PipelineSlotsTakeConstantBuffersByLocation`·`ConstantBuffer_RootBudgetGuaranteesAndOverflow`(보장값 13·12·14, 경계 하나 위에서 넘친 단계 table, 루트 상수 없으면 28개 모두 root, 결정적 배치, 음성 입력)·`ConstantBlock_*` 2건·`RenderGraph_Constants*` 2건·`RenderGraph_ParallelRecordingReplaysConstantCommands` 통과, 기존 `ShaderBindings`·`ShaderSet`·`PipelineCache`·`ComputeDispatch`·`RenderGraph`·`RenderLane`·`GpuTrace` 묶음도 통과(`ShaderBindings`의 상수 버퍼 거부 대조는 수용 대조로 바꿨다). Sandbox `--self-test`의 `RunConstantChecks`(Programs/Sandbox/Private/ConstantSelfTest.cpp, 셰이더 Constant.rsf·ConstantMany.rsf·ConstantWide.rsf): D3D12(GTX 1060)·D3D12 WARP·D3D11(GTX 1060)·D3D11 WARP·OpenGL ES(ES 3.2 context)·GL 4.3 core·Vulkan(GTX 1060)·lavapipe 모두 0 failures — 기록 순서 갱신(왼쪽 옛 값·오른쪽 새 값), SetConstantData, 파이프라인 전환 뒤 묶음 유지, 안 묶은·작은(32 byte 선언에 16 byte) 버퍼 그리기 무시 2건, 정수 상수 버퍼 compute(handle·기록 명령), 단계마다 12개 그리기의 slot별 픽셀 16개. D3D12·WARP는 단계마다 14개 그리기와 그 진단 퍼뮤테이션(root UAV)도 같은 픽셀이고, 둘 다 루트 상수 32 DWORD를 선언해 넘친 CBV table 경로를 지난다(28개 중 root 15·진단 14). 그 밖 장치에서 14개는 형식 정의 상한 때문에 쿠킹하지 않는다(NOT RUN). 검증 계층 오류 0, 장치 사이 기존 픽셀 대조도 그대로 0 differing channels다.
 - 리뷰 반영(같은 날): D3D11 다른 스레드 갱신 rename, GLES 생성·갱신의 소유 스레드 검사, D3D12 ring 크기(32768 → 131072)와 넘친 CBV table 재사용, Vulkan pool의 UBO 칸(set당 `MaxConstantBufferSlots`), `SetConstantData` 실패 계약(InvalidArgument만 앞 묶음 유지, 그 밖 실패는 slot을 비운다). 반영 뒤 self-test 여덟 장치 다시 0 failures.
 - 남은 것: 9항(공유 상수 slot 표·`ParameterBatch` 자원 부분·D3D11 크기별 pool·ring 크기 조정), Vulkan·Metal 진단 버퍼 자리(SL2).
+
+### 9.12 엔진 호스트 연결(RR11, 개정 45)
+
+18.3절 RR11의 남은 부분이다. 9.2절의 "렌더 lane 시작 단계에서 엔진 셰이더 집합을 연다"를 엔진 호스트 공용 경로로 만든다. 지금까지는 Sandbox가 등록부·공급자·장치별 집합을 손으로 만들었다(`Programs/Sandbox/Private/SandboxShaders.cpp`). 결정은 권장안으로 확정했고 애매한 곳은 UE 5.8을 따랐다.
+
+**UE 5.8 순서.** 모듈 적재(`Launch/Private/LaunchEngineLoop.cpp:2742` `LoadPreInitModules`, 셰이더를 가진 플러그인은 PostConfigInit 단계 — `:6815`) → 셰이더 컴파일 관리자 생성(셰이더 컴파일을 허용하는 실행만 실제로 일한다, `:3245–3260`) → 셰이더 타입 초기화(`:3295` `InitializeShaderTypes`, `RC/Private/ShaderCore.cpp:3671`) → 전역 셰이더 맵(`:3307` `CompileGlobalShaderMap`). 원문 디렉터리 대응표는 RenderCore 런타임 API이고(`RC/Public/ShaderCore.h:1654` `AddShaderSourceDirectoryMapping`) 쿠킹 데이터를 쓰거나 컴파일을 허용하지 않는 실행에서는 무시된다(`RC/Private/ShaderCore.cpp:4222`).
+
+**구조.**
+1. **엔진 셰이더 호스트 `EngineShaderHost`**(`RenderBase/EngineShaderHost.h`). 엔진 호스트(Sandbox `--engine`·self-test, 이후 게임 실행 파일)가 하나 만드는 호스트 서비스다(모듈 로더 3.12절).
+   - 소유하는 것: 셰이더 타입 등록부(셰이더 시스템 SSD3), 원문 디렉터리 표(가상 루트 → 디스크 폴더, UE 대응표와 같은 자리 — 공급자만 읽는다), 공급자 자리 하나(SX14), 쿠킹 라이브러리 원천 자리 하나(아래 3항).
+   - `Attach(services)`: 등록부와 자신을 서비스로 올린다. 호스트는 다른 호스트 서비스와 함께 `StartPhase(PostConfigInit)` 전에 부른다 — PostConfigInit 모듈도 셰이더 타입을 등록할 수 있다(UE 플러그인 규칙과 같다). `Detach(services)`는 호스트 묶음 종료 뒤다.
+   - `Freeze()`: 엔진 묶음과 PostEngineInit 모듈이 시작한 뒤(`Engine::Initialize` 뒤), 렌더 lane 시작 전에 로더 스레드에서 부른다(UE `InitializeShaderTypes` 자리). 등록부와 원문 디렉터리 표가 닫힌다. 성공하면 Info 한 줄(셰이더 타입 수·정점 입력 타입 수), 실패하면 Error(등록부 `LastFailure`)다. 두 번째 호출은 아무 일도 하지 않는다.
+   - 늦은 등록: Freeze 뒤 시작하는 모듈의 등록은 `ScopeClosed`이고 그 모듈 시작이 실패한다(RenderBase 모듈은 Error 로그). 같은 등록부로 엔진 묶음을 다시 시작해도 같다 — 등록부는 엔진 묶음 한 번의 수명에 묶인다. 그래서 등록부를 쓰는 동안 호스트는 엔진 묶음을 시작 상태로 둔다(self-test는 `StartEngineGroup` 사용자 하나를 직접 잡는다).
+   - 스레드: `Attach`·`Detach`·`Freeze`·원문 디렉터리 추가·자리 연결은 로더 스레드, Freeze 뒤 조회는 어느 스레드에서나 된다(자리는 잠금으로 읽는다 — lane 스레드가 연다).
+2. **엔진 렌더 자원 `EngineRenderResources`**(같은 헤더). 렌더 lane 처리기가 멤버로 두고 `OnLaneStart`에서 `Open(device, host)`, `OnLaneStop`에서 `Retire(device)`를 부른다(5.5절 시작 순서의 "엔진 셰이더 집합 열기와 검사 → 내장 자원 팩"). 장치 소유 스레드에서 직접 그리는 self-test도 같은 함수를 쓴다. `Open` 순서:
+   1. 등록부가 Freeze되지 않았으면 `NotReady`(진단: Freeze 자리).
+   2. 형식 id `EngineShaderFormat(backend)`: D3D12 `D3D12_SM6`, D3D11 `D3D11_SM5`, Vulkan `VULKAN_SM5`, OpenGL ES `GLES31_PC`, Metal `METAL_SM5`. TargetProfile `shaderFormats`·장치 요구 비트에 따른 선택(셰이더 시스템 SSD10·SSD15)과 Android의 `GLES31_ANDROID`는 쿠킹 원천이 들어올 때 그 원천이 맡는다(RenderBase는 플랫폼 매크로로 가르지 않는다 — 플랫폼 경계 정책, Android에는 공급자도 없다).
+   3. 쿠킹 원천이 붙어 있으면 그 형식의 엔진 라이브러리를 읽어 `OpenCooked`. 원천에 그 형식이 없으면(`NotFound`) 4로 간다. 다른 오류는 실패다.
+   4. 공급자로 `OpenFromProvider`. 공급자가 없으면 `UnsupportedCapability`(집합 문제 `NoProvider`) — Release 실행 파일의 필요 시 컴파일 형식(9.2절).
+   5. `WaitUntilSettled`. `Ready`가 아니면 Error 로그(형식·집합 문제 이름·설명)와 함께 실패다(`NoProvider`는 `UnsupportedCapability`, 나머지는 `DependencyFailed`).
+   6. `BuiltinResources::Create`(11.4절 5항). 실패하면 집합을 Retire하고 Error 로그(팩 `LastFailure` — 빠진 fallback 셰이더 이름)와 함께 그 오류다. 엔진 셰이더 타입을 등록하는 모듈이 시작하지 않았으면(등록 누락) 여기서 `NotFound`로 드러난다.
+   - 반환 뒤 RenderLane이 제출 fence를 기다려 `BuiltinReady`를 게시한다(기존 5.5절). 실패하면 준비 완료가 없고 프레임 slot 확보가 그 오류다.
+   - `Retire(device)`: 팩 → 집합 순(5.5절 종료 4단계). 집합 객체는 `EngineRenderResources`가 파괴될 때(또는 다음 `Open`에서) 부순다 — 파이프라인 캐시 lease는 그 전에 주인이 비운다.
+3. **쿠킹 라이브러리 원천 `CookedShaderLibrarySource`**(interface만). `ReadLibrary(formatId, library, out)` — 그 형식·종류의 라이브러리 byte를 넘기거나 `NotFound`. 매니페스트 v2·`.rshl`(셰이더 시스템 SSD11·SSD13) 구현은 에셋 쪽이 push된 뒤 붙인다(호스트 `AttachCookedLibraries`). 지금은 원천이 없으므로 모든 형식이 공급자 경로다.
+4. **Development 공급자 모듈 `DevelopmentShaderProvider`**(Developer). Sandbox의 공급자를 옮겼다. 모듈 수명 객체 `Startup`이 `EngineShaderHost` 서비스를 찾아 공급자를 붙이고 `Shutdown`에서 떼고 워커를 멈춘다. 서비스가 없으면 아무 일도 하지 않고, 이미 다른 공급자가 붙어 있으면(호스트가 직접 붙인 공급자·시험) 붙이지 않고 Info만 남긴다. 실행 파일은 Release 밖에서만 이 모듈을 링크한다(Build.cs) — Runtime 모듈은 이 모듈을 모르고(SX14) 실행 파일 소스에도 `#if`가 없다.
+   - 첫 요청에서 준비한다: `/Engine` = `<engine>/Shaders`와 호스트 원문 디렉터리 mount, 형식 정의 `<engine>/Config/ShaderFormats`, 워커(실행 파일 옆, 없으면 같은 출력 뿌리의 ShaderCompileWorker 타깃 출력 — 출력 폴더 이름 `<도구>-<플랫폼>-<타깃>-<구성>`의 타깃 자리를 `shadercompileworker`로, 빌드 타깃 3.11절), 너겟 캐시, 관리자.
+   - 형식마다 `CompileShaderLibrary`(개발 전용 타입 포함 — 셰이더 시스템 SSD16)를 한 번 하고 byte를 들고 있다가 같은 형식의 다음 집합에 복사한다. 요청은 잠금으로 직렬화한다(장치 소유 스레드와 lane 스레드가 모두 부른다).
+5. **Sandbox.** `--engine` 호스트는 다른 서비스와 함께 `EngineShaderHost`를 올리고 Sandbox 셰이더 타입과 `/Plugin/Sandbox` 원문 디렉터리를 등록한 뒤 `Engine::Initialize` 다음에 Freeze한다(장치가 아직 없으므로 여기까지 — 창 렌더 경로는 화면 마일스톤에서 lane과 잇는다). self-test는 같은 호스트를 엔진 묶음 사용자 하나와 함께 잡고, 장치마다 `EngineRenderResources`를 열며(직접 그리기 검사의 활성 집합·팩), 렌더 lane self-test 처리기는 `OnLaneStart`에서 연다.
+
+**버린 안.**
+- Engine 모듈이 셰이더 집합을 연다: Engine은 Graphics를 모른다(엔진 런타임 3절).
+- 첫 `Open`에서 Freeze: `Open`은 lane 스레드이고 등록부는 로더 스레드 규칙이다. 늦게 시작한 모듈이 조용히 빠질 수 있다.
+- 공급자를 실행 파일 소스의 `#if`로 만든다(이전 Sandbox): 실행 파일마다 사본이 생긴다. 모듈 링크로 개발 구성을 고르면 같은 코드 하나다.
+- 공급자를 ShaderCompiler 모듈 안에 둔다: 쿠커·워커 도구까지 RenderBase·Graphics에 의존하게 된다.
+
+**한계.** 형식은 backend 고정 표다(Android GLES는 쿠킹 원천 뒤). 프로젝트 라이브러리(RR9)와 셰이더 교체 연결(`ShaderSetSlot`, SH4 감시 재컴파일)은 그대로 후속이다. 장치 재생성(RR18)은 새 `EngineRenderResources`를 연다.
+
+**완료 기준.** EngineTests(기록 장치): `Engine::Initialize`로 엔진 묶음이 시작하면 RenderBase가 호스트 등록부에 엔진 셰이더 타입을 넣고, Freeze 뒤 렌더 lane 시작이 집합 `Ready`·팩·`BuiltinReady`를 만들며 종료가 Retire 0 누수로 끝난다. 음성: 등록 누락(엔진 타입 없는 등록부) → `NotFound`와 빠진 셰이더 이름, `BuiltinReady` 없음, Freeze 전 `Open` `NotReady`, Freeze 뒤 엔진 묶음 재시작 실패(`RenderBase`), 공급자 없음 `UnsupportedCapability`, 쿠킹 원천 우선·`NotFound`면 공급자, 자리 중복 `Busy`. Sandbox `--self-test` 여덟 장치 PASS와 엔진 호스트 자식의 Freeze 로그.
+
+**구현(2026-11-25, 개정 45).** 위 구조대로다.
+- 파일: RenderBase `RenderBase/EngineShaderHost.h`·`Private/EngineShaderHost.cpp`(`EngineShaderHost`·`EngineRenderResources`·`CookedShaderLibrarySource`·`EngineShaderFormat`·`MaxShaderSourceDirectories` 16), Developer `Engine/Source/Developer/DevelopmentShaderProvider`(`DevelopmentShaderProvider` — Sandbox `SandboxShaders.cpp`의 공급자를 옮겼다, 모듈 수명 객체 `DevelopmentShaderProviderModule`). Sandbox는 `SANDBOX_SHADER_PROVIDER` 정의와 ShaderCompiler 계열 직접 의존을 지우고 Release 밖에서 `DevelopmentShaderProvider`만 링크한다. `SandboxShaders`는 호스트 붙이기(`AttachHost`)·self-test 범위(`SelfTestShaderHost` — 엔진 묶음 사용자 하나)·장치별 `EngineRenderResources`(`DeviceShaders`)만 남았고, `RenderUtilitySelfTest`는 자기 팩 대신 그 팩을 쓴다. 렌더 lane self-test 처리기는 스왑체인 뒤 `OnLaneStart`에서 연다.
+- 스펙과 다르게 정한 것: Android `GLES31_ANDROID`는 형식 표에 넣지 않았다(RenderBase는 플랫폼 매크로로 가르지 않는다 — 플랫폼 경계 정책. 쿠킹 원천이 고른다). 원문 디렉터리 가상 루트는 `/Plugin/<이름>`·`/Project` 문법 그대로이고 같은 루트는 대소문자 무시로 중복이다.
+- 시험: EngineTests `RenderBase_EngineShaderHostOpensAtLaneStart`(원문 디렉터리 규칙, 서비스 두 형식, 공급자 자리 `Busy`, `Engine::Initialize`의 엔진 묶음에서 RenderBase 등록, Freeze 전 `Open` `NotReady`, Freeze 뒤 등록·디렉터리 `ScopeClosed`, lane 시작의 집합 `Ready`·팩·`BuiltinReady`, 종료 Retire와 회수 0, 엔진 종료가 등록을 거둠, 떼기), `RenderBase_EngineRenderResourcesDiagnoseMissingPieces`(메시 셰이더 등록 누락 → `NotFound`·`BuiltinMeshVertex`, lane `BeginFrame`도 그 오류, 공급자 없음 `UnsupportedCapability`·`NoProvider`, 공급 실패 `DependencyFailed`·공급자 진단, 실패 뒤 다시 열기·`Busy`), `RenderBase_EngineRenderResourcesPreferCookedLibraries`(쿠킹 원천 우선·`NotFound`면 공급자·읽기 오류 전달·자리 `Busy`), `RenderBase_EngineShaderHostRejectsLateRegistration`(Monolithic — 다른 등록부가 있으면 `AlreadyRegistered`, Freeze 뒤 엔진 묶음 재시작이 `RenderBase` 실패로 되돌아감). Sandbox `--self-test`: 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) 모두 PASS(Graphics self-test 0 failures, 장치 사이 대조 0 differing channels), 렌더 lane 두 모드에서 "lane start opens the engine shader set and the builtin resource pack"·"lane stop retires the engine render resources", 엔진 호스트 자식이 `Engine shader types are frozen: 79 shader types, 1 vertex input types`를 남긴다(Sandbox 타입과 RenderBase 엔진 타입).

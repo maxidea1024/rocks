@@ -42,4 +42,8 @@ bool SphereComponent::TryLocalBounds(ComponentBounds& local) const noexcept {
     return true;
 }
 
+Result<VolumeShape> SphereComponent::TryWorldVolumeShape() const noexcept {
+    return VolumeShape::TrySphere(WorldLocation(), static_cast<double>(ScaledSphereRadius()));
+}
+
 } // namespace rocks

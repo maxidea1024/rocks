@@ -32,6 +32,12 @@ int Run(launch::ApplicationContext& context) noexcept {
         }
     }
 
+    // 엔진 셰이더 호스트(셰이더 타입 등록·Development 공급자 — RenderBase 9.12절 RR11)다.
+    DemoShaderHost shaderHost(context.Modules());
+    if (!shaderHost.IsReady()) {
+        return 2;
+    }
+
     if (selfTest) {
         const int checked = RunGameHudSelfTest(allocator);
         if (checked != 0) {
@@ -44,10 +50,7 @@ int Run(launch::ApplicationContext& context) noexcept {
         return 1;
     }
     auto& device = *created.Value();
-    // UI 셰이더 집합(엔진 셰이더 타입 + Development 공급자 — UiToolkit 9.1절 UW1a)이다.
-    ROCKS_ON_SCOPE_EXIT {
-        ShutdownDemoShaders();
-    };
+    // 장치의 UI 셰이더 집합이다(UiToolkit 9.1절 UW1a).
     DemoShaderSet shaders(allocator, device);
     if (!shaders.IsReady()) {
         return 2;

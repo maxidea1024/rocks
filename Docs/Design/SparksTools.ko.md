@@ -2,6 +2,8 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 11(2026-11-25): LC8e 구현·리뷰 반영(10.9절 — `initialized` 때 첫 분석, 드라이브 `:`는 `%3A`, 지움을 먼저 발행, 작업 공간 없으면 분석하지 않음, 가장 안쪽 패키지, schema 상대 경로 절대화, 잘못된 UTF-8 본문은 -32700, 머리 전체 상한을 줄마다, class 기반 경로 강조·prelude enum case `defaultLibrary`, 경로 표기의 UTF-8·대소문자 수정).
+- 개정 10(2026-11-24): LC8e 설계(10절 — 틀·수명·문서 저장소·분석·진단·의미 강조·위치 변환·시험).
 - 개정 9(2026-11-24): SL 3.13 표 `@test` 행 개정(SL 문서를 장별 폴더로 나눈 뒤).
 - 개정 8(2026-11-23): LC8d 구현·리뷰 반영(9.7절 — `@test` 반환 타입 금지(S0621), 엔진 enum 값 수정, 취소 판정·메서드 거부, 실행기 거부는 1, 토큰 밑줄).
 - 개정 7(2026-11-23): LC8d 설계(9절 — `@test`는 최상위 함수만(SL 3.13 표·컴파일러와 맞춤, 클래스 `@test` 삭제), 실행기는 SparksTestHost 공개 API, VM 최상위 진입 `CallFunction`, 결과 형식). T1·T10 개정.
@@ -20,7 +22,7 @@
 | LC8b build·ids | `build`(모듈마다 `.sparkc` — 출력 폴더), `ids`(발급 대기 안정 ID를 `.rocksids.json`에 GUID로 발급) | 출력 byte golden, manifest 왕복 시험 — 완료(개정 4, 7절) |
 | LC8c formatter·fmt | lexer의 주석 보존 모드, 공식 서식 규칙(3절)의 token 기반 formatter(SparksCompiler), `fmt`·`fmt --check` | corpus 전체에서 멱등(fmt(fmt(x)) = fmt(x))·token 열 보존, 서식 golden — 완료(개정 6, 8절) |
 | LC8d @test·test | `@test fn` 실행기(headless 가짜 host — 엔진 함수는 "엔진 필요" 실패), 결과를 진단 형식으로 | 실행기 시험(통과·Assert 실패·fault·엔진 필요·끝나지 않음) — 완료(개정 8, 9절) |
-| LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) |
+| LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) — 10절 |
 | LC8f 언어 서버 편집 | 자동완성(멤버·hook·attribute·리터럴·경로·Unity 이름 제시), hover, 정의 이동, 빠른 수정(SL §13 목록), 문서 서식 | 자동완성 후보 golden, prefix fuzz, 빠른 수정 golden |
 | LC8g VS Code 확장 | `Tools/VSCode/sparks`(TypeScript — 언어 등록·문법 강조·`sparks-lsp` 시작) | 확장 패키징 시험(C# 도구 시험에서 manifest 검사) |
 
@@ -199,3 +201,60 @@
 - **리뷰 반영:** `Result`를 반환하는 `@test`의 오류 반환이 통과로 세어짐 → 반환 타입 금지(S0621, conformance `Rules/Attributes` 사례). instance 없는 정지 실행이 `Detach`의 this frame 판정으로 조용히 취소될 수 있음 → 판정을 클래스 메서드 frame으로 좁히고 실행기는 끝 기록 없는 소멸을 거부. 링크 거부 종료 코드 3 → 1. `CallFunction`의 메서드 거부와 시험. 밑줄을 구문 트리 토큰으로. 로드 거부 이름 `Soft.Load`. `Error` case 이름은 컴파일러 심볼로. 엔진 struct 기본값·로드 거부·Tag 값 리터럴·색인 fault 시험. 프레임 수 해석은 상한을 넘는 순간 멈춘다(자리 수 상수 대신 — 앞의 0은 된다).
 - **한계:** 최상위 함수에는 문맥 이름이 없어(S0321) `@test`가 `World`를 쓸 수 없다 — headless World fixture(SL 13.1)는 EI에서 `@test` 문맥 규칙(SL 개정)과 함께 정한다. `Assert` 문구는 원문 줄로만 보인다(설명 줄에 따로 넣지 않는다). 시험의 `Log` 출력은 보이지 않는다(요구 시 `--verbose`). 정지 실행의 재개 순서에서 instance 없는 실행은 생성 번호 0이라 같은 프레임의 instance 실행보다 먼저다(결정적).
 - **시험:** `SparksTestRunner_ResultsOfEachKind`(11가지 — 프레임 수·위치), `SparksTestRunner_EngineRefusalsAndIndexFault`, `SparksTestRunner_ReportFormat`(보고 golden), `SparksTestRunner_TestsAreIndependent`, `SparksTestRunner_RejectsBadInput`, `SparksTestRunner_CallFunctionSession`, `SparksTestRunner_AllocationFailureEverywhere`, `SparksTools_TestRunsAndReports`·`SparksTools_TestNoTestsAndDiagnostics`·`SparksTools_TestAllocationFailure`, `SparksTools_UsageErrors`(`--max-frames` 8가지). 수동 확인(2026-11-23 Windows): `SparksCli test`(통과·Assert·0 나눗셈·끝나지 않음·엔진 필요 섞임 — 1).
+
+## 10. LC8e 설계(개정 10)
+
+### 10.1 구조
+
+- `SparksTools/LanguageServer.h`(공개): `MessageChannel`(입력 읽기 `Read(Span<char>) → Result<usize>`(0은 입력 끝), 출력 쓰기 `Write(StringView)`, 기록 `Log(StringView)` — 표준 오류)과 `int32 RunLanguageServer(Allocator&, platform::FileSystem&, Span<const StringView> arguments, MessageChannel&)`. 프로그램 `Programs/SparksLsp`(대상 `SparksLsp`, Launch Tool)는 표준 입력·출력·오류(SE-B7)를 잇는 채널로 이 함수를 부르기만 한다. 시험은 각본 입력(조각 크기를 정한 채널)으로 같은 프로세스에서 부른다.
+- 인자: `--schema <폴더>`(여러 번 — CLI와 같다), `--stdio`(VS Code가 넘긴다 — 받아서 무시). 그 밖은 표준 오류에 사용법 한 줄과 2. 초기화 옵션 `initializationOptions.schemas`(문자열 배열 — 첫 작업 공간 뿌리 기준 또는 절대 경로)도 schema 폴더에 더한다. 상대 경로는 받을 때 절대 경로로 바꾼다(명령줄은 작업 디렉터리 기준, 초기화 옵션은 첫 뿌리 기준 — 뿌리가 없으면 작업 디렉터리) — schema 파일 진단의 URI가 절대 경로여야 한다.
+- 파일: `Private/LspFraming`(Content-Length 틀), `LspServer`(JSON-RPC 해석·응답 쓰기·수명·문서 저장소·분석·발행 — 요청 종류가 적어 프로토콜 층을 따로 두지 않는다), `LspText`(UTF-16 위치 변환·`file` URI·경로 비교 key), `LspSemanticTokens`. 작업 공간 덮기는 `Workspace::Overlay`(LC8a 작업 공간에 더함).
+
+### 10.2 틀과 JSON-RPC
+
+- 메시지 = 머리 줄들(`이름: 값\r\n`) + 빈 줄(`\r\n`) + 본문 `Content-Length` byte(UTF-8 JSON). `Content-Length`는 필수·10진수·`MaxLspMessageBytes`(64 MiB) 이하, `Content-Type`은 받고 무시, 다른 머리는 무시, 머리 줄 하나는 `MaxLspHeaderBytes`(1,024 byte) 이하, 머리 전체는 `MaxLspHeaderBlockBytes`(4,096 byte) 이하(줄 끝 없는 입력이 버퍼를 끝없이 키우지 않게 — 줄 하나를 다 읽을 때마다와 줄을 기다릴 때 모두 본다: 조각 크기와 상관없이 같은 판정). 틀이 깨지면(필수 머리 없음·숫자 아님·상한 초과·줄 끝 없이 입력 끝) 표준 오류에 한 줄을 쓰고 1로 끝난다(틀을 다시 맞출 수 없다). 출력도 같은 틀(`Content-Length: N\r\n\r\n` + 본문 — 본문은 Core `JsonWriter` compact).
+- JSON-RPC 2.0: 요청(id·method), 알림(id 없음), 응답(클라이언트 응답은 받고 버린다 — 서버는 요청을 보내지 않는다). 본문이 JSON이 아니면(잘못된 UTF-8·글자 중간에서 끊긴 본문 포함 — 틀은 byte 그대로 넘긴다) id null로 ParseError(-32700), 모양이 틀리면 InvalidRequest(-32600), 모르는 요청은 MethodNotFound(-32601), 인자가 틀리면 InvalidParams(-32602). 모르는 알림과 `$/`로 시작하는 알림(`$/cancelRequest`·`$/setTrace`)은 무시한다 — 요청은 받은 순서로 하나씩 끝까지 처리하므로(10.4절) 취소할 진행 중 요청이 없다.
+
+### 10.3 수명
+
+- `initialize` 전의 요청은 ServerNotInitialized(-32002), 알림은 버린다(`exit` 제외). `initialize` 결과: `capabilities` = `positionEncoding: "utf-16"`, `textDocumentSync: { openClose: true, change: 1 }`(전체 내용 — T11), `semanticTokensProvider: { legend, full: true }`, `serverInfo: { name: "sparks-lsp" }`. 두 번째 `initialize`는 InvalidRequest.
+- 작업 공간 뿌리: `workspaceFolders`(있으면 전부), 없으면 `rootUri`, 둘 다 없으면 작업 공간 없음 — 분석하지 않는다(진단·강조 없음, initialize 때 표준 오류에 한 줄). 편집기는 폴더를 열고 쓰는 것이 기본이고, 단일 파일 모드(열린 문서의 패키지를 찾아 올라가기)는 저장 전 문서·패키지 밖 문서가 섞이면 작업 공간 읽기 전체가 실패하므로 LC8g에서 필요를 본 뒤 정한다. `file` URI만 받는다(다른 scheme 폴더는 무시).
+- `shutdown` → null 결과, 그 뒤 요청은 InvalidRequest. `exit` 알림 → shutdown을 받았으면 0, 아니면 1로 끝난다. `exit` 없이 입력이 끝나면 1.
+
+### 10.4 문서 저장소와 분석
+
+- `didOpen`(uri·version·text)은 문서를 열린 문서 표에 넣고, `didChange`(전체 내용 — 마지막 change의 text)는 내용과 version을 바꾸고, `didClose`는 표에서 뺀다(디스크 내용으로 돌아간다). 문서 수 상한 `MaxLspDocuments`(4,096) — 넘는 didOpen은 표준 오류에 알리고 무시.
+- **분석:** `initialized` 알림(디스크 작업 공간의 첫 진단)과 문서 알림마다 곧바로(받은 순서 — 결정적) 작업 공간 전체를 다시 읽어(T3 — 디스크에서 바뀐 파일도 반영) 열린 문서 내용으로 덮고 컴파일한다(모든 단계 — CLI `check`와 같은 `Compilation`). 덮기: 경로가 같은 작업 공간 파일의 내용을 바꾸고, 작업 공간에 없는 `.spark`가 어떤 패키지 뿌리 아래면 그 패키지 모듈로 더한다(저장 전 새 파일). 뿌리가 겹치면(중첩 패키지) 가장 안쪽 패키지이고, `.`로 시작하는 폴더·파일 아래는 모듈이 아니다(작업 공간 읽기와 같다). 그 밖의 열린 문서(패키지 밖)는 분석하지 않는다(진단 없음). 경로 비교는 `/` 구분으로 맞추고 Windows 드라이브 글자만 소문자로 본다(그 밖의 대소문자는 구분한다). 작업 공간 읽기가 실패하면(패키지 밖 원문 등) 진단을 모두 지우고 그 이유를 표준 오류에 쓴다 — 이유가 바뀔 때만.
+- 매 분석이 전체를 새로 컴파일한다 — 증분 분석·디스크 결과 보관은 SL 13절 목표(파일 1,000개 p95 300 ms)를 잰 뒤(T11).
+
+### 10.5 진단 발행
+
+- 분석마다 작업 공간 파일(모듈·manifest·ID manifest·schema)과 열린 문서마다 진단 목록을 만들고, 지난번 발행과 다른 URI만 `textDocument/publishDiagnostics`(uri, 열린 문서면 version, diagnostics)로 보낸다(이전에 진단이 있던 URI가 이번 대상에 없으면 — 지운 파일·닫은 새 문서·다른 철자로 다시 연 문서 — 빈 목록으로 지운다). 발행 순서는 지움 먼저, 그다음 URI byte 순(두 철자를 한 key로 보는 클라이언트에서 뒤에 온 지움이 새 진단을 덮지 않게). 지난 발행 표에는 빈 목록이 아닌 URI만 둔다(없음 = 빈 목록). 작업 공간 파일의 URI는 서버가 경로에서 만들고(10.6절), 열린 문서는 클라이언트가 보낸 URI 그대로 쓴다. 같은 파일을 다른 철자(대문자 드라이브·`:`)로 열면 문서 표에는 URI마다 따로 있고, 덮기·발행은 경로 key로 한 파일이다(마지막에 연 문서의 내용·URI·version).
+- 진단 하나: `range`(10.6절 — 원문 위치가 없는 진단은 0:0–0:0), `severity: 1`, `code: "S0412"`, `source: "sparks"`, `message` = 메시지, 설명이 있으면 `\n` + 설명, 수정 예가 있으면 `\nfix: ` + 수정 예(CLI의 줄들과 같은 내용 — 원문 줄·밑줄은 편집기가 보이므로 뺀다). 순서는 SL 8.1 순서.
+
+### 10.6 위치 변환
+
+- LSP 위치는 0부터 센 줄과 UTF-16 code unit 열이다(T11). 줄은 SL 8.1 줄(LF 기준 — CR은 줄 끝)과 같다. 열: 줄 처음부터 그 byte 위치까지 code point마다 U+10000 미만은 1, 이상은 2, 잘못된 UTF-8 byte는 1(U+FFFD — SL 8.1 표시와 같은 대체). BOM은 1줄 0열 앞(BOM 안 위치는 0:0).
+- `file` URI ↔ 경로: `file://` + (Windows `/c:/…`·`/c%3A/…`의 드라이브 글자 앞 `/` 제거) + percent decoding(UTF-8), 경로 → URI는 segment마다 RFC 3986 unreserved 밖을 `%XX`(대문자 — Core `TryPercentEncode`)로, 드라이브 글자는 소문자, 드라이브 `:`도 `%3A`(VS Code가 보내는 모양 `file:///c%3A/…`와 같게). authority는 비었거나 `localhost`(RFC 8089)만 받는다. 잘못된 percent·UTF-8 아님·다른 authority·query·fragment·percent로 쓴 경로 구분자(`%2F`·`%5C`)는 그 URI를 무시한다(진단 없음). 경로 비교 key는 `/` 구분·끝 `/` 없음·드라이브 소문자다(대소문자는 그 밖에 그대로 — 파일 체계가 돌려준 철자를 쓴다).
+
+### 10.7 의미 강조(T12)
+
+- `textDocument/semanticTokens/full` → `{ data }`(5개씩: 줄 차이·시작 차이·길이·종류·modifier bit — UTF-16). 열린 문서·작업 공간 모듈만(그 밖은 빈 data). 마지막 분석 결과를 쓴다(요청이 분석을 다시 하지 않는다 — 문서 알림마다 분석했다).
+- 토큰: 모듈 구문 트리의 `Name`·`Identifier`·`Member` 노드 중 심볼이 있는 것(이름 토큰), `Type` 노드와 class 기반 목록 `Path` 노드의 타입(경로 마지막 이름 토큰 — 이름 노드에 심볼이 따로 없을 때), import 경로의 이름(namespace). 원문 위치 순, 겹치면 앞의 것(같은 토큰이 둘이면 하나). 속성(`@test` 등)은 심볼이 없어 강조하지 않는다(편집기 문법 강조 몫 — LC8g).
+- 종류(legend 순서): `namespace`(import 별칭·모듈·prelude 이름 공간·RPC 접두), `type`(내장·prelude 타입), `class`(Sparks·엔진 클래스), `struct`, `enum`, `interface`, `typeParameter`, `enumMember`, `event`, `function`(최상위 fn·prelude 함수), `method`(메서드·엔진 함수·interface 메서드), `property`(필드·엔진 필드·언어 필드), `parameter`, `variable`(지역·const·문맥 이름). modifier: `declaration`(선언 이름), `readonly`(`let`·const·읽기 전용 속성·문맥 이름), `static`(최상위 fn·const·schema·prelude static — `Delay`·`Log.Info`), `async`, `defaultLibrary`(엔진·prelude·언어 소유 — 엔진·prelude enum의 case 포함). 엔진 클래스의 필드(`Owner` 등)는 `property defaultLibrary`다.
+
+### 10.8 시험(LC8e)
+
+- 틀: 조각 크기 1·2·7·전체로 같은 각본을 나눠도 같은 출력, 머리 오류 5가지(없음·숫자 아님·상한 초과·머리 줄 상한·입력 중간 끝 — 1), 여러 머리·`Content-Type`.
+- 프로토콜 golden: 각본 세션(initialize → initialized → didOpen → semanticTokens → didChange → didClose → shutdown → exit)의 출력 전체 byte. 수명 오류(초기화 전 요청 -32002, 두 번째 initialize, shutdown 뒤 요청, 모르는 요청 -32601, JSON 아님 -32700, 모양 틀림 -32600, 인자 틀림 -32602, exit만 — 1).
+- 진단 동등성: conformance 폴더·파일 사례(LC8a 동등성 시험과 같은 집합)를 작업 공간으로 열어 발행 진단(경로·코드·위치 — UTF-16을 code point로 되돌려)이 `sparks check`와 같다. 열린 문서 덮기(디스크와 다른 내용·저장 전 새 파일·닫으면 디스크로)와 진단 지우기.
+- 위치·URI: 한글·이모지(서로게이트 쌍)·CRLF·BOM·잘못된 UTF-8, Windows 드라이브·`%3A`·공백·한글 경로 왕복, 잘못된 percent.
+- 의미 강조 golden(종류·modifier 전부 나오는 사례), 할당 실패 전수(짧은 세션 — ExitError(3)이거나 같은 출력).
+
+### 10.9 구현(LC8e)
+
+- **모양:** 위 설계대로다. 설계와 달라진 곳: (1) `initialized` 알림도 분석한다 — 문서를 열기 전에 디스크 작업 공간의 진단이 보인다. (2) 경로 → URI의 드라이브 `:`는 `%3A`(10.6절 — 설계는 `:` 그대로). (3) 작업 공간이 없으면 분석하지 않는다(10.3절 — 설계는 "열린 문서만"). (4) 프로토콜 층 파일(`LspProtocol`)을 두지 않았다(10.1절). (5) 의미 강조에서 `Attribute`를 빼고 class 기반 `Path`를 더했다(10.7절).
+- **리뷰 반영:** 잘못된 UTF-8 본문이 3으로 끝남(틀이 본문을 `String`에 담았다) → 틀은 reader 버퍼의 byte를 그대로 넘기고 JSON 해석이 -32700. 머리 전체 상한을 줄을 기다릴 때만 봐 조각 크기에 따라 판정이 달랐음 → 줄마다. 지움을 URI 순서에 합치면 다른 철자로 다시 연 문서의 새 진단을 뒤의 지움이 덮을 수 있음 → 지움 먼저. 중첩 패키지의 저장 전 새 파일이 바깥 패키지로 감 → 가장 안쪽, `.` 폴더 제외. 상대 schema 경로의 발행 URI가 `file:///Schemas/…` → 절대 경로로. 작업 공간 없음의 설계 문구 불일치 → 설계를 고침. 읽기 실패 기록이 문서 알림마다 → 이유가 바뀔 때만. `localhost` authority 받음, `%2F`·`%5C` 거부. 발행의 열린 문서 대조를 O(문서²) → O(문서). 경로 접두 비교가 기본 비교(ASCII 대소문자 무시)였음 → 대소문자 구분(덮기의 패키지 뿌리, LC8a 폴더 인자의 모듈 고르기).
+- **함께 고친 것(LC8a):** 작업 공간의 진단 경로 표기(`Display` — `\` → `/`)가 한 byte씩 `String`에 붙여 UTF-8 sequence가 쪼개지면 실패했다 — 한글이 든 폴더에서 `sparks check`가 할당 실패(3)로 끝났다. `\` 사이 구간을 통째로 붙인다. 언어 서버의 경로 key(`LspPathKey`)도 같다. 시험: `SparksTools_CheckNonAsciiFolder`, 언어 서버 시험은 모두 공백·한글이 든 임시 폴더에서 돈다.
+- **시험(`SparksToolsLspProtocolTests`·`SparksToolsLspAnalysisTests`, 준비는 `SparksToolsLspTestSupport.h`):** `SparksLsp_LifecycleGolden`(초기화 전 요청 -32002·초기화 전 알림 무시·`initialize` 인자 틀림 -32602·두 번째 initialize -32600·JSON 아님·잘못된 UTF-8·글자 중간에서 끊긴 본문 -32700·배열·bool id·문자열 아닌 method -32600·클라이언트 응답·`$/` 알림 무시·모르는 요청 -32601·uri 없는 강조 -32602·shutdown 뒤 요청 -32600 — 출력 byte 전체 golden), `SparksLsp_ExitCodesAndUsage`(exit만·shutdown 없음·입력 끝·빈 입력 1, 인자 오류 2, 읽기·쓰기 오류 3), `SparksLsp_FramingChunksAndHeaders`(조각 1·2·7·전체, 머리 이름 대소문자·값 공백·`Content-Type`·1,024 byte 머리 줄, 깨진 틀 17가지 — 없음·숫자 아님·음수·상한+1·자리 넘침·두 번·`:` 없음·머리 줄 상한·줄 끝 없는 긴 머리·머리 전체 상한(끝나지 않은 줄·다 끝난 줄들)·본문 모자람·64 MiB 그대로(입력 끝)·머리 중간 끝 — 조각 1과 전체), `SparksLsp_PublishesAndOverlaysDiagnostics`(디스크 진단 → 열어 고침 → 바꿈 → 같은 진단 바꿈은 발행 없음 → 다른 모듈을 깨 닫힌 모듈 진단 → 닫아 지움 → 저장 전 새 파일 → 닫아 지움 → 닫아 디스크로, 패키지 밖·file 아님·잘못된 percent·authority 문서는 진단 없음, 디스크에서 지운 파일의 지움과 대문자 드라이브·`:` URI 문서, 진단이 있던 파일을 다른 철자로 열기 — 지움 먼저), `SparksLsp_WorkspaceRoots`(workspaceFolders 우선·file 아닌 폴더 기록·잘못된 항목, 없는 폴더 — 기록·진단 없음·빈 강조·같은 이유는 한 번만 기록, 작업 공간 없음 — 기록, URI 철자 — `localhost`·소문자 `%3a` 받음·`%2F` 거부), `SparksLsp_NestedPackagesAndHiddenFolders`(가장 안쪽 패키지, `.` 폴더), `SparksLsp_DocumentStoreEdges`(4,096개 상한, 열지 않은 문서의 바꿈·닫기, 같은 URI 다시 열기, 부분 바꿈 거부, manifest 덮기 — 깨진 manifest면 패키지 모듈 진단이 지워졌다 닫으면 돌아옴), `SparksLsp_SchemaFolders`(schema 없음, 초기화 옵션 상대 경로, 명령줄 상대 경로 — 깨진 schema 진단 URI가 절대 경로), `SparksLsp_PositionsAreUtf16`(BOM·CRLF·한글·이모지, 디스크의 잘못된 UTF-8 — 앞 글자와 범위 끝), `SparksLsp_SemanticTokensGolden`(full profile·schema — 종류 13가지·modifier 5가지, 같은 줄 한글·이모지 뒤 열, 디스크 모듈·밖 URI·file 아닌 URI), `SparksLsp_MatchesConformanceCorpus`(LC8a 동등성 시험과 같은 사례 집합 — 발행 진단 = `.expect`), `SparksLsp_AllocationFailure`(세 세션 — 열기·강조·바꿈·JSON 아님·닫기 / workspaceFolders·초기화 옵션 schema·저장 전 새 파일·지움 / 없는 작업 공간·잘못된 UTF-8 본문 — 모든 할당 실패가 3이거나 같은 출력, 누수 없음).
+- **한계:** `typeParameter`는 사용자 원문에 나올 자리가 없다(Sparks에 사용자 generic이 없다 — 언어·엔진 타입 인자만) — legend에는 둔다(LC8f hover가 쓴다). 매 분석이 디스크 전체를 다시 읽고 컴파일한다(10.4절 — 증분은 측정 뒤). lexer가 첫 잘못된 UTF-8 byte에서 멈추므로 그 뒤 열은 진단으로 볼 수 없다(변환 함수는 1로 센다). 열린 문서가 4,096개를 넘으면 무시한다. 짝 없는 서로게이트(`"\ud800"`)가 든 본문은 Core JSON이 거부해 -32700이다(그 문서는 열리지 않는다). 덮기는 분석마다 열린 문서 × 작업 공간 파일만큼 경로 key를 만든다(측정 뒤 색인). POSIX 경로·드라이브 뿌리(`file:///c:`)의 URI 왕복은 Windows에서 돌리는 시험에 없다(macOS·Linux CI가 같은 시험을 POSIX 임시 폴더로 돈다). 할당 실패 때 표준 오류 한 줄이 빠질 수 있다(출력은 같다). 수동 확인(2026-11-24 Windows): `SparksLsp --stdio`에 각본 입력(initialize·열기·강조·닫기·shutdown·exit — 0).

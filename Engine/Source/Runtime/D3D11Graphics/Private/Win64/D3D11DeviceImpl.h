@@ -264,7 +264,7 @@ public:
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
-    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(PixelFormat.ko.md PF4).
+    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(Docs/Design/PixelFormat PF4).
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;

@@ -290,13 +290,31 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
   - Primitive: "BlockAll"(`PrimitiveComponent.cpp:361`)
   - Shape: "OverlapAllDynamic"(`ShapeComponent.cpp:48`)
   - Trigger Actor의 shape: "Trigger"(`TriggerActors.cpp:21`)
-- Rocks는 profile 표가 물리(CR16) 몫이라 아직 없다. 이름만 데이터로 둔다.
+- 이름 데이터(D2):
   - `collisionProfileName`은 영속 `String`이다. 빈 값이면 클래스 기본 이름(virtual `DefaultCollisionProfileName()`)을 쓴다.
   - `CollisionProfileName()`은 실효 이름을 돌려준다.
   - 생성자에서 할당하지 않으려고 빈 값을 기본으로 둔다. 할당 실패를 알릴 길이 없기 때문이다.
 - `SetCollisionProfileName(name)`: 이름이 클래스 기본과 같으면(ASCII 대소문자 무시 — UE `FName` 비교) 빈 값으로 둔다. 다른 이름은 철자 그대로 둔다. 오류는 할당 실패·잘못된 UTF-8이다(값 유지). UE처럼 Mobility를 보지 않는다. profile은 물리 데이터라 Render 다시 보내기를 표시하지 않는다.
 - 이름 상수: `PrimitiveComponent::PrimitiveCollisionProfileName`("BlockAll"), `ShapeComponent::ShapeCollisionProfileName`("OverlapAllDynamic"), `TriggerBase::TriggerCollisionProfileName`("Trigger").
-- `CollisionEnabled`·object type·응답 채널은 profile 표가 생길 때 들인다(24.3.8절).
+- **CD2 연결(2026-11-25 — [충돌 데이터](../CollisionData.ko.md) 9절, 표는 CD1 `Collision` 모듈):**
+  - World가 Initialize 때 설정 문맥(`WorldDesc::settings`)의 `CollisionSettings`로 `CollisionProfileTable`을 만들어 갖는다(`World::CollisionProfiles()`).
+    - 문맥이 없거나 `CollisionSettings`가 등록되지 않았으면 빈 표다. 모든 이름이 `profileMissing`이다.
+    - 표를 만들며 빠진 의미 오류 항목은 경고 `CollisionProfileEntryDropped`로 남긴다.
+  - `PrimitiveComponent`에 영속 필드 `bodySettings`(`BodySettings`)를 둔다. `GetBodySettings()`로 읽는다.
+  - `TryResolveCollision()`은 `ResolveCollision(표, CollisionProfileName(), bodySettings)`다. World 장부 밖 객체면 `InvalidArgument`다.
+  - profile 이름을 정하는 모든 경로는 해석 결과가 표의 profile이면 `MakeCustomCollision`으로 body 사용자 지정 칸에 옮긴다.
+    - 그런 경로는 등록(`OnRegister`)과 `SetCollisionProfileName`이다.
+    - 이것은 UE `ReadConfig`가 body에 복사하는 것과 같다. 그래서 profile이 표에서 사라지면 마지막 해석 값으로 돌아간다.
+    - 이름이 표에 없으면 body를 바꾸지 않는다.
+    - 등록 때는 경고 `CollisionProfileMissing`을 한 번 남긴다. 영속 이름은 바꾸지 않는다(UE는 `Custom`으로 바꾼다).
+  - `SetCollisionEnabled`·`SetCollisionObjectType`·`SetCollisionResponseToChannel`·`SetCollisionResponseToAllChannels`는 실효 값을 고쳐 값이 바뀔 때만 동작한다.
+    - 고친 실효 값을 body에 옮기고, 이름을 `Custom`으로 바꾼다(UE `InvalidateCollisionProfileName`).
+    - 범위 밖 enum은 `InvalidArgument`다. 할당 실패면 값을 유지한다.
+    - Mobility와 Render 다시 보내기는 보지 않는다(물리 데이터).
+    - object type setter는 UE `FBodyInstance::SetObjectType`(`BodyInstance.cpp:675`)처럼 같은 값이어도 `Custom`으로 바꾼다.
+    - setter가 `customResponses`를 실효 값의 차이 칸으로 다시 쓰므로, 표에 아직 없는 채널 이름의 칸은 사라진다. UE `UpdateResponseContainerFromArray`와 같다. 해석 자체는 목록을 고치지 않는다.
+  - 표를 만들 때 빠진 항목은 항목마다 경고(종류·대상·관련 이름)로 남긴다.
+  - 한계: 등록이 profile 값을 `bodySettings`에 복사하므로, 배치된 컴포넌트의 영속 값이 클래스 기본값 레코드(생성자 값 — 복사 전)와 달라진다. UE는 archetype에도 profile을 불러 차이가 생기지 않는다. 클래스 기본값 차이 쓰기(A5)나 prefab 비교에 이 칸이 차이로 잡히는지는 그 경로를 쓸 때 확인한다. 필요하면 기본값 레코드에도 같은 해석을 적용한다.
 
 #### 24.3.5 setter와 Mobility
 
@@ -362,7 +380,7 @@ UE `TriggerBase.cpp:12`, `TriggerActors.cpp:20–180`.
 
 | UE | 사유 |
 |---|---|
-| `BodyInstance`(CollisionEnabled·ObjectType·응답 채널·물리 시뮬레이션·질량 등) | 물리 모듈·profile 표(CR16) |
+| `BodyInstance`의 실행 중 body·시뮬레이션(영속 값은 CD2 `bodySettings`로 들였다 — 24.3.4절) | 물리 모듈(CR16) |
 | overlap·hit 이벤트(`OnComponentBeginOverlap` 등)·`UpdateOverlaps` | CR7 이벤트 + 물리(CR16) |
 | `IndirectLightingCacheQuality`·`LightmapType`·`LightmassSettings` | 굽는 조명 체계 |
 | HLOD(`bEnableAutoLODGeneration`·`HLODBatchingPolicy`·`ExcludeFromHLODLevels`) | HLOD 체계 |

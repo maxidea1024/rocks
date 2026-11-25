@@ -3,12 +3,12 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 
-// 픽셀 형식 번호표·형식 정보·크기 계산이다(Docs/Design/PixelFormat.ko.md). 그래픽 장치
+// 픽셀 형식 번호표·형식 정보·크기 계산이다(Docs/Design/PixelFormat). 그래픽 장치
 // 계약(Graphics)과 에셋(AssetRuntime)·도구가 함께 쓰는 값 타입이며 장치 객체를 담지 않는다. 장치
-// 형식 대응과 장치별 능력은 backend가 가진다(PixelFormat.ko.md 8절).
+// 형식 대응과 장치별 능력은 backend가 가진다(Docs/Design/PixelFormat 8절).
 namespace rocks::graphics {
 
-// 텍스처·렌더 타깃 픽셀 형식이다(UE 5.8 EPixelFormat 대응, PixelFormat.ko.md 5절).
+// 텍스처·렌더 타깃 픽셀 형식이다(UE 5.8 EPixelFormat 대응, Docs/Design/PixelFormat 5절).
 //
 // - 열거자 값이 고정 번호표다. 계열별 구간(결정 PX2): 1–63 비압축 색, 64–79 깊이·스텐실, 80–95
 //   BC, 96–111 ETC2·EAC, 112–159 ASTC, 160–175 비디오. 빈 번호는 무효 값이다.
@@ -85,7 +85,7 @@ enum class PixelFormat : uint8 {
     // 공유 지수 RGB(DXGI R9G9B9E5_SHAREDEXP).
     RGB9E5Ufloat = 47,
 
-    // 깊이·스텐실(64–79). 스텐실 읽기는 형식이 아니라 view의 plane 선택이다(PixelFormat.ko.md
+    // 깊이·스텐실(64–79). 스텐실 읽기는 형식이 아니라 view의 plane 선택이다(Docs/Design/PixelFormat
     // 10절).
     D16Unorm = 64,
     D24Unorm = 65,
@@ -195,8 +195,8 @@ enum class PixelChannel : uint8 {
     Stencil = 1u << 5
 };
 
-// 장치가 형식에 대해 가진 능력이다(PixelFormat.ko.md 7절). 값은 장치가 채우고(GX1) 이 타입은 표현만
-// 정한다. 여러 비트를 OR로 묶는다.
+// 장치가 형식에 대해 가진 능력이다(Docs/Design/PixelFormat 7절). 값은 장치가 채우고(GX1) 이 타입은
+// 표현만 정한다. 여러 비트를 OR로 묶는다.
 enum class PixelFormatCaps : uint32 {
     None = 0,
     // 2D 텍스처로 만들고 셰이더에서 샘플·load
@@ -244,7 +244,7 @@ struct PixelFormatPlane {
     uint8 heightShift = 0;
 };
 
-// 형식 하나의 장치 없는 정보다(PixelFormat.ko.md 6절, UE FPixelFormatInfo 대응).
+// 형식 하나의 장치 없는 정보다(Docs/Design/PixelFormat 6절, UE FPixelFormatInfo 대응).
 struct PixelFormatInfo {
     PixelFormat format = PixelFormat::Unknown;
     // 안정 이름이다(열거자 이름과 같다). 텍스트·JSON 직렬화에 쓴다.

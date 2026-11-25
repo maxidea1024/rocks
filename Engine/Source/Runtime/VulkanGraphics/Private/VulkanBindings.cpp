@@ -89,7 +89,7 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     features.textureViewSwizzle = true;
     features.textureViewRanges = true;
     features.anisotropicPointFilter = true;
-    // sRGB 짝 형식은 MUTABLE_FORMAT 이미지의 view로 읽는다(PixelFormat.ko.md 14.2절).
+    // sRGB 짝 형식은 MUTABLE_FORMAT 이미지의 view로 읽는다(Docs/Design/PixelFormat 14.2절).
     features.srgbPairView = true;
     features.vertexStores = enabledFeatures_.vertexPipelineStoresAndAtomics == VK_TRUE;
     features.pixelStores = enabledFeatures_.fragmentStoresAndAtomics == VK_TRUE;

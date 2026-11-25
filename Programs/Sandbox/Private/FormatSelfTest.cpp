@@ -22,7 +22,7 @@ constexpr int ColorTolerance = 2;
 uint32 failures = 0;
 const char* backendName = "";
 // OpenGL ES는 색 렌더 타깃이 아닌 형식·블록 압축을 읽지 못한다(ReadTexture가 Unsupported,
-// PixelFormat.ko.md 14.2절). 그 backend에서만 Unsupported를 허용하고 수를 센다.
+// Docs/Design/PixelFormat 14.2절). 그 backend에서만 Unsupported를 허용하고 수를 센다.
 bool readLimited = false;
 uint32 unreadable = 0;
 

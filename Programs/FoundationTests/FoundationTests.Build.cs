@@ -24,7 +24,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/UiCore", "Runtime/UiFramework", "Runtime/UiWidget", "Runtime/UiScreens", "Runtime/WorldIntegration", "Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend"];
+    private static readonly string[] EngineTestModules = ["Runtime/UiCore", "Runtime/UiFramework", "Runtime/UiWidget", "Runtime/UiScreens", "Runtime/WorldIntegration", "Runtime/Input", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -95,6 +95,7 @@ public abstract class TestsModule : ModuleRules
         ["Base"] = ["Core"],
         ["Compression"] = ["AsyncCompression", "Task"],
         ["CompressionTraining"] = ["Task"],
+        ["Collision"] = ["ConfigTestFixtures"],
         ["Config"] = ["ConfigTestFixtures", "CoreTypeBindings"],
         // The segment stream negative tests compress their payloads.
         ["Crypto"] = ["Compression"],
@@ -128,7 +129,8 @@ public abstract class TestsModule : ModuleRules
         ["TraceCapture"] = ["TraceAnalysis"],
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
-        ["World"] = ["ObjectSerialization", "Task", "WorldTestFixtures"]
+        // The World collision tests build the profile table from a Config test fixture context (Docs/Design/CollisionData.ko.md CD2).
+        ["World"] = ["ConfigTestFixtures", "ObjectSerialization", "Task", "WorldTestFixtures"]
     };
 
     // Modules whose private headers (test access headers) the tests of a module include (Docs/Design/BuildTargets section 3.5 BS1b). Each entry is

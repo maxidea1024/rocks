@@ -88,10 +88,20 @@ public:
         return rootDisplays_[package].View();
     }
 
+    // 열린 문서 내용으로 덮는다(언어 서버 — Docs/Design/SparksTools.ko.md 10.4절). key는 경로 비교
+    // key(LspPathKey — `/` 구분·드라이브 소문자)다. 같은 경로의 파일이 있으면 그 내용을 바꾸고,
+    // 없고
+    // `.spark`가 어떤 패키지 뿌리 아래면 그 패키지 모듈로 더한다(저장 전 새 파일). 값은 덮었는지다.
+    // fileKey는 Files()의 파일마다 비교 key를 만드는 함수다. 실패: 할당 실패.
+    template <typename KeyOf>
+    Result<bool> Overlay(StringView key, StringView text, KeyOf&& fileKey) noexcept;
+
     // 패키지의 ID manifest 파일 번호다(Files() 색인). 없으면 NoPackage.
     uint32 IdsFile(uint32 package) const noexcept;
 
 private:
+    Result<bool> AddOverlayModule(uint32 package, StringView relative, StringView full,
+                                  StringView text) noexcept;
     Result<bool> LoadPath(platform::FileSystem& files, StringView path, StringBuilderBase& problem,
                           bool& ioFailure) noexcept;
     Result<bool> Walk(platform::FileSystem& files, StringView full, StringView display,
@@ -105,5 +115,61 @@ private:
     Array<String> roots_;        // 읽은 패키지 뿌리(입력 경로 그대로 — 중복 방지)
     Array<String> rootDisplays_; // 패키지마다 진단 경로 뿌리
 };
+
+template <typename KeyOf>
+Result<bool> Workspace::Overlay(StringView key, StringView text, KeyOf&& fileKey) noexcept {
+    String other(*allocator_);
+    for (WorkspaceFile& file : files_) {
+        if (auto made = fileKey(file.full.View(), other); !made) {
+            return Result<bool>::Failure(made.Error());
+        }
+
+        if (other.View() == key) {
+            file.text.Clear();
+            if (auto appended =
+                    file.text.TryAppend(Span<const char>(text.Data(), text.ByteCount()));
+                !appended) {
+                return Result<bool>::Failure(appended.Error());
+            }
+
+            return Result<bool>::Success(true);
+        }
+    }
+
+    if (!key.EndsWith(SourceExtension, StringComparison::CaseSensitive)) {
+        return Result<bool>::Success(false);
+    }
+
+    // 가장 안쪽(뿌리 key가 가장 긴) 패키지다 — 중첩 패키지의 파일은 안쪽 패키지 모듈이다.
+    uint32 owner = NoPackage;
+    usize ownerBytes = 0;
+    for (uint32 package = 0; package < roots_.Size(); ++package) {
+        if (auto made = fileKey(roots_[package].View(), other); !made) {
+            return Result<bool>::Failure(made.Error());
+        }
+
+        if (key.ByteCount() > other.ByteCount() + 1 &&
+            key.StartsWith(other.View(), StringComparison::CaseSensitive) &&
+            key.Data()[other.ByteCount()] == '/' &&
+            (owner == NoPackage || other.ByteCount() > ownerBytes)) {
+            owner = package;
+            ownerBytes = other.ByteCount();
+        }
+    }
+
+    if (owner == NoPackage) {
+        return Result<bool>::Success(false);
+    }
+
+    // 작업 공간 읽기가 건너뛰는 `.` 폴더·파일 아래는 모듈이 아니다.
+    const StringView relative(key.Data() + ownerBytes + 1, key.ByteCount() - ownerBytes - 1);
+    for (usize at = 0; at < relative.ByteCount(); ++at) {
+        if (relative.Data()[at] == '.' && (at == 0 || relative.Data()[at - 1] == '/')) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    return AddOverlayModule(owner, relative, key, text);
+}
 
 } // namespace rocks::sparks::tools::detail

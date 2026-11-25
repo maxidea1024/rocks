@@ -5,17 +5,13 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <Graphics/GraphicsLog.h>
-#include <RenderBase/EngineShaderTypes.h>
+#include <HostConfig/HostSettings.h>
+#include <ModuleLoader/HostServices.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 #include <stdio.h>
 #include <string.h>
 
-#if SANDBOX_SHADER_PROVIDER
-#include <DevelopmentShaderProvider/DevelopmentShaderProvider.h>
-#endif
-
-// Sandbox 셰이더 집합과 Development 공급자(Docs/Design/ShaderSystem 16.1절 SSD19, 12.3.1절
-// SSD16)다.
+// Sandbox 셰이더 연결(Docs/Design/ShaderSystem 16.1절 SSD19, Docs/Design/RenderBase 9.12절)이다.
 namespace sandbox::shaders {
 
 using namespace rocks;
@@ -38,71 +34,53 @@ const ShaderTypeDesc* const Types[] = {
 #undef SANDBOX_PIXEL_IF
 #undef SANDBOX_PIXEL_DEV_IF
 
+// 경로 버퍼 byte 수다.
+constexpr usize PathBytes = 1024;
+
 SystemAllocator& ProcessAllocator() noexcept {
     static SystemAllocator allocator;
     return allocator;
 }
 
-// 등록부다(처음 쓸 때 등록·Freeze한다 — 프로세스 수명).
-shader::ShaderTypeRegistry* Registry() noexcept {
-    static shader::ShaderTypeRegistry registry(ProcessAllocator());
-    // 엔진 셰이더 타입(RenderBase 11.4절 2항)도 함께 등록한다(엔진 호스트에서는 RenderBase 모듈이
-    // 호스트 등록부에 넣는다).
-    static bool ready = registry.Register(Types) &&
-                        registry.Register(render::EngineShaderTypes()) && registry.Freeze();
-    if (!ready) {
+// 활성 자원이다(DeviceShaders가 연 동안).
+render::EngineRenderResources* active = nullptr;
+bool hostPrepared = false;
+
+// Sandbox 타입과 /Plugin/Sandbox 원문 디렉터리(엔진 폴더의 형제 Programs/Sandbox/Shaders)를 한 번
+// 넣는다.
+Result<void> PrepareHost(render::EngineShaderHost& host) noexcept {
+    if (hostPrepared) {
+        return Result<void>::Success();
+    }
+
+    if (auto registered = host.Registry().Register(Types); !registered) {
         Log::Error(graphics::LogGraphics,
                    "Sandbox shader types failed to register: {Type}: {Reason}",
-                   registry.LastFailure().typeName, registry.LastFailure().reason);
-        return nullptr;
+                   StringView(host.Registry().LastFailure().typeName),
+                   StringView(host.Registry().LastFailure().reason));
+        return registered;
     }
 
-    return &registry;
-}
-
-// 장치 backend의 셰이더 형식 id다(호스트 Windows TargetProfile 대신 — SH2d 전 고정 표).
-StringView FormatFor(graphics::Backend backend) noexcept {
-    switch (backend) {
-    case graphics::Backend::D3D12:
-        return "D3D12_SM6";
-    case graphics::Backend::D3D11:
-        return "D3D11_SM5";
-    case graphics::Backend::Vulkan:
-        return "VULKAN_SM5";
-    case graphics::Backend::OpenGL:
-        return "GLES31_PC";
-    case graphics::Backend::Metal:
-        return "METAL_SM5";
+    char engine[PathBytes] = {};
+    auto found = FindEngineDirectory(Span<char>(engine, sizeof(engine)));
+    if (!found) {
+        Log::Error(
+            graphics::LogGraphics,
+            "The engine folder was not found; Sandbox shader sources are not mounted ({Error})",
+            ErrorCodeName(found.Error()));
+        return Result<void>::Failure(found.Error());
     }
 
-    return StringView();
-}
+    char path[PathBytes];
+    snprintf(path, sizeof(path), "%s/../Programs/Sandbox/Shaders", engine);
+    if (auto added = host.AddSourceDirectory("/Plugin/Sandbox", StringView(path)); !added) {
+        Log::Error(graphics::LogGraphics, "Sandbox shader sources could not be added: {Error}",
+                   ErrorCodeName(added.Error()));
+        return added;
+    }
 
-render::ShaderSet* active = nullptr;
-
-#if SANDBOX_SHADER_PROVIDER
-
-// Sandbox 원문(Programs/Sandbox/Shaders)을 /Plugin/Sandbox로 mount한다(SSD19).
-constexpr shader::ShaderSourceMountDesc SandboxMounts[] = {
-    {"/Plugin/Sandbox", "Programs/Sandbox/Shaders"}};
-
-// Development 공급자다(Developer DevelopmentShaderProvider — 프로세스 수명).
-shader::DevelopmentShaderProvider* Provider() noexcept {
-    static shader::DevelopmentShaderProvider provider(
-        {.allocator = &ProcessAllocator(), .mounts = SandboxMounts, .hostTarget = "sandbox"});
-    return &provider;
-}
-
-#endif
-
-render::ShaderSetDesc SetDesc(Allocator& allocator, graphics::Device& device) noexcept {
-    render::ShaderSetDesc desc;
-    desc.allocator = &allocator;
-    desc.device = &device;
-    desc.registry = Registry();
-    desc.library = shader::ShaderLibraryKind::Engine;
-    desc.formatId = FormatFor(device.Info().backend);
-    return desc;
+    hostPrepared = true;
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -111,23 +89,64 @@ Span<const ShaderTypeDesc* const> AllTypes() noexcept {
     return Types;
 }
 
+render::EngineShaderHost& Host() noexcept {
+    static render::EngineShaderHost host(ProcessAllocator());
+    return host;
+}
+
+Result<void> AttachHost(ModuleLoader& modules) noexcept {
+    render::EngineShaderHost& host = Host();
+    if (auto prepared = PrepareHost(host); !prepared) {
+        return prepared;
+    }
+
+    if (auto attached = host.Attach(modules.Services()); !attached) {
+        Log::Error(graphics::LogGraphics, "The engine shader host could not be attached: {Error}",
+                   ErrorCodeName(attached.Error()));
+        return attached;
+    }
+
+    return Result<void>::Success();
+}
+
+void DetachHost(ModuleLoader& modules) noexcept {
+    Host().Detach(modules.Services());
+}
+
+SelfTestShaderHost::SelfTestShaderHost(ModuleLoader& modules) noexcept : modules_(modules) {
+    attached_ = AttachHost(modules).IsOk();
+    if (!attached_) {
+        return;
+    }
+
+    const ModuleLoadReport started = modules.StartEngineGroup();
+    if (!started.IsOk()) {
+        Log::Error(graphics::LogGraphics,
+                   "Engine modules could not start for the shader host: {Module} at {Stage}: "
+                   "{Message}",
+                   StringView(started.failed), StringView(started.stage),
+                   StringView(started.message));
+        return;
+    }
+
+    engineGroup_ = true;
+    frozen_ = Host().Freeze().IsOk();
+}
+
+SelfTestShaderHost::~SelfTestShaderHost() noexcept {
+    if (engineGroup_) {
+        modules_.ShutdownEngineGroup();
+    }
+
+    if (attached_) {
+        DetachHost(modules_);
+    }
+}
+
 DeviceShaders::DeviceShaders(Allocator& allocator, graphics::Device& device) noexcept
-    : set_(SetDesc(allocator, device)) {
-#if SANDBOX_SHADER_PROVIDER
-    render::ShaderProvider* provider = Provider();
-#else
-    render::ShaderProvider* provider = nullptr;
-#endif
-    if (Registry() == nullptr) {
-        return;
-    }
-
-    if (auto opened = set_.OpenFromProvider(provider); !opened) {
-        return;
-    }
-
-    if (set_.WaitUntilSettled() == render::ShaderSetState::Ready) {
-        active = &set_;
+    : device_(device), resources_(allocator) {
+    if (resources_.Open(device, Host()) && active == nullptr) {
+        active = &resources_;
         active_ = true;
     }
 }
@@ -137,7 +156,7 @@ DeviceShaders::~DeviceShaders() noexcept {
         active = nullptr;
     }
 
-    set_.Retire();
+    resources_.Retire(device_);
 }
 
 bool DeviceShaders::IsReady() const noexcept {
@@ -145,38 +164,44 @@ bool DeviceShaders::IsReady() const noexcept {
 }
 
 StringView DeviceShaders::Problem() const noexcept {
-    return Registry() == nullptr ? StringView("Sandbox shader types failed to register")
-                                 : set_.ProblemDetail();
+    return resources_.Problem();
 }
 
 bool Has(const ShaderTypeDesc& type) noexcept {
-    return active != nullptr && active->FindEntry(type.nameHash).IsOk();
+    render::ShaderSet* set = ActiveSet();
+    return set != nullptr && set->FindEntry(type.nameHash).IsOk();
 }
 
 render::ShaderSet* ActiveSet() noexcept {
-    return active;
+    return active != nullptr ? active->Shaders() : nullptr;
+}
+
+const render::BuiltinResources* ActiveBuiltins() noexcept {
+    return active != nullptr ? &active->Builtins() : nullptr;
 }
 
 const shader::ShaderBindingLayout* Layout(const ShaderTypeDesc& type) noexcept {
-    if (active == nullptr) {
+    render::ShaderSet* set = ActiveSet();
+    if (set == nullptr) {
         return nullptr;
     }
 
-    auto entry = active->FindEntry(type.nameHash);
-    return entry ? active->BindingLayout(entry.Value()) : nullptr;
+    auto entry = set->FindEntry(type.nameHash);
+    return entry ? set->BindingLayout(entry.Value()) : nullptr;
 }
 
 Result<graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept {
-    if (active == nullptr) {
+    render::ShaderSet* set = ActiveSet();
+    if (set == nullptr) {
         return Result<graphics::ShaderHandle>::Failure(ErrorCode::NotReady);
     }
 
-    auto entry = active->FindEntry(type.nameHash);
+    auto entry = set->FindEntry(type.nameHash);
     if (!entry) {
         return Result<graphics::ShaderHandle>::Failure(entry.Error());
     }
 
-    return active->DeviceShader(entry.Value());
+    return set->DeviceShader(entry.Value());
 }
 
 Result<graphics::PipelineHandle> CreateGraphicsPipeline(graphics::Device& device,
@@ -208,12 +233,6 @@ CreateComputePipeline(graphics::Device& device, const ShaderTypeDesc& compute,
 
     desc.computeShader = cs.Value();
     return device.CreateComputePipeline(desc);
-}
-
-void ShutdownProvider() noexcept {
-#if SANDBOX_SHADER_PROVIDER
-    Provider()->Shutdown();
-#endif
 }
 
 } // namespace sandbox::shaders

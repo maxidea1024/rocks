@@ -18,6 +18,8 @@ public:
     // 기본 반지름·반 높이(cm, UE CapsuleComponent.cpp:23–24)다.
     static constexpr float DefaultCapsuleRadius = 22.0f;
     static constexpr float DefaultCapsuleHalfHeight = 44.0f;
+    // UE 물리 캡슐 크기 하한(cm — FKSphylElem 0.1)이다.
+    static constexpr double CapsuleMinimumPhysicsSize = 0.1;
 
     explicit CapsuleComponent(Allocator& allocator) noexcept : ShapeComponent(allocator) {
     }
@@ -54,6 +56,9 @@ public:
     Result<void> SetCapsuleHalfHeight(float halfHeight) noexcept {
         return SetCapsuleSize(capsuleRadius_, halfHeight);
     }
+
+    // UE 물리 형상 크기의 캡슐이다(28.3절 — 반지름은 max(|sx|, |sy|) 배, 0.1 cm 하한).
+    Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
 
 protected:
     // 지역 (0, (r, r, h), h)다(UE CapsuleComponent.cpp:104).

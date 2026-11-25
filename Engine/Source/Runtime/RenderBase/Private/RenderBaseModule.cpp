@@ -15,7 +15,8 @@ constexpr LogCategory LogRenderBase{"RenderBase"};
 
 // RenderBase 모듈의 수명 객체다(Docs/Design/ModuleLoader 3.12절).
 // - 호스트가 셰이더 타입 등록부를 서비스로 올렸으면 엔진 셰이더 타입(EngineShaderTypes,
-//   Docs/Design/RenderBase 11.4절 2항)을 등록한다. 등록 실패는 모듈 시작 실패다.
+//   Docs/Design/RenderBase 11.4절 2항)과 정점 입력 타입(BuiltinVertexInput, 10.6절 3항)을 등록한다.
+//   등록 실패는 모듈 시작 실패다.
 // - 호스트가 실행 중인 trace 세션을 서비스로 등록했으면 GPU trace 채널 "gpu"와 기록 형을 등록하고
 //   Shutdown에서 푼다. 등록한 동안 모듈 lease를 잡는다(채널·형 객체가 이 모듈의 데이터다). GPU
 //   계측은 진단 기능이라 등록 실패는 Warning이고 시작은 성공한다.
@@ -65,7 +66,7 @@ public:
 
 private:
     // 엔진 셰이더 타입 등록이다(등록부가 없는 호스트에서는 아무 일도 하지 않는다).
-    shader::ShaderTypeModuleRegistration shaders_{EngineShaderTypes()};
+    shader::ShaderTypeModuleRegistration shaders_{EngineShaderTypes(), EngineVertexInputTypes()};
     // GPU trace 형을 등록한 세션이다. 호스트가 이 모듈의 묶음을 내린 뒤에 서비스를 뗀다.
     TraceSession* session_ = nullptr;
     ModuleLease lease_;

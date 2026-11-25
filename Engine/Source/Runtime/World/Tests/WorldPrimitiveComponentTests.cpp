@@ -4,6 +4,9 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Meta/TypeSchema.h>
 #include <ObjectSerialization/ObjectGraph.h>
+#include <Collision/BodySettings.generated.h>
+#include <Collision/CollisionSettings.generated.h>
+#include <Collision/CollisionTypes.generated.h>
 #include <TestSupport/Test.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
@@ -509,14 +512,14 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 10, Actor 3). Primitive가 41, Shape가 3,
-    // Box·Sphere 가 1, Capsule이 2를 더한다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 10, Actor 3). Primitive가 42(bodySettings 포함 —
+    // CD2), Shape가 3, Box·Sphere 가 1, Capsule이 2를 더한다.
     const Expected expected[] = {
-        {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 51, true},
-        {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 54, true},
-        {ObjectTypeIdOf<BoxComponent>(), ObjectTypeIdOf<ShapeComponent>(), 55, false},
-        {ObjectTypeIdOf<SphereComponent>(), ObjectTypeIdOf<ShapeComponent>(), 55, false},
-        {ObjectTypeIdOf<CapsuleComponent>(), ObjectTypeIdOf<ShapeComponent>(), 56, false},
+        {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 52, true},
+        {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 55, true},
+        {ObjectTypeIdOf<BoxComponent>(), ObjectTypeIdOf<ShapeComponent>(), 56, false},
+        {ObjectTypeIdOf<SphereComponent>(), ObjectTypeIdOf<ShapeComponent>(), 56, false},
+        {ObjectTypeIdOf<CapsuleComponent>(), ObjectTypeIdOf<ShapeComponent>(), 57, false},
         {ObjectTypeIdOf<TriggerBase>(), ObjectTypeIdOf<Actor>(), 3, true},
         {ObjectTypeIdOf<TriggerBox>(), ObjectTypeIdOf<TriggerBase>(), 3, false},
         {ObjectTypeIdOf<TriggerSphere>(), ObjectTypeIdOf<TriggerBase>(), 3, false},
@@ -559,13 +562,34 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
             return shape.SetBoxExtent(Vec3d(5.0, 6.0, 7.0));
         });
     REQUIRE(edited);
-    // 기본 profile을 따르는 Shape(빈 값)도 저장한다(저장하려면 리플렉션 Actor여야 한다).
+    // 기본 profile(빈 이름)을 따르는 Shape도 저장한다.
+    auto defaulted = world.SpawnActor<Actor>(params);
+    REQUIRE(defaulted);
+    auto defaultSphere = world.AddComponent<SphereComponent>(defaulted.Value());
+    REQUIRE(defaultSphere);
+    REQUIRE(world.With<Actor>(defaulted.Value(), [&](Actor& value) noexcept {
+        return value.SetRootComponent(defaultSphere.Value());
+    }));
+    // 사용자 지정 충돌 값을 가진 Shape도 저장한다(저장하려면 리플렉션 Actor여야 한다).
     auto plain = world.SpawnActor<Actor>(params);
     REQUIRE(plain);
     auto plainSphere = world.AddComponent<SphereComponent>(plain.Value());
     REQUIRE(plainSphere);
     REQUIRE(world.With<Actor>(plain.Value(), [&](Actor& value) noexcept {
         return value.SetRootComponent(plainSphere.Value());
+    }));
+    // bodySettings 저장 왕복(CD2): "Custom"으로 바꾸는 setter로 사용자 지정 칸을 채운다.
+    REQUIRE(world.With<SphereComponent>(plainSphere.Value(), [](SphereComponent& shape) noexcept {
+        if (auto set = shape.SetCollisionObjectType(CollisionChannel::Pawn); !set) {
+            return set;
+        }
+
+        if (auto set = shape.SetCollisionEnabled(CollisionEnabled::QueryOnly); !set) {
+            return set;
+        }
+
+        return shape.SetCollisionResponseToChannel(CollisionChannel::Camera,
+                                                   CollisionResponse::Ignore);
     }));
 
     Array<uint8> saved(fixture.allocator);
@@ -583,23 +607,38 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
         REQUIRE(root);
         ObjectHandle loadedZone;
         ObjectHandle loadedPlain;
+        ObjectHandle loadedDefault;
         {
             auto borrowed = loaded.Resolve<Level>(access, root.Value().Handle());
             REQUIRE(borrowed);
             Level* pointer = Get(borrowed.Value());
-            REQUIRE(pointer != nullptr && pointer->Actors().Size() == 2);
-            // Level actors 순서는 보장하지 않는다(7.2절) — 타입으로 고른다.
-            for (usize index = 0; index < 2; ++index) {
+            REQUIRE(pointer != nullptr && pointer->Actors().Size() == 3);
+            // Level actors 순서는 보장하지 않는다(7.2절) — 타입과 profile 이름으로 고른다.
+            for (usize index = 0; index < 3; ++index) {
                 const ObjectHandle candidate = pointer->Actors()[index];
                 if (loaded.Resolve<TriggerBox>(access, candidate)) {
                     loadedZone = candidate;
-                } else {
+                    continue;
+                }
+
+                auto actor = loaded.Resolve<Actor>(access, candidate);
+                Actor* actorPointer = actor ? Get(actor.Value()) : nullptr;
+                REQUIRE(actorPointer != nullptr);
+                auto sphereBorrow =
+                    loaded.Resolve<SphereComponent>(access, actorPointer->RootComponent());
+                REQUIRE(sphereBorrow);
+                SphereComponent* sphereShape = Get(sphereBorrow.Value());
+                REQUIRE(sphereShape != nullptr);
+                if (sphereShape->CollisionProfileName() == CustomCollisionProfileName) {
                     loadedPlain = candidate;
+                } else {
+                    loadedDefault = candidate;
+                    CHECK(sphereShape->CollisionProfileName() == StringView("OverlapAllDynamic"));
                 }
             }
         }
 
-        REQUIRE(!loadedZone.IsNull() && !loadedPlain.IsNull());
+        REQUIRE(!loadedZone.IsNull() && !loadedPlain.IsNull() && !loadedDefault.IsNull());
         {
             auto actor = loaded.Resolve<Actor>(access, loadedPlain);
             REQUIRE(actor);
@@ -609,7 +648,22 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
             REQUIRE(sphereBorrow);
             SphereComponent* sphereShape = Get(sphereBorrow.Value());
             REQUIRE(sphereShape != nullptr);
-            CHECK(sphereShape->CollisionProfileName() == StringView("OverlapAllDynamic"));
+            CHECK(sphereShape->CollisionProfileName() == CustomCollisionProfileName);
+            const BodySettings& body = sphereShape->GetBodySettings();
+            CHECK(body.objectType == CollisionChannel::Pawn);
+            CHECK(body.collisionEnabled == CollisionEnabled::QueryOnly);
+            REQUIRE(body.customResponses.Size() == 1);
+            CHECK(body.customResponses[0].channel.View() == StringView("Camera"));
+            CHECK(body.customResponses[0].response == CollisionResponse::Ignore);
+            CHECK(!body.simulatePhysics && body.enableGravity);
+            // 그래프로 로드한 객체는 World 장부 밖이다: 해석·Custom setter는 InvalidArgument, 이름
+            // setter는 이름만 바꾸고 body는 그대로다.
+            CHECK(sphereShape->TryResolveCollision().Error() == ErrorCode::InvalidArgument);
+            CHECK(sphereShape->SetCollisionObjectType(CollisionChannel::Vehicle).Error() ==
+                  ErrorCode::InvalidArgument);
+            CHECK(sphereShape->SetCollisionProfileName("BlockAll"));
+            CHECK(sphereShape->CollisionProfileName() == StringView("BlockAll"));
+            CHECK(body.objectType == CollisionChannel::Pawn);
         }
 
         ObjectHandle loadedShape;
