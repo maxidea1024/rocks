@@ -2,6 +2,7 @@
 #include "LanguageNames.h"
 #include "TypeChecker.h"
 #include <Core/Graph/StrongComponents.h>
+#include <SparksCompiler/LanguageCatalog.h>
 
 // 선언 규칙이다(Docs/Design/SparksLanguage 3.11절): `?` 없는 객체 필드(S0428), 상수식(S0510)·
 // const 순환(S0511)·const 타입(S0512), core 프로필의 full 문법(S1113). LC2d 단계(Flow)에서만 돈다.
@@ -10,9 +11,16 @@ namespace rocks::sparks::detail {
 
 namespace {
 
-// core 패키지에서 쓸 수 없는 attribute 이름이다(1.3절 full).
-constexpr StringView FullOnlyAttributes[] = {
-    "rpc", "worker", "deterministic", "pure", "tick", "cheat", "editorButton", "cvar", "test"};
+// core 패키지에서 쓸 수 없는 hook인지다(`Validate`).
+bool IsFullOnlyHook(StringView name) noexcept {
+    for (const LanguageHook& hook : LanguageHooks()) {
+        if (hook.fullOnly && hook.name == name) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 } // namespace
 
@@ -436,15 +444,17 @@ void TypeChecker::CheckProfile(uint32 module) noexcept {
             break;
         case SyntaxKind::Type: {
             const uint32 type = c.NodeType(module, node);
-            if (type != NoType && IsLanguage(NonOptional(type), "Class")) {
+            if (type != NoType && IsLanguage(NonOptional(type), FullOnlyPreludeTypeName)) {
                 report(node, "'Class<T>'", "refer to a prefab instead");
             }
 
             break;
         }
         case SyntaxKind::Attribute:
-            for (const StringView name : FullOnlyAttributes) {
-                if (TokenText(module, node) == name) {
+            for (uint32 index = 0; index < LanguageAttributeCount(); ++index) {
+                const LanguageWord word = LanguageAttributeAt(index);
+                const StringView name = word.name;
+                if (word.fullOnly && TokenText(module, node) == name) {
                     StringBuilder<CompilationMessageInlineBytes> feature(allocator_);
                     feature.AppendFormat("'@{}'", name);
                     if (binder_.Succeeded(feature)) {
@@ -458,7 +468,7 @@ void TypeChecker::CheckProfile(uint32 module) noexcept {
             const uint32 path = tree.Child(node, 2);
             if (path != NoNode && tree.Node(path).childCount == 1 &&
                 tree.Node(tree.Child(path, 0)).kind == SyntaxKind::Name &&
-                TokenText(module, tree.Child(path, 0)) == "Validate") {
+                IsFullOnlyHook(TokenText(module, tree.Child(path, 0)))) {
                 report(tree.Child(path, 0), "'on Validate()'", "check values in 'on Start()'");
             }
 

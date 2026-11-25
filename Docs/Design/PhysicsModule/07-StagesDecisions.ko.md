@@ -4,7 +4,7 @@
 
 ## 7.1 단계
 
-모두 M4 물리 단계에서 계획 순서대로 한다(사용자 결정 2026-11-25 — 스펙만 지금). 묶음마다 설계 갱신 → 구현 → 리뷰어 1명 → 커밋.
+모두 M4 물리 단계에서 계획 순서대로 한다(사용자 결정 2026-11-25 — 스펙만 지금). 같은 날 화면 마일스톤 뒤라 PH1부터 착수했다(7.1.1절). 묶음마다 설계 갱신 → 구현 → 리뷰어 1명 → 커밋.
 
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
@@ -16,6 +16,39 @@
 | PH5 | 힘·속도·질량·잠듦 API(2.6–2.7절), DOF·CCD·body 값 사상(6.5절), 기본 물리 재질·결합 방식(6.6절) | PH2 | PA04·PA05와 API 왕복, 잠듦 이벤트 |
 | PH6 | weld(2.8절), 메시 단순 충돌·complex-as-simple(StaticMesh — D2b 뒤), 쿠킹 형상 너겟(계획 16.4절 cook — PC05) | PH2, StaticMesh 에셋(MA2b), 에셋 쿠킹 | weld 질량·질의 결과 컴포넌트, PC05 |
 | (후속) | 캐릭터 이동(CM13), constraint 등(CM14), 지형 heightfield(CM18), ragdoll(CM7), 큰 월드 PhysicsRegion(계획 16.5절 — PC07), 플랫폼 결정성(PC04·PC08) | | |
+
+### 7.1.1 PH1 구현 세부(2026-11-25)
+
+사용자 결정(2026-11-25): A1–A6과 화면 마일스톤(SM1–SM6)이 끝나 계획 순서의 다음으로 PH1을 지금 시작한다. World 접점은 이 세션이, PhysicsSimulate 엔진 자리는 runtime 세션(rocks-f5)이 넣는다(7.4절).
+
+**파일.**
+
+| 위치 | 내용 |
+|---|---|
+| World `Public/World/Physics/PhysicsScene.h` | 추상 접점 `PhysicsScene`(Jolt 타입 없음). PH1 함수는 `Stats()`(body 수·활성 body 수·step 수 — `PhysicsSceneStats`) 하나이고, 2.2절의 나머지는 그 동작을 구현하는 단계(PH2–PH5)에서 더한다(PMD22) |
+| World `World.h` | `GetPhysicsScene()`·`SetPhysicsScene(PhysicsScene*)`, 설정 문맥 읽기 `Settings()`(WorldDesc::settings — 물리 설정을 읽는다) |
+| Physics `Public/Physics/PhysicsSettings.h` | `PhysicsSettings`(6.8절) 중 PH1이 쓰는 칸: `defaultGravityZ`, `maxBodies`·`maxBodyPairs`·`maxContactConstraints`, `tempAllocatorBytes`. 나머지 칸은 쓰는 단계에서 더한다 |
+| Physics `Public/Physics/PhysicsWorldSubsystem.h` | `PhysicsWorldSubsystem`(2.1절), `Type()`, 진단용 `Scene()` |
+| Physics `Private/JoltRuntime.*` | 프로세스 공유 자원(어댑터 경계 10.4절 순서)의 참조 수 획득·해제 |
+| Physics `Private/TaskJobSystem.*` | Jolt job → Task(6.7절) |
+| Physics `Private/JoltLayers.*` | object 층 bit 배치(6.1절)·broadphase 층 3개·PH1 필터 |
+| Physics `Private/JoltPhysicsScene.*` | `PhysicsScene` 구현: Jolt `PhysicsSystem`·임시 할당기·job 시스템 소유, `Step(seconds)` |
+| Physics `Private/PhysicsModule.cpp` | 수명 객체(`RegisterSettings`만 — Jolt 공유 자원은 장면이 쥔다, PMD21) |
+| Physics `Tests/` | PH1 완료 기준 시험 |
+
+**Jolt 공유 자원(PMD21).** 할당 hook(프로세스 수명 `SystemAllocator` — 글꼴 라이브러리와 같은 방식, 실패는 진단 후 fatal)·`Trace`(구조화 로그 `Physics.Jolt`)·`AssertFailed`(Fatal — Rocks assert와 같다) → `VerifyJoltVersionID` → `Factory` → `RegisterTypes`를 참조 수 0 → 1에서 하고, 1 → 0에서 `UnregisterTypes` → `Factory` 삭제를 한다. `PhysicsWorldSubsystem`이 장면마다 하나를 쥔다. 모듈 수명 객체는 쥐지 않는다 — 장면이 없을 때 Jolt 전역 상태를 비워 두어, 모듈을 시작한 프로세스에서도 Jolt를 직접 쓰는 연결 시험과 겹치지 않고, 모듈 로더 없이 World를 만드는 시험·도구도 같은 경로를 쓴다(버린 대안: 모듈 `Startup`에서 획득 — 2.1절 원안. 공유 형상 캐시가 생기는 PH6에서 수명을 다시 본다). hook 함수 포인터는 참조 수 0 → 1마다 설정하고 해제 때 되돌리지 않는다(Jolt가 남긴 블록을 다른 해제 함수가 받지 않게 — 연결 시험처럼 hook을 바꾸는 코드가 사이에 있어도 다음 획득이 다시 건다). 살아 있는 hook 블록 수를 세어 시험이 잔여 0을 확인한다. 획득·해제는 잠금으로 직렬화한다.
+
+**job scheduler(PMD20).** 엔진이 World에 빌려주는 worker pool은 지금 `World::GcScheduler()`(WorldDesc::gcScheduler) 하나다. 물리는 그것을 빌려 쓴다(GC 표식은 Tick 끝, 물리 step은 Physics 단계라 같은 프레임 안에서 겹치지 않는다). 없으면 `GetMaxConcurrency` 1이고 `QueueJob`이 제출 thread에서 바로 실행한다(Jolt `JobSystemSingleThreaded`와 같은 동작). 엔진이 일반 Task pool을 World에 주게 되면 그쪽으로 바꾼다(계획 16.1절 "Game·Render·IO 예약분 제외"는 그때).
+
+**job 수명.** Jolt `Job`은 미리 잡은 고정 목록(`FixedSizeFreeList<Job>`, `cMaxPhysicsJobs` 2048)에서 만든다. Jolt는 한 `PhysicsSystem`의 동시 job 수가 이 값을 넘지 않게 만든다(넘으면 Jolt assert — Fatal). `QueueJob`은 job 참조를 하나 더 쥐고(`AddRef`) Task에 `Execute` → `Release`를 제출한다. 제출이 실패하면(scheduler 포화 `CapacityExceeded`·할당 실패·종료 중) 그 자리에서 실행하지 않고 미룬 job 목록(미리 잡은 `cMaxPhysicsJobs`칸)에 둔다. Jolt job 함수는 자기 body 접근 권한 범위(`BodyAccess::Grant`) 안에서 다음 job의 의존을 풀어 `QueueJob`을 부르므로, 그 자리에서 실행하면 권한 범위가 겹쳐 Jolt assert가 난다(PH1 시험에서 확인 — 계획 16.1절의 "포화 시 제출 thread에서 즉시 실행"을 이렇게 고친다). 미룬 job은 Jolt barrier를 기다리는 thread가 실행하고(`WaitForJobs`는 barrier에 든 실행 가능한 job을 대기 thread에서 실행한다 — step의 job은 모두 barrier에 든다), worker도 자기 job을 끝낸 뒤 목록을 비운다. Jolt `JobSystemThreadPool`은 대기열이 차면 sleep으로 기다리는데 Rocks는 그렇게 하지 않는다(타이밍 의존 금지). `WaitForJobs`가 끝나도 Task 작업이 아직 `Release`를 하지 않았을 수 있으므로(Jolt `JobSystem.h` 설명) 남은 Task 작업 수를 센다. step마다 `Update` 뒤에 그 수가 0이 될 때까지 조건 변수로 기다리고(sleep 없음) 미룬 목록의 참조를 놓는다 — 그러지 않으면 늦게 끝난 Task와 미룬 목록이 쥔 job이 다음 step으로 넘어가 고정 목록이 찬다(PH1 시험에서 간헐적으로 확인). job 시스템 파괴(장면 파괴)도 같은 대기를 한다. Task body·미룬 목록의 저장소는 프로세스 수명 할당기다 — `Function` 정리는 capture 소멸(남은 수를 줄여 장면 파괴를 풀어 준다) 뒤에 저장소를 해제하므로, job 시스템 멤버 할당기면 장면이 사라진 뒤 worker가 해제할 수 있다(리뷰 반영). 동시 실행 수(`GetMaxConcurrency`)는 생성 때 고정한다(Jolt가 한 `Update` 안에서 여러 번 읽는다).
+
+**FP 환경.** Jolt는 step의 job을 실행하는 모든 thread의 FP 상태가 같아야 한다(어댑터 경계 10.4절). worker의 job과 장면 thread의 `Update`를 모두 `platform::RunWithDeterministicFloatingPoint`(nearest-even, FTZ·DAZ 끔, trap 끔 — CoreDataFoundations 2.1절) 안에서 실행해 구조적으로 맞춘다. 환경을 바꿔야 했던 횟수를 진단으로 센다. 시험은 장면 thread를 FTZ 환경(`RunWithRealtimeAudioFloatingPoint`)에 두고 step해도 상태 byte가 같고 교정 횟수가 잡히는지 본다.
+
+**층과 PH1 필터.** object 층은 6.1절의 32 bit 배치를 그대로 쓴다(반입 정의 `JPH_OBJECT_LAYER_BITS` 32 — 어댑터 경계 10.2절). broadphase 층 3개(Static·Moving·QueryOnly)는 운동 묶음 bit로 정한다. 시뮬레이션 쌍 필터는 6.2절 1단계(둘 다 Static, QueryOnly, physics·probe 표지 없음 → 거짓)까지만 하고 그 밖은 참이다. 응답 묶음 판정(2단계 이후)은 응답 묶음 표가 생기는 PH3에서 더한다.
+
+**World 접점 규칙.** `SetPhysicsScene`은 World가 `Initialized`(Subsystem 초기화가 이 상태에서 돈다 — `Initialize`가 끝난 뒤 `BeginPlay` 전도 이 상태다) 또는 `TearingDown`(정리)일 때만 받고, 다른 상태는 `InvalidArgument`다. 같은 World에 장면이 이미 있는데 null 아닌 다른 장면을 넣으면 `AlreadyExists`다. body가 있는 동안 바꾸지 못하게 하는 검사는 body가 생기는 PH2에서 더한다.
+
+**step.** `JoltPhysicsScene::Step(seconds)`는 `PhysicsSystem::Update(seconds, collisionSteps 1, 임시 할당기, job 시스템)`이다. 중력은 `defaultGravityZ`(cm/s²)를 m/s²로 바꿔 Jolt +Y 축에 둔다(축 A — Rocks Z → Jolt Y, 어댑터 경계 2절. 변환 함수 묶음은 PH2). `PhysicsWorldSubsystem`은 Game·Tryout World에서만 PhysicsSimulate 자리에 step을 건다(3.1절, PMD16). 자리가 엔진 런타임에 들어오기 전에는 시험이 `Step`을 직접 부른다.
 
 ## 7.2 시험 원칙
 
@@ -59,10 +92,14 @@
 | PMD16 | step은 Game·Tryout World만, Editor·Preview는 질의 전용 장면 + teleport 이동 | UE 편집 World는 물리 tick을 돌리지 않는다(`BodyInstance.cpp:2796–2802` `bEditorWorld`) |
 | PMD17 | 결합 방식은 프로세스 전역 | Jolt 결합 함수는 상태 없는 함수 포인터(`ContactConstraintManager.h:53`), UE도 프로젝트 설정 하나 |
 | PMD18 | `maxLinearVelocity` 기본은 사실상 없음(√FLT_MAX cm/s) | UE body 상한이 같다(6.8절). Jolt `mMaxLinearVelocity`(기본 500 m/s — `Physics/Body/BodyCreationSettings.h:111`)는 속도 clamp에만 쓰이고(`Physics/Body/MotionProperties.inl:23–31`, soft body 제외) `BodyInterface`의 속도 설정 함수도 clamp판을 부른다(`Physics/Body/BodyInterface.cpp:595–603`). 버린 대안: Jolt 기본 500 m/s — 빠른 탄환 body가 UE와 달리 느려진다. 큰 속도의 안정성은 CCD(`continuousCollision`)로 다룬다 |
+| PMD20 | job은 World가 빌려주는 worker pool(`GcScheduler`), 없으면 제출 thread 실행 | 엔진이 World에 주는 pool이 지금 그것뿐이다. 물리 전용 pool은 계획 16.1절이 금지한다(7.1.1절) |
+| PMD21 | Jolt 공유 자원은 장면마다 참조 수로 쥔다(모듈 수명 객체는 쥐지 않는다) | 장면이 없으면 Jolt 전역 상태가 비어 있고, 모듈 로더 없이 World를 만드는 시험·도구도 같은 경로를 쓴다(7.1.1절) |
+| PMD22 | `PhysicsScene` 접점은 단계마다 그 동작과 함께 넓힌다(PH1은 `Stats`만) | 구현 없는 순수 가상을 미리 두지 않는다(2.2절 목록이 목표) |
 | PMD19 | DOF 잠금은 `mAllowedDOFs`(월드 축, 속도 성분 제거), CustomPlane만 `SixDOFConstraint` | UE도 월드 축·생성 시점 기준이다(6.5절). 한계 둘: (1) UE는 joint라 잠긴 축으로 teleport하면 생성 시점 값으로 끌려 돌아가지만(joint frame을 갱신하지 않는다) Rocks는 teleport한 값을 유지한다 — UE의 부작용으로 보고 따르지 않는다. (2) UE `SixDOF`의 회전 잠금은 twist·swing 분해 각을 잠그고 Jolt는 월드 축 각속도 성분을 없앤다. 회전 축 하나만 잠그고 나머지 둘로 크게 돌면 결과 자세가 다를 수 있다(두 축 이상 잠금·평면 방식은 같다) |
 
 ## 7.6 개정 이력
 
+- 개정 6(2026-11-25): PH1 착수 — 구현 세부(7.1.1절), PMD20–PMD22.
 - 개정 5(2026-11-25): PMU3·PMU4를 UE 원본으로 닫았다. `maxLinearVelocity` 기본은 사실상 없음(PMD18), DOF 잠금 기준은 월드 축·생성 시점(PMD19, 한계 둘). 미확인 항목이 없다.
 - 개정 4(2026-11-25): PMU2를 닫았다. Jolt 접촉 캐시의 solver 충격량을 읽는 추적 가능한 수정과 시험(어댑터 경계 10.6절)으로 `normalImpulse`를 UE처럼 solver 값으로 바꿨다(6.4절, PMD14).
 - 개정 3(2026-11-25): UE용 Jolt 공개 플러그인 UnrealJolt(369ef176)와 대조했다(어댑터 경계 11절). 설계는 바뀌지 않았다: 좌표(행렬식 +1)·채널 응답 필터·`MoveKinematic`·결과 반영에 보간 없음은 그대로 두고, PMU2는 UnrealJolt도 추정값을 써서 닫지 않는다.
