@@ -2,6 +2,8 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 18(2026-11-26): LC8g 구현(12.6절 — 소스 넷(`extension`·`serverController`·`serverLocation`·`serverSlots`), 출력 창은 `LogOutputChannel`(languageclient 11 요구), 정리 지우기는 비동기·재시도이고 칸 만들기와 같은 작업 줄, node 교체 확인).
+- 개정 17(2026-11-25): LC8g 설계(12절 — 위치 `Tools/VSCode/sparks`(`Extras/`는 다른 엔진 코드 자리), 의존 고정·`vscode-languageclient`, 서버 찾기(설정 → Rocks 출력 폴더의 가장 최근 것), 서버 교체 구조(빌드 출력은 원본만 — 내용 해시 칸의 복사본을 실행, 다시 빌드하면 새 칸으로 교체), 단일 파일 모드는 넣지 않음, TextMate 문법 범위, 시험: C# manifest 검사 + C++ 키워드 대조, 영어 정책을 `Tools/`로 넓힘).
 - 개정 16(2026-11-25): LC8f3 구현(11.11절 — `LspCodeActions.cpp`, 수정마다 편집 하나, 진단 객체 공용, `SimilarHook`·`SimilarAttribute` 공개).
 - 개정 15(2026-11-25): LC8f3 설계(11.7절 — 빠른 수정 코드 표 Q1–Q10, 서버 자기 진단 기준, 편집 규칙, 제안 이름은 컴파일러 공개 함수, 미룬 것: handler 골격·`Soft` 로드·`@formerly`·이름 변경).
 - 개정 14(2026-11-25): LC8f2 구현(11.10절 — 컴파일러 공개 목록 `LanguageCatalog.h`(hook 목록이 정본, attribute·키워드는 검사 표에 full 칸)·`Compilation::MemberAvailable`(타입 검사와 같은 원소 조건 판정 — `TypeFacts`), snapshot은 Types 단계, Unity 별칭에 `On` hook 이름, `on`·`emit`·기반 목록 후보를 SL 3.12·3.9절 규칙대로, 확장 이벤트는 보이는 것만, 중복은 순위와 무관하게 하나).
@@ -29,7 +31,7 @@
 | LC8d @test·test | `@test fn` 실행기(headless 가짜 host — 엔진 함수는 "엔진 필요" 실패), 결과를 진단 형식으로 | 실행기 시험(통과·Assert 실패·fault·엔진 필요·끝나지 않음) — 완료(개정 8, 9절) |
 | LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) — 10절 |
 | LC8f 언어 서버 편집 | 자동완성(멤버·hook·attribute·리터럴·경로·Unity 이름 제시), hover, 정의 이동, 빠른 수정(SL §13 목록), 문서 서식 | 자동완성 후보 golden, prefix fuzz, 빠른 수정 golden |
-| LC8g VS Code 확장 | `Tools/VSCode/sparks`(TypeScript — 언어 등록·문법 강조·`sparks-lsp` 시작) | 확장 패키징 시험(C# 도구 시험에서 manifest 검사) |
+| LC8g VS Code 확장 | `Tools/VSCode/sparks`(TypeScript — 언어 등록·문법 강조·`sparks-lsp` 시작) | 확장 패키징 시험(C# 도구 시험에서 manifest 검사), 문법 키워드 = 컴파일러 키워드(C++ 시험) — 12절 |
 
 ## 2. 구조
 
@@ -223,7 +225,7 @@
 ### 10.3 수명
 
 - `initialize` 전의 요청은 ServerNotInitialized(-32002), 알림은 버린다(`exit` 제외). `initialize` 결과: `capabilities` = `positionEncoding: "utf-16"`, `textDocumentSync: { openClose: true, change: 1 }`(전체 내용 — T11), `semanticTokensProvider: { legend, full: true }`, `serverInfo: { name: "sparks-lsp" }`. 두 번째 `initialize`는 InvalidRequest.
-- 작업 공간 뿌리: `workspaceFolders`(있으면 전부), 없으면 `rootUri`, 둘 다 없으면 작업 공간 없음 — 분석하지 않는다(진단·강조 없음, initialize 때 표준 오류에 한 줄). 편집기는 폴더를 열고 쓰는 것이 기본이고, 단일 파일 모드(열린 문서의 패키지를 찾아 올라가기)는 저장 전 문서·패키지 밖 문서가 섞이면 작업 공간 읽기 전체가 실패하므로 LC8g에서 필요를 본 뒤 정한다. `file` URI만 받는다(다른 scheme 폴더는 무시).
+- 작업 공간 뿌리: `workspaceFolders`(있으면 전부), 없으면 `rootUri`, 둘 다 없으면 작업 공간 없음 — 분석하지 않는다(진단·강조 없음, initialize 때 표준 오류에 한 줄). 편집기는 폴더를 열고 쓰는 것이 기본이고, 단일 파일 모드(열린 문서의 패키지를 찾아 올라가기)는 저장 전 문서·패키지 밖 문서가 섞이면 작업 공간 읽기 전체가 실패하므로 넣지 않는다(LC8g 결정 — 12.3절). `file` URI만 받는다(다른 scheme 폴더는 무시).
 - `shutdown` → null 결과, 그 뒤 요청은 InvalidRequest. `exit` 알림 → shutdown을 받았으면 0, 아니면 1로 끝난다. `exit` 없이 입력이 끝나면 1.
 
 ### 10.4 문서 저장소와 분석
@@ -382,3 +384,67 @@
 - **시험(`SparksToolsLspCodeActionTests`):** `SparksLsp_CodeActionGolden`(50사례 — Q1–Q10 전부와 각 조건의 수정 없음 사례: 값을 돌려주는 함수·`var`·타입 표기·중첩 블록·대입 대상·null을 다루는 다른 쓰임·await 뒤 읽기, BOM·CRLF·별칭 import 뒤·줄 주석 뒤·같은 줄 코드·블록 주석 앞 import, 여러 후보·이름 겹침·별칭 한정 타입, 다른 대상·의존하지 않는 패키지의 확장 이벤트, tab 들여쓰기·선언과 같은 줄의 attribute, 줄 끝 없는 마지막 줄, 별칭 있는 겹친 import, `override`·대기 있는 최상위 `async`·`@test`, 자기 이벤트·인자 있는·이미 있는 hook, 한글 뒤 UTF-16 열; 수정마다 title·범위·새 글자·`isPreferred`, 그리고 원문과 편집을 적용한 원문을 새 서버로 열어 대상 코드가 없어지고 다른 코드가 늘지 않음), `SparksLsp_CodeActionEdges`(범위 밖 진단 `[]`, `only: ["refactor"]`는 `[]`·`["quickfix"]`는 수정, 열지 않은 문서·manifest `[]`, range 없음 -32602), `SparksLsp_CodeActionAllocationFailure`(재진입 두 수정과 import 추가 — 3이거나 같은 출력). lifecycle golden의 capabilities에 `codeActionProvider`.
 - **리뷰 반영:** `?.`가 대입 대상·값 자리에서 새 오류(S0731·타입) → 문장일 때만. `?? return`이 `var`·await 뒤 읽기·null을 다루는 다른 쓰임에서 새 오류 → 그 경우 뺌. `async` 넣기가 `override`·interface 구현·`@rpc`에서 시그니처 오류 → 뺌, 최상위 `@test`는 넣음, 대기 있는 최상위 함수의 `async` 지우기 → 뺌. hook 이름 바꾸기가 인자 있는 handler·이미 있는 hook에서 새 오류 → 뺌, 자기 이벤트 판정이 확장 이벤트까지 보던 것 → class 체인만(컴파일러와 같게). import 추가가 별칭 한정 타입·이름 겹침·의존하지 않는 패키지·다른 대상의 확장 이벤트에 나옴 → 판정 공용(`CanImport`), 같은 줄 코드·블록 주석이 이어질 때 자리. 별칭 있는 겹친 import 지우기 → 뺌. `context.only`의 kind 계층·빈 글자, 비지 않은 범위는 반열림. 시험은 적용 뒤 "다른 코드가 늘지 않음"까지 본다.
 - **한계:** 수정은 진단을 낸 그 컴파일(마지막 분석)의 원문 기준이라 클라이언트가 그 뒤 고친 내용과 어긋나면 클라이언트가 버전 불일치로 버린다(문서 버전을 편집에 싣는 `documentChanges`는 후속). 표 밖 코드와 11.7절 "미룬 것"은 수정이 없다.
+
+## 12. LC8g 설계(개정 17)
+
+### 12.1 배치와 구성
+
+- **위치:** `Tools/VSCode/sparks`(새 최상위 `Tools/` — 편집기 연동). UE는 편집기 보조물을 `Engine/Extras`에 두지만 Rocks의 `Extras/`는 다른 엔진(UE)의 코드 자리라(foreign-engine-boundary — UnrealExchange 11.1절) 쓰지 않는다. `Programs/`는 Rocks 빌드 규칙이 훑는 C++·C# 프로그램 자리라 node 프로젝트를 섞지 않는다.
+- **파일:** `package.json`(manifest), `package-lock.json`(의존 고정 — 판마다 integrity hash), `tsconfig.json`, `src/extension.ts`(활성화·클라이언트·명령), `src/serverLocation.ts`(서버 찾기 — 12.3절), `language-configuration.json`, `syntaxes/sparks.tmLanguage.json`, `README.md`(설치·사용 — 한국어 문서). 빌드 결과 `out/`과 `node_modules/`는 저장소 `.gitignore`가 뺀다.
+- **의존(정확한 판, 범위 없음):** `vscode-languageclient` 11.0.0(MIT — LSP 클라이언트: JSON-RPC·capabilities·진단·의미 강조·자동완성·빠른 수정 공급자를 VS Code API에 잇는다, 직접 구현은 그 전부를 다시 만든다 — 외부 라이브러리 원칙), 개발 의존 `typescript` 6.0.3·`@types/vscode` 1.91.0(= `engines.vscode` 하한 `^1.91.0` — languageclient 11의 요구)·`@types/node` 20.19.43(VS Code 1.91의 Node 20). 전이 의존은 lock 파일이 고정한다. 판은 공개 뒤 2주 넘은 것을 고른다.
+- **빌드:** `npm ci` → `npm run compile`(`tsc -p .` → `out/`). Rocks 빌드(`Rocks.proj`)와 CI에는 넣지 않는다 — node는 Rocks 필수 도구가 아니고(Setup이 설치하지 않는다) 확장은 개발용이다(T14 — 배포·마켓 등록 없음). 설치는 VS Code `Developer: Install Extension from Location...`에 이 폴더를 주거나 확장 개발 창(F5 — `.vscode/launch.json`)으로 띄운다.
+
+### 12.2 manifest
+
+- `name` `sparks`, `displayName` `Sparks`, `publisher` `rocks`, `private: true`, `license` `UNLICENSED`, `main` `./out/extension.js`, `engines.vscode` `^1.91.0`.
+- `activationEvents`: `onLanguage:sparks`, `workspaceContains:**/SparksPackage.json5`(파일을 열기 전에도 작업 공간 진단이 보인다).
+- `contributes.languages`: id `sparks`, aliases `Sparks`, extensions `.spark`, configuration `./language-configuration.json`. `contributes.grammars`: language `sparks`, scopeName `source.sparks`, path `./syntaxes/sparks.tmLanguage.json`.
+- `contributes.configuration`: `sparks.server.path`(string, 기본 빈 글자 = 자동 찾기), `sparks.server.schemas`(string 배열, 기본 `[]` → `initializationOptions.schemas` — 10.1절, 상대 경로는 서버가 첫 뿌리 기준으로 바꾼다), `sparks.trace.server`(`off`·`messages`·`verbose` — languageclient가 읽는 이름). 설정이 바뀌면 서버를 다시 시작한다.
+- `contributes.commands`: `sparks.restartServer`(`Sparks: Restart Language Server`).
+- `contributes.configurationDefaults` `[sparks]`: `editor.insertSpaces: true`·`editor.tabSize: 4`(공식 서식 3절), `editor.semanticHighlighting.enabled: true`(T12 — 테마 기본값과 무관하게 의미 강조를 켠다). 의미 토큰 종류·modifier는 모두 LSP 표준 이름이라 `semanticTokenScopes`가 필요 없다.
+- 클라이언트 문서 선택: `{ scheme: "file", language: "sparks" }`와 `{ scheme: "file", pattern: "**/SparksPackage.json5" }`(저장 전 manifest 편집도 분석 — 10.4절 overlay). 다른 scheme(`untitled` 등)은 보내지 않는다(서버가 `file`만 받는다 — 10.6절).
+
+### 12.3 서버 찾기와 시작
+
+- `sparks.server.path`가 있으면 그 파일(상대 경로면 첫 작업 공간 폴더 기준). 없으면 작업 공간 폴더마다 위로 올라가며 `Rocks.proj`가 있는 폴더(Rocks 저장소 뿌리)를 찾아 `out/dotnet-<플랫폼>-sparkslsp-<구성>/bin/SparksLsp[.exe]`(Rocks.Build `EnginePlanning.DefaultOutput` 규칙 — 플랫폼 `windows`·`macos`·`linux`, 구성 `debug`·`development`·`release`) 중 있는 것을 고른다. 여럿이면 수정 시각이 가장 늦은 것(방금 빌드한 것 — 같으면 앞의 구성 순서).
+- 못 찾으면 오류 알림(영어 — 빌드 명령 `dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=SparksLsp`과 설정 이름, `Open Settings` 단추)을 한 번 내고 서버 없이 둔다(문법 강조만). 설정을 고치면 다시 찾는다.
+- 실행: `TransportKind.stdio`(languageclient가 `--stdio`를 붙인다 — 서버는 받고 무시, 10.1절), 작업 디렉터리는 첫 작업 공간 폴더. 실행하는 것은 찾은 파일이 아니라 아래 교체 구조의 복사본이다.
+
+### 12.3.1 서버 교체(swap) 구조
+
+- **문제:** Windows는 실행 중인 이미지 파일을 덮어쓰지 못하게 잠근다(이름 바꾸기는 된다). 확장이 빌드 출력의 `SparksLsp.exe`를 그대로 실행하면 편집기를 연 채 `RocksTarget=SparksLsp`를 다시 빌드할 때 링크가 실패한다(다른 언어 서버 확장에서 흔한 충돌 — 사용자 지적 2026-11-25). 여러 VS Code 창이 같은 서버를 쓰면 더 잦다.
+- **원본과 칸:** 찾은 파일(12.3절)은 원본이고 실행하지 않는다. 실행은 확장 전역 저장소(`ExtensionContext.globalStorageUri`)의 `server/<확장 호스트 pid>/<원본 SHA-256 앞 16 hex>/` 칸에 복사한 `SparksLsp[.exe]`(같은 폴더의 `SparksLsp.pdb`가 있으면 함께 — 크래시 덤프·디버거용)로 한다. 칸은 창(확장 호스트 프로세스)마다 따로다 — 창끼리 칸을 나누면 한 창이 지우는 칸을 다른 창이 막 실행하려는 경쟁이 생기고, 그것을 막는 사용 표지·잠금은 복사 한 번(수 MB)보다 비싸다.
+- **칸 만들기(원자적 게시):** 원본을 읽어 해시 → staging에 복사 → 복사본의 해시가 그 해시와 같고 복사 뒤 원본 크기·수정 시각이 복사 전과 같을 때만(원본이 쓰이는 도중이면 다르다) 폴더 이름을 칸 이름으로 바꾼다(staging은 `server/<pid>/.staging/`). 같은 칸이 이미 있으면 그것을 쓴다. 조건이 맞지 않으면 게시하지 않고 다음 변경을 기다린다(지금 서버는 그대로).
+- **교체:** 원본 파일(과 pdb)을 감시한다. 변경 알림이 오면 0.5 s 동안 더 알림이 없을 때(링크가 여러 번 쓰는 동안 칸을 여러 번 만들지 않게 — 편의상 묶음이고 판정은 위 해시 조건이 한다) 칸을 만들고, 새 해시가 실행 중인 칸과 다르면 클라이언트를 멈추고(`shutdown`·`exit` — 10.3절) 새 칸으로 다시 시작한다. languageclient가 다시 시작할 때 열린 문서를 `didOpen`으로 다시 보내므로 진단·강조가 이어진다. 알림 한 줄(`Sparks language server updated`)을 상태 표시줄에 잠깐 보인다.
+- **정리:** 시작과 교체 뒤에 자기 pid 폴더에서 실행 중인 칸 밖의 칸을 지우고(옛 서버가 아직 끝나지 않아 잠겼으면 실패 — 오류 아님, 다음 정리 때), 다른 pid 폴더는 그 프로세스가 없을 때만 지운다(`process.kill(pid, 0)`이 ESRCH — 살아 있는 창의 폴더는 건드리지 않는다. pid가 다른 프로세스에 재사용됐으면 남겨 두며 그 프로세스가 끝난 뒤 지운다). 확장이 끝날 때(`deactivate`) 서버를 멈춘 뒤 자기 pid 폴더 전체를 지운다(실패하면 다음 창이 지운다).
+- **대안(버린 것):** (1) 빌드가 링크 전에 잠긴 출력의 이름을 바꿔 치우기 — 모든 도구에 통하지만 빌드 출력 폴더에 옛 파일 찌꺼기가 쌓이고 증분 key·정리 규칙(Rocks.Build)을 바꿔야 하며, 실행 중인 서버는 여전히 옛 파일이라 교체 시점을 정하는 쪽이 따로 필요하다. (2) 수정 시각만 보고 바로 다시 시작 — 쓰는 도중의 파일을 실행할 수 있다. (3) 서버가 스스로 다시 실행 — 서버는 편집기 수명을 모르고 문서 상태를 다시 받을 길이 클라이언트에 있다.
+- **한계:** 감시는 VS Code 파일 감시(`FileSystemWatcher` + 원본 폴더의 `RelativePattern` — 작업 공간 밖도 된다)라 네트워크 드라이브 등에서 알림이 빠지면 `Sparks: Restart Language Server` 명령이 같은 교체를 한다(칸 만들기 → 다르면 교체).
+- **단일 파일 모드는 넣지 않는다:** 폴더 없이 연 `.spark`는 서버가 분석하지 않는다(10.3절 — 진단·강조 없음, 서식은 된다). 대안(열린 문서에서 위로 패키지 뿌리를 찾아 작업 공간으로 삼기)은 패키지 밖 문서·여러 패키지 문서가 섞이면 작업 공간이 문서마다 달라져 진단 동등성(CLI와 같은 `Compilation`)이 흐려진다. 필요가 보이면 서버 쪽 결정으로 다시 연다.
+
+### 12.4 TextMate 문법과 언어 설정
+
+- 문법은 의미 강조가 덮기 전·서버 없이 보이는 어휘 강조다(T14). scope는 TextMate 관례 이름(테마가 아는 것).
+- **주석:** `///`(뒤가 `/`가 아닐 때 — `comment.line.documentation`), `//`(`comment.line.double-slash`), `/* */`(중첩 없음 — `comment.block`). SL 3.1절.
+- **문자열:** verbatim `@"…"`(`""`만 escape, 여러 줄 — `string.quoted.double.verbatim`)를 일반 문자열보다 먼저. 일반 `"…"`는 줄 끝에서 끝난다(줄바꿈 없음), escape `\"`·`\\`·`\n`·`\t`·`\$`·`\u{1–6자리 16진}`(`constant.character.escape`), 그 밖의 `\x`는 `invalid.illegal`, 보간 `${ … }`(`meta.interpolation` — 안은 식 규칙, 문자열 리터럴 없음). SL 3.6절 어휘.
+- **attribute:** `@` + 이름(`@"`가 아닐 때 — `storage.type.annotation`).
+- **키워드:** 컴파일러 lexer 표(`LanguageKeywordAt`)의 33개를 무리로 나눈다 — 흐름(`if`·`else`·`for`·`in`·`while`·`switch`·`case`·`default`·`break`·`continue`·`return`·`await`·`try`·`emit` — `keyword.control`), 선언(`import`·`as`·`class`·`struct`·`enum`·`interface`·`event`·`fn`·`const`·`var`·`let`·`on` — `storage.type`), modifier(`async`·`override`·`open` — `storage.modifier`), 상수(`true`·`false`·`null` — `constant.language`), `this`(`variable.language`). 무리마다 `\b(a|b|…)\b` 한 패턴이고 repository 이름은 `keywords-`로 시작한다(C++ 시험이 이 모양을 읽는다 — 12.5절).
+- **숫자:** 16진·2진(`_` 구분), 10진·실수(`.5`·`1e3`·`1_000.5e-3`) — `constant.numeric`. 선언 이름(`class`·`struct`·`enum`·`interface` 뒤 이름 `entity.name.type`, `fn` 뒤 `entity.name.function`)은 서버 없을 때를 위한 근사다.
+- **언어 설정:** 주석 `//`·`/* */`, 괄호 `{}`·`[]`·`()`, 자동 닫기(`"`는 문자열·주석 밖에서만), Enter 규칙(`///` 줄에서 Enter면 다음 줄도 `/// `), 들여쓰기 규칙(`{`·`[`·`(`로 끝나는 줄 뒤 + 1, `}`·`]`·`)`로 시작하는 줄 − 1).
+
+### 12.5 시험(LC8g)
+
+- **교체 구조:** 확장 코드(TypeScript)라 자동 시험 밖이다 — 사람 확인에서 서버가 켜진 채 `RocksTarget=SparksLsp`를 다시 빌드해 링크가 성공하고 서버가 새 칸으로 바뀌는지 본다.
+- **C# (`Rocks.ToolTests` self 묶음 `SparksVSCode.*`):** manifest 필드(12.2절 — 이름·표시 이름·publisher·license·id·별칭·확장자·문법 scopeName·설정 셋의 타입과 기본값·명령과 제목·활성화 이벤트·서식 기본값·`main`이 `tsconfig`의 `outDir`과 맞음), 의존 판이 모두 정확한 판(범위 기호 없음)이고 lock 파일(`lockfileVersion` 3)의 같은 판·integrity와 같음, 언어 설정·문법 파일이 있고 JSON으로 읽힘, 문법의 모든 `include "#x"`가 repository에 있고 모든 정규식이 .NET 정규식으로 컴파일됨(Oniguruma 근사 — 문법 실수 대부분을 잡는다), `.gitignore`가 `node_modules/`·`out/`을 뺌.
+- **C++ (`SparksToolsVSCodeTests` — `SparksVSCode_GrammarKeywordsMatchCompiler`):** 문법 파일을 엔진 폴더 기준으로 읽어 `keywords-*` 패턴의 이름 집합이 `LanguageKeywordAt` 집합과 같고 겹침이 없음(사본 표가 컴파일러와 어긋나지 않게 — T13). 패턴 모양이 `\b(…)\b`가 아니면 실패.
+- **정책:** 영어 규칙을 `Tools/`로 넓힌다 — `.ts`는 주석 밖 한글 금지(손으로 쓴 소스 — 주석은 한국어), `Tools/` 아래 `.json`은 파일 전체 영어(설정). 훑기는 `node_modules`를 건너뛴다(npm이 받은 외부 원본).
+- **사람 확인:** TypeScript 컴파일(`npm run compile`)과 VS Code에서 열어 강조·진단·자동완성·hover·정의 이동·빠른 수정·서식이 되는지는 구현 때 한 번 보고 사용자 확인을 받는다(GUI라 자동 시험 밖 — `@vscode/test-electron` 하니스는 VS Code 내려받기가 필요해 넣지 않는다).
+
+### 12.6 구현(LC8g — 개정 18)
+
+- **파일:** `Tools/VSCode/sparks/` — `package.json`·`package-lock.json`(전이 의존 포함 13개, 모두 npm registry·sha512 integrity)·`tsconfig.json`(`node16` 모듈, `strict`, 주석 없는 출력)·`language-configuration.json`·`syntaxes/sparks.tmLanguage.json`·`.vscode/launch.json`(F5 확장 개발 창)·`README.md`, 소스 `src/extension.ts`(활성화·명령·설정/폴더 변경 → 다시 시작), `src/serverController.ts`(`ServerController` — 시작·교체·다시 시작을 한 작업 줄(promise 사슬)로 이어 동시에 둘이 돌지 않게, 같은 오류 알림은 한 번), `src/serverLocation.ts`(12.3절), `src/serverSlots.ts`(12.3.1절 칸 만들기·정리). 12.1절 목록에 없던 `serverController`·`serverSlots`는 파일당 한 책임으로 나눈 것이다.
+- **세부:** 출력 창은 `createOutputChannel("Sparks", { log: true })`(languageclient 11이 `LogOutputChannel`을 요구한다). 원본 감시 패턴은 `{SparksLsp,SparksLsp.*}`(확장자 없는 macOS·Linux 실행 파일과 `.exe`·`.pdb`). 원본을 열거나 읽다가 `EBUSY`·`EPERM`·`EACCES`·`ENOENT`면 "도중에 바뀜"으로 보고 다음 알림을 기다린다. 정리의 지우기는 `fs.promises.rm`(재시도 5회·100 ms 간격 증가 — Windows가 서버 종료 직후·백신 검사 중 잠깐 복사본을 잡는다)이고 칸 만들기와 같은 작업 줄에서 기다린다(정리가 만들던 staging을 지우지 않게). Rocks 링크(lld)는 출력을 임시 파일에 쓴 뒤 이름 바꾸기로 바꾸므로 원본은 한 번에 갈린다 — 해시 대조는 그렇지 않은 도구를 위한 것이다.
+- **정책:** 영어 규칙(`PolicyChecks.EnglishArtifacts`)에 `Tools` 루트 — `.ts`는 주석 밖 한글 금지(`WithoutTypeScriptComments` — C 계열 주석·문자열에 백틱 템플릿, 정규식 리터럴은 근사), `Tools/` 아래 `.json`은 파일 전체 영어. 정책 훑기(`PolicyChecks.Files`)는 `node_modules`를 건너뛴다. self 대조에 `Tools/` 양성·음성·`node_modules` 사례.
+- **시험:** C# `SparksVSCodeTests`(`SparksVSCode.ManifestContributions`·`DependenciesArePinned`·`GrammarIsWellFormed`(쓰이지 않는 repository 규칙도 실패)·`BuildOutputIsIgnored`), C++ `SparksVSCode_GrammarKeywordsMatchCompiler`. 음성 대조: 문법에서 `open`을 빼면 C++ 시험이, include 이름을 틀리면 C# 시험이 실패한다(확인함).
+- **교체 확인(node, VS Code 밖):** 빌드 출력에서 원본을 찾고 칸을 만들어(같은 원본은 같은 칸) 복사본을 실행한 채 원본을 덮어쓰면 성공하고, 새 칸이 생기며, 실행 중인 옛 칸은 정리가 건너뛰고 서버가 끝난 뒤 지워진다. VS Code 안의 확인(강조·진단·자동완성·hover·정의·빠른 수정·서식, 켠 채 `RocksTarget=SparksLsp` 재빌드 → 자동 교체)은 사용자 확인으로 남는다(12.5절).
+- **리뷰 반영:** 칸 쪽 실패(staging 쓰기·이름 바꾸기 — 백신이 새 exe를 잡아 EPERM)를 "원본이 바뀜"으로 보던 것 → 원본 읽기 단계와 칸 단계를 나눠 칸 쪽은 오류, 이름 바꾸기는 재시도(rm과 같은 상수), 서버가 없을 때의 "원본이 바뀜"은 3번 다시 시도한 뒤 알림. 감시를 원본 경로가 바뀔 때만 만들던 것 → 다시 시작마다 다시 만든다(감시 폴더가 지워지면 알림이 끊긴다). `start()`에 상한이 없어 답하지 않는 서버가 작업 줄을 막던 것 → 30 s 상한, 넘으면 멈추고 알림. 같은 칸을 다시 켜도 "updated"를 알리던 것 → 칸이 바뀔 때만. 시작 실패 뒤 stop의 예상된 거부를 기록하던 것 → 뺌. `deactivate`가 빈 pid 폴더를 남기던 것 → 폴더째 지움. 보간이 줄을 넘던 것 → 줄 끝에서 끝남. 정책의 `.ts` 주석 제거가 백틱 템플릿 안의 `//` 뒤를 주석으로 지우던 것 → `WithoutTypeScriptComments`(템플릿을 여러 줄 리터럴로), self 대조에 템플릿 사례. manifest 시험에 표시 이름·publisher·license·별칭·명령 제목.
+- **한계:** 링크가 원본을 직접 덮어쓰는 도구에서 쓰기를 멈춘 틈에 복사가 끝나면 불완전한 칸을 게시할 수 있다(쓰기가 이어지면 다음 알림이 다시 교체한다). 감시 알림이 빠지는 파일 체계에서는 명령으로 교체한다. 확장 자체는 자동 시험 밖이다.
