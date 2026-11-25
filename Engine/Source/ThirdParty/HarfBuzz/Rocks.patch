@@ -37,3 +37,41 @@ index b476a55..6d41b61 100644
        buf[len] = '\0';
        return true;
      }
+diff --git a/src/hb-shape-plan.cc b/src/hb-shape-plan.cc
+index 19a8413..7f12fe3 100644
+--- a/src/hb-shape-plan.cc
++++ b/src/hb-shape-plan.cc
+@@ -258,10 +258,10 @@ hb_shape_plan_create2 (hb_face_t                     *face,
+ {
+   DEBUG_MSG_FUNC (SHAPE_PLAN, nullptr,
+ 		  "face=%p num_features=%u num_coords=%u shaper_list=%p",
+-		  face,
++		  (const void *) face,
+ 		  num_user_features,
+ 		  num_coords,
+-		  shaper_list);
++		  (const void *) shaper_list);
+ 
+   if (unlikely (!props || !HB_DIRECTION_IS_VALID (props->direction)))
+     return hb_shape_plan_get_empty ();
+@@ -421,7 +421,7 @@ _hb_shape_plan_execute_internal (hb_shape_plan_t    *shape_plan,
+   DEBUG_MSG_FUNC (SHAPE_PLAN, shape_plan,
+ 		  "num_features=%u shaper_func=%p, shaper_name=%s",
+ 		  num_features,
+-		  shape_plan->key.shaper_func,
++		  (const void *) shape_plan->key.shaper_func,
+ 		  shape_plan->key.shaper_name);
+ 
+   if (unlikely (!buffer->len))
+@@ -573,9 +573,9 @@ _hb_shape_plan_get_cached (hb_face_t                     *face,
+   *uncached_plan = nullptr;
+   DEBUG_MSG_FUNC (SHAPE_PLAN, nullptr,
+ 		  "face=%p num_features=%u shaper_list=%p",
+-		  face,
++		  (const void *) face,
+ 		  num_user_features,
+-		  shaper_list);
++		  (const void *) shaper_list);
+ 
+   if (unlikely (!props))
+     return hb_shape_plan_get_empty ();
