@@ -55,8 +55,9 @@ UI 코드 일부가 9절 순서(UT0·CB2 선행)보다 먼저, 글꼴 시스템�
 - `PaintBox`에 둥근 상자 값(로컬 크기, 외곽선 두께·색, 반경)을 싣는다. `DrawBatch`는 이 값이 다르면 그리기 명령을 나눈다(UE도 ShaderParams가 배치 키라 크기·반경·두께가 다른 상자는 따로 그린다). 채움색은 정점 색, UV는 상자 안 로컬 0..1이다.
 - 셰이더는 엔진 셰이더 `/Engine/Private/Ui/UiRoundedBox.rsf`(그리기 상수: 화면 변환, (0, 두께, 크기 x, 크기 y), 반경 4, 외곽선 색)다. 식은 UE `SlateShaderCommon.ush` 84–119행과 같다: 외곽선은 상자 안쪽, 테두리 AA 반폭 1.0·채움 0.5(로컬 단위), straight 알파 출력과 SrcAlpha 블렌드. 텍스처를 곱한 둥근 상자(UE는 브러시 텍스처를 곱한다)는 쓰는 곳이 생기면 더한다.
 
-**UW3b 스타일 기반(설계).**
+**UW3b 스타일 기반(설계, 구현 완료).**
 - `StyleBrush`(UiCore): 그리기 방식·채움·외곽선 색을 `ColorRef`(테마 slot)로 들고, 그릴 때 테마로 `Brush`를 만든다(UE `FSlateBrush`의 `FSlateColor` tint). 둥근 상자 반경·외곽선 두께·이미지 resource를 함께 둔다.
 - 스타일 구조체: `ButtonStyle`(상태 넷의 brush, 보통·눌림 여백, 상태별 전경색 — UE `FButtonStyle`), `TextStyle`(글꼴 typeface 이름·크기, 색 — UE `FTextBlockStyle`의 글꼴·색 부분), 그 밖은 UW3c에서 위젯을 바꿀 때 하나씩 더한다.
 - `StyleSet`: 이름으로 형식별 스타일을 찾는 표다(UE `FSlateStyleSet::GetWidgetStyle`). `AddCoreStyles(set)`가 14장 UE 값(출처 행을 주석으로)을 넣는다. 위젯 기본값은 같은 값의 상수 함수(`DefaultButtonStyle()` 등)로 두어, 스타일 집합 없이 만든 위젯도 UE 룩이다(UE도 인자를 생략하면 핵심 스타일의 기본 항목을 쓴다).
 - 테마: `PaintList`가 그릴 때 쓸 `ThemeColors`를 들고(지정하지 않으면 UE 다크 기본 테마), 위젯은 `OnPaint`에서 그 테마로 색을 푼다. 테마의 소유자는 `ui::Application`이다(전역 등록부 없음 — 4.1절).
+- 구현에서 정한 것: 글꼴 typeface는 문자열 대신 `Typeface` 열거(Regular·Bold·Italic·BoldItalic·Light)로 둔다. 스타일 값이 이름 수명을 갖지 않게 하려는 것이고, 글꼴 계층이 열거를 합성 글꼴의 typeface 이름으로 바꾼다(UE `TypefaceFontName`과 같은 값). 버린 대안은 `StringView` 이름이다(사용자가 만든 스타일에서 매달린 view가 된다). `AddCoreStyles`의 키는 UE 키 그대로 "Button"·"PrimaryButton"·"SimpleButton"·"NormalText"·"SmallText"·"Text.Large"·"PrimaryButtonText"다(StarshipCoreStyle.cpp 1333–1339행, 1503–1511행). 없는 이름을 `Get*`로 찾으면 형식 기본값을 돌려준다(UE는 경고 뒤 기본값). 테마를 바꾸면 `CacheRoot::SetTheme`이 기록을 모두 버린다. 색이 바뀌므로 정점만 갱신할 수 없기 때문이다. 시험 `UiCore_*Style*`·`UiCore_PaintListThemeDefaultsToUeDark`가 14장 값을 대조한다(UV8).

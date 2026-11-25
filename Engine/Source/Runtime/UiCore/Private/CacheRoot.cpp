@@ -22,6 +22,13 @@ void CacheRoot::Reset() noexcept {
     ++revision_;
 }
 
+void CacheRoot::SetTheme(const ThemeColors* theme) noexcept {
+    list_.SetTheme(theme);
+    scratch_.SetTheme(theme);
+    assembled_.SetTheme(theme);
+    Reset();
+}
+
 const PaintList& CacheRoot::List() const noexcept {
     return list_;
 }
@@ -146,7 +153,8 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
     if (paint != paint_) {
         for (usize i = 0; i < entries_.Size(); ++i) {
             Entry& entry = entries_[i];
-            const float inherited = entry.parentBody == MaxSize ? 1.0f : entries_[entry.parentBody].nextOpacity;
+            const float inherited =
+                entry.parentBody == MaxSize ? 1.0f : entries_[entry.parentBody].nextOpacity;
             entry.nextOpacity = inherited * entry.element->GetRenderOpacity();
             const bool opacityChanged = entry.nextOpacity != entry.opacity;
             if (!entry.overlay) {
@@ -162,7 +170,8 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                     }
                 }
             }
-            if (opacityChanged || entry.everyFrame || entry.revision != entry.element->paintRevision_) {
+            if (opacityChanged || entry.everyFrame ||
+                entry.revision != entry.element->paintRevision_) {
                 auto queued = changed_.TryPushBack(i);
                 if (!queued) {
                     return queued;

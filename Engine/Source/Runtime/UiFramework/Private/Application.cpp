@@ -7,6 +7,19 @@ Application::Application(Allocator& allocator) noexcept
     : allocator_(allocator), cache_(allocator), hitGrid_(allocator), timers_(allocator),
       toolTips_(allocator), hover_(allocator), captures_(allocator), focus_(allocator),
       modifiers_(allocator), commandScopes_(allocator) {
+    cache_.SetTheme(&theme_);
+}
+
+void Application::SetTheme(const ThemeColors& theme) noexcept {
+    if (theme == theme_) {
+        return;
+    }
+    theme_ = theme;
+    cache_.SetTheme(&theme_);
+}
+
+const ThemeColors& Application::Theme() const noexcept {
+    return theme_;
 }
 
 Application::~Application() noexcept {
@@ -81,6 +94,7 @@ Result<void> Application::BuildPaintList(const Geometry& geometry, float layoutS
         return prepared;
     }
     list.Clear();
+    list.SetTheme(&theme_);
     auto painted = root_->Paint(list, 0);
     return painted ? hitGrid_.Update(root_) : Move(painted);
 }
@@ -135,7 +149,8 @@ bool Application::HasAnyUserFocus(const Element& element) const noexcept {
     return false;
 }
 
-bool Application::HasPointerCapture(PointerSource source, uint32 user, uint32 pointer) const noexcept {
+bool Application::HasPointerCapture(PointerSource source, uint32 user,
+                                    uint32 pointer) const noexcept {
     for (const auto& capture : captures_) {
         if (capture.userId == user && capture.pointerId == pointer && capture.source == source) {
             auto target = capture.target.Lock();

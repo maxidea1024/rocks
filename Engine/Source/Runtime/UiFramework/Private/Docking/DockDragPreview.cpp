@@ -63,6 +63,7 @@ Result<void> DockManager::PaintFloatingPreview(PaintList& list) const noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     PaintList scratch(allocator_);
+    scratch.SetTheme(&list.Theme());
     auto result = PaintPreviewPart(
         *tab.content, Vec2{0, header.Value().Size().y} - body.Value().min, scratch, list);
     if (result) {

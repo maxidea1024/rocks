@@ -4,7 +4,13 @@
 
 namespace rocks::ui {
 
-enum class ColorSource : uint8 { Specified, Theme, Foreground, SubduedForeground, Style };
+enum class ColorSource : uint8 {
+    Specified,
+    Theme,
+    Foreground,
+    SubduedForeground,
+    Style
+};
 
 struct StyleColorContext {
     LinearColor foreground{1, 1, 1, 1};
@@ -20,6 +26,7 @@ struct ROCKS_UICORE_API ColorRef {
     static ColorRef Specified(LinearColor color) noexcept;
     bool IsValid() const noexcept;
     LinearColor Resolve(const ThemeColors& theme, const StyleColorContext& context) const noexcept;
+    bool operator==(const ColorRef&) const noexcept = default;
 };
 
 } // namespace rocks::ui

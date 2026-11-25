@@ -28,6 +28,11 @@ public:
     Result<WeakPtr<Application*>> WeakContext() noexcept;
     void SetRoot(const SharedPtr<Element>& root) noexcept;
 
+    // 위젯 스타일 색을 풀 테마다(UW3b — 기본은 UE 다크 테마). 바꾸면 그리기 캐시를 모두 다시
+    // 만든다. BuildPaintList에 넘긴 목록은 이 Application의 테마를 빌린다.
+    void SetTheme(const ThemeColors& theme) noexcept;
+    const ThemeColors& Theme() const noexcept;
+
     // 변경된 배치를 반영하고 목록을 새로 기록한다. 지역 CachePanel의 기록은 재사용한다.
     Result<void> BuildPaintList(const Geometry& geometry, float layoutScale,
                                 PaintList& list) noexcept;
@@ -144,6 +149,7 @@ private:
 
     SharedPtr<Application*> context_;
     Allocator& allocator_;
+    ThemeColors theme_{};
     CacheRoot cache_;
     HitGrid hitGrid_;
     SharedPtr<Element> root_;

@@ -22,6 +22,10 @@ public:
     CacheRoot(const CacheRoot&) = delete;
     CacheRoot& operator=(const CacheRoot&) = delete;
     void Reset() noexcept;
+
+    // 기록에 쓸 테마를 바꾸고 기록을 모두 버린다(다음 Update가 전체를 다시 그린다). nullptr이면
+    // DefaultThemeColors()다. 테마는 이 캐시보다 오래 살아야 한다.
+    void SetTheme(const ThemeColors* theme) noexcept;
     Result<void> Update(const Element& root, int32 layer) noexcept;
     const PaintList& List() const noexcept;
     int32 HighestLayer() const noexcept;

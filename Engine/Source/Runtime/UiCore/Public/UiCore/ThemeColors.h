@@ -80,8 +80,13 @@ public:
     Result<void> Load(Allocator& allocator, StringView engine, StringView project = {},
                       StringView user = {}) noexcept;
     bool operator==(const ThemeColors&) const noexcept = default;
+
 private:
     LinearColor values_[static_cast<usize>(ThemeSlot::Count)]{};
 };
+
+// UE 5.8 에디터 다크 테마 기본값이다(StyleColors.cpp — 기본 생성자와 같은 값). 테마를 지정하지 않은
+// 그리기 목록이 쓴다(Docs/Design/UiToolkit 9.1절 UW3b).
+ROCKS_UICORE_API const ThemeColors& DefaultThemeColors() noexcept;
 
 } // namespace rocks::ui

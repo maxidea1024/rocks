@@ -235,6 +235,14 @@ float PaintList::InheritedOpacity() const noexcept {
     return opacity_;
 }
 
+void PaintList::SetTheme(const ThemeColors* theme) noexcept {
+    theme_ = theme;
+}
+
+const ThemeColors& PaintList::Theme() const noexcept {
+    return theme_ ? *theme_ : DefaultThemeColors();
+}
+
 void PaintList::Clear() noexcept {
     opacity_ = 1;
     boxes_.Clear();

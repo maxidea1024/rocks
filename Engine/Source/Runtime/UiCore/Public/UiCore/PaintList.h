@@ -5,6 +5,7 @@
 #include <Core/Math/Rect.h>
 #include <UiCore/Geometry.h>
 #include <UiCore/Brush.h>
+#include <UiCore/ThemeColors.h>
 
 namespace rocks::ui {
 
@@ -78,12 +79,18 @@ public:
     // 이미 잘린 목록을 현재 clip과 교차시켜 원래 그리기 순서대로 붙인다.
     Result<void> TryAppendRecorded(Span<const PaintBox> boxes) noexcept;
 
+    // 위젯이 스타일 색(ColorRef)을 풀 테마다(UW3b). nullptr이면 DefaultThemeColors()다. 목록은
+    // 테마를 빌리므로 소유자(ui::Application)가 목록보다 오래 살아야 한다. Clear는 테마를 유지한다.
+    void SetTheme(const ThemeColors* theme) noexcept;
+    const ThemeColors& Theme() const noexcept;
+
     void Clear() noexcept;
 
 private:
     friend class CacheRoot;
     friend class Element;
     float opacity_ = 1;
+    const ThemeColors* theme_ = nullptr;
     struct ClipState {
         Box2<float> bounds;
         bool empty = false;
