@@ -104,7 +104,7 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
     const ObjectAccessContext access = registry.OwnerAccess();
     const TypeId base = IdOf<BaseGameAsset>();
     const TypeId derived = IdOf<DerivedGameAsset>();
-    auto baseRegistration = table.Register(base, {&BaseTags, &BaseDependencies});
+    auto baseRegistration = table.Register(base, {&BaseTags, &BaseDependencies, nullptr});
     REQUIRE(baseRegistration);
     {
         AssetTagSink sink(env.allocator);
@@ -119,7 +119,8 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
     }
 
     {
-        auto derivedRegistration = table.Register(derived, {&DerivedTagsWithBase, nullptr});
+        auto derivedRegistration =
+            table.Register(derived, {&DerivedTagsWithBase, nullptr, nullptr});
         REQUIRE(derivedRegistration);
         AssetTagSink sink(env.allocator);
         // 저장할 패키지 id는 CallBase로 부른 base hook까지 그대로 간다.
@@ -134,7 +135,7 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
     }
 
     {
-        auto alone = table.Register(derived, {&DerivedTagsAlone, &DerivedDependencies});
+        auto alone = table.Register(derived, {&DerivedTagsAlone, &DerivedDependencies, nullptr});
         REQUIRE(alone);
         AssetTagSink sink(env.allocator);
         REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, AssetId{}, sink));
@@ -167,13 +168,15 @@ TEST(AssetTypeHooks_Errors) {
     const ObjectAccessContext access = registry.OwnerAccess();
     const TypeId base = IdOf<BaseGameAsset>();
     const TypeId derived = IdOf<DerivedGameAsset>();
-    CHECK(table.Register(TypeId{}, {&BaseTags, nullptr}).Error() == ErrorCode::InvalidArgument);
+    CHECK(table.Register(TypeId{}, {&BaseTags, nullptr, nullptr}).Error() ==
+          ErrorCode::InvalidArgument);
     CHECK(table.Register(base, {}).Error() == ErrorCode::InvalidArgument);
-    auto baseRegistration = table.Register(base, {&BaseTags, &BaseDependencies});
+    auto baseRegistration = table.Register(base, {&BaseTags, &BaseDependencies, nullptr});
     REQUIRE(baseRegistration);
-    CHECK(table.Register(base, {nullptr, &BaseDependencies}).Error() == ErrorCode::AlreadyExists);
+    CHECK(table.Register(base, {nullptr, &BaseDependencies, nullptr}).Error() ==
+          ErrorCode::AlreadyExists);
     auto derivedRegistration =
-        table.Register(derived, {&DerivedTagsWithBase, &DerivedDependencies});
+        table.Register(derived, {&DerivedTagsWithBase, &DerivedDependencies, nullptr});
     REQUIRE(derivedRegistration);
     failBase = true;
     AssetTagSink sink(env.allocator);
@@ -209,17 +212,17 @@ TEST(AssetTypeHooks_RegistrationLifetime) {
     const TypeId base = IdOf<BaseGameAsset>();
     const TypeId derived = IdOf<DerivedGameAsset>();
     {
-        auto scoped = table.Register(base, {&BaseTags, nullptr});
+        auto scoped = table.Register(base, {&BaseTags, nullptr, nullptr});
         REQUIRE(scoped);
         CHECK(table.Count() == 1 && scoped.Value().IsActive());
     }
 
     CHECK(table.Count() == 0);
-    auto first = table.Register(base, {&BaseTags, nullptr});
+    auto first = table.Register(base, {&BaseTags, nullptr, nullptr});
     REQUIRE(first);
     AssetTypeHookRegistration moved(Move(first.Value()));
     CHECK(!first.Value().IsActive() && moved.IsActive() && table.Count() == 1);
-    auto second = table.Register(derived, {&DerivedTagsAlone, nullptr});
+    auto second = table.Register(derived, {&DerivedTagsAlone, nullptr, nullptr});
     REQUIRE(second);
     moved = Move(second.Value());
     CHECK(table.Count() == 1 && moved.IsActive());
@@ -314,7 +317,7 @@ TEST(AssetTypeHooks_RegisterAllocationFailures) {
     uint32 failures = 0;
     for (uint64 attempt = 1;; ++attempt) {
         failing.FailOnAttempt(attempt);
-        auto registration = table.Register(IdOf<BaseGameAsset>(), {&BaseTags, nullptr});
+        auto registration = table.Register(IdOf<BaseGameAsset>(), {&BaseTags, nullptr, nullptr});
         const bool failed = failing.Attempts() >= attempt;
         failing.DisableFailure();
         if (!failed) {

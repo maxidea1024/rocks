@@ -158,7 +158,7 @@ template <typename S, usize N>
 struct Curve {
     Point<S, N> Points[MaxPoints] = {};
     int32 Num = 0;
-    bool bIsLooped = false;
+    bool isLooped = false;
     float LoopKeyOffset = 0.0f;
     Options options;
 
@@ -189,16 +189,16 @@ struct Curve {
 
     void SetLoopKey(float InLoopKey) noexcept {
         if (Num == 0) {
-            bIsLooped = false;
+            isLooped = false;
             return;
         }
 
         const float LastInKey = Points[Num - 1].InVal;
         if (InLoopKey > LastInKey) {
-            bIsLooped = true;
+            isLooped = true;
             LoopKeyOffset = InLoopKey - LastInKey;
         } else {
-            bIsLooped = false;
+            isLooped = false;
         }
     }
 
@@ -254,9 +254,9 @@ struct Curve {
         }
 
         if (Index == LastPoint) {
-            const bool pastEnd = !bIsLooped || InVal >= Points[LastPoint].InVal + LoopKeyOffset;
+            const bool pastEnd = !isLooped || InVal >= Points[LastPoint].InVal + LoopKeyOffset;
             if (pastEnd) {
-                const Point<S, N>& held = bIsLooped ? Points[0] : Points[LastPoint];
+                const Point<S, N>& held = isLooped ? Points[0] : Points[LastPoint];
                 for (usize c = 0; c < N; ++c) {
                     Out[c] =
                         order == 0 ? held.OutVal[c] : (order == 1 ? held.ArriveTangent[c] : S(0));
@@ -266,11 +266,11 @@ struct Curve {
             }
         }
 
-        const bool bLoopSegment = (bIsLooped && Index == LastPoint);
-        const int32 NextIndex = bLoopSegment ? 0 : (Index + 1);
+        const bool isLoopSegment = (isLooped && Index == LastPoint);
+        const int32 NextIndex = isLoopSegment ? 0 : (Index + 1);
         const Point<S, N>& PrevPoint = Points[Index];
         const Point<S, N>& NextPoint = Points[NextIndex];
-        const float Diff = bLoopSegment ? LoopKeyOffset : (NextPoint.InVal - PrevPoint.InVal);
+        const float Diff = isLoopSegment ? LoopKeyOffset : (NextPoint.InVal - PrevPoint.InVal);
         if (Diff > 0.0f && PrevPoint.InterpMode != CIM_Constant) {
             float Alpha = (InVal - PrevPoint.InVal) / Diff;
             // Rocks는 루프 끝의 반올림으로 1을 넘는 비율을 1로 자른다(UE는 checkf).
@@ -309,8 +309,8 @@ struct Curve {
 
     void ComputeCurveTangent(float PrevTime, const S (&PrevPoint)[N], float CurTime,
                              const S (&CurPoint)[N], float NextTime, const S (&NextPoint)[N],
-                             float Tension, bool bWantClamping, S (&OutTangent)[N]) const noexcept {
-        if (bWantClamping && options.clampTangents) {
+                             float Tension, bool wantClamping, S (&OutTangent)[N]) const noexcept {
+        if (wantClamping && options.clampTangents) {
             for (usize c = 0; c < N; ++c) {
                 const S ClampedTangent = ClampFloatTangent(PrevPoint[c], PrevTime, CurPoint[c],
                                                            CurTime, NextPoint[c], NextTime);
@@ -328,27 +328,26 @@ struct Curve {
         }
     }
 
-    void AutoSetTangents(float Tension, bool bStationaryEndpoints) noexcept {
+    void AutoSetTangents(float Tension, bool stationaryEndpoints) noexcept {
         const int32 NumPoints = Num;
         const int32 LastPoint = NumPoints - 1;
         for (int32 PointIndex = 0; PointIndex < NumPoints; PointIndex++) {
             const int32 PrevIndex =
-                (PointIndex == 0) ? (bIsLooped ? LastPoint : 0) : (PointIndex - 1);
+                (PointIndex == 0) ? (isLooped ? LastPoint : 0) : (PointIndex - 1);
             const int32 NextIndex =
-                (PointIndex == LastPoint) ? (bIsLooped ? 0 : LastPoint) : (PointIndex + 1);
+                (PointIndex == LastPoint) ? (isLooped ? 0 : LastPoint) : (PointIndex + 1);
             Point<S, N>& ThisPoint = Points[PointIndex];
             const Point<S, N>& PrevPoint = Points[PrevIndex];
             const Point<S, N>& NextPoint = Points[NextIndex];
-            const float PrevTime = (bIsLooped && PointIndex == 0)
-                                       ? (ThisPoint.InVal - LoopKeyOffset)
-                                       : PrevPoint.InVal;
-            const float NextTime = (bIsLooped && PointIndex == LastPoint)
+            const float PrevTime =
+                (isLooped && PointIndex == 0) ? (ThisPoint.InVal - LoopKeyOffset) : PrevPoint.InVal;
+            const float NextTime = (isLooped && PointIndex == LastPoint)
                                        ? (ThisPoint.InVal + LoopKeyOffset)
                                        : NextPoint.InVal;
             if (ThisPoint.InterpMode == CIM_CurveAuto ||
                 ThisPoint.InterpMode == CIM_CurveAutoClamped) {
-                if (bStationaryEndpoints &&
-                    (PointIndex == 0 || (PointIndex == LastPoint && !bIsLooped))) {
+                if (stationaryEndpoints &&
+                    (PointIndex == 0 || (PointIndex == LastPoint && !isLooped))) {
                     for (usize c = 0; c < N; ++c) {
                         ThisPoint.ArriveTangent[c] = S(0);
                         ThisPoint.LeaveTangent[c] = S(0);
@@ -511,7 +510,7 @@ void CheckCurveMatchesReference(const InterpCurve<T>& curve,
 
     const float first = reference.Points[0].InVal;
     const float last = reference.Points[reference.Num - 1].InVal +
-                       (reference.bIsLooped ? reference.LoopKeyOffset : 0.0f);
+                       (reference.isLooped ? reference.LoopKeyOffset : 0.0f);
     float inputs[64] = {};
     int32 inputCount = 0;
     for (int32 index = 0; index < reference.Num && inputCount < 32; ++index) {

@@ -132,6 +132,17 @@ struct CommandScene {
                                            platform::FileOpenMode::ReadExisting));
     }
 
+    // 디렉터리가 있는지다(Exists는 파일만 연다).
+    bool DirectoryExists(StringView relative) noexcept {
+        char path[1024] = {};
+        FixedStringBuilder builder{Span<char>(path)};
+        bool exists = false;
+        return builder.TryAppendFormat("{}/{}", root.Root(), relative) &&
+               static_cast<bool>(platform::PhysicalFileSystem().DirectoryExists(
+                   builder.View().Data(), builder.View().ByteCount(), exists)) &&
+               exists;
+    }
+
     asset_database_test::TempProject root;
     bool ready = false;
 };

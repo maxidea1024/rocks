@@ -7,7 +7,7 @@
 #include <Core/Text/NameComponent.h>
 #include <Serialization/Archive.h>
 
-// 쿠킹 매니페스트 v1 reader·writer·검증·대조다(Docs/Design/AssetSystem 10절, 10.1절).
+// 쿠킹 매니페스트 v2 reader·writer·검증·대조다(Docs/Design/AssetSystem 10절, 10.1절·10.3절 4항).
 // reader는 byte를 모델로 풀기만 하고(구조 — 길이·잘림·개수), 칸 규칙과 항목 사이 규칙은 writer와
 // 같은 ValidateCookedManifest가 본다(두 쪽 규칙이 갈리지 않는다).
 namespace rocks {
@@ -26,6 +26,13 @@ constexpr usize MinEntryBytes = 2 * GuidBytes + LengthPrefixBytes + DigestBytes 
 // bundle 하나의 최소 byte다(이름 길이 칸 + 구성원 개수 칸).
 constexpr usize MinBundleBytes = LengthPrefixBytes + sizeof(uint32);
 constexpr usize DependencyBytes = GuidBytes + sizeof(uint32);
+// backend 하나의 최소 byte다(이름 길이 칸 + 형식 개수 칸 — 10.3절 4항).
+constexpr usize MinBackendBytes = LengthPrefixBytes + sizeof(uint32);
+// artifact 하나의 최소 byte다(kind + 이름·formatId 길이 칸 + bytes + sha256 + cookKey).
+constexpr usize MinArtifactBytes =
+    sizeof(uint8) + 2 * LengthPrefixBytes + sizeof(uint64) + 2 * DigestBytes;
+// artifact 경로의 SHA-256 hex 앞 글자 수다(패키지 경로와 같다 — AS 4.2절).
+constexpr usize ArtifactHashChars = 16;
 // 비교 키·식별자 문자열 builder의 내장 용량이다. 키 길이는 경로 상한까지 다양하므로 작게 두고
 // allocator로 자라게 한다(할당 실패는 그 오류로 돌려준다).
 constexpr usize KeyInlineBytes = 8;
@@ -77,6 +84,128 @@ bool ByteLess(StringView left, StringView right) noexcept {
     }
 
     return left.ByteCount() < right.ByteCount();
+}
+
+// backend 이름 어휘다(10.3절 1항).
+constexpr StringView KnownGraphicsBackends[] = {"D3D12", "D3D11", "Vulkan", "Metal", "OpenGL"};
+
+// artifact 키 비교다(음수·0·양수 — kind 값 → 이름 byte 순 → formatId byte 순).
+int CompareArtifactKey(CookArtifactKind leftKind, StringView leftName, StringView leftFormat,
+                       CookArtifactKind rightKind, StringView rightName,
+                       StringView rightFormat) noexcept {
+    const uint8 a = static_cast<uint8>(leftKind);
+    const uint8 b = static_cast<uint8>(rightKind);
+    if (a != b) {
+        return a < b ? -1 : 1;
+    }
+
+    if (!(leftName == rightName)) {
+        return ByteLess(leftName, rightName) ? -1 : 1;
+    }
+
+    if (!(leftFormat == rightFormat)) {
+        return ByteLess(leftFormat, rightFormat) ? -1 : 1;
+    }
+
+    return 0;
+}
+
+bool IsKnownArtifactName(StringView name) noexcept {
+    return name == CookedArtifactEngineName || name == CookedArtifactProjectName;
+}
+
+bool IsKnownArtifactKind(CookArtifactKind kind) noexcept {
+    return kind == CookArtifactKind::ShaderLibrary;
+}
+
+// backend 표(10.3절 4항 — 번호 순: 이름 어휘 → 이름 중복 → 형식 수 → 형식 id 문법 → 전역 중복)다.
+Result<void> ValidateBackends(const CookedManifest& manifest, AssetDiagnostic* failure) noexcept {
+    const Array<CookedManifestBackend>& backends = manifest.backends;
+    if (backends.Size() > CookedManifestMaxBackends) {
+        return ManifestCorrupt<void>(failure, Field::BackendCount, CookedManifestNoEntry);
+    }
+
+    for (usize index = 0; index < backends.Size(); ++index) {
+        const CookedManifestBackend& backend = backends[index];
+        if (!IsKnownGraphicsBackend(backend.name.View())) {
+            return ManifestCorrupt<void>(failure, Field::Backend, index);
+        }
+
+        for (usize earlier = 0; earlier < index; ++earlier) {
+            if (backends[earlier].name.View() == backend.name.View()) {
+                return ManifestCorrupt<void>(failure, Field::Backend, index);
+            }
+        }
+
+        const usize formats = backend.formats.Size();
+        if (formats == 0 || formats > CookedManifestMaxFormatsPerBackend) {
+            return ManifestCorrupt<void>(failure, Field::FormatCount, index);
+        }
+
+        for (usize format = 0; format < formats; ++format) {
+            const StringView id = backend.formats[format].View();
+            if (!IsValidShaderFormatId(id)) {
+                return ManifestCorrupt<void>(failure, Field::ShaderFormat, index);
+            }
+
+            // 앞 형식 전부(앞 backend 전부와 같은 backend의 앞 형식)와 다르다.
+            for (usize other = 0; other <= index; ++other) {
+                const usize end = other == index ? format : backends[other].formats.Size();
+                for (usize at = 0; at < end; ++at) {
+                    if (backends[other].formats[at].View() == id) {
+                        return ManifestCorrupt<void>(failure, Field::ShaderFormat, index);
+                    }
+                }
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+bool HasShaderFormat(const CookedManifest& manifest, StringView id) noexcept {
+    for (const CookedManifestBackend& backend : manifest.backends) {
+        for (const String& format : backend.formats) {
+            if (format.View() == id) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// artifact 표(10.3절 4항 — 번호 순: kind → 이름 → formatId가 backend 표에 있음 → bytes → 정렬)다.
+Result<void> ValidateArtifacts(const CookedManifest& manifest, AssetDiagnostic* failure) noexcept {
+    const Array<CookedManifestArtifact>& artifacts = manifest.artifacts;
+    if (artifacts.Size() > CookedManifestMaxArtifacts) {
+        return ManifestCorrupt<void>(failure, Field::ArtifactCount, CookedManifestNoEntry);
+    }
+
+    for (usize index = 0; index < artifacts.Size(); ++index) {
+        const CookedManifestArtifact& artifact = artifacts[index];
+        if (!IsKnownArtifactKind(artifact.kind)) {
+            return ManifestCorrupt<void>(failure, Field::ArtifactKind, index);
+        }
+
+        if (!IsKnownArtifactName(artifact.name.View())) {
+            return ManifestCorrupt<void>(failure, Field::ArtifactName, index);
+        }
+
+        if (!HasShaderFormat(manifest, artifact.formatId.View())) {
+            return ManifestCorrupt<void>(failure, Field::ArtifactFormat, index);
+        }
+
+        if (artifact.bytes == 0 || artifact.bytes > CookedArtifactMaxBytes) {
+            return ManifestCorrupt<void>(failure, Field::ArtifactBytes, index);
+        }
+
+        if (index > 0 && !CookedArtifactLess(artifacts[index - 1], artifact)) {
+            return ManifestCorrupt<void>(failure, Field::ArtifactOrder, index);
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 // (asset, kind) 순서다.
@@ -271,6 +400,63 @@ Result<void> ValidateEntry(const CookedManifestEntry& entry, uint64 index, Alloc
 
 } // namespace
 
+bool IsKnownGraphicsBackend(StringView name) noexcept {
+    for (StringView known : KnownGraphicsBackends) {
+        if (known == name) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool IsValidShaderFormatId(StringView id) noexcept {
+    if (id.IsEmpty() || id.ByteCount() > ShaderFormatIdMaxBytes) {
+        return false;
+    }
+
+    for (usize index = 0; index < id.ByteCount(); ++index) {
+        const char c = id.Data()[index];
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool CookedArtifactLess(const CookedManifestArtifact& left,
+                        const CookedManifestArtifact& right) noexcept {
+    return CompareArtifactKey(left.kind, left.name.View(), left.formatId.View(), right.kind,
+                              right.name.View(), right.formatId.View()) < 0;
+}
+
+const CookedManifestArtifact* CookedManifest::FindArtifact(CookArtifactKind kind, StringView name,
+                                                           StringView formatId) const noexcept {
+    usize low = 0;
+    usize high = artifacts.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        const CookedManifestArtifact& probe = artifacts[middle];
+        if (CompareArtifactKey(probe.kind, probe.name.View(), probe.formatId.View(), kind, name,
+                               formatId) < 0) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    if (low == artifacts.Size()) {
+        return nullptr;
+    }
+
+    const CookedManifestArtifact& found = artifacts[low];
+    return CompareArtifactKey(found.kind, found.name.View(), found.formatId.View(), kind, name,
+                              formatId) == 0
+               ? &found
+               : nullptr;
+}
+
 const CookedManifestEntry* CookedManifest::Find(AssetId asset) const noexcept {
     usize low = 0;
     usize high = entries.Size();
@@ -298,6 +484,10 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
     const usize count = manifest.entries.Size();
     if (count > CookedManifestMaxEntries) {
         return ManifestCorrupt<void>(failure, Field::EntryCount, CookedManifestNoEntry);
+    }
+
+    if (auto backends = ValidateBackends(manifest, failure); !backends) {
+        return backends;
     }
 
     // 경로 힌트 caseless 키와 그 항목 번호다(정렬해 이웃만 비교한다).
@@ -366,7 +556,7 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
         }
     }
 
-    return Result<void>::Success();
+    return ValidateArtifacts(manifest, failure);
 }
 
 namespace package_detail {
@@ -411,6 +601,15 @@ Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedMani
     step(writer.WriteU32(manifest.cookedBy.majorVersion));
     step(writer.WriteU32(manifest.cookedBy.minorVersion));
     step(writer.WriteU32(manifest.cookedBy.patchVersion));
+    step(writer.WriteU32(static_cast<uint32>(manifest.backends.Size())));
+    for (const CookedManifestBackend& backend : manifest.backends) {
+        step(writer.WriteString(backend.name.View()));
+        step(writer.WriteU32(static_cast<uint32>(backend.formats.Size())));
+        for (const String& format : backend.formats) {
+            step(writer.WriteString(format.View()));
+        }
+    }
+
     for (usize index = 0; error == ErrorCode::None && index < manifest.entries.Size(); ++index) {
         const CookedManifestEntry& entry = manifest.entries[index];
         step(writer.WriteGuid(entry.asset.value));
@@ -435,6 +634,17 @@ Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedMani
             step(writer.WriteGuid(dependency.asset.value));
             step(writer.WriteU32(static_cast<uint32>(dependency.kind)));
         }
+    }
+
+    step(writer.WriteU32(static_cast<uint32>(manifest.artifacts.Size())));
+    for (usize index = 0; error == ErrorCode::None && index < manifest.artifacts.Size(); ++index) {
+        const CookedManifestArtifact& artifact = manifest.artifacts[index];
+        step(writer.WriteU8(static_cast<uint8>(artifact.kind)));
+        step(writer.WriteString(artifact.name.View()));
+        step(writer.WriteString(artifact.formatId.View()));
+        step(writer.WriteU64(artifact.bytes));
+        step(writer.WriteRaw(Span<const uint8>(artifact.sha256.bytes, DigestBytes)));
+        step(writer.WriteRaw(Span<const uint8>(artifact.cookKey.bytes, DigestBytes)));
     }
 
     // CRC32 자리를 같이 써 두고 다 쓴 뒤 채운다(AS 10.1절 1 — 앞의 모든 byte).
@@ -540,6 +750,53 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
         }
 
         *part = static_cast<uint16>(value.Value());
+    }
+
+    // backend 표(10.3절 4항): 개수는 상한과 남은 byte로 먼저 묶는다.
+    auto backendCount = in.ReadU32();
+    if (!backendCount || backendCount.Value() > CookedManifestMaxBackends ||
+        backendCount.Value() > in.Remaining() / MinBackendBytes) {
+        return ManifestCorrupt<Out>(failure, Field::BackendCount, CookedManifestNoEntry);
+    }
+
+    if (auto reserved = manifest.backends.TryReserve(backendCount.Value()); !reserved) {
+        return ManifestResource<Out>(failure, reserved.Error());
+    }
+
+    for (uint32 index = 0; index < backendCount.Value(); ++index) {
+        auto name = in.ReadStringView();
+        if (!name) {
+            return ManifestCorrupt<Out>(failure, Field::Backend, index);
+        }
+
+        // backend 수만큼 예약했다(빈 이름·형식 목록 추가는 할당하지 않는다).
+        CookedManifestBackend& backend = *manifest.backends.TryEmplaceBack(allocator).Value();
+        if (auto assigned = backend.name.TryAssign(name.Value()); !assigned) {
+            return ManifestResource<Out>(failure, assigned.Error(), index);
+        }
+
+        auto formats = in.ReadU32();
+        if (!formats || formats.Value() > CookedManifestMaxFormatsPerBackend ||
+            formats.Value() > in.Remaining() / LengthPrefixBytes) {
+            return ManifestCorrupt<Out>(failure, Field::FormatCount, index);
+        }
+
+        if (auto reserved = backend.formats.TryReserve(formats.Value()); !reserved) {
+            return ManifestResource<Out>(failure, reserved.Error(), index);
+        }
+
+        for (uint32 format = 0; format < formats.Value(); ++format) {
+            auto id = in.ReadStringView();
+            if (!id) {
+                return ManifestCorrupt<Out>(failure, Field::ShaderFormat, index);
+            }
+
+            // 형식 수만큼 예약했다.
+            String& slot = *backend.formats.TryEmplaceBack(allocator).Value();
+            if (auto assigned = slot.TryAssign(id.Value()); !assigned) {
+                return ManifestResource<Out>(failure, assigned.Error(), index);
+            }
+        }
     }
 
     if (auto reserved = manifest.entries.TryReserve(count.Value()); !reserved) {
@@ -652,6 +909,60 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
             const uint32 kind = in.ReadU32().Value();
             (void)entry.dependencies.TryPushBack(CookedManifestDependency{
                 AssetId{target}, static_cast<PackageDependencyKind>(kind)});
+        }
+    }
+
+    // artifact 표(10.3절 4항): 개수는 상한과 남은 byte로 먼저 묶는다.
+    auto artifactCount = in.ReadU32();
+    if (!artifactCount || artifactCount.Value() > CookedManifestMaxArtifacts ||
+        artifactCount.Value() > in.Remaining() / MinArtifactBytes) {
+        return ManifestCorrupt<Out>(failure, Field::ArtifactCount, CookedManifestNoEntry);
+    }
+
+    if (auto reserved = manifest.artifacts.TryReserve(artifactCount.Value()); !reserved) {
+        return ManifestResource<Out>(failure, reserved.Error());
+    }
+
+    for (uint32 index = 0; index < artifactCount.Value(); ++index) {
+        // artifact 수만큼 예약했다(빈 이름 추가는 할당하지 않는다).
+        CookedManifestArtifact& artifact = *manifest.artifacts.TryEmplaceBack(allocator).Value();
+        auto kind = in.ReadU8();
+        if (!kind) {
+            return ManifestCorrupt<Out>(failure, Field::ArtifactKind, index);
+        }
+
+        // 모르는 값도 담는다 — 칸 규칙(ValidateCookedManifest)이 ArtifactKind로 거부한다.
+        artifact.kind = static_cast<CookArtifactKind>(kind.Value());
+        auto name = in.ReadStringView();
+        if (!name) {
+            return ManifestCorrupt<Out>(failure, Field::ArtifactName, index);
+        }
+
+        if (auto assigned = artifact.name.TryAssign(name.Value()); !assigned) {
+            return ManifestResource<Out>(failure, assigned.Error(), index);
+        }
+
+        auto format = in.ReadStringView();
+        if (!format) {
+            return ManifestCorrupt<Out>(failure, Field::ArtifactFormat, index);
+        }
+
+        if (auto assigned = artifact.formatId.TryAssign(format.Value()); !assigned) {
+            return ManifestResource<Out>(failure, assigned.Error(), index);
+        }
+
+        auto bytesField = in.ReadU64();
+        if (!bytesField) {
+            return ManifestCorrupt<Out>(failure, Field::ArtifactBytes, index);
+        }
+
+        artifact.bytes = bytesField.Value();
+        if (!readDigest(artifact.sha256)) {
+            return ManifestCorrupt<Out>(failure, Field::ArtifactSha256, index);
+        }
+
+        if (!readDigest(artifact.cookKey)) {
+            return ManifestCorrupt<Out>(failure, Field::ArtifactCookKey, index);
         }
     }
 
@@ -807,6 +1118,47 @@ Result<void> AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
     step(out.TryAppend(StringView(hex, HashChars)));
     step(out.TryAppend(".rpkg"));
     return error == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(error);
+}
+
+Result<void> AppendCookedArtifactPath(StringBuilderBase& out,
+                                      const CookedManifestArtifact& artifact) noexcept {
+    // 10.3절 4항: Shaders/<이름>-<formatId>-<h>.rshl — h = SHA-256 앞 16자. 칸이 경로 조각이라 먼저
+    // 본다(out은 그대로).
+    if (!IsKnownArtifactKind(artifact.kind) || !IsKnownArtifactName(artifact.name.View()) ||
+        !IsValidShaderFormatId(artifact.formatId.View())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    char hex[Sha256Digest::HexBytes + 1];
+    artifact.sha256.ToHex(hex);
+    ErrorCode error = ErrorCode::None;
+    auto step = [&](Result<void> result) noexcept {
+        if (error == ErrorCode::None && !result) {
+            error = result.Error();
+        }
+    };
+    step(out.TryAppend("Shaders/"));
+    step(out.TryAppend(artifact.name.View()));
+    step(out.TryAppendAscii('-'));
+    step(out.TryAppend(artifact.formatId.View()));
+    step(out.TryAppendAscii('-'));
+    step(out.TryAppend(StringView(hex, ArtifactHashChars)));
+    step(out.TryAppend(".rshl"));
+    return error == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(error);
+}
+
+Result<void> CheckCookedArtifactFile(const CookedManifestArtifact& artifact, Span<const uint8> file,
+                                     AssetDiagnostic* failure) noexcept {
+    // 크기를 먼저 본다(CheckCookedPackageFile과 같은 순서 — 길이가 다르면 해시하지 않는다).
+    if (file.Size() != artifact.bytes) {
+        return ManifestCorrupt<void>(failure, Field::ArtifactBytes, CookedManifestNoEntry);
+    }
+
+    if (!SameDigest(Sha256::Hash(file), artifact.sha256)) {
+        return ManifestCorrupt<void>(failure, Field::ArtifactSha256, CookedManifestNoEntry);
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace rocks

@@ -512,18 +512,18 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 10, Actor 3). Primitive가 42(bodySettings 포함 —
+    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). Primitive가 42(bodySettings 포함 —
     // CD2), Shape가 3, Box·Sphere 가 1, Capsule이 2를 더한다.
     const Expected expected[] = {
-        {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 52, true},
-        {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 55, true},
-        {ObjectTypeIdOf<BoxComponent>(), ObjectTypeIdOf<ShapeComponent>(), 56, false},
-        {ObjectTypeIdOf<SphereComponent>(), ObjectTypeIdOf<ShapeComponent>(), 56, false},
-        {ObjectTypeIdOf<CapsuleComponent>(), ObjectTypeIdOf<ShapeComponent>(), 57, false},
-        {ObjectTypeIdOf<TriggerBase>(), ObjectTypeIdOf<Actor>(), 3, true},
-        {ObjectTypeIdOf<TriggerBox>(), ObjectTypeIdOf<TriggerBase>(), 3, false},
-        {ObjectTypeIdOf<TriggerSphere>(), ObjectTypeIdOf<TriggerBase>(), 3, false},
-        {ObjectTypeIdOf<TriggerCapsule>(), ObjectTypeIdOf<TriggerBase>(), 3, false},
+        {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 53, true},
+        {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 56, true},
+        {ObjectTypeIdOf<BoxComponent>(), ObjectTypeIdOf<ShapeComponent>(), 57, false},
+        {ObjectTypeIdOf<SphereComponent>(), ObjectTypeIdOf<ShapeComponent>(), 57, false},
+        {ObjectTypeIdOf<CapsuleComponent>(), ObjectTypeIdOf<ShapeComponent>(), 58, false},
+        {ObjectTypeIdOf<TriggerBase>(), ObjectTypeIdOf<Actor>(), 4, true},
+        {ObjectTypeIdOf<TriggerBox>(), ObjectTypeIdOf<TriggerBase>(), 4, false},
+        {ObjectTypeIdOf<TriggerSphere>(), ObjectTypeIdOf<TriggerBase>(), 4, false},
+        {ObjectTypeIdOf<TriggerCapsule>(), ObjectTypeIdOf<TriggerBase>(), 4, false},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

@@ -97,9 +97,13 @@ public:
         return Note("}");
     }
 
-    Result<void> Field(StringView name) noexcept override {
-        return Note("F:", name);
+    // 유효 플래그에 EditorOnly가 있으면 이름 앞에 "E"를 붙여 적는다(전파 확인 — 에셋 A4e2b).
+    Result<void> Field(StringView name, const FieldSchema& field, uint32 flags) noexcept override {
+        lastField = &field;
+        return Note(HasFlag(flags, FieldFlags::EditorOnly) ? "FE:" : "F:", name);
     }
+
+    const FieldSchema* lastField = nullptr;
 
     Result<void> Value(const FieldValue& value) noexcept override {
         return NoteValue("V:", value);
@@ -397,7 +401,8 @@ constexpr StringView OpaqueVisitHolderName = "OpaqueVisitHolder";
 
 } // namespace
 
-// 접근기 없는 Opaque 필드는 Unsupported다(ExportJson과 같다).
+// 접근기 없는 Opaque 필드는 Unsupported다(ExportJson과 같다). skipFieldsWithoutText면 그 필드를
+// 건너뛰고 끝까지 돈다(에셋 A4e2b bundle 수집).
 TEST(TextVisit_OpaqueIsUnsupported) {
     VisitObjects fixture;
     FieldSchema field;
@@ -417,6 +422,12 @@ TEST(TextVisit_OpaqueIsUnsupported) {
     CHECK(VisitValues(AssignmentTarget::Live(fixture.objects, fixture.access, object), visitor,
                       fixture.options)
               .Error() == ErrorCode::Unsupported);
+    TextCodecOptions skipping = fixture.options;
+    skipping.skipFieldsWithoutText = true;
+    LogVisitor skipped(fixture.system);
+    REQUIRE(VisitValues(AssignmentTarget::Live(fixture.objects, fixture.access, object), skipped,
+                        skipping));
+    CHECK(!Has(skipped.log, "F:blob") && Has(skipped.log, "{\n}\n"));
     REQUIRE(fixture.objects.RequestDestroy(fixture.access, object));
 }
 

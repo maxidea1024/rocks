@@ -31,6 +31,26 @@ internal static partial class MetaTests
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated field flag header compiles: " + compiled.StdOut + compiled.StdErr);
         });
+        // TextMapMergeByKey(AssetSystem 10.3.1절)는 Map 필드의 descriptor flags·스키마 비트 256에 닿고, Map이 아닌 필드는 RMC2202다.
+        suite.Add("Meta.TextMapMergeByKeyReachesMapFields", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(MapPreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
+                "explicit Value(rocks::Allocator& allocator) noexcept : keyed(allocator) {}\n" +
+                "ROCKS_PROPERTY(TextMapMergeByKey) rocks::OrderedMap<rocks::uint32, rocks::int32> keyed;\n};\n}\n");
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement keyed = descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(item => item.GetProperty("name").GetString() == "probe::Value").GetProperty("fields").EnumerateArray()
+                .Single(field => field.GetProperty("name").GetString() == "keyed");
+            Verify.That(keyed.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").SequenceEqual(["TextMapMergeByKey"]),
+                "text map merge by key flag");
+            Verify.Contains("256u", Compact(probe.GeneratedText()), "TextMapMergeByKey bit");
+            ProcessResult compiled = await probe.CompileGeneratedAsync();
+            Verify.Equal(0, compiled.ExitCode, "generated map merge flag header compiles: " + compiled.StdOut + compiled.StdErr);
+        });
+        AddRejectGroup(context, "Meta.TextMapMergeByKeyNeedsMap", [
+            Declaration("ROCKS_PROPERTY(TextMapMergeByKey) rocks::int32 count = 0;")],
+            "RMC2202", "TextMapMergeByKey applies only to map fields");
         AddRejectGroup(context, "Meta.RequiredCannotBeDuplicateTransient", [
             Declaration("ROCKS_PROPERTY(Required, DuplicateTransient) rocks::ObjectRef<Value> next;"),
             Declaration("ROCKS_PROPERTY(Required, NonTryoutDuplicateTransient) rocks::ObjectRef<Value> next;")],

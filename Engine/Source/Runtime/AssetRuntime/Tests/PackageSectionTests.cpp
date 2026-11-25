@@ -125,7 +125,8 @@ Array<uint8> WithSection(Allocator& allocator, const Array<uint8>& file, Package
 
 } // namespace
 
-// Summary(AS 5.2절, 5.7절 1): 스키마 GUID·버전, 필드 수(에디터 4·쿠킹 5), 버전 표의
+// Summary(AS 5.2절, 5.7절 1): 스키마 GUID·버전, 필드 수(에디터 5·쿠킹 6), 클래스 기본값
+// 목록(A5c — 필드 없음·정렬·중복·항목 wire·지문 크기·필드 수), 버전 표의
 // 모양(RecordList· 항목 필드·wire)과 정렬·중복, 엔진 버전 Record(필드·범위·wire)와 compatibleWith
 // 규칙, 프로파일 id(wire·빈 값·4 KiB·UTF-8)·설정 SHA-256(wire·크기)·쿠커 버전(wire). 고장 없는
 // 재구성은 writer byte와 같다.
@@ -143,8 +144,15 @@ TEST(AssetPackage_SummaryFields) {
     for (bool editor : editorValues) {
         const Array<uint8>& file = editor ? base.editor : base.cooked;
         const PackageKind kind = editor ? PackageKind::Editor : PackageKind::Cooked;
+        // 클래스 기본값 목록은 패키지 종류마다 다르다(지문 구성 — A5c).
+        PackageReadOptions plainKind;
+        plainKind.expectedKind = kind;
+        auto own = ReadPackage(allocator, file.View(), plainKind);
+        REQUIRE(own);
+        REQUIRE(own.Value().summary.classDefaults.Size() >= 2);
         SummaryInput input{valid.Value().summary.types.View(), Span<const PackageCustomVersion>(),
                            editor};
+        input.classDefaults = own.Value().summary.classDefaults.View();
         // 고장 없음 = writer byte.
         {
             usize row = 0;
@@ -211,6 +219,7 @@ TEST(AssetPackage_TypeAndCustomVersionAxes) {
         auto summaryWith = [&](Span<const PackageTypeVersion> rows,
                                Span<const PackageCustomVersion> custom) noexcept {
             SummaryInput input{rows, custom, editor};
+            input.classDefaults = valid.Value().summary.classDefaults.View();
             Array<uint8> summary = SummaryBytes(allocator, input, SummaryFault::None);
             return WithSection(allocator, file, PackageSectionKind::Summary, summary.View());
         };

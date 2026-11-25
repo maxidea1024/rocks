@@ -175,8 +175,9 @@ public:
     // 영어 설명을 둔다. 실패하면 만든 것을 Retire한다.
     Result<void> Open(graphics::Device& device, const EngineShaderHost& host) noexcept;
 
-    // 팩 → 집합 순으로 Retire한다(5.5절 종료 4단계). lease가 남지 않았으면 집합 객체도 놓는다(공급자
-    // 저장소를 공급자 모듈 종료 전에 돌려준다 — 9.12절 2항). 열지 않았으면 아무 일도 하지 않는다.
+    // 팩 → 집합 순으로 Retire한다(5.5절 종료 4단계). lease가 남지 않았으면 집합 객체도
+    // 놓는다(공급자 저장소를 공급자 모듈 종료 전에 돌려준다 — 9.12절 2항). 열지 않았으면 아무 일도
+    // 하지 않는다.
     void Retire(graphics::Device& device) noexcept;
 
     bool IsReady() const noexcept {

@@ -66,7 +66,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 - **누락 = 기준(형식 규칙):** 빠진 필드·멤버는 정책이 아니라 형식 규칙으로 허용되며 기준 값을 뜻한다(C++ 타입에서는 지금의 "누락 필드는 생성자 값 유지"와 같다). Required 진단은 기준을 적용한 뒤의 실효 값으로 낸다(빠졌다고 null로 보지 않는다). 레코드 인코딩은 `rejectMissingRequired`를 끄고 한다. 이 규칙은 레코드가 없어도 성립하므로 A0-O의 graph v2가 처음부터 갖는다(A5에서 형식 버전을 다시 올리지 않는다). A0-O는 1단계의 present 판정을 override 집합의 자리로 남기고, 전부 저장(undo·스냅샷·복제)의 override 집합은 그래프 바이트 밖 컨테이너에 두며, 차이 형식인지는 형식 비트가 아니라 호출자 옵션으로 정한다([ObjectFoundations](ObjectFoundations.ko.md) 4절).
 - **마이그레이션:** 빠진 값은 "저장 당시 그 버전의 기본값"이다. 기본값만 바꾸는 것은 버전을 올리지 않는다(전파가 목적이다). 기존 인스턴스에 전파하지 않으려 하거나 필드의 의미(단위·분할)를 바꾸면 버전을 올리고, migrate가 값의 존재 여부를 받아 빠진 값에 옛 기본값(마이그레이션 코드의 상수)을 써 넣는다. struct 멤버의 기본값은 소유 클래스 생성자가 정하므로, struct 멤버의 전파 차단은 소유 클래스 버전을 올려 클래스 migrate가 한다. 엔진은 버전별 옛 레코드를 보관하지 않는다.
 - **참조 기본값과 의존:** C++ 레코드의 강한 참조는 구조적으로 null이다. non-null 참조 기본값(Sparks `Asset(...)`·Soft·Row 초기값, SparksLanguage 3.2·7.2절)은 다음과 함께 허용한다 — 비교는 대상 정체성, 패키지 Dependencies = 저장된 참조 ∪ override하지 않은 값의 레코드 참조이며 로드 대조(AssetSystem 5.2절)도 기준 적용 결과로 한다, World 객체 참조는 거부. 그 전까지 레코드의 참조 기본값(Soft 포함)은 null만 허용하고 위반은 레코드 생성 오류다. 이 의존 수집과 default subobject는 Sparks의 해당 도입 단계(L2)의 선행 조건이다.
-- **지문과 쿠킹:** 레코드 지문은 레코드 byte의 SHA-256이며 대상 구성(editor·cooked)의 EditorOnly 포함 여부와 codec wire 버전을 넣는다. 에셋 너겟 키는 처리기가 읽은 유효 값으로 만들므로 지문을 넣지 않는다(타입 전체 지문은 무관한 필드 변경까지 무효화한다). cookKey 지역 입력에 패키지 export 구체 클래스별 (TypeId, 지문) 정렬 목록을 더하고(base 기본값은 파생 레코드에 이미 들어 있다), 패키지 Summary 타입 표의 클래스 행에 저장 당시 지문을 기록한다. 쿠킹 패키지도 차이 형식이며(UE도 쿠킹 데이터를 기준 차이로 저장한다), 로드 때 지문이 다르면 `UnsupportedVersion`(AssetSystem 5.3절 타입 데이터 축, 다시 쿠킹)이다. 편집기 패키지는 지문이 다르면 "기본값이 바뀐 타입·영향받은 객체"를 진단하고 계속 연다.
+- **지문과 쿠킹:** 레코드 지문은 레코드 byte의 SHA-256이며 대상 구성(editor·cooked)의 EditorOnly 포함 여부와 codec wire 버전을 넣는다. 에셋 너겟 키는 처리기가 읽은 유효 값으로 만들므로 지문을 넣지 않는다(타입 전체 지문은 무관한 필드 변경까지 무효화한다). cookKey 지역 입력에 패키지 export 구체 클래스별 (TypeId, 지문) 정렬 목록을 더하고(base 기본값은 파생 레코드에 이미 들어 있다), 패키지 Summary의 `ClassDefaults` 목록(레코드 있는 export 클래스 행 — A5c)에 저장 당시 지문을 기록한다. 쿠킹 패키지도 차이 형식이며(UE도 쿠킹 데이터를 기준 차이로 저장한다), 로드 때 지문이 다르면 `UnsupportedVersion`(AssetSystem 5.3절 타입 데이터 축, 다시 쿠킹)이다. 편집기 패키지는 지문이 다르면 "기본값이 바뀐 타입·영향받은 객체"를 진단하고 계속 연다.
 - **조회·되돌리기:** 기본값 읽기는 레코드를 경로(PropertyPath)로 해석해 돌려준다. 되돌리기는 단일 값·원소·멤버부터 지원하고 struct·배열 통째 되돌리기는 후속이다(Atomic struct의 되돌리기는 통째이며 A5에서 이 후속과 함께 구현한다 — ReflectionExtensions 3.1절). ReadOnly 필드와 소유 컨테이너(`components` 등)는 되돌리기 대상이 아니다.
 - **reload(SparksLanguage 12.4절):** reload는 새 등록 revision과 새 레코드를 만들고, 같은 revision의 레코드는 바뀌지 않는다. 살아 있는 인스턴스에서 override 집합에 없고 인코딩이 이전 레코드와 같은 값은 새 값으로 바꾼다. override 집합의 값은 유지하고 편집기에 표시한다. 이전 레코드는 reload가 끝날 때까지 보관한다.
 - **기준의 일반화:** 조회 API와 차이 형식은 "기준(base)"을 명시한다. 지금 기준은 클래스 레코드이고, prefab이 생기면 archetype 사슬이 된다(UE도 archetype 기준이다).
@@ -74,6 +74,198 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 - **불변성:** 실행 중 레코드를 바꾸는 경로를 두지 않는다(`GetMutableDefault`·CDO config 로드에 해당하는 것 없음). 프로젝트 설정으로 기본값을 바꾸는 기능이 필요해지면 레코드를 만들 때 합성하는 별도 계층으로 두고 지문은 최종 레코드로 계산한다.
 - **시점:** 처음 필요한 곳은 A5(텍스처 설정의 UnsupportedSetting 판정, 빌드 키의 "기본값 포함")다. A0-O의 graph v2가 누락=기준 규칙과 실효 값 Required 진단을 처음부터 갖고, A5는 레코드·차이 쓰기·override 집합·지문·cookKey·Summary 지문 열을 더한다(A1 Summary, A4 cookKey 산출물을 그때 고친다). A5 전에 만든 패키지·fixture는 A5에서 다시 만든다(하위호환을 두지 않는 방침). Tick 설정(`TickSettings`)은 struct 멤버 단위 비교와 함께 A5에서 리플렉션으로 옮긴다(ReflectionFoundations 결정 21). 표현 방식(override 집합 자료구조, Registry 밖 인코딩 경로, 레코드 경로 해석기)은 A5 구현 명세에서 정한다.
 - **거부한 대안 — UE식 객체 CDO:** WorldOnly 타입의 CDO는 어느 World에도 속하지 않는 장부 밖 객체가 되고, 코드 곳곳에 `IsDefaultObject` 분기가 생긴다. 상주 객체라 메모리·GC root를 차지하고 모듈 재등록 때 교체해야 한다. 가변 CDO는 이후 생성·차이 저장의 기준을 실행 중 바꿔 결정성을 깬다 — UE도 이 때문에 원격 이주에는 불변 기준 객체를 따로 만든다. 생성자 순수성 계약은 두 방식 모두 필요하므로 거부 사유가 아니다.
+
+### 클래스 기본값 구현 명세 — A5a 레코드 (2026-11-23)
+
+'클래스 기본값 결정'이 "A5 구현 명세에서 정한다"고 남긴 표현 방식 가운데 레코드 부분이다(차이 쓰기·override 집합은 A5b, 지문 연결은 A5c — [AssetSystem](AssetSystem/12-Textures/12.7-Stages.ko.md) 12.7절). 근거 조사는 2026-11-23 현재 코드이고, 설계 교차 검증(필수 4 — ObjectRegistry 의존·Soft 검출·수동 함수표 표지·할당 소유)을 반영했다.
+
+**데이터와 자리.**
+- `ClassDefaults`(ObjectRuntime `Object/ClassDefaults.h`, 불변): `editorRecord`(그래프 저장과 같은 wire의 클래스 Record byte — 저장 정책 editor: Transient만 뺀다), `cookedRecord`(저장 정책 cooked: EditorOnly 실효 필드·멤버도 뺀다 — 쿠킹 저장과 같은 `excludedFlags`·`includeFlags`로 다시 인코딩한다), `editorFingerprint`·`cookedFingerprint`. 구성은 저장 정책의 제외 플래그 집합으로 식별한다. 다른 구성(예: 전용 서버 쿠킹의 클라이언트 전용 제외)이 생기면 구성을 더한다.
+- 자리는 `TypeRegistry::Record`(등록 세대 하나)의 지연 슬롯이다. 원자 칸 하나에 상태(없음·게시됨·실패 기억)와 게시 포인터를 함께 담는다. 읽기는 acquire 적재로 잠금 없이 하고, 게시는 release 저장이다. 생성은 TypeRegistry의 생성 전용 잠금(`defaultsGate_` — `gate_`와 다른 잠금, ClassRef 판정이 `gate_`를 잡으므로) 안에서 한 번만 한다. 잠금을 잡은 뒤 상태를 다시 보므로 같은 타입을 두 번 만들지 않는다. `DestroyRecord`가 해제한다. 등록 세대가 바뀌면(재등록·reload) 새 슬롯이라 옛 레코드·실패 기억이 따라오지 않는다.
+- **할당 소유**: 게시하는 `ClassDefaults`와 그 byte 배열, 실패 기억의 진단(필드 경로 포함)은 TypeRegistry allocator로 만든다(게시 시도가 TypeRegistry 안에서 복사한다 — `DestroyRecord`가 같은 allocator로 해제). 그래서 TypeRegistry 계약에 "allocator는 스레드 안전해야 한다(레코드 게시는 생성 스레드 밖에서도 할당한다)"를 더한다. 구현 때 기존 TypeRegistry 생성처(엔진 기본 allocator·시험의 할당 실패 allocator)가 넘기는 allocator를 점검한다. 임시 인스턴스와 작업 버퍼는 호출자 allocator다.
+- `TypeLease`에 접근자를 더한다: `ResolveClassDefaults(builder, user, diagnostic)`(게시된 상태 읽기, 없으면 생성 잠금 안에서 builder를 한 번 불러 게시하거나 실패를 기억 — 잠금은 TypeRegistry가 잡는다)와 `HasGeneratedFieldCodecs()`(base 사슬 표지 판정). 레코드 수명은 lease가 쥔 등록 레코드 수명이다(lease 밖으로 byte를 넘기지 않는다).
+- 만드는 쪽은 인코딩 본문이 있는 ObjectSerialization이다: `AcquireClassDefaults(const TypeLease& lease, Allocator& scratch, ClassDefaultsDiagnostic* diagnostic = nullptr) → Result<const ClassDefaults*>`. ObjectRegistry를 받지 않는다 — 레코드는 TypeRegistry 등록 세대에 속하므로 특정 ObjectRegistry의 상태(소유 스레드·GC 처리 중·종료)에 성패가 걸리면 안 된다. 그래서 어느 스레드에서나 부를 수 있다.
+  - ClassRef 기본값(값은 TypeId — 생성자가 non-null을 넣을 수 있다)은 복원 1단계처럼 `TypeRegistry::Acquire`로 판정한다(잠금 보호).
+  - Name은 C++ 생성자가 풀에 닿을 수 없어 None만 만든다. 문맥의 Name 풀은 없고, None이 아닌 Name이 나오면 결정적 codec 위반이다.
+  - BulkDataRef(AssetRuntime)는 생성자가 bulk id를 만들 수 없어 구조적으로 비어 있다(저장의 bulk 재번호 hook과 엇갈리지 않는다).
+
+**레코드가 없는 타입**(Unsupported — 기억한다, 호출자는 전부 저장):
+- 추상(`construct` 없음), `completeFieldLayout` 거짓.
+- 생성 코덱 표지가 없는 타입(`ManualFields`). MetaCompiler가 생성 함수표에 `ops.generatedFieldCodecs = true`를 한 줄 더 낸다. 표지는 모든 필드 thunk가 생성 코드(`EncodeGeneratedField`·`EncodeBitfieldField`)라는 뜻이고, base 사슬의 모든 등록 레코드에 표지가 있어야 한다(생성 클래스가 손 함수표 base를 상속하면 base 필드가 원본 모드를 모른다). 손으로 쓴 함수표는 encode가 원본 모드를 모르므로 표지가 없고, 레코드 없이 전부 저장한다.
+- Sparks 등록 타입은 지금 손 함수표로 등록되어 표지가 없으므로 같은 규칙으로 레코드가 없다. 초기값 합성(위 결정)은 Sparks L2 단계에서 그 등록이 표지와 합성 경로를 함께 가져온다.
+
+**Registry 밖 인코딩 경로**:
+- 필드 encode thunk 서명의 Registry 인자를 `ObjectRegistry*`로 바꾼다(원본 모드에는 Registry가 없다 — 가짜 Registry를 넘기지 않는다. 생성 코드의 thunk 람다 한 줄과 손 함수표·시험 thunk가 바뀐다, 그 밖에는 null이 아니다). `FieldEncodeContext`에 원본 모드를 더한다: 가상 `RawSource() → const Object*`(기본 null). 생성 class 필드 thunk(`EncodeGeneratedField` — 컨테이너·Optional·Map·InstancedStruct·정적 배열·struct·Text 모두)와 bitfield thunk(`EncodeBitfieldField`)는 `RawSource()`가 있으면 Registry `Resolve`·staged 대신 그 객체에서 멤버를 읽는다. 선례는 같은 두 함수의 staged 분기다. 그 뒤는 같은 `EncodeMemberValue`라 byte가 같다. struct 멤버 thunk는 원래 `const void*`를 받는다. 수동 함수표 경로(`EncodeThroughFieldValue`)는 원본 모드에서 Unsupported다(표지 판정이 먼저 막지만 방어로 둔다 — 실제로 나오면 다른 codec Unsupported와 구별되지 않아 `EncodeFailed`다).
+- 객체 하나의 필드 루프(필드 범위·제외 판정·ops 찾기·encode·wire 재확인·`RecordBuilder::AddField` — 지금 `SaveNodeFields` 375–400행)를 공용 함수로 꺼낸다. pin·`BeginObject`·budget·위치 rebase·파일 byte 누계는 그래프 저장이 그 앞뒤에서 한다. 필드마다 그래프 저장만 하는 일이 있으면 그 지점을 콜백 인자로 둔다(구현 때 확정). `ValidateLayout`은 레코드도 먼저 부른다.
+- 레코드 문맥 `ClassDefaultsEncodeContext`(ObjectSerialization 내부):
+  - 강한 참조 null은 그래프 저장과 같은 `U32 0`이다. non-null 강한·weak 참조는 실패한다(이유 `NonNullReference` + 필드 경로).
+  - Soft 참조는 hook을 거쳐서만 문맥에 닿으므로(비가상 `SubstituteSoftReference`·`CollectSoftReference`) 레코드 전용 내부 hook을 둔다: `CollectSoftReference`는 경로를 담아 `NonNullReference`로 실패, `SubstituteStruct`·`SubstituteSoftReference`는 값 그대로, `Report`는 진단을 모은다(치환 없음, 수집은 거부용).
+  - 한도는 그래프 저장 기본 한도(`ObjectGraphLimits{}`)다. 객체 하나의 Record는 그래프 전체 한도 안에 들므로, 같은 객체를 저장할 수 있으면 레코드도 한도에 걸리지 않는다(결정적 CapacityExceeded로 기억되어 저장 가능한 타입이 막히는 일이 없다).
+  - Required 검사는 끈다(`rejectMissingRequired` 거짓 — 결정의 레코드 인코딩 규칙).
+
+**만드는 순서**(생성 잠금 안):
+1. 슬롯 상태를 다시 본다(게시됨이면 그것, 실패 기억이면 그 오류·진단).
+2. 레코드가 없는 타입 판정.
+3. 임시 인스턴스 둘을 동시에 산 채로 만든다(주소에 기대는 값이 저장소 재사용으로 가려지지 않게): `ops.size`·`ops.alignment`로 받은 저장소마다 `ops.construct(memory, scratch)`. 소멸은 `ops.destroy(object)` 뒤 **저장소 시작 주소**를 반환한다(construct가 준 `Object*`는 vfptr 등으로 저장소 시작과 다를 수 있다). handle이 없는 객체라 생성자에서 Registry API를 쓸 수 없다(Create도 construct 뒤에 Registry를 세운다 — 생성자 순수성 계약과 같다). 생성자는 생성 잠금 안에서 돌므로 순수성 계약에 "잠금을 잡지 않고 레코드 생성을 다시 부르지 않는다"를 더한다. 아직 게시되지 않은 타입을 같은 스레드가 builder 안에서 다시 부르면 Fatal이다(모든 구성 — 게시된 타입은 잠금 없는 빠른 경로로 바로 돌아간다).
+4. 두 인스턴스의 editor 인코딩을 byte 비교한다. 다르면 이유 `NonDeterministic`(첫 다른 필드 id)이다.
+5. 첫 인스턴스를 cooked 정책으로 한 번 더 인코딩한다.
+6. 지문: `SHA-256("RocksClassDefaults" ‖ 구성 byte ‖ ObjectGraphFormatVersion(u32 LE) ‖ 레코드 byte)`. `ObjectGraphFormatVersion`은 그래프 형식 버전(지금 `graph_detail::FormatVersion` = 2 — 공개 상수로 올린다)이고 결정의 "codec wire 버전"이 이것이다. Record 머리에 schema id·version이 있으므로 타입 버전이 오르면 지문도 바뀐다(의도 — 쿠킹 패키지가 다시 쿠킹된다). 구성 byte 표: 0 = editor(제외 {Transient}), 1 = cooked(제외 {Transient, EditorOnly}). 구성이 늘면 다음 번호를 주고 번호를 다시 쓰지 않는다.
+7. 게시. 기억하는 실패는 결정적 이유뿐이다: 레코드 없는 타입(셋), `NonDeterministic`, `NonNullReference`, 결정적 codec 위반(InvalidArgument·TypeMismatch 등 입력이 같으면 늘 같은 오류). OutOfMemory·Busy·ShuttingDown·NotFound(ClassRef 대상이 아직 등록 전)·접근 오류는 기억하지 않는다(다음 호출이 다시 만든다). ClassRef 대상만 재등록되어 "base 파생 아님"으로 기억한 실패가 이 타입 세대에 남는 경우는 C++ 타입이 재등록되지 않아 지금 없다 — Sparks L2(reload)에서 다시 본다.
+
+**경로 조회**: `FindDefaultPayload(lease, const ClassDefaults&, const PropertyPathBuffer& path, ClassDefaultsConfiguration, Allocator& scratch) → Result<DefaultPayload{wire, bytes}>`. path는 그 타입 스키마로 해석한 것이다(`ParsePropertyPath`). 필드 → (비Atomic struct면) 멤버 사슬까지 Record를 따라 내려가 그 값의 wire와 payload byte를 준다. 정적 배열 원소는 구현 때 Unsupported로 정했다(ValueArray reader가 원소 byte 구간을 주지 않는다 — 되돌리기는 정적 배열 필드 통째로 한다). Atomic struct는 그 struct 경로까지만이다(멤버 경로는 InvalidArgument). 동적 배열 원소·Map 키·Set·Optional 안쪽도 Unsupported다(기준이 없다 — 결정의 원소 단위 차이 후속). cooked로 조회한 EditorOnly 경로와 레코드에 없는 경로는 NotFound다. 쓰는 곳: A5b 되돌리기(payload를 그 경로에 decode), A5d 계약 설정 판정(필드 payload byte 비교). 값으로 푸는 텍스트 조회는 ReflectionText 쪽 후속이다.
+
+**전부 만들기**: `ForEachClassDefaults(TypeRegistry&, Allocator& scratch, callback)` — 등록 목록의 TypeId를 `gate_` 아래에서 복사한 뒤(어느 스레드에서나) 하나씩 Acquire해 lease를 쥐고, 등록된 구체 클래스(추상은 뺀다)의 레코드를 만들어 (TypeId, 지문 둘 또는 실패 진단)을 넘긴다. 쿠킹 시작과 CI 시험이 쓴다(결정의 "실패를 미리 드러낸다"). Windows·macOS 지문 대조는 이 목록의 golden 덤프 시험이다(A5c).
+
+**진단** `ClassDefaultsDiagnostic{reason, error, type, fieldPath}`(fieldPath는 고정 크기 `PathStep` 배열 — 할당 없이 복사·기억한다, 텍스트는 `FormatPropertyPath`) — reason: `None`·`Abstract`·`IncompleteLayout`·`ManualFields`·`NonDeterministic`·`NonNullReference`·`EncodeFailed`(그 밖의 codec 오류 — 오류 코드 보존). 오류 코드는 Unsupported(앞 셋)·InvalidArgument(NonDeterministic·NonNullReference)·codec 오류 그대로·OutOfMemory. 실패를 기억하면 진단(경로 포함)도 함께 기억해 두 번째 호출이 같은 진단을 낸다.
+
+**버린 대안**: 레코드를 살아 있는 객체로 두기(결정의 거부 대안), 별도 raw thunk 칸(생성 코드가 커지고 같은 본문을 두 경로가 부른다 — 문맥 모드 + 표지 한 줄로 충분하다), 레코드를 ObjectRegistry마다 두기·ObjectRegistry로 만들기(레코드는 타입 등록 세대에 속한다 — Registry 상태에 성패가 걸리고 일시 오류가 기억된다), CAS 경쟁 게시(진 쪽이 헛일을 하고 TypeRegistry allocator 사용이 두 배다 — 생성 잠금으로 한 번만), cooked 레코드를 editor 레코드에서 걸러 만들기(struct 안 EditorOnly 실효 멤버는 다시 인코딩해야 정확하다).
+
+**시험(A5a)**:
+- 같음: 기본값 fixture 클래스(정수·float·문자열·enum·struct(비Atomic·Atomic)·배열·Set·Map·Optional·정적 배열·Text·InstancedStruct(빈·비어 있지 않은)·Name None·ClassRef(null·non-null)·null 강한 참조(필드·struct·컨테이너 안)·EditorOnly 필드·EditorOnly 전파(struct 필드 플래그·EditorOnly struct 타입)·Transient·bitfield·상속 필드·가상 함수가 있는 클래스)의 editor 레코드 = 같은 객체의 editor 그래프 저장 Record, cooked 레코드 = cooked 그래프 저장 Record.
+- 지문: 값 고정(같은 입력 같은 값, 구성마다 다름, 타입 버전이 오르면 다름).
+- 레코드 없는 타입 셋(손 함수표는 `EncodeThroughFieldValue`가 아닌 직접 만든 encode 포함)과 기억.
+- 비결정 생성자 NonDeterministic 기억, non-null Soft(필드·struct·배열·Map·Optional·InstancedStruct 안 — 경로) NonNullReference 기억, 두 번째 호출 진단 같음.
+- 할당 실패 모든 지점 OutOfMemory·기억 안 함·다시 성공(TypeRegistry allocator·scratch 둘 다).
+- ClassRef 대상 미등록 NotFound 기억 안 함 → 등록 뒤 성공.
+- 스레드: 다른 스레드가 만든 레코드를 이 스레드가 받음(builder 한 번, 같은 레코드). 생성 잠금 경쟁 자체는 sleep 없이 결정적으로 만들 수 없어(잠금 대기를 관찰할 수 없다) 잠금 뒤 다시 보기는 코드 검토로 확인한다. 같은 스레드 재진입 Fatal은 프로세스를 끝내 시험하지 않는다.
+- ObjectRegistry 독립: ObjectRegistry 둘(같은 TypeRegistry)에서 저장 비교 기준이 같은 byte.
+- 재등록 뒤 새 슬롯.
+- 경로 조회: 필드·struct 멤버·두 단계 멤버·Atomic struct 통째·Atomic 멤버 InvalidArgument·정적 배열 원소 Unsupported·cooked의 EditorOnly 필드·멤버 NotFound·빈 경로.
+- `ForEachClassDefaults` 목록(추상 제외·실패 진단 포함).
+
+### 클래스 기본값 구현 명세 — A5b 차이 쓰기·override 집합 (2026-11-23)
+
+'클래스 기본값 결정'의 override 판정·같음·struct·배열·차이 저장 범위를 그래프 저장·패키지 저장·편집기 패키지 집합에 구현한다. 설계 교차 검증(필수 2 — weak 지연 자리값의 생략, 텍스트 되돌리기의 NaN)을 반영했다. A5b1(차이 쓰기·override 집합·차이 형식 로드의 present 기록)과 A5b2(기본값으로 되돌리기 `--reset=`)로 나눈다. 레코드는 A5a다.
+
+**차이 형식은 호출자 옵션이다**(결정 — 형식 비트 없음):
+- `ObjectGraphSaveOptions::baseline`(`None`·`Editor`·`Cooked`, 기본 `None` = 전부 저장)과 `overrides`(아래 `GraphOverrides*`, null = 집합 없음). Editor는 `policy.excludedFlags`에 EditorOnly가 없어야 하고 Cooked는 있어야 한다. `policy.includeFlags`는 0이어야 한다(SaveGame 등 포함 필터 저장은 차이 형식이 아니다). 어기면 InvalidArgument다. 그 밖의 제외 플래그(에셋 복제의 DuplicateTransient)는 그대로 둔다 — 제외한 필드는 쓰지 않으므로 로드가 기준(생성자 값)을 둔다. 이는 "복제본은 기본값"이라는 그 플래그의 뜻과 같다.
+- 노드마다 그 구체 클래스의 레코드를 `AcquireClassDefaults`로 얻는다. 레코드가 없는 타입(Abstract는 노드가 될 수 없고, IncompleteLayout·ManualFields)은 그 노드를 전부 저장한다. 그 밖의 레코드 실패(NonDeterministic·NonNullReference·codec 오류·할당)는 저장 실패다(결정: 레코드 생성 실패를 전부 저장으로 대체하지 않는다).
+- 쓰는 곳: PackageWriter가 에디터 패키지는 `Editor`, 쿠킹 패키지는 `Cooked`로 쓴다(결정: 쿠킹 패키지도 차이 형식). 쿠킹은 override 집합을 주지 않는다 — 런타임은 같은 빌드의 레코드를 기준으로 읽으므로 기준과 같은 값은 빠져도 같은 값이 된다. 기본값이 바뀌면 지문이 cookKey에 들어가 다시 쿠킹된다(A5c). 그래프 직접 저장(세이브게임·시험·Rockpile 등)은 기본 `None`이다.
+
+**비교와 생략**(저장할 값 = override 집합 ∪ 기준과 인코딩이 다른 값):
+- 최상위 필드: 지금처럼 필드 writer에 인코딩한 뒤 레코드의 같은 필드 payload와 (wire, byte)를 비교한다. 같고 그 필드가 override 단위가 아니면 Record에 더하지 않는다. 레코드에 그 필드가 없으면(그 구성에서 제외된 필드) 그 필드는 원래 쓰지 않는다.
+- 비Atomic 단일 struct 필드·멤버(값 종류 Struct이고 원소 index가 없는 위치)는 멤버 단위다. `EncodeStructRecord`의 멤버 루프가 문맥의 기준 사슬(아래)에 그 struct의 기준 Record가 있으면 멤버마다 인코딩한 뒤 기준 멤버 payload와 비교한다. 같고 그 멤버 경로가 override 단위가 아니면 `RecordWriter::CancelField`로 그 TLV를 걷어 낸다. 저장할 멤버가 하나도 없으면 그 struct 값 자체를 생략한다(최상위면 필드를 더하지 않고, 멤버면 그 멤버를 걷어 낸다 — 결정: 저장 대상 멤버가 하나라도 있을 때만 struct Record를 쓴다).
+- Atomic struct·배열(Array·정적 배열)·Set·Map·Optional·InstancedStruct·bitfield는 그 위치 통째로 비교한다(결정: 배열 통째, 원소 struct는 기준이 없어 모든 멤버를 쓴다). 정적 배열은 UE 5.8과 다르다(아래 대조): Rocks 정적 배열 wire는 늘 N개인 값 하나(ValueArray·RecordList — 리플렉션 B9g)라 원소 단위 생략에는 희소 wire 형식이 필요하다. 그래서 형식을 바꾸지 않고 통째로 둔다. 대가는 원소 하나만 달라도 N개 모두 저장되어 나머지 원소가 이후 기본값 변경을 따라가지 않는 것이다(한계 — 희소 형식은 요구가 생기면 형식 개정으로).
+- 같음은 wire byte 비교다. 참조는 기준이 늘 null(U32 0)이므로(A5a) non-null 참조 값은 언제나 다르다 — 결정의 "참조는 대상 정체성 비교"가 byte 비교로 충족된다(기준에 non-null 참조가 생기는 Sparks L2에서 정체성 비교를 더한다). struct 치환 hook(`SubstituteStruct` — 패키지 저장의 BulkDataRef 재번호)이 있는 값은 치환된 값의 byte로 비교한다. 기준 레코드에 없는 멤버(그 구성에서 제외 — cooked의 EditorOnly)는 원래 쓰지 않는다.
+- **생략 조건 — 위치·지연 항목**(교차 검증 필수 1): 그 값(필드·멤버)을 인코딩하는 동안 외부 참조 위치 수(`PositionCount`)나 weak 지연 항목 수(`WeakDeferralCount`)가 늘었으면 byte가 기준과 같아도 생략하지 않는다. Include 정책의 집합 밖 weak 대상은 자리값 `U32 0`을 쓰고 모든 노드 뒤에 최종 local ID로 덮어쓰므로(`DeferWeak`·`ResolveWeakDeferrals`) byte만으로는 null과 구별되지 않는다. 그 밖에는 기준과 같은 byte에 non-null 참조가 없으므로(외부 참조 값은 0이 아닌 slot, local ID는 1부터) 생략한 byte에 위치가 없고, 걷어 내기가 그 TLV를 쓴 직후라 뒤 값의 위치도 옮길 일이 없다.
+- **생략 전에 이미 일어난 부작용**: Admit hook 질의, Null 수용·저장 불가 대상의 ExternalReference 진단, `CheckRequired`(Required null 진단·거부), Include가 강한 참조로 더한 노드. 노드가 더해진 값은 local ID(0 아님)라 생략되지 않는다. 그 밖의 경우는 쓴 값이 null이라 생략해도 로드 결과(기준 null)가 같으므로 진단은 그대로 둔다.
+- **기준 사슬**: 그래프 저장 문맥(`GraphEncodeContext`)이 (프레임, 기준 Record reader) 쌍의 스택을 둔다. `EncodeObjectFields`는 비Atomic 단일 struct 필드를 인코딩하기 전에 레코드의 그 필드 payload를 열어 쌓고, `EncodeStructRecord`는 스택 위 프레임이 지금 위치(`Current()` — 원소 index 없음)일 때만 차이 모드로 돈다. 원소 struct(Array·Map 값·Optional 안·InstancedStruct 내용)는 같은 프레임에 index가 서거나 다른 프레임이라 기준이 없다(전부 쓴다). 중첩 비Atomic struct 멤버도 같은 방식으로 쌓는다.
+
+**override 집합**:
+- 단위(결정): 값 경로의 끝이다 — 최상위 단일 값·배열 계열 필드, 비Atomic struct는 멤버 끝까지 내려간 경로, Atomic struct는 그 struct 경로다. 원소·key 단계는 단위가 아니다(배열·Map 필드가 단위다). 경로 정규화 `AddOverrideUnits(lease, path, set)`(ObjectRuntime)는 path를 첫 원소·key 단계 앞에서, 처음 만나는 Atomic struct 경로에서, 그리고 단일 struct가 아닌 칸(InstancedStruct 내용·Optional 안 — 뒤 단계가 그 안쪽) 뒤에서 자른다(그 필드가 단위 — 원소·key와 같은 규칙, 코드 리뷰 필수 2). 자른 끝이 비Atomic struct면 그 아래 모든 잎 멤버 경로로 펼친다(struct 통째 쓰기는 멤버마다 기록 — 결정: struct 필드 자체는 단위가 아니다).
+- 자료: `OverrideSet`(ObjectRuntime, 객체 하나 — 단위 경로들을 (FieldId 사슬) byte 순으로 정렬해 담는 작은 배열, 경로 하나는 최대 `MaxPropertyPathSteps` 단계)과 그래프 저장이 묻는 인터페이스 `GraphOverrides { const OverrideSet* Find(ObjectHandle) }`.
+- 편집기 패키지 집합(`EditorPackageSet`)이 열린 객체마다 집합을 가진다(handle → `OverrideSet`, 열린 패키지 수명 — Close·Discard가 지운다). 런타임(World·게임 저장)에는 집합이 없다(결정: 차이 저장은 패키지 저장에만).
+- 기록하는 곳:
+  - 경로 쓰기 — `AssetService::Set`(asset-set)의 대입마다 정규화해 더한다. 단위 계산(대입 경로를 스키마로 해석 — 첫 `[` 앞까지, 해석이 실패하면 마지막 `.` 구간을 떼어 다시)과 집합 자리 예약(`ReserveOverrides`)은 값 게시 전에 하고, 게시 뒤에는 할당 없는 합치기(`MergeOverrides`)만 한다(게시 뒤 실패로 값만 바뀐 채 남지 않게 — 코드 리뷰 필수 2). asset-new는 초기화기가 공개 전에 계산하고 `Create`가 공개 전에 설치한다(`EditorAssetInitializer::InitialOverrides`). `--unset=`(Optional)·`--erase=`(원소)는 그 필드 단위다.
+  - 새 객체 `asset-new`의 초기 대입, 임포트·재임포트(묶음 포함)의 설정 대입(`StageImport`의 설정 — 사용자 `--<경로>=`)도 같다.
+  - 이동·삭제가 다른 패키지의 참조 필드를 고쳐 쓰는 경로는 기록하지 않는다(참조는 늘 기준 null과 다르고, null로 고치면 기준과 같아 생략되어도 로드 값이 같다).
+  - 차이 형식 로드 — 파일에 있는 값 경로가 집합이다(결정). 그래프 복원 1단계의 `MarkPresent`가 hook `FieldCodecHooks::NotePresent(info{objectIndex, path})`를 부른다(지금 문맥의 빈 자리를 hook으로 연다). `EditorPackageSet`은 그 경로를 단위로 정규화해 모았다가 로드가 성공(2단계 게시)한 뒤에만 객체 index → handle로 옮긴다(실패하면 버린다). 비Atomic struct의 struct 자체 present는 버리고 잎 멤버만 담는다. Atomic struct는 struct 경로만 담는다. 스키마에 없는 필드(UnknownField)·정규화할 수 없는 경로는 오류가 아니라 무시한다. 원소·key 단계가 있는 경로(컨테이너 안 struct의 멤버)는 hook이 담지 않는다(그 필드 자체의 present가 따로 오고 단위는 그 필드다 — 원소 수만큼 쌓이지 않게, 코드 리뷰 필수 3). 복원은 hook이 present를 받을 때만(`FieldCodecHooks::WantsPresent`) 경로를 만든다(런타임 로드 비용 없음). 마이그레이션 타입은 옛 필드 id의 present가 들어오므로 지금 스키마로 정규화되지 않는 것은 버린다 — migrate가 쓴 값은 기준과 다르면 다음 저장에 쓰여 그 다음 로드에서 present가 된다.
+  - 결과: 기록하지 않은 쓰기(C++ 직접 쓰기·임포트 출력)도 기준과 달라 한 번 저장된 값은 다시 로드하면 present라 집합이 된다(결정의 "파일에 있는 값 = 집합" 그대로 — 그 값은 이후 기본값 변경을 따라가지 않는다. 임포트 출력은 재임포트가 매번 다시 쓰므로 실제 영향은 없다).
+  - 복제(`EditorPackageSet::Duplicate`)·ID 수정 사본은 원본 집합을 그대로 쓴다(사본은 패키지 저장이다 — 차이 형식).
+  - 임포트 출력(임포터가 쓴 값)은 집합에 기록하지 않는다. 임포트가 정하는 필드는 매번 모두 쓰고(A2f 계약), 기준과 같으면 생략되어 기준 변경을 따라간다. 사용자 설정 대입(`--<경로>=`)은 기록한다.
+- 저장: `EditorPackageSet::Save`가 PackageWriter에 집합 조회를 넘긴다(`PackageWriteOptions::overrides`). 저장은 집합을 바꾸지 않는다(저장 실패의 되돌리기에도 그대로).
+- 수명: Close·Discard가 그 패키지 객체의 집합을 지운다. Duplicate·FixDuplicateId의 사본은 열지 않고 원본 객체(같은 handle)의 메모리 상태를 새 id로 쓰므로 원본 handle의 집합을 그대로 조회한다.
+- `RecordWriter::CancelField`: 마지막으로 끝낸 TLV 하나만 취소할 수 있다(그 뒤에 쓴 것이 없어야 한다 — 아니면 InvalidArgument). writer를 그 TLV 시작으로 자르고 필드 수를 되돌린다. 쓴 작업량은 환급하지 않는다. `ArchiveWriter::Truncate(byteCount)`를 같이 둔다(지금 크기 이하로만).
+
+**A5b2 되돌리기**:
+- 명령 `asset-set <target> --reset=<경로>`와 `AssetService::Set`의 대입 종류 Reset이다.
+- 그 경로 값을 기준 값으로 쓴 뒤(이 쓰기는 기록하지 않는다) 집합에서 그 단위(펼친 잎 포함)를 지운다(결정).
+- 값 쓰기(교차 검증 필수 2): 레코드의 그 경로 payload(`FindDefaultPayload` — 필드·비Atomic 멤버 사슬·Atomic 통째)를 그 경로에 **binary로 decode**해 게시한다. 텍스트(ReflectionText)를 거치지 않는다 — 텍스트는 NaN을 부호·payload 없이 `nan` 하나로 써서 기준과 byte가 달라지고(결정의 같음은 NaN payload까지), 임시 객체를 편집기 Registry에 만들면 생성 규칙·관찰자·GC 부작용이 생긴다. 경로 쓰기의 검증·진단(ReadOnly·타입·Required 실효 값)은 그 decode 위에 그대로 둔다. decode를 경로 쓰기에 잇는 API는 아래 "A5b2 decode 명세"다.
+- 단위: 단일 값·멤버·Atomic struct·배열 계열 필드 통째(필드 payload)다. 원소·key 경로는 기준이 없어 Unsupported다(A5a 경로 조회와 같다). 비Atomic struct 통째 되돌리기는 그 struct 필드 payload(레코드는 모든 멤버를 담는다)로 된다.
+- Sparks 타입(초기값 덮기)도 레코드가 생기는 L2에서 같은 payload 경로를 쓴다.
+- ReadOnly 필드와 소유 컨테이너는 거부한다(결정).
+
+**A5b2 decode 명세**(2026-11-24 — 착수 전, 교차 검증 필수 4 반영: 문맥 모드·Optional·Map API·사전 단계·묶음 순서):
+- API(ObjectSerialization `ClassDefaults.h`): `RevertToDefault(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle object, const PropertyPathBuffer& path, Allocator& scratch, PropertyPathFailure* failure = nullptr, ClassDefaultsDiagnostic* diagnostic = nullptr) → Result<void>`과 그 두 단계 `PlanRevert(registry, access, object, path, scratch, RevertPlan& out, diagnostic) → Result<void>`(사전 단계 — 실패하면 out 연산 목록은 빈다)·`ApplyRevert(registry, access, const RevertPlan&, failure)`. `RevertPlan`은 대상 handle과 `RevertOperation`(kind Write·ResetOptional·EmplaceOptional·ClearInstanced, 필드 단계 배열 — 원소·key 없음이라 7 KB `PropertyPathBuffer` 대신 단계만, FieldValue) 목록이다(2026-11-24 구현 때 확정 — out 인자는 계획을 묶음 동안 재사용하려고). path는 그 객체 타입 스키마로 해석한 단위 경로다(원소·key 단계가 있으면 Unsupported — A5a 경로 조회와 같다). 객체 타입 lease로 `AcquireClassDefaults`(Editor 구성) → `FindDefaultPayload`로 (wire, payload)를 얻는다.
+- 값 해석 문맥(`RevertDecodeContext` — FieldDecodeContext): 한 번에 해석한다. 기록하지 않는 단계의 기본 동작(1단계가 남긴 기록을 꺼내기 — `TakeClassReference`·`TakeName`)을 재정의해 ClassRef는 대상 TypeRegistry `Acquire` + `CheckClassReferenceLease`로 판정하고, Name은 대상 Registry 풀에 intern한다. hook 없음, 한도는 그래프 기본 한도. 그 위치의 FieldScope(lease의 FieldEnum·FieldStruct·FieldKeyEnum)를 세우고 `ParseFieldValue(FieldView{id, wire, payload})`로 FieldValue를 만든다 — float·double은 비트 그대로다(NaN payload·-0.0, 텍스트 왕복 없음). Text는 FieldValue text 칸(`MakeParsedText`), 참조는 기준이 늘 null이라 null 값이다.
+- 재생 규칙(값 종류별 — 경로 쓰기 API):
+  - 단일 값(bool·정수·실수·enum·String·Text·Name·Guid·AssetId·Digest·Soft·ClassRef·강한·weak 참조)·bitfield(최상위·struct 멤버)·**Optional 단일 값**(FieldValue present = set 여부 — false면 unset): `PathWrite(path, value)`.
+  - 단일 struct(Atomic·비Atomic): payload Record의 스키마 멤버마다 path + 멤버 단계로 재생한다(Editor 레코드는 모든 멤버를 담는다).
+  - Optional<값 struct>: 기준 unset이면 `PathResetOptional`, set이면 `PathEmplaceOptional` 뒤 안쪽 멤버 경로로 재생.
+  - 배열(Array): `PathClear` 뒤 원소 순서대로 — 단일 값 원소는 해석한 값으로 `PathInsertElement`(끝 index), struct 원소는 값 없이 `PathInsertElement`로 기본 원소를 넣고 index 멤버 경로로 재생.
+  - 정적 배열: 원소마다 index 경로로 재생(크기 고정 — 삽입·삭제 없음).
+  - Set: `PathClear` 뒤 원소마다 `PathInsertKey`.
+  - Map 단일 값: `PathClear` 뒤 항목마다 key 단계 경로에 `PathWrite`(없으면 끝에 넣는다 — key는 wire 정규형으로 PathKey). Map<K, 값 struct>: `PathInsertKey`로 기본 값을 넣은 뒤 `m[k].member`로 재생.
+  - InstancedStruct: 기준은 늘 빈 값(A5a)이라 `PathClearInstanced`.
+  - C++ 생성자가 만든 컨테이너는 거의 비어 있어 대개 `PathClear` 하나다.
+- 텍스트 대입 종류: `reflection_text::AssignmentKind::Reset`을 더한다. 텍스트 묶음(`PrepareAssignments`·`Append`)은 Reset을 처리하지 않고 호출 오류 InvalidArgument(진단 없음)로 거부한다 — `AssetService::Set`만 떼어 binary 재생한다(asset-new·임포트 설정은 Reset을 받지 않는다 — 명령도 asset-set만 `--reset=`). 지울 override는 Reset 경로(필드 단계만)로 시작하는 단위 전부다(`EditorPackageSet::RemoveOverridesUnder` — 비Atomic struct 통째면 옛 스키마의 잎까지, 할당 없음). 겹침 검사는 Reset 경로 집합과 대입 단위 집합의 접두 비교다(`UnitsOverlap`).
+- **1차 구현 범위**(2026-11-24 착수 때 결정 — 위 표의 일부): 단일 값·bitfield·Optional 단일 값·단일 struct(멤버 재귀)·Optional<값 struct>·InstancedStruct를 재생한다. 배열·Set·Map·정적 배열과 그것을 품은 struct 경로는 Unsupported다(사전 단계가 거부 — 아무것도 쓰지 않는다). 근거: 컨테이너 기준을 재생하려면 원소 wire별 해석(ValueArray·RecordList·Map·Set reader와 원소 종류별 wire)과 key 경로 조립이 필요해 범위가 크고, C++ 생성자가 채운 컨테이너는 드물다. 컨테이너 재생(위 표의 배열·Set·Map·정적 배열 규칙)은 CU4 Undo·편집기 되돌리기 UI와 함께 후속이다. 그 전까지 컨테이너 필드는 `--erase=`·텍스트 대입으로 비우거나 다시 쓴다.
+- 사전 단계(`PlanRevert` — 어떤 쓰기보다 먼저): 위 규칙대로 재생할 연산 목록(경로·FieldValue·연산 종류)을 모두 만들고 검사한다 — 모든 경로가 해석되는지, 유효 플래그(`PropagateFieldFlags` 누적)에 ReadOnly가 있는 위치가 하나라도 있으면 되돌리기 전체를 Unsupported(ReadOnly)로 거부한다(struct 안 ReadOnly 멤버 포함 — 결정의 ReadOnly 거부), 배열 원소 수가 MaxElements 안인지. 그래서 적용 단계에 남는 실패는 할당·Busy·종료(자원·상태)뿐이다.
+- 원자성: 적용은 여러 경로 쓰기라 남는 실패(할당 등)가 중간에 나면 일부만 되돌아간 채 남는다(한계 — 실패 시 복원은 CU4 Undo 체계(PathWrite previous·연산 전 PathRead)와 함께 후속, 복원 자체도 할당으로 실패할 수 있다). asset-set은 실패하면 저장하지 않고 오류를 돌려준다(그 객체는 dirty로 남아 다음 저장·닫기에서 정리된다).
+- asset-set 묶음 안 순서(교차 검증 필수 4): Reset은 묶음 맨 앞에 적용한다(다른 텍스트 대입보다 먼저). 같은 단위(또는 한쪽이 다른 쪽 접두 — 펼친 잎 포함)에 Reset과 텍스트 대입을 섞으면 InvalidArgument(사용법)다 — 그래서 순서가 결과를 바꾸지 않는다. 흐름(재판정 필수 — 텍스트 Publish는 Prepare 뒤 owner가 Registry API로 바뀌면 Busy라, 되돌리기 뒤에 텍스트를 다시 준비한다): Reset 경로 해석·`PlanRevert`(모두) → 텍스트 `PrepareAssignments`(검증만 — 버린다) → override 계획(최종 결과 = 지금 집합 − Reset 단위 ∪ 대입 단위 — 더할 단위 예약, 지울 단위는 할당 없음) → `ApplyRevert`(모두) → 텍스트 `PrepareAssignments`를 다시 → `Publish` → 합치기·지우기 → 저장. 검증 실패는 어떤 게시보다 먼저 드러난다. 두 번째 Prepare는 같은 대입을 같은 단위 밖에서 다시 해석하므로(Reset과 단위가 겹치지 않는다) 자원 실패만 남고, 그 경우는 적용 중 실패와 같은 한계다. `RevertPlan`(연산 목록 — FieldValue의 String·Text 포함)은 scratch allocator로 만들고 계획부터 적용까지 산다(그 사이 두 Prepare를 지난다).
+- 오류: 레코드 없는 타입 Unsupported(진단 이유 그대로), 원소·key 경로·Atomic 멤버 경로 Unsupported·InvalidArgument(FindDefaultPayload와 같다), ReadOnly 위치 Unsupported, 경로 해석·MaxElements 오류, 적용 단계의 자원 오류. 명령 `--reset=`은 경로가 비면 사용법 오류(종료 2)다.
+- 시험: 단일 값 각 종류(Text·Name None·non-null ClassRef 기본값·NaN payload·-0.0 비트 그대로), bitfield(최상위·struct 안), Optional 단일 값(기준 set·unset)·Optional<struct>, Array 단일 값·struct 원소, 정적 배열 원소, Set, Map 단일 값·Map 값 struct, InstancedStruct, Atomic·비Atomic struct 통째, ReadOnly 멤버가 있는 struct 통째 거부(아무것도 쓰지 않음), override 펼친 잎 지움, 레코드 없는 타입 Unsupported, 원소 경로 Unsupported, 묶음 안 Reset과 같은 단위 대입 InvalidArgument·다른 단위는 둘 다 적용(되돌리기 뒤 Publish가 Busy가 아님), 적용 중 할당 실패 뒤 상태(문서화한 한계 — 오류·저장 없음), `--reset=` 사용법 오류.
+
+**로드**: 바꾸지 않는다 — 빠진 필드·멤버는 이미 형식 규칙으로 기준(생성자 값)이다(A0-O). Required 진단은 실효 값으로 한다(A0-O).
+
+**UE 5.8 대조**(Class.cpp 1982–2022 `SerializeVersionedTaggedProperties`, PropertyArray.cpp 188):
+- 같은 점: 기준 비교 delta는 기준이 있을 때만 하고 트랜잭션(undo)에서는 끈다(Rocks: 차이 형식은 패키지 저장 옵션, undo·스냅샷은 전부 저장). 배열 원소는 `SerializeItem(…, Defaults 없음)`이라 원소 struct는 delta 없이 모두 쓴다. Atomic(`ShouldSerializeAtomically`)은 통째, 비Atomic struct는 멤버 단위 delta다.
+- 다른 점: 정적 C 배열(`ArrayDim > 1`)을 UE binary 저장은 index마다 기본값과 비교한다(원소 단위 — 텍스트 형식만 전부). Rocks는 통째다(위 근거 — wire 형식). UE `FOverridableSerializationLogic`(실험)이 켜지면 `Identical` 대신 override 연산만으로 판정하지만(대체), Rocks는 "집합 ∪ 다름"(합집합 — 결정)이다.
+
+**버린 대안**:
+- 텍스트(ReflectionText)·임시 객체로 되돌리기: NaN payload를 잃고 편집기 Registry에 부작용이 생긴다(위).
+- 저장 뒤 Record를 다시 짜서 생략하기: 외부 참조 위치를 옮겨 적어야 한다. 위치 불변식 덕분에 쓰는 즉시 걷어 내면 위치를 옮길 일이 없다.
+- override 집합을 ObjectRegistry에 두기: 런타임 객체 100만 개에 편집 상태가 생긴다. 차이 저장은 편집기 패키지 저장에만 쓴다.
+- 쿠킹에도 집합 쓰기: 런타임은 같은 빌드 레코드로 읽어 결과가 같고, 집합이 쿠킹 입력이 되면 cookKey가 편집 이력에 묶인다.
+
+**시험**:
+- 차이 저장 byte: 기준과 같은 값 생략, 다른 값만, 비Atomic struct 멤버 일부만, 모든 멤버 같음 → struct 생략, 한 멤버만 override된 struct(나머지 같음), 3단계 중첩 비Atomic struct, Atomic 통째, 배열·Map·Optional·InstancedStruct·bitfield·정적 배열 통째, 원소 struct는 전부, 외부 참조가 있는 struct 멤버와 그 옆에서 생략된 멤버(위치 재배정이 맞음), Include 정책 weak 지연 항목이 걸린 필드·멤버는 생략하지 않음.
+- 복제의 DuplicateTransient와 차이 저장 조합, cooked 차이 저장 → 런타임 로드 값.
+- override: 기준과 같아도 집합 단위는 씀(필드·멤버·Atomic·배열).
+- 정책 위반 InvalidArgument 셋, 레코드 없는 타입은 전부, 레코드 실패는 저장 실패.
+- 왕복: 차이 저장 → 로드 → 값 같음, 집합 = 파일 경로(단위 정규화), 다시 저장 byte 같음. 실패한 로드 뒤 집합 없음, UnknownField present 무시, Close·Discard 뒤 집합 지움.
+- `OverrideUnit` 표(원소·key 자르기·Atomic·struct 펼침).
+- asset-set이 집합에 기록, 재임포트 설정 대입 기록, 임포트 출력은 기록 안 함, 복제가 원본 집합으로 씀.
+- 되돌리기(A5b2): 단일 값·멤버·Atomic·배열, NaN·-0.0 기본값 되돌린 뒤 byte가 기준과 같음, 집합에서 지움, ReadOnly 거부, 원소 경로 Unsupported.
+- 할당 실패.
+
+### 클래스 기본값 구현 명세 — A5c 지문 연결 (2026-11-24, 착수 전 — 교차 검증 1차 반영)
+
+'클래스 기본값 결정'의 지문과 쿠킹 문단을 패키지 형식·로드·쿠커·색인에 잇고, Tick 설정을 리플렉션으로 옮긴다([AssetSystem](AssetSystem/12-Textures/12.7-Stages.ko.md) 12.7절 A5c). 근거 조사는 2026-11-24 코드(PackageWriter·PackageReader Summary, CookKeys `CookLocalKey`·`HashTypeTable`, AssetIndexEntry, World `TickSettings`)다. 교차 검증(필수 3 — 문서 충돌, 레코드 없는 export 타입, 빌드 구성 간 지문)을 반영했다.
+
+**레코드 유무 분류**(아래 모든 곳이 같은 분류를 쓴다):
+- 레코드 있음 — 지문이 있다.
+- 레코드 없는 타입 — A5a의 기억되는 Unsupported 이유(Abstract·IncompleteLayout·ManualFields — 손 함수표·지금의 Sparks 등록 타입 포함). 차이 저장은 이 타입을 전부 저장하고(A5b) 정상 export가 될 수 있다. 지문이 없고 그것이 정상이다.
+- 레코드 실패 — 그 밖의 실패(NonDeterministic·NonNullReference·EncodeFailed, 할당 실패는 일시적이라 그 호출의 오류). 타입 계약 위반이다 — 차이 저장이 실패하므로 그 타입의 객체는 저장할 수 없다.
+
+**패키지 형식(A1 개정)**:
+- Summary Record에 필드 `ClassDefaults`(RecordList `{id Guid, fingerprint Bytes 32}`)를 더한다. 행 = Exports의 서로 다른 typeId 가운데 레코드 있는 타입(레코드 없는 타입은 행이 없다), TypeId 오름차순, 중복 없음. 지문 구성은 패키지 종류를 따른다(에디터 = Editor, 쿠킹 = Cooked — 차이 쓰기 기준과 같다). 타입 버전 표(`Types` — export 타입 집합)에 열을 두지 않는 이유: 행은 레코드 있는 타입만이라 열로 두면 레코드 없는 타입 행에 "없음" 표지가 필요하다(구현 때 정정 — 처음 근거로 적은 "struct·enum 행"은 없다, 타입 표는 export 타입만 담는다).
+- `PackageFormatVersion` 1 → 2. 차이 형식 Objects(A5b)와 이 필드를 함께 표시한다. 하위호환을 두지 않으므로 v1 파일은 기존 형식 축 규칙(낮은 formatVersion — 에디터·쿠킹 모두 `UnsupportedVersion`, PackageReader 헤더 검사 2)대로 거부한다. 시험 fixture·바이트 헤더는 다시 만든다.
+- `PackageSummary::classDefaults`(`Array<PackageClassDefaults{TypeId type, Sha256Digest fingerprint}>`).
+- writer: 차이 저장한 뒤 export 클래스마다 `AcquireClassDefaults`(그래프 저장이 이미 만들었으므로 조회) — 있음은 행, 없는 타입은 행 없음, 실패는 저장 실패(차이 저장이 먼저 실패한다).
+- reader 형식 검사: 행이 정렬·중복 없음이고 행 집합 ⊆ export 타입 집합이어야 한다(아니면 Summary `CorruptPackage` — 5.7절에 더한다). 할당 실패는 `OutOfMemory`(5.7절 12).
+- 문서 개정(이 명세와 함께): AssetSystem 05-PackageFormat 5.2절 Summary 행("클래스 행에는 … 지문 열" → `ClassDefaults` 목록)·5.7절 1(Summary Record 필드 목록)·5.7절 `CorruptPackage` 경우, 10-Cooker 10절 cookKey 지역 입력 문구, 이 문서 '클래스 기본값 결정'의 지문과 쿠킹 문단("Summary 타입 표의 클래스 행" → "Summary의 ClassDefaults 목록").
+
+**로드 판정**(`PackageReadOptions::types`가 있을 때만 — 타입 축과 같다). 등록된 클래스인 export 타입마다(미등록·클래스가 아닌 타입은 `unavailableExportType` 경로가 이미 판정한다) 저장 쪽(행 있음 + 지문 / 행 없음)과 지금 쪽(그 패키지 종류 구성의 레코드 있음 + 지문 / 레코드 없는 타입 / 레코드 실패)을 맞춘다:
+- 같음 = 둘 다 행·레코드가 있고 지문이 같거나, 둘 다 없음(행 없음 + 지금 레코드 없는 타입).
+- 쿠킹: 같지 않으면 Summary `UnsupportedVersion`(다시 쿠킹 — related = 그 TypeId). 지금 레코드 실패도 `UnsupportedVersion`이다(이 빌드가 기준을 만들 수 없다).
+- 에디터: 계속 연다(읽기 전용이 아니다). `PackageContents::changedDefaults`(TypeId 정렬 목록)·`unavailableDefaults`(지금 레코드 실패인 TypeId 정렬 목록과 이유)에 담는다. `EditorPackageSet::Open`이 타입마다 경고를 낸다 — 지문·유무가 다르면 `ClassDefaultsChanged`(diagnostic.asset = 패키지, related = TypeId, text = 영향받은 export 수), 지금 레코드 실패면 `ClassDefaultsUnavailable`(text = 이유 이름 — 이 패키지는 그 타입을 고치기 전까지 저장할 수 없다). 바뀐 기본값으로 다시 저장하면 파일에 있던 값(present → override 집합)은 그대로 남고 빠져 있던 값은 새 기본값이 된다(UE에서 CDO가 바뀐 뒤 다시 저장한 것과 같다) — 그 뒤 저장은 새 지문을 쓴다.
+- 비용: 레코드는 등록 세대마다 한 번 만들고 기억하므로 로드마다 지문 비교는 조회다.
+
+**cookKey(A4 개정)**:
+- `AssetIndexEntry::exportTypes`(TypeId 정렬 목록 — Exports의 서로 다른 typeId)를 둔다. 색인이 에디터 패키지 Summary 타입 표(= export 타입 집합, reader가 대조함)에서 만든다(ClassDefaults 행은 레코드 있는 타입만이라 쓰지 않는다). AssetIndex 캐시 schemaVersion을 3 → 4로 올린다.
+- 쿠커는 시작 때 `ForEachClassDefaults`로 (TypeId → cooked 지문 / 레코드 없는 타입 / 레코드 실패와 진단) 표를 한 번 만든다(결정의 "쿠킹은 모든 레코드를 강제로 만들어 실패를 미리 드러낸다" — 비용은 등록된 구체 클래스 수 × 생성 2회). 레코드 실패 타입은 쿠킹 보고서에 경고로 모두 적는다 — 쓰는 에셋이 없으면 쿠킹을 멈추지 않는다.
+- `CookLocalKey`에 export 타입마다 (TypeId, 상태 byte(0 = 레코드 있음, 1 = 레코드 없는 타입), 지문(상태 0일 때만)) 목록을 더한다(개수 먼저, exportTypes 순). export 타입이 미등록이면 그 대상은 cookKey 실패이고 진단 `UnsupportedVersion`(A4c1 분류와 같다), 레코드 실패면 cookKey 실패이고 새 진단 `InvalidClassDefaults`(related = TypeId, 이유는 보고서 — 다시 쿠킹으로 풀리지 않는 타입 계약 위반이라 `UnsupportedVersion`과 나눈다)다. base 기본값은 파생 레코드에 이미 들어 있으므로 base 행은 따로 넣지 않는다.
+- 쿠커 프로세스의 모듈 구성에 따라 표가 달라질 수 있다(타입 표 지문과 같은 한계 — 적중만 잃는다).
+
+**빌드 구성과 지문**(교차 검증 필수 3):
+- 생성자 결정성 계약(A5a)에 더한다: 비EditorOnly 필드의 생성자 값은 빌드 구성(에디터·게임·전용 서버, Debug·Release)과 플랫폼에 무관해야 한다. cooked 지문은 쿠커(에디터 빌드)가 만들고 쿠킹 패키지를 읽는 런타임(게임 빌드)이 자기 레코드로 다시 계산해 비교하므로, 구성마다 값이 다르면 모든 쿠킹 패키지가 런타임에서 `UnsupportedVersion`이 된다. EditorOnly 필드는 cooked 레코드에 없어 이 계약 밖이다.
+- 대조 1(fixture golden): `ClassDefaults_FingerprintGolden` — 시험 fixture 모듈(ReflectionTestFixtures) 등록으로 `ForEachClassDefaults`를 돌려 `TypeId editor지문 cooked지문`(레코드 없는 타입·실패는 이유) 줄을 golden 파일과 비교한다. Windows·macOS·Debug·Release 체인이 같은 golden을 본다.
+- 대조 2(엔진 타입 구성 간): commandlet `class-defaults-dump`가 에셋 타입 모듈(AssetTypeModule)과 그 의존 모듈이 등록한 구체 클래스에 대해 `TypeId cooked지문`(또는 이유) 줄을 쓴다. 검증 체인이 구성(Debug·Release, 그리고 게임·전용 서버 대상이 생기면 그것)과 플랫폼마다 덤프를 만들고 서로 비교한다(golden 파일 없이 두 결과의 같음 — 엔진 타입이 바뀌어도 흔들리지 않는다). 다르면 그 타입을 보고하고 실패한다. 구성 사이 비교는 같은 모듈 구성(같은 대상 종류)끼리만 한다.
+
+**Tick 설정 리플렉션 이동**(ReflectionFoundations 결정 21):
+- `TickPhase`를 `ROCKS_ENUM`(센티널 `Count`는 `Hidden` 열거자 — 저장·편집 값이 아니다), `TickSettings`를 `ROCKS_STRUCT`(멤버 일곱 모두 `ROCKS_PROPERTY`)로 바꾸고, Actor·Component의 `tickSettings_`를 `ROCKS_PROPERTY(Name = "tickSettings")`로 바꾼다(`enabled_`와 같은 방식). `ROCKS_NATIVE() TickHandle ticks_[...]`는 그대로다. ID는 rocksids에 등록한다. 멤버에 참조가 없어 WorldOnly 소유 형질·깊이 제약에 걸리지 않는다.
+- 검증: struct 검증 hook(`validateTree`)에 `IsValidTickSettings`를 연결해 경로 쓰기·로드로 들어온 잘못된 값(OnTick phase = Physics·음수·비유한 interval)을 그 자리에서 거부한다. FinishSpawning·AddComponent의 검사는 그대로 둔다(생성자가 채운 값).
+- 결과: 생성자가 채운 Tick 설정이 레코드에 들어가고(차이 저장은 기본값과 같으면 생략), 인스턴스마다 바꾼 값은 저장·로드된다. 시작 뒤 변경은 지금처럼 `SetTickEnabled`만 반영한다(편집 반영은 SparksEngineIntegration SE-W5). WorldOnly 클래스라 패키지에 저장되는 경로는 레벨 저장(후속)이다 — 지금 확인은 그래프 왕복·레코드 시험이다.
+- Component.h·Actor.h 머리 주석의 "Tick 설정은 ROCKS_NATIVE" 문구를 고친다.
+
+**UE 5.8 대조**: UE 증분 쿠킹의 클래스 다이제스트(`FClassDigestData` — Editor/UnrealEd/Private/EditorDomain/EditorDomainUtils.h 44–67행)는 `InclusiveSchemaHash`(배치)·CustomVersion·ConstructClasses만 담고 CDO 기본값을 키에 넣지 않으며, allowlist(`bTargetIterativeEnabled`) 클래스에만 증분 쿠킹을 쓴다. UE 쿠킹 데이터도 CDO 기준 차이지만 기본값 변경 뒤 다시 쿠킹을 보장하지 않는다(엔진·게임 빌드를 함께 갈아 끼우는 운용에 기댄다). Rocks는 쿠킹 패키지가 기준 차이 형식이고 매니페스트 재사용을 하므로 지문을 키에 넣는다. 에디터 로드 경고는 UE에 없는 Rocks 결정('클래스 기본값 결정')이다.
+
+**버린 대안**: 지문을 타입 버전 표의 열로(위), 레코드 없는 타입에 "없음" 행(이유 byte + 빈 지문 — 형식 칸이 하나 늘고 행 없음과 뜻이 같다), 로드 때 지문 대신 레코드 byte 비교(패키지에 레코드를 담아야 한다 — 크기), cookKey에 타입 표 전체 지문만(무관한 클래스 기본값 변경까지 전부 다시 쿠킹 — 결정의 "타입 전체 지문은 무관한 필드 변경까지 무효화"), 쿠커가 cookKey 때 에디터 패키지를 다시 읽어 export 타입을 얻기(색인이 이미 Exports를 읽는다), 엔진 전체 타입 golden 파일(엔진 타입이 바뀔 때마다 흔들린다 — 대조 2가 구성 간 같음만 본다), 레코드 실패를 cookKey `UnsupportedVersion`으로(다시 쿠킹으로 풀린다고 읽힌다).
+
+**구현에서 정한 점(2026-11-24)**: 분류는 ObjectSerialization `ClassifyClassDefaults`(+ ObjectRuntime `IsClassWithoutDefaults`·`ClassDefaultsReasonName`) 하나를 writer·reader·쿠커·덤프가 같이 쓴다. 쿠커 표는 `CookClassDefaultsTable`(`BuildCookClassDefaults` — CookProject가 한 번 만들어 `CookKeyRequest::classDefaults`로 넘기고, 없으면 ComputeCookKeys가 만든다). 에디터 경고의 `diagnostic.detail`도 영향받은 export 수다. 지문 golden 표는 빌드 재개 때 실제 출력으로 채운다(그 전에는 시험이 실패한다 — 빈 golden이 통과하지 않게). 검증 체인의 구성 간 덤프 비교 단계는 빌드 재개 때 체인 스크립트에 넣는다.
+
+**시험(A5c)**: Summary 필드 왕복(에디터·쿠킹 구성, 레코드 없는 타입은 행 없음), 행 정렬·중복·export 밖 행 `CorruptPackage`, v1 파일 거부, 쿠킹 로드(지문 불일치·행 유무 불일치·지금 레코드 실패 `UnsupportedVersion`, 레코드 없는 타입끼리는 통과), 에디터 로드(`ClassDefaultsChanged`·`ClassDefaultsUnavailable` 경고·계속 열기·다시 저장하면 새 지문), 색인 exportTypes(캐시 왕복), cookKey(기본값 변경 → 그 클래스를 쓰는 대상만 키 바뀜, 레코드 없는 타입 상태 byte, 미등록 `UnsupportedVersion`·레코드 실패 `InvalidClassDefaults`, 쓰지 않는 실패 타입은 경고만), 지문 golden, `class-defaults-dump` 출력, TickSettings(레코드·그래프 왕복·Hidden `Count`·경로 쓰기·로드의 잘못된 값 거부), 할당 실패.
 
 ## 단계와 완료 기준
 

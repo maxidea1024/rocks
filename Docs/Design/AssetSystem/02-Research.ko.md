@@ -11,5 +11,5 @@
 | 프로세스 | 없음 | 임포트 worker process는 17절. PlatformBase `Process`·`LocalChannel`은 Rockpile R0(별도 작업 — A3는 쓰지 않는다) |
 | 그래픽 | `PixelFormat` 전체(PF1–PF3), 차원 5종·view swizzle·샘플러 W축·필터 5종·비교 샘플러(A0-G 구현) | 바인딩 샘플러 → GX6 |
 | 도구 | `CommandletRegistry`, `Programs/Commandlet` | `asset-*` → A6 |
-| 기존 에셋 코드(미커밋) | AssetRuntime(단일 `.rasset`), AssetTools(BMP·TGA·PSD·PNG 디코더 — PNG는 zlib 대기, 설정·mip 빌드) | 대체. 디코더 → ImageCore, mip → TextureTools |
+| 기존 에셋 코드(미커밋) | AssetRuntime(단일 `.rasset`), AssetTools(BMP·TGA·PSD·PNG 디코더 — PNG는 zlib 대기, 설정·mip 빌드) | 대체. 디코더 → ImageCodec, mip → TextureTools |
 | 외부 라이브러리 | Core/ThirdParty(zlib·LZ4·Zstd), Core `Compression` 모듈 | PNG zlib·bulk Zstd에 사용. 이미지 디코더는 자체 구현 |

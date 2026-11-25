@@ -505,13 +505,17 @@ try
     await Check("asset-list empty project", ["asset-list", $"--project={empty}"], 0, "", "");
     await Check("asset-list content is a file", ["asset-list", $"--project={fileContent}"], 1, "", "cannot scan");
     await Check("asset-list help", ["asset-list", "--help"], 0, "usage: asset-list", "");
+    // class-defaults-dump(A5c 대조 2): 등록된 구체 클래스마다 한 줄, 사용법.
+    await Check("class-defaults-dump", ["class-defaults-dump"], 0, " present ", "");
+    await Check("class-defaults-dump help", ["class-defaults-dump", "--help"], 0, "usage: class-defaults-dump", "");
+    await Check("class-defaults-dump extra", ["class-defaults-dump", "extra"], 2, "", "usage: class-defaults-dump");
     await Check("asset-list positional", ["asset-list", "extra"], 2, "", "usage: asset-list");
     await Check("asset-list twice", ["asset-list", $"--project={project}", $"--project={project}"], 2, "",
         "usage: asset-list");
     await Check("asset-list empty value", ["asset-list", "--project="], 2, "", "usage: asset-list");
     // A2c3b부터 --type은 옵션이다: 등록하지 않은 타입 이름은 실행 실패다.
-    await Check("asset-list unknown type", ["asset-list", "--type=Texture2D", $"--project={project}"], 1, "",
-        "asset-list: NotFound: Texture2D: unknown type");
+    await Check("asset-list unknown type", ["asset-list", "--type=NoSuchAssetType", $"--project={project}"], 1, "",
+        "asset-list: NotFound: NoSuchAssetType: unknown type");
     // 13절 공통 옵션 --wait=<초>는 받고(읽기 명령은 잠금이 없다) 10진 숫자가 아니면 사용법 오류다.
     await Check("asset-list wait", ["asset-list", "--wait=5", $"--project={project}"], 0, "/Game/Items/Base", "");
     await Check("asset-list invalid wait", ["asset-list", "--wait=5s", $"--project={project}"], 2, "",
@@ -695,6 +699,15 @@ try
         quotedErased.StdOut.Contains("targetFrameRate.overrides=\n", StringComparison.Ordinal) &&
         !quotedErased.StdOut.Contains("targetFrameRate.overrides[", StringComparison.Ordinal), quotedErased);
 
+    // --reset: 클래스 기본값으로 되돌린다(A5b2 — rateScale 기본 1). 빈 경로는 사용법 오류, asset-new는
+    // --reset을 받지 않는다(사용법 오류).
+    await CheckAll("asset-set reset", ["asset-set", "/Game/Anims/Run", "--reset=rateScale", projectOption], 0, [], []);
+    await CheckAll("asset-set reset result", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["rateScale=1\n"], []);
+    await CheckAll("asset-set reset empty", ["asset-set", "/Game/Anims/Run", "--reset=", projectOption], 2, [],
+        ["usage: asset-set"]);
+    await CheckAll("asset-new reset", ["asset-new", "AnimationClip", "/Game/Anims/Reset", "--reset=rateScale",
+        projectOption], 2, [], ["usage: asset-new"]);
+
     // 대입 오류는 모두 모아 보고하고 아무것도 바꾸지 않는다(파일 byte 그대로).
     string runFile = Path.Combine(project, "Content", "Anims", "Run.rasset");
     byte[] before = File.ReadAllBytes(runFile);
@@ -705,6 +718,14 @@ try
     Report("asset-set errors leave the file", File.ReadAllBytes(runFile).SequenceEqual(before), new(0, "", ""));
     await CheckAll("asset-set soft unresolved", ["asset-set", "/Game/Characters/Hero", "compatibleSkeletons=/Game/Nope",
         projectOption], 1, [], ["asset-set: Unresolved: compatibleSkeletons: "]);
+
+    // 텍스처 타입 모듈(A5d — AssetTypeModules): Texture2D를 만들고 값·숨김 값 입력을 본다.
+    await CheckAll("asset-new texture", ["asset-new", "Texture2D", "/Game/Tex/Plain", "lodGroup=UI",
+        "compressionSettings=Normalmap", projectOption], 0, ["/Game/Tex/Plain "], []);
+    await CheckAll("asset-new texture result", ["asset-info", "/Game/Tex/Plain", projectOption], 0,
+        ["lodGroup=UI\n", "compressionSettings=Normalmap\n"], []);
+    await CheckAll("asset-set texture hidden value", ["asset-set", "/Game/Tex/Plain", "compressionSettings=LQ", projectOption],
+        1, [], ["asset-set: InvalidSetting: compressionSettings: "]);
 
     // asset-new 거부: 타입(모름·추상·에셋 아님·struct)·경로(있음·규칙)·대입 오류(만들지 않음).
     await CheckAll("asset-new unknown type", ["asset-new", "NoSuchType", "/Game/X", projectOption], 1, [],
@@ -821,7 +842,7 @@ try
     // 프로젝트 찾기: --project 없이 프로젝트 안에서 위로 찾는다.
     ProcessResult found = await RunEdit(Path.Combine(project, "Content"), "asset-info", "/Game/Anims/Run");
     Report("asset-info finds the project upward", found.ExitCode == 0 &&
-        found.StdOut.Contains("rateScale=2.5\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
+        found.StdOut.Contains("rateScale=1\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
     await CheckAll("asset-info without a project", ["asset-info", "/Game/Anims/Run"], 1, [], ["no project found"]);
     await CheckAll("asset-list type without a project", ["asset-list", "--type=Skeleton"], 1, [], ["no project found"]);
 
@@ -1866,10 +1887,13 @@ finally
 
 // asset-cook(AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1): 제품 실행 파일이 쿠커 모듈을 시작해 설정·보고서 타입을
 // 등록하고 엔진 프로파일(실행 파일 위쪽 Engine/Config)로 쿠킹한다. 전체 쿠킹 게시·두 번째는 전부 재사용·--json·사용법·도움말. 진단 줄·
-// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다. 제품 실행 파일에는 셰이더 산출물 단계가 아직
+// 없으므로(SH2d 전 — 10.3절 1항: backend가 있는 프로필은 UnsupportedCapability) 실행 파일을 임시 배치에 복사하고 그 위쪽
+// Engine/Config의 Windows 프로필을 셰이더 없는 프로필(graphicsBackends·shaderFormats 비움)로 둔다.
 string cookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-{Environment.ProcessId}");
 try
 {
+    string cookExecutable = ShaderlessEngineLayout(executable, Path.Combine(cookDirectory, "Engine-layout"));
     string project = Path.Combine(cookDirectory, "Cooking");
     Directory.CreateDirectory(Path.Combine(project, "Config"));
     File.WriteAllText(Path.Combine(project, "Cooking.rocksproject"), "{}\n");
@@ -1877,7 +1901,7 @@ try
     string projectOption = $"--project={project}";
 
     async Task<ProcessResult> RunCook(params string[] arguments) =>
-        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(60)));
+        await ProcessRunner.RunAsync(new(cookExecutable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(60)));
 
     void ReportCook(string label, bool passed, ProcessResult result)
     {
@@ -2165,15 +2189,59 @@ if (OperatingSystem.IsMacOS())
 
 return failures == 0 ? 0 : 1;
 
-// 항목이 없는 쿠킹 매니페스트 byte다(AssetSystem 10절 형식 v1): magic, 형식 버전, 항목 수, 프로파일 id(LE64 길이 + byte),
-// 프로파일·쿠킹 설정 digest, 쿠커 버전, 쿠킹한 엔진 버전 셋, 앞 모든 byte의 CRC32.
+// 실행 파일을 root/bin에 복사하고, 실행 파일 위쪽의 엔진 Config(저장소 Engine/Config)를 root/Engine/Config로 복사한 뒤 Windows
+// 프로필을 셰이더 없는 프로필로 바꾼다. 복사한 실행 파일 경로를 돌려준다.
+static string ShaderlessEngineLayout(string executable, string root)
+{
+    string? directory = Path.GetDirectoryName(Path.GetFullPath(executable));
+    string? engineConfig = null;
+    while (directory is not null)
+    {
+        string candidate = Path.Combine(directory, "Engine", "Config");
+        if (Directory.Exists(candidate))
+        {
+            engineConfig = candidate;
+            break;
+        }
+
+        directory = Path.GetDirectoryName(directory);
+    }
+
+    if (engineConfig is null)
+    {
+        throw new InvalidOperationException("Engine/Config not found above the executable");
+    }
+
+    string targetConfig = Path.Combine(root, "Engine", "Config");
+    foreach (string file in Directory.EnumerateFiles(engineConfig, "*", SearchOption.AllDirectories))
+    {
+        string destination = Path.Combine(targetConfig, Path.GetRelativePath(engineConfig, file));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Copy(file, destination, true);
+    }
+
+    string profile = Path.Combine(targetConfig, "TargetProfiles", "Windows.json");
+    var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(profile))!.AsObject();
+    json["graphicsBackends"] = new System.Text.Json.Nodes.JsonArray();
+    json["shaderFormats"] = new System.Text.Json.Nodes.JsonObject();
+    File.WriteAllText(profile, json.ToJsonString());
+    string bin = Path.Combine(root, "bin");
+    Directory.CreateDirectory(bin);
+    string copied = Path.Combine(bin, Path.GetFileName(executable));
+    File.Copy(executable, copied, true);
+    return copied;
+}
+
+// 항목이 없는 쿠킹 매니페스트 byte다(AssetSystem 10.3절 4항 형식 v2): magic, 형식 버전, 항목 수, 프로파일 id(LE64 길이 +
+// byte), 프로파일·쿠킹 설정 digest, 쿠커 버전, 쿠킹한 엔진 버전 셋, backend 수(0 — 셰이더 없는 프로필), artifact 수(0),
+// 앞 모든 byte의 CRC32.
 static byte[] EmptyCookedManifest(string profile)
 {
     using MemoryStream stream = new();
     using (BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, true))
     {
         writer.Write("RMAN"u8);
-        writer.Write(1u);
+        writer.Write(2u);
         writer.Write(0u);
         byte[] profileBytes = System.Text.Encoding.UTF8.GetBytes(profile);
         writer.Write((ulong)profileBytes.Length);
@@ -2182,6 +2250,8 @@ static byte[] EmptyCookedManifest(string profile)
         writer.Write(1u);
         writer.Write(0u);
         writer.Write(1u);
+        writer.Write(0u);
+        writer.Write(0u);
         writer.Write(0u);
     }
 
@@ -2197,7 +2267,7 @@ static byte[] EmptyCookedManifest(string profile)
 static Dictionary<string, byte[]> ReadPackageFixtures(string executable)
 {
     DirectoryInfo root = FindRepositoryRoot(executable);
-    string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "Source", "Developer", "AssetDatabase", "Tests",
+    string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "source", "Developer", "AssetDatabase", "Tests",
         "AssetIndexCommandletFixtures.h"));
     Dictionary<string, byte[]> arrays = [];
     foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(header,

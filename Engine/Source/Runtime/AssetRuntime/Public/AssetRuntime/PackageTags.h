@@ -32,6 +32,10 @@ inline constexpr Guid PackageTagKeyField{0, 1};
 inline constexpr Guid PackageTagValueField{0, 2};
 // 키의 byte 상한이다(값은 패키지 문자열 상한 PackageMaxStringBytes).
 inline constexpr usize MaxPackageTagKeyBytes = 256;
+// 에셋 bundle 구성원 태그의 키 접두다(`Bundle.<이름>` = 구성원 AssetId 표준 문자열, 구성원마다 태그
+// 하나 — Docs/Design/AssetSystem 10.2절 결정 9). 에디터 패키지 저장이 쓰고(AssetDatabase) 쿠커가
+// PrimaryAsset의 것만 읽는다(AssetCooker).
+inline constexpr StringView AssetBundleTagPrefix = "Bundle.";
 
 // 쓰기 입력 한 쌍이다(호출 동안만 빌린다).
 struct PackageTagInput {

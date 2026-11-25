@@ -27,7 +27,7 @@ class CookWalk {
 public:
     CookWalk(Allocator& allocator, const CookRunRequest& request, CookRunResult& result) noexcept
         : allocator_(allocator), request_(request), result_(result), before_(allocator),
-          order_(allocator), check_(allocator), checkEntry_(allocator) {
+          order_(allocator), check_(allocator), checkEntry_(allocator), warnings_(allocator) {
     }
 
     Result<void> Run() noexcept {
@@ -191,6 +191,7 @@ private:
 
         MemoryPackageSink sink(allocator_);
         AssetDiagnostic failure;
+        warnings_.Clear();
         CookContext context;
         context.allocator = &allocator_;
         context.registry = &packages.Registry();
@@ -205,11 +206,20 @@ private:
         context.verifyNuggets = request_.verifyNuggets;
         context.sink = &sink;
         context.failure = &failure;
-        if (auto cooked = processor.Value()->Cook(context); !cooked) {
-            if (cooked.Error() == ErrorCode::OutOfMemory) {
-                return cooked;
-            }
+        context.warnings = &warnings_;
+        auto cooked = processor.Value()->Cook(context);
+        if (!cooked && cooked.Error() == ErrorCode::OutOfMemory) {
+            return cooked;
+        }
 
+        // 처리기 경고는 실패해도 옮긴다(실패 전 경고도 원인 파악에 쓴다). 대상 id로 고정한다.
+        for (CookDiagnostic warning : warnings_) {
+            warning.warning = true;
+            warning.asset = target.id;
+            Keep(result_.diagnostics.TryPushBack(warning));
+        }
+
+        if (!cooked) {
             Diagnose(failure.code, target.id, failure.related, cooked.Error());
             return Release();
         }
@@ -303,6 +313,8 @@ private:
     // 로더 대조용 매니페스트 머리와 항목 scratch다(항목 의존이 출력의 의존 목록이다).
     CookedManifest check_;
     CookedManifestEntry checkEntry_;
+    // 처리기 하나의 경고 scratch다(CookContext::warnings).
+    Array<CookDiagnostic> warnings_;
     ErrorCode error_ = ErrorCode::None;
 };
 

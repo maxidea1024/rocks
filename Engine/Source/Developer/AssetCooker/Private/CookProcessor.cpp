@@ -4,6 +4,11 @@
 namespace rocks {
 
 Result<void> CookProcessor::Cook(CookContext& context) const noexcept {
+    return WriteCookedPackage(context, 0);
+}
+
+Result<void> CookProcessor::WriteCookedPackage(CookContext& context,
+                                               uint32 minimumBulkAlignment) noexcept {
     const TargetProfile& profile = *context.profile;
     PackageWriteOptions options;
     options.kind = PackageKind::Cooked;
@@ -12,8 +17,10 @@ Result<void> CookProcessor::Cook(CookContext& context) const noexcept {
     options.cookerVersion = context.cookerVersion;
     options.bulkCodec =
         profile.bulkCodec == CookBulkCodec::Zstd ? BulkCodec::Zstd : BulkCodec::None;
-    options.bulkAlignment =
+    const uint32 profileAlignment =
         profile.bulkAlignment == 0 ? PackageDefaultCookedBulkAlignment : profile.bulkAlignment;
+    options.bulkAlignment =
+        profileAlignment < minimumBulkAlignment ? minimumBulkAlignment : profileAlignment;
     options.bulkSource = context.bulkSource;
     auto written = WritePackage(*context.allocator, *context.registry, context.access,
                                 context.package, options, *context.sink, context.failure);

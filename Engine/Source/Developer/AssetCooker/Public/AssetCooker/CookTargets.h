@@ -19,10 +19,6 @@
 //   if (targets.HasErrors()) { /* 진단 보고 — 게시하지 않음 */ }
 namespace rocks {
 
-// PrimaryAsset bundle 구성원 태그의 키 접두다(`Bundle.<이름>` = 구성원 AssetId 표준 문자열,
-// 구성원마다 태그 하나 — 저장 때 A4e가 쓴다).
-inline constexpr StringView CookBundleTagPrefix = "Bundle.";
-
 // 쿠킹 진단이다. 같은 코드가 경고·오류로 쓰이므로(NeverCookReferenced·MissingDependency·
 // InvalidPath) 수준을 따로 둔다.
 struct CookDiagnostic {

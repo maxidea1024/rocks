@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <AssetRuntime/BulkData.h>
 #include <Core/Containers/Array.h>
@@ -44,7 +45,19 @@ struct AssetImporterInfo {
     // `[a-z0-9]`)다. 비면 `--importer=`로만 고른다.
     Span<const StringView> extensions{};
     // 원본 역할 목록(ImportRecord 역할 규칙, 유일)이다. 비면 원본 하나 DefaultImportSourceRole.
+    // 고정 역할은 임포트마다 정확히 한 번씩이다.
     Span<const StringView> roles{};
+    // 가변 원본 역할 접두(예 `blob:` — Docs/Design/AssetSystem 7.1절 19 A2f3b UXR9)다. 고정 역할
+    // 밖의 역할은 이 중 하나로 시작하고 접두 뒤가 비지 않아야 한다(여럿 가능 — 원본 수·합 상한 안).
+    // 접두는 역할 문자 1–MaxImportRoleBytes byte이고, 고정 역할이 접두로 시작하거나 한 접두가 다른
+    // 접두의 앞부분이면 등록 InvalidArgument다. 비면 가변 원본 없음.
+    Span<const StringView> rolePrefixes{};
+    // 가변 원본만 받는지다(Docs/Design/AssetSystem 7.1절 18 — A5h 보강, 텍스처 slice처럼 모든
+    // 원본이 같은 종류인 임포터). 참이면 고정 역할이 없다(기본 DefaultImportSourceRole도 없음):
+    // roles가 비고 rolePrefixes가 하나 이상이어야 하고(아니면 등록 InvalidArgument), 임포트 원본은
+    // 접두 역할 하나 이상이다(0개는 InvalidImportOption). 재임포트의 역할 없는 원본 하나
+    // (`--source=`)는 받지 않는다(InvalidImportOption).
+    bool variableSourcesOnly = false;
     // 옵션 struct(등록 ROCKS_STRUCT)다. 0이면 옵션 없음. 필드 이름은 outputType의 노출 속성
     // 이름·ImportReservedNames와 겹칠 수 없다(대소문자 무시 — 옵션과 설정을 첫 이름으로 나눈다).
     TypeId optionsType{};
@@ -61,7 +74,8 @@ struct AssetImportSource {
 // Import 호출 동안만 쓴다.
 class AssetImportContext {
 public:
-    // 원본들이다(임포터 roles 순 — 원본 하나면 역할 DefaultImportSourceRole).
+    // 원본들이다(고정 역할 roles 순 → 접두 역할 byte 순 — 원본 하나면 역할
+    // DefaultImportSourceRole).
     virtual Span<const AssetImportSource> Sources() const noexcept = 0;
     // 옵션 struct 값(optionsType의 C++ 값 — 읽기 전용)이다. 옵션이 없으면 null.
     virtual const void* Options() const noexcept = 0;
@@ -89,6 +103,32 @@ public:
     // 서비스 실패의 진단이 된다).
     virtual Result<void> Fail(AssetDiagnosticCode code, ErrorCode error,
                               uint64 detail = 0) noexcept = 0;
+    // 주 출력 기록에 임포터 태그 한 쌍을 더한다(Docs/Design/AssetSystem 7.1절 19 A2f3a UXR8 —
+    // 저장이 패키지 Tags로 낸다, 색인 항목 태그에 나온다). key는 `<Info().name>.`으로 시작한다
+    // (IsValidImportTag). 같은 쌍은 한 번만 남는다. 이번 기록에는 이번에 더한 것만
+    // 남는다(재임포트도 — 옛 값은 PreviousTags로 읽어 다시 더한다). 오류: 규칙 위반·MaxImportTags
+    // 초과 InvalidArgument, 할당 실패.
+    virtual Result<void> AddTag(StringView key, StringView value) noexcept = 0;
+    // 재임포트면 옛 소유 기록의 태그((key, value) byte 순), 새 임포트는 빈 목록이다. 수명은 Import
+    // 호출 동안이다.
+    virtual Span<const ImportTag> PreviousTags() const noexcept = 0;
+    // 다른 에셋 id의 대표 객체를 연다(Docs/Design/AssetSystem 7.1절 19 A2f3c UXR10 — 출력에서 Hard
+    // 참조로 건다: SetReference, 저장이 import·Hard 의존을 쓴다). 찾는 순서는 이번 실행의 묶음
+    // 구성원 주 출력(A2f3d — 색인에 없어도 된다) → 색인에 고유하게 있는 에셋이다(이번 실행의
+    // 출력은 아직 저장 전이라 색인에 없다). 읽기 전용 패키지도 연다. 연 패키지는 임포트가
+    // 끝나면(성공·실패 모두) 닫힌다(이미 열려 있던 것은 그대로). 대상 타입은 임포터가 확인한다.
+    // 오류: 이 임포트의 자기 출력(Output으로 받는다) InvalidArgument, 색인에 없음 NotFound(진단
+    // MissingDependency, related = id), 같은 id 둘 AlreadyExists(진단 DuplicateAssetId), 열기 오류,
+    // 할당 실패.
+    virtual Result<ObjectHandle> OpenAsset(AssetId asset) noexcept = 0;
+    // 묶음 임포트(Docs/Design/AssetSystem 7.1절 19 A2f3d UXR11 — AssetService::ImportGroup)의
+    // 구성원 수(단일 Import·Reimport는 1)·이 구성원 번호·index번 구성원 주 출력 id(범위 밖은
+    // null)다. 모든 구성원의 주 출력은 임포터 호출 전에 있으므로 다른 구성원은
+    // OpenAsset(MemberAsset(i))로 열어 Hard로 건다(순환 가능 — 자기 번호는 OpenAsset이
+    // InvalidArgument).
+    virtual usize GroupSize() const noexcept = 0;
+    virtual usize GroupIndex() const noexcept = 0;
+    virtual AssetId MemberAsset(usize index) const noexcept = 0;
 
 protected:
     ~AssetImportContext() = default;

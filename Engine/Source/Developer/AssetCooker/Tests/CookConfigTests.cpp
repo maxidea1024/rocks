@@ -12,7 +12,7 @@
 // 쿠킹 설정 시험이다(Docs/Design/AssetSystem 10.2절 결정 2·3 — A4a): 프로파일 엔진·프로젝트
 // 병합(멤버 병합·id 채움), 거부(id 형식·엔진 파일 없음·파일의 id 다름·bulkAlignment·JSON 문법·대입
 // 진단·크기 상한), 쿠킹 규칙(기본값·모든 칸·경로 형식·PrimaryAsset 타입·디렉터리), SHA-256(같은
-// 내용 같음·칸마다 바뀜), 엔진 기본 프로파일 파일, 읽기 오류, 할당 실패.
+// 내용 같음·칸마다 바뀜), 엔진 기본 프로파일 파일, 읽기 오류, 할당 실패, 텍스처 칸(12.14절 — A5j).
 using namespace rocks;
 
 namespace cook_config_tests_file {
@@ -106,15 +106,17 @@ TEST(CookConfig_ProfileMerge) {
     ConfigScene scene;
     REQUIRE(scene.Ready());
     REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
-                        "{\"graphicsBackend\": \"D3D12\", \"bulkAlignment\": 8192}"));
+                        "{\"graphicsBackends\": [\"D3D12\"], \"shaderFormats\": "
+                        "{\"D3D12\": {\"formats\": [\"D3D12_SM6\"]}}, \"bulkAlignment\": 8192}"));
     TargetProfile profile(scene.env.allocator);
     REQUIRE(scene.Profile("Windows", profile, nullptr));
-    CHECK(profile.id.View() == "Windows" && profile.graphicsBackend.View() == "D3D12" &&
+    CHECK(profile.id.View() == "Windows" && profile.graphicsBackends.Size() == 1 &&
+          profile.graphicsBackends[0].View() == "D3D12" &&
           profile.bulkCodec == CookBulkCodec::None && profile.bulkAlignment == 8192);
     REQUIRE(scene.Write("Project/TargetProfiles/Windows.json",
                         "{\"id\": \"Windows\", \"bulkCodec\": \"Zstd\"}"));
     REQUIRE(scene.Profile("Windows", profile, nullptr));
-    CHECK(profile.graphicsBackend.View() == "D3D12" && profile.bulkCodec == CookBulkCodec::Zstd &&
+    CHECK(profile.graphicsBackends.Size() == 1 && profile.bulkCodec == CookBulkCodec::Zstd &&
           profile.bulkAlignment == 8192);
     // 다시 읽어도 앞 값이 남지 않는다(기본값에서 시작).
     scene.files.Remove("Project/TargetProfiles/Windows.json");
@@ -127,7 +129,7 @@ TEST(CookConfig_ProfileMerge) {
     real.files = &platform::PhysicalFileSystem();
     real.engineConfigDirectory = engineConfig.View();
     real.projectConfigDirectory = "cook-config-no-project";
-    const char* defaults[] = {"Windows", "Android"};
+    const char* defaults[] = {"Windows", "Android", "Mac"};
     for (const char* id : defaults) {
         TextDiagnostics diagnostics(scene.env.allocator);
         CookConfigFailure failure;
@@ -351,7 +353,9 @@ TEST(CookConfig_Hashes) {
     ConfigScene scene;
     REQUIRE(scene.Ready());
     CookConfigContext context = scene.Context(scene.env.allocator);
-    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", "{\"graphicsBackend\": \"D3D12\"}"));
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
+                        "{\"graphicsBackends\": [\"D3D12\"], \"shaderFormats\": "
+                        "{\"D3D12\": {\"formats\": [\"D3D12_SM6\"]}}}"));
     TargetProfile base(scene.env.allocator);
     REQUIRE(scene.Profile("Windows", base, nullptr));
     auto baseHash = HashTargetProfile(context, base);
@@ -376,7 +380,10 @@ TEST(CookConfig_Hashes) {
         REQUIRE(changed.id.TryAssign("Android"));
         CHECK(distinct(HashTargetProfile(context, changed).Value()));
         REQUIRE(scene.Profile("Windows", changed, nullptr));
-        REQUIRE(changed.graphicsBackend.TryAssign("Vulkan"));
+        REQUIRE(changed.graphicsBackends[0].TryAssign("Vulkan"));
+        CHECK(distinct(HashTargetProfile(context, changed).Value()));
+        REQUIRE(scene.Profile("Windows", changed, nullptr));
+        REQUIRE(changed.shaderFormats.Find(StringView("D3D12"))->formats[0].TryAssign("D3D12_SM5"));
         CHECK(distinct(HashTargetProfile(context, changed).Value()));
         REQUIRE(scene.Profile("Windows", changed, nullptr));
         changed.bulkCodec = CookBulkCodec::Zstd;
@@ -398,6 +405,8 @@ TEST(CookConfig_Hashes) {
         "{\"alwaysCook\": [\"/Game/B\", \"/Game/A\"]}",
         "{\"neverCook\": [\"/Game/A\"]}",
         "{\"cookSoftReferences\": true}",
+        // 셰이더 라이브러리 개발 전용 퍼뮤테이션(10.3.1절 A4f3 1번).
+        "{\"cookDevelopmentShaders\": true}",
         "{\"primaryAssets\": [{\"type\": \"TestAsset\", \"directories\": [\"/Game/\"]}]}",
         "{\"primaryAssets\": [{\"type\": \"TestAsset\", \"directories\": [\"/Game/A/\"]}]}",
     };
@@ -453,7 +462,9 @@ TEST(CookConfig_AllocationFailures) {
     ConfigScene scene;
     REQUIRE(scene.Ready());
     REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
-                        "{\"graphicsBackend\": \"D3D12 with a longer backend name\"}"));
+                        "{\"graphicsBackends\": [\"D3D12\", \"Vulkan\"], \"shaderFormats\": "
+                        "{\"D3D12\": {\"formats\": [\"D3D12_SM6_WITH_A_LONGER_FORMAT_NAME\"]}, "
+                        "\"Vulkan\": {\"formats\": [\"VULKAN_SM5\"]}}}"));
     REQUIRE(scene.Write("Project/TargetProfiles/Windows.json", "{\"bulkCodec\": \"Zstd\"}"));
     REQUIRE(scene.Write("Project/CookSettings.json",
                         "{\"alwaysCook\": [\"/Game/Maps/LongerDirectoryName/\"], "
@@ -490,7 +501,8 @@ TEST(CookConfig_AllocationFailures) {
             CHECK(profileHash.Value() == baseProfileHash.Value() &&
                   settingsHash.Value() == baseSettingsHash.Value());
             CHECK(profile.id.View() == baseProfile.id.View() &&
-                  profile.graphicsBackend.View() == baseProfile.graphicsBackend.View() &&
+                  profile.graphicsBackends.Size() == baseProfile.graphicsBackends.Size() &&
+                  profile.shaderFormats.Count() == baseProfile.shaderFormats.Count() &&
                   profile.bulkCodec == baseProfile.bulkCodec &&
                   profile.bulkAlignment == baseProfile.bulkAlignment);
             CHECK(settings.alwaysCook.Size() == 1 && settings.neverCook.Size() == 1 &&
@@ -511,6 +523,182 @@ TEST(CookConfig_AllocationFailures) {
     }
 
     CHECK(failures >= 5);
+}
+
+// 텍스처 칸(12.14절): 기본값(빈 표·norm16 true·표에 없는 그룹은 UE 멤버 기본값), 키별 병합(그룹
+// 하나의 칸 하나만 덮음·엔진 그룹 유지·새 그룹은 기본값 뒤 병합), 검증(Min > Max·음수 크기·음수
+// maxAniso·OnlyFirstMip·계약 mipGen — index = 그룹 값, 경계는 받음), 모르는 그룹·필터 이름은 대입
+// 진단, 엔진 파일 둘의 27행·Android norm16 false, SHA-256이 텍스처 칸을 포함함.
+TEST(CookConfig_TextureProfile) {
+    ConfigScene scene;
+    REQUIRE(scene.Ready());
+    TargetProfile profile(scene.env.allocator);
+    CookConfigFailure failure;
+
+    // 기본값.
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", "{}"));
+    REQUIRE(scene.Profile("Windows", profile, &failure));
+    CHECK(profile.textureLodGroups.IsEmpty() && profile.textureNorm16Supported);
+    const TextureLodGroup fallback = FindTextureLodGroup(profile, TextureGroup::World);
+    CHECK(fallback.minLodSize == 1 && fallback.maxLodSize == 4096 && fallback.lodBias == 0 &&
+          fallback.mipGenSettings == TextureMipGenSettings::SimpleAverage &&
+          fallback.maxAniso == 0 && !fallback.highPriorityLoad &&
+          fallback.mipLoadOptions == TextureMipLoadOptions::AllMips &&
+          !fallback.cookPlatformTilingDisabled &&
+          fallback.minMagFilter == TextureLodMinMagFilter::Aniso &&
+          fallback.mipFilter == TextureLodMipFilter::Point && fallback.numStreamedMips == -1 &&
+          fallback.maxLodSizeLow == -1 && fallback.maxLodSizeMedium == -1 &&
+          fallback.maxLodSizeHigh == -1 && fallback.maxLodSizeEpic == -1);
+
+    // 키별 병합.
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
+                        "{\"textureLodGroups\": {"
+                        "\"World\": {\"maxLodSize\": 16384, \"minMagFilter\": \"Aniso\"},"
+                        "\"UI\": {\"mipGenSettings\": \"NoMipmaps\"}}}"));
+    REQUIRE(scene.Write("Project/TargetProfiles/Windows.json",
+                        "{\"textureLodGroups\": {"
+                        "\"World\": {\"lodBias\": 1},"
+                        "\"Bokeh\": {\"maxLodSize\": 256, \"mipFilter\": \"Linear\"}},"
+                        "\"textureNorm16Supported\": false}"));
+    REQUIRE(scene.Profile("Windows", profile, &failure));
+    CHECK(profile.textureLodGroups.Count() == 3 && !profile.textureNorm16Supported);
+    const TextureLodGroup* world = profile.textureLodGroups.Find(TextureGroup::World);
+    const TextureLodGroup* ui = profile.textureLodGroups.Find(TextureGroup::UI);
+    const TextureLodGroup* bokeh = profile.textureLodGroups.Find(TextureGroup::Bokeh);
+    REQUIRE(world != nullptr && ui != nullptr && bokeh != nullptr);
+    CHECK(world->maxLodSize == 16384 && world->lodBias == 1 && world->minLodSize == 1);
+    CHECK(ui->mipGenSettings == TextureMipGenSettings::NoMipmaps && ui->maxLodSize == 4096);
+    CHECK(bokeh->maxLodSize == 256 && bokeh->mipFilter == TextureLodMipFilter::Linear &&
+          bokeh->minMagFilter == TextureLodMinMagFilter::Aniso && bokeh->lodBias == 0);
+    scene.files.Remove("Project/TargetProfiles/Windows.json");
+
+    // 검증(index = TextureGroup 값).
+    struct Case {
+        const char* text;
+        TextureGroup group;
+    };
+    const Case rejects[] = {
+        {"{\"textureLodGroups\": {\"World\": {\"minLodSize\": 64, \"maxLodSize\": 32}}}",
+         TextureGroup::World},
+        {"{\"textureLodGroups\": {\"UI\": {\"minLodSize\": -1}}}", TextureGroup::UI},
+        {"{\"textureLodGroups\": {\"Effects\": {\"minLodSize\": 0, \"maxLodSize\": -1}}}",
+         TextureGroup::Effects},
+        {"{\"textureLodGroups\": {\"Skybox\": {\"maxAniso\": -2}}}", TextureGroup::Skybox},
+        {"{\"textureLodGroups\": {\"Bokeh\": {\"mipLoadOptions\": \"OnlyFirstMip\"}}}",
+         TextureGroup::Bokeh},
+        {"{\"textureLodGroups\": {\"Pixels2D\": {\"mipGenSettings\": \"FromTextureGroup\"}}}",
+         TextureGroup::Pixels2D},
+        {"{\"textureLodGroups\": {\"8BitData\": {\"mipGenSettings\": \"Sharpen0\"}}}",
+         TextureGroup::EightBitData},
+        {"{\"textureLodGroups\": {\"16BitData\": {\"mipGenSettings\": \"Blur5\"}}}",
+         TextureGroup::SixteenBitData},
+    };
+    for (const Case& item : rejects) {
+        REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", item.text));
+        auto read = scene.Profile("Windows", profile, &failure);
+        CHECK(!read && read.Error() == ErrorCode::InvalidArgument &&
+              failure.code == AssetDiagnosticCode::InvalidSetting &&
+              failure.field == CookConfigField::TextureLodGroup &&
+              failure.file == CookConfigFile::None &&
+              failure.index == static_cast<uint32>(item.group));
+    }
+
+    const char* accepted[] = {
+        "{\"textureLodGroups\": {\"World\": {\"minLodSize\": 32, \"maxLodSize\": 32}}}",
+        "{\"textureLodGroups\": {\"World\": {\"minLodSize\": 0, \"maxLodSize\": 0}}}",
+        "{\"textureLodGroups\": {\"World\": {\"mipGenSettings\": \"Unfiltered\", "
+        "\"maxAniso\": 16, \"mipLoadOptions\": \"Default\"}}}",
+        "{\"textureLodGroups\": {\"Project01\": {\"numStreamedMips\": 3, \"maxLodSizeLow\": 512, "
+        "\"maxLodSizeEpic\": 8192, \"highPriorityLoad\": true, "
+        "\"cookPlatformTilingDisabled\": true}}}",
+    };
+    for (const char* text : accepted) {
+        REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", text));
+        CHECK(scene.Profile("Windows", profile, &failure));
+    }
+
+    // 모르는 그룹 이름·필터 이름은 대입 진단(UE처럼 aniso로 보지 않는다).
+    const char* unknown[] = {
+        "{\"textureLodGroups\": {\"Worlds\": {\"lodBias\": 1}}}",
+        "{\"textureLodGroups\": {\"World\": {\"minMagFilter\": \"Anisotropic\"}}}",
+        "{\"textureLodGroups\": {\"World\": {\"mipFilter\": \"Aniso\"}}}",
+        "{\"textureLodGroups\": {\"World\": {\"filter\": \"Point\"}}}",
+        "{\"textureNorm16Supported\": 1}",
+    };
+    for (const char* text : unknown) {
+        REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", text));
+        TextDiagnostics diagnostics(scene.env.allocator);
+        auto read = ReadTargetProfile(scene.Context(scene.env.allocator), "Windows", profile,
+                                      diagnostics, &failure);
+        CHECK(!read && failure.field == CookConfigField::Text && diagnostics.HasErrors());
+    }
+
+    // SHA-256이 텍스처 칸을 포함한다.
+    CookConfigContext context = scene.Context(scene.env.allocator);
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", "{}"));
+    REQUIRE(scene.Profile("Windows", profile, nullptr));
+    auto plain = HashTargetProfile(context, profile);
+    REQUIRE(plain);
+    profile.textureNorm16Supported = false;
+    auto norm16 = HashTargetProfile(context, profile);
+    REQUIRE(norm16);
+    CHECK(!(norm16.Value() == plain.Value()));
+    profile.textureNorm16Supported = true;
+    TextureLodGroup changed;
+    changed.maxAniso = 4;
+    REQUIRE(profile.textureLodGroups.InsertOrAssign(TextureGroup::World, changed));
+    auto grouped = HashTargetProfile(context, profile);
+    REQUIRE(grouped);
+    CHECK(!(grouped.Value() == plain.Value()) && !(grouped.Value() == norm16.Value()));
+
+    // 엔진 기본 파일(UE 5.8 BaseDeviceProfiles GlobalDefaults 27행).
+    String engineConfig = EngineConfigFromSource(scene.env.allocator);
+    CookConfigContext real = scene.Context(scene.env.allocator);
+    real.files = &platform::PhysicalFileSystem();
+    real.engineConfigDirectory = engineConfig.View();
+    real.projectConfigDirectory = "cook-config-no-project";
+    const char* ids[] = {"Windows", "Android", "Mac"};
+    for (const char* id : ids) {
+        TextDiagnostics diagnostics(scene.env.allocator);
+        TargetProfile engine(scene.env.allocator);
+        REQUIRE(ReadTargetProfile(real, id, engine, diagnostics, &failure));
+        CHECK(engine.textureLodGroups.Count() == 27);
+        CHECK(engine.textureNorm16Supported == (StringView(id) != "Android"));
+        const TextureLodGroup* group = engine.textureLodGroups.Find(TextureGroup::World);
+        REQUIRE(group != nullptr);
+        CHECK(group->maxLodSize == 16384 && group->minMagFilter == TextureLodMinMagFilter::Aniso &&
+              group->mipFilter == TextureLodMipFilter::Point);
+        group = engine.textureLodGroups.Find(TextureGroup::Effects);
+        REQUIRE(group != nullptr);
+        CHECK(group->minMagFilter == TextureLodMinMagFilter::Linear);
+        group = engine.textureLodGroups.Find(TextureGroup::UI);
+        REQUIRE(group != nullptr);
+        CHECK(group->mipGenSettings == TextureMipGenSettings::NoMipmaps);
+        group = engine.textureLodGroups.Find(TextureGroup::Shadowmap);
+        REQUIRE(group != nullptr);
+        CHECK(group->numStreamedMips == 3);
+        group = engine.textureLodGroups.Find(TextureGroup::Bokeh);
+        REQUIRE(group != nullptr);
+        CHECK(group->maxLodSize == 256 && group->minMagFilter == TextureLodMinMagFilter::Linear &&
+              group->mipFilter == TextureLodMipFilter::Linear);
+        group = engine.textureLodGroups.Find(TextureGroup::Pixels2D);
+        REQUIRE(group != nullptr);
+        CHECK(group->minMagFilter == TextureLodMinMagFilter::Point);
+        const TextureGroup dataGroups[] = {TextureGroup::EightBitData,
+                                           TextureGroup::SixteenBitData};
+        for (TextureGroup data : dataGroups) {
+            group = engine.textureLodGroups.Find(data);
+            REQUIRE(group != nullptr);
+            CHECK(group->minLodSize == 1 && group->maxLodSize == 4096 &&
+                  group->minMagFilter == TextureLodMinMagFilter::Point &&
+                  group->mipFilter == TextureLodMipFilter::Point &&
+                  group->mipGenSettings == TextureMipGenSettings::NoMipmaps);
+        }
+
+        // UE 행에 없는 그룹(ColorLookupTable 등)은 표에 없고 기본값이다.
+        CHECK(engine.textureLodGroups.Find(TextureGroup::ColorLookupTable) == nullptr &&
+              FindTextureLodGroup(engine, TextureGroup::ColorLookupTable).maxLodSize == 4096);
+    }
 }
 
 } // namespace cook_config_tests_file

@@ -33,14 +33,11 @@ struct FrameView {
     uint32 mip;
 };
 
-constexpr FrameView FrameViews[] = {{screen::InspectorView::None, 0, 0},
-                                    {screen::InspectorView::Texture2D, 0, 0},
-                                    {screen::InspectorView::Texture2D, 0, 1},
-                                    {screen::InspectorView::Hdr2D, 0, 0},
-                                    {screen::InspectorView::Texture2DArray, 2, 0},
-                                    {screen::InspectorView::Cube, 0, 0},
-                                    {screen::InspectorView::CubeArray, 1, 0},
-                                    {screen::InspectorView::Volume, 2, 0}};
+constexpr FrameView FrameViews[] = {
+    {screen::InspectorView::None, 0, 0},           {screen::InspectorView::Texture2D, 0, 0},
+    {screen::InspectorView::Texture2D, 0, 1},      {screen::InspectorView::Hdr2D, 0, 0},
+    {screen::InspectorView::Texture2DArray, 2, 0}, {screen::InspectorView::Cube, 0, 0},
+    {screen::InspectorView::CubeArray, 1, 0},      {screen::InspectorView::Volume, 2, 0}};
 constexpr uint64 ScreenFrames = sizeof(FrameViews) / sizeof(FrameViews[0]);
 static_assert(ScreenFrames <= screen::MaxCaptureSlots, "one capture slot per frame");
 constexpr double FrameSeconds = 1.0 / 60.0;
@@ -157,10 +154,11 @@ double FilmChannel(double logColor, const render::TonemapConstants& constants, d
     const double shoulderScale = 1.0 + whiteClip - shoulder;
     const double straight = slope * (logColor + straightMatch);
     double toeColor =
-        -blackClip + (2.0 * toeScale) / (1.0 + exp((-2.0 * slope / toeScale) * (logColor - toeMatch)));
-    double shoulderColor = (1.0 + whiteClip) -
-                           (2.0 * shoulderScale) /
-                               (1.0 + exp((2.0 * slope / shoulderScale) * (logColor - shoulderMatch)));
+        -blackClip +
+        (2.0 * toeScale) / (1.0 + exp((-2.0 * slope / toeScale) * (logColor - toeMatch)));
+    double shoulderColor =
+        (1.0 + whiteClip) - (2.0 * shoulderScale) / (1.0 + exp((2.0 * slope / shoulderScale) *
+                                                               (logColor - shoulderMatch)));
     if (!(logColor < toeMatch)) {
         toeColor = straight;
     }
@@ -207,9 +205,9 @@ Color3 FilmToneMap(const Color3& colorAP1, const render::TonemapConstants& const
 
     double hue = 0.0;
     if (colorAP0.c[0] != colorAP0.c[1] || colorAP0.c[1] != colorAP0.c[2]) {
-        hue = (180.0 / 3.14159265358979) *
-              atan2(sqrt(3.0) * (colorAP0.c[1] - colorAP0.c[2]),
-                    2.0 * colorAP0.c[0] - colorAP0.c[1] - colorAP0.c[2]);
+        hue =
+            (180.0 / 3.14159265358979) * atan2(sqrt(3.0) * (colorAP0.c[1] - colorAP0.c[2]),
+                                               2.0 * colorAP0.c[0] - colorAP0.c[1] - colorAP0.c[2]);
     }
 
     if (hue < 0.0) {
@@ -311,8 +309,8 @@ Expected ExpectedPixel(const float (&scene)[3]) noexcept {
         Color3{{scene[0] * constants.exposure[0], scene[1] * constants.exposure[0],
                 scene[2] * constants.exposure[0]}},
         constants);
-    return Expected{{EncodeSrgb8(display.c[0]), EncodeSrgb8(display.c[1]),
-                     EncodeSrgb8(display.c[2])}};
+    return Expected{
+        {EncodeSrgb8(display.c[0]), EncodeSrgb8(display.c[1]), EncodeSrgb8(display.c[2])}};
 }
 
 // --- 엔진 실행 ---
@@ -329,8 +327,8 @@ void ScreenCheck(bool condition, const char* name, const char* mode, const char*
 // 엔진 루프를 ScreenHost에 잇는다(EngineHost HostLoopBridge의 렌더 부분과 같다).
 class ScreenTestHooks final : public EngineLoopHooks {
 public:
-    ScreenTestHooks(screen::ScreenHost& screen, platform::Window& window,
-                    input::InputQueue& queue, GameInstanceClient& client) noexcept
+    ScreenTestHooks(screen::ScreenHost& screen, platform::Window& window, input::InputQueue& queue,
+                    GameInstanceClient& client) noexcept
         : screen_(screen), window_(window), queue_(queue), client_(client) {
     }
 
@@ -466,7 +464,8 @@ void CheckInspector(const screen::ScreenRenderer& renderer, const char* name,
                       "inspector 2D array shows layer 2");
     }
 
-    // cube 가로 십자: (2, 1) 칸 +X 빨강, (1, 0) +Y 초록, (3, 1) -Z 노랑, (1, 1) +Z 파랑, (0, 0) 밖 검정.
+    // cube 가로 십자: (2, 1) 칸 +X 빨강, (1, 0) +Y 초록, (3, 1) -Z 노랑, (1, 1) +Z 파랑, (0, 0) 밖
+    // 검정.
     const Array<uint8>& cube = renderer.CapturedPixels(5);
     if (HasCapture(cube)) {
         CheckExpected(cube, 100, 45, RedPixel, name, mode, "inspector cube cross +X face");
@@ -565,8 +564,8 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
     // 화면 가운데는 HDR cube(2, 1, 0.5), 오른쪽 cube(8, 8, 8)는 x = 80 + 80·250/450, 위 가운데는
     // Pending 텍스처 cube(흰 typed 대체 × 1), 왼쪽 위 모서리는 배경이다(카메라 원점, 수평 FOV 90°).
     constexpr float PendingColor[3] = {1.0f, 1.0f, 1.0f};
-    const uint32 rightX = ScreenWidth / 2 +
-                          static_cast<uint32>((ScreenWidth / 2) * screen::SceneRightOffset /
+    const uint32 rightX =
+        ScreenWidth / 2 + static_cast<uint32>((ScreenWidth / 2) * screen::SceneRightOffset /
                                               (screen::SceneCubeDistance - 50.0));
     CheckPixel(pixels, ScreenWidth / 2, ScreenHeight / 2, screen::SceneCenterColor, name, modeName,
                "HDR cube pixel equals the CPU filmic tone map");

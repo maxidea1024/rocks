@@ -21,4 +21,15 @@ namespace rocks::commandlet_host {
 ROCKS_ASSETCOMMANDLETS_API Result<int32>
 RunAssetCookCommand(void* context, Span<const StringView> args, CommandletOutput& output) noexcept;
 
+// asset-load-cooked: 쿠킹 루트의 매니페스트로 에셋 하나를 단발 로드해 확인한다(AssetSystem 13.1절
+// A6). context는 AssetCommandContext다.
+ROCKS_ASSETCOMMANDLETS_API Result<int32>
+RunAssetLoadCookedCommand(void* context, Span<const StringView> args,
+                          CommandletOutput& output) noexcept;
+
+// nugget-gc: 프로젝트 너겟 로컬 backend의 GC다(AssetSystem 13.1절 A6, 9.1절 9). context는
+// AssetCommandContext다.
+ROCKS_ASSETCOMMANDLETS_API Result<int32>
+RunNuggetGcCommand(void* context, Span<const StringView> args, CommandletOutput& output) noexcept;
+
 } // namespace rocks::commandlet_host

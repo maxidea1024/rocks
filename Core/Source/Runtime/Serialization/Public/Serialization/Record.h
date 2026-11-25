@@ -165,6 +165,14 @@ public:
         return EndField(static_cast<uint32>(type));
     }
 
+    // 마지막으로 끝낸(EndField) 필드 하나를 걷어 낸다(차이 쓰기 — 기준과 같은 struct 멤버, Docs/
+    // Design/RuntimeClassMetadata.ko.md 'A5b'). writer를 그 TLV 시작으로 자르고 필드 수를 되돌린다.
+    // 쓴 작업량은 환급하지 않는다. 열린 필드가 있거나, 끝낸 필드가 없거나(이미 걷어 냈다 포함), 그
+    // 뒤에 무엇을 더 썼으면 InvalidArgument다.
+    Result<void> CancelField() noexcept;
+    // 마지막으로 끝낸 필드 payload의 writer 안 시작 offset이다(없으면 IndexNone).
+    usize LastFieldPayloadOffset() const noexcept;
+
     // 필드 수·payload 크기를 채운다. 열린 필드가 있으면 InvalidArgument, 전체가 maxTotalBytes를
     // 넘으면 CapacityExceeded다.
     Result<void> End() noexcept;
@@ -180,6 +188,9 @@ private:
     ArchiveWriter* out_;
     usize start_;
     usize field_ = NoField;
+    // 마지막으로 끝낸 필드의 TLV 시작과 끝이다(CancelField).
+    usize last_ = NoField;
+    usize lastEnd_ = NoField;
     uint32 count_ = 0;
     RecordLimits limits_;
 };

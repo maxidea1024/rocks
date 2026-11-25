@@ -165,10 +165,26 @@ StringView ExecutableDirectoryOf(StringView executablePath) noexcept {
     return StringView(data, end);
 }
 
-Result<void> ResolveCookedRoot(StringView configured, StringView executableDir,
+Result<void> ResolveCookedRoot(StringView configured, StringView engineOnlyDirectory,
+                               StringView runtimeProfile, StringView executableDir,
                                String& out) noexcept {
     if (!configured.IsEmpty()) {
         return out.TryAppend(configured);
+    }
+
+    if (!engineOnlyDirectory.IsEmpty()) {
+        if (runtimeProfile.IsEmpty()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StringView pieces[] = {engineOnlyDirectory, "/Saved/Cooked/", runtimeProfile};
+        for (StringView piece : pieces) {
+            if (auto appended = out.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+
+        return Result<void>::Success();
     }
 
     if (executableDir.IsEmpty()) {

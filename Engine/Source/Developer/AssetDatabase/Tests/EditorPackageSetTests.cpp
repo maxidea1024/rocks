@@ -103,7 +103,7 @@ struct ShapeScene {
             break;
         }
         case BaseShape::CorruptRecord:
-            record = OneFieldRecord(env.allocator, ImportRecordSchema);
+            record = OneFieldRecord(env.allocator, ImportRecordSchema, ImportRecordVersion);
             options.importRecord = record.View();
             break;
         case BaseShape::OwnerViolation:
