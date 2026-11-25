@@ -40,6 +40,6 @@
 | AU7 | `ConcurrencyGroup`·해결 규칙, voice 상한·steal, 가상화, `SoundCategory`·`MixSnapshot`, `MixBus` graph·send·plan 교체, EQ·compressor·plate 리버브·delay, 리버브 존(3.15절), 감쇠 나머지(모양·공기 흡수·거리별 send), 차폐 목표값 입력 | AU3(AU6과 병행 가능), 차폐 완성은 PR16 | 3.19절 동시 발음·가상화·리버브 존 시험, 그래프 교체 시 꼬리 보존 |
 | AU8 | trace 채널·카운터, 재생 추적, 콘솔 명령, WAV 캡처. 3D 시각화·`AudioInspector`는 PR17 뒤 같은 단계의 후반(AU8b) | AU3(AU8b는 PR17) | "왜 안 들리나"를 `audio.playback`으로 재현, trace-report 집계 |
 | AU9 | 장치 교체·rate 변경·앱 수명·모바일 세션, 다채널 출력·downmix, 품질 프로필, 1시간 부하, 실시간 등급 판단, 병렬 렌더 판단 | AU2, PR9, PR13, PR15, PR19 | 3.18절 목표, 콜백 종료 뒤 접근 0, 실행 플랫폼별 결과 기록 |
-| AU10 | `BeatClock`, 모듈레이션, `SoundEvent`, `SoundGraph`(M7), `SignalBus`, 공간화·soundfield 확장 인터페이스(HRTF·ambisonics), convolution 리버브, 지역화 대사, 에디터 미리듣기. 마이크 입력은 capture backend 설계를 이 문서 개정으로 먼저 정한다 | AU6, AU7, AU8, PR17, PR20 | 기능별 CPU·메모리 예산 측정, 그래프 교체·꼬리 보존, 오프라인 재현 |
+| AU10 | `BeatClock`, 모듈레이션, `SoundGraph`(M7 — 합성 사운드는 이것 하나, AD29), `SignalBus`, 공간화·soundfield 확장 인터페이스(HRTF·ambisonics), convolution 리버브, 지역화 대사, 에디터 미리듣기. 마이크 입력은 capture backend 설계를 이 문서 개정으로 먼저 정한다 | AU6, AU7, AU8, PR17, PR20 | 기능별 CPU·메모리 예산 측정, 그래프 교체·꼬리 보존, 오프라인 재현 |
 
 단계마다 리뷰어 1명이 교차 검증하고, 스펙·문서 관점은 묶음 끝에 본다.

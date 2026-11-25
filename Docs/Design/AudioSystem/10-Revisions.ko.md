@@ -15,3 +15,4 @@
 - 개정 11(2026-11-23): Mixer2 구현 리뷰 반영. 필수 — mailbox는 마지막 값이 아니라 그 수명의 최소 fade만 쓴다(스케줄링에 따라 steal이 사라지던 문제·ABA), stop-all은 RT가 처리한 epoch를 출판하고 제어가 미처리 epoch의 짧은 fade를 유지한다. 권장 — 두 스레드 시험을 ACK gate·terminal 관찰로 강화, 처리 순서·Stopping·Prepared stop-all·짧은 fade·stale 거부·clip 해제 시험, seqlock·계수 칸 static_assert. 참고 — seqlock 순번 64비트 문구, stop-all 건너뜀은 무시 계수에서 뺀다.
 - 개정 12(2026-11-23): 3.24절 AU5 앞당김 — ADPCM 블록 코덱(UE MS ADPCM 형식·식, 채널 블록 교차 배치, 계수 탐색 인코더, 임의 접근 디코드). 청크 표·`AudioDecoder` 인터페이스·쿠킹은 PR11 뒤, Opus는 PR6 뒤. 구현 리뷰 반영: 넘침 없는 크기 검사, delta 상한·64비트 디코드, 유효 frame 오차, 리터럴 표·byte 대조 시험.
 - 개정 13(2026-11-23): 3.25절 AU4 앞당김 — 원본 디코드 라이브러리(결과 형식 `DecodedSourceAudio`, WAV RIFF/RIFX·EXTENSIBLE·smpl·cue·labl, AIFF·AIFF-C NONE·sowt·fl32). `SoundClipImporter`·`SoundClip` 에셋은 AU3 뒤.
+- 개정 29(2026-11-26): Sound Cue 대응 `SoundEvent` 삭제, 합성 사운드는 `SoundGraph` 하나(AD29 사용자 결정). 2·3.9·4·5·6·7절과 [노드 그래프](../NodeGraph/README.ko.md) 1·12·15절 고침.

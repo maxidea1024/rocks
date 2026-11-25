@@ -28,3 +28,4 @@
 | 5.1 서라운드 쌍 | 장치 마스크(Windows 기본 BL·BR 210°·150°) | SL·SR 250°·110° 고정, 장치 마스크 대응은 AU9 | ITU-R BS.775 배치, 내부 순서 고정(3.3절) |
 | HPF 계수 | `FastTan` 근사 | `PlatformMath::Tan` | 정확한 기준값 대조 |
 | 다채널 분리 임포트 | `_L`·`_R` 파일 묶음 임포트 | 받지 않음 | 수요 생기면 |
+| 합성 사운드 에셋 | Sound Cue(`USoundNode` 트리)와 MetaSounds 둘 다 | `SoundGraph`(MetaSounds 대응) 하나 | UE도 새 작업은 MetaSounds가 주력이고 Sound Cue 기능(랜덤·레이어·switch·지연·loop)은 그래프 노드로 덮인다. 두 체계를 따로 유지하지 않는다(AD29) |
