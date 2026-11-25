@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Rocks.Tooling.Checks;
 
@@ -26,7 +27,8 @@ public static class CSharpMemberSpacing
     public sealed record Result(IReadOnlyList<int> Lines, int ParseErrorLine, string Fixed);
 
     /// <summary>
-    /// 텍스트 하나를 검사한다. 줄 끝은 텍스트의 첫 줄 끝(CRLF가 있으면 CRLF, 아니면 LF)을 따른다.
+    /// 텍스트 하나를 검사한다. 넣는 줄 끝은 텍스트의 첫 줄 끝(CRLF면 CRLF, 아니면 LF — 줄 끝이 섞인 파일도 첫 줄 끝)을 따른다.
+    /// 전처리 기호 없이 파싱하므로 실제 빌드에서 켜지는 `#if` 쪽도 disabled text로 보고 보지 않는다(한계).
     /// </summary>
     public static Result Inspect(string text)
     {
@@ -38,35 +40,42 @@ public static class CSharpMemberSpacing
         }
 
         SyntaxNode root = tree.GetRoot();
-        // 넣을 자리(뒤 선언 leading trivia 맨 앞)와 넣을 줄 끝 수다(앞 선언이 같은 줄에서 끝나면 둘 — 줄을 나누고 빈 줄을 만든다).
-        List<(int Position, int Newlines)> insertions = [];
+        SourceText source = tree.GetText();
+        string newline = FirstLineEnding(text);
+        // 바꿀 범위와 넣을 텍스트다. 보통은 뒤 선언 leading trivia 맨 앞(들여쓰기 앞)에 줄 끝 하나를 넣는다. 앞 선언이 같은 줄에서
+        // 끝나면 앞 선언 뒤 공백을 지우고 줄 끝 둘과 앞 선언 첫 줄의 들여쓰기를 넣는다(줄을 나누고 빈 줄을 만든다).
+        List<(int Start, int Length, string Text, int Line)> edits = [];
         foreach (SyntaxList<MemberDeclarationSyntax> members in DeclarationLists(root))
         {
             for (int index = 1; index < members.Count; index++)
             {
-                int newlines = MissingNewlines(members[index - 1], members[index]);
-                if (newlines != 0)
+                MemberDeclarationSyntax previous = members[index - 1];
+                MemberDeclarationSyntax next = members[index];
+                int newlines = MissingNewlines(previous, next);
+                int line = tree.GetLineSpan(new(next.FullSpan.Start, 0)).StartLinePosition.Line + 1;
+                if (newlines == 1)
                 {
-                    insertions.Add((members[index].FullSpan.Start, newlines));
+                    edits.Add((next.FullSpan.Start, 0, newline, line));
+                }
+                else if (newlines == 2)
+                {
+                    int start = previous.Span.End;
+                    TextLine first = source.Lines.GetLineFromPosition(previous.SpanStart);
+                    string indent = Indentation(source.ToString(first.Span));
+                    edits.Add((start, next.FullSpan.Start - start, newline + newline + indent, line));
                 }
             }
         }
 
-        insertions.Sort((left, right) => left.Position.CompareTo(right.Position));
-        string newline = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        edits.Sort((left, right) => left.Start.CompareTo(right.Start));
         StringBuilder fixedText = new(text);
-        for (int index = insertions.Count - 1; index >= 0; index--)
+        for (int index = edits.Count - 1; index >= 0; index--)
         {
-            for (int count = 0; count < insertions[index].Newlines; count++)
-            {
-                fixedText.Insert(insertions[index].Position, newline);
-            }
+            fixedText.Remove(edits[index].Start, edits[index].Length);
+            fixedText.Insert(edits[index].Start, edits[index].Text);
         }
 
-        int[] lines = insertions
-            .Select(insertion => tree.GetLineSpan(new(insertion.Position, 0)).StartLinePosition.Line + 1)
-            .ToArray();
-        return new(lines, 0, fixedText.ToString());
+        return new(edits.Select(edit => edit.Line).ToArray(), 0, fixedText.ToString());
     }
 
     /// <summary>
@@ -80,9 +89,21 @@ public static class CSharpMemberSpacing
         {
             byte[] bytes = File.ReadAllBytes(file);
             bool bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
-            string text = new UTF8Encoding(false).GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0));
-            Result result = Inspect(text);
             string relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+            // 잘못된 byte를 U+FFFD로 바꿔 조용히 다시 쓰지 않게 엄격히 읽는다(UTF-8이 아니면 보고만 한다).
+            string text;
+            try
+            {
+                text = new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes, bom ? 3 : 0,
+                    bytes.Length - (bom ? 3 : 0));
+            }
+            catch (DecoderFallbackException)
+            {
+                failures.Add(new(relative, 0, Rule, "not UTF-8"));
+                continue;
+            }
+
+            Result result = Inspect(text);
             if (result.ParseErrorLine != 0)
             {
                 failures.Add(new(relative, result.ParseErrorLine, Rule, "parse error"));
@@ -105,6 +126,25 @@ public static class CSharpMemberSpacing
         }
 
         return failures;
+    }
+
+    // 텍스트의 첫 줄 끝이다(줄 끝이 없으면 LF).
+    private static string FirstLineEnding(string text)
+    {
+        int index = text.IndexOf('\n');
+        return index > 0 && text[index - 1] == '\r' ? "\r\n" : "\n";
+    }
+
+    // 줄 앞의 들여쓰기(공백·탭)다.
+    private static string Indentation(string line)
+    {
+        int length = 0;
+        while (length < line.Length && (line[length] == ' ' || line[length] == '\t'))
+        {
+            length++;
+        }
+
+        return line[..length];
     }
 
     // 검사할 선언 목록이다: 컴파일 단위·namespace 본문(file-scoped 포함)·형식 본문(class·struct·record·interface). 열거형은

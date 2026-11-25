@@ -52,9 +52,16 @@ internal static class CSharpMemberSpacingTests
         });
         suite.Add("MemberSpacing.Exceptions", () =>
         {
-            // 연속 필드·이벤트 필드는 묶어도 된다.
+            // 연속 필드·이벤트 필드는 묶어도 된다. accessor가 있는 이벤트는 필드가 아니다.
             Expect("field group", Lines("class A", "{", "    const int A = 1;", "    int b;", "    event System.Action? E;",
                 "}"), []);
+            Expect("event accessors", Lines("class A", "{", "    int b;", "    event System.Action E { add { } remove { } }",
+                "}"), [4]);
+            // #region·#pragma도 지시문이다.
+            Expect("region", Lines("class A", "{", "    void X() { }", "    #region Y", "    void Y() { }", "    #endregion",
+                "}"), []);
+            Expect("pragma", Lines("class A", "{", "    void X() { }", "#pragma warning disable CS0168", "    void Y() { }", "}"),
+                []);
             // 열거형 멤버는 대상이 아니다.
             Expect("enum", Lines("enum E", "{", "    A,", "    B,", "}"), []);
             // 사이에 전처리 지시문이 있으면 보지 않는다(꺼진 쪽 선언은 보이지 않는다).
@@ -92,14 +99,23 @@ internal static class CSharpMemberSpacingTests
             Expect("block namespace", Lines("namespace N", "{", "    class A { }", "    delegate void D();", "}"), [4]);
             // 같은 줄의 두 선언은 줄을 나누고 빈 줄을 만든다.
             Expect("same line", Lines("class A", "{", "    void X() { } void Y() { }", "}"), [3],
-                Lines("class A", "{", "    void X() { } ", "", "void Y() { }", "}"));
+                Lines("class A", "{", "    void X() { }", "", "    void Y() { }", "}"));
+            // 중첩 형식·struct·record 본문·C# 14 extension 블록도 대상이다.
+            Expect("nested", Lines("class A", "{", "    class B", "    {", "        void X() { }", "        void Y() { }", "    }",
+                "}"), [6]);
+            Expect("struct", Lines("struct S", "{", "    void X() { }", "    void Y() { }", "}"), [4]);
+            Expect("record", Lines("record R", "{", "    void X() { }", "    void Y() { }", "}"), [4]);
+            Expect("extension", Lines("static class E", "{", "    extension(int value)", "    {",
+                "        public int A() => value;", "        public int B() => value;", "    }", "}"), [6]);
             return Task.CompletedTask;
         });
         suite.Add("MemberSpacing.LineEndingsParseErrorsAndFiles", () =>
         {
-            // CRLF 파일은 CRLF로 고친다.
+            // CRLF 파일은 CRLF로 고친다. 줄 끝이 섞이면 첫 줄 끝을 따른다.
             string crlf = "class A\r\n{\r\n    void X() { }\r\n    void Y() { }\r\n}\r\n";
             Expect("crlf", crlf, [4], "class A\r\n{\r\n    void X() { }\r\n\r\n    void Y() { }\r\n}\r\n");
+            string mixed = "class A\n{\r\n    void X() { }\r\n    void Y() { }\r\n}\r\n";
+            Expect("mixed", mixed, [4], "class A\n{\r\n    void X() { }\r\n\n    void Y() { }\r\n}\r\n");
             // 구문 오류는 건너뛰지 않고 첫 오류 행을 알린다.
             CSharpMemberSpacing.Result broken = CSharpMemberSpacing.Inspect(Lines("class A", "{", "    void X( { }", "}"));
             Verify.That(broken.ParseErrorLine == 3 && broken.Lines.Count == 0, "parse error line");
@@ -121,6 +137,14 @@ internal static class CSharpMemberSpacingTests
                 byte[] written = File.ReadAllBytes(file);
                 Verify.That(written.Take(3).SequenceEqual(bom), "BOM kept");
                 Verify.That(CSharpMemberSpacing.Check(directory, [file], apply: false).Count == 0, "clean after apply");
+
+                // UTF-8이 아닌 파일은 바꾸지 않고 알린다.
+                string latin = Path.Combine(directory, "L.cs");
+                byte[] latinBytes = [.. System.Text.Encoding.ASCII.GetBytes("class L { } // "), 0xE9, 0x0A];
+                File.WriteAllBytes(latin, latinBytes);
+                IReadOnlyList<CheckFailure> encoding = CSharpMemberSpacing.Check(directory, [latin], apply: true);
+                Verify.That(encoding.Count == 1 && encoding[0].Line == 0 && encoding[0].Message == "not UTF-8" &&
+                    File.ReadAllBytes(latin).SequenceEqual(latinBytes), "not UTF-8 is reported and kept");
 
                 string bad = Path.Combine(directory, "B.cs");
                 File.WriteAllText(bad, Lines("class B", "{", "    void X( { }", "}"));

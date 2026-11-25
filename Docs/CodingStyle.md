@@ -126,7 +126,7 @@ C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검�
 - 구현: `Rocks.Tooling.Checks`의 `CSharpMemberSpacing`이 `Microsoft.CodeAnalysis.CSharp` 5.9.0(정확한 버전 하나로 고정)의 구문 트리만 쓴다. 파싱 언어 버전은 `LanguageVersion.CSharp14`(Programs/Directory.Build.props의 LangVersion 14.0과 같다)이고, 컴파일·의미 분석은 하지 않는다.
   - 대상 파일은 `Build/Format/Rocks.Format.slnx` 프로젝트들의 Compile 항목이다(서식 검사의 소속 확인과 같은 목록).
   - 위반은 `경로:행: member-blank-line: 내용`으로 알린다. 행은 뒤 선언의 첫 줄(주석·특성 포함)이다. 구문 오류가 있는 파일은 건너뛰지 않고 `경로:행: member-blank-line: parse error`로 알린다.
-  - `--write`는 뒤 선언 leading trivia의 맨 앞(들여쓰기 앞)에 줄 끝 하나를 넣는다. 줄 끝 문자(CRLF·LF)는 그 파일의 기존 줄 끝을 따르고, 인코딩·BOM은 그대로 둔다. 빈 줄 하나만 넣으므로 IDE2000(연속 빈 줄)을 만들지 않는다.
+  - `--write`는 뒤 선언 leading trivia의 맨 앞(들여쓰기 앞)에 줄 끝 하나를 넣는다. 줄 끝 문자(CRLF·LF)는 그 파일의 첫 줄 끝을 따르고(줄 끝이 섞인 파일도 첫 줄 끝), 인코딩·BOM은 그대로 둔다. 두 선언이 같은 줄에 있으면 앞 선언 뒤 공백을 지우고 줄 끝 둘과 앞 선언 첫 줄의 들여쓰기를 넣는다. UTF-8이 아닌 파일은 고치지 않고 `경로:0: member-blank-line: not UTF-8`로 알린다(잘못된 byte를 바꿔 다시 쓰지 않는다). 한계: 전처리 기호 없이 파싱하므로 실제 빌드에서 켜지는 `#if` 쪽(`NET…_OR_GREATER` 등)도 disabled text로 보고 보지 않는다. 빈 줄 하나만 넣으므로 IDE2000(연속 빈 줄)을 만들지 않는다.
   - 순서(`--write`): 빈 줄 수정 → dotnet format 수정 → 둘 다 다시 검증. 검사만 할 때는 dotnet format 검증과 빈 줄 검사를 함께 알린다.
 - 버린 대안:
   - 빌드 분석기(Roslyn analyzer 프로젝트를 모든 C# 프로젝트에 참조): `TreatWarningsAsErrors`라 위반이 곧 빌드 실패가 된다. 서식은 빌드가 아니라 format 검사의 몫이라는 지금 구조와도 어긋난다.
