@@ -303,7 +303,8 @@ void AiController::OnFrameworkEndPlay(EndPlayReason reason) noexcept {
 // --- PlayerController ---
 
 PlayerController::PlayerController(Allocator& allocator) noexcept
-    : Controller(allocator), actionInput_(allocator), actionBindings_(allocator) {
+    : Controller(allocator), actionInput_(allocator), actionBindings_(allocator),
+      haptics_(allocator) {
     wantsPlayerState = true;
     // pause 중에도 Tick한다(UE PlayerController.cpp:204 — TickPlayerInput·Tick).
     PrimaryTick().tick = true;
@@ -359,6 +360,20 @@ void PlayerController::OnTick(const TickContext& context) noexcept {
 
     actionBindings_.Dispatch(actionInput_);
     actionInput_.FinishDispatch();
+
+    // 진동 합성(Docs/Design/InputActions 6.3절 — UE ProcessForceFeedbackAndHaptics). 전달 뒤라 이번
+    // 틱 콜백이 시작한 효과도 기여한다. pause 중 deltaSeconds는 unscaled delta다(TickWhenPaused).
+    if (localPlayer_.IsNull()) {
+        motorOutput_ = {};
+    } else {
+        input::HapticUpdateContext hapticContext;
+        hapticContext.deltaSeconds = context.deltaSeconds;
+        hapticContext.unscaledDeltaSeconds = context.unscaledDeltaSeconds;
+        hapticContext.paused = context.paused;
+        hapticContext.scale = hapticScale_;
+        hapticContext.enabled = hapticsEnabled_;
+        motorOutput_ = haptics_.Update(hapticContext);
+    }
 
     if (!context.paused) {
         OnPlayerTick(context);

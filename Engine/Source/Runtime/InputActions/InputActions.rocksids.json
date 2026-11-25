@@ -3,6 +3,55 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsLeftLarge",
+      "id": "034b2243b89943879d3582f606a3b85f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsLeftSmall",
+      "id": "b6f7e05e30994009afedd7dc5cb728c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsRightLarge",
+      "id": "8af2a377dc0b498898017b1673fd67f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsRightSmall",
+      "id": "6503293b7eb745c8989ae4c75dd014b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::curve",
+      "id": "b24191c06d6141f59a24a0068861fdf2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticEffect::channels",
+      "id": "c46b21e58d394c6bbcb59a8b2b5c017b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticEffect::id",
+      "id": "78769542cdf0494296e30ef9a010087a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::InputAction::id",
       "id": "8518726a6f0d4ab29bdd89ac8d0e533d",
       "aliases": [],
@@ -446,6 +495,20 @@
       "kind": "type",
       "name": "rocks::input::DeadZoneType",
       "id": "452db0f2d706493e9bc8324c24fa680f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::HapticChannel",
+      "id": "41e6b301b9374428a372bb3f56168775",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::HapticEffect",
+      "id": "5f6a6e01b28e4e43b6cca9447a586a35",
       "aliases": [],
       "retired": false
     },
