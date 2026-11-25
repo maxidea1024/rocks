@@ -29,7 +29,7 @@ enum class Backend : uint8 {
 };
 
 // "D3D12" 같은 이름이다. 범위 밖이면 "Unknown"이다.
-const char* BackendName(Backend backend) noexcept;
+ROCKS_GRAPHICS_API const char* BackendName(Backend backend) noexcept;
 
 // backend 장치가 받는 셰이더 코드 종류다(D3D12 Dxil, D3D11 Dxbc, OpenGL Essl, Vulkan Spirv, Metal
 // Metallib).
