@@ -77,6 +77,33 @@ TEST(SparksTools_CheckReportsDiagnosticsAndExitCodes) {
     }
 }
 
+TEST(SparksTools_CheckNonAsciiFolder) {
+    // 공백·한글이 든 폴더 경로: 진단 경로 표기(`\` → `/`)가 UTF-8 글자를 그대로 둔다.
+    SystemAllocator allocator;
+    {
+        TempFolder temp(allocator);
+        constexpr StringView Folder = "Pkg \xED\x95\x9C\xEA\xB8\x80"; // "Pkg 한글"
+        StringBuilder<64> manifest(allocator);
+        StringBuilder<64> bad(allocator);
+        REQUIRE(manifest.TryAppendFormat("{}/SparksPackage.json5", Folder));
+        REQUIRE(bad.TryAppendFormat("{}/Sub/Bad.spark", Folder));
+        REQUIRE(temp.Write(manifest.View(), Manifest));
+        REQUIRE(temp.Write(bad.View(), "import Nope;\n"));
+        const String folder = temp.PathOf(Folder);
+        const String shown = Slashed(allocator, folder.View());
+        BufferOutput output(allocator);
+        const StringView arguments[] = {"check", folder.View()};
+        CHECK(RunCommand(allocator, platform::PhysicalFileSystem(), arguments, output) ==
+              ExitFailure);
+        StringBuilder<256> expected(allocator);
+        REQUIRE(expected.TryAppendFormat("{}/Sub/Bad.spark:1:8: error S0301:", shown.View()));
+        CHECK(output.output.View().StartsWith(expected.View()));
+        CHECK(output.error.IsEmpty());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(SparksTools_UsageErrors) {
     SystemAllocator allocator;
     struct Case {

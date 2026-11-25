@@ -96,10 +96,20 @@ inline constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"
 
 // 폴더 경로 표기(`\` → `/`)다 — 진단 경로 기대값을 만든다.
 inline String Slashed(Allocator& allocator, StringView path) noexcept {
+    // `\` 사이 구간을 통째로 붙인다(String은 UTF-8 sequence를 쪼개 붙일 수 없다).
     String out(allocator);
-    for (usize at = 0; at < path.ByteCount(); ++at) {
-        const char c = path.Data()[at] == '\\' ? '/' : path.Data()[at];
-        CHECK(out.TryAppend(StringView(&c, 1)));
+    usize run = 0;
+    for (usize at = 0; at <= path.ByteCount(); ++at) {
+        if (at < path.ByteCount() && path.Data()[at] != '\\') {
+            continue;
+        }
+
+        CHECK(out.TryAppend(StringView(path.Data() + run, at - run)));
+        if (at < path.ByteCount()) {
+            CHECK(out.TryAppend("/"));
+        }
+
+        run = at + 1;
     }
 
     return out;
