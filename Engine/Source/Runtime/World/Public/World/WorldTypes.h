@@ -251,4 +251,15 @@ inline constexpr uint8 TickHookLate = 2;
 inline constexpr uint32 TickHookCount = 3;
 } // namespace detail
 
+// 레벨 편입 결과다(World::AdoptLevel — Docs/Design/EngineRuntime 29절).
+struct LevelAdoption {
+    ObjectHandle level;
+    // 장부에 넣은 Actor 수다(실패한 Actor 포함).
+    uint32 actors = 0;
+    // FinishSpawning이 실패해 정리된 Actor 수다.
+    uint32 failedActors = 0;
+    // 정리한 null·root 밖·잘못된 부착 부모 원소 수다.
+    uint32 droppedEntries = 0;
+};
+
 } // namespace rocks

@@ -32,3 +32,4 @@
 - [26. 이동 컴포넌트(D4)](26-MovementComponents.ko.md)
 - [27. 환경 컴포넌트 데이터(D5)](27-EnvironmentComponents.ko.md)
 - [28. 영역 형상과 후처리 볼륨 혼합(CR17)](28-VolumeShape.ko.md)
+- [29. 레벨 편입](29-LevelAdoption.ko.md)
