@@ -1,0 +1,119 @@
+#pragma once
+
+#include <Base/Types.h>
+#include <Core/Text/StringView.h>
+
+// 머티리얼 IR 연산이다(Docs/Design/MaterialSystem 6.2·6.8절). 산술·초월 연산은 UE Operator 노드의
+// 연산 전부(UE EMaterialExpressionOperatorKind —
+// RE/Public/Materials/MaterialExpressionOperator.h:14–100)와 같은 뜻이고, 그 밖에 구조
+// 연산(상수·복제·성분 선택·이어 붙이기·변환·선택·분기)과 미분을 둔다. 값 번호·hash에 들어가므로
+// 순서를 바꾸지 않고 끝에만 더한다.
+namespace rocks::material {
+
+enum class IrOp : uint8 {
+    // 구조 연산.
+    Constant = 0,
+    // 스칼라를 성분 수만큼 복제한다(즉시값 없음 — 결과 타입이 성분 수를 준다).
+    Splat = 1,
+    // 성분 선택이다. 즉시값 [0]에 성분 번호를 2 bit씩(성분 0이 하위) 담는다.
+    Swizzle = 2,
+    Append = 3,
+    // 스칼라 종류 변환이다(결과 타입이 대상 종류).
+    Convert = 4,
+    // 조건 선택이다(두 값을 모두 계산한다).
+    Select = 5,
+    // 동적 분기다(UE IfThenElse — 원문은 [branch] if).
+    Branch = 6,
+
+    // 단항(UE Operator 단항).
+    BitwiseNot = 7,
+    Negate = 8,
+    Not = 9,
+    Abs = 10,
+    ACos = 11,
+    ACosFast = 12,
+    ACosh = 13,
+    ASin = 14,
+    ASinFast = 15,
+    ASinh = 16,
+    ATan = 17,
+    ATanFast = 18,
+    ATanh = 19,
+    Ceil = 20,
+    Cos = 21,
+    Cosh = 22,
+    Exponential = 23,
+    Exponential2 = 24,
+    Floor = 25,
+    Frac = 26,
+    IsFinite = 27,
+    IsInf = 28,
+    IsNan = 29,
+    Length = 30,
+    Logarithm = 31,
+    Logarithm10 = 32,
+    Logarithm2 = 33,
+    WorldPositionTile = 34,
+    Reciprocal = 35,
+    Round = 36,
+    Rsqrt = 37,
+    Saturate = 38,
+    Sign = 39,
+    Sin = 40,
+    Sinh = 41,
+    Sqrt = 42,
+    Tan = 43,
+    Tanh = 44,
+    Transpose = 45,
+    Truncate = 46,
+    Normalize = 47,
+    Ddx = 48,
+    Ddy = 49,
+
+    // 이항(UE Operator 이항).
+    Equals = 50,
+    GreaterThan = 51,
+    GreaterThanOrEquals = 52,
+    LessThan = 53,
+    LessThanOrEquals = 54,
+    NotEquals = 55,
+    And = 56,
+    Or = 57,
+    Add = 58,
+    Subtract = 59,
+    Multiply = 60,
+    MatrixMultiply = 61,
+    Divide = 62,
+    Modulo = 63,
+    BitwiseAnd = 64,
+    BitwiseOr = 65,
+    BitwiseXor = 66,
+    BitShiftLeft = 67,
+    BitShiftRight = 68,
+    ATan2 = 69,
+    ATan2Fast = 70,
+    Cross = 71,
+    Distance = 72,
+    Dot = 73,
+    Fmod = 74,
+    Max = 75,
+    Min = 76,
+    Pow = 77,
+    Step = 78,
+
+    // 삼항(UE Operator 삼항).
+    Clamp = 79,
+    Lerp = 80,
+    Smoothstep = 81
+};
+
+// 연산 수다(마지막 값 + 1).
+inline constexpr uint32 IrOpCount = 82;
+
+// 연산이 받는 피연산자 수다(Constant 0, 단항 1, 이항 2, 삼항·선택·분기 3, Append 2).
+ROCKS_MATERIALCOMPILER_API uint8 IrOpArity(IrOp op) noexcept;
+
+// 진단·dump용 영어 이름이다. 범위 밖이면 "Invalid"다.
+ROCKS_MATERIALCOMPILER_API StringView IrOpName(IrOp op) noexcept;
+
+} // namespace rocks::material

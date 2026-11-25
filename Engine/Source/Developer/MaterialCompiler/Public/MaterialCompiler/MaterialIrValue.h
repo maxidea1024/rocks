@@ -1,0 +1,54 @@
+#pragma once
+
+#include <Base/Guid.h>
+#include <Base/NumericLimits.h>
+#include <Base/Types.h>
+#include <Core/Text/StringView.h>
+#include <MaterialCompiler/MaterialIrOp.h>
+#include <MaterialCompiler/MaterialIrType.h>
+
+// 머티리얼 IR 값 하나다(Docs/Design/MaterialSystem 6.2·6.8절).
+namespace rocks::material {
+
+// 값 번호다. 빌더 안에서는 만든 순서, 모듈 안에서는 진입점에서 다시 매긴 순서다(6.6절).
+using IrValueId = uint32;
+
+// "값 없음" 표지다.
+inline constexpr IrValueId NoIrValue = NumericLimits<uint32>::Max();
+
+// 값 하나가 받는 피연산자의 최대 수다(삼항 연산·선택·분기).
+inline constexpr uint32 MaxIrOperands = 3;
+
+// 즉시값 칸 수다(상수 성분 넷 — 행렬 상수는 두지 않는다).
+inline constexpr uint32 IrImmediateSlots = 4;
+
+// 값이 바뀌는 빈도다(6.2절 격자 — 뒤로 갈수록 자주 바뀐다).
+enum class IrFrequency : uint8 {
+    Constant = 0,
+    Static = 1,
+    Uniform = 2,
+    Instance = 3,
+    Vertex = 4,
+    Pixel = 5
+};
+
+// 값을 처음 낸 그래프 위치다(진단·원문 위치 지도 — 7.6절). pin은 출력 핀 키의 정적 원문이다.
+// hash-consing 키에 넣지 않는다.
+struct IrSite {
+    Guid node;
+    StringView pin;
+};
+
+struct IrValue {
+    IrType type;
+    IrOp op = IrOp::Constant;
+    uint8 operandCount = 0;
+    IrFrequency frequency = IrFrequency::Constant;
+    IrValueId operands[MaxIrOperands] = {NoIrValue, NoIrValue, NoIrValue};
+    // 상수는 성분별 비트 패턴(float·int·uint 32 bit, double 64 bit, bool 0·1), Swizzle은 [0]에
+    // 성분 번호(2 bit씩, 성분 0이 하위)다. 그 밖의 연산은 0이다.
+    uint64 immediate[IrImmediateSlots] = {0, 0, 0, 0};
+    IrSite site;
+};
+
+} // namespace rocks::material
