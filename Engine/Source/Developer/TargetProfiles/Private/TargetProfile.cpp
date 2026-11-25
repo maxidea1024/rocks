@@ -22,9 +22,6 @@ constexpr uint32 ProfileBulkAlignmentMin = 8;
 constexpr uint32 ProfileBulkAlignmentMax = 65536;
 constexpr StringView ProfileJsonExtension = ".json";
 
-// backend 이름 어휘다(10.3절 1항).
-constexpr StringView GraphicsBackendNames[] = {"D3D12", "D3D11", "Vulkan", "Metal", "OpenGL"};
-
 Result<void> ProfileFail(TargetProfileFailure* failure, TargetProfileFile file,
                          TargetProfileField field, ErrorCode error, uint32 index = 0) noexcept {
     if (failure != nullptr) {
@@ -161,29 +158,38 @@ Result<void> CheckShaderFields(const TargetProfile& profile,
 
 } // namespace
 
-bool IsKnownGraphicsBackend(StringView name) noexcept {
-    for (StringView known : GraphicsBackendNames) {
-        if (known == name) {
-            return true;
+Result<void> MakeCookedManifestBackends(Allocator& allocator, const TargetProfile& profile,
+                                        Array<CookedManifestBackend>& out) noexcept {
+    out.Clear();
+    if (auto reserved = out.TryReserve(profile.graphicsBackends.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const String& name : profile.graphicsBackends) {
+        const ShaderFormatList* list = profile.shaderFormats.Find(name);
+        if (list == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // backend 수만큼 예약했다(빈 이름·형식 목록 추가는 할당하지 않는다).
+        CookedManifestBackend& backend = *out.TryEmplaceBack(allocator).Value();
+        if (auto assigned = backend.name.TryAssign(name.View()); !assigned) {
+            return assigned;
+        }
+
+        if (auto reserved = backend.formats.TryReserve(list->formats.Size()); !reserved) {
+            return reserved;
+        }
+
+        for (const String& format : list->formats) {
+            String& slot = *backend.formats.TryEmplaceBack(allocator).Value();
+            if (auto assigned = slot.TryAssign(format.View()); !assigned) {
+                return assigned;
+            }
         }
     }
 
-    return false;
-}
-
-bool IsValidShaderFormatId(StringView id) noexcept {
-    if (id.IsEmpty() || id.ByteCount() > ShaderFormatIdMaxBytes) {
-        return false;
-    }
-
-    for (usize index = 0; index < id.ByteCount(); ++index) {
-        const char c = id.Data()[index];
-        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
-            return false;
-        }
-    }
-
-    return true;
+    return Result<void>::Success();
 }
 
 Result<void> ApplyConfigJsonFile(Allocator& allocator, platform::FileSystem& files, StringView path,

@@ -388,3 +388,83 @@ v1은 A4f에서 v2(backend 표·비에셋 산출물 표 — 10.3절 4항)로 바
 - TargetProfiles 단독(AssetCooker 없이): 프로필 병합·구조 검증 위반마다(어휘·중복·형식 목록 없음·키 남음·형식 id 문법·전역 중복·상한 8·16)·Replace(프로젝트가 한 backend만 적으면 Map 전체 교체)·셰이더 없는 프로필(형식 Map도 빔), 호스트 프로필, 엔진 파일 셋(Windows·Android·Mac).
 - AssetCooker: SHA-256이 새 칸을 포함, `CookConfigFailure` 변환(대응 표 전부), `ReadCookSettings`가 공개 도우미로 읽기, 명령 문구(GraphicsBackends·ShaderFormats).
 - 호스트 프로필: HostSettings 재정의 이름을 따름, 빈 재정의는 HostPlatformName().
+
+**A4f2 결정**(2026-11-25 — 착수 때 정함):
+1. **모델**(AssetRuntime `CookedManifest.h`):
+   - `enum class CookArtifactKind : uint8 { ShaderLibrary = 1 }`(0은 쓰지 않는다 — 손상 판정).
+   - `CookedManifestBackend{name, formats(Array<String>)}`.
+   - `CookedManifestArtifact{kind, name, formatId, bytes, sha256, cookKey}`.
+   - `CookedManifest`에 `backends`·`artifacts` 칸(entries처럼 공개 칸)과 읽기 함수 `Backends()`·`Artifacts()`(Span)·`FindArtifact(kind, name, formatId)`(정렬 불변식에 기댄 이진 탐색, 없으면 null)를 더한다.
+   - 정렬 규칙은 공개 함수 `CookedArtifactLess`(kind 값 → 이름 byte 순 → formatId byte 순) 하나다. 검증·`FindArtifact`·쿠커 병합이 같은 함수를 쓴다.
+   - 이름 상수: `CookedArtifactEngineName`(`Engine`), `CookedArtifactProjectName`(`Project`), `CookedManifestMaxArtifacts`(4096), `CookedArtifactMaxBytes`(4 GiB).
+2. **어휘·문법은 한 곳에 둔다**:
+   - `IsKnownGraphicsBackend`·`IsValidShaderFormatId`·`ShaderFormatIdMaxBytes`를 TargetProfiles에서 AssetRuntime `CookedManifest.h`로 옮긴다. TargetProfiles는 그 함수를 쓴다.
+   - 매니페스트 검증과 프로필 검증이 같은 함수를 쓰므로, 통과한 프로필은 늘 쓸 수 있는 매니페스트를 만든다(상한 상수와 같은 이유).
+3. **진단 칸**:
+   - `CookedManifestField` 끝에 4항의 칸 열한 개와 `ArtifactCookKey`를 더한다. `ArtifactCookKey`는 4항 목록에 없던 칸이다. reader의 잘림 칸으로 필요하다 — 앞 문자열이 길면 뒤의 고정 칸이 잘릴 수 있다.
+   - detail 값:
+     - `Backend`·`ShaderFormat`·`FormatCount`: backend 번호.
+     - `BackendCount`·`ArtifactCount`: `CookedManifestNoEntry`.
+     - `Artifact*`: artifact 번호.
+     - 런타임 대조(`CheckCookedArtifactFile`): `CookedManifestNoEntry`, asset은 null.
+   - reader의 잘림 칸:
+
+     | 표 | 읽던 칸 | 진단 칸 |
+     |---|---|---|
+     | backend | 이름 | `Backend` |
+     | backend | 형식 개수 | `FormatCount` |
+     | backend | 형식 문자열 | `ShaderFormat` |
+     | artifact | kind | `ArtifactKind` |
+     | artifact | 이름 | `ArtifactName` |
+     | artifact | formatId | `ArtifactFormat` |
+     | artifact | bytes | `ArtifactBytes` |
+     | artifact | sha256 | `ArtifactSha256` |
+     | artifact | cookKey | `ArtifactCookKey` |
+
+   - 문자열 칸의 길이 상한·UTF-8 위반도 같은 칸이다(`Backend`·`ShaderFormat`·`ArtifactName`·`ArtifactFormat` — 2026-11-25 교차 검증 A).
+
+4. **reader 구조 상한**(남은 byte로 묶는다 — 작은 파일이 큰 할당을 요구하지 못하게, v1과 같은 방식):
+   - backendCount: 8 초과이거나 남은 byte / 12 초과면 `BackendCount`.
+   - backend마다 formatCount: 16 초과이거나 남은 byte / 8 초과면 `FormatCount`.
+   - artifactCount: 4096 초과이거나 남은 byte / 89 초과면 `ArtifactCount`.
+   - entryCount의 남은 byte 검사는 그대로다. backend 표 byte까지 남은 byte에 들어 있지만, 상한 검사는 보수적일 뿐 맞는 입력을 거부하지 않는다.
+5. **칸 규칙**(`ValidateCookedManifest` — 4항 순서):
+   - backend 표:
+     - backend 수 8 초과: `BackendCount`.
+     - backend 번호 순으로: 어휘 밖·앞 번호와 같은 이름은 `Backend`, 형식 0개·16 초과는 `FormatCount`, 형식 id 문법·전역 중복은 `ShaderFormat`.
+   - artifact 표:
+     - 수 4096 초과: `ArtifactCount`.
+     - artifact 번호 순으로: kind → 이름(`Engine`·`Project`) → formatId가 backend 표에 있음 → bytes(1 이상 4 GiB 이하) → 앞 항목보다 `CookedArtifactLess`로 큼(`ArtifactOrder`).
+6. **경로** `AppendCookedArtifactPath(out, const CookedManifestArtifact&)`:
+   - `Shaders/<이름>-<formatId>-<sha256 앞 16 hex 소문자>.rshl`을 만든다.
+   - kind·이름·formatId 칸 규칙을 다시 본다(위반은 InvalidArgument). 경로 조각이 되는 문자열이라 검증하지 않은 항목(A4f3 단계 sink 입력)에서도 경로가 쿠킹 루트 밖을 가리키지 못한다.
+7. **대조** `CheckCookedArtifactFile(artifact, file, failure)`:
+   - 길이가 다르면 `ArtifactBytes`, SHA-256이 다르면 `ArtifactSha256`. 둘 다 `CorruptPackage` / InvalidArgument다.
+   - 길이를 먼저 본다(`CheckCookedPackageFile`과 같은 순서).
+8. **쿠커**:
+   - `CookPublishConfig`에 `backends`(Span)를 더한다. `CookProject`는 TargetProfiles의 새 함수 `MakeCookedManifestBackends(allocator, profile, out)`로 채운다(`graphicsBackends` 순서, backend마다 `shaderFormats` 순서).
+   - `Finish`가 만드는 매니페스트에 backend 표를 복사한다.
+   - artifact 표는 이번 쿠킹 항목(A4f3 전에는 없다)과, 부분 쿠킹이면 merge 항목 중 같은 (kind, 이름, formatId)가 이번 쿠킹에 없는 것을 합쳐 `CookedArtifactLess`로 정렬한다.
+   - 전체 쿠킹은 이전 artifact를 넘기지 않는다. `Shaders/` 정리는 A4f3이다.
+   - 한계: 부분 쿠킹이 이어받은 artifact의 파일 존재·크기·SHA-256은 A4f2에서 대조하지 않는다(A4f3 6항의 파일 대조가 맡는다 — 교차 검증 B).
+   - A4f2와 A4f3 사이의 쿠킹 결과는 backend 표만 있고 artifact 표는 비어 있다. 미빌드 중간 단계라 런타임 영향은 없다.
+9. **런타임 노출**: `EngineAssetsSubsystem::Manifest()`(초기화 뒤 Deinitialize까지 유효한 const 참조)를 더한다. 셰이더 쪽(SSD15)이 표를 읽을 곳이다. `AssetLoaderConfig`는 이미 매니페스트 포인터를 받는다.
+10. **v1**: reader를 두지 않는다. formatVersion 1 파일은 `UnsupportedVersion`이다. 저장소에 실수로 들어온 시험 산출물 `rocks-engine-assets-admission-00-31200/`(BS8e 커밋, v1)은 읽는 곳이 없다. 지우는 것은 그 커밋 주인 몫이라 그대로 두고 사용자에게 알린다(교차 검증 E).
+
+**A4f2 시험**(14.1.109):
+- 왕복·결정성과 시험 인코더 배치 일치: backend 셋·형식 여럿·artifact 넷, 셰이더 없는 매니페스트.
+- 칸 규칙 위반 표에 backend·artifact 행을 더한다(검증·writer·reader 같은 진단). 셰이더 없는 매니페스트(backend 0개)의 artifact는 `ArtifactFormat`이다(교차 검증 D).
+- 구조 변조: 개수 칸 셋(상한 + 1·남은 byte 초과), 모든 칸의 잘림 위치(표 범위 대조), v1 `UnsupportedVersion`.
+- 판정 순서 표에 더하는 행:
+  - backend 위반 + 항목 위반 → backend.
+  - 항목 위반 + artifact 위반 → 항목.
+  - reader 구조(artifact 개수 칸) + 칸 규칙(backend 어휘) → 구조.
+- 경계: 어휘 다섯 backend 전부·형식 16·모든 (이름, 형식) artifact 조합·bytes 1과 4 GiB를 받는다. backend 8·artifact 4096은 어휘·이름이 모자라 맞는 매니페스트로 닿지 않는다(개수 상한은 구조 시험이 본다).
+- 할당 실패 전 지점.
+- `FindArtifact`: 있음·없음, 앞·사이·뒤.
+- `AppendCookedArtifactPath`: 값, 칸 위반, 할당 실패.
+- `CheckCookedArtifactFile`: 길이·SHA, 판정 순서.
+- 쿠커: backend 표가 프로필 순서, 부분 쿠킹의 artifact 병합(이번 항목 우선·이전 항목 유지).
+- `MakeCookedManifestBackends`.
+- 엔진 에셋 `Manifest()`.
+- v2로 다시 맞출 픽스처(교차 검증 C): ManifestTestSupport 시험 인코더(배치), ManifestTests의 byte 위치(항목 잘림 — 항목 뒤 artifact 개수 칸)·헤더 잘림 칸 목록. 나머지(CookPublish·CookProject·AssetCookCommandlet·EngineAssetsManifestFile·TextureScenario·Loader 시험)는 writer API로 byte를 만들어 자동으로 v2다. 서명 봉투 시험은 내용과 무관한 byte를 서명해 바뀌지 않는다.

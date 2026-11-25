@@ -132,6 +132,12 @@ public:
         return profile_.View();
     }
 
+    // 읽은(서명 확인을 마친) 쿠킹 매니페스트다. 초기화 뒤 Deinitialize까지 유효하다. 셰이더 쪽이
+    // backend 표·artifact 표(FindArtifact)를 여기서 읽는다(Docs/Design/AssetSystem 10.3절 8항).
+    const CookedManifest& Manifest() const noexcept {
+        return *manifest_;
+    }
+
     EngineAssetsStats Stats() const noexcept {
         return stats_;
     }

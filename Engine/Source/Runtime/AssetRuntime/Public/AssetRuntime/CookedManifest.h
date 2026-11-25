@@ -11,17 +11,18 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 
-// 쿠킹 매니페스트 v1(`CookedManifest.rman`)이다(Docs/Design/AssetSystem 10절, 10.1절 A1b).
-// 쿠커(A4)가 모델을 만들어 WriteCookedManifest로 쓰고, 로더(A1c)가 ReadCookedManifest로 읽어
-// 패키지를 찾고(Find) 연 패키지를 CheckCookedPackage로 대조한다. 서명 봉투(ContentSigning)는 검증한
-// 같은 버퍼의 매니페스트 byte를 reader에 넘긴다.
+// 쿠킹 매니페스트 v2(`CookedManifest.rman`)다(Docs/Design/AssetSystem 10절, 10.1절 A1b·10.3절 4항
+// A4f2). 쿠커(A4)가 모델을 만들어 WriteCookedManifest로 쓰고, 로더(A1c)가 ReadCookedManifest로 읽어
+// 패키지를 찾고(Find) 연 패키지를 CheckCookedPackage로 대조한다. backend 표·artifact 표(셰이더
+// 라이브러리 등 비에셋 산출물)는 셰이더 쪽이 FindArtifact로 찾고 CheckCookedArtifactFile로
+// 대조한다. 서명 봉투(ContentSigning)는 검증한 같은 버퍼의 매니페스트 byte를 reader에 넘긴다.
 namespace rocks {
 
 // 매니페스트 magic이다(파일 앞 4 byte).
 inline constexpr uint8 CookedManifestMagic[4] = {'R', 'M', 'A', 'N'};
 
 // 이 reader·writer가 쓰는 형식 버전이다(다른 값은 UnsupportedVersion).
-inline constexpr uint32 CookedManifestFormatVersion = 1;
+inline constexpr uint32 CookedManifestFormatVersion = 2;
 
 // 파일 byte 상한이다.
 inline constexpr uint64 CookedManifestMaxFileBytes = uint64{1} * 1024 * 1024 * 1024;
@@ -45,6 +46,30 @@ inline constexpr uint32 CookedManifestMaxPathBytes = 256;
 // 상수를 쓴다, 통과한 프로필은 늘 쓸 수 있는 매니페스트를 만든다).
 inline constexpr uint32 CookedManifestMaxBackends = 8;
 inline constexpr uint32 CookedManifestMaxFormatsPerBackend = 16;
+
+// v2 artifact 표 상한과 artifact 파일 하나의 byte 상한이다(10.3절 4항).
+inline constexpr uint32 CookedManifestMaxArtifacts = 4096;
+inline constexpr uint64 CookedArtifactMaxBytes = uint64{4} * 1024 * 1024 * 1024;
+
+// 셰이더 형식 id(`[A-Z0-9_]`)의 byte 상한이다.
+inline constexpr usize ShaderFormatIdMaxBytes = 64;
+
+// artifact 이름이다(엔진 셰이더 라이브러리·프로젝트 셰이더 라이브러리 — 10.3절 4항).
+inline constexpr StringView CookedArtifactEngineName = "Engine";
+inline constexpr StringView CookedArtifactProjectName = "Project";
+
+// 비에셋 산출물 종류다(0은 쓰지 않는다 — 손상 판정).
+enum class CookArtifactKind : uint8 {
+    // 셰이더 라이브러리(`Shaders/<이름>-<형식>-<hash>.rshl`)다.
+    ShaderLibrary = 1
+};
+
+// backend 이름 어휘다(`D3D12`·`D3D11`·`Vulkan`·`Metal`·`OpenGL` — 구현 여부와 무관, 대소문자 구분,
+// 10.3절 1항). TargetProfile 구조 검증과 매니페스트 검증이 같은 함수를 쓴다.
+ROCKS_ASSETRUNTIME_API bool IsKnownGraphicsBackend(StringView name) noexcept;
+
+// 셰이더 형식 id 문법(`[A-Z0-9_]`, 1–ShaderFormatIdMaxBytes byte)이다.
+ROCKS_ASSETRUNTIME_API bool IsValidShaderFormatId(StringView id) noexcept;
 
 // 항목 flags 비트다.
 enum class CookedManifestFlags : uint32 {
@@ -87,7 +112,23 @@ enum class CookedManifestField : uint32 {
     PackageDependencies,
     // bundle 구성원 개수 칸과 구성원(AS 10.1절 5 — A1d 개정)이다.
     BundleMemberCount,
-    BundleMember
+    BundleMember,
+    // v2 backend 표(detail = backend 번호)다.
+    Backend,
+    ShaderFormat,
+    // v2 artifact 표(detail = artifact 번호)다.
+    ArtifactKind,
+    ArtifactName,
+    ArtifactFormat,
+    ArtifactBytes,
+    ArtifactOrder,
+    // 개수 칸이다(BackendCount·ArtifactCount는 CookedManifestNoEntry, FormatCount는 backend 번호).
+    BackendCount,
+    FormatCount,
+    ArtifactCount,
+    // artifact SHA-256(reader 잘림·런타임 파일 대조)과 cookKey(reader 잘림)다.
+    ArtifactSha256,
+    ArtifactCookKey
 };
 
 // 헤더 칸 진단의 detail 값이다(항목 번호가 없다).
@@ -145,10 +186,54 @@ struct CookedManifestEntry {
     Array<CookedManifestDependency> dependencies;
 };
 
-// 매니페스트 모델이다. entries는 AssetId 엄격 오름차순이다.
+// 쿠킹한 그래픽 backend 하나다(프로필 `graphicsBackends` 순서, formats는 그 backend의
+// `shaderFormats` 순서 — 런타임 형식 선택이 쿠킹 결과로 고른다, 10.3절 4항).
+struct CookedManifestBackend {
+    explicit CookedManifestBackend(Allocator& allocator) noexcept
+        : name(allocator), formats(allocator) {
+    }
+
+    CookedManifestBackend(CookedManifestBackend&&) noexcept = default;
+    CookedManifestBackend& operator=(CookedManifestBackend&&) noexcept = default;
+    CookedManifestBackend(const CookedManifestBackend&) = delete;
+    CookedManifestBackend& operator=(const CookedManifestBackend&) = delete;
+
+    String name;
+    Array<String> formats;
+};
+
+// 비에셋 산출물 파일 하나다. 경로는 칸이 아니라 AppendCookedArtifactPath로 계산한다(내용 주소).
+struct CookedManifestArtifact {
+    explicit CookedManifestArtifact(Allocator& allocator) noexcept
+        : name(allocator), formatId(allocator) {
+    }
+
+    CookedManifestArtifact(CookedManifestArtifact&&) noexcept = default;
+    CookedManifestArtifact& operator=(CookedManifestArtifact&&) noexcept = default;
+    CookedManifestArtifact(const CookedManifestArtifact&) = delete;
+    CookedManifestArtifact& operator=(const CookedManifestArtifact&) = delete;
+
+    CookArtifactKind kind = CookArtifactKind::ShaderLibrary;
+    // CookedArtifactEngineName 또는 CookedArtifactProjectName이다.
+    String name;
+    // backend 표에 있는 셰이더 형식 id다.
+    String formatId;
+    uint64 bytes = 0;
+    Sha256Digest sha256{};
+    // 만든 단계가 정의하는 재사용 키다(10.3절 6항).
+    Sha256Digest cookKey{};
+};
+
+// artifact 표의 정렬 순서다: kind 값 → 이름 byte 순 → formatId byte 순(검증·FindArtifact·쿠커
+// 병합이 같은 함수를 쓴다).
+ROCKS_ASSETRUNTIME_API bool CookedArtifactLess(const CookedManifestArtifact& left,
+                                               const CookedManifestArtifact& right) noexcept;
+
+// 매니페스트 모델이다. entries는 AssetId 엄격 오름차순, artifacts는 CookedArtifactLess 엄격
+// 오름차순이다.
 struct ROCKS_ASSETRUNTIME_API CookedManifest {
     explicit CookedManifest(Allocator& allocator) noexcept
-        : profileId(allocator), entries(allocator) {
+        : profileId(allocator), backends(allocator), entries(allocator), artifacts(allocator) {
     }
 
     CookedManifest(CookedManifest&&) noexcept = default;
@@ -162,14 +247,36 @@ struct ROCKS_ASSETRUNTIME_API CookedManifest {
     uint32 cookerVersion = 0;
     // 진단용이다(병합·로드 판정에 쓰지 않는다 — AS 10절).
     EngineVersion cookedBy{};
+    // 셰이더 없는 프로필이면 비어 있다.
+    Array<CookedManifestBackend> backends;
     Array<CookedManifestEntry> entries;
+    Array<CookedManifestArtifact> artifacts;
 
     // asset의 항목이다(이진 탐색 — entries가 정렬되어 있어야 한다). 없으면 null이다. 반환 포인터는
     // entries가 바뀌기 전까지 유효하다.
     const CookedManifestEntry* Find(AssetId asset) const noexcept;
+
+    // backend 표·artifact 표다(10.3절 8항 — 셰이더 쪽이 실행 장치에 맞는 형식을 고른다).
+    Span<const CookedManifestBackend> Backends() const noexcept {
+        return Span<const CookedManifestBackend>(backends.Data(), backends.Size());
+    }
+
+    Span<const CookedManifestArtifact> Artifacts() const noexcept {
+        return Span<const CookedManifestArtifact>(artifacts.Data(), artifacts.Size());
+    }
+
+    // (kind, name, formatId)의 artifact다(이진 탐색 — artifacts가 정렬되어 있어야 한다). 없으면
+    // null이다. 반환 포인터는 artifacts가 바뀌기 전까지 유효하다.
+    //
+    // 사용 예:
+    //   const CookedManifestArtifact* engine = manifest.FindArtifact(
+    //       CookArtifactKind::ShaderLibrary, CookedArtifactEngineName, "D3D12_SM6");
+    const CookedManifestArtifact* FindArtifact(CookArtifactKind kind, StringView name,
+                                               StringView formatId) const noexcept;
 };
 
-// 모델을 AS 10.1절 규칙(헤더·항목 칸·항목 사이 규칙)으로 검증한다. scratch는 경로 힌트·bundle 비교
+// 모델을 AS 10.1절·10.3절 4항 규칙(헤더 → backend 표 → 항목 칸 → 항목 사이 → artifact 표)으로
+// 검증한다. scratch는 경로 힌트·bundle 비교
 // 키의 임시 저장소다(반환 전에 돌려준다).
 //
 // 오류: 위반은 CorruptPackage / InvalidArgument(section = CookedManifestField, detail = 항목 번호
@@ -194,8 +301,9 @@ WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest, Array<
 
 // 매니페스트 byte를 검증하고 모델로 푼다(AS 10.1절 2의 순서). 결과는 bytes를 빌리지 않는다.
 //
-// 오류: formatVersion이 1이 아니면 UnsupportedVersion / Unsupported, 그 밖의 위반(magic·CRC·칸·항목
-// 사이 규칙·남는 byte)은 CorruptPackage / InvalidArgument, 할당 실패는 진단 None과 그 오류다.
+// 오류: formatVersion이 2가 아니면(v1 포함) UnsupportedVersion / Unsupported, 그 밖의
+// 위반(magic·CRC·칸·항목 사이 규칙·남는 byte)은 CorruptPackage / InvalidArgument, 할당 실패는 진단
+// None과 그 오류다.
 //
 // 사용 예:
 //   auto manifest = ReadCookedManifest(allocator, bytes.View(), &failure);
@@ -247,5 +355,23 @@ Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
 ROCKS_ASSETRUNTIME_API Result<void>
 AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
                         const Sha256Digest& packageSha256) noexcept;
+
+// 쿠킹 루트 기준 artifact 파일 경로(`Shaders/<이름>-<formatId>-<sha256 앞 16 hex>.rshl` — 10.3절
+// 4항)를 out 뒤에 붙인다. kind·이름·formatId 칸 규칙을 다시 본다(경로 조각이라 검증하지 않은 항목도
+// 쿠킹 루트 밖을 가리키지 못한다).
+//
+// 오류: 칸 규칙 위반 InvalidArgument(out은 그대로), out의 할당 실패는 그 오류다(out 길이는 그대로가
+// 아닐 수 있다 — 호출자가 버린다).
+ROCKS_ASSETRUNTIME_API Result<void>
+AppendCookedArtifactPath(StringBuilderBase& out, const CookedManifestArtifact& artifact) noexcept;
+
+// 연 artifact 파일을 항목과 대조한다(10.3절 8항): 길이 = bytes(ArtifactBytes)를 먼저, 그다음
+// SHA-256 = sha256(ArtifactSha256)을 본다.
+//
+// 오류: 다르면 CorruptPackage / InvalidArgument(section = 그 칸, detail = CookedManifestNoEntry,
+// asset null)다.
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedArtifactFile(const CookedManifestArtifact& artifact, Span<const uint8> file,
+                        AssetDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

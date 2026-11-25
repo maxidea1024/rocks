@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetRuntime/AssetDiagnostic.h>
+#include <AssetRuntime/CookedManifest.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Text/String.h>
@@ -123,10 +124,10 @@ struct TargetProfile {
 ROCKS_TARGETPROFILES_API TextureLodGroup FindTextureLodGroup(const TargetProfile& profile,
                                                              TextureGroup group) noexcept;
 
-// 설정 파일 크기 상한·프로파일 id 길이 상한·형식 id 길이 상한이다.
+// 설정 파일 크기 상한·프로파일 id 길이 상한이다(형식 id 길이 상한 ShaderFormatIdMaxBytes와
+// 어휘·문법 함수는 매니페스트와 같은 출처 — AssetRuntime CookedManifest.h, 10.3.1절 A4f2 2번).
 inline constexpr usize ConfigJsonMaxFileBytes = 1024 * 1024;
 inline constexpr usize TargetProfileIdMaxBytes = 64;
-inline constexpr usize ShaderFormatIdMaxBytes = 64;
 // 엔진·프로젝트 설정 디렉터리 안의 상대 경로다.
 inline constexpr StringView TargetProfileDirectory = "TargetProfiles";
 
@@ -213,12 +214,6 @@ struct TargetProfileFailure {
     uint32 column = 0;
 };
 
-// backend 이름 어휘다(구현 여부와 무관 — 10.3절 1항).
-ROCKS_TARGETPROFILES_API bool IsKnownGraphicsBackend(StringView name) noexcept;
-
-// 형식 id 문법(`[A-Z0-9_]`, 1–64 byte)이다.
-ROCKS_TARGETPROFILES_API bool IsValidShaderFormatId(StringView id) noexcept;
-
 // id 프로파일을 읽는다: 엔진 파일(필수) → 프로젝트 파일(있으면) 순으로 대입하고 검증한다. out은
 // 기본값에서 시작한다(id는 미리 채운다). 오류(InvalidArgument — failure의 code InvalidSetting): id
 // 형식(`[A-Za-z0-9_]`, 1–64 byte), 엔진 파일 없음(error NotFound도 InvalidSetting), JSON 문법, 대입
@@ -237,5 +232,15 @@ ROCKS_TARGETPROFILES_API Result<void>
 ReadHostTargetProfile(const TargetProfileContext& context, StringView platform, TargetProfile& out,
                       reflection_text::TextDiagnostics& diagnostics,
                       TargetProfileFailure* failure) noexcept;
+
+// 검증한 프로필의 셰이더 칸을 매니페스트 backend 표로 바꿔 out을 채운다(10.3절 4항 —
+// graphicsBackends 순서, backend마다 shaderFormats 순서). ReadTargetProfile을 통과한 프로필은
+// 언제나 검증을 통과하는 표를 만든다(같은 상한·어휘·문법).
+//
+// 오류: graphicsBackends의 backend가 shaderFormats에 없으면 InvalidArgument(검증하지 않은 프로필),
+// 할당 실패는 그 오류다. 실패하면 out은 정해지지 않는다.
+ROCKS_TARGETPROFILES_API Result<void>
+MakeCookedManifestBackends(Allocator& allocator, const TargetProfile& profile,
+                           Array<CookedManifestBackend>& out) noexcept;
 
 } // namespace rocks

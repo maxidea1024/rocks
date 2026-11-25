@@ -40,6 +40,9 @@ struct CookPublishConfig {
     Sha256Digest cookSettings{};
     uint32 cookerVersion = CookerVersion;
     EngineVersion cookedBy{};
+    // 매니페스트 backend 표다(TargetProfiles MakeCookedManifestBackends — 10.3.1절 A4f2 8번).
+    // Finish가 복사한다(Finish까지 살아야 한다). 셰이더 없는 프로필이면 비어 있다.
+    Span<const CookedManifestBackend> backends{};
 };
 
 // 게시기다(CookPackages의 출력 sink). 한 쿠킹에 한 번 쓴다: Begin → Put·Reuse → Finish. 한

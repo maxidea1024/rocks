@@ -619,6 +619,61 @@ Result<void> CookPublisher::Refuse(AssetDiagnosticCode code, AssetId asset, Asse
     return Result<void>::Success();
 }
 
+namespace {
+
+// artifact 항목 하나를 복사한다(부분 쿠킹 병합 — 10.3.1절 A4f2 8번).
+Result<void> CopyArtifact(const CookedManifestArtifact& source, Array<CookedManifestArtifact>& out,
+                          Allocator& allocator) noexcept {
+    CookedManifestArtifact copy(allocator);
+    copy.kind = source.kind;
+    copy.bytes = source.bytes;
+    copy.sha256 = source.sha256;
+    copy.cookKey = source.cookKey;
+    if (auto assigned = copy.name.TryAssign(source.name.View()); !assigned) {
+        return assigned;
+    }
+
+    if (auto assigned = copy.formatId.TryAssign(source.formatId.View()); !assigned) {
+        return assigned;
+    }
+
+    return out.TryPushBack(Move(copy));
+}
+
+// backend 표를 복사한다.
+Result<void> CopyBackends(Span<const CookedManifestBackend> source,
+                          Array<CookedManifestBackend>& out, Allocator& allocator) noexcept {
+    if (auto reserved = out.TryReserve(source.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const CookedManifestBackend& backend : source) {
+        CookedManifestBackend copy(allocator);
+        if (auto assigned = copy.name.TryAssign(backend.name.View()); !assigned) {
+            return assigned;
+        }
+
+        if (auto reserved = copy.formats.TryReserve(backend.formats.Size()); !reserved) {
+            return reserved;
+        }
+
+        for (const String& format : backend.formats) {
+            // 형식 수만큼 예약했다(빈 String 추가는 할당하지 않는다).
+            String& slot = *copy.formats.TryEmplaceBack(allocator).Value();
+            if (auto assigned = slot.TryAssign(format.View()); !assigned) {
+                return assigned;
+            }
+        }
+
+        // backend 수만큼 예약했다.
+        (void)out.TryPushBack(Move(copy));
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace
+
 Result<void> CookPublisher::Finish(const CookedManifest* merge,
                                    Span<const AssetId> removed) noexcept {
     if (!begun_ || finished_) {
@@ -639,6 +694,10 @@ Result<void> CookPublisher::Finish(const CookedManifest* merge,
     manifest.cookSettings = config_.cookSettings;
     manifest.cookerVersion = config_.cookerVersion;
     manifest.cookedBy = config_.cookedBy;
+    if (auto copied = CopyBackends(config_.backends, manifest.backends, *allocator_); !copied) {
+        return copied;
+    }
+
     if (auto reserved = manifest.entries.TryReserve(entries_.Size() +
                                                     (merge != nullptr ? merge->entries.Size() : 0));
         !reserved) {
@@ -679,6 +738,23 @@ Result<void> CookPublisher::Finish(const CookedManifest* merge,
         }
 
         algo::Sort(manifest.entries.View(), EntryLess);
+        // artifact 표: 이번 쿠킹이 만든 항목(A4f3 단계 — 지금은 없다)이 이기고, 같은 (kind, 이름,
+        // formatId)가 없는 이전 항목은 남는다. 파일 대조는 A4f3 6항이다(10.3.1절 A4f2 8번 한계).
+        const usize freshArtifacts = manifest.artifacts.Size();
+        for (const CookedManifestArtifact& old : merge->artifacts) {
+            const bool replaced = algo::BinarySearch(Span<const CookedManifestArtifact>(
+                                                         manifest.artifacts.Data(), freshArtifacts),
+                                                     old, CookedArtifactLess) != algo::NotFound;
+            if (replaced) {
+                continue;
+            }
+
+            if (auto copied = CopyArtifact(old, manifest.artifacts, *allocator_); !copied) {
+                return copied;
+            }
+        }
+
+        algo::Sort(manifest.artifacts.View(), CookedArtifactLess);
     }
 
     Array<uint8> bytes(*allocator_);

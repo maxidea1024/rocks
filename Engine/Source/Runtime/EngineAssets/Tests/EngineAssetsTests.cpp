@@ -110,6 +110,9 @@ TEST(EngineAssets_LoadsThroughEngineFrames) {
     REQUIRE(assets != nullptr);
     CHECK(assets->CookedRoot() == disk.Root());
     CHECK(assets->RuntimeProfile() == "Windows");
+    // 읽은 매니페스트를 그대로 노출한다(10.3절 8항 — 셰이더 쪽이 표를 읽는 곳).
+    CHECK(assets->Manifest().profileId.View() == "Windows" &&
+          !assets->Manifest().entries.IsEmpty());
     CHECK(!engine.IsInFrame());
     auto preloaded = assets->Manager().LoadBlocking(RequestOf(2), "EngineAssetsTests.Preload");
     REQUIRE(preloaded);

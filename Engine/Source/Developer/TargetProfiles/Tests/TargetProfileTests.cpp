@@ -9,6 +9,7 @@
 #include <TargetProfiles/TargetProfile.generated.h>
 #include <TargetProfiles/TargetProfile.h>
 #include <TargetProfiles/TargetProfiles.module.generated.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
 #include <string.h>
@@ -329,7 +330,81 @@ TEST(TargetProfile_EngineFiles) {
 
         CHECK(profile.textureLodGroups.Count() == 27 &&
               profile.textureNorm16Supported == row.norm16);
+
+        // 매니페스트 backend 표(10.3.1절 A4f2 8번): 프로필 순서 그대로이고 매니페스트 검증을
+        // 통과한다.
+        CookedManifest manifest(scene.allocator);
+        REQUIRE(manifest.profileId.TryAssign(row.id));
+        REQUIRE(MakeCookedManifestBackends(scene.allocator, profile, manifest.backends));
+        REQUIRE(manifest.backends.Size() == row.backends.Size());
+        for (usize index = 0; index < row.backends.Size(); ++index) {
+            CHECK(manifest.backends[index].name.View() == row.backends[index] &&
+                  manifest.backends[index].formats.Size() == 1 &&
+                  manifest.backends[index].formats[0].View() == row.formats[index]);
+        }
+
+        CHECK(ValidateCookedManifest(manifest, scene.allocator));
     }
+}
+
+// MakeCookedManifestBackends(10.3.1절 A4f2 8번): 형식 여럿의 순서를 지키고, 셰이더 없는 프로필은 빈
+// 표이며, 호출 전 out 내용은 지운다. 검증하지 않은 프로필(형식 목록 없는 backend)은
+// InvalidArgument다. 할당 실패(모든 지점)는 그 오류다.
+TEST(TargetProfile_ManifestBackends) {
+    ProfileScene scene;
+    REQUIRE(scene.Ready());
+    Allocator& allocator = scene.allocator;
+    TargetProfile profile(allocator);
+    REQUIRE(profile.graphicsBackends.TryEmplaceBack(allocator));
+    REQUIRE(profile.graphicsBackends[0].TryAssign("Vulkan"));
+    REQUIRE(profile.graphicsBackends.TryEmplaceBack(allocator));
+    REQUIRE(profile.graphicsBackends[1].TryAssign("D3D12"));
+    auto addFormats = [&](StringView backend, StringView first, StringView second) {
+        String key(allocator);
+        ShaderFormatList list(allocator);
+        return key.TryAssign(backend).IsOk() && list.formats.TryEmplaceBack(allocator).IsOk() &&
+               list.formats[0].TryAssign(first).IsOk() &&
+               (second.IsEmpty() || (list.formats.TryEmplaceBack(allocator).IsOk() &&
+                                     list.formats[1].TryAssign(second).IsOk())) &&
+               profile.shaderFormats.Insert(Move(key), Move(list)).IsOk();
+    };
+    // Map 순서(D3D12 먼저)와 무관하게 graphicsBackends 순서(Vulkan 먼저)다.
+    REQUIRE(addFormats("D3D12", "D3D12_SM6", "D3D12_SM5"));
+    REQUIRE(addFormats("Vulkan", "VULKAN_SM5", StringView()));
+    Array<CookedManifestBackend> out(allocator);
+    REQUIRE(out.TryEmplaceBack(allocator));
+    REQUIRE(MakeCookedManifestBackends(allocator, profile, out));
+    REQUIRE(out.Size() == 2);
+    CHECK(out[0].name.View() == "Vulkan" && out[0].formats.Size() == 1 &&
+          out[1].name.View() == "D3D12" && out[1].formats.Size() == 2 &&
+          out[1].formats[0].View() == "D3D12_SM6" && out[1].formats[1].View() == "D3D12_SM5");
+
+    test::NFailAllocator failing(allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        failing.FailOnAttempt(attempt);
+        Array<CookedManifestBackend> table(failing);
+        auto made = MakeCookedManifestBackends(failing, profile, table);
+        if (failing.Attempts() < attempt) {
+            REQUIRE(made);
+            break;
+        }
+
+        CHECK(made.Error() == ErrorCode::OutOfMemory);
+        ++failures;
+    }
+
+    failing.DisableFailure();
+    CHECK(failures > 0);
+
+    TargetProfile shaderless(allocator);
+    REQUIRE(MakeCookedManifestBackends(allocator, shaderless, out));
+    CHECK(out.IsEmpty());
+
+    REQUIRE(profile.graphicsBackends.TryEmplaceBack(allocator));
+    REQUIRE(profile.graphicsBackends[2].TryAssign("Metal"));
+    CHECK(MakeCookedManifestBackends(allocator, profile, out).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 } // namespace target_profile_tests_file

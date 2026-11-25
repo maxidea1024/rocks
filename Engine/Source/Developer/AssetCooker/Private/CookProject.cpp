@@ -272,7 +272,14 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
         }
     }
 
+    // 매니페스트 backend 표(10.3.1절 A4f2 8번 — 검증한 프로필이라 InvalidArgument는 나지 않는다).
+    Array<CookedManifestBackend> backends(allocator);
+    if (auto made = MakeCookedManifestBackends(allocator, *request.profile, backends); !made) {
+        return made;
+    }
+
     CookPublishConfig publishConfig;
+    publishConfig.backends = Span<const CookedManifestBackend>(backends.Data(), backends.Size());
     publishConfig.files = request.files;
     publishConfig.layout = request.layout;
     publishConfig.profileId = request.profile->id.View();
