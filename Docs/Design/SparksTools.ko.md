@@ -2,6 +2,8 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 13(2026-11-25): LC8f1 구현·리뷰 반영(11.9절 — 이름 노드 → 심볼 규칙을 의미 강조와 공용(`LspVisitNames`), 선언 위치 표시는 `패키지/모듈 경로:줄`·schema 파일 이름, 엔진 필드 읽기 전용 표시 수정).
+- 개정 12(2026-11-25): LC8f 설계(11절 — LC8f1 위치 질의·hover·정의 이동·서식, LC8f2 자동완성(구멍 snapshot·컴파일러 공개 목록·core 숨김·Unity 별칭), LC8f3 빠른 수정 개요, 리터럴 자동완성은 EI).
 - 개정 11(2026-11-25): LC8e 구현·리뷰 반영(10.9절 — `initialized` 때 첫 분석, 드라이브 `:`는 `%3A`, 지움을 먼저 발행, 작업 공간 없으면 분석하지 않음, 가장 안쪽 패키지, schema 상대 경로 절대화, 잘못된 UTF-8 본문은 -32700, 머리 전체 상한을 줄마다, class 기반 경로 강조·prelude enum case `defaultLibrary`, 경로 표기의 UTF-8·대소문자 수정).
 - 개정 10(2026-11-24): LC8e 설계(10절 — 틀·수명·문서 저장소·분석·진단·의미 강조·위치 변환·시험).
 - 개정 9(2026-11-24): SL 3.13 표 `@test` 행 개정(SL 문서를 장별 폴더로 나눈 뒤).
@@ -241,7 +243,7 @@
 
 - `textDocument/semanticTokens/full` → `{ data }`(5개씩: 줄 차이·시작 차이·길이·종류·modifier bit — UTF-16). 열린 문서·작업 공간 모듈만(그 밖은 빈 data). 마지막 분석 결과를 쓴다(요청이 분석을 다시 하지 않는다 — 문서 알림마다 분석했다).
 - 토큰: 모듈 구문 트리의 `Name`·`Identifier`·`Member` 노드 중 심볼이 있는 것(이름 토큰), `Type` 노드와 class 기반 목록 `Path` 노드의 타입(경로 마지막 이름 토큰 — 이름 노드에 심볼이 따로 없을 때), import 경로의 이름(namespace). 원문 위치 순, 겹치면 앞의 것(같은 토큰이 둘이면 하나). 속성(`@test` 등)은 심볼이 없어 강조하지 않는다(편집기 문법 강조 몫 — LC8g).
-- 종류(legend 순서): `namespace`(import 별칭·모듈·prelude 이름 공간·RPC 접두), `type`(내장·prelude 타입), `class`(Sparks·엔진 클래스), `struct`, `enum`, `interface`, `typeParameter`, `enumMember`, `event`, `function`(최상위 fn·prelude 함수), `method`(메서드·엔진 함수·interface 메서드), `property`(필드·엔진 필드·언어 필드), `parameter`, `variable`(지역·const·문맥 이름). modifier: `declaration`(선언 이름), `readonly`(`let`·const·읽기 전용 속성·문맥 이름), `static`(최상위 fn·const·schema·prelude static — `Delay`·`Log.Info`), `async`, `defaultLibrary`(엔진·prelude·언어 소유 — 엔진·prelude enum의 case 포함). 엔진 클래스의 필드(`Owner` 등)는 `property defaultLibrary`다.
+- 종류(legend 순서): `namespace`(import 별칭·모듈·prelude 이름 공간·RPC 접두), `type`(내장·prelude 타입), `class`(Sparks·엔진 클래스), `struct`, `enum`, `interface`, `typeParameter`, `enumMember`, `event`, `function`(최상위 fn·prelude 함수), `method`(메서드·엔진 함수·interface 메서드), `property`(필드·엔진 필드·언어 필드), `parameter`, `variable`(지역·const·문맥 이름). modifier: `declaration`(선언 이름), `readonly`(`let`·const·읽기 전용 속성·문맥 이름), `static`(최상위 fn·const·schema·prelude static — `Delay`·`Log.Info`), `async`, `defaultLibrary`(엔진·prelude·언어 소유 — 엔진·prelude enum의 case 포함). 엔진 클래스의 필드(`Owner` 등)는 `property defaultLibrary`이고, schema `access: readWrite`가 아니면(schema 기본은 읽기 전용) `readonly`도 붙는다(LC8f1에서 고침).
 
 ### 10.8 시험(LC8e)
 
@@ -258,3 +260,80 @@
 - **함께 고친 것(LC8a):** 작업 공간의 진단 경로 표기(`Display` — `\` → `/`)가 한 byte씩 `String`에 붙여 UTF-8 sequence가 쪼개지면 실패했다 — 한글이 든 폴더에서 `sparks check`가 할당 실패(3)로 끝났다. `\` 사이 구간을 통째로 붙인다. 언어 서버의 경로 key(`LspPathKey`)도 같다. 시험: `SparksTools_CheckNonAsciiFolder`, 언어 서버 시험은 모두 공백·한글이 든 임시 폴더에서 돈다.
 - **시험(`SparksToolsLspProtocolTests`·`SparksToolsLspAnalysisTests`, 준비는 `SparksToolsLspTestSupport.h`):** `SparksLsp_LifecycleGolden`(초기화 전 요청 -32002·초기화 전 알림 무시·`initialize` 인자 틀림 -32602·두 번째 initialize -32600·JSON 아님·잘못된 UTF-8·글자 중간에서 끊긴 본문 -32700·배열·bool id·문자열 아닌 method -32600·클라이언트 응답·`$/` 알림 무시·모르는 요청 -32601·uri 없는 강조 -32602·shutdown 뒤 요청 -32600 — 출력 byte 전체 golden), `SparksLsp_ExitCodesAndUsage`(exit만·shutdown 없음·입력 끝·빈 입력 1, 인자 오류 2, 읽기·쓰기 오류 3), `SparksLsp_FramingChunksAndHeaders`(조각 1·2·7·전체, 머리 이름 대소문자·값 공백·`Content-Type`·1,024 byte 머리 줄, 깨진 틀 17가지 — 없음·숫자 아님·음수·상한+1·자리 넘침·두 번·`:` 없음·머리 줄 상한·줄 끝 없는 긴 머리·머리 전체 상한(끝나지 않은 줄·다 끝난 줄들)·본문 모자람·64 MiB 그대로(입력 끝)·머리 중간 끝 — 조각 1과 전체), `SparksLsp_PublishesAndOverlaysDiagnostics`(디스크 진단 → 열어 고침 → 바꿈 → 같은 진단 바꿈은 발행 없음 → 다른 모듈을 깨 닫힌 모듈 진단 → 닫아 지움 → 저장 전 새 파일 → 닫아 지움 → 닫아 디스크로, 패키지 밖·file 아님·잘못된 percent·authority 문서는 진단 없음, 디스크에서 지운 파일의 지움과 대문자 드라이브·`:` URI 문서, 진단이 있던 파일을 다른 철자로 열기 — 지움 먼저), `SparksLsp_WorkspaceRoots`(workspaceFolders 우선·file 아닌 폴더 기록·잘못된 항목, 없는 폴더 — 기록·진단 없음·빈 강조·같은 이유는 한 번만 기록, 작업 공간 없음 — 기록, URI 철자 — `localhost`·소문자 `%3a` 받음·`%2F` 거부), `SparksLsp_NestedPackagesAndHiddenFolders`(가장 안쪽 패키지, `.` 폴더), `SparksLsp_DocumentStoreEdges`(4,096개 상한, 열지 않은 문서의 바꿈·닫기, 같은 URI 다시 열기, 부분 바꿈 거부, manifest 덮기 — 깨진 manifest면 패키지 모듈 진단이 지워졌다 닫으면 돌아옴), `SparksLsp_SchemaFolders`(schema 없음, 초기화 옵션 상대 경로, 명령줄 상대 경로 — 깨진 schema 진단 URI가 절대 경로), `SparksLsp_PositionsAreUtf16`(BOM·CRLF·한글·이모지, 디스크의 잘못된 UTF-8 — 앞 글자와 범위 끝), `SparksLsp_SemanticTokensGolden`(full profile·schema — 종류 13가지·modifier 5가지, 같은 줄 한글·이모지 뒤 열, 디스크 모듈·밖 URI·file 아닌 URI), `SparksLsp_MatchesConformanceCorpus`(LC8a 동등성 시험과 같은 사례 집합 — 발행 진단 = `.expect`), `SparksLsp_AllocationFailure`(세 세션 — 열기·강조·바꿈·JSON 아님·닫기 / workspaceFolders·초기화 옵션 schema·저장 전 새 파일·지움 / 없는 작업 공간·잘못된 UTF-8 본문 — 모든 할당 실패가 3이거나 같은 출력, 누수 없음).
 - **한계:** `typeParameter`는 사용자 원문에 나올 자리가 없다(Sparks에 사용자 generic이 없다 — 언어·엔진 타입 인자만) — legend에는 둔다(LC8f hover가 쓴다). 매 분석이 디스크 전체를 다시 읽고 컴파일한다(10.4절 — 증분은 측정 뒤). lexer가 첫 잘못된 UTF-8 byte에서 멈추므로 그 뒤 열은 진단으로 볼 수 없다(변환 함수는 1로 센다). 열린 문서가 4,096개를 넘으면 무시한다. 짝 없는 서로게이트(`"\ud800"`)가 든 본문은 Core JSON이 거부해 -32700이다(그 문서는 열리지 않는다). 덮기는 분석마다 열린 문서 × 작업 공간 파일만큼 경로 key를 만든다(측정 뒤 색인). POSIX 경로·드라이브 뿌리(`file:///c:`)의 URI 왕복은 Windows에서 돌리는 시험에 없다(macOS·Linux CI가 같은 시험을 POSIX 임시 폴더로 돈다). 할당 실패 때 표준 오류 한 줄이 빠질 수 있다(출력은 같다). 수동 확인(2026-11-24 Windows): `SparksLsp --stdio`에 각본 입력(initialize·열기·강조·닫기·shutdown·exit — 0).
+
+## 11. LC8f 설계(개정 12)
+
+### 11.1 나눔
+
+- **LC8f1** 위치 질의 공용·hover·정의 이동·서식, **LC8f2** 자동완성(멤버·`on`·attribute·import 경로·이름 범위·Unity 별칭·core 숨김), **LC8f3** 빠른 수정(진단 코드별 편집 — 착수 때 대상 코드 표를 이 절에 개정으로 정한다). 단계마다 구현·시험·리뷰어 1명·커밋. 리터럴 인자 자동완성(태그·에셋 경로 — SL 13절)은 사전이 생기는 EI로 미룬다(컴파일러에 태그·에셋 사전이 아직 없다 — 같은 사전 원칙(T13)을 지키려면 검증과 같은 사전이 먼저다).
+- 요청은 마지막 분석 결과(10.4절)를 쓴다. 자동완성만 구멍을 넣은 snapshot을 한 번 더 컴파일한다(11.6절).
+
+### 11.2 위치 질의 공용(LC8f1)
+
+- **LSP 위치 → byte 위치(`LspOffsetOf`):** 줄(0부터)이 줄 수 이상이면 파일 끝, 열은 줄 처음(1줄은 BOM 뒤)부터 UTF-16 code unit을 세어 가는 byte 위치, 열이 줄 끝을 넘으면 줄 끝(LF 앞, CRLF면 CR 앞 — 외톨이 CR은 lexer처럼 줄 안의 글자로 1), 서로게이트 쌍 가운데면 그 글자의 시작. 잘못된 UTF-8 byte는 1(10.6절과 같은 규칙 — 왕복이 맞는다).
+- **커서의 이름(`LspNameAt`):** 모듈 토큰 중 `begin ≤ 위치 < end`인 식별자 토큰, 없으면 `end == 위치`인 식별자 토큰(방금 친 이름 끝). 그 토큰을 가진 노드를 의미 강조와 같은 규칙으로 심볼에 잇는다: `Name`·`Identifier`·`Member`는 `NodeSymbol`, `Type`·기반 `Path`의 마지막 이름은 그 타입의 심볼(이름 노드에 심볼이 없을 때), import 경로의 이름은 그 경로가 가리키는 모듈. 의미 강조의 노드 → 심볼 규칙과 한 함수로 쓴다(두 곳이 어긋나지 않게).
+- 문서는 열린 문서·작업 공간 모듈만(10.7절과 같은 URI → 모듈 대응). 그 밖은 결과 없음(`null`).
+
+### 11.3 hover(LC8f1)
+
+- `textDocument/hover` → `{ contents: { kind: "markdown", value }, range }`(range는 이름 토큰) 또는 `null`(이름 없음·심볼 없음).
+- value = ```` ```sparks ```` 코드 블록 한 줄(선언 모양) + 문서 주석(있으면 빈 줄 뒤) + 선언 위치 한 줄(엔진은 schema 파일·줄, 사용자는 `모듈 경로:줄`). 선언 모양(종류별):
+
+| 종류 | 모양 |
+|---|---|
+| class·struct·enum·interface | `class Speaker : ScriptableComponent`(기반 전부), `struct Point`, `enum Mood`, `interface Greeter` |
+| field·엔진 field·언어 field | `var Speaker.Volume: int`, `let …`(읽기 전용 — 엔진은 schema `access: readWrite`가 아니면), 엔진은 `let Rocks.Component.Owner: Actor` |
+| fn·method·interface 메서드·엔진 함수 | `async fn Speaker.Wait(seconds: float)`, `fn Top(p: Point): int` — 매개변수는 선언의 매개변수 목록에서(버린 매개변수는 `_`), 엔진은 schema 이름, 언어 함수는 이름 없이 타입만(`fn Log.Info(string)`) |
+| event | `event Speaker.Spoke(word: int)` |
+| enum case | `Mood.Calm` |
+| const | `const Limit: int` |
+| 매개변수·지역 | `param word: int`, `let total: int`(타입을 쓰지 않은 지역은 초기값 식의 타입 — 추론 타입 표시, SL 13절 L2) |
+| import 별칭·모듈 | `import Lib`(모듈 import 경로) |
+| 내장·prelude 타입·값·문맥 이름·RPC 접두 | `type int`, `type Array<T>`, `Log`, `World: Rocks.World`, `Server` |
+
+- 타입 표기는 `AppendTypeText`(정규 표기 — 사용자 타입은 `패키지:모듈.이름`이 아니라 짧은 이름으로: hover는 읽는 글이라 타입 심볼 이름을 쓴다; 타입 인자·`?`는 그대로).
+- 문서 주석: 선언 노드의 `Doc`(DocComment — 토큰마다 `///` 한 줄)에서 `///`와 그 뒤 공백 하나를 뗀 줄들. 엔진 schema에는 문서가 없다(schema `doc` 칸은 EI).
+
+### 11.4 정의 이동(LC8f1)
+
+- `textDocument/definition` → `Location`(uri·range) 또는 `null`. 사용자 심볼은 그 모듈 파일(열린 문서면 그 URI, 아니면 서버가 만든 URI)의 이름 노드 토큰 범위, 엔진 심볼은 schema 파일의 그 항목 `name` 값 범위(`SchemaType`·`SchemaField`·`SchemaFunction`·`SchemaEvent`·`SchemaCase`의 span — 엔진 enum case 포함), import 경로의 이름(경로 앞부분 이름도 — `import Combat.Score`의 `Combat`)·별칭은 대상 모듈 파일의 0:0–0:0, 언어·prelude·문맥 이름은 `null`.
+
+### 11.5 서식(LC8f1)
+
+- `textDocument/formatting` → 열린 문서 내용을 `FormatSource`(LC8c — 단일 공식 서식, `options`는 받고 무시)로 서식한다. 바뀌면 TextEdit 하나(0:0 → 문서 끝, 새 원문 전체 — BOM은 위치 밖이라 범위에 들지 않는다), BOM 뒤 내용이 서식과 같으면 `[]`, 어휘·구문 진단이 있으면 `[]`(서식하지 않는다 — 진단은 이미 발행했다), 열린 문서가 아니면 `null`. 줄 끝은 LF로 바뀐다(formatter 규칙 — CRLF 문서도 LF가 된다). `.spark`가 아닌 문서(manifest·schema)는 `null`.
+- capabilities에 `hoverProvider`·`definitionProvider`·`documentFormattingProvider: true`를 더한다.
+
+### 11.6 자동완성(LC8f2)
+
+- `textDocument/completion`(trigger 글자 `.`·`@`) → `CompletionList { isIncomplete, items }`. 열린 문서만(아니면 빈 목록). 커서가 주석·문자열 안이면 빈 목록(리터럴 인자 자동완성은 EI).
+- **구멍 snapshot:** 문서 내용의 커서 자리에 구멍 식별자(`SparksCompletionHole`)를 넣은 내용으로 작업 공간을 한 번 컴파일한다 — 깨진 원문(`x.|`)에서도 받는 쪽 식이 완결되어 타입이 정해진다. 입력 중인 접두(커서 앞 식별자 글자)는 그대로 두고 그 뒤에 넣는다(`x.Vo|` → `x.VoSparksCompletionHole`). 결과의 노드는 구멍 토큰으로 찾는다.
+- **자리(앞 토큰으로 정한다):**
+  - 멤버 `식.|`: 구멍을 가진 `Member` 노드의 객체 — 값이면 `ExpressionType`(선택 타입은 그 안의 타입)의 멤버(class·struct·엔진·언어 타입과 기반 체인 — `owner`가 체인의 타입인 field·method·event·언어 멤버·엔진 멤버), 타입 이름이면 정적 멤버(enum case·static 함수·상수), import 별칭이면 그 모듈의 최상위 선언.
+  - `on |`: hook(컴파일러 hook 목록 — `Tick(dt: float)` 같은 매개변수 모양을 detail로), 자기·기반의 이벤트, 필드(뒤에 `.`가 오는 경로 첫 이름). `on A.B.|`: 경로 앞 이름들을 해석한 타입의 이벤트·필드와 `Changed`.
+  - `@|`: 컴파일러 attribute 목록.
+  - `import |`·`import A.|`: 같은 패키지와 의존 패키지 모듈의 import 경로에서 다음 segment.
+  - 그 밖(식·문장 자리): 보이는 지역·매개변수(같은 함수, 커서 앞 선언, 선언 노드의 부모 범위가 커서를 담음 — 블록 범위 근사), 자기 class 멤버와 기반 체인, 모듈 최상위 선언, import 별칭과 import한 모듈의 최상위 선언, prelude 타입·값, 문맥 이름, 엔진 타입, 키워드(컴파일러 키워드 목록). 타입 자리(앞 토큰이 `:`·`<`·`->`가 아닌 `as?` 뒤·기반 목록)는 타입만.
+- **컴파일러 공개 목록(새 공개 헤더 `SparksCompiler/LanguageCatalog.h`):** hook(이름·매개변수 모양·full 전용), attribute(이름·full 전용), 키워드(이름·full 전용 — `interface`·`open`). 컴파일러 검사가 쓰는 표를 그대로 내보낸다(사본 표를 두지 않는다).
+- **core 숨김:** core 패키지 모듈에서는 full 전용 hook(`Validate`)·attribute(1.3절 full 목록)·키워드와 `Class` prelude 타입, Sparks class·interface를 기반 목록 후보에서 뺀다(S1113과 같은 규칙).
+- **Unity 별칭:** `Update`→`Tick`, `FixedUpdate`→`FixedTick`, `LateUpdate`→`LateTick`, `OnEnable`→`Enable`, `GetComponent`→`Find` — Rocks 이름이 후보일 때 같은 항목을 하나 더 낸다(label은 Rocks 이름, `filterText`는 Unity 이름, detail `Unity: Update`).
+- **항목:** `label`, `kind`(LSP CompletionItemKind — class 7·struct 22·enum 13·enumMember 20·interface 8·function 3·method 2·field 5·property 10·event 23·variable 6·constant 21·module 9·keyword 14·typeParameter 25), `detail`(hover의 선언 모양 한 줄), `sortText`(가까움 순위 숫자 + 이름: 지역·매개변수 0, 멤버 1, 모듈 2, import 3, prelude·문맥 4, 엔진 타입 5, 키워드 6). 접두(ASCII 대소문자 무시)로 서버가 거르고, label·kind가 같은 것은 하나만, 상한 `MaxLspCompletionItems`(1,000 — 넘으면 `isIncomplete: true`).
+- capabilities `completionProvider: { triggerCharacters: [".", "@"] }`.
+
+### 11.7 빠른 수정(LC8f3 — 개요)
+
+- `textDocument/codeAction`(context.diagnostics) → 진단 코드별 편집 생성기가 만든 `CodeAction { title, kind: "quickfix", diagnostics, edit }`. 대상(SL 13절 목록): `?` 추가, `?? return`, 누락 import, handler 골격(`@save`·`@net` 필드의 Changed 골격은 `on Enable` 반영 호출을 함께), 재진입 정책 표시(`@skipWhileBusy`·`@restart`), `Soft` → `try await X.Load()`, `@formerly`, 이름 충돌 시 이름 변경. 진단이 있는 것부터 착수 때 코드 표로 정한다.
+
+### 11.8 시험(LC8f)
+
+- LC8f1: hover golden(표의 종류마다 — 문서 주석·추론 타입·엔진 schema 위치), 정의 이동(사용자·엔진 field·함수·enum case·import·언어 이름 null), 서식(바뀜·같음·구문 오류·열지 않은 문서·manifest), 위치 역변환(서로게이트 가운데·줄 끝 넘음·마지막 줄 넘음·BOM·CRLF), 할당 실패 전수.
+- LC8f2: 자리마다 후보 golden(이름·종류·순서), core 숨김, Unity 별칭, prefix fuzz(corpus 원문의 모든 토큰 경계에서 요청 — 실패·빈 응답 오류 없이 결정적, 같은 요청 두 번 같은 결과), 할당 실패 전수.
+- LC8f3: 코드마다 편집 golden(편집 적용 뒤 원문이 그 진단 없이 컴파일).
+
+### 11.9 구현(LC8f1)
+
+- **파일:** `Private/LspQueries.cpp`(커서의 이름 `LspNameAt`·선언 모양 `LspAppendDeclaration`·hover `LspAppendHover`·정의 `LspDefinition`·읽기 전용 판정 `LspIsReadOnly`), `LspServer.h`의 `LspVisitNames`(노드 → 이름·심볼 — 의미 강조와 공용, 11.2절), `LspText`의 `LspOffsetOf`, `LspServer.cpp`의 `Hover`·`Definition`·`Formatting`과 공용 `ModuleOfUri`·`UriOfSource`·`PositionParams`(위치 인자는 0 이상 uint32 범위 정수 — 아니면 -32602).
+- **설계와 달라진 곳:** 선언 위치 줄은 사용자 모듈이 ``Declared at `<패키지>/<모듈 경로>:<줄>`.``, schema가 ``Declared in the engine schema at `<파일 이름>:<줄>`.``(기기마다 다른 절대 경로를 보이지 않는다). 언어 함수의 매개변수는 이름 없이 타입만(`async fn Delay(float, Clock)`), prelude enum case는 `Clock.Game`, prelude 값은 이름만(`Log`).
+- **함께 고친 것:** 엔진 필드의 읽기 전용(schema `access` 기본 `read`)을 hover(`let`)와 의미 강조(`readonly`)가 보지 않았다 — `LspIsReadOnly`로 둘 다(의미 강조 golden의 `Owner`가 `property readonly defaultLibrary`로).
+- **시험(`SparksToolsLspQueryTests`):** `SparksLsp_HoverAndDefinitionGolden`(30자리 — import·class 선언·엔진 기반·필드·`let` 필드·이벤트·이벤트 매개변수·async 메서드·매개변수·지역 선언/사용(추론 타입)·prelude 함수·타입·case·엔진 필드·prelude 값·언어 함수·import한 함수·enum·case·const·최상위 fn·타입 사용·멤버·이름 끝 자리·키워드·문자열 — 정의 자리와 hover 전문 golden, 문서 주석 두 줄), `SparksLsp_Formatting`(바뀜·같음·구문 오류·CRLF → LF·열지 않음·manifest), `SparksLsp_PositionsToOffsets`(BOM·CRLF·이모지 뒤·서로게이트 가운데·줄 끝 넘음·마지막 줄 넘음·이름 끝, 위치 인자 틀림 4가지 -32602), `SparksLsp_QueryAllocationFailure`(hover·정의 5자리·서식 — 3이거나 같은 출력). lifecycle golden의 "지원하지 않는 요청"은 `textDocument/references`(L3)로.
+- **리뷰 반영:** 사용자 함수·이벤트의 매개변수를 심볼에서 모아 버린 매개변수(`_` — 심볼 없음)가 빠짐 → 선언의 매개변수 목록에서(`event Door.Opened(by: Actor, _: int)`). 반환 타입의 void 판정이 임시 글자를 만들어 그 할당 실패를 삼킴 → 타입 표의 내장 심볼로. 지역 타입의 초기값 추론 대체 → 뺌(검사기가 추론 타입을 심볼에 둔다 — 오류 자리에서 틀린 타입을 보이지 않게). import 경로 앞부분 이름도 대상 모듈로(11.4절). `LspOffsetOf`가 외톨이 CR에서 멈춰 `LspPositionOf`와 왕복이 어긋남 → CRLF의 CR에서만. BOM 문서의 서식이 늘 편집을 냄 → BOM 뒤 내용과 비교. 선언 위치 줄의 schema 판정을 "모듈이 아님"에서 "schema 원문"으로. 엔진 기반에도 `Rocks.` 접두. prelude 함수의 async 판정을 함수 갈래와 같게. 시험: hover golden 47자리(struct·interface·interface 메서드·interface 기반·별칭 선언/사용·import 경로 앞 이름·선택 타입·`Array<T>`·`int`·엔진 함수·엔진 enum·엔진 case·문맥 이름·버린 매개변수 더함), 위치 역변환에 줄 끝 clamp가 이름으로 드러나는 자리·외톨이 CR, 서식 BOM, 정수 아닌 위치(-32602).
+- **한계:** `this`·attribute 이름·`on` 경로의 hook 이름(`on Tick`)은 심볼이 없어 hover·정의가 없다(hook 목록이 공개되는 LC8f2에서 hook 설명을 더할지 본다). 엔진 schema에 문서가 없다(EI). hover 위치 줄은 열린 문서의 저장 전 내용 기준이다. 외톨이 CR을 줄 끝으로 보는 LSP 클라이언트와는 그 줄 뒤 위치가 어긋난다(10.6절 — 원문 줄은 LF 기준). 엔진 이벤트(`Owner.Damaged`)는 `on` 경로 뒤 이름에 심볼이 없어 hover가 없다. 서로게이트 가운데 위치의 보정(글자 시작)은 문자열 안이라 이름 질의로는 드러나지 않는다.

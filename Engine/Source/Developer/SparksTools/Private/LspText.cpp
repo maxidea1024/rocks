@@ -112,6 +112,32 @@ LspPosition LspPositionOf(const SourceFile& file, uint32 offset) noexcept {
     return position;
 }
 
+uint32 LspOffsetOf(const SourceFile& file, LspPosition position) noexcept {
+    const StringView text = file.Text();
+    const uint32 end = static_cast<uint32>(text.ByteCount());
+    if (file.LineCount() == 0 || position.line >= file.LineCount()) {
+        return end;
+    }
+
+    uint32 at = file.LineBegin(position.line + 1);
+    at = at < file.ContentBegin() ? file.ContentBegin() : at;
+    uint32 remaining = position.character;
+    // 줄 끝은 LF와 그 앞의 CR이다(외톨이 CR은 lexer처럼 줄 안의 글자 — LspPositionOf와 같다).
+    while (remaining > 0 && at < end && text.Data()[at] != '\n' &&
+           !(text.Data()[at] == '\r' && at + 1 < end && text.Data()[at + 1] == '\n')) {
+        uint32 units = 1;
+        const usize length = LspSequence(text.Data() + at, end - at, units);
+        if (units > remaining) {
+            break; // 서로게이트 쌍 가운데 — 그 글자의 시작
+        }
+
+        remaining -= units;
+        at += length == 0 ? 1 : static_cast<uint32>(length);
+    }
+
+    return at;
+}
+
 Result<bool> LspPathFromUri(StringView uri, String& path) noexcept {
     // authority는 비었거나 `localhost`(RFC 8089 — 같은 기기)만 받는다.
     auto parsed = TryParseUri(uri);

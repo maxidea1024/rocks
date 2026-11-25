@@ -430,7 +430,7 @@ TEST(SparksLsp_SemanticTokensGolden) {
                       "28:12 4 method static defaultLibrary\n"
                       "29:15 4 enum\n"
                       "29:20 4 enumMember\n"
-                      "32:7 5 property defaultLibrary\n"
+                      "32:7 5 property readonly defaultLibrary\n"
                       "32:13 7 event defaultLibrary\n"
                       "32:21 6 parameter declaration\n"
                       "32:29 5 type defaultLibrary\n"
