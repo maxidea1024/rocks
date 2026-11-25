@@ -170,7 +170,7 @@ material::ParameterKey Key(Allocator& allocator, uint64 parameter) noexcept {
     return key;
 }
 
-// TODO 필드 검사: 결과가 정확히 (선행, 필드) 하나인가.
+// 선행 TODO 필드 검사: 결과가 정확히 (선행, 필드) 하나인가.
 bool ExactlyOne(const Array<MaterialPrerequisiteUse>& uses, MaterialPrerequisite prerequisite,
                 StringView field) noexcept {
     return uses.Size() == 1 && uses[0].prerequisite == prerequisite && uses[0].field == field;
@@ -997,7 +997,8 @@ TEST(Material_BuildHookResolvesOutermostPackage) {
 }
 #endif
 
-// TODO 필드 검사(MD12): 기본값이면 비어 있고, 필드 하나만 바꾸면 그 (선행, 필드) 하나만 나온다.
+// 선행 TODO 필드 검사(MD12): 기본값이면 비어 있고, 필드 하나만 바꾸면 그 (선행, 필드) 하나만
+// 나온다.
 TEST(Material_CollectsUsedPrerequisitesPerField) {
     SystemAllocator allocator;
     {
@@ -1144,7 +1145,7 @@ TEST(Material_CollectsUsedPrerequisitesPerField) {
         CHECK(ExactlyOne(uses, testCase.prerequisite, testCase.field));
     }
 
-    // TODO가 아닌 override(블렌드 모드 Translucent)는 쓰여도 진단이 없다.
+    // 상태가 TODO가 아닌 override(블렌드 모드 Translucent)는 쓰여도 진단이 없다.
     {
         MaterialInstance instance(allocator);
         instance.traitOverrides.blendMode = BlendMode::Translucent;
@@ -1194,7 +1195,7 @@ TEST(Material_CollectsUsedPrerequisitesPerField) {
         CHECK(ExactlyOne(uses, testCase.prerequisite, testCase.field));
     }
 
-    // TODO가 아닌 override(컬렉션·static enum)는 진단이 없다.
+    // 상태가 TODO가 아닌 override(컬렉션·static enum)는 진단이 없다.
     {
         MaterialFunctionInstance instance(allocator);
         REQUIRE(

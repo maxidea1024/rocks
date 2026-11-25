@@ -42,8 +42,11 @@
 #include <MaterialSchema/Nodes/Vectors/TransformPositionProperties.h>
 #include <MaterialSchema/Nodes/VirtualTexture/RuntimeVirtualTextureSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/VirtualTexture/RuntimeVirtualTextureSampleProperties.h>
+#include <MaterialSchema/MaterialGraphSchema.h>
+#include <MaterialSchema/MaterialNodeCatalog.h>
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
+#include <NodeGraph/NodeTypeRegistry.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
 #include <ObjectSerialization/StructRecord.h>
@@ -190,6 +193,7 @@ Array<uint8> IntegerFieldRecord(Allocator& allocator, const TypeSchema& schema, 
 
     return writer.TakeBytes();
 }
+
 // Operator 시험 입력 수다(문자 A–Z 26개를 넘겨 Input<n> 키까지 본다).
 constexpr usize OperatorTestInputs = 28;
 
@@ -349,7 +353,7 @@ TEST(MaterialDynamicPins_TextureObjectOutputType) {
 
 // Custom: 이름 있는 입력은 그 이름, 빈 이름은 Input<n>이고, 출력 Result 타입은 outputType,
 // 추가 출력은 이름·타입대로다. 추가 출력이 있으면 주 출력 표시가 "return"이고 이름 없는 추가 출력은
-// 핀이 없다(UE RebuildOutputs). 이미 있는 키와 같은 출력 키는 Out을 붙인다.
+// 핀이 없다(UE RebuildOutputs). 입력과 같은 출력 키는 Out을 붙이고, 출력끼리 겹치면 실패한다.
 TEST(MaterialDynamicPins_CustomInputsAndOutputs) {
     PinEnv env;
     REQUIRE(env.ready);
@@ -374,17 +378,23 @@ TEST(MaterialDynamicPins_CustomInputsAndOutputs) {
     REQUIRE(properties.additionalOutputs.TryPushBack(extra));
     REQUIRE(properties.additionalOutputs.TryPushBack(anonymous));
     REQUIRE(properties.additionalOutputs.TryPushBack(sameAsInput));
-    REQUIRE(properties.additionalOutputs.TryPushBack(sameAsResult));
     nodegraph::PinList pins(env.allocator);
     REQUIRE(CollectDynamicPins(env, "Material.CustomHlsl", env.Save(properties), fixture, pins));
-    REQUIRE(pins.Size() == 6);
+    REQUIRE(pins.Size() == 5);
     CHECK(IsPin(env, pins.View()[0], "Tint", In, MaterialPinType::Any, "Tint"));
     CHECK(IsPin(env, pins.View()[1], "Input1", In, MaterialPinType::Any, ""));
     CHECK(IsPin(env, pins.View()[2], "Result", Out, MaterialPinType::Float2, "return"));
     CHECK(IsPin(env, pins.View()[3], "Mask", Out, MaterialPinType::Float4, "Mask"));
     CHECK(IsPin(env, pins.View()[4], "TintOut", Out, MaterialPinType::Float1, "Tint"));
-    CHECK(IsPin(env, pins.View()[5], "ResultOut", Out, MaterialPinType::Float3, "Result"));
     CHECK(pins.View()[0].valuePolicy == nodegraph::PinValuePolicy::Hidden);
+
+    // 추가 출력 이름이 주 출력 키 Result와 같으면 출력끼리 겹쳐 실패한다.
+    CustomHlslProperties resultOutput(env.allocator);
+    REQUIRE(resultOutput.additionalOutputs.TryPushBack(sameAsResult));
+    nodegraph::PinList resultClash(env.allocator);
+    CHECK(
+        CollectDynamicPins(env, "Material.CustomHlsl", env.Save(resultOutput), fixture, resultClash)
+            .Error() == ErrorCode::InvalidArgument);
 
     // 이름 있는 입력 "Result"면 주 출력 키가 ResultOut이다.
     CustomHlslProperties resultInput(env.allocator);
@@ -421,6 +431,23 @@ TEST(MaterialDynamicPins_CustomInputsAndOutputs) {
     nodegraph::PinList clash(env.allocator);
     CHECK(CollectDynamicPins(env, "Material.CustomHlsl", env.Save(duplicate), fixture, clash)
               .Error() == ErrorCode::InvalidArgument);
+
+    // 같은 이름의 추가 출력 둘도 실패한다(순서에 따라 키가 바뀌지 않게 피하지 않는다 — UE도 실패).
+    CustomHlslProperties twoMasks(env.allocator);
+    REQUIRE(twoMasks.additionalOutputs.TryPushBack(extra));
+    REQUIRE(twoMasks.additionalOutputs.TryPushBack(extra));
+    nodegraph::PinList outputClash(env.allocator);
+    CHECK(CollectDynamicPins(env, "Material.CustomHlsl", env.Save(twoMasks), fixture, outputClash)
+              .Error() == ErrorCode::InvalidArgument);
+
+    // 이름 없는 추가 출력만 있어도 주 출력 표시는 "return"이다(UE는 추가 출력 배열 크기로 정한다).
+    CustomHlslProperties onlyAnonymous(env.allocator);
+    REQUIRE(onlyAnonymous.additionalOutputs.TryPushBack(anonymous));
+    nodegraph::PinList anonymousPins(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.CustomHlsl", env.Save(onlyAnonymous), fixture,
+                               anonymousPins));
+    REQUIRE(anonymousPins.Size() == 1);
+    CHECK(IsPin(env, anonymousPins.View()[0], "Result", Out, MaterialPinType::Float3, "return"));
 }
 
 // Switch·Operator·Convert: 개수와 이름·폭이 속성대로다.
@@ -647,6 +674,14 @@ TEST(MaterialDynamicPins_AttributeNodes) {
     REQUIRE(CollectDynamicPins(env, "Material.Aggregate", env.Save(aggregate), fixture, user));
     REQUIRE(user.Size() == 4);
     CHECK(user.View()[0].type == ToPinTypeId(MaterialPinType::Any));
+
+    // 같은 속성 이름 둘은 거부한다.
+    AggregateProperties repeated(env.allocator);
+    REQUIRE(repeated.attributeNames.TryPushBack(env.Intern("BaseColor")));
+    REQUIRE(repeated.attributeNames.TryPushBack(env.Intern("BaseColor")));
+    nodegraph::PinList twicePins(env.allocator);
+    CHECK(CollectDynamicPins(env, "Material.Aggregate", env.Save(repeated), fixture, twicePins)
+              .Error() == ErrorCode::InvalidArgument);
 }
 
 // LayerStack·MaterialCache: 목록대로다. MaterialCache 출력은 늘 속성마다 있고, 입력은 견본이
@@ -694,14 +729,92 @@ TEST(MaterialDynamicPins_LayerStackAndMaterialCache) {
     REQUIRE(sample.Size() == 4);
     CHECK(IsPin(env, sample.View()[0], "Primitive", In, MaterialPinType::UInt1, "Primitive"));
     CHECK(IsPin(env, sample.View()[1], "UV", In, MaterialPinType::Float2, "UV"));
-    CHECK(IsPin(env, sample.View()[2], "Color", Out, MaterialPinType::Float3, "Color"));
-    CHECK(IsPin(env, sample.View()[3], "Roughness", Out, MaterialPinType::Float1, "Roughness"));
+    // 출력 키는 쓰기 모드와 같다(isSample을 바꿔도 출력 연결이 그대로다).
+    CHECK(IsPin(env, sample.View()[2], "ColorOut", Out, MaterialPinType::Float3, "Color"));
+    CHECK(IsPin(env, sample.View()[3], "RoughnessOut", Out, MaterialPinType::Float1, "Roughness"));
+
+    // 이름 없는 속성은 Attribute<n>·Attribute<n>Out이고, 견본 모드의 UV 속성은 입력 UV와 겹치지
+    // 않는다.
+    MaterialCacheOutputProperties unnamedCache(env.allocator);
+    MaterialCacheAttribute blank(env.allocator);
+    blank.valueType = static_cast<uint32>(MaterialPinType::Float2);
+    MaterialCacheAttribute uv(env.allocator);
+    REQUIRE(uv.decoration.TryAssign("UV"));
+    uv.valueType = static_cast<uint32>(MaterialPinType::Float2);
+    REQUIRE(unnamedCache.attributes.TryPushBack(Move(blank)));
+    REQUIRE(unnamedCache.attributes.TryPushBack(Move(uv)));
+    nodegraph::PinList unnamedWrite(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.MaterialCacheOutput", env.Save(unnamedCache), fixture,
+                               unnamedWrite));
+    REQUIRE(unnamedWrite.Size() == 4);
+    CHECK(IsPin(env, unnamedWrite.View()[0], "Attribute0", In, MaterialPinType::Float2, ""));
+    CHECK(IsPin(env, unnamedWrite.View()[2], "Attribute0Out", Out, MaterialPinType::Float2, ""));
+    unnamedCache.isSample = true;
+    nodegraph::PinList unnamedSample(env.allocator);
+    REQUIRE(CollectDynamicPins(env, "Material.MaterialCacheOutput", env.Save(unnamedCache), fixture,
+                               unnamedSample));
+    REQUIRE(unnamedSample.Size() == 4);
+    CHECK(IsPin(env, unnamedSample.View()[1], "UV", In, MaterialPinType::Float2, "UV"));
+    CHECK(IsPin(env, unnamedSample.View()[3], "UVOut", Out, MaterialPinType::Float2, "UV"));
 
     // 범위 밖 핀 타입 번호는 거부한다.
     cache.attributes[0].valueType = MaterialPinTypeCount;
     nodegraph::PinList bad(env.allocator);
     CHECK(CollectDynamicPins(env, "Material.MaterialCacheOutput", env.Save(cache), fixture, bad)
               .Error() == ErrorCode::InvalidArgument);
+}
+
+// 정적 핀과의 충돌: 등록표의 CollectPins(정적 + 동적)를 거쳐 사용자 이름이 정적 핀 키와 같으면
+// 실패하는지 본다(19.13.3절 — Switch 입력 "Default", Aggregate 속성 "Result").
+TEST(MaterialDynamicPins_StaticKeyCollisions) {
+    PinEnv env;
+    REQUIRE(env.ready);
+    nodegraph::NodeTypeRegistry registry(env.allocator, env.names);
+    MaterialNodeCatalog catalog(env.allocator);
+    MaterialGraphSchema schema(MaterialGraphKind::Material, catalog, env.names, env.allocator);
+    REQUIRE(registry.Initialize());
+    REQUIRE(schema.Ready());
+    REQUIRE(registry.RegisterSchema(schema, ModuleLease()));
+    REQUIRE(catalog.RegisterGroups(registry, schema, BuiltinMaterialNodeGroups(), ModuleLease()));
+
+    NodeFixture fixture(env.allocator);
+    fixture.document.domain = schema.Domain();
+    fixture.node.typeSchemaVersion = 1;
+    const auto collect = [&](StringView type, const Array<uint8>& bytes,
+                             nodegraph::PinList& out) noexcept {
+        fixture.node.type = env.Intern(type);
+        fixture.node.properties.bytes.Clear();
+        if (auto copied = fixture.node.properties.bytes.TryAppend(bytes.View()); !copied) {
+            return copied;
+        }
+
+        return registry.CollectPins(fixture.document, fixture.graph, fixture.node, out);
+    };
+
+    SwitchProperties fine(env.allocator);
+    SwitchInput grass;
+    grass.inputName = env.Intern("Grass");
+    REQUIRE(fine.inputs.TryPushBack(grass));
+    nodegraph::PinList finePins(env.allocator);
+    REQUIRE(collect("Material.Switch", env.Save(fine), finePins));
+    CHECK(finePins.Size() == 4);
+
+    const StringView staticKeys[] = {"Default", "SwitchValue", "Result"};
+    for (StringView name : staticKeys) {
+        SwitchProperties clash(env.allocator);
+        SwitchInput input;
+        input.inputName = env.Intern(name);
+        REQUIRE(clash.inputs.TryPushBack(input));
+        nodegraph::PinList pins(env.allocator);
+        CHECK(collect("Material.Switch", env.Save(clash), pins).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+
+    AggregateProperties aggregate(env.allocator);
+    REQUIRE(aggregate.attributeNames.TryPushBack(env.Intern("Result")));
+    nodegraph::PinList aggregatePins(env.allocator);
+    CHECK(collect("Material.Aggregate", env.Save(aggregate), aggregatePins).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 } // namespace material_dynamic_pins_tests_file

@@ -57,8 +57,12 @@ constexpr usize GuidHexDigits = 32;
 // 16진 한 자리의 bit 수와 mask다.
 constexpr int HexDigitBits = 4;
 constexpr uint64 HexDigitMask = 0xF;
+// byte 하나의 bit 수다.
+constexpr int BitsPerByte = 8;
 // Guid 반쪽(uint64)의 16진 자릿수다.
-constexpr int HalfHexDigits = static_cast<int>(sizeof(uint64) * 8) / HexDigitBits;
+constexpr int HalfHexDigits = static_cast<int>(sizeof(uint64)) * BitsPerByte / HexDigitBits;
+// 같은 이름의 입력이 있는 출력 키에 붙이는 접미사다(19.13.3절 키 충돌 규칙).
+constexpr StringView OutputKeySuffix = "Out";
 // 문자로 이름을 붙이는 Operator 입력 수다(A–Z, UE GetInputName).
 constexpr usize OperatorLetterInputs = 26;
 
@@ -160,40 +164,37 @@ Result<Name> UserKey(const DynamicPinsInput& input, StringView text, StringView 
     return text.IsEmpty() ? IndexedKey(input.names, prefix, index) : Intern(input.names, text);
 }
 
-// 출력 키다. keyText인 핀(입력 포함)이 이미 있으면 뒤에 Out을 붙인다(핀 키는 방향과 상관없이
-// 유일 — 19.13.3절). 붙인 키도 있으면 Add가 InvalidArgument를 낸다.
-Result<Name> OutputKey(const DynamicPinsInput& input, const PinList& out,
-                       StringView keyText) noexcept {
-    auto key = Intern(input.names, keyText);
-    if (!key || out.Find(key.Value()) == nullptr) {
-        return key;
-    }
-
+// keyText 뒤에 OutputKeySuffix를 붙인 키다.
+Result<Name> SuffixedKey(const DynamicPinsInput& input, StringView keyText) noexcept {
     SystemAllocator scratch;
     String text(scratch);
     if (auto assigned = text.TryAssign(keyText); !assigned) {
         return Result<Name>::Failure(assigned.Error());
     }
 
-    if (auto appended = text.TryAppend("Out"); !appended) {
+    if (auto appended = text.TryAppend(OutputKeySuffix); !appended) {
         return Result<Name>::Failure(appended.Error());
     }
 
     return Intern(input.names, text.View());
 }
 
-// 사용자 이름 출력 핀이다. 이름이 있으면 그 이름, 비면 prefix<index>를 키로 하고 OutputKey 규칙을
-// 따른다.
-Result<void> AddUserOutput(const DynamicPinsInput& input, PinList& out, StringView text,
-                           StringView prefix, usize index, MaterialPinType type) noexcept {
-    char buffer[KeyBufferBytes];
-    const StringView keyText = text.IsEmpty() ? IndexedText(buffer, prefix, index) : text;
-    auto key = OutputKey(input, out, keyText);
+// 출력 키다. keyText인 입력 핀이 이미 있으면 뒤에 Out을 붙인다(핀 키는 방향과 상관없이 유일 —
+// 19.13.3절). 같은 키의 출력이 이미 있으면 키를 그대로 돌려줘 Add가 InvalidArgument를 내게 한다:
+// 출력끼리 겹치면 순서에 따라 키가 바뀌므로 피하지 않는다(UE도 같은 이름의 Custom 출력은 실패).
+Result<Name> OutputKey(const DynamicPinsInput& input, const PinList& out,
+                       StringView keyText) noexcept {
+    auto key = Intern(input.names, keyText);
     if (!key) {
-        return Result<void>::Failure(key.Error());
+        return key;
     }
 
-    return AddOutput(out, key.Value(), type, text);
+    const PinDescriptor* existing = out.Find(key.Value());
+    if (existing == nullptr || existing->direction != nodegraph::PinDirection::Input) {
+        return key;
+    }
+
+    return SuffixedKey(input, keyText);
 }
 
 Result<NodePropertyReader> Open(Allocator& scratch, const DynamicPinsInput& input,
@@ -495,8 +496,9 @@ Result<void> CustomDynamicPins(const DynamicPinsInput& input, PinList& out) noex
         return Result<void>::Failure(outputs.Error());
     }
 
-    // UE RebuildOutputs: 추가 출력이 있으면 주 출력 이름이 "return"이고 이름을 보인다. 키는 늘
-    // Result다(연결이 추가 출력 수에 따라 바뀌지 않는다).
+    // UE RebuildOutputs: 추가 출력이 있으면 주 출력 이름이 "return"이고 이름을 보인다. 키는
+    // Result다 (연결이 추가 출력 수에 따라 바뀌지 않는다 — 입력 이름이 Result면 키 충돌 규칙으로
+    // ResultOut).
     const StringView mainDisplay =
         outputs.Value().Count() == 0 ? StringView() : StringView("return");
     auto mainKey = OutputKey(input, out, "Result");
@@ -531,8 +533,12 @@ Result<void> CustomDynamicPins(const DynamicPinsInput& input, PinList& out) noex
             return Result<void>::Failure(type.Error());
         }
 
-        if (auto added = AddUserOutput(input, out, text.Value(), "Output", index, type.Value());
-            !added) {
+        auto key = OutputKey(input, out, text.Value());
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (auto added = AddOutput(out, key.Value(), type.Value(), text.Value()); !added) {
             return added;
         }
     }
@@ -912,17 +918,8 @@ Result<void> AggregateDynamicPins(const DynamicPinsInput& input, PinList& out) n
             return added;
         }
 
-        // 같은 이름의 출력은 키에 Out을 붙인다(핀 키는 방향과 상관없이 유일 — 19.13.3절).
-        String outputKey(scratch);
-        if (auto assigned = outputKey.TryAssign(name); !assigned) {
-            return assigned;
-        }
-
-        if (auto appended = outputKey.TryAppend("Out"); !appended) {
-            return appended;
-        }
-
-        auto output = Intern(input.names, outputKey.View());
+        // 출력은 늘 같은 이름의 입력과 짝이므로 키에 Out을 붙인다(19.13.3절).
+        auto output = SuffixedKey(input, name);
         if (!output) {
             return Result<void>::Failure(output.Error());
         }
@@ -1053,8 +1050,9 @@ Result<void> MaterialCacheDynamicPins(const DynamicPinsInput& input, PinList& ou
         }
     }
 
-    // UE ConstructOutputs: 출력은 견본 여부와 상관없이 속성마다 하나다. 같은 키의 입력이 있으면
-    // 출력 키에 Out을 붙인다.
+    // UE ConstructOutputs: 출력은 견본 여부와 상관없이 속성마다 하나다. 키는 늘 <이름>Out(비면
+    // Attribute<n>Out)이다: 쓰기 모드의 같은 이름 입력과 겹치지 않고, isSample을 바꿔도 출력 연결이
+    // 그대로다(UE는 bIsSample을 바꿔도 출력 이름이 같다).
     for (usize index = 0; index < attributes.Value().Count(); ++index) {
         auto element = attributes.Value().Element(index);
         if (!element) {
@@ -1067,8 +1065,16 @@ Result<void> MaterialCacheDynamicPins(const DynamicPinsInput& input, PinList& ou
             return Result<void>::Failure(!text ? text.Error() : kind.Error());
         }
 
-        if (auto added = AddUserOutput(input, out, text.Value(), "Attribute", index,
-                                       static_cast<MaterialPinType>(kind.Value()));
+        char buffer[KeyBufferBytes];
+        const StringView keyText =
+            text.Value().IsEmpty() ? IndexedText(buffer, "Attribute", index) : text.Value();
+        auto key = SuffixedKey(input, keyText);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (auto added = AddOutput(out, key.Value(), static_cast<MaterialPinType>(kind.Value()),
+                                   text.Value());
             !added) {
             return added;
         }

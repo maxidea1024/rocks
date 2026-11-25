@@ -23,9 +23,9 @@ public static partial class PolicyChecks
     // 선행 표(19.4.1절)의 행이다: | `MPQ-<이름>` | …
     private static readonly Regex MaterialPrerequisiteRow = Pattern("^\\|\\s*`(MPQ-[A-Za-z0-9]+)`\\s*\\|");
 
-    // 코드의 TODO 표기다. 형식은 TODO(MPQ-<이름>) 하나다. 괄호·쌍점이 붙은 표기(TODO(·TODO (·TODO:)는 모두 표기로 보고, 뒤에 낱말이
-    // 오는 것("TODO 노드" — 상태 이름)은 산문이라 보지 않는다.
-    private static readonly Regex MaterialTodoAny = Pattern("TODO(?=\\s*[(:])");
+    // 코드의 TODO 표기다. 형식은 TODO(MPQ-<이름>) 하나다. 주석 첫머리의 TODO(// TODO fix)와 괄호·쌍점이 붙은 TODO(TODO(·TODO (·TODO:)는
+    // 모두 표기로 본다. 문장 가운데의 낱말 TODO("상태가 TODO 노드" — 상태 이름)는 산문이라 보지 않는다.
+    private static readonly Regex MaterialTodoAny = Pattern("(?<=(?://|/\\*)\\s*)TODO\\b|\\bTODO(?=\\s*[(:])");
     private static readonly Regex MaterialTodoValid = Pattern("^TODO\\((MPQ-[A-Za-z0-9]+)\\)");
 
     // 노드 표 행이다(첫 칸이 UE 클래스).

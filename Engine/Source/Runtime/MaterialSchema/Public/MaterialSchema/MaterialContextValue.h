@@ -4,7 +4,8 @@
 #include <Core/Containers/Span.h>
 #include <Core/Text/StringView.h>
 #include <MaterialSchema/MaterialContextFeature.h>
-#include <MaterialSchema/MaterialNodeDefinition.h>
+#include <MaterialSchema/MaterialPinDefault.h>
+#include <MaterialSchema/MaterialStageMask.h>
 #include <MaterialSchema/MaterialPinType.h>
 #include <RenderData/MaterialEnums.h>
 

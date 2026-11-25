@@ -2,7 +2,8 @@
 
 #include <Base/Guid.h>
 #include <Core/Text/StringView.h>
-#include <MaterialSchema/MaterialNodeDefinition.h>
+#include <MaterialSchema/MaterialPinDefault.h>
+#include <MaterialSchema/MaterialStageMask.h>
 #include <MaterialSchema/MaterialPinType.h>
 
 // 머티리얼 속성 정의다(Docs/Design/MaterialSystem 19.12절, UE FMaterialAttributeDefintion —

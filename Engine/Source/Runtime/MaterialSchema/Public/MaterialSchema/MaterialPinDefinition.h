@@ -4,7 +4,7 @@
 #include <Core/Text/StringView.h>
 #include <MaterialSchema/MaterialPinDefault.h>
 #include <MaterialSchema/MaterialPinType.h>
-#include <NodeGraph/NodeTypeDescriptor.h>
+#include <NodeGraph/GraphDocument.h>
 
 // 머티리얼 노드 핀 하나의 정적 정의다(Docs/Design/MaterialSystem 5.2·19.13.3절).
 // MaterialNodeDefinition의 핀 배열 원소이고, 동적 핀 함수가 아닌 정적 핀만 이 형식으로 둔다.

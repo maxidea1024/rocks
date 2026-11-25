@@ -22,7 +22,7 @@ class MaterialBase;
 class MaterialFunctionInstance;
 class MaterialInstance;
 
-// TODO 필드 사용 하나다. field는 정적 영어 필드 경로다(예: "traits.displacement").
+// 선행이 빠진 TODO 필드의 사용 하나다. field는 정적 영어 필드 경로다(예: "traits.displacement").
 struct MaterialPrerequisiteUse {
     material::MaterialPrerequisite prerequisite = material::MaterialPrerequisite::None;
     StringView field;

@@ -17,7 +17,8 @@
 // - 사용자가 이름을 붙이는 핀(Custom·Switch 입력, 레이어 입력, 속성 이름)은 그 이름이다.
 //   이름이 비면 "Input<n>"·"Attribute<n>"이다(n은 0부터, 10진). 이름 없는 Custom 추가 출력과
 //   Aggregate 속성은 핀을 만들지 않는다(UE RebuildOutputs).
-// - 출력 키가 이미 있는 핀(입력 포함)과 같으면 뒤에 "Out"을 붙인다. Aggregate 출력은 늘 붙인다.
+// - 출력 키가 이미 있는 입력 핀과 같으면 뒤에 "Out"을 붙인다. Aggregate·MaterialCache 출력은 늘
+//   붙인다. 출력끼리 겹치거나 입력끼리 겹치면 계산이 InvalidArgument로 실패한다.
 // - 함수 호출 입출력은 "P_<함수 입출력 노드 id 32자 hex>", 속성 Get/Set은 "A_<속성 id 32자 hex>"다.
 // - 그 밖은 UE 입력 멤버 이름이다(MipValue·CoordinatesDX 등).
 //
