@@ -206,6 +206,8 @@ struct Context {
     Allocator& allocator;
     const ShaderSourceTree& tree;
     ShaderPreprocessLimits limits;
+    // 생성 include 연결이다(RenderBase 10.6절 2항).
+    Span<const ShaderGeneratedInclude> generated;
     // 전처리가 끝날 때까지 사는 텍스트(매크로 정의, 가상 경로, __FILE__ 문자열, 정규화한 원문).
     TextArena persistent;
     // 한 줄(여러 줄 매크로 호출이면 그 줄들) 동안 사는 텍스트.

@@ -514,4 +514,42 @@ TEST(ShaderPreprocessor_ForcesPlatformHeader) {
     CHECK(strcmp(missing.path, ShaderPlatformHeaderPath) == 0);
 }
 
+// 생성 include 연결(RenderBase 10.6절 2항): 연결한 가상 경로의 include는 연결 대상 파일을 읽고,
+// 폐포·#line에는 대상 경로가 남는다. 연결이 없으면 GeneratedSource, 대상 경로가 규칙 밖이면 그 줄의
+// InvalidPath다.
+TEST(ShaderPreprocessor_GeneratedIncludeReadsTheMappedSource) {
+    Case test;
+    REQUIRE(test.Make("generated"));
+    REQUIRE(test.File("Main.rsf", "#include \"/Engine/Generated/VertexInput.rsh\"\n"
+                                  "int b = VERTEX_VALUE;\n"));
+    REQUIRE(test.File("InputA.rsh", "#pragma once\n#define VERTEX_VALUE 7\nint fromInput;\n"));
+    const ShaderGeneratedInclude mapped[] = {
+        {StringView("/Engine/Generated/VertexInput.rsh"), StringView("/Plugin/Test/InputA.rsh")}};
+    const ShaderSourceStatus status =
+        PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), test.shader, {}, mapped);
+    PrintStatus("generated", status);
+    REQUIRE(status);
+    CHECK(test.shader.text.View().Contains(StringView("int b = 7;")));
+    CHECK(test.shader.text.View().Contains(StringView("\"/Plugin/Test/InputA.rsh\"")));
+    bool target = false;
+    bool generated = false;
+    for (const ShaderIncludeFile& file : test.shader.includes) {
+        target = target || file.virtualPath.View() == StringView("/Plugin/Test/InputA.rsh");
+        generated = generated || file.virtualPath.View().Contains(StringView("Generated"));
+    }
+
+    CHECK(target && !generated);
+
+    // 연결이 없으면 소스 트리 규칙대로 GeneratedSource다.
+    const ShaderSourceStatus unmapped = test.Run();
+    CHECK(unmapped.code == ShaderSourceError::GeneratedSource && unmapped.line == 1);
+
+    // 연결 대상이 가상 경로 규칙 밖이면 include 줄의 InvalidPath다.
+    const ShaderGeneratedInclude invalid[] = {
+        {StringView("/Engine/Generated/VertexInput.rsh"), StringView("Plugin/Test/InputA.rsh")}};
+    const ShaderSourceStatus rejected =
+        PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), test.shader, {}, invalid);
+    CHECK(rejected.code == ShaderSourceError::InvalidPath && rejected.line == 1);
+}
+
 } // namespace shader_preprocessor_tests_file

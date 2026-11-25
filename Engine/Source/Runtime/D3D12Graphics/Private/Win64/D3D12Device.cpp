@@ -420,6 +420,10 @@ uint64 D3D12Device::IgnoredDraws() const noexcept {
     return ignoredDraws_;
 }
 
+uint64 D3D12Device::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
+}
+
 uint64 D3D12Device::ValidationErrorCount() const noexcept {
     DrainValidationMessages();
     return validationErrors_;

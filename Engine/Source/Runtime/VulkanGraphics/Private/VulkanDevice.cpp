@@ -905,6 +905,10 @@ uint64 VulkanDevice::IgnoredDraws() const noexcept {
     return ignoredDraws_;
 }
 
+uint64 VulkanDevice::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
+}
+
 uint64 VulkanDevice::ValidationErrorCount() const noexcept {
     return platform::AtomicLoad<platform::MemoryOrder::Acquire>(&validationState_.errors);
 }
