@@ -101,8 +101,7 @@ struct RegistryShaderSet {
     // 등록부의 정점 입력 타입이다(완결성 검사와 같은 목록).
     static Span<const shader::ShaderVertexInputType>
     VertexInputs(const shader::ShaderTypeRegistry& registry) noexcept {
-        (void)registry;
-        return Span<const shader::ShaderVertexInputType>();
+        return registry.VertexInputTypes();
     }
 
     ShaderSet set;

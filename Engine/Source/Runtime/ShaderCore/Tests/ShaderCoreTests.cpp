@@ -356,4 +356,120 @@ TEST(ShaderCore_ModuleRegistrationHelper) {
     CHECK(services.Unregister(registry));
 }
 
+namespace {
+
+ROCKS_SHADER_TYPE_NAME(InputAName, "TestVertexInputA");
+ROCKS_SHADER_TYPE_NAME(InputBName, "TestVertexInputB");
+ROCKS_SHADER_TYPE_NAME(InputCaseName, "TESTVERTEXINPUTA");
+
+constexpr ShaderVertexInputType InputA = MakeShaderVertexInputType(
+    InputAName, "/Engine/Private/VertexInput/A.rsh", ShaderTypeOwner::Engine);
+constexpr ShaderVertexInputType InputB = MakeShaderVertexInputType(
+    InputBName, "/Plugin/Sample/VertexInput/B.rsh", ShaderTypeOwner::EnginePlugin);
+
+ShaderVertexInputType ChangedInput(void (*change)(ShaderVertexInputType&)) noexcept {
+    ShaderVertexInputType input = MakeShaderVertexInputType(
+        OtherName, "/Engine/Private/VertexInput/Other.rsh", ShaderTypeOwner::Engine);
+    change(input);
+    return input;
+}
+
+} // namespace
+
+// 정점 입력 타입 등록(Docs/Design/RenderBase 10.6절 1항): 검사 음성 대조, 목록 원자성, 등록 순서와
+// 무관한 id 순, 조회, Freeze 뒤 거부(늦은 등록), 해제, 모듈 등록 도우미의 실패 되돌림.
+TEST(ShaderCore_RegistryVertexInputTypes) {
+    ShaderTypeRegistry first(TestAllocator());
+    ShaderTypeRegistry second(TestAllocator());
+    const ShaderVertexInputType forward[] = {InputA, InputB};
+    const ShaderVertexInputType backward[] = {InputB, InputA};
+    REQUIRE(first.RegisterVertexInputTypes(forward));
+    REQUIRE(second.RegisterVertexInputTypes(Span<const ShaderVertexInputType>(backward, 1)));
+    REQUIRE(second.RegisterVertexInputTypes(Span<const ShaderVertexInputType>(backward + 1, 1)));
+    REQUIRE(first.Freeze());
+    REQUIRE(second.Freeze());
+    REQUIRE(first.VertexInputTypes().Size() == 2 && second.VertexInputTypes().Size() == 2);
+    CHECK(first.VertexInputTypes()[0].id < first.VertexInputTypes()[1].id);
+    for (usize index = 0; index < 2; ++index) {
+        CHECK(first.VertexInputTypes()[index].id == second.VertexInputTypes()[index].id);
+    }
+
+    CHECK(first.FindVertexInputType(InputAName.hash) != nullptr &&
+          first.FindVertexInputType(InputAName.hash)->sourcePath == InputA.sourcePath);
+    CHECK(first.FindVertexInputType(ShaderTypeNameHash("Missing")) == nullptr);
+    // 정점 입력 타입은 타입 집합 SHA에 들지 않는다.
+    ShaderTypeRegistry empty(TestAllocator());
+    REQUIRE(empty.Freeze());
+    CHECK(first.TypeSetDigest() == empty.TypeSetDigest());
+    // Freeze 뒤 등록은 닫혔다.
+    const ShaderVertexInputType late[] = {ChangedInput([](ShaderVertexInputType&) noexcept {})};
+    CHECK(first.RegisterVertexInputTypes(late).Error() == ErrorCode::ScopeClosed);
+    const ShaderVertexInputType removed[] = {InputA};
+    first.UnregisterVertexInputTypes(removed);
+    CHECK(first.VertexInputTypes().Size() == 1 &&
+          first.FindVertexInputType(InputAName.hash) == nullptr);
+
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderVertexInputType one[] = {InputA};
+    REQUIRE(registry.RegisterVertexInputTypes(one));
+    // 같은 이름, 대소문자만 다른 이름(같은 해시).
+    CHECK(registry.RegisterVertexInputTypes(one).Error() == ErrorCode::InvalidArgument);
+    CHECK(strstr(registry.LastFailure().reason, "already registered") != nullptr);
+    const ShaderVertexInputType caseOnly[] = {MakeShaderVertexInputType(
+        InputCaseName, "/Engine/Private/VertexInput/A2.rsh", ShaderTypeOwner::Engine)};
+    CHECK(registry.RegisterVertexInputTypes(caseOnly).Error() == ErrorCode::InvalidArgument);
+    CHECK(strstr(registry.LastFailure().reason, "collides") != nullptr);
+    const ShaderVertexInputType invalid[] = {
+        ChangedInput([](ShaderVertexInputType& input) noexcept { input.name = "Bad Name"; }),
+        ChangedInput([](ShaderVertexInputType& input) noexcept { input.id ^= 1; }),
+        ChangedInput([](ShaderVertexInputType& input) noexcept { input.id = NoVertexInputType; }),
+        ChangedInput([](ShaderVertexInputType& input) noexcept {
+            input.sourcePath = "/Engine/Private/VertexInput/Other.rsf";
+        }),
+        ChangedInput(
+            [](ShaderVertexInputType& input) noexcept { input.sourcePath = "Engine/Other.rsh"; }),
+        ChangedInput([](ShaderVertexInputType& input) noexcept {
+            input.sourcePath = "/Engine/Shared/Other.h";
+        }),
+        ChangedInput([](ShaderVertexInputType& input) noexcept {
+            input.sourcePath = "/Engine/Generated/VertexInput.rsh";
+        }),
+        ChangedInput(
+            [](ShaderVertexInputType& input) noexcept { input.owner = ShaderTypeOwner::Project; }),
+        ChangedInput([](ShaderVertexInputType& input) noexcept {
+            input.owner = static_cast<ShaderTypeOwner>(9);
+        })};
+    for (const ShaderVertexInputType& input : invalid) {
+        CHECK(registry.RegisterVertexInputTypes(Span<const ShaderVertexInputType>(&input, 1))
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(registry.LastFailure().reason[0] != '\0');
+    }
+
+    // 목록 하나가 잘못되면(같은 목록 안 중복 포함) 목록 전체를 등록하지 않는다.
+    const ShaderVertexInputType duplicated[] = {InputB, InputB};
+    CHECK(registry.RegisterVertexInputTypes(duplicated).Error() == ErrorCode::InvalidArgument);
+    CHECK(registry.VertexInputTypes().Size() == 1 &&
+          registry.FindVertexInputType(InputBName.hash) == nullptr);
+
+    // 모듈 등록 도우미: 정점 입력 타입 등록이 실패하면 앞서 등록한 셰이더 타입도 거둔다.
+    HostServices services(TestAllocator());
+    REQUIRE(services.Register(registry));
+    {
+        const ShaderTypeDesc* const types[] = {&TestPixel};
+        ShaderTypeModuleRegistration failing(types, one);
+        CHECK(failing.Attach(services, ModuleLease()).Error() == ErrorCode::InvalidArgument);
+        CHECK(failing.Registry() == nullptr && registry.Find(TestPixelName.hash) == nullptr);
+        const ShaderVertexInputType others[] = {InputB};
+        ShaderTypeModuleRegistration module(types, others);
+        REQUIRE(module.Attach(services, ModuleLease()));
+        CHECK(registry.Find(TestPixelName.hash) != nullptr &&
+              registry.FindVertexInputType(InputBName.hash) != nullptr);
+    }
+
+    CHECK(registry.Find(TestPixelName.hash) == nullptr &&
+          registry.FindVertexInputType(InputBName.hash) == nullptr &&
+          registry.VertexInputTypes().Size() == 1);
+    CHECK(services.Unregister(registry));
+}
+
 } // namespace shader_core_tests_file

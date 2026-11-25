@@ -360,7 +360,6 @@ private:
         desc.allocator = &allocator_;
         desc.registry = request.registry;
         desc.formats = formats;
-        desc.vertexInputTypes = request.vertexInputTypes;
         desc.library = request.library;
         // Development 공급자는 개발 전용 타입도 만든다(진단 버퍼 퍼뮤테이션 — ShaderSystem 7.2절
         // 12항, RenderBase 9.11절 6항의 D3D12 root 예산 시험).
