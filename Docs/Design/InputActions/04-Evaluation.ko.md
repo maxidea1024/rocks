@@ -10,7 +10,7 @@
 
 ### 4.1 컨텍스트
 
-API: `AddContext(context, priority, ContextOptions)` / `RemoveContext(context, options)` / `ClearContexts()` / `HasContext(context)`.
+API: `AddContext(bundle, priority, ContextOptions)` / `UpdateContext(bundle, forceImmediately)` / `RemoveContext(contextId, options)` / `ClearContexts()` / `HasContext(contextId)`. 컨텍스트는 `InputContextBundle` 사본으로 넣고 id로 가리킨다(2.7절). `AddContext`는 bundle을 검증하고(실패면 `InvalidArgument`, 상태는 그대로) 복사한다(실패면 `OutOfMemory`, 상태는 그대로).
 
 `ContextOptions`(UE `EnhancedInputSubsystemInterface.h:47-100`):
 
@@ -23,7 +23,8 @@ API: `AddContext(context, priority, ContextOptions)` / `RemoveContext(context, o
 동작:
 - 추가·제거는 다시 만들기를 **예약**하고, 다음 평가 처음에 한 번 한다(UE 모듈 Tick — `EnhancedInputModule.cpp:298-328`).
 - 예약된 요청들의 `ignorePressedKeysUntilRelease`는 AND로 합친다. 다시 만든 뒤 참으로 되돌린다(UE cpp:433·1201).
-- 이미 있는 컨텍스트를 다시 추가할 때:
+- `UpdateContext`는 있는 id의 사본만 바꾸고 다시 만들기를 예약한다(우선순위·등록 횟수 그대로, 없는 id면 `NotFound` — 2.7절).
+- 이미 있는 컨텍스트(같은 id)를 다시 추가할 때 데이터는 건드리지 않는다(UE와 같다):
   - `Untracked`면 우선순위를 바꾸고 다시 만든다.
   - `CountRegistrations`면 횟수만 늘린다(우선순위 변경·다시 만들기 없음 — UE cpp:273-285). 제거는 횟수가 0이 될 때 빠진다.
 
@@ -44,7 +45,7 @@ API: `AddContext(context, priority, ContextOptions)` / `RemoveContext(context, o
 6. **상태 보존**(UE :1113-1192):
    - 새 바인딩마다 이전 목록에서 액션·키·트리거 종류 열·모디파이어 종류 열이 같은 **첫** 바인딩을 찾아 1:1로 짝짓는다(쓴 것은 뺀다).
    - 짝이 있으면 트리거·모디파이어 실행 상태를 넘긴다. 매개변수는 새 값을 쓴다.
-   - 액션 수준 상태(값·트리거 상태·시간)는 액션이 남아 있는 한 그대로다.
+   - 액션 수준 상태(값·트리거 상태·시간)는 액션이 남아 있는 한 그대로다. 액션 트리거·모디파이어 실행 상태는 바인딩과 같은 규칙으로 넘긴다: 종류 열이 같으면 상태를 넘기고 매개변수는 새 값, 다르면 초기화한다(UE는 instance를 만들 때 복제해서 다시 생길 때까지 옛 트리거를 쓴다 — 7.3절).
    - 새로 생긴 Boolean 바인딩의 키가 지금 눌려 있고 `ignorePressedKeysUntilRelease`면, 놓을 때까지 무시한다.
    - 다시 만든 뒤 모든 바인딩에 dt 0으로 모디파이어를 한 번 돌려 상태를 맞춘다(UE :1188-1192).
 7. **사라진 액션**: 바인딩에서 사라진 액션은 다음 평가에서 값 0으로 한 번 평가해 Canceled·Completed를 낸 뒤 지운다(UE `EnhancedPlayerInput.cpp:1171-1200`).
@@ -73,7 +74,7 @@ UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
         - `Cumulative`: 합이다.
      4. 바인딩 트리거 결합 결과는 액션마다 **가장 진전된 하나**를 남긴다. 기준은 상태(None < Ongoing < Triggered)이고, 같으면 트리거를 평가한 바인딩이다(UE :281).
 3. **주입 입력**: 바인딩 루프 뒤다(UE :619-667).
-   - `InjectValue(action, value, triggers, modifiers)` — UE `InjectInputForAction`.
+   - `InjectValue(const InputActionData& action, value, triggers, modifiers)` — UE `InjectInputForAction`. 액션 표에 그 id가 있으면 표의 설정을, 없으면 넘긴 설정을 쓴다(주입 전용 항목 — 놓은 뒤 Completed·Canceled를 내면 지운다).
    - 한 평가에 여러 번 주입하면 각각 처리한다.
    - 직전 평가에도 주입되었으면 Held, 아니면 Actuated다. 이번에 다시 주입하지 않은 액션은 값 0으로 한 번 평가한다(놓기).
    - 연속 주입(`StartContinuousInjection`·`UpdateContinuousInjection`·`StopContinuousInjection`)은 평가마다 다시 주입한다.
@@ -86,8 +87,8 @@ UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
    5. 일시정지 중이고 `!triggerWhenPaused`면 None이다.
    6. 전이표(3.4절)로 이벤트를 만든다. 경과 시간·Triggered 시간을 누적한다.
 5. **결과**:
-   - `ActionState(action)`: 값·트리거 상태·이번 이벤트·경과/Triggered 시간이다.
-   - `Events()`: 이번 평가 이벤트 목록 (액션, ActionEvent, 값, 시간)이다. 바인딩 목록 순 → 주입 순으로 처음 나타난 액션 순서다.
+   - `ActionState(actionId)`: 값·트리거 상태·이번 이벤트·경과/Triggered 시간이다. 표에 없는 액션은 빈 상태다.
+   - `Events()`: 이번 평가 이벤트 목록 (액션 id, ActionEvent, 값, 시간)이다. 바인딩 목록 순 → 주입 순으로 처음 나타난 액션 순서다.
 6. **전달 뒤**: Completed·Canceled가 난 액션의 경과·Triggered 시간을 0으로 둔다. 전달이 끝난 뒤에 한다(UE :455-466).
 
 `Flush()`(UE `FlushPressedKeys` :1021-1066):

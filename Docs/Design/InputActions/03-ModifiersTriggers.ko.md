@@ -59,8 +59,8 @@ UE는 `UInputModifier`·`UInputTrigger` 파생 객체(Instanced)다. Rocks는 **
 | `Tap` | releaseTime 0.2 | 직전 작동·지금 비작동·직전 누적 < releaseTime이면 Triggered. 누적 ≥ releaseTime이면 None |
 | `RepeatedTap` | repeatDelay 0.5, taps 2, releaseTime 0.2 | 탭 사이 Ongoing, N번째 탭에 Triggered. alwaysTick이다 |
 | `Pulse` | triggerOnStart 참, interval 1.0, limit 0(무제한) | 누적 > interval · (start ? n : n+1)이면 Triggered이고 n++. 한도에 닿으면 None |
-| `ChordAction` | chordAction(InputAction) | Implicit. 대상 액션의 **이번 평가 바인딩 수준 결합 상태**(4.3절 2 뒤, 액션 트리거 전)를 따른다. Triggered가 아니면 막는다(UE `InputAction.cpp:68-71`). 평가기는 액션 번호마다 상태를 표(`TriggerContext::chordStates`)로 넘기고, 트리거마다 자기 대상 번호를 읽는다(UE `FindActionInstanceData(ChordAction)` — 대상이 여럿인 Ctrl+Shift+S). 표 밖이면 None이다 |
-| `ChordBlocker` | chordAction(평가기가 넣는다) | Blocker. 대상 chord가 Triggered면 막는다 |
+| `ChordAction` | chordActionId(액션 id — 2.7절). 평가기가 다시 만들 때 액션 표 색인을 NATIVE `chordAction`에 쓴다(없으면 `NoChordAction` — 표 밖이라 None) | Implicit. 대상 액션의 **이번 평가 바인딩 수준 결합 상태**(4.3절 2 뒤, 액션 트리거 전)를 따른다. Triggered가 아니면 막는다(UE `InputAction.cpp:68-71`). 평가기는 액션 번호마다 상태를 표(`TriggerContext::chordStates`)로 넘기고, 트리거마다 자기 대상 번호를 읽는다(UE `FindActionInstanceData(ChordAction)` — 대상이 여럿인 Ctrl+Shift+S). 표 밖이면 None이다 |
+| `ChordBlocker` | chordActionId(평가기가 넣는다) | Blocker. 대상 chord가 Triggered면 막는다 |
 
 시간 기준:
 - UE `RepeatedTap`은 벽시계(`FPlatformTime::Seconds()` — cpp:270)를 쓴다. Rocks는 평가 dt 누적을 쓴다(결정적 시험 — IAD3). 벽시계처럼 dilation을 받지 않는다(`affectedByTimeDilation`은 누름 시간에만). 다음 탭 마감의 처음 값은 "없음"(어떤 시계 값보다 과거)이라 첫 탭은 세지 않는다(UE `RepeatTime` 0이 늘 과거인 것과 같다). Triggered 직후 마감 안의 탭 하나가 다시 Triggered인 UE 동작도 그대로다.
