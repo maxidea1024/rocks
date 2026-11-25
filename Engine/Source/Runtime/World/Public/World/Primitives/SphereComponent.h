@@ -33,6 +33,9 @@ public:
     // 오류: 음수·비유한.
     Result<void> SetSphereRadius(float radius) noexcept;
 
+    // 반지름 ScaledSphereRadius의 구다(28.3절).
+    Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
+
 protected:
     // 지역 (0, (R, R, R), R)다(UE SphereComponent.cpp:25).
     bool TryLocalBounds(ComponentBounds& local) const noexcept override;

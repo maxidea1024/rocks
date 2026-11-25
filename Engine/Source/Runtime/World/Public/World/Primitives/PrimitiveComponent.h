@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Collision/BodySettings.h>
+#include <Collision/CollisionProfileTable.h>
+#include <Collision/CollisionTypes.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 #include <World/Lights/LightingChannels.h>
@@ -15,8 +18,11 @@ namespace rocks {
 // 규약(24.3.5절):
 // - setter는 UE처럼 Mobility를 보지 않는다. 값 검증 실패는 InvalidArgument이고 값을 바꾸지 않는다.
 // - 값이 바뀌면 Render 시스템 상태가 있을 때 다시 보내기를 표시한다.
-// - 충돌 profile은 이름만 데이터다(24.3.4절). 빈 값이면 클래스 기본
-//   (DefaultCollisionProfileName)이다.
+// - 충돌 profile은 이름과 body 값(bodySettings)이 데이터다(24.3.4절, CollisionData 9절 CD2). 빈
+//   이름이면 클래스 기본(DefaultCollisionProfileName)이다. 실효 충돌 값은 World의 profile 표로
+//   해석한다(TryResolveCollision). profile 이름을 정하는 모든 경로(이름 setter·등록)는 해석한
+//   profile 값을 bodySettings의 사용자 지정 칸에 옮겨 둔다 — profile이 표에서 사라지면 UE처럼
+//   마지막 해석 값으로 돌아간다.
 //
 // 스레드: World의 게임 스레드 전용이다.
 ROCKS_CLASS(Abstract)
@@ -30,7 +36,7 @@ public:
     static constexpr const char* PrimitiveCollisionProfileName = "BlockAll";
 
     explicit PrimitiveComponent(Allocator& allocator) noexcept
-        : SceneComponent(allocator), collisionProfileName_(allocator) {
+        : SceneComponent(allocator), collisionProfileName_(allocator), bodySettings_(allocator) {
     }
 
     // --- 거리 ---
@@ -371,9 +377,39 @@ public:
     // 실효 충돌 profile 이름이다(저장 값이 비면 클래스 기본 — 24.3.4절).
     StringView CollisionProfileName() const noexcept;
 
-    // 클래스 기본과 같은 이름(ASCII 대소문자 무시 — UE FName 비교)은 빈 값으로 둔다. profile은 물리
-    // 데이터라 Render 다시 보내기를 표시하지 않는다. 오류: 할당 실패·잘못된 UTF-8(값 유지).
+    // 클래스 기본과 같은 이름(ASCII 대소문자 무시 — UE FName 비교)은 빈 값으로 둔다. 표에 그
+    // profile이 있으면 값을 bodySettings 사용자 지정 칸에 옮긴다(UE SetCollisionProfileName →
+    // ReadConfig). 없으면 body는 그대로다(마지막 해석 값 — UE와 같다). profile은 물리 데이터라
+    // Render 다시 보내기를 표시하지 않는다. 오류: 할당 실패·잘못된 UTF-8(값 유지).
     Result<void> SetCollisionProfileName(StringView name) noexcept;
+
+    // body 값이다(UE FBodyInstance 영속 필드 — CollisionData 6절).
+    const BodySettings& GetBodySettings() const noexcept {
+        return bodySettings_;
+    }
+
+    // 실효 충돌 값이다(CollisionData 5절 ResolveCollision — World의 profile 표, 이름은
+    // CollisionProfileName). profileName은 World 표가 살아 있는 동안 유효하다. 오류: World 장부 밖
+    // 객체(HasWorld 거짓 — InvalidArgument).
+    Result<ResolvedCollision> TryResolveCollision() const noexcept;
+
+    // 아래 넷은 profile 이름을 "Custom"으로 바꾸고 실효 값(바꾼 칸 포함)을 body 사용자 지정 칸에
+    // 옮긴다(UE SetCollisionEnabled·SetCollisionObjectType·SetCollisionResponseToChannel·
+    // SetCollisionResponseToAllChannels → InvalidateCollisionProfileName). Enabled·응답은 값이
+    // 같으면 아무것도 바꾸지 않고, object type은 UE처럼 같은 값이어도 바꾼다. customResponses는
+    // 실효 값의 차이 칸으로 다시 쓰므로 표에 아직 없는 채널 이름의 칸은 사라진다(UE
+    // UpdateResponseContainerFromArray와 같다). 오류: World 장부 밖 객체·범위 밖
+    // enum(InvalidArgument), 할당 실패(값 유지).
+    //
+    // 사용 예:
+    //   primitive.SetCollisionResponseToChannel(CollisionChannel::Pawn,
+    //   CollisionResponse::Overlap);
+    //   // CollisionProfileName() == "Custom", 나머지 칸은 직전 profile 값 그대로
+    Result<void> SetCollisionEnabled(CollisionEnabled enabled) noexcept;
+    Result<void> SetCollisionObjectType(CollisionChannel channel) noexcept;
+    Result<void> SetCollisionResponseToChannel(CollisionChannel channel,
+                                               CollisionResponse response) noexcept;
+    Result<void> SetCollisionResponseToAllChannels(CollisionResponse response) noexcept;
 
     // 클래스 기본 profile 이름이다(UE 생성자의 SetCollisionProfileName — Primitive "BlockAll").
     virtual StringView DefaultCollisionProfileName() const noexcept {
@@ -442,8 +478,20 @@ protected:
     ROCKS_PROPERTY(ReadOnly, Name = "generateOverlapEvents") bool generateOverlapEvents_ = true;
     ROCKS_PROPERTY(ReadOnly, Name = "canCharacterStepUpOn")
     rocks::CanBeCharacterBase canCharacterStepUpOn_ = rocks::CanBeCharacterBase::Yes;
+
+protected:
+    // 등록 때 이름을 해석한다: profile 값이면 body에 옮기고, 표에 없으면 경고를 한 번 남긴다
+    // (CollisionProfileMissing — CollisionData 9절 CD2). 파생이 재정의하면 이것을 먼저 부른다.
+    Result<void> OnRegister() noexcept override;
+
+private:
+    // 실효 값을 편집해 바뀌면 "Custom"으로 옮긴다(위 네 setter의 공통 경로).
+    template <class Edit>
+    Result<void> EditCustomCollision(Edit&& edit) noexcept;
+
     // 빈 값 = 클래스 기본(DefaultCollisionProfileName).
     ROCKS_PROPERTY(ReadOnly, Name = "collisionProfileName") String collisionProfileName_;
+    ROCKS_PROPERTY(ReadOnly, Name = "bodySettings") BodySettings bodySettings_;
 };
 
 } // namespace rocks
