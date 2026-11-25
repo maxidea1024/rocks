@@ -5,6 +5,8 @@
 /Intermediate/
 # Engine-only asset nuggets (engine shaders without a project — Docs/Design/ShaderSystem section 10)
 /Engine/Intermediate/
+# Engine-only cooks (asset-cook --engine — Docs/Design/AssetSystem section 10.3 item 7) and their cook root locks
+/Engine/Saved/
 /Saved/
 /out/
 # Visual Studio solution written by Rocks.Build.Cli projectfiles (Docs/Design/ProjectFiles.ko.md)

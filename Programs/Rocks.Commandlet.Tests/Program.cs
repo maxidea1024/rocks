@@ -1939,6 +1939,58 @@ finally
     Directory.Delete(cookDirectory, true);
 }
 
+// asset-cook --engine(ShaderSystem 16.1절 SSD44–SSD46, AssetSystem 10.3.1절 A4f4): 제품 실행 파일이 ShaderCompiler 모듈을 시작해
+// 셰이더 라이브러리 단계를 등록하고, 단계가 엔진 묶음(RenderBase 엔진 셰이더 타입)을 시작해 Windows 프로필의 형식마다 Engine 라이브러리를
+// 엔진 쿠킹 루트에 게시한다. 두 번째 쿠킹은 같은 cookKey라 라이브러리를 재사용한다. 저장소 Engine/Saved를 건드리지 않게 실행 파일·워커와
+// Engine/Config·Engine/Shaders를 임시 배치에 복사한다(엔진 너겟 root도 그 배치다). DXIL·DXBC를 만드는 호스트(Windows)에서만 돈다.
+if (OperatingSystem.IsWindows())
+{
+    string engineCookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-engine-{Environment.ProcessId}");
+    try
+    {
+        string engineCookExecutable = EngineCookLayout(executable, engineCookDirectory);
+        string shaders = Path.Combine(engineCookDirectory, "Engine", "Saved", "Cooked", "Windows", "Shaders");
+
+        async Task<ProcessResult> RunEngineCook(params string[] arguments) =>
+            await ProcessRunner.RunAsync(new(engineCookExecutable, arguments, Path.GetDirectoryName(engineCookExecutable)!,
+                Timeout: TimeSpan.FromSeconds(600)));
+
+        void ReportEngineCook(string label, bool passed, ProcessResult result)
+        {
+            Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+            if (!passed)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+            }
+        }
+
+        string[] Libraries() => Directory.Exists(shaders)
+            ? [.. Directory.EnumerateFiles(shaders, "*.rshl").Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)]
+            : [];
+
+        bool HasLibrary(string[] files, string format) => files.Any(file => file.StartsWith($"Engine-{format}-", StringComparison.Ordinal));
+
+        ProcessResult first = await RunEngineCook("asset-cook", "--engine", "--profile=Windows");
+        string[] published = Libraries();
+        ReportEngineCook("asset-cook --engine publishes the engine shader libraries", first.ExitCode == 0 &&
+            first.StdOut.StartsWith("asset-cook: Windows published targets 0 ", StringComparison.Ordinal) && published.Length == 3 &&
+            HasLibrary(published, "D3D12_SM6") && HasLibrary(published, "D3D11_SM5") && HasLibrary(published, "VULKAN_SM5") &&
+            File.Exists(Path.Combine(engineCookDirectory, "Engine", "Saved", "Cooked", "Windows", "CookedManifest.rman")), first);
+        ProcessResult second = await RunEngineCook("asset-cook", "--engine", "--profile=Windows", "--json");
+        int reused = second.StdOut.Split("\"reused\": true", StringSplitOptions.None).Length - 1;
+        ReportEngineCook("asset-cook --engine reuses unchanged libraries", second.ExitCode == 0 && reused == 3 &&
+            second.StdOut.Contains("\"kind\": \"ShaderLibrary\"", StringComparison.Ordinal) && Libraries().SequenceEqual(published), second);
+    }
+    finally
+    {
+        if (Directory.Exists(engineCookDirectory))
+        {
+            Directory.Delete(engineCookDirectory, true);
+        }
+    }
+}
+
 // asset-import-unreal(UnrealExchange.ko.md 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
 // dry run(텍스처 하나 계획), 실행(임포터 없음 — 건너뜀 경고, 종료 0), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터
 // 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
@@ -2290,6 +2342,39 @@ static DirectoryInfo FindRepositoryRoot(string executable)
     }
 
     return root ?? throw new InvalidOperationException("The repository root (Rocks.proj) is not above the executable.");
+}
+
+// 엔진 전용 쿠킹 배치다: 저장소 Engine/Config·Engine/Shaders를 root/Engine 아래로, 실행 파일과 그 옆 ShaderCompileWorker를 root/bin으로
+// 복사해 복사한 실행 파일 경로를 돌려준다(FindEngineDirectory가 실행 파일 위쪽의 Engine/Config로 root/Engine을 찾는다).
+static string EngineCookLayout(string executable, string root)
+{
+    DirectoryInfo repository = FindRepositoryRoot(executable);
+    foreach (string folder in new[] { "Config", "Shaders" })
+    {
+        string source = Path.Combine(repository.FullName, "Engine", folder);
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string destination = Path.Combine(root, "Engine", folder, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, true);
+        }
+    }
+
+    string bin = Path.Combine(root, "bin");
+    Directory.CreateDirectory(bin);
+    string directory = Path.GetDirectoryName(Path.GetFullPath(executable))!;
+    foreach (string name in new[] { "ShaderCompileWorker.exe", "ShaderCompileWorker" })
+    {
+        string worker = Path.Combine(directory, name);
+        if (File.Exists(worker))
+        {
+            File.Copy(worker, Path.Combine(bin, name), true);
+        }
+    }
+
+    string copied = Path.Combine(bin, Path.GetFileName(executable));
+    File.Copy(executable, copied, true);
+    return copied;
 }
 
 // CRC-32(IEEE 802.3, 반사 다항식 0xEDB88320)다.
