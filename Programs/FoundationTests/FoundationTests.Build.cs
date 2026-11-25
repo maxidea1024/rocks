@@ -129,7 +129,8 @@ public abstract class TestsModule : ModuleRules
         ["TraceCapture"] = ["TraceAnalysis"],
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
-        ["World"] = ["ObjectSerialization", "Task", "WorldTestFixtures"]
+        // The World collision tests build the profile table from a Config test fixture context (Docs/Design/CollisionData.ko.md CD2).
+        ["World"] = ["ConfigTestFixtures", "ObjectSerialization", "Task", "WorldTestFixtures"]
     };
 
     // Modules whose private headers (test access headers) the tests of a module include (Docs/Design/BuildTargets section 3.5 BS1b). Each entry is
