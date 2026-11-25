@@ -3,6 +3,7 @@
 #include "PlatformTextureSource.h"
 #include "ScreenRenderer.h"
 
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Matrix4.h>
 #include <Core/Memory/UniquePtr.h>
@@ -177,7 +178,7 @@ public:
         return selected_;
     }
 
-    static constexpr uint32 NoInspectorEntry = ~uint32{0};
+    static constexpr uint32 NoInspectorEntry = NumericLimits<uint32>::Max();
 
     // 쿠킹 텍스처 데이터를 올리고 표시 목록 끝에 더한다(18.5절 7항 — 패키지 공개 뒤 게임 lane).
     // cpuPlaceholder면 올리지 않고 검정 대체 항목만 더한다(CPU Availability). 오류: lane 시작 전
