@@ -15,6 +15,14 @@ namespace physics_world_tests_file {
 namespace {
 
 constexpr double StepSeconds = 1.0 / 60.0;
+// World Tick 한 번에 넣는 시간(고정 스텝 3.5개 — 누적 오차 없이 고정 스텝 3번).
+constexpr int TickSteps = 3;
+constexpr double TickStepsAndHalf = TickSteps + 0.5;
+
+// 엔진 자리를 미리 채우는 콜백이다(아무것도 하지 않는다).
+Result<void> OccupyStage(World&, const TickContext&, void*) noexcept {
+    return Result<void>::Success();
+}
 
 // WorldSubsystemTests와 같은 수명 순서의 World 고정 장치다.
 struct WorldFixture {
@@ -69,6 +77,10 @@ TEST(Physics_GameWorldPlugsSceneAndSimulates) {
     CHECK(world.GetPhysicsScene()->Stats().steps == 1u);
 
     REQUIRE(world.BeginPlay());
+    // 엔진 자리 PhysicsSimulate가 고정 스텝마다 step한다(3.5 스텝 길이 → 고정 스텝 3번).
+    REQUIRE(world.Tick(StepSeconds * TickStepsAndHalf));
+    CHECK(world.GetPhysicsScene()->Stats().steps == 1u + static_cast<uint64>(TickSteps));
+    CHECK(world.Stats().engineStageFailures == 0u);
     CHECK(world.SetPhysicsScene(nullptr).Error() == ErrorCode::InvalidArgument);
     REQUIRE(world.Shutdown());
     CHECK(world.GetPhysicsScene() == nullptr);
@@ -86,6 +98,11 @@ TEST(Physics_EditorAndPreviewWorldsHaveSceneWithoutSteps) {
         CHECK(fixture.world->GetPhysicsScene() != nullptr);
         CHECK(!physics->Simulates());
         CHECK(physics->SimulateStep(StepSeconds).Error() == ErrorCode::WrongContext);
+        // 엔진 자리에 걸지 않았다(비어 있어 다른 쪽이 걸 수 있다). Tick해도 step이 없다.
+        CHECK(fixture.world->SetEngineStage(EngineStage::PhysicsSimulate, &OccupyStage, nullptr));
+        fixture.world->ClearEngineStage(EngineStage::PhysicsSimulate);
+        REQUIRE(fixture.world->Tick(StepSeconds * TickStepsAndHalf));
+        CHECK(fixture.world->GetPhysicsScene()->Stats().steps == 0u);
         REQUIRE(fixture.world->Shutdown());
     }
 
@@ -97,11 +114,40 @@ TEST(Physics_EditorAndPreviewWorldsHaveSceneWithoutSteps) {
     REQUIRE(inactive.world->Shutdown());
 }
 
+// PhysicsSimulate 자리를 다른 쪽이 먼저 쓰면 초기화가 AlreadyExists로 실패하고 장면을 떼고
+// 파괴한다. 정리는 남의 자리를 지우지 않는다.
+TEST(Physics_InitializeRollsBackWhenSimulateStageIsTaken) {
+    const WorldSubsystemType subsystems[] = {PhysicsWorldSubsystem::Type()};
+    WorldFixture fixture(subsystems, WorldKind::Game);
+    REQUIRE(fixture.world);
+    World& world = *fixture.world;
+    REQUIRE(world.SetEngineStage(EngineStage::PhysicsSimulate, &OccupyStage, nullptr));
+    CHECK(world.Initialize().Error() == ErrorCode::AlreadyExists);
+    CHECK(world.GetPhysicsScene() == nullptr);
+    CHECK(world.SetEngineStage(EngineStage::PhysicsSimulate, &OccupyStage, nullptr).Error() ==
+          ErrorCode::AlreadyExists);
+    world.ClearEngineStage(EngineStage::PhysicsSimulate);
+}
+
 // 접점 규칙: Initialized에서 다른 장면을 겹쳐 꽂으면 AlreadyExists, Created에서는 InvalidArgument.
 TEST(Physics_WorldSetPhysicsSceneRules) {
     struct NullScene final : PhysicsScene {
         PhysicsSceneStats Stats() const noexcept override {
             return {};
+        }
+
+        Result<PhysicsBodyHandle> CreateBody(const BodyCreateDesc&) noexcept override {
+            return Result<PhysicsBodyHandle>::Failure(ErrorCode::Unsupported);
+        }
+
+        void DestroyBody(PhysicsBodyHandle) noexcept override {
+        }
+
+        void SetBodyTransform(PhysicsBodyHandle, const Transform&, TeleportMode) noexcept override {
+        }
+
+        Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle) const noexcept override {
+            return Result<BodyKinematics>::Failure(ErrorCode::StaleHandle);
         }
     };
 

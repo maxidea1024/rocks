@@ -1,7 +1,6 @@
 #include "ScreenRenderer.h"
 
 #include <Core/Diagnostics/Log.h>
-#include <Core/Math/Float16.h>
 #include <Core/Move.h>
 #include <RenderBase/FullscreenPass.h>
 #include <RenderBase/PipelineStatePresets.h>
@@ -30,61 +29,77 @@ TraceScopeName TonemapCaptureName("Sandbox.TonemapCapture");
 TraceScopeName InspectorName("Sandbox.TextureInspector");
 TraceScopeName InspectorCaptureName("Sandbox.TextureInspectorCapture");
 
-// 절차 생성 표시 텍스처의 색이다(RGBA8Unorm).
-constexpr uint8 Red[4] = {255, 0, 0, 255};
-constexpr uint8 Green[4] = {0, 255, 0, 255};
-constexpr uint8 Blue[4] = {0, 0, 255, 255};
-constexpr uint8 White[4] = {255, 255, 255, 255};
-constexpr uint8 Cyan[4] = {0, 255, 255, 255};
-constexpr uint8 Magenta[4] = {255, 0, 255, 255};
-constexpr uint8 Yellow[4] = {255, 255, 0, 255};
-// cube 면 순서(+X, -X, +Y, -Y, +Z, -Z)의 색이다.
-constexpr const uint8* CubeFaceColors[6] = {Red, Cyan, Green, Magenta, Blue, Yellow};
-// 2D 표시 텍스처 크기(mip 0)다.
-constexpr uint32 Inspector2DSize = 4;
-constexpr usize RgbaBytes = 4;
-
-// view마다 셰이더 타입·텍스처 이름·표시 방식이다(None 칸은 쓰지 않는다).
+// 차원·성분 계열마다 셰이더 타입·텍스처 이름·대체 텍스처 모양이다(InspectorKindCount 칸).
 struct InspectorKind {
+    graphics::TextureDimension dimension;
+    InspectorComponent component;
     shader::ShaderTypeName type;
     const char* texture;
-    render::TextureInspectorDisplay display;
+    shader::ShaderResourceShape shape;
 };
 
-constexpr InspectorKind InspectorKinds[InspectorViewCount] = {
-    {render::TextureInspector2DPixelType, render::TextureInspector2DSourceName,
-     render::TextureInspectorDisplay::Ldr},
-    {render::TextureInspector2DPixelType, render::TextureInspector2DSourceName,
-     render::TextureInspectorDisplay::Ldr},
-    {render::TextureInspector2DPixelType, render::TextureInspector2DSourceName,
-     render::TextureInspectorDisplay::Hdr},
-    {render::TextureInspector2DArrayPixelType, render::TextureInspector2DArraySourceName,
-     render::TextureInspectorDisplay::Ldr},
-    {render::TextureInspectorCubePixelType, render::TextureInspectorCubeSourceName,
-     render::TextureInspectorDisplay::Ldr},
-    {render::TextureInspectorCubeArrayPixelType, render::TextureInspectorCubeArraySourceName,
-     render::TextureInspectorDisplay::Ldr},
-    {render::TextureInspectorVolumePixelType, render::TextureInspectorVolumeSourceName,
-     render::TextureInspectorDisplay::Ldr}};
+constexpr InspectorKind InspectorKinds[InspectorKindCount] = {
+    {graphics::TextureDimension::Texture2D, InspectorComponent::Float,
+     render::TextureInspector2DPixelType, render::TextureInspector2DSourceName,
+     shader::ShaderResourceShape::Texture2D},
+    {graphics::TextureDimension::Texture2DArray, InspectorComponent::Float,
+     render::TextureInspector2DArrayPixelType, render::TextureInspector2DArraySourceName,
+     shader::ShaderResourceShape::Texture2DArray},
+    {graphics::TextureDimension::TextureCube, InspectorComponent::Float,
+     render::TextureInspectorCubePixelType, render::TextureInspectorCubeSourceName,
+     shader::ShaderResourceShape::TextureCube},
+    {graphics::TextureDimension::TextureCubeArray, InspectorComponent::Float,
+     render::TextureInspectorCubeArrayPixelType, render::TextureInspectorCubeArraySourceName,
+     shader::ShaderResourceShape::TextureCubeArray},
+    {graphics::TextureDimension::Texture3D, InspectorComponent::Float,
+     render::TextureInspectorVolumePixelType, render::TextureInspectorVolumeSourceName,
+     shader::ShaderResourceShape::Texture3D},
+    {graphics::TextureDimension::Texture2D, InspectorComponent::Uint,
+     render::TextureInspector2DUintPixelType, render::TextureInspector2DUintSourceName,
+     shader::ShaderResourceShape::Texture2D},
+    {graphics::TextureDimension::Texture2DArray, InspectorComponent::Uint,
+     render::TextureInspector2DArrayUintPixelType, render::TextureInspector2DArrayUintSourceName,
+     shader::ShaderResourceShape::Texture2DArray},
+    {graphics::TextureDimension::Texture3D, InspectorComponent::Uint,
+     render::TextureInspectorVolumeUintPixelType, render::TextureInspectorVolumeUintSourceName,
+     shader::ShaderResourceShape::Texture3D},
+    {graphics::TextureDimension::Texture2D, InspectorComponent::Int,
+     render::TextureInspector2DIntPixelType, render::TextureInspector2DIntSourceName,
+     shader::ShaderResourceShape::Texture2D},
+    {graphics::TextureDimension::Texture2DArray, InspectorComponent::Int,
+     render::TextureInspector2DArrayIntPixelType, render::TextureInspector2DArrayIntSourceName,
+     shader::ShaderResourceShape::Texture2DArray},
+    {graphics::TextureDimension::Texture3D, InspectorComponent::Int,
+     render::TextureInspectorVolumeIntPixelType, render::TextureInspectorVolumeIntSourceName,
+     shader::ShaderResourceShape::Texture3D}};
 
-void AppendColor(Array<uint8>& out, const uint8* color, usize count) noexcept {
-    for (usize index = 0; index < count; ++index) {
-        (void)out.TryAppend(Span<const uint8>(color, RgbaBytes));
+// 2D float 칸이다(CPU Availability·대체 없음의 검정 표시).
+constexpr uint32 InspectorKind2D = 0;
+constexpr uint32 NoInspectorKind = InspectorKindCount;
+
+uint32 FindInspectorKind(graphics::TextureDimension dimension,
+                         InspectorComponent component) noexcept {
+    for (uint32 index = 0; index < InspectorKindCount; ++index) {
+        if (InspectorKinds[index].dimension == dimension &&
+            InspectorKinds[index].component == component) {
+            return index;
+        }
     }
+
+    return NoInspectorKind;
 }
 
-// 점 표본·clamp 샘플러의 표시 텍스처 desc다.
-graphics::TextureDesc InspectorDesc(graphics::TextureDimension dimension, uint32 size) noexcept {
-    graphics::TextureDesc desc;
-    desc.dimension = dimension;
-    desc.width = size;
-    desc.height = size;
-    desc.format = graphics::PixelFormat::RGBA8Unorm;
-    desc.sampler.filter = graphics::Filter::Point;
-    desc.sampler.addressU = graphics::AddressMode::Clamp;
-    desc.sampler.addressV = graphics::AddressMode::Clamp;
-    desc.sampler.addressW = graphics::AddressMode::Clamp;
-    return desc;
+shader::ShaderComponentType ShaderComponentOf(InspectorComponent component) noexcept {
+    switch (component) {
+    case InspectorComponent::Float:
+        return shader::ShaderComponentType::Float;
+    case InspectorComponent::Uint:
+        return shader::ShaderComponentType::Uint;
+    case InspectorComponent::Int:
+        return shader::ShaderComponentType::Int;
+    }
+
+    return shader::ShaderComponentType::Float;
 }
 
 // lane이 장치 handle로 푼 그리기 항목이다(그 프레임 arena에 둔다).
@@ -102,102 +117,24 @@ Span<const uint8> Bytes(const void* data, usize size) noexcept {
 } // namespace
 
 ScreenRenderer::ScreenRenderer(Allocator& allocator, const render::EngineShaderHost& host) noexcept
-    : allocator_(allocator), host_(host), resources_(allocator),
-      captured_{Array<uint8>(allocator), Array<uint8>(allocator), Array<uint8>(allocator),
-                Array<uint8>(allocator), Array<uint8>(allocator), Array<uint8>(allocator),
-                Array<uint8>(allocator), Array<uint8>(allocator)} {
+    : allocator_(allocator), host_(host), resources_(allocator), captured_(allocator) {
+    // capture 자리는 미리 만든다(lane이 자리를 늘리지 않는다 — 할당 실패면 자리가 적을 뿐이다).
+    if (captured_.TryReserve(MaxCaptureSlots)) {
+        for (uint32 slot = 0; slot < MaxCaptureSlots; ++slot) {
+            (void)captured_.TryPushBack(Array<uint8>(allocator));
+        }
+    }
 }
 
-Result<void> ScreenRenderer::CreateInspectorTextures(graphics::Device& device) noexcept {
-    Array<uint8> bytes(allocator_);
-    auto create = [&](InspectorView view, const graphics::TextureDesc& desc) noexcept {
-        auto created = device.CreateTexture(desc, bytes.View());
-        bytes.Clear();
-        if (!created) {
-            Log::Error(LogSandboxScreen, "An inspector texture could not be created: {Error}",
-                       ErrorCodeName(created.Error()));
-            return Result<void>::Failure(created.Error());
-        }
-
-        inspectorTextures_[static_cast<uint32>(view)] = created.Value();
-        inspectorCreated_ |= 1u << static_cast<uint32>(view);
-        return Result<void>::Success();
-    };
-
-    // 2D: mip 0 바둑판(빨강·초록), mip 1 파랑, mip 2 흰색.
-    graphics::TextureDesc plane =
-        InspectorDesc(graphics::TextureDimension::Texture2D, Inspector2DSize);
-    plane.mipLevels = InspectorMips[static_cast<uint32>(InspectorView::Texture2D)];
-    for (uint32 y = 0; y < Inspector2DSize; ++y) {
-        for (uint32 x = 0; x < Inspector2DSize; ++x) {
-            AppendColor(bytes, (x + y) % 2 == 0 ? Red : Green, 1);
-        }
-    }
-
-    AppendColor(bytes, Blue, (Inspector2DSize / 2) * (Inspector2DSize / 2));
-    AppendColor(bytes, White, 1);
-    if (auto made = create(InspectorView::Texture2D, plane); !made) {
-        return made;
-    }
-
-    // HDR 2D: RGBA16Float 1×1.
-    graphics::TextureDesc hdr = InspectorDesc(graphics::TextureDimension::Texture2D, 1);
-    hdr.format = graphics::PixelFormat::RGBA16Float;
-    const Float16 half[4] = {Float16::FromFloat(InspectorHdrColor[0]),
-                             Float16::FromFloat(InspectorHdrColor[1]),
-                             Float16::FromFloat(InspectorHdrColor[2]), Float16::FromFloat(1.0f)};
-    (void)bytes.TryAppend(Span<const uint8>(reinterpret_cast<const uint8*>(half), sizeof(half)));
-    if (auto made = create(InspectorView::Hdr2D, hdr); !made) {
-        return made;
-    }
-
-    graphics::TextureDesc layers = InspectorDesc(graphics::TextureDimension::Texture2DArray, 1);
-    layers.arraySize = InspectorLayers[static_cast<uint32>(InspectorView::Texture2DArray)];
-    AppendColor(bytes, Red, 1);
-    AppendColor(bytes, Green, 1);
-    AppendColor(bytes, Blue, 1);
-    if (auto made = create(InspectorView::Texture2DArray, layers); !made) {
-        return made;
-    }
-
-    graphics::TextureDesc cube = InspectorDesc(graphics::TextureDimension::TextureCube, 1);
-    for (const uint8* color : CubeFaceColors) {
-        AppendColor(bytes, color, 1);
-    }
-
-    if (auto made = create(InspectorView::Cube, cube); !made) {
-        return made;
-    }
-
-    if (device.Caps().features.textureCubeArray) {
-        graphics::TextureDesc cubes =
-            InspectorDesc(graphics::TextureDimension::TextureCubeArray, 1);
-        cubes.arraySize = InspectorLayers[static_cast<uint32>(InspectorView::CubeArray)];
-        for (const uint8* color : CubeFaceColors) {
-            AppendColor(bytes, color, 1);
-        }
-
-        AppendColor(bytes, White, 6);
-        if (auto made = create(InspectorView::CubeArray, cubes); !made) {
-            return made;
-        }
-    }
-
-    graphics::TextureDesc volume = InspectorDesc(graphics::TextureDimension::Texture3D, 1);
-    volume.depth = InspectorLayers[static_cast<uint32>(InspectorView::Volume)];
-    AppendColor(bytes, Red, 1);
-    AppendColor(bytes, Green, 1);
-    AppendColor(bytes, Blue, 1);
-    AppendColor(bytes, White, 1);
-    return create(InspectorView::Volume, volume);
-}
-
-void ScreenRenderer::RetireInspectorTextures(graphics::Device& device) noexcept {
-    for (graphics::TextureHandle& texture : inspectorTextures_) {
-        if (!texture.IsNull()) {
-            device.Retire(texture);
-            texture = {};
-        }
+uint32 InspectorLayerCount(const InspectorTexture& texture, uint32 mip) noexcept {
+    switch (texture.dimension) {
+    case graphics::TextureDimension::Texture2DArray:
+    case graphics::TextureDimension::TextureCubeArray:
+        return texture.layers;
+    case graphics::TextureDimension::Texture3D:
+        return graphics::MipExtent(texture.depth, mip);
+    default:
+        return 1;
     }
 }
 
@@ -263,7 +200,7 @@ Result<void> ScreenRenderer::PrepareRequests() noexcept {
     tonemapRequest_ = request.Value();
     tonemapRequest_.state.bindings.texture = render::TonemapSceneColorName;
     tonemapRequest_.state.drawConstantBytes = sizeof(render::TonemapConstants);
-    for (uint32 view = 1; view < InspectorViewCount; ++view) {
+    for (uint32 view = 0; view < InspectorKindCount; ++view) {
         auto entry = set->FindEntry(InspectorKinds[view].type.hash);
         if (!entry) {
             return Result<void>::Failure(entry.Error());
@@ -309,11 +246,7 @@ Result<void> ScreenRenderer::OnLaneStart(render::RenderLaneContext& context) noe
     }
 
     pool_ = Move(pool.Value());
-    if (auto prepared = PrepareRequests(); !prepared) {
-        return prepared;
-    }
-
-    return CreateInspectorTextures(device);
+    return PrepareRequests();
 }
 
 void ScreenRenderer::OnLaneStop(render::RenderLaneContext& context) noexcept {
@@ -329,7 +262,6 @@ void ScreenRenderer::OnLaneStop(render::RenderLaneContext& context) noexcept {
         pool_.Reset();
     }
 
-    RetireInspectorTextures(device);
     resources_.Retire(device);
     if (!swapChain_.IsNull()) {
         device.Retire(swapChain_);
@@ -349,7 +281,7 @@ bool ScreenRenderer::FinishFrame(render::RenderFrameContext& context, render::Re
     }
 
     ++stats_.framesRendered;
-    if (!capture.IsNull() && slot < MaxCaptureSlots) {
+    if (!capture.IsNull() && slot < captured_.Size()) {
         Array<uint8>& pixels = captured_[slot];
         const usize bytes = static_cast<usize>(width_) * height_ * OutputBytesPerPixel;
         if (pixels.TryResize(bytes) && context.Device().ReadPixels(capture, pixels.View())) {
@@ -365,14 +297,59 @@ bool ScreenRenderer::FinishFrame(render::RenderFrameContext& context, render::Re
 // 텍스처 표시 view를 그린다(장면 대신 — 18.5절 6항).
 void ScreenRenderer::RenderInspector(render::RenderFrameContext& context,
                                      const ScreenPacket& packet) noexcept {
-    const uint32 view = static_cast<uint32>(packet.inspector);
-    const graphics::TextureHandle texture = inspectorTextures_[view];
+    const InspectorTexture& target = packet.inspector;
+    render::BuiltinResources& builtins = resources_.Builtins();
+    const graphics::TextureHandle black = builtins.Texture(render::BuiltinTexture::Black2D);
+    uint32 kind = FindInspectorKind(target.dimension, target.component);
+    graphics::TextureHandle texture;
+    bool fallback = false;
+    if (target.cpuPlaceholder || kind == NoInspectorKind) {
+        // CPU Availability(6.5절)와 표시 엔트리가 없는 조합(정수 cube 계열)은 검정 2D다.
+        kind = InspectorKind2D;
+        texture = black;
+        fallback = !target.cpuPlaceholder;
+    } else {
+        auto typed = builtins.FallbackTexture(InspectorKinds[kind].shape,
+                                              ShaderComponentOf(target.component));
+        auto ready = context.Handles().Texture(target.handle);
+        if (ready) {
+            texture = ready.Value();
+        } else if (typed) {
+            // Pending·Failed는 typed 대체다(6.2절 — 계수는 ResolveTexture가 올린다).
+            auto resolved =
+                builtins.ResolveTexture(context.Handles(), target.handle, typed.Value());
+            texture = resolved ? resolved.Value() : typed.Value();
+            fallback = true;
+        } else {
+            // 맞는 typed 대체가 없는 조합(정수 2D 배열·volume)은 검정 2D다.
+            kind = InspectorKind2D;
+            texture = black;
+            fallback = true;
+        }
+    }
+
+    if (fallback) {
+        ++stats_.inspectorFallbacks;
+    }
+
+    const uint32 mip = texture == black ? 0u : packet.inspectorMip;
     render::TextureInspectorConstants constants;
     constants.exposure[0] = packet.tonemap.exposure[0];
-    constants.selection[0] = static_cast<float>(packet.inspectorMip);
+    constants.selection[0] = static_cast<float>(mip);
     constants.selection[1] = static_cast<float>(packet.inspectorLayer);
-    constants.selection[2] = static_cast<float>(InspectorLayers[view]);
-    constants.selection[3] = static_cast<float>(InspectorKinds[view].display);
+    constants.selection[2] = static_cast<float>(graphics::MipExtent(target.depth, mip));
+    constants.selection[3] = static_cast<float>(
+        texture == black ? render::TextureInspectorDisplay::Ldr : target.display);
+    const graphics::ChannelSwizzle swizzle =
+        texture == black ? graphics::ChannelSwizzle{} : target.swizzle;
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        constants.swizzle[channel] = static_cast<float>(swizzle.Channel(channel));
+    }
+
+    constants.integer[0] = target.integerScale;
+    constants.integer[1] = static_cast<float>(graphics::MipExtent(target.width, mip));
+    constants.integer[2] = static_cast<float>(graphics::MipExtent(target.height, mip));
+    const uint32 view = kind;
     auto bind = [texture, constants](render::GraphPassContext& pass) noexcept {
         pass.Commands().SetTexture(texture);
         (void)pass.Commands().SetDrawConstants(Bytes(&constants, sizeof(constants)));
@@ -407,9 +384,7 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
         return;
     }
 
-    const uint32 view = static_cast<uint32>(packet.inspector);
-    if (packet.inspector != InspectorView::None && view < InspectorViewCount &&
-        !renderer.inspectorTextures_[view].IsNull()) {
+    if (packet.inspecting) {
         renderer.RenderInspector(context, packet);
         return;
     }

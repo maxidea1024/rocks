@@ -62,7 +62,7 @@ public:
 | 시작 잠듦 | `startAwake`가 거짓이고 **소유 Actor가 아직 BeginPlay 전**이면 Dynamic body를 잠든 채 넣는다(게임 중 Spawn한 Actor도 등록은 BeginPlay 전이므로 잠든 채 시작한다). BeginPlay 뒤 등록이면 깨어서 넣는다 | `PrimitiveComponent.cpp:955–961`(`HasActorBegunPlay`) |
 
 - scale 0은 아주 작은 값(`KINDA_SMALL_NUMBER` 대응 상수)으로 보정해 형상을 만든다. UE shipping 빌드는 세 축이 **모두** 0일 때만 보정한다(`PrimitiveComponent.cpp:909–925`). Rocks는 **어느 한 축**이라도 0이면 그 축을 보정한다(Jolt 형상은 0 크기 축을 받지 않는다 — `ScaleHelpers::cMinScale`, UE와 다른 점).
-- 실패: `CreateBody` 실패(형상 생성 실패·용량 초과)는 시스템 상태 실패로 돌아가 등록 실패가 된다(ERD26). 형상 값 오류(음수 반경 등)는 형상 컴포넌트 setter가 이미 막으므로 남는 실패는 용량·할당이다. 용량 한도(`PhysicsSettings::maxBodies`)는 Jolt `PhysicsSystem::Init`의 최대 body 수다.
+- 실패: `CreateBody` 실패(형상 생성 실패·용량 초과)는 시스템 상태 실패로 돌아가 등록 실패가 된다(ERD26). 형상 크기 0·음수는 실패가 아니라 UE처럼 clamp한다(구 반경·box 반폭 최소 `KindaSmallNumber`, 캡슐 0.1 cm 하한 — `ChaosInterfaceUtils.cpp:139–177`, 7.1.3절). 남는 실패는 비유한 값·용량·할당이다. 용량 한도(`PhysicsSettings::maxBodies`)는 Jolt `PhysicsSystem::Init`의 최대 body 수다.
 
 ### 2.3.1 바뀔 때
 

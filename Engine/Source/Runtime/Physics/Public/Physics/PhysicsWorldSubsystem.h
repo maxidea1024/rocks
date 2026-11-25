@@ -13,7 +13,8 @@ namespace rocks {
 // 파괴한다. Subsystem 정리는 모든 Actor 정리 뒤라 body가 장면보다 먼저 사라진다.
 //
 // 만드는 World: Game·Tryout·Editor·Preview(Inactive 제외 — 편집기 picking·미리보기 충돌도 질의를
-// 쓴다). step은 Game·Tryout World만 한다(3.1절 PMD16).
+// 쓴다). step은 Game·Tryout World만 한다(3.1절 PMD16): 그 World에서만 엔진 자리
+// PhysicsSimulate(고정 스텝마다, 사용자 Fixed hook 뒤)에 SimulateStep을 건다.
 //
 // 호스트가 World Subsystem 목록에 넣는다(Gameplay는 Physics에 의존하지 않는다 — 1.2절 PMD3):
 //   config.worldSubsystems.TryPushBack(PhysicsWorldSubsystem::Type());
@@ -28,7 +29,8 @@ public:
     static WorldSubsystemType Type() noexcept;
 
     // 장면을 만들어 World에 꽂는다. 오류: Jolt 버전 정의 불일치(InvalidArgument — 반입 정의와
-    // 소비자 정의가 다르다), 설정 검증 실패(InvalidArgument), 할당 실패.
+    // 소비자 정의가 다르다), 설정 검증 실패(InvalidArgument), PhysicsSimulate 자리를 다른 쪽이 이미
+    // 씀(AlreadyExists), 할당 실패.
     Result<void> Initialize(World& world) noexcept override;
 
     // 장면을 World에서 떼고 파괴한다(진행 중인 job이 끝나기를 기다린다).
