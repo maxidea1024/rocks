@@ -32,7 +32,13 @@ public sealed class CommandletHost : ModuleRules
         // (Docs/Design/AssetSystem section 12.12).
         // Collision: owns the Engine.json Collision section (Docs/Design/CollisionData.ko.md section 3); a program that reads the engine config
         // must register every section's settings struct (an unknown section is a config error), as Sandbox does.
+        // Cooker module set (Docs/Design/BuildTargets section 3.10, BS10 item 1 and 4): the engine Runtime and ClientOnly modules that the engine
+        // repository shipping target (Sandbox, Release) links, so their module lifetime objects register the same shader types in the cooker as in
+        // the shipping executable (the shader library cook stage starts the engine group, policy check cooker-module-set). OpenGLGraphics is linked
+        // on every platform: Windows shipping targets do not have it, but the rule is a superset and Android and macOS shipping targets do.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
-            "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "Collision"]
+            "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "Collision",
+            "Engine", "Gameplay", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
+            "VulkanGraphics", "OpenGLGraphics"]
     };
 }

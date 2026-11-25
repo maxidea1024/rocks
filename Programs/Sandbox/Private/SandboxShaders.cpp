@@ -46,10 +46,10 @@ SystemAllocator& ProcessAllocator() noexcept {
 render::EngineRenderResources* active = nullptr;
 bool hostPrepared = false;
 
-// Sandbox 타입과 /Plugin/Sandbox 원문 디렉터리(엔진 폴더의 형제 Programs/Sandbox/Shaders)를 한 번
-// 넣는다.
-Result<void> PrepareHost(render::EngineShaderHost& host) noexcept {
-    if (hostPrepared) {
+// self-test면 Sandbox 타입과 /Plugin/Sandbox 원문 디렉터리(엔진 폴더의 형제
+// Programs/Sandbox/Shaders)를 한 번 넣는다. 엔진 실행은 아무것도 넣지 않는다(SSD48).
+Result<void> PrepareHost(render::EngineShaderHost& host, SandboxShaderScope scope) noexcept {
+    if (hostPrepared || scope == SandboxShaderScope::Engine) {
         return Result<void>::Success();
     }
 
@@ -104,9 +104,9 @@ render::EngineShaderHost& Host() noexcept {
     return host;
 }
 
-Result<void> AttachHost(ModuleLoader& modules) noexcept {
+Result<void> AttachHost(ModuleLoader& modules, SandboxShaderScope scope) noexcept {
     render::EngineShaderHost& host = Host();
-    if (auto prepared = PrepareHost(host); !prepared) {
+    if (auto prepared = PrepareHost(host, scope); !prepared) {
         return prepared;
     }
 
@@ -124,7 +124,7 @@ void DetachHost(ModuleLoader& modules) noexcept {
 }
 
 SelfTestShaderHost::SelfTestShaderHost(ModuleLoader& modules) noexcept : modules_(modules) {
-    attached_ = AttachHost(modules).IsOk();
+    attached_ = AttachHost(modules, SandboxShaderScope::SelfTest).IsOk();
     if (!attached_) {
         return;
     }

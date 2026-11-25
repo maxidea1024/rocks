@@ -110,3 +110,4 @@
 - 개정 50(2026-11-25): SH2g(SL0) 착수(16.1절 — 엔진 셰이더 개정 3 결정 SLD19–SLD21 반영). 완료 기준의 컴파일 행렬 형식을 형식 정의 전부로 적고(EngineTests 워커 컴파일, Metal SKIP), GPU probe 위치(Sandbox self-test)와 시험 루트 폴더를 적었다. 같은 이름 "SH2g"가 개정 46의 GLES cube 메모에도 쓰였으므로 SL0 쪽은 "SH2g(SL0)"로 적는다.
 - 개정 51(2026-11-25): SH2g(SL0) 구현 메모(16.1절 — 완료 기준 충족, FXC X4000이 도구 실패로 분류되어 대체 경로를 타지 않는 사실(후속 확인), HLSL 2018 `static_assert` 없음).
 - 개정 52(2026-11-25): SH2d 구현 설계(16.1절 SSD44–SSD48 — 단계 위치·등록, 단계 흐름, cookKey byte, 런타임 열기·형식 선택·장치 요구 비트, Sandbox 엔진 전용 실행). SSD10의 `shaderFormats` JSON 모양을 구현(`{"D3D12": {"formats": [...]}}`, `ShaderFormatList`)에 맞췄다(12.3절 예시·12.3.1절).
+- 개정 53(2026-11-25): SH2d 구현 메모(16.1절 — 쿠킹 단계·cookKey·모듈 시작 등록, 생산 호스트 사전 판정, 장치 요구 비트, 매니페스트 원천·형식 선택, BS10 Commandlet 모듈 집합·정책, Sandbox 엔진 전용 실행의 EngineAssets·쿠킹 라이브러리·쿠킹 화면 self-test, 한계).

@@ -90,11 +90,12 @@ TEST(InputTrigger_TimedKinds) {
     CHECK(Sequence(hold, {1, 1, 1, 1, 0, 1, 1, 1}, {O, O, T, N, N, O, O, T}));
 
     // HoldAndRelease: 놓는 평가에서 이번 dt를 더해 0.3 ≥ 0.25면 Triggered.
-    InputTrigger release = InputTrigger::HoldAndReleaseDefault();
-    release.holdTime = 0.25f;
+    InputTrigger release;
+    release.type = InputTriggerType::HoldAndRelease;
+    CHECK(release.holdAndReleaseTime == 0.5f && release.holdTime == 1.0f);
+    release.holdAndReleaseTime = 0.25f;
     CHECK(Sequence(release, {1, 1, 0}, {O, O, T}));
     CHECK(Sequence(release, {1, 0}, {O, N}));
-    CHECK(release.holdTime == 0.25f && InputTrigger::HoldAndReleaseDefault().holdTime == 0.5f);
 
     // Tap: 0.2 안에 놓으면 Triggered, 오래 누르면 None으로 멈춘다.
     InputTrigger tap;
@@ -187,6 +188,7 @@ TEST(InputTrigger_CombineRules) {
     // Implicit(ChordAction)은 모두 Triggered여야 한다 — 대상이 Triggered가 아니면 막는다.
     InputTrigger chord;
     chord.type = InputTriggerType::ChordAction;
+    chord.chordAction = 0;
     InputTrigger down;
     const InputTrigger chorded[] = {chord, down};
     InputTriggerState chordedState[2];
@@ -201,6 +203,7 @@ TEST(InputTrigger_CombineRules) {
     // Blocker: 대상이 Triggered면 막는다. Blocker만 있으면 active를 세우지 않는다.
     InputTrigger blocker;
     blocker.type = InputTriggerType::ChordBlocker;
+    blocker.chordAction = 0;
     const InputTrigger blocked[] = {down, blocker};
     InputTriggerState blockedState[2];
     TriggerCombiner blockedNow;

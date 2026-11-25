@@ -162,9 +162,13 @@ enum class TickEdgeSource : uint8 {
 };
 
 // 사용자 등록이 아닌 엔진 단계의 자리다(Docs/Design/EngineRuntime 15.4절 ERD7). 열거 순서가 실행
-// 순서다: Physics 단계 끝(고정 스텝 뒤, 프레임에 한 번) PhysicsResults → SkeletalPhysicsFinalize,
-// LateUpdate 단계 시작 Timers → TickableSubsystems → CameraUpdate.
+// 순서다: Physics 단계의 고정 스텝마다(그 스텝의 사용자 Fixed hook 뒤) PhysicsSimulate, Physics
+// 단계 끝(고정 스텝 뒤, 프레임에 한 번) PhysicsResults → SkeletalPhysicsFinalize, LateUpdate 단계
+// 시작 Timers → TickableSubsystems → CameraUpdate.
 enum class EngineStage : uint8 {
+    // 물리 장면을 고정 스텝 하나만큼 진행한다(UE FStartPhysicsTickFunction). 문맥은 그 고정 스텝의
+    // 것이다(deltaSeconds = 고정 스텝 길이, fixedStepIndex = 스텝 번호).
+    PhysicsSimulate,
     PhysicsResults,
     SkeletalPhysicsFinalize,
     Timers,
@@ -176,11 +180,12 @@ enum class EngineStage : uint8 {
 inline constexpr uint32 EngineStageCount = static_cast<uint32>(EngineStage::Count);
 
 // "PhysicsResults" 같은 엔진 단계 이름이다. 범위 밖이면 "Unknown"이다.
-const char* EngineStageName(EngineStage stage) noexcept;
+ROCKS_WORLD_API const char* EngineStageName(EngineStage stage) noexcept;
 
-// 엔진 단계 콜백이다. context.phase는 그 자리의 단계(Physics·LateUpdate), delta·pause 정보는 그
-// 프레임의 값이다(pause 정책은 콜백이 context.paused로 정한다 — CameraUpdate는 pause 중 부르지
-// 않는다). 실패는 그 프레임 Tick의 실패로 돌아가고 WorldStats::engineStageFailures에 센다.
+// 엔진 단계 콜백이다. context.phase는 그 자리의 단계(Physics·LateUpdate)이고, delta·pause 정보는 그
+// 프레임의 값이다. PhysicsSimulate만 그 고정 스텝의 값(고정 스텝 길이·스텝 번호)이다. pause 정책은
+// 콜백이 context.paused로 정한다(CameraUpdate는 pause 중 부르지 않는다). 실패는 그 프레임 Tick의
+// 실패로 돌아가고 WorldStats::engineStageFailures에 센다.
 using EngineStageFunction = Result<void> (*)(World& world, const TickContext& context,
                                              void* user) noexcept;
 
@@ -240,7 +245,8 @@ struct WorldStats {
     uint32 skippedTicks = 0;
     // 엔진 단계 콜백이 실패한 누적 수다.
     uint32 engineStageFailures = 0;
-    // 엔진 단계 자리마다 마지막 실행의 소요 시간(ns)이다(콜백이 없으면 0).
+    // 엔진 단계 자리마다 마지막 Tick 안 실행 소요 시간의 합(ns)이다(PhysicsSimulate는 스텝마다
+    // 돈다). 그 Tick에 돌지 않았거나 콜백이 없으면 0이다.
     uint64 engineStageNanoseconds[static_cast<uint32>(EngineStage::Count)] = {};
     // LifeSpan이 걸려 만료를 기다리는 Actor 수(시작 전에 건 것 포함)다.
     uint32 pendingLifeSpans = 0;

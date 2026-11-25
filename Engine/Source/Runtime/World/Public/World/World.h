@@ -25,6 +25,7 @@ class ConfigContext;
 namespace rocks {
 
 class ConstructionContext;
+class PhysicsScene;
 class World;
 
 // World 수명과 같이하는 Subsystem의 기반이다(SubsystemCollection 참고).
@@ -359,6 +360,24 @@ public:
     WorkerScheduler* GcScheduler() const noexcept {
         return gcScheduler_;
     }
+
+    // 설정 문맥이다(WorldDesc::settings — 없으면 nullptr). 물리 설정처럼 World 수명 Subsystem이
+    // 등록된 설정 struct를 읽는 데 쓴다(FindSettings).
+    config::ConfigContext* Settings() const noexcept {
+        return settings_;
+    }
+
+    // 이 World의 물리 장면 접점이다(Docs/Design/PhysicsModule 2.2절 — UE UWorld::GetPhysicsScene).
+    // Physics 모듈의 PhysicsWorldSubsystem이 꽂고, 없으면 nullptr이다(물리 없는 World).
+    PhysicsScene* GetPhysicsScene() const noexcept {
+        return physicsScene_;
+    }
+
+    // 물리 장면 접점을 꽂거나(scene) 뗀다(nullptr). PhysicsWorldSubsystem만 부른다. World가
+    // Initialized(Subsystem 초기화 중과 BeginPlay 전)·TearingDown(정리 중)일 때만 받고 다른 상태는
+    // InvalidArgument, 이미 다른 장면이 꽂혀 있으면 AlreadyExists다(먼저 뗀다). 장면은 뗄 때까지
+    // 살아 있어야 한다. PhysicsModule 7.1.1절.
+    Result<void> SetPhysicsScene(PhysicsScene* scene) noexcept;
 
     WorldState State() const noexcept {
         return state_;
@@ -1015,6 +1034,8 @@ private:
     WorkerScheduler* gcScheduler_ = nullptr;
     // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
     config::ConfigContext* settings_ = nullptr;
+    // 물리 장면 접점이다(빌림 — PhysicsWorldSubsystem이 소유).
+    PhysicsScene* physicsScene_ = nullptr;
     cvar::CVarScopeId cvarScope_{};
     CollisionProfileTable collisionProfiles_;
     StepPlan lastStep_;

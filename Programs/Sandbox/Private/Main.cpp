@@ -47,6 +47,7 @@ using rocks::StringView;
 int Usage() noexcept {
     fprintf(stderr,
             "usage: Sandbox [--self-test] [--gpu-validation] | --engine-shader-self-test | "
+            "--cooked-shader-self-test | "
             "--engine [--window] [--frames N] "
             "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
             "[--config <file>] "
@@ -111,6 +112,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     rocks::usize settingCount = 0;
     bool gpuValidation = false;
     bool engineShaders = false;
+    bool cookedShaders = false;
     bool framesGiven = false;
     for (rocks::usize index = 0; index < arguments.Size(); ++index) {
         const StringView argument = arguments[index];
@@ -123,6 +125,8 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             engine = true;
         } else if (Is(argument, "--engine-shader-self-test")) {
             engineShaders = true;
+        } else if (Is(argument, "--cooked-shader-self-test")) {
+            cookedShaders = true;
         } else if (Is(argument, "--gpu-validation")) {
             gpuValidation = true;
         } else if (Is(argument, "--window")) {
@@ -167,9 +171,11 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     }
 
     options.arguments = Span<const StringView>(settingArguments, settingCount);
-    if (engineShaders) {
+    if (engineShaders || cookedShaders) {
         return sandbox::RunGraphicsSelfTest(context.DefaultAllocator(), context.Modules(), false,
-                                            true);
+                                            engineShaders
+                                                ? sandbox::GraphicsSelfTestScope::EngineShaders
+                                                : sandbox::GraphicsSelfTestScope::CookedShaders);
     }
 
     return engine ? sandbox::RunEngineHost(context, options)
