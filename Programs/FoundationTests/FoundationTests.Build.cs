@@ -44,7 +44,7 @@ public abstract class TestsModule : ModuleRules
 
     // Third-party libraries with process-wide state (ThirdParty.json globalState) among EngineThirdPartyHeaders, and the test sources that use them
     // directly. Physics owns Jolt; only the Monolithic engine runner may consume it beside its owner (GlobalStateTestConsumer — Docs/Design/BuildTargets
-    // section 3.8 BD29 test executable exception, revision 37). The Modular runner leaves the library off and skips these sources (the Monolithic runner
+    // section 3.8 BD29 test executable exception, revision 38). The Modular runner leaves the library off and skips these sources (the Monolithic runner
     // runs them).
     private static readonly string[] GlobalStateThirdPartyHeaders = ["Jolt"];
 

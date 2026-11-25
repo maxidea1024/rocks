@@ -107,7 +107,7 @@ internal static class DependencyScopeTests
         }
 
         // Monolithic 시험 실행 파일(GlobalStateTestConsumer)은 소유 모듈과 함께 직접 소비해도 세지 않는다(3.8절 시험 실행 파일 예외 —
-        // 개정 37). 실행 파일이 아니거나 Modular이면 표지 자체를 거부한다.
+        // 개정 38). 실행 파일이 아니거나 Modular이면 표지 자체를 거부한다.
         NativeModuleInput[] withTestRunner = [.. stateful, new NativeModuleInput
         {
             Name = "Runner", Kind = NativeModuleKind.Executable, PrivateDependencies = ["Root"], GlobalStateTestConsumer = true
