@@ -7,7 +7,8 @@ namespace rocks::input {
 
 PlayerActionInput::PlayerActionInput(Allocator& allocator) noexcept
     : allocator_(&allocator), contexts_(allocator), actions_(allocator), bindings_(allocator),
-      chordStates_(allocator), profile_(allocator) {
+      chordStates_(allocator), injections_(allocator), events_(allocator),
+      chordDependencies_(allocator), profile_(allocator) {
 }
 
 usize PlayerActionInput::FindContext(const Guid& contextId) const noexcept {

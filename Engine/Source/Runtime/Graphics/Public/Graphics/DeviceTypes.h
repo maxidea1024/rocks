@@ -439,6 +439,7 @@ struct TextureDesc {
     uint32 mipLevels = 1;
     // 이 텍스처를 묶을 때(SetTexture) 셰이더가 읽는 성분 대응이다(view swizzle). 항등이 아니면
     // D3D11은 Unsupported다(view swizzle이 없다). attachment·복사·ReadTexture에는 적용하지 않는다.
+    // 쿠킹 텍스처는 항등으로 둔다(쿠킹 swizzle은 셰이더가 적용 — RenderBase 6.5절).
     ChannelSwizzle swizzle;
     // 이 텍스처를 묶을 때 쓰는 기본 샘플러다(결정 R12: 바인딩 때 다른 샘플러를 고르는 것은 GX6).
     SamplerDesc sampler;

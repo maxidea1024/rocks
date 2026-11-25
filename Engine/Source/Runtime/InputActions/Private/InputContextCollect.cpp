@@ -185,6 +185,22 @@ Result<void> CheckBindings(const InputContextBundle& bundle, Span<const InputBin
 
 } // namespace
 
+Result<void> ValidateInputElements(Span<const InputTrigger> triggers,
+                                   Span<const InputModifier> modifiers,
+                                   InputDataDiagnostic* diagnostic) noexcept {
+    DataCheck check;
+    check.out = diagnostic;
+    if (auto checked = CheckElements(triggers, modifiers, check); !checked) {
+        return checked;
+    }
+
+    if (diagnostic != nullptr) {
+        *diagnostic = InputDataDiagnostic{};
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> ValidateInputActionSettings(const InputActionSettings& settings,
                                          InputDataDiagnostic* diagnostic) noexcept {
     DataCheck check;

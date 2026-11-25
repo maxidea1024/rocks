@@ -470,7 +470,7 @@ UE와 다르게 정한 점:
 - [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md) Binds 절(`using rocksBinds_N = ::<철자>` 서술)과 "현재 한계와 검증 범위": CLG1·CLG2.
 - `Programs/Rocks.MetaCompiler` 주석: `TypeSpelling`(Clang 정규 철자라는 주석), `StaticArrayProbe` 머리 주석, `NativeMemberProbe` 머리 주석의 "값으로 담는 타입은 첫 실행 AST의 재귀 검사가 본다": CLG1·CLG2.
 
-그대로 두는 것(측정 기록 — 그때의 도구 모음을 적은 것): [압축](Compression.ko.md) 검증 표, [로깅](LoggingSystem.ko.md)·[동기화](Synchronization.ko.md)의 실측, [리플렉션 기반](ReflectionFoundations.ko.md) 8절 교차검증·도구 지문 예시, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)·[유니티 빌드·PCH](UnityBuildPch.ko.md)의 측정 도구 모음, `Docs/Implementation`·`Docs/Reviews`의 실행 기록, 코드 주석의 예시(`NativeBuildModels.cs:171`, `ToolchainFingerprint.cs:27`, `ActionGraph.cs:664`). clang-format 21.1.6을 적은 곳(`Build/README.md` 6·169행, [코딩 스타일](../CodingStyle.md), 리플렉션 메타데이터 생성 형식 절)은 CLGD11에 따라 그대로다.
+그대로 두는 것(측정 기록 — 그때의 도구 모음을 적은 것): [압축](Compression.ko.md) 검증 표, [로깅](LoggingSystem.ko.md)·[동기화](Synchronization/README.ko.md)의 실측, [리플렉션 기반](ReflectionFoundations.ko.md) 8절 교차검증·도구 지문 예시, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)·[유니티 빌드·PCH](UnityBuildPch.ko.md)의 측정 도구 모음, `Docs/Implementation`·`Docs/Reviews`의 실행 기록, 코드 주석의 예시(`NativeBuildModels.cs:171`, `ToolchainFingerprint.cs:27`, `ActionGraph.cs:664`). clang-format 21.1.6을 적은 곳(`Build/README.md` 6·169행, [코딩 스타일](../CodingStyle.md), 리플렉션 메타데이터 생성 형식 절)은 CLGD11에 따라 그대로다.
 
 ## 14. 개정 이력
 

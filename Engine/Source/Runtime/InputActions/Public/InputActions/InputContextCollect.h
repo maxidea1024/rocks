@@ -38,6 +38,12 @@ ROCKS_INPUTACTIONS_API Result<void>
 ValidateInputContextBundle(const InputContextBundle& bundle,
                            InputDataDiagnostic* diagnostic = nullptr) noexcept;
 
+// 트리거·모디파이어 목록을 같은 규칙으로 본다(주입 — 4.3절 3). 위치 칸은 element·elementKind만
+// 쓴다.
+ROCKS_INPUTACTIONS_API Result<void>
+ValidateInputElements(Span<const InputTrigger> triggers, Span<const InputModifier> modifiers,
+                      InputDataDiagnostic* diagnostic = nullptr) noexcept;
+
 // 액션 설정 하나를 같은 규칙으로 본다(주입 액션 — 4.3절 3). 위치 칸은 action을 빼고 같다.
 ROCKS_INPUTACTIONS_API Result<void>
 ValidateInputActionSettings(const InputActionSettings& settings,

@@ -47,7 +47,7 @@ using rocks::StringView;
 int Usage() noexcept {
     fprintf(stderr,
             "usage: Sandbox [--self-test] [--gpu-validation] | --engine-shader-self-test | "
-            "--cooked-shader-self-test | "
+            "--cooked-shader-self-test | --texture-self-test | "
             "--engine [--window] [--frames N] "
             "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
             "[--config <file>] "
@@ -113,6 +113,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     bool gpuValidation = false;
     bool engineShaders = false;
     bool cookedShaders = false;
+    bool textures = false;
     bool framesGiven = false;
     for (rocks::usize index = 0; index < arguments.Size(); ++index) {
         const StringView argument = arguments[index];
@@ -127,6 +128,8 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             engineShaders = true;
         } else if (Is(argument, "--cooked-shader-self-test")) {
             cookedShaders = true;
+        } else if (Is(argument, "--texture-self-test")) {
+            textures = true;
         } else if (Is(argument, "--gpu-validation")) {
             gpuValidation = true;
         } else if (Is(argument, "--window")) {
@@ -171,11 +174,13 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     }
 
     options.arguments = Span<const StringView>(settingArguments, settingCount);
-    if (engineShaders || cookedShaders) {
+    if (engineShaders || cookedShaders || textures) {
+        const sandbox::GraphicsSelfTestScope scope =
+            engineShaders   ? sandbox::GraphicsSelfTestScope::EngineShaders
+            : cookedShaders ? sandbox::GraphicsSelfTestScope::CookedShaders
+                            : sandbox::GraphicsSelfTestScope::Textures;
         return sandbox::RunGraphicsSelfTest(context.DefaultAllocator(), context.Modules(), false,
-                                            engineShaders
-                                                ? sandbox::GraphicsSelfTestScope::EngineShaders
-                                                : sandbox::GraphicsSelfTestScope::CookedShaders);
+                                            scope);
     }
 
     return engine ? sandbox::RunEngineHost(context, options)
