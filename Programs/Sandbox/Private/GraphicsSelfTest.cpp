@@ -9,6 +9,7 @@
 #include "RenderLaneSelfTest.h"
 #include "RenderUtilitySelfTest.h"
 #include "ScreenSelfTest.h"
+#include "TextureSceneSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
 #include "FormatSelfTest.h"
@@ -101,6 +102,7 @@ bool engineShadersOnly = false;
 // 쿠킹 엔진 셰이더 라이브러리 화면 검사만 도는 실행인가(--cooked-shader-self-test, ShaderSystem
 // 16.1절 SSD48).
 bool cookedShadersOnly = false;
+bool texturesOnly = false;
 // 렌더 lane 검사의 엔진이 쓰는 프로세스 모듈 로더다(RunGraphicsSelfTest 동안 유효).
 ModuleLoader* selfTestModules = nullptr;
 
@@ -483,6 +485,16 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.gpuValidationEnabled ? ", GPU-based validation" : "",
            info.software ? ", software" : "");
 
+    if (texturesOnly) {
+        // 쿠킹 텍스처 장면 대조만 돈다(RenderBase 18.5절 7항).
+        failures += RunTextureSceneChecks(name, device, result.triangle.GetAllocator());
+        failures +=
+            RunCookedTextureChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+        return;
+    }
+
     if (cookedShadersOnly) {
         // 쿠킹 엔진 라이브러리 화면 검사만 돈다(공급자 없이 — Release 실행 파일에서도 된다).
         failures +=
@@ -806,6 +818,11 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     // 엔진 창 렌더 경로(RenderBase 18.5절 SM1–SM5): 엔진 장면 → tone map → 스왑체인, CPU 기준 대조.
     failures += RunScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+    // 쿠킹 텍스처 업로드 경로의 장면 대조(RenderBase 18.5절 7항 SM7 — 메모리 플랫폼 데이터).
+    failures += RunTextureSceneChecks(name, device, result.triangle.GetAllocator());
+    // 시험 콘텐츠 쿠킹의 텍스처(쿠킹이 없으면 NOT RUN).
+    failures +=
+        RunCookedTextureChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     // 같은 화면 경로를 쿠킹 엔진 셰이더 라이브러리로(SSD48 — 엔진 쿠킹 결과가 없으면 NOT RUN).
     failures +=
         RunCookedScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
@@ -929,6 +946,7 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     selfTestModules = &modules;
     engineShadersOnly = scope == GraphicsSelfTestScope::EngineShaders;
     cookedShadersOnly = scope == GraphicsSelfTestScope::CookedShaders;
+    texturesOnly = scope == GraphicsSelfTestScope::Textures;
     ResetEngineShaderRecords();
     // 검증 계층이 프로세스를 끝내도 그때까지의 진행이 남도록 출력 버퍼를 쓰지 않는다.
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -958,14 +976,14 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software, &report), warp,
                &report);
-    if (!engineShadersOnly) {
+    if (!engineShadersOnly && !texturesOnly) {
         RunD3D12CreateReportProbe(allocator);
     }
 
     RunBackend("D3D11", graphics::CreateD3D11Device(allocator, desc, &report), d3d11, &report);
     RunBackend("D3D11 WARP", graphics::CreateD3D11Device(allocator, software, &report), d3d11Warp,
                &report);
-    if (!engineShadersOnly) {
+    if (!engineShadersOnly && !texturesOnly) {
         RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
         RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
     }
@@ -989,11 +1007,13 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     RunVulkan(allocator, desc, vulkan, vulkanSoftware);
     // 엔진 셰이더 probe의 장치 사이 대조(Docs/Design/EngineShaders 8.5절)와 coverage 사유.
     failures += ReportEngineShaderCrossDevice();
-    if (engineShadersOnly || cookedShadersOnly) {
+    if (engineShadersOnly || cookedShadersOnly || texturesOnly) {
         const bool ranAny = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran ||
                             glesProfile.ran || glesDesktop.ran || vulkan.ran || vulkanSoftware.ran;
         printf("%s self-test: %s (%u failure%s)\n",
-               engineShadersOnly ? "Engine shader" : "Cooked shader",
+               engineShadersOnly   ? "Engine shader"
+               : cookedShadersOnly ? "Cooked shader"
+                                   : "Texture",
                failures == 0 && ranAny ? "PASS" : (ranAny ? "FAIL" : "NOT RUN"), failures,
                failures == 1 ? "" : "s");
         return failures == 0 ? 0 : 1;

@@ -48,7 +48,7 @@
 
 **World 접점 규칙.** `SetPhysicsScene`은 World가 `Initialized`(Subsystem 초기화가 이 상태에서 돈다 — `Initialize`가 끝난 뒤 `BeginPlay` 전도 이 상태다) 또는 `TearingDown`(정리)일 때만 받고, 다른 상태는 `InvalidArgument`다. 같은 World에 장면이 이미 있는데 null 아닌 다른 장면을 넣으면 `AlreadyExists`다. body가 있는 동안 바꾸지 못하게 하는 검사는 body가 생기는 PH2에서 더한다.
 
-**step.** `JoltPhysicsScene::Step(seconds)`는 `PhysicsSystem::Update(seconds, collisionSteps 1, 임시 할당기, job 시스템)`이다. 중력은 `defaultGravityZ`(cm/s²)를 m/s²로 바꿔 Jolt +Y 축에 둔다(축 A — Rocks Z → Jolt Y, 어댑터 경계 2절. 변환 함수 묶음은 PH2). `PhysicsWorldSubsystem`은 Game·Tryout World에서만 PhysicsSimulate 자리에 step을 건다(3.1절, PMD16). 자리가 엔진 런타임에 들어오기 전에는 시험이 `Step`을 직접 부른다.
+**step.** `JoltPhysicsScene::Step(seconds)`는 `PhysicsSystem::Update(seconds, collisionSteps 1, 임시 할당기, job 시스템)`이다. 중력은 `defaultGravityZ`(cm/s²)를 m/s²로 바꿔 Jolt +Y 축에 둔다(축 A — Rocks Z → Jolt Y, 어댑터 경계 2절. 변환 함수 묶음은 PH2). `PhysicsWorldSubsystem`은 Game·Tryout World에서만 엔진 자리 `EngineStage::PhysicsSimulate`(엔진 런타임 15.4절 — rocks-f5 a438860b)에 `SimulateStep(문맥 delta = 고정 스텝 길이)`을 걸고 정리 때 뗀다(3.1절, PMD16 — World는 종류로 거르지 않는다). 자리가 이미 쓰였으면 초기화가 `AlreadyExists`로 실패한다. 호스트 Sandbox가 GameInstance의 World Subsystem 목록에 넣고 Physics 설정 타입을 설정 문맥에 등록한다(1.2절 — Sandbox 화면 자체 시험의 Game World도 장면을 만든다, 설정 문맥이 없으면 기본 설정). 확인은 Windows(EngineTests·Sandbox)뿐이다 — Android·Mac Sandbox 링크에 Physics·Jolt가 처음 들어가므로 그 빌드는 CI·다음 Android 확인 때 본다(미확인).
 
 ## 7.2 시험 원칙
 
@@ -64,7 +64,7 @@
 
 | 문서 | 요청 | 맡는 곳 |
 |---|---|---|
-| 엔진 런타임 8·15절 | Physics 단계 **고정 스텝마다** 사용자 Fixed hook 뒤에 엔진 자리 `PhysicsSimulate`를 하나 더한다(지금은 단계 끝 자리 둘뿐). 등록은 `SetEngineStage`와 같은 방식 | runtime 세션(rocks-f5) — PH1 전 |
+| 엔진 런타임 8·15절 | Physics 단계 **고정 스텝마다** 사용자 Fixed hook 뒤에 엔진 자리 `PhysicsSimulate`를 하나 더한다. 등록은 `SetEngineStage`와 같은 방식 | runtime 세션(rocks-f5) — 반영됨(a438860b, 2026-11-25) |
 | 엔진 런타임 23절 | 즉시 다시 만들기 API `RecreateSystemStateNow(kind)`(2.3.1절 — ERD25의 PreRender 일괄과 별도, 실패 정책은 같음) | runtime 세션 — PH2 전 |
 | 엔진 런타임 23·24절 | `PrimitiveComponent`의 물리 시스템 상태 판정·생성(2.3절), `OnTransformUpdated` hook에서 body 이동(3.3절), 이동 API의 `TeleportMode` 인자, simulate 켤 때 떼기(2.3.1절), `MoveComponent`·`UpdateOverlaps`(5장), `World::GetPhysicsScene`·`SetPhysicsScene`(2.2절) | World 코드 — PH2·PH4 때(누가 구현할지는 그때 정한다) |
 | 컴포넌트 도입 CR16 | 상태를 "설계 있음(PhysicsModule)"으로, CM3에 `CylinderComponent` 데이터 | 반영함(2026-11-25, PH0) |

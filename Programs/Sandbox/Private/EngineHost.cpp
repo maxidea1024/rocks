@@ -1,5 +1,6 @@
 #include "EngineHost.h"
 
+#include "CookedTextureLibrary.h"
 #include "GraphicsDeviceTraits.h"
 #include "SandboxGame.h"
 #include "SandboxShaders.h"
@@ -24,6 +25,7 @@
 #include <Input/InputSettings.h>
 #include <Input/InputState.h>
 #include <Launch/Application.h>
+#include <Physics/PhysicsSettings.h>
 #include <Platform/ApkFile.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
@@ -112,6 +114,12 @@ public:
         screen_ = screen;
     }
 
+    // 쿠킹 텍스처 목록을 붙인다(18.5절 7항). 프레임 끝에 준비된 텍스처를 화면에 올리고, 엔진 종료
+    // 시작에 티켓·lease를 놓는다(EngineAssets 종료 계약 — AssetSystem 11.8절 6).
+    void AttachTextures(CookedTextureLibrary* textures) noexcept {
+        textures_ = textures;
+    }
+
     // 렌더 lane slot 대기 중 창 메시지 펌프다(5.3절 — 펌프한 이벤트는 다음 PumpEvents가 모은다).
     render::RenderLanePump LanePump() noexcept {
         return {&PumpWindow, this};
@@ -188,6 +196,10 @@ public:
     // 않는다). 헤드리스는 기다리지 않는다.
     void EndFrame(Engine&) noexcept override {
         if (screen_ != nullptr) {
+            if (textures_ != nullptr) {
+                textures_->Update(*screen_);
+            }
+
             screen_->HandleInspectorInput(input_);
             screen_->SubmitFrame(options_.client);
         }
@@ -209,6 +221,10 @@ public:
 
     // 엔진 종료 hook을 렌더 lane 종료 단계에 잇는다(Docs/Design/RenderBase 5.5절).
     void BeginShutdown(Engine&) noexcept override {
+        if (textures_ != nullptr) {
+            textures_->Release();
+        }
+
         if (screen_ != nullptr) {
             screen_->BlockFrames();
         }
@@ -241,6 +257,7 @@ private:
     input::InputQueue& queue_;
     Options options_;
     screen::ScreenHost* screen_ = nullptr;
+    CookedTextureLibrary* textures_ = nullptr;
     input::InputState input_;
     uint64 pumped_ = 0;
     // 지난 프레임까지 본 큐 손실 수다.
@@ -323,10 +340,11 @@ void LogApkProbe() noexcept {
               size, StringView(text, length));
 }
 
-// 엔진 전용 쿠킹 결과(`asset-cook --engine --profile=<실행 프로파일>`)의 매니페스트가 있는가다
-// (ShaderSystem 16.1절 SSD48). 쿠킹 루트는 EngineAssets와 같은 규칙(asset.cooked_root 비었을 때의
-// 엔진 전용 기본값)이다. 한계: asset.cooked_root를 설정으로 바꾼 실행은 보지 않는다.
-bool HasEngineCook(Allocator& allocator, StringView engineDirectory) noexcept {
+// 쿠킹 결과의 매니페스트가 있는가다(ShaderSystem 16.1절 SSD48, RenderBase 18.5절 7항). 쿠킹 루트는
+// EngineAssets와 같은 규칙이다: asset.cooked_root(설정·`--set=` — 시험 콘텐츠 쿠킹 등)가 있으면
+// 그것, 없으면 엔진 전용 기본값(`asset-cook --engine --profile=<실행 프로파일>`)이다.
+bool HasEngineCook(Allocator& allocator, StringView engineDirectory,
+                   const config::ConfigContext& settings) noexcept {
     char executable[4096];
     usize executableBytes = 0;
     if (engineDirectory.IsEmpty() ||
@@ -334,8 +352,13 @@ bool HasEngineCook(Allocator& allocator, StringView engineDirectory) noexcept {
         return false;
     }
 
+    StringView configured;
+    if (auto setting = settings.FindConsoleSetting("asset.cooked_root")) {
+        configured = settings.ConsoleValue(setting.Value()).string.View();
+    }
+
     String root(allocator);
-    if (!ResolveCookedRoot(StringView(), engineDirectory, ResolveRuntimeProfile(StringView()),
+    if (!ResolveCookedRoot(configured, engineDirectory, ResolveRuntimeProfile(StringView()),
                            ExecutableDirectoryOf(StringView(executable, executableBytes)), root) ||
         !root.TryAppend("/") || !root.TryAppend(CookedManifestFileName)) {
         return false;
@@ -400,7 +423,7 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     // 있을 때만 EngineAssets Subsystem을 넣는다(없으면 그 초기화가 NotFound로 엔진 시작을 막는다 —
     // 개발 트리는 쿠킹 없이 공급자로 돈다).
     EngineAssetsSubsystem::SetEngineOnlyDirectory(engineDirectory);
-    const bool engineCook = HasEngineCook(allocator, engineDirectory);
+    const bool engineCook = HasEngineCook(allocator, engineDirectory, settings);
     const EngineSubsystemType engineAssets[] = {EngineAssetsSubsystemType()};
     CookedShaderAttachment cooked(shaders::Host());
     UniquePtr<platform::Window> window;
@@ -409,6 +432,9 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     // 파괴하고(종료 hook이 쓴다), 창보다 뒤에 선언해 창보다 먼저 파괴한다(스왑체인 → 창).
     UniquePtr<graphics::Device> device;
     UniquePtr<screen::ScreenHost> screenHost;
+    // 쿠킹 텍스처 목록이다(18.5절 7항). 준비 callback이 가리키므로 엔진(AssetManager Shutdown)보다
+    // 먼저 선언해 뒤에 파괴한다.
+    UniquePtr<CookedTextureLibrary> textures;
     if (options.window) {
         auto created = CreateSandboxWindow(allocator);
         if (!created) {
@@ -491,6 +517,17 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
                 host.Value()->Start(*window, render::RenderLaneMode::Thread, bridge.LanePump())) {
                 screenHost = Move(host.Value());
                 bridge.AttachScreen(screenHost.Get());
+            }
+
+            // 쿠킹 텍스처를 요청한다(패키지 공개 뒤 프레임 끝에 올린다 — 6.5절 "업로드").
+            if (EngineAssetsSubsystem* assets = engine.GetSubsystem<EngineAssetsSubsystem>();
+                assets != nullptr && screenHost) {
+                auto library = UniquePtr<CookedTextureLibrary>::TryMake(
+                    allocator, allocator, assets->Manager(), assets->Manifest(), engine.Types());
+                if (library && library.Value()->RequestAll()) {
+                    textures = Move(library.Value());
+                    bridge.AttachTextures(textures.Get());
+                }
             }
         }
     }
@@ -771,6 +808,15 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
            compute.number == 1.0;
 }
 
+// 설정 struct를 RegisterSettings로 올리는 엔진 모듈(Collision·Physics)의 리플렉션 타입을 등록한다.
+Result<void> RegisterSandboxSettingsTypes(ModuleRegistration& registration) noexcept {
+    if (auto collision = RegisterCollisionTypes(registration); !collision) {
+        return collision;
+    }
+
+    return RegisterPhysicsTypes(registration);
+}
+
 } // namespace
 
 // 엔진 호스트 본문이다(Docs/Design/ModuleLoader 3.11절). Launch가 소유한 프로세스 모듈
@@ -787,9 +833,10 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
     boot.modules = &modules;
     // 설정 struct를 RegisterSettings로 올리는 엔진 모듈의 리플렉션 타입을 설정 문맥의 타입 등록에
     // 넣는다(HostSettings는 Config·TraceControl 타입만 스스로 넣는다). Collision 모듈의
-    // CollisionSettings(Engine branch Collision 섹션, Docs/Design/CollisionData.ko.md 3절)다 —
-    // 없으면 모듈 설정 등록이 NotFound로 실패한다.
-    boot.registerModuleTypes = &RegisterCollisionTypes;
+    // CollisionSettings(Engine branch Collision 섹션, Docs/Design/CollisionData.ko.md 3절)와
+    // Physics 모듈의 PhysicsSettings(Physics 섹션, Docs/Design/PhysicsModule 6.8절)다 — 없으면 모듈
+    // 설정 등록이 NotFound로 실패한다.
+    boot.registerModuleTypes = &RegisterSandboxSettingsTypes;
     if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
         boot.engineDir = StringView(engineDir, found.Value());
     } else {
