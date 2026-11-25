@@ -29,6 +29,7 @@ Result<void> Render(Allocator& allocator, graphics::Device& device,
     }
 
     WidgetSurfaceHost surfaces(allocator, device, ActiveShaders(), textures);
+    surfaces.SetVectorImages(&icons, imagePipeline);
     auto prepared = surfaces.Prepare(area, frame, width, height, pipeline);
     if (!prepared) {
         return Result<void>::Failure(prepared.Error());

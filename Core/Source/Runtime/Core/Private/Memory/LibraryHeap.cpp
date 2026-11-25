@@ -12,10 +12,15 @@ namespace rocks {
 namespace {
 
 // 블록 정렬(malloc과 같은 보장)이다.
-constexpr usize LibraryBlockAlignment = alignof(max_align_t);
+// 플랫폼 malloc은 64비트에서 16을 보장하지만 alignof(max_align_t)는 Windows·Apple arm64에서 8이라
+// 둘 중 큰 값을 쓴다.
+constexpr usize MallocAlignment = 16;
+constexpr usize LibraryBlockAlignment = alignof(max_align_t) > MallocAlignment
+                                            ? alignof(max_align_t)
+                                            : MallocAlignment;
 
 // 블록 앞에 크기를 적는 머리다. 정렬을 지키려고 정렬 크기와 같다.
-constexpr usize LibraryBlockHeader = alignof(max_align_t);
+constexpr usize LibraryBlockHeader = LibraryBlockAlignment;
 
 static_assert(LibraryBlockHeader >= sizeof(usize), "Library block header must hold the size");
 

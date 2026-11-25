@@ -25,9 +25,16 @@ const ThemeColors& Application::Theme() const noexcept {
 }
 
 void Application::SetVectorImageResolver(VectorImageResolver* resolver) noexcept {
+    if (vectorImages_ == resolver) {
+        return;
+    }
+
     vectorImages_ = resolver;
     vectorRevision_ = resolver ? resolver->Revision() : 0;
     cache_.SetVectorImageResolver(resolver);
+    // 지역 캐시(CachePanel)는 테마 revision이 바뀌어야 다시 기록한다.
+    ++themeRevision_;
+    cache_.SetTheme(&theme_, themeRevision_);
 }
 
 void Application::SyncVectorRevision() noexcept {

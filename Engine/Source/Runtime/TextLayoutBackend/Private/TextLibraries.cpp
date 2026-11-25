@@ -5,10 +5,7 @@
 
 #include <Core/Memory/LibraryHeap.h>
 #include <Platform/Sync.h>
-#include <Base/NumericLimits.h>
 #include <Base/PlacementNew.h>
-#include <stddef.h>
-#include <string.h>
 #include <unicode/uclean.h>
 #include <unicode/udata.h>
 #include <unicode/umachine.h>

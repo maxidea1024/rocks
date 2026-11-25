@@ -21,7 +21,10 @@ class FileSystem;
 //   atlas.Register(...) 또는 RegisterDirectory(...)   // 시작 때
 //   application.SetVectorImageResolver(&atlas);
 //   ... app.UpdatePaintCache(...)  — 벡터 brush가 Resolve를 부른다
-//   atlas.Sync(imagePipeline);                         // Draw 전
+//   atlas.Sync(imagePipeline);                         // Draw 전(그 Draw의 기록 뒤 — 보관
+//   표면·끌기
+//                                                      // 미리보기처럼 따로 그리는 경로도 각자
+//                                                      부른다)
 //   DrawBatchRenderer::Draw(...);
 //   atlas.AdvanceFrame();                              // 한도를 넘었으면 비우고 Revision을 올린다
 //
@@ -34,9 +37,13 @@ namespace rocks::ui {
 // atlas 페이지 한 변(화소)이다(UE FSlateVectorGraphicsCache AtlasSize).
 inline constexpr uint32 VectorAtlasPageSize = 1024;
 
-// 이 수보다 페이지가 많아지면 AdvanceFrame이 atlas를 비운다(UE Slate.MaxSVGAtlasPagesBeforeFlush —
-// 17.2절).
+// 이 수보다 atlas 페이지가 많아지면 AdvanceFrame이 atlas를 비운다(UE
+// Slate.MaxSVGAtlasPagesBeforeFlush — 17.2절).
 inline constexpr usize MaxVectorAtlasPages = 4;
+
+// 페이지에 들지 않는 큰 그림의 단독 텍스처 수 한도다(UE Slate.MaxSVGNonAtlasTexturesBeforeFlush —
+// atlas 페이지와 따로 센다).
+inline constexpr usize MaxVectorStandaloneImages = 8;
 
 // SVG 파일 하나의 byte 상한이다.
 inline constexpr uint64 MaxVectorImageFileBytes = 1u << 20;
@@ -73,8 +80,9 @@ public:
     // 생성·업로드 실패는 그 오류다.
     Result<void> Sync(graphics::PipelineHandle imagePipeline) noexcept;
 
-    // 프레임을 마친다. 페이지가 MaxVectorAtlasPages를 넘었으면 모두 놓고 Revision을 올린다(다음
-    // 프레임의 그리기 목록이 다시 만들어진다). 비웠으면 true다.
+    // 프레임을 마친다(그 프레임의 모든 Draw 뒤). atlas 페이지가 MaxVectorAtlasPages를, 단독
+    // 텍스처가 MaxVectorStandaloneImages를 넘었으면 모두 놓고 Revision을 올린다(다음 프레임의
+    // 그리기 목록이 다시 만들어진다). 비웠으면 true다.
     bool AdvanceFrame() noexcept;
 
     // 시험·진단용이다: 지금 페이지 수, 지금까지 래스터화한 횟수.

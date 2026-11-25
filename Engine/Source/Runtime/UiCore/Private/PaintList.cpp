@@ -171,7 +171,8 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
         Box2<float> uv = brush.uv;
         if (!brush.vectorImage.IsNull()) {
             // 벡터 brush: 그릴 화소 크기로 래스터화한 자리로 바꾼다(17.2절). 화소 크기는 로컬 크기
-            // x 누적 변환의 두 열 길이를 올림한 것이다.
+            // x 누적 변환의 두 열 길이를 반올림한 것이다(UE FVectorCacheKey는 IntPoint로 버린다 —
+            // float 오차로 1 px 큰 래스터가 생기지 않게 반올림한다).
             if (vectorImages_ == nullptr) {
                 return Result<void>::Success();
             }
@@ -179,21 +180,27 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
             const AffineTransform2D& render = geometry.render;
             const float scaleX = math::Sqrt(render.m00 * render.m00 + render.m10 * render.m10);
             const float scaleY = math::Sqrt(render.m01 * render.m01 + render.m11 * render.m11);
-            const float limit = static_cast<float>(MaxVectorImagePixels);
-            const float width = math::Clamp(math::Ceil(geometry.size.x * scaleX), 1.0f, limit);
-            const float height = math::Clamp(math::Ceil(geometry.size.y * scaleY), 1.0f, limit);
-            if (!math::IsFinite(width) || !math::IsFinite(height)) {
+            const float drawnWidth = geometry.size.x * scaleX;
+            const float drawnHeight = geometry.size.y * scaleY;
+            if (!math::IsFinite(drawnWidth) || !math::IsFinite(drawnHeight)) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
 
+            const float limit = static_cast<float>(MaxVectorImagePixels);
+            const float width = math::Clamp(math::Round(drawnWidth), 1.0f, limit);
+            const float height = math::Clamp(math::Round(drawnHeight), 1.0f, limit);
             auto resolved = vectorImages_->Resolve(brush.vectorImage, static_cast<uint32>(width),
                                                    static_cast<uint32>(height));
             if (!resolved) {
                 return Result<void>::Failure(resolved.Error());
             }
 
+            // brush uv는 래스터 자리 안의 부분 범위다(래스터 brush와 같은 뜻).
+            const Box2<float>& slot = resolved.Value().uv;
+            const Vec2 span = slot.max - slot.min;
             box.resource = resolved.Value().resource;
-            uv = resolved.Value().uv;
+            uv = {{slot.min.x + span.x * brush.uv.min.x, slot.min.y + span.y * brush.uv.min.y},
+                  {slot.min.x + span.x * brush.uv.max.x, slot.min.y + span.y * brush.uv.max.y}};
         }
 
         box.uvStart = {brush.mirrorX ? uv.max.x : uv.min.x, brush.mirrorY ? uv.max.y : uv.min.y};

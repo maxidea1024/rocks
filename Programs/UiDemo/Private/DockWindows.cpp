@@ -71,6 +71,7 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
 
     auto& host = *surface.Value();
     host.app.SetVectorImageResolver(&icons_);
+    host.surfaces.SetVectorImages(&icons_, imagePipeline_);
     auto initialized = host.app.SetCommands({}, commands_);
     if (initialized) {
         initialized = host.queue.TryInitialize(1024);
@@ -223,6 +224,7 @@ Result<void> DockWindows::UpdateDragImage(Surface& host) noexcept {
     }
 
     PaintList list(allocator_);
+    list.SetVectorImageResolver(&icons_);
     auto result = host.area->PaintFloatingPreview(list);
     if (!result) {
         return result;
@@ -236,6 +238,12 @@ Result<void> DockWindows::UpdateDragImage(Surface& host) noexcept {
 
     DrawBatchBuffers buffers(device_, ActiveShaders(), batch);
     result = buffers.Upload();
+    if (!result) {
+        return result;
+    }
+
+    // 미리보기가 받은 SVG 자리의 페이지를 읽기 전에 올린다(17.2절 프레임 순서).
+    result = icons_.Sync(imagePipeline_);
     if (!result) {
         return result;
     }

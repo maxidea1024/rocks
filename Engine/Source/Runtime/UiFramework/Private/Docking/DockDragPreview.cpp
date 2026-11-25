@@ -72,6 +72,7 @@ Result<void> DockManager::PaintFloatingPreview(PaintList& list) const noexcept {
 
     PaintList scratch(allocator_);
     scratch.SetTheme(&list.Theme(), list.ThemeRevision());
+    scratch.SetVectorImageResolver(list.GetVectorImageResolver());
     auto result = PaintPreviewPart(
         *tab.content, Vec2{0, header.Value().Size().y} - body.Value().min, scratch, list);
     if (result) {

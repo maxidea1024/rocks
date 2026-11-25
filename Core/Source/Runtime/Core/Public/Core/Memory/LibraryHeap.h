@@ -7,9 +7,9 @@
 // 프로세스 수명 SystemAllocator를 지난다 — 라이브러리의 지연 정적 객체가 프로세스 종료 때 풀리므로
 // 할당기는 소멸하지 않는다.
 //
-// realloc은 이전 크기를 주지 않으므로 블록 앞에 크기를 적는다(머리 alignof(max_align_t) byte).
-// 돌려주는 주소는 malloc과 같은 정렬(alignof(max_align_t))이다. C 함수와 같이 실패하면 nullptr이고,
-// 0 byte 요청도 서로 다른 유효 주소다(머리만 있는 블록).
+// realloc은 이전 크기를 주지 않으므로 블록 앞에 크기를 적는다(머리 16 byte 이상).
+// 돌려주는 주소는 플랫폼 malloc과 같은 정렬(max(alignof(max_align_t), 16))이다. C 함수와 같이
+// 실패하면 nullptr이고, 0 byte 요청도 서로 다른 유효 주소다(머리만 있는 블록).
 //
 // 사용 예(라이브러리를 링크하는 모듈의 hook 정의):
 //   extern "C" void* RocksFooMalloc(size_t size) { return rocks::LibraryHeapAllocate(size); }

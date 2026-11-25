@@ -4,6 +4,7 @@
 #include <Core/Containers/HashMap.h>
 #include <Core/FileError.h>
 #include <Core/FileRead.h>
+#include <Core/Algorithms.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
@@ -79,11 +80,24 @@ struct VectorImageAtlas::State {
         UniquePtr<RocksNanoSvgImage, ImageDeleter> parsed;
     };
 
+    // atlas 페이지(guillotine 칸) 또는 큰 그림 하나의 단독 텍스처다(UE 비atlas 텍스처 — 여백 없이
+    // 정확한 크기, uv 0..1).
     struct Page {
-        UniquePtr<text::FontAtlasPage> pixels;
+        UniquePtr<text::FontAtlasPage> atlas;
+        Array<uint8> single;
+        uint32 width = 0;
+        uint32 height = 0;
         SlotHandle slot{};
         graphics::TextureHandle texture{};
         bool dirty = true;
+
+        bool IsStandalone() const noexcept {
+            return !atlas;
+        }
+
+        Span<const uint8> Pixels() const noexcept {
+            return atlas ? atlas->Pixels() : single.View();
+        }
     };
 
     explicit State(Allocator& memory) noexcept
@@ -173,14 +187,14 @@ Result<VectorImageKey> VectorImageAtlas::Register(StringView path, Span<const ui
 namespace {
 
 struct DirectoryWalk {
-    VectorImageAtlas* atlas = nullptr;
     platform::FileSystem* files = nullptr;
     Allocator* allocator = nullptr;
     // 지금 보는 디렉터리의 전체 경로와 키 경로 시작 위치다.
     char path[PathBufferBytes] = {};
     usize pathBytes = 0;
     usize rootBytes = 0;
-    usize registered = 0;
+    // 찾은 SVG 파일의 전체 경로다(열거 순서는 플랫폼마다 달라 등록 전에 정렬한다).
+    Array<String>* found = nullptr;
     Result<void> status = Result<void>::Success();
 };
 
@@ -211,25 +225,10 @@ bool VisitEntry(const platform::DirectoryEntry& entry, void* context) noexcept {
     if (directory) {
         walk.status = Walk(walk);
     } else {
-        Array<uint8> bytes(*walk.allocator);
-        bool existed = false;
-        const StringView full(walk.path, walk.pathBytes);
-        walk.status = ReadWholeFile(*walk.files, full, MaxVectorImageFileBytes, bytes, existed);
-        if (walk.status && !existed) {
-            walk.status = Result<void>::Failure(ErrorCode::NotFound);
-        }
-
+        String full(*walk.allocator);
+        walk.status = full.TryAppend(StringView(walk.path, walk.pathBytes));
         if (walk.status) {
-            // 키 경로는 root 뒤 '/'부터 ".svg" 앞까지다.
-            const usize keyStart = walk.rootBytes + 1;
-            const StringView key(walk.path + keyStart,
-                                 walk.pathBytes - keyStart - SvgExtension.ByteCount());
-            auto added = walk.atlas->Register(key, bytes.View());
-            if (added) {
-                ++walk.registered;
-            } else {
-                walk.status = Result<void>::Failure(added.Error());
-            }
+            walk.status = walk.found->TryPushBack(Move(full));
         }
     }
 
@@ -269,10 +268,11 @@ Result<usize> VectorImageAtlas::RegisterDirectory(platform::FileSystem& files,
         return Result<usize>::Failure(ErrorCode::NotFound);
     }
 
+    Array<String> found(state_->allocator);
     DirectoryWalk walk;
-    walk.atlas = this;
     walk.files = &files;
     walk.allocator = &state_->allocator;
+    walk.found = &found;
     for (char byte : root) {
         walk.path[walk.pathBytes++] = byte;
     }
@@ -283,7 +283,36 @@ Result<usize> VectorImageAtlas::RegisterDirectory(platform::FileSystem& files,
         return Result<usize>::Failure(walked.Error());
     }
 
-    return Result<usize>::Success(walk.registered);
+    // 경로 byte 순으로 등록한다(갤러리 목록·캡처가 플랫폼과 무관하게 같은 순서).
+    algo::Sort(found.View(), [](const String& left, const String& right) noexcept {
+        return StringView::CompareBytes(left.View(), right.View()) < 0;
+    });
+    usize registered = 0;
+    for (const String& path : found) {
+        Array<uint8> bytes(state_->allocator);
+        bool existed = false;
+        auto read = ReadWholeFile(files, path.View(), MaxVectorImageFileBytes, bytes, existed);
+        if (!read) {
+            return Result<usize>::Failure(read.Error());
+        }
+
+        if (!existed) {
+            return Result<usize>::Failure(ErrorCode::NotFound);
+        }
+
+        // 키 경로는 root 뒤 '/'부터 ".svg" 앞까지다.
+        const usize keyStart = root.ByteCount() + 1;
+        const StringView key = path.View().SliceBytes(keyStart, path.View().ByteCount() - keyStart -
+                                                                    SvgExtension.ByteCount());
+        auto added = Register(key, bytes.View());
+        if (!added) {
+            return Result<usize>::Failure(added.Error());
+        }
+
+        ++registered;
+    }
+
+    return Result<usize>::Success(registered);
 }
 
 usize VectorImageAtlas::ImageCount() const noexcept {
@@ -368,66 +397,93 @@ Result<ResolvedVectorImage> VectorImageAtlas::Resolve(VectorImageKey key, uint32
 
     ++state.rasterCount;
 
-    // 자리 찾기: 기존 페이지 → 새 페이지(한 변이 페이지보다 크면 그 크기의 단독 페이지).
-    text::AtlasRect slot;
-    usize pageIndex = MaxSize;
-    for (usize i = 0; i < state.pages.Size(); ++i) {
-        auto added = state.pages[i].pixels->Add(width, height, pixels.View(), slot);
+    // 자리는 지금 받고 텍스처는 Sync가 채운다(17.2절 프레임 순서).
+    const auto addPage = [&](State::Page&& entry) noexcept -> Result<usize> {
+        auto registered = textures_.TryAdd({});
+        if (!registered) {
+            return Result<usize>::Failure(registered.Error());
+        }
+
+        entry.slot = registered.Value();
+        if (auto pushed = state.pages.TryPushBack(Move(entry)); !pushed) {
+            (void)textures_.TryRemove(registered.Value());
+            return Result<usize>::Failure(pushed.Error());
+        }
+
+        return Result<usize>::Success(state.pages.Size() - 1);
+    };
+    ResolvedVectorImage resolved;
+    const uint32 padded = 2 * text::FontAtlasPadding;
+    if (width + padded > VectorAtlasPageSize || height + padded > VectorAtlasPageSize) {
+        // 페이지에 들지 않는 그림은 정확한 크기의 단독 텍스처다(UE CreateNonAtlasedTexture).
+        State::Page entry{{}, Move(pixels), width, height, {}, {}, true};
+        auto added = addPage(Move(entry));
         if (!added) {
             return Result<ResolvedVectorImage>::Failure(added.Error());
         }
 
-        if (added.Value()) {
-            pageIndex = i;
-            break;
+        resolved.resource = state.pages[added.Value()].slot;
+        resolved.uv = {{0, 0}, {1, 1}};
+    } else {
+        text::AtlasRect slot;
+        usize pageIndex = MaxSize;
+        for (usize i = 0; i < state.pages.Size(); ++i) {
+            if (state.pages[i].IsStandalone()) {
+                continue;
+            }
+
+            auto placed = state.pages[i].atlas->Add(width, height, pixels.View(), slot);
+            if (!placed) {
+                return Result<ResolvedVectorImage>::Failure(placed.Error());
+            }
+
+            if (placed.Value()) {
+                pageIndex = i;
+                break;
+            }
         }
+
+        if (pageIndex == MaxSize) {
+            // 화소는 straight alpha RGBA다. 내용 종류는 byte 수(4)만 쓴다.
+            auto page =
+                text::FontAtlasPage::TryCreate(state.allocator, VectorAtlasPageSize,
+                                               VectorAtlasPageSize, text::FontAtlasContent::Color);
+            if (!page) {
+                return Result<ResolvedVectorImage>::Failure(page.Error());
+            }
+
+            auto placed = page.Value()->Add(width, height, pixels.View(), slot);
+            if (!placed || !placed.Value()) {
+                return Result<ResolvedVectorImage>::Failure(placed ? ErrorCode::Overflow
+                                                                   : placed.Error());
+            }
+
+            State::Page entry{Move(page.Value()),
+                              Array<uint8>(state.allocator),
+                              VectorAtlasPageSize,
+                              VectorAtlasPageSize,
+                              {},
+                              {},
+                              true};
+            auto added = addPage(Move(entry));
+            if (!added) {
+                return Result<ResolvedVectorImage>::Failure(added.Error());
+            }
+
+            pageIndex = added.Value();
+        }
+
+        State::Page& page = state.pages[pageIndex];
+        page.dirty = true;
+        const float pageSize = static_cast<float>(VectorAtlasPageSize);
+        const float left = static_cast<float>(slot.x + text::FontAtlasPadding);
+        const float top = static_cast<float>(slot.y + text::FontAtlasPadding);
+        resolved.resource = page.slot;
+        resolved.uv = {{left / pageSize, top / pageSize},
+                       {(left + static_cast<float>(width)) / pageSize,
+                        (top + static_cast<float>(height)) / pageSize}};
     }
 
-    if (pageIndex == MaxSize) {
-        const uint32 padded = 2 * text::FontAtlasPadding;
-        const uint32 pageWidth =
-            width + padded > VectorAtlasPageSize ? width + padded : VectorAtlasPageSize;
-        const uint32 pageHeight =
-            height + padded > VectorAtlasPageSize ? height + padded : VectorAtlasPageSize;
-        // 화소는 straight alpha RGBA다. 내용 종류는 byte 수(4)만 쓴다.
-        auto page = text::FontAtlasPage::TryCreate(state.allocator, pageWidth, pageHeight,
-                                                   text::FontAtlasContent::Color);
-        if (!page) {
-            return Result<ResolvedVectorImage>::Failure(page.Error());
-        }
-
-        auto added = page.Value()->Add(width, height, pixels.View(), slot);
-        if (!added || !added.Value()) {
-            return Result<ResolvedVectorImage>::Failure(added ? ErrorCode::Overflow
-                                                              : added.Error());
-        }
-
-        // 자리는 지금 받고 텍스처는 Sync가 채운다.
-        auto registered = textures_.TryAdd({});
-        if (!registered) {
-            return Result<ResolvedVectorImage>::Failure(registered.Error());
-        }
-
-        State::Page entry{Move(page.Value()), registered.Value(), {}, true};
-        if (auto pushed = state.pages.TryPushBack(Move(entry)); !pushed) {
-            (void)textures_.TryRemove(registered.Value());
-            return Result<ResolvedVectorImage>::Failure(pushed.Error());
-        }
-
-        pageIndex = state.pages.Size() - 1;
-    }
-
-    State::Page& page = state.pages[pageIndex];
-    page.dirty = true;
-    const float pageWidth = static_cast<float>(page.pixels->Width());
-    const float pageHeight = static_cast<float>(page.pixels->Height());
-    const float left = static_cast<float>(slot.x + text::FontAtlasPadding);
-    const float top = static_cast<float>(slot.y + text::FontAtlasPadding);
-    ResolvedVectorImage resolved;
-    resolved.resource = page.slot;
-    resolved.uv = {{left / pageWidth, top / pageHeight},
-                   {(left + static_cast<float>(width)) / pageWidth,
-                    (top + static_cast<float>(height)) / pageHeight}};
     if (auto inserted = state.rasters.Insert(rasterKey, resolved); !inserted) {
         return Result<ResolvedVectorImage>::Failure(inserted.Error());
     }
@@ -453,11 +509,13 @@ Result<void> VectorImageAtlas::Sync(graphics::PipelineHandle imagePipeline) noex
             continue;
         }
 
-        text::AtlasRect region;
-        (void)page.pixels->TakeDirtyRegion(region);
+        if (page.atlas) {
+            text::AtlasRect region;
+            (void)page.atlas->TakeDirtyRegion(region);
+        }
+
         if (!page.texture.IsNull()) {
-            if (auto updated = device_.UpdateTexture(page.texture, 0, page.pixels->Pixels());
-                !updated) {
+            if (auto updated = device_.UpdateTexture(page.texture, 0, page.Pixels()); !updated) {
                 return updated;
             }
 
@@ -466,11 +524,11 @@ Result<void> VectorImageAtlas::Sync(graphics::PipelineHandle imagePipeline) noex
         }
 
         graphics::TextureDesc desc;
-        desc.width = page.pixels->Width();
-        desc.height = page.pixels->Height();
+        desc.width = page.width;
+        desc.height = page.height;
         desc.format = graphics::PixelFormat::RGBA8UnormSrgb;
         desc.usage = graphics::TextureUsage::Sampled;
-        auto created = device_.CreateTexture(desc, page.pixels->Pixels());
+        auto created = device_.CreateTexture(desc, page.Pixels());
         if (!created) {
             return Result<void>::Failure(created.Error());
         }
@@ -490,7 +548,17 @@ Result<void> VectorImageAtlas::Sync(graphics::PipelineHandle imagePipeline) noex
 }
 
 bool VectorImageAtlas::AdvanceFrame() noexcept {
-    if (!state_ || state_->pages.Size() <= MaxVectorAtlasPages) {
+    if (!state_) {
+        return false;
+    }
+
+    usize standalone = 0;
+    for (const State::Page& page : state_->pages) {
+        standalone += page.IsStandalone() ? 1 : 0;
+    }
+
+    const usize atlasPages = state_->pages.Size() - standalone;
+    if (atlasPages <= MaxVectorAtlasPages && standalone <= MaxVectorStandaloneImages) {
         return false;
     }
 
@@ -516,9 +584,9 @@ Span<const uint8> VectorImageAtlas::PagePixels(usize index, uint32& width,
         return {};
     }
 
-    const text::FontAtlasPage& page = *state_->pages[index].pixels;
-    width = page.Width();
-    height = page.Height();
+    const State::Page& page = state_->pages[index];
+    width = page.width;
+    height = page.height;
     return page.Pixels();
 }
 

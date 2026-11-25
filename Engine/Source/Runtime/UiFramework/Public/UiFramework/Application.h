@@ -117,6 +117,8 @@ public:
                                     const SharedPtr<Element>& scope) noexcept;
 
 private:
+    // resolver revision이 바뀌었으면 테마 revision을 올려 캐시를 다시 만든다.
+    void SyncVectorRevision() noexcept;
     struct Focus {
         uint32 userId;
         WeakPtr<Element> target;
@@ -161,8 +163,6 @@ private:
     VectorImageResolver* vectorImages_ = nullptr;
     // 마지막으로 본 resolver revision이다.
     uint64 vectorRevision_ = 0;
-    // resolver revision이 바뀌었으면 테마 revision을 올려 캐시를 다시 만든다.
-    void SyncVectorRevision() noexcept;
     CacheRoot cache_;
     HitGrid hitGrid_;
     SharedPtr<Element> root_;

@@ -14,7 +14,9 @@ TEST(Core_LibraryHeapBehavesLikeCAllocation) {
     const usize before = LibraryHeapLiveBlocks();
     auto* bytes = static_cast<uint8*>(LibraryHeapAllocate(10));
     REQUIRE(bytes != nullptr);
-    CHECK(reinterpret_cast<uptr>(bytes) % alignof(max_align_t) == 0);
+    // 플랫폼 malloc과 같은 16 byte 정렬이다.
+    constexpr uptr MallocAlignment = 16;
+    CHECK(reinterpret_cast<uptr>(bytes) % MallocAlignment == 0);
     CHECK(LibraryHeapLiveBlocks() == before + 1);
     for (uint8 i = 0; i < 10; ++i) {
         bytes[i] = i;

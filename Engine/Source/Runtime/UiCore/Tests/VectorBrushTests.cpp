@@ -65,6 +65,25 @@ TEST(UiCore_VectorBrushResolvesAtDrawnPixelSize) {
     list.Clear();
     REQUIRE(list.TryAddBrush(turned, brush, LinearColor(1, 1, 1, 1), 0));
     CHECK(resolver.lastWidth == 20 && resolver.lastHeight == 10);
+    // 회전에 비균등 배율을 섞으면 두 열 길이가 다르다: 로컬 x축은 (m00, m10) = (0, -1)로 1배, 로컬
+    // y축은 (m01, m11) = (3, 0)으로 3배다.
+    const AffineTransform2D mixed{0, 3, -1, 0, 0, 0};
+    const Geometry skewed = Geometry::Root({10, 10}, mixed);
+    list.Clear();
+    REQUIRE(list.TryAddBrush(skewed, brush, LinearColor(1, 1, 1, 1), 0));
+    CHECK(resolver.lastWidth == 10 && resolver.lastHeight == 30);
+    // 배율 오차(1.0000001)로 1 px 큰 래스터가 생기지 않는다(반올림 — UE는 버린다).
+    const AffineTransform2D nearlyOne{1.0000001f, 0, 0, 1.0000001f, 0, 0};
+    list.Clear();
+    REQUIRE(
+        list.TryAddBrush(Geometry::Root({16, 16}, nearlyOne), brush, LinearColor(1, 1, 1, 1), 0));
+    CHECK(resolver.lastWidth == 16 && resolver.lastHeight == 16);
+    // brush uv는 받은 자리 안의 부분 범위다(왼쪽 절반 → 자리 uv 0.25..0.375).
+    Brush half = brush;
+    half.uv = {{0, 0}, {0.5f, 1}};
+    list.Clear();
+    REQUIRE(list.TryAddBrush(Geometry::Root({16, 16}, {}), half, LinearColor(1, 1, 1, 1), 0));
+    CHECK(list.Boxes()[0].uvStart.x == 0.25f && list.Boxes()[0].uvEnd.x == 0.375f);
     // 거울 뒤집기는 받은 uv를 뒤집는다.
     Brush mirrored = brush;
     mirrored.mirrorX = true;
@@ -75,6 +94,10 @@ TEST(UiCore_VectorBrushResolvesAtDrawnPixelSize) {
     const Brush missing = Brush::Vector(VectorImageKey::FromPath("Common/Missing"), {16, 16});
     CHECK(list.TryAddBrush(Geometry::Root({16, 16}, {}), missing, {1, 1, 1, 1}, 0).Error() ==
           ErrorCode::NotFound);
+    // 벡터 9분할은 아직 없어 Image 모드가 아닌 벡터 brush는 유효하지 않다.
+    Brush boxed = brush;
+    boxed.mode = BrushMode::Box;
+    CHECK(!boxed.IsValid());
 }
 
 TEST(UiCore_StyleSvgBrushResolvesThemeTint) {

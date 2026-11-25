@@ -110,18 +110,33 @@ TEST(UiRender_VectorImageAtlasSyncsAndFlushes) {
     REQUIRE(atlas.Sync(pipeline));
     entry = bench.textures.Find(first.Value().resource);
     CHECK(entry != nullptr && !entry->texture.IsNull() && entry->pipeline == pipeline);
-    // 한 변이 페이지보다 큰 그림은 그 크기의 단독 페이지다. 페이지가 MaxVectorAtlasPages를 넘으면
-    // AdvanceFrame이 모두 놓고 revision을 올린다.
-    const uint64 revision = atlas.Revision();
-    for (uint32 i = 0; i < MaxVectorAtlasPages; ++i) {
-        REQUIRE(atlas.Resolve(full.Value(), VectorAtlasPageSize + 1 + i, 4));
+    // 이미 텍스처가 있는 페이지에 새 래스터가 들면 Sync가 페이지를 다시 올린다(UpdateTexture).
+    usize updates = 0;
+    REQUIRE(atlas.Resolve(full.Value(), 24, 24));
+    REQUIRE(atlas.Sync(pipeline));
+    for (const auto& call : bench.device.Calls()) {
+        updates += call.op == render::testing::RecordingDevice::Op::UpdateTexture ? 1 : 0;
     }
 
-    CHECK(atlas.PageCount() == MaxVectorAtlasPages + 1);
+    CHECK(updates == 1 && atlas.PageCount() == 1);
+    // 페이지에 들지 않는 그림은 여백 없이 정확한 크기의 단독 텍스처이고 uv는 0..1이다(UE 비atlas
+    // 텍스처). 단독 텍스처가 MaxVectorStandaloneImages를 넘으면 AdvanceFrame이 모두 놓고 revision을
+    // 올린다(atlas 페이지와 따로 센다).
+    const uint64 revision = atlas.Revision();
+    auto large = atlas.Resolve(full.Value(), VectorAtlasPageSize, 4);
+    REQUIRE(large);
+    CHECK(large.Value().uv.min == Vec2(0, 0) && large.Value().uv.max == Vec2(1, 1));
     uint32 width = 0;
     uint32 height = 0;
     (void)atlas.PagePixels(1, width, height);
-    CHECK(width == VectorAtlasPageSize + 1 + 2 * text::FontAtlasPadding);
+    CHECK(width == VectorAtlasPageSize && height == 4);
+    REQUIRE(atlas.Sync(pipeline));
+    CHECK(!atlas.AdvanceFrame());
+    for (uint32 i = 0; i < MaxVectorStandaloneImages; ++i) {
+        REQUIRE(atlas.Resolve(full.Value(), VectorAtlasPageSize + 1 + i, 4));
+    }
+
+    CHECK(atlas.PageCount() == MaxVectorStandaloneImages + 2);
     REQUIRE(atlas.Sync(pipeline));
     CHECK(atlas.AdvanceFrame());
     CHECK(atlas.PageCount() == 0 && atlas.Revision() == revision + 1);
@@ -130,6 +145,54 @@ TEST(UiRender_VectorImageAtlasSyncsAndFlushes) {
     // 비운 뒤에도 다시 래스터화한다.
     REQUIRE(atlas.Resolve(full.Value(), 16, 16));
     CHECK(atlas.PageCount() == 1);
+}
+
+TEST(UiRender_VectorImageAtlasRejectsDamagedSvgWithoutLeaks) {
+    const usize before = LibraryHeapLiveBlocks();
+    {
+        AtlasBench bench;
+        VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+        // 거대한 수(유한하지 않은 크기)와 크기 0인 그림은 InvalidArgument이고 등록되지 않는다.
+        const StringView rejected[] = {
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1e40\" height=\"1e40\"></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"0\" height=\"0\"></svg>",
+        };
+        for (StringView text : rejected) {
+            auto added = atlas.Register("Test/Rejected", Bytes(text));
+            CHECK(!added && added.Error() == ErrorCode::InvalidArgument);
+        }
+
+        CHECK(atlas.ImageCount() == 0);
+        // 잘린 태그는 nanosvg가 관대하게 읽어 도형 없는 그림이 된다(UE도 같은 라이브러리다). 등록은
+        // 되고 래스터는 비어 있다.
+        constexpr StringView Truncated =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect x=\"0\" y";
+        auto truncated = atlas.Register("Test/Truncated", Bytes(Truncated));
+        REQUIRE(truncated);
+        auto drawn = atlas.Resolve(truncated.Value(), 16, 16);
+        REQUIRE(drawn);
+        CHECK(AlphaAt(atlas, drawn.Value(), 8, 8) == 0);
+    }
+
+    // 실패한 파싱과 래스터도 nanosvg 메모리를 모두 놓는다.
+    CHECK(LibraryHeapLiveBlocks() == before);
+}
+
+TEST(UiRender_VectorImageAtlasKeepsGradientAspect) {
+    AtlasBench bench;
+    VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+    // 그라데이션이 있는 그림은 비균등 배율에서 늘이지 않고 작은 배율로 가운데에 둔다(17.6절).
+    constexpr StringView Gradient =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">"
+        "<defs><linearGradient id=\"g\"><stop offset=\"0\" stop-color=\"#FFFFFF\"/>"
+        "<stop offset=\"1\" stop-color=\"#FFFFFF\"/></linearGradient></defs>"
+        "<rect x=\"0\" y=\"0\" width=\"16\" height=\"16\" fill=\"url(#g)\"/></svg>";
+    auto gradient = atlas.Register("Test/Gradient", Bytes(Gradient));
+    REQUIRE(gradient);
+    auto wide = atlas.Resolve(gradient.Value(), 32, 16);
+    REQUIRE(wide);
+    // 16x16 그림이 32x16 칸 가운데(8..24)에 놓인다: 가장자리 열은 투명, 가운데 열은 불투명이다.
+    CHECK(AlphaAt(atlas, wide.Value(), 2, 8) == 0 && AlphaAt(atlas, wide.Value(), 16, 8) == 255);
 }
 
 TEST(UiRender_VectorImageAtlasAllocatesThroughLibraryHeap) {

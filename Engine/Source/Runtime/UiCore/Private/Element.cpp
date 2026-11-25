@@ -334,6 +334,11 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
                 local->SetTheme(&list.Theme(), list.ThemeRevision());
             }
 
+            // 벡터 brush resolver도 바깥 목록의 것을 쓴다(바뀌면 지역 기록을 다시 만든다 — 17.2절).
+            if (local->scratch_.GetVectorImageResolver() != list.GetVectorImageResolver()) {
+                local->SetVectorImageResolver(list.GetVectorImageResolver());
+            }
+
             auto updated = local->Update(*this, layer, list.foreground_, list.disabled_);
             if (!updated) {
                 return updated;

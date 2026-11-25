@@ -38,8 +38,9 @@ struct BrushOutline {
 // resource는 렌더러에 등록한 이미지다. 빈 핸들은 단색을 뜻한다.
 // imageSize는 원본의 논리 크기, margin은 원본 크기에 대한 각 변의 비율이다.
 // vectorImage가 있는 Image brush는 벡터 이미지(SVG)다(UE ESlateBrushImageType::Vector —
-// Docs/Design/ UiToolkit 17.2절). 그리기 목록에 기록할 때 그릴 화소 크기로 래스터화한 자리로
-// 바뀌고, resource·uv는 쓰지 않는다.
+// Docs/Design/UiToolkit 17.2절). 그리기 목록에 기록할 때 그릴 화소 크기로 래스터화한 자리로 바뀐다.
+// resource는 쓰지 않고, uv는 그 자리 안의 부분 범위다. 벡터 9분할(Box·Border)은 아직 없어 Image
+// 모드가 아니면 유효하지 않다.
 struct ROCKS_UICORE_API Brush {
     BrushMode mode = BrushMode::Image;
     SlotHandle resource{};

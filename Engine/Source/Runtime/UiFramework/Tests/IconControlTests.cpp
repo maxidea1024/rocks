@@ -1,8 +1,11 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/CoreIcons.h>
+#include <UiFramework/Application.h>
+#include <UiFramework/CachePanel.h>
 #include <UiFramework/CheckBox.h>
 #include <UiFramework/ComboBox.h>
+#include <UiFramework/Image.h>
 
 // 아이콘을 쓰는 컨트롤 시험이다(Docs/Design/UiToolkit 17.4절 UW4s5). 체크 표시·콤보 화살표가 SVG
 // 아이콘 brush로 기록되는지(요청한 키·크기·tint)를 단언한다.
@@ -16,6 +19,7 @@ class IconProbe final : public VectorImageResolver {
 public:
     Result<ResolvedVectorImage> Resolve(VectorImageKey key, uint32 width,
                                         uint32 height) noexcept override {
+        ++calls;
         lastKey = key;
         lastWidth = width;
         lastHeight = height;
@@ -25,10 +29,12 @@ public:
     }
 
     uint64 Revision() const noexcept override {
-        return 0;
+        return revision;
     }
 
     VectorImageKey lastKey{};
+    uint64 revision = 0;
+    uint32 calls = 0;
     uint32 lastWidth = 0;
     uint32 lastHeight = 0;
 };
@@ -94,6 +100,41 @@ TEST(UiFramework_ComboBoxDrawsDownArrow) {
     CHECK(bounds.min.y == 4 && bounds.max.y == 20);
     // 색은 버튼 전경색(UE UseForeground)이다.
     CHECK(list.Boxes()[1].color == IconTheme(ThemeSlot::ForegroundHover));
+}
+
+// 지역 캐시(CachePanel) 안의 벡터 brush도 Application의 resolver로 풀리고, resolver revision이
+// 바뀌면 (atlas 비우기) 지역 기록까지 다시 만든다(Docs/Design/UiToolkit 17.2절).
+TEST(UiFramework_CachePanelResolvesVectorBrushes) {
+    SystemAllocator allocator;
+    IconProbe probe;
+    auto panel = SharedPtr<CachePanel>::TryMake(allocator, allocator);
+    auto image = SharedPtr<Image>::TryMake(allocator, allocator);
+    REQUIRE(panel && image);
+    REQUIRE(image.Value()->SetBrush(Brush::Vector(icons::Check, icons::Icon16)));
+    REQUIRE(panel.Value()->TryAddChild(image.Value()));
+    Application app(allocator);
+    app.SetRoot(panel.Value());
+    const Geometry root = Geometry::Root({16, 16}, {});
+    // resolver가 없을 때 기록한 지역 캐시는 아이콘이 없다.
+    auto empty = app.UpdatePaintCache(root, 1);
+    REQUIRE(empty);
+    CHECK(empty.Value()->List().Boxes().IsEmpty());
+    // resolver를 넣으면 지역 캐시까지 다시 기록해 아이콘을 그린다.
+    app.SetVectorImageResolver(&probe);
+    auto drawn = app.UpdatePaintCache(root, 1);
+    REQUIRE(drawn);
+    REQUIRE(drawn.Value()->List().Boxes().Size() == 1);
+    CHECK(probe.lastKey == icons::Check);
+    const uint32 resolved = probe.calls;
+    // 바뀐 것이 없으면 다시 풀지 않는다.
+    REQUIRE(app.UpdatePaintCache(root, 1));
+    CHECK(probe.calls == resolved);
+    // atlas를 비우면(revision) 지역 기록도 다시 만들어 새 자리를 받는다.
+    ++probe.revision;
+    auto again = app.UpdatePaintCache(root, 1);
+    REQUIRE(again);
+    CHECK(probe.calls == resolved + 1);
+    CHECK(again.Value()->List().Boxes().Size() == 1);
 }
 
 } // namespace rocks::ui

@@ -7,8 +7,9 @@
 namespace rocks::ui {
 
 // 벡터 이미지 래스터 화소 크기의 한 변 상한이다. PaintList는 이 값으로 자르고, resolver는 넘으면
-// InvalidArgument다.
-inline constexpr uint32 MaxVectorImagePixels = 4096;
+// InvalidArgument다. OpenGL ES 3.0이 보장하는 최소 텍스처 크기(GL_MAX_TEXTURE_SIZE 2048)에 맞춘다 —
+// 큰 그림은 이 크기의 단독 텍스처가 된다.
+inline constexpr uint32 MaxVectorImagePixels = 2048;
 
 // 벡터 brush를 그리기 목록에 기록할 때 화소 크기의 래스터 자리로 바꾸는 쪽이다(UE
 // FSlateVectorGraphicsCache — Docs/Design/UiToolkit 17.2절). UiRender VectorImageAtlas가 구현한다.

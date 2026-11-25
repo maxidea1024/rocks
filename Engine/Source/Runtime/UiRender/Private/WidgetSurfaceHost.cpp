@@ -1,4 +1,5 @@
 #include <UiRender/WidgetSurfaceHost.h>
+#include <UiRender/VectorImageAtlas.h>
 #include <UiRender/DrawBatchBuffers.h>
 
 namespace rocks::ui {
@@ -62,6 +63,12 @@ WidgetSurfaceHost::WidgetSurfaceHost(Allocator& allocator, graphics::Device& dev
                                      graphics::PixelFormat format) noexcept
     : allocator_(allocator), device_(device), shaders_(shaders), textures_(textures),
       format_(format), postBuffers_(device, textures), entries_(allocator), order_(allocator) {
+}
+
+void WidgetSurfaceHost::SetVectorImages(VectorImageAtlas* atlas,
+                                        graphics::PipelineHandle imagePipeline) noexcept {
+    vectorImages_ = atlas;
+    vectorPipeline_ = imagePipeline;
 }
 
 WidgetSurfaceHost::~WidgetSurfaceHost() noexcept {
@@ -267,6 +274,7 @@ Result<bool> WidgetSurfaceHost::Update(Entry& entry, uint64 frame, uint32 width,
         }
 
         entry.list.Clear();
+        entry.list.SetVectorImageResolver(vectorImages_);
         auto result = source.RecordContent(entry.list);
         if (result) {
             result = entry.batch.Build(entry.list);
@@ -274,6 +282,11 @@ Result<bool> WidgetSurfaceHost::Update(Entry& entry, uint64 frame, uint32 width,
 
         if (result) {
             result = entry.buffers.Upload();
+        }
+
+        // 기록이 받은 SVG 자리의 페이지를 렌더 전에 올린다(17.2절 프레임 순서).
+        if (result && vectorImages_) {
+            result = vectorImages_->Sync(vectorPipeline_);
         }
 
         if (result) {
