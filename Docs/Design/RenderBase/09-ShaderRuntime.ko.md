@@ -233,7 +233,7 @@
    - 스레드: `Attach`·`Detach`·`Freeze`·원문 디렉터리 추가·자리 연결은 로더 스레드, Freeze 뒤 조회는 어느 스레드에서나 된다(자리는 잠금으로 읽는다 — lane 스레드가 연다).
 2. **엔진 렌더 자원 `EngineRenderResources`**(같은 헤더). 렌더 lane 처리기가 멤버로 두고 `OnLaneStart`에서 `Open(device, host)`, `OnLaneStop`에서 `Retire(device)`를 부른다(5.5절 시작 순서의 "엔진 셰이더 집합 열기와 검사 → 내장 자원 팩"). 장치 소유 스레드에서 직접 그리는 self-test도 같은 함수를 쓴다. `Open` 순서:
    1. 등록부가 Freeze되지 않았으면 `NotReady`(진단: Freeze 자리).
-   2. 형식 id `EngineShaderFormat(backend)`: D3D12 `D3D12_SM6`, D3D11 `D3D11_SM5`, Vulkan `VULKAN_SM5`, OpenGL ES `GLES31_PC`(Android는 `GLES31_ANDROID`), Metal `METAL_SM5`. TargetProfile `shaderFormats`·장치 요구 비트에 따른 선택(셰이더 시스템 SSD10·SSD15)은 쿠킹 원천이 들어올 때 그 원천이 맡는다.
+   2. 형식 id `EngineShaderFormat(backend)`: D3D12 `D3D12_SM6`, D3D11 `D3D11_SM5`, Vulkan `VULKAN_SM5`, OpenGL ES `GLES31_PC`, Metal `METAL_SM5`. TargetProfile `shaderFormats`·장치 요구 비트에 따른 선택(셰이더 시스템 SSD10·SSD15)과 Android의 `GLES31_ANDROID`는 쿠킹 원천이 들어올 때 그 원천이 맡는다(RenderBase는 플랫폼 매크로로 가르지 않는다 — 플랫폼 경계 정책, Android에는 공급자도 없다).
    3. 쿠킹 원천이 붙어 있으면 그 형식의 엔진 라이브러리를 읽어 `OpenCooked`. 원천에 그 형식이 없으면(`NotFound`) 4로 간다. 다른 오류는 실패다.
    4. 공급자로 `OpenFromProvider`. 공급자가 없으면 `UnsupportedCapability`(집합 문제 `NoProvider`) — Release 실행 파일의 필요 시 컴파일 형식(9.2절).
    5. `WaitUntilSettled`. `Ready`가 아니면 Error 로그(형식·집합 문제 이름·설명)와 함께 실패다(`NoProvider`는 `UnsupportedCapability`, 나머지는 `DependencyFailed`).
@@ -252,6 +252,6 @@
 - 공급자를 실행 파일 소스의 `#if`로 만든다(이전 Sandbox): 실행 파일마다 사본이 생긴다. 모듈 링크로 개발 구성을 고르면 같은 코드 하나다.
 - 공급자를 ShaderCompiler 모듈 안에 둔다: 쿠커·워커 도구까지 RenderBase·Graphics에 의존하게 된다.
 
-**한계.** 형식은 backend 고정 표다. 프로젝트 라이브러리(RR9)와 셰이더 교체 연결(`ShaderSetSlot`, SH4 감시 재컴파일)은 그대로 후속이다. 장치 재생성(RR18)은 새 `EngineRenderResources`를 연다.
+**한계.** 형식은 backend 고정 표다(Android GLES는 쿠킹 원천 뒤). 프로젝트 라이브러리(RR9)와 셰이더 교체 연결(`ShaderSetSlot`, SH4 감시 재컴파일)은 그대로 후속이다. 장치 재생성(RR18)은 새 `EngineRenderResources`를 연다.
 
 **완료 기준.** EngineTests(기록 장치): `Engine::Initialize`로 엔진 묶음이 시작하면 RenderBase가 호스트 등록부에 엔진 셰이더 타입을 넣고, Freeze 뒤 렌더 lane 시작이 집합 `Ready`·팩·`BuiltinReady`를 만들며 종료가 Retire 0 누수로 끝난다. 음성: 등록 누락(엔진 타입 없는 등록부) → `NotFound`와 빠진 셰이더 이름, `BuiltinReady` 없음, Freeze 전 `Open` `NotReady`, Freeze 뒤 엔진 묶음 재시작 실패(`RenderBase`), 공급자 없음 `UnsupportedCapability`, 쿠킹 원천 우선·`NotFound`면 공급자, 자리 중복 `Busy`. Sandbox `--self-test` 여덟 장치 PASS와 엔진 호스트 자식의 Freeze 로그.
