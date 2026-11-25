@@ -20,6 +20,9 @@ namespace rocks {
 // 결과가 바뀌므로 처리기 버전 Guid를 바꾼다.
 inline constexpr uint32 TextureMinResidentMipCount = 7;
 
+// 상주 꼬리 덩어리 안 mip 시작 정렬이다(RenderBase 6.5절 계약 — 사이는 0으로 채운다, 12.5.1절).
+inline constexpr uint64 TextureTailMipAlignment = 16;
+
 // 너겟 값 머리(part 0)의 형식 버전이다(배치가 바뀌면 올린다 — 처리기 버전 Guid도 바꾼다).
 inline constexpr uint32 TextureNuggetHeaderVersion = 1;
 
@@ -27,9 +30,10 @@ inline constexpr uint32 TextureNuggetHeaderVersion = 1;
 inline constexpr uint32 TextureNuggetMaxMips = 32;
 
 // 처리기 정체성이다(출력 배치 — 값·머리 형식·플랫폼 데이터 채우기 — 가 바뀌면 버전 Guid를 바꾼다).
+// 버전 2: 상주 꼬리 mip 16 byte 정렬(2026-11-25 A5k — RenderBase 6.5절).
 inline constexpr NuggetProcessorId TextureCookProcessorId{
     Guid{0x524f434b54455843ull, 0x0000000000000001ull},
-    Guid{0x524f434b54455856ull, 0x0000000000000001ull}};
+    Guid{0x524f434b54455856ull, 0x0000000000000002ull}};
 
 // 쿠킹 mip 하나의 크기와 byte다(너겟 머리 부호화·플랫폼 데이터 채우기가 쓴다 — byte는 빌림).
 struct TextureCookMip {

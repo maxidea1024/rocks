@@ -13,3 +13,4 @@
 - [12.12 A5h 텍스처 임포터](12.12-A5hImporter.ko.md)
 - [12.13 A5i 텍스처 빌드](12.13-A5iBuild.ko.md)
 - [12.14 A5j 텍스처 쿠킹](12.14-A5jCook.ko.md)
+- [12.15 A5k 텍스처 시나리오·PostLoad 판정·렌더 세션 알림](12.15-A5kScenario.ko.md)

@@ -354,7 +354,14 @@ Result<void> CookFillPlatformData(TexturePlatformData& data, TextureDimension di
                                   CookChainedBulkSource& bulk, Array<uint8>& tail) noexcept {
     const uint32 count = static_cast<uint32>(mips.Size());
     const uint32 streamed = count - resident;
+    // 상주 꼬리: mip마다 16 byte 정렬 시작, 사이는 0(RenderBase 6.5절 — 마지막 뒤는 채우지 않는다).
     for (uint32 index = streamed; index < count; ++index) {
+        const usize aligned = static_cast<usize>((tail.Size() + TextureTailMipAlignment - 1) &
+                                                 ~(TextureTailMipAlignment - 1));
+        if (auto padded = tail.TryResize(aligned); !padded) {
+            return padded;
+        }
+
         if (auto appended = tail.TryAppend(mips[index].bytes); !appended) {
             return appended;
         }
@@ -396,6 +403,7 @@ Result<void> CookFillPlatformData(TexturePlatformData& data, TextureDimension di
 
             mip.bulk = added.Value();
         } else {
+            offset = (offset + TextureTailMipAlignment - 1) & ~(TextureTailMipAlignment - 1);
             mip.tailOffset = offset;
             offset += mip.byteSize;
         }

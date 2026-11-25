@@ -504,12 +504,13 @@ TEST(TextureCook_Dimensions) {
         uint64 tailBytes;
     };
     const Case cases[] = {
-        {TypeIdOf<Texture2D>(), TextureDimension::Texture2D, 8, 8, 1, 4, 1, 1, 64 + 16 + 4 + 1},
-        {TypeIdOf<TextureCube>(), TextureDimension::TextureCube, 4, 4, 6, 3, 6, 1, 6 * 21},
-        {TypeIdOf<Texture2DArray>(), TextureDimension::Texture2DArray, 4, 4, 2, 3, 2, 1, 2 * 21},
+        // 꼬리 byte는 mip마다 16 byte 정렬 시작을 넣은 크기다(64·16·4·1 → 0·64·80·96 → 97).
+        {TypeIdOf<Texture2D>(), TextureDimension::Texture2D, 8, 8, 1, 4, 1, 1, 96 + 1},
+        {TypeIdOf<TextureCube>(), TextureDimension::TextureCube, 4, 4, 6, 3, 6, 1, 128 + 6},
+        {TypeIdOf<Texture2DArray>(), TextureDimension::Texture2DArray, 4, 4, 2, 3, 2, 1, 48 + 2},
         {TypeIdOf<TextureCubeArray>(), TextureDimension::TextureCubeArray, 4, 4, 12, 3, 12, 1,
          12 * 21},
-        {TypeIdOf<VolumeTexture>(), TextureDimension::Volume, 4, 4, 4, 3, 1, 4, 64 + 8 + 1},
+        {TypeIdOf<VolumeTexture>(), TextureDimension::Volume, 4, 4, 4, 3, 1, 4, 80 + 1},
     };
     uint64 id = 1;
     for (const Case& item : cases) {
@@ -529,6 +530,7 @@ TEST(TextureCook_Dimensions) {
               data->residentTailMips == item.numMips && data->mips.Size() == item.numMips);
         uint64 offset = 0;
         for (const TextureMipData& mip : data->mips) {
+            offset = (offset + TextureTailMipAlignment - 1) & ~(TextureTailMipAlignment - 1);
             CHECK(mip.bulk.IsEmpty() && mip.tailOffset == offset);
             offset += mip.byteSize;
         }
@@ -568,11 +570,13 @@ TEST(TextureCook_Streaming) {
 
         uint64 offset = 0;
         for (uint32 index = 2; index < 9; ++index) {
+            offset = (offset + TextureTailMipAlignment - 1) & ~(TextureTailMipAlignment - 1);
             CHECK(data->mips[index].bulk.IsEmpty() && data->mips[index].tailOffset == offset);
             offset += data->mips[index].byteSize;
         }
 
-        CHECK(offset == 4096 + 1024 + 256 + 64 + 16 + 4 + 1 && data->tailBulk.rawBytes == offset);
+        // 4096·1024·256·64·16·4·1 → 시작 0·4096·5120·5376·5440·5456·5472(16 byte 정렬) → 5473.
+        CHECK(offset == 5472 + 1 && data->tailBulk.rawBytes == offset);
         CHECK(BulkEntryCount(scene.allocator, out.sink.Bytes()) == 3);
     }
 
