@@ -33,6 +33,12 @@ inline constexpr int32 LspTestUnclean = 1;
 inline constexpr int32 LspTestUsage = 2;
 inline constexpr int32 LspTestError = 3;
 
+// 시험이 보내는 LSP 위치다(0부터 센 줄·UTF-16 열).
+struct LspTestPlace {
+    uint32 line = 0;
+    uint32 character = 0;
+};
+
 // 작업 공간 없이 initialize했을 때의 기록 줄이다(10.3절).
 inline constexpr StringView LspTestNoWorkspaceLog =
     "sparks-lsp: no workspace folder is open; documents are not analyzed\n";
@@ -247,6 +253,28 @@ public:
         LspQuote(params, uri);
         CHECK(params.TryAppend("}}"));
         return Call(id, "textDocument/semanticTokens/full", params.View());
+    }
+
+    // 위치 요청(`textDocument/hover`·`definition`·`completion`)이다.
+    LspScript& At(int64 id, StringView method, StringView uri, uint32 line,
+                  uint32 character) noexcept {
+        String params(allocator_);
+        CHECK(params.TryAppend("{\"textDocument\":{\"uri\":"));
+        LspQuote(params, uri);
+        StringBuilder<96> position(allocator_);
+        position.AppendFormat("}},\"position\":{{\"line\":{},\"character\":{}}}}}", line,
+                              character);
+        CHECK(!position.HasFailed());
+        CHECK(params.TryAppend(position.View()));
+        return Call(id, method, params.View());
+    }
+
+    LspScript& Format(int64 id, StringView uri) noexcept {
+        String params(allocator_);
+        CHECK(params.TryAppend("{\"textDocument\":{\"uri\":"));
+        LspQuote(params, uri);
+        CHECK(params.TryAppend("},\"options\":{\"tabSize\":2,\"insertSpaces\":true}}"));
+        return Call(id, "textDocument/formatting", params.View());
     }
 
     LspScript& End(int64 shutdownId) noexcept {
@@ -731,6 +759,95 @@ inline bool LspCopySchema(Allocator& allocator, const LspFolder& folder,
     return source.TryAssign(schema.View()) && source.TryAppend("/Engine.sparkbind.json") &&
            LspReadText(allocator, source.View(), text) && target.TryAssign(relative) &&
            target.TryAppend("/Engine.sparkbind.json") && folder.Write(target.View(), text.View());
+}
+
+// 응답 id의 `result` JSON 글자(서버의 compact 출력 그대로)다. 없으면 빈 글자.
+inline String LspResultText(Allocator& allocator, StringView output, int64 id) noexcept {
+    Array<String> bodies(allocator);
+    CHECK(LspBodies(output, bodies, allocator));
+    StringBuilder<64> prefix(allocator);
+    prefix.AppendFormat("{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":", id);
+    String result(allocator);
+    for (const String& body : bodies) {
+        const StringView text = body.View();
+        if (text.StartsWith(prefix.View(), StringComparison::CaseSensitive) && text.EndsWith("}")) {
+            CHECK(result.TryAssign(StringView(text.Data() + prefix.View().ByteCount(),
+                                              text.ByteCount() - prefix.View().ByteCount() - 1)));
+        }
+    }
+
+    return result;
+}
+
+// ASCII 원문 text에서 needle의 occurrence번째(0부터) 자리의 LSP 위치(+ shift 글자)다.
+inline LspTestPlace LspPlaceOf(StringView text, StringView needle, uint32 occurrence = 0,
+                               uint32 shift = 0) noexcept {
+    usize from = 0;
+    usize at = StringView::NotFound;
+    for (uint32 count = 0; count <= occurrence; ++count) {
+        at = text.Find(needle, StringComparison::CaseSensitive, StringSearchDirection::FromStart,
+                       from);
+        CHECK(at != StringView::NotFound);
+        if (at == StringView::NotFound) {
+            return LspTestPlace{};
+        }
+
+        from = at + 1;
+    }
+
+    LspTestPlace place;
+    for (usize index = 0; index < at; ++index) {
+        if (text.Data()[index] == '\n') {
+            ++place.line;
+            place.character = 0;
+        } else {
+            ++place.character;
+        }
+    }
+
+    place.character += shift;
+    return place;
+}
+
+// 각본 하나의 모든 할당 실패 자리: 3으로 끝나거나 출력이 같다(실패를 삼켜 다른 결과를 내지
+// 않는다). 새는 할당이 없다. 기록(표준 오류)은 할당 실패 때 빠질 수 있어 비교하지 않는다.
+inline void LspSweepAllocations(SystemAllocator& backing, Span<const StringView> arguments,
+                                StringView script, int32 cleanCode) noexcept {
+    String baseline(backing);
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            LspScriptChannel channel(backing, script, LspTestWholeChunk);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            const int32 code =
+                RunLanguageServer(allocator, platform::PhysicalFileSystem(), arguments, channel);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                attempts = used;
+                CHECK(code == cleanCode);
+                CHECK(baseline.TryAssign(channel.output.View()));
+                CHECK(!baseline.IsEmpty());
+            } else if (code == LspTestError) {
+                ++failures;
+            } else {
+                CHECK(code == cleanCode);
+                CHECK(channel.output.View() == baseline.View());
+            }
+        }
+
+        if (failAt != 0) { // 첫 반복은 baseline을 backing에 남긴다
+            CHECK(backing.Stats().liveAllocations == before);
+        }
+    }
+
+    CHECK(failures > 0);
 }
 
 } // namespace rocks::test::sparks_lsp

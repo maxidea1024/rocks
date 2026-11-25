@@ -28,6 +28,8 @@ String LspInitializeBody(Allocator& allocator, StringView id) noexcept {
     CHECK(out.TryAppend(id));
     CHECK(out.TryAppend(",\"result\":{\"capabilities\":{\"positionEncoding\":\"utf-16\","
                         "\"textDocumentSync\":{\"openClose\":true,\"change\":1},"
+                        "\"hoverProvider\":true,\"definitionProvider\":true,"
+                        "\"documentFormattingProvider\":true,"
                         "\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":["));
     for (usize at = 0; at < sizeof(LspTestTypes) / sizeof(LspTestTypes[0]); ++at) {
         CHECK(out.TryAppend(at == 0 ? "\"" : ",\""));
@@ -62,7 +64,7 @@ void LspLifecycleScript(LspScript& script) noexcept {
         .Message("{\"jsonrpc\":\"2.0\",\"id\":9,\"result\":null}")
         .Notify("$/cancelRequest", "{\"id\":1}")
         .Notify("workspace/didChangeConfiguration", "{}")
-        .Call(5, "textDocument/hover", "{}")
+        .Call(5, "textDocument/references", "{}")
         .Call(6, "textDocument/semanticTokens/full", "{\"textDocument\":{}}")
         .Tokens(7, "untitled:x")
         .Initialize(8, {}) // 두 번째 initialize
@@ -292,51 +294,6 @@ TEST(SparksLsp_FramingChunksAndHeaders) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
-
-namespace {
-
-// 각본 하나의 모든 할당 실패 자리: 3으로 끝나거나 출력이 같다(실패를 삼켜 다른 결과를 내지
-// 않는다). 새는 할당이 없다. 기록(표준 오류)은 할당 실패 때 빠질 수 있어 비교하지 않는다.
-void LspSweepAllocations(SystemAllocator& backing, Span<const StringView> arguments,
-                         StringView script, int32 cleanCode) noexcept {
-    String baseline(backing);
-    uint64 attempts = 0;
-    uint64 failures = 0;
-    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
-        test::NFailAllocator allocator(backing);
-        const uint64 before = backing.Stats().liveAllocations;
-        {
-            LspScriptChannel channel(backing, script, LspTestWholeChunk);
-            if (failAt != 0) {
-                allocator.FailOnAttempt(failAt);
-            }
-
-            const int32 code =
-                RunLanguageServer(allocator, platform::PhysicalFileSystem(), arguments, channel);
-            const uint64 used = allocator.Attempts();
-            allocator.DisableFailure();
-            if (failAt == 0) {
-                attempts = used;
-                CHECK(code == cleanCode);
-                CHECK(baseline.TryAssign(channel.output.View()));
-                CHECK(!baseline.IsEmpty());
-            } else if (code == LspTestError) {
-                ++failures;
-            } else {
-                CHECK(code == cleanCode);
-                CHECK(channel.output.View() == baseline.View());
-            }
-        }
-
-        if (failAt != 0) { // 첫 반복은 baseline을 backing에 남긴다
-            CHECK(backing.Stats().liveAllocations == before);
-        }
-    }
-
-    CHECK(failures > 0);
-}
-
-} // namespace
 
 TEST(SparksLsp_AllocationFailure) {
     // 세 세션: (1) 열기·강조·바꿈·JSON 아님·닫기, (2) workspaceFolders·초기화 옵션 schema(뿌리

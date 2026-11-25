@@ -4,6 +4,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Path.h>
 #include <SparksCompiler/Diagnostic.h>
+#include <SparksCompiler/Formatter.h>
 #include <SparksTools/LanguageServer.h>
 #include "LspFraming.h"
 #include "LspServer.h"
@@ -41,6 +42,9 @@ constexpr StringView LspServerName = "sparks-lsp";
 constexpr StringView LspSource = "sparks";
 constexpr StringView LspFixPrefix = "\nfix: ";
 constexpr StringView LspEmptyList = "[]";
+constexpr StringView LspSourceExtension = ".spark";
+constexpr StringView LspUriMessage = "the request needs 'textDocument.uri'";
+constexpr StringView LspPositionMessage = "the request needs 'textDocument.uri' and 'position'";
 constexpr StringView LspUsage = "usage: sparks-lsp [--stdio] [--schema <folder>]...\n";
 
 // JsonWriter 호출의 결과를 버리는 감싸개다 — writer는 첫 오류를 기억하고 Finish가 돌려준다.
@@ -183,6 +187,12 @@ private:
 
     Result<void> Initialize(JsonValue id, JsonValue params) noexcept;
     Result<void> SemanticTokens(JsonValue id, JsonValue params) noexcept;
+    Result<void> Hover(JsonValue id, JsonValue params) noexcept;
+    Result<void> Definition(JsonValue id, JsonValue params) noexcept;
+    Result<void> Formatting(JsonValue id, JsonValue params) noexcept;
+    Result<uint32> ModuleOfUri(StringView uri) noexcept;
+    Result<bool> UriOfSource(uint32 source, String& uri) noexcept;
+    static bool PositionParams(JsonValue params, StringView& uri, LspPosition& position) noexcept;
     Result<void> Opened(JsonValue params) noexcept;
     Result<void> Changed(JsonValue params) noexcept;
     Result<void> Closed(JsonValue params) noexcept;
@@ -378,6 +388,8 @@ Result<void> LspServer::Initialize(JsonValue id, JsonValue params) noexcept {
             .Key("change")
             .Number(LspSyncFull)
             .End();
+        out.Key("hoverProvider").Flag(true).Key("definitionProvider").Flag(true);
+        out.Key("documentFormattingProvider").Flag(true);
         out.Key("semanticTokensProvider").Object().Key("legend").Object();
         out.Key("tokenTypes").Array();
         for (const StringView type : LspTokenTypes) {
@@ -843,37 +855,21 @@ Result<void> LspServer::SemanticTokens(JsonValue id, JsonValue params) noexcept 
     const JsonValue uri =
         document.IsValid() && document.IsObject() ? document.Find("uri") : JsonValue();
     if (!uri.IsValid() || !uri.IsString()) {
-        return Fail(id, LspInvalidParams, "the request needs 'textDocument.uri'");
+        return Fail(id, LspInvalidParams, LspUriMessage);
     }
 
-    // 문서의 모듈(열린 문서면 그 key, 아니면 URI의 경로)을 마지막 분석에서 찾는다.
-    String path(allocator_);
-    String key(allocator_);
-    auto converted = LspPathFromUri(uri.GetString(), path);
-    if (!converted) {
-        return Result<void>::Failure(converted.Error());
-    }
-
-    if (converted.Value()) {
-        if (auto made = LspPathKey(path.View(), key); !made) {
-            return made;
-        }
+    auto module = ModuleOfUri(uri.GetString());
+    if (!module) {
+        return Result<void>::Failure(module.Error());
     }
 
     Array<uint32> data(allocator_);
-    if (analysis_ && analysis_->compiled && !key.IsEmpty()) {
+    if (module.Value() != NoModule) {
         const LspAnalysis& analysis = *analysis_;
-        for (uint32 module = 0; module < analysis.compilation.ModuleCount(); ++module) {
-            const uint32 source = analysis.compilation.ModuleSource(module).index;
-            if (source < analysis.keys.Size() && analysis.keys[source].View() == key.View()) {
-                if (auto appended = LspAppendSemanticTokens(analysis.compilation, analysis.sources,
-                                                            module, data);
-                    !appended) {
-                    return appended;
-                }
-
-                break;
-            }
+        if (auto appended = LspAppendSemanticTokens(analysis.compilation, analysis.sources,
+                                                    module.Value(), data);
+            !appended) {
+            return appended;
         }
     }
 
@@ -884,6 +880,228 @@ Result<void> LspServer::SemanticTokens(JsonValue id, JsonValue params) noexcept 
         }
 
         out.EndArray().End();
+        return Result<void>::Success();
+    });
+}
+
+Result<uint32> LspServer::ModuleOfUri(StringView uri) noexcept {
+    // 문서의 모듈(URI의 경로 key)을 마지막 분석에서 찾는다.
+    String path(allocator_);
+    String key(allocator_);
+    auto converted = LspPathFromUri(uri, path);
+    if (!converted) {
+        return Result<uint32>::Failure(converted.Error());
+    }
+
+    if (converted.Value()) {
+        if (auto made = LspPathKey(path.View(), key); !made) {
+            return Result<uint32>::Failure(made.Error());
+        }
+    }
+
+    if (!analysis_ || !analysis_->compiled || key.IsEmpty()) {
+        return Result<uint32>::Success(NoModule);
+    }
+
+    const LspAnalysis& analysis = *analysis_;
+    for (uint32 module = 0; module < analysis.compilation.ModuleCount(); ++module) {
+        const uint32 source = analysis.compilation.ModuleSource(module).index;
+        if (source < analysis.keys.Size() && analysis.keys[source].View() == key.View()) {
+            return Result<uint32>::Success(module);
+        }
+    }
+
+    return Result<uint32>::Success(NoModule);
+}
+
+Result<bool> LspServer::UriOfSource(uint32 source, String& uri) noexcept {
+    const LspAnalysis& analysis = *analysis_;
+    if (source >= analysis.keys.Size() || analysis.keys[source].IsEmpty()) {
+        return Result<bool>::Success(false);
+    }
+
+    for (const LspDocument& document : documents_) {
+        if (document.key.View() == analysis.keys[source].View()) {
+            if (auto assigned = uri.TryAssign(document.uri.View()); !assigned) {
+                return Result<bool>::Failure(assigned.Error());
+            }
+
+            return Result<bool>::Success(true);
+        }
+    }
+
+    if (auto made = LspUriFromPath(analysis.keys[source].View(), uri); !made) {
+        return Result<bool>::Failure(made.Error());
+    }
+
+    return Result<bool>::Success(true);
+}
+
+bool LspServer::PositionParams(JsonValue params, StringView& uri, LspPosition& position) noexcept {
+    const JsonValue document = params.IsObject() ? params.Find("textDocument") : JsonValue();
+    const JsonValue text =
+        document.IsValid() && document.IsObject() ? document.Find("uri") : JsonValue();
+    const JsonValue place = params.IsObject() ? params.Find("position") : JsonValue();
+    if (!text.IsValid() || !text.IsString() || !place.IsValid() || !place.IsObject()) {
+        return false;
+    }
+
+    const JsonValue line = place.Find("line");
+    const JsonValue character = place.Find("character");
+    if (!line.IsValid() || !line.IsNumber() || !character.IsValid() || !character.IsNumber()) {
+        return false;
+    }
+
+    auto lineNumber = line.TryGetUInt64();
+    auto characterNumber = character.TryGetUInt64();
+    if (!lineNumber || !characterNumber || lineNumber.Value() > NumericLimits<uint32>::Max() ||
+        characterNumber.Value() > NumericLimits<uint32>::Max()) {
+        return false;
+    }
+
+    uri = text.GetString();
+    position.line = static_cast<uint32>(lineNumber.Value());
+    position.character = static_cast<uint32>(characterNumber.Value());
+    return true;
+}
+
+Result<void> LspServer::Hover(JsonValue id, JsonValue params) noexcept {
+    StringView uri;
+    LspPosition position;
+    if (!PositionParams(params, uri, position)) {
+        return Fail(id, LspInvalidParams, LspPositionMessage);
+    }
+
+    auto module = ModuleOfUri(uri);
+    if (!module) {
+        return Result<void>::Failure(module.Error());
+    }
+
+    if (module.Value() == NoModule) {
+        return Respond(id, JsonValue());
+    }
+
+    const LspAnalysis& analysis = *analysis_;
+    const SourceFile& file =
+        analysis.sources.Get(analysis.compilation.ModuleSource(module.Value()));
+    LspNamed named;
+    if (!LspNameAt(analysis.compilation, module.Value(), LspOffsetOf(file, position), named)) {
+        return Respond(id, JsonValue());
+    }
+
+    StringBuilder<LspJsonInlineBytes> value(allocator_);
+    auto shown = LspAppendHover(analysis.compilation, analysis.sources, named, value);
+    if (!shown) {
+        return Result<void>::Failure(shown.Error());
+    }
+
+    if (!shown.Value()) {
+        return Respond(id, JsonValue());
+    }
+
+    const SourceSpan span =
+        analysis.compilation.ModuleTree(module.Value())->Tokens()[named.token].span;
+    return Send([&](LspOut& out) noexcept {
+        out.Key("id").Value(id).Key("result").Object().Key("contents").Object();
+        out.Key("kind").Text("markdown").Key("value").Text(value.View()).End();
+        out.Key("range").Object().Key("start").Position(LspPositionOf(file, span.begin));
+        out.Key("end").Position(LspPositionOf(file, span.end)).End().End();
+        return Result<void>::Success();
+    });
+}
+
+Result<void> LspServer::Definition(JsonValue id, JsonValue params) noexcept {
+    StringView uri;
+    LspPosition position;
+    if (!PositionParams(params, uri, position)) {
+        return Fail(id, LspInvalidParams, LspPositionMessage);
+    }
+
+    auto module = ModuleOfUri(uri);
+    if (!module) {
+        return Result<void>::Failure(module.Error());
+    }
+
+    if (module.Value() == NoModule) {
+        return Respond(id, JsonValue());
+    }
+
+    const LspAnalysis& analysis = *analysis_;
+    const SourceFile& file =
+        analysis.sources.Get(analysis.compilation.ModuleSource(module.Value()));
+    LspNamed named;
+    SourceId source;
+    SourceSpan span;
+    if (!LspNameAt(analysis.compilation, module.Value(), LspOffsetOf(file, position), named) ||
+        !LspDefinition(analysis.compilation, named, source, span)) {
+        return Respond(id, JsonValue());
+    }
+
+    String target(allocator_);
+    auto made = UriOfSource(source.index, target);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    if (!made.Value()) {
+        return Respond(id, JsonValue());
+    }
+
+    const SourceFile& destination = analysis.sources.Get(source);
+    return Send([&](LspOut& out) noexcept {
+        out.Key("id").Value(id).Key("result").Object().Key("uri").Text(target.View());
+        out.Key("range").Object().Key("start").Position(LspPositionOf(destination, span.begin));
+        out.Key("end").Position(LspPositionOf(destination, span.end)).End().End();
+        return Result<void>::Success();
+    });
+}
+
+Result<void> LspServer::Formatting(JsonValue id, JsonValue params) noexcept {
+    const JsonValue document = params.IsObject() ? params.Find("textDocument") : JsonValue();
+    const JsonValue uri =
+        document.IsValid() && document.IsObject() ? document.Find("uri") : JsonValue();
+    if (!uri.IsValid() || !uri.IsString()) {
+        return Fail(id, LspInvalidParams, LspUriMessage);
+    }
+
+    // 열린 `.spark` 문서만(11.5절). 옵션은 받고 무시한다(단일 공식 서식).
+    const LspDocument* open = FindDocument(uri.GetString());
+    if (open == nullptr ||
+        !open->key.View().EndsWith(LspSourceExtension, StringComparison::CaseSensitive)) {
+        return Respond(id, JsonValue());
+    }
+
+    SourceSet sources(allocator_);
+    DiagnosticList diagnostics(allocator_);
+    auto added = sources.TryAdd(open->key.View(), open->text.View(), diagnostics);
+    if (!added) {
+        return Result<void>::Failure(added.Error());
+    }
+
+    const SourceFile& file = sources.Get(added.Value());
+    StringBuilder<LspJsonInlineBytes> formatted(allocator_);
+    bool changed = false;
+    if (file.IsUsable()) {
+        auto done = FormatSource(allocator_, sources, added.Value(), diagnostics, formatted);
+        if (!done) {
+            return Result<void>::Failure(done.Error());
+        }
+
+        // BOM 뒤 내용과 비교한다(formatter는 BOM을 뗀다 — 편집 범위도 BOM 뒤부터다).
+        const StringView content(file.Text().Data() + file.ContentBegin(),
+                                 file.Text().ByteCount() - file.ContentBegin());
+        changed = done.Value() && formatted.View() != content;
+    }
+
+    const LspPosition end = LspPositionOf(file, static_cast<uint32>(file.Text().ByteCount()));
+    return Send([&](LspOut& out) noexcept {
+        out.Key("id").Value(id).Key("result").Array();
+        if (changed) {
+            out.Object().Key("range").Object().Key("start").Position(LspPosition());
+            out.Key("end").Position(end).End().Key("newText").Text(formatted.View()).End();
+        }
+
+        out.EndArray();
         return Result<void>::Success();
     });
 }
@@ -966,6 +1184,18 @@ Result<bool> LspServer::Handle(StringView body) noexcept {
 
     if (name == "textDocument/semanticTokens/full") {
         return done(SemanticTokens(id, params));
+    }
+
+    if (name == "textDocument/hover") {
+        return done(Hover(id, params));
+    }
+
+    if (name == "textDocument/definition") {
+        return done(Definition(id, params));
+    }
+
+    if (name == "textDocument/formatting") {
+        return done(Formatting(id, params));
     }
 
     return done(Fail(id, LspMethodNotFound, "the method is not supported"));
