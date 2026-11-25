@@ -30,6 +30,7 @@ String LspInitializeBody(Allocator& allocator, StringView id) noexcept {
                         "\"textDocumentSync\":{\"openClose\":true,\"change\":1},"
                         "\"hoverProvider\":true,\"definitionProvider\":true,"
                         "\"documentFormattingProvider\":true,"
+                        "\"completionProvider\":{\"triggerCharacters\":[\".\",\"@\"]},"
                         "\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":["));
     for (usize at = 0; at < sizeof(LspTestTypes) / sizeof(LspTestTypes[0]); ++at) {
         CHECK(out.TryAppend(at == 0 ? "\"" : ",\""));
