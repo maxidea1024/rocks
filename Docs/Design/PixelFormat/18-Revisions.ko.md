@@ -5,3 +5,4 @@
 - 개정 3(2026-11-17): PF2(D3D12)·PF3 틀·PF6(D3D12) 구현과 스펙 차이를 14.1절에 기록하였다. 깊이·스텐실 이미지 크기를 plane 합으로 바꾸었고, `TextureUsage::DepthStencil`·`CreateTextureView`·`ReadTexture`·`GetPixelFormatCaps`를 Graphics 계약에 더하였다.
 - 개정 4(2026-11-18): PF4. D3D11·Vulkan·OpenGL ES 대응 표·능력 질의·깊이·스텐실·비디오·view·readback(14.2절). 8.6절 표의 norm16·SNORM 렌더 타깃·BGRA8 조건을 확장 사양으로 대조해 고치고 32F 블렌드 조건(`GL_EXT_float_blend`)을 더하였다.
 - 개정 5(2026-11-18): RenderBase GX1·GX2(버퍼) 1단계와 함께 `Multisample` 능력·`GetPixelFormatSampleCounts`를 모든 backend에 넣고, GLES texel buffer 형식을 ES 3.2 Table 8.18로 대조해 공개했다(RQ9, 7절 표·14.3절). Vulkan texel buffer 쓰기 능력은 읽기도 되는 형식만, D3D11 `RGB9E5Ufloat` texel buffer는 공개하지 않는다.
+- 개정 6(2026-11-25): 에셋 세션 요청으로 12절에 번호의 뜻을 바꾸지 않는 규칙을 더하였다. `pixelFormat` 숫자는 쿠킹 데이터(`TexturePlatformData`)에 그대로 저장되므로 기존 번호를 다른 뜻으로 다시 쓰지 않고, 부득이 뜻을 바꾸면 `TexturePlatformData` 타입 버전을 올려 다시 쿠킹되게 한다.
