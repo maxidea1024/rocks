@@ -41,6 +41,11 @@ inline constexpr uint32 CookedManifestMaxDependencies = 65536;
 // 경로 힌트(논리 경로 — AS 4.2절) byte 상한이다.
 inline constexpr uint32 CookedManifestMaxPathBytes = 256;
 
+// v2 backend 표 상한이다(Docs/Design/AssetSystem 10.3절 4항 — A4f1의 TargetProfile 구조 검증이 같은
+// 상수를 쓴다, 통과한 프로필은 늘 쓸 수 있는 매니페스트를 만든다).
+inline constexpr uint32 CookedManifestMaxBackends = 8;
+inline constexpr uint32 CookedManifestMaxFormatsPerBackend = 16;
+
 // 항목 flags 비트다.
 enum class CookedManifestFlags : uint32 {
     None = 0,

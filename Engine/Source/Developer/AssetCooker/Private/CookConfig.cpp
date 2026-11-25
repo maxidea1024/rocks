@@ -5,23 +5,15 @@
 #include <AssetNugget/NuggetReflected.h>
 #include <AssetRuntime/Package.generated.h>
 #include <Core/FileError.h>
-#include <Core/FileRead.h>
-#include <Core/Text/Json.h>
 #include <Object/TypeRegistry.h>
-#include <ReflectionText/TextJson.h>
+#include <TargetProfiles/TargetProfile.generated.h>
 
 namespace rocks {
 
 namespace {
 
 using reflection_text::AssignmentTarget;
-using reflection_text::TextCodecOptions;
 using reflection_text::TextDiagnostics;
-
-// bulk 정렬 범위다(쿠킹 패키지 writer와 같다 — PackageWriteOptions).
-constexpr uint32 CookBulkAlignmentMin = 8;
-constexpr uint32 CookBulkAlignmentMax = 65536;
-constexpr StringView CookJsonExtension = ".json";
 
 Result<void> Fail(CookConfigFailure* failure, CookConfigFile file, CookConfigField field,
                   ErrorCode error, uint32 index = 0) noexcept {
@@ -51,82 +43,34 @@ Result<void> JoinPath(StringView directory, StringView middle, StringView name, 
     return Result<void>::Success();
 }
 
-// path의 JSON을 target에 대입한다(파일이 없으면 existed = false로 아무것도 하지 않는다).
+// path의 JSON을 target에 대입한다(TargetProfiles 공개 도우미 — 실패 단계를 칸으로 옮긴다).
 Result<void> ApplyJsonFile(const CookConfigContext& context, StringView path,
                            const AssignmentTarget& target, TextDiagnostics& diagnostics,
                            CookConfigFile file, CookConfigFailure* failure,
                            bool& existed) noexcept {
-    Allocator& allocator = *context.allocator;
-    Array<uint8> bytes(allocator);
-    if (auto read = ReadWholeFile(*context.files, path, CookConfigMaxFileBytes, bytes, existed);
-        !read) {
-        const CookConfigField field = read.Error() == ErrorCode::CapacityExceeded
-                                          ? CookConfigField::File
-                                          : CookConfigField::None;
-        return Fail(failure, file, field, read.Error());
+    ConfigJsonOutcome outcome;
+    auto applied =
+        ApplyConfigJsonFile(*context.allocator, *context.files, path, target, diagnostics, outcome);
+    existed = outcome.existed;
+    if (applied) {
+        return applied;
     }
 
-    if (!existed) {
-        return Result<void>::Success();
-    }
-
-    JsonDocument document(allocator);
-    const JsonError parsed =
-        document.Parse(StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()));
-    if (!parsed.Succeeded()) {
-        if (parsed.code == JsonErrorCode::OutOfMemory) {
-            return Fail(failure, file, CookConfigField::None, ErrorCode::OutOfMemory);
-        }
-
+    const ErrorCode error = applied.Error();
+    CookConfigField field = CookConfigField::None;
+    if (outcome.stage == ConfigJsonStage::File && error == ErrorCode::CapacityExceeded) {
+        field = CookConfigField::File;
+    } else if (outcome.stage == ConfigJsonStage::Json) {
+        field = CookConfigField::Json;
         if (failure != nullptr) {
-            failure->line = parsed.position.line;
-            failure->column = parsed.position.column;
+            failure->line = outcome.line;
+            failure->column = outcome.column;
         }
-
-        return Fail(failure, file, CookConfigField::Json, ErrorCode::InvalidArgument);
+    } else if (outcome.stage == ConfigJsonStage::Text) {
+        field = CookConfigField::Text;
     }
 
-    // Map(텍스처 LOD 그룹 표)은 키별 병합이다(12.14절 — 쿠킹 규칙에는 Map이 없다).
-    TextCodecOptions options;
-    options.mapMerge = reflection_text::MapMergeMode::MergeByKey;
-    auto prepared = reflection_text::ImportJson(document.Root(), target, options, diagnostics);
-    if (!prepared) {
-        const ErrorCode error = prepared.Error();
-        return Fail(failure, file,
-                    error == ErrorCode::InvalidArgument ? CookConfigField::Text
-                                                        : CookConfigField::None,
-                    error);
-    }
-
-    if (auto published = prepared.Value().Publish(); !published) {
-        return Fail(failure, file, CookConfigField::None, published.Error());
-    }
-
-    return Result<void>::Success();
-}
-
-bool IsProfileIdCharacter(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
-}
-
-bool IsValidProfileId(StringView id) noexcept {
-    if (id.IsEmpty() || id.ByteCount() > TargetProfileIdMaxBytes) {
-        return false;
-    }
-
-    for (usize index = 0; index < id.ByteCount(); ++index) {
-        if (!IsProfileIdCharacter(id.Data()[index])) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool IsValidBulkAlignment(uint32 alignment) noexcept {
-    return alignment == 0 ||
-           (alignment >= CookBulkAlignmentMin && alignment <= CookBulkAlignmentMax &&
-            (alignment & (alignment - 1)) == 0);
+    return Fail(failure, file, field, error);
 }
 
 template <class T>
@@ -166,88 +110,67 @@ Result<CookPathKind> ClassifyCookPath(Allocator& allocator, StringView text) noe
     return Result<CookPathKind>::Success(directory ? CookPathKind::Directory : CookPathKind::Asset);
 }
 
-Result<void> ReadTargetProfile(const CookConfigContext& context, StringView id, TargetProfile& out,
-                               TextDiagnostics& diagnostics, CookConfigFailure* failure) noexcept {
-    if (failure != nullptr) {
-        *failure = CookConfigFailure{};
+CookConfigField ToCookConfigField(TargetProfileField field) noexcept {
+    switch (field) {
+    case TargetProfileField::None:
+        return CookConfigField::None;
+    case TargetProfileField::File:
+        return CookConfigField::File;
+    case TargetProfileField::Json:
+        return CookConfigField::Json;
+    case TargetProfileField::Text:
+        return CookConfigField::Text;
+    case TargetProfileField::Id:
+        return CookConfigField::Id;
+    case TargetProfileField::BulkAlignment:
+        return CookConfigField::BulkAlignment;
+    case TargetProfileField::TextureLodGroup:
+        return CookConfigField::TextureLodGroup;
+    case TargetProfileField::GraphicsBackends:
+        return CookConfigField::GraphicsBackends;
+    case TargetProfileField::ShaderFormats:
+        return CookConfigField::ShaderFormats;
     }
 
-    if (!IsValidProfileId(id)) {
-        return Fail(failure, CookConfigFile::None, CookConfigField::Id, ErrorCode::InvalidArgument);
-    }
-
-    out = TargetProfile(*context.allocator);
-    if (auto assigned = out.id.TryAssign(id); !assigned) {
-        return Fail(failure, CookConfigFile::None, CookConfigField::None, assigned.Error());
-    }
-
-    auto lease =
-        context.types->AcquireValueType(GeneratedType<TargetProfile>::Id(), TypeKind::Struct);
-    if (!lease) {
-        return Fail(failure, CookConfigFile::None, CookConfigField::None, lease.Error());
-    }
-
-    const AssignmentTarget target = AssignmentTarget::Value(
-        *context.registry, context.access, lease.Value(), &out, *context.allocator);
-    String path(*context.allocator);
-    struct Layer {
-        StringView directory;
-        CookConfigFile file;
-    };
-    const Layer layers[] = {{context.engineConfigDirectory, CookConfigFile::EngineProfile},
-                            {context.projectConfigDirectory, CookConfigFile::ProjectProfile}};
-    for (const Layer& layer : layers) {
-        if (auto joined =
-                JoinPath(layer.directory, TargetProfileDirectory, id, CookJsonExtension, path);
-            !joined) {
-            return Fail(failure, layer.file, CookConfigField::None, joined.Error());
-        }
-
-        bool existed = false;
-        if (auto applied = ApplyJsonFile(context, path.View(), target, diagnostics, layer.file,
-                                         failure, existed);
-            !applied) {
-            return applied;
-        }
-
-        if (!existed && layer.file == CookConfigFile::EngineProfile) {
-            // 엔진 플랫폼 목록이 기준이다 — 프로젝트만의 프로파일은 받지 않는다.
-            return Fail(failure, layer.file, CookConfigField::None, ErrorCode::InvalidArgument);
-        }
-
-        if (out.id.View() != id) {
-            return Fail(failure, layer.file, CookConfigField::Id, ErrorCode::InvalidArgument);
-        }
-    }
-
-    if (!IsValidBulkAlignment(out.bulkAlignment)) {
-        return Fail(failure, CookConfigFile::None, CookConfigField::BulkAlignment,
-                    ErrorCode::InvalidArgument);
-    }
-
-    // 텍스처 LOD 그룹(12.14절): 크기·maxAniso 0 이상·Min ≤ Max, mipGen은 SimpleAverage·NoMipmaps·
-    // Unfiltered, mipLoadOptions OnlyFirstMip은 계약.
-    for (const auto& entry : out.textureLodGroups) {
-        const TextureLodGroup& group = entry.value;
-        const TextureMipGenSettings mipGen = group.mipGenSettings;
-        const bool valid = group.minLodSize >= 0 && group.maxLodSize >= 0 && group.maxAniso >= 0 &&
-                           group.minLodSize <= group.maxLodSize &&
-                           (mipGen == TextureMipGenSettings::SimpleAverage ||
-                            mipGen == TextureMipGenSettings::NoMipmaps ||
-                            mipGen == TextureMipGenSettings::Unfiltered) &&
-                           group.mipLoadOptions != TextureMipLoadOptions::OnlyFirstMip;
-        if (!valid) {
-            return Fail(failure, CookConfigFile::None, CookConfigField::TextureLodGroup,
-                        ErrorCode::InvalidArgument, static_cast<uint32>(entry.key));
-        }
-    }
-
-    return Result<void>::Success();
+    return CookConfigField::None;
 }
 
-TextureLodGroup FindTextureLodGroup(const TargetProfile& profile, TextureGroup group) noexcept {
-    const TextureLodGroup* found = profile.textureLodGroups.Find(group);
-    return found != nullptr ? *found : TextureLodGroup{};
+CookConfigFile ToCookConfigFile(TargetProfileFile file) noexcept {
+    switch (file) {
+    case TargetProfileFile::None:
+        return CookConfigFile::None;
+    case TargetProfileFile::EngineProfile:
+        return CookConfigFile::EngineProfile;
+    case TargetProfileFile::ProjectProfile:
+        return CookConfigFile::ProjectProfile;
+    }
+
+    return CookConfigFile::None;
+}
+
+Result<void> ReadTargetProfile(const CookConfigContext& context, StringView id, TargetProfile& out,
+                               TextDiagnostics& diagnostics, CookConfigFailure* failure) noexcept {
+    const TargetProfileContext profiles{context.allocator,
+                                        context.files,
+                                        context.registry,
+                                        context.access,
+                                        context.types,
+                                        context.engineConfigDirectory,
+                                        context.projectConfigDirectory};
+    TargetProfileFailure read;
+    auto done = rocks::ReadTargetProfile(profiles, id, out, diagnostics, &read);
+    if (failure != nullptr) {
+        *failure = CookConfigFailure{};
+        failure->code = read.code;
+        failure->error = read.error;
+        failure->file = ToCookConfigFile(read.file);
+        failure->field = ToCookConfigField(read.field);
+        failure->index = read.index;
+        failure->line = read.line;
+        failure->column = read.column;
+    }
+
+    return done;
 }
 
 Result<void> ReadCookSettings(const CookConfigContext& context, CookSettings& out,

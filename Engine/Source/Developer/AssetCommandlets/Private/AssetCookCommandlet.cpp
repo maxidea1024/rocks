@@ -153,6 +153,11 @@ Result<void> AppendConfigField(StringBuilderBase& out, const CookConfigFailure& 
     case CookConfigField::PrimaryAssetDirectory:
         return out.TryAppendFormat("invalid primaryAssets[{}].directories[{}]", failure.index,
                                    failure.item);
+    case CookConfigField::GraphicsBackends:
+        return out.TryAppendFormat("invalid graphicsBackends[{}]", failure.index);
+    case CookConfigField::ShaderFormats:
+        // index는 backend 번호다(10.3절 1항 — 형식 목록 없음·키·형식 id·중복·상한).
+        return out.TryAppendFormat("invalid shaderFormats (backend {})", failure.index);
     case CookConfigField::TextureLodGroup:
         // index는 TextureGroup 값이다(12.14절 검증 — 크기·mipGen·mipLoadOptions).
         return out.TryAppendFormat("invalid textureLodGroups entry (TextureGroup value {})",

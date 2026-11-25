@@ -10,6 +10,6 @@ public sealed class AssetCooker : EngineModuleRules
 
     protected override string ModuleName => "AssetCooker";
 
-    // Texture: the texture LOD group table of TargetProfile uses its enums (TextureGroup, TextureMipGenSettings — section 12.14).
-    protected override string[] PublicDependencies => ["AssetDatabase", "AssetRuntime", "AssetNugget", "ObjectSerialization", "ReflectionText", "Texture"];
+    // TargetProfiles: the target profile struct, layering and checks (section 10.3.1 A4f1 — it also brings the Texture enums).
+    protected override string[] PublicDependencies => ["AssetDatabase", "AssetRuntime", "AssetNugget", "ObjectSerialization", "ReflectionText", "TargetProfiles"];
 }

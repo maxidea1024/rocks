@@ -1,5 +1,8 @@
 {
-  "graphicsBackend": "",
+  "graphicsBackends": ["OpenGL"],
+  "shaderFormats": {
+    "OpenGL": {"formats": ["GLES31_ANDROID"]}
+  },
   "textureNorm16Supported": false,
   "textureLodGroups": {
     "World": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},

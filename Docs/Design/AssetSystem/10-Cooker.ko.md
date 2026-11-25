@@ -378,7 +378,7 @@ v1은 A4f에서 v2(backend 표·비에셋 산출물 표 — 10.3절 4항)로 바
    - AssetCooker는 TargetProfiles에 public 의존하고 `HashTargetProfile`·CookSettings를 둔다. A5j1에서 더한 AssetCooker의 직접 Texture 의존은 TargetProfiles public 의존으로 대체한다.
    - 비용: `shader-compile`·SSD16 공급자도 TargetProfiles를 거쳐 Texture 런타임 모듈을 링크한다(엔진 실행 파일은 이미 가진다 — 비용은 셰이더 도구 쪽뿐). `TargetProfileContext`가 Registry·TypeRegistry를 요구하므로 셰이더 도구는 프로필을 읽으려고 ObjectRegistry 하나를 만든다(ReflectionText import 때문 — 피할 수 없다).
    - rocksids 이동은 한 커밋에서 한다(두 파일에 같은 Guid가 동시에 있지 않게). 같은 Guid라 TypeId와 `HashTargetProfile`의 필드 기록이 그대로이고, 프로필 SHA는 새 칸만큼만 바뀐다.
-3. **셰이더 칸**: `graphicsBackend`를 지우고(하위호환 없음) `graphicsBackends`·`shaderFormats`를 둔다. 1항 구조 검증의 위반은 새 칸 `TargetProfileField::GraphicsBackends`(index = 번호)·`ShaderFormats`(index = backend 번호, 형식 id 위반은 그 backend 번호)다.
+3. **셰이더 칸**: `graphicsBackend`를 지우고(하위호환 없음, 안정 id는 retired로 남긴다) `graphicsBackends`·`shaderFormats`를 둔다. 리플렉션 Map 값은 컨테이너를 담지 못하므로 `shaderFormats`는 `OrderedMap<String, ShaderFormatList{formats: Array<String>}>`다 — JSON은 `{"D3D12": {"formats": ["D3D12_SM6"]}}`(1항의 `Map<String, Array<String>>`과 뜻은 같고 한 층 감싼다, A4f 끝 알림에 넣는다). 1항 구조 검증의 위반은 새 칸 `TargetProfileField::GraphicsBackends`(index = 번호)·`ShaderFormats`(index = backend 번호, 형식 id 위반은 그 backend 번호)다.
 4. **호스트 프로필** `ReadHostTargetProfile(context, platform, out, diagnostics, failure)`: platform은 호출자가 넘긴 HostSettings 플랫폼 이름 재정의다(HostSettings.h 57 — 비면 HostConfig `HostPlatformName()`, Windows·Mac·Android). 그 이름으로 `ReadTargetProfile`을 부른다. 그래서 의존에 HostConfig를 더한다(가벼운 Core 모듈). Linux 호스트(BS6 보류)는 엔진 프로필 파일이 없어 엔진 파일 없음 진단(`InvalidSetting`·NotFound)이다.
 5. 엔진 파일 `Mac.json`(1항 값 — LOD 그룹 27행은 Windows와 같고, norm16 true), Windows·Android의 셰이더 칸(1항 값).
 

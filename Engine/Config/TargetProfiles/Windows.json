@@ -1,5 +1,10 @@
 {
-  "graphicsBackend": "D3D12",
+  "graphicsBackends": ["D3D12", "D3D11", "Vulkan"],
+  "shaderFormats": {
+    "D3D12": {"formats": ["D3D12_SM6"]},
+    "D3D11": {"formats": ["D3D11_SM5"]},
+    "Vulkan": {"formats": ["VULKAN_SM5"]}
+  },
   "textureLodGroups": {
     "World": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},
     "WorldNormalMap": {"minLodSize": 1, "maxLodSize": 16384, "lodBias": 0, "minMagFilter": "Aniso", "mipFilter": "Point", "mipGenSettings": "SimpleAverage"},

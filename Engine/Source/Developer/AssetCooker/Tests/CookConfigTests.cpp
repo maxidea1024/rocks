@@ -106,15 +106,17 @@ TEST(CookConfig_ProfileMerge) {
     ConfigScene scene;
     REQUIRE(scene.Ready());
     REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
-                        "{\"graphicsBackend\": \"D3D12\", \"bulkAlignment\": 8192}"));
+                        "{\"graphicsBackends\": [\"D3D12\"], \"shaderFormats\": "
+                        "{\"D3D12\": {\"formats\": [\"D3D12_SM6\"]}}, \"bulkAlignment\": 8192}"));
     TargetProfile profile(scene.env.allocator);
     REQUIRE(scene.Profile("Windows", profile, nullptr));
-    CHECK(profile.id.View() == "Windows" && profile.graphicsBackend.View() == "D3D12" &&
+    CHECK(profile.id.View() == "Windows" && profile.graphicsBackends.Size() == 1 &&
+          profile.graphicsBackends[0].View() == "D3D12" &&
           profile.bulkCodec == CookBulkCodec::None && profile.bulkAlignment == 8192);
     REQUIRE(scene.Write("Project/TargetProfiles/Windows.json",
                         "{\"id\": \"Windows\", \"bulkCodec\": \"Zstd\"}"));
     REQUIRE(scene.Profile("Windows", profile, nullptr));
-    CHECK(profile.graphicsBackend.View() == "D3D12" && profile.bulkCodec == CookBulkCodec::Zstd &&
+    CHECK(profile.graphicsBackends.Size() == 1 && profile.bulkCodec == CookBulkCodec::Zstd &&
           profile.bulkAlignment == 8192);
     // 다시 읽어도 앞 값이 남지 않는다(기본값에서 시작).
     scene.files.Remove("Project/TargetProfiles/Windows.json");
@@ -127,7 +129,7 @@ TEST(CookConfig_ProfileMerge) {
     real.files = &platform::PhysicalFileSystem();
     real.engineConfigDirectory = engineConfig.View();
     real.projectConfigDirectory = "cook-config-no-project";
-    const char* defaults[] = {"Windows", "Android"};
+    const char* defaults[] = {"Windows", "Android", "Mac"};
     for (const char* id : defaults) {
         TextDiagnostics diagnostics(scene.env.allocator);
         CookConfigFailure failure;
@@ -351,7 +353,9 @@ TEST(CookConfig_Hashes) {
     ConfigScene scene;
     REQUIRE(scene.Ready());
     CookConfigContext context = scene.Context(scene.env.allocator);
-    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", "{\"graphicsBackend\": \"D3D12\"}"));
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
+                        "{\"graphicsBackends\": [\"D3D12\"], \"shaderFormats\": "
+                        "{\"D3D12\": {\"formats\": [\"D3D12_SM6\"]}}}"));
     TargetProfile base(scene.env.allocator);
     REQUIRE(scene.Profile("Windows", base, nullptr));
     auto baseHash = HashTargetProfile(context, base);
@@ -376,7 +380,10 @@ TEST(CookConfig_Hashes) {
         REQUIRE(changed.id.TryAssign("Android"));
         CHECK(distinct(HashTargetProfile(context, changed).Value()));
         REQUIRE(scene.Profile("Windows", changed, nullptr));
-        REQUIRE(changed.graphicsBackend.TryAssign("Vulkan"));
+        REQUIRE(changed.graphicsBackends[0].TryAssign("Vulkan"));
+        CHECK(distinct(HashTargetProfile(context, changed).Value()));
+        REQUIRE(scene.Profile("Windows", changed, nullptr));
+        REQUIRE(changed.shaderFormats.Find(StringView("D3D12"))->formats[0].TryAssign("D3D12_SM5"));
         CHECK(distinct(HashTargetProfile(context, changed).Value()));
         REQUIRE(scene.Profile("Windows", changed, nullptr));
         changed.bulkCodec = CookBulkCodec::Zstd;
@@ -453,7 +460,9 @@ TEST(CookConfig_AllocationFailures) {
     ConfigScene scene;
     REQUIRE(scene.Ready());
     REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
-                        "{\"graphicsBackend\": \"D3D12 with a longer backend name\"}"));
+                        "{\"graphicsBackends\": [\"D3D12\", \"Vulkan\"], \"shaderFormats\": "
+                        "{\"D3D12\": {\"formats\": [\"D3D12_SM6_WITH_A_LONGER_FORMAT_NAME\"]}, "
+                        "\"Vulkan\": {\"formats\": [\"VULKAN_SM5\"]}}}"));
     REQUIRE(scene.Write("Project/TargetProfiles/Windows.json", "{\"bulkCodec\": \"Zstd\"}"));
     REQUIRE(scene.Write("Project/CookSettings.json",
                         "{\"alwaysCook\": [\"/Game/Maps/LongerDirectoryName/\"], "
@@ -490,7 +499,8 @@ TEST(CookConfig_AllocationFailures) {
             CHECK(profileHash.Value() == baseProfileHash.Value() &&
                   settingsHash.Value() == baseSettingsHash.Value());
             CHECK(profile.id.View() == baseProfile.id.View() &&
-                  profile.graphicsBackend.View() == baseProfile.graphicsBackend.View() &&
+                  profile.graphicsBackends.Size() == baseProfile.graphicsBackends.Size() &&
+                  profile.shaderFormats.Count() == baseProfile.shaderFormats.Count() &&
                   profile.bulkCodec == baseProfile.bulkCodec &&
                   profile.bulkAlignment == baseProfile.bulkAlignment);
             CHECK(settings.alwaysCook.Size() == 1 && settings.neverCook.Size() == 1 &&
@@ -645,13 +655,13 @@ TEST(CookConfig_TextureProfile) {
     real.files = &platform::PhysicalFileSystem();
     real.engineConfigDirectory = engineConfig.View();
     real.projectConfigDirectory = "cook-config-no-project";
-    const char* ids[] = {"Windows", "Android"};
+    const char* ids[] = {"Windows", "Android", "Mac"};
     for (const char* id : ids) {
         TextDiagnostics diagnostics(scene.env.allocator);
         TargetProfile engine(scene.env.allocator);
         REQUIRE(ReadTargetProfile(real, id, engine, diagnostics, &failure));
         CHECK(engine.textureLodGroups.Count() == 27);
-        CHECK(engine.textureNorm16Supported == (StringView(id) == "Windows"));
+        CHECK(engine.textureNorm16Supported == (StringView(id) != "Android"));
         const TextureLodGroup* group = engine.textureLodGroups.Find(TextureGroup::World);
         REQUIRE(group != nullptr);
         CHECK(group->maxLodSize == 16384 && group->minMagFilter == TextureLodMinMagFilter::Aniso &&
