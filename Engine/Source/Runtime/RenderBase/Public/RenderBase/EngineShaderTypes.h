@@ -37,8 +37,8 @@ ROCKS_SHADER_TYPE_NAME(BuiltinMeshPixelType, "BuiltinMeshPixel");
 // BuiltinMeshPixel의 텍스처 이름이다(PipelineBindingNames::texture).
 inline constexpr char BuiltinMeshAlbedoName[] = "Albedo";
 
-// 최소 tone map PS다(/Engine/Private/PostProcess/TonemapPass.rsf, Docs/Design/RenderBase 18.5절 3항).
-// FullscreenTriangleVertex와 짝이다. 텍스처 이름은 TonemapSceneColorName, 그리기별 상수는
+// 최소 tone map PS다(/Engine/Private/PostProcess/TonemapPass.rsf, Docs/Design/RenderBase 18.5절
+// 3항). FullscreenTriangleVertex와 짝이다. 텍스처 이름은 TonemapSceneColorName, 그리기별 상수는
 // TonemapConstants다. 출력은 선형 표시 색이고 sRGB 부호화는 대상 view가 한다. 렌더러 RS0에서
 // RendererShaders 모듈로 옮긴다.
 ROCKS_SHADER_TYPE_NAME(TonemapPixelType, "TonemapPixel");
@@ -48,8 +48,8 @@ inline constexpr char TonemapSceneColorName[] = "SceneColor";
 
 // TonemapPixel의 그리기별 상수다(48 byte, TonemapPass.rsf TonemapConstants). 기본값은 UE 5.8
 // FPostProcessSettings 기본값(Engine/Private/Scene.cpp — BlueCorrection 0.6, ExpandGamut 1,
-// ToneCurveAmount 1, FilmSlope 0.88, FilmToe 0.55, FilmShoulder 0.26, FilmBlackClip 0, FilmWhiteClip
-// 0.04)과 노출 배율 1이다.
+// ToneCurveAmount 1, FilmSlope 0.88, FilmToe 0.55, FilmShoulder 0.26, FilmBlackClip 0,
+// FilmWhiteClip 0.04)과 노출 배율 1이다.
 //
 // 사용 예:
 //   render::TonemapConstants tonemap;
@@ -112,10 +112,9 @@ enum class TextureInspectorDisplay : uint8 {
 //   inspector.selection[2] = depth;                 // volume 깊이(texel 수)
 //   inspector.selection[3] = static_cast<float>(render::TextureInspectorDisplay::Hdr);
 struct alignas(16) TextureInspectorConstants {
-    float exposure[4] = {TonemapConstants::DefaultExposureScale,
-                         TonemapConstants::DefaultBlueCorrection,
-                         TonemapConstants::DefaultExpandGamut,
-                         TonemapConstants::DefaultToneCurveAmount};
+    float exposure[4] = {
+        TonemapConstants::DefaultExposureScale, TonemapConstants::DefaultBlueCorrection,
+        TonemapConstants::DefaultExpandGamut, TonemapConstants::DefaultToneCurveAmount};
     float film[4] = {TonemapConstants::DefaultFilmSlope, TonemapConstants::DefaultFilmToe,
                      TonemapConstants::DefaultFilmShoulder, TonemapConstants::DefaultFilmBlackClip};
     float filmWhite[4] = {TonemapConstants::DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};

@@ -284,7 +284,8 @@ TEST(AssetOrphan_Undetermined) {
     {
         RootRef<Package> package;
         REQUIRE(!MakeAsset<TestAsset>(*env.source, 0xb06, package).IsNull());
-        const Array<uint8> record = OneFieldRecord(env.allocator, ImportRecordSchema);
+        const Array<uint8> record =
+            OneFieldRecord(env.allocator, ImportRecordSchema, ImportRecordVersion);
         PackageWriteOptions options = EditorOptions();
         options.importRecord = record.View();
         const Array<uint8> bytes = Write(env.allocator, *env.source, package.Handle(), options);

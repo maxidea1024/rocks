@@ -4,7 +4,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Core/Math/MathUtility.h>
 
-// 원본 디코더 시험이 함께 쓰는 도구다(Docs/Design/AudioSystem.ko.md 3.26–3.29절): 채널별 주파수
+// 원본 디코더 시험이 함께 쓰는 도구다(Docs/Design/AudioSystem 3.26–3.29절): 채널별 주파수
 // 확인(채널 순서), Ogg page CRC 다시 계산(page 검사를 지나 packet 디코더까지 가는 손상 시험),
 // 디코드 결과 SHA-256.
 namespace rocks::audio::sourcetest {

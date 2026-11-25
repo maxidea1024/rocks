@@ -24,6 +24,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::Actor::tickSettings_",
+      "id": "5103c0c5088547639a54f60302e0455a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::BoxComponent::boxExtent_",
       "id": "ee5c772194b0417a8854272022dfcf44",
       "aliases": [],
@@ -96,6 +103,13 @@
       "kind": "field",
       "name": "rocks::Component::enabled_",
       "id": "c5074d28e80b4e6992d165e099cf8ee7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Component::tickSettings_",
+      "id": "e800fd2b130e43d88e23fa0bc613af27",
       "aliases": [],
       "retired": false
     },
@@ -2662,6 +2676,55 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::TickSettings::fixedTick",
+      "id": "8dc9c02164294221a66e238638a27b04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TickSettings::intervalSeconds",
+      "id": "88b2b0f9598b4abca9be405bd181eda8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TickSettings::lateTick",
+      "id": "f675f92779e14ee6a5bd3d347998878d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TickSettings::phase",
+      "id": "64d8eaa4ac17461880f3c7341ea8aed1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TickSettings::priority",
+      "id": "c62b4468112c4cb3a9b45d78e5d33ebe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TickSettings::tick",
+      "id": "b6fc2f005a2245b69848dedf6864be6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TickSettings::tickWhenPaused",
+      "id": "2db893f0474e43c78346baece5db795f",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::Actor",
       "id": "390b007f97694694a6348a88ff0afe0f",
@@ -3127,6 +3190,20 @@
       "kind": "type",
       "name": "rocks::TemperatureMethod",
       "id": "0e233af283204d54a19bf1cb168c56cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TickPhase",
+      "id": "76eafb8204b645e28f4c2f2a057098b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TickSettings",
+      "id": "0b1591a15b324ed48fce3e930b7ae2f8",
       "aliases": [],
       "retired": false
     },

@@ -17,4 +17,7 @@ public sealed class AssetDatabase : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["AssetRuntime", "HostConfig", "ReflectionText"];
+
+    // Class default revert (asset-set --reset=) calls ObjectSerialization directly.
+    protected override string[] PrivateDependencies => ["ObjectSerialization"];
 }

@@ -14,6 +14,7 @@ namespace class_flag_graph_tests_file {
 using namespace rocks::test::map;
 using reflection_fixture::ClassFlagHolder;
 using reflection_fixture::DeprecatedThing;
+using reflection_fixture::EditorOnlyThing;
 using reflection_fixture::KindBase;
 using reflection_fixture::TransientChild;
 using reflection_fixture::TransientThing;
@@ -47,6 +48,7 @@ public:
         if (diagnostic.kind == FieldDiagnosticKind::ExternalReference) {
             external3 += diagnostic.value == 3 ? 1 : 0;
             external4 += diagnostic.value == 4 ? 1 : 0;
+            external5 += diagnostic.value == 5 ? 1 : 0;
         } else if (diagnostic.kind == FieldDiagnosticKind::TransientType) {
             ++transient;
         } else if (diagnostic.kind == FieldDiagnosticKind::DeprecatedType) {
@@ -61,6 +63,7 @@ public:
 
     usize external3 = 0;
     usize external4 = 0;
+    usize external5 = 0;
     usize transient = 0;
     usize deprecated = 0;
     usize missing = 0;
@@ -278,6 +281,64 @@ TEST(ClassFlagGraph_ExcludeAndKeepPolicies) {
             REQUIRE(target.Collect(target.OwnerAccess()));
             REQUIRE(target.Shutdown(target.OwnerAccess()));
         }
+    }
+
+    REQUIRE(objects.Collect(objects.OwnerAccess()));
+    REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+}
+
+// 저장 불가 마스크(에셋 A4e2b — 쿠킹 쓰기가 EditorOnly를 더한다): 기본 마스크는 EditorOnly 객체를
+// 보통 대상으로 저장하고, EditorOnly를 더하면 그 참조를 null + 진단 5로 쓰며 그것을 root·집합에
+// 두면 InvalidArgument다. Transient 대상은 마스크와 무관하게 진단 3이다.
+TEST(ClassFlagGraph_UnsaveableMaskAddsEditorOnly) {
+    SystemAllocator allocator;
+    ClassFlagFixture fixture(allocator);
+    ObjectRegistry objects(allocator, fixture.types, {0x434647, 9});
+    {
+        RootRef<ClassFlagHolder> holder = New<ClassFlagHolder>(objects);
+        RootRef<EditorOnlyThing> editor = New<EditorOnlyThing>(objects);
+        RootRef<TransientChild> transient = New<TransientChild>(objects);
+        With<ClassFlagHolder>(objects, holder.Handle(), [&](ClassFlagHolder& value) noexcept {
+            const auto access = objects.OwnerAccess();
+            CHECK(objects.SetReference(access, holder.Handle(), value.strong, editor.Handle()));
+            CHECK(objects.SetReference(access, holder.Handle(), value.needed, transient.Handle()));
+        });
+        CHECK(HasFlag(GeneratedType<EditorOnlyThing>::Schema().flags, TypeFlags::EditorOnly));
+
+        ObjectGraphSaveOptions options;
+        ClassFlagDiagnostics plain;
+        options.hooks = &plain;
+        REQUIRE(
+            SaveObjectGraph(allocator, objects, objects.OwnerAccess(), holder.Handle(), options));
+        CHECK(plain.external5 == 0 && plain.external3 == 1);
+
+        ClassFlagDiagnostics masked;
+        options.hooks = &masked;
+        options.unsaveableTypeFlags =
+            UnsaveableTypeFlags | static_cast<uint32>(TypeFlags::EditorOnly);
+        auto bytes =
+            SaveObjectGraph(allocator, objects, objects.OwnerAccess(), holder.Handle(), options);
+        REQUIRE(bytes);
+        CHECK(masked.external5 == 1 && masked.external3 == 1);
+        {
+            ObjectRegistry target(allocator, fixture.types, {0x434647, 10});
+            {
+                auto loaded = LoadObjectGraph(allocator, target, fixture.types,
+                                              target.OwnerAccess(), bytes.Value().View());
+                REQUIRE(loaded);
+                With<ClassFlagHolder>(
+                    target, loaded.Value().Handle(),
+                    [](ClassFlagHolder& value) noexcept { CHECK(value.strong.Handle().IsNull()); });
+            }
+
+            REQUIRE(target.Collect(target.OwnerAccess()));
+            REQUIRE(target.Shutdown(target.OwnerAccess()));
+        }
+
+        options.hooks = nullptr;
+        auto root =
+            SaveObjectGraph(allocator, objects, objects.OwnerAccess(), editor.Handle(), options);
+        CHECK(!root && root.Error() == ErrorCode::InvalidArgument);
     }
 
     REQUIRE(objects.Collect(objects.OwnerAccess()));

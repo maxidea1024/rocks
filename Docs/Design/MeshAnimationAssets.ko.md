@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-23, 개정 14(MA2b 선행을 MaterialSystem MS3에서 MS3a — `MaterialBase` 골격 — 로 좁힘, 13절). 개정 13(MA 묶음 리뷰 반영 — 3.7절 12, 5.4절 16·17, 6.4절 6, 7.5절 10, 12·13절). 개정 12(MA3a 구현 — 4.8절·12.6절). 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem/12-Textures.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-23, 개정 14(MA2b 선행을 MaterialSystem MS3에서 MS3a — `MaterialBase` 골격 — 로 좁힘, 13절). 개정 13(MA 묶음 리뷰 반영 — 3.7절 12, 5.4절 16·17, 6.4절 6, 7.5절 10, 12·13절). 개정 12(MA3a 구현 — 4.8절·12.6절). 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem/12-Textures/README.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -967,7 +967,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MR6 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1·15절 | 이 문서를 가리키는 연결(개정 1에서 반영) | 반영(개정 1) |
 | MR7 | 렌더 기반(GraphicsTypes) | `IndexFormat`을 Graphics에서 GraphicsTypes로 옮긴다(직렬화하는 쪽이 장치 없는 모듈을 쓰게) | 반영·결정(RenderBase 개정 30 결정 R20 — 고정 번호표 UInt16 = 1·UInt32 = 2, 이동은 MA2 착수 전) |
 | MR8 | Core 리플렉션 미러 | `FrameRate`·`Box<double>`·`Rotator<double>`·`Transform`·`LinearColor`의 Binds 미러가 있는지 확인하고 없으면 더한다(필드 타입으로 쓴다) | 확인함: `Rotator<double>`·`LinearColor`·`Transform` 미러는 있다(CoreTypeBindings/CoreValueTypes.h). `FrameRate`는 MA6a에서 더했다(7.5절 3). `Box<double>`는 MA2b에서 더한다 |
-| MR9 | [에셋 시스템](AssetSystem/12-Textures.ko.md) 12.4.5절·TargetProfile | 메시 LOD 그룹 표(screenSize·minLod 기본값)를 텍스처 LOD 그룹과 나란히 둔다 | 반영(AssetSystem 개정 10, 12.4.5절 — UE `FStaticMeshLODGroup` 멤버 대응) |
+| MR9 | [에셋 시스템](AssetSystem/12-Textures/12.4-Settings.ko.md) 12.4.5절·TargetProfile | 메시 LOD 그룹 표(screenSize·minLod 기본값)를 텍스처 LOD 그룹과 나란히 둔다 | 반영(AssetSystem 개정 10, 12.4.5절 — UE `FStaticMeshLODGroup` 멤버 대응) |
 | MR10 | 에셋 시스템 3·4.6절 | 모듈 그래프에 8절 다섯 모듈 추가, 11절 진단 코드 등록 | 반영(AssetSystem 개정 10, 3·4.6절) |
 
 ## 16. 개정 이력

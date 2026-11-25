@@ -55,7 +55,7 @@ float ComputeAzimuthDegrees(const Vec3& listenerForward, const Vec3& listenerRig
                             const Vec3& listenerToSound) noexcept {
     // UE GetAzimuth는 (앞 내적, 오른쪽 내적) 2D 방향의 atan(|y/x|)와 사분면으로 0–360°를 만든다.
     // atan2와 같은 결과이고, UE의 경계 결함(정왼쪽 90°, 정후면 0°, 수직 90°)만 Rocks는 270°·
-    // 180°·0°로 바로잡는다(Docs/Design/AudioSystem.ko.md 7절).
+    // 180°·0°로 바로잡는다(Docs/Design/AudioSystem 7절).
     const double x = static_cast<double>(Dot(listenerForward, listenerToSound));
     const double y = static_cast<double>(Dot(listenerRight, listenerToSound));
     if (PlatformMath::Sqrt(x * x + y * y) <= MinHorizontalLength) {

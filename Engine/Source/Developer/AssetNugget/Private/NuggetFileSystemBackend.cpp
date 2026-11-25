@@ -1,6 +1,7 @@
 #include "NuggetInternal.h"
 
 #include <AssetNugget/NuggetFileSystemBackend.h>
+#include <Base/NumericLimits.h>
 #include <Compression/CompressedBlocks.h>
 #include <Core/Algorithms.h>
 #include <Core/FileError.h>
@@ -23,6 +24,9 @@ constexpr StringView TemporaryExtension = ".tmp";
 constexpr StringView LockExtension = ".lock";
 constexpr StringView TemporaryDirectory = "tmp";
 constexpr int64 TicksPerDay = 24ll * 60 * 60 * platform::FileTicksPerSecond;
+// tick으로 바꿔도 넘치지 않는 최대 일수다(넘으면 "나이 제한 없음" — 9.1절 9).
+constexpr uint32 NuggetCollectMaxUnusedDays =
+    static_cast<uint32>(NumericLimits<int64>::Max() / TicksPerDay);
 // Exists 판정에서 값 byte를 흘려 읽는 버퍼 크기다.
 constexpr usize VerifyBufferBytes = 64 * 1024;
 
@@ -868,6 +872,11 @@ NuggetFileSystemBackend::Collect(const NuggetCollectOptions& options) noexcept {
         return Result<Out>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 읽기 전용 루트(공유 경로 등)는 지우지 않는다(Put과 대칭 — 9.1절 9).
+    if (readOnly_) {
+        return Result<Out>::Failure(ErrorCode::Unsupported);
+    }
+
     NameList top(*allocator_);
     if (auto listed = ListDirectory(*allocator_, *files_, root_.View(), top); !listed) {
         return Result<Out>::Failure(listed.Error());
@@ -955,9 +964,11 @@ NuggetFileSystemBackend::Collect(const NuggetCollectOptions& options) noexcept {
     }
 
     const int64 now = clock_->NowTicks();
-    const int64 unused = static_cast<int64>(options.unusedDays) * TicksPerDay;
+    // 넘치는 일수는 나이 제한 없음이다(부호 있는 곱의 넘침을 막는다).
+    const bool ageLimited = options.unusedDays <= NuggetCollectMaxUnusedDays;
+    const int64 unused = ageLimited ? static_cast<int64>(options.unusedDays) * TicksPerDay : 0;
     for (const CollectEntry& entry : entries) {
-        const bool old = now - entry.modified > unused;
+        const bool old = ageLimited && now - entry.modified > unused;
         const bool over = total > options.maxBytes;
         if (!old && !over) {
             ++result.kept;

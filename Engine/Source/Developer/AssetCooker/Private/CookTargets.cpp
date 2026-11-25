@@ -174,8 +174,29 @@ private:
         Keep(out_.diagnostics.TryPushBack(CookDiagnostic{code, warning, asset, related, setting}));
     }
 
-    bool IsNever(const AssetIndexEntry& entry) const noexcept {
-        return AnyMatches(never_.View(), entry.key.View());
+    // NeverCook 경로이거나 대표 타입이 EditorOnly 클래스인지다(EditorOnly 에셋은 NeverCook과 같은
+    // 규칙 — 결정 4, A4e2b). 대표 타입이 이 프로세스에 없으면(NotFound — 로드되지 않은 모듈)
+    // 판정하지 않는다(키 단계가 UnsupportedVersion 오류를 낸다). 그 밖의 조회 오류는 함수 오류로
+    // 남긴다.
+    bool IsNever(const AssetIndexEntry& entry) noexcept {
+        if (AnyMatches(never_.View(), entry.key.View())) {
+            return true;
+        }
+
+        if (entry.type == TypeId{}) {
+            return false;
+        }
+
+        auto type = request_.types->Acquire(entry.type);
+        if (!type) {
+            if (type.Error() != ErrorCode::NotFound) {
+                Keep(Result<void>::Failure(type.Error()));
+            }
+
+            return false;
+        }
+
+        return HasFlag(type.Value().Schema().flags, TypeFlags::EditorOnly);
     }
 
     // PrimaryAsset 규칙에 맞는 항목을 모은다(전체·부분 모두 — PrimaryAsset 표시에 쓴다).
@@ -351,14 +372,14 @@ private:
 
         if (primary_.Contains(id)) {
             for (const PackageTag& tag : entry.tags) {
-                if (!tag.key.View().StartsWith(CookBundleTagPrefix,
+                if (!tag.key.View().StartsWith(AssetBundleTagPrefix,
                                                StringComparison::CaseSensitive)) {
                     continue;
                 }
 
                 auto member = AssetId::TryParse(tag.value.View());
                 if (!member || member.Value().IsNull() ||
-                    tag.key.View().ByteCount() == CookBundleTagPrefix.ByteCount()) {
+                    tag.key.View().ByteCount() == AssetBundleTagPrefix.ByteCount()) {
                     Diagnose(AssetDiagnosticCode::CorruptPackage, false, id);
                 } else {
                     Follow(id, member.Value(), true);
@@ -440,8 +461,8 @@ private:
     Result<void> CollectBundles(const AssetIndexEntry& entry, CookTarget& target) noexcept {
         for (const PackageTag& tag : entry.tags) {
             const StringView key = tag.key.View();
-            if (!key.StartsWith(CookBundleTagPrefix, StringComparison::CaseSensitive) ||
-                key.ByteCount() == CookBundleTagPrefix.ByteCount()) {
+            if (!key.StartsWith(AssetBundleTagPrefix, StringComparison::CaseSensitive) ||
+                key.ByteCount() == AssetBundleTagPrefix.ByteCount()) {
                 continue;
             }
 
@@ -450,8 +471,8 @@ private:
                 continue;
             }
 
-            const StringView name(key.Data() + CookBundleTagPrefix.ByteCount(),
-                                  key.ByteCount() - CookBundleTagPrefix.ByteCount());
+            const StringView name(key.Data() + AssetBundleTagPrefix.ByteCount(),
+                                  key.ByteCount() - AssetBundleTagPrefix.ByteCount());
             // 태그는 (키, 값) 순이고 같은 쌍이 없다(PackageTags 형식) — 같은 bundle은 늘 마지막
             // 항목이고 구성원은 겹치지 않는다.
             const usize count = target.bundles.Size();

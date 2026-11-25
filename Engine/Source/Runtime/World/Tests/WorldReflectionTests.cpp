@@ -11,6 +11,7 @@
 #include <World/Component.generated.h>
 #include <World/Level.generated.h>
 #include <World/SceneComponent.generated.h>
+#include <World/WorldTypes.generated.h>
 #include <WorldTestFixtures/SaveFixture.generated.h>
 #include <WorldTestFixtures/WorldTestFixtures.module.generated.h>
 
@@ -255,13 +256,15 @@ TEST(WorldReflection_TypesAreWorldOnlyReflectedClasses) {
     };
 
     const Expected expected[] = {
+        // tickSettings(A5c)가 Actor·Component에 하나씩 더해졌다(파생은 상속 필드를 함께 센다).
         {ObjectTypeIdOf<Level>(), TypeId{}, 2},
-        {ObjectTypeIdOf<Actor>(), TypeId{}, 3},
-        {ObjectTypeIdOf<Component>(), TypeId{}, 1},
-        // SceneComponent: relativeTransform + CM0b 부착·절대·Mobility·가시성 8개(23.3절).
-        {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 10},
-        {ObjectTypeIdOf<SaveActor>(), ObjectTypeIdOf<Actor>(), 6},
-        {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 12},
+        {ObjectTypeIdOf<Actor>(), TypeId{}, 4},
+        {ObjectTypeIdOf<Component>(), TypeId{}, 2},
+        // SceneComponent: relativeTransform + CM0b 부착·절대·Mobility·가시성 8개(23.3절) + 상속
+        // tickSettings.
+        {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 11},
+        {ObjectTypeIdOf<SaveActor>(), ObjectTypeIdOf<Actor>(), 7},
+        {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 13},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);
@@ -878,6 +881,64 @@ TEST(WorldReflection_TraversalsSkipNullComponentSlots) {
 // World 필드는 경로로 읽을 수 있고(components[0]·rootComponent·relativeTransform.translation.x —
 // 도구 이름) ReadOnly라 경로 쓰기·배열 편집은 Unsupported(ReadOnly)다. fixture의 영속 필드는 경로로
 // 쓰고 옛 값을 받는다.
+// Tick 설정 리플렉션(A5c — RuntimeClassMetadata 'A5c 지문 연결'): Actor·Component의 tickSettings는
+// TickSettings struct 필드(ReadOnly 아님)이고 TickPhase enum 멤버를 가지며 Count는 Hidden이다.
+// 경로 쓰기는 struct 검증 hook(Validate = IsValidTickSettings)이 OnTick 단계 Physics·음수 간격을
+// 거부하고 맞는 값은 쓴다. 클래스 기본값 레코드에 들어간다(Actor 생성자 값).
+TEST(WorldReflection_TickSettingsAreReflected) {
+    ReflectedWorld fixture(9);
+    REQUIRE(fixture.Ready());
+    TypeRegistry& types = fixture.types;
+    const TypeId owners[] = {ObjectTypeIdOf<Actor>(), ObjectTypeIdOf<Component>()};
+    for (TypeId owner : owners) {
+        auto lease = types.Acquire(owner);
+        REQUIRE(lease);
+        const FieldSchema* tick = FindField(lease.Value().Schema(), "tickSettings");
+        REQUIRE(tick != nullptr);
+        CHECK(tick->value.kind == ValueKind::Struct && tick->flags == 0);
+        CHECK(FindField(lease.Value().Schema(), "tickSettings_") == nullptr);
+    }
+
+    auto settings = types.AcquireValueType(GeneratedType<TickSettings>::Id(), TypeKind::Struct);
+    REQUIRE(settings);
+    CHECK(settings.Value().Schema().fields.Size() == 7);
+    const FieldSchema* phase = FindField(settings.Value().Schema(), "phase");
+    REQUIRE(phase != nullptr);
+    CHECK(phase->value.kind == ValueKind::Enum);
+    CHECK(TickSettings::Validate(TickSettings{}));
+    TickSettings physics;
+    physics.tick = true;
+    physics.phase = TickPhase::Physics;
+    CHECK(ErrorOf(TickSettings::Validate(physics)) == ErrorCode::InvalidArgument);
+    TickSettings negative;
+    negative.intervalSeconds = -1.0;
+    CHECK(ErrorOf(TickSettings::Validate(negative)) == ErrorCode::InvalidArgument);
+
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto actor = world.SpawnActorDeferred<SaveActor>();
+    REQUIRE(actor);
+    Allocator& allocator = fixture.allocator;
+    ObjectRegistry& objects = world.Objects();
+    const ObjectAccessContext access = world.Access();
+    auto actorType = types.Acquire(ObjectTypeIdOf<SaveActor>());
+    REQUIRE(actorType);
+    PropertyPathBuffer path;
+    FieldValue value(allocator);
+    value.kind = ValueKind::Float64;
+    value.float64 = -2.0;
+    REQUIRE(ParsePropertyPath(actorType.Value(), StringView("tickSettings.intervalSeconds"), path));
+    CHECK(ErrorOf(PathWrite(objects, access, actor.Value(), path.View(), value)) ==
+          ErrorCode::InvalidArgument);
+    value.float64 = 0.25;
+    REQUIRE(PathWrite(objects, access, actor.Value(), path.View(), value));
+    auto read = world.With<Actor>(actor.Value(), [](Actor& owner) noexcept {
+        return Result<double>::Success(owner.GetTickSettings().intervalSeconds);
+    });
+    REQUIRE(read);
+    CHECK(read.Value() == 0.25);
+}
+
 TEST(WorldReflection_PathReadsWorldFieldsAndWritesOnlyFixtureFields) {
     ReflectedWorld fixture(8);
     REQUIRE(fixture.Ready());

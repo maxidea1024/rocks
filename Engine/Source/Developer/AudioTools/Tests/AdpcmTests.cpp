@@ -15,7 +15,7 @@ namespace adpcm_tests_file {
 using namespace rocks::audio;
 using platform::PlatformMath;
 
-// ADPCM 블록 코덱 시험이다(Docs/Design/AudioSystem.ko.md 3.24.4절). 정답은 UE Adpcm.cpp·
+// ADPCM 블록 코덱 시험이다(Docs/Design/AudioSystem 3.24.4절). 정답은 UE Adpcm.cpp·
 // AudioFormatADPCM.cpp의 식을 이 파일에 따로 옮긴 참조 구현이고, 표(계수·적응)도 시험 대상 헤더를
 // 쓰지 않고 리터럴로 둔다(표 값 오류를 잡기 위해서다).
 

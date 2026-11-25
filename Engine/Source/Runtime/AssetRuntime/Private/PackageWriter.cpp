@@ -11,6 +11,8 @@
 #include <Core/Containers/HashMap.h>
 #include <Core/FileError.h>
 #include <Core/Encoding/Crc32.h>
+#include <AssetRuntime/PackageReader.h>
+#include <ObjectSerialization/ClassDefaults.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Serialization/RecordList.h>
 
@@ -489,6 +491,42 @@ Result<void> BuildVersionList(Allocator& allocator, Span<const Guid> ids,
     return list.Finish(parent, field);
 }
 
+// 클래스 기본값 목록(RecordList[{id, fingerprint}] — A5c)을 parent의 Summary 필드로 쓴다.
+Result<void> BuildClassDefaultsList(Allocator& allocator, Span<const PackageClassDefaults> rows,
+                                    RecordBuilder& parent) noexcept {
+    RecordListLimits listLimits;
+    listLimits.maxItems = PackageMaxExports;
+    listLimits.maxPayloadBytes = static_cast<usize>(PackageMaxSectionBytes);
+    RecordListBuilder list(allocator, listLimits);
+    for (const PackageClassDefaults& row : rows) {
+        RecordBuilder item(allocator, ClassDefaultsItemSchema, 1);
+        uint8 guid[16];
+        StoreLittleEndian<uint64>(guid, row.type.high);
+        StoreLittleEndian<uint64>(guid + 8, row.type.low);
+        if (auto added = item.AddField(ClassDefaultsItemIdField, WireType::Guid, guid); !added) {
+            return added;
+        }
+
+        if (auto added =
+                item.AddField(ClassDefaultsItemFingerprintField, WireType::Bytes,
+                              Span<const uint8>(row.fingerprint.bytes, Sha256Digest::Bytes));
+            !added) {
+            return added;
+        }
+
+        auto built = item.Build();
+        if (!built) {
+            return Result<void>::Failure(built.Error());
+        }
+
+        if (auto added = list.AddItem(built.Value().View()); !added) {
+            return added;
+        }
+    }
+
+    return list.Finish(parent, SummaryClassDefaultsField);
+}
+
 Result<void> AddEngineVersion(Allocator& allocator, RecordBuilder& parent, Guid field,
                               EngineVersion version) noexcept {
     RecordBuilder record(allocator, EngineVersionSchema, 1);
@@ -654,6 +692,50 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
     Array<uint8> container(allocator);
     for (usize position = 0; position < drafts.Size(); ++position) {
         const BulkDraft& draft = drafts[position];
+        // 저장 byte 재사용(12.12절): 같은 codec의 이전 파일 entry는 다시 압축하지 않고 복사한다.
+        // 0 byte entry는 늘 None이라 쓰기 codec이 Zstd면 여기 오지 않는다(codec이 다르다).
+        auto stored = options.bulkSource->ReadStoredBulk(draft.original);
+        if (!stored && stored.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(stored.Error());
+        }
+
+        const BulkCodec wanted = draft.original.rawBytes == 0 ? BulkCodec::None : options.bulkCodec;
+        if (stored && stored.Value().codec == wanted &&
+            stored.Value().rawBytes == draft.original.rawBytes &&
+            stored.Value().sha256 == draft.original.sha256) {
+            const PackageStoredBulk& copy = stored.Value();
+            if (Crc32(copy.stored) != copy.crc32) {
+                return FailAsset<void>(
+                    failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, self,
+                    static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
+            }
+
+            if (position > 0) {
+                if (auto padded = out.Pad(alignment); !padded) {
+                    return padded;
+                }
+            }
+
+            PackageBulkEntry entry;
+            entry.bulkId = static_cast<uint32>(position + 1);
+            entry.flags = draft.editorOnly ? static_cast<uint32>(BulkEntryFlags::EditorOnly) : 0;
+            entry.offset = out.Position() - start;
+            entry.rawBytes = copy.rawBytes;
+            entry.sha256 = copy.sha256;
+            entry.storedBytes = copy.stored.Size();
+            entry.codec = copy.codec;
+            entry.crc32 = copy.crc32;
+            if (auto appended = out.Append(copy.stored); !appended) {
+                return appended;
+            }
+
+            if (auto pushed = index.TryPushBack(entry); !pushed) {
+                return pushed;
+            }
+
+            continue;
+        }
+
         auto raw = options.bulkSource->ReadBulk(draft.original);
         if (!raw) {
             return Result<void>::Failure(raw.Error());
@@ -979,7 +1061,11 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     const AssetId sourceId = self.Value();
     const AssetId selfId = options.duplicateId.IsNull() ? sourceId : options.duplicateId;
 
-    // 1. export 집합(깊이 우선, 저장 불가 부분 트리 제외).
+    // 1. export 집합(깊이 우선, 저장 불가 부분 트리 제외 — 쿠킹은 EditorOnly 클래스도 저장 불가다,
+    // A4e2b).
+    const uint32 unsaveableMask =
+        UnsaveableTypeFlags |
+        (options.kind == PackageKind::Cooked ? static_cast<uint32>(TypeFlags::EditorOnly) : 0u);
     Array<ObjectHandle> inners(allocator);
     if (auto collected = registry.CollectInners(access, package, InnerOrder::DepthFirst, inners);
         !collected) {
@@ -1016,7 +1102,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         auto type = registry.AcquireType(access, inner);
         ROCKS_ASSERT(type.IsOk());
 
-        const bool excluded = parent.excluded || IsUnsaveableType(type.Value());
+        const bool excluded = parent.excluded || IsUnsaveableType(type.Value(), unsaveableMask);
         Frame frame{inner, 0, excluded};
         if (!excluded) {
             if (exports.Size() >= PackageMaxExports) {
@@ -1095,6 +1181,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     WriterHooks hooks(allocator, registry, access, package, selfId, sourceId);
     ObjectGraphSaveOptions save;
     save.unsaveable = UnsaveablePolicy::Exclude;
+    save.unsaveableTypeFlags = unsaveableMask;
     save.policy.rejectMissingRequired = true;
     save.policy.excludedFlags =
         (options.kind == PackageKind::Cooked ? PackageWriterEditorOnlyFlag : 0) |
@@ -1102,6 +1189,10 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     save.hooks = &hooks;
     save.externals = GraphExternalPolicy::Admit;
     save.writeNodeTable = false;
+    // 패키지는 차이 형식이다(A5b — 기준 레코드와 같은 값은 쓰지 않는다, 쿠킹은 집합 없이).
+    save.baseline =
+        options.kind == PackageKind::Cooked ? GraphBaseline::Cooked : GraphBaseline::Editor;
+    save.overrides = options.kind == PackageKind::Cooked ? nullptr : options.overrides;
     auto saved = SaveObjectGraphSet(allocator, registry, access, exports.View(), save);
     if (!saved) {
         if (hooks.SawUnpackaged()) {
@@ -1110,6 +1201,43 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         }
 
         return Result<Out>::Failure(saved.Error());
+    }
+
+    // 클래스 기본값 목록(A5c — RuntimeClassMetadata 'A5c 지문 연결'): 레코드 있는 export 클래스의
+    // 지문이다(차이 저장이 이미 만들었으므로 조회). 레코드 없는 타입은 행이 없고, 레코드 실패는
+    // 차이 저장이 먼저 실패한다(여기 오면 같은 실패를 돌려준다). typeVersions는 export 타입 정렬
+    // 목록이다.
+    Array<PackageClassDefaults> classDefaults(allocator);
+    if (auto reserved = classDefaults.TryReserve(typeVersions.Size()); !reserved) {
+        return Result<Out>::Failure(reserved.Error());
+    }
+
+    const ClassDefaultsConfiguration defaultsConfiguration =
+        options.kind == PackageKind::Cooked ? ClassDefaultsConfiguration::Cooked
+                                            : ClassDefaultsConfiguration::Editor;
+    for (const PackageTypeVersion& row : typeVersions) {
+        auto lease = registry.Types().Acquire(row.type);
+        if (!lease) {
+            return Result<Out>::Failure(lease.Error());
+        }
+
+        auto status = ClassifyClassDefaults(lease.Value(), allocator);
+        if (!status) {
+            return Result<Out>::Failure(status.Error());
+        }
+
+        switch (status.Value().availability) {
+        case ClassDefaultsAvailability::Present:
+            (void)classDefaults.TryPushBack(PackageClassDefaults{
+                row.type, status.Value().defaults->Fingerprint(defaultsConfiguration)});
+            break;
+        case ClassDefaultsAvailability::WithoutRecord:
+            break;
+        case ClassDefaultsAvailability::Failed:
+            return Result<Out>::Failure(status.Value().diagnostic.error != ErrorCode::None
+                                            ? status.Value().diagnostic.error
+                                            : ErrorCode::InvalidArgument);
+        }
     }
 
     // 3. ObjectImports(AS 5.2절 순서 — 외부 참조 대상과 그 Outer 사슬, 객체마다 한 항목).
@@ -1311,6 +1439,10 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         if (auto list = BuildVersionList(allocator, ids.View(), versions.View(), summary,
                                          SummaryCustomVersionsField);
             !list) {
+            return Result<Out>::Failure(list.Error());
+        }
+
+        if (auto list = BuildClassDefaultsList(allocator, classDefaults.View(), summary); !list) {
             return Result<Out>::Failure(list.Error());
         }
     }

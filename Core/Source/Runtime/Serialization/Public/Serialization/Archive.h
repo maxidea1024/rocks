@@ -123,6 +123,10 @@ private:
     // 이미 쓴 범위 [offset, offset + bytes.Size())를 덮어쓴다(RecordWriter·RecordListWriter의
     // 길이·개수 채우기).
     Result<void> Patch(usize offset, Span<const uint8> bytes) noexcept;
+    // 쓴 byte를 앞 byteCount개만 남기고 버린다(RecordWriter::CancelField — 차이 쓰기가 기준과 같은
+    // 멤버를 걷어 낸다, Docs/Design/RuntimeClassMetadata.ko.md 'A5b'). 줄이기만 하므로 할당하지
+    // 않고, 청구한 작업량은 환급하지 않는다. 오류: byteCount가 지금 크기보다 큼 InvalidArgument.
+    Result<void> Truncate(usize byteCount) noexcept;
     Array<uint8> bytes_;
     ArchiveLimits limits_;
     uint64 operations_ = 0;

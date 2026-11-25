@@ -71,7 +71,7 @@
     }
   ],
   "notes": [
-    "Ogg Opus file decoder for the audio importer (Docs/Design/AudioSystem.ko.md section 3.29). Developer only: AudioTools links it.",
+    "Ogg Opus file decoder for the audio importer (Docs/Design/AudioSystem section 3.29). Developer only: AudioTools links it.",
     "OpusFile.Build.cs adds the Ogg and Opus include directories, because opusfile.h includes ogg/ogg.h and opus_multistream.h; consumers link OpusFile, Opus and Ogg.",
     "The UTF-8 file name conversion in stream.c (Windows op_fopen path) combines the fourth byte with & where | looks intended; the parentheses added by Rocks.patch keep the upstream behaviour. AudioTools opens memory streams only."
   ],

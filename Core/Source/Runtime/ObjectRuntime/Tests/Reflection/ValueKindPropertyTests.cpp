@@ -147,7 +147,7 @@ struct Holder final : Object {};
 
 constexpr TypeId HolderType{0x564b43, 1};
 
-Result<uint32> ClassEncode(const RuntimeFieldOps&, ObjectRegistry&, const ObjectAccessContext&,
+Result<uint32> ClassEncode(const RuntimeFieldOps&, ObjectRegistry*, const ObjectAccessContext&,
                            ObjectHandle, ArchiveWriter&, FieldEncodeContext&) noexcept {
     return Result<uint32>::Failure(ErrorCode::Unsupported);
 }

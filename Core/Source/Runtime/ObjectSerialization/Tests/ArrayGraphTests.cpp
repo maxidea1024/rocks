@@ -204,7 +204,7 @@ RuntimeFieldOps ClassCodecField(Guid id, const void* valueNative = nullptr) noex
     RuntimeFieldOps ops;
     ops.fieldId = id;
     ops.encode =
-        +[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access,
+        +[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access,
             ObjectHandle object, ArchiveWriter& out, FieldEncodeContext& context) noexcept {
             return detail::EncodeGeneratedField<O>(registry, access, object, Member, out, context);
         };

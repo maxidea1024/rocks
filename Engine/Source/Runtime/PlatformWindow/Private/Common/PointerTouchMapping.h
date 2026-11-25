@@ -31,14 +31,16 @@ enum class PointerTouchAction : uint8 {
     Cancelled
 };
 
+// 시험(PointerTouchMappingTests)이 부르므로 export한다(Modular 링크).
 // 메시지와 pointerFlags가 뜻하는 터치 동작이다. 모르는 메시지는 None이다. capture 상실은 그
 // 포인터의 취소다(UE는 처리하지 않지만 눌린 채 남지 않게 더했다 — 4.1절).
-PointerTouchAction TouchActionOf(uint32 message, uint32 pointerFlags) noexcept;
+ROCKS_PLATFORMWINDOW_API PointerTouchAction TouchActionOf(uint32 message,
+                                                          uint32 pointerFlags) noexcept;
 
 // 포인터 종류가 터치로 보낼 대상(터치·펜)인지다. 마우스(PT_MOUSE)는 WM_MOUSE* 경로를 쓴다.
-bool IsTouchPointerType(uint32 pointerType) noexcept;
+ROCKS_PLATFORMWINDOW_API bool IsTouchPointerType(uint32 pointerType) noexcept;
 
 // 0–1024 압력을 0–1로 바꾼다(넘으면 1).
-float NormalizePointerPressure(uint32 pressure) noexcept;
+ROCKS_PLATFORMWINDOW_API float NormalizePointerPressure(uint32 pressure) noexcept;
 
 } // namespace rocks::platform::pointer

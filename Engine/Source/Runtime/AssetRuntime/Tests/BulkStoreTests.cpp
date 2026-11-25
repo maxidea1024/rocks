@@ -554,6 +554,120 @@ TEST(FilePackageBulkStore_RebindAfterSave) {
     CHECK(reread.Read(RefOf(newBulk.entries[0])));
 }
 
+namespace {
+
+// bulk source를 감싸 ReadBulk 호출을 세고, 원하면 저장 byte 한 byte를 뒤집는다(CRC 손상).
+class CountingBulkSource final : public PackageBulkSource {
+public:
+    CountingBulkSource(Allocator& allocator, FilePackageBulkStore& store) noexcept
+        : store_(&store), copy_(allocator) {
+    }
+
+    Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override {
+        ++rawReads;
+        return store_->ReadBulk(ref);
+    }
+
+    Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept override {
+        auto stored = store_->ReadStoredBulk(ref);
+        if (!stored || !corrupt) {
+            return stored;
+        }
+
+        copy_.Clear();
+        if (!copy_.TryAppend(stored.Value().stored)) {
+            return Result<PackageStoredBulk>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        copy_[0] = static_cast<uint8>(copy_[0] ^ 1);
+        PackageStoredBulk changed = stored.Value();
+        changed.stored = copy_.View();
+        return Result<PackageStoredBulk>::Success(changed);
+    }
+
+    usize rawReads = 0;
+    bool corrupt = false;
+
+private:
+    FilePackageBulkStore* store_;
+    Array<uint8> copy_;
+};
+
+} // namespace
+
+// 저장 byte 재사용(Docs/Design/AssetSystem 12.12절): 파일 entry는 ReadStoredBulk가 저장 byte·codec·
+// crc를 준다(저장하지 않은 bulk·없는 id는 NotFound). 같은 codec(Zstd)으로 다시 쓰면 raw를 읽지 않고
+// 저장 byte·crc를 그대로 옮기고(새 파일 entry의 stored byte = 옛 것), 다른 codec(None)이면 raw를
+// 읽어 부호화한다. 저장 byte의 CRC가 틀리면 CorruptPackage다(원래 CRC를 옮기므로 세탁되지 않는다).
+// 기본 구현(MemoryBulkSource 등)은 NotFound다.
+TEST(FilePackageBulkStore_StoredReuse) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2510));
+    AttachedStore attached(env, scene.zstd.View());
+    REQUIRE(attached.ready);
+    FilePackageBulkStore& store = attached.store;
+    const PackageBulkEntry& first = attached.bulk.entries[0];
+    auto stored = store.ReadStoredBulk(RefOf(first));
+    REQUIRE(stored);
+    CHECK(stored.Value().codec == BulkCodec::Zstd && stored.Value().crc32 == first.crc32 &&
+          stored.Value().stored.Size() == first.storedBytes &&
+          stored.Value().rawBytes == first.rawBytes && stored.Value().sha256 == first.sha256);
+    BulkDataRef missing = RefOf(first);
+    missing.bulkId = 9;
+    CHECK(store.ReadStoredBulk(missing).Error() == ErrorCode::NotFound);
+    Array<uint8> raw(env.allocator);
+    FillIncompressible(raw, 16, 3);
+    auto unsaved = store.AddUnsaved(Copy(env.allocator, raw.View()));
+    REQUIRE(unsaved);
+    CHECK(store.ReadStoredBulk(unsaved.Value()).Error() == ErrorCode::NotFound);
+    CHECK(scene.bulk.ReadStoredBulk(RefOf(first)).Error() == ErrorCode::NotFound);
+
+    ObjectRegistry& registry = *env.source;
+    TestAsset* asset = Pointer<TestAsset>(registry, scene.asset);
+    REQUIRE(asset != nullptr);
+    asset->pixels = RefOf(attached.bulk.entries[0]);
+    asset->source = RefOf(attached.bulk.entries[1]);
+    auto part = registry.FindChild(registry.OwnerAccess(), scene.asset, "Part");
+    REQUIRE(part);
+    Pointer<TestPart>(registry, part.Value())->data = RefOf(attached.bulk.entries[2]);
+
+    CountingBulkSource counting(env.allocator, store);
+    PackageWriteOptions options = EditorOptions();
+    options.bulkSource = &counting;
+    options.bulkCodec = BulkCodec::Zstd;
+    const Array<uint8> reused = Write(env.allocator, registry, scene.package.Handle(), options);
+    REQUIRE(!reused.IsEmpty());
+    CHECK(counting.rawReads == 0);
+    FileBulk reusedBulk(env.allocator);
+    REQUIRE(ReadFileBulk(env.allocator, reused.View(), reusedBulk));
+    REQUIRE(reusedBulk.entries.Size() == attached.bulk.entries.Size());
+    for (usize index = 0; index < reusedBulk.entries.Size(); ++index) {
+        const PackageBulkEntry& before = attached.bulk.entries[index];
+        const PackageBulkEntry& after = reusedBulk.entries[index];
+        CHECK(after.codec == BulkCodec::Zstd && after.crc32 == before.crc32 &&
+              after.storedBytes == before.storedBytes && after.sha256 == before.sha256);
+        CHECK(memcmp(reused.Data() + reusedBulk.bulkOffset + after.offset,
+                     scene.zstd.Data() + attached.bulk.bulkOffset + before.offset,
+                     static_cast<usize>(after.storedBytes)) == 0);
+    }
+
+    options.bulkCodec = BulkCodec::None;
+    const Array<uint8> recoded = Write(env.allocator, registry, scene.package.Handle(), options);
+    REQUIRE(!recoded.IsEmpty());
+    CHECK(counting.rawReads == attached.bulk.entries.Size());
+    CHECK(recoded.Size() == scene.raw.Size());
+
+    counting.corrupt = true;
+    options.bulkCodec = BulkCodec::Zstd;
+    AssetDiagnostic failure;
+    const Array<uint8> refused =
+        Write(env.allocator, registry, scene.package.Handle(), options, &failure);
+    CHECK(refused.IsEmpty() && failure.code == AssetDiagnosticCode::CorruptPackage &&
+          failure.section == static_cast<uint32>(PackageSectionKind::Bulk));
+}
+
 // Detach(7.1절 6·15): 아직 읽지 않은 entry를 모두 읽어 두고 파일과의 연결을 끊는다 — 뒤에 파일을
 // 지워도 읽힌다. 손상 entry가 있으면 그 오류이고 연결은 그대로다. 두 번째 Detach는 무동작이다.
 TEST(FilePackageBulkStore_Detach) {

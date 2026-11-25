@@ -296,6 +296,14 @@ enum class SummaryFault {
     SettingsSize,
     CookerWire,
     CookerSize,
+    // 클래스 기본값 목록(A5c — RuntimeClassMetadata 'A5c 지문 연결'): 필드 없음, 정렬·중복, 항목
+    // id wire·지문 크기·필드 수.
+    NoClassDefaults,
+    DefaultsUnsorted,
+    DefaultsDuplicate,
+    DefaultsIdWire,
+    DefaultsDigestSize,
+    DefaultsItemFieldCount,
     Count
 };
 
@@ -305,7 +313,41 @@ struct SummaryInput {
     bool editor = false;
     // 참이면 항목 고장(Item*·정렬)을 타입 표 대신 커스텀 버전 표에 넣는다.
     bool faultCustoms = false;
+    // 클래스 기본값 목록이다(A5c — 비면 행 없음).
+    Span<const PackageClassDefaults> classDefaults{};
 };
+
+// 클래스 기본값 목록 항목 하나를 넣는다(Defaults* 고장).
+inline Result<void> AddClassDefaultsItem(Allocator& allocator, RecordListBuilder& list,
+                                         const PackageClassDefaults& row,
+                                         SummaryFault fault) noexcept {
+    RecordBuilder item(allocator, package_detail::ClassDefaultsItemSchema, 1);
+    uint8 guid[16];
+    StoreLittleEndian<uint64>(guid, row.type.high);
+    StoreLittleEndian<uint64>(guid + 8, row.type.low);
+    Result<void> added =
+        fault == SummaryFault::DefaultsIdWire
+            ? item.AddField(package_detail::ClassDefaultsItemIdField, WireType::Bytes, guid)
+            : item.AddField(package_detail::ClassDefaultsItemIdField, WireType::Guid, guid);
+    if (added) {
+        added = item.AddField(
+            package_detail::ClassDefaultsItemFingerprintField, WireType::Bytes,
+            Span<const uint8>(row.fingerprint.bytes, fault == SummaryFault::DefaultsDigestSize
+                                                         ? Sha256Digest::Bytes - 1
+                                                         : Sha256Digest::Bytes));
+    }
+
+    if (added && fault == SummaryFault::DefaultsItemFieldCount) {
+        added = item.AddField(Guid{10, 10}, WireType::Guid, guid);
+    }
+
+    if (!added) {
+        return added;
+    }
+
+    auto built = item.Build();
+    return built ? list.AddItem(built.Value().View()) : Result<void>::Failure(built.Error());
+}
 
 inline Result<void> AddVersionItem(Allocator& allocator, RecordListBuilder& list, Guid id,
                                    uint32 version, SummaryFault fault) noexcept {
@@ -436,6 +478,25 @@ inline Array<uint8> SummaryBytes(Allocator& allocator, const SummaryInput& input
     list(fault == SummaryFault::NoCustoms ? Guid{12, 12}
                                           : package_detail::SummaryCustomVersionsField,
          false);
+    {
+        RecordListBuilder rows(allocator);
+        const usize count = input.classDefaults.Size();
+        for (usize index = 0; ok && index < count; ++index) {
+            const usize position =
+                fault == SummaryFault::DefaultsUnsorted ? count - 1 - index : index;
+            ok = AddClassDefaultsItem(allocator, rows, input.classDefaults[position], fault).IsOk();
+            if (ok && fault == SummaryFault::DefaultsDuplicate && index == 0) {
+                ok = AddClassDefaultsItem(allocator, rows, input.classDefaults[position],
+                                          SummaryFault::None)
+                         .IsOk();
+            }
+        }
+
+        ok = ok && rows.Finish(summary, fault == SummaryFault::NoClassDefaults
+                                            ? Guid{18, 18}
+                                            : package_detail::SummaryClassDefaultsField)
+                       .IsOk();
+    }
     if (input.editor) {
         const EngineVersion saved = TestEngineVersion;
         EngineVersion compatible = saved.CompatibleBaseline();

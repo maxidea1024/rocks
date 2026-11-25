@@ -344,6 +344,20 @@ TEST(AssetReimportCommand_Reimports) {
                   .Contains("asset-reimport: MissingSource: /Game/Rock"));
     }
 
+    // 원본 전체 교체(`--replace-sources` — 7.1절 19 A2f3b): 역할 있는 원본으로 기록 원본 전체를
+    // 바꾼다 (시험 임포터의 유일한 고정 역할 source).
+    {
+        char replacement[512] = {};
+        FixedStringBuilder replacementOption{Span<char>(replacement)};
+        REQUIRE(
+            replacementOption.TryAppendFormat("--source.source={}/Other.trock", scene.root.Root()));
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--replace-sources", replacementOption.View(),
+                                   projectOption.View()};
+        CHECK(run.Reimport(args) == 0);
+        CHECK(run.captured.out.View().StartsWith("asset-reimport: /Game/Rock "));
+    }
+
     // 사용법(종료 2)·도움말.
     const StringView noPath[] = {"--wait=1"};
     const StringView positionalSource[] = {"/Game/A", "a.trock"};
@@ -352,8 +366,14 @@ TEST(AssetReimportCommand_Reimports) {
     const StringView mixed[] = {"/Game/A", "--source=a", "--source.px=b"};
     const StringView mixedReverse[] = {"/Game/A", "--source.px=b", "--source=a"};
     const StringView emptySource[] = {"/Game/A", "--source="};
-    const Span<const StringView> cases[] = {noPath, positionalSource, importer,   sourceTwice,
-                                            mixed,  mixedReverse,     emptySource};
+    // --replace-sources는 역할 있는 원본과만, 한 번만 쓴다.
+    const StringView replaceAlone[] = {"/Game/A", "--replace-sources"};
+    const StringView replaceSingle[] = {"/Game/A", "--replace-sources", "--source=a"};
+    const StringView replaceTwice[] = {"/Game/A", "--replace-sources", "--replace-sources",
+                                       "--source.px=b"};
+    const Span<const StringView> cases[] = {
+        noPath,       positionalSource, importer,     sourceTwice,   mixed,
+        mixedReverse, emptySource,      replaceAlone, replaceSingle, replaceTwice};
     for (Span<const StringView> args : cases) {
         Run run(env.allocator, &state);
         CHECK(run.Reimport(args) == 2);

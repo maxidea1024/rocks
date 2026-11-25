@@ -8,6 +8,10 @@
 
 namespace rocks {
 
+namespace detail {
+struct LevelGraphTestAccess;
+}
+
 // World 안의 Actor 묶음이다. Level이 자기 Actor를 강한 GC 간선 목록으로 소유하고, World는 Level의
 // 루트만 보유한다(World -> Level -> Actor -> Component). World는 시작할 때 영구(persistent) Level을
 // 하나 만들며, 서브 Level은 World::CreateLevel로 추가한다. 향후 레벨 스트리밍·월드 분할의
@@ -60,6 +64,8 @@ public:
 
 private:
     friend class World;
+    // 편입 시험이 장부 밖 그래프를 손상시킨다(Private/LevelGraphTestAccess.h — Tests/ 전용).
+    friend struct detail::LevelGraphTestAccess;
 
     ROCKS_NATIVE() World* world_ = nullptr;
     ROCKS_PROPERTY(ReadOnly, Required, Name = "actors") ObjectRefArray<Actor> actors_;

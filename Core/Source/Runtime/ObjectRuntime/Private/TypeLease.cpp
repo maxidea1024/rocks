@@ -1,8 +1,12 @@
 #include "TypeRegistryInternal.h"
 
 #include <Object/TypeRegistry.h>
+#include <Base/Checked.h>
 #include <Platform/Atomics.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
+#include <Platform/Sync.h>
 
 // TypeLease·StructView(TypeLease.h)의 레코드 접근이다. 스키마·함수표·enum·struct 필드 대상, 필드
 // ID 정렬 색인 조회, 상속 사슬 판정(IsA·IsNativeA)을 둔다.
@@ -301,6 +305,130 @@ usize TypeLease::ObjectOffset() const noexcept {
 
     return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(
         &static_cast<TypeRegistry::Record*>(record_)->objectOffset);
+}
+
+Result<const ClassDefaults*>
+TypeLease::ResolveClassDefaults(ClassDefaultsBuilder builder, void* user,
+                                ClassDefaultsDiagnostic* diagnostic) const noexcept {
+    using Out = Result<const ClassDefaults*>;
+    if (!record_) {
+        platform::Fatal("Access to an empty TypeLease");
+    }
+
+    auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (record->kind != TypeKind::Class || builder == nullptr) {
+        return Out::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 게시된 상태(성공·실패 기억)를 돌려준다.
+    auto settled = [&](const ClassDefaultsState& state) noexcept {
+        if (!state.failed) {
+            return Out::Success(&state.defaults);
+        }
+
+        if (diagnostic != nullptr) {
+            *diagnostic = state.diagnostic;
+        }
+
+        return Out::Failure(state.diagnostic.error);
+    };
+    if (const ClassDefaultsState* state =
+            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&record->defaults)) {
+        return settled(*state);
+    }
+
+    TypeRegistry& owner = *owner_;
+    const uint64 self = platform::CurrentThreadId();
+    if (platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_) == self) {
+        platform::Fatal("Class defaults builder re-entered on the same thread");
+    }
+
+    platform::LockGuard lock(owner.defaultsGate_);
+    // 잠금을 기다리는 동안 다른 스레드가 게시했을 수 있다.
+    if (const ClassDefaultsState* state =
+            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&record->defaults)) {
+        return settled(*state);
+    }
+
+    ClassDefaultsDraft draft;
+    ClassDefaultsDiagnostic local;
+    local.type = record->schema.id;
+    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_, self);
+    auto built = builder(user, *this, owner, draft, local);
+    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_, uint64{0});
+    if (!built) {
+        local.error = built.Error();
+        if (local.reason == ClassDefaultsReason::None) {
+            local.reason = ClassDefaultsReason::EncodeFailed;
+        }
+
+        if (diagnostic != nullptr) {
+            *diagnostic = local;
+        }
+
+        if (!IsRememberedClassDefaultsFailure(local)) {
+            return Out::Failure(built.Error());
+        }
+
+        // 기억할 자리를 받지 못하면 기억하지 않고 원래 오류를 돌려준다(다음 호출이 다시 만든다).
+        auto memory =
+            owner.allocator_.Allocate(sizeof(ClassDefaultsState), alignof(ClassDefaultsState));
+        if (!memory) {
+            return Out::Failure(built.Error());
+        }
+
+        auto* state = ::new (memory.Value()) ClassDefaultsState();
+        state->failed = true;
+        state->diagnostic = local;
+        platform::AtomicStore<platform::MemoryOrder::Release>(&record->defaults, state);
+        return Out::Failure(built.Error());
+    }
+
+    // 상태와 두 Record byte를 한 블록에 둔다(상태 뒤에 editor → cooked).
+    usize total = 0;
+    if (!TryAdd(sizeof(ClassDefaultsState), draft.editorRecord.Size(), total) ||
+        !TryAdd(total, draft.cookedRecord.Size(), total)) {
+        return Out::Failure(ErrorCode::Overflow);
+    }
+
+    auto memory = owner.allocator_.Allocate(total, alignof(ClassDefaultsState));
+    if (!memory) {
+        if (diagnostic != nullptr) {
+            *diagnostic = local;
+            diagnostic->error = memory.Error();
+        }
+
+        return Out::Failure(memory.Error());
+    }
+
+    auto* state = ::new (memory.Value()) ClassDefaultsState();
+    uint8* bytes = static_cast<uint8*>(memory.Value()) + sizeof(ClassDefaultsState);
+    platform::MemoryCopy(bytes, draft.editorRecord.Data(), draft.editorRecord.Size());
+    platform::MemoryCopy(bytes + draft.editorRecord.Size(), draft.cookedRecord.Data(),
+                         draft.cookedRecord.Size());
+    state->defaults.editor_ = Span<const uint8>(bytes, draft.editorRecord.Size());
+    state->defaults.cooked_ =
+        Span<const uint8>(bytes + draft.editorRecord.Size(), draft.cookedRecord.Size());
+    state->defaults.editorFingerprint_ = draft.editorFingerprint;
+    state->defaults.cookedFingerprint_ = draft.cookedFingerprint;
+    platform::AtomicStore<platform::MemoryOrder::Release>(&record->defaults, state);
+    return Out::Success(&state->defaults);
+}
+
+bool TypeLease::HasGeneratedFieldCodecs() const noexcept {
+    if (!record_) {
+        platform::Fatal("Access to an empty TypeLease");
+    }
+
+    // base 사슬은 등록 동안 바뀌지 않는다(base는 의존 계수로 파생보다 오래 산다).
+    for (const auto* record = static_cast<const TypeRegistry::Record*>(record_); record != nullptr;
+         record = record->base) {
+        if (!record->ops.generatedFieldCodecs) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool TypeLease::RecordObjectOffset(usize offset) const noexcept {

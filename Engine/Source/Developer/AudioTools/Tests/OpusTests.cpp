@@ -18,7 +18,7 @@ using namespace rocks::audio;
 using namespace rocks::audio::opusfixtures;
 using namespace rocks::audio::sourcetest;
 
-// Ogg Opus 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.29.3절).
+// Ogg Opus 원본 디코드 시험이다(Docs/Design/AudioSystem 3.29.3절).
 
 namespace {
 

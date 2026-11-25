@@ -25,9 +25,9 @@
 //                                  --inject-key-at-frame N은 시험용으로 N번째 프레임에 입력 큐에
 //                                  W 키 눌림을 넣는다
 //                                  --graphics=<auto|d3d12|d3d11|vulkan|opengl>는 창 렌더 경로의
-//                                  장치다(기본 auto — D3D12 → Vulkan → OpenGL ES), --graphics-validation은 API 검증
-//                                  계층을 켜고, --no-render는 렌더 없이 창만 연다
-//                                  (Docs/Design/RenderBase 18.5절)
+//                                  장치다(기본 auto — D3D12 → Vulkan → OpenGL ES),
+//                                  --graphics-validation은 API 검증 계층을 켜고, --no-render는 렌더
+//                                  없이 창만 연다 (Docs/Design/RenderBase 18.5절)
 //
 // 진입점은 Launch 공통 실행 계층이다(Docs/Design/CrashHandlingAndLaunch.ko.md 16절). Launch가
 // 명령줄을 UTF-8로 캡처하고 크래시 수집(덤프 도우미 포함)을 설치한다. 로그(Docs/Design/

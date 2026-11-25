@@ -1,5 +1,6 @@
 #include "AssetDatabaseInternal.h"
 
+#include <AssetDatabase/AssetBundleTags.h>
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetDatabase/LogicalPath.h>
@@ -103,6 +104,49 @@ usize EditorParentBytes(StringView path) noexcept {
     }
 
     return slash - 1;
+}
+
+// 열린 패키지의 override 집합을 그래프 저장에 보이는 어댑터다(A5b — 저장 동안만 산다).
+class PackageOverrides final : public GraphOverrides {
+public:
+    explicit PackageOverrides(const HashMap<ObjectHandle, OverrideSet>& map) noexcept : map_(map) {
+    }
+
+    const OverrideSet* Find(ObjectHandle object) const noexcept override {
+        return map_.Find(object);
+    }
+
+private:
+    const HashMap<ObjectHandle, OverrideSet>& map_;
+};
+
+// 경고 text 칸에 NUL로 끝나는 ASCII 문자열을 복사한다(칸보다 길면 자른다).
+void CopyWarningText(const char* text, char* out, usize capacity) noexcept {
+    usize at = 0;
+    while (text[at] != '\0' && at + 1 < capacity) {
+        out[at] = text[at];
+        ++at;
+    }
+
+    out[at] = '\0';
+}
+
+// 경고 text 칸에 십진수를 쓴다(NUL로 끝남 — uint64는 20자리라 칸에 늘 들어간다).
+void FormatDecimalText(uint64 value, char* out, usize capacity) noexcept {
+    constexpr usize MaxDigits = 20;
+    char digits[MaxDigits];
+    usize count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+
+    usize at = 0;
+    while (count != 0 && at + 1 < capacity) {
+        out[at++] = digits[--count];
+    }
+
+    out[at] = '\0';
 }
 
 } // namespace
@@ -698,6 +742,8 @@ Result<void> EditorPackageSet::PreparePending(Pending& pending,
     options.bulk = PackageBulkMode::Defer;
     options.read = config_.read;
     options.read.expectedKind = PackageKind::Editor;
+    // 파일에 있는 값 경로가 override 집합이다(A5b — 공개 전에 노드 handle로 옮긴다).
+    options.collectPresent = true;
     auto state = UniquePtr<PackageLoadState>::TryMake(allocator, allocator, *registry_,
                                                       *config_.types, Access(), options);
     if (!state) {
@@ -937,6 +983,81 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         (void)infos.TryPushBack(Move(info));
     }
 
+    // 파일에 있던 값 경로를 객체 handle의 override 집합으로 옮긴다(A5b — 공개 전이라 실패하면
+    // 아무것도 열리지 않는다). 모르는 필드·정규화할 수 없는 경로는 버린다.
+    for (usize slot = 0; slot < count; ++slot) {
+        PackageLoadState& state = *pending[origin[slot]].state;
+        const Span<const ObjectHandle> nodes = state.Stage().Nodes();
+        EditorPackageInfo& info = infos[slot];
+        for (usize at = 0; at < state.PresentCount(); ++at) {
+            const uint32 node = state.PresentObject(at);
+            if (node >= nodes.Size()) {
+                continue;
+            }
+
+            auto lease = transaction.AcquireType(nodes[node]);
+            if (!lease) {
+                return oom(lease.Error());
+            }
+
+            OverrideSet* set = info.overrides.Find(nodes[node]);
+            if (set == nullptr) {
+                if (auto inserted = info.overrides.Insert(nodes[node], OverrideSet(allocator));
+                    !inserted) {
+                    return oom(inserted.Error());
+                }
+
+                set = info.overrides.Find(nodes[node]);
+            }
+
+            if (auto added = AddPresentUnit(lease.Value(), state.PresentPath(at), *set); !added) {
+                return oom(added.Error());
+            }
+        }
+    }
+
+    // 클래스 기본값 경고(A5c): 저장 당시와 다른 클래스(text = 그 클래스의 export 수), 지금 레코드를
+    // 만들 수 없는 클래스(text = 이유). 공개 전에 만들어 둔다.
+    Array<EditorWarning> defaultsWarnings(allocator);
+    if (warnings != nullptr) {
+        for (usize slot = 0; slot < count; ++slot) {
+            const PackageContents& contents = pending[origin[slot]].state->Contents();
+            const AssetId package = pending[origin[slot]].id;
+            for (TypeId type : contents.changedDefaults) {
+                uint64 exports = 0;
+                for (const PackageExportEntry& entry : contents.exports) {
+                    exports += entry.type == type ? 1 : 0;
+                }
+
+                EditorWarning warning;
+                warning.kind = EditorWarningKind::ClassDefaultsChanged;
+                warning.diagnostic =
+                    EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, package,
+                                     static_cast<uint32>(PackageSectionKind::Summary));
+                warning.diagnostic.related = AssetId{type};
+                warning.diagnostic.detail = exports;
+                FormatDecimalText(exports, warning.text, EditorWarningTextBytes);
+                if (auto pushed = defaultsWarnings.TryPushBack(warning); !pushed) {
+                    return oom(pushed.Error());
+                }
+            }
+
+            for (const PackageUnavailableDefaults& one : contents.unavailableDefaults) {
+                EditorWarning warning;
+                warning.kind = EditorWarningKind::ClassDefaultsUnavailable;
+                warning.diagnostic =
+                    EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, package,
+                                     static_cast<uint32>(PackageSectionKind::Summary));
+                warning.diagnostic.related = AssetId{one.type};
+                CopyWarningText(ClassDefaultsReasonName(one.reason), warning.text,
+                                EditorWarningTextBytes);
+                if (auto pushed = defaultsWarnings.TryPushBack(warning); !pushed) {
+                    return oom(pushed.Error());
+                }
+            }
+        }
+    }
+
     if (auto reserved = open_.TryReserve(open_.Size() + count); !reserved) {
         return oom(reserved.Error());
     }
@@ -946,8 +1067,8 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
     }
 
     if (warnings != nullptr) {
-        if (auto reserved =
-                warnings->TryReserve(warnings->Size() + excluded.Size() + unresolved.Size());
+        if (auto reserved = warnings->TryReserve(warnings->Size() + excluded.Size() +
+                                                 unresolved.Size() + defaultsWarnings.Size());
             !reserved) {
             return oom(reserved.Error());
         }
@@ -976,6 +1097,10 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
                                  static_cast<uint32>(PackageSectionKind::ObjectImports));
             warning.diagnostic.related = one.target;
             warning.diagnostic.detail = one.import;
+            (void)warnings->TryPushBack(warning);
+        }
+
+        for (const EditorWarning& warning : defaultsWarnings) {
             (void)warnings->TryPushBack(warning);
         }
     }
@@ -1087,6 +1212,20 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         creating_ = false;
         if (!initialized) {
             return fail(AssetDiagnosticCode::None, initialized.Error());
+        }
+
+        // 초기화가 쓴 경로는 override 집합이다(A5b — 공개 전에 설치해 공개 뒤 실패하지 않는다).
+        if (const OverrideSet* initial = initializer->InitialOverrides();
+            initial != nullptr && !initial->IsEmpty()) {
+            OverrideSet copy(*allocator_);
+            if (auto copied = copy.TryAssign(*initial); !copied) {
+                return fail(AssetDiagnosticCode::None, copied.Error());
+            }
+
+            if (auto inserted = info.overrides.Insert(representative.Value(), Move(copy));
+                !inserted) {
+                return fail(AssetDiagnosticCode::None, inserted.Error());
+            }
         }
     }
 
@@ -1280,6 +1419,16 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
                 }
             }
 
+            // 임포터 태그(A2f3a)도 옮긴다(UE 복제가 AssetImportData를 그대로 옮기는 것과 같다).
+            Array<ImportTagInput> tags(allocator);
+            if (auto reserved = tags.TryReserve(old.tags.Size()); !reserved) {
+                return fail(AssetDiagnosticCode::None, reserved.Error());
+            }
+
+            for (const ImportTag& one : old.tags) {
+                (void)tags.TryPushBack(ImportTagInput{one.key.View(), one.value.View()});
+            }
+
             ImportRecordInput input;
             input.owner = newId;
             input.importerId = old.importerId;
@@ -1288,6 +1437,7 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
             input.sources = sources.View();
             input.options = old.options.View();
             input.outputs = outputs.View();
+            input.tags = tags.View();
             auto written = WriteImportRecord(allocator, newId, input);
             if (!written) {
                 return fail(AssetDiagnosticCode::None, written.Error());
@@ -1299,7 +1449,8 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
         }
     }
 
-    if (auto planned = PlanHookOutputs(info, newId, {}, plan, diagnostic); !planned) {
+    if (auto planned = PlanHookOutputs(info, newId, {}, record.View(), plan, diagnostic);
+        !planned) {
         return EditorFail<void>(failure, diagnostic);
     }
 
@@ -1473,6 +1624,16 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
                 }
             }
 
+            // 임포터 태그(A2f3a)도 옮긴다(같은 임포트의 기록이다 — id만 바뀐다).
+            Array<ImportTagInput> tags(allocator);
+            if (auto reserved = tags.TryReserve(old.tags.Size()); !reserved) {
+                return abandon(AssetDiagnosticCode::None, reserved.Error());
+            }
+
+            for (const ImportTag& one : old.tags) {
+                (void)tags.TryPushBack(ImportTagInput{one.key.View(), one.value.View()});
+            }
+
             ImportRecordInput input;
             input.owner = newId;
             input.importerId = old.importerId;
@@ -1481,6 +1642,7 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
             input.sources = sources.View();
             input.options = old.options.View();
             input.outputs = outputs.View();
+            input.tags = tags.View();
             auto written = WriteImportRecord(allocator, newId, input);
             if (!written) {
                 return abandon(AssetDiagnosticCode::None, written.Error());
@@ -1492,7 +1654,8 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
     }
 
     AssetDiagnostic diagnostic;
-    if (auto planned = PlanHookOutputs(info, newId, info.importOwner.View(), plan, diagnostic);
+    if (auto planned =
+            PlanHookOutputs(info, newId, info.importOwner.View(), recordBytes, plan, diagnostic);
         !planned) {
         (void)CloseOpened(before.View());
         return EditorFail<void>(failure, diagnostic);
@@ -1634,7 +1797,8 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
     }
 
     // extra 의존 = hook의 Build 의존 + 열 때 읽은 ImportOwner.
-    return PlanHookOutputs(info, info.id, info.importOwner.View(), plan, diagnostic);
+    return PlanHookOutputs(info, info.id, info.importOwner.View(), info.importRecord.View(), plan,
+                           diagnostic);
 }
 
 Result<void> EditorPackageSet::PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
@@ -1680,7 +1844,7 @@ Result<void> EditorPackageSet::PlanNewTarget(const LogicalPath& path, AssetId id
 
 Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
                                                Span<const PackageDependencyEntry> importOwner,
-                                               SavePlan& plan,
+                                               Span<const uint8> importRecord, SavePlan& plan,
                                                AssetDiagnostic& diagnostic) noexcept {
     Allocator& allocator = *allocator_;
     const AssetId id = info.id;
@@ -1709,6 +1873,27 @@ Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, As
         AssetTagSink tags(allocator);
         Result<void> step = config_.hooks->CollectTags(*registry_, access, representative.Value(),
                                                        typeId, asset, tags);
+        // bundle 태그는 모든 에셋에 쓴다(필드 지정자 AssetBundles — PrimaryAsset 여부는 쿠킹
+        // 설정이 정하므로 저장 때 알 수 없다, AS 10.2절 A4e2b).
+        if (step) {
+            step =
+                CollectAssetBundleTags(*registry_, access, representative.Value(), allocator, tags);
+        }
+
+        // 임포터 태그(A2f3a UXR8): 이번에 쓸 기록이 소유 기록이면 그 태그를 그대로 낸다(원천이
+        // 기록이라 임포터 모듈이 없는 프로젝트에서 다시 저장해도 남는다 — UE UAssetImportData).
+        if (step && !importRecord.IsEmpty()) {
+            auto record = ReadImportRecord(allocator, asset, importRecord);
+            step = record ? Result<void>::Success() : Result<void>::Failure(record.Error());
+            if (record && record.Value().OwnedBy(asset)) {
+                for (const ImportTag& tag : record.Value().tags) {
+                    if (step) {
+                        step = tags.Add(tag.key.View(), tag.value.View());
+                    }
+                }
+            }
+        }
+
         if (step) {
             step = config_.hooks->CollectBuildDependencies(
                 *registry_, access, representative.Value(), typeId, asset, dependencies);
@@ -1737,6 +1922,271 @@ Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, As
     (void)plan.extra.TryAppend(importOwner);
 
     return Result<void>::Success();
+}
+
+Result<void> EditorPackageSet::RecordOverride(ObjectHandle object,
+                                              Span<const PathStep> path) noexcept {
+    if (registry_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const ObjectAccessContext access = Access();
+    auto outermost = registry_->GetOutermost(access, object);
+    if (!outermost) {
+        return Result<void>::Failure(outermost.Error());
+    }
+
+    EditorPackageInfo* owner = nullptr;
+    for (EditorPackageInfo& info : open_) {
+        owner = info.package == outermost.Value() ? &info : owner;
+    }
+
+    if (owner == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    auto lease = registry_->AcquireType(access, object);
+    if (!lease) {
+        return Result<void>::Failure(lease.Error());
+    }
+
+    OverrideSet* set = owner->overrides.Find(object);
+    if (set == nullptr) {
+        if (auto inserted = owner->overrides.Insert(object, OverrideSet(*allocator_)); !inserted) {
+            return Result<void>::Failure(inserted.Error());
+        }
+
+        set = owner->overrides.Find(object);
+    }
+
+    return AddOverrideUnits(lease.Value(), path, *set);
+}
+
+Result<void> EditorPackageSet::ReserveOverrides(ObjectHandle object,
+                                                const OverrideSet& pending) noexcept {
+    if (registry_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 기록할 단위가 없으면 빈 항목을 만들지 않는다.
+    if (pending.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    auto outermost = registry_->GetOutermost(Access(), object);
+    if (!outermost) {
+        return Result<void>::Failure(outermost.Error());
+    }
+
+    EditorPackageInfo* owner = nullptr;
+    for (EditorPackageInfo& info : open_) {
+        owner = info.package == outermost.Value() ? &info : owner;
+    }
+
+    if (owner == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    OverrideSet* set = owner->overrides.Find(object);
+    if (set == nullptr) {
+        if (auto inserted = owner->overrides.Insert(object, OverrideSet(*allocator_)); !inserted) {
+            return Result<void>::Failure(inserted.Error());
+        }
+
+        set = owner->overrides.Find(object);
+    }
+
+    return set->TryReserve(pending.Count(), pending.IdCount());
+}
+
+void EditorPackageSet::MergeOverrides(ObjectHandle object, const OverrideSet& pending) noexcept {
+    for (EditorPackageInfo& info : open_) {
+        if (OverrideSet* set = info.overrides.Find(object)) {
+            for (usize index = 0; index < pending.Count(); ++index) {
+                // ReserveOverrides가 자리를 잡았다(할당하지 않는다).
+                (void)set->Add(pending.At(index));
+            }
+
+            return;
+        }
+    }
+}
+
+namespace {
+
+// 원본 재구성 hook의 sink다(12.14절 A5j2 — 원소 bulk 읽기, 자기 패키지 bulk 더하기).
+class RebuildSink final : public AssetSourceRebuildSink {
+public:
+    RebuildSink(ObjectRegistry& registry, const ObjectAccessContext& access,
+                Span<const EditorPackageInfo> open, const EditorPackageInfo& target,
+                AssetSourceRebuildCause cause, ObjectHandle changed, Array<EditorWarning>* warnings,
+                AssetDiagnostic* failure) noexcept
+        : registry_(registry), access_(access), open_(open), target_(target), cause_(cause),
+          changed_(changed), warnings_(warnings), failure_(failure) {
+    }
+
+    Result<Span<const uint8>> ReadBulk(ObjectHandle object,
+                                       const BulkDataRef& ref) noexcept override {
+        if (ref.IsEmpty()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto outermost = registry_.GetOutermost(access_, object);
+        if (!outermost) {
+            return Result<Span<const uint8>>::Failure(outermost.Error());
+        }
+
+        for (const EditorPackageInfo& info : open_) {
+            if (info.package == outermost.Value() && info.store != nullptr) {
+                return info.store->Read(ref, failure_);
+            }
+        }
+
+        return Result<Span<const uint8>>::Failure(ErrorCode::NotFound);
+    }
+
+    Result<BulkDataRef> AddBulk(Array<uint8>&& raw) noexcept override {
+        if (target_.store == nullptr) {
+            return Result<BulkDataRef>::Failure(ErrorCode::NotFound);
+        }
+
+        return target_.store->AddUnsaved(rocks::Move(raw));
+    }
+
+    bool HasImportRecord() const noexcept override {
+        return !target_.importRecord.IsEmpty();
+    }
+
+    AssetSourceRebuildCause Cause() const noexcept override {
+        return cause_;
+    }
+
+    ObjectHandle ChangedSource() const noexcept override {
+        return changed_;
+    }
+
+    void MarkRebuilt() noexcept override {
+        rebuilt_ = true;
+    }
+
+    bool Rebuilt() const noexcept {
+        return rebuilt_;
+    }
+
+    Result<void> Fail(AssetDiagnosticCode code, ErrorCode error, uint64 detail) noexcept override {
+        if (failure_ != nullptr) {
+            *failure_ = AssetDiagnostic{};
+            failure_->code = code;
+            failure_->error = error;
+            failure_->asset = target_.id;
+            failure_->detail = detail;
+        }
+
+        return Result<void>::Failure(error);
+    }
+
+    Result<void> Warn(AssetDiagnosticCode code, uint64 detail) noexcept override {
+        if (!AssetDiagnosticIsWarning(code)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (warnings_ == nullptr) {
+            return Result<void>::Success();
+        }
+
+        EditorWarning warning;
+        warning.kind = EditorWarningKind::SourceRebuildWarning;
+        warning.diagnostic.code = code;
+        warning.diagnostic.asset = target_.id;
+        warning.diagnostic.detail = detail;
+        return warnings_->TryPushBack(warning);
+    }
+
+private:
+    ObjectRegistry& registry_;
+    const ObjectAccessContext& access_;
+    Span<const EditorPackageInfo> open_;
+    const EditorPackageInfo& target_;
+    AssetSourceRebuildCause cause_;
+    ObjectHandle changed_;
+    bool rebuilt_ = false;
+    Array<EditorWarning>* warnings_;
+    AssetDiagnostic* failure_;
+};
+
+} // namespace
+
+Result<void> EditorPackageSet::RebuildSource(ObjectHandle object, AssetId asset,
+                                             Span<const StringView> assignedFields,
+                                             AssetSourceRebuildCause cause, ObjectHandle changed,
+                                             Array<EditorWarning>* warnings,
+                                             AssetDiagnostic* failure, bool* rebuilt) noexcept {
+    if (rebuilt != nullptr) {
+        *rebuilt = false;
+    }
+
+    if (registry_.Get() == nullptr || config_.hooks == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const EditorPackageInfo* target = Find(asset);
+    if (target == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    const ObjectAccessContext access = Access();
+    auto type = registry_->AcquireType(access, object);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    RebuildSink sink(*registry_, access, open_.View(), *target, cause, changed, warnings, failure);
+    Result<void> done = config_.hooks->RebuildSource(*registry_, access, object, type.Value().Id(),
+                                                     asset, assignedFields, sink);
+    if (rebuilt != nullptr) {
+        *rebuilt = sink.Rebuilt();
+    }
+
+    return done;
+}
+
+Result<void> EditorPackageSet::NormalizeSettings(ObjectHandle object, AssetId asset,
+                                                 Span<const StringView> assignedFields) noexcept {
+    if (registry_.Get() == nullptr || config_.hooks == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const ObjectAccessContext access = Access();
+    auto type = registry_->AcquireType(access, object);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    return config_.hooks->NormalizeSettings(*registry_, access, object, type.Value().Id(), asset,
+                                            assignedFields);
+}
+
+void EditorPackageSet::RemoveOverridesUnder(ObjectHandle object,
+                                            const OverrideSet& prefixes) noexcept {
+    for (EditorPackageInfo& info : open_) {
+        if (OverrideSet* set = info.overrides.Find(object)) {
+            for (usize index = 0; index < prefixes.Count(); ++index) {
+                set->RemoveUnder(prefixes.At(index));
+            }
+
+            return;
+        }
+    }
+}
+
+const OverrideSet* EditorPackageSet::FindOverrides(ObjectHandle object) const noexcept {
+    for (const EditorPackageInfo& info : open_) {
+        if (const OverrideSet* set = info.overrides.Find(object)) {
+            return set;
+        }
+    }
+
+    return nullptr;
 }
 
 Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
@@ -1800,6 +2250,7 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
     };
     PackageWriteOptions write;
     write.kind = PackageKind::Editor;
+    write.bulkCodec = EditorPackageBulkCodec;
     write.engineVersion = config_.writeEngineVersion.IsEmpty() ? build::CurrentEngineVersion()
                                                                : config_.writeEngineVersion;
     write.bulkSource = info.store;
@@ -1807,6 +2258,10 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
     write.extraDependencies = plan.extra.View();
     write.importRecord = duplicate != nullptr ? duplicate->importRecord : info.importRecord.View();
     write.duplicateId = duplicate != nullptr ? duplicate->id : AssetId{};
+    // 차이 형식(A5b): 이 패키지(복제·ID 수정은 원본) 객체들의 override 집합 단위는 기준과 같아도
+    // 쓴다.
+    PackageOverrides overrides(info.overrides);
+    write.overrides = &overrides;
     PackageWriteResult result(allocator);
     {
         platform::File file;

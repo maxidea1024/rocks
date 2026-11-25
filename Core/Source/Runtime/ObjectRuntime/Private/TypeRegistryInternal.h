@@ -1,10 +1,20 @@
 #pragma once
 
+#include <Object/ClassDefaults.h>
 #include <Object/TypeRegistry.h>
 
 // TypeRegistry 구현 파일(TypeRegistry*.cpp·TypeLease.cpp)이 함께 쓰는 내부 정의다. 타입
 // 레코드(TypeRegistry::Record)와 등록 한 번의 색인 준비물(TypeRegistry::IndexGrowth)을 둔다.
 namespace rocks {
+
+// 클래스 기본값 슬롯의 게시 상태다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드'). 성공이면
+// defaults가 같은 블록 뒤에 이어 둔 byte를 가리키고, 실패 기억이면 diagnostic만 쓴다. TypeRegistry
+// allocator의 한 블록이며 DestroyRecord가 해제한다.
+struct ClassDefaultsState {
+    bool failed = false;
+    ClassDefaultsDiagnostic diagnostic;
+    ClassDefaults defaults;
+};
 
 // 클래스·enum·struct 레코드가 같은 목록·ID 공간을 쓴다. enum 레코드는 schema.id·name과
 // ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. struct 레코드는 schema(id·version·
@@ -47,6 +57,9 @@ struct TypeRegistry::Record {
     uint32 leases = 0;
     uint32 dependents = 0;
     Record* base = nullptr;
+    // 클래스 기본값 슬롯이다(null = 아직 없음). acquire로 읽고 생성 잠금(defaultsGate_) 안에서
+    // release로 한 번만 게시한다(TypeLease::ResolveClassDefaults).
+    ClassDefaultsState* defaults = nullptr;
 };
 
 // 등록 한 번의 색인 준비물이다(잠금 밖에서 할당한 새 색인과, 바꾼 뒤 잠금 밖에서 반환할 옛 색인).

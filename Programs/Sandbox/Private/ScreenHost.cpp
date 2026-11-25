@@ -27,16 +27,28 @@ inline constexpr LogCategory LogSandboxScreen{"Sandbox.Screen"};
 // Sandbox 장면이다(18.5절 1항). 카메라(PlayerStart 원점, +X를 본다) 앞 500 cm에 cube 셋, 그 위에
 // Pending 텍스처 cube 하나, 아래 100 cm에 바닥 plane(20 m × 20 m, 중간 회색 0.18)을 둔다.
 constexpr SceneObject Scene[] = {
-    {render::BuiltinMesh::Plane, Vec3d(SceneCubeDistance, 0.0, -100.0), Vec3d(20.0, 20.0, 1.0),
+    {render::BuiltinMesh::Plane,
+     Vec3d(SceneCubeDistance, 0.0, -100.0),
+     Vec3d(20.0, 20.0, 1.0),
      {0.18f, 0.18f, 0.18f, 1.0f}},
-    {render::BuiltinMesh::Cube, Vec3d(SceneCubeDistance, 0.0, 0.0), Vec3d(1.0, 1.0, 1.0),
+    {render::BuiltinMesh::Cube,
+     Vec3d(SceneCubeDistance, 0.0, 0.0),
+     Vec3d(1.0, 1.0, 1.0),
      {SceneCenterColor[0], SceneCenterColor[1], SceneCenterColor[2], 1.0f}},
-    {render::BuiltinMesh::Cube, Vec3d(SceneCubeDistance, -SceneRightOffset, 0.0),
-     Vec3d(1.0, 1.0, 1.0), {0.25f, 1.0f, 4.0f, 1.0f}},
-    {render::BuiltinMesh::Cube, Vec3d(SceneCubeDistance, SceneRightOffset, 0.0),
-     Vec3d(1.0, 1.0, 1.0), {SceneRightColor[0], SceneRightColor[1], SceneRightColor[2], 1.0f}},
-    {render::BuiltinMesh::Cube, Vec3d(SceneCubeDistance, 0.0, 200.0), Vec3d(1.0, 1.0, 1.0),
-     {1.0f, 1.0f, 1.0f, 1.0f}, render::BuiltinTexture::White2D, true}};
+    {render::BuiltinMesh::Cube,
+     Vec3d(SceneCubeDistance, -SceneRightOffset, 0.0),
+     Vec3d(1.0, 1.0, 1.0),
+     {0.25f, 1.0f, 4.0f, 1.0f}},
+    {render::BuiltinMesh::Cube,
+     Vec3d(SceneCubeDistance, SceneRightOffset, 0.0),
+     Vec3d(1.0, 1.0, 1.0),
+     {SceneRightColor[0], SceneRightColor[1], SceneRightColor[2], 1.0f}},
+    {render::BuiltinMesh::Cube,
+     Vec3d(SceneCubeDistance, 0.0, 200.0),
+     Vec3d(1.0, 1.0, 1.0),
+     {1.0f, 1.0f, 1.0f, 1.0f},
+     render::BuiltinTexture::White2D,
+     true}};
 
 Mat4 ToFloat(const Mat4d& matrix) noexcept {
     Mat4 out = Mat4::Zero();
@@ -107,8 +119,8 @@ Result<UniquePtr<graphics::Device>> CreateScreenDevice(Allocator& allocator, Scr
     graphics::DeviceDesc desc;
     desc.enableValidation = validation;
     graphics::DeviceCreateReport report;
-    Result<UniquePtr<graphics::Device>> created = Result<UniquePtr<graphics::Device>>::Failure(
-        ErrorCode::Unsupported);
+    Result<UniquePtr<graphics::Device>> created =
+        Result<UniquePtr<graphics::Device>>::Failure(ErrorCode::Unsupported);
     switch (backend) {
     case ScreenBackend::D3D12:
         created = graphics::CreateD3D12Device(allocator, desc, &report);
@@ -148,9 +160,9 @@ Result<ScreenView> MakeScreenView(const CameraView& camera, uint32 width, uint32
     }
 
     // UE 기본 종횡비 축(수평 FOV 유지): 화면 비율로 세로 계수를 정한다(18.5절 2항).
-    auto projection = TryMakePerspective(math::DegreesToRadians(camera.fov) * 0.5,
-                                         static_cast<double>(width), static_cast<double>(height),
-                                         ScreenNearPlane);
+    auto projection =
+        TryMakePerspective(math::DegreesToRadians(camera.fov) * 0.5, static_cast<double>(width),
+                           static_cast<double>(height), ScreenNearPlane);
     if (!projection) {
         return Result<ScreenView>::Failure(projection.Error());
     }
@@ -175,9 +187,10 @@ bool FindPlayerCamera(GameInstanceClient& client, CameraView& camera) noexcept {
                                        [&controller](LocalPlayer& player) noexcept {
                                            controller = player.PlayerControllerHandle();
                                        });
-        auto director = world->With<PlayerController>(
-            controller,
-            [](PlayerController& player) noexcept { return player.CameraDirectorHandle(); });
+        auto director =
+            world->With<PlayerController>(controller, [](PlayerController& player) noexcept {
+                return player.CameraDirectorHandle();
+            });
         if (!director) {
             return false;
         }

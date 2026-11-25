@@ -4,9 +4,11 @@
 #include <Core/Text/NameComponent.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 매니페스트 v1 시험이다(Docs/Design/AssetSystem 10절, 10.1절 A1b): 왕복·결정성·Find,
-// 칸마다 규칙 위반(검증·writer·reader가 같은 진단), 구조 변조(CRC를 다시 맞춘 잘림·개수·길이·남는
-// byte), 버전, 대조 함수(프로파일·병합·패키지 — A1a writer가 쓴 쿠킹 패키지와), 파일 경로.
+// 쿠킹 매니페스트 v2 시험이다(Docs/Design/AssetSystem 10절, 10.1절 A1b·10.3절 4항 A4f2): 왕복·
+// 결정성·Find·FindArtifact, 칸마다 규칙 위반(검증·writer·reader가 같은 진단 — backend·artifact 표
+// 포함), 구조 변조(CRC를 다시 맞춘 잘림·개수·길이·남는 byte), 버전(v1 포함), 대조
+// 함수(프로파일·병합· 패키지 — A1a writer가 쓴 쿠킹 패키지와, artifact 파일), 파일
+// 경로(패키지·artifact).
 using namespace rocks;
 namespace manifest_tests_file {
 
@@ -14,8 +16,22 @@ using namespace rocks::asset_test;
 
 namespace {
 
+// 기본 장면의 backend 셋(D3D12 [D3D12_SM6, D3D12_SM5]·Vulkan [VULKAN_SM5]·Metal [METAL_SM5])과
+// artifact 넷(정렬 순서: Engine D3D12_SM5 < D3D12_SM6 < VULKAN_SM5 → Project D3D12_SM6)이다.
+bool AddBaseTables(CookedManifest& manifest) noexcept {
+    const StringView d3d12[] = {"D3D12_SM6", "D3D12_SM5"};
+    const StringView vulkan[] = {"VULKAN_SM5"};
+    const StringView metal[] = {"METAL_SM5"};
+    return AddBackend(manifest, "D3D12", d3d12) && AddBackend(manifest, "Vulkan", vulkan) &&
+           AddBackend(manifest, "Metal", metal) &&
+           AddArtifact(manifest, "Engine", "D3D12_SM5", 5000, 0x51) != nullptr &&
+           AddArtifact(manifest, "Engine", "D3D12_SM6", 6000, 0x52) != nullptr &&
+           AddArtifact(manifest, "Engine", "VULKAN_SM5", 7000, 0x53) != nullptr &&
+           AddArtifact(manifest, "Project", "D3D12_SM6", 8000, 0x54) != nullptr;
+}
+
 // 기본 장면: 10(PrimaryAsset, bundle 둘, Hard → 11·Soft → 12·Soft → 99 — 쿠킹하지 않은 대상),
-// 11(Hard → 10 — 10과 순환), 12(의존 없음).
+// 11(Hard → 10 — 10과 순환), 12(의존 없음), 그리고 AddBaseTables의 backend·artifact 표.
 bool MakeBase(CookedManifest& manifest) noexcept {
     FillManifestHeader(manifest);
     CookedManifestEntry* a =
@@ -34,7 +50,7 @@ bool MakeBase(CookedManifest& manifest) noexcept {
         return false;
     }
 
-    return AddEntry(manifest, 12, "Shield") != nullptr;
+    return AddEntry(manifest, 12, "Shield") != nullptr && AddBaseTables(manifest);
 }
 
 bool SameEntry(const CookedManifestEntry& left, const CookedManifestEntry& right) noexcept {
@@ -75,9 +91,31 @@ bool SameManifest(const CookedManifest& left, const CookedManifest& right) noexc
                 left.cookedBy.majorVersion == right.cookedBy.majorVersion &&
                 left.cookedBy.minorVersion == right.cookedBy.minorVersion &&
                 left.cookedBy.patchVersion == right.cookedBy.patchVersion &&
-                left.entries.Size() == right.entries.Size();
+                left.entries.Size() == right.entries.Size() &&
+                left.backends.Size() == right.backends.Size() &&
+                left.artifacts.Size() == right.artifacts.Size();
     for (usize index = 0; same && index < left.entries.Size(); ++index) {
         same = SameEntry(left.entries[index], right.entries[index]);
+    }
+
+    for (usize index = 0; same && index < left.backends.Size(); ++index) {
+        const CookedManifestBackend& a = left.backends[index];
+        const CookedManifestBackend& b = right.backends[index];
+        same = a.name.View() == b.name.View() && a.formats.Size() == b.formats.Size();
+        for (usize format = 0; same && format < a.formats.Size(); ++format) {
+            same = a.formats[format].View() == b.formats[format].View();
+        }
+    }
+
+    for (usize index = 0; same && index < left.artifacts.Size(); ++index) {
+        const CookedManifestArtifact& a = left.artifacts[index];
+        const CookedManifestArtifact& b = right.artifacts[index];
+        same = a.kind == b.kind && a.name.View() == b.name.View() &&
+               a.formatId.View() == b.formatId.View() && a.bytes == b.bytes &&
+               SameBytes(Span<const uint8>(a.sha256.bytes, 32),
+                         Span<const uint8>(b.sha256.bytes, 32)) &&
+               SameBytes(Span<const uint8>(a.cookKey.bytes, 32),
+                         Span<const uint8>(b.cookKey.bytes, 32));
     }
 
     return same;
@@ -151,6 +189,36 @@ void SetBundles(CookedManifest& manifest, StringView first, StringView second) {
 void SetDependency(CookedManifest& manifest, usize position, uint64 low,
                    PackageDependencyKind kind) {
     manifest.entries[0].dependencies[position] = CookedManifestDependency{FixedId(low), kind};
+}
+
+void SetBackendName(CookedManifest& manifest, usize index, StringView name) {
+    (void)manifest.backends[index].name.TryAssign(name);
+}
+
+void SetFormat(CookedManifest& manifest, usize backend, usize format, StringView id) {
+    (void)manifest.backends[backend].formats[format].TryAssign(id);
+}
+
+void SetArtifactName(CookedManifest& manifest, usize index, StringView name) {
+    (void)manifest.artifacts[index].name.TryAssign(name);
+}
+
+void SetArtifactFormat(CookedManifest& manifest, usize index, StringView id) {
+    (void)manifest.artifacts[index].formatId.TryAssign(id);
+}
+
+// "F00"부터 count개의 형식 id를 backend 끝에 더한다.
+void AddNumberedFormats(CookedManifest& manifest, usize backend, uint32 count) {
+    constexpr uint32 Base = 10;
+    for (uint32 index = 0; index < count; ++index) {
+        const char id[4] = {'F', static_cast<char>('0' + index / Base),
+                            static_cast<char>('0' + index % Base), 0};
+        auto slot =
+            manifest.backends[backend].formats.TryEmplaceBack(manifest.backends.GetAllocator());
+        if (slot) {
+            (void)slot.Value()->TryAssign(id);
+        }
+    }
 }
 
 using F = CookedManifestField;
@@ -310,6 +378,88 @@ const Violation Violations[] = {
          }
      },
      F::DependencyCount, 2, 12, NoId},
+    // backend 표(10.3.1절 A4f2 5번): 어휘는 5개뿐이라 상한 + 1은 같은 이름을 되풀이한다(개수를 먼저
+    // 본다).
+    {"too many backends",
+     [](CookedManifest& m) {
+         const StringView formats[] = {"X"};
+         for (uint32 index = 3; index <= CookedManifestMaxBackends; ++index) {
+             (void)AddBackend(m, "D3D12", formats);
+         }
+     },
+     F::BackendCount, Head, NoId, NoId},
+    {"unknown backend", [](CookedManifest& m) { SetBackendName(m, 1, "DX12"); }, F::Backend, 1,
+     NoId, NoId},
+    {"lowercase backend", [](CookedManifest& m) { SetBackendName(m, 0, "d3d12"); }, F::Backend, 0,
+     NoId, NoId},
+    {"empty backend", [](CookedManifest& m) { SetBackendName(m, 2, ""); }, F::Backend, 2, NoId,
+     NoId},
+    {"duplicate backend", [](CookedManifest& m) { SetBackendName(m, 2, "D3D12"); }, F::Backend, 2,
+     NoId, NoId},
+    {"backend without formats", [](CookedManifest& m) { m.backends[1].formats.Clear(); },
+     F::FormatCount, 1, NoId, NoId},
+    {"too many formats",
+     [](CookedManifest& m) { AddNumberedFormats(m, 0, CookedManifestMaxFormatsPerBackend - 1); },
+     F::FormatCount, 0, NoId, NoId},
+    {"lowercase format", [](CookedManifest& m) { SetFormat(m, 0, 1, "d3d12_sm5"); },
+     F::ShaderFormat, 0, NoId, NoId},
+    {"format with dash", [](CookedManifest& m) { SetFormat(m, 1, 0, "VULKAN-SM5"); },
+     F::ShaderFormat, 1, NoId, NoId},
+    {"empty format", [](CookedManifest& m) { SetFormat(m, 2, 0, ""); }, F::ShaderFormat, 2, NoId,
+     NoId},
+    {"long format",
+     [](CookedManifest& m) {
+         String& id = m.backends[2].formats[0];
+         id.Clear();
+         for (usize index = 0; index <= ShaderFormatIdMaxBytes; ++index) {
+             (void)id.TryAppend("A");
+         }
+     },
+     F::ShaderFormat, 2, NoId, NoId},
+    {"duplicate format in backend", [](CookedManifest& m) { SetFormat(m, 0, 1, "D3D12_SM6"); },
+     F::ShaderFormat, 0, NoId, NoId},
+    {"duplicate format across backends",
+     [](CookedManifest& m) { SetFormat(m, 2, 0, "VULKAN_SM5"); }, F::ShaderFormat, 2, NoId, NoId},
+    // artifact 표(10.3.1절 A4f2 5번).
+    {"too many artifacts",
+     [](CookedManifest& m) {
+         for (uint32 index = 4; index <= CookedManifestMaxArtifacts; ++index) {
+             (void)AddArtifact(m, "Engine", "D3D12_SM5", 1, 0);
+         }
+     },
+     F::ArtifactCount, Head, NoId, NoId},
+    {"artifact kind 0",
+     [](CookedManifest& m) { m.artifacts[1].kind = static_cast<CookArtifactKind>(0); },
+     F::ArtifactKind, 1, NoId, NoId},
+    {"unknown artifact kind",
+     [](CookedManifest& m) { m.artifacts[1].kind = static_cast<CookArtifactKind>(2); },
+     F::ArtifactKind, 1, NoId, NoId},
+    {"lowercase artifact name", [](CookedManifest& m) { SetArtifactName(m, 0, "engine"); },
+     F::ArtifactName, 0, NoId, NoId},
+    {"unknown artifact name", [](CookedManifest& m) { SetArtifactName(m, 3, "Game"); },
+     F::ArtifactName, 3, NoId, NoId},
+    {"empty artifact name", [](CookedManifest& m) { SetArtifactName(m, 2, ""); }, F::ArtifactName,
+     2, NoId, NoId},
+    {"format not in table", [](CookedManifest& m) { SetArtifactFormat(m, 3, "METAL_SM6"); },
+     F::ArtifactFormat, 3, NoId, NoId},
+    // 셰이더 없는 매니페스트(backend 0개)의 artifact는 늘 형식 위반이다(교차 검증 D).
+    {"shaderless artifacts", [](CookedManifest& m) { m.backends.Clear(); }, F::ArtifactFormat, 0,
+     NoId, NoId},
+    {"zero artifact bytes", [](CookedManifest& m) { m.artifacts[2].bytes = 0; }, F::ArtifactBytes,
+     2, NoId, NoId},
+    {"artifact over 4 GiB",
+     [](CookedManifest& m) { m.artifacts[2].bytes = CookedArtifactMaxBytes + 1; }, F::ArtifactBytes,
+     2, NoId, NoId},
+    {"unsorted artifact formats",
+     [](CookedManifest& m) {
+         SetArtifactFormat(m, 0, "D3D12_SM6");
+         SetArtifactFormat(m, 1, "D3D12_SM5");
+     },
+     F::ArtifactOrder, 1, NoId, NoId},
+    {"duplicate artifact", [](CookedManifest& m) { SetArtifactFormat(m, 1, "D3D12_SM5"); },
+     F::ArtifactOrder, 1, NoId, NoId},
+    {"unsorted artifact names", [](CookedManifest& m) { SetArtifactName(m, 3, "Engine"); },
+     F::ArtifactOrder, 3, NoId, NoId},
 };
 
 } // namespace
@@ -333,6 +483,11 @@ TEST(CookedManifest_RoundTrip) {
     REQUIRE(WriteCookedManifest(allocator, read.Value(), again));
     CHECK(SameBytes(again.View(), bytes.View()));
 
+    // backend·artifact 표도 그대로다(읽기 함수는 칸과 같은 표).
+    CHECK(read.Value().Backends().Size() == 3 && read.Value().Artifacts().Size() == 4);
+    CHECK(read.Value().Backends()[0].formats[1].View() == "D3D12_SM5" &&
+          read.Value().Backends().Data() == read.Value().backends.Data() &&
+          read.Value().Artifacts().Data() == read.Value().artifacts.Data());
     CHECK(read.Value().Find(FixedId(11)) == &read.Value().entries[1]);
     CHECK(read.Value().Find(FixedId(10)) == &read.Value().entries[0]);
     CHECK(read.Value().Find(FixedId(12)) == &read.Value().entries[2]);
@@ -443,6 +598,40 @@ TEST(CookedManifest_FieldRules) {
 
     constexpr uint16 MaxEnginePart = NumericLimits<uint16>::Max();
     edge.cookedBy = EngineVersion{MaxEnginePart, MaxEnginePart, MaxEnginePart};
+    // 표 경계(10.3.1절 A4f2): 어휘 다섯 backend 전부, 첫 backend 형식 16개(64 byte id 하나 포함),
+    // 모든 (이름, 형식) artifact 조합, bytes 1·4 GiB. backend 8·artifact 4096은 어휘·이름이 모자라
+    // 맞는 매니페스트로 닿지 않는다(개수 상한은 구조 시험이 본다).
+    edge.backends.Clear();
+    edge.artifacts.Clear();
+    const StringView one[] = {"D3D12_SM6"};
+    REQUIRE(AddBackend(edge, "D3D12", one));
+    AddNumberedFormats(edge, 0, CookedManifestMaxFormatsPerBackend - 2);
+    REQUIRE(edge.backends[0].formats.TryEmplaceBack(allocator));
+    for (usize index = 0; index < ShaderFormatIdMaxBytes; ++index) {
+        REQUIRE(edge.backends[0].formats[CookedManifestMaxFormatsPerBackend - 1].TryAppend("L"));
+    }
+
+    const StringView d3d11[] = {"D3D11_SM5"};
+    const StringView vulkan[] = {"VULKAN_SM5"};
+    const StringView metal[] = {"METAL_SM5"};
+    const StringView opengl[] = {"GLES31_ANDROID"};
+    REQUIRE(AddBackend(edge, "D3D11", d3d11) && AddBackend(edge, "Vulkan", vulkan) &&
+            AddBackend(edge, "Metal", metal) && AddBackend(edge, "OpenGL", opengl));
+    const StringView names[] = {CookedArtifactEngineName, CookedArtifactProjectName};
+    for (StringView name : names) {
+        for (const CookedManifestBackend& backend : edge.backends) {
+            for (const String& format : backend.formats) {
+                REQUIRE(AddArtifact(edge, name, format.View(), 1, 0x60) != nullptr);
+            }
+        }
+    }
+
+    edge.artifacts.Sort(
+        [](const CookedManifestArtifact& left, const CookedManifestArtifact& right) noexcept {
+            return CookedArtifactLess(left, right);
+        });
+    edge.artifacts[0].bytes = CookedArtifactMaxBytes;
+    REQUIRE(edge.backends.Size() == 5 && edge.artifacts.Size() == 2 * (16 + 4));
     Array<uint8> bytes(allocator);
     AssetDiagnostic failure;
     REQUIRE(WriteCookedManifest(allocator, edge, bytes, &failure));
@@ -479,7 +668,8 @@ TEST(CookedManifest_StructureTampering) {
         CHECK(expect(withRaw([&](ManifestRaw& raw) { raw.magic[index] ^= 1; }), F::Magic, Head));
     }
 
-    const uint32 versions[] = {0, CookedManifestFormatVersion + 1, NumericLimits<uint32>::Max()};
+    // v1(10.3절 4항 — reader를 두지 않는다)도 UnsupportedVersion이다.
+    const uint32 versions[] = {0, 1, CookedManifestFormatVersion + 1, NumericLimits<uint32>::Max()};
     for (uint32 version : versions) {
         AssetDiagnostic failure;
         CHECK(ReadCookedManifest(
@@ -508,8 +698,8 @@ TEST(CookedManifest_StructureTampering) {
         CHECK(expect(Copy(allocator, valid.View().Slice(0, length)), F::File, Head));
     }
 
-    // 상한 + 1·남은 byte로 담을 수 없는 수는 개수 칸, 실제보다 작으면 남는 byte, 실제보다 크면 없는
-    // 항목을 읽다 잘린다(그 칸).
+    // 상한 + 1·남은 byte로 담을 수 없는 수는 개수 칸, 실제보다 작으면 artifact 개수 칸(v2),
+    // 실제보다 크면 없는 항목을 읽다 잘린다(그 칸).
     const uint32 counts[] = {CookedManifestMaxEntries + 1, 1000};
     for (uint32 count : counts) {
         CHECK(expect(withRaw([&](ManifestRaw& raw) {
@@ -519,11 +709,13 @@ TEST(CookedManifest_StructureTampering) {
                      F::EntryCount, Head));
     }
 
+    // 실제보다 작으면 다음 항목 앞 byte를 artifact 개수 칸으로 읽는다(v2 — 항목 표 뒤가 artifact
+    // 표).
     CHECK(expect(withRaw([&](ManifestRaw& raw) {
                      raw.overrideCount = true;
                      raw.entryCount = 2;
                  }),
-                 F::File, Head));
+                 F::ArtifactCount, CookedManifestNoEntry));
     {
         AssetDiagnostic failure;
         CHECK(!ReadCookedManifest(allocator, withRaw([&](ManifestRaw& raw) {
@@ -580,6 +772,53 @@ TEST(CookedManifest_StructureTampering) {
 
     CHECK(expect(withRaw([&](ManifestRaw& raw) { raw.trailing = 1; }), F::File, Head));
 
+    // v2 표 개수 칸(10.3.1절 A4f2 4번): 상한 + 1, 남은 byte 초과(artifact 넷은 418 byte — 89 byte로
+    // 4개까지)는 개수 칸이고, 실제보다 작은 artifact 수는 남는 byte다.
+    CHECK(expect(withRaw([&](ManifestRaw& raw) {
+                     raw.overrideBackendCount = true;
+                     raw.backendCount = CookedManifestMaxBackends + 1;
+                 }),
+                 F::BackendCount, Head));
+    const uint32 formatCounts[] = {CookedManifestMaxFormatsPerBackend + 1, 100000};
+    for (uint32 count : formatCounts) {
+        CHECK(expect(withRaw([&](ManifestRaw& raw) {
+                         raw.overrideFormatCount = true;
+                         raw.formatCount = count;
+                     }),
+                     F::FormatCount, 0));
+    }
+
+    const uint32 artifactCounts[] = {CookedManifestMaxArtifacts + 1, 5};
+    for (uint32 count : artifactCounts) {
+        CHECK(expect(withRaw([&](ManifestRaw& raw) {
+                         raw.overrideArtifactCount = true;
+                         raw.artifactCount = count;
+                     }),
+                     F::ArtifactCount, Head));
+    }
+
+    CHECK(expect(withRaw([&](ManifestRaw& raw) {
+                     raw.overrideArtifactCount = true;
+                     raw.artifactCount = 3;
+                 }),
+                 F::File, Head));
+    {
+        // 표가 빈 매니페스트: backend 1개(남은 byte는 artifact 개수 칸 4뿐 — 12 미만)와, 형식
+        // 하나인 backend의 형식 개수 2(남은 13 byte — 8 × 2 미만)는 개수 칸이다.
+        CookedManifest bare(allocator);
+        FillManifestHeader(bare);
+        ManifestRaw oneBackend;
+        oneBackend.overrideBackendCount = true;
+        oneBackend.backendCount = 1;
+        CHECK(expect(EncodeManifest(allocator, bare, oneBackend), F::BackendCount, Head));
+        const StringView single[] = {"X"};
+        REQUIRE(AddBackend(bare, "D3D12", single));
+        ManifestRaw twoFormats;
+        twoFormats.overrideFormatCount = true;
+        twoFormats.formatCount = 2;
+        CHECK(expect(EncodeManifest(allocator, bare, twoFormats), F::FormatCount, 0));
+    }
+
     // 잘못된 UTF-8(모델 String은 담을 수 없어 byte로 넣는다): 프로파일·경로·bundle의 첫 byte를
     // 0xFF로.
     auto patched = [&](StringView text) {
@@ -602,6 +841,10 @@ TEST(CookedManifest_StructureTampering) {
     CHECK(expect(patched("Windows"), F::ProfileId, Head));
     CHECK(expect(patched("/Game/Hero"), F::PathHint, 0));
     CHECK(expect(patched("Core"), F::Bundle, 0));
+    // 표 문자열(첫 등장 — backend 이름·형식, artifact 이름)도 같은 칸이다(교차 검증 A).
+    CHECK(expect(patched("Metal"), F::Backend, 2));
+    CHECK(expect(patched("D3D12_SM5"), F::ShaderFormat, 0));
+    CHECK(expect(patched("Project"), F::ArtifactName, 3));
 
     // 파일 상한 초과는 내용을 읽기 전에 거부한다(길이만 큰 span — byte에 닿지 않는다). 이 시험은
     // 읽기 전에 길이로 거부하는 순서에 기댄다. 순서가 바뀌면 경계 밖 읽기가 된다.
@@ -617,16 +860,18 @@ TEST(CookedManifest_StructureTampering) {
     CookedManifest empty(allocator);
     FillManifestHeader(empty);
     const Array<uint8> emptyBytes = EncodeManifest(allocator, empty);
-    const CookedManifestField headerFields[] = {F::ProfileId, F::ProfileSettings, F::CookSettings,
-                                                F::CookerVersion, F::EngineVersion};
-    bool seen[5] = {};
+    constexpr usize HeaderFieldCount = 7;
+    const CookedManifestField headerFields[HeaderFieldCount] = {
+        F::ProfileId,     F::ProfileSettings, F::CookSettings, F::CookerVersion,
+        F::EngineVersion, F::BackendCount,    F::ArtifactCount};
+    bool seen[HeaderFieldCount] = {};
     for (usize length = 16; length < emptyBytes.Size(); ++length) {
         Array<uint8> cut = Copy(allocator, emptyBytes.View().Slice(0, length));
         FixManifestCrc(cut);
         AssetDiagnostic failure;
         CHECK(!ReadCookedManifest(allocator, cut.View(), &failure) &&
               failure.code == AssetDiagnosticCode::CorruptPackage);
-        for (usize field = 0; field < 5; ++field) {
+        for (usize field = 0; field < HeaderFieldCount; ++field) {
             seen[field] =
                 seen[field] || failure.section == static_cast<uint32>(headerFields[field]);
         }
@@ -707,8 +952,8 @@ TEST(CookedManifest_EntryTruncation) {
         entryBytes += range.bytes;
     }
 
-    // 항목 1은 CRC 바로 앞에서 끝난다.
-    const usize body = valid.Size() - sizeof(uint32);
+    // 항목 1 뒤에는 artifact 개수 칸(0)이 있고 그 뒤가 CRC다(v2 — 표가 빈 장면).
+    const usize body = valid.Size() - 2 * sizeof(uint32);
     usize at = body - entryBytes;
     for (const Range& range : ranges) {
         bool all = true;
@@ -877,6 +1122,11 @@ TEST(CookedManifest_AllocationBound) {
     dependencies.overrideDependencyCount = true;
     dependencies.dependencyCount = 50000;
     CHECK(largest(EncodeManifest(allocator, manifest, dependencies), false));
+    // artifact 개수 칸이 상한(4096)이어도 남은 byte로 먼저 거부한다(예약하지 않는다).
+    ManifestRaw artifacts;
+    artifacts.overrideArtifactCount = true;
+    artifacts.artifactCount = CookedManifestMaxArtifacts;
+    CHECK(largest(EncodeManifest(allocator, manifest, artifacts), false));
 }
 
 // 프로파일·병합 대조(AS 10.1절 8): 실행 프로파일이 다르면 IncompatibleCook, 병합은 네 칸 각각이
@@ -1209,7 +1459,7 @@ TEST(CookedManifest_PackageCrossCheck) {
 // 검증· writer는 칸 규칙만 본다 — 그래서 여러 위반에서는 reader와 검증·writer가 다를 수 있다.
 //   길이 10 + 잘못된 magic                          → File
 //   magic·formatVersion 둘 다 잘못                   → Magic
-//   formatVersion 2 + 틀린 CRC                      → UnsupportedVersion
+//   다음 formatVersion + 틀린 CRC                  → UnsupportedVersion
 //   빈 프로파일 + 틀린 CRC                           → Crc
 //   남는 1 byte + 빈 프로파일                         → File
 //   항목 0 flags=2 + 항목 1 bundle 257개              → reader BundleCount/1, 검증·writer Flags/0
@@ -1395,5 +1645,269 @@ TEST(CookedManifest_EntryCountLimit) {
     CHECK(WriteCookedManifest(allocator, manifest, out, &failure).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(IsPrefilled(out) && CorruptAt(failure, F::EntryCount, Head));
+}
+
+// 표 칸 잘림(10.3.1절 A4f2 3·4번): backend 표와 artifact 표의 마지막 항목 안 모든 위치로 자르고
+// CRC를 다시 맞추면 자른 위치가 속한 칸이다. 앞 항목을 길게(64 byte 형식 id) 해 개수 칸의 남은 byte
+// 검사를 넘긴다. 형식 개수 칸은 형식 최소 byte(길이 칸 8 × 형식 수)까지 덮는다.
+TEST(CookedManifest_TableTruncation) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Allocator& allocator = env.allocator;
+    String longA(allocator);
+    String longB(allocator);
+    for (usize index = 0; index < ShaderFormatIdMaxBytes; ++index) {
+        REQUIRE(longA.TryAppend("A") && longB.TryAppend("B"));
+    }
+
+    constexpr usize LengthBytes = sizeof(uint64);
+    constexpr usize CountBytes = sizeof(uint32);
+    constexpr usize DigestBytes = Sha256Digest::Bytes;
+    struct Range {
+        CookedManifestField field;
+        usize bytes;
+        uint64 detail;
+    };
+    // 끝에서 rangeBytes 앞부터 ranges 순서로 자르며 대조한다(끝 = CRC 앞).
+    auto check = [&](const Array<uint8>& valid, Span<const Range> ranges) {
+        usize total = 0;
+        for (const Range& range : ranges) {
+            total += range.bytes;
+        }
+
+        const usize body = valid.Size() - sizeof(uint32);
+        usize at = body - total;
+        bool all = true;
+        for (const Range& range : ranges) {
+            for (usize end = at; end < at + range.bytes; ++end) {
+                Array<uint8> cut = Copy(allocator, valid.View().Slice(0, end + sizeof(uint32)));
+                FixManifestCrc(cut);
+                AssetDiagnostic failure;
+                all = all && !ReadCookedManifest(allocator, cut.View(), &failure) &&
+                      CorruptAt(failure, range.field, range.detail) && failure.asset.IsNull();
+            }
+
+            at += range.bytes;
+        }
+
+        return all && at == body;
+    };
+
+    // backend 표: D3D12 [A×64, B×64] 뒤 Vulkan [VULKAN_SM5, VULKAN_SM6], 항목·artifact 없음.
+    CookedManifest backends(allocator);
+    FillManifestHeader(backends);
+    const StringView longFormats[] = {longA.View(), longB.View()};
+    const StringView vulkan[] = {"VULKAN_SM5", "VULKAN_SM6"};
+    REQUIRE(AddBackend(backends, "D3D12", longFormats) && AddBackend(backends, "Vulkan", vulkan));
+    Array<uint8> backendBytes(allocator);
+    REQUIRE(WriteCookedManifest(allocator, backends, backendBytes));
+    constexpr usize VulkanFormats = 2;
+    constexpr usize FormatBytes = LengthBytes + 10;
+    const Range backendRanges[] = {
+        {F::Backend, LengthBytes + 6, 1},
+        {F::FormatCount, CountBytes + VulkanFormats * LengthBytes, 1},
+        {F::ShaderFormat, VulkanFormats * FormatBytes - VulkanFormats * LengthBytes, 1},
+        {F::ArtifactCount, CountBytes, Head},
+    };
+    CHECK(check(backendBytes, backendRanges));
+
+    // artifact 표: Engine A×64·Engine B×64 뒤 Project D3D12_SM6.
+    CookedManifest artifacts(allocator);
+    FillManifestHeader(artifacts);
+    const StringView formats[] = {longA.View(), longB.View(), "D3D12_SM6"};
+    REQUIRE(AddBackend(artifacts, "D3D12", formats));
+    REQUIRE(AddArtifact(artifacts, "Engine", longA.View(), 1, 1) != nullptr &&
+            AddArtifact(artifacts, "Engine", longB.View(), 2, 2) != nullptr &&
+            AddArtifact(artifacts, "Project", "D3D12_SM6", 3, 3) != nullptr);
+    Array<uint8> artifactBytes(allocator);
+    REQUIRE(WriteCookedManifest(allocator, artifacts, artifactBytes));
+    const Range artifactRanges[] = {
+        {F::ArtifactKind, sizeof(uint8), 2},     {F::ArtifactName, LengthBytes + 7, 2},
+        {F::ArtifactFormat, LengthBytes + 9, 2}, {F::ArtifactBytes, sizeof(uint64), 2},
+        {F::ArtifactSha256, DigestBytes, 2},     {F::ArtifactCookKey, DigestBytes, 2},
+    };
+    CHECK(check(artifactBytes, artifactRanges));
+}
+
+// FindArtifact(10.3절 8항): 있는 키는 그 항목, 없는 키는 앞(kind 0·이름 앞)·사이(형식 사이·이름
+// 사이)·뒤(이름 뒤·kind 2)가 모두 null이다. 빈 표도 null이다.
+TEST(CookedManifest_FindArtifact) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookedManifest manifest(env.allocator);
+    REQUIRE(MakeBase(manifest));
+    constexpr CookArtifactKind Library = CookArtifactKind::ShaderLibrary;
+    for (const CookedManifestArtifact& artifact : manifest.artifacts) {
+        CHECK(manifest.FindArtifact(artifact.kind, artifact.name.View(),
+                                    artifact.formatId.View()) == &artifact);
+    }
+
+    struct Key {
+        CookArtifactKind kind;
+        StringView name;
+        StringView format;
+    };
+    const Key missing[] = {
+        {static_cast<CookArtifactKind>(0), "Engine", "D3D12_SM5"},
+        {Library, "Engine", "A"},
+        {Library, "Engine", "D3D12_SM55"},
+        {Library, "Engine", "Z"},
+        {Library, "Project", "D3D12_SM5"},
+        {Library, "Project", "Z"},
+        {static_cast<CookArtifactKind>(2), "Engine", "D3D12_SM5"},
+    };
+    for (const Key& key : missing) {
+        CHECK(manifest.FindArtifact(key.kind, key.name, key.format) == nullptr);
+    }
+
+    CookedManifest empty(env.allocator);
+    FillManifestHeader(empty);
+    CHECK(empty.FindArtifact(Library, "Engine", "D3D12_SM6") == nullptr);
+}
+
+// artifact 파일 경로(10.3절 4항): Shaders/<이름>-<formatId>-<h>.rshl — h는 SHA-256 앞 16자. 앞에
+// 내용이 있는 builder에 붙인다. 칸 위반(kind·이름·형식 id — 경로 조각)은 InvalidArgument이고 out은
+// 그대로다.
+TEST(CookedManifest_ArtifactPath) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookedManifest manifest(env.allocator);
+    FillManifestHeader(manifest);
+    CookedManifestArtifact* engine = AddArtifact(manifest, "Engine", "D3D12_SM6", 10, 0xAB);
+    CookedManifestArtifact* project = AddArtifact(manifest, "Project", "VULKAN_SM5", 10, 0xCD);
+    REQUIRE(engine != nullptr && project != nullptr);
+    StringBuilder<16> path(env.allocator);
+    REQUIRE(path.TryAppend("root/"));
+    REQUIRE(AppendCookedArtifactPath(path, *engine));
+    CHECK(path.View() == StringView("root/Shaders/Engine-D3D12_SM6-abababababababab.rshl"));
+    StringBuilder<16> other(env.allocator);
+    REQUIRE(AppendCookedArtifactPath(other, *project));
+    CHECK(other.View() == StringView("Shaders/Project-VULKAN_SM5-cdcdcdcdcdcdcdcd.rshl"));
+
+    auto refused = [&](auto&& change) {
+        // 표에 더하지 않는다(engine·project 포인터가 무효가 되지 않게).
+        CookedManifestArtifact bad(env.allocator);
+        bad.sha256 = ManifestDigestOf(0xAB);
+        if (!bad.name.TryAssign("Engine") || !bad.formatId.TryAssign("D3D12_SM6")) {
+            return false;
+        }
+
+        change(bad);
+        StringBuilder<16> out(env.allocator);
+        return out.TryAppend("root/").IsOk() &&
+               AppendCookedArtifactPath(out, bad).Error() == ErrorCode::InvalidArgument &&
+               out.View() == StringView("root/");
+    };
+    CHECK(refused([](CookedManifestArtifact& a) { a.kind = static_cast<CookArtifactKind>(0); }));
+    CHECK(refused([](CookedManifestArtifact& a) { a.kind = static_cast<CookArtifactKind>(2); }));
+    CHECK(refused([](CookedManifestArtifact& a) { (void)a.name.TryAssign("engine"); }));
+    CHECK(refused([](CookedManifestArtifact& a) { (void)a.name.TryAssign("../Engine"); }));
+    CHECK(refused([](CookedManifestArtifact& a) { (void)a.formatId.TryAssign("D3D12/SM6"); }));
+    CHECK(refused([](CookedManifestArtifact& a) { (void)a.formatId.TryAssign(".."); }));
+    CHECK(refused([](CookedManifestArtifact& a) { a.formatId.Clear(); }));
+
+    // 할당 실패(모든 지점 — out 성장)는 그 오류다.
+    test::NFailAllocator failing(env.allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        failing.FailOnAttempt(attempt);
+        StringBuilder<4> out(failing);
+        auto appended = AppendCookedArtifactPath(out, *engine);
+        if (failing.Attempts() < attempt) {
+            REQUIRE(appended);
+            break;
+        }
+
+        CHECK(appended.Error() == ErrorCode::OutOfMemory);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+}
+
+// artifact 파일 대조(10.3절 8항): 맞는 파일은 받고, 길이가 다르면 ArtifactBytes, 같은 길이에서
+// 내용이 다르면 ArtifactSha256이다(detail 없음·asset null). 둘 다 다르면 길이를 먼저 본다.
+TEST(CookedManifest_ArtifactFileCheck) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Allocator& allocator = env.allocator;
+    constexpr usize FileBytes = 300;
+    Array<uint8> file(allocator);
+    for (usize index = 0; index < FileBytes; ++index) {
+        REQUIRE(file.TryPushBack(static_cast<uint8>(index * 7 + 3)));
+    }
+
+    CookedManifest manifest(allocator);
+    FillManifestHeader(manifest);
+    CookedManifestArtifact* artifact = AddArtifact(manifest, "Engine", "D3D12_SM6", FileBytes, 0);
+    REQUIRE(artifact != nullptr);
+    artifact->sha256 = Sha256::Hash(file.View());
+    CHECK(CheckCookedArtifactFile(*artifact, file.View()));
+    auto expect = [&](const Array<uint8>& bytes, CookedManifestField field) {
+        AssetDiagnostic failure;
+        return CheckCookedArtifactFile(*artifact, bytes.View(), &failure).Error() ==
+                   ErrorCode::InvalidArgument &&
+               CorruptAt(failure, field, Head) && failure.asset.IsNull();
+    };
+    Array<uint8> longer = Copy(allocator, file.View());
+    REQUIRE(longer.TryPushBack(0));
+    CHECK(expect(longer, F::ArtifactBytes));
+    Array<uint8> flipped = Copy(allocator, file.View());
+    flipped[FileBytes / 2] ^= 1;
+    CHECK(expect(flipped, F::ArtifactSha256));
+    Array<uint8> both = Copy(allocator, file.View().Slice(0, FileBytes - 1));
+    both[0] ^= 1;
+    CHECK(expect(both, F::ArtifactBytes));
+    CHECK(expect(Array<uint8>(allocator), F::ArtifactBytes));
+}
+
+// 표 판정 순서(10.3절 4항 — CookedManifest_JudgementOrder에 더하는 줄): 각 입력은 적힌 칸 말고는
+// 정상이다.
+//   backend 위반(어휘) + 항목 위반(flags)            → Backend/0(세 경로)
+//   항목 위반(flags) + artifact 위반(bytes 0)         → Flags/2(세 경로)
+//   reader 구조(artifact 개수 칸 4097) + backend 어휘 → reader ArtifactCount, 검증·writer Backend/0
+TEST(CookedManifest_TableJudgementOrder) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Allocator& allocator = env.allocator;
+    auto allPaths = [&](const CookedManifest& manifest, CookedManifestField field, uint64 detail) {
+        AssetDiagnostic validated;
+        AssetDiagnostic written;
+        AssetDiagnostic decoded;
+        Array<uint8> out = Prefilled(allocator);
+        return !ValidateCookedManifest(manifest, allocator, &validated) &&
+               CorruptAt(validated, field, detail) &&
+               !WriteCookedManifest(allocator, manifest, out, &written) &&
+               CorruptAt(written, field, detail) && IsPrefilled(out) &&
+               !ReadCookedManifest(allocator, EncodeManifest(allocator, manifest).View(),
+                                   &decoded) &&
+               CorruptAt(decoded, field, detail);
+    };
+
+    CookedManifest backendFirst(allocator);
+    REQUIRE(MakeBase(backendFirst));
+    SetBackendName(backendFirst, 0, "DX12");
+    backendFirst.entries[2].flags = 2;
+    CHECK(allPaths(backendFirst, F::Backend, 0));
+
+    CookedManifest entryFirst(allocator);
+    REQUIRE(MakeBase(entryFirst));
+    entryFirst.entries[2].flags = 2;
+    entryFirst.artifacts[2].bytes = 0;
+    CHECK(allPaths(entryFirst, F::Flags, 2));
+
+    CookedManifest structureFirst(allocator);
+    REQUIRE(MakeBase(structureFirst));
+    SetBackendName(structureFirst, 0, "DX12");
+    AssetDiagnostic validated;
+    CHECK(!ValidateCookedManifest(structureFirst, allocator, &validated) &&
+          CorruptAt(validated, F::Backend, 0));
+    ManifestRaw raw;
+    raw.overrideArtifactCount = true;
+    raw.artifactCount = CookedManifestMaxArtifacts + 1;
+    AssetDiagnostic decoded;
+    CHECK(!ReadCookedManifest(allocator, EncodeManifest(allocator, structureFirst, raw).View(),
+                              &decoded) &&
+          CorruptAt(decoded, F::ArtifactCount, Head));
 }
 } // namespace manifest_tests_file

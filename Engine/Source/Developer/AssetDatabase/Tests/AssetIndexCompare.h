@@ -16,6 +16,7 @@ inline bool SameEntry(const AssetIndexEntry& left, const AssetIndexEntry& right)
         left.key.View() != right.key.View() || left.fileName.View() != right.fileName.View() ||
         left.duplicateId != right.duplicateId || left.duplicatePath != right.duplicatePath ||
         left.dependencies.Size() != right.dependencies.Size() ||
+        left.exportTypes.Size() != right.exportTypes.Size() ||
         left.tags.Size() != right.tags.Size() ||
         left.importRecord.present != right.importRecord.present ||
         !(left.importRecord.owner == right.importRecord.owner) ||
@@ -28,6 +29,12 @@ inline bool SameEntry(const AssetIndexEntry& left, const AssetIndexEntry& right)
 
     for (usize index = 0; index < left.importRecord.outputs.Size(); ++index) {
         if (!(left.importRecord.outputs[index] == right.importRecord.outputs[index])) {
+            return false;
+        }
+    }
+
+    for (usize index = 0; index < left.exportTypes.Size(); ++index) {
+        if (!(left.exportTypes[index] == right.exportTypes[index])) {
             return false;
         }
     }
