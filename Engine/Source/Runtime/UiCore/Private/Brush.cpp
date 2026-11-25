@@ -38,4 +38,13 @@ Brush Brush::PillBox(LinearColor fill, LinearColor outlineColor, float outlineWi
     return brush;
 }
 
+Brush Brush::Vector(VectorImageKey image, Vec2 size, LinearColor tint) noexcept {
+    Brush brush;
+    brush.mode = BrushMode::Image;
+    brush.vectorImage = image;
+    brush.imageSize = size;
+    brush.tint = tint;
+    return brush;
+}
+
 } // namespace rocks::ui

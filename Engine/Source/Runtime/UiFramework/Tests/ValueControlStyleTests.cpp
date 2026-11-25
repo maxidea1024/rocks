@@ -13,7 +13,7 @@ namespace rocks::ui {
 
 namespace {
 
-LinearColor Theme(ThemeSlot slot) noexcept {
+LinearColor ValueStyleColor(ThemeSlot slot) noexcept {
     return DefaultThemeColors().Get(slot);
 }
 
@@ -35,31 +35,31 @@ TEST(UiFramework_SliderPaintsStyleStates) {
     REQUIRE(paint());
     REQUIRE(list.Boxes().Size() == 2);
     const PaintBox& bar = list.Boxes()[0];
-    CHECK(bar.roundedBox && bar.color == Theme(ThemeSlot::Input));
-    CHECK(bar.outlineColor == Theme(ThemeSlot::Input) && bar.outlineWidth == 1.0f);
+    CHECK(bar.roundedBox && bar.color == ValueStyleColor(ThemeSlot::Input));
+    CHECK(bar.outlineColor == ValueStyleColor(ThemeSlot::Input) && bar.outlineWidth == 1.0f);
     CHECK(bar.geometry.size == Vec2(92, 4));
     CHECK(bar.geometry.WindowBounds().Value().min == Vec2(4, 8));
     const PaintBox& thumb = list.Boxes()[1];
     CHECK(thumb.roundedBox && thumb.geometry.size == Vec2(8, 8));
     CHECK(thumb.cornerRadius == Vec4(4, 4, 4, 4));
-    CHECK(thumb.color == Theme(ThemeSlot::Foreground));
+    CHECK(thumb.color == ValueStyleColor(ThemeSlot::Foreground));
     // 값 0, 들여쓰기: 손잡이 가운데 = 손잡이 폭 8(UE OnPaint 81-92행).
     CHECK(thumb.geometry.WindowBounds().Value().min == Vec2(4, 6));
     // 올림: 손잡이 ForegroundHover. 다시 그리기를 요청한다.
     slider.OnMouseEnter(0);
     REQUIRE(paint());
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::ForegroundHover));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::ForegroundHover));
     slider.OnMouseLeave(0);
     REQUIRE(paint());
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::Foreground));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::Foreground));
     // 비활성·잠금: 막대 외곽선 Recessed(UE GetBarImage 485행 — 잠금도 비활성 모양).
     slider.SetEnabled(false);
     REQUIRE(paint());
-    CHECK(list.Boxes()[0].outlineColor == Theme(ThemeSlot::Recessed));
+    CHECK(list.Boxes()[0].outlineColor == ValueStyleColor(ThemeSlot::Recessed));
     slider.SetEnabled(true);
     slider.SetLocked(true);
     REQUIRE(paint());
-    CHECK(list.Boxes()[0].outlineColor == Theme(ThemeSlot::Recessed));
+    CHECK(list.Boxes()[0].outlineColor == ValueStyleColor(ThemeSlot::Recessed));
     slider.SetLocked(false);
     // 들여쓰기 없음: 값 0의 손잡이 가운데 = 손잡이 폭 절반(4) — 경계 안에 머문다.
     slider.SetIndentHandle(false);
@@ -85,13 +85,13 @@ TEST(UiFramework_SliderPointerMatchesPaintedThumb) {
     PaintList list(allocator);
     REQUIRE(slider.OnPaint(list, 0));
     // 끄는 동안은 올림 모양이고, 놓으면 다시 그려 보통 모양으로 돌아간다.
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::ForegroundHover));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::ForegroundHover));
     CHECK(list.Boxes()[1].geometry.WindowBounds().Value().min == Vec2(46, 6));
     CHECK(slider.OnPointerEvent({PointerEventType::Up, {8, 10}}).releaseCapture);
     CHECK(slider.GetValue() == 0);
     list.Clear();
     REQUIRE(slider.OnPaint(list, 0));
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::Foreground));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::Foreground));
 }
 
 TEST(UiFramework_ScrollBarPaintsStyleStatesAndThickness) {
@@ -117,19 +117,19 @@ TEST(UiFramework_ScrollBarPaintsStyleStatesAndThickness) {
     // 트랙은 None이라 손잡이 하나만 그린다: RB(Hover, 4).
     REQUIRE(paint());
     REQUIRE(list.Boxes().Size() == 1);
-    CHECK(list.Boxes()[0].roundedBox && list.Boxes()[0].color == Theme(ThemeSlot::Hover));
+    CHECK(list.Boxes()[0].roundedBox && list.Boxes()[0].color == ValueStyleColor(ThemeSlot::Hover));
     CHECK(list.Boxes()[0].cornerRadius == Vec4(4, 4, 4, 4));
     // 올림·끌기: RB(Hover2, 4). 끌기를 놓으면 다시 보통이다.
     bar.OnMouseEnter(0);
     REQUIRE(paint());
-    CHECK(list.Boxes()[0].color == Theme(ThemeSlot::Hover2));
+    CHECK(list.Boxes()[0].color == ValueStyleColor(ThemeSlot::Hover2));
     bar.OnMouseLeave(0);
     CHECK(bar.OnPointerEvent({PointerEventType::Down, {4, 10}}).capture);
     REQUIRE(paint());
-    CHECK(list.Boxes()[0].color == Theme(ThemeSlot::Hover2));
+    CHECK(list.Boxes()[0].color == ValueStyleColor(ThemeSlot::Hover2));
     CHECK(bar.OnPointerEvent({PointerEventType::Up, {4, 10}}).releaseCapture);
     REQUIRE(paint());
-    CHECK(list.Boxes()[0].color == Theme(ThemeSlot::Hover));
+    CHECK(list.Boxes()[0].color == ValueStyleColor(ThemeSlot::Hover));
     // 손잡이 최소 길이는 UE MinThumbSize 35다.
     REQUIRE(bar.SetState(0, 0.01f));
     REQUIRE(paint());
@@ -149,8 +149,8 @@ TEST(UiFramework_ProgressBarPaintsStyleAndFillOverride) {
     // 바탕 Color(Foldout), 채움 Color(PrimaryHover)이고 채움 색 기본 흰색은 스타일 색 그대로다.
     REQUIRE(paint());
     REQUIRE(list.Boxes().Size() == 2);
-    CHECK(list.Boxes()[0].color == Theme(ThemeSlot::Foldout));
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::PrimaryHover));
+    CHECK(list.Boxes()[0].color == ValueStyleColor(ThemeSlot::Foldout));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::PrimaryHover));
     CHECK(list.Boxes()[1].geometry.size == Vec2(50, 10));
     // 채움 brush를 덮으면 그것을 쓰고, ClearFillBrush로 스타일 채움에 돌아간다.
     Brush red;
@@ -162,16 +162,16 @@ TEST(UiFramework_ProgressBarPaintsStyleAndFillOverride) {
     // marquee는 덮은 채움이 아니라 스타일 marquee다(UE FProgressBarStyle.MarqueeImage).
     bar.SetMarquee(true);
     REQUIRE(paint());
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::PrimaryHover));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::PrimaryHover));
     bar.SetMarquee(false);
     bar.ClearFillBrush();
     REQUIRE(paint());
-    CHECK(list.Boxes()[1].color == Theme(ThemeSlot::PrimaryHover));
+    CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::PrimaryHover));
     // 채움 색은 채움 brush에 곱한다(UE FillColorAndOpacity).
     bar.SetFillColor({0.5f, 0.5f, 0.5f, 1});
     REQUIRE(paint());
     CHECK(list.Boxes()[1].color ==
-          Theme(ThemeSlot::PrimaryHover) * LinearColor(0.5f, 0.5f, 0.5f, 1));
+          ValueStyleColor(ThemeSlot::PrimaryHover) * LinearColor(0.5f, 0.5f, 0.5f, 1));
 }
 
 TEST(UiFramework_ThrobberDefaultPieceIsCircle) {

@@ -168,10 +168,36 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
     }
 
     if (brush.mode == BrushMode::Image) {
-        box.uvStart = {brush.mirrorX ? brush.uv.max.x : brush.uv.min.x,
-                       brush.mirrorY ? brush.uv.max.y : brush.uv.min.y};
-        box.uvEnd = {brush.mirrorX ? brush.uv.min.x : brush.uv.max.x,
-                     brush.mirrorY ? brush.uv.min.y : brush.uv.max.y};
+        Box2<float> uv = brush.uv;
+        if (!brush.vectorImage.IsNull()) {
+            // 벡터 brush: 그릴 화소 크기로 래스터화한 자리로 바꾼다(17.2절). 화소 크기는 로컬 크기
+            // x 누적 변환의 두 열 길이를 올림한 것이다.
+            if (vectorImages_ == nullptr) {
+                return Result<void>::Success();
+            }
+
+            const AffineTransform2D& render = geometry.render;
+            const float scaleX = math::Sqrt(render.m00 * render.m00 + render.m10 * render.m10);
+            const float scaleY = math::Sqrt(render.m01 * render.m01 + render.m11 * render.m11);
+            const float limit = static_cast<float>(MaxVectorImagePixels);
+            const float width = math::Clamp(math::Ceil(geometry.size.x * scaleX), 1.0f, limit);
+            const float height = math::Clamp(math::Ceil(geometry.size.y * scaleY), 1.0f, limit);
+            if (!math::IsFinite(width) || !math::IsFinite(height)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto resolved = vectorImages_->Resolve(brush.vectorImage, static_cast<uint32>(width),
+                                                   static_cast<uint32>(height));
+            if (!resolved) {
+                return Result<void>::Failure(resolved.Error());
+            }
+
+            box.resource = resolved.Value().resource;
+            uv = resolved.Value().uv;
+        }
+
+        box.uvStart = {brush.mirrorX ? uv.max.x : uv.min.x, brush.mirrorY ? uv.max.y : uv.min.y};
+        box.uvEnd = {brush.mirrorX ? uv.min.x : uv.max.x, brush.mirrorY ? uv.min.y : uv.max.y};
         return addPiece({});
     }
 
@@ -262,6 +288,14 @@ Span<const PaintBox> PaintList::Boxes() const noexcept {
 
 float PaintList::InheritedOpacity() const noexcept {
     return opacity_;
+}
+
+void PaintList::SetVectorImageResolver(VectorImageResolver* resolver) noexcept {
+    vectorImages_ = resolver;
+}
+
+VectorImageResolver* PaintList::GetVectorImageResolver() const noexcept {
+    return vectorImages_;
 }
 
 void PaintList::SetTheme(const ThemeColors* theme, uint64 revision) noexcept {

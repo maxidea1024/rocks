@@ -10,6 +10,12 @@
 
 // 갤러리 탭들이 함께 쓰는 부품이다(Docs/Design/UiToolkit 16장). 텍스트는 데모 글꼴 조합으로
 // shaping하고, 색은 지정하지 않으면 부모 전경색을 따른다(UE STextBlock 기본 UseForeground).
+namespace rocks::ui {
+
+class VectorImageAtlas;
+
+} // namespace rocks::ui
+
 namespace rocks::ui::gallery {
 
 // 갤러리 탭을 만드는 동안과 창이 열려 있는 동안 살아 있는 공용 자원이다(GalleryWindow가 소유하고,
@@ -20,6 +26,8 @@ struct GalleryContext {
     const GalleryStrings& strings;
     // 이미지·9분할·장면 견본용 절차 생성 텍스처다.
     const GalleryTextures& textures;
+    // 등록한 SVG 아이콘이다(Icons 탭 목록 — 없으면 빈 탭).
+    const VectorImageAtlas* icons = nullptr;
 };
 
 // UE 갤러리 이름표 색(AppStyle "Colors.White50" — 흰색 50%)이다.

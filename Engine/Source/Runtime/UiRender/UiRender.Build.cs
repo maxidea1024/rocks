@@ -11,5 +11,6 @@ public sealed class UiRender : EngineModuleRules
     protected override string[] PublicDependencies => ["UiCore", "Graphics", "TextLayout", "RenderBase", "ShaderCore"];
 
     // The module lifetime object reads the host services (ModuleLoader start context).
-    protected override string[] PrivateDependencies => ["ModuleLoader"];
+    // nanosvg rasterizes SVG vector images and icons (UiToolkit 17.2); no nanosvg type appears in the public headers.
+    protected override string[] PrivateDependencies => ["ModuleLoader", "NanoSvg"];
 }

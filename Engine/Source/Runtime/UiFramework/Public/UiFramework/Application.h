@@ -33,6 +33,12 @@ public:
     void SetTheme(const ThemeColors& theme) noexcept;
     const ThemeColors& Theme() const noexcept;
 
+    // 벡터 brush(SVG 아이콘)를 래스터 자리로 바꿀 resolver다(Docs/Design/UiToolkit 17.2절 —
+    // 렌더러의 VectorImageAtlas). resolver는 이 Application보다 오래 살아야 한다. resolver가
+    // atlas를 비워 Revision이 바뀌면 다음 그리기 갱신이 테마 revision을 올려 캐시를 모두 다시
+    // 만든다.
+    void SetVectorImageResolver(VectorImageResolver* resolver) noexcept;
+
     // 변경된 배치를 반영하고 목록을 새로 기록한다. 지역 CachePanel의 기록은 재사용한다.
     Result<void> BuildPaintList(const Geometry& geometry, float layoutScale,
                                 PaintList& list) noexcept;
@@ -152,6 +158,11 @@ private:
     ThemeColors theme_{};
     // SetTheme마다 늘린다(지역 캐시가 같은 주소의 테마 값이 바뀐 것을 알게 한다).
     uint64 themeRevision_ = 0;
+    VectorImageResolver* vectorImages_ = nullptr;
+    // 마지막으로 본 resolver revision이다.
+    uint64 vectorRevision_ = 0;
+    // resolver revision이 바뀌었으면 테마 revision을 올려 캐시를 다시 만든다.
+    void SyncVectorRevision() noexcept;
     CacheRoot cache_;
     HitGrid hitGrid_;
     SharedPtr<Element> root_;

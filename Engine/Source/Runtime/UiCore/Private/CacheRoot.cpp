@@ -29,6 +29,13 @@ void CacheRoot::SetTheme(const ThemeColors* theme, uint64 revision) noexcept {
     Reset();
 }
 
+void CacheRoot::SetVectorImageResolver(VectorImageResolver* resolver) noexcept {
+    list_.SetVectorImageResolver(resolver);
+    scratch_.SetVectorImageResolver(resolver);
+    assembled_.SetVectorImageResolver(resolver);
+    Reset();
+}
+
 const PaintList& CacheRoot::List() const noexcept {
     return list_;
 }

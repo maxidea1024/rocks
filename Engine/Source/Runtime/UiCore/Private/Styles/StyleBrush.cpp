@@ -36,12 +36,28 @@ StyleBrush StyleBrush::Pill(ThemeSlot fill) noexcept {
     return brush;
 }
 
+StyleBrush StyleBrush::Svg(VectorImageKey image, Vec2 size, ThemeSlot tint) noexcept {
+    StyleBrush brush;
+    brush.mode = BrushMode::Image;
+    brush.fill = ColorRef::FromTheme(tint);
+    brush.vectorImage = image;
+    brush.imageSize = size;
+    return brush;
+}
+
+StyleBrush StyleBrush::SvgForeground(VectorImageKey image, Vec2 size) noexcept {
+    StyleBrush brush = Svg(image, size, ThemeSlot::Foreground);
+    brush.fill = ColorRef{ColorSource::Foreground};
+    return brush;
+}
+
 Brush StyleBrush::Resolve(const ThemeColors& theme,
                           const StyleColorContext& context) const noexcept {
     Brush brush;
     brush.mode = mode;
     brush.tint = fill.Resolve(theme, context);
     brush.resource = resource;
+    brush.vectorImage = vectorImage;
     brush.imageSize = imageSize;
     brush.margin = margin;
     brush.tint.a *= opacity;

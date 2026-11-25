@@ -4,6 +4,7 @@
 #include <Core/Math/Color.h>
 #include <Core/Math/Rect.h>
 #include <Core/Math/Vector4.h>
+#include <UiCore/VectorImageKey.h>
 
 namespace rocks::ui {
 
@@ -36,6 +37,9 @@ struct BrushOutline {
 
 // resource는 렌더러에 등록한 이미지다. 빈 핸들은 단색을 뜻한다.
 // imageSize는 원본의 논리 크기, margin은 원본 크기에 대한 각 변의 비율이다.
+// vectorImage가 있는 Image brush는 벡터 이미지(SVG)다(UE ESlateBrushImageType::Vector —
+// Docs/Design/ UiToolkit 17.2절). 그리기 목록에 기록할 때 그릴 화소 크기로 래스터화한 자리로
+// 바뀌고, resource·uv는 쓰지 않는다.
 struct ROCKS_UICORE_API Brush {
     BrushMode mode = BrushMode::Image;
     SlotHandle resource{};
@@ -47,6 +51,7 @@ struct ROCKS_UICORE_API Brush {
     bool mirrorY = false;
     // RoundedBox 모드의 외곽선·반경이다.
     BrushOutline outline{};
+    VectorImageKey vectorImage{};
     bool IsValid() const noexcept;
 
     // 고정 반경 둥근 상자다(UE FSlateRoundedBoxBrush(fill, radius, outline, width)).
@@ -58,6 +63,8 @@ struct ROCKS_UICORE_API Brush {
     // 높이 절반 반경(알약·원) 둥근 상자다(UE FSlateRoundedBoxBrush(fill, outline, width)).
     static Brush PillBox(LinearColor fill, LinearColor outlineColor = {0, 0, 0, 0},
                          float outlineWidth = 0.0f) noexcept;
+    // 벡터 이미지 brush다(UE FSlateVectorImageBrush(path, size, tint)).
+    static Brush Vector(VectorImageKey image, Vec2 size, LinearColor tint = {1, 1, 1, 1}) noexcept;
     bool operator==(const Brush&) const noexcept = default;
 };
 

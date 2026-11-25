@@ -15,14 +15,14 @@ UE 5.8 에디터의 아이콘은 거의 모두 SVG 벡터 이미지다(`FSlateVe
 
 ### 17.2 Rocks 구성
 
-**외부 라이브러리.** nanosvg(memononen/nanosvg, zlib 라이선스, UE와 같은 라이브러리 — UD3)를 `Engine/Source/ThirdParty/NanoSvg`에 들인다. 공식 릴리스가 없어 commit `239e102ec2c6`(master, 2026-07-09)과 archive SHA-256으로 고정한다(Minimp3와 같은 방식). 들이는 파일은 `nanosvg.h`·`nanosvgrast.h`·`LICENSE.txt`다. glue 파일 하나가 구현을 한 번 컴파일하고, 표준 헤더를 먼저 넣은 다음 `malloc`·`realloc`·`free`를 Rocks Allocator 함수로 바꾼다(HarfBuzz·Brotli처럼 모든 할당이 Rocks Allocator를 지난다). 파일 API(`nsvgParseFromFile` — `fopen`)는 부르지 않는다. 색 해석의 `sscanf`(`%x`·`%u`)와 수 해석(`nsvg__atof` — 자체 구현)은 locale에 기대지 않는다.
+**외부 라이브러리.** nanosvg(memononen/nanosvg, zlib 라이선스, UE와 같은 라이브러리 — UD3)를 `Engine/Source/ThirdParty/NanoSvg`에 들인다. 공식 릴리스가 없어 commit `239e102ec2c6`(master, 2026-07-09)과 archive SHA-256으로 고정한다(Minimp3와 같은 방식). 들이는 파일은 `nanosvg.h`·`nanosvgrast.h`·`LICENSE.txt`다. glue 파일 하나가 구현을 한 번 컴파일하고, 표준 헤더를 먼저 넣은 다음 `malloc`·`realloc`·`free`를 Rocks hook으로 바꾼다. hook은 UiRender가 Core `LibraryHeap`(C 라이브러리용 malloc 호환 공용 힙 — HarfBuzz·ICU hook도 이것으로 옮겼다)으로 정의하므로 모든 할당이 Rocks 할당기를 지난다. 소비 모듈은 nanosvg 헤더를 보지 않고 Rocks 어댑터 `Adapter/RocksNanoSvg.h`(불투명 handle과 파싱·크기·그라데이션 여부·비균등 배율·래스터 함수)만 include한다 — nanosvg.h의 MSVC 경고 pragma가 소비자에게 닿지 않는다. 원본은 한 줄만 고쳤다(`nsvgParseFromFile`의 `size == -1l` 부호 비교 — `ThirdParty.json` modifications·`Rocks.patch`). 파일 API(`nsvgParseFromFile` — `fopen`)는 부르지 않는다. 색 해석의 `sscanf`(`%x`·`%u`)와 수 해석(`nsvg__atof` — 자체 구현)은 locale에 기대지 않는다.
 
 **키.** `ui::VectorImageKey`(UiCore)는 아이콘 경로의 64비트 해시다. 경로는 아이콘 루트 기준 상대 경로에서 확장자를 뺀 것이고 구분자는 `/`다(예: `Common/Check`). `VectorImageKey::FromPath("Common/Check")`는 constexpr이라(Core `HashStringBytes`) 정적 스타일 값에 그대로 쓴다. 해시가 겹치면 등록 때 `AlreadyExists`로 막는다.
 
 **brush.** `Brush`에 `vectorImage`(키)를 더한다. `mode == Image`이고 키가 있으면 벡터 brush다(UE `ESlateBrushImageType::Vector`). `imageSize`는 논리 크기, `tint`·`uv`·`mirrorX/Y`는 래스터 brush와 같은 뜻이다. 9분할(Box·Border) 벡터 brush(UE `FSlateVectorBoxBrush`)는 후속이다(17.6절). `StyleBrush::Svg(path, size, ThemeSlot tint)`가 UE `IMAGE_BRUSH_SVG(path, size, color)`에 대응한다.
 
 **해석 시점 — 그리기 목록 기록 때.** UE는 batch를 만들 때 해석하지만, Rocks는 `PaintList`가 brush를 기록할 때 해석한다. `PaintList`는 테마처럼 `VectorImageResolver*`를 들고(Application이 넣는다), 벡터 brush를 만나면 화소 크기를 정해 `Resolve(key, width, height)`로 (텍스처 handle, UV)를 받아 래스터 brush처럼 기록한다.
-- 화소 크기 = 올림(로컬 크기 × 배율). 배율은 누적 변환의 두 열 길이다(회전·기울임이 있어도 늘어난 길이만 반영). 가로·세로 각각 정한다. `MaxVectorImagePixels`(4096)를 넘으면 그 값으로 자른다.
+- 화소 크기 = 올림(로컬 크기 × 배율). 배율은 누적 변환의 두 열 길이다(회전·기울임이 있어도 늘어난 길이만 반영). 가로·세로 각각 정한다. `MaxVectorImagePixels`(UiCore, 4096)를 넘으면 그 값으로 자른다. 그릴 영역이 늘어나면 그림도 늘어난다(UE와 같다) — 아이콘을 줄 안에 둘 때는 가운데 정렬로 원래 크기를 지킨다.
 - 그리기 목록 cache: 이미 기록한 항목에는 해석한 handle과 UV가 들어 있다. resolver가 atlas를 비우면 `Revision()`이 바뀌고, Application이 테마 revision과 같은 경로로 cache root를 다시 만든다(3.4절·9.1절 UW3c의 테마 revision 경로를 쓴다).
 - resolver가 없으면(창·GPU 없는 시험) 벡터 brush는 아무것도 그리지 않고 성공한다(UE null renderer와 같다).
 - 모르는 키는 `NotFound`로 그리기를 실패시킨다. 스타일 시험이 오타를 바로 잡게 하려는 것이다(UE는 경고만 남기고 빈칸을 그린다 — Rocks가 엄격한 쪽이다).

@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Math/Color.h>
 #include <Core/Math/Rect.h>
+#include <UiCore/VectorImageResolver.h>
 #include <UiCore/Geometry.h>
 #include <UiCore/Brush.h>
 #include <UiCore/ColorRef.h>
@@ -88,6 +89,12 @@ public:
     // 모른다).
     void SetTheme(const ThemeColors* theme, uint64 revision = 0) noexcept;
     const ThemeColors& Theme() const noexcept;
+
+    // 벡터 brush를 래스터 자리로 바꿀 resolver다(Docs/Design/UiToolkit 17.2절). nullptr이면 벡터
+    // brush는 아무것도 그리지 않는다(창·GPU 없는 시험 — UE null renderer와 같다). 목록은 resolver를
+    // 빌리므로 소유자가 목록보다 오래 살아야 한다. Clear는 resolver를 유지한다.
+    void SetVectorImageResolver(VectorImageResolver* resolver) noexcept;
+    VectorImageResolver* GetVectorImageResolver() const noexcept;
     uint64 ThemeRevision() const noexcept;
 
     // 지금 그리는 요소가 물려받은 전경색이다(UE FWidgetStyle::GetForegroundColor). 루트는 흰색이다.
@@ -131,6 +138,7 @@ private:
     friend class Element;
     float opacity_ = 1;
     const ThemeColors* theme_ = nullptr;
+    VectorImageResolver* vectorImages_ = nullptr;
     uint64 themeRevision_ = 0;
     LinearColor foreground_{1, 1, 1, 1};
     bool disabled_ = false;

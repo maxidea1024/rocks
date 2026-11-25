@@ -3,6 +3,7 @@
 #include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
 #include <UiFramework/InputAdapter.h>
+#include <UiRender/VectorImageAtlas.h>
 #include <UiRender/WidgetSurfaceHost.h>
 #include <UiRender/DrawBatchRenderer.h>
 #include <UiRender/DrawBatchBuffers.h>
@@ -12,8 +13,11 @@ namespace rocks::ui {
 // 창마다 입력·배치·스왑 체인을 소유한다. 글꼴과 브러시 등 장치 자원은 창 사이에서 공유한다.
 class DockWindows {
 public:
+    // icons는 SVG brush를 래스터화할 atlas이고 imagePipeline으로 페이지를
+    // 올린다(Docs/Design/UiToolkit 17.2절). 창들보다 오래 살아야 한다.
     DockWindows(Allocator& allocator, graphics::Device& device, graphics::PipelineHandle pipeline,
-                SlotArray<BrushTexture>& textures, const SharedPtr<CommandList>& commands) noexcept;
+                SlotArray<BrushTexture>& textures, const SharedPtr<CommandList>& commands,
+                VectorImageAtlas& icons, graphics::PipelineHandle imagePipeline) noexcept;
     Result<void> Run(UniquePtr<platform::Window> window,
                      const SharedPtr<DockManager>& area) noexcept;
 
@@ -56,6 +60,8 @@ private:
     graphics::PipelineHandle pipeline_;
     SlotArray<BrushTexture>& textures_;
     SharedPtr<CommandList> commands_;
+    VectorImageAtlas& icons_;
+    graphics::PipelineHandle imagePipeline_;
     SlotArray<UniquePtr<Surface>> windows_;
     SlotHandle primary_{};
 };

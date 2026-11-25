@@ -55,9 +55,10 @@ DockWindows::Surface::~Surface() noexcept {
 
 DockWindows::DockWindows(Allocator& allocator, graphics::Device& device,
                          graphics::PipelineHandle pipeline, SlotArray<BrushTexture>& textures,
-                         const SharedPtr<CommandList>& commands) noexcept
+                         const SharedPtr<CommandList>& commands, VectorImageAtlas& icons,
+                         graphics::PipelineHandle imagePipeline) noexcept
     : allocator_(allocator), device_(device), pipeline_(pipeline), textures_(textures),
-      commands_(commands), windows_(allocator) {
+      commands_(commands), icons_(icons), imagePipeline_(imagePipeline), windows_(allocator) {
 }
 
 Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
@@ -69,6 +70,7 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
     }
 
     auto& host = *surface.Value();
+    host.app.SetVectorImageResolver(&icons_);
     auto initialized = host.app.SetCommands({}, commands_);
     if (initialized) {
         initialized = host.queue.TryInitialize(1024);
@@ -343,6 +345,11 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
         return Result<bool>::Failure(uploaded.Error());
     }
 
+    // 그리기 목록이 받은 SVG 자리의 페이지를 올린다(그리기 전 — 17.2절).
+    if (auto synced = icons_.Sync(imagePipeline_); !synced) {
+        return Result<bool>::Failure(synced.Error());
+    }
+
     // 창 바탕은 테마 Background다(내용이 덮지 않는 틈에 보인다).
     const LinearColor background = host.app.Theme().Get(ThemeSlot::Background);
     auto frame =
@@ -359,6 +366,8 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
     }
 
     host.presented = true;
+    // 한도를 넘었으면 atlas를 비운다. revision이 올라 다음 그리기가 목록을 다시 만든다.
+    (void)icons_.AdvanceFrame();
     return Result<bool>::Success(true);
 }
 

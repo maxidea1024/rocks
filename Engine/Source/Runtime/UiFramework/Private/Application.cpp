@@ -24,6 +24,22 @@ const ThemeColors& Application::Theme() const noexcept {
     return theme_;
 }
 
+void Application::SetVectorImageResolver(VectorImageResolver* resolver) noexcept {
+    vectorImages_ = resolver;
+    vectorRevision_ = resolver ? resolver->Revision() : 0;
+    cache_.SetVectorImageResolver(resolver);
+}
+
+void Application::SyncVectorRevision() noexcept {
+    if (!vectorImages_ || vectorImages_->Revision() == vectorRevision_) {
+        return;
+    }
+
+    vectorRevision_ = vectorImages_->Revision();
+    ++themeRevision_;
+    cache_.SetTheme(&theme_, themeRevision_);
+}
+
 Application::~Application() noexcept {
     if (context_) {
         *context_ = nullptr;
@@ -105,8 +121,10 @@ Result<void> Application::BuildPaintList(const Geometry& geometry, float layoutS
         return prepared;
     }
 
+    SyncVectorRevision();
     list.Clear();
     list.SetTheme(&theme_, themeRevision_);
+    list.SetVectorImageResolver(vectorImages_);
     auto painted = root_->Paint(list, 0);
     return painted ? hitGrid_.Update(root_) : Move(painted);
 }
@@ -126,6 +144,7 @@ Result<const CacheRoot*> Application::UpdateArrangedPaintCache() noexcept {
         return Result<const CacheRoot*>::Failure(ErrorCode::NotReady);
     }
 
+    SyncVectorRevision();
     auto updated = cache_.Update(*root_, 0);
     if (updated) {
         updated = hitGrid_.Update(root_);

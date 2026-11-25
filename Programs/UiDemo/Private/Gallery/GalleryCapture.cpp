@@ -20,8 +20,9 @@ constexpr usize RgbBytes = 3;
 // 지금 앞에 있는 탭을 그려 RGBA를 읽는다.
 Result<void> Render(Allocator& allocator, graphics::Device& device,
                     graphics::PipelineHandle pipeline, SlotArray<BrushTexture>& textures,
-                    Application& app, const SharedPtr<DockManager>& area, uint32 width,
-                    uint32 height, uint64 frame, Array<uint8>& rgba) noexcept {
+                    Application& app, const SharedPtr<DockManager>& area, VectorImageAtlas& icons,
+                    graphics::PipelineHandle imagePipeline, uint32 width, uint32 height,
+                    uint64 frame, Array<uint8>& rgba) noexcept {
     const Vec2 size(static_cast<float>(width), static_cast<float>(height));
     if (auto arranged = app.PrepareLayout(Geometry::Root(size, {}), 1); !arranged) {
         return arranged;
@@ -48,7 +49,14 @@ Result<void> Render(Allocator& allocator, graphics::Device& device,
         return uploaded;
     }
 
-    return DrawBatchRenderer::ReadPixels(device, pipeline, buffers, textures, width, height, rgba);
+    if (auto synced = icons.Sync(imagePipeline); !synced) {
+        return synced;
+    }
+
+    auto read =
+        DrawBatchRenderer::ReadPixels(device, pipeline, buffers, textures, width, height, rgba);
+    (void)icons.AdvanceFrame();
+    return read;
 }
 
 // RGBA를 PPM(P6, RGB 행을 위에서 아래로)으로 쓴다.
@@ -87,10 +95,12 @@ Result<void> WritePpm(Allocator& allocator, StringView name, Span<const uint8> r
 
 Result<void> CaptureGallery(Allocator& allocator, graphics::Device& device,
                             graphics::PipelineHandle pipeline, SlotArray<BrushTexture>& textures,
-                            const SharedPtr<DockManager>& area, Span<const StringView> tabs,
+                            const SharedPtr<DockManager>& area, VectorImageAtlas& icons,
+                            graphics::PipelineHandle imagePipeline, Span<const StringView> tabs,
                             uint32 width, uint32 height) noexcept {
     Application app(allocator);
     app.SetRoot(area);
+    app.SetVectorImageResolver(&icons);
     uint64 frame = 0;
     Array<uint8> rgba(allocator);
     StringBuilder<> name(allocator);
@@ -99,8 +109,8 @@ Result<void> CaptureGallery(Allocator& allocator, graphics::Device& device,
             return activated;
         }
 
-        auto rendered =
-            Render(allocator, device, pipeline, textures, app, area, width, height, frame++, rgba);
+        auto rendered = Render(allocator, device, pipeline, textures, app, area, icons,
+                               imagePipeline, width, height, frame++, rgba);
         if (!rendered) {
             return rendered;
         }

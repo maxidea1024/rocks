@@ -17,6 +17,8 @@ struct ROCKS_UICORE_API StyleBrush {
     BrushRounding rounding = BrushRounding::Fixed;
     // 이미지 brush의 resource·논리 크기·9분할 여백이다.
     SlotHandle resource{};
+    // 벡터 이미지(SVG)다. 있으면 Image 모드 벡터 brush로 푼다.
+    VectorImageKey vectorImage{};
     Vec2 imageSize{};
     Vec4 margin{};
     // 채움 색 알파에 곱한다(UE Panel.CopyWithNewOpacity(0.8)처럼 테마 색의 반투명 변형).
@@ -34,6 +36,10 @@ struct ROCKS_UICORE_API StyleBrush {
     // 높이 절반 반경(알약·원)의 테마 색 둥근 상자다(UE FSlateRoundedBoxBrush(fill) — 반경 없이 만든
     // 것).
     static StyleBrush Pill(ThemeSlot fill) noexcept;
+    // 테마 색으로 tint한 벡터 이미지다(UE IMAGE_BRUSH_SVG(path, size, color) — 17.2절).
+    static StyleBrush Svg(VectorImageKey image, Vec2 size, ThemeSlot tint) noexcept;
+    // 전경색(UE FSlateColor::UseForeground)으로 tint한 벡터 이미지다.
+    static StyleBrush SvgForeground(VectorImageKey image, Vec2 size) noexcept;
 
     // 테마로 색을 풀어 그릴 Brush를 만든다.
     Brush Resolve(const ThemeColors& theme, const StyleColorContext& context) const noexcept;

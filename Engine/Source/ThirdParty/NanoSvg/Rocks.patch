@@ -1,0 +1,13 @@
+diff --git a/nanosvg.h b/nanosvg.h
+index 291ecbf..2df9743 100644
+--- a/nanosvg.h
++++ b/nanosvg.h
+@@ -3208,7 +3208,7 @@ NSVGimage* nsvgParseFromFile(const char* filename, const char* units, float dpi)
+ 	if (!fp) goto error;
+ 	if (fseek(fp, 0, SEEK_END)) goto error;
+ 	size = ftell(fp);
+-	if (size == -1l) goto error;
++	if (size == (size_t)-1l) goto error; /* Rocks modification: see ThirdParty.json modifications. */
+ 	if (fseek(fp, 0, SEEK_SET)) goto error;
+ 	data = (char*)malloc(size+1);
+ 	if (data == NULL) goto error;

@@ -1,6 +1,7 @@
 #include "GalleryWindow.h"
 
 #include "ColorsPage.h"
+#include "IconsPage.h"
 #include "TextPage.h"
 
 #include <Core/Diagnostics/Log.h>
@@ -21,10 +22,11 @@ Result<SharedPtr<DockManager>> Fail(StringView step, const Result<T>& failed) no
 
 } // namespace
 
-GalleryWindow::GalleryWindow(Allocator& allocator, DemoText& text,
-                             const GalleryTextures& textures) noexcept
-    : allocator_(allocator), strings_(allocator), context_{allocator, text, strings_, textures},
-      definitions_(allocator), bindings_(allocator) {
+GalleryWindow::GalleryWindow(Allocator& allocator, DemoText& text, const GalleryTextures& textures,
+                             const VectorImageAtlas* icons) noexcept
+    : allocator_(allocator), strings_(allocator),
+      context_{allocator, text, strings_, textures, icons}, definitions_(allocator),
+      bindings_(allocator) {
 }
 
 const SharedPtr<CommandList>& GalleryWindow::Commands() const noexcept {
@@ -102,6 +104,11 @@ Result<SharedPtr<DockManager>> GalleryWindow::Create() noexcept {
         return Fail("effects page", effects);
     }
 
+    auto iconsPage = BuildIconsPage(context_);
+    if (!iconsPage) {
+        return Fail("icons page", iconsPage);
+    }
+
     widgets_ = Move(widgets.Value());
     layout_ = Move(layout.Value());
     behavior_ = Move(behavior.Value());
@@ -126,6 +133,10 @@ Result<SharedPtr<DockManager>> GalleryWindow::Create() noexcept {
 
     if (result) {
         result = AddTab(dock, EffectsTab, effects_.root);
+    }
+
+    if (result) {
+        result = AddTab(dock, IconsTab, iconsPage.Value());
     }
 
     // UE SetForegroundTab("Starship Widgets")다.

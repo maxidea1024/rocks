@@ -2,6 +2,7 @@
 
 #include <HostConfig/HostSettings.h>
 #include <Platform/File.h>
+#include <UiRender/VectorImageAtlas.h>
 
 namespace rocks::ui {
 
@@ -9,6 +10,9 @@ namespace {
 
 // 경로 버퍼 byte 수다.
 constexpr usize PathBytes = 1024;
+
+// 엔진 폴더 기준 아이콘 폴더다.
+constexpr StringView IconDirectory = "Content/Ui/Icons";
 
 } // namespace
 
@@ -50,6 +54,27 @@ Result<void> ReadEngineFile(StringView relative, Array<uint8>& out) noexcept {
     const bool closed = static_cast<bool>(file.Close());
     return ok && closed ? Result<void>::Success()
                         : Result<void>::Failure(ErrorCode::DependencyFailed);
+}
+
+Result<usize> RegisterEngineIcons(VectorImageAtlas& atlas) noexcept {
+    char engine[PathBytes] = {};
+    auto found = FindEngineDirectory(Span<char>(engine, sizeof(engine)));
+    if (!found) {
+        return Result<usize>::Failure(ErrorCode::NotFound);
+    }
+
+    const usize base = found.Value();
+    if (base + 1 + IconDirectory.ByteCount() + 1 > PathBytes) {
+        return Result<usize>::Failure(ErrorCode::Overflow);
+    }
+
+    usize length = base;
+    engine[length++] = '/';
+    for (char byte : IconDirectory) {
+        engine[length++] = byte;
+    }
+
+    return atlas.RegisterDirectory(platform::PhysicalFileSystem(), StringView(engine, length));
 }
 
 } // namespace rocks::ui

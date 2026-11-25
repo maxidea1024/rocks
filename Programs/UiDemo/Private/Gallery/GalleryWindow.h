@@ -29,8 +29,11 @@ public:
     static constexpr StringView LayoutTab = "Layout";
     static constexpr StringView BehaviorTab = "Behavior";
     static constexpr StringView EffectsTab = "Effects";
+    static constexpr StringView IconsTab = "Icons";
 
-    GalleryWindow(Allocator& allocator, DemoText& text, const GalleryTextures& textures) noexcept;
+    // icons는 Icons 탭이 보일 SVG 아이콘 목록이다(없으면 빈 탭). 창보다 오래 살아야 한다.
+    GalleryWindow(Allocator& allocator, DemoText& text, const GalleryTextures& textures,
+                  const VectorImageAtlas* icons = nullptr) noexcept;
 
     // 문자열 표를 읽고 탭을 만든다. 문자열 파일이 없으면 NotFound다.
     Result<SharedPtr<DockManager>> Create() noexcept;

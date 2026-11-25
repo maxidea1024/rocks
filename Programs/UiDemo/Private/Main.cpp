@@ -1,3 +1,4 @@
+#include "DemoFiles.h"
 #include "DemoShaders.h"
 #include "DockWindows.h"
 #include "GameHud.h"
@@ -13,6 +14,7 @@
 #include <Core/ScopeExit.h>
 #include <D3D11Graphics/D3D11Device.h>
 #include <Launch/EntryPoint.h>
+#include <UiRender/VectorImageAtlas.h>
 
 namespace {
 
@@ -129,7 +131,14 @@ int Run(launch::ApplicationContext& context) noexcept {
         return 3;
     }
 
-    gallery::GalleryWindow gallery(allocator, font, sampleTextures);
+    // SVG 아이콘 atlas다(Docs/Design/UiToolkit 17장). 엔진 아이콘 폴더를 모두 등록한다.
+    VectorImageAtlas icons(allocator, device, textures);
+    if (auto registered = RegisterEngineIcons(icons); !registered) {
+        Log::Error(LogUiDemo, "Engine icons could not be registered ({Error})", registered.Error());
+        return 11;
+    }
+
+    gallery::GalleryWindow gallery(allocator, font, sampleTextures, &icons);
     auto area = gallery.Create();
     if (!area) {
         return 6;
@@ -143,9 +152,10 @@ int Run(launch::ApplicationContext& context) noexcept {
         const StringView tabs[] = {
             gallery::GalleryWindow::ColorsTab,   gallery::GalleryWindow::TextTab,
             gallery::GalleryWindow::WidgetsTab,  gallery::GalleryWindow::LayoutTab,
-            gallery::GalleryWindow::BehaviorTab, gallery::GalleryWindow::EffectsTab};
+            gallery::GalleryWindow::BehaviorTab, gallery::GalleryWindow::EffectsTab,
+            gallery::GalleryWindow::IconsTab};
         return gallery::CaptureGallery(allocator, device, solid.Value(), textures, area.Value(),
-                                       tabs, GalleryWidth, GalleryHeight)
+                                       icons, image.Value(), tabs, GalleryWidth, GalleryHeight)
                    ? 0
                    : 7;
     }
@@ -175,7 +185,8 @@ int Run(launch::ApplicationContext& context) noexcept {
     }
 
     {
-        DockWindows windows(allocator, device, solid.Value(), textures, gallery.Commands());
+        DockWindows windows(allocator, device, solid.Value(), textures, gallery.Commands(), icons,
+                            image.Value());
         if (!windows.Run(Move(window.Value()), area.Value())) {
             return 9;
         }
