@@ -1,6 +1,8 @@
 #include <AssetRuntime/Tests/AssetTestSupport.h>
 #include <Material/Material.generated.h>
+#include <Material/MaterialBase.generated.h>
 #include <Material/Material.h>
+#include <Material/MaterialModule.h>
 #include <TestSupport/Test.h>
 
 // 머티리얼 에셋 클래스 골격 시험이다(Docs/Design/MaterialSystem 4.2절, 단계 MS3a): 등록과
