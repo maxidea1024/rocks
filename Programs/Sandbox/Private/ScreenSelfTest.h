@@ -22,6 +22,7 @@ rocks::uint32 RunScreenChecks(const char* name, rocks::graphics::Device& device,
 // 카메라 입력 경로를 헤드리스 엔진으로 확인한다(18.5절 5항 (e)): W를 누른 채 돌린 두 프레임 사이
 // 카메라 이동 = 1200 cm/s × 프레임 수 × 고정 delta, 오른쪽 화살표 회전율 45 °/s. 실패 수를
 // 돌려준다.
-rocks::uint32 RunPawnInputChecks(rocks::Allocator& allocator, rocks::ModuleLoader& modules) noexcept;
+rocks::uint32 RunPawnInputChecks(rocks::Allocator& allocator,
+                                 rocks::ModuleLoader& modules) noexcept;
 
 } // namespace sandbox

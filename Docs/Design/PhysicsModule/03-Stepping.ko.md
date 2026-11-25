@@ -8,7 +8,7 @@
 
 | 자리 | 언제 | 하는 일 | UE |
 |---|---|---|---|
-| **PhysicsSimulate**(새 — 7.4절 요청) | Physics 단계의 고정 스텝마다, 사용자 Fixed hook 뒤 | (1) Kinematic 목표 적용과 목표 없는 Kinematic 정지(3.3절) (2) Jolt `PhysicsSystem::Update(fixedStep, collisionSteps 1)` (3) 이번 스텝의 활성 body·접촉·잠듦 기록을 스텝 번호와 함께 버퍼에 쌓음(3.4절) | `FStartPhysicsTickFunction` → `StartFrame` → `AdvanceAndDispatch`(`E/Private/PhysicsEngine/PhysLevel.cpp:239–245`, `PC/Private/ChaosScene.cpp:363–386`) |
+| **PhysicsSimulate**(새 — 7.4절 요청) | Physics 단계의 고정 스텝마다, 사용자 Fixed hook 뒤 | (1) Kinematic 목표 적용과 목표 없는 Kinematic 정지(3.3절) (2) Jolt `PhysicsSystem::Update(fixedStep, collisionSteps 1)` (3) 이번 스텝 접촉의 solver 충격량을 읽고(6.4절) 활성 body·접촉·잠듦 기록을 스텝 번호와 함께 버퍼에 쌓음(3.4절) | `FStartPhysicsTickFunction` → `StartFrame` → `AdvanceAndDispatch`(`E/Private/PhysicsEngine/PhysLevel.cpp:239–245`, `PC/Private/ChaosScene.cpp:363–386`) |
 | **PhysicsResults**(있음 — 엔진 런타임 15.4절 표 첫 칸) | Physics 단계 끝, 프레임에 한 번 | (1) 이번 프레임에 움직인 Dynamic body의 transform을 컴포넌트에 반영(3.4절) (2) 쌓인 hit 이벤트를 결정적 순서로 발행(5.4절) (3) 잠듦·깨움 이벤트 발행(step 밖 깨움 포함) | `FEndPhysicsTickFunction` → `EndFrame`·`OnSyncBodies`·충돌 통지(`PhysLevel.cpp:257–279`, `ChaosScene.cpp:500–576`, `E/Private/PhysicsEngine/Experimental/PhysScene_Chaos.cpp:2452–2727`) |
 
 - 고정 스텝이 0번인 프레임(누적이 한 스텝에 못 미침)은 PhysicsSimulate가 없다. PhysicsResults는 그래도 돈다 — 게임 lane API(`WakeRigidBody` 등)가 step 밖에서 낸 깨움·잠듦 이벤트가 남아 있을 수 있다.
@@ -35,7 +35,7 @@ UE `SetBodyTransform`(`E/Private/PhysicsEngine/BodyInstance.cpp:2767–2839`)을
 | Dynamic | 즉시 옮기고 속도는 그대로(UE `SetGlobalPose` — `:2544–2560`) | 같다(UE 단일 body는 `ResetPhysics`도 `TeleportPhysics`와 같은 경로) |
 | Static | 즉시 옮긴다(broadphase 갱신) | 같다 |
 
-- **목표 없는 스텝의 Kinematic 정지.** Jolt `MoveKinematic`은 위치가 아니라 **속도**를 정하고, 그 속도는 다음 스텝에도 남는다(`Physics/Body/Body.h:221`). 그래서 PhysicsSimulate는 이번 스텝에 목표가 없는 Kinematic body의 선·각속도를 0으로 둔다(현재 자세로 `MoveKinematic`). 같은 프레임의 고정 스텝 여러 번에서 목표는 첫 스텝이 쓰고(도달), 나머지 스텝은 정지다. 이동이 부드러워야 하는 Kinematic(움직이는 발판)은 Fixed hook에서 스텝마다 옮긴다. UE는 프레임당 물리 step이 기본 한 번이라 이 문제가 없다(3.5절).
+- **목표 없는 스텝의 Kinematic 정지.** Jolt `MoveKinematic`은 위치가 아니라 **속도**를 정하고, 그 속도는 다음 스텝에도 남는다(`Physics/Body/Body.h:221`). 그래서 PhysicsSimulate는 이번 스텝에 목표가 없는 Kinematic body의 선·각속도를 0으로 둔다(현재 자세로 `MoveKinematic`). 같은 프레임의 고정 스텝 여러 번에서 목표는 첫 스텝이 쓰고(도달), 나머지 스텝은 정지다. 이동이 부드러워야 하는 Kinematic(움직이는 발판)은 Fixed hook에서 스텝마다 옮긴다. UE는 프레임당 물리 step이 기본 한 번이라 이 문제가 없다(3.5절). `MoveKinematic` 대신 teleport로만 옮기면 밀린 Dynamic body가 이동 속도를 받지 못한다(UnrealJolt가 그렇다 — 어댑터 경계 11.5절).
 - **Editor·Preview World**는 Kinematic 이동도 언제나 teleport다(UE `BodyInstance.cpp:2796–2802` — `bEditorWorld`).
 - 컴포넌트 이동 경로: `SceneComponent` transform이 바뀌면(부착 전파 포함) `PrimitiveComponent::OnTransformUpdated` 가상 hook이 body가 있으면 `SetBodyTransform`을 부른다(UE `OnUpdateTransform` → `SendPhysicsTransform` — `E/Private/Components/PrimitiveComponent.cpp:1061–1083`). 결과 반영(3.4절)이 부른 이동은 `skipPhysics` 표지로 body에 되돌려 보내지 않는다(UE `MOVECOMP_SkipPhysicsMove`).
 - teleport 표지는 `SceneComponent`의 이동 API 인자(`TeleportMode`)로 전한다. D2·D4의 이동 API에 인자를 더하는 일은 7.4절 요청이다.

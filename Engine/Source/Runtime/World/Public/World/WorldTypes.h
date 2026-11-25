@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Result.h>
 #include <Meta/TypeSchema.h>
 #include <World/TickScheduler.h>
 
@@ -103,20 +104,30 @@ enum class WorldState : uint8 {
 //   tick.lateTick = true;                  // OnLateTick도 받는다
 //   tick.intervalSeconds = 0.5;            // 0.5초마다(누적 delta 전달)
 // 잘못된 설정(OnTick 단계가 Physics·LateUpdate·범위 밖, 음수·비유한 interval)은 FinishSpawning·
-// AddComponent가 InvalidArgument로 거부한다(IsValidTickSettings).
+// AddComponent가 InvalidArgument로 거부한다(IsValidTickSettings). 리플렉션 struct다(Actor·
+// Component의 tickSettings 필드 — 생성자 값은 클래스 기본값 레코드에 들어가고 인스턴스 값은
+// 저장된다, RuntimeClassMetadata 'A5c 지문 연결'). 경로 쓰기·로드로 들어온 값은 Validate가 같은
+// 규칙으로 거부한다.
+ROCKS_STRUCT()
 struct TickSettings {
+    ROCKS_GENERATED_BODY()
+
+    // 리플렉션 검증 hook이다(IsValidTickSettings가 거짓이면 InvalidArgument — 할당·전역 상태
+    // 없음). Modular 대상의 다른 모듈(시험)도 부르므로 export한다.
+    ROCKS_WORLD_API static Result<void> Validate(const TickSettings& settings) noexcept;
+
     // OnTick을 받는다. 실행 단계는 phase(PrePhysics·PostPhysics·PreRender 중 하나)다.
-    bool tick = false;
-    TickPhase phase = TickPhase::PrePhysics;
+    ROCKS_PROPERTY() bool tick = false;
+    ROCKS_PROPERTY() TickPhase phase = TickPhase::PrePhysics;
     // OnFixedTick을 Physics 단계(고정 스텝마다)에서 받는다.
-    bool fixedTick = false;
+    ROCKS_PROPERTY() bool fixedTick = false;
     // OnLateTick을 LateUpdate 단계에서 받는다.
-    bool lateTick = false;
+    ROCKS_PROPERTY() bool lateTick = false;
     // 같은 단계 안의 순서(작을수록 먼저)와 실행 간격(초, 0이면 매번)이다. 모든 hook에 공통이다.
-    int32 priority = 0;
-    double intervalSeconds = 0.0;
+    ROCKS_PROPERTY() int32 priority = 0;
+    ROCKS_PROPERTY() double intervalSeconds = 0.0;
     // World pause 중에도 unscaled delta로 실행한다.
-    bool tickWhenPaused = false;
+    ROCKS_PROPERTY() bool tickWhenPaused = false;
 };
 
 // 등록할 수 있는 Tick 설정인지다(TickSettings 설명의 규칙).

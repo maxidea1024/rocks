@@ -29,7 +29,7 @@ internal static class MetaProbeIdentity
 
             foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Value::other", "probe::Object::value",
                 "probe::Value::soft", "probe::Value::id", "probe::Value::portrait", "probe::Value::levels", "probe::Value::slot",
-                "probe::Value::weights", "probe::Slot::icon",
+                "probe::Value::weights", "probe::Slot::icon", "probe::Value::editorSlot",
                 "probe::ViaAliasTemplate::extra", "probe::ViaMemberTypedef::extra", "probe::ViaDecltype::extra", "probe::TwoTags::extra",
                 "probe::Value::mode", "probe::Value::nested",
                 "example::Invalid::valid", "example::Invalid::bad",

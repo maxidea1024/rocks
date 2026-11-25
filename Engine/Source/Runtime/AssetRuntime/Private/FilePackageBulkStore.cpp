@@ -149,7 +149,7 @@ struct FilePackageBulkStore::Slot {
 
 FilePackageBulkStore::FilePackageBulkStore(Allocator& allocator, PackageFileCache& cache) noexcept
     : allocator_(&allocator), cache_(&cache), path_(allocator), slots_(allocator),
-      table_(allocator) {
+      stored_(allocator), table_(allocator) {
 }
 
 FilePackageBulkStore::~FilePackageBulkStore() {
@@ -287,6 +287,40 @@ Result<Span<const uint8>> FilePackageBulkStore::Read(const BulkDataRef& ref,
 
 Result<Span<const uint8>> FilePackageBulkStore::ReadBulk(const BulkDataRef& ref) noexcept {
     return Read(ref, nullptr);
+}
+
+Result<PackageStoredBulk> FilePackageBulkStore::ReadStoredBulk(const BulkDataRef& ref) noexcept {
+    using Out = PackageStoredBulk;
+    auto slot = FindSlot(ref);
+    if (!slot) {
+        return Result<Out>::Failure(slot.Error());
+    }
+
+    const Slot& found = *slot.Value();
+    if (found.fileId == 0 || !IsAttached()) {
+        return Result<Out>::Failure(ErrorCode::NotFound);
+    }
+
+    auto reader = cache_->Acquire(path_.View(), fingerprint_, nullptr);
+    if (!reader) {
+        return Result<Out>::Failure(reader.Error());
+    }
+
+    if (auto sized = stored_.TryResize(static_cast<usize>(found.entry.storedBytes)); !sized) {
+        return Result<Out>::Failure(sized.Error());
+    }
+
+    if (auto read = reader.Value()->ReadAt(found.fileOffset, stored_.View()); !read) {
+        return Result<Out>::Failure(read.Error());
+    }
+
+    PackageStoredBulk out;
+    out.codec = found.entry.codec;
+    out.crc32 = found.entry.crc32;
+    out.rawBytes = found.rawBytes;
+    out.sha256 = found.sha256;
+    out.stored = stored_.View();
+    return Result<Out>::Success(out);
 }
 
 Result<BulkDataRef> FilePackageBulkStore::AddUnsaved(Array<uint8>&& raw) noexcept {

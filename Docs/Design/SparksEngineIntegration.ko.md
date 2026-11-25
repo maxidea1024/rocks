@@ -78,7 +78,7 @@ SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 LC4d에서 함께 했�
 | SE-G4 | CVar 사전 내보내기와 스크립트 읽기 | 일부 | `Config` 모듈에 CVar 구현은 있다. 스크립트 노출은 함수 리플렉션 뒤(CVR8) | EI5 | CVarSystem 14.5절, SL 10.4절 |
 | SE-G5 | 물리 이벤트·`Collider`·`Hit`·질의 | 설계만 | 물리 모듈이 없다(PhysicsJoltAdapter) | EI5 | SL 10.4절, LevelScript 4절 |
 | SE-G6 | UI `WidgetController`·WidgetAsset schema | 설계만 | UiToolkit | EI5 | SL 10.4절 |
-| SE-G7 | 유지 자원을 돌려주는 API(오디오 반복·입력 context·시퀀서 등) | 설계만 | 오디오는 [오디오 시스템](AudioSystem.ko.md) 3.17절이 정했다: `StartLoop`의 `LoopHandle?` null은 재생 자리를 얻지 못함, 서버·`--no-sound`는 `Ignored` 상태의 유효 핸들, 스키마에 `World.Audio.Play2D` 추가(AU3b). 입력 context·시퀀서는 해당 모듈이 없다 | EI5 | SL 7.1절 |
+| SE-G7 | 유지 자원을 돌려주는 API(오디오 반복·입력 context·시퀀서 등) | 설계만 | 오디오는 [오디오 시스템](AudioSystem/03-Design/03.17-Sparks.ko.md) 3.17절이 정했다: `StartLoop`의 `LoopHandle?` null은 재생 자리를 얻지 못함, 서버·`--no-sound`는 `Ignored` 상태의 유효 핸들, 스키마에 `World.Audio.Play2D` 추가(AU3b). 입력 context·시퀀서는 해당 모듈이 없다 | EI5 | SL 7.1절 |
 | SE-G8 | 네트워크 복제·RPC | 없음 | 네트워크 모듈이 없다 | EI7 | SL 14절 |
 | SE-G9 | 세이브게임 저장 경로 | 일부 | `SaveGame` 필드만 고르는 저장 필터는 있다(`Object/FieldCodecPolicy.h`의 `includeFlags`). 세이브 슬롯·파일과 World 저장 API는 없다 | EI7 | SL 15절 |
 | SE-G10 | Tryout(편집기 내 실행) session과 편집기 Undo transaction | 없음 | — | EI6 | 전체 계획 22절 |
@@ -123,5 +123,5 @@ SE-B7은 Commandlet의 표준 출력 구현을 PlatformBase로 올리고 표준 
 ## 4. 개정 기록
 
 - 개정 1(2026-11-20): 첫 목록. SL 초안 1.3의 17.2절에 있던 코드 쪽 후속 항목을 옮기고 현재 상태를 코드로 확인하였다. 리뷰어 1명이 상태 표기와 "언어 코어에 밖의 선행이 없다"는 주장을 코드와 대조하였다(상태 정정 8건, 항목 추가 9건, LC4의 ID manifest와 LC8의 표준 출력 반영). 리뷰어가 확인하지 못한 것: macOS·Android backend 세부, 로그 카테고리의 실행 중 등록 가능 여부.
-- 개정 2(2026-11-22): SE-G7에 오디오 설계([오디오 시스템](AudioSystem.ko.md) 3.17절)를 반영했다.
+- 개정 2(2026-11-22): SE-G7에 오디오 설계([오디오 시스템](AudioSystem/03-Design/03.17-Sparks.ko.md) 3.17절)를 반영했다.
 - 개정 3(2026-11-25): LC9(AOT)를 미룬다는 사용자 결정(SL SD77)을 머리말에 반영했다. EI8은 그대로 LC9 뒤다.

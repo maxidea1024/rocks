@@ -18,6 +18,7 @@ constexpr usize ImportOwnerRecordFields = 6;
 constexpr usize ImportReferenceRecordFields = 4;
 constexpr usize ImportSourceFields = 5;
 constexpr usize ImportOutputFields = 3;
+constexpr usize ImportTagFields = 2;
 
 // Record 계층 오류를 읽기 오류로 바꾼다: 할당 실패·지원 범위 밖 버전은 그대로, 그 밖은 형식 위반
 // InvalidArgument다(PackageTags와 같은 규칙).
@@ -137,6 +138,13 @@ bool ImportValidSource(StringView role, StringView root, StringView path) noexce
 bool ImportValidOutput(StringView key, AssetId asset, TypeId type) noexcept {
     return ImportValidText(key, 0, MaxImportOutputKeyBytes) && !asset.IsNull() &&
            !(type == TypeId{});
+}
+
+// 태그 (key, value) byte 순이다.
+bool ImportTagLess(StringView leftKey, StringView leftValue, StringView rightKey,
+                   StringView rightValue) noexcept {
+    const int byKey = StringView::CompareBytes(leftKey, rightKey);
+    return byKey != 0 ? byKey < 0 : StringView::CompareBytes(leftValue, rightValue) < 0;
 }
 
 Span<const uint8> ImportBytesOf(StringView text) noexcept {
@@ -288,13 +296,27 @@ Result<Array<uint8>> ImportBuildOutput(Allocator& allocator,
     return item.Build();
 }
 
+Result<Array<uint8>> ImportBuildTag(Allocator& allocator, const ImportTagInput& tag) noexcept {
+    RecordBuilder item(allocator, ImportTagSchema, ImportRecordVersion);
+    Result<void> step = item.AddField(ImportTagKeyField, WireType::String, ImportBytesOf(tag.key));
+    if (step) {
+        step = item.AddField(ImportTagValueField, WireType::String, ImportBytesOf(tag.value));
+    }
+
+    if (!step) {
+        return Result<Array<uint8>>::Failure(step.Error());
+    }
+
+    return item.Build();
+}
+
 // 소유 기록 입력의 규칙을 본다(참이면 유효). 할당 실패는 그 오류다.
 Result<bool> ImportOwnerInputValid(Allocator& allocator, AssetId self,
                                    const ImportRecordInput& input) noexcept {
     if (input.importerId == Guid{} ||
         !ImportValidText(input.importerName, 1, MaxImporterNameBytes) || input.sources.IsEmpty() ||
         input.sources.Size() > MaxImportSources || input.outputs.IsEmpty() ||
-        input.outputs.Size() > MaxImportOutputs ||
+        input.outputs.Size() > MaxImportOutputs || input.tags.Size() > MaxImportTags ||
         (!input.options.IsEmpty() && !ReadRecordHeader(input.options))) {
         return Result<bool>::Success(false);
     }
@@ -307,6 +329,12 @@ Result<bool> ImportOwnerInputValid(Allocator& allocator, AssetId self,
 
     for (const ImportOutputInput& output : input.outputs) {
         if (!ImportValidOutput(output.outputKey, output.asset, output.type)) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    for (const ImportTagInput& tag : input.tags) {
+        if (!IsValidImportTag(input.importerName, tag.key, tag.value)) {
             return Result<bool>::Success(false);
         }
     }
@@ -372,7 +400,42 @@ Result<void> ImportAddOwnerFields(Allocator& allocator, RecordBuilder& record,
         }
     }
 
-    return outputs.Finish(record, ImportRecordOutputsField);
+    if (auto finished = outputs.Finish(record, ImportRecordOutputsField); !finished) {
+        return finished;
+    }
+
+    // 태그는 있을 때만 쓴다(빈 목록 필드는 읽기가 거부한다) — (key, value) 순, 같은 쌍은
+    // InvalidArgument.
+    if (input.tags.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    auto tagLess = [&](usize left, usize right) noexcept {
+        return ImportTagLess(input.tags[left].key, input.tags[left].value, input.tags[right].key,
+                             input.tags[right].value);
+    };
+    auto tagOrder = ImportSortedOrder(allocator, input.tags.Size(), tagLess);
+    if (!tagOrder) {
+        return Result<void>::Failure(tagOrder.Error());
+    }
+
+    if (ImportHasNeighborDuplicate(tagOrder.Value(), tagLess)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    RecordListBuilder tags(allocator);
+    for (usize index : tagOrder.Value()) {
+        auto built = ImportBuildTag(allocator, input.tags[index]);
+        if (!built) {
+            return Result<void>::Failure(built.Error());
+        }
+
+        if (auto added = tags.AddItem(built.Value().View()); !added) {
+            return added;
+        }
+    }
+
+    return tags.Finish(record, ImportRecordTagsField);
 }
 
 // 원본 목록 필드를 읽는다(1–256개, role 유일).
@@ -512,10 +575,79 @@ Result<void> ImportReadOutputs(Allocator& allocator, AssetId self, const RecordR
                          : Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+// 태그 목록 필드를 읽는다(1–MaxImportTags개 — 빈 목록은 필드를 쓰지 않는다, (key, value) 엄격
+// 오름차순, 쌍마다 IsValidImportTag).
+Result<void> ImportReadTags(Allocator& allocator, const RecordReader& record,
+                            const FieldView& field, ImportRecord& out) noexcept {
+    auto list = RecordListReader::OpenField(record, field, ImportTagSchema, ImportRecordVersion,
+                                            ImportRecordVersion);
+    if (!list) {
+        return Result<void>::Failure(ImportReadError(list.Error()));
+    }
+
+    const usize count = list.Value().ItemCount();
+    if (count == 0 || count > MaxImportTags) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = out.tags.TryReserve(count); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        auto item = list.Value().OpenItem(index);
+        if (!item) {
+            return Result<void>::Failure(ImportReadError(item.Error()));
+        }
+
+        auto key = item.Value().Find(ImportTagKeyField);
+        auto value = item.Value().Find(ImportTagValueField);
+        if (!key || !value || item.Value().FieldCount() != ImportTagFields ||
+            !ImportFieldIs(key.Value(), WireType::String, 0) ||
+            !ImportFieldIs(value.Value(), WireType::String, 0)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StringView keyText = ImportTextOf(key.Value());
+        const StringView valueText = ImportTextOf(value.Value());
+        if (!IsValidImportTag(out.importerName.View(), keyText, valueText) ||
+            (index != 0 && !ImportTagLess(out.tags[index - 1].key.View(),
+                                          out.tags[index - 1].value.View(), keyText, valueText))) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        ImportTag tag(allocator);
+        Result<void> step = tag.key.TryAssign(keyText);
+        if (step) {
+            step = tag.value.TryAssign(valueText);
+        }
+
+        if (!step) {
+            return step;
+        }
+
+        (void)out.tags.TryPushBack(Move(tag));
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace
 
 bool IsValidImportSourceLocation(StringView root, StringView relativePath) noexcept {
     return ImportValidRoot(root) && ImportValidSourcePath(root, relativePath);
+}
+
+bool IsValidImportTag(StringView importerName, StringView key, StringView value) noexcept {
+    // 접두 `<importerName>.` 뒤에 한 byte 이상이 있어야 한다.
+    if (importerName.IsEmpty() || key.ByteCount() <= importerName.ByteCount() + 1 ||
+        !key.StartsWith(importerName, StringComparison::CaseSensitive) ||
+        key.Data()[importerName.ByteCount()] != '.') {
+        return false;
+    }
+
+    return ImportValidText(key, 1, MaxPackageTagKeyBytes) &&
+           ImportValidText(value, 0, PackageMaxStringBytes);
 }
 
 Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
@@ -537,7 +669,7 @@ Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
         }
     } else if (!(input.importerId == Guid{}) || !input.importerName.IsEmpty() ||
                input.importerVersion != 0 || !input.sources.IsEmpty() || !input.options.IsEmpty() ||
-               !input.outputs.IsEmpty()) {
+               !input.outputs.IsEmpty() || !input.tags.IsEmpty()) {
         return Result<Out>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -617,6 +749,7 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
     auto sources = reader.Find(ImportRecordSourcesField);
     auto options = reader.Find(ImportRecordOptionsField);
     auto outputs = reader.Find(ImportRecordOutputsField);
+    auto tags = reader.Find(ImportRecordTagsField);
     if (!out.OwnedBy(self)) {
         // 참조 기록: owner만 의미가 있다.
         if (!(out.importerId == Guid{}) || !name.IsEmpty() || out.importerVersion != 0 ||
@@ -627,7 +760,7 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
         return Result<Out>::Success(Move(out));
     }
 
-    const usize expectedFields = ImportOwnerRecordFields + (options ? 1 : 0);
+    const usize expectedFields = ImportOwnerRecordFields + (options ? 1 : 0) + (tags ? 1 : 0);
     if (out.importerId == Guid{} || !ImportValidText(name, 1, MaxImporterNameBytes) || !sources ||
         !outputs || reader.FieldCount() != expectedFields ||
         !ImportFieldIs(sources.Value(), WireType::RecordList, 0) ||
@@ -657,6 +790,16 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
 
     if (auto read = ImportReadOutputs(allocator, self, reader, outputs.Value(), out); !read) {
         return Result<Out>::Failure(read.Error());
+    }
+
+    if (tags) {
+        if (!ImportFieldIs(tags.Value(), WireType::RecordList, 0)) {
+            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto read = ImportReadTags(allocator, reader, tags.Value(), out); !read) {
+            return Result<Out>::Failure(read.Error());
+        }
     }
 
     return Result<Out>::Success(Move(out));

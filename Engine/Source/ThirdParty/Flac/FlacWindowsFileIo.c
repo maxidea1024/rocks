@@ -1,4 +1,4 @@
-/* Rocks glue for libFLAC (Docs/Design/AudioSystem.ko.md section 3.27). On Windows, libFLAC opens
+/* Rocks glue for libFLAC (Docs/Design/AudioSystem section 3.27). On Windows, libFLAC opens
    files through the UTF-8 wrappers of src/share/win_utf8_io (compat.h maps flac_fopen to
    fopen_utf8), which the file-based decoder init functions reference. The upstream file includes
    windows.h and is Windows only. The manifest defines ROCKS_FLAC_WIN_UTF8_IO for Windows builds

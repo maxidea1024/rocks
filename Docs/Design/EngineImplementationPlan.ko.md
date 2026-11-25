@@ -34,7 +34,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.16 레벨 스크립트:** 사용자 결정(2026-11-20, 모든 항목 권장안)으로 Blueprint 제외를 유지하고, UE Level Blueprint에 해당하는 빈 곳을 Sparks 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 채운다. 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 Sparks 코드로 내보내고 실행은 Sparks). 엔진 Actor가 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`를 노출하고, 배치한 Actor에 편집기에서 ScriptableComponent를 붙일 수 있음을 명시한다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다.
 
-**1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
+**1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem/README.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
 
 **1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph/README.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
@@ -1686,7 +1686,7 @@ OnlineServices는 Auth·Session/Lobby·Presence/Friends·Invite·Matchmaking·Cl
 
 ## 18. 오디오·DSP Graph
 
-오디오는 게임의 AudioComponent 설정과 실시간 native mixer를 분리한다. miniaudio는 device IO·decode backend 후보로 사용하고 엔진의 voice·routing·DSP 정책은 독립 인터페이스에 정의한다. 구현 정본은 [오디오 시스템](AudioSystem.ko.md)이다(개정 1.17). [S11](https://miniaud.io/docs/manual/index.html)
+오디오는 게임의 AudioComponent 설정과 실시간 native mixer를 분리한다. miniaudio는 device IO·decode backend 후보로 사용하고 엔진의 voice·routing·DSP 정책은 독립 인터페이스에 정의한다. 구현 정본은 [오디오 시스템](AudioSystem/README.ko.md)이다(개정 1.17). [S11](https://miniaud.io/docs/manual/index.html)
 
 ~~~cpp
 struct AudioVoiceHandle {
@@ -1705,7 +1705,7 @@ Result<AudioCommandTicket> TryEnqueueAudio(AudioCommand);
 void RenderAudioBlock(float* output, uint32 frames) noexcept;
 ~~~
 
-48 kHz·256/512 frame block을 기준 후보로 사용하며 device가 지원하는 실제 값으로 구성한다. voice pool·DSP state·command ring을 미리 할당한다. AudioRT(전용 렌더 스레드 — 장치 콜백은 출력 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다, [오디오 시스템](AudioSystem.ko.md) 3.2절, 개정 1.17)에서 Object·파일 IO·일반 task wait·heap allocation·mutex·직접 로그 출력을 금지한다. trace는 미리 확보한 ring에 숫자 event만 기록한다.
+48 kHz·256/512 frame block을 기준 후보로 사용하며 device가 지원하는 실제 값으로 구성한다. voice pool·DSP state·command ring을 미리 할당한다. AudioRT(전용 렌더 스레드 — 장치 콜백은 출력 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다, [오디오 시스템](AudioSystem/03-Design/03.02-Threads.ko.md) 3.2절, 개정 1.17)에서 Object·파일 IO·일반 task wait·heap allocation·mutex·직접 로그 출력을 금지한다. trace는 미리 확보한 ring에 숫자 event만 기록한다.
 
 Audio graph는 worker에서 검증·생성한 불변 plan을 block boundary에 교체한다. 이전 graph와 clip chunk는 audio epoch ACK 후 반환한다. 명령은 bounded MPSC 또는 producer별 SPSC로 전달한다. 일반 명령은 포화 시 Backpressure를 반환하며 낮은 우선순위 parameter는 정의된 latest-value 규칙으로 병합한다. 수락되지 않은 명령을 성공으로 간주하지 않는다. listener·emitter 위치는 snapshot으로 전달한다.
 

@@ -25,11 +25,7 @@
 
 ## 7.3 미확인
 
-| ID | 확인할 것 | 영향 |
-|---|---|---|
-| PMU2 | Jolt step 뒤 실제 접촉 충격량을 읽는 방법(contact constraint 누적 lambda) | 5.4·6.4절 `normalImpulse` |
-| PMU3 | `maxLinearVelocity` 기본값(UE에 상한 없음 — Jolt가 받는 큰 값의 안정성) | 6.5·6.8절 |
-| PMU4 | UE DOF 잠금 축 기준(월드·body 초기 방향) | 6.5절 |
+없다. PMU1·PMU5·PMU6은 개정 1·2, PMU2는 개정 4(Jolt 수정과 시험 — 어댑터 경계 10.6절), PMU3·PMU4는 개정 5(PMD18·PMD19)에서 닫았다.
 
 ## 7.4 다른 문서 개정 요청
 
@@ -58,12 +54,17 @@
 | PMD11 | overlap은 질의 기반, 시뮬레이션 쌍 필터는 Block만 | UE와 같다 |
 | PMD12 | object 층 32 bit = 채널 6 + 운동 묶음 2 + 참여 표지 3 + 응답 묶음 색인 21 | broadphase 층은 object 층으로만 정해진다(`BroadPhaseLayer.h:70`). 개정 1의 16 bit(채널 + 색인)는 Static·Dynamic, 질의 전용을 구분하지 못했다 |
 | PMD13 | probe = 접촉마다 `mIsSensor` | Jolt가 접촉 단위 sensor를 지원 |
-| PMD14 | `normalImpulse`는 `EstimateCollisionResponse` 추정 | Jolt가 충격량을 주지 않는다(PMU2로 실제 값 조사) |
+| PMD14 | `normalImpulse`는 solver 충격량의 법선 방향 벡터 합(Jolt 접촉 캐시를 읽는 추적 가능한 수정), CCD로만 닿은 쌍은 `EstimateCollisionResponse` 추정 | UE hit의 `NormalImpulse`가 solver 충격량이다. Jolt에 공개 API가 없다(버린 대안: 늘 추정 — 충돌 세기가 UE와 달라진다. 운동량 변화로 역산 — 여러 쌍이 겹치면 나눌 수 없다) |
 | PMD15 | Dynamic body에 대한 `SetBodyTransform`은 명시 호출만 받고 부착 전파는 무시 | Fixed hook 안의 낡은 transform이 body를 되돌리지 않게(3.2절) |
 | PMD16 | step은 Game·Tryout World만, Editor·Preview는 질의 전용 장면 + teleport 이동 | UE 편집 World는 물리 tick을 돌리지 않는다(`BodyInstance.cpp:2796–2802` `bEditorWorld`) |
 | PMD17 | 결합 방식은 프로세스 전역 | Jolt 결합 함수는 상태 없는 함수 포인터(`ContactConstraintManager.h:53`), UE도 프로젝트 설정 하나 |
+| PMD18 | `maxLinearVelocity` 기본은 사실상 없음(√FLT_MAX cm/s) | UE body 상한이 같다(6.8절). Jolt `mMaxLinearVelocity`(기본 500 m/s — `Physics/Body/BodyCreationSettings.h:111`)는 속도 clamp에만 쓰이고(`Physics/Body/MotionProperties.inl:23–31`, soft body 제외) `BodyInterface`의 속도 설정 함수도 clamp판을 부른다(`Physics/Body/BodyInterface.cpp:595–603`). 버린 대안: Jolt 기본 500 m/s — 빠른 탄환 body가 UE와 달리 느려진다. 큰 속도의 안정성은 CCD(`continuousCollision`)로 다룬다 |
+| PMD19 | DOF 잠금은 `mAllowedDOFs`(월드 축, 속도 성분 제거), CustomPlane만 `SixDOFConstraint` | UE도 월드 축·생성 시점 기준이다(6.5절). 한계 둘: (1) UE는 joint라 잠긴 축으로 teleport하면 생성 시점 값으로 끌려 돌아가지만(joint frame을 갱신하지 않는다) Rocks는 teleport한 값을 유지한다 — UE의 부작용으로 보고 따르지 않는다. (2) UE `SixDOF`의 회전 잠금은 twist·swing 분해 각을 잠그고 Jolt는 월드 축 각속도 성분을 없앤다. 회전 축 하나만 잠그고 나머지 둘로 크게 돌면 결과 자세가 다를 수 있다(두 축 이상 잠금·평면 방식은 같다) |
 
 ## 7.6 개정 이력
 
+- 개정 5(2026-11-25): PMU3·PMU4를 UE 원본으로 닫았다. `maxLinearVelocity` 기본은 사실상 없음(PMD18), DOF 잠금 기준은 월드 축·생성 시점(PMD19, 한계 둘). 미확인 항목이 없다.
+- 개정 4(2026-11-25): PMU2를 닫았다. Jolt 접촉 캐시의 solver 충격량을 읽는 추적 가능한 수정과 시험(어댑터 경계 10.6절)으로 `normalImpulse`를 UE처럼 solver 값으로 바꿨다(6.4절, PMD14).
+- 개정 3(2026-11-25): UE용 Jolt 공개 플러그인 UnrealJolt(369ef176)와 대조했다(어댑터 경계 11절). 설계는 바뀌지 않았다: 좌표(행렬식 +1)·채널 응답 필터·`MoveKinematic`·결과 반영에 보간 없음은 그대로 두고, PMU2는 UnrealJolt도 추정값을 써서 닫지 않는다.
 - 개정 2(2026-11-25): 리뷰어 1명 대조 반영(치명 2 — object 층 bit가 broadphase 층을 정하지 못함, Kinematic 속도 남음 / 중요 8 — Kinematic 즉시 이동, simulate 컴포넌트 떼기, 프레임 안에서 잠든 body 반영, Fixed hook 낡은 transform, 즉시 재생성 API·실패 정책, Jolt 마찰은 body 값·결합 함수 전역·반발 문턱, startAwake·overlap은 Actor 단위, Editor·Preview step 없음 / 경미 8 — 계획 16.2·16.3절 개정 요청, `mAllowDynamicOrKinematic` 불필요, DOF 전부 잠금·CustomPlane, `updateMassWhenScaleChanges`, 접점에 침투·깨움·속도, 0 스텝 프레임 이벤트, 접촉 합치는 순서·hit 문턱, 인용 3곳, scale 0·traceComplex UE 차이, Gameplay 의존 대신 설정 목록). PMU6을 닫았다(시뮬레이션 컴포넌트는 부착되지 않으므로 순서 문제가 없다).
 - 개정 1(2026-11-25): 초안. UE 5.8.4 조사 두 갈래(body 수명·step, 질의·이동·이벤트)를 근거로 썼다. 쓰는 중 UE 원본으로 확인해 PMU1(AllObjects에 이름 없는 채널 포함)·PMU5(기본 물리 재질·결합 방식)와 기본 DOF(Full3D)를 닫았다.

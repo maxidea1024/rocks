@@ -10,7 +10,7 @@ namespace rocks::graph_detail {
 // u32 · flags u32 · nodeCount u32 · externalCount u32의 24 byte이고, 그 뒤에 [NodeTable] nodeCount
 // × {Guid type, u32 outer, String name}, nodeCount × Bytes(Record)가 오며 남는 byte가 없다.
 inline constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-inline constexpr uint32 FormatVersion = 2;
+inline constexpr uint32 FormatVersion = ObjectGraphFormatVersion;
 inline constexpr usize HeaderBytes = 24;
 // flags 비트다. BaseOuter는 NodeTable과만 쓰고 outer 0 노드의 Outer가 기준 Outer임을 뜻한다.
 inline constexpr uint32 NodeTableFlag = 1;

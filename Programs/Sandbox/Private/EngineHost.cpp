@@ -384,12 +384,12 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
             Log::Info(LogSandboxHost, "Screen rendering is not available: no shader provider or "
                                       "cooked shader libraries");
         } else if (auto created = screen::CreateScreenDevice(allocator, options.graphics,
-                                                              options.graphicsValidation)) {
+                                                             options.graphicsValidation)) {
             device = Move(created.Value());
             auto host = UniquePtr<screen::ScreenHost>::TryMake(allocator, allocator, *device,
                                                                shaders::Host());
-            if (host && host.Value()->Start(*window, render::RenderLaneMode::Thread,
-                                            bridge.LanePump())) {
+            if (host &&
+                host.Value()->Start(*window, render::RenderLaneMode::Thread, bridge.LanePump())) {
                 screenHost = Move(host.Value());
                 bridge.AttachScreen(screenHost.Get());
             }

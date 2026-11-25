@@ -1,0 +1,1356 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::Texture2D::addressX",
+      "id": "3d6b6cfa2a8d45ebbf51121c1bdee435",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2D::addressY",
+      "id": "ea26537206f84fc182e255f77fd10e72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2D::borderColor",
+      "id": "4891ebf7dc364c6aa5dd81b560dfa6d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2DArray::addressX",
+      "id": "e9c508cca34145cf9610300933b80ec1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2DArray::addressY",
+      "id": "5d74aa09a95f4c4baeb2031d927c39e6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2DArray::addressZ",
+      "id": "46fda13b48f14bebb6cad88bf3b39e05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2DArray::borderColor",
+      "id": "4670fc0d3f9c4a028e4c8a69e24d5979",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture2DArray::sourceTextures",
+      "id": "6cfd88d2eea048aba04f1d89d51e1dab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustBrightness",
+      "id": "f36e3275c80b4f1487f4279c3007215e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustBrightnessCurve",
+      "id": "6eb63fe0796d428c885ed6aeea5dae0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustHue",
+      "id": "05d42e7588ca4de0abb90612a17ceeb8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustMaxAlpha",
+      "id": "4595a2ad033843f68b75826b8185a931",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustMinAlpha",
+      "id": "a6af720a154942098538c150900487ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustRGBCurve",
+      "id": "f5ee60ec28f34a08afd60ab981c3a1f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustSaturation",
+      "id": "b7c379104f524683bf10019ca40e4825",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::adjustVibrance",
+      "id": "711ddb0e012549bda11febd5076aa0bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::alphaCoverageThresholds",
+      "id": "f23aa3d650934938b9752ce0f9d92495",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::availability",
+      "id": "cf41ffd5dc2f4662bcf1edceb83c4cc0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::chromaKeyColor",
+      "id": "41122580adf345f4ad770ec91b37485e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::chromaKeyTexture",
+      "id": "ecd24393bae548c481ba3982fd562e33",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::chromaKeyThreshold",
+      "id": "cc779b0373f9466cab258c3ce4e8afe6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compositePower",
+      "id": "d3cef9102fed40668afac0be22279534",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compositeTexture",
+      "id": "86cf476d69634be188b74268992e1e25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compositeTextureMode",
+      "id": "7ae6fa2a981f4c32aff18f13a7b0bba8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionCacheId",
+      "id": "90246fb77cf541488475ac393f906307",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionForceAlpha",
+      "id": "a3acf521a08c4e81b269be08ec4e2e8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionNoAlpha",
+      "id": "71f0af992ac74307904e28778f29c461",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionNone",
+      "id": "2099a507454f4f909f7b9ed18bb965bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionQuality",
+      "id": "30041d5a41c746d69abea7729b907be6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionSettings",
+      "id": "0ed0b96554e848b09e34741e08365571",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::compressionYCoCg",
+      "id": "671ab68a3d0c4d359b2ed6ad4a2c7560",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::cookPlatformTilingSettings",
+      "id": "165662f16ceb4e3d85c37af16ab572ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::doScaleMipsForAlphaCoverage",
+      "id": "10d0720eddeb45d7a4d2d6aa51e45239",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::downscale",
+      "id": "913b4ddb616246059a1b5a4ad3ed3abf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::downscaleOptions",
+      "id": "116bbf665170447fa0a5ac3ef0748b4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::filter",
+      "id": "186054638f1e43feaa820f99971d086c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::flipGreenChannel",
+      "id": "0a85933b4aad45b6ac23fdf808c8d77e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::layerFormatSettings",
+      "id": "8d01ad999f354ae0b6ac3f97cff73777",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::lodBias",
+      "id": "21d76685b0694a639c2b7a4832834029",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::lodGroup",
+      "id": "2b7ba8f52f944d0289a66e7afc398b59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::lossyCompressionAmount",
+      "id": "eef07f99e14640b0a03a3c2261780e73",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::maxTextureSize",
+      "id": "3f7478024a9f4be18b3d779f37e97aa5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::mipGenSettings",
+      "id": "ca089c04e4804246b54d90a416ba19c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::mipLoadOptions",
+      "id": "80bf326112154debbf06d4fd1e5bdbf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::noTiling",
+      "id": "d7ee4efdff4a432a89d47d8f8c8b6b34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::normalizeNormals",
+      "id": "0a6d09461b9a45d9bb758ec96707317f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::oodlePreserveExtremes",
+      "id": "dd55f367d67743d7b4cf19cb4764ab49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::oodleTextureSdkVersion",
+      "id": "4eb7b85ac44f49ce9394cf79863cc2ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::padWithBorderColor",
+      "id": "b99e444c5c2242d0a27ffdbb9dcfd9a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::paddingColor",
+      "id": "f9ecf0f8e9b14afa8ec939ee8594865a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::platformData",
+      "id": "e7c4bdfe26aa493a84e859c9ac1b1cb1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::powerOfTwoMode",
+      "id": "572eabc697dd45d8be98b448f48dee6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::preserveBorder",
+      "id": "525855e8c903432c9a6cad3be06463ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::resizeDuringBuildX",
+      "id": "f642b9492b6a47b48f876092482daab9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::resizeDuringBuildY",
+      "id": "95b808e1f8eb4970b89162cf963a4acb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::source",
+      "id": "a2f027af35af45f8bf90a629b072e195",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::sourceColorSettings",
+      "id": "42135da73fbb4d409e4652a1f7a1ad1d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::srgb",
+      "id": "df695568d8a14534b49d48805a792553",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::useLegacyGamma",
+      "id": "a4d7bed118a145e1bb254d9297b8cad0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::useNewMipFilter",
+      "id": "19b6057ae5a148cca32d544584b80759",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::useVirtualTextureStreamingPriority",
+      "id": "554edbeeefa3420f8e985ee7476dff9f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::virtualTexturePrefetchMips",
+      "id": "0e3340ac761240578eac3474bff0b472",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::virtualTextureStreaming",
+      "id": "4014b3f0b17f41be98d72e36d363f83c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Texture::virtualTextureStreamingPriority",
+      "id": "4512bbb8a7d24e57b48f3ca70b3a742a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::addressX",
+      "id": "c6db9526b4324a8a8a65a09583504984",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::addressY",
+      "id": "d778e572bc0243528ed689fcfb88d053",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::addressZ",
+      "id": "68bd991856fe491fb1de2df00a794ec4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::compression",
+      "id": "44d864fc8c8242e399c4f9bce6d8f207",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::dimension",
+      "id": "128d88256c05474fb493ff9aedebbcac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::encodingOverride",
+      "id": "9d8adafe0ca14a81a7180e4ec7029ed5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::flipGreenChannel",
+      "id": "fdbc07d7bc51439297e6da8609e1f7eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::format",
+      "id": "34d72449056d4138bd72505dc00bd0a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::lodBias",
+      "id": "dd22f63b27ed4aec9b0d4d2bc3105c3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::maxLodSize",
+      "id": "1c38918096bc47c3afd3933f92b824ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::maxTextureSize",
+      "id": "4c5dbe5e3827407f8504616967d0575c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::minLodSize",
+      "id": "459a9ac2617a4d4199200434f5ae707b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::mipGenSettings",
+      "id": "58fc0b23c3fb4340b95160baf1beaeb4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::norm16Supported",
+      "id": "982a65410c7a4693b81c5d0efed27a61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::normalizeNormals",
+      "id": "2174c6e4eef2418fb585973d9ae27e6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::numSlices",
+      "id": "325ac1d89f584401b1579aadd61fa54a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::padWithBorderColor",
+      "id": "edf3272699e8420f805a47b95965ba0f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::paddingColor",
+      "id": "9d1f3618bc6a4bdc8465c9e9958790e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::powerOfTwoMode",
+      "id": "6639e825cc0f4400aaa5ae1b5789707d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::preserveBorder",
+      "id": "65b22aa730e0417592b15d568d137cda",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::resizeX",
+      "id": "3ba4de33947247c1bb5ceae1b5ce43ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::resizeY",
+      "id": "296e8c84078e4844a1c1f40f077cf5f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::sizeX",
+      "id": "9b55babe62f5451dbe33ddc0c9971ee0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::sizeY",
+      "id": "616bd567296a45c98f38ef0dad317e47",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::srgb",
+      "id": "fc10ea8694164736999704c9a0d458a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::useLegacyGamma",
+      "id": "b14778de78e44fc3afe5e8e0753851ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureCubeArray::sourceTextures",
+      "id": "fb0592d83d3048579c649e894b63b8a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureCubeFileOptions::cubeLayout",
+      "id": "e3ecf2a916ce4380a0356bbb58d3d135",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureCubeFileOptions::pngInfill",
+      "id": "14e33fbe421f4ac38bed238b278ef6b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureDownscale::defaultValue",
+      "id": "048b2ef27cca48ec8ce6546db0f8bf35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureDownscale::perPlatform",
+      "id": "b8cf26f878cd4b7daa53e1b2320d4d9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureFormatSettings::compressionForceAlpha",
+      "id": "1c54195f71164185a3b004f30e9f6a84",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureFormatSettings::compressionNoAlpha",
+      "id": "b6f229bb6aec45b38d32fcede5744228",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureFormatSettings::compressionNone",
+      "id": "61a1cd793ab04c81938d5132db1bd17d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureFormatSettings::compressionSettings",
+      "id": "8818922e49ee4798be569448a45f4a07",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureFormatSettings::compressionYCoCg",
+      "id": "c80eeb22fd7147de877edeb4507c4ace",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureFormatSettings::srgb",
+      "id": "bd54d97a1b6c43cea61a75fdc5e6f515",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureImportOptions::pngInfill",
+      "id": "a303abb3d8bb43fbbc2d8137ecc51595",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureMipData::bulk",
+      "id": "87a912e0218a4afa96e2826bd4d47898",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureMipData::byteSize",
+      "id": "cb1a53e132f448caae3de7f72d744745",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureMipData::sizeX",
+      "id": "cf722ee2e03b490b9f1492824ae2b644",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureMipData::sizeY",
+      "id": "c3b58f2b25284f3292936f4f9007dc98",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureMipData::sizeZ",
+      "id": "70ab4b0b42ee49b3b5427b56ff73b8cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureMipData::tailOffset",
+      "id": "0d97e18bf589447d9f2e0606d9887f3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::dimension",
+      "id": "1b7b81ea6cc24c9393f7e4e1e1fb8755",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::mips",
+      "id": "3223ed54909042ffb40e386be20f7fc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::numMips",
+      "id": "a19ffb03e3a444b1b130ac8738a1176c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::numSlices",
+      "id": "90e14fc4ecf841a9868abb4a08a118d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::pixelFormat",
+      "id": "b4e1481157c44094948433beaf2ff4cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::residentTailMips",
+      "id": "1685b08ad390400ebcde64a6ce5dbf72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::sampler",
+      "id": "2abde437cf2f47f486712ed96bb788f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::sizeX",
+      "id": "715f8589b87e46f3be3f86108019f229",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::sizeY",
+      "id": "f4b86d66d7c7414aa9a245e3d2e7d5b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::sizeZ",
+      "id": "72e7593438224f268565990da790ed20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::srgb",
+      "id": "7f4c893630bd40e89290c2eaa1fcc14b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::swizzleA",
+      "id": "40a04ed57985415d9b019236ff5c6b4e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::swizzleB",
+      "id": "5cc6bcd964744b73badef8a0c385e22b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::swizzleG",
+      "id": "e4ff81c0c534445097d671d8f3fb003c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::swizzleR",
+      "id": "89e1dc60aa2f415b9a8a60fb35673759",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TexturePlatformData::tailBulk",
+      "id": "c70fc9e4b07f425481359af043ebd48a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSamplerSettings::addressU",
+      "id": "22314e46ef3046cba979be9981e97a76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSamplerSettings::addressV",
+      "id": "2489b2ebbb174e2fb4c2d1950ae9be07",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSamplerSettings::addressW",
+      "id": "4fcc891991764482bb2745b481587730",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSamplerSettings::borderColor",
+      "id": "917e063c48184dd09f154d566478f2da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSamplerSettings::filter",
+      "id": "59fca6ac43164e4787ffef39d8015838",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSamplerSettings::maxAniso",
+      "id": "4a1878dd59ee44259aaa93961b5972dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::bulk",
+      "id": "e8ff73ad029f4d38b6db909233bc6486",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::format",
+      "id": "2107c4628e24435a86cf7d009f1e29b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::numLayers",
+      "id": "4444d6a6a8c54e4b857202c29e271b3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::numMips",
+      "id": "239708271ab64a008605b246e9e754e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::numSlices",
+      "id": "7e5f6ed8c9c04f4bb2f4268a76b74392",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::sizeX",
+      "id": "d7460b55f5f04b5081d6f815c8e52ed7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSource::sizeY",
+      "id": "2718e9b855b643aa84df24fc36672dab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::blueChromaticityCoordinate",
+      "id": "6bbd85b9a48f4507811c99b47cdca582",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::chromaticAdaptationMethod",
+      "id": "3e90830ae3414f80918508d5b56a2e9f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::colorSpace",
+      "id": "0da23eeedd0d43b8906290cbdb0201f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::encodingOverride",
+      "id": "01f6037844ec437fb11ed0ce2a59ffbe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::greenChromaticityCoordinate",
+      "id": "46643527ac974967a43862da519935c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::redChromaticityCoordinate",
+      "id": "8b07ec6e80c8401aa1902ee22829522a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureSourceColorSettings::whiteChromaticityCoordinate",
+      "id": "9b7d15f2babc4657a6d04d159905d5f1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureVolumeFileOptions::pngInfill",
+      "id": "589bae24b359438ba7bf35aa351de84f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureVolumeFileOptions::volumeTileX",
+      "id": "e5a095ce640f405c85ff1206ac9491c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureVolumeFileOptions::volumeTileY",
+      "id": "d98be1a4ecff416eb844e43055f5a76d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VolumeTexture::addressMode",
+      "id": "5fa772d30b6c4f70b41cea199b90ebc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VolumeTexture::borderColor",
+      "id": "a83691f6503a4e1cbc1013bef734718f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VolumeTexture::source2DTexture",
+      "id": "75a359f5093c421fb1772dbf65f9fbf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VolumeTexture::source2DTileSizeX",
+      "id": "171e85b205d94747b559ceedf675f3cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VolumeTexture::source2DTileSizeY",
+      "id": "94c69ad1e6504f94ab7516ac20fffeaa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Texture",
+      "id": "fab5a5c11cb946c1b0d15fcba73ea4f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Texture2D",
+      "id": "e011f58b1cec4de3a56e77ce25b0e659",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Texture2DArray",
+      "id": "6de31876f3464c1093bac7a6c8d37bd9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureAddress",
+      "id": "7faa6c9a29ad408ead58e651db537c3d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureAvailability",
+      "id": "35e2be03cd104f88b5c5ea892c17aa57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureBorderColor",
+      "id": "9a7fb8462d214fbd8160c278c7c85a55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureBuildSettings",
+      "id": "677023dac0e24e52a45e1a2f64074cc2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureChromaticAdaptationMethod",
+      "id": "09dde3ad05d9460181087c69e7d79273",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureColorSpace",
+      "id": "c7930416b68f453e8c13e12fbaa8c2d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCompositeMode",
+      "id": "4ed532cf55e94076b1676ecc148b3653",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCompressionQuality",
+      "id": "9397c19f4d76462883320a8c839150fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCompressionSettings",
+      "id": "f82218c51b68479596fcfba91adcbe39",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCookPlatformTilingSettings",
+      "id": "2b8bf7b70cbf4f2eac3d110e74afffc8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCube",
+      "id": "1f24bc5f8f1b4cf1ac4b3e29dd2a92f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCubeArray",
+      "id": "1c84e35e2ab8406fa8743b8e5d9c2d37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCubeFileOptions",
+      "id": "ad96327a40f348e7b73dbc37e972b211",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureCubeLayout",
+      "id": "d4f8037c3c5b4b64ac41c6e446d9db63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureDimension",
+      "id": "6775d8aaa5074f208bf0e2f4ef979293",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureDownscale",
+      "id": "98fc89aa16514fd49e6a905e759230f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureDownscaleOptions",
+      "id": "ea23b67765704a22a33666f761c09645",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureFilter",
+      "id": "3811f1f2832d4aeb8b6ed50d1b09c075",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureFormatSettings",
+      "id": "1aaca81b326b42e09d5f131eef66f8cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureGroup",
+      "id": "0c117d73481b41398d255816dbb7d0d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureImportOptions",
+      "id": "6e640e0d9b9a4544ad4de434224ae2c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureImportPngInfill",
+      "id": "f6c1c11319d241f0906d20585667de05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureLossyCompressionAmount",
+      "id": "6446598dce9749d3917e86c9b276a2a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureMipData",
+      "id": "78091843c502445b8590e8ccf2c0680f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureMipGenSettings",
+      "id": "5ba57070556944bcb914cacc99cc9de9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureMipLoadOptions",
+      "id": "4e500bbd4e214f56b005266a41612a85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TexturePlatformData",
+      "id": "afa421a7a9644d4ebd016aabfad598a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TexturePowerOfTwoSetting",
+      "id": "e2ee6862b6e74663a0758967c41ab1ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSamplerFilter",
+      "id": "bc51616a86bd44ca83f574ba6af26301",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSamplerSettings",
+      "id": "3f37647046834a969ddce439ed37b68b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSource",
+      "id": "2e6df298563c4aa0a97cd2d8d37977ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSourceColorSettings",
+      "id": "1543a3f1df514c00b8cf82c977fbba06",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSourceEncoding",
+      "id": "e9167401695442ac842361d54c16d07d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSourceFormat",
+      "id": "3d934eb4621542249e8451bb6bb9b81e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureSwizzle",
+      "id": "585041a209d7408cb450d2a09480ba7f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureVolumeFileOptions",
+      "id": "b7a75021794846aaa256743706d1cd53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::VirtualTextureProducerPriority",
+      "id": "123226954fde4c7eb084b43b39c1a42c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::VolumeTexture",
+      "id": "9791900e77ac46669d232d40b37d1edf",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

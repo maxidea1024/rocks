@@ -3,49 +3,15 @@
 // 경로(넓은 색역 확장 → blue correction → FilmToneMap → ToneCurveAmount → blue correction 되돌림)를
 // LUT 없이 픽셀마다 계산한다. 색 보정(ColorCorrectAll)은 기본값에서 항등이라 넣지 않는다(SL8).
 // 행렬은 UE와 같은 행 나열이고 mul(M, v)로 쓴다(열 벡터). 작업 색 공간은 선형 sRGB(Rec.709 원색,
-// D65)다.
+// D65)다. 원색·순응 행렬은 ColorSpaces·ChromaticAdaptation 상수를 쓴다(같은 행렬을 두 벌 두지 않는다
+// — 엔진 셰이더 7.1절). 이름의 Rocks 접두는 RB 18.5절에서 먼저 넣은 것으로 TonemapPass·
+// TextureInspector가 쓰므로 그대로 둔다.
 
 #pragma once
 
-// ACES 원색 변환 행렬이다(UE ACES/ACESCommon.ush와 같은 값).
-static const float3x3 RocksAP0ToXyz = {
-    0.9525523959, 0.0000000000, 0.0000936786,
-    0.3439664498, 0.7281660966, -0.0721325464,
-    0.0000000000, 0.0000000000, 1.0088251844};
-static const float3x3 RocksXyzToAP0 = {
-    1.0498110175, 0.0000000000, -0.0000974845,
-    -0.4959030231, 1.3733130458, 0.0982400361,
-    0.0000000000, 0.0000000000, 0.9912520182};
-static const float3x3 RocksAP1ToXyz = {
-    0.6624541811, 0.1340042065, 0.1561876870,
-    0.2722287168, 0.6740817658, 0.0536895174,
-    -0.0055746495, 0.0040607335, 1.0103391003};
-static const float3x3 RocksXyzToAP1 = {
-    1.6410233797, -0.3248032942, -0.2364246952,
-    -0.6636628587, 1.6153315917, 0.0167563477,
-    0.0117218943, -0.0082844420, 0.9883948585};
-static const float3x3 RocksAP0ToAP1 = {
-    1.4514393161, -0.2365107469, -0.2149285693,
-    -0.0765537734, 1.1762296998, -0.0996759264,
-    0.0083161484, -0.0060324498, 0.9977163014};
-static const float3 RocksAP1ToY = float3(0.2722287168, 0.6740817658, 0.0536895174);
-static const float3x3 RocksXyzToSrgb = {
-    3.2409699419, -1.5373831776, -0.4986107603,
-    -0.9692436363, 1.8759675015, 0.0415550574,
-    0.0556300797, -0.2039769589, 1.0569715142};
-static const float3x3 RocksSrgbToXyz = {
-    0.4123907993, 0.3575843394, 0.1804807884,
-    0.2126390059, 0.7151686788, 0.0721923154,
-    0.0193308187, 0.1191947798, 0.9505321522};
-// Bradford 색 순응(D65 ↔ D60)이다.
-static const float3x3 RocksD65ToD60 = {
-    1.0130349146, 0.0061052578, -0.0149709436,
-    0.0076982301, 0.9981633521, -0.0050320385,
-    -0.0028413174, 0.0046851567, 0.9245061375};
-static const float3x3 RocksD60ToD65 = {
-    0.9872240087, -0.0061132286, 0.0159532883,
-    -0.0075983718, 1.0018614847, 0.0053300358,
-    0.0030725771, -0.0050959615, 1.0816806031};
+#include "/Engine/Private/Color/ChromaticAdaptation.rsh"
+#include "/Engine/Private/Color/ColorSpaces.rsh"
+
 // 넓은 색역(P3와 AP1 사이) → XYZ다(UE PostProcessCombineLUTs.usf Wide_2_XYZ_MAT).
 static const float3x3 RocksWideToXyz = {
     0.5441691, 0.2395926, 0.1666943,
@@ -162,7 +128,7 @@ float RocksFilmToneChannel(float logColor, RocksFilmicParameters film, float toe
 
 // UE FilmToneMap이다. 입력·출력은 AP1 원색 선형 값이다(출력은 0 이상).
 float3 RocksFilmToneMap(float3 colorAP1, RocksFilmicParameters film) {
-    const float3x3 ap1ToAP0 = mul(RocksXyzToAP0, RocksAP1ToXyz);
+    const float3x3 ap1ToAP0 = mul(XyzToAP0, AP1ToXyz);
     float3 colorAP0 = mul(ap1ToAP0, colorAP1);
 
     // ACES "glow" 단계다.
@@ -177,8 +143,8 @@ float3 RocksFilmToneMap(float3 colorAP1, RocksFilmicParameters film) {
     const float weight = smoothstep(0.0, 1.0, 1.0 - abs(2.0 * centeredHue / 135.0));
     colorAP0.r += weight * weight * saturation * (0.03 - colorAP0.r) * (1.0 - 0.82);
 
-    float3 working = max(0.0, mul(RocksAP0ToAP1, colorAP0));
-    working = lerp(dot(working, RocksAP1ToY), working, 0.96);
+    float3 working = max(0.0, mul(AP0ToAP1, colorAP0));
+    working = lerp(dot(working, AP1LuminanceWeights), working, 0.96);
 
     const float toeScale = 1.0 + film.blackClip - film.toe;
     const float inMatch = 0.18;
@@ -200,27 +166,27 @@ float3 RocksFilmToneMap(float3 colorAP1, RocksFilmicParameters film) {
     tone.r = RocksFilmToneChannel(logColor.r, film, toeMatch, straightMatch, shoulderMatch);
     tone.g = RocksFilmToneChannel(logColor.g, film, toeMatch, straightMatch, shoulderMatch);
     tone.b = RocksFilmToneChannel(logColor.b, film, toeMatch, straightMatch, shoulderMatch);
-    tone = lerp(dot(tone, RocksAP1ToY), tone, 0.93);
+    tone = lerp(dot(tone, AP1LuminanceWeights), tone, 0.93);
     return max(0.0, tone);
 }
 
 // 선형 sRGB 장면 색 → filmic 표시 색(선형 sRGB, 0 이상)이다. UE Filmic 경로의 출력 부호화 앞까지다
 // (출력 장치 sRGB·작업 색 공간 sRGB의 기본 경우). 장면 색은 0 이상이어야 한다.
 float3 RocksFilmicDisplayColor(float3 linearSrgb, RocksFilmicParameters film) {
-    const float3x3 srgbToAP1 = mul(RocksXyzToAP1, mul(RocksD65ToD60, RocksSrgbToXyz));
-    const float3x3 ap1ToSrgb = mul(RocksXyzToSrgb, mul(RocksD60ToD65, RocksAP1ToXyz));
-    const float3x3 ap1ToAP0 = mul(RocksXyzToAP0, RocksAP1ToXyz);
-    const float3x3 ap0ToAP1 = mul(RocksXyzToAP1, RocksAP0ToXyz);
+    const float3x3 srgbToAP1 = mul(XyzToAP1, mul(BradfordD65ToD60, Rec709ToXyz));
+    const float3x3 ap1ToSrgb = mul(XyzToRec709, mul(BradfordD60ToD65, AP1ToXyz));
+    const float3x3 ap1ToAP0 = mul(XyzToAP0, AP1ToXyz);
+    const float3x3 ap0ToAP1 = mul(XyzToAP1, AP0ToXyz);
     float3 colorAP1 = mul(srgbToAP1, linearSrgb);
 
     // 밝고 채도 높은 색을 sRGB 밖으로 넓힌다(UE ExpandGamut). 검정은 휘도 0이라 넓히지 않는다.
-    const float luma = dot(colorAP1, RocksAP1ToY);
+    const float luma = dot(colorAP1, AP1LuminanceWeights);
     if (luma > 0.0) {
         const float3 chroma = colorAP1 / luma;
         const float chromaDistance = dot(chroma - 1.0, chroma - 1.0);
         const float expandAmount = (1.0 - exp2(-4.0 * chromaDistance)) *
                                    (1.0 - exp2(-4.0 * film.expandGamut * luma * luma));
-        const float3x3 expand = mul(mul(RocksXyzToAP1, RocksWideToXyz), ap1ToSrgb);
+        const float3x3 expand = mul(mul(XyzToAP1, RocksWideToXyz), ap1ToSrgb);
         colorAP1 = lerp(colorAP1, mul(expand, colorAP1), expandAmount);
     }
 

@@ -22,7 +22,7 @@ namespace audio_codec_tests_file {
 
 using namespace rocks::audio;
 
-// 코덱 계층 C1 시험이다(Docs/Design/AudioSystem.ko.md 3.30.4절): 플랫폼 데이터 쓰기·검증·디코드,
+// 코덱 계층 C1 시험이다(Docs/Design/AudioSystem 3.30.4절): 플랫폼 데이터 쓰기·검증·디코드,
 // 청크 나누기·pre-roll, 디코더 표·계약.
 
 namespace {
@@ -158,6 +158,7 @@ public:
 
     Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload,
                             uint64 startCodecFrame) noexcept override {
+        finished_ = false;
         const uint64 frameBytes = uint64{channels_} * Pcm16SampleBytes;
         if (payload.Size() != (uint64{chunk.preRollFrames} + chunk.frameCount) * frameBytes ||
             startCodecFrame < chunk.firstFrame ||
@@ -184,6 +185,25 @@ public:
         return Result<void>::Success();
     }
 
+    // 상태(window)를 이어 쓰고 복제 pre-roll은 건너뛴다. 그래서 전체 디코드는 청크 경계와 무관하게
+    // 기준(연속 디코드)과 같다.
+    Result<void> ContinueChunk(const AudioChunkEntry& chunk,
+                               Span<const uint8> payload) noexcept override {
+        const uint64 frameBytes = uint64{channels_} * Pcm16SampleBytes;
+        if (!finished_ || chunk.firstFrame != chunkEnd_ ||
+            payload.Size() != (uint64{chunk.preRollFrames} + chunk.frameCount) * frameBytes) {
+            payload_ = Span<const uint8>();
+            finished_ = false;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        finished_ = false;
+        payload_ = payload;
+        chunkEnd_ = chunk.firstFrame + chunk.frameCount;
+        payloadFirst_ = chunk.firstFrame - chunk.preRollFrames;
+        return Result<void>::Success();
+    }
+
     Result<uint32> DecodeNext(const PlanarView& out) noexcept override {
         if (payload_.Size() == 0 || out.channelCount != channels_ ||
             out.frameCount < TestUnitFrames) {
@@ -197,6 +217,7 @@ public:
             Step(&out, count);
         }
 
+        finished_ = count == 0;
         return Result<uint32>::Success(count);
     }
 
@@ -229,6 +250,7 @@ private:
     uint64 payloadFirst_ = 0;
     uint64 position_ = 0;
     int32 window_[MaxOutputChannels][TestMemoryFrames] = {};
+    bool finished_ = false;
 };
 
 Result<UniquePtr<AudioDecoder>> CreateTestCodecDecoder(Allocator& allocator) noexcept {
@@ -804,6 +826,44 @@ TEST(Audio_Codec_DecoderContract) {
         CHECK(total == chunk.frameCount);
         CHECK(decoder.DecodeNext(out) && decoder.DecodeNext(out).Value() == 0);
 
+        // ContinueChunk 순서 규칙은 상태 없는 codec도 같다(3.30.2절): 청크 없이·다 내지
+        // 않고·이어지지 않으면 InvalidArgument이고 열린 청크를 닫는다. 다 낸 뒤 바로 다음 청크는
+        // 연다.
+        {
+            AudioPlatformDataOptions chunked;
+            chunked.targetChunkBytes = 1;
+            const Array<uint8> chunkedBytes = WriteOrDie(allocator, encoded, chunked);
+            auto chunkedView = AudioPlatformDataView::Parse(chunkedBytes.View());
+            REQUIRE(chunkedView);
+            const AudioPlatformDataView& many = chunkedView.Value();
+            REQUIRE(many.Header().chunkCount >= 3);
+            const auto drain = [&]() noexcept {
+                while (true) {
+                    auto count = decoder.DecodeNext(out);
+                    if (!count || count.Value() == 0) {
+                        return static_cast<bool>(count);
+                    }
+                }
+            };
+
+            REQUIRE(decoder.Open(many.Header(), many.CodecHeader()));
+            CHECK(decoder.ContinueChunk(many.Chunk(1), many.ChunkPayload(1)).Error() ==
+                  ErrorCode::InvalidArgument);
+            REQUIRE(decoder.BeginChunk(many.Chunk(0), many.ChunkPayload(0), 0));
+            REQUIRE(decoder.DecodeNext(out));
+            CHECK(decoder.ContinueChunk(many.Chunk(1), many.ChunkPayload(1)).Error() ==
+                  ErrorCode::InvalidArgument);
+            CHECK(decoder.DecodeNext(out).Error() == ErrorCode::InvalidArgument);
+            REQUIRE(decoder.BeginChunk(many.Chunk(0), many.ChunkPayload(0), 0));
+            REQUIRE(drain());
+            CHECK(decoder.ContinueChunk(many.Chunk(2), many.ChunkPayload(2)).Error() ==
+                  ErrorCode::InvalidArgument);
+            REQUIRE(decoder.BeginChunk(many.Chunk(0), many.ChunkPayload(0), 0));
+            REQUIRE(drain());
+            CHECK(decoder.ContinueChunk(many.Chunk(1), many.ChunkPayload(1)));
+            CHECK(drain());
+        }
+
         // codec 머리가 있으면 Open이 거부한다.
         const uint8 extra[8] = {};
         CHECK(decoder.Open(view.Value().Header(), Span<const uint8>(extra)).Error() ==
@@ -942,6 +1002,10 @@ TEST(Audio_Codec_DecoderReopenAndBounds) {
     AudioPlatformDataHeader newer = view.Value().Header();
     newer.bitstreamVersion = Pcm16BitstreamVersion + 1;
     CHECK(decoder.Open(newer, Span<const uint8>()).Error() == ErrorCode::Unsupported);
+    // 새 판이 codec 머리를 두더라도 손상(InvalidArgument)이 아니라 모르는 판이다.
+    const uint8 newerCodecHeader[AudioCodecHeaderAlignment] = {};
+    CHECK(decoder.Open(newer, Span<const uint8>(newerCodecHeader, AudioCodecHeaderAlignment))
+              .Error() == ErrorCode::Unsupported);
     Array<float> scratch(allocator);
     REQUIRE(scratch.TryResize(2 * Pcm16UnitFrames));
     PlanarView out;

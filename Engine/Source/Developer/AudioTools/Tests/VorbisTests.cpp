@@ -17,7 +17,7 @@ using namespace rocks::audio;
 using namespace rocks::audio::vorbisfixtures;
 using namespace rocks::audio::sourcetest;
 
-// Ogg Vorbis 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.28.3절).
+// Ogg Vorbis 원본 디코드 시험이다(Docs/Design/AudioSystem 3.28.3절).
 
 namespace {
 

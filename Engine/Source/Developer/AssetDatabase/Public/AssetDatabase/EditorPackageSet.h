@@ -12,6 +12,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
+#include <Object/OverrideSet.h>
 #include <Object/ReferenceObserver.h>
 #include <Platform/File.h>
 
@@ -106,7 +107,18 @@ enum class EditorWarningKind : uint8 {
     ImportWarning,
     // ID 수정: 새 id로 바꾼 패키지나 그 형제 출력이 고아가 됐다(진단 OrphanedOutput, asset = 고아,
     // related = 그 owner — 7.1절 17 A2e4b).
-    OrphanedOutput
+    OrphanedOutput,
+    // 열기: 저장 당시와 지금의 클래스 기본값이 다른 export 클래스다(A5c — 진단 None, asset =
+    // 패키지, related = 그 TypeId, text = 그 클래스의 export 수). 열기는 계속되고, 파일에 없던 값은
+    // 새 기본값이 된다(RuntimeClassMetadata 'A5c 지문 연결').
+    ClassDefaultsChanged,
+    // 열기: 지금 클래스 기본값 레코드를 만들 수 없는 export 클래스다(A5c — 진단 None, asset =
+    // 패키지, related = 그 TypeId, text = 이유 이름). 그 클래스를 고치기 전까지 이 패키지는 저장할
+    // 수 없다(차이 저장이 레코드를 요구한다).
+    ClassDefaultsUnavailable,
+    // 원본 재구성: 원본 묶음 hook의 경고다(진단 = 그 코드 — SourceCleared, asset = 그 에셋,
+    // detail — Docs/Design/AssetSystem 12.14절 A5j2).
+    SourceRebuildWarning
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
@@ -153,6 +165,12 @@ public:
     virtual Result<void> Initialize(ConstructionContext& transaction,
                                     ObjectHandle asset) noexcept = 0;
 
+    // Initialize가 쓴 경로의 override 집합이다(없으면 null — RuntimeClassMetadata 'A5b'). Create가
+    // 공개 전에 새 대표 에셋의 집합으로 설치한다.
+    virtual const OverrideSet* InitialOverrides() const noexcept {
+        return nullptr;
+    }
+
 protected:
     ~EditorAssetInitializer() = default;
 };
@@ -160,11 +178,16 @@ protected:
 // 저장 검증 scratch 크기다(VerifyPackageFile이 건너뛴 섹션을 이 크기 조각으로 훑는다).
 inline constexpr usize EditorSaveVerifyScratchBytes = 64 * 1024;
 
+// 에디터 패키지 bulk의 저장 codec이다(Docs/Design/AssetSystem 5절·12.12절 — UE FEditorBulkData처럼
+// 원본을 압축한다). 바뀌지 않은 entry는 다시 압축하지 않고 저장 byte를 복사한다
+// (PackageBulkSource::ReadStoredBulk).
+inline constexpr BulkCodec EditorPackageBulkCodec = BulkCodec::Zstd;
+
 // 열린 패키지 하나의 정보다.
 struct EditorPackageInfo {
     explicit EditorPackageInfo(Allocator& allocator) noexcept
         : fileName(allocator), logicalPath(allocator), unresolved(allocator),
-          importRecord(allocator), importOwner(allocator) {
+          importRecord(allocator), importOwner(allocator), overrides(allocator) {
     }
 
     EditorPackageInfo(EditorPackageInfo&&) noexcept = default;
@@ -192,6 +215,10 @@ struct EditorPackageInfo {
     bool unsaved = false;
     // 이 패키지의 파일 bulk 저장소다(Package가 소유 — 저장의 bulk source·Rebind).
     FilePackageBulkStore* store = nullptr;
+    // 이 패키지 객체들의 override 집합이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5b' — 차이
+    // 형식 저장이 기준과 같아도 쓰는 값 경로). 열 때 파일에 있던 값 경로로 채우고, 경로 쓰기
+    // (RecordOverride)가 더한다. 패키지를 닫으면 함께 사라진다.
+    HashMap<ObjectHandle, OverrideSet> overrides;
 };
 
 // 열린 패키지 경로 바꾸기 준비다(EditorPackageSet::PrepareRelocate가 채우고 CommitRelocate가 쓴다 —
@@ -360,6 +387,42 @@ public:
     // 열린 패키지 정보다(없으면 null). 다음 Open까지 유효하다.
     const EditorPackageInfo* Find(AssetId id) const noexcept;
 
+    // object(열린 패키지 안 객체)의 경로 쓰기를 override 집합에 기록한다(RuntimeClassMetadata 'A5b'
+    // — asset-set·asset-new·임포트 설정 대입). path는 그 객체 타입 스키마의 경로이고 단위로
+    // 정규화한다 (AddOverrideUnits — 원소·key는 필드, Atomic은 struct, 비Atomic struct 끝은 잎
+    // 멤버로 펼침). 오류: 열린 패키지 객체가 아님 NotFound, 타입 조회·정규화의 오류, 할당 실패.
+    Result<void> RecordOverride(ObjectHandle object, Span<const PathStep> path) noexcept;
+    // 값 게시 전에 pending(단위 집합)을 object 집합에 합칠 자리를 잡는다(집합 항목을 만들고 용량을
+    // 예약 — RuntimeClassMetadata 'A5b'). 그 뒤 MergeOverrides는 실패하지 않는다. 오류: 열린 패키지
+    // 객체가 아님 NotFound, 할당 실패.
+    Result<void> ReserveOverrides(ObjectHandle object, const OverrideSet& pending) noexcept;
+    // ReserveOverrides 뒤 pending을 object 집합에 합친다(할당 없음).
+    void MergeOverrides(ObjectHandle object, const OverrideSet& pending) noexcept;
+    // object 집합에서 prefixes의 각 경로로 시작하는 단위를 모두 지운다(그 경로 자체 포함 — 기본값
+    // 되돌리기 A5b2, 비Atomic struct 통째면 그 아래 잎과 옛 스키마의 잎까지). 할당하지 않는다(열린
+    // 패키지 객체가 아니거나 집합이 없으면 아무것도 하지 않는다).
+    void RemoveOverridesUnder(ObjectHandle object, const OverrideSet& prefixes) noexcept;
+    // object의 override 집합이다(없으면 null — 객체의 패키지가 닫히면 무효).
+    const OverrideSet* FindOverrides(ObjectHandle object) const noexcept;
+    // object(열린 패키지 asset의 대표 에셋)의 설정을 정규화한다(타입 hook 표의 정규화 hook —
+    // Docs/Design/AssetSystem 12.12절, UE ValidateSettingsAfterImportOrEdit). assignedFields는 이번
+    // 명령이 대입·되돌린 최상위 필드 이름이다. hook 표가 없거나 그 타입에 hook이 없으면 아무것도
+    // 하지 않는다. 오류: 타입 조회 오류, hook의 오류.
+    Result<void> NormalizeSettings(ObjectHandle object, AssetId asset,
+                                   Span<const StringView> assignedFields) noexcept;
+    // object(열린 패키지 asset의 대표 에셋)의 원본을 묶음 필드에서 다시 만든다(타입 hook 표의 원본
+    // 재구성 hook — 12.14절 A5j2, UE UpdateSourceFromSourceTextures). 묶음 원소의 bulk는 그 원소가
+    // 속한 열린 패키지에서 읽고 새 원본은 asset 패키지의 저장 전 bulk로 더한다. 정규화보다 먼저
+    // 부른다. hook 표가 없거나 hook이 없으면 아무것도 하지 않는다. 경고는 warnings(있으면)에
+    // SourceRebuildWarning으로 붙는다. cause·changed는 sink의 Cause·ChangedSource다(changed는
+    // Propagate일 때 재임포트한 원소). rebuilt가 있으면 hook이 원본을 실제로 다시 썼는지를 둔다
+    // (sink MarkRebuilt). 오류: asset이 열려 있지 않음 NotFound, 타입 조회 오류, hook의 오류(진단은
+    // failure).
+    Result<void> RebuildSource(ObjectHandle object, AssetId asset,
+                               Span<const StringView> assignedFields, AssetSourceRebuildCause cause,
+                               ObjectHandle changed, Array<EditorWarning>* warnings,
+                               AssetDiagnostic* failure, bool* rebuilt = nullptr) noexcept;
+
     // 이동하는 열린 패키지의 경로를 바꿀 준비를 한다(7.1절 17 A2e2). 저장된 패키지는 fileName이
     // fromFile(Content 상대 OS 이름 — 파일 또는 디렉터리, 이동하는 실제 이름)과 같거나 그 아래면 그
     // 앞부분을 toFile로 바꾼다(OS 이동과 같은 규칙 — 디스크의 실제 이름, 빈 fromFile은 없음).
@@ -472,9 +535,11 @@ private:
     Result<void> PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
                                AssetDiagnostic& diagnostic) noexcept;
     // 대표 에셋 타입 hook의 Tags·Build 의존과 importOwner를 plan에 모은다(asset은 저장할 id — hook
-    // 문맥에 준다).
+    // 문맥에 준다). Tags에는 bundle 태그(A4e2b)와, importRecord(이번에 쓸 기록 byte — self =
+    // asset)가 소유 기록이면 그 임포터 태그(A2f3a)도 더한다.
     Result<void> PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
-                                 Span<const PackageDependencyEntry> importOwner, SavePlan& plan,
+                                 Span<const PackageDependencyEntry> importOwner,
+                                 Span<const uint8> importRecord, SavePlan& plan,
                                  AssetDiagnostic& diagnostic) noexcept;
     // duplicate가 있으면 복제 모드다(원본 정보·저장소를 바꾸지 않는다).
     Result<void> WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,

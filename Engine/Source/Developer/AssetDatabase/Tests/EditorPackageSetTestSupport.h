@@ -98,9 +98,9 @@ inline ObjectHandle MakeAsset(ObjectRegistry& registry, uint64 id,
 }
 
 // fields 하나만 든 Record다(손상·다른 스키마 ImportRecord).
-inline Array<uint8> OneFieldRecord(Allocator& allocator, Guid schema) noexcept {
+inline Array<uint8> OneFieldRecord(Allocator& allocator, Guid schema, uint32 version = 1) noexcept {
     const uint8 value[4] = {1, 2, 3, 4};
-    RecordBuilder builder(allocator, schema, 1);
+    RecordBuilder builder(allocator, schema, version);
     if (!builder.AddField(Guid{0, 9}, WireType::U32, value)) {
         return Array<uint8>(allocator);
     }

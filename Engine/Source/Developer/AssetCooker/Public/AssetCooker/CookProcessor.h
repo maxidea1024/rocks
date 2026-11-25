@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetCooker/CookConfig.h>
+#include <AssetCooker/CookTargets.h>
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetNugget/NuggetCache.h>
 #include <AssetNugget/NuggetKey.h>
@@ -40,6 +41,10 @@ struct CookContext {
     // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
     PackageSink* sink = nullptr;
     AssetDiagnostic* failure = nullptr;
+    // 처리기 경고를 받는 곳이다(null이면 버린다 — 12.14절 10번). 처리기는 warning = true·asset =
+    // 대상 id로 넣고, 실행기가 실행 진단으로 옮긴다(게시를 막지 않는다). push의 할당 실패는
+    // OutOfMemory로 돌려준다.
+    Array<CookDiagnostic>* warnings = nullptr;
 };
 
 // 처리기다. Cook의 기본은 에디터 객체 그래프를 그대로 쿠킹 패키지로 쓴다(UE가 패키지를 대상
@@ -64,6 +69,13 @@ public:
     // cookerVersion, 프로파일 bulkCodec·bulkAlignment(0이면 PackageDefaultCookedBulkAlignment),
     // bulkSource). 오류: WritePackage의 오류(진단은 context.failure).
     virtual Result<void> Cook(CookContext& context) const noexcept;
+
+protected:
+    // 기본 Cook의 쓰기다. bulk 정렬은 max(프로파일 값(0이면 기본), minimumBulkAlignment)다 —
+    // 처리기가 렌더 요구 같은 더 큰 정렬을 쓸 때(텍스처 스트리밍 덩어리 4 KiB — AssetSystem 12.14절
+    // A5j3). minimumBulkAlignment 0이면 프로파일 값 그대로다. 오류는 Cook과 같다.
+    static Result<void> WriteCookedPackage(CookContext& context,
+                                           uint32 minimumBulkAlignment) noexcept;
 };
 
 // 기본 처리기의 정체성이다(기본 Cook의 출력 의미가 바뀌면 버전을 바꾼다).

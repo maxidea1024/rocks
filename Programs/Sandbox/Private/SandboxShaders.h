@@ -8,6 +8,7 @@
 #include <RenderBase/EngineShaderHost.h>
 #include <RenderBase/ShaderSet.h>
 #include <ShaderCore/ShaderFormatFacts.h>
+#include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderType.h>
 
 // Sandbox 셰이더다(Docs/Design/ShaderSystem 16.1절 SSD19·SH2f). 원문은 Programs/Sandbox/Shaders이고
@@ -101,6 +102,39 @@ constexpr ShaderTypeDesc DevelopmentOnly(ShaderTypeDesc desc) noexcept {
 #undef SANDBOX_VERTEX_IF
 #undef SANDBOX_PIXEL_IF
 #undef SANDBOX_PIXEL_DEV_IF
+
+// 엔진 셰이더 SL0 probe 타입이다(Docs/Design/EngineShaders 7.6절, 결정 SLD19). 원문은
+// Programs/Sandbox/EngineShaderTests를 /Plugin/EngineShaderTests로 mount한 시험 루트이고 쿠킹하지
+// 않는다. 그리기별 상수는 ProbeConstants(96 byte — Common/ProbeCommon.rsh)다.
+inline constexpr rocks::shader::ShaderParameterMember ProbeConstantMembers[] = {
+    {"control", rocks::shader::ShaderParameterType::Uint4, 0, 0},
+    {"parameters", rocks::shader::ShaderParameterType::Float4, 16, 0},
+    {"values", rocks::shader::ShaderParameterType::Float4x4, 32, 0}};
+inline constexpr rocks::uint32 ProbeConstantBytes = 96;
+inline constexpr rocks::shader::ShaderParameterLayout ProbeConstantLayouts[] = {
+    {"ProbeConstants", true, ProbeConstantBytes, ProbeConstantMembers}};
+
+constexpr ShaderTypeDesc EngineShaderProbeType(StringView name, StringView path,
+                                               StringView entry) noexcept {
+    ShaderTypeDesc desc = rocks::shader::MakeShaderTypeDesc(
+        rocks::shader::ShaderTypeName{name, rocks::shader::ShaderTypeNameHash(name)}, path, entry,
+        rocks::shader::ShaderStagePixel, rocks::shader::ShaderTypeOwner::EnginePlugin);
+    desc.parameterLayouts = ProbeConstantLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc MathFloatProbe =
+    EngineShaderProbeType("EngineShaderMathFloatProbe",
+                          "/Plugin/EngineShaderTests/Math/MathProbes.rsf", "MathFloatProbePixel");
+inline constexpr ShaderTypeDesc MathUintProbe =
+    EngineShaderProbeType("EngineShaderMathUintProbe",
+                          "/Plugin/EngineShaderTests/Math/MathProbes.rsf", "MathUintProbePixel");
+inline constexpr ShaderTypeDesc ColorFloatProbe = EngineShaderProbeType(
+    "EngineShaderColorFloatProbe", "/Plugin/EngineShaderTests/Color/ColorProbes.rsf",
+    "ColorFloatProbePixel");
+inline constexpr ShaderTypeDesc ShadingFloatProbe = EngineShaderProbeType(
+    "EngineShaderShadingFloatProbe", "/Plugin/EngineShaderTests/Shading/ShadingTestKernels.rsf",
+    "ShadingFloatProbePixel");
 
 // Sandbox가 등록하는 모든 셰이더 타입이다.
 rocks::Span<const ShaderTypeDesc* const> AllTypes() noexcept;

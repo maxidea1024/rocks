@@ -50,10 +50,11 @@ class SceneComponent;
 // 리플렉션(Docs/Design/ReflectionFoundations.ko.md 9.1절): WorldOnly 리플렉션 클래스다. 영속
 // 필드는 components(소유 Component 목록 — 강한 GC 간선), rootComponent(대표 SceneComponent —
 // 늘 components 안에 있는 강한 참조), enabled이고 모두 ReadOnly다(경로·리플렉션 쓰기가 World 장부 —
-// ActorRecord·hook·Tick 등록 — 를 우회하지 않게). World 포인터·소속 Level·Tick 설정은
-// ROCKS_NATIVE(저장하지 않는 런타임 상태)다. 영속 상태를 더하는 파생은 ROCKS_CLASS(WorldOnly
-// 상속)로 리플렉션 헤더에 선언하고, 영속 상태가 없는 런타임 전용 파생은 위처럼
-// ROCKS_NATIVE_TYPE으로 둔다(그 객체가 든 그래프는 저장할 수 없다).
+// ActorRecord·hook·Tick 등록 — 를 우회하지 않게)와 tickSettings(Tick 설정 — 생성자 값은 클래스
+// 기본값, 시작 때 한 번 등록하므로 시작 뒤 변경은 반영하지 않는다)다. World 포인터·소속 Level·
+// Tick 등록 handle은 ROCKS_NATIVE(저장하지 않는 런타임 상태)다. 영속 상태를 더하는 파생은
+// ROCKS_CLASS(WorldOnly 상속)로 리플렉션 헤더에 선언하고, 영속 상태가 없는 런타임 전용 파생은
+// 위처럼 ROCKS_NATIVE_TYPE으로 둔다(그 객체가 든 그래프는 저장할 수 없다).
 //
 // 소유: Level이 Actor를, Actor가 자기 Component를 강한 GC 간선 목록(ObjectRefArray)으로 소유한다.
 // native 파생 클래스가 다른 객체로의 강한 간선(ObjectRef·ObjectRefArray)을 더하면
@@ -253,9 +254,9 @@ private:
     // 만들지 않는다. 쓰기는 Registry SetReference로만 한다(Actor·World 구현).
     ROCKS_PROPERTY(ReadOnly, Name = "rootComponent")
     ObjectRef<SceneComponent> rootComponent_;
-    // Tick 설정은 클래스 기본값(생성자)이 정한다. 기본값 레코드와 차이 저장이 아직 없어 인스턴스
-    // 저장값이 기본값 변경을 가리므로 저장하지 않는다. A5에서 리플렉션으로 옮긴다(9.1절).
-    ROCKS_NATIVE() TickSettings tickSettings_;
+    // Tick 설정이다(A5c — 생성자 값은 클래스 기본값 레코드에 들어가고, 차이 저장이 기본값과 같은
+    // 값을 생략하므로 기본값 변경이 인스턴스에 반영된다. 9.1절).
+    ROCKS_PROPERTY(Name = "tickSettings") TickSettings tickSettings_;
     ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;
     // 게임 논리 참조다(17.3절). 저장 여부는 Prefab·저장 단계가 정한다(지금은 실행 중 값).

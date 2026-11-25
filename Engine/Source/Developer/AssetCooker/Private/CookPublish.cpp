@@ -161,17 +161,68 @@ Result<void> List(platform::FileSystem& files, StringView path, Listing& out) no
     return Result<void>::Success();
 }
 
+// artifact 항목 하나를 복사한다(부분 쿠킹 병합 — 10.3.1절 A4f2 8번).
+Result<void> CopyArtifact(const CookedManifestArtifact& source, Array<CookedManifestArtifact>& out,
+                          Allocator& allocator) noexcept {
+    CookedManifestArtifact copy(allocator);
+    copy.kind = source.kind;
+    copy.bytes = source.bytes;
+    copy.sha256 = source.sha256;
+    copy.cookKey = source.cookKey;
+    if (auto assigned = copy.name.TryAssign(source.name.View()); !assigned) {
+        return assigned;
+    }
+
+    if (auto assigned = copy.formatId.TryAssign(source.formatId.View()); !assigned) {
+        return assigned;
+    }
+
+    return out.TryPushBack(Move(copy));
+}
+
+// backend 표를 복사한다.
+Result<void> CopyBackends(Span<const CookedManifestBackend> source,
+                          Array<CookedManifestBackend>& out, Allocator& allocator) noexcept {
+    if (auto reserved = out.TryReserve(source.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const CookedManifestBackend& backend : source) {
+        CookedManifestBackend copy(allocator);
+        if (auto assigned = copy.name.TryAssign(backend.name.View()); !assigned) {
+            return assigned;
+        }
+
+        if (auto reserved = copy.formats.TryReserve(backend.formats.Size()); !reserved) {
+            return reserved;
+        }
+
+        for (const String& format : backend.formats) {
+            // 형식 수만큼 예약했다(빈 String 추가는 할당하지 않는다).
+            String& slot = *copy.formats.TryEmplaceBack(allocator).Value();
+            if (auto assigned = slot.TryAssign(format.View()); !assigned) {
+                return assigned;
+            }
+        }
+
+        // backend 수만큼 예약했다.
+        (void)out.TryPushBack(Move(copy));
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace
 
-Result<void> AppendCookedRoot(StringBuilderBase& out, const ProjectLayout& layout,
+Result<void> AppendCookedRoot(StringBuilderBase& out, StringView savedDirectory,
                               StringView profileId) noexcept {
-    const StringView pieces[] = {layout.SavedDirectory(), "/", CookedDirectoryName, "/", profileId};
+    const StringView pieces[] = {savedDirectory, "/", CookedDirectoryName, "/", profileId};
     return AppendAll(out, pieces);
 }
 
 CookPublisher::CookPublisher(Allocator& allocator, const CookPublishConfig& config) noexcept
     : allocator_(&allocator), config_(config), root_(allocator), entries_(allocator),
-      directories_(allocator), diagnostics_(allocator) {
+      artifacts_(allocator), directories_(allocator), diagnostics_(allocator) {
 }
 
 // 경고를 남긴다(push의 할당 실패는 그 오류 — 경고를 조용히 잃지 않는다).
@@ -190,15 +241,15 @@ bool CookPublisher::HasErrors() const noexcept {
     return false;
 }
 
-Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
-    if (begun_ || config_.files == nullptr || config_.layout == nullptr ||
-        !lock.IsHeldFor(*config_.layout)) {
+Result<void> CookPublisher::Begin(const CookRootLock& lock) noexcept {
+    if (begun_ || config_.files == nullptr || config_.savedDirectory.IsEmpty() ||
+        config_.profileId.IsEmpty() || !lock.IsHeldFor(config_.savedDirectory, config_.profileId)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     platform::FileSystem& files = *config_.files;
     PathBuilder root(*allocator_);
-    if (auto built = AppendCookedRoot(root, *config_.layout, config_.profileId); !built) {
+    if (auto built = AppendCookedRoot(root, config_.savedDirectory, config_.profileId); !built) {
         return built;
     }
 
@@ -209,7 +260,7 @@ Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
     // 쿠킹 루트까지의 디렉터리 중 없던 것은 그 부모를 Finish가 동기화한다(10절 게시 2 — 첫 쿠킹이면
     // 새 루트의 항목이 매니페스트보다 먼저 매체에 남아야 한다).
     PathBuilder cooked(*allocator_);
-    const StringView cookedPieces[] = {config_.layout->SavedDirectory(), "/", CookedDirectoryName};
+    const StringView cookedPieces[] = {config_.savedDirectory, "/", CookedDirectoryName};
     if (auto built = AppendAll(cooked, cookedPieces); !built) {
         return built;
     }
@@ -220,8 +271,14 @@ Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
         return built;
     }
 
-    const StringView chain[] = {config_.layout->SavedDirectory(), cooked.View(), root_.View(),
-                                packagesPath.View()};
+    PathBuilder shadersPath(*allocator_);
+    const StringView shadersPieces[] = {root_.View(), "/", CookShadersDirectoryName};
+    if (auto built = AppendAll(shadersPath, shadersPieces); !built) {
+        return built;
+    }
+
+    const StringView chain[] = {config_.savedDirectory, cooked.View(), root_.View(),
+                                packagesPath.View(), shadersPath.View()};
     for (StringView directory : chain) {
         bool exists = false;
         if (auto checked = files.DirectoryExists(directory.Data(), directory.ByteCount(), exists);
@@ -243,7 +300,8 @@ Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
         }
     }
 
-    const StringView children[] = {CookStagingDirectoryName, CookPackagesDirectoryName};
+    const StringView children[] = {CookStagingDirectoryName, CookPackagesDirectoryName,
+                                   CookShadersDirectoryName};
     for (StringView child : children) {
         PathBuilder path(*allocator_);
         const StringView pieces[] = {root_.View(), "/", child};
@@ -405,62 +463,200 @@ Result<void> CookPublisher::Put(const CookedPackage& package) noexcept {
         }
     }
 
-    const StringView directory(targetView.Data(), slash - 1);
-    if (auto made = platform::MakeDirectoryTree(files, directory.Data(), directory.ByteCount());
-        !made) {
-        discard();
-        return Result<void>::Failure(FileErrorCode(made));
-    }
-
-    const platform::FileStatus moved = files.Move(temp.View().Data(), temp.View().ByteCount(),
-                                                  targetView.Data(), targetView.ByteCount(), false);
-    bool wrote = static_cast<bool>(moved);
-    if (!moved) {
-        if (moved.code != platform::FileCode::AlreadyExists) {
-            discard();
-            return Result<void>::Failure(FileErrorCode(moved));
-        }
-
-        // 같은 이름(같은 내용 해시)이 있다 — 크기·SHA-256으로 확인한다.
-        Sha256Digest digest;
-        uint64 bytes = 0;
-        auto hashed = HashPath(files, targetView, *allocator_, digest, bytes);
-        if (!hashed && hashed.Error() == ErrorCode::OutOfMemory) {
-            discard();
-            return hashed;
-        }
-
-        if (hashed && bytes == package.bytes.Size() && digest == package.sha256) {
-            discard();
-        } else {
-            // 손상된 게시 파일이다(시나리오 27) — 경고하고 새 byte로 교체한다.
-            if (auto warned = Warn(AssetDiagnosticCode::CorruptEntry, package.asset,
-                                   hashed ? ErrorCode::None : hashed.Error());
-                !warned) {
-                discard();
-                return warned;
-            }
-            const platform::FileStatus replaced =
-                files.Replace(temp.View().Data(), temp.View().ByteCount(), targetView.Data(),
-                              targetView.ByteCount());
-            if (!replaced && replaced.code != platform::FileCode::NotDurable) {
-                discard();
-                return Result<void>::Failure(FileErrorCode(replaced));
-            }
-
-            wrote = true;
-        }
+    bool wrote = false;
+    if (auto placed = PlaceStaged(temp.View(), targetView, slash - 1, package.bytes.Size(),
+                                  package.sha256, package.asset, wrote);
+        !placed) {
+        return placed;
     }
 
     if (wrote) {
         bytesWritten_ += package.bytes.Size();
     }
 
-    if (auto remembered = RememberDirectory(directory); !remembered) {
+    if (auto remembered = RememberDirectory(StringView(targetView.Data(), slash - 1));
+        !remembered) {
         return remembered;
     }
 
     return AddEntry(package);
+}
+
+Result<void> CookPublisher::PlaceStaged(StringView temp, StringView target, usize directoryBytes,
+                                        uint64 bytes, const Sha256Digest& digest, AssetId asset,
+                                        bool& wrote) noexcept {
+    platform::FileSystem& files = *config_.files;
+    wrote = false;
+    auto discard = [&]() noexcept { (void)files.Delete(temp.Data(), temp.ByteCount()); };
+    const StringView directory(target.Data(), directoryBytes);
+    if (auto made = platform::MakeDirectoryTree(files, directory.Data(), directory.ByteCount());
+        !made) {
+        discard();
+        return Result<void>::Failure(FileErrorCode(made));
+    }
+
+    const platform::FileStatus moved =
+        files.Move(temp.Data(), temp.ByteCount(), target.Data(), target.ByteCount(), false);
+    if (moved) {
+        wrote = true;
+        return Result<void>::Success();
+    }
+
+    if (moved.code != platform::FileCode::AlreadyExists) {
+        discard();
+        return Result<void>::Failure(FileErrorCode(moved));
+    }
+
+    // 같은 이름(같은 내용 해시)이 있다 — 크기·SHA-256으로 확인한다.
+    Sha256Digest existing;
+    uint64 existingBytes = 0;
+    auto hashed = HashPath(files, target, *allocator_, existing, existingBytes);
+    if (!hashed && hashed.Error() == ErrorCode::OutOfMemory) {
+        discard();
+        return hashed;
+    }
+
+    if (hashed && existingBytes == bytes && existing == digest) {
+        discard();
+        return Result<void>::Success();
+    }
+
+    // 손상된 게시 파일이다(시나리오 27) — 경고하고 새 byte로 교체한다.
+    if (auto warned = Warn(AssetDiagnosticCode::CorruptEntry, asset,
+                           hashed ? ErrorCode::None : hashed.Error());
+        !warned) {
+        discard();
+        return warned;
+    }
+
+    const platform::FileStatus replaced =
+        files.Replace(temp.Data(), temp.ByteCount(), target.Data(), target.ByteCount());
+    if (!replaced && replaced.code != platform::FileCode::NotDurable) {
+        discard();
+        return Result<void>::Failure(FileErrorCode(replaced));
+    }
+
+    wrote = true;
+    return Result<void>::Success();
+}
+
+Result<void> CookPublisher::PutArtifact(CookArtifactKind kind, StringView name, StringView formatId,
+                                        const Sha256Digest& cookKey, StringView stagingFile,
+                                        const CookedManifestArtifact** placed) noexcept {
+    if (!begun_ || finished_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    platform::FileSystem& files = *config_.files;
+    auto discard = [&]() noexcept {
+        (void)files.Delete(stagingFile.Data(), stagingFile.ByteCount());
+    };
+    // 크기·SHA-256은 단계가 말한 값이 아니라 파일에서 직접 계산한다(10.3절 3항).
+    CookedManifestArtifact artifact(*allocator_);
+    artifact.kind = kind;
+    artifact.cookKey = cookKey;
+    if (auto hashed = HashPath(files, stagingFile, *allocator_, artifact.sha256, artifact.bytes);
+        !hashed) {
+        discard();
+        return hashed;
+    }
+
+    if (artifact.bytes == 0 || artifact.bytes > CookedArtifactMaxBytes) {
+        discard();
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto assigned = artifact.name.TryAssign(name); !assigned) {
+        discard();
+        return assigned;
+    }
+
+    if (auto assigned = artifact.formatId.TryAssign(formatId); !assigned) {
+        discard();
+        return assigned;
+    }
+
+    PathBuilder target(*allocator_);
+    const StringView targetPieces[] = {root_.View(), "/"};
+    Result<void> built = AppendAll(target, targetPieces);
+    if (built) {
+        // 칸 문법 위반은 InvalidArgument다(경로 조각 — 쿠킹 루트 밖을 가리키지 못한다).
+        built = AppendCookedArtifactPath(target, artifact);
+    }
+
+    if (!built) {
+        discard();
+        return built;
+    }
+
+    if (auto reserved = artifacts_.TryReserve(artifacts_.Size() + 1); !reserved) {
+        discard();
+        return reserved;
+    }
+
+    // 대상은 `<루트>/Shaders/<파일>`이다.
+    const usize directoryBytes =
+        root_.View().ByteCount() + 1 + CookShadersDirectoryName.ByteCount();
+    bool wrote = false;
+    if (auto moved = PlaceStaged(stagingFile, target.View(), directoryBytes, artifact.bytes,
+                                 artifact.sha256, {}, wrote);
+        !moved) {
+        return moved;
+    }
+
+    if (wrote) {
+        bytesWritten_ += artifact.bytes;
+    }
+
+    if (auto remembered = RememberDirectory(StringView(target.View().Data(), directoryBytes));
+        !remembered) {
+        return remembered;
+    }
+
+    // 예약했다.
+    (void)artifacts_.TryPushBack(Move(artifact));
+    if (placed != nullptr) {
+        *placed = &artifacts_[artifacts_.Size() - 1];
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> CookPublisher::ReuseArtifact(const CookedManifestArtifact& artifact) noexcept {
+    if (!begun_ || finished_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return CopyArtifact(artifact, artifacts_, *allocator_);
+}
+
+Result<bool> CookPublisher::ArtifactFileMatches(const CookedManifestArtifact& artifact) noexcept {
+    if (!begun_) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    PathBuilder path(*allocator_);
+    const StringView pieces[] = {root_.View(), "/"};
+    Result<void> built = AppendAll(path, pieces);
+    if (built) {
+        built = AppendCookedArtifactPath(path, artifact);
+    }
+
+    if (!built) {
+        // 칸 위반 항목은 게시 파일이 아니다(후보가 아니다).
+        return built.Error() == ErrorCode::InvalidArgument ? Result<bool>::Success(false)
+                                                           : Result<bool>::Failure(built.Error());
+    }
+
+    Sha256Digest digest;
+    uint64 bytes = 0;
+    auto hashed = HashPath(*config_.files, path.View(), *allocator_, digest, bytes);
+    if (!hashed) {
+        return hashed.Error() == ErrorCode::OutOfMemory ? Result<bool>::Failure(hashed.Error())
+                                                        : Result<bool>::Success(false);
+    }
+
+    return Result<bool>::Success(bytes == artifact.bytes && digest == artifact.sha256);
 }
 
 Result<void> CookPublisher::Reuse(const CookedManifestEntry& existing, const CookTarget& target,
@@ -528,8 +724,23 @@ Result<void> CookPublisher::RemoveUnreferenced(const CookedManifest& manifest) n
     platform::FileSystem& files = *config_.files;
     // 새 매니페스트가 가리키는 파일 경로(쿠킹 루트 기준) 목록이다(정렬 — 이진 탐색).
     Array<String> referenced(*allocator_);
-    if (auto reserved = referenced.TryReserve(manifest.entries.Size()); !reserved) {
+    if (auto reserved = referenced.TryReserve(manifest.entries.Size() + manifest.artifacts.Size());
+        !reserved) {
         return reserved;
+    }
+
+    for (const CookedManifestArtifact& artifact : manifest.artifacts) {
+        PathBuilder path(*allocator_);
+        if (auto built = AppendCookedArtifactPath(path, artifact); !built) {
+            return built;
+        }
+
+        String copy(*allocator_);
+        if (auto assigned = copy.TryAssign(path.View()); !assigned) {
+            return assigned;
+        }
+
+        (void)referenced.TryPushBack(Move(copy));
     }
 
     for (const CookedManifestEntry& entry : manifest.entries) {
@@ -603,6 +814,43 @@ Result<void> CookPublisher::RemoveUnreferenced(const CookedManifest& manifest) n
         }
     }
 
+    // Shaders/<파일> 한 단계를 훑는다(10.3.1절 A4f3 4번 — 디렉터리는 건드리지 않는다).
+    PathBuilder shaders(*allocator_);
+    const StringView shaderPieces[] = {root_.View(), "/", CookShadersDirectoryName};
+    if (auto built = AppendAll(shaders, shaderPieces); !built) {
+        return built;
+    }
+
+    Listing libraries(*allocator_);
+    if (auto listed = List(files, shaders.View(), libraries); !listed) {
+        return listed;
+    }
+
+    for (const String& name : libraries.files) {
+        PathBuilder relative(*allocator_);
+        const StringView relativePieces[] = {CookShadersDirectoryName, "/", name.View()};
+        if (auto built = AppendAll(relative, relativePieces); !built) {
+            return built;
+        }
+
+        if (algo::BinarySearch(referenced.View(), relative.View(), PathOrder{}) != algo::NotFound) {
+            continue;
+        }
+
+        PathBuilder full(*allocator_);
+        const StringView fullPieces[] = {shaders.View(), "/", name.View()};
+        if (auto built = AppendAll(full, fullPieces); !built) {
+            return built;
+        }
+
+        if (auto removed = files.Delete(full.View().Data(), full.View().ByteCount()); !removed) {
+            if (auto warned = Warn(AssetDiagnosticCode::None, {}, FileErrorCode(removed));
+                !warned) {
+                return warned;
+            }
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -639,6 +887,15 @@ Result<void> CookPublisher::Finish(const CookedManifest* merge,
     manifest.cookSettings = config_.cookSettings;
     manifest.cookerVersion = config_.cookerVersion;
     manifest.cookedBy = config_.cookedBy;
+    if (auto copied = CopyBackends(config_.backends, manifest.backends, *allocator_); !copied) {
+        return copied;
+    }
+
+    manifest.artifacts = Move(artifacts_);
+    artifacts_ = Array<CookedManifestArtifact>(*allocator_);
+    // 정렬은 늘 한다(같은 키 두 번은 writer 검증 ArtifactOrder가 거부한다 — sink가 먼저 막는다).
+    algo::Sort(manifest.artifacts.View(), CookedArtifactLess);
+
     if (auto reserved = manifest.entries.TryReserve(entries_.Size() +
                                                     (merge != nullptr ? merge->entries.Size() : 0));
         !reserved) {
@@ -679,6 +936,23 @@ Result<void> CookPublisher::Finish(const CookedManifest* merge,
         }
 
         algo::Sort(manifest.entries.View(), EntryLess);
+        // artifact 표: 이번 쿠킹이 만든 항목이 이기고, 같은 (kind, 이름, formatId)가 없는 이전
+        // 항목은 남는다(위에서 이번 구간을 정렬했다 — 이진 탐색).
+        const usize freshArtifacts = manifest.artifacts.Size();
+        for (const CookedManifestArtifact& old : merge->artifacts) {
+            const bool replaced = algo::BinarySearch(Span<const CookedManifestArtifact>(
+                                                         manifest.artifacts.Data(), freshArtifacts),
+                                                     old, CookedArtifactLess) != algo::NotFound;
+            if (replaced) {
+                continue;
+            }
+
+            if (auto copied = CopyArtifact(old, manifest.artifacts, *allocator_); !copied) {
+                return copied;
+            }
+        }
+
+        algo::Sort(manifest.artifacts.View(), CookedArtifactLess);
     }
 
     Array<uint8> bytes(*allocator_);

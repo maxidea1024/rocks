@@ -86,8 +86,9 @@ ScanScheduler::~ScanScheduler() noexcept {
 
 AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules,
                                      StringView module) noexcept
-    : modules_(&modules), module_(module.IsEmpty() ? AssetTypeModule : module), types_(allocator),
-      registrations_(types_, allocator), names_(allocator) {
+    : modules_(&modules), module_(module.IsEmpty() ? AssetTypeModules[0] : module),
+      defaultModules_(module.IsEmpty()), types_(allocator), registrations_(types_, allocator),
+      names_(allocator) {
 }
 
 AssetCommandTypes::~AssetCommandTypes() noexcept {
@@ -103,9 +104,15 @@ AssetCommandTypes::~AssetCommandTypes() noexcept {
 }
 
 Result<void> AssetCommandTypes::Start() noexcept {
-    if (auto loaded = modules_->Load(module_); !loaded.IsOk()) {
-        return Result<void>::Failure(loaded.error != ErrorCode::None ? loaded.error
-                                                                     : ErrorCode::Unsupported);
+    // 기본은 타입 모듈 목록 전부다(실패하면 그 모듈 이름을 남긴다).
+    const Span<const StringView> list = defaultModules_ ? Span<const StringView>(AssetTypeModules)
+                                                        : Span<const StringView>(&module_, 1);
+    for (StringView name : list) {
+        if (auto loaded = modules_->Load(name); !loaded.IsOk()) {
+            module_ = name;
+            return Result<void>::Failure(loaded.error != ErrorCode::None ? loaded.error
+                                                                         : ErrorCode::Unsupported);
+        }
     }
 
     if (auto attached = modules_->AttachTypeRegistrar(registrations_); !attached.IsOk()) {
@@ -120,6 +127,12 @@ Result<void> AssetCommandTypes::Start() noexcept {
 
     namesReady_ = true;
     return Result<void>::Success();
+}
+
+StringView AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept {
+    return code == reflection_text::TextDiagnosticCode::HiddenEnumerator
+               ? StringView(AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting))
+               : reflection_text::TextDiagnosticCodeName(code);
 }
 
 bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {
@@ -137,6 +150,15 @@ bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {
 
     out = seconds * MillisecondsPerSecond;
     return true;
+}
+
+uint32 RemainingWaitMilliseconds(uint32 waitMilliseconds, uint64 startNanoseconds,
+                                 uint64 nowNanoseconds) noexcept {
+    constexpr uint64 NanosecondsPerMillisecond = 1000000;
+    const uint64 elapsed = nowNanoseconds > startNanoseconds
+                               ? (nowNanoseconds - startNanoseconds) / NanosecondsPerMillisecond
+                               : 0;
+    return elapsed >= waitMilliseconds ? 0u : static_cast<uint32>(waitMilliseconds - elapsed);
 }
 
 bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView command,
@@ -169,6 +191,20 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
                 : Fail(output, allocator, command, 1, "{}: {}: cannot register the asset types",
                        ErrorCodeName(started.Error()), session.types.Module());
         return false;
+    }
+
+    const AssetTypeHookSetup& hookSetup = session.context->typeHooks;
+    if (hookSetup.registerHooks != nullptr) {
+        if (auto registered =
+                hookSetup.registerHooks(hookSetup.state, session.hooks, session.hookTokens);
+            !registered) {
+            failure = registered.Error() == ErrorCode::OutOfMemory
+                          ? Result<int32>::Failure(registered.Error())
+                          : Fail(output, allocator, command, 1,
+                                 "{}: cannot register the asset type hooks",
+                                 ErrorCodeName(registered.Error()));
+            return false;
+        }
     }
 
     const AssetImporterSetup& setup = session.context->importers;

@@ -15,7 +15,7 @@ namespace mp3_tests_file {
 using namespace rocks::audio;
 using namespace rocks::audio::mp3fixtures;
 
-// MP3 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.26.3절). 입력은 LAME·ffmpeg로
+// MP3 원본 디코드 시험이다(Docs/Design/AudioSystem 3.26.3절). 입력은 LAME·ffmpeg로
 // 만든 작은 파일이다(Mp3TestFixtures.h).
 
 namespace {

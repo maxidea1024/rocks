@@ -1,4 +1,5 @@
 #include <ReflectionTestFixtures/ArrayFixture.h>
+#include <ReflectionTestFixtures/ClassDefaultsFixture.h>
 #include <ReflectionTestFixtures/ReflectionFixture.h>
 #include <ReflectionTestFixtures/StructFixture.h>
 #include <ReflectionTestFixtures/ValidateFixture.h>
@@ -8,6 +9,8 @@
 namespace rocks::reflection_fixture {
 
 uint32 ArrayOwner::constructed = 0;
+
+int32 DefaultsCounter::created = 0;
 
 bool Node::destroyedWithOldLabel = false;
 

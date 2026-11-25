@@ -60,7 +60,7 @@ C++와 HLSL이 같은 정의를 써야 하는 것만 둔다. 파일마다 `#prag
 | 파일 | 내용 | 단계 | UE 대응 |
 |---|---|---|---|
 | `ShaderTypeAliases.h` | C++ 쪽에서 `float2`·`float4x4`·`uint` 같은 HLSL 이름을 ShaderCore 셰이더 정렬 타입(SS 7.2절 5항)에 연결한다. HLSL 쪽은 비어 있다 | SL0 | `HLSLTypeAliases.h`·`HLSLMathAliases.h` |
-| `ShaderStaticAssert.h` | C++는 `static_assert`, HLSL은 컴파일 오류가 되는 정적 검사 매크로(메시지는 영어) | SL0 | `HLSLStaticAssert.h` |
+| `ShaderStaticAssert.h` | C++는 `static_assert`, HLSL은 빈 매크로(HLSL 2018·FXC에 정적 검사 수단이 없다 — C++ 쪽이 같은 헤더를 검사, 7.8절, 개정 4). 메시지는 영어 | SL0 | `HLSLStaticAssert.h` |
 | `ReservedBindingSpaces.h` | Rocks 예약 register space 번호(루트 상수 space 3 등, SS 7.2절 2항) | SL0 | `HLSLReservedSpaces.h` |
 | `SurfaceEnums.h` | `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표(RN 결정 RN5) | SL2 | `ShadingCommon.ush`의 번호 정의 |
 | `ViewLayout.h` | view 상수 블록 배치·플래그 | SL2 | `ViewDefinitions.h` |

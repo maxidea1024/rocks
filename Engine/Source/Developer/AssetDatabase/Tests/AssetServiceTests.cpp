@@ -7,6 +7,8 @@
 #include <AssetDatabase/LogicalPath.h>
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/Package.h>
+#include <AssetTestFixtures/TestAssets.generated.h>
+#include <Object/OverrideSet.h>
 #include <TestSupport/NFailAllocator.h>
 
 // 에셋 서비스 API 시험이다(Docs/Design/AssetSystem 13절·7.1절 15 A2c3): asset-new(타입 도구
@@ -317,6 +319,173 @@ TEST(AssetService_SetAssignsAndSaves) {
     AssetDatabaseLock idle;
     CHECK(service.Set(idle, "/Game/Hero", {}, false, diagnostics).Error() ==
           ErrorCode::InvalidArgument);
+}
+
+// override 집합(Docs/Design/RuntimeClassMetadata.ko.md 'A5b'): asset-set이 기준과 같은
+// 값(value=0)을 넣어도 집합에 기록해 차이 형식 저장이 그 값을 쓰고, 다시 연 패키지는 파일에 있는 값
+// 경로로 집합을 채운다(value 있음, 손대지 않은 label 없음).
+TEST(AssetService_SetRecordsOverrides) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    TempProject root("service-overrides");
+    ServiceScene scene(env, sources, env.allocator, root);
+    REQUIRE(scene.ready);
+    AssetDatabaseLock lock;
+    REQUIRE(lock.Acquire(scene.project.layout, 0));
+    const auto fieldId = [](StringView name) noexcept {
+        for (const FieldSchema& field : TypeOf<asset_fixture::TestAsset>().fields) {
+            if (StringView(field.name.Data(), field.name.Size()) == name) {
+                return field.id;
+            }
+        }
+
+        return Guid{};
+    };
+    const Guid value[] = {fieldId("value")};
+    const Guid label[] = {fieldId("label")};
+    // 다시 연 서비스에서 Leaf 대표 에셋의 집합을 본다.
+    const auto reopened = [&](bool& hasValue, bool& hasLabel) noexcept {
+        AssetService again(env.allocator, scene.project.layout,
+                           ServiceConfig(env, scene.project, scene.hooks));
+        if (!again.Initialize()) {
+            return false;
+        }
+
+        auto package = again.Packages().Open(FixedId(LeafId));
+        if (!package) {
+            return false;
+        }
+
+        auto asset =
+            again.Packages().Registry().FindChild(again.Packages().Access(), package.Value(), "");
+        if (!asset) {
+            return false;
+        }
+
+        const OverrideSet* set = again.Packages().FindOverrides(asset.Value());
+        hasValue = set != nullptr && set->Contains(Span<const Guid>(value));
+        hasLabel = set != nullptr && set->Contains(Span<const Guid>(label));
+        return true;
+    };
+    bool hasValue = true;
+    bool hasLabel = true;
+    REQUIRE(reopened(hasValue, hasLabel));
+    CHECK(!hasValue && !hasLabel);
+
+    TextDiagnostics diagnostics(env.allocator);
+    Array<TextAssignment> assignments(env.allocator);
+    const StringView texts[] = {"value=0"};
+    REQUIRE(MakeAssignments(texts, assignments));
+    REQUIRE(scene.service.Set(lock, "/Game/Leaf", assignments.View(), false, diagnostics));
+    REQUIRE(reopened(hasValue, hasLabel));
+    CHECK(hasValue && !hasLabel);
+}
+
+// 기본값 되돌리기(asset-set --reset= — RuntimeClassMetadata 'A5b2 decode 명세'): 바꾼 value를
+// Reset하면 기본값(0)으로 저장되고 그 override 단위가 지워진다(다시 연 서비스). 같은 단위의 Reset과
+// 대입은 InvalidArgument이고 아무것도 바꾸지 않는다. 다른 단위의 Reset과 대입은 둘 다
+// 적용된다(되돌리기 뒤 다시 준비하므로 Publish가 Busy가 아니다). 텍스트 묶음(asset-new 대입)에
+// Reset을 넣으면 InvalidArgument다. 컨테이너 경로 Reset은 Unsupported다(1차 범위).
+TEST(AssetService_SetReset) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    TempProject root("service-reset");
+    ServiceScene scene(env, sources, env.allocator, root);
+    REQUIRE(scene.ready);
+    AssetDatabaseLock lock;
+    REQUIRE(lock.Acquire(scene.project.layout, 0));
+    const auto fieldId = [](StringView name) noexcept {
+        for (const FieldSchema& field : TypeOf<asset_fixture::TestAsset>().fields) {
+            if (StringView(field.name.Data(), field.name.Size()) == name) {
+                return field.id;
+            }
+        }
+
+        return Guid{};
+    };
+    const Guid value[] = {fieldId("value")};
+    const Guid label[] = {fieldId("label")};
+    const auto reopened = [&](bool& hasValue, bool& hasLabel) noexcept {
+        AssetService again(env.allocator, scene.project.layout,
+                           ServiceConfig(env, scene.project, scene.hooks));
+        if (!again.Initialize()) {
+            return false;
+        }
+
+        auto package = again.Packages().Open(FixedId(LeafId));
+        if (!package) {
+            return false;
+        }
+
+        auto asset =
+            again.Packages().Registry().FindChild(again.Packages().Access(), package.Value(), "");
+        if (!asset) {
+            return false;
+        }
+
+        const OverrideSet* set = again.Packages().FindOverrides(asset.Value());
+        hasValue = set != nullptr && set->Contains(Span<const Guid>(value));
+        hasLabel = set != nullptr && set->Contains(Span<const Guid>(label));
+        return true;
+    };
+    const auto reset = [](StringView path, uint32 index) noexcept {
+        TextAssignment assignment;
+        assignment.kind = reflection_text::AssignmentKind::Reset;
+        assignment.path = path;
+        assignment.sourceIndex = index;
+        return assignment;
+    };
+
+    TextDiagnostics diagnostics(env.allocator);
+    Array<TextAssignment> first(env.allocator);
+    const StringView firstTexts[] = {"value=5"};
+    REQUIRE(MakeAssignments(firstTexts, first));
+    REQUIRE(scene.service.Set(lock, "/Game/Leaf", first.View(), false, diagnostics));
+    bool hasValue = false;
+    bool hasLabel = true;
+    REQUIRE(reopened(hasValue, hasLabel));
+    CHECK(hasValue && !hasLabel);
+
+    // 같은 단위: Reset value + value=7은 거부, 아무것도 바뀌지 않는다.
+    Array<TextAssignment> clash(env.allocator);
+    const StringView clashTexts[] = {"value=7"};
+    REQUIRE(MakeAssignments(clashTexts, clash));
+    REQUIRE(clash.TryPushBack(reset("value", 1)));
+    AssetDiagnostic why;
+    auto clashed =
+        scene.service.Set(lock, "/Game/Leaf", clash.View(), false, diagnostics, nullptr, &why);
+    CHECK(!clashed && clashed.Error() == ErrorCode::InvalidArgument);
+    String lines(env.allocator);
+    REQUIRE(ReadBack(env, scene.project, scene.hooks, "/Game/Leaf", lines));
+    CHECK(Has(lines, "value=5\n"));
+
+    // 다른 단위: Reset value + label=fresh는 둘 다 적용된다.
+    Array<TextAssignment> mixed(env.allocator);
+    const StringView mixedTexts[] = {"label=fresh"};
+    REQUIRE(MakeAssignments(mixedTexts, mixed));
+    REQUIRE(mixed.TryPushBack(reset("value", 1)));
+    REQUIRE(scene.service.Set(lock, "/Game/Leaf", mixed.View(), false, diagnostics));
+    REQUIRE(reopened(hasValue, hasLabel));
+    CHECK(!hasValue && hasLabel);
+    lines.Clear();
+    REQUIRE(ReadBack(env, scene.project, scene.hooks, "/Game/Leaf", lines));
+    CHECK(Has(lines, "value=0\n") && Has(lines, "label=fresh\n"));
+
+    // 컨테이너 경로(ObjectRefArray)는 1차 범위 밖이라 Unsupported다.
+    const TextAssignment containers[] = {reset("hardList", 0)};
+    auto refused = scene.service.Set(lock, "/Game/Leaf", Span<const TextAssignment>(containers),
+                                     false, diagnostics);
+    CHECK(!refused && refused.Error() == ErrorCode::Unsupported);
+
+    // asset-new 대입(텍스트 묶음)은 Reset을 받지 않는다.
+    const TextAssignment fresh[] = {reset("value", 0)};
+    auto made = scene.service.New(lock, "TestAsset", "/Game/Fresh/Reset",
+                                  Span<const TextAssignment>(fresh), diagnostics);
+    CHECK(!made && made.Error() == ErrorCode::InvalidArgument);
 }
 
 // Weak 참조 대입(5.1절 — 같은 패키지 안만 보존): asset-set의 Weak은 대상 패키지 안의 객체만

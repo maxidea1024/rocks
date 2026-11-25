@@ -43,7 +43,12 @@ enum class AssignmentKind : uint8 {
     // `--unset=<경로>` — Optional 필드를 unset으로 되돌린다.
     Unset,
     // `--erase=<경로>` — Map 항목·Set 원소(`m[k]`)나 Array 원소(`a[i]`)를 지운다.
-    Erase
+    Erase,
+    // `--reset=<경로>` — 클래스 기본값으로 되돌린다(A5b2 — Docs/Design/RuntimeClassMetadata.ko.md).
+    // 텍스트 묶음은 처리하지 않는다: 호출자(AssetService::Set)가 따로 떼어 ObjectSerialization
+    // PlanRevert·ApplyRevert로 binary 재생한다. PrepareAssignments·Append에 넣으면
+    // InvalidArgument다.
+    Reset
 };
 
 // 대입 하나다. path·value는 PrepareAssignments·Append 호출 동안만 빌린다(묶음은 해석한 결과만
@@ -268,7 +273,8 @@ private:
 //     struct는 PathInsertKey, Array<struct> 원소는 그 자리 기본 원소 — StaticArray<struct> 원소는
 //     Unsupported), Set 원소 자리는 빈 값이면 원소 넣기(값이 있으면 InvalidValue).
 //   - Unset: Optional 필드만(아니면 InvalidValue). Erase: Map 항목·Set 원소·Array 원소(아니면
-//     InvalidValue, StaticArray 원소는 Unsupported).
+//     InvalidValue, StaticArray 원소는 Unsupported). Reset은 받지 않는다(호출 오류
+//     InvalidArgument — 진단 없음).
 //   - 지금 값과 같은 단일 값 쓰기와 목록·항목 목록(Array·StaticArray·Set·Map 통째 — 원소·키·값과
 //     순서가 같다)은 무동작이다(override 경로에는 넣는다). Deprecated 클래스 ClassRef(단일 값과
 //     Array·Set·Map의 원소·값)도 같은 값은 무동작이고 다르면 InvalidValue다.

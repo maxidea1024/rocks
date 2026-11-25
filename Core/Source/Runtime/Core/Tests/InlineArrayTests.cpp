@@ -51,13 +51,24 @@ TEST(InlineArray_PushPopRespectsFixedCapacity) {
     // 가득 찬 뒤의 추가는 넘치는 저장으로 바꾸지 않고 실패하며 내용을 그대로 둔다.
     CHECK(values.TryPushBack(40).Error() == ErrorCode::CapacityExceeded);
     CHECK(values.TryEmplaceBack(50u).Error() == ErrorCode::CapacityExceeded);
-    CHECK(values.Size() == 3 && values[0] == 10 && values[2] == 30 && values.Back() == 30);
+    CHECK(values.Size() == 3 && values[0] == 10 && values[2] == 30 && values.Last() == 30);
 
     CHECK(values.PopBack() == 30);
     CHECK(values.PopBack() == 20);
-    CHECK(values.Size() == 1 && values.Back() == 10);
+    CHECK(values.Size() == 1 && values.Last() == 10);
     values.Clear();
     CHECK(values.IsEmpty());
+}
+
+TEST(InlineArray_LastCountsFromTheEnd) {
+    InlineArray<uint32, 4> values;
+    values.PushBack(10);
+    values.PushBack(20);
+    values.PushBack(30);
+    CHECK(values.Last() == 30 && values.Last(1) == 20 && values.Last(2) == 10);
+    values.Last(1) = 25;
+    const InlineArray<uint32, 4>& view = values;
+    CHECK(view[1] == 25 && view.Last(0) == 30 && view.Last(2) == 10);
 }
 
 TEST(InlineArray_RemoveAtSwapAndIteration) {
