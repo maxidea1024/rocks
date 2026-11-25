@@ -4,6 +4,9 @@
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCooker/CookArtifacts.h>
 #include <AssetCooker/CookConfig.h>
+#include <AssetCooker/CookRootLock.h>
+#include <Core/FileRead.h>
+#include <HostConfig/HostSettings.h>
 #include <AssetNugget/NuggetCacheSettings.h>
 #include <Base/InitializerList.h>
 #include <Platform/File.h>
@@ -315,6 +318,86 @@ TEST(AssetCookCommand_ArtifactStage) {
         cook.run.captured.out.IsEmpty());
 }
 
+// `--wait` 마감 시각 하나(10.3.1절 A4f4 1번): 지난 시간을 빼고 남은 밀리초, 다 쓰면 0, 시계가
+// 거꾸로면 지난 시간 0.
+TEST(AssetCookCommand_RemainingWait) {
+    constexpr uint64 Millisecond = 1000000;
+    CHECK(RemainingWaitMilliseconds(1000, 0, 0) == 1000);
+    CHECK(RemainingWaitMilliseconds(1000, 5 * Millisecond, 405 * Millisecond) == 600);
+    CHECK(RemainingWaitMilliseconds(1000, 0, 1000 * Millisecond) == 0);
+    CHECK(RemainingWaitMilliseconds(1000, 0, 5000 * Millisecond) == 0);
+    CHECK(RemainingWaitMilliseconds(1000, 10 * Millisecond, 0) == 1000);
+    CHECK(RemainingWaitMilliseconds(0, 0, Millisecond) == 0);
+}
+
+// 쿠킹 루트 잠금(10.3.1절 A4f4 2번): 다른 쪽이 같은 쿠킹 루트를 쥐고 있으면 프로젝트 쿠킹은
+// `Busy: <루트>: the cook root is locked` 줄로 끝난다(--wait=0). 놓으면 다시 된다.
+TEST(AssetCookCommand_CookRootLock) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene cook(env.allocator, "cook-command-root-lock");
+    REQUIRE(cook.ready);
+    StringBuilder<512> saved(env.allocator);
+    REQUIRE(saved.TryAppendFormat("{}/Saved", cook.scene.root.Root()));
+    CookRootLock held;
+    REQUIRE(held.Acquire(env.allocator, saved.View(), "Windows", 0));
+    CHECK(cook.Cook() == 1);
+    CHECK(cook.run.Error("Busy: ") && cook.run.Error("the cook root is locked by another process"));
+    held.Release();
+    CHECK(cook.Cook() == 0);
+}
+
+// 엔진 전용 쿠킹(10.3.1절 A4f4 4번): 문맥의 엔진 디렉터리 재정의(임시 디렉터리 — 실제 저장소
+// Engine/Saved를 건드리지 않는다)에 저장소의 Windows 프로필을 두고 `--engine`으로 쿠킹하면 엔진
+// 쿠킹 루트(`<엔진>/Saved/Cooked/Windows`)에 게시한다(항목 0 — 요약 줄 targets 0). 엔진
+// CookSettings 파일을 읽는다(문법 오류는 그 파일 줄). 쿠킹 루트 잠금을 쥐고 있으면 Busy다.
+TEST(AssetCookCommand_EngineCook) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene cook(env.allocator, "cook-command-engine");
+    REQUIRE(cook.ready);
+    CommandScene engine("cook-command-engine-dir");
+    REQUIRE(engine.ready);
+    char source[1024] = {};
+    auto found = FindEngineDirectory(Span<char>(source));
+    REQUIRE(found);
+    StringBuilder<1100> profilePath(env.allocator);
+    REQUIRE(profilePath.TryAppendFormat("{}/Config/TargetProfiles/Windows.json",
+                                        StringView(source, found.Value())));
+    Array<uint8> profileBytes(env.allocator);
+    bool existed = false;
+    REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), profilePath.View(), 1024 * 1024,
+                          profileBytes, existed) &&
+            existed);
+    REQUIRE(engine.MakeDirectory("Config") && engine.MakeDirectory("Config/TargetProfiles") &&
+            engine.WriteFile("Config/TargetProfiles/Windows.json",
+                             StringView(reinterpret_cast<const char*>(profileBytes.Data()),
+                                        profileBytes.Size())));
+    cook.run.context.engineDirectory = engine.root.Root();
+    const StringView args[] = {"--engine", "--profile=Windows"};
+    CHECK(cook.run.Cook(args) == 0);
+    CHECK(cook.run.Out("asset-cook: Windows published targets 0 cooked 0 reused 0 bytes ") &&
+          engine.Exists("Saved/Cooked/Windows/CookedManifest.rman") &&
+          engine.Exists("Saved/Cooked/Windows/Shaders") &&
+          !cook.scene.Exists("Saved/Cooked/Windows/CookedManifest.rman"));
+
+    REQUIRE(engine.WriteFile("Config/CookSettings.json", "{"));
+    CHECK(cook.run.Cook(args) == 1);
+    CHECK(cook.run.Error("Config/CookSettings.json"));
+    REQUIRE(engine.WriteFile("Config/CookSettings.json", "{\"cookDevelopmentShaders\": true}"));
+
+    StringBuilder<512> saved(env.allocator);
+    REQUIRE(saved.TryAppendFormat("{}/Saved", engine.root.Root()));
+    CookRootLock held;
+    REQUIRE(held.Acquire(env.allocator, saved.View(), "Windows", 0));
+    CHECK(cook.run.Cook(args) == 1);
+    CHECK(cook.run.Error("Busy: ") && cook.run.Error("the cook root is locked"));
+    held.Release();
+    const StringView json[] = {"--engine", "--profile=Windows", "--json"};
+    CHECK(cook.run.Cook(json) == 0);
+    CHECK(cook.run.Out("\"ShaderLibrary\"") && cook.run.Out("\"name\": \"Engine\""));
+}
+
 // 쿠킹 함수 오류: 쿠킹 루트의 Packages 자리가 파일이면 게시가 실패한다(실패 줄 1 — 보고서 없음).
 TEST(AssetCookCommand_CookFailure) {
     AssetEnv env;
@@ -460,6 +543,13 @@ TEST(AssetCookCommand_Usage) {
     CHECK(usage({"--profile=Windows", "--force"}));
     CHECK(usage({"--profile=Windows", ""}));
     CHECK(usage({"--help", "--profile=Windows"}));
+    // 엔진 전용은 프로젝트·경로·대조 원천과 함께 쓰지 않는다(10.3.1절 A4f4 4번).
+    CHECK(usage({"--engine", "--profile=Windows", "--project=X"}));
+    CHECK(usage({"--engine", "--profile=Windows", "/Game/A"}));
+    CHECK(usage(
+        {"--engine", "--profile=Windows", "--verify-nuggets", "--verify-nuggets-source=local"}));
+    CHECK(usage({"--engine", "--engine", "--profile=Windows"}));
+    CHECK(usage({"--engine"}));
 
     const StringView remote[] = {"--profile=Windows", "--verify-nuggets",
                                  "--verify-nuggets-source=remote"};

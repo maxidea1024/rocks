@@ -39,6 +39,8 @@ struct ProjectScene {
                 files.AddFile("Content/Hub.rasset", sources.hub.View()) &&
                 static_cast<bool>(index.Rebuild(files, ReadOptions())) &&
                 static_cast<bool>(set.Initialize()) && static_cast<bool>(lock.Acquire(layout, 0)) &&
+                static_cast<bool>(
+                    cookLock.Acquire(env.allocator, layout.SavedDirectory(), "Windows", 0)) &&
                 profile.id.TryAssign("Windows") && everything.TryAssign("/Game/") &&
                 settings.alwaysCook.TryPushBack(Move(everything));
     }
@@ -70,6 +72,7 @@ struct ProjectScene {
         request.files = &files;
         request.layout = &layout;
         request.lock = &lock;
+        request.cookLock = &cookLock;
         request.index = &index;
         request.packages = &set;
         request.types = &env.types;
@@ -116,6 +119,8 @@ struct ProjectScene {
     TargetProfile profile;
     CookSettings settings;
     AssetDatabaseLock lock;
+    // 쿠킹 루트 잠금이다(에셋 DB 잠금 뒤 — 10.3.1절 A4f4 2번).
+    CookRootLock cookLock;
     bool ready = false;
 };
 

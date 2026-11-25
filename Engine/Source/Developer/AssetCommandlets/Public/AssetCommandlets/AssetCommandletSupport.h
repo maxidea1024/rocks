@@ -104,6 +104,10 @@ struct AssetCommandContext {
     AssetTypeHookSetup typeHooks{};
     AssetImportTranslator importTranslator{};
     AssetCookProcessorSetup cookProcessors{};
+    // 엔진 디렉터리 재정의다(비면 FindEngineDirectory — 제품 호스트 CommandletHost는 두지 않는다).
+    // 명령 시험이 임시 엔진 디렉터리를 넣어 실제 저장소 `Engine/Saved`를 건드리지 않게
+    // 한다(10.3.1절 A4f4 4번).
+    StringView engineDirectory{};
 };
 
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem 7.1절 15 A2c3b, ModuleLoader
@@ -165,6 +169,14 @@ inline constexpr uint32 MillisecondsPerSecond = 1000;
 // --wait 값(10진 숫자만, 0–MaxWaitSeconds)을 밀리초로 푼다. 비어 있으면 0이다. 형식·범위 위반은
 // false다.
 ROCKS_ASSETCOMMANDLETS_API bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept;
+
+// `--wait` 마감 시각 하나에서 남은 밀리초다(두 잠금이 대기를 나눠 쓴다 — Docs/Design/AssetSystem
+// 10.3.1절 A4f4 1번): startNanoseconds부터 nowNanoseconds까지 지난 시간을 waitMilliseconds에서
+// 빼고, 다 썼으면 0이다(now가 start보다 앞이면 지난 시간 0). 값은 단조
+// 시계(platform::MonotonicNanoseconds)다.
+ROCKS_ASSETCOMMANDLETS_API uint32 RemainingWaitMilliseconds(uint32 waitMilliseconds,
+                                                            uint64 startNanoseconds,
+                                                            uint64 nowNanoseconds) noexcept;
 
 // 에셋 Registry의 문맥 id다(명령 하나의 에디터 집합).
 inline constexpr ContextId CommandletAssetContext{0x524f434b41535345ull, 1};

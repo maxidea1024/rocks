@@ -338,7 +338,20 @@ private:
 
 // 비에셋 산출물 단계를 돈다(10.3.1절 A4f3 3번 — CookPackages 뒤, Finish 전). 셰이더 없는 프로필은
 // 단계를 부르지 않고, 단계가 없으면 오류 진단(code None, UnsupportedCapability)을 남긴다.
-Result<void> RunArtifactStages(Allocator& allocator, const CookProjectRequest& request,
+// 단계 입력이다(프로젝트 쿠킹과 엔진 전용 쿠킹이 같은 코드를 쓴다).
+struct ArtifactStageInputs {
+    platform::FileSystem* files = nullptr;
+    const TargetProfile* profile = nullptr;
+    const CookSettings* settings = nullptr;
+    Sha256Digest profileSettings{};
+    uint32 cookerVersion = CookerVersion;
+    NuggetCache* nuggets = nullptr;
+    bool verifyNuggets = false;
+    bool engineOnly = false;
+    CookArtifactStageTable* stages = nullptr;
+};
+
+Result<void> RunArtifactStages(Allocator& allocator, const ArtifactStageInputs& request,
                                StringView root, const CookedManifest* previous,
                                CookPublisher& publisher, CookProjectResult& result) noexcept {
     const TargetProfile& profile = *request.profile;
@@ -393,7 +406,7 @@ Result<void> RunArtifactStages(Allocator& allocator, const CookProjectRequest& r
     artifactRequest.cookedRoot = root;
     artifactRequest.stagingDirectory = staging.View();
     artifactRequest.nuggets = request.nuggets;
-    artifactRequest.engineOnly = false;
+    artifactRequest.engineOnly = request.engineOnly;
     artifactRequest.verifyNuggets = request.verifyNuggets;
     artifactRequest.reusable = reusable.View();
     ArtifactStageSink sink(allocator, publisher, artifactRequest, *stage, result);
@@ -412,8 +425,24 @@ Result<void> RunArtifactStages(Allocator& allocator, const CookProjectRequest& r
     return Result<void>::Success();
 }
 
+// 보고서 입력이다(프로젝트 쿠킹은 에디터 패키지 집합의 Registry, 엔진 전용은 요청의 Registry).
+struct CookReportInputs {
+    platform::FileSystem* files = nullptr;
+    TypeRegistry* types = nullptr;
+    ObjectRegistry* registry = nullptr;
+    ObjectAccessContext access{};
+    const TargetProfile* profile = nullptr;
+    EngineVersion cookedBy{};
+};
+
+CookReportInputs ReportInputsOf(const CookProjectRequest& request) noexcept {
+    return CookReportInputs{
+        request.files,   request.types,   &request.packages->Registry(), request.packages->Access(),
+        request.profile, request.cookedBy};
+}
+
 // 보고서를 만들어 쿠킹 루트에 원자 교체로 쓴다.
-Result<void> WriteReport(Allocator& allocator, const CookProjectRequest& request,
+Result<void> WriteReport(Allocator& allocator, const CookReportInputs& request,
                          const CookProjectResult& result, StringView root) noexcept {
     CookReport report(allocator);
     char buildId[Sha256Digest::HexBytes + 1];
@@ -479,8 +508,7 @@ Result<void> WriteReport(Allocator& allocator, const CookProjectRequest& request
         return Result<void>::Failure(lease.Error());
     }
 
-    EditorPackageSet& packages = *request.packages;
-    const AssignmentTarget target = AssignmentTarget::Value(packages.Registry(), packages.Access(),
+    const AssignmentTarget target = AssignmentTarget::Value(*request.registry, request.access,
                                                             lease.Value(), &report, allocator);
     StringBuilder<CookProjectInlineBytes> text(allocator);
     JsonWriter writer(text);
@@ -503,10 +531,7 @@ Result<void> WriteReport(Allocator& allocator, const CookProjectRequest& request
     return written ? Result<void>::Success() : Result<void>::Failure(written.Error());
 }
 
-} // namespace
-
-Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request,
-                         CookProjectResult& result) noexcept {
+void ResetCookResult(CookProjectResult& result) noexcept {
     result.diagnostics.Clear();
     result.targets = 0;
     result.cooked = 0;
@@ -520,35 +545,26 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     result.stageFailure.stage = Guid{};
     result.stageFailure.formatId.Clear();
     result.stageFailure.error = ErrorCode::None;
-    if (request.files == nullptr || request.layout == nullptr || request.lock == nullptr ||
-        request.index == nullptr || request.packages == nullptr || request.types == nullptr ||
-        request.processors == nullptr || request.profile == nullptr ||
-        request.settings == nullptr) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+}
 
-    StringBuilder<CookProjectInlineBytes> root(allocator);
-    if (auto built = AppendCookedRoot(root, *request.layout, request.profile->id.View()); !built) {
-        return built;
-    }
-
-    // 기존 매니페스트다(없거나 깨졌으면 없음 — 깨진 것은 경고).
+// 기존 매니페스트를 읽는다(없거나 깨졌으면 hasExisting 거짓 — 깨진 것은 경고 진단).
+Result<void> ReadPreviousManifest(Allocator& allocator, platform::FileSystem& files,
+                                  StringView root, uint64 limitBytes, CookedManifest& existing,
+                                  bool& hasExisting, CookProjectResult& result) noexcept {
+    hasExisting = false;
     StringBuilder<CookProjectInlineBytes> manifestPath(allocator);
-    const StringView manifestPieces[] = {root.View(), "/", CookedManifestFileName};
+    const StringView manifestPieces[] = {root, "/", CookedManifestFileName};
     if (auto built = manifestPath.TryAppendJoin(manifestPieces, ""); !built) {
         return built;
     }
 
     Array<uint8> manifestBytes(allocator);
     bool existed = false;
-    CookedManifest existing(allocator);
-    bool hasExisting = false;
     // 깨진 기존 매니페스트(상한 초과 포함)는 경고 뒤 없는 것으로 본다 — 사용자가 지우기 전까지
     // 쿠킹이 멈추지 않게 한다.
     AssetDiagnosticCode brokenCode = AssetDiagnosticCode::CorruptPackage;
     ErrorCode broken = ErrorCode::None;
-    if (auto read = ReadWholeFile(*request.files, manifestPath.View(), request.manifestLimitBytes,
-                                  manifestBytes, existed);
+    if (auto read = ReadWholeFile(files, manifestPath.View(), limitBytes, manifestBytes, existed);
         !read) {
         if (read.Error() != ErrorCode::CapacityExceeded) {
             return read;
@@ -570,11 +586,55 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     }
 
     if (broken != ErrorCode::None) {
-        if (auto pushed =
-                result.diagnostics.TryPushBack(CookDiagnostic{brokenCode, true, {}, {}, 0, broken});
-            !pushed) {
-            return pushed;
-        }
+        return result.diagnostics.TryPushBack(CookDiagnostic{brokenCode, true, {}, {}, 0, broken});
+    }
+
+    return Result<void>::Success();
+}
+
+ArtifactStageInputs StageInputsOf(const CookProjectRequest& request) noexcept {
+    ArtifactStageInputs inputs;
+    inputs.files = request.files;
+    inputs.profile = request.profile;
+    inputs.settings = request.settings;
+    inputs.profileSettings = request.profileSettings;
+    inputs.cookerVersion = request.cookerVersion;
+    inputs.nuggets = request.nuggets;
+    inputs.verifyNuggets = request.verifyNuggets;
+    inputs.stages = request.stages;
+    return inputs;
+}
+
+} // namespace
+
+Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request,
+                         CookProjectResult& result) noexcept {
+    ResetCookResult(result);
+    if (request.files == nullptr || request.layout == nullptr || request.lock == nullptr ||
+        request.cookLock == nullptr || request.index == nullptr || request.packages == nullptr ||
+        request.types == nullptr || request.processors == nullptr || request.profile == nullptr ||
+        request.settings == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 두 잠금(에셋 DB → 쿠킹 루트)을 모두 쥐었는지 본다(10.3.1절 A4f4 2번).
+    const StringView saved = request.layout->SavedDirectory();
+    if (!request.lock->IsHeldFor(*request.layout) ||
+        !request.cookLock->IsHeldFor(saved, request.profile->id.View())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    StringBuilder<CookProjectInlineBytes> root(allocator);
+    if (auto built = AppendCookedRoot(root, saved, request.profile->id.View()); !built) {
+        return built;
+    }
+
+    CookedManifest existing(allocator);
+    bool hasExisting = false;
+    if (auto read = ReadPreviousManifest(allocator, *request.files, root.View(),
+                                         request.manifestLimitBytes, existing, hasExisting, result);
+        !read) {
+        return read;
     }
 
     // 기존 매니페스트가 없으면 부분 쿠킹은 전체 쿠킹과 같다(결정 10).
@@ -598,7 +658,7 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
                 return pushed;
             }
 
-            return WriteReport(allocator, request, result, root.View());
+            return WriteReport(allocator, ReportInputsOf(request), result, root.View());
         }
     }
 
@@ -662,14 +722,14 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     CookPublishConfig publishConfig;
     publishConfig.backends = Span<const CookedManifestBackend>(backends.Data(), backends.Size());
     publishConfig.files = request.files;
-    publishConfig.layout = request.layout;
+    publishConfig.savedDirectory = saved;
     publishConfig.profileId = request.profile->id.View();
     publishConfig.profileSettings = request.profileSettings;
     publishConfig.cookSettings = request.cookSettings;
     publishConfig.cookerVersion = request.cookerVersion;
     publishConfig.cookedBy = request.cookedBy;
     CookPublisher publisher(allocator, publishConfig);
-    if (auto begun = publisher.Begin(*request.lock); !begun) {
+    if (auto begun = publisher.Begin(*request.cookLock); !begun) {
         return begun;
     }
 
@@ -735,8 +795,8 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
 
     // 비에셋 산출물 단계는 에셋 오류가 있어도 돈다(보고서가 오류를 한 번에 모은다 — 10.3.1절 A4f3
     // 3번).
-    if (auto staged =
-            RunArtifactStages(allocator, request, root.View(), previous, publisher, result);
+    if (auto staged = RunArtifactStages(allocator, StageInputsOf(request), root.View(), previous,
+                                        publisher, result);
         !staged) {
         return staged;
     }
@@ -757,7 +817,89 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     result.published = publisher.Published();
     result.bytesWritten = publisher.BytesWritten();
     algo::Sort(result.diagnostics.View(), CookDiagnosticBefore);
-    return WriteReport(allocator, request, result, root.View());
+    return WriteReport(allocator, ReportInputsOf(request), result, root.View());
+}
+
+Result<void> CookEngine(Allocator& allocator, const CookEngineRequest& request,
+                        CookProjectResult& result) noexcept {
+    ResetCookResult(result);
+    if (request.files == nullptr || request.savedDirectory.IsEmpty() ||
+        request.cookLock == nullptr || request.types == nullptr || request.registry == nullptr ||
+        request.profile == nullptr || request.settings == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const StringView profileId = request.profile->id.View();
+    if (!request.cookLock->IsHeldFor(request.savedDirectory, profileId)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    StringBuilder<CookProjectInlineBytes> root(allocator);
+    if (auto built = AppendCookedRoot(root, request.savedDirectory, profileId); !built) {
+        return built;
+    }
+
+    CookedManifest existing(allocator);
+    bool hasExisting = false;
+    if (auto read = ReadPreviousManifest(allocator, *request.files, root.View(),
+                                         request.manifestLimitBytes, existing, hasExisting, result);
+        !read) {
+        return read;
+    }
+
+    Array<CookedManifestBackend> backends(allocator);
+    if (auto made = MakeCookedManifestBackends(allocator, *request.profile, backends); !made) {
+        return made;
+    }
+
+    CookPublishConfig publishConfig;
+    publishConfig.files = request.files;
+    publishConfig.savedDirectory = request.savedDirectory;
+    publishConfig.profileId = profileId;
+    publishConfig.profileSettings = request.profileSettings;
+    publishConfig.cookSettings = request.cookSettings;
+    publishConfig.cookerVersion = request.cookerVersion;
+    publishConfig.cookedBy = request.cookedBy;
+    publishConfig.backends = Span<const CookedManifestBackend>(backends.Data(), backends.Size());
+    CookPublisher publisher(allocator, publishConfig);
+    if (auto begun = publisher.Begin(*request.cookLock); !begun) {
+        return begun;
+    }
+
+    // 엔진 전용: `Engine` artifact만, 너겟은 단계가 엔진 root로 연다(nuggets null — 10.3.1절 A4f4
+    // 3번).
+    ArtifactStageInputs inputs;
+    inputs.files = request.files;
+    inputs.profile = request.profile;
+    inputs.settings = request.settings;
+    inputs.profileSettings = request.profileSettings;
+    inputs.cookerVersion = request.cookerVersion;
+    inputs.verifyNuggets = request.verifyNuggets;
+    inputs.engineOnly = true;
+    inputs.stages = request.stages;
+    if (auto staged = RunArtifactStages(allocator, inputs, root.View(),
+                                        hasExisting ? &existing : nullptr, publisher, result);
+        !staged) {
+        return staged;
+    }
+
+    // 늘 전체 쿠킹이다(병합 없음 — 가리키지 않는 `Shaders/` 파일을 지운다).
+    if (!result.HasErrors()) {
+        if (auto finished = publisher.Finish(nullptr, {}); !finished) {
+            return finished;
+        }
+    }
+
+    if (auto appended = AppendDiagnostics(result.diagnostics, publisher.Diagnostics()); !appended) {
+        return appended;
+    }
+
+    result.published = publisher.Published();
+    result.bytesWritten = publisher.BytesWritten();
+    algo::Sort(result.diagnostics.View(), CookDiagnosticBefore);
+    const CookReportInputs report{request.files,  request.types,   request.registry,
+                                  request.access, request.profile, request.cookedBy};
+    return WriteReport(allocator, report, result, root.View());
 }
 
 } // namespace rocks

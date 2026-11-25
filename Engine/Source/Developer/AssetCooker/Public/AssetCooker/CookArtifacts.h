@@ -31,7 +31,9 @@ struct CookArtifactRequest {
     StringView cookedRoot{};
     // `<쿠킹 루트>/.staging`이다(파일 경로는 CookArtifactSink::NewStagingPath로 받는다).
     StringView stagingDirectory{};
-    // 너겟 캐시다(null이면 너겟 없이 만든다).
+    // 너겟 캐시다. null이면 단계가 정한다 — engineOnly면 단계가 엔진 너겟 root(셰이더 쪽
+    // ResolveShaderNuggetRoot)로 연 캐시를 쓰고 Run 안에서 닫는다, 아니면 너겟 없이 만든다(10.3.1절
+    // A4f4 3번).
     NuggetCache* nuggets = nullptr;
     // 엔진 전용 쿠킹이면 `Engine` artifact만 만든다(A4f4 `asset-cook --engine`).
     bool engineOnly = false;

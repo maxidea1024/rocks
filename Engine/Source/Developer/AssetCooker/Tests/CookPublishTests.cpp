@@ -78,9 +78,11 @@ struct PublishScene {
     PublishScene(AssetEnv& sceneEnv, const char* tag) noexcept
         : env(sceneEnv), root(tag), layout(env.allocator),
           files(env.allocator, Initialized(layout, root)), backends(env.allocator) {
-        ready = root.made && files.Ready() && static_cast<bool>(lock.Acquire(layout, 0)) &&
-                AddBackend("D3D12", "D3D12_SM6", "D3D12_SM5") &&
-                AddBackend("Vulkan", "VULKAN_SM5", StringView());
+        ready =
+            root.made && files.Ready() &&
+            static_cast<bool>(lock.Acquire(env.allocator, layout.SavedDirectory(), Profile, 0)) &&
+            AddBackend("D3D12", "D3D12_SM6", "D3D12_SM5") &&
+            AddBackend("Vulkan", "VULKAN_SM5", StringView());
     }
 
     // 매니페스트 backend 표 하나를 더한다(second가 비면 형식 하나).
@@ -112,7 +114,7 @@ struct PublishScene {
     CookPublishConfig Config() noexcept {
         CookPublishConfig config;
         config.files = &files;
-        config.layout = &layout;
+        config.savedDirectory = layout.SavedDirectory();
         config.profileId = Profile;
         config.profileSettings = DigestOf("profile");
         config.cookSettings = DigestOf("settings");
@@ -158,7 +160,8 @@ struct PublishScene {
     TempProject root;
     ProjectLayout layout;
     MemoryFileSystem files;
-    AssetDatabaseLock lock;
+    // 쿠킹 루트 잠금이다(게시기 Begin이 대조한다 — 10.3.1절 A4f4 2번).
+    CookRootLock lock;
     // 매니페스트 backend 표다(D3D12 [D3D12_SM6, D3D12_SM5]·Vulkan [VULKAN_SM5] — 10.3.1절 A4f2
     // 8번).
     Array<CookedManifestBackend> backends;
@@ -235,7 +238,7 @@ TEST(CookPublish_FullCookAndCleanup) {
     REQUIRE(publisher.Begin(scene.lock));
     CHECK(!scene.files.Has(orphan.View()));
     StringBuilder<256> expectedRoot(env.allocator);
-    REQUIRE(AppendCookedRoot(expectedRoot, scene.layout, Profile));
+    REQUIRE(AppendCookedRoot(expectedRoot, scene.layout.SavedDirectory(), Profile));
     CHECK(publisher.Root() == expectedRoot.View());
     REQUIRE(publisher.Put(a.View()) && publisher.Put(b.View()) && publisher.Put(c.View()));
     const uint32 syncsBefore = scene.files.syncs;
@@ -578,13 +581,18 @@ TEST(CookPublish_RejectsAndFaults) {
     nullFiles.files = nullptr;
     CookPublisher noFiles(env.allocator, nullFiles);
     CHECK(noFiles.Begin(scene.lock).Error() == ErrorCode::InvalidArgument);
-    CookPublishConfig nullLayout = scene.Config();
-    nullLayout.layout = nullptr;
-    CookPublisher noLayout(env.allocator, nullLayout);
-    CHECK(noLayout.Begin(scene.lock).Error() == ErrorCode::InvalidArgument);
-    AssetDatabaseLock unheld;
+    CookPublishConfig nullSaved = scene.Config();
+    nullSaved.savedDirectory = {};
+    CookPublisher noSaved(env.allocator, nullSaved);
+    CHECK(noSaved.Begin(scene.lock).Error() == ErrorCode::InvalidArgument);
+    CookRootLock unheld;
     CookPublisher notLocked(env.allocator, scene.Config());
     CHECK(notLocked.Begin(unheld).Error() == ErrorCode::InvalidArgument);
+    // 다른 쿠킹 루트(다른 프로필)의 잠금은 받지 않는다(10.3.1절 A4f4 2번).
+    CookRootLock other;
+    REQUIRE(other.Acquire(env.allocator, scene.layout.SavedDirectory(), "Android", 0));
+    CookPublisher otherRoot(env.allocator, scene.Config());
+    CHECK(otherRoot.Begin(other).Error() == ErrorCode::InvalidArgument);
     CookTarget target(env.allocator);
     CHECK(notLocked.Put(a.View()).Error() == ErrorCode::InvalidArgument);
     CHECK(notLocked.Finish(nullptr, {}).Error() == ErrorCode::InvalidArgument);

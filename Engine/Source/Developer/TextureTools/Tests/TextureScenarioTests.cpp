@@ -99,16 +99,18 @@ struct ScenarioScene {
           hooks(allocator, types), hookTokens(allocator), importers(allocator, types),
           importerTokens(allocator), clock(ScenarioStartTicks),
           processors(allocator, types, fallback), profile(allocator), settings(allocator) {
-        ready = static_cast<bool>(generated::AssetCooker::RegisterModuleTypes(registration)) &&
-                static_cast<bool>(names.Initialize()) && root.made && files.Ready() &&
-                files.AddDirectory("Content") && files.AddDirectory("Config") &&
-                files.AddDirectory("SourceArt") &&
-                static_cast<bool>(RegisterTextureTypeHooks(nullptr, hooks, hookTokens)) &&
-                static_cast<bool>(
-                    RegisterTextureImporters(&textureImporters, importers, importerTokens)) &&
-                static_cast<bool>(RegisterTextureCookProcessors(&textureCook, processors)) &&
-                static_cast<bool>(lock.Acquire(layout, 0)) &&
-                static_cast<bool>(profile.id.TryAssign("Windows"));
+        ready =
+            static_cast<bool>(generated::AssetCooker::RegisterModuleTypes(registration)) &&
+            static_cast<bool>(names.Initialize()) && root.made && files.Ready() &&
+            files.AddDirectory("Content") && files.AddDirectory("Config") &&
+            files.AddDirectory("SourceArt") &&
+            static_cast<bool>(RegisterTextureTypeHooks(nullptr, hooks, hookTokens)) &&
+            static_cast<bool>(
+                RegisterTextureImporters(&textureImporters, importers, importerTokens)) &&
+            static_cast<bool>(RegisterTextureCookProcessors(&textureCook, processors)) &&
+            static_cast<bool>(lock.Acquire(layout, 0)) &&
+            static_cast<bool>(cookLock.Acquire(allocator, layout.SavedDirectory(), "Windows", 0)) &&
+            static_cast<bool>(profile.id.TryAssign("Windows"));
         String everything(allocator);
         ready = ready && everything.TryAssign("/Game/") &&
                 settings.alwaysCook.TryPushBack(Move(everything));
@@ -189,6 +191,7 @@ struct ScenarioScene {
         request.files = &files;
         request.layout = &layout;
         request.lock = &lock;
+        request.cookLock = &cookLock;
         request.index = &service->Index();
         request.packages = &service->Packages();
         request.types = &types;
@@ -288,6 +291,7 @@ struct ScenarioScene {
     TextureImporterSet textureImporters;
     ManualAssetClock clock;
     AssetDatabaseLock lock;
+    CookRootLock cookLock;
     DefaultCookProcessor fallback;
     TextureCookProcessor textureCook;
     CookProcessorTable processors;

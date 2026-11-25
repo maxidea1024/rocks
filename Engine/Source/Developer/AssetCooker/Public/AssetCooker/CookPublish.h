@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetCooker/CookRootLock.h>
 #include <AssetCooker/CookRun.h>
 #include <AssetDatabase/AssetDatabaseLock.h>
 #include <AssetDatabase/ProjectLayout.h>
@@ -12,7 +13,7 @@
 //
 // 사용 예:
 //   CookPublisher publisher(allocator, config);
-//   if (auto begun = publisher.Begin(lock); !begun) { ... }
+//   if (auto begun = publisher.Begin(cookLock); !begun) { ... }
 //   request.output = &publisher;                 // CookPackages가 Put을 부른다
 //   publisher.Reuse(existingEntry, target, path); // 재사용 대상
 //   if (!errors) { publisher.Finish(partial ? &existing : nullptr, targets.removed.View()); }
@@ -27,14 +28,15 @@ inline constexpr StringView CookShadersDirectoryName = "Shaders";
 // 패키지 파일 대조를 흘려 읽는 조각 크기다.
 inline constexpr usize CookHashChunkBytes = 64 * 1024;
 
-// layout의 쿠킹 루트(`<Saved>/Cooked/<profileId>`)를 out 뒤에 붙인다. 오류: 할당 실패.
-ROCKS_ASSETCOOKER_API Result<void> AppendCookedRoot(StringBuilderBase& out,
-                                                    const ProjectLayout& layout,
-                                                    StringView profileId) noexcept;
+// 쿠킹 루트(`<savedDirectory>/Cooked/<profileId>` — 프로젝트는 layout.SavedDirectory(), 엔진 전용은
+// `Engine/Saved`)를 out 뒤에 붙인다. 오류: 할당 실패.
+ROCKS_ASSETCOOKER_API Result<void>
+AppendCookedRoot(StringBuilderBase& out, StringView savedDirectory, StringView profileId) noexcept;
 
 struct CookPublishConfig {
     platform::FileSystem* files = nullptr;
-    const ProjectLayout* layout = nullptr;
+    // Saved 디렉터리다(쿠킹 루트 = `<savedDirectory>/Cooked/<profileId>` — 10.3.1절 A4f4 2번).
+    StringView savedDirectory{};
     // 매니페스트 머리 값이다(프로파일 id·출력 설정 SHA-256·CookSettings SHA-256·쿠커 버전·쿠킹한
     // 엔진 버전 — 엔진 버전은 진단용).
     StringView profileId{};
@@ -58,9 +60,10 @@ public:
 
     // 쿠킹 루트·`.staging`·`Packages`·`Shaders`를 만들고 `.staging` 안의 고아 파일을 지운다(못
     // 지우면 경고).
-    // 오류: 설정 null·두 번째 호출 InvalidArgument, lock이 이 프로젝트의 잡은 쓰기 잠금이 아니면
-    // InvalidArgument, 디렉터리 만들기·열거 IO 오류, 할당 실패.
-    Result<void> Begin(const AssetDatabaseLock& lock) noexcept;
+    // 오류: 설정 null·빈 칸·두 번째 호출 InvalidArgument, lock이 이 쿠킹 루트의 잡은 잠금이 아니면
+    // InvalidArgument(에셋 DB 잠금은 CookProject가 본다 — 10.3.1절 A4f4 2번), 디렉터리 만들기·열거
+    // IO 오류, 할당 실패.
+    Result<void> Begin(const CookRootLock& lock) noexcept;
 
     // 쿠킹 패키지 하나를 `.staging/<대상 파일 이름>.tmp`에 쓰고 `Packages/<a>/<A>-<h>.rpkg`로
     // 덮어쓰지 않고 옮긴다. 대상이 있으면 크기·SHA-256을 대조해 같으면 임시 파일을 지우고, 다르면

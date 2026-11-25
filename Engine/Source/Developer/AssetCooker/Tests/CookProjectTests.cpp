@@ -278,10 +278,22 @@ TEST(CookProject_CorruptManifestAndRejects) {
     CHECK(rejects([](CookProjectRequest& r) noexcept { r.processors = nullptr; }));
     CHECK(rejects([](CookProjectRequest& r) noexcept { r.profile = nullptr; }));
     CHECK(rejects([](CookProjectRequest& r) noexcept { r.settings = nullptr; }));
+    CHECK(rejects([](CookProjectRequest& r) noexcept { r.cookLock = nullptr; }));
+    // 쿠킹 루트 잠금만 쥐고 에셋 DB 잠금이 없으면 거부한다(잠금 순서 — 10.3.1절 A4f4 2번).
     AssetDatabaseLock unheld;
     CookProjectRequest request = scene.Request();
     request.lock = &unheld;
     CHECK(CookProject(env.allocator, request, result).Error() == ErrorCode::InvalidArgument);
+    // 쿠킹 루트 잠금이 없거나 다른 쿠킹 루트(다른 프로필)의 것이면 거부한다.
+    CookRootLock noCookLock;
+    CookProjectRequest unlocked = scene.Request();
+    unlocked.cookLock = &noCookLock;
+    CHECK(CookProject(env.allocator, unlocked, result).Error() == ErrorCode::InvalidArgument);
+    CookRootLock otherRoot;
+    REQUIRE(otherRoot.Acquire(env.allocator, scene.layout.SavedDirectory(), "Android", 0));
+    CookProjectRequest elsewhere = scene.Request();
+    elsewhere.cookLock = &otherRoot;
+    CHECK(CookProject(env.allocator, elsewhere, result).Error() == ErrorCode::InvalidArgument);
 
     const Array<uint8> current = scene.Copy(Manifest);
     scene.files.Remove(Manifest);

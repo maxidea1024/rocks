@@ -9,6 +9,8 @@
 #include <Core/Text/Path.h>
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/ModuleLoader.h>
+#include <Object/ObjectRegistry.h>
+#include <Platform/Clock.h>
 #include <Platform/File.h>
 
 // asset-cook 명령 구현이다(Docs/Design/AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1).
@@ -20,7 +22,10 @@ namespace {
 constexpr StringView CookName = "asset-cook";
 constexpr StringView CookUsage =
     "usage: asset-cook --profile=<id> [<path>...] [--verify-nuggets] "
-    "[--verify-nuggets-source=local|remote] [--json] [--project=<dir>] [--wait=<seconds>]\n";
+    "[--verify-nuggets-source=local|remote] [--json] [--project=<dir>] [--wait=<seconds>]\n"
+    "       asset-cook --engine --profile=<id> [--verify-nuggets] [--json] [--wait=<seconds>]\n";
+// 엔진 전용 쿠킹의 Registry 문맥 id다(프로젝트 세션 없이 설정·보고서 struct를 읽고 쓴다).
+constexpr ContextId EngineCookContext{0x454e47434f4f4b31ull, 1};
 // 쿠킹 설정·보고서 struct를 등록하는 모듈이다.
 constexpr StringView CookerModule = "AssetCooker";
 constexpr StringView VerifySourceLocal = "local";
@@ -43,6 +48,8 @@ struct CookArgs {
     bool verify = false;
     bool json = false;
     bool help = false;
+    // 엔진 전용 쿠킹(10.3.1절 A4f4 4번 — 프로젝트·경로·대조 원천과 함께 쓰지 않는다)이다.
+    bool engine = false;
     Array<StringView> paths;
 };
 
@@ -66,10 +73,11 @@ Result<bool> ParseCook(Span<const StringView> args, CookArgs& out) noexcept {
             continue;
         }
 
-        bool* const flags[] = {&out.verify, &out.json};
-        const StringView flagNames[] = {"--verify-nuggets", "--json"};
+        bool* const flags[] = {&out.verify, &out.json, &out.engine};
+        const StringView flagNames[] = {"--verify-nuggets", "--json", "--engine"};
+        constexpr usize FlagCount = 3;
         bool matched = false;
-        for (usize index = 0; index < 2 && !matched; ++index) {
+        for (usize index = 0; index < FlagCount && !matched; ++index) {
             if (argument == flagNames[index]) {
                 if (*flags[index]) {
                     return Result<bool>::Success(false);
@@ -107,9 +115,39 @@ Result<bool> ParseCook(Span<const StringView> args, CookArgs& out) noexcept {
         return Result<bool>::Success(false);
     }
 
+    // 엔진 전용은 프로젝트·경로 인자·대조 원천(프로젝트 너겟 설정)과 함께 쓰지 않는다.
+    if (out.engine && (!out.project.IsEmpty() || !out.paths.IsEmpty() || !out.source.IsEmpty())) {
+        return Result<bool>::Success(false);
+    }
+
     uint32 milliseconds = 0;
     return Result<bool>::Success(!out.profile.IsEmpty() &&
                                  ParseWaitMilliseconds(out.wait, milliseconds));
+}
+
+// `--wait` 마감 시각 하나에서 남은 밀리초다(10.3.1절 A4f4 1번).
+uint32 RemainingWait(uint32 waitMilliseconds, uint64 startNanoseconds) noexcept {
+    return RemainingWaitMilliseconds(waitMilliseconds, startNanoseconds,
+                                     platform::MonotonicNanoseconds());
+}
+
+// 쿠킹 루트 잠금을 잡는다(실패하면 줄을 쓰고 failure에 종료 코드를 둔다).
+bool LockCookRoot(CommandletOutput& output, Allocator& allocator, CookRootLock& lock,
+                  StringView saved, StringView profile, StringView root, uint32 waitMilliseconds,
+                  Result<int32>& failure) noexcept {
+    if (auto held = lock.Acquire(allocator, saved, profile, waitMilliseconds); !held) {
+        failure = held.Error() == ErrorCode::OutOfMemory ? Result<int32>::Failure(held.Error())
+                  : held.Error() == ErrorCode::Busy
+                      ? Fail(output, allocator, CookName, 1,
+                             "Busy: {}: the cook root is locked by another process; use "
+                             "--wait=<seconds>",
+                             root)
+                      : Fail(output, allocator, CookName, 1, "{}: {}: cannot lock the cook root",
+                             ErrorCodeName(held.Error()), root);
+        return false;
+    }
+
+    return true;
 }
 
 // 설정 실패 파일의 경로다(파일 밖 판정 — id 형식·합친 값 — 은 `TargetProfiles/<id>`).
@@ -236,11 +274,15 @@ Result<void> AppendNuggetField(StringBuilderBase& out,
 // 진단은 부분 쿠킹의 인자 경로·전체 쿠킹의 `alwaysCook[<순번>]`, 그 밖은 쿠킹 루트다. roots는
 // 실제로 부분 쿠킹했을 때만 인자 경로다(기존 매니페스트가 없거나 깨져 전체 쿠킹으로 바뀌면 비어
 // 있다 — 그때 순번은 alwaysCook 순번이다).
-Result<void> AppendTarget(StringBuilderBase& out, const AssetIndex& index, AssetId asset,
+Result<void> AppendTarget(StringBuilderBase& out, const AssetIndex* index, AssetId asset,
                           const CookDiagnostic& diagnostic, Span<const StringView> roots,
                           StringView root) noexcept {
     if (!asset.IsNull()) {
-        if (auto found = index.FindById(asset); found) {
+        if (index == nullptr) {
+            return out.TryAppendFormat("{}", asset);
+        }
+
+        if (auto found = index->FindById(asset); found) {
             return out.TryAppend(found.Value()->path.View());
         }
 
@@ -262,7 +304,7 @@ Result<void> AppendTarget(StringBuilderBase& out, const AssetIndex& index, Asset
 
 // 쿠킹 진단을 한 줄씩 쓴다.
 Result<int32> WriteDiagnostics(CommandletOutput& output, Allocator& allocator,
-                               const AssetIndex& index, const CookProjectResult& result,
+                               const AssetIndex* index, const CookProjectResult& result,
                                Span<const StringView> paths, StringView root) noexcept {
     const Span<const StringView> roots = result.partial ? paths : Span<const StringView>{};
     for (const CookDiagnostic& diagnostic : result.diagnostics) {
@@ -307,6 +349,68 @@ Result<int32> WriteDiagnostics(CommandletOutput& output, Allocator& allocator,
     return Result<int32>::Success(0);
 }
 
+// 쿠킹 결과를 쓴다: 함수 오류는 실패 줄(단계가 멈췄으면 정체성·호출·형식), 그 밖은 진단 줄 →
+// `--json`이면 보고서, 아니면 요약 줄. 종료 코드는 게시했으면 0이다.
+Result<int32> WriteCookOutcome(CommandletOutput& output, Allocator& allocator,
+                               platform::FileSystem& files, const AssetIndex* index,
+                               Span<const StringView> paths, StringView root, StringView profile,
+                               bool json, Result<void> cooked,
+                               const CookProjectResult& result) noexcept {
+    if (!cooked) {
+        if (cooked.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(cooked.Error());
+        }
+
+        // 단계가 멈췄으면 그 정체성·호출·형식을 적는다(교차 검증 3 — 보고서가 없다).
+        const CookArtifactFailure& stage = result.stageFailure;
+        if (stage.call != CookArtifactCall::None) {
+            return Fail(output, allocator, CookName, 1, "{}: {}: stage {} {}({}): the cook failed",
+                        ErrorCodeName(cooked.Error()), root, stage.stage,
+                        CookArtifactCallName(stage.call), stage.formatId.View());
+        }
+
+        return Fail(output, allocator, CookName, 1, "{}: {}: the cook failed",
+                    ErrorCodeName(cooked.Error()), root);
+    }
+
+    if (auto written = WriteDiagnostics(output, allocator, index, result, paths, root); !written) {
+        return written;
+    }
+
+    const int32 code = result.published ? 0 : 1;
+    if (json) {
+        StringBuilder<LineBytes> path(allocator);
+        if (auto made = path.TryAppendFormat("{}/{}", root, CookReportFileName); !made) {
+            return Result<int32>::Failure(made.Error());
+        }
+
+        Array<uint8> report(allocator);
+        bool existed = false;
+        if (auto read = ReadWholeFile(files, path.View(), CookReportPrintMaxBytes, report, existed);
+            !read || !existed) {
+            const ErrorCode error = read ? ErrorCode::NotFound : read.Error();
+            return error == ErrorCode::OutOfMemory
+                       ? Result<int32>::Failure(error)
+                       : Fail(output, allocator, CookName, 1, "{}: {}: cannot read the cook report",
+                              ErrorCodeName(error), path.View());
+        }
+
+        return Write(output, CommandletStream::Output,
+                     StringView(reinterpret_cast<const char*>(report.Data()), report.Size()), code);
+    }
+
+    StringBuilder<LineBytes> summary(allocator);
+    if (auto made = summary.TryAppendFormat(
+            "{}: {} {} targets {} cooked {} reused {} bytes {}{}\n", CookName, profile,
+            result.published ? "published" : "not published", result.targets, result.cooked,
+            result.reused, result.bytesWritten, result.partial ? " partial" : "");
+        !made) {
+        return Result<int32>::Failure(made.Error());
+    }
+
+    return Write(output, CommandletStream::Output, summary.View(), code);
+}
+
 // 명령이 끝날 때 너겟 캐시를 닫는다.
 struct NuggetShutdown {
     ~NuggetShutdown() noexcept {
@@ -315,6 +419,140 @@ struct NuggetShutdown {
 
     NuggetCache& cache;
 };
+
+// 엔진 디렉터리다(문맥 재정의가 있으면 그것 — 명령 시험, 없으면 FindEngineDirectory). 못 찾으면
+// 줄을 쓰고 failure에 종료 코드를 둔다. storage는 찾은 경로의 저장소다.
+bool ResolveEngineDirectory(const AssetCommandContext& command, CommandletOutput& output,
+                            Allocator& allocator, Array<char>& storage, StringView& out,
+                            Result<int32>& failure) noexcept {
+    if (!command.engineDirectory.IsEmpty()) {
+        out = command.engineDirectory;
+        return true;
+    }
+
+    if (auto sized = storage.TryResize(MaxNativePathBytes() + 1); !sized) {
+        failure = Result<int32>::Failure(sized.Error());
+        return false;
+    }
+
+    auto found = FindEngineDirectory(Span<char>(storage.Data(), storage.Size()));
+    if (!found) {
+        failure = Fail(output, allocator, CookName, 1, "{}: Engine/Config: cannot find the engine",
+                       ErrorCodeName(found.Error()));
+        return false;
+    }
+
+    out = StringView(storage.Data(), found.Value());
+    return true;
+}
+
+// 엔진 전용 쿠킹이다(10.3.1절 A4f4 4번): 프로젝트 세션 없이 에셋 타입·쿠커 모듈을 시작하고 자기
+// ObjectRegistry로 엔진 프로필(프로젝트 재정의 없음)·엔진 CookSettings를 읽어 엔진 쿠킹 루트
+// (`Engine/Saved/Cooked/<프로필>`)에 게시한다.
+Result<int32> RunEngineCook(const AssetCommandContext& command, const CookArgs& parsed,
+                            uint32 waitMilliseconds, uint64 waitStart,
+                            CommandletOutput& output) noexcept {
+    Allocator& allocator = *command.allocator;
+    AssetCommandTypes types(allocator, *command.modules, command.typeModule);
+    if (auto started = types.Start(); !started) {
+        return started.Error() == ErrorCode::OutOfMemory
+                   ? Result<int32>::Failure(started.Error())
+                   : Fail(output, allocator, CookName, 1, "{}: {}: cannot register the asset types",
+                          ErrorCodeName(started.Error()), types.Module());
+    }
+
+    if (auto loaded = command.modules->Load(CookerModule); !loaded.IsOk()) {
+        const ErrorCode error =
+            loaded.error != ErrorCode::None ? loaded.error : ErrorCode::Unsupported;
+        return error == ErrorCode::OutOfMemory
+                   ? Result<int32>::Failure(error)
+                   : Fail(output, allocator, CookName, 1, "{}: {}: cannot start the cooker module",
+                          ErrorCodeName(error), CookerModule);
+    }
+
+    Result<int32> failure = Result<int32>::Success(1);
+    Array<char> engine(allocator);
+    StringView engineDirectory;
+    if (!ResolveEngineDirectory(command, output, allocator, engine, engineDirectory, failure)) {
+        return failure;
+    }
+
+    StringBuilder<LineBytes> engineConfig(allocator);
+    StringBuilder<LineBytes> saved(allocator);
+    if (auto made = engineConfig.TryAppendFormat("{}/Config", engineDirectory); !made) {
+        return Result<int32>::Failure(made.Error());
+    }
+
+    if (auto made = saved.TryAppendFormat("{}/Saved", engineDirectory); !made) {
+        return Result<int32>::Failure(made.Error());
+    }
+
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    ObjectRegistry registry(allocator, types.Types(), EngineCookContext);
+    // 프로필은 엔진 파일만, CookSettings는 엔진 Config의 파일(있으면)이다.
+    const CookConfigContext profileContext{
+        &allocator,          &files,      &registry, registry.OwnerAccess(), &types.Types(),
+        engineConfig.View(), StringView()};
+    CookConfigContext settingsContext = profileContext;
+    settingsContext.projectConfigDirectory = engineConfig.View();
+    reflection_text::TextDiagnostics diagnostics(allocator);
+    TargetProfile profile(allocator);
+    CookSettings settings(allocator);
+    CookConfigFailure configFailure;
+    if (auto read =
+            ReadTargetProfile(profileContext, parsed.profile, profile, diagnostics, &configFailure);
+        !read) {
+        return WriteConfigFailure(output, allocator, profileContext, parsed.profile, diagnostics,
+                                  configFailure, read.Error());
+    }
+
+    if (auto read = ReadCookSettings(settingsContext, settings, diagnostics, &configFailure);
+        !read) {
+        return WriteConfigFailure(output, allocator, settingsContext, parsed.profile, diagnostics,
+                                  configFailure, read.Error());
+    }
+
+    // 두 struct는 위에서 읽혔으므로 등록되어 있다 — 해시 실패는 할당 실패뿐이다.
+    auto profileHash = HashTargetProfile(profileContext, profile);
+    if (!profileHash) {
+        return Result<int32>::Failure(profileHash.Error());
+    }
+
+    auto settingsHash = HashCookSettings(settingsContext, settings);
+    if (!settingsHash) {
+        return Result<int32>::Failure(settingsHash.Error());
+    }
+
+    StringBuilder<LineBytes> root(allocator);
+    if (auto made = AppendCookedRoot(root, saved.View(), profile.id.View()); !made) {
+        return Result<int32>::Failure(made.Error());
+    }
+
+    CookRootLock cookLock;
+    if (!LockCookRoot(output, allocator, cookLock, saved.View(), profile.id.View(), root.View(),
+                      RemainingWait(waitMilliseconds, waitStart), failure)) {
+        return failure;
+    }
+
+    CookEngineRequest request;
+    request.files = &files;
+    request.savedDirectory = saved.View();
+    request.cookLock = &cookLock;
+    request.types = &types.Types();
+    request.registry = &registry;
+    request.access = registry.OwnerAccess();
+    request.profile = &profile;
+    request.profileSettings = profileHash.Value();
+    request.settings = &settings;
+    request.cookSettings = settingsHash.Value();
+    request.cookedBy = build::CurrentEngineVersion();
+    request.verifyNuggets = parsed.verify;
+    request.stages = &CookArtifactStages();
+    CookProjectResult result(allocator);
+    const Result<void> cooked = CookEngine(allocator, request, result);
+    return WriteCookOutcome(output, allocator, files, nullptr, Span<const StringView>(),
+                            root.View(), profile.id.View(), parsed.json, cooked, result);
+}
 
 } // namespace
 
@@ -342,6 +580,14 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
                     "Unsupported: remote: the Rockpile nugget backend is not available");
     }
 
+    // `--wait` 마감 시각은 하나다(에셋 DB 잠금 → 쿠킹 루트 잠금 — 10.3.1절 A4f4 1번).
+    uint32 waitMilliseconds = 0;
+    (void)ParseWaitMilliseconds(parsed.wait, waitMilliseconds);
+    const uint64 waitStart = platform::MonotonicNanoseconds();
+    if (parsed.engine) {
+        return RunEngineCook(command, parsed, waitMilliseconds, waitStart, output);
+    }
+
     EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, CookName, parsed.project, parsed.wait, true, session,
@@ -360,20 +606,13 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
     }
 
     Array<char> engine(allocator);
-    if (auto sized = engine.TryResize(MaxNativePathBytes() + 1); !sized) {
-        return Result<int32>::Failure(sized.Error());
-    }
-
-    auto found = FindEngineDirectory(Span<char>(engine.Data(), engine.Size()));
-    if (!found) {
-        return Fail(output, allocator, CookName, 1, "{}: Engine/Config: cannot find the engine",
-                    ErrorCodeName(found.Error()));
+    StringView engineDirectory;
+    if (!ResolveEngineDirectory(command, output, allocator, engine, engineDirectory, failure)) {
+        return failure;
     }
 
     StringBuilder<LineBytes> engineConfig(allocator);
-    if (auto made =
-            engineConfig.TryAppendFormat("{}/Config", StringView(engine.Data(), found.Value()));
-        !made) {
+    if (auto made = engineConfig.TryAppendFormat("{}/Config", engineDirectory); !made) {
         return Result<int32>::Failure(made.Error());
     }
 
@@ -461,7 +700,8 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
     }
 
     StringBuilder<LineBytes> root(allocator);
-    if (auto made = AppendCookedRoot(root, session.layout, profile.id.View()); !made) {
+    if (auto made = AppendCookedRoot(root, session.layout.SavedDirectory(), profile.id.View());
+        !made) {
         return Result<int32>::Failure(made.Error());
     }
 
@@ -497,61 +737,18 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
     // 비에셋 산출물 단계(셰이더 라이브러리 — 구현 모듈이 시작 hook에서 등록, 10.3.1절 A4f3 6번)다.
     request.stages = &CookArtifactStages();
     CookProjectResult result(allocator);
-    if (auto cooked = CookProject(allocator, request, result); !cooked) {
-        if (cooked.Error() == ErrorCode::OutOfMemory) {
-            return Result<int32>::Failure(cooked.Error());
-        }
-
-        // 단계가 멈췄으면 그 정체성·호출·형식을 적는다(교차 검증 3 — 보고서가 없다).
-        const CookArtifactFailure& stage = result.stageFailure;
-        if (stage.call != CookArtifactCall::None) {
-            return Fail(output, allocator, CookName, 1, "{}: {}: stage {} {}({}): the cook failed",
-                        ErrorCodeName(cooked.Error()), root.View(), stage.stage,
-                        CookArtifactCallName(stage.call), stage.formatId.View());
-        }
-
-        return Fail(output, allocator, CookName, 1, "{}: {}: the cook failed",
-                    ErrorCodeName(cooked.Error()), root.View());
+    CookRootLock cookLock;
+    if (!LockCookRoot(output, allocator, cookLock, session.layout.SavedDirectory(),
+                      profile.id.View(), root.View(), RemainingWait(waitMilliseconds, waitStart),
+                      failure)) {
+        return failure;
     }
 
-    if (auto written = WriteDiagnostics(output, allocator, session.service->Index(), result,
-                                        parsed.paths.View(), root.View());
-        !written) {
-        return written;
-    }
-
-    const int32 code = result.published ? 0 : 1;
-    if (parsed.json) {
-        StringBuilder<LineBytes> path(allocator);
-        if (auto made = path.TryAppendFormat("{}/{}", root.View(), CookReportFileName); !made) {
-            return Result<int32>::Failure(made.Error());
-        }
-
-        Array<uint8> report(allocator);
-        bool existed = false;
-        if (auto read = ReadWholeFile(files, path.View(), CookReportPrintMaxBytes, report, existed);
-            !read || !existed) {
-            const ErrorCode error = read ? ErrorCode::NotFound : read.Error();
-            return error == ErrorCode::OutOfMemory
-                       ? Result<int32>::Failure(error)
-                       : Fail(output, allocator, CookName, 1, "{}: {}: cannot read the cook report",
-                              ErrorCodeName(error), path.View());
-        }
-
-        return Write(output, CommandletStream::Output,
-                     StringView(reinterpret_cast<const char*>(report.Data()), report.Size()), code);
-    }
-
-    StringBuilder<LineBytes> summary(allocator);
-    if (auto made = summary.TryAppendFormat(
-            "{}: {} {} targets {} cooked {} reused {} bytes {}{}\n", CookName, profile.id.View(),
-            result.published ? "published" : "not published", result.targets, result.cooked,
-            result.reused, result.bytesWritten, result.partial ? " partial" : "");
-        !made) {
-        return Result<int32>::Failure(made.Error());
-    }
-
-    return Write(output, CommandletStream::Output, summary.View(), code);
+    request.cookLock = &cookLock;
+    const Result<void> cooked = CookProject(allocator, request, result);
+    return WriteCookOutcome(output, allocator, files, &session.service->Index(),
+                            parsed.paths.View(), root.View(), profile.id.View(), parsed.json,
+                            cooked, result);
 }
 
 } // namespace rocks::commandlet_host

@@ -152,6 +152,15 @@ bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {
     return true;
 }
 
+uint32 RemainingWaitMilliseconds(uint32 waitMilliseconds, uint64 startNanoseconds,
+                                 uint64 nowNanoseconds) noexcept {
+    constexpr uint64 NanosecondsPerMillisecond = 1000000;
+    const uint64 elapsed = nowNanoseconds > startNanoseconds
+                               ? (nowNanoseconds - startNanoseconds) / NanosecondsPerMillisecond
+                               : 0;
+    return elapsed >= waitMilliseconds ? 0u : static_cast<uint32>(waitMilliseconds - elapsed);
+}
+
 bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView command,
                  StringView project, StringView wait, bool write, EditSession& session,
                  Result<int32>& failure) noexcept {

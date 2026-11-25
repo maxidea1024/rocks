@@ -12,6 +12,7 @@
 // 사용 예(asset-cook 명령 — A4e):
 //   CookProjectRequest request;
 //   request.files = &files; request.layout = &layout; request.lock = &lock;
+//   request.cookLock = &cookLock;   // 쿠킹 루트 잠금(에셋 DB 잠금 뒤에 잡는다)
 //   request.index = &index; request.packages = &set; request.types = &types;
 //   request.processors = &processors; request.profile = &profile; request.settings = &settings;
 //   request.profileSettings = profileHash; request.cookSettings = settingsHash;
@@ -103,8 +104,10 @@ struct CookReport {
 struct CookProjectRequest {
     platform::FileSystem* files = nullptr;
     const ProjectLayout* layout = nullptr;
-    // 이 프로젝트의 잡은 쓰기 잠금이다(게시기가 확인한다).
+    // 이 프로젝트의 잡은 쓰기 잠금과 그 뒤에 잡은 쿠킹 루트 잠금이다(10.3.1절 A4f4 2번 — 둘 다
+    // 쥐었는지 확인한다).
     const AssetDatabaseLock* lock = nullptr;
+    const CookRootLock* cookLock = nullptr;
     // 쿠킹 직전에 갱신한 색인과 Initialize한 에디터 패키지 집합(dirty 없음)이다. 보고서 codec은
     // 집합의 Registry를 쓴다.
     AssetIndex* index = nullptr;
@@ -194,9 +197,43 @@ struct CookProjectResult {
 // IncompatibleCook과 보고서로 끝낸다. verifyNuggets면 재사용 없이 모든 대상을 쿠킹한다. 오류(멈춤 —
 // 보고서 없음): 요청 인자 null InvalidArgument, 각 단계의 함수 오류(색인·TypeRegistry·IO·잠금 아님
 // 등), 단계 계약 위반·단계 오류(그 오류 — 원인은 result.stageFailure), 기존 매니페스트 읽기 IO
-// 오류, 보고서 쓰기 오류, 할당 실패.
+// 오류, 보고서 쓰기 오류, 할당 실패. 잠금(에셋 DB·쿠킹 루트)이 이 프로젝트·쿠킹 루트의 잡은
+// 잠금이 아니면 InvalidArgument다.
 ROCKS_ASSETCOOKER_API Result<void> CookProject(Allocator& allocator,
                                                const CookProjectRequest& request,
                                                CookProjectResult& result) noexcept;
+
+// 엔진 전용 쿠킹 요청이다(10.3절 7항, 10.3.1절 A4f4 3번 — 에셋 대상·색인·패키지 집합이 없다).
+struct CookEngineRequest {
+    platform::FileSystem* files = nullptr;
+    // `Engine/Saved`다(쿠킹 루트 `Engine/Saved/Cooked/<프로필>`).
+    StringView savedDirectory{};
+    // 그 쿠킹 루트의 잡은 잠금이다.
+    const CookRootLock* cookLock = nullptr;
+    // 설정·보고서 struct가 등록된 TypeRegistry와 보고서 내보내기의 Registry다.
+    TypeRegistry* types = nullptr;
+    ObjectRegistry* registry = nullptr;
+    ObjectAccessContext access{};
+    const TargetProfile* profile = nullptr;
+    Sha256Digest profileSettings{};
+    const CookSettings* settings = nullptr;
+    Sha256Digest cookSettings{};
+    uint32 cookerVersion = CookerVersion;
+    EngineVersion cookedBy{};
+    // 단계가 너겟 적중을 다시 만들어 대조한다(재사용 후보도 없다).
+    bool verifyNuggets = false;
+    CookArtifactStageTable* stages = nullptr;
+    uint64 manifestLimitBytes = CookedManifestMaxFileBytes;
+};
+
+// 엔진 전용 쿠킹이다(result를 비우고 채운다): 기존 엔진 매니페스트 읽기(깨졌으면 경고 뒤 없음) →
+// 게시기 Begin → 비에셋 산출물 단계(engineOnly — `Engine` artifact만, 너겟은 단계가 연다) → 오류
+// 진단이 없으면 전체 쿠킹 게시(entryCount 0 — `Shaders/` 정리 포함) → 보고서. 셰이더 없는 프로필은
+// 빈 매니페스트를 게시한다. 오류: 요청 인자 null·빈 savedDirectory·잠금이 그 쿠킹 루트의 잡은
+// 잠금이 아님 InvalidArgument, 단계 계약 위반·단계 오류(원인은 result.stageFailure), IO 오류, 할당
+// 실패.
+ROCKS_ASSETCOOKER_API Result<void> CookEngine(Allocator& allocator,
+                                              const CookEngineRequest& request,
+                                              CookProjectResult& result) noexcept;
 
 } // namespace rocks

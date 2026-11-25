@@ -40,10 +40,13 @@ class ConfigContext;
 ROCKS_ENGINEASSETS_API Result<void>
 RegisterEngineAssetsSettings(config::ConfigContext& context) noexcept;
 
-// 쿠킹 루트를 정한다(11.8절 3): configured가 비지 않았으면 그것, 비었으면 executableDir + "/Cooked"
-// 다. out 뒤에 붙인다. 오류: executableDir도 비었으면 InvalidArgument, 할당 실패.
+// 쿠킹 루트를 정한다(11.8절 3, 10.3.1절 A4f4 5번): configured가 비지 않았으면 그것, 비었고
+// engineOnlyDirectory가 있으면 `<engineOnlyDirectory>/Saved/Cooked/<runtimeProfile>`(엔진 전용 실행
+// — `asset-cook --engine`의 쿠킹 루트), 아니면 executableDir + "/Cooked"다. out 뒤에 붙인다. 오류:
+// 쓸 값이 없으면(executableDir까지 빔) InvalidArgument, 할당 실패.
 ROCKS_ENGINEASSETS_API Result<void>
-ResolveCookedRoot(StringView configured, StringView executableDir, String& out) noexcept;
+ResolveCookedRoot(StringView configured, StringView engineOnlyDirectory, StringView runtimeProfile,
+                  StringView executableDir, String& out) noexcept;
 
 // configured가 비지 않았으면 그것, 비었으면 빌드 플랫폼의 기본 실행 프로파일 id(Windows·Mac·
 // Android — 10절 TargetProfile)다.
@@ -99,6 +102,21 @@ public:
     //   static ContentTrust trust{keys, 7, MakeContentScope("MyGame", "live").Value()};
     //   EngineAssetsSubsystem::SetContentTrust(&trust);
     static void SetContentTrust(const ContentTrust* trust) noexcept;
+
+    // 엔진 전용 실행(Sandbox 등 — 프로젝트 없이 엔진 쿠킹 결과를 쓰는 실행)의 엔진 디렉터리를 둔다
+    // (10.3.1절 A4f4 5번): `asset.cooked_root`가 비면 쿠킹 루트가
+    // `<engineDirectory>/Saved/Cooked/<실행 프로파일>`이다. 빈 값이면 해제다(실행 파일 기준으로
+    // 돌아간다). 프로세스 값이라 여러 Engine이 함께 본다(UE FPaths::EngineDir처럼).
+    //
+    // 수명·순서: 엔진 Initialize 전에만 부른다(Initialize가 한 번 읽어 쿠킹 루트를 복사한다).
+    // engineDirectory의 byte는 이 프로세스에서 엔진들이 Initialize를 마칠 때까지 살아 있어야 한다.
+    // 포장된 게임·프로젝트 실행은 부르지 않는다.
+    //
+    // 사용 예(엔진 전용 호스트):
+    //   if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
+    //       EngineAssetsSubsystem::SetEngineOnlyDirectory(StringView(engineDir, found.Value()));
+    //   }
+    static void SetEngineOnlyDirectory(StringView engineDirectory) noexcept;
 
     // 11.8절 4의 순서로 만든다. 실패하면 만든 것을 역순으로 되돌리고 그 오류를 돌려준다(기록 한
     // 번). 매니페스트는 쿠킹 루트에 서명 봉투(CookedManifest.rsig)가 있으면 그것만 읽어 검증한다.

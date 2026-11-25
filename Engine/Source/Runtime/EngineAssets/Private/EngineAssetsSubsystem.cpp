@@ -25,6 +25,11 @@ uint64 NextAssetContext = 0;
 // 원자적으로 쓰고 읽는다(release·acquire — 가리키는 값은 등록 전에 다 만들어져 있다).
 const ContentTrust* ContentTrustSource = nullptr;
 
+// 엔진 전용 실행의 엔진 디렉터리다(SetEngineOnlyDirectory — 엔진 Initialize 전에만 쓰고
+// Initialize가 읽는다. 쓰기와 읽기가 겹치지 않는 것이 계약이라 원자 연산을 두지 않는다).
+const char* EngineOnlyDirectoryData = nullptr;
+usize EngineOnlyDirectoryBytes = 0;
+
 // 봉투 검증 실패 단계 이름("content signature (<칸>)")의 버퍼 byte 수다.
 constexpr usize ContentStageBytes = 64;
 
@@ -95,6 +100,11 @@ void EngineAssetsSubsystem::SetContentTrust(const ContentTrust* trust) noexcept 
     platform::AtomicStore<platform::MemoryOrder::Release>(&ContentTrustSource, trust);
 }
 
+void EngineAssetsSubsystem::SetEngineOnlyDirectory(StringView engineDirectory) noexcept {
+    EngineOnlyDirectoryData = engineDirectory.IsEmpty() ? nullptr : engineDirectory.Data();
+    EngineOnlyDirectoryBytes = engineDirectory.ByteCount();
+}
+
 Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     using namespace engine_assets_detail;
     engine_ = &engine;
@@ -116,10 +126,19 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
         return Result<void>::Failure(error);
     };
 
-    // 쿠킹 루트·프로파일(부팅 CVar — 시작 때 한 번).
+    // 쿠킹 루트·프로파일(부팅 CVar — 시작 때 한 번). 엔진 전용 실행의 루트는 프로파일을 담으므로
+    // 프로파일을 먼저 정한다.
+    profile_.Clear();
+    if (auto assigned = profile_.TryAppend(ResolveRuntimeProfile(RuntimeProfileVar.Get()));
+        !assigned) {
+        return fail("runtime profile", assigned.Error());
+    }
+
     const StringView configuredRoot = CookedRootVar.Get();
+    const StringView engineOnly(EngineOnlyDirectoryData,
+                                EngineOnlyDirectoryData == nullptr ? 0 : EngineOnlyDirectoryBytes);
     StringView executableDir;
-    if (configuredRoot.IsEmpty()) {
+    if (configuredRoot.IsEmpty() && engineOnly.IsEmpty()) {
         // 진입점(Launch)이 캡처한 실행 파일 경로다(OS에서 얻은 절대 경로 — 긴 경로도 받는다).
         if (!ProcessCommandLine::IsCaptured()) {
             return fail("executable path", ErrorCode::InvalidArgument);
@@ -129,14 +148,10 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     }
 
     cookedRoot_.Clear();
-    if (auto resolved = ResolveCookedRoot(configuredRoot, executableDir, cookedRoot_); !resolved) {
+    if (auto resolved = ResolveCookedRoot(configuredRoot, engineOnly, profile_.View(),
+                                          executableDir, cookedRoot_);
+        !resolved) {
         return fail("cooked root", resolved.Error());
-    }
-
-    profile_.Clear();
-    if (auto assigned = profile_.TryAppend(ResolveRuntimeProfile(RuntimeProfileVar.Get()));
-        !assigned) {
-        return fail("runtime profile", assigned.Error());
     }
 
     // 매니페스트: 서명 봉투가 있으면 그것만 읽어 검증하고 같은 버퍼의 매니페스트 byte를 쓴다

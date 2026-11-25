@@ -8,7 +8,9 @@
 // 쿠커가 직접 계산·FindArtifact·CheckCookedArtifactFile, 같은 내용 다시 쿠킹, 게시 파일 손상
 // CorruptEntry, 전체 쿠킹 정리·부분 쿠킹 유지, 재사용 후보와 cookKey, verify는 후보 없음), job
 // 오류· 미등록 UnsupportedCapability·셰이더 없는 프로필·에셋 오류가 있어도 단계가 돎, 계약 위반과
-// stageFailure, cookDevelopmentShaders 전달, 보고서 두 칸, 할당 실패.
+// stageFailure, cookDevelopmentShaders 전달, 보고서 두 칸, 할당 실패. 엔진 전용 쿠킹
+// CookEngine(10.3.1절 A4f4 3번 — Engine만·Project는 계약 위반·entryCount 0·재사용·셰이더 없는
+// 프로필·미등록·verify·깨진 이전 매니페스트·잠금·인자·할당 실패).
 using namespace rocks;
 
 namespace cook_artifact_tests_file {
@@ -63,6 +65,8 @@ public:
     Result<void> Run(const CookArtifactRequest& request, CookArtifactSink& sink) noexcept override {
         ++runs;
         offered = request.reusable.Size();
+        sawEngineOnly = request.engineOnly;
+        sawVerify = request.verifyNuggets;
         sawDevelopment = request.settings->cookDevelopmentShaders;
         if (table != nullptr) {
             auto unregistered = table->Unregister(*this);
@@ -85,6 +89,12 @@ public:
 
             for (const String& format : list->formats) {
                 for (StringView name : names) {
+                    // 엔진 전용 요청은 Engine만 만든다(respectEngineOnly 거짓이면 계약 위반 시험).
+                    if (request.engineOnly && respectEngineOnly &&
+                        name == CookedArtifactProjectName) {
+                        continue;
+                    }
+
                     if (auto made = Make(request, sink, name, format.View()); !made) {
                         return made;
                     }
@@ -105,6 +115,10 @@ public:
 
     uint32 seed = 1;
     bool failJob = false;
+    bool respectEngineOnly = true;
+    // 관찰값: 마지막 Run의 engineOnly·verifyNuggets다.
+    bool sawEngineOnly = false;
+    bool sawVerify = false;
     Violation violation = Violation::None;
     // 있으면 Run 중에 이 표의 해제·등록을 시도한다(사용 중 Busy).
     CookArtifactStageTable* table = nullptr;
@@ -626,6 +640,218 @@ TEST(CookArtifact_AllocationFailures) {
         }
 
         CHECK(failures >= 20u);
+    }
+}
+
+namespace {
+
+// 엔진 전용 쿠킹 장면이다: 임시 "엔진" 디렉터리(Saved 아래 잠금·쿠킹 루트)와 그 메모리 파일 시스템,
+// 설정·보고서 struct를 등록한 TypeRegistry·Registry, 셰이더 있는 프로필과 가짜 단계.
+struct EngineScene {
+    explicit EngineScene(AssetEnv& sceneEnv, const char* tag) noexcept
+        : env(sceneEnv), root(tag), saved(env.allocator), files(env.allocator, root.Root()),
+          registry(env.allocator, env.types, ContextId{0x454e47494e455431ull, 1}),
+          profile(env.allocator), settings(env.allocator) {
+        ready = root.made && files.Ready() && RegisterCookerTypes(env) &&
+                saved.TryAppendFormat("{}/Saved", root.Root()) && profile.id.TryAssign("Windows") &&
+                AddShaders(env, profile) &&
+                static_cast<bool>(lock.Acquire(env.allocator, saved.View(), "Windows", 0)) &&
+                static_cast<bool>(table.Register(stage));
+    }
+
+    ~EngineScene() {
+        (void)table.Unregister(stage);
+    }
+
+    CookEngineRequest Request() noexcept {
+        CookEngineRequest request;
+        request.files = &files;
+        request.savedDirectory = saved.View();
+        request.cookLock = &lock;
+        request.types = &env.types;
+        request.registry = &registry;
+        request.access = registry.OwnerAccess();
+        request.profile = &profile;
+        request.profileSettings =
+            Sha256::Hash(Span<const uint8>(reinterpret_cast<const uint8*>("E"), 1));
+        request.settings = &settings;
+        request.cookSettings =
+            Sha256::Hash(Span<const uint8>(reinterpret_cast<const uint8*>("S"), 1));
+        request.cookedBy = TestEngineVersion;
+        request.stages = &table;
+        return request;
+    }
+
+    // 쿠킹 루트 기준 메모리 파일 시스템 이름이다.
+    String Name(StringView rest) noexcept {
+        String name(env.allocator);
+        CHECK(name.TryAssign("Saved/Cooked/Windows/") && name.TryAppend(rest));
+        return name;
+    }
+
+    Result<CookedManifest> Manifest() noexcept {
+        const String name = Name(CookedManifestFileName);
+        return ReadCookedManifest(env.allocator, files.Bytes(name.View()));
+    }
+
+    AssetEnv& env;
+    TempProject root;
+    StringBuilder<StagingInlineBytes> saved;
+    MemoryFileSystem files;
+    ObjectRegistry registry;
+    TargetProfile profile;
+    CookSettings settings;
+    CookRootLock lock;
+    CookArtifactStageTable table;
+    FakeStage stage;
+    bool ready = false;
+};
+
+} // namespace
+
+// 엔진 전용 쿠킹(10.3.1절 A4f4 3번): Engine artifact만(형식 둘) 게시하고 항목은 없다(entryCount 0),
+// 단계는 engineOnly 요청을 받는다. 다시 쿠킹은 후보를 재사용한다. verify는 요청에 닿고 후보가 없다.
+// 셰이더 없는 프로필은 빈 매니페스트(backend 0·artifact 0)를 게시하고 단계를 부르지 않는다.
+// 미등록은 UnsupportedCapability로 게시하지 않는다. 깨진 이전 매니페스트는 경고 뒤 전체 쿠킹이다.
+// 보고서를 쓴다.
+TEST(CookEngine_PublishesEngineLibraries) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    EngineScene scene(env, "cook-engine");
+    REQUIRE(scene.ready);
+    CookProjectResult first(env.allocator);
+    REQUIRE(CookEngine(env.allocator, scene.Request(), first));
+    CHECK(first.published && !first.HasErrors() && scene.stage.sawEngineOnly &&
+          scene.stage.produced == 2 && first.targets == 0);
+    auto manifest = scene.Manifest();
+    REQUIRE(manifest);
+    CHECK(manifest.Value().entries.IsEmpty() && manifest.Value().backends.Size() == 2 &&
+          manifest.Value().artifacts.Size() == 2);
+    for (const CookedManifestArtifact& artifact : manifest.Value().artifacts) {
+        CHECK(artifact.name.View() == CookedArtifactEngineName);
+        StringBuilder<StagingInlineBytes> path(env.allocator);
+        REQUIRE(AppendCookedArtifactPath(path, artifact));
+        const String name = scene.Name(path.View());
+        CHECK(CheckCookedArtifactFile(artifact, scene.files.Bytes(name.View())));
+    }
+
+    CHECK(scene.files.Has(scene.Name(CookReportFileName).View()));
+
+    CookProjectResult again(env.allocator);
+    REQUIRE(CookEngine(env.allocator, scene.Request(), again));
+    CHECK(again.published && scene.stage.offered == 2 && scene.stage.reused == 2 &&
+          again.bytesWritten == 0);
+
+    CookEngineRequest verify = scene.Request();
+    verify.verifyNuggets = true;
+    CookProjectResult verified(env.allocator);
+    REQUIRE(CookEngine(env.allocator, verify, verified));
+    CHECK(verified.published && scene.stage.sawVerify && scene.stage.offered == 0);
+
+    // 깨진 이전 매니페스트: 경고 뒤 없는 것으로 보고 전체 쿠킹한다.
+    const String manifestName = scene.Name(CookedManifestFileName);
+    const uint8 junk[] = {'J', 'U', 'N', 'K'};
+    scene.files.Remove(manifestName.View());
+    REQUIRE(scene.files.AddFile(manifestName.View(), junk));
+    CookProjectResult repaired(env.allocator);
+    REQUIRE(CookEngine(env.allocator, scene.Request(), repaired));
+    CHECK(repaired.published && scene.stage.offered == 0 &&
+          HasDiagnostic(repaired, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+                        true));
+
+    CookEngineRequest missing = scene.Request();
+    missing.stages = nullptr;
+    CookProjectResult unsupported(env.allocator);
+    const uint32 runs = scene.stage.runs;
+    REQUIRE(CookEngine(env.allocator, missing, unsupported));
+    CHECK(!unsupported.published && scene.stage.runs == runs &&
+          HasDiagnostic(unsupported, AssetDiagnosticCode::None, ErrorCode::UnsupportedCapability,
+                        false));
+
+    TargetProfile shaderless(env.allocator);
+    REQUIRE(shaderless.id.TryAssign("Windows"));
+    CookEngineRequest plain = scene.Request();
+    plain.profile = &shaderless;
+    CookProjectResult quiet(env.allocator);
+    REQUIRE(CookEngine(env.allocator, plain, quiet));
+    auto empty = scene.Manifest();
+    REQUIRE(quiet.published && empty);
+    CHECK(empty.Value().backends.IsEmpty() && empty.Value().artifacts.IsEmpty() &&
+          scene.stage.runs == runs);
+}
+
+// 계약·거부(10.3.1절 A4f4 3번): engineOnly를 따르지 않은 단계(Project Produce)는 InvalidArgument로
+// 멈추고 stageFailure가 Produce(D3D12_SM6)다. 인자 null·빈 savedDirectory·잠금 없음·다른 쿠킹
+// 루트의 잠금은 InvalidArgument다.
+TEST(CookEngine_ContractAndRejects) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    EngineScene scene(env, "cook-engine-rejects");
+    REQUIRE(scene.ready);
+    scene.stage.respectEngineOnly = false;
+    CookProjectResult result(env.allocator);
+    auto cooked = CookEngine(env.allocator, scene.Request(), result);
+    CHECK(!cooked && cooked.Error() == ErrorCode::InvalidArgument &&
+          result.stageFailure.call == CookArtifactCall::Produce &&
+          result.stageFailure.formatId.View() == "D3D12_SM6" &&
+          !scene.files.Has(scene.Name(CookedManifestFileName).View()));
+    scene.stage.respectEngineOnly = true;
+
+    const auto rejects = [&](void (*mutate)(CookEngineRequest&)) noexcept {
+        CookEngineRequest request = scene.Request();
+        mutate(request);
+        return CookEngine(env.allocator, request, result).Error() == ErrorCode::InvalidArgument;
+    };
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.files = nullptr; }));
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.savedDirectory = {}; }));
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.cookLock = nullptr; }));
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.types = nullptr; }));
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.registry = nullptr; }));
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.profile = nullptr; }));
+    CHECK(rejects([](CookEngineRequest& r) noexcept { r.settings = nullptr; }));
+    CookRootLock unheld;
+    CookEngineRequest unlocked = scene.Request();
+    unlocked.cookLock = &unheld;
+    CHECK(CookEngine(env.allocator, unlocked, result).Error() == ErrorCode::InvalidArgument);
+    CookRootLock other;
+    REQUIRE(other.Acquire(env.allocator, scene.saved.View(), "Android", 0));
+    CookEngineRequest elsewhere = scene.Request();
+    elsewhere.cookLock = &other;
+    CHECK(CookEngine(env.allocator, elsewhere, result).Error() == ErrorCode::InvalidArgument);
+}
+
+// 할당 실패(모든 지점): 첫 엔진 쿠킹과 재사용 쿠킹이 OutOfMemory로 끝나고 표는 사용 중이 아니다.
+TEST(CookEngine_AllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    EngineScene scene(env, "cook-engine-oom");
+    REQUIRE(scene.ready);
+    const String manifestName = scene.Name(CookedManifestFileName);
+    test::NFailAllocator failing(env.allocator);
+    for (int pass = 0; pass < 2; ++pass) {
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            if (pass == 0) {
+                scene.files.Remove(manifestName.View());
+            }
+
+            CookProjectResult result(failing);
+            failing.FailOnAttempt(attempt);
+            auto cooked = CookEngine(failing, scene.Request(), result);
+            const bool hit = failing.Attempts() >= attempt;
+            failing.DisableFailure();
+            CHECK(!scene.table.InUse());
+            if (!hit) {
+                REQUIRE(cooked);
+                CHECK(result.published && result.artifacts.Size() == 2);
+                break;
+            }
+
+            CHECK(cooked.Error() == ErrorCode::OutOfMemory);
+            ++failures;
+        }
+
+        CHECK(failures >= 10u);
     }
 }
 

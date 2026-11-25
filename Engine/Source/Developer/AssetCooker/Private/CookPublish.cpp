@@ -214,9 +214,9 @@ Result<void> CopyBackends(Span<const CookedManifestBackend> source,
 
 } // namespace
 
-Result<void> AppendCookedRoot(StringBuilderBase& out, const ProjectLayout& layout,
+Result<void> AppendCookedRoot(StringBuilderBase& out, StringView savedDirectory,
                               StringView profileId) noexcept {
-    const StringView pieces[] = {layout.SavedDirectory(), "/", CookedDirectoryName, "/", profileId};
+    const StringView pieces[] = {savedDirectory, "/", CookedDirectoryName, "/", profileId};
     return AppendAll(out, pieces);
 }
 
@@ -241,15 +241,15 @@ bool CookPublisher::HasErrors() const noexcept {
     return false;
 }
 
-Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
-    if (begun_ || config_.files == nullptr || config_.layout == nullptr ||
-        !lock.IsHeldFor(*config_.layout)) {
+Result<void> CookPublisher::Begin(const CookRootLock& lock) noexcept {
+    if (begun_ || config_.files == nullptr || config_.savedDirectory.IsEmpty() ||
+        config_.profileId.IsEmpty() || !lock.IsHeldFor(config_.savedDirectory, config_.profileId)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     platform::FileSystem& files = *config_.files;
     PathBuilder root(*allocator_);
-    if (auto built = AppendCookedRoot(root, *config_.layout, config_.profileId); !built) {
+    if (auto built = AppendCookedRoot(root, config_.savedDirectory, config_.profileId); !built) {
         return built;
     }
 
@@ -260,7 +260,7 @@ Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
     // 쿠킹 루트까지의 디렉터리 중 없던 것은 그 부모를 Finish가 동기화한다(10절 게시 2 — 첫 쿠킹이면
     // 새 루트의 항목이 매니페스트보다 먼저 매체에 남아야 한다).
     PathBuilder cooked(*allocator_);
-    const StringView cookedPieces[] = {config_.layout->SavedDirectory(), "/", CookedDirectoryName};
+    const StringView cookedPieces[] = {config_.savedDirectory, "/", CookedDirectoryName};
     if (auto built = AppendAll(cooked, cookedPieces); !built) {
         return built;
     }
@@ -277,7 +277,7 @@ Result<void> CookPublisher::Begin(const AssetDatabaseLock& lock) noexcept {
         return built;
     }
 
-    const StringView chain[] = {config_.layout->SavedDirectory(), cooked.View(), root_.View(),
+    const StringView chain[] = {config_.savedDirectory, cooked.View(), root_.View(),
                                 packagesPath.View(), shadersPath.View()};
     for (StringView directory : chain) {
         bool exists = false;
