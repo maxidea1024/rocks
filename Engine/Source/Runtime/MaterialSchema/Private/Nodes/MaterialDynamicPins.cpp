@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
+#include <Core/Text/String.h>
 #include <MaterialSchema/MaterialAssetReference.generated.h>
 #include <MaterialSchema/MaterialAttributeTable.h>
 #include <MaterialSchema/Nodes/Custom/CustomHlslProperties.generated.h>
@@ -842,7 +843,22 @@ Result<void> AggregateDynamicPins(const DynamicPinsInput& input, PinList& out) n
             return added;
         }
 
-        if (auto added = AddOutput(out, key.Value(), type, name); !added) {
+        // 같은 이름의 출력은 키에 Out을 붙인다(핀 키는 방향과 상관없이 유일 — 19.13.3절).
+        String outputKey(scratch);
+        if (auto assigned = outputKey.TryAssign(name); !assigned) {
+            return assigned;
+        }
+
+        if (auto appended = outputKey.TryAppend("Out"); !appended) {
+            return appended;
+        }
+
+        auto output = Intern(input.names, outputKey.View());
+        if (!output) {
+            return Result<void>::Failure(output.Error());
+        }
+
+        if (auto added = AddOutput(out, output.Value(), type, name); !added) {
             return added;
         }
     }

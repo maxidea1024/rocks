@@ -114,6 +114,8 @@ public abstract class TestsModule : ModuleRules
         ["Texture"] = ["ObjectSerialization"],
         ["TextureTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
         ["Material"] = ["AssetTestFixtures"],
+        // The dynamic pin tests write node properties with the reflection codec (SaveStructRecord) before reading them back as a node would.
+        ["MaterialSchema"] = ["ObjectSerialization"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
         ["MeshTools"] = ["AssetTestFixtures"],

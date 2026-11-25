@@ -68,7 +68,7 @@ MS1b는 19.6절 표의 "구현"·"TODO" 노드 297개의 정의(핀·속성 stru
   | DynamicParameter | 출력 Param1–Param4(표시 이름 `paramNames`)·RGB·RGBA | Param1–Param4 |
   | FunctionCall | 함수 입출력 사본 `inputs`·`outputs`(UE `FunctionInputs`·`FunctionOutputs` — 함수가 바뀌면 에디터가 다시 채운다) | `P_<입출력 노드 id 32자 hex>`(NodeGraph GD2) |
   | FunctionInput | Preview 입력과 Result 출력(타입 `inputType`) | Preview·Result |
-  | Aggregate | `attributeNames`마다 입력·출력 한 쌍(MaterialAttributes 종류면 내장 속성 타입, 사용자 종류는 Any — TODO MPQ-MaterialAggregate) | 속성 이름 |
+  | Aggregate | `attributeNames`마다 입력·출력 한 쌍(MaterialAttributes 종류면 내장 속성 타입, 사용자 종류는 Any — TODO MPQ-MaterialAggregate) | 입력은 속성 이름, 출력은 `<이름>Out`(키 충돌 규칙) |
   | GetAttributes·SetAttributes | `attributeGetTypes`·`attributeSetTypes`마다 출력·입력(내장 속성 표의 이름·타입, custom 속성은 표시 없음·Any) | `A_<속성 id 32자 hex>` |
   | LayerStack | 레이어 함수 입력 사본 `layerInputs`(UE `LayerInputs`) | 입력 이름 |
   | MaterialCacheOutput | 표본(`isSample`)이면 Primitive·UV 입력과 `attributes` 출력, 아니면 `attributes` 입력 | 속성 표시 이름 |
