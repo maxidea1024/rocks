@@ -93,10 +93,20 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 
 ### 7.7 MS2a 생성 원문 세부
 
-- **파일.** 생성 파일 `/Engine/Generated/Material.rsh`는 7.3절 정의를 먼저 내고, 진입점 함수를 7.3절 표 순서로 낸다. 정적 원문 `Engine/Shaders/Private/Material/MaterialCommon.rsh`는 문맥 구조체(`MaterialVertexInputs`·`MaterialVertexResult`·`MaterialInputs`)와 `Shading/SurfaceAttributes.rsh` include, 생성 파일 include를 담는다(7.2절). MS2a의 문맥 구조체 칸은 MS2a 노드가 쓰는 것뿐이고 MS2b가 문맥 값 표(19.3.2절)대로 채운다.
-- **함수 몸체.** 진입점에서 닿는 값을 다시 매긴 번호 순으로 `const <타입> m<번호> = <식>;`로 낸다. 상수는 식 안에 리터럴로 바로 쓴다(지역 변수로 두지 않는다). 쓰지 않는 함수는 기본값을 돌려준다(7.3절).
-- **리터럴.** float는 Core StringBuilder `{}`(최단 왕복, C runtime·locale 무관)로 쓰고, 정수 모양이면 `.0`을 붙인다. 벡터는 `float3(a, b, c)`다. 정수는 10진이고 uint는 `u` 접미다. double(LWC) 상수는 MS2b의 LWC 표현(5.3절 — 타일 + 오프셋)으로 낸다.
-- **연산 철자.** 함수 연산은 HLSL 내장 함수 이름이다(`saturate`·`frac`·`lerp`·`rsqrt` 등). IsNan·IsInf는 fast-math가 지우지 않는 비트 검사 함수(`MaterialIsNan`·`MaterialIsInf` — `MaterialCommon.rsh`)로 낸다(6.2절). 0 나누기는 HLSL 그대로다(UE도 그대로).
-- **`DynamicBranch`.** `[branch] if (c) { r = a; } else { r = b; }`로 낸다. MS2a는 두 가지 값을 분기 앞에서 계산한다(값을 가장 좁은 블록에 두는 배치는 후속이다 — UE IR 빌더의 배치 단계, 6.1절).
-- **원문 위치 지도.** 값을 낸 줄마다 원인 노드(NodeId·PinKey)를 기록한다(7.6절). `#line`은 `/Engine/Generated/Material.rsh`만 쓴다.
-- **결정성.** 같은 그래프는 같은 바이트다(6.6절, MS-T1). 노드 저장 순서는 결과에 영향이 없다(출력 핀에서 거슬러 가므로).
+- **파일.** 생성 파일 `/Engine/Generated/Material.rsh`는 7.3절 정의를 먼저 내고, 진입점 함수를 7.3절 표 순서로 낸다. 정적 원문 `Engine/Shaders/Private/Material/MaterialCommon.rsh`는 문맥 구조체(`MaterialVertexInputs`·`MaterialVertexResult`·`MaterialInputs`), 보조 함수, `Shading/SurfaceAttributes.rsh` include, 생성 파일 include를 담는다(7.2절). MS2a의 문맥 구조체 칸은 7.3절 목록의 첫 칸(정점: translated world 위치, 픽셀: 화면 위치)과 `MaterialVertexResult.worldPositionOffset`뿐이고 MS2b가 문맥 값 표(19.3.2절)대로 채운다.
+- **API.** `WriteMaterialSource(allocator, module, traits, asset, graph, out)`가 IR 모듈(6.8절)과 기본 속성으로 `MaterialGeneratedSource { text, locations, diagnostics, succeeded }`를 채운다. 생성할 수 없는 값(MS2a: Double — LWC 표현이 MS2b, `WorldPositionTile`)은 그 값의 원인 노드에 `NotYetLowered`를 진단하고 succeeded가 거짓이다.
+- **정의.** 영역 `MATERIAL_DOMAIN_<영역>`과 블렌드 모드 `MATERIAL_BLEND_<모드>`는 모두 내고 해당하는 것만 1, 나머지는 0이다(pass 원문이 `#if`로 묻는다 — 정의가 없을 때와 0을 가르지 않는다). 블렌드 모드는 Rocks `BlendMode` 여덟 값 전부다(`_ALPHA_HOLDOUT`·`_TRANSLUCENT_COLORED_TRANSMITTANCE` 포함 — Renderer가 그리기 전에는 거르기가 뺀다). `MATERIAL_USES_WPO`·`MATERIAL_USES_PIXEL_DEPTH_OFFSET`은 그 진입점 결과가 있고 상수 0 벡터가 아니면 1이다. `MATERIAL_USES_PREVIOUS_WPO`는 MS2a에서 `MATERIAL_USES_WPO`와 같다(아래). `MATERIAL_USES_OPACITY_MASK`는 블렌드 모드 Masked일 때 1이다. `MATERIAL_SHADING_MODELS`·`MATERIAL_SINGLE_SHADING_MODEL`은 Surface 입력을 번역하는 MS2d 전까지 DefaultLit(비트 1·번호 1 — `DefaultSurfaceAttributes`와 같다)이다. `MATERIAL_NUM_TEXCOORDS`·`MATERIAL_NUM_INTERPOLANT_VECTORS`는 MS2b 전까지 0이다. `MATERIAL_OPACITY_MASK_CLIP`은 `opacityMaskClipValue` 리터럴이다.
+- **함수 몸체.** 진입점 함수마다 그 함수의 결과에서 닿는 값을 모듈 번호 순(6.6절 후위 순 — 피연산자가 먼저)으로 `const <타입> m<번호> = <식>;`로 낸다. 상수는 식 안에 리터럴로 바로 쓴다(지역 변수로 두지 않는다). 여러 함수가 같은 값을 쓰면 함수마다 다시 낸다(함수 사이 공유는 하위 컴파일러가 한다 — 7.3절). 결과가 없는 함수는 기본값을 돌려준다(Opacity·OpacityMask 1, PDO 0, Preview float4 0, Surface는 `DefaultSurfaceAttributes()`, Vertex는 결과를 건드리지 않는다).
+- **진입점 → 함수.** Vertex 결과 `WorldPositionOffset` → `r.worldPositionOffset`. `EvaluateMaterialVertexPrevious`는 MS2a에서 `EvaluateMaterialVertex`를 그대로 부른다(이전 프레임 문맥 값 — 시간·instance — 이 MS2b에 와서야 생기므로 두 값이 같다. MS2b가 이전 진입점을 따로 번역한다). Surface 결과 `AmbientOcclusion` → `s.ambientOcclusion`, Opacity·OpacityMask 결과는 각 함수와 `s.opacity`·`s.opacityMask`에 같은 값으로 쓴다. Surface 결과 `Refraction`·`SurfaceThickness`는 Renderer `SurfaceAttributes`에 칸이 없어 쓰지 않는다(칸이 생기면 Renderer 개정과 함께 쓴다 — 16절 요청).
+- **리터럴.** float는 Core StringBuilder `{}`(최단 왕복, C runtime·locale 무관)로 쓰고, 숫자와 부호만이면 `.0`을 붙인다(`5` → `5.0`, 과학 표기 `1e+20`은 그대로). −0은 `-0.0`이다. 벡터는 `float3(a, b, c)`다. 정수는 10진이고 uint는 `u` 접미, bool은 `true`·`false`다. double(LWC) 값은 MS2b의 LWC 표현(5.3절 — 타일 + 오프셋)으로 내며 MS2a는 진단한다.
+- **연산 철자.** 함수 연산은 HLSL 내장 함수 이름이다(`saturate`·`frac`·`lerp`·`rsqrt`·`trunc` 등). 연산자는 괄호로 감싼다(`(a + b)`). 그 밖에:
+  - Clamp는 `min(max(x, lo), hi)`다(UE 기본 번역기와 같은 식).
+  - `sign`은 HLSL이 int를 돌려주므로 값 타입으로 감싼다(`float3(sign(x))`). 나머지 `%`, Reciprocal `(1.0 / x)`, 행렬 곱 `mul(a, b)`다.
+  - 벡터 조건 선택·논리곱·논리합은 HLSL 2021이 벡터 `?:`·`&&`·`||`를 막으므로 `MaterialSelect`·`MaterialAnd`·`MaterialOr`(`MaterialCommon.rsh` — `ROCKS_HLSL2021`이면 `select`·`and`·`or`, 아니면 연산자)로 낸다.
+  - 빠른 역삼각 함수는 UE `FastMathThirdParty.ush`의 Eberly 다항식과 같은 `MaterialAcosFast`·`MaterialAsinFast`·`MaterialAtanFast`·`MaterialAtan2Fast`다(엔진 `FastAcos` 등은 다른 근사라 쓰지 않는다 — 결과가 UE와 같아야 한다).
+  - HLSL에 없는 역쌍곡 함수는 `MaterialAcosh`·`MaterialAsinh`·`MaterialAtanh`(로그 식)다.
+  - IsNan·IsInf·IsFinite는 fast-math가 지우지 않는 비트 검사 `MaterialIsNan`·`MaterialIsInf`·`MaterialIsFinite`다(6.2절). 0 나누기는 HLSL 그대로다(UE도 그대로).
+- **`DynamicBranch`.** `<타입> m<번호>; [branch] if (c) { m = a; } else { m = b; }`로 낸다. MS2a는 두 가지 값을 분기 앞에서 계산한다(값을 가장 좁은 블록에 두는 배치는 후속이다 — UE IR 빌더의 배치 단계, 6.1절).
+- **원문 위치 지도.** 값을 낸 줄마다 (줄 번호 1부터, 원인 NodeId)를 기록한다(7.6절). 컴파일러는 include 경로로 파일 이름을 알므로 `#line`을 내지 않는다.
+- **결정성.** 같은 그래프는 같은 바이트다(6.6절, MS-T1). 노드 저장 순서와 화면 편집(재경유 추가 포함)은 결과에 영향이 없다(출력 핀에서 거슬러 가고 재경유는 값을 그대로 넘긴다 — MS-T2의 생성 원문 부분).
+- **시험(MS-T3).** fixture 그래프의 생성 원문을 저장된 기대 원문(`Tests/Golden/*.rsh`)과 byte로 견준다. 생성 규칙을 바꾸면 기대 원문을 함께 고친다.
