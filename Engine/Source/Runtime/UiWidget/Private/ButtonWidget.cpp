@@ -42,60 +42,51 @@ Result<void> ButtonWidget::SetInputMethods(ButtonClickMethod click, ButtonClickM
     }
     return Result<void>::Success();
 }
-Result<void> ButtonWidget::SetTints(LinearColor normal, LinearColor hovered,
-                                    LinearColor pressed) noexcept {
-    if (!normal.IsFinite() || !hovered.IsFinite() || !pressed.IsFinite()) {
+Result<void> ButtonWidget::SetStyle(const ButtonStyle& style) noexcept {
+    if (!Button::IsValidStyle(style)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
-    normalTint_ = normal;
-    hoveredTint_ = hovered;
-    pressedTint_ = pressed;
+    style_ = style;
     if (auto live = CachedElement()) {
-        ApplyProperties(*live);
-    }
-    return Result<void>::Success();
-}
-Result<void> ButtonWidget::SetStateBrushes(Optional<Brush> hovered,
-                                           Optional<Brush> pressed) noexcept {
-    if ((hovered && !hovered->IsValid()) || (pressed && !pressed->IsValid())) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-    hoveredBrush_ = Move(hovered);
-    pressedBrush_ = Move(pressed);
-    if (auto live = CachedElement()) {
-        return static_cast<Button&>(*live).SetStateBrushes(hoveredBrush_, pressedBrush_);
+        return static_cast<Button&>(*live).SetStyle(style);
     }
     return Result<void>::Success();
 }
 
-Result<void> ButtonWidget::SetBrush(const Brush& brush) noexcept {
-    if (!brush.IsValid()) {
+const ButtonStyle& ButtonWidget::GetStyle() const noexcept {
+    return style_;
+}
+
+Result<void> ButtonWidget::SetBackgroundColor(LinearColor color) noexcept {
+    if (!color.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
-    brush_ = brush;
+    backgroundColor_ = color;
     if (auto live = CachedElement()) {
-        return static_cast<Button&>(*live).SetBrush(brush);
+        static_cast<Button&>(*live).SetColor(color);
     }
     return Result<void>::Success();
 }
+
+LinearColor ButtonWidget::GetBackgroundColor() const noexcept {
+    return backgroundColor_;
+}
+
 Result<void> ButtonWidget::SetPadding(Vec4 padding) noexcept {
     if (!SlotPlacement{.padding = padding}.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     padding_ = padding;
     if (auto live = CachedElement()) {
-        return static_cast<Button&>(*live).SetPadding(padding);
+        return static_cast<Button&>(*live).SetContentPadding(padding);
     }
     return Result<void>::Success();
 }
 void ButtonWidget::ApplyProperties(Element& element) noexcept {
     auto& button = static_cast<Button&>(element);
-    button.SetColor(normalTint_);
-    button.SetHoveredColor(hoveredTint_);
-    button.SetPressedColor(pressedTint_);
-    (void)button.SetBrush(brush_);
-    (void)button.SetStateBrushes(hoveredBrush_, pressedBrush_);
-    (void)button.SetPadding(padding_);
+    button.SetColor(backgroundColor_);
+    (void)button.SetStyle(style_);
+    (void)button.SetContentPadding(padding_);
     button.SetFocusable(focusable_);
     (void)button.SetInputMethods(static_cast<ButtonClickMethod>(clickMethod_),
                                  static_cast<ButtonClickMethod>(touchMethod_),

@@ -64,9 +64,7 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::CreatePanel(Allocator& allocato
     }
     ElementBuildScope scope(allocator);
     const StackPanel::SlotArgs slots[] = {
-        {.content = Make<Button>({.color = LinearColor{0, 0, 0, 0},
-                                  .pressedColor = {0, 0, 0, 0},
-                                  .padding = {4, 4, 4, 4}})},
+        {.content = Make<Button>({.style = NoBorderButtonStyle(), .contentPadding = {4, 4, 4, 4}})},
         {.content = body.Value()},
     };
     auto root = Build<VerticalStack>({.slots = slots});

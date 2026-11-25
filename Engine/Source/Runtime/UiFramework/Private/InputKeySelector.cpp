@@ -4,9 +4,10 @@
 namespace rocks::ui {
 
 Result<void> InputKeySelector::Construct(Args&& args) noexcept {
-    auto result = Frame::Construct(
-        {.content = args.content, .color = Move(args.color), .desiredSize = Vec2{100, 24}});
+    // 모양은 UE SInputKeySelector처럼 핵심 스타일 "Button"이다.
+    auto result = Button::Construct({.content = args.content, .color = Move(args.color)});
     if (result) {
+        SetDesiredSize({100, 24});
         result = SetSelectedKey(args.selectedKey);
     }
     if (result) {
@@ -23,7 +24,6 @@ Result<void> InputKeySelector::Construct(Args&& args) noexcept {
 InputKeySelector::InputKeySelector(Allocator& allocator) noexcept
     : Button(allocator), allocator_(allocator) {
     SetDesiredSize({100, 24});
-    SetColor({0.12f, 0.12f, 0.12f, 1});
 }
 
 Result<void> InputKeySelector::RefreshCaption(KeyChord chord, bool selecting) noexcept {

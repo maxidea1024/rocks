@@ -95,6 +95,17 @@ const ButtonStyle& SimpleButtonStyle() noexcept {
     return style;
 }
 
+const ButtonStyle& NoBorderButtonStyle() noexcept {
+    static const ButtonStyle style = [] {
+        ButtonStyle noBorder;
+        noBorder.normalForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        noBorder.hoveredForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        noBorder.pressedForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        return noBorder;
+    }();
+    return style;
+}
+
 const TextStyle& NormalTextStyle() noexcept {
     static const TextStyle style{{Typeface::Regular, NormalFontSize}, {ColorSource::Foreground}};
     return style;

@@ -40,7 +40,6 @@ TEST(UiFramework_ButtonPaintsFirstHoverAndLastLeaveAcrossUsers) {
     SystemAllocator allocator;
     Button button(allocator);
     REQUIRE(button.Arrange(Geometry::Root({16, 16}, {})));
-    button.SetHoveredColor({1, 0, 0, 1});
     uint32 enters = 0, leaves = 0;
     button.SetOnHovered(Delegate<void()>::CreateLambda([&]() noexcept { ++enters; }));
     button.SetOnUnhovered(Delegate<void()>::CreateLambda([&]() noexcept { ++leaves; }));
@@ -51,7 +50,8 @@ TEST(UiFramework_ButtonPaintsFirstHoverAndLastLeaveAcrossUsers) {
     PaintList list(allocator);
     REQUIRE(button.OnPaint(list, 0));
     REQUIRE(list.Boxes().Size() == 1);
-    CHECK(list.Boxes()[0].color == LinearColor(1, 0, 0, 1));
+    // 올림 상태는 기본 스타일의 올림 brush(RB(Hover, 4, Input, 1))다.
+    CHECK(list.Boxes()[0].color == DefaultThemeColors().Get(ThemeSlot::Hover));
     button.OnMouseLeave(1);
     CHECK(!button.IsHovered() && leaves == 1);
 }

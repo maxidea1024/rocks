@@ -67,7 +67,8 @@ struct TextStyle {
     bool operator==(const TextStyle&) const noexcept = default;
 };
 
-// 버튼 스타일이다(UE FButtonStyle). 여백은 (왼쪽, 위, 오른쪽, 아래)다.
+// 버튼 스타일이다(UE FButtonStyle). 여백은 (왼쪽, 위, 오른쪽, 아래)다. 기본값은 UE FButtonStyle
+// 생성자와 같다(brush 없음, 여백 0, 전경색 상속).
 struct ButtonStyle {
     StyleBrush normal{};
     StyleBrush hovered{};
@@ -75,10 +76,10 @@ struct ButtonStyle {
     StyleBrush disabled{};
     Vec4 normalPadding{};
     Vec4 pressedPadding{};
-    ColorRef normalForeground = ColorRef::FromTheme(ThemeSlot::Foreground);
-    ColorRef hoveredForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
-    ColorRef pressedForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
-    ColorRef disabledForeground = ColorRef::FromTheme(ThemeSlot::Foreground);
+    ColorRef normalForeground{ColorSource::Foreground};
+    ColorRef hoveredForeground{ColorSource::Foreground};
+    ColorRef pressedForeground{ColorSource::Foreground};
+    ColorRef disabledForeground{ColorSource::Foreground};
     bool operator==(const ButtonStyle&) const noexcept = default;
 };
 
@@ -105,6 +106,10 @@ ROCKS_UICORE_API const ButtonStyle& PrimaryButtonStyle() noexcept;
 
 // 아이콘·단순 버튼 스타일이다(UE "SimpleButton" = SimpleButtonIconOnly — 1493–1495행, 1508행).
 ROCKS_UICORE_API const ButtonStyle& SimpleButtonStyle() noexcept;
+
+// 보이지 않는 버튼 스타일이다(UE "NoBorder" — 232–240행, 252행: brush 없음, 전경 ForegroundHover,
+// 여백 0). 펼침 영역 머리처럼 내용만 보이는 클릭 영역에 쓴다.
+ROCKS_UICORE_API const ButtonStyle& NoBorderButtonStyle() noexcept;
 
 // 보통 텍스트 스타일이다(UE "NormalText" — 1252–1258행: Regular 10, 상속 전경색).
 ROCKS_UICORE_API const TextStyle& NormalTextStyle() noexcept;

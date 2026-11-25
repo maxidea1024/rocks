@@ -5,7 +5,7 @@
 #include <Core/Math/Rect.h>
 #include <UiCore/Geometry.h>
 #include <UiCore/Brush.h>
-#include <UiCore/ThemeColors.h>
+#include <UiCore/ColorRef.h>
 
 namespace rocks::ui {
 
@@ -84,6 +84,11 @@ public:
     void SetTheme(const ThemeColors* theme) noexcept;
     const ThemeColors& Theme() const noexcept;
 
+    // 지금 그리는 요소가 물려받은 전경색이다(UE FWidgetStyle::GetForegroundColor). 루트는 흰색이다.
+    // 텍스트처럼 ColorSource::Foreground 색을 쓰는 요소는 ColorContext()로 푼다.
+    LinearColor ForegroundColor() const noexcept;
+    StyleColorContext ColorContext() const noexcept;
+
     void Clear() noexcept;
 
 private:
@@ -91,6 +96,7 @@ private:
     friend class Element;
     float opacity_ = 1;
     const ThemeColors* theme_ = nullptr;
+    LinearColor foreground_{1, 1, 1, 1};
     struct ClipState {
         Box2<float> bounds;
         bool empty = false;

@@ -80,6 +80,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ButtonWidget::backgroundColor_",
+      "id": "699090be137e429fa4d65b223c90929d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ButtonWidget::clickMethod_",
       "id": "93294cf99b5c42f78423e72784f6dfe1",
       "aliases": [],
@@ -97,14 +104,14 @@
       "name": "rocks::ui::ButtonWidget::hoveredTint_",
       "id": "6b6c0e6f3b11466b9b2eb13f6d90ecea",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::ui::ButtonWidget::normalTint_",
       "id": "998112f37f8942a7812f1018b9269809",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -125,7 +132,7 @@
       "name": "rocks::ui::ButtonWidget::pressedTint_",
       "id": "60cae66a596f4b2bb4563c0dfd909297",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",

@@ -16,7 +16,8 @@ public:
         bool allowModifiers = true;
         bool allowGamepad = false;
         ElementChild content{};
-        Bindable<LinearColor> color{LinearColor{0.12f, 0.12f, 0.12f, 1}};
+        // brush 색에 곱한다(UE ButtonColorAndOpacity).
+        Bindable<LinearColor> color{LinearColor{1, 1, 1, 1}};
         Delegate<Result<void>(StringView)> caption{};
         Delegate<void(KeyChord)> onSelected{};
         ElementArgs common{};

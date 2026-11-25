@@ -198,7 +198,9 @@ SharedPtr<Element> Element::FindChild(const Element* child) const noexcept {
     return {};
 }
 
-PointerReply Element::OnTouchPan(const PointerEvent&, Vec2) noexcept { return {}; }
+PointerReply Element::OnTouchPan(const PointerEvent&, Vec2) noexcept {
+    return {};
+}
 
 void Element::OnPointerReleaseInPath(const PointerEvent&) noexcept {
 }
@@ -211,18 +213,28 @@ input::WindowRegion Element::GetWindowRegion() const noexcept {
     return input::WindowRegion::Client;
 }
 
-void Element::SetCursorOverride(input::MouseCursor cursor) noexcept {cursorOverride_=static_cast<uint8>(cursor);}
-void Element::ResetCursorOverride() noexcept {cursorOverride_=255;}
+void Element::SetCursorOverride(input::MouseCursor cursor) noexcept {
+    cursorOverride_ = static_cast<uint8>(cursor);
+}
+void Element::ResetCursorOverride() noexcept {
+    cursorOverride_ = 255;
+}
 input::MouseCursor Element::ResolveMouseCursor(Vec2 position) const noexcept {
-    for (auto* node=this;node;node=node->Parent()) {
-        if (node->cursorOverride_ != 255) {return static_cast<input::MouseCursor>(node->cursorOverride_);}
-        auto cursor=node->QueryMouseCursor(position);
-        if (cursor != input::MouseCursor::Arrow) {return cursor;}
+    for (auto* node = this; node; node = node->Parent()) {
+        if (node->cursorOverride_ != 255) {
+            return static_cast<input::MouseCursor>(node->cursorOverride_);
+        }
+        auto cursor = node->QueryMouseCursor(position);
+        if (cursor != input::MouseCursor::Arrow) {
+            return cursor;
+        }
     }
     return input::MouseCursor::Arrow;
 }
-void Element::OnMouseEnter(uint32) noexcept {}
-void Element::OnMouseLeave(uint32) noexcept {}
+void Element::OnMouseEnter(uint32) noexcept {
+}
+void Element::OnMouseLeave(uint32) noexcept {
+}
 input::MouseCursor Element::QueryMouseCursor(Vec2) const noexcept {
     return input::MouseCursor::Arrow;
 }
@@ -293,7 +305,11 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
 
     if (!cache && !inheritedVolatile) {
         if (auto* local = LocalPaintCache()) {
-            auto updated = local->Update(*this, layer);
+            // 지역 캐시도 바깥 테마·전경색으로 기록한다(달라지면 Update가 전체를 다시 만든다).
+            if (&local->scratch_.Theme() != &list.Theme()) {
+                local->SetTheme(&list.Theme());
+            }
+            auto updated = local->Update(*this, layer, list.foreground_);
             if (!updated) {
                 return updated;
             }
@@ -310,9 +326,12 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
 
     const usize entry = cache ? cache->next_.Size() : 0;
     const float parentOpacity = list.opacity_;
+    const LinearColor parentForeground = list.foreground_;
     list.opacity_ *= renderOpacity_;
+    list.foreground_ = ResolveForeground(list.Theme(), parentForeground);
     auto result = PaintContents(list, layer, highest, cache, inheritedVolatile || IsVolatile());
     list.opacity_ = parentOpacity;
+    list.foreground_ = parentForeground;
     if (cache && result) {
         cache->next_[entry].subtreeEnd = cache->next_.Size();
     }
@@ -368,7 +387,7 @@ Result<void> Element::PaintContents(PaintList& list, int32 layer, int32& highest
         }
         if (cache) {
             cache->next_[childBody].parentBody = body;
-            cache->next_[cache->next_.Size()-1].parentBody = body;
+            cache->next_[cache->next_.Size() - 1].parentBody = body;
         }
         previous = i;
     }
@@ -528,7 +547,9 @@ void Element::SetVolatile(bool enabled) noexcept {
 }
 
 Result<void> Element::SetRenderOpacity(float opacity) noexcept {
-    if (!math::IsFinite(opacity) || opacity < 0 || opacity > 1) {return Result<void>::Failure(ErrorCode::InvalidArgument);}
+    if (!math::IsFinite(opacity) || opacity < 0 || opacity > 1) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
     if (renderOpacity_ != opacity) {
         renderOpacity_ = opacity;
         // 캐시는 부모 본문을 통해 누적 알파가 달라진 자식만 다시 기록한다.
@@ -537,7 +558,30 @@ Result<void> Element::SetRenderOpacity(float opacity) noexcept {
     return Result<void>::Success();
 }
 
-float Element::GetRenderOpacity() const noexcept {return renderOpacity_;}
+float Element::GetRenderOpacity() const noexcept {
+    return renderOpacity_;
+}
+
+Result<void> Element::SetForegroundColor(ColorRef color) noexcept {
+    if (!color.IsValid()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (foregroundColor_ != color) {
+        foregroundColor_ = color;
+        // 캐시는 부모 본문을 통해 상속 전경색이 달라진 자식만 다시 기록한다.
+        InvalidatePaint();
+    }
+    return Result<void>::Success();
+}
+
+ColorRef Element::GetForegroundColor() const noexcept {
+    return foregroundColor_;
+}
+
+LinearColor Element::ResolveForeground(const ThemeColors& theme,
+                                       LinearColor inherited) const noexcept {
+    return GetForegroundColor().Resolve(theme, {inherited, inherited});
+}
 
 void Element::SetForceVolatile(bool enabled) noexcept {
     if (forceVolatile_ != enabled) {

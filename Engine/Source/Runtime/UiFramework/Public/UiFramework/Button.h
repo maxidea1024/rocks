@@ -2,6 +2,7 @@
 
 #include <Core/Delegate.h>
 #include <Core/Optional.h>
+#include <UiCore/Style.h>
 #include <UiFramework/Frame.h>
 
 namespace rocks::ui {
@@ -19,22 +20,31 @@ enum class ButtonPressMethod : uint8 {
     Up
 };
 
+// 상태별 모양은 ButtonStyle이 정한다(UE SButton·FButtonStyle, UiToolkit 9.1절 UW3c). 기본은 UE 5.8
+// 에디터 핵심 스타일 "Button"이다.
+//
+// 사용 예:
+//   Make<Button>({.content = Label("Apply"), .style = PrimaryButtonStyle(), .onClicked = apply});
 class ROCKS_UIFRAMEWORK_API Button : public Frame {
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     using Super = Frame;
     struct Args {
         ElementChild content{};
+        // 값을 복사한다. 상태별 brush·여백·전경색을 담는다.
+        ButtonStyle style = DefaultButtonStyle();
+        // brush 색에 곱한다(UE ButtonColorAndOpacity). 기본 흰색은 스타일 색 그대로다.
         Bindable<LinearColor> color{LinearColor{1, 1, 1, 1}};
-        LinearColor pressedColor{0.8f, 0.8f, 0.8f, 1};
-        Vec4 padding{};
+        // 자식 전경색이다. 없으면 스타일의 상태별 전경색이다(UE ForegroundColor = UseStyle).
+        Optional<ColorRef> foregroundColor{};
+        // 스타일의 보통·눌림 여백에 더한다(UE ContentPadding·GetCombinedPadding).
+        Vec4 contentPadding{};
         ElementArgs common{};
         Delegate<void()> onClicked{};
         ButtonClickMethod clickMethod = ButtonClickMethod::DownAndUp;
         ButtonClickMethod touchMethod = ButtonClickMethod::DownAndUp;
         ButtonPressMethod pressMethod = ButtonPressMethod::DownAndUp;
         bool focusable = true;
-        Optional<LinearColor> hoveredColor{};
         Delegate<void()> onPressed{}, onReleased{}, onHovered{}, onUnhovered{};
     };
 
@@ -54,15 +64,19 @@ public:
     Result<void> SetInputMethods(ButtonClickMethod click, ButtonClickMethod touch,
                                  ButtonPressMethod press) noexcept;
     void SetFocusable(bool enabled) noexcept;
-    // 기본 브러시는 Frame에서 관리한다. 상태별 브러시를 생략하면 기본 브러시를 쓴다.
-    Result<void> SetStateBrushes(Optional<Brush> hovered, Optional<Brush> pressed) noexcept;
-    void SetHoveredColor(LinearColor color) noexcept;
+    // 여백이 음수·비유한이거나 brush·색이 그릴 수 없는 값이면 InvalidArgument다.
+    Result<void> SetStyle(const ButtonStyle& style) noexcept;
+    static bool IsValidStyle(const ButtonStyle& style) noexcept;
+    const ButtonStyle& GetStyle() const noexcept;
+    Result<void> SetContentPadding(Vec4 padding) noexcept;
+    Vec4 GetContentPadding() const noexcept;
     bool IsHovered() const noexcept;
     void OnMouseEnter(uint32 user) noexcept override;
     void OnMouseLeave(uint32 user) noexcept override;
-    void SetPressedColor(LinearColor color) noexcept;
-
     bool IsPressed() const noexcept;
+
+    // SetForegroundColor로 정하지 않았으면(ColorSource::Style) 상태별 스타일 전경색이다.
+    ColorRef GetForegroundColor() const noexcept override;
 
     bool SupportsKeyboardFocus() const noexcept override;
 
@@ -81,11 +95,16 @@ public:
 protected:
     LinearColor CurrentColor() const noexcept;
 
+    // 지금 상태(비활성·눌림·올림·보통)의 스타일 brush다.
+    const StyleBrush& CurrentStyleBrush() const noexcept;
+
     // 입력 방식과 무관하게 활성화될 때 호출한다.
     virtual void OnActivated() noexcept;
 
 private:
     void ReleasePointer() noexcept;
+    // 눌림 상태가 바뀌면 스타일 여백 + 내용 여백을 다시 정한다(UE UpdatePadding).
+    void UpdatePadding() noexcept;
     void Activate() noexcept;
 
     Delegate<void()> onClicked_, onPressed_, onReleased_, onHovered_, onUnhovered_;
@@ -97,10 +116,8 @@ private:
     Vec2 pressOrigin_{};
     uint32 hoverCount_ = 0;
     bool focusable_ = true;
-    Optional<Brush> hoveredBrush_, pressedBrush_;
-    bool hasHoveredColor_ = false;
-    LinearColor hoveredColor_{1, 1, 1, 1};
-    LinearColor pressedColor_{0.8f, 0.8f, 0.8f, 1.0f};
+    ButtonStyle style_ = DefaultButtonStyle();
+    Vec4 contentPadding_{};
     PointerSource pointerSource_ = PointerSource::Mouse;
     uint32 userId_ = 0;
     uint32 pointerId_ = 0;

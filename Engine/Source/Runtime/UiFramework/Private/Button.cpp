@@ -3,18 +3,22 @@
 namespace rocks::ui {
 
 Result<void> Button::Construct(Args&& args) noexcept {
-    auto status = Frame::Construct(
-        {.content = args.content, .color = Move(args.color), .padding = args.padding});
+    auto status = Frame::Construct({.content = args.content, .color = Move(args.color)});
     if (status) {
-        SetPressedColor(args.pressedColor);
+        status = SetStyle(args.style);
+    }
+    if (status) {
+        status = SetContentPadding(args.contentPadding);
+    }
+    if (status && args.foregroundColor) {
+        status = SetForegroundColor(*args.foregroundColor);
+    }
+    if (status) {
         SetOnClicked(Move(args.onClicked));
         SetOnPressed(Move(args.onPressed));
         SetOnReleased(Move(args.onReleased));
         SetOnHovered(Move(args.onHovered));
         SetOnUnhovered(Move(args.onUnhovered));
-        if (args.hoveredColor) {
-            SetHoveredColor(*args.hoveredColor);
-        }
         SetFocusable(args.focusable);
         status = SetInputMethods(args.clickMethod, args.touchMethod, args.pressMethod);
     }
@@ -22,6 +26,9 @@ Result<void> Button::Construct(Args&& args) noexcept {
 }
 
 Button::Button(Allocator& allocator) noexcept : Frame(allocator) {
+    // UE SButton의 ForegroundColor 기본값 UseStyle이다.
+    (void)SetForegroundColor(ColorRef{ColorSource::Style});
+    UpdatePadding();
 }
 
 void Button::SetOnClicked(Delegate<void()>&& callback) noexcept {
@@ -57,29 +64,60 @@ void Button::SetFocusable(bool enabled) noexcept {
         OnKeyCancelled(keyUserId_, pressedKey_);
     }
 }
-Result<void> Button::SetStateBrushes(Optional<Brush> hovered, Optional<Brush> pressed) noexcept {
-    if ((hovered && !hovered->IsValid()) || (pressed && !pressed->IsValid())) {
+bool Button::IsValidStyle(const ButtonStyle& style) noexcept {
+    const auto validPadding = [](Vec4 padding) noexcept {
+        return padding.IsFinite() && padding.x >= 0 && padding.y >= 0 && padding.z >= 0 &&
+               padding.w >= 0;
+    };
+    const ThemeColors& theme = DefaultThemeColors();
+    const StyleBrush* brushes[] = {&style.normal, &style.hovered, &style.pressed, &style.disabled};
+    for (const StyleBrush* brush : brushes) {
+        if (!brush->fill.IsValid() || !brush->outlineColor.IsValid() ||
+            !brush->Resolve(theme, {}).IsValid()) {
+            return false;
+        }
+    }
+    return validPadding(style.normalPadding) && validPadding(style.pressedPadding) &&
+           style.normalForeground.IsValid() && style.hoveredForeground.IsValid() &&
+           style.pressedForeground.IsValid() && style.disabledForeground.IsValid();
+}
+
+Result<void> Button::SetStyle(const ButtonStyle& style) noexcept {
+    if (!IsValidStyle(style)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
-    const bool changed = hovered.HasValue() != hoveredBrush_.HasValue() ||
-                         pressed.HasValue() != pressedBrush_.HasValue() ||
-                         (hovered && *hovered != *hoveredBrush_) ||
-                         (pressed && *pressed != *pressedBrush_);
-    if (changed) {
-        hoveredBrush_ = Move(hovered);
-        pressedBrush_ = Move(pressed);
+    if (style_ != style) {
+        style_ = style;
         InvalidatePaint();
+        UpdatePadding();
     }
     return Result<void>::Success();
 }
 
-void Button::SetHoveredColor(LinearColor color) noexcept {
-    hoveredColor_ = color;
-    hasHoveredColor_ = true;
-    if (IsHovered()) {
-        InvalidatePaint();
-    }
+const ButtonStyle& Button::GetStyle() const noexcept {
+    return style_;
 }
+
+Result<void> Button::SetContentPadding(Vec4 padding) noexcept {
+    if (!padding.IsFinite() || padding.x < 0 || padding.y < 0 || padding.z < 0 || padding.w < 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (contentPadding_ != padding) {
+        contentPadding_ = padding;
+        UpdatePadding();
+    }
+    return Result<void>::Success();
+}
+
+Vec4 Button::GetContentPadding() const noexcept {
+    return contentPadding_;
+}
+
+void Button::UpdatePadding() noexcept {
+    const Vec4 state = IsPressed() ? style_.pressedPadding : style_.normalPadding;
+    (void)SetPadding(state + contentPadding_);
+}
+
 bool Button::IsHovered() const noexcept {
     return hoverCount_ != 0;
 }
@@ -102,14 +140,8 @@ void Button::OnMouseLeave(uint32 user) noexcept {
 void Button::ReleasePointer() noexcept {
     pressed_ = false;
     InvalidatePaint();
+    UpdatePadding();
     onReleased_.ExecuteIfBound();
-}
-
-void Button::SetPressedColor(LinearColor color) noexcept {
-    if (pressedColor_ != color) {
-        pressedColor_ = color;
-        InvalidatePaint();
-    }
 }
 
 bool Button::IsPressed() const noexcept {
@@ -129,6 +161,7 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
         if (!keyPressed_ && !event.repeat) {
             keyPressed_ = true;
             InvalidatePaint();
+            UpdatePadding();
             keyUserId_ = userId;
             pressedKey_ = event.key;
             activePress_ = pressMethod_;
@@ -144,6 +177,7 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
         pressedKey_ == event.key) {
         keyPressed_ = false;
         InvalidatePaint();
+        UpdatePadding();
         const bool activate = activePress_ != ButtonPressMethod::Down;
         onReleased_.ExecuteIfBound();
         if (activate) {
@@ -168,6 +202,7 @@ void Button::OnKeyCancelled(uint32 userId, input::Key key) noexcept {
     if (keyPressed_ && keyUserId_ == userId && key == pressedKey_) {
         keyPressed_ = false;
         InvalidatePaint();
+        UpdatePadding();
         onReleased_.ExecuteIfBound();
     }
 }
@@ -181,6 +216,7 @@ PointerReply Button::OnPointerEvent(const PointerEvent& event) noexcept {
     if (event.type == PointerEventType::Down && !pressed_) {
         pressed_ = true;
         InvalidatePaint();
+        UpdatePadding();
         pointerSource_ = event.source;
         pointerId_ = event.pointerId;
         userId_ = event.userId;
@@ -237,16 +273,38 @@ void Button::OnPointerCaptureLost(PointerSource source, uint32 userId, uint32 po
 }
 
 Result<void> Button::OnPaint(PaintList& list, int32 layer) const noexcept {
-    const auto& brush = IsPressed() && pressedBrush_   ? *pressedBrush_
-                        : IsHovered() && hoveredBrush_ ? *hoveredBrush_
-                                                       : GetBrush();
-    return list.TryAddBrush(GetGeometry(), brush, CurrentColor(), layer);
+    const StyleBrush& style = CurrentStyleBrush();
+    if (style.mode == BrushMode::None) {
+        return Result<void>::Success();
+    }
+    // brush 색은 테마로 풀고 ButtonColorAndOpacity를 곱한다(UE SButton::OnPaint).
+    return list.TryAddBrush(GetGeometry(), style.Resolve(list.Theme(), list.ColorContext()),
+                            CurrentColor(), layer);
 }
 
 LinearColor Button::CurrentColor() const noexcept {
-    return IsPressed()                       ? pressedColor_
-           : IsHovered() && hasHoveredColor_ ? hoveredColor_
-                                             : GetColor();
+    return GetColor();
+}
+
+const StyleBrush& Button::CurrentStyleBrush() const noexcept {
+    // UE는 비활성 brush가 있으면 그것을, 없으면 보통 상태 brush에 비활성 효과를 쓴다.
+    if (!IsEnabled() && style_.disabled.mode != BrushMode::None) {
+        return style_.disabled;
+    }
+    return IsPressed() ? style_.pressed : IsHovered() ? style_.hovered : style_.normal;
+}
+
+ColorRef Button::GetForegroundColor() const noexcept {
+    const ColorRef assigned = Element::GetForegroundColor();
+    if (!IsEnabled()) {
+        return style_.disabledForeground;
+    }
+    if (assigned.source != ColorSource::Style) {
+        return assigned;
+    }
+    return IsPressed()   ? style_.pressedForeground
+           : IsHovered() ? style_.hoveredForeground
+                         : style_.normalForeground;
 }
 
 void Button::OnActivated() noexcept {

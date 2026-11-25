@@ -7,6 +7,7 @@
 #include <UiCore/KeyChord.h>
 #include <UiCore/NavigationRule.h>
 #include <Core/Text/String.h>
+#include <UiCore/ColorRef.h>
 #include <UiCore/PaintList.h>
 
 namespace rocks::ui {
@@ -227,6 +228,13 @@ public:
     void SetVolatile(bool enabled) noexcept;
     Result<void> SetRenderOpacity(float opacity) noexcept;
     float GetRenderOpacity() const noexcept;
+
+    // 자식에게 물려줄 전경색이다(UE SWidget::GetForegroundColor·FWidgetStyle, UiToolkit 9.1절
+    // UW3c). 기본은 부모 전경색 상속(ColorSource::Foreground)이다. 텍스트·아이콘은 그릴 때
+    // PaintList::ForegroundColor()로 상속 색을 푼다. 파생 클래스는 상태별 색(버튼 올림 등)을 돌려줄
+    // 수 있고, 바꿀 때 InvalidatePaint를 부른다. 잘못된 ColorRef는 InvalidArgument다.
+    Result<void> SetForegroundColor(ColorRef color) noexcept;
+    virtual ColorRef GetForegroundColor() const noexcept;
     bool IsVolatile() const noexcept;
     // 게임 위젯이 지정한 상시 갱신 요청이다. 네이티브 애니메이션의 자체 갱신 상태와 독립적이다.
     void SetForceVolatile(bool enabled) noexcept;
@@ -291,6 +299,8 @@ private:
     usize subtreeBindings_ = 0;
     uint64 bindingPass_ = 0;
 
+    // 부모 전경색 inherited 아래에서 이 요소가 자식에게 물려줄 전경색이다.
+    LinearColor ResolveForeground(const ThemeColors& theme, LinearColor inherited) const noexcept;
     Result<void> PaintSubtree(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
                               bool inheritedVolatile) const noexcept;
     Result<void> PaintContents(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
@@ -303,6 +313,7 @@ private:
     Vec2 renderPivot_{};
     uint8 cursorOverride_ = 255;
     float renderOpacity_ = 1;
+    ColorRef foregroundColor_{ColorSource::Foreground};
     bool hasRenderTransform_ = false;
     Vec2 desiredSize_{};
     Vec2 desiredSeenByParent_{};

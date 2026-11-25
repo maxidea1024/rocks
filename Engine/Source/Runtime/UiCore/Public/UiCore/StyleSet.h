@@ -52,8 +52,8 @@ private:
 };
 
 // UE 5.8 에디터 핵심 스타일 중 Rocks 형식이 있는 항목을 넣는다(14장 — "Button", "PrimaryButton",
-// "SimpleButton", "NormalText", "SmallText", "Text.Large", "PrimaryButtonText"). 이름은 UE 키와
-// 같다 (StarshipCoreStyle.cpp 1333–1339행, 1503–1511행).
+// "SimpleButton", "NoBorder", "NormalText", "SmallText", "Text.Large", "PrimaryButtonText"). 이름은
+// UE 키와 같다 (StarshipCoreStyle.cpp 1333–1339행, 1503–1511행).
 ROCKS_UICORE_API Result<void> AddCoreStyles(StyleSet& styles) noexcept;
 
 } // namespace rocks::ui

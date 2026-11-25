@@ -243,8 +243,17 @@ const ThemeColors& PaintList::Theme() const noexcept {
     return theme_ ? *theme_ : DefaultThemeColors();
 }
 
+LinearColor PaintList::ForegroundColor() const noexcept {
+    return foreground_;
+}
+
+StyleColorContext PaintList::ColorContext() const noexcept {
+    return {foreground_, foreground_};
+}
+
 void PaintList::Clear() noexcept {
     opacity_ = 1;
+    foreground_ = {1, 1, 1, 1};
     boxes_.Clear();
     clips_.Clear();
 }

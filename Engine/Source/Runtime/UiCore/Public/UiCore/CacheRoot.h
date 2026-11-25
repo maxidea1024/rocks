@@ -26,7 +26,10 @@ public:
     // 기록에 쓸 테마를 바꾸고 기록을 모두 버린다(다음 Update가 전체를 다시 그린다). nullptr이면
     // DefaultThemeColors()다. 테마는 이 캐시보다 오래 살아야 한다.
     void SetTheme(const ThemeColors* theme) noexcept;
-    Result<void> Update(const Element& root, int32 layer) noexcept;
+    // inheritedForeground는 root가 부모에게서 물려받은 전경색이다(창 루트는 흰색). 기록 때와 다르면
+    // 전체를 다시 만든다.
+    Result<void> Update(const Element& root, int32 layer,
+                        LinearColor inheritedForeground = {1, 1, 1, 1}) noexcept;
     const PaintList& List() const noexcept;
     int32 HighestLayer() const noexcept;
     uint64 Revision() const noexcept;
@@ -48,6 +51,9 @@ private:
         PaintList::ClipState clip;
         float opacity;
         float nextOpacity;
+        // 기록 때 이 요소가 자식에게 물려준 전경색과, 이번 판에 다시 계산한 값이다.
+        LinearColor foreground;
+        LinearColor nextForeground;
         // 본문과 전경은 같은 부모 본문을 참조한다. 캐시 루트는 부모를 갖지 않는다.
         usize parentBody = MaxSize;
         bool clipped;
@@ -74,6 +80,7 @@ private:
     const Element* root_ = nullptr;
     uint64 plan_ = 0, paint_ = 0, revision_ = 0;
     int32 layer_ = 0, highest_ = 0;
+    LinearColor rootForeground_{1, 1, 1, 1};
     PaintCacheStats stats_{};
     bool verticesOnly_ = false;
 };

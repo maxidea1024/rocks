@@ -250,12 +250,10 @@ Result<SharedPtr<Element>> OrbitWorkspace::Inspector() noexcept {
         {maximum, Label("100%", 13, Muted)},
         {Row(28, 261, 28, 1), fill(Line)},
         {Row(28, 285, 28, 24), check.Value()},
-        {Rect(28, 340, 187, 44),
-         Make<Button>({.content = Label("출발점으로 되돌리기", 15, Space),
-                       .color = LinearColor::FromSRGB(Mint),
-                       .pressedColor = LinearColor::FromSRGB({85, 191, 178}),
-                       .padding = {18, 10, 12, 0},
-                       .onClicked = Bind(this, &OrbitWorkspace::Rewind)})},
+        {Rect(28, 340, 187, 44), Make<Button>({.content = Label("출발점으로 되돌리기", 15, Space),
+                                               .style = PrimaryButtonStyle(),
+                                               .contentPadding = {6, 8.5f, 0, 0},
+                                               .onClicked = Bind(this, &OrbitWorkspace::Rewind)})},
         {Row(28, 402, 28, 24), Label("Home  출발점     End  종료점", 13, Muted)},
     };
     auto scroll = Build<ScrollView>(

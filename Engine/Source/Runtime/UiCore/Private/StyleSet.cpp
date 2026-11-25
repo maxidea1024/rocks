@@ -76,6 +76,9 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
         added = styles.SetButton("SimpleButton", SimpleButtonStyle());
     }
     if (added) {
+        added = styles.SetButton("NoBorder", NoBorderButtonStyle());
+    }
+    if (added) {
         added = styles.SetText("NormalText", NormalTextStyle());
     }
     if (added) {

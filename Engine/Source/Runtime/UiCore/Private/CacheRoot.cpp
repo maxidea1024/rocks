@@ -53,9 +53,12 @@ Span<const PaintRange> CacheRoot::ChangedRanges() const noexcept {
     return ranges_.View();
 }
 
-Result<void> CacheRoot::Update(const Element& root, int32 layer) noexcept {
+Result<void> CacheRoot::Update(const Element& root, int32 layer,
+                               LinearColor inheritedForeground) noexcept {
     stats_ = {};
-    if (root_ != &root || plan_ != root.planRevision_ || layer_ != layer) {
+    if (root_ != &root || plan_ != root.planRevision_ || layer_ != layer ||
+        rootForeground_ != inheritedForeground) {
+        rootForeground_ = inheritedForeground;
         return Rebuild(root, layer);
     }
     if (volatileEntries_.IsEmpty() && paint_ == root.subtreePaintRevision_) {
@@ -75,6 +78,8 @@ Result<void> CacheRoot::Record(const Element& element, int32 layer, bool overlay
     entry.subtreeRevision = element.subtreePaintRevision_;
     entry.opacity = scratch_.opacity_;
     entry.nextOpacity = entry.opacity;
+    entry.foreground = scratch_.foreground_;
+    entry.nextForeground = entry.foreground;
     entry.clipped = !scratch_.clips_.IsEmpty();
     if (entry.clipped) {
         entry.clip = scratch_.clips_[scratch_.clips_.Size() - 1];
@@ -101,6 +106,7 @@ Result<void> CacheRoot::Record(const Element& element, int32 layer, bool overlay
 
 Result<void> CacheRoot::Rebuild(const Element& root, int32 layer) noexcept {
     scratch_.Clear();
+    scratch_.foreground_ = rootForeground_;
     next_.Clear();
     const uint64 plan = root.planRevision_;
     const uint64 paint = root.subtreePaintRevision_;
@@ -156,10 +162,16 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
             const float inherited =
                 entry.parentBody == MaxSize ? 1.0f : entries_[entry.parentBody].nextOpacity;
             entry.nextOpacity = inherited * entry.element->GetRenderOpacity();
-            const bool opacityChanged = entry.nextOpacity != entry.opacity;
+            const LinearColor inheritedForeground = entry.parentBody == MaxSize
+                                                        ? rootForeground_
+                                                        : entries_[entry.parentBody].nextForeground;
+            entry.nextForeground =
+                entry.element->ResolveForeground(scratch_.Theme(), inheritedForeground);
+            const bool inheritedChanged =
+                entry.nextOpacity != entry.opacity || entry.nextForeground != entry.foreground;
             if (!entry.overlay) {
                 if (entry.subtreeRevision == entry.element->subtreePaintRevision_ &&
-                    !entry.subtreeVolatile && !opacityChanged) {
+                    !entry.subtreeVolatile && !inheritedChanged) {
                     i = entry.subtreeEnd - 1;
                     continue;
                 }
@@ -170,7 +182,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                     }
                 }
             }
-            if (opacityChanged || entry.everyFrame ||
+            if (inheritedChanged || entry.everyFrame ||
                 entry.revision != entry.element->paintRevision_) {
                 auto queued = changed_.TryPushBack(i);
                 if (!queued) {
@@ -202,6 +214,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
         }
         int32 highest = entry.layer;
         scratch_.opacity_ = paint != paint_ ? entry.nextOpacity : entry.opacity;
+        scratch_.foreground_ = paint != paint_ ? entry.nextForeground : entry.foreground;
         auto painted =
             Record(*entry.element, entry.layer, entry.overlay, entry.everyFrame, highest);
         if (entry.clipped) {
@@ -241,6 +254,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 commands = scratch_.Boxes().Slice(replacement.first, replacement.count);
                 entry.count = replacement.count;
                 entry.opacity = replacement.opacity;
+                entry.foreground = replacement.foreground;
                 entry.revision = replacement.revision;
             }
             entry.first = assembled_.Boxes().Size();
@@ -271,6 +285,10 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 compatible &= old.layer == updated.layer && old.resource == updated.resource &&
                               old.operation == updated.operation &&
                               old.cornerRadius == updated.cornerRadius &&
+                              old.roundedBox == updated.roundedBox &&
+                              old.roundedSize == updated.roundedSize &&
+                              old.outlineWidth == updated.outlineWidth &&
+                              old.outlineColor == updated.outlineColor &&
                               old.hasClip == updated.hasClip &&
                               old.emptyClip == updated.emptyClip &&
                               (!old.hasClip || old.clip == updated.clip);
@@ -285,6 +303,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 (void)ranges_.TryPushBack({entry.first, entry.count});
             }
             entry.opacity = replacement.opacity;
+            entry.foreground = replacement.foreground;
             entry.revision = replacement.revision;
         }
         if (different) {
