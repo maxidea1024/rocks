@@ -1,3 +1,4 @@
+#include <Core/Encoding/Sha256.h>
 #include "MeshSourceInternal.h"
 
 #include <Base/Endian.h>
@@ -9,6 +10,32 @@
 // 원본 메시의 저장(Store)과 읽기(Load)다(Docs/Design/MeshAnimationAssets 3.4·3.7·9.1·9.2절).
 // 모든 배치는 little-endian이고 정렬 패딩이 없다.
 namespace rocks {
+
+// 원본 bulk를 읽는 곳이다(로드한 패키지 또는 쿠킹·저장의 bulk 원본 — 둘 중 하나).
+struct MeshSourceBulkReader {
+    const Package* package = nullptr;
+    PackageBulkSource* source = nullptr;
+
+    Result<Span<const uint8>> Read(const BulkDataRef& ref) const noexcept {
+        if (package != nullptr) {
+            return package->BulkBytes(ref);
+        }
+
+        // bulk 원본은 크기·SHA-256을 보지 않으므로 여기서 ref와 대조한다(빈 ref는 BulkBytes와 같은
+        // 오류, 다르면 BulkBytes처럼 TypeMismatch — 쿠킹은 원본 SHA로 너겟 키를 만든다).
+        if (ref.IsEmpty()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto bytes = source->ReadBulk(ref);
+        if (bytes &&
+            (bytes.Value().Size() != ref.rawBytes || Sha256::Hash(bytes.Value()) != ref.sha256)) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        return bytes;
+    }
+};
 
 namespace {
 
@@ -288,11 +315,11 @@ Result<void> CorruptLayout(MeshDiagnostic* failure, MeshIssue issue,
                                            index);
 }
 
-// ref의 bulk를 읽는다. 못 읽으면 CorruptPackage(BulkUnreadable)와 BulkBytes의 오류다.
-Result<Span<const uint8>> ReadStorageBulk(const Package& package, const BulkDataRef& ref,
-                                          MeshDiagnostic* failure, MeshElement element,
-                                          uint32 attribute) noexcept {
-    auto bytes = package.BulkBytes(ref);
+// ref의 bulk를 읽는다. 못 읽으면 CorruptPackage(BulkUnreadable)와 읽기 오류다.
+Result<Span<const uint8>> ReadStorageBulk(const MeshSourceBulkReader& reader,
+                                          const BulkDataRef& ref, MeshDiagnostic* failure,
+                                          MeshElement element, uint32 attribute) noexcept {
+    auto bytes = reader.Read(ref);
     if (!bytes) {
         (void)rocks::mesh_source_detail::Fail(failure, AssetDiagnosticCode::CorruptPackage,
                                               bytes.Error(), MeshIssue::BulkUnreadable, element,
@@ -755,6 +782,20 @@ Result<void> MeshSource::Store(MemoryBulkSource& bulk, NamePool& names, MeshSour
 
 Result<void> MeshSource::Load(const MeshSourceData& data, const Package& package, NamePool& names,
                               MeshDiagnostic* failure) noexcept {
+    MeshSourceBulkReader reader;
+    reader.package = &package;
+    return LoadFrom(data, reader, names, failure);
+}
+
+Result<void> MeshSource::Load(const MeshSourceData& data, PackageBulkSource& bulk, NamePool& names,
+                              MeshDiagnostic* failure) noexcept {
+    MeshSourceBulkReader reader;
+    reader.source = &bulk;
+    return LoadFrom(data, reader, names, failure);
+}
+
+Result<void> MeshSource::LoadFrom(const MeshSourceData& data, const MeshSourceBulkReader& reader,
+                                  NamePool& names, MeshDiagnostic* failure) noexcept {
     if (data.formatVersion != MeshSourceFormatVersion) {
         return rocks::mesh_source_detail::Fail(failure, AssetDiagnosticCode::UnsupportedVersion,
                                                ErrorCode::Unsupported, MeshIssue::FormatVersion);
@@ -776,7 +817,7 @@ Result<void> MeshSource::Load(const MeshSourceData& data, const Package& package
     }
 
     auto topology =
-        ReadStorageBulk(package, data.topology, failure, MeshElement::Invalid, MeshNoAttribute);
+        ReadStorageBulk(reader, data.topology, failure, MeshElement::Invalid, MeshNoAttribute);
     if (!topology) {
         return Result<void>::Failure(topology.Error());
     }
@@ -838,7 +879,7 @@ Result<void> MeshSource::Load(const MeshSourceData& data, const Package& package
             return assigned;
         }
 
-        auto values = ReadStorageBulk(package, record.data, failure, record.element, recordIndex);
+        auto values = ReadStorageBulk(reader, record.data, failure, record.element, recordIndex);
         if (!values) {
             return Result<void>::Failure(values.Error());
         }

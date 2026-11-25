@@ -104,7 +104,7 @@ public abstract class TestsModule : ModuleRules
         ["Material"] = ["AssetTestFixtures"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
-        ["MeshTools"] = ["AssetTestFixtures"],
+        ["MeshTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
         ["ModuleLoader"] = ["DynamicModuleTestApi"],
         ["NodeGraph"] = ["ReflectionText"],
         ["NodeGraphTools"] = ["ReflectionTestFixtures"],

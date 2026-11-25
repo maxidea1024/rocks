@@ -137,6 +137,14 @@ MA2b를 셋으로 나눈다. MA2b1 = 타입과 로드 검증, MA2b2 = 쿠킹 패
 10. **너겟.** bucket은 새 `NuggetBucketMesh`(`"mesh"`)이고 SCC Record(구성원 하나)다. 지역 키는 머리·TypeId·`StaticMeshBuildVersion`(패킹·LOD 입력 규칙 버전 — 텍스처 `TextureBuildVersion`과 같은 역할)·`MeshMikkTSpacePatchVersion`·`MeshBuildThresholdVersion`·색 형식·장치 유무(3번)와 쿠킹 LOD마다 (원본 종류, 위상 SHA-256·크기, 요소 수, 속성 레코드(이름·요소·타입·채널·SHA-256·크기), 유효 빌드 설정(리플렉션 기록), 슬롯 이름 목록, 섹션마다 유효 섹션 정보 여섯 값)이다. 화면 크기·minLod·bounds 확장은 키에 넣지 않는다(너겟 밖 값이다 — 9.3절을 고쳤다). meshoptimizer 어댑터 버전은 어댑터가 생길 때 넣는다. 값은 part 0 = 머리(형식 버전, LOD 수, LOD마다 정점 수·stream 형식과 구간·index 형식·섹션, bounds, 빌드 경고 목록), part i = 쿠킹 LOD i의 `data` byte다(서버 쿠킹이면 part 0만). 경고를 머리에 담는 까닭: 메시 경고(값 정리·슬롯 대체)는 원본에서 나와 적중이면 다시 계산할 수 없다(텍스처는 설정만으로 경고를 정한다). 적중을 받아들이는 조건: 머리를 읽을 수 있고, LOD 수가 이번 쿠킹 LOD 수와 같고, 값 수 = LOD 수 + 1(서버면 1), part i byte 수 = 머리의 LOD i 덩어리 크기, 머리로 만든 `renderData`가 `ValidateStaticMeshRenderData`와 LOD마다 `ValidateStaticMeshIndices`를 통과한다. 아니면 미적중으로 다루고 Record를 치운다(텍스처 12.14절 6번과 같다).
 11. **경고·실패.** 빌드 경고는 LOD 순서로 처리기 경고가 된다(`CookDiagnostic` code = `MeshDiagnostic` code). 빌드 실패는 그 진단 코드와 오류다. 원본 로드 실패는 `InvalidSource`다.
 
+12. **구현에서 정한 점(MA2b2).** 모두 권장안이다.
+    - **원본 읽기.** 쿠킹 문맥은 패키지가 아니라 bulk 원본(`CookContext::bulkSource`)을 주므로 `MeshSource::Load(data, PackageBulkSource&, names, failure)` 오버로드를 더했다. 판정은 Package 형태와 같다. bulk 원본은 크기·SHA-256을 보지 않으므로 byte 수나 SHA-256이 ref와 다르면 `CorruptPackage`(BulkUnreadable)·`TypeMismatch`다(원본 bulk는 EditorOnly라 쿠킹 패키지 쓰기가 다시 보지 않고, 너겟 키가 ref의 SHA-256으로 만들어지므로 손상된 원본이 정상 키로 Put되지 않게 — 리뷰 반영). 두 형태는 내부 읽기 대상(`MeshSourceBulkReader`)만 다르다.
+    - **경고 위치·순서.** 처리기 경고의 `CookDiagnostic::setting`이 쿠킹 LOD 번호다(뺀 LOD의 경고는 다음 쿠킹 LOD, 마지막 LOD를 뺐으면 마지막 쿠킹 LOD). 경고는 LOD 순서로, LOD마다 입력 선택 경고(설정에서 나와 적중에서도 다시 계산) 다음 빌드 경고다. 빌드 경고는 너겟 머리에 (code, LOD)로 담아 적중에서도 같은 순서로 낸다. 머리 읽기는 알려진 진단 코드만 받는다.
+    - **섹션 정보의 materialIndex.** 표 항목의 materialIndex가 음수면 슬롯 대응을 쓴다(빌드 입력 `MeshNoIndex`). 0 이상이면 그 값이다(범위 밖이면 기본 머티리얼 — 5.5.1절 9).
+    - **머리 배치(`MeshTools/StaticMeshNuggetHeader.h`).** 버전 u32, LOD 수 u32, bounds 7 f64, 경고 수 u32와 (code u32, LOD u32), LOD마다 정점 수 u32, data byte 수 u64, stream 구간(형식 u32·offset u64·byteSize u64) 위치·tangent 기저, UV 수 u32와 각 구간, 색 구간, index 형식 u32, index 구간, 섹션 수 u32와 섹션마다 정수 다섯(u32)·bool 다섯(u8 0·1). 경고 수 상한 65535, 섹션 수 상한 `MeshMaxPolygonGroups`, 남는 byte가 있으면 손상이다.
+    - **연쇄 bulk 원본.** 텍스처 처리기의 사본을 `AssetCooker/CookBulkSource.h`의 `CookChainedBulkSource`로 옮겼다(동작 불변 — 텍스처 시험 그대로 통과).
+    - **정체성.** 처리기 `StaticMeshCookProcessorId`와 너겟 키 머리 `StaticMeshNuggetProcessorId`를 나눴다(텍스처와 같은 이유 — renderData 채우기만 바뀌면 처리기 버전만 올린다).
+
 #### 5.5.3 MA2b3 — 임포트 서비스
 
 1. **API.** `MeshTools/StaticMeshImport.h`의 `ImportStaticMesh(context, output, spec, failure)`가 임포터(교환 형식 UX3b, 뒤의 glTF·FBX)의 `AssetImporter::Import` 안에서 `Output()`으로 받은 `StaticMesh` 객체를 채운다. 임포터는 파일 형식만 읽고 메모리 `MeshSource`와 값으로 `StaticMeshImportSpec`을 만든다(텍스처 `TextureImportSpec`과 같은 역할 — 10절).

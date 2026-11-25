@@ -15,6 +15,9 @@
 
 namespace rocks {
 
+// 원본 bulk 읽기 대상이다(구현 세부 — MeshSource::Load가 쓴다).
+struct MeshSourceBulkReader;
+
 // 변 하나의 두 정점이다. 저장 형태는 작은 번호 먼저다(first < second — ValidateMeshSource가 본다).
 struct MeshEdgeVertices {
     uint32 first = 0;
@@ -239,6 +242,18 @@ public:
     Result<void> Load(const MeshSourceData& data, const Package& package, NamePool& names,
                       MeshDiagnostic* failure = nullptr) noexcept;
 
+    // Load와 같은 판정으로 bulk를 패키지 대신 bulk 원본에서 읽는다(쿠킹 처리기 —
+    // CookContext::bulkSource, Docs/Design/MeshAnimationAssets 5.5.2절 4). bulk 원본은
+    // 크기·SHA-256을 보지 않으므로 byte 수나 SHA-256이 ref와 다르면 Package 형태와 같이
+    // CorruptPackage(BulkUnreadable)·TypeMismatch다(빈 ref는 InvalidArgument, 원본에 없는 id는 그
+    // 오류). 스레드: bulk 원본을 쓰는 스레드(쿠킹 처리기)에서 부른다.
+    //
+    // 사용 예:
+    //   MeshSource source(allocator);
+    //   auto loaded = source.Load(lod.source, *context.bulkSource, *registry.Names(), &failure);
+    Result<void> Load(const MeshSourceData& data, PackageBulkSource& bulk, NamePool& names,
+                      MeshDiagnostic* failure = nullptr) noexcept;
+
     // 이 객체를 data(필드 전체를 덮어쓴다)와 bulk entry로 쓴다(3.4절, 9.1절 위상 배치, 9.2절 속성
     // 정렬, 가변 길이 값 압축). 먼저 ValidateMeshSource(본 수 모름)로 검증한다. 같은 내용이면 같은
     // byte다(결정적). 위상 entry 하나와 레코드마다 entry 하나를 bulk에 더한다.
@@ -289,6 +304,10 @@ public:
     };
 
 private:
+    // Load 두 형태의 공통 본문이다(reader는 패키지나 bulk 원본 — MeshSourceStorage.cpp).
+    Result<void> LoadFrom(const MeshSourceData& data, const MeshSourceBulkReader& reader,
+                          NamePool& names, MeshDiagnostic* failure) noexcept;
+
     friend struct MeshSourceAccess;
 
     // element 요소를 하나 더할 자리를 그 요소의 모든 속성 채널에 잡는다(실패하면 아무것도 늘지

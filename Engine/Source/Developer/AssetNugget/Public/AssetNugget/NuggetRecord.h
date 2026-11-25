@@ -48,6 +48,8 @@ inline constexpr StringView NuggetNamespace = "rocks.nuggets";
 
 // 처리기 종류(bucket)다 — `[a-z][a-z0-9_]{0,63}`, 고정 소문자 ASCII 상수.
 inline constexpr StringView NuggetBucketTexture = "texture";
+// 정적 메시 쿠킹 LOD(Docs/Design/MeshAnimationAssets 5.5.2절 10)다.
+inline constexpr StringView NuggetBucketMesh = "mesh";
 inline constexpr StringView NuggetBucketShader = "shader";
 inline constexpr StringView NuggetBucketScc = "scc";
 
