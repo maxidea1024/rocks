@@ -1,10 +1,16 @@
 #pragma once
 
+#include <UiCore/Styles/CoreIcons.h>
 #include <UiFramework/MenuAnchor.h>
 #include <UiFramework/SizeBox.h>
 #include <UiFramework/ScrollView.h>
 
 namespace rocks::ui {
+
+// 콤보 아래 화살표의 크기와 둘레 여백이다(UE FComboButtonStyle DownArrowImage 16x16 —
+// "wide-chevron-down", DownArrowPadding 기본 2, SlateTypes.cpp 176행).
+inline constexpr float ComboArrowSize = 16.0f;
+inline constexpr float ComboArrowPadding = 2.0f;
 
 // 선택 값의 표현과 메뉴 행의 표현을 생성기로 분리한다. 생성기는 매번 부모 없는 새 Element를
 // 반환해야 한다. 선택 인덱스 -1은 선택 해제다. 열려 있는 동안 방향키로 이동하고 Enter로 확정한다.
@@ -35,6 +41,9 @@ public:
     Result<void> SetMaxListHeight(float height) noexcept;
     int32 SelectedIndex() const noexcept;
     bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    // 버튼 위 오른쪽에 아래 화살표를 그린다(UE SComboButton 오른쪽 칸 — 전경색 tint, 세로 가운데).
+    // 화살표 자리는 내용 여백으로 비워 둔다.
+    Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
 
 private:
     Result<SharedPtr<Element>> MakeMenu() noexcept;

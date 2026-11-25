@@ -12,6 +12,7 @@
 
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
+#include <UiCore/Styles/CoreIcons.h>
 #include <UiCore/Styles/CoreStyles.h>
 #include <UiCore/Styles/DockTabStyle.h>
 #include <UiCore/Styles/FontStyle.h>

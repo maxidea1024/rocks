@@ -1,4 +1,5 @@
 #include <UiCore/Styles/CoreStyles.h>
+#include <UiCore/Styles/CoreIcons.h>
 
 // Element 스타일 형식과 UE 5.8 에디터 핵심 스타일 기본값이다(Docs/Design/UiToolkit 9.1절 UW3b,
 // 14장). RB(채움, 반경, 외곽선, 두께)는 UE FSlateRoundedBoxBrush다.
@@ -65,12 +66,19 @@ const CheckBoxStyle& DefaultCheckBoxStyle() noexcept {
         check.backgroundHovered = StyleBrush::RoundedBox(
             ThemeSlot::Input, CheckBoxCornerRadius, ThemeSlot::Hover, CheckBoxOutlineThickness);
         check.backgroundPressed = check.backgroundHovered;
-        check.checkedColor = ColorRef::FromTheme(ThemeSlot::Primary);
-        check.checkedHoveredColor = ColorRef::FromTheme(ThemeSlot::PrimaryHover);
-        check.checkedPressedColor = ColorRef::FromTheme(ThemeSlot::PrimaryPress);
-        check.undeterminedColor = check.checkedColor;
-        check.undeterminedHoveredColor = check.checkedHoveredColor;
-        check.undeterminedPressedColor = check.checkedPressedColor;
+        // 표시는 SVG 16x16 Check·Indeterminate를 Primary·PrimaryHover·PrimaryPress로 tint한다
+        // (1667-1691행).
+        check.checkedImage = StyleBrush::Svg(icons::Check, icons::Icon16, ThemeSlot::Primary);
+        check.checkedHoveredImage =
+            StyleBrush::Svg(icons::Check, icons::Icon16, ThemeSlot::PrimaryHover);
+        check.checkedPressedImage =
+            StyleBrush::Svg(icons::Check, icons::Icon16, ThemeSlot::PrimaryPress);
+        check.undeterminedImage =
+            StyleBrush::Svg(icons::Indeterminate, icons::Icon16, ThemeSlot::Primary);
+        check.undeterminedHoveredImage =
+            StyleBrush::Svg(icons::Indeterminate, icons::Icon16, ThemeSlot::PrimaryHover);
+        check.undeterminedPressedImage =
+            StyleBrush::Svg(icons::Indeterminate, icons::Icon16, ThemeSlot::PrimaryPress);
         check.foreground = hover;
         check.hoveredForeground = hover;
         check.pressedForeground = hover;

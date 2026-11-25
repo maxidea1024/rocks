@@ -11,6 +11,31 @@ ComboBox::ComboBox(Allocator& allocator) noexcept
     SetDesiredSize({80, 24});
     SetPlacement(MenuPlacement::ComboBox);
     SetMenuFactory(MenuFactory::CreateRaw(this, &ComboBox::MakeMenu));
+    // 화살표 칸(여백 2 + 16 + 여백 2)을 내용 오른쪽에 비워 둔다.
+    (void)SetContentPadding({0, 0, ComboArrowPadding * 2 + ComboArrowSize, 0});
+}
+
+Result<void> ComboBox::OnPaint(PaintList& list, int32 layer) const noexcept {
+    auto painted = MenuAnchor::OnPaint(list, layer);
+    if (!painted) {
+        return painted;
+    }
+
+    const auto& geometry = GetGeometry();
+    const float right = GetStyle().normalPadding.z;
+    const float x = geometry.size.x - right - ComboArrowPadding - ComboArrowSize;
+    const float y = (geometry.size.y - ComboArrowSize) * 0.5f;
+    if (x < 0 || geometry.size.y <= 0) {
+        return Result<void>::Success();
+    }
+
+    const bool disabled = !IsEnabled() || list.IsDisabled();
+    const StyleColorContext context = list.ColorContext();
+    const LinearColor ink = PaintForegroundColor(disabled).Resolve(list.Theme(), context);
+    const auto arrow =
+        geometry.MakeChild({ComboArrowSize, ComboArrowSize}, {1, 0, 0, 1, x, y}, {}, {});
+    return list.TryAddBrush(arrow, Brush::Vector(icons::WideChevronDown, icons::Icon16), ink,
+                            layer);
 }
 
 Result<void> ComboBox::Construct(Args&& args) noexcept {
