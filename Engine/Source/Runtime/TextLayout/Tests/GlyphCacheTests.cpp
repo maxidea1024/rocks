@@ -72,6 +72,10 @@ public:
         return Result<void>::Success();
     }
 
+    Result<void> ExtractGeometry(uint32, text::GlyphGeometry&) noexcept override {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     int32 rasterCount = 0;
 };
 

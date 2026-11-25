@@ -43,6 +43,10 @@ public:
     Result<bool> Add(uint32 width, uint32 height, Span<const uint8> pixels,
                      AtlasRect& outSlot) noexcept;
 
+    // 이미 받은 칸의 안쪽(여백 제외) 사각형 inner를 같은 크기 화소로 덮어쓴다(거리장 자리표시
+    // 교체). 범위 밖이거나 화소 수가 맞지 않으면 InvalidArgument다.
+    Result<void> Replace(const AtlasRect& inner, Span<const uint8> pixels) noexcept;
+
     // 마지막으로 가져간 뒤 바뀐 사각형을 out에 쓰고 비운다. 바뀐 것이 없으면 false다.
     bool TakeDirtyRegion(AtlasRect& out) noexcept;
 

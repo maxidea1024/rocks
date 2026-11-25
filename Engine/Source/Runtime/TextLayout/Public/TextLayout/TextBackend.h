@@ -4,6 +4,7 @@
 #include <Core/Result.h>
 #include <TextLayout/FontFaceData.h>
 #include <TextLayout/FontTypes.h>
+#include <TextLayout/GlyphGeometry.h>
 #include <TextLayout/GlyphRaster.h>
 #include <TextLayout/TextShaping.h>
 
@@ -56,6 +57,11 @@ public:
     // 실패는 Unsupported(원본 오류를 로그), 할당 실패는 OutOfMemory다.
     virtual Result<void> Rasterize(const GlyphRasterRequest& request,
                                    GlyphBitmap& out) noexcept = 0;
+
+    // 글리프 윤곽을 글꼴 단위 그대로(hinting·변환 없음) out에 쓴다(UE FFreeTypeShapeBuilder와 같은
+    // 판정 — 6.8절 FT2e). 거리장을 만들 수 없는 face·글리프(비 scalable, 윤곽 아님, 크기 0 —
+    // 공백)는 Unsupported, 글리프 번호가 범위 밖이면 InvalidArgument, 할당 실패는 OutOfMemory다.
+    virtual Result<void> ExtractGeometry(uint32 glyphIndex, GlyphGeometry& out) noexcept = 0;
 };
 
 class ROCKS_TEXTLAYOUT_API TextBackend {
@@ -79,6 +85,14 @@ public:
     // 문자열은 run이 없다. 잘못된 UTF-8은 InvalidArgument다.
     virtual Result<void> ResolveBidi(StringView utf8, TextBaseDirection base,
                                      Array<BidiRun>& out) noexcept = 0;
+
+    // geometry로 거리장을 만들어 out에 쓴다(UE FSlateSdfGenerator — MTSDF는 DistanceField 4채널,
+    // 단일 채널은 Alpha, 첫 행이 위, bearing은 화소 경계). face를 쓰지 않으므로 여러 스레드에서
+    // 동시에 불러도 된다. geometry가 비었거나 크기가 상한을 넘으면 Unsupported, ppem·spread가 0
+    // 이하이면 InvalidArgument, 할당 실패는 OutOfMemory다.
+    virtual Result<void> GenerateDistanceField(const GlyphGeometry& geometry,
+                                               const DistanceFieldRequest& request,
+                                               GlyphBitmap& out) const noexcept = 0;
 };
 
 } // namespace rocks::text
