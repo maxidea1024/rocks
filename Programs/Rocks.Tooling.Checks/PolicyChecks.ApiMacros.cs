@@ -41,6 +41,7 @@ public static partial class PolicyChecks
         "Core/Source/Runtime/PlatformBase/Private/Common/CrashReportingInternal.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/DirectoryWatchInternal.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/ProcessEntryInternal.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/Sync/QueueMutex.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/Sync/SyncSeams.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/VirtualMemoryBackend.h",
         "Core/Source/Runtime/PlatformBase/Private/Win64/CrashFiles.h",

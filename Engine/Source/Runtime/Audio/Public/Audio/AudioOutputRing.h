@@ -20,8 +20,8 @@ inline constexpr uint32 MaxOutputBufferCount = 16;
 // 더 채울 수 있어야 구조적 underrun이 없다(3.2절). blockFrames가 0이면 MinOutputBufferCount다.
 //
 // 사용 예: ChooseOutputBufferCount(480, 256, 0) == 3
-uint32 ChooseOutputBufferCount(uint32 callbackFrames, uint32 blockFrames,
-                               uint32 requested) noexcept;
+ROCKS_AUDIO_API uint32 ChooseOutputBufferCount(uint32 callbackFrames, uint32 blockFrames,
+                                               uint32 requested) noexcept;
 
 // 출력 링 계수 스냅샷이다(어느 스레드에서나 읽는다).
 struct AudioOutputRingCounters {
