@@ -31,6 +31,9 @@ public static partial class PolicyChecks
             "#\\s*include\\s*<utility>|\\bstd\\s*::\\s*(?:tuple_size|tuple_element)\\b"),
         // 중괄호 목록 추론이 찾는 std::initializer_list를 여는 래퍼다(Docs/CodingStyle.md "중괄호 목록 추론").
         ["Core/Source/Runtime/Base/Public/Base/InitializerList.h"] = Pattern("\\bstd\\s*::\\s*initializer_list(?![A-Za-z0-9_])"),
+        // msdfgen 원본 브랜치에서 옮긴 approximateSDF glue다. 원본 알고리즘의 우선순위 큐만 허용한다(msdfgen 자체가
+        // std::vector를 쓰는 C++ 서드파티 — Docs/Design/Font/08-ThirdParty.ko.md 8.2절).
+        ["Engine/Source/ThirdParty/Msdfgen/RocksApproximateSdf.cpp"] = Pattern("\\bstd\\s*::\\s*priority_queue\\b"),
     };
 
     // OS별 전처리기 분기다(C++23 #elifdef·#elifndef 포함). Base/Compiler.h만 ROCKS_PLATFORM_* 정의·검증을 위해 쓸 수 있다.

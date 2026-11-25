@@ -146,3 +146,55 @@
 
 - RB3(셰이더 집합): 첫 사용 생성 경쟁(두 스레드가 gate로 동시에 요청해도 게시 1회, 진 쪽 `Retire`), 완결성 검사 음성 대조(타입 하나를 뺀 라이브러리로 시작 실패), 서명 불일치 음성 대조, 공급자 경로(공급 대기 → 완료 → 검사 → `Ready`, 공급자 없는 실행 파일의 `UnsupportedCapability`), 라이브러리 조회 순서와 중복 키 오류, `Retire`된 집합의 새 장치 셰이더 생성 거부.
 - RB4(바인딩·상수 블록·파이프라인 캐시): 셰이더 시스템 7.3절 (a)·(d)를 런타임 경로로, 파이프라인 캐시 적중·미적중 계수, 집합 `Retire` 때 캐시 항목 회수, `PerFrame` 상수 블록의 slot 회수(fence gate), GLES 업로드 판단(program 전환 뒤 같은 블록을 다시 올리는지, 바뀌지 않은 블록은 올리지 않는지 호출 수 계측, 7.3절 (i)), null·종류 불일치 검증의 음성 대조, 교체(9.8절) 성공·실패.
+
+### 9.11 상수 버퍼 묶기(GX6, 개정 38)
+
+9.3–9.4절의 상수 블록을 장치에 올려 셰이더의 상수 버퍼(cbuffer) slot에 묶는 경로다. 그리기별 상수(루트 상수, 9.4절)는 그대로 두고, 이름 있는 cbuffer(셰이더 시스템 7.2절 1항)를 대상으로 한다. 파라미터 묶음 `ParameterBatch`의 자원 부분과 공유 상수 slot 표(9.5절)는 이 절 밖이다(아래 9항).
+
+**UE 5.8 방식.**
+
+| 항목 | UE 5.8 | 근거 |
+|---|---|---|
+| 수명 | `UniformBuffer_SingleDraw`(그리기 한 번)·`SingleFrame`(그 프레임)·`MultiFrame`(여러 프레임) | `RHI/Public/RHIDefinitions.h:517–525` |
+| D3D12 할당 | `MultiFrame`은 영구 upload heap 할당, 나머지는 빠른 상수 ring. 갱신은 새 자리를 받아 옮긴다(rename). 256 B 정렬(`D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT`). GPU는 upload heap을 그대로 읽는다 | `D3D12RHI/Private/D3D12UniformBuffer.cpp:76–90, 194–204` |
+| D3D12 묶기 | 단계별 root CBV(최대 16), 넘치면 CBV table | `D3D12RHI/Private/D3D12DescriptorCache.cpp:681–750`, `D3D12RootSignature.cpp:298–308, 332` |
+| Vulkan | `SingleDraw`·`SingleFrame`은 임시 블록 ring(정렬 max(`minUniformBufferOffsetAlignment`, 16)), `MultiFrame`은 메모리 관리자 할당. descriptor는 기본으로 모두 `UNIFORM_BUFFER_DYNAMIC`(`maxDescriptorSetUniformBuffersDynamic`까지, 나머지는 일반 UBO) | `VulkanRHI/Private/VulkanUniformBuffer.cpp:39–48`, `VulkanDescriptorSets.cpp:7–14, 24–25, 60–65` |
+| D3D11 | 크기별 pool의 `DYNAMIC` 버퍼, 만들 때·갱신 때 `MAP_WRITE_DISCARD` | `Windows/D3D11RHI/Private/D3D11UniformBuffer.cpp:141–161, 234–289` |
+| OpenGL | 늘 에뮬레이션: program마다 마지막으로 올린 UB 고유 ID를 기억하고 다를 때만 복사 표대로 `glUniform4*v` | `OpenGLDrv/Private/OpenGLShaders.cpp:1298, 2058, 3335–3351` |
+
+**결정(권장안 확정).**
+1. **수명.** Graphics에 `ConstantBufferLifetime`(`SingleFrame`·`MultiFrame`)과 handle `ConstantBufferHandle`을 두고, UE `SingleDraw`는 handle 없는 기록 명령(3항)으로 둔다. 9.4절 수명과는 `PerDraw` → 기록 명령, `PerFrame` → `SingleFrame`, `Persistent` → `MultiFrame`으로 잇는다.
+   - `Device::CreateConstantBuffer(lifetime, contents)`: 내용은 16 byte 배수, 16–65536 byte(`MaxConstantBufferBytes` = 셰이더 시스템 `MaxShaderConstantBufferBytes`). 기록 중에도 만들 수 있다(GX8 생성 규칙과 같다).
+   - `UpdateConstantBuffer(handle, contents)`: `MultiFrame`만, 같은 크기만(아니면 `InvalidArgument`). 갱신은 **기록 순서**를 따른다: 그 앞에 기록한 그리기는 옛 내용, 뒤의 그리기는 새 내용을 읽는다(UE rename과 같다). `SingleFrame`은 만든 뒤 바꾸지 않는다(바꿀 값은 새 버퍼).
+   - `Retire(ConstantBufferHandle)`: 다른 자원과 같이 마지막 사용 fence 뒤 해제한다(GX7). `SingleFrame`의 "그 프레임"은 Graphics가 모르는 단위이므로 쓰는 쪽(9.4절 `PerFrame` 블록 주인, 렌더 그래프)이 프레임 끝에 Retire한다. 프레임 slot의 GPU 완료 회수(9.10절 RB4)는 마지막 사용 fence가 맡는다.
+   - 버린 대안: `SingleFrame`을 장치 기록(Begin…EndFrame) 수명으로. 렌더 그래프는 Raster pass마다 기록을 따로 열므로(7절) 한 프레임의 뷰 상수를 여러 기록이 함께 읽는다.
+2. **정렬과 업로드.** 모든 backend가 상수 버퍼 자리를 `ConstantBufferAlignment` = 256 byte 단위로 잡는다(D3D12 CBV 주소 규칙, Vulkan `minUniformBufferOffsetAlignment`의 사양 최대값). D3D12·Vulkan은 CPU 가시 메모리(D3D12 upload heap, Vulkan host-visible coherent)를 GPU가 그대로 읽는다(UE와 같다, 복사 명령 없음).
+   - 기록 명령용 ring: queue마다 하나(그래픽·async compute — fence 값이 queue마다 따로라서), Graphics `UploadRingAllocator`. 묶음은 그 기록의 제출 fence로 닫고 완료 뒤 회수한다(GX8 ring과 같은 규칙). 자리가 없으면 끝난 제출을 회수하고, 그래도 없으면 가장 오래된 닫힌 묶음을 기다린다. 지금 기록 하나가 ring을 다 쓰면 그 명령은 `CapacityExceeded`이고 slot을 비운다(뒤 그리기는 무시된다).
+   - handle용 page: CPU 가시 버퍼 page(1 MiB)를 Graphics `GpuPageAllocator`로 나눈다. `UpdateConstantBuffer`는 새 구간을 받아 내용을 쓰고 옛 구간을 마지막 사용 fence 뒤에 돌려준다.
+   - D3D11: handle마다 `DYNAMIC` 버퍼(만들 때 초기 내용, 갱신은 `MAP_WRITE_DISCARD` — 드라이버 rename이 기록 순서를 지킨다), 기록 명령은 (단계, slot)마다 `DYNAMIC` 버퍼 하나를 `WRITE_DISCARD`로 갈아 쓴다(UE 크기별 pool은 측정 뒤). OpenGL ES: 모두 CPU 사본이다(9.4절 표현).
+3. **묶기.** `CommandContext::SetConstantBuffer(stage, slot, handle)`과 `SetConstantData(stage, slot, bytes)`(기록 명령 — bytes를 그 기록의 ring에 복사해 묶는다, UE `SingleDraw`). `slot`은 그 단계 바인딩 layout(값 1)의 상수 버퍼 slot(셰이더 시스템 16.1절 SSD30 — backend 위치)이고 0–13(`MaxConstantBufferSlots`, 형식 정의 최대인 D3D12 14)이다. 위치가 형식마다 다르므로 쓰는 쪽은 값 1에서 얻는다: 렌더 쪽은 바인딩 지도(9.3절 `ShaderBindingMap`의 단계별 자리)이고, 이름으로 찾으려면 `FindConstantBufferSlot(layout, name)`이다.
+   - 묶음은 단계마다 따로이고 그 기록 안에서 `SetPipeline`을 넘어 유지된다(D3D11·UE와 같다). 기록 시작 때 모두 빈다. null handle은 그 slot을 비운다.
+   - handle 묶음은 그리기 때 그 handle의 현재 자리로 푼다(그래서 갱신 뒤의 그리기가 새 내용을 본다). Retire된 handle은 빈 slot이다.
+   - 그리기·dispatch 조건: 파이프라인이 읽는 상수 버퍼(단계, slot)마다 셰이더 선언 크기(값 1 `constantBufferBytes`) 이상인 버퍼가 묶여야 한다. 아니면 무시하고 `IgnoredDraws`를 올린다(버퍼 view slot과 같은 규칙, `ConstantBuffersSatisfied`).
+   - 파이프라인 생성: 값 1의 상수 버퍼를 모두 받는다(이름 표에 넣지 않는다). slot이 범위 밖이면 `InvalidArgument`다.
+   - 버린 대안: 이름 표(`PipelineBindingNames::constantBuffers[n]`)로 고정 번호를 주기. 이름 표는 묶음 설정 전의 개발 경로이고, 바인딩 지도가 이미 단계별 위치를 내므로 표를 늘리지 않는다(UE도 셰이더 파라미터 지도의 index로 묶는다).
+4. **backend 매핑.**
+
+   | backend | 기록 명령 | handle | 셰이더 쪽 묶기 |
+   |---|---|---|---|
+   | D3D12 | queue별 upload ring | upload page 구간 | root CBV(GPU 주소), 예산을 넘는 slot은 그 단계 CBV table(5항) |
+   | D3D11 | (단계, slot)별 `DYNAMIC` 버퍼 `WRITE_DISCARD` | handle별 `DYNAMIC` 버퍼 | `VS·PS·CSSetConstantBuffers`(b0–b12, b13은 루트 상수) |
+   | Vulkan | queue별 host-visible ring | host-visible page 구간 | set = 단계의 binding = slot. `UNIFORM_BUFFER_DYNAMIC`(descriptor는 (버퍼, 0, 선언 크기), 동적 offset = 구간 위치)를 `maxDescriptorSetUniformBuffersDynamic`까지, 넘는 것은 일반 UBO. 버퍼(VkBuffer)가 같으면 set을 다시 쓰지 않고 offset만 바꿔 다시 묶는다 |
+   | OpenGL ES | (단계, slot)별 CPU 사본 | CPU 사본 | 값 2 복사 표의 `<단계>c<slot>_<타입>` 배열에 `glUniform4fv/4iv/4uiv`. (program, 단계, slot)마다 마지막으로 올린 (identity, version)을 기억하고 다를 때만 올린다(9.4절 판단, UE와 같다) |
+
+5. **D3D12 root signature 배치와 예산(셰이더 시스템 7.2절 4항 개정 47).** 파이프라인마다 VS·PS(또는 CS) slot 표로 만들고 캐시한다.
+   - 순서: 단계마다 [SRV table][Sampler table][UAV table(CS만)][CBV table(넘친 것)] → root CBV((slot, 단계) 오름차순, 같은 slot은 VS·PS 순) → PS 진단 root UAV(6항) → 루트 상수(그 파이프라인 `drawConstantBytes` ÷ 4 DWORD, 0이면 없음, visibility ALL).
+   - 단계의 SRV table은 그 단계가 읽는 SRV(텍스처·버퍼 view) 전부를 register마다 range 하나로 담고, 그리기 때 CPU 전용 heap의 descriptor를 shader-visible ring으로 복사해 연속 구간을 만든다(UE offline → online heap 복사와 같다). 바로 앞 그리기와 원본 목록이 같으면 복사하지 않고 그 구간을 다시 쓴다. UAV table도 같다. Sampler table은 개발 경로에서 단계당 하나라 영구 descriptor를 가리킨다. 지금까지의 "자원마다 table 하나"(셰이더 시스템 16.1절 SH2e2 메모)는 table 수가 자원 수만큼 늘어 예산을 넘기므로 버린다.
+   - 예산식 `루트 상수 DWORD + table 수 + 2 × root CBV 수 + 2 × 진단 root UAV ≤ 64`. 모든 CBV가 root로 들어가면 CBV table이 없다. 아니면 넘치는 CBV가 생기는 단계마다 CBV table 하나(1 DWORD)를 더 세고, 식을 만족하는 가장 큰 root CBV 수 R을 고른다. root는 (slot, 단계) 순 앞 R개, 나머지는 각 단계의 높은 slot이며 그 단계 CBV table의 range [가장 낮은 넘친 slot, 가장 높은 slot]에 들어간다(사이 빈 slot은 null CBV). CBV table의 descriptor는 그리기마다 ring에 `CreateConstantBufferView`로 만든다(크기는 256 byte 올림).
+   - 보장값(루트 상수 32 DWORD, 단계 table 최대 — VS·PS는 SRV·Sampler·CBV 셋, UAV table은 CS만이라 CS는 넷): 그래픽 64 − 32 − 6 = 26 → root CBV 13, 진단 퍼뮤테이션 12, CS 64 − 32 − 4 = 28 → 14. 어느 경우도 항상 만들 수 있다. 셰이더 시스템 개정 32의 12·11은 VS·PS에도 UAV table을 세어 table 8로 계산한 값이라 고친다.
+6. **PS 진단 버퍼 자리(셰이더 시스템 7.2절 12항).** D3D12는 PS 값 1에 `RocksDebugBuffer`가 있으면 root UAV(u0 space999, visibility ALL)를 두고, 장치가 0으로 채운 내부 버퍼(`PixelDebugBufferBytes` = 4 KiB)를 묶는다. 버퍼를 읽고 비우는 일·크기 결정은 엔진 셰이더 SL2다. Vulkan(set 3)·Metal의 진단 자리는 SL2에서 만들고, 그때까지 그 backend의 진단 파이프라인 생성은 `Unsupported`다(D3D11·GLES 형식은 진단 퍼뮤테이션이 없다).
+7. **RenderBase.** `ConstantBlock`이 장치 버퍼를 갖는다: `Commit(device)`는 `PerFrame`이면 `SingleFrame` 버퍼를 만들고(이미 있고 값이 바뀌었으면 새로 만들고 옛것을 Retire), `Persistent`면 `MultiFrame`을 만들거나 바뀐 version만 `Update`한다. `PerDraw`는 장치 버퍼가 없다. `Release(device)`가 Retire한다. `ApplyConstantBlock(commands, map, block)`은 지도의 상수 버퍼 자리마다 `PerDraw`면 `SetConstantData`, 아니면 commit된 버퍼를 `SetConstantBuffer`로 묶는다(commit 전이거나 값이 commit보다 새로우면 `InvalidArgument`). 루트 상수 표는 지금처럼 `ApplyDrawConstants`다.
+8. **RenderGraph.** `RenderGraph::CreateConstants(bytes, name)`(또는 `ConstantBlock`)이 그래프 상수 `GraphConstantBuffer`를 선언한다. 내용은 프레임 arena에 복사하고, 장치 `SingleFrame` 버퍼는 실행 시작(Immediate는 선언 때)에 소유 스레드가 만들어 그래프 끝에 Retire한다 — 병렬 기록(RG3) pass 함수는 장치 생성을 하지 않기 때문이다. 상수 버퍼는 CPU 가시 메모리이고 바뀌지 않으므로 접근 선언·전이가 없다(어느 pass나 읽는다). pass는 `GraphPassContext::Constants(c)`로 handle을 받거나 `SetConstants(map, c)`로 지도의 자리마다 묶는다. pass 함수 안의 `SetConstantData`도 쓸 수 있다(기록 목록이 byte를 arena에 복사해 재생한다).
+9. **이 절 밖.** 공유 상수 slot 표(9.5절 — 바인딩 layout의 구조체 identity SX8과 렌더러 slot 등록이 먼저다), `ParameterBatch`의 자원 묶음, D3D11 크기별 pool·ring 크기 조정은 측정 뒤다.
+
+**완료 기준(9.10절 RB4의 GX6분).** EngineTests: 예산 계획(보장값 13·12·14, 경계 하나 위에서 table로 내림, 64 DWORD 이하, 결정적 배치), 값 1 상수 버퍼 수용·slot 범위·`ConstantBuffersSatisfied`, 기록 장치의 묶기·commit·갱신 순서, 그래프 상수의 생성·Retire·병렬 기록 재생. Sandbox `--self-test`(D3D12·D3D11·Vulkan·OpenGL ES, 각 소프트웨어 장치 포함): handle 두 수명과 기록 명령으로 그린 픽셀, 기록 순서 갱신(그리기 1은 옛 값·그리기 2는 새 값), 파이프라인 전환 뒤 묶음 유지, 안 묶은·작은 버퍼의 무시 계수, 상수 버퍼를 읽는 compute 결과, 단계마다 상수 버퍼 12개(D3D12는 14개와 진단 퍼뮤테이션)를 쓰는 그리기의 픽셀 — 장치 사이 결과가 같아야 한다.
