@@ -2,6 +2,8 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 16(2026-11-25): LC8f3 구현(11.11절 — `LspCodeActions.cpp`, 수정마다 편집 하나, 진단 객체 공용, `SimilarHook`·`SimilarAttribute` 공개).
+- 개정 15(2026-11-25): LC8f3 설계(11.7절 — 빠른 수정 코드 표 Q1–Q10, 서버 자기 진단 기준, 편집 규칙, 제안 이름은 컴파일러 공개 함수, 미룬 것: handler 골격·`Soft` 로드·`@formerly`·이름 변경).
 - 개정 14(2026-11-25): LC8f2 구현(11.10절 — 컴파일러 공개 목록 `LanguageCatalog.h`(hook 목록이 정본, attribute·키워드는 검사 표에 full 칸)·`Compilation::MemberAvailable`(타입 검사와 같은 원소 조건 판정 — `TypeFacts`), snapshot은 Types 단계, Unity 별칭에 `On` hook 이름, `on`·`emit`·기반 목록 후보를 SL 3.12·3.9절 규칙대로, 확장 이벤트는 보이는 것만, 중복은 순위와 무관하게 하나).
 - 개정 13(2026-11-25): LC8f1 구현·리뷰 반영(11.9절 — 이름 노드 → 심볼 규칙을 의미 강조와 공용(`LspVisitNames`), 선언 위치 표시는 `패키지/모듈 경로:줄`·schema 파일 이름, 엔진 필드 읽기 전용 표시 수정).
 - 개정 12(2026-11-25): LC8f 설계(11절 — LC8f1 위치 질의·hover·정의 이동·서식, LC8f2 자동완성(구멍 snapshot·컴파일러 공개 목록·core 숨김·Unity 별칭), LC8f3 빠른 수정 개요, 리터럴 자동완성은 EI).
@@ -322,15 +324,33 @@
 - capabilities `completionProvider: { triggerCharacters: [".", "@"] }`.
 - **detail(심볼이 아닌 항목):** hook `on Tick(dt: float)`, attribute `@edit`, 키워드 `keyword`, import segment `import Tools.Kit`, `Changed`는 `event Changed`, Unity 별칭 `Unity: Update`. kind는 hook 3(function)·attribute 14(keyword)·segment 9(module).
 
-### 11.7 빠른 수정(LC8f3 — 개요)
+### 11.7 빠른 수정(LC8f3 — 개정 15)
 
-- `textDocument/codeAction`(context.diagnostics) → 진단 코드별 편집 생성기가 만든 `CodeAction { title, kind: "quickfix", diagnostics, edit }`. 대상(SL 13절 목록): `?` 추가, `?? return`, 누락 import, handler 골격(`@save`·`@net` 필드의 Changed 골격은 `on Enable` 반영 호출을 함께), 재진입 정책 표시(`@skipWhileBusy`·`@restart`), `Soft` → `try await X.Load()`, `@formerly`, 이름 충돌 시 이름 변경. 진단이 있는 것부터 착수 때 코드 표로 정한다.
+- **요청:** `textDocument/codeAction`(uri·range·context) → `CodeAction[]`. 서버는 클라이언트가 보낸 `context.diagnostics`가 아니라 **마지막 분석의 자기 진단** 중 그 문서에서 범위와 겹치는 것(빈 범위면 그 자리를 담는 것)마다 편집 생성기를 부른다 — 진단 문구를 해석하지 않고 코드·위치·컴파일 결과(구문 트리·심볼·타입)로 편집을 만든다. `context.only`가 있고 `quickfix`를 담지 않으면 `[]`(kind는 `.` 계층 — 빈 글자는 모든 kind를 담는다). 열린 `.spark` 문서가 아니면 `[]`.
+- **항목:** `{ title, kind: "quickfix", diagnostics: [발행한 것과 같은 진단 객체], edit: { changes: { <uri>: [TextEdit] } }, isPreferred }`. 진단 하나에 수정이 하나면 `isPreferred: true`. title은 영어(실행 중 문구 규칙). 순서는 진단 순서(10.5절 정렬) → 표의 수정 순서.
+- **편집 규칙:** 위치는 진단을 낸 컴파일의 원문 기준(열린 문서 = 마지막 분석 내용). 삽입은 빈 범위 TextEdit. 줄 하나를 차지한 선언(앞뒤가 공백뿐)을 지우면 그 줄 전체(줄 끝 LF·CRLF 포함)를, 아니면 그 범위와 뒤 공백을 지운다. 새 줄을 넣을 때는 그 줄의 들여쓰기를 따르고 줄 끝은 문서의 첫 줄 끝(CRLF·LF)을 따른다.
+
+| 코드 | 수정 | 편집 |
+|---|---|---|
+| Q1 S0428·S0413 `?` 없는 객체 필드 | `Add '?' to the type` | 진단의 Type 노드 끝에 `?`(타입 표기가 없는 필드는 수정 없음) |
+| Q2 S0412 null일 수 있는 값 | `Add '?? return'` · `Use '?.'` | 진단 노드가 지역 이름이고 그 지역 선언(`let x = 식;` — `var`·타입 표기·`?? return`이 없음)의 추론 타입이 `T?`이며, 감싼 함수·handler가 값을 돌려주지 않고, 선언과 진단 사이에 대기가 없고(await 뒤 `T?`는 `?? return`이 풀지 못한다), 그 지역의 다른 쓰임이 null을 다루지 않으면(`?.`·`??`·`if let`·null 비교 — 바꾼 뒤 그 쓰임이 오류다) 초기값 뒤에 ` ?? return`. 진단 노드가 `x.멤버`·`x.멤버(...)`의 받는 쪽이고 그것이 문장(`식;`·`_ = 식;`)이면 `.`을 `?.`로(대입 대상·값 자리는 `T?` 결과가 다른 오류) |
+| Q3 S0317·S0318 모르는 이름·타입 | `Add 'import <경로>;'` | 이름 하나(식의 이름, 한 구간 타입 이름 — `L.Y`의 `Y`는 아님)일 때, import할 수 있는 모듈(같은 패키지·의존 패키지, 아직 import하지 않음, 최상위 이름이 이 모듈·별칭 없이 import한 모듈과 겹치지 않음 — SL 3.4절) 중 그 이름의 최상위 선언(S0318은 타입만)을 가진 모듈마다 하나 — 경로는 import 경로(의존 패키지는 `<패키지>.<경로>`), 패키지 이름 → 모듈 경로 순. 마지막 import 문 뒤 줄(같은 줄에 선언·블록 주석이 이어지면 그 import 바로 뒤에서 줄을 바꿔), 없으면 원문 처음(뒤에 빈 줄) |
+| Q4 S0815 import하지 않은 확장 이벤트 | `Add 'import <경로>;'` | 그 경로의 대상(`World` 원천이면 World, 그 밖은 Actor)에 그 이름의 확장 이벤트를 선언한, import할 수 있는(Q3과 같은 판정) 모듈마다(Q3과 같은 삽입) |
+| Q5 S0816 재진입 정책 없음 | `Add '@skipWhileBusy'` · `Add '@restart'` | handler의 `on` 토큰 앞에 attribute와 줄 끝·그 줄의 들여쓰기(`on`이 줄 처음이면 attribute 한 줄이 된다) |
+| Q6 S0817·S0622 자리가 틀린·겹친 attribute | `Remove the attribute` | 그 attribute를 지운다(편집 규칙) |
+| Q7 S0714·S0303·S0304·S0305 쓰지 않는·겹친·자기·Rocks import | `Remove the import` | 그 import 문을 지운다(별칭이 있는 겹친 import는 그 별칭이 쓰일 수 있어 수정 없음) |
+| Q8 S0713 버린 결과 | `Discard the result with '_ ='` | 식 앞에 `_ = ` |
+| Q9 S0601 `async` 밖의 `await`·최상위 `async fn` | `Declare the function 'async'` · `Remove 'async'` | class·struct 함수(`override`·`open`·`@rpc`·interface 구현은 `async`가 시그니처를 바꿔 다른 오류라 뺀다)와 최상위 `@test` 함수면 `fn` 앞에 `async `(`open`·`override` 뒤 — 3.6절). 대기가 없는 최상위 함수의 `async`는 그 토큰과 뒤 공백을 지운다(대기가 있으면 수정 없음) |
+| Q10 S0803·S0620 모르는 hook·attribute | `Change to '<이름>'` | 컴파일러가 수정 예에 쓰는 같은 제안(`SimilarHook`·`SimilarAttribute` — 편집 거리 2 이하, 같으면 표 순서)이 있으면 이름 토큰을 바꾼다. hook은 인자가 없는 handler만(인자 모양이 hook마다 다르다 — 인자 없음은 모든 hook에 맞다), 그 hook이 이미 있는 class(S0806)와 자기 class 체인의 Sparks 이벤트를 hook으로 쓴 경우(컴파일러도 제안하지 않는다)는 수정이 없다 |
+
+- **제안 이름 공용:** hook·attribute 이름 제안을 컴파일러 공개 목록(`LanguageCatalog.h`)의 `SimilarHook`·`SimilarAttribute`로 내보내고 검사기(S0803·S0620의 수정 예)도 그것을 부른다(사본 없음 — T13).
+- **미룬 것(이유):** handler 골격(`@save`·`@net` 필드의 Changed 골격)은 진단이 없는 소스 동작(`source` kind)이라 진단 기반 빠른 수정과 따로 — VS Code 확장(LC8g) 뒤 필요할 때. `Soft` → `try await X.Load()`는 S0401의 기대 타입을 도구가 알아야 한다(진단에 구조화된 수정을 싣는 컴파일러 변경이 먼저 — 후속). `@formerly`는 옛 이름을 알아야 한다(ID manifest의 은퇴 이름 — `sparks ids`와 함께 후속). 이름 충돌 시 이름 변경은 rename(L3)과 함께.
 
 ### 11.8 시험(LC8f)
 
 - LC8f1: hover golden(표의 종류마다 — 문서 주석·추론 타입·엔진 schema 위치), 정의 이동(사용자·엔진 field·함수·enum case·import·언어 이름 null), 서식(바뀜·같음·구문 오류·열지 않은 문서·manifest), 위치 역변환(서로게이트 가운데·줄 끝 넘음·마지막 줄 넘음·BOM·CRLF), 할당 실패 전수.
 - LC8f2: 자리마다 후보 golden(이름·종류·순서), core 숨김, Unity 별칭, prefix fuzz(corpus 원문의 모든 토큰 경계에서 요청 — 실패·빈 응답 오류 없이 결정적, 같은 요청 두 번 같은 결과), 할당 실패 전수.
-- LC8f3: 코드마다 편집 golden(편집 적용 뒤 원문이 그 진단 없이 컴파일).
+- LC8f3: 코드마다 편집 golden(title·편집 범위·새 글자), 편집 적용 뒤 원문을 다시 분석하면 그 자리의 그 코드 진단이 없다, CRLF 문서의 줄 삽입·삭제, 범위 밖 진단은 대상 아님, `context.only`, 열지 않은 문서, 할당 실패 전수.
 
 ### 11.9 구현(LC8f1)
 
@@ -353,3 +373,12 @@
 - **시험(`SparksToolsLspCompletionTests`):** `SparksLsp_CompletionGolden`(72자리 — 멤버: class 값·접두·이름 가운데·`?.`·string·`Array<struct>`·`Array<int>`·enum·prelude enum·이름 공간·별칭·문맥 이름·엔진 enum·엔진 object(보이는 확장 이벤트만)·Unity `GetComponent`·재정의 한 번; 이름 범위: 접두·엔진 타입·키워드·숫자·`_`·문장 처음 전체·지역 선언 뒤·자기 초기값·`for` 안/뒤·`if let`; 빈 자리: 줄·블록 주석·문서 주석·문자열·닫히지 않은 문자열·verbatim·보간 안 문자열(블록 주석 뒤·보간 안은 후보); 타입: 접두·별칭 뒤·타입 인자·선언 이름; `on`: 전체·Unity 접두·객체 필드·필드의 필드·구간 넷·string·`let`·엔진 객체 필드·`changed` 있는/없는 엔진 필드·객체 배열·`World`·Actor 아닌 `this`·Actor class의 `on`·`this`; `emit`: 자기 이벤트만·Actor class·`this`·지역; attribute; 기반 목록 첫/뒤 자리·자기 자신 제외; import·segment·의존 패키지; core 기반 목록 첫/뒤·attribute·`on`·키워드 `o`·`Cl`), `SparksLsp_CompletionEdges`(열지 않은 문서·manifest·작업 공간 밖 문서는 빈 목록, 위치 없음 -32602), `SparksLsp_CompletionBomAndCrlf`(BOM·CRLF 문서가 LF와 같은 후보), `SparksLsp_CompletionLimit`(1,100개 → 앞 1,000개와 isIncomplete), `SparksLsp_CompletionFuzz`(사례 원문의 모든 토큰 경계 — 응답 형식, 두 번 돌린 출력이 같다), `SparksLsp_CompletionAllocationFailure`(멤버·`on` 자리 — 3이거나 같은 출력). lifecycle golden의 capabilities에 `completionProvider`.
 - **리뷰 반영:** `on |`이 자기 이벤트(S0803)를, `on this.|`가 Actor 아닌 class에서 필드·Sparks 이벤트를, `on F.|`가 `Changed` 없는 필드·언어 멤버·배열 멤버를, `on F.G.|`가 이벤트를 냄 → SL 3.12절 원천 표대로. `let` 필드에 `Changed` → `var`만. `emit |`가 기반 체인(S0811)·확장 이벤트를 냄 → 자기 이벤트만, `emit this.|`·`emit t.|` 더함. 확장 이벤트가 import와 무관하게 보임 → S0815 규칙대로. 기반 목록이 확장 불가 타입·`open` 아닌 class·자기 자신·첫 자리 interface를 냄 → SL 3.9절대로. 범위 판정이 노드 끝 자리를 안으로 봄(`{ }a|`에 `a`) → 끝은 밖. 중복 제거가 같은 순위 안에서만 → 순위와 무관하게. `MemberAvailable` 주석에 receiver 범위 조건.
 - **한계:** 이름 범위 근사라 같은 블록의 뒤쪽 선언·다른 분기의 지역은 걸러지지만 중첩 함수가 없어 그 밖의 가림은 보지 않는다. 엔진 이름의 `Rocks.` 한정 경로, RPC 접두(`Server.`), 확장 이벤트 선언 자리, 제네릭 타입 매개변수는 후보가 아니다. 요청마다 작업 공간을 다시 읽어 컴파일한다(문서 크기에 비례 — 증분 분석은 후속). prefix fuzz는 사례 원문의 토큰 경계이며 corpus 전체가 아니다.
+
+### 11.11 구현(LC8f3)
+
+- **파일:** 도구 `Private/LspCodeActions.cpp`(편집 생성기 — 표 Q1–Q10), `LspServer.h`의 `LspFix`(제목·원문 byte 범위·새 글자 — 수정 하나는 편집 하나)·`LspCollectFixes`, `LspServer.cpp`의 `CodeAction`과 공용 `AppendDiagnostic`(발행과 빠른 수정이 같은 진단 객체)·`PositionOf`. 컴파일러 `LanguageCatalog.h`의 `SimilarHook`·`SimilarAttribute` — S0803·S0620의 수정 예가 이것을 부른다(옛 거리 계산 사본 두 곳을 지움).
+- **겹침:** 빈 범위면 그 자리를 담거나 경계에 닿는 진단, 아닌 범위는 반열린 구간 [시작, 끝)과 겹치는 진단이 대상이다(LSP 범위는 반열림). 시작이 끝보다 뒤면 바꿔 본다.
+- **편집의 세부:** import 줄은 마지막 import 문 끝 뒤 첫 줄 끝 다음 자리(원문이 그 줄에서 끝나면 앞에 줄 끝), import가 없으면 원문 처음(BOM 뒤)에 `import X;` + 빈 줄. 이미 import한 모듈(별칭 import 포함)은 후보가 아니다. `?? return`은 지역 선언에 타입 표기가 없고(추론 타입이 `T?`) `?? return`이 아직 없을 때만.
+- **시험(`SparksToolsLspCodeActionTests`):** `SparksLsp_CodeActionGolden`(50사례 — Q1–Q10 전부와 각 조건의 수정 없음 사례: 값을 돌려주는 함수·`var`·타입 표기·중첩 블록·대입 대상·null을 다루는 다른 쓰임·await 뒤 읽기, BOM·CRLF·별칭 import 뒤·줄 주석 뒤·같은 줄 코드·블록 주석 앞 import, 여러 후보·이름 겹침·별칭 한정 타입, 다른 대상·의존하지 않는 패키지의 확장 이벤트, tab 들여쓰기·선언과 같은 줄의 attribute, 줄 끝 없는 마지막 줄, 별칭 있는 겹친 import, `override`·대기 있는 최상위 `async`·`@test`, 자기 이벤트·인자 있는·이미 있는 hook, 한글 뒤 UTF-16 열; 수정마다 title·범위·새 글자·`isPreferred`, 그리고 원문과 편집을 적용한 원문을 새 서버로 열어 대상 코드가 없어지고 다른 코드가 늘지 않음), `SparksLsp_CodeActionEdges`(범위 밖 진단 `[]`, `only: ["refactor"]`는 `[]`·`["quickfix"]`는 수정, 열지 않은 문서·manifest `[]`, range 없음 -32602), `SparksLsp_CodeActionAllocationFailure`(재진입 두 수정과 import 추가 — 3이거나 같은 출력). lifecycle golden의 capabilities에 `codeActionProvider`.
+- **리뷰 반영:** `?.`가 대입 대상·값 자리에서 새 오류(S0731·타입) → 문장일 때만. `?? return`이 `var`·await 뒤 읽기·null을 다루는 다른 쓰임에서 새 오류 → 그 경우 뺌. `async` 넣기가 `override`·interface 구현·`@rpc`에서 시그니처 오류 → 뺌, 최상위 `@test`는 넣음, 대기 있는 최상위 함수의 `async` 지우기 → 뺌. hook 이름 바꾸기가 인자 있는 handler·이미 있는 hook에서 새 오류 → 뺌, 자기 이벤트 판정이 확장 이벤트까지 보던 것 → class 체인만(컴파일러와 같게). import 추가가 별칭 한정 타입·이름 겹침·의존하지 않는 패키지·다른 대상의 확장 이벤트에 나옴 → 판정 공용(`CanImport`), 같은 줄 코드·블록 주석이 이어질 때 자리. 별칭 있는 겹친 import 지우기 → 뺌. `context.only`의 kind 계층·빈 글자, 비지 않은 범위는 반열림. 시험은 적용 뒤 "다른 코드가 늘지 않음"까지 본다.
+- **한계:** 수정은 진단을 낸 그 컴파일(마지막 분석)의 원문 기준이라 클라이언트가 그 뒤 고친 내용과 어긋나면 클라이언트가 버전 불일치로 버린다(문서 버전을 편집에 싣는 `documentChanges`는 후속). 표 밖 코드와 11.7절 "미룬 것"은 수정이 없다.

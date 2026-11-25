@@ -22,30 +22,6 @@ extern "C" NTSYSAPI BOOLEAN NTAPI RtlDllShutdownInProgress(VOID);
 
 namespace rocks::platform {
 
-ConditionVariable::ConditionVariable() noexcept {
-    static_assert(sizeof(CONDITION_VARIABLE) <= sizeof(storage_));
-    static_assert(alignof(CONDITION_VARIABLE) <= alignof(ConditionVariable));
-    InitializeConditionVariable(reinterpret_cast<CONDITION_VARIABLE*>(storage_));
-}
-
-ConditionVariable::~ConditionVariable() noexcept = default;
-
-WaitResult ConditionVariable::Wait(Mutex& mutex, uint32 timeoutMs) noexcept {
-    if (SleepConditionVariableSRW(reinterpret_cast<CONDITION_VARIABLE*>(storage_),
-                                  reinterpret_cast<SRWLOCK*>(mutex.storage_), timeoutMs, 0)) {
-        return WaitResult::Signaled;
-    }
-    return GetLastError() == ERROR_TIMEOUT ? WaitResult::TimedOut : WaitResult::Failed;
-}
-
-void ConditionVariable::NotifyOne() noexcept {
-    WakeConditionVariable(reinterpret_cast<CONDITION_VARIABLE*>(storage_));
-}
-
-void ConditionVariable::NotifyAll() noexcept {
-    WakeAllConditionVariable(reinterpret_cast<CONDITION_VARIABLE*>(storage_));
-}
-
 void SleepFor(uint32 milliseconds) noexcept {
     // wait API의 무한 sentinel과 달리 SleepFor의 최댓값도 유한 시간으로 취급한다.
     if (milliseconds == InfiniteTimeout) {

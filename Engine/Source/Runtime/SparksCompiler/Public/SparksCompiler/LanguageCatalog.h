@@ -66,6 +66,12 @@ ROCKS_SPARKSCOMPILER_API LanguageWord LanguageAttributeAt(uint32 index) noexcept
 ROCKS_SPARKSCOMPILER_API uint32 LanguageKeywordCount() noexcept;
 ROCKS_SPARKSCOMPILER_API LanguageWord LanguageKeywordAt(uint32 index) noexcept;
 
+// name과 비슷한 hook·attribute 이름이다(ASCII 대소문자 무시 편집 거리 2 이하 중 가장 가까운 것,
+// 같으면 목록 순서의 앞 — S0803·S0620의 수정 예와 언어 서버 빠른 수정이 같은 제안을 쓴다). 없으면
+// 빈 글자다.
+ROCKS_SPARKSCOMPILER_API StringView SimilarHook(StringView name) noexcept;
+ROCKS_SPARKSCOMPILER_API StringView SimilarAttribute(StringView name) noexcept;
+
 // Unity 이름 대응 전부다.
 ROCKS_SPARKSCOMPILER_API Span<const UnityAlias> UnityAliases() noexcept;
 

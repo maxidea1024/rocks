@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Containers/TakeAllStack.h>
 #include <Base/Checked.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
@@ -39,11 +40,12 @@ struct FrameArenaStats {
 namespace detail {
 
 // 소멸자 등록 기록이다. 객체(또는 배열) 바로 앞에 같은 할당으로 둔다.
-struct FrameArenaDestructor {
+// 소멸자 기록이다. 여러 writer가 잠금 없이 TakeAllStack에 넣고 Reset이 통째로 가져간다
+// (Docs/Design/Synchronization 12.2절, 4.5절 11번).
+struct FrameArenaDestructor : TakeAllStackNode {
     void (*destroy)(void* objects, usize count) noexcept = nullptr;
     void* objects = nullptr;
     usize count = 0;
-    FrameArenaDestructor* next = nullptr;
 };
 
 template <typename T>
@@ -269,7 +271,7 @@ private:
     unsigned char* sharedNext_ = nullptr;
     unsigned char* sharedEnd_ = nullptr;
     // 원자적으로 갱신한다(writer 잠금 없는 경로·여러 스레드의 등록).
-    detail::FrameArenaDestructor* destructors_ = nullptr;
+    TakeAllStack<detail::FrameArenaDestructor> destructors_;
     uint64 destructorCount_ = 0;
     uint64 requestedBytes_ = 0;
     uint64 openWriters_ = 0;
