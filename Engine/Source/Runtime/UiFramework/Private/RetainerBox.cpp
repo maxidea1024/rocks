@@ -8,7 +8,6 @@ Result<void> RetainerBox::Construct(Args&& args) noexcept {
     if (!phase) {
         return phase;
     }
-    SetEffectMaterial(Move(args.effectMaterial));
     auto tinted = SetEffectTint(args.effectTint);
     if (!tinted) {
         return tinted;
@@ -69,17 +68,6 @@ Result<void> RetainerBox::SetPhase(uint32 phase, uint32 count) noexcept {
 
 bool RetainerBox::NeedsCapture(uint64 frame) const noexcept {
     return requested_ || frame % phaseCount_ == phase_;
-}
-
-void RetainerBox::SetEffectMaterial(SharedPtr<const RetainerEffect> effect) noexcept {
-    if (effect_.Get() != effect.Get()) {
-        effect_ = Move(effect);
-        InvalidatePaint();
-    }
-}
-
-SharedPtr<const RetainerEffect> RetainerBox::EffectMaterial() const noexcept {
-    return effect_;
 }
 
 Result<void> RetainerBox::SetEffectTint(LinearColor tint) noexcept {

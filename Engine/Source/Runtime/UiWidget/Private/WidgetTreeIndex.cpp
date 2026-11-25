@@ -148,6 +148,8 @@ Result<ObjectHandle> WidgetTree::FindWidget(ObjectRegistry& objects,
     ObjectHandle found;
     String candidate(objects.ObjectAllocator());
     auto visited = ForEachWidget(objects, Visitor::CreateLambda([&](ObjectHandle handle) noexcept {
+                                     // GetName은 뒤에 붙이므로 매번 비운다.
+                                     candidate.Clear();
                                      auto read =
                                          objects.GetName(objects.OwnerAccess(), handle, candidate);
                                      if (!read) {

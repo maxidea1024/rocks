@@ -31,12 +31,12 @@ UI 코드 일부가 9절 순서(UT0·CB2 선행)보다 먼저, 글꼴 시스템�
 - 터치는 Input의 `TouchBegan`·`TouchMoved`·`TouchEnded`(손가락 번호, `cancelled`)를 쓴다([터치 입력](../TouchInput.ko.md) 3.1절). UI 쪽 `TouchBegin`·`TouchMove`·`TouchEnd`·`TouchCancel`과 `pointerId` 필드는 지웠다. `InputAdapter`가 손가락 번호를 pointer 번호로 쓰고 `cancelled`를 Cancel로 바꾼다. UI capture는 (source, user, pointer)로 찾으므로 마우스 0번과 손가락 0번은 겹치지 않는다.
 - 마우스 capture 상실은 취소(`PointerCaptureLost`)다(UE `OnMouseCaptureLost`). engine-runtime의 "눌린 버튼마다 가짜 MouseUp" 방식은 버린다. 가짜 뗌은 Button을 클릭으로 처리한다. `InputState`는 취소를 받으면 눌린 버튼을 뗀 것으로 기록한다(클릭 없음).
 - `PlatformWindow`의 창 기본 구현(`Window.cpp`)은 `Private/Common`으로 옮겼다. Android는 clipboard·조합 창·drag 이미지를 아직 구현하지 않아 Unsupported를 낸다(`AndroidUiServices.cpp`).
-- `MaterialBase`를 클래스 단위로 export한다(빌드 타깃 BS8d3 — 다른 모듈의 파생). 효과 재질은 UW1에서 Material 참조로 바뀐다.
+- 병합 때 `MaterialBase`를 클래스 단위로 export했으나(빌드 타깃 BS8d3 — 다른 모듈의 파생) UW1a에서 파생 클래스(`RetainerEffectMaterial`)를 지우며 되돌렸다.
 
 | 단계 | 범위 | 완료 판정 |
 |---|---|---|
 | UW0 | engine-runtime 병합·충돌 해결, 문서 분할, 다른 세션이 고치다 멈춘 선언 복구 | 병합 커밋(UiRender 셰이더 경로만 미해결) |
-| UW1a | UI 셰이더를 엔진 셰이더 타입으로: `/Engine/Private/Ui/*.rsf`(엔진 셰이더 A19 `UiElements` 일부를 SLU보다 앞당김), 타입 desc는 UiRender, 파이프라인은 `ShaderSet`·`PipelineCache`. 효과 셰이더 원문(`RetainerEffect`) 제거 — 효과는 3.6절대로 Material 참조(Material 셰이더가 생길 때까지 효과 없음) | EngineTests 빌드·UI 시험 통과, UiDemo 실행 |
+| UW1a | UI 셰이더를 엔진 셰이더 타입으로: `/Engine/Private/Ui/*.rsf`(엔진 셰이더 A19 `UiElements` 일부를 SLU보다 앞당김), 타입 desc는 UiRender, 파이프라인은 `ShaderSet`·`PipelineCache`. 효과 셰이더 원문(`RetainerEffect`·`RetainerEffectMaterial`, 안정 ID는 retire) 제거 — 효과는 3.6절대로 Material 참조(Material 셰이더가 생길 때까지 효과 없음, 색조는 남김). 셰이더 공급은 Developer `DevelopmentShaderProvider`(Sandbox 공급자를 공용화 — 셰이더 시스템 16절 2026-11-25 메모)이고 UiDemo는 Sandbox처럼 Release 밖에서만 공급자를 링크하고 워커를 선행 타깃으로 빌드한다 | EngineTests 빌드·UI 시험 통과, UiDemo 실행 |
 | UW2 | 텍스트를 글꼴 시스템으로: GlyphAtlas·GlyphAtlasCache·DemoFont(GDI) 삭제, `TextLabel`이 `ResolvedCompositeFont`·크기를 받아 최종 배율로 `ShapeText`, 글리프는 `GlyphCache`, 업로드는 `TakeDirtyRegion` 부분 갱신. `TextLayoutModel`(BiDi·hit test·caret)은 TextLayout 모듈에 남긴다 | 한글·아랍어·이모지가 데모에 보임, 텍스트 시험 |
 | UW3 | 규칙: 빌드 파일 영어, 데모 문자열(지역화 표나 시험 fixture), format·빈 줄, 이름 있는 상수 | policy·format 통과 |
 | UW4 | 렌더 경계: UiCore에 그래픽 타입 없는 `UiRenderer` 계약(3.7절), UI lane이 그리기 묶음을 복사해 `RenderLane::Post`, UiRender는 processor 소유·`RenderFrameContext::Device()`, RenderGraph pass로 프레임당 한 번 제출, viewport는 `ViewportElement`·`ViewportSource`(3.11절) | lane 분리 시험, 제출 수 = 1/프레임 |

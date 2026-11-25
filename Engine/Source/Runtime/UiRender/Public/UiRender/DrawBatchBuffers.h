@@ -1,15 +1,16 @@
 #pragma once
 
 #include <Graphics/Device.h>
+#include <RenderBase/ShaderSet.h>
 #include <UiCore/DrawBatch.h>
 
 namespace rocks::ui {
 
-// 한 CPU 배치에 대응하는 장치 버퍼다. 장치와 배치는 이 객체보다 오래 살아야 한다.
+// 한 CPU 배치에 대응하는 장치 버퍼다. 장치·셰이더 집합·배치는 이 객체보다 오래 살아야 한다.
 class ROCKS_UIRENDER_API DrawBatchBuffers {
 public:
     DrawBatchBuffers(
-        graphics::Device& device, const DrawBatch& batch,
+        graphics::Device& device, render::ShaderSet& shaders, const DrawBatch& batch,
         graphics::PixelFormat targetFormat = graphics::PixelFormat::RGBA8UnormSrgb) noexcept;
     ~DrawBatchBuffers() noexcept;
     DrawBatchBuffers(const DrawBatchBuffers&) = delete;
@@ -27,6 +28,7 @@ private:
     mutable uint32 backdropWidth_ = 0, backdropHeight_ = 0;
     graphics::PixelFormat targetFormat_;
     graphics::Device& device_;
+    render::ShaderSet& shaders_;
     const DrawBatch& batch_;
     graphics::BufferHandle vertices_{}, indices_{};
     uint64 revision_ = 0, topology_ = 0;

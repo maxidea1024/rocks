@@ -3,11 +3,12 @@
 namespace rocks::ui {
 
 WorldWidgetPresenter::WorldWidgetPresenter(Allocator& allocator, graphics::Device& device,
+                                           render::ShaderSet& shaders,
                                            SlotArray<BrushTexture>& textures,
                                            graphics::PixelFormat format) noexcept
-    : device_(device), textures_(textures), format_(format),
-      children_(allocator, device, textures, format), batch_(allocator),
-      buffers_(device, batch_, format), surface_(device, textures) {
+    : device_(device), shaders_(shaders), textures_(textures), format_(format),
+      children_(allocator, device, shaders, textures, format), batch_(allocator),
+      buffers_(device, shaders, batch_, format), surface_(device, textures) {
 }
 WorldWidgetPresenter::~WorldWidgetPresenter() noexcept {
     if (!solid_.IsNull()) {
@@ -26,14 +27,14 @@ Result<bool> WorldWidgetPresenter::Prepare(WorldWidgetComponent& component, uint
         return Result<bool>::Failure(arranged.Error());
     }
     if (solid_.IsNull()) {
-        auto made = DrawBatchRenderer::CreateSolidPipeline(device_, format_);
+        auto made = DrawBatchRenderer::CreateSolidPipeline(device_, shaders_, format_);
         if (!made) {
             return Result<bool>::Failure(made.Error());
         }
         solid_ = made.Value();
     }
     if (composite_.IsNull()) {
-        auto made = DrawBatchRenderer::CreateRetainedPipeline(device_, format_);
+        auto made = DrawBatchRenderer::CreateRetainedPipeline(device_, shaders_, format_);
         if (!made) {
             return Result<bool>::Failure(made.Error());
         }

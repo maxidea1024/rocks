@@ -18,7 +18,8 @@ public:
                                                uint32, uint32)>;
 
     WidgetSurfaceHost(
-        Allocator& allocator, graphics::Device& device, SlotArray<BrushTexture>& textures,
+        Allocator& allocator, graphics::Device& device, render::ShaderSet& shaders,
+        SlotArray<BrushTexture>& textures,
         graphics::PixelFormat format = graphics::PixelFormat::RGBA8UnormSrgb) noexcept;
     ~WidgetSurfaceHost() noexcept;
     WidgetSurfaceHost(const WidgetSurfaceHost&) = delete;
@@ -39,6 +40,7 @@ private:
                         graphics::PipelineHandle solid) noexcept;
     Allocator& allocator_;
     graphics::Device& device_;
+    render::ShaderSet& shaders_;
     SlotArray<BrushTexture>& textures_;
     graphics::PixelFormat format_;
     PostBufferSet postBuffers_;

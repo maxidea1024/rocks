@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "DockWindows.h"
 #include "OrbitWorkspace.h"
 #include "WorkspaceCapture.h"
@@ -43,8 +44,17 @@ int Run(launch::ApplicationContext& context) noexcept {
         return 1;
     }
     auto& device = *created.Value();
+    // UI 셰이더 집합(엔진 셰이더 타입 + Development 공급자 — UiToolkit 9.1절 UW1a)이다.
+    ROCKS_ON_SCOPE_EXIT {
+        ShutdownDemoShaders();
+    };
+    DemoShaderSet shaders(allocator, device);
+    if (!shaders.IsReady()) {
+        return 2;
+    }
+
     constexpr auto format = graphics::PixelFormat::RGBA8UnormSrgb;
-    auto solid = DrawBatchRenderer::CreateSolidPipeline(device, format);
+    auto solid = DrawBatchRenderer::CreateSolidPipeline(device, ActiveShaders(), format);
     if (!solid) {
         return 2;
     }
@@ -57,14 +67,14 @@ int Run(launch::ApplicationContext& context) noexcept {
             return checked;
         }
     }
-    auto image = DrawBatchRenderer::CreateImagePipeline(device, format);
+    auto image = DrawBatchRenderer::CreateImagePipeline(device, ActiveShaders(), format);
     if (!image) {
         return 2;
     }
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(image.Value());
     };
-    auto mask = DrawBatchRenderer::CreateMaskPipeline(device, format);
+    auto mask = DrawBatchRenderer::CreateMaskPipeline(device, ActiveShaders(), format);
     if (!mask) {
         return 2;
     }

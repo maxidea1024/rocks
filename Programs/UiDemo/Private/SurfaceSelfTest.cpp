@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "SurfaceSelfTest.h"
 #include <Core/ScopeExit.h>
 #include <UiFramework/Application.h>
@@ -34,7 +35,7 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         return 62;
     }
     SlotArray<BrushTexture> textures(allocator);
-    WidgetSurfaceHost host(allocator, device, textures);
+    WidgetSurfaceHost host(allocator, device, ActiveShaders(), textures);
     bool blue = false;
     host.SetScenePainter(WidgetSurfaceHost::ScenePainter::CreateLambda(
         [&](Element&, graphics::Device& gpu, graphics::TextureHandle target, uint32,
@@ -55,7 +56,7 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
                 return Result<void>::Failure(frame.Error());
             }
             auto drawn =
-                DrawBatchRenderer::Draw(gpu, *frame.Value(), solid, batch, {width, height});
+                DrawBatchRenderer::Draw(gpu, ActiveShaders(), *frame.Value(), solid, batch, {width, height});
             auto ended = gpu.EndFrame();
             if (!drawn) {
                 return drawn;
@@ -72,7 +73,7 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         auto prepared = host.Prepare(root.Value(), frame, width, height, solid);
         auto cached = app.UpdateArrangedPaintCache();
         DrawBatch batch(allocator);
-        DrawBatchBuffers buffers(device, batch);
+        DrawBatchBuffers buffers(device, ActiveShaders(), batch);
         if (!prepared || !cached || !batch.Update(*cached.Value()) || !buffers.Upload() ||
             !DrawBatchRenderer::ReadPixels(device, solid, buffers, textures, width, height,
                                            pixels)) {
@@ -103,47 +104,34 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         auto prepared = host.Prepare(root.Value(), frame, width, height, solid);
         auto cached = app.UpdateArrangedPaintCache();
         DrawBatch batch(allocator);
-        DrawBatchBuffers buffers(device, batch);
+        DrawBatchBuffers buffers(device, ActiveShaders(), batch);
         return prepared && cached && batch.Update(*cached.Value()) && buffers.Upload() &&
                DrawBatchRenderer::ReadPixels(device, solid, buffers, textures, width, height,
                                              pixels);
     };
+    // 경계(4행 7열) 픽셀의 R 위치다. 흐림은 오른쪽의 파랑을 섞으므로 흐림 검사는 파랑 채널(+2)을 본다
+    // (효과 재질이 없어 채널을 바꾸지 않는다 — 효과 재질은 머티리얼 셰이더가 생기면 다시 검사한다,
+    // UiToolkit 9.1절 UW1a).
     const uint32 edge = (4 * width + 7) * 4;
-    const uint32 right = (4 * width + 15) * 4;
-    // 머티리얼이 원본의 파랑 채널을 빨강으로 교환하는지 실제 결과로 검사한다.
-    constexpr StringView hlsl = R"(Texture2D child : register(t0);
-SamplerState s : register(s0);
-float4 PSMain(float4 p : SV_Position, float4 tint : COLOR0, float2 uv : TEXCOORD0) : SV_Target {
-    return child.Sample(s, uv).bgra * tint;
-})";
-    constexpr StringView glsl = R"(#version 320 es
-precision highp float;
-layout(binding=0) uniform sampler2D ps0;
-layout(location=0) in vec4 color;
-layout(location=1) in vec2 uv;
-layout(location=0) out vec4 result;
-void main(){result=texture(ps0,uv).bgra*color;})";
-    auto effect = RetainerEffect::Create(allocator, hlsl, glsl, "ChildColor");
-    if (!effect || !blur.Value()->SetStrength(0)) {
+    constexpr uint32 blueChannel = 2;
+    const uint32 edgeBlue = edge + blueChannel;
+    if (!blur.Value()->SetStrength(0)) {
         return 68;
     }
-    retainer.Value()->SetEffectMaterial(effect.Value());
-    if (!render(3) || pixels[right] < 245 || pixels[right + 2] > 5) {
-        return 69;
-    }
+
     // 둥근 모서리는 원본 픽셀을 유지하고 직사각형의 같은 위치에는 블러가 적용된다.
     if (!blur.Value()->SetStrength(24) || !blur.Value()->SetCornerRadius({4, 4, 4, 4}) ||
-        !render(4) || pixels[0] > 5 || pixels[1] < 245 || pixels[edge] < 10) {
+        !render(4) || pixels[0] > 5 || pixels[1] < 245 || pixels[edgeBlue] < 10) {
         return 70;
     }
-    if (!blur.Value()->SetCornerRadius({}) || !render(5) || pixels[0] < 10) {
+    if (!blur.Value()->SetCornerRadius({}) || !render(5) || pixels[blueChannel] < 10) {
         return 71;
     }
-    if (!blur.Value()->SetRenderOpacity(0) || !render(6) || pixels[edge] > 5) {
+    if (!blur.Value()->SetRenderOpacity(0) || !render(6) || pixels[edgeBlue] > 5) {
         return 72;
     }
     blur.Value()->SetApplyAlphaToBlur(false);
-    if (!render(7) || pixels[edge] < 10) {
+    if (!render(7) || pixels[edgeBlue] < 10) {
         return 73;
     }
     Brush fallback;
@@ -179,8 +167,8 @@ void main(){result=texture(ps0,uv).bgra*color;})";
         (void)textures.TryRemove(slot.Value());
     };
     const PostBufferUpdateInfo targets[] = {{slot.Value(), 4}, {{}, 0}};
-    if (!capture.Value()->SetUpdates(targets) || !render(9) || pixels[edge] > 5 ||
-        !device.ReadPixels(processed.Value(), copy.View()) || copy[edge] < 10) {
+    if (!capture.Value()->SetUpdates(targets) || !render(9) || pixels[edgeBlue] > 5 ||
+        !device.ReadPixels(processed.Value(), copy.View()) || copy[edgeBlue] < 10) {
         return 79;
     }
     auto* plain = textures.Find(capture.Value()->ManagedSurface());
@@ -201,8 +189,8 @@ void main(){result=texture(ps0,uv).bgra*color;})";
     auto* plainChannel = textures.Find(host.GetPostBuffer(2));
     if (!filteredChannel || !plainChannel ||
         host.GetPostBuffer(1) != capture.Value()->GetPostBuffer(1) ||
-        !device.ReadPixels(filteredChannel->texture, copy.View()) || copy[edge] < 10 ||
-        !device.ReadPixels(plainChannel->texture, copy.View()) || copy[edge] > 5) {
+        !device.ReadPixels(filteredChannel->texture, copy.View()) || copy[edgeBlue] < 10 ||
+        !device.ReadPixels(plainChannel->texture, copy.View()) || copy[edgeBlue] > 5) {
         return 83;
     }
     const int viewportCheck = VerifyViewportWorld(allocator, device, solid);

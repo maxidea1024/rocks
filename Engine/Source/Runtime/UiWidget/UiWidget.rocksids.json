@@ -825,7 +825,7 @@
       "name": "rocks::ui::RetainerBoxWidget::effectMaterial_",
       "id": "3bd4ab7f3c324f798bb9c674fff0abb3",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -853,28 +853,28 @@
       "name": "rocks::ui::RetainerBoxWidget::textureParameter_",
       "id": "318c51ce84fa4eac8cd9e15dfaf6c4fc",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::ui::RetainerEffectMaterial::glsl_",
       "id": "23de4c9484e34d668ff347834f0be952",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::ui::RetainerEffectMaterial::hlsl_",
       "id": "8be168ea877948a98131b59d087917f5",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::ui::RetainerEffectMaterial::textureParameter_",
       "id": "2dab216b9c434776b69970f5484d04ae",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -2414,7 +2414,7 @@
       "name": "rocks::ui::RetainerEffectMaterial",
       "id": "a0f7a2cb6d7b439295424f1e3f449bff",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",

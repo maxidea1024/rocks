@@ -12,7 +12,8 @@ namespace rocks::ui {
 class ROCKS_WORLDINTEGRATION_API WorldWidgetPresenter {
 public:
     WorldWidgetPresenter(
-        Allocator& allocator, graphics::Device& device, SlotArray<BrushTexture>& textures,
+        Allocator& allocator, graphics::Device& device, render::ShaderSet& shaders,
+        SlotArray<BrushTexture>& textures,
         graphics::PixelFormat surfaceFormat = graphics::PixelFormat::RGBA8UnormSrgb) noexcept;
     ~WorldWidgetPresenter() noexcept;
     WorldWidgetPresenter(const WorldWidgetPresenter&) = delete;
@@ -28,6 +29,7 @@ public:
 
 private:
     graphics::Device& device_;
+    render::ShaderSet& shaders_;
     SlotArray<BrushTexture>& textures_;
     graphics::PixelFormat format_;
     WidgetSurfaceHost children_;

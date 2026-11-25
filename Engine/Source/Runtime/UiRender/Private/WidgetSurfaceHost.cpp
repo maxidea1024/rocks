@@ -4,15 +4,13 @@
 namespace rocks::ui {
 
 struct WidgetSurfaceHost::Entry {
-    Entry(Allocator& allocator, graphics::Device& owner, SlotArray<BrushTexture>& registry,
-          graphics::PixelFormat format, const SharedPtr<Element>& node) noexcept
+    Entry(Allocator& allocator, graphics::Device& owner, render::ShaderSet& shaders,
+          SlotArray<BrushTexture>& registry, graphics::PixelFormat format,
+          const SharedPtr<Element>& node) noexcept
         : device(owner), textures(registry), widget(node), list(allocator), batch(allocator),
-          buffers(owner, batch, format), retained(owner, registry), postBuffers(owner, registry) {
+          buffers(owner, shaders, batch, format), retained(owner, registry), postBuffers(owner, registry) {
     }
     ~Entry() noexcept {
-        if (!effectPipeline.IsNull()) {
-            device.Retire(effectPipeline);
-        }
         if (auto node = widget.Lock()) {
             auto* source = node->GetWidgetSurface();
             if (source) {
@@ -45,8 +43,6 @@ struct WidgetSurfaceHost::Entry {
     RetainedSurface retained;
     PostBufferSet postBuffers;
     SlotHandle channels[PostBufferChannelCount]{};
-    SharedPtr<const RetainerEffect> effect;
-    graphics::PipelineHandle effectPipeline{};
     graphics::TextureHandle target{};
     graphics::TextureHandle depth{};
     uint32 depthWidth = 0, depthHeight = 0;
@@ -57,9 +53,11 @@ struct WidgetSurfaceHost::Entry {
 };
 
 WidgetSurfaceHost::WidgetSurfaceHost(Allocator& allocator, graphics::Device& device,
+                                     render::ShaderSet& shaders,
                                      SlotArray<BrushTexture>& textures,
                                      graphics::PixelFormat format) noexcept
-    : allocator_(allocator), device_(device), textures_(textures), format_(format),
+    : allocator_(allocator), device_(device), shaders_(shaders), textures_(textures),
+      format_(format),
       postBuffers_(device, textures), entries_(allocator), order_(allocator) {
 }
 
@@ -109,7 +107,7 @@ Result<void> WidgetSurfaceHost::Discover(const SharedPtr<Element>& node,
     }
     if (!current) {
         auto created =
-            UniquePtr<Entry>::TryMake(allocator_, allocator_, device_, textures_, format_, node);
+            UniquePtr<Entry>::TryMake(allocator_, allocator_, device_, shaders_, textures_, format_, node);
         if (!created) {
             return Result<void>::Failure(created.Error());
         }
@@ -193,7 +191,7 @@ Result<bool> WidgetSurfaceHost::Update(Entry& entry, uint64 frame, uint32 width,
             SlotHandle handle{};
             if ((channelMask & (1u << i)) != 0) {
                 if (image_.IsNull()) {
-                    auto made = DrawBatchRenderer::CreateImagePipeline(device_, format_);
+                    auto made = DrawBatchRenderer::CreateImagePipeline(device_, shaders_, format_);
                     if (!made) {
                         return Result<bool>::Failure(made.Error());
                     }
@@ -227,30 +225,16 @@ Result<bool> WidgetSurfaceHost::Update(Entry& entry, uint64 frame, uint32 width,
     }
     const bool resize = entry.width != width || entry.height != height;
     if (kind == WidgetSurfaceKind::RetainedContent) {
-        const auto effect = source.EffectMaterial();
-        const bool materialChanged = effect.Get() != entry.effect.Get();
-        if (!materialChanged && !resize && source.ManagedSurface() == entry.published &&
+        if (!resize && source.ManagedSurface() == entry.published &&
             !source.NeedsCapture(frame)) {
             return Result<bool>::Success(false);
         }
-        if (composite_.IsNull() && !effect) {
-            auto made = DrawBatchRenderer::CreateRetainedPipeline(device_, format_);
+        if (composite_.IsNull()) {
+            auto made = DrawBatchRenderer::CreateRetainedPipeline(device_, shaders_, format_);
             if (!made) {
                 return Result<bool>::Failure(made.Error());
             }
             composite_ = made.Value();
-        }
-        graphics::PipelineHandle next = entry.effectPipeline;
-        if (materialChanged) {
-            next = {};
-            if (effect) {
-                auto compiled = DrawBatchRenderer::CreateEffectPipeline(
-                    device_, format_, {effect->Hlsl(), effect->Glsl()});
-                if (!compiled) {
-                    return Result<bool>::Failure(compiled.Error());
-                }
-                next = compiled.Value();
-            }
         }
         entry.list.Clear();
         auto result = source.RecordContent(entry.list);
@@ -262,25 +246,15 @@ Result<bool> WidgetSurfaceHost::Update(Entry& entry, uint64 frame, uint32 width,
         }
         if (result) {
             result = entry.retained.Render(entry.buffers, width, height, format_, solid,
-                                           next.IsNull() ? composite_ : next);
+                                           composite_);
         }
         if (!result) {
-            if (materialChanged && !next.IsNull()) {
-                device_.Retire(next);
-            }
             return Result<bool>::Failure(result.Error());
-        }
-        if (materialChanged) {
-            if (!entry.effectPipeline.IsNull()) {
-                device_.Retire(entry.effectPipeline);
-            }
-            entry.effectPipeline = next;
-            entry.effect = effect;
         }
         entry.published = entry.retained.Resource();
     } else {
         if (image_.IsNull()) {
-            auto made = DrawBatchRenderer::CreateImagePipeline(device_, format_);
+            auto made = DrawBatchRenderer::CreateImagePipeline(device_, shaders_, format_);
             if (!made) {
                 return Result<bool>::Failure(made.Error());
             }

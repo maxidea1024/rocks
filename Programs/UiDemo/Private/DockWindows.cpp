@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "DockWindows.h"
 
 namespace rocks::ui {
@@ -28,8 +29,8 @@ DockWindows::Surface::Surface(Allocator& allocator, graphics::Device& graphicsDe
                               const SharedPtr<DockManager>& manager,
                               SlotArray<BrushTexture>& textures) noexcept
     : device(graphicsDevice), window(Move(native)), area(manager), app(allocator), adapter(app),
-      queue(allocator), consumed(allocator), batch(allocator), buffers(device, batch),
-      surfaces(allocator, device, textures) {
+      queue(allocator), consumed(allocator), batch(allocator), buffers(device, ActiveShaders(), batch),
+      surfaces(allocator, device, ActiveShaders(), textures) {
     app.SetRoot(area);
     window->SetRegionHitTest(
         platform::Window::RegionHitTest::CreateLambda([this](IntVec2 point) noexcept {
@@ -192,7 +193,7 @@ Result<void> DockWindows::UpdateDragImage(Surface& host) noexcept {
     if (!result) {
         return result;
     }
-    DrawBatchBuffers buffers(device_, batch);
+    DrawBatchBuffers buffers(device_, ActiveShaders(), batch);
     result = buffers.Upload();
     if (!result) {
         return result;

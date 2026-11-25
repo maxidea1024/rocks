@@ -15,7 +15,6 @@ public:
         ElementChild content{};
         uint32 phase = 0;
         uint32 phaseCount = 1;
-        SharedPtr<const RetainerEffect> effectMaterial{};
         LinearColor effectTint{1, 1, 1, 1};
         ElementArgs common{};
     };
@@ -37,8 +36,6 @@ public:
     // 전체 주기 중 phase 프레임에 생략 가능한 캡처를 예약한다. 명시적 갱신은 즉시 허용한다.
     Result<void> SetPhase(uint32 phase, uint32 count) noexcept;
     bool NeedsCapture(uint64 frame) const noexcept override;
-    void SetEffectMaterial(SharedPtr<const RetainerEffect> effect) noexcept;
-    SharedPtr<const RetainerEffect> EffectMaterial() const noexcept override;
     Result<void> SetEffectTint(LinearColor tint) noexcept;
     void RequestRender() noexcept;
     // 자식을 타깃 로컬 좌표로 기록한다. 성공적으로 그린 뒤 SetRetainedTexture로 게시한다.
@@ -51,7 +48,6 @@ protected:
     Span<const SharedPtr<Element>> PaintChildren() const noexcept override;
 
 private:
-    SharedPtr<const RetainerEffect> effect_;
     LinearColor effectTint_{1, 1, 1, 1};
     mutable CacheRoot contentCache_;
     SlotHandle retained_{};

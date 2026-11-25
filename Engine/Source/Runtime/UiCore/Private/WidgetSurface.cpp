@@ -6,10 +6,6 @@ SharedPtr<WidgetSurfaceScene> WidgetSurface::SceneSource() const noexcept {
     return {};
 }
 
-SharedPtr<const RetainerEffect> WidgetSurface::EffectMaterial() const noexcept {
-    return {};
-}
-
 uint32 WidgetSurface::RequestedPostBuffers() const noexcept {
     return 0;
 }

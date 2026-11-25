@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "GameHud.h"
 
 #include <D3D11Graphics/D3D11Device.h>
@@ -28,19 +29,24 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
         return 3;
     }
     auto& device = *created.Value();
+    DemoShaderSet shaders(allocator, device);
+    if (!shaders.IsReady()) {
+        return 3;
+    }
+
     graphics::TextureDesc desc;
     desc.width = 64;
     desc.height = 16;
     desc.format = graphics::PixelFormat::RGBA8Unorm;
     desc.usage = graphics::TextureUsage::RenderTarget;
     auto target = device.CreateTexture(desc, {});
-    auto pipeline = DrawBatchRenderer::CreateSolidPipeline(device, desc.format);
+    auto pipeline = DrawBatchRenderer::CreateSolidPipeline(device, ActiveShaders(), desc.format);
     if (!target || !pipeline) {
         return 4;
     }
 
     DrawBatch batch(allocator);
-    DrawBatchBuffers buffers(device, batch);
+    DrawBatchBuffers buffers(device, ActiveShaders(), batch);
     auto bar =
         objects.ResolveForWrite<ProgressBarWidget>(objects.OwnerAccess(), hud.Value().progress);
     if (!bar) {

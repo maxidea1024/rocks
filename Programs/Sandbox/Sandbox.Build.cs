@@ -5,7 +5,7 @@ using Rocks.Build.Rules;
 // --self-test checks offscreen render results without a window. The sample renderer used for test drawing (SampleRenderer) lives in this
 // executable (it is not the engine renderer).
 // Shaders are Programs/Sandbox/Shaders mounted as /Plugin/Sandbox (ShaderSystem section 16.1 SSD19). They are not cooked: outside Release the
-// executable carries the development shader provider (Developer ShaderCompiler, the shader compile worker and the user tool store) that builds
+// executable carries the development shader provider (Developer DevelopmentShaderProvider: ShaderCompiler, the shader compile worker and the user tool store) that builds
 // each device format's library in memory. Release Game targets must not reach Developer modules, so Release Sandbox has no provider and its
 // drawing self-tests report NOT RUN.
 // The OpenGL ES backend is the GLES31_PC preview on Windows and is kept out of Release Windows executables (ShaderSystem section 9, UE keeps the
@@ -36,7 +36,7 @@ public sealed class SandboxProgram : ModuleRules
             PublicDependencies = ["Launch", "Engine", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
                 "D3D11Graphics", "VulkanGraphics",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
-                .. (shaderProvider ? ["ShaderCompiler", "ShaderCompilerCommon", "AssetNugget", "ObjectRuntime", "Task"] : Array.Empty<string>()),
+                .. (shaderProvider ? ["DevelopmentShaderProvider", "ObjectRuntime", "Task"] : Array.Empty<string>()),
                 .. (traceAnalysis ? ["TraceAnalysis"] : Array.Empty<string>())]
         };
     }

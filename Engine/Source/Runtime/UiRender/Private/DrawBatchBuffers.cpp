@@ -13,9 +13,10 @@ Span<const uint8> VertexBytes(Span<const DrawVertex> vertices) noexcept {
 
 } // namespace
 
-DrawBatchBuffers::DrawBatchBuffers(graphics::Device& device, const DrawBatch& batch,
+DrawBatchBuffers::DrawBatchBuffers(graphics::Device& device, render::ShaderSet& shaders,
+                                   const DrawBatch& batch,
                                    graphics::PixelFormat targetFormat) noexcept
-    : targetFormat_(targetFormat), device_(device), batch_(batch) {
+    : targetFormat_(targetFormat), device_(device), shaders_(shaders), batch_(batch) {
 }
 
 DrawBatchBuffers::~DrawBatchBuffers() noexcept {
@@ -30,7 +31,7 @@ DrawBatchBuffers::~DrawBatchBuffers() noexcept {
 
 Result<void> DrawBatchBuffers::PrepareBlur(uint32 width, uint32 height) const noexcept {
     if (blurPipeline_.IsNull()) {
-        auto pipeline = DrawBatchRenderer::CreateBlurPipeline(device_, targetFormat_);
+        auto pipeline = DrawBatchRenderer::CreateBlurPipeline(device_, shaders_, targetFormat_);
         if (!pipeline) {
             return Result<void>::Failure(pipeline.Error());
         }

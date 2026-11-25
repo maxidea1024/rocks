@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "SurfaceSelfTest.h"
 #include <UiFramework/Application.h>
 #include <UiFramework/Viewport.h>
@@ -59,7 +60,7 @@ int VerifyViewportWorld(Allocator& allocator, graphics::Device& device,
                 return built;
             }
             return DrawBatchRenderer::Draw(
-                gpu, commands, solid, batch,
+                gpu, ActiveShaders(), commands, solid, batch,
                 {static_cast<float>(camera.width), static_cast<float>(camera.height)});
         });
     if (!widget.SetSceneRenderer(objects, Move(renderer))) {
@@ -70,7 +71,7 @@ int VerifyViewportWorld(Allocator& allocator, graphics::Device& device,
         return 126;
     }
     SlotArray<BrushTexture> textures(allocator);
-    WidgetSurfaceHost host(allocator, device, textures);
+    WidgetSurfaceHost host(allocator, device, ActiveShaders(), textures);
     if (!host.Prepare(element.Value(), 0, 8, 8, solid)) {
         return 127;
     }

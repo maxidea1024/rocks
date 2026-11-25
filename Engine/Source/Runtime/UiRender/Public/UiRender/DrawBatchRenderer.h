@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Graphics/Device.h>
+#include <RenderBase/ShaderSet.h>
 #include <UiCore/DrawBatch.h>
 
 namespace rocks::ui {
@@ -23,32 +24,36 @@ public:
                                    const DrawBatchBuffers& buffers,
                                    const SlotArray<BrushTexture>& textures, uint32 width,
                                    uint32 height, Array<uint8>& rgba) noexcept;
-    // 단색 사각형용 파이프라인을 만든다. 반환한 파이프라인은 호출자가 Retire한다.
+    // 파이프라인은 shaders(엔진 셰이더 집합 — UiShaderTypes 등록, UiToolkit 9.1절 UW1a)의 UI
+    // 셰이더로 만든다. 반환한 파이프라인은 호출자가 Retire한다. 집합이 Ready가 아니면 NotReady, UI
+    // 셰이더 타입이 없으면 NotFound다.
+    //
+    // 단색 사각형용 파이프라인을 만든다.
     static Result<graphics::PipelineHandle>
-    CreateSolidPipeline(graphics::Device& device, graphics::PixelFormat format) noexcept;
+    CreateSolidPipeline(graphics::Device& device, render::ShaderSet& shaders,
+                        graphics::PixelFormat format) noexcept;
 
     static Result<graphics::PipelineHandle>
-    CreateImagePipeline(graphics::Device& device, graphics::PixelFormat format) noexcept;
+    CreateImagePipeline(graphics::Device& device, render::ShaderSet& shaders,
+                        graphics::PixelFormat format) noexcept;
 
     // 투명 바탕에 그린 하위 트리는 RGB에 알파가 이미 곱해져 있다.
     static Result<graphics::PipelineHandle>
-    CreateRetainedPipeline(graphics::Device& device, graphics::PixelFormat format) noexcept;
-
-    // 사용자 머티리얼 픽셀 셰이더와 표준 UI 정점 셰이더를 결합한다.
-    static Result<graphics::PipelineHandle>
-    CreateEffectPipeline(graphics::Device& device, graphics::PixelFormat format,
-                         graphics::ShaderSource pixel) noexcept;
+    CreateRetainedPipeline(graphics::Device& device, render::ShaderSet& shaders,
+                           graphics::PixelFormat format) noexcept;
 
     // R8 글리프의 R을 덮임률로 읽고 정점 색의 알파에 곱한다.
     static Result<graphics::PipelineHandle>
-    CreateMaskPipeline(graphics::Device& device, graphics::PixelFormat format) noexcept;
+    CreateMaskPipeline(graphics::Device& device, render::ShaderSet& shaders,
+                       graphics::PixelFormat format) noexcept;
 
     // 배경을 캡처한 텍스처에 화면 좌표 기준의 가우스 필터를 적용한다.
     static Result<graphics::PipelineHandle>
-    CreateBlurPipeline(graphics::Device& device, graphics::PixelFormat format) noexcept;
+    CreateBlurPipeline(graphics::Device& device, render::ShaderSet& shaders,
+                       graphics::PixelFormat format) noexcept;
 
     static Result<void>
-    Draw(graphics::Device& device, graphics::CommandContext& commands,
+    Draw(graphics::Device& device, render::ShaderSet& shaders, graphics::CommandContext& commands,
          graphics::PipelineHandle pipeline, const DrawBatch& batch, Vec2 viewportSize,
          const SlotArray<BrushTexture>* textures = nullptr,
          graphics::PixelFormat targetFormat = graphics::PixelFormat::RGBA8UnormSrgb) noexcept;

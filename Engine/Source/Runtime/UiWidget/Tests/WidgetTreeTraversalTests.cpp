@@ -1,4 +1,5 @@
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/NamePool.h>
 #include <TestSupport/Test.h>
 #include <UiWidget/OverlayWidget.generated.h>
 #include <UiWidget/ProgressBarWidget.generated.h>
@@ -12,7 +13,12 @@ TEST(UiWidget_TreeTraversalHonorsSlotOrderNestedBoundariesAndLiveElements) {
     TypeRegistry types(allocator);
     ModuleRegistration registration(types, allocator);
     REQUIRE(RegisterWidgetTypes(registration));
-    ObjectRegistry objects(allocator, types, {0x554957, 47});
+    // 이름 찾기(FindWidget)는 객체 이름을 읽으므로 이름 풀을 붙인다.
+    NamePool names(allocator);
+    REQUIRE(names.Initialize());
+    RegistryOptions options;
+    options.names = &names;
+    ObjectRegistry objects(allocator, types, {0x554957, 47}, options);
     const auto access = objects.OwnerAccess();
     ObjectAccessScope scope(access);
     auto owner = objects.NewObject<WidgetTree>(access, GeneratedType<WidgetTree>::Id());

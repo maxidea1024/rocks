@@ -20,6 +20,8 @@ Result<ObjectHandle> UserWidget::FindAnimation(ObjectRegistry& objects,
                                                StringView name) const noexcept {
     String stored(objects.ObjectAllocator());
     for (auto handle : animations_.View()) {
+        // GetName은 뒤에 붙이므로 매번 비운다.
+        stored.Clear();
         auto read = objects.GetName(objects.OwnerAccess(), handle, stored);
         if (!read) {
             return Result<ObjectHandle>::Failure(read.Error());

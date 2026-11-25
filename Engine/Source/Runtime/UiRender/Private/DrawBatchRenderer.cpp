@@ -1,215 +1,13 @@
 #include <UiRender/DrawBatchRenderer.h>
 #include <UiRender/DrawBatchBuffers.h>
+#include <RenderBase/PipelineStatePresets.h>
+#include <UiRender/UiShaderTypes.h>
 #include <Core/ScopeExit.h>
 #include <stddef.h>
 
 namespace rocks::ui {
 
 namespace {
-
-constexpr char SolidHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 screen; };
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(float2 position : ATTRIBUTE0, float4 color : ATTRIBUTE1) {
-    VSOutput output;
-    output.position = float4(position * screen.xy + screen.zw, 0.0, 1.0);
-    output.color = color;
-    return output;
-}
-
-float4 PSMain(VSOutput input) : SV_Target { return input.color; }
-)";
-
-constexpr char SolidVertexGlsl[] = R"(#version 320 es
-precision highp float;
-layout(location = 0) in vec2 position;
-layout(location = 1) in vec4 color;
-uniform highp vec4 vu_h[1];
-layout(location = 0) out vec4 outColor;
-void main() {
-    gl_Position = vec4(position * vu_h[0].xy + vu_h[0].zw, 0.0, 1.0);
-    outColor = color;
-}
-)";
-
-constexpr char SolidPixelGlsl[] = R"(#version 320 es
-precision highp float;
-layout(location = 0) in vec4 inColor;
-layout(location = 0) out vec4 outColor;
-void main() { outColor = inColor; }
-)";
-
-constexpr char ImageHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 screen; };
-Texture2D image : register(t0);
-SamplerState imageSampler : register(s0);
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; float2 uv : TEXCOORD0; };
-VSOutput VSMain(float2 position : ATTRIBUTE0, float4 color : ATTRIBUTE1, float2 uv : ATTRIBUTE2) {
-    VSOutput output;
-    output.position = float4(position * screen.xy + screen.zw, 0.0, 1.0);
-    output.color = color;
-    output.uv = uv;
-    return output;
-}
-
-float4 PSMain(VSOutput input) : SV_Target { return image.Sample(imageSampler, input.uv) * input.color; }
-)";
-
-constexpr char ImageVertexGlsl[] = R"(#version 320 es
-precision highp float;
-layout(location = 0) in vec2 position;
-layout(location = 1) in vec4 color;
-layout(location = 2) in vec2 uv;
-uniform highp vec4 vu_h[1];
-layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec2 outUv;
-void main() {
-    gl_Position = vec4(position * vu_h[0].xy + vu_h[0].zw, 0.0, 1.0);
-    outColor = color;
-    outUv = uv;
-}
-)";
-
-constexpr char ImagePixelGlsl[] = R"(#version 320 es
-precision highp float;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) in vec4 inColor;
-layout(location = 1) in vec2 inUv;
-layout(location = 0) out vec4 outColor;
-void main() { outColor = texture(ps0, inUv) * inColor; }
-)";
-
-// 투명 바탕에 합성한 텍스처는 RGB에 알파가 곱해져 있으므로, 위젯 불투명도도 RGB와 A에 함께
-// 적용한다.
-constexpr char RetainedPixelHlsl[] = R"(
-Texture2D image : register(t0);
-SamplerState imageSampler : register(s0);
-float4 PSMain(float4 position : SV_Position, float4 tint : COLOR0, float2 uv : TEXCOORD0) : SV_Target {
-    float4 sampleColor = image.Sample(imageSampler, uv);
-    return float4(sampleColor.rgb * tint.rgb * tint.a, sampleColor.a * tint.a);
-}
-)";
-
-constexpr char RetainedPixelGlsl[] = R"(#version 320 es
-precision highp float;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) in vec4 inColor;
-layout(location = 1) in vec2 inUv;
-layout(location = 0) out vec4 outColor;
-void main() {
-    vec4 sampleColor = texture(ps0, inUv);
-    outColor = vec4(sampleColor.rgb * inColor.rgb * inColor.a, sampleColor.a * inColor.a);
-}
-)";
-
-constexpr char MaskPixelHlsl[] = R"(
-Texture2D image : register(t0);
-SamplerState imageSampler : register(s0);
-float4 PSMain(float4 position : SV_Position, float4 color : COLOR0, float2 uv : TEXCOORD0) : SV_Target {
-    return float4(color.rgb, color.a * image.Sample(imageSampler, uv).r);
-}
-)";
-
-constexpr char MaskPixelGlsl[] = R"(#version 320 es
-precision highp float;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) in vec4 inColor;
-layout(location = 1) in vec2 inUv;
-layout(location = 0) out vec4 outColor;
-void main() { outColor = vec4(inColor.rgb, inColor.a * texture(ps0, inUv).r); }
-)";
-
-// UV는 현재 패스의 전체 화면을 기준으로 계산한다. 위젯을 이동하거나 회전해도
-// 뒤에 그린 배경 중 같은 화면 좌표를 샘플한다. 샘플 간격은 출력 픽셀 단위다.
-constexpr char BlurHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 screen; float4 cornerRadius; };
-Texture2D image : register(t0);
-SamplerState imageSampler : register(s0);
-struct VSOutput { float4 position : SV_Position; float4 samplePoint : TEXCOORD0; float4 localBox : TEXCOORD1; float4 radii : TEXCOORD2; };
-VSOutput VSMain(float2 p : ATTRIBUTE0, float4 color : ATTRIBUTE1, float2 uv : ATTRIBUTE2) {
-    VSOutput o;
-    o.position = float4(p * screen.xy + screen.zw, 0, 1);
-    float ratio = uv.y / max(0.001, uv.x);
-    o.samplePoint = float4(p * float2(screen.x, -screen.y) * 0.5, exp(-0.5 * ratio * ratio), uv.y);
-    o.localBox = color;
-    o.radii = cornerRadius;
-    return o;
-}
-float4 PSMain(VSOutput i) : SV_Target {
-    uint w, h; image.GetDimensions(w, h);
-    if (i.radii.x < 0) return image.Load(int3(int2(i.position.xy), 0));
-    float2 halfTexel = 0.5 / float2(w, h);
-    float2 step = i.samplePoint.w * halfTexel;
-    float2 boxHalf = 0.5 * i.localBox.zw;
-    float2 delta = i.localBox.xy - boxHalf;
-    float radius = delta.y < 0 ? (delta.x < 0 ? i.radii.x : i.radii.y) : (delta.x < 0 ? i.radii.w : i.radii.z);
-    radius = min(radius, min(boxHalf.x, boxHalf.y));
-    if (length(max(abs(delta) - boxHalf + radius, 0.0)) > radius) discard;
-    float w1 = i.samplePoint.z, w2 = w1*w1*w1*w1;
-    float weights[5] = {w2,w1,1,w1,w2};
-    float total = 1 + 2*(w1+w2);
-    float4 sum = 0;
-    [unroll] for (int y = -2; y <= 2; ++y) {
-        [unroll] for (int x = -2; x <= 2; ++x) {
-            float weight = weights[x+2] * weights[y+2];
-            sum += weight * image.SampleLevel(imageSampler, clamp(i.samplePoint.xy + float2(x,y)*step, halfTexel, 1.0-halfTexel), 0);
-        }
-    }
-    return sum / (total * total);
-}
-)";
-
-constexpr char BlurVertexGlsl[] = R"(#version 320 es
-precision highp float;
-layout(location = 0) in vec2 position;
-layout(location = 1) in vec4 box;
-layout(location = 2) in vec2 uv;
-uniform highp vec4 vu_h[2];
-layout(location = 0) out vec4 samplePoint;
-layout(location = 1) out vec4 localBox;
-layout(location = 2) out vec4 radii;
-void main() {
-    gl_Position = vec4(position * vu_h[0].xy + vu_h[0].zw, 0, 1);
-    float ratio = uv.y / max(0.001, uv.x);
-    samplePoint = vec4(position * vec2(vu_h[0].x, -vu_h[0].y) * 0.5, exp(-0.5*ratio*ratio), uv.y);
-    localBox = box;
-    radii = vu_h[1];
-}
-)";
-
-constexpr char BlurPixelGlsl[] = R"(#version 320 es
-precision highp float;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) in vec4 samplePoint;
-layout(location = 1) in vec4 localBox;
-layout(location = 2) in vec4 radii;
-layout(location = 0) out vec4 outColor;
-void main() {
-    if (radii.x < 0.0) {
-        ivec2 size = textureSize(ps0,0);
-        outColor = texelFetch(ps0,clamp(ivec2(samplePoint.xy * vec2(size)),ivec2(0),size-1),0);
-        return;
-    }
-    vec2 halfTexel = 0.5 / vec2(textureSize(ps0,0));
-    vec2 stepSize = samplePoint.w * halfTexel;
-    vec2 boxHalf = 0.5 * localBox.zw;
-    vec2 delta = localBox.xy - boxHalf;
-    float radius = delta.y < 0.0 ? (delta.x < 0.0 ? radii.x : radii.y) : (delta.x < 0.0 ? radii.w : radii.z);
-    radius = min(radius,min(boxHalf.x,boxHalf.y));
-    if (length(max(abs(delta) - boxHalf + radius,0.0)) > radius) discard;
-    float w1 = samplePoint.z, w2 = w1*w1*w1*w1;
-    float weights[5] = float[5](w2,w1,1.0,w1,w2);
-    float total = 1.0 + 2.0*(w1+w2);
-    vec4 sum = vec4(0.0);
-    for (int y = -2; y <= 2; ++y) {
-        for (int x = -2; x <= 2; ++x) {
-            float weight = weights[x+2] * weights[y+2];
-            sum += weight * textureLod(ps0,clamp(samplePoint.xy+vec2(x,y)*stepSize,halfTexel,1.0-halfTexel),0.0);
-        }
-    }
-    outColor = sum / (total * total);
-}
-)";
 
 enum class UiShader {
     Solid,
@@ -219,9 +17,18 @@ enum class UiShader {
     Blur
 };
 
-Result<graphics::PipelineHandle>
-CreateUiPipeline(graphics::Device& device, graphics::PixelFormat format, UiShader shader,
-                 const graphics::ShaderSource* effect = nullptr) noexcept {
+// 그리기별 상수 byte 수다(UiElements.rsf UiDrawConstants·UiBackdropBlur.rsf UiBlurConstants).
+constexpr uint32 UiDrawConstantBytes = 16;
+constexpr uint32 UiBlurConstantBytes = 32;
+
+// 정점 속성 수다(위치·색, 텍스처는 UV를 더한다).
+constexpr uint32 SolidAttributeCount = 2;
+constexpr uint32 TexturedAttributeCount = 3;
+
+Result<graphics::PipelineHandle> CreatePipeline(graphics::Device& device,
+                                                render::ShaderSet& shaders,
+                                                graphics::PixelFormat format,
+                                                UiShader shader) noexcept {
     const bool textured = shader != UiShader::Solid;
     const graphics::VertexAttribute attributes[] = {
         {0, graphics::VertexFormat::Float2, 0, offsetof(DrawVertex, position)},
@@ -230,79 +37,74 @@ CreateUiPipeline(graphics::Device& device, graphics::PixelFormat format, UiShade
     const graphics::VertexStream streams[] = {
         {sizeof(DrawVertex), graphics::VertexStepRate::Vertex}};
     graphics::PipelineDesc desc;
-    if (textured) {
-        desc.vertex = {ImageHlsl, ImageVertexGlsl};
-        desc.pixel = {ImageHlsl, ImagePixelGlsl};
-        if (shader == UiShader::Blur) {
-            desc.vertex = {BlurHlsl, BlurVertexGlsl};
-            desc.pixel = {BlurHlsl, BlurPixelGlsl};
-        }
-        if (shader == UiShader::Retained) {
-            desc.pixel =
-                effect ? *effect : graphics::ShaderSource{RetainedPixelHlsl, RetainedPixelGlsl};
-        }
-        if (shader == UiShader::Mask) {
-            desc.pixel = {MaskPixelHlsl, MaskPixelGlsl};
-        }
-    } else {
-        desc.vertex = {SolidHlsl, SolidVertexGlsl};
-        desc.pixel = {SolidHlsl, SolidPixelGlsl};
-    }
-    desc.layout = {Span<const graphics::VertexAttribute>(attributes, textured ? 3u : 2u), streams};
-    desc.drawConstantBytes = shader == UiShader::Blur ? 32 : 16;
+    desc.layout = {Span<const graphics::VertexAttribute>(
+                       attributes, textured ? TexturedAttributeCount : SolidAttributeCount),
+                   streams};
+    desc.drawConstantBytes = shader == UiShader::Blur ? UiBlurConstantBytes : UiDrawConstantBytes;
     desc.colorFormats[0] = format;
     if (shader != UiShader::Blur) {
-        desc.blend[0] = graphics::AlphaBlend();
-        if (shader == UiShader::Retained) {
-            desc.blend[0].sourceColor = graphics::BlendFactor::One;
-        }
+        // 보관 표면은 premultiplied다(RGB에 알파가 이미 곱해져 있다).
+        desc.blend[0] =
+            shader == UiShader::Retained ? render::PremultipliedAlphaBlend() : render::AlphaBlend();
     }
-    return device.CreatePipeline(desc);
+
+    switch (shader) {
+    case UiShader::Solid:
+        return CreateUiPipeline(device, shaders, UiSolidVertexType, UiSolidPixelType, desc);
+    case UiShader::Image:
+        desc.bindings.texture = UiTextureName;
+        return CreateUiPipeline(device, shaders, UiImageVertexType, UiImagePixelType, desc);
+    case UiShader::Mask:
+        desc.bindings.texture = UiTextureName;
+        return CreateUiPipeline(device, shaders, UiImageVertexType, UiMaskPixelType, desc);
+    case UiShader::Retained:
+        desc.bindings.texture = UiTextureName;
+        return CreateUiPipeline(device, shaders, UiImageVertexType, UiRetainedPixelType, desc);
+    case UiShader::Blur:
+    default:
+        desc.bindings.texture = UiBackdropName;
+        return CreateUiPipeline(device, shaders, UiBlurVertexType, UiBlurPixelType, desc);
+    }
 }
 
 } // namespace
 
 Result<graphics::PipelineHandle>
-DrawBatchRenderer::CreateSolidPipeline(graphics::Device& device,
+DrawBatchRenderer::CreateSolidPipeline(graphics::Device& device, render::ShaderSet& shaders,
                                        graphics::PixelFormat format) noexcept {
-    return CreateUiPipeline(device, format, UiShader::Solid);
+    return CreatePipeline(device, shaders, format, UiShader::Solid);
 }
 
 Result<graphics::PipelineHandle>
-DrawBatchRenderer::CreateImagePipeline(graphics::Device& device,
+DrawBatchRenderer::CreateImagePipeline(graphics::Device& device, render::ShaderSet& shaders,
                                        graphics::PixelFormat format) noexcept {
-    return CreateUiPipeline(device, format, UiShader::Image);
+    return CreatePipeline(device, shaders, format, UiShader::Image);
 }
 
 Result<graphics::PipelineHandle>
-DrawBatchRenderer::CreateMaskPipeline(graphics::Device& device,
+DrawBatchRenderer::CreateMaskPipeline(graphics::Device& device, render::ShaderSet& shaders,
                                       graphics::PixelFormat format) noexcept {
-    return CreateUiPipeline(device, format, UiShader::Mask);
+    return CreatePipeline(device, shaders, format, UiShader::Mask);
 }
 
 Result<graphics::PipelineHandle>
-DrawBatchRenderer::CreateRetainedPipeline(graphics::Device& device,
+DrawBatchRenderer::CreateRetainedPipeline(graphics::Device& device, render::ShaderSet& shaders,
                                           graphics::PixelFormat format) noexcept {
-    return CreateUiPipeline(device, format, UiShader::Retained);
+    return CreatePipeline(device, shaders, format, UiShader::Retained);
 }
 
 Result<graphics::PipelineHandle>
-DrawBatchRenderer::CreateEffectPipeline(graphics::Device& device, graphics::PixelFormat format,
-                                        graphics::ShaderSource pixel) noexcept {
-    return CreateUiPipeline(device, format, UiShader::Retained, &pixel);
-}
-
-Result<graphics::PipelineHandle>
-DrawBatchRenderer::CreateBlurPipeline(graphics::Device& device,
+DrawBatchRenderer::CreateBlurPipeline(graphics::Device& device, render::ShaderSet& shaders,
                                       graphics::PixelFormat format) noexcept {
-    return CreateUiPipeline(device, format, UiShader::Blur);
+    return CreatePipeline(device, shaders, format, UiShader::Blur);
 }
 
-Result<void> DrawBatchRenderer::Draw(graphics::Device& device, graphics::CommandContext& commands,
+Result<void> DrawBatchRenderer::Draw(graphics::Device& device, render::ShaderSet& shaders,
+                                     graphics::CommandContext& commands,
                                      graphics::PipelineHandle pipeline, const DrawBatch& batch,
                                      Vec2 viewportSize, const SlotArray<BrushTexture>* textures,
                                      graphics::PixelFormat targetFormat) noexcept {
-    DrawBatchBuffers buffers(device, batch, targetFormat);
+    DrawBatchBuffers buffers(device, shaders, batch, targetFormat);
     auto uploaded = buffers.Upload();
     if (!uploaded) {
         return uploaded;

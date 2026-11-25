@@ -18,7 +18,7 @@ struct WorldWidgetClipPlane {
 // 호출자가 먼저 지정한다. 속도 attachment가 있으면 현재 UV - 직전 UV를 별도로 출력한다.
 class ROCKS_UIRENDER_API WorldWidgetPlane {
 public:
-    explicit WorldWidgetPlane(graphics::Device& device) noexcept;
+    WorldWidgetPlane(graphics::Device& device, render::ShaderSet& shaders) noexcept;
     ~WorldWidgetPlane() noexcept;
     WorldWidgetPlane(const WorldWidgetPlane&) = delete;
     WorldWidgetPlane& operator=(const WorldWidgetPlane&) = delete;
@@ -31,6 +31,7 @@ public:
 
 private:
     graphics::Device& device_;
+    render::ShaderSet& shaders_;
     graphics::PipelineHandle pipeline_{};
     graphics::BufferHandle quad_{};
 };

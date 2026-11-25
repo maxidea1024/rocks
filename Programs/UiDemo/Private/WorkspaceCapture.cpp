@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "WorkspaceCapture.h"
 #include <AssetDatabase/AtomicFileWrite.h>
 #include <Core/Text/StringBuilder.h>
@@ -18,7 +19,7 @@ Result<void> CaptureWorkspace(Allocator& allocator, graphics::Device& device,
     if (!arranged) {
         return arranged;
     }
-    WidgetSurfaceHost surfaces(allocator, device, textures);
+    WidgetSurfaceHost surfaces(allocator, device, ActiveShaders(), textures);
     auto preparedSurfaces = surfaces.Prepare(root, 0, width, height, pipeline);
     if (!preparedSurfaces) {
         return Result<void>::Failure(preparedSurfaces.Error());
@@ -28,7 +29,7 @@ Result<void> CaptureWorkspace(Allocator& allocator, graphics::Device& device,
         return Result<void>::Failure(cache.Error());
     }
     DrawBatch batch(allocator);
-    DrawBatchBuffers buffers(device, batch);
+    DrawBatchBuffers buffers(device, ActiveShaders(), batch);
     auto prepared = batch.Update(*cache.Value());
     if (!prepared) {
         return Result<void>::Failure(prepared.Error());

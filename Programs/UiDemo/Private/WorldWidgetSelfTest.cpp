@@ -1,3 +1,4 @@
+#include "DemoShaders.h"
 #include "SurfaceSelfTest.h"
 #include <Core/ScopeExit.h>
 #include <UiWidget/BorderWidget.generated.h>
@@ -63,12 +64,12 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
         return 150;
     }
     SlotArray<BrushTexture> textures(allocator);
-    WorldWidgetPresenter presenter(allocator, device, textures);
+    WorldWidgetPresenter presenter(allocator, device, ActiveShaders(), textures);
     auto initial = presenter.Prepare(widget, 0), idle = presenter.Prepare(widget, 1);
     if (!initial || !initial.Value() || !idle || idle.Value()) {
         return 151;
     }
-    WorldWidgetPlane plane(device);
+    WorldWidgetPlane plane(device, ActiveShaders());
     using graphics::PixelFormat;
     if (!plane.Initialize(PixelFormat::RGBA8UnormSrgb, PixelFormat::D32Float,
                           PixelFormat::RGBA8Unorm, true)) {
