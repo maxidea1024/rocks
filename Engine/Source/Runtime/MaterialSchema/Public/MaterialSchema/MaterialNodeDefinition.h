@@ -33,10 +33,13 @@ struct TypeSchema;
 //           .Menu("Multiply", "Math", "*", "Multiplies two values component-wise.");
 namespace rocks::material {
 
+// 핀 기본값의 최대 성분 수다(float4).
+inline constexpr uint8 MaxMaterialPinDefaultComponents = 4;
+
 // 입력 핀을 연결하지 않고 사용자 값도 없을 때의 값이다. componentCount 0은 기본값 없음이다(연결이
 // 없으면 필수 입력 오류 또는 노드가 정한 동작).
 struct MaterialPinDefault {
-    float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float values[MaxMaterialPinDefaultComponents] = {0.0f, 0.0f, 0.0f, 0.0f};
     uint8 componentCount = 0;
 
     static constexpr MaterialPinDefault Scalar(float x) noexcept {
@@ -116,6 +119,12 @@ constexpr MaterialPinDefinition MaterialOutput(StringView key, MaterialPinType t
     return pin;
 }
 
+// 비활성 노드의 통과 쌍 정의다(NodeGraph PassThroughPair의 정적 형식 — 키는 등록 때 intern한다).
+struct MaterialPassThrough {
+    StringView input;
+    StringView output;
+};
+
 // 노드가 들어갈 수 있는 그래프 종류다(UE UMaterialExpression::IsAllowedIn 대응).
 enum class MaterialGraphKind : uint8 {
     Material = 0,
@@ -177,7 +186,7 @@ struct MaterialNodeDefinition {
     // 선택이다(개수가 속성으로 정해지는 핀 — 임의 HLSL·함수 호출·Switch).
     nodegraph::DynamicPinsFn dynamicPins = nullptr;
     // 선택이다. 입력은 정적 입력 핀 키, 출력은 정적 출력 핀 키다.
-    Span<const nodegraph::PassThroughPair> passThrough;
+    Span<const MaterialPassThrough> passThrough;
     nodegraph::NodeMenuInfo menu;
     nodegraph::NodeCapabilities capabilities = nodegraph::DefaultNodeCapabilities;
     nodegraph::MigrateFn migrate = nullptr;
@@ -219,7 +228,7 @@ struct MaterialNodeDefinition {
     }
 
     constexpr MaterialNodeDefinition
-    PassThrough(Span<const nodegraph::PassThroughPair> value) const noexcept {
+    PassThrough(Span<const MaterialPassThrough> value) const noexcept {
         MaterialNodeDefinition copy = *this;
         copy.passThrough = value;
         return copy;

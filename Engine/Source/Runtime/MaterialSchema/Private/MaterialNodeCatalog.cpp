@@ -1,6 +1,6 @@
+#include <Core/Move.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
-#include <Core/Move.h>
 #include <Meta/TypeSchema.h>
 
 // 머티리얼 노드 정의의 등록과 조회다(Docs/Design/MaterialSystem 5.2·19.7절).
@@ -8,7 +8,24 @@ namespace rocks::material {
 
 namespace {
 
-constexpr uint32 MaxDefaultComponents = 4;
+char LowerAscii(char value) noexcept {
+    return value >= 'A' && value <= 'Z' ? static_cast<char>(value - 'A' + 'a') : value;
+}
+
+// NamePool 비교 규칙(ASCII 대소문자 무시)과 같은 비교다.
+bool SameKey(StringView left, StringView right) noexcept {
+    if (left.ByteCount() != right.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.ByteCount(); ++index) {
+        if (LowerAscii(left.Data()[index]) != LowerAscii(right.Data()[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 bool SameText(Span<const char> left, StringView right) noexcept {
     if (left.Size() != right.ByteCount()) {
@@ -34,12 +51,23 @@ bool SchemaHasField(const TypeSchema& schema, StringView name) noexcept {
     return false;
 }
 
+bool HasPin(Span<const MaterialPinDefinition> pins, StringView key,
+            nodegraph::PinDirection direction) noexcept {
+    for (const MaterialPinDefinition& pin : pins) {
+        if (pin.direction == direction && SameKey(pin.key, key)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 Result<void> ValidatePins(Span<const MaterialPinDefinition> pins) noexcept {
     for (usize index = 0; index < pins.Size(); ++index) {
         const MaterialPinDefinition& pin = pins[index];
         if (pin.key.IsEmpty() || static_cast<uint32>(pin.type) >= MaterialPinTypeCount ||
             (static_cast<uint8>(pin.flags) & ~MaterialPinFlagMask) != 0 ||
-            pin.defaultValue.componentCount > MaxDefaultComponents) {
+            pin.defaultValue.componentCount > MaxMaterialPinDefaultComponents) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -55,7 +83,7 @@ Result<void> ValidatePins(Span<const MaterialPinDefinition> pins) noexcept {
         }
 
         for (usize other = 0; other < index; ++other) {
-            if (pins[other].key == pin.key) {
+            if (SameKey(pins[other].key, pin.key)) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
         }
@@ -97,12 +125,62 @@ Result<void> ValidateDefinition(const MaterialNodeDefinition& definition) noexce
         }
     }
 
+    for (const MaterialPassThrough& pair : definition.passThrough) {
+        if (!HasPin(definition.pins, pair.input, nodegraph::PinDirection::Input) ||
+            !HasPin(definition.pins, pair.output, nodegraph::PinDirection::Output)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     return ValidatePins(definition.pins);
 }
 
 nodegraph::PinValuePolicy ValuePolicyOf(const MaterialPinDefinition& pin) noexcept {
     return HasPinFlag(pin.flags, MaterialPinFlags::HideValue) ? nodegraph::PinValuePolicy::Hidden
                                                               : nodegraph::PinValuePolicy::Editable;
+}
+
+// 정의 하나의 NodeGraph 서술 배열(핀·통과 쌍)을 이름을 intern해 채운다.
+Result<void> BuildDescriptorArrays(NamePool& names, const MaterialNodeDefinition& definition,
+                                   Array<nodegraph::PinDescriptor>& pins,
+                                   Array<nodegraph::PassThroughPair>& passThrough) noexcept {
+    pins.Clear();
+    passThrough.Clear();
+    if (auto reserved = pins.TryReserve(definition.pins.Size()); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved = passThrough.TryReserve(definition.passThrough.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const MaterialPinDefinition& pin : definition.pins) {
+        auto key = names.TryIntern(pin.key);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        nodegraph::PinDescriptor descriptor =
+            pin.direction == nodegraph::PinDirection::Input
+                ? nodegraph::InputPin(key.Value(), ToPinTypeId(pin.type), pin.displayName)
+                : nodegraph::OutputPin(key.Value(), ToPinTypeId(pin.type), pin.displayName);
+        descriptor.advanced = HasPinFlag(pin.flags, MaterialPinFlags::Advanced);
+        descriptor.valuePolicy = ValuePolicyOf(pin);
+        // 용량을 미리 잡았으므로 실패하지 않는다.
+        (void)pins.TryPushBack(descriptor);
+    }
+
+    for (const MaterialPassThrough& pair : definition.passThrough) {
+        auto input = names.TryIntern(pair.input);
+        auto output = names.TryIntern(pair.output);
+        if (!input || !output) {
+            return Result<void>::Failure(!input ? input.Error() : output.Error());
+        }
+
+        (void)passThrough.TryPushBack(nodegraph::PassThroughPair{input.Value(), output.Value()});
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -132,24 +210,24 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::Register(
 Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
     nodegraph::NodeTypeRegistry& registry, const MaterialGraphSchema& schema,
     Span<const Span<const MaterialNodeDefinition>> groups, ModuleLease lease) noexcept {
-    using Failure = Result<MaterialNodeGroupId>;
+    using Outcome = Result<MaterialNodeGroupId>;
     if (!schema.Ready() || registry.FindSchema(schema.Domain()) != &schema) {
-        return Failure::Failure(ErrorCode::InvalidArgument);
+        return Outcome::Failure(ErrorCode::InvalidArgument);
     }
 
     for (usize groupIndex = 0; groupIndex < groups.Size(); ++groupIndex) {
         const Span<const MaterialNodeDefinition> definitions = groups[groupIndex];
         for (usize index = 0; index < definitions.Size(); ++index) {
             if (auto valid = ValidateDefinition(definitions[index]); !valid) {
-                return Failure::Failure(valid.Error());
+                return Outcome::Failure(valid.Error());
             }
 
             for (usize otherGroup = 0; otherGroup <= groupIndex; ++otherGroup) {
                 const Span<const MaterialNodeDefinition> others = groups[otherGroup];
                 const usize end = otherGroup == groupIndex ? index : others.Size();
                 for (usize other = 0; other < end; ++other) {
-                    if (others[other].type == definitions[index].type) {
-                        return Failure::Failure(ErrorCode::InvalidArgument);
+                    if (SameKey(others[other].type, definitions[index].type)) {
+                        return Outcome::Failure(ErrorCode::InvalidArgument);
                     }
                 }
             }
@@ -157,7 +235,7 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
     }
 
     if (auto reserved = groups_.TryReserve(groups_.Size() + 1); !reserved) {
-        return Failure::Failure(reserved.Error());
+        return Outcome::Failure(reserved.Error());
     }
 
     const MaterialNodeGroupId group{nextGroup_};
@@ -165,13 +243,10 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
     const MaterialGraphKindMask kind = ToMask(schema.Kind());
     NamePool& names = registry.Names();
     Array<nodegraph::PinDescriptor> pins(allocator_);
+    Array<nodegraph::PassThroughPair> passThrough(allocator_);
     Result<void> status = Result<void>::Success();
 
     for (const Span<const MaterialNodeDefinition> definitions : groups) {
-        if (!status) {
-            break;
-        }
-
         for (const MaterialNodeDefinition& definition : definitions) {
             if ((definition.graphKinds & kind) == 0) {
                 continue;
@@ -183,30 +258,15 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
                 break;
             }
 
-            pins.Clear();
-            if (auto reserved = pins.TryReserve(definition.pins.Size()); !reserved) {
-                status = Move(reserved);
+            // 같은 종류 이름은 모든 도메인에서 같은 정의여야 한다(Find가 도메인 없이 찾는다).
+            const MaterialNodeDefinition* existing = Find(type.Value());
+            if (existing != nullptr && existing != &definition) {
+                status = Result<void>::Failure(ErrorCode::AlreadyExists);
                 break;
             }
 
-            for (const MaterialPinDefinition& pin : definition.pins) {
-                auto key = names.TryIntern(pin.key);
-                if (!key) {
-                    status = Result<void>::Failure(key.Error());
-                    break;
-                }
-
-                nodegraph::PinDescriptor descriptor =
-                    pin.direction == nodegraph::PinDirection::Input
-                        ? nodegraph::InputPin(key.Value(), ToPinTypeId(pin.type), pin.displayName)
-                        : nodegraph::OutputPin(key.Value(), ToPinTypeId(pin.type), pin.displayName);
-                descriptor.advanced = HasPinFlag(pin.flags, MaterialPinFlags::Advanced);
-                descriptor.valuePolicy = ValuePolicyOf(pin);
-                // 용량을 미리 잡았으므로 실패하지 않는다.
-                (void)pins.TryPushBack(descriptor);
-            }
-
-            if (!status) {
+            if (auto built = BuildDescriptorArrays(names, definition, pins, passThrough); !built) {
+                status = Move(built);
                 break;
             }
 
@@ -219,11 +279,12 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
 
             descriptor.staticPins = pins.View();
             descriptor.dynamicPins = definition.dynamicPins;
-            descriptor.passThrough = definition.passThrough;
+            descriptor.passThrough = passThrough.View();
             descriptor.menu = definition.menu;
             descriptor.capabilities = definition.capabilities;
             descriptor.migrate = definition.migrate;
 
+            // 등록표가 핀·통과 쌍을 소유 복사하므로 배열을 다음 정의에 다시 쓴다.
             auto registered = registry.RegisterNodeType(schema.Domain(), descriptor, lease);
             if (!registered) {
                 status = Result<void>::Failure(registered.Error());
@@ -241,6 +302,10 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
                 break;
             }
         }
+
+        if (!status) {
+            break;
+        }
     }
 
     if (!status) {
@@ -251,14 +316,14 @@ Result<MaterialNodeGroupId> MaterialNodeCatalog::RegisterGroups(
         }
 
         RebuildLookup();
-        return Failure::Failure(status.Error());
+        return Outcome::Failure(status.Error());
     }
 
     // 용량을 미리 잡았으므로 실패하지 않는다.
     (void)groups_.TryPushBack(group.value);
     ++nextGroup_;
     RebuildLookup();
-    return Result<MaterialNodeGroupId>::Success(group);
+    return Outcome::Success(group);
 }
 
 Result<void> MaterialNodeCatalog::Unregister(nodegraph::NodeTypeRegistry& registry,
@@ -281,7 +346,9 @@ Result<void> MaterialNodeCatalog::Unregister(nodegraph::NodeTypeRegistry& regist
             continue;
         }
 
-        if (auto removed = registry.UnregisterNodeType(entries_[at].registration); !removed) {
+        // registry에서 이미 빠진 종류(NotFound)는 빠진 것으로 본다.
+        auto removed = registry.UnregisterNodeType(entries_[at].registration);
+        if (!removed && removed.Error() != ErrorCode::NotFound) {
             RebuildLookup();
             return removed;
         }

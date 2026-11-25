@@ -19,7 +19,7 @@
 
 형식은 [노드 그래프](../NodeGraph/06-DataModel.ko.md) 6절(문서·노드·간선·정규 순서·불변식 GI1–GI10)을 따른다. 이 절은 머티리얼 쪽 규칙만 적는다.
 
-- **그래프** = NodeGraph `GraphDocument`(도메인 `Material`). 출력 노드(`MaterialOutput`)는 하나다. schema의 `CreateDefaultNodes`가 만들고 문서당 하나 capability로 지킨다. 함수 그래프는 입력·출력 노드를 여럿 가진다.
+- **그래프** = NodeGraph `GraphDocument`(도메인 `Material`). 출력 노드(`Material.Output`)는 하나다. schema의 `CreateDefaultNodes`가 만들고 문서당 하나 capability로 지킨다. 함수 그래프는 입력·출력 노드를 여럿 가진다.
 - **노드** = `{ NodeId, NodeTypeId, schemaVersion, properties(PropertyRecord) }`. 속성은 리플렉션 Record 바이트다(노드 그래프 GD23). 핀은 인스턴스로 저장하지 않는다. 저장하는 것은 입력 기본값 override와 고아 핀뿐이다(노드 그래프 GD3). 핀은 노드 타입 descriptor가 정한다. 개수가 바뀌는 핀(임의 HLSL 노드의 입력, 함수 호출 노드의 입출력)은 노드 속성에서 핀 목록을 만드는 descriptor 함수가 정한다.
 - **핀** = `{ PinKey, 방향, 타입 제약, 기본값(입력 핀), 단계 제약, 필수 여부 }`. `PinKey`는 노드 타입 descriptor가 선언한 안정 키다(계획 14.6절 PinId). 표시 이름·배열 순번과 독립이라 핀 이름을 바꿔도 키는 그대로다. 핀을 없애거나 합치면 노드 migration이 옛 키를 새 키로 옮긴다.
 - **간선** = `(출력 NodeId, 출력 PinKey) → (입력 NodeId, 입력 PinKey)`. 입력 핀은 간선 하나, 출력 핀은 여럿을 가진다.
@@ -54,7 +54,7 @@
 
 | ID | 규칙 | 시점 |
 |---|---|---|
-| V1 | 핀 타입 제약과 암묵 변환(5.3절) | 연결·번역 |
+| V1 | 핀 타입 제약과 암묵 변환(5.3절). 연결 때는 타입 군만 보고(수 군·같은 자원 타입·TextureAny), 폭·변환은 번역이 본다(UE `CanConnectMaterialValueTypes`와 같다) | 연결(군)·번역(폭) |
 | V2 | 데이터 흐름 순환 금지(재경유 포함) | 연결·번역 |
 | V3 | 함수 호출 순환·인스턴스 부모 사슬 순환 금지 | 번역(Build 의존 SCC) |
 | V4 | 단계 규칙. 픽셀 전용 노드(화면 좌표·미분·scene texture)를 정점 출력에 쓰면 오류다. 정점에서 암묵 mip 텍스처 샘플도 오류다(명시 mip 필요) | 번역(IR 분석, 6.4절) |

@@ -1,3 +1,4 @@
+#include <Core/Containers/Array.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <Meta/TypeSchema.h>
@@ -25,14 +26,26 @@ bool SameFieldName(Span<const char> left, StringView right) noexcept {
     return true;
 }
 
-// 의미에서 빼는 필드인가(정의의 nonSemanticFields를 그 스키마의 필드 ID로 본다).
-bool IsNonSemanticField(const MaterialNodeDefinition& definition, const TypeSchema& schema,
-                        Guid fieldId) noexcept {
+// 정의의 nonSemanticFields를 스키마 필드 ID로 한 번 바꾼다.
+Result<void> CollectNonSemanticIds(const MaterialNodeDefinition& definition,
+                                   const TypeSchema& schema, Array<Guid>& out) noexcept {
     for (StringView name : definition.nonSemanticFields) {
         for (const FieldSchema& field : schema.fields) {
-            if (field.id == fieldId && SameFieldName(field.name, name)) {
-                return true;
+            if (SameFieldName(field.name, name)) {
+                if (auto pushed = out.TryPushBack(field.id); !pushed) {
+                    return pushed;
+                }
             }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+bool Contains(const Array<Guid>& ids, Guid id) noexcept {
+    for (const Guid& candidate : ids) {
+        if (candidate == id) {
+            return true;
         }
     }
 
@@ -106,20 +119,28 @@ MaterialGraphSchema::NormalizeSemanticNode(const nodegraph::GraphNode& node,
         return writer.WriteNode(node);
     }
 
+    const TypeSchema& schema = definition->propertiesSchema();
     const Span<const uint8> bytes = node.properties.bytes.View();
     auto header = ReadRecordHeader(bytes);
-    if (!header) {
-        // 손상된 속성은 그대로 쓴다. 문서 검증(GI)이 따로 보고한다.
+    if (!header || !(header.Value().schema == schema.id)) {
+        // 정의의 속성 struct가 아닌 바이트(손상·다른 schema)는 거를 필드를 정할 수 없으므로 그대로
+        // 쓴다. 문서 검증(GI — 속성 schema 일치)이 따로 오류로 보고한다.
         return writer.WriteNode(node);
     }
 
+    // 정의의 속성 Record다: 여기서부터 실패는 의미 바이트를 정할 수 없다는 오류다(기본값을 조용히
+    // hash에 넣지 않는다 — 5.5절).
     auto reader = RecordReader::Open(scratch_, bytes, header.Value().schema,
                                      header.Value().schemaVersion, header.Value().schemaVersion);
     if (!reader) {
-        return writer.WriteNode(node);
+        return Result<void>::Failure(reader.Error());
     }
 
-    const TypeSchema& schema = definition->propertiesSchema();
+    Array<Guid> excluded(scratch_);
+    if (auto collected = CollectNonSemanticIds(*definition, schema, excluded); !collected) {
+        return collected;
+    }
+
     RecordBuilder builder(scratch_, header.Value().schema, header.Value().schemaVersion);
     for (;;) {
         auto field = reader.Value().Next();
@@ -131,7 +152,7 @@ MaterialGraphSchema::NormalizeSemanticNode(const nodegraph::GraphNode& node,
             return Result<void>::Failure(field.Error());
         }
 
-        if (IsNonSemanticField(*definition, schema, field.Value().id)) {
+        if (Contains(excluded, field.Value().id)) {
             continue;
         }
 
@@ -151,11 +172,11 @@ MaterialGraphSchema::NormalizeSemanticNode(const nodegraph::GraphNode& node,
 }
 
 nodegraph::ConnectVerdict
-MaterialGraphSchema::CanConnect(const nodegraph::GraphReadView& view,
+MaterialGraphSchema::CanConnect(const nodegraph::GraphReadView&,
                                 const nodegraph::ConnectQuery& query) const noexcept {
     nodegraph::ConnectVerdict verdict;
     if (query.graph == nullptr || query.fromPin == nullptr || query.toPin == nullptr) {
-        verdict.reasonCode = static_cast<uint32>(MaterialConnectReason::TypeMismatch);
+        verdict.reasonCode = static_cast<uint32>(MaterialConnectReason::InvalidQuery);
         return verdict;
     }
 
@@ -169,10 +190,14 @@ MaterialGraphSchema::CanConnect(const nodegraph::GraphReadView& view,
         return verdict;
     }
 
-    auto cycle = nodegraph::WouldCreateCycle(*query.graph, query.from, query.to,
-                                             view.Registry().GetAllocator());
-    if (!cycle || cycle.Value()) {
+    auto cycle = nodegraph::WouldCreateCycle(*query.graph, query.from, query.to, scratch_);
+    if (!cycle) {
         // 판정할 수 없으면(할당 실패) 잇지 않는다.
+        verdict.reasonCode = static_cast<uint32>(MaterialConnectReason::CycleCheckFailed);
+        return verdict;
+    }
+
+    if (cycle.Value()) {
         verdict.reasonCode = static_cast<uint32>(MaterialConnectReason::Cycle);
         return verdict;
     }

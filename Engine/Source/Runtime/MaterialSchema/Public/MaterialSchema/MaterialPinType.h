@@ -62,11 +62,13 @@ enum class MaterialPinType : uint32 {
     // 속성 집합(UE MCT_MaterialAttributes).
     MaterialAttributes = 35,
     // shading model 번호(UE MCT_ShadingModel).
-    ShadingModel = 36
+    ShadingModel = 36,
+    // 번역 때 정해지는 열거 값(5.3절 — preset 선택 등).
+    StaticEnum = 37
 };
 
 // 표의 타입 수다(마지막 값 + 1).
-inline constexpr uint32 MaterialPinTypeCount = 37;
+inline constexpr uint32 MaterialPinTypeCount = 38;
 
 // 타입 군이다(연결 판정).
 enum class MaterialPinTypeClass : uint8 {

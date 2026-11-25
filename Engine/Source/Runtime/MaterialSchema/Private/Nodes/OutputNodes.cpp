@@ -14,42 +14,46 @@ constexpr float DefaultSurfaceThicknessCm = 0.01f;
 // UE Displacement 기본값(중립 높이)이다.
 constexpr float DefaultDisplacement = 0.5f;
 
+// 핀 타입은 UE 속성 타입과 같다(MaterialAttributeDefinitionMap.cpp:395–430). 수 군끼리는 연결 때
+// 막지 않고 번역의 V1이 폭을 맞춘다(5.3절). 키가 UE 이름과 다른 핀은 그 옆에 적는다(19.5절).
 constexpr MaterialPinDefinition OutputPins[] = {
+    // UE FrontMaterial.
     MaterialInput("Surface", MaterialPinType::Surface, "Surface"),
-    MaterialInput("Opacity", MaterialPinType::Numeric, "Opacity", MaterialPinDefault::Scalar(1.0f)),
-    MaterialInput("OpacityMask", MaterialPinType::Numeric, "Opacity Mask",
+    MaterialInput("Opacity", MaterialPinType::Float1, "Opacity", MaterialPinDefault::Scalar(1.0f)),
+    MaterialInput("OpacityMask", MaterialPinType::Float1, "Opacity Mask",
                   MaterialPinDefault::Scalar(1.0f)),
-    MaterialInput("AmbientOcclusion", MaterialPinType::Numeric, "Ambient Occlusion",
+    MaterialInput("AmbientOcclusion", MaterialPinType::Float1, "Ambient Occlusion",
                   MaterialPinDefault::Scalar(1.0f)),
-    MaterialInput("WorldPositionOffset", MaterialPinType::Numeric, "World Position Offset",
+    MaterialInput("WorldPositionOffset", MaterialPinType::Float3, "World Position Offset",
                   MaterialPinDefault::Vector3(0.0f, 0.0f, 0.0f)),
-    MaterialInput("PixelDepthOffset", MaterialPinType::Numeric, "Pixel Depth Offset",
+    MaterialInput("PixelDepthOffset", MaterialPinType::Float1, "Pixel Depth Offset",
                   MaterialPinDefault::Scalar(0.0f)),
-    MaterialInput("Refraction", MaterialPinType::Numeric, "Refraction",
+    MaterialInput("Refraction", MaterialPinType::Float3, "Refraction",
                   MaterialPinDefault::Vector3(1.0f, 0.0f, 0.0f)),
-    MaterialInput("SurfaceThickness", MaterialPinType::Numeric, "Surface Thickness",
+    MaterialInput("SurfaceThickness", MaterialPinType::Float1, "Surface Thickness",
                   MaterialPinDefault::Scalar(DefaultSurfaceThicknessCm),
                   MaterialPinFlags::Advanced),
-    MaterialInput("Displacement", MaterialPinType::Numeric, "Displacement",
+    MaterialInput("Displacement", MaterialPinType::Float1, "Displacement",
                   MaterialPinDefault::Scalar(DefaultDisplacement), MaterialPinFlags::Advanced),
-    // 기본값이 없다: 연결이 없으면 정점 입력의 같은 UV 채널을 그대로 쓴다(UE와 같음).
-    MaterialInput("CustomizedUv0", MaterialPinType::Numeric, "Customized UV0", {},
+    // UE CustomizedUV0–7. 기본값이 없다: 연결이 없으면 정점 입력의 같은 UV 채널을 그대로 쓴다(UE와
+    // 같음).
+    MaterialInput("CustomizedUv0", MaterialPinType::Float2, "Customized UV0", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv1", MaterialPinType::Numeric, "Customized UV1", {},
+    MaterialInput("CustomizedUv1", MaterialPinType::Float2, "Customized UV1", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv2", MaterialPinType::Numeric, "Customized UV2", {},
+    MaterialInput("CustomizedUv2", MaterialPinType::Float2, "Customized UV2", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv3", MaterialPinType::Numeric, "Customized UV3", {},
+    MaterialInput("CustomizedUv3", MaterialPinType::Float2, "Customized UV3", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv4", MaterialPinType::Numeric, "Customized UV4", {},
+    MaterialInput("CustomizedUv4", MaterialPinType::Float2, "Customized UV4", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv5", MaterialPinType::Numeric, "Customized UV5", {},
+    MaterialInput("CustomizedUv5", MaterialPinType::Float2, "Customized UV5", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv6", MaterialPinType::Numeric, "Customized UV6", {},
+    MaterialInput("CustomizedUv6", MaterialPinType::Float2, "Customized UV6", {},
                   MaterialPinFlags::Advanced),
-    MaterialInput("CustomizedUv7", MaterialPinType::Numeric, "Customized UV7", {},
+    MaterialInput("CustomizedUv7", MaterialPinType::Float2, "Customized UV7", {},
                   MaterialPinFlags::Advanced),
-    // 머티리얼 속성 사용 표시(기본 속성 useMaterialAttributes)일 때만 쓴다(5.6절).
+    // UE MaterialAttributes. 기본 속성 useMaterialAttributes일 때만 쓴다(5.6절).
     MaterialInput("Attributes", MaterialPinType::MaterialAttributes, "Material Attributes", {},
                   MaterialPinFlags::Advanced),
 };

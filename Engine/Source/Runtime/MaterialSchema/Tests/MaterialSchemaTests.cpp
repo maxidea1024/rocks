@@ -1,5 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
+#include <MaterialSchema/MaterialAttributeTable.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <MaterialSchema/MaterialSchemaModule.h>
@@ -379,7 +380,12 @@ TEST(MaterialSchema_DefaultOutputNode) {
 
     nodegraph::GraphCommandList commands(env.allocator);
     REQUIRE(env.material.CreateDefaultNodes(nodegraph::GraphRole::Main, Guid{1, 1}, ids, commands));
-    CHECK(commands.Size() == 1);
+    REQUIRE(commands.Size() == 1);
+    const nodegraph::GraphCommand& added = commands.View()[0];
+    CHECK(added.kind == nodegraph::GraphCommandKind::AddNode);
+    CHECK(added.nodeData.type == env.Intern(MaterialOutputNodeTypeName));
+    CHECK(added.nodeData.typeSchemaVersion == 1);
+    CHECK(added.layout.node == added.nodeData.id);
 
     nodegraph::GraphCommandList collapsed(env.allocator);
     REQUIRE(env.material.CreateDefaultNodes(nodegraph::GraphRole::Collapsed, Guid{1, 1}, ids,
@@ -517,6 +523,277 @@ TEST(MaterialSchema_VocabularyNames) {
               .IsEmpty());
     CHECK(HasFeature(ToMask(MaterialContextFeature::Scene), MaterialContextFeature::Scene));
     CHECK(!HasFeature(ToMask(MaterialContextFeature::Scene), MaterialContextFeature::View));
+}
+
+namespace {
+
+// 계수 lease다(등록이 쥐고 해제가 놓는지 본다).
+struct CountedLease {
+    int count = 0;
+
+    static void Retain(void* context) noexcept {
+        ++static_cast<CountedLease*>(context)->count;
+    }
+
+    static void Release(void* context) noexcept {
+        --static_cast<CountedLease*>(context)->count;
+    }
+
+    ModuleLease Acquire() noexcept {
+        auto lease = ModuleLease::Acquire(this, &Retain, &Release);
+        return lease ? Move(lease.Value()) : ModuleLease();
+    }
+};
+
+constexpr MaterialPinDefinition TogglePins[] = {
+    MaterialInput("In", MaterialPinType::Numeric, "In"),
+    MaterialOutput("Out", MaterialPinType::Numeric, "Out"),
+};
+
+// 키를 대소문자만 다르게 적어도 정적 핀과 맞는다(NamePool 규칙).
+constexpr MaterialPassThrough ToggleThrough[] = {{"in", "Out"}};
+constexpr MaterialPassThrough ToggleBadThrough[] = {{"Out", "In"}};
+
+constexpr MaterialNodeDefinition PluginDefinitions[] = {
+    MaterialNode("Plugin.Toggle")
+        .Pins(TogglePins)
+        .PassThrough(ToggleThrough)
+        .Capabilities(nodegraph::DefaultNodeCapabilities |
+                      nodegraph::NodeCapabilities::AllowDisable),
+};
+
+nodegraph::GraphNode MakeNode(SchemaEnv& env, Guid id, Name type) noexcept {
+    nodegraph::GraphNode node(env.allocator);
+    node.id = id;
+    node.type = type;
+    node.typeSchemaVersion = 1;
+    return node;
+}
+
+nodegraph::GraphEdge MakeEdge(Guid from, Name fromPin, Guid to, Name toPin) noexcept {
+    nodegraph::GraphEdge edge;
+    edge.fromNode = from;
+    edge.fromPin = fromPin;
+    edge.toNode = to;
+    edge.toPin = toPin;
+    return edge;
+}
+
+Array<uint8> ForeignRecord(Allocator& allocator, uint8 value) noexcept {
+    constexpr Guid foreign{0x464f524549474e00ull, 9};
+    RecordBuilder builder(allocator, foreign, 1);
+    const uint8 payload[] = {value, 0, 0, 0};
+    (void)builder.AddField(ParamDefaultField, WireType::U32, payload);
+    auto built = builder.Build();
+    return built ? Move(built.Value()) : Array<uint8>(allocator);
+}
+
+} // namespace
+
+// 가짜 플러그인 묶음: 자기 lease로 등록하고 해제하면 lease를 놓는다. 통과 쌍 키는 intern된다.
+TEST(MaterialSchema_PluginGroupLeaseAndPassThrough) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    CountedLease plugin;
+    auto group =
+        env.catalog.Register(env.registry, env.material, PluginDefinitions, plugin.Acquire());
+    REQUIRE(group);
+    CHECK(plugin.count > 0);
+    const nodegraph::RegisteredNodeType* toggle =
+        env.registry.FindNodeType(env.material.Domain(), env.Intern("Plugin.Toggle"));
+    REQUIRE(toggle != nullptr);
+    REQUIRE(toggle->descriptor.passThrough.Size() == 1);
+    CHECK(toggle->descriptor.passThrough[0].input == env.Intern("In"));
+    CHECK(toggle->descriptor.passThrough[0].output == env.Intern("Out"));
+    CHECK(env.catalog.Unregister(env.registry, group.Value()));
+    CHECK(plugin.count == 0);
+
+    // 통과 쌍이 정적 입력 → 출력이 아니면 거부한다.
+    static constexpr MaterialNodeDefinition bad[] = {
+        MaterialNode("Plugin.BadToggle").Pins(TogglePins).PassThrough(ToggleBadThrough),
+    };
+    CHECK(env.catalog.Register(env.registry, env.material, bad, ModuleLease()).Error() ==
+          ErrorCode::InvalidArgument);
+}
+
+// 같은 종류 이름을 다른 정의로 다른 도메인에 등록하면 AlreadyExists다(Find는 도메인 없이 찾는다).
+// 한 도메인 묶음만 해제해도 다른 도메인에 등록한 같은 정의는 찾을 수 있다.
+TEST(MaterialSchema_CatalogTypeNameIsDomainIndependent) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    static constexpr MaterialNodeDefinition first[] = {MaterialNode("Material.Shared")};
+    static constexpr MaterialNodeDefinition second[] = {MaterialNode("Material.Shared")};
+    auto inMaterial = env.catalog.Register(env.registry, env.material, first, ModuleLease());
+    REQUIRE(inMaterial);
+    CHECK(env.catalog.Register(env.registry, env.function, second, ModuleLease()).Error() ==
+          ErrorCode::AlreadyExists);
+
+    auto inFunction = env.catalog.Register(env.registry, env.function, first, ModuleLease());
+    REQUIRE(inFunction);
+    CHECK(env.catalog.Unregister(env.registry, inMaterial.Value()));
+    CHECK(env.catalog.Find(env.Intern("Material.Shared")) == &first[0]);
+    CHECK(env.catalog.Unregister(env.registry, inFunction.Value()));
+    CHECK(env.catalog.Find(env.Intern("Material.Shared")) == nullptr);
+}
+
+// 종류 이름 중복은 NamePool 규칙(ASCII 대소문자 무시)으로 본다.
+TEST(MaterialSchema_CatalogRejectsCaseVariants) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    static constexpr MaterialNodeDefinition variants[] = {
+        MaterialNode("Material.Case"),
+        MaterialNode("material.case"),
+    };
+    CHECK(env.catalog.Register(env.registry, env.material, variants, ModuleLease()).Error() ==
+          ErrorCode::InvalidArgument);
+}
+
+// registry에서 이미 빠진 종류가 있어도 묶음 해제는 끝나고 lease를 놓는다.
+TEST(MaterialSchema_CatalogUnregisterToleratesRemovedTypes) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    CountedLease lease;
+    static constexpr MaterialNodeDefinition single[] = {MaterialNode("Material.Removed")};
+    auto group = env.catalog.Register(env.registry, env.material, single, lease.Acquire());
+    REQUIRE(group);
+    // 다른 소유자가 등록표에서 먼저 지운 경우를 흉내 낸다: 등록 id를 모르므로 해제를 두 번 부른다.
+    CHECK(env.catalog.Unregister(env.registry, group.Value()));
+    CHECK(lease.count == 0);
+    CHECK(env.catalog.Unregister(env.registry, group.Value()).Error() == ErrorCode::NotFound);
+}
+
+// 이름 pool이 준비되지 않았으면 schema는 준비되지 않는다.
+TEST(MaterialSchema_SchemaNotReadyWithoutNames) {
+    SystemAllocator allocator;
+    NamePool names(allocator);
+    MaterialNodeCatalog catalog(allocator);
+    MaterialGraphSchema schema(MaterialGraphKind::Material, catalog, names, allocator);
+    CHECK(!schema.Ready());
+}
+
+// 순환: 노드 여럿을 거치는 순환과 재경유를 낀 순환을 거부한다(V2).
+TEST(MaterialSchema_ConnectRejectsIndirectCycles) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    REQUIRE(env.catalog.Register(env.registry, env.material, TestDefinitions, ModuleLease()));
+    const Name add = env.Intern("Material.TestAdd");
+    const Name a = env.Intern("A");
+    const Name result = env.Intern("Result");
+    const Name rerouteIn = env.Intern(nodegraph::ReroutePinIn);
+    const Name rerouteOut = env.Intern(nodegraph::ReroutePinOut);
+
+    nodegraph::GraphDocument document(env.allocator);
+    document.domain = env.material.Domain();
+    nodegraph::Graph main(env.allocator);
+    main.id = Guid{1, 1};
+    // 1 → 2 → 재경유 3 → 4. 4의 Result를 1의 B에 이으면 순환이다.
+    REQUIRE(main.nodes.TryPushBack(MakeNode(env, Guid{1, 0}, add)));
+    REQUIRE(main.nodes.TryPushBack(MakeNode(env, Guid{2, 0}, add)));
+    REQUIRE(main.nodes.TryPushBack(MakeNode(env, Guid{3, 0}, env.registry.RerouteType())));
+    REQUIRE(main.nodes.TryPushBack(MakeNode(env, Guid{4, 0}, add)));
+    REQUIRE(main.edges.TryPushBack(MakeEdge(Guid{1, 0}, result, Guid{2, 0}, a)));
+    REQUIRE(main.edges.TryPushBack(MakeEdge(Guid{2, 0}, result, Guid{3, 0}, rerouteIn)));
+    REQUIRE(main.edges.TryPushBack(MakeEdge(Guid{3, 0}, rerouteOut, Guid{4, 0}, a)));
+    document.mainGraph = main.id;
+    REQUIRE(document.graphs.TryPushBack(Move(main)));
+    nodegraph::GraphReadView reader(document, env.registry);
+
+    const nodegraph::RegisteredNodeType* addType = env.registry.FindNodeType(document.domain, add);
+    REQUIRE(addType != nullptr);
+    const nodegraph::PinDescriptor& addB = addType->descriptor.staticPins[1];
+    const nodegraph::PinDescriptor& addResult = addType->descriptor.staticPins[2];
+
+    nodegraph::ConnectQuery query;
+    query.graph = &document.graphs[0];
+    query.from = {Guid{4, 0}, result};
+    query.to = {Guid{1, 0}, addB.key};
+    query.fromPin = &addResult;
+    query.toPin = &addB;
+    auto verdict = env.material.CanConnect(reader, query);
+    CHECK(verdict.action == nodegraph::ConnectAction::Deny);
+    CHECK(verdict.reasonCode == static_cast<uint32>(MaterialConnectReason::Cycle));
+
+    // 반대 방향(1의 Result → 4의 B)은 순환이 아니다.
+    query.from = {Guid{1, 0}, result};
+    query.to = {Guid{4, 0}, addB.key};
+    CHECK(env.material.CanConnect(reader, query).action == nodegraph::ConnectAction::Make);
+
+    // 빈 질의는 InvalidQuery다.
+    nodegraph::ConnectQuery empty;
+    CHECK(env.material.CanConnect(reader, empty).reasonCode ==
+          static_cast<uint32>(MaterialConnectReason::InvalidQuery));
+}
+
+// 속성 schema가 정의와 다른 바이트는 거르지 않고 그대로 의미에 든다(문서 검증이 따로 보고).
+TEST(MaterialSchema_SemanticKeepsForeignSchemaBytes) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    REQUIRE(env.catalog.Register(env.registry, env.material, TestDefinitions, ModuleLease()));
+    const Name param = env.Intern("Material.TestParam");
+    auto left = OneNodeDocument(env, param, ForeignRecord(env.allocator, 1));
+    auto right = OneNodeDocument(env, param, ForeignRecord(env.allocator, 2));
+    Array<uint8> leftBytes(env.allocator);
+    Array<uint8> rightBytes(env.allocator);
+    REQUIRE(nodegraph::WriteSemanticBytes(left, env.registry, env.allocator, leftBytes));
+    REQUIRE(nodegraph::WriteSemanticBytes(right, env.registry, env.allocator, rightBytes));
+    CHECK(!SameBytes(leftBytes, rightBytes));
+}
+
+// 속성 표(19.12절): 내장 속성 등록·조회, UE Guid·기본값·빈도, 중복·잘못된 정의, lease 해제.
+TEST(MaterialSchema_AttributeTable) {
+    SystemAllocator allocator;
+    MaterialAttributeTable table(allocator);
+    CountedLease builtinLease;
+    auto builtins = table.Register(BuiltinMaterialAttributes(), builtinLease.Acquire());
+    REQUIRE(builtins);
+    CHECK(table.Size() == BuiltinMaterialAttributes().Size());
+
+    // UE Roughness: FGuid(0xD1DD967C, 0x4CAD47D3, 0x9E6346FB, 0x08ECF210), 기본값 0.5.
+    const MaterialAttributeDefinition* roughness =
+        table.Find(Guid{0xD1DD967C4CAD47D3ull, 0x9E6346FB08ECF210ull});
+    REQUIRE(roughness != nullptr);
+    CHECK(roughness->name == StringView("Roughness"));
+    CHECK(roughness->type == MaterialPinType::Float1);
+    CHECK(roughness->defaultValue.values[0] == 0.5f);
+
+    // WPO는 정점 단계, Normal 기본값은 (0, 0, 1)이다.
+    const MaterialAttributeDefinition* wpo =
+        table.Find(Guid{0xF905F895D5814314ull, 0x916D24348C40CE9Eull});
+    REQUIRE(wpo != nullptr);
+    CHECK(wpo->frequency == MaterialVertexStage);
+    const MaterialAttributeDefinition* normal =
+        table.Find(Guid{0x0FA2821A200F4A4Aull, 0xB719B789C1259C64ull});
+    REQUIRE(normal != nullptr);
+    CHECK(normal->defaultValue.values[2] == 1.0f);
+
+    // 이미 있는 id는 AlreadyExists, 잘못된 정의는 InvalidArgument다.
+    CHECK(table.Register(Span<const MaterialAttributeDefinition>(roughness, 1), ModuleLease())
+              .Error() == ErrorCode::AlreadyExists);
+    static constexpr MaterialAttributeDefinition invalid[] = {
+        {Guid{}, "Zero", MaterialPinType::Float1, {}, MaterialPixelStage, false},
+        {Guid{7, 7}, "", MaterialPinType::Float1, {}, MaterialPixelStage, false},
+        {Guid{7, 8}, "Both", MaterialPinType::Float1, {}, AllMaterialStages, false},
+    };
+    for (const MaterialAttributeDefinition& definition : invalid) {
+        CHECK(table.Register(Span<const MaterialAttributeDefinition>(&definition, 1), ModuleLease())
+                  .Error() == ErrorCode::InvalidArgument);
+    }
+
+    // custom 속성을 더하고 해제한다.
+    CountedLease customLease;
+    static constexpr MaterialAttributeDefinition custom[] = {
+        {Guid{0x435553544f4d0001ull, 1}, "Wetness", MaterialPinType::Float1,
+         MaterialPinDefault::Scalar(0.0f), MaterialPixelStage, false},
+    };
+    auto customGroup = table.Register(custom, customLease.Acquire());
+    REQUIRE(customGroup);
+    CHECK(customLease.count > 0);
+    CHECK(table.Unregister(customGroup.Value()));
+    CHECK(customLease.count == 0);
+    CHECK(table.Find(custom[0].id) == nullptr);
+    CHECK(table.Unregister(customGroup.Value()).Error() == ErrorCode::NotFound);
+    CHECK(table.Unregister(builtins.Value()));
+    CHECK(builtinLease.count == 0);
 }
 
 } // namespace material_schema_tests_file

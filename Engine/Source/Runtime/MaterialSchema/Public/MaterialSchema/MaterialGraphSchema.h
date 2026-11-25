@@ -3,6 +3,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/NamePool.h>
+#include <MaterialSchema/MaterialGraphTypes.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
 #include <NodeGraph/GraphSchema.h>
 
@@ -20,28 +21,13 @@
 //   if (!schema.Ready()) { ... }
 //   registry.RegisterSchema(schema, lease);
 //
-// 스레드: 상태가 없어 여러 스레드에서 읽을 수 있다(GraphSchema 계약). catalog 조회는 소유 lane에서
-// 바뀌므로, 등록·해제와 판정을 같은 lane에서 한다.
+// 스레드: 상태가 없어 여러 스레드에서 읽을 수 있다(GraphSchema 계약). 판정이 쓰는 임시 할당은 모두
+// scratch로 한다. catalog 조회는 소유 lane에서 바뀌므로, 등록·해제와 판정을 같은 lane에서 한다.
 // 수명: catalog·names·scratch는 schema보다 오래 살아야 한다. scratch는 의미 정규화가 잠깐 쓰는
 // Record 사본과 기본 노드 값에 쓰며, 여러 스레드에서 판정하면 thread-safe allocator여야 한다.
 namespace rocks::material {
 
 class MaterialNodeCatalog;
-
-// 도메인 이름이다.
-inline constexpr StringView MaterialDomainName = "Material";
-inline constexpr StringView MaterialFunctionDomainName = "MaterialFunction";
-
-// 출력 노드 종류 이름이다(5.6절).
-inline constexpr StringView MaterialOutputNodeTypeName = "Material.Output";
-
-// 연결 거부 사유 코드다(ConnectVerdict::reasonCode).
-enum class MaterialConnectReason : uint32 {
-    None = 0,
-    TypeMismatch = 1,
-    Cycle = 2,
-    KindMismatch = 3
-};
 
 class ROCKS_MATERIALSCHEMA_API MaterialGraphSchema final : public nodegraph::GraphSchema {
 public:
@@ -83,10 +69,5 @@ private:
     Name outputType_;
     bool ready_ = false;
 };
-
-// 두 핀 타입을 이을 수 있는가(순환 검사 제외). from은 출력 핀, to는 입력 핀 타입이다.
-// UnresolvedPinType(wildcard)은 어느 쪽이든 받는다.
-ROCKS_MATERIALSCHEMA_API bool CanConnectMaterialPinTypes(nodegraph::PinTypeId from,
-                                                         nodegraph::PinTypeId to) noexcept;
 
 } // namespace rocks::material

@@ -8,6 +8,7 @@
 #include <Core/Result.h>
 #include <Core/Text/Name.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
+#include <MaterialSchema/MaterialNodeGroupId.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
 // 머티리얼 노드 정의의 등록과 조회다(Docs/Design/MaterialSystem 5.2·19.7절).
@@ -30,11 +31,6 @@ namespace rocks::material {
 
 class MaterialGraphSchema;
 
-// 등록 묶음 하나의 식별이다. 0은 없음이다.
-struct MaterialNodeGroupId {
-    uint64 value = 0;
-};
-
 class ROCKS_MATERIALSCHEMA_API MaterialNodeCatalog {
 public:
     explicit MaterialNodeCatalog(Allocator& allocator) noexcept;
@@ -45,12 +41,14 @@ public:
 
     // definitions를 schema의 도메인에 등록한다. schema는 registry에 이미 등록되어 있어야 한다.
     //
-    // 정의 검사(InvalidArgument): 종류 이름 비어 있음, 핀 키 비어 있음·중복, 핀 타입 범위 밖,
+    // 정의 검사(InvalidArgument): 종류 이름 비어 있음, 핀 키 비어 있음·중복(ASCII 대소문자 무시 —
+    // NamePool 비교 규칙), 통과 쌍 키가 정적 입력·출력 핀이 아님, 핀 타입 범위 밖,
     // 출력 핀의 기본값·입력 표지, TextureAny 출력, 정의되지 않은 표지 비트, 기본값 성분 수 4 초과,
     // 상태 Implemented인데 선행 있음·PrerequisiteMissing인데 선행 None, nonSemanticFields가 있는데
     // propertiesSchema 없음·필드 이름이 스키마에 없음, stages 0·정의 밖 비트, graphKinds 정의 밖
-    // 비트, 묶음 안 종류 이름 중복. 그 밖은 NodeTypeRegistry::RegisterNodeType의 오류(같은 종류가
-    // 이미 있으면 AlreadyExists 등)와 할당 오류다. 실패하면 이 묶음의 등록은 모두 되돌린다.
+    // 비트, 묶음 안 종류 이름 중복(대소문자 무시). 이미 다른 정의로 등록된 종류 이름은
+    // AlreadyExists다. 그 밖은 NodeTypeRegistry::RegisterNodeType의 오류(같은 종류가 이미 있으면
+    // AlreadyExists 등)와 할당 오류다. 실패하면 이 묶음의 등록은 모두 되돌린다.
     Result<MaterialNodeGroupId> Register(nodegraph::NodeTypeRegistry& registry,
                                          const MaterialGraphSchema& schema,
                                          Span<const MaterialNodeDefinition> definitions,
@@ -63,12 +61,13 @@ public:
                    Span<const Span<const MaterialNodeDefinition>> groups,
                    ModuleLease lease) noexcept;
 
-    // 묶음을 해제한다(등록의 역순). 없는 id면 NotFound다. registry의 해제 오류(통지 콜백 안의 Busy
-    // 등)가 나면 그 오류를 돌려주고 남은 종류는 등록된 채로 둔다(다시 부를 수 있다).
+    // 묶음을 해제한다(등록의 역순). 없는 id면 NotFound다. registry에서 이미 빠진 종류(NotFound)는
+    // 빠진 것으로 본다. 그 밖의 해제 오류(통지 콜백 안의 Busy 등)가 나면 그 오류를 돌려주고 남은
+    // 종류는 등록된 채로 둔다(다시 부를 수 있다).
     Result<void> Unregister(nodegraph::NodeTypeRegistry& registry, MaterialNodeGroupId id) noexcept;
 
-    // 종류 이름의 정의다(모든 도메인 공통 — 같은 정의를 두 도메인에 등록해도 정의는 하나다). 없으면
-    // nullptr이다.
+    // 종류 이름의 정의다. 같은 종류 이름은 모든 도메인에서 같은 정의여야 한다(다른 정의로 등록하면
+    // AlreadyExists) — 그래서 도메인 없이 찾는다. 없으면 nullptr이다.
     const MaterialNodeDefinition* Find(Name type) const noexcept;
 
     // 도메인 등록 수다(같은 정의를 두 도메인에 등록하면 둘이다).

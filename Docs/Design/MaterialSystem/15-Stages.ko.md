@@ -27,7 +27,7 @@
 
 | 단계 | 내용 | 완료 기준 | 계획 대응 |
 |---|---|---|---|
-| MS1a | MaterialSchema 기반: 핀 타입 표(5.3절), 머티리얼 노드 정의 형식(단계·capability·문맥 기능·상태·선행 ID, 19.2·19.3절)과 등록표(엔진·플러그인 공용, 19.7절), `GraphSchema` 구현, 출력 노드(5.6절)와 `CreateDefaultNodes`, `NormalizeSemanticNode`(5.5절), `RegisterMaterialAttribute`(19.12절) | 저장/재열기 왕복, 화면 편집의 semantic hash 불변, 모르는 노드 보존, 노드 등록 해제 drain, 가짜 플러그인 등록·해제 | MAT0 |
+| MS1a | MaterialSchema 기반: 핀 타입 표(5.3절), 머티리얼 노드 정의 형식(단계·capability·문맥 기능·상태·선행 ID, 19.2·19.3절)과 등록표(엔진·플러그인 공용, 19.7절), `GraphSchema` 구현, 출력 노드(5.6절)와 `CreateDefaultNodes`, `NormalizeSemanticNode`(5.5절), `RegisterMaterialAttribute`(19.12절) | 화면 편집의 semantic hash 불변(배치는 문서 밖), 모르는 노드 속성 바이트 보존, 노드 등록 해제의 lease 해제, 가짜 플러그인 등록·해제, 속성 표 등록·해제. 저장/재열기 왕복은 그래프 필드가 생기는 MS3b에서 본다 | MAT0 |
 | MS1b | 19장 노드 정의 전부(상태 "구현"·"TODO" 297개): 핀·속성 struct(리플렉션, 에셋 참조는 19.4.3절 형식)·메뉴·migration 자리, 문맥 값 표(19.3.2절), 단일 원본 `MaterialNodeCatalog.json`과 policy 검사(19.2.2절) | MS-T12 (a), policy 검사 | MAT0 |
 | MS2a | MaterialCompiler 기반: IR(6.2절)·분석·최적화·HLSL 생성 골격(7.3절 진입점 함수와 정의 — 표면 함수는 Renderer `SurfaceAttributes` 계약대로, custom·previous 진입점은 MS2b·MS2d가 채움)·`MaterialCommon.rsh`; 상수·수학·`DynamicBranch`·`Operator`·이름 있는 재경유·출력 노드 스칼라 핀 lowering | MS-T1·T2·T3, V1·V2·V4·V5·V7·V8·V11·V12 음성 대조 | MAT0 |
 | MS2b | 문맥 값 표 전부(19.3.2절)와 진입점별 사용 정의(19.3.1절)·previous 문맥(19.3.5절)·좌표·벡터·공간 변환·미분·스위치(19.3.4절 해석 시점별)·보간기·파티클·하늘·데칼 등 공급 노드 | MS-T3·MS-T13, V6·V15 음성 대조 | MAT0–MAT1 |

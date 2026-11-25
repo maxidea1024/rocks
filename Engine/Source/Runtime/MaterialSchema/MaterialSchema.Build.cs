@@ -6,7 +6,7 @@ using Rocks.Build.Rules;
 // registration), the MaterialGraphSchema domain schemas for material and material function documents, and the semantic
 // normalization that keeps parameter default values out of the semantic hash. Node property structs are reflected (Record bytes,
 // NodeGraph GD23). Engine Runtime module: no devices, no objects, no lowering code (lowering is MaterialCompiler).
-// Generated header prefix is <MaterialSchema/...generated.h>, module registration is rocks::generated::MaterialSchema::RegisterModuleTypes
+// Reflected types arrive in stage MS3b: generated headers <MaterialSchema/...generated.h>, module registration rocks::generated::MaterialSchema::RegisterModuleTypes
 // (called by RegisterMaterialSchemaTypes), and the identity spec is MaterialSchema.rocksids.json.
 public sealed class MaterialSchema : EngineModuleRules
 {
