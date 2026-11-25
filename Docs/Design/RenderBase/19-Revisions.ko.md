@@ -71,6 +71,7 @@
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 45(2026-11-25): RB3 엔진 호스트 연결 설계와 구현(9.12절, 18.3절 RR11): 호스트 서비스 `EngineShaderHost`(셰이더 타입 등록부·원문 디렉터리 표·공급자 자리·쿠킹 라이브러리 원천 interface 자리, 모듈 시작 뒤 Freeze), lane 시작의 `EngineRenderResources`(형식 고르기 → 쿠킹 원천 → 공급자 → 검사 → 내장 자원 팩), Sandbox 공급자를 Developer 모듈 `DevelopmentShaderProvider`로 옮김(모듈 수명 객체가 호스트 서비스에 붙음). 버린 것: Engine 모듈이 집합을 엶, 첫 `Open`에서 Freeze, 실행 파일 `#if` 공급자, ShaderCompiler 안의 공급자.
 - 개정 44(2026-11-25): RB4 셰이더 교체 구현(9.8절 "구현", `ShaderSetSlot`). 스펙과 다르게 정한 것: 공급 대기 후보를 버릴 때 공급 완료를 기다린다.
 - 개정 43(2026-11-25): RB6 5–7항·RB5 3항 구현(11.4절 "구현(개정 43)"): 내장 자원 팩 1차(텍스처 10·typed 버퍼 4·기본 메시 cube·plane·fallback 셰이더), 엔진 기본 정점 입력 타입과 fallback 메시 셰이더, typed 대체 선택과 `ResolveTexture`(RB2 6.2절). 스펙과 다르게 정한 것: PS 단계의 생성 include 제외, 다른 종류 handle은 `TypeMismatch`, 팩 파괴자는 Retire하지 않음.
 - 개정 42(2026-11-25): RB5 1·2항 구현(10.6절 "구현"): 정점 입력 타입 등록부(셰이더 타입 등록부에 함께), 생성 include 연결, 쿠커·셰이더 집합의 등록부 목록. 스펙과 다르게 정한 것: `Shared`·`Generated` 아래 원문 거부.

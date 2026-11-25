@@ -51,7 +51,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX13 | subpass·framebuffer fetch(tiled GPU용) | 후속(개정 40 결정: 모바일 렌더러·SH6과 함께) | GX4·GX5 | 모바일 렌더러(RS8 on-tile resolve) | M | 4.4절 |
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
 | RB2 | 장치 자원 소유자·내장 자원 팩·대체 자원 | 부분(lease·Retire는 RB1·RG1 `RenderHandleTable`. 내장 자원 팩 1차·`Pending`·`Failed` 대체는 개정 40 — 18.3절 RR7, 장치 재생성은 후속 RR18) | GX2·GX7·GX8·GX11 | RB6 | M | 6절 |
-| RB3 | 셰이더 집합 | 구현(SH2e3, 남은 것은 18.3절 RR9–RR11) | SH2·P14·P6b·GX1·GX11·CP7 | RB4 | M | 9.2절 |
+| RB3 | 셰이더 집합 | 구현(SH2e3, 엔진 호스트 연결 RR11은 개정 45 — 9.12절, 남은 것은 18.3절 RR9) | SH2·P14·P6b·GX1·GX11·CP7 | RB4 | M | 9.2절 |
 | RB4 | 바인딩 지도·상수 블록·파이프라인 캐시·교체 | 부분(SH2e3·GX3·GX4·GX6. 교체는 개정 40 RR8, 남은 것 RR12–RR14) | GX3·GX6·GX8·CP3 | RG1 파라미터 구조체 | L | 9.3–9.8·9.11절 |
 | RB5 | 정점 입력 타입 | 부분(개정 40 RR4–RR6, 남은 것 RR15·RR16) | P14·SX4·GX3·GX4 | 메시 렌더링 | M | 10절 |
 | RB6 | 공용 자원·그리기 유틸리티 | 개정 40(RR1–RR3·RR7, 남은 것 RR17) | GX3·GX4·RB2 | 화면 마일스톤 | M | 11절 |
