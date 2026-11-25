@@ -25,5 +25,5 @@ AssetSystem 9절 공통 항목(원본 bytes 해시·처리기 버전·정규 설
 | 처리기 | 추가 키 입력 |
 |---|---|
 | 정적 메시 빌드 | 쿠킹 LOD별 원본 해시(위상·속성 bulk SHA-256)·원본 종류(원본·baked), 유효 빌드 설정, 슬롯 이름, 섹션별 유효 섹션 정보, 색 형식 프로필·장치 유무, `StaticMeshBuildVersion`, MikkTSpace 패치 버전, 임계값 상수 집합 버전(5.5.2절 10). 화면 크기·minLod·bounds 확장은 너겟 밖에서 정해 넣지 않는다. meshoptimizer 어댑터 버전은 어댑터가 생길 때 더한다 |
-| 스킨 메시 빌드 | 위 + 스켈레톤 build key(메시 본 ↔ 스켈레톤 대응), 영향 상한·정밀도 |
+| 스킨 메시 빌드 | 위 + `SkinnedMeshBuildVersion`, 스킨 설정 여섯(영향 상한·정밀도·임계값), 메시 본 계층(이름 원문·부모·기준 pose 비트), `lodMaterialMap`. 스켈레톤은 넣지 않는다(쿠킹이 메시 본만 쓴다 — 6.7.2절 3, UE와 같다) |
 | 클립 쿠킹 | 원본 해시, 쿠킹 플랫폼 targetFrameRate, 스켈레톤 build key(본 번호), 보간 규칙 버전 |
