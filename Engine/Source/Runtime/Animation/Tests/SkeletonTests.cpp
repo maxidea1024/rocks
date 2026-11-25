@@ -2,7 +2,7 @@
 
 #include <TestSupport/NFailAllocator.h>
 
-// 본 계층·스켈레톤 시험이다(Docs/Design/MeshAnimationAssets.ko.md 6.1·6.2·6.4절, 12절
+// 본 계층·스켈레톤 시험이다(Docs/Design/MeshAnimationAssets 6.1·6.2·6.4절, 12절
 // "스켈레톤·스킨"): 계층 불변식(규칙마다 하나씩 어기기, 경계), pose 정규화, 스켈레톤 필드 하나씩
 // 변조 거부, 저장 → 로드 → 재저장 byte 일치, 진단 이름.
 using namespace rocks;

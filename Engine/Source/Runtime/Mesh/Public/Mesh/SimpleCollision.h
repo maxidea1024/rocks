@@ -11,7 +11,7 @@
 #include <Core/Math/Vector3.h>
 #include <Meta/Annotations.h>
 
-// 메시 단순 충돌 값 타입과 검증이다(Docs/Design/MeshAnimationAssets.ko.md 4.6·4.8절, UE
+// 메시 단순 충돌 값 타입과 검증이다(Docs/Design/MeshAnimationAssets 4.6·4.8절, UE
 // FKAggregateGeom·FKShapeElem 대응). 물리 형상으로 옮기는 것은 물리 어댑터(PhysicsJoltAdapter.ko.md
 // 4절), StaticMesh 필드 연결은 MA2b다.
 namespace rocks {

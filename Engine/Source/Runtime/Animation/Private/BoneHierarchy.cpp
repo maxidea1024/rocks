@@ -3,7 +3,7 @@
 #include <Core/Algorithms.h>
 
 // 본 계층 검증·정규화·조회와 모듈 내부 공용
-// 함수다(Docs/Design/MeshAnimationAssets.ko.md 6.1·6.4절).
+// 함수다(Docs/Design/MeshAnimationAssets 6.1·6.4절).
 namespace rocks {
 
 namespace animation_detail {

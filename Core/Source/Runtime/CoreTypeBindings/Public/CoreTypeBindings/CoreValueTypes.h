@@ -184,7 +184,7 @@ struct Transform3dBinding {
 // 프레임 속도(rocks::FrameRate — UE FFrameRate)다. 초당 numerator / denominator 프레임이고 두 값은
 // 양수다. Core FrameRate의 private 멤버를 GeneratedType friend로 읽고 쓰며(InterpCurve 미러와 같은
 // 방식), 도구 이름은 UE와 같은 numerator·denominator다. 검증 hook Validate가 0·음수 값을 거부한다
-// (FrameRate::TryCreate와 같은 불변식 — Docs/Design/MeshAnimationAssets.ko.md 7.5절 3).
+// (FrameRate::TryCreate와 같은 불변식 — Docs/Design/MeshAnimationAssets 7.5절 3).
 ROCKS_STRUCT(Binds = "rocks::FrameRate", Atomic, Version = 1)
 struct FrameRateBinding {
     ROCKS_PROPERTY(Name = "numerator") int32 numerator_ = 60000;

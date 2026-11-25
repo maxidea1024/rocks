@@ -1,6 +1,6 @@
 #include "SkinnedMeshTestSupport.h"
 
-// 스킨 메시 빌드 시험이다(Docs/Design/MeshAnimationAssets.ko.md 6.3·6.5절, 12절 "스켈레톤·스킨"):
+// 스킨 메시 빌드 시험이다(Docs/Design/MeshAnimationAssets 6.3·6.5절, 12절 "스켈레톤·스킨"):
 // 영향 줄이기·8비트 부호화의 동률과 잔차, bone map, 용접의 스킨 항목, 스킨 임계값, inverse-bind,
 // 가중치 프로필, morph target.
 using namespace rocks;

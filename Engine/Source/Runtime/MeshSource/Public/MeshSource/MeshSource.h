@@ -35,7 +35,7 @@ struct MeshAttributeInfo {
     StringView name{};
 };
 
-// 원본 메시의 편집·빌드용 메모리 형태다(Docs/Design/MeshAnimationAssets.ko.md 3절, UE
+// 원본 메시의 편집·빌드용 메모리 형태다(Docs/Design/MeshAnimationAssets 3절, UE
 // FMeshDescription 대응). 리플렉션 타입이 아니며 영속 형태 MeshSourceData와 Load·Store로 오간다.
 //
 // 모델: 정점(위치)·코너(정점 번호)·변(정점 쌍)·다각형(둘레 코너 목록 + 묶음 번호)·삼각형(코너 셋

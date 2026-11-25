@@ -6,7 +6,7 @@
 #include <MeshSource/Tests/MeshSourceTestSupport.h>
 #include <MeshTools/SkinnedMeshBuilder.h>
 
-// 스킨 메시 빌드 시험 공용 도우미다(Docs/Design/MeshAnimationAssets.ko.md 12절 "스켈레톤·스킨"):
+// 스킨 메시 빌드 시험 공용 도우미다(Docs/Design/MeshAnimationAssets 12절 "스켈레톤·스킨"):
 // Name pool, 본 계층 만들기, 가중치·morph 속성 쓰기, 스킨 빌드 결과의 정규 byte.
 namespace rocks::skinned_mesh_test {
 

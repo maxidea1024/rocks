@@ -4,7 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/NFailAllocator.h>
 
-// ValidateMeshSource 시험이다(Docs/Design/MeshAnimationAssets.ko.md 3.1·3.5·3.7절, 12절 "위상·속성
+// ValidateMeshSource 시험이다(Docs/Design/MeshAnimationAssets 3.1·3.5·3.7절, 12절 "위상·속성
 // 불변식별 위반 fixture"): 정상 메시(코너 공유·퇴화 삼각형·같은 코너 반복)는 통과하고, 불변식마다
 // 하나씩 어긴 메시는 정확히 그 규칙(issue)과 위치로 거부된다. 검증은 메시를 바꾸지 않는다.
 using namespace rocks;

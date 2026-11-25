@@ -4,7 +4,7 @@ using Rocks.Build.Rules;
 // Asset runtime reflection test fixture module (Docs/Design/AssetSystem section 14). Owns test asset classes that derive from AssetRuntime's
 // Asset (hard, soft and EditorOnly references, bulk data references, subobjects, an unsaveable class, and value-kind assets from simple scalars to
 // game-data-like composites — Docs/Design/AssetSystem section 14.1, and a source mesh asset for the MeshSource tests and a simple collision
-// asset for the Mesh collision tests — Docs/Design/MeshAnimationAssets.ko.md section 12) and the identity spec
+// asset for the Mesh collision tests — Docs/Design/MeshAnimationAssets section 12) and the identity spec
 // (AssetTestFixtures.rocksids.json). Only the EngineTests executable depends on it.
 public sealed class AssetTestFixtures : EngineModuleRules
 {

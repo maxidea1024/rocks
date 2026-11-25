@@ -1,6 +1,6 @@
 #include "ClipTestSupport.h"
 
-// 애니메이션 클립 시험이다(Docs/Design/MeshAnimationAssets.ko.md 7절·7.5절, 12절 "클립"): 샘플링
+// 애니메이션 클립 시험이다(Docs/Design/MeshAnimationAssets 7절·7.5절, 12절 "클립"): 샘플링
 // 규칙, 원본·클립 검증, 정렬, 쿠킹 변환(같은 비율의 키 보존·재샘플링·상수 접기·트랙 대응).
 using namespace rocks;
 namespace clip_tests_file {

@@ -36,7 +36,7 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "Reference tangent space generator used by the static mesh build (Docs/Design/MeshAnimationAssets.ko.md section 5.2 and decision MA-D5). Pinned to the author's repository (UE ships an older copy with an extra m_bIgnoreDegenerates field; Rocks uses upstream as is, which also has the later all-NaN guard in MergeVertsFast).",
+    "Reference tangent space generator used by the static mesh build (Docs/Design/MeshAnimationAssets section 5.2 and decision MA-D5). Pinned to the author's repository (UE ships an older copy with an extra m_bIgnoreDegenerates field; Rocks uses upstream as is, which also has the later all-NaN guard in MergeVertsFast).",
     "Rocks.patch routes cos and acos through hooks backed by Rocks deterministic math (RocksMikkTSpaceCosPi, RocksMikkTSpaceAcos) and malloc/free through the caller's allocator (RocksMikkTSpaceAllocate, RocksMikkTSpaceFree). MeshTools defines the hooks, so only MeshTools links this library. cos(t*pi/180) becomes cospi(t/180), the same function; the default 180 degree threshold gives -1 in both.",
     "The allocation-failure fallback GenerateSharedVerticesIndexListSlow is broken upstream (index2rec is never assigned); Rocks.patch fixes it, and the fixed fallback gives the same tangents as the hashed path (MeshTools allocation failure test). The reference glue builds the same fixed source.",
     "MikkTSpaceReference.c is Rocks glue that rebuilds the same source with the original upstream expressions (CRT cos/acos and malloc/free) under renamed entry points (RocksMikkTSpaceReferenceGenTangSpace*). Only the comparison tests call it; it is never referenced by production code.",

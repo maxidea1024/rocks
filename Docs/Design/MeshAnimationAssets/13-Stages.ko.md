@@ -1,0 +1,19 @@
+## 13. 단계
+
+ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 a 단계(MA2a·MA3a·MA4a·MA5a·MA6a)로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
+
+| 단계 | 내용 | 선행 |
+|---|---|---|
+| MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, d5405bfa)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
+| MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다. **구현(2026-11-21, 미커밋)**: 모듈 `Mesh`·`MeshTools`, ThirdParty MikkTSpace(3e895b49d05e + Rocks.patch), Core `deterministic::Acos`, 진단 코드 4개, 시험 26개 + Core 2개(12.2절 대조표·coverage — Mesh·MeshTools 줄 99.7%, 분기 98.5%), 정한 점은 5.4절 | MA1 |
+| MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, 로드 경로에서 `ValidateSimpleCollision`·`ValidateSimpleCollisionBulk`를 부른다, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `MaterialBase` 에셋 클래스(MaterialSystem MS3a — 골격만, 2026-11-23 앞당김) |
+| MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b. **구현(2026-11-21, 미커밋)**: `Mesh/SimpleCollision.h`(형상 struct 여섯·`CollisionEnabled`·`CollisionComplexity`·`SimpleCollision`, 검증, 볼록 bulk 저장·로드), 진단 코드 `InvalidCollisionData`·`UnsupportedCollisionShape`, 시험 8개(12.6절 대조표·coverage), 시험 fixture `TestCollisionAsset`, 정한 점은 4.8절 | MA2a |
+| MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분. **구현(2026-11-21, 미커밋)**: 모듈 `Engine/Source/Runtime/Animation`, 진단 코드 `InvalidSkeletonData`·`SkeletonMismatch`, 시험 15개(12.3절 대조표·coverage), 정한 점은 6.4절 | A1 |
+| MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화, 로드 경로에서 `ValidateSkeleton`을 부른다 | MA4a, A2–A4 |
+| MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지. **구현(2026-11-21, 미커밋)**: `Mesh`의 `SkinnedMeshBuildSettings`(리플렉션 파생 struct), `MeshTools`의 `BuildSkinnedMeshLod`·`ReduceBoneInfluences`·`QuantizeSkinWeights8`(5.2절 단계 함수는 공용 파일로 옮김), 진단 코드 `InfluencesTrimmed`·`MissingInfluences`, 시험 16개(12.4절 대조표·coverage), 정한 점은 6.5절 | MA2a, MA4a |
+| MA5b | `SkinnedAsset`·`SkeletalMesh` 클래스, 쿠킹 렌더 데이터 패킹(`SkinnedRenderLod`), 쿠킹 처리기·임포트 서비스, 스켈레톤 병합 저장 연결 | MA5a, MA2b, MA4b |
+| MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8). **구현(2026-11-21, 미커밋)**: `Animation`의 `AnimationClip.h`(리플렉션)·`ClipSource.h`(메모리 형태·검증·Load·Store·샘플링·`BuildClipPlayback`), CoreTypeBindings `FrameRate` 미러, 진단 코드 `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`, 시험 15개(12.5절 대조표·coverage), 정한 점은 7.5절 | MA4a, Curve 단계(완료) |
+| MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화), 로드 경로에서 `ValidateAnimationClip`(에디터)과 쿠킹 데이터의 스켈레톤 대조(`trackToBone` 본 번호 < 스켈레톤 본 수·중복 없음, 회전 키 |길이² − 1| ≤ `BoneRotationNormalizedTolerance`)를 부른다 | MA6a, MA4b |
+| MA7 | 명령행·문서·검증 보고 | MA1–MA6b |
+
+렌더 쪽 소비: Renderer RS0(정적 메시)가 MA2 결과를, RS12(skinned)가 MA5 결과를 쓴다(Renderer 17절 RQ19).

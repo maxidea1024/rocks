@@ -993,7 +993,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 10.2 Rocks 규칙
 
 - **등록.** 이름, `.rsh` 가상 경로, 기능 표시, 거르기 함수, 정적 정점 배치(인스턴스 데이터와 무관), 소유 파라미터 구조체를 가진다. 정적 등록 표이고, 셰이더 타입 등록(셰이더 시스템 12.2절)과 같은 시점에 닫힌다. 늦게 로드되는 모듈의 등록은 거부한다.
-- **세 가지 정점 입력.** (1) **정점 입력 없음**: 전체화면·compute·유틸리티 셰이더(속성 없는 파이프라인, 11.2절). (2) **엔진 기본 정점 입력 타입**: 내장 메시와 fallback 메시 셰이더(계획 9.6절)가 쓰는 고정 배치(위치·UV·색, 지금 Sandbox 샘플 렌더러의 "Rocks 정점 형식", `Programs/Sandbox/Private/SampleRenderer.h` `BuiltinShaderHlsl` 주석). (3) **메시 정점 입력 타입**: 메시 렌더링 단계에서 정의한다. 메시 에셋 쪽 stream 집합은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 5.3·6.3절이 정했다(10.4절 끝 "메시 에셋 요구").
+- **세 가지 정점 입력.** (1) **정점 입력 없음**: 전체화면·compute·유틸리티 셰이더(속성 없는 파이프라인, 11.2절). (2) **엔진 기본 정점 입력 타입**: 내장 메시와 fallback 메시 셰이더(계획 9.6절)가 쓰는 고정 배치(위치·UV·색, 지금 Sandbox 샘플 렌더러의 "Rocks 정점 형식", `Programs/Sandbox/Private/SampleRenderer.h` `BuiltinShaderHlsl` 주석). (3) **메시 정점 입력 타입**: 메시 렌더링 단계에서 정의한다. 메시 에셋 쪽 stream 집합은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/05-StaticMesh.ko.md) 5.3·6.3절이 정했다(10.4절 끝 "메시 에셋 요구").
 - **셰이더 키 축.** 셰이더 시스템 키에 정점 입력 타입을 더한다(SX4, 결정 R9 권장안 (a) 키 필드). 거르기는 셰이더 타입 조건 AND 정점 입력 타입 조건이다. 완결성 검사(9.2절)는 타입 × 정점 입력 타입 × 퍼뮤테이션을 열거한다.
 - **include 연결.** 메시 셰이더는 고정 가상 경로 `/Engine/Generated/VertexInput.rsh`를 include한다. 워커 입력을 만드는 메인 프로세스 전처리기가 이 경로를 그 정점 입력 타입의 `.rsh`로 잇는다(셰이더 시스템 결정 6). 그래서 셰이더 맵 키에 정점 입력 타입이 들어가야 한다(SX4). `.rsh`가 구현할 함수 인터페이스(입력 구조체, 월드 위치, 단계 사이 변수 채우기)는 첫 메시 셰이더 착수 전에 정한다.
 - **정점 배치.** 속성마다 (location, 형식, stream 번호, offset), stream마다 (stride, 정점/인스턴스, 인스턴스 step 1). Metal 정점 buffer 상한(셰이더 시스템 7.2절 4항: 정점 stream 8개)과 맞춰 stream ≤ 8이다. 같은 버퍼·stride·용도의 stream 합치기는 UE와 같다.
@@ -1281,7 +1281,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | 문서 | 위치 | 현재 | 개정 |
 |---|---|---|---|
 | AssetSystem | 1절 A0-G(샘플러 확장) | 샘플러 확장 범위 | **A0-G 착수 전**: 비교 함수(SX13), 텍스처 desc 샘플러는 기본값이고 바인딩 때 지정 가능(결정 R12) |
-| 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절). **메시 에셋 스펙 [MeshAnimationAssets](MeshAnimationAssets.ko.md)이 stream 집합을 정했고 이 문서 10.4절 끝 "메시 에셋 요구"로 받았다(개정 29)** |
+| 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절). **메시 에셋 스펙 [MeshAnimationAssets](MeshAnimationAssets/README.ko.md)이 stream 집합을 정했고 이 문서 10.4절 끝 "메시 에셋 요구"로 받았다(개정 29)** |
 | 〃 | A5 텍스처 플랫폼 데이터(`TexturePlatformData`) | 형식·swizzle·mip 배치 서술 | **A5 착수 전**: 6.5절 입력 계약(mip-major 배치, 상주 꼬리·스트리밍 덩어리, 4 KiB 정렬, 고정 번호표 직렬화). 에셋 세션이 반영한다 |
 | ShaderSystem | 9.9절 SX1–SX14 | — | 표대로. SX3·SX4·SX5·SX6은 P14 전, SX13은 A0-G 전, SX14는 SH1 전 |
 | 〃 | 3절 구조 | ShaderCore에 "라이브러리 로드" | ShaderCore는 장치 없는 메타데이터·라이브러리 형식 읽기, 장치 셰이더 객체는 RenderBase |

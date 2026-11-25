@@ -5,7 +5,7 @@
 #include <Core/Math/Transform.h>
 
 // 애니메이션 클립의 메모리 형태(원본·쿠킹), 검증, 저장·로드, 샘플링, 쿠킹 변환이다
-// (Docs/Design/MeshAnimationAssets.ko.md 7.2·7.4·7.5절).
+// (Docs/Design/MeshAnimationAssets 7.2·7.4·7.5절).
 namespace rocks {
 
 // 샘플링에서 α가 이 값보다 작으면 앞 키, 1 − 이 값보다 크면 다음 키를 그대로 쓴다(UE

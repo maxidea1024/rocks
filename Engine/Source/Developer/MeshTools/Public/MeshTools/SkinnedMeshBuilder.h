@@ -4,7 +4,7 @@
 #include <Core/Math/Matrix4.h>
 #include <MeshTools/StaticMeshBuilder.h>
 
-// 스킨 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets.ko.md 6.3·6.5절, UE BuildSkeletalMesh·
+// 스킨 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets 6.3·6.5절, UE BuildSkeletalMesh·
 // FSkeletalMeshBuilder 대응).
 namespace rocks {
 

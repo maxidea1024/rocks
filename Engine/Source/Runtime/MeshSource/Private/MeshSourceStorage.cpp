@@ -6,7 +6,7 @@
 #include <Object/NameField.h>
 #include <Platform/Memory.h>
 
-// 원본 메시의 저장(Store)과 읽기(Load)다(Docs/Design/MeshAnimationAssets.ko.md 3.4·3.7·9.1·9.2절).
+// 원본 메시의 저장(Store)과 읽기(Load)다(Docs/Design/MeshAnimationAssets 3.4·3.7·9.1·9.2절).
 // 모든 배치는 little-endian이고 정렬 패딩이 없다.
 namespace rocks {
 

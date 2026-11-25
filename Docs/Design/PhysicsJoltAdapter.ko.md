@@ -83,7 +83,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 - **캡슐·실린더.** UE 캡슐은 로컬 Z축이 캡슐 축이다(`Engine/Classes/PhysicsEngine/SphylElem.h:13`). Rocks 물리 캡슐도 로컬 +Z축이다. Jolt 캡슐·실린더 축(J6)이 +Y이면 기본안 A가 Rocks +Z를 Jolt +Y로 옮기므로 형상 회전이 필요 없다. 아니면 고정 회전으로 감싼다. Rocks cylinder(UE에는 없는 단순 충돌·질의 형상)의 사상, convex radius 정책, 안정성 경고는 [Cylinder 형상 설계](CylinderShape.ko.md) 4절(CY2)을 따른다.
 - **heightfield.** Rocks(UE landscape)의 표본 격자는 XY 평면이고 높이는 +Z다. 기본안 A에서 Rocks X는 Jolt Z, Rocks Y는 Jolt X가 되므로 Jolt 격자가 XZ 평면(J7)이면 표본 배열을 전치해 넘기고 높이는 `CentimetersToMeters`로 바꾼다. 칸마다 나누는 대각선 방향, 표본 색인 순서, 구멍 표시(J7)와 UE landscape 충돌의 대각선 선택(U3)이 맞지 않으면 같은 높이 표본에서 다른 표면이 나온다. 시험 PA07이 이를 고정한다.
 - **convex·compound.** convex 점은 A와 cm → m로 바꾸고, compound 자식의 상대 변환은 이동을 A·(cm → m), 회전을 (A·v, w)로 바꾼다.
-- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
+- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/04-CommonSettings.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
 
   | Rocks 형상 | 값의 의미(UE와 같음) | Jolt 형상 |
   |---|---|---|

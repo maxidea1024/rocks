@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 // 렌더 정점 용접·퇴화 제거·섹션·슬롯 대응·색과 UV 채널·값 정리 경고 시험이다(Docs/Design/
-// MeshAnimationAssets.ko.md 5.2절 9·10단계, 4.3절, 12절 "빌드"). 임계값은 UE 원본 값이고 비교는
+// Docs/Design/MeshAnimationAssets 5.2절 9·10단계, 4.3절, 12절 "빌드"). 임계값은 UE 원본 값이고 비교는
 // 성분마다 |a − b| ≤ 임계값이다(경계 안·밖을 함께 본다).
 using namespace rocks;
 namespace static_mesh_builder_weld_tests_file {

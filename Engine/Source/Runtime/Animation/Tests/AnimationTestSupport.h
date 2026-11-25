@@ -8,7 +8,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 
-// Animation 시험 공용 도우미다(Docs/Design/MeshAnimationAssets.ko.md 12절 "스켈레톤·스킨"):
+// Animation 시험 공용 도우미다(Docs/Design/MeshAnimationAssets 12절 "스켈레톤·스킨"):
 // 이름으로 본 계층 만들기, 스켈레톤 에셋 만들기와 채우기, 계층 비교, 무작위 계층.
 namespace rocks::animation_test {
 

@@ -2,7 +2,7 @@
 
 #include <Animation/SkeletonMerge.h>
 
-// 본 계층 병합이다(Docs/Design/MeshAnimationAssets.ko.md 6.2·6.4절, UE
+// 본 계층 병합이다(Docs/Design/MeshAnimationAssets 6.2·6.4절, UE
 // USkeleton::MergeBonesToBoneTree — 부모 사슬 검사를 켠 기본 경로).
 namespace rocks {
 

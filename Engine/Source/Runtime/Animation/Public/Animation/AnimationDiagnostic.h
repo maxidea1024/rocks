@@ -3,7 +3,7 @@
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <Base/NumericLimits.h>
 
-// 스켈레톤·본 계층·클립 진단이다(Docs/Design/MeshAnimationAssets.ko.md 6.4절·7.5절·11절).
+// 스켈레톤·본 계층·클립 진단이다(Docs/Design/MeshAnimationAssets 6.4절·7.5절·11절).
 namespace rocks {
 
 // 진단이 위치를 가리키지 않을 때의 번호다.

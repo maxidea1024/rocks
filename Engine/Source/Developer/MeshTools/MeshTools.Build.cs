@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Mesh build tools (Docs/Design/MeshAnimationAssets.ko.md section 5.2, stage MA2a): BuildStaticMeshLod turns one LOD source mesh (MeshSource)
+// Mesh build tools (Docs/Design/MeshAnimationAssets section 5.2, stage MA2a): BuildStaticMeshLod turns one LOD source mesh (MeshSource)
 // with its build settings (Mesh MeshBuildSettings) and the material slot names into an in-memory render result (welded render vertices with
 // position, normal, tangent, binormal sign, UV channels and linear colors, uint32 indices, sections and bounds) plus warnings. Packing into the
 // cooked format, the StaticMesh class, cook handlers and import services come with stage MA2b.

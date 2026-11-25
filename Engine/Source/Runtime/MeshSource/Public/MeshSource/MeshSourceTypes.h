@@ -6,7 +6,7 @@
 #include <Core/Text/StringView.h>
 #include <MeshSource/MeshSourceData.h>
 
-// 원본 메시의 상수·값 타입·진단이다(Docs/Design/MeshAnimationAssets.ko.md 3절·11절).
+// 원본 메시의 상수·값 타입·진단이다(Docs/Design/MeshAnimationAssets 3절·11절).
 namespace rocks {
 
 // 다각형 둘레의 최소 코너 수다(3.1절 — 삼각형 미만은 면이 아니다).
@@ -137,7 +137,7 @@ enum class MeshIssue : uint8 {
     NonFiniteColor,       // NonFiniteAttribute: 색 비유한값을 (1, 1, 1, 1)로 고침
     UvOutOfRange,         // UvOutOfRange: |UV 성분| > MeshUvRangeWarning
     NonNormalizedWeights, // NonNormalizedWeights: 가중치 합 != BoneWeightTotal을 정규화함
-    // 빌드(MeshTools BuildStaticMeshLod — MeshAnimationAssets.ko.md 5.2·5.4절). 진단 code는 같은
+    // 빌드(MeshTools BuildStaticMeshLod — Docs/Design/MeshAnimationAssets 5.2·5.4절). 진단 code는 같은
     // 이름이고 InvalidBuildScale만 InvalidSetting이다. index는 차례로 묶음·없음·필드·축이다.
     MaterialSlotFallback, // 묶음의 슬롯 이름과 맞는 슬롯이 없음
     NegativeBuildScale,   // buildScale 음수 성분이 홀수 개(count = 그 수)
