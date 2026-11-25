@@ -29,6 +29,10 @@ Thumbs.db
 *.pem
 *.key
 
+# VS Code extension dependencies and build output (Docs/Design/SparksTools.ko.md section 12.1)
+/Tools/VSCode/*/node_modules/
+/Tools/VSCode/*/out/
+
 # Python tool caches
 __pycache__/
 *.py[cod]

@@ -464,6 +464,120 @@ TEST(WorldTick_EngineStagesRunInDocumentedOrder) {
     REQUIRE(world.Shutdown());
 }
 
+namespace {
+
+constexpr uint32 MaxSimulatedSteps = 8;
+// Fixture의 고정 스텝 길이(desc.timeStep)다.
+constexpr double FixtureFixedStep = 1.0 / 60.0;
+
+struct SimulatedStep {
+    uint64 index = 0;
+    double delta = 0.0;
+    double unscaledDelta = 0.0;
+    TickPhase phase = TickPhase::PrePhysics;
+    bool handleEmpty = false;
+};
+
+SimulatedStep simulated[MaxSimulatedSteps] = {};
+uint32 simulatedCount = 0;
+bool failSimulate = false;
+
+Result<void> RecordSimulate(World&, const TickContext& context, void*) noexcept {
+    Log('M', context.paused ? 'p' : '!');
+    const uint32 at = simulatedCount;
+    if (at < MaxSimulatedSteps) {
+        simulated[at] = {context.fixedStepIndex, context.deltaSeconds, context.unscaledDeltaSeconds,
+                         context.phase, context.handle.IsNull()};
+        ++simulatedCount;
+    }
+
+    if (!failSimulate) {
+        return Result<void>::Success();
+    }
+
+    // 스텝마다 다른 오류: 프레임 결과가 첫 오류인지 본다.
+    return Result<void>::Failure(at % 2 == 0 ? ErrorCode::DependencyFailed : ErrorCode::Busy);
+}
+
+// 덤프 문자열 검사다(정의는 아래 진단 시험 곁).
+bool Has(const String& text, const char* needle) noexcept;
+
+} // namespace
+
+// 15.4절: PhysicsSimulate는 고정 스텝마다 그 스텝의 사용자 Fixed hook 뒤, Physics 끝 단계 앞에
+// 돈다. 문맥은 그 스텝의 것(고정 스텝 길이·스텝 번호)이고, 고정 스텝 0번 프레임·pause 중에는 돌지
+// 않으며 단일 스텝은 한 번이다. 실패는 스텝마다 세고 Tick 실패로 돌아간다(남은 스텝은 그대로 돈다).
+TEST(WorldTick_PhysicsSimulateRunsAfterEachFixedStep) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    REQUIRE(world.SetEngineStage(EngineStage::PhysicsSimulate, &RecordSimulate, nullptr));
+    REQUIRE(world.SetEngineStage(EngineStage::PhysicsResults, &RecordStage,
+                                 const_cast<char*>(&PhysicsTag)));
+    CHECK(world.SetEngineStage(EngineStage::PhysicsSimulate, &RecordSimulate, nullptr).Error() ==
+          ErrorCode::AlreadyExists);
+    CHECK(StringView(EngineStageName(EngineStage::PhysicsSimulate)) ==
+          StringView("PhysicsSimulate"));
+    const ObjectHandle fixedActor = fixture.Spawn('F', 0, TickPhase::PrePhysics, true, true);
+    REQUIRE(!fixedActor.IsNull());
+    simulatedCount = 0;
+    CHECK(fixture.Frame("FuFfM!P!Fl"));
+    REQUIRE(simulatedCount == 1);
+    // 문맥은 그 고정 스텝의 것이다(첫 스텝 번호 0, 길이 = 고정 스텝, Physics 단계, handle 없음).
+    CHECK(simulated[0].index == 0 && simulated[0].delta == FixtureFixedStep &&
+          simulated[0].unscaledDelta == FixtureFixedStep);
+    CHECK(simulated[0].phase == TickPhase::Physics && simulated[0].handleEmpty);
+
+    // 고정 스텝 둘: 스텝마다 Fixed hook → PhysicsSimulate, 스텝 번호 1·2.
+    simulatedCount = 0;
+    ResetLog();
+    REQUIRE(world.Tick(2.0 * FixtureFixedStep));
+    CHECK(LogIs("FuFfM!FfM!P!Fl"));
+    REQUIRE(simulatedCount == 2);
+    CHECK(simulated[0].index == 1 && simulated[1].index == 2);
+    CHECK(simulated[1].delta == FixtureFixedStep);
+
+    // 고정 스텝 0번: PhysicsSimulate는 없고 Physics 끝 단계는 돈다. 진단 시간은 0이다.
+    simulatedCount = 0;
+    ResetLog();
+    REQUIRE(world.Tick(FixtureFixedStep * 0.25));
+    CHECK(LogIs("FuP!Fl") && simulatedCount == 0);
+    CHECK(world.Stats().engineStageNanoseconds[static_cast<uint32>(EngineStage::PhysicsSimulate)] ==
+          0);
+
+    // pause 중에는 없고, 단일 스텝은 한 번이다(다른 delta를 줘도 문맥은 고정 스텝 길이다).
+    world.SetPaused(true);
+    CHECK(fixture.Frame("Pp"));
+    REQUIRE(world.Clock().RequestSingleStep(0.5));
+    simulatedCount = 0;
+    CHECK(fixture.Frame("FuFfM!P!Fl"));
+    REQUIRE(simulatedCount == 1);
+    CHECK(simulated[0].delta == FixtureFixedStep && simulated[0].index == 3);
+    world.SetPaused(false);
+
+    // 진단 덤프는 고정 스텝마다의 자리로 적는다.
+    SystemAllocator allocator;
+    String text(allocator);
+    REQUIRE(world.DumpTickGraph(text));
+    CHECK(Has(text, "[engine stage PhysicsSimulate after each fixed step registered]"));
+    CHECK(Has(text, "[engine stage PhysicsResults at end registered]"));
+
+    // 실패: 두 스텝 모두 돌고 둘 다 센다. 프레임 결과는 첫 스텝의 오류다.
+    failSimulate = true;
+    simulatedCount = 0;
+    const uint64 failuresBefore = world.Stats().engineStageFailures;
+    ResetLog();
+    CHECK(world.Tick(2.0 * FixtureFixedStep).Error() == ErrorCode::DependencyFailed);
+    CHECK(LogIs("FuFfM!FfM!P!Fl"));
+    CHECK(world.Stats().engineStageFailures == failuresBefore + 2);
+    failSimulate = false;
+    world.ClearEngineStage(EngineStage::PhysicsSimulate);
+    CHECK(fixture.Frame("FuFfP!Fl"));
+    REQUIRE(world.Shutdown());
+}
+
 // 리뷰 보강: 같은 Component의 hook 사이 시작 전 선언도 적용된다(Late가 PreRender의 Update 뒤로
 // 늦춰진다 — 15.3절 hook별 실효 단계).
 TEST(WorldTick_SameComponentHooksDeclaredBeforeStart) {

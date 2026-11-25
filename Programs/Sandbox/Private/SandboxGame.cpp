@@ -8,6 +8,7 @@
 #include <Gameplay/Pawn.h>
 #include <Gameplay/PlayerController.generated.h>
 #include <Gameplay/PlayerController.h>
+#include <Physics/PhysicsWorldSubsystem.h>
 #include <World/Actor.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
@@ -257,6 +258,8 @@ Result<void> PopulateMain(World& world, void*) noexcept {
 } // namespace
 
 SandboxGame::SandboxGame() noexcept {
+    worldSubsystems[0] = rocks::PhysicsWorldSubsystem::Type();
+    config.worldSubsystems = rocks::Span<const rocks::WorldSubsystemType>(worldSubsystems);
     config.defaultDirectorType = ObjectTypeIdOf<SandboxDirector>();
     config.defaultMap.name = "Main";
     config.defaultMap.populate = &PopulateMain;
