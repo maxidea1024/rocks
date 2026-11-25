@@ -27,6 +27,7 @@ class ROCKS_MATERIAL_API MaterialFunctionInstance final : public MaterialFunctio
     ROCKS_GENERATED_BODY()
 
 public:
+#if ROCKS_WITH_EDITOR_DATA
     explicit MaterialFunctionInstance(Allocator& allocator) noexcept
         : scalarOverrides(allocator), vectorOverrides(allocator), doubleVectorOverrides(allocator),
           textureOverrides(allocator), collectionOverrides(allocator),
@@ -35,27 +36,35 @@ public:
           staticSwitchOverrides(allocator), staticComponentMaskOverrides(allocator),
           staticEnumOverrides(allocator) {
     }
+#else
+    explicit MaterialFunctionInstance(Allocator&) noexcept {
+    }
+#endif
 
+    // 모든 필드가 EditorOnly다: 함수 인스턴스는 쿠킹 데이터가 없고(4.2절) 쓰는 머티리얼에 펼쳐져
+    // 들어가므로, 텍스처 등 참조가 쿠킹 패키지에 Hard 간선을 만들지 않게 한다(4.6.1절).
 #if ROCKS_WITH_EDITOR_DATA
     // 부모 함수(함수 또는 함수 인스턴스)다. Build 의존이고 사슬 순환은 V3 오류다.
     ROCKS_PROPERTY(EditorOnly) ObjectRef<MaterialFunctionBase> parent;
-#endif
-
-    ROCKS_PROPERTY() Array<material::ScalarParameterOverride> scalarOverrides;
-    ROCKS_PROPERTY() Array<material::VectorParameterOverride> vectorOverrides;
-    ROCKS_PROPERTY() Array<material::DoubleVectorParameterOverride> doubleVectorOverrides;
-    ROCKS_PROPERTY() StructRefArray<TextureParameterOverride> textureOverrides;
-    ROCKS_PROPERTY() Array<material::AssetParameterOverride> collectionOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::ScalarParameterOverride> scalarOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::VectorParameterOverride> vectorOverrides;
+    ROCKS_PROPERTY(EditorOnly)
+    Array<material::DoubleVectorParameterOverride> doubleVectorOverrides;
+    ROCKS_PROPERTY(EditorOnly) StructRefArray<TextureParameterOverride> textureOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::AssetParameterOverride> collectionOverrides;
     // TODO(MPQ-TextureCollection): 텍스처 컬렉션 에셋이 생기면 대상 클래스를 검사한다.
-    ROCKS_PROPERTY() Array<material::AssetParameterOverride> textureCollectionOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::AssetParameterOverride> textureCollectionOverrides;
     // TODO(MPQ-VirtualTexture): RVT 에셋이 생기면 대상 클래스를 검사한다.
-    ROCKS_PROPERTY() Array<material::AssetParameterOverride> virtualTextureOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::AssetParameterOverride> virtualTextureOverrides;
     // TODO(MPQ-SparseVolumeTexture): sparse volume texture 에셋이 생기면 대상 클래스를 검사한다.
-    ROCKS_PROPERTY() Array<material::AssetParameterOverride> sparseVolumeTextureOverrides;
-    ROCKS_PROPERTY() Array<material::FontParameterOverride> fontOverrides;
-    ROCKS_PROPERTY() Array<material::StaticSwitchOverride> staticSwitchOverrides;
-    ROCKS_PROPERTY() Array<material::StaticComponentMaskOverride> staticComponentMaskOverrides;
-    ROCKS_PROPERTY() Array<material::StaticEnumOverride> staticEnumOverrides;
+    ROCKS_PROPERTY(EditorOnly)
+    Array<material::AssetParameterOverride> sparseVolumeTextureOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::FontParameterOverride> fontOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::StaticSwitchOverride> staticSwitchOverrides;
+    ROCKS_PROPERTY(EditorOnly)
+    Array<material::StaticComponentMaskOverride> staticComponentMaskOverrides;
+    ROCKS_PROPERTY(EditorOnly) Array<material::StaticEnumOverride> staticEnumOverrides;
+#endif
 };
 
 } // namespace rocks

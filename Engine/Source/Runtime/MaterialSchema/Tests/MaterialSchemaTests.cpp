@@ -525,6 +525,41 @@ TEST(MaterialSchema_VocabularyNames) {
     CHECK(!HasFeature(ToMask(MaterialContextFeature::Scene), MaterialContextFeature::View));
 }
 
+// 선행 ID 전수: enum 값 순서가 19.4.1절 표 순서와 같고, 모든 ID가 "MPQ-" 접두이며 서로 다르다.
+// 값을 빼거나 순서를 밀면 여기서 걸린다.
+TEST(MaterialSchema_PrerequisiteIdsMatchTable) {
+    // 19.4.1절 표의 행 순서다.
+    const StringView table[] = {
+        "MPQ-TextureCollection",
+        "MPQ-SparseVolumeTexture",
+        "MPQ-VirtualTexture",
+        "MPQ-ExternalTexture",
+        "MPQ-Font",
+        "MPQ-CurveAsset",
+        "MPQ-MaterialAggregate",
+        "MPQ-SubsurfaceProfile",
+        "MPQ-SpecularProfile",
+        "MPQ-ToonShading",
+        "MPQ-NeuralProfile",
+        "MPQ-PhysicalMaterial",
+        "MPQ-VirtualizedGeometry",
+        "MPQ-ColoredTransmittance",
+        "MPQ-AlphaHoldout",
+        "MPQ-LightBake",
+    };
+    static_assert(sizeof(table) / sizeof(table[0]) + 1 == MaterialPrerequisiteCount,
+                  "prerequisite table must list every value except None");
+
+    for (uint32 value = 1; value < MaterialPrerequisiteCount; ++value) {
+        const StringView id = MaterialPrerequisiteId(static_cast<MaterialPrerequisite>(value));
+        CHECK(id == table[value - 1]);
+        CHECK(id.StartsWith("MPQ-", StringComparison::CaseSensitive));
+        for (uint32 other = 1; other < value; ++other) {
+            CHECK(id != MaterialPrerequisiteId(static_cast<MaterialPrerequisite>(other)));
+        }
+    }
+}
+
 namespace {
 
 // 계수 lease다(등록이 쥐고 해제가 놓는지 본다).

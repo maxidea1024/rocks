@@ -25,11 +25,11 @@ UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병
 | 클래스 | 필드(EditorOnly 표시) | 쿠킹 데이터 |
 |---|---|---|
 | `MaterialBase`(Abstract) | profile 목록·조명 굽기 설정·텍스처 sampling scale(19.11절) | sampling scale |
-| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(UE `UMaterial` 속성 대응 전부 — 19.9절), 물리 재질 필드(19.9절, TODO MPQ-PhysicalMaterial), `usage : VertexInputUsage`, `functionRefs`(EditorOnly, Build 의존)·`collectionRefs`(Hard + Build, 4.4절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
-| `MaterialInstance` | `parent : ObjectRef<MaterialBase>`(Hard), 종류별 override 배열(4.3절, 19.11절), `staticOverrides`, `traitOverrides : MaterialTraitOverrides`(값마다 Optional, 19.11절), `layerStackOverrides` | static 변형이 있으면 자기 `MaterialArtifact`, 없으면 평탄화한 override 값만 |
+| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(UE `UMaterial` 속성 대응 전부 — 19.9절), 물리 재질 필드(19.9절, TODO MPQ-PhysicalMaterial), `usage : VertexInputUsage`, `parameterCollections : ObjectRefArray<ParameterCollection>`(Hard — 함수 Build 의존은 hook, 4.4·4.6.1절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
+| `MaterialInstance` | `parent : ObjectRef<MaterialBase>`(Hard), 종류별 override 배열(4.3절, 19.11절), static override 셋(`staticSwitchOverrides`·`staticComponentMaskOverrides`·`staticEnumOverrides`), `traitOverrides : MaterialTraitOverrides`(값마다 Optional, 19.11절), `overridesLayerStack`·`layerStack`(EditorOnly) | static 변형이 있으면 자기 `MaterialArtifact`, 없으면 평탄화한 override 값만 |
 | `MaterialFunction` | `graph`(EditorOnly), `usage : {General, Layer, LayerBlend}`, `exposeToLibrary`(EditorOnly), 입출력 선언 | 없다(쿠킹 런타임에 함수는 필요 없다. 함수를 쓰는 머티리얼에 펼쳐져 들어간다) |
-| `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunction>`, 파라미터 기본값 override | 없다 |
-| `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>`(`ParameterId`·이름·기본값) | layout과 기본값(World 상태가 쓴다) |
+| `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunctionBase>`, 파라미터 기본값 override(모두 EditorOnly — 4.6.1절) | 없다 |
+| `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>`(`ParameterId`·이름·기본값), `base`(Hard)·`scalarBaseOverrides`·`vectorBaseOverrides`(4.6.1절) | layout과 기본값(World 상태가 쓴다) |
 
 `DynamicMaterialInstance`는 에셋이 아니다. World 쪽 객체가 만들어 소유하며, 부모 머티리얼은 `SoftObjectRef`와 `AssetLease`로 붙잡는다(AssetSystem 6.3절. 계획 7.1절 예시의 `SoftObjectRef<MaterialAsset>`과 같은 규칙). dynamic 파라미터만 바꿀 수 있고 static 값·기본 속성은 바꿀 수 없다(`UnsupportedSetting`). UE도 static 변형 갱신 함수가 에디터 전용이다(`RE/Public/Materials/MaterialInstance.h:1042–1083`). 다만 UE에서 실행 중 인스턴스가 static override를 거부하는 경로 전체를 추적하지는 않았다(미확인).
 
@@ -40,7 +40,7 @@ UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병
 - **그래프 저장.** 머티리얼 에셋은 NodeGraph `GraphDocument`(도메인 `Material`)를 필드로 갖는다([노드 그래프](../NodeGraph/05-Decisions.ko.md) GD1·9.1절). 노드별 속성은 노드 타입이 정한 `ROCKS_STRUCT`의 리플렉션 Record 바이트(`PropertyRecord`, 노드 그래프 GD23)로 담는다. 속성 안의 에셋 참조는 `AssetId`로 저장해 AssetSystem 6.2절 의존 종류로 보고한다(노드 그래프 6.2절). 노드 위치·크기·접힘·주석 상자 같은 배치 데이터는 `GraphDocumentLayout`으로 따로 두고 EditorOnly로 표시한다(semantic hash 밖, 5.5절).
 - **모르는 노드.** 등록되지 않은 `NodeTypeId`(plugin 비활성 등)는 속성 바이트를 그대로 보존하는 자리 노드로 읽는다(계획 14.6절, 노드 그래프 GD14). 출력에 닿으면 쿠킹 오류다(5.4절 V12).
 - **스키마 변경.** 노드 타입마다 `schemaVersion`을 두고 migration 함수를 등록한다(계획 14.6절, 노드 그래프 10절). 핀 이름 변경은 `PinKey`가 안정 키라 간선이 보존된다. 사라진 핀에 간선이나 사용자 기본값이 있으면 고아 핀으로 남기고(노드 그래프 6.4절), 고아 핀에 닿은 간선은 번역 오류로 보고한다.
-- **파라미터 override.** 종류별 배열 `scalarOverrides`·`vectorOverrides`·`textureOverrides`·`dynamicBoolOverrides`·`staticOverrides`로 둔다. 원소는 `{ key : ParameterKey, value }` 구조체이고 `ParameterKey`는 9.2절이다. 텍스처 값은 `ObjectRef<Texture>` 멤버라 AssetSystem 6.1절의 패키지 사이 Hard 간선 관찰 대상(구조체 배열 원소의 참조 멤버)에 든다. `InstancedStruct`에 담으면 그 관찰 대상 밖이라 쓰지 않는다.
+- **파라미터 override.** 종류별 배열 `scalarOverrides`·`vectorOverrides`·`textureOverrides`·`dynamicBoolOverrides`·`staticSwitchOverrides`·`staticComponentMaskOverrides`·`staticEnumOverrides` 등으로 둔다(전체 목록은 19.11절). 원소는 `{ key : ParameterKey, value }` 구조체이고 `ParameterKey`는 9.2절이다. 텍스처 값은 `ObjectRef<Texture>` 멤버라 AssetSystem 6.1절의 패키지 사이 Hard 간선 관찰 대상(구조체 배열 원소의 참조 멤버)에 든다. `InstancedStruct`에 담으면 그 관찰 대상 밖이라 쓰지 않는다.
 
 ### 4.4 참조와 의존(AssetSystem 6.2절 종류)
 
@@ -73,12 +73,12 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 | 파일 | 클래스 | 필드 |
 |---|---|---|
 | `MaterialBase.h` | `MaterialBase`(Abstract) | `subsurfaceProfiles`·`specularProfiles`·`toonProfiles`(TODO)·`neuralProfile`(TODO)·`lightBakeSettings`(TODO)·`textureSamplingScales`(19.11절) |
-| `Material.h` | `Material` | `graph : MaterialGraph`(EditorOnly)·`layout : GraphDocumentLayout`(EditorOnly)·`traits : MaterialTraitsDesc`·`usage : VertexInputUsage`·`physicalMaterial`·`physicalMaterialMask`·`renderTracePhysicalMaterials`(TODO)·`virtualizedGeometryOverride`(TODO)·`preview : MaterialPreviewSettings`(EditorOnly) |
-| `MaterialInstance.h` | `MaterialInstance` | `parent`·종류별 override 배열·`staticOverrides`·`traitOverrides : MaterialTraitOverrides`·`layerStackOverrides`·물리 재질·profile override(19.11절) |
+| `Material.h` | `Material` | `graph : MaterialGraph`(EditorOnly)·`layout : GraphDocumentLayout`(EditorOnly)·`traits : MaterialTraitsDesc`·`usage : VertexInputUsage`·`parameterCollections`·`physicalMaterial`·`physicalMaterialMask`·`physicalMaterialMap`·`renderTracePhysicalMaterials`(TODO)·`virtualizedGeometryOverride`(TODO)·`preview : MaterialPreviewSettings`(EditorOnly) |
+| `MaterialInstance.h` | `MaterialInstance` | `parent`·종류별 override 배열·static override 셋·`traitOverrides : MaterialTraitOverrides`·`lightBakeOverrides`·`overridesLayerStack`·`layerStack`(EditorOnly)·물리 재질·profile override(19.11절) |
 | `MaterialFunctionBase.h` | `MaterialFunctionBase`(Abstract, UE `UMaterialFunctionInterface`) | — |
-| `MaterialFunction.h` | `MaterialFunction` | `graph`·`layout`(EditorOnly)·`usage : MaterialFunctionUsage {General, Layer, LayerBlend}`·`exposeToLibrary`(EditorOnly)·`libraryCategories`(EditorOnly)·`description`(EditorOnly) |
-| `MaterialFunctionInstance.h` | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunction>`·파라미터 override 배열 |
-| `ParameterCollection.h` | `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>` |
+| `MaterialFunction.h` | `MaterialFunction` | `graph`·`layout`(EditorOnly)·`usage : MaterialFunctionUsage {General, Layer, LayerBlend}`·`exposeToLibrary`·`libraryCategories`·`description`·`userExposedCaption`(모두 EditorOnly) |
+| `MaterialFunctionInstance.h` | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunctionBase>`·파라미터 override 배열(모두 EditorOnly) |
+| `ParameterCollection.h` | `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>`·`base`·`scalarBaseOverrides`·`vectorBaseOverrides` |
 
 **모듈 `MaterialSchema`(장치·객체 없는 값 타입 — 번역·쿠킹·런타임이 함께 쓴다)**
 
@@ -114,3 +114,15 @@ MS3b 코드 리뷰(필수 4·권장 8·참고 4)를 다음과 같이 반영한�
 - **사용 대상 집합(참고 15).** `VertexInputUsage`는 선언 순서를 보존하고 중복이 없다. `AddVertexInput`·`ContainsVertexInput` 도우미로만 넣는다.
 - **레이어 EditorOnly 칸(참고 17).** UE `FMaterialLayersFunctionsEditorOnlyData`의 `LayerStates`·`LayerNames`·`RestrictToLayerRelatives`·`RestrictToBlendRelatives`·`LayerGuids`·`LayerLinkStates`·`DeletedParentLayerGuids`를 들인다. 레이어마다 `visible`·`displayName`·`restrictToLayerRelatives`·`restrictToBlendRelatives`·`layerId`·`linkState : MaterialLayerLinkState`이고, 스택에 `deletedParentLayerIds`가 있다. `MaterialFunction`에 UE `UserExposedCaption`(EditorOnly)을 `userExposedCaption`으로 더한다.
 - **이름.** 19.9·19.11절 표의 필드 이름을 코드에 맞춘다(아래 표 고침).
+
+#### 4.6.2 MS3b 재리뷰 반영(개정 12)
+
+MS3b 재리뷰(필수 1·권장 4·참고 1)를 다음과 같이 반영한다.
+
+- **Build hook의 패키지 판정(필수).** hook은 참조 대상의 outermost를 `ObjectRegistry::GetOutermost`로 구한다(PackageWriter와 같은 방법). outermost가 Package가 아니면(패키지 없는 객체) `InvalidArgument`로 실패한다. 조용히 건너뛰면 Build 의존이 빠진 채 저장되어 쿠킹 키가 낡는다. PackageWriter도 같은 경우를 저장 실패로 다룬다. 패키지 id가 null이어도 `InvalidArgument`다. 자기 패키지 판정은 대상의 outermost와 `context.object`의 outermost를 handle로 비교한다. 저장 id(`context.asset`)로 비교하면 복제 때 원본 패키지 안 객체가 원본 id로 보고되기 때문이다. Registry 조회 오류는 그대로 돌려준다.
+- **함수 인스턴스는 모든 필드가 EditorOnly(권장 2).** 4.2절대로 함수 인스턴스는 쿠킹 데이터가 없다. UE는 override 배열을 일반 `UPROPERTY`로 두지만(`MaterialFunctionInstance.h:26–74`), Rocks는 함수 인스턴스 패키지가 텍스처 등을 Hard로 끌고 쿠킹되지 않도록 `parent`와 override 배열 전부를 EditorOnly로 둔다. 함수를 쓰는 머티리얼이 번역 때 값을 펼쳐 넣는다. 버린 대안은 쿠커가 `MaterialFunctionBase` 계열을 쿠킹 대상에서 빼는 것이다. 이 방법은 타입별 예외를 쿠커에 두게 된다.
+- **인스턴스 물리 재질 mask·map(재리뷰 확인 16).** UE MIC는 `PhysMaterialMask`와 `PhysicalMaterialMap`을 부모로 내려가지 않고 자기 값만 쓴다(`RE/Private/Materials/MaterialInstanceConstant.cpp:64–66` `GetPhysicalMaterialMask`, `RE/Private/Materials/MaterialInstance.cpp:2187–2194` `GetPhysicalMaterialFromMap`). Rocks도 같게 `MaterialInstance.physicalMaterialMask : MaterialAssetReference`와 `physicalMaterialMap : MaterialAssetReference[8]`을 "자기 값, 상속 없음"으로 둔다. `physicalMaterialOverride`만 UE `bOverridePhysMaterial`처럼 `Optional`이다. 값이 없으면 부모 값이고, null 값이면 엔진 기본 물리 재질이다(`MaterialInstance.cpp:2157–2168`).
+- **스펙 표(권장 1).** 4.2·4.3·4.6절 표의 필드 이름을 코드에 맞춘다(이 개정).
+- **시험(권장 3·4).** 함수 인스턴스 왕복, 컬렉션 `base`·`parameterCollections`의 Hard 의존과 로드 연결, `vectorBaseOverrides`, 레이어 스택의 참조 아닌 칸 왕복, 쿠킹 패키지에 함수·함수 인스턴스 참조 항목이 없음, hook의 Outer 2단·null·자기 패키지·복제 id·패키지 없는 대상, 함수 인스턴스 TODO 검사 양성·음성, 선행 ID 17개 전수(enum 순서 = 19.4.1절 표 순서)를 더한다.
+- **19.4.1절 표 순서(참고).** `MPQ-LightBake` 행을 끝으로 옮겨 enum 순서와 맞춘다.
+- **RenderData 의존(앞 리뷰 12).** `RenderData` 모듈이 ObjectRuntime에 의존하는 것(리플렉션 열거)은 Renderer 스펙이 정할 일이다. 16절 MRD15로 렌더 세션에 요청하는 일로 남긴다(요청 대상 세션이 정해지면 보낸다).

@@ -12,40 +12,56 @@ namespace rocks {
 
 namespace {
 
-// Outer 사슬의 최대 깊이다(순환 방지 — 객체 계층은 이보다 얕다).
-constexpr uint32 MaxOuterDepth = 64;
-
 // target이 속한 패키지의 id를 Build 의존으로 더한다(null이면 건너뛴다). 대표 에셋의 Asset::Id는
-// 로드 때만 채워지므로(Package.h) 메모리에서 만든 에셋도 맞게 내려고 Outer 사슬의 Package를 본다.
-// 패키지가 이 에셋 자신이면 건너뛴다(자기 Build 의존은 없다).
+// 로드 때만 채워지므로(Package.h) 메모리에서 만든 에셋도 맞게 내려고 target의 outermost Package를
+// 본다. 대상이 이 에셋과 같은 패키지(context.object의 outermost)면 건너뛴다 — 복제에서도 원본
+// 패키지 안 객체를 자기로 본다. 오류: outermost가 Package가 아니거나(패키지 없는 객체 —
+// PackageWriter도 저장 실패로 다룬다) 패키지 id가 null이면 InvalidArgument, Registry 조회 오류.
 Result<void> AddAssetOf(const AssetTypeHookContext& context, ObjectHandle target,
                         AssetDependencySink& sink) noexcept {
-    ObjectHandle current = target;
-    for (uint32 depth = 0; depth < MaxOuterDepth && !current.IsNull(); ++depth) {
-        auto package = context.registry.Resolve<Package>(context.access, current);
-        if (package) {
-            auto pointer = package.Value().Get();
-            if (!pointer) {
-                return Result<void>::Failure(pointer.Error());
-            }
-
-            const AssetId id = pointer.Value()->Id();
-            if (id.IsNull() || id == context.asset) {
-                return Result<void>::Success();
-            }
-
-            return sink.Add(id);
-        }
-
-        auto outer = context.registry.GetOuter(context.access, current);
-        if (!outer) {
-            return Result<void>::Failure(outer.Error());
-        }
-
-        current = outer.Value();
+    if (target.IsNull()) {
+        return Result<void>::Success();
     }
 
-    return Result<void>::Success();
+    auto outermost = context.registry.GetOutermost(context.access, target);
+    if (!outermost) {
+        return Result<void>::Failure(outermost.Error());
+    }
+
+    auto self = context.registry.GetOutermost(context.access, context.object);
+    if (!self) {
+        return Result<void>::Failure(self.Error());
+    }
+
+    if (outermost.Value() == self.Value()) {
+        return Result<void>::Success();
+    }
+
+    auto type = context.registry.AcquireType(context.access, outermost.Value());
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    if (!type.Value().IsNativeA(NativeTypeKey<Package>())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto package = context.registry.Resolve<Package>(context.access, outermost.Value());
+    if (!package) {
+        return Result<void>::Failure(package.Error());
+    }
+
+    auto pointer = package.Value().Get();
+    if (!pointer) {
+        return Result<void>::Failure(pointer.Error());
+    }
+
+    const AssetId id = pointer.Value()->Id();
+    if (id.IsNull()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return sink.Add(id);
 }
 
 Result<void> InstanceBuildDependencies(const AssetTypeHookContext& context,

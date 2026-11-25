@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Material/Material.h>
 #include <Material/MaterialFunctionInstance.h>
 #include <Material/MaterialInstance.h>
@@ -151,10 +152,10 @@ Result<void> CollectUsedPrerequisites(const MaterialInstance& instance,
         {!instance.fontOverrides.IsEmpty(), MaterialPrerequisite::Font, "fontOverrides"},
         {HasOverride(instance.physicalMaterialOverride), MaterialPrerequisite::PhysicalMaterial,
          "physicalMaterialOverride"},
-        {HasOverride(instance.physicalMaterialMaskOverride), MaterialPrerequisite::PhysicalMaterial,
-         "physicalMaterialMaskOverride"},
-        {AnySet(instance.physicalMaterialMapOverride), MaterialPrerequisite::PhysicalMaterial,
-         "physicalMaterialMapOverride"},
+        {!instance.physicalMaterialMask.IsNull(), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialMask"},
+        {AnySet(instance.physicalMaterialMap), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialMap"},
         {HasOverride(instance.virtualizedGeometryOverride),
          MaterialPrerequisite::VirtualizedGeometry, "virtualizedGeometryOverride"},
         {displacement, MaterialPrerequisite::VirtualizedGeometry, "traitOverrides.displacement"},
@@ -173,6 +174,7 @@ Result<void> CollectUsedPrerequisites(const MaterialInstance& instance,
 
 Result<void> CollectUsedPrerequisites(const MaterialFunctionInstance& instance,
                                       Array<MaterialPrerequisiteUse>& out) noexcept {
+#if ROCKS_WITH_EDITOR_DATA
     const Use uses[] = {
         {!instance.textureCollectionOverrides.IsEmpty(), MaterialPrerequisite::TextureCollection,
          "textureCollectionOverrides"},
@@ -183,6 +185,12 @@ Result<void> CollectUsedPrerequisites(const MaterialFunctionInstance& instance,
         {!instance.fontOverrides.IsEmpty(), MaterialPrerequisite::Font, "fontOverrides"},
     };
     return AddUses(out, uses);
+#else
+    // 편집 데이터가 없으면 볼 필드가 없다(모든 필드가 EditorOnly).
+    (void)instance;
+    (void)out;
+    return Result<void>::Success();
+#endif
 }
 
 } // namespace rocks

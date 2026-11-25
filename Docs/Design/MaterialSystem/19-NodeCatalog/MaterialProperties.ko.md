@@ -20,7 +20,7 @@
 | UE `UMaterial` 속성 | 줄 | Rocks | 상태 | 비고 |
 |---|---|---|---|---|
 | `PhysMaterial` | 462 | `physicalMaterial : SoftAssetRef` | 필드 + TODO | MPQ-PhysicalMaterial(PhysicsModule 물리 재질 에셋) |
-| `PhysMaterialMask` | 466 | `physicalMaterialMask : SoftAssetRef` | 필드 + TODO | MPQ-PhysicalMaterial |
+| `PhysMaterialMask` | 466 | `physicalMaterialMask : MaterialAssetReference` | 필드 + TODO | MPQ-PhysicalMaterial |
 | `PhysicalMaterialMap` | 470 | `physicalMaterialMap : MaterialAssetReference[8]` | 필드 + TODO | MPQ-PhysicalMaterial |
 | `RenderTracePhysicalMaterialOutputs` | 474 | `renderTracePhysicalMaterials` | 필드 + TODO | MPQ-PhysicalMaterial, RenderTrace 플러그인 출력 노드와 짝 |
 | `MaterialDomain` | 481 | `traits.domain` | 필드 | Renderer 14.2 영역 번호표 |
@@ -211,8 +211,9 @@ UE는 정점 입력 타입마다 `bUsedWith*`를 둔다(`Material.h:703–911`, 
 | `BasePropertyOverrides` | `traitOverrides : MaterialTraitOverrides`(아래) | 필드 |
 | (UE `LightmassSettings`의 `bOverride*`) | `lightBakeOverrides : MaterialLightBakeOverrides` | 필드 + TODO(MPQ-LightBake) |
 | (9.3절 Static Enum) | `staticEnumOverrides` | 필드 |
-| `PhysicalMaterialMap`(MIC) | `physicalMaterialMapOverride : MaterialAssetReference[8]`(칸마다 null이면 부모 칸) | 필드 + TODO(MPQ-PhysicalMaterial) |
-| `PhysMaterial`·`bOverridePhysMaterial`, MIC `PhysMaterialMask` | `physicalMaterialOverride`·`physicalMaterialMaskOverride : Optional<MaterialAssetReference>` | 필드 + TODO(MPQ-PhysicalMaterial) |
+| `PhysicalMaterialMap`(MIC) | `physicalMaterialMap : MaterialAssetReference[8]`(자기 값, 부모로 내려가지 않음 — UE `GetPhysicalMaterialFromMap`, 4.6.2절) | 필드 + TODO(MPQ-PhysicalMaterial) |
+| `PhysMaterial`·`bOverridePhysMaterial` | `physicalMaterialOverride : Optional<MaterialAssetReference>`(값 없음 = 부모, null = 엔진 기본) | 필드 + TODO(MPQ-PhysicalMaterial) |
+| MIC `PhysMaterialMask` | `physicalMaterialMask : MaterialAssetReference`(자기 값, 부모로 내려가지 않음, 4.6.2절) | 필드 + TODO(MPQ-PhysicalMaterial) |
 | `NaniteOverrideMaterial` | `virtualizedGeometryOverride` | 필드 + TODO(MPQ-VirtualizedGeometry) |
 | `bOverrideSubsurfaceProfile`·`SpecularProfileOverride`·`ToonProfileOverride`와 bool들 | `subsurfaceProfileOverride`·`specularProfileOverride`·`toonProfileOverride : Optional<MaterialAssetReference>` | 필드 + TODO(profile MPQ) |
 | `bOverrideBlendableLocation`·`BlendableLocationOverride`·`bOverrideBlendablePriority`·`BlendablePriorityOverride` | `traitOverrides.blendableLocation`·`blendablePriority` | 필드(효과는 Renderer) |

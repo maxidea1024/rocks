@@ -93,11 +93,14 @@ public:
 #endif
 
     // TODO(MPQ-PhysicalMaterial): 물리 재질 에셋이 생기면 대상 클래스를 검사한다.
+    // physicalMaterialOverride는 값이 없으면 부모 값, null 값이면 엔진 기본 물리 재질이다(UE
+    // bOverridePhysMaterial·PhysMaterial). mask와 map은 UE MIC처럼 인스턴스 자기 값만 쓰고 부모로
+    // 내려가지 않는다(UE UMaterialInstanceConstant::GetPhysicalMaterialMask·
+    // UMaterialInstance::GetPhysicalMaterialFromMap — 4.6.1절).
     ROCKS_PROPERTY() Optional<material::MaterialAssetReference> physicalMaterialOverride;
-    ROCKS_PROPERTY() Optional<material::MaterialAssetReference> physicalMaterialMaskOverride;
-    // 칸마다 null이면 부모 칸을 쓴다(UE MIC PhysicalMaterialMap).
+    ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterialMask;
     ROCKS_PROPERTY()
-    material::MaterialAssetReference physicalMaterialMapOverride[MaterialPhysicalMaterialMapSize];
+    material::MaterialAssetReference physicalMaterialMap[MaterialPhysicalMaterialMapSize];
     // TODO(MPQ-VirtualizedGeometry): 가상화 geometry 대체 머티리얼 override.
     ROCKS_PROPERTY() Optional<material::MaterialAssetReference> virtualizedGeometryOverride;
     // TODO(MPQ-SubsurfaceProfile): subsurface profile override.

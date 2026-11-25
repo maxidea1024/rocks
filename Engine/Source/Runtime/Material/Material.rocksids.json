@@ -318,14 +318,14 @@
     },
     {
       "kind": "field",
-      "name": "rocks::MaterialInstance::physicalMaterialMapOverride",
+      "name": "rocks::MaterialInstance::physicalMaterialMap",
       "id": "d42e1def961b4d19ab34c73f3326b416",
       "aliases": [],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::MaterialInstance::physicalMaterialMaskOverride",
+      "name": "rocks::MaterialInstance::physicalMaterialMask",
       "id": "4124a2531e7b4237abcc9b3b3245e2a2",
       "aliases": [],
       "retired": false

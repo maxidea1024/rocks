@@ -23,8 +23,9 @@
 
 // 머티리얼 에셋 클래스 시험이다(Docs/Design/MaterialSystem 4.2·4.6·4.6.1·19.9–19.11절, 단계 MS3b):
 // 클래스 등록과 상속, 기본값이 UE와 같음, 필드 저장·로드·재저장 왕복(그래프·traits·사용 대상·
-// override·Optional·함수·컬렉션), 텍스처 override의 Hard 의존, 레이어 스택의 EditorOnly 의존과
-// Build hook, TODO 필드 검사의 필드별 양성·음성.
+// override·Optional·레이어 스택·함수·함수 인스턴스·컬렉션), 텍스처·컬렉션 참조의 Hard 의존, 레이어
+// 스택·함수 인스턴스의 EditorOnly 의존(쿠킹 패키지엔 항목 없음)과 Build hook의 패키지 판정, TODO
+// 필드 검사의 필드별 양성·음성.
 using namespace rocks;
 namespace material_asset_tests_file {
 
@@ -44,10 +45,10 @@ bool IsA(TypeRegistry& types, TypeId actual, TypeId expected) noexcept {
 
 // 패키지 하나와 그 대표 에셋을 만든다.
 template <class T>
-ObjectHandle MakeAsset(asset_test::AssetEnv& env, uint64 id, RootRef<Package>& package) noexcept {
+ObjectHandle MakeAsset(asset_test::AssetEnv& env, uint64 id, RootRef<Package>& package,
+                       PackageKind kind = PackageKind::Editor) noexcept {
     ObjectRegistry& source = *env.source;
-    auto made =
-        NewPackage(source, source.OwnerAccess(), asset_test::FixedId(id), PackageKind::Editor);
+    auto made = NewPackage(source, source.OwnerAccess(), asset_test::FixedId(id), kind);
     if (!made) {
         return ObjectHandle{};
     }
@@ -56,15 +57,23 @@ ObjectHandle MakeAsset(asset_test::AssetEnv& env, uint64 id, RootRef<Package>& p
     return asset_test::Make<T>(source, TypeOf<T>(), package.Handle(), "");
 }
 
+// 한 번에 로드하는 파일의 최대 수다.
+constexpr usize MaxLoadedFiles = 3;
+
 // 저장한 파일들을 다른 Registry에 한 번에 로드한다.
 struct Loaded {
-    RootRef<Object> roots[2];
-    ObjectHandle packages[2];
-    ObjectHandle assets[2];
+    RootRef<Object> roots[MaxLoadedFiles];
+    ObjectHandle packages[MaxLoadedFiles];
+    ObjectHandle assets[MaxLoadedFiles];
 };
 
 bool LoadFiles(asset_test::AssetEnv& env, Span<const Array<uint8>> saved, Loaded& out) noexcept {
-    Array<uint8> files[2] = {Array<uint8>(env.allocator), Array<uint8>(env.allocator)};
+    if (saved.Size() > MaxLoadedFiles) {
+        return false;
+    }
+
+    Array<uint8> files[MaxLoadedFiles] = {Array<uint8>(env.allocator), Array<uint8>(env.allocator),
+                                          Array<uint8>(env.allocator)};
     for (usize index = 0; index < saved.Size(); ++index) {
         files[index] = asset_test::Copy(env.allocator, saved[index].View());
     }
@@ -113,6 +122,40 @@ bool HasDependency(asset_test::AssetEnv& env, const Array<uint8>& file, AssetId 
 
     for (const PackageDependencyEntry& entry : contents.Value().dependencies) {
         if (entry.asset == asset && entry.kind == kind) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// 쿠킹 패키지가 asset으로 가는 의존 항목을 (종류와 상관없이) 하나라도 가졌는가. 읽기 실패는 참으로
+// 돌려 시험이 통과하지 않게 한다.
+bool CookedMentions(asset_test::AssetEnv& env, const Array<uint8>& file, AssetId asset) noexcept {
+    auto contents =
+        ReadPackage(env.allocator, file.View(), asset_test::LoadOptions(PackageKind::Cooked).read);
+    if (!contents) {
+        return true;
+    }
+
+    for (const PackageDependencyEntry& entry : contents.Value().dependencies) {
+        if (entry.asset == asset) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool CookedHasHard(asset_test::AssetEnv& env, const Array<uint8>& file, AssetId asset) noexcept {
+    auto contents =
+        ReadPackage(env.allocator, file.View(), asset_test::LoadOptions(PackageKind::Cooked).read);
+    if (!contents) {
+        return false;
+    }
+
+    for (const PackageDependencyEntry& entry : contents.Value().dependencies) {
+        if (entry.asset == asset && entry.kind == PackageDependencyKind::Hard) {
             return true;
         }
     }
@@ -384,6 +427,26 @@ TEST(Material_InstanceOverridesRoundTrip) {
             instance.lightBakeOverrides.diffuseBoost = 2.0f;
             // 없음으로 덮기(값이 있는 null 참조).
             instance.physicalMaterialOverride = material::MaterialAssetReference{};
+#if ROCKS_WITH_EDITOR_DATA
+            // 레이어 스택의 참조 아닌 칸(함수 참조 왕복은 다른 시험이 본다).
+            instance.overridesLayerStack = true;
+            auto layerIndex =
+                source.AddElement(source.OwnerAccess(), handle, instance.layerStack.layers);
+            if (!layerIndex) {
+                return false;
+            }
+
+            MaterialLayerEntry& entry = instance.layerStack.layers[layerIndex.Value()];
+            entry.layerId = Guid{0x61, 6};
+            entry.visible = false;
+            entry.restrictToLayerRelatives = true;
+            entry.restrictToBlendRelatives = true;
+            entry.linkState = MaterialLayerLinkState::UnlinkedFromParent;
+            if (!entry.displayName.TryAssign("Moss") ||
+                !instance.layerStack.deletedParentLayerIds.TryPushBack(Guid{0x62, 6})) {
+                return false;
+            }
+#endif
             return instance.scalarOverrides.TryPushBack(Move(roughness)) &&
                    instance.staticEnumOverrides.TryPushBack(Move(preset)) &&
                    instance.fontOverrides.TryPushBack(Move(font)) &&
@@ -426,7 +489,19 @@ TEST(Material_InstanceOverridesRoundTrip) {
     CHECK(!copy->lightBakeOverrides.emissiveBoost.HasValue());
     CHECK(copy->physicalMaterialOverride.HasValue() &&
           copy->physicalMaterialOverride.Value().IsNull());
-    CHECK(!copy->physicalMaterialMaskOverride.HasValue());
+    CHECK(copy->physicalMaterialMask.IsNull());
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(copy->overridesLayerStack);
+    REQUIRE(copy->layerStack.layers.Size() == 1);
+    const MaterialLayerEntry& layer = copy->layerStack.layers[0];
+    CHECK(layer.layerId == (Guid{0x61, 6}));
+    CHECK(!layer.visible && layer.restrictToLayerRelatives && layer.restrictToBlendRelatives);
+    CHECK(layer.linkState == MaterialLayerLinkState::UnlinkedFromParent);
+    CHECK(layer.displayName.View() == StringView("Moss"));
+    CHECK(layer.layer.Handle().IsNull() && layer.blend.Handle().IsNull());
+    REQUIRE(copy->layerStack.deletedParentLayerIds.Size() == 1);
+    CHECK(copy->layerStack.deletedParentLayerIds[0] == (Guid{0x62, 6}));
+#endif
     CHECK(ResaveSame(env, files[0], loaded.packages[0]));
 }
 
@@ -636,6 +711,292 @@ TEST(Material_FunctionAndCollectionRoundTrip) {
     CHECK(ResaveSame(env, files[1], loaded.packages[1]));
 }
 
+#if ROCKS_WITH_EDITOR_DATA
+// MaterialFunctionInstance 왕복: 부모(다른 패키지 함수 — EditorOnly 의존)·static enum·글꼴 page·
+// 컬렉션 override·scalar override가 남고, 로드하면 부모 참조가 이어지며, 재저장 byte가 같다.
+TEST(Material_FunctionInstanceRoundTrip) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    RootRef<Package> functionPackage;
+    const ObjectHandle function = MakeAsset<MaterialFunction>(env, 0x670, functionPackage);
+    RootRef<Package> instancePackage;
+    const ObjectHandle instance = MakeAsset<MaterialFunctionInstance>(env, 0x671, instancePackage);
+    REQUIRE(!function.IsNull() && !instance.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<MaterialFunctionInstance>(
+        source, instance, [&](MaterialFunctionInstance& value) noexcept {
+            Allocator& allocator = source.ObjectAllocator();
+            if (!source.SetReference(access, instance, value.parent, function)) {
+                return false;
+            }
+
+            material::ScalarParameterOverride scalar(allocator);
+            scalar.key = Key(allocator, 0x34);
+            scalar.value = 0.125f;
+            material::StaticEnumOverride preset(allocator);
+            preset.key = Key(allocator, 0x35);
+            preset.value = 5;
+            material::FontParameterOverride font(allocator);
+            font.key = Key(allocator, 0x36);
+            font.font.assetId = asset_test::FixedId(0x8F0);
+            font.page = 4;
+            material::AssetParameterOverride collection(allocator);
+            collection.key = Key(allocator, 0x37);
+            collection.value.assetId = asset_test::FixedId(0x8F1);
+            return value.scalarOverrides.TryPushBack(Move(scalar)) &&
+                   value.staticEnumOverrides.TryPushBack(Move(preset)) &&
+                   value.fontOverrides.TryPushBack(Move(font)) &&
+                   value.collectionOverrides.TryPushBack(Move(collection));
+        }));
+
+    const Array<uint8> files[2] = {
+        asset_test::Write(env.allocator, source, functionPackage.Handle(),
+                          asset_test::EditorOptions()),
+        asset_test::Write(env.allocator, source, instancePackage.Handle(),
+                          asset_test::EditorOptions())};
+    REQUIRE(!files[0].IsEmpty() && !files[1].IsEmpty());
+    CHECK(HasDependency(env, files[1], asset_test::FixedId(0x670),
+                        PackageDependencyKind::EditorOnly));
+    CHECK(!HasDependency(env, files[1], asset_test::FixedId(0x670), PackageDependencyKind::Hard));
+
+    Loaded loaded;
+    REQUIRE(LoadFiles(env, files, loaded));
+    MaterialFunctionInstance* copy =
+        asset_test::Pointer<MaterialFunctionInstance>(*env.target, loaded.assets[1]);
+    REQUIRE(copy != nullptr);
+    CHECK(copy->parent.Handle() == loaded.assets[0]);
+    REQUIRE(copy->scalarOverrides.Size() == 1);
+    CHECK(copy->scalarOverrides[0].key.parameterId == (Guid{0x34, 1}));
+    CHECK(copy->scalarOverrides[0].value == 0.125f);
+    REQUIRE(copy->staticEnumOverrides.Size() == 1);
+    CHECK(copy->staticEnumOverrides[0].value == 5);
+    REQUIRE(copy->fontOverrides.Size() == 1);
+    CHECK(copy->fontOverrides[0].font.assetId == asset_test::FixedId(0x8F0));
+    CHECK(copy->fontOverrides[0].page == 4);
+    REQUIRE(copy->collectionOverrides.Size() == 1);
+    CHECK(copy->collectionOverrides[0].value.assetId == asset_test::FixedId(0x8F1));
+    CHECK(ResaveSame(env, files[1], loaded.packages[1]));
+}
+#endif
+
+// 파라미터 컬렉션 참조: 머티리얼의 parameterCollections와 컬렉션 base는 Hard 의존이고, 세 패키지를
+// 함께 로드하면 참조가 이어진다. 상속 기본값 덮기(scalar·vector)가 남는다.
+TEST(Material_ParameterCollectionReferencesAreHard) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    RootRef<Package> basePackage;
+    const ObjectHandle base = MakeAsset<ParameterCollection>(env, 0x680, basePackage);
+    RootRef<Package> childPackage;
+    const ObjectHandle child = MakeAsset<ParameterCollection>(env, 0x681, childPackage);
+    RootRef<Package> materialPackage;
+    const ObjectHandle material = MakeAsset<Material>(env, 0x682, materialPackage);
+    REQUIRE(!base.IsNull() && !child.IsNull() && !material.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<ParameterCollection>(
+        source, base, [&](ParameterCollection& value) noexcept {
+            material::VectorCollectionParameter tint;
+            tint.id = Guid{0x72, 7};
+            tint.defaultValue = LinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+            return value.vectors.TryPushBack(tint);
+        }));
+    REQUIRE(asset_test::WithBorrow<ParameterCollection>(
+        source, child, [&](ParameterCollection& value) noexcept {
+            material::VectorCollectionBaseOverride inherited;
+            inherited.parameterId = Guid{0x72, 7};
+            inherited.value = LinearColor(0.0f, 0.5f, 1.0f, 1.0f);
+            return source.SetReference(access, child, value.base, base).IsOk() &&
+                   value.vectorBaseOverrides.TryPushBack(inherited);
+        }));
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        return source.AddReference(access, material, value.parameterCollections, child).IsOk();
+    }));
+
+    const Array<uint8> files[3] = {
+        asset_test::Write(env.allocator, source, basePackage.Handle(), asset_test::EditorOptions()),
+        asset_test::Write(env.allocator, source, childPackage.Handle(),
+                          asset_test::EditorOptions()),
+        asset_test::Write(env.allocator, source, materialPackage.Handle(),
+                          asset_test::EditorOptions())};
+    REQUIRE(!files[0].IsEmpty() && !files[1].IsEmpty() && !files[2].IsEmpty());
+    CHECK(HasDependency(env, files[1], asset_test::FixedId(0x680), PackageDependencyKind::Hard));
+    CHECK(HasDependency(env, files[2], asset_test::FixedId(0x681), PackageDependencyKind::Hard));
+
+    Loaded loaded;
+    REQUIRE(LoadFiles(env, files, loaded));
+    ParameterCollection* childCopy =
+        asset_test::Pointer<ParameterCollection>(*env.target, loaded.assets[1]);
+    Material* materialCopy = asset_test::Pointer<Material>(*env.target, loaded.assets[2]);
+    REQUIRE(childCopy != nullptr && materialCopy != nullptr);
+    CHECK(childCopy->base.Handle() == loaded.assets[0]);
+    REQUIRE(childCopy->vectorBaseOverrides.Size() == 1);
+    CHECK(childCopy->vectorBaseOverrides[0].parameterId == (Guid{0x72, 7}));
+    CHECK(childCopy->vectorBaseOverrides[0].value == LinearColor(0.0f, 0.5f, 1.0f, 1.0f));
+    REQUIRE(materialCopy->parameterCollections.Size() == 1);
+    CHECK(materialCopy->parameterCollections[0] == loaded.assets[1]);
+    CHECK(ResaveSame(env, files[1], loaded.packages[1]));
+    CHECK(ResaveSame(env, files[2], loaded.packages[2]));
+}
+
+#if ROCKS_WITH_EDITOR_DATA
+// 쿠킹 패키지: 레이어 스택의 함수 참조와 함수 인스턴스의 모든 참조(부모·텍스처 override)는
+// EditorOnly라 쿠킹 패키지에 의존 항목이 아예 없다. 부모 머티리얼은 쿠킹에도 Hard다(4.6.1절).
+TEST(Material_CookedPackagesDropEditorOnlyReferences) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    const PackageKind cooked = PackageKind::Cooked;
+    RootRef<Package> functionPackage;
+    const ObjectHandle function = MakeAsset<MaterialFunction>(env, 0x690, functionPackage, cooked);
+    RootRef<Package> parentPackage;
+    const ObjectHandle parent = MakeAsset<Material>(env, 0x691, parentPackage, cooked);
+    RootRef<Package> instancePackage;
+    const ObjectHandle instance = MakeAsset<MaterialInstance>(env, 0x692, instancePackage, cooked);
+    RootRef<Package> functionInstancePackage;
+    const ObjectHandle functionInstance =
+        MakeAsset<MaterialFunctionInstance>(env, 0x693, functionInstancePackage, cooked);
+    RootRef<Package> texturePackage;
+    const ObjectHandle texture = MakeAsset<Texture2D>(env, 0x694, texturePackage, cooked);
+    REQUIRE(!function.IsNull() && !parent.IsNull() && !instance.IsNull() &&
+            !functionInstance.IsNull() && !texture.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<MaterialInstance>(
+        source, instance, [&](MaterialInstance& value) noexcept {
+            if (!source.SetReference(access, instance, value.parent, parent)) {
+                return false;
+            }
+
+            value.overridesLayerStack = true;
+            auto index = source.AddElement(access, instance, value.layerStack.layers);
+            return index && source
+                                .SetElementReference(
+                                    access, instance, value.layerStack.layers, index.Value(),
+                                    value.layerStack.layers[index.Value()].layer, function)
+                                .IsOk();
+        }));
+    REQUIRE(asset_test::WithBorrow<MaterialFunctionInstance>(
+        source, functionInstance, [&](MaterialFunctionInstance& value) noexcept {
+            if (!source.SetReference(access, functionInstance, value.parent, function)) {
+                return false;
+            }
+
+            auto index = source.AddElement(access, functionInstance, value.textureOverrides);
+            return index && source
+                                .SetElementReference(
+                                    access, functionInstance, value.textureOverrides, index.Value(),
+                                    value.textureOverrides[index.Value()].value, texture)
+                                .IsOk();
+        }));
+
+    const Array<uint8> instanceFile = asset_test::Write(
+        env.allocator, source, instancePackage.Handle(), asset_test::CookedOptions());
+    const Array<uint8> functionInstanceFile = asset_test::Write(
+        env.allocator, source, functionInstancePackage.Handle(), asset_test::CookedOptions());
+    REQUIRE(!instanceFile.IsEmpty() && !functionInstanceFile.IsEmpty());
+    CHECK(CookedHasHard(env, instanceFile, asset_test::FixedId(0x691)));
+    CHECK(!CookedMentions(env, instanceFile, asset_test::FixedId(0x690)));
+    CHECK(!CookedMentions(env, functionInstanceFile, asset_test::FixedId(0x690)));
+    CHECK(!CookedMentions(env, functionInstanceFile, asset_test::FixedId(0x694)));
+}
+
+// Build hook의 패키지 판정(4.6.1절): 다른 패키지의 하위 객체(Outer 2단)는 그 패키지 id로, 자기
+// 패키지 안 객체와 null 참조는 건너뛰고, 패키지 없는 객체는 InvalidArgument로 실패한다.
+TEST(Material_BuildHookResolvesOutermostPackage) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    RootRef<Package> functionPackage;
+    const ObjectHandle function = MakeAsset<MaterialFunction>(env, 0x6A0, functionPackage);
+    RootRef<Package> instancePackage;
+    const ObjectHandle instance = MakeAsset<MaterialInstance>(env, 0x6A1, instancePackage);
+    REQUIRE(!function.IsNull() && !instance.IsNull());
+    const ObjectHandle remoteInner =
+        asset_test::Make<MaterialFunction>(source, TypeOf<MaterialFunction>(), function, "Inner");
+    const ObjectHandle localInner =
+        asset_test::Make<MaterialFunction>(source, TypeOf<MaterialFunction>(), instance, "Local");
+    REQUIRE(!remoteInner.IsNull() && !localInner.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<MaterialInstance>(
+        source, instance, [&](MaterialInstance& value) noexcept {
+            value.overridesLayerStack = true;
+            const ObjectHandle targets[] = {remoteInner, localInner};
+            for (const ObjectHandle target : targets) {
+                auto index = source.AddElement(access, instance, value.layerStack.layers);
+                if (!index || !source
+                                   .SetElementReference(
+                                       access, instance, value.layerStack.layers, index.Value(),
+                                       value.layerStack.layers[index.Value()].layer, target)
+                                   .IsOk()) {
+                    return false;
+                }
+            }
+
+            return true;
+        }));
+
+    AssetTypeHookTable table(env.allocator, env.types);
+    Array<AssetTypeHookRegistration> registrations(env.allocator);
+    REQUIRE(RegisterMaterialAssetHooks(table, registrations));
+
+    // 부모 null·혼합 함수 null·자기 패키지 레이어는 건너뛰고 다른 패키지 하위 객체만 남는다.
+    AssetDependencySink instanceSink(env.allocator);
+    REQUIRE(table.CollectBuildDependencies(source, access, instance, TypeOf<MaterialInstance>(),
+                                           asset_test::FixedId(0x6A1), instanceSink));
+    REQUIRE(instanceSink.Dependencies().Size() == 1);
+    CHECK(instanceSink.Dependencies()[0].asset == asset_test::FixedId(0x6A0));
+    CHECK(instanceSink.Dependencies()[0].kind == PackageDependencyKind::Build);
+
+    // 복제처럼 저장 id가 원본과 달라도 자기 패키지 판정은 객체 소속으로 한다.
+    AssetDependencySink copySink(env.allocator);
+    REQUIRE(table.CollectBuildDependencies(source, access, instance, TypeOf<MaterialInstance>(),
+                                           asset_test::FixedId(0x6AF), copySink));
+    REQUIRE(copySink.Dependencies().Size() == 1);
+    CHECK(copySink.Dependencies()[0].asset == asset_test::FixedId(0x6A0));
+
+    // 패키지 정책 Registry는 패키지 없는 객체를 만들지 못한다(ObjectIdentity.h RegistryPolicy).
+    // 정책 없는 Registry에서 패키지 없는 대상을 가리키면 hook은 건너뛰지 않고 InvalidArgument로
+    // 실패한다.
+    RegistryOptions looseOptions;
+    looseOptions.names = &env.names;
+    auto looseRegistry = UniquePtr<ObjectRegistry>::TryMake(
+        env.allocator, env.allocator, env.types, ContextId{0x4d41544c4f4f5345ull, 3}, looseOptions);
+    REQUIRE(looseRegistry);
+    ObjectRegistry& loose = *looseRegistry.Value();
+    const ObjectAccessContext looseAccess = loose.OwnerAccess();
+    auto looseFunction = loose.NewObject<MaterialFunction>(looseAccess, TypeOf<MaterialFunction>(),
+                                                           ObjectHandle{}, "LooseFunction");
+    auto looseInstance = loose.NewObject<MaterialFunctionInstance>(
+        looseAccess, TypeOf<MaterialFunctionInstance>(), ObjectHandle{}, "LooseInstance");
+    REQUIRE(looseFunction && looseInstance);
+    const ObjectHandle looseInstanceHandle = looseInstance.Value().Handle();
+    const ObjectHandle looseFunctionHandle = looseFunction.Value().Handle();
+    REQUIRE(asset_test::WithBorrow<MaterialFunctionInstance>(
+        loose, looseInstanceHandle, [&](MaterialFunctionInstance& value) noexcept {
+            return loose
+                .SetReference(looseAccess, looseInstanceHandle, value.parent, looseFunctionHandle)
+                .IsOk();
+        }));
+
+    AssetDependencySink looseSink(env.allocator);
+    CHECK(table
+              .CollectBuildDependencies(loose, looseAccess, looseInstanceHandle,
+                                        TypeOf<MaterialFunctionInstance>(),
+                                        asset_test::FixedId(0x6A2), looseSink)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(looseSink.Dependencies().IsEmpty());
+    registrations.Clear();
+}
+#endif
+
 // TODO 필드 검사(MD12): 기본값이면 비어 있고, 필드 하나만 바꾸면 그 (선행, 필드) 하나만 나온다.
 TEST(Material_CollectsUsedPrerequisitesPerField) {
     SystemAllocator allocator;
@@ -738,13 +1099,13 @@ TEST(Material_CollectsUsedPrerequisitesPerField) {
          },
          MaterialPrerequisite::PhysicalMaterial, "physicalMaterialOverride"},
         {[](MaterialInstance& i, Allocator&) noexcept {
-             i.physicalMaterialMaskOverride = material::MaterialAssetReference{};
+             i.physicalMaterialMask.assetId = asset_test::FixedId(1);
          },
-         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMaskOverride"},
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMask"},
         {[](MaterialInstance& i, Allocator&) noexcept {
-             i.physicalMaterialMapOverride[0].assetId = asset_test::FixedId(1);
+             i.physicalMaterialMap[0].assetId = asset_test::FixedId(1);
          },
-         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMapOverride"},
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMap"},
         {[](MaterialInstance& i, Allocator&) noexcept {
              i.virtualizedGeometryOverride = material::MaterialAssetReference{};
          },
@@ -797,9 +1158,62 @@ TEST(Material_CollectsUsedPrerequisitesPerField) {
         Array<MaterialPrerequisiteUse> uses(allocator);
         REQUIRE(CollectUsedPrerequisites(instance, uses));
         CHECK(uses.IsEmpty());
-        REQUIRE(instance.fontOverrides.TryPushBack(material::FontParameterOverride(allocator)));
+    }
+
+#if ROCKS_WITH_EDITOR_DATA
+    struct FunctionInstanceCase {
+        void (*mutate)(MaterialFunctionInstance&, Allocator&) noexcept;
+        MaterialPrerequisite prerequisite;
+        StringView field;
+    };
+
+    const FunctionInstanceCase functionCases[] = {
+        {[](MaterialFunctionInstance& i, Allocator& a) noexcept {
+             (void)i.textureCollectionOverrides.TryPushBack(material::AssetParameterOverride(a));
+         },
+         MaterialPrerequisite::TextureCollection, "textureCollectionOverrides"},
+        {[](MaterialFunctionInstance& i, Allocator& a) noexcept {
+             (void)i.virtualTextureOverrides.TryPushBack(material::AssetParameterOverride(a));
+         },
+         MaterialPrerequisite::VirtualTexture, "virtualTextureOverrides"},
+        {[](MaterialFunctionInstance& i, Allocator& a) noexcept {
+             (void)i.sparseVolumeTextureOverrides.TryPushBack(material::AssetParameterOverride(a));
+         },
+         MaterialPrerequisite::SparseVolumeTexture, "sparseVolumeTextureOverrides"},
+        {[](MaterialFunctionInstance& i, Allocator& a) noexcept {
+             (void)i.fontOverrides.TryPushBack(material::FontParameterOverride(a));
+         },
+         MaterialPrerequisite::Font, "fontOverrides"},
+    };
+
+    for (const FunctionInstanceCase& testCase : functionCases) {
+        MaterialFunctionInstance instance(allocator);
+        testCase.mutate(instance, allocator);
+        Array<MaterialPrerequisiteUse> uses(allocator);
         REQUIRE(CollectUsedPrerequisites(instance, uses));
-        CHECK(ExactlyOne(uses, MaterialPrerequisite::Font, "fontOverrides"));
+        CHECK(ExactlyOne(uses, testCase.prerequisite, testCase.field));
+    }
+
+    // TODO가 아닌 override(컬렉션·static enum)는 진단이 없다.
+    {
+        MaterialFunctionInstance instance(allocator);
+        REQUIRE(
+            instance.collectionOverrides.TryPushBack(material::AssetParameterOverride(allocator)));
+        REQUIRE(instance.staticEnumOverrides.TryPushBack(material::StaticEnumOverride(allocator)));
+        Array<MaterialPrerequisiteUse> uses(allocator);
+        REQUIRE(CollectUsedPrerequisites(instance, uses));
+        CHECK(uses.IsEmpty());
+    }
+#endif
+
+    // 물리 재질 표는 마지막 칸 하나만 채워도 잡힌다(인스턴스).
+    {
+        MaterialInstance instance(allocator);
+        instance.physicalMaterialMap[MaterialPhysicalMaterialMapSize - 1].assetId =
+            asset_test::FixedId(1);
+        Array<MaterialPrerequisiteUse> uses(allocator);
+        REQUIRE(CollectUsedPrerequisites(instance, uses));
+        CHECK(ExactlyOne(uses, MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMap"));
     }
 }
 
