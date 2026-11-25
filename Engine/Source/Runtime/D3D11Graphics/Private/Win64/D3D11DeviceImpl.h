@@ -264,7 +264,7 @@ public:
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
-    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(PixelFormat.ko.md PF4).
+    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(Docs/Design/PixelFormat PF4).
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
@@ -327,6 +327,7 @@ public:
     uint64 RejectedCalls() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
 
@@ -670,6 +671,8 @@ private:
     // 정점·index 버퍼를 다시 묶는다.
     bool inputsDirty_ = false;
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;
     // 검증 메시지 원문을 ID마다 한 번만 남긴다(DrainValidationMessages가 쓴다).

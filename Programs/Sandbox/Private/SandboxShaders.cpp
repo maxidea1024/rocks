@@ -5,6 +5,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <Graphics/GraphicsLog.h>
+#include <RenderBase/EngineShaderTypes.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,7 +64,11 @@ SystemAllocator& ProcessAllocator() noexcept {
 // 등록부다(처음 쓸 때 등록·Freeze한다 — 프로세스 수명).
 shader::ShaderTypeRegistry* Registry() noexcept {
     static shader::ShaderTypeRegistry registry(ProcessAllocator());
-    static bool ready = registry.Register(Types) && registry.Freeze();
+    // 엔진 셰이더 타입(RenderBase 11.4절 2항)도 함께 등록한다(엔진 호스트에서는 RenderBase 모듈이
+    // 호스트 등록부에 넣는다).
+    static bool ready =
+        registry.Register(Types) && registry.Register(render::EngineShaderTypes()) &&
+        registry.RegisterVertexInputTypes(render::EngineVertexInputTypes()) && registry.Freeze();
     if (!ready) {
         Log::Error(graphics::LogGraphics,
                    "Sandbox shader types failed to register: {Type}: {Reason}",
@@ -356,7 +361,6 @@ private:
         desc.allocator = &allocator_;
         desc.registry = request.registry;
         desc.formats = formats;
-        desc.vertexInputTypes = request.vertexInputTypes;
         desc.library = request.library;
         // Development 공급자는 개발 전용 타입도 만든다(진단 버퍼 퍼뮤테이션 — ShaderSystem 7.2절
         // 12항, RenderBase 9.11절 6항의 D3D12 root 예산 시험).

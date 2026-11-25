@@ -19,9 +19,11 @@
 | Actor `SkyAtmosphere`·`HeightFog`·`DecalActor` | `ASkyAtmosphere`·`AExponentialHeightFog`·`ADecalActor` | `Actor` | 컴포넌트 기본 |
 | Actor `ReflectionCapture`(Abstract)·`SphereReflectionCapture`·`BoxReflectionCapture`·`PlaneReflectionCapture` | UE 같은 이름 | `Actor` | Static |
 
+- 범위는 UE의 `ClampMin`·`ClampMax`와 `PostEditChangeProperty` clamp만 따른다. `UIMin`·`UIMax`뿐인 값은 편집기 슬라이더 범위라 유한이기만 하면 받는다(UE와 같다 — 리뷰 반영 2026-11-25).
 - 필드가 많은 대기·안개·후처리는 설정 구조체 하나(`SkyAtmosphereSettings`·`HeightFogSettings`·`PostProcessSettings` — 리플렉션 구조체, 공개 필드)를 영속 필드로 갖고 `Settings()`·`SetSettings()`로 바꾼다. `SetSettings`는 범위를 검증하고 하나라도 벗어나면 `InvalidArgument`로 전체를 거부한다(값 유지). Decal·반사 캡처는 필드가 적어 필드별 setter다(D1–D4와 같다).
 - 값이 바뀌면 Render 시스템 상태 다시 보내기를 표시한다(24.1절).
-- Actor는 광원 Actor와 같은 규칙으로 PreAwake에서 root를 만든다(24.2.5절 — 같은 타입 root는 재사용, 다른 타입은 `InvalidArgument`). 켜고 끄기는 root visible이다(UE replicated `bEnabled` — 복제는 네트워크 단계). Actor 이름은 UE 접두만 뗐다(decal은 컴포넌트와 구별하려고 `DecalActor`).
+- 파일(24.1절 파일 배치): `World/Environment/`에 클래스마다 헤더 하나(`SkyAtmosphereComponent.h`·`HeightFogComponent.h`·`DecalComponent.h`·`ReflectionCaptureComponent.h`·`Sphere`/`Box`/`PlaneReflectionCaptureComponent.h`와 Actor 7개), 설정·enum은 `SkyAtmosphereSettings.h`·`HeightFogSettings.h`·`ReflectionSourceType.h`. 후처리는 `World/PostProcess/`의 `PostProcessTypes.h`(enum)·`PostProcessSettings.h`(구조체·범위 검사)·`PostProcessBlending.h`(덮어쓰기)·`PostProcessComponent.h`다. `Private/`도 같은 폴더에 cpp를 하나씩 둔다.
+- Actor는 광원 Actor와 같은 규칙으로 PreAwake에서 root를 만든다(24.2.5절 — 같은 타입 root는 재사용, 다른 타입은 `InvalidArgument`). 켜고 끄기(`SetFogEnabled`·`IsFogEnabled` — root visible)는 `HeightFog`에만 있다. UE에서 replicated `bEnabled`가 있는 환경 Actor는 `AExponentialHeightFog`뿐이다(복제는 네트워크 단계). Actor 이름은 UE 접두만 뗐다(decal은 컴포넌트와 구별하려고 `DecalActor`).
 
 ### 27.2 SkyAtmosphereComponent
 
@@ -49,52 +51,53 @@ UE `C/ExponentialHeightFogComponent.cpp:72–119`. 안개 높이는 컴포넌트
 - `fogDensity` 0.02 [0, 10], `fogHeightFalloff` 0.2 [0, 2](UE `PostEditChange` clamp — `:244`), `secondFogData`(`HeightFogData { fogDensity 0, fogHeightFalloff 0.2, fogHeightOffset 0 }` — 같은 범위, 생성자가 밀도를 0으로).
 - `fogInscatteringLuminance` 검정(LinearColor), `skyAtmosphereAmbientContributionColorScale` 흰색, `inscatteringColorCubemapAngle` 0 [0, 360], `inscatteringTextureTint` 흰색, `skyLightCaptureAffectsHeightFogStrength` 0 [0, ∞), `skyLightCaptureAffectsHeightFogRoughness` 0.15 [0, 1].
 - `fullyDirectionalInscatteringColorDistance` 100000 [0, ∞), `nonDirectionalInscatteringColorDistance` 1000 [0, fully…], `directionalInscatteringExponent` 4, `directionalInscatteringStartDistance` 10000, `directionalInscatteringLuminance` 검정.
-- `fogMaxOpacity` 1 [0, 1], `startDistance` 0, `endDistance` 0(끔), `fogCutoffDistance` 0(끔) — 셋 다 [0, ∞).
-- 볼륨 안개: `enableVolumetricFog` 거짓, `volumetricFogScatteringDistribution` 0.2 [−0.9, 0.9], `volumetricFogAlbedo` `Color` 흰색, `volumetricFogEmissive` 검정, `volumetricFogExtinctionScale` 1, `volumetricFogDistance` 6000, `volumetricFogStartDistance` 0, `volumetricFogNearFadeInDistance` 0, `volumetricFogStaticLightingScatteringIntensity` 1, `overrideLightColorsWithFogInscatteringColors` 거짓. 거리·배율은 [0, ∞).
+- `fogMaxOpacity` 1 [0, 1], `startDistance` 0 [0, WORLD_MAX], `endDistance` 0(끔)·`fogCutoffDistance` 0(끔) [0, 10 × WORLD_MAX](UE `:243–252` — WORLD_MAX는 UE5 큰 월드 `UE_LARGE_WORLD_MAX` 8796093022208 cm). `fullyDirectionalInscatteringColorDistance`도 [0, WORLD_MAX]다.
+- 볼륨 안개: `enableVolumetricFog` 거짓, `volumetricFogScatteringDistribution` 0.2 [−0.9, 0.9], `volumetricFogAlbedo` `Color` 흰색, `volumetricFogEmissive` 검정, `volumetricFogExtinctionScale` 1, `volumetricFogDistance` 6000, `volumetricFogStartDistance` 0, `volumetricFogNearFadeInDistance` 0, `volumetricFogStaticLightingScatteringIntensity` 1, `overrideLightColorsWithFogInscatteringColors` 거짓. 볼륨 안개 값은 UE에 `UIMin`뿐이라 유한이기만 하면 된다.
 - `holdout` 거짓, `renderInMainPass`·`visibleInReflectionCaptures`·`visibleInRealTimeSkyCaptures` 참.
 
-계산: `IsFogVisible()`(UE `:126`): (밀도 + 둘째 밀도) × 1000 > 1e-8이고 `fogMaxOpacity` > 1e-8. `FogHeight()` = 월드 Z, `SecondFogHeight()` = Z + `secondFogData.fogHeightOffset`.
+계산: `IsFogVisible()`(UE `:126`): (밀도 + 둘째 밀도) × 1000 > `UE_DELTA`(1e-5)이고 `fogMaxOpacity` > 1e-5(UE처럼 float 비교). `FogHeight()` = 월드 Z, `SecondFogHeight()` = Z + `secondFogData.fogHeightOffset`.
 
 Mobility: UE 안개 setter는 보지 않는다 — Rocks도 막지 않는다.
 
 ### 27.4 DecalComponent
 
-UE `C/DecalComponent.cpp:233–512`. 필드: `sortOrder` 0, `fadeScreenSize` 0.01, `fadeStartDelay`·`fadeDuration`·`fadeInDuration`·`fadeInStartDelay` 0(초, 0 이상), `destroyOwnerAfterFade` 참, `decalSize` (128, 256, 256) cm(반 크기, 0 이상), `decalColor` 흰색(LinearColor).
+UE `C/DecalComponent.cpp:233–512`. 필드: `sortOrder` 0, `fadeScreenSize` 0.01, `fadeStartDelay`·`fadeDuration`·`fadeInDuration`·`fadeInStartDelay` 0(초), `destroyOwnerAfterFade` 참, `decalSize` (128, 256, 256) cm(반 크기), `decalColor` 흰색(LinearColor).
 
 - bounds(`TryLocalBounds`): 지역 (0, decalSize, |decalSize|)를 월드로(UE `:472` — `TransformedSphere` 규칙).
 - 수명(**끝까지 동작**): `OnStart`(UE `BeginPlay`)가 `SetLifeSpan(fadeStartDelay + fadeDuration)`을 부른다. `SetLifeSpan(seconds)`: > 0이면 그 시간 뒤 컴포넌트를 파괴하고, `destroyOwnerAfterFade`이고 fade 시간이 있으면 소유 Actor도 파괴한다(UE `LifeSpanCallback` — `:285`). 0 이하면 취소다. UE는 World 타이머를 쓴다. Rocks는 World 타이머가 없어 이 컴포넌트의 OnTick(PrePhysics)이 남은 시간을 세고, 수명이 없으면 Tick을 끈다. `SetFadeOut(start, duration, destroyOwner)`(UE `:318` — cvar `r.Decal.FadeDurationScale`은 Rocks에 없어 1)·`SetFadeIn(start, duration)`.
+- 값 범위: UE decal 속성에는 범위 제한이 없어 유한이기만 하면 받는다. `SetFadeOut`은 수명(합)이 넘치면 바꾸기 전에 거부한다.
 - Mobility: UE setter는 보지 않는다.
 
 `DecalActor`: root `DecalComponent`, 상대 회전 pitch −90°(아래 — UE `DecalActor.cpp:30`), `destroyOwnerAfterFade` 참.
 
 ### 27.5 PostProcessComponent
 
-UE `C/PostProcessComponent.cpp:16–24`. 필드: `settings`(`PostProcessSettings`), `priority` 0, `blendRadius` 100 cm [0, ∞), `blendWeight` 1 [0, 1], `enabled` 참, `unbound` 참(UE 컴포넌트 기본 — 볼륨 Actor는 거짓).
+UE `C/PostProcessComponent.cpp:16–24`. 필드: `settings`(`PostProcessSettings`), `priority` 0, `blendRadius` 100 cm [0, ∞), `blendWeight` 1(UE `UIMin`뿐 — 혼합이 [0, 1]로 다룬다), `postProcessEnabled` 참(UE `bEnabled` — Component 활성 `enabled`와 이름이 겹쳐 바꿨다), `unbound` 참(UE 컴포넌트 기본 — 볼륨 Actor는 거짓).
 
 `PostProcessSettings`(UE `FPostProcessSettings` — `Engine/Classes/Engine/Scene.h:711`, 기본 `Scene.cpp:398`)의 다음 묶음을 넣는다. 각 값은 `override…` 플래그(UE `bOverride_X`, 기본 거짓)와 짝이다.
 - 흰색 균형: `temperatureType`(`TemperatureMethod { WhiteBalance, ColorTemperature }`), `whiteTemp` 6500, `whiteTint` 0.
 - 색 보정 전역: `colorSaturation`·`colorContrast`·`colorGamma`·`colorGain` (1, 1, 1, 1), `colorOffset` 0 (Vec4d, w = 휘도).
 - 톤 매핑: `tonemappingMethod`(`TonemappingMethod { Filmic, StandardAces }`), `filmSlope` 0.88, `filmToe` 0.55, `filmShoulder` 0.26, `filmBlackClip` 0, `filmWhiteClip` 0.04.
 - 색 수차 `sceneFringeIntensity` 0. Bloom: `bloomMethod`(`BloomMethod { Standard, Convolution }`), `bloomIntensity` 0.675, `bloomThreshold` −1, `bloomSizeScale` 4.
-- 노출: `autoExposureMethod`(`AutoExposureMethod { Histogram, Basic, Manual }`), `autoExposureBias` 1(UE cvar `r.DefaultFeature.AutoExposure.Bias` 기본), `autoExposureMinBrightness` 0.03·`autoExposureMaxBrightness` 8, `autoExposureSpeedUp` 3·`autoExposureSpeedDown` 1, `autoExposureLowPercent` 10·`autoExposureHighPercent` 90, `autoExposureApplyPhysicalCameraExposure` 참, `cameraShutterSpeed` 60, `cameraIso` 100.
+- 노출: `autoExposureMethod`(`AutoExposureMethod { Histogram, Basic, Manual }`), `autoExposureBias` 1(UE cvar `r.DefaultFeature.AutoExposure.Bias` 기본), `autoExposureMinBrightness` −10·`autoExposureMaxBrightness` 20(EV100 — UE5 기본 확장 범위 `Scene.cpp:500`, UE4 범위 0.03·8은 레거시라 넣지 않는다, 둘 다 [−10, ∞)), `autoExposureSpeedUp` 3·`autoExposureSpeedDown` 1, `autoExposureLowPercent` 10·`autoExposureHighPercent` 90, `autoExposureApplyPhysicalCameraExposure` 참, `cameraShutterSpeed` 60 [0.01, 8000], `cameraIso` 100 [1, ∞).
 - 렌즈 flare `lensFlareIntensity` 1, vignette `vignetteIntensity` 0.4, grain `filmGrainIntensity` 0, AO `ambientOcclusionIntensity` 0.5·`ambientOcclusionRadius` 200, DOF `depthOfFieldFocalDistance` 0(끔)·`depthOfFieldFstop` 4·`depthOfFieldSensorWidth` 24.576 mm, motion blur `motionBlurAmount` 0.5·`motionBlurMax` 5·`motionBlurTargetFps` 30·`motionBlurPerObjectSize` 0.
-- 범위는 UE `ClampMin`·`ClampMax`(예: AO intensity [0, 1], bloom intensity ≥ 0, exposure percent [0, 100], motion blur amount [0, 1])다. 넘으면 `SetSettings`가 거부한다.
+- 범위는 UE `ClampMin`·`ClampMax`(예: AO intensity [0, 1], bloom intensity ≥ 0, exposure percent [0, 100], motion blur amount [0, 1])다. 넘으면 `SetSettings`가 거부한다. `UIMin`뿐인 색 수차·렌즈 flare·vignette·grain 세기는 유한이기만 하면 된다.
 
-계산(**끝까지 동작**): `OverridePostProcessSettings(destination, source, weight)`(UE `FSceneView::OverridePostProcessSettings` — `SceneView.cpp:1622`): override 플래그가 켜진 값만, 연속 값은 `Lerp(dest, src, weight)`, 이산 값(enum·불)은 weight > 0이면 그대로 쓴다(UE `SET_PP`). weight는 [0, 1]로 자른다. 볼륨 모으기(카메라 위치·우선순위 정렬·bounded 볼륨의 거리 가중 — UE `World.cpp:10422–10744`)는 카메라·렌더(RS6)와 함께 넣는다. bounded 판정이 물리 shape 거리를 쓰기 때문이다.
+계산(**끝까지 동작**): `OverridePostProcessSettings(destination, source, weight)`(UE `FSceneView::OverridePostProcessSettings` — `SceneView.cpp:1622`): override 플래그가 켜진 값만, 연속 값은 `Lerp(dest, src, weight)`, 이산 값(enum·불·정수)은 weight > 0이면 그대로 쓴다(UE `SET_PP`). 초점 거리는 dest나 src가 0("DOF 끔")이면 보간하지 않고 src를 쓴다(UE `:1780`). weight > 1은 1로 자르고(+inf 포함 — UE `:1638`), 0 이하면 아무것도 하지 않는다. NaN은 값을 망가뜨리므로 무시한다(UE에 없는 방어). 볼륨 모으기(카메라 위치·우선순위 정렬·bounded 볼륨의 거리 가중 — UE `World.cpp:10422–10744`)는 카메라·렌더(RS6)와 함께 넣는다. bounded 판정이 물리 shape 거리를 쓰기 때문이다.
 
 Mobility: UE setter는 보지 않는다.
 
 ### 27.6 반사 캡처
 
-UE `C/ReflectionCaptureComponent.cpp:768–1401`. 기반 필드: `reflectionSourceType`(`ReflectionSourceType { CapturedScene, SpecifiedCubemap }`), `sourceCubemapAngle` 0 [0, 360], `brightness` 1 [0, ∞), `captureOffset` 0(cm, 월드), `runtimeSkylightScale` (0.1, 0.1, 0.1), `runtimeCapture` 거짓, `maxViewDistance` 0 [0, ∞), `finiteFarPlane` 거짓. 생성자 Mobility Static(UE "실행 중 바꾸면 안 된다").
+UE `C/ReflectionCaptureComponent.cpp:768–1401`. 기반 필드: `sourceType`(UE `ReflectionSourceType` — 형식 이름과 겹쳐 줄였다, `ReflectionSourceType { CapturedScene, SpecifiedCubemap }`), `sourceCubemapAngle` 0, `brightness` 1, `captureOffset` 0(cm, 월드), `runtimeSkylightScale` (0.1, 0.1, 0.1), `runtimeCapture` 거짓, `maxViewDistance` 0, `finiteFarPlane` 거짓. 필드마다 setter가 있다(UE BlueprintReadWrite인 `runtimeSkylightScale`·`finiteFarPlane` 포함). 범위는 UE에 `UIMin`뿐이라 유한이기만 하면 받는다(아래 표의 반경·거리도 같다). 생성자 Mobility Static(UE "실행 중 바꾸면 안 된다").
 
 | 클래스 | 필드 | `InfluenceBoundingRadius()` |
 |---|---|---|
-| Sphere | `influenceRadius` 3000 cm [0, ∞) | influenceRadius |
-| Box | `boxTransitionDistance` 100 cm [0, ∞) | \|월드 scale\|(상자 크기가 scale이다 — UE `:1364`) |
-| Plane | `influenceRadiusScale` 2 [0, ∞) | \|(scale.y, scale.z)\| × scale(`:1398`) |
+| Sphere | `influenceRadius` 3000 cm | influenceRadius |
+| Box | `boxTransitionDistance` 100 cm | \|월드 scale\|(상자 크기가 scale이다 — UE `:1364`) |
+| Plane | `influenceRadiusScale` 2 | \|(scale.y, scale.z)\| × scale(`:1398`) |
 
-Actor: `SphereReflectionCapture`(root Sphere), `BoxReflectionCapture`(root 상대 scale (1000, 1000, 400)), `PlaneReflectionCapture`(root 상대 scale (1, 1000, 1000)) — UE `ReflectionCapture.cpp:282·335·387`. Mobility Static이라 게임 World에서는 놓은 자리에서 움직이지 않는다.
+Actor: `SphereReflectionCapture`(root Sphere), `BoxReflectionCapture`(root 상대 scale (1000, 1000, 400)), `PlaneReflectionCapture`(root 상대 scale (1, 1000, 1000)) — UE `C/ReflectionCaptureComponent.cpp:282·335·387`. Mobility Static이라 게임 World에서는 놓은 자리에서 움직이지 않는다.
 
 `PlanarReflectionComponent`는 SceneCapture 계열이라 넣지 않는다(24.1절 — SceneCapture 선행).
 

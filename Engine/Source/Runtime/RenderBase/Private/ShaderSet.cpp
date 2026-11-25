@@ -167,7 +167,6 @@ Result<void> ShaderSet::OpenFromProvider(ShaderProvider* provider) noexcept {
     request.formatId = desc_.formatId;
     request.library = desc_.library;
     request.registry = desc_.registry;
-    request.vertexInputTypes = desc_.vertexInputTypes;
     auto requested = provider->RequestLibrary(request, *this);
     if (!requested) {
         platform::LockGuard lock(gate_);
@@ -293,10 +292,9 @@ Result<void> ShaderSet::Validate() noexcept {
     }
 
     // 완결성과 서명이다(개발 전용 항목은 검사하지 않는다 — 9.2절).
-    Array<shader::ShaderVertexInputType> inputs(allocator_);
     Array<shader::ShaderLibraryCombination> combinations(allocator_);
-    if (!shader::SortShaderVertexInputTypes(desc_.vertexInputTypes, inputs) ||
-        !shader::EnumerateShaderLibraryCombinations(desc_.registry->Types(), inputs.View(), facts,
+    if (!shader::EnumerateShaderLibraryCombinations(desc_.registry->Types(),
+                                                    desc_.registry->VertexInputTypes(), facts,
                                                     desc_.library, false, combinations)) {
         return FailWith(ShaderSetProblem::WrongFormat,
                         "shader set cannot enumerate the registered shader types (vertex input "

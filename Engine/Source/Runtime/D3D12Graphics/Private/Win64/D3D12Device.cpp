@@ -205,7 +205,7 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     }
 
     // 장치 능력(GX1)과 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해
-    // 둔다(PixelFormat.ko.md PF3). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
+    // 둔다(Docs/Design/PixelFormat PF3). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
     caps_ = d3d12::QueryDeviceCaps(device_.Get(), adapter.Get(), featureLevel_);
     for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
         const PixelFormat format = static_cast<PixelFormat>(number);
@@ -418,6 +418,10 @@ StringView D3D12Device::LastError() const noexcept {
 
 uint64 D3D12Device::IgnoredDraws() const noexcept {
     return ignoredDraws_;
+}
+
+uint64 D3D12Device::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
 }
 
 uint64 D3D12Device::ValidationErrorCount() const noexcept {

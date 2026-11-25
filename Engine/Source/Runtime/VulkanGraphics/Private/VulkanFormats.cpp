@@ -42,8 +42,8 @@ TextureFormatInfo Video(VkFormat format, VkFormat luma, VkFormat chroma) noexcep
 
 } // namespace
 
-// 대응 주의점(PixelFormat.ko.md 8.5절): BC1은 RGBA 블록(D3D 의미), RG8Snorm(UE V8U8)은 SNORM, A8은
-// R8 + (0, 0, 0, R) 대응(샘플 전용), RGB9E5·NV12·P010은 UE에 없는 Rocks 대응이다. P010의 plane
+// 대응 주의점(Docs/Design/PixelFormat 8.5절): BC1은 RGBA 블록(D3D 의미), RG8Snorm(UE V8U8)은 SNORM,
+// A8은 R8 + (0, 0, 0, R) 대응(샘플 전용), RGB9E5·NV12·P010은 UE에 없는 Rocks 대응이다. P010의 plane
 // view는 10X6 형식이다(상위 10비트, 하위 6비트는 정의되지 않는다).
 TextureFormatInfo TextureFormat(PixelFormat format) noexcept {
     switch (format) {

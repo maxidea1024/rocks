@@ -128,6 +128,7 @@
   - `ApplyPending(cache)`: 프레임 경계의 렌더 lane 작업에서 부른다(프레임 packet 작업 맨 앞). 후보가 `WaitingForProvider`면 다음 경계로 미룬다. `Ready`면 교체한다: 옛 집합의 캐시 항목을 `PipelineCache::RetireSet`, 옛 집합 `Retire`, 새 집합이 현재가 된다(epoch가 다르므로 캐시 항목이 섞이지 않는다). `Failed`면 버리고 현재를 유지한다. 돌려주는 값은 교체했는지다.
   - `CollectRetired()`: Retire한 옛 집합 가운데 lease가 0인 것을 파괴한다(진행 중 프레임의 기록 packet·그래프가 잡은 lease가 풀린 뒤). 종료 4단계(5.5절)는 `Shutdown`이 현재 집합까지 Retire하고 lease가 남으면 `Busy`다(closure 실패 — 강제 해제하지 않는다).
   - 통계: 교체 수·거부 수·대기 중인 옛 집합 수.
+  - **구현(2026-11-25, 개정 44).** `RenderBase/ShaderSetSlot.h`(`ShaderSetSlot` — `Install`·`Propose`·`ApplyPending`·`CollectRetired`·`Shutdown`, 통계 `Swaps`·`Rejections`·`RetiredCount`·`LastRejection`). 집합은 `UniquePtr<ShaderSet>`으로 넘긴다. 스펙과 다르게 정한 것: 공급 대기 후보를 버릴 때(새 후보가 오거나 종료) 그 공급이 끝날 때까지 기다린다(`WaitUntilSettled` — 공급자가 파괴된 집합에 `CompleteProvision`을 부르지 않게). 시험 `ShaderSetSlot_SwapsAtFrameBoundaryAndKeepsTheCurrentOnFailure`(첫 집합 null·실패·중복 거부, 실패 후보의 거부와 현재 유지, lease를 잡은 채 교체 — 옛 집합의 캐시 항목 0·Retired·새 lease 거부·회수 대기, 새 epoch 캐시 미적중, lease가 풀린 뒤 파괴, 종료의 Busy와 성공, 마지막 후보 우선)·`ShaderSetSlot_DefersWaitingCandidatesAndRejectsFailedProvision`(공급 대기 후보는 미루고 공급 완료 뒤 교체, 공급 실패 후보는 적용 때 버리고 현재 유지). 감시 재컴파일(SH4)이 `Propose`를 부르는 연결은 SH4에서 한다.
 
 ### 9.9 셰이더 시스템 문서 개정(SX)
 

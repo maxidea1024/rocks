@@ -261,11 +261,8 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
     platform::FileSystem& files =
         desc.files != nullptr ? *desc.files : platform::PhysicalFileSystem();
 
-    // 정점 입력 타입은 id 순으로 열거한다.
-    Array<ShaderVertexInputType> inputs(allocator);
-    if (auto sorted = SortShaderVertexInputTypes(desc.vertexInputTypes, inputs); !sorted) {
-        return sorted;
-    }
+    // 정점 입력 타입은 등록부 목록(Freeze 뒤 id 순)이다(RenderBase 10.6절 1항).
+    const Span<const ShaderVertexInputType> inputs = desc.registry->VertexInputTypes();
 
     if (!report.formats.TryReserve(desc.formats.Size())) {
         return Fail(ErrorCode::OutOfMemory);
@@ -284,7 +281,7 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         CopyText(line.formatId, sizeof(line.formatId), snapshot->definition.Id());
         const ShaderFormatFacts facts = MakeShaderFormatFacts(snapshot->definition);
         if (auto enumerated =
-                EnumerateShaderLibraryCombinations(desc.registry->Types(), inputs.View(), facts,
+                EnumerateShaderLibraryCombinations(desc.registry->Types(), inputs, facts,
                                                    desc.library, desc.includeDevelopment, plans);
             !enumerated) {
             return enumerated;
@@ -320,6 +317,11 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             job.parameterLayouts = plan.type->parameterLayouts;
             job.requiredFeatures = ShaderLibraryCombinationFeatures(plan);
             job.developmentOnly = plan.developmentOnly;
+            if (plan.vertexInputType != NoVertexInputType) {
+                const ShaderVertexInputType* input =
+                    desc.registry->FindVertexInputType(plan.vertexInputType);
+                job.vertexInputSource = input != nullptr ? input->sourcePath : StringView();
+            }
             (void)jobs.TryPushBack(job);
         }
 

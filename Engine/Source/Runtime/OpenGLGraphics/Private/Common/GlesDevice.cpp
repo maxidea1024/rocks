@@ -411,7 +411,7 @@ Result<BufferHandle> GlesDevice::CreateBuffer(const BufferDesc& desc,
 }
 
 PixelFormatCaps GlesDevice::GetPixelFormatCaps(PixelFormat format) const noexcept {
-    // 장치 생성 때 대응 표(GlesFormats.cpp)와 확장으로 채운 표다(PixelFormat.ko.md 7·8.6절).
+    // 장치 생성 때 대응 표(GlesFormats.cpp)와 확장으로 채운 표다(Docs/Design/PixelFormat 7·8.6절).
     const auto number = static_cast<uint32>(format);
     if (!IsValidPixelFormat(format) || number > MaxPixelFormatNumber) {
         return PixelFormatCaps::None;
@@ -428,7 +428,7 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     }
 
     // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장)에서 그 용도로 쓸 수 없으면 다른 형식으로
-    // 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다 먼저 한다.
+    // 대신하지 않고 Unsupported다(Docs/Design/PixelFormat 8.3절). 다른 인자 검사보다 먼저 한다.
     const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
     const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
     // 렌더 타깃·깊이·Storage 비트는 초기 픽셀이 없다(업로드하지 않는다).
@@ -591,8 +591,8 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
 }
 
 // ES core에는 texture view(형식 재해석)가 없다. 같은 텍스처 객체를 공유해 plane만 고르는 view(깊이·
-// 스텐실 plane, 같은 형식)를 만들고, 형식을 바꾸는 view(sRGB 짝)는 Unsupported다(PixelFormat.ko.md
-// 14.2절).
+// 스텐실 plane, 같은 형식)를 만들고, 형식을 바꾸는 view(sRGB 짝)는 Unsupported다
+// (Docs/Design/PixelFormat 14.2절).
 Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
                                                     const TextureViewDesc& desc) noexcept {
     auto owner = ownership_.Check();
@@ -738,8 +738,9 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return Result<PipelineHandle>::Failure(rejected.Error());
     }
 
-    // 렌더 타깃으로 대응하지 않는 형식은 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절).
-    // 블렌드를 켜면 그 형식이 블렌드를 받아야 한다(32-bit float는 GL_EXT_float_blend).
+    // 렌더 타깃으로 대응하지 않는 형식은 대신하지 않고 Unsupported다
+    // (Docs/Design/PixelFormat 8.3절). 블렌드를 켜면 그 형식이 블렌드를 받아야 한다(32-bit
+    // float는 GL_EXT_float_blend).
     for (uint32 index = 0; index < desc.colorTargetCount; ++index) {
         const PixelFormat format = desc.colorFormats[index];
         const PixelFormatCaps required =
@@ -1053,6 +1054,10 @@ StringView GlesDevice::LastError() const noexcept {
 
 uint64 GlesDevice::IgnoredDraws() const noexcept {
     return ignoredDraws_;
+}
+
+uint64 GlesDevice::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
 }
 
 uint64 GlesDevice::ValidationErrorCount() const noexcept {

@@ -716,9 +716,25 @@ private:
             return false;
         }
 
-        const StringView path(resolved, bytes);
+        StringView path(resolved, bytes);
         if (const ShaderSourceStatus valid = ValidateShaderVirtualPath(path); !valid) {
             return context_.Fail(valid.code, line, StringView(valid.message), path);
+        }
+
+        // 생성 include 연결이면 연결 대상 파일을 읽는다(RenderBase 10.6절 2항).
+        for (const ShaderGeneratedInclude& generated : context_.generated) {
+            if (generated.virtualPath != path) {
+                continue;
+            }
+
+            if (const ShaderSourceStatus valid = ValidateShaderVirtualPath(generated.sourcePath);
+                !valid) {
+                return context_.Fail(valid.code, line, StringView(valid.message),
+                                     generated.sourcePath);
+            }
+
+            path = generated.sourcePath;
+            break;
         }
 
         if (depth + 1 > context_.limits.includeDepth) {
@@ -806,10 +822,12 @@ bool Run(Context& context, StringView entryPath, Span<const ShaderDefine> define
 
 ShaderSourceStatus PreprocessShader(const ShaderSourceTree& tree, StringView entryPath,
                                     Span<const ShaderDefine> defines, PreprocessedShader& out,
-                                    const ShaderPreprocessLimits& limits) noexcept {
+                                    const ShaderPreprocessLimits& limits,
+                                    Span<const ShaderGeneratedInclude> generated) noexcept {
     using namespace preprocess_detail;
     out.Reset();
     Context context(out.text.GetAllocator(), tree, limits);
+    context.generated = generated;
     context.path = entryPath;
     if (!preprocess_driver_detail::Run(context, entryPath, defines, out)) {
         out.Reset();

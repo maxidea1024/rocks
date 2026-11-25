@@ -554,6 +554,7 @@ public:
     uint64 RejectedCalls() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
     // --- transient heap·placed 자원(GX12, VulkanTransient.cpp) ---
@@ -716,7 +717,8 @@ private:
     }
 
     // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로 실패하고
-    // LastError에 형식 이름을 남긴다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
+    // LastError에 형식 이름을 남긴다(Docs/Design/PixelFormat 8.3절). 호출자는 gate_를 잡고 있어야
+    // 한다.
     template <class T>
     Result<T> UnsupportedFormat(PixelFormat format) noexcept {
         auto failed = FailCode("pixel format", ErrorCode::Unsupported, PixelFormatName(format));
@@ -990,8 +992,8 @@ private:
     VkDebugUtilsMessengerEXT messenger_ = VK_NULL_HANDLE;
     VkPhysicalDevice physical_ = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties properties_ = {};
-    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다, PixelFormat.ko.md
-    // 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
+    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다,
+    // Docs/Design/PixelFormat 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
     PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue queue_ = VK_NULL_HANDLE;
@@ -1104,6 +1106,8 @@ private:
     // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
     uint64 descriptorExhaustions_ = 0;
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     uint32 markerDepth_ = 0;
     // GX5: 기록 중 프레임이 상태를 바꾼 텍스처와, 전이를 위해 닫은 render pass다.
     Array<SlotHandle> touchedTextures_;

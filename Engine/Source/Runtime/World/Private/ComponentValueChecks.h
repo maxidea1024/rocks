@@ -20,6 +20,11 @@ inline bool NonNegative(float value) noexcept {
     return math::IsFinite(value) && value >= 0.0f;
 }
 
+// 유한이고 minimum 이상이다(UE ClampMin만 있는 속성).
+inline bool AtLeast(float value, float minimum) noexcept {
+    return math::IsFinite(value) && value >= minimum;
+}
+
 inline bool NonNegative(double value) noexcept {
     return math::IsFinite(value) && value >= 0.0;
 }

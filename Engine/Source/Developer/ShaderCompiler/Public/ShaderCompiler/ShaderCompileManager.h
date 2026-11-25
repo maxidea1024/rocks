@@ -113,6 +113,10 @@ struct ShaderCompileJob {
     uint32 requiredFeatures = 0;
     // 개발 전용 퍼뮤테이션인가(PS면 SC10이 ROCKS_DEBUG_BUFFER를 넣는다 — 16.1절 SSD34).
     bool developmentOnly = false;
+    // 정점 입력 축 job의 정점 입력 타입 원문(.rsh 가상 경로)이다. 비지 않으면 전처리가
+    // VertexInputGeneratedIncludePath include를 이 파일로 잇는다(SSD6, RenderBase 10.6절 2항 —
+    // include 폐포에 들어가 키 5행이 정점 입력 타입마다 다르다).
+    StringView vertexInputSource{};
     // 시험 hook(config.testHooks일 때만 — Compile 밖 값이면 그 job은 hook으로 워커에 간다).
     ShaderWorkerJobKind testHook = ShaderWorkerJobKind::Compile;
 };

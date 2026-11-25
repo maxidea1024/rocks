@@ -598,9 +598,12 @@ constexpr ShaderTypeDesc CookEngine =
     MakeShaderTypeDesc(CookEngineName, "/Engine/Private/NotCooked.rsf", "Main", ShaderStagePixel,
                        ShaderTypeOwner::Engine);
 
+// 정점 입력 타입이다(등록부가 id 순으로 정렬한다 — 등록 순서와 무관, RenderBase 10.6절 1항).
 constexpr ShaderVertexInputType CookVertexInputs[] = {
-    {VertexInputBName.hash, VertexInputBName.name, &CookVertexBFilter},
-    {VertexInputAName.hash, VertexInputAName.name, nullptr}};
+    MakeShaderVertexInputType(VertexInputBName, "/Project/CookVertexB.rsh",
+                              ShaderTypeOwner::Project, &CookVertexBFilter),
+    MakeShaderVertexInputType(VertexInputAName, "/Project/CookVertexA.rsh",
+                              ShaderTypeOwner::Project)};
 
 // 쿠킹 결과 파일을 연다.
 bool OpenCooked(const ShaderLibraryCookFormat& line, Array<uint8>& bytes,
@@ -646,6 +649,13 @@ TEST(ShaderLibraryCook_CooksFiltersAndPublishes) {
     ShaderTypeRegistry registry(TestAllocator());
     const ShaderTypeDesc* const types[] = {&CookCompute, &CookPixel, &CookWave, &CookEngine};
     REQUIRE(registry.Register(types));
+    // 정점 입력 id가 이름 해시가 아니면 등록부가 거부한다(목록 전체).
+    const ShaderVertexInputType badInputs[] = {
+        CookVertexInputs[0],
+        {1, VertexInputAName.name, "/Project/CookVertexA.rsh", ShaderTypeOwner::Project, nullptr}};
+    CHECK(registry.RegisterVertexInputTypes(badInputs).Error() == ErrorCode::InvalidArgument);
+    CHECK(registry.VertexInputTypes().IsEmpty());
+    REQUIRE(registry.RegisterVertexInputTypes(CookVertexInputs));
     ShaderCompileManagerConfig config = test.Config("CookWork");
     ShaderCompileManager manager(config);
     REQUIRE(manager.Start());
@@ -656,7 +666,6 @@ TEST(ShaderLibraryCook_CooksFiltersAndPublishes) {
     desc.allocator = &TestAllocator();
     desc.registry = &registry;
     desc.formats = formats;
-    desc.vertexInputTypes = CookVertexInputs;
     desc.library = ShaderLibraryKind::Project;
     desc.manager = &manager;
     desc.outputDirectory = StringView(output);
@@ -665,12 +674,8 @@ TEST(ShaderLibraryCook_CooksFiltersAndPublishes) {
     const Result<void> early = CookShaderLibraries(desc, report);
     CHECK(!early && early.Error() == ErrorCode::NotReady);
     REQUIRE(registry.Freeze());
-    // 정점 입력 id가 이름 해시가 아니면 InvalidArgument다.
-    const ShaderVertexInputType badInputs[] = {{1, "CookVertexA", nullptr}};
-    desc.vertexInputTypes = badInputs;
-    const Result<void> invalid = CookShaderLibraries(desc, report);
-    CHECK(!invalid && invalid.Error() == ErrorCode::InvalidArgument);
-    desc.vertexInputTypes = CookVertexInputs;
+    // Freeze 뒤 정점 입력 타입 등록은 닫혔다.
+    CHECK(registry.RegisterVertexInputTypes(CookVertexInputs).Error() == ErrorCode::ScopeClosed);
 
     const Result<void> cooked = CookShaderLibraries(desc, report);
     for (const ShaderLibraryCookJobFailure& failure : report.failures) {
@@ -792,6 +797,105 @@ TEST(ShaderLibraryCook_CooksFiltersAndPublishes) {
     CHECK(memory.Size() == developmentBytes.Size() &&
           memcmp(memory.Data(), developmentBytes.Data(), memory.Size()) == 0);
     CHECK(!CompileShaderLibrary(desc, memoryReport, memory));
+    manager.Shutdown();
+}
+
+namespace {
+
+// 생성 include 연결 시험 원문이다(RenderBase 10.6절 2항): 정점 입력 축 PS가 고정 가상 경로를
+// include하고, 정점 입력 타입마다 다른 .rsh가 색을 정한다.
+constexpr char VertexAxisSource[] = "#include \"/Engine/Generated/VertexInput.rsh\"\n"
+                                    "float4 PSMain() : SV_Target { return VERTEX_INPUT_COLOR; }\n";
+constexpr char VertexAxisInputA[] = "#pragma once\n"
+                                    "#define VERTEX_INPUT_COLOR float4(1.0, 0.0, 0.0, 1.0)\n";
+constexpr char VertexAxisInputB[] = "#pragma once\n"
+                                    "#define VERTEX_INPUT_COLOR float4(0.0, 1.0, 0.0, 1.0)\n";
+
+ROCKS_SHADER_TYPE_NAME(VertexAxisPixelName, "CookVertexAxisPixel");
+ROCKS_SHADER_TYPE_NAME(VertexAxisFlatName, "CookVertexAxisFlat");
+
+constexpr ShaderTypeDesc MakeVertexAxisPixel(ShaderTypeName name, uint32 flags) noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(name, "/Project/VertexAxis.rsf", "PSMain",
+                                             ShaderStagePixel, ShaderTypeOwner::Project);
+    desc.flags = flags;
+    return desc;
+}
+
+constexpr ShaderTypeDesc VertexAxisPixel =
+    MakeVertexAxisPixel(VertexAxisPixelName, ShaderTypeVertexInputAxis);
+// 축이 없는 타입은 연결이 없어 그 include가 GeneratedSource 오류다.
+constexpr ShaderTypeDesc VertexAxisFlat = MakeVertexAxisPixel(VertexAxisFlatName, 0);
+
+constexpr ShaderVertexInputType VertexAxisInputs[] = {
+    MakeShaderVertexInputType(VertexInputAName, "/Project/CookVertexA.rsh",
+                              ShaderTypeOwner::Project),
+    MakeShaderVertexInputType(VertexInputBName, "/Project/CookVertexB.rsh",
+                              ShaderTypeOwner::Project)};
+
+} // namespace
+
+// 정점 입력 축 job은 /Engine/Generated/VertexInput.rsh를 그 정점 입력 타입 원문으로 잇는다: 같은
+// 셰이더 타입·퍼뮤테이션이라도 정점 입력 타입마다 코드와 키가 다르다. 축 없는 타입의 같은 include는
+// 전처리 오류(GeneratedSource)다.
+TEST(ShaderLibraryCook_VertexInputIncludeSelectsTheTypeSource) {
+    ManagerCase test;
+    const char* skip = nullptr;
+    if (!test.Make("librarycookvertexaxis", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderLibraryCook_VertexInputIncludeSelectsTheTypeSource: %s\n", skip);
+        }
+
+        return;
+    }
+
+    REQUIRE(test.fixture.Write("Project/Shaders/VertexAxis.rsf", VertexAxisSource));
+    REQUIRE(test.fixture.Write("Project/Shaders/CookVertexA.rsh", VertexAxisInputA));
+    REQUIRE(test.fixture.Write("Project/Shaders/CookVertexB.rsh", VertexAxisInputB));
+    ShaderCompileManager manager(test.Config("CookVertexAxisWork"));
+    REQUIRE(manager.Start());
+    const ShaderFormatSnapshot* const formats[] = {&test.d3d12};
+    ShaderLibraryCookDesc desc;
+    desc.allocator = &TestAllocator();
+    desc.formats = formats;
+    desc.library = ShaderLibraryKind::Project;
+    desc.manager = &manager;
+
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderTypeDesc* const types[] = {&VertexAxisPixel};
+    REQUIRE(registry.Register(types));
+    REQUIRE(registry.RegisterVertexInputTypes(VertexAxisInputs));
+    REQUIRE(registry.Freeze());
+    desc.registry = &registry;
+    ShaderLibraryCookReport report(TestAllocator());
+    Array<uint8> bytes(TestAllocator());
+    const Result<void> built = CompileShaderLibrary(desc, report, bytes);
+    for (const ShaderLibraryCookJobFailure& failure : report.failures) {
+        fprintf(stderr, "cook job %s: %s\n", failure.typeName, failure.diagnostics.Data());
+    }
+
+    REQUIRE(built);
+    REQUIRE(report.formats.Size() == 1);
+    CHECK(report.formats[0].jobs == 2 && report.formats[0].entries == 2 &&
+          report.formats[0].codes == 2);
+    ShaderLibraryView view;
+    REQUIRE(view.Open(bytes.View()));
+    ShaderLibraryEntry entryA;
+    ShaderLibraryEntry entryB;
+    REQUIRE(HasEntry(view, VertexAxisPixelName, VertexInputAName.hash, 0, entryA));
+    REQUIRE(HasEntry(view, VertexAxisPixelName, VertexInputBName.hash, 0, entryB));
+    CHECK(entryA.codeIndex != entryB.codeIndex);
+
+    ShaderTypeRegistry flatRegistry(TestAllocator());
+    const ShaderTypeDesc* const flatTypes[] = {&VertexAxisFlat};
+    REQUIRE(flatRegistry.Register(flatTypes));
+    REQUIRE(flatRegistry.RegisterVertexInputTypes(VertexAxisInputs));
+    REQUIRE(flatRegistry.Freeze());
+    desc.registry = &flatRegistry;
+    ShaderLibraryCookReport flatReport(TestAllocator());
+    CHECK(!CompileShaderLibrary(desc, flatReport, bytes));
+    REQUIRE(flatReport.failures.Size() == 1);
+    CHECK(flatReport.failures[0].status == ShaderCompileStatus::PreprocessError &&
+          Contains(flatReport.failures[0].diagnostics, "GeneratedSource"));
     manager.Shutdown();
 }
 
