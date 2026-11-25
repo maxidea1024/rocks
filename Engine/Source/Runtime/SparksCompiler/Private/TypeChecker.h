@@ -3,6 +3,7 @@
 #include <Core/Text/Json.h>
 
 #include "NameBinder.h"
+#include "TypeFacts.h"
 
 // 타입 검사(LC2c)다(Docs/Design/SparksLanguage 3.10절, S0326·S04xx·S05xx·S0109). 이름 해석
 // (NameBinder)의 이름 공간과 심볼을 그대로 쓰며 NameBinder::Run의 마지막에 돈다. 파일:
@@ -12,19 +13,6 @@
 //   CheckStatements.cpp  선언 초기값·본문·문장·반환·switch
 
 namespace rocks::sparks::detail {
-
-// 숫자 타입의 분류다.
-enum class NumericKind : uint8 {
-    None,
-    Signed,
-    Unsigned,
-    Float
-};
-
-struct NumericInfo {
-    NumericKind kind = NumericKind::None;
-    uint32 bits = 0;
-};
 
 // 컴파일 때 아는 값이다(상수식·switch case·const).
 struct ConstantValue {
@@ -362,7 +350,7 @@ private:
     // 진단 문장의 타입 표기다(정규 이름 대신 선언 이름 — `Mode`, `Array<Box>?`).
     void AppendDisplayType(StringBuilderBase& out, uint32 type) const noexcept;
 
-    // ---- 타입 관계(TypeRelations.cpp) ----
+    // ---- 타입 관계(TypeRelations.cpp — 표만 읽는 판정은 TypeFacts에 맡긴다) ----
     NumericInfo Numeric(uint32 type) const noexcept;
     bool IsOptional(uint32 type) const noexcept;
     uint32 NonOptional(uint32 type) noexcept;

@@ -10,6 +10,7 @@
 #include <Config/ConfigDump.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <HostConfig/HostSettings.h>
+#include <ModuleLoader/ModuleLoader.h>
 #include <NodeGraphTools/GraphCommandlets.h>
 #include <Platform/File.h>
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
@@ -165,6 +166,30 @@ bool BootSettings(HostSettings& settings, ModuleLoader& modules) noexcept {
            settings.CompleteStartup().IsOk();
 }
 
+// 셰이더 라이브러리 단계를 등록하는 모듈이다(Docs/Design/BuildTargets 3.10절 4항).
+constexpr char ShaderCookStageModule[] = "ShaderCompiler";
+
+// asset-cook 앞에 ShaderCompiler 모듈을 시작해 모듈 수명 객체가 셰이더 라이브러리 비에셋 산출물
+// 단계를 등록하게 한다(ShaderSystem 16.1절 SSD44). 모듈을 시작하지 못하면 명령은 그대로 돌고
+// 셰이더 있는 프로필은 쿠커가 UnsupportedCapability로 게시하지 않는다(AssetSystem 10.3절 3항).
+struct CookCommandContext {
+    AssetCommandContext* asset = nullptr;
+    ModuleLoader* modules = nullptr;
+};
+
+Result<int32> RunCookWithShaderStage(void* context, Span<const StringView> args,
+                                     CommandletOutput& output) noexcept {
+    auto* cook = static_cast<CookCommandContext*>(context);
+    if (const ModuleLoadReport loaded = cook->modules->Load(ShaderCookStageModule);
+        !loaded.IsOk()) {
+        (void)output.write(output.context, CommandletStream::Error,
+                           "asset-cook: warning: the shader library cook stage module did not "
+                           "start\n");
+    }
+
+    return RunAssetCookCommand(cook->asset, args, output);
+}
+
 } // namespace
 
 // 명령을 등록하고 실행한다. 명령의 Log 호출은 Launch가 설치한 도구 로그로 간다(명령이 로그를
@@ -274,8 +299,9 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         return 1;
     }
 
+    CookCommandContext cookContext{&assetContext, &modules};
     registered = registry.Register({"asset-cook", "Cook the project for a target profile.",
-                                    &RunAssetCookCommand, &assetContext});
+                                    &RunCookWithShaderStage, &cookContext});
     if (!registered) {
         return 1;
     }

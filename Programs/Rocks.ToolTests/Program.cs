@@ -70,6 +70,8 @@ internal static class Program
                     string rulesAssembly = options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root);
                     ReleaseExclusionResult release = ReleaseExclusion.Check(root, rulesAssembly);
                     failures.AddRange(release.Failures);
+                    // 쿠커 모듈 집합(Docs/Design/BuildTargets 3.10절 BS10): Commandlet ⊇ 출시 타깃의 엔진 Runtime·ClientOnly 모듈.
+                    failures.AddRange(CookerModuleSet.Check(root, rulesAssembly));
                     // 유니티 묶음 충돌(Docs/Design/UnityBuildPch.ko.md 9.2절)도 규칙 어셈블리를 평가해 유니티를 켠 모듈만 본다.
                     failures.AddRange(PolicyChecks.UnityCollisions(root, rulesAssembly));
                     // PCH 헤더는 빌드가 강제 include한다 — 소스와 헤더가 직접 include하지 않는다(같은 문서 8.1·10절).

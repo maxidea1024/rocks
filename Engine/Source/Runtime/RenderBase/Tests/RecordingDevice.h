@@ -410,6 +410,11 @@ public:
         caps_.limits.computeGroupCount[2] = z;
     }
 
+    // 장치 능력을 바꾼다(쿠킹 형식 선택의 한도·장치 요구 시험). 장치를 쓰기 전에 고친다.
+    graphics::DeviceCaps& MutableCaps() noexcept {
+        return caps_;
+    }
+
     // 살아 있는 버퍼 view 수다(그래프가 view를 모두 Retire했는지).
     usize LiveBufferViews() const noexcept {
         return bufferViews_.Size();
