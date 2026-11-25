@@ -36,10 +36,11 @@ public abstract class TestsModule : ModuleRules
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
     // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1), the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
-    // section 10.5, JL1) and the ImageCodec tests that write EXR, TIFF and JPEG fixtures through OpenEXRCore, libtiff and libjpeg. Headers enter only
-    // through this executable's Private includes (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem
-    // section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Msdfgen", "Jolt", "OpenExr", "LibTiff", "LibJpegTurbo"];
+    // section 10.5, JL1) and the ImageCodec JPEG tests that write fixtures through libjpeg. Headers enter only through this executable's Private
+    // includes (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8). libtiff and
+    // OpenEXRCore have process-wide state, so only ImageCodec depends on them (BD29) and the TIFF and EXR tests write fixtures through the ImageCodec
+    // encode API (Docs/Design/AssetSystem section 12.10.1).
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Msdfgen", "Jolt", "LibJpegTurbo"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone

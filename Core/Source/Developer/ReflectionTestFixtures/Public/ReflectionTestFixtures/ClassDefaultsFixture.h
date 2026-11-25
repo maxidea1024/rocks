@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Containers/OrderedSet.h>
@@ -36,7 +37,9 @@ struct DefaultsPoint {
 
     ROCKS_PROPERTY() int32 x = 3;
     ROCKS_PROPERTY() float y = 1.5f;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) int32 note = 4;
+#endif
 };
 
 // Atomic struct(통째 단위 — 멤버 경로는 InvalidArgument)다.
@@ -93,8 +96,10 @@ struct DefaultsHolder : DefaultsAbstractBase {
     ROCKS_PROPERTY() ObjectRef<Object> link;
     ROCKS_PROPERTY() WeakObjectRef<Object> weak;
     ROCKS_PROPERTY() SoftObjectRef<Object> soft;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) int32 editorValue = 11;
     ROCKS_PROPERTY(EditorOnly) DefaultsPoint editorPoint;
+#endif
     ROCKS_PROPERTY(Transient) int32 scratch = 12;
     ROCKS_PROPERTY() uint8 lit : 1 = 1;
     ROCKS_PROPERTY() uint8 dim : 1 = 0;

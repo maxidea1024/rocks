@@ -11,14 +11,14 @@ public sealed class LibTiff : ThirdPartyModuleRules
     protected override string ModuleName => "LibTiff";
 
     // tif_zip.c includes zlib.h and tif_jpeg.c and tif_ojpeg.c include jpeglib.h, so the library compiles against the Zlib headers
-    // and defines (Z_PREFIX, Z_SOLO) and the LibJpegTurbo headers. Consumers take LibTiff before LibJpegTurbo and Zlib.
+    // and consumer defines (Z_PREFIX, Z_SOLO) and the LibJpegTurbo headers. tiffio.h includes neither, so they are private
+    // dependencies (BuildTargets BS3a). Consumers take LibTiff before LibJpegTurbo and Zlib.
     public override NativeModuleInput Configure(BuildContext context)
     {
         NativeModuleInput input = base.Configure(context);
         return input with
         {
-            PrivateIncludeDirectories = [.. input.PrivateIncludeDirectories, .. ConsumerIncludeDirectories(context, "Zlib", "LibJpegTurbo")],
-            PrivateDefines = [.. input.PrivateDefines, .. ConsumerDefines(context, "Zlib", "LibJpegTurbo")],
+            PrivateDependencies = [.. input.PrivateDependencies, "Zlib", "LibJpegTurbo"],
         };
     }
 }

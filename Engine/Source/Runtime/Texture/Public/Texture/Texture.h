@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <AssetRuntime/StreamableRenderAsset.h>
 #include <Core/Math/Color.h>
 #include <Core/Math/Vector4.h>
@@ -21,10 +22,15 @@ class ROCKS_TEXTURE_API Texture : public StreamableRenderAsset {
 
 public:
     explicit Texture(Allocator& allocator) noexcept
-        : layerFormatSettings(allocator), downscale(allocator), platformData(allocator) {
+        :
+#if ROCKS_WITH_EDITOR_DATA
+          layerFormatSettings(allocator),
+#endif
+          downscale(allocator), platformData(allocator) {
     }
 
     // ---- 에디터 데이터(UE WITH_EDITORONLY_DATA) ----
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) TextureSource source;
     // 보정(계약).
     ROCKS_PROPERTY(EditorOnly) float adjustBrightness = 1.0f;
@@ -77,6 +83,7 @@ public:
     ROCKS_PROPERTY(EditorOnly) uint8 useLegacyGamma : 1 = 0;
     ROCKS_PROPERTY(EditorOnly)
     TextureSourceColorSettings sourceColorSettings;
+#endif
 
     // ---- 저장(런타임) ----
     ROCKS_PROPERTY() int32 lodBias = 0;
@@ -139,7 +146,12 @@ class ROCKS_TEXTURE_API Texture2DArray final : public Texture {
 
 public:
     explicit Texture2DArray(Allocator& allocator) noexcept
-        : Texture(allocator), sourceTextures(allocator) {
+        : Texture(allocator)
+#if ROCKS_WITH_EDITOR_DATA
+          ,
+          sourceTextures(allocator)
+#endif
+    {
     }
 
     ROCKS_PROPERTY() TextureAddress addressX = TextureAddress::Wrap;
@@ -147,7 +159,9 @@ public:
     ROCKS_PROPERTY() TextureAddress addressZ = TextureAddress::Wrap;
     ROCKS_PROPERTY()
     TextureBorderColor borderColor = TextureBorderColor::TransparentBlack;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) ObjectRefArray<Texture2D> sourceTextures;
+#endif
 };
 
 // Cube 배열 텍스처다(UE UTextureCubeArray — 원본 TextureCube 목록).
@@ -157,10 +171,17 @@ class ROCKS_TEXTURE_API TextureCubeArray final : public Texture {
 
 public:
     explicit TextureCubeArray(Allocator& allocator) noexcept
-        : Texture(allocator), sourceTextures(allocator) {
+        : Texture(allocator)
+#if ROCKS_WITH_EDITOR_DATA
+          ,
+          sourceTextures(allocator)
+#endif
+    {
     }
 
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) ObjectRefArray<TextureCube> sourceTextures;
+#endif
 };
 
 // 볼륨 텍스처다(UE UVolumeTexture — 세 축 공통 주소, 원본 2D 텍스처와 타일 크기).
@@ -174,9 +195,11 @@ public:
     ROCKS_PROPERTY() TextureAddress addressMode = TextureAddress::Wrap;
     ROCKS_PROPERTY()
     TextureBorderColor borderColor = TextureBorderColor::TransparentBlack;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) ObjectRef<Texture2D> source2DTexture;
     ROCKS_PROPERTY(EditorOnly) int32 source2DTileSizeX = 0;
     ROCKS_PROPERTY(EditorOnly) int32 source2DTileSizeY = 0;
+#endif
 };
 
 // Texture 모듈 리플렉션 타입을 등록한다(생성 집계 함수 generated::Texture::RegisterModuleTypes —

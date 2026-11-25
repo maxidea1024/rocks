@@ -30,7 +30,9 @@ public sealed class CommandletHost : ModuleRules
         // ShaderCompiler (Developer): the shader-compile command (Docs/Design/ShaderSystem section 11.1 SC13).
         // TextureTools (Developer): the texture importers, the settings normalization hook and the asset-import argument translator
         // (Docs/Design/AssetSystem section 12.12).
+        // Collision: owns the Engine.json Collision section (Docs/Design/CollisionData.ko.md section 3); a program that reads the engine config
+        // must register every section's settings struct (an unknown section is a config error), as Sandbox does.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
-            "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools"]
+            "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "Collision"]
     };
 }

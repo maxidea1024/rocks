@@ -2,14 +2,12 @@
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
+#include <ImageCodec/ImageEncode.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
-#include <rocksjpeg.h>
-#include <tif_rocks.h>
-#include <tiffio.h>
 
 // TIFF 디코더 시험이다(Docs/Design/AssetSystem 12.10절 A5f — libtiff, UE TiffImageWrapper와 같은
 // 받는 범위). 파일은 libtiff 쓰기 API로 메모리에 만들고(압축·Predictor·planar·tile·BigTIFF·여러
@@ -20,261 +18,16 @@ using namespace rocks;
 using namespace rocks::image;
 namespace tiff_decode_tests_file {
 
-// tiff.h가 전역에 deprecated uint8·uint16·uint32·uint64를 두므로 Rocks 정수 타입을 이 이름 공간에서
-// 먼저 찾게 한다(전역 이름을 쓰면 -Wdeprecated-declarations).
-using rocks::int64;
-using rocks::uint16;
-using rocks::uint32;
-using rocks::uint64;
-using rocks::uint8;
-
 namespace {
 
-// ---- 시험 쪽 libtiff 할당(tif_rocks.h 묶음) ----
+// ---- 쓰기(ImageCodec EncodeTiff — 12.10.1절) ----
 
-constexpr usize TestBlockHeader = 16;
-
-void* TestTiffAllocate(size_t bytes) noexcept {
-    void* block = platform::AlignedAllocate(bytes + TestBlockHeader, TestBlockHeader);
-    if (block == nullptr) {
-        return nullptr;
-    }
-
-    *static_cast<usize*>(block) = bytes;
-    return static_cast<uint8*>(block) + TestBlockHeader;
-}
-
-void TestTiffRelease(void* address) noexcept {
-    if (address != nullptr) {
-        platform::AlignedFree(static_cast<uint8*>(address) - TestBlockHeader);
-    }
-}
-
-void* TestTiffReallocate(void* address, size_t bytes) noexcept {
-    void* resized = TestTiffAllocate(bytes);
-    if (resized != nullptr && address != nullptr) {
-        const usize kept =
-            *reinterpret_cast<usize*>(static_cast<uint8*>(address) - TestBlockHeader);
-        platform::MemoryCopy(resized, address, kept < bytes ? kept : bytes);
-        TestTiffRelease(address);
-    }
-
-    return resized;
-}
-
-const RocksTiffAllocator testTiffAllocator = {TestTiffAllocate, TestTiffReallocate,
-                                              TestTiffRelease};
-const RocksJpegAllocator testJpegAllocator = {TestTiffAllocate, TestTiffRelease};
-
-// libtiff와 그 JPEG 코덱(libjpeg-turbo) 할당을 함께 묶는다(JPEG TIFF 쓰기).
-class TestTiffBinding {
-public:
-    TestTiffBinding() noexcept
-        : previous_(RocksTiffBindAllocator(&testTiffAllocator)),
-          previousJpeg_(RocksJpegBindAllocator(&testJpegAllocator)) {
-    }
-
-    ~TestTiffBinding() noexcept {
-        RocksJpegBindAllocator(previousJpeg_);
-        RocksTiffBindAllocator(previous_);
-    }
-
-private:
-    const RocksTiffAllocator* previous_;
-    const RocksJpegAllocator* previousJpeg_;
-};
-
-// ---- 메모리 쓰기 ----
-
-struct MemoryFile {
-    explicit MemoryFile(Allocator& allocator) noexcept : data(allocator) {
-    }
-
-    Array<uint8> data;
-    uint64 position = 0;
-};
-
-tmsize_t MemoryRead(thandle_t handle, void* buffer, tmsize_t size) noexcept {
-    auto* file = static_cast<MemoryFile*>(handle);
-    if (size <= 0 || file->position >= file->data.Size()) {
-        return 0;
-    }
-
-    const uint64 count = file->data.Size() - file->position < static_cast<uint64>(size)
-                             ? file->data.Size() - file->position
-                             : static_cast<uint64>(size);
-    platform::MemoryCopy(buffer, file->data.Data() + file->position, static_cast<usize>(count));
-    file->position += count;
-    return static_cast<tmsize_t>(count);
-}
-
-tmsize_t MemoryWrite(thandle_t handle, void* buffer, tmsize_t size) noexcept {
-    auto* file = static_cast<MemoryFile*>(handle);
-    const uint64 end = file->position + static_cast<uint64>(size);
-    if (end > file->data.Size() && !file->data.TryResize(static_cast<usize>(end))) {
-        return 0;
-    }
-
-    platform::MemoryCopy(file->data.Data() + file->position, buffer, static_cast<usize>(size));
-    file->position = end;
-    return size;
-}
-
-toff_t MemorySeek(thandle_t handle, toff_t offset, int whence) noexcept {
-    auto* file = static_cast<MemoryFile*>(handle);
-    if (whence == SEEK_SET) {
-        file->position = offset;
-    } else if (whence == SEEK_CUR) {
-        file->position += offset;
-    } else {
-        file->position = file->data.Size() + offset;
-    }
-
-    return file->position;
-}
-
-int MemoryClose(thandle_t) noexcept {
-    return 0;
-}
-
-toff_t MemorySize(thandle_t handle) noexcept {
-    return static_cast<MemoryFile*>(handle)->data.Size();
-}
-
-int MemoryMap(thandle_t, void**, toff_t*) noexcept {
-    return 0;
-}
-
-void MemoryUnmap(thandle_t, void*, toff_t) noexcept {
-}
-
-// libtiff로 쓸 이미지다. raw는 TIFF 저장 순서의 표본 행(contig: 행마다 모든 표본, separate:
-// 평면마다 모든 행)이고 한 행은 ceil(width × 행 표본 × bits / 8) byte다.
-struct TiffImage {
-    uint32 width = 1;
-    uint32 height = 1;
-    uint16 bits = 8;
-    uint16 samples = 1;
-    uint16 sampleFormat = SAMPLEFORMAT_UINT;
-    uint16 photometric = PHOTOMETRIC_MINISBLACK;
-    uint16 compression = COMPRESSION_NONE;
-    uint16 predictor = 1;
-    uint16 planar = PLANARCONFIG_CONTIG;
-    uint16 orientation = ORIENTATION_TOPLEFT;
-    uint32 rowsPerStrip = 0;
-    uint32 tileWidth = 0;
-    uint32 tileHeight = 0;
-    Span<const uint16> extraSamples;
-    bool writeExtraSamples = false;
-    const uint16* colormap = nullptr;
-    bool ycbcr11 = false;
-    bool jpegColorModeRgb = false;
-    Span<const uint8> raw;
-    uint32 pages = 1;
-    const char* mode = "w";
-};
+using TiffImage = TiffWriteImage;
 
 Array<uint8> WriteTiff(Allocator& allocator, const TiffImage& image) noexcept {
-    TestTiffBinding binding;
-    MemoryFile file(allocator);
-    TIFF* tiff = TIFFClientOpenExt("test", image.mode, &file, MemoryRead, MemoryWrite, MemorySeek,
-                                   MemoryClose, MemorySize, MemoryMap, MemoryUnmap, nullptr);
-    CHECK(tiff != nullptr);
-    if (tiff == nullptr) {
-        return Move(file.data);
-    }
-
-    const bool separate = image.planar == PLANARCONFIG_SEPARATE && image.samples > 1;
-    const uint32 rowSamples = separate ? 1 : image.samples;
-    const usize rowBytes = (static_cast<usize>(image.width) * rowSamples * image.bits + 7) / 8;
-    for (uint32 page = 0; page < image.pages; ++page) {
-        TIFFSetField(tiff, TIFFTAG_IMAGEWIDTH, image.width);
-        TIFFSetField(tiff, TIFFTAG_IMAGELENGTH, image.height);
-        TIFFSetField(tiff, TIFFTAG_BITSPERSAMPLE, static_cast<int>(image.bits));
-        TIFFSetField(tiff, TIFFTAG_SAMPLESPERPIXEL, static_cast<int>(image.samples));
-        TIFFSetField(tiff, TIFFTAG_SAMPLEFORMAT, static_cast<int>(image.sampleFormat));
-        TIFFSetField(tiff, TIFFTAG_PHOTOMETRIC, static_cast<int>(image.photometric));
-        TIFFSetField(tiff, TIFFTAG_COMPRESSION, static_cast<int>(image.compression));
-        TIFFSetField(tiff, TIFFTAG_PLANARCONFIG, static_cast<int>(image.planar));
-        TIFFSetField(tiff, TIFFTAG_ORIENTATION, static_cast<int>(image.orientation));
-        if (image.predictor != 1) {
-            TIFFSetField(tiff, TIFFTAG_PREDICTOR, static_cast<int>(image.predictor));
-        }
-
-        if (image.writeExtraSamples) {
-            TIFFSetField(tiff, TIFFTAG_EXTRASAMPLES, static_cast<int>(image.extraSamples.Size()),
-                         image.extraSamples.Data());
-        }
-
-        if (image.colormap != nullptr) {
-            const usize entries = usize{1} << image.bits;
-            TIFFSetField(tiff, TIFFTAG_COLORMAP, image.colormap, image.colormap + entries,
-                         image.colormap + 2 * entries);
-        }
-
-        if (image.ycbcr11) {
-            TIFFSetField(tiff, TIFFTAG_YCBCRSUBSAMPLING, 1, 1);
-        }
-
-        if (image.jpegColorModeRgb) {
-            // YCbCr JPEG: libtiff가 RGB 입력을 YCbCr 4:2:0으로 바꿔 쓴다.
-            TIFFSetField(tiff, TIFFTAG_JPEGCOLORMODE, JPEGCOLORMODE_RGB);
-        }
-
-        const uint32 planes = separate ? image.samples : 1;
-        if (image.tileWidth != 0) {
-            TIFFSetField(tiff, TIFFTAG_TILEWIDTH, image.tileWidth);
-            TIFFSetField(tiff, TIFFTAG_TILELENGTH, image.tileHeight);
-            const usize tileRowBytes =
-                (static_cast<usize>(image.tileWidth) * rowSamples * image.bits + 7) / 8;
-            Array<uint8> tile(allocator);
-            CHECK(tile.TryResize(tileRowBytes * image.tileHeight));
-            for (uint32 plane = 0; plane < planes; ++plane) {
-                for (uint32 y = 0; y < image.height; y += image.tileHeight) {
-                    for (uint32 x = 0; x < image.width; x += image.tileWidth) {
-                        platform::MemoryZero(tile.Data(), tile.Size());
-                        const usize xByte = static_cast<usize>(x) * rowSamples * image.bits / 8;
-                        const usize copy =
-                            rowBytes - xByte < tileRowBytes ? rowBytes - xByte : tileRowBytes;
-                        for (uint32 r = 0; r < image.tileHeight && y + r < image.height; ++r) {
-                            const usize source =
-                                (static_cast<usize>(plane) * image.height + y + r) * rowBytes;
-                            platform::MemoryCopy(tile.Data() + r * tileRowBytes,
-                                                 image.raw.Data() + source + xByte, copy);
-                        }
-
-                        const uint32 index =
-                            TIFFComputeTile(tiff, x, y, 0, static_cast<uint16>(plane));
-                        CHECK(TIFFWriteEncodedTile(tiff, index, tile.Data(),
-                                                   static_cast<tmsize_t>(tile.Size())) >= 0);
-                    }
-                }
-            }
-        } else {
-            if (image.rowsPerStrip != 0) {
-                TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, image.rowsPerStrip);
-            }
-
-            Array<uint8> line(allocator);
-            CHECK(line.TryResize(rowBytes));
-            for (uint32 plane = 0; plane < planes; ++plane) {
-                for (uint32 row = 0; row < image.height; ++row) {
-                    const usize source =
-                        (static_cast<usize>(plane) * image.height + row) * rowBytes;
-                    platform::MemoryCopy(line.Data(), image.raw.Data() + source, rowBytes);
-                    CHECK(TIFFWriteScanline(tiff, line.Data(), row, static_cast<uint16>(plane)) ==
-                          1);
-                }
-            }
-        }
-
-        if (image.pages > 1) {
-            CHECK(TIFFWriteDirectory(tiff) == 1);
-        }
-    }
-
-    TIFFClose(tiff);
-    return Move(file.data);
+    Array<uint8> file(allocator);
+    CHECK(EncodeTiff(allocator, image, file));
+    return file;
 }
 
 // ---- 손으로 만드는 고전 TIFF(little-endian) ----
@@ -325,16 +78,16 @@ Array<uint8> HandTiff(Allocator& allocator, Span<const HandTag> tags, Span<const
 Array<uint8> HandGray(Allocator& allocator, uint16 compression, uint16 photometric,
                       uint16 sampleFormat = 1, uint16 samples = 1) noexcept {
     const uint8 pixels[8] = {10, 20, 30, 40, 50, 60, 70, 80};
-    const HandTag tags[] = {{TIFFTAG_IMAGEWIDTH, TypeLong, 1, 2},
-                            {TIFFTAG_IMAGELENGTH, TypeLong, 1, 1},
-                            {TIFFTAG_BITSPERSAMPLE, TypeShort, 1, 8},
-                            {TIFFTAG_COMPRESSION, TypeShort, 1, compression},
-                            {TIFFTAG_PHOTOMETRIC, TypeShort, 1, photometric},
-                            {TIFFTAG_STRIPOFFSETS, TypeLong, 1, 8},
-                            {TIFFTAG_SAMPLESPERPIXEL, TypeShort, 1, samples},
-                            {TIFFTAG_ROWSPERSTRIP, TypeLong, 1, 1},
-                            {TIFFTAG_STRIPBYTECOUNTS, TypeLong, 1, 2u * samples},
-                            {TIFFTAG_SAMPLEFORMAT, TypeShort, 1, sampleFormat}};
+    const HandTag tags[] = {{tiff::TagImageWidth, TypeLong, 1, 2},
+                            {tiff::TagImageLength, TypeLong, 1, 1},
+                            {tiff::TagBitsPerSample, TypeShort, 1, 8},
+                            {tiff::TagCompression, TypeShort, 1, compression},
+                            {tiff::TagPhotometric, TypeShort, 1, photometric},
+                            {tiff::TagStripOffsets, TypeLong, 1, 8},
+                            {tiff::TagSamplesPerPixel, TypeShort, 1, samples},
+                            {tiff::TagRowsPerStrip, TypeLong, 1, 1},
+                            {tiff::TagStripByteCounts, TypeLong, 1, 2u * samples},
+                            {tiff::TagSampleFormat, TypeShort, 1, sampleFormat}};
     return HandTiff(allocator, tags, pixels);
 }
 
@@ -460,7 +213,7 @@ TEST(TiffDecode_Gray) {
     PutLe16(half, Float16::FromFloat(0.5f).bits);
     image = TiffImage{};
     image.bits = 16;
-    image.sampleFormat = SAMPLEFORMAT_IEEEFP;
+    image.sampleFormat = tiff::SampleFormatIeeeFp;
     image.raw = half;
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::R16F,
                  half));
@@ -484,7 +237,7 @@ TEST(TiffDecode_Gray) {
     float gaFloat[2] = {0.25f, 0.75f};
     image.width = 1;
     image.bits = 32;
-    image.sampleFormat = SAMPLEFORMAT_IEEEFP;
+    image.sampleFormat = tiff::SampleFormatIeeeFp;
     image.raw = Span<const uint8>(reinterpret_cast<const uint8*>(gaFloat), sizeof(gaFloat));
     decoded = Decode(allocator, WriteTiff(allocator, image).View());
     CHECK(decoded.ok && decoded.result.image.format == TextureSourceFormat::RGBA32F);
@@ -498,7 +251,7 @@ TEST(TiffDecode_Gray) {
     const uint8 white8[] = {0, 55};
     image = TiffImage{};
     image.width = 2;
-    image.photometric = PHOTOMETRIC_MINISWHITE;
+    image.photometric = tiff::PhotometricMinIsWhite;
     image.raw = white8;
     const uint8 white8Out[] = {255, 200};
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::G8,
@@ -514,7 +267,7 @@ TEST(TiffDecode_Gray) {
                  white16Out));
     const float whiteFloat = 0.25f;
     image.bits = 32;
-    image.sampleFormat = SAMPLEFORMAT_IEEEFP;
+    image.sampleFormat = tiff::SampleFormatIeeeFp;
     image.raw = Span<const uint8>(reinterpret_cast<const uint8*>(&whiteFloat), sizeof(whiteFloat));
     decoded = Decode(allocator, WriteTiff(allocator, image).View());
     CHECK(decoded.ok && GetFloat(decoded.result.image.pixels.Data()) == 0.75f);
@@ -527,7 +280,7 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     TiffImage image;
     image.width = 2;
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
+    image.photometric = tiff::PhotometricRgb;
     image.raw = rgb;
     const uint8 rgbOut[] = {1, 2, 3, 255, 4, 5, 6, 255};
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::RGBA8,
@@ -549,12 +302,12 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     // 함께 버린다.
     const uint8 rgba[] = {100, 50, 25, 128};
     const uint8 rgbaOut[] = {100, 50, 25, 128};
-    const uint16 extraValues[] = {EXTRASAMPLE_UNSPECIFIED, EXTRASAMPLE_ASSOCALPHA,
-                                  EXTRASAMPLE_UNASSALPHA};
+    const uint16 extraValues[] = {tiff::ExtraSampleUnspecified, tiff::ExtraSampleAssocAlpha,
+                                  tiff::ExtraSampleUnassAlpha};
     for (uint16 extra : extraValues) {
         image = TiffImage{};
         image.samples = 4;
-        image.photometric = PHOTOMETRIC_RGB;
+        image.photometric = tiff::PhotometricRgb;
         image.extraSamples = Span<const uint16>(&extra, 1);
         image.writeExtraSamples = true;
         image.raw = rgba;
@@ -565,7 +318,7 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     // ExtraSamples 태그 없이 표본 4개(DEFAULT_EXTRASAMPLE_AS_ALPHA — UE와 같다).
     image = TiffImage{};
     image.samples = 4;
-    image.photometric = PHOTOMETRIC_RGB;
+    image.photometric = tiff::PhotometricRgb;
     image.raw = rgba;
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::RGBA8,
                  rgbaOut));
@@ -583,9 +336,9 @@ TEST(TiffDecode_ColorPaletteAlpha) {
           limited.failure.error == ErrorCode::CapacityExceeded);
 
     const uint8 rgbaa[] = {100, 50, 25, 128, 77};
-    const uint16 twoExtra[] = {EXTRASAMPLE_UNASSALPHA, EXTRASAMPLE_UNSPECIFIED};
+    const uint16 twoExtra[] = {tiff::ExtraSampleUnassAlpha, tiff::ExtraSampleUnspecified};
     image = TiffImage{};
-    image.photometric = PHOTOMETRIC_RGB;
+    image.photometric = tiff::PhotometricRgb;
     image.writeExtraSamples = true;
     image.samples = 5;
     image.extraSamples = twoExtra;
@@ -599,7 +352,7 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     PutLe32(rgb32, NumericLimits<uint32>::Max());
     image = TiffImage{};
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
+    image.photometric = tiff::PhotometricRgb;
     image.bits = 32;
     image.raw = rgb32;
     uint8 rgb32Out[8] = {};
@@ -610,7 +363,7 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     uint8 rgbHalf[6] = {};
     PutLe16(rgbHalf, Float16::FromFloat(1.0f).bits);
     image.bits = 16;
-    image.sampleFormat = SAMPLEFORMAT_IEEEFP;
+    image.sampleFormat = tiff::SampleFormatIeeeFp;
     image.raw = rgbHalf;
     decoded = Decode(allocator, WriteTiff(allocator, image).View());
     CHECK(decoded.ok && decoded.result.image.format == TextureSourceFormat::RGBA16F &&
@@ -625,7 +378,7 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     image = TiffImage{};
     image.width = 2;
     image.bits = 2;
-    image.photometric = PHOTOMETRIC_PALETTE;
+    image.photometric = tiff::PhotometricPalette;
     image.colormap = colormap;
     image.raw = indices;
     const uint8 paletteOut[] = {0x12, 0x34, 0xFF, 255, 0, 0, 0, 255};
@@ -644,8 +397,8 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     image = TiffImage{};
     image.height = 2;
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
-    image.orientation = ORIENTATION_BOTLEFT;
+    image.photometric = tiff::PhotometricRgb;
+    image.orientation = tiff::OrientationBotLeft;
     image.raw = twoRows;
     const uint8 flipped[] = {4, 5, 6, 255, 1, 2, 3, 255};
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::RGBA8,
@@ -660,7 +413,7 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     const uint8 grayRows[] = {9, 8};
     image = TiffImage{};
     image.height = 2;
-    image.orientation = ORIENTATION_BOTLEFT;
+    image.orientation = tiff::OrientationBotLeft;
     image.raw = grayRows;
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::G8,
                  grayRows));
@@ -668,9 +421,9 @@ TEST(TiffDecode_ColorPaletteAlpha) {
     image = TiffImage{};
     image.width = 2;
     image.bits = 2;
-    image.photometric = PHOTOMETRIC_PALETTE;
+    image.photometric = tiff::PhotometricPalette;
     image.colormap = colormap;
-    image.orientation = ORIENTATION_TOPRIGHT;
+    image.orientation = tiff::OrientationTopRight;
     image.raw = indices;
     const uint8 mirrored[] = {0, 0, 0, 255, 0x12, 0x34, 0xFF, 255};
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, image).View()), TextureSourceFormat::RGBA8,
@@ -691,7 +444,7 @@ TEST(TiffDecode_LayoutAndCodecs) {
     image.width = Width;
     image.height = Height;
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
+    image.photometric = tiff::PhotometricRgb;
     image.raw = rgb;
     const Decoded reference = Decode(allocator, WriteTiff(allocator, image).View());
     CHECK(reference.ok);
@@ -703,24 +456,26 @@ TEST(TiffDecode_LayoutAndCodecs) {
                                       reference.result.image.pixels.Size());
     };
 
-    const uint16 codecs[] = {COMPRESSION_LZW, COMPRESSION_ADOBE_DEFLATE, COMPRESSION_PACKBITS};
+    const uint16 codecs[] = {tiff::CompressionLzw, tiff::CompressionAdobeDeflate,
+                             tiff::CompressionPackBits};
     for (uint16 codec : codecs) {
         image.compression = codec;
         CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
-        image.predictor = PREDICTOR_HORIZONTAL;
+        image.predictor = tiff::PredictorHorizontal;
         CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
         image.predictor = 1;
     }
 
     // 짧은 마지막 strip(RowsPerStrip 3, 높이 7), big-endian, BigTIFF.
-    image.compression = COMPRESSION_LZW;
+    image.compression = tiff::CompressionLzw;
     image.rowsPerStrip = 3;
     CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
-    image.mode = "wb";
+    image.byteOrder = TiffByteOrder::Big;
     CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
-    image.mode = "w8";
+    image.byteOrder = TiffByteOrder::Little;
+    image.bigTiff = true;
     CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
-    image.mode = "w";
+    image.bigTiff = false;
     image.rowsPerStrip = 0;
 
     // planar 2(평면마다 모든 행): 같은 표본을 평면 순서로 다시 놓는다.
@@ -731,14 +486,14 @@ TEST(TiffDecode_LayoutAndCodecs) {
         }
     }
 
-    image.planar = PLANARCONFIG_SEPARATE;
+    image.planar = tiff::PlanarSeparate;
     image.raw = planes;
     CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
     // tile 16×16(가장자리 부분 tile), planar + tile.
     image.tileWidth = 16;
     image.tileHeight = 16;
     CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
-    image.planar = PLANARCONFIG_CONTIG;
+    image.planar = tiff::PlanarContig;
     image.raw = rgb;
     CHECK(same(Decode(allocator, WriteTiff(allocator, image).View())));
 
@@ -751,9 +506,9 @@ TEST(TiffDecode_LayoutAndCodecs) {
     TiffImage wide;
     wide.width = Width;
     wide.bits = 16;
-    wide.compression = COMPRESSION_LZW;
-    wide.predictor = PREDICTOR_HORIZONTAL;
-    wide.mode = "wb";
+    wide.compression = tiff::CompressionLzw;
+    wide.predictor = tiff::PredictorHorizontal;
+    wide.byteOrder = TiffByteOrder::Big;
     wide.raw = gray16;
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, wide).View()), TextureSourceFormat::G16,
                  gray16));
@@ -763,10 +518,10 @@ TEST(TiffDecode_LayoutAndCodecs) {
     }
 
     wide.bits = 32;
-    wide.sampleFormat = SAMPLEFORMAT_IEEEFP;
-    wide.compression = COMPRESSION_ADOBE_DEFLATE;
-    wide.predictor = PREDICTOR_FLOATINGPOINT;
-    wide.mode = "w";
+    wide.sampleFormat = tiff::SampleFormatIeeeFp;
+    wide.compression = tiff::CompressionAdobeDeflate;
+    wide.predictor = tiff::PredictorFloatingPoint;
+    wide.byteOrder = TiffByteOrder::Little;
     wide.raw = Span<const uint8>(reinterpret_cast<const uint8*>(floats), sizeof(floats));
     CHECK(Pixels(Decode(allocator, WriteTiff(allocator, wide).View()), TextureSourceFormat::R32F,
                  Span<const uint8>(reinterpret_cast<const uint8*>(floats), sizeof(floats))));
@@ -776,11 +531,11 @@ TEST(TiffDecode_LayoutAndCodecs) {
     TiffImage fax;
     fax.width = 16;
     fax.bits = 1;
-    fax.photometric = PHOTOMETRIC_MINISWHITE;
+    fax.photometric = tiff::PhotometricMinIsWhite;
     fax.raw = bilevel;
     const Decoded faxReference = Decode(allocator, WriteTiff(allocator, fax).View());
     CHECK(faxReference.ok);
-    const uint16 faxCodecs[] = {COMPRESSION_CCITTFAX3, COMPRESSION_CCITTFAX4};
+    const uint16 faxCodecs[] = {tiff::CompressionCcittFax3, tiff::CompressionCcittFax4};
     for (uint16 codec : faxCodecs) {
         fax.compression = codec;
         const Decoded decoded = Decode(allocator, WriteTiff(allocator, fax).View());
@@ -799,7 +554,7 @@ TEST(TiffDecode_LayoutAndCodecs) {
     const uint8 ycbcr[] = {100, 128, 128};
     TiffImage ycc;
     ycc.samples = 3;
-    ycc.photometric = PHOTOMETRIC_YCBCR;
+    ycc.photometric = tiff::PhotometricYCbCr;
     ycc.ycbcr11 = true;
     ycc.raw = ycbcr;
     const Decoded converted = Decode(allocator, WriteTiff(allocator, ycc).View());
@@ -815,51 +570,60 @@ TEST(TiffDecode_RejectionsAndDamage) {
     SystemAllocator allocator;
     const uint8 handPixels[] = {10, 20};
     CHECK(Pixels(
-        Decode(allocator, HandGray(allocator, COMPRESSION_NONE, PHOTOMETRIC_MINISBLACK).View()),
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionNone, tiff::PhotometricMinIsBlack).View()),
         TextureSourceFormat::G8, handPixels));
     // JPEG·옛 JPEG은 libjpeg-turbo로 푼다(A5g) — 손으로 만든 데이터는 JPEG가 아니라 손상이다.
     // PixarLog·SGILog·LogLuv는 LossySource.
     CHECK(Fails(
-        Decode(allocator, HandGray(allocator, COMPRESSION_JPEG, PHOTOMETRIC_MINISBLACK).View()),
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionJpeg, tiff::PhotometricMinIsBlack).View()),
         AssetDiagnosticCode::InvalidSource));
     CHECK(Fails(
-        Decode(allocator, HandGray(allocator, COMPRESSION_OJPEG, PHOTOMETRIC_MINISBLACK).View()),
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionOJpeg, tiff::PhotometricMinIsBlack).View()),
         AssetDiagnosticCode::InvalidSource));
     CHECK(Fails(
-        Decode(allocator, HandGray(allocator, COMPRESSION_PIXARLOG, PHOTOMETRIC_MINISBLACK).View()),
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionPixarLog, tiff::PhotometricMinIsBlack).View()),
         AssetDiagnosticCode::LossySource));
     CHECK(
-        Fails(Decode(allocator, HandGray(allocator, COMPRESSION_SGILOG, PHOTOMETRIC_LOGLUV).View()),
+        Fails(Decode(allocator,
+                     HandGray(allocator, tiff::CompressionSgiLog, tiff::PhotometricLogLuv).View()),
               AssetDiagnosticCode::LossySource));
-    CHECK(Fails(Decode(allocator, HandGray(allocator, COMPRESSION_NONE, PHOTOMETRIC_LOGL).View()),
-                AssetDiagnosticCode::LossySource));
     CHECK(Fails(
-        Decode(allocator, HandGray(allocator, COMPRESSION_ZSTD, PHOTOMETRIC_MINISBLACK).View()),
+        Decode(allocator, HandGray(allocator, tiff::CompressionNone, tiff::PhotometricLogL).View()),
+        AssetDiagnosticCode::LossySource));
+    CHECK(Fails(
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionZstd, tiff::PhotometricMinIsBlack).View()),
         AssetDiagnosticCode::UnsupportedSourceFormat));
     // SampleFormat 2(signed)·CMYK는 UE도 받지 않는다.
     CHECK(Fails(
-        Decode(allocator, HandGray(allocator, COMPRESSION_NONE, PHOTOMETRIC_MINISBLACK, 2).View()),
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionNone, tiff::PhotometricMinIsBlack, 2).View()),
         AssetDiagnosticCode::UnsupportedSourceFormat));
-    CHECK(Fails(Decode(allocator,
-                       HandGray(allocator, COMPRESSION_NONE, PHOTOMETRIC_SEPARATED, 1, 4).View()),
-                AssetDiagnosticCode::UnsupportedSourceFormat));
+    CHECK(Fails(
+        Decode(allocator,
+               HandGray(allocator, tiff::CompressionNone, tiff::PhotometricSeparated, 1, 4).View()),
+        AssetDiagnosticCode::UnsupportedSourceFormat));
 
     // 손상: strip offset이 파일 밖, IFD 항목 수가 파일을 넘는다.
     const uint8 pixels[2] = {1, 2};
-    const HandTag outside[] = {{TIFFTAG_IMAGEWIDTH, TypeLong, 1, 2},
-                               {TIFFTAG_IMAGELENGTH, TypeLong, 1, 1},
-                               {TIFFTAG_BITSPERSAMPLE, TypeShort, 1, 8},
-                               {TIFFTAG_PHOTOMETRIC, TypeShort, 1, PHOTOMETRIC_MINISBLACK},
-                               {TIFFTAG_STRIPOFFSETS, TypeLong, 1, 4000},
-                               {TIFFTAG_STRIPBYTECOUNTS, TypeLong, 1, 2}};
+    const HandTag outside[] = {{tiff::TagImageWidth, TypeLong, 1, 2},
+                               {tiff::TagImageLength, TypeLong, 1, 1},
+                               {tiff::TagBitsPerSample, TypeShort, 1, 8},
+                               {tiff::TagPhotometric, TypeShort, 1, tiff::PhotometricMinIsBlack},
+                               {tiff::TagStripOffsets, TypeLong, 1, 4000},
+                               {tiff::TagStripByteCounts, TypeLong, 1, 2}};
     CHECK(Fails(Decode(allocator, HandTiff(allocator, outside, pixels).View()),
                 AssetDiagnosticCode::InvalidSource));
-    const HandTag good[] = {{TIFFTAG_IMAGEWIDTH, TypeLong, 1, 2},
-                            {TIFFTAG_IMAGELENGTH, TypeLong, 1, 1},
-                            {TIFFTAG_BITSPERSAMPLE, TypeShort, 1, 8},
-                            {TIFFTAG_PHOTOMETRIC, TypeShort, 1, PHOTOMETRIC_MINISBLACK},
-                            {TIFFTAG_STRIPOFFSETS, TypeLong, 1, 8},
-                            {TIFFTAG_STRIPBYTECOUNTS, TypeLong, 1, 2}};
+    const HandTag good[] = {{tiff::TagImageWidth, TypeLong, 1, 2},
+                            {tiff::TagImageLength, TypeLong, 1, 1},
+                            {tiff::TagBitsPerSample, TypeShort, 1, 8},
+                            {tiff::TagPhotometric, TypeShort, 1, tiff::PhotometricMinIsBlack},
+                            {tiff::TagStripOffsets, TypeLong, 1, 8},
+                            {tiff::TagStripByteCounts, TypeLong, 1, 2}};
     CHECK(Fails(Decode(allocator, HandTiff(allocator, good, pixels, 400).View()),
                 AssetDiagnosticCode::InvalidSource));
     // StripByteCounts가 없으면 libtiff가 크기에서 추정한다(UE와 같다).
@@ -873,8 +637,8 @@ TEST(TiffDecode_RejectionsAndDamage) {
     image.width = 2;
     image.height = 2;
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
-    image.compression = COMPRESSION_LZW;
+    image.photometric = tiff::PhotometricRgb;
+    image.compression = tiff::CompressionLzw;
     image.raw = rgb;
     const Array<uint8> file = WriteTiff(allocator, image);
     CHECK(Decode(allocator, file.View()).ok);
@@ -902,8 +666,8 @@ TEST(TiffDecode_Jpeg) {
     image.width = Size;
     image.height = Size;
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
-    image.compression = COMPRESSION_JPEG;
+    image.photometric = tiff::PhotometricRgb;
+    image.compression = tiff::CompressionJpeg;
     image.rowsPerStrip = Size;
     image.raw = rgb;
     const auto close = [&rgb](const Decoded& decoded) noexcept {
@@ -929,7 +693,7 @@ TEST(TiffDecode_Jpeg) {
     };
     const Array<uint8> rgbFile = WriteTiff(allocator, image);
     CHECK(close(Decode(allocator, rgbFile.View())));
-    image.photometric = PHOTOMETRIC_YCBCR;
+    image.photometric = tiff::PhotometricYCbCr;
     image.jpegColorModeRgb = true;
     const Array<uint8> yccFile = WriteTiff(allocator, image);
     CHECK(close(Decode(allocator, yccFile.View())));
@@ -1033,8 +797,8 @@ TEST(TiffDecode_AllocationAndThreads) {
     image.width = 2;
     image.height = 2;
     image.samples = 3;
-    image.photometric = PHOTOMETRIC_RGB;
-    image.compression = COMPRESSION_LZW;
+    image.photometric = tiff::PhotometricRgb;
+    image.compression = tiff::CompressionLzw;
     image.raw = rgb;
     const Array<uint8> file = WriteTiff(allocator, image);
     const Decoded reference = Decode(allocator, file.View());
@@ -1086,7 +850,7 @@ TEST(TiffDecode_AllocationAndThreads) {
 
     // 단독 실행의 할당 횟수와, 두 스레드가 각자 Allocator로 동시에 디코딩한 횟수가 같다.
     TiffImage other = image;
-    other.compression = COMPRESSION_ADOBE_DEFLATE;
+    other.compression = tiff::CompressionAdobeDeflate;
     const Array<uint8> second = WriteTiff(allocator, other);
     // 스레드마다 따로 센다(같은 시각에 두 스레드가 한 세기를 바꾸지 않게).
     LiveCountingAllocator firstCount(allocator);

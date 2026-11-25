@@ -185,8 +185,8 @@ protected:
     }
 
 private:
-    // controlRotation을 돌리고(pitch 한계) 그 방향 기준으로 root를 옮긴다(UE DefaultPawn MoveForward·
-    // MoveRight는 control 회전 축, MoveUp은 월드 Z). 입력 벡터는 길이 1로 자른다(UE
+    // controlRotation을 돌리고(pitch 한계) 그 방향 기준으로 root를 옮긴다(UE DefaultPawn
+    // MoveForward· MoveRight는 control 회전 축, MoveUp은 월드 Z). 입력 벡터는 길이 1로 자른다(UE
     // ConsumeInputVector·GetClampedToMaxSize). 가속·감속은 이동 컴포넌트 단계에서 넣는다.
     void ApplyMovement(const PawnInput& input, double deltaSeconds) noexcept {
         Rotator<double> rotation = GetControlRotation();
@@ -215,11 +215,10 @@ private:
         }
 
         const Vec3d step = direction * (PawnMaxSpeed * deltaSeconds);
-        (void)GetWorld().With<SceneComponent>(RootComponent(),
-                                              [&step](SceneComponent& root) noexcept {
-                                                  return root.SetRelativeLocation(
-                                                      root.WorldLocation() + step);
-                                              });
+        (void)GetWorld().With<SceneComponent>(
+            RootComponent(), [&step](SceneComponent& root) noexcept {
+                return root.SetRelativeLocation(root.WorldLocation() + step);
+            });
     }
 
     // 제스처 시작·끝을 로그로 남긴다(Pinch·Rotate는 끝날 때 마지막 값, Flick은 방향 각).

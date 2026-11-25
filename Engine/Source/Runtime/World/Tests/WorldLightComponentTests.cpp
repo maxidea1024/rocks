@@ -877,21 +877,21 @@ TEST(Light_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 10, Actor 3). 광원 클래스가 더하는 수는
+    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). 광원 클래스가 더하는 수는
     // LightComponentBase 11·LightComponent 14·LocalLight 3·Point 5·Spot 2·Rect 4·Directional 15·Sky
     // 8, 광원 Actor 0이다.
     const Expected expected[] = {
-        {ObjectTypeIdOf<LightComponentBase>(), ObjectTypeIdOf<SceneComponent>(), 21, true},
-        {ObjectTypeIdOf<LightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 35, true},
-        {ObjectTypeIdOf<LocalLightComponent>(), ObjectTypeIdOf<LightComponent>(), 38, true},
-        {ObjectTypeIdOf<PointLightComponent>(), ObjectTypeIdOf<LocalLightComponent>(), 43, false},
-        {ObjectTypeIdOf<SpotLightComponent>(), ObjectTypeIdOf<PointLightComponent>(), 45, false},
-        {ObjectTypeIdOf<RectLightComponent>(), ObjectTypeIdOf<LocalLightComponent>(), 42, false},
-        {ObjectTypeIdOf<DirectionalLightComponent>(), ObjectTypeIdOf<LightComponent>(), 50, false},
-        {ObjectTypeIdOf<SkyLightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 29, false},
-        {ObjectTypeIdOf<Light>(), ObjectTypeIdOf<Actor>(), 3, true},
-        {ObjectTypeIdOf<PointLight>(), ObjectTypeIdOf<Light>(), 3, false},
-        {ObjectTypeIdOf<SkyLight>(), ObjectTypeIdOf<Light>(), 3, false},
+        {ObjectTypeIdOf<LightComponentBase>(), ObjectTypeIdOf<SceneComponent>(), 22, true},
+        {ObjectTypeIdOf<LightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 36, true},
+        {ObjectTypeIdOf<LocalLightComponent>(), ObjectTypeIdOf<LightComponent>(), 39, true},
+        {ObjectTypeIdOf<PointLightComponent>(), ObjectTypeIdOf<LocalLightComponent>(), 44, false},
+        {ObjectTypeIdOf<SpotLightComponent>(), ObjectTypeIdOf<PointLightComponent>(), 46, false},
+        {ObjectTypeIdOf<RectLightComponent>(), ObjectTypeIdOf<LocalLightComponent>(), 43, false},
+        {ObjectTypeIdOf<DirectionalLightComponent>(), ObjectTypeIdOf<LightComponent>(), 51, false},
+        {ObjectTypeIdOf<SkyLightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 30, false},
+        {ObjectTypeIdOf<Light>(), ObjectTypeIdOf<Actor>(), 4, true},
+        {ObjectTypeIdOf<PointLight>(), ObjectTypeIdOf<Light>(), 4, false},
+        {ObjectTypeIdOf<SkyLight>(), ObjectTypeIdOf<Light>(), 4, false},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);
