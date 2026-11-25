@@ -11,8 +11,17 @@ using platform::MemoryOrder;
 
 constexpr float Int16Scale = 32767.0f;
 
+// [-1, 1]로 자른다. NaN은 0이다(float→int 변환에 NaN을 넘기지 않는다).
 int16 ToInt16(float sample) noexcept {
-    const float clamped = sample > 1.0f ? 1.0f : (sample < -1.0f ? -1.0f : sample);
+    float clamped = 0.0f;
+    if (sample >= 1.0f) {
+        clamped = 1.0f;
+    } else if (sample <= -1.0f) {
+        clamped = -1.0f;
+    } else if (sample > -1.0f) {
+        clamped = sample;
+    }
+
     const float scaled = clamped * Int16Scale;
     return static_cast<int16>(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
 }

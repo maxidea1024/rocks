@@ -45,6 +45,12 @@ Result<void> AudioRenderThread::Initialize(Allocator& allocator, AudioMixer& mix
 
     pending_ = static_cast<AudioRtCommand*>(memory.Value());
     pendingCount_ = 0;
+    // 다시 초기화하면(장치가 Null로 다시 열 때) 앞 시도의 계수·우선순위를 남기지 않는다.
+    priorityKnown_.Store<MemoryOrder::Relaxed>(0);
+    appliedPriority_.Store<MemoryOrder::Relaxed>(0);
+    renderedBlocks_.Store<MemoryOrder::Relaxed>(0);
+    pendingFullStalls_.Store<MemoryOrder::Relaxed>(0);
+    stalledWaits_.Store<MemoryOrder::Relaxed>(0);
     allocator_ = &allocator;
     mixer_ = &mixer;
     ring_ = &ring;

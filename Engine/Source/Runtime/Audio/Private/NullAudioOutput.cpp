@@ -13,6 +13,9 @@ using platform::MemoryOrder;
 
 constexpr uint64 NanosecondsPerSecond = 1000000000;
 constexpr uint64 NanosecondsPerMillisecond = 1000000;
+// 시한보다 이만큼 넘게 늦으면(절전 복귀·디버거 정지 등) 밀린 콜백을 몰아 부르지 않고 시한을
+// 지금으로 다시 맞춘다. 주기 몇 개 정도의 늦음은 그대로 따라잡는다(3.33.5절).
+constexpr uint64 NullResyncNanoseconds = 100 * NanosecondsPerMillisecond;
 constexpr char NullOutputName[] = "Null";
 
 } // namespace
@@ -142,28 +145,29 @@ void NullAudioOutput::Deliver(uint32 frames) noexcept {
     callbacks_.FetchAdd<MemoryOrder::Release>(1);
 }
 
-// 콜백 주기의 누적 시한(시작 + n × 주기)까지 남은 시간만 잔다. 늦게 깨도 다음 시한은 누적이라
-// 드리프트가 쌓이지 않는다. 한참 늦었으면(절전 복귀 등) 시한을 지금으로 다시 맞춘다(밀린 콜백을
-// 몰아서 부르지 않는다).
+// 콜백 주기의 누적 시한(시작 + n × 주기)까지 남은 시간만 정밀 대기(PreciseSleeper)로 잔다. 일찍
+// 깼으면 다시 잔다(돌며 기다리지 않는다). 늦게 깨도 다음 시한은 누적이라 드리프트가 쌓이지 않고,
+// 주기 몇 개 늦음은 이어 부르며 따라잡는다. NullResyncNanoseconds를 넘게 늦었으면 시한을 지금으로
+// 다시 맞춘다.
 void NullAudioOutput::TimerMain(void* context) noexcept {
     auto& self = *static_cast<NullAudioOutput*>(context);
+    platform::PreciseSleeper sleeper;
+    // 만들지 못하면 millisecond 올림 대기로 돈다(시한 누적이라 평균 진행은 같다).
+    (void)sleeper.Initialize();
     const uint64 period =
         uint64{self.format_.callbackFrames} * NanosecondsPerSecond / self.format_.sampleRate;
     uint64 deadline = platform::MonotonicNanoseconds() + period;
     while (self.stopRequested_.Load<MemoryOrder::Acquire>() == 0) {
         const uint64 now = platform::MonotonicNanoseconds();
         if (now < deadline) {
-            platform::SleepFor(static_cast<uint32>((deadline - now) / NanosecondsPerMillisecond));
-            if (platform::MonotonicNanoseconds() < deadline) {
-                platform::YieldThread();
-                continue;
-            }
+            sleeper.SleepNanoseconds(deadline - now);
+            continue;
         }
 
         self.Deliver(self.format_.callbackFrames);
         deadline += period;
         const uint64 after = platform::MonotonicNanoseconds();
-        if (after > deadline + period) {
+        if (after > deadline + NullResyncNanoseconds) {
             deadline = after + period;
         }
     }

@@ -93,6 +93,38 @@ private:
 // 않는다.
 ROCKS_PLATFORMBASE_API void SleepFor(uint32 milliseconds) noexcept;
 
+// millisecond 아래 시간을 자는 대기 객체다(오디오 Null 출력 타이머 — Docs/Design/AudioSystem
+// 3.33.5절). Windows의 Sleep은 기본 timer tick(약 15.6 ms)으로 깨므로 짧은 주기를 지킬 수 없다.
+// UE는 프로세스 전체에 timeBeginPeriod(1)을 걸지만, 여기서는 프로세스 전역 설정을 바꾸지 않고 이
+// 객체만 고해상도 waitable timer(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, Windows 10 1803+)로 잔다.
+// 그 flag가 없는 OS에서는 보통 waitable timer로 만든다(해상도는 tick). POSIX는 nanosleep이다.
+//
+// 스레드 계약: 한 객체는 한 스레드만 쓴다(waitable timer 하나를 공유하지 않는다). Initialize 전이나
+// 실패 뒤에도 SleepNanoseconds는 동작한다(SleepFor로 millisecond를 올림해 잔다).
+//
+// 사용 예:
+//   PreciseSleeper sleeper;
+//   (void)sleeper.Initialize();
+//   sleeper.SleepNanoseconds(2'500'000);  // 2.5 ms
+class ROCKS_PLATFORMBASE_API PreciseSleeper {
+public:
+    PreciseSleeper() noexcept = default;
+    ~PreciseSleeper() noexcept;
+    PreciseSleeper(const PreciseSleeper&) = delete;
+    PreciseSleeper& operator=(const PreciseSleeper&) = delete;
+
+    // OS 대기 객체를 만든다. 만들지 못하면 false다(다시 불러도 된다). 이미 만들었으면 true다.
+    bool Initialize() noexcept;
+
+    // nanoseconds 이상 잔다(0은 즉시 반환). 깨는 시점의 늦음은 OS 스케줄링이 정한다.
+    void SleepNanoseconds(uint64 nanoseconds) noexcept;
+
+private:
+    // Windows waitable timer HANDLE이다(POSIX는 쓰지 않는다). 공개 헤더는 OS를 가르지 않으므로 늘
+    // 둔다.
+    [[maybe_unused]] void* timer_ = nullptr;
+};
+
 // 현재 스레드의 OS 이름을 buffer에 UTF-8로 복사하고(NUL 포함) 길이(NUL 제외)를 돌려준다. 이름이
 // 없거나 조회할 수 없거나 capacity가 모자라면 0이다(buffer는 capacity가 0이 아니면 빈 문자열).
 // MaxThreadNameBytes + 1 byte buffer면 Thread::Start로 붙인 이름을 모두 받는다. 진단·시험용이다.

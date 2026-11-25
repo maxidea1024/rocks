@@ -167,8 +167,10 @@ bool PosixGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
     const int maximum = sched_get_priority_max(SCHED_OTHER);
     int policy = 0;
     sched_param parameters{};
+    // ThreadPriority 대응(ThreadOptions)은 SCHED_OTHER 눈금이다. 다른 정책(실시간 RR·FIFO 등)은 그
+    // 눈금으로 읽을 수 없으므로 조회하지 못한 것으로 본다.
     if (minimum < 0 || maximum < minimum ||
-        pthread_getschedparam(pthread_self(), &policy, &parameters) != 0) {
+        pthread_getschedparam(pthread_self(), &policy, &parameters) != 0 || policy != SCHED_OTHER) {
         return false;
     }
 

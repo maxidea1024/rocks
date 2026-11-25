@@ -4,6 +4,7 @@
 #include <Audio/OfflineAudioRender.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Platform/PlatformMath.h>
 #include <Platform/Clock.h>
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Thread.h>
@@ -81,7 +82,13 @@ struct FakeBackendConfig {
     uint32 sampleRate = 0;
     bool overrideLayout = false;
     ChannelLayout layout = ChannelLayout::Stereo;
+    AudioSampleFormat sampleFormat = AudioSampleFormat::Float32;
+    // 0이 아니면 Stop 안에서 콜백을 이만큼(FakeStopFillFrames 이하) 한 번 부른다. 장치가 링을 Stop
+    // 뒤에만 거두는지 본다.
+    uint32 fillOnStop = 0;
 };
+
+constexpr uint32 FakeStopFillFrames = 64;
 
 // 호출 순서를 'O'pen·'S'tart·s'T'op·'C'lose로 기록하는 시험 backend다. 콜백은 시험이
 // log.callback으로 직접 부른다.
@@ -103,7 +110,7 @@ public:
         format.sampleRate = config_.sampleRate != 0 ? config_.sampleRate : request.sampleRate;
         format.layout = config_.overrideLayout ? config_.layout : request.layout;
         format.callbackFrames = request.callbackFrames;
-        format.sampleFormat = AudioSampleFormat::Float32;
+        format.sampleFormat = config_.sampleFormat;
         log_.callback = &callback;
         log_.format = format;
         return Result<AudioOutputFormat>::Success(format);
@@ -121,6 +128,16 @@ public:
 
     Result<void> Stop() noexcept override {
         log_.Add('T');
+        if (config_.fillOnStop != 0 && log_.callback != nullptr) {
+            float buffer[FakeStopFillFrames * 2] = {};
+            AudioOutputView view;
+            view.data = buffer;
+            view.frames = config_.fillOnStop;
+            view.channels = ChannelCount(log_.format.layout);
+            view.format = AudioSampleFormat::Float32;
+            log_.callback->Fill(view);
+        }
+
         return Result<void>::Success();
     }
 
@@ -312,6 +329,30 @@ bool WaitForProgress(Predicate&& predicate) noexcept {
     return true;
 }
 
+// Highest로 만든 스레드가 실제로 받은 우선순위를 읽는다.
+bool HighestThreadPriority(platform::ThreadPriority& priority) noexcept {
+    struct Probe {
+        bool known = false;
+        platform::ThreadPriority priority = platform::ThreadPriority::Normal;
+    } probe;
+    platform::ThreadOptions options;
+    options.name = "AudioPriorityProbe";
+    options.priority = platform::ThreadPriority::Highest;
+    platform::Thread thread;
+    if (thread.Start(
+            [](void* context) noexcept {
+                auto& self = *static_cast<Probe*>(context);
+                self.known = platform::TryGetCurrentThreadPriority(self.priority);
+            },
+            &probe, options) != platform::ThreadStatus::Success ||
+        thread.Join() != platform::ThreadStatus::Success) {
+        return false;
+    }
+
+    priority = probe.priority;
+    return probe.known;
+}
+
 } // namespace
 
 TEST(Audio_Output_BufferCountTable) {
@@ -420,7 +461,8 @@ TEST(Audio_Output_RingInt16Conversion) {
     SystemAllocator allocator;
     AudioOutputRing ring;
     CHECK(ring.Initialize(allocator, 2, 8, 1, nullptr));
-    const float input[8] = {0.0f, 1.0f, -1.0f, 1.5f, -2.0f, 0.5f, -0.5f, 1.0f / 32767.0f * 0.49f};
+    const float input[8] = {0.0f,  1.0f, -1.0f, 1.5f,
+                            -2.0f, 0.5f, -0.5f, platform::PlatformMath::QuietNaN<float>()};
     Span<float> slot = ring.BeginWrite();
     for (usize index = 0; index < slot.Size(); ++index) {
         slot[index] = input[index];
@@ -442,6 +484,7 @@ TEST(Audio_Output_RingInt16Conversion) {
     CHECK(output[4] == -32767);
     CHECK(output[5] == 16384);
     CHECK(output[6] == -16384);
+    // NaN은 0이다.
     CHECK(output[7] == 0);
 
     // Int16 underrun도 무음이다.
@@ -786,6 +829,11 @@ TEST(Audio_Output_RenderThreadRefillsAfterCallback) {
     CHECK(!device->Info().usingNull && device->Info().bufferCount == 2);
     CHECK(ring.WrittenBlocks() == 2);
     CHECK(device->Info().priorityKnown);
+    // AudioRT가 기록한 값은 같은 플랫폼에서 Highest로 만든 스레드가 읽는 값과 같다(OS가 낮췄다면 둘
+    // 다 같이 낮다).
+    platform::ThreadPriority expected = platform::ThreadPriority::Normal;
+    CHECK(HighestThreadPriority(expected));
+    CHECK(device->Info().priority == expected);
 
     float buffer[Block * 2];
     for (uint64 round = 1; round <= 8; ++round) {
@@ -815,6 +863,110 @@ TEST(Audio_Output_TimerNullDeliversThenStops) {
     }
 
     CHECK(output->CallbackCount() == stopped);
+}
+
+TEST(Audio_Output_ThreadModeStartFailureRestartsForNull) {
+    // 스레드 방식에서 실 backend Start가 실패하면 AudioRT를 멈추고 Null로 다시 시작한다. 계수·링은
+    // 앞 시도 것을 남기지 않는다.
+    SystemAllocator allocator;
+    FakeBackendLog log;
+    FakeBackendConfig config;
+    config.startError = ErrorCode::Unsupported;
+    AudioOutputDeviceOptions options;
+    options.nullMode = NullAudioOutputMode::Manual;
+    auto device = OpenOrDie(ConfigOf(), MakeFake(allocator, log, config), RequestOf(Block), options,
+                            allocator);
+    CHECK(device->Info().usingNull && device->Info().backendError == ErrorCode::Unsupported);
+    CHECK(log.CallsAre("OSC"));
+    CHECK(device->Ring().WrittenBlocks() == 2);
+    CHECK(device->RenderCountersSnapshot().renderedBlocks == 2);
+    CHECK(device->Info().priorityKnown);
+
+    const AudioOutputRing& ring = device->Ring();
+    NullAudioOutput* output = device->NullOutput();
+    CHECK(output != nullptr);
+    output->Pump(Block);
+    CHECK(WaitForProgress([&ring]() noexcept { return ring.WrittenBlocks() == 3; }));
+    device->Close();
+    CHECK(device->RenderCountersSnapshot().renderedBlocks == 3);
+    CHECK(device->RingCountersSnapshot().underrunFrames == 0);
+}
+
+TEST(Audio_Output_RingOutlivesBackendStop) {
+    // backend Stop 안에서 부른 콜백도 살아 있는 링을 읽는다(AudioRT 정지·링 해제는 Stop 뒤).
+    SystemAllocator allocator;
+    const AudioRenderMode modes[] = {AudioRenderMode::Manual, AudioRenderMode::Thread};
+    for (AudioRenderMode mode : modes) {
+        FakeBackendLog log;
+        FakeBackendConfig config;
+        config.fillOnStop = FakeStopFillFrames;
+        AudioOutputDeviceOptions options = ManualOptions();
+        options.renderMode = mode;
+        auto device = OpenOrDie(ConfigOf(), MakeFake(allocator, log, config), RequestOf(Block),
+                                options, allocator);
+        CHECK(!device->Info().usingNull);
+        device->Close();
+        CHECK(log.CallsAre("OSTC"));
+        const AudioOutputRingCounters counters = device->RingCountersSnapshot();
+        CHECK(counters.consumedFrames == FakeStopFillFrames && counters.underrunFrames == 0);
+    }
+}
+
+TEST(Audio_Output_Int16BackendReadsRing) {
+    // backend가 Int16만 주면 콜백 보기도 Int16이고 링 복사에서 바꾼다.
+    SystemAllocator allocator;
+    FakeBackendLog log;
+    FakeBackendConfig config;
+    config.sampleFormat = AudioSampleFormat::Int16;
+    auto device = OpenOrDie(ConfigOf(), MakeFake(allocator, log, config), RequestOf(Block),
+                            ManualOptions(), allocator);
+    CHECK(device->Info().format.sampleFormat == AudioSampleFormat::Int16);
+    int16 buffer[Block * 2];
+    for (int16& sample : buffer) {
+        sample = 7;
+    }
+
+    AudioOutputView view;
+    view.data = buffer;
+    view.frames = Block;
+    view.channels = 2;
+    view.format = AudioSampleFormat::Int16;
+    log.callback->Fill(view);
+    // 재생이 없으니 믹서 출력은 무음이다.
+    for (int16 sample : buffer) {
+        CHECK(sample == 0);
+    }
+
+    CHECK(device->RingCountersSnapshot().consumedFrames == Block);
+    CHECK(device->RingCountersSnapshot().underrunFrames == 0);
+}
+
+TEST(Audio_Output_MultichannelMixerConfigRejected) {
+    // AU2 믹서는 Mono·Stereo만 낸다. 다채널 설정은 Null로도 열 수 없어 InvalidArgument다.
+    SystemAllocator allocator;
+    FakeBackendLog log;
+    auto opened = AudioOutputDevice::TryOpen(ConfigOf(Block, ChannelLayout::Surround51),
+                                             MakeFake(allocator, log), RequestOf(Block),
+                                             ManualOptions(), allocator);
+    CHECK(!opened && opened.Error() == ErrorCode::InvalidArgument);
+    CHECK(log.count == 0);
+
+    // 요청의 layout은 쓰지 않고 믹서 설정의 layout을 요청한다.
+    auto mono =
+        OpenOrDie(ConfigOf(Block, ChannelLayout::Mono), MakeFake(allocator, log),
+                  RequestOf(Block, Rate, ChannelLayout::Stereo), ManualOptions(), allocator);
+    CHECK(log.format.layout == ChannelLayout::Mono);
+    CHECK(mono->Mixer().OutputChannelCount() == 1);
+}
+
+TEST(Audio_Output_NullUsesMixerRateWhenUnspecified) {
+    // 요청 rate 0(장치 기본)으로 Null에 가면 믹서 설정의 rate를 쓴다.
+    SystemAllocator allocator;
+    AudioMixerConfig config = ConfigOf();
+    config.sampleRate = 44100;
+    auto device = OpenOrDie(config, nullptr, RequestOf(Block, 0), ManualOptions(), allocator);
+    CHECK(device->Info().usingNull && device->Info().format.sampleRate == 44100);
+    CHECK(device->Mixer().Config().sampleRate == 44100);
 }
 
 } // namespace audio_output_tests_file

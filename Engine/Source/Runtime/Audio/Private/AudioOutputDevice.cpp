@@ -54,8 +54,15 @@ AudioOutputDevice::TryOpen(const AudioMixerConfig& mixerConfig,
         return Result<UniquePtr<AudioOutputDevice>>::Failure(made.Error());
     }
 
+    // AU2 믹서는 Mono·Stereo만 낸다(다채널은 AU9). 설정 오류라 Null로도 같으므로 바로 거부한다.
+    if (!IsSupportedOutputLayout(mixerConfig.layout)) {
+        return Result<UniquePtr<AudioOutputDevice>>::Failure(ErrorCode::InvalidArgument);
+    }
+
     AudioOutputDevice& device = *made.Value();
+    // backend에는 믹서 설정의 layout을 요청한다(request.layout은 쓰지 않는다 — 3.33.4절).
     AudioOutputRequest effective = request;
+    effective.layout = mixerConfig.layout;
     if (effective.callbackFrames == 0) {
         effective.callbackFrames = mixerConfig.blockFrames;
     }
@@ -63,9 +70,10 @@ AudioOutputDevice::TryOpen(const AudioMixerConfig& mixerConfig,
     device.backend_ = Move(backend);
     if (device.backend_) {
         if (auto opened = device.OpenWith(*device.backend_, mixerConfig, effective); !opened) {
-            // 실 backend 실패는 Null로 진행하고 원래 오류를 남긴다(3.33.4절). 설정 오류는 Null로도
-            // 같으므로 그대로 돌려준다.
-            if (opened.Error() == ErrorCode::InvalidArgument) {
+            // 실 backend 실패는 Null로 진행하고 원래 오류를 남긴다(3.33.4절). 설정 오류와 메모리
+            // 부족은 Null로도 같으므로 그대로 돌려준다.
+            if (opened.Error() == ErrorCode::InvalidArgument ||
+                opened.Error() == ErrorCode::OutOfMemory) {
                 return Result<UniquePtr<AudioOutputDevice>>::Failure(opened.Error());
             }
 
@@ -80,7 +88,13 @@ AudioOutputDevice::TryOpen(const AudioMixerConfig& mixerConfig,
     }
 
     if (device.active_ == nullptr) {
-        if (auto opened = device.OpenWith(device.null_, mixerConfig, effective); !opened) {
+        // Null은 장치가 없으므로 rate 0(장치 기본)을 믹서 설정의 rate로 바꾼다.
+        AudioOutputRequest nullRequest = effective;
+        if (nullRequest.sampleRate == 0) {
+            nullRequest.sampleRate = mixerConfig.sampleRate;
+        }
+
+        if (auto opened = device.OpenWith(device.null_, mixerConfig, nullRequest); !opened) {
             return Result<UniquePtr<AudioOutputDevice>>::Failure(opened.Error());
         }
 
@@ -115,7 +129,8 @@ Result<void> AudioOutputDevice::OpenWith(AudioOutputBackend& backend,
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    // 장치가 rate를 정한다(UE와 같다). 믹서 설정의 나머지는 그대로다.
+    // 장치가 rate와 layout(출력 채널 수)을 정한다(UE FMixerDevice와 같다). 믹서 설정의 나머지는
+    // 그대로다.
     AudioMixerConfig config = mixerConfig;
     config.sampleRate = format.Value().sampleRate;
     config.layout = format.Value().layout;
@@ -158,11 +173,13 @@ Result<void> AudioOutputDevice::OpenWith(AudioOutputBackend& backend,
     }
 
     if (auto started = backend.Start(); !started) {
+        // Start가 콜백을 이미 시작한 뒤 실패했을 수 있다. backend를 먼저 닫아(Close는 콜백 종료
+        // 장벽을 포함한다) 링을 읽는 콜백이 없게 한 뒤에 AudioRT·링·믹서를 거둔다.
+        backend.Close();
         render_.Stop();
         render_.Shutdown();
         ring_.Shutdown();
         mixer_ = NullOpt;
-        backend.Close();
         return Result<void>::Failure(started.Error() == ErrorCode::InvalidArgument
                                          ? ErrorCode::Unsupported
                                          : started.Error());
