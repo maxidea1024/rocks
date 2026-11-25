@@ -118,7 +118,7 @@
     "external/deflate/lib/x86/adler32_impl.h": "7c9cbed664a6527900188064999f5bd62878bb70a1598d04513e3e7236e9a0a7",
     "external/deflate/lib/x86/adler32_template.h": "8e5d14f8e596bd54bea188b6ff5c96649329beeebd9acdd59307a5202206d11e",
     "external/deflate/lib/x86/cpu_features.c": "9ed976e4c66478e8b6a8856424816147a971f75894c66f03274ab8119074dde0",
-    "external/deflate/lib/x86/cpu_features.h": "7bfbea8cd8e801209771f2190f27bbd3d4e386ce13dd8401a2c276e5bccd1593",
+    "external/deflate/lib/x86/cpu_features.h": "3a9700ce1a8cc23bbedaae348fb7e9ceb0894a80ca2c96a44f3849be8eb6191f",
     "external/deflate/lib/x86/crc32_impl.h": "5da090b17f96f499e3ace6852f3bfc74934ca847e7a41572e2eb3cf36c23f765",
     "external/deflate/lib/x86/crc32_pclmul_template.h": "f0aa09cf49fd77e1f95c360f8edddd3a17725b8ea92f92c70efe50a182f51d72",
     "external/deflate/lib/x86/decompress_impl.h": "81ab9fd7d4723fdc7ae81dca82f817bcecb7baf5bdfffde0ccfbba70569ac2f1",
@@ -131,11 +131,11 @@
     "src/lib/OpenEXRCore/ImathConfig.h": "697514e26459b8f842341e2db5b2c244ad4bdea3fb898000fcea35d9ff946245",
     "src/lib/OpenEXRCore/OpenEXRConfig.h": "0d9daf4306079816b7343a05c4428862092c107527b7b6bbea665a6de7dc5d36",
     "src/lib/OpenEXRCore/OpenEXRConfigInternal.h": "3b5094e1c214487738a87d0df9d219cd936d9313c2e72bd2c65c65022391f178",
-    "src/lib/OpenEXRCore/attributes.c": "f7a985bb09d148c2bc7a208b0ca71db32b2c6a659e5fbb27033b9e70fac9316f",
+    "src/lib/OpenEXRCore/attributes.c": "cce726be0a249f797fc7213514e0eda3a5f398f69b3f22e296dd38cae1a326b1",
     "src/lib/OpenEXRCore/backward_compatibility.h": "000ff3bbf49265904955f2fceec8bd836a4c0d19d02fd000730987a2fb3b7a07",
     "src/lib/OpenEXRCore/base.c": "d483080706524195b237b56d61ca66d9286cc4026c3c7bb1c8fb58615341f8e5",
     "src/lib/OpenEXRCore/bytes.c": "5cb337e0507d11af9a2728465fc6aaf3cb80e9719bd39f661e9f2f900bd24e1a",
-    "src/lib/OpenEXRCore/channel_list.c": "44b8be85def0fdcd819ec5166e4d5380fafc38ea11c79ba3bb9d53abdd339d48",
+    "src/lib/OpenEXRCore/channel_list.c": "444d9f69d7e7fbe736ab8eb001c5341db7fe928ed5036d778374290366a98923",
     "src/lib/OpenEXRCore/chunk.c": "47c4885e97808a8432a305622027887b65a89b68cf5403dfef70af1d03de1c47",
     "src/lib/OpenEXRCore/coding.c": "c47e68a14a501d81b7cca9cff2ff067dc9a43164a7c7100a07d188b935a2dae7",
     "src/lib/OpenEXRCore/compression.c": "1be344b4d72d94f130818e3e6ee42402ebd84bc349cda07ac06ed003d38deba7",
@@ -177,11 +177,11 @@
     "src/lib/OpenEXRCore/internal_string.h": "da7973a00a5346f5482506c9a06b0502ded441df48884834c2f953d7761f8ea3",
     "src/lib/OpenEXRCore/internal_string_vector.h": "faa9565a911ab5e6c9ecdaf3e2c5f5f88ae74e65d79006555ef4e0b49ab01744",
     "src/lib/OpenEXRCore/internal_structs.c": "6b29102071da2b77e98b6202b756fa7f77252de5310a39be9e14bfd1d8454f36",
-    "src/lib/OpenEXRCore/internal_structs.h": "6b7d22abc0f08f411d667613488ec6b45c65259c82d954c636f0c15186c4b53f",
-    "src/lib/OpenEXRCore/internal_util.h": "351c80f1729cc52b68ffcc02fcfb3e54e72badc5f7899700410df39cf737e34c",
-    "src/lib/OpenEXRCore/internal_win32_file_impl.h": "bb646feb8aad5e58b3994e427bd1606f62736f4dc3fef0ea2aed3d430b143c54",
+    "src/lib/OpenEXRCore/internal_structs.h": "bf95f43035edf705ac889ebf1d35e27722e77cc782d9e8316bb28384fdf2e5f0",
+    "src/lib/OpenEXRCore/internal_util.h": "5333fdc6050342ab673a6b8a676fdce098480b2182ceb0685878c6a4ae7e7374",
+    "src/lib/OpenEXRCore/internal_win32_file_impl.h": "68f267dc2ab905dd4d9c8bd3005f7def76ccc60fe5af97fdcd208a48a7bb9eca",
     "src/lib/OpenEXRCore/internal_xdr.h": "1056506d514718451b37005a836be5bb74e3dc3c018e44955de5e85ea22f2cba",
-    "src/lib/OpenEXRCore/internal_zip.c": "637c402d6367aa09e4417ec60ea6fe222a9dbd0d3be9d1f8c0551efb3b489a47",
+    "src/lib/OpenEXRCore/internal_zip.c": "07e37f00b5b615b1d53c5e5c4a302845f89ccac77f08a62eed70d81f8729f58c",
     "src/lib/OpenEXRCore/memory.c": "3ec42e4f76d8e9fbc00f1e14c7a8f49c50326f63817102f5c9af72a0612773be",
     "src/lib/OpenEXRCore/opaque.c": "a207aa80ae1ca4fb6bdfee255b407eeb08f75de0ea3c3f13a424af86572c52da",
     "src/lib/OpenEXRCore/openexr.h": "64112b55030b83dc5826db78d5ff05bd72d31bb9aed8bef268b8ba63c5649824",
@@ -200,7 +200,7 @@
     "src/lib/OpenEXRCore/openexr_std_attr.h": "3788e8a5a876f35d483997e3e067334eb0220c17e21377a923a20b4dee6b15fb",
     "src/lib/OpenEXRCore/openexr_version.h": "6ceb2be313895d00aaba0ba5d0dbb60dd2ded1f972d3594a796f965086bc5bdb",
     "src/lib/OpenEXRCore/pack.c": "a02c63d481a0890e554f109a0b7cc43d9a9806cf5690b4d8e243656dd96c7b31",
-    "src/lib/OpenEXRCore/parse_header.c": "0c0dc41d85f40e16a199fd11b44c32ed81004768d1d074f5751bcf71e81f7414",
+    "src/lib/OpenEXRCore/parse_header.c": "17dd1b23911154b6186e9413a50df6d80bd071236fc0ffb3f4057a8aaf81187c",
     "src/lib/OpenEXRCore/part.c": "88a315711c041ba7a0562ca8b4c049ae54258e3338aea3009135d8dca28afd20",
     "src/lib/OpenEXRCore/part_attr.c": "86eea0595c622d78b43507b2ade5ca51abd72d3f718bcb931eb74b22c5b12afe",
     "src/lib/OpenEXRCore/preview.c": "33d73c9a39ce200308c46d10541c01d1a17b3b8bf9c1e03746cb119856fe9b67",
@@ -391,6 +391,46 @@
       "file": "src/lib/OpenEXRCore/ImathConfig.h",
       "upstreamSha256": null,
       "reason": "Stand-in for the Imath configuration header that openexr_config.h includes: Imath is not imported and its version macros stay undefined, so internal_coding.h uses the half conversion built into OpenEXRCore (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "external/deflate/lib/x86/cpu_features.h",
+      "upstreamSha256": "7bfbea8cd8e801209771f2190f27bbd3d4e386ce13dd8401a2c276e5bccd1593",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/attributes.c",
+      "upstreamSha256": "f7a985bb09d148c2bc7a208b0ca71db32b2c6a659e5fbb27033b9e70fac9316f",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/channel_list.c",
+      "upstreamSha256": "44b8be85def0fdcd819ec5166e4d5380fafc38ea11c79ba3bb9d53abdd339d48",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/internal_structs.h",
+      "upstreamSha256": "6b7d22abc0f08f411d667613488ec6b45c65259c82d954c636f0c15186c4b53f",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/internal_util.h",
+      "upstreamSha256": "351c80f1729cc52b68ffcc02fcfb3e54e72badc5f7899700410df39cf737e34c",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/internal_win32_file_impl.h",
+      "upstreamSha256": "bb646feb8aad5e58b3994e427bd1606f62736f4dc3fef0ea2aed3d430b143c54",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/internal_zip.c",
+      "upstreamSha256": "637c402d6367aa09e4417ec60ea6fe222a9dbd0d3be9d1f8c0551efb3b489a47",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
+    },
+    {
+      "file": "src/lib/OpenEXRCore/parse_header.c",
+      "upstreamSha256": "0c0dc41d85f40e16a199fd11b44c32ed81004768d1d074f5751bcf71e81f7414",
+      "reason": "Build-clean under clang 22 /W4 /WX: (void) casts for unused parameters, {0} zero initializers, LONG64 casts for the Interlocked*64 calls, explicit casts for signed/unsigned comparisons and printf arguments, SSE4.1 path only with __SSE4_1__ (the x86-64 baseline is SSE2; clang-cl also defines _MSC_VER), and no evex512 target feature on clang 22+"
     }
   ],
   "patch": "Rocks.patch"

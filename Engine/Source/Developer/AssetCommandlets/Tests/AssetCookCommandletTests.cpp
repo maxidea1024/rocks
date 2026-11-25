@@ -4,6 +4,7 @@
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCooker/CookArtifacts.h>
 #include <AssetCooker/CookConfig.h>
+#include <AssetCooker/CookPublish.h>
 #include <AssetCooker/CookRootLock.h>
 #include <Core/FileRead.h>
 #include <HostConfig/HostSettings.h>

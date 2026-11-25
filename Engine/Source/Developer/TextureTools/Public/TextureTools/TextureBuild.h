@@ -67,7 +67,7 @@ struct TextureBuildResult {
         : mips(allocator), warnings(allocator) {
     }
 
-    PixelFormat pixelFormat = PixelFormat::Unknown;
+    graphics::PixelFormat pixelFormat = graphics::PixelFormat::Unknown;
     bool srgb = false;
     TextureSwizzle swizzle[4] = {TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::B,
                                  TextureSwizzle::A};
@@ -87,7 +87,7 @@ inline constexpr usize TextureBuildMaxWarnings = 2;
 
 // 출력 형식이다(12.4.3절 표·norm16 대체·sRGB 확장 — BuildTexture 결과와 같다).
 struct TextureBuildOutputInfo {
-    PixelFormat pixelFormat = PixelFormat::Unknown;
+    graphics::PixelFormat pixelFormat = graphics::PixelFormat::Unknown;
     bool srgb = false;
     TextureSwizzle swizzle[4] = {TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::B,
                                  TextureSwizzle::A};

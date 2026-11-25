@@ -18,6 +18,8 @@
 using namespace rocks;
 namespace texture_type_tests_file {
 
+using graphics::PixelFormat;
+
 namespace {
 
 struct TextureFixture {
@@ -389,7 +391,7 @@ TEST(Texture_GraphRoundTrip) {
             auto saved =
                 SaveObjectGraph(allocator, source, access, created.Value().Handle(), options);
             REQUIRE(saved);
-            const Array<uint8> bytes = saved.Value().TakeBytes();
+            const Array<uint8> bytes = Move(saved.Value());
             ObjectRegistry target(allocator, fixture.types, {0x5458, 5});
             auto loaded = LoadObjectGraph(allocator, target, fixture.types, target.OwnerAccess(),
                                           bytes.View());

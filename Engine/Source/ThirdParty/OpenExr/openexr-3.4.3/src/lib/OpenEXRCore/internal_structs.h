@@ -64,7 +64,7 @@ atomic_load (
 #        if UINTPTR_MAX == 0xFFFFFFFF
     return (uintptr_t) InterlockedOr (object, 0);
 #        else
-    return (uintptr_t) InterlockedOr64 (object, 0);
+    return (uintptr_t) InterlockedOr64 ((LONG64 volatile*) object, 0);
 #        endif
 }
 
@@ -77,7 +77,8 @@ atomic_compare_exchange_strong (
         (uintptr_t) InterlockedCompareExchange (object, desired, *expected);
 #        else
     uintptr_t prev =
-        (uintptr_t) InterlockedCompareExchange64 (object, desired, *expected);
+        (uintptr_t) InterlockedCompareExchange64 (
+            (LONG64 volatile*) object, (LONG64) desired, (LONG64) *expected);
 #        endif
     if (prev == *expected) return 1;
     *expected = prev;
@@ -252,6 +253,7 @@ struct _priv_exr_context_t
 static inline void
 internal_exr_lock (exr_const_context_t c)
 {
+  (void)c;
 #ifdef ILMTHREAD_THREADING_ENABLED
     exr_context_t nonc = EXR_CONST_CAST (exr_context_t, c);
 #    ifdef _WIN32
@@ -265,6 +267,7 @@ internal_exr_lock (exr_const_context_t c)
 static inline void
 internal_exr_unlock (exr_const_context_t c)
 {
+  (void)c;
 #ifdef ILMTHREAD_THREADING_ENABLED
     exr_context_t nonc = EXR_CONST_CAST (exr_context_t, c);
 #    ifdef _WIN32

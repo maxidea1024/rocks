@@ -232,7 +232,13 @@ Result<void> ApplyConfigJsonFile(Allocator& allocator, platform::FileSystem& fil
         return Result<void>::Failure(prepared.Error());
     }
 
-    return prepared.Value().Publish();
+    // 값 대상이라 게시 결과(옛 값)는 바로 버린다.
+    auto published = prepared.Value().Publish();
+    if (!published) {
+        return Result<void>::Failure(published.Error());
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> ReadTargetProfile(const TargetProfileContext& context, StringView id,

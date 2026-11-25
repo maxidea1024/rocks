@@ -354,7 +354,7 @@ Result<int32> WriteDiagnostics(CommandletOutput& output, Allocator& allocator,
 Result<int32> WriteCookOutcome(CommandletOutput& output, Allocator& allocator,
                                platform::FileSystem& files, const AssetIndex* index,
                                Span<const StringView> paths, StringView root, StringView profile,
-                               bool json, Result<void> cooked,
+                               bool json, const Result<void>& cooked,
                                const CookProjectResult& result) noexcept {
     if (!cooked) {
         if (cooked.Error() == ErrorCode::OutOfMemory) {

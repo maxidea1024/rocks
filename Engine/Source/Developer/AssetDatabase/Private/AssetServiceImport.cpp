@@ -128,8 +128,8 @@ bool IsOutputKey(StringView key) noexcept {
 // 다른 역할을 byte 순으로. 가변만 받는 임포터는 원본이 하나 이상이다(0개면 bad = 0). 위반이면
 // bad에 그 번호(빠진 고정 역할이면 count + 그 고정 역할 번호)를 두고 거짓이다. 오류: 할당 실패.
 template <class RoleAt>
-Result<bool> OrderImportRoles(Allocator& allocator, const AssetImporterInfo& info, usize count,
-                              RoleAt roleAt, Array<usize>& order, usize& bad) noexcept {
+Result<bool> OrderImportRoles(const AssetImporterInfo& info, usize count, RoleAt roleAt,
+                              Array<usize>& order, usize& bad) noexcept {
     order.Clear();
     const StringView defaultRole = DefaultImportSourceRole;
     const Span<const StringView> fixed = info.variableSourcesOnly ? Span<const StringView>()
@@ -467,7 +467,11 @@ public:
             step = tag.value.TryAssign(value);
         }
 
-        return step ? tags_.TryPushBack(rocks::Move(tag)) : step;
+        if (!step) {
+            return step;
+        }
+
+        return tags_.TryPushBack(rocks::Move(tag));
     }
 
     Span<const ImportTag> PreviousTags() const noexcept override {
@@ -926,7 +930,7 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
             // 일 전부터 열려 있고 저장하지 않은 편집이 있으면 그 편집까지 저장하게 되므로 Busy다
             // (재임포트 구성원의 Busy 규칙과 같다).
             const usize at =
-                algo::LowerBound(before, referencer->id, [](AssetId left, AssetId key) noexcept {
+                algo::LowerBound(before.View(), referencer->id, [](AssetId left, AssetId key) noexcept {
                     return GuidLess(left.value, key.value);
                 });
             const bool wasOpen = at < before.Size() && before[at] == referencer->id;
@@ -1313,7 +1317,7 @@ Result<void> AssetService::PrepareImport(ImportRun& run, AssetDiagnostic* failur
     Array<usize> order(allocator);
     usize badRole = 0;
     auto roleCheck = OrderImportRoles(
-        allocator, info, sources.Size(), [&](usize at) noexcept { return sources[at].role; }, order,
+        info, sources.Size(), [&](usize at) noexcept { return sources[at].role; }, order,
         badRole);
     if (!roleCheck) {
         return FailImport<void>(failure, AssetDiagnosticCode::None, roleCheck.Error());
@@ -1887,7 +1891,7 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
         const auto roleAt = [&](usize at) noexcept {
             return single ? onlyRole : overrides[at].role;
         };
-        auto checked = OrderImportRoles(allocator, info, overrides.Size(), roleAt, order, badRole);
+        auto checked = OrderImportRoles(info, overrides.Size(), roleAt, order, badRole);
         if (!checked) {
             return FailImport<void>(failure, AssetDiagnosticCode::None, checked.Error(), mainId);
         }
@@ -1907,7 +1911,7 @@ Result<void> AssetService::PrepareReimport(ImportRun& run, Span<const AssetId> b
         }
     } else {
         auto checked = OrderImportRoles(
-            allocator, info, recorded.sources.Size(),
+            info, recorded.sources.Size(),
             [&](usize at) noexcept { return recorded.sources[at].role.View(); }, order, badRole);
         if (!checked) {
             return FailImport<void>(failure, AssetDiagnosticCode::None, checked.Error(), mainId);

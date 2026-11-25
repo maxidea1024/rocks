@@ -17,6 +17,14 @@ namespace exr_decode_tests_file {
 
 namespace {
 
+// 빈 encode pipeline이다(EXR_ENCODE_PIPELINE_INITIALIZER와 같은 값 — 매크로의 부분 초기화는
+// -Wmissing-field-initializers에 걸린다).
+exr_encode_pipeline_t EmptyEncodePipeline() noexcept {
+    exr_encode_pipeline_t pipeline{};
+    pipeline.pipe_size = sizeof(exr_encode_pipeline_t);
+    return pipeline;
+}
+
 constexpr usize TestBlockHeader = 16;
 
 void* TestExrAllocate(size_t bytes) noexcept {
@@ -171,7 +179,7 @@ Array<uint8> WriteExr(Allocator& allocator, const ExrSpec& spec) noexcept {
     CHECK(zeros.TryResize(static_cast<usize>(spec.width) * spec.height * 4));
     platform::MemoryZero(zeros.Data(), zeros.Size());
     for (int part = 0; part < spec.parts; ++part) {
-        exr_encode_pipeline_t pipeline = EXR_ENCODE_PIPELINE_INITIALIZER;
+        exr_encode_pipeline_t pipeline = EmptyEncodePipeline();
         bool initialized = false;
         if (spec.tiled) {
             int32_t levelsX = 1;

@@ -409,7 +409,7 @@ static int TIFFjpeg_start_decompress(JPEGState *sp)
     sp->cinfo.d.progress = &sp->progress;
     sp->progress.progress_monitor = TIFFjpeg_progress_monitor;
     sp->otherSettings.max_allowed_scan_number = 100;
-    sz_max_allowed_scan_number = getenv("LIBTIFF_JPEG_MAX_ALLOWED_SCAN_NUMBER");
+    sz_max_allowed_scan_number = ((const char *)NULL) /* Rocks: no environment override */;
     if (sz_max_allowed_scan_number)
         sp->otherSettings.max_allowed_scan_number =
             atoi(sz_max_allowed_scan_number);
@@ -1339,7 +1339,7 @@ static int JPEGComputeStrileWidthHeightBytesPerLine(TIFF *tif, uint16_t s)
 
         if (sp->cinfo.d.mem->max_memory_to_use > 0 &&
             nRequiredMemory > (toff_t)(sp->cinfo.d.mem->max_memory_to_use) &&
-            getenv("LIBTIFF_ALLOW_LARGE_LIBJPEG_MEM_ALLOC") == NULL)
+            ((const char *)NULL) /* Rocks: no environment override */ == NULL)
         {
             TIFFErrorExtR(
                 tif, module,
@@ -2803,7 +2803,7 @@ static int JPEGInitializeLibJPEG(TIFF *tif, int decompress)
         if (sp->cinfo.c.mem->max_memory_to_use > 0)
         {
             /* This is to address bug related in ticket GDAL #1795. */
-            if (getenv("JPEGMEM") == NULL)
+            if (((const char *)NULL) /* Rocks: no environment override */ == NULL)
             {
                 /* Increase the max memory usable. This helps when creating
                  * files */

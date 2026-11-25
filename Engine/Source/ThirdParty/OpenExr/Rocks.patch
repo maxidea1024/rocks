@@ -88,3 +88,157 @@ new file mode 100644
 +#pragma once
 +
 +#endif /* INCLUDED_IMATH_CONFIG_H */
+diff --git a/external/deflate/lib/x86/cpu_features.h b/external/deflate/lib/x86/cpu_features.h
+--- a/external/deflate/lib/x86/cpu_features.h
++++ b/external/deflate/lib/x86/cpu_features.h
+@@ -165,7 +165,7 @@ static inline u32 get_x86_cpu_features(void) { return 0; }
+ #  define HAVE_AVXVNNI(features)	((features) & X86_CPU_FEATURE_AVXVNNI)
+ #endif
+ 
+-#if (GCC_PREREQ(14, 0) || CLANG_PREREQ(18, 0, 18000000)) \
++#if (GCC_PREREQ(14, 0) || (CLANG_PREREQ(18, 0, 18000000) && !CLANG_PREREQ(22, 0, 22000000))) \
+ 	&& !defined(__EVEX512__) /* avoid subtracting the evex512 feature */
+ #  define EVEX512	",evex512"	/* needed to override potential -mno-evex512 */
+ #  define NO_EVEX512	",no-evex512"
+diff --git a/src/lib/OpenEXRCore/attributes.c b/src/lib/OpenEXRCore/attributes.c
+--- a/src/lib/OpenEXRCore/attributes.c
++++ b/src/lib/OpenEXRCore/attributes.c
+@@ -69,12 +69,12 @@ attr_init (exr_context_t ctxt, exr_attribute_t* nattr)
+     switch (nattr->type)
+     {
+         case EXR_ATTR_BOX2I: {
+-            exr_attr_box2i_t nil = {{0}};
++            exr_attr_box2i_t nil = {0};
+             *(nattr->box2i)      = nil;
+             break;
+         }
+         case EXR_ATTR_BOX2F: {
+-            exr_attr_box2f_t nil = {{0}};
++            exr_attr_box2f_t nil = {0};
+             *(nattr->box2f)      = nil;
+             break;
+         }
+diff --git a/src/lib/OpenEXRCore/channel_list.c b/src/lib/OpenEXRCore/channel_list.c
+--- a/src/lib/OpenEXRCore/channel_list.c
++++ b/src/lib/OpenEXRCore/channel_list.c
+@@ -80,7 +80,7 @@ exr_attr_chlist_add_with_length (
+     int32_t                    xsamp,
+     int32_t                    ysamp)
+ {
+-    exr_attr_chlist_entry_t  nent = {{0}};
++    exr_attr_chlist_entry_t  nent = {0};
+     exr_attr_chlist_entry_t *nlist, *olist;
+     int                      newcount, insertpos;
+     int32_t                  maxlen;
+diff --git a/src/lib/OpenEXRCore/internal_structs.h b/src/lib/OpenEXRCore/internal_structs.h
+--- a/src/lib/OpenEXRCore/internal_structs.h
++++ b/src/lib/OpenEXRCore/internal_structs.h
+@@ -64,7 +64,7 @@ atomic_load (
+ #        if UINTPTR_MAX == 0xFFFFFFFF
+     return (uintptr_t) InterlockedOr (object, 0);
+ #        else
+-    return (uintptr_t) InterlockedOr64 (object, 0);
++    return (uintptr_t) InterlockedOr64 ((LONG64 volatile*) object, 0);
+ #        endif
+ }
+ 
+@@ -77,7 +77,8 @@ atomic_compare_exchange_strong (
+         (uintptr_t) InterlockedCompareExchange (object, desired, *expected);
+ #        else
+     uintptr_t prev =
+-        (uintptr_t) InterlockedCompareExchange64 (object, desired, *expected);
++        (uintptr_t) InterlockedCompareExchange64 (
++            (LONG64 volatile*) object, (LONG64) desired, (LONG64) *expected);
+ #        endif
+     if (prev == *expected) return 1;
+     *expected = prev;
+@@ -252,6 +253,7 @@ struct _priv_exr_context_t
+ static inline void
+ internal_exr_lock (exr_const_context_t c)
+ {
++  (void)c;
+ #ifdef ILMTHREAD_THREADING_ENABLED
+     exr_context_t nonc = EXR_CONST_CAST (exr_context_t, c);
+ #    ifdef _WIN32
+@@ -265,6 +267,7 @@ internal_exr_lock (exr_const_context_t c)
+ static inline void
+ internal_exr_unlock (exr_const_context_t c)
+ {
++  (void)c;
+ #ifdef ILMTHREAD_THREADING_ENABLED
+     exr_context_t nonc = EXR_CONST_CAST (exr_context_t, c);
+ #    ifdef _WIN32
+diff --git a/src/lib/OpenEXRCore/internal_util.h b/src/lib/OpenEXRCore/internal_util.h
+--- a/src/lib/OpenEXRCore/internal_util.h
++++ b/src/lib/OpenEXRCore/internal_util.h
+@@ -46,6 +46,7 @@ compute_sampled_height (int height, int y_sampling, int start_y)
+ static inline int
+ compute_sampled_width (int width, int x_sampling, int start_x)
+ {
++    (void)start_x;
+     /*
+      * we require that the start_x % x_sampling == 0 and for tiled images (and for deep),
+      * x_sampling must be 1, so this can simplify the math compared to the y case
+diff --git a/src/lib/OpenEXRCore/internal_win32_file_impl.h b/src/lib/OpenEXRCore/internal_win32_file_impl.h
+--- a/src/lib/OpenEXRCore/internal_win32_file_impl.h
++++ b/src/lib/OpenEXRCore/internal_win32_file_impl.h
+@@ -103,6 +103,8 @@ struct _internal_exr_filehandle
+ static void
+ default_shutdown (exr_const_context_t c, void* userdata, int failed)
+ {
++    (void)c;
++    (void)failed;
+     /* we will handle failure before here */
+     struct _internal_exr_filehandle* fh = userdata;
+     if (fh)
+@@ -388,6 +390,7 @@ default_init_write_file (exr_context_t file)
+ static int64_t
+ default_query_size_func (exr_const_context_t ctxt, void* userdata)
+ {
++    (void)ctxt;
+     struct _internal_exr_filehandle* fh = userdata;
+     int64_t                          sz = -1;
+ 
+diff --git a/src/lib/OpenEXRCore/internal_zip.c b/src/lib/OpenEXRCore/internal_zip.c
+--- a/src/lib/OpenEXRCore/internal_zip.c
++++ b/src/lib/OpenEXRCore/internal_zip.c
+@@ -20,7 +20,7 @@
+ #    include <emmintrin.h>
+ #    include <mmintrin.h>
+ #endif
+-#if defined __SSE4_1__ || (_MSC_VER >= 1300 && (_M_IX86 || _M_X64))
++#if defined __SSE4_1__
+ #    define IMF_HAVE_SSE4_1 1
+ #    include <smmintrin.h>
+ #endif
+diff --git a/src/lib/OpenEXRCore/parse_header.c b/src/lib/OpenEXRCore/parse_header.c
+--- a/src/lib/OpenEXRCore/parse_header.c
++++ b/src/lib/OpenEXRCore/parse_header.c
+@@ -130,7 +130,7 @@ scratch_seq_read (struct _internal_exr_seq_scratch* scr, void* buf, uint64_t sz)
+ 
+             if (scr->ctxt->file_size > 0)
+             {
+-                if ((scr->fileoff + SCRATCH_BUFFER_SIZE) > scr->ctxt->file_size)
++                if ((scr->fileoff + SCRATCH_BUFFER_SIZE) > (uint64_t) scr->ctxt->file_size)
+                 {
+                     toread = scr->ctxt->file_size - scr->fileoff;
+                 }
+@@ -768,15 +768,15 @@ extract_attr_bytes(
+ 
+     exr_attr_bytes_destroy(ctxt, attrdata);
+ 
+-    if (attrsz < sizeof(uint32_t))
++    if (attrsz < (int32_t) sizeof(uint32_t))
+         return ctxt->print_error (
+             ctxt,
+             EXR_ERR_ATTR_SIZE_MISMATCH,
+-            "Attribute '%s': Invalid size %d (exp '%s' size >= %ld)",
++            "Attribute '%s': Invalid size %d (exp '%s' size >= %d)",
+             aname,
+             attrsz,
+             tname,
+-            sizeof(uint32_t));
++            (int) sizeof(uint32_t));
+ 
+     rv = scratch->sequential_read (scratch, &hint_length, sizeof (uint32_t));
+     if (rv != EXR_ERR_SUCCESS)

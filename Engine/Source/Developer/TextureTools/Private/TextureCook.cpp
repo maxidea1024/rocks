@@ -16,6 +16,10 @@
 
 // 텍스처 쿠킹 처리기다(Docs/Design/AssetSystem 12.14절 — A5j1).
 namespace rocks {
+
+using graphics::IsValidPixelFormat;
+using graphics::PixelFormatFromNumber;
+using graphics::PixelFormatImageBytes;
 namespace {
 
 using reflection_text::AssignmentTarget;
@@ -792,7 +796,7 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
                                       resident, facts.sampler, bulk, tail);
     }
 
-    Result<void> cooked = filled;
+    Result<void> cooked = Result<void>::Success();
     if (filled) {
         CookContext write = context;
         write.bulkSource = &bulk;

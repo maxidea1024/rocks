@@ -129,9 +129,9 @@ Result<void> AssetCommandTypes::Start() noexcept {
     return Result<void>::Success();
 }
 
-const char* AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept {
+StringView AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept {
     return code == reflection_text::TextDiagnosticCode::HiddenEnumerator
-               ? AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting)
+               ? StringView(AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting))
                : reflection_text::TextDiagnosticCodeName(code);
 }
 

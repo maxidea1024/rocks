@@ -393,12 +393,11 @@ diff --git a/src/rocksjpeg.c b/src/rocksjpeg.c
 new file mode 100644
 --- /dev/null
 +++ b/src/rocksjpeg.c
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,145 @@
 +/* Rocks interface to libjpeg-turbo 3.2.1 (Docs/Design/AssetSystem section 12.11). See rocksjpeg.h. */
 +#define JPEG_INTERNALS
 +#include "jinclude.h"
 +#include "jpeglib.h"
-+#include "jpegint.h"
 +#include "rocksjpeg.h"
 +
 +#include <limits.h>
@@ -540,3 +539,508 @@ new file mode 100644
 +  jpeg_destroy_decompress(&cinfo);
 +  return ROCKS_JPEG_OK;
 +}
+diff --git a/src/jccoefct.c b/src/jccoefct.c
+--- a/src/jccoefct.c
++++ b/src/jccoefct.c
+@@ -358,6 +358,7 @@ compress_first_pass(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
+ METHODDEF(boolean)
+ compress_output(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
+ {
++  (void)input_buf;
+   my_coef_ptr coef = (my_coef_ptr)cinfo->coef;
+   JDIMENSION MCU_col_num;       /* index of current MCU within row */
+   int blkn, ci, xindex, yindex, yoffset;
+diff --git a/src/jccolext.c b/src/jccolext.c
+--- a/src/jccolext.c
++++ b/src/jccolext.c
+@@ -32,6 +32,10 @@ LOCAL(void)
+ rgb_ycc_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+                 _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
+ {
++  (void)input_buf;
++  (void)num_rows;
++  (void)output_buf;
++  (void)output_row;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+@@ -89,6 +93,10 @@ LOCAL(void)
+ rgb_gray_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+                  _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
+ {
++  (void)input_buf;
++  (void)num_rows;
++  (void)output_buf;
++  (void)output_row;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+diff --git a/src/jccolor.c b/src/jccolor.c
+--- a/src/jccolor.c
++++ b/src/jccolor.c
+@@ -262,6 +262,10 @@ METHODDEF(void)
+ cmyk_ycck_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+                   _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
+ {
++  (void)input_buf;
++  (void)num_rows;
++  (void)output_buf;
++  (void)output_row;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+@@ -405,6 +409,7 @@ null_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+ METHODDEF(void)
+ null_method(j_compress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work needed */
+ }
+ 
+diff --git a/src/jcdiffct.c b/src/jcdiffct.c
+--- a/src/jcdiffct.c
++++ b/src/jcdiffct.c
+@@ -311,6 +311,7 @@ compress_first_pass(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
+ METHODDEF(boolean)
+ compress_output(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
+ {
++  (void)input_buf;
+   my_diff_ptr diff = (my_diff_ptr)cinfo->coef;
+   int ci, compi;
+   _JSAMPARRAY buffer[MAX_COMPONENTS];
+diff --git a/src/jclossls.c b/src/jclossls.c
+--- a/src/jclossls.c
++++ b/src/jclossls.c
+@@ -195,6 +195,7 @@ jpeg_difference_first_row(j_compress_ptr cinfo, int ci,
+                           _JSAMPROW input_buf, _JSAMPROW prev_row,
+                           JDIFFROW diff_buf, JDIMENSION width)
+ {
++  (void)prev_row;
+   DIFFERENCE_1D(INITIAL_PREDICTORx);
+ 
+   /*
+@@ -269,6 +270,7 @@ METHODDEF(void)
+ noscale(j_compress_ptr cinfo,
+         _JSAMPROW input_buf, _JSAMPROW output_buf, JDIMENSION width)
+ {
++  (void)cinfo;
+   memcpy(output_buf, input_buf, width * sizeof(_JSAMPLE));
+ }
+ 
+diff --git a/src/jcmaster.c b/src/jcmaster.c
+--- a/src/jcmaster.c
++++ b/src/jcmaster.c
+@@ -164,6 +164,7 @@ LOCAL(void)
+ initial_setup(j_compress_ptr cinfo, boolean transcode_only)
+ /* Do computations that are needed before master selection phase */
+ {
++  (void)transcode_only;
+   int ci;
+   jpeg_component_info *compptr;
+   long samplesperrow;
+diff --git a/src/jcsample.c b/src/jcsample.c
+--- a/src/jcsample.c
++++ b/src/jcsample.c
+@@ -87,6 +87,7 @@ typedef my_downsampler *my_downsample_ptr;
+ METHODDEF(void)
+ start_pass_downsample(j_compress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work for now */
+ }
+ 
+diff --git a/src/jctrans.c b/src/jctrans.c
+--- a/src/jctrans.c
++++ b/src/jctrans.c
+@@ -296,6 +296,7 @@ start_pass_coef(j_compress_ptr cinfo, J_BUF_MODE pass_mode)
+ METHODDEF(boolean)
+ compress_output(j_compress_ptr cinfo, JSAMPIMAGE input_buf)
+ {
++  (void)input_buf;
+   my_coef_ptr coef = (my_coef_ptr)cinfo->coef;
+   JDIMENSION MCU_col_num;       /* index of current MCU within row */
+   JDIMENSION last_MCU_col = cinfo->MCUs_per_row - 1;
+diff --git a/src/jdapistd.c b/src/jdapistd.c
+--- a/src/jdapistd.c
++++ b/src/jdapistd.c
+@@ -380,6 +380,11 @@ LOCAL(void)
+ noop_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+              JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)cinfo;
++  (void)input_buf;
++  (void)input_row;
++  (void)num_rows;
++  (void)output_buf;
+ }
+ 
+ 
+@@ -388,6 +393,10 @@ LOCAL(void)
+ noop_quantize(j_decompress_ptr cinfo, _JSAMPARRAY input_buf,
+               _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)cinfo;
++  (void)input_buf;
++  (void)num_rows;
++  (void)output_buf;
+ }
+ 
+ 
+diff --git a/src/jdatadst.c b/src/jdatadst.c
+--- a/src/jdatadst.c
++++ b/src/jdatadst.c
+@@ -78,6 +78,7 @@ init_destination(j_compress_ptr cinfo)
+ METHODDEF(void)
+ init_mem_destination(j_compress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work necessary here */
+ }
+ 
+diff --git a/src/jdatasrc.c b/src/jdatasrc.c
+--- a/src/jdatasrc.c
++++ b/src/jdatasrc.c
+@@ -59,6 +59,7 @@ init_source(j_decompress_ptr cinfo)
+ METHODDEF(void)
+ init_mem_source(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work necessary here */
+ }
+ 
+@@ -199,6 +200,7 @@ skip_input_data(j_decompress_ptr cinfo, long num_bytes)
+ METHODDEF(void)
+ term_source(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work necessary here */
+ }
+ 
+diff --git a/src/jdcoefct.c b/src/jdcoefct.c
+--- a/src/jdcoefct.c
++++ b/src/jdcoefct.c
+@@ -200,6 +200,7 @@ decompress_onepass(j_decompress_ptr cinfo, _JSAMPIMAGE output_buf)
+ METHODDEF(int)
+ dummy_consume_data(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   return JPEG_SUSPENDED;        /* Always indicate nothing was done */
+ }
+ 
+diff --git a/src/jdcol565.c b/src/jdcol565.c
+--- a/src/jdcol565.c
++++ b/src/jdcol565.c
+@@ -21,6 +21,10 @@ ycc_rgb565_convert_internal(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                             JDIMENSION input_row, _JSAMPARRAY output_buf,
+                             int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+@@ -104,6 +108,10 @@ ycc_rgb565D_convert_internal(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                              JDIMENSION input_row, _JSAMPARRAY output_buf,
+                              int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+diff --git a/src/jdcolext.c b/src/jdcolext.c
+--- a/src/jdcolext.c
++++ b/src/jdcolext.c
+@@ -31,6 +31,10 @@ LOCAL(void)
+ ycc_rgb_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                 JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)num_rows;
++  (void)output_buf;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+diff --git a/src/jdcolor.c b/src/jdcolor.c
+--- a/src/jdcolor.c
++++ b/src/jdcolor.c
+@@ -295,6 +295,10 @@ METHODDEF(void)
+ rgb_gray_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                  JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)num_rows;
++  (void)output_buf;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+@@ -411,6 +415,10 @@ METHODDEF(void)
+ ycck_cmyk_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                   JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)num_rows;
++  (void)output_buf;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+@@ -612,6 +620,7 @@ gray_rgb565D_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+ METHODDEF(void)
+ start_pass_dcolor(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work needed */
+ }
+ 
+diff --git a/src/jddiffct.c b/src/jddiffct.c
+--- a/src/jddiffct.c
++++ b/src/jddiffct.c
+@@ -248,6 +248,7 @@ decompress_data(j_decompress_ptr cinfo, _JSAMPIMAGE output_buf)
+ METHODDEF(int)
+ dummy_consume_data(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   return JPEG_SUSPENDED;        /* Always indicate nothing was done */
+ }
+ 
+diff --git a/src/jdlossls.c b/src/jdlossls.c
+--- a/src/jdlossls.c
++++ b/src/jdlossls.c
+@@ -109,6 +109,8 @@ jpeg_undifference1(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_1D(INITIAL_PREDICTOR2);
+ }
+ 
+@@ -117,6 +119,8 @@ jpeg_undifference2(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR2);
+   (void)(Rc);
+ }
+@@ -126,6 +130,8 @@ jpeg_undifference3(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR3);
+ }
+ 
+@@ -134,6 +140,8 @@ jpeg_undifference4(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR4);
+ }
+ 
+@@ -142,6 +150,8 @@ jpeg_undifference5(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR5);
+ }
+ 
+@@ -150,6 +160,8 @@ jpeg_undifference6(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR6);
+ }
+ 
+@@ -158,6 +170,8 @@ jpeg_undifference7(j_decompress_ptr cinfo, int comp_index,
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR7);
+   (void)(Rc);
+ }
+@@ -175,6 +189,7 @@ jpeg_undifference_first_row(j_decompress_ptr cinfo, int comp_index,
+                             JDIFFROW diff_buf, JDIFFROW prev_row,
+                             JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)prev_row;
+   lossless_decomp_ptr losslessd = (lossless_decomp_ptr)cinfo->idct;
+ 
+   UNDIFFERENCE_1D(INITIAL_PREDICTORx);
+@@ -228,6 +243,7 @@ METHODDEF(void)
+ noscale(j_decompress_ptr cinfo,
+         JDIFFROW diff_buf, _JSAMPROW output_buf, JDIMENSION width)
+ {
++  (void)cinfo;
+   do {
+     *output_buf++ = (_JSAMPLE)(*diff_buf++);
+   } while (--width);
+diff --git a/src/jdmerge.c b/src/jdmerge.c
+--- a/src/jdmerge.c
++++ b/src/jdmerge.c
+@@ -230,6 +230,7 @@ merged_2v_upsample(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                    JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ /* 2:1 vertical sampling case: may need a spare row. */
+ {
++  (void)in_row_groups_avail;
+   my_merged_upsample_ptr upsample = (my_merged_upsample_ptr)cinfo->upsample;
+   _JSAMPROW work_ptrs[2];
+   JDIMENSION num_rows;          /* number of rows returned to caller */
+@@ -289,6 +290,8 @@ merged_1v_upsample(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                    JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ /* 1:1 vertical sampling case: much easier, never need a spare row. */
+ {
++  (void)in_row_groups_avail;
++  (void)out_rows_avail;
+   my_merged_upsample_ptr upsample = (my_merged_upsample_ptr)cinfo->upsample;
+ 
+   /* Just do the upsampling. */
+diff --git a/src/jdpostct.c b/src/jdpostct.c
+--- a/src/jdpostct.c
++++ b/src/jdpostct.c
+@@ -178,6 +178,8 @@ post_process_prepass(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                      JDIMENSION in_row_groups_avail, _JSAMPARRAY output_buf,
+                      JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ {
++  (void)output_buf;
++  (void)out_rows_avail;
+   my_post_ptr post = (my_post_ptr)cinfo->post;
+   JDIMENSION old_next_row, num_rows;
+ 
+@@ -221,6 +223,9 @@ post_process_2pass(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                    JDIMENSION in_row_groups_avail, _JSAMPARRAY output_buf,
+                    JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ {
++  (void)input_buf;
++  (void)in_row_group_ctr;
++  (void)in_row_groups_avail;
+   my_post_ptr post = (my_post_ptr)cinfo->post;
+   JDIMENSION num_rows, max_rows;
+ 
+@@ -265,6 +270,7 @@ post_process_2pass(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+ GLOBAL(void)
+ _jinit_d_post_controller(j_decompress_ptr cinfo, boolean need_full_buffer)
+ {
++  (void)need_full_buffer;
+   my_post_ptr post;
+ 
+ #ifdef D_LOSSLESS_SUPPORTED
+diff --git a/src/jdsample.c b/src/jdsample.c
+--- a/src/jdsample.c
++++ b/src/jdsample.c
+@@ -68,6 +68,7 @@ sep_upsample(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+              _JSAMPARRAY output_buf, JDIMENSION *out_row_ctr,
+              JDIMENSION out_rows_avail)
+ {
++  (void)in_row_groups_avail;
+   my_upsample_ptr upsample = (my_upsample_ptr)cinfo->upsample;
+   int ci;
+   jpeg_component_info *compptr;
+@@ -149,6 +150,8 @@ METHODDEF(void)
+ fullsize_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+                   _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)cinfo;
++  (void)compptr;
+   *output_data_ptr = input_data;
+ }
+ 
+@@ -162,6 +165,9 @@ METHODDEF(void)
+ noop_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+               _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)cinfo;
++  (void)compptr;
++  (void)input_data;
+   *output_data_ptr = NULL;      /* safety check */
+ }
+ 
+@@ -225,6 +231,7 @@ METHODDEF(void)
+ h2v1_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+               _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)compptr;
+   _JSAMPARRAY output_data = *output_data_ptr;
+   register _JSAMPROW inptr, outptr;
+   register _JSAMPLE invalue;
+@@ -253,6 +260,7 @@ METHODDEF(void)
+ h2v2_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+               _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)compptr;
+   _JSAMPARRAY output_data = *output_data_ptr;
+   register _JSAMPROW inptr, outptr;
+   register _JSAMPLE invalue;
+diff --git a/src/jquant1.c b/src/jquant1.c
+--- a/src/jquant1.c
++++ b/src/jquant1.c
+@@ -251,6 +251,8 @@ output_value(j_decompress_ptr cinfo, int ci, int j, int maxj)
+ /* Return j'th output value, where j will range from 0 to maxj */
+ /* The output values must fall in 0.._MAXJSAMPLE in increasing order */
+ {
++  (void)ci;
++  (void)cinfo;
+   /* We always provide values 0 and _MAXJSAMPLE for each component;
+    * any additional values are equally spaced between these limits.
+    * (Forcing the upper and lower values to the limits ensures that
+@@ -265,6 +267,8 @@ largest_input_value(j_decompress_ptr cinfo, int ci, int j, int maxj)
+ /* Return largest input value that should map to j'th output value */
+ /* Must have largest(j=0) >= 0, and largest(j=maxj) >= _MAXJSAMPLE */
+ {
++  (void)ci;
++  (void)cinfo;
+   /* Breakpoints are halfway between values returned by output_value */
+   return (int)(((JLONG)(2 * j + 1) * _MAXJSAMPLE + maxj) / (2 * maxj));
+ }
+@@ -741,6 +745,7 @@ alloc_fs_workspace(j_decompress_ptr cinfo)
+ METHODDEF(void)
+ start_pass_1_quant(j_decompress_ptr cinfo, boolean is_pre_scan)
+ {
++  (void)is_pre_scan;
+   my_cquantize_ptr cquantize = (my_cquantize_ptr)cinfo->cquantize;
+   size_t arraysize;
+   int i;
+@@ -798,6 +803,7 @@ start_pass_1_quant(j_decompress_ptr cinfo, boolean is_pre_scan)
+ METHODDEF(void)
+ finish_pass_1_quant(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work in 1-pass case */
+ }
+ 
+diff --git a/src/jquant2.c b/src/jquant2.c
+--- a/src/jquant2.c
++++ b/src/jquant2.c
+@@ -204,6 +204,7 @@ METHODDEF(void)
+ prescan_quantize(j_decompress_ptr cinfo, _JSAMPARRAY input_buf,
+                  _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)output_buf;
+   my_cquantize_ptr cquantize = (my_cquantize_ptr)cinfo->cquantize;
+   register _JSAMPROW ptr;
+   register histptr histp;
+@@ -1133,6 +1134,7 @@ finish_pass1(j_decompress_ptr cinfo)
+ METHODDEF(void)
+ finish_pass2(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work */
+ }
+ 

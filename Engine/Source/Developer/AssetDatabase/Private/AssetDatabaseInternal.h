@@ -11,6 +11,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/File.h>
+#include <ReflectionText/TextAssignments.h>
 #include <ReflectionText/TextCodecOptions.h>
 
 // AssetDatabase 모듈 안에서 함께 쓰는 도우미다(Docs/Design/AssetSystem 7.1절).

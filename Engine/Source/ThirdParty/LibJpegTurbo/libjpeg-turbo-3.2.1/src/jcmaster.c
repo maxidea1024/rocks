@@ -164,6 +164,7 @@ LOCAL(void)
 initial_setup(j_compress_ptr cinfo, boolean transcode_only)
 /* Do computations that are needed before master selection phase */
 {
+  (void)transcode_only;
   int ci;
   jpeg_component_info *compptr;
   long samplesperrow;

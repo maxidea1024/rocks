@@ -1486,7 +1486,7 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
                 return FailAsset<void>(failure, AssetDiagnosticCode::None, added.Error());
             }
 
-            (void)plans.TryPushBack(Move(plan));
+            (void)plans.TryPushBack(rocks::Move(plan));
         }
     }
 

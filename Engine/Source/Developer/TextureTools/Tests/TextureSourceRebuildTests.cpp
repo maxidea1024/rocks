@@ -91,7 +91,7 @@ struct RebuildScene {
         tokens.Clear();
     }
 
-    const ObjectAccessContext& Access() const noexcept {
+    ObjectAccessContext Access() const noexcept {
         return env.objects.OwnerAccess();
     }
 

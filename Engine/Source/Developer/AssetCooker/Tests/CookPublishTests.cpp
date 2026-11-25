@@ -830,7 +830,7 @@ TEST(CookPublish_PlanReuse) {
     unknown.hasKey = true;
     REQUIRE(keys.keys.TryPushBack(unknown));
     StringBuilder<256> root(env.allocator);
-    REQUIRE(AppendCookedRoot(root, scene.layout, Profile));
+    REQUIRE(AppendCookedRoot(root, scene.layout.SavedDirectory(), Profile));
     CookReuseRequest request;
     request.files = &scene.files;
     request.cookedRoot = root.View();

@@ -304,8 +304,11 @@ TEST(AssetImport_ImporterTags) {
     const auto tagCount = [&](AssetId id, StringView key, StringView value) noexcept {
         auto entry = service.Index().FindById(id);
         usize count = 0;
-        for (const PackageTag& tag :
-             entry ? entry.Value()->tags : Array<PackageTag>(env.allocator)) {
+        if (!entry) {
+            return count;
+        }
+
+        for (const PackageTag& tag : entry.Value()->tags) {
             count +=
                 tag.key.View() == key && (value.IsEmpty() || tag.value.View() == value) ? 1 : 0;
         }

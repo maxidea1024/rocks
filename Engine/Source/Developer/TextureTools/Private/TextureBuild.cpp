@@ -14,6 +14,8 @@
 // float 식, 재표본은 double 누적 후 float 저장이다. 곱과 합은 따로 써서 FMA로 합쳐지지 않게 한다.
 // 초월 함수는 DeterministicMath만 쓴다.
 namespace rocks {
+
+using graphics::PixelFormat;
 namespace {
 
 constexpr usize Channels = 4;

@@ -22,6 +22,8 @@
 using namespace rocks;
 namespace texture_build_tests_file {
 
+using graphics::PixelFormat;
+
 namespace {
 
 // 선형 G8 원본(srgb off — 값 v / 255 그대로) 설정이다.

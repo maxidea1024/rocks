@@ -31,6 +31,8 @@
 using namespace rocks;
 namespace texture_cook_tests_file {
 
+using graphics::PixelFormat;
+
 using rocks::asset_database_test::TempProject;
 
 namespace {
@@ -109,7 +111,7 @@ struct CookScene {
         CHECK(registration.Unregister());
     }
 
-    const ObjectAccessContext& EditorAccess() const noexcept {
+    ObjectAccessContext EditorAccess() const noexcept {
         return editor->OwnerAccess();
     }
 

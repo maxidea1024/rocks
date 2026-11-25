@@ -9,6 +9,11 @@ ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, Texture)
 
 namespace rocks {
 
+using graphics::GetPixelFormatInfo;
+using graphics::PixelFormat;
+using graphics::PixelFormatFromNumber;
+using graphics::PixelFormatKind;
+
 Result<void> RegisterTextureTypes(ModuleRegistration& registration) noexcept {
     return generated::Texture::RegisterModuleTypes(registration);
 }
