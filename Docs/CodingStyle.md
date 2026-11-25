@@ -110,7 +110,32 @@
 
 **clang-format 21.1.6**을 사용한다. 버전을 고정하고 버전 변경은 독립 변경으로 검토한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .`(`Programs/Rocks.Tooling.Checks`의 FormatCheck)가 Core·Engine·Programs·Templates의 C++ 소스 서식을 검사한다. CI에도 같은 검사를 연결한다.
 
-C#(빌드 도구·검사 도구·모듈·타깃 규칙·게임 템플릿 규칙)은 Microsoft C# 규칙을 따른다(Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나). 같은 `format` 명령이 `global.json`이 고정한 .NET SDK의 `dotnet format`으로 `Build/Format/Rocks.Format.slnx`(저장소의 C# 프로젝트 전부)를 한 번에 검사하며 규칙은 `.editorconfig`의 `[*.cs]` 절이다. 저장소의 `.cs`(외부 라이브러리 원본·bin·obj 제외)가 모두 그 솔루션의 프로젝트에 속하는지도 확인해, 어느 프로젝트에도 속하지 않아 검사에서 빠지는 파일을 알린다. 위반은 `경로:행: 규칙 ID: 내용`으로 출력하고 `--write`를 붙이면 두 포매터가 고친다. 멤버 사이 빈 줄은 이 검사에 해당 규칙이 없어 리뷰에서 확인한다.
+C#(빌드 도구·검사 도구·모듈·타깃 규칙·게임 템플릿 규칙)은 Microsoft C# 규칙을 따른다(Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나). 같은 `format` 명령이 `global.json`이 고정한 .NET SDK의 `dotnet format`으로 `Build/Format/Rocks.Format.slnx`(저장소의 C# 프로젝트 전부)를 한 번에 검사하며 규칙은 `.editorconfig`의 `[*.cs]` 절이다. 저장소의 `.cs`(외부 라이브러리 원본·bin·obj 제외)가 모두 그 솔루션의 프로젝트에 속하는지도 확인해, 어느 프로젝트에도 속하지 않아 검사에서 빠지는 파일을 알린다. 위반은 `경로:행: 규칙 ID: 내용`으로 출력하고 `--write`를 붙이면 두 포매터가 고친다. 멤버 사이 빈 줄은 dotnet format에 해당 규칙이 없어 같은 `format` 명령이 Roslyn 구문 트리로 따로 본다(규칙 `member-blank-line`, 2026-11-25).
+
+C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검증 반영):
+- 대상: 선언 목록 안에서 선언이 바로 앞 선언 뒤에 올 때, **앞 선언의 마지막 줄 바로 다음 줄이 빈 줄**이어야 한다(공백만 있는 줄도 빈 줄이다). MS C# 규칙의 "메서드·속성 정의 사이에 빈 줄"을 모든 멤버로 넓힌 것이다.
+  - 선언 목록: 형식 본문(class·struct·record·interface)의 멤버, namespace 본문(file-scoped 포함)과 컴파일 단위의 형식·대리자·namespace 선언.
+  - 멤버: 메서드·생성자·소멸자·속성·인덱서·이벤트·연산자·변환 연산자·중첩 형식·대리자·필드. 인터페이스의 본문 없는 선언과 한 줄 자동 속성도 대상이다.
+  - 대상 아님: 레코드 위치 매개변수·primary constructor 매개변수(매개변수 목록), 객체 초기화자·익명 형식 멤버(editorconfig new_line 규칙 몫), 지역 함수(문장 — IDE2003 몫).
+- 예외:
+  - 필드(`const` 포함)와 이벤트 필드가 연속하면 빈 줄 없이 묶어도 된다(.NET 런타임 관례 — 필드 무리).
+  - 열거형 멤버는 대상이 아니다.
+  - 목록의 첫 선언은 앞 선언이 없으므로 대상이 아니다. 여는 `{` 바로 뒤의 빈 줄을 막는 것(StyleCop SA1505)은 이 규칙의 범위가 아니다.
+  - 두 선언 사이에 전처리 지시문(`#if`·`#region` 등)이 있으면 보지 않는다(지시문의 위치가 뜻을 가진다). `#if`의 꺼진 쪽은 Roslyn이 disabled text로 두므로 그 안의 선언은 보이지 않는다.
+- 주석·특성: 뒤 선언의 주석(`//`·`///`)과 특성은 뒤 선언에 속한다. 그래서 빈 줄은 그 위(앞 선언의 마지막 줄 바로 다음)에 와야 한다 — `}` / `// 설명` / 빈 줄 / `void X()`는 위반이다. 줄 끝 주석(`}  // 끝`)은 Roslyn이 앞 토큰에 붙이므로 앞 선언에 남는다.
+- 구현: `Rocks.Tooling.Checks`의 `CSharpMemberSpacing`이 `Microsoft.CodeAnalysis.CSharp` 5.9.0(정확한 버전 하나로 고정)의 구문 트리만 쓴다. 파싱 언어 버전은 `LanguageVersion.CSharp14`(Programs/Directory.Build.props의 LangVersion 14.0과 같다)이고, 컴파일·의미 분석은 하지 않는다.
+  - 대상 파일은 `Build/Format/Rocks.Format.slnx` 프로젝트들의 Compile 항목이다(서식 검사의 소속 확인과 같은 목록).
+  - 위반은 `경로:행: member-blank-line: 내용`으로 알린다. 행은 뒤 선언의 첫 줄(주석·특성 포함)이다. 구문 오류가 있는 파일은 건너뛰지 않고 `경로:행: member-blank-line: parse error`로 알린다.
+  - `--write`는 뒤 선언 leading trivia의 맨 앞(들여쓰기 앞)에 줄 끝 하나를 넣는다. 줄 끝 문자(CRLF·LF)는 그 파일의 기존 줄 끝을 따르고, 인코딩·BOM은 그대로 둔다. 빈 줄 하나만 넣으므로 IDE2000(연속 빈 줄)을 만들지 않는다.
+  - 순서(`--write`): 빈 줄 수정 → dotnet format 수정 → 둘 다 다시 검증. 검사만 할 때는 dotnet format 검증과 빈 줄 검사를 함께 알린다.
+- 버린 대안:
+  - 빌드 분석기(Roslyn analyzer 프로젝트를 모든 C# 프로젝트에 참조): `TreatWarningsAsErrors`라 위반이 곧 빌드 실패가 된다. 서식은 빌드가 아니라 format 검사의 몫이라는 지금 구조와도 어긋난다.
+  - 텍스트(정규식) 검사: 문자열·주석 안의 중괄호, 한 줄 멤버, 특성·주석의 소속을 바르게 가르지 못한다.
+- 도입 절차(공유 트리):
+  1. 검사기·시험 커밋과 기계적 `--write` 수정 커밋(동작 불변)으로 나눈다.
+  2. 수정 커밋 전에 `git status`로 다른 세션이 고치고 있는 `.cs`를 확인한다. 겹치면 worktree에서 커밋해 update-ref로 반영하거나, 그 파일은 그 세션에 알리고 빼 둔다.
+  3. 두 커밋은 함께 push한다(CI format 검사가 중간에 실패하지 않게).
+- 시험(Rocks.ToolTests, 결정적 입력 문자열): 예외마다 양성·음성 쌍, 주석·특성 위치(위의 모호한 사례 포함), namespace·컴파일 단위 목록, 구문 오류 보고, 지시문 사이, CRLF·LF 보존, `--write` 뒤 재검사 0과 IDE2000 없음.
 
 빌드 시 공개 헤더를 각각 단독 include한 번역 단위로 컴파일한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .`(PolicyChecks.Runtime)는 런타임 소스(Core·Engine·플러그인·프로그램, 모듈 `Tests/` 제외)의 금지 include와 `std::` 사용, 날 형식 한계 리터럴(`raw-limit-literal`)을 검사한다. 이 검사는 외부 SDK 내부나 최종 바이너리의 모든 의존성을 증명하는 검사는 아니다.
 
