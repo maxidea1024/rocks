@@ -25,7 +25,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 구현 단계는 NG0–NG8(14절)이다. 착수는 계획 순서(A0-B → A0-O → 리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르고, 이 문서 때문에 화면 단계를 앞당기지 않는다.
 
 - 화면이 없는 NG0–NG4는 [머티리얼 시스템](../MaterialSystem.ko.md) MS1과 같은 시점이거나 그 직전이다.
-- 화면 단계 NG5–NG7은 [UI 툴킷](../UiToolkit.ko.md) UT3·UT4 뒤다.
+- 화면 단계 NG5–NG7은 [UI 툴킷](../UiToolkit/README.ko.md) UT3·UT4 뒤다.
 
 ## 요약
 

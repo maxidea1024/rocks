@@ -12,7 +12,7 @@
 
 **용어.** UE 구조를 따르되 Rocks 파일·함수 이름은 Rocks 서술형 이름이다. UE 파일 이름은 각 영역의 "UE 파일" 칸과 대응표(11·12장)에만 둔다. GBuffer·Forward+·light grid·HZB·CSM·PCF·TAA·tone mapping·BRDF·GGX처럼 업계 공용어는 그대로 쓴다.
 
-**근거 문서 약어.** SS = [셰이더 시스템](../ShaderSystem/README.ko.md)(개정 28), RN = [렌더러](../Renderer.ko.md)(개정 13), RB = [렌더 기반](../RenderBase/README.ko.md), MS = [머티리얼 시스템](../MaterialSystem.ko.md)(개정 9), EIP = [엔진 구현 계획](../EngineImplementationPlan.ko.md), CC = [컴포넌트 도입](../ComponentCatalog/README.ko.md)(개정 7), UI = [UI 툴킷](../UiToolkit.ko.md).
+**근거 문서 약어.** SS = [셰이더 시스템](../ShaderSystem/README.ko.md)(개정 28), RN = [렌더러](../Renderer.ko.md)(개정 13), RB = [렌더 기반](../RenderBase/README.ko.md), MS = [머티리얼 시스템](../MaterialSystem.ko.md)(개정 9), EIP = [엔진 구현 계획](../EngineImplementationPlan.ko.md), CC = [컴포넌트 도입](../ComponentCatalog/README.ko.md)(개정 7), UI = [UI 툴킷](../UiToolkit/README.ko.md).
 
 자주 인용하는 장 파일: SS [1절 결정](../ShaderSystem/01-Decisions.ko.md), [2절 형식](../ShaderSystem/02-FormatsAndConversion.ko.md), [3절 구조](../ShaderSystem/03-StructureSummary.ko.md), [7절 바인딩 규약](../ShaderSystem/07-BindingConventions.ko.md), [11절 워커·SH1(SC1–SC14)](../ShaderSystem/11-WorkerCommunication.ko.md), [12절 형식 정의·셰이더 타입·쿠킹](../ShaderSystem/12-FormatDefinitionsCooking.ko.md), [15절 결정 사항](../ShaderSystem/15-OpenDecisions.ko.md), [16절 이후 단계(SH0–SH6)](../ShaderSystem/16-LaterStages.ko.md); CC [3절 필수 컴포넌트](../ComponentCatalog/03-RequiredComponents.ko.md), [5절 묶음 순서](../ComponentCatalog/05-BundleOrder.ko.md), [8절 폴더 밖](../ComponentCatalog/08-OutsideFolder.ko.md), [9절 플러그인](../ComponentCatalog/09-Plugins.ko.md).
 

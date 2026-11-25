@@ -58,7 +58,7 @@ dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=Foundati
 - [렌더 기반 구현 범위와 계약](Docs/Implementation/RenderBase.ko.md)
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
-- [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)
+- [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit/README.ko.md)
 - [압축 헬퍼 설계(코덱 선정·외부 라이브러리 통합·동기/비동기 API)](Docs/Design/Compression.ko.md)
 - [암호 모듈 설계(libsodium·HW 전용 AES 경량 계층·Span API·스트리밍)](Docs/Design/Crypto.ko.md)
 - [세그먼트 스트림 형식 v1 명세(헤더·키 파생·검증 순서·시험 벡터)](Docs/Design/CryptoSegmentFormat.ko.md)
