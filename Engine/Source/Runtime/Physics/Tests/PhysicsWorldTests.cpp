@@ -135,6 +135,20 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
         PhysicsSceneStats Stats() const noexcept override {
             return {};
         }
+
+        Result<PhysicsBodyHandle> CreateBody(const BodyCreateDesc&) noexcept override {
+            return Result<PhysicsBodyHandle>::Failure(ErrorCode::Unsupported);
+        }
+
+        void DestroyBody(PhysicsBodyHandle) noexcept override {
+        }
+
+        void SetBodyTransform(PhysicsBodyHandle, const Transform&, TeleportMode) noexcept override {
+        }
+
+        Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle) const noexcept override {
+            return Result<BodyKinematics>::Failure(ErrorCode::StaleHandle);
+        }
     };
 
     NullScene first;

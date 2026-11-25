@@ -1,10 +1,15 @@
-// World 물리 장면 Subsystem(Docs/Design/PhysicsModule 2.1절, 7.1.1절).
+// World 물리 장면 Subsystem(Docs/Design/PhysicsModule 2.1절, 7.1.1·7.1.4절).
 #include "JoltPhysicsScene.h"
 
 #include <Config/ConfigContext.h>
 #include <Core/Math/MathUtility.h>
 #include <Physics/PhysicsSettings.generated.h>
 #include <Physics/PhysicsWorldSubsystem.h>
+#include <World/Actor.generated.h>
+#include <World/Component.generated.h>
+#include <World/Primitives/PrimitiveComponent.generated.h>
+#include <World/Primitives/PrimitiveComponent.h>
+#include <World/SceneComponent.generated.h>
 
 ROCKS_DEFINE_NATIVE_TYPE_KEY(rocks::PhysicsWorldSubsystem)
 
@@ -29,6 +34,11 @@ physics::JoltPhysicsScene& JoltScene(PhysicsScene& scene) noexcept {
 // 엔진 자리 PhysicsSimulate 콜백이다(고정 스텝마다 — 문맥의 delta가 고정 스텝 길이다, 3.1절).
 Result<void> SimulateFixedStep(World&, const TickContext& context, void* user) noexcept {
     return static_cast<PhysicsWorldSubsystem*>(user)->SimulateStep(context.deltaSeconds);
+}
+
+// 엔진 자리 PhysicsResults 콜백이다(Physics 단계 끝, 프레임에 한 번 — 3.1·3.4절).
+Result<void> ApplyFrameResults(World& world, const TickContext&, void* user) noexcept {
+    return static_cast<PhysicsWorldSubsystem*>(user)->ApplyResults(world);
 }
 
 } // namespace
@@ -78,11 +88,18 @@ Result<void> PhysicsWorldSubsystem::Initialize(World& world) noexcept {
 
     scene_ = UniquePtr<PhysicsScene>(Move(created.Value()));
     simulates_ = SimulatesKind(world.Kind());
-    // step은 Game·Tryout World만 건다(World는 종류로 거르지 않는다 — 3.1절 PMD16).
+    JoltScene(*scene_).SetSimulates(simulates_);
+    // step·결과 반영은 Game·Tryout World만 건다(World는 종류로 거르지 않는다 — 3.1절 PMD16).
     if (simulates_) {
-        if (auto staged =
-                world.SetEngineStage(EngineStage::PhysicsSimulate, &SimulateFixedStep, this);
-            !staged) {
+        auto staged = world.SetEngineStage(EngineStage::PhysicsSimulate, &SimulateFixedStep, this);
+        if (staged) {
+            staged = world.SetEngineStage(EngineStage::PhysicsResults, &ApplyFrameResults, this);
+            if (!staged) {
+                world.ClearEngineStage(EngineStage::PhysicsSimulate);
+            }
+        }
+
+        if (!staged) {
             (void)world.SetPhysicsScene(nullptr);
             scene_.Reset();
             simulates_ = false;
@@ -96,6 +113,7 @@ Result<void> PhysicsWorldSubsystem::Initialize(World& world) noexcept {
 void PhysicsWorldSubsystem::Deinitialize(World& world) noexcept {
     if (simulates_) {
         world.ClearEngineStage(EngineStage::PhysicsSimulate);
+        world.ClearEngineStage(EngineStage::PhysicsResults);
     }
 
     if (scene_) {
@@ -108,6 +126,34 @@ void PhysicsWorldSubsystem::Deinitialize(World& world) noexcept {
     }
 
     simulates_ = false;
+}
+
+Result<void> PhysicsWorldSubsystem::ApplyResults(World& world) noexcept {
+    if (!scene_) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    auto moved = JoltScene(*scene_).TakeMovedBodies();
+    if (!moved) {
+        return Result<void>::Failure(moved.Error());
+    }
+
+    ErrorCode failure = ErrorCode::None;
+    for (const physics::MovedBody& body : moved.Value()) {
+        auto applied = world.With<PrimitiveComponent>(
+            body.component, [&](PrimitiveComponent& primitive) noexcept {
+                return primitive.ApplyPhysicsTransform(body.location, body.rotation);
+            });
+        // 반영 중 다른 컴포넌트가 파괴될 수 있다 — 사라진 handle은 건너뛴다(3.4절 재진입). 이동
+        // 실패만 첫 오류로 남긴다.
+        const bool gone = !applied && (applied.Error() == ErrorCode::StaleHandle ||
+                                       applied.Error() == ErrorCode::NotFound);
+        if (!applied && !gone && failure == ErrorCode::None) {
+            failure = applied.Error();
+        }
+    }
+
+    return failure == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(failure);
 }
 
 Result<void> PhysicsWorldSubsystem::SimulateStep(double seconds) noexcept {

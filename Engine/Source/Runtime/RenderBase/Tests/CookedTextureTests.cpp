@@ -1,5 +1,6 @@
 #include "RecordingDevice.h"
 
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
@@ -140,10 +141,6 @@ bool Rejects(const CookedTextureSource& source, ErrorCode code,
     auto checked = Check(source, issue);
     return !checked && checked.Error() == code && issue == expected;
 }
-
-} // namespace cooked_texture_tests_file
-
-using namespace cooked_texture_tests_file;
 
 TEST(RenderBase_CookedTextureDescForEveryDimension) {
     struct Case {
@@ -342,7 +339,7 @@ TEST(RenderBase_CookedTextureRejectsCorruptData) {
         fixture.source.tail = Span<const uint8>(fixture.tail.Data(), fixture.tail.Size() - 1);
         CHECK(Rejects(fixture.source, Corrupt, CookedTextureIssue::TailRange));
         CHECK(!PackCookedTexturePixels(Allocator_(), fixture.source));
-        fixture.mips[3].tailOffset = ~uint64{0} - 15;
+        fixture.mips[3].tailOffset = NumericLimits<uint64>::Max() - 15;
         CHECK(Rejects(fixture.source, Corrupt, CookedTextureIssue::TailRange));
     }
 }
@@ -442,3 +439,5 @@ TEST(RenderBase_CookedTextureCreatesOnLane) {
     REQUIRE(lane.Shutdown());
     CHECK(lane.Handles().Count() == 0 && device.PendingRetireCount() == 0);
 }
+
+} // namespace cooked_texture_tests_file

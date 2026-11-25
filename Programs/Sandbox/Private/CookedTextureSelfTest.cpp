@@ -270,8 +270,33 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
             CookedCheck(requested != 0, name, "the cook lists texture assets");
             CookedCheck(engine.Run().IsOk(), name, "engine runs until every texture is drawn");
             CookedCheck(hooks.done, name, "every cooked texture settles before the frame limit");
-            CookedCheck(library && library->Failed() == 0, name,
-                        "every cooked texture loads, converts and passes the upload check");
+            // OpenGL ES는 Windows 쿠킹의 대상 backend가 아니다: 장치가 못 하는 형식(예: GL core
+            // 위 ES의 RGBA16Unorm — EXT_texture_norm16 없음)은 실패가 아니라 NOT RUN 사유다.
+            const bool cookTarget = device.Info().backend != graphics::Backend::OpenGL;
+            for (uint32 request = 0; library && request < library->Requested(); ++request) {
+                const ErrorCode error = library->FailureOf(request);
+                if (error == ErrorCode::None) {
+                    continue;
+                }
+
+                const StringView path = library->PathOf(request);
+                if (!cookTarget && error == ErrorCode::UnsupportedCapability) {
+                    if (fillChecks) {
+                        printf("  [NOT RUN] %s cooked texture %.*s: the device cannot sample its "
+                               "format (not a cook target backend)\n",
+                               name, static_cast<int>(path.ByteCount()), path.Data());
+                    }
+
+                    continue;
+                }
+
+                CookedCheck(false, name,
+                            "a cooked texture loads, converts and passes the upload check");
+                printf("    %.*s: %s\n", static_cast<int>(path.ByteCount()), path.Data(),
+                       ErrorCodeName(error));
+            }
+
+            CookedCheck(library != nullptr, name, "the cooked texture list is created");
             if (fillChecks && library) {
                 for (uint32 request = 0; request < library->Requested(); ++request) {
                     const uint32 entry = library->EntryOf(request);

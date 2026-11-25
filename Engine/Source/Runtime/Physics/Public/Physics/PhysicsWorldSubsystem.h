@@ -52,6 +52,11 @@ public:
     // 쌍·접촉을 놓쳤다, 경고 로그).
     Result<void> SimulateStep(double seconds) noexcept;
 
+    // 지난 반영 뒤 움직인 Dynamic body의 위치·회전을 컴포넌트에 쓴다(엔진 자리 PhysicsResults가
+    // 부른다 — 3.4절). 칸 번호 순이다. 오류: 장면 없음(NotReady), 할당 실패. 컴포넌트 이동 실패는
+    // 그 컴포넌트만 건너뛰고 첫 오류를 돌려준다.
+    Result<void> ApplyResults(World& world) noexcept;
+
 private:
     Allocator& allocator_;
     UniquePtr<PhysicsScene> scene_;

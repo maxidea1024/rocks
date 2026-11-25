@@ -53,7 +53,8 @@ TEST(ObjectDiagnosticsTrackLifetimeWithoutAllocation) {
         REQUIRE(registry.CaptureDiagnostics(records).IsOk());
         CHECK(records[0].phase == ObjectPhase::DestroyRequested);
         borrow.Value().Reset();
-        root.Value().Reset();
+        // root를 쥔 채라 수집이 작업 큐를 확보해야 한다(root가 없으면 확보하지 않는다 —
+        // Docs/Implementation/FoundationStatus 7번). 실패한 수집은 아무것도 바꾸지 않는다.
         auto failedCollection = registry.Collect(access);
         CHECK(!failedCollection.IsOk());
         CHECK(failedCollection.Error() == ErrorCode::OutOfMemory);
@@ -61,6 +62,7 @@ TEST(ObjectDiagnosticsTrackLifetimeWithoutAllocation) {
         REQUIRE(registry.CaptureDiagnostics(records).IsOk());
         CHECK(records[0].phase == ObjectPhase::DestroyRequested);
 
+        root.Value().Reset();
         allocator.DisableFailure();
         auto collected = registry.Collect(access);
         REQUIRE(collected.IsOk());

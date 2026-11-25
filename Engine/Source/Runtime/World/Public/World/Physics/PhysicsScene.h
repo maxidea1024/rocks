@@ -1,6 +1,12 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Math/Transform.h>
+#include <Core/Result.h>
+#include <World/Physics/BodyCreateDesc.h>
+#include <World/Physics/BodyKinematics.h>
+#include <World/Physics/PhysicsBodyHandle.h>
+#include <World/Physics/TeleportMode.h>
 
 namespace rocks {
 
@@ -19,8 +25,8 @@ struct PhysicsSceneStats {
 // SetPhysicsScene) 정리 때 뗀다. 장면이 없는 World(물리 없이 만든 시험·도구 World)에서
 // World::GetPhysicsScene()은 nullptr이다.
 //
-// 함수는 구현하는 단계마다 더한다(PH1은 Stats만 — PhysicsModule 7.1.1절 PMD22). 공개 인자는
-// Rocks 단위(cm·kg·초)이고 결과는 값, 실패는 Result다.
+// 함수는 구현하는 단계마다 더한다(PH1 Stats, PH2b body 수명·이동·운동 읽기 — PhysicsModule 7.1.1·
+// 7.1.3절 PMD22). 공개 인자는 Rocks 단위(cm·kg·초)이고 결과는 값, 실패는 Result다.
 //
 // 사용 예:
 //   if (PhysicsScene* scene = world.GetPhysicsScene()) {
@@ -34,6 +40,21 @@ public:
 
     // 장면의 body·step 수다.
     virtual PhysicsSceneStats Stats() const noexcept = 0;
+
+    // body를 만들어 장면에 넣는다(2.3절 — PrimitiveComponent::CreateSystemState(Physics)가 부른다).
+    // 오류: 형상 없음·잘못된 값(InvalidArgument), 장면 body 용량 초과(CapacityExceeded), 할당 실패.
+    virtual Result<PhysicsBodyHandle> CreateBody(const BodyCreateDesc& desc) noexcept = 0;
+
+    // body를 장면에서 빼고 지운다. 없는 handle·옛 세대는 무시한다.
+    virtual void DestroyBody(PhysicsBodyHandle body) noexcept = 0;
+
+    // body를 월드 transform(cm)으로 옮긴다(3.3절). scale은 쓰지 않는다(형상 갱신은 재생성 —
+    // PH2d). 없는 handle·옛 세대는 무시한다.
+    virtual void SetBodyTransform(PhysicsBodyHandle body, const Transform& worldTransform,
+                                  TeleportMode mode) noexcept = 0;
+
+    // body의 현재 운동 상태다. 오류: 없는 handle·옛 세대(StaleHandle).
+    virtual Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept = 0;
 
 protected:
     PhysicsScene() noexcept = default;

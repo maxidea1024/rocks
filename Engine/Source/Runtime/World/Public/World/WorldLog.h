@@ -43,6 +43,10 @@ inline constexpr char DiagCollisionProfileEntryDropped[] = "CollisionProfileEntr
 // - CollisionProfileMissing: PrimitiveComponent의 충돌 profile 이름이 표에 없어 사용자 지정 값으로
 //   해석했다(Warning — 등록 때 한 번, CollisionData 5절).
 inline constexpr char DiagCollisionProfileMissing[] = "CollisionProfileMissing";
+// - SimulateOnStaticBody: Mobility가 Movable이 아닌 PrimitiveComponent에 simulatePhysics가
+//   켜져 있어 Static body로 만들었다(Warning — Docs/Design/PhysicsModule 2.5절, UE
+//   BodyInstance.cpp:2697-2700).
+inline constexpr char DiagSimulateOnStaticBody[] = "SimulateOnStaticBody";
 inline constexpr char DiagAutoTickPrerequisiteCycleSkipped[] = "AutoTickPrerequisiteCycleSkipped";
 inline constexpr char DiagBeginPlayDispatchContractViolated[] = "BeginPlayDispatchContractViolated";
 

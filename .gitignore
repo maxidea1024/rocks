@@ -39,3 +39,6 @@ __pycache__/
 
 # clang coverage raw profiles written to the working directory (Build/MeasureCoverage.ps1 runs)
 *.profraw
+# Sandbox texture test content (Docs/Design/RenderBase section 18.5 item 7): cook output, locks and caches
+/Programs/Sandbox/TestContent/Saved/
+/Programs/Sandbox/TestContent/Intermediate/
