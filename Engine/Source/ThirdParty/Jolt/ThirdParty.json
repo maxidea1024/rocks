@@ -149,13 +149,13 @@
   "defines": [
     "JPH_CROSS_PLATFORM_DETERMINISTIC",
     "JPH_ENABLE_ASSERTS",
-    "JPH_OBJECT_LAYER_BITS=16"
+    "JPH_OBJECT_LAYER_BITS=32"
   ],
   "platformDefines": {},
   "consumerDefines": [
     "JPH_CROSS_PLATFORM_DETERMINISTIC",
     "JPH_ENABLE_ASSERTS",
-    "JPH_OBJECT_LAYER_BITS=16"
+    "JPH_OBJECT_LAYER_BITS=32"
   ],
   "adapterHeaders": [
     "JoltPhysics-5.7.0/Jolt/AABBTree/AABBTreeBuilder.h",

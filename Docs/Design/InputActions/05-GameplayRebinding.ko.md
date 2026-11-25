@@ -8,15 +8,20 @@
 
 `PlayerController`는 `PlayerActionInput`과 `InputActionBindings`(UE `UEnhancedInputComponent`)를 가진다. 둘 다 NATIVE(실행 중 상태)다.
 
+컨텍스트 객체 쥐기(2.7절 — UE `AppliedInputContextData`가 컨텍스트를 강하게 붙잡는 역할):
+- 에셋 컨텍스트는 적용한 동안 `AssetLease`로 쥐고, 코드로 만든 객체는 handle로 쥔다(PlayerController의 기존 NATIVE handle + `World::With` 방식).
+- `AddInputContext(asset, priority, options)`는 `AssetManager::With` 범위에서 `CollectInputContext`로 모아 평가기에 넣는다. 데이터를 바꾼 뒤에는 `RefreshInputContext(asset)`이 다시 모아 `UpdateContext`한다.
+- 실행 중 편집을 퍼뜨리는 도우미(UE `MapKey`·`UnmapKey`·`UnmapAll`): 한 번 모은 bundle을 그 id의 컨텍스트를 가진 모든 PlayerController에 `UpdateContext`한다. `notifyUserSettings`로 등록된 컨텍스트면 사용자 설정 행도 갱신한다(5.2절).
+
 평가 시점:
 - `PlayerController::OnTick` 안에서 한다. 입력 스냅숏과 제스처 다음, `OnPlayerTick` 전이다(지금 `Controllers.cpp:322-336`).
 - 일시정지 중에도 평가하고 전달한다. 막는 것은 액션의 `triggerWhenPaused`다. `OnPlayerTick`은 pause 중 건너뛰지만 전달은 하므로, pause 메뉴의 "재개" 액션이 동작한다. UE도 pause Tick에서 `TickPlayerInput(…, bGamePaused = true)`로 입력을 처리한다.
 
 바인딩 API(UE `EI/Public/EnhancedInputComponent.h`):
-- `BindAction(action, ActionEvent events, Function<void(const ActionEventData&)>, bool consumes = false) → BindingHandle`
-  - `ActionEventData`는 액션, 이벤트, 값, 경과·Triggered 시간이다(UE `(const FInputActionInstance&)` 형태).
+- `BindAction(actionId, ActionEvent events, Function<void(const ActionEventData&)>, bool consumes = false) → BindingHandle`
+  - `ActionEventData`는 액션 id, 이벤트, 값, 경과·Triggered 시간이다(UE `(const FInputActionInstance&)` 형태).
   - 할당 실패면 `OutOfMemory`다.
-- `BindActionValue(action) → ValueBindingHandle`과 `ActionValue(handle) → InputValue`: 평가마다 갱신한다. 포인터를 내주지 않는다(재배치 안전).
+- `BindActionValue(actionId) → ValueBindingHandle`과 `ActionValue(handle) → InputValue`: 평가마다 갱신한다. 포인터를 내주지 않는다(재배치 안전).
 - `RemoveBinding(handle)`·`ClearBindings()`
 
 전달 규칙(UE :720-1006):

@@ -117,12 +117,15 @@ OutputFormat OutputForTable(TextureCompressionSettings compression,
                             TextureSourceFormat format) noexcept {
     OutputFormat out;
     const SourceClass source = ClassOf(format);
+    // 단일 채널 출력의 swizzle은 UE sampler type 계약이다(12.16.4 — 셰이더가 복제한다): Grayscale·
+    // Alpha·DistanceFieldFont는 .rrrr(UE ProcessMaterialGreyscale·AlphaTextureLookup), 그 밖은
+    // Color sampler라 복제가 없다(r001).
     const auto single = [&out](OutputKind kind, bool replicate) noexcept {
         out.kind = kind;
         out.channels = 1;
         if (replicate) {
             SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::R, TextureSwizzle::R,
-                       TextureSwizzle::One);
+                       TextureSwizzle::R);
         } else {
             SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::Zero, TextureSwizzle::Zero,
                        TextureSwizzle::One);
@@ -151,8 +154,10 @@ OutputFormat OutputForTable(TextureCompressionSettings compression,
         single(KindFor(source), true);
         break;
     case TextureCompressionSettings::Displacementmap:
-    case TextureCompressionSettings::Alpha:
         single(KindFor(source), false);
+        break;
+    case TextureCompressionSettings::Alpha:
+        single(KindFor(source), true);
         break;
     case TextureCompressionSettings::HDR:
         out.kind = OutputKind::Half;
@@ -162,7 +167,7 @@ OutputFormat OutputForTable(TextureCompressionSettings compression,
         out.opaqueAlpha = true;
         break;
     case TextureCompressionSettings::DistanceFieldFont:
-        single(OutputKind::Unorm8, false);
+        single(OutputKind::Unorm8, true);
         break;
     case TextureCompressionSettings::HalfFloat:
         single(OutputKind::Half, false);

@@ -2,6 +2,7 @@
 #include "VulkanFormats.h"
 
 #include <Platform/Memory.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 
 // 장치 능력(RenderBase 4.4절 GX1), 버퍼 view·ReadBuffer(GX2), 그리기 descriptor set이다
 // (Docs/Design/VulkanGraphics.ko.md 6절). 그리기 descriptor set은 파이프라인 layout마다 다르므로
@@ -97,6 +98,12 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     features.hdrOutput = false;
     features.resourceBindingTier = 0;
     features.shaderModel = 0;
+    // 형식 장치 요구 비트다(DeviceFeatures::shaderDeviceRequirements — Info().apiVersion과 같은
+    // 실효 판).
+    const uint32 apiVersion =
+        properties_.apiVersion < RequestedApiVersion ? properties_.apiVersion : RequestedApiVersion;
+    features.shaderDeviceRequirements =
+        apiVersion >= VK_API_VERSION_1_1 ? shader::DeviceRequiresVulkan1_1 : 0u;
 }
 
 const DeviceCaps& VulkanDevice::Caps() const noexcept {

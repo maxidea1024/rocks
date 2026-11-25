@@ -2,11 +2,13 @@
 
 #include <Base/Types.h>
 #include <Core/Math/Vector3.h>
+#include <Meta/Annotations.h>
 
 namespace rocks::input {
 
 // 액션 값의 종류다(UE EInputActionValueType — Docs/Design/InputActions 2.1절). 이 순서가 승격
 // 순서다(Boolean < Axis1D < Axis2D < Axis3D).
+ROCKS_ENUM()
 enum class InputValueType : uint8 {
     Boolean,
     Axis1D,

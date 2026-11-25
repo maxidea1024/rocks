@@ -318,6 +318,37 @@ KeySample ReadKey(const InputState& state, uint32 gamepad, InputKey key) noexcep
     return KeySample{};
 }
 
+uint32 InputKeySlot(InputKey key) noexcept {
+    if (!key.IsValid()) {
+        return InputKeySlotCount;
+    }
+
+    uint32 base = 0;
+    switch (key.kind) {
+    case InputKeyKind::Touch:
+        base += GamepadAxisKeyCount;
+        [[fallthrough]];
+    case InputKeyKind::GamepadAxis:
+        base += GamepadButtonCount;
+        [[fallthrough]];
+    case InputKeyKind::GamepadButton:
+        base += MouseAxisKeyCount;
+        [[fallthrough]];
+    case InputKeyKind::MouseAxis:
+        base += MouseButtonCount;
+        [[fallthrough]];
+    case InputKeyKind::MouseButton:
+        base += KeyCount;
+        [[fallthrough]];
+    case InputKeyKind::Keyboard:
+        return base + key.code;
+    case InputKeyKind::None:
+        break;
+    }
+
+    return InputKeySlotCount;
+}
+
 StringView InputKeyName(InputKey key) noexcept {
     if (!key.IsValid()) {
         return StringView("None");

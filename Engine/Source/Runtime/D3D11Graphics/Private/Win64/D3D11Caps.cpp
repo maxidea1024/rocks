@@ -3,6 +3,7 @@
 #include "D3D11Common.h"
 
 #include <DxgiGraphics/DxgiAdapter.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 
 namespace rocks::graphics::d3d11 {
 
@@ -101,6 +102,9 @@ DeviceCaps QueryDeviceCaps(ID3D11Device* device, IDXGIAdapter1* adapter) noexcep
     features.hdrOutput = dxgi::AdapterHasHdrOutput(adapter);
     features.resourceBindingTier = 0;
     features.shaderModel = 50;
+    // 형식 장치 요구 비트다(DeviceFeatures::shaderDeviceRequirements).
+    features.shaderDeviceRequirements =
+        featureLevel >= D3D_FEATURE_LEVEL_11_0 ? shader::DeviceRequiresD3DFeatureLevel11_0 : 0u;
     return caps;
 }
 

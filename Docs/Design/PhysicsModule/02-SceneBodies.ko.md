@@ -7,7 +7,7 @@
 - World마다 물리 장면이 하나다(UE `UWorld::PhysicsScene` — `E/Classes/Engine/World.h:1588`, 생성 `E/Private/World.cpp:2461–2464`·`6807–6843`, 파괴 `:1540–1561`). Tryout 세션 둘이면 장면도 둘이다(계획 16.4절 "World·Tryout session마다 분리한 physics system").
 - 만드는 쪽은 Physics 모듈의 World subsystem `PhysicsWorldSubsystem`이다. `Initialize`에서 Jolt 장면을 만들어 World에 접점으로 꽂고(2.2절), `Deinitialize`에서 뗀 뒤 파괴한다. subsystem 정리는 초기화 역순이고(ERD8) 모든 Actor 정리 뒤이므로(16.5절 표), body는 장면보다 먼저 사라진다.
 - 생성 판정(`shouldCreate` — ERD9): World 종류가 Game·Tryout·Editor·Preview면 만든다. Inactive는 만들지 않는다. UE는 `InitWorld`의 `bCreatePhysicsScene`(기본 참)으로 편집·미리보기 World에도 장면을 만든다(편집기 picking·미리보기 충돌이 쓴다).
-- 프로세스 공유 자원(Jolt 할당 hook·`Factory`·`RegisterTypes`·형상 캐시)은 Physics 모듈 수명 객체가 `Startup`·`Shutdown`에서 맡는다(어댑터 경계 10.4절 순서). 종료 순서는 계획 16.4절: 진행 중 step 완료 → World 장면 해제 → 공유 형상 해제 → 프로세스 공유 자원 해제.
+- 프로세스 공유 자원(Jolt 할당 hook·`Factory`·`RegisterTypes`)은 장면마다 참조 수로 쥐어 첫 장면이 만들고 마지막 장면이 해제한다(어댑터 경계 10.4절 순서, PMD21 — 7.1.1절). 공유 형상 캐시의 수명은 PH6에서 정한다. 종료 순서는 계획 16.4절: 진행 중 step 완료 → World 장면 해제 → 공유 형상 해제 → 프로세스 공유 자원 해제.
 
 ## 2.2 World 쪽 접점
 

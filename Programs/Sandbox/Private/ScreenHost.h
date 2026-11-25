@@ -51,6 +51,13 @@ const char* ScreenBackendName(ScreenBackend backend) noexcept;
 Result<UniquePtr<graphics::Device>> CreateScreenDevice(Allocator& allocator, ScreenBackend backend,
                                                        bool validation) noexcept;
 
+// order(쿠킹 매니페스트의 graphicsBackends 순서 — ShaderSystem 16.1절 SSD48)로 만들 수 있는 첫
+// 장치를 만든다. Metal 등 이 실행 파일이 만들지 않는 backend는 건너뛴다. 모두 실패하면 마지막 오류
+// (없으면 Unsupported)다.
+Result<UniquePtr<graphics::Device>> CreateScreenDeviceInOrder(Allocator& allocator,
+                                                              Span<const graphics::Backend> order,
+                                                              bool validation) noexcept;
+
 // 엔진 셰이더를 열 원천(쿠킹 라이브러리 원천이나 공급자)이 있는가. 없으면(Release·Android) 렌더
 // 경로를 시작하지 않는다(18.5절 1항).
 bool CanOpenEngineShaders(const render::EngineShaderHost& host) noexcept;

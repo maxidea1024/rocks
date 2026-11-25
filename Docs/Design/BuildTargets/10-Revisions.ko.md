@@ -39,3 +39,4 @@
 | 35 | 2026-11-24 | 3.10절 1항 기준을 Engine 타깃(코어 묶음 — 셰이더 타입 모듈이 없어 늘 참)에서 엔진 저장소 출시 타깃(지금 Sandbox) 폐포로 고쳤다. Commandlet이 그래픽 backend까지 링크하게 되므로 SH2d에서 넣는다 |
 | 36 | 2026-11-25 | 3.11절 선행 타깃(렌더 세션 요청 — Sandbox Development 셰이더 공급자의 ShaderCompileWorker): `TargetRules.PrerequisiteTargets`와 조건 칸, `build`·`test`가 주 타깃 전에 자기 규칙으로 따로 빌드(후위 순서·형제 출력), 출시 타깃 Release 건너뜀, 규칙 로드 검사, IDE·UE(`PreBuildTargets`·`bEditorDependsOnShaderCompileWorker`) 근거, BD44, 단계 BS11, 7절 두 행. 3.1절 동반 타깃 문단에 선행 타깃을 적었다 |
 | 37 | 2026-11-25 | 3.10절 4항 BS10 1항 구현 세부(렌더 세션 SH2d): Commandlet 링크 목록, 정책 `cooker-module-set`의 평가 호스트·대상 모듈·실패 문구, 쿠커 시작 순서(호스트가 asset-cook 전에 ShaderCompiler 적재, 단계의 등록부 원천이 엔진 묶음을 PostEngineInit까지 시작·Freeze·내림), 한계와 버린 대안 |
+| 38 | 2026-11-25 | BD29 시험 실행 파일 예외(3.8절 — 사용자 결정, Physics 모듈 PH1이 Jolt를 소비하고 Jolt 연결 시험·물리 내부 시험이 Jolt를 직접 쓴다): `GlobalStateTestConsumer` 표지는 Monolithic에서만 소비 모듈로 세지 않고, Modular 시험은 그 서드파티를 쓰는 시험 파일을 뺀다 |

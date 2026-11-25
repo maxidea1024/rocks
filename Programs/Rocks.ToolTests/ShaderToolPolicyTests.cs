@@ -24,6 +24,57 @@ internal static class ShaderToolPolicyTests
             Verify.That(result.Notices.Count == 0, "unexpected Release exception notices: " + string.Join('\n', result.Notices));
         });
         suite.Add("Policy.ReleaseExclusionControls", ReleaseControls);
+        suite.Add("Policy.RepositoryCookerModuleSet",
+            () => NoFailures(CookerModuleSet.Check(options.Root, ReleaseExclusion.DefaultRulesAssembly(options.Root))));
+        suite.Add("Policy.CookerModuleSetControls", CookerControls);
+    }
+
+    // 쿠커 모듈 집합(Docs/Design/BuildTargets 3.10절 4항)의 음성 대조다: 출시 타깃 폐포의 Runtime·ClientOnly 엔진 모듈이 쿠커 폐포에 없으면 실패,
+    // Developer 모듈·실행 파일·플러그인 모듈은 대상이 아니고, 쿠커에만 있는 모듈(⊇)은 허용이다.
+    private static void CookerControls()
+    {
+        NativeModuleInput[] modules =
+        [
+            new() { Name = "Game", Kind = NativeModuleKind.Executable, PublicDependencies = ["Engine", "Renderer", "Importer"] },
+            new() { Name = "Engine", PublicDependencies = ["Core"] },
+            new() { Name = "Core" },
+            new() { Name = "Renderer", Type = Rocks.Build.Descriptors.ModuleType.ClientOnly, PublicDependencies = ["Engine"] },
+            new() { Name = "Importer", PublicDependencies = ["Engine"] },
+            new() { Name = "Tools", Type = Rocks.Build.Descriptors.ModuleType.Developer, PublicDependencies = ["Engine"] },
+            new() { Name = "Cooker", Kind = NativeModuleKind.Executable, PublicDependencies = ["Engine", "Tools"] },
+            new() { Name = "FullCooker", Kind = NativeModuleKind.Executable, PublicDependencies = ["Engine", "Renderer", "Tools"] }
+        ];
+        var plugin = new HashSet<string>(["Importer"], StringComparer.OrdinalIgnoreCase);
+        var none = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 쿠커가 Renderer(ClientOnly)를 링크하지 않으면 그 모듈 하나가 실패다. Importer는 플러그인 모듈이라 대상이 아니다.
+        IReadOnlyList<CheckFailure> missing = CookerModuleSet.Analyze(modules, ["Cooker"], [("Game", ["Game"], plugin)], NativePlatform.Windows);
+        Verify.That(missing.Count == 1 && missing[0].ToString().Contains("module Renderer is not linked into the Commandlet", StringComparison.Ordinal),
+            "a shipping ClientOnly module the cooker does not link must fail: " + string.Join('\n', missing));
+
+        // 플러그인 표시가 없으면 Importer도 엔진 모듈이라 실패다.
+        IReadOnlyList<CheckFailure> unmarked = CookerModuleSet.Analyze(modules, ["FullCooker"], [("Game", ["Game"], none)], NativePlatform.Windows);
+        Verify.That(unmarked.Count == 1 && unmarked[0].ToString().Contains("module Importer", StringComparison.Ordinal),
+            "an engine Runtime module the cooker does not link must fail: " + string.Join('\n', unmarked));
+
+        // 쿠커가 출시 폐포를 모두 링크하면 통과한다(쿠커에만 있는 Developer 모듈 Tools는 허용).
+        NoFailures(CookerModuleSet.Analyze(modules, ["FullCooker"], [("Game", ["Game"], plugin)], NativePlatform.Windows));
+        Verify.That(Throws(() => CookerModuleSet.Analyze(modules, ["Missing"], [], NativePlatform.Windows)),
+            "an unknown cooker module must be an argument error");
+    }
+
+    private static bool Throws(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static void ReferenceControls()

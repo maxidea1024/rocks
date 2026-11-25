@@ -366,7 +366,9 @@ enum class TextureDimension : uint8 {
     Volume = 4,
 };
 
-// 출력 채널이 형식의 어느 채널인지다(쿠킹 swizzle — 렌더러가 view swizzle로 적용, A0-G).
+// 출력 채널이 형식의 어느 채널인지다(쿠킹 swizzle — UE sampler type 계약 데이터,
+// Docs/Design/AssetSystem 12.16.4절). 셰이더가 sampler type에 따라 복제하며 렌더러는 view swizzle을
+// 항등으로 둔다(D3D11에는 view swizzle이 없다 — 모든 backend가 같은 결과).
 ROCKS_ENUM()
 enum class TextureSwizzle : uint8 {
     R = 0,
