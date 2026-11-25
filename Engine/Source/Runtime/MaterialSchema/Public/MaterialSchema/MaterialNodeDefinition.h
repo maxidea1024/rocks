@@ -293,7 +293,7 @@ struct MaterialNodeDefinition {
         return copy;
     }
 
-    // 상태를 TODO(PrerequisiteMissing)로 하고 선행을 정한다(19.2절).
+    // 상태를 PrerequisiteMissing("TODO" 상태)으로 하고 선행을 정한다(19.2절).
     constexpr MaterialNodeDefinition Missing(MaterialPrerequisite value) const noexcept {
         MaterialNodeDefinition copy = *this;
         copy.status = MaterialNodeStatus::PrerequisiteMissing;

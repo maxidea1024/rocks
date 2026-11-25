@@ -6,7 +6,8 @@
 // 노드 상태와 머티리얼 층 선행이다(Docs/Design/MaterialSystem 19.2·19.4.1절, 결정 MD12).
 //
 // "TODO" 노드(PrerequisiteMissing)는 서술·속성은 있고 lowering이 선행 ID를 담은 오류를 낸다. 코드
-// 표기는 `// TODO(MPQ-<이름>): …` 하나이며, 이름은 MaterialPrerequisiteId가 돌려주는 문자열이다.
+// 표기는 `// TODO(MPQ-Font): …`처럼 한 형식이며, 괄호 안은 MaterialPrerequisiteId가 돌려주는 문자열이다
+// (policy material-todo가 검사한다).
 //
 // 사용 예:
 //   if (definition.status == MaterialNodeStatus::PrerequisiteMissing) {

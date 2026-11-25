@@ -49,6 +49,7 @@ enum class MaterialPinType : uint32 {
     // 위 다섯 텍스처 타입을 받는 입력(UE MCT_Texture). 출력 핀에는 쓰지 않는다.
     TextureAny = 25,
     // 아래 여섯은 자원 종류가 아직 없다(19.4.1절 MPQ). 핀은 정의를 위해 지금 둔다.
+    // TODO(MPQ-ExternalTexture): 외부(영상) 텍스처 자원 종류가 생기면 이 타입의 연결과 번역을 연다.
     TextureExternal = 26,
     TextureVirtual = 27,
     SparseVolumeTexture = 28,

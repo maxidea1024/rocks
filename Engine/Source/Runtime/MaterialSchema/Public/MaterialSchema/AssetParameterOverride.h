@@ -16,7 +16,7 @@ struct AssetParameterOverride {
 
     ROCKS_PROPERTY() ParameterKey key;
     // 값 종류는 파라미터 노드가 정한다(컬렉션·텍스처 컬렉션·가상 텍스처·sparse volume·글꼴 —
-    // 19.11절). 대상 클래스가 없는 종류는 TODO(MPQ)다.
+    // 19.11절). 대상 클래스가 없는 종류는 TODO 종류다(19.4.1절 MPQ).
     ROCKS_PROPERTY() MaterialAssetReference value;
 };
 
