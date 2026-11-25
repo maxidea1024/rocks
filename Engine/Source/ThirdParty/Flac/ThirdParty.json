@@ -126,7 +126,7 @@
     }
   ],
   "notes": [
-    "FLAC source decoder for the audio importer (Docs/Design/AudioSystem.ko.md sections 3.10.1 and 3.27). Developer only: AudioTools links it, runtime targets do not.",
+    "FLAC source decoder for the audio importer (Docs/Design/AudioSystem sections 3.10.1 and 3.27). Developer only: AudioTools links it, runtime targets do not.",
     "Built without config.h: the configure results are manifest defines (little endian on every Rocks target, 64-bit bit reader words, no Ogg FLAC, no x86 or NEON intrinsics, FLAC__NO_ASM). FLAC is lossless and the decoder is integer only, so the decoded samples are the same on every architecture.",
     "FlacFormat.c compiles format.c with PACKAGE_VERSION defined (the version strings). FlacWindowsFileIo.c compiles src/share/win_utf8_io/win_utf8_io.c only when the Windows platform define ROCKS_FLAC_WIN_UTF8_IO is set (the platform choice stays in this manifest; Rocks glue does not branch on OS macros), because compat.h maps flac_fopen to its fopen_utf8 on Windows and the file is Windows only.",
     "AudioTools decodes from memory through the stream callbacks (FLAC__stream_decoder_init_stream) and never calls the file-based init functions.",

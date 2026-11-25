@@ -20,7 +20,7 @@ namespace audio_mixer_tests_file {
 using namespace rocks::audio;
 using platform::PlatformMath;
 
-// AU1 믹서 코어 시험이다(Docs/Design/AudioSystem.ko.md 3.22.10절). 모두 OfflineAudioRender로
+// AU1 믹서 코어 시험이다(Docs/Design/AudioSystem 3.22.10절). 모두 OfflineAudioRender로
 // 결정적으로 렌더하고 frame·채널 값을 정답과 대조한다. 기본 rig는 limiter를 꺼서(clamp만 남는다)
 // 정수·이진 소수 fixture가 정확히 일치한다.
 

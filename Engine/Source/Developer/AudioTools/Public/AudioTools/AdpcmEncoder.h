@@ -4,7 +4,7 @@
 #include <Audio/AudioBuffer.h>
 #include <Core/Containers/Array.h>
 
-// MS ADPCM 블록 인코더다(Docs/Design/AudioSystem.ko.md 3.24.2절). UE AudioFormatADPCM의
+// MS ADPCM 블록 인코더다(Docs/Design/AudioSystem 3.24.2절). UE AudioFormatADPCM의
 // EncodeNibble· EncodeBlock과 같은 식이고, 블록마다 계수 세트 7개를 모두 시험해 제곱 오차가 가장
 // 작은 것을 고른다(UE는 색인 0 고정). 출력 배치는 블록 묶음마다 채널을 교차한다(Audio/Adpcm.h).
 // 디코드는 Audio의 DecodeAdpcmFrames다.

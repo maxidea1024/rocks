@@ -10,7 +10,7 @@ Result<AssetLease> LoadBlocking(const AssetRequest&);
 ```
 
 - LoadTicket = 요청 관심, AssetLease = 상주 수명(별도 계수). 동시 요청은 합류, caller별 취소는 독립, callback은 caller별 정확히 한 번 terminal. `OnReady` 중복 등록은 `AlreadyRegistered`, 등록 실패 시 callback 미등록·소유권 caller 유지(계획 §9.2).
-- `ReadyMask`: `Cpu` 구현, `Render` 계약(`UnsupportedCapability`). 오디오 재생 구간의 준비는 `ReadyMask`에 비트를 더하지 않고 오디오 모듈의 준비 티켓(`PreparePlayback`)이 맡는다([오디오 시스템](../AudioSystem.ko.md) 3.12.4절, AD18 — 같은 clip의 seek 구간 둘을 따로 준비해야 해서다). `Cpu`(객체 공개)는 그 티켓의 전제다.
+- `ReadyMask`: `Cpu` 구현, `Render` 계약(`UnsupportedCapability`). 오디오 재생 구간의 준비는 `ReadyMask`에 비트를 더하지 않고 오디오 모듈의 준비 티켓(`PreparePlayback`)이 맡는다([오디오 시스템](../AudioSystem/03-Design/03.12-LoadingAndStreaming.ko.md) 3.12.4절, AD18 — 같은 clip의 seek 구간 둘을 따로 준비해야 해서다). `Cpu`(객체 공개)는 그 티켓의 전제다.
 - `TaskLane`: `Game` 구현, `Worker`·`Render` 계약(이번 엔진은 Game 스레드 하나라 전달 대상이 없다 — `Unsupported`).
 - `AssetScope`: Tryout·World 수명 범위. `Revoke()`는 그 scope의 신규 접근·발급을 막고 진행 중 callback에 `ScopeClosed`를 한 번 전달, lease를 회수한다(다른 scope의 같은 에셋 lease는 유지).
 - `LoadBlocking`: 도구·테스트·엔진 초기화 전용이다. AssetRuntime은 Engine을 모르므로 `EngineAssets`가 "프레임 실행 중" 판정 함수를 `AssetManager`에 주입하고, 그 구간에서 호출하면 `WrongContext`다(로딩 화면은 프레임 밖 초기화 단계 또는 `RequestAsset`을 쓴다).

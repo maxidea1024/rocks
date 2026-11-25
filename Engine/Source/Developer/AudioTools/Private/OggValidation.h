@@ -5,7 +5,7 @@
 #include <Core/Result.h>
 
 // Ogg 원본(Vorbis·Opus)을 디코드하기 전에 물리 stream 전체를 page 단위로 확인한다
-// (Docs/Design/AudioSystem.ko.md 3.28.2절). vorbisfile·opusfile은 CRC가 맞지 않는 page를 건너뛰고,
+// (Docs/Design/AudioSystem 3.28.2절). vorbisfile·opusfile은 CRC가 맞지 않는 page를 건너뛰고,
 // link 끝 page나 다음 link의 BOS page가 빠져도 오류 없이 짧게 디코드한다. 무결성은 여기서 본다.
 namespace rocks::audio::sourcedetail {
 

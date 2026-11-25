@@ -1,6 +1,6 @@
 # 동기화 객체와 lock-free 계층 설계
 
-기준일: 2026-11-22, 개정 3(9.6절 `RealtimeWakeSignal` — [오디오 시스템](AudioSystem.ko.md) 요구). 개정 2(2026-11-18): 교차검증 1차 반영, 결정 확정. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 결정은 권장안으로 확정했다(16절). 원칙과 부딪히는 항목과 범위가 큰 항목은 16절에 따로 표시했다. 개정 2의 반영 내용은 18절에 있다.
+기준일: 2026-11-22, 개정 3(9.6절 `RealtimeWakeSignal` — [오디오 시스템](AudioSystem/README.ko.md) 요구). 개정 2(2026-11-18): 교차검증 1차 반영, 결정 확정. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 결정은 권장안으로 확정했다(16절). 원칙과 부딪히는 항목과 범위가 큰 항목은 16절에 따로 표시했다. 개정 2의 반영 내용은 18절에 있다.
 
 **착수 시점.** 고정 구현 순서(Curve → A0-G → A1–A6 → 화면 마일스톤)를 바꾸지 않는다. 설계만 한다. 이 문서의 단계(SY — 15절)는 그 순서 안에 끼워 넣지 않으며 착수 시점은 사용자가 정한다.
 
@@ -626,7 +626,7 @@ bool IsDone(const OnceFlag& flag) noexcept;
 
 ### 9.6 RealtimeWakeSignal(개정 3)
 
-실시간 스레드와 그 스레드를 깨우는 쪽 사이의 신호다. 첫 사용처는 [오디오 시스템](AudioSystem.ko.md) 3.2절의 장치 콜백 → AudioRT 깨우기다. 장치 콜백은 OS·오디오 라이브러리가 소유한 높은 우선순위 스레드이고, AudioRT는 잠금을 잡지 않는다(D27). 9.1절 `AutoResetEvent`는 parking lot 위에 있어 Signal이 bucket 잠금을 잡을 수 있고, `WaiterSignal`의 macOS판은 `pthread_mutex_t`를 잡는다(7.3절). 그래서 둘 다 이 자리에 쓸 수 없다. 지금의 `ManualResetEvent`·`Semaphore`도 Signal·Release 안에서 `Mutex`를 잡는다(4.1절).
+실시간 스레드와 그 스레드를 깨우는 쪽 사이의 신호다. 첫 사용처는 [오디오 시스템](AudioSystem/03-Design/03.02-Threads.ko.md) 3.2절의 장치 콜백 → AudioRT 깨우기다. 장치 콜백은 OS·오디오 라이브러리가 소유한 높은 우선순위 스레드이고, AudioRT는 잠금을 잡지 않는다(D27). 9.1절 `AutoResetEvent`는 parking lot 위에 있어 Signal이 bucket 잠금을 잡을 수 있고, `WaiterSignal`의 macOS판은 `pthread_mutex_t`를 잡는다(7.3절). 그래서 둘 다 이 자리에 쓸 수 없다. 지금의 `ManualResetEvent`·`Semaphore`도 Signal·Release 안에서 `Mutex`를 잡는다(4.1절).
 
 - **모양.** 대기자는 한 번에 하나다(고정 스레드는 아니다). 둘이 동시에 기다리면 계약 위반이고 Debug·Development에서 Fatal로 드러낸다. 자동 리셋이다. 상태는 `Atomic<uint32>` 하나다: 0 = 비어 있음, 1 = 신호, 2 = 대기 중.
 - **`Signal() noexcept`.** 상태를 1로 교환하고, 이전 값이 2였을 때만 OS 깨우기를 부른다. 잠금·할당이 없고, 대기자가 없으면 시스템 호출도 없다. 연속 Signal은 신호 하나로 합쳐진다.
@@ -1062,7 +1062,7 @@ private:
 - **D31 TLS 파괴 뒤 대기(새)** — 스레드 레코드의 `thread_local` 칸이 파괴된 뒤의 대기는 UE처럼 대기마다 영구 풀의 임시 레코드를 쓰고 참조 계수로 돌려준다. 시험을 둔다(10.2·14.2절).
 - **D32 빌드 연결(새)** — `WaitOnAddress` 링크는 `PlatformBase.Build.cs`의 Windows `SystemLibraries`에 `"Synchronization"`을 넣어 한다. thread safety 분석은 ThirdParty 모듈에 걸지 않는다. `ActionGraph.cs` 430·471–472행 플래그와 MetaCompiler `--clang-arg` 허용 목록 변경은 SY0에 넣는다(7.3·13.1절).
 - **D33 Task 설계 후속 문서(새)** — Task 설계 문서는 아직 없다. work-stealing deque, overflow 큐, worker 보충(oversubscription)은 **Task 설계(후속 문서)** 항목으로 남긴다. 이 문서는 그 바탕(`Atomic<T>`·`SpinBackoff`·`IndexedFreeList`·`StepPolicy`·대기 훅 자리)만 정한다(2.3·10.5·12.2절).
-- **D34 실시간 깨우기(개정 3)** — `RealtimeWakeSignal`을 둔다: 대기자 하나, 자동 리셋, Signal은 잠금·할당이 없고 대기자가 있을 때만 OS 깨우기를 부른다. macOS는 Mach semaphore. 첫 사용처는 오디오 장치 콜백 → AudioRT([오디오 시스템](AudioSystem.ko.md) AD26·PR21). 단계 SY12.
+- **D34 실시간 깨우기(개정 3)** — `RealtimeWakeSignal`을 둔다: 대기자 하나, 자동 리셋, Signal은 잠금·할당이 없고 대기자가 있을 때만 OS 깨우기를 부른다. macOS는 Mach semaphore. 첫 사용처는 오디오 장치 콜백 → AudioRT([오디오 시스템](AudioSystem/05-Decisions.ko.md) AD26·PR21). 단계 SY12.
 
 ## 17. 미확인 사실
 
@@ -1098,4 +1098,4 @@ Rocks·도구 쪽:
   - 단계: 임시 이름공간 없이 SY2 제자리 교체(D28), thread safety 매크로를 SY0으로, SY7 선행에 SY2, MetaCompiler `Atomic<...>` 확인을 SY0 통과 조건으로.
   - 사실 정정: UE ParkingLot `Reserve` 시점·재진입 검사 줄·scratch 할당기·TLS 파괴 경로, `FAAArrayQueue` 사용처(`LocalWorkQueue.h`), 사용 수 재계산, `EV` 36행, `TQueue`·`TCircularQueue` 제외 목록, IntrusiveMutex 대기 bit 해제 시점. Rocks 쪽은 D3D11·D3D12 줄 번호, TraceCapture Mutex 파일 수, `DeviceOwnership` 분류, RenderBase 인용 줄, 빠진 중복(`FrameArena`, `LogSystem` 소비자 spin·`WaitForSpace`, `TraceEvents` double 더하기, 시험의 폴링 반복).
   - Task 설계 문서가 없음을 적고 work-stealing·overflow·oversubscription을 "Task 설계(후속 문서)"로 남겼다(D33).
-- 개정 3(2026-11-22): 실시간 깨우기 `RealtimeWakeSignal`(9.6절, D34, 단계 SY12)과 6절 대응표 한 줄. [오디오 시스템](AudioSystem.ko.md) AD26·PR21의 요구다.
+- 개정 3(2026-11-22): 실시간 깨우기 `RealtimeWakeSignal`(9.6절, D34, 단계 SY12)과 6절 대응표 한 줄. [오디오 시스템](AudioSystem/05-Decisions.ko.md) AD26·PR21의 요구다.

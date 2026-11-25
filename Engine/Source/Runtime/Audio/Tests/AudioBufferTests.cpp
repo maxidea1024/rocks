@@ -15,7 +15,7 @@ using namespace rocks::audio;
 using namespace rocks::audio::audiotest;
 
 // Audio DSP1의 형식·planar 버퍼·gain ramp
-// 시험이다(Docs/Design/AudioSystem.ko.md 3.20.1–3.20.3절, 3.20.8절).
+// 시험이다(Docs/Design/AudioSystem 3.20.1–3.20.3절, 3.20.8절).
 
 TEST(Audio_DSP1_ChannelLayoutCountsAndOrder) {
     CHECK(ChannelCount(ChannelLayout::Mono) == 1);

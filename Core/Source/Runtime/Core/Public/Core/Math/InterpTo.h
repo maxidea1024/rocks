@@ -57,4 +57,24 @@ Quaternion<T> QInterpTo(const Quaternion<T>& current, const Quaternion<T>& targe
                       Clamp(speed * deltaSeconds, static_cast<T>(0), static_cast<T>(1)));
 }
 
+// current에서 target 쪽으로 speed·deltaSeconds만큼(거리 상한) 일정 속도로 옮긴다(UE
+// VInterpConstantTo — UnrealMath.cpp:2562). 남은 거리가 그 이하면 target이고, 옮길 거리가 0 이하면
+// current다. 단위는 입력과 같다.
+template <typename T>
+Vector3<T> VInterpConstantTo(const Vector3<T>& current, const Vector3<T>& target, T deltaSeconds,
+                             T speed) noexcept {
+    const Vector3<T> delta = target - current;
+    const T distance = delta.Length();
+    const T maxStep = speed * deltaSeconds;
+    if (distance > maxStep) {
+        if (maxStep > static_cast<T>(0)) {
+            return current + delta * (maxStep / distance);
+        }
+
+        return current;
+    }
+
+    return target;
+}
+
 } // namespace rocks::math

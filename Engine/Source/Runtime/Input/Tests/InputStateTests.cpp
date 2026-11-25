@@ -173,6 +173,28 @@ TEST(Input_RepeatDownForReleasedKeyCountsAsPress) {
     CHECK(state.WasReleased(Key::W));
 }
 
+// 원시 축은 dead zone 전 값이다. 비유한 값은 0, 연결 해제·범위 밖 패드·축은 0이다.
+TEST(Input_GamepadRawAxesBeforeDeadZone) {
+    InputState state;
+    const float zero = 0.0f;
+    GamepadSnapshot pad;
+    pad.connected = true;
+    pad.axes[static_cast<uint32>(GamepadAxis::LeftX)] = 0.1f;
+    pad.axes[static_cast<uint32>(GamepadAxis::LeftY)] = zero / zero;
+    pad.axes[static_cast<uint32>(GamepadAxis::RightTrigger)] = 1.0f / zero;
+    Frame(state, {InputEvent::Gamepad(2, pad)});
+    CHECK(state.GamepadAxisValue(2, GamepadAxis::LeftX) == 0.0f);
+    CHECK(state.GamepadAxisRawValue(2, GamepadAxis::LeftX) == 0.1f);
+    CHECK(state.GamepadAxisRawValue(2, GamepadAxis::LeftY) == 0.0f);
+    CHECK(state.GamepadAxisRawValue(2, GamepadAxis::RightTrigger) == 0.0f);
+    CHECK(state.GamepadAxisRawValue(MaxGamepads, GamepadAxis::LeftX) == 0.0f);
+    CHECK(state.GamepadAxisRawValue(2, GamepadAxis::Count) == 0.0f);
+    CHECK(state.GamepadAxisRawValue(1, GamepadAxis::LeftX) == 0.0f);
+    GamepadSnapshot disconnected;
+    Frame(state, {InputEvent::Gamepad(2, disconnected)});
+    CHECK(state.GamepadAxisRawValue(2, GamepadAxis::LeftX) == 0.0f);
+}
+
 TEST(Input_DeadZoneRejectsOutOfRangeValues) {
     InputState state;
     const float zero = 0.0f;

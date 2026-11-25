@@ -4,7 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
 
-// 쿠킹된 오디오 플랫폼 데이터 형식이다(Docs/Design/AudioSystem.ko.md 3.30.1절). byte 배치는
+// 쿠킹된 오디오 플랫폼 데이터 형식이다(Docs/Design/AudioSystem 3.30.1절). byte 배치는
 // [메타 = 머리 80 + codec 머리 + 청크 표 64 × 청크 수 + 16 정렬 0][payload 영역]이고 little
 // endian이다. 메타와 payload 영역을 나눠 둘 수 있다(패키지에는 메타와 payload 앞부분, sidecar에는
 // payload 영역).

@@ -55,7 +55,7 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
   - 두 body 중 `notifyRigidBodyCollision`이 참인 쪽이 있으면 `ContactNotice`(body handle 둘, 첫 접촉점, 접촉점 수, 법선, 스텝 번호, 추정 충격량)를 worker별 버퍼에 복사한다.
   - 게임 코드를 부르지 않고, 다른 body 상태를 읽지 않는다(계획 16.2절).
 - **합치는 순서.** worker별 버퍼를 합친 뒤 (스텝 번호, 낮은 body handle, 높은 body handle) 순으로 정렬한다(worker 배정이 비결정적이므로). 같은 쌍의 여러 스텝 접촉은 하나로 합친다(5.4절).
-- **충격량.** Jolt는 `OnContactAdded` 시점(해 풀기 전)에 충격량을 주지 않는다. `EstimateCollisionResponse`(`Physics/Collision/EstimateCollisionResponse.h:37`)로 추정해 `normalImpulse`에 넣는다(Jolt가 충돌음 세기 등에 권하는 방법 — `ContactListener.h:108`). UE는 solver가 누적한 실제 충격량이다(PMU2). 공개 구현 UnrealJolt도 같은 추정을 쓴다(어댑터 경계 11.4절).
+- **충격량.** UE처럼 solver가 실제로 쓴 충격량이다(PMD14). Jolt는 `OnContactAdded` 시점(해 풀기 전)에 충격량을 주지 않으므로(`ContactListener.h:106–108`) 고정 스텝마다 `Update`가 끝난 뒤 그 스텝에 모은 `ContactNotice`의 body 쌍마다 `PhysicsSystem::GetAppliedContactImpulse`(Rocks 추적 가능한 수정 — 어댑터 경계 10.6절)로 받는 body 쪽 충격량 벡터(접촉마다 법선 방향 — UE `E/Private/PhysicsEngine/Experimental/PhysScene_Chaos.cpp:1068–1070`과 같다)를 읽는다. 변환은 운동량 벡터(축 A, kg·m/s → kg·cm/s ×100 — 어댑터 경계 3절). CCD로만 닿은 쌍(함수가 거짓)은 listener에서 `EstimateCollisionResponse`(`Physics/Collision/EstimateCollisionResponse.h:37`)로 구해 둔 추정값을 쓴다. 같은 스텝에 discrete와 CCD가 섞인 쌍은 CCD 몫이 빠진다(한계 — 어댑터 경계 10.6절). 공개 구현 UnrealJolt는 늘 추정값을 쓴다(어댑터 경계 11.4절).
 - **hit 문턱.** UE `MinDeltaVelocityForHitEvents`(기본 0 — `E/Private/PhysicsEngine/PhysicsSettings.cpp:31`)를 물리 설정에 둔다. 상대 속도 변화가 이보다 작은 접촉은 통지하지 않는다(0이면 모두).
 - `OnContactValidate`는 쓰지 않는다(필터 판정은 6.2절이 끝낸다).
 
@@ -74,12 +74,12 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 | `updateMassWhenScaleChanges` | scale 갱신 때 질량 재계산 여부 | 참이면 새 형상으로 다시 계산, 거짓이면 이전 질량·관성을 `MassAndInertiaProvided`로 유지 |
 | `linearDamping`·`angularDamping` | `mLinearDamping`·`mAngularDamping` | 값 그대로(1/s). Jolt 기본 0.05에 맡기지 않는다 |
 | `overrideMaxAngularVelocity`·`maxAngularVelocity` | `mMaxAngularVelocity` | 도/s → rad/s. 덮어쓰기가 아니면 물리 설정 값(6.8절) |
-| (없음) | `mMaxLinearVelocity` | 물리 설정 `maxLinearVelocity`(cm/s → m/s). UE body에는 이 상한이 없다(PMU3) |
+| (없음) | `mMaxLinearVelocity` | 물리 설정 `maxLinearVelocity`(cm/s → m/s). 기본은 UE처럼 사실상 없음(PMD18 — 6.8절) |
 | `continuousCollision` | `EMotionQuality::LinearCast` | |
 | `smoothEdgeCollisions` | `mEnhancedInternalEdgeRemoval` | |
 | `overrideSolverIterations`·`positionIterations`·`velocityIterations` | `mNumPositionStepsOverride`·`mNumVelocityStepsOverride` | 덮어쓰기면 값, 아니면 0(장면 기본) |
 | `gyroscopicTorque` | `mApplyGyroscopicForce` | |
-| `dofMode`·`lock*` | `mAllowedDOFs`(월드 축 bit) | 축 bit는 A로 재배치(Rocks X → Jolt Z, Y → X, Z → Y). 잠금 축 기준은 PMU4. **모든 자유도를 잠근 조합**(Jolt `EAllowedDOFs::None`은 허용되지 않는다 — `Physics/Body/AllowedDOFs.h:12`)은 진단 후 Kinematic처럼 다루지 않고 잠금을 적용하지 않는다(경고 `AllDegreesOfFreedomLocked`). **CustomPlane**(임의 법선 평면)은 월드 축 bit로 표현할 수 없어 Jolt `SixDOFConstraint`(body 대 고정)로 구현한다(PH5) |
+| `dofMode`·`lock*` | `mAllowedDOFs`(월드 축 bit) | 축 bit는 A로 재배치(Rocks X → Jolt Z, Y → X, Z → Y). 잠금 축은 **월드 축**이고 잠근 값은 body를 만들 때의 위치·자세다(PMD19 — UE `CreateDOFLock`은 body 대 월드 joint로, 월드 쪽 frame이 월드 X·Y 축과 생성 시점 위치다, `E/Private/PhysicsEngine/BodyInstance.cpp:856–925`, 생성은 `InitDynamicProperties` — `:4727`). 평면 방식(`YZPlane` 등)은 법선 방향 이동과 법선에 수직인 두 축 회전을 잠근다(UE `:890–903` — 평면 안 이동과 법선 축 회전만 남는다). **모든 자유도를 잠근 조합**(Jolt `EAllowedDOFs::None`은 허용되지 않는다 — `Physics/Body/AllowedDOFs.h:12`)은 진단 후 Kinematic처럼 다루지 않고 잠금을 적용하지 않는다(경고 `AllDegreesOfFreedomLocked`). **CustomPlane**(임의 법선 평면)은 월드 축 bit로 표현할 수 없어 Jolt `SixDOFConstraint`(body 대 고정)로 구현한다(PH5) |
 | `generateWakeEvents` | `BodyActivationListener` | 2.7절 |
 | `notifyRigidBodyCollision` | 접촉 수집 표지 | 6.4절 |
 | `autoWeld` | compound | 2.8절 |
@@ -107,7 +107,7 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 |---|---|---|
 | `defaultGravityZ` | −980 cm/s² | `DefaultGravityZ`(`PC/Private/PhysicsSettingsCore.cpp:29`) |
 | `maxAngularVelocity` | 3600 도/s | `MaxAngularVelocity`(`:43`) |
-| `maxLinearVelocity` | PMU3 | 없음(Jolt 상한 대응) |
+| `maxLinearVelocity` | `UnlimitedLinearVelocity` = √FLT_MAX cm/s(이름 있는 상수 — 사실상 없음) | body마다 `SetMaxLinearVelocity(√FLT_MAX)`(`E/Private/PhysicsEngine/BodyInstance.cpp:1331`, 제곱해도 넘치지 않는 최대 — `PC/Private/ChaosEngineInterface.cpp:693–701`). 임시 상한 CVar `p.HackMaxVelocity2`는 기본 −1(끔 — `CH/Private/Chaos/PBDRigidsEvolutionGBF.cpp:53–54`) |
 | `bounceThresholdVelocity` | 200 cm/s | `BounceThresholdVelocity`(`:42`) |
 | `minDeltaVelocityForHitEvents` | 0 cm/s | `MinDeltaVelocityForHitEvents`(`E/Private/PhysicsEngine/PhysicsSettings.cpp:31`) |
 | `defaultDegreesOfFreedom` | `Full3D`(`SettingsDof { Full3D, YZPlane, XZPlane, XYPlane }`) | `ESettingsDOF`(`E/Classes/PhysicsEngine/PhysicsSettings.h:73–78`·`:278`, 값을 정하지 않아 0 = Full3D) |

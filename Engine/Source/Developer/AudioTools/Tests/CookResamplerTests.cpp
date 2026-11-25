@@ -15,7 +15,7 @@ namespace cook_resampler_tests_file {
 
 using namespace rocks::audio;
 
-// 쿠킹 리샘플러 시험이다(Docs/Design/AudioSystem.ko.md 3.31.3절).
+// 쿠킹 리샘플러 시험이다(Docs/Design/AudioSystem 3.31.3절).
 
 namespace {
 

@@ -30,7 +30,8 @@ public sealed class SandboxProgram : ModuleRules
                 ? new AndroidPackage("com.rocks.sandbox", context.PathInRoot("Programs/Sandbox/AndroidAssets"))
                 : null,
             Sources = context.Sources("Programs/Sandbox/Private"),
-            PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
+            // The engine shader probe ids are shared by the probe shaders and the self-test (Docs/Design/EngineShaders section 7.6).
+            PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private"), context.PathInRoot("Programs/Sandbox/EngineShaderTests/Shared")],
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
             PublicDependencies = ["Launch", "Engine", "Collision", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",

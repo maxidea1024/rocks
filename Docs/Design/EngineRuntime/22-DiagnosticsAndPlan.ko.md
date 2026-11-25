@@ -72,3 +72,13 @@ S14 구현:
 | S12 | Controller·Pawn·PlayerController·CameraDirector·AiController, PlayerState 수명 시험 | S11 |
 | S13 | 14단계 시나리오·Director 없는 World 시나리오 시험, Sandbox 연결 | S12 |
 | S14 | 진단 덤프·콘솔 명령·Guide 갱신, 전체 시험·커버리지 | S13 |
+
+### 22.4 다른 문서의 개정 요청(받은 것)
+
+받은 요청은 여기에 적고, 해당 절을 고친 뒤 상태를 바꾼다.
+
+| 요청한 문서 | 고칠 절 | 요청 | 필요한 때 | 상태 |
+|---|---|---|---|---|
+| [물리 모듈](../PhysicsModule/07-StagesDecisions.ko.md) 7.4절 | 8·15절 | Physics 단계 고정 스텝마다 사용자 Fixed hook 뒤에 엔진 자리 `PhysicsSimulate`를 하나 더한다(지금은 단계 끝 자리 PhysicsResults·SkeletalPhysicsFinalize 둘). 등록은 `SetEngineStage`와 같은 방식 | PH1 전 | 계획됨 — CR21(입력 액션) 뒤 |
+| 같음 | 23절 | 즉시 다시 만들기 `RecreateSystemStateNow(kind)`(UE `EnsurePhysicsStateCreated`). ERD25의 PreRender 일괄과 별도이고 실패 정책은 같다(값 변경은 성공, Warning `SystemStateRecreateFailed`) | PH2 전 | 계획됨 — CR21 뒤 |
+| 같음 | 23·24절(World 코드) | `World::GetPhysicsScene`·`SetPhysicsScene`(World 모듈 추상 접점 `PhysicsScene`), PrimitiveComponent 물리 시스템 상태 판정·생성, `OnTransformUpdated` hook의 body 이동, 이동 API `TeleportMode` 인자, simulate를 켤 때 부모에서 떼기, `MoveComponent` sweep·`UpdateOverlaps` | PH2·PH4 때 | 맡을 곳은 그때 정한다 |

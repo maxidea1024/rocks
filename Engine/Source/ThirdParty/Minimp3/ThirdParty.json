@@ -42,7 +42,7 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "MP3 source decoder for the audio importer (Docs/Design/AudioSystem.ko.md sections 3.10.1 and 3.26). Developer only: AudioTools links it, runtime targets do not.",
+    "MP3 source decoder for the audio importer (Docs/Design/AudioSystem sections 3.10.1 and 3.26). Developer only: AudioTools links it, runtime targets do not.",
     "Minimp3Glue.c compiles the header-only implementation once (MINIMP3_IMPLEMENTATION, float output, no stdio, Layer III only: MINIMP3_ONLY_MP3 leaves out the Layer I and II decoder, which AudioTools rejects anyway) and exposes the static tag helpers of minimp3_ex.h (ID3 skip, Xing/LAME tag) under Rocks names. The tag reader gets a zero-padded copy of the frame because mp3dec_check_vbrtag reads the tag fields before it checks the frame size. AudioTools decodes frame by frame with mp3dec_decode_frame and never calls the minimp3_ex load or ex functions, which allocate with malloc and realloc.",
     "SIMD is selected at compile time (SSE2 on x86-64, NEON on ARM64) with no runtime CPU dispatch, so decoded samples are fixed per architecture (decision of section 3.10.1 on determinism)."
   ],
