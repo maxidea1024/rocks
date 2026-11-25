@@ -2,7 +2,7 @@
 
 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)를 Rocks Core 위에 재구현
 
-**설계 기준일 2026.11.22 · 초안 2.5 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD15는 `NotPlaceable`만 확정, UD13–UD17 권장안 · 미구현(UI 코드 없음, 스펙만 존재)**
+**설계 기준일 2026.11.25 · 초안 2.6 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD15는 `NotPlaceable`만 확정, UD13–UD17 권장안 · 선행 구현을 UT1 진행 중으로 재작업 중(9.1절 UW 단계)**
 
 Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용한다. 구조는 UE 5.8의 UI 체계를 그대로 따른다. 하위 층은 Object가 아닌 경량 Element로 레이아웃·그리기·입력·focus·텍스트를 처리하고, 상위 층은 `rocks::Object`인 Widget이 Element를 감싸 에셋·리플렉션·GC·자체 언어 바인딩·Designer 편집을 제공한다. 에디터는 Element 층을 직접 사용하고, 게임 UI는 Widget 층으로 작성한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8의 기본값을 따른다(4.2절).
 
@@ -12,7 +12,7 @@ Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용�
 |---|---|
 | 기준 문서 | [전체 구현 계획](../EngineImplementationPlan.ko.md) 개정 1.9 · [Core·Object·Input 상세 구현 계획](../CoreObjectInputDetailedPlan.ko.md) · [Clang 생성 Reflection](../../Implementation/ReflectionMetadata.ko.md) · [리플렉션 B9](../ReflectionExtensions.ko.md) · [Sparks 언어 설계](../SparksLanguage/README.ko.md) |
 | UE 기준 | 로컬 클론 `C:\github\UnrealEngine` 5.8.4-release(commit `f45729c0b6f0`). 이 문서의 UE 경로는 `Engine/Source/` 기준 상대 경로이며, 행 번호는 해당 클론의 값이다 |
-| Rocks 상태 | UI·TextLayout·UiRender 코드 없음. Core·Object·리플렉션 구현 중. `PlatformWindow`은 Win64 단일 창(DPI·IME·clipboard·cursor 없음) |
+| Rocks 상태 | 단계 순서보다 먼저 만든 UI 코드(UiCore·UiFramework·UiWidget·UiScreens·UiRender·WorldIntegration·UiDemo, 약 34k줄)가 있다. 9.1절의 리뷰 결과대로 UT1 진행 중으로 보고 UW 단계로 이 문서에 맞춘다. 글꼴은 [글꼴 설계](../Font/README.ko.md) FT1·FT2가 구현됐다. `PlatformWindow`은 Win64·Android 창, Win64 clipboard·cursor·IMM 조합 창(DPI 없음) |
 | 이름 | Rocks 고유 이름을 사용한다(UD12). UI 계층 매크로는 `ROCKS_UI_` 접두. UE 이름(모듈·타입·매크로)은 대응표와 근거 열에만 적는다 |
 | UE 원본 취급 | UE 소스는 구조·동작 확인을 위한 열람·대조에만 사용하고 코드를 옮기지 않는다. Epic 저작 자원(아이콘·이미지·`Engine/Content`)은 포함하지 않는다 |
 | 식별자 | 단계 UT0–UT6, Core 선행 계약 CU1–CU9, Core·플랫폼 보강 CB1–CB4·PW1–PW8, 검증 UV1–UV9, 위험 UR1–UR8, 결정 UD1–UD17 |
