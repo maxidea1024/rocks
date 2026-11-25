@@ -283,6 +283,24 @@ usize BulkEntryCount(Allocator& allocator, Span<const uint8> bytes) noexcept {
     return contents ? contents.Value().bulkEntries.Size() : NumericLimits<usize>::Max();
 }
 
+// 쿠킹 패키지의 bulk 시작 오프셋이 모두 alignment 배수인지 본다(읽기 실패면 거짓).
+bool BulkOffsetsAligned(Allocator& allocator, Span<const uint8> bytes, uint64 alignment) noexcept {
+    PackageReadOptions read;
+    read.expectedKind = PackageKind::Cooked;
+    auto contents = ReadPackage(allocator, bytes, read, nullptr);
+    if (!contents) {
+        return false;
+    }
+
+    for (const PackageBulkEntry& bulk : contents.Value().bulkEntries) {
+        if (bulk.offset % alignment != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // 쿠킹·로드해 platformData를 돌려준다(실패하면 null).
 const TexturePlatformData* CookAndLoad(CookScene& scene, const TextureCookProcessor& processor,
                                        CookOut& out, Loaded& loaded) noexcept {
@@ -578,6 +596,20 @@ TEST(TextureCook_Streaming) {
         // 4096·1024·256·64·16·4·1 → 시작 0·4096·5120·5376·5440·5456·5472(16 byte 정렬) → 5473.
         CHECK(offset == 5472 + 1 && data->tailBulk.rawBytes == offset);
         CHECK(BulkEntryCount(scene.allocator, out.sink.Bytes()) == 3);
+        CHECK(BulkOffsetsAligned(scene.allocator, out.sink.Bytes(), TextureStreamingBulkAlignment));
+    }
+
+    // 프로파일 정렬이 4 KiB보다 작아도 텍스처는 4 KiB다(렌더 요구 — 12.14절 A5j3).
+    {
+        constexpr uint32 SmallAlignment = 16;
+        scene.profile.bulkAlignment = SmallAlignment;
+        REQUIRE(scene.MakeGray(2, 256, 256));
+        CookOut out(scene.allocator);
+        Loaded loaded;
+        REQUIRE(CookAndLoad(scene, processor, out, loaded) != nullptr);
+        CHECK(BulkEntryCount(scene.allocator, out.sink.Bytes()) == 3 &&
+              BulkOffsetsAligned(scene.allocator, out.sink.Bytes(), TextureStreamingBulkAlignment));
+        scene.profile.bulkAlignment = 0;
     }
 
     struct Size {

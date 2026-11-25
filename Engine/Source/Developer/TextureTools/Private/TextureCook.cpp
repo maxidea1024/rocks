@@ -796,7 +796,8 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
     if (filled) {
         CookContext write = context;
         write.bulkSource = &bulk;
-        cooked = CookProcessor::Cook(write);
+        // bulk 정렬은 max(프로파일, 4 KiB)다(렌더 요구 — 12.14절 A5j3).
+        cooked = WriteCookedPackage(write, TextureStreamingBulkAlignment);
     } else {
         cooked = CookFail(context, AssetDiagnosticCode::None, filled.Error());
     }

@@ -33,7 +33,11 @@ inline constexpr uint32 TextureNuggetMaxMips = 32;
 // 버전 2: 상주 꼬리 mip 16 byte 정렬(2026-11-25 A5k — RenderBase 6.5절).
 inline constexpr NuggetProcessorId TextureCookProcessorId{
     Guid{0x524f434b54455843ull, 0x0000000000000001ull},
-    Guid{0x524f434b54455856ull, 0x0000000000000002ull}};
+    Guid{0x524f434b54455856ull, 0x0000000000000003ull}};
+
+// 텍스처 쿠킹 패키지 bulk 정렬의 하한이다(스트리밍 mip bulk·tailBulk 시작 4 KiB — 렌더 요구,
+// RenderBase 6.5절, AssetSystem 12.14절 A5j3). 프로파일 정렬이 더 크면 그것을 쓴다.
+inline constexpr uint32 TextureStreamingBulkAlignment = 4096;
 
 // 너겟 키 머리의 정체성이다(쿠킹 처리기 정체성과 나눈다 — 플랫폼 데이터 배치만 바뀌면 처리기 버전만
 // 올리고 너겟 값은 그대로 다시 쓴다, R-0). 너겟 값(머리·mip byte)의 뜻이 바뀌면 이 버전을 올린다.
