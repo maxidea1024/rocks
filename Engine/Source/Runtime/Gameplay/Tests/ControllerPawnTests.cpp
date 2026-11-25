@@ -355,6 +355,18 @@ TEST(ControllerPawn_PossessOrderAndStealing) {
         return pawn.Owner() == alpha && yaw > 89.999 && yaw < 90.001;
     });
     CHECK(linked.Value());
+    // Actor view 회전(SpringArm usePawnControlRotation — EngineRuntime 26.2절)은 control
+    // rotation이다.
+    CHECK(world.With<Controller>(alpha, [](Controller& value) noexcept {
+        value.SetControlRotation(Rotator<double>(-20.0, 30.0, 0.0));
+    }));
+    auto viewed = world.With<Actor>(first, [](Actor& actor) noexcept {
+        Rotator<double> view;
+        const bool provided = actor.TryGetViewRotation(view);
+        return provided && view.pitch > -20.001 && view.pitch < -19.999 && view.yaw > 29.999 &&
+               view.yaw < 30.001;
+    });
+    CHECK(viewed && viewed.Value());
 
     // beta가 first를 빼앗는다: alpha UnPossess(→ 이벤트) → beta PossessedBy.
     ResetEvents();

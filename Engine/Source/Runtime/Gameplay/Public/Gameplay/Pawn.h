@@ -61,6 +61,12 @@ public:
     // 없으면 0).
     Rotator<double> GetControlRotation() noexcept;
 
+    // UE APawn::GetViewRotation: control rotation이다(관전 분기는 없다 — 26.2절).
+    bool TryGetViewRotation(Rotator<double>& out) noexcept override {
+        out = GetControlRotation();
+        return true;
+    }
+
     // 연결을 건다(Controller::OnPossess가 부른다 — UE PossessedBy): Owner = controller →
     // controller· PlayerState 연결 → OnPossessed → 바뀌었으면 OnControllerChanged.
     void PossessedBy(ObjectHandle controller, ObjectHandle playerState) noexcept;

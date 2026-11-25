@@ -147,6 +147,26 @@ Result<bool> FontAtlasPage::Add(uint32 width, uint32 height, Span<const uint8> p
     return Result<bool>::Success(false);
 }
 
+Result<void> FontAtlasPage::Replace(const AtlasRect& inner, Span<const uint8> pixels) noexcept {
+    const uint32 bytesPerPixel = FontAtlasBytesPerPixel(content_);
+    if (inner.x + inner.width > width_ || inner.y + inner.height > height_ ||
+        pixels.Size() != static_cast<usize>(inner.width) * inner.height * bytesPerPixel) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize rowBytes = static_cast<usize>(inner.width) * bytesPerPixel;
+    for (uint32 row = 0; row < inner.height; ++row) {
+        const usize target = (static_cast<usize>(inner.y + row) * width_ + inner.x) * bytesPerPixel;
+        memcpy(pixels_.Data() + target, pixels.Data() + row * rowBytes, rowBytes);
+    }
+
+    if (inner.width > 0 && inner.height > 0) {
+        MarkDirty(inner);
+    }
+
+    return Result<void>::Success();
+}
+
 void FontAtlasPage::MarkDirty(const AtlasRect& rect) noexcept {
     if (!hasDirty_) {
         dirty_ = rect;

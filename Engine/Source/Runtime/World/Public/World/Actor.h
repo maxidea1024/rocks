@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Math/Rotator.h>
 #include <Meta/Annotations.h>
 #include <Object/NativeClass.h>
 #include <Object/ObjectRefArray.h>
@@ -167,6 +168,14 @@ public:
     // 않도록 기다리는 대신 거짓을 반환한다. 기본은 참이다.
     virtual bool IsReadyToStart() const noexcept {
         return true;
+    }
+
+    // 바라보는 회전(도)을 줄 수 있으면 out에 채우고 참이다(UE APawn::GetViewRotation의 자리 —
+    // Docs/Design/EngineRuntime 26.2절). 기본은 거짓이다. Gameplay Pawn이 control rotation으로
+    // 재정의하고, SpringArm의 usePawnControlRotation이 쓴다(World는 Pawn을 모른다).
+    virtual bool TryGetViewRotation(Rotator<double>& out) noexcept {
+        (void)out;
+        return false;
     }
 
     // 초기화 hook이다. 실패를 반환하면 Spawn이 실패하고 Actor는 OnDestroy 없이 정리된다.

@@ -197,32 +197,93 @@ void SceneComponent::MarkDirty() noexcept {
     }
 }
 
+Mat4d SceneComponent::ParentFrameMatrix() const noexcept {
+    // 부모는 World가 붙인 경우에만 있다(장부 밖 객체는 루트로 계산한다).
+    if (parent_.IsNull() || !HasWorld()) {
+        return Mat4d();
+    }
+
+    const StringView socket = attachSocket_.View();
+    auto frame =
+        GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
+            Mat4d matrix = parent.WorldMatrix();
+            auto local = parent.GetSocketTransform(socket, TransformSpace::Component);
+            if (local) {
+                matrix = local.Value().ToMatrix() * matrix;
+            }
+
+            return matrix;
+        });
+    return frame ? frame.Value() : Mat4d();
+}
+
+Result<void> SceneComponent::SetWorldLocationAndRotation(const Vec3d& location,
+                                                         const Quatd& rotation) noexcept {
+    // UE InternalSetWorldLocationAndRotation(SceneComponent.cpp:3265): 월드 값을 부모 frame 기준
+    // 상대 값으로 바꾼다. 위치는 부모 frame 행렬의 역(Rocks 월드 행렬과 짝), 회전은 (부모 회전 ×
+    // socket 회전)⁻¹ × 회전이다. 절대 성분은 월드 값을 그대로 둔다.
+    auto unit = rotation.TryNormalize();
+    if (!unit || !math::IsFinite(location.x) || !math::IsFinite(location.y) ||
+        !math::IsFinite(location.z)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Transform relative = relative_;
+    relative.translation = location;
+    relative.rotation = unit.Value();
+    if (!parent_.IsNull() && HasWorld()) {
+        if (!absoluteLocation_) {
+            auto inverse = ParentFrameMatrix().TryInverse();
+            if (!inverse) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            relative.translation = inverse.Value().TransformPoint(location);
+        }
+
+        if (!absoluteRotation_) {
+            const StringView socket = attachSocket_.View();
+            auto frameRotation =
+                GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
+                    Quatd parentRotation = parent.WorldQuaternion();
+                    auto local = parent.GetSocketTransform(socket, TransformSpace::Component);
+                    return local ? parentRotation * local.Value().rotation : parentRotation;
+                });
+            if (frameRotation) {
+                auto normalized = (frameRotation.Value().Conjugate() * unit.Value()).TryNormalize();
+                relative.rotation = normalized ? normalized.Value() : unit.Value();
+            }
+        }
+    }
+
+    return SetRelativeTransform(relative);
+}
+
+void SceneComponent::NotifyChildSocketsChanged() noexcept {
+    // UE UpdateChildTransforms: 자식의 월드 행렬을 무효로 하고 Transform 통지를 보낸다.
+    if (children_.Size() == 0 || !HasWorld()) {
+        return;
+    }
+
+    World& world = GetWorld();
+    for (usize index = 0; index < children_.Size(); ++index) {
+        auto notified =
+            world.With<SceneComponent>(children_[index], [](SceneComponent& component) noexcept {
+                component.MarkDirty();
+                component.NotifyTransformUpdated();
+            });
+        (void)notified;
+    }
+}
+
 Mat4d SceneComponent::WorldMatrix() const noexcept {
     if (!worldDirty_) {
         return worldMatrix_;
     }
 
-    Mat4d parentMatrix;
-    // 부모는 World가 붙인 경우에만 있다(장부 밖 객체는 루트로 계산한다).
-    if (!parent_.IsNull() && HasWorld()) {
-        auto parentWorld = GetWorld().With<SceneComponent>(
-            parent_, [](SceneComponent& parent) noexcept { return parent.WorldMatrix(); });
-        if (parentWorld) {
-            parentMatrix = parentWorld.Value();
-        }
-    }
-
-    // 부착 socket이 있으면 부모 기준 socket Transform을 부모 월드 앞에 둔다.
-    if (!attachSocket_.IsEmpty() && !parent_.IsNull() && HasWorld()) {
-        const StringView socket = attachSocket_.View();
-        auto socketLocal =
-            GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
-                return parent.GetSocketTransform(socket, TransformSpace::Component);
-            });
-        if (socketLocal) {
-            parentMatrix = socketLocal.Value().ToMatrix() * parentMatrix;
-        }
-    }
+    // 부모 frame = 부모 기준 socket Transform × 부모 월드다. socket 이름이 비어도 부모에게
+    // 묻는다(UE — SpringArm은 이름 없는 자식도 팔 끝에 둔다, Docs/Design/EngineRuntime 26.2절).
+    const Mat4d parentMatrix = ParentFrameMatrix();
 
     // 행 벡터 규약: 상대 변환을 먼저, 부모 월드 변환을 나중에 적용한다(UE NewRelativeTransform *
     // ParentToWorld). 절대 성분이 있으면 TRS로 합성해 그 성분만 상대 값으로 바꾼다(23.3절 ERD31 —
@@ -401,49 +462,43 @@ ComponentBounds SceneComponent::CalcBounds(const Transform& world) const noexcep
 }
 
 Vec3d SceneComponent::WorldScale3D() const noexcept {
-    Vec3d scale = relative_.scale;
     if (absoluteScale_ || parent_.IsNull() || !HasWorld()) {
-        return scale;
+        return relative_.scale;
     }
 
-    // 부착 socket scale(부모 기준)과 부모 월드 scale을 곱한다(UE Relative * Socket * Parent).
-    if (!attachSocket_.IsEmpty()) {
-        const StringView socket = attachSocket_.View();
-        auto socketLocal =
-            GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
-                return parent.GetSocketTransform(socket, TransformSpace::Component);
-            });
-        if (socketLocal) {
-            scale = scale * socketLocal.Value().scale;
-        }
-    }
+    // UE Relative * Socket * Parent: scale은 성분별 곱이다(socket은 이름이 비어도 묻는다 — 한 번의
+    // 빌림으로 부모 월드 scale과 socket scale을 함께 얻는다).
+    const StringView socket = attachSocket_.View();
+    auto frame =
+        GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
+            Vec3d scale = parent.WorldScale3D();
+            if (auto local = parent.GetSocketTransform(socket, TransformSpace::Component)) {
+                scale = local.Value().scale * scale;
+            }
 
-    auto parentScale = GetWorld().With<SceneComponent>(
-        parent_, [](SceneComponent& parent) noexcept { return parent.WorldScale3D(); });
-    return parentScale ? scale * parentScale.Value() : scale;
+            return scale;
+        });
+    return frame ? relative_.scale * frame.Value() : relative_.scale;
 }
 
 Quatd SceneComponent::WorldQuaternion() const noexcept {
-    Quatd rotation = relative_.rotation;
     if (absoluteRotation_ || parent_.IsNull() || !HasWorld()) {
-        return rotation;
+        return relative_.rotation;
     }
 
-    // UE Relative * Socket * Parent: 회전은 Parent.rot × Socket.rot × Relative.rot이다.
-    if (!attachSocket_.IsEmpty()) {
-        const StringView socket = attachSocket_.View();
-        auto socketLocal =
-            GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
-                return parent.GetSocketTransform(socket, TransformSpace::Component);
-            });
-        if (socketLocal) {
-            rotation = socketLocal.Value().rotation * rotation;
-        }
-    }
+    // UE Relative * Socket * Parent: 회전은 Parent.rot × Socket.rot × Relative.rot이다(socket은
+    // 이름이 비어도 묻는다).
+    const StringView socket = attachSocket_.View();
+    auto frame =
+        GetWorld().With<SceneComponent>(parent_, [socket](SceneComponent& parent) noexcept {
+            Quatd rotation = parent.WorldQuaternion();
+            if (auto local = parent.GetSocketTransform(socket, TransformSpace::Component)) {
+                rotation = rotation * local.Value().rotation;
+            }
 
-    auto parentRotation = GetWorld().With<SceneComponent>(
-        parent_, [](SceneComponent& parent) noexcept { return parent.WorldQuaternion(); });
-    return parentRotation ? parentRotation.Value() * rotation : rotation;
+            return rotation;
+        });
+    return frame ? frame.Value() * relative_.rotation : relative_.rotation;
 }
 
 Result<Transform> SceneComponent::TryWorldTransform() const noexcept {
