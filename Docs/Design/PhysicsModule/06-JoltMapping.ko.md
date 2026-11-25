@@ -55,7 +55,7 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
   - 두 body 중 `notifyRigidBodyCollision`이 참인 쪽이 있으면 `ContactNotice`(body handle 둘, 첫 접촉점, 접촉점 수, 법선, 스텝 번호, 추정 충격량)를 worker별 버퍼에 복사한다.
   - 게임 코드를 부르지 않고, 다른 body 상태를 읽지 않는다(계획 16.2절).
 - **합치는 순서.** worker별 버퍼를 합친 뒤 (스텝 번호, 낮은 body handle, 높은 body handle) 순으로 정렬한다(worker 배정이 비결정적이므로). 같은 쌍의 여러 스텝 접촉은 하나로 합친다(5.4절).
-- **충격량.** Jolt는 `OnContactAdded` 시점(해 풀기 전)에 충격량을 주지 않는다. `EstimateCollisionResponse`(`Physics/Collision/EstimateCollisionResponse.h:37`)로 추정해 `normalImpulse`에 넣는다(Jolt가 충돌음 세기 등에 권하는 방법 — `ContactListener.h:108`). UE는 solver가 누적한 실제 충격량이다(PMU2).
+- **충격량.** Jolt는 `OnContactAdded` 시점(해 풀기 전)에 충격량을 주지 않는다. `EstimateCollisionResponse`(`Physics/Collision/EstimateCollisionResponse.h:37`)로 추정해 `normalImpulse`에 넣는다(Jolt가 충돌음 세기 등에 권하는 방법 — `ContactListener.h:108`). UE는 solver가 누적한 실제 충격량이다(PMU2). 공개 구현 UnrealJolt도 같은 추정을 쓴다(어댑터 경계 11.4절).
 - **hit 문턱.** UE `MinDeltaVelocityForHitEvents`(기본 0 — `E/Private/PhysicsEngine/PhysicsSettings.cpp:31`)를 물리 설정에 둔다. 상대 속도 변화가 이보다 작은 접촉은 통지하지 않는다(0이면 모두).
 - `OnContactValidate`는 쓰지 않는다(필터 판정은 6.2절이 끝낸다).
 
