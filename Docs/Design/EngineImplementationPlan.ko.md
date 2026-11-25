@@ -1570,6 +1570,8 @@ public:
 };
 ~~~
 
+상세 설계는 [물리 모듈](PhysicsModule/README.ko.md)이다(개정 1.20 뒤 추가). 위 `PhysicsWorld` 스케치는 그 문서 2.2절의 World 쪽 추상 접점 `PhysicsScene`으로 대체한다. 아래 16.1–16.3절의 command 구조(`Enqueue(PhysicsCommand)`, callback 중 body 추가·삭제를 다음 command batch로, 쓰기는 Physics lane의 command 단계)는 비동기 step(게임 Tick과 겹치는 step)을 들일 때 쓴다. 지금은 동기 step이라 step 밖에서 Jolt 상태를 바로 쓰고, step 안 callback은 값만 복사한다(물리 모듈 3.2절 PMD6).
+
 Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. Jolt의 작업 분배 연결 지점(job system)은 공통 Task Graph의 worker에 작업을 제출하며 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. adapter가 보고하는 worker 수는 Game·Render·IO 예약분을 제외한 physics 예산이다. 제출 실패를 반환할 수 없는 연결 지점이면 사전 예약한 node pool을 사용하고, 포화 시 작업을 폐기하지 않고 제출 thread에서 즉시 실행한다. 실행 중 작업을 취소할 수 없으면 종료 절차는 그 완료를 기다린다(연결 지점의 실패 표현·취소 가능 여부는 검증 항목 J14). physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
 
 물리 쪽 엔진 컴포넌트(충돌 형상 Box·Sphere·Capsule·Cylinder, constraint·handle·spring·thruster·radial force·physical animation, 이동 컴포넌트와 캐릭터 이동)의 범위·선행·순서는 [컴포넌트 도입](ComponentCatalog/03-RequiredComponents.ko.md) 3.10·8.4–8.6절(CM3·CM12–CM14)이 정한다. 플러그인 쪽 Physics Control(CM23, CR43)과 케이블(CM28, CR51)은 같은 문서 9절이 정하고, Chaos vehicle·modular vehicle과 motor sim 오디오 컴포넌트는 vehicle 단계(개별 P3)의 후속이다. 캐릭터 이동은 UE 안정판 `UCharacterMovementComponent` 구조를 들이고 실험 플러그인 Mover는 참고만 한다. 단독 실행을 먼저 만들고 네트워크 예측은 이동 기록 자리를 남겨 뒤에 붙인다(CD15). Chaos 파괴·field·cluster union·네트워크 물리 컴포넌트는 들이지 않고, P3 파괴 문서가 Jolt 위 방식으로 정한다(CD14).
