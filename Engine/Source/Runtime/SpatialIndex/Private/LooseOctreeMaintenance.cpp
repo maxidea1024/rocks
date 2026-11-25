@@ -402,7 +402,7 @@ void LooseOctree::FreeEmptySubtreeBlocks(uint32 node) noexcept {
     InlineArray<uint32, LooseOctreeSearchStackCapacity> stack;
     stack.PushBack(node);
     while (!stack.IsEmpty()) {
-        const uint32 current = stack.Back();
+        const uint32 current = stack.Last();
         const uint32 block = Search(current).childBlock;
         if (block == detail::NoBlock) {
             stack.PopBack();

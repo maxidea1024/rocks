@@ -27,6 +27,16 @@ TEST(SpanEmptyAndByteCount) {
     CHECK(view.ByteCount() == 3 * sizeof(Pair));
 }
 
+TEST(SpanLastCountsFromTheEnd) {
+    int values[3] = {10, 20, 30};
+    const Span<int> view(values);
+    CHECK(view.Last() == 30 && view.Last(1) == 20 && view.Last(2) == 10);
+    view.Last(1) = 25;
+    CHECK(values[1] == 25);
+    const Span<const int> single = view.Slice(0, 1);
+    CHECK(single.Last() == 10);
+}
+
 TEST(SpanSliceAndTrySliceBounds) {
     int values[6] = {0, 1, 2, 3, 4, 5};
     Span<int> view(values);
