@@ -1,17 +1,60 @@
 #pragma once
 
+#include <Base/Compiler.h>
+#include <Core/Containers/Array.h>
+#include <Core/Memory/Allocator.h>
 #include <Material/MaterialBase.h>
+#include <Material/MaterialPreviewSettings.h>
+#include <MaterialSchema/MaterialAssetReference.h>
+#include <MaterialSchema/MaterialTraitsDesc.h>
+#include <MaterialSchema/VertexInputUsage.h>
+#include <NodeGraph/GraphDocument.h>
 
-// 그래프를 가진 머티리얼 에셋이다(Docs/Design/MaterialSystem 2절·4.2절, 단계 MS3a). 지금은 골격만
-// 있다. 그래프·기본 속성·사용 대상 필드는 MS3b가 더한다.
+// 그래프를 가진 머티리얼 에셋이다(Docs/Design/MaterialSystem 4.2·4.6·19.9절, UE UMaterial).
 namespace rocks {
 
-// UE UMaterial 대응이다.
+// 그래프(EditorOnly)와 기본 속성·사용 대상·물리 재질 필드를 가진다. 쿠킹 데이터(번역 결과)는 MS3이
+// 더한다.
+//
+// 사용 예:
+//   auto material = package.NewAsset<Material>(...);
+//   material->traits.blendMode = BlendMode::Masked;
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드 전용이다.
 ROCKS_CLASS()
-class Material final : public MaterialBase {
+class ROCKS_MATERIAL_API Material final : public MaterialBase {
     ROCKS_GENERATED_BODY()
+
+public:
+    explicit Material(Allocator& allocator) noexcept
+        : MaterialBase(allocator),
+#if ROCKS_WITH_EDITOR_DATA
+          graph(allocator), layout(allocator),
+#endif
+          usage(allocator), renderTracePhysicalMaterials(allocator) {
+    }
+
+    // ---- 에디터 데이터 ----
+#if ROCKS_WITH_EDITOR_DATA
+    // 머티리얼 그래프다(도메인 "Material", 5절). 쿠킹 데이터에는 번역 결과만 간다.
+    ROCKS_PROPERTY(EditorOnly) nodegraph::GraphDocument graph;
+    // 그래프 배치(노드 위치·주석 상자)다. semantic hash 밖이다(5.5절).
+    ROCKS_PROPERTY(EditorOnly) nodegraph::GraphDocumentLayout layout;
+    ROCKS_PROPERTY(EditorOnly) MaterialPreviewSettings preview;
+#endif
+
+    // 기본 속성(19.9절)이다.
+    ROCKS_PROPERTY() material::MaterialTraitsDesc traits;
+    // 사용 대상 선언이다(8.4·19.10절).
+    ROCKS_PROPERTY() material::VertexInputUsage usage;
+    // TODO(MPQ-PhysicalMaterial): 물리 재질 에셋이 생기면 Hard 참조로 바꾸지 않고 대상 클래스를
+    // 검사한다 (UE PhysMaterial·PhysMaterialMask·RenderTracePhysicalMaterialOutputs).
+    ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterial;
+    ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterialMask;
+    ROCKS_PROPERTY() Array<material::MaterialAssetReference> renderTracePhysicalMaterials;
+    // TODO(MPQ-VirtualizedGeometry): 가상화 geometry 경로용 대체 머티리얼(UE
+    // NaniteOverrideMaterial).
+    ROCKS_PROPERTY() material::MaterialAssetReference virtualizedGeometryOverride;
 };
 
 } // namespace rocks
