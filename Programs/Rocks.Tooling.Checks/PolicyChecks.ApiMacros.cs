@@ -47,6 +47,7 @@ public static partial class PolicyChecks
         "Core/Source/Runtime/ReflectionText/Private/TextAssignInternal.h",
         "Engine/Source/Runtime/AssetRuntime/Private/PackageInternal.h",
         "Engine/Source/Runtime/EngineAssets/Private/EngineAssetsInternal.h",
+        "Engine/Source/Runtime/PlatformWindow/Private/Common/PointerTouchMapping.h",
         "Engine/Source/Developer/MeshTools/Private/MeshBuildInternal.h"
     ];
 
