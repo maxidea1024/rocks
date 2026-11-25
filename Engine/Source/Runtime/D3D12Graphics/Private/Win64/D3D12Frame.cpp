@@ -436,6 +436,7 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
     if (record == nullptr || !record->hasSrv || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
+        ++nullTextureBindings_;
     }
 
     if (record != nullptr) {

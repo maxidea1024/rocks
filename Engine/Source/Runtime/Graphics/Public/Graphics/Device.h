@@ -44,9 +44,10 @@ public:
     // 텍스처 slot에 묶는다(파이프라인 이름 표 PipelineBindingNames::texture와 그 짝 샘플러). null
     // handle이면 1x1 흰색 텍스처를 쓴다. Read view(CreateTextureView)면 그 mip·slice 범위만 셰이더
     // 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로 함께 묶을 수 있다).
-    // ReadWrite view는 흰 텍스처로 대신한다. 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는
-    // SrvCompute, 그 밖은 SrvGraphics)면 바꾸지 않으므로, 명시 전이(렌더 그래프)와 함께 쓰는
-    // compute pass는 SetPipeline을 먼저 부른다.
+    // ReadWrite view는 흰 텍스처로 대신한다. 흰 텍스처로 대신한 묶기(null·stale·ReadWrite view)는
+    // Device::NullTextureBindings가 센다(RenderBase 경로는 0이어야 한다 — RenderBase 11.4절 4항).
+    // 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는 SrvCompute, 그 밖은 SrvGraphics)면
+    // 바꾸지 않으므로, 명시 전이(렌더 그래프)와 함께 쓰는 compute pass는 SetPipeline을 먼저 부른다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
 
     // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 이름 표, GX2).
@@ -816,6 +817,11 @@ public:
 
     // 지금까지 무시된 그리기 수(파이프라인·버퍼 미설정, stale handle)다.
     virtual uint64 IgnoredDraws() const noexcept = 0;
+
+    // SetTexture가 흰 텍스처로 대신 묶은 수(null·stale handle, ReadWrite view)의 장치 수명 누적이다
+    // (RenderBase 11.4절 4항). 모든 구성에서 센다. RenderBase 경로는 null을 묶지 않고 내장 자원
+    // 팩의 typed 대체를 묶으므로, 그 경로의 그리기 전후로 값이 같아야 한다(11.3절).
+    virtual uint64 NullTextureBindings() const noexcept = 0;
 
     // 장치를 만든 뒤 검증 계층이 보고한 오류의 누적 수다(D3D12 debug layer·DXGI debug의
     // ERROR·CORRUPTION, GL debug output의 ERROR·UNDEFINED_BEHAVIOR, 명시 전이의 before가 장치가

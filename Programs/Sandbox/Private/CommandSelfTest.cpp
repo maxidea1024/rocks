@@ -3,6 +3,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
+#include <RenderBase/PipelineStatePresets.h>
 #include <stdio.h>
 
 namespace sandbox {
@@ -517,7 +518,7 @@ void RunDepthStencil(Bench& bench) noexcept {
     second.depthStencil.back.compare = CompareFunction::Equal;
     // c: 알파 블렌드, 깊이 Equal·쓰지 않음
     PipelineDesc third = base;
-    third.blend[0] = AlphaBlend();
+    third.blend[0] = render::AlphaBlend();
     third.depthStencil.depthTest = true;
     third.depthStencil.depthCompare = CompareFunction::Equal;
     // 읽기 전용 패스용: 시험만(ro), 쓰기(rw, 무시돼야 한다)

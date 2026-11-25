@@ -421,6 +421,10 @@ uint64 D3D11Device::IgnoredDraws() const noexcept {
     return ignoredDraws_;
 }
 
+uint64 D3D11Device::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
+}
+
 uint64 D3D11Device::ValidationErrorCount() const noexcept {
     DrainValidationMessages();
     return validationErrors_;

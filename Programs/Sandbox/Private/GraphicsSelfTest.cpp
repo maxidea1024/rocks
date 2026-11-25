@@ -6,6 +6,7 @@
 #include "CullingSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
+#include "RenderUtilitySelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
 #include "FormatSelfTest.h"
@@ -731,6 +732,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunComputeChecks(name, device, result.triangle.GetAllocator());
     // 상수 버퍼 묶기(GX6, RenderBase 9.11절): handle 두 수명·기록 명령·갱신 순서·D3D12 root 예산.
     failures += RunConstantChecks(name, device, result.triangle.GetAllocator());
+    // RenderBase 그리기 유틸리티(RB6, RenderBase 11.4절): 엔진 셰이더 전체화면 복사(장치·그래프).
+    failures += RunRenderUtilityChecks(name, device, result.triangle.GetAllocator());
     // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.
     failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.

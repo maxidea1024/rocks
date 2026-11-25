@@ -392,7 +392,9 @@ void GlesDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 
 
 void GlesDevice::SetTexture(TextureHandle handle) noexcept {
     const TextureRecord* record = textures_.Find(handle.slot);
-    boundTexture_ = record == nullptr || record->writable ? white_.slot : handle.slot;
+    const bool substitute = record == nullptr || record->writable;
+    nullTextureBindings_ += substitute ? 1 : 0;
+    boundTexture_ = substitute ? white_.slot : handle.slot;
 }
 
 Result<void> GlesDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {

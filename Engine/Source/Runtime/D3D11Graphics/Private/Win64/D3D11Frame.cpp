@@ -298,6 +298,7 @@ void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     if (record == nullptr || !record->srv) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
+        ++nullTextureBindings_;
     }
 
     if (record != nullptr) {

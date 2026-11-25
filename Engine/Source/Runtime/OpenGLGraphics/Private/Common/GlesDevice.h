@@ -386,6 +386,7 @@ public:
     usize PendingRetireCount() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
 
 private:
@@ -667,6 +668,8 @@ private:
     // 기록의 그리기별 상수 값이다(기록 시작 때 0, 그리기·dispatch 때 program에 올린다).
     alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     uint64 validationErrors_ = 0;
     // 마지막으로 제출한 fence 값이다.
     uint64 fenceValue_ = 0;

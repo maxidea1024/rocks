@@ -1055,6 +1055,10 @@ uint64 GlesDevice::IgnoredDraws() const noexcept {
     return ignoredDraws_;
 }
 
+uint64 GlesDevice::NullTextureBindings() const noexcept {
+    return nullTextureBindings_;
+}
+
 uint64 GlesDevice::ValidationErrorCount() const noexcept {
     return validationErrors_;
 }
