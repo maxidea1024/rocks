@@ -563,6 +563,22 @@ public:
         return data_[index];
     }
 
+    // 끝에서 distanceFromEnd번째 원소다(UE TArray::Last 대응). Last()는 마지막 원소, Last(1)은 그
+    // 앞이다(Python의 a[-1]·a[-2]). distanceFromEnd >= Size()면(빈 배열 포함) Fatal이다.
+    //
+    // 사용 예:
+    //   const Order& latest = orders.Last();      // orders[orders.Size() - 1]
+    //   const Order& previous = orders.Last(1);
+    T& Last(usize distanceFromEnd = 0) noexcept {
+        CheckIndex(LastIndex(distanceFromEnd));
+        return data_[size_ - 1 - distanceFromEnd];
+    }
+
+    const T& Last(usize distanceFromEnd = 0) const noexcept {
+        CheckIndex(LastIndex(distanceFromEnd));
+        return data_[size_ - 1 - distanceFromEnd];
+    }
+
     // view는 buffer를 보존하지 않는다. 사용 중 Array를 재할당하거나 원소를 소멸시키면 안 된다.
     Span<T> View() noexcept {
         return Span<T>(data_, size_);
@@ -785,6 +801,11 @@ private:
         if (index >= size_) {
             platform::Fatal("Array index out of bounds");
         }
+    }
+
+    // Last의 색인이다. 범위 밖이면 size_를 돌려 CheckIndex가 Fatal하게 한다(뺄셈이 감기지 않는다).
+    usize LastIndex(usize distanceFromEnd) const noexcept {
+        return distanceFromEnd < size_ ? size_ - 1 - distanceFromEnd : size_;
     }
 
     Allocator* allocator_;

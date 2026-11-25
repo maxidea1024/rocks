@@ -75,6 +75,16 @@ public:
         return data_[index];
     }
 
+    // 끝에서 distanceFromEnd번째 원소다(UE TArrayView::Last 대응). Last()는 마지막 원소, Last(1)은
+    // 그 앞이다(Python의 a[-1]·a[-2]). distanceFromEnd >= Size()면(빈 span 포함) Fatal이다.
+    constexpr T& Last(usize distanceFromEnd = 0) const noexcept {
+        if (distanceFromEnd >= count_) {
+            platform::Fatal("Span index out of bounds");
+        }
+
+        return data_[count_ - 1 - distanceFromEnd];
+    }
+
     // ---- 하위 범위 ----
     // 결과는 같은 저장소를 빌리는 view이며 원본과 수명이 같다. 원소를 복사하지 않는다.
     //
