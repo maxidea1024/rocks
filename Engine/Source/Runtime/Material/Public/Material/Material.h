@@ -5,10 +5,12 @@
 #include <Core/Memory/Allocator.h>
 #include <Material/MaterialBase.h>
 #include <Material/MaterialPreviewSettings.h>
+#include <Material/ParameterCollection.h>
 #include <MaterialSchema/MaterialAssetReference.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
 #include <MaterialSchema/VertexInputUsage.h>
 #include <NodeGraph/GraphDocument.h>
+#include <Object/ObjectRefs.h>
 
 // 그래프를 가진 머티리얼 에셋이다(Docs/Design/MaterialSystem 4.2·4.6·19.9절, UE UMaterial).
 namespace rocks {
@@ -31,7 +33,8 @@ public:
 #if ROCKS_WITH_EDITOR_DATA
           graph(allocator), layout(allocator),
 #endif
-          usage(allocator), renderTracePhysicalMaterials(allocator) {
+          usage(allocator), parameterCollections(allocator),
+          renderTracePhysicalMaterials(allocator) {
     }
 
     // ---- 에디터 데이터 ----
@@ -47,11 +50,17 @@ public:
     ROCKS_PROPERTY() material::MaterialTraitsDesc traits;
     // 사용 대상 선언이다(8.4·19.10절).
     ROCKS_PROPERTY() material::VertexInputUsage usage;
+    // 그래프의 컬렉션 노드가 쓰는 파라미터 컬렉션(Hard — 실행 때 layout·기본값을 함께
+    // 로드, 4.4·4.6.1절) 이다. 번역이 그래프에서 채운다.
+    ROCKS_PROPERTY() ObjectRefArray<ParameterCollection> parameterCollections;
     // TODO(MPQ-PhysicalMaterial): 물리 재질 에셋이 생기면 Hard 참조로 바꾸지 않고 대상 클래스를
     // 검사한다 (UE PhysMaterial·PhysMaterialMask·RenderTracePhysicalMaterialOutputs).
     ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterial;
     ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterialMask;
     ROCKS_PROPERTY() Array<material::MaterialAssetReference> renderTracePhysicalMaterials;
+    // UE PhysicalMaterialMap[8](물리 재질 마스크 색 칸마다)이다.
+    ROCKS_PROPERTY()
+    material::MaterialAssetReference physicalMaterialMap[MaterialPhysicalMaterialMapSize];
     // TODO(MPQ-VirtualizedGeometry): 가상화 geometry 경로용 대체 머티리얼(UE
     // NaniteOverrideMaterial).
     ROCKS_PROPERTY() material::MaterialAssetReference virtualizedGeometryOverride;

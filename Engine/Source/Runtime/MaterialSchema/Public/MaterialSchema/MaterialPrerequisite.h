@@ -39,10 +39,11 @@ enum class MaterialPrerequisite : uint8 {
     VirtualizedGeometry = 13,
     ColoredTransmittance = 14,
     AlphaHoldout = 15,
+    LightBake = 16,
 };
 
 // 선행 수다(None 포함, 마지막 값 + 1).
-inline constexpr uint32 MaterialPrerequisiteCount = 16;
+inline constexpr uint32 MaterialPrerequisiteCount = 17;
 
 // "MPQ-<이름>" 문자열이다(19.4.1절 ID). None·범위 밖이면 빈 문자열이다.
 ROCKS_MATERIALSCHEMA_API StringView

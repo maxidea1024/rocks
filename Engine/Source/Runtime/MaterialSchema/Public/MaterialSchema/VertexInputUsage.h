@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Result.h>
 #include <Core/Text/Name.h>
 #include <Meta/Annotations.h>
 
@@ -21,8 +22,16 @@ struct VertexInputUsage {
     explicit VertexInputUsage(Allocator& allocator) noexcept : vertexInputs(allocator) {
     }
 
-    // 이름 순, 중복 없음.
+    // 선언 순서이고 중복이 없다(AddVertexInput으로만 넣는다).
     ROCKS_PROPERTY() Array<Name> vertexInputs;
 };
+
+// name이 있는가(Name 비교 규칙).
+ROCKS_MATERIALSCHEMA_API bool ContainsVertexInput(const VertexInputUsage& usage,
+                                                  Name name) noexcept;
+
+// name이 없으면 끝에 더한다(있으면 아무것도 하지 않고 성공). 오류: None 이름 InvalidArgument, 할당
+// 실패.
+ROCKS_MATERIALSCHEMA_API Result<void> AddVertexInput(VertexInputUsage& usage, Name name) noexcept;
 
 } // namespace rocks::material

@@ -114,4 +114,27 @@ enum class MaterialFunctionUsage : uint8 {
     LayerBlend = 2
 };
 
+// shading model preset 값이다(UE EMaterialShadingModel 전부 —
+// RE/Classes/Engine/EngineTypes.h:707–728). 인스턴스 override와 SurfaceFromShadingModel이 쓴다.
+// Renderer 번호표(RenderData ShadingModel)와 달리 UE의 PreintegratedSkin과 FromMaterialExpression도
+// 받고, SurfaceFromShadingModel이 번호표로 바꾼다(10.3절). UE 내부 값 MSM_Strata(12)·MSM_NUM(13)은
+// 두지 않는다(번호는 UE와 같게 비운다).
+ROCKS_ENUM()
+enum class ShadingModelPreset : uint8 {
+    Unlit = 0,
+    DefaultLit = 1,
+    Subsurface = 2,
+    PreintegratedSkin = 3,
+    ClearCoat = 4,
+    SubsurfaceProfile = 5,
+    TwoSidedFoliage = 6,
+    Hair = 7,
+    Cloth = 8,
+    Eye = 9,
+    SingleLayerWater = 10,
+    ThinTranslucent = 11,
+    // 그래프의 ShadingModel 출력이 정한다.
+    FromMaterialExpression = 14
+};
+
 } // namespace rocks::material

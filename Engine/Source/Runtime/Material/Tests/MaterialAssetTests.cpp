@@ -1,11 +1,14 @@
+#include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/Tests/AssetTestSupport.h>
 #include <Base/Compiler.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Material/Material.generated.h>
 #include <Material/Material.h>
+#include <Material/MaterialAssetHooks.h>
 #include <Material/MaterialBase.generated.h>
 #include <Material/MaterialFunction.generated.h>
 #include <Material/MaterialFunction.h>
+#include <Material/MaterialFunctionBase.generated.h>
 #include <Material/MaterialFunctionInstance.generated.h>
 #include <Material/MaterialFunctionInstance.h>
 #include <Material/MaterialInstance.generated.h>
@@ -15,14 +18,19 @@
 #include <Material/ParameterCollection.generated.h>
 #include <Material/ParameterCollection.h>
 #include <TestSupport/Test.h>
+#include <Texture/Texture.generated.h>
+#include <Texture/Texture.h>
 
-// 머티리얼 에셋 클래스 시험이다(Docs/Design/MaterialSystem 4.2·4.6·19.9–19.11절, 단계 MS3b): 클래스
-// 등록과 상속, traits 기본값이 UE와 같음, 필드 저장·로드 왕복(그래프·traits·사용 대상·override),
-// TODO 필드 검사.
+// 머티리얼 에셋 클래스 시험이다(Docs/Design/MaterialSystem 4.2·4.6·4.6.1·19.9–19.11절, 단계 MS3b):
+// 클래스 등록과 상속, 기본값이 UE와 같음, 필드 저장·로드·재저장 왕복(그래프·traits·사용 대상·
+// override·Optional·함수·컬렉션), 텍스처 override의 Hard 의존, 레이어 스택의 EditorOnly 의존과
+// Build hook, TODO 필드 검사의 필드별 양성·음성.
 using namespace rocks;
 namespace material_asset_tests_file {
 
 namespace {
+
+using material::MaterialPrerequisite;
 
 template <class T>
 TypeId TypeOf() noexcept {
@@ -34,10 +42,77 @@ bool IsA(TypeRegistry& types, TypeId actual, TypeId expected) noexcept {
     return result && result.Value();
 }
 
-bool HasUse(const Array<MaterialPrerequisiteUse>& uses, material::MaterialPrerequisite prerequisite,
-            StringView field) noexcept {
-    for (const MaterialPrerequisiteUse& use : uses) {
-        if (use.prerequisite == prerequisite && use.field == field) {
+// 패키지 하나와 그 대표 에셋을 만든다.
+template <class T>
+ObjectHandle MakeAsset(asset_test::AssetEnv& env, uint64 id, RootRef<Package>& package) noexcept {
+    ObjectRegistry& source = *env.source;
+    auto made =
+        NewPackage(source, source.OwnerAccess(), asset_test::FixedId(id), PackageKind::Editor);
+    if (!made) {
+        return ObjectHandle{};
+    }
+
+    package = Move(made.Value());
+    return asset_test::Make<T>(source, TypeOf<T>(), package.Handle(), "");
+}
+
+// 저장한 파일들을 다른 Registry에 한 번에 로드한다.
+struct Loaded {
+    RootRef<Object> roots[2];
+    ObjectHandle packages[2];
+    ObjectHandle assets[2];
+};
+
+bool LoadFiles(asset_test::AssetEnv& env, Span<const Array<uint8>> saved, Loaded& out) noexcept {
+    Array<uint8> files[2] = {Array<uint8>(env.allocator), Array<uint8>(env.allocator)};
+    for (usize index = 0; index < saved.Size(); ++index) {
+        files[index] = asset_test::Copy(env.allocator, saved[index].View());
+    }
+
+    if (!asset_test::LoadAll(env, *env.target, Span<Array<uint8>>(files, saved.Size()),
+                             PackageKind::Editor, nullptr,
+                             Span<RootRef<Object>>(out.roots, saved.Size()),
+                             Span<ObjectHandle>(out.packages, saved.Size()))) {
+        return false;
+    }
+
+    for (usize index = 0; index < saved.Size(); ++index) {
+        auto asset =
+            env.target->FindObject(env.target->OwnerAccess(), out.packages[index], StringView());
+        if (!asset) {
+            return false;
+        }
+
+        out.assets[index] = asset.Value();
+    }
+
+    return true;
+}
+
+// 로드한 패키지를 다시 써서 처음 byte와 같은가.
+bool ResaveSame(asset_test::AssetEnv& env, const Array<uint8>& first,
+                ObjectHandle package) noexcept {
+    auto contents =
+        ReadPackage(env.allocator, first.View(), asset_test::LoadOptions(PackageKind::Editor).read);
+    if (!contents) {
+        return false;
+    }
+
+    const Array<uint8> resaved =
+        asset_test::ResaveAsRead(env.allocator, *env.target, package, contents.Value());
+    return asset_test::SameBytes(first.View(), resaved.View());
+}
+
+bool HasDependency(asset_test::AssetEnv& env, const Array<uint8>& file, AssetId asset,
+                   PackageDependencyKind kind) noexcept {
+    auto contents =
+        ReadPackage(env.allocator, file.View(), asset_test::LoadOptions(PackageKind::Editor).read);
+    if (!contents) {
+        return false;
+    }
+
+    for (const PackageDependencyEntry& entry : contents.Value().dependencies) {
+        if (entry.asset == asset && entry.kind == kind) {
             return true;
         }
     }
@@ -45,102 +120,180 @@ bool HasUse(const Array<MaterialPrerequisiteUse>& uses, material::MaterialPrereq
     return false;
 }
 
-// 한 패키지를 저장해 다른 Registry에 로드하고 대표 에셋 handle을 돌려준다. loadedPackage는 로드한
-// 패키지 handle이다(재저장에 쓴다).
-ObjectHandle SaveAndLoad(asset_test::AssetEnv& env, ObjectHandle package, RootRef<Object>& root,
-                         Array<uint8>& first, ObjectHandle& loadedPackage) noexcept {
-    first = asset_test::Write(env.allocator, *env.source, package, asset_test::EditorOptions());
-    if (first.IsEmpty()) {
-        return ObjectHandle{};
-    }
+material::ParameterKey Key(Allocator& allocator, uint64 parameter) noexcept {
+    material::ParameterKey key(allocator);
+    key.ownerAssetId = asset_test::FixedId(0x700);
+    key.parameterId = Guid{parameter, 1};
+    return key;
+}
 
-    Array<uint8> files[1] = {asset_test::Copy(env.allocator, first.View())};
-    RootRef<Object> roots[1];
-    ObjectHandle handles[1];
-    if (!asset_test::LoadAll(env, *env.target, files, PackageKind::Editor, nullptr, roots,
-                             handles)) {
-        return ObjectHandle{};
-    }
-
-    root = Move(roots[0]);
-    loadedPackage = handles[0];
-    auto loaded = env.target->FindObject(env.target->OwnerAccess(), handles[0], StringView());
-    return loaded ? loaded.Value() : ObjectHandle{};
+// TODO 필드 검사: 결과가 정확히 (선행, 필드) 하나인가.
+bool ExactlyOne(const Array<MaterialPrerequisiteUse>& uses, MaterialPrerequisite prerequisite,
+                StringView field) noexcept {
+    return uses.Size() == 1 && uses[0].prerequisite == prerequisite && uses[0].field == field;
 }
 
 } // namespace
 
-// 등록: 여섯 클래스가 등록되고 상속 관계가 4.2절과 같다.
+// 등록: 클래스가 등록되고 상속 관계가 4.2·4.6.1절과 같다(함수와 함수 인스턴스는
+// MaterialFunctionBase).
 TEST(Material_RegistersAllAssetClasses) {
     asset_test::AssetEnv env;
     REQUIRE(env.Ready());
     REQUIRE(RegisterMaterialTypes(env.modules));
     CHECK(IsA(env.types, TypeOf<MaterialInstance>(), TypeOf<MaterialBase>()));
     CHECK(IsA(env.types, TypeOf<Material>(), TypeOf<MaterialBase>()));
-    CHECK(IsA(env.types, TypeOf<MaterialFunction>(), GeneratedType<Asset>::Id()));
-    CHECK(IsA(env.types, TypeOf<MaterialFunctionInstance>(), GeneratedType<Asset>::Id()));
+    CHECK(IsA(env.types, TypeOf<MaterialFunction>(), TypeOf<MaterialFunctionBase>()));
+    CHECK(IsA(env.types, TypeOf<MaterialFunctionInstance>(), TypeOf<MaterialFunctionBase>()));
+    CHECK(IsA(env.types, TypeOf<MaterialFunctionBase>(), GeneratedType<Asset>::Id()));
     CHECK(IsA(env.types, TypeOf<ParameterCollection>(), GeneratedType<Asset>::Id()));
     CHECK(!IsA(env.types, TypeOf<MaterialFunction>(), TypeOf<MaterialBase>()));
     CHECK(!IsA(env.types, TypeOf<ParameterCollection>(), TypeOf<MaterialBase>()));
+
+    // 추상 기반은 만들 수 없다.
+    RootRef<Package> package;
+    CHECK(MakeAsset<MaterialFunctionBase>(env, 0x620, package).IsNull());
 }
 
-// traits 기본값이 UE UMaterial 생성자(RE/Private/Materials/Material.cpp:1137–)와 같다.
+// traits 기본값이 UE UMaterial 생성자(RE/Private/Materials/Material.cpp:1137–)·헤더 초기값과 같다.
+// UE에서 생성자가 정하지 않는 값은 0·false다.
 TEST(Material_DefaultTraitsMatchUnreal) {
     const material::MaterialTraitsDesc traits;
     CHECK(traits.domain == MaterialDomain::Surface);
     CHECK(traits.blendMode == BlendMode::Opaque);
     CHECK(traits.opacityMaskClipValue == 0.3333f);
+    CHECK(!traits.twoSided && !traits.thinSurface && !traits.useMaterialAttributes);
     CHECK(traits.tangentSpaceNormal);
-    CHECK(traits.lightmapDirectionality);
-    CHECK(traits.castRayTracedShadows);
-    CHECK(traits.translucencyVertexFog);
-    CHECK(traits.frontLayerTranslucency);
+    CHECK(!traits.allowNegativeEmissive && !traits.fullyRough &&
+          !traits.normalCurvatureToRoughness);
     CHECK(traits.roughnessTracking);
-    CHECK(traits.allowVariableRateShading);
+    CHECK(!traits.engineDefaultMaterial && !traits.maskedAssumedOpaque &&
+          !traits.ditherOpacityMask);
+    CHECK(!traits.ditheredLodTransition && !traits.castDynamicShadowAsMasked);
+    CHECK(traits.castRayTracedShadows);
+    CHECK(traits.customizedUvCount == 0);
+    CHECK(traits.pixelDepthOffsetMode == material::PixelDepthOffsetMode::AlongCameraVector);
+    CHECK(traits.maxWorldPositionOffset == 0.0f && !traits.alwaysEvaluateWorldPositionOffset);
+    CHECK(!traits.hasPixelAnimation && !traits.outputTranslucentVelocity &&
+          !traits.translucencyVelocityFromDepth);
     CHECK(traits.decalResponse == material::DecalResponse::ColorNormalRoughness);
+    CHECK(!traits.responsiveAntialiasing && !traits.screenSpaceReflections &&
+          !traits.contactShadows);
+    CHECK(!traits.disableDepthTest && !traits.writeOnlyAlpha && !traits.sphericalParticleNormals);
+    CHECK(!traits.emissiveForAreaLighting);
+    CHECK(traits.lightmapDirectionality);
+    CHECK(!traits.usesDistortion);
     CHECK(traits.refractionMethod == material::RefractionMethod::None);
     CHECK(traits.refractionCoverageMode == material::RefractionCoverageMode::CoverageAccountedFor);
-    CHECK(traits.pixelDepthOffsetMode == material::PixelDepthOffsetMode::AlongCameraVector);
-    CHECK(traits.translucency.pass == material::TranslucencyPass::AfterDepthOfField);
-    CHECK(traits.translucency.lightingMode ==
+    CHECK(traits.refractionDepthBias == 0.0f);
+    CHECK(!traits.lightFunctionAtlasCompatible && !traits.alphaToCoverage &&
+          !traits.translucentCustomDepthWrites);
+    CHECK(traits.frontLayerTranslucency);
+    CHECK(!traits.surfaceCacheSharing && !traits.wireframe);
+    CHECK(traits.shadingRate == material::MaterialShadingRate::Rate1x1);
+    CHECK(traits.allowVariableRateShading);
+    CHECK(traits.translucencyVertexFog);
+    CHECK(!traits.applyCloudFogging && !traits.isSky && !traits.fogPerPixel);
+    CHECK(!traits.relaxVirtualTextureRestrictions);
+
+    const material::MaterialDisplacementTraits& displacement = traits.displacement;
+    CHECK(!displacement.enableTessellation && !displacement.enableFade);
+    CHECK(displacement.magnitude == 4.0f && displacement.center == 0.5f);
+    CHECK(displacement.fadeStartSizePixels == 4.0f && displacement.fadeEndSizePixels == 1.0f);
+
+    const material::MaterialTranslucencyTraits& translucency = traits.translucency;
+    CHECK(translucency.pass == material::TranslucencyPass::AfterDepthOfField);
+    CHECK(translucency.lightingMode ==
           material::TranslucencyLightingMode::VolumetricNonDirectional);
-    CHECK(traits.translucency.shadowDensityScale == 0.5f);
-    CHECK(traits.translucency.selfShadowSecondDensityScale == 10.0f);
-    CHECK(traits.translucency.backscatteringExponent == 30.0f);
-    CHECK(traits.translucency.shadowStartOffset == 100.0f);
-    CHECK(traits.postProcess.location == material::BlendableLocation::SceneColorAfterTonemapping);
-    CHECK(traits.postProcess.blendable);
-    CHECK(traits.displacement.magnitude == 4.0f);
-    CHECK(traits.displacement.center == 0.5f);
-    CHECK(traits.displacement.fadeStartSizePixels == 4.0f);
-    CHECK(traits.displacement.fadeEndSizePixels == 1.0f);
+    CHECK(!translucency.mobileSeparateTranslucency);
+    CHECK(translucency.directionalLightingIntensity == 1.0f);
+    CHECK(translucency.shadowDensityScale == 0.5f);
+    CHECK(translucency.selfShadowDensityScale == 2.0f);
+    CHECK(translucency.selfShadowSecondDensityScale == 10.0f);
+    CHECK(translucency.selfShadowSecondOpacity == 0.0f);
+    CHECK(translucency.backscatteringExponent == 30.0f);
+    CHECK(translucency.multipleScatteringExtinction == LinearColor(1.0f, 0.833f, 0.588f, 1.0f));
+    CHECK(translucency.shadowStartOffset == 100.0f);
+    CHECK(!translucency.localLightShadow);
+    CHECK(translucency.localLightShadowQuality == 0.0f &&
+          translucency.directionalLightShadowQuality == 0.0f);
+
+    const material::MaterialForwardTraits& forward = traits.forward;
+    CHECK(!forward.preintegratedSimpleIbl && !forward.highQualityReflections &&
+          !forward.blendSkyLightCubemaps && !forward.planarReflections);
+
+    const material::MaterialPostProcessTraits& post = traits.postProcess;
+    CHECK(post.location == material::BlendableLocation::SceneColorAfterTonemapping);
+    CHECK(post.priority == 0 && post.blendable && !post.outputAlpha);
+    CHECK(post.userSceneTexture.IsNone() && post.resolutionRelativeToInput.IsNone());
+    CHECK(post.userTextureDivisorX == 0 && post.userTextureDivisorY == 0);
+    CHECK(!post.disablePreExposureScale && !post.stencilTest);
+    CHECK(post.stencilCompare == material::StencilCompare::Less && post.stencilRef == 0);
 }
 
-// Material 필드 왕복: 그래프(EditorOnly)·traits·사용 대상이 저장·로드 뒤에도 같고, 다시 쓴 byte가
-// 처음과 같다(그래프 저장/재열기 왕복 — 15.2절 MS1a 기준의 이월분).
+// 나머지 값 타입 기본값이 UE와 같다(조명 굽기 FLightmassMaterialInterfaceSettings, 텍스처 정보
+// FMaterialTextureInfo, 레이어 줄).
+TEST(Material_DefaultValueTypesMatchUnreal) {
+    const MaterialLightBakeSettings bake;
+    CHECK(!bake.castShadowAsMasked);
+    CHECK(bake.emissiveBoost == 1.0f && bake.diffuseBoost == 1.0f &&
+          bake.exportResolutionScale == 1.0f);
+
+    const material::MaterialTextureSamplingScale scale;
+    CHECK(scale.uvChannel == material::NoUvChannel);
+    CHECK(scale.samplingScale == 0.0f);
+
+    SystemAllocator allocator;
+    const MaterialLayerEntry entry(allocator);
+    CHECK(entry.visible && !entry.restrictToLayerRelatives && !entry.restrictToBlendRelatives);
+    CHECK(entry.linkState == MaterialLayerLinkState::NotFromParent);
+    CHECK(entry.layer.Handle().IsNull() && entry.blend.Handle().IsNull());
+
+    const MaterialLightBakeOverrides overrides{};
+    CHECK(!overrides.castShadowAsMasked.HasValue() && !overrides.emissiveBoost.HasValue());
+}
+
+// 사용 대상 도우미: 중복 없이 선언 순서로 더하고 None은 거부한다.
+TEST(Material_VertexInputUsageHelpers) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    NamePool& names = *env.source->Names();
+    const Name staticMesh = names.TryIntern(material::StaticMeshVertexInputName).Value();
+    const Name skinned = names.TryIntern("SkinnedMesh").Value();
+    material::VertexInputUsage usage(env.allocator);
+    CHECK(material::AddVertexInput(usage, skinned));
+    CHECK(material::AddVertexInput(usage, staticMesh));
+    CHECK(material::AddVertexInput(usage, skinned));
+    REQUIRE(usage.vertexInputs.Size() == 2);
+    CHECK(usage.vertexInputs[0] == skinned && usage.vertexInputs[1] == staticMesh);
+    CHECK(material::ContainsVertexInput(usage, staticMesh));
+    CHECK(!material::ContainsVertexInput(usage, Name()));
+    CHECK(material::AddVertexInput(usage, Name()).Error() == ErrorCode::InvalidArgument);
+}
+
+// Material 필드 왕복: 그래프(EditorOnly)·traits·사용 대상·물리 재질 표가 저장·로드 뒤에도 같고,
+// 다시 쓴 byte가 처음과 같다(그래프 저장/재열기 왕복 — 15.2절 MS1a 기준의 이월분).
 TEST(Material_FieldsRoundTrip) {
     asset_test::AssetEnv env;
     REQUIRE(env.Ready());
     REQUIRE(RegisterMaterialTypes(env.modules));
     ObjectRegistry& source = *env.source;
-    auto package =
-        NewPackage(source, source.OwnerAccess(), asset_test::FixedId(0x610), PackageKind::Editor);
-    REQUIRE(package);
-    const ObjectHandle handle =
-        asset_test::Make<Material>(source, TypeOf<Material>(), package.Value().Handle(), "");
+    RootRef<Package> package;
+    const ObjectHandle handle = MakeAsset<Material>(env, 0x610, package);
     REQUIRE(!handle.IsNull());
 
     NamePool& names = *source.Names();
     const Name staticMesh = names.TryIntern(material::StaticMeshVertexInputName).Value();
-    const Name domain = names.TryIntern("Material").Value();
     const Name outputType = names.TryIntern("Material.Output").Value();
+    const Name domain = names.TryIntern("Material").Value();
     REQUIRE(asset_test::WithBorrow<Material>(source, handle, [&](Material& material) noexcept {
         material.traits.blendMode = BlendMode::Masked;
         material.traits.opacityMaskClipValue = 0.5f;
         material.traits.twoSided = true;
         material.traits.translucency.pass = material::TranslucencyPass::AfterMotionBlur;
         material.traits.postProcess.priority = 7;
-        if (!material.usage.vertexInputs.TryPushBack(staticMesh)) {
+        material.physicalMaterialMap[3].assetId = asset_test::FixedId(0x803);
+        if (!material::AddVertexInput(material.usage, staticMesh)) {
             return false;
         }
 
@@ -166,19 +319,20 @@ TEST(Material_FieldsRoundTrip) {
         return true;
     }));
 
-    RootRef<Object> root;
-    Array<uint8> first(env.allocator);
-    ObjectHandle loadedPackage;
-    const ObjectHandle loaded =
-        SaveAndLoad(env, package.Value().Handle(), root, first, loadedPackage);
-    REQUIRE(!loaded.IsNull());
-    Material* copy = asset_test::Pointer<Material>(*env.target, loaded);
+    const Array<uint8> files[1] = {
+        asset_test::Write(env.allocator, source, package.Handle(), asset_test::EditorOptions())};
+    REQUIRE(!files[0].IsEmpty());
+    Loaded loaded;
+    REQUIRE(LoadFiles(env, files, loaded));
+    Material* copy = asset_test::Pointer<Material>(*env.target, loaded.assets[0]);
     REQUIRE(copy != nullptr);
     CHECK(copy->traits.blendMode == BlendMode::Masked);
     CHECK(copy->traits.opacityMaskClipValue == 0.5f);
     CHECK(copy->traits.twoSided);
     CHECK(copy->traits.translucency.pass == material::TranslucencyPass::AfterMotionBlur);
     CHECK(copy->traits.postProcess.priority == 7);
+    CHECK(copy->physicalMaterialMap[3].assetId == asset_test::FixedId(0x803));
+    CHECK(copy->physicalMaterialMap[2].IsNull());
     REQUIRE(copy->usage.vertexInputs.Size() == 1);
     CHECK(copy->usage.vertexInputs[0] == env.target->Names()->TryIntern("StaticMesh").Value());
 #if ROCKS_WITH_EDITOR_DATA
@@ -187,96 +341,366 @@ TEST(Material_FieldsRoundTrip) {
     CHECK(copy->graph.graphs[0].nodes[0].id == (Guid{0x20, 2}));
     CHECK(copy->preview.cameraPitch == 30);
 #endif
-
-    auto contents =
-        ReadPackage(env.allocator, first.View(), asset_test::LoadOptions(PackageKind::Editor).read);
-    REQUIRE(contents);
-    const Array<uint8> resaved =
-        asset_test::ResaveAsRead(env.allocator, *env.target, loadedPackage, contents.Value());
-    CHECK(asset_test::SameBytes(first.View(), resaved.View()));
+    CHECK(ResaveSame(env, files[0], loaded.packages[0]));
 }
 
-// MaterialInstance 필드 왕복: 파라미터 override(키 포함)와 기본 속성 override가 남는다.
+// MaterialInstance 필드 왕복: 파라미터 override(키 포함)·static enum·글꼴 page·기본 속성 override
+// (Optional enum·float·int, 사용 대상 added/removed)·조명 굽기 override·Optional null 덮기가 남고,
+// 재저장 byte가 같다.
 TEST(Material_InstanceOverridesRoundTrip) {
     asset_test::AssetEnv env;
     REQUIRE(env.Ready());
     REQUIRE(RegisterMaterialTypes(env.modules));
     ObjectRegistry& source = *env.source;
-    auto package =
-        NewPackage(source, source.OwnerAccess(), asset_test::FixedId(0x611), PackageKind::Editor);
-    REQUIRE(package);
-    const ObjectHandle handle = asset_test::Make<MaterialInstance>(
-        source, TypeOf<MaterialInstance>(), package.Value().Handle(), "");
+    RootRef<Package> package;
+    const ObjectHandle handle = MakeAsset<MaterialInstance>(env, 0x611, package);
     REQUIRE(!handle.IsNull());
+    const Name skinned = source.Names()->TryIntern("SkinnedMesh").Value();
+    const Name staticMesh = source.Names()->TryIntern("StaticMesh").Value();
 
     REQUIRE(asset_test::WithBorrow<MaterialInstance>(
         source, handle, [&](MaterialInstance& instance) noexcept {
-            material::ScalarParameterOverride roughness(source.ObjectAllocator());
-            roughness.key.ownerAssetId = asset_test::FixedId(0x700);
-            roughness.key.parameterId = Guid{0x30, 3};
+            Allocator& allocator = source.ObjectAllocator();
+            material::ScalarParameterOverride roughness(allocator);
+            roughness.key = Key(allocator, 0x30);
             roughness.key.scope.kind = material::ParameterScopeKind::FunctionCall;
             if (!roughness.key.scope.callPath.TryPushBack(Guid{0x40, 4})) {
                 return false;
             }
 
             roughness.value = 0.25f;
-            material::StaticSwitchOverride useDetail(source.ObjectAllocator());
-            useDetail.key.parameterId = Guid{0x31, 3};
-            useDetail.value = true;
+            material::StaticEnumOverride preset(allocator);
+            preset.key = Key(allocator, 0x32);
+            preset.value = 3;
+            material::FontParameterOverride font(allocator);
+            font.key = Key(allocator, 0x33);
+            font.page = 2;
             instance.traitOverrides.blendMode = BlendMode::Translucent;
-            instance.traitOverrides.twoSided = false;
+            instance.traitOverrides.shadingModel = material::ShadingModelPreset::PreintegratedSkin;
+            instance.traitOverrides.blendableLocation =
+                material::BlendableLocation::ReplacingTonemapper;
+            instance.traitOverrides.maxWorldPositionOffset = 12.5f;
+            instance.traitOverrides.blendablePriority = -3;
+            instance.lightBakeOverrides.diffuseBoost = 2.0f;
+            // 없음으로 덮기(값이 있는 null 참조).
+            instance.physicalMaterialOverride = material::MaterialAssetReference{};
             return instance.scalarOverrides.TryPushBack(Move(roughness)) &&
-                   instance.staticSwitchOverrides.TryPushBack(Move(useDetail));
+                   instance.staticEnumOverrides.TryPushBack(Move(preset)) &&
+                   instance.fontOverrides.TryPushBack(Move(font)) &&
+                   instance.traitOverrides.addedVertexInputs.TryPushBack(skinned) &&
+                   instance.traitOverrides.removedVertexInputs.TryPushBack(staticMesh);
         }));
 
-    RootRef<Object> root;
-    Array<uint8> first(env.allocator);
-    ObjectHandle loadedPackage;
-    const ObjectHandle loaded =
-        SaveAndLoad(env, package.Value().Handle(), root, first, loadedPackage);
-    REQUIRE(!loaded.IsNull());
-    MaterialInstance* copy = asset_test::Pointer<MaterialInstance>(*env.target, loaded);
+    const Array<uint8> files[1] = {
+        asset_test::Write(env.allocator, source, package.Handle(), asset_test::EditorOptions())};
+    REQUIRE(!files[0].IsEmpty());
+    Loaded loaded;
+    REQUIRE(LoadFiles(env, files, loaded));
+    MaterialInstance* copy = asset_test::Pointer<MaterialInstance>(*env.target, loaded.assets[0]);
     REQUIRE(copy != nullptr);
     REQUIRE(copy->scalarOverrides.Size() == 1);
     const material::ScalarParameterOverride& roughness = copy->scalarOverrides[0];
     CHECK(roughness.key.ownerAssetId == asset_test::FixedId(0x700));
-    CHECK(roughness.key.parameterId == (Guid{0x30, 3}));
+    CHECK(roughness.key.parameterId == (Guid{0x30, 1}));
     CHECK(roughness.key.scope.kind == material::ParameterScopeKind::FunctionCall);
     REQUIRE(roughness.key.scope.callPath.Size() == 1);
     CHECK(roughness.key.scope.callPath[0] == (Guid{0x40, 4}));
     CHECK(roughness.value == 0.25f);
-    REQUIRE(copy->staticSwitchOverrides.Size() == 1);
-    CHECK(copy->staticSwitchOverrides[0].value);
-    REQUIRE(copy->traitOverrides.blendMode.HasValue());
-    CHECK(copy->traitOverrides.blendMode.Value() == BlendMode::Translucent);
-    REQUIRE(copy->traitOverrides.twoSided.HasValue());
-    CHECK(!copy->traitOverrides.twoSided.Value());
-    CHECK(!copy->traitOverrides.opacityMaskClipValue.HasValue());
+    REQUIRE(copy->staticEnumOverrides.Size() == 1);
+    CHECK(copy->staticEnumOverrides[0].value == 3);
+    REQUIRE(copy->fontOverrides.Size() == 1);
+    CHECK(copy->fontOverrides[0].page == 2);
+    const material::MaterialTraitOverrides& traits = copy->traitOverrides;
+    CHECK(traits.blendMode.HasValue() && traits.blendMode.Value() == BlendMode::Translucent);
+    CHECK(traits.shadingModel.HasValue() &&
+          traits.shadingModel.Value() == material::ShadingModelPreset::PreintegratedSkin);
+    CHECK(traits.blendableLocation.HasValue() &&
+          traits.blendableLocation.Value() == material::BlendableLocation::ReplacingTonemapper);
+    CHECK(traits.maxWorldPositionOffset.HasValue() &&
+          traits.maxWorldPositionOffset.Value() == 12.5f);
+    CHECK(traits.blendablePriority.HasValue() && traits.blendablePriority.Value() == -3);
+    CHECK(!traits.opacityMaskClipValue.HasValue() && !traits.twoSided.HasValue());
+    REQUIRE(traits.addedVertexInputs.Size() == 1 && traits.removedVertexInputs.Size() == 1);
+    CHECK(copy->lightBakeOverrides.diffuseBoost.HasValue() &&
+          copy->lightBakeOverrides.diffuseBoost.Value() == 2.0f);
+    CHECK(!copy->lightBakeOverrides.emissiveBoost.HasValue());
+    CHECK(copy->physicalMaterialOverride.HasValue() &&
+          copy->physicalMaterialOverride.Value().IsNull());
+    CHECK(!copy->physicalMaterialMaskOverride.HasValue());
+    CHECK(ResaveSame(env, files[0], loaded.packages[0]));
 }
 
-// TODO 필드 검사(MD12): 기본값이면 비어 있고, 값을 넣은 필드마다 그 선행 ID가 나온다.
-TEST(Material_CollectsUsedPrerequisites) {
+// 텍스처 override는 다른 패키지 텍스처의 Hard 의존이다. 두 패키지를 함께 로드하면 참조가 이어진다.
+TEST(Material_InstanceTextureOverrideIsHardDependency) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    RootRef<Package> texturePackage;
+    const ObjectHandle texture = MakeAsset<Texture2D>(env, 0x630, texturePackage);
+    RootRef<Package> instancePackage;
+    const ObjectHandle instance = MakeAsset<MaterialInstance>(env, 0x631, instancePackage);
+    REQUIRE(!texture.IsNull() && !instance.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<MaterialInstance>(
+        source, instance, [&](MaterialInstance& value) noexcept {
+            auto index = source.AddElement(access, instance, value.textureOverrides);
+            if (!index) {
+                return false;
+            }
+
+            TextureParameterOverride& element = value.textureOverrides[index.Value()];
+            element.key.parameterId = Guid{0x50, 5};
+            return source
+                .SetElementReference(access, instance, value.textureOverrides, index.Value(),
+                                     element.value, texture)
+                .IsOk();
+        }));
+
+    const Array<uint8> files[2] = {asset_test::Write(env.allocator, source, texturePackage.Handle(),
+                                                     asset_test::EditorOptions()),
+                                   asset_test::Write(env.allocator, source,
+                                                     instancePackage.Handle(),
+                                                     asset_test::EditorOptions())};
+    REQUIRE(!files[0].IsEmpty() && !files[1].IsEmpty());
+    CHECK(HasDependency(env, files[1], asset_test::FixedId(0x630), PackageDependencyKind::Hard));
+
+    Loaded loaded;
+    REQUIRE(LoadFiles(env, files, loaded));
+    MaterialInstance* copy = asset_test::Pointer<MaterialInstance>(*env.target, loaded.assets[1]);
+    REQUIRE(copy != nullptr);
+    REQUIRE(copy->textureOverrides.Size() == 1);
+    CHECK(copy->textureOverrides[0].key.parameterId == (Guid{0x50, 5}));
+    CHECK(copy->textureOverrides[0].value.Handle() == loaded.assets[0]);
+    CHECK(ResaveSame(env, files[1], loaded.packages[1]));
+}
+
+// 레이어 스택과 함수 인스턴스 부모는 EditorOnly 의존(쿠킹 Hard 간선 없음)이고, Build 의존은 hook이
+// 선언한다(4.6.1절).
+TEST(Material_FunctionReferencesAreEditorOnlyAndBuild) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    RootRef<Package> functionPackage;
+    const ObjectHandle function = MakeAsset<MaterialFunction>(env, 0x640, functionPackage);
+    RootRef<Package> parentPackage;
+    const ObjectHandle parent = MakeAsset<Material>(env, 0x641, parentPackage);
+    RootRef<Package> instancePackage;
+    const ObjectHandle instance = MakeAsset<MaterialInstance>(env, 0x642, instancePackage);
+    RootRef<Package> functionInstancePackage;
+    const ObjectHandle functionInstance =
+        MakeAsset<MaterialFunctionInstance>(env, 0x643, functionInstancePackage);
+    REQUIRE(!function.IsNull() && !parent.IsNull() && !instance.IsNull() &&
+            !functionInstance.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<MaterialInstance>(
+        source, instance, [&](MaterialInstance& value) noexcept {
+            if (!source.SetReference(access, instance, value.parent, parent)) {
+                return false;
+            }
+
+#if ROCKS_WITH_EDITOR_DATA
+            value.overridesLayerStack = true;
+            auto index = source.AddElement(access, instance, value.layerStack.layers);
+            if (!index) {
+                return false;
+            }
+
+            MaterialLayerEntry& entry = value.layerStack.layers[index.Value()];
+            entry.layerId = Guid{0x60, 6};
+            entry.linkState = MaterialLayerLinkState::LinkedToParent;
+            return source
+                .SetElementReference(access, instance, value.layerStack.layers, index.Value(),
+                                     entry.layer, function)
+                .IsOk();
+#else
+            return true;
+#endif
+        }));
+#if ROCKS_WITH_EDITOR_DATA
+    REQUIRE(asset_test::WithBorrow<MaterialFunctionInstance>(
+        source, functionInstance, [&](MaterialFunctionInstance& value) noexcept {
+            return static_cast<bool>(
+                source.SetReference(access, functionInstance, value.parent, function));
+        }));
+#endif
+
+    const Array<uint8> instanceFile = asset_test::Write(
+        env.allocator, source, instancePackage.Handle(), asset_test::EditorOptions());
+    REQUIRE(!instanceFile.IsEmpty());
+    CHECK(
+        HasDependency(env, instanceFile, asset_test::FixedId(0x641), PackageDependencyKind::Hard));
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(HasDependency(env, instanceFile, asset_test::FixedId(0x640),
+                        PackageDependencyKind::EditorOnly));
+    CHECK(
+        !HasDependency(env, instanceFile, asset_test::FixedId(0x640), PackageDependencyKind::Hard));
+#endif
+
+    AssetTypeHookTable table(env.allocator, env.types);
+    Array<AssetTypeHookRegistration> registrations(env.allocator);
+    REQUIRE(RegisterMaterialAssetHooks(table, registrations));
+    CHECK(RegisterMaterialAssetHooks(table, registrations).Error() == ErrorCode::AlreadyExists);
+    CHECK(registrations.Size() == 2);
+
+    AssetDependencySink instanceSink(env.allocator);
+    REQUIRE(table.CollectBuildDependencies(source, access, instance, TypeOf<MaterialInstance>(),
+                                           asset_test::FixedId(0x642), instanceSink));
+    bool parentDeclared = false;
+    bool functionDeclared = false;
+    for (const PackageDependencyEntry& entry : instanceSink.Dependencies()) {
+        CHECK(entry.kind == PackageDependencyKind::Build);
+        parentDeclared = parentDeclared || entry.asset == asset_test::FixedId(0x641);
+        functionDeclared = functionDeclared || entry.asset == asset_test::FixedId(0x640);
+    }
+
+    CHECK(parentDeclared);
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(functionDeclared);
+    AssetDependencySink functionSink(env.allocator);
+    REQUIRE(table.CollectBuildDependencies(source, access, functionInstance,
+                                           TypeOf<MaterialFunctionInstance>(),
+                                           asset_test::FixedId(0x643), functionSink));
+    REQUIRE(functionSink.Dependencies().Size() == 1);
+    CHECK(functionSink.Dependencies()[0].asset == asset_test::FixedId(0x640));
+#else
+    (void)functionDeclared;
+#endif
+    registrations.Clear();
+}
+
+// 함수·컬렉션 왕복: EditorOnly 필드·쓰임·상속 칸이 남고 재저장 byte가 같다.
+TEST(Material_FunctionAndCollectionRoundTrip) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    RootRef<Package> functionPackage;
+    const ObjectHandle function = MakeAsset<MaterialFunction>(env, 0x650, functionPackage);
+    RootRef<Package> collectionPackage;
+    const ObjectHandle collection = MakeAsset<ParameterCollection>(env, 0x651, collectionPackage);
+    REQUIRE(!function.IsNull() && !collection.IsNull());
+    const Name wetness = source.Names()->TryIntern("Wetness").Value();
+
+    REQUIRE(asset_test::WithBorrow<MaterialFunction>(
+        source, function, [&](MaterialFunction& value) noexcept {
+            value.usage = material::MaterialFunctionUsage::LayerBlend;
+#if ROCKS_WITH_EDITOR_DATA
+            value.exposeToLibrary = true;
+            return value.userExposedCaption.TryAssign("Blend Layers") &&
+                   value.description.TryAssign("Blends two layers.");
+#else
+            return true;
+#endif
+        }));
+    REQUIRE(asset_test::WithBorrow<ParameterCollection>(
+        source, collection, [&](ParameterCollection& value) noexcept {
+            material::ScalarCollectionParameter scalar;
+            scalar.id = Guid{0x70, 7};
+            scalar.name = wetness;
+            scalar.defaultValue = 0.5f;
+            material::ScalarCollectionBaseOverride inherited;
+            inherited.parameterId = Guid{0x71, 7};
+            inherited.value = 0.75f;
+            return value.scalars.TryPushBack(scalar) &&
+                   value.scalarBaseOverrides.TryPushBack(inherited);
+        }));
+
+    const Array<uint8> files[2] = {
+        asset_test::Write(env.allocator, source, functionPackage.Handle(),
+                          asset_test::EditorOptions()),
+        asset_test::Write(env.allocator, source, collectionPackage.Handle(),
+                          asset_test::EditorOptions())};
+    REQUIRE(!files[0].IsEmpty() && !files[1].IsEmpty());
+    Loaded loaded;
+    REQUIRE(LoadFiles(env, files, loaded));
+    MaterialFunction* functionCopy =
+        asset_test::Pointer<MaterialFunction>(*env.target, loaded.assets[0]);
+    ParameterCollection* collectionCopy =
+        asset_test::Pointer<ParameterCollection>(*env.target, loaded.assets[1]);
+    REQUIRE(functionCopy != nullptr && collectionCopy != nullptr);
+    CHECK(functionCopy->usage == material::MaterialFunctionUsage::LayerBlend);
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(functionCopy->exposeToLibrary);
+    CHECK(functionCopy->userExposedCaption.View() == StringView("Blend Layers"));
+#endif
+    REQUIRE(collectionCopy->scalars.Size() == 1);
+    CHECK(collectionCopy->scalars[0].defaultValue == 0.5f);
+    REQUIRE(collectionCopy->scalarBaseOverrides.Size() == 1);
+    CHECK(collectionCopy->scalarBaseOverrides[0].value == 0.75f);
+    CHECK(collectionCopy->base.Handle().IsNull());
+    CHECK(ResaveSame(env, files[0], loaded.packages[0]));
+    CHECK(ResaveSame(env, files[1], loaded.packages[1]));
+}
+
+// TODO 필드 검사(MD12): 기본값이면 비어 있고, 필드 하나만 바꾸면 그 (선행, 필드) 하나만 나온다.
+TEST(Material_CollectsUsedPrerequisitesPerField) {
     SystemAllocator allocator;
     {
         Material material(allocator);
         Array<MaterialPrerequisiteUse> uses(allocator);
         REQUIRE(CollectUsedPrerequisites(material, uses));
         CHECK(uses.IsEmpty());
+    }
 
-        material.traits.blendMode = BlendMode::AlphaHoldout;
-        material.traits.displacement.magnitude = 2.0f;
-        material.traits.relaxVirtualTextureRestrictions = true;
-        material.physicalMaterial.assetId = asset_test::FixedId(0x800);
-        material.neuralProfile.assetId = asset_test::FixedId(0x801);
+    struct MaterialCase {
+        void (*mutate)(Material&) noexcept;
+        MaterialPrerequisite prerequisite;
+        StringView field;
+    };
+
+    const MaterialCase materialCases[] = {
+        {[](Material& m) noexcept { m.traits.blendMode = BlendMode::AlphaHoldout; },
+         MaterialPrerequisite::AlphaHoldout, "traits.blendMode"},
+        {[](Material& m) noexcept {
+             m.traits.blendMode = BlendMode::TranslucentColoredTransmittance;
+         },
+         MaterialPrerequisite::ColoredTransmittance, "traits.blendMode"},
+        {[](Material& m) noexcept { m.traits.displacement.enableFade = true; },
+         MaterialPrerequisite::VirtualizedGeometry, "traits.displacement"},
+        {[](Material& m) noexcept { m.traits.relaxVirtualTextureRestrictions = true; },
+         MaterialPrerequisite::VirtualTexture, "traits.relaxVirtualTextureRestrictions"},
+        {[](Material& m) noexcept { m.physicalMaterial.assetId = asset_test::FixedId(1); },
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterial"},
+        {[](Material& m) noexcept { m.physicalMaterialMask.assetId = asset_test::FixedId(1); },
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMask"},
+        {[](Material& m) noexcept {
+             (void)m.renderTracePhysicalMaterials.TryPushBack(material::MaterialAssetReference{});
+         },
+         MaterialPrerequisite::PhysicalMaterial, "renderTracePhysicalMaterials"},
+        {[](Material& m) noexcept { m.physicalMaterialMap[7].assetId = asset_test::FixedId(1); },
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMap"},
+        {[](Material& m) noexcept {
+             m.virtualizedGeometryOverride.assetId = asset_test::FixedId(1);
+         },
+         MaterialPrerequisite::VirtualizedGeometry, "virtualizedGeometryOverride"},
+        {[](Material& m) noexcept {
+             (void)m.subsurfaceProfiles.TryPushBack(material::MaterialAssetReference{});
+         },
+         MaterialPrerequisite::SubsurfaceProfile, "subsurfaceProfiles"},
+        {[](Material& m) noexcept {
+             (void)m.specularProfiles.TryPushBack(material::MaterialAssetReference{});
+         },
+         MaterialPrerequisite::SpecularProfile, "specularProfiles"},
+        {[](Material& m) noexcept {
+             (void)m.toonProfiles.TryPushBack(material::MaterialAssetReference{});
+         },
+         MaterialPrerequisite::ToonShading, "toonProfiles"},
+        {[](Material& m) noexcept { m.neuralProfile.assetId = asset_test::FixedId(1); },
+         MaterialPrerequisite::NeuralProfile, "neuralProfile"},
+        {[](Material& m) noexcept { m.lightBakeSettings.diffuseBoost = 2.0f; },
+         MaterialPrerequisite::LightBake, "lightBakeSettings"},
+    };
+
+    for (const MaterialCase& testCase : materialCases) {
+        Material material(allocator);
+        testCase.mutate(material);
+        Array<MaterialPrerequisiteUse> uses(allocator);
         REQUIRE(CollectUsedPrerequisites(material, uses));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::AlphaHoldout, "traits.blendMode"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::VirtualizedGeometry,
-                     "traits.displacement"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::VirtualTexture,
-                     "traits.relaxVirtualTextureRestrictions"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::PhysicalMaterial, "physicalMaterial"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::NeuralProfile, "neuralProfile"));
-        CHECK(uses.Size() == 5);
+        CHECK(ExactlyOne(uses, testCase.prerequisite, testCase.field));
     }
 
     {
@@ -284,20 +708,98 @@ TEST(Material_CollectsUsedPrerequisites) {
         Array<MaterialPrerequisiteUse> uses(allocator);
         REQUIRE(CollectUsedPrerequisites(instance, uses));
         CHECK(uses.IsEmpty());
+    }
 
-        material::AssetParameterOverride font(allocator);
-        REQUIRE(instance.fontOverrides.TryPushBack(Move(font)));
-        instance.traitOverrides.blendMode = BlendMode::TranslucentColoredTransmittance;
-        instance.traitOverrides.enableTessellation = true;
-        instance.toonProfileOverride.assetId = asset_test::FixedId(0x802);
+    struct InstanceCase {
+        void (*mutate)(MaterialInstance&, Allocator&) noexcept;
+        MaterialPrerequisite prerequisite;
+        StringView field;
+    };
+
+    const InstanceCase instanceCases[] = {
+        {[](MaterialInstance& i, Allocator& a) noexcept {
+             (void)i.textureCollectionOverrides.TryPushBack(material::AssetParameterOverride(a));
+         },
+         MaterialPrerequisite::TextureCollection, "textureCollectionOverrides"},
+        {[](MaterialInstance& i, Allocator& a) noexcept {
+             (void)i.virtualTextureOverrides.TryPushBack(material::AssetParameterOverride(a));
+         },
+         MaterialPrerequisite::VirtualTexture, "virtualTextureOverrides"},
+        {[](MaterialInstance& i, Allocator& a) noexcept {
+             (void)i.sparseVolumeTextureOverrides.TryPushBack(material::AssetParameterOverride(a));
+         },
+         MaterialPrerequisite::SparseVolumeTexture, "sparseVolumeTextureOverrides"},
+        {[](MaterialInstance& i, Allocator& a) noexcept {
+             (void)i.fontOverrides.TryPushBack(material::FontParameterOverride(a));
+         },
+         MaterialPrerequisite::Font, "fontOverrides"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.physicalMaterialOverride = material::MaterialAssetReference{};
+         },
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.physicalMaterialMaskOverride = material::MaterialAssetReference{};
+         },
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMaskOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.physicalMaterialMapOverride[0].assetId = asset_test::FixedId(1);
+         },
+         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialMapOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.virtualizedGeometryOverride = material::MaterialAssetReference{};
+         },
+         MaterialPrerequisite::VirtualizedGeometry, "virtualizedGeometryOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.traitOverrides.displacementCenter = 0.1f;
+         },
+         MaterialPrerequisite::VirtualizedGeometry, "traitOverrides.displacement"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.subsurfaceProfileOverride = material::MaterialAssetReference{};
+         },
+         MaterialPrerequisite::SubsurfaceProfile, "subsurfaceProfileOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.specularProfileOverride = material::MaterialAssetReference{};
+         },
+         MaterialPrerequisite::SpecularProfile, "specularProfileOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.toonProfileOverride = material::MaterialAssetReference{};
+         },
+         MaterialPrerequisite::ToonShading, "toonProfileOverride"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.lightBakeOverrides.emissiveBoost = 3.0f;
+         },
+         MaterialPrerequisite::LightBake, "lightBakeOverrides"},
+        {[](MaterialInstance& i, Allocator&) noexcept {
+             i.traitOverrides.blendMode = BlendMode::AlphaHoldout;
+         },
+         MaterialPrerequisite::AlphaHoldout, "traitOverrides.blendMode"},
+    };
+
+    for (const InstanceCase& testCase : instanceCases) {
+        MaterialInstance instance(allocator);
+        testCase.mutate(instance, allocator);
+        Array<MaterialPrerequisiteUse> uses(allocator);
         REQUIRE(CollectUsedPrerequisites(instance, uses));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::Font, "fontOverrides"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::ColoredTransmittance,
-                     "traitOverrides.blendMode"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::VirtualizedGeometry,
-                     "traitOverrides.displacement"));
-        CHECK(HasUse(uses, material::MaterialPrerequisite::ToonShading, "toonProfileOverride"));
-        CHECK(uses.Size() == 4);
+        CHECK(ExactlyOne(uses, testCase.prerequisite, testCase.field));
+    }
+
+    // TODO가 아닌 override(블렌드 모드 Translucent)는 쓰여도 진단이 없다.
+    {
+        MaterialInstance instance(allocator);
+        instance.traitOverrides.blendMode = BlendMode::Translucent;
+        Array<MaterialPrerequisiteUse> uses(allocator);
+        REQUIRE(CollectUsedPrerequisites(instance, uses));
+        CHECK(uses.IsEmpty());
+    }
+
+    {
+        MaterialFunctionInstance instance(allocator);
+        Array<MaterialPrerequisiteUse> uses(allocator);
+        REQUIRE(CollectUsedPrerequisites(instance, uses));
+        CHECK(uses.IsEmpty());
+        REQUIRE(instance.fontOverrides.TryPushBack(material::FontParameterOverride(allocator)));
+        REQUIRE(CollectUsedPrerequisites(instance, uses));
+        CHECK(ExactlyOne(uses, MaterialPrerequisite::Font, "fontOverrides"));
     }
 }
 

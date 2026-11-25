@@ -23,10 +23,10 @@ constexpr StringView PrerequisiteIds[MaterialPrerequisiteCount] = {
     "MPQ-VirtualizedGeometry",
     "MPQ-ColoredTransmittance",
     "MPQ-AlphaHoldout",
+    "MPQ-LightBake",
 };
 
-static_assert(static_cast<uint32>(MaterialPrerequisite::AlphaHoldout) + 1 ==
-                  MaterialPrerequisiteCount,
+static_assert(static_cast<uint32>(MaterialPrerequisite::LightBake) + 1 == MaterialPrerequisiteCount,
               "MaterialPrerequisiteCount must follow the last MaterialPrerequisite value");
 
 } // namespace

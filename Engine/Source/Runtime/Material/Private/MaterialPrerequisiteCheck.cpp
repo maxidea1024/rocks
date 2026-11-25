@@ -1,22 +1,51 @@
 #include <Material/Material.h>
+#include <Material/MaterialFunctionInstance.h>
 #include <Material/MaterialInstance.h>
 #include <Material/MaterialPrerequisiteCheck.h>
 
-// 에셋 TODO 필드 검사다(Docs/Design/MaterialSystem 19.4.1·19.9·19.11절).
+// 에셋 TODO 필드 검사다(Docs/Design/MaterialSystem 4.6.1·19.4.1·19.9·19.11절).
 namespace rocks {
 
 namespace {
 
+using material::MaterialAssetReference;
 using material::MaterialPrerequisite;
 
-Result<void> Add(Array<MaterialPrerequisiteUse>& out, MaterialPrerequisite prerequisite,
-                 StringView field) noexcept {
-    return out.TryPushBack(MaterialPrerequisiteUse{prerequisite, field});
+// 검사 한 줄이다(쓰였는가·선행·필드 경로).
+struct Use {
+    bool used;
+    MaterialPrerequisite prerequisite;
+    StringView field;
+};
+
+Result<void> AddUses(Array<MaterialPrerequisiteUse>& out, Span<const Use> uses) noexcept {
+    for (const Use& use : uses) {
+        if (!use.used) {
+            continue;
+        }
+
+        if (auto added = out.TryPushBack(MaterialPrerequisiteUse{use.prerequisite, use.field});
+            !added) {
+            return added;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
-Result<void> AddIf(Array<MaterialPrerequisiteUse>& out, bool used,
-                   MaterialPrerequisite prerequisite, StringView field) noexcept {
-    return used ? Add(out, prerequisite, field) : Result<void>::Success();
+bool AnySet(Span<const MaterialAssetReference> references) noexcept {
+    for (const MaterialAssetReference& reference : references) {
+        if (!reference.IsNull()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Optional override는 값이 있으면(없음으로 덮기 포함) 쓰인 것이다.
+bool HasOverride(const Optional<MaterialAssetReference>& reference) noexcept {
+    return reference.HasValue();
 }
 
 bool SameDisplacement(const material::MaterialDisplacementTraits& left,
@@ -26,6 +55,13 @@ bool SameDisplacement(const material::MaterialDisplacementTraits& left,
            left.enableFade == right.enableFade &&
            left.fadeStartSizePixels == right.fadeStartSizePixels &&
            left.fadeEndSizePixels == right.fadeEndSizePixels;
+}
+
+bool SameLightBake(const MaterialLightBakeSettings& left,
+                   const MaterialLightBakeSettings& right) noexcept {
+    return left.castShadowAsMasked == right.castShadowAsMasked &&
+           left.emissiveBoost == right.emissiveBoost && left.diffuseBoost == right.diffuseBoost &&
+           left.exportResolutionScale == right.exportResolutionScale;
 }
 
 // 블렌드 모드 값의 선행이다(Renderer 14.2절 후속 값).
@@ -40,36 +76,21 @@ MaterialPrerequisite BlendModePrerequisite(BlendMode mode) noexcept {
     }
 }
 
-Result<void> AddBlendMode(Array<MaterialPrerequisiteUse>& out, BlendMode mode,
-                          StringView field) noexcept {
-    const MaterialPrerequisite prerequisite = BlendModePrerequisite(mode);
-    return AddIf(out, prerequisite != MaterialPrerequisite::None, prerequisite, field);
-}
-
 } // namespace
 
 Result<void> CollectUsedPrerequisites(const MaterialBase& base,
                                       Array<MaterialPrerequisiteUse>& out) noexcept {
-    if (auto added = AddIf(out, !base.subsurfaceProfiles.IsEmpty(),
-                           MaterialPrerequisite::SubsurfaceProfile, "subsurfaceProfiles");
-        !added) {
-        return added;
-    }
-
-    if (auto added = AddIf(out, !base.specularProfiles.IsEmpty(),
-                           MaterialPrerequisite::SpecularProfile, "specularProfiles");
-        !added) {
-        return added;
-    }
-
-    if (auto added = AddIf(out, !base.toonProfiles.IsEmpty(), MaterialPrerequisite::ToonShading,
-                           "toonProfiles");
-        !added) {
-        return added;
-    }
-
-    return AddIf(out, !base.neuralProfile.IsNull(), MaterialPrerequisite::NeuralProfile,
-                 "neuralProfile");
+    const Use uses[] = {
+        {!base.subsurfaceProfiles.IsEmpty(), MaterialPrerequisite::SubsurfaceProfile,
+         "subsurfaceProfiles"},
+        {!base.specularProfiles.IsEmpty(), MaterialPrerequisite::SpecularProfile,
+         "specularProfiles"},
+        {!base.toonProfiles.IsEmpty(), MaterialPrerequisite::ToonShading, "toonProfiles"},
+        {!base.neuralProfile.IsNull(), MaterialPrerequisite::NeuralProfile, "neuralProfile"},
+        {!SameLightBake(base.lightBakeSettings, MaterialLightBakeSettings{}),
+         MaterialPrerequisite::LightBake, "lightBakeSettings"},
+    };
+    return AddUses(out, uses);
 }
 
 Result<void> CollectUsedPrerequisites(const Material& material,
@@ -79,38 +100,26 @@ Result<void> CollectUsedPrerequisites(const Material& material,
         return base;
     }
 
-    const bool physical = !material.physicalMaterial.IsNull() ||
-                          !material.physicalMaterialMask.IsNull() ||
-                          !material.renderTracePhysicalMaterials.IsEmpty();
-    if (auto added =
-            AddIf(out, physical, MaterialPrerequisite::PhysicalMaterial, "physicalMaterial");
-        !added) {
-        return added;
-    }
-
-    if (auto added =
-            AddIf(out, !material.virtualizedGeometryOverride.IsNull(),
-                  MaterialPrerequisite::VirtualizedGeometry, "virtualizedGeometryOverride");
-        !added) {
-        return added;
-    }
-
-    if (auto added = AddIf(
-            out,
-            !SameDisplacement(material.traits.displacement, material::MaterialDisplacementTraits{}),
-            MaterialPrerequisite::VirtualizedGeometry, "traits.displacement");
-        !added) {
-        return added;
-    }
-
-    if (auto added =
-            AddIf(out, material.traits.relaxVirtualTextureRestrictions,
-                  MaterialPrerequisite::VirtualTexture, "traits.relaxVirtualTextureRestrictions");
-        !added) {
-        return added;
-    }
-
-    return AddBlendMode(out, material.traits.blendMode, "traits.blendMode");
+    const BlendMode blend = material.traits.blendMode;
+    const MaterialPrerequisite blendPrerequisite = BlendModePrerequisite(blend);
+    const Use uses[] = {
+        {!material.physicalMaterial.IsNull(), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterial"},
+        {!material.physicalMaterialMask.IsNull(), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialMask"},
+        {!material.renderTracePhysicalMaterials.IsEmpty(), MaterialPrerequisite::PhysicalMaterial,
+         "renderTracePhysicalMaterials"},
+        {AnySet(material.physicalMaterialMap), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialMap"},
+        {!material.virtualizedGeometryOverride.IsNull(), MaterialPrerequisite::VirtualizedGeometry,
+         "virtualizedGeometryOverride"},
+        {!SameDisplacement(material.traits.displacement, material::MaterialDisplacementTraits{}),
+         MaterialPrerequisite::VirtualizedGeometry, "traits.displacement"},
+        {material.traits.relaxVirtualTextureRestrictions, MaterialPrerequisite::VirtualTexture,
+         "traits.relaxVirtualTextureRestrictions"},
+        {blendPrerequisite != MaterialPrerequisite::None, blendPrerequisite, "traits.blendMode"},
+    };
+    return AddUses(out, uses);
 }
 
 Result<void> CollectUsedPrerequisites(const MaterialInstance& instance,
@@ -120,19 +129,19 @@ Result<void> CollectUsedPrerequisites(const MaterialInstance& instance,
         return base;
     }
 
-    struct ArrayUse {
-        bool used;
-        MaterialPrerequisite prerequisite;
-        StringView field;
-    };
-
     const material::MaterialTraitOverrides& traits = instance.traitOverrides;
     const bool displacement =
         traits.enableTessellation.HasValue() || traits.displacementMagnitude.HasValue() ||
         traits.displacementCenter.HasValue() || traits.enableDisplacementFade.HasValue() ||
         traits.displacementFadeStartSizePixels.HasValue() ||
         traits.displacementFadeEndSizePixels.HasValue();
-    const ArrayUse uses[] = {
+    const MaterialLightBakeOverrides& bake = instance.lightBakeOverrides;
+    const bool lightBake = bake.castShadowAsMasked.HasValue() || bake.emissiveBoost.HasValue() ||
+                           bake.diffuseBoost.HasValue() || bake.exportResolutionScale.HasValue();
+    const MaterialPrerequisite blendPrerequisite =
+        traits.blendMode.HasValue() ? BlendModePrerequisite(traits.blendMode.Value())
+                                    : MaterialPrerequisite::None;
+    const Use uses[] = {
         {!instance.textureCollectionOverrides.IsEmpty(), MaterialPrerequisite::TextureCollection,
          "textureCollectionOverrides"},
         {!instance.virtualTextureOverrides.IsEmpty(), MaterialPrerequisite::VirtualTexture,
@@ -140,31 +149,40 @@ Result<void> CollectUsedPrerequisites(const MaterialInstance& instance,
         {!instance.sparseVolumeTextureOverrides.IsEmpty(),
          MaterialPrerequisite::SparseVolumeTexture, "sparseVolumeTextureOverrides"},
         {!instance.fontOverrides.IsEmpty(), MaterialPrerequisite::Font, "fontOverrides"},
-        {!instance.physicalMaterialOverride.IsNull() ||
-             !instance.physicalMaterialMaskOverride.IsNull(),
-         MaterialPrerequisite::PhysicalMaterial, "physicalMaterialOverride"},
-        {!instance.virtualizedGeometryOverride.IsNull(), MaterialPrerequisite::VirtualizedGeometry,
-         "virtualizedGeometryOverride"},
+        {HasOverride(instance.physicalMaterialOverride), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialOverride"},
+        {HasOverride(instance.physicalMaterialMaskOverride), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialMaskOverride"},
+        {AnySet(instance.physicalMaterialMapOverride), MaterialPrerequisite::PhysicalMaterial,
+         "physicalMaterialMapOverride"},
+        {HasOverride(instance.virtualizedGeometryOverride),
+         MaterialPrerequisite::VirtualizedGeometry, "virtualizedGeometryOverride"},
         {displacement, MaterialPrerequisite::VirtualizedGeometry, "traitOverrides.displacement"},
-        {!instance.subsurfaceProfileOverride.IsNull(), MaterialPrerequisite::SubsurfaceProfile,
+        {HasOverride(instance.subsurfaceProfileOverride), MaterialPrerequisite::SubsurfaceProfile,
          "subsurfaceProfileOverride"},
-        {!instance.specularProfileOverride.IsNull(), MaterialPrerequisite::SpecularProfile,
+        {HasOverride(instance.specularProfileOverride), MaterialPrerequisite::SpecularProfile,
          "specularProfileOverride"},
-        {!instance.toonProfileOverride.IsNull(), MaterialPrerequisite::ToonShading,
+        {HasOverride(instance.toonProfileOverride), MaterialPrerequisite::ToonShading,
          "toonProfileOverride"},
+        {lightBake, MaterialPrerequisite::LightBake, "lightBakeOverrides"},
+        {blendPrerequisite != MaterialPrerequisite::None, blendPrerequisite,
+         "traitOverrides.blendMode"},
     };
+    return AddUses(out, uses);
+}
 
-    for (const ArrayUse& use : uses) {
-        if (auto added = AddIf(out, use.used, use.prerequisite, use.field); !added) {
-            return added;
-        }
-    }
-
-    if (traits.blendMode.HasValue()) {
-        return AddBlendMode(out, traits.blendMode.Value(), "traitOverrides.blendMode");
-    }
-
-    return Result<void>::Success();
+Result<void> CollectUsedPrerequisites(const MaterialFunctionInstance& instance,
+                                      Array<MaterialPrerequisiteUse>& out) noexcept {
+    const Use uses[] = {
+        {!instance.textureCollectionOverrides.IsEmpty(), MaterialPrerequisite::TextureCollection,
+         "textureCollectionOverrides"},
+        {!instance.virtualTextureOverrides.IsEmpty(), MaterialPrerequisite::VirtualTexture,
+         "virtualTextureOverrides"},
+        {!instance.sparseVolumeTextureOverrides.IsEmpty(),
+         MaterialPrerequisite::SparseVolumeTexture, "sparseVolumeTextureOverrides"},
+        {!instance.fontOverrides.IsEmpty(), MaterialPrerequisite::Font, "fontOverrides"},
+    };
+    return AddUses(out, uses);
 }
 
 } // namespace rocks

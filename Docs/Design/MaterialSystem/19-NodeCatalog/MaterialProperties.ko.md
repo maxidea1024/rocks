@@ -211,7 +211,7 @@ UE는 정점 입력 타입마다 `bUsedWith*`를 둔다(`Material.h:703–911`, 
 | `BasePropertyOverrides` | `traitOverrides : MaterialTraitOverrides`(아래) | 필드 |
 | (UE `LightmassSettings`의 `bOverride*`) | `lightBakeOverrides : MaterialLightBakeOverrides` | 필드 + TODO(MPQ-LightBake) |
 | (9.3절 Static Enum) | `staticEnumOverrides` | 필드 |
-| `PhysicalMaterialMap`(MIC) | `physicalMaterialMapOverride : Optional<MaterialAssetReference>[8]` | 필드 + TODO(MPQ-PhysicalMaterial) |
+| `PhysicalMaterialMap`(MIC) | `physicalMaterialMapOverride : MaterialAssetReference[8]`(칸마다 null이면 부모 칸) | 필드 + TODO(MPQ-PhysicalMaterial) |
 | `PhysMaterial`·`bOverridePhysMaterial`, MIC `PhysMaterialMask` | `physicalMaterialOverride`·`physicalMaterialMaskOverride : Optional<MaterialAssetReference>` | 필드 + TODO(MPQ-PhysicalMaterial) |
 | `NaniteOverrideMaterial` | `virtualizedGeometryOverride` | 필드 + TODO(MPQ-VirtualizedGeometry) |
 | `bOverrideSubsurfaceProfile`·`SpecularProfileOverride`·`ToonProfileOverride`와 bool들 | `subsurfaceProfileOverride`·`specularProfileOverride`·`toonProfileOverride : Optional<MaterialAssetReference>` | 필드 + TODO(profile MPQ) |

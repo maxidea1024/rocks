@@ -1,10 +1,10 @@
 #pragma once
 
-#include <AssetRuntime/Package.h>
 #include <Base/Compiler.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/String.h>
+#include <Material/MaterialFunctionBase.h>
 #include <MaterialSchema/MaterialTraitEnums.h>
 #include <NodeGraph/GraphDocument.h>
 
@@ -17,14 +17,14 @@ namespace rocks {
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드 전용이다.
 ROCKS_CLASS()
-class ROCKS_MATERIAL_API MaterialFunction final : public Asset {
+class ROCKS_MATERIAL_API MaterialFunction final : public MaterialFunctionBase {
     ROCKS_GENERATED_BODY()
 
 public:
 #if ROCKS_WITH_EDITOR_DATA
     explicit MaterialFunction(Allocator& allocator) noexcept
-        : graph(allocator), layout(allocator), libraryCategories(allocator),
-          description(allocator) {
+        : graph(allocator), layout(allocator), libraryCategories(allocator), description(allocator),
+          userExposedCaption(allocator) {
     }
 #else
     explicit MaterialFunction(Allocator&) noexcept {
@@ -39,6 +39,8 @@ public:
     ROCKS_PROPERTY(EditorOnly) bool exposeToLibrary = false;
     ROCKS_PROPERTY(EditorOnly) Array<String> libraryCategories;
     ROCKS_PROPERTY(EditorOnly) String description;
+    // 함수 호출 노드에 보일 이름이다(UE UserExposedCaption).
+    ROCKS_PROPERTY(EditorOnly) String userExposedCaption;
 #endif
 
     ROCKS_PROPERTY()

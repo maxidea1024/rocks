@@ -66,6 +66,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::FontParameterOverride::font",
+      "id": "09da908001af4eada880eae8ce06b8d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontParameterOverride::key",
+      "id": "eb8367c49d1a4b90b40f90a92e65a44b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontParameterOverride::page",
+      "id": "d684ad9c11dd4e1a93a17c212093ba61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialAssetReference::assetId",
       "id": "43140e6f14134d958646553b444939c6",
       "aliases": [],
@@ -255,6 +276,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::MaterialTraitOverrides::addedVertexInputs",
+      "id": "32678d9ddee44cee9d84717961d7811e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialTraitOverrides::blendMode",
       "id": "5437b67f579c440f9679182ea490ae16",
       "aliases": [],
@@ -360,8 +388,8 @@
     },
     {
       "kind": "field",
-      "name": "rocks::material::MaterialTraitOverrides::overridesUsage",
-      "id": "23d4508435784cc28e2c5978a02ce13e",
+      "name": "rocks::material::MaterialTraitOverrides::removedVertexInputs",
+      "id": "bf20fa1d9c554ddcaef961d6e66e0fb8",
       "aliases": [],
       "retired": false
     },
@@ -390,13 +418,6 @@
       "kind": "field",
       "name": "rocks::material::MaterialTraitOverrides::twoSided",
       "id": "b3e2bd192cd44889b618cf65425b7f03",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::material::MaterialTraitOverrides::usage",
-      "id": "45b737a6c390471b852a8f3dd406f8d7",
       "aliases": [],
       "retired": false
     },
@@ -920,6 +941,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::ScalarCollectionBaseOverride::parameterId",
+      "id": "55abd6cf58f74631aea96238a948cca5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ScalarCollectionBaseOverride::value",
+      "id": "497c027560824b5aa014ab5e87145151",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::ScalarCollectionParameter::defaultValue",
       "id": "df157140d9e74cbeaed650c16620c88a",
       "aliases": [],
@@ -990,6 +1025,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::StaticEnumOverride::key",
+      "id": "5d0cb040b309434287b1548c134635f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticEnumOverride::value",
+      "id": "f9a3a38e6a0f4664b2bda6b6cfdb24dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::StaticSwitchOverride::key",
       "id": "34e17a2c956846e992ebc0f8d0aabf54",
       "aliases": [],
@@ -999,6 +1048,20 @@
       "kind": "field",
       "name": "rocks::material::StaticSwitchOverride::value",
       "id": "e61f7e76a38441c69c6aeb3bf11c14d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorCollectionBaseOverride::parameterId",
+      "id": "ed9d789e86e2443eaab8eb2b809c464b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorCollectionBaseOverride::value",
+      "id": "bfa24fac270c4faea556fa8f1795f9b8",
       "aliases": [],
       "retired": false
     },
@@ -1076,6 +1139,13 @@
       "kind": "type",
       "name": "rocks::material::DynamicBoolParameterOverride",
       "id": "fa2e712f94964d9bad08c71a166901d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::FontParameterOverride",
+      "id": "09aec539b0dc4a5a92360e9edf80bb1a",
       "aliases": [],
       "retired": false
     },
@@ -1193,6 +1263,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::ScalarCollectionBaseOverride",
+      "id": "d0efbbd72e6b4c50b127d0f3b569cd6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::ScalarCollectionParameter",
       "id": "50f244ebd8d94a63923d927c14c853cb",
       "aliases": [],
@@ -1207,8 +1284,22 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::ShadingModelPreset",
+      "id": "ee03a23d1ec84bdeaad9b51bf4f3b13d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::StaticComponentMaskOverride",
       "id": "896dd3e78fcf46de8053255bdc5f9996",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::StaticEnumOverride",
+      "id": "f16f840b7bc54d6e839708ce92e749ce",
       "aliases": [],
       "retired": false
     },
@@ -1237,6 +1328,13 @@
       "kind": "type",
       "name": "rocks::material::TranslucencyPass",
       "id": "6f6f9f2414484a8aab0d42aab3751ecc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::VectorCollectionBaseOverride",
+      "id": "b12e9bb51b89489dac7ac20d2cfc7f0f",
       "aliases": [],
       "retired": false
     },

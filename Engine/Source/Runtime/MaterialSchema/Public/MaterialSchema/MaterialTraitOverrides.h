@@ -3,7 +3,8 @@
 #include <Core/Optional.h>
 #include <Core/Memory/Allocator.h>
 #include <MaterialSchema/MaterialTraitEnums.h>
-#include <MaterialSchema/VertexInputUsage.h>
+#include <Core/Containers/Array.h>
+#include <Core/Text/Name.h>
 #include <Meta/Annotations.h>
 #include <RenderData/MaterialEnums.h>
 
@@ -19,14 +20,15 @@ ROCKS_STRUCT()
 struct MaterialTraitOverrides {
     ROCKS_GENERATED_BODY()
 
-    explicit MaterialTraitOverrides(Allocator& allocator) noexcept : usage(allocator) {
+    explicit MaterialTraitOverrides(Allocator& allocator) noexcept
+        : addedVertexInputs(allocator), removedVertexInputs(allocator) {
     }
 
     ROCKS_PROPERTY() Optional<float> opacityMaskClipValue;
     ROCKS_PROPERTY() Optional<BlendMode> blendMode;
     // 고전 shading model 값이다. Rocks에서는 SurfaceFromShadingModel의 preset 값
     // override다(10.3절).
-    ROCKS_PROPERTY() Optional<ShadingModel> shadingModel;
+    ROCKS_PROPERTY() Optional<ShadingModelPreset> shadingModel;
     ROCKS_PROPERTY() Optional<bool> ditheredLodTransition;
     ROCKS_PROPERTY() Optional<bool> castDynamicShadowAsMasked;
     ROCKS_PROPERTY() Optional<bool> twoSided;
@@ -44,9 +46,11 @@ struct MaterialTraitOverrides {
     ROCKS_PROPERTY() Optional<bool> surfaceCacheSharing;
     ROCKS_PROPERTY() Optional<BlendableLocation> blendableLocation;
     ROCKS_PROPERTY() Optional<int32> blendablePriority;
-    // 사용 대상을 덮는가와 그 값이다(UE bOverride_UsageFlags·UsageFlags).
-    ROCKS_PROPERTY() bool overridesUsage = false;
-    ROCKS_PROPERTY() VertexInputUsage usage;
+    // 사용 대상 override다(UE bOverride_UsageFlags — 플래그별로 덮는다,
+    // MaterialInstance.cpp:2676–2680). 결과 = (부모 사용 대상 ∪ added) − removed다(4.6.1절). 두
+    // 집합에 같은 이름이 있으면 removed가 이긴다.
+    ROCKS_PROPERTY() Array<Name> addedVertexInputs;
+    ROCKS_PROPERTY() Array<Name> removedVertexInputs;
 };
 
 } // namespace rocks::material

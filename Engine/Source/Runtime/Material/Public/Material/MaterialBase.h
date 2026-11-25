@@ -11,6 +11,9 @@
 // UMaterialInterface). 머티리얼과 인스턴스가 함께 가지는 필드를 둔다.
 namespace rocks {
 
+// 물리 재질 표 칸 수다(UE PhysicalMaterialMap[8] — EPhysicalMaterialMaskColor 수).
+inline constexpr usize MaterialPhysicalMaterialMapSize = 8;
+
 // 메시 슬롯은 이 타입을 Hard로 참조한다(비면 엔진 기본 머티리얼).
 //
 // 사용 예(슬롯 필드):
