@@ -26,10 +26,17 @@ struct RegistryShaderSet {
     RegistryShaderSet(Allocator& allocator, graphics::Device& device,
                       const shader::ShaderTypeRegistry& registry) noexcept
         : set(Desc(allocator, device, registry)) {
+        Array<uint8> bytes(allocator);
+        ready = BuildLibrary(allocator, registry, bytes) && set.OpenCooked(Move(bytes));
+    }
+
+    // 등록부의 모든 조합을 담은 라이브러리 byte를 out에 만든다(집합을 여러 개 여는 시험 — 교체).
+    static bool BuildLibrary(Allocator& allocator, const shader::ShaderTypeRegistry& registry,
+                             Array<uint8>& out) noexcept {
         shader::ShaderLibraryBuildDesc build;
         build.kind = shader::ShaderLibraryKind::Engine;
         if (!shader::SetShaderFormatFactsId(build.facts, "D3D12_SM6")) {
-            return;
+            return false;
         }
 
         build.facts.backend = shader::ShaderBackend::D3D12;
@@ -37,21 +44,18 @@ struct RegistryShaderSet {
         if (!shader::EnumerateShaderLibraryCombinations(registry.Types(), VertexInputs(registry),
                                                         build.facts, build.kind, false,
                                                         combinations)) {
-            return;
+            return false;
         }
 
         // 항목마다 코드·layout byte다(만들기가 끝날 때까지 산다).
         Array<Array<uint8>> layouts(allocator);
         Array<uint32> codes(allocator);
         Array<shader::ShaderLibraryBuildEntry> entries(allocator);
-        if (!layouts.TryReserve(combinations.Size()) || !codes.TryReserve(combinations.Size()) ||
-            !entries.TryReserve(combinations.Size())) {
-            return;
-        }
-
         Array<shader::ShaderLibraryValue> values(allocator);
-        if (!values.TryReserve(combinations.Size() * 2)) {
-            return;
+        if (!layouts.TryReserve(combinations.Size()) || !codes.TryReserve(combinations.Size()) ||
+            !entries.TryReserve(combinations.Size()) ||
+            !values.TryReserve(combinations.Size() * 2)) {
+            return false;
         }
 
         for (const shader::ShaderLibraryCombination& combination : combinations) {
@@ -59,7 +63,7 @@ struct RegistryShaderSet {
             shader::ShaderBindingLayout binding(allocator);
             binding.stage = combination.type->stage;
             if (!shader::EncodeShaderBindingLayout(binding, layouts[layouts.Size() - 1])) {
-                return;
+                return false;
             }
 
             (void)codes.TryPushBack(static_cast<uint32>(combination.type->nameHash) ^
@@ -84,8 +88,7 @@ struct RegistryShaderSet {
 
         build.typeSetSha256 = registry.TypeSetDigest();
         build.entries = entries.View();
-        Array<uint8> bytes(allocator);
-        ready = shader::BuildShaderLibrary(build, allocator, bytes) && set.OpenCooked(Move(bytes));
+        return static_cast<bool>(shader::BuildShaderLibrary(build, allocator, out));
     }
 
     static ShaderSetDesc Desc(Allocator& allocator, graphics::Device& device,
