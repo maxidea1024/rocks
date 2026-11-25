@@ -1,6 +1,8 @@
 // Sandbox 셰이더 타입 목록이다(SandboxShaders.h·SandboxShaders.cpp가 매크로를 정해 두 번 펼친다).
 // SANDBOX_<단계>(변수, 원문 파일, 엔트리), SANDBOX_<단계>_IF(…, 거르기)는 그 형식에서 컴파일하지
 // 않는 타입이다(형식 상한 — GLES31_PC의 VS·PS storage block 0, render target 4).
+// SANDBOX_PIXEL_DEV_IF는 개발 전용 PS 타입이다(진단 버퍼 ROCKS_DEBUG_BUFFER, ShaderSystem 7.2절
+// 12항).
 
 SANDBOX_VERTEX(FullScreenVS, "FullScreen.rsf", "VSMain")
 
@@ -37,6 +39,16 @@ SANDBOX_COMPUTE(GraphPatternCS, "GraphCompute.rsf", "PatternCS")
 SANDBOX_PIXEL_IF(CommandMrtPS, "Command.rsf", "MrtPS", EightRenderTargets)
 
 SANDBOX_PIXEL(TintPS, "Tint.rsf", "TintPS")
+
+SANDBOX_VERTEX(ConstantVS, "Constant.rsf", "ConstantVS")
+SANDBOX_PIXEL(ConstantPS, "Constant.rsf", "ConstantPS")
+SANDBOX_PIXEL(ConstantAltPS, "Constant.rsf", "ConstantAltPS")
+SANDBOX_COMPUTE(ConstantCS, "Constant.rsf", "ConstantCS")
+SANDBOX_VERTEX(ConstantManyVS, "ConstantMany.rsf", "ConstantManyVS")
+SANDBOX_PIXEL(ConstantManyPS, "ConstantMany.rsf", "ConstantManyPS")
+SANDBOX_VERTEX_IF(ConstantWideVS, "ConstantWide.rsf", "ConstantWideVS", D3D12Only)
+SANDBOX_PIXEL_IF(ConstantWidePS, "ConstantWide.rsf", "ConstantWidePS", D3D12Only)
+SANDBOX_PIXEL_DEV_IF(ConstantWideDebugPS, "ConstantWide.rsf", "ConstantWideDebugPS", D3D12Only)
 
 SANDBOX_PIXEL(FormatFloatColorPS, "Format.rsf", "FloatColorPS")
 SANDBOX_PIXEL(FormatIntColorPS, "Format.rsf", "IntColorPS")

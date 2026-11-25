@@ -45,9 +45,21 @@ constexpr bool EightRenderTargets(rocks::shader::VertexInputTypeId, uint32,
     return format.limits.renderTargets >= 8;
 }
 
+// D3D12 형식에서만 컴파일하는 타입이다(상수 버퍼 14개 — D3D12 형식 정의 상한, root 예산 시험).
+constexpr bool D3D12Only(rocks::shader::VertexInputTypeId, uint32,
+                         const rocks::shader::ShaderFormatFacts& format) noexcept {
+    return format.backend == rocks::shader::ShaderBackend::D3D12;
+}
+
 constexpr ShaderTypeDesc Filtered(ShaderTypeDesc desc,
                                   rocks::shader::ShaderShouldCompileFunction filter) noexcept {
     desc.shouldCompile = filter;
+    return desc;
+}
+
+// 개발 전용 타입이다(Development 공급자만 만든다 — PS면 진단 버퍼가 붙는다).
+constexpr ShaderTypeDesc DevelopmentOnly(ShaderTypeDesc desc) noexcept {
+    desc.flags |= rocks::shader::ShaderTypeDevelopmentOnly;
     return desc;
 }
 
@@ -71,6 +83,11 @@ constexpr ShaderTypeDesc Filtered(ShaderTypeDesc desc,
         Filtered(SandboxType("Sandbox" #Variable, "/Plugin/Sandbox/" File, Entry,                  \
                              ::rocks::shader::ShaderStagePixel),                                   \
                  Filter);
+#define SANDBOX_PIXEL_DEV_IF(Variable, File, Entry, Filter)                                        \
+    inline constexpr ::rocks::shader::ShaderTypeDesc Variable =                                    \
+        DevelopmentOnly(Filtered(SandboxType("Sandbox" #Variable, "/Plugin/Sandbox/" File, Entry,  \
+                                             ::rocks::shader::ShaderStagePixel),                   \
+                                 Filter));
 
 #include "SandboxShaderTypes.inl"
 
@@ -79,6 +96,7 @@ constexpr ShaderTypeDesc Filtered(ShaderTypeDesc desc,
 #undef SANDBOX_COMPUTE
 #undef SANDBOX_VERTEX_IF
 #undef SANDBOX_PIXEL_IF
+#undef SANDBOX_PIXEL_DEV_IF
 
 // Sandbox가 등록하는 모든 셰이더 타입이다.
 rocks::Span<const ShaderTypeDesc* const> AllTypes() noexcept;
@@ -107,6 +125,10 @@ bool Has(const ShaderTypeDesc& type) noexcept;
 
 // 활성 집합이다(파이프라인 캐시 요청용). 없으면 null이다.
 rocks::render::ShaderSet* ActiveSet() noexcept;
+
+// 활성 집합에서 타입의 정규화 바인딩 layout(값 1)이다(상수 버퍼 slot 찾기 — RenderBase 9.11절).
+// 없으면 null이다.
+const rocks::shader::ShaderBindingLayout* Layout(const ShaderTypeDesc& type) noexcept;
 
 // 활성 집합의 장치 셰이더(첫 사용 생성)다. 활성 집합이 없으면 NotReady다.
 rocks::Result<rocks::graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept;
