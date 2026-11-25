@@ -14,4 +14,4 @@
 | A3 | AssetNugget(9.1절, 하위 단계 A3a–A3c — Rockpile 레코드 계약): 키(공통 머리·세대·SCC)·Record(`.rnug` v2)·`NuggetFileSystemBackend`·`NuggetCache`(Memory 계층·세션 고정·소비 입력 대조)·일괄·비동기 요청, `NuggetRockpileBackend`는 계약 | 적중·무효화·손상·동시 기록·GC 시험 |
 | A4 | AssetCooker(10.2절 — 하위 단계 A4a–A4e, A4f 셰이더 라이브러리 연동은 10.3절 — A5 뒤·A6 전(사용자 결정 2026-11-24)) | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
 | A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCodec(BMP·TGA·PNG·JPEG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
-| A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고 | 14절 결과 기록 |
+| A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고(13.1절) | 명령·문서는 A6에서, 14절 결과 기록은 빌드·시험 체인 뒤(화면 마일스톤 뒤 — 2026-11-23 사용자 결정) |
