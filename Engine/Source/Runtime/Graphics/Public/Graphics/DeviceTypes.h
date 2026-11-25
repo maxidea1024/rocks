@@ -416,7 +416,7 @@ constexpr bool IsValidTextureUsage(TextureUsage usage) noexcept {
 // 위, 행 사이 padding이 없다. 다중 plane 형식은 이미지 안에서 plane 0 다음 plane 1이다. 전체 크기는
 // TextureDataBytes, mip 하나는 TextureMipBytes다. UpdateTexture·UploadTextureFromStaging·
 // ReadTexture도 mip 하나 전체(모든 slice)를 같은 배치로 다룬다. 장치가 대응하지 않는 형식·차원은
-// 생성이 Unsupported다(PixelFormat.ko.md 8.3절).
+// 생성이 Unsupported다(Docs/Design/PixelFormat 8.3절).
 //
 // 사용 예(6면 cube, mip 하나, 면마다 64×64 RGBA8):
 //   TextureDesc desc;
@@ -519,7 +519,7 @@ enum class TextureViewDimension : uint8 {
 
 // 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane·성분
 // 대응·mip·slice 범위·차원을 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
-// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부·나머지 B부).
+// (Docs/Design/PixelFormat 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부·나머지 B부).
 // - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
 //   깊이·스텐실과 비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
 // - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),

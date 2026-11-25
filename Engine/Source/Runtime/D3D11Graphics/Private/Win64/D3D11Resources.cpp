@@ -190,7 +190,7 @@ Result<BufferHandle> D3D11Device::CreateBuffer(const BufferDesc& desc,
 Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
     // 형식·용도·차원 지원은 장치 능력으로 판정한다(다른 형식으로 대신하지 않는다,
-    // PixelFormat.ko.md 8.3절). 크기 검사보다 먼저 본다.
+    // Docs/Design/PixelFormat 8.3절). 크기 검사보다 먼저 본다.
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(FormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
         platform::LockGuard lock(gate_);
@@ -532,7 +532,8 @@ PixelFormatCaps D3D11Device::GetPixelFormatCaps(PixelFormat format) const noexce
     return FormatCaps(format);
 }
 
-// 원 텍스처의 자원을 공유하는 SRV view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수 있다.
+// 원 텍스처의 자원을 공유하는 SRV view다(Docs/Design/PixelFormat 9–11절). 다른 스레드에서도 부를 수
+// 있다.
 Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
                                                      const TextureViewDesc& desc) noexcept {
     platform::LockGuard lock(gate_);

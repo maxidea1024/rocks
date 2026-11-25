@@ -105,7 +105,7 @@ Engine/Source/Runtime/OpenGLGraphics/
 - 버퍼: `glGenBuffers` + `GL_COPY_WRITE_BUFFER`에 묶어 `glBufferData`·`glBufferSubData`. 정점 배열 상태(`GL_ELEMENT_ARRAY_BUFFER` binding)를 건드리지 않으려고 복사 대상 binding을 쓴다.
 - 텍스처: `glTexStorage2D` + `glTexSubImage2D`(첫 행 = 이미지 위쪽, UV (0,0) = 좌상단). 업로드는 그리기 유닛과 겹치지 않는 유닛 32에서 묶는다.
 - 샘플러: 텍스처마다 샘플러 객체 하나(`glSamplerParameter*`), 그릴 때 `glBindSampler`. border 색은 ES 3.2 core다.
-- 형식 표(`GlesFormats.cpp`): 행마다 내부·외부 형식, 렌더 타깃 가능 여부, 샘플링·렌더 타깃에 필요한 확장(`GlesFeature`)을 둔다. 지금은 `RGBA8Unorm`·`RGBA8UnormSrgb`(ES 3.2 core) 두 행이다. [픽셀 형식](PixelFormat.ko.md) PF1(`PixelFormat` 86개)이 들어온 뒤에도 이 두 형식만 대응하고, 표에 없는 올바른 형식은 텍스처·파이프라인 생성이 `Unsupported`다(다른 인자 검사보다 먼저, 대체하지 않는다). 전체 대응 단계에서 행을 더하고, 확장이 없으면 역시 `Unsupported`다.
+- 형식 표(`GlesFormats.cpp`): 행마다 내부·외부 형식, 렌더 타깃 가능 여부, 샘플링·렌더 타깃에 필요한 확장(`GlesFeature`)을 둔다. 지금은 `RGBA8Unorm`·`RGBA8UnormSrgb`(ES 3.2 core) 두 행이다. [픽셀 형식](PixelFormat/14-ImplementationStages.ko.md) PF1(`PixelFormat` 86개)이 들어온 뒤에도 이 두 형식만 대응하고, 표에 없는 올바른 형식은 텍스처·파이프라인 생성이 `Unsupported`다(다른 인자 검사보다 먼저, 대체하지 않는다). 전체 대응 단계에서 행을 더하고, 확장이 없으면 역시 `Unsupported`다.
 
   | 확장 | `GlesFeature` | 쓰는 곳 |
   |---|---|---|
@@ -230,7 +230,7 @@ Engine/Source/Runtime/OpenGLGraphics/
 ## 12. 개정 이력
 
 - 개정 1(2026-11-17): 초안·P11 구현.
-- 개정 2(2026-11-18): RenderBase GX1·GX2 버퍼 1단계(5.1절 버퍼 view·장치 능력). texel buffer 형식 능력은 PixelFormat.ko.md 14.3절(RQ9).
+- 개정 2(2026-11-18): RenderBase GX1·GX2 버퍼 1단계(5.1절 버퍼 view·장치 능력). texel buffer 형식 능력은 [PixelFormat](PixelFormat/14-ImplementationStages.ko.md) 14.3절(RQ9).
 - 개정 3(2026-11-18): GX1·GX2 리뷰 반영(A8 texel buffer 능력 제외, 그래픽 단계 image uniform·유닛 0 밖 sampler 거부, 구조화 stride 대조, viewport 수 1)과 RenderBase GX3·GX4(5.8절).
 - 개정 4(2026-11-25): SH2e2 반영. 쿠킹된 ESSL을 장치 셰이더로 받고 파이프라인 생성 때 컴파일·link한다. 루트 상수는 값 2 복사 표로, 정점 입력·자원 위치는 값 1로 얻는다(1·2·5.5·5.8·7·8·9·10절). 손으로 쓴 GLSL 원문(`ShaderSource::glsl`) 경로 서술을 지웠다.
 - 개정 5(2026-11-25): RenderBase GX6 반영 — 상수 버퍼 배열을 값 2 복사 표로 올리는 묶기(1·10절).

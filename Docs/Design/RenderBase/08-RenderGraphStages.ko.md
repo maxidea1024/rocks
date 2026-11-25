@@ -25,7 +25,7 @@
   - 의존 선언은 파라미터 구조체가 아니라 명시 접근 목록이다(위). 결정 R4는 그대로이고 수집기가 같은 목록을 만든다.
   - GX5는 최소 범위다: begin·end 분리 전이와 pipe가 없고, Raster pass 렌더 타깃 전이(attachment)는 장치 `BeginOffscreen`·`BeginFrame`이 낸다(GX4 attachment 시작이 기록 안으로 들어오면 그래프가 `Transition`으로 낸다). 만든 자원의 첫 전이 before는 `Unknown`(내용 불필요, 장치 추적 상태)이다.
   - 실행 단위: Raster pass마다 장치 기록 하나를 열고(`BeginOffscreen`은 clear만 한다), Compute·Copy pass는 열린 기록에 이어 쓴다. 열린 기록이 없는 Compute·Copy pass와 attachment load(`GraphLoadAction::Load`)는 `Unsupported`다(GX4).
-  - 자원 desc는 지금 Graphics desc 그대로다(형식은 [픽셀 형식](../PixelFormat.ko.md) PF1의 `PixelFormat`). 그래프 텍스처는 RenderTarget 용도·번호표 안의 비압축 형식만, import 텍스처는 mip 수를 `GraphImportOptions::mipLevels`로 받는다(장치에 desc 조회가 없다). 풀 byte 추정은 `PixelFormatInfo` 기준 `MipChainBytes`다. GX2(차원·array·샘플 수·버퍼 용도) 뒤에는 풀 키 비교 함수와 desc 검사만 넓히면 된다.
+  - 자원 desc는 지금 Graphics desc 그대로다(형식은 [픽셀 형식](../PixelFormat/14-ImplementationStages.ko.md) PF1의 `PixelFormat`). 그래프 텍스처는 RenderTarget 용도·번호표 안의 비압축 형식만, import 텍스처는 mip 수를 `GraphImportOptions::mipLevels`로 받는다(장치에 desc 조회가 없다). 풀 byte 추정은 `PixelFormatInfo` 기준 `MipChainBytes`다. GX2(차원·array·샘플 수·버퍼 용도) 뒤에는 풀 키 비교 함수와 desc 검사만 넓히면 된다.
   - 풀 키에 샘플러를 넣었다(7.4절은 제외). 지금 장치는 텍스처 desc의 샘플러로 묶으므로 빼면 다른 샘플러로 읽힌다. 결정 R12의 바인딩 때 샘플러 지정이 들어오면 뺀다.
   - 해제 pass 번호는 계산·진단만 하고 풀 반환은 그래프 끝이다(프레임 안 재사용은 RG2 완료 기준이다).
   - import lease는 `RenderHandleTable`에 두었다(`AcquireLease`·`ReleaseLease`·`TakeReleasedRetire`, RB2의 `DeviceResourceOwner` 전). lease가 남은 handle의 Retire는 장치 Retire를 미루고 렌더 lane이 lane 작업 끝에 잇는다. export는 새 `RenderHandle`로 소유를 넘기고 그 handle의 Retire가 수명을 정한다.

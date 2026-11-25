@@ -11,7 +11,7 @@ namespace rocks::graphics::gles {
 // 확장에 기대는 기능이다. 장치가 만들어질 때 한 번 조사해 GlesFeatures에 둔다. 형식 표의 항목이
 // 이 값 하나를 요구할 수 있다(None이면 ES 3.2 core만으로 된다). 판정은 ES 확장 이름으로 한다
 // (Windows 미리보기의 데스크톱 core context도 같은 이름을 공개할 때만 켠다,
-// PixelFormat.ko.md 8.6절).
+// Docs/Design/PixelFormat 8.6절).
 enum class GlesFeature : uint8 {
     None,
     // R16·RG16·RGBA16 UNORM·SNORM 텍스처와 UNORM 렌더 타깃(GL_EXT_texture_norm16)
@@ -151,7 +151,7 @@ const GlesTextureFormat* FindTextureFormat(PixelFormat format) noexcept;
 // 형식이 쓰는 것, norm16 제외).
 bool IsBufferTextureFormat(GLenum internalFormat) noexcept;
 
-// 이 장치에서 format의 능력이다(PixelFormat.ko.md 7절 OpenGL ES 열). 표에 없으면 None이다.
+// 이 장치에서 format의 능력이다(Docs/Design/PixelFormat 7절 OpenGL ES 열). 표에 없으면 None이다.
 PixelFormatCaps TextureFormatCaps(const GlesTextureFormat& format,
                                   const GlesFeatures& features) noexcept;
 
