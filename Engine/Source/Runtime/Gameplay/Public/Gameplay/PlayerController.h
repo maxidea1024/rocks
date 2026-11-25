@@ -2,7 +2,7 @@
 
 #include <Core/Math/Vector3.h>
 #include <Gameplay/Controller.h>
-#include <World/CameraComponent.h>
+#include <World/Camera/CameraComponent.h>
 #include <Input/InputState.h>
 #include <Input/TouchGestureRecognizer.h>
 
