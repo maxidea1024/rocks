@@ -24,6 +24,10 @@
 //                                  같은 종료 요청 표시를 남긴다
 //                                  --inject-key-at-frame N은 시험용으로 N번째 프레임에 입력 큐에
 //                                  W 키 눌림을 넣는다
+//                                  --graphics=<auto|d3d12|d3d11|vulkan|opengl>는 창 렌더 경로의
+//                                  장치다(기본 auto — D3D12 → Vulkan → OpenGL ES), --graphics-validation은 API 검증
+//                                  계층을 켜고, --no-render는 렌더 없이 창만 연다
+//                                  (Docs/Design/RenderBase 18.5절)
 //
 // 진입점은 Launch 공통 실행 계층이다(Docs/Design/CrashHandlingAndLaunch.ko.md 16절). Launch가
 // 명령줄을 UTF-8로 캡처하고 크래시 수집(덤프 도우미 포함)을 설치한다. 로그(Docs/Design/
@@ -39,6 +43,7 @@ using rocks::StringView;
 int Usage() noexcept {
     fprintf(stderr,
             "usage: Sandbox [--self-test] [--gpu-validation] | --engine [--window] [--frames N] "
+            "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
             "[--config <file>] "
             "[--set=<target>=<value>]... [--trace=<channels>]... "
             "[--trace-file <path>]\n");
@@ -114,6 +119,17 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             gpuValidation = true;
         } else if (Is(argument, "--window")) {
             options.window = true;
+        } else if (Is(argument, "--no-render")) {
+            options.render = false;
+        } else if (Is(argument, "--graphics-validation")) {
+            options.graphicsValidation = true;
+        } else if (argument.StartsWith("--graphics=", rocks::StringComparison::CaseSensitive)) {
+            constexpr rocks::usize PrefixBytes = sizeof("--graphics=") - 1;
+            const StringView name(argument.Data() + PrefixBytes,
+                                  argument.ByteCount() - PrefixBytes);
+            if (!sandbox::screen::ParseScreenBackend(name, options.graphics)) {
+                return Usage();
+            }
         } else if (Is(argument, "--frames") && hasValue &&
                    ParseFrames(arguments[index + 1], options.frames)) {
             framesGiven = true;

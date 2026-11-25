@@ -33,7 +33,7 @@ public sealed class SandboxProgram : ModuleRules
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
-            PublicDependencies = ["Launch", "Engine", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
+            PublicDependencies = ["Launch", "Engine", "Collision", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
                 "D3D11Graphics", "VulkanGraphics",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>()),

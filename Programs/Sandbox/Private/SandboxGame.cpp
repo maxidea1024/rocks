@@ -31,6 +31,59 @@ constexpr input::GamepadButton WatchedGamepadButtons[] = {input::GamepadButton::
 // 로그로 확인하는 게임패드 번호다(첫 패드).
 constexpr uint32 WatchedGamepad = 0;
 
+// 카메라 조작 값이다(Docs/Design/RenderBase 18.5절 4항, UE ADefaultPawn·UFloatingPawnMovement·
+// APlayerCameraManager 기본값).
+// 최대 속도(cm/s, UE FloatingPawnMovement MaxSpeed)다.
+constexpr double PawnMaxSpeed = 1200.0;
+// 회전율(도/s, UE DefaultPawn BaseTurnRate·BaseLookUpRate)이다.
+constexpr double PawnTurnRate = 45.0;
+// 마우스 1 pixel당 회전(도, UE 기본 축 감도 0.07 × 컨트롤러 입력 배율 2.5)이다.
+constexpr double PawnMouseDegreesPerPixel = 0.175;
+// pitch 한계(도, UE ViewPitchMin·ViewPitchMax)다.
+constexpr double PawnPitchLimit = 89.9;
+
+// 키 둘의 축 값(+1·−1)이다.
+double KeyAxis(const input::InputState& state, input::Key positive, input::Key negative) noexcept {
+    return (state.IsDown(positive) ? 1.0 : 0.0) - (state.IsDown(negative) ? 1.0 : 0.0);
+}
+
+// UE DefaultPawn 바인딩으로 이번 프레임 이동 입력(앞·오른쪽·위)과 회전(yaw·pitch, 도)을 모은다.
+struct PawnInput {
+    double forward = 0.0;
+    double right = 0.0;
+    double up = 0.0;
+    double yaw = 0.0;
+    double pitch = 0.0;
+};
+
+PawnInput ReadPawnInput(const input::InputState& state, double deltaSeconds) noexcept {
+    PawnInput out;
+    out.forward = KeyAxis(state, input::Key::W, input::Key::S) +
+                  KeyAxis(state, input::Key::Up, input::Key::Down) +
+                  state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::LeftY);
+    out.right = KeyAxis(state, input::Key::D, input::Key::A) +
+                state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::LeftX);
+    out.up = KeyAxis(state, input::Key::E, input::Key::Q) +
+             KeyAxis(state, input::Key::Space, input::Key::C) -
+             (state.IsDown(input::Key::LeftControl) ? 1.0 : 0.0) +
+             (state.IsDown(WatchedGamepad, input::GamepadButton::South) ? 1.0 : 0.0) +
+             (state.IsDown(WatchedGamepad, input::GamepadButton::LeftThumb) ? 1.0 : 0.0) -
+             (state.IsDown(WatchedGamepad, input::GamepadButton::RightThumb) ? 1.0 : 0.0);
+    const double turn = KeyAxis(state, input::Key::Right, input::Key::Left) +
+                        state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::RightX);
+    const double look = state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::RightY);
+    out.yaw = turn * PawnTurnRate * deltaSeconds;
+    out.pitch = look * PawnTurnRate * deltaSeconds;
+    // 창이 마우스를 가두지 않으므로 오른쪽 버튼을 누른 동안만 돌린다(UE 편집 viewport 방식). 화면
+    // y는 아래가 +라 위로 올리면 위를 본다.
+    if (state.IsDown(input::MouseButton::Right)) {
+        out.yaw += state.MouseDeltaX() * PawnMouseDegreesPerPixel;
+        out.pitch -= state.MouseDeltaY() * PawnMouseDegreesPerPixel;
+    }
+
+    return out;
+}
+
 // Controller의 입력 스냅숏에서 이번 프레임 새로 눌린 것을 로그로 남기는 Pawn이다.
 class SandboxPawn final : public Pawn {
     ROCKS_NATIVE_TYPE(SandboxPawn, Pawn, 0x6c1f8e3a5d2b4097ull, 0xa3d70e9b1c64f582ull)
@@ -51,7 +104,7 @@ public:
         return SetRootComponent(root.Value());
     }
 
-    void OnTick(const TickContext&) noexcept override {
+    void OnTick(const TickContext& context) noexcept override {
         if (ControllerHandle().IsNull()) {
             return;
         }
@@ -77,6 +130,7 @@ public:
         }
 
         const input::InputState& state = snapshot.Value().input;
+        ApplyMovement(ReadPawnInput(state, context.deltaSeconds), context.deltaSeconds);
         LogGestures(snapshot.Value().gestures);
         for (input::Key key : WatchedKeys) {
             if (state.WasPressed(key)) {
@@ -131,6 +185,43 @@ protected:
     }
 
 private:
+    // controlRotation을 돌리고(pitch 한계) 그 방향 기준으로 root를 옮긴다(UE DefaultPawn MoveForward·
+    // MoveRight는 control 회전 축, MoveUp은 월드 Z). 입력 벡터는 길이 1로 자른다(UE
+    // ConsumeInputVector·GetClampedToMaxSize). 가속·감속은 이동 컴포넌트 단계에서 넣는다.
+    void ApplyMovement(const PawnInput& input, double deltaSeconds) noexcept {
+        Rotator<double> rotation = GetControlRotation();
+        if (input.yaw != 0.0 || input.pitch != 0.0) {
+            rotation.yaw = Rotator<double>::NormalizeAxis(rotation.yaw + input.yaw);
+            rotation.pitch = Rotator<double>::NormalizeAxis(rotation.pitch + input.pitch);
+            rotation.pitch = rotation.pitch < -PawnPitchLimit  ? -PawnPitchLimit
+                             : rotation.pitch > PawnPitchLimit ? PawnPitchLimit
+                                                               : rotation.pitch;
+            (void)GetWorld().With<PlayerController>(
+                ControllerHandle(), [&rotation](PlayerController& controller) noexcept {
+                    controller.SetControlRotation(rotation);
+                });
+        }
+
+        Vec3d direction = rotation.RotateVector(Vec3d(1.0, 0.0, 0.0)) * input.forward +
+                          rotation.RotateVector(Vec3d(0.0, 1.0, 0.0)) * input.right +
+                          Vec3d(0.0, 0.0, 1.0) * input.up;
+        const double length = direction.Length();
+        if (length == 0.0 || RootComponent().IsNull()) {
+            return;
+        }
+
+        if (length > 1.0) {
+            direction = direction * (1.0 / length);
+        }
+
+        const Vec3d step = direction * (PawnMaxSpeed * deltaSeconds);
+        (void)GetWorld().With<SceneComponent>(RootComponent(),
+                                              [&step](SceneComponent& root) noexcept {
+                                                  return root.SetRelativeLocation(
+                                                      root.WorldLocation() + step);
+                                              });
+    }
+
     // 제스처 시작·끝을 로그로 남긴다(Pinch·Rotate는 끝날 때 마지막 값, Flick은 방향 각).
     static void
     LogGestures(const input::TouchGestureValue (&gestures)[input::TouchGestureCount]) noexcept {

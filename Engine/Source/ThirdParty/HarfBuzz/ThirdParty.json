@@ -443,7 +443,7 @@
     "src/hb-set.cc": "68a4a7bc456b217b82d1e0bd6d995257e6be595c537c202f043b6aad18f4b0e9",
     "src/hb-set.h": "f19c6a8dea1733d749f6cebe6a7366a9ece37a0020bd1153b233f1fbb72d3440",
     "src/hb-set.hh": "401d54b77e586486432119b0f9a10f79483992113b6670e83cb2a032eebcdeda",
-    "src/hb-shape-plan.cc": "6bb8126212a8b43f5079cd5e732592645f319be588deda9a7af37e7598152db6",
+    "src/hb-shape-plan.cc": "bca3f2ef50933daa45b5bd006d5bd31789ee17cf1cdd28b499f42cc5d0a9b416",
     "src/hb-shape-plan.h": "03555c82558fa347e96549ec99698fae790c2cfb9ee795c5ea48ff4134e06224",
     "src/hb-shape-plan.hh": "2c0596333430546d947368752020afa34510a9f4e684558fecf2f4c610fe3c1e",
     "src/hb-shape.cc": "03e5e5e761768032afd4ca802e0db1f5ed1affbb03ffe3202776a9b6bdd19b87",
@@ -1227,6 +1227,11 @@
       "file": "src/hb-ot-post-table.hh",
       "upstreamSha256": "fe8c8b1046cd287bb837435177a14f71ebc29e8eedf6e432bc392b500863ad83",
       "reason": "strncpy copies a byte string of known length that is shorter than the buffer and is followed by buf[len] = '\\0', so hb_memcpy gives the same C string; the Microsoft CRT marks strncpy deprecated and the engine warning rules reject -Wdeprecated-declarations."
+    },
+    {
+      "file": "src/hb-shape-plan.cc",
+      "upstreamSha256": "6bb8126212a8b43f5079cd5e732592645f319be588deda9a7af37e7598152db6",
+      "reason": "Cast the %p arguments of the shape plan debug messages to const void * (-Wformat-pedantic: %p takes a void pointer). The format attribute applies on the Android NDK target, so these five arguments failed there."
     }
   ],
   "patch": "Rocks.patch"
