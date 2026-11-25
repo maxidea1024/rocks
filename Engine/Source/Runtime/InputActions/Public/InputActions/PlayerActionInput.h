@@ -3,13 +3,19 @@
 #include <Base/Guid.h>
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
+#include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Input/InputState.h>
+#include <InputActions/ActionEvalContext.h>
 #include <InputActions/ActionEvent.h>
+#include <InputActions/ActionEventRecord.h>
+#include <InputActions/ActionStateView.h>
+#include <InputActions/ChordDependency.h>
 #include <InputActions/ContextOptions.h>
+#include <InputActions/InputActionData.h>
 #include <InputActions/InputActionSettings.h>
 #include <InputActions/InputBindingView.h>
 #include <InputActions/InputContextBundle.h>
@@ -19,6 +25,8 @@
 #include <InputActions/InputTrigger.h>
 #include <InputActions/InputTriggerState.h>
 #include <InputActions/InputValue.h>
+#include <InputActions/TriggerCombiner.h>
+#include <InputActions/TriggerContext.h>
 #include <InputActions/TriggerTypes.h>
 
 namespace rocks::input {
@@ -31,9 +39,13 @@ namespace rocks::input {
 // 사용 예:
 //   PlayerActionInput input(allocator);
 //   if (auto added = input.AddContext(Move(bundle), 0); !added) { return added; }
-//   if (auto applied = input.ApplyPendingChanges(inputState, gamepad); !applied) { ... }
+//   (void)input.Evaluate(inputState, context);   // 평가마다
+//   for (const ActionEventRecord& event : input.Events()) { ... }
+//   input.FinishDispatch();                        // 전달을 마친 뒤
 //
-// 할당: 다시 만들 때만 한다(4.6절). 스레드: 게임 스레드 전용이다.
+// 할당(4.6절): 컨텍스트 추가·다시 만들기·주입 호출 때 한다. 평가(Evaluate·FinishDispatch·Flush)는
+// 이벤트 목록이 예약을 넘을 때(전달 중 즉시 다시 만들기로 액션이 는 경우)만 할당한다. 스레드: 게임
+// 스레드 전용이다.
 class ROCKS_INPUTACTIONS_API PlayerActionInput {
 public:
     explicit PlayerActionInput(Allocator& allocator) noexcept;
@@ -74,6 +86,58 @@ public:
     // 예약된 다시 만들기를 한다(4.2절). state·gamepad는 "지금 눌려 있음" 판정에 쓴다. 할당 실패면
     // OutOfMemory이고 이전 목록과 예약이 남는다.
     Result<void> ApplyPendingChanges(const InputState& state, uint32 gamepad) noexcept;
+
+    // ---- 평가(4.3절) ----
+
+    // 평가 한 번이다(UE UEnhancedPlayerInput::EvaluateInputDelegates의 액션 부분): 앞 평가의 전달
+    // 뒤 정리 → 예약된 다시 만들기 → 바인딩 루프 → 주입 → 액션 마무리. 다시 만들기가 실패하면 이전
+    // 목록으로 평가를 마치고 OutOfMemory를 돌려준다. 이벤트 목록이 용량을 넘어 커질 때의 할당
+    // 실패도 OutOfMemory(그 기록은 빠진다)다.
+    Result<void> Evaluate(const InputState& state, const ActionEvalContext& context) noexcept;
+
+    // 전달을 마친 뒤의 정리다(4.3절 6): 끝난 액션의 시간을 0으로, 사라진 액션·끝난 주입 전용 액션을
+    // 표에서 지운다. 안 부르면 다음 Evaluate가 처음에 한다.
+    void FinishDispatch() noexcept;
+
+    // 액션의 마지막 평가 상태(값·트리거 상태·이벤트·경과/Triggered 시간)다. 표(바인딩이 가리키는
+    // 액션·사라진 액션·주입 전용 액션)에 없는 액션은 found 거짓이고 나머지는 기본값이다. 시간은
+    // FinishDispatch 전까지 이번 평가의 누적값이다.
+    ActionStateView ActionState(const Guid& actionId) const noexcept;
+
+    // 마지막 평가의 이벤트다(다음 Evaluate까지 유효하다 — 전달 중 즉시 다시 만들기·주입도 무효로
+    // 만들지 않는다).
+    Span<const ActionEventRecord> Events() const noexcept {
+        return events_.View();
+    }
+
+    // 다시 만들 때 모은 chord 짝이다(전달 억제 — 4.4절). 다음 다시 만들기까지 유효하다.
+    Span<const ChordDependency> ChordDependencies() const noexcept {
+        return chordDependencies_.View();
+    }
+
+    // 마지막 평가에서 눌려 있던 디지털 바인딩을 놓을 때까지 무시한다(UE FlushPressedKeys — 4.3절).
+    void Flush() noexcept;
+
+    // ---- 주입(4.3절 3) ----
+
+    // 다음 Evaluate에 action의 값을 한 번 넣는다(UE InjectInputForAction). 표에 그 id가 있으면 표의
+    // 설정을, 없으면 action의 설정을 쓴다(주입 전용 항목). 검증 실패는 InvalidArgument, 할당 실패는
+    // OutOfMemory이고 둘 다 상태가 그대로다.
+    Result<void> InjectValue(const InputActionData& action, const InputValue& value,
+                             Span<const InputTrigger> triggers = {},
+                             Span<const InputModifier> modifiers = {}) noexcept;
+
+    // 평가마다 다시 넣는 주입이다(UE StartContinuousInjectionForAction). 같은 액션의 이전 연속
+    // 주입을 대신한다. 오류는 InjectValue와 같다.
+    Result<void> StartContinuousInjection(const InputActionData& action, const InputValue& value,
+                                          Span<const InputTrigger> triggers = {},
+                                          Span<const InputModifier> modifiers = {}) noexcept;
+
+    // 연속 주입의 값을 바꾼다. 연속 주입이 없으면 NotFound다.
+    Result<void> UpdateContinuousInjection(const Guid& actionId, const InputValue& value) noexcept;
+
+    // 연속 주입을 멈춘다(다음 평가에서 놓기 — 값 0). 없으면 NotFound다.
+    Result<void> StopContinuousInjection(const Guid& actionId) noexcept;
 
     // ---- 다시 만든 결과(진단·시험) ----
 
@@ -118,8 +182,37 @@ private:
         ActionEvent events = ActionEvent::None;
         double elapsedSeconds = 0.0;
         double triggeredSeconds = 0.0;
-        // 바인딩에서 사라졌다(다음 평가에 값 0으로 한 번 평가한 뒤 지운다 — 4.2절 7).
+        // 바인딩에서 사라졌다(다음 평가에 이벤트 없는 액션으로 마무리한 뒤 지운다 — 4.2절 7).
         bool unmapped = false;
+        // 사라진 액션을 평가 한 번으로 마무리했다(정리에서 지운다 — 그 전 정리는 남긴다).
+        bool unmappedFinished = false;
+        // 바인딩 없이 주입으로만 들어온 액션이다(4.3절 3).
+        bool injectedOnly = false;
+        // 직전·이번 평가에 주입되었다(놓기 판정 — UE LastInjectedActions).
+        bool injectedLast = false;
+        bool injectedThis = false;
+        // 이번 평가에 바인딩·주입 이벤트가 있었다(UE ActionsWithEventsThisTick)와 가장 진전된
+        // 결합이다.
+        bool hadEvent = false;
+        TriggerCombiner combiner;
+    };
+
+    // 주입 하나의 트리거·모디파이어와 상태다((액션, 종류 열)마다 — 4.3절 3).
+    struct InjectionEntry {
+        explicit InjectionEntry(Allocator& allocator) noexcept
+            : triggers(allocator), modifiers(allocator), triggerStates(allocator),
+              modifierStates(allocator), pending(allocator) {
+        }
+
+        Guid action;
+        Array<InputTrigger> triggers;
+        Array<InputModifier> modifiers;
+        Array<InputTriggerState> triggerStates;
+        Array<InputModifierState> modifierStates;
+        // 다음 평가에 넣을 값이다.
+        Array<InputValue> pending;
+        bool continuous = false;
+        InputValue continuousValue;
     };
 
     // 다시 만든 바인딩 하나다(UE FEnhancedActionKeyMapping의 사본).
@@ -147,6 +240,24 @@ private:
     Result<void> Rebuild(const InputState* state, uint32 gamepad) noexcept;
     Result<void> RequestRebuild(const ContextOptions& options) noexcept;
     bool KeyDownForRebuild(const InputState* state, uint32 gamepad, InputKey key) const noexcept;
+    bool LastDown(InputKey key) const noexcept;
+    // ChordAction·ChordBlocker의 대상 색인을 table의 앞쪽 mapped칸에서 푼다(없으면 NoChordAction).
+    static void ResolveChords(Span<InputTrigger> triggers, const Array<ActionEntry>& table,
+                              usize mapped) noexcept;
+    usize FindAction(const Guid& actionId) const noexcept;
+    // 바인딩·주입 한 번을 액션에 반영한다(UE ProcessActionMappingEvent).
+    void ProcessMapping(ActionEntry& action, usize actionIndex, const InputValue& raw,
+                        Span<const InputTrigger> triggers, Span<InputTriggerState> triggerStates,
+                        Span<const InputModifier> modifiers,
+                        Span<InputModifierState> modifierStates,
+                        const ModifierContext& modifierContext,
+                        const TriggerContext& triggerContext) noexcept;
+    Result<void> Inject(const InputActionData& action, const InputValue& value,
+                        Span<const InputTrigger> triggers, Span<const InputModifier> modifiers,
+                        bool continuous) noexcept;
+    void EvaluateInjections(const ModifierContext& modifierContext,
+                            const TriggerContext& triggerContext) noexcept;
+    void RecordDownKeys(const InputState& state, uint32 gamepad) noexcept;
 
     Allocator* allocator_;
     Array<ContextEntry> contexts_;
@@ -154,13 +265,19 @@ private:
     Array<BindingEntry> bindings_;
     // 마지막 평가에서 눌려 있던 키의 비트다(InputKeySlot — 즉시 다시 만들기의 "지금 눌려 있음",
     // 4.1절). 묶이지 않은 키도 담는다.
-    static constexpr uint32 KeyBitWords = (InputKeySlotCount + 63) / 64;
+    static constexpr uint32 KeyBitsPerWord = 64;
+    static constexpr uint32 KeyBitWords = (InputKeySlotCount + KeyBitsPerWord - 1) / KeyBitsPerWord;
     uint64 lastDownKeys_[KeyBitWords] = {};
     // 액션 표 앞쪽(바인딩이 가리키는 액션) 칸마다 이번 평가의 바인딩 수준 결합 상태다(chord 대상 —
     // TriggerContext::chordStates). 다시 만들 때 할당한다.
     Array<TriggerState> chordStates_;
     // 액션 표 앞쪽 칸 수다. 표는 바인딩이 가리키는 액션 → 사라진 액션 → 주입 전용 액션 순이다.
     usize mappedActions_ = 0;
+    Array<InjectionEntry> injections_;
+    Array<ActionEventRecord> events_;
+    Array<ChordDependency> chordDependencies_;
+    // Evaluate 뒤 FinishDispatch를 아직 안 했다.
+    bool dispatchPending_ = false;
     String profile_;
     uint64 nextOrder_ = 0;
     bool rebuildPending_ = false;

@@ -37,6 +37,16 @@ public:
         return evaluatedTriggers_;
     }
 
+    // 바인딩에 트리거가 있었다는 표지다(UE SetMappingTriggerApplied — 액션 마무리가 결과를 바인딩
+    // 상태로 제한한다, 4.3절 4).
+    void SetMappingTriggerApplied(bool applied) noexcept {
+        mappingTriggerApplied_ = applied;
+    }
+
+    bool MappingTriggerApplied() const noexcept {
+        return mappingTriggerApplied_;
+    }
+
     // (상태, 트리거 평가 여부) 순서 비교다(UE operator<) — 바인딩 중 가장 진전된 것을 고른다.
     bool operator<(const TriggerCombiner& other) const noexcept;
 
@@ -48,6 +58,7 @@ private:
     bool foundExplicit_ = false;
     bool allImplicitsTriggered_ = true;
     bool blocking_ = false;
+    bool mappingTriggerApplied_ = false;
 };
 
 } // namespace rocks::input

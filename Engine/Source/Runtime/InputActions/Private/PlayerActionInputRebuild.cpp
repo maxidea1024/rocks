@@ -267,8 +267,7 @@ bool PlayerActionInput::KeyDownForRebuild(const InputState* state, uint32 gamepa
     }
 
     // 즉시 다시 만들기: 마지막 평가에서 눌려 있던 키다(4.1절).
-    const uint32 slot = InputKeySlot(key);
-    return slot < InputKeySlotCount && (lastDownKeys_[slot / 64] & (uint64{1} << (slot % 64))) != 0;
+    return LastDown(key);
 }
 
 Result<void> PlayerActionInput::SortedContexts(Array<uint32>& order) const noexcept {
@@ -310,6 +309,7 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
     Array<InputKey> applied(allocator);
     Array<InputKey> contextApplied(allocator);
     Array<uint32> chorded(allocator);
+    Array<ChordDependency> dependencies(allocator);
     Array<Guid> chordingActions(allocator);
     Array<const InputBinding*> ordered(allocator);
     Array<const InputBinding*> tiers[RebuildTierCount] = {Array<const InputBinding*>(allocator),
@@ -501,6 +501,29 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
                 return copied;
             }
 
+            for (const Span<const InputTrigger> triggers :
+                 {binding->triggers.View(), action->settings.triggers.View()}) {
+                for (const InputTrigger& trigger : triggers) {
+                    if (trigger.type != InputTriggerType::ChordAction) {
+                        continue;
+                    }
+
+                    bool known = false;
+                    for (const ChordDependency& dependency : dependencies) {
+                        known = known || (dependency.source == action->id &&
+                                          dependency.target == trigger.chordActionId);
+                    }
+
+                    if (!known) {
+                        if (auto pushed =
+                                dependencies.TryPushBack({action->id, trigger.chordActionId});
+                            !pushed) {
+                            return pushed;
+                        }
+                    }
+                }
+            }
+
             if (chords) {
                 if (auto pushed = chorded.TryPushBack(static_cast<uint32>(bindings.Size()));
                     !pushed) {
@@ -556,41 +579,58 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
     // 또 와도 다시 남긴다, UE RemovedActions는 매번 다시 모은다) ----
     const usize mappedCount = actions.Size();
     Array<usize> carried(allocator);
-    for (usize index = 0; index < actions_.Size(); ++index) {
-        const ActionEntry& old = actions_[index];
-        if (findAction(old.id) < mappedCount) {
-            continue;
+    // 주입 중인 액션(주입 전용·직전 주입·연속 주입)은 주입 전용으로 남긴다(4.3절 3 — 주입이
+    // 이어진다).
+    auto stillInjected = [this](const ActionEntry& old) noexcept {
+        if (old.injectedOnly || old.injectedLast) {
+            return true;
         }
 
-        if (old.state == TriggerState::None && old.events == ActionEvent::None) {
-            continue;
+        for (const InjectionEntry& injection : injections_) {
+            if (injection.action == old.id &&
+                (injection.continuous || !injection.pending.IsEmpty())) {
+                return true;
+            }
         }
 
-        ActionEntry entry(allocator);
-        entry.id = old.id;
-        if (auto copied = detail::TryCopyValue(entry.settings, old.settings, allocator); !copied) {
-            return copied;
-        }
+        return false;
+    };
 
-        entry.unmapped = true;
-        if (auto pushed = actions.TryPushBack(Move(entry)); !pushed) {
-            return pushed;
-        }
+    for (const bool injectedPass : {false, true}) {
+        for (usize index = 0; index < actions_.Size(); ++index) {
+            const ActionEntry& old = actions_[index];
+            if (findAction(old.id) < mappedCount || stillInjected(old) != injectedPass) {
+                continue;
+            }
 
-        if (auto pushed = carried.TryPushBack(index); !pushed) {
-            return pushed;
+            if (!injectedPass && old.state == TriggerState::None &&
+                old.events == ActionEvent::None) {
+                continue;
+            }
+
+            ActionEntry entry(allocator);
+            entry.id = old.id;
+            if (auto copied = detail::TryCopyValue(entry.settings, old.settings, allocator);
+                !copied) {
+                return copied;
+            }
+
+            entry.unmapped = !injectedPass;
+            entry.injectedOnly = injectedPass;
+            if (auto pushed = actions.TryPushBack(Move(entry)); !pushed) {
+                return pushed;
+            }
+
+            if (auto pushed = carried.TryPushBack(index); !pushed) {
+                return pushed;
+            }
         }
     }
 
     // ---- 4. chord 색인·상태 배열·alwaysTick ----
+    // chord 대상은 앞쪽(바인딩이 가리키는 액션)에서만 찾는다(사라진 액션은 대상이 아니다).
     auto resolve = [&](Array<InputTrigger>& triggers) noexcept {
-        for (InputTrigger& trigger : triggers) {
-            const bool chord = trigger.type == InputTriggerType::ChordAction ||
-                               trigger.type == InputTriggerType::ChordBlocker;
-            const usize found = chord ? findAction(trigger.chordActionId) : actions.Size();
-            trigger.chordAction =
-                found < actions.Size() ? static_cast<uint32>(found) : NoChordAction;
-        }
+        ResolveChords(triggers.View(), actions, mappedCount);
     };
 
     for (ActionEntry& action : actions) {
@@ -630,6 +670,14 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
         return sized;
     }
 
+    // 이벤트 목록은 액션 수만큼 미리 잡는다(평가 무할당 — 4.6절). 전달 중(즉시 다시 만들기)에는
+    // 전달하는 쪽이 Events()를 돌고 있으므로 잡지 않는다(다음 평가가 필요하면 늘린다).
+    if (!dispatchPending_) {
+        if (auto reserved = events_.TryReserve(actions.Size()); !reserved) {
+            return reserved;
+        }
+    }
+
     // ---- 5. 상태 보존(할당 없음 — UE :1113-1192) ----
     for (BindingEntry& binding : bindings) {
         const Guid actionId = actions[binding.action].id;
@@ -666,7 +714,7 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
     }
 
     for (ActionEntry& action : actions) {
-        if (action.unmapped) {
+        if (action.unmapped || action.injectedOnly) {
             continue;
         }
 
@@ -680,6 +728,7 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
             action.events = old.events;
             action.elapsedSeconds = old.elapsedSeconds;
             action.triggeredSeconds = old.triggeredSeconds;
+            action.injectedLast = old.injectedLast;
             // 액션 트리거·모디파이어 상태는 종류 열이 같을 때만 넘긴다(4.2절 6 — 7.3절).
             if (RebuildSameShape(old.settings.triggers.View(), old.settings.modifiers.View(),
                                  action.settings.triggers.View(),
@@ -697,16 +746,19 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
         }
     }
 
-    // 사라진 액션은 실행 상태를 그대로 옮긴다(다음 평가가 값 0으로 한 번 평가한다).
+    // 사라진 액션·주입 전용 액션은 실행 상태를 그대로 옮긴다(사라진 액션은 다음 평가가 이벤트 없는
+    // 액션으로 마무리한다).
     usize carriedAt = 0;
     for (ActionEntry& action : actions) {
-        if (!action.unmapped) {
+        if (!action.unmapped && !action.injectedOnly) {
             continue;
         }
 
         const ActionEntry& old = actions_[carried[carriedAt++]];
-        // 값은 0이다(UE NotifyInputActionsUnmapped의 Value.Reset).
-        action.value = InputValue(action.settings.valueType, Vec3d());
+        // 사라진 액션의 값은 0이다(UE NotifyInputActionsUnmapped의 Value.Reset). 주입 전용은
+        // 그대로다.
+        action.value = action.unmapped ? InputValue(action.settings.valueType, Vec3d()) : old.value;
+        action.injectedLast = old.injectedLast;
         action.state = old.state;
         action.events = old.events;
         action.elapsedSeconds = old.elapsedSeconds;
@@ -723,7 +775,12 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
     actions_ = Move(actions);
     bindings_ = Move(bindings);
     chordStates_ = Move(chordStates);
+    chordDependencies_ = Move(dependencies);
     mappedActions_ = mappedCount;
+    // 주입 트리거의 chord 색인도 새 표로 다시 푼다(할당 없음).
+    for (InjectionEntry& injection : injections_) {
+        ResolveChords(injection.triggers.View(), actions_, mappedCount);
+    }
 
     // ---- 6. 모디파이어 초기 계산(dt 0 — UE InitializeMappingActionModifiers :1212-1219) ----
     for (BindingEntry& binding : bindings_) {
