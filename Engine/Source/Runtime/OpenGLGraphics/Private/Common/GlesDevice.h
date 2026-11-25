@@ -161,12 +161,43 @@ struct GlesRootCopy {
 // 파이프라인 하나의 루트 상수 복사 수 상한이다(단계 둘 × 타입 셋 구간이면 충분하다).
 inline constexpr uint32 MaxGlesRootCopies = 16;
 
+// 상수 버퍼 복사 하나다(RenderBase 9.11절 4항): 묶인 (stage, slot) 버퍼 byte[sourceOffset, +vectors
+// × 16)를 location부터 vec4 vectors개로 올린다.
+struct GlesConstantCopy {
+    uint32 stage = 0;
+    uint32 slot = 0;
+    GLint location = -1;
+    GLsizei vectors = 0;
+    uint32 sourceOffset = 0;
+    shader::ShaderGlesUniformType type = shader::ShaderGlesUniformType::Float;
+};
+
+// 파이프라인 하나의 상수 버퍼 복사 수 상한이다(단계 둘 × slot 14 × 타입 셋 구간보다 넉넉하다).
+inline constexpr uint32 MaxGlesConstantCopies = 128;
+
+// 상수 버퍼 handle 하나(CPU 사본)다. identity는 장치 안 고유하고 version은 갱신마다 오른다.
+struct ConstantBufferRecord {
+    explicit ConstantBufferRecord(Allocator& allocator) noexcept : bytes(allocator) {
+    }
+
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    Array<uint8> bytes;
+    uint64 identity = 0;
+    uint64 version = 0;
+};
+
 struct PipelineRecord {
     GLuint program = 0;
     GLuint vertexArray = 0;
     // 루트 상수 복사(바인딩 머리의 루트 상수 복사 표를 링크 때 uniform 위치로 바꾼 것)다.
     GlesRootCopy rootCopies[MaxGlesRootCopies] = {};
     uint32 rootCopyCount = 0;
+    // 상수 버퍼 복사(값 2 복사 표의 상수 버퍼 부분)와, 이 program에 (단계, slot)마다 마지막으로
+    // 올린 (identity, version)이다(uniform은 program 상태다 — RenderBase 9.4절 업로드 판단).
+    GlesConstantCopy constantCopies[MaxGlesConstantCopies] = {};
+    uint32 constantCopyCount = 0;
+    uint64 uploadedIdentity[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint64 uploadedVersion[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
     // 고정 slot 표(셰이더 layout의 유닛·binding)다.
     PipelineSlots slots;
     // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
@@ -298,6 +329,21 @@ public:
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override;
     void Retire(BufferHandle handle) noexcept override;
     void Retire(BufferViewHandle handle) noexcept override;
+    // 상수 버퍼(GlesDeviceConstants.cpp)는 CPU 사본이다.
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
+
+    // 상수 버퍼 업로드 판단 계수(시험·진단)다: 올린 (program, 단계, slot) 수와 건너뛴 수.
+    uint64 ConstantUploads() const noexcept {
+        return constantUploads_;
+    }
+
+    uint64 ConstantUploadSkips() const noexcept {
+        return constantUploadSkips_;
+    }
     void Retire(TextureHandle handle) noexcept override;
     void Retire(PipelineHandle handle) noexcept override;
     Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
@@ -350,6 +396,10 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle handle) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
@@ -494,6 +544,8 @@ private:
     void ApplyIndexBuffer() noexcept;
     const PipelineRecord* DrawablePipeline() const noexcept;
     void ApplyConstants(const PipelineRecord& pipeline) noexcept;
+    // 파이프라인이 읽는 상수 버퍼를 올린다(바뀐 것만). 하나라도 없거나 작으면 거짓이다.
+    bool ApplyConstantBuffers(SlotHandle pipeline) noexcept;
 
     // 스왑체인 텍스처를 창 표면의 기본 framebuffer에 Y를 뒤집어 blit한다(장치 context를 그
     // 표면에 붙인다). 끝나면 기록 중인 패스 대상과 viewport를 다시 묶는다. 표면에 붙이지 못하면
@@ -509,6 +561,23 @@ private:
     Array<RetiredObject> retired_;
     SlotArray<ReadbackRecord> readbacks_;
     SlotArray<BufferViewRecord> bufferViews_;
+    // 상수 버퍼(9.11절): handle 표, 기록 명령 사본(기록마다 비우는 저장소와 (단계, slot)별 위치),
+    // 묶음, identity 계수, 업로드 판단 계수다.
+    Allocator& allocator_;
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    Array<uint8> transientConstants_;
+    usize transientOffsets_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint32 transientBytes_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint64 transientIdentity_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    struct BoundConstant {
+        SlotHandle handle;
+        // 참이면 기록 명령 사본이다.
+        bool data = false;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint64 constantIdentity_ = 0;
+    uint64 constantUploads_ = 0;
+    uint64 constantUploadSkips_ = 0;
     Array<OrphanBuffer> orphanBuffers_;
     // 장치 능력(GX1)과 형식별 MSAA 표본 수다(생성 때 정해진다).
     DeviceCaps caps_;

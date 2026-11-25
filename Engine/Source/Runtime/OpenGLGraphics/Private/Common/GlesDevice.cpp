@@ -53,7 +53,8 @@ void GlesStagingSource::DestroyStaging(const StagingMemory& memory) noexcept {
 GlesDevice::GlesDevice(Allocator& allocator) noexcept
     : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
       pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
-      bufferViews_(allocator), orphanBuffers_(allocator), timestamps_(allocator),
+      bufferViews_(allocator), allocator_(allocator), constantBuffers_(allocator),
+      transientConstants_(allocator), orphanBuffers_(allocator), timestamps_(allocator),
       timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), splits_(allocator),
       shaders_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -818,6 +819,14 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return Result<PipelineHandle>::Failure(rejected.Error());
     }
 
+    // GLES 형식에는 PS 진단 버퍼가 없다(ShaderSystem 7.2절 12항).
+    if (record.slots.debugBuffer) {
+        Diagnostic message;
+        message.Text("the pixel debug buffer is not available on OpenGL ES");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<PipelineHandle>::Failure(rejected.Error());
+    }
+
     // separate shader object를 쓰지 않고 VS·PS를 한 프로그램으로 잇는다(UE OpenGLBase.h:283–287).
     record.bufferSlots = record.slots.bufferSlots;
     auto linked = LinkProgram(stages, record);
@@ -1525,6 +1534,51 @@ Result<void> GlesDevice::LinkProgram(Span<const DeviceShaderCode* const> stages,
             }
 
             GlesRootCopy& out = record.rootCopies[record.rootCopyCount++];
+            out.location = location;
+            out.vectors = static_cast<GLsizei>((copy.bytes + RootConstantVectorBytes - 1) /
+                                               RootConstantVectorBytes);
+            out.sourceOffset = copy.sourceOffset;
+            out.type = array.type;
+        }
+    }
+
+    // 상수 버퍼 복사 표다(RenderBase 9.11절 4항). 복사의 버퍼 순번이 값 1 slot이다. 위치가 -1인
+    // 원소(셰이더가 쓰지 않는 구간)는 건너뛴다.
+    for (const DeviceShaderCode* code : stages) {
+        const shader::ShaderGlesBindingHeader& header = code->GlesHeader();
+        const uint32 stage = ConstantBufferStageIndex(code->Stage());
+        for (const shader::ShaderGlesCopy& copy : header.copies) {
+            if (copy.buffer == shader::ShaderGlesRootConstantsBuffer ||
+                copy.buffer >= MaxConstantBufferSlots || copy.arrayIndex >= header.arrays.Size()) {
+                continue;
+            }
+
+            const shader::ShaderGlesUniformArray& array = header.arrays[copy.arrayIndex];
+            char base[shader::ShaderGlesArrayNameBytes] = {};
+            char element[shader::ShaderGlesArrayNameBytes + 16] = {};
+            if (!shader::ShaderGlesUniformArrayName(header.stage, array, base)) {
+                continue;
+            }
+
+            snprintf(element, sizeof(element), "%s[%u]", base, copy.vec4Offset);
+            const GLint location = gl_.GetUniformLocation(record.program, element);
+            const uint64 end = static_cast<uint64>(copy.sourceOffset) + copy.bytes;
+            if (location < 0 || end > record.slots.constantSlots.bytes[stage][copy.buffer]) {
+                continue;
+            }
+
+            if (record.constantCopyCount == MaxGlesConstantCopies) {
+                gl_.DeleteProgram(record.program);
+                record.program = 0;
+                Diagnostic message;
+                message.Text("pipeline has more constant buffer copies than the OpenGL ES device "
+                             "keeps");
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+
+            GlesConstantCopy& out = record.constantCopies[record.constantCopyCount++];
+            out.stage = stage;
+            out.slot = copy.buffer;
             out.location = location;
             out.vectors = static_cast<GLsizei>((copy.bytes + RootConstantVectorBytes - 1) /
                                                RootConstantVectorBytes);

@@ -15,7 +15,8 @@ RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
       placedTextures_(allocator), placedBuffers_(allocator), buffers_(allocator),
       allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
       pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), shaders_(allocator),
-      bufferViews_(allocator), retired_(allocator), readbacks_(allocator),
+      bufferViews_(allocator), constantBuffers_(allocator), retired_(allocator),
+      readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -1043,6 +1044,85 @@ void RecordingDevice::Retire(BufferViewHandle view) noexcept {
 
     Defer();
     Record(Op::RetireBufferView);
+}
+
+namespace {
+
+uint32 ConstantFirstWord(Span<const uint8> bytes) noexcept {
+    uint32 word = 0;
+    if (bytes.Size() >= sizeof(word)) {
+        platform::MemoryCopy(&word, bytes.Data(), sizeof(word));
+    }
+
+    return word;
+}
+
+} // namespace
+
+// 실제 장치와 같은 규칙(크기·수명·갱신 대상)으로 검사한다.
+Result<ConstantBufferHandle>
+RecordingDevice::CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                      Span<const uint8> contents) noexcept {
+    if ((lifetime != ConstantBufferLifetime::SingleFrame &&
+         lifetime != ConstantBufferLifetime::MultiFrame) ||
+        !graphics::IsValidConstantBufferBytes(contents.Size())) {
+        return Result<ConstantBufferHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ConstantState state;
+    state.lifetime = lifetime;
+    state.bytes = static_cast<uint32>(contents.Size());
+    state.word = ConstantFirstWord(contents);
+    auto added = constantBuffers_.TryAdd(state);
+    if (!added) {
+        return Result<ConstantBufferHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateConstantBuffer, (static_cast<uint64>(lifetime) << 32) | state.bytes);
+    return Result<ConstantBufferHandle>::Success(ConstantBufferHandle{added.Value()});
+}
+
+Result<void> RecordingDevice::UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                                   Span<const uint8> contents) noexcept {
+    ConstantState* state = constantBuffers_.Find(buffer.slot);
+    if (state == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (state->lifetime != ConstantBufferLifetime::MultiFrame || contents.Size() != state->bytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    state->word = ConstantFirstWord(contents);
+    Record(Op::UpdateConstantBuffer, state->word);
+    return Result<void>::Success();
+}
+
+void RecordingDevice::Retire(ConstantBufferHandle buffer) noexcept {
+    if (!ownership_.Check() || !constantBuffers_.TryRemove(buffer.slot)) {
+        return;
+    }
+
+    Defer();
+    Record(Op::RetireConstantBuffer);
+}
+
+void RecordingDevice::SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
+                                        ConstantBufferHandle buffer) noexcept {
+    const ConstantState* state = constantBuffers_.Find(buffer.slot);
+    Record(Op::SetConstantBuffer,
+           ConstantValue(stage, slot, state != nullptr ? state->word : UnboundConstantWord));
+}
+
+Result<void> RecordingDevice::SetConstantData(graphics::ShaderStage stage, uint32 slot,
+                                              Span<const uint8> bytes) noexcept {
+    if (!recording_ || slot >= graphics::MaxConstantBufferSlots ||
+        !graphics::IsValidConstantBufferBytes(bytes.Size())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Record(Op::SetConstantData, ConstantValue(stage, slot, ConstantFirstWord(bytes)));
+    return Result<void>::Success();
 }
 
 // 읽기 view는 셰이더 읽기(그래픽·compute) 상태여야 한다.

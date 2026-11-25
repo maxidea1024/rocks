@@ -4,6 +4,7 @@
 #include <Core/Containers/SlotArray.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <Graphics/ConstantBuffer.h>
 #include <Graphics/DeviceTypes.h>
 #include <Graphics/ShaderCode.h>
 #include <ShaderCore/ShaderBindingLayout.h>
@@ -130,16 +131,27 @@ struct PipelineSlots {
     uint32 writeTextures = 0;
     // 단계마다 셰이더가 읽는 루트 상수 byte 수다(VS·PS 또는 CS).
     uint32 rootConstantBytes[2] = {};
+    // 단계마다 읽는 상수 버퍼 slot(값 1 slot = backend 위치)과 선언 byte 수다(RenderBase 9.11절,
+    // CommandContext::SetConstantBuffer·SetConstantData).
+    ConstantBufferSlots constantSlots;
+    // PS가 진단 버퍼(RocksDebugBuffer, ShaderSystem 7.2절 12항)를 쓴다. 자리는 backend가 정한다
+    // (9.11절 6항 — D3D12 root UAV, 그 밖은 SL2까지 Unsupported).
+    bool debugBuffer = false;
 };
+
+// PS 진단 버퍼의 예약 이름이다(ShaderSystem 7.2절 12항).
+inline constexpr char PixelDebugBufferName[] = "RocksDebugBuffer";
 
 // 영어 이유 버퍼 크기다.
 inline constexpr usize PipelineSlotErrorBytes = 256;
 
-// stages(그래픽은 VS·PS, compute는 CS)의 layout과 이름 표로 out을 채운다. 실패는
-// InvalidArgument이고 error에 영어 이유를 쓴다: 단계 루트 상수가 drawConstantBytes보다 큼, 상수
-// 버퍼(파라미터 묶음 전에는 루트 상수만), 표에 없는 자원, 텍스처를 VS가 읽음, 텍스처 짝이 아닌
-// 샘플러(공유 샘플러 포함), 역할과 모양이 맞지 않음(텍스처 이름에 typed buffer 등), 그래픽 단계의
-// UAV, 진단 버퍼, 같은 slot을 다른 종류·값 계열로 읽음, 쓰기 slot에 버퍼와 텍스처를 함께 둠.
+// stages(그래픽은 VS·PS, compute는 CS)의 layout과 이름 표로 out을 채운다. 상수 버퍼는 이름 표 없이
+// 모두 constantSlots에 들어간다(RenderBase 9.11절 3항). PS의 RocksDebugBuffer는 debugBuffer로
+// 표시한다. 실패는 InvalidArgument이고 error에 영어 이유를 쓴다: 단계 루트 상수가 drawConstantBytes
+// 보다 큼, 상수 버퍼 slot이 MaxConstantBufferSlots 밖이거나 크기가 규칙 밖, 표에 없는 자원,
+// 텍스처를 VS가 읽음, 텍스처 짝이 아닌 샘플러(공유 샘플러 포함), 역할과 모양이 맞지 않음(텍스처
+// 이름에 typed buffer 등), 그래픽 단계의 UAV, 진단 버퍼, 같은 slot을 다른 종류·값 계열로 읽음, 쓰기
+// slot에 버퍼와 텍스처를 함께 둠.
 ROCKS_GRAPHICS_API Result<void>
 ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages, const PipelineBindingNames& names,
                      uint32 drawConstantBytes, PipelineSlots& out,
@@ -164,6 +176,15 @@ ROCKS_GRAPHICS_API Result<void> FindComputeShader(const DeviceShaderTable& table
                                                   const ComputePipelineDesc& desc,
                                                   const DeviceShaderCode*& compute,
                                                   char (&error)[PipelineSlotErrorBytes]) noexcept;
+
+// layout에서 이름이 name인 상수 버퍼의 slot(backend 위치)이다. 셰이더가 쓰지 않아 빠졌거나
+// 이름이 없으면 NotFound다.
+//
+// 사용 예(Sandbox·시험 — 렌더 쪽은 RenderBase ShaderBindingMap의 자리를 쓴다):
+//   auto slot = FindConstantBufferSlot(pixelLayout, "Material");
+//   commands.SetConstantBuffer(ShaderStage::Pixel, slot.Value(), material);
+ROCKS_GRAPHICS_API Result<uint32> FindConstantBufferSlot(const shader::ShaderBindingLayout& layout,
+                                                         StringView name) noexcept;
 
 // "vertex"·"pixel"·"compute"다.
 ROCKS_GRAPHICS_API const char* ShaderStageName(ShaderStage stage) noexcept;

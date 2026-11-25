@@ -522,6 +522,10 @@ const PipelineRecord* GlesDevice::PrepareDraw(bool indexed) noexcept {
         }
     }
 
+    if (!ApplyConstantBuffers(boundPipeline_.slot)) {
+        return nullptr;
+    }
+
     ApplyConstants(*pipeline);
     ApplySlots(*pipeline);
     return pipeline;
@@ -551,6 +555,10 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
             textures_.Find(boundWriteTextures_[slot].slot) == nullptr) {
             return nullptr;
         }
+    }
+
+    if (!ApplyConstantBuffers(boundPipeline_.slot)) {
+        return nullptr;
     }
 
     ApplyConstants(*pipeline);

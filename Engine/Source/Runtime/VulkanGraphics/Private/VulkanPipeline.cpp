@@ -435,6 +435,12 @@ bool SpirvEntryPoint(Span<const uint8> code, char (&out)[64]) noexcept {
 
 Result<void> VulkanDevice::BuildPipelineLayout(const PipelineSlots& slots, bool compute,
                                                PipelineRecord& record) noexcept {
+    // PS 진단 버퍼 자리(set 3)는 엔진 셰이더 SL2에서 만든다(RenderBase 9.11절 6항).
+    if (slots.debugBuffer) {
+        return FailCode("CreatePipeline", ErrorCode::Unsupported,
+                        "the pixel debug buffer binding is not available on Vulkan yet");
+    }
+
     const uint32 stageCount = compute ? 1u : 2u;
     VkDescriptorSetLayoutBinding layoutBindings[2][MaxPipelineBindings] = {};
     uint32 layoutCounts[2] = {};
@@ -456,6 +462,45 @@ Result<void> VulkanDevice::BuildPipelineLayout(const PipelineSlots& slots, bool 
         entry.stageFlags = compute           ? VK_SHADER_STAGE_COMPUTE_BIT
                            : mapped.set == 0 ? VK_SHADER_STAGE_VERTEX_BIT
                                              : VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+
+    // 상수 버퍼는 단계 set의 binding = slot이다(9.11절 4항). 동적 UBO는 layout 전체에서
+    // maxDescriptorSetUniformBuffersDynamic까지이고(UE와 같다), 넘는 것은 일반 UBO다. set 안
+    // 동적 offset 순서가 binding 순서와 같도록 slot 오름차순으로 더한다.
+    uint32 dynamicCount = 0;
+    const uint32 dynamicLimit = properties_.limits.maxDescriptorSetUniformBuffersDynamic;
+    for (uint32 set = 0; set < stageCount; ++set) {
+        const ShaderStage stage =
+            compute ? ShaderStage::Compute : (set == 0 ? ShaderStage::Vertex : ShaderStage::Pixel);
+        const uint32 stageIndex = ConstantBufferStageIndex(stage);
+        for (uint32 slot = 0; slot < MaxConstantBufferSlots; ++slot) {
+            if ((slots.constantSlots.usedMask[stageIndex] & (1u << slot)) == 0) {
+                continue;
+            }
+
+            if (record.bindingCount == MaxPipelineBindings) {
+                return Reject("pipeline has more descriptor bindings than the Vulkan device keeps");
+            }
+
+            PipelineBinding mapped;
+            mapped.set = set;
+            mapped.binding = slot;
+            mapped.slot = slot;
+            mapped.stage = stageIndex;
+            mapped.range = slots.constantSlots.bytes[stageIndex][slot];
+            mapped.source = BindingSource::ConstantBuffer;
+            mapped.type = dynamicCount < dynamicLimit ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+                                                      : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            dynamicCount += mapped.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ? 1u : 0u;
+            record.bindings[record.bindingCount++] = mapped;
+            VkDescriptorSetLayoutBinding& entry = layoutBindings[set][layoutCounts[set]++];
+            entry.binding = mapped.binding;
+            entry.descriptorType = mapped.type;
+            entry.descriptorCount = 1;
+            entry.stageFlags = compute    ? VK_SHADER_STAGE_COMPUTE_BIT
+                               : set == 0 ? VK_SHADER_STAGE_VERTEX_BIT
+                                          : VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
     }
 
     VkDescriptorSetLayout layouts[2] = {emptySetLayout_, emptySetLayout_};
