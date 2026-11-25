@@ -62,6 +62,38 @@ bool Compilation::TypeEqual::operator()(uint32 left, const TypeProbe& right) con
     return true;
 }
 
+bool Compilation::HasAttribute(uint32 symbol, StringView name) const noexcept {
+    if (symbol >= symbols_.Size()) {
+        return false;
+    }
+
+    const Symbol& entry = symbols_[symbol];
+    if (entry.module >= trees_.Size() || entry.node >= trees_[entry.module].NodeCount()) {
+        return false;
+    }
+
+    const SyntaxTree& tree = trees_[entry.module];
+    const uint32 attributes = tree.Child(entry.node, 1);
+    if (attributes == NoNode || tree.Node(attributes).kind != SyntaxKind::List) {
+        return false;
+    }
+
+    const StringView text = sources_->Get(modules_[entry.module].source).Text();
+    for (const uint32 attribute : tree.Children(attributes)) {
+        const uint32 token = tree.Node(attribute).token;
+        if (tree.Node(attribute).kind != SyntaxKind::Attribute || token == NoToken) {
+            continue;
+        }
+
+        const SourceSpan span = tree.Tokens()[token].span;
+        if (StringView(text.Data() + span.begin, span.end - span.begin) == name) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 uint32 Compilation::NodeSymbol(uint32 module, uint32 node) const noexcept {
     if (module >= nodeBase_.Size() || nodeBase_[module] == NoNode ||
         node >= trees_[module].NodeCount()) {

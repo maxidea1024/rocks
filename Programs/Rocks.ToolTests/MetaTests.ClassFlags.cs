@@ -77,7 +77,8 @@ internal static partial class MetaTests
             await probe.GenerateAsync(BundlePreamble +
                 "ROCKS_STRUCT()\nstruct Slot {\nROCKS_GENERATED_BODY()\nexplicit Slot(rocks::Allocator& a) noexcept : icon(a) {}\n" +
                 "ROCKS_PROPERTY(AssetBundles = \"UI\") rocks::SoftObjectRef<rocks::Object> icon;\n};\n" +
-                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept : portrait(a), levels(a), slot(a), weights(a), editorSlot(a) {}\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept : portrait(a), levels(a), slot(a), weights(a)\n" +
+                "#if ROCKS_WITH_EDITOR_DATA\n, editorSlot(a)\n#endif\n{}\n" +
                 "ROCKS_PROPERTY(AssetBundles = \" UI , Game \") rocks::SoftObjectRef<rocks::Object> portrait;\n" +
                 "ROCKS_PROPERTY(AssetBundles = \"Game\") rocks::Array<rocks::SoftObjectRef<rocks::Object>> levels;\n" +
                 "ROCKS_PROPERTY(AssetBundles = \"UI\") Slot slot;\n" +
@@ -85,7 +86,7 @@ internal static partial class MetaTests
                 "ROCKS_PROPERTY(AssetBundles = \"Game\") rocks::InstancedStruct<> extra;\n" +
                 "ROCKS_PROPERTY() rocks::int32 count = 0;\n" +
                 // EditorOnly struct 필드 안 멤버 목록은 받는다(태그 수집이 EditorOnly 경로를 건너뛴다 — A4e2b).
-                "ROCKS_PROPERTY(EditorOnly) Slot editorSlot;\n};\n}\n");
+                "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly) Slot editorSlot;\n#endif\n};\n}\n");
             using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
             string Bundles(string type, string field) => descriptor.RootElement.GetProperty("types").EnumerateArray()
                 .Single(item => item.GetProperty("name").GetString() == type).GetProperty("fields").EnumerateArray()
@@ -107,8 +108,8 @@ internal static partial class MetaTests
             BundlePreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY(AssetBundles = \"UI\") rocks::AssetId id{};\n};\n}\n"],
             "RMC2202", "AssetBundles applies only");
         AddRejectGroup(context, "Meta.AssetBundlesRejectEditorOnlyFields", [
-            BundlePreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept : soft(a) {}\n" +
-                "ROCKS_PROPERTY(EditorOnly, AssetBundles = \"UI\") rocks::SoftObjectRef<rocks::Object> soft;\n};\n}\n"],
+            BundlePreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& a) noexcept\n#if ROCKS_WITH_EDITOR_DATA\n: soft(a)\n#endif\n{ (void)a; }\n" +
+                "#if ROCKS_WITH_EDITOR_DATA\nROCKS_PROPERTY(EditorOnly, AssetBundles = \"UI\") rocks::SoftObjectRef<rocks::Object> soft;\n#endif\n};\n}\n"],
             "RMC2202", "inside an EditorOnly field");
         AddRejectGroup(context, "Meta.AssetBundlesRejectBadLists", [
             BundleField("\"\""), BundleField("\"UI,,Game\""), BundleField("\"UI,UI\""), BundleField("\"1UI\""),

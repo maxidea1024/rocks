@@ -69,12 +69,12 @@ class0 = Mover : ScriptableComponent s1 r1 b0 init Mover.$init
   handler Owner.Damaged Mover.on Owner.Damaged await skipWhileBusy ref11 -> ref14
 
 function Wrap  scalar=8/8 ref=0/0 buf=0/0 params=1/0/0 returns sx4
-  body db8b8a03718bc7ebb103f347e4037bf0cfb87c92939a0d9794bfb9146885acdd
+  body 86901a6ce587b6a3fcb00c7965a09bd11798389875ee66d8f3e58e0dff2593fb
   0000  LOADI  s1, 0    ; 4:14
   0001  EQ.I  s1, s0, s1    ; 4:9
   0002  BRF  s1, 0009    ; 4:9
-  0003  LOADI  s1, 2    ; 5:16
-  0004  LOADI  s1, 3    ; 5:9
+  0003  LOADI  s1, 0    ; 5:16
+  0004  LOADI  s1, 1    ; 5:9
   0005  LOADI  s2, 0    ; 5:9
   0006  LOADI  s3, 0    ; 5:9
   0007  LOADI  s4, 0    ; 5:9
@@ -111,12 +111,12 @@ function Mover.Fetch  scalar=3/3 ref=2/3 buf=0/0 params=0/1/0 returns sx2
   0007  RET  s1 x2    ; 21:9
 
 function Mover.Check  scalar=2/2 ref=1/1 buf=0/0 params=1/1/0 returns sx1
-  body 7b5e2718c2b6f56021e41fe8c9366bee971d0c211d9bfa920be14ef6f71a3de5
+  body a3752e7d6c8a8b744f0848a7d2b82b0be503590a82b5e4460ca3dc41ccd0598a
   0000  LOADI  s1, 0    ; 25:17
   0001  LT.I  s1, s0, s1    ; 25:13
   0002  BRF  s1, 0006    ; 25:13
-  0003  LOADI  s1, 3    ; 26:20
-  0004  LOADI  s1, 4    ; 26:13
+  0003  LOADI  s1, 1    ; 26:20
+  0004  LOADI  s1, 2    ; 26:13
   0005  RET  s1 x1    ; 26:13
   0006  LOADI  s1, 0    ; 29:9
   0007  RET  s1 x1    ; 29:9

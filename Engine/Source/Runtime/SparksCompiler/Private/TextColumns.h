@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// 원문 열 계산의 공용 규칙이다(Docs/Design/SparksLanguage.ko.md 8.1절 "위치"). Source(줄·열)와
+// 원문 열 계산의 공용 규칙이다(Docs/Design/SparksLanguage 8.1절 "위치"). Source(줄·열)와
 // Diagnostic(밑줄 폭)이 같은 규칙을 써야 밑줄이 열과 맞는다.
 
 namespace rocks::sparks::detail {

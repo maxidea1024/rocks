@@ -12,7 +12,7 @@
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/ResourceAccess.h>
-#include <Graphics/ShaderSourceCompiler.h>
+#include <Graphics/ShaderBindings.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
@@ -56,7 +56,8 @@ inline constexpr uint32 MaxDescriptorPoolsPerRecord = 8;
 inline constexpr uint32 MaxSplitEventsPerRecord = 64;
 // 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4,
 // compute는 읽기 4 + 쓰기 4).
-inline constexpr uint32 MaxPipelineBindings = 2 + 2 * MaxDrawBufferViews;
+inline constexpr uint32 MaxPipelineBindings =
+    2 + 2 * MaxDrawBufferViews + 2 * MaxConstantBufferSlots;
 // framebuffer 하나의 attachment 수 상한이다(색 MaxColorTargets + 깊이 1).
 inline constexpr uint32 MaxPassAttachments = MaxColorTargets + 1;
 // 그리기별 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
@@ -213,7 +214,9 @@ enum class BindingSource : uint8 {
     // SetWritableBufferView slot(compute u0–u3)
     WritableBufferView,
     // SetWritableTexture slot(compute u0–u3의 storage image)
-    WritableTexture
+    WritableTexture,
+    // SetConstantBuffer·SetConstantData의 (단계, slot)(RenderBase 9.11절 — slot은 binding 번호)
+    ConstantBuffer
 };
 
 struct PipelineBinding {
@@ -222,6 +225,26 @@ struct PipelineBinding {
     VkDescriptorType type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     BindingSource source = BindingSource::Texture;
     uint32 slot = 0;
+    // 상수 버퍼의 셰이더 선언 byte 수(descriptor range)와 묶음 표 단계 색인이다.
+    uint32 range = 0;
+    uint32 stage = 0;
+};
+
+// 상수 버퍼 handle 저장소 page다(host-visible 버퍼 하나, 9.11절 2항).
+struct ConstantPage {
+    explicit ConstantPage(Allocator& allocator) noexcept : ranges(allocator) {
+    }
+
+    VkBuffer buffer = VK_NULL_HANDLE;
+    MemoryAllocation memory;
+    GpuPageAllocator ranges;
+};
+
+struct ConstantBufferRecord {
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    uint32 bytes = 0;
+    uint32 page = 0;
+    GpuPageAllocation block;
 };
 
 // 파이프라인과 그 layout이다. set 0(VS, compute면 CS)·1(PS) layout은 셰이더 리플렉션에서 만들고
@@ -344,6 +367,9 @@ struct Retired {
     VkDescriptorSetLayout setLayouts[2] = {};
     VkBufferView bufferView = VK_NULL_HANDLE;
     MemoryAllocation memory;
+    // 상수 버퍼 page 구간이다(Retire·UpdateConstantBuffer의 옛 자리, 9.11절 2항).
+    int64 constantPage = -1;
+    GpuPageAllocation constantBlock;
     // placed 자원의 heap이다. 자원을 파괴한 뒤 heap의 placed 수를 줄인다(ReleasePlacement).
     SlotHandle heap;
     // 회수한 transient heap의 메모리다(placed 자원이 모두 파괴된 뒤 heap의 마지막 사용 fence 뒤).
@@ -481,8 +507,17 @@ public:
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
     void Retire(BufferViewHandle view) noexcept override;
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, VulkanConstants.cpp).
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
+    void Retire(ShaderHandle shader) noexcept override;
+
     void Retire(SwapChainHandle swapChain) noexcept override;
     void ReclaimCompleted() noexcept override;
     Result<void> WaitIdle() noexcept override;
@@ -519,6 +554,7 @@ public:
     uint64 RejectedCalls() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
+    uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
     // --- transient heap·placed 자원(GX12, VulkanTransient.cpp) ---
@@ -545,6 +581,10 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     void Transition(Span<const ResourceTransition> transitions) noexcept override;
     // 분리 전이다(Device.h). synchronization2가 있으면 begin은 vkCmdSetEvent2, end는
     // vkCmdWaitEvents2(UE VulkanBarriers.cpp:661–663, 1405–1414), 없으면 end에서 Transition처럼
@@ -677,7 +717,8 @@ private:
     }
 
     // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로 실패하고
-    // LastError에 형식 이름을 남긴다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
+    // LastError에 형식 이름을 남긴다(Docs/Design/PixelFormat 8.3절). 호출자는 gate_를 잡고 있어야
+    // 한다.
     template <class T>
     Result<T> UnsupportedFormat(PixelFormat format) noexcept {
         auto failed = FailCode("pixel format", ErrorCode::Unsupported, PixelFormatName(format));
@@ -764,14 +805,10 @@ private:
     Result<VkRenderPass> RenderPassFor(const RenderPassKey& key) noexcept;
     // 색 하나·깊이 없는 render pass다(swapchain 중간 이미지).
     Result<VkRenderPass> RenderPassFor(VkFormat format, bool load) noexcept;
-    Result<void> MatchVertexInputs(const CompiledShader& vertex,
-                                   const VertexLayout& layout) noexcept;
-    // 단계들의 리플렉션을 고정 배치(PipelineDesc·ComputePipelineDesc)와 대조하고 set
-    // layout·파이프라인 layout·binding 표를 record에 만든다. 단계의 push constant 블록이
-    // record.drawConstantBytes보다 크면 InvalidArgument다. compute면 pixel은 null이다. 실패하면
-    // 만든 객체를 파괴한다.
-    Result<void> BuildPipelineLayout(const CompiledShader& first, const CompiledShader* pixel,
-                                     bool compute, PipelineRecord& record) noexcept;
+    // slot 표(PipelineSlots — 셰이더 layout의 set = 단계·binding)로 set layout·파이프라인 layout·
+    // binding 표를 record에 만든다. 실패하면 만든 객체를 파괴한다.
+    Result<void> BuildPipelineLayout(const PipelineSlots& slots, bool compute,
+                                     PipelineRecord& record) noexcept;
     void DestroyPipelineLayout(PipelineRecord& record) noexcept;
     Result<void> Reject(const char* message) noexcept;
     // 패스 끝 MSAA resolve다(EndFrame, render pass를 닫은 뒤, 잠금 안).
@@ -779,7 +816,10 @@ private:
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                         uint32 drawConstantBytes) noexcept;
-    Result<VkShaderModule> CreateShaderModule(const CompiledShader& shader) noexcept;
+    // 장치 셰이더의 SPIR-V module과 진입점 이름(OpEntryPoint)이다. 진입점이 없으면
+    // InvalidArgument다.
+    Result<VkShaderModule> CreateShaderModule(const DeviceShaderCode& shader,
+                                              char (&entry)[64]) noexcept;
 
     // --- VulkanCommands.cpp ---
     Result<void> BeginRecording() noexcept;
@@ -900,6 +940,17 @@ private:
     Result<VkSemaphore> TakeAcquireSemaphore() noexcept;
     void ReturnAcquireSemaphore(VkSemaphore semaphore, uint64 fenceValue) noexcept;
 
+    // --- VulkanConstants.cpp(잠금 안) ---
+    Result<void> InitializeConstants() noexcept;
+    void DestroyConstants() noexcept;
+    Result<void> AllocateConstantBlock(uint64 bytes, uint32& page,
+                                       GpuPageAllocation& block) noexcept;
+    void RetireConstantBlock(uint32 page, const GpuPageAllocation& block) noexcept;
+    uint8* ConstantData(uint32 page, const GpuPageAllocation& block) const noexcept;
+    // 묶인 (단계, slot)의 버퍼·구간 위치·byte 수다(없으면 null).
+    VkBuffer ResolveConstant(uint32 stage, uint32 slot, VkDeviceSize& offset,
+                             uint32& bytes) const noexcept;
+
     // --- VulkanUpload.cpp ---
     Result<void> CreateUploadRing(const DeviceDesc& desc) noexcept;
     Result<void> OpenUploadList() noexcept;
@@ -941,8 +992,8 @@ private:
     VkDebugUtilsMessengerEXT messenger_ = VK_NULL_HANDLE;
     VkPhysicalDevice physical_ = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties properties_ = {};
-    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다, PixelFormat.ko.md
-    // 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
+    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다,
+    // Docs/Design/PixelFormat 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
     PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue queue_ = VK_NULL_HANDLE;
@@ -972,7 +1023,6 @@ private:
     uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
     bool validation_ = false;
     bool software_ = false;
-    ShaderSourceCompiler* shaderCompiler_ = nullptr;
 
     // 메모리 할당기와 그 잠금이다. 장치 잠금·staging pool 잠금 안에서 잡는 가장 안쪽 잠금이다(이
     // 잠금을 쥔 채 다른 잠금을 잡지 않는다).
@@ -1035,9 +1085,29 @@ private:
     // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
     TextureHandle boundWriteTextures_[MaxDrawBufferViews];
     bool descriptorsDirty_ = true;
+    // 상수 버퍼(9.11절): handle 표·page, 기록 명령 ring, (단계, slot) 묶음, 지금 set과 그 set에 쓴
+    // 상수 버퍼(binding 색인마다 VkBuffer·offset — 동적 binding은 버퍼만 대조한다).
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    Array<UniquePtr<ConstantPage>> constantPages_;
+    UploadRingAllocator constantRing_;
+    VkBuffer constantRingBuffer_ = VK_NULL_HANDLE;
+    MemoryAllocation constantRingMemory_;
+    struct BoundConstant {
+        SlotHandle handle;
+        // 참이면 ring 구간(offset)이다.
+        bool data = false;
+        VkDeviceSize offset = 0;
+        uint32 bytes = 0;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    VkDescriptorSet currentSets_[2] = {};
+    VkBuffer writtenConstantBuffers_[MaxPipelineBindings] = {};
+    VkDeviceSize writtenConstantOffsets_[MaxPipelineBindings] = {};
     // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
     uint64 descriptorExhaustions_ = 0;
     uint64 ignoredDraws_ = 0;
+    // SetTexture가 흰 텍스처로 대신 묶은 수다(NullTextureBindings).
+    uint64 nullTextureBindings_ = 0;
     uint32 markerDepth_ = 0;
     // GX5: 기록 중 프레임이 상태를 바꾼 텍스처와, 전이를 위해 닫은 render pass다.
     Array<SlotHandle> touchedTextures_;
@@ -1071,6 +1141,8 @@ private:
     VkQueryPool queryPool_ = VK_NULL_HANDLE;
     TimestampSourceImpl timestampSource_;
     TimestampRing timestamps_;
+    // 장치 셰이더(CreateShader — 코드와 layout의 CPU 사본)다.
+    DeviceShaderTable shaders_;
     uint64 timestampFrequency_ = 0;
     uint64 timestampMask_ = 0;
     // 초기화가 필요한 slot(bit)과 이번 기록이 초기화한·쓴 slot이다.

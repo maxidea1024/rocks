@@ -1,0 +1,66 @@
+// 정점 입력 self-test 셰이더다(float·int·uint attribute, 인스턴스 stream, 입력 없는 배치).
+struct VSOutput {
+    float4 position : SV_Position;
+    float4 color : TEXCOORD0;
+};
+
+struct FloatInput {
+    float2 position : ATTRIBUTE0;
+    float4 value : ATTRIBUTE1;
+};
+
+VSOutput FloatVS(FloatInput input) {
+    VSOutput output;
+    output.position = float4(input.position, 0.5, 1.0);
+    output.color = float4(input.value.rgb, 1.0);
+    return output;
+}
+
+struct IntInput {
+    float2 position : ATTRIBUTE0;
+    int4 value : ATTRIBUTE1;
+};
+
+VSOutput IntVS(IntInput input) {
+    VSOutput output;
+    output.position = float4(input.position, 0.5, 1.0);
+    output.color = float4(float3(input.value.rgb) / 255.0, 1.0);
+    return output;
+}
+
+struct UintInput {
+    float2 position : ATTRIBUTE0;
+    uint4 value : ATTRIBUTE1;
+};
+
+VSOutput UintVS(UintInput input) {
+    VSOutput output;
+    output.position = float4(input.position, 0.5, 1.0);
+    output.color = float4(float3(input.value.rgb) / 255.0, 1.0);
+    return output;
+}
+
+struct InstanceInput {
+    float2 position : ATTRIBUTE0;
+    float2 offset : ATTRIBUTE1;
+    float4 color : ATTRIBUTE2;
+};
+
+VSOutput InstanceVS(InstanceInput input) {
+    VSOutput output;
+    output.position = float4(input.position + input.offset, 0.5, 1.0);
+    output.color = float4(input.color.rgb, 1.0);
+    return output;
+}
+
+VSOutput NoInputVS(uint id : SV_VertexID) {
+    VSOutput output;
+    float2 uv = float2((id << 1) & 2, id & 2);
+    output.position = float4(uv * 2.0 - 1.0, 0.5, 1.0);
+    output.color = float4(0.25, 0.5, 0.75, 1.0);
+    return output;
+}
+
+float4 ColorPS(VSOutput input) : SV_Target0 {
+    return input.color;
+}

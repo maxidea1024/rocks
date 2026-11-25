@@ -32,7 +32,7 @@ public sealed class NativeBuildEngine
         request = PathSpelling.OnDisk(request);
         Directory.CreateDirectory(request.OutputDirectory);
         await using var outputLock = await AcquireOutputLockAsync(request.OutputDirectory, cancellationToken);
-        // 실행 파일마다 모듈 표 TU를 생성 소스로 더한다(Docs/Design/ModuleLoader.ko.md 3.2절). 아래에서 규칙 생성 TU와 함께 쓴다.
+        // 실행 파일마다 모듈 표 TU를 생성 소스로 더한다(Docs/Design/ModuleLoader 3.2절). 아래에서 규칙 생성 TU와 함께 쓴다.
         request = ModuleTables.Add(request);
         // 규칙이 만든 생성 번역 단위(도구 표 등)를 먼저 쓴다. 그 뒤의 BuildInfo·액션 그래프는 이것을 보통 소스로 본다.
         request = GeneratedSources.Write(request);

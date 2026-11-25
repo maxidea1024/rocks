@@ -1,7 +1,9 @@
 #include "CommandSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
+#include <RenderBase/PipelineStatePresets.h>
 #include <stdio.h>
 
 namespace sandbox {
@@ -42,251 +44,7 @@ StringView Text(const char (&text)[Count]) noexcept {
 // constants[0].y는 정점 모양(0 화면 덮는 삼각형, 1 화면 덮는 띠 사각형, 2 가운데 행 가로선, 3
 // 가운데 점), constants[4]는 색이다.
 
-constexpr char FillHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 constants[5]; };
-struct VSOutput {
-    float4 position : SV_Position;
-#ifdef __spirv__
-    [[vk::builtin("PointSize")]] float pointSize : PSIZE;
-#endif
-};
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    float mode = constants[0].y;
-    float2 p;
-    if (mode < 0.5) {
-        p = float2((id << 1) & 2, id & 2) * 2.0 - 1.0;
-    } else if (mode < 1.5) {
-        p = float2((id >> 1) & 1, id & 1) * 2.0 - 1.0;
-    } else if (mode < 2.5) {
-        p = float2(id == 0 ? -1.0 : 1.0, -0.125);
-    } else {
-        p = float2(0.125, -0.125);
-    }
-    output.position = float4(p, constants[0].x, 1.0);
-#ifdef __spirv__
-    output.pointSize = 1.0;
-#endif
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return constants[4]; }
-)";
-
-#define COMMAND_TEST_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
-
-constexpr char FillVertexGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-uniform highp vec4 vu_h[5];
-void main() {
-    int id = gl_VertexID;
-    float mode = vu_h[0].y;
-    vec2 p;
-    if (mode < 0.5) {
-        p = vec2((id << 1) & 2, id & 2) * 2.0 - 1.0;
-    } else if (mode < 1.5) {
-        p = vec2((id >> 1) & 1, id & 1) * 2.0 - 1.0;
-    } else if (mode < 2.5) {
-        p = vec2(id == 0 ? -1.0 : 1.0, -0.125);
-    } else {
-        p = vec2(0.125, -0.125);
-    }
-    gl_Position = vec4(p, vu_h[0].x, 1.0);
-    gl_PointSize = 1.0;
-}
-)";
-
-constexpr char FillPixelGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-uniform highp vec4 pu_h[5];
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = pu_h[4]; }
-)";
-
-// compute가 구조화 UAV(u0)와 typed UAV(u1)에 쓴다.
-constexpr char WriterHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 constants[5]; };
-RWStructuredBuffer<float4> items : register(u0);
-RWBuffer<uint> codes : register(u1);
-[numthreads(4, 1, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) {
-    items[id.x] = float4(constants[4].xy, 0.0, 1.0);
-    codes[id.x] = 0x40u + id.x * 16u;
-}
-)";
-
-// 쓰기 구조화 slot 0은 storage binding 4, 쓰기 typed slot 1은 image unit 1이다.
-constexpr char WriterGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(local_size_x = 4) in;
-uniform highp vec4 cu_h[5];
-layout(std430, binding = 4) buffer type_RWStructuredBuffer_v4float { vec4 data[]; } items;
-layout(binding = 1, r32ui) uniform highp writeonly uimageBuffer codes;
-void main() {
-    uint i = gl_GlobalInvocationID.x;
-    items.data[i] = vec4(cu_h[4].xy, 0.0, 1.0);
-    imageStore(codes, int(i), uvec4(0x40u + i * 16u));
-}
-)";
-
-// PS가 구조화 slot 0(t1)을, VS가 typed slot 1(t2)을 읽는다.
-constexpr char ReaderHlsl[] = R"(
-StructuredBuffer<float4> items : register(t1);
-Buffer<uint> codes : register(t2);
-struct VSOutput { float4 position : SV_Position; float4 color : COLOR0; };
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = float4(float2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
-    output.color = float4(0.0, 0.0, codes.Load(2) / 255.0, 1.0);
-    return output;
-}
-float4 PSMain(VSOutput input) : SV_Target { return float4(items[1].xy, input.color.z, 1.0); }
-)";
-
-constexpr char ReaderVertexGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(binding = 18) uniform highp usamplerBuffer codes;
-layout(location = 0) out vec4 out_var_COLOR0;
-void main() {
-    int id = gl_VertexID;
-    gl_Position = vec4(vec2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
-    out_var_COLOR0 = vec4(0.0, 0.0, float(texelFetch(codes, 2).x) / 255.0, 1.0);
-}
-)";
-
-constexpr char ReaderPixelGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(std430, binding = 0) readonly buffer type_StructuredBuffer_v4float { vec4 data[]; } items;
-layout(location = 0) in vec4 in_var_COLOR0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = vec4(items.data[1].xy, in_var_COLOR0.z, 1.0); }
-)";
-
-// compute가 간접 인자 세 가지(그리기 0, index 그리기 16, dispatch 36)를 raw UAV에 쓴다.
-constexpr char ArgumentsHlsl[] = R"(
-RWByteAddressBuffer args : register(u0);
-[numthreads(1, 1, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) {
-    args.Store4(0, uint4(3, 1, 0, 0));
-    args.Store4(16, uint4(3, 1, 0, 0));
-    args.Store(32, 0);
-    args.Store3(36, uint3(2, 1, 1));
-}
-)";
-
-constexpr char ArgumentsGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(local_size_x = 1) in;
-layout(std430, binding = 4) buffer type_RWByteAddressBuffer { uint data[]; } args;
-void main() {
-    args.data[0] = 3u; args.data[1] = 1u; args.data[2] = 0u; args.data[3] = 0u;
-    args.data[4] = 3u; args.data[5] = 1u; args.data[6] = 0u; args.data[7] = 0u; args.data[8] = 0u;
-    args.data[9] = 2u; args.data[10] = 1u; args.data[11] = 1u;
-}
-)";
-
-// 그룹마다 표시 하나를 raw UAV에 쓴다(간접 dispatch의 그룹 수 확인).
-constexpr char MarkerHlsl[] = R"(
-RWByteAddressBuffer marks : register(u0);
-[numthreads(1, 1, 1)]
-void CSMain(uint3 group : SV_GroupID) { marks.Store(group.x * 4, 0xC0DE0000u + group.x); }
-)";
-
-constexpr char MarkerGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(local_size_x = 1) in;
-layout(std430, binding = 4) buffer type_RWByteAddressBuffer { uint data[]; } marks;
-void main() { marks.data[gl_WorkGroupID.x] = 0xC0DE0000u + gl_WorkGroupID.x; }
-)";
-
-// 배치 밖 UAV(u5)를 쓴다(음성 대조).
-constexpr char OutsideHlsl[] = R"(
-RWByteAddressBuffer outside : register(u5);
-[numthreads(1, 1, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) { outside.Store(0, 1); }
-)";
-
-constexpr char OutsideGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(local_size_x = 1) in;
-layout(std430, binding = 9) buffer type_RWByteAddressBuffer { uint data[]; } outside;
-void main() { outside.data[0] = 1u; }
-)";
-
-// 8개 색 타깃에 쓴다(6은 R32Uint, 7은 RGBA16Float).
-constexpr char MrtHlsl[] = R"(
-struct VSOutput { float4 position : SV_Position; };
-VSOutput VSMain(uint id : SV_VertexID) {
-    VSOutput output;
-    output.position = float4(float2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
-    return output;
-}
-struct PSOutput {
-    float4 c0 : SV_Target0;
-    float4 c1 : SV_Target1;
-    float4 c2 : SV_Target2;
-    float4 c3 : SV_Target3;
-    float4 c4 : SV_Target4;
-    float4 c5 : SV_Target5;
-    uint c6 : SV_Target6;
-    float4 c7 : SV_Target7;
-};
-PSOutput PSMain(VSOutput input) {
-    PSOutput output;
-    output.c0 = float4(0.0 / 8.0, 0.5, 0.25, 1.0);
-    output.c1 = float4(1.0 / 8.0, 0.5, 0.25, 1.0);
-    output.c2 = float4(2.0 / 8.0, 0.5, 0.25, 1.0);
-    output.c3 = float4(3.0 / 8.0, 0.5, 0.25, 1.0);
-    output.c4 = float4(4.0 / 8.0, 0.5, 0.25, 1.0);
-    output.c5 = float4(5.0 / 8.0, 0.5, 0.25, 1.0);
-    output.c6 = 1234u;
-    output.c7 = float4(7.0 / 8.0, 0.5, 0.25, 1.0);
-    return output;
-}
-)";
-
-constexpr char MrtVertexGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-void main() {
-    int id = gl_VertexID;
-    gl_Position = vec4(vec2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-constexpr char MrtPixelGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-layout(location = 0) out vec4 out_var_SV_Target0;
-layout(location = 1) out vec4 out_var_SV_Target1;
-layout(location = 2) out vec4 out_var_SV_Target2;
-layout(location = 3) out vec4 out_var_SV_Target3;
-layout(location = 4) out vec4 out_var_SV_Target4;
-layout(location = 5) out vec4 out_var_SV_Target5;
-layout(location = 6) out highp uint out_var_SV_Target6;
-layout(location = 7) out vec4 out_var_SV_Target7;
-void main() {
-    out_var_SV_Target0 = vec4(0.0 / 8.0, 0.5, 0.25, 1.0);
-    out_var_SV_Target1 = vec4(1.0 / 8.0, 0.5, 0.25, 1.0);
-    out_var_SV_Target2 = vec4(2.0 / 8.0, 0.5, 0.25, 1.0);
-    out_var_SV_Target3 = vec4(3.0 / 8.0, 0.5, 0.25, 1.0);
-    out_var_SV_Target4 = vec4(4.0 / 8.0, 0.5, 0.25, 1.0);
-    out_var_SV_Target5 = vec4(5.0 / 8.0, 0.5, 0.25, 1.0);
-    out_var_SV_Target6 = 1234u;
-    out_var_SV_Target7 = vec4(7.0 / 8.0, 0.5, 0.25, 1.0);
-}
-)";
-
-// 그리기별 상수 16 byte(float4 하나, TintConstants)를 PS만 읽어 화면을 그 색으로 채운다.
-constexpr char TintHlsl[] = R"(
-cbuffer DrawConstants : register(b0) { float4 tint; };
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    return float4(float2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
-}
-float4 PSMain() : SV_Target { return tint; }
-)";
-
-constexpr char TintVertexGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-void main() {
-    int id = gl_VertexID;
-    gl_Position = vec4(vec2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-constexpr char TintPixelGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
-uniform highp vec4 pu_h[1];
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() { out_var_SV_Target0 = pu_h[0]; }
-)";
-
-#undef COMMAND_TEST_GLSL_HEAD
+// 셰이더는 Command.rsf·Tint.rsf다(자원 slot은 파이프라인 이름 표로 잇는다).
 
 struct Rgba {
     uint8 r = 0;
@@ -300,13 +58,13 @@ bool Near(uint8 actual, uint8 expected) noexcept {
     return difference <= ColorTolerance && difference >= -ColorTolerance;
 }
 
-// FillHlsl·WriterHlsl의 그리기별 상수다(float4 constants[5]).
+// Command.rsf Fill(FillVS·FillPS·WriterCS)의 그리기별 상수다(float4 constants[5]).
 struct FillConstants {
     float shape[16] = {};
     float color[4] = {};
 };
 
-// TintHlsl의 그리기별 상수다(float4 tint).
+// Tint.rsf의 그리기별 상수다(float4 tint).
 struct TintConstants {
     float color[4] = {};
 };
@@ -328,7 +86,7 @@ void SetFill(CommandContext& commands, const FillConstants& constants) noexcept 
           "fill draw constants are accepted");
 }
 
-// 화면 덮는 삼각형·띠·선·점 모드다(FillHlsl).
+// 화면 덮는 삼각형·띠·선·점 모드다(Command.rsf FillVS).
 constexpr float FullScreen = 0.0f;
 constexpr float StripQuad = 1.0f;
 constexpr float MiddleLine = 2.0f;
@@ -380,29 +138,38 @@ struct Bench {
         return device.CreateBufferView(buffer, desc);
     }
 
-    Result<PipelineHandle> Pipeline(PipelineDesc desc, StringView hlsl, StringView vertexGlsl,
-                                    StringView pixelGlsl) noexcept {
-        desc.vertex = {hlsl, vertexGlsl};
-        desc.pixel = {hlsl, pixelGlsl};
+    Result<PipelineHandle> Pipeline(PipelineDesc desc, const shaders::ShaderTypeDesc& vertex,
+                                    const shaders::ShaderTypeDesc& pixel) noexcept {
         // 대상은 선형 RGBA8이다(기본 RGBA8UnormSrgb 대신).
         if (desc.colorTargetCount == 1 && desc.colorFormats[0] == PixelFormat::RGBA8UnormSrgb) {
             desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         }
 
-        return device.CreatePipeline(desc);
+        return shaders::CreateGraphicsPipeline(device, vertex, pixel, desc);
     }
 
     Result<PipelineHandle> Fill(PipelineDesc desc = {}) noexcept {
         desc.drawConstantBytes = sizeof(FillConstants);
-        return Pipeline(desc, Text(FillHlsl), Text(FillVertexGlsl), Text(FillPixelGlsl));
+        return Pipeline(desc, shaders::CommandFillVS, shaders::CommandFillPS);
     }
 
-    Result<PipelineHandle> Compute(StringView hlsl, StringView glsl,
-                                   uint32 drawConstantBytes = 0) noexcept {
+    // 쓰기 slot 0·1의 버퍼 이름과 함께 compute 파이프라인을 만든다.
+    Result<PipelineHandle> Compute(const shaders::ShaderTypeDesc& compute,
+                                   uint32 drawConstantBytes = 0, const char* write0 = nullptr,
+                                   const char* write1 = nullptr) noexcept {
         ComputePipelineDesc desc;
-        desc.shader = {hlsl, glsl};
         desc.drawConstantBytes = drawConstantBytes;
-        return device.CreateComputePipeline(desc);
+        desc.bindings.writableBuffers[0] = write0 != nullptr ? StringView(write0) : StringView();
+        desc.bindings.writableBuffers[1] = write1 != nullptr ? StringView(write1) : StringView();
+        return shaders::CreateComputePipeline(device, compute, desc);
+    }
+
+    // compute가 쓴 두 버퍼를 slot 0·1로 읽는 그리기 파이프라인이다.
+    Result<PipelineHandle> Reader() noexcept {
+        PipelineDesc desc;
+        desc.bindings.bufferViews[0] = "ReadItems";
+        desc.bindings.bufferViews[1] = "ReadCodes";
+        return Pipeline(desc, shaders::CommandReaderVS, shaders::CommandReaderPS);
     }
 
     bool Read(TextureHandle texture) noexcept {
@@ -439,9 +206,16 @@ bool ReadWords(Device& device, Allocator& allocator, BufferHandle buffer, uint32
 // compute가 구조화·typed UAV에 쓰고 같은 패스의 VS·PS가 SRV로 읽어 그린다(GX5 UAV → SRV 전이).
 void RunComputeWrites(Bench& bench) noexcept {
     Device& device = bench.device;
-    auto writer = bench.Compute(Text(WriterHlsl), Text(WriterGlsl), sizeof(FillConstants));
-    auto reader =
-        bench.Pipeline({}, Text(ReaderHlsl), Text(ReaderVertexGlsl), Text(ReaderPixelGlsl));
+    if (!shaders::Has(shaders::CommandReaderPS)) {
+        // GLES31_PC는 PS storage block을 받지 않는다(형식 상한 0 — ShaderSystem 7.2절 4항).
+        printf("  [NOT RUN] %s commands: compute writes read by a pixel shader (no pixel storage "
+               "blocks)\n",
+               backendName);
+        return;
+    }
+
+    auto writer = bench.Compute(shaders::CommandWriterCS, sizeof(FillConstants), "Items", "Codes");
+    auto reader = bench.Reader();
     auto items = bench.Buffer(
         64, BufferUsage::ShaderRead | BufferUsage::ShaderWrite | BufferUsage::Structured, 16, 0);
     auto codes = bench.Buffer(16, BufferUsage::ShaderRead | BufferUsage::ShaderWrite, 0, 0);
@@ -513,8 +287,8 @@ void RunComputeWrites(Bench& bench) noexcept {
 // compute가 쓴 간접 인자로 간접 그리기·index 간접 그리기·간접 dispatch를 한다(GX5 UAV → 간접 인자).
 void RunIndirect(Bench& bench) noexcept {
     Device& device = bench.device;
-    auto writer = bench.Compute(Text(ArgumentsHlsl), Text(ArgumentsGlsl));
-    auto marker = bench.Compute(Text(MarkerHlsl), Text(MarkerGlsl));
+    auto writer = bench.Compute(shaders::CommandArgumentsCS, 0, "Arguments");
+    auto marker = bench.Compute(shaders::CommandMarkerCS, 0, "Marks");
     auto fill = bench.Fill();
     auto args =
         bench.Buffer(48, BufferUsage::Indirect | BufferUsage::ShaderWrite | BufferUsage::Raw, 0, 0);
@@ -611,9 +385,12 @@ void RunMultipleTargets(Bench& bench) noexcept {
     tooMany.colorCount = MaxColorTargets + 1;
     Check(device.BeginPass(tooMany).Error() == ErrorCode::InvalidArgument,
           "a pass with more than MaxColorTargets attachments is rejected");
-    if (device.Caps().limits.colorAttachments < MaxColorTargets) {
-        printf("  [NOT RUN] %s commands: MRT 8 (device has %u color attachments)\n", backendName,
-               device.Caps().limits.colorAttachments);
+    if (device.Caps().limits.colorAttachments < MaxColorTargets ||
+        !shaders::Has(shaders::CommandMrtPS)) {
+        // GLES31_PC 형식은 render target 4개라 8 target PS를 쿠킹하지 않는다(형식 상한).
+        printf("  [NOT RUN] %s commands: MRT 8 (device has %u color attachments, shader %s)\n",
+               backendName, device.Caps().limits.colorAttachments,
+               shaders::Has(shaders::CommandMrtPS) ? "available" : "not cooked for this format");
         return;
     }
 
@@ -643,7 +420,7 @@ void RunMultipleTargets(Bench& bench) noexcept {
     desc.blend[2].sourceAlpha = BlendFactor::One;
     desc.blend[2].destinationAlpha = BlendFactor::One;
     desc.blend[3].writeMask = ColorWriteMask::Red | ColorWriteMask::Alpha;
-    auto pipeline = bench.Pipeline(desc, Text(MrtHlsl), Text(MrtVertexGlsl), Text(MrtPixelGlsl));
+    auto pipeline = bench.Pipeline(desc, shaders::FullScreenVS, shaders::CommandMrtPS);
     Check(created && pipeline.IsOk(), "MRT 8 targets and pipeline");
     if (!created || !pipeline) {
         PrintLastError(device);
@@ -741,7 +518,7 @@ void RunDepthStencil(Bench& bench) noexcept {
     second.depthStencil.back.compare = CompareFunction::Equal;
     // c: 알파 블렌드, 깊이 Equal·쓰지 않음
     PipelineDesc third = base;
-    third.blend[0] = AlphaBlend();
+    third.blend[0] = render::AlphaBlend();
     third.depthStencil.depthTest = true;
     third.depthStencil.depthCompare = CompareFunction::Equal;
     // 읽기 전용 패스용: 시험만(ro), 쓰기(rw, 무시돼야 한다)
@@ -1086,12 +863,12 @@ void RunDrawConstants(Bench& bench) noexcept {
     const auto tintPipeline = [&](uint32 bytes) noexcept {
         PipelineDesc desc;
         desc.drawConstantBytes = bytes;
-        return bench.Pipeline(desc, Text(TintHlsl), Text(TintVertexGlsl), Text(TintPixelGlsl));
+        return bench.Pipeline(desc, shaders::FullScreenVS, shaders::TintPS);
     };
     auto tooLarge = tintPipeline(MaxDrawConstantBytes + DrawConstantAlignment);
     auto unaligned = tintPipeline(DrawConstantAlignment + 8);
-    auto computeTooLarge = bench.Compute(Text(WriterHlsl), Text(WriterGlsl),
-                                         MaxDrawConstantBytes + DrawConstantAlignment);
+    auto computeTooLarge = bench.Compute(
+        shaders::CommandWriterCS, MaxDrawConstantBytes + DrawConstantAlignment, "Items", "Codes");
     Check(tooLarge.Error() == ErrorCode::InvalidArgument &&
               unaligned.Error() == ErrorCode::InvalidArgument &&
               computeTooLarge.Error() == ErrorCode::InvalidArgument,
@@ -1099,11 +876,11 @@ void RunDrawConstants(Bench& bench) noexcept {
     // 셰이더가 읽는 블록이 선언보다 크면 거부한다(80 byte를 읽는 Fill에 64·0, 16 byte Tint에 0).
     PipelineDesc fillSmall;
     fillSmall.drawConstantBytes = 64;
-    auto fillShort =
-        bench.Pipeline(fillSmall, Text(FillHlsl), Text(FillVertexGlsl), Text(FillPixelGlsl));
-    auto fillNone = bench.Pipeline({}, Text(FillHlsl), Text(FillVertexGlsl), Text(FillPixelGlsl));
+    auto fillShort = bench.Pipeline(fillSmall, shaders::CommandFillVS, shaders::CommandFillPS);
+    auto fillNone = bench.Pipeline({}, shaders::CommandFillVS, shaders::CommandFillPS);
     auto tintNone = tintPipeline(0);
-    auto writerShort = bench.Compute(Text(WriterHlsl), Text(WriterGlsl), DrawConstantAlignment);
+    auto writerShort =
+        bench.Compute(shaders::CommandWriterCS, DrawConstantAlignment, "Items", "Codes");
     Check(fillShort.Error() == ErrorCode::InvalidArgument &&
               fillNone.Error() == ErrorCode::InvalidArgument &&
               tintNone.Error() == ErrorCode::InvalidArgument &&
@@ -1115,7 +892,7 @@ void RunDrawConstants(Bench& bench) noexcept {
     auto tint = tintPipeline(sizeof(TintConstants));
     auto fill = bench.Fill();
     // 상수를 읽지 않는 0 byte 파이프라인이다.
-    auto none = bench.Pipeline({}, Text(ReaderHlsl), Text(ReaderVertexGlsl), Text(ReaderPixelGlsl));
+    auto none = bench.Pipeline({}, shaders::FullScreenVS, shaders::FormatFloatColorPS);
     Check(tintWide && tint && fill && none,
           "draw constant pipelines of 0, 16, 80 and 128 bytes are created");
     if (!tintWide || !tint || !fill || !none) {
@@ -1202,9 +979,9 @@ void RunDrawConstants(Bench& bench) noexcept {
 void RunRejections(Bench& bench) noexcept {
     Device& device = bench.device;
     const DeviceFeatures& features = device.Caps().features;
-    auto outside = bench.Compute(Text(OutsideHlsl), Text(OutsideGlsl));
+    auto outside = bench.Compute(shaders::CommandOutsideCS, 0, "Marks");
     Check(outside.Error() == ErrorCode::InvalidArgument,
-          "compute resources outside the fixed layout are rejected");
+          "compute resources outside the pipeline binding names are rejected");
     PipelineDesc tooMany;
     tooMany.colorTargetCount = MaxColorTargets + 1;
     PipelineDesc depthWithoutTarget;
@@ -1276,7 +1053,7 @@ void RunRejections(Bench& bench) noexcept {
 
     // 파이프라인 종류가 맞지 않는 그리기·dispatch와 그룹 수 한도 밖 dispatch는 무시된다.
     auto fill = bench.Fill();
-    auto marker = bench.Compute(Text(MarkerHlsl), Text(MarkerGlsl));
+    auto marker = bench.Compute(shaders::CommandMarkerCS, 0, "Marks");
     if (fill && marker) {
         const uint64 ignoredBefore = device.IgnoredDraws();
         auto frame = device.BeginOffscreen(bench.target, {});

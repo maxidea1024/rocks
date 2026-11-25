@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <AssetRuntime/Package.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
@@ -34,7 +35,12 @@ struct BundleAsset final : Asset {
 
     explicit BundleAsset(Allocator& allocator) noexcept
         : portrait(allocator), levels(allocator), slot(allocator), plain(allocator),
-          weights(allocator), editorSoft(allocator) {
+          weights(allocator)
+#if ROCKS_WITH_EDITOR_DATA
+          ,
+          editorSoft(allocator)
+#endif
+    {
     }
 
     ROCKS_PROPERTY(AssetBundles = " UI , Game ") SoftObjectRef<Asset> portrait;
@@ -43,8 +49,10 @@ struct BundleAsset final : Asset {
     ROCKS_PROPERTY() SoftObjectRef<Asset> plain;
     ROCKS_PROPERTY(AssetBundles = "Audio") OrderedMap<SoftObjectRef<Asset>, int32> weights;
     ROCKS_PROPERTY(AssetBundles = "Game") InstancedStruct<> extra;
+#if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) InstancedStruct<> editorExtra;
     ROCKS_PROPERTY(EditorOnly) SoftObjectRef<Asset> editorSoft;
+#endif
 };
 
 // 편집기 전용 에셋 클래스다(쿠킹 대상이 아니다 — NeverCook과 같은 규칙).

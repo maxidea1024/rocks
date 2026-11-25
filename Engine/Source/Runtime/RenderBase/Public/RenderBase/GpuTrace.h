@@ -8,7 +8,7 @@
 #include <TraceCapture/TraceCpuScope.h>
 #include <TraceCapture/TraceSession.h>
 
-// GPU 계측이다(Docs/Design/RenderBase.ko.md 13절 RB7, Docs/Design/TraceSystem.ko.md 9절). 이름 구간
+// GPU 계측이다(Docs/Design/RenderBase 13절 RB7, Docs/Design/TraceSystem.ko.md 9절). 이름 구간
 // 하나가 debug marker(캡처 도구)와 timestamp 한 쌍을 함께 기록하고, GPU 완료 뒤 완료 통지 큐로 받은
 // timestamp를 calibration 쌍으로 trace tick에 옮겨 trace(채널 "gpu")에 쓴다.
 namespace rocks::render {
@@ -18,7 +18,7 @@ ROCKS_RENDERBASE_API extern TraceChannel GpuTraceChannel;
 
 // 채널 "gpu"와 GPU 기록 형(Trace.GpuQueue·Trace.GpuCalibration·Trace.GpuScope·Trace.GpuFrame,
 // TraceStandardFormat)을 세션에 등록한다. RenderBase 모듈의 Startup이 호스트 서비스의 trace 세션에
-// 부른다(Docs/Design/ModuleLoader.ko.md 3.12절). 시험은 직접 부른다. 실패: TraceSession::
+// 부른다(Docs/Design/ModuleLoader 3.12절). 시험은 직접 부른다. 실패: TraceSession::
 // RegisterChannel·RegisterEventType의 오류다. 실패하면 이 호출이 등록한 것을 되돌린다.
 ROCKS_RENDERBASE_API Result<void> RegisterGpuTraceTypes(TraceSession& session) noexcept;
 

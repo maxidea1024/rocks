@@ -3,7 +3,7 @@
 #include <RenderGraph/GraphSharedData.h>
 #include <TestSupport/Test.h>
 
-// RG1 남은 것 C부 시험이다(Docs/Design/RenderBase.ko.md 7.5절): GraphSharedData(타입마다 값 하나,
+// RG1 남은 것 C부 시험이다(Docs/Design/RenderBase 7.5절): GraphSharedData(타입마다 값 하나,
 // 중복 생성·없는 값 필수 조회 검증 오류, 다른 그래프 handle을 담은 값 거부, 그래프 파괴 때 소멸),
 // SceneTextureTable((ViewSet, view) 키), 검증 실패 그래프의 history export.
 using namespace rocks;

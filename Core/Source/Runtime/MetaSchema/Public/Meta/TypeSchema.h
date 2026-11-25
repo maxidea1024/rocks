@@ -692,7 +692,28 @@ struct TypeSchema {
     // Within의 파생이어야 한다, RMC2208). TypeRegistry는 base에 Within이 있는데 파생이 0이면
     // InvalidArgument다. struct는 0이어야 한다.
     TypeId withinType{};
+    // 이 타입(상속 포함)의 EditorOnly 필드 ID 목록이다(Docs/Design/BuildTargets 3.4절 BS2c). 빌드
+    // 조합과 무관하게 같은 값이다: ROCKS_WITH_EDITOR_DATA=1이면 그 필드가 fields에도 있고(그때는
+    // EditorOnly여야 한다), 0이면 fields에 없다(필드가 컴파일에서 빠진다). 에디터 데이터 없는
+    // 빌드가 에디터 패키지를 읽을 때 이 ID의 저장 값을 진단 없이 건너뛴다. 중복·0 ID와 EditorOnly가
+    // 아닌 필드의 ID는 InvalidArgument다. 등록이 깊게 복사한다. MetaCompiler가 채우고, 수동 등록은
+    // 비워 둘 수 있다(리플렉션 조상의 필드를 빌리는 native 클래스는 조상의 목록을 물려받는다).
+    Span<const Guid> editorOnlyFieldIds{};
 };
+
+// schema가 id를 EditorOnly 필드 ID로 싣는지다(editorOnlyFieldIds — 선형 탐색, 목록은 작다).
+//
+// 사용 예:
+//   if (IsEditorOnlyFieldId(schema, storedId)) { /* 에디터 데이터 없는 빌드: 값을 건너뛴다 */ }
+constexpr bool IsEditorOnlyFieldId(const TypeSchema& schema, Guid id) noexcept {
+    for (usize index = 0; index < schema.editorOnlyFieldIds.Size(); ++index) {
+        if (schema.editorOnlyFieldIds[index] == id) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 // 타입 도구 이름의 문법이다: `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`(Sparks 모듈 경로
 // `Weapons.Sword` — `:`는 쓰지 않는다). `none`은 ClassRef·참조 텍스트의 null 표기라 대소문자 무시로

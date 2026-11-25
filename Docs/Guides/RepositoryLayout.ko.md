@@ -159,7 +159,7 @@ public sealed class Core : CoreModuleRules
   활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](../Design/BuildTargets/README.ko.md). 구현하면 위 기술자 표·모듈
   type 표·게임 빌드 연동 절을 함께 고친다.
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
-- `loadingPhase`의 런타임 반영: [모듈 로더](../Design/ModuleLoader.ko.md) 3.3·3.11절(ML1)이 모듈 표 행의 단계로 반영한다(`PostEngineInit`·`None` 포함). 기술자 모듈의 플러그인 활성 반영은 ML5다.
+- `loadingPhase`의 런타임 반영: [모듈 로더](../Design/ModuleLoader/README.ko.md) 3.3·3.11절(ML1)이 모듈 표 행의 단계로 반영한다(`PostEngineInit`·`None` 포함). 기술자 모듈의 플러그인 활성 반영은 ML5다.
 - 소스 트리 프로젝트 빌드가 생기면 그 `.rocksproject`의 engineVersion을 `Build/Build.version`과 대조한다(지금 기술자는
   설치 SDK 게임 빌드에서만 읽고, 그때 SDK manifest의 엔진 버전과 대조한다).
 - 2026-11-12 이전 구조(`Engine/<Module>`, 최상위 `Tests/`·`Tools/`)를 가리키는 과거 검토·배포 문서

@@ -23,5 +23,5 @@ bool DynamicProbeModule::Started() const noexcept {
 
 } // namespace rocks::test
 
-// DynamicModuleTestFixture 모듈의 진입점이다(Docs/Design/ModuleLoader.ko.md 3.2절).
+// DynamicModuleTestFixture 모듈의 진입점이다(Docs/Design/ModuleLoader 3.2절).
 ROCKS_IMPLEMENT_MODULE(rocks::test::DynamicProbeModule, DynamicModuleTestFixture)

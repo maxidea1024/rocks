@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "name": "LibPng",
+  "version": "1.6.59",
+  "upstreamDirectory": "libpng-1.6.59",
+  "globalState": false,
+  "source": {
+    "url": "https://download.sourceforge.net/libpng/libpng-1.6.59.tar.xz",
+    "sha256": "d80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389",
+    "verification": "Official libpng release tarball (libpng.sourceforge.io, ANNOUNCE 'libpng 1.6.59 - September 28, 2026'), downloaded on 2026-11-24. The release has no signature or digest file, so the imported files were compared byte for byte with the GitHub tag v1.6.59 (pnggroup/libpng, tag object a543b51f2de2904f3436830394b1013782f7f9e6) source archive and are identical. Imported files are the read-side library sources and the headers (no write sources, tests, contrib, SIMD sources or build scripts), scripts/pnglibconf.h.prebuilt and LICENSE."
+  },
+  "licenses": [
+    {
+      "spdx": "libpng-2.0",
+      "upstreamExpression": "LICENSE (PNG Reference Library License version 2, with the older libpng license for versions up to 1.6.35)",
+      "file": "libpng-1.6.59/LICENSE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "libpng-1.6.59/png.c",
+    "libpng-1.6.59/pngerror.c",
+    "libpng-1.6.59/pngget.c",
+    "libpng-1.6.59/pngmem.c",
+    "libpng-1.6.59/pngpread.c",
+    "libpng-1.6.59/pngread.c",
+    "libpng-1.6.59/pngrio.c",
+    "libpng-1.6.59/pngrtran.c",
+    "libpng-1.6.59/pngrutil.c",
+    "libpng-1.6.59/pngset.c",
+    "libpng-1.6.59/pngtrans.c"
+  ],
+  "includeDirectories": [
+    "libpng-1.6.59"
+  ],
+  "defines": [
+    "PNG_ARM_NEON_OPT=0",
+    "PNG_INTEL_SSE_OPT=0",
+    "PNG_MIPS_MSA_OPT=0",
+    "PNG_MIPS_MMI_OPT=0",
+    "PNG_POWERPC_VSX_OPT=0",
+    "PNG_LOONGARCH_LSX_OPT=0",
+    "PNG_RISCV_RVV_OPT=0"
+  ],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "libpng-1.6.59/png.h",
+    "libpng-1.6.59/pngconf.h",
+    "libpng-1.6.59/pnglibconf.h"
+  ],
+  "files": {
+    "LICENSE": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+    "png.c": "741727b68e19a187bea802c64aea509fa64c78b09fecf4f19822a6a31c324159",
+    "png.h": "5758258cb691e429bafbf16057210e2d9bfa2c33b6c4636a6db562480f39b273",
+    "pngconf.h": "3f1d9e8b05ec5165b65744f99af0ef3d0d10d77d6866551715b80ac884a0bf47",
+    "pngdebug.h": "923e849bded3f15a74fa943ed87b423d88ba5699feeed214872fea09997c44fc",
+    "pngerror.c": "6e8f475172d8c1e34982f4fa4130042110d5591dccdf95723345c2a7e5c7f761",
+    "pngget.c": "3098a692f096c58b9c0f039fbfd38c29b0a86c464a498a9c775c22698a2bec95",
+    "pnginfo.h": "95fd19c965b86c6f279e426b9ee42c62e83af41a372b51fe8feb52a3427cb44d",
+    "pnglibconf.h": "e1d6252bdc438577d3eb9779fa6e77c4f42966d64a84bf0c3fb4c56daf33bd1c",
+    "pngmem.c": "2dcf91e5f7d4aaa11c53cdac246223f405e5cc3e1c7ccccb7a40650c41465b56",
+    "pngpread.c": "230e4e01a9748922a33a936d1c4a2f599d61fc6425b49270197949fd3f38443e",
+    "pngpriv.h": "44f9ecf9664767ec55632f900bb6d59f81b63d24f0039258813695ef428f7c48",
+    "pngread.c": "8ff4bfc0218fb9f712ab5940baeb546b3bbf64abce4038572944716d5520fec8",
+    "pngrio.c": "3c710643f274fd2b4aa2bc154c9dc53a512edae773dda1434f205fb005f2e93e",
+    "pngrtran.c": "0e3737046eb1523480e74ac1235ac8f2df541ca9e7f43c92431b1f0c8c8379d9",
+    "pngrutil.c": "a1d62bc61c118b225c60549ea8de3065ae84642af56dd3776bf4692fb0f6aa5e",
+    "pngset.c": "36153f08f34be63ca572d51dda7e0dcc534d4eca264f45041ceae6e83138fc9b",
+    "pngstruct.h": "46b48213ed1691ddb989cfa7844a272e13fe7a7eb67a97037ca96d76b242bac4",
+    "pngtrans.c": "38aa34b51567a06428b15be16c5819e6f2ae0d3bfce4e1f777ae6242f74eb6d4",
+    "scripts/pnglibconf.h.prebuilt": "4172045bef3f4032089a697f18758e24e02a3873851108409f00dadf6deb2530"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "PNG decoder for FreeType colour bitmap glyphs (CBDT/sbix strikes) in the font backend (Docs/Design/Font/08-ThirdParty.ko.md section 8.1, decision FD9). FreeType's sfnt/pngshim.c is the only consumer.",
+    "pnglibconf.h is an added file based on scripts/pnglibconf.h.prebuilt (the upstream configuration for builds without the configure step) with writing and stdio turned off; Rocks.patch records it.",
+    "All architecture-specific SIMD paths are off (PNG_*_OPT=0): PNG is lossless so the output is the same, and the library builds from one source list on every platform.",
+    "zlib is the Core Zlib module (Z_SOLO, Z_PREFIX); libpng sets its own zalloc and zfree, so the missing zlib default allocator does not matter."
+  ],
+  "modifications": [
+    {
+      "file": "pnglibconf.h",
+      "upstreamSha256": null,
+      "reason": "Added file: the upstream prebuilt configuration scripts/pnglibconf.h.prebuilt under the name the library includes (\"pnglibconf.h\"), as the upstream build instructions say to do without the configure step, with the write side (PNG_WRITE_*, PNG_SIMPLIFIED_WRITE_*, PNG_CONVERT_tIME, PNG_SAVE_INT_32 whose png_save_uint_32 is write-only) and stdio (PNG_STDIO_SUPPORTED, PNG_CONSOLE_IO_SUPPORTED, which needs stdio) turned off: FreeType only decodes from memory, and those paths use CRT functions the engine warning rules reject (fopen, strerror, gmtime)."
+    }
+  ],
+  "patch": "Rocks.patch"
+}

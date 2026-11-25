@@ -162,6 +162,12 @@ inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* con
 
         const usize index = view.FieldIndex(field.Value().id);
         if (index == StructView::NoField) {
+            // 에디터 데이터 없는 빌드에서 컴파일에서 빠진 EditorOnly 멤버는 모르는 필드가 아니다:
+            // 진단 없이 건너뛴다(Docs/Design/BuildTargets 3.4절 BS2c).
+            if (IsEditorOnlyFieldId(schema, field.Value().id)) {
+                continue;
+            }
+
             if (auto skipped = SkipUnknownField(context, field.Value().id); !skipped) {
                 return skipped;
             }

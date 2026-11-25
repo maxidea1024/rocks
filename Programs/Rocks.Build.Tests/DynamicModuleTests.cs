@@ -3,7 +3,7 @@ using Rocks.Build;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 실행 중 적재 모듈(<see cref="NativeModuleInput.DynamicModules"/> — Docs/Design/ModuleLoader.ko.md 3.8절, ML3)을 실제 컴파일·링크로
+/// 실행 중 적재 모듈(<see cref="NativeModuleInput.DynamicModules"/> — Docs/Design/ModuleLoader 3.8절, ML3)을 실제 컴파일·링크로
 /// 검사한다. 픽스처: Engine이 Plugin을 DynamicModules로 두고 Plugin은 Engine에 링크 의존한다(UE처럼 동적 관계는 순환 검사의 참조 사슬이
 /// 아니다). 확인하는 것:
 /// <list type="bullet">

@@ -45,8 +45,10 @@ namespace Rocks.Build.Cli
         // 조합이 있으면 그 모듈에만 조합을 재정의로 얹고, 빌드 대상을 그 모듈로 줄이고, 그 모듈의 object를 지워 처음부터 컴파일한 뒤 결과
         // 행을 채운다. 조합이 없으면(준비 실행) 그 모듈이 의존하는 모듈만 빌드한다. 출력은 이 명령의 것이어야 한다(평소 빌드 출력 거부).
         // sdkAssembly가 있으면 다중 구성 SDK 내보내기(SdkExportCommand)가 부른 구성 하나의 sdk 빌드다. 빌드가 끝나면 그 구성을 조립에 더한다.
+        // prerequisites가 false면 선행 타깃을 빌드하지 않는다(Docs/Design/BuildTargets 3.11절 — 주 빌드가 평탄한 목록으로 이미 빌드한
+        // 선행 타깃의 안쪽 빌드다).
         internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken, UnityProfileRun? profile,
-            SdkAssembly? sdkAssembly = null)
+            SdkAssembly? sdkAssembly = null, bool prerequisites = true)
         {
             if (args.Length == 0)
             {
@@ -235,7 +237,8 @@ namespace Rocks.Build.Cli
 
             var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
-            var rules = RuleLoader.Load(rulesPath, targetName, context);
+            var ruleSet = RuleLoader.LoadAll(rulesPath, context);
+            var rules = RuleLoader.Select(ruleSet, targetName, context.Platform);
             // 모르는 모듈 이름은 출력과 잠금을 만들기 전에 알린다(메타 생성까지 가지 않는다).
             if (profile is not null && !rules.Modules.Any(module => string.Equals(module.Name, profile.Module, StringComparison.OrdinalIgnoreCase)))
             {
@@ -254,11 +257,31 @@ namespace Rocks.Build.Cli
                 ? TestPrograms(rules, name => RuleLoader.Load(rulesPath, name, context).Target)
                 : [];
 
+            // 설치 SDK는 Game 매크로 조합만 싣는다(Docs/Design/BuildTargets 3.2절 BD5·BS2a).
+            if (args[0] == "sdk" && !rules.Target.Kind.Defines.SequenceEqual(new TargetKind(TargetType.Game).Defines))
+            {
+                throw new ArgumentException($"Target {targetName}: an installed SDK is exported from the Game macro combination only (this is a " +
+                    $"{rules.Target.Type} target or a Program with CompileWithEditor or WithEditorData).");
+            }
+
             if (args[0] == "sdk" && rules.Target.LogCompiledMinimum is not null)
             {
                 throw new ArgumentException($"Target {targetName}: LogCompiledMinimum cannot be overridden for an installed SDK export " +
                     "(game builds compile against the SDK with the configuration default).");
             }
+
+            // 선행 타깃(Docs/Design/BuildTargets 3.11절)은 build·test가 주 타깃의 메타 생성 전에 따로 빌드한다. 계획만·파일 하나 컴파일·묶음
+            // 실측은 주 타깃의 일부만 다루므로 빌드하지 않는다. 설치 SDK export는 선행 타깃을 싣지 않는다.
+            if (args[0] == "sdk" && rules.Target.PrerequisiteTargets.Count != 0)
+            {
+                throw new ArgumentException($"Target {targetName}: an installed SDK export does not build prerequisite targets " +
+                    "(Docs/Design/BuildTargets section 3.11).");
+            }
+
+            IReadOnlyList<TargetRules> prerequisiteTargets = prerequisites && args[0] is ("build" or "test") && !singleFile && profile is null &&
+                options.GetValueOrDefault(PlanOnlyOption, "off") != "on"
+                ? RuleLoader.PrerequisitesOf(rules.Target, ruleSet.Targets, toolchain.Platform, configuration)
+                : [];
 
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
@@ -293,6 +316,27 @@ namespace Rocks.Build.Cli
                 {
                     throw new ArgumentException($"Target {targetName}: an installed SDK does not carry engine plugins; the export target enables " +
                         string.Join(", ", pluginSet.EnabledPlugins.Select(plugin => plugin.Name)) + ".");
+                }
+
+                // 선행 타깃을 자기 규칙으로, 같은 옵션(구성·도구 체인·플랫폼·빌드 방식)으로 따로 빌드한다(3.11절). 목록은 이미 평탄하므로 안쪽
+                // 빌드는 선행 타깃을 다시 펼치지 않는다. 출력은 그 타깃의 기본 출력이고 --output이면 형제 디렉터리다.
+                foreach (TargetRules prerequisite in prerequisiteTargets)
+                {
+                    string[] prerequisiteArguments = ["build", .. options.Where(pair => pair.Key != "target" && pair.Key != "output")
+                        .SelectMany(pair => new[] { "--" + pair.Key, pair.Value }), "--target", prerequisite.Name,
+                        .. options.ContainsKey("output")
+                            ? new[] { "--output", SeparateTargetOutput(output, root, platformName, prerequisite.Name, configuration) }
+                            : []];
+                    Console.WriteLine($"Prerequisite target {prerequisite.Name}: building before {targetName}.");
+                    var prerequisiteStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                    int prerequisiteExit = await RunAsync(prerequisiteArguments, cancellationToken, null, null, prerequisites: false);
+                    evidence.RecordStep("prerequisite", prerequisiteArguments, prerequisiteExit,
+                        System.Diagnostics.Stopwatch.GetElapsedTime(prerequisiteStart));
+                    if (prerequisiteExit != 0)
+                    {
+                        await evidence.FinishAsync($"Prerequisite target {prerequisite.Name} failed to build.");
+                        return 1;
+                    }
                 }
 
                 string[] buildRoots = layout.BuildRoots;
@@ -435,6 +479,18 @@ namespace Rocks.Build.Cli
                         InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
                 }
 
+                // Android APK 프로그램(AndroidPackage)은 링크한 lib<이름>.so를 APK로 묶는다(Docs/Design/AndroidPlatform.ko.md 7절).
+                if (android)
+                {
+                    foreach (NativeModuleInput apkModule in modules.Where(module => module.AndroidPackage is not null &&
+                                 result.ModuleOutputs.ContainsKey(module.Name)))
+                    {
+                        string apk = await AndroidPackager.PackageAsync(apkModule, result.ModuleOutputs[apkModule.Name], output, androidAbi,
+                            androidApi, configuration, cancellationToken);
+                        Console.WriteLine($"Android package: {apk}");
+                    }
+                }
+
                 if (args[0] == "test")
                 {
                     if (rules.Target.TestExecutable is null)
@@ -500,6 +556,9 @@ namespace Rocks.Build.Cli
                     // 모듈 API 매크로(Docs/Design/BuildTargets 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
                     // 검사(native 컴파일 시험·생성 헤더 검증)는 Monolithic 값(빈 값)을 받는다. 그 검사는 타깃 폐포 밖 모듈의 헤더도 경로로 include하므로
                     // (예: Foundation의 meta 시험이 RenderBase 헤더를 쓴다) 저장소의 모든 모듈 규칙에서 만든다(BS8e).
+                    // 타깃 매크로 넷(BS2a)도 정의 헤더 없이 Core 헤더를 컴파일하는 native 검사가 받는다. meta 검사는 받지 않는다(메타 컴파일러가 두 조합을
+                    // 스스로 정한다 — BS2c).
+                    string[] targetMacros = [.. rules.Target.Kind.Defines.SelectMany(define => new[] { "--clang-arg", "-D" + define })];
                     string[] apiMacros = [.. rules.Modules.Where(module => !module.ThirdParty)
                         .SelectMany(module => new[] { "--clang-arg", "-D" + LinkTypes.ApiMacro(module.Name) + "=" })];
                     var checks = new List<string[]> {
@@ -507,7 +566,7 @@ namespace Rocks.Build.Cli
                         // native 검사의 컴파일 시험(AlgorithmsCompilerTests 등)도 Core 헤더를 include하므로 구성·대상 OS 매크로를 받는다.
                         (string[])["native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
-                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. apiMacros,
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. targetMacros, .. apiMacros,
                             "--json", Path.Combine(output, "tool-native-report.json")]
                     };
                     if (configuration == NativeConfiguration.Asan)
@@ -533,7 +592,7 @@ namespace Rocks.Build.Cli
                     // 시험 동반 타깃을 같은 구성·도구 체인·빌드 방식으로 빌드하고 그 실행 파일(동반 빌드 보고서의 모듈 출력)을 하니스에 넘긴다.
                     foreach ((string program, string programExecutable) in testPrograms)
                     {
-                        string programOutput = TestProgramOutput(options.ContainsKey("output") ? output : null, root, platformName, program, configuration);
+                        string programOutput = SeparateTargetOutput(options.ContainsKey("output") ? output : null, root, platformName, program, configuration);
                         string[] programArguments = ["build", .. options.Where(pair => pair.Key != "target" && pair.Key != "output")
                             .SelectMany(pair => new[] { "--" + pair.Key, pair.Value }), "--target", program, "--output", programOutput];
                         var programStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -710,9 +769,10 @@ namespace Rocks.Build.Cli
             return programs;
         }
 
-        // 시험 동반 타깃의 출력 디렉터리다(BS8d6). 기본은 그 타깃의 기본 출력이고, test에 --output을 주면 그 경로 뒤에 "-<타깃 소문자>"를 붙인
-        // 형제 디렉터리다(시험 타깃 출력과 겹치지 않고 같은 out 아래에 있다 — CI가 /p:NativeOutput으로 출력을 정한다).
-        internal static string TestProgramOutput(string? customOutput, string root, string platformName, string program, NativeConfiguration configuration) =>
+        // 따로 빌드하는 타깃(시험 동반 타깃 BS8d6·선행 타깃 3.11절)의 출력 디렉터리다. 기본은 그 타깃의 기본 출력이고, 주 명령에 --output을
+        // 주면 그 경로 뒤에 "-<타깃 소문자>"를 붙인 형제 디렉터리다(주 타깃 출력과 겹치지 않고 같은 out 아래에 있다 — CI가 /p:NativeOutput으로
+        // 출력을 정한다).
+        internal static string SeparateTargetOutput(string? customOutput, string root, string platformName, string program, NativeConfiguration configuration) =>
             customOutput is null ? EnginePlanning.DefaultOutput(root, platformName, program, configuration)
                 : customOutput + "-" + program.ToLowerInvariant();
 

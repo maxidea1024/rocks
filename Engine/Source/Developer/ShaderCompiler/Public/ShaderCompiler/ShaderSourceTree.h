@@ -6,6 +6,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
+#include <ShaderCore/ShaderVirtualPath.h>
 
 // 셰이더 소스 트리와 가상 경로다(Docs/Design/ShaderSystem 3절, 11.1절 SC2).
 //
@@ -18,7 +19,7 @@
 // 경로로 있어야 하고, 그 아래 Generated 디렉터리가 있으면 거부한다(<루트>/Generated/…는 메모리
 // 원문 — 생성 HLSL, SH3 — 전용 자리다).
 //
-// 가상 경로 규칙(UE CheckVirtualShaderFilePath 대응, ValidateShaderVirtualPath):
+// 가상 경로 규칙(UE CheckVirtualShaderFilePath 대응, ShaderCore CheckShaderVirtualPath):
 // - mount된 루트 아래 파일이다: /Engine/…, /Project/…, /Plugin/<이름>/….
 // - 성분은 비지 않은 ASCII [A-Za-z0-9_.-]이고 "."·".."이 아니다('\\'·빈 성분 거부).
 // - 확장자: <루트>/Shared/ 아래는 .h(C++·HLSL 공용 헤더)만, 그 밖은 .rsf(엔트리)·.rsh(include).
@@ -36,22 +37,14 @@
 // 바꾸지 않는다). 파일 시스템 객체는 동시 호출을 받아야 한다(PhysicalFileSystem은 받는다).
 namespace rocks::shader {
 
-// 가상 경로의 최대 byte 수(NUL 포함)다. 오류 위치 버퍼도 이 크기다.
-inline constexpr usize MaxShaderVirtualPathBytes = 256;
-// 플러그인 이름(/Plugin/<이름>)의 최대 byte 수(NUL 제외)다.
-inline constexpr usize MaxShaderPluginNameBytes = 64;
 // 원문 파일 하나의 최대 byte 수(16 MiB)다. 넘으면 읽기 전에 거부한다.
 inline constexpr usize MaxShaderSourceFileBytes = usize{16} * 1024 * 1024;
 // 오류 세부 문구의 최대 byte 수(NUL 포함)다. 넘는 부분은 잘린다.
 inline constexpr usize MaxShaderSourceMessageBytes = 256;
 
-// 가상 루트와 예약 디렉터리 이름이다.
-inline constexpr char EngineShaderVirtualRoot[] = "/Engine";
-inline constexpr char ProjectShaderVirtualRoot[] = "/Project";
-inline constexpr char PluginShaderVirtualPrefix[] = "/Plugin/";
-inline constexpr char GeneratedShaderDirectoryName[] = "Generated";
-inline constexpr char SharedShaderDirectoryName[] = "Shared";
-// 저장소 루트 기준 엔진 셰이더 디렉터리(/Engine의 실제 디렉터리)다.
+// 가상 경로 문법·상수(MaxShaderVirtualPathBytes·가상 루트 이름)는
+// ShaderCore(ShaderCore/ShaderVirtualPath.h)에 있다(셰이더 타입 경로 검사와 같은 규칙). 저장소 루트
+// 기준 엔진 셰이더 디렉터리(/Engine의 실제 디렉터리)다.
 inline constexpr char EngineShaderSourceDirectory[] = "Engine/Shaders";
 
 // 소스 트리·전처리기·정의 조립이 함께 쓰는 오류 코드다. 위치는 ShaderSourceStatus의 path·line에

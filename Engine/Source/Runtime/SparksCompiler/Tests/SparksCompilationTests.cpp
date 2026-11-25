@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 컴파일 단위 시험이다(Docs/Design/SparksLanguage.ko.md 3.4절 모듈 경로·import 해석·패키지 의존,
+// 컴파일 단위 시험이다(Docs/Design/SparksLanguage 3.4절 모듈 경로·import 해석·패키지 의존,
 // 10.2절 schema, S0301–S0305, S1106–S1112, S1120). 진단 경로는 "<패키지>/<모듈 경로>"와
 // "<패키지>/SparksPackage.json5"다.
 using namespace rocks;

@@ -19,7 +19,7 @@ internal static class TestProgramsTests
         var targets = new Dictionary<string, TargetRules>(StringComparer.Ordinal)
         {
             ["ProbeTarget"] = new Probe("ProbeTarget", ["Probe"]),
-            ["GameTarget"] = new Probe("GameTarget", ["Probe"]) { Kind = TargetType.Game },
+            ["GameTarget"] = new Probe("GameTarget", ["Probe"]) { Declared = TargetType.Game },
             ["WithTests"] = new Probe("WithTests", ["Probe"]) { Tests = "Probe" },
             ["WithPrograms"] = new Probe("WithPrograms", ["Probe"]) { Programs = ["ProbeTarget"] },
             ["LibraryOnly"] = new Probe("LibraryOnly", ["Library"]),
@@ -43,10 +43,10 @@ internal static class TestProgramsTests
         Expect("has no rules", () => BuildCommand.TestPrograms(Runner("Missing"), Load));
 
         string root = Path.GetFullPath("rocks-root");
-        Require(BuildCommand.TestProgramOutput(null, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
+        Require(BuildCommand.SeparateTargetOutput(null, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
             EnginePlanning.DefaultOutput(root, "windows", "LaunchProbeModular", NativeConfiguration.Debug), "default companion output");
         string custom = Path.Combine(root, "out", "ci-modular");
-        Require(BuildCommand.TestProgramOutput(custom, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
+        Require(BuildCommand.SeparateTargetOutput(custom, root, "windows", "LaunchProbeModular", NativeConfiguration.Debug) ==
             Path.Combine(root, "out", "ci-modular-launchprobemodular"), "companion output next to a custom test output");
         Console.WriteLine("PASS test programs: selection, duplicates, invalid companion targets, companion output");
     }
@@ -75,7 +75,7 @@ internal static class TestProgramsTests
 
     private sealed class Probe(string name, IReadOnlyList<string> modules) : TargetRules
     {
-        public TargetType Kind { get; init; } = TargetType.Program;
+        public TargetType Declared { get; init; } = TargetType.Program;
 
         public string? Tests { get; init; }
 
@@ -85,7 +85,7 @@ internal static class TestProgramsTests
 
         public override IReadOnlyList<string> Modules => modules;
 
-        public override TargetType Type => Kind;
+        public override TargetType Type => Declared;
 
         public override string? TestExecutable => Tests;
 

@@ -28,5 +28,5 @@
 - 플랫폼별 설정 파일(`Config/<Platform>/`): [설정 시스템](../ConfigSystem.ko.md)의 플랫폼 층이다.
 - 패키징·스테이징(실행 파일 옆 런타임 파일, UE `RuntimeDependencies`·`AllowedConfigFiles`·`DirectoriesToAlwaysStageAsNonUFS`, Android 패키징 설정): [에셋 시스템](../AssetSystem/18-OutOfScope.ko.md) 18절 "범위 밖과 후속"의 Android 패키징 후속과 전체 계획 2430행 부근의 패키징 계획에서 정한다.
 - Server 타깃의 기능 축소 범위: 네트워크 단계 스펙(3.7절).
-- 모듈 수명 객체·로더(UE `IModuleInterface`·`FModuleManager`·플러그인 로딩 단계): [모듈 로더](../ModuleLoader.ko.md)(BD30). 이 문서는 요구 계약만 정한다.
+- 모듈 수명 객체·로더(UE `IModuleInterface`·`FModuleManager`·플러그인 로딩 단계): [모듈 로더](../ModuleLoader/README.ko.md)(BD30). 이 문서는 요구 계약만 정한다.
 - 코드 다시 불러오기(UE Live Coding — Win64 비출시 구성, `TargetRules.cs:1587-1590`): `Modular` 링크가 생긴 뒤 별도 스펙으로 정한다.

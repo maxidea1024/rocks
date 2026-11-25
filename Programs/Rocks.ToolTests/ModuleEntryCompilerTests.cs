@@ -2,7 +2,7 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.ToolTests;
 
-// 모듈 진입점 매크로 ROCKS_IMPLEMENT_MODULE(Core/Module/ModuleEntry.h, Docs/Design/ModuleLoader.ko.md 3.1·3.2절)의 컴파일 시점
+// 모듈 진입점 매크로 ROCKS_IMPLEMENT_MODULE(Core/Module/ModuleEntry.h, Docs/Design/ModuleLoader 3.1·3.2절)의 컴파일 시점
 // 검사를 실제 컴파일러로 확인한다(구문 검사만 한다). 빌드가 넣는 ROCKS_MODULE_NAME과 같은 이름은 컴파일되고, 다른 이름·정의가 없는
 // 컴파일·잘못된 RegisterSettings 서명·ModuleImplementation이 아닌 클래스는 영어 static_assert 문구로 실패해야 한다. 매크로가 빠진
 // 모듈의 링크 오류는 Rocks.Build.Tests(ModuleTableTests)가 실제 링크로 검사한다.
@@ -145,7 +145,7 @@ internal static class ModuleEntryCompilerTests
                     "ROCKS_IMPLEMENT_MODULE class must derive from rocks::ModuleImplementation"),
             ];
 
-            // 자기 타입 표지(ROCKS_MODULE_TYPES=1, Docs/Design/ModuleLoader.ko.md 3.10절): 매크로가 스스로 선언한 RegisterModuleOwnTypes가
+            // 자기 타입 표지(ROCKS_MODULE_TYPES=1, Docs/Design/ModuleLoader 3.10절): 매크로가 스스로 선언한 RegisterModuleOwnTypes가
             // 메타 컴파일러의 모듈 생성 헤더 선언·모듈 생성 소스 정의와 같은 서명이고 진입 기술의 registerTypes 칸에 맞는다.
             const string ownTypesSignature =
                 "::rocks::Result<void> RegisterModuleOwnTypes(::rocks::ModuleRegistration& registration, const ::rocks::ModuleLease& module) noexcept";

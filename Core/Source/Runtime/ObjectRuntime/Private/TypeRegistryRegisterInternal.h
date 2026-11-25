@@ -39,6 +39,13 @@ bool IsAsciiIdentifier(Span<const char> text) noexcept;
 Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMembers,
                                usize& typedFields) noexcept;
 
+// EditorOnly 필드 ID 목록(TypeSchema::editorOnlyFieldIds — Docs/Design/BuildTargets 3.4절
+// BS2c)을 필드 목록과 대조한다: 목록 크기는 필드 상한 이하, 0·중복 ID 없음, 목록의 ID가 fields에
+// 있으면 그 필드는 EditorOnly다. 어기면 InvalidArgument다. fields의 EditorOnly 필드가 목록에 없어도
+// 된다(수동 등록 — 아는 필드라 로드가 건너뛸 대상이 아니다).
+Result<void> ValidateEditorOnlyFieldIds(Span<const FieldSchema> fields,
+                                        Span<const Guid> ids) noexcept;
+
 // 대상 형식(배열이면 원소)이 Enum·Struct인 필드만 값의 native 키를 싣는다.
 bool CarriesValueNativeType(const FieldSchema& field) noexcept;
 

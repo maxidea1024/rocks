@@ -3,7 +3,7 @@ using Rocks.Build.Descriptors;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 모듈 표 TU(Docs/Design/ModuleLoader.ko.md 3.2절, <see cref="ModuleTables"/>)를 실제 컴파일·링크로 검사한다. 픽스처는 가짜 Core(표지
+/// 모듈 표 TU(Docs/Design/ModuleLoader 3.2절, <see cref="ModuleTables"/>)를 실제 컴파일·링크로 검사한다. 픽스처는 가짜 Core(표지
 /// <see cref="NativeModuleInput.ProvidesModuleTable"/>, 최소 <c>Core/Module/ModuleEntry.h</c>)와 그 아래 모듈·header-only·서드파티·엔진·게임
 /// 실행 파일이다. 확인하는 것: 표 행(의존 순서, 면제 모듈 제외, 면제 모듈을 거치는 의존의 대체, 기술자 단계), 진입점 모듈만 받는
 /// <c>ROCKS_MODULE_NAME</c>, 증분 no-op, 매크로가 빠진 모듈의 링크 오류, 대소문자만 다른 모듈 이름·의존 철자 거부(MD17), 예약 매크로 거부,
@@ -146,7 +146,7 @@ internal static class ModuleTableTests
         {
             ProcessResult run = await ProcessRunner.RunAsync(new(cold.ModuleOutputs["Game"], [], fixture, request.Toolchain.Environment));
             // Engine의 의존 Headers(header-only)는 그 너머의 Core로 바뀐다. Game의 직접 의존 Core는 그대로 남는다. 실행 파일 행의 단계는
-            // 규칙 값(PostDefault)과 무관하게 None이다(단계 실행 대상이 아니다 — Docs/Design/ModuleLoader.ko.md 3.11절).
+            // 규칙 값(PostDefault)과 무관하게 None이다(단계 실행 대상이 아니다 — Docs/Design/ModuleLoader 3.11절).
             Check(run.ExitCode == 0 && run.StdOut.Replace("\r", "", StringComparison.Ordinal) ==
                 "Core||3\nEngine|Core|3\nGame|Engine,Core|6\nname=Game,Engine\n", "module table rows and ROCKS_MODULE_NAME:\n" + run.StdOut + run.StdErr);
         }

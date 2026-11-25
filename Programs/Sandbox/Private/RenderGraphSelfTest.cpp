@@ -1,4 +1,5 @@
 #include "RenderGraphSelfTest.h"
+#include "SandboxShaders.h"
 
 #include "TextureViewSelfTest.h"
 
@@ -52,24 +53,7 @@ constexpr uint32 ParallelWorkers = 3;
 
 // 그리기별 상수 색으로 화면을 채운다(병렬 기록 시험, 샘플 렌더러를 worker에서 함께 쓰지 않으려고
 // 따로 둔다).
-constexpr char TintHlsl[] = "cbuffer DrawConstants : register(b0) { float4 tint; };\n"
-                            "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"
-                            "    float2 uv = float2((id << 1) & 2, id & 2);\n"
-                            "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"
-                            "}\n"
-                            "float4 PSMain() : SV_Target { return tint; }\n";
-
-constexpr char TintVertexGlsl[] = "#version 320 es\nprecision highp float;\n"
-                                  "void main() {\n"
-                                  "    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
-                                  "    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);\n"
-                                  "}\n";
-
-constexpr char TintPixelGlsl[] = "#version 320 es\nprecision highp float;\n"
-                                 "uniform highp vec4 pu_h[1];\n"
-                                 "layout(location = 0) out vec4 out_var_SV_Target0;\n"
-                                 "void main() { out_var_SV_Target0 = pu_h[0]; }\n";
-
+// 셰이더는 FullScreen.rsf·Tint.rsf다.
 struct TintConstants {
     float values[4] = {};
 };
@@ -496,8 +480,8 @@ bool RunSampledUploadGraph(GraphBench& bench, RenderHandle output, const uint8* 
 // view 기준 mip(GraphPassContext::ViewBaseMip)을 상수로 받는다(OpenGL ES는 텍스처 전체가 묶인다).
 bool RunHzbGraph(GraphBench& bench, Allocator& allocator) noexcept {
     Device& device = *bench.device;
-    auto fill = device.CreateComputePipeline(hzb::FillPipelineDesc());
-    auto reduce = device.CreateComputePipeline(hzb::ReducePipelineDesc());
+    auto fill = hzb::CreateFillPipeline(device);
+    auto reduce = hzb::CreateReducePipeline(device);
     Check(fill && reduce, "HZB compute pipelines");
     bool ok = fill && reduce;
     RenderHandle exported;
@@ -1220,11 +1204,10 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
     // RG3 병렬 기록: 같은 그래프를 직렬·병렬로 실행한 출력 픽셀이 같다.
     if (ok) {
         PipelineDesc tintDesc;
-        tintDesc.vertex = {StringView(TintHlsl), StringView(TintVertexGlsl)};
-        tintDesc.pixel = {StringView(TintHlsl), StringView(TintPixelGlsl)};
         tintDesc.colorFormats[0] = TargetDesc().format;
         tintDesc.drawConstantBytes = sizeof(TintConstants);
-        auto tint = device.CreatePipeline(tintDesc);
+        auto tint = shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, shaders::TintPS,
+                                                    tintDesc);
         WorkerScheduler scheduler(allocator);
         WorkerSchedulerConfig config;
         config.workerCount = ParallelWorkers;
@@ -1339,8 +1322,8 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
     if (ok && device.Caps().features.computeShaders &&
         HasPixelFormatCaps(device.GetPixelFormatCaps(hzbDesc.format),
                            RequiredPixelFormatCaps(hzbDesc))) {
-        auto fill = device.CreateComputePipeline(hzb::FillPipelineDesc());
-        auto reduce = device.CreateComputePipeline(hzb::ReducePipelineDesc());
+        auto fill = hzb::CreateFillPipeline(device);
+        auto reduce = hzb::CreateReducePipeline(device);
         Array<uint8> graphicsProbe(allocator);
         Array<uint8> asyncProbe(allocator);
         Array<uint8> graphicsOutput(allocator);

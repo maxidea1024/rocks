@@ -1,0 +1,22 @@
+// slice attachment self-test 셰이더다(흰색 채우기, mip 읽기, MSAA 배열 층 읽기).
+float4 WhitePS() : SV_Target0 {
+    return float4(1.0, 1.0, 1.0, 1.0);
+}
+
+struct LevelConstants {
+    float4 level;
+};
+
+ROCKS_ROOT_CONSTANTS(LevelConstants, Level);
+
+Texture2D<float4> Source;
+
+float4 HalfPS() : SV_Target0 {
+    return Source.Load(int3(0, 0, (int)Level.level.x)) * 0.5;
+}
+
+Texture2DMSArray<float4> Layers;
+
+float4 MsaaLayerPS() : SV_Target0 {
+    return Layers.Load(int3(0, 0, 1), 0);
+}

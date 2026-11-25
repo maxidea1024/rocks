@@ -1,6 +1,6 @@
 #include "PreludeMembers.h"
 
-// 부록 B 시그니처(Docs/Design/SparksLanguage.ko.md 3.8절)의 표다. 순서는 문서 순서이며 심볼 번호를
+// 부록 B 시그니처(Docs/Design/SparksLanguage 3.8절)의 표다. 순서는 문서 순서이며 심볼 번호를
 // 정한다(결정적이다).
 
 namespace rocks::sparks::detail {

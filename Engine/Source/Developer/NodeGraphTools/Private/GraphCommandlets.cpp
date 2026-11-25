@@ -11,7 +11,7 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/File.h>
 
-// 노드 그래프 commandlet이다(Docs/Design/NodeGraph.ko.md 9.4절 "commandlet"). 명령마다 등록표 묶음
+// 노드 그래프 commandlet이다(Docs/Design/NodeGraph 9.4절 "commandlet"). 명령마다 등록표 묶음
 // (GraphSession)을 만들어 문서 텍스트 파일을 읽고 쓴다.
 namespace rocks::nodegraph {
 namespace {

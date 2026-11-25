@@ -1,0 +1,171 @@
+diff --git a/source/common/cstring.h b/source/common/cstring.h
+index 3a14e42..f30f8ba 100644
+--- a/source/common/cstring.h
++++ b/source/common/cstring.h
+@@ -33,16 +33,47 @@
+ #include <stdlib.h>
+ #include <ctype.h>
+ 
+-#define uprv_strcpy(dst, src) U_STANDARD_CPP_NAMESPACE  strcpy(dst, src)
++#define uprv_strcpy(dst, src) uprv_rocksStrcpy(dst, src)
+ #define uprv_strlen(str) U_STANDARD_CPP_NAMESPACE strlen(str)
+ #define uprv_strcmp(s1, s2) U_STANDARD_CPP_NAMESPACE strcmp(s1, s2)
+-#define uprv_strcat(dst, src) U_STANDARD_CPP_NAMESPACE strcat(dst, src)
++#define uprv_strcat(dst, src) uprv_rocksStrcat(dst, src)
+ #define uprv_strchr(s, c) U_STANDARD_CPP_NAMESPACE strchr(s, c)
+ #define uprv_strstr(s, c) U_STANDARD_CPP_NAMESPACE strstr(s, c)
+ #define uprv_strrchr(s, c) U_STANDARD_CPP_NAMESPACE strrchr(s, c)
+-#define uprv_strncpy(dst, src, size) U_STANDARD_CPP_NAMESPACE strncpy(dst, src, size)
++#define uprv_strncpy(dst, src, size) uprv_rocksStrncpy(dst, src, size)
+ #define uprv_strncmp(s1, s2, n) U_STANDARD_CPP_NAMESPACE strncmp(s1, s2, n)
+-#define uprv_strncat(dst, src, n) U_STANDARD_CPP_NAMESPACE strncat(dst, src, n)
++#define uprv_strncat(dst, src, n) uprv_rocksStrncat(dst, src, n)
++
++/* Rocks modification (Engine/Source/ThirdParty/Icu/ThirdParty.json "modifications"): the same results as strcpy, strcat,
++ * strncpy and strncat, written with memcpy and strlen because the Microsoft CRT marks those four deprecated and the engine
++ * warning rules reject the deprecation warning. */
++static inline char *uprv_rocksStrcpy(char *dst, const char *src) {
++    U_STANDARD_CPP_NAMESPACE memcpy(dst, src, U_STANDARD_CPP_NAMESPACE strlen(src) + 1);
++    return dst;
++}
++static inline char *uprv_rocksStrcat(char *dst, const char *src) {
++    uprv_rocksStrcpy(dst + U_STANDARD_CPP_NAMESPACE strlen(dst), src);
++    return dst;
++}
++static inline char *uprv_rocksStrncpy(char *dst, const char *src, size_t size) {
++    size_t i = 0;
++    for (; i < size && src[i] != 0; ++i) {
++        dst[i] = src[i];
++    }
++    for (; i < size; ++i) {
++        dst[i] = 0;
++    }
++    return dst;
++}
++static inline char *uprv_rocksStrncat(char *dst, const char *src, size_t n) {
++    char *end = dst + U_STANDARD_CPP_NAMESPACE strlen(dst);
++    size_t i = 0;
++    for (; i < n && src[i] != 0; ++i) {
++        end[i] = src[i];
++    }
++    end[i] = 0;
++    return dst;
++}
+ 
+ /**
+  * Is c an ASCII-repertoire letter a-z or A-Z?
+diff --git a/source/common/ubrk.cpp b/source/common/ubrk.cpp
+index c2f95c5..237de89 100644
+--- a/source/common/ubrk.cpp
++++ b/source/common/ubrk.cpp
+@@ -176,7 +176,20 @@ ubrk_safeClone(
+ 
+ U_CAPI UBreakIterator * U_EXPORT2
+ ubrk_clone(const UBreakIterator *bi, UErrorCode *status) {
+-    return ubrk_safeClone(bi, nullptr, nullptr, status);
++    // Rocks modification: the body of ubrk_safeClone with no buffer, instead of calling the deprecated function
++    // (-Wdeprecated-declarations under the engine warning rules). Same result and status.
++    if (status == nullptr || U_FAILURE(*status)) {
++        return nullptr;
++    }
++    if (bi == nullptr) {
++        *status = U_ILLEGAL_ARGUMENT_ERROR;
++        return nullptr;
++    }
++    BreakIterator *newBI = ((BreakIterator *)bi)->clone();
++    if (newBI == nullptr) {
++        *status = U_MEMORY_ALLOCATION_ERROR;
++    }
++    return (UBreakIterator *)newBI;
+ }
+ 
+ 
+diff --git a/source/common/putil.cpp b/source/common/putil.cpp
+index a1fb0c9..a191860 100644
+--- a/source/common/putil.cpp
++++ b/source/common/putil.cpp
+@@ -642,7 +642,14 @@ U_CAPI int32_t U_EXPORT2
+ uprv_timezone()
+ {
+ #ifdef U_TIMEZONE
++#if U_PLATFORM_USES_ONLY_WIN32_API
++    /* Rocks modification: _get_timezone reads the same CRT value as _timezone, which the Microsoft CRT marks deprecated. */
++    long rocksTimezone = 0;
++    _get_timezone(&rocksTimezone);
++    return (int32_t)rocksTimezone;
++#else
+     return U_TIMEZONE;
++#endif
+ #else
+     time_t t, t1, t2;
+     struct tm tmrec;
+@@ -1081,8 +1088,8 @@ typedef int(system_property_get)(const char*, char*);
+ 
+ static char gAndroidTimeZone[PROP_VALUE_MAX] = { '\0' };
+ 
+-static void u_property_read(void* cookie, const char* name, const char* value,
+-                            uint32_t serial) {
++static void u_property_read(void* cookie, const char* /*name*/, const char* value,
++                            uint32_t /*serial*/) {
+     uprv_strcpy((char* )cookie, value);
+ }
+ #endif
+@@ -1248,7 +1255,13 @@ uprv_tzname(int n)
+ #if U_PLATFORM_USES_ONLY_WIN32_API
+     /* The return value is free'd in timezone.cpp on Windows because
+      * the other code path returns a pointer to a heap location. */
+-    return uprv_strdup(U_TZNAME[n]);
++    /* Rocks modification: _get_tzname copies the same CRT name as _tzname, which the Microsoft CRT marks deprecated. */
++    char rocksTzname[64];
++    size_t rocksTznameLength = 0;
++    if (_get_tzname(&rocksTznameLength, rocksTzname, sizeof(rocksTzname), n) != 0) {
++        rocksTzname[0] = 0;
++    }
++    return uprv_strdup(rocksTzname);
+ #else
+     /*
+     U_TZNAME is usually a non-unique abbreviation, which isn't normally usable.
+@@ -1564,7 +1577,10 @@ static void U_CALLCONV TimeZoneDataDirInitFn(UErrorCode &status) {
+ # endif
+ 
+ #else
+-    dir = getenv("ICU_TIMEZONE_FILES_DIR");
++    /* Rocks modification: the ICU_TIMEZONE_FILES_DIR environment variable is not read (the engine loads ICU data only from
++     * memory, UCONFIG_NO_FILE_IO, and does not change behavior by environment; getenv is also deprecated in the Microsoft
++     * CRT). The same empty directory as an unset variable follows below. */
++    dir = nullptr;
+ #endif // U_PLATFORM_HAS_WINUWP_API
+ 
+ #if defined(U_TIMEZONE_FILES_DIR)
+diff --git a/source/common/umapfile.cpp b/source/common/umapfile.cpp
+index c99b9ef..34d2716 100644
+--- a/source/common/umapfile.cpp
++++ b/source/common/umapfile.cpp
+@@ -94,6 +94,7 @@ typedef HANDLE MemoryMap;
+ #if MAP_IMPLEMENTATION==MAP_NONE
+     U_CFUNC UBool
+     uprv_mapFile(UDataMemory *pData, const char *path, UErrorCode *status) {
++        (void)path; /* Rocks modification: unused without file access (-Wunused-parameter). */
+         if (U_FAILURE(*status)) {
+             return false;
+         }
+@@ -102,6 +103,7 @@ typedef HANDLE MemoryMap;
+     }
+ 
+     U_CFUNC void uprv_unmapFile(UDataMemory *pData) {
++        (void)pData; /* Rocks modification: unused without file access (-Wunused-parameter). */
+         /* nothing to do */
+     }
+ #elif MAP_IMPLEMENTATION==MAP_WIN32
+diff --git a/source/common/uinit.cpp b/source/common/uinit.cpp
+index dc3867b..fa8eaa8 100644
+--- a/source/common/uinit.cpp
++++ b/source/common/uinit.cpp
+@@ -36,6 +36,7 @@ static UBool U_CALLCONV uinit_cleanup() {
+ static void U_CALLCONV
+ initData(UErrorCode &status)
+ {
++    (void)status; /* Rocks modification: unused without plugins and conversion (-Wunused-parameter). */
+ #if UCONFIG_ENABLE_PLUGINS
+     /* initialize plugins */
+     uplug_init(&status);

@@ -66,6 +66,11 @@ public:
 
     ComponentState GetState() const noexcept;
 
+    // World에 등록되어 있는지다(OnRegister 성공 뒤 ~ 해제 전).
+    bool IsRegistered() const noexcept {
+        return registered_;
+    }
+
     bool IsEnabled() const noexcept {
         return enabled_;
     }
@@ -104,7 +109,42 @@ public:
     virtual void OnDisable() noexcept {
     }
 
-    virtual void OnDestroy() noexcept {
+    // 게임플레이 시작에 필요한 의존이 준비됐는지다(Actor::IsReadyToStart와 같은 뜻 — 17.4절 ERD18,
+    // CR4·SE-W2). 소유 Actor는 자신과 켜진 모든 Component가 준비된 프레임에 시작한다. 이미
+    // Playing인 Actor에 나중에 추가한 Component는 자기 준비만 기다린다. 기본은 참이다.
+    virtual bool IsReadyToStart() const noexcept {
+        return true;
+    }
+
+    // reason은 정리 이유다(17.2절 — 소유 Actor와 함께 정리되면 Actor의 이유).
+    virtual void OnDestroy(EndPlayReason) noexcept {
+    }
+
+    // --- 시스템 상태(Docs/Design/EngineRuntime 23.2절 CR1) ---
+
+    // 그 종류의 시스템 상태가 지금 있는지다(등록 직후 만들고 해제 직전 지운다).
+    bool HasSystemState(SystemStateKind kind) const noexcept {
+        const uint32 index = static_cast<uint32>(kind);
+        return index < SystemStateKindCount && (systemStates_ & (1u << index)) != 0;
+    }
+
+    // 그 종류의 시스템 상태를 다음 갱신 지점(World Tick의 PreRender 단계 끝, 파괴 정리 전)에
+    // 지우고 다시 만들게 표시한다(UE MarkRenderStateDirty). 등록 전·파괴 대기·그 종류가 없으면
+    // 아무것도 하지 않고 성공한다. 같은 프레임의 중복 표시는 한 번이다. 오류: 범위 밖 종류
+    // InvalidArgument, 할당 실패.
+    Result<void> MarkSystemStateDirty(SystemStateKind kind) noexcept;
+
+    // --- 타입 규칙·EditorOnly(23.2절 CR5·CR6) ---
+
+    // 이 타입의 규칙이다(인스턴스 virtual — World가 만든 직후 등록 전에 묻는다). 기본은 규칙 없음.
+    virtual ComponentTypeRules TypeRules() const noexcept {
+        return {};
+    }
+
+    // 편집 전용 Component인지다(UE bIsEditorOnly). 참이면 Game·Tryout World의 AddComponent가
+    // Unsupported로 거부한다(편집·미리보기 World는 만든다).
+    virtual bool IsEditorOnly() const noexcept {
+        return false;
     }
 
 protected:
@@ -115,6 +155,21 @@ protected:
 
     // OnRegister가 성공한 Component의 정리 hook이다. 다른 객체 접근은 World::With로 한다.
     virtual void OnUnregister() noexcept {
+    }
+
+    // 시스템 상태 hook이다(23.2절). WantsSystemState가 참인 종류만 등록 직후(OnRegister 뒤)
+    // Render → Physics → Audio 순으로 CreateSystemState를 부른다. 하나라도 실패하면 만든 것을
+    // 역순으로 지우고 OnUnregister를 부른 뒤 등록이 실패한다. 해제(OnUnregister 전)에는 있는 것을
+    // 역순으로 DestroySystemState한다. 꺼짐(OnDisable)은 지우지 않는다.
+    virtual bool WantsSystemState(SystemStateKind) const noexcept {
+        return false;
+    }
+
+    virtual Result<void> CreateSystemState(SystemStateKind) noexcept {
+        return Result<void>::Success();
+    }
+
+    virtual void DestroySystemState(SystemStateKind) noexcept {
     }
 
     TickSettings& PrimaryTick() noexcept {
@@ -137,6 +192,11 @@ private:
     ROCKS_NATIVE() bool awake_ = false;
     ROCKS_NATIVE() bool enabledApplied_ = false;
     ROCKS_NATIVE() bool startQueued_ = false;
+    // 있는 시스템 상태와 다시 만들 표시다(종류마다 비트).
+    ROCKS_NATIVE() uint8 systemStates_ = 0;
+    ROCKS_NATIVE() uint8 dirtySystemStates_ = 0;
+    // 단독 파괴(DestroyComponent)의 정리 이유다(먼저 정한 것을 유지한다).
+    ROCKS_NATIVE() EndPlayReason endReason_ = EndPlayReason::Destroyed;
     ROCKS_NATIVE() TickHandle ticks_[detail::TickHookCount];
 };
 

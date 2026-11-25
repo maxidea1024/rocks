@@ -6,16 +6,6 @@ namespace rocks::graphics::d3d12 {
 
 namespace {
 
-// compute root signature 매개변수 번호다: 그리기 상수(b0), 읽기 버퍼 view slot table(t1–t4), 쓰기
-// 버퍼 view slot table(u0–u3).
-constexpr UINT ComputeRootConstants = 0;
-constexpr UINT ComputeRootReads = 1;
-constexpr UINT ComputeRootWrites = ComputeRootReads + MaxDrawBufferViews;
-// SetTexture의 텍스처(t0)·샘플러(s0) table이다(텍스처 GX2 A부).
-constexpr UINT ComputeRootTexture = ComputeRootWrites + MaxDrawBufferViews;
-constexpr UINT ComputeRootSampler = ComputeRootTexture + 1;
-constexpr UINT ComputeRootCount = ComputeRootSampler + 1;
-
 // 읽기 전용 상태 묶음이다(같은 기록 안에서 서로 합칠 수 있다).
 constexpr D3D12_RESOURCE_STATES ReadOnlyStates =
     D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER |
@@ -29,60 +19,6 @@ bool IsReadOnlyState(D3D12_RESOURCE_STATES state) noexcept {
 } // namespace
 
 Result<void> D3D12Device::CreateComputeObjects() noexcept {
-    D3D12_DESCRIPTOR_RANGE readRanges[MaxDrawBufferViews] = {};
-    D3D12_DESCRIPTOR_RANGE writeRanges[MaxDrawBufferViews] = {};
-    D3D12_ROOT_PARAMETER parameters[ComputeRootCount] = {};
-    D3D12_DESCRIPTOR_RANGE textureRange = {};
-    textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    textureRange.NumDescriptors = 1;
-    D3D12_DESCRIPTOR_RANGE samplerRange = {};
-    samplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-    samplerRange.NumDescriptors = 1;
-    parameters[ComputeRootTexture].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[ComputeRootTexture].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[ComputeRootTexture].DescriptorTable.pDescriptorRanges = &textureRange;
-    parameters[ComputeRootTexture].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    parameters[ComputeRootSampler].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    parameters[ComputeRootSampler].DescriptorTable.NumDescriptorRanges = 1;
-    parameters[ComputeRootSampler].DescriptorTable.pDescriptorRanges = &samplerRange;
-    parameters[ComputeRootSampler].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    parameters[ComputeRootConstants].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[ComputeRootConstants].Constants.ShaderRegister = 0;
-    parameters[ComputeRootConstants].Constants.Num32BitValues = ConstantCount;
-    parameters[ComputeRootConstants].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    // slot마다 table 하나라 view의 descriptor 칸을 그대로 가리킨다(그래픽 root signature와 같은
-    // 방식, GX6 전 고정 배치).
-    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
-        readRanges[slot].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        readRanges[slot].NumDescriptors = 1;
-        readRanges[slot].BaseShaderRegister = slot + 1;
-        writeRanges[slot].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-        writeRanges[slot].NumDescriptors = 1;
-        writeRanges[slot].BaseShaderRegister = slot;
-        D3D12_ROOT_PARAMETER& read = parameters[ComputeRootReads + slot];
-        read.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        read.DescriptorTable.NumDescriptorRanges = 1;
-        read.DescriptorTable.pDescriptorRanges = &readRanges[slot];
-        read.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        D3D12_ROOT_PARAMETER& write = parameters[ComputeRootWrites + slot];
-        write.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        write.DescriptorTable.NumDescriptorRanges = 1;
-        write.DescriptorTable.pDescriptorRanges = &writeRanges[slot];
-        write.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    }
-
-    D3D12_ROOT_SIGNATURE_DESC desc = {};
-    desc.NumParameters = ComputeRootCount;
-    desc.pParameters = parameters;
-    ComRef<ID3DBlob> blob;
-    ComRef<ID3DBlob> errors;
-    if (FAILED(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, blob.Out(),
-                                           errors.Out())) ||
-        FAILED(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
-                                            IID_PPV_ARGS(computeRootSignature_.Out())))) {
-        return Fail("compute root signature creation failed");
-    }
-
     // 간접 명령 signature다. 인자 하나만 담으므로 root signature가 필요 없다.
     const auto makeSignature = [this](D3D12_INDIRECT_ARGUMENT_TYPE type, UINT stride,
                                       ComRef<ID3D12CommandSignature>& out) noexcept {
@@ -143,30 +79,29 @@ Result<void> D3D12Device::CreateComputeObjects() noexcept {
 Result<PipelineHandle>
 D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
-        return FailCode<PipelineHandle>(
-            ErrorCode::InvalidArgument,
-            "compute pipeline needs HLSL source and valid drawConstantBytes");
+    if (!ValidateComputePipelineDesc(desc)) {
+        return FailCode<PipelineHandle>(ErrorCode::InvalidArgument,
+                                        "compute pipeline needs valid drawConstantBytes");
     }
 
-    ComRef<ID3DBlob> code;
-    auto compiled = Compile(desc.shader.hlsl, "CSMain", "cs_5_1", code);
-    if (!compiled) {
-        return Result<PipelineHandle>::Failure(compiled.Error());
+    char error[PipelineSlotErrorBytes] = {};
+    const DeviceShaderCode* shader = nullptr;
+    PipelineSlots slots;
+    if (!FindComputeShader(shaders_, desc, shader, error) ||
+        !ResolvePipelineSlots(Span<const DeviceShaderCode* const>(&shader, 1), desc.bindings,
+                              desc.drawConstantBytes, slots, error)) {
+        return FailCode<PipelineHandle>(ErrorCode::InvalidArgument, error);
     }
 
-    DrawBufferSlots readSlots;
-    DrawBufferSlots writeSlots;
-    uint32 writeTextures = 0;
-    auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
-                                     readSlots, &writeSlots, &writeTextures);
-    if (!reflected) {
-        return Result<PipelineHandle>::Failure(reflected.Error());
+    RootLayout rootLayout;
+    auto root = RootSignatureFor(slots, true, desc.drawConstantBytes, rootLayout);
+    if (!root) {
+        return Result<PipelineHandle>::Failure(root.Error());
     }
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC state = {};
-    state.pRootSignature = computeRootSignature_.Get();
-    state.CS = {code->GetBufferPointer(), code->GetBufferSize()};
+    state.pRootSignature = root.Value().Get();
+    state.CS = {shader->Code().Data(), shader->Code().Size()};
     PipelineRecord record;
     const HRESULT created =
         device_->CreateComputePipelineState(&state, IID_PPV_ARGS(record.state.Out()));
@@ -174,11 +109,14 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
         return FailWith<PipelineHandle>("ID3D12Device::CreateComputePipelineState", created);
     }
 
-    record.bufferSlots = readSlots;
-    record.writeSlots = writeSlots;
+    record.rootSignature = Move(root.Value());
+    record.root = rootLayout;
+    record.slots = slots;
+    record.bufferSlots = slots.bufferSlots;
+    record.writeSlots = slots.writeSlots;
     record.compute = true;
     record.drawConstantBytes = desc.drawConstantBytes;
-    record.writeTextures = writeTextures;
+    record.writeTextures = slots.writeTextures;
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<PipelineHandle>::Failure(reserved.Error());
@@ -493,7 +431,8 @@ bool D3D12Device::PrepareDraw(bool indexed) noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
     if (!recording_ || pipeline == nullptr || pipeline->compute ||
         (target_.colorCount == 0 && target_.depth.IsNull()) || !StreamsBound() ||
-        !BufferViewsBound() || (target_.depthReadOnly && pipeline->writesDepthStencil)) {
+        !BufferViewsBound() || !ConstantsBound(*pipeline) ||
+        (target_.depthReadOnly && pipeline->writesDepthStencil)) {
         return false;
     }
 
@@ -525,12 +464,13 @@ bool D3D12Device::PrepareDraw(bool indexed) noexcept {
         }
     }
 
-    return true;
+    return ApplyRootBindings(*pipeline);
 }
 
 bool D3D12Device::PrepareDispatch() noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
-    if (!recording_ || pipeline == nullptr || !pipeline->compute || !BufferViewsBound()) {
+    if (!recording_ || pipeline == nullptr || !pipeline->compute || !BufferViewsBound() ||
+        !ConstantsBound(*pipeline)) {
         return false;
     }
 
@@ -568,48 +508,19 @@ bool D3D12Device::PrepareDispatch() noexcept {
     }
 
     // 읽는 view는 셰이더 읽기, 쓰는 view는 UAV 상태로 맞추고 compute root 인자를 건다.
-    list_->SetComputeRootSignature(computeRootSignature_.Get());
-    const TextureRecord* texture = textures_.Find(boundTexture_);
-    if (texture == nullptr) {
-        texture = textures_.Find(white_.slot);
-    }
-
-    if (texture != nullptr) {
-        list_->SetComputeRootDescriptorTable(ComputeRootTexture, srvs_.Gpu(texture->srv));
-        list_->SetComputeRootDescriptorTable(ComputeRootSampler, samplers_.Gpu(texture->sampler));
-    }
-    if (pipeline->drawConstantBytes != 0) {
-        list_->SetComputeRoot32BitConstants(
-            ComputeRootConstants, static_cast<UINT>(pipeline->drawConstantBytes / sizeof(uint32)),
-            constants_, 0);
-    }
-
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* read = bufferViews_.Find(boundViews_[slot].slot);
         if (read != nullptr && (pipeline->bufferSlots.usedMask & (1u << slot)) != 0) {
             RequireBufferState(read->resource.Get(), ShaderReadStates);
         }
 
-        list_->SetComputeRootDescriptorTable(
-            ComputeRootReads + slot,
-            srvs_.Gpu(read != nullptr ? read->descriptor : nullBufferSrv_));
         const BufferViewRecord* write = bufferViews_.Find(boundWriteViews_[slot].slot);
         if (write != nullptr && (pipeline->writeSlots.usedMask & (1u << slot)) != 0) {
             RequireBufferState(write->resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
-
-        const TextureRecord* writeTexture = (pipeline->writeTextures & (1u << slot)) != 0
-                                                ? textures_.Find(boundWriteTextures_[slot].slot)
-                                                : nullptr;
-        uint32 descriptor = write != nullptr ? write->descriptor : nullBufferUav_;
-        if (writeTexture != nullptr) {
-            descriptor = writeTexture->srv;
-        }
-
-        list_->SetComputeRootDescriptorTable(ComputeRootWrites + slot, srvs_.Gpu(descriptor));
     }
 
-    return true;
+    return ApplyRootBindings(*pipeline);
 }
 
 ID3D12Resource* D3D12Device::IndirectArguments(BufferHandle arguments, uint64 offset,
@@ -821,9 +732,19 @@ Result<void> D3D12Device::ClearWritableBufferView(BufferViewHandle view, uint32 
                               "only raw and R32Uint or R32Sint typed views can be cleared");
     }
 
+    // GPU handle은 shader-visible ring의 사본이다(srvs_는 CPU 전용 heap, RenderBase 9.11절 5항).
+    D3D12_CPU_DESCRIPTOR_HANDLE online = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
+    if (!AllocateOnline(1, online, gpu)) {
+        return FailCode<void>(ErrorCode::CapacityExceeded,
+                              "the shader-visible descriptor ring of this recording is full");
+    }
+
+    device_->CopyDescriptorsSimple(1, online, srvs_.Cpu(record->descriptor),
+                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     RequireBufferState(record->resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     const UINT values[4] = {value, value, value, value};
-    list_->ClearUnorderedAccessViewUint(srvs_.Gpu(record->descriptor),
+    list_->ClearUnorderedAccessViewUint(gpu,
                                         cpuUavs_.Cpu(static_cast<uint32>(record->cpuDescriptor)),
                                         record->resource.Get(), values, 0, nullptr);
     return Result<void>::Success();

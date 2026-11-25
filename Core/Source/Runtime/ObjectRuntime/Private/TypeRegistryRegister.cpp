@@ -22,6 +22,7 @@ using detail::CarriesValueNativeType;
 using detail::ContainsInheritedFields;
 using detail::CopyBytes;
 using detail::RecordTag;
+using detail::ValidateEditorOnlyFieldIds;
 using detail::ValidateFieldList;
 
 // 클래스·struct가 받는 TypeFlags 비트다. 그 밖의 비트(클래스의 Atomic, struct의 Abstract·
@@ -105,6 +106,36 @@ bool IsAsciiIdentifier(Span<const char> text) noexcept {
     }
 
     return true;
+}
+
+Result<void> ValidateEditorOnlyFieldIds(Span<const FieldSchema> fields,
+                                        Span<const Guid> ids) noexcept {
+    // 필드 목록 상한(ValidateFieldList)과 같다.
+    constexpr usize MaxEditorOnlyFieldIds = 4096;
+    if (ids.Size() > MaxEditorOnlyFieldIds) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize index = 0; index < ids.Size(); ++index) {
+        if (ids[index] == Guid{}) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (usize previous = 0; previous < index; ++previous) {
+            if (ids[previous] == ids[index]) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
+        for (usize field = 0; field < fields.Size(); ++field) {
+            if (fields[field].id == ids[index] &&
+                !HasFlag(fields[field].flags, FieldFlags::EditorOnly)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMembers,
@@ -288,6 +319,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (auto listed = ValidateEditorOnlyFieldIds(schema.fields, schema.editorOnlyFieldIds);
+        !listed) {
+        return Result<TypeRegistrationToken>::Failure(listed.Error());
+    }
+
     // 완전한 필드 배치를 선언한 타입은 그래프에 저장할 수 있어야 하므로 Transient가 아닌 모든
     // 필드에 codec(encode·decode)이 있어야 한다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
     if (ops.completeFieldLayout) {
@@ -360,7 +396,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     // 필드 ID 정렬 색인과 스키마 위치 → 함수표 위치 색인(경로 접근의 FieldIndex·FieldOps).
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
     const usize opsIndexOffset = orderOffset + schema.fields.Size() * sizeof(uint32);
-    usize bytes = opsIndexOffset + schema.fields.Size() * sizeof(uint32);
+    // EditorOnly 필드 ID 목록(Guid 정렬)을 문자열보다 먼저 둔다.
+    const usize idsOffset =
+        (opsIndexOffset + schema.fields.Size() * sizeof(uint32) + alignof(Guid) - 1) &
+        ~(alignof(Guid) - 1);
+    usize bytes = idsOffset + schema.editorOnlyFieldIds.Size() * sizeof(Guid);
     if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
@@ -498,7 +538,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     auto* fieldOrder = reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + orderOffset);
     auto* opsIndex =
         reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + opsIndexOffset);
-    uint8* cursor = reinterpret_cast<uint8*>(opsIndex + schema.fields.Size());
+    uint8* cursor = static_cast<uint8*>(memory.Value()) + idsOffset;
     {
         // mutating_이 등록·해제를 막으므로 위에서 확인한 enum·struct 레코드가 그대로 있다.
         platform::LockGuard lock(gate_);
@@ -517,6 +557,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.baseType = schema.baseType;
     record->schema.flags = schema.flags;
     record->schema.withinType = schema.withinType;
+    record->schema.editorOnlyFieldIds = CopyBytes(schema.editorOnlyFieldIds, cursor);
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};

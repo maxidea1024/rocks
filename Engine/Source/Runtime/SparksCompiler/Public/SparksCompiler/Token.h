@@ -4,7 +4,7 @@
 #include <Core/Text/StringView.h>
 #include <SparksCompiler/Source.h>
 
-// Sparks 토큰이다(Docs/Design/SparksLanguage.ko.md 8.1절 "어휘 분석"·"토큰", 3.6절 어휘).
+// Sparks 토큰이다(Docs/Design/SparksLanguage 8.1절 "어휘 분석"·"토큰", 3.6절 어휘).
 //
 // 토큰은 종류와 원문 위치만 가진다. 값(정수·실수, escape를 푼 문자열)은 구문 분석이 원문에서 다시
 // 읽는다. 문자열은 여러 토큰으로 나뉜다:

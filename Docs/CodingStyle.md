@@ -33,6 +33,13 @@
 
 공개 헤더(`Public/`)에는 쓰기 가능한 정적 저장소(const가 아닌 `inline` 변수, inline·템플릿 함수 안의 const가 아닌 `static` 지역 변수, `static inline` 데이터 멤버)와 `thread_local`(선언 포함)을 두지 않는다. 공유 라이브러리(`Modular`)마다 따로 생겨 상태가 갈라진다. 저장소는 소유 모듈의 `.cpp`에 두고 접근 함수로 노출한다. `constexpr`·const 상수는 괜찮다. 공개 헤더 검사의 Clang 진단 `-Wunique-object-duplication`과 정책 `public-header-static-storage`가 막는다([빌드 타깃](Design/BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BD29).
 
+## 파일 배치
+
+- **클래스 하나에 파일 하나**: 공개 헤더 하나에 클래스(리플렉션 클래스·Actor·컴포넌트) 하나를 두고, 구현 `.cpp`도 클래스마다 나눈다. 여러 클래스가 같이 쓰는 enum·설정 struct·자유 함수는 클래스 헤더에 끼우지 않고 별도 헤더(`LightUnits.h`·`PrimitiveTypes.h`처럼 `<범주>Types.h`나 내용 이름)로 둔다.
+- **범주 폴더**: 기능 범주마다 폴더를 둔다(`Public/World/Lights/`, `Private/Lights/`). `Private/`도 `Public/`과 같은 폴더 이름을 쓴다. 여러 범주가 같이 쓰는 private 도움 함수는 `Private/` 바로 아래 이름 있는 namespace 헤더(`ComponentValueChecks.h` — `rocks::component_checks`)로 두고, 범주 안에서만 쓰면 그 폴더에 둔다. 같은 모듈 private 헤더는 상대 경로 `"../X.h"`로 include한다.
+- 유니티 빌드가 묶음 안 cpp 사이의 익명 namespace 이름을 겹치게 하므로, 여러 cpp가 쓰는 도움 함수는 사본을 두지 않고 위 공용 헤더로 모은다.
+- 이동·분할은 동작을 바꾸지 않는 별도 커밋이다. 각 cpp는 PCH·유니티 없이 단독으로 컴파일되어야 한다(필요한 include만 직접 — 묶음이 다른 파일의 include로 가려 주는 것에 기대지 않는다).
+
 ## 형식 한계와 "없음" 표지
 
 형식의 한계를 `0xffffffffu`·`UINT32_MAX`·`SIZE_MAX`·`INT_MAX`·`FLT_MAX`·`static_cast<usize>(-1)`·`~0u`·`2147483647` 같은 날 숫자나 C 매크로로 쓰지 않는다. 값이 무엇을 뜻하는지(상한인지, 비어 있다는 표지인지)를 이름으로 드러낸다.

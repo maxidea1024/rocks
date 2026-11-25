@@ -6,7 +6,7 @@
 #include <NodeGraphTools/GraphPaste.h>
 #include <Serialization/Record.h>
 
-// 복사·붙여넣기다(Docs/Design/NodeGraph.ko.md 9.4절 "복사"·"붙여넣기"). 붙여넣기는 노드 판정 →
+// 복사·붙여넣기다(Docs/Design/NodeGraph 9.4절 "복사"·"붙여넣기"). 붙여넣기는 노드 판정 →
 // InsertNode(새 id·위치 이동) → 조각 간선 InsertEdge(원래 순번 순) → 바깥 간선 Connect(같은
 // 문서이고 schema가 허락하며 판정이 Make일 때만 — 실행 때도 Make만 받는다) → AddComment 순서로 명령
 // 목록 하나를 만든다. 노드·간선 판정은 InsertNode·InsertEdge 규칙을 미리 본다 — 걸리는 것은 진단과

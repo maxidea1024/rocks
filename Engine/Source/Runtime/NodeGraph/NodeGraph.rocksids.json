@@ -87,6 +87,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::nodegraph::Graph::inputs",
+      "id": "7e04cdc37a78419eb2dbfb914ef1780e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::nodegraph::Graph::nodes",
       "id": "c328cf5405784d37b412df964450f08c",
       "aliases": [],
@@ -94,8 +101,50 @@
     },
     {
       "kind": "field",
+      "name": "rocks::nodegraph::Graph::outputs",
+      "id": "8c67301b04544860a8d29eb5ea1ede2f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Graph::ownerNode",
+      "id": "e394d6e8c3d54d6285e1e1dafdbe8056",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::nodegraph::Graph::role",
       "id": "f1f06a454abe426e869cfc761909d58a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphBoundaryPin::key",
+      "id": "ea3df2ad7b004ad7af4c0654c5b8ef0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphBoundaryPin::kind",
+      "id": "09befdb611c4478dadc97df347c7299f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphBoundaryPin::maxEdges",
+      "id": "ef1ce2730ffb4d04b9cdf060f4d582b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphBoundaryPin::type",
+      "id": "a263b13fc9ee41f2808939f65a6bec38",
       "aliases": [],
       "retired": false
     },
@@ -374,6 +423,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::nodegraph::GraphBoundaryPin",
+      "id": "471f6b435cf64a9389dffb90afd22539",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::nodegraph::GraphDocument",
       "id": "2c5294187c9c47059eac37be8cdc1173",
       "aliases": [],
@@ -432,6 +488,13 @@
       "kind": "type",
       "name": "rocks::nodegraph::PinDirection",
       "id": "3238f1478a174bd28f98ddd7603519c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::PinKind",
+      "id": "b070e688bfa44fe8a70b8a468a428457",
       "aliases": [],
       "retired": false
     },

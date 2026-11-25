@@ -6,6 +6,7 @@
 #include <Core/Text/StringView.h>
 #include <Graphics/DeviceCaps.h>
 #include <Graphics/PipelineState.h>
+#include <Graphics/ShaderCode.h>
 #include <GraphicsTypes/ChannelSwizzle.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
@@ -28,7 +29,26 @@ enum class Backend : uint8 {
 };
 
 // "D3D12" 같은 이름이다. 범위 밖이면 "Unknown"이다.
-const char* BackendName(Backend backend) noexcept;
+ROCKS_GRAPHICS_API const char* BackendName(Backend backend) noexcept;
+
+// backend 장치가 받는 셰이더 코드 종류다(D3D12 Dxil, D3D11 Dxbc, OpenGL Essl, Vulkan Spirv, Metal
+// Metallib).
+constexpr ShaderCodeKind ShaderCodeKindOf(Backend backend) noexcept {
+    switch (backend) {
+    case Backend::D3D12:
+        return ShaderCodeKind::Dxil;
+    case Backend::D3D11:
+        return ShaderCodeKind::Dxbc;
+    case Backend::OpenGL:
+        return ShaderCodeKind::Essl;
+    case Backend::Vulkan:
+        return ShaderCodeKind::Spirv;
+    case Backend::Metal:
+        return ShaderCodeKind::Metallib;
+    }
+
+    return ShaderCodeKind::Metallib;
+}
 
 // 자원 handle이다. 발급한 장치 안에서만 의미가 있으며 파괴 후에는 stale이 된다(slot+generation).
 struct BufferHandle {
@@ -71,8 +91,6 @@ struct SwapChainHandle {
     bool operator==(const SwapChainHandle&) const noexcept = default;
 };
 
-class ShaderSourceCompiler;
-
 // 장치 생성 설정이다.
 struct DeviceDesc {
     // API 검증 계층(D3D12·D3D11 debug layer, Vulkan VK_LAYER_KHRONOS_validation, GL debug
@@ -93,11 +111,6 @@ struct DeviceDesc {
     uint64 uploadRingBytes = 0;
     // 스트리밍 staging pool 예산이다(0이면 DefaultStagingBudgetBytes).
     uint64 stagingBudgetBytes = 0;
-    // 실행 중 컴파일러가 없는 backend(Vulkan)가 PipelineDesc의 HLSL 원문을 backend 코드로 바꿀 때
-    // 부르는 개발용 컴파일 훅이다(Graphics/ShaderSourceCompiler.h). 쿠킹된 셰이더(ShaderSystem SH2)
-    // 전까지만 쓰며 Release 실행 파일에는 넣지 않는다. null이면 그런 backend의 파이프라인 생성은
-    // Unsupported다. D3D12·D3D11·OpenGL은 무시한다. 장치보다 오래 살아야 한다.
-    ShaderSourceCompiler* shaderCompiler = nullptr;
 };
 
 // 장치 생성 실패의 원인 기록이다(Docs/Design/LoggingSystem.ko.md 13절). 호출자 스택에 두고 생성
@@ -286,15 +299,16 @@ ROCKS_GRAPHICS_API Result<void> CheckBufferViewLimits(const DeviceLimits& limits
                                                       const BufferViewDesc& view,
                                                       const ResolvedBufferView& resolved) noexcept;
 
-// 그리기에 묶는 버퍼 view slot 수다(GX6 파라미터 바인딩 전의 개발 경로 고정 배치, PipelineDesc
-// 주석). slot n은 HLSL register t(n + 1), GLSL ES typed는 텍스처 유닛 PS n + 1·VS n + 17
-// (samplerBuffer), 구조화·raw는 storage block binding n이다. 단계당 SRV 합계는 텍스처 t0와 합쳐
-// 5다(형식 정의 최소 보장 16 안).
+// 그리기에 묶는 버퍼 view slot 수다(GX6 파라미터 바인딩 전의 개발 경로 고정 slot, PipelineDesc
+// 주석). slot과 셰이더 자원은 이름 표(PipelineBindingNames)로 잇고 backend 위치는 셰이더 layout이
+// 정한다.
 inline constexpr uint32 MaxDrawBufferViews = 4;
+static_assert(MaxDrawBufferViews == MaxPipelineNamedSlots,
+              "named pipeline slots must cover every draw buffer view slot");
 
-// 파이프라인이 읽는 버퍼 view slot 배치다. backend가 셰이더 리플렉션(D3D reflection, SPIR-V
-// 리플렉션, GL program introspection)으로 채우고, 그리기 때 묶인 view가 배치를 채우는지 본다
-// (DrawBufferSlotsSatisfied).
+// 파이프라인이 읽는 버퍼 view slot 배치다. 셰이더 바인딩 layout(모양·원소 타입·구조화 stride)으로
+// 채우고(Graphics/ShaderBindings.h ResolvePipelineSlots), 그리기 때 묶인 view가 배치를 채우는지
+// 본다 (DrawBufferSlotsSatisfied).
 struct DrawBufferSlots {
     // slot n을 셰이더가 읽으면 비트 n이다.
     uint32 usedMask = 0;
@@ -402,7 +416,7 @@ constexpr bool IsValidTextureUsage(TextureUsage usage) noexcept {
 // 위, 행 사이 padding이 없다. 다중 plane 형식은 이미지 안에서 plane 0 다음 plane 1이다. 전체 크기는
 // TextureDataBytes, mip 하나는 TextureMipBytes다. UpdateTexture·UploadTextureFromStaging·
 // ReadTexture도 mip 하나 전체(모든 slice)를 같은 배치로 다룬다. 장치가 대응하지 않는 형식·차원은
-// 생성이 Unsupported다(PixelFormat.ko.md 8.3절).
+// 생성이 Unsupported다(Docs/Design/PixelFormat 8.3절).
 //
 // 사용 예(6면 cube, mip 하나, 면마다 64×64 RGBA8):
 //   TextureDesc desc;
@@ -505,7 +519,7 @@ enum class TextureViewDimension : uint8 {
 
 // 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane·성분
 // 대응·mip·slice 범위·차원을 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
-// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부·나머지 B부).
+// (Docs/Design/PixelFormat 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부·나머지 B부).
 // - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
 //   깊이·스텐실과 비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
 // - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),
@@ -642,14 +656,6 @@ struct VertexBufferBinding {
     uint64 offset = 0;
 };
 
-// backend별 셰이더 원문이다. 장치는 자기 backend 원문만 쓴다. 진입점 이름은 HLSL에서 VSMain·PSMain,
-// GLSL에서 main이다. OpenGL backend의 glsl은 GLSL ES 3.20(`#version 320 es`) 원문이다(OpenGL ES
-// 3.2 장치, OpenGLGraphics/OpenGLDevice.h). SH2에서 쿠킹된 코드로 바뀐다.
-struct ShaderSource {
-    StringView hlsl;
-    StringView glsl;
-};
-
 // 그리기별 상수(RenderBase 결정 R7, ShaderSystem 7.2절 2항 루트 상수)의 크기 규칙이다. 파이프라인이
 // drawConstantBytes로 선언하며 0(없음)부터 MaxDrawConstantBytes까지 DrawConstantAlignment 배수다.
 // 최대는 Rocks 루트 상수 계약(32 DWORD = Vulkan push constant 최소 보장)과 같다.
@@ -688,34 +694,28 @@ Span<const uint8> DrawConstantBytes(const T& constants) noexcept {
     return Span<const uint8>(reinterpret_cast<const uint8*>(&constants), sizeof(T));
 }
 
-// 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다(파라미터 바인딩 GX6 전의
-// 개발 경로):
-// - 그리기별 상수 drawConstantBytes byte(HLSL b0의 cbuffer DrawConstants / GLSL ES 루트 상수
-//   에뮬레이션 배열 uniform highp vec4 vu_h[N]·pu_h[N], N = byte / 16). 셰이더 단계마다 읽는
-//   블록 크기(HLSL cbuffer 크기, GLSL ES 배열의 active 크기 × 16)가 drawConstantBytes 이하여야
-//   하고(작아도 된다), 넘으면 InvalidArgument다. 값은 CommandContext::SetDrawConstants로 올린다.
-// - PS 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 셰이더는 묶을 텍스처의
-//   차원에 맞는 타입(Texture2D·Texture2DArray·Texture3D·TextureCube·TextureCubeArray / sampler2D·
-//   sampler2DArray·sampler3D·samplerCube·samplerCubeArray)을 선언한다. 샘플러는 묶은 텍스처의
-//   TextureDesc::sampler를 따르며, 비교 샘플러(SamplerDesc::comparison)면 HLSL은
-//   SamplerComparisonState s0, GLSL ES는 sampler*Shadow ps0으로 선언한다.
-// - VS·PS가 읽는 버퍼 view slot 0–3(SetBufferView). HLSL은 register t1–t4에 Buffer<T>·
-//   StructuredBuffer<T>·ByteAddressBuffer를 선언한다. GLSL ES는 typed를 samplerBuffer·
-//   isamplerBuffer·usamplerBuffer로 PS는 layout(binding = 1 + slot), VS는 layout(binding = 17 +
-//   slot)(VS 텍스처 유닛은 16부터, ShaderSystem 7.2절 4항)에, 구조화·raw를 layout(std430,
-//   binding = slot) readonly buffer로 선언하고 raw block 이름은 type_ByteAddressBuffer로
-//   시작한다(SPIRV-Cross 출력 이름). 생성은 셰이더 리플렉션으로 slot 배치(DrawBufferSlots)를
-//   얻는다.
-// 배치 밖 자원(다른 register·상수 버퍼, VS·PS의 UAV)을 선언한 셰이더는 InvalidArgument다(UAV는
-// compute만, ShaderSystem 7.2절 4항). OpenGL ES의 VS·PS storage block은 장치 한도
-// (DeviceLimits::vertex·pixel.storageBuffers, ES 3.2 최소 보장 0)를 넘으면 링크가 실패한다
-// (DependencyFailed). 깊이는 쓰지 않는다.
+// 그리기 파이프라인 설정이다(ShaderSystem 16.1절 SSD18 — UE PSO 초기화자처럼 장치 셰이더 handle을
+// 받는다). 셰이더는 Device::CreateShader로 만든 VS·PS이고 단계 사이 연결(ShaderCore
+// CheckShaderStageLink)이 맞아야 한다. 자원은 셰이더 layout의 backend 위치에 묶이고, 그리기 기록의
+// 고정 slot(파라미터 묶음 GX6 전의 개발 경로)과는 bindings 이름 표로 잇는다(ShaderCode.h
+// PipelineBindingNames):
+// - 그리기별 상수 drawConstantBytes byte(셰이더의 ROCKS_ROOT_CONSTANTS, ShaderSystem 7.2절 2항).
+//   단계마다 읽는 루트 상수 크기가 drawConstantBytes 이하여야 하고(작아도 된다), 넘으면
+//   InvalidArgument다. 값은 CommandContext::SetDrawConstants로 올린다.
+// - PS 텍스처 하나(bindings.texture, 짝 샘플러 <이름>Sampler). 셰이더는 묶을 텍스처의 차원에 맞는
+//   타입(Texture2D·Texture2DArray·Texture3D·TextureCube·TextureCubeArray)을 선언한다. 샘플러는 묶은
+//   텍스처의 TextureDesc::sampler를 따르며 비교 샘플러(SamplerDesc::comparison)면
+//   SamplerComparisonState로 선언한다.
+// - VS·PS가 읽는 버퍼 view slot 0–3(bindings.bufferViews, SetBufferView): Buffer<T>·
+//   StructuredBuffer<T>·ByteAddressBuffer. 같은 이름을 두 단계가 읽으면 같은 view를 본다.
+// 이름 표에 없는 자원·상수 버퍼(루트 상수 밖)·VS·PS의 UAV·공유 샘플러를 선언한 셰이더는
+// InvalidArgument다(LastError에 단계·자원 이름). OpenGL ES의 VS·PS storage block은 형식 상한(0)으로
+// 쿠킹 때 거부된다.
 //
 // 셰이더 입력 대조(RenderBase 10.4절): 정점 셰이더가 읽는 모든 location이 layout에 있어야 하고
-// 형식의 셰이더 타입 계열(VertexFormatShaderType)이 셰이더 입력 타입과 같아야 한다. 셰이더가 읽지
-// 않는 속성은 허용한다. 입력은 D3D12가 컴파일한 VS 입력 signature(시맨틱 ATTRIBUTEn), OpenGL이 링크
-// 뒤 active attribute에서 얻는다. 위반은 InvalidArgument이며 LastError에 location·형식·셰이더
-// 타입을 적는다. 정점 입력 시맨틱은 ATTRIBUTEn만 쓴다(SV_ 시스템 값 제외).
+// 형식의 셰이더 타입 계열(VertexFormatShaderType)이 셰이더 입력 원소 타입(바인딩 layout v3의
+// attribute 타입)과 같아야 한다. 셰이더가 읽지 않는 속성은 허용한다. 위반은 InvalidArgument이며
+// LastError에 location·형식·셰이더 타입을 적는다.
 //
 // 출력·고정 기능 상태(GX3, Renderer RQ5): 색 attachment 형식 colorFormats[0 .. colorTargetCount),
 // 깊이 attachment 형식 depthFormat(없으면 Unknown), 타깃별 블렌드·쓰기 mask, alpha-to-coverage,
@@ -734,8 +734,11 @@ Span<const uint8> DrawConstantBytes(const T& constants) noexcept {
 //   desc.depthStencil.depthWrite = true;   // depthCompare 기본 GreaterEqual
 //   desc.drawConstantBytes = 64;           // 셰이더가 float4x4 하나를 읽는다
 struct PipelineDesc {
-    ShaderSource vertex;
-    ShaderSource pixel;
+    // 장치 셰이더(CreateShader)다. 단계는 Vertex·Pixel이어야 한다.
+    ShaderHandle vertexShader;
+    ShaderHandle pixelShader;
+    // 고정 slot과 셰이더 자원 이름의 표다(ShaderCode.h PipelineBindingNames).
+    PipelineBindingNames bindings;
     VertexLayout layout;
     PrimitiveTopology topology = PrimitiveTopology::TriangleList;
     uint32 colorTargetCount = 1;
@@ -772,22 +775,20 @@ ROCKS_GRAPHICS_API Result<void> CheckPipelineFeatures(const DeviceCaps& caps,
 // mask). 읽기 전용 깊이 attachment(DepthAttachment::readOnly)에서는 그런 그리기를 무시한다.
 ROCKS_GRAPHICS_API bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
 
-// compute 파이프라인 설정이다. 진입점은 HLSL CSMain, GLSL ES는 main(#version 320 es compute 셰이더,
-// layout(local_size_*))이다. 자원 배치(GX6 전 개발 경로 고정 배치):
-// - 그리기별 상수 drawConstantBytes byte(HLSL b0 / GLSL ES uniform highp vec4 cu_h[N], N = byte /
-//   16). 규칙은 PipelineDesc와 같다.
-// - 읽기 버퍼 view slot 0–3(SetBufferView): HLSL t1–t4, GLSL ES typed는 텍스처 유닛 1 + slot
-//   (samplerBuffer), 구조화·raw는 storage block binding slot
-// - 텍스처 하나(SetTexture): HLSL t0·s0, GLSL ES 텍스처 유닛 0(layout(binding = 0) sampler*)
-// - 쓰기 텍스처 slot 0–3(SetWritableTexture, 쓰기 버퍼 view와 같은 번호 공간): HLSL u0–u3의
-//   RWTexture2D·RWTexture2DArray·RWTexture3D, GLSL ES image unit slot의 image2D·image2DArray·
-//   image3D(형식 한정자 필요)
-// - 쓰기 버퍼 view slot 0–3(SetWritableBufferView): HLSL u0–u3(RWBuffer<T>·RWStructuredBuffer<T>·
-//   RWByteAddressBuffer), GLSL ES typed는 image unit slot(layout(binding = slot, <형식>)
-//   imageBuffer), 구조화·raw는 storage block binding 4 + slot
-// 배치 밖 자원은 InvalidArgument다.
+// compute 파이프라인 설정이다. 셰이더는 단계 Compute의 장치 셰이더(CreateShader)다. 자원은
+// PipelineDesc와 같이 bindings 이름 표로 고정 slot에 잇는다:
+// - 그리기별 상수 drawConstantBytes byte(규칙은 PipelineDesc와 같다).
+// - 읽기 버퍼 view slot 0–3(bindings.bufferViews, SetBufferView)과 텍스처 하나(bindings.texture,
+//   SetTexture).
+// - 쓰기 slot 0–3(SetWritableBufferView·SetWritableTexture, 같은 번호 공간):
+//   bindings.writableBuffers(RWBuffer<T>·RWStructuredBuffer<T>·RWByteAddressBuffer)와
+//   bindings.writableTextures(RWTexture2D·RWTexture2DArray·RWTexture3D, 형식은 ROCKS_IMAGE_FORMAT).
+// 이름 표에 없는 자원은 InvalidArgument다.
 struct ComputePipelineDesc {
-    ShaderSource shader;
+    // 장치 셰이더(CreateShader, 단계 Compute)다.
+    ShaderHandle computeShader;
+    // 고정 slot과 셰이더 자원 이름의 표다(ShaderCode.h PipelineBindingNames).
+    PipelineBindingNames bindings;
     // 그리기별 상수 byte 수다(0 = 없음, IsValidDrawConstantBytes).
     uint32 drawConstantBytes = 0;
 };

@@ -11,7 +11,7 @@
 
 #include <stdio.h>
 
-// NodeGraphTools 시험 공용 도우미다(Docs/Design/NodeGraph.ko.md 9.4절, 13절 GT5·GT10): NodeGraph
+// NodeGraphTools 시험 공용 도우미다(Docs/Design/NodeGraph 9.4절, 13절 GT5·GT10): NodeGraph
 // 시험 도메인(TestEnv) 위에 리플렉션 Registry(같은 NamePool)와 텍스트 문맥을 둔다. 속성 struct는
 // ReflectionTestFixtures의 InstancedPoint·InstancedScale을 쓴다.
 namespace rocks::nodegraph_tools_test {

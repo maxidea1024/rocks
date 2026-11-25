@@ -96,7 +96,8 @@ constexpr ColorWriteMask operator&(ColorWriteMask left, ColorWriteMask right) no
     return static_cast<ColorWriteMask>(static_cast<uint8>(left) & static_cast<uint8>(right));
 }
 
-// 색 attachment 하나의 블렌드·쓰기 mask다. enable이 거짓이면 소스 색을 그대로 쓴다.
+// 색 attachment 하나의 블렌드·쓰기 mask다. enable이 거짓이면 소스 색을 그대로 쓴다. 자주 쓰는
+// 조합(불투명·알파·가산·premultiplied)은 RenderBase 프리셋(RenderBase/PipelineStatePresets.h)이다.
 struct ColorTargetBlend {
     bool enable = false;
     BlendFactor sourceColor = BlendFactor::One;
@@ -107,17 +108,6 @@ struct ColorTargetBlend {
     BlendOperation alphaOperation = BlendOperation::Add;
     ColorWriteMask writeMask = ColorWriteMask::All;
 };
-
-// 소스 알파로 섞는 일반 알파 블렌드다(premultiplied 아님, 알파는 1 − 소스 알파로 섞는다).
-constexpr ColorTargetBlend AlphaBlend() noexcept {
-    ColorTargetBlend blend;
-    blend.enable = true;
-    blend.sourceColor = BlendFactor::SourceAlpha;
-    blend.destinationColor = BlendFactor::InverseSourceAlpha;
-    blend.sourceAlpha = BlendFactor::One;
-    blend.destinationAlpha = BlendFactor::InverseSourceAlpha;
-    return blend;
-}
 
 // 삼각형 컬링이다(UE ERasterizerCullMode 대응). 앞면은 표시된 화면에서 반시계로 감긴 삼각형이다
 // (UE와 같다, ShaderSystem 7.2절 8항). 창·RenderTarget 어느 대상에 그려도 같은 삼각형이 같은 면으로

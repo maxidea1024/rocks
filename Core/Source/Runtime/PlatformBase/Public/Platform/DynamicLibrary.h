@@ -13,7 +13,7 @@ struct DynamicSymbol {
 
 class DynamicLibraryLease;
 
-// Open·OpenSystem 실패의 OS 로더 문구다(POSIX dlerror, Docs/Design/ModuleLoader.ko.md MD14).
+// Open·OpenSystem 실패의 OS 로더 문구다(POSIX dlerror, Docs/Design/ModuleLoader MD14).
 // dlopen은 숫자 오류 코드를 주지 않으므로(FileStatus.nativeError는 0) 원인(의존 라이브러리 이름,
 // 다른 아키텍처, 서명 등)은 이 문구로만 알 수 있다. Windows는 nativeError가 원래 OS
 // 코드(ERROR_MOD_NOT_FOUND 등)이고 문구는 비어 있다.

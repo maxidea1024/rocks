@@ -20,7 +20,7 @@ struct ModuleLoaderTestAccess;
 
 } // namespace detail
 
-// 모듈 하나의 상태다(Docs/Design/ModuleLoader.ko.md 3.4절). BinaryLoaded(Modular)는 ML4에 더한다.
+// 모듈 하나의 상태다(Docs/Design/ModuleLoader 3.4절). BinaryLoaded(Modular)는 ML4에 더한다.
 enum class ModuleState : uint8 {
     // 시작한 적이 없다.
     NotLoaded,
@@ -37,7 +37,7 @@ enum class ModuleState : uint8 {
 };
 
 // 동시에 붙일 수 있는 타입 등록기의 최대 수다(동시에 사는 Engine마다 하나 —
-// Docs/Design/ModuleLoader.ko.md 3.11절).
+// Docs/Design/ModuleLoader 3.11절).
 inline constexpr usize MaxTypeRegistrars = 4;
 
 // 모듈의 종료 시점을 정하는 묶음이다(3.3절). 안쪽 묶음일수록 값이 크다.
@@ -138,7 +138,7 @@ public:
     static Result<UniquePtr<ModuleLoader>> TryCreate(Allocator& allocator,
                                                      ModuleTable table) noexcept;
 
-    // Modular 실행 파일의 로더를 모듈 manifest로 만든다(Docs/Design/ModuleLoader.ko.md 3.5·3.13·
+    // Modular 실행 파일의 로더를 모듈 manifest로 만든다(Docs/Design/ModuleLoader 3.5·3.13·
     // 3.14절). manifestPath(절대 경로, UTF-8)의 manifest를 엄격하게 해석하고, 모든 행(호스트 모듈
     // 포함)의 공유 라이브러리를 의존 순서로 적재해 export 진입점 RocksModuleEntry로 진입 기술을
     // 얻은 뒤(Prepare) TryCreate와 같은 로더를 만든다. 로더가 manifest 표와 라이브러리를 소유하며,

@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ClassRefFixture.generated.h>
 #include <ReflectionTestFixtures/MapFixture.generated.h>
 #include <ReflectionTestFixtures/OptionalFixture.generated.h>
@@ -6,6 +7,8 @@
 #include <ReflectionTestFixtures/WeakObjectRefFixture.generated.h>
 #include <Core/Text/NamePool.h>
 #include <ObjectSerialization/StructRecord.h>
+#include <Serialization/Archive.h>
+#include <Serialization/Record.h>
 #include "InstancedStructTestSupport.h"
 #include "NameGraphTestSupport.h"
 
@@ -97,6 +100,28 @@ struct Env {
     ObjectRegistry objects;
     bool ready = false;
 };
+
+// 에디터 데이터 없는 빌드(Docs/Design/BuildTargets 3.4절 BS2c)의 struct Record 디코드도 컴파일에서
+// 빠진 EditorOnly 멤버(StructMiddle::note)의 저장 값을 진단 없이 건너뛴다(모르는 필드 정책
+// Reject여도).
+TEST(StructRecord_EditorOnlyMembersWithoutEditorData) {
+    const TypeSchema& schema = GeneratedType<StructMiddle>::Schema();
+    REQUIRE(schema.editorOnlyFieldIds.Size() == 1);
+#if !ROCKS_WITH_EDITOR_DATA
+    Env env;
+    REQUIRE(env.ready);
+    ArchiveWriter payload(env.allocator);
+    REQUIRE(payload.WriteU32(7));
+    RecordBuilder record(env.allocator, TypeIdOf<StructMiddle>(), schema.version);
+    REQUIRE(record.AddField(schema.editorOnlyFieldIds[0], WireType::U32, payload.View()));
+    auto bytes = record.Build();
+    REQUIRE(bytes);
+    StructRecordOptions options;
+    options.decodePolicy.unknownField = UnknownFieldPolicy::Reject;
+    StructMiddle value(env.allocator);
+    REQUIRE(env.Load(bytes.Value().View(), value, options));
+#endif
+}
 
 TEST(StructRecord_RoundTripMemberKinds) {
     Env env;
@@ -556,13 +581,18 @@ TEST(StructRecord_NestedStructEnumAndTypeMigration) {
     middle.leaf.group = TextureGroup::EightBitData;
     REQUIRE(middle.leaf.label.TryAssign("leaf"));
     middle.offset = -40;
+#if ROCKS_WITH_EDITOR_DATA
     middle.note = 7;
+#endif
     auto bytes = env.Save(middle);
     REQUIRE(bytes);
     StructMiddle back(values);
     REQUIRE(env.Load(bytes.Value().View(), back));
     CHECK(back.leaf.count == 3 && back.leaf.group == TextureGroup::EightBitData &&
-          back.leaf.label.View() == "leaf" && back.offset == -40 && back.note == 7);
+          back.leaf.label.View() == "leaf" && back.offset == -40);
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(back.note == 7);
+#endif
     auto again = env.Save(back);
     REQUIRE(again);
     CHECK(test::graph::SameBytes(bytes.Value().View(), again.Value().View()));

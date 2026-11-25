@@ -278,7 +278,7 @@ LOD 화면 크기(UE `FPerPlatformFloat ScreenSize`, StaticMeshSourceData.h:177-
 
 ### 4.8 구현에서 정한 점(MA3a)
 
-MA3a 구현(`Mesh` 모듈의 `Mesh/SimpleCollision.h`) 중 4.6절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. UE 근거는 E/Classes/PhysicsEngine/ShapeElem.h·SphereElem.h·BoxElem.h·SphylElem.h·TaperedCapsuleElem.h·ConvexElem.h·AggregateGeom.h, E/Private/Collision/KAggregateGeom.cpp(생성자 기본값), E/Classes/Engine/EngineTypes.h(`ECollisionEnabled`)다.
+MA3a 구현(`Mesh` 모듈의 `Mesh/SimpleCollision.h`) 중 4.6절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. UE 근거는 E/Classes/PhysicsEngine/ShapeElem.h·SphereElem.h·BoxElem.h·SphylElem.h·TaperedCapsuleElem.h·ConvexElem.h·AggregateGeom.h, E/Private/Collision/KAggregateGeom.cpp(생성자 기본값), E/Classes/Engine/EngineTypes.h(`ECollisionEnabled`)다. `CollisionEnabled` enum은 2026-11-25에 `Collision` 모듈로 옮겼다(같은 타입 ID — 컴포넌트 body와 같은 타입을 쓰려고, World가 에셋 모듈에 의존하지 않으므로 둘 아래 모듈에 둔다 — [충돌 데이터](CollisionData.ko.md) CDD1). `Mesh`는 `Collision`에 의존한다.
 
 1. **타입.** 형상 struct 여섯(`CollisionSphere`·`CollisionBox`·`CollisionCapsule`·`CollisionTaperedCapsule`·`CollisionCylinder`·`CollisionConvex`)은 공통 필드(`name`·`contributeToMass` 기본 참·`collisionEnabled` 기본 `QueryAndPhysics`·`restOffset` 기본 0 — UE `FKShapeElem`)를 각자 갖는다. 공통 기반 struct로 상속하지 않는 까닭은 UE도 형상마다 독립 USTRUCT 필드를 저장하고, 필드 순서가 저장 의미에 들어가지 않아 기반을 둘 이점이 없기 때문이다(버린 대안: `CollisionShapeBase` 상속 — 필드 경로가 형상마다 같아지는 것 말고는 얻는 것이 없다). 크기 기본값은 UE 생성자와 같다(구 반경 1, 상자 1·1·1, 캡슐 반경 1·길이 1, 테이퍼드 캡슐 1·1·1). 실린더 기본값은 캡슐과 같게 반경 1·길이 1로 둔다. `CollisionEnabled`는 UE 값 여섯(`NoCollision`·`QueryOnly`·`PhysicsOnly`·`QueryAndPhysics`·`ProbeOnly`·`QueryAndProbe`)을 같은 번호로 둔다. `CollisionComplexity`는 4.6절 넷이고, `StaticMesh` 필드 연결은 MA2b다.
 2. **크기 규칙(UE 의미, 물리 사상 가능성 기준).** 모든 실수는 유한이어야 한다. 구 반경 > 0, 상자 `size` 세 성분 > 0, 캡슐 반경 > 0·길이 ≥ 0(0이면 구와 같다 — UE가 받는 값), 테이퍼드 캡슐 두 반경 > 0·길이 ≥ 0, 실린더 반경 > 0·길이 > 0(길이 0은 원판이라 축을 정할 수 없다 — [Cylinder 형상 설계](CylinderShape.ko.md) 3.3절), `restOffset`은 유한(부호 제한 없음 — UE도 음수를 받는다). 회전(`Rotator<double>`, 도)은 유한이면 범위를 두지 않는다(UE 편집 범위 ±360은 UI 제한이다). UE는 이 값을 검사하지 않고 물리 생성 때 잘라 쓰지만, Rocks는 데이터 단계에서 거부해 물리 어댑터가 받는 값을 좁힌다.
@@ -959,7 +959,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 
 | ID | 대상 | 요구 | 상태 |
 |---|---|---|---|
-| MR1 | [렌더 기반](RenderBase.ko.md) 10절 | 정적 메시 정점 입력 타입: stream 집합(위치 Float3, tangent 기저 Byte4Snorm×2 또는 Short4Snorm×2, UV 쌍 Half4/Float4 × 1–4, 색 프로필별 선택). 고정밀 형식은 퍼뮤테이션 축이 아니라 stream 형식 차이로 처리할지 정한다 | 반영(RenderBase 개정 29, 10.4절 끝) |
+| MR1 | [렌더 기반](RenderBase/10-VertexInput.ko.md) 10절 | 정적 메시 정점 입력 타입: stream 집합(위치 Float3, tangent 기저 Byte4Snorm×2 또는 Short4Snorm×2, UV 쌍 Half4/Float4 × 1–4, 색 프로필별 선택). 고정밀 형식은 퍼뮤테이션 축이 아니라 stream 형식 차이로 처리할지 정한다 | 반영(RenderBase 개정 29, 10.4절 끝) |
 | MR2 | 렌더 기반 10절, [렌더러](Renderer.ko.md) RS12 | skinned 정점 입력: 영향 4/8개, 번호 8/16비트, 가중치 8/16비트, 섹션 본 palette 크기 한도 | 반영·결정(RenderBase 개정 30 결정 R18·R19: 섹션 분할 없음·LOD 통합 bone map·256 기준 번호 폭·typed buffer 본 행렬, 고정밀은 stream 형식 차이) |
 | MR3 | [텍스처 스트리밍](TextureStreaming.ko.md) | 메시 LOD 스트리밍(StreamableRenderAsset 공유): LOD별 bulk 묶음, 상주 LOD 규칙 | 반영·결정(TextureStreaming 개정 6 결정 T9·4.9절·TS5) |
 | MR4 | [머티리얼 시스템](MaterialSystem.ko.md) 8.4절 | 메시 정점 입력 타입 이름(정적·skinned)을 사용 대상 집합에 등록. morph 사용 여부 표시 | 반영(MaterialSystem 개정 6, 8.4절) |

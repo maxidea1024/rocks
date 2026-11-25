@@ -1,12 +1,13 @@
 #include "GraphNameRanks.h"
 
+#include <Base/InitializerList.h>
 #include <Base/NumericLimits.h>
 #include <Core/Algorithms.h>
 #include <NodeGraph/GraphNameOrder.h>
 #include <NodeGraph/GraphSemantic.h>
 #include <Serialization/Archive.h>
 
-// 의미 바이트와 semantic hash다(Docs/Design/NodeGraph.ko.md 8.4절).
+// 의미 바이트와 semantic hash다(Docs/Design/NodeGraph 8.4절).
 namespace rocks::nodegraph {
 
 namespace {
@@ -353,6 +354,35 @@ private:
 
         if (auto written = writer_.WriteU32(graph.domainRole); !written) {
             return written;
+        }
+
+        // 하위 그래프 인터페이스(10.1절 NG3c): 부모 노드와 경계 목록(순서가 핀 순서다).
+        if (auto written = writer_.WriteGuid(graph.ownerNode); !written) {
+            return written;
+        }
+
+        for (const Array<GraphBoundaryPin>* list : {&graph.inputs, &graph.outputs}) {
+            if (auto written = writer_.WriteU32(static_cast<uint32>(list->Size())); !written) {
+                return written;
+            }
+
+            for (const GraphBoundaryPin& pin : *list) {
+                if (auto written = WriteName(pin.key); !written) {
+                    return written;
+                }
+
+                if (auto written = writer_.WriteU8(static_cast<uint8>(pin.kind)); !written) {
+                    return written;
+                }
+
+                if (auto written = WriteName(pin.type); !written) {
+                    return written;
+                }
+
+                if (auto written = writer_.WriteU32(pin.maxEdges); !written) {
+                    return written;
+                }
+            }
         }
 
         uint32 nodeCount = 0;

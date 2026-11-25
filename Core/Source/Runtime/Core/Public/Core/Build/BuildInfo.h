@@ -42,4 +42,21 @@ ROCKS_CORE_API Sha256Digest ToolBuildId() noexcept;
 // 쿠킹 byte와 내용 주소 이름이 바뀐다(쿠커 출력 의미가 바뀌면 따로 두는 쿠커 버전을 올린다).
 ROCKS_CORE_API EngineVersion CurrentEngineVersion() noexcept;
 
+// 타깃 종류다(Docs/Design/BuildTargets 3.1절 — UE TargetType과 같은 다섯 값). 컴파일 분기는 타깃
+// 매크로 (ROCKS_WITH_EDITOR·ROCKS_WITH_EDITOR_DATA·ROCKS_WITH_SERVER_CODE·ROCKS_WITH_CLIENT_CODE)로
+// 하고, 실행 중 분기는 이 값으로 한다. UE의 UE_GAME·UE_SERVER 같은 타깃 종류 매크로는 두지
+// 않는다(BD3).
+enum class TargetType : uint8 {
+    Game,
+    Editor,
+    Client,
+    Server,
+    Program
+};
+
+// 이 실행 파일의 타깃 종류다. 빌드 정보 TU가 정의한다(Game과 Program은 매크로 조합이 같아 매크로로
+// 가를 수 없다). 사용 예:
+//   if (build::CurrentTargetType() == build::TargetType::Server) { /* 렌더 없는 시작 */ }
+ROCKS_CORE_API TargetType CurrentTargetType() noexcept;
+
 } // namespace rocks::build

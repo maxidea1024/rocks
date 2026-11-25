@@ -4,7 +4,7 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 
-// Sparks 리터럴 원문의 값을 푼다(Docs/Design/SparksLanguage.ko.md 3.6절 어휘, SD54).
+// Sparks 리터럴 원문의 값을 푼다(Docs/Design/SparksLanguage 3.6절 어휘, SD54).
 //
 // 어휘 분석은 토큰의 원문 위치만 남기고, 값은 쓰는 쪽(어휘 분석의 범위 검사, 구문 분석)이 이 함수로
 // 원문에서 다시 읽는다. 입력은 어휘 분석이 오류 없이 만든 리터럴 토큰의 원문이어야 한다(형식은

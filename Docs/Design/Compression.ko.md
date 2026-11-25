@@ -81,6 +81,7 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 | `adapterHeaders` | 엔진 소유 번역 단위가 include하는 외부 헤더 |
 | `pragmaDirectives` | 원본의 컴파일러 지시문 전체: `#pragma`(`once` 제외, MSVC 번호 형식 포함)·`_Pragma`·`__pragma`·경고/deprecation 억제 define. 줄 이음을 합친 논리 줄 기준(파일·시작 줄·원문). 3.6 참고 |
 | `notes` | 실험 API 고정 사유, 설정 매크로 근거 등 |
+| `rtti`(선택, code 전용) | `true`면 이 라이브러리의 C++ 번역 단위만 RTTI를 켜고 컴파일한다(3.3절 C++ 서드파티). 생략하면 `false`. C++ 번역 단위가 없는데 `true`면 manifest 오류 |
 
 라이선스(`licenses`) 규칙:
 
@@ -108,6 +109,12 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 - C++ 번역 단위의 인자는 이전과 byte 단위로 같다. action key가 인자를 포함하므로 바뀌면 모든 증분 빌드가 무효화된다.
   테스트가 C++ 인자 golden을 고정한다.
 - 증분 빌드의 header 추적에 `.c`를 포함한다(`lz4hc.c`가 `lz4.c`를 include).
+
+**C++ 서드파티(2026-11-24, [글꼴 설계](Font/08-ThirdParty.ko.md) FT1 — HarfBuzz·ICU·msdfgen).**
+- `kind: code`의 번역 단위로 `.cpp`·`.cc`(원본 파일 또는 Rocks 글루)도 받는다. 엔진 C++ 번역 단위와 같은 인자(C++23, 경고 규칙, FP 축약 금지, 구성 매크로, CRT, 최적화, 디버그 정보, ASan 프로필)로 컴파일하며 RTTI·예외는 끈다.
+- 예외: manifest `rtti: true`인 라이브러리는 그 라이브러리의 C++ 번역 단위에만 RTTI를 켠다(Windows clang-cl `/GR`을 `/GR-` 뒤에, macOS·Android `-frtti`를 `-fno-rtti` 뒤에). 모듈 인자(`AdditionalCompileArguments`)로 RTTI·예외를 켜는 것은 계속 거부하며, 표지(`NativeModuleInput.RuntimeTypeInformation`)는 서드파티 모듈만 가질 수 있다. 지금 `rtti: true`는 ICU 하나다(ICU4C common이 자기 클래스 계층에서 `dynamic_cast`·`typeid`를 쓴다 — 사용자 결정 2026-11-24 "ICU만 RTTI 예외"). RTTI를 켠 object와 끈 object는 함께 링크된다. ICU 타입은 엔진 공개 API에 나오지 않고 소비 모듈은 C API만 쓰므로 RTTI가 엔진 쪽으로 번지지 않는다.
+- 예외(exception)를 쓰는 C++ 라이브러리는 받지 않는다(켤 manifest 필드가 없다).
+- 서드파티 C++ 원본의 STL 사용은 정책 검사 대상이 아니다(원본 디렉터리는 원래 검사하지 않는다). 엔진 소유 adapter 번역 단위가 서드파티 공개 형식의 STL(예: msdfgen `std::vector`)을 다루면 그 adapter만 STL 정책의 좁은 예외로 등록한다.
 - AST·reflection 생성은 C++만 다룬다.
 - ThirdParty 모듈은 `CodeOptimization.Always`다(Debug에서도 `-O2`). UE가 외부 라이브러리를 최적화 빌드로 쓰는 것과 같은
   이유이며 CRT·구성 매크로·NDEBUG는 구성을 따른다.
@@ -1257,7 +1264,7 @@ brotli==1.1.0`, google/brotli 1.1.0의 공식 binding)가 만든 13개(합 4,107
 ### 13.8 후속
 
 - macOS ARM64·Android 실기기 실행.
-- WOFF2 글꼴 importer(표 변환 복원)는 글꼴 모듈의 몫이다.
+- WOFF2 글꼴 importer(표 변환 복원)는 글꼴 모듈의 몫이다. [글꼴 설계](Font/09-Decisions.ko.md) FD10: FreeType이 이 Brotli로 직접 열며, 임포트는 FT8(Rocks 추가 기능)이다.
 - Brotli 압축(`c/enc`)과 사용자 사전·large window는 수요가 생기면 다룬다.
 
 ## 14. 형식 플러그인 등록 (7차, 교차검증 반영)

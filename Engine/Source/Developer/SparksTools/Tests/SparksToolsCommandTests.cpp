@@ -77,6 +77,33 @@ TEST(SparksTools_CheckReportsDiagnosticsAndExitCodes) {
     }
 }
 
+TEST(SparksTools_CheckNonAsciiFolder) {
+    // 공백·한글이 든 폴더 경로: 진단 경로 표기(`\` → `/`)가 UTF-8 글자를 그대로 둔다.
+    SystemAllocator allocator;
+    {
+        TempFolder temp(allocator);
+        constexpr StringView Folder = "Pkg \xED\x95\x9C\xEA\xB8\x80"; // "Pkg 한글"
+        StringBuilder<64> manifest(allocator);
+        StringBuilder<64> bad(allocator);
+        REQUIRE(manifest.TryAppendFormat("{}/SparksPackage.json5", Folder));
+        REQUIRE(bad.TryAppendFormat("{}/Sub/Bad.spark", Folder));
+        REQUIRE(temp.Write(manifest.View(), Manifest));
+        REQUIRE(temp.Write(bad.View(), "import Nope;\n"));
+        const String folder = temp.PathOf(Folder);
+        const String shown = Slashed(allocator, folder.View());
+        BufferOutput output(allocator);
+        const StringView arguments[] = {"check", folder.View()};
+        CHECK(RunCommand(allocator, platform::PhysicalFileSystem(), arguments, output) ==
+              ExitFailure);
+        StringBuilder<256> expected(allocator);
+        REQUIRE(expected.TryAppendFormat("{}/Sub/Bad.spark:1:8: error S0301:", shown.View()));
+        CHECK(output.output.View().StartsWith(expected.View()));
+        CHECK(output.error.IsEmpty());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(SparksTools_UsageErrors) {
     SystemAllocator allocator;
     struct Case {
@@ -96,6 +123,14 @@ TEST(SparksTools_UsageErrors) {
     const StringView twoOuts[] = {"build", "--out", "o", "--out", "p", "x"};
     const StringView outValue[] = {"build", "x", "--out"};
     const StringView unknownWithOut[] = {"frob", "--out", "o", "x"};
+    const StringView checkFrames[] = {"check", "--max-frames", "5", "x"};
+    const StringView twoFrames[] = {"test", "--max-frames", "5", "--max-frames", "6", "x"};
+    const StringView zeroFrames[] = {"test", "--max-frames", "0", "x"};
+    const StringView wordFrames[] = {"test", "--max-frames", "ten", "x"};
+    const StringView signFrames[] = {"test", "--max-frames", "+5", "x"};
+    const StringView manyFrames[] = {"test", "--max-frames", "1000001", "x"};
+    const StringView longFrames[] = {"test", "--max-frames", "99999999999", "x"};
+    const StringView noFrames[] = {"test", "x", "--max-frames"};
     const Case cases[] = {
         {{}, "sparks: no command given\n"},
         {none, "sparks: no path given\n"},
@@ -110,6 +145,14 @@ TEST(SparksTools_UsageErrors) {
         {twoOuts, "sparks: 'build' takes one --out\n"},
         {outValue, "sparks: '--out' needs a folder\n"},
         {unknownWithOut, "sparks: unknown command\n"},
+        {checkFrames, "sparks: '--max-frames' is only for 'test'\n"},
+        {twoFrames, "sparks: 'test' takes one --max-frames\n"},
+        {zeroFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {wordFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {signFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {manyFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {longFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {noFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
     };
     for (const Case& entry : cases) {
         BufferOutput output(allocator);

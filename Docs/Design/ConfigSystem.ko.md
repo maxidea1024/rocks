@@ -2,7 +2,7 @@
 
 기준일: 2026-11-19, 개정 16(시험 fixture의 출시 규칙 명시 — CVar Release 구성 확인). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
-[렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
+[렌더 기반](RenderBase/README.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
 - 24.2절 Config 우선순위: engine default → platform → project → device profile → user → session override, 런타임 변경 가능·재시작 필요 구분, 값 출처 표시, 품질 조합 검증
 

@@ -3,7 +3,7 @@
   "id": "D3D12_SM6",
   "status": "supported",
   "backend": "D3D12",
-  "processor": { "module": "ShaderFormatD3D", "version": 1 },
+  "processor": { "module": "ShaderFormatD3D", "version": 4 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler"],
   "language": { "hlsl2021": true },
@@ -25,7 +25,7 @@
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute", "waveOperations", "vertexViewportLayerOutput"],
-  "deviceRequirements": ["D3D_FEATURE_LEVEL_11_0", "D3D12_SHADER_MODEL_6_6"],
+  "features": ["compute", "waveOperations", "vertexViewportLayerOutput", "typedUavLoad", "debugPixelUav"],
+  "deviceRequirements": ["D3D_FEATURE_LEVEL_11_0", "D3D12_SHADER_MODEL_6_6", "D3D12_TYPED_UAV_LOAD_ADDITIONAL_FORMATS"],
   "producers": [{ "host": "windows-x64" }]
 }

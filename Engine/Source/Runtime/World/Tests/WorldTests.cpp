@@ -92,7 +92,7 @@ public:
         Record("c.disable");
     }
 
-    void OnDestroy() noexcept override {
+    void OnDestroy(EndPlayReason) noexcept override {
         Record("c.destroy");
     }
 
@@ -155,7 +155,7 @@ public:
         Record("a.disable");
     }
 
-    void OnDestroy() noexcept override {
+    void OnDestroy(EndPlayReason) noexcept override {
         Record("a.destroy");
         if (!destroyBypassVictim.IsNull()) {
             CHECK(GetWorld()
@@ -1543,7 +1543,7 @@ TEST(World_NativeDerivedTypesInheritReflectedBase) {
         {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 4},
         {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 4},
         {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 4},
-        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 3},
+        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 11},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

@@ -1,7 +1,7 @@
 #include <NodeGraph/GraphClone.h>
 #include <NodeGraph/GraphCommand.h>
 
-// 그래프 공통 명령 목록이다(Docs/Design/NodeGraph.ko.md 8.1·8.6절).
+// 그래프 공통 명령 목록이다(Docs/Design/NodeGraph 8.1·8.6절).
 namespace rocks::nodegraph {
 
 Result<GraphCommand*> GraphCommandList::Push(GraphCommandKind kind, Guid graph) noexcept {
@@ -227,7 +227,7 @@ Result<void> GraphCommandList::SetEnableState(Guid graph, Guid node,
 }
 
 Result<void> GraphCommandList::AddGraph(Guid graph, GraphRole role, uint32 domainRole,
-                                        StringView title) noexcept {
+                                        StringView title, Guid ownerNode) noexcept {
     auto command = Push(GraphCommandKind::AddGraph, graph);
     if (!command) {
         return Result<void>::Failure(command.Error());
@@ -235,7 +235,26 @@ Result<void> GraphCommandList::AddGraph(Guid graph, GraphRole role, uint32 domai
 
     command.Value()->role = role;
     command.Value()->domainRole = domainRole;
+    command.Value()->node = ownerNode;
     if (auto copied = command.Value()->title.TryAssign(title); !copied) {
+        return CommandListDropLast(commands_, copied.Error());
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> GraphCommandList::SetGraphBoundary(Guid graph, Span<const GraphBoundaryPin> inputs,
+                                                Span<const GraphBoundaryPin> outputs) noexcept {
+    auto command = Push(GraphCommandKind::SetGraphBoundary, graph);
+    if (!command) {
+        return Result<void>::Failure(command.Error());
+    }
+
+    if (auto copied = command.Value()->inputs.TryAppend(inputs); !copied) {
+        return CommandListDropLast(commands_, copied.Error());
+    }
+
+    if (auto copied = command.Value()->outputs.TryAppend(outputs); !copied) {
         return CommandListDropLast(commands_, copied.Error());
     }
 
@@ -368,8 +387,6 @@ const char* GraphCommandReasonName(GraphCommandReason reason) noexcept {
         return "NotOrdered";
     case GraphCommandReason::OrderMismatch:
         return "OrderMismatch";
-    case GraphCommandReason::PinsDropped:
-        return "PinsDropped";
     case GraphCommandReason::ValueHidden:
         return "ValueHidden";
     case GraphCommandReason::ValueEmpty:
@@ -394,12 +411,22 @@ const char* GraphCommandReasonName(GraphCommandReason reason) noexcept {
         return "RerouteCycle";
     case GraphCommandReason::ValueTooLarge:
         return "ValueTooLarge";
+    case GraphCommandReason::BoundaryNode:
+        return "BoundaryNode";
+    case GraphCommandReason::BoundaryInvalid:
+        return "BoundaryInvalid";
+    case GraphCommandReason::GraphReferenced:
+        return "GraphReferenced";
+    case GraphCommandReason::CollapsedCycle:
+        return "CollapsedCycle";
     case GraphCommandReason::GraphFull:
         return "GraphFull";
     case GraphCommandReason::InvariantBroken:
         return "InvariantBroken";
     case GraphCommandReason::NodeDataInvalid:
         return "NodeDataInvalid";
+    case GraphCommandReason::MigrationInvalid:
+        return "MigrationInvalid";
     }
 
     return "Unknown";

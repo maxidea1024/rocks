@@ -6,5 +6,8 @@ public sealed class DeterministicMath : CoreModuleRules
 {
     protected override string ModuleName => "DeterministicMath";
 
-    protected override string[] PublicDependencies => ["PlatformBase"];
+    protected override string[] PublicDependencies => ["Base"];
+
+    // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
+    protected override string[] PrivateDependencies => ["PlatformBase"];
 }

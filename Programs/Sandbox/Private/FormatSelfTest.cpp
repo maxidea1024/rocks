@@ -1,4 +1,5 @@
 #include "FormatSelfTest.h"
+#include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
 #include <Platform/Memory.h>
@@ -21,7 +22,7 @@ constexpr int ColorTolerance = 2;
 uint32 failures = 0;
 const char* backendName = "";
 // OpenGL ES는 색 렌더 타깃이 아닌 형식·블록 압축을 읽지 못한다(ReadTexture가 Unsupported,
-// PixelFormat.ko.md 14.2절). 그 backend에서만 Unsupported를 허용하고 수를 센다.
+// Docs/Design/PixelFormat 14.2절). 그 backend에서만 Unsupported를 허용하고 수를 센다.
 bool readLimited = false;
 uint32 unreadable = 0;
 
@@ -32,124 +33,7 @@ void Check(bool condition, PixelFormat format, const char* what) noexcept {
     }
 }
 
-StringView Text(const char* text, usize bytes) noexcept {
-    return StringView(text, bytes - 1);
-}
-
-template <usize Count>
-StringView Text(const char (&text)[Count]) noexcept {
-    return Text(text, Count);
-}
-
-// 정점 버퍼 없이 화면을 덮는 삼각형과 출력 계열별 상수 색이다(파이프라인 색 형식 시험).
-constexpr char FloatColorHlsl[] = R"(
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 uv = float2((id << 1) & 2, id & 2);
-    return float4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-float4 PSMain(float4 position : SV_Position) : SV_Target { return float4(0.25, 0.5, 0.75, 1.0); }
-)";
-
-constexpr char IntColorHlsl[] = R"(
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 uv = float2((id << 1) & 2, id & 2);
-    return float4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-int4 PSMain(float4 position : SV_Position) : SV_Target { return int4(1, 2, 3, 4); }
-)";
-
-constexpr char UintColorHlsl[] = R"(
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 uv = float2((id << 1) & 2, id & 2);
-    return float4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-uint4 PSMain(float4 position : SV_Position) : SV_Target { return uint4(1, 2, 3, 4); }
-)";
-
-constexpr char ColorVertexGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-void main() {
-    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-)";
-
-constexpr char ColorPixelGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = vec4(0.25, 0.5, 0.75, 1.0);
-}
-)";
-
-constexpr char IntColorPixelGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) out ivec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = ivec4(1, 2, 3, 4);
-}
-)";
-
-constexpr char UintColorPixelGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(location = 0) out uvec4 out_var_SV_Target0;
-void main() {
-    out_var_SV_Target0 = uvec4(1u, 2u, 3u, 4u);
-}
-)";
-
-// LoadFloatHlsl·LoadStencilHlsl의 GLSL ES판이다(OpenGL ES backend).
-constexpr char LoadFloatGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp sampler2D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    vec4 value = texelFetch(ps0, ivec2(gl_FragCoord.xy) % 4, 0);
-    out_var_SV_Target0 = vec4(value.rgb, 1.0);
-}
-)";
-
-constexpr char LoadStencilGlsl[] = R"(#version 320 es
-precision highp float;
-precision highp int;
-layout(binding = 0) uniform highp usampler2D ps0;
-layout(location = 0) out vec4 out_var_SV_Target0;
-void main() {
-    uvec4 value = texelFetch(ps0, ivec2(gl_FragCoord.xy) % 4, 0);
-    out_var_SV_Target0 = vec4(0.0, float(value.g) / 255.0, 0.0, 1.0);
-}
-)";
-
-// 묶은 텍스처(view)를 화면 좌표로 load해 rgb를 낸다(float 형식 view).
-constexpr char LoadFloatHlsl[] = R"(
-Texture2D<float4> source : register(t0);
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 uv = float2((id << 1) & 2, id & 2);
-    return float4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-float4 PSMain(float4 position : SV_Position) : SV_Target {
-    float4 value = source.Load(int3(int2(position.xy) % 4, 0));
-    return float4(value.rgb, 1.0);
-}
-)";
-
-// 스텐실 plane view(uint)를 load해 G 채널 값을 255로 나눠 G에 낸다(스텐실 값은 G 채널, 10절).
-constexpr char LoadStencilHlsl[] = R"(
-Texture2D<uint4> source : register(t0);
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 uv = float2((id << 1) & 2, id & 2);
-    return float4(uv * 2.0 - 1.0, 0.5, 1.0);
-}
-float4 PSMain(float4 position : SV_Position) : SV_Target {
-    uint4 value = source.Load(int3(int2(position.xy) % 4, 0));
-    return float4(0.0, value.g / 255.0, 0.0, 1.0);
-}
-)";
+// 셰이더는 FullScreen.rsf와 Format.rsf다(출력 계열별 상수 색, 깊이·스텐실 plane 읽기).
 
 // 결정적 바이트 열이다(seed마다 다르다).
 void FillBytes(Span<uint8> bytes, uint32 seed) noexcept {
@@ -429,20 +313,16 @@ void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocat
 
     // 파이프라인 색 형식: 셰이더 출력 계열을 형식에 맞춘다(타입이 다르면 검증 계층 경고).
     const PixelShaderType shader = GetPixelFormatInfo(format).shaderType;
-    StringView hlsl = Text(FloatColorHlsl);
-    StringView glsl = Text(ColorPixelGlsl);
+    const shaders::ShaderTypeDesc* pixel = &shaders::FormatFloatColorPS;
     if (shader == PixelShaderType::Int) {
-        hlsl = Text(IntColorHlsl);
-        glsl = Text(IntColorPixelGlsl);
+        pixel = &shaders::FormatIntColorPS;
     } else if (shader == PixelShaderType::Uint || shader == PixelShaderType::Uint64) {
-        hlsl = Text(UintColorHlsl);
-        glsl = Text(UintColorPixelGlsl);
+        pixel = &shaders::FormatUintColorPS;
     }
     PipelineDesc pipelineDesc;
-    pipelineDesc.vertex = {hlsl, Text(ColorVertexGlsl)};
-    pipelineDesc.pixel = {hlsl, glsl};
     pipelineDesc.colorFormats[0] = format;
-    auto pipeline = device.CreatePipeline(pipelineDesc);
+    auto pipeline =
+        shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, *pixel, pipelineDesc);
     const bool expected = HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget);
     ExpectCreation(pipeline.IsOk(), pipeline.IsOk() ? ErrorCode::None : pipeline.Error(), expected,
                    format, "pipeline color format matches the RenderTarget capability");
@@ -632,13 +512,13 @@ void RunViewChecks(Device& device, Allocator& allocator) noexcept {
     targetDesc.usage = TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     PipelineDesc pipelineDesc;
-    pipelineDesc.vertex = {Text(LoadFloatHlsl), Text(ColorVertexGlsl)};
-    pipelineDesc.pixel = {Text(LoadFloatHlsl), Text(LoadFloatGlsl)};
     pipelineDesc.colorFormats[0] = PixelFormat::RGBA8Unorm;
-    auto floatLoad = device.CreatePipeline(pipelineDesc);
-    pipelineDesc.vertex.hlsl = Text(LoadStencilHlsl);
-    pipelineDesc.pixel = {Text(LoadStencilHlsl), Text(LoadStencilGlsl)};
-    auto stencilLoad = device.CreatePipeline(pipelineDesc);
+    pipelineDesc.bindings.texture = "Depth";
+    auto floatLoad = shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS,
+                                                     shaders::FormatLoadFloatPS, pipelineDesc);
+    pipelineDesc.bindings.texture = "Stencil";
+    auto stencilLoad = shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS,
+                                                       shaders::FormatLoadStencilPS, pipelineDesc);
     Check(target.IsOk() && floatLoad.IsOk() && stencilLoad.IsOk(), PixelFormat::RGBA8Unorm,
           "view bench resources are created");
     if (!target || !floatLoad || !stencilLoad) {

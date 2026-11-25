@@ -7,7 +7,7 @@
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
-// 문서와 등록표의 읽기 전용 view다(Docs/Design/NodeGraph.ko.md 7·8.6절). schema
+// 문서와 등록표의 읽기 전용 view다(Docs/Design/NodeGraph 7·8.6절). schema
 // 판정(CanConnect·Validate)과 화면이 문서를 바꾸지 않고 조회할 때 쓴다. 문서는 정규 순서여야
 // 한다(GraphMutator가 지킨다).
 //

@@ -112,6 +112,15 @@ public:
     GraphPassAccesses& TextureView(GraphTextureView view, graphics::ResourceAccess access,
                                    GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
 
+    // 버퍼 view(RenderGraph::CreateBufferView)로 버퍼 전체를 access로 쓴다고 선언한다. 읽기 view는
+    // SRV 접근(SrvGraphics·SrvCompute), 쓰기 view는 UAV 접근만 받는다. 기록 함수는
+    // GraphPassContext::View로 장치 view를 받는다.
+    //
+    // 사용 예(compute가 구조화 버퍼에 쓴다):
+    //   accesses.BufferView(itemsWrite, graphics::ResourceAccess::UavCompute);
+    GraphPassAccesses& BufferView(GraphBufferView view, graphics::ResourceAccess access,
+                                  GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
+
     // 버퍼 전체를 access로 쓴다고 선언한다.
     GraphPassAccesses& Buffer(GraphBuffer buffer, graphics::ResourceAccess access,
                               GraphAccessFlags flags = GraphAccessFlags::None) noexcept;

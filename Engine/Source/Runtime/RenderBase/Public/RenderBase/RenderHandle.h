@@ -12,7 +12,7 @@ class Device;
 
 namespace rocks::render {
 
-// 게임 lane이 예약받는 렌더 자원 handle이다(Docs/Design/RenderBase.ko.md 5.4절 handle 예약, 6.2절).
+// 게임 lane이 예약받는 렌더 자원 handle이다(Docs/Design/RenderBase 5.4절 handle 예약, 6.2절).
 // 장치 handle이 아니라 RenderBase 표의 slot+generation이며, 렌더 lane이 실제 장치 자원을 만들어 이
 // handle에 잇는다. 게임 lane은 생성 요청 때 바로 이 handle을 받아 프레임 packet에 담는다.
 struct RenderHandle {
@@ -44,7 +44,7 @@ enum class RenderResourceState : uint8 {
     Retired
 };
 
-// 렌더 handle의 Retire를 장치 해제 대신 받는 쪽이다(Docs/Design/RenderBase.ko.md 7.4절 결정 R15).
+// 렌더 handle의 Retire를 장치 해제 대신 받는 쪽이다(Docs/Design/RenderBase 7.4절 결정 R15).
 // 장치 자원을 다른 소유자(렌더 그래프 자원 풀)가 계속 가지면서 handle로 빌려줄 때 BindBuffer·
 // BindTexture에 넘긴다. 그 handle의 Retire는 ReleaseRetiredResource가 장치 Retire 대신 이 sink로
 // 넘긴다.
@@ -70,7 +70,7 @@ protected:
 };
 
 // 렌더 handle의 사용 lease다(계획 11.2절 RenderResourceLease,
-// Docs/Design/RenderBase.ko.md 6.2·7.4절). 렌더 그래프 import처럼 장치 자원을 기록에 쓰겠다고
+// Docs/Design/RenderBase 6.2·7.4절). 렌더 그래프 import처럼 장치 자원을 기록에 쓰겠다고
 // 승인받은 동안 잡는다. lease가 남은 handle을 Retire하면 새 lease는 막히고, 장치 Retire는 마지막
 // lease가 풀린 뒤로 미뤄진다(그 사이 기록이 stale handle을 쓰지 않는다). GPU 사용 뒤 해제는 장치
 // 내부 last-use 집계(GX7)가 맡는다.

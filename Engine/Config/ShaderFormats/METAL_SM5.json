@@ -3,7 +3,7 @@
   "id": "METAL_SM5",
   "status": "supported",
   "backend": "Metal",
-  "processor": { "module": "ShaderFormatMetal", "version": 1 },
+  "processor": { "module": "ShaderFormatMetal", "version": 3 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler", "SpirvTools", "SpirvCross", "MetalToolchain"],
   "language": { "hlsl2021": true },
@@ -28,7 +28,7 @@
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute", "vertexViewportLayerOutput"],
+  "features": ["compute", "vertexViewportLayerOutput", "debugPixelUav"],
   "deviceRequirements": [],
   "producers": [
     { "host": "macos-arm64", "systemTools": ["MetalToolchain"] },

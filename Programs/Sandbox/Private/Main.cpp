@@ -10,9 +10,11 @@
 //                                  창 없이 그래픽 backend·엔진 호스트 검사(종료 코드 0 = 통과).
 //                                  --gpu-validation은 D3D12 장치를 GPU 기반 검증으로 만든다(UE
 //                                  -gpuvalidation, 아주 느리다)
-//   Sandbox --engine [--frames N] [--config <Engine.json>] [--set=<target>=<value>]...
+//   Sandbox --engine [--window] [--frames N] [--config <Engine.json>] [--set=<target>=<value>]...
 //                  [--trace=<목록>]... [--trace-file <path>]
-//                                  헤드리스 엔진을 N 프레임(기본 60) 돌린다. 엔진 층 설정
+//                                  엔진을 N 프레임(헤드리스 기본 60) 돌린다. --window는 창을 열고
+//                                  키보드·마우스·게임패드 입력을 Pawn에 넘긴다(실제 시간,
+//                                  --frames가 없으면 창을 닫을 때까지). 엔진 층 설정
 //                                  파일(Engine/Config) 다음 설정 파일(Project 층 — "Settings"
 //                                  섹션의 log.* 등), 그다음 --set(Session 층) 순으로 합친다.
 //                                  --trace는 trace 채널·묶음을 켠다(TraceControl)
@@ -20,6 +22,12 @@
 //                                  종료).
 //                                  --request-termination-at-frame N은 시험용으로 N번째 프레임에서
 //                                  같은 종료 요청 표시를 남긴다
+//                                  --inject-key-at-frame N은 시험용으로 N번째 프레임에 입력 큐에
+//                                  W 키 눌림을 넣는다
+//                                  --graphics=<auto|d3d12|d3d11|vulkan|opengl>는 창 렌더 경로의
+//                                  장치다(기본 auto — D3D12 → Vulkan → OpenGL ES), --graphics-validation은 API 검증
+//                                  계층을 켜고, --no-render는 렌더 없이 창만 연다
+//                                  (Docs/Design/RenderBase 18.5절)
 //
 // 진입점은 Launch 공통 실행 계층이다(Docs/Design/CrashHandlingAndLaunch.ko.md 16절). Launch가
 // 명령줄을 UTF-8로 캡처하고 크래시 수집(덤프 도우미 포함)을 설치한다. 로그(Docs/Design/
@@ -33,11 +41,12 @@ using rocks::Span;
 using rocks::StringView;
 
 int Usage() noexcept {
-    fprintf(
-        stderr,
-        "usage: Sandbox [--self-test] [--gpu-validation] | --engine [--frames N] [--config <file>] "
-        "[--set=<target>=<value>]... [--trace=<channels>]... "
-        "[--trace-file <path>]\n");
+    fprintf(stderr,
+            "usage: Sandbox [--self-test] [--gpu-validation] | --engine [--window] [--frames N] "
+            "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
+            "[--config <file>] "
+            "[--set=<target>=<value>]... [--trace=<channels>]... "
+            "[--trace-file <path>]\n");
     return 2;
 }
 
@@ -96,6 +105,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     StringView settingArguments[MaxSettingArguments];
     rocks::usize settingCount = 0;
     bool gpuValidation = false;
+    bool framesGiven = false;
     for (rocks::usize index = 0; index < arguments.Size(); ++index) {
         const StringView argument = arguments[index];
         const bool hasValue = index + 1 < arguments.Size();
@@ -107,8 +117,22 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             engine = true;
         } else if (Is(argument, "--gpu-validation")) {
             gpuValidation = true;
+        } else if (Is(argument, "--window")) {
+            options.window = true;
+        } else if (Is(argument, "--no-render")) {
+            options.render = false;
+        } else if (Is(argument, "--graphics-validation")) {
+            options.graphicsValidation = true;
+        } else if (argument.StartsWith("--graphics=", rocks::StringComparison::CaseSensitive)) {
+            constexpr rocks::usize PrefixBytes = sizeof("--graphics=") - 1;
+            const StringView name(argument.Data() + PrefixBytes,
+                                  argument.ByteCount() - PrefixBytes);
+            if (!sandbox::screen::ParseScreenBackend(name, options.graphics)) {
+                return Usage();
+            }
         } else if (Is(argument, "--frames") && hasValue &&
                    ParseFrames(arguments[index + 1], options.frames)) {
+            framesGiven = true;
             ++index;
         } else if (Is(argument, "--config") && hasValue) {
             options.configPath = arguments[++index].Data();
@@ -116,6 +140,9 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             options.traceFile = arguments[++index].Data();
         } else if (Is(argument, "--request-termination-at-frame") && hasValue &&
                    ParseFrames(arguments[index + 1], options.requestTerminationAtFrame)) {
+            ++index;
+        } else if (Is(argument, "--inject-key-at-frame") && hasValue &&
+                   ParseFrames(arguments[index + 1], options.injectKeyAtFrame)) {
             ++index;
         } else if ((argument.StartsWith("--set=", rocks::StringComparison::CaseSensitive) ||
                     argument.StartsWith("--trace=", rocks::StringComparison::CaseSensitive)) &&
@@ -126,10 +153,20 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
         }
     }
 
+    // 창 모드는 --frames가 없으면 창을 닫을 때까지 돈다.
+    if (options.window && !framesGiven) {
+        options.frames = 0;
+    }
+
     options.arguments = Span<const StringView>(settingArguments, settingCount);
     return engine ? sandbox::RunEngineHost(context, options)
                   : RunSelfTest(context.DefaultAllocator(), context.Modules(), gpuValidation);
 }
+
+// Android APK를 런처에서 띄우면(Intent extra 없음) 창 모드 엔진을
+// 돌린다(Docs/Design/AndroidPlatform.ko.md 6절). 액티비티가 끝날 때(onDestroy) 종료 요청 다리로
+// 정상 종료한다.
+constexpr StringView AndroidDefaultArguments[] = {"--engine", "--window"};
 
 const rocks::launch::ApplicationDescription& Describe() noexcept {
     static constexpr rocks::launch::ApplicationDescription Description{
@@ -137,7 +174,8 @@ const rocks::launch::ApplicationDescription& Describe() noexcept {
         .kind = rocks::launch::ApplicationKind::EngineHost,
         .settings = {.toolLogging = rocks::launch::ToolLogging::Stderr},
         .configure = &Configure,
-        .run = &Run};
+        .run = &Run,
+        .androidDefaultArguments = Span<const StringView>(AndroidDefaultArguments)};
     return Description;
 }
 

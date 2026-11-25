@@ -6,7 +6,7 @@
 #include <NodeGraph/GraphDocument.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// 문서 정규화와 전체 불변식 검사다(Docs/Design/NodeGraph.ko.md 6.3절, GI1–GI14).
+// 문서 정규화와 전체 불변식 검사다(Docs/Design/NodeGraph 6.3절, GI1–GI14).
 //
 // 사용 예:
 //   // import·시험 입력을 정규 순서로 맞춘다.
@@ -51,7 +51,11 @@ enum class GraphInvariant : uint8 {
     // GI13: 알려진 종류 노드의 버전·속성 schema·비활성 허용.
     NodeTypeData = 13,
     // GI14: 입력 기본값의 키가 현재 입력 핀이고 값이 비어 있지 않다.
-    InputDefaultPin = 14
+    InputDefaultPin = 14,
+    // GI15: 하위 그래프 인터페이스(경계 목록)와 경계 노드(Graph.Input·Graph.Output)가 맞다(10.1절).
+    BoundaryInterface = 15,
+    // GI16: 하위 그래프와 부모 Graph.Collapsed가 1:1이고 가리킴에 순환이 없다(10.1절).
+    CollapsedOwner = 16
 };
 
 // 위반이 가리키는 요소의 종류다.

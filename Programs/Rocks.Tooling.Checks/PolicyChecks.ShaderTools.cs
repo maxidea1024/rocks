@@ -8,21 +8,20 @@ public static partial class PolicyChecks
 {
     // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 두 프로세스 공용
     // 모듈(ShaderCompilerCommon — 형식 정의가 도구 이름을 표와 대조한다), 워커(프로그램과 본체 모듈 ShaderWorker)와 그 안의 형식 모듈,
-    // 워커 자리 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다), SH0 도구 스파이크(Programs/ShaderToolSpike,
-    // 워커가 생기기 전에 도구를 직접 여는 측정 프로그램).
+    // 도구를 여는 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다). SH0 도구 스파이크는 SH1e에서 지웠다.
     private static readonly string[] ShaderToolTableUsers =
     [
         "Engine/Source/Developer/ShaderToolTable/", "Engine/Source/Developer/ShaderCompiler/", "Engine/Source/Developer/ShaderCompilerCommon/",
         "Engine/Source/Developer/ShaderWorker/", "Engine/Source/Developer/ShaderToolLoader/", "Programs/ShaderCompileWorker/",
-        "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
+        "Programs/FoundationTests/"
     ];
 
-    // 도구 binary를 열어도 되는 곳이다: 워커(프로그램과 그 본체 모듈 ShaderWorker)와 그 안의 형식 모듈, 워커 자리 모듈, 시험 runner, SH0
-    // 도구 스파이크. 메인 프로세스(ShaderCompiler)는 도구 표만 쓰고 binary를 열지 않는다.
+    // 도구 binary를 열어도 되는 곳이다: 워커(프로그램과 그 본체 모듈 ShaderWorker)와 그 안의 형식 모듈, 도구를 여는 모듈, 시험 runner.
+    // 메인 프로세스(ShaderCompiler)는 도구 표만 쓰고 binary를 열지 않는다.
     private static readonly string[] ShaderToolLoadUsers =
     [
         "Engine/Source/Developer/ShaderToolLoader/", "Engine/Source/Developer/ShaderWorker/", "Programs/ShaderCompileWorker/",
-        "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
+        "Programs/FoundationTests/"
     ];
 
     // 워커 쪽(워커 프로그램·본체 모듈·형식 모듈)이다. 메인 프로세스 전용 모듈(ShaderCompiler — 소스 트리·키·관리자)과 에셋 너겟에 닿으면
@@ -35,7 +34,7 @@ public static partial class PolicyChecks
     private static readonly Regex ShaderWorkerForbiddenInclude = Pattern("#\\s*include\\s*[<\"](?:ShaderCompiler|AssetNugget)/");
 
     // DynamicLibrary::Open(절대 경로 열기)을 불러도 되는 곳이다: 도구 로드 허용 위치와 API 구현·시험(PlatformBase·TestSupport), 모듈
-    // 로더의 Modular manifest 적재(Docs/Design/ModuleLoader.ko.md 3.13절 — 엔진 모듈 공유 라이브러리를 manifest 폴더의 절대 경로로 연다).
+    // 로더의 Modular manifest 적재(Docs/Design/ModuleLoader 3.13절 — 엔진 모듈 공유 라이브러리를 manifest 폴더의 절대 경로로 연다).
     // 그 밖(Runtime 모듈)은 OS 공급 라이브러리를 이름으로 여는 OpenSystem만 쓴다(Vulkan 로더·XInput).
     private static readonly string[] DynamicLibraryOpenUsers =
     [
@@ -159,6 +158,12 @@ public static partial class PolicyChecks
 
             foreach (string name in binaryLibraries.Prepend("ShaderToolLoader"))
             {
+                // 그 라이브러리 자신의 모듈 규칙(<루트>/<Lib>/<Lib>.Build.cs — Docs/Design/BuildTargets 3.5절 BS3a)은 자기 이름을 적는다.
+                if (relative.EndsWith("/" + name + "/" + name + ".Build.cs", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 string literal = "\"" + name + "\"";
                 if (text.Contains(literal, StringComparison.Ordinal))
                 {

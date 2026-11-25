@@ -111,11 +111,11 @@ function Label  scalar=2/2 ref=0/0 buf=2/3 params=1/0/1 returns bx1
   0020  JMP  0010    ; 41:5
 
 function Validate  scalar=1/1 ref=0/0 buf=2/2 params=0/0/1 returns bx1
-  body 26874d06b0b677cf5899dfe553fb9d8250e2571f6c0fc55202586c10cfb08ea6
+  body 7ee6d7b6defaa4b4075805b0393a1c25f4981385c658dca2c66f2ae9fcba644d
   0000  LOADSTR  b1, t9    ; 52:17
   0001  EQ.STR  s0, b0, b1    ; 52:9
   0002  BRF  s0, 0006    ; 52:9
-  0003  LOADI  s0, 2    ; 53:16
+  0003  LOADI  s0, 0    ; 53:16
   0004  ERR  b1, s0    ; 53:9
   0005  RET  b1 x1    ; 53:9
   0006  OK  b1, b0 x1    ; 56:5

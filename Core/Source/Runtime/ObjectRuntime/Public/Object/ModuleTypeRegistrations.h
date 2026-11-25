@@ -9,7 +9,7 @@
 
 namespace rocks {
 
-// 모듈 로더의 타입 등록기(ModuleTypeRegistrar) 일반 구현이다(Docs/Design/ModuleLoader.ko.md 3.10절
+// 모듈 로더의 타입 등록기(ModuleTypeRegistrar) 일반 구현이다(Docs/Design/ModuleLoader 3.10절
 // MD15). TypeRegistry 하나에 모듈마다 ModuleRegistration을 따로 두어 모듈 하나의 타입만 골라
 // 되돌린다. Engine이 엔진 레지스트리에, 엔진 없이 World 레지스트리를 만드는 도구(WorldBench)가 자기
 // 레지스트리에 쓴다.

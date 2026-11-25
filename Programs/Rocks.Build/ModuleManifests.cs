@@ -8,7 +8,7 @@ namespace Rocks.Build;
 
 /// <summary>
 /// Modular 타깃의 모듈 manifest(<c>&lt;Target&gt;[-&lt;Platform&gt;-&lt;Configuration&gt;].modules.json</c>)를 쓴다(Docs/Design/BuildTargets
-/// 3.8절 BS8d1, Docs/Design/ModuleLoader.ko.md 3.5절). Monolithic 실행 파일의 모듈 표 TU와 같은 행(<see cref="ModuleTables.Rows"/>)을 파일
+/// 3.8절 BS8d1, Docs/Design/ModuleLoader 3.5절). Monolithic 실행 파일의 모듈 표 TU와 같은 행(<see cref="ModuleTables.Rows"/>)을 파일
 /// 이름·크기와 함께 싣는다. 링크가 모두 성공하고 입력이 바뀌지 않은 빌드 끝에서만 쓴다(원자적 교체, 내용이 같으면 쓰지 않는다). 키는 영어이고
 /// 모듈 로더가 모르는 키를 거부한다(ML4a). 켠 플러그인의 모듈 행은 플러그인마다 그 플러그인 binaries 폴더의 같은 이름 manifest에 싣고,
 /// 실행 파일 manifest의 <c>plugins</c>가 그 manifest를 가리킨다(ModuleLoader 3.15절 ML5a). 행의 <c>order</c>는 Monolithic 모듈 표와 같은
@@ -127,7 +127,7 @@ public static class ModuleManifests
             writer.WriteStartArray("modules");
             foreach ((ModuleRow row, int order) in rows)
             {
-                // 실행 파일 행도 호스트 공유 라이브러리다(Docs/Design/ModuleLoader.ko.md 3.14절 — 입력 검사가 Launch에 닿게 한다).
+                // 실행 파일 행도 호스트 공유 라이브러리다(Docs/Design/ModuleLoader 3.14절 — 입력 검사가 Launch에 닿게 한다).
                 string file = LinkTypes.SharedLibraryFileName(target, row.Name, platform, configuration);
                 writer.WriteStartObject();
                 writer.WriteString("name", row.Name);
@@ -143,7 +143,7 @@ public static class ModuleManifests
                 writer.WriteEndArray();
                 writer.WriteString("loadingPhase", row.Phase.ToString());
                 writer.WriteBoolean("onRequest", row.OnRequest);
-                // 호스트 모듈 행이다. Launch가 그 라이브러리에서 앱 기술을 찾는다(Docs/Design/ModuleLoader.ko.md 3.14절).
+                // 호스트 모듈 행이다. Launch가 그 라이브러리에서 앱 기술을 찾는다(Docs/Design/ModuleLoader 3.14절).
                 writer.WriteBoolean("host", row.Executable);
                 writer.WriteEndObject();
             }

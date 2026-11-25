@@ -81,6 +81,15 @@ struct ShaderDefine {
     StringView value;
 };
 
+// 생성 include 연결 하나다(RenderBase 10.6절 2항 — 정점 입력 축 job의
+// VertexInputGeneratedIncludePath → 그 정점 입력 타입 원문). virtualPath를 include하면 sourcePath
+// 파일을 읽는다. include 폐포·#line·__FILE__에는 sourcePath가 남는다. 빌린 view이며 호출 동안 살아
+// 있어야 한다.
+struct ShaderGeneratedInclude {
+    StringView virtualPath;
+    StringView sourcePath;
+};
+
 // include 폐포의 파일 하나다. sha256은 원래 파일 byte(BOM·CRLF 정규화 전)의 SHA-256이다.
 struct ShaderIncludeFile {
     explicit ShaderIncludeFile(Allocator& allocator) noexcept : virtualPath(allocator) {
@@ -107,10 +116,13 @@ struct ROCKS_SHADERCOMPILER_API PreprocessedShader {
 };
 
 // entryPath(.rsf 가상 경로)를 tree에서 읽어 전처리한다. 처리 규칙은 파일 주석을 따른다. defines의
-// 이름이 식별자가 아니거나(InvalidDefine) 겹치면(DuplicateDefine) 오류다. 실패하면 out은 비어 있고
-// 결과에 위치(가상 경로·줄)와 세부가 있다. out은 먼저 비운다.
+// 이름이 식별자가 아니거나(InvalidDefine) 겹치면(DuplicateDefine) 오류다. generated는 생성 include
+// 연결이다(연결 대상 경로가 가상 경로 규칙에 맞지 않으면 그 include 줄의 오류다. 연결이 없는
+// <루트>/Generated/ include는 소스 트리의 GeneratedSource다). 실패하면 out은 비어 있고 결과에
+// 위치(가상 경로·줄)와 세부가 있다. out은 먼저 비운다.
 ROCKS_SHADERCOMPILER_API ShaderSourceStatus PreprocessShader(
     const ShaderSourceTree& tree, StringView entryPath, Span<const ShaderDefine> defines,
-    PreprocessedShader& out, const ShaderPreprocessLimits& limits = {}) noexcept;
+    PreprocessedShader& out, const ShaderPreprocessLimits& limits = {},
+    Span<const ShaderGeneratedInclude> generated = {}) noexcept;
 
 } // namespace rocks::shader

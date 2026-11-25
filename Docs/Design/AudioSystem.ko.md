@@ -84,7 +84,7 @@ UE는 장치 추상(AudioMixerCore) → DSP(SignalProcessing) → 믹서(AudioMi
 
 - 서버 실행 파일은 `AudioMiniaudio`·`AudioOpus`를 링크하지 않는다. `Audio`·`EngineAudio`는 링크한다. 재생 API와 에셋 클래스가 있어야 서버의 게임 코드·Sparks가 그대로 빌드되고, 장치가 없으면 재생 요청은 "무시됨" 결과를 낸다(3.8.4절, AD8). 서버가 오디오 길이·마커 같은 메타데이터만 읽는 경우는 `Audio`의 플랫폼 데이터 헤더 해석으로 충분하다. 쿠킹된 서버 패키지에는 오디오 payload를 넣지 않는다(3.11.5절).
 - `Audio`는 World·Engine·AssetRuntime·Object를 모른다. 공개 헤더에 장치·코덱 라이브러리 타입을 두지 않는다. `EngineAudio`가 Object 세계와 `Audio`를 잇는다. UE는 Engine과 AudioMixer가 서로 의존하지만 Rocks는 단방향이다(7절).
-- backend·디코더 연결: `AudioMiniaudio`의 모듈 `Startup`이 [모듈 로더](ModuleLoader.ko.md) `HostServices`에 `AudioOutputBackendFactory`를 등록하고, `AudioOpus`는 `AudioDecoderTable`에 디코더를 등록한다. `AudioEngineSubsystem`은 `HostServices::Find`로 factory를 찾고, 없으면(서버·모듈 미적재) `NullAudioOutput`을 쓴다. 호스트(Launch·Sandbox)는 ClientOnly 모듈을 직접 참조하지 않는다. Engine 모듈이 graphics·window를 모르는 원칙(EngineRuntime)과 같다.
+- backend·디코더 연결: `AudioMiniaudio`의 모듈 `Startup`이 [모듈 로더](ModuleLoader/README.ko.md) `HostServices`에 `AudioOutputBackendFactory`를 등록하고, `AudioOpus`는 `AudioDecoderTable`에 디코더를 등록한다. `AudioEngineSubsystem`은 `HostServices::Find`로 factory를 찾고, 없으면(서버·모듈 미적재) `NullAudioOutput`을 쓴다. 호스트(Launch·Sandbox)는 ClientOnly 모듈을 직접 참조하지 않는다. Engine 모듈이 graphics·window를 모르는 원칙(EngineRuntime)과 같다.
 
 버린 안: UE처럼 SignalProcessing·AudioExtensions·AudioPlatformConfiguration·SoundFieldRendering을 처음부터 따로 둔다. 쓰는 곳이 하나뿐인 경계를 미리 만들면 이동 비용만 생긴다. 두 번째 사용자가 생기면 동작 불변 이동 커밋으로 나눈다.
 

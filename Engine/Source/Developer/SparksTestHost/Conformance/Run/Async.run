@@ -301,7 +301,7 @@ advance 0.1 -> ok (0 suspended)
 stats -> waits 0, suspended 0, skipped 4
 Timer.TryGroup(#12) -> suspended (27 steps)
 advance 0.1 -> ok (0 suspended)
-  resume #12 Timer.TryLater -> ended error(3) (13 steps)
+  resume #12 Timer.TryLater -> ended error(1) (13 steps)
   resume #12 Timer.TryGroup -> ok (4 steps)
   log info "try group"
 Timer.Maybe(#12) -> suspended (11 steps)

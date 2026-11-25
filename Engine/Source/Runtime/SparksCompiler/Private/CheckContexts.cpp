@@ -4,7 +4,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 실행 문맥·효과·attribute 규칙이다(Docs/Design/SparksLanguage.ko.md 3.13절): attribute 이름·자리·
+// 실행 문맥·효과·attribute 규칙이다(Docs/Design/SparksLanguage 3.13절): attribute 이름·자리·
 // 중복·인자(S0620–S0623), `async` 밖의 `await`(S0601), 문맥이 금지하는 효과(S0602 — 호출 그래프의
 // 전이 폐포), `while`의 대기(S0603). Rules 단계(LC3)에서만 돈다.
 
@@ -537,8 +537,10 @@ void TypeChecker::CheckAttributes(uint32 module) noexcept {
         const SyntaxNode& entry = tree.Node(node);
         switch (entry.kind) {
         case SyntaxKind::Function:
+            // `@test`는 인자·반환 타입이 없는 최상위 함수다(SparksTools 9.1절 — 실행기가 반환 값을
+            // 보지 않으므로 `Result` 오류 반환이 조용히 통과하지 않게).
             CheckAttributeList(context, node, AttributePlace::TopFunction, false,
-                               !hasParameters(node), false);
+                               !hasParameters(node) && tree.Child(node, 4) == NoNode, false);
             break;
         case SyntaxKind::ExtensionEvent:
             CheckAttributeList(context, node, AttributePlace::Event, false, false, false);

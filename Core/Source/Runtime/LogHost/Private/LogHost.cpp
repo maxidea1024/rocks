@@ -1,5 +1,7 @@
 #include <LogHost/LogHost.h>
 
+#include "LogcatSink.h"
+
 #include <Compression/FixedWorkspaceCompressor.h>
 #include <Core/Diagnostics/Log.h>
 #include <Crypto/Bytes.h>
@@ -281,6 +283,15 @@ Result<void> LogHost::StartWith(const LogSystemConfig& preset, bool settings,
     if (auto added = logs_->AddSink(*stderr_); !added) {
         Stop();
         return added;
+    }
+
+    // Android는 stderr 옆에 logcat에도 쓴다(APK에는 stderr를 보는 사람이 없다 —
+    // Docs/Design/AndroidPlatform.ko.md 6절).
+    if (RuntimeLogSink* logcat = detail::AndroidLogcatSink(); logcat != nullptr) {
+        if (auto added = logs_->AddSink(*logcat); !added) {
+            Stop();
+            return added;
+        }
     }
 
     if (settings) {

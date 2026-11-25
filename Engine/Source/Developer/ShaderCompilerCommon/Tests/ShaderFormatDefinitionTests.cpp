@@ -2,6 +2,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/File.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
+#include <Base/InitializerList.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
@@ -104,8 +105,33 @@ bool FailsWith(const char* id, const char* from, const char* to, ShaderFormatErr
     return matches;
 }
 
-const ShaderFormatDefinition* Find(const EngineCompileProfile& profile, const char* id) noexcept {
-    for (const ShaderFormatDefinition& definition : profile.Formats()) {
+// 저장소 형식 정의 몇 개를 읽어 둔 묶음이다(엔진 컴파일 프로필은 개정 32에서 없앴다).
+struct LoadedFormats {
+    static constexpr usize Capacity = 8;
+
+    bool Load(std::initializer_list<const char*> ids) noexcept {
+        for (const char* id : ids) {
+            if (count == Capacity ||
+                !LoadShaderFormatDefinition(ShaderFormatDirectory, id, formats[count])) {
+                return false;
+            }
+
+            ++count;
+        }
+
+        return true;
+    }
+
+    Span<const ShaderFormatDefinition> Formats() const noexcept {
+        return Span<const ShaderFormatDefinition>(formats, count);
+    }
+
+    ShaderFormatDefinition formats[Capacity] = {};
+    usize count = 0;
+};
+
+const ShaderFormatDefinition* Find(const LoadedFormats& loaded, const char* id) noexcept {
+    for (const ShaderFormatDefinition& definition : loaded.Formats()) {
         if (definition.Id() == StringView(id)) {
             return &definition;
         }
@@ -116,7 +142,6 @@ const ShaderFormatDefinition* Find(const EngineCompileProfile& profile, const ch
 
 struct DirectoryScan {
     usize definitions = 0;
-    usize profiles = 0;
     usize failures = 0;
 };
 
@@ -129,15 +154,6 @@ bool VisitConfig(const platform::DirectoryEntry& entry, void* context) noexcept 
     }
 
     const StringView id(entry.name, entry.nameBytes - Extension.ByteCount());
-    if (id.StartsWith("Engine-", StringComparison::CaseSensitive)) {
-        EngineCompileProfile profile;
-        const ShaderFormatStatus loaded =
-            LoadEngineCompileProfile(ShaderFormatDirectory, id, profile);
-        scan.failures += loaded ? 0 : 1;
-        ++scan.profiles;
-        return true;
-    }
-
     ShaderFormatDefinition definition;
     const ShaderFormatStatus loaded =
         LoadShaderFormatDefinition(ShaderFormatDirectory, id, definition);
@@ -154,26 +170,20 @@ bool VisitConfig(const platform::DirectoryEntry& entry, void* context) noexcept 
 } // namespace
 
 TEST(ShaderFormat_RepositoryDirectoryParses) {
-    // 모든 형식 정의(자리만 둔 둘 포함)와 엔진 프로필 둘이 파일 이름 = id로 읽힌다.
+    // 모든 형식 정의(자리만 둔 둘 포함)가 파일 이름 = id로 읽힌다(엔진 컴파일 프로필 파일은 없다).
     DirectoryScan scan;
     REQUIRE(platform::PhysicalFileSystem().EnumerateDirectory(
         ShaderFormatDirectory, strlen(ShaderFormatDirectory), VisitConfig, &scan));
     CHECK(scan.definitions == 8u);
-    CHECK(scan.profiles == 2u);
     CHECK(scan.failures == 0u);
 }
 
-TEST(ShaderFormat_EngineWindowsProfileCarriesDecisionsAndMeasurements) {
-    EngineCompileProfile profile;
-    const ShaderFormatStatus loaded =
-        LoadEngineCompileProfile(ShaderFormatDirectory, "Engine-Windows", profile);
-    REQUIRE(loaded);
-    CHECK(profile.host == ShaderHost::WindowsX64);
-    REQUIRE(profile.formatCount == 5u);
-    const char* const order[] = {"D3D12_SM6", "D3D11_SM5", "VULKAN_SM5", "GLES31_PC",
-                                 "GLES31_ANDROID"};
-    for (usize index = 0; index < profile.formatCount; ++index) {
-        CHECK(profile.formats[index].Id() == StringView(order[index]));
+TEST(ShaderFormat_WindowsFormatsCarryDecisionsAndMeasurements) {
+    LoadedFormats profile;
+    REQUIRE(profile.Load({"D3D12_SM6", "D3D11_SM5", "VULKAN_SM5", "GLES31_PC", "GLES31_ANDROID"}));
+    for (const ShaderFormatDefinition& format : profile.Formats()) {
+        CHECK(format.state == ShaderFormatState::Supported);
+        CHECK(format.CanProduceOn(ShaderHost::WindowsX64));
     }
 
     // 결정 3: D3D12 SM 6.6(S2: 이 기계 GPU·WARP는 Agility SDK 없이 6.8).
@@ -184,6 +194,18 @@ TEST(ShaderFormat_EngineWindowsProfileCarriesDecisionsAndMeasurements) {
     CHECK((d3d12->deviceRequirements & DeviceRequiresD3D12ShaderModel6_6) != 0);
     CHECK((d3d12->features & ShaderFeatureWaveOperations) != 0);
     CHECK(d3d12->compiler.imageFormat == ImageFormatExpansion::Empty);
+    // 개정 29(E8): typedUavLoad는 장치 보장 기능이고 D3D12만 장치 요구로 보장한다.
+    CHECK((d3d12->features & ShaderFeatureTypedUavLoad) != 0);
+    CHECK((d3d12->deviceRequirements & DeviceRequiresD3D12TypedUavLoadAdditionalFormats) != 0);
+    CHECK(!IsRuntimeCheckedShaderFeature(ShaderFeatureTypedUavLoad));
+    for (const char* id : {"D3D11_SM5", "VULKAN_SM5", "GLES31_PC", "GLES31_ANDROID"}) {
+        const ShaderFormatDefinition* other = Find(profile, id);
+        REQUIRE(other != nullptr);
+        CHECK((other->features & ShaderFeatureTypedUavLoad) == 0);
+    }
+
+    CHECK(StringView(ImageFormatName(ImageFormatIndex("r11g11b10f"))) == "r11g11b10f");
+    CHECK(StringView(ImageFormatName(IndexNone)) == "unknown");
 
     // 결정 2: HLSL 2021은 D3D12·Vulkan·Metal 켬, D3D11 끔(D3D11의 2021 셰이더는 SPIRV-Cross 경로).
     const ShaderFormatDefinition* d3d11 = Find(profile, "D3D11_SM5");
@@ -243,11 +265,10 @@ TEST(ShaderFormat_EngineWindowsProfileCarriesDecisionsAndMeasurements) {
     CHECK(!IsRuntimeCheckedShaderFeature(ShaderFeatureWaveOperations));
 }
 
-TEST(ShaderFormat_EngineMacProfileUsesSystemMetalTools) {
-    EngineCompileProfile profile;
-    REQUIRE(LoadEngineCompileProfile(ShaderFormatDirectory, "Engine-MacOS", profile));
-    CHECK(profile.host == ShaderHost::MacosArm64);
-    REQUIRE(profile.formatCount == 2u);
+TEST(ShaderFormat_MetalUsesSystemMetalTools) {
+    LoadedFormats profile;
+    REQUIRE(profile.Load({"METAL_SM5", "GLES31_ANDROID"}));
+    CHECK(Find(profile, "GLES31_ANDROID")->CanProduceOn(ShaderHost::MacosArm64));
     const ShaderFormatDefinition* metal = Find(profile, "METAL_SM5");
     REQUIRE(metal != nullptr);
     CHECK((metal->features & ShaderFeatureVertexViewportLayerOutput) != 0);
@@ -272,7 +293,7 @@ TEST(ShaderFormat_RejectsUnknownProperties) {
     CHECK(FailsWith("D3D12_SM6", "\"shaderModel\": \"6_6\",",
                     "\"shaderModel\": \"6_6\", \"esslVersion\": 320,",
                     ShaderFormatErrorCode::UnknownProperty, "compiler.esslVersion"));
-    CHECK(FailsWith("D3D12_SM6", "\"version\": 1 }", "\"version\": 1, \"name\": \"x\" }",
+    CHECK(FailsWith("D3D12_SM6", "\"version\": 4 }", "\"version\": 4, \"name\": \"x\" }",
                     ShaderFormatErrorCode::UnknownProperty, "processor.name"));
     // uniformVectors는 GLES 에뮬레이션만의 상한이다.
     CHECK(FailsWith("VULKAN_SM5", "\"rootConstantBytes\": 128",
@@ -365,63 +386,6 @@ TEST(ShaderFormat_RejectsInconsistentValues) {
     CHECK(traversal.code == ShaderFormatErrorCode::InvalidValue);
 }
 
-TEST(ShaderFormat_ProfileFormatsMustResolve) {
-    ShaderFormatDefinition d3d12;
-    ShaderFormatDefinition d3d11;
-    ShaderFormatDefinition placeholder;
-    REQUIRE(LoadShaderFormatDefinition(ShaderFormatDirectory, "D3D12_SM6", d3d12));
-    REQUIRE(LoadShaderFormatDefinition(ShaderFormatDirectory, "D3D11_SM5", d3d11));
-    REQUIRE(LoadShaderFormatDefinition(ShaderFormatDirectory, "VULKAN_ANDROID", placeholder));
-    CHECK(placeholder.state == ShaderFormatState::Placeholder);
-    const ShaderFormatDefinition available[] = {d3d12, d3d11, placeholder};
-
-    struct Case {
-        const char* json;
-        ShaderFormatErrorCode code;
-    };
-
-    const Case cases[] = {
-        {"{\"schema\": 1, \"id\": \"P\", \"host\": \"windows-x64\", \"formats\": [\"D3D12_SM6\"]}",
-         ShaderFormatErrorCode::None},
-        {"{\"schema\": 1, \"id\": \"P\", \"host\": \"windows-x64\", \"formats\": [\"METAL_SM5\"]}",
-         ShaderFormatErrorCode::UnknownFormat},
-        {"{\"schema\": 1, \"id\": \"P\", \"host\": \"windows-x64\", \"formats\": "
-         "[\"VULKAN_ANDROID\"]}",
-         ShaderFormatErrorCode::PlaceholderFormat},
-        // DXBC는 Windows만 만든다(FXC).
-        {"{\"schema\": 1, \"id\": \"P\", \"host\": \"macos-arm64\", \"formats\": [\"D3D11_SM5\"]}",
-         ShaderFormatErrorCode::HostCannotProduce},
-    };
-    for (const Case& test : cases) {
-        EngineCompileProfileDesc desc;
-        REQUIRE(ParseEngineCompileProfile(Text(test.json), "P", desc));
-        EngineCompileProfile profile;
-        const ShaderFormatStatus resolved = ResolveEngineCompileProfile(desc, available, profile);
-        CHECK(resolved.code == test.code);
-    }
-
-    EngineCompileProfileDesc desc;
-    CHECK(ParseEngineCompileProfile(
-              Text("{\"schema\": 1, \"id\": \"P\", \"host\": \"windows-x64\", \"formats\": "
-                   "[\"D3D12_SM6\"], \"graphicsBackends\": []}"),
-              "P", desc)
-              .code == ShaderFormatErrorCode::UnknownProperty);
-    CHECK(ParseEngineCompileProfile(
-              Text("{\"schema\": 1, \"id\": \"P\", \"host\": \"windows-x64\", \"formats\": "
-                   "[\"D3D12_SM6\", \"D3D12_SM6\"]}"),
-              "P", desc)
-              .code == ShaderFormatErrorCode::DuplicateValue);
-    CHECK(ParseEngineCompileProfile(
-              Text("{\"schema\": 1, \"id\": \"P\", \"host\": \"windows-x64\", \"formats\": []}"),
-              "P", desc)
-              .code == ShaderFormatErrorCode::InvalidValue);
-    CHECK(ParseEngineCompileProfile(
-              Text("{\"schema\": 1, \"id\": \"Q\", \"host\": \"windows-x64\", \"formats\": "
-                   "[\"D3D12_SM6\"]}"),
-              "P", desc)
-              .code == ShaderFormatErrorCode::IdMismatch);
-}
-
 TEST(ShaderFormat_DefinitionDigestFollowsFileBytes) {
     // job 키 3항 입력: 같은 byte는 같은 SHA-256, 값 하나·공백 하나만 바뀌어도 다른 SHA-256이다.
     const Array<uint8> original = ReadConfig("VULKAN_SM5");
@@ -435,7 +399,7 @@ TEST(ShaderFormat_DefinitionDigestFollowsFileBytes) {
     const char* const changes[][2] = {
         {"\"storageImages\": 4,", "\"storageImages\": 3,"},
         {"\"hlsl2021\": true", "\"hlsl2021\": false"},
-        {"\"version\": 1 }", "\"version\": 2 }"},
+        {"\"version\": 4 }", "\"version\": 5 }"},
         {"\"bindingConvention\": 1,", "\"bindingConvention\":  1,"},
     };
     for (const auto& change : changes) {
@@ -445,11 +409,5 @@ TEST(ShaderFormat_DefinitionDigestFollowsFileBytes) {
         REQUIRE(ParseShaderFormatDefinition(changed.View(), "VULKAN_SM5", definition));
         CHECK(!(definition.sha256 == first.sha256));
     }
-
-    // 엔진 프로필 SHA-256도 파일 byte다.
-    EngineCompileProfile profile;
-    REQUIRE(LoadEngineCompileProfile(ShaderFormatDirectory, "Engine-MacOS", profile));
-    CHECK(profile.sha256 == Sha256::Hash(ReadConfig("Engine-MacOS").View()));
-    CHECK(profile.formats[0].sha256 == Sha256::Hash(ReadConfig("METAL_SM5").View()));
 }
 } // namespace shader_format_definition_tests_file

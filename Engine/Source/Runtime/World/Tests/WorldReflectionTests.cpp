@@ -260,9 +260,10 @@ TEST(WorldReflection_TypesAreWorldOnlyReflectedClasses) {
         {ObjectTypeIdOf<Level>(), TypeId{}, 2},
         {ObjectTypeIdOf<Actor>(), TypeId{}, 4},
         {ObjectTypeIdOf<Component>(), TypeId{}, 2},
-        {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 3},
+        // SceneComponent: relativeTransform + CM0b 부착·절대·Mobility·가시성 8개(23.3절) + 상속 tickSettings.
+        {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 11},
         {ObjectTypeIdOf<SaveActor>(), ObjectTypeIdOf<Actor>(), 7},
-        {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 5},
+        {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 13},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);

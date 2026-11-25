@@ -3,8 +3,12 @@
 #include <Core/Memory/FrameArena.h>
 #include <Core/Move.h>
 #include <Graphics/Device.h>
+#include <RenderBase/ComputeDispatch.h>
+#include <RenderBase/FullscreenPass.h>
 #include <RenderBase/GpuTrace.h>
+#include <RenderBase/PipelineCache.h>
 #include <RenderBase/RenderHandle.h>
+#include <RenderBase/ShaderParameters.h>
 #include <RenderGraph/GraphPassAccesses.h>
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/GraphSharedData.h>
@@ -12,7 +16,7 @@
 #include <Task/WorkerScheduler.h>
 #include <TraceCapture/TraceCpuScope.h>
 
-// 렌더 그래프다(Docs/Design/RenderBase.ko.md 7·8절 RG1·RG2, UE FRDGBuilder 대응).
+// 렌더 그래프다(Docs/Design/RenderBase 7·8절 RG1·RG2, UE FRDGBuilder 대응).
 namespace rocks::render {
 
 class RenderFrameContext;
@@ -41,6 +45,24 @@ public:
     // 이 pass가 TextureView로 선언한 view의 장치 view다(읽기는 SetTexture, 쓰기는
     // SetWritableTexture로 묶는다). 선언하지 않은 view는 null이다.
     graphics::TextureHandle View(GraphTextureView view) const noexcept;
+
+    // 이 pass가 BufferView로 선언한 버퍼 view의 장치 view다(읽기는 SetBufferView, 쓰기는
+    // SetWritableBufferView로 묶는다). 선언하지 않은 view는 null이다.
+    graphics::BufferViewHandle View(GraphBufferView view) const noexcept;
+
+    // 그래프 상수(RenderGraph::CreateConstants)의 장치 상수 버퍼다. 다른 그래프의 handle이면
+    // null이다. 어느 pass에서나 읽을 수 있다(접근 선언 없음, Docs/Design/RenderBase 9.11절 8항).
+    graphics::ConstantBufferHandle Constants(GraphConstantBuffer constants) const noexcept;
+
+    // 그래프 상수를 바인딩 지도의 단계 자리마다 묶는다(ApplyConstantBuffer). 실패: 다른 그래프의
+    // handle·루트 상수 표 InvalidArgument.
+    //
+    // 사용 예:
+    //   auto view = graph.CreateConstants(viewBlock, "View");      // 선언(소유 스레드)
+    //   ... AddPass(..., [=](GraphPassContext& pass) noexcept { pass.SetConstants(viewMap,
+    //   view.Value()); ... });
+    Result<void> SetConstants(const ShaderBindingMap& map,
+                              GraphConstantBuffer constants) const noexcept;
 
     // view의 기준 mip이다(graphics::TextureViewBaseMip: 범위 view를 지원하는 장치는 0, OpenGL ES는
     // view의 첫 mip). 셰이더는 이 값을 그리기별 상수로 받아 명시 LOD로 읽는다(7.5절). 선언하지 않은
@@ -144,6 +166,17 @@ struct RenderGraphDesc {
     // async compute pass가 쓰는 자원도 aliasing한다(기본 끔, 1차). 켜면 그 자원은 fork·join으로
     // 넓힌 수명으로 할당한다.
     bool asyncComputeAliasing = false;
+};
+
+// compute pass 하나의 dispatch다(RenderGraph::AddComputePass, Docs/Design/RenderBase 4.4절 "GX3·GX4
+// compute 연결 설계" (4)). indirectArguments가 null이면 groups로 직접 dispatch하고(빈 그룹 수면
+// 아무것도 기록하지 않는다), 아니면 그 버퍼 [indirectOffset]의 DispatchIndirectArguments로 간접
+// dispatch한다.
+struct GraphComputeDispatch {
+    graphics::PipelineHandle pipeline;
+    ComputeGroupCount groups;
+    GraphBuffer indirectArguments;
+    uint64 indirectOffset = 0;
 };
 
 // 렌더 lane 프레임 작업에서 그래프 설정을 만든다: 장치·handle 표·그 slot의 프레임 arena·프레임
@@ -265,6 +298,34 @@ public:
     // 내용은 정해지지 않는다(업로드하거나 pass가 쓴다).
     Result<GraphBuffer> CreateBuffer(const graphics::BufferDesc& desc, const char* name) noexcept;
 
+    // 그래프 버퍼(또는 import 버퍼)의 view를 선언한다(UE CreateSRV·CreateUAV의 버퍼 판). desc는
+    // graphics::BufferViewDesc 규칙(종류·접근·형식·원소 범위)이다. pass는
+    // GraphPassAccesses::BufferView로 선언하고 GraphPassContext::View로 장치 view를 받는다. 장치
+    // view는 그 view를 처음 쓰는 pass 직전에 만들고 그래프 끝에 Retire한다. 실패: 다른 그래프
+    // handle·만든 버퍼의 view 규칙 위반(graphics::ResolveBufferView) InvalidArgument(검증 오류),
+    // arena 할당 실패는 그 오류다. import 버퍼의 규칙·장치 한도는 장치 view 생성이 확인한다(실행
+    // 오류).
+    //
+    // 사용 예(compute가 쓰고 다음 pass가 읽는 구조화 버퍼):
+    //   graphics::BufferViewDesc write{.kind = graphics::BufferViewKind::Structured,
+    //                                  .access = graphics::ViewAccess::ReadWrite};
+    //   auto itemsWrite = graph.CreateBufferView(items, write);
+    Result<GraphBufferView> CreateBufferView(GraphBuffer buffer,
+                                             const graphics::BufferViewDesc& desc) noexcept;
+
+    // --- 그래프 상수(Docs/Design/RenderBase 9.11절 8항, UE CreateUniformBuffer 대응) ---
+
+    // 그래프 수명 상수 버퍼를 선언한다. bytes는 이 호출 안에서 프레임 arena에 복사한다. 장치
+    // SingleFrame 상수 버퍼는 실행 시작(Immediate는 이 호출)에 만들고 그래프 끝에 Retire한다.
+    // pass는 GraphPassContext::Constants·SetConstants로 묶는다. name은 정적 수명 문자열(진단)이다.
+    // 실패: 크기 규칙 위반(graphics::IsValidConstantBufferBytes) InvalidArgument(검증 오류),
+    // Execute 뒤 Busy, arena 할당 실패는 그 오류, 장치 생성 실패는 그 오류(그래프 오류 — Execute가
+    // 돌려준다).
+    Result<GraphConstantBuffer> CreateConstants(Span<const uint8> bytes, const char* name) noexcept;
+    // 상수 블록의 지금 값으로 선언한다(블록의 장치 버퍼는 쓰지 않는다).
+    Result<GraphConstantBuffer> CreateConstants(const ConstantBlock& block,
+                                                const char* name) noexcept;
+
     // --- 그래프 안 업로드(RG2, UE QueueBufferUpload 대응) ---
     //
     // 만든 자원에 CPU 데이터를 올린다고 선언한다. 데이터는 이 호출 안에서 프레임 arena에 복사한다
@@ -330,6 +391,69 @@ public:
                                           const GraphRenderTarget& target,
                                           GraphPassExecutor* executor) noexcept;
 
+    // compute pass를 넣는다(UE FComputeShaderUtils::AddPass, Docs/Design/RenderBase 4.4절 "GX3·GX4
+    // compute 연결 설계" (4)). 기록 순서는 SetPipeline → bind(pass) → Dispatch·DispatchIndirect다.
+    // bind는 void(GraphPassContext&) noexcept 람다이며 view·상수를 묶는다. 간접 dispatch면 인자
+    // 버퍼를 이 pass의 IndirectArgs 접근으로 accesses에 더한다(이미 같은 선언이 있으면 더하지
+    // 않는다). kind는 Compute·AsyncCompute다(AsyncCompute의 실행 pipe는 그래프가 정한다, RG4).
+    // 실패(검증 오류, 그 뒤 Execute는 InvalidArgument): kind가 Compute·AsyncCompute가 아님,
+    // pipeline null, 그룹 수가 장치 한도 밖(ValidateGroupCount), 인자 버퍼가 다른 그래프의 것,
+    // 만든 인자 버퍼의 ValidateDispatchArguments 위반, import 인자 버퍼의 offset이 4 byte 배수가
+    // 아님. 그 밖은 AddPass와 같다.
+    //
+    // 사용 예(그룹 8 × 8, Storage 텍스처에 쓴다):
+    //   GraphPassAccesses accesses(graph);
+    //   accesses.TextureView(targetWrite, graphics::ResourceAccess::UavCompute);
+    //   GraphComputeDispatch dispatch;
+    //   dispatch.pipeline = pipeline;
+    //   dispatch.groups = GroupCountFor(w, h, ComputeGroupSize2D, ComputeGroupSize2D);
+    //   graph.AddComputePass(FillName, GraphPassKind::Compute, GraphPassFlags::None, accesses,
+    //                        dispatch, [=](GraphPassContext& pass) noexcept {
+    //                            pass.Commands().SetWritableTexture(0, pass.View(targetWrite));
+    //                        });
+    template <class Bind>
+    Result<GraphPass> AddComputePass(TraceScopeName& name, GraphPassKind kind, GraphPassFlags flags,
+                                     GraphPassAccesses& accesses,
+                                     const GraphComputeDispatch& dispatch, Bind&& bind) noexcept;
+
+    // 위의 캐시 판이다: 이 자리(소유 스레드)에서 cache.FindOrCreate(request)로 파이프라인을 얻어
+    // dispatch.pipeline을 채운다(기록 함수는 worker에서 돌 수 있어 장치 생성을 하지 않는다, RG3).
+    // 파이프라인 실패는 그 오류를 돌려주고 그래프 오류로 남긴다(그 뒤 Execute가 그 오류를
+    // 돌려준다).
+    template <class Bind>
+    Result<GraphPass> AddComputePass(TraceScopeName& name, GraphPassKind kind, GraphPassFlags flags,
+                                     GraphPassAccesses& accesses, PipelineCache& cache,
+                                     const ComputePipelineRequest& request,
+                                     GraphComputeDispatch dispatch, Bind&& bind) noexcept;
+
+    // 전체화면 pass를 넣는다(UE FPixelShaderUtils::AddFullscreenPass, Docs/Design/RenderBase 11.4절
+    // 3항). Raster pass이고 기록 순서는 SetPipeline → bind(pass) → Draw(3)(정점 버퍼 없음 — VS는
+    // 엔진 셰이더 FullscreenTriangleVertex, RenderBase/FullscreenPass.h)다. 렌더 타깃은 accesses의
+    // attachment 선언이다. bind는 void(GraphPassContext&) noexcept 람다이며 텍스처·상수를 묶는다.
+    // 실패(검증 오류, 그 뒤 Execute는 InvalidArgument): pipeline null, accesses에 렌더 타깃이 없음.
+    // 그 밖은 AddPass와 같다.
+    //
+    // 사용 예(HDR 장면 색을 출력에 복사한다):
+    //   GraphPassAccesses accesses(graph);
+    //   accesses.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
+    //       .RenderTarget(output, GraphLoadAction::DontCare);
+    //   graph.AddFullscreenPass(CopyName, GraphPassFlags::None, accesses, cache, copyRequest,
+    //                           [=](GraphPassContext& pass) noexcept {
+    //                               pass.Commands().SetTexture(pass.Texture(sceneColor));
+    //                           });
+    template <class Bind>
+    Result<GraphPass> AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                                        const GraphPassAccesses& accesses,
+                                        graphics::PipelineHandle pipeline, Bind&& bind) noexcept;
+
+    // 위의 캐시 판이다: 이 자리(소유 스레드)에서 cache.FindOrCreate(request)로 파이프라인을 얻는다.
+    // 파이프라인 실패는 그 오류를 돌려주고 그래프 오류로 남긴다.
+    template <class Bind>
+    Result<GraphPass> AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                                        const GraphPassAccesses& accesses, PipelineCache& cache,
+                                        const GraphicsPipelineRequest& request,
+                                        Bind&& bind) noexcept;
+
     // 그래프를 실행한다(Deferred: culling·수명·전이 계산 → 선언 순서 실행, Immediate: 마무리).
     // 마지막 전이·제출(EndFrame), 풀 반환·export handle 연결·lease 반환·풀 축출까지 한다. 한 번만
     // 부른다. 실패: 앞선 검증 오류 InvalidArgument, 다시 부르면 Busy, 장치 실패는 그 오류(그래도
@@ -378,6 +502,19 @@ private:
     // 실행기를 arena에 만든다. 실패하면 null이다.
     template <class Execute>
     GraphPassExecutor* MakeExecutor(Execute&& execute) noexcept;
+
+    // AddComputePass의 검사다(실패는 검증 오류로 남긴다). 간접이면 accesses에 IndirectArgs 접근을
+    // 더한다.
+    Result<void> CheckComputeDispatch(TraceScopeName& name, GraphPassKind kind,
+                                      const GraphComputeDispatch& dispatch,
+                                      GraphPassAccesses& accesses) noexcept;
+    // 캐시 판의 파이프라인 실패를 그래프 오류로 남기고 code를 돌려준다.
+    ErrorCode RecordComputePipelineFailure(TraceScopeName& name, ErrorCode code) noexcept;
+    // AddFullscreenPass의 검사다(실패는 검증 오류로 남긴다).
+    Result<void> CheckFullscreenPass(TraceScopeName& name, const GraphPassAccesses& accesses,
+                                     graphics::PipelineHandle pipeline) noexcept;
+    // 전체화면 캐시 판의 파이프라인 실패를 그래프 오류로 남기고 code를 돌려준다.
+    ErrorCode RecordFullscreenPipelineFailure(TraceScopeName& name, ErrorCode code) noexcept;
 
     FrameArena& arena_;
     detail::GraphState* state_ = nullptr;
@@ -449,6 +586,79 @@ Result<GraphPass> RenderGraph::AddPass(TraceScopeName& name, GraphPassKind kind,
     }
 
     return AddPassWithAccesses(name, kind, flags, accesses.Accesses(), accesses.Target(), executor);
+}
+
+template <class Bind>
+Result<GraphPass> RenderGraph::AddComputePass(TraceScopeName& name, GraphPassKind kind,
+                                              GraphPassFlags flags, GraphPassAccesses& accesses,
+                                              const GraphComputeDispatch& dispatch,
+                                              Bind&& bind) noexcept {
+    auto checked = CheckComputeDispatch(name, kind, dispatch, accesses);
+    if (!checked) {
+        return Result<GraphPass>::Failure(checked.Error());
+    }
+
+    return AddPass(name, kind, flags, accesses,
+                   [dispatch, bound = Forward<Bind>(bind)](GraphPassContext& pass) noexcept {
+                       graphics::CommandContext& commands = pass.Commands();
+                       auto apply = [&bound, &pass](graphics::CommandContext&) noexcept {
+                           bound(pass);
+                       };
+                       if (dispatch.indirectArguments.IsNull()) {
+                           DispatchCompute(commands, dispatch.pipeline, dispatch.groups, apply);
+                       } else {
+                           DispatchComputeIndirect(commands, dispatch.pipeline,
+                                                   pass.Buffer(dispatch.indirectArguments),
+                                                   dispatch.indirectOffset, apply);
+                       }
+                   });
+}
+
+template <class Bind>
+Result<GraphPass> RenderGraph::AddComputePass(TraceScopeName& name, GraphPassKind kind,
+                                              GraphPassFlags flags, GraphPassAccesses& accesses,
+                                              PipelineCache& cache,
+                                              const ComputePipelineRequest& request,
+                                              GraphComputeDispatch dispatch, Bind&& bind) noexcept {
+    auto pipeline = cache.FindOrCreate(request);
+    if (!pipeline) {
+        return Result<GraphPass>::Failure(RecordComputePipelineFailure(name, pipeline.Error()));
+    }
+
+    dispatch.pipeline = pipeline.Value();
+    return AddComputePass(name, kind, flags, accesses, dispatch, Forward<Bind>(bind));
+}
+
+template <class Bind>
+Result<GraphPass> RenderGraph::AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                                                 const GraphPassAccesses& accesses,
+                                                 graphics::PipelineHandle pipeline,
+                                                 Bind&& bind) noexcept {
+    auto checked = CheckFullscreenPass(name, accesses, pipeline);
+    if (!checked) {
+        return Result<GraphPass>::Failure(checked.Error());
+    }
+
+    return AddPass(name, GraphPassKind::Raster, flags, accesses,
+                   [pipeline, bound = Forward<Bind>(bind)](GraphPassContext& pass) noexcept {
+                       graphics::CommandContext& commands = pass.Commands();
+                       commands.SetPipeline(pipeline);
+                       bound(pass);
+                       DrawFullscreenTriangle(commands);
+                   });
+}
+
+template <class Bind>
+Result<GraphPass>
+RenderGraph::AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,
+                               const GraphPassAccesses& accesses, PipelineCache& cache,
+                               const GraphicsPipelineRequest& request, Bind&& bind) noexcept {
+    auto pipeline = cache.FindOrCreate(request);
+    if (!pipeline) {
+        return Result<GraphPass>::Failure(RecordFullscreenPipelineFailure(name, pipeline.Error()));
+    }
+
+    return AddFullscreenPass(name, flags, accesses, pipeline.Value(), Forward<Bind>(bind));
 }
 
 } // namespace rocks::render

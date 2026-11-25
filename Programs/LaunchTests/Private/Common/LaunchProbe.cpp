@@ -178,6 +178,38 @@ int WriteAllocatorState(ApplicationContext& context) noexcept {
     return clean ? 0 : 1;
 }
 
+// 메인 스레드 호스트 시험(--thread-host, Docs/Design/MacPlatform.ko.md 3절)이다. 호스트는 본문을 새
+// 스레드에서 돌리고 join한 뒤 본문의 반환값을 돌려준다. Cocoa run loop 대신 join만 하는 호스트다.
+uint64 hostThreadId = 0;
+
+struct HostedBody {
+    int (*body)(void*) noexcept = nullptr;
+    void* context = nullptr;
+    int exitCode = 0;
+};
+
+void RunHostedBody(void* raw) noexcept {
+    auto& hosted = *static_cast<HostedBody*>(raw);
+    hosted.exitCode = hosted.body(hosted.context);
+}
+
+int ProbeMainThreadHost(int (*body)(void*) noexcept, void* context) noexcept {
+    hostThreadId = platform::CurrentThreadId();
+    WriteProbeLine("LAUNCH HOST STARTED");
+    HostedBody hosted{body, context, 0};
+    platform::Thread thread;
+    platform::ThreadOptions options;
+    options.name = "ProbeGameThread";
+    if (thread.Start(&RunHostedBody, &hosted, options) != platform::ThreadStatus::Success ||
+        thread.Join() != platform::ThreadStatus::Success) {
+        WriteProbeLine("LAUNCH HOST THREAD FAILED");
+        return 1;
+    }
+
+    WriteProbeLine("LAUNCH HOST JOINED");
+    return hosted.exitCode;
+}
+
 } // namespace
 
 void WriteProbeLine(const char* text) noexcept {
@@ -216,6 +248,8 @@ void Configure(Span<const StringView> arguments, ApplicationSettings& settings) 
             ResetIgnoredTerminationSignal();
         } else if (Is(argument, "--ignore-sigint")) {
             IgnoreTerminationSignal();
+        } else if (Is(argument, "--thread-host")) {
+            settings.mainThreadHost = &ProbeMainThreadHost;
         }
     }
 }
@@ -238,6 +272,14 @@ int Run(ApplicationContext& context) noexcept {
 
         WriteHexLine("LAUNCH EXE ", context.ExecutablePath());
         return 0;
+    }
+
+    // 본문이 메인 스레드 호스트가 만든 스레드에서 도는지 본다(--thread-host와 함께). 호스트가
+    // 없으면 hostThreadId가 0이라 실패한다.
+    if (Is(mode, "host-thread")) {
+        const bool hosted = hostThreadId != 0 && platform::CurrentThreadId() != hostThreadId;
+        WriteProbeLine(hosted ? "LAUNCH BODY ON HOSTED THREAD" : "LAUNCH BODY ON MAIN THREAD");
+        return hosted ? HostedBodyExitCode : 1;
     }
 
     if (Is(mode, "exit")) {

@@ -1,6 +1,0 @@
-{
-  "schema": 1,
-  "id": "Engine-Windows",
-  "host": "windows-x64",
-  "formats": ["D3D12_SM6", "D3D11_SM5", "VULKAN_SM5", "GLES31_PC", "GLES31_ANDROID"]
-}

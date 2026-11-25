@@ -1,4 +1,5 @@
 #include <Base/Compiler.h>
+#include <Base/InitializerList.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
@@ -78,10 +79,35 @@ public:
         Step("world.tick");
         ++ticks;
         lastDelta = context.deltaSeconds;
+        // World Tick 안의 DestroyWorld는 5단계로 미뤄진다(18.5절).
+        if (destroyEngine != nullptr) {
+            const usize before = destroyEngine->WorldCount();
+            CHECK(destroyEngine->DestroyWorld(destroyTarget).IsOk());
+            CHECK(destroyEngine->WorldCount() == before);
+            destroyEngine = nullptr;
+        }
     }
 
     uint32 ticks = 0;
     double lastDelta = 0.0;
+    static inline Engine* destroyEngine = nullptr;
+    static inline World* destroyTarget = nullptr;
+};
+
+// 정리(Deinitialize) 중에 다른 World 파괴를 요청하는 WorldSubsystem이다(파괴 중 요청은 미뤄진다).
+class TeardownDestroyerSubsystem final : public WorldSubsystem {
+public:
+    void Deinitialize(World&) noexcept override {
+        if (engine != nullptr) {
+            const usize before = engine->WorldCount();
+            CHECK(engine->DestroyWorld(target).IsOk());
+            CHECK(engine->WorldCount() == before);
+            engine = nullptr;
+        }
+    }
+
+    static inline Engine* engine = nullptr;
+    static inline World* target = nullptr;
 };
 
 // SceneComponent(리플렉션 base 두 단계 위)의 native 파생이다. 게임 등록처럼 토큰을 버린다.
@@ -128,8 +154,8 @@ public:
         Step("begin");
         if (destroyAtFrame != 0 && engine.Time().frameIndex == destroyAtFrame && target) {
             CHECK(engine.DestroyWorld(target).IsOk());
-            // 프레임 안에서는 지연되므로 아직 남아 있다.
-            CHECK(engine.WorldCount() == 1);
+            // World Tick 밖(loop hook)에서는 즉시 파괴한다(18.5절).
+            CHECK(engine.WorldCount() == 0);
         }
 
         if (shutdownInsideFrame) {
@@ -155,6 +181,19 @@ public:
         return fail ? Result<void>::Failure(ErrorCode::DependencyFailed) : Result<void>::Success();
     }
 
+    Result<void> OnEngineReady(Engine& engine) noexcept override {
+        Step("client.ready");
+        CHECK(engine.State() == EngineState::Running);
+        if (createWorldOnReady) {
+            WorldCreateDesc desc;
+            desc.name = "Ready";
+            CHECK(engine.CreateWorld(desc).IsOk());
+        }
+
+        return failReady ? Result<void>::Failure(ErrorCode::DependencyFailed)
+                         : Result<void>::Success();
+    }
+
     void OnEngineTick(Engine&) noexcept override {
         Step("client.tick");
     }
@@ -164,6 +203,8 @@ public:
     }
 
     bool fail = false;
+    bool failReady = false;
+    bool createWorldOnReady = false;
 };
 
 class AlphaSubsystem final : public EngineSubsystem {
@@ -244,7 +285,7 @@ TEST(Engine_HeadlessRunExecutesFramesInDocumentedOrder) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 엔진 묶음(Docs/Design/ModuleLoader.ko.md 3.11절, ML1): Engine은 시험 실행기의 프로세스 로더로
+// 엔진 묶음(Docs/Design/ModuleLoader 3.11절, ML1): Engine은 시험 실행기의 프로세스 로더로
 // 엔진 단계 모듈(World·Engine 등)을 시작하고 PostEngineInit 단계를 돈 뒤, Shutdown에서 엔진 묶음을
 // 내리고 자기 타입 등록기를 뗀다. 한 프로세스에서 Engine을 차례로 만들면 매번 시작·종료하고, 동시에
 // 둘이면 처음 Engine이 시작하고 마지막 Engine이 내린다(참조 수, 등록기는 Engine마다).
@@ -509,7 +550,7 @@ TEST(Engine_DuplicateTypeRegistrationFailsInitialization) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(Engine_RequestExitFromHookAndDeferredWorldDestroy) {
+TEST(Engine_RequestExitFromHookAndWorldDestroyOutsideWorldTick) {
     ResetSteps();
     SystemAllocator allocator;
     {
@@ -531,7 +572,7 @@ TEST(Engine_RequestExitFromHookAndDeferredWorldDestroy) {
         REQUIRE(engine.Run());
         CHECK(engine.Time().frameIndex == 5);
         CHECK(engine.WorldCount() == 0);
-        // 파괴를 요청한 3번째 프레임에는 World Tick을 건너뛴다(1·2번째 프레임만 Tick).
+        // 3번째 프레임 시작(BeginFrame)에 바로 파괴되어 1·2번째 프레임만 Tick한다.
         uint32 worldTicks = 0;
         for (uint32 index = 0; index < stepCount; ++index) {
             worldTicks += strcmp(steps[index], "world.tick") == 0 ? 1u : 0u;
@@ -593,7 +634,7 @@ bool Registered(TypeId type) noexcept {
 }
 
 // 리플렉션 모듈 등록: World 타입은 이미 있고(모듈 로더가 World 모듈의 자기 ModuleRegistration에
-// 등록했다 — Docs/Design/ModuleLoader.ko.md 3.10절) fixture 모듈은 아직 없다. 이
+// 등록했다 — Docs/Design/ModuleLoader 3.10절) fixture 모듈은 아직 없다. 이
 // ModuleRegistration에 World를 다시 등록하면 타입은 이미 있어 건너뛰고 모듈 키 기록만 남는다. 같은
 // ModuleRegistration에 한 번 더 부르면 기록이 늘지 않는다(멱등). fixture 모듈 등록도 World를 다시
 // 등록하지 않는다.
@@ -1372,14 +1413,13 @@ TEST(EngineLog_TickPrerequisiteCycleIsRejectedWithActorNames) {
         auto first = main.SpawnActor<TickingActor>();
         auto second = main.SpawnActor<TickingActor>();
         REQUIRE(first && second);
-        // 시작(Tick 등록) 전에는 거부한다.
-        CHECK(main.AddActorTickPrerequisite(first.Value(), second.Value()).Error() ==
-              ErrorCode::InvalidArgument);
+        // 시작(Tick 등록) 전에도 선언할 수 있다(시작 때 적용 — EngineRuntime 15.3절 ERD5).
+        REQUIRE(main.AddTickPrerequisite({first.Value()}, {second.Value()}));
         REQUIRE(engine.RunFrame());
-        REQUIRE(main.AddActorTickPrerequisite(first.Value(), second.Value()));
-        CHECK(main.AddActorTickPrerequisite(first.Value(), first.Value()).Error() ==
+        CHECK(main.AddTickPrerequisite({first.Value()}, {second.Value()}));
+        CHECK(main.AddTickPrerequisite({first.Value()}, {first.Value()}).Error() ==
               ErrorCode::InvalidArgument);
-        CHECK(main.AddActorTickPrerequisite(second.Value(), first.Value()).Error() ==
+        CHECK(main.AddTickPrerequisite({second.Value()}, {first.Value()}).Error() ==
               ErrorCode::CycleDetected);
         // 거부는 상태를 바꾸지 않는다(다음 프레임도 정상 실행).
         REQUIRE(engine.RunFrame());
@@ -1741,4 +1781,156 @@ TEST(Engine_CrashDuringInitializeAndShutdownRecordsTheStage) {
     CHECK(strstr(content, EngineStageShutdown) != nullptr);
 }
 
+namespace {
+
+// 바깥 조회 창으로 EngineSubsystem을 찾는 WorldSubsystem이다(EngineRuntime 16.3절 ERD10).
+class EngineLookupWorldSubsystem final : public WorldSubsystem {
+public:
+    Result<void> Initialize(World& world) noexcept override {
+        foundAtInitialize = GetEngineSubsystem<AlphaSubsystem>(world) != nullptr;
+        return Result<void>::Success();
+    }
+
+    void PreDeinitialize(World& world) noexcept override {
+        foundAtPreDeinitialize = GetEngineSubsystem<AlphaSubsystem>(world) != nullptr;
+    }
+
+    static inline bool foundAtInitialize = false;
+    static inline bool foundAtPreDeinitialize = true;
+};
+
+} // namespace
+
+TEST(Engine_WorldSubsystemFindsEngineSubsystemThroughOuterLookup) {
+    ResetSteps();
+    SystemAllocator allocator;
+    {
+        const EngineSubsystemType subsystems[] = {
+            MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha")};
+        const WorldSubsystemType worldSubsystems[] = {
+            MakeSubsystemType<WorldSubsystem, EngineLookupWorldSubsystem>("EngineLookup")};
+        EngineConfig config;
+        config.modules = &test::ProcessModules();
+        config.subsystems = subsystems;
+        config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+        config.registerTypes = &RegisterGameTypes;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        WorldCreateDesc desc;
+        desc.name = "Main";
+        desc.subsystems = worldSubsystems;
+        auto world = engine.CreateWorld(desc);
+        REQUIRE(world);
+        CHECK(world.Value()->Kind() == WorldKind::Game);
+        CHECK(EngineLookupWorldSubsystem::foundAtInitialize);
+        REQUIRE(engine.Shutdown());
+        // 조회 창은 PreDeinitialize부터 닫힌다(EngineSubsystem은 아직 살아 있어도).
+        CHECK(!EngineLookupWorldSubsystem::foundAtPreDeinitialize);
+    }
+}
+
+// 18.2절: OnEngineReady는 Running이 된 뒤 한 번 불려 World를 만들 수 있다. 실패하면 정상 종료 순서
+// (client 종료 → World 파괴 → Subsystem 정리)로 정리하고 Failed로 끝난다.
+TEST(Engine_ClientReadyRunsWhenRunningAndFailureShutsDownNormally) {
+    SystemAllocator allocator;
+    const EngineSubsystemType subsystems[] = {
+        MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha")};
+    for (bool failReady : {false, true}) {
+        ResetSteps();
+        RecordingClient client;
+        client.createWorldOnReady = true;
+        client.failReady = failReady;
+        EngineConfig config;
+        config.modules = &test::ProcessModules();
+        config.client = &client;
+        config.subsystems = subsystems;
+        Engine engine(allocator);
+        if (!failReady) {
+            REQUIRE(engine.Initialize(config));
+            const char* const started[] = {"alpha.init", "client.start", "client.ready"};
+            CHECK(StepsAre(started));
+            CHECK(engine.WorldCount() == 1);
+            REQUIRE(engine.Shutdown());
+            continue;
+        }
+
+        CHECK(engine.Initialize(config).Error() == ErrorCode::DependencyFailed);
+        const char* const failed[] = {"alpha.init", "client.start", "client.ready",
+                                      "client.shutdown", "alpha.deinit"};
+        CHECK(StepsAre(failed));
+        CHECK(engine.State() == EngineState::Failed);
+        CHECK(engine.WorldCount() == 0);
+        CHECK(engine.Shutdown().IsOk());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 18.5절: DestroyWorld는 World Tick 안과 다른 World를 파괴하는 중에만 5단계로 미룬다. 미룬 World는
+// 그 프레임 Tick에서 빠진다.
+TEST(Engine_DestroyWorldDefersOnlyDuringWorldTickAndWorldTeardown) {
+    ResetSteps();
+    SystemAllocator allocator;
+    {
+        const WorldSubsystemType destroyer[] = {
+            MakeSubsystemType<WorldSubsystem, TeardownDestroyerSubsystem>("TeardownDestroyer")};
+        EngineConfig config;
+        config.modules = &test::ProcessModules();
+        config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+        config.registerTypes = &RegisterGameTypes;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        WorldCreateDesc desc;
+        desc.name = "Ticking";
+        auto ticking = engine.CreateWorld(desc);
+        desc.name = "Victim";
+        auto victim = engine.CreateWorld(desc);
+        REQUIRE(ticking && victim);
+        REQUIRE(ticking.Value()->SpawnActor<TickingActor>());
+        REQUIRE(victim.Value()->SpawnActor<TickingActor>());
+        TickingActor::destroyEngine = &engine;
+        TickingActor::destroyTarget = victim.Value();
+        ResetSteps();
+        REQUIRE(engine.RunFrame());
+        // Ticking의 Tick이 Victim 파괴를 미뤘고 Victim은 그 프레임 Tick하지 않았다.
+        const char* const ticked[] = {"world.tick"};
+        CHECK(StepsAre(ticked));
+        CHECK(engine.WorldCount() == 1 && engine.WorldAt(0) == ticking.Value());
+
+        // 파괴 중(Deinitialize) 요청은 미뤄졌다가 다음 프레임 5단계에서 처리된다.
+        desc.name = "Torn";
+        desc.subsystems = destroyer;
+        auto torn = engine.CreateWorld(desc);
+        REQUIRE(torn);
+        TeardownDestroyerSubsystem::engine = &engine;
+        TeardownDestroyerSubsystem::target = ticking.Value();
+        REQUIRE(engine.DestroyWorld(torn.Value()));
+        CHECK(TeardownDestroyerSubsystem::engine == nullptr);
+        CHECK(engine.WorldCount() == 1);
+        ResetSteps();
+        REQUIRE(engine.RunFrame());
+        CHECK(stepCount == 0);
+        CHECK(engine.WorldCount() == 0);
+
+        // 5단계에서 파괴하는 World의 정리 hook이 뒤에 만든 World 파괴를 요청해도 같은 5단계에서
+        // 끝난다(리뷰 보강 — 한 바퀴 뒤 다시 돈다).
+        desc.name = "First";
+        auto first = engine.CreateWorld(desc);
+        desc.name = "Second";
+        desc.subsystems = {};
+        auto second = engine.CreateWorld(desc);
+        REQUIRE(first && second);
+        REQUIRE(first.Value()->SpawnActor<TickingActor>());
+        TickingActor::destroyEngine = &engine;
+        TickingActor::destroyTarget = first.Value();
+        TeardownDestroyerSubsystem::engine = &engine;
+        TeardownDestroyerSubsystem::target = second.Value();
+        REQUIRE(engine.RunFrame());
+        CHECK(TeardownDestroyerSubsystem::engine == nullptr);
+        CHECK(engine.WorldCount() == 0);
+        REQUIRE(engine.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
 } // namespace engine_tests_file
