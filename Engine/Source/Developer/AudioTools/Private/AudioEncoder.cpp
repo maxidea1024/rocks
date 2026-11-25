@@ -1,26 +1,15 @@
 #include <AudioTools/AdpcmEncoder.h>
 #include <AudioTools/AudioEncoder.h>
 
+#include "AudioEncoderInternal.h"
+
 #include <Audio/Adpcm.h>
 #include <Base/Endian.h>
 #include <Core/Math/MathUtility.h>
 
 namespace rocks::audio {
 
-namespace {
-
-// PCM16·ADPCM 인코더 판(너겟 키용)이다. 출력 byte가 바뀌면 올린다.
-constexpr uint32 Pcm16EncoderVersion = 1;
-constexpr uint32 AdpcmEncoderVersion = 1;
-
-constexpr AudioCodecInfo Pcm16Info = {AudioCodecId::Pcm16,   "PCM16",
-                                      Pcm16EncoderVersion,   Pcm16BitstreamVersion,
-                                      MinPlatformSampleRate, MaxPlatformSampleRate,
-                                      MaxOutputChannels};
-constexpr AudioCodecInfo AdpcmInfo = {AudioCodecId::Adpcm,   "ADPCM",
-                                      AdpcmEncoderVersion,   AdpcmBitstreamVersion,
-                                      MinPlatformSampleRate, MaxPlatformSampleRate,
-                                      MaxOutputChannels};
+namespace encoderdetail {
 
 // 공통 입력 검사다(채널·마스크·rate·frame·비유한 표본).
 Result<void> CheckEncodeInput(const PlanarConstView& pcm, uint32 sampleRate, uint32 channelMask,
@@ -53,6 +42,26 @@ void FillCommon(const AudioCodecInfo& info, const PlanarConstView& pcm, uint32 s
     out.sampleRate = sampleRate;
     out.frames = pcm.frameCount;
 }
+
+} // namespace encoderdetail
+
+namespace {
+
+using encoderdetail::CheckEncodeInput;
+using encoderdetail::FillCommon;
+
+// PCM16·ADPCM 인코더 판(너겟 키용)이다. 출력 byte가 바뀌면 올린다.
+constexpr uint32 Pcm16EncoderVersion = 1;
+constexpr uint32 AdpcmEncoderVersion = 1;
+
+constexpr AudioCodecInfo Pcm16Info = {AudioCodecId::Pcm16,   "PCM16",
+                                      Pcm16EncoderVersion,   Pcm16BitstreamVersion,
+                                      MinPlatformSampleRate, MaxPlatformSampleRate,
+                                      MaxOutputChannels};
+constexpr AudioCodecInfo AdpcmInfo = {AudioCodecId::Adpcm,   "ADPCM",
+                                      AdpcmEncoderVersion,   AdpcmBitstreamVersion,
+                                      MinPlatformSampleRate, MaxPlatformSampleRate,
+                                      MaxOutputChannels};
 
 Result<void> EncodePcm16Into(const PlanarConstView& pcm, uint32 sampleRate, uint32 channelMask,
                              EncodedAudio& out) noexcept {

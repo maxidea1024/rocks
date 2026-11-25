@@ -312,7 +312,7 @@ Android 창·입력(UE처럼 NativeActivity 상속 액티비티와 `android_nati
 
 ## 앱 수명 이벤트 (2026-11-22 설계, 오디오 요구)
 
-[오디오 시스템](AudioSystem.ko.md) PR9가 요구한다. 데스크톱 창 포커스는 PlatformWindow가 이미 준다(`Window::HasFocus`·`FocusLost` — `Engine/Source/Runtime/PlatformWindow/Public/PlatformWindow/Window.h:72,98`). 비활성 창 볼륨(`audio.unfocused.volume`)은 이것으로 한다. 없는 것은 창과 무관한 앱 수준 수명이다.
+[오디오 시스템](AudioSystem/06-Phases.ko.md) PR9가 요구한다. 데스크톱 창 포커스는 PlatformWindow가 이미 준다(`Window::HasFocus`·`FocusLost` — `Engine/Source/Runtime/PlatformWindow/Public/PlatformWindow/Window.h:72,98`). 비활성 창 볼륨(`audio.unfocused.volume`)은 이것으로 한다. 없는 것은 창과 무관한 앱 수준 수명이다.
 
 UE 5.8은 `FCoreDelegates`의 `ApplicationWillDeactivateDelegate`·`ApplicationHasReactivatedDelegate`·`ApplicationWillEnterBackgroundDelegate`·`ApplicationHasEnteredForegroundDelegate`·`GetApplicationWillTerminateDelegate`(`Engine/Source/Runtime/Core/Public/Misc/CoreDelegates.h:349–366`)로 알리고, Android 오디오 포커스는 `GameActivity`의 `onAudioFocusChange`(`Engine/Build/Android/Java/src/com/epicgames/unreal/GameActivity.java.template:5074`)가 받는다.
 

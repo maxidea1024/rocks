@@ -422,6 +422,11 @@ public sealed record NativeModuleInput
     // 소비 모듈의 공유 라이브러리마다 링크되므로 상태가 두 벌이 된다. 다른 모듈은 그 소비 모듈의 Rocks API를 거친다.
     public bool HasGlobalState { get; init; }
 
+    // Monolithic 시험 실행 파일이 HasGlobalState 서드파티를 소유 모듈과 함께 직접 소비한다는 표지다(Docs/Design/BuildTargets 3.8절 BD29
+    // 시험 실행 파일 예외 — 개정 38). 실행 파일만 켤 수 있고, LinkType Monolithic에서만 소비 모듈로 세지 않는다(한 이미지라 상태가 한 벌이다).
+    // Modular에서 켜면 입력 오류다(Modular 시험은 그 서드파티를 의존하지 않는다).
+    public bool GlobalStateTestConsumer { get; init; }
+
     // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 모듈 표를 만들 때 행의 의존이 이 단계보다 늦으면
     // 오류다(MD6 — None 의존은 허용).

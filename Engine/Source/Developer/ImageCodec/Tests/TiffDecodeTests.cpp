@@ -1,3 +1,5 @@
+#include "LiveCountingAllocator.h"
+
 #include <Base/NumericLimits.h>
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -17,6 +19,8 @@
 using namespace rocks;
 using namespace rocks::image;
 namespace tiff_decode_tests_file {
+
+using image_codec_test::LiveCountingAllocator;
 
 namespace {
 
@@ -730,50 +734,6 @@ TEST(TiffDecode_Jpeg) {
 
 namespace {
 
-// 살아 있는 블록 수를 세는 Allocator다(디코딩이 실패 경로에서도 받은 블록을 전부 돌려주는지 본다).
-class LiveCountingAllocator final : public Allocator {
-public:
-    explicit LiveCountingAllocator(Allocator& inner) noexcept : inner_(inner) {
-    }
-
-    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
-        auto allocated = inner_.Allocate(bytes, alignment, tag);
-        if (allocated) {
-            ++live_;
-        }
-
-        return allocated;
-    }
-
-    Result<void> Deallocate(void* address) noexcept override {
-        if (address != nullptr) {
-            --live_;
-        }
-
-        return inner_.Deallocate(address);
-    }
-
-    void TrimMemory() noexcept override {
-        inner_.TrimMemory();
-    }
-
-    void MarkThreadIdle() noexcept override {
-        inner_.MarkThreadIdle();
-    }
-
-    void MarkThreadActive() noexcept override {
-        inner_.MarkThreadActive();
-    }
-
-    int64 Live() const noexcept {
-        return live_;
-    }
-
-private:
-    Allocator& inner_;
-    int64 live_ = 0;
-};
-
 struct ThreadJob {
     Span<const uint8> file;
     test::NFailAllocator* allocator = nullptr;
@@ -877,6 +837,97 @@ TEST(TiffDecode_AllocationAndThreads) {
     CHECK(sharedFirst.Attempts() == soloFirst.Attempts() &&
           sharedSecond.Attempts() == soloSecond.Attempts());
     CHECK(firstCount.Live() == 0 && secondCount.Live() == 0);
+}
+
+// 쓰기 할당 실패 전수(12.10.1절 — 14.1.119 후속 1번): EncodeTiff의 n번째 할당(libtiff·libjpeg 묶음,
+// 출력 파일, 줄·tile 버퍼 — 출력 Array도 같은 Allocator)이 실패하면 OutOfMemory이고 out은 비며 받은
+// 블록이 모두 돌아온다. 실패가 없으면 기준과 같은 byte다. 구성: LZW strip RGB, Deflate tile 16비트
+// + Predictor, JPEG RGB, 색표, 여러 page BigTIFF big-endian.
+TEST(TiffEncode_AllocationFailures) {
+    SystemAllocator allocator;
+    constexpr uint32 Size = 16;
+    uint8 rgb[Size * Size * 3] = {};
+    uint8 wide[Size * Size * 2] = {};
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        rgb[index * 3] = static_cast<uint8>(index);
+        rgb[index * 3 + 1] = static_cast<uint8>(index * 3);
+        rgb[index * 3 + 2] = 100;
+        wide[index * 2] = static_cast<uint8>(index * 7);
+        wide[index * 2 + 1] = static_cast<uint8>(index >> 2);
+    }
+
+    uint16 colormap[3 * 4] = {0x1200, 0x3400, 0x5600, 0x7800};
+    const uint8 indices[Size * Size / 4] = {0x1B, 0xE4};
+    TiffImage images[5];
+    for (TiffImage& image : images) {
+        image.width = Size;
+        image.height = Size;
+    }
+
+    images[0].samples = 3;
+    images[0].photometric = tiff::PhotometricRgb;
+    images[0].compression = tiff::CompressionLzw;
+    images[0].rowsPerStrip = 4;
+    images[0].raw = rgb;
+    images[1].bits = 16;
+    images[1].compression = tiff::CompressionAdobeDeflate;
+    images[1].predictor = tiff::PredictorHorizontal;
+    images[1].tileWidth = Size;
+    images[1].tileHeight = Size;
+    images[1].raw = wide;
+    images[2] = images[0];
+    images[2].compression = tiff::CompressionJpeg;
+    images[2].rowsPerStrip = Size;
+    images[3].bits = 2;
+    images[3].photometric = tiff::PhotometricPalette;
+    images[3].colormap = colormap;
+    images[3].raw = indices;
+    images[4] = images[0];
+    images[4].pages = 3;
+    images[4].bigTiff = true;
+    images[4].byteOrder = TiffByteOrder::Big;
+    for (const TiffImage& image : images) {
+        Array<uint8> reference(allocator);
+        REQUIRE(EncodeTiff(allocator, image, reference));
+        uint32 failures = 0;
+        uint64 firstLeak = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            LiveCountingAllocator counted(allocator);
+            test::NFailAllocator failing(counted);
+            bool exhausted = false;
+            bool ok = false;
+            bool expected = true;
+            {
+                Array<uint8> out(failing);
+                failing.FailOnAttempt(attempt);
+                const Result<void> encoded = EncodeTiff(failing, image, out);
+                exhausted = failing.Attempts() < attempt;
+                failing.DisableFailure();
+                ok = encoded.IsOk();
+                expected =
+                    ok ? out.Size() == reference.Size() &&
+                             platform::MemoryEquals(out.Data(), reference.Data(), reference.Size())
+                       : encoded.Error() == ErrorCode::OutOfMemory && out.IsEmpty();
+            }
+
+            if (counted.Live() != 0 && firstLeak == 0) {
+                firstLeak = attempt;
+            }
+
+            CHECK(expected);
+            if (!ok) {
+                ++failures;
+            }
+
+            if (exhausted) {
+                CHECK(ok);
+                break;
+            }
+        }
+
+        CHECK(firstLeak == 0);
+        CHECK(failures > 0);
+    }
 }
 
 } // namespace tiff_decode_tests_file

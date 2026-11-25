@@ -2,7 +2,7 @@
 
 #include <Audio/AudioBuffer.h>
 
-// 목표 이득으로 frame 단위로 옮겨 가는 gain ramp다(Docs/Design/AudioSystem.ko.md 3.20.3절).
+// 목표 이득으로 frame 단위로 옮겨 가는 gain ramp다(Docs/Design/AudioSystem 3.20.3절).
 //
 // ramp 중 k번째 frame(0부터)의 이득은 start + (target − start)·k/N이고(N = ramp 길이), N frame을
 // 처리한 뒤의 현재값은 target과 정확히 같다(부동소수 누적 오차가 남지 않는다). 이득을 매 frame

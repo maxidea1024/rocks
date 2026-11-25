@@ -35,4 +35,4 @@
 - **D31 TLS 파괴 뒤 대기(새)** — 스레드 레코드의 `thread_local` 칸이 파괴된 뒤의 대기는 UE처럼 대기마다 영구 풀의 임시 레코드를 쓰고 참조 계수로 돌려준다. 시험을 둔다(10.2·14.2절).
 - **D32 빌드 연결(새)** — `WaitOnAddress` 링크는 `PlatformBase.Build.cs`의 Windows `SystemLibraries`에 `"Synchronization"`을 넣어 한다. thread safety 분석은 ThirdParty 모듈에 걸지 않는다. `ActionGraph.cs` 430·471–472행 플래그와 MetaCompiler `--clang-arg` 허용 목록 변경은 SY0에 넣는다(7.3·13.1절).
 - **D33 Task 설계 후속 문서(새)** — Task 설계 문서는 아직 없다. work-stealing deque, overflow 큐, worker 보충(oversubscription)은 **Task 설계(후속 문서)** 항목으로 남긴다. 이 문서는 그 바탕(`Atomic<T>`·`SpinBackoff`·`IndexedFreeList`·`StepPolicy`·대기 훅 자리)만 정한다(2.3·10.5·12.2절).
-- **D34 실시간 깨우기(개정 3)** — `RealtimeWakeSignal`을 둔다: 대기자 하나, 자동 리셋, Signal은 잠금·할당이 없고 대기자가 있을 때만 OS 깨우기를 부른다. macOS는 Mach semaphore. 첫 사용처는 오디오 장치 콜백 → AudioRT([오디오 시스템](../AudioSystem.ko.md) AD26·PR21). 단계 SY12.
+- **D34 실시간 깨우기(개정 3)** — `RealtimeWakeSignal`을 둔다: 대기자 하나, 자동 리셋, Signal은 잠금·할당이 없고 대기자가 있을 때만 OS 깨우기를 부른다. macOS는 Mach semaphore. 첫 사용처는 오디오 장치 콜백 → AudioRT([오디오 시스템](../AudioSystem/05-Decisions.ko.md) AD26·PR21). 단계 SY12.

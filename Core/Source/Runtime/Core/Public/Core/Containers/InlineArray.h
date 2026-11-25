@@ -206,13 +206,14 @@ public:
         return *Slot(index);
     }
 
-    // 마지막 원소다. 비어 있으면 Fatal이다.
-    T& Back() noexcept {
-        return (*this)[size_ - (size_ == 0 ? 0 : 1)];
+    // 끝에서 distanceFromEnd번째 원소다(UE TArray::Last 대응). Last()는 마지막 원소, Last(1)은 그
+    // 앞이다(Python의 a[-1]·a[-2]). distanceFromEnd >= Size()면(비어 있을 때 포함) Fatal이다.
+    T& Last(usize distanceFromEnd = 0) noexcept {
+        return (*this)[distanceFromEnd < size_ ? size_ - 1 - distanceFromEnd : size_];
     }
 
-    const T& Back() const noexcept {
-        return (*this)[size_ - (size_ == 0 ? 0 : 1)];
+    const T& Last(usize distanceFromEnd = 0) const noexcept {
+        return (*this)[distanceFromEnd < size_ ? size_ - 1 - distanceFromEnd : size_];
     }
 
     T* Data() noexcept {

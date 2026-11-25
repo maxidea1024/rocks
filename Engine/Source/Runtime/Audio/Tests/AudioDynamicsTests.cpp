@@ -17,7 +17,7 @@ using namespace rocks::audio;
 using namespace rocks::audio::audiotest;
 using platform::PlatformMath;
 
-// Audio DSP2 dynamics 처리기 시험이다(Docs/Design/AudioSystem.ko.md 3.21절). 정답은 3.21.2절 식(UE
+// Audio DSP2 dynamics 처리기 시험이다(Docs/Design/AudioSystem 3.21절). 정답은 3.21.2절 식(UE
 // FDynamicsProcessor 블록 경로)을 double로 독립 계산한 값이다.
 
 namespace {

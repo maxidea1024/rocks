@@ -1,6 +1,7 @@
 #include "TextureImportTestSupport.h"
 
 #include <Base/InitializerList.h>
+#include <Platform/Memory.h>
 #include <Texture/TextureImportOptions.generated.h>
 
 // 텍스처 임포터 시험이다(Docs/Design/AssetSystem 12.12절 — 14.1.97절 대조표): 임포터
@@ -635,6 +636,112 @@ TEST(TextureImport_Reimport) {
               item.reverted);
         CHECK((updated->neverStream == 0) == item.reverted);
     }
+}
+
+namespace {
+
+bool SameSource(const TextureSource& a, const TextureSource& b) noexcept {
+    return a.format == b.format && a.sizeX == b.sizeX && a.sizeY == b.sizeY &&
+           a.numSlices == b.numSlices && a.numMips == b.numMips && a.numLayers == b.numLayers &&
+           a.bulk.rawBytes == b.bulk.rawBytes;
+}
+
+// kind 임포트를 객체 Registry 할당의 n번째 실패마다 부르고 OutOfMemory로 끝난 수를 돌려준다.
+// existing이면 재임포트다(같은 원본이라 성공한 시도가 대상을 바꿔도 결과가 같다).
+uint32 SweepImport(TextureEnv& env, TextureImportKind kind, Span<const AssetImportSource> sources,
+                   const void* options, ObjectHandle existing = {}) noexcept {
+    Imported reference(env, sources, options, existing);
+    const bool ran = Run(kind, reference) && reference.context.Imported() != nullptr;
+    CHECK(ran);
+    if (!ran) {
+        return 0;
+    }
+
+    const TextureSource expected = reference.context.Imported()->source;
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        Imported run(env, sources, options, existing);
+        TextureImporter importer(kind);
+        env.objectAllocator.FailOnAttempt(attempt);
+        const Result<void> done = importer.Import(run.context);
+        const bool exhausted = env.objectAllocator.Attempts() < attempt;
+        env.objectAllocator.DisableFailure();
+        if (done) {
+            const Texture* texture = run.context.Imported();
+            CHECK(texture != nullptr && SameSource(texture->source, expected) &&
+                  run.context.bulk.Size() == reference.context.bulk.Size() &&
+                  platform::MemoryEquals(run.context.bulk.Data(), reference.context.bulk.Data(),
+                                         reference.context.bulk.Size()) &&
+                  run.context.warnings.Size() == reference.context.warnings.Size());
+        } else {
+            ++failures;
+            CHECK(done.Error() == ErrorCode::OutOfMemory &&
+                  run.context.failCode == AssetDiagnosticCode::None && !exhausted);
+        }
+
+        if (exhausted) {
+            return failures;
+        }
+    }
+}
+
+} // namespace
+
+// 할당 실패 전수(14.1.119 후속 1번): 객체 Registry 할당자(임포터의 ObjectAllocator — 디코딩·회색
+// 감지·infill·합치기·타일 떼기)의 n번째 할당이 실패하면 임포트는 OutOfMemory이고 진단을 남기지
+// 않는다(새 객체는 서비스가 버린다). 실패가 없으면(시도가 다 쓰이면) 기준과 같은 원본
+// 설명·byte·경고 수다. 구성: PNG 2D(이진 투명 — infill), 회색 PNG(G8 감지), Cube 6면, 한 파일
+// Cube(HorizontalCross), 가변 역할 Array, 한 파일 Volume, 재임포트.
+TEST(TextureImport_AllocationFailures) {
+    TextureEnv env;
+    REQUIRE(env.ready);
+    const Rgba texels[] = {{10, 20, 30, 255}, {40, 50, 60, 0}, {70, 80, 90, 255}, {1, 2, 3, 0}};
+    const Array<uint32> channels = Channels(env.allocator, texels);
+    const Array<uint8> png = MakePng(env.allocator, 2, 2, PngColor::Rgba, 8, channels.View());
+    const AssetImportSource single[] = {Source(DefaultImportSourceRole, png)};
+    CHECK(SweepImport(env, TextureImportKind::Texture2D, single, nullptr) > 0);
+
+    const Array<uint8> gray = SolidPng(env.allocator, 4, 4, {9, 9, 9, 255});
+    const AssetImportSource graySource[] = {Source(DefaultImportSourceRole, gray)};
+    CHECK(SweepImport(env, TextureImportKind::Texture2D, graySource, nullptr) > 0);
+
+    Array<Array<uint8>> files(env.allocator);
+    for (uint32 index = 0; index < TextureCubeFaces; ++index) {
+        REQUIRE(files.TryPushBack(SolidPng(env.allocator, 2, 2, {index, 0, 0, 255})));
+    }
+
+    AssetImportSource faces[TextureCubeFaces];
+    for (usize index = 0; index < TextureCubeFaces; ++index) {
+        faces[index] = Source(TextureCubeFaceRoles[index], files[index]);
+    }
+
+    CHECK(SweepImport(env, TextureImportKind::Cube, faces, nullptr) > 0);
+
+    const Array<uint8> cross = SolidPng(env.allocator, 8, 6, {5, 6, 7, 255});
+    const AssetImportSource crossSource[] = {Source(DefaultImportSourceRole, cross)};
+    TextureCubeFileOptions cubeOptions;
+    cubeOptions.cubeLayout = TextureCubeLayout::HorizontalCross;
+    CHECK(SweepImport(env, TextureImportKind::CubeFile, crossSource, &cubeOptions) > 0);
+
+    constexpr StringView Roles[] = {"slice:0", "slice:1", "slice:2"};
+    AssetImportSource slices[3];
+    for (usize index = 0; index < 3; ++index) {
+        slices[index] = Source(Roles[index], files[index]);
+    }
+
+    CHECK(SweepImport(env, TextureImportKind::Array, slices, nullptr) > 0);
+
+    const Array<uint8> atlas = SolidPng(env.allocator, 4, 4, {3, 0, 0, 255});
+    const AssetImportSource atlasSource[] = {Source(DefaultImportSourceRole, atlas)};
+    TextureVolumeFileOptions volumeOptions;
+    volumeOptions.volumeTileX = 2;
+    volumeOptions.volumeTileY = 2;
+    CHECK(SweepImport(env, TextureImportKind::VolumeFile, atlasSource, &volumeOptions) > 0);
+
+    Imported created(env, single, nullptr);
+    REQUIRE(Run(TextureImportKind::Texture2D, created));
+    CHECK(SweepImport(env, TextureImportKind::Texture2D, graySource, nullptr,
+                      created.context.output) > 0);
 }
 
 } // namespace texture_importer_tests_file

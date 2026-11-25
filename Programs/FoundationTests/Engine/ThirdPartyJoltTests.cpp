@@ -2,6 +2,8 @@
 // 10.5절, JL1). 실행 파일이 라이브러리를 직접 링크하고 Jolt 헤더를 경고 0으로 include한다.
 // 좌표 사상과 단위 변환은 Physics 모듈 adapter의 몫이라 여기서는 Jolt 좌표(오른손 Y-up, m)를
 // 그대로 쓴다.
+#include <Base/NumericLimits.h>
+#include <Core/Math/MathUtility.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 // Jolt.h가 Jolt의 모든 헤더보다 먼저 와야 한다(Core.h의 설정과 STL include).
@@ -14,6 +16,7 @@
 #include <Jolt/Core/Memory.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
 #include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -75,6 +78,24 @@ constexpr float RestSpeedTolerance = 0.05f;
 
 constexpr float FractionTolerance = 1.0e-4f;
 constexpr float NormalTolerance = 1.0e-3f;
+
+// 접촉 충격량 시험(물리 모듈 6.4절, PMU2). 스텝마다 충격량 = m·(v후 − v전 + g·dt)(수직 성분,
+// 감쇠 0·반발 0·마찰 방향 운동 없음). 허용 오차는 질량 약 524–1000 kg·속도 float 오차를
+// 덮는다(N·s).
+constexpr int ImpulseSteps = FreeFallSteps * 3 + SettleSteps;
+constexpr float ImpulseTolerance = 0.1f;
+// 수평 성분 허용 오차는 수직 크기에 비례한다(캐시 법선을 body 회전으로 되돌린 float 오차 —
+// 상자 면 충돌 13100 N·s에서 0.3 N·s 정도).
+constexpr float ImpulseDirectionTolerance = 1.0e-4f;
+// 선속도 상한 시험(m/s). Jolt BodyCreationSettings::mMaxLinearVelocity 기본값과 그보다 빠른 속도.
+constexpr float JoltDefaultMaxLinearVelocity = 500.0f;
+constexpr float FastBodySpeed = 10000.0f;
+constexpr float MetersPerCentimeter = 0.01f;
+constexpr float ImpactSpeedFloor = 1.0f; // m/s
+constexpr float BoxHalfExtent = 0.5f;
+constexpr JPH::uint SphereContactPoints = 1;
+constexpr JPH::uint BoxFaceContactPoints = 4;
+constexpr int TwoCollisionSteps = 2;
 
 constexpr float CylinderHalfHeight = 0.5f;
 constexpr float CylinderRadius = 0.25f;
@@ -179,7 +200,8 @@ struct Scene {
     JPH::BodyID floor;
     JPH::BodyID sphere;
 
-    Scene() {
+    // 잠들면 접촉이 사라지므로 충격량 시험은 잠듦을 끈다. box면 구 대신 정육면체를 떨어뜨린다.
+    explicit Scene(bool allowSleeping = true, bool box = false) {
         system.Init(MaxBodies, BodyMutexCount, MaxBodyPairs, MaxContactConstraints,
                     layers.broadPhaseLayers, objectVsBroadPhase, layers.layerPairs);
         system.SetGravity(JPH::Vec3(0.0f, -GravityMetersPerSecondSquared, 0.0f));
@@ -191,20 +213,29 @@ struct Scene {
             JPH::EMotionType::Static, StaticLayer);
         floor = bodies.CreateAndAddBody(floorSettings, JPH::EActivation::DontActivate);
 
+        JPH::RefConst<JPH::Shape> fallingShape;
+        if (box) {
+            fallingShape = new JPH::BoxShape(JPH::Vec3::sReplicate(BoxHalfExtent));
+        } else {
+            fallingShape = new JPH::SphereShape(SphereRadius);
+        }
+
         JPH::BodyCreationSettings sphereSettings(
-            new JPH::SphereShape(SphereRadius), JPH::RVec3(0.0f, SphereStartHeight, 0.0f),
-            JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, MovingLayer);
+            fallingShape, JPH::RVec3(0.0f, SphereStartHeight, 0.0f), JPH::Quat::sIdentity(),
+            JPH::EMotionType::Dynamic, MovingLayer);
         // 감쇠를 끄면 자유 낙하가 반암시 Euler 식과 같아진다.
         sphereSettings.mLinearDamping = 0.0f;
         sphereSettings.mAngularDamping = 0.0f;
+        sphereSettings.mAllowSleeping = allowSleeping;
         sphere = bodies.CreateAndAddBody(sphereSettings, JPH::EActivation::Activate);
         system.OptimizeBroadPhase();
     }
 
-    void Step(int count, JPH::TempAllocator& temp, JPH::JobSystem& jobs) {
+    void Step(int count, JPH::TempAllocator& temp, JPH::JobSystem& jobs,
+              int collisionSteps = CollisionSteps) {
         for (int index = 0; index < count; ++index) {
             const JPH::EPhysicsUpdateError error =
-                system.Update(StepSeconds, CollisionSteps, &temp, &jobs);
+                system.Update(StepSeconds, collisionSteps, &temp, &jobs);
             CHECK(error == JPH::EPhysicsUpdateError::None);
         }
     }
@@ -305,6 +336,168 @@ TEST(ThirdParty_JoltSimulatesQueriesAndReleasesHookedMemory) {
     CHECK(g_counters.total != 0);
     CHECK(g_counters.live == 0);
     CHECK(g_traceCalls == 0);
+    CHECK(g_assertFailures == 0);
+    JPH::RegisterDefaultAllocator();
+}
+
+namespace {
+
+// 동적 body의 질량(kg). body가 없으면 0이다.
+float BodyMass(const JPH::PhysicsSystem& system, JPH::BodyID body) {
+    JPH::BodyLockRead lock(system.GetBodyLockInterface(), body);
+    CHECK(lock.Succeeded());
+    if (!lock.Succeeded()) {
+        return 0.0f;
+    }
+
+    return 1.0f / lock.GetBody().GetMotionProperties()->GetInverseMass();
+}
+
+// 낙하 body 바닥면이 처음 y = 0 아래로 들어가는 스텝(반암시 Euler 식, 1부터 센다).
+int FirstPenetratingStep(float halfHeight) {
+    for (int step = 1;; ++step) {
+        const float n = static_cast<float>(step);
+        const float height = SphereStartHeight - GravityMetersPerSecondSquared * StepSeconds *
+                                                     StepSeconds * n * (n + 1.0f) * 0.5f;
+        if (height - halfHeight <= 0.0f) {
+            return step;
+        }
+    }
+}
+
+// 낙하·충돌·정지의 모든 스텝에서 돌려받은 충격량이 운동량 변화와 같은지 본다.
+void CheckAppliedImpulseFollowsMomentum(bool box, JPH::TempAllocator& temp, JPH::JobSystem& jobs) {
+    Scene scene(false, box);
+    JPH::BodyInterface& bodies = scene.system.GetBodyInterface();
+    const float mass = BodyMass(scene.system, scene.sphere);
+    const JPH::uint expectedPoints = box ? BoxFaceContactPoints : SphereContactPoints;
+
+    int firstContact = 0;
+    int contactSteps = 0;
+    int mismatches = 0;
+    JPH::Vec3 lastImpulse = JPH::Vec3::sZero();
+    float largestImpulse = 0.0f;
+    for (int step = 1; step <= ImpulseSteps; ++step) {
+        const float before = bodies.GetLinearVelocity(scene.sphere).GetY();
+        scene.Step(1, temp, jobs);
+        const float after = bodies.GetLinearVelocity(scene.sphere).GetY();
+        const float expected =
+            mass * (after - before + GravityMetersPerSecondSquared * StepSeconds);
+
+        JPH::Vec3 impulse = JPH::Vec3::sReplicate(-1.0f);
+        JPH::uint points = 0;
+        const bool touching =
+            scene.system.GetAppliedContactImpulse(scene.floor, scene.sphere, impulse, points);
+        // 반대 순서로 물으면 바닥이 받은 충격량이다(작용·반작용).
+        JPH::Vec3 onFloor = JPH::Vec3::sReplicate(-1.0f);
+        JPH::uint floorPoints = 0;
+        CHECK(scene.system.GetAppliedContactImpulse(scene.sphere, scene.floor, onFloor,
+                                                    floorPoints) == touching);
+        CHECK(onFloor == -impulse);
+        CHECK(floorPoints == points);
+        if (touching) {
+            firstContact = firstContact == 0 ? step : firstContact;
+            ++contactSteps;
+            CHECK(points == expectedPoints);
+        } else {
+            CHECK(impulse == JPH::Vec3::sZero());
+            CHECK(points == 0u);
+        }
+
+        // 수평 성분은 없고 수직 성분은 운동량 변화와 같다.
+        const float horizontalTolerance =
+            ImpulseTolerance + ImpulseDirectionTolerance * (expected < 0.0f ? -expected : expected);
+        if (!Near(impulse.GetY(), expected, ImpulseTolerance) ||
+            !Near(impulse.GetX(), 0.0f, horizontalTolerance) ||
+            !Near(impulse.GetZ(), 0.0f, horizontalTolerance)) {
+            ++mismatches;
+        }
+
+        lastImpulse = impulse;
+        largestImpulse = impulse.GetY() > largestImpulse ? impulse.GetY() : largestImpulse;
+    }
+
+    // 첫 접촉은 실제로 파고드는 스텝이거나 그 한 스텝 전(speculative contact)이고, 반발 0·잠듦
+    // 없음이라 그 뒤로 떨어지지 않는다.
+    const int penetrating = FirstPenetratingStep(box ? BoxHalfExtent : SphereRadius);
+    CHECK(firstContact >= penetrating - 1);
+    CHECK(firstContact <= penetrating);
+    CHECK(contactSteps == ImpulseSteps - firstContact + 1);
+    CHECK(mismatches == 0);
+    // 충돌 스텝이 들어 있다: 10 m 낙하(약 14 m/s)를 몇 스텝 안에 멈춘다.
+    CHECK(largestImpulse > mass * ImpactSpeedFloor);
+    // 정지: 중력 한 스텝분을 받친다.
+    CHECK(Near(lastImpulse.GetY(), mass * GravityMetersPerSecondSquared * StepSeconds,
+               ImpulseTolerance));
+}
+
+} // namespace
+
+// Rocks 수정 GetAppliedContactImpulse(Jolt manifest modifications)가 solver가 실제로 쓴 충격량을
+// 돌려준다(물리 모듈 6.4절, PMU2, 어댑터 경계 10.6절). 구(접촉점 1)와 상자(면 접촉 4점)에서
+// 모든 스텝이 운동량 변화와 같고, collision step이 둘이면 마지막 collision step 값이다.
+TEST(ThirdParty_JoltReportsAppliedContactImpulse) {
+    InstallHooks();
+    REQUIRE(JPH::VerifyJoltVersionID());
+    JPH::Factory::sInstance = new JPH::Factory();
+    JPH::RegisterTypes();
+
+    {
+        JPH::TempAllocatorImpl temp(TempAllocatorBytes);
+        JPH::JobSystemSingleThreaded jobs(JobCapacity);
+        CheckAppliedImpulseFollowsMomentum(false, temp, jobs);
+        CheckAppliedImpulseFollowsMomentum(true, temp, jobs);
+
+        // collision step 2: 정지한 뒤 마지막 collision step(dt/2)의 충격량만 남는다.
+        Scene scene(false);
+        scene.Step(ImpulseSteps, temp, jobs, TwoCollisionSteps);
+        JPH::Vec3 impulse = JPH::Vec3::sZero();
+        JPH::uint points = 0;
+        CHECK(scene.system.GetAppliedContactImpulse(scene.floor, scene.sphere, impulse, points));
+        const float mass = BodyMass(scene.system, scene.sphere);
+        const float halfStep = StepSeconds / static_cast<float>(TwoCollisionSteps);
+        CHECK(Near(impulse.GetY(), mass * GravityMetersPerSecondSquared * halfStep,
+                   ImpulseTolerance));
+    }
+
+    JPH::UnregisterTypes();
+    delete JPH::Factory::sInstance;
+    JPH::Factory::sInstance = nullptr;
+    JPH::RegisterDefaultAllocator();
+}
+
+// 선속도 상한(물리 모듈 PMD18): Jolt 기본 500 m/s는 속도를 줄이고, UE처럼 √FLT_MAX cm/s(m/s로
+// 0.01배)를 넣으면 빠른 body가 그대로 날아간다. 상한 제곱이 float 안에 있어 clamp 계산이 넘치지
+// 않고 assert도 없다.
+TEST(ThirdParty_JoltUnlimitedLinearVelocityKeepsFastBodies) {
+    g_assertFailures = 0;
+    InstallHooks();
+    REQUIRE(JPH::VerifyJoltVersionID());
+    JPH::Factory::sInstance = new JPH::Factory();
+    JPH::RegisterTypes();
+
+    {
+        JPH::TempAllocatorImpl temp(TempAllocatorBytes);
+        JPH::JobSystemSingleThreaded jobs(JobCapacity);
+        Scene scene;
+        JPH::BodyInterface& bodies = scene.system.GetBodyInterface();
+        scene.system.SetGravity(JPH::Vec3::sZero());
+        const JPH::Vec3 fast(FastBodySpeed, 0.0f, 0.0f);
+
+        bodies.SetLinearVelocity(scene.sphere, fast);
+        CHECK(Near(bodies.GetLinearVelocity(scene.sphere).GetX(), JoltDefaultMaxLinearVelocity,
+                   FreeFallTolerance));
+
+        const float unlimited = math::Sqrt(NumericLimits<float>::Max()) * MetersPerCentimeter;
+        bodies.SetMaxLinearVelocity(scene.sphere, unlimited);
+        bodies.SetLinearVelocity(scene.sphere, fast);
+        scene.Step(1, temp, jobs);
+        CHECK(bodies.GetLinearVelocity(scene.sphere) == fast);
+    }
+
+    JPH::UnregisterTypes();
+    delete JPH::Factory::sInstance;
+    JPH::Factory::sInstance = nullptr;
     CHECK(g_assertFailures == 0);
     JPH::RegisterDefaultAllocator();
 }

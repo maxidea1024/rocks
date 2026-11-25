@@ -12,7 +12,7 @@
 |---|---|
 | 같은 단계 안 DAG, 등록 때 순환 거부(`CycleDetected`) | Component·Fixed·Late hook 사이 의존 API, 의존 제거 |
 | Actor 주 Tick(OnTick) 사이 의존(`AddActorTickPrerequisite`, 둘 다 Playing일 때만) | 시작 전(Spawn 직후) 선언, 시작 뒤 단계·priority·interval 변경 |
-| Component Tick이 소유 Actor Tick 뒤(자동) | 단계를 넘는 의존, 부착 관계 의존, 엔진 단계 자리(Physics 끝·LateUpdate 시작) |
+| Component Tick이 소유 Actor Tick 뒤(자동) | 단계를 넘는 의존, 부착 관계 의존, 엔진 단계 자리(Physics 고정 스텝마다·Physics 끝·LateUpdate 시작) |
 
 ### 15.2 UE 5.8 계약
 
@@ -60,10 +60,11 @@ Result<TickPhase> GetTickEffectivePhase(TickPoint point) const noexcept;
 
 | 자리 | 순서 | UE 대응 |
 |---|---|---|
+| Physics 단계의 고정 스텝마다(그 스텝의 사용자 Fixed hook 뒤) | `PhysicsSimulate` 물리 진행 | 스텝마다: UE async 물리 `FAsyncPhysicsTickCallback`(step 직전 사용자 async tick — `PhysScene_Chaos.cpp:145–157`) 뒤 `AdvanceAndDispatch_External`(`PhysicsCore/Private/ChaosScene.cpp:363–386`). UE 동기 모드는 프레임에 한 번 `TG_StartPhysics` → `StartPhysicsSim`(`PhysLevel.cpp:239–245`)·`StartFrame`(`:215–223`) |
 | Physics 단계 끝(고정 스텝 뒤, 프레임에 한 번) | (1) `PhysicsResults` 물리 결과 반영 → (2) `SkeletalPhysicsFinalize` | `TG_EndPhysics`(8절 표) |
 | LateUpdate 단계 시작 | (1) `Timers` 타이머·LifeSpan(17.5절) → (2) `TickableSubsystems`(16.5절) → (3) `CameraUpdate`(20.6절) | `LevelTick.cpp:1778–1883`: PostPhysics 뒤 타이머 → tickable → `UpdateCameraManager` → PostUpdateWork |
 
-- 자리마다 등록은 최대 하나이고(중복은 `AlreadyExists`), 비어 있으면 건너뛴다. 콜백은 `World::SetEngineStage(stage, function, user)`로 두고 World `Shutdown`이 모두 비운다. 콜백이 받는 `TickContext`는 그 프레임의 delta·pause 정보이며 `handle`·`fixedStepIndex`는 비어 있다. Physics 끝 두 단계는 고정 스텝이 0번인 프레임과 pause 중에도 프레임마다 한 번 돈다(pause 판단은 `context.paused`로 콜백이). 콜백 안에서 Spawn·Destroy·의존 선언 같은 World API를 부를 수 있다(Spawn은 다음 프레임 시작, Destroy는 곧바로 Tick에서 빠진다). 콜백은 `Result`를 돌려주며 실패는 그 프레임 Tick 실패로 집계한다(6절 Tick 실패 요약).
+- 자리마다 등록은 최대 하나이고(중복은 `AlreadyExists`), 비어 있으면 건너뛴다. 콜백은 `World::SetEngineStage(stage, function, user)`로 두고 World `Shutdown`이 모두 비운다. 콜백이 받는 `TickContext`는 그 프레임의 delta·pause 정보이며 `handle`·`fixedStepIndex`는 비어 있다. 단 `PhysicsSimulate`는 그 고정 스텝의 문맥이다(`deltaSeconds`·`unscaledDeltaSeconds` = 고정 스텝 길이, `fixedStepIndex` = 그 스텝 번호 — 사용자 Fixed hook과 같다). 고정 스텝이 0번인 프레임은 `PhysicsSimulate`가 돌지 않고, pause 중에는 고정 스텝이 없으므로 돌지 않는다(디버그 단일 스텝 프레임은 한 번 — 8절). 진단 시간(`WorldStats::engineStageNanoseconds`)은 모든 자리에서 마지막 Tick 안 실행의 합이다(그 프레임에 돌지 않은 자리 — 0번 스텝 프레임의 PhysicsSimulate, pause 중 CameraUpdate — 는 0). World는 WorldKind로 거르지 않는다. Editor·Preview World에서 step을 돌지 않게 하는 것은 등록 주체(Physics 모듈)가 Game·Tryout World에만 등록하는 것이다([물리 모듈](../PhysicsModule/03-Stepping.ko.md) 3.1절). Physics 끝 두 단계는 고정 스텝이 0번인 프레임과 pause 중에도 프레임마다 한 번 돈다(pause 판단은 `context.paused`로 콜백이). 콜백 안에서 Spawn·Destroy·의존 선언 같은 World API를 부를 수 있다(Spawn은 다음 프레임 시작, Destroy는 곧바로 Tick에서 빠진다). 콜백은 `Result`를 돌려주며 실패는 그 프레임 Tick 실패로 집계한다(6절 Tick 실패 요약).
 - pause 중에는 `Timers`(게임 시계가 멈춤)·`TickableSubsystems`(16.5절)가 pause 정책을 따르고, `CameraUpdate`는 실행하지 않는다. UE는 pause 중 `!bIsPaused || ShouldPerformFullTickWhenPaused()`일 때만 `UpdateCameraManager`를 부른다(`LevelTick.cpp:1844–1851`, 기본 거짓). 디버그 단일 스텝 프레임은 pause가 아닌 것으로 본다(8절).
 
 ### 15.5 시험(완료 조건)
@@ -74,6 +75,6 @@ Result<TickPhase> GetTickEffectivePhase(TickPoint point) const noexcept;
 - 순환: 사용자 호출 거부, 자동 간선은 Warning과 함께 생략.
 - 부착 의존: 부착·떼기·다시 붙이기, 부모 파괴 뒤 자식 실행.
 - 실행 중 변경: 단계·priority·interval 변경이 다음 경계에 반영, 실행 중 배열 불변.
-- 엔진 단계: 자리 순서, 중복 등록 거부, 실패 집계, pause 중 동작(Camera 생략, 단일 스텝 프레임은 실행).
+- 엔진 단계: 자리 순서, 중복 등록 거부, 실패 집계, pause 중 동작(Camera 생략, 단일 스텝 프레임은 실행). 고정 스텝마다 자리: 스텝 문맥(고정 스텝 길이·스텝 번호 = 그 스텝 Fixed hook과 같음), 0번 스텝 프레임·pause 중 없음, 단일 스텝 한 번, 스텝마다 실패 집계(첫 오류가 프레임 결과), 진단 시간 0(돌지 않은 프레임).
 - 무작위 연산(등록·해제·의존 추가·제거·단계·priority 변경)의 매 프레임 실행 순서가 처음부터 계산한 기준 모형과 같다(증분 경로 대조), hook 안 변경·고정 스텝 사이 재계산 없음·할당 실패 뒤 재시도·해제된 선행이 쌓이지 않음.
 - 8절의 기존 TickScheduler 시험은 그대로 통과한다(자동 Actor→Component 간선을 쓰던 시험은 ERD1에 맞게 고친다).

@@ -1,4 +1,4 @@
-#include <Core/Text/EditDistance.h>
+#include <SparksCompiler/LanguageCatalog.h>
 
 #include "CompilationChecker.h"
 #include "LanguageNames.h"
@@ -13,42 +13,9 @@ namespace rocks::sparks::detail {
 
 namespace {
 
-// hook의 인자 모양이다.
-enum class HookShape : uint8 {
-    Plain,     // 인자 없음
-    Tick,      // (dt: float)
-    Trigger,   // (other: Actor, trigger: Collider)
-    Collision, // (other: Actor, hit: Hit)
-};
-
-struct HookEntry {
-    StringView name;
-    HookShape shape;
-};
-
-// §5.1의 hook이다(`Validate`는 full — 프로필은 S1113이 본다).
-constexpr HookEntry HookEntries[] = {
-    {"Awake", HookShape::Plain},
-    {"Enable", HookShape::Plain},
-    {"Start", HookShape::Plain},
-    {"Tick", HookShape::Tick},
-    {"FixedTick", HookShape::Tick},
-    {"LateTick", HookShape::Tick},
-    {"Disable", HookShape::Plain},
-    {"Destroy", HookShape::Plain},
-    {"TriggerEnter", HookShape::Trigger},
-    {"TriggerExit", HookShape::Trigger},
-    {"CollisionEnter", HookShape::Collision},
-    {"CollisionExit", HookShape::Collision},
-    {"Validate", HookShape::Plain},
-};
-
 // 재진입 표시 attribute 이름이다(SD11).
 constexpr StringView SkipWhileBusyAttribute = "skipWhileBusy";
 constexpr StringView RestartAttribute = "restart";
-
-// hook 이름 제안의 편집 거리 상한이다.
-constexpr usize MaxHookSuggestionDistance = 2;
 
 } // namespace
 
@@ -349,8 +316,8 @@ void TypeChecker::CheckHook(const CheckContext& context, uint32 handler, uint32 
     const Compilation& c = compilation_;
     const SyntaxTree& tree = c.trees_[context.module];
     const StringView name = TokenText(context.module, nameNode);
-    const HookEntry* hook = nullptr;
-    for (const HookEntry& entry : HookEntries) {
+    const LanguageHook* hook = nullptr;
+    for (const LanguageHook& entry : LanguageHooks()) {
         if (entry.name == name) {
             hook = &entry;
         }
@@ -373,16 +340,7 @@ void TypeChecker::CheckHook(const CheckContext& context, uint32 handler, uint32 
             return;
         }
 
-        StringView best;
-        usize bestDistance = MaxHookSuggestionDistance + 1;
-        for (const HookEntry& entry : HookEntries) {
-            const usize distance = EditDistance(name, entry.name, MaxHookSuggestionDistance,
-                                                EditDistanceCase::AsciiInsensitive);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = entry.name;
-            }
-        }
+        const StringView best = SimilarHook(name);
 
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.AppendFormat("'{}' is not a lifecycle hook.", name);
@@ -404,7 +362,8 @@ void TypeChecker::CheckHook(const CheckContext& context, uint32 handler, uint32 
         return;
     }
 
-    const bool physics = hook->shape == HookShape::Trigger || hook->shape == HookShape::Collision;
+    const bool physics = hook->parameters == HookParameters::Trigger ||
+                         hook->parameters == HookParameters::Collision;
     if (physics && binder_.EngineChainHas(context.owner, EngineSymbol("LevelScript"))) {
         Report(context, DiagnosticCode::LevelScriptPhysicsHook, handler,
                "A LevelScript cannot declare physics hooks.",
@@ -448,22 +407,22 @@ void TypeChecker::CheckHook(const CheckContext& context, uint32 handler, uint32 
 
     uint32 expected[2] = {NoType, NoType};
     usize expectedCount = 0;
-    switch (hook->shape) {
-    case HookShape::Tick:
+    switch (hook->parameters) {
+    case HookParameters::Tick:
         expected[0] = floatType_;
         expectedCount = 1;
         break;
-    case HookShape::Trigger:
+    case HookParameters::Trigger:
         expected[0] = TypeOfSymbol(binder_.actor_);
         expected[1] = TypeOfSymbol(EngineSymbol("Collider"));
         expectedCount = 2;
         break;
-    case HookShape::Collision:
+    case HookParameters::Collision:
         expected[0] = TypeOfSymbol(binder_.actor_);
         expected[1] = TypeOfSymbol(EngineSymbol("Hit"));
         expectedCount = 2;
         break;
-    case HookShape::Plain:
+    case HookParameters::None:
         break;
     }
 

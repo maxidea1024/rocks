@@ -1,5 +1,5 @@
 #include <Core/Algorithms.h>
-#include <Core/Text/EditDistance.h>
+#include <SparksCompiler/LanguageCatalog.h>
 
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
@@ -93,42 +93,40 @@ struct AttributeRule {
     StringView name;
     uint32 places;
     AttributeArguments arguments;
-    bool varOnly; // `var` 필드만
-    bool context; // 실행 문맥 attribute(함수 하나에 하나)
+    bool varOnly;  // `var` 필드만
+    bool context;  // 실행 문맥 attribute(함수 하나에 하나)
+    bool fullOnly; // core 패키지에서 쓸 수 없다(1.3절 full — S1113)
 };
 
 constexpr AttributeRule AttributeRules[] = {
     {"edit", AttributePlace::ClassField | AttributePlace::StructField,
-     AttributeArguments::EditRange, false, false},
-    {"save", AttributePlace::ClassField, AttributeArguments::None, true, false},
-    {"net", AttributePlace::ClassField, AttributeArguments::NetMode, true, false},
-    {"authorityOnly", AttributePlace::Event, AttributeArguments::None, false, false},
+     AttributeArguments::EditRange, false, false, false},
+    {"save", AttributePlace::ClassField, AttributeArguments::None, true, false, false},
+    {"net", AttributePlace::ClassField, AttributeArguments::NetMode, true, false, false},
+    {"authorityOnly", AttributePlace::Event, AttributeArguments::None, false, false, false},
     {"formerly",
      AttributePlace::ClassField | AttributePlace::StructField | AttributePlace::EnumCase |
          AttributePlace::TypeDeclaration,
-     AttributeArguments::OneString, false, false},
-    {"tableRow", AttributePlace::Struct, AttributeArguments::AssetLiteral, false, false},
+     AttributeArguments::OneString, false, false, false},
+    {"tableRow", AttributePlace::Struct, AttributeArguments::AssetLiteral, false, false, false},
     {"skipWhileBusy", AttributePlace::Handler | AttributePlace::AnyFunction,
-     AttributeArguments::None, false, false},
+     AttributeArguments::None, false, false, false},
     {"restart", AttributePlace::Handler | AttributePlace::AnyFunction, AttributeArguments::None,
-     false, false},
-    {"rpc", AttributePlace::ClassFunction, AttributeArguments::Rpc, false, false},
-    {"pure", AttributePlace::AnyFunction, AttributeArguments::None, false, true},
-    {"worker", AttributePlace::AnyFunction, AttributeArguments::None, false, true},
-    {"deterministic", AttributePlace::AnyFunction, AttributeArguments::None, false, true},
-    {"editorButton", AttributePlace::ClassFunction, AttributeArguments::None, false, true},
-    {"cheat", AttributePlace::ClassFunction, AttributeArguments::None, false, true},
-    {"test", AttributePlace::TopFunction, AttributeArguments::None, false, true},
-    {"tick", AttributePlace::TickHook, AttributeArguments::Tick, false, false},
-    {"cvar", AttributePlace::ClassField, AttributeArguments::OneString, true, false},
+     false, false, false},
+    {"rpc", AttributePlace::ClassFunction, AttributeArguments::Rpc, false, false, true},
+    {"pure", AttributePlace::AnyFunction, AttributeArguments::None, false, true, true},
+    {"worker", AttributePlace::AnyFunction, AttributeArguments::None, false, true, true},
+    {"deterministic", AttributePlace::AnyFunction, AttributeArguments::None, false, true, true},
+    {"editorButton", AttributePlace::ClassFunction, AttributeArguments::None, false, true, true},
+    {"cheat", AttributePlace::ClassFunction, AttributeArguments::None, false, true, true},
+    {"test", AttributePlace::TopFunction, AttributeArguments::None, false, true, true},
+    {"tick", AttributePlace::TickHook, AttributeArguments::Tick, false, false, true},
+    {"cvar", AttributePlace::ClassField, AttributeArguments::OneString, true, false, true},
 };
 
 constexpr StringView TickPhaseNames[] = {"PrePhysics", "PostPhysics", "LateUpdate"};
 constexpr StringView RpcTargets[] = {"Server", "AllClients", "OwnerClient"};
 constexpr StringView RpcReliability[] = {"Reliable", "Unreliable"};
-
-// attribute 이름 제안의 편집 거리 상한이다.
-constexpr usize MaxAttributeSuggestionDistance = 2;
 
 } // namespace
 
@@ -438,17 +436,7 @@ void TypeChecker::CheckAttributeList(const CheckContext& context, uint32 declara
         }
 
         if (rule == nullptr) {
-            StringView best;
-            usize bestDistance = MaxAttributeSuggestionDistance + 1;
-            for (const AttributeRule& candidate : AttributeRules) {
-                const usize distance =
-                    EditDistance(name, candidate.name, MaxAttributeSuggestionDistance,
-                                 EditDistanceCase::AsciiInsensitive);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    best = candidate.name;
-                }
-            }
+            const StringView best = SimilarAttribute(name);
 
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.AppendFormat("Unknown attribute '@{}'.", name);
@@ -1692,3 +1680,19 @@ bool TypeChecker::AlwaysReturns(uint32 module, uint32 statement) const noexcept 
 }
 
 } // namespace rocks::sparks::detail
+
+namespace rocks::sparks {
+
+uint32 LanguageAttributeCount() noexcept {
+    return static_cast<uint32>(sizeof(detail::AttributeRules) / sizeof(detail::AttributeRules[0]));
+}
+
+LanguageWord LanguageAttributeAt(uint32 index) noexcept {
+    if (index >= LanguageAttributeCount()) {
+        return LanguageWord{StringView(), false};
+    }
+
+    return LanguageWord{detail::AttributeRules[index].name, detail::AttributeRules[index].fullOnly};
+}
+
+} // namespace rocks::sparks

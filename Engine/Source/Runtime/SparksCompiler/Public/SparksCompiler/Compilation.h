@@ -200,6 +200,13 @@ public:
     // (타입 이름·void·대기 등)이거나 해석하지 못했으면 NoType.
     uint32 ExpressionType(uint32 module, uint32 node) const noexcept;
 
+    // 멤버 심볼이 receiver 타입의 값에서 있는지다: 언어 멤버(부록 B)는 원소 조건([==]·[<]·[값]·
+    // [객체]·void 아님 — 3.8절)을 receiver의 첫 타입 인자로 판정하고(타입 검사와 같은 판정), 그
+    // 밖의 심볼은 참이다. member나 receiver가 범위 밖이면(심볼 표·타입 표 밖 — NoType은 범위
+    // 안) 거짓이다.
+    // 사용 예: 언어 서버 자동완성의 멤버 후보(Docs/Design/SparksTools.ko.md 11.6절).
+    bool MemberAvailable(uint32 member, uint32 receiver) const noexcept;
+
     // 타입의 정규 표기를 붙인다: 내장 타입은 정규 이름(`int64` → `int`), prelude는 그 이름, 엔진
     // 타입은 `Rocks.이름`, 사용자 타입은 `패키지:모듈.이름`, 타입 매개변수는 그 이름, 제네릭은
     // `Map<string, int>`, 선택은 끝의 `?`, NoType은 `?`. 실패: 할당 실패.

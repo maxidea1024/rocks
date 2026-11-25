@@ -104,7 +104,7 @@
     }
   ],
   "notes": [
-    "Cook-time resampler for audio (Docs/Design/AudioSystem.ko.md section 3.31). UE uses the same library and converter (Runtime/AudioPlatformConfiguration/Private/AudioResampler.cpp, SRC_SINC_BEST_QUALITY). Developer only: AudioTools links it.",
+    "Cook-time resampler for audio (Docs/Design/AudioSystem section 3.31). UE uses the same library and converter (Runtime/AudioPlatformConfiguration/Private/AudioResampler.cpp, SRC_SINC_BEST_QUALITY). Developer only: AudioTools links it.",
     "Built without config.h: the configure results are manifest defines. SampleRateVersion.c defines PACKAGE and VERSION (the version string literals) and compiles samplerate.c.",
     "The sinc converter uses coefficient tables, arithmetic and lrint only (no transcendental libm calls), so results are fixed per architecture and compiler flags. Internal allocation uses malloc/calloc (tool only)."
   ]

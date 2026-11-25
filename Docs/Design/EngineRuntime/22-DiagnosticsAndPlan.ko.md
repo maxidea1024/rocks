@@ -24,7 +24,7 @@ S14 구현:
 - `World::DumpSubsystems`·`Engine::DumpSubsystems`는 `SubsystemCollection::Describe`(이름 목록 `NameAt`)를 쓴다. Engine이 모르는 계층(GameInstance·LocalPlayer)은 `EngineClient::DescribeSubsystems`로 client가 붙인다.
 - `GameInstanceClient::DumpFramework`와 `GameplayStats`(`GameplayWorldSubsystem::Stats(world)`)를 둔다. `WorldStats`에는 `ticks.demoted`·`engineStageNanoseconds`·`pendingLifeSpans`를 더한다.
 - 콘솔 명령은 Engine이 설정 문맥에 `engine`·`world` 영역을 더하고 `engine.dumpsubsystems`·`world.dumpticks`를 묶는다. `game.dumpframework`는 GameInstanceClient가 묶는다(영역 `game`은 기본 표). 둘 다 종료 전에 푼다. 출력은 콘솔 sink와 Info 로그다. 설정 문맥 하나를 Engine 여럿이 같이 쓰면 마지막에 묶은 Engine(과 그 client)이 명령 대상이다. 그 Engine이 먼저 끝나면 명령은 대상 없음(`NotReady`)이 된다. 대상 목록은 두지 않는다 — 한 프로세스에 Engine이 여럿인 것은 시험뿐이기 때문이다.
-- 리뷰 반영(S14): `TickStats.demoted`는 마지막 재계산 값이다. 덤프는 재계산 대기를 머리줄에 표시하고, 순서 배열에 없는 항목(재구성 할당 실패 포함)을 `pending`으로 빠짐없이 쓴다. 엔진 단계 자리는 실행 위치대로 쓴다(LateUpdate는 Tick 항목 앞 `at start`, Physics는 뒤 `at end`). 진단 덤프의 낡은 handle은 건너뛰고 할당 실패만 오류로 돌린다.
+- 리뷰 반영(S14): `TickStats.demoted`는 마지막 재계산 값이다. 덤프는 재계산 대기를 머리줄에 표시하고, 순서 배열에 없는 항목(재구성 할당 실패 포함)을 `pending`으로 빠짐없이 쓴다. 엔진 단계 자리는 실행 위치대로 쓴다(LateUpdate는 Tick 항목 앞 `at start`, Physics는 뒤 `at end`, `PhysicsSimulate`는 `after each fixed step`). 진단 덤프의 낡은 handle은 건너뛰고 할당 실패만 오류로 돌린다.
 - 진단 코드는 로그의 `{Code}` 속성으로 싣는다(World `WorldLog.h`, Gameplay `GameplayTypes.h` 상수). 따로 진단 수집기는 두지 않는다. 지금은 로그가 진단 경로이기 때문이다.
 - 시험: `WorldTick_DumpTickGraphListsOrderPrerequisitesAndDemotion`, `WorldSubsystem_SkipChainsAndOptionalCycles`(생략 줄), `GameplayDiagnostics_ConsoleDumpsDescribeEveryLayer`.
 
@@ -38,7 +38,7 @@ S14 구현:
 | ERD4 | 꺼진 선행 | 실행만 건너뛰고 간선 유지. 단계 늦춤은 선행이 꺼져도 유지(UE와 다름) | 같은 단계는 관찰 결과 같음, 단계는 프레임마다 흔들리지 않게 |
 | ERD5 | 시작 전 선언 | 허용, World 선언 그래프에 두고 등록 때 적용 | UE는 등록 전 선언 허용 |
 | ERD6 | 실행 중 변경 | priority·interval은 다음 단계 경계, 단계는 다음 프레임 시작 | UE `SetTickGroup` 등 |
-| ERD7 | 엔진 단계 자리 | Physics 끝 2개, LateUpdate 시작 3개(Timers → tickable → Camera). Camera는 pause 중 생략 | UE `LevelTick.cpp` 순서 |
+| ERD7 | 엔진 단계 자리 | Physics 고정 스텝마다 1개(`PhysicsSimulate` — 그 스텝의 사용자 Fixed hook 뒤), Physics 끝 2개, LateUpdate 시작 3개(Timers → tickable → Camera). Camera는 pause 중 생략 | UE `LevelTick.cpp` 순서. 스텝마다 자리는 UE async 물리의 `FAsyncPhysicsTickCallback`(step 직전 async tick 컴포넌트·Actor — `PhysicsEngine/Experimental/PhysScene_Chaos.cpp:145–157`)처럼 사용자 고정 tick 다음에 step이다 |
 | ERD8 | Subsystem 의존 | 정적 선언·생성 전 검사·역순 정리 유지 | UE와 다름(순환 미감지·정방향) — 안전 |
 | ERD9 | 조건부 생성 | `shouldCreate`, 필수 의존 누락 시 의존자 생략(진단), 선택 의존 | UE는 의존자를 그래도 만든다 — 필수 의존 계약 우선(차이) |
 | ERD10 | 계층 조회 | World에는 타입 지운 조회 창만, 타입 도우미는 Engine·Gameplay 자유 함수. 조회 창은 EndPlay 끝에 닫힘 | 3절 의존 방향, GameInstance Subsystem이 World 정리보다 먼저 사라짐 |
@@ -72,3 +72,13 @@ S14 구현:
 | S12 | Controller·Pawn·PlayerController·CameraDirector·AiController, PlayerState 수명 시험 | S11 |
 | S13 | 14단계 시나리오·Director 없는 World 시나리오 시험, Sandbox 연결 | S12 |
 | S14 | 진단 덤프·콘솔 명령·Guide 갱신, 전체 시험·커버리지 | S13 |
+
+### 22.4 다른 문서의 개정 요청(받은 것)
+
+받은 요청은 여기에 적고, 해당 절을 고친 뒤 상태를 바꾼다.
+
+| 요청한 문서 | 고칠 절 | 요청 | 필요한 때 | 상태 |
+|---|---|---|---|---|
+| [물리 모듈](../PhysicsModule/07-StagesDecisions.ko.md) 7.4절 | 8·15절 | Physics 단계 고정 스텝마다 사용자 Fixed hook 뒤에 엔진 자리 `PhysicsSimulate`를 하나 더한다(지금은 단계 끝 자리 PhysicsResults·SkeletalPhysicsFinalize 둘). 등록은 `SetEngineStage`와 같은 방식 | PH1 전 | 반영함(2026-11-25 — 8·15.4절, rocks-45 요청으로 CR21 중간에 앞당김) |
+| 같음 | 23절 | 즉시 다시 만들기 `RecreateSystemStateNow(kind)`(UE `EnsurePhysicsStateCreated`). ERD25의 PreRender 일괄과 별도이고 실패 정책은 같다(값 변경은 성공, Warning `SystemStateRecreateFailed`) | PH2 전 | 계획됨 — CR21 뒤 |
+| 같음 | 23·24절(World 코드) | `World::GetPhysicsScene`·`SetPhysicsScene`(World 모듈 추상 접점 `PhysicsScene`), PrimitiveComponent 물리 시스템 상태 판정·생성, `OnTransformUpdated` hook의 body 이동, 이동 API `TeleportMode` 인자, simulate를 켤 때 부모에서 떼기, `MoveComponent` sweep·`UpdateOverlaps` | PH2·PH4 때 | 맡을 곳은 그때 정한다 |

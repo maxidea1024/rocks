@@ -1,0 +1,696 @@
+// A02 수학 probe다(Docs/Design/EngineShaders 7.3·7.6절). MathFloatProbePixel은 RGBA32Float, MathUintProbePixel은
+// R32Uint 타깃에 사례마다 결과를 쓴다. 함수 번호·선택자·입력 규칙은 Shared/ProbeFunctionIds.h와
+// Common/ProbeCommon.rsh, 기대값은 Sandbox EngineShaderReference*.cpp(CPU double)다.
+#include "/Engine/Private/Common/ShaderPrelude.rsh"
+#include "/Engine/Private/Math/BitPacking.rsh"
+#include "/Engine/Private/Math/DitheredQuantization.rsh"
+#include "/Engine/Private/Math/ExtendedPrecision.rsh"
+#include "/Engine/Private/Math/FastApproximations.rsh"
+#include "/Engine/Private/Math/IntegerHash.rsh"
+#include "/Engine/Private/Math/LowDiscrepancy.rsh"
+#include "/Engine/Private/Math/MatrixMath.rsh"
+#include "/Engine/Private/Math/MortonOrder.rsh"
+#include "/Engine/Private/Math/Quaternion.rsh"
+#include "/Engine/Private/Math/RandomNumbers.rsh"
+#include "/Engine/Private/Math/RayIntersection.rsh"
+#include "/Engine/Private/Math/SampleWarping.rsh"
+#include "/Engine/Private/Math/ScreenNoise.rsh"
+#include "/Engine/Private/Math/SphericalHarmonics.rsh"
+#include "/Engine/Private/Math/UnitVectorEncoding.rsh"
+#include "/Engine/Private/Math/VectorMath.rsh"
+#include "/Plugin/EngineShaderTests/Common/ProbeCommon.rsh"
+
+float4 Bool4(bool value) {
+    return float4(value ? 1.0 : 0.0, 0.0, 0.0, 0.0);
+}
+
+// 시험 쪽 tangent: 방향 n에 직교하는 단위 벡터(라이브러리 BuildOrthonormalBasis와 따로 — 축 하나와 외적).
+float3 ProbeTangent(float3 n, uint c) {
+    const float3 seedAxis = abs(n.x) < 0.5 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+    const float3 t = normalize(cross(seedAxis, n));
+    const float angle = ProbeUnit(c, 40u) * 6.28318530718;
+    return t * cos(angle) + cross(n, t) * sin(angle);
+}
+
+float4 ProbeScalarFloat(uint f, uint s, uint c) {
+    const float x = ProbeSigned(c, 0u, 2);
+    const float y = ProbeSigned(c, 1u, 2);
+    const float z = ProbeSigned(c, 2u, 2);
+    const float w = ProbeSigned(c, 3u, 2);
+    if (f == ProbeScalarPowers) {
+        if (s == 0u) {
+            return float4(Square(x), Pow3(x), Pow4(x), Pow5(x));
+        }
+
+        if (s == 1u) {
+            return Pow5(float4(x, y, z, w));
+        }
+
+        return float4(Pow3(float3(x, y, z)), Square(float2(x, w)).y) + float4(0.0, 0.0, 0.0, Pow2(float2(y, z)).x);
+    }
+
+    if (f == ProbeScalarMinMax) {
+        const float a = c < 4u ? asfloat(ProbeSpecialBits[c]) : x;
+        if (s == 0u) {
+            return float4(Max3(a, y, z), Min3(a, y, z), SignNotZero(a), SaturateSigned(a));
+        }
+
+        return float4(Max3(float3(a, y, z), float3(y, z, a), float3(z, a, y)).x, Min3(float2(a, y), float2(y, z), float2(z, a)).y,
+                      SignNotZero(float3(y, z, a)).z, SaturateSigned(float4(x, y, z, a)).w);
+    }
+
+    if (f == ProbeScalarSafe) {
+        const float v = c < 16u ? asfloat(ProbeSpecialBits[c]) : ProbeSigned(c, 0u, 4);
+        const float edge0 = ProbeSigned(c, 4u, 1);
+        const float edge1 = (c % 7u) == 0u ? edge0 : edge0 + ProbeUnit(c, 5u) * 2.0;
+        if (s == 0u) {
+            const float finite = IsFiniteValue(v) ? v : 0.0;
+            return float4(SafeRcp(finite), SafeSqrt(finite), LinearStep(edge0, edge1, x), SmootherStep(edge0, edge1, x));
+        }
+
+        return float4(SafeRcp(float3(x, y, z)).xy, SafeSqrt(float2(y, -z)));
+    }
+
+    if (f == ProbeSafeNormalize) {
+        const int exponent = -(int)(c % 80u);
+        const float3 v = ProbeVector(c, 0u) * ProbePowerOfTwo(exponent);
+        return float4(SafeNormalize(v, float3(0.0, 0.0, 1.0)), SafeNormalize(float2(v.x, v.y), float2(1.0, 0.0)).x);
+    }
+
+    if (f == ProbeMathConstants) {
+        if (c == 0u) {
+            return float4(Pi, TwoPi, HalfPi, InversePi);
+        }
+
+        if (c == 1u) {
+            return float4(InverseTwoPi, DegreesToRadiansScale, RadiansToDegreesScale, FloatMaxValue);
+        }
+
+        if (c == 2u) {
+            return float4(FloatMinNormal, FloatEpsilon, SmallestSafeDivisor, SmallestSafeSquaredLength);
+        }
+
+        return float4(DegreesToRadians(180.0), RadiansToDegrees(Pi), 0.0, 0.0);
+    }
+
+    // ProbePowPositive
+    const float base = c < 4u ? 0.0 : ProbeUnit(c, 0u) * 4.0;
+    if (s == 0u) {
+        return float4(PowPositive(base, y), PowPositive(base, 0.5), PowPositive(base, 2.4), PowPositive(-base, y));
+    }
+
+    return float4(PowPositive(float3(base, ProbeUnit(c, 1u), ProbeUnit(c, 2u) * 2.0), y), 0.0);
+}
+
+float4 ProbeVectorFloat(uint f, uint s, uint c) {
+    float3 n = ProbeDirection(c, 0u);
+    // 앞 8개 사례는 축·n.z = −1 근처 경계다.
+    if (c < 8u) {
+        const float3 axes[8] = {float3(0.0, 0.0, 1.0), float3(0.0, 0.0, -1.0), float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0),
+                                float3(-1.0, 0.0, 0.0), float3(0.0, -1.0, 0.0), normalize(float3(1.0e-4, 0.0, -1.0)),
+                                normalize(float3(0.0, -1.0e-4, -1.0))};
+        n = axes[c];
+    }
+
+    if (f == ProbeOrthonormalBasis) {
+        float3 t;
+        float3 b;
+        BuildOrthonormalBasis(n, t, b);
+        return float4(s == 0u ? t : (s == 1u ? b : n), 0.0);
+    }
+
+    if (f == ProbeGramSchmidt) {
+        const float3 t = (c % 5u) == 0u ? n * 3.0 : ProbeVector(c, 3u);
+        return float4(GramSchmidtTangent(t, n), 0.0);
+    }
+
+    if (f == ProbeReflectRefract) {
+        float3 incident = ProbeDirection(c, 3u);
+        if (dot(incident, n) > 0.0) {
+            incident = -incident;
+        }
+
+        if (s == 0u) {
+            return float4(ReflectDirection(incident, n), 0.0);
+        }
+
+        const float eta = 0.5 + ProbeUnit(c, 6u) * 1.5;
+        bool tir;
+        const float3 refracted = RefractDirection(incident, n, eta, tir);
+        return float4(refracted, tir ? 1.0 : 0.0);
+    }
+
+    // ProbeAngleBetween
+    float3 other = ProbeDirection(c, 3u);
+    if (c % 11u == 1u) {
+        other = n;
+    } else if (c % 11u == 2u) {
+        other = -n;
+    }
+
+    return float4(AngleBetweenUnitVectors(n, other), 0.0, 0.0, 0.0);
+}
+
+float3x3 ProbeMatrix3(uint c) {
+    float3x3 m = float3x3(ProbeVector(c, 0u), ProbeVector(c, 3u), ProbeVector(c, 6u));
+    m[0][0] += 2.0;
+    m[1][1] += 2.0;
+    m[2][2] -= 2.0;
+    return m;
+}
+
+float4 ProbeMatrixFloat(uint f, uint s, uint c) {
+    const float3 p = ProbeVector(c, 0u) * 512.0;
+    if (f == ProbeMatrixTransform) {
+        if (s == 0u) {
+            return float4(TransformPosition(p, Probe.values), 0.0);
+        }
+
+        if (s == 1u) {
+            return float4(TransformDirection(p, Probe.values), 0.0);
+        }
+
+        return TransformPositionHomogeneous(p, Probe.values);
+    }
+
+    if (f == ProbeInverse3x3) {
+        const float3x3 m = ProbeMatrix3(c);
+        if (s < 3u) {
+            return float4(InverseMatrix3x3(m)[s], 0.0);
+        }
+
+        return float4(Determinant3x3(m), 0.0, 0.0, 0.0);
+    }
+
+    if (f == ProbeNormalMatrix) {
+        return float4(NormalMatrixFromWorld(Probe.values)[min(s, 2u)], 0.0);
+    }
+
+    if (f == ProbeExtractTransform) {
+        return float4(s == 0u ? ExtractTranslation(Probe.values) : ExtractScale(Probe.values), 0.0);
+    }
+
+    // ProbeProjection
+    const float depth = ProbeUnit(c, 0u);
+    const float nearDistance = ProjectionNearDistance(Probe.values);
+    const float2 tanHalf = ProjectionTanHalfFov(Probe.values);
+    return float4(nearDistance, tanHalf, ReversedInfiniteDepthToViewDepth(depth, nearDistance));
+}
+
+float4 ProbeQuaternionFloat(uint f, uint s, uint c) {
+    const float4 a = normalize(float4(ProbeVector(c, 0u), ProbeSigned(c, 3u, 0)) + float4(0.0, 0.0, 0.0, 0.01));
+    const float4 b = normalize(float4(ProbeVector(c, 4u), ProbeSigned(c, 7u, 0)) + float4(0.0, 0.0, 0.0, 0.01));
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeQuaternion) {
+        const float3 v = ProbeVector(c, 8u) * 100.0;
+        if (s == 0u) {
+            result = QuatMultiply(a, b);
+        } else if (s == 1u) {
+            result = float4(QuatRotateVector(a, v), 0.0);
+        } else if (s < 5u) {
+            result = float4(QuatToMatrix(a)[s - 2u], 0.0);
+        } else if (s == 5u) {
+            result = MatrixToQuat(QuatToMatrix(a));
+        } else if (s == 6u) {
+            result = QuatSlerp(a, b, ProbeUnit(c, 11u));
+        } else {
+            result = QuatConjugate(a);
+        }
+    } else {
+        // ProbeTangentFrame
+        const float3 n = ProbeDirection(c, 0u);
+        const float3 t = ProbeTangent(n, c);
+        const float3 bitangent = (ProbeBits(c, 41u) & 1u) != 0u ? cross(n, t) : -cross(n, t);
+        const float4 q = EncodeTangentFrame(t, bitangent, n);
+        float3 decodedT = float3(0.0, 0.0, 0.0);
+        float3 decodedB = float3(0.0, 0.0, 0.0);
+        float3 decodedN = float3(0.0, 0.0, 0.0);
+        DecodeTangentFrame(q, decodedT, decodedB, decodedN);
+        result = s == 0u ? q : float4(s == 1u ? decodedT : (s == 2u ? decodedB : decodedN), 0.0);
+    }
+
+    return result;
+}
+
+float4 ProbeApproximationFloat(uint f, uint s, uint c) {
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeFastTrig) {
+        const float signedX = ProbeSigned(c, 0u, 0);
+        const float x = c < 3u ? (c == 0u ? 1.0 : (c == 1u ? -1.0 : 0.0)) : signedX;
+        const float y = ProbeSigned(c, 1u, 6);
+        const float z = ProbeSigned(c, 2u, 6);
+        result = float4(FastAcos(x), FastAsin(x), FastAtan(y), FastAtan2(y, c == 3u ? 0.0 : z));
+    } else if (f == ProbeFastExpLog) {
+        const float positive = ProbeWidePositive(c, 0u);
+        const float w = ProbeSigned(c, 1u, 7);
+        result = float4(FastRsqrt(positive), FastExp2(w), FastLog2(positive), positive);
+    } else if (f == ProbeExtendedSums) {
+        const float a = ProbeWidePositive(c, 0u) * ((ProbeBits(c, 2u) & 1u) != 0u ? -1.0 : 1.0);
+        const float b = ProbeWidePositive(c, 1u) * ((ProbeBits(c, 3u) & 1u) != 0u ? -1.0 : 1.0);
+        float sum = 0.0;
+        float sumError = 0.0;
+        float product = 0.0;
+        float productError = 0.0;
+        TwoSum(a, b, sum, sumError);
+        TwoProduct(a, b, product, productError);
+        result = float4(sum, sumError, product, productError);
+    } else {
+        // ProbeTranslatedWorld: 1e7 cm(±2^24) 근처 world, 카메라는 world ± 1024 cm.
+        const float3 worldHigh = float3(ProbeSigned(c, 0u, 24), ProbeSigned(c, 1u, 24), ProbeSigned(c, 2u, 24));
+        const float3 worldLow = ProbeVector(c, 3u) * 0.5;
+        const float3 viewHigh = worldHigh + ProbeVector(c, 6u) * 1024.0;
+        const float3 viewLow = ProbeVector(c, 9u) * 0.5;
+        const ExtendedFloat3 world = NormalizeExtended(worldHigh, worldLow);
+        const ExtendedFloat3 view = NormalizeExtended(viewHigh, viewLow);
+        const ExtendedFloat3 sum = ExtendedAdd(world, view);
+        const ExtendedFloat3 scaled = ExtendedScale(world, ProbeUnit(c, 12u) + 0.5);
+        float3 picked = world.high;
+        if (s == 0u) {
+            picked = ToTranslatedWorld(world, view);
+        } else if (s == 1u) {
+            picked = sum.high;
+        } else if (s == 2u) {
+            picked = sum.low;
+        } else if (s == 3u) {
+            picked = scaled.high;
+        } else if (s == 4u) {
+            picked = scaled.low;
+        }
+
+        result = float4(picked, 0.0);
+    }
+
+    return result;
+}
+
+float4 ProbePackingFloat(uint f, uint s, uint c) {
+    const uint bits = ProbeBits(c, 0u);
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeNormalizedDecode) {
+        if (s == 0u) {
+            result = float4(DecodeUnorm(bits & 0xffu, 8u), DecodeUnorm(bits & 0x3ffu, 10u), DecodeUnorm(bits & 0xffffu, 16u),
+                            DecodeSnorm(bits & 0xffu, 8u));
+        } else if (s == 1u) {
+            result = float4(DecodeSnorm(bits & 0x3ffu, 10u), DecodeSnorm(bits & 0xffffu, 16u), 0.0, 0.0);
+        } else {
+            result = s == 2u ? UnpackRGBA8Unorm(bits) : UnpackRGB10A2Unorm(bits);
+        }
+    } else if (f == ProbeSmallFloatDecode) {
+        result = s == 0u ? float4(DecodeSmallUnsignedFloat(c & 0x7ffu, Float11MantissaBits),
+                                  DecodeSmallUnsignedFloat(c & 0x3ffu, Float10MantissaBits), 0.0, 0.0)
+                         : float4(UnpackRG11B10Ufloat(bits), 0.0);
+    } else if (f == ProbeRgb9e5Decode) {
+        result = float4(UnpackRGB9E5Ufloat(bits), 0.0);
+    } else {
+        // ProbeHalfDecode
+        result = float4(DecodeHalf(c & 0xffffu), UnpackHalf2(bits), 0.0);
+    }
+
+    return result;
+}
+
+float4 ProbeEncodingFloat(uint f, uint s, uint c) {
+    const float3 n = ProbeDirection(c, 0u);
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeOctahedral) {
+        const float3 upper = float3(n.xy, abs(n.z));
+        if (s == 0u) {
+            result = float4(EncodeOctahedral(n), EncodeHemiOctahedral(upper));
+        } else if (s == 1u) {
+            result = float4(DecodeOctahedral(EncodeOctahedral(n)), 0.0);
+        } else if (s == 2u) {
+            result = float4(DecodeHemiOctahedral(EncodeHemiOctahedral(upper)), 0.0);
+        } else if (s == 3u) {
+            result = float4(ReconstructNormalZ(ProbeVector(c, 3u).xy * 0.75), 0.0);
+        } else {
+            const uint quantizeBits = Probe.control.w & 0x1fu;
+            const uint2 code = uint2(ProbeBits(c, 4u), ProbeBits(c, 5u)) & ((1u << quantizeBits) - 1u);
+            result = float4(DequantizeOctahedral(code, quantizeBits), 0.0);
+        }
+    } else {
+        // ProbeDither: 행마다 값 하나, 사례마다 잡음.
+        const uint2 xy = ProbeCoordinates(c);
+        const float value = ProbeUnit(xy.y, 9u);
+        const float noise = ProbeUnit(c, 1u);
+        result = float4(QuantizeWithDither(value, 8u, noise), QuantizeWithDither(float3(value, value, value), 10u, noise).y,
+                        value, noise);
+    }
+
+    return result;
+}
+
+float4 ProbeRandomFloat(uint f, uint s, uint c) {
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeUnitFloat) {
+        const uint bits = c == 0u ? 0xffffffffu : (c == 1u ? 0u : ProbeBits(c, 0u));
+        result = float4(UintToUnitFloat(bits), UintToUnitFloat(uint2(c, bits)).y, RadicalInverseBase2(c), Halton3(c));
+    } else if (f == ProbeRandomStream) {
+        RandomPcgState rng = RandomPcgSeed(c ^ (Probe.control.w * 0x9e3779b9u));
+        const float first = RandomPcgNextFloat(rng);
+        const float second = RandomPcgNextFloat(rng);
+        const float third = RandomPcgNextFloat(rng);
+        result = float4(first, second, third, RandomPcgNextFloat(rng));
+    } else if (f == ProbeScreenNoise) {
+        const float2 pixel = (float2)ProbeCoordinates(c);
+        const uint frame = (uint)Probe.parameters.x;
+        result = float4(InterleavedGradientNoise(pixel), InterleavedGradientNoise(pixel, frame),
+                        InterleavedGradientNoise(pixel, frame + 64u), InterleavedGradientNoise(pixel, frame + 1u));
+    } else {
+        // ProbeLowDiscrepancy
+        const uint count = (uint)Probe.parameters.x;
+        result = s == 0u ? float4(Hammersley(c, count), R2Sequence(c)) : float4(SobolOwen2D(c, Probe.control.w), Halton2(c), 0.0);
+    }
+
+    return result;
+}
+
+float4 ProbeSamplingFloat(uint f, uint s, uint c) {
+    const float2 u = float2(ProbeUnit(c, 0u), ProbeUnit(c, 1u));
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeSampleWarping) {
+        const float cosThetaMax = Probe.parameters.x;
+        if (s == 0u) {
+            result = float4(ConcentricSquareToDisk(u), 0.0, 0.0);
+        } else if (s == 1u) {
+            result = float4(UniformSphere(u), 0.0);
+        } else if (s == 2u) {
+            result = float4(UniformHemisphere(u), 0.0);
+        } else if (s == 3u) {
+            result = float4(CosineHemisphere(u), 0.0);
+        } else if (s == 4u) {
+            result = float4(UniformCone(u, cosThetaMax), 0.0);
+        } else {
+            result = float4(UniformSpherePdf(), UniformHemispherePdf(), CosineHemispherePdf(u.x * 2.0 - 1.0),
+                            UniformConePdf(cosThetaMax));
+        }
+    } else {
+        // 격자 칸 중심 방향(θ 행·φ 열) 또는 무작위 방향.
+        const uint2 xy = ProbeCoordinates(c);
+        const float theta = ((float)xy.y + 0.5) * (Pi / max(Probe.parameters.y, 1.0));
+        const float phi = ((float)xy.x + 0.5) * (TwoPi / (float)ProbeWidth());
+        const float3 gridDirection = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+        const float3 d = f == ProbeSphericalHarmonicsGrid ? gridDirection : ProbeDirection(c, 0u);
+        if (f == ProbeSphericalHarmonicsBasis || f == ProbeSphericalHarmonicsGrid) {
+            const SphericalHarmonics3 basis = BasisSH3(d);
+            const SphericalHarmonics2 basis2 = BasisSH2(d);
+            if (s == 0u) {
+                result = basis.band01;
+            } else if (s == 1u) {
+                result = basis.band2;
+            } else {
+                result = float4(basis.band2Last, EvaluateSH3(ProjectDirectionSH3(d, 2.0), d), DotSH2(basis2, basis2),
+                                EvaluateSH2(AddSH2(AddSH2(ZeroSH2(), ProjectDirectionSH2(d, 1.0)), ScaleSH2(basis2, 0.5)), d));
+            }
+        } else {
+            // ProbeSphericalHarmonicsIrradiance: 계수는 values 앞 9개(행 우선).
+            SphericalHarmonics3 sh;
+            sh.band01 = Probe.values[0];
+            sh.band2 = Probe.values[1];
+            sh.band2Last = Probe.values[2].x;
+            SphericalHarmonics2 sh2;
+            sh2.coefficients = Probe.values[0];
+            const float width = Probe.parameters.x;
+            result = float4(EvaluateIrradianceSH3(sh, d), EvaluateIrradianceSH2(sh2, d), EvaluateSH3(WindowSH3(sh, width), d),
+                            EvaluateSH3(AddSH3(ZeroSH3(), ScaleSH3(sh, 0.5)), d) + DotSH3(sh, ConvolveCosineLobeSH3(sh)) * 0.0);
+        }
+    }
+
+    return result;
+}
+
+float4 ProbeRayFloat(uint s, uint c) {
+    const float3 origin = ProbeVector(c, 0u) * 400.0;
+    const float3 direction = ProbeDirection(c, 3u);
+    const float3 center = ProbeVector(c, 6u) * 100.0;
+    const float3 axis = ProbeDirection(c, 9u);
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (s == 0u) {
+        const float4 plane = float4(ProbeDirection(c, 9u), ProbeSigned(c, 12u, 6));
+        float t = 0.0;
+        const bool hit = RayPlaneIntersection(origin, direction, plane, t);
+        result = float4(hit ? 1.0 : 0.0, t, 0.0, 0.0);
+    } else if (s == 1u) {
+        float2 hits = float2(0.0, 0.0);
+        const bool hit = RaySphereIntersection(origin, direction, center, 50.0 + ProbeUnit(c, 9u) * 200.0, hits);
+        result = float4(hit ? 1.0 : 0.0, hits, 0.0);
+    } else if (s == 2u) {
+        const float3 extent = float3(ProbeUnit(c, 9u), ProbeUnit(c, 10u), ProbeUnit(c, 11u)) * 200.0 + 10.0;
+        float2 range = float2(0.0, 0.0);
+        const bool hit = RayAabbIntersection(origin, 1.0 / direction, center - extent, center + extent, range);
+        result = float4(hit ? 1.0 : 0.0, range, 0.0);
+    } else if (s == 3u) {
+        float t = 0.0;
+        const bool hit = RayConeIntersection(origin, direction, center, axis, 0.5 + ProbeUnit(c, 12u) * 0.45, 300.0, t);
+        result = float4(hit ? 1.0 : 0.0, t, 0.0, 0.0);
+    } else if (s == 4u) {
+        float t = 0.0;
+        const bool hit = RayCylinderIntersection(origin, direction, center, axis, 20.0 + ProbeUnit(c, 12u) * 150.0, 300.0, t);
+        result = float4(hit ? 1.0 : 0.0, t, 0.0, 0.0);
+    } else {
+        const float3 v0 = center + ProbeVector(c, 12u) * 200.0;
+        const float3 v1 = center + ProbeVector(c, 15u) * 200.0;
+        const float3 v2 = center + ProbeVector(c, 18u) * 200.0;
+        float t = 0.0;
+        float3 barycentrics = float3(0.0, 0.0, 0.0);
+        const bool hit = RayTriangleIntersection(origin, direction, v0, v1, v2, 0.0, FloatMaxValue, t, barycentrics);
+        result = float4(hit ? 1.0 : 0.0, t, barycentrics.y, barycentrics.z);
+    }
+
+    return result;
+}
+
+float4 MathFloatProbePixel(float4 position : SV_Position) : SV_Target0 {
+    const uint f = ProbeFunction();
+    const uint s = ProbeSelector();
+    const uint c = ProbeCase(position);
+    if (f < ProbeOrthonormalBasis) {
+        return ProbeScalarFloat(f, s, c);
+    }
+
+    if (f < ProbeMatrixTransform) {
+        return ProbeVectorFloat(f, s, c);
+    }
+
+    if (f < ProbeQuaternion) {
+        return ProbeMatrixFloat(f, s, c);
+    }
+
+    if (f < ProbeFastTrig) {
+        return ProbeQuaternionFloat(f, s, c);
+    }
+
+    if (f < ProbeNormalizedDecode) {
+        return ProbeApproximationFloat(f, s, c);
+    }
+
+    if (f < ProbeOctahedral) {
+        return ProbePackingFloat(f, s, c);
+    }
+
+    if (f < ProbeUnitFloat) {
+        return ProbeEncodingFloat(f, s, c);
+    }
+
+    if (f < ProbeSampleWarping) {
+        return ProbeRandomFloat(f, s, c);
+    }
+
+    if (f < ProbeRayIntersection) {
+        return ProbeSamplingFloat(f, s, c);
+    }
+
+    return ProbeRayFloat(s, c);
+}
+
+// 공유 모서리 watertight 시험이다: 삼각형 A(p0, p1, p2)와 B(p2, p1, p3)가 모서리 p1–p2를 나눈다. 광선은
+// 모서리 위 점을 겨눈다(점은 precise로 계산 — 두 삼각형이 같은 꼭짓점을 받는다). 결과 bit 0 = A 맞음,
+// bit 1 = B 맞음이다.
+uint WatertightCase(uint c) {
+    const float3 p0 = float3(0.0, -100.0, 0.0) + ProbeVector(c, 0u) * float3(30.0, 30.0, 60.0);
+    const float3 p1 = float3(-50.0, 0.0, 10.0) + ProbeVector(c, 3u) * 20.0;
+    const float3 p2 = float3(50.0, 0.0, -10.0) + ProbeVector(c, 6u) * 20.0;
+    const float3 p3 = float3(0.0, 100.0, 0.0) + ProbeVector(c, 9u) * float3(30.0, 30.0, 60.0);
+    precise float along = ProbeUnit(c, 12u);
+    precise float3 target = p1 + (p2 - p1) * along;
+    // 원점은 두 면을 같은 쪽에서 보는 방향에 둔다(실루엣 모서리를 스치는 광선은 둘 다 비켜 갈 수 있어
+    // watertight 성질의 시험이 아니다). 무작위 방향이 두 면 사이로 가면 두 법선 평균 쪽으로 바꾼다.
+    const float3 normalA = normalize(cross(p1 - p0, p2 - p0));
+    const float3 normalB = normalize(cross(p1 - p2, p3 - p2));
+    float3 away = ProbeDirection(c, 13u);
+    if (dot(away, normalA) * dot(away, normalB) <= 0.0) {
+        away = normalize(normalA + normalB + away * 0.25);
+    }
+
+    const float3 origin = target + away * (200.0 + ProbeUnit(c, 16u) * 800.0);
+    precise float3 direction = target - origin;
+    float t = 0.0;
+    float3 barycentrics = float3(0.0, 0.0, 0.0);
+    const bool hitA = RayTriangleIntersection(origin, direction, p0, p1, p2, 0.0, 2.0, t, barycentrics);
+    const bool hitB = RayTriangleIntersection(origin, direction, p2, p1, p3, 0.0, 2.0, t, barycentrics);
+    return (hitA ? 1u : 0u) | (hitB ? 2u : 0u);
+}
+
+uint MathUintProbePixel(float4 position : SV_Position) : SV_Target0 {
+    const uint f = ProbeFunction();
+    const uint s = ProbeSelector();
+    const uint c = ProbeCase(position);
+    const uint bits = ProbeBits(c, 0u);
+    const uint other = ProbeBits(c, 1u);
+    const uint parameter = Probe.control.w & 0x1fu;
+    if (f == ProbeFiniteBits) {
+        const uint input = ProbeFloatBits(c, 0u);
+        return s == 0u ? (IsFiniteValue(asfloat(input)) ? 1u : 0u) : asuint(ReplaceNonFinite(asfloat(input), 7.0));
+    }
+
+    if (f == ProbeNormalizedRoundTrip) {
+        const uint code = c & UnormMaxCode(parameter);
+        return s == 0u ? EncodeUnorm(DecodeUnorm(code, parameter), parameter)
+                       : EncodeSnorm(DecodeSnorm(code, parameter), parameter);
+    }
+
+    if (f == ProbeNormalizedEncode) {
+        const float value = ProbeSigned(c, 0u, 1);
+        return s == 0u ? EncodeUnorm(value, parameter) : EncodeSnorm(value, parameter);
+    }
+
+    if (f == ProbePackColor) {
+        const float4 color = float4(ProbeUnit(c, 0u), ProbeUnit(c, 1u), ProbeUnit(c, 2u), ProbeUnit(c, 3u)) * 2.0 - 0.5;
+        return s == 0u ? PackRGBA8Unorm(color) : PackRGB10A2Unorm(color);
+    }
+
+    if (f == ProbeSmallFloatEncode) {
+        const float value = asfloat(ProbeFloatBits(c, 0u));
+        if (s == 0u) {
+            return EncodeSmallUnsignedFloat(value, Float11MantissaBits);
+        }
+
+        if (s == 1u) {
+            return EncodeSmallUnsignedFloat(value, Float10MantissaBits);
+        }
+
+        return PackRG11B10Ufloat(float3(value, ProbeWidePositive(c, 1u), ProbeWidePositive(c, 2u) * 0.001));
+    }
+
+    if (f == ProbeSmallFloatRoundTrip) {
+        return s == 0u ? EncodeSmallUnsignedFloat(DecodeSmallUnsignedFloat(c & 0x7ffu, Float11MantissaBits), Float11MantissaBits)
+                       : EncodeSmallUnsignedFloat(DecodeSmallUnsignedFloat(c & 0x3ffu, Float10MantissaBits), Float10MantissaBits);
+    }
+
+    if (f == ProbeRgb9e5Encode) {
+        const float3 color = float3(asfloat(ProbeFloatBits(c, 0u)), ProbeWidePositive(c, 1u) * 0.01, ProbeUnit(c, 2u) * 4.0);
+        return PackRGB9E5Ufloat(color);
+    }
+
+    if (f == ProbeHalfEncode) {
+        const float value = asfloat(ProbeFloatBits(c, 0u));
+        return s == 0u ? EncodeHalf(value) : PackHalf2(float2(value, ProbeSigned(c, 1u, 17)));
+    }
+
+    if (f == ProbeHalfRoundTrip) {
+        return EncodeHalf(DecodeHalf(c & 0xffffu));
+    }
+
+    if (f == ProbeBitFields) {
+        const uint offset = other & 0x1fu;
+        const uint count = ((other >> 5) & 0x3fu) % (33u - offset);
+        if (s == 0u) {
+            return InsertBits(bits, ProbeBits(c, 2u), offset, count);
+        }
+
+        if (s == 1u) {
+            return ExtractBits(bits, offset, count);
+        }
+
+        return s == 2u ? PackSignedToUnsigned((int)bits) : (uint)UnpackUnsignedToSigned(bits);
+    }
+
+    if (f == ProbeQuantizeOctahedral) {
+        const uint2 code = QuantizeOctahedral(ProbeDirection(c, 0u), parameter);
+        return code.x | (code.y << 16);
+    }
+
+    if (f == ProbeMorton) {
+        if (s == 0u) {
+            return MortonEncode2D(uint2(bits & 0xffffu, bits >> 16));
+        }
+
+        if (s == 1u) {
+            const uint2 decoded = MortonDecode2D(bits);
+            return decoded.x | (decoded.y << 16);
+        }
+
+        if (s == 2u) {
+            return MortonEncode3D(uint3(bits & 0x3ffu, (bits >> 10) & 0x3ffu, (bits >> 20) & 0x3ffu));
+        }
+
+        const uint3 decoded3 = MortonDecode3D(bits);
+        return decoded3.x | (decoded3.y << 10) | (decoded3.z << 20);
+    }
+
+    if (f == ProbeHash) {
+        const uint v = c < 256u ? c : (c < 272u ? ProbeSpecialBits[c - 256u] : bits);
+        switch (s) {
+        case 0u:
+            return HashPcg(v);
+        case 1u:
+            return HashPcg2D(uint2(v, other)).x;
+        case 2u:
+            return HashPcg2D(uint2(v, other)).y;
+        case 3u:
+            return HashPcg3D(uint3(v, other, c)).x;
+        case 4u:
+            return HashPcg3D(uint3(v, other, c)).y;
+        case 5u:
+            return HashPcg3D(uint3(v, other, c)).z;
+        case 6u:
+            return HashPcg4D(uint4(v, other, c, bits)).x;
+        case 7u:
+            return HashPcg4D(uint4(v, other, c, bits)).y;
+        case 8u:
+            return HashPcg4D(uint4(v, other, c, bits)).z;
+        case 9u:
+            return HashPcg4D(uint4(v, other, c, bits)).w;
+        case 10u:
+            return HashMix32(v);
+        default:
+            return HashCombine(v, other);
+        }
+    }
+
+    if (f == ProbeRandomStreamBits) {
+        RandomPcgState rng = RandomPcgSeed(c);
+        const uint first = RandomPcgNextUint(rng);
+        const uint second = RandomPcgNextUint(rng);
+        const uint third = RandomPcgNextUint(rng);
+        return s == 0u ? first : (second ^ third ^ RandomPcgNextUint(rng));
+    }
+
+    if (f == ProbeLowDiscrepancyBits) {
+        switch (s) {
+        case 0u:
+            return RadicalInverseBase2Bits(c);
+        case 1u:
+            return Halton3Fraction(c).x;
+        case 2u:
+            return Halton3Fraction(c).y;
+        case 3u:
+            return SobolOwen2DBits(c, Probe.control.w).x;
+        case 4u:
+            return SobolOwen2DBits(c, Probe.control.w).y;
+        case 5u:
+            return R2SequenceBits(c).x;
+        case 6u:
+            return R2SequenceBits(c).y;
+        default:
+            return SobolSecondDimension(c);
+        }
+    }
+
+    if (f == ProbeBlueNoise) {
+        const uint2 texel = BlueNoiseTexel(ProbeCoordinates(c), (uint)Probe.parameters.x, (uint)Probe.parameters.y);
+        return texel.x | (texel.y << 16);
+    }
+
+    // ProbeWatertight
+    return WatertightCase(c);
+}

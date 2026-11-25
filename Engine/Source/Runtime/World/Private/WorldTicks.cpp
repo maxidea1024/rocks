@@ -230,6 +230,10 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
         value = 0;
     }
 
+    for (uint64& value : engineStageNanoseconds_) {
+        value = 0;
+    }
+
     ProcessStarts();
 
     Result<void> outcome = Result<void>::Success();
@@ -251,6 +255,12 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
                 auto ran = ticks_.RunPhase(phase, fixed, *this);
                 if (!ran && outcome) {
                     outcome = Move(ran);
+                }
+
+                // 그 스텝의 사용자 Fixed hook 뒤 물리 진행(15.4절 — 고정 스텝마다).
+                auto simulated = RunEngineStage(EngineStage::PhysicsSimulate, phase, fixed);
+                if (!simulated && outcome) {
+                    outcome = Move(simulated);
                 }
             }
 

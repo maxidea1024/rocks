@@ -1,5 +1,6 @@
 #include <ShaderCompiler/ShaderLibraryCook.h>
 
+#include <Core/Algorithms.h>
 #include <Core/FileError.h>
 #include <Core/FileRead.h>
 #include <Platform/Process.h>
@@ -193,6 +194,76 @@ ShaderLibraryCookOutcome PublishFile(platform::FileSystem& files, Allocator& all
     return ShaderLibraryCookOutcome::Written;
 }
 
+// cookKey 입력 writer다(정수는 little-endian — SSD46).
+class CookKeyWriter {
+public:
+    void U8(uint8 value) noexcept {
+        hasher_.Update(Span<const uint8>(&value, 1));
+    }
+
+    void U32(uint32 value) noexcept {
+        uint8 bytes[sizeof(uint32)];
+        for (usize index = 0; index < sizeof(bytes); ++index) {
+            bytes[index] = static_cast<uint8>(value >> (index * 8));
+        }
+
+        hasher_.Update(Span<const uint8>(bytes, sizeof(bytes)));
+    }
+
+    void U64(uint64 value) noexcept {
+        U32(static_cast<uint32>(value));
+        U32(static_cast<uint32>(value >> 32));
+    }
+
+    void Digest(const Sha256Digest& digest) noexcept {
+        hasher_.Update(Span<const uint8>(digest.bytes, Sha256Digest::Bytes));
+    }
+
+    Sha256Digest Finish() noexcept {
+        return hasher_.Finish();
+    }
+
+private:
+    Sha256 hasher_;
+};
+
+// 라이브러리 cookKey다(Docs/Design/ShaderSystem 16.1절 SSD46). entries는 BuildShaderLibrary에 넘긴
+// 항목 표(조합 순서), jobKeys는 정렬할 job 키 사본이다.
+Sha256Digest LibraryCookKey(const ShaderLibraryCookDesc& desc, const ShaderFormatSnapshot& format,
+                            const Sha256Digest& typeSet,
+                            Span<const ShaderLibraryBuildEntry> entries,
+                            Span<Sha256Digest> jobKeys) noexcept {
+    CookKeyWriter writer;
+    writer.U64(ShaderLibraryCookerGuid.high);
+    writer.U64(ShaderLibraryCookerGuid.low);
+    writer.U32(ShaderLibraryCookKeyVersion);
+    writer.U32(ShaderLibraryVersion);
+    writer.U8(static_cast<uint8>(desc.library));
+    writer.U8(desc.includeDevelopment ? 1 : 0);
+    writer.Digest(format.definition.sha256);
+    writer.Digest(typeSet);
+    writer.U32(static_cast<uint32>(entries.Size()));
+    for (const ShaderLibraryBuildEntry& entry : entries) {
+        writer.U64(entry.key.nameHash);
+        writer.U64(entry.key.vertexInputType);
+        writer.U32(entry.key.permutationId);
+        writer.U32(entry.stage);
+        writer.Digest(entry.layoutSignature);
+        writer.U32(entry.runtimeFeatures);
+        writer.U8(entry.developmentOnly ? 1 : 0);
+    }
+
+    algo::Sort(jobKeys, [](const Sha256Digest& left, const Sha256Digest& right) noexcept {
+        return memcmp(left.bytes, right.bytes, Sha256Digest::Bytes) < 0;
+    });
+    writer.U32(static_cast<uint32>(jobKeys.Size()));
+    for (const Sha256Digest& key : jobKeys) {
+        writer.Digest(key);
+    }
+
+    return writer.Finish();
+}
+
 // 라이브러리 파일 경로다.
 Result<void> BuildPath(const ShaderLibraryCookDesc& desc, StringView formatId,
                        const Sha256Digest& fileSha, String& out) noexcept {
@@ -330,6 +401,10 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             return compiled;
         }
 
+        for (const ShaderCompileJobResult& result : results) {
+            line.cacheHits += result.cacheHit ? 1u : 0u;
+        }
+
         // 실패를 모은다.
         for (usize index = 0; index < results.Size(); ++index) {
             const ShaderCompileJobResult& result = results[index];
@@ -381,6 +456,19 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             (void)entries.TryPushBack(entry);
         }
 
+        // job 키 사본(정렬용)이다. 성공한 job은 키가 있다(키 계산이 컴파일 앞이다).
+        Array<Sha256Digest> jobKeys(allocator);
+        if (!jobKeys.TryReserve(results.Size())) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+
+        for (const ShaderCompileJobResult& result : results) {
+            (void)jobKeys.TryPushBack(result.key);
+        }
+
+        line.cookKey = LibraryCookKey(desc, *snapshot, typeSet, entries.View(),
+                                      Span<Sha256Digest>(jobKeys.Data(), jobKeys.Size()));
+        line.hasCookKey = true;
         ShaderLibraryBuildDesc build;
         build.kind = desc.library;
         build.facts = facts;

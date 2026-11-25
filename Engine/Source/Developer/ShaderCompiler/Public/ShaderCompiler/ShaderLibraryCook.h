@@ -4,6 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Encoding/Sha256.h>
+#include <Core/Guid.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
@@ -46,6 +47,12 @@
 //       for (const ShaderLibraryCookJobFailure& failure : report.failures) { ... }
 //   }
 namespace rocks::shader {
+
+// 셰이더 라이브러리 쿠커의 처리기 Guid다(cookKey 머리 — Docs/Design/ShaderSystem 16.1절 SSD46,
+// 비에셋 산출물 단계 정체성의 processor). 바꾸면 모든 라이브러리 cookKey가 바뀐다.
+inline constexpr Guid ShaderLibraryCookerGuid{0x52534c434f4f4b31ull, 0x9d2e4b7a1c3f5e01ull};
+// cookKey byte 배치 버전이다(SSD46 — 배치를 바꾸면 올린다).
+inline constexpr uint32 ShaderLibraryCookKeyVersion = 1;
 
 struct ShaderLibraryCookDesc {
     Allocator* allocator = nullptr;
@@ -110,6 +117,12 @@ struct ShaderLibraryCookFormat {
     uint32 failedJobs = 0;
     uint32 entries = 0;
     uint32 codes = 0;
+    // 너겟에서 온 job 수다.
+    uint32 cacheHits = 0;
+    // 라이브러리 재사용 키다(SSD46 — 라이브러리 byte를 만든 줄만, hasCookKey). 입력(형식 정의·
+    // 타입 집합·항목 표·job 키·includeDevelopment)이 같으면 같다.
+    Sha256Digest cookKey{};
+    bool hasCookKey = false;
     // BuildFailed·WriteFailed의 영어 이유(정적 수명)다.
     const char* reason = "";
 };

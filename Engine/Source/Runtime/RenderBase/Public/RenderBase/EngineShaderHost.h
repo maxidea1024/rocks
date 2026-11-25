@@ -22,7 +22,7 @@
 //   대응 — 공급자만 읽는다), 공급자 자리(SX14), 쿠킹 라이브러리 원천 자리를 가진다.
 // - EngineRenderResources: 렌더 lane 시작 단계에서 엔진 셰이더 집합과 내장 자원 팩을 연다.
 // - CookedShaderLibrarySource: 쿠킹 라이브러리(매니페스트 v2·.rshl) 원천 interface다. 구현은
-//   에셋 쪽이 붙인다(지금은 없다 — 모든 형식이 공급자 경로다).
+//   CookedManifestShaderLibraries(RenderBase/CookedManifestShaderLibraries.h)다.
 //
 // 사용 예(엔진 호스트):
 //   render::EngineShaderHost shaders(allocator);
@@ -58,13 +58,28 @@ struct ShaderSourceDirectory {
     StringView directory;
 };
 
-// 쿠킹 라이브러리 원천이다(9.12절 3항). 호스트가 AttachCookedLibraries로 붙인다.
+// 쿠킹 라이브러리 원천이다(9.12절 3항, ShaderSystem 16.1절 SSD47). 호스트가 AttachCookedLibraries로
+// 붙인다. 구현은 매니페스트 v2를 읽는 CookedManifestShaderLibraries다(시험은 가짜 원천).
+// EngineRenderResources::Open이 SelectCookedShaderFormat으로 장치 형식을 고를 때 쓴다. 모든 호출은
+// 렌더 lane 스레드(또는 장치 소유 스레드) 하나에서 차례로 온다.
 class CookedShaderLibrarySource {
 public:
-    // formatId·library의 라이브러리 byte를 out에 담는다. 그 형식이 없으면 NotFound(공급자 경로로
-    // 넘어간다), 읽기 실패는 그 오류다. 렌더 lane 스레드에서 불린다.
+    // 쿠킹한 backend 순서(매니페스트 머리 graphicsBackends)다. 빈 목록이면 셰이더 없는 쿠킹이다.
+    // 원천이 사는 동안 유효하다.
+    virtual Span<const graphics::Backend> Backends() const noexcept = 0;
+
+    // backend의 선호 순서 형식 id(매니페스트 머리 shaderFormats)다. 쿠킹에 그 backend가 없으면 빈
+    // 목록이다. 원천이 사는 동안 유효하다.
+    virtual Span<const StringView> Formats(graphics::Backend backend) const noexcept = 0;
+
+    // formatId·library의 라이브러리 byte를 out에 담는다. 그 항목이 없으면 NotFound(형식 선택이 다음
+    // 형식으로 넘어간다), 크기·SHA-256 불일치·파일 없음은 손상(InvalidArgument — Problem에
+    // CorruptPackage 설명), 읽기 실패는 그 오류다.
     virtual Result<void> ReadLibrary(StringView formatId, shader::ShaderLibraryKind library,
                                      Array<uint8>& out) noexcept = 0;
+
+    // 마지막 ReadLibrary 실패의 영어 설명이다(없으면 빈 값). 다음 ReadLibrary까지 유효하다.
+    virtual StringView Problem() const noexcept = 0;
 
 protected:
     ~CookedShaderLibrarySource() = default;
@@ -168,11 +183,14 @@ public:
     EngineRenderResources(const EngineRenderResources&) = delete;
     EngineRenderResources& operator=(const EngineRenderResources&) = delete;
 
-    // 엔진 셰이더 집합(쿠킹 원천 → 공급자)을 열고 검사한 뒤 내장 자원 팩을 만든다. host와 device는
-    // Retire까지 산다. 실패: 등록부가 Freeze되지 않음 NotReady, 형식 없음 Unsupported, 이미 엶
-    // Busy, 공급자 없음 UnsupportedCapability, 집합 검사·공급 실패 DependencyFailed, 쿠킹 원천의
-    // 읽기 오류, 팩 생성 오류(빠진 fallback 셰이더 NotFound). 실패는 Error 로그를 남기고 Problem에
-    // 영어 설명을 둔다. 실패하면 만든 것을 Retire한다.
+    // 엔진 셰이더 집합을 열고 검사한 뒤 내장 자원 팩을 만든다. host와 device는 Retire까지 산다.
+    // 쿠킹 원천이 붙어 있으면 SelectCookedShaderFormat(매니페스트 backend·형식 순서, 상한·장치
+    // 요구)으로 고른 형식의 라이브러리를 열고, 장치 backend가 쿠킹에 없으면(NotFound) 고정 표
+    // 형식(EngineShaderFormat)으로 공급자에 간다(ShaderSystem SSD16). 실패: 등록부가 Freeze되지
+    // 않음 NotReady, 형식 없음·셰이더 없는 쿠킹·맞는 쿠킹 형식 없음 Unsupported, 이미 엶 Busy,
+    // 공급자 없음 UnsupportedCapability, 집합 검사·공급 실패 DependencyFailed, 쿠킹 원천의 손상
+    // (InvalidArgument)·읽기 오류, 팩 생성 오류(빠진 fallback 셰이더 NotFound). 실패는 Error 로그를
+    // 남기고 Problem에 영어 설명을 둔다. 실패하면 만든 것을 Retire한다.
     Result<void> Open(graphics::Device& device, const EngineShaderHost& host) noexcept;
 
     // 팩 → 집합 순으로 Retire한다(5.5절 종료 4단계). lease가 남지 않았으면 집합 객체도
@@ -202,6 +220,11 @@ public:
         return cooked_;
     }
 
+    // 연 집합의 셰이더 형식 id다(마지막 Open이 고른 형식 — 없으면 빈 값).
+    StringView FormatId() const noexcept {
+        return StringView(format_);
+    }
+
     // 마지막 실패의 영어 설명이다(없으면 빈 문자열).
     StringView Problem() const noexcept {
         return StringView(problem_);
@@ -215,6 +238,8 @@ private:
     UniquePtr<ShaderSet> set_;
     BuiltinResources builtins_;
     char problem_[512] = {};
+    // 집합 desc가 가리키는 형식 id 저장소다(집합보다 오래 산다).
+    char format_[shader::MaxShaderFormatIdBytes] = {};
     bool ready_ = false;
     bool cooked_ = false;
 };

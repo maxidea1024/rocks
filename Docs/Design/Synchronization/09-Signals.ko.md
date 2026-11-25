@@ -93,7 +93,7 @@ bool IsDone(const OnceFlag& flag) noexcept;
 
 ### 9.6 RealtimeWakeSignal(개정 3)
 
-실시간 스레드와 그 스레드를 깨우는 쪽 사이의 신호다. 첫 사용처는 [오디오 시스템](../AudioSystem.ko.md) 3.2절의 장치 콜백 → AudioRT 깨우기다. 장치 콜백은 OS·오디오 라이브러리가 소유한 높은 우선순위 스레드이고, AudioRT는 잠금을 잡지 않는다(D27). 9.1절 `AutoResetEvent`는 parking lot 위에 있어 Signal이 bucket 잠금을 잡을 수 있고, `WaiterSignal`의 macOS판은 `pthread_mutex_t`를 잡는다(7.3절). 그래서 둘 다 이 자리에 쓸 수 없다. 지금의 `ManualResetEvent`·`Semaphore`도 Signal·Release 안에서 `Mutex`를 잡는다(4.1절).
+실시간 스레드와 그 스레드를 깨우는 쪽 사이의 신호다. 첫 사용처는 [오디오 시스템](../AudioSystem/03-Design/03.02-Threads.ko.md) 3.2절의 장치 콜백 → AudioRT 깨우기다. 장치 콜백은 OS·오디오 라이브러리가 소유한 높은 우선순위 스레드이고, AudioRT는 잠금을 잡지 않는다(D27). 9.1절 `AutoResetEvent`는 parking lot 위에 있어 Signal이 bucket 잠금을 잡을 수 있고, `WaiterSignal`의 macOS판은 `pthread_mutex_t`를 잡는다(7.3절). 그래서 둘 다 이 자리에 쓸 수 없다. 지금의 `ManualResetEvent`·`Semaphore`도 Signal·Release 안에서 `Mutex`를 잡는다(4.1절).
 
 - **모양.** 대기자는 한 번에 하나다(고정 스레드는 아니다). 둘이 동시에 기다리면 계약 위반이고 Debug·Development에서 Fatal로 드러낸다. 자동 리셋이다. 상태는 `Atomic<uint32>` 하나다: 0 = 비어 있음, 1 = 신호, 2 = 대기 중.
 - **`Signal() noexcept`.** 상태를 1로 교환하고, 이전 값이 2였을 때만 OS 깨우기를 부른다. 잠금·할당이 없고, 대기자가 없으면 시스템 호출도 없다. 연속 Signal은 신호 하나로 합쳐진다.
