@@ -1,3 +1,102 @@
+diff --git a/src/jccoefct.c b/src/jccoefct.c
+--- a/src/jccoefct.c
++++ b/src/jccoefct.c
+@@ -358,6 +358,7 @@
+ METHODDEF(boolean)
+ compress_output(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
+ {
++  (void)input_buf;
+   my_coef_ptr coef = (my_coef_ptr)cinfo->coef;
+   JDIMENSION MCU_col_num;       /* index of current MCU within row */
+   int blkn, ci, xindex, yindex, yoffset;
+diff --git a/src/jccolext.c b/src/jccolext.c
+--- a/src/jccolext.c
++++ b/src/jccolext.c
+@@ -32,6 +32,10 @@
+ rgb_ycc_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+                 _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
+ {
++  (void)input_buf;
++  (void)output_buf;
++  (void)output_row;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+@@ -89,6 +93,10 @@
+ rgb_gray_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+                  _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
+ {
++  (void)input_buf;
++  (void)output_buf;
++  (void)output_row;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+diff --git a/src/jccolor.c b/src/jccolor.c
+--- a/src/jccolor.c
++++ b/src/jccolor.c
+@@ -262,6 +262,10 @@
+ cmyk_ycck_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
+                   _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
+ {
++  (void)input_buf;
++  (void)output_buf;
++  (void)output_row;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+@@ -405,6 +409,7 @@
+ METHODDEF(void)
+ null_method(j_compress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work needed */
+ }
+ 
+diff --git a/src/jcdiffct.c b/src/jcdiffct.c
+--- a/src/jcdiffct.c
++++ b/src/jcdiffct.c
+@@ -311,6 +311,7 @@
+ METHODDEF(boolean)
+ compress_output(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
+ {
++  (void)input_buf;
+   my_diff_ptr diff = (my_diff_ptr)cinfo->coef;
+   int ci, compi;
+   _JSAMPARRAY buffer[MAX_COMPONENTS];
+diff --git a/src/jclossls.c b/src/jclossls.c
+--- a/src/jclossls.c
++++ b/src/jclossls.c
+@@ -195,6 +195,7 @@
+                           _JSAMPROW input_buf, _JSAMPROW prev_row,
+                           JDIFFROW diff_buf, JDIMENSION width)
+ {
++  (void)prev_row;
+   DIFFERENCE_1D(INITIAL_PREDICTORx);
+ 
+   /*
+@@ -269,6 +270,7 @@
+ noscale(j_compress_ptr cinfo,
+         _JSAMPROW input_buf, _JSAMPROW output_buf, JDIMENSION width)
+ {
++  (void)cinfo;
+   memcpy(output_buf, input_buf, width * sizeof(_JSAMPLE));
+ }
+ 
+diff --git a/src/jcmaster.c b/src/jcmaster.c
+--- a/src/jcmaster.c
++++ b/src/jcmaster.c
+@@ -164,6 +164,7 @@
+ initial_setup(j_compress_ptr cinfo, boolean transcode_only)
+ /* Do computations that are needed before master selection phase */
+ {
++  (void)transcode_only;
+   int ci;
+   jpeg_component_info *compptr;
+   long samplesperrow;
 diff --git a/src/jconfig.h b/src/jconfig.h
 new file mode 100644
 --- /dev/null
@@ -165,44 +264,356 @@ new file mode 100644
 +#endif
 +
 +/* #undef WITH_PROFILE */
-diff --git a/src/jversion.h b/src/jversion.h
-new file mode 100644
---- /dev/null
-+++ b/src/jversion.h
-@@ -0,0 +1,33 @@
-+/* Rocks configuration header for libjpeg-turbo 3.2.1 (Docs/Design/AssetSystem section 12.11): the template
-+   src/jversion.h.in copied as is with the CMake values filled in by hand (no SIMD, arithmetic coding on,
-+   libjpeg API version 62 - the libjpeg-turbo default). */
-+/*
-+ * jversion.h
-+ *
-+ * This file was part of the Independent JPEG Group's software:
-+ * Copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.
-+ * libjpeg-turbo Modifications:
-+ * Copyright (C) 2010, 2012-2026, D. R. Commander.
-+ * For conditions of distribution and use, see the accompanying README.ijg
-+ * file.
-+ *
-+ * This file contains software version identification.
-+ */
-+
-+
-+#if JPEG_LIB_VERSION >= 80
-+
-+#define JVERSION        "8d  15-Jan-2012"
-+
-+#elif JPEG_LIB_VERSION >= 70
-+
-+#define JVERSION        "7  27-Jun-2009"
-+
-+#else
-+
-+#define JVERSION        "6b  27-Mar-1998"
-+
-+#endif
-+
-+#define JCOPYRIGHT \
-+  "Copyright (C) 1991-2026 The libjpeg-turbo Project and many others"
+diff --git a/src/jcsample.c b/src/jcsample.c
+--- a/src/jcsample.c
++++ b/src/jcsample.c
+@@ -87,6 +87,7 @@
+ METHODDEF(void)
+ start_pass_downsample(j_compress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work for now */
+ }
+ 
+diff --git a/src/jctrans.c b/src/jctrans.c
+--- a/src/jctrans.c
++++ b/src/jctrans.c
+@@ -296,6 +296,7 @@
+ METHODDEF(boolean)
+ compress_output(j_compress_ptr cinfo, JSAMPIMAGE input_buf)
+ {
++  (void)input_buf;
+   my_coef_ptr coef = (my_coef_ptr)cinfo->coef;
+   JDIMENSION MCU_col_num;       /* index of current MCU within row */
+   JDIMENSION last_MCU_col = cinfo->MCUs_per_row - 1;
+diff --git a/src/jdapistd.c b/src/jdapistd.c
+--- a/src/jdapistd.c
++++ b/src/jdapistd.c
+@@ -380,6 +380,11 @@
+ noop_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+              JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)cinfo;
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ }
+ 
+ 
+@@ -388,6 +393,10 @@
+ noop_quantize(j_decompress_ptr cinfo, _JSAMPARRAY input_buf,
+               _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)cinfo;
++  (void)input_buf;
++  (void)output_buf;
++  (void)num_rows;
+ }
+ 
+ 
+diff --git a/src/jdatadst.c b/src/jdatadst.c
+--- a/src/jdatadst.c
++++ b/src/jdatadst.c
+@@ -78,6 +78,7 @@
+ METHODDEF(void)
+ init_mem_destination(j_compress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work necessary here */
+ }
+ 
+diff --git a/src/jdatasrc.c b/src/jdatasrc.c
+--- a/src/jdatasrc.c
++++ b/src/jdatasrc.c
+@@ -59,6 +59,7 @@
+ METHODDEF(void)
+ init_mem_source(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work necessary here */
+ }
+ 
+@@ -199,6 +200,7 @@
+ METHODDEF(void)
+ term_source(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work necessary here */
+ }
+ 
+diff --git a/src/jdcoefct.c b/src/jdcoefct.c
+--- a/src/jdcoefct.c
++++ b/src/jdcoefct.c
+@@ -200,6 +200,7 @@
+ METHODDEF(int)
+ dummy_consume_data(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   return JPEG_SUSPENDED;        /* Always indicate nothing was done */
+ }
+ 
+diff --git a/src/jdcol565.c b/src/jdcol565.c
+--- a/src/jdcol565.c
++++ b/src/jdcol565.c
+@@ -21,6 +21,10 @@
+                             JDIMENSION input_row, _JSAMPARRAY output_buf,
+                             int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+@@ -104,6 +108,10 @@
+                              JDIMENSION input_row, _JSAMPARRAY output_buf,
+                              int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+diff --git a/src/jdcolext.c b/src/jdcolext.c
+--- a/src/jdcolext.c
++++ b/src/jdcolext.c
+@@ -31,6 +31,10 @@
+ ycc_rgb_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                 JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+diff --git a/src/jdcolor.c b/src/jdcolor.c
+--- a/src/jdcolor.c
++++ b/src/jdcolor.c
+@@ -295,6 +295,10 @@
+ rgb_gray_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                  JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int r, g, b;
+@@ -411,6 +415,10 @@
+ ycck_cmyk_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
+                   JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)input_buf;
++  (void)input_row;
++  (void)output_buf;
++  (void)num_rows;
+ #if BITS_IN_JSAMPLE != 16
+   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
+   register int y, cb, cr;
+@@ -612,6 +620,7 @@
+ METHODDEF(void)
+ start_pass_dcolor(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work needed */
+ }
+ 
+diff --git a/src/jddiffct.c b/src/jddiffct.c
+--- a/src/jddiffct.c
++++ b/src/jddiffct.c
+@@ -248,6 +248,7 @@
+ METHODDEF(int)
+ dummy_consume_data(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   return JPEG_SUSPENDED;        /* Always indicate nothing was done */
+ }
+ 
+diff --git a/src/jdlossls.c b/src/jdlossls.c
+--- a/src/jdlossls.c
++++ b/src/jdlossls.c
+@@ -109,6 +109,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_1D(INITIAL_PREDICTOR2);
+ }
+ 
+@@ -117,6 +119,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR2);
+   (void)(Rc);
+ }
+@@ -126,6 +130,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR3);
+ }
+ 
+@@ -134,6 +140,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR4);
+ }
+ 
+@@ -142,6 +150,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR5);
+ }
+ 
+@@ -150,6 +160,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR6);
+ }
+ 
+@@ -158,6 +170,8 @@
+                    JDIFFROW diff_buf, JDIFFROW prev_row,
+                    JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)cinfo;
++  (void)comp_index;
+   UNDIFFERENCE_2D(PREDICTOR7);
+   (void)(Rc);
+ }
+@@ -175,6 +189,7 @@
+                             JDIFFROW diff_buf, JDIFFROW prev_row,
+                             JDIFFROW undiff_buf, JDIMENSION width)
+ {
++  (void)prev_row;
+   lossless_decomp_ptr losslessd = (lossless_decomp_ptr)cinfo->idct;
+ 
+   UNDIFFERENCE_1D(INITIAL_PREDICTORx);
+@@ -228,6 +243,7 @@
+ noscale(j_decompress_ptr cinfo,
+         JDIFFROW diff_buf, _JSAMPROW output_buf, JDIMENSION width)
+ {
++  (void)cinfo;
+   do {
+     *output_buf++ = (_JSAMPLE)(*diff_buf++);
+   } while (--width);
+diff --git a/src/jdmerge.c b/src/jdmerge.c
+--- a/src/jdmerge.c
++++ b/src/jdmerge.c
+@@ -230,6 +230,7 @@
+                    JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ /* 2:1 vertical sampling case: may need a spare row. */
+ {
++  (void)in_row_groups_avail;
+   my_merged_upsample_ptr upsample = (my_merged_upsample_ptr)cinfo->upsample;
+   _JSAMPROW work_ptrs[2];
+   JDIMENSION num_rows;          /* number of rows returned to caller */
+@@ -289,6 +290,8 @@
+                    JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ /* 1:1 vertical sampling case: much easier, never need a spare row. */
+ {
++  (void)in_row_groups_avail;
++  (void)out_rows_avail;
+   my_merged_upsample_ptr upsample = (my_merged_upsample_ptr)cinfo->upsample;
+ 
+   /* Just do the upsampling. */
+diff --git a/src/jdpostct.c b/src/jdpostct.c
+--- a/src/jdpostct.c
++++ b/src/jdpostct.c
+@@ -178,6 +178,8 @@
+                      JDIMENSION in_row_groups_avail, _JSAMPARRAY output_buf,
+                      JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ {
++  (void)output_buf;
++  (void)out_rows_avail;
+   my_post_ptr post = (my_post_ptr)cinfo->post;
+   JDIMENSION old_next_row, num_rows;
+ 
+@@ -221,6 +223,9 @@
+                    JDIMENSION in_row_groups_avail, _JSAMPARRAY output_buf,
+                    JDIMENSION *out_row_ctr, JDIMENSION out_rows_avail)
+ {
++  (void)input_buf;
++  (void)in_row_group_ctr;
++  (void)in_row_groups_avail;
+   my_post_ptr post = (my_post_ptr)cinfo->post;
+   JDIMENSION num_rows, max_rows;
+ 
+@@ -265,6 +270,7 @@
+ GLOBAL(void)
+ _jinit_d_post_controller(j_decompress_ptr cinfo, boolean need_full_buffer)
+ {
++  (void)need_full_buffer;
+   my_post_ptr post;
+ 
+ #ifdef D_LOSSLESS_SUPPORTED
+diff --git a/src/jdsample.c b/src/jdsample.c
+--- a/src/jdsample.c
++++ b/src/jdsample.c
+@@ -68,6 +68,7 @@
+              _JSAMPARRAY output_buf, JDIMENSION *out_row_ctr,
+              JDIMENSION out_rows_avail)
+ {
++  (void)in_row_groups_avail;
+   my_upsample_ptr upsample = (my_upsample_ptr)cinfo->upsample;
+   int ci;
+   jpeg_component_info *compptr;
+@@ -149,6 +150,8 @@
+ fullsize_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+                   _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)cinfo;
++  (void)compptr;
+   *output_data_ptr = input_data;
+ }
+ 
+@@ -162,6 +165,9 @@
+ noop_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+               _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)cinfo;
++  (void)compptr;
++  (void)input_data;
+   *output_data_ptr = NULL;      /* safety check */
+ }
+ 
+@@ -225,6 +231,7 @@
+ h2v1_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+               _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)compptr;
+   _JSAMPARRAY output_data = *output_data_ptr;
+   register _JSAMPROW inptr, outptr;
+   register _JSAMPLE invalue;
+@@ -253,6 +260,7 @@
+ h2v2_upsample(j_decompress_ptr cinfo, jpeg_component_info *compptr,
+               _JSAMPARRAY input_data, _JSAMPARRAY *output_data_ptr)
+ {
++  (void)compptr;
+   _JSAMPARRAY output_data = *output_data_ptr;
+   register _JSAMPROW inptr, outptr;
+   register _JSAMPLE invalue;
 diff --git a/src/jmemrocks.c b/src/jmemrocks.c
 new file mode 100644
 --- /dev/null
@@ -320,85 +731,109 @@ new file mode 100644
 +{
 +  (void)cinfo;
 +}
-diff --git a/src/rocksjpeg.h b/src/rocksjpeg.h
+diff --git a/src/jquant1.c b/src/jquant1.c
+--- a/src/jquant1.c
++++ b/src/jquant1.c
+@@ -251,6 +251,8 @@
+ /* Return j'th output value, where j will range from 0 to maxj */
+ /* The output values must fall in 0.._MAXJSAMPLE in increasing order */
+ {
++  (void)cinfo;
++  (void)ci;
+   /* We always provide values 0 and _MAXJSAMPLE for each component;
+    * any additional values are equally spaced between these limits.
+    * (Forcing the upper and lower values to the limits ensures that
+@@ -265,6 +267,8 @@
+ /* Return largest input value that should map to j'th output value */
+ /* Must have largest(j=0) >= 0, and largest(j=maxj) >= _MAXJSAMPLE */
+ {
++  (void)cinfo;
++  (void)ci;
+   /* Breakpoints are halfway between values returned by output_value */
+   return (int)(((JLONG)(2 * j + 1) * _MAXJSAMPLE + maxj) / (2 * maxj));
+ }
+@@ -741,6 +745,7 @@
+ METHODDEF(void)
+ start_pass_1_quant(j_decompress_ptr cinfo, boolean is_pre_scan)
+ {
++  (void)is_pre_scan;
+   my_cquantize_ptr cquantize = (my_cquantize_ptr)cinfo->cquantize;
+   size_t arraysize;
+   int i;
+@@ -798,6 +803,7 @@
+ METHODDEF(void)
+ finish_pass_1_quant(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work in 1-pass case */
+ }
+ 
+diff --git a/src/jquant2.c b/src/jquant2.c
+--- a/src/jquant2.c
++++ b/src/jquant2.c
+@@ -204,6 +204,7 @@
+ prescan_quantize(j_decompress_ptr cinfo, _JSAMPARRAY input_buf,
+                  _JSAMPARRAY output_buf, int num_rows)
+ {
++  (void)output_buf;
+   my_cquantize_ptr cquantize = (my_cquantize_ptr)cinfo->cquantize;
+   register _JSAMPROW ptr;
+   register histptr histp;
+@@ -1133,6 +1134,7 @@
+ METHODDEF(void)
+ finish_pass2(j_decompress_ptr cinfo)
+ {
++  (void)cinfo;
+   /* no work */
+ }
+ 
+diff --git a/src/jversion.h b/src/jversion.h
 new file mode 100644
 --- /dev/null
-+++ b/src/rocksjpeg.h
-@@ -0,0 +1,64 @@
-+/* Rocks interface to libjpeg-turbo 3.2.1 (Docs/Design/AssetSystem section 12.11). libjpeg reports errors with
-+   longjmp; these functions keep setjmp and longjmp inside C so that no C++ frame is ever skipped, and they turn the
-+   outcome into a plain result code. Memory comes from the allocator bound to the current thread (jmemrocks.c). No
-+   message is printed. */
-+#ifndef ROCKS_JPEG_H
-+#define ROCKS_JPEG_H
++++ b/src/jversion.h
+@@ -0,0 +1,33 @@
++/* Rocks configuration header for libjpeg-turbo 3.2.1 (Docs/Design/AssetSystem section 12.11): the template
++   src/jversion.h.in copied as is with the CMake values filled in by hand (no SIMD, arithmetic coding on,
++   libjpeg API version 62 - the libjpeg-turbo default). */
++/*
++ * jversion.h
++ *
++ * This file was part of the Independent JPEG Group's software:
++ * Copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.
++ * libjpeg-turbo Modifications:
++ * Copyright (C) 2010, 2012-2026, D. R. Commander.
++ * For conditions of distribution and use, see the accompanying README.ijg
++ * file.
++ *
++ * This file contains software version identification.
++ */
 +
-+#include <stddef.h>
 +
-+#ifdef __cplusplus
-+extern "C" {
++#if JPEG_LIB_VERSION >= 80
++
++#define JVERSION        "8d  15-Jan-2012"
++
++#elif JPEG_LIB_VERSION >= 70
++
++#define JVERSION        "7  27-Jun-2009"
++
++#else
++
++#define JVERSION        "6b  27-Mar-1998"
++
 +#endif
 +
-+/* Allocation functions the memory back end calls (jpeg_get_small and the like). */
-+typedef struct RocksJpegAllocator {
-+  void* (*allocate)(size_t bytes);
-+  void (*release)(void* address);
-+} RocksJpegAllocator;
-+
-+/* Binds allocator to the current thread and returns the previous binding (null for none). */
-+const RocksJpegAllocator* RocksJpegBindAllocator(const RocksJpegAllocator* allocator);
-+
-+/* Outcome of a call. Error is any libjpeg error exit (damaged or unsupported stream, failed allocation - the caller
-+   tells them apart), Warning is a recoverable-data warning (treated as damage), ScanLimit is more progressive scans
-+   than allowed. */
-+typedef enum RocksJpegResult {
-+  ROCKS_JPEG_OK = 0,
-+  ROCKS_JPEG_ERROR = 1,
-+  ROCKS_JPEG_WARNING = 2,
-+  ROCKS_JPEG_SCAN_LIMIT = 3
-+} RocksJpegResult;
-+
-+/* Header facts read by jpeg_read_header (require_image TRUE). colorSpace is the libjpeg J_COLOR_SPACE value. */
-+typedef struct RocksJpegInfo {
-+  unsigned width;
-+  unsigned height;
-+  int components;
-+  int colorSpace;
-+  int precision;
-+  int lossless;
-+  int progressive;
-+} RocksJpegInfo;
-+
-+/* Reads the header of data into info. */
-+RocksJpegResult RocksJpegReadInfo(const unsigned char* data, size_t size, RocksJpegInfo* info);
-+
-+/* Decodes data into pixels (height rows of rowBytes): grayscale writes one byte per texel, otherwise four (R, G, B,
-+   255). maxScans limits progressive scans. The integer slow IDCT (JDCT_ISLOW) and the libjpeg default upsampling and
-+   block smoothing are used. */
-+RocksJpegResult RocksJpegDecode(const unsigned char* data, size_t size, int grayscale, unsigned maxScans,
-+                                unsigned char* pixels, size_t rowBytes);
-+
-+/* Libjpeg colour space values the caller compares against. */
-+enum {
-+  ROCKS_JPEG_COLOR_GRAYSCALE = 1,
-+  ROCKS_JPEG_COLOR_RGB = 2,
-+  ROCKS_JPEG_COLOR_YCBCR = 3
-+};
-+
-+#ifdef __cplusplus
-+}
-+#endif
-+
-+#endif /* ROCKS_JPEG_H */
++#define JCOPYRIGHT \
++  "Copyright (C) 1991-2026 The libjpeg-turbo Project and many others"
 diff --git a/src/rocksjpeg.c b/src/rocksjpeg.c
 new file mode 100644
 --- /dev/null
 +++ b/src/rocksjpeg.c
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,145 @@
 +/* Rocks interface to libjpeg-turbo 3.2.1 (Docs/Design/AssetSystem section 12.11). See rocksjpeg.h. */
 +#define JPEG_INTERNALS
 +#include "jinclude.h"
 +#include "jpeglib.h"
-+#include "jpegint.h"
 +#include "rocksjpeg.h"
 +
 +#include <limits.h>
@@ -540,3 +975,72 @@ new file mode 100644
 +  jpeg_destroy_decompress(&cinfo);
 +  return ROCKS_JPEG_OK;
 +}
+diff --git a/src/rocksjpeg.h b/src/rocksjpeg.h
+new file mode 100644
+--- /dev/null
++++ b/src/rocksjpeg.h
+@@ -0,0 +1,64 @@
++/* Rocks interface to libjpeg-turbo 3.2.1 (Docs/Design/AssetSystem section 12.11). libjpeg reports errors with
++   longjmp; these functions keep setjmp and longjmp inside C so that no C++ frame is ever skipped, and they turn the
++   outcome into a plain result code. Memory comes from the allocator bound to the current thread (jmemrocks.c). No
++   message is printed. */
++#ifndef ROCKS_JPEG_H
++#define ROCKS_JPEG_H
++
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Allocation functions the memory back end calls (jpeg_get_small and the like). */
++typedef struct RocksJpegAllocator {
++  void* (*allocate)(size_t bytes);
++  void (*release)(void* address);
++} RocksJpegAllocator;
++
++/* Binds allocator to the current thread and returns the previous binding (null for none). */
++const RocksJpegAllocator* RocksJpegBindAllocator(const RocksJpegAllocator* allocator);
++
++/* Outcome of a call. Error is any libjpeg error exit (damaged or unsupported stream, failed allocation - the caller
++   tells them apart), Warning is a recoverable-data warning (treated as damage), ScanLimit is more progressive scans
++   than allowed. */
++typedef enum RocksJpegResult {
++  ROCKS_JPEG_OK = 0,
++  ROCKS_JPEG_ERROR = 1,
++  ROCKS_JPEG_WARNING = 2,
++  ROCKS_JPEG_SCAN_LIMIT = 3
++} RocksJpegResult;
++
++/* Header facts read by jpeg_read_header (require_image TRUE). colorSpace is the libjpeg J_COLOR_SPACE value. */
++typedef struct RocksJpegInfo {
++  unsigned width;
++  unsigned height;
++  int components;
++  int colorSpace;
++  int precision;
++  int lossless;
++  int progressive;
++} RocksJpegInfo;
++
++/* Reads the header of data into info. */
++RocksJpegResult RocksJpegReadInfo(const unsigned char* data, size_t size, RocksJpegInfo* info);
++
++/* Decodes data into pixels (height rows of rowBytes): grayscale writes one byte per texel, otherwise four (R, G, B,
++   255). maxScans limits progressive scans. The integer slow IDCT (JDCT_ISLOW) and the libjpeg default upsampling and
++   block smoothing are used. */
++RocksJpegResult RocksJpegDecode(const unsigned char* data, size_t size, int grayscale, unsigned maxScans,
++                                unsigned char* pixels, size_t rowBytes);
++
++/* Libjpeg colour space values the caller compares against. */
++enum {
++  ROCKS_JPEG_COLOR_GRAYSCALE = 1,
++  ROCKS_JPEG_COLOR_RGB = 2,
++  ROCKS_JPEG_COLOR_YCBCR = 3
++};
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ROCKS_JPEG_H */

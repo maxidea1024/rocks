@@ -295,6 +295,10 @@ METHODDEF(void)
 rgb_gray_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
                  JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
 {
+  (void)input_buf;
+  (void)input_row;
+  (void)output_buf;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int r, g, b;
@@ -411,6 +415,10 @@ METHODDEF(void)
 ycck_cmyk_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
                   JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
 {
+  (void)input_buf;
+  (void)input_row;
+  (void)output_buf;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int y, cb, cr;
@@ -612,6 +620,7 @@ gray_rgb565D_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
 METHODDEF(void)
 start_pass_dcolor(j_decompress_ptr cinfo)
 {
+  (void)cinfo;
   /* no work needed */
 }
 

@@ -109,6 +109,8 @@ jpeg_undifference1(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_1D(INITIAL_PREDICTOR2);
 }
 
@@ -117,6 +119,8 @@ jpeg_undifference2(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_2D(PREDICTOR2);
   (void)(Rc);
 }
@@ -126,6 +130,8 @@ jpeg_undifference3(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_2D(PREDICTOR3);
 }
 
@@ -134,6 +140,8 @@ jpeg_undifference4(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_2D(PREDICTOR4);
 }
 
@@ -142,6 +150,8 @@ jpeg_undifference5(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_2D(PREDICTOR5);
 }
 
@@ -150,6 +160,8 @@ jpeg_undifference6(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_2D(PREDICTOR6);
 }
 
@@ -158,6 +170,8 @@ jpeg_undifference7(j_decompress_ptr cinfo, int comp_index,
                    JDIFFROW diff_buf, JDIFFROW prev_row,
                    JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)cinfo;
+  (void)comp_index;
   UNDIFFERENCE_2D(PREDICTOR7);
   (void)(Rc);
 }
@@ -175,6 +189,7 @@ jpeg_undifference_first_row(j_decompress_ptr cinfo, int comp_index,
                             JDIFFROW diff_buf, JDIFFROW prev_row,
                             JDIFFROW undiff_buf, JDIMENSION width)
 {
+  (void)prev_row;
   lossless_decomp_ptr losslessd = (lossless_decomp_ptr)cinfo->idct;
 
   UNDIFFERENCE_1D(INITIAL_PREDICTORx);
@@ -228,6 +243,7 @@ METHODDEF(void)
 noscale(j_decompress_ptr cinfo,
         JDIFFROW diff_buf, _JSAMPROW output_buf, JDIMENSION width)
 {
+  (void)cinfo;
   do {
     *output_buf++ = (_JSAMPLE)(*diff_buf++);
   } while (--width);

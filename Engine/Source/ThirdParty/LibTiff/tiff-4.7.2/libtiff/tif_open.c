@@ -373,7 +373,7 @@ TIFF *TIFFClientOpenExt(const char *name, const char *mode,
     }
     _TIFFmemset(tif, 0, sizeof(*tif));
     tif->tif_name = (char *)tif + sizeof(TIFF);
-    strcpy(tif->tif_name, name);
+    memcpy(tif->tif_name, name, strlen(name) + 1);
     tif->tif_mode = m & ~(O_CREAT | O_TRUNC);
     tif->tif_curdir = TIFF_NON_EXISTENT_DIR_NUMBER; /* non-existent directory */
     tif->tif_curdircount = TIFF_NON_EXISTENT_DIR_NUMBER;

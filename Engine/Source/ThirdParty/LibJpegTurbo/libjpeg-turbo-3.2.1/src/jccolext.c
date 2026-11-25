@@ -32,6 +32,10 @@ LOCAL(void)
 rgb_ycc_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
                 _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
 {
+  (void)input_buf;
+  (void)output_buf;
+  (void)output_row;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int r, g, b;
@@ -89,6 +93,10 @@ LOCAL(void)
 rgb_gray_convert(j_compress_ptr cinfo, _JSAMPARRAY input_buf,
                  _JSAMPIMAGE output_buf, JDIMENSION output_row, int num_rows)
 {
+  (void)input_buf;
+  (void)output_buf;
+  (void)output_row;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int r, g, b;

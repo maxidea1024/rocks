@@ -73,16 +73,16 @@
     "libtiff/tif_close.c": "c08aa975b642b5034962d1dbdbadc944c979843764de4ce440055ccc72be57a1",
     "libtiff/tif_codec.c": "ba6c41b956bfccb221b8e9d088502880544f7dedb751f50fdaddefd1edd263cb",
     "libtiff/tif_color.c": "4e5183a58f908ad6d2fa1805d657fbde67fde90a66b3e431005221bf190983ac",
-    "libtiff/tif_compress.c": "e569f3502c4af70f4ccd56b7f78aac0f809fedb438419cb1ae09f69e3b1bfb8e",
+    "libtiff/tif_compress.c": "0309ee0f6a10dbdf035f09dc90bb99a5bba9715c615668a9c06e5c91d6737b89",
     "libtiff/tif_config.h": "bdbfc8bb877b7e66d92fde93a8f830ee42e35cd4f621e3740e15b12cd28f2d3a",
     "libtiff/tif_dir.c": "633bede16c3b1829d8ded69c97be9dd16d976121eed99ab8ccacf707d14625db",
     "libtiff/tif_dir.h": "2d9c36a036f169b8521e0e3f0de968576136b5b43f38d8b9904791a6137d342f",
-    "libtiff/tif_dirinfo.c": "f0c2d4c491cfc148ac8cb02ad12ee3d17b6a9e64a6f7de2f12fcd5d18ed5f711",
-    "libtiff/tif_dirread.c": "0d29d892f610566d54de4d01d998ac71d6ef6c239a110b7482824e2c6336e707",
+    "libtiff/tif_dirinfo.c": "356878e81e964dec90c062f480b9aefc6490c6a0718e7e09c0ca65c6d1f621b9",
+    "libtiff/tif_dirread.c": "b9f28e1b9a780fb01363c709bbac2b228c2622452d06833ce3367d0bbc8d89a5",
     "libtiff/tif_dirwrite.c": "6c0fa9956a82abe68c5eb517c36bbfaafd6eed4d04af6aae85797b5d3ada52c2",
     "libtiff/tif_dumpmode.c": "e850f24a63acc1e67f133a1c783b2ecde72a6816e37e840f206f5c8a5d633fe5",
     "libtiff/tif_error.c": "ec178c0dcb7d1e4e6a5aec3220549ab5372cdc1725b185584972c005d11f5abd",
-    "libtiff/tif_extension.c": "b49abfbd8f153237ff1187c6c1d34ffd0a6f26013b70d133b41ba64cbbf725ca",
+    "libtiff/tif_extension.c": "794bf7b085ab59fec67db9a47acc84a6be15e23a31d911cd5ea532e7084984c0",
     "libtiff/tif_fax3.c": "21e3a1efe3a309662736d4d745a01c305e411cc22fd17453cb48adcc1498c31f",
     "libtiff/tif_fax3.h": "1f76e5301166899b22409c31192d9f91be00bbe61f6d2badc529ece3b839de2d",
     "libtiff/tif_fax3sm.c": "7484907f2bd8a2439f582158e2eeef7f209780a411ea07e1b88ce74fa0cbbc75",
@@ -90,11 +90,11 @@
     "libtiff/tif_getimage.c": "9ebfe8afe9d74f6b3d23d5172d1e20150c3162082a80d2eb0fa776817915dc07",
     "libtiff/tif_hash_set.c": "b1257c93662c75de7ad67fc73f73a20e0645502fc05120d14f12bf08be49f10b",
     "libtiff/tif_hash_set.h": "de1ba012c293a798301e445e2d65b8a37bfd60426b7a6be59891058163c896eb",
-    "libtiff/tif_jpeg.c": "f6b80b90e7fb8f17448d07ceebb075dc1b8371fba5f84ab3ed00df2730a13c21",
+    "libtiff/tif_jpeg.c": "e08409b25a263104e14ab705a7a5fea45514b8b2c5272a1a218234e353ac680f",
     "libtiff/tif_lzw.c": "d313ba3ff2e358e9a516f7c5e7ce9b2f86ef12f505e667b2c6526da1a5085099",
     "libtiff/tif_next.c": "10a71e4975baac7278c6ed3ae4b0eb18402027ce1e4a2feb58873250269b9022",
     "libtiff/tif_ojpeg.c": "e0dcb8bf12d3b403407155ac84402158c4efb0f19d2c6e10f16329b2bf311bc4",
-    "libtiff/tif_open.c": "d536531e0323cc007982e8ec10d4cae03b984f19523d1b3e66dd60a7f33ce959",
+    "libtiff/tif_open.c": "38865376f48cbc472063cfc73c021ba780fd933baf1432e5d06520a8fc8d40e3",
     "libtiff/tif_packbits.c": "6882b72c2770de2f5c491d34f81a40be6b0782a65f04b6c5b7b4a18035db7e83",
     "libtiff/tif_predict.c": "5480cb89241e7c0095b4a85c37aeb91a1c7ddf62ab05c2ac634e9ce96bc0618a",
     "libtiff/tif_predict.h": "a1a7241bac6631f1161921f5158a96c7ee53dbe293f7caefdf945cd279046c48",
@@ -232,19 +232,44 @@
   ],
   "modifications": [
     {
+      "file": "libtiff/tif_compress.c",
+      "upstreamSha256": "e569f3502c4af70f4ccd56b7f78aac0f809fedb438419cb1ae09f69e3b1bfb8e",
+      "reason": "Copy the name with memcpy of strlen + 1 bytes into the buffer allocated for exactly that size instead of strcpy, which the Microsoft CRT marks deprecated under -Wdeprecated-declarations; the result is unchanged."
+    },
+    {
       "file": "libtiff/tif_config.h",
       "upstreamSha256": null,
       "reason": "Hand-written configuration header in place of the file the libtiff CMake build generates from tif_config.h.cmake.in (Docs/Design/AssetSystem section 12.10)"
     },
     {
+      "file": "libtiff/tif_dirinfo.c",
+      "upstreamSha256": "f0c2d4c491cfc148ac8cb02ad12ee3d17b6a9e64a6f7de2f12fcd5d18ed5f711",
+      "reason": "_TIFFMergeFields: when growing the fields array fails, keep the old array and its count instead of zeroing the count, so TIFFCleanup frees the array (the allocation failure test found the leak); behavior on success is unchanged."
+    },
+    {
       "file": "libtiff/tif_dirread.c",
       "upstreamSha256": "9a9220abd10e952c5147207461725630ccd9a0886e157ccabbe8c5a3006445fe",
-      "reason": "Allocate the IFD offset map entries with _TIFFmalloc and free them with _TIFFfree instead of the CRT, so every libtiff allocation reaches the allocator bound in tif_rocks.c (Docs/Design/AssetSystem section 12.10)"
+      "reason": "Allocate the IFD offset map entries with _TIFFmalloc and free them with _TIFFfree instead of the CRT, so every libtiff allocation reaches the allocator bound in tif_rocks.c (Docs/Design/AssetSystem section 12.10); and do not read LIBTIFF_STRILE_ARRAY_MAX_RESIZE_COUNT: the environment is not read, so the decode does not depend on the host environment (cooking determinism, Docs/Design/AssetSystem section 12.10) and the Microsoft CRT getenv deprecated under -Wdeprecated-declarations is not called. The built-in limit of 1000000 strips applies."
+    },
+    {
+      "file": "libtiff/tif_extension.c",
+      "upstreamSha256": "b49abfbd8f153237ff1187c6c1d34ffd0a6f26013b70d133b41ba64cbbf725ca",
+      "reason": "Copy the name with memcpy of strlen + 1 bytes into the buffer allocated for exactly that size instead of strcpy, which the Microsoft CRT marks deprecated under -Wdeprecated-declarations; the result is unchanged."
     },
     {
       "file": "libtiff/tif_hash_set.c",
       "upstreamSha256": "f3d3aaf6ac8bfa79626e48fa4cc17c65abee3caa7577154370391c82a74120f4",
       "reason": "Allocate through _TIFFmalloc, _TIFFcalloc and _TIFFfree instead of the CRT (the IFD loop detection hash set), so every libtiff allocation reaches the allocator bound in tif_rocks.c (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "upstreamSha256": "f6b80b90e7fb8f17448d07ceebb075dc1b8371fba5f84ab3ed00df2730a13c21",
+      "reason": "Do not read LIBTIFF_JPEG_MAX_ALLOWED_SCAN_NUMBER, LIBTIFF_ALLOW_LARGE_LIBJPEG_MEM_ALLOC and JPEGMEM: the environment is not read, so the decode does not depend on the host environment (cooking determinism, Docs/Design/AssetSystem section 12.10) and the Microsoft CRT getenv deprecated under -Wdeprecated-declarations is not called. The built-in defaults apply (100 scans, the libjpeg memory threshold, the larger encoder memory limit). And when copying the JPEGTables tag fails (allocation failure), leave no tables and fail the set instead of keeping the length with a null pointer that libjpeg would read (found by the decoder allocation failure test)."
+    },
+    {
+      "file": "libtiff/tif_open.c",
+      "upstreamSha256": "d536531e0323cc007982e8ec10d4cae03b984f19523d1b3e66dd60a7f33ce959",
+      "reason": "Copy the name with memcpy of strlen + 1 bytes into the buffer allocated for exactly that size instead of strcpy, which the Microsoft CRT marks deprecated under -Wdeprecated-declarations; the result is unchanged."
     },
     {
       "file": "libtiff/tif_rocks.c",

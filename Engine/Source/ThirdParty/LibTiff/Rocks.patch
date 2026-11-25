@@ -1,3 +1,123 @@
+diff --git a/libtiff/tif_compress.c b/libtiff/tif_compress.c
+--- a/libtiff/tif_compress.c
++++ b/libtiff/tif_compress.c
+@@ -237,7 +237,7 @@
+         char *codec_name;
+         cd->info = (TIFFCodec *)((uint8_t *)cd + sizeof(codec_t));
+         codec_name = (char *)((uint8_t *)cd->info + sizeof(TIFFCodec));
+-        strcpy(codec_name, name);
++        memcpy(codec_name, name, strlen(name) + 1);
+         cd->info->name = codec_name;
+         cd->info->scheme = scheme;
+         cd->info->init = init;
+diff --git a/libtiff/tif_config.h b/libtiff/tif_config.h
+new file mode 100644
+--- /dev/null
++++ b/libtiff/tif_config.h
+@@ -0,0 +1,36 @@
++/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
++   libtiff CMake build generates from tif_config.h.cmake.in. Only the entries the imported library sources test are set: the
++   codec switches come from tiffconf.h, fcntl.h supplies the open mode flags _TIFFgetMode uses, and the size_t width selects the
++   printf formats of the library messages. Rocks reads through TIFFClientOpenExt only, so no file I/O configuration is needed. */
++#ifndef ROCKS_TIF_CONFIG_H
++#define ROCKS_TIF_CONFIG_H
++
++#include "tiffconf.h"
++
++#define HAVE_ASSERT_H 1
++#define HAVE_FCNTL_H 1
++
++#define PACKAGE "LibTIFF Software"
++#define PACKAGE_BUGREPORT "tiff@lists.osgeo.org"
++#define PACKAGE_NAME "LibTIFF Software"
++#define PACKAGE_TARNAME "tiff"
++#define PACKAGE_URL ""
++
++#if SIZE_MAX == UINT64_MAX
++#define SIZEOF_SIZE_T 8
++#else
++#define SIZEOF_SIZE_T 4
++#endif
++
++#define WORDS_BIGENDIAN 0
++
++#define TIFF_SIZE_FORMAT "zu"
++#if SIZEOF_SIZE_T == 8
++#define TIFF_SSIZE_FORMAT PRId64
++#elif SIZEOF_SIZE_T == 4
++#define TIFF_SSIZE_FORMAT PRId32
++#else
++#error "Unsupported size_t size"
++#endif
++
++#endif /* ROCKS_TIF_CONFIG_H */
+diff --git a/libtiff/tif_dirinfo.c b/libtiff/tif_dirinfo.c
+--- a/libtiff/tif_dirinfo.c
++++ b/libtiff/tif_dirinfo.c
+@@ -648,7 +648,8 @@
+     }
+     if (!tif_newfields)
+     {
+-        tif->tif_nfields = 0;
++        /* Rocks: a failed realloc keeps the old array and its count, so
++         * TIFFCleanup still frees it (Rocks.patch) */
+         TIFFErrorExtR(tif, module, "Failed to allocate fields array");
+         return 0;
+     }
+diff --git a/libtiff/tif_dirread.c b/libtiff/tif_dirread.c
+--- a/libtiff/tif_dirread.c
++++ b/libtiff/tif_dirread.c
+@@ -5770,7 +5770,7 @@
+     if (tif->tif_map_dir_offset_to_number == NULL)
+     {
+         tif->tif_map_dir_offset_to_number = TIFFHashSetNew(
+-            hashFuncOffsetToNumber, equalFuncOffsetToNumber, free);
++            hashFuncOffsetToNumber, equalFuncOffsetToNumber, _TIFFfree);
+         if (tif->tif_map_dir_offset_to_number == NULL)
+         {
+             TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
+@@ -5852,8 +5852,8 @@
+                                   foundEntryOld);
+             }
+ 
+-            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)malloc(
+-                sizeof(TIFFOffsetAndDirNumber));
++            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)_TIFFmalloc(
++                (tmsize_t)sizeof(TIFFOffsetAndDirNumber));
+             if (entryPtr == NULL)
+             {
+                 return 0;
+@@ -5891,7 +5891,7 @@
+     }
+ 
+     TIFFOffsetAndDirNumber *entryPtr =
+-        (TIFFOffsetAndDirNumber *)malloc(sizeof(TIFFOffsetAndDirNumber));
++        (TIFFOffsetAndDirNumber *)_TIFFmalloc((tmsize_t)sizeof(TIFFOffsetAndDirNumber));
+     if (entryPtr == NULL)
+     {
+         TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
+@@ -7799,7 +7799,8 @@
+     {
+         uint64_t *resizeddata;
+         const TIFFField *fip = TIFFFieldWithTag(tif, dir->tdir_tag);
+-        const char *pszMax = getenv("LIBTIFF_STRILE_ARRAY_MAX_RESIZE_COUNT");
++        /* Rocks: the environment is not read (Rocks.patch) */
++        const char *pszMax = NULL;
+         uint32_t max_nstrips = 1000000;
+         if (pszMax)
+             max_nstrips = (uint32_t)atoi(pszMax);
+diff --git a/libtiff/tif_extension.c b/libtiff/tif_extension.c
+--- a/libtiff/tif_extension.c
++++ b/libtiff/tif_extension.c
+@@ -103,7 +103,7 @@
+     psLink->next = tif->tif_clientinfo;
+     psLink->name = (char *)_TIFFmallocExt(tif, (tmsize_t)(strlen(name) + 1));
+     assert(psLink->name != NULL);
+-    strcpy(psLink->name, name);
++    memcpy(psLink->name, name, strlen(name) + 1);
+     psLink->data = data;
+ 
+     tif->tif_clientinfo = psLink;
 diff --git a/libtiff/tif_hash_set.c b/libtiff/tif_hash_set.c
 --- a/libtiff/tif_hash_set.c
 +++ b/libtiff/tif_hash_set.c
@@ -96,139 +216,63 @@ diff --git a/libtiff/tif_hash_set.c b/libtiff/tif_hash_set.c
      set->tabList = newTabList;
      set->nAllocatedSize = nNewAllocatedSize;
      set->bRehash = false;
-diff --git a/libtiff/tif_dirread.c b/libtiff/tif_dirread.c
---- a/libtiff/tif_dirread.c
-+++ b/libtiff/tif_dirread.c
-@@ -5770,7 +5770,7 @@
-     if (tif->tif_map_dir_offset_to_number == NULL)
-     {
-         tif->tif_map_dir_offset_to_number = TIFFHashSetNew(
--            hashFuncOffsetToNumber, equalFuncOffsetToNumber, free);
-+            hashFuncOffsetToNumber, equalFuncOffsetToNumber, _TIFFfree);
-         if (tif->tif_map_dir_offset_to_number == NULL)
+diff --git a/libtiff/tif_jpeg.c b/libtiff/tif_jpeg.c
+--- a/libtiff/tif_jpeg.c
++++ b/libtiff/tif_jpeg.c
+@@ -409,7 +409,8 @@
+     sp->cinfo.d.progress = &sp->progress;
+     sp->progress.progress_monitor = TIFFjpeg_progress_monitor;
+     sp->otherSettings.max_allowed_scan_number = 100;
+-    sz_max_allowed_scan_number = getenv("LIBTIFF_JPEG_MAX_ALLOWED_SCAN_NUMBER");
++    /* Rocks: the environment is not read (Rocks.patch) */
++    sz_max_allowed_scan_number = NULL;
+     if (sz_max_allowed_scan_number)
+         sp->otherSettings.max_allowed_scan_number =
+             atoi(sz_max_allowed_scan_number);
+@@ -1339,7 +1340,7 @@
+ 
+         if (sp->cinfo.d.mem->max_memory_to_use > 0 &&
+             nRequiredMemory > (toff_t)(sp->cinfo.d.mem->max_memory_to_use) &&
+-            getenv("LIBTIFF_ALLOW_LARGE_LIBJPEG_MEM_ALLOC") == NULL)
++            1 /* Rocks: the environment is not read (Rocks.patch) */)
          {
-             TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
-@@ -5852,8 +5852,8 @@
-                                   foundEntryOld);
+             TIFFErrorExtR(
+                 tif, module,
+@@ -2637,6 +2638,13 @@
              }
- 
--            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)malloc(
--                sizeof(TIFFOffsetAndDirNumber));
-+            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)_TIFFmalloc(
-+                (tmsize_t)sizeof(TIFFOffsetAndDirNumber));
-             if (entryPtr == NULL)
+             _TIFFsetByteArrayExt(tif, &sp->otherSettings.jpegtables,
+                                  va_arg(ap, void *), v32);
++            /* Rocks: a failed copy leaves no tables, not a length without
++             * bytes (Rocks.patch) */
++            if (sp->otherSettings.jpegtables == NULL)
++            {
++                sp->otherSettings.jpegtables_length = 0;
++                return (0);
++            }
+             sp->otherSettings.jpegtables_length = v32;
+             TIFFSetFieldBit(tif, FIELD_JPEGTABLES);
+             break;
+@@ -2803,7 +2811,7 @@
+         if (sp->cinfo.c.mem->max_memory_to_use > 0)
+         {
+             /* This is to address bug related in ticket GDAL #1795. */
+-            if (getenv("JPEGMEM") == NULL)
++            if (1) /* Rocks: the environment is not read (Rocks.patch) */
              {
-                 return 0;
-@@ -5891,7 +5891,7 @@
+                 /* Increase the max memory usable. This helps when creating
+                  * files */
+diff --git a/libtiff/tif_open.c b/libtiff/tif_open.c
+--- a/libtiff/tif_open.c
++++ b/libtiff/tif_open.c
+@@ -373,7 +373,7 @@
      }
- 
-     TIFFOffsetAndDirNumber *entryPtr =
--        (TIFFOffsetAndDirNumber *)malloc(sizeof(TIFFOffsetAndDirNumber));
-+        (TIFFOffsetAndDirNumber *)_TIFFmalloc((tmsize_t)sizeof(TIFFOffsetAndDirNumber));
-     if (entryPtr == NULL)
-     {
-         TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
-diff --git a/libtiff/tif_config.h b/libtiff/tif_config.h
-new file mode 100644
---- /dev/null
-+++ b/libtiff/tif_config.h
-@@ -0,0 +1,36 @@
-+/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
-+   libtiff CMake build generates from tif_config.h.cmake.in. Only the entries the imported library sources test are set: the
-+   codec switches come from tiffconf.h, fcntl.h supplies the open mode flags _TIFFgetMode uses, and the size_t width selects the
-+   printf formats of the library messages. Rocks reads through TIFFClientOpenExt only, so no file I/O configuration is needed. */
-+#ifndef ROCKS_TIF_CONFIG_H
-+#define ROCKS_TIF_CONFIG_H
-+
-+#include "tiffconf.h"
-+
-+#define HAVE_ASSERT_H 1
-+#define HAVE_FCNTL_H 1
-+
-+#define PACKAGE "LibTIFF Software"
-+#define PACKAGE_BUGREPORT "tiff@lists.osgeo.org"
-+#define PACKAGE_NAME "LibTIFF Software"
-+#define PACKAGE_TARNAME "tiff"
-+#define PACKAGE_URL ""
-+
-+#if SIZE_MAX == UINT64_MAX
-+#define SIZEOF_SIZE_T 8
-+#else
-+#define SIZEOF_SIZE_T 4
-+#endif
-+
-+#define WORDS_BIGENDIAN 0
-+
-+#define TIFF_SIZE_FORMAT "zu"
-+#if SIZEOF_SIZE_T == 8
-+#define TIFF_SSIZE_FORMAT PRId64
-+#elif SIZEOF_SIZE_T == 4
-+#define TIFF_SSIZE_FORMAT PRId32
-+#else
-+#error "Unsupported size_t size"
-+#endif
-+
-+#endif /* ROCKS_TIF_CONFIG_H */
-diff --git a/libtiff/tiffconf.h b/libtiff/tiffconf.h
-new file mode 100644
---- /dev/null
-+++ b/libtiff/tiffconf.h
-@@ -0,0 +1,55 @@
-+/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
-+   libtiff CMake build generates from tiffconf.h.cmake.in. Every Rocks target is little endian with IEEE floating point. The codecs
-+   are the lossless ones UE 5.8 also enables (CCITT, LZW, NeXT, PackBits, ThunderScan, ZIP through the Rocks zlib) plus JPEG and
-+   old JPEG through the Rocks libjpeg-turbo (section 12.11 - UE enables them on Mac and Linux only); PixarLog, SGILog, JBIG, LERC,
-+   LZMA, WebP and ZSTD are not built.
-+   DEFAULT_EXTRASAMPLE_AS_ALPHA matches UE: a fourth sample without an ExtraSamples value is alpha. */
-+#ifndef _TIFFCONF_
-+#define _TIFFCONF_
-+
-+#include <inttypes.h>
-+#include <stddef.h>
-+#include <stdint.h>
-+
-+#define TIFF_INT16_T int16_t
-+#define TIFF_INT32_T int32_t
-+#define TIFF_INT64_T int64_t
-+#define TIFF_INT8_T int8_t
-+#define TIFF_UINT16_T uint16_t
-+#define TIFF_UINT32_T uint32_t
-+#define TIFF_UINT64_T uint64_t
-+#define TIFF_UINT8_T uint8_t
-+
-+#if SIZE_MAX == UINT64_MAX
-+#define TIFF_SSIZE_T int64_t
-+#else
-+#define TIFF_SSIZE_T int32_t
-+#endif
-+
-+#define HAVE_IEEEFP 1
-+#define HOST_FILLORDER FILLORDER_LSB2MSB
-+#define HOST_BIGENDIAN 0
-+
-+#define CCITT_SUPPORT 1
-+#define JPEG_SUPPORT 1
-+#define LZW_SUPPORT 1
-+#define NEXT_SUPPORT 1
-+#define OJPEG_SUPPORT 1
-+#define PACKBITS_SUPPORT 1
-+#define THUNDER_SUPPORT 1
-+#define ZIP_SUPPORT 1
-+
-+#define STRIPCHOP_DEFAULT TIFF_STRIPCHOP
-+#define SUBIFD_SUPPORT 1
-+#define DEFAULT_EXTRASAMPLE_AS_ALPHA 1
-+#define CHECK_JPEG_YCBCR_SUBSAMPLING 1
-+#define MDI_SUPPORT 1
-+
-+#define COLORIMETRY_SUPPORT
-+#define YCBCR_SUPPORT
-+#define CMYK_SUPPORT
-+#define ICC_SUPPORT
-+#define PHOTOSHOP_SUPPORT
-+#define IPTC_SUPPORT
-+
-+#endif /* _TIFFCONF_ */
+     _TIFFmemset(tif, 0, sizeof(*tif));
+     tif->tif_name = (char *)tif + sizeof(TIFF);
+-    strcpy(tif->tif_name, name);
++    memcpy(tif->tif_name, name, strlen(name) + 1);
+     tif->tif_mode = m & ~(O_CREAT | O_TRUNC);
+     tif->tif_curdir = TIFF_NON_EXISTENT_DIR_NUMBER; /* non-existent directory */
+     tif->tif_curdircount = TIFF_NON_EXISTENT_DIR_NUMBER;
 diff --git a/libtiff/tif_rocks.c b/libtiff/tif_rocks.c
 new file mode 100644
 --- /dev/null
@@ -382,3 +426,63 @@ new file mode 100644
 +#endif
 +
 +#endif /* TIF_ROCKS_H */
+diff --git a/libtiff/tiffconf.h b/libtiff/tiffconf.h
+new file mode 100644
+--- /dev/null
++++ b/libtiff/tiffconf.h
+@@ -0,0 +1,55 @@
++/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
++   libtiff CMake build generates from tiffconf.h.cmake.in. Every Rocks target is little endian with IEEE floating point. The codecs
++   are the lossless ones UE 5.8 also enables (CCITT, LZW, NeXT, PackBits, ThunderScan, ZIP through the Rocks zlib) plus JPEG and
++   old JPEG through the Rocks libjpeg-turbo (section 12.11 - UE enables them on Mac and Linux only); PixarLog, SGILog, JBIG, LERC,
++   LZMA, WebP and ZSTD are not built.
++   DEFAULT_EXTRASAMPLE_AS_ALPHA matches UE: a fourth sample without an ExtraSamples value is alpha. */
++#ifndef _TIFFCONF_
++#define _TIFFCONF_
++
++#include <inttypes.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#define TIFF_INT16_T int16_t
++#define TIFF_INT32_T int32_t
++#define TIFF_INT64_T int64_t
++#define TIFF_INT8_T int8_t
++#define TIFF_UINT16_T uint16_t
++#define TIFF_UINT32_T uint32_t
++#define TIFF_UINT64_T uint64_t
++#define TIFF_UINT8_T uint8_t
++
++#if SIZE_MAX == UINT64_MAX
++#define TIFF_SSIZE_T int64_t
++#else
++#define TIFF_SSIZE_T int32_t
++#endif
++
++#define HAVE_IEEEFP 1
++#define HOST_FILLORDER FILLORDER_LSB2MSB
++#define HOST_BIGENDIAN 0
++
++#define CCITT_SUPPORT 1
++#define JPEG_SUPPORT 1
++#define LZW_SUPPORT 1
++#define NEXT_SUPPORT 1
++#define OJPEG_SUPPORT 1
++#define PACKBITS_SUPPORT 1
++#define THUNDER_SUPPORT 1
++#define ZIP_SUPPORT 1
++
++#define STRIPCHOP_DEFAULT TIFF_STRIPCHOP
++#define SUBIFD_SUPPORT 1
++#define DEFAULT_EXTRASAMPLE_AS_ALPHA 1
++#define CHECK_JPEG_YCBCR_SUBSAMPLING 1
++#define MDI_SUPPORT 1
++
++#define COLORIMETRY_SUPPORT
++#define YCBCR_SUPPORT
++#define CMYK_SUPPORT
++#define ICC_SUPPORT
++#define PHOTOSHOP_SUPPORT
++#define IPTC_SUPPORT
++
++#endif /* _TIFFCONF_ */

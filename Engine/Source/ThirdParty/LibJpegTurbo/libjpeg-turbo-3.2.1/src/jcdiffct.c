@@ -311,6 +311,7 @@ compress_first_pass(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
 METHODDEF(boolean)
 compress_output(j_compress_ptr cinfo, _JSAMPIMAGE input_buf)
 {
+  (void)input_buf;
   my_diff_ptr diff = (my_diff_ptr)cinfo->coef;
   int ci, compi;
   _JSAMPARRAY buffer[MAX_COMPONENTS];

@@ -380,6 +380,11 @@ LOCAL(void)
 noop_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
              JDIMENSION input_row, _JSAMPARRAY output_buf, int num_rows)
 {
+  (void)cinfo;
+  (void)input_buf;
+  (void)input_row;
+  (void)output_buf;
+  (void)num_rows;
 }
 
 
@@ -388,6 +393,10 @@ LOCAL(void)
 noop_quantize(j_decompress_ptr cinfo, _JSAMPARRAY input_buf,
               _JSAMPARRAY output_buf, int num_rows)
 {
+  (void)cinfo;
+  (void)input_buf;
+  (void)output_buf;
+  (void)num_rows;
 }
 
 

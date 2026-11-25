@@ -46,6 +46,7 @@ compute_sampled_height (int height, int y_sampling, int start_y)
 static inline int
 compute_sampled_width (int width, int x_sampling, int start_x)
 {
+    (void)start_x;
     /*
      * we require that the start_x % x_sampling == 0 and for tiled images (and for deep),
      * x_sampling must be 1, so this can simplify the math compared to the y case

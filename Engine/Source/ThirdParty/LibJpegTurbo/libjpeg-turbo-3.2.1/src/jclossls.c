@@ -195,6 +195,7 @@ jpeg_difference_first_row(j_compress_ptr cinfo, int ci,
                           _JSAMPROW input_buf, _JSAMPROW prev_row,
                           JDIFFROW diff_buf, JDIMENSION width)
 {
+  (void)prev_row;
   DIFFERENCE_1D(INITIAL_PREDICTORx);
 
   /*
@@ -269,6 +270,7 @@ METHODDEF(void)
 noscale(j_compress_ptr cinfo,
         _JSAMPROW input_buf, _JSAMPROW output_buf, JDIMENSION width)
 {
+  (void)cinfo;
   memcpy(output_buf, input_buf, width * sizeof(_JSAMPLE));
 }
 

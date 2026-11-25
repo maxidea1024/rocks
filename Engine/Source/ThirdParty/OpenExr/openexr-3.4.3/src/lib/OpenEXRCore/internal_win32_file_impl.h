@@ -103,6 +103,8 @@ struct _internal_exr_filehandle
 static void
 default_shutdown (exr_const_context_t c, void* userdata, int failed)
 {
+    (void)c;
+    (void)failed;
     /* we will handle failure before here */
     struct _internal_exr_filehandle* fh = userdata;
     if (fh)
@@ -388,6 +390,7 @@ default_init_write_file (exr_context_t file)
 static int64_t
 default_query_size_func (exr_const_context_t ctxt, void* userdata)
 {
+    (void)ctxt;
     struct _internal_exr_filehandle* fh = userdata;
     int64_t                          sz = -1;
 

@@ -248,6 +248,7 @@ decompress_data(j_decompress_ptr cinfo, _JSAMPIMAGE output_buf)
 METHODDEF(int)
 dummy_consume_data(j_decompress_ptr cinfo)
 {
+  (void)cinfo;
   return JPEG_SUSPENDED;        /* Always indicate nothing was done */
 }
 

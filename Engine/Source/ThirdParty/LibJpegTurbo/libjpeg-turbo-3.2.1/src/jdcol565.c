@@ -21,6 +21,10 @@ ycc_rgb565_convert_internal(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
                             JDIMENSION input_row, _JSAMPARRAY output_buf,
                             int num_rows)
 {
+  (void)input_buf;
+  (void)input_row;
+  (void)output_buf;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int y, cb, cr;
@@ -104,6 +108,10 @@ ycc_rgb565D_convert_internal(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
                              JDIMENSION input_row, _JSAMPARRAY output_buf,
                              int num_rows)
 {
+  (void)input_buf;
+  (void)input_row;
+  (void)output_buf;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int y, cb, cr;
