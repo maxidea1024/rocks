@@ -117,3 +117,21 @@ MA5a 구현(`Mesh`의 `SkinnedMeshBuildSettings`, `MeshTools`의 스킨 빌드) 
 15. **정적 빌드와 공유.** 5.2절 단계 함수(원본 사본·값 정리 경고·설정 경고·렌더 정점·섹션·bounds)를 MeshTools 내부 공용 파일로 옮기고 렌더 정점 구성에 용접 임계값·삼각형 번호 붕괴 제외·추가 비교 함수·렌더 정점을 만든 코너 목록을 매개변수로 더했다. 정적 빌드 결과 byte는 그대로다(기존 시험).
 16. **진단 등록.** `AssetDiagnosticCode`에 `InfluencesTrimmed`(11절에 있던 이름)와 `MissingInfluences`(새 경고 — 11절 표에 더했다)를, `MeshIssue`에 `InfluencesTrimmed`·`MissingInfluences`·`NonFiniteMorph`·`InvalidSettingValue`·`InvalidBoneHierarchy`·`EmptyBoneHierarchy`·`SingularBindPose`를 더했다. MeshSource에 접두 판정 `MatchesMeshAttributePrefix`(3.7절 5와 같은 ASCII 대소문자 무시, 접두 뒤가 비면 거짓)를 공개해 빌드가 이름 판정을 다시 구현하지 않게 했다.
 17. **결정성.** 빌드 전체가 `RunWithDeterministicFloatingPoint` 안이고 스레드를 쓰지 않는다. 정수 규칙(정렬·정규화·부호화)은 입력만으로 정해지고, morph 법선 재계산은 기본 빌드와 같은 결정적 수학을 쓴다.
+
+### 6.6 MA4b — 스켈레톤 임포트 서비스와 병합 저장
+
+설계일 2026-11-25(사용자 지시 "SkeletalMesh도 처리해" — MA5b의 선행). MA2b3(5.5.3절)과 같은 모양이다.
+
+1. **모듈.** 새 Developer 모듈 `AnimationTools`(`Engine/Source/Developer/AnimationTools`, 8절)다. 공개 의존은 Animation·AssetDatabase(`AssetImportContext`)다. 클립 처리기·클립 임포트는 MA6b가 더한다.
+2. **API.** `AnimationTools/SkeletonImport.h`의 `ImportSkeleton(context, output, spec, failure)`가 임포터(교환 형식 UX·glTF·FBX)의 `AssetImporter::Import` 안에서 `Output()`으로 받은 `Skeleton`을 채운다. `SkeletonImportSpec`은 10절 입력 그대로다: 본(`SkeletonImportBone{name, parentIndex, referencePose}` — 본 번호 순), `retargetModes`(비면 모두 `Animation` — UE 새 본 기본, 아니면 본 수와 같은 길이), 가상 본(이름 셋), 소켓(`BoneSocket` 필드 — 이름은 문자열), 커브(`SkeletonCurveInfo` 필드 — `linkedBones`는 문자열 목록), `replaceOnReimport`(아래 4). 포인터·span은 호출 동안 산다. `failure`(선택)는 스켈레톤 진단 세부(`SkeletonDiagnostic`)다.
+3. **새 임포트.** 이름을 intern하고(실패는 `InvalidSetting`, detail = 그 목록 안 위치, 원래 오류) `retargetModes` 길이가 0도 본 수도 아니면 `InvalidSetting`(detail = 길이). 본 계층을 만들고 기준 pose를 정규화한다(`NormalizeBoneReferencePose` — 6.4절 3 "저장 경로가 부른다"). 필드를 쓰고 `ValidateSkeleton`으로 본다. 위반은 그 진단(`InvalidSkeletonData`·`CapacityExceeded` 등, detail = 진단 index)으로 `context.Fail`이고 서비스가 출력을 버린다(AssetImporter 계약 — 저장하지 않으므로 기존 에셋은 그대로다). 보존 필드(슬롯 묶음·리타깃 원본·호환 스켈레톤·`useRetargetModesFromCompatibleSkeleton`)는 비운다.
+4. **재임포트(기존 스켈레톤 — 병합).** UE는 스켈레톤 본을 지우지 않고 메시 본을 더하기만 한다(`USkeleton::MergeAllBonesToBoneTree`). 그래서:
+   - 본: 정규화한 명세 계층을 메시 쪽으로 `MergeBonesIntoSkeleton`(아래 5)한다. 기존 본은 번호·pose를 지키고, 없는 본을 명세 순서로 뒤에 더하고, 대소문자만 다른 이름은 명세 표시로 바꾼다. 사슬 불일치는 `SkeletonMismatch`다(6.4절 6).
+   - `retargetModes`: 기존 본은 그대로, 더한 본은 명세 값(명세가 비면 `Animation`)이다.
+   - 소켓·가상 본·커브: 기본은 사용자 편집 보존 — 기존 항목을 두고 이름(Name 비교)이 기존에 없는 명세 항목만 뒤에 더한다. `replaceOnReimport`면 명세 값으로 바꾸고 명세에 있는 기존 본의 `retargetModes`도 명세 값으로 바꾼다(교환 경로처럼 원본 쪽이 정본일 때 — 정적 메시 `replaceSettingsOnReimport`와 같은 역할). 본은 이때도 지우지 않는다(클립·메시의 본 번호가 깨지지 않게).
+   - 보존 필드는 그대로 둔다(명세에 없다).
+   - 그 뒤 `ValidateSkeleton`(3과 같다).
+5. **병합 적용 도우미.** `AnimationTools/SkeletonMergeApply.h`의 `MergeBonesIntoSkeleton(skeleton, meshBones, newModes, result, failure)`가 `MergeBoneHierarchy`(순수 판정 — 6.4절 6) 결과를 스켈레톤에 쓴다: `bones` 교체, `retargetModes`를 결과 본 수로 늘려 더한 본에 `newModes[메시 번호]`(비면 `Animation`)를 둔다. 실패하면 스켈레톤은 그대로다(할당을 먼저 마친다). 스킨 메시 임포트(MA5b3)도 같은 함수를 쓴다.
+6. **로드 경로.** 정적 메시·텍스처와 같이 클래스 PostLoad는 쓰지 않는다(5.5.1절 9, AssetSystem 12.15절 2). 스켈레톤을 쓰는 쪽 — 스킨 메시 쿠킹(MA5b2)·클립 쿠킹(MA6b)·애니메이션 평가 — 이 쓰기 전에 `ValidateSkeleton`을 부른다. 13절 MA4b 행의 "로드 경로에서 ValidateSkeleton"은 이 규칙으로 바꾼다.
+7. **너겟 무효화.** 병합 저장은 스켈레톤 패키지를 바꾸므로 콘텐츠 해시가 바뀐다. 스켈레톤을 Build로 의존하는 처리기(스킨 메시 MA5b2·클립 MA6b — 저장 때 타입 hook `DependencyDeclarer`로 Build 간선을 선언한다, AssetSystem 16.2절)의 build key에 그 해시가 들어가 다시 쿠킹된다(AssetSystem 10.2절 5). 시험은 처리기가 생기는 MA5b2에서 한다.
+8. **시험.** `AnimationTools/Tests/SkeletonImportTests.cpp`: 새 임포트 필드·pose 정규화·`retargetModes` 기본, 이름·길이 실패(detail), 계층·소켓 검증 실패(진단 index), 재임포트 병합(기존 본 번호·pose 유지, 새 본 추가, 대소문자 이름 바꿈, 사슬 불일치), 편집 보존과 `replaceOnReimport`, 보존 필드 유지, `MergeBonesIntoSkeleton` 실패 시 불변.
