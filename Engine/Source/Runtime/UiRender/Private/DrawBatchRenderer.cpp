@@ -14,12 +14,15 @@ enum class UiShader {
     Image,
     Mask,
     Retained,
-    Blur
+    Blur,
+    RoundedBox
 };
 
 // 그리기별 상수 byte 수다(UiElements.rsf UiDrawConstants·UiBackdropBlur.rsf UiBlurConstants).
 constexpr uint32 UiDrawConstantBytes = 16;
 constexpr uint32 UiBlurConstantBytes = 32;
+// UiRoundedBox.rsf UiRoundedBoxConstants(화면·params·반경·외곽선 색)다.
+constexpr uint32 UiRoundedBoxConstantBytes = 64;
 
 // 정점 속성 수다(위치·색, 텍스처는 UV를 더한다).
 constexpr uint32 SolidAttributeCount = 2;
@@ -40,7 +43,9 @@ Result<graphics::PipelineHandle> CreatePipeline(graphics::Device& device,
     desc.layout = {Span<const graphics::VertexAttribute>(
                        attributes, textured ? TexturedAttributeCount : SolidAttributeCount),
                    streams};
-    desc.drawConstantBytes = shader == UiShader::Blur ? UiBlurConstantBytes : UiDrawConstantBytes;
+    desc.drawConstantBytes = shader == UiShader::Blur         ? UiBlurConstantBytes
+                             : shader == UiShader::RoundedBox ? UiRoundedBoxConstantBytes
+                                                              : UiDrawConstantBytes;
     desc.colorFormats[0] = format;
     if (shader != UiShader::Blur) {
         // 보관 표면은 premultiplied다(RGB에 알파가 이미 곱해져 있다).
@@ -60,6 +65,9 @@ Result<graphics::PipelineHandle> CreatePipeline(graphics::Device& device,
     case UiShader::Retained:
         desc.bindings.texture = UiTextureName;
         return CreateUiPipeline(device, shaders, UiImageVertexType, UiRetainedPixelType, desc);
+    case UiShader::RoundedBox:
+        return CreateUiPipeline(device, shaders, UiRoundedBoxVertexType, UiRoundedBoxPixelType,
+                                desc);
     case UiShader::Blur:
     default:
         desc.bindings.texture = UiBackdropName;
@@ -91,6 +99,12 @@ Result<graphics::PipelineHandle>
 DrawBatchRenderer::CreateRetainedPipeline(graphics::Device& device, render::ShaderSet& shaders,
                                           graphics::PixelFormat format) noexcept {
     return CreatePipeline(device, shaders, format, UiShader::Retained);
+}
+
+Result<graphics::PipelineHandle>
+DrawBatchRenderer::CreateRoundedBoxPipeline(graphics::Device& device, render::ShaderSet& shaders,
+                                            graphics::PixelFormat format) noexcept {
+    return CreatePipeline(device, shaders, format, UiShader::RoundedBox);
 }
 
 Result<graphics::PipelineHandle>
@@ -133,6 +147,11 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
     }
 
     for (const DrawCommand& command : batch.Commands()) {
+        if (command.roundedBox) {
+            if (auto ready = buffers.PrepareRoundedBox(); !ready) {
+                return ready;
+            }
+        }
         if (command.operation == PaintOperation::BlurBackdrop ||
             command.operation == PaintOperation::BlurToBuffer) {
             auto ready = buffers.PrepareBlur(static_cast<uint32>(viewportSize.x),
@@ -211,7 +230,8 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
         const auto nextPipeline = (command.operation == PaintOperation::BlurBackdrop ||
                                    command.operation == PaintOperation::BlurToBuffer)
                                       ? buffers.blurPipeline_
-                                      : (texture ? texture->pipeline : pipeline);
+                                  : command.roundedBox ? buffers.roundedPipeline_
+                                                       : (texture ? texture->pipeline : pipeline);
         if (currentPipeline != nextPipeline) {
             commands.SetPipeline(nextPipeline);
             currentPipeline = nextPipeline;
@@ -220,6 +240,28 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
             ScreenTransform screen;
             Vec4 radii;
         };
+        struct RoundedBoxConstants {
+            ScreenTransform screen;
+            Vec4 params;
+            Vec4 radii;
+            LinearColor outline;
+        };
+        if (command.roundedBox) {
+            const RoundedBoxConstants rounded{
+                transform,
+                {0.0f, command.outlineWidth, command.roundedSize.x, command.roundedSize.y},
+                command.cornerRadius,
+                command.outlineColor};
+            if (auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(rounded)); !set) {
+                return set;
+            }
+        } else if (command.operation == PaintOperation::Draw) {
+            // 다른 크기의 상수(블러·둥근 상자) 뒤에는 화면 변환만 다시 넣는다.
+            if (auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(transform));
+                !set) {
+                return set;
+            }
+        }
         if (command.operation == PaintOperation::BlurBackdrop ||
             command.operation == PaintOperation::BlurToBuffer) {
             const BlurConstants blur{transform, command.cornerRadius};

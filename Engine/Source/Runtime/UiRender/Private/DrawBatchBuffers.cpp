@@ -27,6 +27,23 @@ DrawBatchBuffers::~DrawBatchBuffers() noexcept {
     if (!blurPipeline_.IsNull()) {
         device_.Retire(blurPipeline_);
     }
+    if (!roundedPipeline_.IsNull()) {
+        device_.Retire(roundedPipeline_);
+    }
+}
+
+Result<void> DrawBatchBuffers::PrepareRoundedBox() const noexcept {
+    if (!roundedPipeline_.IsNull()) {
+        return Result<void>::Success();
+    }
+
+    auto pipeline = DrawBatchRenderer::CreateRoundedBoxPipeline(device_, shaders_, targetFormat_);
+    if (!pipeline) {
+        return Result<void>::Failure(pipeline.Error());
+    }
+
+    roundedPipeline_ = pipeline.Value();
+    return Result<void>::Success();
 }
 
 Result<void> DrawBatchBuffers::PrepareBlur(uint32 width, uint32 height) const noexcept {

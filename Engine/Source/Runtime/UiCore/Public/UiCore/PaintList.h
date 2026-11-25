@@ -30,7 +30,13 @@ struct PaintBox {
     PaintOperation operation = PaintOperation::Draw;
     float blurRadius = 0;
     int32 blurKernel = -1;
+    // 블러는 모서리 반경, 둥근 상자는 모서리 반경(왼쪽 위부터 시계 방향)이다.
     Vec4 cornerRadius{};
+    // 둥근 상자다(UW3a). roundedSize는 잘라내기 전 상자 전체의 로컬 크기, UV는 그 안의 0..1이다.
+    bool roundedBox = false;
+    Vec2 roundedSize{};
+    float outlineWidth = 0.0f;
+    LinearColor outlineColor{0, 0, 0, 0};
     bool operator==(const PaintBox&) const noexcept = default;
 };
 

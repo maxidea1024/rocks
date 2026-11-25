@@ -135,6 +135,18 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
         }
         return TryAddBox(box);
     };
+    if (brush.mode == BrushMode::RoundedBox) {
+        // 상자 전체 크기와 반경을 싣고, 잘라낸 조각은 UV 부분 구간으로 같은 모양을 유지한다.
+        const float half = geometry.size.y * 0.5f;
+        box.roundedBox = true;
+        box.roundedSize = geometry.size;
+        box.cornerRadius = brush.outline.rounding == BrushRounding::HalfHeight
+                               ? Vec4{half, half, half, half}
+                               : brush.outline.cornerRadii;
+        box.outlineWidth = brush.outline.width;
+        box.outlineColor = brush.outline.color;
+        return addPiece({});
+    }
     if (brush.mode == BrushMode::Image) {
         box.uvStart = {brush.mirrorX ? brush.uv.max.x : brush.uv.min.x,
                        brush.mirrorY ? brush.uv.max.y : brush.uv.min.y};

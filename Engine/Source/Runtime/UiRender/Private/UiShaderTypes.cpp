@@ -8,6 +8,7 @@ namespace {
 constexpr char ElementsPath[] = "/Engine/Private/Ui/UiElements.rsf";
 constexpr char BlurPath[] = "/Engine/Private/Ui/UiBackdropBlur.rsf";
 constexpr char PlanePath[] = "/Engine/Private/Ui/UiWorldPlane.rsf";
+constexpr char RoundedBoxPath[] = "/Engine/Private/Ui/UiRoundedBox.rsf";
 
 constexpr shader::ShaderTypeDesc Vertex(shader::ShaderTypeName name, StringView path) noexcept {
     return shader::MakeShaderTypeDesc(name, path, name.name, shader::ShaderStageVertex,
@@ -27,15 +28,19 @@ constexpr shader::ShaderTypeDesc MaskPixelDesc = Pixel(UiMaskPixelType, Elements
 constexpr shader::ShaderTypeDesc RetainedPixelDesc = Pixel(UiRetainedPixelType, ElementsPath);
 constexpr shader::ShaderTypeDesc BlurVertexDesc = Vertex(UiBlurVertexType, BlurPath);
 constexpr shader::ShaderTypeDesc BlurPixelDesc = Pixel(UiBlurPixelType, BlurPath);
+constexpr shader::ShaderTypeDesc RoundedBoxVertexDesc =
+    Vertex(UiRoundedBoxVertexType, RoundedBoxPath);
+constexpr shader::ShaderTypeDesc RoundedBoxPixelDesc = Pixel(UiRoundedBoxPixelType, RoundedBoxPath);
 constexpr shader::ShaderTypeDesc PlaneVertexDesc = Vertex(UiWorldPlaneVertexType, PlanePath);
 constexpr shader::ShaderTypeDesc PlanePixelDesc = Pixel(UiWorldPlanePixelType, PlanePath);
 constexpr shader::ShaderTypeDesc PlaneVelocityPixelDesc =
     Pixel(UiWorldPlaneVelocityPixelType, PlanePath);
 
 constexpr const shader::ShaderTypeDesc* Types[] = {
-    &SolidVertexDesc, &SolidPixelDesc,    &ImageVertexDesc,       &ImagePixelDesc,
-    &MaskPixelDesc,   &RetainedPixelDesc, &BlurVertexDesc,        &BlurPixelDesc,
-    &PlaneVertexDesc, &PlanePixelDesc,    &PlaneVelocityPixelDesc};
+    &SolidVertexDesc,    &SolidPixelDesc,    &ImageVertexDesc,        &ImagePixelDesc,
+    &MaskPixelDesc,      &RetainedPixelDesc, &BlurVertexDesc,         &BlurPixelDesc,
+    &PlaneVertexDesc,    &PlanePixelDesc,    &PlaneVelocityPixelDesc, &RoundedBoxVertexDesc,
+    &RoundedBoxPixelDesc};
 
 Result<graphics::ShaderHandle> DeviceShader(render::ShaderSet& shaders,
                                             const shader::ShaderTypeName& type) noexcept {

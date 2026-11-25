@@ -30,6 +30,11 @@ struct DrawCommand {
     SlotHandle resource{};
     PaintOperation operation = PaintOperation::Draw;
     Vec4 cornerRadius{};
+    // 둥근 상자 명령이다(UW3a — 크기·반경·두께·외곽선 색이 같은 상자만 한 명령에 묶는다).
+    bool roundedBox = false;
+    Vec2 roundedSize{};
+    float outlineWidth = 0.0f;
+    LinearColor outlineColor{0, 0, 0, 0};
 };
 
 // CPU 그리기 목록을 정점과 인덱스로 변환한다. Graphics 자원이나 GPU 수명은 소유하지 않는다.

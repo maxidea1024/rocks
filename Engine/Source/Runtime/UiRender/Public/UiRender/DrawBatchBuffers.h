@@ -23,8 +23,10 @@ private:
     friend class DrawBatchRenderer;
     void Release() noexcept;
     Result<void> PrepareBlur(uint32 width, uint32 height) const noexcept;
+    Result<void> PrepareRoundedBox() const noexcept;
     mutable graphics::TextureHandle backdrop_{};
     mutable graphics::PipelineHandle blurPipeline_{};
+    mutable graphics::PipelineHandle roundedPipeline_{};
     mutable uint32 backdropWidth_ = 0, backdropHeight_ = 0;
     graphics::PixelFormat targetFormat_;
     graphics::Device& device_;

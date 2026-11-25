@@ -29,6 +29,10 @@ ROCKS_SHADER_TYPE_NAME(UiRetainedPixelType, "UiRetainedPixel");
 ROCKS_SHADER_TYPE_NAME(UiBlurVertexType, "UiBlurVertex");
 ROCKS_SHADER_TYPE_NAME(UiBlurPixelType, "UiBlurPixel");
 
+// UiRoundedBox.rsf: 둥근 상자(채움 + 안쪽 외곽선 — UW3a).
+ROCKS_SHADER_TYPE_NAME(UiRoundedBoxVertexType, "UiRoundedBoxVertex");
+ROCKS_SHADER_TYPE_NAME(UiRoundedBoxPixelType, "UiRoundedBoxPixel");
+
 // UiWorldPlane.rsf: 월드 공간 위젯 평면(색, 색 + 속도).
 ROCKS_SHADER_TYPE_NAME(UiWorldPlaneVertexType, "UiWorldPlaneVertex");
 ROCKS_SHADER_TYPE_NAME(UiWorldPlanePixelType, "UiWorldPlanePixel");

@@ -124,15 +124,25 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
         }
 
         const uint32 firstIndex = static_cast<uint32>(indices.Size() - 6);
+        const auto sameRoundedBox = [&](const DrawCommand& last) noexcept {
+            return last.roundedBox == box.roundedBox &&
+                   (!box.roundedBox ||
+                    (last.roundedSize == box.roundedSize && last.cornerRadius == box.cornerRadius &&
+                     last.outlineWidth == box.outlineWidth &&
+                     last.outlineColor == box.outlineColor));
+        };
         if (box.operation == PaintOperation::Draw && !commands.IsEmpty() &&
             commands[commands.Size() - 1].operation == PaintOperation::Draw &&
             commands[commands.Size() - 1].hasClip == box.hasClip &&
             commands[commands.Size() - 1].resource == box.resource &&
-            (!box.hasClip || commands[commands.Size() - 1].clip == box.clip)) {
+            (!box.hasClip || commands[commands.Size() - 1].clip == box.clip) &&
+            sameRoundedBox(commands[commands.Size() - 1])) {
             commands[commands.Size() - 1].indexCount += 6;
         } else {
-            auto added = commands.TryPushBack({firstIndex, 6, box.hasClip, box.clip, box.resource,
-                                               box.operation, box.cornerRadius});
+            auto added =
+                commands.TryPushBack({firstIndex, 6, box.hasClip, box.clip, box.resource,
+                                      box.operation, box.cornerRadius, box.roundedBox,
+                                      box.roundedSize, box.outlineWidth, box.outlineColor});
             if (!added) {
                 return added;
             }

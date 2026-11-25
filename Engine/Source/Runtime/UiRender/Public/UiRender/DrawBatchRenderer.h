@@ -47,6 +47,11 @@ public:
     CreateMaskPipeline(graphics::Device& device, render::ShaderSet& shaders,
                        graphics::PixelFormat format) noexcept;
 
+    // 둥근 상자(채움 + 안쪽 외곽선, straight 알파)를 그린다(UW3a).
+    static Result<graphics::PipelineHandle>
+    CreateRoundedBoxPipeline(graphics::Device& device, render::ShaderSet& shaders,
+                             graphics::PixelFormat format) noexcept;
+
     // 배경을 캡처한 텍스처에 화면 좌표 기준의 가우스 필터를 적용한다.
     static Result<graphics::PipelineHandle>
     CreateBlurPipeline(graphics::Device& device, render::ShaderSet& shaders,
