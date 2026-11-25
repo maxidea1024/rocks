@@ -90,3 +90,13 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 - 생성 원문의 `#line`은 가상 경로 `/Engine/Generated/Material.rsh`만 쓴다(셰이더 시스템 10절 경로 누출 금지).
 - 번역 결과에 **원문 위치 지도**(생성 줄 범위 → NodeId·PinKey)를 둔다(계획 14.6절 SourceMap). job 오류의 줄 번호는 이 지도로 노드 위치 진단으로 바뀐다.
 - 에디터의 생성 원문 보기(계획 14.5절 "generated HLSL")는 이 파일 텍스트를 그대로 보여 준다.
+
+### 7.7 MS2a 생성 원문 세부
+
+- **파일.** 생성 파일 `/Engine/Generated/Material.rsh`는 7.3절 정의를 먼저 내고, 진입점 함수를 7.3절 표 순서로 낸다. 정적 원문 `Engine/Shaders/Private/Material/MaterialCommon.rsh`는 문맥 구조체(`MaterialVertexInputs`·`MaterialVertexResult`·`MaterialInputs`)와 `Shading/SurfaceAttributes.rsh` include, 생성 파일 include를 담는다(7.2절). MS2a의 문맥 구조체 칸은 MS2a 노드가 쓰는 것뿐이고 MS2b가 문맥 값 표(19.3.2절)대로 채운다.
+- **함수 몸체.** 진입점에서 닿는 값을 다시 매긴 번호 순으로 `const <타입> m<번호> = <식>;`로 낸다. 상수는 식 안에 리터럴로 바로 쓴다(지역 변수로 두지 않는다). 쓰지 않는 함수는 기본값을 돌려준다(7.3절).
+- **리터럴.** float는 Core StringBuilder `{}`(최단 왕복, C runtime·locale 무관)로 쓰고, 정수 모양이면 `.0`을 붙인다. 벡터는 `float3(a, b, c)`다. 정수는 10진이고 uint는 `u` 접미다. double(LWC) 상수는 MS2b의 LWC 표현(5.3절 — 타일 + 오프셋)으로 낸다.
+- **연산 철자.** 함수 연산은 HLSL 내장 함수 이름이다(`saturate`·`frac`·`lerp`·`rsqrt` 등). IsNan·IsInf는 fast-math가 지우지 않는 비트 검사 함수(`MaterialIsNan`·`MaterialIsInf` — `MaterialCommon.rsh`)로 낸다(6.2절). 0 나누기는 HLSL 그대로다(UE도 그대로).
+- **`DynamicBranch`.** `[branch] if (c) { r = a; } else { r = b; }`로 낸다. MS2a는 두 가지 값을 분기 앞에서 계산한다(값을 가장 좁은 블록에 두는 배치는 후속이다 — UE IR 빌더의 배치 단계, 6.1절).
+- **원문 위치 지도.** 값을 낸 줄마다 원인 노드(NodeId·PinKey)를 기록한다(7.6절). `#line`은 `/Engine/Generated/Material.rsh`만 쓴다.
+- **결정성.** 같은 그래프는 같은 바이트다(6.6절, MS-T1). 노드 저장 순서는 결과에 영향이 없다(출력 핀에서 거슬러 가므로).

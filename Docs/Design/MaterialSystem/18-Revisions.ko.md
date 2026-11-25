@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 15(초안) | 2026-11-26 | MS2a 구현 세부를 6.8·7.7절에 적었다: 세 묶음(MS2a1 IR 핵심·MS2a2 번역기·MS2a3 HLSL 생성), IR 타입·연산·값·빌더·상수 접기 범위·대수 단순화·DCE·IR hash, lowering 표와 `NotYetLowered`, 입력 값·암묵 변환·폭 규칙, MS2a 진단 범위, 생성 원문 리터럴·연산 철자·DynamicBranch·원문 위치 지도 |
 | 14(초안) | 2026-11-26 | MS1b2 구현 규칙을 19.13.3절에 적었다: 필수 입력은 UE `Compile`의 연결 없음 오류가 근거(메타 `RequiredInput`은 표시용), 표시 이름은 UE `GetInputName`(기본은 멤버 이름 그대로), 입출력 같은 이름은 출력 키에 `Out`, 입력 배열 스위치의 정적 핀, 동적 핀 노드 표, UE와 다른 점 셋 |
 | 13(초안) | 2026-11-26 | 19.13절(노드 정의 코드 — MS1b 파일 배치·UE 변환 규칙·동적 핀 속성 읽기 `NodePropertyReader`·새 노드 문자열 기본값 `textDefaults`·문맥 값 표 형식)을 더했다. 5.3절에 `Numeric`·`Any`·`ShadingModel` 행을 더했다(`Any`는 UE `MCT_Unknown` 통과 핀) |
 | 12(초안) | 2026-11-26 | MS3b 재리뷰 반영(4.6.2절): Build hook이 outermost로 패키지를 찾고 패키지 없는 대상은 `InvalidArgument`, 자기 판정은 객체 소속, 함수 인스턴스 필드 전부 EditorOnly, 인스턴스 물리 재질 mask·map은 UE처럼 자기 값(상속 없음), 4.2·4.3·4.6절 표 이름 정정, 19.4.1절 표 순서를 enum과 맞춤, 시험 보강 |
