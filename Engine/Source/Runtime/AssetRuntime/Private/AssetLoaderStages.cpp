@@ -81,6 +81,14 @@ void AssetLoader::Impl::ProcessRetire() noexcept {
                     continue;
                 }
 
+                // 할당 실패는 내용 결함이 아니다: 기대는 요청도 OutOfMemory(진단 None — 11.6절
+                // 6·13번). "의존 없음"으로 보고하지 않는다.
+                if (target.failError == ErrorCode::OutOfMemory) {
+                    FinishRequest(index, AssetLoadState::Failed, ErrorCode::OutOfMemory,
+                                  AssetDiagnostic{}, ObjectHandle{});
+                    continue;
+                }
+
                 AssetDiagnostic dependency;
                 dependency.code = AssetDiagnosticCode::MissingDependency;
                 dependency.error = ErrorCode::DependencyFailed;

@@ -2,6 +2,7 @@
 
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
+#include <AssetCommandlets/ClassDefaultsCommandlet.h>
 #include <AssetCooker/CookArtifacts.h>
 #include <AssetCooker/CookConfig.h>
 #include <AssetCooker/CookRootLock.h>
@@ -13,6 +14,7 @@
 #include <AssetRuntime/CookedManifest.h>
 #include <Base/InitializerList.h>
 #include <Platform/File.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
 // asset-cook 명령 시험이다(Docs/Design/AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1):
@@ -45,6 +47,7 @@ struct Run {
         captured.error.Clear();
         CommandletOutput output = captured.Output();
         auto ran = RunAssetCookCommand(&context, args, output);
+        lastError = ran ? ErrorCode::None : ran.Error();
         return ran ? ran.Value() : -1;
     }
 
@@ -55,6 +58,7 @@ struct Run {
         captured.error.Clear();
         CommandletOutput output = captured.Output();
         auto ran = command(&context, args, output);
+        lastError = ran ? ErrorCode::None : ran.Error();
         return ran ? ran.Value() : -1;
     }
 
@@ -74,6 +78,8 @@ struct Run {
 
     AssetCommandContext context;
     Captured captured;
+    // 마지막 명령 함수 오류다(종료 코드를 돌려줬으면 None).
+    ErrorCode lastError = ErrorCode::None;
 };
 
 constexpr StringView AlwaysAll = "{\"alwaysCook\": [\"/Game/\"]}\n";
@@ -791,6 +797,71 @@ TEST(NuggetGcCommand_CollectsAndRejects) {
     CHECK(usage({"--max-bytes=18446744073709551616", "--unused-days=0"}));
     CHECK(usage({"--max-bytes=0", "--max-bytes=0", "--unused-days=0"}));
     CHECK(usage({"--max-bytes=0", "--unused-days=0", "extra"}));
+}
+
+namespace {
+
+// 명령 한 번(call — 종료 코드, 함수 오류면 -1)을 failing의 n번째 할당 실패마다 부르고 OutOfMemory로
+// 끝난 수를 돌려준다. 실패가 아니면 종료 코드는 expected이고 표준 출력에 out이 있다. 실패한 시도가
+// 남긴 상태(staging·잠금·임시 파일·너겟)가 다음 시도를 막지 않는다.
+template <class Call>
+uint32 SweepCommand(test::NFailAllocator& failing, Run& run, Call&& call, int32 expected,
+                    StringView out) noexcept {
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        failing.FailOnAttempt(attempt);
+        const int32 code = call();
+        const bool exhausted = failing.Attempts() < attempt;
+        failing.DisableFailure();
+        if (code == -1) {
+            ++failures;
+            CHECK(run.lastError == ErrorCode::OutOfMemory && !exhausted);
+        } else {
+            CHECK(code == expected && run.Out(out));
+        }
+
+        if (exhausted) {
+            return failures;
+        }
+    }
+}
+
+} // namespace
+
+// 할당 실패 전수(14.1.119 후속 1번): 명령 문맥 Allocator의 n번째 할당이 실패하면 명령 함수는
+// OutOfMemory로 실패하고(진단 줄로 바꾸지 않는다 — 호스트가 쓴다), 실패가 없으면 기준과 같은 종료
+// 코드·출력이다. 같은 프로젝트에서 이어 부르므로 실패한 시도의 흔적이 다음 시도를 막지 않는지도
+// 본다. 명령: asset-cook(--verify-nuggets 전체 쿠킹 — 너겟 비교·게시, 그다음 전부 재사용),
+// asset-load-cooked, nugget-gc, class-defaults-dump.
+TEST(AssetCommands_AllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene cook(env.allocator, "command-allocation");
+    REQUIRE(cook.ready);
+    REQUIRE(cook.Cook() == 0);
+    test::NFailAllocator failing(env.allocator);
+    cook.run.context.allocator = &failing;
+    CHECK(SweepCommand(
+              failing, cook.run, [&]() noexcept { return cook.Cook({"--verify-nuggets"}); }, 0,
+              "published targets 2 cooked 2 reused 0 bytes ") > 0);
+    CHECK(SweepCommand(
+              failing, cook.run, [&]() noexcept { return cook.Cook(); }, 0,
+              "published targets 2 cooked 0 reused 2 bytes 0\n") > 0);
+    const StringView load[] = {cook.project.View(), "--profile=Windows", "/game/rock"};
+    CHECK(SweepCommand(
+              failing, cook.run,
+              [&]() noexcept { return cook.run.Call(&RunAssetLoadCookedCommand, load); }, 0,
+              " (/Game/Rock) packages 2\n") > 0);
+    const StringView gc[] = {cook.project.View(), "--max-bytes=18446744073709551615",
+                             "--unused-days=4294967295"};
+    CHECK(SweepCommand(
+              failing, cook.run, [&]() noexcept { return cook.run.Call(&RunNuggetGcCommand, gc); },
+              0, "nugget-gc: removed 0 (0 bytes) kept ") > 0);
+    CHECK(SweepCommand(
+              failing, cook.run,
+              [&]() noexcept { return cook.run.Call(&RunClassDefaultsDumpCommand, {}); }, 0,
+              " present ") > 0);
+    cook.run.context.allocator = &env.allocator;
 }
 
 } // namespace asset_cook_commandlet_tests_file

@@ -88,7 +88,7 @@ Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/Ren
 4. Object와 ObjectRef의 복사·이동은 금지한다. ObjectRef는 SetReference를 통해 변경하고 소유자의 Trace가 빠짐없이 방문해야 한다. 현재는 객체 안에 직접 포함된 필드만 지원한다. 생성 메타데이터는 지원하는 전체 필드와 자동 Trace를 대조하지만, 수동 Trace 누락과 임의 raw pointer 오용까지 증명하지 않는다.
 5. RequestDestroy는 논리적 접근을 닫는다. 외부 RootRef에서 도달 가능한 동안 파괴 요청 객체와 그 강한 간선의 자식을 보존하며, 도달 불가능한 cycle은 수거한다. 기존 RootRef의 Clone과 새로운 WeakObjectRef pin은 다르게 처리한다. `Discard`는 부분 트리를 논리 파괴하면서 이름 색인·자식 고리에서 바로 뺀다. 패키지 정책 Registry에서는 outer → inner도 강한 간선이고 RequestDestroy가 Unsupported라 소속 객체는 Discard로만 죽으며, 붙인 `ReferenceObserver`가 패키지 사이 강한 간선 다중도 변화를 합산한다([객체 생명주기](ObjectLifecycle.ko.md)의 "Discard"·"패키지 사이 참조 관찰").
 6. ConstructionContext는 전체 공개 전까지 객체를 격리한다. 실패 가능한 초기화는 호출자가 결과를 확인하고 Commit을 생략한다. `Commit(roots, out)`은 호출자가 고른 객체마다 루트를 돌려주고(`Commit()`은 첫 staged 객체 하나), 루트가 없는 객체는 그 루트에서 도달하거나(inner → outer 간선 포함) 별도 루트가 있어야 한다. 객체는 생성 때 정한 불변 Outer·이름을 가진다([객체 생명주기](ObjectLifecycle.ko.md)의 "Outer와 이름").
-7. GC는 작업 큐를 먼저 확보한다. OOM이나 잘못된 간선으로 mark가 끝나지 않으면 sweep하지 않는다. 사용자 생성자·Trace·소멸자와 할당기 callback은 Registry 잠금 밖에서 실행한다. 변경 재진입은 거부하며 활성 생성 트랜잭션의 재진입 롤백은 금지한다.
+7. GC는 작업 큐를 먼저 확보한다. 단 STW `Collect`는 root가 없으면 확보하지 않는다 — 표식 씨앗은 root뿐이고(영구 영역은 trace하지 않는다) 큐에 아무것도 들어가지 않는다. 그래서 root를 다 놓은 Registry의 `Shutdown`(파괴자 포함)은 이 할당에 기대지 않는다(2026-11-26 — asset-cook 할당 실패 전수가 찾음: 파괴자의 `Shutdown`이 파괴 요청 넷의 큐 할당 실패로 Busy가 되어 Fatal). OOM이나 잘못된 간선으로 mark가 끝나지 않으면 sweep하지 않는다. 사용자 생성자·Trace·소멸자와 할당기 callback은 Registry 잠금 밖에서 실행한다. 변경 재진입은 거부하며 활성 생성 트랜잭션의 재진입 롤백은 금지한다.
 8. Shutdown은 새 소유권 유입을 닫고 회수를 시도한다. 보유권이 남으면 Busy이며 반환 후 재시도한다. 접근 검증이나 processing 재진입 거부는 닫기 전에 반환한다. 닫은 뒤의 회수 실패는 닫힌 상태를 유지한다.
 
 각 계약은 해당 공개 헤더와 복잡한 처리 단계에 한국어 주석으로도 남긴다. [코드 스타일](../CodingStyle.md)은 주석의 정확성과 갱신을 리뷰 기준으로 요구한다.

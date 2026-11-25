@@ -364,6 +364,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
 
     const uint64 started = platform::MonotonicNanoseconds();
     GcReport report;
+    uint64 queueBound = 0;
     {
         platform::LockGuard lock(gate_);
         if (processing_ || constructions_ || totalBorrows_ || gcPhase_ != GcPhase::Idle) {
@@ -372,12 +373,16 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
 
         processing_ = true;
         report.examined = tally_.liveObjects + tally_.destroyRequested;
+        // 표식 씨앗은 root뿐이다(영구 영역은 trace하지 않는다). root가 없으면 큐에 아무것도
+        // 들어가지 않으므로 확보하지 않는다 — root를 다 놓은 Shutdown(파괴자 포함)이 이 할당에
+        // 기대지 않는다 (Docs/Implementation/FoundationStatus 7번).
+        queueBound = rootCount_ == 0 ? 0 : GcQueueBound(report.examined);
     }
 
     // 모든 후보를 담을 용량을 먼저 확보한다. OOM이 발생해도 아직 어떤 객체도 retire하지 않았다.
     // 후보당 한 번만 큐에 넣으므로 이후 순회는 추가 할당 없이 깊은 그래프도 처리한다.
     Array<uint32> work(allocator_);
-    auto reserved = work.TryReserve(static_cast<usize>(GcQueueBound(report.examined)));
+    auto reserved = work.TryReserve(static_cast<usize>(queueBound));
     if (reserved) {
         reserved = VerifyClusterLedger();
     }
