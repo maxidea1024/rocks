@@ -23,7 +23,7 @@
 - **시스템 연결**은 하지 않는다. 시스템 상태(23.2절 `WantsSystemState`)를 요청하지 않으므로 아무것도 그리지 않는다. setter는 Render 시스템 상태가 있을 때만 다시 보내기를 표시한다(`MarkSystemStateDirty(Render)` — 상태가 없으면 아무것도 하지 않는다). 그래서 RS 단계가 상태를 붙이면 setter를 고치지 않아도 된다.
 - 모듈은 World다(CameraComponent와 같은 자리 — 23.4절). 에셋 참조(텍스처·머티리얼)가 필요한 속성은 그 참조 필드 체계가 World에 들어올 때 넣는다(24.2.8절).
 
-묶음마다 설계 → 구현 → 리뷰어 1명 → 커밋으로 간다. D2는 24.3절이다. 이 장이 길어져 D3부터는 장을 나눈다: D3 [25장](25-SplineComponent.ko.md), D4 26장, D5 27장.
+묶음마다 설계 → 구현 → 리뷰어 1명 → 커밋으로 간다. D2는 24.3절이다. 이 장이 길어져 D3부터는 장을 나눈다: D3 [25장](25-SplineComponent.ko.md), D4 [26장](26-MovementComponents.ko.md), D5 [27장](27-EnvironmentComponents.ko.md).
 
 ### 24.2 D1 — 광원
 

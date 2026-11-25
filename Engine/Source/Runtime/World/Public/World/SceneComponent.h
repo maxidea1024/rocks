@@ -159,6 +159,11 @@ public:
     // 월드 위치(cm, 월드 행렬의 이동 성분 — 마지막 행)다.
     Vec3d WorldLocation() const noexcept;
 
+    // 월드 위치·회전을 정한다(UE SetWorldLocationAndRotation — 부모 frame 기준 상대 값으로 바꿔
+    // 쓴다, 절대 성분은 그대로, scale은 유지). 오류: 비유한 위치·0 quaternion, 부모 frame 역변환
+    // 실패 (InvalidArgument), Mobility 위반(23.3절). 실패하면 바뀌지 않는다.
+    Result<void> SetWorldLocationAndRotation(const Vec3d& location, const Quatd& rotation) noexcept;
+
     // 월드 scale이다(UE GetComponentTransform().GetScale3D()): 부모 사슬의 상대 scale과 부착 socket
     // scale을 성분별로 곱한다(UE FTransform 합성 — 회전과 무관하게 축별 곱이고 부호를 지킨다).
     // absoluteScale이면 상대 scale 그대로다. 행렬 분해(TryWorldTransform)와 달리 반사 부호가 원래
@@ -312,6 +317,10 @@ protected:
         return BoundsSphereRule::TransformedSphere;
     }
 
+    // 이 컴포넌트의 socket Transform(GetSocketTransform 결과)이 바뀌었음을 자식에게 알린다: 자식의
+    // 월드 행렬을 무효로 하고 Transform 통지를 보낸다(UE UpdateChildTransforms — SpringArm이 쓴다).
+    void NotifyChildSocketsChanged() noexcept;
+
     // 생성자에서 hiddenInGame 기본값을 정한다(hook·다시 보내기 없이 — Shape 기본값).
     void InitializeHiddenInGame(bool hidden) noexcept {
         hiddenInGame_ = hidden;
@@ -347,6 +356,8 @@ private:
     void ApplyVisibility(bool visible, bool hidden, bool setVisible, bool propagate) noexcept;
 
     void MarkDirty() noexcept;
+    // 부모 frame(부모 기준 socket Transform × 부모 월드) 행렬이다. 부모가 없으면 단위다.
+    Mat4d ParentFrameMatrix() const noexcept;
     Result<void> AddChild(ObjectHandle child) noexcept;
     void RemoveChild(ObjectHandle child) noexcept;
 
