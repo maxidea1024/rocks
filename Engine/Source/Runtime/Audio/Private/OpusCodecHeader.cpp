@@ -48,8 +48,7 @@ Result<OpusCodecHeader> ParseOpusCodecHeader(Span<const uint8> bytes,
     // 없으면 1채널 머리에 stream 255를 적어 디코더 상태를 수 MB 잡게 할 수 있다.
     if (data[OpusFamilyOffset] != OpusMappingFamilyVorbis || parsed.streams == 0 ||
         parsed.coupledStreams > parsed.streams || codedChannels != channels ||
-        data[OpusReservedOffset] != 0 ||
-        LoadLittleEndian<uint16>(data + OpusGainOffset) != 0 ||
+        data[OpusReservedOffset] != 0 || LoadLittleEndian<uint16>(data + OpusGainOffset) != 0 ||
         parsed.preSkip != header.encoderDelay) {
         return Result<OpusCodecHeader>::Failure(ErrorCode::InvalidArgument);
     }

@@ -3,8 +3,9 @@ using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
 // libopus 1.6.1 (Xiph.Org and contributors, BSD-3-Clause), float build without SIMD or runtime CPU detection: Opus codec for the
-// Ogg Opus source decoder of the audio importer (Docs/Design/AudioSystem.ko.md section 3.29). The ThirdParty.json in the same
-// folder is the single source of sources, licenses and file hashes.
+// Ogg Opus source decoder of the audio importer (Docs/Design/AudioSystem.ko.md section 3.29), the Opus platform data encoder
+// (AudioTools) and the runtime Opus decoder module AudioOpus (section 3.32). The ThirdParty.json in the same folder is the single
+// source of sources, licenses and file hashes.
 public sealed class Opus : ThirdPartyModuleRules
 {
     // Library-internal header directories. They are added to the library build only, so that headers with common names (debug.h,

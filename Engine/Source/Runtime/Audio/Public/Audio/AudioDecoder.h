@@ -44,13 +44,12 @@ public:
 
     // 앞 청크를 끝까지 낸 뒤(DecodeNext가 0) 바로 다음 청크(첫 frame = 앞 청크 끝)를 상태를 이어
     // 연다. 복제 pre-roll은 디코드하지 않고 건너뛴다. 그래서 처음부터 순차로 낸 결과는 연속
-    // 디코드와 같다(3.30.2절 청크 경계 규칙). payload 검사는 BeginChunk와 같고, 앞 청크를 다 내지
-    // 않았거나 이어지지 않으면 InvalidArgument다. 기본 구현은 청크 사이 상태가 없는 codec(PCM16·
-    // ADPCM)용으로 BeginChunk(chunk.firstFrame)를 부른다.
+    // 디코드와 같다(3.30.2절 청크 경계 규칙). payload 검사는 BeginChunk와 같다. 열린 청크가 없거나,
+    // 앞 청크를 다 내지 않았거나, 이어지지 않으면 InvalidArgument이고 열린 청크도 닫는다. 모든
+    // codec이 이 순서 규칙을 지킨다(청크 사이 상태가 없는 PCM16·ADPCM도 같다). 그래서 호출 순서
+    // 오류가 codec에 따라 숨지 않는다.
     virtual Result<void> ContinueChunk(const AudioChunkEntry& chunk,
-                                       Span<const uint8> payload) noexcept {
-        return BeginChunk(chunk, payload, chunk.firstFrame);
-    }
+                                       Span<const uint8> payload) noexcept = 0;
 
     // 다음 단위를 out에 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수,
     // 청크 끝이면 0이다. out 채널 수가 다르거나 frame 용량이 MaxFramesPerCall보다 작거나

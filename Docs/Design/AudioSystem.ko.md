@@ -444,7 +444,7 @@ Opus 48 kHz 리샘플의 결과:
 - 헤더: 형식 버전, 코덱 id·버전, 채널 레이아웃, 인코딩 rate, 유효 PCM frame 수, loop 구간(인코딩 rate 기준), encoder delay·끝 padding, 청크 수, 로딩 동작, 첫 청크 상주 여부. (개정 22: 3.30.1절이 대체 — 채널 레이아웃은 채널 마스크, 로딩 동작·첫 청크 상주는 `SoundClip` 쿠킹 필드)
 - 청크 표: 청크마다 payload 위치·크기, 첫 frame·frame 수, 독립 디코드 시작 여부, 필요한 pre-roll frame, SHA-256(서명 프로필에서 manifest가 덮는다).
 - 청크 크기: 목표 `TargetChunkBytes`(= 256 KiB, 플랫폼 프로필로 바꿈). 청크 경계는 코덱 프레임 경계다.
-- 청크 독립성: 모든 청크는 그 청크만으로 디코드를 시작할 수 있다. Opus는 앞 청크 끝의 패킷을 `OpusPreRollMs`(= 320 ms — 개정 27에서 80 ms(RFC 7845 최소 권장값)를 측정으로 늘림, 3.32.4절)만큼 이 청크 앞에 **복제**해 두고, 디코더는 그 구간을 디코드해 버린다(`preRollFrames`). 앞 청크를 읽지 않아도 seek·재시작이 되며, 대가는 청크마다 약 80 ms 분량의 byte다. ADPCM·PCM은 블록 독립이라 pre-roll이 없다.
+- 청크 독립성: 모든 청크는 그 청크만으로 디코드를 시작할 수 있다. Opus는 앞 청크 끝의 패킷을 `OpusPreRollFrames`(= 15360 = 320 ms — 개정 27에서 80 ms(RFC 7845 최소 권장값)를 측정으로 늘림, 3.32.4절)만큼 이 청크 앞에 **복제**해 두고, 디코더는 그 구간을 디코드해 버린다(`preRollFrames`). 앞 청크를 읽지 않아도 seek·재시작이 되며, 대가는 청크마다 약 320 ms 분량의 byte다. ADPCM·PCM은 블록 독립이라 pre-roll이 없다.
 - loop 이음매: loop 끝에서 처음으로 돌아갈 때 디코더가 pre-roll을 다시 디코드하면 그 블록에 출력이 늦는다. 그래서 looping clip은 재생 시작 때 loop 머리 `LoopHeadFrames`(= pre-roll + 2 × Q 이상) PCM을 디코드해 voice 링 옆에 두고, 디코드 worker는 loop 끝에 닿기 전에 loop 시작 청크로 미리 seek한다.
 - 플랫폼 재정의(UE `FPlatformAudioCookOverrides`): rate 상한 표(최대·높음·중간·낮음·최소 — PCM·ADPCM만), 품질 배수, 자동 스트리밍 길이 임계, 첫 청크 인라인.
 
@@ -1506,8 +1506,8 @@ public:
     virtual Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload, uint64 startCodecFrame) noexcept = 0;
     // 앞 청크를 끝까지 낸 뒤(DecodeNext가 0) 바로 다음 청크(첫 frame = 앞 청크 끝)를 상태를 이어 연다(개정 27). 복제 pre-roll은
     // 디코드하지 않고 건너뛴다. payload 검사는 BeginChunk와 같고, 앞 청크를 다 내지 않았거나 이어지지 않으면 InvalidArgument다.
-    // 기본 구현은 청크 사이 상태가 없는 codec(PCM16·ADPCM)용으로 BeginChunk(chunk.firstFrame)를 부른다.
-    virtual Result<void> ContinueChunk(const AudioChunkEntry& chunk, Span<const uint8> payload) noexcept;
+    // 열린 청크도 닫는다. 순서 규칙은 모든 codec이 지킨다(상태 없는 PCM16·ADPCM은 검사 뒤 BeginChunk(firstFrame)).
+    virtual Result<void> ContinueChunk(const AudioChunkEntry& chunk, Span<const uint8> payload) noexcept = 0;
     // 다음 단위를 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수, 청크 끝이면 0.
     virtual Result<uint32> DecodeNext(PlanarView out) noexcept = 0;
     // DecodeNext 한 번이 쓸 수 있는 최대 frame 수(out 용량 하한). PCM16 1024, ADPCM 1012, Opus 960(bitstream 1, 3.32.4절).
@@ -1668,7 +1668,7 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 - 입력은 float로 넣는다(`opus_multistream_encode_float`). UE는 int16으로 바꿔 넣지만 Rocks 원본 PCM은 float라(3.25절) 정밀도를 지킨다.
 - 채널 순서: 내부 순서 planar를 Vorbis 순서 교차로 바꿔 넣는다. 3.29.2절 표(`VorbisChannelOrder`)를 `Audio/VorbisChannelOrder.h`로 옮겨 `AudioTools`(원본 디코드·인코더)와 `AudioOpus`(디코더)가 같이 쓴다.
 - 단위 = `[u16 LE 길이][multistream 패킷]`(3.30.1절), 단위 codec frame 960. 패킷 버퍼는 `OpusMaxPacketBytes` = 1277 × 8 byte(stream마다 최대 1275 byte + 자기 구분 길이 2 byte)다.
-- `preRollFrames` = 15360(320 ms = 16 패킷, `OpusPreRollMs`, 3.32.4절 측정).
+- `preRollFrames` = `OpusPreRollFrames` = 15360(320 ms = 16 패킷, 3.32.4절 측정).
 - 오류: rate ≠ 48000·채널 0·9·마스크 bit 수 불일치·frame 0·비유한 표본·품질 범위 밖은 `InvalidArgument`(다른 rate는 쿠킹 처리기가 C2로 먼저 바꾼다), 마스크가 기본 배치가 아니면 `Unsupported`(그런 원본을 어떻게 쿠킹할지는 AU5 나머지가 정한다), 할당 실패 `OutOfMemory`, libopus 오류 `Unsupported`다. 실패하면 out을 비운다.
 - 결정성: libopus float 인코더는 libm(분석·SILK float)을 부르므로 byte는 아키텍처·OS별로 고정이다(3.29.1절과 같은 한계). 같은 쿠커 호스트 종류면 같은 입력·설정에 같은 byte다.
 
@@ -1677,11 +1677,12 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 - 모듈 `Engine/Source/Runtime/AudioOpus`: type ClientOnly(BS2 0d9c3a8b, AD24 — Server 타깃에서 빠지고 Runtime 모듈은 의존할 수 없다, 3.30절). 의존은 `Audio`(Public)와 ThirdParty `Opus`(Private)다.
 - 등록: `RegisterOpusAudioDecoder(AudioDecoderTable&)`(이미 있으면 `AlreadyExists`)를 공개한다. 지금은 표를 만드는 쪽(시험·도구)이 직접 부른다. 모듈 `Startup`에서 `HostServices`로 factory를 내놓는 연결(3.30.2절 등록 경로)은 표를 만드는 AU3 `AudioEngineSubsystem`과 같이 넣는다.
 - `Open`: codec이 Opus가 아니면 `InvalidArgument`, 그다음 bitstream 판 ≠ 1이면 `Unsupported`다(다른 규칙보다 먼저 — 새 판이 codec 머리·rate 규칙을 바꿔도 손상이 아니라 모르는 판으로 알린다. PCM16·ADPCM도 같은 순서로 고친다). 그 뒤 채널 1–8·rate 48000·codec 머리(3.32.2절 규칙 전부, pre-skip = 머리 encoder delay)·채널 마스크 = 기본 배치를 보고 다르면 `InvalidArgument`다. 디코더 상태(`opus_multistream_decoder_get_size(streams, coupled)`)와 scratch(960 × 채널 float)를 allocator로 잡는다(이미 잡은 크기로 충분하면 다시 쓴다). 실패하면 앞 상태를 비운다.
-- `BeginChunk`: 먼저 검사한다 — payload byte 수 = 청크 표 값, 청크 codec frame 수·pre-roll이 960 배수, startCodecFrame 범위, 길이 접두를 끝까지 훑어 길이가 1 이상이고 합이 payload와 정확히 같으며, 패킷마다 첫 stream TOC가 나타내는 길이(`opus_packet_get_nb_samples`)가 960이고, 패킷 수 × 960 = pre-roll + codec frame 수. 어긋나면 `InvalidArgument`다(이미 낸 PCM이 voice에 나간 뒤 길이 때문에 실패하지 않게). 그 뒤 상태를 비우고(`OPUS_RESET_STATE`) 시작 패킷보다 `OpusPreRollMs`(320 ms = 16 패킷) 앞 패킷부터 디코드해 startCodecFrame 앞을 버린다. 그 지점이 payload 머리 앞이면 머리(복제 pre-roll 포함)부터다. 시작 패킷은 scratch에 디코드해 두고 나머지를 `DecodeNext`가 낸다.
-  - 스트림 머리(청크 0의 앞 16 패킷 안)에서 시작하면 디코더 초기 상태에서 스트림 첫 패킷부터라 연속 디코드와 bit까지 같다(loop 시작 0인 loop 머리도 같다). 그 밖의 시작은 pre-roll로 수렴한 근사다. 같은 시작 위치는 언제나 같은 표본을 내므로 loop 머리 PCM(3.11.3절)은 loop마다 같다. seek 비용은 패킷 17개 디코드로 고정이다.
+- `BeginChunk`: 먼저 검사한다 — payload byte 수 = 청크 표 값, 청크 codec frame 수·pre-roll이 960 배수, startCodecFrame 범위, 길이 접두를 끝까지 훑어 길이가 1 이상이고 합이 payload와 정확히 같으며, 패킷마다 첫 stream TOC가 나타내는 길이(`opus_packet_get_nb_samples`)가 960이고, 패킷 수 × 960 = pre-roll + codec frame 수. 어긋나면 `InvalidArgument`다(이미 낸 PCM이 voice에 나간 뒤 길이 때문에 실패하지 않게). 그 뒤 상태를 비우고(`OPUS_RESET_STATE`) 시작 패킷보다 `OpusPreRollFrames`(320 ms = 16 패킷) 앞 패킷부터 디코드해 startCodecFrame 앞을 버린다. 그 지점이 payload 머리 앞이면 머리(복제 pre-roll 포함)부터다. 시작 패킷은 scratch에 디코드해 두고 나머지를 `DecodeNext`가 낸다.
+  - 시작 패킷이 스트림 패킷 0–16(17개, 시험의 `ExactStartPackets`)이면 디코드가 스트림 첫 패킷부터이므로 디코더 초기 상태에서 스트림 첫 패킷부터라 연속 디코드와 bit까지 같다(loop 시작 0인 loop 머리도 같다). 그 밖의 시작은 pre-roll로 수렴한 근사다. 같은 시작 위치는 언제나 같은 표본을 내므로 loop 머리 PCM(3.11.3절)은 loop마다 같다. seek 비용은 패킷 17개 디코드로 고정이다.
   - pre-roll 길이 측정(스테레오 300·500 Hz 순음 진폭 0.3, 품질 80, 48 kHz, 1–2 s 지점 seek 4곳, 연속 디코드와 비교): 4 패킷(80 ms) 최대 오차 0.053·SNR 23 dB, 8 패킷 0.0049·45 dB, 12 패킷 3.6e-4·68 dB, 16 패킷(320 ms) 2.5e-5·91 dB, 25 패킷 1.5e-7(float 오차 수준). 오차는 패킷 4개마다 약 21 dB씩 준다. 20 ms CELT의 frame 사이 에너지 예측(계수 0.5)이 초기화된 상태를 frame마다 절반씩만 잊기 때문이다. 순음은 intra frame이 드물어 나쁜 쪽 경우다. 16비트 1 LSB(3.1e-5) 아래인 320 ms로 정했다. 대가는 청크마다 복제 byte(품질 80 스테레오로 약 6.4 KB — 256 KiB 청크의 2.5%)와 seek 때 패킷 16개 더 디코드다.
   - 버린 대안: (가) 80 ms(RFC 7845 4.6절 최소 권장) — 위 측정으로 loop 이음매·seek 직후에 들리는 어긋남. (나) 청크 머리부터 디코드해 bit를 맞춤 — seek 한 번에 최대 청크 하나(256 KiB, 품질 80 스테레오로 약 13 s) 디코드라 `LoopHeadFrames`(pre-roll + 2 × Q) 계산과 PCM 링 크기(3.12.3절)가 깨진다.
   - UE 대응: UE `FOpusAudioInfo::SeekToFrame`(`Runtime/OpusAudioDecoder/Module/Private/OpusAudioInfo.cpp:357`)과 스트리밍 seek(`AudioDecompress.cpp`)는 대상 패킷으로 바로 건너뛰고 그 패킷 안 표본만 버린다. 디코더 리셋·pre-roll이 없다. Rocks는 리셋 뒤 pre-roll을 디코드한다.
+- 한계(첫 stream TOC만 검사): multistream 패킷에서 둘째 이후 stream은 자기 구분 framing(RFC 6716 부록 B)이라 `BeginChunk`가 그 길이를 따로 보지 않는다. 그 stream만 손상되면 `DecodeNext`가 libopus 오류(`InvalidArgument`)를 내며 청크를 닫는다. 이것은 3.30.2절의 "실제 디코드 오류"에 든다. 쿠킹 결과는 청크 SHA(3.30.2절)로 먼저 확인하므로 실제로는 변조·버그에서만 생긴다. 모든 stream을 미리 따라가려면 libopus 내부 parser를 다시 구현해야 해서 하지 않았다.
 - `ContinueChunk`(개정 27, 3.30.2절 청크 경계 규칙): 앞 청크를 끝까지 냈고(`DecodeNext`가 0) 새 청크 첫 frame = 앞 청크 끝이어야 한다(아니면 `InvalidArgument`, 열린 청크도 닫는다). payload 검사는 `BeginChunk`와 같다. 상태를 비우지 않고 복제 pre-roll 패킷은 디코드하지 않고 건너뛴다. 그래서 처음부터 순차로 낸 결과는 청크 하나로 디코드한 결과와 bit까지 같다.
 - `DecodeNext`: scratch에 남은 표본을 먼저 내고, 없으면 다음 패킷을 `opus_multistream_decode_float`(frame 960, FEC 없음)로 풀어 Vorbis 순서 교차 → 내부 순서 planar로 쓴다. 결과가 960이 아니거나 오류면 `InvalidArgument`(손상)이고 청크를 닫는다(손상된 libopus 상태로 이어 디코드하지 않게. 다시 `BeginChunk`해야 한다). 청크 끝이면 0이다. output gain은 0만 받으므로 적용하지 않는다.
 - `MaxFramesPerCall` = 960이다. bitstream 1은 모든 패킷이 20 ms라서다. 3.30.2절의 Opus 5760(패킷 최대 120 ms)은 bitstream 1에서 960으로 고친다.
@@ -1696,9 +1697,9 @@ auto loopStart = CookResampledPosition(sourceLoopStart, 44100, 48000);   // Resu
 |---|---|
 | 품질 | `OpusBitrateForQuality` 1·40·80·100과 UE식 float 계산 1–100 전부 대조, 품질이 높으면 byte가 많음 |
 | 왕복 | 1·2·3·4·5·6·7·8채널, 채널마다 다른 주파수 sine: 쓰기 → 검증 → 전체 디코드, frame 수 = 원본, 각 채널의 주파수가 같은 자리(채널 순서), 가장자리를 뺀 구간 SNR 하한 |
-| 머리 | codec Opus·rate 48000·delay = lookahead·padding = 합 − delay − frames·codec 머리 필드(family 1, stream·coupled·mapping = libopus Vorbis mapping, pre-skip)·청크 k > 0 pre-roll 3840(앞쪽 청크는 frame 0까지만) |
+| 머리 | codec Opus·rate 48000·delay = lookahead·padding = 합 − delay − frames·codec 머리 필드(family 1, stream·coupled·mapping = libopus Vorbis mapping, pre-skip)·청크 k > 0 pre-roll 15360(앞쪽 청크는 frame 0까지만) |
 | 채널 순서 표 | `InterleaveVorbisOrder`·`DeinterleaveVorbisOrder`를 1–8채널 고정 기대값(Vorbis 슬롯)과 직접 비교 — 인코더·디코더가 같은 표를 써서 왕복으로는 표 오류가 드러나지 않기 때문 |
-| 청크 | 작은 목표로 여러 청크: 전체 디코드(청크 0 `BeginChunk`, 뒤는 `ContinueChunk`) = 같은 인코드를 청크 하나로 쓴 디코드(bit 같음). 모든 청크의 머리·패킷 경계 앞뒤·가운데·끝 직전에서 seek해 다음 청크로 이어 읽기: 스트림 머리 16 패킷 안의 시작은 연속 디코드와 bit 같음, 그 밖은 SNR ≥ 80 dB, 같은 시작 두 번은 bit 같음 |
+| 청크 | 작은 목표로 여러 청크: 전체 디코드(청크 0 `BeginChunk`, 뒤는 `ContinueChunk`) = 같은 인코드를 청크 하나로 쓴 디코드(bit 같음). 모든 청크의 머리·패킷 경계 앞뒤·가운데·끝 직전에서 seek해 다음 청크로 이어 읽기: 스트림 패킷 0–16의 시작은 연속 디코드와 bit 같음, 그 밖은 SNR ≥ 80 dB(비교 창 최소 4800 frame), 같은 시작 두 번은 bit 같음 |
 | 청크 잇기 | `ContinueChunk`: `Open` 전·청크 없음·앞 청크를 다 내지 않음·이어지지 않는 청크·payload 손상 `InvalidArgument`(열린 청크도 닫힘), 청크 가운데 seek 뒤 끝까지 낸 다음 잇기 성공 |
 | codec 머리 음성 | 크기 ≠ 16, family ≠ 1, stream 0, coupled > stream, stream + coupled ≠ 채널 수, mapping 범위 밖, 뒤 칸·예약 칸 ≠ 0, gain ≠ 0, pre-skip ≠ delay, rate ≠ 48000, 마스크가 기본 배치 아님: `InvalidArgument`, bitstream 판 ≠ 1(codec 머리 크기가 달라도): `Unsupported`. Open → BeginChunk → 실패한 Open 뒤 `DecodeNext` `InvalidArgument`. 같은 디코더를 2 → 8 → 1채널로 다시 열어 새 디코더와 같은 결과 |
 | 청크 손상 | 길이 0, 길이 접두가 payload 밖, 남는 byte, 패킷 수 불일치, frame 수가 960 배수 아님, 첫 패킷 TOC를 10 ms·40 ms(2 frame)로 바꿈: `BeginChunk`에서 `InvalidArgument`. 패킷 byte 무작위 교체: 오류 또는 성공(멈추거나 범위 밖을 읽지 않음) |

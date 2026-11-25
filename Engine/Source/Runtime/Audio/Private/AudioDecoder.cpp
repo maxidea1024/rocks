@@ -26,6 +26,12 @@ bool OutputFits(const PlanarView& out, uint32 channels, uint32 maxFrames) noexce
     return out.channelCount == channels && out.frameCount >= maxFrames;
 }
 
+// ContinueChunk 순서 규칙(3.30.2절 청크 경계 규칙): 열린 청크를 끝까지 냈고(DecodeNext가 0) 다음
+// 청크가 그 끝에서 시작한다.
+bool ContinuesChunk(bool drained, uint64 chunkEnd, const AudioChunkEntry& next) noexcept {
+    return drained && next.firstFrame == chunkEnd;
+}
+
 // PCM16 디코더: 단위 = 1024 frame 교차 int16 LE(3.30.2절).
 class Pcm16Decoder final : public AudioDecoder {
 public:
@@ -35,7 +41,8 @@ public:
         open_ = false;
         payload_ = Span<const uint8>();
         // 판은 codec 다음, 다른 규칙보다 먼저 본다(새 판의 규칙 변화를 손상으로 알리지 않게).
-        if (header.codec == AudioCodecId::Pcm16 && header.bitstreamVersion != Pcm16BitstreamVersion) {
+        if (header.codec == AudioCodecId::Pcm16 &&
+            header.bitstreamVersion != Pcm16BitstreamVersion) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
@@ -51,6 +58,7 @@ public:
     Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload,
                             uint64 startCodecFrame) noexcept override {
         payload_ = Span<const uint8>();
+        finished_ = false;
         const uint64 frameBytes = uint64{channels_} * Pcm16SampleBytes;
         if (!open_ || chunk.preRollFrames != 0 || payload.Size() != chunk.payloadBytes ||
             payload.Size() != uint64{chunk.frameCount} * frameBytes ||
@@ -61,8 +69,22 @@ public:
 
         payload_ = payload;
         frames_ = chunk.frameCount;
+        chunkEnd_ = chunk.firstFrame + chunk.frameCount;
         position_ = static_cast<uint32>(startCodecFrame - chunk.firstFrame);
         return Result<void>::Success();
+    }
+
+    // 청크 사이 상태가 없으므로 이어 열기는 첫 frame부터의 BeginChunk다. 순서 규칙은 상태 있는
+    // codec과 같게 지킨다.
+    Result<void> ContinueChunk(const AudioChunkEntry& chunk,
+                               Span<const uint8> payload) noexcept override {
+        if (!ContinuesChunk(payload_.Size() != 0 && finished_, chunkEnd_, chunk)) {
+            payload_ = Span<const uint8>();
+            finished_ = false;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return BeginChunk(chunk, payload, chunk.firstFrame);
     }
 
     Result<uint32> DecodeNext(const PlanarView& out) noexcept override {
@@ -73,6 +95,11 @@ public:
         // 단위 경계까지(시작 단위는 나머지, 마지막 단위는 남은 frame)다.
         const uint32 unitLeft = Pcm16UnitFrames - position_ % Pcm16UnitFrames;
         const uint32 count = frames_ - position_ < unitLeft ? frames_ - position_ : unitLeft;
+        if (count == 0) {
+            finished_ = true;
+            return Result<uint32>::Success(0);
+        }
+
         const uint8* source =
             payload_.Data() + static_cast<usize>(position_) * channels_ * Pcm16SampleBytes;
         for (uint32 frame = 0; frame < count; ++frame) {
@@ -95,10 +122,12 @@ public:
 
 private:
     Span<const uint8> payload_;
+    uint64 chunkEnd_ = 0;
     uint32 channels_ = 0;
     uint32 frames_ = 0;
     uint32 position_ = 0;
     bool open_ = false;
+    bool finished_ = false;
 };
 
 // ADPCM 디코더: 단위 = 블록 묶음(채널 × 512 byte, 3.24.1절).
@@ -110,7 +139,8 @@ public:
         open_ = false;
         payload_ = Span<const uint8>();
         // 판은 codec 다음, 다른 규칙보다 먼저 본다(새 판의 규칙 변화를 손상으로 알리지 않게).
-        if (header.codec == AudioCodecId::Adpcm && header.bitstreamVersion != AdpcmBitstreamVersion) {
+        if (header.codec == AudioCodecId::Adpcm &&
+            header.bitstreamVersion != AdpcmBitstreamVersion) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
@@ -126,6 +156,7 @@ public:
     Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload,
                             uint64 startCodecFrame) noexcept override {
         payload_ = Span<const uint8>();
+        finished_ = false;
         if (!open_ || chunk.preRollFrames != 0 || payload.Size() != chunk.payloadBytes ||
             payload.Size() != AdpcmPayloadBytes(channels_, chunk.frameCount) ||
             startCodecFrame < chunk.firstFrame ||
@@ -135,8 +166,22 @@ public:
 
         payload_ = payload;
         frames_ = chunk.frameCount;
+        chunkEnd_ = chunk.firstFrame + chunk.frameCount;
         position_ = static_cast<uint32>(startCodecFrame - chunk.firstFrame);
         return Result<void>::Success();
+    }
+
+    // 청크 사이 상태가 없으므로 이어 열기는 첫 frame부터의 BeginChunk다. 순서 규칙은 상태 있는
+    // codec과 같게 지킨다.
+    Result<void> ContinueChunk(const AudioChunkEntry& chunk,
+                               Span<const uint8> payload) noexcept override {
+        if (!ContinuesChunk(payload_.Size() != 0 && finished_, chunkEnd_, chunk)) {
+            payload_ = Span<const uint8>();
+            finished_ = false;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return BeginChunk(chunk, payload, chunk.firstFrame);
     }
 
     Result<uint32> DecodeNext(const PlanarView& out) noexcept override {
@@ -147,6 +192,7 @@ public:
         const uint32 unitLeft = AdpcmFramesPerBlock - position_ % AdpcmFramesPerBlock;
         const uint32 count = frames_ - position_ < unitLeft ? frames_ - position_ : unitLeft;
         if (count == 0) {
+            finished_ = true;
             return Result<uint32>::Success(0);
         }
 
@@ -166,10 +212,12 @@ public:
 
 private:
     Span<const uint8> payload_;
+    uint64 chunkEnd_ = 0;
     uint32 channels_ = 0;
     uint32 frames_ = 0;
     uint32 position_ = 0;
     bool open_ = false;
+    bool finished_ = false;
 };
 
 template <typename Decoder>

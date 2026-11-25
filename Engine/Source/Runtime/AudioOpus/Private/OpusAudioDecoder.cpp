@@ -196,10 +196,11 @@ public:
 
 private:
     // 청크 표 값과 payload 단위를 검사한다: 길이 접두를 끝까지 훑어 길이 1 이상, 합이 payload와
-    // 정확히 같고, 패킷마다 첫 stream TOC가 나타내는 길이가 960 frame이며, 패킷 수 × 960 = pre-roll +
-    // codec frame 수. 이미 낸 PCM이 voice에 나간 뒤 DecodeNext가 길이 때문에 실패하지 않게 여기서
+    // 정확히 같고, 패킷마다 첫 stream TOC가 나타내는 길이가 960 frame이며, 패킷 수 × 960 = pre-roll
+    // + codec frame 수. 이미 낸 PCM이 voice에 나간 뒤 DecodeNext가 길이 때문에 실패하지 않게 여기서
     // 거른다(3.30.2절).
-    Result<void> CheckChunk(const AudioChunkEntry& chunk, Span<const uint8> payload) const noexcept {
+    Result<void> CheckChunk(const AudioChunkEntry& chunk,
+                            Span<const uint8> payload) const noexcept {
         if (!open_ || payload.Size() != chunk.payloadBytes || chunk.frameCount == 0 ||
             chunk.frameCount % OpusPacketFrames != 0 ||
             chunk.preRollFrames % OpusPacketFrames != 0) {
@@ -248,7 +249,8 @@ private:
     // 패킷 count개를 디코드하지 않고 건너뛴다(CheckChunk가 단위 경계를 확인했다).
     void SkipPackets(uint64 count) noexcept {
         for (uint64 packet = 0; packet < count; ++packet) {
-            position_ += OpusLengthPrefixBytes + LoadLittleEndian<uint16>(payload_.Data() + position_);
+            position_ +=
+                OpusLengthPrefixBytes + LoadLittleEndian<uint16>(payload_.Data() + position_);
         }
     }
 

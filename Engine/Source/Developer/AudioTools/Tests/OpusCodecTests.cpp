@@ -62,10 +62,14 @@ constexpr uint32 HighQuality = 90;
 constexpr uint32 SmallFirstChunkBytes = 4096;
 constexpr uint32 SmallChunkBytes = 16384;
 constexpr uint64 CrossChunkFrames = 100;
+// seek 비교 창의 최소 길이다(100 ms — 300 Hz 30주기). 청크 끝 직전 시작도 다음 청크로 이어 읽어 이
+// 길이를 채운다(스트림 끝에서는 거기까지). 시작 직후 몇 frame만 보면 신호 에너지가 작아 SNR이
+// 측정(3.32.4절)보다 흔들린다.
+constexpr uint64 MinimumSeekCompareFrames = 4800;
 constexpr uint64 MidChunkOffset = 7;
 
-// 청크 0의 payload 앞 이 패킷 수 안에서 시작하면 디코더가 스트림 머리부터 디코드한다(pre-roll 패킷 +
-// 시작 패킷).
+// 청크 0의 payload 앞 이 패킷 수 안에서 시작하면 디코더가 스트림 머리부터 디코드한다(pre-roll 패킷
+// + 시작 패킷).
 constexpr uint64 ExactStartPackets = OpusPreRollFrames / OpusPacketFrames + 1;
 
 // seek 시작(320 ms pre-roll로 수렴한 근사)과 연속 디코드 사이 SNR 하한이다(에너지 비, 80 dB. 측정
@@ -366,8 +370,8 @@ TEST(Audio_OpusCodec_RoundTripChannels) {
         // family byte와 stream·coupled·mapping이 libopus Vorbis mapping(RFC 7845 5.1.1.2)과 같다.
         const OpusCodecHeader& opus = codecHeader.Value();
         const VorbisMapping& expected = ExpectedVorbisMappings[channels - 1];
-        bool mappingSame = opus.streams == expected.streams &&
-                           opus.coupledStreams == expected.coupledStreams;
+        bool mappingSame =
+            opus.streams == expected.streams && opus.coupledStreams == expected.coupledStreams;
         for (uint32 channel = 0; channel < channels; ++channel) {
             mappingSame = mappingSame && opus.mapping[channel] == expected.mapping[channel];
         }
@@ -411,8 +415,8 @@ TEST(Audio_OpusCodec_ChunksAndMidChunkStart) {
         CHECK(chunk.preRollFrames == expectedPreRoll && chunk.frameCount % OpusPacketFrames == 0);
     }
 
-    // 전체 디코드(청크 0 BeginChunk, 그 뒤 ContinueChunk) = 청크 하나로 쓴 같은 인코드의 디코드(연속
-    // 디코드). 청크로 나눠도 순차 재생 결과는 bit까지 같다.
+    // 전체 디코드(청크 0 BeginChunk, 그 뒤 ContinueChunk) = 청크 하나로 쓴 같은 인코드의
+    // 디코드(연속 디코드). 청크로 나눠도 순차 재생 결과는 bit까지 같다.
     DecodedAudioPcm full(allocator);
     REQUIRE(DecodeAudioPlatformData(view, table, allocator, full));
     REQUIRE(full.FrameCount() == Frames);
@@ -434,13 +438,15 @@ TEST(Audio_OpusCodec_ChunksAndMidChunkStart) {
 
     // 청크마다 여러 시작 위치(머리·패킷 경계 앞뒤·가운데·끝 직전)에서 seek(BeginChunk)해 다음 청크
     // 조금까지 읽는다(다음 청크는 ContinueChunk). 청크 0의 payload 앞 ExactStartPackets 패킷 안
-    // 시작은 스트림 머리부터 디코드하므로 연속 디코드와 bit가 같다. 그 밖의 시작은 pre-roll로 수렴한
-    // 근사라 SNR 하한으로 본다. 같은 시작 두 번은 언제나 bit가 같다. codec frame c는 유효 frame
-    // c − delay다.
+    // 시작은 스트림 머리부터 디코드하므로 연속 디코드와 bit가 같다. 그 밖의 시작은 pre-roll로
+    // 수렴한 근사라 SNR 하한으로 본다. 같은 시작 두 번은 언제나 bit가 같다. codec frame c는 유효
+    // frame c − delay다.
     bool exact = true;
     bool close = true;
     bool repeatable = true;
     uint32 approximated = 0;
+    const AudioChunkEntry last = view.Chunk(view.Header().chunkCount - 1);
+    const uint64 streamEnd = last.firstFrame + last.frameCount;
     for (uint32 index = 0; index < view.Header().chunkCount; ++index) {
         const AudioChunkEntry chunk = view.Chunk(index);
         const uint64 end = chunk.firstFrame + chunk.frameCount;
@@ -448,8 +454,11 @@ TEST(Audio_OpusCodec_ChunksAndMidChunkStart) {
              {uint64{0}, uint64{1}, uint64{OpusPacketFrames - 1}, uint64{OpusPacketFrames},
               uint64{chunk.frameCount / 2 + MidChunkOffset}, uint64{chunk.frameCount - 1}}) {
             const uint64 start = chunk.firstFrame + offset;
-            const uint64 frames =
+            const uint64 wanted =
                 end - start + (index + 1 < view.Header().chunkCount ? CrossChunkFrames : 0);
+            const uint64 longEnough =
+                wanted < MinimumSeekCompareFrames ? MinimumSeekCompareFrames : wanted;
+            const uint64 frames = longEnough < streamEnd - start ? longEnough : streamEnd - start;
             Array<float> range(allocator);
             Array<float> again(allocator);
             REQUIRE(ReadCodecRange(view, table, allocator, start, frames, range));
@@ -538,13 +547,15 @@ TEST(Audio_OpusCodec_ContinueChunkRules) {
     // 청크 가운데에서 seek해 끝까지 낸 뒤에도 다음 청크로 이을 수 있다. payload 검사는 BeginChunk와
     // 같다.
     const AudioChunkEntry first = view.Chunk(0);
-    REQUIRE(decoder.BeginChunk(first, view.ChunkPayload(0), first.firstFrame + first.frameCount / 2));
+    REQUIRE(
+        decoder.BeginChunk(first, view.ChunkPayload(0), first.firstFrame + first.frameCount / 2));
     REQUIRE(drain());
     AudioChunkEntry broken = view.Chunk(1);
     broken.payloadBytes -= 1;
     CHECK(decoder.ContinueChunk(broken, view.ChunkPayload(1)).Error() ==
           ErrorCode::InvalidArgument);
-    REQUIRE(decoder.BeginChunk(first, view.ChunkPayload(0), first.firstFrame + first.frameCount / 2));
+    REQUIRE(
+        decoder.BeginChunk(first, view.ChunkPayload(0), first.firstFrame + first.frameCount / 2));
     REQUIRE(drain());
     CHECK(decoder.ContinueChunk(view.Chunk(1), view.ChunkPayload(1)));
     CHECK(drain());
@@ -689,8 +700,8 @@ TEST(Audio_OpusCodec_VorbisChannelOrderTable) {
         InterleaveVorbisOrder(channelData, channels, 0, 1, interleaved);
         bool same = true;
         for (uint32 slot = 0; slot < channels; ++slot) {
-            same = same && interleaved[slot] ==
-                               static_cast<float>(ExpectedVorbisSlots[channels - 1][slot]);
+            same = same &&
+                   interleaved[slot] == static_cast<float>(ExpectedVorbisSlots[channels - 1][slot]);
         }
 
         // 되돌리면 내부 순서다.
@@ -836,7 +847,8 @@ TEST(Audio_OpusCodec_EncoderRejects) {
     CHECK(error(tone.View(), NonOpusRate, stereo, MidQuality) == ErrorCode::InvalidArgument);
     CHECK(error(tone.View(), Rate, stereo, 0) == ErrorCode::InvalidArgument);
     CHECK(error(tone.View(), Rate, stereo, 101) == ErrorCode::InvalidArgument);
-    CHECK(error(tone.View(), Rate, AudioChannelFrontLeft, MidQuality) == ErrorCode::InvalidArgument);
+    CHECK(error(tone.View(), Rate, AudioChannelFrontLeft, MidQuality) ==
+          ErrorCode::InvalidArgument);
     CHECK(error(tone.View(), Rate, AudioChannelFrontLeft | AudioChannelFrontCenter, MidQuality) ==
           ErrorCode::Unsupported);
     PlanarConstView noChannels = tone.View();
@@ -855,7 +867,8 @@ TEST(Audio_OpusCodec_EncoderRejects) {
     infinite.channelCount = 1;
     infinite.frameCount = OpusPacketFrames;
     infinite.channels[0] = data.Data();
-    CHECK(error(infinite, Rate, DefaultAudioChannelMask(1), MidQuality) == ErrorCode::InvalidArgument);
+    CHECK(error(infinite, Rate, DefaultAudioChannelMask(1), MidQuality) ==
+          ErrorCode::InvalidArgument);
 }
 
 TEST(Audio_OpusCodec_DecoderContract) {
