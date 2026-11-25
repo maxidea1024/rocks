@@ -159,6 +159,28 @@ Result<float> NodePropertyReader::ReadFloat(StringView field, float fallback) no
     return value.Value().ReadF32();
 }
 
+Result<double> NodePropertyReader::ReadDouble(StringView field, double fallback) noexcept {
+    auto found = Find(field);
+    if (!found) {
+        return Result<double>::Failure(found.Error());
+    }
+
+    if (!found.Value()) {
+        return Result<double>::Success(fallback);
+    }
+
+    if (found.Value()->wireType != static_cast<uint32>(WireType::F64)) {
+        return Result<double>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    auto value = record_->OpenValue(*found.Value());
+    if (!value) {
+        return Result<double>::Failure(value.Error());
+    }
+
+    return value.Value().ReadF64();
+}
+
 Result<Guid> NodePropertyReader::ReadGuid(StringView field, Guid fallback) noexcept {
     auto found = Find(field);
     if (!found) {

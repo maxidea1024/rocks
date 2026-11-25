@@ -53,6 +53,7 @@ public:
     Result<int64> ReadInteger(StringView field, int64 fallback) noexcept;
     Result<bool> ReadBool(StringView field, bool fallback) noexcept;
     Result<float> ReadFloat(StringView field, float fallback) noexcept;
+    Result<double> ReadDouble(StringView field, double fallback) noexcept;
     Result<Guid> ReadGuid(StringView field, Guid fallback) noexcept;
     // String·Name 필드의 원문이다(입력 바이트를 빌린다). 기록되지 않았으면 빈 문자열이다.
     Result<StringView> ReadText(StringView field) noexcept;

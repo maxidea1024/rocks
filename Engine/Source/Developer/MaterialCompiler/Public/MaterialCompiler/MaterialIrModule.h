@@ -65,6 +65,13 @@ public:
         return hash_;
     }
 
+    // 값·결과를 비운다(번역 실패 결과 — 6.8절).
+    void Clear() noexcept {
+        values_.Clear();
+        results_.Clear();
+        hash_ = Sha256Digest{};
+    }
+
 private:
     friend ROCKS_MATERIALCOMPILER_API Result<void>
     BuildIrModule(const IrBuilder& builder, Span<const IrResult> results, IrModule& out) noexcept;

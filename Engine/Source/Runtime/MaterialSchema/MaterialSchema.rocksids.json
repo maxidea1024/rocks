@@ -1403,6 +1403,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::MaterialPinValue::componentCount",
+      "id": "ca31763991b74687a1ab63b875557bab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialPinValue::w",
+      "id": "05a805a866b0469d84d08b3945094917",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialPinValue::x",
+      "id": "0d5c088c5b6745d2b0a47730979b9980",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialPinValue::y",
+      "id": "30331da4c6d949ceaabd9ec9410659b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialPinValue::z",
+      "id": "b00fd0073d1742b188eaec192bde4968",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialPostProcessTraits::blendable",
       "id": "4695960f804c4838b96f17576558f0c9",
       "aliases": [],
@@ -5227,6 +5262,13 @@
       "kind": "type",
       "name": "rocks::material::MaterialFunctionUsage",
       "id": "f2d646725e194d8d95e4e3e078cbff4d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialPinValue",
+      "id": "7dfc433c722543908d38250d802c283b",
       "aliases": [],
       "retired": false
     },

@@ -116,6 +116,8 @@ public abstract class TestsModule : ModuleRules
         ["Material"] = ["AssetTestFixtures"],
         // The dynamic pin tests write node properties with the reflection codec (SaveStructRecord) before reading them back as a node would.
         ["MaterialSchema"] = ["ObjectSerialization"],
+        // The translator tests build material graphs whose node properties and pin values are written with the reflection codec.
+        ["MaterialCompiler"] = ["ObjectSerialization"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
         ["MeshTools"] = ["AssetTestFixtures"],
