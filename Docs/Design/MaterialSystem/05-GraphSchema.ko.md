@@ -34,7 +34,7 @@
 | `Int1`–`Int4`, `UInt1`–`UInt4` | 32-bit 정수 벡터 | 상수 블록에서는 float와 다른 16 byte slot에 둔다(7.2절 5항) |
 | `Bool` | 실행 중 bool | 상수 블록에는 uint 비트로 담는다(UE도 32비트 단위 비트 패킹, `RE/Private/Materials/HLSLMaterialTranslator.cpp:3792–3822`) |
 | `Float3x3`, `Float4x4` | 행렬 | 상수 블록에는 `Float4x4`만 둔다(7.2절 5항). `Float3x3`는 IR 안에서만 쓴다 |
-| `Double1`–`Double4` | 큰 좌표 값(LWC, 셰이더 안에서는 타일 + 오프셋 `Float` 벡터 둘) | 절대 world 위치(`Double3`, cm)·`ConstantDouble`(`Double1`)·`DoubleVectorParameter`(`Double4`). UE `MCT_LWCScalar`–`MCT_LWCVector4`와 같다(`HLSLMaterialTranslator.cpp:511, 2539`). uniform 값은 double의 high·low 두 slot이다(`MaterialUniformExpressions.cpp:1344–1365`). Float로의 변환은 명시 노드(`TruncateWorldPosition`)나 translated world 변환으로만 한다. 셰이더 안 기본 위치는 카메라 상대 world(translated world)이고, 절대 위치가 필요한 노드만 이 타입을 쓴다. 표현은 Renderer 스펙의 view 상수(16절 MRD6)를 따른다. UE는 LWC 타입을 쓰고 기본으로 켠다(`RE/Private/Materials/HLSLMaterialTranslator.cpp:150–178` `r.MaterialEditor.LWCEnabled`) |
+| `Double1`–`Double4` | 큰 좌표 값(LWC, 셰이더 안에서는 타일 + 오프셋 `Float` 벡터 둘) | 절대 world 위치(`Double3`, cm)·`ConstantDouble`(`Double1`)·`DoubleVectorParameter`(`Double4`). UE `MCT_LWCScalar`–`MCT_LWCVector4`와 같다(`HLSLMaterialTranslator.cpp:511, 2539`). uniform 값은 double의 high·low 두 slot이다(`MaterialUniformExpressions.cpp:1344–1365`). Float로의 의도된 변환은 명시 노드(`TruncateWorldPosition`)나 translated world 변환이다. 그 밖에 Double을 받지 않는 연산·타입이 정해진 입력에 들어가면 번역이 Float로 낮춘다(UE LWC demote — 6.8절 "입력 값과 변환"). 셰이더 안 기본 위치는 카메라 상대 world(translated world)이고, 절대 위치가 필요한 노드만 이 타입을 쓴다. 표현은 Renderer 스펙의 view 상수(16절 MRD6)를 따른다. UE는 LWC 타입을 쓰고 기본으로 켠다(`RE/Private/Materials/HLSLMaterialTranslator.cpp:150–178` `r.MaterialEditor.LWCEnabled`) |
 | `Texture2D`·`Texture2DArray`·`TextureCube`·`TextureCubeArray`·`Texture3D` | 텍스처 자원 | `TextureAny`는 이 다섯을 받는 입력 전용 타입(UE `MCT_Texture`) |
 | `TextureExternal`·`TextureVirtual`·`SparseVolumeTexture`·`TextureCollection`·`TextureMeshPaint`·`TextureMaterialCache` | 자원 종류가 아직 없는 텍스처 | 선언만 한다(19.4.1절 `MPQ-ExternalTexture`·`MPQ-VirtualTexture`·`MPQ-SparseVolumeTexture`·`MPQ-TextureCollection`). UE `MaterialValueType.h:38–40, 67–69`. 같은 타입끼리만 잇는다 |
 | `StaticBool`·`StaticInt`·`StaticEnum` | 번역 때 정해지는 값 | static switch·component mask·preset 선택 |
@@ -50,6 +50,8 @@
 - 짧은 벡터 → 긴 벡터는 오류다. 명시 Append 노드를 쓴다.
 - 정수 → float는 허용하고, float → 정수는 오류다(명시 변환 노드).
 - `StaticBool` → `Bool`은 허용하고, 반대는 오류다.
+
+**핀 사용자 값.** 연결 없는 입력 핀에 사용자가 넣은 값은 NodeGraph `PinValueEntry`의 Record이고 struct는 `MaterialPinValue { x, y, z, w : float; componentCount : uint8 }`이다(MaterialSchema). componentCount는 1–4이고, 타입이 정해진 핀이면 그 폭 이하다. 정수·Bool 핀의 값도 float로 담고 번역이 핀 타입으로 바꾼다(UE도 입력 덮기 상수는 float다). 번역 규칙은 6.8절이다.
 
 ### 5.4 검증 규칙
 

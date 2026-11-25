@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 17(초안) | 2026-11-26 | MS1b 재리뷰 반영(19.13절): 마스크 출력 핀 타입은 마스크 폭(Constant2·3·4), 입력과 같은 출력 키만 `Out`(출력끼리 겹치면 실패), MaterialCache 출력 키는 늘 `<이름>Out`, 정적 핀 키와 겹치는 사용자 이름 목록, Aggregate가 UE와 다른 점, policy TODO 표기 범위(19.2.1절). MS2a2 번역기 세부(6.8절): 입력·결과·진단 형식, 의미 기준(기본 번역기 결과 + IR `Build` 구조), 핀 사용자 값 `MaterialPinValue`(5.3절), 입력 변환·산술 공통 타입·연산 묶음별 수 종류, MS2a 노드 62개 lowering 표, 출력 노드 핀 → 진입점과 활성 조건(V5), 진단 코드 101–106. 5.3절: Double을 받지 않는 연산에서의 자동 낮춤 |
 | 16(초안) | 2026-11-26 | MS1b 리뷰 반영(19.13절): `MCT_Unknown` → `Any`, `MCT_LWCMatrix` → `Float4x4`, 이름 없는 출력 여럿의 키(마스크 글자), 동적 출력 키 충돌 규칙, Custom 추가 출력(이름 없는 것 생략·"return"), Aggregate 빈 이름 생략, MaterialCache 출력은 늘 속성마다, UE와 다른 점 다섯(기본 입력 배열·TextureObjectParameter 출력 타입·동적 입력 Required 없음·Custom 출력 타입·Switch 이름 충돌 진단), 문맥 값 `Get` 접두 규칙, 목록 파일 읽기 방식, `textDefaults` 필드마다 하나. 14절 E15(새 노드 초기 배열 원소). 6.6·6.8절: 값 번호는 깊이 우선 후위 순, `sqrt`는 아직 접지 않음 |
 | 15(초안) | 2026-11-26 | MS2a 구현 세부를 6.8·7.7절에 적었다: 세 묶음(MS2a1 IR 핵심·MS2a2 번역기·MS2a3 HLSL 생성), IR 타입·연산·값·빌더·상수 접기 범위·대수 단순화·DCE·IR hash, lowering 표와 `NotYetLowered`, 입력 값·암묵 변환·폭 규칙, MS2a 진단 범위, 생성 원문 리터럴·연산 철자·DynamicBranch·원문 위치 지도 |
 | 14(초안) | 2026-11-26 | MS1b2 구현 규칙을 19.13.3절에 적었다: 필수 입력은 UE `Compile`의 연결 없음 오류가 근거(메타 `RequiredInput`은 표시용), 표시 이름은 UE `GetInputName`(기본은 멤버 이름 그대로), 입출력 같은 이름은 출력 키에 `Out`, 입력 배열 스위치의 정적 핀, 동적 핀 노드 표, UE와 다른 점 셋 |
