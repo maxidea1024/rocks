@@ -60,7 +60,7 @@ API: `AddContext(bundle, priority, ContextOptions)` / `UpdateContext(bundle, for
 
 UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
 
-1. 예약된 다시 만들기를 한다.
+1. 앞 평가의 전달 뒤 정리(6)를 아직 안 했으면 먼저 한다. 그다음 예약된 다시 만들기를 한다. 다시 만들기가 실패(할당)하면 이전 목록으로 평가를 마치고 `OutOfMemory`를 돌려준다.
 2. **바인딩 루프**: 바인딩마다 키를 읽어 키 이벤트를 정한다(UE :591-603).
 
    | 키 이벤트 | 조건 |
@@ -70,7 +70,10 @@ UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
    | `None` | 그 밖 |
 
    - 한 평가 안에 눌렀다 뗀 키는 눌림 값(1)으로 Actuated 한 번이다(UE :603-612·294-308).
-   - 무시 중인 바인딩은 건너뛴다. 키를 놓으면 무시를 푼다.
+   - 판정: 이번 눌림은 `KeySample`의 `down || pressed`(한 평가 탭 포함), 직전 눌림은 직전 평가에서 그 키가 `down || pressed`였는지다(모든 키의 고정 비트 집합 — UE `KeyDownPrevious = bDownPrevious || IE_Pressed`, 그래서 한 평가 탭의 다음 평가는 값 0으로 평가되어 Released·Tap이 나고 Pressed의 직전 값이 풀린다). 둘 다 거짓이면 None이다(Actuated와 Held는 평가 여부만 가른다 — 둘 다 평가한다).
+   - 터치 키(UE `bCorrectTouchBoolActionKeys`): Boolean 액션은 값을 `down || pressed`의 1·0으로, 축 액션은 닿아 있지 않으면 0으로 둔다.
+   - 무시 중인 바인딩은 키가 눌려 있으면 건너뛴다. 키가 놓여 있거나 이번 평가에 놓임이 있었으면(놓고 다시 누름 포함) 무시를 풀고 그 평가부터 평가한다(UE :575-586, `InputKey`가 IE_Released에서 바로 푼다 — :309-323).
+   - chord 대상 상태: 바인딩을 평가할 때마다 그 액션의 바인딩 수준 결합 상태를 chord 작업 배열(4.2절 8)에 쓴다. 뒤 바인딩의 ChordAction·ChordBlocker가 읽는다(재정렬로 대상이 먼저 온다).
    - **None이면 그 바인딩을 평가하지 않는다.** 값 초기화도 트리거 갱신도 하지 않는다. 단 alwaysTick 트리거가 있는 바인딩은 None이어도 평가한다(UE :220).
    - 평가하는 바인딩은 다음 순서로 처리한다.
      1. 액션의 이번 평가 첫 바인딩이면 액션 값을 0으로 초기화한다.
@@ -78,32 +81,37 @@ UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
      3. 값의 MagnitudeSquared가 **정확히 0이 아닐 때만** 누적한다(UE :249). 방식은 둘이다.
         - `TakeHighestAbsoluteValue`: 성분마다 절댓값이 큰 쪽이다. 같으면 나중 값이다(`>=`).
         - `Cumulative`: 합이다.
-     4. 바인딩 트리거 결합 결과는 액션마다 **가장 진전된 하나**를 남긴다. 기준은 상태(None < Ongoing < Triggered)이고, 같으면 트리거를 평가한 바인딩이다(UE :281).
+     4. 바인딩 트리거 결합 결과는 액션마다 **가장 진전된 하나**를 남긴다. 기준은 상태(None < Ongoing < Triggered)이고, 같으면 트리거를 평가한 바인딩, 그것도 같으면 나중 바인딩이다(UE :281 `FMath::Max`).
 3. **주입 입력**: 바인딩 루프 뒤다(UE :619-667).
    - `InjectValue(const InputActionData& action, value, triggers, modifiers)` — UE `InjectInputForAction`. 액션 표에 그 id가 있으면 표의 설정을, 없으면 넘긴 설정을 쓴다(주입 전용 항목 — 놓은 뒤 Completed·Canceled를 내면 지운다).
    - 한 평가에 여러 번 주입하면 각각 처리한다.
    - 직전 평가에도 주입되었으면 Held, 아니면 Actuated다. 이번에 다시 주입하지 않은 액션은 값 0으로 한 번 평가한다(놓기).
    - 연속 주입(`StartContinuousInjection`·`UpdateContinuousInjection`·`StopContinuousInjection`)은 평가마다 다시 주입한다.
-   - 주입의 트리거·모디파이어 상태는 (액션, 주입 트리거·모디파이어 종류 열)마다 평가기가 둔다(4.6절).
+   - 주입의 트리거·모디파이어 상태는 (액션, 주입 트리거·모디파이어 종류 열)마다 평가기가 둔다(4.6절). 매개변수는 마지막으로 넘긴 값이다.
+   - 주입은 넘긴 설정과 트리거·모디파이어를 검증한다(2.7절 규칙 — 실패면 `InvalidArgument`). 할당 실패는 `OutOfMemory`이고 상태는 그대로다. 놓기 평가는 트리거·모디파이어 없이 값 0이다(UE :640-650).
 4. **액션 마무리**: 이번 평가에 이벤트(바인딩·주입)가 있었던 액션만 한다(UE :671-717). 없던 액션은 상태 None이고 액션 트리거를 돌리지 않는다.
    1. 액션 모디파이어를 적용한다.
    2. 트리거가 없는 액션은 결합 상태를 다시 정한다. 모디파이어가 값을 바꿨을 때만 nonzero 기준으로 다시 정한다(UE :687-690).
    3. 액션 트리거를 바인딩 결합 상태에 이어서 평가한다(같은 결합 규칙).
-   4. 바인딩 트리거가 있었으면 결과를 min(새 상태, 바인딩 상태)로 제한한다(UE :695).
+   4. 바인딩 트리거가 있었으면(남긴 결합의 표지 — UE `bMappingTriggerApplied`) 결과를 min(새 상태, 바인딩 상태)로 제한한다(UE :695).
    5. 일시정지 중이고 `!triggerWhenPaused`면 None이다.
-   6. 전이표(3.4절)로 이벤트를 만든다. 경과 시간·Triggered 시간을 누적한다.
+   6. 전이표(3.4절)로 이벤트를 만든다. 이벤트 없던 액션도 직전 상태에서 None으로의 전이(Canceled·Completed)를 낸다. 경과 시간은 상태가 None이 아니면, Triggered 시간은 이벤트에 Triggered가 있으면 dt를 더한다(UE :703-704 — Started·Triggered가 한 평가면 공개 이벤트는 Triggered).
+   - 사라진 액션(4.2절 7)은 바인딩이 없으므로 이벤트 없는 액션으로 마무리된다.
 5. **결과**:
-   - `ActionState(actionId)`: 값·트리거 상태·이번 이벤트·경과/Triggered 시간이다. 표에 없는 액션은 빈 상태다.
-   - `Events()`: 이번 평가 이벤트 목록 (액션 id, ActionEvent, 값, 시간)이다. 바인딩 목록 순 → 주입 순으로 처음 나타난 액션 순서다.
-6. **전달 뒤**: Completed·Canceled가 난 액션의 경과·Triggered 시간을 0으로 둔다. 전달이 끝난 뒤에 한다(UE :455-466).
+   - `ActionState(actionId)` → `ActionStateView`: 값·트리거 상태·이번 이벤트·경과/Triggered 시간, 표에 있는지다. 표에 없는 액션은 빈 상태다.
+   - `Events()` → `ActionEventRecord` 목록: 이번 평가에 이벤트가 있는 액션마다 (액션 id, ActionEvent, 값, 경과·Triggered 시간)이다. 액션 표 순서(바인딩에 처음 나온 순 → 사라진 액션 → 주입 전용)다.
+   - `ChordDependencies()`: 다시 만들 때 모은 (chord 트리거를 가진 액션, 그 대상 액션) 짝이다(4.4절·5.1절 전달 억제용 — UE `DependentChordActions`).
+6. **전달 뒤**(`FinishDispatch()` — 전달을 마친 쪽이 부른다. 안 부르면 다음 `Evaluate`가 처음에 한다, UE :455-480):
+   - 공개 이벤트(Triggered가 있으면 Triggered, 아니면 그 이벤트)가 None·Canceled·Completed인 액션은 경과 시간을 0으로, Triggered가 아닌 액션은 Triggered 시간을 0으로 둔다.
+   - 사라진 액션과 주입이 끝난 주입 전용 액션(이번에 주입하지 않았고 상태 None)을 표에서 지운다.
 
 `Flush()`(UE `FlushPressedKeys` :1021-1066):
-- 눌린 디지털 바인딩을 다시 누를 때까지 무시한다.
+- 마지막 평가에서 키가 눌려 있던 디지털 바인딩(키보드·마우스 버튼·패드 버튼·터치 — 축은 아니다, UE `IsDigital = !IsAnalog`)을 놓을 때까지 무시하고 그 바인딩의 트리거·모디파이어 상태를 처음으로 둔다. Rocks `InputState`는 평가기 밖이므로 키 상태 자체는 지우지 않는다. UE는 키 상태를 0으로 둬서 놓을 때 Released·Tap이 늦게 나지 않는데, Rocks는 상태 초기화로 같은 결과를 낸다.
 - 진행 중이던 액션은 다음 평가에 Completed·Canceled를 낸다. UE 기본 `bSendTriggeredEventsWhenInputIsFlushed`가 참이다.
 
 ### 4.4 chord 전달 억제
 
-chord 대상 액션(SourceAction)이 Triggered인 평가에서는 그 chord에 묶인 액션(DependantAction — chord 트리거를 가진 쪽)의 **모든 이벤트** 전달을 막는다(UE `OnlyTriggerLastActionInChord` 기본 1 — :846-861). 전달은 5.1절이다.
+chord 트리거를 가진 액션(UE `SourceAction` — 예: Ctrl+S의 Save)이 이번 평가에 Triggered로 전달된 평가에서는 그 대상 액션(UE `DependantAction` — Ctrl)의 **모든 이벤트** 전달을 막는다(UE `ShouldOnlyTriggerLastActionInChord` 기본 참 — `EnhancedPlayerInput.h:290-297`, :846-861). "Triggered로 전달됨"은 Triggered에 묶인 바인딩이 실행 목록에 든 것이다(UE `TriggeredActionsThisTick` — :808-812). 전달은 5.1절이다(IA3).
 
 ### 4.5 평가 문맥
 
@@ -111,7 +119,8 @@ chord 대상 액션(SourceAction)이 Triggered인 평가에서는 그 chord에 �
 - `double deltaSeconds`: **dilation을 뺀 dt**다. 게임 `TickContext::unscaledDeltaSeconds`다(UE `NonDilatedDeltaTime` :488-489).
 - `double timeDilation`: 시간 트리거가 `affectedByTimeDilation`일 때 곱한다.
 - `bool paused`
-- `float fov`(도): FovScaling용
+- `float fov`(도): FovScaling용(0 이하면 카메라 없음)
+- `bool hasPlayer`: 평가기가 플레이어에 붙어 있는지(FovScaling — 3.1절)
 - `uint32 gamepad`: 이 플레이어 패드 번호
 
 UE는 모디파이어·트리거·경과 시간 모두에 dilation을 뺀 dt를 넘긴다(:492·615·683·703-704). 일시정지 중에도 Rocks의 unscaled dt가 흐르므로 Hold 등이 진행된다(UE와 같다).
@@ -119,6 +128,7 @@ UE는 모디파이어·트리거·경과 시간 모두에 dilation을 뺀 dt를 
 ### 4.6 자원
 
 - 바인딩 목록·상태 배열은 다시 만들 때만 할당한다(평가는 할당하지 않는다).
-- 단 `Events()` 목록은 용량을 넘을 때 커진다(평가마다 비운다).
-- 주입 상태 표는 처음 주입할 때 할당한다.
+- `Events()` 목록은 다시 만들 때와 주입 전용 액션을 넣을 때 액션 수만큼 잡는다. 전달 중(평가 뒤 `FinishDispatch` 전)에는 전달하는 쪽이 목록을 돌고 있으므로 잡지 않는다(즉시 다시 만들기가 목록을 무효로 만들지 않는다). 그 경우 다음 평가가 용량을 넘으면 커진다.
+- 주입은 호출마다 트리거·모디파이어 사본을 할당한다(평가 밖). 쓰지 않는 주입 항목(넣을 값·연속 주입이 없고 액션이 표에 없거나 놓인 것)은 전달 뒤 정리에서 지운다(해제만).
+- 주입이 걸린 사라진 액션은 전달 뒤 정리에서 지우지 않고 주입 전용으로 바꾼다.
 - 할당 실패: 다시 만들기 실패면 이전 목록을 유지하고 다음 평가에서 다시 시도한다(`OutOfMemory`를 `Evaluate` 결과로 돌려준다).
