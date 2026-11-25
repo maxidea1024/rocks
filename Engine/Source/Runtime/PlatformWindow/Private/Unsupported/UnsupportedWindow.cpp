@@ -2,6 +2,11 @@
 
 namespace rocks::platform {
 
+Result<UniquePtr<DragImage>> DragImage::Create(Allocator&, const Window&, IntVec2, IntVec2,
+                                               Span<const uint8>, uint8) noexcept {
+    return Result<UniquePtr<DragImage>>::Failure(ErrorCode::Unsupported);
+}
+
 // 창·게임패드 backend가 아직 없는 플랫폼(macOS 등)이다. 동작하는 척하지 않고 Unsupported를
 // 반환한다.
 

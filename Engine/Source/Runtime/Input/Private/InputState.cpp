@@ -160,6 +160,18 @@ Result<void> InputQueue::TryInitialize(usize capacity) noexcept {
     return Result<void>::Success();
 }
 
+void InputQueue::DrainTo(InputQueue& target) noexcept {
+    if (&target == this) {
+        return;
+    }
+    target.dropped_ += dropped_ - forwardedDropped_;
+    forwardedDropped_ = dropped_;
+    for (const auto& event : events_) {
+        target.Push(event);
+    }
+    Clear();
+}
+
 bool InputQueue::Push(const InputEvent& event) noexcept {
     // 초기화 전이거나 가득 찼으면 할당하지 않고 버린다.
     if (events_.Size() >= capacity_ || !events_.TryPushBack(event)) {
@@ -223,6 +235,21 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
             keysDown_.Set(index, false);
             break;
         }
+        case InputEventType::TextComposition:
+            break;
+        case InputEventType::TextCompositionCommit:
+            if (event.composition) {
+                auto points = event.composition->View().TryCodePoints();
+                if (points) {
+                    for (auto point : points.Value()) {
+                        if (textCount_ == MaxTextPerFrame) {
+                            break;
+                        }
+                        text_[textCount_++] = point;
+                    }
+                }
+            }
+            break;
         case InputEventType::Text:
             if (textCount_ < MaxTextPerFrame) {
                 text_[textCount_++] = event.codePoint;
@@ -263,6 +290,18 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
             mouseDown_ &= ~Bit(index);
             break;
         }
+        case InputEventType::PointerCaptureLost:
+            mouseReleased_ |= mouseDown_;
+            mouseDown_ = 0;
+            break;
+        case InputEventType::MouseLeave:
+            break;
+        case InputEventType::TouchBegin:
+        case InputEventType::TouchMove:
+        case InputEventType::TouchEnd:
+        case InputEventType::TouchCancel:
+            // 터치 접점은 이벤트 소비자가 직접 처리한다. 이 스냅샷은 아직 터치를 보관하지 않는다.
+            break;
         case InputEventType::MouseWheel:
             if (math::IsFinite(event.wheel)) {
                 wheel_ += event.wheel;

@@ -1,0 +1,173 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::ui::HardwareVisibilityWidget::deviceMask_",
+      "id": "aa02cf5bb66f4bdcba328fd93eddeea3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::HardwareVisibilityWidget::hiddenMode_",
+      "id": "785391298bc644788114c3626552c25a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Screen::config_",
+      "id": "f1330064e3434f888e0cf261d55b0069",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Screen::domain_",
+      "id": "1e11321fe8a54cdebb102b1fe3490d1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Screen::focusTarget_",
+      "id": "dc3171f1298642bcb746382462bb6ac9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Screen::modal_",
+      "id": "2d0983af32f04155b668178eb1b2f407",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Screen::restoreFocus_",
+      "id": "9bf8eb38b38042188e723ea7cbd5e699",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenInputConfig::captureMouse",
+      "id": "01b683e756b64a3a8cd877684071382a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenInputConfig::ignoreLook",
+      "id": "b0d215d388134020982fe6bb7f6ae0f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenInputConfig::ignoreMove",
+      "id": "2cf9c36842db4a6ca8ec3e46628ba5da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenInputConfig::mode",
+      "id": "f624fc86f9af4134b3c7e29b18948c18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenInputConfig::showCursor",
+      "id": "b742e5927db042d9828faf8fbcbada37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenTabListWidget::contents_",
+      "id": "05a9c85448894c9ca25471e1333967cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenTabListWidget::switcher_",
+      "id": "63ac20df736f4837948e71c895ab0eea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScreenTabListWidget::tabIds_",
+      "id": "783aeb47ec194682bcbf8e5760098f9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::HardwareVisibilityWidget",
+      "id": "209eacc2fb2d436ca15444a527a69df3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::Screen",
+      "id": "3e72af937fb54e64b7e786e247620aef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenContainerWidget",
+      "id": "c38dfa1356fd476e823891b3a11daa5c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenInputConfig",
+      "id": "761d69f21d414676bdab303d9c7f3cdf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenInputMode",
+      "id": "90e82a394b9d408fb37d3dc8410329bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenQueueWidget",
+      "id": "79b84cf1695e46948d41fd890b00ba59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenStackWidget",
+      "id": "38818e94cb4041728e64038467cc681d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenSwitcherWidget",
+      "id": "4facbd908ab4472fb449383675f675f1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScreenTabListWidget",
+      "id": "75d6fd3ef5d54bf1bb739277d5afd56d",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

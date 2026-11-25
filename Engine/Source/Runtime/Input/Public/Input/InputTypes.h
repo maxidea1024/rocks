@@ -6,6 +6,9 @@
 // 그대로 쓰지 않는다. 저장이 필요하면 이름(KeyName)으로 기록한다.
 namespace rocks::input {
 
+// 창의 클라이언트 영역 중 운영체제에 이동 및 최대화를 맡길 부분을 나타낸다.
+enum class WindowRegion : uint8 { Client, Caption, FullscreenCaption };
+
 // 키보드 키다. 문자 배치(QWERTY·AZERTY)와 무관한 물리 위치 기준이다. 예: Key::W는 US 배열의 W
 // 자리이며 프랑스 배열에서는 Z가 찍히는 키다. 입력된 문자가 필요하면 InputEventType::Text를 쓴다.
 enum class Key : uint8 {
@@ -119,6 +122,21 @@ enum class MouseButton : uint8 {
     X1,
     X2,
     Count
+};
+
+// 크기 조절 방향은 포인터를 움직이는 축을 뜻한다.
+enum class MouseCursor : uint8 {
+    Arrow,
+    ResizeHorizontal,
+    ResizeVertical,
+    Text,
+    Hand,
+    Crosshair,
+    Move,
+    ResizeNorthWestSouthEast,
+    ResizeNorthEastSouthWest,
+    Unavailable,
+    Wait
 };
 
 // 게임패드 버튼이다. 얼굴 버튼은 제조사 표기(A/B, ×/○) 대신 위치(South·East·West·North)로 부른다.

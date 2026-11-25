@@ -1,3 +1,4 @@
+#include "Win64InlineComposition.h"
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>
 #include <Platform/Win64/WideString.h>
@@ -6,6 +7,7 @@
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
 #include <Windows.h>
+#include <imm.h>
 #include <WtsApi32.h>
 #include <Xinput.h>
 
@@ -248,7 +250,8 @@ bool ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
 
 class Win64Window final : public Window {
 public:
-    Win64Window() noexcept = default;
+    explicit Win64Window(Allocator& allocator) noexcept : allocator_(allocator), deferred_(allocator) {
+    }
 
     ~Win64Window() override {
         if (window_ != nullptr) {
@@ -258,6 +261,11 @@ public:
     }
 
     Result<void> Create(const WindowDesc& desc) noexcept {
+        // 다른 창이 메시지를 펌프하거나 동기 Win32 호출이 재진입했을 때 입력을 보관한다.
+        auto initialized = deferred_.TryInitialize(256);
+        if (!initialized) {
+            return initialized;
+        }
         // 제목은 OS 호출 전에 바꿔 둔다. 잘못된 UTF-8은 입력 오류다(Window::Create가 먼저 거른다).
         wchar_t title[MaxTitleCharacters];
         if (!ToWide(desc.title, title)) {
@@ -267,10 +275,11 @@ public:
         instance_ = GetModuleHandleW(nullptr);
         WNDCLASSEXW windowClass = {};
         windowClass.cbSize = sizeof(windowClass);
-        windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+        windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_DBLCLKS;
         windowClass.lpfnWndProc = &Win64Window::Procedure;
         windowClass.hInstance = instance_;
         windowClass.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
+        cursor_ = windowClass.hCursor;
         windowClass.lpszClassName = WindowClassName;
         // 같은 프로세스의 두 번째 창은 이미 등록된 클래스를 쓴다.
         if (RegisterClassExW(&windowClass) == 0) {
@@ -285,10 +294,15 @@ public:
                                 : (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
         RECT rectangle = {0, 0, static_cast<LONG>(desc.width), static_cast<LONG>(desc.height)};
         AdjustWindowRectEx(&rectangle, style, FALSE, 0);
-        window_ =
-            CreateWindowExW(0, WindowClassName, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
-                            rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
-                            nullptr, nullptr, instance_, this);
+        const int x = desc.useDesktopPosition ? desc.desktopPosition.x +
+                                                    (desc.positionClientOrigin ? rectangle.left : 0)
+                                              : CW_USEDEFAULT;
+        const int y = desc.useDesktopPosition
+                          ? desc.desktopPosition.y + (desc.positionClientOrigin ? rectangle.top : 0)
+                          : CW_USEDEFAULT;
+        window_ = CreateWindowExW(
+            0, WindowClassName, title, style, x, y, rectangle.right - rectangle.left,
+            rectangle.bottom - rectangle.top, nullptr, nullptr, instance_, this);
         if (window_ == nullptr) {
             return Fail("CreateWindowExW", GetLastError());
         }
@@ -307,6 +321,7 @@ public:
     DWORD failedError = 0;
 
     void PumpEvents(input::InputQueue& queue) noexcept override {
+        deferred_.DrainTo(queue);
         queue_ = &queue;
         MSG message;
         while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
@@ -346,6 +361,60 @@ public:
         return true;
     }
 
+    bool ConsumeRepaint() noexcept override {
+        const bool requested = repaint_;
+        repaint_ = false;
+        return requested;
+    }
+
+    void WaitForEvents(uint32 milliseconds) noexcept override {
+        (void)MsgWaitForMultipleObjectsEx(0, nullptr, milliseconds, QS_ALLINPUT,
+                                          MWMO_INPUTAVAILABLE);
+    }
+
+    void SetRegionHitTest(RegionHitTest&& callback) noexcept override {
+        regionHitTest_ = Move(callback);
+    }
+
+    void SetMouseCursor(input::MouseCursor shape) noexcept override {
+        if (shape == cursorShape_) {
+            return;
+        }
+        LPCWSTR resource = reinterpret_cast<LPCWSTR>(IDC_ARROW);
+        if (shape == input::MouseCursor::ResizeHorizontal) {
+            resource = reinterpret_cast<LPCWSTR>(IDC_SIZEWE);
+        } else if (shape == input::MouseCursor::ResizeVertical) {
+            resource = reinterpret_cast<LPCWSTR>(IDC_SIZENS);
+        }
+        switch(shape) {
+        case input::MouseCursor::Text: resource=reinterpret_cast<LPCWSTR>(IDC_IBEAM);break;
+        case input::MouseCursor::Hand: resource=reinterpret_cast<LPCWSTR>(IDC_HAND);break;
+        case input::MouseCursor::Crosshair: resource=reinterpret_cast<LPCWSTR>(IDC_CROSS);break;
+        case input::MouseCursor::Move: resource=reinterpret_cast<LPCWSTR>(IDC_SIZEALL);break;
+        case input::MouseCursor::ResizeNorthWestSouthEast: resource=reinterpret_cast<LPCWSTR>(IDC_SIZENWSE);break;
+        case input::MouseCursor::ResizeNorthEastSouthWest: resource=reinterpret_cast<LPCWSTR>(IDC_SIZENESW);break;
+        case input::MouseCursor::Unavailable: resource=reinterpret_cast<LPCWSTR>(IDC_NO);break;
+        case input::MouseCursor::Wait: resource=reinterpret_cast<LPCWSTR>(IDC_WAIT);break;
+        default: break;
+        }
+        HCURSOR cursor = LoadCursorW(nullptr, resource);
+        if (!cursor) {
+            return;
+        }
+        cursor_ = cursor;
+        cursorShape_ = shape;
+        // 입력 큐를 처리한 뒤에도 현재 창의 클라이언트 영역에서만 즉시 반영한다.
+        const HWND captured = GetCapture();
+        RECT client{};
+        POINT point{};
+        if (captured == window_ ||
+            (!captured && GetCursorPos(&point) && WindowFromPoint(point) == window_ &&
+             ScreenToClient(window_, &point) && GetClientRect(window_, &client) &&
+             PtInRect(&client, point))) {
+            SetCursor(cursor_);
+        }
+    }
+
     bool HasFocus() const noexcept override {
         return focused_;
     }
@@ -356,6 +425,27 @@ public:
 
     NativeWindowHandle NativeHandle() const noexcept override {
         return {window_, instance_};
+    }
+
+    Result<IntVec2> ClientToDesktop(IntVec2 point) const noexcept override {
+        POINT p{point.x, point.y};
+        if (!::ClientToScreen(window_, &p)) {
+            return Result<IntVec2>::Failure(ErrorCode::DependencyFailed);
+        }
+        return Result<IntVec2>::Success({static_cast<int32>(p.x), static_cast<int32>(p.y)});
+    }
+
+    Result<IntVec2> DesktopToClient(IntVec2 point) const noexcept override {
+        POINT p{point.x, point.y};
+        if (!::ScreenToClient(window_, &p)) {
+            return Result<IntVec2>::Failure(ErrorCode::DependencyFailed);
+        }
+        return Result<IntVec2>::Success({static_cast<int32>(p.x), static_cast<int32>(p.y)});
+    }
+
+    bool IsAtDesktopPoint(IntVec2 point) const noexcept override {
+        const HWND hit = WindowFromPoint({point.x, point.y});
+        return hit && GetAncestor(hit, GA_ROOT) == window_;
     }
 
     Result<void> SetTitle(StringView text) noexcept override {
@@ -378,9 +468,10 @@ private:
     }
 
     void Push(const input::InputEvent& event) noexcept {
-        // 펌프 밖(예: 창 생성 중)에 온 메시지의 입력은 버린다.
         if (queue_ != nullptr) {
             queue_->Push(event);
+        } else {
+            deferred_.Push(event);
         }
     }
 
@@ -405,27 +496,91 @@ private:
         }
     }
 
-    void MouseButton(input::MouseButton button, bool down) noexcept {
+    void MouseButton(input::MouseButton button, bool down, LPARAM position) noexcept {
+        const float x = static_cast<float>(static_cast<int16>(LOWORD(position)));
+        const float y = static_cast<float>(static_cast<int16>(HIWORD(position)));
         // 버튼을 누른 채 창 밖으로 나가도 놓기 이벤트를 받도록 캡처한다.
+        const uint32 bit = 1u << static_cast<uint32>(button);
         if (down) {
-            if (capturedButtons_++ == 0) {
+            if (!capturedButtons_) {
                 SetCapture(window_);
             }
-            Push(input::InputEvent::MouseDown(button));
+            capturedButtons_ |= bit;
+            Push(input::InputEvent::MouseDown(button, x, y));
         } else {
-            if (capturedButtons_ > 0 && --capturedButtons_ == 0) {
+            capturedButtons_ &= ~bit;
+            if (!capturedButtons_ && GetCapture() == window_) {
                 ReleaseCapture();
             }
-            Push(input::InputEvent::MouseUp(button));
+            Push(input::InputEvent::MouseUp(button, x, y));
         }
+    }
+
+    input::WindowRegion ClientRegion(LPARAM coordinates) noexcept {
+        POINT point{static_cast<short>(LOWORD(coordinates)),
+                    static_cast<short>(HIWORD(coordinates))};
+        if (regionHitTest_ && ScreenToClient(window_, &point)) {
+            return regionHitTest_.Execute({point.x, point.y});
+        }
+        return input::WindowRegion::Client;
+    }
+
+    void ToggleBorderlessFullscreen() noexcept {
+        if (fullscreenStyle_) {
+            SetWindowLongPtrW(window_, GWL_STYLE, fullscreenStyle_);
+            SetWindowPlacement(window_, &windowedPlacement_);
+            SetWindowPos(window_, nullptr, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            fullscreenStyle_ = 0;
+            return;
+        }
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        windowedPlacement_.length = sizeof(windowedPlacement_);
+        if (!GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor) ||
+            !GetWindowPlacement(window_, &windowedPlacement_)) {
+            return;
+        }
+        fullscreenStyle_ = GetWindowLongPtrW(window_, GWL_STYLE);
+        SetWindowLongPtrW(window_, GWL_STYLE,
+                          (fullscreenStyle_ & ~static_cast<LONG_PTR>(WS_OVERLAPPEDWINDOW)) |
+                              WS_POPUP);
+        const RECT bounds = monitor.rcMonitor;
+        SetWindowPos(window_, nullptr, bounds.left, bounds.top, bounds.right - bounds.left,
+                     bounds.bottom - bounds.top, SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 
     LRESULT Handle(UINT message, WPARAM wParam, LPARAM lParam) noexcept {
         switch (message) {
+        case WM_NCHITTEST: {
+            const auto frame = DefWindowProcW(window_, message, wParam, lParam);
+            if (frame == HTCLIENT && ClientRegion(lParam) != input::WindowRegion::Client) {
+                return HTCAPTION;
+            }
+            return frame;
+        }
+        case WM_NCLBUTTONDBLCLK:
+            if (wParam == HTCAPTION &&
+                ClientRegion(lParam) == input::WindowRegion::FullscreenCaption) {
+                ToggleBorderlessFullscreen();
+                return 0;
+            }
+            break;
+        case WM_SETCURSOR:
+            if (reinterpret_cast<HWND>(wParam) == window_ && LOWORD(lParam) == HTCLIENT &&
+                cursor_) {
+                SetCursor(cursor_);
+                return TRUE;
+            }
+            break;
         case WM_CLOSE:
             closeRequested_ = true;
             return 0;
+        case WM_PAINT:
+            repaint_ = true;
+            break;
         case WM_SIZE:
+            repaint_ = true;
             minimized_ = wParam == SIZE_MINIMIZED;
             width_ = LOWORD(lParam);
             height_ = HIWORD(lParam);
@@ -437,7 +592,17 @@ private:
         case WM_KILLFOCUS:
             focused_ = false;
             capturedButtons_ = 0;
+            if (GetCapture() == window_) {
+                ReleaseCapture();
+            }
             Push(input::InputEvent::FocusLost());
+            return 0;
+        case WM_CAPTURECHANGED:
+            // 마지막 버튼을 놓아 정상 해제할 때는 이미 0이므로 별도 취소를 보내지 않는다.
+            if (capturedButtons_ != 0) {
+                capturedButtons_ = 0;
+                Push(input::InputEvent::CaptureLost());
+            }
             return 0;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN: {
@@ -457,36 +622,75 @@ private:
             }
             break;
         }
+        case WM_IME_SETCONTEXT:
+            if (IsInlineCompositionWindow(window_)) {
+                lParam &= ~static_cast<LPARAM>(ISC_SHOWUICOMPOSITIONWINDOW);
+            }
+            break;
+        case WM_IME_COMPOSITION:
+            if (IsInlineCompositionWindow(window_) &&
+                RouteInlineComposition(window_, lParam, allocator_, queue_ ? *queue_ : deferred_)) {
+                return 0;
+            }
+            break;
+        case WM_IME_ENDCOMPOSITION:
+            if (IsInlineCompositionWindow(window_)) {
+                Push(input::InputEvent::Composition());
+            }
+            break;
         case WM_CHAR:
             PushText(static_cast<wchar_t>(wParam));
             return 0;
+        case WM_MOUSELEAVE: {
+            trackingMouse_ = false;
+            input::InputEvent leave;
+            leave.type = input::InputEventType::MouseLeave;
+            Push(leave);
+            return 0;
+        }
         case WM_MOUSEMOVE:
+            if (!trackingMouse_) {
+                TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE, window_, 0};
+                trackingMouse_ = TrackMouseEvent(&tracking) != FALSE;
+            }
             Push(input::InputEvent::MouseMove(
                 static_cast<float>(static_cast<int16>(LOWORD(lParam))),
                 static_cast<float>(static_cast<int16>(HIWORD(lParam)))));
             return 0;
+        case WM_LBUTTONDBLCLK:
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
-            MouseButton(input::MouseButton::Left, message == WM_LBUTTONDOWN);
+            MouseButton(input::MouseButton::Left, message != WM_LBUTTONUP, lParam);
             return 0;
+        case WM_RBUTTONDBLCLK:
         case WM_RBUTTONDOWN:
         case WM_RBUTTONUP:
-            MouseButton(input::MouseButton::Right, message == WM_RBUTTONDOWN);
+            MouseButton(input::MouseButton::Right, message != WM_RBUTTONUP, lParam);
             return 0;
+        case WM_MBUTTONDBLCLK:
         case WM_MBUTTONDOWN:
         case WM_MBUTTONUP:
-            MouseButton(input::MouseButton::Middle, message == WM_MBUTTONDOWN);
+            MouseButton(input::MouseButton::Middle, message != WM_MBUTTONUP, lParam);
             return 0;
+        case WM_XBUTTONDBLCLK:
         case WM_XBUTTONDOWN:
         case WM_XBUTTONUP:
             MouseButton(HIWORD(wParam) == XBUTTON1 ? input::MouseButton::X1
                                                    : input::MouseButton::X2,
-                        message == WM_XBUTTONDOWN);
+                        message != WM_XBUTTONUP, lParam);
             return TRUE;
-        case WM_MOUSEWHEEL:
-            Push(input::InputEvent::MouseWheel(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
-                                               static_cast<float>(WHEEL_DELTA)));
+        case WM_MOUSEWHEEL: {
+            const float delta = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
+                                static_cast<float>(WHEEL_DELTA);
+            POINT point{static_cast<int16>(LOWORD(lParam)), static_cast<int16>(HIWORD(lParam))};
+            if (ScreenToClient(window_, &point)) {
+                Push(input::InputEvent::MouseWheel(delta, static_cast<float>(point.x),
+                                                   static_cast<float>(point.y)));
+            } else {
+                Push(input::InputEvent::MouseWheel(delta));
+            }
             return 0;
+        }
         default:
             break;
         }
@@ -508,15 +712,24 @@ private:
         return self->Handle(message, wParam, lParam);
     }
 
+    Allocator& allocator_;
     HWND window_ = nullptr;
+    HCURSOR cursor_ = nullptr;
+    RegionHitTest regionHitTest_;
+    LONG_PTR fullscreenStyle_ = 0;
+    WINDOWPLACEMENT windowedPlacement_{};
+    bool trackingMouse_ = false;
+    input::MouseCursor cursorShape_ = input::MouseCursor::Arrow;
     HINSTANCE instance_ = nullptr;
     input::InputQueue* queue_ = nullptr;
+    input::InputQueue deferred_;
     uint32 width_ = 0;
     uint32 height_ = 0;
     uint32 highSurrogate_ = 0;
     uint32 capturedButtons_ = 0;
     bool closeRequested_ = false;
     bool resized_ = false;
+    bool repaint_ = true;
     bool focused_ = false;
     bool minimized_ = false;
 };
@@ -665,7 +878,7 @@ Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc&
         return fail(ErrorCode::InvalidArgument, nullptr, 0);
     }
 
-    auto created = UniquePtr<Win64Window>::TryMake(allocator);
+    auto created = UniquePtr<Win64Window>::TryMake(allocator, allocator);
     if (!created) {
         return fail(created.Error(), nullptr, 0);
     }

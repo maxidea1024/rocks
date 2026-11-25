@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Memory/SharedPtr.h>
+#include <Core/Text/String.h>
 #include <Input/InputTypes.h>
 
 namespace rocks::input {
@@ -18,10 +20,22 @@ enum class InputEventType : uint8 {
     MouseUp,
     // 휠 회전. wheel은 한 칸 = 1.0이며 위(앞)로 굴리면 +다.
     MouseWheel,
+    // OS가 마우스 capture를 강제로 해제했다.
+    PointerCaptureLost,
+    // 터치 접점별 시작·이동·종료·취소다. 좌표는 창 client 픽셀이다.
+    TouchBegin,
+    TouchMove,
+    TouchEnd,
+    TouchCancel,
     // 게임패드 한 개의 전체 상태(backend가 폴링한 값). 연결 해제도 이 이벤트로 알린다.
     GamepadState,
     // 창이 입력 포커스를 잃음. 눌려 있던 키·버튼을 모두 놓은 것으로 처리한다.
-    FocusLost
+    FocusLost,
+    // 조합 중 문자열과 UTF-8 커서 위치다. 빈 문자열은 기존 조합 표시를 취소한다.
+    TextComposition,
+    // IME가 확정한 한 덩어리다. 여러 코드 포인트도 편집 이력 하나를 만든다.
+    TextCompositionCommit,
+    MouseLeave
 };
 
 // 게임패드 한 개의 폴링 결과다. 축은 데드존을 적용하기 전의 정규화 값이다.
@@ -37,13 +51,19 @@ struct InputEvent {
     InputEventType type = InputEventType::FocusLost;
     Key key = Key::None;
     bool repeat = false;
+    // 마우스 버튼·휠 이벤트에 창 client 좌표가 함께 실렸는지다.
+    bool hasPointerPosition = false;
     MouseButton mouseButton = MouseButton::Left;
     uint8 gamepadIndex = 0;
     uint32 codePoint = 0;
+    uint32 pointerId = 0;
+    uint32 userId = 0;
     float x = 0.0f;
     float y = 0.0f;
     float wheel = 0.0f;
     GamepadSnapshot gamepad;
+    SharedPtr<const String> composition;
+    usize compositionCaret = 0;
 
     static InputEvent KeyDown(Key value, bool isRepeat = false) noexcept {
         InputEvent event;
@@ -67,6 +87,15 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent Composition(SharedPtr<const String> text = {}, usize caret = 0,
+                                  bool commit = false) noexcept {
+        InputEvent event;
+        event.type = commit ? InputEventType::TextCompositionCommit : InputEventType::TextComposition;
+        event.composition = Move(text);
+        event.compositionCaret = caret;
+        return event;
+    }
+
     static InputEvent MouseMove(float positionX, float positionY) noexcept {
         InputEvent event;
         event.type = InputEventType::MouseMove;
@@ -82,6 +111,14 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent MouseDown(MouseButton button, float positionX, float positionY) noexcept {
+        InputEvent event = MouseDown(button);
+        event.x = positionX;
+        event.y = positionY;
+        event.hasPointerPosition = true;
+        return event;
+    }
+
     static InputEvent MouseUp(MouseButton button) noexcept {
         InputEvent event;
         event.type = InputEventType::MouseUp;
@@ -89,10 +126,26 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent MouseUp(MouseButton button, float positionX, float positionY) noexcept {
+        InputEvent event = MouseUp(button);
+        event.x = positionX;
+        event.y = positionY;
+        event.hasPointerPosition = true;
+        return event;
+    }
+
     static InputEvent MouseWheel(float delta) noexcept {
         InputEvent event;
         event.type = InputEventType::MouseWheel;
         event.wheel = delta;
+        return event;
+    }
+
+    static InputEvent MouseWheel(float delta, float positionX, float positionY) noexcept {
+        InputEvent event = MouseWheel(delta);
+        event.x = positionX;
+        event.y = positionY;
+        event.hasPointerPosition = true;
         return event;
     }
 
@@ -107,6 +160,44 @@ struct InputEvent {
     static InputEvent FocusLost() noexcept {
         InputEvent event;
         event.type = InputEventType::FocusLost;
+        return event;
+    }
+
+    static InputEvent CaptureLost() noexcept {
+        InputEvent event;
+        event.type = InputEventType::PointerCaptureLost;
+        return event;
+    }
+
+    static InputEvent TouchBegin(uint32 pointer, float positionX, float positionY,
+                                 uint32 user = 0) noexcept {
+        InputEvent event;
+        event.type = InputEventType::TouchBegin;
+        event.pointerId = pointer;
+        event.userId = user;
+        event.x = positionX;
+        event.y = positionY;
+        return event;
+    }
+
+    static InputEvent TouchMove(uint32 pointer, float positionX, float positionY,
+                                uint32 user = 0) noexcept {
+        InputEvent event = TouchBegin(pointer, positionX, positionY, user);
+        event.type = InputEventType::TouchMove;
+        return event;
+    }
+
+    static InputEvent TouchEnd(uint32 pointer, float positionX, float positionY,
+                               uint32 user = 0) noexcept {
+        InputEvent event = TouchBegin(pointer, positionX, positionY, user);
+        event.type = InputEventType::TouchEnd;
+        return event;
+    }
+
+    static InputEvent TouchCancel(uint32 pointer, float positionX, float positionY,
+                                  uint32 user = 0) noexcept {
+        InputEvent event = TouchBegin(pointer, positionX, positionY, user);
+        event.type = InputEventType::TouchCancel;
         return event;
     }
 };
@@ -135,6 +226,9 @@ public:
     // 이벤트를 추가한다. 가득 찼으면 버리고 false를 반환한다.
     bool Push(const InputEvent& event) noexcept;
 
+    // 보관한 이벤트와 직전 전달 이후의 유실 건수를 대상 큐에 넘긴다.
+    void DrainTo(InputQueue& target) noexcept;
+
     Span<const InputEvent> Events() const noexcept {
         return events_.View();
     }
@@ -153,6 +247,7 @@ private:
     Array<InputEvent> events_;
     usize capacity_ = 0;
     uint64 dropped_ = 0;
+    uint64 forwardedDropped_ = 0;
 };
 
 } // namespace rocks::input

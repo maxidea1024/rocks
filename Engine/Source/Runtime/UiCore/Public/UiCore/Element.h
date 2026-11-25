@@ -1,0 +1,324 @@
+#pragma once
+
+#include <Core/Containers/Array.h>
+#include <Core/Memory/SharedPtr.h>
+#include <Input/InputEvent.h>
+#include <UiCore/Geometry.h>
+#include <UiCore/KeyChord.h>
+#include <UiCore/NavigationRule.h>
+#include <Core/Text/String.h>
+#include <UiCore/PaintList.h>
+
+namespace rocks::ui {
+
+class Element;
+
+struct PopupRequest {
+    SharedPtr<Element> layer;
+    SharedPtr<Element> anchor;
+    void (*close)(Element&) noexcept = nullptr;
+};
+
+// 중립 접근성 역할이다. 플랫폼 어댑터는 제어 이름과 역할을 별개로 전달한다.
+enum class AccessibleRole : uint8 {
+    Group,
+    Text,
+    Button,
+    CheckBox,
+    Slider,
+    ScrollBar,
+    SpinBox,
+    Image,
+    Progress,
+    List
+};
+enum class AccessibleBehavior : uint8 {
+    Auto,
+    Custom,
+    Summary,
+    ToolTip,
+    Excluded
+};
+class ElementSemantics;
+class WidgetSurface;
+class CacheRoot;
+class AttributeBinding;
+
+enum class Visibility : uint8 {
+    Visible,
+    Collapsed,
+    Hidden,
+    HitTestInvisible,
+    SelfHitTestInvisible
+};
+
+enum class PointerEventType : uint8 {
+    Down,
+    Up,
+    Move,
+    Wheel,
+    Cancel
+};
+
+enum class PointerSource : uint8 {
+    Mouse,
+    Touch
+};
+
+struct PointerEvent {
+    PointerEventType type;
+    Vec2 position;
+    uint32 pointerId = 0;
+    uint32 userId = 0;
+    PointerSource source = PointerSource::Mouse;
+    input::MouseButton button = input::MouseButton::Left;
+    float wheel = 0;
+};
+
+// 이벤트 소비와 포인터 capture 변경 요청이다.
+struct PointerReply {
+    bool handled = false;
+    bool capture = false;
+    bool releaseCapture = false;
+    // 터치 탭을 감시하는 캡처다. 실제 팬이 시작되면 조상 스크롤 영역이 넘겨받을 수 있다.
+    bool allowTouchPan = false;
+};
+
+// Game lane에서만 사용하는 트리다. 부모가 자식을 소유하며 부모 포인터는 소유하지 않는다.
+// Geometry는 배치 호출자가 창 좌표 기준으로 설정한다.
+class ROCKS_UICORE_API Element {
+public:
+    explicit Element(Allocator& allocator) noexcept;
+
+    Element(const Element&) = delete;
+    Element& operator=(const Element&) = delete;
+
+    virtual ~Element() noexcept;
+
+    // 자식을 소유한다. 이미 부모가 있거나 순환을 만드는 자식은 거부한다.
+    virtual Result<void> TryAddChild(const SharedPtr<Element>& child) noexcept;
+
+    // 화면의 팝업 호스트를 찾아 전면 레이어를 붙인다. 호스트가 없으면 NotFound를 반환한다.
+    virtual Result<void> AttachPopupLayer(const PopupRequest& popup) noexcept;
+    // 화면이 비활성화될 때 이 호스트에서 열린 메뉴를 닫는다.
+    virtual void DismissHostedPopups() noexcept;
+
+    // 자식을 분리한다. 해당 자식이 없으면 false를 돌려준다.
+    virtual bool RemoveChild(Element& child) noexcept;
+
+    // 동일 애셋의 두 인스턴스는 소유 트리 식별자로 구분한다.
+    void SetNavigationIdentity(Guid domain, Guid identity) noexcept;
+    Guid NavigationIdentity() const noexcept;
+    Guid NavigationDomain() const noexcept;
+    Result<void> SetNavigationRule(FocusDirection direction, NavigationBoundary boundary) noexcept;
+    NavigationBoundary GetNavigationRule(FocusDirection direction) const noexcept;
+    Result<void> SetNavigationHandler(NavigationHandler&& handler) noexcept;
+    Guid ResolveCustomNavigation(uint32 user, FocusDirection direction) noexcept;
+
+    // 화면 판독기에 제공할 이름·요약의 원문을 복사한다. 기본 텍스트는 요소가 직접 제공할 수 있다.
+    Result<void> SetAccessibility(StringView name, StringView summary, AccessibleBehavior behavior,
+                                  AccessibleBehavior summaryBehavior, bool allowChildren) noexcept;
+    Result<void> GetAccessibleText(String& output, bool summary = false) const noexcept;
+    bool IsAccessible() const noexcept;
+    bool AllowsAccessibleChildren() const noexcept;
+    virtual AccessibleRole GetAccessibleRole() const noexcept;
+    virtual StringView DefaultAccessibleText() const noexcept;
+
+    using ToolTipFactory = Delegate<Result<SharedPtr<Element>>()>;
+    Result<void> SetToolTipFactory(ToolTipFactory&& factory, StringView description = {},
+                                   bool interactive = false) noexcept;
+    bool HasToolTip() const noexcept;
+    bool IsToolTipInteractive() const noexcept;
+    Result<SharedPtr<Element>> MakeToolTip() noexcept;
+    uint64 ToolTipRevision() const noexcept;
+    Element* Parent() const noexcept;
+    // 자신을 포함해 지정한 루트 아래에 붙어 있는지 검사한다.
+    bool IsWithin(const Element& root) const noexcept;
+    bool IsInputPathActive(const Element& root, bool pointer) const noexcept;
+
+    usize ChildCount() const noexcept;
+
+    // 측정·그리기·입력에 참여하는 자식이다. 트리를 변경하면 뷰가 무효화된다.
+    virtual Span<const SharedPtr<Element>> ActiveChildren() const noexcept;
+
+    Element* ChildAt(usize index) const noexcept;
+
+    // 범위 밖이면 빈 참조다. 반환한 참조는 트리에서 제거된 뒤에도 자식을 유지한다.
+    SharedPtr<Element> ChildRefAt(usize index) const noexcept;
+
+    // 직접 소유한 자식이면 공유 참조를 돌려준다.
+    SharedPtr<Element> FindChild(const Element* child) const noexcept;
+
+    // 누름 이벤트를 루트에서 대상 방향으로 전달할 때 먼저 호출한다.
+    // 자식이 누름을 캡처한 경우에도 해제·취소를 부모에서 관찰할 수 있다. 이벤트를 소비하지 않는다.
+    // 시작점에서 움직임이 충분하면 해당 스크롤 영역이 캡처를 요청한다. 안쪽 영역부터 질의한다.
+    virtual PointerReply OnTouchPan(const PointerEvent& move, Vec2 pressPosition) noexcept;
+    virtual void OnPointerReleaseInPath(const PointerEvent& event) noexcept;
+    virtual PointerReply OnPreviewPointerDown(const PointerEvent&) noexcept;
+    // 사용자 정의 제목 표시줄은 Caption을 반환한다. 포커스를 받는 자식은 자체 입력을 유지한다.
+    virtual input::WindowRegion GetWindowRegion() const noexcept;
+    void SetCursorOverride(input::MouseCursor cursor) noexcept;
+    void ResetCursorOverride() noexcept;
+    input::MouseCursor ResolveMouseCursor(Vec2 position) const noexcept;
+    virtual void OnMouseEnter(uint32 user) noexcept;
+    virtual void OnMouseLeave(uint32 user) noexcept;
+    virtual input::MouseCursor QueryMouseCursor(Vec2 position) const noexcept;
+
+    // 기본 구현은 이벤트를 소비하지 않는다.
+    virtual PointerReply OnPointerEvent(const PointerEvent&) noexcept;
+
+    // capture가 해제되거나 루트에서 분리된 뒤 다음 입력이 들어오면 호출한다.
+    virtual void OnPointerCaptureLost(PointerSource, uint32, uint32) noexcept;
+
+    // 키보드 focus를 받을 수 있는 Element만 재정의한다.
+    virtual bool SupportsKeyboardFocus() const noexcept;
+
+    // 키 누름은 미리보기에서 루트부터, 본 이벤트에서 focus 대상부터 전달된다.
+    // 보조 키가 필요한 입력 컨트롤은 이 경로에서 키를 선점한다. 기본 구현은 기존 미리보기로
+    // 전달한다.
+    virtual bool OnPreviewKeyChord(uint32 user, const input::InputEvent& event,
+                                   KeyChord chord) noexcept;
+    // 게임패드 스냅숏에서 새로 눌린 버튼을 포커스 위젯에 먼저 보낸다.
+    virtual bool OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept;
+    virtual bool OnPreviewKeyDown(uint32, const input::InputEvent&) noexcept;
+
+    virtual bool OnKeyEvent(uint32, const input::InputEvent&) noexcept;
+
+    // 장치 연결이 끊기면 누른 키를 활성화 없이 해제한다.
+    virtual void OnKeyCancelled(uint32 userId, input::Key key) noexcept;
+
+    virtual void OnFocusReceived(uint32) noexcept;
+
+    virtual void OnFocusLost(uint32) noexcept;
+
+    // 자기 자신을 그리기 목록에 기록한다. 기본 Element는 그리지 않는다.
+    virtual Result<void> OnPaint(PaintList&, int32) const noexcept;
+
+    // 자식을 그린 뒤 자기 전경을 기록한다.
+    virtual Result<void> OnPaintOverlay(PaintList&, int32) const noexcept;
+
+    // 부모를 먼저 기록하고 자식을 순서대로 기록한다. 실패 시 이미 기록된 명령은 유지한다.
+    Result<void> Paint(PaintList& list, int32 layer) const noexcept;
+
+    // 활성 자식이나 배치가 바뀔 때만 렌더 호스트가 표면 소유자 목록을 다시 찾는다.
+    uint64 PaintPlanRevision() const noexcept;
+    virtual WidgetSurface* GetWidgetSurface() noexcept;
+
+    void SetGeometry(const Geometry& geometry) noexcept;
+
+    // 피벗은 로컬 크기에 대한 비율이다. 렌더 변환은 원하는 크기를 바꾸지 않는다.
+    Result<void> SetRenderTransform(const AffineTransform2D& transform, Vec2 pivot) noexcept;
+    void ClearRenderTransform() noexcept;
+
+    // 부모가 할당한 Geometry를 적용한다. 패널은 자식 배치도 수행한다.
+    virtual Result<void> Arrange(const Geometry& geometry) noexcept;
+    Result<void> ArrangeIfNeeded(const Geometry& geometry) noexcept;
+
+    // 자식부터 원하는 크기를 계산해 캐시한다. scale은 DPI 등을 반영한 양수 배율이다.
+    Result<void> Prepass(float scale) noexcept;
+
+    // 원하는 크기에 영향을 주는 파생 Element의 속성 setter에서도 호출해야 한다.
+    // 부모는 자식의 원하는 크기가 실제로 달라졌을 때 다시 측정한다.
+    void InvalidateLayout() noexcept;
+    // 원하는 크기는 유지하고 자식의 위치·크기만 다시 배치한다.
+    void InvalidateArrangement() noexcept;
+    void InvalidatePaint() noexcept;
+    // 이 요소와 표시 중인 자손은 캐시 안에서도 매 프레임 그린다.
+    void SetVolatile(bool enabled) noexcept;
+    Result<void> SetRenderOpacity(float opacity) noexcept;
+    float GetRenderOpacity() const noexcept;
+    bool IsVolatile() const noexcept;
+    // 게임 위젯이 지정한 상시 갱신 요청이다. 네이티브 애니메이션의 자체 갱신 상태와 독립적이다.
+    void SetForceVolatile(bool enabled) noexcept;
+
+    // 표시 중인 트리에서 바인딩된 속성만 레이아웃 계산 전에 갱신한다.
+    void UpdateBoundAttributes() noexcept;
+
+    Vec2 GetDesiredSize() const noexcept;
+
+    virtual Vec2 ComputeDesiredSize(float) const noexcept;
+
+    const Geometry& GetGeometry() const noexcept;
+
+    void SetVisibility(Visibility visibility) noexcept;
+
+    Visibility GetVisibility() const noexcept;
+
+    void SetEnabled(bool enabled) noexcept;
+
+    bool IsEnabled() const noexcept;
+
+    // 자기 자신과 자식의 그리기·입력을 경계 안으로 제한한다.
+    void SetClipToBounds(bool enabled) noexcept;
+
+    bool ClipsToBounds() const noexcept;
+
+    // 앞에 그려진 자식부터 검사하며, 경계 클리핑이 켜진 조상 밖의 점은 제외한다.
+    Element* HitTest(Vec2 position) noexcept;
+
+protected:
+    // 기존 자식 위치에 빈 배치 노드를 삽입한다. 슬롯 순서와 포커스, 입력 캡처는 그대로 이어진다.
+    static Result<void> WrapAttachedChild(Element& child,
+                                          const SharedPtr<Element>& wrapper) noexcept;
+    // 자식 목록 정리가 끝난 뒤 조상에게 분리된 서브트리를 알린다.
+    virtual void OnDescendantDetached(const Element& subtree) noexcept;
+    // 직접 그리는 자식의 범위다. 오프스크린 결과를 표시할 때 입력·측정 트리를 유지한다.
+    virtual Span<const SharedPtr<Element>> PaintChildren() const noexcept;
+    void InvalidatePaintPlan() noexcept;
+
+    virtual CacheRoot* LocalPaintCache() const noexcept;
+    float MeasuredLayoutScale() const noexcept;
+
+    // 연속해서 그릴 두 자식 사이에 새 레이어가 필요하면 true다.
+    virtual bool StartsPaintLayer(usize previous, usize next) const noexcept;
+
+    virtual float RelativeLayoutScale() const noexcept;
+
+    // 패널이 자식의 그리기 순서를 정해 삽입한다.
+    // 같은 부모 안에서 그리기 순서만 옮긴다. 기존 포커스·포인터 캡처·바인딩을 유지한다.
+    void MoveChildWithin(usize from, usize to) noexcept;
+    Result<void> TryInsertChild(usize index, const SharedPtr<Element>& child) noexcept;
+
+private:
+    Result<void> EnsureSemantics() noexcept;
+    SharedPtr<ElementSemantics> semantics_;
+    Guid navigationIdentity_{};
+    Guid navigationDomain_{};
+    friend class CacheRoot;
+    friend class AttributeBinding;
+    friend class HitGrid;
+    AttributeBinding* bindings_ = nullptr;
+    usize subtreeBindings_ = 0;
+    uint64 bindingPass_ = 0;
+
+    Result<void> PaintSubtree(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
+                              bool inheritedVolatile) const noexcept;
+    Result<void> PaintContents(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
+                               bool inheritedVolatile) const noexcept;
+
+    Array<SharedPtr<Element>> children_;
+    Element* parent_ = nullptr;
+    Geometry geometry_{};
+    AffineTransform2D renderTransform_{};
+    Vec2 renderPivot_{};
+    uint8 cursorOverride_ = 255;
+    float renderOpacity_ = 1;
+    bool hasRenderTransform_ = false;
+    Vec2 desiredSize_{};
+    Vec2 desiredSeenByParent_{};
+    float measuredScale_ = 0;
+    bool layoutDirty_ = true;
+    bool measureChildren_ = true;
+    bool arrangeDirty_ = true;
+    bool volatile_ = false;
+    bool forceVolatile_ = false;
+    Geometry allotted_{};
+    uint64 paintRevision_ = 0;
+    uint64 subtreePaintRevision_ = 0;
+    uint64 planRevision_ = 0;
+    Visibility visibility_ = Visibility::Visible;
+    bool enabled_ = true;
+    bool clipToBounds_ = false;
+};
+
+} // namespace rocks::ui

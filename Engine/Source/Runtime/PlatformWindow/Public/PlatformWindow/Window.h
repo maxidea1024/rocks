@@ -1,6 +1,8 @@
 #pragma once
 
+#include <Core/Delegate.h>
 #include <Core/Diagnostics/LogCategory.h>
+#include <Core/Math/IntVector.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
 #include <Input/InputEvent.h>
@@ -17,6 +19,9 @@ struct WindowDesc {
     uint32 height = 720;
     bool resizable = true;
     bool visible = true;
+    bool useDesktopPosition = false;
+    IntVec2 desktopPosition{};
+    bool positionClientOrigin = false;
 };
 
 // 창 계층의 로그 카테고리다(Docs/Design/LoggingSystem.ko.md 13절). 창 생성 실패는 창을 여는
@@ -95,6 +100,16 @@ public:
     // 마지막 호출 이후 크기가 바뀌었으면 새 크기를 쓰고 true를 반환한다.
     virtual bool ConsumeResize(uint32& width, uint32& height) noexcept = 0;
 
+    // 노출·복원 등으로 표시 내용만 다시 제출할 필요가 있는지 소비한다.
+    virtual bool ConsumeRepaint() noexcept;
+    // 클라이언트 영역과 이 창이 마우스를 캡처한 동안 사용할 커서다.
+    using RegionHitTest = Delegate<input::WindowRegion(IntVec2)>;
+    // 클라이언트 좌표를 UI의 영역으로 바꾼다. 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
+    virtual void SetRegionHitTest(RegionHitTest&& hitTest) noexcept;
+    virtual void SetMouseCursor(input::MouseCursor cursor) noexcept;
+    // 입력 구동 호스트가 다른 창을 포함한 스레드 메시지 또는 제한 시간까지 대기한다.
+    virtual void WaitForEvents(uint32 milliseconds) noexcept;
+
     virtual bool HasFocus() const noexcept = 0;
 
     // 최소화되어 그릴 영역이 없는지다. 렌더러는 이때 present를 건너뛴다.
@@ -102,9 +117,24 @@ public:
 
     virtual NativeWindowHandle NativeHandle() const noexcept = 0;
 
+    // 부동 창의 드롭 위치를 정할 때 사용하는 화면 좌표 변환과 최상위 창 판정이다.
+    virtual Result<IntVec2> ClientToDesktop(IntVec2 point) const noexcept;
+    virtual Result<IntVec2> DesktopToClient(IntVec2 point) const noexcept;
+    virtual bool IsAtDesktopPoint(IntVec2 point) const noexcept;
+
     // 제목을 바꾼다(UTF-8, WindowDesc::title과 같은 자름 규칙). 잘못된 UTF-8은 InvalidArgument이고
     // 제목은 그대로다. OS 실패는 DependencyFailed다.
     virtual Result<void> SetTitle(StringView title) noexcept = 0;
+};
+
+// 데스크톱 위를 따라다니는 드래그 이미지다. 입력과 포커스는 원래 창에 남는다.
+class ROCKS_PLATFORMWINDOW_API DragImage {
+public:
+    static Result<UniquePtr<DragImage>> Create(Allocator& allocator, const Window& owner,
+                                               IntVec2 position, IntVec2 size,
+                                               Span<const uint8> rgba, uint8 opacity) noexcept;
+    virtual ~DragImage() = default;
+    virtual void MoveTo(IntVec2 position) noexcept = 0;
 };
 
 // 게임패드 입력 backend다. 폴링 결과를 GamepadState 이벤트로 큐에 넣는다. 상태가 바뀐

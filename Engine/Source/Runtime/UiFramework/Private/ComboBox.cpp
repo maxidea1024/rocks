@@ -1,0 +1,256 @@
+#include <Base/NumericLimits.h>
+#include <UiFramework/ComboBox.h>
+#include <UiFramework/ScrollView.h>
+#include <UiFramework/VerticalStack.h>
+#include <Core/ScopeExit.h>
+
+namespace rocks::ui {
+
+ComboBox::ComboBox(Allocator& allocator) noexcept
+    : MenuAnchor(allocator), allocator_(allocator), rows_(allocator) {
+    SetDesiredSize({80, 24});
+    SetPlacement(MenuPlacement::ComboBox);
+    SetMenuFactory(MenuFactory::CreateRaw(this, &ComboBox::MakeMenu));
+}
+
+Result<void> ComboBox::Construct(Args&& args) noexcept {
+    auto limit = SetMaxListHeight(args.maxListHeight);
+    if (!limit) {
+        return limit;
+    }
+    SetOptionFactory(Move(args.makeOption));
+    SetOnSelectionChanged(Move(args.onSelectionChanged));
+    SetOnOpening(Move(args.onOpening));
+    return Refresh(args.count, args.selected);
+}
+
+void ComboBox::DisconnectModel() noexcept {
+    DisconnectMenu();
+    makeOption_.Unbind();
+    selectionChanged_.Unbind();
+    UpdateOptions(0, -1);
+}
+
+Result<void> ComboBox::SetMaxListHeight(float height) noexcept {
+    if (!math::IsFinite(height) || height <= 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    maxListHeight_ = height;
+    if (auto bounds = menuBounds_.Lock()) {
+        return bounds->SetSizeRange({}, {NumericLimits<float>::Max(), height});
+    }
+    return Result<void>::Success();
+}
+
+void ComboBox::SetOptionFactory(MakeOption&& factory) noexcept {
+    makeOption_ = Move(factory);
+}
+
+void ComboBox::SetOnSelectionChanged(Delegate<void(int32)>&& callback) noexcept {
+    selectionChanged_ = Move(callback);
+}
+
+int32 ComboBox::SelectedIndex() const noexcept {
+    return selected_;
+}
+
+Result<void> ComboBox::SetDisplay(int32 index) noexcept {
+    auto old = ChildRefAt(0);
+    SharedPtr<Element> display;
+    if (index >= 0) {
+        if (!makeOption_) {
+            return Result<void>::Failure(ErrorCode::NotReady);
+        }
+        auto made = makeOption_.Execute(static_cast<usize>(index), true);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+        display = Move(made.Value());
+        if (!display || display->Parent() || IsWithin(*display)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        display->SetVisibility(Visibility::HitTestInvisible);
+    }
+    if (old) {
+        (void)RemoveChild(*old);
+    }
+    if (display) {
+        auto added = TryAddChild(display);
+        if (!added) {
+            if (old) {
+                (void)TryAddChild(old);
+            }
+            return added;
+        }
+    }
+    return Result<void>::Success();
+}
+
+Result<void> ComboBox::Refresh(usize count, int32 selected) noexcept {
+    if (changing_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+    if (count > static_cast<usize>(NumericLimits<int32>::Max()) || selected < -1 ||
+        (selected >= 0 && static_cast<usize>(selected) >= count)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    changing_ = true;
+    ROCKS_ON_SCOPE_EXIT {
+        changing_ = false;
+    };
+    auto updated = SetDisplay(selected);
+    if (updated) {
+        Close();
+        rows_.Clear();
+        count_ = count;
+        selected_ = selected;
+    }
+    return updated;
+}
+
+void ComboBox::UpdateOptions(usize count, int32 selected) noexcept {
+    Close();
+    rows_.Clear();
+    count_ = count;
+    selected_ = selected;
+    if (selected < 0) {
+        if (auto display = ChildRefAt(0)) {
+            (void)RemoveChild(*display);
+        }
+    }
+}
+
+Result<void> ComboBox::Select(int32 index) noexcept {
+    if (index == selected_) {
+        Close();
+        return Result<void>::Success();
+    }
+    auto changed = Refresh(count_, index);
+    if (changed) {
+        selectionChanged_.ExecuteIfBound(index);
+    }
+    return changed;
+}
+
+void ComboBox::Highlight(int32 index) noexcept {
+    highlighted_ = index;
+    if (auto scroll = scroll_.Lock();
+        scroll && index >= 0 && static_cast<usize>(index) < rows_.Size()) {
+        auto row = rows_[static_cast<usize>(index)].Lock();
+        const auto& viewport = scroll->GetGeometry();
+        if (row && viewport.size.y > 0) {
+            AffineTransform2D inverse;
+            if (viewport.render.TryInverse(inverse)) {
+                const auto position = inverse.Compose(row->GetGeometry().render).Apply({});
+                const float overflow = position.y + row->GetGeometry().size.y - viewport.size.y;
+                if (position.y < 0 || overflow > 0) {
+                    (void)scroll->SetScrollOffset(scroll->GetScrollOffset() +
+                                                  (position.y < 0 ? position.y : overflow));
+                }
+            }
+        }
+    }
+    for (usize i = 0; i < rows_.Size(); ++i) {
+        if (auto row = rows_[i].Lock()) {
+            row->SetColor(static_cast<int32>(i) == index ? LinearColor{0.12f, 0.31f, 0.6f, 1}
+                                                         : LinearColor{0.11f, 0.12f, 0.14f, 1});
+        }
+    }
+}
+
+Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
+    if (!makeOption_ || !Parent() || !count_ || changing_) {
+        return Result<SharedPtr<Element>>::Failure(changing_ ? ErrorCode::Busy
+                                                             : ErrorCode::NotReady);
+    }
+    changing_ = true;
+    ROCKS_ON_SCOPE_EXIT {
+        changing_ = false;
+    };
+    auto stack = SharedPtr<VerticalStack>::TryMake(allocator_, allocator_);
+    if (!stack) {
+        return Result<SharedPtr<Element>>::Failure(stack.Error());
+    }
+    Array<WeakPtr<Button>> rows(allocator_);
+    const auto self = Parent()->FindChild(this);
+    for (usize i = 0; i < count_; ++i) {
+        auto content = makeOption_.Execute(i, false);
+        if (!content || !content.Value() || content.Value()->Parent()) {
+            return Result<SharedPtr<Element>>::Failure(content ? ErrorCode::InvalidArgument
+                                                               : content.Error());
+        }
+        auto row = SharedPtr<Button>::TryMake(allocator_, allocator_);
+        if (!row) {
+            return Result<SharedPtr<Element>>::Failure(row.Error());
+        }
+        content.Value()->SetVisibility(Visibility::HitTestInvisible);
+        row.Value()->SetDesiredSize({0, 24});
+        auto added = row.Value()->TryAddChild(content.Value());
+        if (added) {
+            added = stack.Value()->TryAddChild(row.Value());
+        }
+        if (added) {
+            added = rows.TryPushBack(WeakPtr<Button>(row.Value()));
+        }
+        if (!added) {
+            return Result<SharedPtr<Element>>::Failure(added.Error());
+        }
+        row.Value()->SetOnClicked(Delegate<void()>::CreateWeakLambda(self, [this, i]() noexcept {
+            if (IsOpen()) {
+                (void)Select(static_cast<int32>(i));
+            }
+        }));
+    }
+    auto scroll = SharedPtr<ScrollView>::TryMake(allocator_, allocator_);
+    if (!scroll) {
+        return Result<SharedPtr<Element>>::Failure(scroll.Error());
+    }
+    auto attached = scroll.Value()->TryAddChild(stack.Value());
+    if (!attached) {
+        return Result<SharedPtr<Element>>::Failure(attached.Error());
+    }
+    auto bounds = SharedPtr<SizeBox>::TryMake(allocator_, allocator_);
+    if (!bounds) {
+        return Result<SharedPtr<Element>>::Failure(bounds.Error());
+    }
+    attached = bounds.Value()->SetSizeRange({}, {NumericLimits<float>::Max(), maxListHeight_});
+    if (attached) {
+        attached = bounds.Value()->TryAddChild(scroll.Value());
+    }
+    if (!attached) {
+        return Result<SharedPtr<Element>>::Failure(attached.Error());
+    }
+    if (selected_ > 0) {
+        (void)scroll.Value()->SetScrollOffset(static_cast<float>(selected_) * 24.f);
+    }
+    menuBounds_ = WeakPtr<SizeBox>(bounds.Value());
+    scroll_ = WeakPtr<ScrollView>(scroll.Value());
+    rows_ = Move(rows);
+    Highlight(selected_ >= 0 ? selected_ : 0);
+    return Result<SharedPtr<Element>>::Success(Move(bounds.Value()));
+}
+
+bool ComboBox::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+    if (event.type == input::InputEventType::KeyDown && count_) {
+        const bool up = event.key == input::Key::Up;
+        if (up || event.key == input::Key::Down) {
+            const int32 current = IsOpen() ? highlighted_ : selected_;
+            const int32 last = static_cast<int32>(count_) - 1;
+            const int32 next =
+                up ? (current > 0 ? current - 1 : 0) : (current < last ? current + 1 : last);
+            if (IsOpen()) {
+                Highlight(next);
+            } else {
+                (void)Select(next);
+            }
+            return true;
+        }
+        if (IsOpen() && event.key == input::Key::Enter) {
+            (void)Select(highlighted_);
+            return true;
+        }
+    }
+    return MenuAnchor::OnKeyEvent(user, event);
+}
+
+} // namespace rocks::ui

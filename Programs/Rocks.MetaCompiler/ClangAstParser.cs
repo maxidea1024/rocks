@@ -101,7 +101,9 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
     private static readonly HashSet<string> NonOwningTemplates = new(StringComparer.Ordinal)
     {
         "rocks::WeakObjectRef",
-        "rocks::SoftObjectRef"
+        "rocks::SoftObjectRef",
+        // WeakPtr는 객체를 소유하지 않으므로 대상 타입 내부의 강한 참조를 따라가지 않는다.
+        "rocks::WeakPtr"
     };
 
     private void IndexRecords(JsonElement node, string[] scope)
