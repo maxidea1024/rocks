@@ -130,6 +130,10 @@ public:
     Result<Span<const uint8>> Read(const BulkDataRef& ref,
                                    AssetDiagnostic* failure = nullptr) noexcept override;
     Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override;
+    // 파일 entry의 저장 byte를 읽는다(12.12절 저장 byte 재사용 — CRC 확인은 writer가 한다). span은
+    // 다음 ReadStoredBulk까지 유효하다. 오류: 메모리에만 있는 bulk·연결 없음 NotFound, 없는 id
+    // NotFound, 크기·SHA-256이 다른 ref TypeMismatch, 캐시 열기·읽기 오류, 할당 실패.
+    Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept override;
 
     // 저장하지 않은 bulk를 더하고 그 ref(최상위 bit id)를 준다. SHA-256을 이때 계산한다. 오류:
     // id 소진 CapacityExceeded, 할당 실패(raw는 실패해도 소비된다).
@@ -188,6 +192,8 @@ private:
     PackageFingerprint fingerprint_{};
     AssetId asset_{};
     Array<UniquePtr<Slot>> slots_;
+    // ReadStoredBulk의 저장 byte(다음 호출까지 둔다).
+    Array<uint8> stored_;
     // 메모리 id → slots_ index.
     HashMap<uint32, usize> table_;
     uint32 nextUnsaved_ = 1;

@@ -324,6 +324,11 @@ private:
 } // namespace
 
 Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& assignment) noexcept {
+    // Reset은 텍스트 묶음이 처리하지 않는다(호출자가 binary 재생 — AssignmentKind::Reset).
+    if (assignment.kind == AssignmentKind::Reset) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     const TextSource source = TextSource::Assignment(assignment.sourceIndex);
     TextPath resolved;
     PreparedInstancedTypes instanced(state);

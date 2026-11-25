@@ -70,6 +70,16 @@ struct FieldDiagnostic {
     int64 value = 0;
 };
 
+// 복원 1단계가 파일에서 만난 값 하나다(present — Docs/Design/RuntimeClassMetadata.ko.md 'A5b'
+// override 집합: 차이 형식 로드는 파일에 있는 값 경로가 집합이다). objectIndex는 그래프 안 노드
+// 위치(0부터), path는 그 필드·멤버의 경로(호출 동안만 유효 — 원소 단계는 없다, present는 필드·멤버
+// 단위로 한 번씩 불린다)다.
+struct PresentInfo {
+    TypeId objectType{};
+    uint32 objectIndex = 0;
+    Span<const PathStep> path{};
+};
+
 // non-null 소프트 참조 하나다(A1 Dependencies 수집). view와 path는 호출 동안만 유효하다.
 struct SoftReferenceInfo {
     AssetId asset{};
@@ -146,6 +156,18 @@ class FieldCodecHooks {
 public:
     virtual Result<void> Report(const FieldDiagnostic&) noexcept {
         return Result<void>::Success();
+    }
+
+    // 복원 1단계가 파일에 있는 필드·멤버마다 한 번 부른다(PresentInfo — 편집기 패키지 집합이
+    // override 집합을 채운다). 1단계 판정 뒤의 실패로 로드가 끝날 수 있으므로 받은 쪽은 로드가
+    // 성공한 뒤에만 집합에 넣는다. 실패를 돌려주면 그 복원이 그 오류로 실패한다.
+    virtual Result<void> NotePresent(const PresentInfo&) noexcept {
+        return Result<void>::Success();
+    }
+
+    // present를 받는지다(거짓이면 복원이 경로를 만들지 않는다 — 런타임 로드 비용). 기본 거짓.
+    virtual bool WantsPresent() const noexcept {
+        return false;
     }
 
     virtual Result<void> CollectSoftReference(const SoftReferenceInfo&) noexcept {

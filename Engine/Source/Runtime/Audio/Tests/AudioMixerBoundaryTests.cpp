@@ -56,7 +56,7 @@ namespace audio_mixer_boundary_tests_file {
 
 using namespace rocks::audio;
 
-// AU1 Mixer2 스레드 경계 시험이다(Docs/Design/AudioSystem.ko.md 3.23.8절). 경계 상태(쓰는 중
+// AU1 Mixer2 스레드 경계 시험이다(Docs/Design/AudioSystem 3.23.8절). 경계 상태(쓰는 중
 // seqlock, 늦게 보이는 mailbox, 낡은 ACK)는 Inline에서 시험 접근점으로 주입해 결정적으로 단언한다.
 
 namespace {

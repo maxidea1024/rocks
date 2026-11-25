@@ -6,6 +6,7 @@
 #include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/Algorithms.h>
+#include <Core/Assert.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
@@ -140,6 +141,26 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
         dependency.kind = static_cast<PackageDependencyKind>(kind);
         dependency.required = required == 1;
         (void)entry.dependencies.TryPushBack(dependency);
+    }
+
+    // export 타입 목록(A5c): 1개 이상, 엄격 오름차순.
+    const uint32 exportTypes = reader.ReadU32LE();
+    if (reader.Failed() || exportTypes == 0 || exportTypes > reader.Remaining() / GuidBytes) {
+        return Result<bool>::Success(false);
+    }
+
+    if (auto reserved = entry.exportTypes.TryReserve(exportTypes); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    for (uint32 index = 0; index < exportTypes; ++index) {
+        const TypeId type = ReadGuid(reader);
+        if (!entry.exportTypes.IsEmpty() &&
+            !GuidLess(entry.exportTypes[entry.exportTypes.Size() - 1], type)) {
+            return Result<bool>::Success(false);
+        }
+
+        (void)entry.exportTypes.TryPushBack(type);
     }
 
     const uint32 tags = reader.ReadU32LE();
@@ -453,6 +474,14 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
             writer.WriteU32LE(static_cast<uint32>(dependency.kind));
             WriteGuid(writer, dependency.expectedType);
             writer.WriteU8(dependency.required ? 1 : 0);
+        }
+
+        // 색인 항목은 대표 export가 있어 export 타입이 늘 1개 이상이다(읽기는 0을 형식 위반으로
+        // 캐시 전체를 버린다).
+        ROCKS_ASSERT(!entry->exportTypes.IsEmpty());
+        writer.WriteU32LE(static_cast<uint32>(entry->exportTypes.Size()));
+        for (TypeId type : entry->exportTypes) {
+            WriteGuid(writer, type);
         }
 
         writer.WriteU32LE(static_cast<uint32>(entry->tags.Size()));

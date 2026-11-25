@@ -3,7 +3,7 @@
 #include <AudioTools/AudioEncoder.h>
 
 // 인코더 출력을 청크로 나눠 플랫폼 데이터 byte를 만든다
-// (Docs/Design/AudioSystem.ko.md 3.30.1·3.30.3절).
+// (Docs/Design/AudioSystem 3.30.1·3.30.3절).
 //
 // 사용 예:
 //   AudioPlatformDataOptions options;

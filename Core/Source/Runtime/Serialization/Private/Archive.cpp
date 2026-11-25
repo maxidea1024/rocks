@@ -207,6 +207,15 @@ Span<const uint8> ArchiveWriter::View() const noexcept {
     return bytes_.View();
 }
 
+Result<void> ArchiveWriter::Truncate(usize byteCount) noexcept {
+    if (byteCount > bytes_.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 축소는 실패하지 않는다(Array::TryResize).
+    return bytes_.TryResize(byteCount);
+}
+
 usize ArchiveWriter::ByteCount() const noexcept {
     return bytes_.Size();
 }

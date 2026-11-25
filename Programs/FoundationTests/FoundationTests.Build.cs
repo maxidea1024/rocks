@@ -24,7 +24,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/AssetTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/InputActions", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -32,13 +32,15 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "Audio", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "InputActions", "Engine", "Gameplay", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "Material", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
-    // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1) and the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
-    // section 10.5, JL1). Headers enter only through this executable's Private includes
-    // (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Msdfgen", "Jolt"];
+    // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1), the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
+    // section 10.5, JL1) and the ImageCodec JPEG tests that write fixtures through libjpeg. Headers enter only through this executable's Private
+    // includes (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem section 8). libtiff and
+    // OpenEXRCore have process-wide state, so only ImageCodec depends on them (BD29) and the TIFF and EXR tests write fixtures through the ImageCodec
+    // encode API (Docs/Design/AssetSystem section 12.10.1).
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace", "FreeType", "LibPng", "Msdfgen", "Jolt", "LibJpegTurbo"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
@@ -92,6 +94,8 @@ public abstract class TestsModule : ModuleRules
         ["AssetDatabase"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetNugget"] = ["AssetDatabase", "AssetRuntime", "AssetTestFixtures", "ObjectSerialization"],
         ["AssetRuntime"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        // The Opus codec tests round-trip the AudioTools encoder through the AudioOpus decoder (AudioTools itself does not depend on it).
+        ["AudioTools"] = ["AudioOpus"],
         ["Base"] = ["Core"],
         ["Compression"] = ["AsyncCompression", "Task"],
         ["CompressionTraining"] = ["Task"],
@@ -104,6 +108,11 @@ public abstract class TestsModule : ModuleRules
         // Gameplay diagnostics tests drive the console commands through the Config test fixture context.
         ["Gameplay"] = ["ConfigTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
+        ["ImageCodec"] = ["Compression"],
+        // MemoryFileSystem.h(AssetDatabase Tests — header only): the profile tests read layered JSON from memory.
+        ["TargetProfiles"] = ["AssetDatabase"],
+        ["Texture"] = ["ObjectSerialization"],
+        ["TextureTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
         ["Material"] = ["AssetTestFixtures"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
@@ -121,11 +130,13 @@ public abstract class TestsModule : ModuleRules
             "Serialization", "TraceAnalysis", "World"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
-        ["ShaderCompiler"] = ["DeterministicMath"],
+        // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers.
+        ["ShaderCompiler"] = ["DeterministicMath", "RenderBase"],
         ["SparksCompiler"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTestHost"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTools"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["Task"] = ["TraceAnalysis"],
+        ["Texture"] = ["AssetTestFixtures", "ObjectSerialization"],
         ["TraceCapture"] = ["TraceAnalysis"],
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],

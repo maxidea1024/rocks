@@ -21,13 +21,23 @@ public:
         : allocator_(allocator), request_(request), out_(out), nodes_(allocator), map_(allocator),
           failed_(allocator), contentHashes_(allocator), localKeys_(allocator),
           buildKeys_(allocator), cookFailed_(allocator), cookLocal_(allocator),
-          cookKeys_(allocator), component_(allocator) {
+          cookKeys_(allocator), component_(allocator), ownDefaults_(allocator) {
     }
 
     Result<void> Run() noexcept {
         auto typeTable = HashTypeTable(allocator_, *request_.types);
         if (!typeTable) {
             return Result<void>::Failure(typeTable.Error());
+        }
+
+        defaults_ = request_.classDefaults;
+        if (defaults_ == nullptr) {
+            if (auto built = BuildCookClassDefaults(allocator_, *request_.types, ownDefaults_);
+                !built) {
+                return built;
+            }
+
+            defaults_ = &ownDefaults_;
         }
 
         out_.typeTable = typeTable.Value();
@@ -353,9 +363,43 @@ private:
         writer.WriteU32(PackageSectionSchemaVersion);
         writer.WriteDigest(out_.typeTable);
         writer.WriteDigest(request_.profileSettings);
+        // export 클래스 기본값(A5c): 타입마다 TypeId·유무 상태(0 = 레코드 있음, 1 = 레코드 없는
+        // 타입)·cooked 지문(있을 때만). 표에 없거나 실패한 타입은 CheckClassDefaults가 먼저 걸렀다.
+        writer.WriteList(entry.exportTypes.Size());
+        for (TypeId type : entry.exportTypes) {
+            const CookClassDefaults* row = defaults_->Find(type);
+            ROCKS_ASSERT(row != nullptr);
+            writer.WriteGuid(type);
+            const bool present = row->availability == ClassDefaultsAvailability::Present;
+            writer.WriteU32(present ? 0 : 1);
+            if (present) {
+                writer.WriteDigest(row->cooked);
+            }
+        }
+
         auto key = writer.Finish();
         ROCKS_ASSERT(key);
         return key.Value();
+    }
+
+    // 대상의 export 클래스가 모두 기본값 표에 있고 실패가 아닌지 본다(아니면 진단 — 미등록
+    // UnsupportedVersion·레코드 실패 InvalidClassDefaults, 그 대상은 cookKey가 없다).
+    bool CheckClassDefaults(const AssetIndexEntry& entry) noexcept {
+        bool usable = true;
+        for (TypeId type : entry.exportTypes) {
+            const CookClassDefaults* row = defaults_->Find(type);
+            if (row == nullptr) {
+                Diagnose(AssetDiagnosticCode::UnsupportedVersion, entry.id, AssetId{type},
+                         ErrorCode::NotFound);
+                usable = false;
+            } else if (row->availability == ClassDefaultsAvailability::Failed) {
+                Diagnose(AssetDiagnosticCode::InvalidClassDefaults, entry.id, AssetId{type},
+                         row->diagnostic.error);
+                usable = false;
+            }
+        }
+
+        return usable;
     }
 
     static bool IsExcluded(const Array<AssetId>& excluded, AssetId id) noexcept {
@@ -380,6 +424,10 @@ private:
 
         for (usize at = 0; at < count; ++at) {
             cookFailed_[at] = failed_[at];
+            if (cookFailed_[at] == 0 && !CheckClassDefaults(*nodes_[at])) {
+                cookFailed_[at] = 1;
+            }
+
             if (cookFailed_[at] != 0) {
                 continue;
             }
@@ -419,9 +467,59 @@ private:
     Array<uint32> component_;
     uint32 stamp_ = 0;
     ErrorCode error_ = ErrorCode::None;
+    // 클래스 기본값 표다(요청의 것, 없으면 ownDefaults_).
+    const CookClassDefaultsTable* defaults_ = nullptr;
+    CookClassDefaultsTable ownDefaults_;
 };
 
+// ForEachClassDefaults 방문자다: 레코드 유무로 행을 더하고 일시 실패만 오류로 돌려준다.
+Result<void> AddCookClassDefaults(void* user, TypeId type, const ClassDefaults* defaults,
+                                  const ClassDefaultsDiagnostic& diagnostic) noexcept {
+    auto& table = *static_cast<CookClassDefaultsTable*>(user);
+    CookClassDefaults row;
+    row.type = type;
+    row.diagnostic = diagnostic;
+    if (defaults != nullptr) {
+        row.availability = ClassDefaultsAvailability::Present;
+        row.cooked = defaults->Fingerprint(ClassDefaultsConfiguration::Cooked);
+    } else if (!IsRememberedClassDefaultsFailure(diagnostic)) {
+        return Result<void>::Failure(diagnostic.error != ErrorCode::None ? diagnostic.error
+                                                                         : ErrorCode::OutOfMemory);
+    } else {
+        row.availability = IsClassWithoutDefaults(diagnostic.reason)
+                               ? ClassDefaultsAvailability::WithoutRecord
+                               : ClassDefaultsAvailability::Failed;
+    }
+
+    return table.rows.TryPushBack(row);
+}
+
 } // namespace
+
+const CookClassDefaults* CookClassDefaultsTable::Find(TypeId type) const noexcept {
+    const usize at =
+        algo::LowerBound(rows.View(), type, [](const CookClassDefaults& row, TypeId key) noexcept {
+            return GuidLess(row.type, key);
+        });
+    return at < rows.Size() && rows[at].type == type ? &rows[at] : nullptr;
+}
+
+Result<void> BuildCookClassDefaults(Allocator& allocator, TypeRegistry& types,
+                                    CookClassDefaultsTable& out) noexcept {
+    out.rows.Clear();
+    if (auto visited = ForEachClassDefaults(types, allocator, &AddCookClassDefaults, &out);
+        !visited) {
+        out.rows.Clear();
+        return visited;
+    }
+
+    // 표 찾기는 GuidLess 이진 탐색이다(ForEachClassDefaults 순서에 기대지 않는다).
+    algo::Sort(out.rows.View(),
+               [](const CookClassDefaults& left, const CookClassDefaults& right) noexcept {
+                   return GuidLess(left.type, right.type);
+               });
+    return Result<void>::Success();
+}
 
 Result<Sha256Digest> HashTypeTable(Allocator& allocator, const TypeRegistry& types) noexcept {
     Array<TypeVersionEntry> list(allocator);

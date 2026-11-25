@@ -245,13 +245,19 @@ RuntimeStructFieldOps StructFieldOps(Guid fieldId,
 // ConstructionContext::Get으로 owner를 얻는다(Borrow·encode 고정 없음 — 검사 중 표시가 그
 // 트랜잭션의 쓰기를 막고 Commit 전이라 회수되지 않는다).
 template <class Owner, class MemberOwner, class Member>
-Result<uint32> EncodeGeneratedField(ObjectRegistry& registry, const ObjectAccessContext& access,
+Result<uint32> EncodeGeneratedField(ObjectRegistry* registry, const ObjectAccessContext& access,
                                     ObjectHandle handle, Member MemberOwner::* member,
                                     ArchiveWriter& out, FieldEncodeContext& context) noexcept {
     static_assert(IsBaseOfV<MemberOwner, Owner>);
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     if (!MatchesSchema<Member>(context.Field())) {
         return Result<uint32>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // 원본 모드(클래스 기본값 레코드 — Registry 밖 임시 인스턴스): 그 객체에서 바로 읽는다.
+    if (const Object* raw = context.RawSource()) {
+        const Owner& source = *static_cast<const Owner*>(raw);
+        return EncodeMemberValue(source.*member, out, context);
     }
 
     if (ConstructionContext* staged = context.StagedSource()) {
@@ -264,7 +270,11 @@ Result<uint32> EncodeGeneratedField(ObjectRegistry& registry, const ObjectAccess
         return EncodeMemberValue(source.*member, out, context);
     }
 
-    auto borrowed = registry.Resolve<Owner>(access, handle);
+    if (registry == nullptr) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto borrowed = registry->Resolve<Owner>(access, handle);
     if (!borrowed) {
         return Result<uint32>::Failure(borrowed.Error());
     }
@@ -473,10 +483,15 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
 //   RuntimeFieldOps ops{id, read, write, writeStaged, &detail::EncodeThroughFieldValue,
 //                       &detail::DecodeThroughFieldValue};
 //   ops.readStaged = readStaged;   // Required 필드면(그래프 로드의 Required 실효 값 검사)
-inline Result<uint32> EncodeThroughFieldValue(const RuntimeFieldOps& self, ObjectRegistry& registry,
+inline Result<uint32> EncodeThroughFieldValue(const RuntimeFieldOps& self, ObjectRegistry* registry,
                                               const ObjectAccessContext& access,
                                               ObjectHandle handle, ArchiveWriter& out,
                                               FieldEncodeContext& context) noexcept {
+    // 원본 모드는 read 함수표로 읽을 수 없다(클래스 기본값 레코드는 생성 코덱 표지가 먼저 막는다).
+    if (context.RawSource() != nullptr) {
+        return Result<uint32>::Failure(ErrorCode::Unsupported);
+    }
+
     FieldValue value(context.Scratch());
     if (ConstructionContext* staged = context.StagedSource()) {
         if (!self.readStaged) {
@@ -491,7 +506,11 @@ inline Result<uint32> EncodeThroughFieldValue(const RuntimeFieldOps& self, Objec
             return Result<uint32>::Failure(ErrorCode::Unsupported);
         }
 
-        if (auto read = self.read(registry, access, handle, value); !read) {
+        if (registry == nullptr) {
+            return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto read = self.read(*registry, access, handle, value); !read) {
             return Result<uint32>::Failure(read.Error());
         }
     }

@@ -52,6 +52,9 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public bool TextExportTransient { get; init; }
 
+    // JSON import가 이 Map을 키별로 병합한다(TextMapMergeByKey — Map 필드만, SchemaValidator RMC2202, Docs/Design/AssetSystem 10.3.1절).
+    public bool TextMapMergeByKey { get; init; }
+
     public string ToolName { get; init; } = "";
 
     public uint MaxElements { get; init; }
@@ -216,7 +219,7 @@ internal static class Specifiers
         foreach ((string key, Value? value) in values)
         {
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
-                "SaveGame" or "TextExportTransient" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly";
+                "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly";
             bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
@@ -263,6 +266,7 @@ internal static class Specifiers
             NonTryoutDuplicateTransient = values.ContainsKey("NonTryoutDuplicateTransient"),
             SaveGame = values.ContainsKey("SaveGame"),
             TextExportTransient = values.ContainsKey("TextExportTransient"),
+            TextMapMergeByKey = values.ContainsKey("TextMapMergeByKey"),
             // 필드 이름과 같은 Name은 지정하지 않은 것과 같다(모듈 사이 상속 필드의 도구 이름이 같은 바이트가 되게).
             ToolName = toolName == fieldName ? "" : toolName,
             MaxElements = values.GetValueOrDefault("MaxElements")?.Number ?? 0,

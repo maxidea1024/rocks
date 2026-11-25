@@ -11,7 +11,7 @@ namespace source_audio_tests_file {
 
 using namespace rocks::audio;
 
-// WAV·AIFF 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.25.4절). 파일 byte를 시험 안에서
+// WAV·AIFF 원본 디코드 시험이다(Docs/Design/AudioSystem 3.25.4절). 파일 byte를 시험 안에서
 // 조립하고 표본 값이 정확히 일치하는지 본다.
 
 namespace {

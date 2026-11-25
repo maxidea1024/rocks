@@ -80,14 +80,17 @@ Result<void> Visitor::VisitField(const SchemaScope& scope, usize index, uint32 f
     }
 
     if (detail::HasNoJsonForm(*slot.field)) {
-        return Result<void>::Failure(ErrorCode::Unsupported);
+        return context.Options().skipFieldsWithoutText
+                   ? Result<void>::Success()
+                   : Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     if (!path.Push(slot.field->id)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    Result<void> visited = visitor.Field(detail::FieldToolName(*slot.field));
+    Result<void> visited =
+        visitor.Field(detail::FieldToolName(*slot.field), *slot.field, slot.flags);
     if (visited) {
         visited = VisitValue(slot);
     }

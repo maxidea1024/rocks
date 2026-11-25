@@ -4,6 +4,7 @@
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCommandlets/AssetIndexCommandlet.h>
+#include <AssetCommandlets/ClassDefaultsCommandlet.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
@@ -13,6 +14,8 @@
 #include <Platform/File.h>
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
 #include <TraceAnalysis/TraceModel.h>
+#include <TextureTools/TextureCook.h>
+#include <TextureTools/TextureImport.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <UnrealExchange/ExchangeCommand.h>
 
@@ -171,6 +174,15 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
+    // 텍스처 임포터·설정 정규화 hook·예약 인자 번역기다(Docs/Design/AssetSystem 12.12절 — 임포터
+    // 묶음은 명령보다 오래 산다).
+    TextureImporterSet textureImporters;
+    assetContext.importers = {&RegisterTextureImporters, &textureImporters};
+    assetContext.typeHooks = {&RegisterTextureTypeHooks, nullptr};
+    assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
+    // 텍스처 쿠킹 처리기다(12.14절 — asset-cook이 처리기 표에 등록한다).
+    TextureCookProcessor textureCook;
+    assetContext.cookProcessors = {&RegisterTextureCookProcessors, &textureCook};
     // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);
@@ -268,6 +280,19 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         return 1;
     }
 
+    registered = registry.Register({"asset-load-cooked",
+                                    "Load one cooked asset from the cooked manifest to check it.",
+                                    &RunAssetLoadCookedCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered = registry.Register({"nugget-gc", "Collect unused asset nuggets of the project.",
+                                    &RunNuggetGcCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
     registered = registry.Register({"shader-compile", "Compile shaders through the shader workers.",
                                     &shader::RunShaderCompileCommand, &shaderContext});
     if (!registered) {
@@ -312,6 +337,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     }
     registered = registry.Register({"asset-alias-remove", "Remove a path alias of the project.",
                                     &RunAssetAliasRemoveCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"class-defaults-dump", "Print the class default fingerprints of the registered classes.",
+         &RunClassDefaultsDumpCommand, &assetContext});
     if (!registered) {
         return 1;
     }

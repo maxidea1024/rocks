@@ -165,6 +165,19 @@ struct AssignShelf {
     ROCKS_PROPERTY() OrderedMap<String, AssignPoint> byKey;
 };
 
+// 키별 병합 플래그 Map의 fixture다(TextMapMergeByKey — AssetSystem 10.3.1절): 플래그 단 Map(값은
+// Map을 담은 struct — 안쪽 Map은 플래그가 없어 통째 교체), 플래그 없는 Map(통째 교체).
+ROCKS_STRUCT()
+struct AssignKeyedShelf {
+    ROCKS_GENERATED_BODY()
+
+    explicit AssignKeyedShelf(Allocator& allocator) noexcept : keyed(allocator), plain(allocator) {
+    }
+
+    ROCKS_PROPERTY(TextMapMergeByKey) OrderedMap<String, AssignShelf> keyed;
+    ROCKS_PROPERTY() OrderedMap<String, int32> plain;
+};
+
 // 통째 값 대입의 fixture다(리플렉션 B9i 리뷰 반영): ReadOnly 통째 값(목록·항목 목록·정적
 // 배열·Optional·struct 원소 배열·struct Map — export → 같은 객체 import 왕복이 무동작인지),
 // Deprecated 클래스를 담을 수 있는 ClassRef 컨테이너, struct Map을 담은 struct의 배열·Optional.

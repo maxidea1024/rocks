@@ -34,6 +34,12 @@ struct DeprecatedThing final : KindBase {
     ROCKS_GENERATED_BODY()
 };
 
+// 편집기 전용 클래스다(에셋 A4e2b — 그래프 저장의 저장 불가 마스크에 EditorOnly를 더한 쿠킹 쓰기).
+ROCKS_CLASS(EditorOnly)
+struct EditorOnlyThing final : KindBase {
+    ROCKS_GENERATED_BODY()
+};
+
 ROCKS_CLASS()
 struct ClassFlagHolder final : Object {
     ROCKS_GENERATED_BODY()

@@ -102,6 +102,38 @@ inline uint32 ReadU32(Span<const uint8> bytes, usize at) noexcept {
     return value;
 }
 
+inline uint64 ReadU64(Span<const uint8> bytes, usize at) noexcept {
+    uint64 value = 0;
+    for (usize index = 0; index < 8; ++index) {
+        value |= uint64{bytes[at + index]} << (8 * index);
+    }
+
+    return value;
+}
+
+// 저장한 그래프(BaseOuter 없음)의 node번째 노드 Record다. header의 NodeTable 표지가 있으면 노드
+// 항목(type Guid 16 + outer u32 + 이름 u64 길이·byte)을 건너뛰고, 앞 노드의 Bytes(u64 길이 +
+// Record)를 지나 그 노드의 Record를 돌려준다(명세 5.1절 순서).
+inline Span<const uint8> NodeRecordAt(Span<const uint8> graph, usize node) noexcept {
+    constexpr usize GuidBytes = 16;
+    constexpr usize OuterBytes = 4;
+    constexpr usize LengthBytes = 8;
+    const uint32 count = ReadU32(graph, NodeCountOffset);
+    usize at = HeaderBytes;
+    if ((ReadU32(graph, FlagsOffset) & NodeTableFlag) != 0) {
+        for (uint32 index = 0; index < count; ++index) {
+            at += GuidBytes + OuterBytes;
+            at += LengthBytes + static_cast<usize>(ReadU64(graph, at));
+        }
+    }
+
+    for (usize index = 0; index < node; ++index) {
+        at += LengthBytes + static_cast<usize>(ReadU64(graph, at));
+    }
+
+    return graph.Slice(at + LengthBytes, static_cast<usize>(ReadU64(graph, at)));
+}
+
 inline void PatchU32(Array<uint8>& bytes, usize at, uint32 value) noexcept {
     for (usize index = 0; index < 4; ++index) {
         bytes[at + index] = static_cast<uint8>(value >> (8 * index));

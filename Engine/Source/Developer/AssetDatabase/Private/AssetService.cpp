@@ -11,6 +11,8 @@
 #include <Core/Text/Json.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/AssetId.h>
+#include <Object/PropertyPath.h>
+#include <ObjectSerialization/ClassDefaults.h>
 #include <ReflectionText/TextJson.h>
 #include <ReflectionText/TextLines.h>
 
@@ -39,12 +41,14 @@ EditorPackageSetConfig MakeSetConfig(const AssetServiceConfig& config, const Pro
     return packages;
 }
 
-// 공개 전 대표 에셋에 대입을 모두 검증·게시하는 초기화다(asset-new).
+// 공개 전 대표 에셋에 대입을 모두 검증·게시하는 초기화다(asset-new). 대입 경로는 override 집합이다
+// (A5b — Create가 공개 전에 설치한다).
 class AssignInitializer final : public EditorAssetInitializer {
 public:
-    AssignInitializer(Span<const TextAssignment> assignments, const TextCodecOptions& options,
-                      TextDiagnostics& diagnostics) noexcept
-        : assignments_(assignments), options_(options), diagnostics_(diagnostics) {
+    AssignInitializer(Allocator& allocator, Span<const TextAssignment> assignments,
+                      const TextCodecOptions& options, TextDiagnostics& diagnostics) noexcept
+        : assignments_(assignments), options_(options), diagnostics_(diagnostics),
+          overrides_(allocator) {
     }
 
     Result<void> Initialize(ConstructionContext& transaction,
@@ -55,17 +59,138 @@ public:
             return Result<void>::Failure(prepared.Error());
         }
 
+        if (!assignments_.IsEmpty()) {
+            auto lease = transaction.AcquireType(asset);
+            if (!lease) {
+                return Result<void>::Failure(lease.Error());
+            }
+
+            if (auto planned = asset_database_detail::PlanAssignmentOverrides(
+                    lease.Value(), assignments_, overrides_);
+                !planned) {
+                return planned;
+            }
+        }
+
         auto published = prepared.Value().Publish();
         return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
+    }
+
+    const OverrideSet* InitialOverrides() const noexcept override {
+        return &overrides_;
     }
 
 private:
     Span<const TextAssignment> assignments_;
     const TextCodecOptions& options_;
     TextDiagnostics& diagnostics_;
+    OverrideSet overrides_;
 };
 
 } // namespace
+
+namespace asset_database_detail {
+
+bool UnitsOverlap(const OverrideSet& left, const OverrideSet& right) noexcept {
+    // 한쪽이 다른 쪽의 접두인지다(같은 단위 포함).
+    auto prefixOf = [](Span<const Guid> shorter, Span<const Guid> longer) noexcept {
+        if (shorter.Size() > longer.Size()) {
+            return false;
+        }
+
+        for (usize index = 0; index < shorter.Size(); ++index) {
+            if (!(shorter[index] == longer[index])) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    for (usize l = 0; l < left.Count(); ++l) {
+        for (usize r = 0; r < right.Count(); ++r) {
+            if (prefixOf(left.At(l), right.At(r)) || prefixOf(right.At(r), left.At(l))) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+Result<void> PlanAssignmentOverrides(const TypeLease& lease,
+                                     Span<const reflection_text::TextAssignment> assignments,
+                                     OverrideSet& pending) noexcept {
+    for (const reflection_text::TextAssignment& assignment : assignments) {
+        const StringView text = assignment.path;
+        usize end = text.ByteCount();
+        for (usize index = 0; index < text.ByteCount(); ++index) {
+            if (text.Data()[index] == '[') {
+                end = index;
+                break;
+            }
+        }
+
+        // 해석되는 가장 긴 앞부분을 찾는다(검증된 대입이라 첫 필드는 늘 해석된다).
+        PropertyPathBuffer path;
+        bool parsed = false;
+        while (end > 0 && !parsed) {
+            parsed = static_cast<bool>(ParsePropertyPath(lease, text.SliceBytes(0, end), path));
+            if (!parsed) {
+                usize dot = end;
+                while (dot > 0 && text.Data()[dot - 1] != '.') {
+                    --dot;
+                }
+
+                end = dot > 0 ? dot - 1 : 0;
+            }
+        }
+
+        // PrepareAssignments가 검증한 대입이라 첫 필드는 늘 해석된다(여기 오지 않는다).
+        if (!parsed) {
+            continue;
+        }
+
+        if (auto added =
+                AddOverrideUnits(lease, Span<const PathStep>(path.steps, path.count), pending);
+            !added && added.Error() == ErrorCode::OutOfMemory) {
+            return added;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> CollectAssignedFields(Span<const reflection_text::TextAssignment> assignments,
+                                   Array<StringView>& out) noexcept {
+    for (const reflection_text::TextAssignment& assignment : assignments) {
+        const StringView path = assignment.path;
+        usize end = path.ByteCount();
+        for (usize index = 0; index < path.ByteCount(); ++index) {
+            const char c = path.Data()[index];
+            if (c == '.' || c == '[') {
+                end = index;
+                break;
+            }
+        }
+
+        const StringView name = path.SliceBytes(0, end);
+        bool seen = false;
+        for (StringView other : out) {
+            seen = seen || other == name;
+        }
+
+        if (!seen) {
+            if (auto pushed = out.TryPushBack(name); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace asset_database_detail
 
 AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
                            const AssetServiceConfig& config) noexcept
@@ -1241,7 +1366,7 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
     resolver.SetAliases(&aliasLookup_);
     const TextCodecOptions options = asset_database_detail::CodecOptions(set_, resolver);
-    AssignInitializer initializer(assignments, options, diagnostics);
+    AssignInitializer initializer(*allocator_, assignments, options, diagnostics);
     auto created = set_.Create(parsed.Value(), lease.Value().Id(), {}, failure, &initializer);
     if (!created) {
         return Result<AssetId>::Failure(created.Error());
@@ -1252,6 +1377,42 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
     for (usize index = 0; index < set_.Count(); ++index) {
         if (set_.At(index).package == created.Value()) {
             id = set_.At(index).id;
+        }
+    }
+
+    // 원본 재구성 → 설정 정규화(12.14절 A5j2 — UE 팩토리가 만든 뒤 UpdateSourceFromSourceTextures·
+    // ValidateSettingsAfterImportOrEdit를 부르는 것과 같다). 실패하면 만든 패키지를 저장하지 않고
+    // 닫는다(파일이 생기지 않는다 — 같은 경로의 다음 New가 막히지 않게).
+    {
+        auto representative = set_.Registry().FindChild(set_.Access(), created.Value(), "");
+        Array<StringView> assigned(*allocator_);
+        Result<void> finished = representative ? Result<void>::Success()
+                                               : Result<void>::Failure(representative.Error());
+        if (finished) {
+            finished = asset_database_detail::CollectAssignedFields(assignments, assigned);
+        }
+
+        if (finished && failure != nullptr) {
+            *failure = AssetDiagnostic{};
+        }
+
+        if (finished) {
+            finished =
+                set_.RebuildSource(representative.Value(), id, assigned.View(),
+                                   AssetSourceRebuildCause::New, ObjectHandle{}, warnings, failure);
+        }
+
+        if (finished) {
+            finished = set_.NormalizeSettings(representative.Value(), id, assigned.View());
+        }
+
+        if (!finished) {
+            (void)set_.Close(id);
+            if (failure != nullptr && failure->code == AssetDiagnosticCode::None) {
+                return FailAsset<AssetId>(failure, AssetDiagnosticCode::None, finished.Error());
+            }
+
+            return Result<AssetId>::Failure(finished.Error());
         }
     }
 
@@ -1277,19 +1438,161 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
         return Result<void>::Failure(asset.Error());
     }
 
+    // Reset(`--reset=` — 기본값 되돌리기 A5b2)은 텍스트 묶음과 떼어 binary로 재생한다.
+    Array<TextAssignment> texts(*allocator_);
+    Array<TextAssignment> resets(*allocator_);
+    for (const TextAssignment& assignment : assignments) {
+        Array<TextAssignment>& into =
+            assignment.kind == reflection_text::AssignmentKind::Reset ? resets : texts;
+        if (!into.TryPushBack(assignment)) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::OutOfMemory);
+        }
+    }
+
+    // 사전 단계: Reset 경로를 해석해 모두 계획한다(어떤 쓰기보다 먼저 — ReadOnly·범위·값 판정).
+    // 지울 override는 그 경로로 시작하는 단위 전부다(경로는 필드 단계만이라 단위 접두로 쓴다).
+    Array<RevertPlan> plans(*allocator_);
+    OverrideSet resetUnits(*allocator_);
+    OverrideSet pending(*allocator_);
+    {
+        auto lease = set_.Registry().AcquireType(set_.Access(), asset.Value());
+        if (!lease) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, lease.Error());
+        }
+
+        if (!plans.TryReserve(resets.Size())) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::OutOfMemory);
+        }
+
+        for (const TextAssignment& reset : resets) {
+            PropertyPathBuffer path;
+            if (auto parsed = ParsePropertyPath(lease.Value(), reset.path, path); !parsed) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, parsed.Error());
+            }
+
+            RevertPlan plan(*allocator_);
+            if (auto planned = PlanRevert(set_.Registry(), set_.Access(), asset.Value(), path,
+                                          *allocator_, plan);
+                !planned) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, planned.Error());
+            }
+
+            Guid prefix[MaxPropertyPathSteps];
+            for (usize index = 0; index < path.count; ++index) {
+                prefix[index] = path.steps[index].fieldId;
+            }
+
+            if (auto added = resetUnits.Add(Span<const Guid>(prefix, path.count)); !added) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, added.Error());
+            }
+
+            (void)plans.TryPushBack(rocks::Move(plan));
+        }
+    }
+
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
     resolver.SetAliases(&aliasLookup_);
     resolver.SetWeakScope(id);
     const TextCodecOptions options = asset_database_detail::CodecOptions(set_, resolver);
-    auto prepared = reflection_text::PrepareAssignments(
-        AssignmentTarget::Live(set_.Registry(), set_.Access(), asset.Value()), assignments, options,
-        diagnostics);
+    const AssignmentTarget live =
+        AssignmentTarget::Live(set_.Registry(), set_.Access(), asset.Value());
+    // 텍스트 대입을 검증한다(Reset이 있으면 검증만 하고 버린다 — 되돌리기 쓰기 뒤 Publish는 Busy라
+    // 되돌리기 뒤에 다시 준비한다).
+    auto prepared = reflection_text::PrepareAssignments(live, texts.View(), options, diagnostics);
     if (!prepared) {
         return FailAsset<void>(failure, AssetDiagnosticCode::None, prepared.Error());
     }
 
+    // 경로 쓰기는 override 집합에 기록한다(A5b — 기준과 같은 값을 넣어도 저장되어 기본값 변경
+    // 뒤에도 남는다). 단위 계산과 자리 예약은 게시 전에 하고 게시 뒤에는 실패 없이 합친다. 최종
+    // 집합 = 지금 집합 − Reset 단위 ∪ 대입 단위다.
+    {
+        auto lease = set_.Registry().AcquireType(set_.Access(), asset.Value());
+        if (!lease) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, lease.Error());
+        }
+
+        if (auto planned = asset_database_detail::PlanAssignmentOverrides(lease.Value(),
+                                                                          texts.View(), pending);
+            !planned) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, planned.Error());
+        }
+    }
+
+    // 같은 단위(한쪽이 다른 쪽 접두 — 펼친 잎 포함)에 Reset과 텍스트 대입을 섞으면 순서가 결과를
+    // 바꾸므로 사용법 오류다.
+    if (asset_database_detail::UnitsOverlap(resetUnits, pending)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = set_.ReserveOverrides(asset.Value(), pending); !reserved) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, reserved.Error());
+    }
+
+    // 되돌리기를 적용한 뒤의 실패는 일부만 바뀐 객체를 남기므로 패키지를 dirty로 표시하고 저장하지
+    // 않는다(다음 저장·닫기가 정리한다 — RuntimeClassMetadata 'A5b2 decode 명세' 원자성).
+    // MarkDirty는 열린 패키지에 실패하지 않는다.
+    const auto failApplied = [&](ErrorCode error) noexcept {
+        (void)set_.MarkDirty(id);
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, error);
+    };
+    if (!plans.IsEmpty()) {
+        // 되돌리기는 묶음 맨 앞이다. 남는 실패는 자원·상태 오류뿐이다.
+        for (const RevertPlan& plan : plans) {
+            if (auto applied = ApplyRevert(set_.Registry(), set_.Access(), plan); !applied) {
+                return failApplied(applied.Error());
+            }
+        }
+
+        prepared = reflection_text::PrepareAssignments(live, texts.View(), options, diagnostics);
+        if (!prepared) {
+            return failApplied(prepared.Error());
+        }
+    }
+
     if (auto published = prepared.Value().Publish(); !published) {
-        return FailAsset<void>(failure, AssetDiagnosticCode::None, published.Error());
+        return plans.IsEmpty()
+                   ? FailAsset<void>(failure, AssetDiagnosticCode::None, published.Error())
+                   : failApplied(published.Error());
+    }
+
+    set_.MergeOverrides(asset.Value(), pending);
+    set_.RemoveOverridesUnder(asset.Value(), resetUnits);
+
+    // 원본 재구성(12.14절 A5j2 — UE UpdateSourceFromSourceTextures) → 설정 정규화(12.12절 — UE
+    // ValidateSettingsAfterImportOrEdit): 대입·되돌린 최상위 필드를 넘긴다. 실패는 바뀐 객체를
+    // 남기므로 dirty로 두고 저장하지 않는다(재구성 실패의 진단은 hook이 남긴 것 그대로).
+    {
+        Array<StringView> assigned(*allocator_);
+        Result<void> normalized =
+            asset_database_detail::CollectAssignedFields(texts.View(), assigned);
+        if (normalized) {
+            normalized = asset_database_detail::CollectAssignedFields(resets.View(), assigned);
+        }
+
+        if (!normalized) {
+            return failApplied(normalized.Error());
+        }
+
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+        }
+
+        if (auto rebuilt = set_.RebuildSource(asset.Value(), id, assigned.View(),
+                                              AssetSourceRebuildCause::Edit, ObjectHandle{},
+                                              warnings, failure);
+            !rebuilt) {
+            (void)set_.MarkDirty(id);
+            if (failure != nullptr && failure->code == AssetDiagnosticCode::None) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, rebuilt.Error());
+            }
+
+            return rebuilt;
+        }
+
+        if (auto done = set_.NormalizeSettings(asset.Value(), id, assigned.View()); !done) {
+            return failApplied(done.Error());
+        }
     }
 
     // 열린 패키지다(MarkDirty는 실패하지 않는다).

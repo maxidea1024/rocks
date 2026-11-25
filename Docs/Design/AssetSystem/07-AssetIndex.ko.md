@@ -340,3 +340,39 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 리뷰 반영(필수 하나·권장 둘): 잘린 파일(CorruptPackage / InvalidArgument)·원본 루트 표 손상(InvalidSource / InvalidArgument, detail = (줄 << 32) | 열)을 정확한 값으로 단언한다. 원본 상태에 원인 오류가 있으면(InvalidSource·모르는 루트의 NotFound) 줄 끝에 ` (<오류 이름>)`, JSON에 `"error": "<오류 이름>" | null`을 쓴다(결과 구조의 정보를 출력에서 잃지 않게 — Busy·AccessDenied를 가린다). 할당 실패 시험은 결과의 모든 필드(임포터 id·버전, 원본 root·relative·error 포함)를 기준과 비교한다.
       - 버린 권장: `<path|AssetId>` 대상 해석을 private 함수 하나로 모으기. 세 곳의 계약이 다르다 — `Delete`는 별칭을 풀지 않고(지금 이름으로 고른다) 저장하지 않은 새 패키지를 포함하며 경로로 고른 항목도 같은 id 둘이면 거부한다, `OpenTarget`은 `EditorPackageSet::Open`을 거쳐 열기 진단을 쓰고 저장하지 않은 새 패키지를 포함한다, `ImportStatus`는 색인 항목만(파일을 고르므로 경로로 고른 같은 id 둘도 읽는다) 별칭과 함께 본다. 하나로 모으면 선택 인자 셋이 생겨 오히려 갈라짐을 숨긴다 — 경로 형식·AssetId 형식의 진단(InvalidPath)은 세 곳이 같다.
     - 버린 대안: 임포터가 패키지를 직접 만들고 저장(원자성·점유·기록 규칙이 임포터마다 흩어진다 — 문맥이 출력을 준다), 옵션을 객체(UE ImportUI `UObject`)로(공개 전 객체가 패키지에 들지 않는 일회 값이라 struct 값 대입으로 충분), 옵션 접두사 `--options.<필드>=`(13절 문법이 바뀌고 UE 명령행 관례와 다르다 — 등록 때 이름 충돌을 막는다), 확장자 경합 우선순위(UE `ImportPriority` — 결과가 등록 순서에 달린다), 타입이 바뀐 출력을 같은 id 새 객체로 바꾸기(위), 재임포트가 참조 기록 출력에서 owner를 따라가기(무엇이 바뀌는지 숨긴다 — 명시 거부), 명령 성공 경로 시험을 A5로 미루기(지금 닿는 코드를 미구현 사유로 남긴다 — 교차 검증 필수 4), 시험 전용 Commandlet 실행 파일(타깃이 하나 더 생긴다 — 프로세스 안 호출이 작다).
+19. **A2f3 세부 — Unreal 교환 요구 UXR8–UXR11**(2026-11-23, 설계 — 권장안으로 확정, [Unreal 교환](../UnrealExchange.ko.md) 13절. A4 뒤·A5 전 약속). 넷 모두 A2f 프레임워크 보강이다. A2f3a(UXR8 임포터 태그) → A2f3b(UXR9 가변 원본) → A2f3c(UXR10 기존 에셋 참조) → A2f3d(UXR11 다중 주 출력 묶음)로 한다. 앞의 셋은 작고 넷째가 크다.
+    - **A2f3a 임포터 태그(UXR8)** — UE `UAssetImportData`가 AssetRegistry 태그를 내는 것과 같다(원천이 기록이라 그 플러그인을 끈 프로젝트에서 다시 저장해도 남는다):
+      - ImportRecord 소유 기록에 필드 8 `tags`(RecordList[Record(ImportTagSchema){1 key String, 2 value String}])를 더한다. 키는 `<기록 importerName>.`으로 시작하고 그 뒤가 비지 않는다(키 전체 1–`MaxPackageTagKeyBytes`, 값 0–`MaxPackageTagValueBytes`, UTF-8·NUL 없음 — 패키지 Tags 규칙), (키, 값) byte 순·같은 쌍 없음, 개수 0–`MaxImportTags`(256 — 태그가 없으면 필드를 쓰지 않는다). 참조 기록은 태그가 없다. 기록 스키마 버전을 2로 올린다 — 1은 읽지 않는다(하위호환 없음 — 교차 검증 권장, 2가 아니면 Unsupported, 시험 fixture는 다시 만든다).
+      - 엔진 태그 이름공간과 같은 임포터 이름(`Bundle` — bundle 구성원 태그 `Bundle.<이름>`과 겹친다, 대소문자 무시)은 등록이 InvalidArgument로 거부한다(교차 검증 권장).
+      - 문맥 `AddTag(key, value)`: 주 출력 기록에 더한다(접두·길이·개수 위반 InvalidArgument, 같은 쌍은 한 번). 다른 출력의 태그는 없다(한계 — 교환 임포트는 에셋마다 주 출력이다).
+      - 문맥 `PreviousTags()`: 재임포트면 옛 소유 기록의 태그(새 임포트는 빈 목록). 이번 기록에는 이번에 `AddTag`한 것만 남는다 — 임포터가 옛 값을 읽어 다시 더한다(옛 경로 누적 `FormerPaths`는 임포터 몫).
+      - 저장(`EditorPackageSet`): 소유 기록이면 그 태그를 hook Tags·bundle 태그와 같은 sink에 더한다(같은 쌍은 합친다). 그래서 색인 항목 태그(`ExchangeIndexLookup`)에 그대로 나온다.
+    - **A2f3b 가변 원본(UXR9)**:
+      - 역할 규칙을 넓힌다(교차 검증 필수 1 — 교환 역할 `blob:<sha256 hex 64>`은 69 byte이고 `:`를 쓴다): 역할 byte 상한 `MaxImportRoleBytes` 64 → 128(ImportRecord role 필드도), 임포터 역할 문자에 `:`를 더한다(`[A-Za-z0-9_.:]`). `--source.<역할>=<파일>`은 첫 `=`에서 나누므로 `:`와 겹치지 않는다.
+      - `AssetImporterInfo::rolePrefixes`(예 `blob:`): 고정 역할(`roles`)은 정확히 한 번씩, 그 밖 역할은 어느 접두로 시작하고 접두 뒤가 비지 않아야 한다(역할 규칙·유일). 원본 수 `MaxImportSources`(256)·합 `MaxImportTotalSourceBytes`(2 GiB)를 넘는 에셋은 실패한다(한계 — blob이 매우 많은 에셋). 등록 검사: 접두는 1–`MaxImportRoleBytes`의 역할 문자, 고정 역할이 접두로 시작하면 InvalidArgument(모호함), 접두끼리 하나가 다른 것의 앞부분이면 InvalidArgument.
+      - `AssetImporterInfo::variableSourcesOnly`(A5h 보강 — 2026-11-24, 12.12절): 참이면 고정 역할이 없다(기본 `source`도 없음). 등록 검사: `roles`가 비고 `rolePrefixes`가 하나 이상(아니면 InvalidArgument). 원본은 가변 역할 하나 이상(0개 InvalidImportOption). 단일 원본 재지정 `--source=`는 받지 않는다(사용법 오류) — 텍스처 slice처럼 모든 원본이 같은 종류인 임포터용.
+      - 재임포트 원본 전체 교체: `Reimport(…, replaceSources)`(묶음 구성원은 `AssetImportGroupMember::replaceSources`) — 참이면 준 원본 목록(overrides)이 새 원본 전체다(새 임포트와 같은 역할 규칙, 기록 원본은 버린다). 명령 `asset-reimport <path> --replace-sources --source.<역할>=…`(`--replace-sources`는 `--source.<역할>=`과만 — 하나 이상 필요, 사용법 오류 2).
+      - 원본 순서: 고정 역할(roles 순) 다음 접두 역할(역할 byte 순) — 결정적.
+    - **A2f3c 기존 에셋 참조(UXR10)**:
+      - 문맥 `OpenAsset(AssetId) → Result<ObjectHandle>`: 찾는 순서는 이번 실행의 묶음 구성원 주 출력(A2f3d — 새 구성원은 색인에 없고 메모리에만 있다, NotFound가 아니다) → 색인에 고유하게 있는 다른 에셋이다(묶음은 모든 임포터 호출 뒤에 저장하므로 이번 실행의 출력은 색인에 없다 — 다른 구성원은 묶음 표로 찾는다)(교차 검증 권장). 대표 객체를 준다. 출력에 Hard 참조로 건다(`SetReference`) — 저장이 import·Hard 의존을 쓴다. 이번 임포트 자기 출력은 `Output`으로 받는다(`OpenAsset`이면 InvalidArgument). 연 패키지는 이번 실행의 열린 목록에 들어 끝에(성공·실패 모두) `CloseOpened`로 닫힌다(이미 열려 있던 것은 그대로). 읽기 전용(NewerVersion) 패키지도 참조 대상으로 연다. 오류: 없음 NotFound(진단 `MissingDependency`, related = 그 id), 같은 id 둘 `DuplicateAssetId`, 열기 오류, 할당 실패.
+      - 임포터는 대상 타입을 직접 확인한다(`Registry().AcquireType` — 다르면 그 임포터가 실패시킨다).
+    - **A2f3d 다중 주 출력 묶음(UXR11)** — 서로 Hard로 참조하는 주 출력들(Unreal 9.3절 Hard 순환 단위 — complex collision 메시 둘 등)을 한 번에 임포트하고 저장한다:
+      - API `AssetService::ImportGroup(lock, Span<const AssetImportGroupMember>, diagnostics, results, warnings, failure)`. 구성원 = {path, sources, importerName, assignments, reimport}(구성원마다 새 임포트 또는 재임포트 — 재임포트 구성원의 sources는 원본 바꾸기, `replaceSources`면 전체 교체). 구성원 수 1–`MaxImportGroupMembers`(64). 같은 경로 둘은 InvalidArgument.
+      - 순서: 판정(구성원마다 A2f1b·A2f2a와 같은 판정 — 하나라도 실패하면 아무것도 쓰지 않는다) → 모든 구성원의 주 출력을 먼저 만든다/연다(그래서 임포터가 `OpenAsset(다른 구성원 id)`로 순환을 걸 수 있다 — 구성원 id는 결과 전에 `MemberAsset(index)`로도 얻는다) → 구성원 순서대로 임포터 호출(구성원마다 자기 문맥) → 저장.
+      - 저장 순서는 **새 파일 먼저, 기존 파일 나중**이다(교차 검증 필수 2 — 디스크에 참조가 닫힌 상태만 남게): 새 비주 출력 → 새 주 출력 → 기존 비주 출력 → 기존 주 출력(같은 무리 안에서는 구성원 순서·key 순). 새 파일 단계에서 실패하면 이번에 쓴 새 파일을 모두 지운다(아직 어떤 기존 파일도 그것을 가리키지 않는다 — 못 지우면 `OrphanNotDeleted`). 기존 파일 단계에서 실패하면 새 파일을 지우지 않는다(이미 교체한 기존 파일이 가리킬 수 있다 — 남은 새 출력은 다시 실행하면 수렴하거나 `OrphanedOutput`으로 보인다), 교체하지 못한 기존 파일은 옛 내용이다. 진짜 다중 파일 원자 교체는 없다(한계 — 7.1절 18과 같은 근거). 이 순서와 되돌리기 규칙은 단일 재임포트(A2f2a — 처음에는 "바뀐 출력 → 주 출력"이고 실패하면 새 파일을 지웠다: 먼저 저장한 기존 출력이 새 key 출력을 Hard로 가리키면 깨진 참조가 남는다)에도 같이 적용한다.
+      - 구성원 A의 추가 출력 `<A 경로>_<key>`가 다른 구성원 B의 주 경로와 같으면 B 주 출력을 먼저 만들었으므로 A의 `Output`이 `DuplicatePath`로 실패한다(진단 detail = A 구성원 번호 — 교차 검증 권장, 시험으로 단언).
+      - 단일 `Import`·`Reimport`는 구성원 하나짜리 묶음으로 같은 본문을 쓴다(동작 같음).
+      - 결과: 구성원마다 `AssetImportResult`. 실패 진단의 asset은 실패한 구성원의 주 출력(모르면 null), detail = 구성원 번호.
+      - Unreal 교환(10.5절 8번)은 이것이 생기면 Hard 순환 단위를 `HardCycle`로 실패시키지 않고 한 묶음으로 넘긴다(rocks-ff 몫).
+    - 버린 대안: 임포터 태그를 타입 hook으로(플러그인을 끈 프로젝트에서 다시 저장하면 사라진다), 가변 원본을 원본 하나의 묶음 파일로(원본마다 해시·상태를 잃는다), 기존 에셋을 경로로 열기(이동에 깨진다 — AssetId), 순환 단위를 임포트 뒤 `asset-set`으로 잇기(중간 상태가 디스크에 남고 Required 참조는 저장이 거부한다).
+    - 시험은 시험 임포터에 태그·접두 역할·기존 에셋 참조·묶음 변형을 더한다(서비스·명령·할당 실패 — 14절 완료 조건 넷).
+    - **상태(2026-11-23, 빌드는 화면 마일스톤 뒤 — 로컬 커밋)**: A2f3a(54c937ca)·A2f3b(3f75b718)·A2f3c(0ead72d9)·A2f3d 구현. 구현하며 정한 것:
+      - 문맥 `GroupSize()`·`GroupIndex()`·`MemberAsset(index)`(범위 밖 null) — 단일 Import·Reimport는 크기 1이다. `OpenAsset(MemberAsset(자기 번호))`는 자기 출력이라 InvalidArgument다.
+      - 구성원 입력 규칙: 재임포트 구성원의 `importer`는 비어야 하고 새 구성원의 `replaceSources`는 거짓이어야 한다(InvalidArgument). 결과 수는 구성원 수와 같아야 한다.
+      - 재임포트의 Busy 판정은 묶음 전에 열려 있던 패키지로 한다(앞 구성원이 Hard 의존으로 연 다른 구성원은 Busy가 아니다 — 순환 재임포트). 단일 재임포트에서는 전과 같다.
+      - 새 주 출력은 단일 Import에서도 임포터 호출 전에 만든다(같은 본문 — 주 경로의 디스크 점유는 원본을 읽기 전에 Create가 본다). 임포터의 `Output({}, outputType)`은 그것을 준다(타입·두 번째 요청 규칙은 같다).
+      - 묶음 실패 진단: detail = 구성원 번호(원래 detail을 덮는다), asset은 원래 진단의 것이 있으면 그대로, 비면 그 구성원의 주 출력. 단일 Import·Reimport는 진단을 바꾸지 않는다(detail = 원본 번호 등).
+      - 묶음 명령은 두지 않는다(Unreal 교환이 API로 쓴다 — 필요해지면 따로).
+      - 리뷰 반영(필수 둘): (1) 재임포트의 고아 입양 후보는 색인 owner 표(`AssetIndex::FindByOwner` — 참조 기록 항목을 owner → 경로 순으로 둔 표, 게시 때 id 표와 함께 만든다)로 찾는다. 비용은 O(log N + 그 owner의 참조 기록 수 × 기록 출력 수)이고 경로 검사를 먼저 한다(처음 구현은 재임포트마다 색인 전체 × 기록 출력을 훑었다 — 전 에셋 재동기화에서 O(N²)). 기록 출력과 입양 출력의 합이 `MaxImportOutputs`에 닿으면 CapacityExceeded로 거부한다(한계 — 고아를 지운 뒤 다시 실행). (2) 기존 파일을 교체한 뒤의 실패는 주 출력까지 저장한 구성원의 결과(id·경로·출력)를 남기고 나머지는 비운다. 새 구성원이 그렇게 남았으면 그 파일이 디스크에 있으므로 호출자는 다음 실행에서 그 구성원을 재임포트로 넘긴다(그대로 새 임포트로 다시 실행하면 DuplicatePath — 수렴은 재임포트 구성원끼리만 저절로 된다).
+      - 저장 때 기록 태그를 읽는 것(`PlanHookOutputs`)은 실패 경로를 늘리지 않는다: 읽지 못하는 기록(다른 스키마·더 새 버전)의 패키지는 열 때 읽기 전용이 되어 저장·복제에 오지 않는다(남는 실패는 할당뿐).
+      - 대조표 14.1.79, coverage 14.1.80(빌드 때).

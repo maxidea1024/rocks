@@ -49,7 +49,11 @@ using StructFieldPathFunction = Result<void> (*)(const RuntimeStructFieldOps& se
 // 있으면(그래프 로드의 Required 실효 값 검사) handle이 그 트랜잭션의 공개 전 객체이므로 Registry
 // Resolve(Reserved 객체는 StaleHandle) 대신 ConstructionContext::Get으로 읽는다(생성 thunk는 그렇게
 // 하고, 범용 codec은 readStaged를 쓴다). 2단계 decode가 owner에 값을 쓸 때는 GetForWrite로 얻는다.
-using FieldEncodeFunction = Result<uint32> (*)(const RuntimeFieldOps& self, ObjectRegistry&,
+// registry는 context.RawSource()가 있을 때(클래스 기본값 레코드 — Registry 밖 임시 인스턴스,
+// Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드') null이고 handle도 null이다. 생성 thunk는
+// 그때 원본 객체에서 멤버를 읽고, 범용 codec은 Unsupported다. 그 밖에는 null이 아니다(null이면
+// InvalidArgument).
+using FieldEncodeFunction = Result<uint32> (*)(const RuntimeFieldOps& self, ObjectRegistry*,
                                                const ObjectAccessContext&, ObjectHandle,
                                                ArchiveWriter& payload,
                                                FieldEncodeContext& context) noexcept;
@@ -641,6 +645,12 @@ struct RuntimeTypeOps {
     // 방문해야 한다 — 패키지 정책 ObjectRegistry는 이 선언이 있는 타입만 만든다(관찰자 계수가
     // 편집은 Registry API로, Commit·Discard는 trace로 센다).
     bool completeFieldLayout = false;
+    // 모든 필드 encode thunk가 생성 코드(detail::EncodeGeneratedField·EncodeBitfieldField)인지다 —
+    // 문맥의 원본 모드(FieldEncodeContext::RawSource)로 Registry 밖 인스턴스를 읽을 수 있다. 메타
+    // 생성 코드만 true로 두고, 손으로 만든 함수표는 false다(클래스 기본값 레코드가 없어 전부
+    // 저장한다 — Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드', 판정은 base 사슬 전체 —
+    // TypeLease::HasGeneratedFieldCodecs).
+    bool generatedFieldCodecs = false;
     // 참조 위치 표(M3, Docs/Design/GarbageCollectionScale.ko.md 3.4절)를 만드는 함수다(선택). 객체
     // 하나를 받아 강한 간선 칸(ObjectRef·ObjectRefArray 멤버)의 위치를 builder에 알린다. 있으면
     // Registry가 타입마다 첫 객체에서 표를 한 번 만들고 GC 표식이 trace 대신 표의 위치에서 handle을

@@ -114,7 +114,33 @@ enum class AssetDiagnosticCode : uint16 {
     UnknownProperty,
     // 쿠킹 verify(AssetSystem 10.2절 결정 12 — A4e1): 처리기가 너겟 적중 없이 다시 만든
     // 결과가 적중 결과와 byte가 다르다(오류 — 키가 입력을 다 담지 않았거나 처리기가 비결정적이다).
-    NuggetMismatch
+    NuggetMismatch,
+    // 클래스 기본값(RuntimeClassMetadata 'A5c 지문 연결'): 클래스의 기본값 레코드를 만들 수
+    // 없다(타입 계약 위반 — 비결정 생성자·non-null 참조 기본값 등, related = 그 TypeId). 그
+    // 클래스를 쓰는 대상의 cookKey 오류, 쓰는 대상이 없으면 쿠킹 보고서 경고다(다시 쿠킹으로 풀리지
+    // 않는다 — UnsupportedVersion과 나눈다).
+    InvalidClassDefaults,
+    // 텍스처 원본(AssetSystem 12.2·12.9절 — A5e 디코더): 손실 원본 형식(LossySource — 오류, JPEG
+    // 밖의 손실 형식), sRGB가 아닌 색 표시(NonSrgbSource — 경고, 변환하지 않는다), 버린 추가
+    // 채널(IgnoredSourceChannels — 경고, detail = 버린 수).
+    LossySource,
+    NonSrgbSource,
+    IgnoredSourceChannels,
+    // 텍스처 원본(AssetSystem 12.10절 — A5f 디코더): 버린 원본 mip(IgnoredSourceMips — 경고,
+    // detail = slice당 버린 mip 수 — mip 0만 쓴다), 버린 추가 이미지(IgnoredSourceImages — 경고,
+    // detail = 버린 수 — TIFF 다음 IFD·EXR 다른 part).
+    IgnoredSourceMips,
+    IgnoredSourceImages,
+    // 텍스처 빌드(AssetSystem 12.13절 — A5i): SRGB를 무시함(SrgbIgnored — 경고, 선형 데이터 종류나
+    // float 출력의 SRGB on), Address Wrap인 PreserveBorder(PreserveBorderWithWrap — 경고).
+    SrgbIgnored,
+    PreserveBorderWithWrap,
+    // 쿠킹 너겟(AssetSystem 12.14절 — A5j): 같은 키에 다른 값이 이미 있다(NuggetConflict — 경고,
+    // 처리기 비결정성·키 누락 진단, 9절 Put 판정. 이번 결과를 쓰고 기존 항목은 둔다).
+    NuggetConflict,
+    // 텍스처 원본 묶음(AssetSystem 12.14절 A5j2): 원본 재구성이 원본을 비웠다(SourceCleared — 경고,
+    // Volume 원본 2D·타일이 원본을 만들지 못함, UE와 같이 비우고 알린다).
+    SourceCleared
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

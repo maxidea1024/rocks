@@ -1,6 +1,6 @@
 ## 3. 모듈과 의존
 
-서버 타깃은 글꼴 라이브러리를 링크하지 않는다(FR8). [빌드 타깃](../BuildTargets/README.ko.md) BD25는 Runtime 모듈이 Server에서 빠지는 모듈에 의존하는 것을 막고, 타깃 종류 매크로는 BD2·BD3의 넷만 둔다. 그래서 오디오(AD24 — [오디오](../AudioSystem.ko.md) 장치 backend·`AudioOpus`)와 같은 방식으로 **라이브러리를 쓰는 부분을 ClientOnly backend 모듈로 떼고 표 등록으로 연결한다**(FD13).
+서버 타깃은 글꼴 라이브러리를 링크하지 않는다(FR8). [빌드 타깃](../BuildTargets/README.ko.md) BD25는 Runtime 모듈이 Server에서 빠지는 모듈에 의존하는 것을 막고, 타깃 종류 매크로는 BD2·BD3의 넷만 둔다. 그래서 오디오(AD24 — [오디오](../AudioSystem/README.ko.md) 장치 backend·`AudioOpus`)와 같은 방식으로 **라이브러리를 쓰는 부분을 ClientOnly backend 모듈로 떼고 표 등록으로 연결한다**(FD13).
 
 | 모듈 | type | 위치 | 직접 의존 | 책임 | 금지 |
 |---|---|---|---|---|---|

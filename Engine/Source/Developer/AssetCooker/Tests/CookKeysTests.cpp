@@ -286,6 +286,79 @@ TEST(CookKeys_BasicAndDeterministic) {
           BuildChanged(keys, again, KeyTargets, false));
 }
 
+// 클래스 기본값(A5c — RuntimeClassMetadata 'A5c 지문 연결'): 요청에 표가 없으면 ComputeCookKeys가
+// 만든 것과 같은 키다. Base 클래스의 cooked 지문이 바뀌면 그 클래스를 export하는 A와 Hard로 기대는
+// L의 cookKey만 바뀌고(build key는 그대로) 나머지는 그대로다. 레코드 없는 타입으로 바뀌어도(상태
+// byte) 같은 대상이 바뀐다. 레코드 실패면 A는 키가 없고 InvalidClassDefaults(related = 타입),
+// 표에 없으면 UnsupportedVersion(NotFound)이며 Hard로 기대는 L도 키가 없다.
+TEST(CookKeys_ClassDefaultsChangeKeys) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    KeyScene scene(env);
+    REQUIRE(scene.ready);
+    CookKeySet base(env.allocator);
+    REQUIRE(Baseline(scene, base));
+    CookClassDefaultsTable table(env.allocator);
+    REQUIRE(BuildCookClassDefaults(env.allocator, env.types, table));
+    const CookClassDefaults* baseRow = table.Find(IdOf<BaseGameAsset>());
+    REQUIRE(baseRow != nullptr);
+    CHECK(baseRow->availability == ClassDefaultsAvailability::Present);
+    for (usize index = 1; index < table.rows.Size(); ++index) {
+        CHECK(GuidLess(table.rows[index - 1].type, table.rows[index].type));
+    }
+
+    CookKeyRequest request = scene.Request();
+    request.classDefaults = &table;
+    CookKeySet same(env.allocator);
+    REQUIRE(ComputeCookKeys(env.allocator, request, same));
+    CHECK(same.diagnostics.IsEmpty());
+    CHECK(CookChanged(base, same, KeyTargets, false) &&
+          BuildChanged(base, same, KeyTargets, false));
+
+    CookClassDefaults& row = table.rows[static_cast<usize>(baseRow - table.rows.Data())];
+    const uint64 exporting[] = {AId, LId};
+    const uint64 untouched[] = {PId, A2Id, TId, M1Id, M2Id, N1Id};
+    row.cooked.bytes[0] ^= 1;
+    CookKeySet flipped(env.allocator);
+    REQUIRE(ComputeCookKeys(env.allocator, request, flipped));
+    CHECK(flipped.diagnostics.IsEmpty());
+    CHECK(CookChanged(base, flipped, exporting, true) &&
+          BuildChanged(base, flipped, exporting, false));
+    CHECK(CookChanged(base, flipped, untouched, false));
+
+    row.availability = ClassDefaultsAvailability::WithoutRecord;
+    CookKeySet without(env.allocator);
+    REQUIRE(ComputeCookKeys(env.allocator, request, without));
+    CHECK(without.diagnostics.IsEmpty());
+    CHECK(CookChanged(base, without, exporting, true) &&
+          CookChanged(flipped, without, exporting, true));
+    CHECK(CookChanged(base, without, untouched, false));
+
+    row.availability = ClassDefaultsAvailability::Failed;
+    row.diagnostic.error = ErrorCode::InvalidArgument;
+    CookKeySet failed(env.allocator);
+    REQUIRE(ComputeCookKeys(env.allocator, request, failed));
+    const CookKey* a = KeyOf(failed, AId);
+    const CookKey* l = KeyOf(failed, LId);
+    REQUIRE(a != nullptr && l != nullptr);
+    CHECK(!a->hasKey && !l->hasKey);
+    REQUIRE(failed.diagnostics.Size() == 1);
+    CHECK(failed.diagnostics[0].code == AssetDiagnosticCode::InvalidClassDefaults &&
+          failed.diagnostics[0].asset == FixedId(AId) &&
+          failed.diagnostics[0].related == AssetId{IdOf<BaseGameAsset>()} &&
+          failed.diagnostics[0].error == ErrorCode::InvalidArgument);
+    CHECK(CookChanged(base, failed, untouched, false));
+
+    REQUIRE(table.rows.TryRemoveAt(static_cast<usize>(&row - table.rows.Data()), 1));
+    CookKeySet missing(env.allocator);
+    REQUIRE(ComputeCookKeys(env.allocator, request, missing));
+    REQUIRE(missing.diagnostics.Size() == 1);
+    CHECK(missing.diagnostics[0].code == AssetDiagnosticCode::UnsupportedVersion &&
+          missing.diagnostics[0].related == AssetId{IdOf<BaseGameAsset>()} &&
+          missing.diagnostics[0].error == ErrorCode::NotFound);
+    CHECK(!KeyOf(missing, AId)->hasKey && !KeyOf(missing, LId)->hasKey);
+}
+
 // 입력마다: 바뀌어야 할 키만 바뀐다.
 TEST(CookKeys_InputsChangeKeys) {
     AssetEnv env;

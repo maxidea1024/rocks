@@ -6,6 +6,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
+#include <Object/ClassDefaults.h>
 
 namespace rocks {
 
@@ -62,15 +63,32 @@ struct PackageCustomVersion {
     uint32 version = 0;
 };
 
+// Summary 클래스 기본값 목록 항목이다(A5c — 레코드 있는 export 클래스의 저장 당시 지문, TypeId
+// 오름차순). 지문 구성은 패키지 종류를 따른다(에디터 Editor, 쿠킹 Cooked).
+struct PackageClassDefaults {
+    TypeId type{};
+    Sha256Digest fingerprint{};
+};
+
+// 에디터 로드에서 지금 레코드를 만들 수 없는 export 클래스다(A5c — 레코드 실패, 이 패키지는 그
+// 타입을 고치기 전까지 저장할 수 없다).
+struct PackageUnavailableDefaults {
+    TypeId type{};
+    ClassDefaultsReason reason = ClassDefaultsReason::None;
+};
+
 // Summary 섹션 값이다(AS 5.2·5.3절). 에디터 패키지는 savedBy·compatibleWith, 쿠킹 패키지는
 // profileId· profileSettings·cookerVersion을 가진다(다른 종류의 칸은 기본값).
 struct PackageSummary {
     explicit PackageSummary(Allocator& allocator) noexcept
-        : types(allocator), customVersions(allocator), profileId(allocator) {
+        : types(allocator), customVersions(allocator), classDefaults(allocator),
+          profileId(allocator) {
     }
 
     Array<PackageTypeVersion> types;
     Array<PackageCustomVersion> customVersions;
+    // 클래스 기본값 목록이다(A5c — 행 ⊆ types의 타입, 레코드 없는 타입은 행이 없다).
+    Array<PackageClassDefaults> classDefaults;
     EngineVersion savedBy{};
     EngineVersion compatibleWith{};
     String profileId;
@@ -101,7 +119,8 @@ struct PackageReadOptions {
 struct PackageContents {
     explicit PackageContents(Allocator& allocator) noexcept
         : sections(allocator), summary(allocator), exports(allocator), imports(allocator),
-          dependencies(allocator), bulkEntries(allocator) {
+          dependencies(allocator), bulkEntries(allocator), changedDefaults(allocator),
+          unavailableDefaults(allocator) {
     }
 
     PackageContents(PackageContents&&) noexcept = default;
@@ -132,6 +151,13 @@ struct PackageContents {
     // UnsupportedVersion을 낸다(AS 5.7절 18). options.types가 null이면 보지 않으므로 거짓이고,
     // 쿠킹은 그런 패키지를 UnsupportedVersion으로 거부하므로 언제나 거짓이다.
     bool unavailableExportType = false;
+    // 에디터 패키지에서 저장 당시와 지금의 클래스 기본값이 다른 export 클래스다(A5c — 지문이
+    // 다르거나 행 유무와 지금 레코드 유무가 다르다, TypeId 오름차순). 쿠킹은 그런 패키지를
+    // UnsupportedVersion으로 거부하므로 언제나 비어 있다. options.types가 null이면 보지 않는다.
+    Array<TypeId> changedDefaults;
+    // 에디터 패키지에서 지금 레코드를 만들 수 없는 export 클래스다(A5c — 레코드 실패, TypeId
+    // 오름차순). changedDefaults와 겹치지 않는다.
+    Array<PackageUnavailableDefaults> unavailableDefaults;
     // 헤더 + 섹션 표의 SHA-256이다(AS 5.5절 지문).
     PackageFingerprint fingerprint{};
 };
@@ -141,9 +167,10 @@ struct PackageContents {
 //
 // 오류(진단 코드 / ErrorCode): 크기 < 64·magic·headerCrc·flags(Editor·Cooked 중 정확히 하나가
 // 아님)는 CorruptPackage / InvalidArgument, formatVersion이 현재보다 높으면 에디터
-// NewerVersion·쿠킹 UnsupportedVersion / Unsupported, 낮으면 UnsupportedVersion / Unsupported(v1이
-// 첫 버전이다), headerBytes· bulkAlignment·reserved·sectionCount(1–32)·sectionTableOffset
-// 정렬·fileBytes 식·Stat 크기 불일치·64 GiB 초과는 CorruptPackage / InvalidArgument다.
+// NewerVersion·쿠킹 UnsupportedVersion / Unsupported, 낮으면 UnsupportedVersion /
+// Unsupported(하위호환 없음 — v2는 A5c 차이 형식·클래스 기본값 목록), headerBytes·
+// bulkAlignment·reserved·sectionCount(1–32)·sectionTableOffset 정렬·fileBytes 식·Stat 크기
+// 불일치·64 GiB 초과는 CorruptPackage / InvalidArgument다.
 ROCKS_ASSETRUNTIME_API Result<PackageHeader>
 ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
                   AssetDiagnostic* failure = nullptr) noexcept;

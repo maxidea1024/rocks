@@ -14,7 +14,7 @@ using namespace rocks::audio;
 using platform::PlatformMath;
 
 // Audio DSP1의 방위각 패너·거리 감쇠
-// 시험이다(Docs/Design/AudioSystem.ko.md 3.20.6–3.20.7절, 3.20.8절). 패너 정답은 UE Get3DChannelMap
+// 시험이다(Docs/Design/AudioSystem 3.20.6–3.20.7절, 3.20.8절). 패너 정답은 UE Get3DChannelMap
 // 식(스피커 표와 각도 비율)이고 감쇠 정답은 UE AttenuationEval 식을 double로 독립 계산한 값이다.
 
 namespace {

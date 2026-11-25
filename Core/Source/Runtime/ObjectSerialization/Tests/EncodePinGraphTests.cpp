@@ -56,9 +56,11 @@ ErrorCode ErrorOf(const Result<void>& result) noexcept {
 
 // encode 도중의 계약 위반 콜백을 흉내 낸다: 지금 encode 중인 노드와 다른 노드를 바꿔 본 뒤 값을
 // 쓴다.
-Result<uint32> EncodeProbe(const RuntimeFieldOps& self, ObjectRegistry& registry,
+Result<uint32> EncodeProbe(const RuntimeFieldOps& self, ObjectRegistry* registryPointer,
                            const ObjectAccessContext& access, ObjectHandle object,
                            ArchiveWriter& out, FieldEncodeContext& context) noexcept {
+    // 그래프 저장은 늘 Registry를 준다(원본 모드가 아니다).
+    ObjectRegistry& registry = *registryPointer;
     ++Attempt.calls;
     auto owner = registry.Resolve<PinNode>(access, object);
     auto other = registry.Resolve<PinNode>(access, Attempt.other);
@@ -89,7 +91,7 @@ Result<uint32> EncodeProbe(const RuntimeFieldOps& self, ObjectRegistry& registry
         return Result<uint32>::Failure(ErrorCode::DependencyFailed);
     }
 
-    return detail::EncodeThroughFieldValue(self, registry, access, object, out, context);
+    return detail::EncodeThroughFieldValue(self, registryPointer, access, object, out, context);
 }
 
 template <auto Member>

@@ -6,7 +6,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 
-// 오디오 원본 파일 디코드 결과와 디코더다(Docs/Design/AudioSystem.ko.md 3.10절, 3.25–3.29절). 파일
+// 오디오 원본 파일 디코드 결과와 디코더다(Docs/Design/AudioSystem 3.10절, 3.25–3.29절). 파일
 // byte를 받아 planar float32 PCM과 loop·cue 메타데이터를 낸다. SoundClipImporter가 이 결과를
 // SoundClip bulk로 옮긴다. 디코더: WAV·AIFF(자체), MP3(minimp3), FLAC(libFLAC),
 // Vorbis(libvorbis), Opus(opusfile).

@@ -48,7 +48,7 @@ struct IntegralCurve {
 
     Array<IntegralKey> Keys;
     int32 DefaultValue = MAX_int32;
-    bool bUseDefaultValueBeforeFirstKey = false;
+    bool useDefaultValueBeforeFirstKey = false;
 };
 
 // 표시 철자를 비교 대상으로 쓰는 String 키다(값은 StringView 하나 — 시험 문자열은 정적 상수다).
@@ -100,7 +100,7 @@ inline int32 IntegralEvaluate(const IntegralCurve& Curve, float Time, int32 InDe
         return ReturnVal;
     }
 
-    if (Num == 0 || (Curve.bUseDefaultValueBeforeFirstKey && Time < Keys[0].time)) {
+    if (Num == 0 || (Curve.useDefaultValueBeforeFirstKey && Time < Keys[0].time)) {
     } else if (Num < 2 || Time < Keys[0].time) {
         ReturnVal = Keys[0].value;
     } else if (Time < Keys[Num - 1].time) {
@@ -363,7 +363,7 @@ TEST(StepCurveGolden_IntegerEvaluateMatchesUe) {
         }
 
         curve.useDefaultBeforeFirstKey = random.Next() % 2 == 0;
-        reference.bUseDefaultValueBeforeFirstKey = curve.useDefaultBeforeFirstKey;
+        reference.useDefaultValueBeforeFirstKey = curve.useDefaultBeforeFirstKey;
         REQUIRE(SameIntegerKeys(curve, reference));
         for (int32 sample = 0; sample < 30; ++sample) {
             const float time = sample == 0 ? platform::PlatformMath::QuietNaN<float>()
@@ -599,8 +599,8 @@ TEST(StepCurveGolden_RemoveRedundantKeysMatchesUe) {
         }
 
         curve.useDefaultBeforeFirstKey = true;
-        reference.bUseDefaultValueBeforeFirstKey = true;
-        ue.bUseDefaultValueBeforeFirstKey = true;
+        reference.useDefaultValueBeforeFirstKey = true;
+        ue.useDefaultValueBeforeFirstKey = true;
         const usize before = curve.KeyCount();
         REQUIRE(curve.TryRemoveRedundantKeys());
         ue58step::IntegralRemoveRedundant(reference, allocator, {});

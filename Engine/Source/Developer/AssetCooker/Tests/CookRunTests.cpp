@@ -151,6 +151,38 @@ public:
     }
 };
 
+// 경고 하나를 남기고(asset·warning은 일부러 틀리게 — 실행기가 고친다) 기본 쿠킹을 하거나 실패하는
+// 처리기다(12.14절 10번).
+class WarningProcessor final : public CookProcessor {
+public:
+    explicit WarningProcessor(bool fail) noexcept : fail_(fail) {
+    }
+
+    NuggetProcessorId Identity() const noexcept override {
+        return NuggetProcessorId{Guid{0x3A27, 1}, Guid{0x3A27, 2}};
+    }
+
+    Result<void> Cook(CookContext& context) const noexcept override {
+        if (context.warnings != nullptr) {
+            if (auto pushed = context.warnings->TryPushBack(CookDiagnostic{
+                    AssetDiagnosticCode::SrgbIgnored, false, AssetId{}, {}, 0, ErrorCode::None});
+                !pushed) {
+                return pushed;
+            }
+        }
+
+        if (fail_) {
+            context.failure->code = AssetDiagnosticCode::InvalidSetting;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return CookProcessor::Cook(context);
+    }
+
+private:
+    bool fail_;
+};
+
 // 실행 장면이다: 메모리 프로젝트(Sources 여덟 + 선택 읽기 전용 패키지)·색인·집합·처리기 표·대상·키.
 struct RunScene {
     // fallback이 있으면 기본 처리기 대신 표의 fallback으로 쓴다.
@@ -590,6 +622,52 @@ TEST(CookRun_ErrorsContinue) {
         CHECK(diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
               diagnostic.error != ErrorCode::None);
     }
+}
+
+// 처리기 경고(12.14절 10번): 경고는 대상 id·warning = true로 실행 진단에 옮겨지고 HasErrors가 세지
+// 않는다(모두 쿠킹된다). 실패한 처리기의 앞선 경고도 옮겨지고 오류 진단이 따로 남는다.
+TEST(CookRun_ProcessorWarnings) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    WarningProcessor warning(false);
+    RunScene scene(env, false, &warning);
+    REQUIRE(scene.ready && scene.Prepare());
+    MemoryOutput output(env.allocator);
+    CookRunResult result(env.allocator);
+    REQUIRE(CookPackages(env.allocator, scene.Request(output), result));
+    CHECK(!result.HasErrors() && result.cooked == 8 && output.records.Size() == 8);
+    CHECK(result.diagnostics.Size() == 8);
+    for (const CookDiagnostic& diagnostic : result.diagnostics) {
+        bool cooked = false;
+        for (const OutputRecord& record : output.records) {
+            cooked = cooked || record.asset == diagnostic.asset;
+        }
+
+        CHECK(diagnostic.warning && diagnostic.code == AssetDiagnosticCode::SrgbIgnored &&
+              !diagnostic.asset.IsNull() && cooked);
+    }
+
+    AssetEnv failEnv;
+    REQUIRE(failEnv.Ready());
+    RunScene failScene(failEnv);
+    REQUIRE(failScene.ready);
+    WarningProcessor failing(true);
+    REQUIRE(failScene.table.Register(IdOf<BaseGameAsset>(), failing));
+    REQUIRE(failScene.Prepare());
+    MemoryOutput failOutput(failEnv.allocator);
+    CookRunResult failResult(failEnv.allocator);
+    REQUIRE(CookPackages(failEnv.allocator, failScene.Request(failOutput), failResult));
+    CHECK(failResult.HasErrors());
+    usize warnings = 0;
+    usize errors = 0;
+    for (const CookDiagnostic& diagnostic : failResult.diagnostics) {
+        warnings += diagnostic.warning ? 1 : 0;
+        errors +=
+            !diagnostic.warning && diagnostic.code == AssetDiagnosticCode::InvalidSetting ? 1 : 0;
+    }
+
+    // BaseGameAsset 계열 둘이 각각 경고 하나·오류 하나다(CookRun_ErrorsContinue와 같은 대상).
+    CHECK(warnings == 2 && errors == 2);
 }
 
 // 요청 거부: 인자 null·상한 0·키 수·재사용 표지 수 다름·다른 색인의 대상 InvalidArgument(결과

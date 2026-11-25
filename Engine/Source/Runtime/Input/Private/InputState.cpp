@@ -405,8 +405,17 @@ void InputState::ApplyGamepad(uint32 index, const GamepadSnapshot& snapshot) noe
         axis = 0.0f;
     }
 
+    for (float& axis : gamepad.rawAxes) {
+        axis = 0.0f;
+    }
+
     if (!snapshot.connected) {
         return;
+    }
+
+    for (uint32 axisIndex = 0; axisIndex < GamepadAxisCount; ++axisIndex) {
+        const float raw = snapshot.axes[axisIndex];
+        gamepad.rawAxes[axisIndex] = math::IsFinite(raw) ? raw : 0.0f;
     }
 
     float leftX = snapshot.axes[static_cast<uint32>(GamepadAxis::LeftX)];
@@ -558,6 +567,15 @@ float InputState::GamepadAxisValue(uint32 gamepad, GamepadAxis axis) const noexc
     }
 
     return gamepads_[gamepad].axes[index];
+}
+
+float InputState::GamepadAxisRawValue(uint32 gamepad, GamepadAxis axis) const noexcept {
+    const uint32 index = static_cast<uint32>(axis);
+    if (gamepad >= MaxGamepads || index >= GamepadAxisCount || !gamepads_[gamepad].connected) {
+        return 0.0f;
+    }
+
+    return gamepads_[gamepad].rawAxes[index];
 }
 
 } // namespace rocks::input

@@ -589,6 +589,8 @@ internal static class CppEmitter
         }
 
         Body("ops.completeFieldLayout = true;");
+        // 모든 필드 encode thunk가 생성 코드다(클래스 기본값 레코드의 원본 모드 — Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드').
+        Body("ops.generatedFieldCodecs = true;");
         Body("ops.parallelTraceSafe = true;");
         // 방문할 필드가 없는 클래스는 잎 타입이다(GC marker가 trace를 부르지 않는다 — Docs/Design/GarbageCollectionScale.ko.md M2).
         if (traced.Length == 0)
@@ -826,7 +828,7 @@ internal static class CppEmitter
     // thunk(ClassPathThunk — 모든 필드), Map·Set은 그 뒤에 키 enum native 키다.
     private static void EmitClassCodec(string native, string member, string tail, Action<string> Line)
     {
-        Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
+        Line("+[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
         Line($"return detail::EncodeGeneratedField<{native}>(registry, access, object, {member}, payload, context); }},");
         Line("+[](const RuntimeFieldOps&, ConstructionContext* construction, ObjectHandle object, const FieldView& field, FieldDecodeContext& context) noexcept -> Result<void> {");
         Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{tail} }},");

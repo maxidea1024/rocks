@@ -1,8 +1,6 @@
-#include "../../AssetDatabase/Tests/AssetDatabaseTestSupport.h"
-#include "../../AssetDatabase/Tests/EditorPackageSetTestSupport.h"
+#include "CookProjectTestSupport.h"
 
 #include <AssetCooker/AssetCooker.module.generated.h>
-#include <AssetCooker/CookProject.h>
 #include <Core/FileError.h>
 #include <TestSupport/NFailAllocator.h>
 
@@ -13,117 +11,16 @@
 // 깨진 기존 매니페스트는 경고 뒤 전체 쿠킹, 요청 거부·읽기 IO 오류, 할당 실패.
 using namespace rocks;
 
+bool rocks::cook_project_test::RegisterCookerTypes(AssetEnv& env) noexcept {
+    return static_cast<bool>(generated::AssetCooker::RegisterModuleTypes(env.modules));
+}
+
 namespace cook_project_tests_file {
 
 using namespace rocks::editor_set_test;
+using namespace rocks::cook_project_test;
 
 namespace {
-
-constexpr StringView Manifest = "Saved/Cooked/Windows/CookedManifest.rman";
-constexpr StringView Report = "Saved/Cooked/Windows/CookReport.json";
-
-// 프로젝트 장면이다: 디스크 임시 루트(잠금)와 그 루트의 메모리 파일 시스템(Content에 Sources 여덟).
-struct ProjectScene {
-    // registerTypes가 거짓이면 AssetCooker 타입(보고서 struct)을 등록하지 않는다.
-    ProjectScene(AssetEnv& sceneEnv, const char* tag, bool registerTypes = true) noexcept
-        : env(sceneEnv), sources(env.allocator), root(tag), layout(env.allocator),
-          files(env.allocator, Initialized(layout, root)), index(env.allocator, layout),
-          set(env.allocator, SetConfig()), processors(env.allocator, env.types, processor),
-          profile(env.allocator), settings(env.allocator) {
-        String everything(env.allocator);
-        ready = (!registerTypes ||
-                 static_cast<bool>(generated::AssetCooker::RegisterModuleTypes(env.modules))) &&
-                MakeSources(env, sources) && root.made && files.Ready() &&
-                files.AddDirectory("Content") && files.AddDirectory("Content/Characters") &&
-                files.AddFile("Content/Base.rasset", sources.base.View()) &&
-                files.AddFile("Content/Derived.rasset", sources.derived.View()) &&
-                files.AddFile("Content/Characters/Hero.rasset", sources.hero.View()) &&
-                files.AddFile("Content/Characters/Villain.rasset", sources.villain.View()) &&
-                files.AddFile("Content/Leaf.rasset", sources.leaf.View()) &&
-                files.AddFile("Content/CycleA.rasset", sources.cycleA.View()) &&
-                files.AddFile("Content/CycleB.rasset", sources.cycleB.View()) &&
-                files.AddFile("Content/Hub.rasset", sources.hub.View()) &&
-                static_cast<bool>(index.Rebuild(files, ReadOptions())) &&
-                static_cast<bool>(set.Initialize()) && static_cast<bool>(lock.Acquire(layout, 0)) &&
-                profile.id.TryAssign("Windows") && everything.TryAssign("/Game/") &&
-                settings.alwaysCook.TryPushBack(Move(everything));
-    }
-
-    static StringView Initialized(ProjectLayout& layout, const TempProject& root) noexcept {
-        return layout.Initialize(root.Root()) ? layout.Root() : root.Root();
-    }
-
-    static PackageReadOptions ReadOptions() noexcept {
-        PackageReadOptions options;
-        options.engineVersion = TestEngineVersion;
-        return options;
-    }
-
-    EditorPackageSetConfig SetConfig() noexcept {
-        EditorPackageSetConfig config;
-        config.types = &env.types;
-        config.files = &files;
-        config.layout = &layout;
-        config.index = &index;
-        config.read.engineVersion = TestEngineVersion;
-        config.registryContext = ContextId{0x434f4f4b50524a31ull, 1};
-        config.registryOptions.names = &env.names;
-        return config;
-    }
-
-    CookProjectRequest Request(Span<const StringView> paths = {}) noexcept {
-        CookProjectRequest request;
-        request.files = &files;
-        request.layout = &layout;
-        request.lock = &lock;
-        request.index = &index;
-        request.packages = &set;
-        request.types = &env.types;
-        request.processors = &processors;
-        request.profile = &profile;
-        request.profileSettings =
-            Sha256::Hash(Span<const uint8>(reinterpret_cast<const uint8*>("W"), 1));
-        request.settings = &settings;
-        request.cookSettings =
-            Sha256::Hash(Span<const uint8>(reinterpret_cast<const uint8*>("S"), 1));
-        request.cookedBy = TestEngineVersion;
-        request.paths = paths;
-        return request;
-    }
-
-    Array<uint8> Copy(StringView relative) noexcept {
-        Array<uint8> bytes(env.allocator);
-        CHECK(bytes.TryAppend(files.Bytes(relative)));
-        return bytes;
-    }
-
-    // 공백을 뺀 보고서 텍스트다.
-    String ReportText() noexcept {
-        String text(env.allocator);
-        for (uint8 byte : files.Bytes(Report)) {
-            if (byte != ' ' && byte != '\n' && byte != '\r' && byte != '\t') {
-                const char character = static_cast<char>(byte);
-                CHECK(text.TryAppend(StringView(&character, 1)));
-            }
-        }
-
-        return text;
-    }
-
-    AssetEnv& env;
-    Sources sources;
-    TempProject root;
-    ProjectLayout layout;
-    MemoryFileSystem files;
-    AssetIndex index;
-    EditorPackageSet set;
-    DefaultCookProcessor processor;
-    CookProcessorTable processors;
-    TargetProfile profile;
-    CookSettings settings;
-    AssetDatabaseLock lock;
-    bool ready = false;
-};
 
 // verify 쿠킹이면 Leaf에서 NuggetMismatch로 실패하고(너겟 적중 대조 실패 흉내 — A4e1), 그 밖은
 // 기본 Cook이다.
@@ -381,10 +278,22 @@ TEST(CookProject_CorruptManifestAndRejects) {
     CHECK(rejects([](CookProjectRequest& r) noexcept { r.processors = nullptr; }));
     CHECK(rejects([](CookProjectRequest& r) noexcept { r.profile = nullptr; }));
     CHECK(rejects([](CookProjectRequest& r) noexcept { r.settings = nullptr; }));
+    CHECK(rejects([](CookProjectRequest& r) noexcept { r.cookLock = nullptr; }));
+    // 쿠킹 루트 잠금만 쥐고 에셋 DB 잠금이 없으면 거부한다(잠금 순서 — 10.3.1절 A4f4 2번).
     AssetDatabaseLock unheld;
     CookProjectRequest request = scene.Request();
     request.lock = &unheld;
     CHECK(CookProject(env.allocator, request, result).Error() == ErrorCode::InvalidArgument);
+    // 쿠킹 루트 잠금이 없거나 다른 쿠킹 루트(다른 프로필)의 것이면 거부한다.
+    CookRootLock noCookLock;
+    CookProjectRequest unlocked = scene.Request();
+    unlocked.cookLock = &noCookLock;
+    CHECK(CookProject(env.allocator, unlocked, result).Error() == ErrorCode::InvalidArgument);
+    CookRootLock otherRoot;
+    REQUIRE(otherRoot.Acquire(env.allocator, scene.layout.SavedDirectory(), "Android", 0));
+    CookProjectRequest elsewhere = scene.Request();
+    elsewhere.cookLock = &otherRoot;
+    CHECK(CookProject(env.allocator, elsewhere, result).Error() == ErrorCode::InvalidArgument);
 
     const Array<uint8> current = scene.Copy(Manifest);
     scene.files.Remove(Manifest);

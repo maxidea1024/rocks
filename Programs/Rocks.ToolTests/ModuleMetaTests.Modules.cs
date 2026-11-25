@@ -649,6 +649,7 @@ internal static partial class ModuleMetaTests
                 ("softAsStrongEdge", original.Replace(Int32Kind, "\"kind\": \"SoftObjectReference\",\n            \"type\": \"\"", StringComparison.Ordinal)
                     .Replace(ValueField, "\"fieldKind\": \"ObjectReference\"", StringComparison.Ordinal)),
                 ("requiredScalar", original[..fieldFlags] + "\"flags\": [\"Required\"]" + original[(fieldFlags + "\"flags\": []".Length)..]),
+                ("mapMergeScalar", original[..fieldFlags] + "\"flags\": [\"TextMapMergeByKey\"]" + original[(fieldFlags + "\"flags\": []".Length)..]),
                 ("enumWithoutTarget", original.Replace(Int32Kind, "\"kind\": \"Enum\",\n            \"type\": \"\"", StringComparison.Ordinal))
             })
             {

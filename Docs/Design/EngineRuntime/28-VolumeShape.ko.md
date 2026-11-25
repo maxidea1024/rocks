@@ -4,7 +4,7 @@
 
 ## 28. 영역 형상과 후처리 볼륨 혼합(CR17)
 
-설계일 2026-11-25. [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR17, 결정 CD1(brush volume 대신 영역 형상)의 상세 설계다. 물리 엔진 없이 "점이 영역 안인가, 밖이면 얼마나 먼가"를 정확히 계산한다. 쓰는 곳은 후처리 볼륨(27.5절에서 미룬 볼륨 모으기 — ERD53), 오디오 리버브 존([오디오](../AudioSystem.ko.md) 3.15.2절), 앞으로의 물리 볼륨(CR27)이다. UE 경로 약어: `E/` = `Engine/Source/Runtime/Engine/`(UE 5.8.4).
+설계일 2026-11-25. [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR17, 결정 CD1(brush volume 대신 영역 형상)의 상세 설계다. 물리 엔진 없이 "점이 영역 안인가, 밖이면 얼마나 먼가"를 정확히 계산한다. 쓰는 곳은 후처리 볼륨(27.5절에서 미룬 볼륨 모으기 — ERD53), 오디오 리버브 존([오디오](../AudioSystem/03-Design/03.15-ReverbZone.ko.md) 3.15.2절), 앞으로의 물리 볼륨(CR27)이다. UE 경로 약어: `E/` = `Engine/Source/Runtime/Engine/`(UE 5.8.4).
 
 ### 28.1 UE 동작
 

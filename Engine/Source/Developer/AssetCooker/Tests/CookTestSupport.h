@@ -7,6 +7,8 @@
 #include <AssetCooker/CookTargets.h>
 #include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
+#include <AssetTestFixtures/BundleAssets.generated.h>
+#include <AssetTestFixtures/BundleAssets.h>
 #include <Core/Text/StringBuilder.h>
 #include <TestSupport/Test.h>
 
@@ -25,7 +27,9 @@ using K = PackageDependencyKind;
 enum class NodeType {
     Test,
     Base,
-    Derived
+    Derived,
+    // 대표 타입이 EditorOnly 클래스인 에셋(EditorToolAsset — A4e2b).
+    EditorTool
 };
 
 struct Dep {
@@ -59,6 +63,9 @@ inline Array<uint8> GraphPackage(AssetEnv& env, ObjectRegistry& registry,
         asset = Make<TestAsset>(registry, IdOf<TestAsset>(), package.Handle(), "");
     } else if (node.type == NodeType::Base) {
         asset = Make<BaseGameAsset>(registry, IdOf<BaseGameAsset>(), package.Handle(), "");
+    } else if (node.type == NodeType::EditorTool) {
+        asset = Make<asset_fixture::EditorToolAsset>(
+            registry, IdOf<asset_fixture::EditorToolAsset>(), package.Handle(), "");
     } else {
         asset = Make<DerivedGameAsset>(registry, IdOf<DerivedGameAsset>(), package.Handle(), "");
     }

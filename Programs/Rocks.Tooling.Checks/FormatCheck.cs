@@ -8,8 +8,9 @@ namespace Rocks.Tooling.Checks;
 
 /// <summary>
 /// 저장소 소스의 서식 검사다. C++(.h·.c·.cpp·.mm)은 고정 버전 clang-format이 루트의 .clang-format으로, C#은 .NET SDK의
-/// dotnet format이 .editorconfig의 [*.cs] 규칙(Allman 중괄호·한 줄 한 문장 같은 공백 서식과 IDE0011·IDE2000–IDE2003)으로
-/// 검사한다. 서식만 보며 이름·주석·설계 품질은 리뷰가 맡는다.
+/// dotnet format이 .editorconfig의 [*.cs] 규칙(Allman 중괄호·한 줄 한 문장 같은 공백 서식과 IDE0011·IDE2000–IDE2003)으로, 선언
+/// 사이 빈 줄은 <see cref="CSharpMemberSpacing"/>(규칙 <c>member-blank-line</c>)이 검사한다. 서식만 보며 이름·주석·설계 품질은
+/// 리뷰가 맡는다.
 /// </summary>
 public static class FormatCheck
 {
@@ -111,9 +112,12 @@ public static class FormatCheck
 
         // 소속 확인(프로젝트 평가, 1초 안팎)은 dotnet format보다 먼저 끝낸다. dotnet format의 복원이 아직 복원하지 않은 프로젝트의
         // obj 파일(nuget.g.props 등)을 쓰는 동안 같은 프로젝트를 평가하면 쓰는 중인 파일을 읽을 수 있다.
-        List<CheckFailure> failures = [.. await CheckCSharpProjectsAsync(root, dotnet, environment, cancellationToken)];
+        var (projectFailures, sources) = await InspectCSharpProjectsAsync(root, dotnet, environment, cancellationToken);
+        List<CheckFailure> failures = [.. projectFailures];
         if (apply)
         {
+            // 순서: 빈 줄 수정 → dotnet format 수정 → 둘 다 다시 검증(CodingStyle.md). 수정 단계의 구문 오류는 검증 단계가 알린다.
+            _ = CSharpMemberSpacing.Check(root, sources, apply: true);
             var fixedResult = await ProcessRunner.RunAsync(new(dotnet, ["format", workspace, "--severity", "warn"], root, environment,
                 Timeout: TimeSpan.FromMinutes(10)), cancellationToken);
             if (fixedResult.ExitCode != 0)
@@ -126,6 +130,7 @@ public static class FormatCheck
         var verified = await ProcessRunner.RunAsync(new(dotnet, ["format", workspace, "--verify-no-changes", "--severity", "warn"],
             root, environment, Timeout: TimeSpan.FromMinutes(10)), cancellationToken);
         failures.AddRange(FormatFailures(root, verified));
+        failures.AddRange(CSharpMemberSpacing.Check(root, sources, apply: false));
         return failures;
     }
 
@@ -139,7 +144,13 @@ public static class FormatCheck
     public static async Task<IReadOnlyList<CheckFailure>> CheckCSharpProjectsAsync(string root, string dotnet,
         IReadOnlyDictionary<string, string?>? environment = null, CancellationToken cancellationToken = default)
     {
-        root = Path.GetFullPath(root);
+        return (await InspectCSharpProjectsAsync(Path.GetFullPath(root), dotnet, environment, cancellationToken)).Failures;
+    }
+
+    // 소속 확인 결과와, 프로젝트에 속한 저장소 C# 소스(절대 경로 — 선언 빈 줄 검사의 대상)다.
+    private static async Task<(IReadOnlyList<CheckFailure> Failures, IReadOnlyList<string> Sources)> InspectCSharpProjectsAsync(
+        string root, string dotnet, IReadOnlyDictionary<string, string?>? environment, CancellationToken cancellationToken)
+    {
         string workspace = Path.Combine(root, CSharpWorkspace);
         if (!File.Exists(workspace))
         {
@@ -156,15 +167,19 @@ public static class FormatCheck
             CompileItemsAsync(root, dotnet, project, environment, cancellationToken)));
         HashSet<string> compiled = new(items.SelectMany(paths => paths), comparer);
         IReadOnlyList<string> upstream = PolicyChecks.UpstreamDirectories(root);
-        return PolicyChecks.Files(root, CSharpRoots)
+        (string Path, string Relative)[] repository = PolicyChecks.Files(root, CSharpRoots)
             .Where(path => Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase))
             .Select(path => (Path: path, Relative: Relative(root, path)))
             .Where(source => !upstream.Any(prefix => source.Relative.StartsWith(prefix, StringComparison.Ordinal)))
+            .ToArray();
+        CheckFailure[] failures = repository
             .Where(source => !compiled.Contains(source.Path))
             .Select(source => new CheckFailure(source.Relative, 0, "csharp-project",
                 $"C# source is not compiled by any project in {CSharpWorkspace}, so dotnet format does not check it; " +
                 "add it to a project there"))
             .ToArray();
+        string[] sources = repository.Where(source => compiled.Contains(source.Path)).Select(source => source.Path).ToArray();
+        return (failures, sources);
     }
 
     // 빌드 없이 평가만 한 프로젝트의 Compile 항목(절대 경로)이다. 생성 파일(obj의 AssemblyInfo 등)은 빌드 단계에서 더해지므로

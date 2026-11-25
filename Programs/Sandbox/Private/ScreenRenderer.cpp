@@ -125,8 +125,8 @@ Result<void> ScreenRenderer::CreateInspectorTextures(graphics::Device& device) n
     };
 
     // 2D: mip 0 바둑판(빨강·초록), mip 1 파랑, mip 2 흰색.
-    graphics::TextureDesc plane = InspectorDesc(graphics::TextureDimension::Texture2D,
-                                                Inspector2DSize);
+    graphics::TextureDesc plane =
+        InspectorDesc(graphics::TextureDimension::Texture2D, Inspector2DSize);
     plane.mipLevels = InspectorMips[static_cast<uint32>(InspectorView::Texture2D)];
     for (uint32 y = 0; y < Inspector2DSize; ++y) {
         for (uint32 x = 0; x < Inspector2DSize; ++x) {
@@ -219,8 +219,9 @@ Result<void> ScreenRenderer::CreateSwapChain(graphics::Device& device,
     desc.height = height;
     auto created = device.CreateSwapChain(desc);
     if (!created) {
-        Log::Error(LogSandboxScreen, "The swap chain could not be created ({Width}x{Height}): {Error}",
-                   width, height, ErrorCodeName(created.Error()));
+        Log::Error(LogSandboxScreen,
+                   "The swap chain could not be created ({Width}x{Height}): {Error}", width, height,
+                   ErrorCodeName(created.Error()));
         return Result<void>::Failure(created.Error());
     }
 
@@ -414,7 +415,8 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
     }
 
     render::BuiltinResources& builtins = renderer.resources_.Builtins();
-    // 메시 파이프라인은 소유 스레드(이 자리)에서 만든다(그래프 기록 함수는 장치 생성을 하지 않는다).
+    // 메시 파이프라인은 소유 스레드(이 자리)에서 만든다(그래프 기록 함수는 장치 생성을 하지
+    // 않는다).
     graphics::PipelineHandle pipelines[2];
     for (uint32 index = 0; index < 2; ++index) {
         auto pipeline = renderer.cache_->FindOrCreate(renderer.meshRequests_[index]);
@@ -443,8 +445,8 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
         out.mesh = &builtins.Mesh(item.mesh);
         out.texture = builtins.Texture(item.builtin);
         if (!item.texture.IsNull()) {
-            auto texture = builtins.ResolveTexture(context.Handles(), item.texture,
-                                                   fallback.Value());
+            auto texture =
+                builtins.ResolveTexture(context.Handles(), item.texture, fallback.Value());
             out.texture = texture ? texture.Value() : fallback.Value();
         }
     }
@@ -477,22 +479,20 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
     render::GraphPassAccesses base(graph);
     base.RenderTarget(sceneColor, render::GraphLoadAction::Clear, packet.clear)
         .DepthTarget(depthTarget);
-    (void)graph.AddPass(BasePassName, render::GraphPassKind::Raster, render::GraphPassFlags::None,
-                        base, [items](render::GraphPassContext& pass) noexcept {
-                            graphics::CommandContext& commands = pass.Commands();
-                            for (const ResolvedItem& item : items) {
-                                commands.SetPipeline(item.pipeline);
-                                (void)commands.SetDrawConstants(
-                                    Bytes(&item.constants, sizeof(item.constants)));
-                                commands.SetTexture(item.texture);
-                                const graphics::VertexBufferBinding vertices[] = {
-                                    {item.mesh->vertices, 0}};
-                                commands.SetVertexBuffers(0, vertices);
-                                commands.SetIndexBuffer(item.mesh->indices,
-                                                        item.mesh->indexFormat);
-                                commands.DrawIndexed(item.mesh->indexCount);
-                            }
-                        });
+    (void)graph.AddPass(
+        BasePassName, render::GraphPassKind::Raster, render::GraphPassFlags::None, base,
+        [items](render::GraphPassContext& pass) noexcept {
+            graphics::CommandContext& commands = pass.Commands();
+            for (const ResolvedItem& item : items) {
+                commands.SetPipeline(item.pipeline);
+                (void)commands.SetDrawConstants(Bytes(&item.constants, sizeof(item.constants)));
+                commands.SetTexture(item.texture);
+                const graphics::VertexBufferBinding vertices[] = {{item.mesh->vertices, 0}};
+                commands.SetVertexBuffers(0, vertices);
+                commands.SetIndexBuffer(item.mesh->indices, item.mesh->indexFormat);
+                commands.DrawIndexed(item.mesh->indexCount);
+            }
+        });
     const render::TonemapConstants tonemap = packet.tonemap;
     auto bindTonemap = [sceneColor, tonemap](render::GraphPassContext& pass) noexcept {
         pass.Commands().SetTexture(pass.Texture(sceneColor));
@@ -512,9 +512,8 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
             render::GraphPassAccesses capture(graph);
             capture.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
                 .RenderTarget(target.Value(), render::GraphLoadAction::DontCare);
-            (void)graph.AddFullscreenPass(TonemapCaptureName, render::GraphPassFlags::None,
-                                          capture, *renderer.cache_, renderer.tonemapRequest_,
-                                          bindTonemap);
+            (void)graph.AddFullscreenPass(TonemapCaptureName, render::GraphPassFlags::None, capture,
+                                          *renderer.cache_, renderer.tonemapRequest_, bindTonemap);
         }
     }
 
@@ -539,8 +538,9 @@ void ResizeSurface(render::RenderLaneContext& context, SurfaceResize& value) noe
 
     auto resized = context.Device().ResizeSwapChain(renderer.swapChain_, value.width, value.height);
     if (!resized) {
-        Log::Error(LogSandboxScreen, "The swap chain could not be resized to {Width}x{Height}: {Error}",
-                   value.width, value.height, ErrorCodeName(resized.Error()));
+        Log::Error(LogSandboxScreen,
+                   "The swap chain could not be resized to {Width}x{Height}: {Error}", value.width,
+                   value.height, ErrorCodeName(resized.Error()));
         context.ReportFailure(resized.Error());
         return;
     }

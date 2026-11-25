@@ -56,7 +56,10 @@ public static partial class PolicyChecks
         // ZLIB_WINAPI일 때만 <windows.h>를 연다. Zlib 모듈과 소비자는 그 매크로를 정의하지 않는다(ThirdParty.json).
         "Core/Source/ThirdParty/Zlib/zlib-1.4/zconf.h",
         // VK_USE_PLATFORM_WIN32_KHR일 때만 <windows.h>를 연다. 저장소는 정의하지 않고 vulkan_core.h와 vulkan_win32.h를 따로 include한다.
-        "Engine/Source/ThirdParty/VulkanHeaders/vulkan-headers-1.4.363.0/include/vulkan/vulkan.h"
+        "Engine/Source/ThirdParty/VulkanHeaders/vulkan-headers-1.4.363.0/include/vulkan/vulkan.h",
+        // USE_WIN32_FILEIO일 때만 <windows.h>를 연다. LibTiff 모듈은 tif_win32.c 대신 tif_rocks.c를 쓰고 그 매크로를 정의하지 않는다
+        // (헤더가 _WIN32에서 AVOID_WIN32_FILEIO를 정의한다 — Docs/Design/AssetSystem 12.10절).
+        "Engine/Source/ThirdParty/LibTiff/tiff-4.7.2/libtiff/tiffio.h"
     };
 
     // 이 접두로 시작하는 이름도 같은 계열이다(Direct3D·DXGI·Direct2D·DirectWrite·WRL).

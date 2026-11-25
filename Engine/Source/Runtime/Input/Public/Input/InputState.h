@@ -112,6 +112,10 @@ public:
 
     // 데드존을 적용한 축 값이다. 스틱 [-1, 1], 트리거 [0, 1]. 연결되지 않았으면 0이다.
     float GamepadAxisValue(uint32 gamepad, GamepadAxis axis) const noexcept;
+    // dead zone을 적용하기 전의 원시 정규화 값이다(스틱 [-1, 1], 트리거 [0, 1] — 비유한 값은 0).
+    // 입력 액션 계층이 읽는다: dead zone은 DeadZone 모디파이어가 건다(UE와 같다 — Docs/Design/
+    // InputActions 2.2절). 연결되지 않은 패드·범위 밖은 0이다.
+    float GamepadAxisRawValue(uint32 gamepad, GamepadAxis axis) const noexcept;
 
     // 손가락 index(0..MaxTouches-1)의 상태다. 범위 밖 index는 닿지 않은 것으로 본다. 위치는 창
     // client 픽셀이고, 끝난 손가락은 마지막 위치를 유지한다.
@@ -157,6 +161,8 @@ private:
         uint32 pressed = 0;
         uint32 released = 0;
         float axes[GamepadAxisCount] = {};
+        // dead zone을 적용하기 전 값이다(GamepadAxisRawValue).
+        float rawAxes[GamepadAxisCount] = {};
     };
 
     struct Touch {

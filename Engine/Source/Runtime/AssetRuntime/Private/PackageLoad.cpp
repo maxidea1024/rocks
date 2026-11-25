@@ -79,9 +79,53 @@ Result<void> CheckResolvedPackage(ConstructionContext& transaction, ObjectHandle
 
 namespace detail {
 
-PackageLoadHooks::PackageLoadHooks(Allocator& allocator, bool cooked) noexcept
-    : softUses(allocator), bulkUses(allocator), cooked_(cooked) {
+PackageLoadHooks::PackageLoadHooks(Allocator& allocator, bool cooked, bool collectPresent) noexcept
+    : softUses(allocator), bulkUses(allocator), presentObjects(allocator), presentStarts(allocator),
+      presentLengths(allocator), presentIds(allocator), cooked_(cooked),
+      collectPresent_(collectPresent) {
     observed_[0] = GeneratedType<BulkDataRef>::Id();
+}
+
+Result<void> PackageLoadHooks::NotePresent(const PresentInfo& info) noexcept {
+    if (!collectPresent_ || info.path.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    // 원소·key 단계가 있는 경로(배열·Map 값·Optional·InstancedStruct 안 struct의 멤버)는 담지
+    // 않는다 — 그 필드 자체의 present가 최상위에서 따로 오고, 단위는 그 필드다(컨테이너 원소 수만큼
+    // 쌓이지 않게).
+    for (const PathStep& entry : info.path) {
+        if (entry.selector != PathSelector::None) {
+            return Result<void>::Success();
+        }
+    }
+
+    // 자리를 먼저 모두 잡는다(실패하면 로드가 할당 실패다).
+    Result<void> step = presentIds.TryReserve(presentIds.Size() + info.path.Size());
+    if (step) {
+        step = presentObjects.TryReserve(presentObjects.Size() + 1);
+    }
+
+    if (step) {
+        step = presentStarts.TryReserve(presentStarts.Size() + 1);
+    }
+
+    if (step) {
+        step = presentLengths.TryReserve(presentLengths.Size() + 1);
+    }
+
+    if (!step) {
+        return step;
+    }
+
+    (void)presentObjects.TryPushBack(info.objectIndex);
+    (void)presentStarts.TryPushBack(static_cast<uint32>(presentIds.Size()));
+    (void)presentLengths.TryPushBack(static_cast<uint32>(info.path.Size()));
+    for (const PathStep& entry : info.path) {
+        (void)presentIds.TryPushBack(entry.fieldId);
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> PackageLoadHooks::Report(const FieldDiagnostic& diagnostic) noexcept {
@@ -137,7 +181,7 @@ PackageLoadState::PackageLoadState(Allocator& allocator, ObjectRegistry& registr
                                    TypeRegistry& types, const ObjectAccessContext& access,
                                    const PackageLoadOptions& options) noexcept
     : allocator_(allocator), registry_(registry), types_(types), options_(options),
-      hooks_(allocator, options.read.expectedKind == PackageKind::Cooked),
+      hooks_(allocator, options.read.expectedKind == PackageKind::Cooked, options.collectPresent),
       stage_(allocator, registry, types, access, StageOptions(options, hooks_)), file_(allocator),
       buffers_(allocator), contents_(allocator), nodes_(allocator), importTypes_(allocator),
       hardTypes_(allocator), bulkBytes_(allocator), bulkSlots_(allocator) {

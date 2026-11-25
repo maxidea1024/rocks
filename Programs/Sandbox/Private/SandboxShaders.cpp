@@ -26,7 +26,7 @@ namespace {
 #define SANDBOX_PIXEL_DEV_IF(Variable, File, Entry, Filter) &Variable,
 const ShaderTypeDesc* const Types[] = {
 #include "SandboxShaderTypes.inl"
-};
+    &MathFloatProbe, &MathUintProbe, &ColorFloatProbe, &ShadingFloatProbe};
 #undef SANDBOX_VERTEX
 #undef SANDBOX_PIXEL
 #undef SANDBOX_COMPUTE
@@ -75,6 +75,16 @@ Result<void> PrepareHost(render::EngineShaderHost& host) noexcept {
     snprintf(path, sizeof(path), "%s/../Programs/Sandbox/Shaders", engine);
     if (auto added = host.AddSourceDirectory("/Plugin/Sandbox", StringView(path)); !added) {
         Log::Error(graphics::LogGraphics, "Sandbox shader sources could not be added: {Error}",
+                   ErrorCodeName(added.Error()));
+        return added;
+    }
+
+    // 엔진 셰이더 시험 루트(Docs/Design/EngineShaders 7.6절 — 쿠킹하지 않는 시험 전용 플러그인
+    // 루트).
+    snprintf(path, sizeof(path), "%s/../Programs/Sandbox/EngineShaderTests", engine);
+    if (auto added = host.AddSourceDirectory("/Plugin/EngineShaderTests", StringView(path));
+        !added) {
+        Log::Error(graphics::LogGraphics, "Engine shader test sources could not be added: {Error}",
                    ErrorCodeName(added.Error()));
         return added;
     }

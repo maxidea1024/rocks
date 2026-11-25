@@ -260,7 +260,7 @@ RuntimeFieldOps ValueField(Guid id) noexcept {
         return detail::WriteGeneratedStagedField<O>(construction, object, Member, value);
     };
     ops.encode =
-        +[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access,
+        +[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access,
             ObjectHandle object, ArchiveWriter& out, FieldEncodeContext& context) noexcept {
             return detail::EncodeGeneratedField<O>(registry, access, object, Member, out, context);
         };
@@ -281,7 +281,7 @@ RuntimeFieldOps PathField(Guid id, const void* valueNative = nullptr, bool path 
     RuntimeFieldOps ops;
     ops.fieldId = id;
     if (codec) {
-        ops.encode = +[](const RuntimeFieldOps&, ObjectRegistry& registry,
+        ops.encode = +[](const RuntimeFieldOps&, ObjectRegistry* registry,
                          const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& out,
                          FieldEncodeContext& context) noexcept {
             return detail::EncodeGeneratedField<O>(registry, access, object, Member, out, context);
