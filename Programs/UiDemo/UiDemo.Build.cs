@@ -18,7 +18,7 @@ public sealed class UiDemoProgram : ModuleRules
             Sources = context.Sources("Programs/UiDemo/Private"),
             PublicDependencies = ["Launch", "PlatformWindow", "D3D11Graphics", "UiFramework", "UiRender", "UiWidget", "RenderBase", "ShaderCore", "ModuleLoader",
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>())],
-            PrivateDependencies = ["AssetDatabase", "WorldIntegration"]
+            PrivateDependencies = ["AssetDatabase", "WorldIntegration", "TextLayoutBackend", "HostConfig"]
         };
     }
 }

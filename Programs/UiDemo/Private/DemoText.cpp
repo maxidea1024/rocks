@@ -1,0 +1,355 @@
+#include "DemoText.h"
+
+#include <Core/Diagnostics/Log.h>
+#include <HostConfig/HostSettings.h>
+#include <Platform/File.h>
+#include <TextLayout/TextShaper.h>
+#include <TextLayoutBackend/TextLayoutBackend.h>
+#include <stdio.h>
+
+// 데모 레이블 텍스트다(Docs/Design/UiToolkit 9.1절 UW2).
+namespace rocks::ui {
+
+namespace {
+
+inline constexpr LogCategory LogUiDemo{"UiDemo"};
+
+// 경로 버퍼 byte 수다.
+constexpr usize PathBytes = 1024;
+
+// 엔진 폴더 기준 ICU 데이터·시험 글꼴 경로다(Engine/Source/ThirdParty).
+constexpr char IcuDataPath[] = "Source/ThirdParty/IcuData/icudata-79.1-rocks/icudt79l.dat";
+constexpr char LatinFontPath[] =
+    "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Regular.ttf";
+constexpr char HangulFontPath[] = "Source/ThirdParty/TestFontNanumGothic/google-fonts-06bfe0d62a98/"
+                                  "ofl/nanumgothic/NanumGothic-Regular.ttf";
+constexpr char ArabicFontPath[] = "Source/ThirdParty/TestFontNotoNaskhArabic/"
+                                  "google-fonts-06bfe0d62a98/ofl/notonaskharabic/"
+                                  "NotoNaskhArabic-wght.ttf";
+constexpr char EmojiFontPath[] =
+    "Source/ThirdParty/TestFontGenerated/generated-2026-11-24/NotoColorEmoji-U1F600.ttf";
+
+// 보조 typeface의 code point 구간이다(한글 자모·호환 자모·음절, 아랍 문자 기본·보충·표시형).
+constexpr text::CodePointRange HangulRanges[] = {
+    {0x1100, 0x11FF}, {0x3130, 0x318F}, {0xA960, 0xA97F}, {0xAC00, 0xD7AF}, {0xD7B0, 0xD7FF}};
+constexpr text::CodePointRange ArabicRanges[] = {
+    {0x0600, 0x06FF}, {0x0750, 0x077F}, {0x08A0, 0x08FF}, {0xFB50, 0xFDFF}, {0xFE70, 0xFEFF}};
+
+// 줄바꿈 code point다(강제 줄바꿈 클러스터).
+constexpr char LineFeed = '\n';
+
+// 기준 글자(줄 metric을 읽을 face를 고른다)다.
+constexpr uint32 MetricsCodePoint = 'A';
+
+bool ReadFile(const char* path, Array<uint8>& out) noexcept {
+    platform::File file;
+    if (!file.Open(path, platform::FileOpenMode::ReadExisting)) {
+        return false;
+    }
+
+    uint64 size = 0;
+    bool ok = static_cast<bool>(file.Size(size)) &&
+              static_cast<bool>(out.TryResize(static_cast<usize>(size)));
+    if (ok && size != 0) {
+        ok = static_cast<bool>(file.ReadExact(out.Data(), static_cast<usize>(size)).status);
+    }
+
+    const bool closed = static_cast<bool>(file.Close());
+    return ok && closed;
+}
+
+bool EnginePath(StringView relative, char (&out)[PathBytes]) noexcept {
+    char engine[PathBytes] = {};
+    if (!FindEngineDirectory(Span<char>(engine, sizeof(engine)))) {
+        return false;
+    }
+
+    const int written = snprintf(out, sizeof(out), "%s/%.*s", engine,
+                                 static_cast<int>(relative.ByteCount()), relative.Data());
+    return written > 0 && static_cast<usize>(written) < sizeof(out);
+}
+
+// 정렬된 경계 목록에서 byte 위치가 경계인지 본다.
+bool IsBoundary(Span<const usize> boundaries, usize offset) noexcept {
+    usize low = 0;
+    usize high = boundaries.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        if (boundaries[middle] < offset) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low < boundaries.Size() && boundaries[low] == offset;
+}
+
+// byte 위치가 속한 클러스터 번호다(ends는 클러스터 끝 byte, 오름차순).
+usize ClusterOf(Span<const usize> ends, usize offset) noexcept {
+    usize low = 0;
+    usize high = ends.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        if (ends[middle] <= offset) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low < ends.Size() ? low : ends.Size() - 1;
+}
+
+} // namespace
+
+DemoText::DemoText(Allocator& allocator, graphics::Device& device,
+                   SlotArray<BrushTexture>& textures, graphics::PipelineHandle maskPipeline,
+                   graphics::PipelineHandle imagePipeline) noexcept
+    : allocator_(allocator), textures_(allocator, device, textures), maskPipeline_(maskPipeline),
+      imagePipeline_(imagePipeline), icuData_(allocator) {
+}
+
+DemoText::~DemoText() noexcept {
+    // 텍스처를 먼저 놓고 cache·글꼴·backend 순으로 파괴한다(cache가 face를 가리킨다).
+    textures_.Reset();
+    cache_ = UniquePtr<text::GlyphCache>();
+    font_ = UniquePtr<text::ResolvedCompositeFont>();
+}
+
+Result<void> DemoText::LoadFace(StringView relativePath,
+                                SharedPtr<const text::FontFaceData>& out) noexcept {
+    char path[PathBytes];
+    Array<uint8> bytes(allocator_);
+    if (!EnginePath(relativePath, path) || !ReadFile(path, bytes)) {
+        Log::Error(LogUiDemo, "Font file not found: {Path}", relativePath);
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    auto data = text::FontFaceData::TryCreate(allocator_, bytes.View());
+    if (!data) {
+        return Result<void>::Failure(data.Error());
+    }
+
+    out = Move(data.Value());
+    return Result<void>::Success();
+}
+
+Result<void> DemoText::Initialize() noexcept {
+    // ICU 데이터는 프로세스 끝까지 살아야 한다(InitializeTextLibraries 계약) — 이 객체가 main
+    // 수명이다.
+    char path[PathBytes];
+    if (!EnginePath(IcuDataPath, path) || !ReadFile(path, icuData_) || icuData_.Size() == 0) {
+        Log::Error(LogUiDemo, "ICU data not found: {Path}", StringView(IcuDataPath));
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    if (auto ready = text::InitializeTextLibraries(icuData_.View()); !ready) {
+        return ready;
+    }
+
+    auto backend = text::CreateTextBackend({.allocator = &allocator_});
+    if (!backend) {
+        return Result<void>::Failure(backend.Error());
+    }
+
+    backend_ = Move(backend.Value());
+    SharedPtr<const text::FontFaceData> latin;
+    SharedPtr<const text::FontFaceData> hangul;
+    SharedPtr<const text::FontFaceData> arabic;
+    SharedPtr<const text::FontFaceData> emoji;
+    if (auto loaded = LoadFace(LatinFontPath, latin); !loaded) {
+        return loaded;
+    }
+
+    if (auto loaded = LoadFace(HangulFontPath, hangul); !loaded) {
+        return loaded;
+    }
+
+    if (auto loaded = LoadFace(ArabicFontPath, arabic); !loaded) {
+        return loaded;
+    }
+
+    if (auto loaded = LoadFace(EmojiFontPath, emoji); !loaded) {
+        return loaded;
+    }
+
+    const text::CompositeTypefaceEntry latinFace[] = {{"Regular", {.data = latin}}};
+    const text::CompositeTypefaceEntry hangulFace[] = {{"Regular", {.data = hangul}}};
+    const text::CompositeTypefaceEntry arabicFace[] = {{"Regular", {.data = arabic}}};
+    const text::CompositeSubTypeface subTypefaces[] = {
+        {.typeface = hangulFace, .ranges = HangulRanges},
+        {.typeface = arabicFace, .ranges = ArabicRanges}};
+    text::CompositeFontSpec spec;
+    spec.defaultTypeface = latinFace;
+    spec.fallbackTypeface = hangulFace;
+    spec.subTypefaces = subTypefaces;
+    spec.lastResort = {.data = emoji};
+    auto font = text::ResolvedCompositeFont::TryCreate(allocator_, *backend_, spec);
+    if (!font) {
+        return Result<void>::Failure(font.Error());
+    }
+
+    font_ = Move(font.Value());
+    auto cache = text::GlyphCache::TryCreate(allocator_, {}, backend_.Get());
+    if (!cache) {
+        return Result<void>::Failure(cache.Error());
+    }
+
+    cache_ = Move(cache.Value());
+    return Result<void>::Success();
+}
+
+Result<void> DemoText::SetText(TextLabel& label, StringView value, int32 pixelHeight) noexcept {
+    if (font_.Get() == nullptr || pixelHeight <= 0) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    // 픽셀 높이 → 96 DPI 포인트 크기다.
+    const float size = static_cast<float>(pixelHeight) *
+                       static_cast<float>(text::FontPointsPerInch) /
+                       static_cast<float>(text::FontRenderDpi);
+    Array<text::ShapedGlyph> shaped(allocator_);
+    if (auto made = text::ShapeText(*backend_, *font_, value, {.size = size}, shaped); !made) {
+        return made;
+    }
+
+    // 클러스터는 grapheme 단위(논리 순서)이고, 줄 경계·BiDi 수준을 붙인다.
+    Array<usize> graphemes(allocator_);
+    Array<usize> lineBreaks(allocator_);
+    Array<text::BidiRun> runs(allocator_);
+    if (auto found =
+            backend_->FindBoundaries(text::TextBoundaryKind::Grapheme, value, "", graphemes);
+        !found) {
+        return found;
+    }
+
+    if (auto found = backend_->FindBoundaries(text::TextBoundaryKind::Line, value, "", lineBreaks);
+        !found) {
+        return found;
+    }
+
+    if (auto resolved = backend_->ResolveBidi(value, text::TextBaseDirection::Auto, runs);
+        !resolved) {
+        return resolved;
+    }
+
+    const text::FontSelection metricsFace =
+        font_->Select(MetricsCodePoint, "Regular", {}, text::FontFallback::None);
+    auto metrics = metricsFace.face != nullptr
+                       ? metricsFace.face->Metrics(size, 1.0f)
+                       : Result<text::FontMetrics>::Failure(ErrorCode::NotFound);
+    if (!metrics) {
+        return Result<void>::Failure(metrics.Error());
+    }
+
+    Array<text::TextCluster> clusters(allocator_);
+    if (auto reserved = clusters.TryReserve(graphemes.Size()); !reserved) {
+        return reserved;
+    }
+
+    usize start = 0;
+    for (const usize end : graphemes) {
+        uint8 level = 0;
+        for (const text::BidiRun& run : runs) {
+            if (start >= run.start && start < run.start + run.length) {
+                level = run.rightToLeft ? 1 : 0;
+            }
+        }
+
+        const bool hardBreak = end > 0 && value.Data()[end - 1] == LineFeed;
+        const bool breakAfter = end < value.ByteCount() && IsBoundary(lineBreaks.View(), end);
+        (void)clusters.TryPushBack({end, 0.0f, level, breakAfter || hardBreak, hardBreak});
+        start = end;
+    }
+
+    // 글리프(시각 순서)를 클러스터에 나눈다. 클러스터 안 위치는 그 클러스터에서 앞선 글리프의
+    // advance 합이다.
+    struct Pending {
+        LabelGlyph glyph;
+        uint32 texture;
+    };
+
+    Array<Pending> pending(allocator_);
+    Array<float> pens(allocator_);
+    if (auto sized = pens.TryResize(clusters.Size()); !sized) {
+        return sized;
+    }
+
+    for (float& pen : pens) {
+        pen = 0.0f;
+    }
+
+    for (const text::ShapedGlyph& glyph : shaped) {
+        if (clusters.Size() == 0) {
+            break;
+        }
+
+        const usize cluster = ClusterOf(graphemes.View(), glyph.cluster);
+        auto cached = cache_->FindOrAdd(
+            {.face = glyph.face, .glyphIndex = glyph.glyphIndex, .size = size, .scale = 1.0f});
+        if (!cached) {
+            return Result<void>::Failure(cached.Error());
+        }
+
+        const text::CachedGlyph& entry = cached.Value();
+        if (entry.valid && entry.rect.width > 0 && entry.rect.height > 0) {
+            auto info = cache_->Texture(entry.texture);
+            if (!info) {
+                return Result<void>::Failure(info.Error());
+            }
+
+            const float width = static_cast<float>(info.Value().width);
+            const float height = static_cast<float>(info.Value().height);
+            const Vec2 extent(static_cast<float>(entry.rect.width),
+                              static_cast<float>(entry.rect.height));
+            const Vec2 low(static_cast<float>(entry.rect.x) / width,
+                           static_cast<float>(entry.rect.y) / height);
+            PaintGlyph paint;
+            paint.position =
+                Vec2(pens[cluster] + glyph.offsetX + static_cast<float>(entry.bearingX),
+                     metrics.Value().ascender - static_cast<float>(entry.bearingY) - glyph.offsetY);
+            paint.size = extent;
+            paint.uv = {low, low + Vec2(extent.x / width, extent.y / height)};
+            if (auto added = pending.TryPushBack({{cluster, paint}, entry.texture}); !added) {
+                return added;
+            }
+        }
+
+        pens[cluster] += glyph.advance;
+        clusters[cluster].advance += glyph.advance;
+    }
+
+    // 새 글리프가 든 cache 텍스처를 GPU에 맞춘 뒤 브러시 handle을 채운다.
+    if (auto synced = textures_.Sync(*cache_, maskPipeline_, imagePipeline_); !synced) {
+        return synced;
+    }
+
+    Array<LabelGlyph> glyphs(allocator_);
+    if (auto reserved = glyphs.TryReserve(pending.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (Pending& item : pending) {
+        item.glyph.glyph.resource = textures_.Resource(item.texture);
+        (void)glyphs.TryPushBack(item.glyph);
+    }
+
+    // TextLabel은 글리프를 논리 클러스터 순서로 받는다(ShapeText는 시각 순서다). 같은 클러스터 안의
+    // 순서는 유지한다(안정 삽입 정렬 — 레이블 글리프 수는 작다).
+    for (usize index = 1; index < glyphs.Size(); ++index) {
+        const LabelGlyph moving = glyphs[index];
+        usize slot = index;
+        while (slot > 0 && glyphs[slot - 1].clusterIndex > moving.clusterIndex) {
+            glyphs[slot] = glyphs[slot - 1];
+            --slot;
+        }
+
+        glyphs[slot] = moving;
+    }
+
+    return label.SetShapedText(value, clusters.View(), glyphs.View(), metrics.Value().lineHeight,
+                               false);
+}
+
+} // namespace rocks::ui

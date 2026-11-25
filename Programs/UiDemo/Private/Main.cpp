@@ -97,7 +97,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (!resource) {
         return 3;
     }
-    DemoFont font(allocator, device, textures, mask.Value());
+    DemoText font(allocator, device, textures, mask.Value(), image.Value());
     if (!font.Initialize()) {
         return 4;
     }

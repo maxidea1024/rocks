@@ -83,7 +83,7 @@ private:
 } // namespace
 
 OrbitWorkspace::OrbitWorkspace(Allocator& allocator, ObjectRegistry& objects,
-                               DemoFont& font) noexcept
+                               DemoText& font) noexcept
     : allocator_(allocator), objects_(objects), font_(font), definitions_(allocator),
       bindings_(allocator) {
 }
