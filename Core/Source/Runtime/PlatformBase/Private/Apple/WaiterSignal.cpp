@@ -31,7 +31,7 @@ WaiterSignal::WaiterSignal() noexcept {
         Fatal("pthread_mutex_init failed");
     }
 
-    PosixInitializeCondition(&objects.condition);
+    detail::PosixInitializeCondition(&objects.condition);
 }
 
 WaiterSignal::~WaiterSignal() noexcept {
@@ -62,9 +62,10 @@ void WaiterSignal::WaitOnce(uint32 timeoutMs) noexcept {
     SignalObjects& objects = Objects(storage_);
     pthread_mutex_lock(&objects.mutex);
     if (state_.Load<MemoryOrder::Acquire>() == 0) {
-        const int result = timeoutMs == InfiniteTimeout
-                               ? pthread_cond_wait(&objects.condition, &objects.mutex)
-                               : PosixTimedWait(&objects.condition, &objects.mutex, timeoutMs);
+        const int result =
+            timeoutMs == InfiniteTimeout
+                ? pthread_cond_wait(&objects.condition, &objects.mutex)
+                : detail::PosixTimedWait(&objects.condition, &objects.mutex, timeoutMs);
         if (result != 0 && result != ETIMEDOUT) {
             Fatal("pthread_cond_wait failed");
         }

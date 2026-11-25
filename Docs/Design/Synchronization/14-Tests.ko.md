@@ -16,6 +16,7 @@
   - `WaiterSignal`의 시한 대기 함수 포인터. 가짜 대기는 OS를 부르지 않고 시험의 `TestGate`를 기다린다. 시험이 "시간이 지났다"를 정하면(가짜 시계를 deadline 뒤로 옮기고 gate를 연다) `TimedOut`으로 돌아간다. 깨우기가 먼저 오면 `Signaled`다. 무한 대기는 seam을 거치지 않는다.
   - 그래서 시한 시험은 실제 시간을 쓰지 않고, "시한 전 깨움"과 "시한 뒤 시간 초과"를 각각 정해진 순서로 만든다.
   - **구현(개정 4).** seam은 `Private/Common/Sync/SyncSeams.h`(설치 함수)와 `SyncTestAccess.h`(시험 통로)다. 가짜 시한 대기는 받은 대상 `WaiterSignal`을 무한으로 기다린다. 시험이 "시간이 지났다"를 정하면 표시를 세운 뒤 그 신호를 `Notify`하고, 깬 가짜 대기는 표시를 보고 `Reset`한 뒤 시간 초과를 돌려준다. 신호를 바꾸지 않고 깨우는 별도 OS 경로를 두면 깨우기가 대기보다 먼저 올 때 사라지므로(주소 대기는 값이 같으면 잔다) 두지 않았다. `WaitDeadline`은 `SyncMonotonicNanoseconds()`(가짜 시계가 있으면 그것)를 쓴다. `InfiniteTimeout`·`WaitResult`는 SY0에서 `Platform/Sync/WaitTypes.h`로 옮겼다(7.4절, `Sync.h`가 include한다).
+- **구현(개정 4).** gate는 TestSupport `TestGate.h`의 `TestGate`(한 번 열기)·`CountingGate`(여러 스레드가 한 번씩 도착)다. 단계 지점은 SY1·SY2에서 `ParkingLot.WaitBegin`(대기 표시를 밖에서 세운 뒤 bucket 전)·`ParkingLot.Enqueued`·`ParkingLot.WakeOne`·`ParkingLot.WakeMultiple`·`ParkingLot.Notify`를 두었다. 대기 표시 경쟁 시험은 스레드 지역 단계 훅으로 대상 스레드를 그 지점에서 gate로 멈춘다. 14.3절의 모든 순서 전수 스케줄러는 Core 동시 컨테이너(SY7)와 함께 만든다.
 - 시험 목록(SY1–SY4):
   - ParkingLot: 콜백 있는 `WakeOne`·`WakeMultiple`·`WakeAll`의 `mayHaveMoreWaiters` 값, 표 키우기 중 대기자 보존, **TLS 파괴 뒤 대기**(스레드 종료 중 다른 `thread_local` 소멸자에서 경합 대기 → 임시 레코드로 잠들고 깨어 반환됨, 그 뒤 영구 풀의 레코드 수가 원래대로임, D31).
   - Mutex: 잠든 대기자 깨움, `TryLockFor` 시한(가짜 OS 대기), `InitiallyLocked`(다른 스레드의 첫 해제가 보유 스택 검사에 걸리지 않음).
@@ -38,6 +39,7 @@
 - 시험 지원의 `StepScheduler`가 스레드 2–3개를 돌린다. 한 번에 한 스레드만 다음 단계 지점까지 가게 하고, 순서는 (a) 시험이 적은 대본, 또는 (b) 작은 시나리오(예: 생산자 둘 × 연산 둘 + 소비자 하나)의 모든 순서를 깊이 우선으로 전수한다. CHESS·loom과 같은 생각이다.
 - 단계 지점 사이의 코드는 원자 연산이 하나 이하가 되게 둔다. 그래야 "모든 순서"가 실제 가능한 순서를 덮는다(순차 일관 모델 기준. 약한 메모리 순서의 재배치는 이 시험이 잡지 못한다 → 14.5절).
 - 대상: `IndexedFreeList`(ABA 시나리오 포함: 태그를 일부러 작게 만든 시험판으로 감김 재현. 태그 폭 static_assert를 피하려고 시험 전용 정책 인자로만 연다), `TakeAllStack`, `IntrusiveMpscQueue`, `BoundedSpscQueue`, `BoundedMpscQueue`(기존, `StepPolicy` 인자를 더한다), `EventCount`, `ReclaimDomain`, 그리고 10.3절 대기 표시 경쟁(14.2절).
+- **구현(개정 4, SY7).** TestSupport `StepScheduler.h`의 `StepScheduler`와 정책 `ScheduledSteps`다. 배우 스레드는 시작도 단계 지점이라 첫 진행 배우부터 스케줄러가 고른다. `Explore`는 결정마다 진행 가능한 배우 목록을 기록해 깊이 우선으로 되돌아가고, `RunSchedule`은 대본 하나로 돈다(ABA 재현). 진행할 수 없는 배우(비어서 다시 시도)는 `StepScheduler::Blocked`로 표시하고, 다른 배우가 한 걸음 나아갈 때까지 후보에서 뺀다(같은 상태를 무한히 되풀이하는 순서를 탐색하지 않는다). 순서 한도·결정 한도는 Fatal이다.
 - 외부 모델 검사기(Relacy·CDSChecker)는 쓰지 않는다(C++ 외부 라이브러리 금지 결정). 이 하네스가 그 역할의 일부를 한다(D24).
 
 ### 14.4 stress 시험

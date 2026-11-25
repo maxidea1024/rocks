@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Platform/Sync.h>
 #include <Platform/Sync/WaiterSignal.h>
 
 #include "SyncSeams.h"
@@ -51,3 +52,17 @@ struct SyncTestAccess {
 #endif
 
 } // namespace rocks::platform::detail
+
+namespace rocks::platform {
+
+// Mutex 상태 word의 시험 통로다(대기 bit 해제 시점 시험, 14.2절).
+struct MutexTestAccess {
+    static constexpr uint8 LockedBit = Mutex::Bits::LockedBit;
+    static constexpr uint8 WaitingBit = Mutex::Bits::WaitingBit;
+
+    static uint8 State(const Mutex& mutex) noexcept {
+        return mutex.state_.Load<MemoryOrder::Acquire>();
+    }
+};
+
+} // namespace rocks::platform

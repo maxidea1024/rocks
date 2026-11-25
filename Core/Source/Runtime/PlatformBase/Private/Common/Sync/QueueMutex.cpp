@@ -8,7 +8,7 @@ namespace rocks::platform::detail {
 namespace {
 
 // 대기 스레드 스택의 노드다. 머리 노드의 queueTail이 꼬리를 가리킨다(머리만 그 칸이 맞다).
-struct alignas(8) QueueNode {
+struct QueueNode {
     WaiterSignal signal;
     QueueNode* next = nullptr;
     QueueNode* queueTail = nullptr;

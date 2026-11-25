@@ -1,12 +1,14 @@
 ## 15. 구현 단계
 
 단계 기호는 SY다. 크기 S·M·L은 상대값이다. 진행(개정 4): SY0·SY1·SY2·SY7·SY12는 2026-11-25 착수(오디오 세션, 브랜치 `feature/synchronization`), 나머지는 미착수다. SY0에서 기존 자유 함수(`AtomicLoad` 등)는 공개 그대로 두고 그 위에 `Atomic<T>`·`AtomicRef<T>`를 얹었다. `platform::detail`로 내리는 것과 호출 옮기기·정책 `atomic-detail`은 SY6이다(D15).
+- SY7·SY12 구현(개정 4): 12.2절·9.6절 "구현" 항목. 시험은 컨테이너마다 단일 스레드 의미·경합 결정적 결과·모든 interleaving(`StepScheduler`)과 `IndexedFreeList` ABA 재현(2-bit 태그는 낡은 next로 CAS 성공, 40-bit는 실패)이다.
+- SY2 구현(개정 4): `Mutex`는 `IntrusiveMutex<Bits>`(1 byte) 위의 인라인 빠른 경로이고 `TryLockFor`만 내보낸 함수다. `ConditionVariable::Wait`·`NotifySlow`도 내보낸 함수다. 가드는 `LockGuard<L>`(scoped capability)·`LockOwner<L>`·`UnlockGuard<L>`와 `LockStart`다. `LockOwner`·`UnlockGuard`는 조건부·역방향 잠금이라 정적 분석에서 뺐다(`ROCKS_NO_THREAD_SAFETY_ANALYSIS`, 보호 필드를 읽는 함수는 `LockGuard`를 쓴다). `Mutex`에 capability 주석을 달았으므로 손으로 `Lock`·`Unlock`을 짝지은 기존 코드는 `-Wthread-safety`가 검사한다.
 
 | 단계 | 내용 | 선행 | 크기 |
 |---|---|---|---|
 | SY0 | PlatformBase: `CpuPause`·`SpinBackoff`, `WaiterSignal`(Windows `WaitOnAddress`·Android futex·macOS 조건 변수)과 가짜 OS 대기 seam, `PlatformBase.Build.cs` Windows `SystemLibraries = ["Synchronization"]`, 정책 허용 목록에 pause builtin, `Atomic<T>`·`AtomicRef<T>`(순서 기본값 없음)와 보조 연산(11절), `Base/Compiler.h`의 thread safety 매크로, `ActionGraph.cs` 430·471–472행에 `-Wthread-safety`, MetaCompiler `--clang-arg` 허용 목록과 회귀 검사, 시험. **통과 조건**: MetaCompiler 지정자 파서가 필드 형식 `Atomic<...>`·`AtomicRef<...>`를 리플렉션 struct 표시 `Atomic`과 혼동하지 않음을 시험으로 확인 | 없음 | M |
 | SY1 | `ParkingLot`(콜백 있는 `WakeMultiple`·`WakeAll` 포함)·`detail::QueueMutex`·영구 선형 할당·침투 목록 깨우기·스레드 레코드 수명과 TLS 파괴 뒤 임시 레코드(D31), `SyncHooks` 자리와 훅 호출 지점(10.4절), `SyncTestAccess.h`, 결정적 시험(14.2절), 단계 스케줄러 하네스(14.3절) | SY0 | L |
-| SY2 | **제자리 교체**: 기존 `Platform/Sync.h`의 `Mutex`·`ConditionVariable`·`LockGuard`를 parking lot판으로 바꾼다(이름·호출 모양 그대로, constexpr·trivially destructible). `IntrusiveMutex`·`InitiallyLocked`·가드 다섯, `WaitResult::Failed` 제거와 그 사용처 정리, 대기 표시 경쟁 시험. 새 타입에 thread safety 주석 | SY1 | M |
+| SY2 | **제자리 교체**: 기존 `Platform/Sync.h`의 `Mutex`·`ConditionVariable`·`LockGuard`를 parking lot판으로 바꾼다(이름·호출 모양 그대로, constexpr·trivially destructible). `IntrusiveMutex`·`InitiallyLocked`·가드 다섯(개정 4: SY2는 `LockGuard`·`LockOwner`·`UnlockGuard`, 읽기 가드는 SY3), 동기화 객체가 `WaitResult::Failed`를 내지 않게 함(값은 프로세스 대기용으로 남는다 — 9.5절 개정 4, 죽은 비교 분기 정리는 SY6), 대기 표시 경쟁 시험. 새 타입에 thread safety 주석 | SY1 | M |
 | SY3 | `RecursiveMutex`·`ReadWriteMutex`·`ReadLockGuard`·`ReadLockOwner` | SY2 | M |
 | SY4 | `ManualResetEvent`·`Semaphore`(기존 타입 제자리 교체), `AutoResetEvent`·`EventCount`·`OnceFlag`·`CallOnce`·`CallOnceUntilSuccess` | SY1 | M |
 | SY5 | 진단: 보유 스택·순위(`LockRank`·`RankedMutex`, lane 구간), 읽기 재진입·잠금 쥔 채 대기·task 대기 검사, `InitiallyLocked` 예외, Core 로그 훅 설치, `sync.dump` | SY2–SY4 | M |

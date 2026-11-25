@@ -66,11 +66,10 @@ private:
     // 0 = 신호 없음, 1 = 신호. Windows·Android는 이 주소에서 잔다(Atomic<uint32>는 표준 배치라
     // 객체 주소가 값 주소다).
     Atomic<uint32> state_;
-#if ROCKS_PLATFORM_MAC
-    // pthread_mutex_t + pthread_cond_t다. OS 타입을 공개 헤더에 노출하지 않는다(구현이 크기를
+    // macOS 구현의 pthread_mutex_t + pthread_cond_t 자리다(주소 대기 플랫폼은 쓰지 않는다). 공개
+    // 헤더는 OS를 가르지 않으므로 늘 둔다. OS 타입을 노출하지 않는다(구현이 크기를
     // static_assert한다).
-    alignas(16) unsigned char storage_[128];
-#endif
+    [[maybe_unused]] alignas(16) unsigned char storage_[128];
 };
 
 } // namespace rocks::platform

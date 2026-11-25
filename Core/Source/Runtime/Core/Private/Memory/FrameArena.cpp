@@ -70,9 +70,10 @@ Result<void> FrameArena::Reset() noexcept {
 
     // 등록 목록은 머리에 넣는 단일 연결 목록이라 앞에서부터 부르면 등록 역순이다. 소멸자 안의 할당·
     // Reset은 resetting_ 때문에 Busy로 거부되므로 이 목록은 더 자라지 않는다.
-    detail::FrameArenaDestructor* record = platform::AtomicExchange(&destructors_, nullptr);
+    detail::FrameArenaDestructor* record = destructors_.TakeAll();
     while (record != nullptr) {
-        detail::FrameArenaDestructor* next = record->next;
+        detail::FrameArenaDestructor* next =
+            TakeAllStack<detail::FrameArenaDestructor>::Next(record);
         record->destroy(record->objects, record->count);
         record = next;
     }
@@ -265,14 +266,9 @@ Result<void*> FrameArena::AllocateFrom(unsigned char*& next, unsigned char*& end
 }
 
 void FrameArena::PushDestructor(detail::FrameArenaDestructor* record) noexcept {
-    // 여러 writer가 잠금 없이 등록하므로 머리에 원자적으로 넣는다(Release로 기록 내용을 게시한다).
-    detail::FrameArenaDestructor* head =
-        platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&destructors_);
-    do {
-        record->next = head;
-    } while (!platform::AtomicCompareExchangeWeak<platform::MemoryOrder::Release,
-                                                  platform::MemoryOrder::Relaxed>(&destructors_,
-                                                                                  head, record));
+    // 여러 writer가 잠금 없이 등록한다(TakeAllStack의 release CAS가 기록 내용을 게시한다). 닫지
+    // 않으므로 늘 들어간다.
+    (void)destructors_.Push(record);
     platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&destructorCount_, uint64{1});
 }
 

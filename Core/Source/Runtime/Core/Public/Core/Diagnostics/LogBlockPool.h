@@ -3,9 +3,11 @@
 #include <Base/Compiler.h>
 #include <Base/NumericLimits.h>
 #include <Base/Types.h>
+#include <Core/Containers/IndexedFreeList.h>
 #include <Core/Diagnostics/LogCapture.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <Platform/Atomics.h>
 
 namespace rocks {
 
@@ -32,9 +34,11 @@ public:
     LogBlockPool& operator=(const LogBlockPool&) = delete;
     ~LogBlockPool() noexcept override;
 
-    // blockCount개의 blockBytes byte 블록을 확보한다. blockCount는 1 이상 NoLogBlock 미만,
-    // blockBytes는 MinimumLogRenderBytes 이상이어야 한다(아니면 InvalidArgument). 이미 초기화했으면
-    // InvalidArgument, 크기 넘침은 Overflow, 그 밖은 allocator 오류다.
+    // blockCount개의 blockBytes byte 블록을 확보한다. blockCount는 1 이상
+    // IndexedFreeList<>::MaxCapacity 이하(빈 블록 목록은 공용 IndexedFreeList —
+    // Docs/Design/Synchronization 12.2절), blockBytes는 MinimumLogRenderBytes 이상이어야
+    // 한다(아니면 InvalidArgument). 이미 초기화했으면 InvalidArgument, 크기 넘침은 Overflow, 그
+    // 밖은 allocator 오류다.
     Result<void> Initialize(Allocator& allocator, usize blockCount, usize blockBytes) noexcept;
 
     // 메모리를 돌려준다. 빌려 간 블록이 없고 다른 호출이 없을 때만 부른다.
@@ -56,24 +60,13 @@ public:
     void Release(uint32 index) noexcept override;
 
 private:
-    static constexpr uint64 IndexMask = NumericLimits<uint32>::Max();
-    // head의 위쪽 절반은 ABA를 막는 태그다(아래 절반은 블록 색인).
-    static constexpr uint32 TagShift = 32;
-    static_assert(IndexMask == (uint64{1} << TagShift) - 1,
-                  "the head tag must start right above the block index bits");
-
-    // 머리를 다른 데이터와 다른 캐시 라인에 둔다(빌리기·돌려주기 CAS 경합 줄).
-    struct alignas(CacheLineSize) Head {
-        uint64 value = 0;
-    };
-
+    // 빈 블록 색인 목록이다(태그 40 bit로 ABA를 막는 lock-free 스택).
+    IndexedFreeList<> free_;
     Allocator* allocator_ = nullptr;
     uint8* storage_ = nullptr;
-    uint32* next_ = nullptr;
     usize blockCount_ = 0;
     usize blockBytes_ = 0;
-    Head head_;
-    uint64 available_ = 0;
+    platform::Atomic<uint64> available_;
 };
 
 } // namespace rocks

@@ -79,11 +79,11 @@ TEST(AtomicType_MemberSemantics) {
 
     // 실패한 CAS는 현재 값을 expected에 쓴다.
     uint32 expected = 1;
-    CHECK(!value.CompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Acquire>(expected,
-                                                                                          2));
+    CHECK((!value.CompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Acquire>(expected,
+                                                                                           2)));
     CHECK(expected == 0xC3);
-    CHECK(value.CompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Acquire>(expected,
-                                                                                         2));
+    CHECK((value.CompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Acquire>(expected,
+                                                                                          2)));
     CHECK(value.Load<MemoryOrder::Acquire>() == 2);
 
     // 부호 없는 산술은 2^N으로 감싼다.

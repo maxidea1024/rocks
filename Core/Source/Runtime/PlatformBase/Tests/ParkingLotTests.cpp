@@ -3,6 +3,7 @@
 #include <Platform/Sync/SyncHooks.h>
 #include <Platform/Sync/WaiterSignal.h>
 #include <Platform/Thread.h>
+#include <TestSupport/OsThread.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/TestGate.h>
 
@@ -19,14 +20,47 @@ using namespace rocks::platform;
 // 실제 시간 없이 정한다.
 namespace {
 
+Atomic<uint32> waitBegins;
+Atomic<uint32> waitEnds;
+
+void CountWaitBegin(const void*) noexcept {
+    waitBegins.FetchAdd<MemoryOrder::Relaxed>(1);
+}
+
+void CountWaitEnd(const void*) noexcept {
+    waitEnds.FetchAdd<MemoryOrder::Relaxed>(1);
+}
+
+constexpr uint32 QueueMutexWorkers = 4;
+constexpr uint32 QueueMutexIterations = 50000;
+
+struct QueueMutexContext {
+    platform::detail::QueueMutex mutex;
+    uint64 counter = 0;
+};
+
+void IncrementUnderQueueMutex(void* raw) noexcept {
+    auto& context = *static_cast<QueueMutexContext*>(raw);
+    for (uint32 index = 0; index < QueueMutexIterations; ++index) {
+        platform::detail::QueueMutexGuard guard(context.mutex);
+        ++context.counter;
+    }
+}
+
+#if !ROCKS_BUILD_RELEASE
 constexpr uint32 FiniteTimeoutMs = 1000;
 constexpr uint64 WakeTokenValue = 42;
 
 // 시험 훅이 여는 gate다. 시험마다 새로 둔다.
 test::CountingGate* parkedGate = nullptr;
+// 세는 주소 범위다. 시험 밖의 대기(예: Thread::Start가 쥔 내부 잠금을 새 스레드가 기다림)는 세지
+// 않는다.
+const unsigned char* parkedBegin = nullptr;
+const unsigned char* parkedEnd = nullptr;
 
-void OnParked(const void*) noexcept {
-    if (parkedGate != nullptr) {
+void OnParked(const void* address) noexcept {
+    const auto* byte = static_cast<const unsigned char*>(address);
+    if (parkedGate != nullptr && byte >= parkedBegin && byte < parkedEnd) {
         parkedGate->Arrive();
     }
 }
@@ -34,13 +68,16 @@ void OnParked(const void*) noexcept {
 // 시험 동안 onParked 훅을 건다.
 class ParkHookScope {
 public:
-    explicit ParkHookScope(test::CountingGate& gate) noexcept {
+    // watched부터 bytes byte 안의 주소에서 잠든 대기만 센다.
+    ParkHookScope(test::CountingGate& gate, const void* watched, usize bytes) noexcept {
+        parkedBegin = static_cast<const unsigned char*>(watched);
+        parkedEnd = parkedBegin + bytes;
         parkedGate = &gate;
-        detail::SyncTestAccess::InstallParkHooks(OnParked, nullptr);
+        platform::detail::SyncTestAccess::InstallParkHooks(OnParked, nullptr);
     }
 
     ~ParkHookScope() noexcept {
-        detail::SyncTestAccess::Clear();
+        platform::detail::SyncTestAccess::Clear();
         parkedGate = nullptr;
     }
 
@@ -90,17 +127,6 @@ bool FakeTimedWait(WaiterSignal& signal, uint32) noexcept {
     return false;
 }
 
-Atomic<uint32> waitBegins;
-Atomic<uint32> waitEnds;
-
-void CountWaitBegin(const void*) noexcept {
-    waitBegins.FetchAdd<MemoryOrder::Relaxed>(1);
-}
-
-void CountWaitEnd(const void*) noexcept {
-    waitEnds.FetchAdd<MemoryOrder::Relaxed>(1);
-}
-
 // 스레드 종료 중의 대기(D31): 이 객체의 소멸자가 thread_local 파괴 중에 ParkingLot에서 잔다.
 struct ExitWaitContext {
     uint8 address = 0;
@@ -123,29 +149,21 @@ struct WaitsInDestructor {
 thread_local WaitsInDestructor waitsInDestructor;
 
 // thread_local은 생성의 역순으로 파괴된다. 먼저 이 객체를 만들고 그 뒤 ParkingLot을 써 레코드 칸을
-// 만들면, 칸이 먼저 파괴되고 이 소멸자가 임시 레코드로 잔다.
+// 만들면, 칸이 먼저 파괴되고 이 소멸자가 임시 레코드로 잔다. platform::Thread가 아닌 OS 스레드에서
+// 돈다 (Thread::Start의 내부 잠금 대기가 레코드 칸을 먼저 만들지 않게).
 void ArmExitWaitAfterRecord(void*) noexcept {
     waitsInDestructor.armed = true;
     uint8 scratch = 0;
     (void)ParkingLot::Wait(&scratch, []() noexcept { return false; }, []() noexcept {});
 }
 
-constexpr uint32 GrowthThreads = 80;
-constexpr uint32 QueueMutexWorkers = 4;
-constexpr uint32 QueueMutexIterations = 50000;
-
-struct QueueMutexContext {
-    detail::QueueMutex mutex;
-    uint64 counter = 0;
-};
-
-void IncrementUnderQueueMutex(void* raw) noexcept {
-    auto& context = *static_cast<QueueMutexContext*>(raw);
-    for (uint32 index = 0; index < QueueMutexIterations; ++index) {
-        detail::QueueMutexGuard guard(context.mutex);
-        ++context.counter;
-    }
+// 보조 스레드가 OS 스레드에서 ArmExitWaitAfterRecord를 돌리고 끝나기를 기다린다.
+void RunExitWaitOnOsThread(void* raw) noexcept {
+    *static_cast<bool*>(raw) = test::RunOnOsThread(ArmExitWaitAfterRecord, nullptr);
 }
+
+constexpr uint32 GrowthThreads = 80;
+#endif
 
 } // namespace
 
@@ -164,8 +182,8 @@ TEST(ParkingLot_CanWaitFalseDoesNotSleep) {
 #if !ROCKS_BUILD_RELEASE
 TEST(ParkingLot_WakeOneDeliversTokenToParkedWaiter) {
     test::CountingGate parked;
-    ParkHookScope hooks(parked);
     uint8 address = 0;
+    ParkHookScope hooks(parked, &address, sizeof(address));
     Waiter waiter;
     waiter.address = &address;
     Thread thread;
@@ -185,9 +203,10 @@ TEST(ParkingLot_WakeOneDeliversTokenToParkedWaiter) {
 
 TEST(ParkingLot_WakeMultipleAndAllReportRemainingWaiters) {
     test::CountingGate parked;
-    ParkHookScope hooks(parked);
-    uint8 address = 0;
-    uint8 otherAddress = 0;
+    uint8 addresses[2] = {};
+    uint8& address = addresses[0];
+    uint8& otherAddress = addresses[1];
+    ParkHookScope hooks(parked, addresses, sizeof(addresses));
     constexpr uint32 SameAddressWaiters = 3;
     Waiter waiters[SameAddressWaiters + 1];
     Thread threads[SameAddressWaiters + 1];
@@ -215,11 +234,11 @@ TEST(ParkingLot_WakeMultipleAndAllReportRemainingWaiters) {
 
 TEST(ParkingLot_TimeoutLeavesQueueAndRaceWithWakeIsWoken) {
     test::CountingGate parked;
-    ParkHookScope hooks(parked);
+    uint8 address = 0;
+    ParkHookScope hooks(parked, &address, sizeof(address));
     FakeTimeout state;
     fakeTimeout = &state;
-    detail::SyncTestAccess::InstallTimedWait(FakeTimedWait);
-    uint8 address = 0;
+    platform::detail::SyncTestAccess::InstallTimedWait(FakeTimedWait);
 
     // 시한 뒤 시간 초과: 대기자는 큐에서 나오고 깨우기는 아무도 찾지 못한다.
     {
@@ -254,40 +273,40 @@ TEST(ParkingLot_TimeoutLeavesQueueAndRaceWithWakeIsWoken) {
               waiter.outcome.wakeToken == WakeTokenValue);
     }
 
-    detail::SyncTestAccess::Clear();
+    platform::detail::SyncTestAccess::Clear();
     fakeTimeout = nullptr;
 }
 
 TEST(ParkingLot_WaitDuringThreadExitUsesTemporaryRecord) {
     test::CountingGate parked;
-    ParkHookScope hooks(parked);
     ExitWaitContext context;
+    ParkHookScope hooks(parked, &context.address, sizeof(context.address));
     exitWaitContext = &context;
-    Thread thread;
-    REQUIRE(thread.Start(ArmExitWaitAfterRecord, nullptr) == ThreadStatus::Success);
-    // 스레드 함수가 끝난 뒤 thread_local 파괴 중에 잠든다.
+    bool ran = false;
+    Thread helper;
+    REQUIRE(helper.Start(RunExitWaitOnOsThread, &ran) == ThreadStatus::Success);
+    // OS 스레드 함수가 끝난 뒤 thread_local 파괴 중에 잠든다.
     parked.WaitFor(1);
     CHECK(ParkingLot::WakeOne(&context.address).wokeThread);
-    REQUIRE(thread.Join() == ThreadStatus::Success);
-    exitWaitContext = nullptr;
-    CHECK(context.outcome.waited && context.outcome.woken);
-    // 칸 레코드와 임시 레코드가 모두 영구 풀로 돌아왔다(새 스레드가 그중 하나를 다시 쓴다).
-    const uint32 freeAfterExit = detail::SyncTestAccess::FreeRecordCount();
+    REQUIRE(helper.Join() == ThreadStatus::Success);
+    CHECK(ran && context.outcome.waited && context.outcome.woken);
+    // 칸 레코드와 임시 레코드가 모두 영구 풀로 돌아왔다. 같은 일을 다시 해도 풀 크기가 같다(새
+    // 스레드가 돌아온 레코드를 다시 쓴다).
+    const uint32 freeAfterExit = platform::detail::SyncTestAccess::FreeRecordCount();
     CHECK(freeAfterExit >= 2);
-    exitWaitContext = &context;
-    Thread reuse;
-    REQUIRE(reuse.Start(ArmExitWaitAfterRecord, nullptr) == ThreadStatus::Success);
+    ran = false;
+    REQUIRE(helper.Start(RunExitWaitOnOsThread, &ran) == ThreadStatus::Success);
     parked.WaitFor(2);
     CHECK(ParkingLot::WakeOne(&context.address).wokeThread);
-    REQUIRE(reuse.Join() == ThreadStatus::Success);
+    REQUIRE(helper.Join() == ThreadStatus::Success);
     exitWaitContext = nullptr;
-    CHECK(detail::SyncTestAccess::FreeRecordCount() == freeAfterExit);
+    CHECK(ran && platform::detail::SyncTestAccess::FreeRecordCount() == freeAfterExit);
 }
 
 TEST(ParkingLot_TableGrowthKeepsEveryWaiter) {
     test::CountingGate parked;
-    ParkHookScope hooks(parked);
     static uint8 addresses[GrowthThreads] = {};
+    ParkHookScope hooks(parked, addresses, sizeof(addresses));
     static Waiter waiters[GrowthThreads];
     static Thread threads[GrowthThreads];
     for (uint32 index = 0; index < GrowthThreads; ++index) {

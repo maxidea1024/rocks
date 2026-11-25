@@ -16,7 +16,6 @@ using namespace rocks::platform;
 namespace {
 
 constexpr uint32 FiniteTimeoutMs = 1000;
-constexpr uint64 NanosecondsPerMillisecond = 1000000;
 
 struct Handoff {
     WaiterSignal signal;
@@ -29,6 +28,9 @@ void WaitAndRead(void* raw) noexcept {
     handoff.signal.Wait();
     handoff.observed = handoff.payload;
 }
+
+#if !ROCKS_BUILD_RELEASE
+constexpr uint64 NanosecondsPerMillisecond = 1000000;
 
 // 가짜 시계: 부를 때마다 시한보다 길게 흐른다. 그래서 WaitFor는 OS 대기 없이 시간 초과다.
 Atomic<uint64> fakeNow;
@@ -73,6 +75,7 @@ void WaitWithTimeout(void* raw) noexcept {
     auto& waiter = *static_cast<TimedWaiter*>(raw);
     waiter.result = waiter.signal.WaitFor(FiniteTimeoutMs);
 }
+#endif
 
 } // namespace
 
@@ -105,11 +108,11 @@ TEST(WaiterSignal_NotifyPublishesPriorWritesToWaiter) {
 #if !ROCKS_BUILD_RELEASE
 TEST(WaiterSignal_DeadlineUsesSyncTestClock) {
     fakeNow.Store<MemoryOrder::Relaxed>(0);
-    detail::SyncTestAccess::InstallClock(JumpingClock);
+    platform::detail::SyncTestAccess::InstallClock(JumpingClock);
     WaiterSignal signal;
     // 시한 계산이 가짜 시계를 쓰므로 실제로 기다리지 않고 시간 초과다.
     const bool notified = signal.WaitFor(FiniteTimeoutMs);
-    detail::SyncTestAccess::Clear();
+    platform::detail::SyncTestAccess::Clear();
     CHECK(!notified);
     CHECK(fakeNow.Load<MemoryOrder::Relaxed>() != 0);
 }
@@ -117,7 +120,7 @@ TEST(WaiterSignal_DeadlineUsesSyncTestClock) {
 TEST(WaiterSignal_FakeTimedWaitOrdersWakeAndTimeout) {
     FakeTimedWaitState state;
     fakeState = &state;
-    detail::SyncTestAccess::InstallTimedWait(FakeTimedWait);
+    platform::detail::SyncTestAccess::InstallTimedWait(FakeTimedWait);
 
     // 시한 전 깨움: 대기자가 가짜 대기에 들어간 뒤 Notify하면 true다.
     {
@@ -150,7 +153,7 @@ TEST(WaiterSignal_FakeTimedWaitOrdersWakeAndTimeout) {
     CHECK(!immediate.WaitFor(0));
     immediate.Notify();
     CHECK(immediate.WaitFor(FiniteTimeoutMs) && immediate.WaitFor(InfiniteTimeout));
-    detail::SyncTestAccess::Clear();
+    platform::detail::SyncTestAccess::Clear();
     fakeState = nullptr;
     CHECK(state.calls.Load<MemoryOrder::Relaxed>() == 2);
     CHECK(state.lastTimeoutMs.Load<MemoryOrder::Relaxed>() == FiniteTimeoutMs);

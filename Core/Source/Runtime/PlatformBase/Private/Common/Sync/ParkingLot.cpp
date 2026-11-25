@@ -434,6 +434,8 @@ ParkingLotWaitOutcome ParkingLotWait(const void* address, ParkingLotCanWait canW
                                      void* canWaitContext, ParkingLotBeforeWait beforeWait,
                                      void* beforeWaitContext, uint32 timeoutMs) noexcept {
     CheckWaitAllowed();
+    // 대기 표시를 밖에서 세운 뒤 bucket에 들어가기 전 지점이다(10.3절 경쟁 시험이 여기서 멈춘다).
+    ROCKS_SYNC_STEP("ParkingLot.WaitBegin");
     const RecordUse use = AcquireRecordForWait();
     ThreadRecord* record = use.record;
     CallHook(hookWaitBegin, address);

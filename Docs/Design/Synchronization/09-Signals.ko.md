@@ -89,7 +89,7 @@ bool IsDone(const OnceFlag& flag) noexcept;
 ### 9.5 대기 시간과 결과
 
 - 시간 인자는 지금처럼 millisecond `uint32`이고 `InfiniteTimeout`이 무한, 0이 즉시 검사다. ParkingLot 안쪽은 monotonic tick 시한으로 바꿔 spurious wake 때 시간을 늘리지 않는다(`WaitDeadline.h`와 같은 규칙).
-- `WaitResult`는 `Signaled`·`TimedOut` 둘로 줄인다. OS 대기 수단의 예상 밖 실패는 이제 `WaiterSignal` 한 곳뿐이고, 거기서 다시 시도할 수 없는 오류는 Fatal이다(D14). 하위호환 없이 `Failed`를 지운다.
+- (개정 4에서 고침) `WaitResult::Failed`는 지우지 않는다. 프로세스 대기(`Process::Wait`)·디렉터리 감시 대기는 OS 오류를 호출자에게 돌려줘야 하는 API라(잘못된 핸들·자식 없음 등을 Fatal로 만들 수 없다) 같은 열거형을 쓴다. 대신 동기화 객체(`Mutex`·`ConditionVariable`·이벤트·`Semaphore`·`WaiterSignal`)는 `Failed`를 내지 않는다. 그 결과를 `Failed`와 비교하는 기존 검사(Crypto `KeyRing`, Task, AsyncFile 등)는 죽은 분기가 되며 SY6에서 지운다. 아래 처음 결정은 이 이유로 고쳤다: `WaitResult`는 `Signaled`·`TimedOut` 둘로 줄인다. OS 대기 수단의 예상 밖 실패는 이제 `WaiterSignal` 한 곳뿐이고, 거기서 다시 시도할 수 없는 오류는 Fatal이다(D14). 하위호환 없이 `Failed`를 지운다.
 
 ### 9.6 RealtimeWakeSignal(개정 3)
 
@@ -101,4 +101,5 @@ bool IsDone(const OnceFlag& flag) noexcept;
 - **OS 수단.** Windows `WaitOnAddress`·`WakeByAddressSingle`, Android futex(7.3절과 같다). macOS는 신호 객체마다 Mach semaphore 하나(`semaphore_create`·`semaphore_signal`·`semaphore_timedwait`)다. `semaphore_signal`은 사용자 공간 잠금을 잡지 않는 커널 호출이라 Core Audio 콜백에서 쓰는 관례적 수단이다. `os_sync_wait_on_address`는 최소 버전 13.0에서 쓸 수 없다(7.3절). Mach semaphore는 커널 객체라 만들기가 실패할 수 있으므로 생성은 `Result<RealtimeWakeSignal> Create() noexcept`다(Windows·Android는 실패하지 않는다).
 - **위치.** PlatformBase `Platform/Sync/RealtimeWakeSignal.h`, OS 구현은 `Private/<OS>/`. 가짜 OS 대기 seam(14.2절)을 같이 쓴다.
 - **시험.** Signal 뒤 Wait, 대기 중 Signal, 연속 Signal 합침, 시한, 두 대기자 검출을 가짜 OS 대기로 결정적으로 확인한다.
+- **구현(개정 4, SY12).** PlatformBase에는 Core `Result`가 없어 생성은 `bool Initialize()`다(macOS만 실패할 수 있다). 상태는 Empty 0·Signaled 1·Waiting 2이고 Signal은 `Exchange(Signaled)`가 Waiting을 돌려줄 때만 OS 깨우기다. 대기자는 Waiting인 동안만 OS 대기에 들어가고 깬 뒤 늘 상태를 다시 본다. 시간 초과는 Waiting → Empty CAS로 거두고, 그 사이 Signal이 왔으면 그 신호를 받는다. macOS Mach semaphore는 횟수를 세므로 시간 초과한 대기자가 받지 않은 깨우기가 다음 대기의 spurious wake 하나로 남는다(상태를 다시 보므로 정확성 문제는 없다). 시한 시험은 가짜 시계(`SyncMonotonicNanoseconds`)로 OS 대기 없이 돈다. 두 대기자 Fatal은 자식 프로세스 시험으로 남긴다.
 - **UE와 다른 점.** UE 오디오 렌더 스레드는 `FEvent`(Apple은 pthread 조건 변수)를 기다린다(`Engine/Source/Runtime/AudioMixerCore/Private/AudioMixer.cpp`). Rocks는 D27 때문에 잠금 없는 신호로 둔다.

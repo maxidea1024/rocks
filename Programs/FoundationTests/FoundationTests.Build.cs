@@ -203,8 +203,10 @@ public abstract class TestsModule : ModuleRules
             // three areas, the public and Tests areas of the modules the runner's compile environment sees, and the PlatformBase internals.
             new SourceGroup(support, ExecutableName, [], ["PlatformBase"])];
 
-        // POSIX platforms use the shared test support implementation.
+        // POSIX platforms use the shared test support implementation. Private/Common holds the platform-independent support (the
+        // interleaving step scheduler state, Docs/Design/Synchronization section 14.3).
         directories.Add(context.Platform == NativePlatform.Windows ? $"{support}/Private/Win64" : $"{support}/Private/Posix");
+        directories.Add($"{support}/Private/Common");
         var sources = context.Sources(directories.ToArray()).ToList();
         sources.Add(context.PathInRoot(context.Configuration == NativeConfiguration.Asan
             ? $"{support}/Private/Asan/Enabled.cpp" : $"{support}/Private/Asan/Disabled.cpp"));

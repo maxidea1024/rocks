@@ -19,6 +19,13 @@
 | `IndexedFreeList<IndexBits = 24>` | 미리 잡은 칸 배열 위의 Treiber 스택. 머리는 64-bit `[태그 64−IndexBits \| 색인 IndexBits]`(기본 태그 40 bit, 색인 24 bit = 칸 약 1,677만 개), 다음 색인은 칸마다 `Atomic<uint32>` | 칸은 배열 수명 동안 해제하지 않는다. 태그로 ABA를 막는다(12.4절) | `LogBlockPool`·`TraceBlockPool` 통합(4.5절 3번), GC 512칸 블록 풀 |
 | `FixedBlockPool` | 고정 크기 블록 할당기. 페이지 단위로 늘리고(늘리기만 `Mutex`) 블록은 `IndexedFreeList`로 돌린다. 스레드 지역 캐시는 두지 않는다(측정 뒤) | 파괴 때만 페이지를 돌려준다 | 작업 레코드, trace 블록, 객체 블록 |
 
+구현(개정 4, SY7):
+- 헤더: `Core/Containers/StepPolicy.h`(`NoSteps`), `BoundedSpscQueue.h`, `IntrusiveMpscQueue.h`, `TakeAllStack.h`, `IndexedFreeList.h`, `Core/Memory/FixedBlockPool.h`. 기존 `BoundedMpscQueue`도 `StepPolicy` 인자를 받는다.
+- 침투형 컨테이너의 노드는 링크 타입(`IntrusiveMpscNode`·`TakeAllStackNode`)을 상속한다. `TakeAllStack`의 닫힘 표지는 스택 객체 자신의 주소다.
+- `IndexedFreeList<IndexBits, TagBits, StepPolicy>`: 태그 폭을 따로 받는다(기본 `64 − IndexBits`). `TagBits >= 38`을 static_assert하고, 정책이 `AllowSmallTag`를 가질 때만 작게 연다(ABA 재현 시험). 시작 상태는 `IndexedFreeListStart::AllFree`·`Empty`다. 색인 "없음"은 `IndexNone`(색인 bit 전부 1)이라 쓸 수 있는 칸은 `MaxCapacity = IndexNone`개다.
+- `FixedBlockPool`은 블록을 색인으로 다룬다(`TryAllocate` → `{data, index}`, `Free(index)`). 블록 수 상한과 페이지 크기는 `Initialize`에서 정하고 페이지 표를 미리 잡는다.
+- 통합: `LogBlockPool`·`TraceBlockPool`의 자체 태그 색인 스택(`[태그 32 | 색인 32]`)을 `IndexedFreeList<>`(`[태그 40 | 색인 24]`)로 바꿨다. 블록 수 상한이 약 1,677만으로 줄었다(로그·trace 풀은 수천 개 이하). trace 블록 머리의 `freeNext` 칸은 지웠다(패딩으로 크기는 같다). `FrameArena` 소멸자 기록은 `TakeAllStack`이다.
+
 두지 않는 것과 이유:
 - **무한 MPMC 큐**(UE `FAAArrayQueue`): 노드 회수가 필요해 hazard pointer·epoch가 따라온다. 지금 필요한 곳은 Task overflow 큐뿐이고 잠금 큐로 시작한다(`EngineImplementationPlan.ko.md` 423행). Task 설계(후속 문서)에서 다시 본다(D33).
 - **유한 MPMC 큐**: 지금 쓰임이 없다. 생기면 Vyukov 유한 MPMC를 `BoundedMpscQueue` 옆에 둔다.

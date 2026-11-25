@@ -42,6 +42,12 @@ public:
 - **`detail::QueueMutex`.** UE `FWordMutex`와 같은 포인터 크기 잠금이다(3.2절). 대기 노드는 대기 스레드 스택에 있고 노드마다 `WaiterSignal`이 있다. ParkingLot 밖에서는 쓰지 않는다.
 - **해시.** 주소를 64-bit 곱셈 해시로 섞는다. 같은 cache line의 서로 다른 잠금이 다른 bucket으로 가야 한다.
 - **진단 훅 자리.** 10.4절에서 정한다. 빠른 경로(경합 없음)에는 들어가지 않는다.
+- **구현(개정 4, SY1).** `Private/Common/Sync/ParkingLot.cpp`·`QueueMutex.{h,cpp}`다.
+  - `mayHaveMoreWaiters`는 bucket 단위가 아니라 **같은 주소의 남은 대기자**다. 꺼내기를 마친 뒤 같은 주소 대기자를 하나 더 만나면 true다. bucket 단위(10.3절 규칙 3)보다 빈 깨우기가 적고 정확성 규칙은 같다.
+  - 시간 초과로 깬 대기자는 bucket을 다시 잠가 아직 큐에 있으면 나온다. 이미 깨우는 쪽이 꺼냈으면 그 `Notify`를 기다린다(깨우는 쪽이 끝나기 전에 레코드를 다시 쓰지 않게, UE와 같다).
+  - 깨우는 쪽은 꺼낸 레코드의 참조 계수를 올리고 bucket을 푼 뒤 `Notify`하고 내린다. `Notify` 전에 `next`를 읽는다(깬 대기자가 곧 다시 기다리며 `next`를 쓴다).
+  - `WaiterSignal`은 `Wait`·`WaitFor`가 돌아가기 직전 `Settle`을 부른다. macOS판은 잠금 없이 신호를 보고 돌아가면 `Notify`가 아직 내부 mutex를 쥐고 있을 수 있어 한 번 잡았다 놓는다(쥔 mutex의 파괴를 막는다). 주소 대기 플랫폼은 할 일이 없다.
+  - 표 키우기 기준은 "살아 있는 사용 스레드 수 > bucket 수"이고 새 크기는 스레드 수 × 2 이상의 2의 거듭제곱이다.
 
 ### 10.3 대기 표시 규칙(D29)
 

@@ -39,6 +39,8 @@ bool WaiterSignal::WaitFor(uint32 timeoutMs) noexcept {
     while (!IsNotified()) {
         const uint32 remaining = deadline.RemainingMilliseconds();
         if (remaining == 0) {
+            // 시간 초과와 겹친 Notify가 끝난 뒤에 돌아간다(돌아온 뒤 파괴·재사용해도 되게).
+            Settle();
             return false;
         }
 

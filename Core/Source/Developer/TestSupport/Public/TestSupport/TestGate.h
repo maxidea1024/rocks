@@ -43,16 +43,24 @@ private:
 //   parked.WaitFor(3);             // 셋 모두 잠들 때까지
 class CountingGate {
 public:
+    // 도착자: 수를 올린 뒤 깨운다. 기다리는 쪽의 "신호 지움 → 수 읽기"와 store-buffering 짝이라
+    // 양쪽에 seq_cst fence를 둔다(시험 지원 코드 — 지움이 늦게 보여 깨움을 지우는 일을 막는다).
     void Arrive() noexcept {
         count_.FetchAdd<platform::MemoryOrder::AcquireRelease>(1);
+        platform::AtomicThreadFence<platform::MemoryOrder::SequentiallyConsistent>();
         signal_.Notify();
     }
 
     // count번 이상 도착할 때까지 기다린다.
     void WaitFor(uint32 count) noexcept {
-        while (count_.Load<platform::MemoryOrder::Acquire>() < count) {
-            signal_.Wait();
+        while (true) {
             signal_.Reset();
+            platform::AtomicThreadFence<platform::MemoryOrder::SequentiallyConsistent>();
+            if (count_.Load<platform::MemoryOrder::Acquire>() >= count) {
+                return;
+            }
+
+            signal_.Wait();
         }
     }
 
