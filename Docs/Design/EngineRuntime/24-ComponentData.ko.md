@@ -23,6 +23,8 @@
 - **시스템 연결**은 하지 않는다. 시스템 상태(23.2절 `WantsSystemState`)를 요청하지 않으므로 아무것도 그리지 않는다. setter는 Render 시스템 상태가 있을 때만 다시 보내기를 표시한다(`MarkSystemStateDirty(Render)` — 상태가 없으면 아무것도 하지 않는다). 그래서 RS 단계가 상태를 붙이면 setter를 고치지 않아도 된다.
 - 모듈은 World다(CameraComponent와 같은 자리 — 23.4절). 에셋 참조(텍스처·머티리얼)가 필요한 속성은 그 참조 필드 체계가 World에 들어올 때 넣는다(24.2.8절).
 
+파일 배치(2026-11-25 사용자 지시 — [코드 스타일](../../CodingStyle.md) "파일 배치"): 클래스마다 헤더·cpp 하나, 범주 폴더 `Lights/`·`Primitives/`·`Spline/`·`Movement/`·`Camera/`(D5는 `Environment/`·`PostProcess/`)를 `Public/World/`와 `Private/`에 같이 둔다. 같이 쓰는 타입은 `LightingChannels.h`·`LightUnits.h`·`PrimitiveTypes.h`·`SplineTypes.h`다. private 공용은 `Private/ComponentValueChecks.h`(setter 값 검사 — `rocks::component_checks`), `Private/ActorRootSetup.h`(24.2.5절 root 준비 — `rocks::actor_root_setup::PrepareRoot<T>`), `Private/Lights/LightUnitMath.h`(24.2.4절 단위 변환 — `rocks::light_math`)다.
+
 묶음마다 설계 → 구현 → 리뷰어 1명 → 커밋으로 간다. D2는 24.3절이다. 이 장이 길어져 D3부터는 장을 나눈다: D3 [25장](25-SplineComponent.ko.md), D4 [26장](26-MovementComponents.ko.md), D5 [27장](27-EnvironmentComponents.ko.md).
 
 ### 24.2 D1 — 광원
@@ -249,7 +251,7 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
 열거:
 - `CanBeCharacterBase : uint8 { No, Yes, Owner }`(UE `ECanBeCharacterBase` — `PrimitiveComponent.h:87`).
 - `RendererStencilMask : uint8 { Default, Mask255, Mask1, Mask2, Mask4, Mask8, Mask16, Mask32, Mask64, Mask128 }`(UE `ERendererStencilMask` — `:122`, 순번 값).
-- `LightingChannels`는 D1 구조체를 같이 쓴다(`World/LightingChannels.h`로 옮긴다).
+- `LightingChannels`는 D1 구조체를 같이 쓴다(`World/Lights/LightingChannels.h`).
 
 #### 24.3.3 PrimitiveComponent 필드
 

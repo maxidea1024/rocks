@@ -16,9 +16,9 @@
 #include <Input/InputEvent.h>
 #include <TestSupport/Test.h>
 #include <World/Actor.generated.h>
-#include <World/CameraComponent.generated.h>
+#include <World/Camera/CameraComponent.generated.h>
 #include <World/Component.generated.h>
-#include <World/CameraComponent.h>
+#include <World/Camera/CameraComponent.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 #include <stdio.h>
