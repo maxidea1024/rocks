@@ -79,6 +79,9 @@ UE와 의도적으로 다른 점(규약이 아니라 안전성·정확도 정책
 | 선형 충격량 | `KilogramCentimetersPerSecondToNewtonSeconds` / 반대 | 100 | 차원(kg·cm/s = 0.01 N·s). UE EUnit에는 kg·cm/s가 없고 충격량 표시 단위는 N·s(`UnitConversion.cpp:590`) |
 | 토크 | `KilogramCentimetersSquaredPerSecondSquaredToNewtonMeters` / 반대 | 10000 | `UnitConversion.cpp:828` |
 | 관성 모멘트 | `KilogramSquareCentimetersToKilogramSquareMeters` / 반대 | 10000 | `Engine/Classes/Components/PrimitiveComponent.h:2863`(관성 텐서 kg·cm²) |
+| 각충격량·각운동량 | `KilogramSquareCentimetersPerSecondToKilogramSquareMetersPerSecond` / 반대 | 10000 | 차원(kg·cm²/s = 0.0001 kg·m²/s). UE `AddAngularImpulseInRadians`(`PrimitiveComponent.h:1802-1813`)가 kg·cm²/s를 받는다([물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md) U1) |
+| 각 스프링 강성·감쇠 | `KilogramSquareCentimetersPerSecondSquaredPerRadianToNewtonMetersPerRadian`·`KilogramSquareCentimetersPerSecondPerRadianToNewtonMeterSecondsPerRadian` / 반대 | 10000 | 차원(토크/rad·토크·초/rad). Jolt 단위 N·m/rad·N·m·s/rad(Jolt `Docs/Architecture.md:524`) |
+| 밀도 | `GramsPerCubicCentimeterToKilogramsPerCubicMeter` / 반대 | 1000(cm 계열 → m 계열에 **곱한다**) | `Private/Math/UnitConversion.cpp:803-806`(g/cm³ 1, kg/m³ 0.001), UE `UPhysicalMaterial::Density` g/cm³(`PhysicsCore/Public/PhysicalMaterials/PhysicalMaterial.h:145-147`) |
 | 질량·시간·각도·각속도 | 변환 없음(길이 차원 없음, 각속도는 API 이름의 rad/s·deg/s를 따른다) | — | `PrimitiveComponent.h:2852-2857`(kg), `:1860-1873`(InRadians/InDegrees) |
 
 함수는 float·double·`Vector3<float/double>`(성분별)을 받는다. m → cm는 정확한 정수 계수를 한 번 곱하고 cm → m는 같은 계수로 한 번 나누므로 결과는 정확한 값을 한 번 반올림한 값이다. UE 매크로 `UE_CM_TO_M`은 float `0.01f`라 double 값에 곱하면 상대 오차 약 2.2e-8이 생기는데 Rocks는 이를 따르지 않는다(정확도 정책 — 규약과 무관). 비유한 입력은 그대로 전파하고 범위 초과는 ±Inf다. UE `UnitConversion.h`의 `EUnit` 표시·파싱·자동 단위 선택 체계는 구현하지 않았다(에디터 표시 단위 단계). UE 물리 API(AddForce·AddImpulse·AddTorque)가 받는 단위가 위 cm 계열인지는 UE 소스에 표기가 없어(추론만) [물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md) 8절의 검증 항목 U1이다. 밀도(UE g/cm³)·각충격량·각 스프링 강성 변환 함수는 아직 없다(같은 문서 K1). 극성·축성 벡터·quaternion의 축 사상은 이 함수의 범위가 아니며 같은 문서 2절이 정한다.
@@ -119,7 +122,7 @@ UE와 의도적으로 다른 점(오류·정확도 정책, 요구 3절 "규약�
 | `Rect.h` | `Box2<T>`(UE FBox2D), `IntRect`(UE FIntRect) | Box2는 닫힌 집합(`Contains`=UE IsInsideOrOn, `ContainsStrictly`=IsInside), 무효 플래그 대신 `TryMake`/`TryFromPoints`. IntRect는 반열린 픽셀 구간, 넓이 int64 |
 | `Interval.h` | `Interval<T>`(UE TInterval) | 닫힌 구간, 무효 상태 대신 `TryMake`. 교집합이 없으면 NotFound, NaN을 포함하면 무효로 드러남 |
 | `Float16.h` | `Float16`(UE FFloat16) | RTNE, 크기 65520 이상은 ±Inf, NaN 유지. `FromFloatClamped`는 ±65504로 포화하되 NaN은 NaN(UE SetClamped는 NaN을 최댓값으로 만들 수 있음). 변환은 `PlatformMath::FloatToHalf/HalfToFloat`(Generic 정확 구현, ARM64는 fcvtn/fcvtl, x64는 F16C가 baseline이 아니어서 Generic) |
-| `UnitConversion.h` | cm 계열 ↔ m 계열 경계 변환(길이·넓이·속도·가속도·힘·선형 충격량·토크·관성), `CentimetersPerMeter`·`SquareCentimetersPerSquareMeter` | 위 "단위 경계 변환" 표. 정확한 정수 계수로 곱하거나 나누기 한 번, 검사 없음(비유한 전파) |
+| `UnitConversion.h` | cm 계열 ↔ m 계열 경계 변환(길이·넓이·속도·가속도·힘·선형 충격량·토크·관성·각충격량·각 스프링·밀도), `CentimetersPerMeter`·`SquareCentimetersPerSquareMeter`·`KilogramsPerCubicMeterPerGramPerCubicCentimeter` | 위 "단위 경계 변환" 표. 정확한 정수 계수로 곱하거나 나누기 한 번, 검사 없음(비유한 전파) |
 | `MathBatch.h` | `math::TransformPoints/TransformVectors` | 행 벡터 `p · M`. 원소 수 불일치·부분 겹침은 Fatal, 정확한 in-place 허용, 결과는 원소별 Mat4 변환과 동일 |
 | `Color.h` | `Color`(8-bit), `LinearColor`(float, 선형 sRGB 원색) | 아래 3절 |
 | `RandomStream.h` | PCG32 결정적 난수 | 아래 4절 |
