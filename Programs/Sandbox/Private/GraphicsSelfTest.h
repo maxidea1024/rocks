@@ -27,7 +27,10 @@ enum class GraphicsSelfTestScope : rocks::uint8 {
     EngineShaders,
     // 쿠킹 엔진 셰이더 라이브러리 화면 검사만(Sandbox --cooked-shader-self-test,
     // ShaderSystem 16.1절 SSD48 — 공급자가 없는 Release에서도 돈다).
-    CookedShaders
+    CookedShaders,
+    // 쿠킹 텍스처 장면 대조만(Sandbox --texture-self-test, RenderBase 18.5절 7항 — 메모리 플랫폼
+    // 데이터 장면과 시험 콘텐츠 쿠킹 장면).
+    Textures
 };
 
 int RunGraphicsSelfTest(rocks::Allocator& allocator, rocks::ModuleLoader& modules,
