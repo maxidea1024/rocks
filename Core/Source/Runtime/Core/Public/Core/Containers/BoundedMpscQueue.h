@@ -3,6 +3,7 @@
 #include <Base/Compiler.h>
 #include <Base/TypeTraits.h>
 #include <Base/Types.h>
+#include <Core/Containers/StepPolicy.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Platform/Atomics.h>
@@ -35,7 +36,10 @@ namespace rocks {
 //   if (!queue.Initialize(allocator, 1024)) { ... }
 //   queue.TryPushWith([&](Record& slot) noexcept { slot = record; });
 //   queue.TryPopWith([&](Record& slot) noexcept { Consume(slot); });
-template <typename T>
+//
+// StepPolicy는 원자 연산 사이의 단계 지점이다(기본 NoSteps는 비용 0, 시험은 interleaving 정책 —
+// Docs/Design/Synchronization 12.1·14.3절).
+template <typename T, class StepPolicy = NoSteps>
 class BoundedMpscQueue {
     static_assert(IsTriviallyCopyableV<T>, "BoundedMpscQueue requires a trivially copyable type");
 
@@ -107,6 +111,7 @@ public:
                 if (platform::AtomicCompareExchangeWeak<platform::MemoryOrder::Relaxed,
                                                         platform::MemoryOrder::Relaxed>(
                         &tail_.value, position, position + 1)) {
+                    StepPolicy::Step("BoundedMpscQueue.PushReserved");
                     fill(cell.value);
                     platform::AtomicStore<platform::MemoryOrder::Release>(&cell.sequence,
                                                                           position + 1);
@@ -118,6 +123,7 @@ public:
                 return false;
             } else {
                 // 다른 생산자가 앞서 예약했다. tail을 다시 읽는다.
+                StepPolicy::Step("BoundedMpscQueue.PushRetry");
                 position = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&tail_.value);
             }
         }
@@ -135,6 +141,7 @@ public:
         Cell& cell = cells_[position & mask_];
         const uint64 sequence =
             platform::AtomicLoad<platform::MemoryOrder::Acquire>(&cell.sequence);
+        StepPolicy::Step("BoundedMpscQueue.PopReadSequence");
         if (static_cast<int64>(sequence - (position + 1)) != 0) {
             return false;
         }

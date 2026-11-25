@@ -176,7 +176,7 @@
     "src/lib/OpenEXRCore/internal_rle.c": "c423a5ac1cf86b1707a119f235691dd149d0effec58e487c98b6744da59e224c",
     "src/lib/OpenEXRCore/internal_string.h": "da7973a00a5346f5482506c9a06b0502ded441df48884834c2f953d7761f8ea3",
     "src/lib/OpenEXRCore/internal_string_vector.h": "faa9565a911ab5e6c9ecdaf3e2c5f5f88ae74e65d79006555ef4e0b49ab01744",
-    "src/lib/OpenEXRCore/internal_structs.c": "6b29102071da2b77e98b6202b756fa7f77252de5310a39be9e14bfd1d8454f36",
+    "src/lib/OpenEXRCore/internal_structs.c": "eea73d3d09404554471c130a0eb3b263b0a246a389432727322fd9da798b98b3",
     "src/lib/OpenEXRCore/internal_structs.h": "03cd8fb591959e6f18d07a7c0d1b79eca30ba43828c941dae0ed176da63bbefb",
     "src/lib/OpenEXRCore/internal_util.h": "5333fdc6050342ab673a6b8a676fdce098480b2182ceb0685878c6a4ae7e7374",
     "src/lib/OpenEXRCore/internal_win32_file_impl.h": "68f267dc2ab905dd4d9c8bd3005f7def76ccc60fe5af97fdcd208a48a7bb9eca",
@@ -406,6 +406,11 @@
       "file": "src/lib/OpenEXRCore/channel_list.c",
       "upstreamSha256": "44b8be85def0fdcd819ec5166e4d5380fafc38ea11c79ba3bb9d53abdd339d48",
       "reason": "Use the {0} zero initializer for the channel entry (-Wmissing-field-initializers); the value is unchanged."
+    },
+    {
+      "file": "src/lib/OpenEXRCore/internal_structs.c",
+      "upstreamSha256": "6b29102071da2b77e98b6202b756fa7f77252de5310a39be9e14bfd1d8454f36",
+      "reason": "internal_exr_revert_add_part: free the allocated part struct that leaves the part table (the reverted part, or the second part copied into first_part), not only its contents; exr_add_part reverts a new part when setting its name fails, and the struct leaked (found by the encoder allocation failure test). Behavior on success is unchanged."
     },
     {
       "file": "src/lib/OpenEXRCore/internal_structs.h",

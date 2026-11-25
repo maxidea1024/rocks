@@ -227,6 +227,25 @@ internal static partial class MetaTests
                 Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
         });
+        // 동기화 SY0 통과 조건(Docs/Design/Synchronization 11.1·15절): C++ 원자 타입 platform::Atomic<T>의 필드 형식을 리플렉션
+        // struct 지정자 Atomic과 혼동하지 않는다. NATIVE 원자 멤버가 있는 클래스는 flags가 비어 있고, 같은 헤더의
+        // ROCKS_STRUCT(Atomic)만 Atomic이다.
+        suite.Add("Meta.AtomicFieldTypeIsNotTheAtomicSpecifier", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble.Replace("namespace probe {", "#include <Platform/Atomics.h>\nnamespace probe {", StringComparison.Ordinal) +
+                "ROCKS_STRUCT(Atomic)\nstruct Point {\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Point point;\n" +
+                "ROCKS_NATIVE() rocks::platform::Atomic<rocks::uint32> hits;\n" +
+                "ROCKS_NATIVE() rocks::platform::Atomic<Value*> next;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name);
+            string Flags(string name) => string.Join(",", Type(name).GetProperty("flags").EnumerateArray().Select(flag => flag.GetString()));
+            Verify.Equal("Atomic", Flags("probe::Point"), "Atomic struct flag");
+            Verify.Equal("", Flags("probe::Value"), "class with platform::Atomic native members");
+        });
         AddRejectGroup(context, "Meta.StructIsNotABaseOrReferenceTarget", [
             Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) + StructLeaf +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}\n" +

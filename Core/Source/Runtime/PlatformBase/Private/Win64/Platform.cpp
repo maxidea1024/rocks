@@ -32,27 +32,6 @@ void AlignedFree(void* address) noexcept {
     _aligned_free(address);
 }
 
-Mutex::Mutex() noexcept {
-    // SDK 타입은 private에서만 해석하며 공개 opaque storage의 ABI 전제를 검사한다.
-    static_assert(sizeof(SRWLOCK) <= sizeof(storage_));
-    static_assert(alignof(SRWLOCK) <= alignof(Mutex));
-    InitializeSRWLock(reinterpret_cast<SRWLOCK*>(storage_));
-}
-
-Mutex::~Mutex() noexcept = default;
-
-void Mutex::Lock() noexcept {
-    AcquireSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
-}
-
-bool Mutex::TryLock() noexcept {
-    return TryAcquireSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_)) != 0;
-}
-
-void Mutex::Unlock() noexcept {
-    ReleaseSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
-}
-
 // ns 변환(MonotonicNanoseconds)은 플랫폼 공통 Private/Common/Clock.cpp가 이 두 값으로 한다.
 uint64 MonotonicTicks() noexcept {
     LARGE_INTEGER counter{};

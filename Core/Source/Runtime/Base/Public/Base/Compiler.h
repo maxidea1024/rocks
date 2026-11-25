@@ -283,6 +283,41 @@
 #define ROCKS_TARGET_ARM64_AES __attribute__((target("neon,aes,fuse-aes")))
 #endif
 
+// Clang thread safety analysis 주석이다(Docs/Design/Synchronization 13.1절, D20). 빌드는 Rocks
+// 모듈에 -Wthread-safety를 켜고 경고를 오류로 둔다. 컴파일 때 도는 유일한 경쟁 검사라 실행 운에
+// 기대지 않는다.
+// - ROCKS_CAPABILITY("mutex"): 잠금 타입. ROCKS_SCOPED_CAPABILITY: 범위 가드 타입.
+// - ROCKS_GUARDED_BY(lock): 그 잠금을 쥐어야 읽고 쓰는 필드. ROCKS_PT_GUARDED_BY: 포인터가 가리키는
+// 값.
+// - ROCKS_REQUIRES(lock)·ROCKS_REQUIRES_SHARED(lock): 잠금을 쥔 채 불러야 하는 함수.
+// - ROCKS_ACQUIRE·ROCKS_ACQUIRE_SHARED·ROCKS_RELEASE·ROCKS_RELEASE_SHARED·ROCKS_TRY_ACQUIRE(성공
+// 값, ...):
+//   잠금을 잡거나 푸는 함수.
+// - ROCKS_EXCLUDES(lock): 그 잠금을 쥐지 않은 채 불러야 하는 함수(자기 교착 방지).
+// - ROCKS_NO_THREAD_SAFETY_ANALYSIS: 분석이 표현하지 못하는 함수(조건부 잠금·잠금 넘겨주기·상태
+// word
+//   안의 IntrusiveMutex). 이유를 옆에 적는다.
+// 사용 예:
+//   class Registry {
+//       platform::Mutex mutex_;
+//       Array<Entry> entries_ ROCKS_GUARDED_BY(mutex_);
+//       void InsertLocked(Entry entry) noexcept ROCKS_REQUIRES(mutex_);
+//   };
+#define ROCKS_THREAD_ANNOTATION(x) __attribute__((x))
+#define ROCKS_CAPABILITY(name) ROCKS_THREAD_ANNOTATION(capability(name))
+#define ROCKS_SCOPED_CAPABILITY ROCKS_THREAD_ANNOTATION(scoped_lockable)
+#define ROCKS_GUARDED_BY(lock) ROCKS_THREAD_ANNOTATION(guarded_by(lock))
+#define ROCKS_PT_GUARDED_BY(lock) ROCKS_THREAD_ANNOTATION(pt_guarded_by(lock))
+#define ROCKS_REQUIRES(...) ROCKS_THREAD_ANNOTATION(requires_capability(__VA_ARGS__))
+#define ROCKS_REQUIRES_SHARED(...) ROCKS_THREAD_ANNOTATION(requires_shared_capability(__VA_ARGS__))
+#define ROCKS_ACQUIRE(...) ROCKS_THREAD_ANNOTATION(acquire_capability(__VA_ARGS__))
+#define ROCKS_ACQUIRE_SHARED(...) ROCKS_THREAD_ANNOTATION(acquire_shared_capability(__VA_ARGS__))
+#define ROCKS_RELEASE(...) ROCKS_THREAD_ANNOTATION(release_capability(__VA_ARGS__))
+#define ROCKS_RELEASE_SHARED(...) ROCKS_THREAD_ANNOTATION(release_shared_capability(__VA_ARGS__))
+#define ROCKS_TRY_ACQUIRE(...) ROCKS_THREAD_ANNOTATION(try_acquire_capability(__VA_ARGS__))
+#define ROCKS_EXCLUDES(...) ROCKS_THREAD_ANNOTATION(locks_excluded(__VA_ARGS__))
+#define ROCKS_NO_THREAD_SAFETY_ANALYSIS ROCKS_THREAD_ANNOTATION(no_thread_safety_analysis)
+
 namespace rocks {
 
 // 컴파일 대상 CPU 아키텍처다(위 ROCKS_ARCH_* 매크로와 같다).

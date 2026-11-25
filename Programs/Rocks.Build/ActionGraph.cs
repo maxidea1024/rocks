@@ -314,6 +314,14 @@ internal static class ActionGraph
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
                 arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language, request.LinkType));
+                // Clang thread safety analysis(Docs/Design/Synchronization 13.1절, D20·D32): Rocks 모듈만 켜고 외부 라이브러리에는 걸지
+                // 않는다. clang-cl도 같은 철자를 받는다. 경고 인자라 AST가 바뀌지 않으므로 AST 프로필(MetaCompiler 입력)에는 넣지
+                // 않는다. 경고는 프로필의 /WX·-Werror로 오류다.
+                if (!module.ThirdParty && language != NativeLanguage.C)
+                {
+                    arguments.Add("-Wthread-safety");
+                }
+
                 // RTTI를 켜는 서드파티(NativeModuleInput.RuntimeTypeInformation)는 프로필의 RTTI 끔 뒤에 켬을 둔다(마지막 인자가 이긴다).
                 if (module.RuntimeTypeInformation && language == NativeLanguage.Cpp)
                 {

@@ -14,46 +14,6 @@
 
 namespace rocks::platform {
 
-ConditionVariable::ConditionVariable() noexcept {
-    static_assert(sizeof(pthread_cond_t) <= sizeof(storage_));
-    static_assert(alignof(pthread_cond_t) <= alignof(ConditionVariable));
-    detail::PosixInitializeCondition(reinterpret_cast<pthread_cond_t*>(storage_));
-}
-
-ConditionVariable::~ConditionVariable() noexcept {
-    if (pthread_cond_destroy(reinterpret_cast<pthread_cond_t*>(storage_)) != 0) {
-        Fatal("Destroying a busy condition variable");
-    }
-}
-
-WaitResult ConditionVariable::Wait(Mutex& mutex, uint32 timeoutMs) noexcept {
-    auto* condition = reinterpret_cast<pthread_cond_t*>(storage_);
-    auto* nativeMutex = reinterpret_cast<pthread_mutex_t*>(mutex.storage_);
-    int result;
-    if (timeoutMs == InfiniteTimeout) {
-        result = pthread_cond_wait(condition, nativeMutex);
-    } else {
-        // 시스템 시각(CLOCK_REALTIME) 변경의 영향을 받지 않는 OS별 시한 대기를 쓴다.
-        result = detail::PosixTimedWait(condition, nativeMutex, timeoutMs);
-    }
-    if (result == 0) {
-        return WaitResult::Signaled;
-    }
-    return result == ETIMEDOUT ? WaitResult::TimedOut : WaitResult::Failed;
-}
-
-void ConditionVariable::NotifyOne() noexcept {
-    if (pthread_cond_signal(reinterpret_cast<pthread_cond_t*>(storage_)) != 0) {
-        Fatal("pthread_cond_signal failed");
-    }
-}
-
-void ConditionVariable::NotifyAll() noexcept {
-    if (pthread_cond_broadcast(reinterpret_cast<pthread_cond_t*>(storage_)) != 0) {
-        Fatal("pthread_cond_broadcast failed");
-    }
-}
-
 void SleepFor(uint32 milliseconds) noexcept {
     if (milliseconds == 0) {
         return;

@@ -4,6 +4,7 @@
 #include <Compression/Compression.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/Containers/Array.h>
+#include <Core/Containers/IndexedFreeList.h>
 #include <Platform/Atomics.h>
 #include <Platform/File.h>
 #include <Platform/Memory.h>
@@ -117,8 +118,6 @@ struct TraceBlockHeader {
     // 같은 스레드의 다음 블록이다. 생산자가 release로 쓰고 writer가 acquire로 읽는다. 다음 블록이
     // 생기면 이 블록에는 더 쓰지 않는다(은퇴).
     TraceBlock* next;
-    // 자유 목록에서 다음 블록의 색인 + 1(0은 끝)이다. 풀만 원자적으로 읽고 쓴다.
-    uint32 freeNext;
     // 풀 안의 색인이다. 확보 뒤 바뀌지 않는다.
     uint32 index;
 };
@@ -177,8 +176,8 @@ private:
     TraceBlock** pages_ = nullptr;
     uint32 maxPages_ = 0;
     uint32 pageCount_ = 0;
-    // 상위 32비트 tag | 하위 32비트 (색인 + 1). 0은 빈 목록이다.
-    uint64 freeHead_ = 0;
+    // 빈 블록 색인 목록이다(공용 IndexedFreeList — Docs/Design/Synchronization 12.2절).
+    IndexedFreeList<> free_;
     uint64 inUse_ = 0;
     uint64 peak_ = 0;
     platform::Mutex growMutex_;
