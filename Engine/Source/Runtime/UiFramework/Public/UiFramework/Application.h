@@ -150,6 +150,8 @@ private:
     SharedPtr<Application*> context_;
     Allocator& allocator_;
     ThemeColors theme_{};
+    // SetTheme마다 늘린다(지역 캐시가 같은 주소의 테마 값이 바뀐 것을 알게 한다).
+    uint64 themeRevision_ = 0;
     CacheRoot cache_;
     HitGrid hitGrid_;
     SharedPtr<Element> root_;

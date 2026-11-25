@@ -51,6 +51,9 @@ struct PaintGlyph {
     LinearColor tint{1, 1, 1, 1};
 };
 
+// UE 5.8 비활성 효과의 알파 배율이다(SlateElementPixelShader.usf 645행 OutColor.a *= .45f).
+inline constexpr float DisabledEffectOpacity = 0.45f;
+
 // Game lane에서 작성하는 CPU 그리기 목록이다. 현재 사각형만 기록하며 GPU 자원을 소유하지 않는다.
 class ROCKS_UICORE_API PaintList {
 public:
@@ -81,13 +84,45 @@ public:
 
     // 위젯이 스타일 색(ColorRef)을 풀 테마다(UW3b). nullptr이면 DefaultThemeColors()다. 목록은
     // 테마를 빌리므로 소유자(ui::Application)가 목록보다 오래 살아야 한다. Clear는 테마를 유지한다.
-    void SetTheme(const ThemeColors* theme) noexcept;
+    // revision은 같은 테마 객체의 값이 바뀔 때마다 늘린다(지역 캐시가 주소만으로는 바뀐 것을
+    // 모른다).
+    void SetTheme(const ThemeColors* theme, uint64 revision = 0) noexcept;
     const ThemeColors& Theme() const noexcept;
+    uint64 ThemeRevision() const noexcept;
 
     // 지금 그리는 요소가 물려받은 전경색이다(UE FWidgetStyle::GetForegroundColor). 루트는 흰색이다.
     // 텍스트처럼 ColorSource::Foreground 색을 쓰는 요소는 ColorContext()로 푼다.
     LinearColor ForegroundColor() const noexcept;
     StyleColorContext ColorContext() const noexcept;
+
+    // 지금 그리는 요소나 조상이 비활성인지다. 비활성 하위 트리는 UE 5.8 비활성 효과처럼 알파에
+    // DisabledEffectOpacity를 곱해 그린다(SlateElementPixelShader.usf 645행 — 레거시 탈색은 UE도
+    // 끈다).
+    bool IsDisabledEffect() const noexcept;
+    // 비활성 효과 예외와 무관하게, 지금 그리는 요소나 조상이 비활성인지다(UE ShouldBeEnabled의
+    // 반대).
+    bool IsDisabled() const noexcept;
+
+    // 비활성 전용 brush를 그리는 요소(UE SButton의 bShowDisabledEffect가 false인 경우)가 자기
+    // 그림에서만 비활성 효과를 뺀다. 범위가 끝나면 되돌린다. 자식에는 효과가 그대로 간다.
+    class DisabledEffectExemption {
+    public:
+        explicit DisabledEffectExemption(PaintList& list) noexcept
+            : list_(list), previous_(list.disabledExempt_) {
+            list_.disabledExempt_ = true;
+        }
+
+        ~DisabledEffectExemption() noexcept {
+            list_.disabledExempt_ = previous_;
+        }
+
+        DisabledEffectExemption(const DisabledEffectExemption&) = delete;
+        DisabledEffectExemption& operator=(const DisabledEffectExemption&) = delete;
+
+    private:
+        PaintList& list_;
+        bool previous_;
+    };
 
     void Clear() noexcept;
 
@@ -96,7 +131,10 @@ private:
     friend class Element;
     float opacity_ = 1;
     const ThemeColors* theme_ = nullptr;
+    uint64 themeRevision_ = 0;
     LinearColor foreground_{1, 1, 1, 1};
+    bool disabled_ = false;
+    bool disabledExempt_ = false;
     struct ClipState {
         Box2<float> bounds;
         bool empty = false;

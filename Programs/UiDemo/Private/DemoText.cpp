@@ -19,8 +19,23 @@ constexpr usize PathBytes = 1024;
 
 // 엔진 폴더 기준 ICU 데이터·시험 글꼴 경로다(Engine/Source/ThirdParty).
 constexpr char IcuDataPath[] = "Source/ThirdParty/IcuData/icudata-79.1-rocks/icudt79l.dat";
-constexpr char LatinFontPath[] =
-    "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Regular.ttf";
+// UE 기본 글꼴(Roboto)의 typeface다(LegacySlateFontInfoCache.cpp 111–122행과 같은 이름).
+struct LatinFace {
+    const char* typeface;
+    const char* path;
+};
+constexpr LatinFace LatinFaces[] = {
+    {"Regular",
+     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Regular.ttf"},
+    {"Bold",
+     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Bold.ttf"},
+    {"Italic",
+     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Italic.ttf"},
+    {"BoldItalic", "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/"
+                   "Roboto-BoldItalic.ttf"},
+    {"Light",
+     "Source/ThirdParty/TestFontRoboto/roboto-3-classic-v3.016/hinted/static/Roboto-Light.ttf"}};
+constexpr usize LatinFaceCount = sizeof(LatinFaces) / sizeof(LatinFaces[0]);
 constexpr char HangulFontPath[] = "Source/ThirdParty/TestFontNanumGothic/google-fonts-06bfe0d62a98/"
                                   "ofl/nanumgothic/NanumGothic-Regular.ttf";
 constexpr char ArabicFontPath[] = "Source/ThirdParty/TestFontNotoNaskhArabic/"
@@ -154,12 +169,14 @@ Result<void> DemoText::Initialize() noexcept {
     }
 
     backend_ = Move(backend.Value());
-    SharedPtr<const text::FontFaceData> latin;
+    SharedPtr<const text::FontFaceData> latin[LatinFaceCount];
     SharedPtr<const text::FontFaceData> hangul;
     SharedPtr<const text::FontFaceData> arabic;
     SharedPtr<const text::FontFaceData> emoji;
-    if (auto loaded = LoadFace(LatinFontPath, latin); !loaded) {
-        return loaded;
+    for (usize i = 0; i < LatinFaceCount; ++i) {
+        if (auto loaded = LoadFace(LatinFaces[i].path, latin[i]); !loaded) {
+            return loaded;
+        }
     }
 
     if (auto loaded = LoadFace(HangulFontPath, hangul); !loaded) {
@@ -174,7 +191,11 @@ Result<void> DemoText::Initialize() noexcept {
         return loaded;
     }
 
-    const text::CompositeTypefaceEntry latinFace[] = {{"Regular", {.data = latin}}};
+    text::CompositeTypefaceEntry latinFace[LatinFaceCount];
+    for (usize i = 0; i < LatinFaceCount; ++i) {
+        latinFace[i] = {LatinFaces[i].typeface, {.data = latin[i]}};
+    }
+
     const text::CompositeTypefaceEntry hangulFace[] = {{"Regular", {.data = hangul}}};
     const text::CompositeTypefaceEntry arabicFace[] = {{"Regular", {.data = arabic}}};
     const text::CompositeSubTypeface subTypefaces[] = {
@@ -201,16 +222,35 @@ Result<void> DemoText::Initialize() noexcept {
 }
 
 Result<void> DemoText::SetText(TextLabel& label, StringView value, int32 pixelHeight) noexcept {
-    if (font_.Get() == nullptr || pixelHeight <= 0) {
-        return Result<void>::Failure(ErrorCode::NotReady);
+    if (pixelHeight <= 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // 픽셀 높이 → 96 DPI 포인트 크기다.
     const float size = static_cast<float>(pixelHeight) *
                        static_cast<float>(text::FontPointsPerInch) /
                        static_cast<float>(text::FontRenderDpi);
+    return Shape(label, value, size, "Regular");
+}
+
+Result<void> DemoText::SetText(TextLabel& label, StringView value, const FontStyle& font) noexcept {
+    if (!(font.size > 0)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Shape(label, value, font.size, TypefaceName(font.typeface));
+}
+
+Result<void> DemoText::Shape(TextLabel& label, StringView value, float size,
+                             StringView typeface) noexcept {
+    if (font_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
     Array<text::ShapedGlyph> shaped(allocator_);
-    if (auto made = text::ShapeText(*backend_, *font_, value, {.size = size}, shaped); !made) {
+    if (auto made =
+            text::ShapeText(*backend_, *font_, value, {.size = size, .typeface = typeface}, shaped);
+        !made) {
         return made;
     }
 
@@ -235,7 +275,7 @@ Result<void> DemoText::SetText(TextLabel& label, StringView value, int32 pixelHe
     }
 
     const text::FontSelection metricsFace =
-        font_->Select(MetricsCodePoint, "Regular", {}, text::FontFallback::None);
+        font_->Select(MetricsCodePoint, typeface, {}, text::FontFallback::None);
     auto metrics = metricsFace.face != nullptr
                        ? metricsFace.face->Metrics(size, 1.0f)
                        : Result<text::FontMetrics>::Failure(ErrorCode::NotFound);

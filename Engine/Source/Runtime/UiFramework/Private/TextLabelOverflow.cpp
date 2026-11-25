@@ -12,6 +12,7 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
     if (width <= 0 || lines.IsEmpty() || lines[0].y >= bottom) {
         return Result<void>::Success();
     }
+
     // 첫 줄이 일부만 보여도 표시하되, 다음 줄이 반쯤 보일 때는 마지막 온전한 줄에서 생략한다.
     usize visible = 1;
     while (visible < lines.Size() && lines[visible].y + lines[visible].height <= bottom) {
@@ -20,11 +21,12 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
 
     const auto visual = layout_.VisualClusters();
     const float markerWidth = ellipsisMarker_->layout_.DesiredSize().x;
+    const LinearColor color = color_.Resolve(list.Theme(), list.ColorContext());
     const auto pass = [&](bool isShadow) noexcept -> Result<void> {
         const Vec2 offset = isShadow ? shadowOffset_ : Vec2{};
         const LinearColor tint = isShadow ? LinearColor(shadowColor_.r, shadowColor_.g,
-                                                        shadowColor_.b, shadowColor_.a * color_.a)
-                                          : color_;
+                                                        shadowColor_.b, shadowColor_.a * color.a)
+                                          : color;
         for (usize row = 0; row < visible; ++row) {
             const auto& line = lines[row];
             const bool truncate =
@@ -37,6 +39,7 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
                 if (markerWidth > width) {
                     continue;
                 }
+
                 float kept = 0;
                 count = 0;
                 while (count < line.visualCount) {
@@ -45,9 +48,11 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
                     if (next > width - markerWidth) {
                         break;
                     }
+
                     kept = next;
                     ++count;
                 }
+
                 first = rightToLeft_ ? line.visualCount - count : 0;
                 const float spare = math::Max(0.0f, width - (kept + markerWidth));
                 float anchor = left;
@@ -56,12 +61,14 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
                 } else if (alignment_ == text::TextAlignment::Center) {
                     anchor += spare * 0.5f;
                 }
+
                 markerX = rightToLeft_ ? anchor : anchor + kept;
                 if (count != 0) {
                     shift = anchor + (rightToLeft_ ? markerWidth : 0) -
                             visual[line.firstVisual + first].x;
                 }
             }
+
             auto content =
                 area.MakeChild(area.size, {1, 0, 0, 1, shift + offset.x, offset.y}, {}, {});
             if (count != 0 && !visualGlyphStarts_.IsEmpty()) {
@@ -73,6 +80,7 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
                     return drawn;
                 }
             }
+
             if (truncate) {
                 auto marker = area.MakeChild(
                     area.size, {1, 0, 0, 1, markerX + offset.x, line.y + offset.y}, {}, {});
@@ -82,6 +90,7 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
                     return drawn;
                 }
             }
+
             if (!isShadow) {
                 auto decorated = PaintDecorations(list, content, layer, line, first, count);
                 if (!decorated) {
@@ -89,6 +98,7 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
                 }
             }
         }
+
         return Result<void>::Success();
     };
 
@@ -96,12 +106,15 @@ Result<void> TextLabel::PaintOverflow(PaintList& list, int32 layer) const noexce
     if (!painted) {
         return painted;
     }
+
     if (shadow != Vec2{}) {
         painted = pass(true);
     }
+
     if (painted) {
         painted = pass(false);
     }
+
     list.PopClip();
     return painted;
 }

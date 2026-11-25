@@ -22,10 +22,10 @@ void CacheRoot::Reset() noexcept {
     ++revision_;
 }
 
-void CacheRoot::SetTheme(const ThemeColors* theme) noexcept {
-    list_.SetTheme(theme);
-    scratch_.SetTheme(theme);
-    assembled_.SetTheme(theme);
+void CacheRoot::SetTheme(const ThemeColors* theme, uint64 revision) noexcept {
+    list_.SetTheme(theme, revision);
+    scratch_.SetTheme(theme, revision);
+    assembled_.SetTheme(theme, revision);
     Reset();
 }
 
@@ -53,17 +53,20 @@ Span<const PaintRange> CacheRoot::ChangedRanges() const noexcept {
     return ranges_.View();
 }
 
-Result<void> CacheRoot::Update(const Element& root, int32 layer,
-                               LinearColor inheritedForeground) noexcept {
+Result<void> CacheRoot::Update(const Element& root, int32 layer, LinearColor inheritedForeground,
+                               bool inheritedDisabled) noexcept {
     stats_ = {};
     if (root_ != &root || plan_ != root.planRevision_ || layer_ != layer ||
-        rootForeground_ != inheritedForeground) {
+        rootForeground_ != inheritedForeground || rootDisabled_ != inheritedDisabled) {
         rootForeground_ = inheritedForeground;
+        rootDisabled_ = inheritedDisabled;
         return Rebuild(root, layer);
     }
+
     if (volatileEntries_.IsEmpty() && paint_ == root.subtreePaintRevision_) {
         return Result<void>::Success();
     }
+
     return Refresh(root, layer);
 }
 
@@ -80,26 +83,31 @@ Result<void> CacheRoot::Record(const Element& element, int32 layer, bool overlay
     entry.nextOpacity = entry.opacity;
     entry.foreground = scratch_.foreground_;
     entry.nextForeground = entry.foreground;
+    entry.disabled = scratch_.disabled_;
     entry.clipped = !scratch_.clips_.IsEmpty();
     if (entry.clipped) {
         entry.clip = scratch_.clips_[scratch_.clips_.Size() - 1];
     }
+
     entry.first = scratch_.Boxes().Size();
     if (overlay) {
         ++stats_.overlayCalls;
     } else {
         ++stats_.paintCalls;
     }
+
     auto result =
         overlay ? element.OnPaintOverlay(scratch_, layer) : element.OnPaint(scratch_, layer);
     if (!result) {
         return result;
     }
+
     entry.count = scratch_.Boxes().Size() - entry.first;
     entry.highest = layer;
     for (const auto& box : scratch_.Boxes().Slice(entry.first, entry.count)) {
         entry.highest = entry.highest > box.layer ? entry.highest : box.layer;
     }
+
     highest = entry.highest;
     return next_.TryPushBack(entry);
 }
@@ -107,6 +115,7 @@ Result<void> CacheRoot::Record(const Element& element, int32 layer, bool overlay
 Result<void> CacheRoot::Rebuild(const Element& root, int32 layer) noexcept {
     scratch_.Clear();
     scratch_.foreground_ = rootForeground_;
+    scratch_.disabled_ = rootDisabled_;
     next_.Clear();
     const uint64 plan = root.planRevision_;
     const uint64 paint = root.subtreePaintRevision_;
@@ -115,31 +124,38 @@ Result<void> CacheRoot::Rebuild(const Element& root, int32 layer) noexcept {
     if (!recorded) {
         return recorded;
     }
+
     if (plan != root.planRevision_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     usize count = 0;
     for (const Entry& entry : next_) {
         count += entry.everyFrame ? 1 : 0;
     }
+
     auto reserved = volatileEntries_.TryEnsureCapacity(count);
     if (!reserved) {
         return reserved;
     }
+
     volatileEntries_.Clear();
     for (usize i = 0; i < next_.Size(); ++i) {
         if (next_[i].everyFrame) {
             (void)volatileEntries_.TryPushBack(i);
         }
     }
+
     usize volatileIndex = 0;
     for (usize i = 0; i < next_.Size(); ++i) {
         while (volatileIndex < volatileEntries_.Size() && volatileEntries_[volatileIndex] < i) {
             ++volatileIndex;
         }
+
         next_[i].subtreeVolatile = volatileIndex < volatileEntries_.Size() &&
                                    volatileEntries_[volatileIndex] < next_[i].subtreeEnd;
     }
+
     stats_.rebuilt = true;
     verticesOnly_ = false;
     root_ = &root;
@@ -165,8 +181,8 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
             const LinearColor inheritedForeground = entry.parentBody == MaxSize
                                                         ? rootForeground_
                                                         : entries_[entry.parentBody].nextForeground;
-            entry.nextForeground =
-                entry.element->ResolveForeground(scratch_.Theme(), inheritedForeground);
+            entry.nextForeground = entry.element->ResolveForeground(
+                scratch_.Theme(), inheritedForeground, entry.disabled);
             const bool inheritedChanged =
                 entry.nextOpacity != entry.opacity || entry.nextForeground != entry.foreground;
             if (!entry.overlay) {
@@ -175,6 +191,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                     i = entry.subtreeEnd - 1;
                     continue;
                 }
+
                 if (entry.subtreeRevision != entry.element->subtreePaintRevision_) {
                     auto visited = visited_.TryPushBack(i);
                     if (!visited) {
@@ -182,6 +199,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                     }
                 }
             }
+
             if (inheritedChanged || entry.everyFrame ||
                 entry.revision != entry.element->paintRevision_) {
                 auto queued = changed_.TryPushBack(i);
@@ -190,12 +208,15 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 }
             }
         }
+
         dirty = changed_.View();
     }
+
     if (dirty.IsEmpty()) {
         for (usize i : visited_) {
             entries_[i].subtreeRevision = entries_[i].element->subtreePaintRevision_;
         }
+
         paint_ = paint;
         return Result<void>::Success();
     }
@@ -212,24 +233,30 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 return pushed;
             }
         }
+
         int32 highest = entry.layer;
         scratch_.opacity_ = paint != paint_ ? entry.nextOpacity : entry.opacity;
         scratch_.foreground_ = paint != paint_ ? entry.nextForeground : entry.foreground;
+        scratch_.disabled_ = entry.disabled;
         auto painted =
             Record(*entry.element, entry.layer, entry.overlay, entry.everyFrame, highest);
         if (entry.clipped) {
             scratch_.PopClip();
         }
+
         if (!painted) {
             return painted;
         }
+
         if (plan_ != root.planRevision_) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         // 형제와 전경의 시작 레이어가 바뀌면 트리 순서로 다시 계산한다.
         if (highest != entry.highest) {
             return Rebuild(root, layer);
         }
+
         movedRanges |= next_[next_.Size() - 1].count != entry.count;
         previousCount += entry.count;
     }
@@ -240,11 +267,13 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
         if (scratch_.Boxes().Size() > MaxSize - unchanged) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         assembled_.Clear();
         auto reserve = assembled_.boxes_.TryEnsureCapacity(unchanged + scratch_.Boxes().Size());
         if (!reserve) {
             return reserve;
         }
+
         usize cursor = 0;
         for (usize i = 0; i < entries_.Size(); ++i) {
             Entry& entry = entries_[i];
@@ -257,9 +286,11 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 entry.foreground = replacement.foreground;
                 entry.revision = replacement.revision;
             }
+
             entry.first = assembled_.Boxes().Size();
             (void)assembled_.boxes_.TryAppend(commands);
         }
+
         auto previous = Move(list_);
         list_ = Move(assembled_);
         assembled_ = Move(previous);
@@ -269,6 +300,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
         if (!reserved) {
             return reserved;
         }
+
         // 같은 판을 뒤늦게 소비하는 호스트를 위해 실제 변경이 생긴 시점에만 이전 범위를 교체한다.
         bool compatible = true;
         // 개수가 같은 색·진행률·volatile 갱신은 바뀐 명령 범위만 덮어쓴다.
@@ -282,6 +314,7 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 if (old == updated) {
                     continue;
                 }
+
                 compatible &= old.layer == updated.layer && old.resource == updated.resource &&
                               old.operation == updated.operation &&
                               old.cornerRadius == updated.cornerRadius &&
@@ -295,30 +328,37 @@ Result<void> CacheRoot::Refresh(const Element& root, int32 layer) noexcept {
                 old = updated;
                 changed = true;
             }
+
             if (changed) {
                 if (!different) {
                     ranges_.Clear();
                 }
+
                 different = true;
                 (void)ranges_.TryPushBack({entry.first, entry.count});
             }
+
             entry.opacity = replacement.opacity;
             entry.foreground = replacement.foreground;
             entry.revision = replacement.revision;
         }
+
         if (different) {
             verticesOnly_ = compatible;
         }
     }
+
     if (root.subtreePaintRevision_ == paint) {
         for (usize i : visited_) {
             entries_[i].subtreeRevision = entries_[i].element->subtreePaintRevision_;
         }
     }
+
     paint_ = paint;
     if (different) {
         ++revision_;
     }
+
     return Result<void>::Success();
 }
 

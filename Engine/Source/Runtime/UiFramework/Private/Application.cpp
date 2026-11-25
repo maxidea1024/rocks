@@ -14,8 +14,10 @@ void Application::SetTheme(const ThemeColors& theme) noexcept {
     if (theme == theme_) {
         return;
     }
+
     theme_ = theme;
-    cache_.SetTheme(&theme_);
+    ++themeRevision_;
+    cache_.SetTheme(&theme_, themeRevision_);
 }
 
 const ThemeColors& Application::Theme() const noexcept {
@@ -27,6 +29,7 @@ Application::~Application() noexcept {
         *context_ = nullptr;
         context_.Reset();
     }
+
     ResetInput();
 }
 
@@ -41,11 +44,13 @@ void Application::ResetInput() noexcept {
     while (!toolTips_.IsEmpty()) {
         CloseToolTip(toolTips_[toolTips_.Size() - 1].user);
     }
+
     modifiers_.Clear();
     CancelAllPointers();
     while (!hover_.IsEmpty()) {
         ClearHover(hover_[hover_.Size() - 1].user);
     }
+
     ClearAllFocus();
 }
 
@@ -53,6 +58,7 @@ input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept
     if (!root_) {
         return input::WindowRegion::Client;
     }
+
     const bool snapshot = hitGrid_.HasSnapshot();
     const auto hit = snapshot ? hitGrid_.Find(position, *root_) : SharedPtr<Element>{};
     auto* target = snapshot ? hit.Get() : root_->HitTest(position);
@@ -61,8 +67,10 @@ input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept
         if (region != input::WindowRegion::Client || target->SupportsKeyboardFocus()) {
             return region;
         }
+
         target = target->Parent();
     }
+
     return input::WindowRegion::Client;
 }
 
@@ -70,6 +78,7 @@ input::MouseCursor Application::QueryMouseCursor(Vec2 position, uint32 userId) c
     if (!root_) {
         return input::MouseCursor::Arrow;
     }
+
     for (const auto& capture : captures_) {
         if (capture.source == PointerSource::Mouse && capture.userId == userId &&
             capture.pointerId == 0) {
@@ -79,10 +88,12 @@ input::MouseCursor Application::QueryMouseCursor(Vec2 position, uint32 userId) c
             }
         }
     }
+
     if (hitGrid_.HasSnapshot()) {
         auto target = hitGrid_.Find(position, *root_);
         return target ? target->ResolveMouseCursor(position) : input::MouseCursor::Arrow;
     }
+
     auto* target = root_->HitTest(position);
     return target ? target->ResolveMouseCursor(position) : input::MouseCursor::Arrow;
 }
@@ -93,8 +104,9 @@ Result<void> Application::BuildPaintList(const Geometry& geometry, float layoutS
     if (!prepared) {
         return prepared;
     }
+
     list.Clear();
-    list.SetTheme(&theme_);
+    list.SetTheme(&theme_, themeRevision_);
     auto painted = root_->Paint(list, 0);
     return painted ? hitGrid_.Update(root_) : Move(painted);
 }
@@ -105,6 +117,7 @@ Result<const CacheRoot*> Application::UpdatePaintCache(const Geometry& geometry,
     if (!prepared) {
         return Result<const CacheRoot*>::Failure(prepared.Error());
     }
+
     return UpdateArrangedPaintCache();
 }
 
@@ -112,13 +125,16 @@ Result<const CacheRoot*> Application::UpdateArrangedPaintCache() noexcept {
     if (!root_) {
         return Result<const CacheRoot*>::Failure(ErrorCode::NotReady);
     }
+
     auto updated = cache_.Update(*root_, 0);
     if (updated) {
         updated = hitGrid_.Update(root_);
     }
+
     if (!updated) {
         return Result<const CacheRoot*>::Failure(updated.Error());
     }
+
     return Result<const CacheRoot*>::Success(&cache_);
 }
 
@@ -136,6 +152,7 @@ Result<void> Application::PrepareLayout(const Geometry& geometry, float layoutSc
     if (!measured) {
         return measured;
     }
+
     return root->ArrangeIfNeeded(geometry);
 }
 
@@ -146,6 +163,7 @@ bool Application::HasAnyUserFocus(const Element& element) const noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -157,6 +175,7 @@ bool Application::HasPointerCapture(PointerSource source, uint32 user,
             return target && root_ && target->IsInputPathActive(*root_, true);
         }
     }
+
     return false;
 }
 
@@ -169,6 +188,7 @@ bool Application::HasMouseCapture(const Element& element, uint32 user,
             return true;
         }
     }
+
     return false;
 }
 
@@ -178,6 +198,7 @@ SharedPtr<Element> Application::GetFocus(uint32 userId) const noexcept {
             return focus.target.Lock();
         }
     }
+
     return {};
 }
 
@@ -192,6 +213,7 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
     if (focusChanging_ || cancelling_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (target && (!target->SupportsKeyboardFocus() || !IsFocusablePath(target.Get()))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -203,6 +225,7 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
             break;
         }
     }
+
     SharedPtr<Element> previous =
         index < focus_.Size() ? focus_[index].target.Lock() : SharedPtr<Element>();
     if (previous.Get() == target.Get() && (target || index == focus_.Size())) {
@@ -225,9 +248,11 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
     if (previous) {
         previous->OnFocusLost(userId);
     }
+
     if (target && IsFocusablePath(target.Get())) {
         target->OnFocusReceived(userId);
     }
+
     focusChanging_ = false;
     return Result<void>::Success();
 }
@@ -238,12 +263,14 @@ bool Application::RouteGamepadButtons(uint32 user, uint32 pressed,
     if (!target || !IsFocusablePath(target.Get()) || (scope && !target->IsWithin(*scope))) {
         return false;
     }
+
     for (uint32 i = 0; i < input::GamepadButtonCount; ++i) {
         if ((pressed & (uint32{1} << i)) &&
             target->OnGamepadButtonDown(user, static_cast<input::GamepadButton>(i))) {
             return true;
         }
     }
+
     return false;
 }
 
@@ -263,10 +290,12 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
     if (event.type == input::InputEventType::KeyDown) {
         CloseToolTip(userId);
     }
+
     auto chord = UpdateChord(userId, event);
     if (!chord) {
         return Result<bool>::Failure(chord.Error());
     }
+
     const bool down = event.type == input::InputEventType::KeyDown;
     SharedPtr<Element> target;
     for (usize i = 0; i < focus_.Size(); ++i) {
@@ -275,11 +304,13 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
             break;
         }
     }
+
     if (!target || !IsFocusablePath(target.Get())) {
         auto cleared = SetFocus(userId, {});
         if (!cleared) {
             return Result<bool>::Failure(cleared.Error());
         }
+
         return Result<bool>::Success(down && !scope &&
                                      ProcessCommands(nullptr, chord.Value(), event.repeat));
     }
@@ -288,10 +319,12 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
     if (scope && !target->IsWithin(*scope)) {
         return Result<bool>::Success(false);
     }
+
     auto pathResult = BuildPath(target.Get(), scope ? scope : root_, path);
     if (!pathResult) {
         return Result<bool>::Failure(pathResult.Error());
     }
+
     if (event.type == input::InputEventType::KeyDown) {
         for (usize i = path.Size(); i > 0; --i) {
             if (path[i - 1]->OnPreviewKeyChord(userId, event, chord.Value())) {
@@ -299,12 +332,14 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
             }
         }
     }
+
     for (usize i = 0; i < path.Size(); ++i) {
         if ((down && ProcessCommands(path[i].Get(), chord.Value(), event.repeat)) ||
             path[i]->OnKeyEvent(userId, event)) {
             return Result<bool>::Success(true);
         }
     }
+
     return Result<bool>::Success(down && !scope &&
                                  ProcessCommands(nullptr, chord.Value(), event.repeat));
 }
@@ -318,6 +353,7 @@ void Application::CancelAllPointers() noexcept {
     while (captures_.Size() != 0) {
         ReleaseCapture(captures_[0].source, captures_[0].userId, captures_[0].pointerId);
     }
+
     cancelling_ = false;
 }
 
@@ -325,6 +361,7 @@ void Application::CancelPointers(PointerSource source) noexcept {
     if (cancelling_) {
         return;
     }
+
     cancelling_ = true;
     usize index = 0;
     while (index < captures_.Size()) {
@@ -334,6 +371,7 @@ void Application::CancelPointers(PointerSource source) noexcept {
             ++index;
         }
     }
+
     cancelling_ = false;
 }
 
@@ -387,6 +425,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             hit = root->HitTest(event.position);
         }
     }
+
     if (event.source == PointerSource::Mouse) {
         const uint64 previousHoverVersion = hoverVersion_;
         auto hovered =
@@ -394,9 +433,11 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
         if (!hovered) {
             return Result<bool>::Failure(hovered.Error());
         }
+
         if (!root_ || (scope ? !IsFocusablePath(scope.Get()) : root != root_)) {
             return Result<bool>::Success(false);
         }
+
         // 진입/이탈 콜백에서 트리가 바뀔 수 있다. 같은 경로 위의 이동은 한 번만 조회한다.
         if (previousHoverVersion != hoverVersion_) {
             if (hitGrid_.HasSnapshot()) {
@@ -407,6 +448,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             }
         }
     }
+
     if (event.source == PointerSource::Mouse) {
         ObserveToolTip(event, hit, root);
         // 마지막 툴팁을 닫으면 임시 루트가 해제된다. 같은 누름은 원래 화면에 계속 전달한다.
@@ -415,13 +457,16 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             if (!root) {
                 return Result<bool>::Success(false);
             }
+
             recorded.Reset();
             hit = root->HitTest(event.position);
         }
     }
+
     if (captured && captured->IsInputPathActive(*root, true)) {
         hit = captured.Get();
     }
+
     if (hit == nullptr) {
         return Result<bool>::Success(false);
     }
@@ -453,6 +498,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
                 return stored;
             }
         }
+
         return Result<void>::Success();
     };
 
@@ -465,24 +511,29 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             if (!reply.capture) {
                 continue;
             }
+
             auto applied = applyReply(reply, candidate);
             if (!applied) {
                 return Result<bool>::Failure(applied.Error());
             }
+
             auto cancelled = event;
             cancelled.type = PointerEventType::Cancel;
             for (const auto& previous : path) {
                 previous->OnPointerReleaseInPath(cancelled);
             }
+
             handled = true;
             break;
         }
     }
+
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
         for (usize i = path.Size(); i > 0; --i) {
             path[i - 1]->OnPointerReleaseInPath(event);
         }
     }
+
     if (event.type == PointerEventType::Down) {
         for (usize i = captured ? 1 : path.Size(); i > 0; --i) {
             const PointerReply reply = path[i - 1]->OnPreviewPointerDown(event);
@@ -490,6 +541,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             if (!applied) {
                 return Result<bool>::Failure(applied.Error());
             }
+
             if (reply.handled) {
                 handled = true;
                 break;
@@ -504,6 +556,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             if (!applied) {
                 return Result<bool>::Failure(applied.Error());
             }
+
             if (reply.handled) {
                 handled = true;
                 break;
@@ -533,6 +586,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
         event.type == PointerEventType::Cancel) {
         ReleaseCapture(event.source, event.userId, event.pointerId);
     }
+
     return Result<bool>::Success(handled);
 }
 
@@ -547,18 +601,22 @@ Result<void> Application::BuildPath(Element* target, const SharedPtr<Element>& r
         if (current != root.Get() && parent == nullptr) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }
+
         SharedPtr<Element> keep = current == root.Get() ? root : parent->FindChild(current);
         if (!keep) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }
+
         auto added = path.TryPushBack(keep);
         if (!added) {
             return added;
         }
+
         if (current == root.Get()) {
             return Result<void>::Success();
         }
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -566,6 +624,7 @@ void Application::ClearAllFocus() noexcept {
     if (focusChanging_) {
         return;
     }
+
     focusChanging_ = true;
     ++focusVersion_;
     while (focus_.Size() != 0) {
@@ -576,6 +635,7 @@ void Application::ClearAllFocus() noexcept {
             previous->OnFocusLost(userId);
         }
     }
+
     focusChanging_ = false;
 }
 
@@ -599,6 +659,7 @@ void Application::ReleaseInactiveTargets(const Element* releasing) noexcept {
             ++i;
         }
     }
+
     cancelling_ = false;
 
     focusChanging_ = true;
@@ -609,6 +670,7 @@ void Application::ReleaseInactiveTargets(const Element* releasing) noexcept {
             ++i;
             continue;
         }
+
         const uint32 userId = focus_[i].userId;
         (void)focus_.TryRemoveAt(i);
         ++focusVersion_;
@@ -616,6 +678,7 @@ void Application::ReleaseInactiveTargets(const Element* releasing) noexcept {
             target->OnFocusLost(userId);
         }
     }
+
     focusChanging_ = false;
 }
 
@@ -628,6 +691,7 @@ void Application::ReleaseCapture(PointerSource source, uint32 userId, uint32 poi
             if (target) {
                 target->OnPointerCaptureLost(source, userId, pointerId);
             }
+
             return;
         }
     }
@@ -666,18 +730,21 @@ Result<void> Application::CollectFocusTargets(const SharedPtr<Element>& element,
         element->GetVisibility() == Visibility::Hidden) {
         return Result<void>::Success();
     }
+
     if (element->SupportsKeyboardFocus()) {
         auto added = targets.TryPushBack(element);
         if (!added) {
             return added;
         }
     }
+
     for (const auto& child : element->ActiveChildren()) {
         auto collected = CollectFocusTargets(child, targets);
         if (!collected) {
             return collected;
         }
     }
+
     return Result<void>::Success();
 }
 

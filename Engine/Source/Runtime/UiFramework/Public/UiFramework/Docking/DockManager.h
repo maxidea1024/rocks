@@ -156,6 +156,11 @@ private:
     void CollapseEmpty(SlotHandle stack) noexcept;
     Result<void> ArrangeNode(SlotHandle node, Vec2 origin, Vec2 size) noexcept;
     Vec2 MeasureNode(SlotHandle node) const noexcept;
+    // 탭 줄 높이다. 모든 탭 머리(DockTabHeader — 탭 여백 포함)의 원하는 높이 중 가장 큰 값을 탭
+    // 최대 높이로 자른다(UE SDockingTabWell::ComputeChildSize).
+    float TabHeight() const noexcept;
+    // 탭 사이 간격이다.
+    float TabGap() const noexcept;
     usize SubtreeDepth(SlotHandle node) const noexcept;
     bool LocalPoint(Vec2 window, Vec2& local) const noexcept;
     SlotHandle FindSplitter(Vec2 local) const noexcept;

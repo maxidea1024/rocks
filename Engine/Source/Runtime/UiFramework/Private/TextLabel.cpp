@@ -8,6 +8,7 @@ float WrapLimit(float requested, bool automatic, float allotted) noexcept {
     if (!automatic || allotted == 0) {
         return requested;
     }
+
     return requested == 0 ? allotted : math::Min(requested, allotted);
 }
 
@@ -31,18 +32,22 @@ Result<void> TextLabel::SetShapedText(StringView source, Span<const text::TextCl
     if (!decorations.IsEmpty() && decorations.Size() != clusters.Size()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (const auto& decor : decorations) {
         if (!decor.color.IsFinite()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
+
     auto valid = source.ValidateUtf8();
     if (!valid) {
         return valid;
     }
+
     if ((clusters.IsEmpty() ? 0 : clusters[clusters.Size() - 1].byteEnd) != source.ByteCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (const auto& cluster : clusters) {
         if (cluster.byteEnd > source.ByteCount() ||
             (cluster.byteEnd < source.ByteCount() &&
@@ -50,6 +55,7 @@ Result<void> TextLabel::SetShapedText(StringView source, Span<const text::TextCl
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
+
     for (usize i = 0; i < glyphs.Size(); ++i) {
         const auto& glyph = glyphs[i];
         if (glyph.clusterIndex >= clusters.Size() || clusters[glyph.clusterIndex].hardBreak ||
@@ -69,19 +75,23 @@ Result<void> TextLabel::SetShapedText(StringView source, Span<const text::TextCl
     if (!stored) {
         return stored;
     }
+
     stored = newClusters.TryAppend(clusters);
     if (!stored) {
         return stored;
     }
+
     stored = newGlyphs.TryAppend(glyphs);
     if (!stored) {
         return stored;
     }
+
     Array<LabelDecoration> newDecorations(allocator_);
     stored = newDecorations.TryAppend(decorations);
     if (!stored) {
         return stored;
     }
+
     auto arranged = Reflow(clusters, glyphs, WrapLimit(wrapWidth_, autoWrap_, allottedWidth_),
                            lineHeight, alignment_, rightToLeft, allottedWidth_, policy_, metrics_,
                            ShadowExtent(shadowOffset_, shadowColor_));
@@ -111,6 +121,7 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
                            Vec4(math::Max(0.0f, -shadowExtent.x), math::Max(0.0f, -shadowExtent.y),
                                 math::Max(0.0f, shadowExtent.x), math::Max(0.0f, shadowExtent.y));
     }
+
     text::TextLayoutModel layout(allocator_);
     auto shaped =
         layout.Layout(clusters, width, height, alignment, rtl, alignmentWidth, policy, paragraph);
@@ -122,10 +133,12 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
     if (clusters.Size() == MaxSize) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     auto sized = starts.TryResize(clusters.Size() + 1);
     if (!sized) {
         return sized;
     }
+
     usize next = 0;
     for (usize i = 0; i < clusters.Size(); ++i) {
         starts[i] = next;
@@ -133,6 +146,7 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
             ++next;
         }
     }
+
     starts[clusters.Size()] = next;
 
     Array<PaintGlyph> positioned(allocator_);
@@ -140,6 +154,7 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
     if (!reserved) {
         return reserved;
     }
+
     const auto visual = layout.VisualClusters();
     Array<usize> visualStarts(allocator_);
     if (!glyphs.IsEmpty()) {
@@ -147,8 +162,10 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
         if (!sized) {
             return sized;
         }
+
         visualStarts[visual.Size()] = glyphs.Size();
     }
+
     const auto lines = layout.Lines();
     for (usize row = 0; row < lines.Size(); ++row) {
         const auto& line = lines[row];
@@ -156,6 +173,7 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
             if (!visualStarts.IsEmpty()) {
                 visualStarts[line.firstVisual + i] = positioned.Size();
             }
+
             const auto& cluster = visual[line.firstVisual + i];
             const Vec2 origin(cluster.x, line.y);
             for (usize j = starts[cluster.logicalIndex]; j < starts[cluster.logicalIndex + 1];
@@ -165,6 +183,7 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
                 if (!glyph.position.IsFinite()) {
                     return Result<void>::Failure(ErrorCode::Overflow);
                 }
+
                 auto added = positioned.TryPushBack(glyph);
                 if (!added) {
                     return added;
@@ -172,6 +191,7 @@ Result<void> TextLabel::Reflow(Span<const text::TextCluster> clusters,
             }
         }
     }
+
     layout_ = Move(layout);
     positioned_ = Move(positioned);
     visualGlyphStarts_ = Move(visualStarts);
@@ -190,10 +210,12 @@ Result<void> TextLabel::SetLayoutOptions(float width, text::TextAlignment alignm
          alignment != text::TextAlignment::Center)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (width == wrapWidth_ && alignment == alignment_ && autoWrap == autoWrap_ &&
         policy == policy_) {
         return Result<void>::Success();
     }
+
     if (lineHeight_ > 0) {
         auto arranged =
             Reflow(clusters_.View(), glyphs_.View(), WrapLimit(width, autoWrap, allottedWidth_),
@@ -203,6 +225,7 @@ Result<void> TextLabel::SetLayoutOptions(float width, text::TextAlignment alignm
             return arranged;
         }
     }
+
     wrapWidth_ = width;
     alignment_ = alignment;
     autoWrap_ = autoWrap;
@@ -215,6 +238,7 @@ Result<void> TextLabel::ArrangeForWidth(float width) noexcept {
     if (!math::IsFinite(width) || width < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const auto limit = WrapLimit(wrapWidth_, autoWrap_, width);
     const bool wrapChanged = limit != WrapLimit(wrapWidth_, autoWrap_, allottedWidth_);
     if (lineHeight_ > 0 && width != allottedWidth_ &&
@@ -226,12 +250,14 @@ Result<void> TextLabel::ArrangeForWidth(float width) noexcept {
         if (!arranged) {
             return arranged;
         }
+
         if (previous != layout_.DesiredSize()) {
             InvalidateLayout();
         } else {
             InvalidatePaint();
         }
     }
+
     allottedWidth_ = width;
     return Result<void>::Success();
 }
@@ -241,6 +267,7 @@ Result<void> TextLabel::Arrange(const Geometry& geometry) noexcept {
     if (!arranged) {
         return arranged;
     }
+
     return Element::Arrange(geometry);
 }
 
@@ -249,6 +276,7 @@ Result<void> TextLabel::SetParagraphStyle(const text::ParagraphMetrics& metrics,
     if (!metrics.IsValid() || !offset.IsFinite() || !color.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const Vec2 extent = ShadowExtent(offset, color);
     const bool layoutChanged =
         metrics_ != metrics || ShadowExtent(shadowOffset_, shadowColor_) != extent;
@@ -260,11 +288,13 @@ Result<void> TextLabel::SetParagraphStyle(const text::ParagraphMetrics& metrics,
             return arranged;
         }
     }
+
     if (layoutChanged) {
         InvalidateLayout();
     } else if (shadowColor_ != color) {
         InvalidatePaint();
     }
+
     metrics_ = metrics;
     shadowOffset_ = offset;
     shadowColor_ = color;
@@ -287,10 +317,12 @@ Result<void> TextLabel::SetMinDesiredWidth(float width) noexcept {
     if (!math::IsFinite(width) || width < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (width != minDesiredWidth_) {
         minDesiredWidth_ = width;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -299,6 +331,7 @@ Result<void> TextLabel::CopyParagraphTo(TextLabel& target) const noexcept {
     if (copied) {
         copied = target.SetParagraphStyle(metrics_, shadowOffset_, shadowColor_);
     }
+
     return copied;
 }
 
@@ -309,6 +342,7 @@ void TextLabel::SetEllipsisMarker(SharedPtr<const TextLabel> marker) noexcept {
             return;
         }
     }
+
     if (marker.Get() != ellipsisMarker_.Get()) {
         ellipsisMarker_ = Move(marker);
         InvalidatePaint();
@@ -316,10 +350,18 @@ void TextLabel::SetEllipsisMarker(SharedPtr<const TextLabel> marker) noexcept {
 }
 
 void TextLabel::SetColor(LinearColor color) noexcept {
-    if (color_ != color) {
+    SetColor(ColorRef::Specified(color));
+}
+
+void TextLabel::SetColor(ColorRef color) noexcept {
+    if (color.IsValid() && color_ != color) {
         color_ = color;
         InvalidatePaint();
     }
+}
+
+ColorRef TextLabel::GetColor() const noexcept {
+    return color_;
 }
 
 StringView TextLabel::DefaultAccessibleText() const noexcept {
@@ -369,30 +411,35 @@ Vec2 TextLabel::ComputeDesiredSize(float) const noexcept {
 
 Result<void> TextLabel::OnPaint(PaintList& list, int32 layer) const noexcept {
     const auto& area = GetGeometry();
+    const LinearColor color = color_.Resolve(list.Theme(), list.ColorContext());
     if (ellipsisMarker_ &&
         (layout_.DesiredSize().x > area.size.x || layout_.DesiredSize().y > area.size.y)) {
         return PaintOverflow(list, layer);
     }
+
     if (shadowColor_.a > 0 && shadowOffset_ != Vec2{}) {
         const auto geometry =
             area.MakeChild(area.size, {1, 0, 0, 1, shadowOffset_.x, shadowOffset_.y}, {}, {});
-        const auto color =
-            LinearColor(shadowColor_.r, shadowColor_.g, shadowColor_.b, shadowColor_.a * color_.a);
-        auto shadow = list.TryAddGlyphRun(geometry, positioned_.View(), color, layer, false);
+        const auto shadowColor =
+            LinearColor(shadowColor_.r, shadowColor_.g, shadowColor_.b, shadowColor_.a * color.a);
+        auto shadow = list.TryAddGlyphRun(geometry, positioned_.View(), shadowColor, layer, false);
         if (!shadow) {
             return shadow;
         }
     }
-    auto painted = list.TryAddGlyphRun(area, positioned_.View(), color_, layer);
+
+    auto painted = list.TryAddGlyphRun(area, positioned_.View(), color, layer);
     if (!painted || (!underline_ && !strikeThrough_ && decorations_.IsEmpty())) {
         return painted;
     }
+
     for (const auto& line : layout_.Lines()) {
         auto drawn = PaintDecorations(list, area, layer, line, 0, line.visualCount);
         if (!drawn) {
             return drawn;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -402,7 +449,9 @@ Result<void> TextLabel::PaintDecorations(PaintList& list, const Geometry& area, 
     if (!underline_ && !strikeThrough_ && decorations_.IsEmpty()) {
         return Result<void>::Success();
     }
+
     const float thickness = math::Min(lineHeight_, math::Max(1.0f, lineHeight_ / 16.0f));
+    const LinearColor color = color_.Resolve(list.Theme(), list.ColorContext());
     const auto visual = layout_.VisualClusters();
     for (usize begin = firstIndex; begin < firstIndex + count;) {
         const auto& first = visual[line.firstVisual + begin];
@@ -414,12 +463,13 @@ Result<void> TextLabel::PaintDecorations(PaintList& list, const Geometry& area, 
                 decorations_[visual[line.firstVisual + end].logicalIndex] == decor)) {
             ++end;
         }
+
         const auto& last = visual[line.firstVisual + end - 1];
         const float length = last.x + last.advance - first.x;
         auto draw = [&](float y) noexcept {
             const auto box =
                 area.MakeChild({length, thickness}, {1, 0, 0, 1, first.x, line.y + y}, {}, {});
-            return list.TryAddBox({box, decor.color * color_, layer});
+            return list.TryAddBox({box, decor.color * color, layer});
         };
         if (length > 0 && (decor.underline || underline_)) {
             auto painted = draw(lineHeight_ - thickness);
@@ -427,14 +477,17 @@ Result<void> TextLabel::PaintDecorations(PaintList& list, const Geometry& area, 
                 return painted;
             }
         }
+
         if (length > 0 && (decor.strikeThrough || strikeThrough_)) {
             auto painted = draw((lineHeight_ - thickness) * 0.5f);
             if (!painted) {
                 return painted;
             }
         }
+
         begin = end;
     }
+
     return Result<void>::Success();
 }
 

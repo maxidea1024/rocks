@@ -95,8 +95,10 @@ public:
 protected:
     LinearColor CurrentColor() const noexcept;
 
-    // 지금 상태(비활성·눌림·올림·보통)의 스타일 brush다.
-    const StyleBrush& CurrentStyleBrush() const noexcept;
+    // 지금 상태(비활성·눌림·올림·보통)의 스타일 brush다. disabled는 이 버튼이나 조상이
+    // 비활성인지다.
+    const StyleBrush& CurrentStyleBrush(bool disabled) const noexcept;
+    ColorRef PaintForegroundColor(bool disabled) const noexcept override;
 
     // 입력 방식과 무관하게 활성화될 때 호출한다.
     virtual void OnActivated() noexcept;

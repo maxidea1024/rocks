@@ -8,13 +8,18 @@ PaintList::PaintList(Allocator& allocator) noexcept : boxes_(allocator), clips_(
 Result<void> PaintList::TryAddBox(const PaintBox& box) noexcept {
     PaintBox clipped = box;
     if (box.operation == PaintOperation::Draw) {
-        clipped.color.a *= opacity_;
+        const float opacity =
+            disabled_ && !disabledExempt_ ? opacity_ * DisabledEffectOpacity : opacity_;
+        clipped.color.a *= opacity;
+        clipped.outlineColor.a *= opacity;
     }
+
     if (!clips_.IsEmpty()) {
         clipped.hasClip = true;
         clipped.emptyClip = clips_[clips_.Size() - 1].empty;
         clipped.clip = clips_[clips_.Size() - 1].bounds;
     }
+
     return boxes_.TryPushBack(clipped);
 }
 
@@ -24,6 +29,7 @@ Result<void> PaintList::TryAddGlyphRun(const Geometry& geometry, Span<const Pain
     if (!color.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const auto tint = [color, useGlyphColor](LinearColor glyph) noexcept {
         return useGlyphColor ? color * glyph
                              : LinearColor(color.r, color.g, color.b, color.a * glyph.a);
@@ -34,24 +40,30 @@ Result<void> PaintList::TryAddGlyphRun(const Geometry& geometry, Span<const Pain
             glyph.size.y < 0 || !glyph.uv.IsValid() || !tint(glyph.tint).IsFinite()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (glyph.size.x > 0 && glyph.size.y > 0) {
             if (glyph.resource.IsNull()) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
+
             ++count;
         }
     }
+
     if (count > MaxSize - boxes_.Size()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     auto reserved = boxes_.TryEnsureCapacity(boxes_.Size() + count);
     if (!reserved) {
         return reserved;
     }
+
     for (const PaintGlyph& glyph : glyphs) {
         if (glyph.size.x == 0 || glyph.size.y == 0) {
             continue;
         }
+
         const AffineTransform2D offset{1, 0, 0, 1, glyph.position.x, glyph.position.y};
         PaintBox box{geometry.MakeChild(glyph.size, offset, {}, {}), tint(glyph.tint), layer};
         box.resource = glyph.resource;
@@ -62,6 +74,7 @@ Result<void> PaintList::TryAddGlyphRun(const Geometry& geometry, Span<const Pain
             return added;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -83,6 +96,7 @@ SliceAxis Slice(float length, float original, float before, float after, float u
     if (nearEdge > farEdge) {
         nearEdge = farEdge = length * 0.5f;
     }
+
     return {{0, nearEdge, farEdge, length},
             {start, start + (end - start) * first, end - (end - start) * last, end}};
 }
@@ -101,14 +115,17 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
         region.min.y > region.max.y) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!brush.IsValid() || !geometry.size.IsFinite() || geometry.size.x < 0 ||
         geometry.size.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const LinearColor tint = color * brush.tint;
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (brush.mode == BrushMode::None || geometry.size.x == 0 || geometry.size.y == 0) {
         return Result<void>::Success();
     }
@@ -125,6 +142,7 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
             if (end.x <= start.x || end.y <= start.y) {
                 return Result<void>::Success();
             }
+
             const auto uv = box.uvStart;
             const auto span = box.uvEnd - uv;
             box.uvStart = uv + Vec2{span.x * ((start.x - origin.x) / extent.x),
@@ -133,6 +151,7 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
                                   span.y * ((end.y - origin.y) / extent.y)};
             box.geometry = geometry.MakeChild(end - start, {1, 0, 0, 1, start.x, start.y}, {}, {});
         }
+
         return TryAddBox(box);
     };
     if (brush.mode == BrushMode::RoundedBox) {
@@ -147,6 +166,7 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
         box.outlineColor = brush.outline.color;
         return addPiece({});
     }
+
     if (brush.mode == BrushMode::Image) {
         box.uvStart = {brush.mirrorX ? brush.uv.max.x : brush.uv.min.x,
                        brush.mirrorY ? brush.uv.max.y : brush.uv.min.y};
@@ -159,10 +179,12 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
     if (boxes_.Size() > MaxSize - 9) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     auto reserved = boxes_.TryEnsureCapacity(boxes_.Size() + 9);
     if (!reserved) {
         return reserved;
     }
+
     const auto x = Slice(geometry.size.x, brush.imageSize.x, brush.margin.x, brush.margin.z,
                          brush.uv.min.x, brush.uv.max.x, brush.mirrorX);
     const auto y = Slice(geometry.size.y, brush.imageSize.y, brush.margin.y, brush.margin.w,
@@ -172,11 +194,13 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
             if (brush.mode == BrushMode::Border && row == 1 && col == 1) {
                 continue;
             }
+
             const Vec2 size{x.positions[col + 1] - x.positions[col],
                             y.positions[row + 1] - y.positions[row]};
             if (size.x <= 0 || size.y <= 0) {
                 continue;
             }
+
             const AffineTransform2D offset{1, 0, 0, 1, x.positions[col], y.positions[row]};
             box.geometry = geometry.MakeChild(size, offset, {}, {});
             box.uvStart = {x.uvs[col], y.uvs[row]};
@@ -187,6 +211,7 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -197,14 +222,17 @@ Result<void> PaintList::PushClip(const Geometry& geometry) noexcept {
     if (!axisAligned) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
+
     if (!geometry.size.IsFinite() || geometry.size.x < 0 || geometry.size.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const Vec2 a = transform.Apply({0, 0});
     const Vec2 b = transform.Apply(geometry.size);
     if (!a.IsFinite() || !b.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     ClipState state;
     state.bounds.min = Vec2(math::Min(a.x, b.x), math::Min(a.y, b.y));
     state.bounds.max = Vec2(math::Max(a.x, b.x), math::Max(a.y, b.y));
@@ -216,6 +244,7 @@ Result<void> PaintList::PushClip(const Geometry& geometry) noexcept {
         state.bounds.max.y = math::Min(state.bounds.max.y, parent.bounds.max.y);
         state.empty = parent.empty;
     }
+
     state.empty = state.empty || state.bounds.min.x >= state.bounds.max.x ||
                   state.bounds.min.y >= state.bounds.max.y;
     return clips_.TryPushBack(state);
@@ -235,8 +264,13 @@ float PaintList::InheritedOpacity() const noexcept {
     return opacity_;
 }
 
-void PaintList::SetTheme(const ThemeColors* theme) noexcept {
+void PaintList::SetTheme(const ThemeColors* theme, uint64 revision) noexcept {
     theme_ = theme;
+    themeRevision_ = revision;
+}
+
+uint64 PaintList::ThemeRevision() const noexcept {
+    return themeRevision_;
 }
 
 const ThemeColors& PaintList::Theme() const noexcept {
@@ -247,6 +281,14 @@ LinearColor PaintList::ForegroundColor() const noexcept {
     return foreground_;
 }
 
+bool PaintList::IsDisabled() const noexcept {
+    return disabled_;
+}
+
+bool PaintList::IsDisabledEffect() const noexcept {
+    return disabled_ && !disabledExempt_;
+}
+
 StyleColorContext PaintList::ColorContext() const noexcept {
     return {foreground_, foreground_};
 }
@@ -254,6 +296,8 @@ StyleColorContext PaintList::ColorContext() const noexcept {
 void PaintList::Clear() noexcept {
     opacity_ = 1;
     foreground_ = {1, 1, 1, 1};
+    disabled_ = false;
+    disabledExempt_ = false;
     boxes_.Clear();
     clips_.Clear();
 }
@@ -262,21 +306,27 @@ Result<void> PaintList::TryAppendRecorded(Span<const PaintBox> boxes) noexcept {
     if (clips_.IsEmpty() && opacity_ == 1) {
         return boxes_.TryAppend(boxes);
     }
+
     if (boxes.Size() > MaxSize - boxes_.Size()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     auto reserved = boxes_.TryEnsureCapacity(boxes_.Size() + boxes.Size());
     if (!reserved) {
         return reserved;
     }
+
     for (PaintBox box : boxes) {
         if (box.operation == PaintOperation::Draw) {
             box.color.a *= opacity_;
+            box.outlineColor.a *= opacity_;
         }
+
         if (clips_.IsEmpty()) {
             (void)boxes_.TryPushBack(box);
             continue;
         }
+
         const auto& clip = clips_[clips_.Size() - 1];
         if (box.hasClip) {
             box.clip.min.x = math::Max(box.clip.min.x, clip.bounds.min.x);
@@ -286,11 +336,13 @@ Result<void> PaintList::TryAppendRecorded(Span<const PaintBox> boxes) noexcept {
         } else {
             box.clip = clip.bounds;
         }
+
         box.hasClip = true;
         box.emptyClip = box.emptyClip || clip.empty || box.clip.min.x >= box.clip.max.x ||
                         box.clip.min.y >= box.clip.max.y;
         (void)boxes_.TryPushBack(box);
     }
+
     return Result<void>::Success();
 }
 

@@ -134,7 +134,8 @@ Composite default font (LegacySlateFontInfoCache.cpp:111-122): Regular=Roboto-Re
 | ComboButtonMargin | (8, 1, 8, 1) | CS:58 |
 | PressedComboButtonMargin | (8, 2, 8, 0) | CS:59 |
 | Icon sizes | Icon8x8 ... Icon128x128 | CS:28-49 |
-| Checkbox corner radius / outline | 3.0 / 1.0 (local consts) | SCS:1664-1665 |
+| Checkbox corner radius / outline | 3.0 / 1.0 (local consts) | SCS:1663-1664 |
+| Dock tab maximum size (Panel / Major) | 160×25 / 210×50; all tabs in a well share one width (W − Overlap)/N + Overlap | SDockingTabWell.cpp:9-10, 304-342 |
 | Button corner radius | 4.0 (literal, no named const) | SCS:1446-1464 |
 | FocusRectangle | RB(Transparent, 4, Primary, 1) | SCS:217 |
 | Window corner radius | 2 (SetCornerRadius(2)); NotificationWindow 8 | SCS:819, :832 |

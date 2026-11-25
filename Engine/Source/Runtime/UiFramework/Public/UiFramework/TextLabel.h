@@ -2,6 +2,7 @@
 
 #include <Core/Text/String.h>
 #include <TextLayout/TextLayoutModel.h>
+#include <UiCore/ColorRef.h>
 #include <UiCore/Element.h>
 
 namespace rocks::ui {
@@ -48,7 +49,12 @@ public:
     Result<void> CopyParagraphTo(TextLabel& target) const noexcept;
     // 부모가 허용한 폭과 높이를 넘는 줄에서만 사용한다. 표시는 전용 셰이핑 결과를 공유한다.
     void SetEllipsisMarker(SharedPtr<const TextLabel> marker) noexcept;
+    // 글자 색이다(UE STextBlock ColorAndOpacity). 기본은 부모 전경색
+    // 상속(ColorSource::Foreground)이라 버튼 안의 레이블은 버튼 상태 전경색을 따른다. LinearColor는
+    // 지정 색(ColorRef::Specified)이다.
     void SetColor(LinearColor color) noexcept;
+    void SetColor(ColorRef color) noexcept;
+    ColorRef GetColor() const noexcept;
     StringView GetText() const noexcept;
     StringView DefaultAccessibleText() const noexcept override;
     // 편집 컨트롤은 셰이퍼가 확정한 클러스터 경계와 실제 줄 위치를 함께 사용한다.
@@ -92,7 +98,7 @@ private:
     LinearColor shadowColor_{0, 0, 0, 0};
     bool underline_ = false;
     bool strikeThrough_ = false;
-    LinearColor color_{1, 1, 1, 1};
+    ColorRef color_{ColorSource::Foreground};
     text::TextWrapPolicy policy_ = text::TextWrapPolicy::WordOrCluster;
     float minDesiredWidth_ = 0;
     float wrapWidth_ = 0;

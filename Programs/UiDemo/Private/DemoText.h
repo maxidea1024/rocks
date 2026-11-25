@@ -5,6 +5,7 @@
 #include <TextLayout/CompositeFont.h>
 #include <TextLayout/GlyphCache.h>
 #include <TextLayout/TextShaping.h>
+#include <UiCore/Style.h>
 #include <UiFramework/TextLabel.h>
 #include <UiRender/GlyphCacheTextures.h>
 
@@ -39,9 +40,15 @@ public:
     // label은 이전 텍스트를 유지한다.
     Result<void> SetText(TextLabel& label, StringView value, int32 pixelHeight) noexcept;
 
+    // value를 글꼴 지정(typeface·96 DPI 포인트 크기 — UE FSlateFontInfo)으로 shaping해 label에
+    // 넣는다.
+    Result<void> SetText(TextLabel& label, StringView value, const FontStyle& font) noexcept;
+
 private:
     Result<void> LoadFace(StringView relativePath,
                           SharedPtr<const text::FontFaceData>& out) noexcept;
+    Result<void> Shape(TextLabel& label, StringView value, float size,
+                       StringView typeface) noexcept;
 
     Allocator& allocator_;
     GlyphCacheTextures textures_;

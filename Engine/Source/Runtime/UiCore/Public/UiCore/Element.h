@@ -235,6 +235,13 @@ public:
     // 수 있고, 바꿀 때 InvalidatePaint를 부른다. 잘못된 ColorRef는 InvalidArgument다.
     Result<void> SetForegroundColor(ColorRef color) noexcept;
     virtual ColorRef GetForegroundColor() const noexcept;
+
+protected:
+    // 그릴 때 자식에게 물려줄 전경색이다. disabled는 이 요소나 조상이 비활성인지다(UE는 비활성이면
+    // DisabledForegroundColor). 기본은 GetForegroundColor()다.
+    virtual ColorRef PaintForegroundColor(bool disabled) const noexcept;
+
+public:
     bool IsVolatile() const noexcept;
     // 게임 위젯이 지정한 상시 갱신 요청이다. 네이티브 애니메이션의 자체 갱신 상태와 독립적이다.
     void SetForceVolatile(bool enabled) noexcept;
@@ -299,8 +306,10 @@ private:
     usize subtreeBindings_ = 0;
     uint64 bindingPass_ = 0;
 
-    // 부모 전경색 inherited 아래에서 이 요소가 자식에게 물려줄 전경색이다.
-    LinearColor ResolveForeground(const ThemeColors& theme, LinearColor inherited) const noexcept;
+    // 부모 전경색 inherited 아래에서 이 요소가 자식에게 물려줄 전경색이다. disabled는 이 요소나
+    // 조상이 비활성인지다.
+    LinearColor ResolveForeground(const ThemeColors& theme, LinearColor inherited,
+                                  bool disabled) const noexcept;
     Result<void> PaintSubtree(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
                               bool inheritedVolatile) const noexcept;
     Result<void> PaintContents(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,

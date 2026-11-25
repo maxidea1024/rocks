@@ -7,7 +7,7 @@
   "source": {
     "url": "https://github.com/googlefonts/roboto-3-classic/releases/download/v3.016/Roboto_v3.016.zip",
     "sha256": "1653dbe12f248da8fb0b9920db7b9496cd677ed3981154f6f15285c8bd4e334f",
-    "verification": "Release asset of googlefonts/roboto-3-classic v3.016 (2026-06-17); its SHA-256 matches the GitHub release asset digest. hinted/static/Roboto-Regular.ttf was extracted byte for byte from the archive. The archive has no license file, so OFL.txt was taken from the same tag (raw.githubusercontent.com/googlefonts/roboto-3-classic/v3.016/OFL.txt)."
+    "verification": "Release asset of googlefonts/roboto-3-classic v3.016 (2026-06-17); its SHA-256 matches the GitHub release asset digest. hinted/static/Roboto-Regular.ttf, -Bold.ttf, -Italic.ttf, -BoldItalic.ttf and -Light.ttf were extracted byte for byte from the archive. The archive has no license file, so OFL.txt was taken from the same tag (raw.githubusercontent.com/googlefonts/roboto-3-classic/v3.016/OFL.txt)."
   },
   "licenses": [
     {
@@ -25,10 +25,15 @@
   "adapterHeaders": [],
   "files": {
     "OFL.txt": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41",
+    "hinted/static/Roboto-Bold.ttf": "44f13e570a8b3fc42240abfcb3d72fe298f3dd6a25db0c78d0c2495dbd0e9121",
+    "hinted/static/Roboto-BoldItalic.ttf": "64576192b69a55031a916cbf8b30b74d38093a1a1bcf6e38760b6b8c2126889b",
+    "hinted/static/Roboto-Italic.ttf": "65e58214106ef45173620f4488006d80de2d666c773c4734148e1d41942cc72b",
+    "hinted/static/Roboto-Light.ttf": "59123d9f5a81091626fb1b37c583510a85db1296ab794b48309aaad0410232ed",
     "hinted/static/Roboto-Regular.ttf": "9f300202f482ad59f8b13bc3131a295744d14fd530fa3765a0a11ec87264d203"
   },
   "pragmaDirectives": [],
   "notes": [
-    "Fixed test font for the font library and font backend tests (Docs/Design/Font/08-ThirdParty.ko.md section 8.5): tests read the file from the repository and never use fonts installed on the machine. Not shipped in any product."
+    "Fixed test font for the font library and font backend tests (Docs/Design/Font/08-ThirdParty.ko.md section 8.5): tests read the file from the repository and never use fonts installed on the machine. Not shipped in any product.",
+    "The Bold, Italic, BoldItalic and Light faces are the typefaces of the UE 5.8 editor core styles that the UiDemo widget gallery shows (Docs/Design/UiToolkit section 9.1 UW4); they stay test data until the engine default font asset (font design FT3) exists."
   ]
 }

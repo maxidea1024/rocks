@@ -76,10 +76,10 @@ TEST(UiFramework_ButtonPaddingFollowsPressedState) {
     REQUIRE(button.Value()->SetContentPadding({1, 1, 1, 1}));
     const Geometry root = Geometry::Root({80, 24}, {});
     REQUIRE(button.Value()->Arrange(root));
-    // 보통: ButtonMargins (12, 1.5, 12, 1.5) + 내용 여백 1.
+    // 보통: ButtonPadding (12, 1.5, 12, 1.5) + 내용 여백 1.
     CHECK(content.Value()->GetGeometry().size == Vec2(80 - 26, 24 - 5));
     CHECK(content.Value()->GetGeometry().WindowBounds().Value().min == Vec2(13, 2.5f));
-    // 눌림: PressedButtonMargins (12, 2.5, 12, 0.5) — 내용이 1만큼 내려간다.
+    // 눌림: PressedButtonPadding (12, 2.5, 12, 0.5) — 내용이 1만큼 내려간다.
     REQUIRE(button.Value()->OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Space)));
     REQUIRE(button.Value()->Arrange(root));
     CHECK(content.Value()->GetGeometry().size == Vec2(80 - 26, 24 - 5));

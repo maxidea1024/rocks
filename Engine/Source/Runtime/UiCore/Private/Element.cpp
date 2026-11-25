@@ -21,12 +21,14 @@ void Element::MoveChildWithin(usize from, usize to) noexcept {
     if (from == to || from >= children_.Size() || to >= children_.Size()) {
         return;
     }
+
     auto held = Move(children_[from]);
     while (from != to) {
         const usize next = from < to ? from + 1 : from - 1;
         children_[from] = Move(children_[next]);
         from = next;
     }
+
     children_[to] = Move(held);
     InvalidateLayout();
 }
@@ -35,6 +37,7 @@ Result<void> Element::TryInsertChild(usize index, const SharedPtr<Element>& chil
     if (index > children_.Size()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!child || child->parent_ != nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -56,6 +59,7 @@ Result<void> Element::TryInsertChild(usize index, const SharedPtr<Element>& chil
             ancestor->subtreeBindings_ += child->subtreeBindings_;
         }
     }
+
     InvalidateLayout();
     return Result<void>::Success();
 }
@@ -78,6 +82,7 @@ bool Element::RemoveChild(Element& child) noexcept {
                     ancestor->subtreeBindings_ -= child.subtreeBindings_;
                 }
             }
+
             auto detached = Move(children_[i]);
             child.parent_ = nullptr;
             (void)children_.TryRemoveAt(i);
@@ -85,6 +90,7 @@ bool Element::RemoveChild(Element& child) noexcept {
             for (auto* host = this; host; host = host->parent_) {
                 host->OnDescendantDetached(*detached);
             }
+
             return true;
         }
     }
@@ -99,17 +105,21 @@ Result<void> Element::WrapAttachedChild(Element& child,
         parent->IsWithin(*wrapper) || wrapper.Get() == &child) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (auto& entry : parent->children_) {
         if (entry.Get() != &child) {
             continue;
         }
+
         auto attached = wrapper->children_.TryPushBack(entry);
         if (!attached) {
             return attached;
         }
+
         for (auto* ancestor = parent; ancestor; ancestor = ancestor->parent_) {
             ancestor->subtreeBindings_ += wrapper->subtreeBindings_;
         }
+
         wrapper->subtreeBindings_ += child.subtreeBindings_;
         child.parent_ = wrapper.Get();
         wrapper->parent_ = parent;
@@ -117,6 +127,7 @@ Result<void> Element::WrapAttachedChild(Element& child,
         parent->InvalidateLayout();
         return Result<void>::Success();
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -126,6 +137,7 @@ bool Element::IsWithin(const Element& root) const noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -137,9 +149,11 @@ bool Element::IsInputPathActive(const Element& root, bool pointer) const noexcep
             (pointer && visibility == Visibility::HitTestInvisible)) {
             return false;
         }
+
         if (current == &root) {
             return true;
         }
+
         const auto* parent = current->parent_;
         if (parent) {
             const auto active = parent->ActiveChildren();
@@ -151,12 +165,14 @@ bool Element::IsInputPathActive(const Element& root, bool pointer) const noexcep
                         break;
                     }
                 }
+
                 if (!found) {
                     return false;
                 }
             }
         }
     }
+
     return false;
 }
 
@@ -216,25 +232,32 @@ input::WindowRegion Element::GetWindowRegion() const noexcept {
 void Element::SetCursorOverride(input::MouseCursor cursor) noexcept {
     cursorOverride_ = static_cast<uint8>(cursor);
 }
+
 void Element::ResetCursorOverride() noexcept {
     cursorOverride_ = 255;
 }
+
 input::MouseCursor Element::ResolveMouseCursor(Vec2 position) const noexcept {
     for (auto* node = this; node; node = node->Parent()) {
         if (node->cursorOverride_ != 255) {
             return static_cast<input::MouseCursor>(node->cursorOverride_);
         }
+
         auto cursor = node->QueryMouseCursor(position);
         if (cursor != input::MouseCursor::Arrow) {
             return cursor;
         }
     }
+
     return input::MouseCursor::Arrow;
 }
+
 void Element::OnMouseEnter(uint32) noexcept {
 }
+
 void Element::OnMouseLeave(uint32) noexcept {
 }
+
 input::MouseCursor Element::QueryMouseCursor(Vec2) const noexcept {
     return input::MouseCursor::Arrow;
 }
@@ -306,17 +329,21 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
     if (!cache && !inheritedVolatile) {
         if (auto* local = LocalPaintCache()) {
             // 지역 캐시도 바깥 테마·전경색으로 기록한다(달라지면 Update가 전체를 다시 만든다).
-            if (&local->scratch_.Theme() != &list.Theme()) {
-                local->SetTheme(&list.Theme());
+            if (&local->scratch_.Theme() != &list.Theme() ||
+                local->scratch_.ThemeRevision() != list.ThemeRevision()) {
+                local->SetTheme(&list.Theme(), list.ThemeRevision());
             }
-            auto updated = local->Update(*this, layer, list.foreground_);
+
+            auto updated = local->Update(*this, layer, list.foreground_, list.disabled_);
             if (!updated) {
                 return updated;
             }
+
             highest = local->HighestLayer();
             return list.TryAppendRecorded(local->List().Boxes());
         }
     }
+
     if (clipToBounds_) {
         auto clipped = list.PushClip(geometry_);
         if (!clipped) {
@@ -327,17 +354,22 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
     const usize entry = cache ? cache->next_.Size() : 0;
     const float parentOpacity = list.opacity_;
     const LinearColor parentForeground = list.foreground_;
+    const bool parentDisabled = list.disabled_;
     list.opacity_ *= renderOpacity_;
-    list.foreground_ = ResolveForeground(list.Theme(), parentForeground);
+    list.disabled_ = parentDisabled || !enabled_;
+    list.foreground_ = ResolveForeground(list.Theme(), parentForeground, list.disabled_);
     auto result = PaintContents(list, layer, highest, cache, inheritedVolatile || IsVolatile());
     list.opacity_ = parentOpacity;
     list.foreground_ = parentForeground;
+    list.disabled_ = parentDisabled;
     if (cache && result) {
         cache->next_[entry].subtreeEnd = cache->next_.Size();
     }
+
     if (clipToBounds_) {
         list.PopClip();
     }
+
     return result;
 }
 
@@ -361,6 +393,7 @@ Result<void> Element::PaintContents(PaintList& list, int32 layer, int32& highest
     if (!painted) {
         return painted;
     }
+
     if (!cache) {
         includeLayers(first);
     }
@@ -372,23 +405,28 @@ Result<void> Element::PaintContents(PaintList& list, int32 layer, int32& highest
         if (visibility == Visibility::Hidden || visibility == Visibility::Collapsed) {
             continue;
         }
+
         int32 childLayer = highest;
         if (previous != children.Size() && StartsPaintLayer(previous, i)) {
             if (childLayer == NumericLimits<int32>::Max()) {
                 return Result<void>::Failure(ErrorCode::Overflow);
             }
+
             ++childLayer;
         }
+
         const usize childBody = cache ? cache->next_.Size() : 0;
         auto result =
             children[i]->PaintSubtree(list, childLayer, highest, cache, inheritedVolatile);
         if (!result) {
             return result;
         }
+
         if (cache) {
             cache->next_[childBody].parentBody = body;
             cache->next_[cache->next_.Size() - 1].parentBody = body;
         }
+
         previous = i;
     }
 
@@ -398,9 +436,11 @@ Result<void> Element::PaintContents(PaintList& list, int32 layer, int32& highest
     if (!overlay) {
         return overlay;
     }
+
     if (!cache) {
         includeLayers(overlayStart);
     }
+
     return Result<void>::Success();
 }
 
@@ -420,6 +460,7 @@ void Element::SetGeometry(const Geometry& geometry) noexcept {
         geometry_ = resolved;
         InvalidatePaintPlan();
     }
+
     arrangeDirty_ = true;
 }
 
@@ -429,9 +470,11 @@ Result<void> Element::SetRenderTransform(const AffineTransform2D& transform, Vec
         !math::IsFinite(transform.tx) || !math::IsFinite(transform.ty)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (hasRenderTransform_ && transform == renderTransform_ && pivot == renderPivot_) {
         return Result<void>::Success();
     }
+
     InvalidateArrangement();
     renderTransform_ = transform;
     renderPivot_ = pivot;
@@ -443,6 +486,7 @@ void Element::ClearRenderTransform() noexcept {
     if (!hasRenderTransform_) {
         return;
     }
+
     hasRenderTransform_ = false;
     InvalidateArrangement();
 }
@@ -456,14 +500,17 @@ Result<void> Element::Prepass(float scale) noexcept {
     if (!math::IsFinite(scale) || scale <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!layoutDirty_ && !measureChildren_ && measuredScale_ == scale) {
         return Result<void>::Success();
     }
+
     arrangeDirty_ = true;
     if (scale != measuredScale_) {
         layoutDirty_ = true;
         InvalidatePaintPlan();
     }
+
     if (visibility_ == Visibility::Collapsed) {
         desiredSize_ = {};
         measuredScale_ = scale;
@@ -478,20 +525,24 @@ Result<void> Element::Prepass(float scale) noexcept {
         if (!measured) {
             return measured;
         }
+
         // FitBox처럼 자식을 다른 배율로도 측정하는 경우가 있어 부모가 마지막으로 본 값과 비교한다.
         if (child->desiredSeenByParent_ != child->desiredSize_) {
             child->desiredSeenByParent_ = child->desiredSize_;
             layoutDirty_ = true;
         }
     }
+
     measureChildren_ = false;
     if (!layoutDirty_) {
         return Result<void>::Success();
     }
+
     const Vec2 desired = ComputeDesiredSize(scale);
     if (!desired.IsFinite() || desired.x < 0 || desired.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     desiredSize_ = desired;
     measuredScale_ = scale;
     layoutDirty_ = false;
@@ -503,6 +554,7 @@ void Element::InvalidateLayout() noexcept {
     for (Element* current = parent_; current; current = current->parent_) {
         current->measureChildren_ = true;
     }
+
     InvalidateArrangement();
     InvalidatePaintPlan();
 }
@@ -511,11 +563,13 @@ Result<void> Element::ArrangeIfNeeded(const Geometry& geometry) noexcept {
     if (!arrangeDirty_ && allotted_ == geometry) {
         return Result<void>::Success();
     }
+
     auto result = Arrange(geometry);
     if (result) {
         allotted_ = geometry;
         arrangeDirty_ = false;
     }
+
     return result;
 }
 
@@ -536,6 +590,7 @@ void Element::InvalidateArrangement() noexcept {
     for (auto* p = this; p; p = p->parent_) {
         p->arrangeDirty_ = true;
     }
+
     InvalidatePaint();
 }
 
@@ -550,11 +605,13 @@ Result<void> Element::SetRenderOpacity(float opacity) noexcept {
     if (!math::IsFinite(opacity) || opacity < 0 || opacity > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (renderOpacity_ != opacity) {
         renderOpacity_ = opacity;
         // 캐시는 부모 본문을 통해 누적 알파가 달라진 자식만 다시 기록한다.
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -566,11 +623,13 @@ Result<void> Element::SetForegroundColor(ColorRef color) noexcept {
     if (!color.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (foregroundColor_ != color) {
         foregroundColor_ = color;
         // 캐시는 부모 본문을 통해 상속 전경색이 달라진 자식만 다시 기록한다.
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -578,9 +637,13 @@ ColorRef Element::GetForegroundColor() const noexcept {
     return foregroundColor_;
 }
 
-LinearColor Element::ResolveForeground(const ThemeColors& theme,
-                                       LinearColor inherited) const noexcept {
-    return GetForegroundColor().Resolve(theme, {inherited, inherited});
+ColorRef Element::PaintForegroundColor(bool) const noexcept {
+    return GetForegroundColor();
+}
+
+LinearColor Element::ResolveForeground(const ThemeColors& theme, LinearColor inherited,
+                                       bool disabled) const noexcept {
+    return PaintForegroundColor(disabled).Resolve(theme, {inherited, inherited});
 }
 
 void Element::SetForceVolatile(bool enabled) noexcept {
@@ -610,6 +673,7 @@ void Element::SetVisibility(Visibility visibility) noexcept {
     if (visibility_ == visibility) {
         return;
     }
+
     const bool collapsedChanged =
         (visibility_ == Visibility::Collapsed) != (visibility == Visibility::Collapsed);
     visibility_ = visibility;
@@ -617,6 +681,7 @@ void Element::SetVisibility(Visibility visibility) noexcept {
         // 크기가 0인 자식도 접으면 슬롯 간격과 줄바꿈에서 빠진다.
         parent_->InvalidateLayout();
     }
+
     InvalidateLayout();
 }
 
@@ -628,6 +693,7 @@ void Element::SetEnabled(bool enabled) noexcept {
     if (enabled_ == enabled) {
         return;
     }
+
     enabled_ = enabled;
     InvalidatePaintPlan();
 }
@@ -640,6 +706,7 @@ void Element::SetClipToBounds(bool enabled) noexcept {
     if (clipToBounds_ == enabled) {
         return;
     }
+
     clipToBounds_ = enabled;
     InvalidatePaintPlan();
 }

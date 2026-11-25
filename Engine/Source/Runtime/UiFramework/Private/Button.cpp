@@ -7,12 +7,15 @@ Result<void> Button::Construct(Args&& args) noexcept {
     if (status) {
         status = SetStyle(args.style);
     }
+
     if (status) {
         status = SetContentPadding(args.contentPadding);
     }
+
     if (status && args.foregroundColor) {
         status = SetForegroundColor(*args.foregroundColor);
     }
+
     if (status) {
         SetOnClicked(Move(args.onClicked));
         SetOnPressed(Move(args.onPressed));
@@ -22,6 +25,7 @@ Result<void> Button::Construct(Args&& args) noexcept {
         SetFocusable(args.focusable);
         status = SetInputMethods(args.clickMethod, args.touchMethod, args.pressMethod);
     }
+
     return status;
 }
 
@@ -38,32 +42,39 @@ void Button::SetOnClicked(Delegate<void()>&& callback) noexcept {
 void Button::SetOnPressed(Delegate<void()>&& callback) noexcept {
     onPressed_ = Move(callback);
 }
+
 void Button::SetOnReleased(Delegate<void()>&& callback) noexcept {
     onReleased_ = Move(callback);
 }
+
 void Button::SetOnHovered(Delegate<void()>&& callback) noexcept {
     onHovered_ = Move(callback);
 }
+
 void Button::SetOnUnhovered(Delegate<void()>&& callback) noexcept {
     onUnhovered_ = Move(callback);
 }
+
 Result<void> Button::SetInputMethods(ButtonClickMethod click, ButtonClickMethod touch,
                                      ButtonPressMethod press) noexcept {
     if (click > ButtonClickMethod::Precise || touch > ButtonClickMethod::Precise ||
         press > ButtonPressMethod::Up) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     clickMethod_ = click;
     touchMethod_ = touch;
     pressMethod_ = press;
     return Result<void>::Success();
 }
+
 void Button::SetFocusable(bool enabled) noexcept {
     focusable_ = enabled;
     if (!enabled && keyPressed_) {
         OnKeyCancelled(keyUserId_, pressedKey_);
     }
 }
+
 bool Button::IsValidStyle(const ButtonStyle& style) noexcept {
     const auto validPadding = [](Vec4 padding) noexcept {
         return padding.IsFinite() && padding.x >= 0 && padding.y >= 0 && padding.z >= 0 &&
@@ -77,6 +88,7 @@ bool Button::IsValidStyle(const ButtonStyle& style) noexcept {
             return false;
         }
     }
+
     return validPadding(style.normalPadding) && validPadding(style.pressedPadding) &&
            style.normalForeground.IsValid() && style.hoveredForeground.IsValid() &&
            style.pressedForeground.IsValid() && style.disabledForeground.IsValid();
@@ -86,11 +98,13 @@ Result<void> Button::SetStyle(const ButtonStyle& style) noexcept {
     if (!IsValidStyle(style)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (style_ != style) {
         style_ = style;
         InvalidatePaint();
         UpdatePadding();
     }
+
     return Result<void>::Success();
 }
 
@@ -102,10 +116,12 @@ Result<void> Button::SetContentPadding(Vec4 padding) noexcept {
     if (!padding.IsFinite() || padding.x < 0 || padding.y < 0 || padding.z < 0 || padding.w < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (contentPadding_ != padding) {
         contentPadding_ = padding;
         UpdatePadding();
     }
+
     return Result<void>::Success();
 }
 
@@ -121,22 +137,26 @@ void Button::UpdatePadding() noexcept {
 bool Button::IsHovered() const noexcept {
     return hoverCount_ != 0;
 }
+
 void Button::OnMouseEnter(uint32) noexcept {
     if (++hoverCount_ == 1) {
         InvalidatePaint();
         onHovered_.ExecuteIfBound();
     }
 }
+
 void Button::OnMouseLeave(uint32 user) noexcept {
     if (pressed_ && userId_ == user && pointerSource_ == PointerSource::Mouse &&
         activeMethod_ == ButtonClickMethod::Precise) {
         ReleasePointer();
     }
+
     if (hoverCount_ && --hoverCount_ == 0) {
         InvalidatePaint();
         onUnhovered_.ExecuteIfBound();
     }
 }
+
 void Button::ReleasePointer() noexcept {
     pressed_ = false;
     InvalidatePaint();
@@ -170,6 +190,7 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
                 Activate();
             }
         }
+
         return true;
     }
 
@@ -183,6 +204,7 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
         if (activate) {
             Activate();
         }
+
         return true;
     }
 
@@ -191,6 +213,7 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
         Activate();
         return true;
     }
+
     return false;
 }
 
@@ -226,6 +249,7 @@ PointerReply Button::OnPointerEvent(const PointerEvent& event) noexcept {
         if (pressed_ && activeMethod_ == ButtonClickMethod::Down) {
             Activate();
         }
+
         return {.handled = true,
                 .capture = pressed_ && (activeMethod_ != ButtonClickMethod::Precise ||
                                         event.source == PointerSource::Touch),
@@ -238,6 +262,7 @@ PointerReply Button::OnPointerEvent(const PointerEvent& event) noexcept {
         Activate();
         return {.handled = true};
     }
+
     if (!pressed_ || pointerSource_ != event.source || pointerId_ != event.pointerId ||
         userId_ != event.userId) {
         return {};
@@ -248,6 +273,7 @@ PointerReply Button::OnPointerEvent(const PointerEvent& event) noexcept {
         ReleasePointer();
         return {.handled = true, .releaseCapture = true};
     }
+
     if (event.type == PointerEventType::Up) {
         const bool activate =
             activeMethod_ != ButtonClickMethod::Down && GetGeometry().Contains(event.position);
@@ -255,6 +281,7 @@ PointerReply Button::OnPointerEvent(const PointerEvent& event) noexcept {
         if (activate) {
             Activate();
         }
+
         return {.handled = true, .releaseCapture = true};
     }
 
@@ -273,25 +300,42 @@ void Button::OnPointerCaptureLost(PointerSource source, uint32 userId, uint32 po
 }
 
 Result<void> Button::OnPaint(PaintList& list, int32 layer) const noexcept {
-    const StyleBrush& style = CurrentStyleBrush();
+    const StyleBrush& style = CurrentStyleBrush(!IsEnabled() || list.IsDisabled());
     if (style.mode == BrushMode::None) {
         return Result<void>::Success();
     }
+
     // brush 색은 테마로 풀고 ButtonColorAndOpacity를 곱한다(UE SButton::OnPaint).
-    return list.TryAddBrush(GetGeometry(), style.Resolve(list.Theme(), list.ColorContext()),
-                            CurrentColor(), layer);
+    const auto draw = [&]() noexcept {
+        return list.TryAddBrush(GetGeometry(), style.Resolve(list.Theme(), list.ColorContext()),
+                                CurrentColor(), layer);
+    };
+    if (&style == &style_.disabled) {
+        // 비활성 전용 brush는 비활성 효과 없이 그린다(UE bShowDisabledEffect — 자식에는 효과가
+        // 간다).
+        PaintList::DisabledEffectExemption exemption(list);
+        return draw();
+    }
+
+    return draw();
 }
 
 LinearColor Button::CurrentColor() const noexcept {
     return GetColor();
 }
 
-const StyleBrush& Button::CurrentStyleBrush() const noexcept {
+const StyleBrush& Button::CurrentStyleBrush(bool disabled) const noexcept {
     // UE는 비활성 brush가 있으면 그것을, 없으면 보통 상태 brush에 비활성 효과를 쓴다.
-    if (!IsEnabled() && style_.disabled.mode != BrushMode::None) {
+    if (disabled && style_.disabled.mode != BrushMode::None) {
         return style_.disabled;
     }
+
     return IsPressed() ? style_.pressed : IsHovered() ? style_.hovered : style_.normal;
+}
+
+ColorRef Button::PaintForegroundColor(bool disabled) const noexcept {
+    // UE SBorder는 비활성이면 DisabledForegroundColor(버튼 스타일의 disabledForeground)를 쓴다.
+    return disabled ? style_.disabledForeground : GetForegroundColor();
 }
 
 ColorRef Button::GetForegroundColor() const noexcept {
@@ -299,9 +343,11 @@ ColorRef Button::GetForegroundColor() const noexcept {
     if (!IsEnabled()) {
         return style_.disabledForeground;
     }
+
     if (assigned.source != ColorSource::Style) {
         return assigned;
     }
+
     return IsPressed()   ? style_.pressedForeground
            : IsHovered() ? style_.hoveredForeground
                          : style_.normalForeground;
