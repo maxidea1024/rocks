@@ -157,13 +157,22 @@ Array<Guid> DiffFields(Allocator& allocator, TypeRegistry& types, Edit&& edit,
     {
         auto created =
             objects.NewObject<DefaultsHolder>(objects.OwnerAccess(), TypeIdOf<DefaultsHolder>());
-        REQUIRE(created);
+        if (!created) {
+            platform::Fatal("diff test object creation failed");
+        }
+
         {
             auto borrowed =
                 objects.Resolve<DefaultsHolder>(objects.OwnerAccess(), created.Value().Handle());
-            REQUIRE(borrowed);
+            if (!borrowed) {
+                platform::Fatal("diff test object resolve failed");
+            }
+
             auto value = borrowed.Value().Get();
-            REQUIRE(value);
+            if (!value) {
+                platform::Fatal("diff test object borrow failed");
+            }
+
             edit(*value.Value());
         }
 
@@ -174,8 +183,11 @@ Array<Guid> DiffFields(Allocator& allocator, TypeRegistry& types, Edit&& edit,
         options.overrides = overrides != nullptr ? &lookup : nullptr;
         auto saved = SaveObjectGraph(allocator, objects, objects.OwnerAccess(),
                                      created.Value().Handle(), options);
-        REQUIRE(saved);
-        const Array<uint8> bytes = saved.Value().TakeBytes();
+        if (!saved) {
+            platform::Fatal("diff test graph save failed");
+        }
+
+        const Array<uint8> bytes = Move(saved.Value());
         const TypeSchema& schema = TypeOf<DefaultsHolder>();
         fields = FieldsOf(allocator, NodeRecord(bytes.View()), schema.id, schema.version);
         created.Value().Reset();
@@ -320,7 +332,7 @@ TEST(DiffSave_OmitsBaselineValues) {
         auto saved = SaveObjectGraph(allocator, objects, objects.OwnerAccess(),
                                      created.Value().Handle(), options);
         REQUIRE(saved);
-        const Array<uint8> bytes = saved.Value().TakeBytes();
+        const Array<uint8> bytes = Move(saved.Value());
         const Span<const uint8> record = NodeRecord(bytes.View());
         const Array<Guid> fields = FieldsOf(allocator, record, schema.id, schema.version);
         CHECK(fields.Size() == 2);
@@ -416,7 +428,7 @@ TEST(DiffSave_WeakDeferralAndPolicy) {
         auto saved = SaveObjectGraph(allocator, objects, objects.OwnerAccess(),
                                      holder.Value().Handle(), options);
         REQUIRE(saved);
-        const Array<uint8> bytes = saved.Value().TakeBytes();
+        const Array<uint8> bytes = Move(saved.Value());
         const TypeSchema& schema = TypeOf<DefaultsHolder>();
         const Array<Guid> fields =
             FieldsOf(allocator, NodeRecord(bytes.View()), schema.id, schema.version);

@@ -82,7 +82,7 @@ Array<uint8> SaveOne(Allocator& allocator, ObjectRegistry& objects, ObjectHandle
         platform::Fatal("test graph save failed");
     }
 
-    return saved.Value().TakeBytes();
+    return Move(saved.Value());
 }
 
 // 명세의 지문 공식을 시험 쪽에서 따로 계산한다.
@@ -515,11 +515,11 @@ TEST(ClassDefaults_FindDefaultPayload) {
     };
     constexpr auto Editor = ClassDefaultsConfiguration::Editor;
     constexpr auto Cooked = ClassDefaultsConfiguration::Cooked;
-    // count = 42(I32 LE).
+    // count = 42(I64 LE — 부호 있는 정수는 폭과 무관하게 I64, FieldValueWire.h).
     auto count = find("count", Editor);
     REQUIRE(count);
-    CHECK(count.Value().wire == static_cast<uint32>(WireType::I32) &&
-          count.Value().bytes.Size() == 4 && count.Value().bytes[0] == 42);
+    CHECK(count.Value().wire == static_cast<uint32>(WireType::I64) &&
+          count.Value().bytes.Size() == 8 && count.Value().bytes[0] == 42);
     auto member = find("point.x", Editor);
     REQUIRE(member);
     CHECK(member.Value().bytes.Size() == 4 && member.Value().bytes[0] == 3);

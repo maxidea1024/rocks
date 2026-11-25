@@ -86,7 +86,7 @@ Array<uint8> SaveAll(Allocator& allocator, ObjectRegistry& objects, ObjectHandle
         platform::Fatal("test graph save failed");
     }
 
-    return saved.Value().TakeBytes();
+    return Move(saved.Value());
 }
 
 // 객체의 네이티브 값을 바로 읽고 고친다(edit에 T&).
@@ -321,7 +321,7 @@ TEST(ClassDefaultsRevert_Rejections) {
         CHECK(holderRefused("fixed[1]", ErrorCode::Unsupported));
         CHECK(holderRefused("pair.u", ErrorCode::InvalidArgument));
         CHECK(holderRefused("scratch", ErrorCode::NotFound));
-        const PropertyPathBuffer empty;
+        const PropertyPathBuffer empty{};
         auto none = RevertToDefault(objects, objects.OwnerAccess(), holderHandle, empty, allocator);
         CHECK(!none && none.Error() == ErrorCode::InvalidArgument);
         holder.Value().Reset();

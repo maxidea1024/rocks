@@ -135,10 +135,10 @@ bool RegisterDetour(TypeRegistry& types) noexcept {
     const FieldSchema fields[] = {
         Scalar(DetourTargetId, "target", 6, ValueKind::ObjectReference, ItemType)};
     RuntimeFieldOps ops = ScalarField<&Detour::target>(DetourTargetId);
-    ops.encode = +[](const RuntimeFieldOps&, ObjectRegistry& registry,
+    ops.encode = +[](const RuntimeFieldOps&, ObjectRegistry* registry,
                      const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& out,
                      FieldEncodeContext& context) noexcept -> Result<uint32> {
-        auto owner = registry.Resolve<Detour>(access, object);
+        auto owner = registry->Resolve<Detour>(access, object);
         if (!owner) {
             return Result<uint32>::Failure(owner.Error());
         }
