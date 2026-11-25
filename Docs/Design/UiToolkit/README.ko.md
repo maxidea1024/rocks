@@ -40,3 +40,4 @@ Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용�
 - [11. 결정 항목](11-Decisions.ko.md)
 - [12. 개정 기록과 기존 스펙의 개정 위치](12-Revisions.ko.md)
 - [13. 참고 자료](13-References.ko.md)
+- [14. 에디터 스타일 값(UE 5.8.4 Starship)](14-EditorStyleValues.ko.md)
