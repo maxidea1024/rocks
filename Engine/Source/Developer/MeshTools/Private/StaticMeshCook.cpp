@@ -14,67 +14,18 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/Memory.h>
 
+#include "MeshCookCommon.h"
+
 // 정적 메시 쿠킹 처리기다(Docs/Design/MeshAnimationAssets 5.5.2절 — MA2b2).
 namespace rocks {
 namespace {
 
+using mesh_cook::CookFail;
+using mesh_cook::PendingBulkId;
 using reflection_text::AssignmentTarget;
 
-// 머리의 고정부(버전·LOD 수·상자 6 double·반지름·경고 수)와 경고·stream·섹션 항목 byte다.
-constexpr usize HeaderFixedBytes = 4 + 4 + 8 * 7 + 4;
-constexpr usize HeaderWarningBytes = 4 + 4;
-constexpr usize HeaderStreamBytes = 4 + 8 + 8;
-constexpr usize HeaderSectionBytes = 4 * 5 + 5;
-// LOD 하나의 고정부(정점 수·data byte·위치·tangent 기저·UV 수·색·index 형식·index·섹션 수)다.
-constexpr usize HeaderLodBytes =
-    4 + 8 + HeaderStreamBytes * 2 + 4 + HeaderStreamBytes + 4 + HeaderStreamBytes + 4;
-// 머리가 담을 수 있는 경고·섹션 수 상한이다(넘으면 손상으로 본다).
-constexpr uint32 HeaderMaxWarnings = 65535;
-constexpr uint32 HeaderMaxSections = MeshMaxPolygonGroups;
-// 검증이 data를 "있음"으로 보게 두는 임시 bulk id다(채우기가 실제 ref로 바꾼다).
-constexpr uint32 PendingBulkId = 1;
-
-void PutHeaderStream(ByteWriter& writer, const MeshRenderStream& stream) noexcept {
-    writer.WriteU32LE(stream.vertexFormat);
-    writer.WriteU64LE(stream.offset);
-    writer.WriteU64LE(stream.byteSize);
-}
-
-void ReadHeaderStream(ByteReader& reader, MeshRenderStream& stream) noexcept {
-    stream.vertexFormat = reader.ReadU32LE();
-    stream.offset = reader.ReadU64LE();
-    stream.byteSize = reader.ReadU64LE();
-}
-
-void PutF64(ByteWriter& writer, double value) noexcept {
-    writer.WriteU64LE(platform::BitCast<uint64>(value));
-}
-
-// 실패 진단을 채우고 error로 실패한다.
-Result<void> CookFail(const CookContext& context, AssetDiagnosticCode code, ErrorCode error,
-                      uint64 detail = 0) noexcept {
-    if (context.failure != nullptr) {
-        *context.failure = AssetDiagnostic{};
-        context.failure->code = code;
-        context.failure->error = error;
-        context.failure->asset = context.entry != nullptr ? context.entry->id : AssetId{};
-        context.failure->detail = detail;
-    }
-
-    return Result<void>::Failure(error);
-}
-
-// 처리기 경고를 문맥에 둔다(없으면 버린다). setting은 쿠킹 LOD 번호다.
-Result<void> CookWarn(const CookContext& context, AssetDiagnosticCode code, uint32 lod) noexcept {
-    if (context.warnings == nullptr) {
-        return Result<void>::Success();
-    }
-
-    const AssetId asset = context.entry != nullptr ? context.entry->id : AssetId{};
-    return context.warnings->TryPushBack(
-        CookDiagnostic{code, true, asset, {}, lod, ErrorCode::None});
-}
-
+// 머리의 고정부(버전·LOD 수·bounds·경고 수)다(나머지는 MeshCookCommon.h 단계가 본다).
+constexpr usize HeaderFixedBytes = 4 + 4 + mesh_cook::HeaderBoundsBytes + 4;
 // 쿠킹 LOD 하나의 입력이다(원본 LOD 번호, baked를 쓰는지, 유효 빌드 설정).
 struct LodInput {
     uint32 sourceLod = 0;
@@ -82,41 +33,6 @@ struct LodInput {
     MeshBuildSettings build;
     float screenSize = 0.0f;
 };
-
-// 섹션 하나의 유효 섹션 정보다(found면 표 항목, 아니면 슬롯 대응 — 5.5.2절 6).
-struct SectionChoice {
-    bool found = false;
-    MeshSectionInfo info;
-};
-
-const MeshSectionInfoEntry* FindSection(Span<const MeshSectionInfoEntry> table, int32 lod,
-                                        int32 section) noexcept {
-    for (const MeshSectionInfoEntry& entry : table) {
-        if (entry.lod == lod && entry.section == section) {
-            return &entry;
-        }
-    }
-
-    return nullptr;
-}
-
-// 원본 LOD lod의 섹션 section 정보다(그 LOD → LOD 0 → 없음 — UE FMeshSectionInfoMap::Get).
-SectionChoice ChooseSection(Span<const MeshSectionInfoEntry> table, uint32 lod,
-                            uint32 section) noexcept {
-    SectionChoice choice;
-    const MeshSectionInfoEntry* entry =
-        FindSection(table, static_cast<int32>(lod), static_cast<int32>(section));
-    if (entry == nullptr) {
-        entry = FindSection(table, 0, static_cast<int32>(section));
-    }
-
-    if (entry != nullptr) {
-        choice.found = true;
-        choice.info = entry->info;
-    }
-
-    return choice;
-}
 
 const MeshSourceData& InputData(const StaticMesh& mesh, const LodInput& input) noexcept {
     const StaticMeshSourceLod& lod = mesh.sourceLods[input.sourceLod];
@@ -151,28 +67,8 @@ Result<Sha256Digest> LocalKey(const CookContext& context, NamePool& names, const
     for (const LodInput& input : inputs) {
         const MeshSourceData& data = InputData(mesh, input);
         writer.WriteBool(input.baked);
-        writer.WriteU32(data.formatVersion);
-        writer.WriteU32(data.vertexCount);
-        writer.WriteU32(data.cornerCount);
-        writer.WriteU32(data.edgeCount);
-        writer.WriteU32(data.polygonCount);
-        writer.WriteU32(data.triangleCount);
-        writer.WriteU32(data.polygonGroupCount);
-        writer.WriteDigest(data.topology.sha256);
-        writer.WriteU64(data.topology.rawBytes);
-        writer.WriteList(data.attributes.Size());
-        for (const MeshAttributeRecord& record : data.attributes) {
-            auto name = names.Acquire(record.name);
-            if (!name) {
-                return Result<Sha256Digest>::Failure(name.Error());
-            }
-
-            writer.WriteString(name.Value().View());
-            writer.WriteU32(static_cast<uint32>(record.element));
-            writer.WriteU32(static_cast<uint32>(record.type));
-            writer.WriteU32(record.channels);
-            writer.WriteDigest(record.data.sha256);
-            writer.WriteU64(record.data.rawBytes);
+        if (auto written = mesh_cook::WriteSourceKey(writer, names, data); !written) {
+            return Result<Sha256Digest>::Failure(written.Error());
         }
 
         MeshBuildSettings keyed = input.build;
@@ -182,18 +78,8 @@ Result<Sha256Digest> LocalKey(const CookContext& context, NamePool& names, const
             return Result<Sha256Digest>::Failure(written.Error());
         }
 
-        writer.WriteList(data.polygonGroupCount);
-        for (uint32 section = 0; section < data.polygonGroupCount; ++section) {
-            const SectionChoice choice =
-                ChooseSection(mesh.sectionInfo.View(), input.sourceLod, section);
-            writer.WriteBool(choice.found);
-            writer.WriteI64(choice.info.materialIndex);
-            writer.WriteBool(choice.info.enableCollision);
-            writer.WriteBool(choice.info.castShadow);
-            writer.WriteBool(choice.info.visibleInRayTracing);
-            writer.WriteBool(choice.info.affectDistanceFieldLighting);
-            writer.WriteBool(choice.info.forceOpaque);
-        }
+        mesh_cook::WriteSectionKey(writer, mesh.sectionInfo.View(), input.sourceLod,
+                                   data.polygonGroupCount);
     }
 
     return writer.Finish();
@@ -218,7 +104,7 @@ struct CookedMesh {
     Array<CookedLod> lods;
     Box<double> box{};
     double sphereRadius = 0.0;
-    Array<StaticMeshCookWarning> warnings;
+    Array<MeshCookWarning> warnings;
 };
 
 // 메시 객체 renderData와 같은 모양의 값(머리 쓰기·검증용 — data는 크기만)을 만든다.
@@ -273,7 +159,7 @@ Result<bool> AcceptHit(const NuggetCacheGetResult& got, usize lodCount, bool dev
     }
 
     StaticMeshRenderData shape(allocator);
-    Array<StaticMeshCookWarning> warnings(allocator);
+    Array<MeshCookWarning> warnings(allocator);
     if (auto read = ReadStaticMeshNuggetHeader(got.values[0].bytes.View(), shape, warnings);
         !read) {
         return read.Error() == ErrorCode::OutOfMemory ? Result<bool>::Failure(read.Error())
@@ -357,21 +243,6 @@ struct SavedFields {
     int32 lodForCollision = 0;
 };
 
-// 원본 LOD 번호 source를 쿠킹 LOD 번호로 옮기고 [0, 쿠킹 LOD 수 − 1]로 자른다(5.5.2절 9).
-int32 MapLod(Span<const LodInput> inputs, int32 source) noexcept {
-    if (inputs.IsEmpty() || source <= 0) {
-        return 0;
-    }
-
-    for (usize index = 0; index < inputs.Size(); ++index) {
-        if (static_cast<int32>(inputs[index].sourceLod) >= source) {
-            return static_cast<int32>(index);
-        }
-    }
-
-    return static_cast<int32>(inputs.Size() - 1);
-}
-
 // 에디터 객체의 renderData·플랫폼 값을 되돌린다(할당하지 않는다). 에디터 패키지의 renderData는 늘
 // 비어 있으므로(쿠킹 데이터 — 임포트가 비운다) 빈 값으로 되돌린다(텍스처 platformData와 같다).
 Result<void> Restore(ObjectRegistry& registry, const ObjectAccessContext& access,
@@ -398,68 +269,34 @@ Result<void> Restore(ObjectRegistry& registry, const ObjectAccessContext& access
 } // namespace
 
 Result<void> WriteStaticMeshNuggetHeader(const StaticMeshRenderData& renderData,
-                                         Span<const StaticMeshCookWarning> warnings,
+                                         Span<const MeshCookWarning> warnings,
                                          Array<uint8>& out) noexcept {
     out.Clear();
-    if (renderData.lods.Size() > StaticMeshMaxLods || warnings.Size() > HeaderMaxWarnings) {
+    if (renderData.lods.Size() > StaticMeshMaxLods ||
+        warnings.Size() > mesh_cook::HeaderMaxWarnings) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     ByteWriter writer(out);
     writer.WriteU32LE(StaticMeshNuggetHeaderVersion);
     writer.WriteU32LE(static_cast<uint32>(renderData.lods.Size()));
-    PutF64(writer, renderData.box.min.x);
-    PutF64(writer, renderData.box.min.y);
-    PutF64(writer, renderData.box.min.z);
-    PutF64(writer, renderData.box.max.x);
-    PutF64(writer, renderData.box.max.y);
-    PutF64(writer, renderData.box.max.z);
-    PutF64(writer, renderData.sphereRadius);
-    writer.WriteU32LE(static_cast<uint32>(warnings.Size()));
-    for (const StaticMeshCookWarning& warning : warnings) {
-        writer.WriteU32LE(static_cast<uint32>(warning.code));
-        writer.WriteU32LE(warning.lod);
-    }
-
+    mesh_cook::PutHeaderBounds(writer, renderData.box, renderData.sphereRadius);
+    mesh_cook::PutHeaderWarnings(writer, warnings);
     for (const StaticMeshRenderLod& lod : renderData.lods) {
-        if (lod.texCoords.Size() > MeshMaxTexCoordStreams ||
-            lod.sections.Size() > HeaderMaxSections) {
+        if (!mesh_cook::FitsHeaderLod(lod)) {
             out.Clear();
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        writer.WriteU32LE(lod.vertexCount);
-        writer.WriteU64LE(lod.data.rawBytes);
-        PutHeaderStream(writer, lod.positions);
-        PutHeaderStream(writer, lod.tangentBasis);
-        writer.WriteU32LE(static_cast<uint32>(lod.texCoords.Size()));
-        for (const MeshRenderStream& stream : lod.texCoords) {
-            PutHeaderStream(writer, stream);
-        }
-
-        PutHeaderStream(writer, lod.colors);
-        writer.WriteU32LE(lod.indexFormat);
-        PutHeaderStream(writer, lod.indices);
-        writer.WriteU32LE(static_cast<uint32>(lod.sections.Size()));
-        for (const MeshRenderSection& section : lod.sections) {
-            writer.WriteU32LE(section.materialIndex);
-            writer.WriteU32LE(section.firstIndex);
-            writer.WriteU32LE(section.triangleCount);
-            writer.WriteU32LE(section.minVertex);
-            writer.WriteU32LE(section.maxVertex);
-            writer.WriteU8(section.enableCollision ? 1 : 0);
-            writer.WriteU8(section.castShadow ? 1 : 0);
-            writer.WriteU8(section.visibleInRayTracing ? 1 : 0);
-            writer.WriteU8(section.affectDistanceFieldLighting ? 1 : 0);
-            writer.WriteU8(section.forceOpaque ? 1 : 0);
-        }
+        mesh_cook::PutHeaderLodStreams(writer, lod);
+        mesh_cook::PutHeaderLodIndices(writer, lod);
     }
 
     return writer.Status();
 }
 
 Result<void> ReadStaticMeshNuggetHeader(Span<const uint8> bytes, StaticMeshRenderData& out,
-                                        Array<StaticMeshCookWarning>& warnings) noexcept {
+                                        Array<MeshCookWarning>& warnings) noexcept {
     out.lods.Clear();
     warnings.Clear();
     ByteReader reader(bytes);
@@ -468,36 +305,13 @@ Result<void> ReadStaticMeshNuggetHeader(Span<const uint8> bytes, StaticMeshRende
     }
 
     const uint32 lodCount = reader.ReadU32LE();
-    // 성분은 차례로 읽는다(함수 인자 평가 순서는 정해져 있지 않다).
-    double bounds[7] = {};
-    for (double& component : bounds) {
-        component = reader.ReadF64LE();
-    }
-
-    out.box.min = Vec3d(bounds[0], bounds[1], bounds[2]);
-    out.box.max = Vec3d(bounds[3], bounds[4], bounds[5]);
-    out.sphereRadius = bounds[6];
-    const uint32 warningCount = reader.ReadU32LE();
-    if (lodCount > StaticMeshMaxLods || warningCount > HeaderMaxWarnings ||
-        bytes.Size() - HeaderFixedBytes < usize{warningCount} * HeaderWarningBytes) {
+    mesh_cook::ReadHeaderBounds(reader, out.box, out.sphereRadius);
+    if (lodCount > StaticMeshMaxLods) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto reserved = warnings.TryReserve(warningCount); !reserved) {
-        return reserved;
-    }
-
-    for (uint32 index = 0; index < warningCount; ++index) {
-        const uint32 code = reader.ReadU32LE();
-        const uint32 lod = reader.ReadU32LE();
-        const auto value = static_cast<AssetDiagnosticCode>(code);
-        if (code > NumericLimits<uint16>::Max() || value == AssetDiagnosticCode::None ||
-            StringView(AssetDiagnosticName(value)) == StringView("Unknown") || lod >= lodCount) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        (void)warnings.TryPushBack(
-            StaticMeshCookWarning{static_cast<AssetDiagnosticCode>(code), lod});
+    if (auto read = mesh_cook::ReadHeaderWarnings(reader, lodCount, warnings); !read) {
+        return read;
     }
 
     if (auto reserved = out.lods.TryReserve(lodCount); !reserved) {
@@ -505,62 +319,13 @@ Result<void> ReadStaticMeshNuggetHeader(Span<const uint8> bytes, StaticMeshRende
     }
 
     for (uint32 index = 0; index < lodCount; ++index) {
-        if (reader.Remaining() < HeaderLodBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
         StaticMeshRenderLod lod(out.lods.GetAllocator());
-        lod.vertexCount = reader.ReadU32LE();
-        lod.data.rawBytes = reader.ReadU64LE();
-        ReadHeaderStream(reader, lod.positions);
-        ReadHeaderStream(reader, lod.tangentBasis);
-        const uint32 texCoords = reader.ReadU32LE();
-        if (texCoords > MeshMaxTexCoordStreams) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (auto read = mesh_cook::ReadHeaderLodStreams(reader, lod); !read) {
+            return read;
         }
 
-        for (uint32 stream = 0; stream < texCoords; ++stream) {
-            MeshRenderStream value;
-            ReadHeaderStream(reader, value);
-            if (auto pushed = lod.texCoords.TryPushBack(value); !pushed) {
-                return pushed;
-            }
-        }
-
-        ReadHeaderStream(reader, lod.colors);
-        lod.indexFormat = reader.ReadU32LE();
-        ReadHeaderStream(reader, lod.indices);
-        const uint32 sections = reader.ReadU32LE();
-        if (sections > HeaderMaxSections ||
-            reader.Remaining() < usize{sections} * HeaderSectionBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        if (auto reserved = lod.sections.TryReserve(sections); !reserved) {
-            return reserved;
-        }
-
-        for (uint32 section = 0; section < sections; ++section) {
-            MeshRenderSection value;
-            value.materialIndex = reader.ReadU32LE();
-            value.firstIndex = reader.ReadU32LE();
-            value.triangleCount = reader.ReadU32LE();
-            value.minVertex = reader.ReadU32LE();
-            value.maxVertex = reader.ReadU32LE();
-            uint8 flags[5] = {};
-            for (uint8& flag : flags) {
-                flag = reader.ReadU8();
-                if (flag > 1) {
-                    return Result<void>::Failure(ErrorCode::InvalidArgument);
-                }
-            }
-
-            value.enableCollision = flags[0] != 0;
-            value.castShadow = flags[1] != 0;
-            value.visibleInRayTracing = flags[2] != 0;
-            value.affectDistanceFieldLighting = flags[3] != 0;
-            value.forceOpaque = flags[4] != 0;
-            (void)lod.sections.TryPushBack(value);
+        if (auto read = mesh_cook::ReadHeaderLodIndices(reader, lod); !read) {
+            return read;
         }
 
         (void)out.lods.TryPushBack(Move(lod));
@@ -631,7 +396,7 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
 
     // 2. LOD 입력·키·조회·(미적중이면) 원본 로드 — 읽기 Borrow 안.
     Array<LodInput> inputs(allocator);
-    Array<StaticMeshCookWarning> selection(allocator);
+    Array<MeshCookWarning> selection(allocator);
     Array<NameLease> slotLeases(allocator);
     Array<StringView> slots(allocator);
     Array<MeshSource> sources(allocator);
@@ -686,8 +451,8 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
                 input.build.recomputeTangents = false;
             } else if (!lod.hasSource || generated) {
                 // 뺀 LOD·축소 없이 빌드한 LOD의 경고다(쿠킹 LOD 번호 — 뺀 LOD는 다음 쿠킹 LOD).
-                const StaticMeshCookWarning warning{AssetDiagnosticCode::UnsupportedSetting,
-                                                    static_cast<uint32>(inputs.Size())};
+                const MeshCookWarning warning{AssetDiagnosticCode::UnsupportedSetting,
+                                              static_cast<uint32>(inputs.Size())};
                 if (!selection.TryPushBack(warning)) {
                     return CookFail(context, AssetDiagnosticCode::None, ErrorCode::OutOfMemory);
                 }
@@ -708,44 +473,27 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
         }
 
         // 마지막 LOD를 뺀 경고는 마지막 쿠킹 LOD에 둔다.
-        for (StaticMeshCookWarning& warning : selection) {
+        for (MeshCookWarning& warning : selection) {
             if (warning.lod >= inputs.Size()) {
                 warning.lod = static_cast<uint32>(inputs.Size() - 1);
             }
         }
 
-        for (usize index = 0; index < mesh.materialSlots.Size(); ++index) {
-            auto lease = names->Acquire(mesh.materialSlots[index].importedSlotName);
-            if (!lease) {
-                return CookFail(context, AssetDiagnosticCode::None, lease.Error());
-            }
-
-            const StringView view = lease.Value().View();
-            if (!slotLeases.TryPushBack(Move(lease.Value())) || !slots.TryPushBack(view)) {
-                return CookFail(context, AssetDiagnosticCode::None, ErrorCode::OutOfMemory);
-            }
+        if (auto acquired =
+                mesh_cook::AcquireSlotNames(*names, mesh.materialSlots, slotLeases, slots);
+            !acquired) {
+            return CookFail(context, AssetDiagnosticCode::None, acquired.Error());
         }
 
         // 섹션 정보(빌드 입력 — 표에 없으면 슬롯 대응, 패킹 플래그 — 표에 없으면 기본값).
         for (const LodInput& input : inputs) {
-            const uint32 groups = InputData(mesh, input).polygonGroupCount;
             Array<MeshBuildSectionInfo> build(allocator);
             Array<MeshSectionInfo> pack(allocator);
-            if (!build.TryReserve(groups) || !pack.TryReserve(groups)) {
-                return CookFail(context, AssetDiagnosticCode::None, ErrorCode::OutOfMemory);
-            }
-
-            for (uint32 section = 0; section < groups; ++section) {
-                const SectionChoice choice =
-                    ChooseSection(mesh.sectionInfo.View(), input.sourceLod, section);
-                MeshBuildSectionInfo info;
-                info.castShadow = choice.info.castShadow;
-                if (choice.found && choice.info.materialIndex >= 0) {
-                    info.materialIndex = static_cast<uint32>(choice.info.materialIndex);
-                }
-
-                (void)build.TryPushBack(info);
-                (void)pack.TryPushBack(choice.info);
+            if (auto chosen = mesh_cook::ChooseSections(mesh.sectionInfo.View(), input.sourceLod,
+                                                        InputData(mesh, input).polygonGroupCount,
+                                                        build, pack);
+                !chosen) {
+                return CookFail(context, AssetDiagnosticCode::None, chosen.Error());
             }
 
             if (!buildSections.TryPushBack(Move(build)) || !packSections.TryPushBack(Move(pack))) {
@@ -836,7 +584,7 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
 
             for (const MeshDiagnostic& warning : built.warnings) {
                 if (auto pushed = builtMesh.warnings.TryPushBack(
-                        StaticMeshCookWarning{warning.code, static_cast<uint32>(index)});
+                        MeshCookWarning{warning.code, static_cast<uint32>(index)});
                     !pushed) {
                     return CookFail(context, AssetDiagnosticCode::None, pushed.Error());
                 }
@@ -887,22 +635,10 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
 
     // 4. 경고(쿠킹 LOD 순서 — LOD마다 입력 선택 경고, 그다음 빌드 경고. 빌드 경고는 적중이면 머리의
     // 것이다).
-    for (uint32 lod = 0; lod < cooked.lods.Size(); ++lod) {
-        for (const StaticMeshCookWarning& warning : selection) {
-            if (warning.lod == lod) {
-                if (auto warned = CookWarn(context, warning.code, lod); !warned) {
-                    return warned;
-                }
-            }
-        }
-
-        for (const StaticMeshCookWarning& warning : cooked.warnings) {
-            if (warning.lod == lod) {
-                if (auto warned = CookWarn(context, warning.code, lod); !warned) {
-                    return warned;
-                }
-            }
-        }
+    if (auto warned = mesh_cook::ReportWarnings(context, static_cast<uint32>(cooked.lods.Size()),
+                                                selection.View(), cooked.warnings.View());
+        !warned) {
+        return warned;
     }
 
     // 5. 화면 크기(너겟 밖 — 5.5.2절 8).
@@ -931,9 +667,9 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
         }
 
         StaticMesh& mesh = *value.Value();
-        mesh.minLod.defaultValue = MapLod(inputs.View(), minLod);
+        mesh.minLod.defaultValue = mesh_cook::MapLod(inputs.View(), minLod);
         mesh.numStreamedLods.defaultValue = numStreamed;
-        mesh.lodForCollision = MapLod(inputs.View(), lodForCollision);
+        mesh.lodForCollision = mesh_cook::MapLod(inputs.View(), lodForCollision);
         StaticMeshRenderData& data = mesh.renderData;
         data.lods.Clear();
         data.box = cooked.box;
@@ -998,24 +734,7 @@ Result<void> StaticMeshCookProcessor::Cook(CookContext& context) const noexcept 
         (void)values.TryPushBack(Move(part));
     }
 
-    NuggetCachePut put;
-    put.bucket = NuggetBucketMesh;
-    put.key = sccKey;
-    put.values = values.View();
-    const AssetId members[1] = {assetId};
-    const NuggetCachePutResult stored = nuggets->PutScc(Span<const AssetId>(members), put);
-    if (stored.status == NuggetStatus::Conflict) {
-        if (auto warned = CookWarn(context, AssetDiagnosticCode::NuggetConflict, 0); !warned) {
-            return warned;
-        }
-    }
-
-    if (stored.failed && nuggets->IsRequired()) {
-        return CookFail(context, AssetDiagnosticCode::None,
-                        stored.error != ErrorCode::None ? stored.error : ErrorCode::IoError);
-    }
-
-    return Result<void>::Success();
+    return mesh_cook::PutNuggets(context, sccKey, assetId, values.View());
 }
 
 Result<void> RegisterStaticMeshCookProcessors(void* state, CookProcessorTable& table) noexcept {

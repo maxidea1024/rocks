@@ -572,11 +572,11 @@ TEST(StaticMeshCook_NuggetHeader) {
     REQUIRE(data.lods.TryPushBack(Move(lod)));
     data.box = Box<double>(Vec3d(-1.0, -2.0, -3.0), Vec3d(1.0, 2.0, 3.0));
     data.sphereRadius = 4.0;
-    const StaticMeshCookWarning warnings[1] = {{AssetDiagnosticCode::MaterialSlotFallback, 0}};
+    const MeshCookWarning warnings[1] = {{AssetDiagnosticCode::MaterialSlotFallback, 0}};
     Array<uint8> header(allocator);
-    REQUIRE(WriteStaticMeshNuggetHeader(data, Span<const StaticMeshCookWarning>(warnings), header));
+    REQUIRE(WriteStaticMeshNuggetHeader(data, Span<const MeshCookWarning>(warnings), header));
     StaticMeshRenderData read(allocator);
-    Array<StaticMeshCookWarning> readWarnings(allocator);
+    Array<MeshCookWarning> readWarnings(allocator);
     REQUIRE(ReadStaticMeshNuggetHeader(header.View(), read, readWarnings));
     REQUIRE(read.lods.Size() == 1 && readWarnings.Size() == 1);
     CHECK(readWarnings[0].code == AssetDiagnosticCode::MaterialSlotFallback);
@@ -589,7 +589,7 @@ TEST(StaticMeshCook_NuggetHeader) {
         CHECK(broken.TryAppend(header.View()));
         mutate(broken);
         StaticMeshRenderData out(allocator);
-        Array<StaticMeshCookWarning> outWarnings(allocator);
+        Array<MeshCookWarning> outWarnings(allocator);
         return ReadStaticMeshNuggetHeader(broken.View(), out, outWarnings).Error() ==
                ErrorCode::InvalidArgument;
     };
