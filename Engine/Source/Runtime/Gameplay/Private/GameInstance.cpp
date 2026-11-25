@@ -182,8 +182,10 @@ Result<void> GameInstance::LoginPlayer(World& world, ObjectHandle player) noexce
     const ObjectHandle director = gameplay->Director();
     const input::InputState* input = nullptr;
     uint32 gamepad = 0;
-    auto read = WithLocalPlayer(player, [&input, &gamepad](LocalPlayer& local) noexcept {
+    input::InputUserSettings* settings = nullptr;
+    auto read = WithLocalPlayer(player, [&input, &gamepad, &settings](LocalPlayer& local) noexcept {
         input = local.input_;
+        settings = &local.inputSettings_;
         // 패드 번호는 ControllerId다(음수는 0 — Docs/Design/InputActions 5.1절).
         gamepad = local.ControllerId() > 0 ? static_cast<uint32>(local.ControllerId()) : 0;
     });
@@ -200,8 +202,8 @@ Result<void> GameInstance::LoginPlayer(World& world, ObjectHandle player) noexce
 
     const ObjectHandle created = controller.Value();
     auto linked = world.With<PlayerController>(
-        created, [player, input, gamepad](PlayerController& value) noexcept {
-            value.SetPlayer(player, input, gamepad);
+        created, [player, input, gamepad, settings](PlayerController& value) noexcept {
+            value.SetPlayer(player, input, gamepad, settings);
         });
     if (!linked) {
         return linked;

@@ -313,10 +313,11 @@ PlayerController::PlayerController(Allocator& allocator) noexcept
 PlayerController::~PlayerController() noexcept = default;
 
 void PlayerController::SetPlayer(ObjectHandle localPlayer, const input::InputState* source,
-                                 uint32 gamepad) noexcept {
+                                 uint32 gamepad, input::InputUserSettings* userSettings) noexcept {
     localPlayer_ = localPlayer;
     inputSource_ = source;
     gamepad_ = gamepad;
+    actionInput_.SetUserSettings(userSettings);
     playerInput_ = input::InputState();
     gestures_.Reset();
 }

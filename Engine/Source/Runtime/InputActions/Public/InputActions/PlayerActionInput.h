@@ -31,6 +31,8 @@
 
 namespace rocks::input {
 
+class InputUserSettings;
+
 // 로컬 플레이어 하나의 컨텍스트 목록과 액션 상태다(UE UEnhancedPlayerInput + 입력 subsystem의
 // 컨텍스트 목록 — Docs/Design/InputActions 4절). 컨텍스트는 InputContextBundle 사본으로 넣고 id로
 // 가리킨다(2.7절). 추가·제거는 다시 만들기를 예약하고 ApplyPendingChanges(Evaluate가 처음에
@@ -75,8 +77,18 @@ public:
 
     bool HasContext(const Guid& contextId) const noexcept;
 
-    // 활성 키 프로필 id다(빈 값 = 없음). 바꾸면 다시 만들기를 예약한다. 할당 실패는
-    // OutOfMemory(그대로).
+    // 사용자 설정(리바인딩 — 5.2절)을 붙인다(null이면 뗀다). 붙어 있으면 활성 프로필은 설정의 현재
+    // 프로필이고, 리바인딩 가능한 바인딩은 사용자 키로 바뀌며, 설정의 Revision이 바뀌면 다음
+    // ApplyPendingChanges가 다시 만든다. notifyUserSettings 옵션의 컨텍스트는 설정에 등록·해제한다.
+    // settings는 붙어 있는 동안 살아 있어야 한다. 다시 만들기를 예약한다.
+    void SetUserSettings(InputUserSettings* settings) noexcept;
+
+    InputUserSettings* UserSettings() const noexcept {
+        return settings_;
+    }
+
+    // 활성 키 프로필 id다(빈 값 = 없음 — 사용자 설정이 없을 때 쓴다). 바꾸면 다시 만들기를
+    // 예약한다. 할당 실패는 OutOfMemory(그대로).
     Result<void> SetKeyProfile(StringView profileId) noexcept;
 
     bool HasPendingRebuild() const noexcept {
@@ -278,6 +290,9 @@ private:
     Array<ChordDependency> chordDependencies_;
     // Evaluate 뒤 FinishDispatch를 아직 안 했다.
     bool dispatchPending_ = false;
+    InputUserSettings* settings_ = nullptr;
+    // 마지막 다시 만들기가 본 설정 Revision이다.
+    uint64 settingsRevision_ = 0;
     String profile_;
     uint64 nextOrder_ = 0;
     bool rebuildPending_ = false;
