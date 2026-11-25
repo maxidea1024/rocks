@@ -47,3 +47,10 @@ UI 코드 일부가 9절 순서(UT0·CB2 선행)보다 먼저, 글꼴 시스템�
 | UW7 | 창·입력 계약: 영역 판정은 게시한 사각형으로 backend가 판정, 스레드 계약 명시, DPI(PW2), pull형 `TextInputContext`(PW3), `WaitForEvents`를 펌프 수준으로, 전체 화면 명시 API, 이벤트 문자열은 프레임 버퍼 offset | Win64 동작 유지, Android·mac 구현 가능성 문서 대조 |
 | UW8 | Element 동작을 UE와 맞춤: 주입 시계, 비활성 hit·Hidden 속성·navigation 위치, 그리기 중 hit grid 등록, Element slot·CB2, StyleSet(4.2절 UE 기본값) | UV2·UV3 시험 |
 | UW9 | Widget 층: UD12 이름, 텍스트 편집 Element를 UiFramework로, UiScreens 입력 설정 적용, 소멸자 사용자 코드 제거. 손으로 쓴 속성 표는 UT0 CU 지정자 뒤 교체(그때까지 임시) | UV7 음성 시험 |
+
+**UW3 하위 단계.** UW3a 둥근 상자 그리기, UW3b `StyleSet`·스타일 구조체·기본 테마와 에디터 스타일 값(14장), UW3c 위젯의 박힌 색·크기를 스타일 조회로 바꿈.
+
+**UW3a 둥근 상자(UE `FSlateRoundedBoxBrush`, 14장 5절).**
+- `Brush`에 `BrushMode::RoundedBox`와 외곽선 설정(모서리 반경 4개 — 왼쪽 위·오른쪽 위·오른쪽 아래·왼쪽 아래 순, 색, 두께, 반경 방식 Fixed·HalfHeight)을 더한다. 반경을 주지 않으면 HalfHeight(높이의 절반 — 알약·원)다(UE와 같다).
+- `PaintBox`에 둥근 상자 값(로컬 크기, 외곽선 두께·색, 반경)을 싣는다. `DrawBatch`는 이 값이 다르면 그리기 명령을 나눈다(UE도 ShaderParams가 배치 키라 크기·반경·두께가 다른 상자는 따로 그린다). 채움색은 정점 색, UV는 상자 안 로컬 0..1이다.
+- 셰이더는 엔진 셰이더 `/Engine/Private/Ui/UiRoundedBox.rsf`(그리기 상수: 화면 변환, (0, 두께, 크기 x, 크기 y), 반경 4, 외곽선 색)다. 식은 UE `SlateShaderCommon.ush` 84–119행과 같다: 외곽선은 상자 안쪽, 테두리 AA 반폭 1.0·채움 0.5(로컬 단위), straight 알파 출력과 SrcAlpha 블렌드. 텍스처를 곱한 둥근 상자(UE는 브러시 텍스처를 곱한다)는 쓰는 곳이 생기면 더한다.
