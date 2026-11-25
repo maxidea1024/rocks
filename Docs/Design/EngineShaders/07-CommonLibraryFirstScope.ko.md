@@ -11,6 +11,8 @@
 - **실수 규칙.** 비정규수에 기대지 않는다(GPU가 0으로 내릴 수 있다). 0 나눗셈·음수 제곱근 가능성이 있는 곳은 `Safe*` 함수나 이름 있는 하한 상수를 쓴다. NaN·Inf 입력의 결과는 함수 주석에 적고, 정의하지 않은 입력은 시험하지 않는다.
 - **결정성.** 정수·비트 함수(해시·패킹·Morton·저불일치 수열의 정수부)는 모든 형식에서 bit 단위로 같아야 한다. 실수 함수는 허용 오차 안에서 같아야 한다(8.3절).
 - **근거 표기.** 함수 머리 주석에 공개 문헌(4장 각 영역)과 정의역·치역·오차 상한을 적는다.
+- **이름(개정 3).** 라이브러리 함수·구조체·상수는 3.5절 이름 그대로 쓰고 `Rocks` 같은 접두를 붙이지 않는다(엔진 밖 셰이더가 include하는 공개 API — 이름 충돌은 플러그인 쪽이 피한다, UE 라이브러리 함수도 접두가 없다). 예외는 RB 18.5절에서 먼저 넣은 `Color/FilmicToneCurve.rsh`의 `Rocks*` 이름으로, `TonemapPass.rsf`·`TextureInspector.rsf`가 쓰므로 그대로 둔다. 그 파일의 원색·순응 행렬은 `Color/ColorSpaces.rsh`·`Color/ChromaticAdaptation.rsh` 상수로 바꿔 같은 행렬을 두 벌 두지 않는다(공용 유틸리티 중복 금지).
+- **행렬 순서.** 색 행렬은 RGB 열 벡터 기준 행 나열로 두고 `mul(M, c)`로 쓴다(색 공간 문헌·SMPTE RP 177 표기와 같다 — 기하 행렬의 행 벡터 `mul(v, M)` 규약(3.4절)과 따로다). 기하 함수(`Math/MatrixMath.rsh`·`Math/Quaternion.rsh`)는 3.4절 행 벡터 규약이다.
 
 ### 7.2 A01·`Shared`
 
@@ -67,12 +69,15 @@ SL1로 옮긴 CS 전용 API(참고): `Common/ComputeDispatch.rsh`(`LinearThreadI
 | `Shading/SurfaceAttributes.rsh` | RN 14.1절 `SurfaceAttributes` HLSL 구조체와 `DefaultSurfaceAttributes()`(필드 기본값: specular 0.5 등) | 기본값 = RN 14.1절 표, 필드 순서·타입이 RN 정의와 같음(C++ 쪽 `RenderData` 정의와 `Shared` 대조는 SL2) |
 | `Shading/SurfaceShading.rsh` | `SurfaceAttributes` → `ShadingParameters`(확산 색·F0·F90·α), shading model 분기 골격(`Unlit`·`DefaultLit`만 동작, 나머지는 `#error`가 아닌 기본값 + 진단 정의) | 금속 0·1, specular 0.5 → F0 0.04 등 표 값 |
 
-### 7.6 시험 셰이더와 실행 위치
+### 7.6 시험 셰이더와 실행 위치(개정 3 — 결정 SLD19–SLD21)
 
-- 시험 셰이더는 엔진 내장 라이브러리에 넣지 않는다. 시험 runner(EngineTests)의 셰이더 폴더를 시험 전용 플러그인 루트(`/Plugin/EngineShaderTests`)로 mount해 컴파일한다(SS SC2 mount 규칙). 쿠킹 대상이 아니므로 Development 필요 시 컴파일(SS SC12)로 만든다.
-- 시험 전용 셰이더(`ShadingTestKernels.rsf`와 영역별 probe)는 이 루트 아래 `/Plugin/EngineShaderTests/<영역>/`에 둔다(엔진 셰이더 트리 `Engine/Shaders`에 두지 않는다 — 결정 SLD16).
-- PS probe(SL0): 전체 화면 삼각형(A18 `FullscreenTriangle.rsf` — SL0에 VS만 앞당겨 둔다)으로 W×H `RGBA32Float`(또는 `R32Uint`) 타깃에 시험 사례 하나당 픽셀 하나를 쓴다. 사례가 많으면 2D로 배치하고 폭은 16,384 이하로 둔다. 장치 한도(`DeviceCaps` — 최소 보장은 Vulkan 4,096, GLES 3.2 2,048)가 더 작으면 그 폭으로 나눠 돈다. 7.3절의 큰 표본(2²⁰)은 1024×1024라 모든 backend에서 한 번에 돈다. 입력은 시험 사례 번호로 결정적으로 만들거나 작은 상수 표로 준다. 결과는 `Utility/TextureReadback.rsf` 경로로 읽는다. compute probe는 GX3·GX4(dispatch) 뒤 SL1에서 같은 시험을 CS로도 돌리고, CS 전용 API(`ComputeDispatch`·`WaveOperations`)는 그때 시험한다.
-- 실행 backend: D3D12 하드웨어·WARP, Vulkan, GLES 미리보기(Sandbox self-test와 같은 대상 — SS 16절 SH2). Vulkan·GLES가 CI에서 NOT RUN이면 로컬 결과를 기록한다.
+- 시험 셰이더는 엔진 내장 라이브러리에 넣지 않는다. 시험 셰이더 폴더 `Programs/Sandbox/EngineShaderTests`를 시험 전용 플러그인 루트(`/Plugin/EngineShaderTests`)로 mount해 컴파일한다(SS SC2 mount 규칙, SLR2). 쿠킹 대상이 아니므로 Development 공급자(SS SSD16·SSD17)로 만든다.
+- 시험 전용 셰이더는 이 루트 아래 `/Plugin/EngineShaderTests/<영역>/`에 둔다(엔진 셰이더 트리 `Engine/Shaders`에 두지 않는다 — 결정 SLD16): `Common/IncludeClosure.rsf`(7.2–7.5절 파일 전부를 include하는 VS·PS·CS 엔트리 — 완료 기준 1), `Common/ProbeCommon.rsh`(probe 상수·사례 번호·시험 입력 생성), `Math/MathProbes.rsf`, `Color/ColorProbes.rsf`, `Shading/ShadingTestKernels.rsf`.
+- **실행 위치(SLD19).** 시험은 둘로 나눈다. (C) 컴파일 행렬은 EngineTests(`Engine/Source/Developer/ShaderCompiler/Tests/EngineShaderCompileMatrixTests.cpp`)가 실제 워커로 모든 시험 엔트리를 형식 정의 전부(`D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`VULKAN_ANDROID`·`GLES31_PC`·`GLES31_ANDROID`·`METAL_SM5`·`METAL_IOS`)에 컴파일한다. 도구가 없는 형식(Windows의 Metal)은 SKIP과 사유다. (N)·(G)·(S)·(P) GPU probe는 실제 장치가 있는 Sandbox self-test(`EngineShaderSelfTest.cpp`)가 D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES(ES context·GL core context)·Vulkan(하드웨어·소프트웨어 ICD)에서 돌리고 CPU 기준 구현(`EngineShaderReference*.cpp`, 시험 쪽 `double` 구현 — 8.2절)과 대조한 뒤 장치 사이 결과도 대조한다(8.5절). EngineTests에는 실제 GPU 장치 시험이 없으므로(장치 계약 시험은 Sandbox self-test 몫 — SS 5절 P11·S4) GPU probe는 Sandbox에 둔다. `Sandbox --engine-shader-self-test`는 이 검사만 돈다(반복 검증용, `--self-test`에도 들어 있다).
+- PS probe(SL0): 전체 화면 삼각형(A18 `FullscreenTriangle.rsf`, RB 11.4절 2항에서 이미 넣었다)으로 W×H `RGBA32Float`(또는 `R32Uint`) 타깃에 시험 사례 하나당 픽셀 하나를 쓴다. 사례가 많으면 2D로 배치하고 폭은 16,384 이하로 둔다. 장치 한도(`DeviceCaps.limits.textureSize2D` — 최소 보장은 Vulkan 4,096, GLES 3.2 2,048)가 더 작으면 그 폭으로 나눠 돈다. 7.3절의 큰 표본(2²⁰)은 1024×1024라 모든 backend에서 한 번에 돈다. 입력은 시험 사례 번호에서 시험 전용 정수 생성기(`ProbeCommon.rsh`·CPU 쪽 같은 식 — 라이브러리 해시와 독립, SLD20)로 만들거나 작은 상수 표로 준다. 생성기는 정수 연산과 24 bit 가수 변환만 써서 GPU·CPU 입력이 bit 단위로 같다.
+- **readback(SLD21).** 결과는 Graphics `Device::ReadTexture`로 읽는다. `RGBA32Float`·`R32Uint` 렌더 타깃은 네 backend 모두 ReadTexture가 그대로 읽으므로(RB GX8, A0-G) 변환 셰이더가 필요 없다. `Utility/TextureReadback.rsf`(표본 불가·readback 불가 형식을 읽을 수 있는 버퍼로 바꾸는 셰이더)는 그런 형식이 필요한 SL1로 옮긴다(4.18절).
+- compute probe는 GX3·GX4(dispatch) 뒤 SL1에서 같은 시험을 CS로도 돌리고, CS 전용 API(`ComputeDispatch`·`WaveOperations`)는 그때 시험한다.
+- 실행 backend 결과가 CI에서 NOT RUN이면(Vulkan·GLES) 로컬 결과를 기록한다(7.8절).
 
 ### 7.7 SL0 완료 기준
 

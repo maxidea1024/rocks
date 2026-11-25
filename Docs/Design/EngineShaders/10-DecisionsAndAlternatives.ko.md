@@ -28,6 +28,9 @@
 | SLD16 | 시험 셰이더는 엔진 셰이더 트리(`Engine/Shaders`) 밖, 시험 전용 플러그인 루트(`/Plugin/EngineShaderTests`)에 두고 엔진 내장 셰이더 라이브러리(SS 12.3절 쿠킹 산출물)에 넣지 않는다 | 출시 라이브러리 크기·쿠킹 시간, 시험 셰이더의 의도적 오류 fixture | 7.6 |
 | SLD17 | morph delta 누적은 정수 고정소수점 원자 합(32-bit `InterlockedAdd`)으로 한다. 배율·범위는 이름 있는 상수, 넘침 없음은 쿠킹 때 morph 최대 delta로 검증한다 | 정수 덧셈은 순서와 무관하게 결정적이라 GLES 포함 모든 형식·dispatch 순서에서 bit 일치한다. float 원자 합은 형식마다 지원이 다르고 순서에 따라 결과가 달라진다 | 4.22 |
 | SLD18 | VS·PS는 UAV를 쓰지 않는다(SS 7.2절, 형식 정의 `uavStages` = `compute`). PS가 쓰는 디버그 기능(GPU assert·print·quad overdraw)은 "디버그 전용 PS UAV" 형식 기능(SLR12)이 있는 형식·개발 빌드에서만 기록하고, 없는 형식(D3D11·GLES 포함)에서는 no-op이다. CS 경로는 그대로다 | SS·RN의 금지 규칙을 디버그 때문에 일반 규칙으로 풀지 않는다. 출시 셰이더에는 영향이 없다 | 3.2, 4.1, 4.20 |
+| SLD19 | (개정 3) 시험을 둘로 나눈다. 컴파일 행렬(C)은 EngineTests가 실제 워커로 형식 정의 전부에 컴파일하고, GPU probe(N·G·S·P)는 실제 장치가 있는 Sandbox self-test가 여덟 장치(D3D12·WARP, D3D11·WARP, OpenGL ES 두 context, Vulkan 하드웨어·소프트웨어)에서 돌린다. 시험 셰이더 폴더는 `Programs/Sandbox/EngineShaderTests` 하나이고 두 runner가 `/Plugin/EngineShaderTests`로 mount한다. CPU 기준 구현은 Sandbox 쪽 `EngineShaderReference*.cpp`다 | EngineTests에는 GPU 장치 시험이 없고(장치 계약은 Sandbox self-test 몫 — SS P11·S4), Sandbox self-test는 장치마다 그 형식 하나만 컴파일하므로 `GLES31_ANDROID`·`VULKAN_ANDROID`·Metal 컴파일은 워커를 직접 부르는 EngineTests가 맞다 | 7.6 |
+| SLD20 | (개정 3) probe 입력은 시험 전용 정수 생성기(사례 번호·흐름 번호 → 32 bit, 곱셈·xorshift만)와 24 bit 가수 변환으로 만든다. 라이브러리 해시(`IntegerHash.rsh`)를 입력 생성에 쓰지 않는다 | 시험 대상 함수로 입력을 만들면 그 함수의 오류가 입력에 섞인다(SLD10과 같은 이유). 정수 연산만 쓰므로 GPU·CPU 입력이 bit 단위로 같고 CPU 기준은 같은 입력을 `double`로 계산한다 | 7.6, 8.4 |
+| SLD21 | (개정 3) SL0 probe 결과는 `Device::ReadTexture`로 `RGBA32Float`·`R32Uint` 렌더 타깃을 바로 읽는다. `Utility/TextureReadback.rsf`는 SL1로 옮긴다 | 두 형식은 네 backend가 모두 렌더 타깃·readback을 지원한다(A0-G, RB GX8). 변환 셰이더는 readback 불가 형식(블록 압축·GLES의 비색 형식)에만 필요하다 | 7.6, 4.18 |
 
 ### 10.2 버린 대안
 
@@ -43,4 +46,6 @@
 | tile·offset 큰 월드 좌표 함께 두기 | SLD6. 두 방식을 함께 두면 함수가 두 벌이 된다 |
 | 공개 셰이더 SDK(예: MIT 라이선스 후처리 모음)를 ThirdParty로 들여 기본 영역을 채우기 | 바인딩 규약(SS 7.2절)·HLSL 2018·GLES 제약·좌표 규약에 맞추는 수정 비용이 직접 구현보다 크고, 출처가 섞인다. 외부 SDK가 본질인 업스케일러(FSR·DLSS·XeSS)는 EIP 12절 adapter로 따로 둔다 |
 | 큰 기능(Nanite·Lumen 등)도 지금 상세 설계 | 사용자 결정(후속). 영역·대응표만 남긴다 |
+| (개정 3) GPU probe를 EngineTests에 두고 장치를 직접 만들기 | EngineTests는 CI에서 GPU 없이 돌고, 여덟 장치 생성·공급자·셰이더 집합 연결이 Sandbox self-test에 이미 있다. 같은 연결을 EngineTests에 다시 두면 장치 준비 코드가 두 벌이 된다 |
+| (개정 3) probe 입력을 라이브러리 `HashPcg`로 만들기 | SLD20. 해시 오류가 입력에 섞이고 golden이 그 오류를 함께 굳힌다 |
 | 플러그인 셰이더(Niagara 등)를 이 문서 범위에 넣기 | 지시 범위는 `Engine/Shaders`. 플러그인은 CC 9절·기능 문서가 정한다 |
