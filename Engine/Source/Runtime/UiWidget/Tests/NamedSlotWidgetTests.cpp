@@ -98,6 +98,7 @@ TEST(UiWidget_NamedSlotsReplaceLiveContentAndKeepOwnershipOnFailure) {
         REQUIRE(user.SetContentForSlot(objects, "Header", {}));
         CHECK(user.GetContentForSlot(objects, "Header").Value().IsNull());
     }
+
     REQUIRE(objects.Collect(access));
     CHECK(!objects.Resolve<Widget>(access, newId));
 }

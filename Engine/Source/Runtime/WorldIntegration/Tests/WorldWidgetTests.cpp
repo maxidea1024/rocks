@@ -83,6 +83,7 @@ TEST(WorldIntegration_WidgetRayUsesPivotPlayerCaptureAndProjectedPlayerLayer) {
         REQUIRE(culled);
         CHECK(!culled.Value() && layer.Value()->ChildCount() == 0);
     }
+
     REQUIRE(world.Shutdown());
 }
 } // namespace rocks::ui

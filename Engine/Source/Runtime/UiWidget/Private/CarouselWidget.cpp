@@ -13,12 +13,15 @@ CarouselWidget::CarouselWidget(Allocator& allocator) noexcept
 uint32 CarouselWidget::ActiveIndex() const noexcept {
     return activeIndex_;
 }
+
 float CarouselWidget::MoveSpeed() const noexcept {
     return moveSpeed_;
 }
+
 bool CarouselWidget::CacheChildren() const noexcept {
     return cacheChildren_;
 }
+
 MulticastDelegate<void()>& CarouselWidget::OnPagesChanged() noexcept {
     return pagesChanged_;
 }
@@ -27,6 +30,7 @@ Result<void> CarouselWidget::SetMoveSpeed(float speed) noexcept {
     if (!math::IsFinite(speed) || speed < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     moveSpeed_ = speed;
     return Result<void>::Success();
 }
@@ -38,6 +42,7 @@ Result<void> CarouselWidget::SetCacheChildren(bool cache) noexcept {
             return changed;
         }
     }
+
     cacheChildren_ = cache;
     return Result<void>::Success();
 }
@@ -55,6 +60,7 @@ Result<void> CarouselWidget::SetActiveWidget(ObjectRegistry& objects, ObjectHand
             }
         }
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -62,16 +68,19 @@ Result<void> CarouselWidget::ChangePage(uint32 index, bool forward) noexcept {
     if (index >= ChildCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto changed = static_cast<Carousel&>(*live).Show(index, forward, moveSpeed_);
         if (!changed) {
             return changed;
         }
     }
+
     if (index != activeIndex_) {
         activeIndex_ = index;
         pagesChanged_.Broadcast();
     }
+
     return Result<void>::Success();
 }
 
@@ -97,11 +106,13 @@ Result<void> CarouselWidget::BeginAutoScrolling(Application& app, float interval
     if (!live) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     auto timer = app.StartTimer(
         live, interval, Delegate<void()>::CreateRaw(this, &CarouselWidget::AdvanceAutoPage));
     if (!timer) {
         return Result<void>::Failure(timer.Error());
     }
+
     autoTimer_ = Move(timer.Value());
     return Result<void>::Success();
 }
@@ -119,6 +130,7 @@ Result<ObjectHandle> CarouselWidget::AddChild(ObjectRegistry& objects, ObjectHan
     if (added) {
         pagesChanged_.Broadcast();
     }
+
     return added;
 }
 
@@ -127,9 +139,11 @@ Result<void> CarouselWidget::RemoveChild(ObjectRegistry& objects, ObjectHandle p
     while (index < ChildCount() && WidgetAt(objects, index) != page) {
         ++index;
     }
+
     if (index == ChildCount()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     auto live = CachedElement();
     auto removed = live ? live->ChildRefAt(index) : SharedPtr<Element>();
     // 비캐시 모드의 다음 페이지가 생성되지 않으면 기존 페이지를 그대로 유지한다.
@@ -140,16 +154,20 @@ Result<void> CarouselWidget::RemoveChild(ObjectRegistry& objects, ObjectHandle p
             return ready;
         }
     }
+
     auto status = PanelWidget::RemoveChild(objects, page);
     if (status) {
         if (removed) {
             (void)live->RemoveChild(*removed);
         }
+
         if (index <= activeIndex_ && activeIndex_) {
             --activeIndex_;
         }
+
         pagesChanged_.Broadcast();
     }
+
     return status;
 }
 
@@ -158,6 +176,7 @@ Result<SharedPtr<Element>> CarouselWidget::CreatePanel(Allocator& allocator) noe
     if (panel) {
         (void)static_cast<Carousel&>(*panel.Value()).SetCacheChildren(cacheChildren_);
     }
+
     return panel;
 }
 
@@ -167,6 +186,7 @@ Result<void> CarouselWidget::AttachChild(ObjectRegistry& objects, ObjectHandle i
     if (!slot) {
         return Result<void>::Failure(slot.Error());
     }
+
     const auto handle = slot.Value().Get().Value()->Content();
     auto factory = CarouselPage::Factory::CreateLambda([&objects, handle]() noexcept {
         auto widget = objects.ResolveForWrite<Widget>(objects.OwnerAccess(), handle);
@@ -178,12 +198,14 @@ Result<void> CarouselWidget::AttachChild(ObjectRegistry& objects, ObjectHandle i
     if (!page) {
         return Result<void>::Failure(page.Error());
     }
+
     if (child && (cacheChildren_ || panel.ChildCount() == 0)) {
         auto ready = page.Value()->TryAddChild(child);
         if (!ready) {
             return ready;
         }
     }
+
     return static_cast<Carousel&>(panel).AddPage(page.Value());
 }
 
@@ -192,18 +214,21 @@ Result<SharedPtr<Element>> CarouselWidget::BuildElement(ObjectRegistry& objects)
     if (!panel) {
         return panel;
     }
+
     for (usize i = 0; i < ChildCount(); ++i) {
         auto added = AttachChild(objects, SlotAt(i), *panel.Value(), {});
         if (!added) {
             return Result<SharedPtr<Element>>::Failure(added.Error());
         }
     }
+
     if (ChildCount()) {
         auto shown = static_cast<Carousel&>(*panel.Value()).Show(activeIndex_, true, 0);
         if (!shown) {
             return Result<SharedPtr<Element>>::Failure(shown.Error());
         }
     }
+
     registry_ = &objects;
     return panel;
 }
@@ -219,6 +244,7 @@ void CarouselWidget::ReleaseElements() noexcept {
             }
         }
     }
+
     registry_ = nullptr;
     PanelWidget::ReleaseElements();
 }

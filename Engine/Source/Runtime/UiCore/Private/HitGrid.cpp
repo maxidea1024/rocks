@@ -1,6 +1,7 @@
 #include <UiCore/HitGrid.h>
 
 namespace rocks::ui {
+
 namespace {
 
 constexpr float CellSize = 128;
@@ -38,14 +39,17 @@ Result<void> HitGrid::Update(const SharedPtr<Element>& root) noexcept {
     if (!root) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (root_.Lock().Get() == root.Get() && plan_ == root->planRevision_) {
         return Result<void>::Success();
     }
+
     HitGrid next(entries_.GetAllocator());
     auto result = next.Record(root, IndexNone, nullptr);
     if (!result) {
         return result;
     }
+
     next.root_ = WeakPtr<Element>(root);
     next.plan_ = root->planRevision_;
     *this = Move(next);
@@ -65,37 +69,44 @@ Result<void> HitGrid::Record(const SharedPtr<Element>& element, usize parentClip
     if (!bounds) {
         return Result<void>::Failure(bounds.Error());
     }
+
     const bool intersects = !clip || clip->Overlaps(bounds.Value());
     if (element->ClipsToBounds() && (!intersects || geometry.size.x <= 0 || geometry.size.y <= 0)) {
         return Result<void>::Success();
     }
+
     Box2<float> area = bounds.Value();
     if (clip && intersects) {
         area = area.TryIntersection(*clip).Value();
     }
+
     if (intersects && (visibility == Visibility::Visible || element->ClipsToBounds())) {
         const usize index = entries_.Size();
         auto added = entries_.TryPushBack({WeakPtr<Element>(element), geometry, parentClip});
         if (!added) {
             return added;
         }
+
         if (visibility == Visibility::Visible && geometry.size.x > 0 && geometry.size.y > 0) {
             auto indexed = Index(index, area);
             if (!indexed) {
                 return indexed;
             }
         }
+
         if (element->ClipsToBounds()) {
             parentClip = index;
             clip = &area;
         }
     }
+
     for (const auto& child : element->ActiveChildren()) {
         auto added = Record(child, parentClip, clip);
         if (!added) {
             return added;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -104,11 +115,13 @@ Result<void> HitGrid::Index(usize entry, const Box2<float>& bounds) noexcept {
     if (!Cell(bounds.min, left, top) || !Cell(bounds.max, right, bottom)) {
         return broad_.TryPushBack(entry);
     }
+
     const int64 width = static_cast<int64>(right) - left + 1;
     const int64 height = static_cast<int64>(bottom) - top + 1;
     if (width > MaxCellsPerEntry || height > MaxCellsPerEntry / width) {
         return broad_.TryPushBack(entry);
     }
+
     for (int64 y = top; y <= bottom; ++y) {
         for (int64 x = left; x <= right; ++x) {
             const auto key = CellKey(static_cast<int32>(x), static_cast<int32>(y));
@@ -118,12 +131,14 @@ Result<void> HitGrid::Index(usize entry, const Box2<float>& bounds) noexcept {
             if (!added) {
                 return added;
             }
+
             auto head = cells_.InsertOrAssign(key, node);
             if (!head) {
                 return Result<void>::Failure(head.Error());
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -133,16 +148,19 @@ bool HitGrid::Accepts(usize index, Vec2 point, const Element& scope,
     if (!entry.geometry.Contains(point)) {
         return false;
     }
+
     for (usize clip = entry.parentClip; clip != IndexNone; clip = entries_[clip].parentClip) {
         if (!entries_[clip].geometry.Contains(point)) {
             return false;
         }
     }
+
     auto target = entry.element.Lock();
     if (!target || target->GetVisibility() != Visibility::Visible ||
         !target->IsInputPathActive(scope, true)) {
         return false;
     }
+
     hit = Move(target);
     return true;
 }
@@ -152,6 +170,7 @@ SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope) const noexcep
     if (!point.IsFinite() || !owner || !scope.IsInputPathActive(*owner, true)) {
         return {};
     }
+
     int32 x, y;
     const auto* found = Cell(point, x, y) ? cells_.Find(CellKey(x, y)) : nullptr;
     usize node = found ? *found : IndexNone;
@@ -164,11 +183,13 @@ SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope) const noexcep
             entry = links_[node].entry;
             node = links_[node].previous;
         }
+
         SharedPtr<Element> hit;
         if (Accepts(entry, point, scope, hit)) {
             return hit;
         }
     }
+
     return {};
 }
 

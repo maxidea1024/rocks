@@ -11,19 +11,23 @@ Result<void> TextLabelWidget::Shape(TextLabel& label, const Text& value,
     if (!value.IsValid()) {
         return label.SetShapedText({}, {}, {}, size, false);
     }
+
     SharedPtr<TextLabel> marker;
     if (ellipsis_ && shaper_) {
         auto shapedMarker = shaper_->ShapeEllipsis(allocator_, size);
         if (!shapedMarker) {
             return Result<void>::Failure(shapedMarker.Error());
         }
+
         marker = Move(shapedMarker.Value());
     }
+
     auto shaped =
         shaper_ ? shaper_->Shape(label, value, size) : Result<void>::Failure(ErrorCode::NotReady);
     if (shaped) {
         label.SetEllipsisMarker(Move(marker));
     }
+
     return shaped;
 }
 
@@ -33,25 +37,30 @@ Result<SharedPtr<Element>> TextLabelWidget::BuildElement(ObjectRegistry& objects
     if (!label) {
         return Result<SharedPtr<Element>>::Failure(label.Error());
     }
+
     auto layout = ApplyTextLayout(*label.Value());
     if (!layout) {
         return Result<SharedPtr<Element>>::Failure(layout.Error());
     }
+
     const auto access = objects.OwnerAccess();
     auto outer = objects.GetOuter(access, Handle());
     if (!outer) {
         return Result<SharedPtr<Element>>::Failure(outer.Error());
     }
+
     auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
     if (!tree) {
         return Result<SharedPtr<Element>>::Failure(tree.Error());
     }
+
     shaper_ = tree.Value().Get().Value()->TextShaper();
     auto shaped = Shape(*label.Value(), text_, fontSize_);
     if (!shaped) {
         shaper_.Reset();
         return Result<SharedPtr<Element>>::Failure(shaped.Error());
     }
+
     label.Value()->SetColor(tint_);
     return Result<SharedPtr<Element>>::Success(Move(label.Value()));
 }
@@ -61,12 +70,14 @@ Result<void> TextLabelWidget::SetText(const Text& text) noexcept {
     if (!copy) {
         return Result<void>::Failure(copy.Error());
     }
+
     if (auto live = CachedElement()) {
         auto shaped = Shape(static_cast<TextLabel&>(*live), text, fontSize_);
         if (!shaped) {
             return shaped;
         }
     }
+
     text_ = Move(copy.Value());
     NotifyPropertyChanged("text");
     return Result<void>::Success();
@@ -80,6 +91,7 @@ Result<void> TextLabelWidget::SetFontSize(float size) noexcept {
     if (!math::IsFinite(size) || size <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (fontSize_ != size) {
         if (auto live = CachedElement()) {
             auto shaped = Shape(static_cast<TextLabel&>(*live), text_, size);
@@ -87,9 +99,11 @@ Result<void> TextLabelWidget::SetFontSize(float size) noexcept {
                 return shaped;
             }
         }
+
         fontSize_ = size;
         NotifyPropertyChanged("fontSize");
     }
+
     return Result<void>::Success();
 }
 
@@ -97,6 +111,7 @@ Result<void> TextLabelWidget::SetEllipsis(bool enabled) noexcept {
     if (enabled == ellipsis_) {
         return Result<void>::Success();
     }
+
     if (auto live = CachedElement()) {
         SharedPtr<TextLabel> marker;
         if (enabled && shaper_) {
@@ -104,10 +119,13 @@ Result<void> TextLabelWidget::SetEllipsis(bool enabled) noexcept {
             if (!shaped) {
                 return Result<void>::Failure(shaped.Error());
             }
+
             marker = Move(shaped.Value());
         }
+
         static_cast<TextLabel&>(*live).SetEllipsisMarker(Move(marker));
     }
+
     ellipsis_ = enabled;
     NotifyPropertyChanged("ellipsis");
     return Result<void>::Success();
@@ -117,10 +135,12 @@ Result<void> TextLabelWidget::SetTint(LinearColor tint) noexcept {
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     tint_ = tint;
     if (auto live = CachedElement()) {
         static_cast<TextLabel&>(*live).SetColor(tint);
     }
+
     return Result<void>::Success();
 }
 

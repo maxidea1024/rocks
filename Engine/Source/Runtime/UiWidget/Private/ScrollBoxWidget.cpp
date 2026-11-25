@@ -13,6 +13,7 @@ Result<void> ScrollBoxWidget::ApplySlotSize(Element& panel, Element& child, Stac
     if (!entry || entry->Parent() != &stack) {
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
+
     return stack.SetSlotLayout(*entry, {.rule = rule, .weight = weight});
 }
 
@@ -25,15 +26,18 @@ Result<void> ScrollBoxWidget::AttachChild(ObjectRegistry& objects, ObjectHandle 
                    ? PanelWidget::AttachChild(objects, slot, panel, child)
                    : Result<void>::Failure(data.Error());
     }
+
     const auto rule = data.Value().Get().Value()->SizeRule();
     const auto weight = data.Value().Get().Value()->FillWeight();
     if (rule > StackSizeRule::FillContent || !math::IsFinite(weight) || weight < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto attached = PanelWidget::AttachChild(objects, slot, panel, child);
     if (!attached) {
         return attached;
     }
+
     return ApplySlotSize(panel, *child, rule, weight);
 }
 
@@ -54,10 +58,12 @@ Result<SharedPtr<Element>> ScrollBoxWidget::CreatePanel(Allocator& allocator) no
     if (!scroll) {
         return Result<SharedPtr<Element>>::Failure(scroll.Error());
     }
+
     auto offset = scroll.Value()->SetScrollOffset(initialOffset_);
     if (!offset) {
         return Result<SharedPtr<Element>>::Failure(offset.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(scroll.Value().AsSharedPtr());
 }
 
@@ -65,11 +71,13 @@ Result<void> ScrollBoxWidget::SetScrollOffset(float offset) noexcept {
     if (!math::IsFinite(offset) || offset < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     endRequested_ = false;
     initialOffset_ = offset;
     if (auto live = CachedElement()) {
         return static_cast<ScrollView&>(*live).SetScrollOffset(offset);
     }
+
     return Result<void>::Success();
 }
 

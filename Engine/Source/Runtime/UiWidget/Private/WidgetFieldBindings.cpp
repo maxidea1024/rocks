@@ -2,6 +2,7 @@
 #include <UiWidget/WidgetFieldBindings.h>
 
 namespace rocks::ui {
+
 namespace {
 
 struct FieldConnection {
@@ -14,6 +15,7 @@ struct FieldConnection {
         if (applying) {
             return Result<void>::Failure(ErrorCode::CycleDetected);
         }
+
         applying = true;
         ROCKS_ON_SCOPE_EXIT {
             applying = false;
@@ -23,9 +25,11 @@ struct FieldConnection {
         if (!read) {
             return read;
         }
+
         if (!setter.IsBound()) {
             return Result<void>::Failure(ErrorCode::Destroyed);
         }
+
         return setter.Execute(objects, target, value);
     }
 
@@ -48,11 +52,13 @@ Result<DelegateHandle> WidgetFieldBindings::Bind(ObjectHandle source, StringView
     if (!setter.IsBound()) {
         return Result<DelegateHandle>::Failure(ErrorCode::InvalidArgument);
     }
+
     PropertyPathBuffer resolved;
     auto parsed = ParsePropertyPath(objects_, objects_.OwnerAccess(), source, path, resolved);
     if (!parsed) {
         return Result<DelegateHandle>::Failure(parsed.Error());
     }
+
     return Connect(source, resolved, target, Move(setter), true);
 }
 
@@ -62,6 +68,7 @@ Result<DelegateHandle> WidgetFieldBindings::SubscribeField(ObjectHandle source, 
     if (!setter.IsBound() || field == Guid{}) {
         return Result<DelegateHandle>::Failure(ErrorCode::InvalidArgument);
     }
+
     PropertyPathBuffer resolved;
     resolved.steps[0] = {field};
     resolved.count = 1;
@@ -77,6 +84,7 @@ Result<DelegateHandle> WidgetFieldBindings::Connect(ObjectHandle source,
     if (!made) {
         return Result<DelegateHandle>::Failure(made.Error());
     }
+
     auto& entry = *made.Value();
     entry.path = path;
     auto subscribed =
@@ -85,6 +93,7 @@ Result<DelegateHandle> WidgetFieldBindings::Connect(ObjectHandle source,
             if (binding->source != changed || binding->path.steps[0].fieldId != field) {
                 return;
             }
+
             auto result = binding->Apply(objects_);
             if (!result) {
                 const auto error = result.Error();
@@ -98,15 +107,18 @@ Result<DelegateHandle> WidgetFieldBindings::Connect(ObjectHandle source,
     if (!subscribed) {
         return subscribed;
     }
+
     entry.handle = subscribed.Value();
     if (!initial) {
         return subscribed;
     }
+
     auto applied = entry.Apply(objects_);
     if (!applied) {
         changed_.Remove(entry.handle);
         return Result<DelegateHandle>::Failure(applied.Error());
     }
+
     return subscribed;
 }
 
@@ -115,11 +127,13 @@ Result<void> WidgetFieldBindings::ApplyOnce(ObjectHandle source, StringView path
     if (!setter.IsBound()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     FieldConnection entry(source, target, Move(setter));
     auto parsed = ParsePropertyPath(objects_, objects_.OwnerAccess(), source, path, entry.path);
     if (!parsed) {
         return parsed;
     }
+
     return entry.Apply(objects_);
 }
 
@@ -141,16 +155,19 @@ Result<void> WidgetFieldBindings::NotifyNamed(ObjectHandle source, StringView fi
     if (!changed_.IsBound()) {
         return Result<void>::Success();
     }
+
     auto type = objects_.AcquireType(objects_.OwnerAccess(), source);
     if (!type) {
         return Result<void>::Failure(type.Error());
     }
+
     for (const auto& field : type.Value().Schema().fields) {
         auto name = field.toolName.IsEmpty() ? field.name : field.toolName;
         if (StringView(name.Data(), name.Size()) == fieldName) {
             return Notify(source, field.id);
         }
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -160,6 +177,7 @@ Result<void> WidgetFieldBindings::Write(ObjectHandle source, PropertyPath path,
     if (!written) {
         return written;
     }
+
     return Notify(source, path.steps[0].fieldId);
 }
 

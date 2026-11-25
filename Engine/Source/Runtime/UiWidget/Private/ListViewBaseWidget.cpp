@@ -7,6 +7,7 @@ Result<void> ListViewBaseWidget::SetSource(Application& app,
     if (CachedElement()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     app_ = &app;
     source_ = source.AsSharedPtr();
     return Result<void>::Success();
@@ -16,6 +17,7 @@ Result<SharedPtr<Element>> ListViewBaseWidget::BuildElement(ObjectRegistry& obje
     if (!app_ || !source_) {
         return Result<SharedPtr<Element>>::Failure(ErrorCode::NotReady);
     }
+
     auto built = CreateView(objects.ObjectAllocator(), *app_, source_.ToSharedRef());
     if (built) {
         auto& view = static_cast<ListView&>(*built.Value());
@@ -43,6 +45,7 @@ Result<SharedPtr<Element>> ListViewBaseWidget::BuildElement(ObjectRegistry& obje
                 }
             }));
     }
+
     return built;
 }
 
@@ -79,10 +82,12 @@ Result<void> ListViewBaseWidget::SetWheelMultiplier(float multiplier) noexcept {
     if (!math::IsFinite(multiplier) || multiplier < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     wheelMultiplier_ = multiplier;
     if (auto live = CachedElement()) {
         return static_cast<ListView&>(*live).SetWheelMultiplier(multiplier);
     }
+
     return Result<void>::Success();
 }
 
@@ -132,6 +137,7 @@ void ListViewBaseWidget::SetOnItemClicked(Delegate<void(uint64)>&& callback) noe
 void ListViewBaseWidget::SetOnSelectionChanged(Delegate<void()>&& callback) noexcept {
     selectionChanged_ = Move(callback);
 }
+
 void ListViewBaseWidget::SetOnItemScrolledIntoView(Delegate<void(uint64)>&& callback) noexcept {
     itemScrolled_ = Move(callback);
 }
@@ -176,6 +182,7 @@ Result<void> ListViewBaseWidget::ScrollItemIntoView(uint64 key) noexcept {
     if (!live) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     auto& view = static_cast<ListView&>(*live);
     auto index = view.FindIndex(key);
     return index ? view.ScrollIndexIntoView(index.Value()) : Result<void>::Failure(index.Error());
@@ -186,6 +193,7 @@ Result<void> ListViewBaseWidget::NavigateToItem(uint64 key, uint32 user) noexcep
     if (!live) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     auto& view = static_cast<ListView&>(*live);
     auto index = view.FindIndex(key);
     return index ? view.NavigateToIndex(index.Value(), user) : Result<void>::Failure(index.Error());
@@ -204,6 +212,7 @@ void ListViewBaseWidget::ReleaseElements() noexcept {
         view.SetOnSelectionChanged({});
         view.SetOnItemScrolledIntoView({});
     }
+
     Widget::ReleaseElements();
 }
 

@@ -53,6 +53,7 @@ TEST(UiWidget_GridFillAndScrollSizeSurviveRebuild) {
         REQUIRE(slot);
         second = slot.Value();
     }
+
     auto scrollSlot = objects.ResolveForWrite<ScrollBoxWidgetSlot>(access, second);
     REQUIRE(scrollSlot);
     auto* weighted = scrollSlot.Value().Get().Value();

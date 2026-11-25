@@ -22,13 +22,16 @@ Result<void> WidgetSwitcherWidget::SetActiveIndex(uint32 index) noexcept {
     if (index >= ChildCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (activeIndex_ == index) {
         return Result<void>::Success();
     }
+
     activeIndex_ = index;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     changed_.Broadcast(activeIndex_);
     return Result<void>::Success();
 }
@@ -55,17 +58,21 @@ Result<void> WidgetSwitcherWidget::RemoveChild(ObjectRegistry& objects,
         if (!slot) {
             return Result<void>::Failure(slot.Error());
         }
+
         if (slot.Value().Get().Value()->Content() == child) {
             break;
         }
     }
+
     auto removed = PanelWidget::RemoveChild(objects, child);
     if (removed && index <= activeIndex_) {
         if (activeIndex_) {
             --activeIndex_;
         }
+
         changed_.Broadcast(activeIndex_);
     }
+
     return removed;
 }
 

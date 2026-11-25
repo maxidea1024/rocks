@@ -4,18 +4,19 @@
 
 namespace rocks::ui {
 
-RetainerBoxWidget::RetainerBoxWidget(Allocator& allocator) noexcept
-    : ContentWidget(allocator) {
+RetainerBoxWidget::RetainerBoxWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
 }
 
 Result<void> RetainerBoxWidget::SetEffectTint(LinearColor tint) noexcept {
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     effectTint_ = tint;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -27,11 +28,13 @@ Result<void> RetainerBoxWidget::SetPhase(uint32 phase, uint32 count) noexcept {
     if (count == 0 || phase >= count) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     phase_ = phase;
     phaseCount_ = count;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 

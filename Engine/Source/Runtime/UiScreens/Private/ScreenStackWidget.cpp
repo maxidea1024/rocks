@@ -1,5 +1,7 @@
 #include <UiScreens/ScreenStackWidget.h>
+
 namespace rocks::ui {
+
 Result<SharedPtr<Element>> ScreenStackWidget::CreateContainer(ObjectRegistry& objects,
                                                               Application& app,
                                                               uint32 user) noexcept {

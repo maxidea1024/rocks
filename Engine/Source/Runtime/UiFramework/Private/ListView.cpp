@@ -27,10 +27,12 @@ Result<void> ListView::SetRowHeight(float height) noexcept {
     if (!math::IsFinite(height) || height <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (rowHeight_ != height) {
         rowHeight_ = height;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -38,12 +40,14 @@ Result<void> ListView::SetScrollOffset(double offset) noexcept {
     if (!math::IsFinite(offset) || offset < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     requestedIndex_.Reset();
     focusUser_.Reset();
     if (offset_ != offset) {
         offset_ = offset;
         InvalidateArrangement();
     }
+
     return Result<void>::Success();
 }
 
@@ -67,6 +71,7 @@ Result<void> ListView::SetWheelMultiplier(float multiplier) noexcept {
     if (!math::IsFinite(multiplier) || multiplier < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     wheelMultiplier_ = multiplier;
     return Result<void>::Success();
 }
@@ -86,6 +91,7 @@ bool ListView::IsSelected(uint64 key) const noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -95,6 +101,7 @@ bool ListView::IsItemVisible(uint64 key) const noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -103,12 +110,14 @@ Result<uint32> ListView::FindIndex(uint64 key) noexcept {
     if (!ready) {
         return Result<uint32>::Failure(ready.Error());
     }
+
     const uint32 count = ItemCount();
     for (uint32 i = 0; i < count; ++i) {
         if (ItemAt(i).key == key) {
             return Result<uint32>::Success(i);
         }
     }
+
     return Result<uint32>::Failure(ErrorCode::NotFound);
 }
 
@@ -117,6 +126,7 @@ void ListView::SelectionChanged() noexcept {
     for (usize i = 0; i < items_.Size(); ++i) {
         source_.SetRowSelected(*ChildAt(i), items_[i], IsSelected(items_[i].key));
     }
+
     selectionChanged_.ExecuteIfBound();
 }
 
@@ -167,6 +177,7 @@ Result<void> ListView::ReplaceSelection(uint64 key) noexcept {
         (selected_.Size() == 1 && selected_[0] == key)) {
         return Result<void>::Success();
     }
+
     if (selected_.IsEmpty()) {
         auto added = selected_.TryPushBack(key);
         if (!added) {
@@ -176,6 +187,7 @@ Result<void> ListView::ReplaceSelection(uint64 key) noexcept {
         selected_[0] = key;
         (void)selected_.TryRemoveAt(1, selected_.Size() - 1);
     }
+
     SelectionChanged();
     return Result<void>::Success();
 }
@@ -186,14 +198,17 @@ Result<void> ListView::SetItemSelection(uint64 key, bool selected) noexcept {
         if (!index) {
             return Result<void>::Failure(index.Error());
         }
+
         if (selectionMode_ != ListSelectionMode::Multi) {
             return ReplaceSelection(key);
         }
+
         if (!IsSelected(key)) {
             auto added = selected_.TryPushBack(key);
             if (!added) {
                 return added;
             }
+
             SelectionChanged();
         }
     } else {
@@ -205,6 +220,7 @@ Result<void> ListView::SetItemSelection(uint64 key, bool selected) noexcept {
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -216,12 +232,14 @@ Result<void> ListView::SelectRange(uint32 first, uint32 last) noexcept {
     if (!reserved) {
         return reserved;
     }
+
     for (uint32 i = begin;; ++i) {
         (void)range.TryPushBack(ItemAt(i).key);
         if (i == end) {
             break;
         }
     }
+
     selected_ = Move(range);
     SelectionChanged();
     return Result<void>::Success();
@@ -232,9 +250,11 @@ Result<void> ListView::SelectIndex(uint32 index) noexcept {
     if (!ready) {
         return ready;
     }
+
     if (index >= ItemCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     rangeAnchor_ = index;
     return ReplaceSelection(ItemAt(index).key);
 }
@@ -243,9 +263,11 @@ void ListView::CancelScrollIntoView() noexcept {
     requestedIndex_.Reset();
     focusUser_.Reset();
 }
+
 bool ListView::IsRefreshPending() const noexcept {
     return refresh_;
 }
+
 void ListView::SetScrollIntoViewAlignment(ScrollIntoViewAlignment alignment) noexcept {
     scrollAlignment_ = alignment;
 }
@@ -256,9 +278,11 @@ Result<void> ListView::RequestIndex(uint32 index, Optional<uint32> focusUser,
     if (!ready) {
         return ready;
     }
+
     if (index >= ItemCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     requestedIndex_ = index;
     focusUser_ = focusUser;
     if (focusUser) {
@@ -271,6 +295,7 @@ Result<void> ListView::RequestIndex(uint32 index, Optional<uint32> focusUser,
             }
         }
     }
+
     InvalidateArrangement();
     return Result<void>::Success();
 }
@@ -280,6 +305,7 @@ Result<void> ListView::ScrollToEnd() noexcept {
     if (!ready) {
         return ready;
     }
+
     return ItemCount() == 0 ? SetScrollOffset(0) : ScrollIndexIntoView(ItemCount() - 1);
 }
 
@@ -340,6 +366,7 @@ void ListView::RecycleRow(usize index) noexcept {
             (void)presses_.TryRemoveAt(i - 1);
         }
     }
+
     app_.ReleaseInputForSubtree(*row);
     source_.ReleaseRow(*row, items_[index]);
     (void)Element::RemoveChild(*row);
@@ -355,6 +382,7 @@ Result<void> ListView::AttachRow(uint32 index, bool prepend) noexcept {
         if (!made) {
             return Result<void>::Failure(made.Error());
         }
+
         row = Move(made.Value());
         if (!row || row->Parent()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -363,6 +391,7 @@ Result<void> ListView::AttachRow(uint32 index, bool prepend) noexcept {
         row = Move(spare_[spare_.Size() - 1]);
         (void)spare_.TryRemoveAt(spare_.Size() - 1);
     }
+
     auto item = ItemAt(index);
     const usize position = prepend ? 0 : items_.Size();
     auto bound = source_.BindRow(*row, item);
@@ -370,20 +399,24 @@ Result<void> ListView::AttachRow(uint32 index, bool prepend) noexcept {
         source_.ReleaseRow(*row, item);
         return bound;
     }
+
     auto stored = items_.TryInsert(item, position);
     if (!stored) {
         source_.ReleaseRow(*row, item);
         return stored;
     }
+
     auto attached = TryInsertChild(position, row);
     if (!attached) {
         (void)items_.TryRemoveAt(position);
         source_.ReleaseRow(*row, item);
         return attached;
     }
+
     if (prepend || items_.Size() == 1) {
         first_ = index;
     }
+
     source_.SetRowSelected(*row, item, IsSelected(item.key));
     row->UpdateBoundAttributes();
     return Result<void>::Success();
@@ -393,10 +426,12 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
     if (!geometry.size.IsFinite() || geometry.size.x < 0 || geometry.size.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto ready = PrepareItems();
     if (!ready) {
         return ready;
     }
+
     SetGeometry(geometry);
     const uint32 columns = Columns(geometry.size.x);
     const uint32 count = ItemCount();
@@ -411,18 +446,22 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
                 return Result<void>::Failure(added.Error());
             }
         }
+
         for (uint32 i = 0; i < count && !missing.IsEmpty(); ++i) {
             missing.Erase(ItemAt(i).key);
         }
+
         if (!missing.IsEmpty()) {
             for (usize i = selected_.Size(); i > 0; --i) {
                 if (missing.Contains(selected_[i - 1])) {
                     (void)selected_.TryRemoveAt(i - 1);
                 }
             }
+
             SelectionChanged();
         }
     }
+
     if (requestedIndex_ && *requestedIndex_ < count && geometry.size.y > 0) {
         const double top = (*requestedIndex_ / columns) * height;
         const double bottom = top + height;
@@ -437,6 +476,7 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
             offset_ = bottom - geometry.size.y;
         }
     }
+
     offset_ = math::Clamp(offset_, 0.0, maxOffset_);
     const auto startLine =
         static_cast<uint32>(math::Min(static_cast<double>(lines), offset_ / height));
@@ -456,6 +496,7 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
         RecycleRow(0);
         ++first_;
     }
+
     refresh_ = false;
     if (items_.IsEmpty()) {
         first_ = start;
@@ -472,6 +513,7 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
             return added;
         }
     }
+
     spare_.Clear();
     const float cellWidth = geometry.size.x / static_cast<float>(columns);
     for (usize i = 0; i < items_.Size(); ++i) {
@@ -484,13 +526,16 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
             placed = row->ArrangeIfNeeded(
                 GetGeometry().MakeChild({cellWidth, rowHeight_}, {1, 0, 0, 1, x, y}, {}, {}));
         }
+
         if (!placed) {
             return placed;
         }
     }
+
     if (!selected_.IsEmpty()) {
         InvalidatePaint();
     }
+
     if (requestedIndex_ && *requestedIndex_ >= first_ &&
         *requestedIndex_ - first_ < items_.Size()) {
         const uint64 key = items_[*requestedIndex_ - first_].key;
@@ -506,12 +551,14 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
                 if (!focused) {
                     return Result<void>::Failure(focused.Error());
                 }
+
                 if (!focused.Value()) {
                     return app_.SetFocus(*user, *this);
                 }
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -527,6 +574,7 @@ Result<void> ListView::OnPaintOverlay(PaintList& list, int32 layer) const noexce
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -538,12 +586,14 @@ void ListView::OnPointerReleaseInPath(const PointerEvent& event) noexcept {
     if (event.type == PointerEventType::Up && event.button != input::MouseButton::Left) {
         return;
     }
+
     for (usize i = 0; i < presses_.Size(); ++i) {
         auto press = presses_[i];
         if (press.user != event.userId || press.pointer != event.pointerId ||
             press.source != event.source) {
             continue;
         }
+
         (void)presses_.TryRemoveAt(i);
         if (event.type == PointerEventType::Up && GetGeometry().Contains(event.position)) {
             for (usize row = 0; row < items_.Size(); ++row) {
@@ -553,11 +603,13 @@ void ListView::OnPointerReleaseInPath(const PointerEvent& event) noexcept {
                         SelectFromPointer(first_ + static_cast<uint32>(row), press.key,
                                           event.userId);
                     }
+
                     itemClicked_.ExecuteIfBound(press.key);
                     break;
                 }
             }
         }
+
         return;
     }
 }
@@ -592,8 +644,10 @@ PointerReply ListView::OnPreviewPointerDown(const PointerEvent& event) noexcept 
                             break;
                         }
                     }
+
                     (void)presses_.TryPushBack({event.userId, event.pointerId, event.source, key});
                 }
+
                 if (event.source != PointerSource::Touch) {
                     SelectFromPointer(index, key, event.userId);
                 }
@@ -601,6 +655,7 @@ PointerReply ListView::OnPreviewPointerDown(const PointerEvent& event) noexcept 
             }
         }
     }
+
     // 행의 단추나 편집기도 같은 누름을 받을 수 있도록 이벤트는 계속 전달한다.
     return {};
 }
@@ -609,6 +664,7 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
     if (event.type != input::InputEventType::KeyDown || ItemCount() == 0) {
         return false;
     }
+
     const uint32 columns = Columns(GetGeometry().size.x);
     int64 index = navigationIndex_.ValueOr(first_);
     bool hasAnchor = navigationIndex_.HasValue();
@@ -623,10 +679,12 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
             }
         }
     }
+
     const bool multi = selectionMode_ == ListSelectionMode::Multi;
     if (multi && event.key == input::Key::A && app_.IsControlDown(user)) {
         return static_cast<bool>(SelectRange(0, ItemCount() - 1));
     }
+
     const uint32 anchor = rangeAnchor_.ValueOr(static_cast<uint32>(index));
     switch (event.key) {
     case input::Key::Up:
@@ -644,6 +702,7 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
         if (columns == 1) {
             return false;
         }
+
         if (hasAnchor) {
             index += event.key == input::Key::Right ? 1 : -1;
         }
@@ -657,17 +716,20 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
     default:
         return false;
     }
+
     if (index < 0) {
         index = 0;
     } else if (index >= ItemCount()) {
         index = ItemCount() - 1;
     }
+
     const auto target = static_cast<uint32>(index);
     if (multi && selectOnNavigation_ && app_.IsShiftDown(user)) {
         rangeAnchor_ = anchor;
         auto range = SelectRange(anchor, target);
         return range && RequestIndex(target, user, false);
     }
+
     rangeAnchor_ = target;
     return static_cast<bool>(RequestIndex(target, user, !multi || !app_.IsControlDown(user)));
 }
@@ -676,11 +738,13 @@ PointerReply ListView::OnTouchPan(const PointerEvent& move, Vec2 origin) noexcep
     if (panning_ || !pointerScrolling_) {
         return {};
     }
+
     float start = 0, current = 0;
     if (!TryTouchPan(GetGeometry(), true, origin, move.position, offset_, maxOffset_, start,
                      current)) {
         return {};
     }
+
     panning_ = true;
     panUser_ = move.userId;
     panPointer_ = move.pointerId;
@@ -707,12 +771,15 @@ PointerReply ListView::OnPointerEvent(const PointerEvent& event) noexcept {
                     math::Clamp(panOffset_ + panStart_ - current, 0., maxOffset_));
             }
         }
+
         if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
             panning_ = false;
             return {.handled = true, .releaseCapture = true};
         }
+
         return {.handled = true};
     }
+
     if (event.type == PointerEventType::Down && event.button == input::MouseButton::Left &&
         (itemClicked_ || event.source == PointerSource::Touch)) {
         for (const auto& press : presses_) {
@@ -724,16 +791,19 @@ PointerReply ListView::OnPointerEvent(const PointerEvent& event) noexcept {
             }
         }
     }
+
     if (!pointerScrolling_ || event.type != PointerEventType::Wheel ||
         !math::IsFinite(event.wheel)) {
         return {};
     }
+
     const double next = math::Clamp(offset_ - static_cast<double>(event.wheel) * rowHeight_ * 3.0 *
                                                   wheelMultiplier_,
                                     0.0, maxOffset_);
     if (offset_ == next) {
         return {};
     }
+
     (void)SetScrollOffset(next);
     return {.handled = true};
 }

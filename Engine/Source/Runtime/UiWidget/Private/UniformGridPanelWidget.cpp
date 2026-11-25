@@ -13,12 +13,14 @@ Result<void> UniformGridPanelWidget::SetCellPadding(Vec4 value) noexcept {
     if (!SlotPlacement{value}.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto applied = static_cast<UniformGrid&>(*live).SetCellPadding(value);
         if (!applied) {
             return applied;
         }
     }
+
     cellPadding_ = value;
     return Result<void>::Success();
 }
@@ -27,12 +29,14 @@ Result<void> UniformGridPanelWidget::SetMinimumCellSize(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < 0 || value.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto applied = static_cast<UniformGrid&>(*live).SetMinimumCellSize(value);
         if (!applied) {
             return applied;
         }
     }
+
     minimumCellSize_ = value;
     return Result<void>::Success();
 }
@@ -54,15 +58,18 @@ Result<SharedPtr<Element>> UniformGridPanelWidget::CreatePanel(Allocator& alloca
     if (!made) {
         return made;
     }
+
     auto& grid = static_cast<UniformGrid&>(*made.Value());
     auto padding = grid.SetCellPadding(cellPadding_);
     if (!padding) {
         return Result<SharedPtr<Element>>::Failure(padding.Error());
     }
+
     auto size = grid.SetMinimumCellSize(minimumCellSize_);
     if (!size) {
         return Result<SharedPtr<Element>>::Failure(size.Error());
     }
+
     return made;
 }
 
@@ -87,6 +94,7 @@ Result<void> UniformGridPanelWidget::AttachChild(ObjectRegistry& objects, Object
     if (!slot) {
         return Result<void>::Failure(slot.Error());
     }
+
     const auto* data = slot.Value().Get().Value();
     const auto layout = data->Layout();
     return static_cast<UniformGrid&>(panel).TryAddSlot(

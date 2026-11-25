@@ -2,7 +2,9 @@
 #include <Core/Text/Json.h>
 
 namespace rocks::ui {
+
 namespace {
+
 struct SlotDefault {
     StringView key;
     uint32 rgba;
@@ -70,12 +72,14 @@ constexpr SlotDefault Defaults[] = {{"Black", 0x000000FFu},
                                     {"User15", 0x00000000u},
                                     {"User16", 0x00000000u}};
 static_assert(sizeof(Defaults) / sizeof(Defaults[0]) == static_cast<usize>(ThemeSlot::Count));
+
 } // namespace
 ThemeColors::ThemeColors() noexcept {
     for (usize i = 0; i < static_cast<usize>(ThemeSlot::Count); ++i) {
         values_[i] = LinearColor::FromSRGB(Color::FromPackedRGBA(Defaults[i].rgba));
     }
 }
+
 const ThemeColors& DefaultThemeColors() noexcept {
     static const ThemeColors theme;
     return theme;
@@ -84,6 +88,7 @@ const ThemeColors& DefaultThemeColors() noexcept {
 LinearColor ThemeColors::Get(ThemeSlot slot) const noexcept {
     return slot < ThemeSlot::Count ? values_[static_cast<usize>(slot)] : LinearColor{};
 }
+
 Result<void> ThemeColors::Load(Allocator& allocator, StringView engine, StringView project,
                                StringView user) noexcept {
     ThemeColors pending;
@@ -92,6 +97,7 @@ Result<void> ThemeColors::Load(Allocator& allocator, StringView engine, StringVi
         if (layer.IsEmpty()) {
             continue;
         }
+
         JsonDocument doc(allocator);
         const auto parsed = doc.Parse(layer);
         if (!parsed.Succeeded()) {
@@ -99,10 +105,12 @@ Result<void> ThemeColors::Load(Allocator& allocator, StringView engine, StringVi
                                              ? ErrorCode::OutOfMemory
                                              : ErrorCode::InvalidArgument);
         }
+
         const auto colors = doc.Root().Find("colors");
         if (!colors.IsObject()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         for (usize i = 0; i < colors.Size(); ++i) {
             const auto key = colors.KeyAt(i);
             const auto value = colors.ValueAt(i);
@@ -110,16 +118,20 @@ Result<void> ThemeColors::Load(Allocator& allocator, StringView engine, StringVi
             if (!value.IsString() || !Color::TryParseHex(value.GetString(), srgb)) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
+
             usize slot = 0;
             while (slot < static_cast<usize>(ThemeSlot::Count) && Defaults[slot].key != key) {
                 ++slot;
             }
+
             if (slot == static_cast<usize>(ThemeSlot::Count)) {
                 return Result<void>::Failure(ErrorCode::NotFound);
             }
+
             pending.values_[slot] = LinearColor::FromSRGB(srgb);
         }
     }
+
     *this = pending;
     return Result<void>::Success();
 }

@@ -25,6 +25,7 @@ Result<void> UniformGridWidgetSlot::UpdateLayout(ObjectRegistry& objects, const 
     if (layout.x < 0 || layout.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto applied = UpdateLiveWidgetSlot<UniformGridPanelWidget, UniformGrid>(
         objects, *this,
         [&layout, horizontal, vertical](UniformGrid& panel, Element& child) noexcept {
@@ -34,6 +35,7 @@ Result<void> UniformGridWidgetSlot::UpdateLayout(ObjectRegistry& objects, const 
     if (!applied) {
         return applied;
     }
+
     return Configure(layout, horizontal, vertical);
 }
 
@@ -43,6 +45,7 @@ Result<void> UniformGridWidgetSlot::Configure(const IntVec2& layout, StackAlignm
     if (layout.x < 0 || layout.y < 0 || !placement.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     x_ = layout.x;
     y_ = layout.y;
     horizontal_ = static_cast<uint8>(horizontal);

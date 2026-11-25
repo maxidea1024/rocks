@@ -13,13 +13,16 @@ Result<void> TextLayoutWidget::ApplyTextLayout(TextLabel& label) const noexcept 
             label.SetParagraphStyle({margin_, lineHeightPercentage_, applyLineHeightToBottomLine_},
                                     shadowOffset_, shadowColor_);
     }
+
     if (ready) {
         ready = label.SetMinDesiredWidth(minDesiredWidth_);
     }
+
     if (ready) {
         label.SetDecoration(underline_, strikeThrough_);
         label.SetClipToBounds(clipText_);
     }
+
     return ready;
 }
 
@@ -31,12 +34,14 @@ Result<void> TextLayoutWidget::SetLayout(float width, text::TextAlignment alignm
          alignment != text::TextAlignment::Right)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto set = ResolveTextLabel(*live).SetLayoutOptions(width, alignment, automatic, policy);
         if (!set) {
             return set;
         }
     }
+
     wrapWidth_ = width;
     justification_ = static_cast<uint8>(alignment);
     autoWrapText_ = automatic;
@@ -80,6 +85,7 @@ Result<void> TextLayoutWidget::SetParagraph(const text::ParagraphMetrics& metric
     if (!metrics.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto applied =
             ResolveTextLabel(*live).SetParagraphStyle(metrics, shadowOffset_, shadowColor_);
@@ -87,6 +93,7 @@ Result<void> TextLayoutWidget::SetParagraph(const text::ParagraphMetrics& metric
             return applied;
         }
     }
+
     margin_ = metrics.margin;
     lineHeightPercentage_ = metrics.lineHeightScale;
     applyLineHeightToBottomLine_ = metrics.scaleLastLine;
@@ -101,12 +108,14 @@ Result<void> TextLayoutWidget::SetMinDesiredWidth(float width) noexcept {
     if (!math::IsFinite(width) || width < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto set = ResolveTextLabel(*live).SetMinDesiredWidth(width);
         if (!set) {
             return set;
         }
     }
+
     minDesiredWidth_ = width;
     return Result<void>::Success();
 }
@@ -127,6 +136,7 @@ Result<void> TextLayoutWidget::SetTextShadow(Vec2 offset, LinearColor color) noe
     if (!offset.IsFinite() || !color.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto applied = ResolveTextLabel(*live).SetParagraphStyle(
             {margin_, lineHeightPercentage_, applyLineHeightToBottomLine_}, offset, color);
@@ -134,6 +144,7 @@ Result<void> TextLayoutWidget::SetTextShadow(Vec2 offset, LinearColor color) noe
             return applied;
         }
     }
+
     shadowOffset_ = offset;
     shadowColor_ = color;
     return Result<void>::Success();

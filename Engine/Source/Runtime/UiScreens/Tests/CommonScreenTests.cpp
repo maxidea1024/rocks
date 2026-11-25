@@ -121,6 +121,7 @@ TEST(UiScreens_NamedTabChangesSwitcherPageAndSkipsDisabledTab) {
             if (button) {
                 button.Value()->SetDesiredSize({30, 20});
             }
+
             return button;
         })));
     auto view = bar->TakeElement(objects);

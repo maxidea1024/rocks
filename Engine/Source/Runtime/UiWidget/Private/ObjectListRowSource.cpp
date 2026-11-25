@@ -19,10 +19,12 @@ uint64 ObjectListRowSource::RootKey(uint32 index) const noexcept {
     if (!owner) {
         return 0;
     }
+
     const auto items = owner.Value().Get().Value()->Items();
     if (index >= items.Size()) {
         return 0;
     }
+
     const auto value = items[index];
     return (static_cast<uint64>(value.slot) << 32) | value.generation;
 }

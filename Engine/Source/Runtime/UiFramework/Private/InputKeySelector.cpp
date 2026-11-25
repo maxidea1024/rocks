@@ -10,14 +10,17 @@ Result<void> InputKeySelector::Construct(Args&& args) noexcept {
         SetDesiredSize({100, 24});
         result = SetSelectedKey(args.selectedKey);
     }
+
     if (result) {
         result = SetCaption(Move(args.caption));
     }
+
     if (result) {
         SetAllowModifiers(args.allowModifiers);
         SetAllowGamepad(args.allowGamepad);
         SetOnSelected(Move(args.onSelected));
     }
+
     return result;
 }
 
@@ -30,12 +33,15 @@ Result<void> InputKeySelector::RefreshCaption(KeyChord chord, bool selecting) no
     if (!caption_) {
         return Result<void>::Success();
     }
+
     if (selecting) {
         return caption_.Execute("...");
     }
+
     if (chord == KeyChord{}) {
         return caption_.Execute("None");
     }
+
     StringBuilder<> label(allocator_);
     auto result = label.TryAppendFormat("{}{}{}{}{}", chord.control ? "Ctrl+" : "",
                                         chord.alt ? "Alt+" : "", chord.shift ? "Shift+" : "",
@@ -43,6 +49,7 @@ Result<void> InputKeySelector::RefreshCaption(KeyChord chord, bool selecting) no
     if (!result) {
         return result;
     }
+
     return caption_.Execute(label.View());
 }
 
@@ -50,11 +57,13 @@ Result<void> InputKeySelector::SetSelectedKey(KeyChord chord) noexcept {
     if (!chord.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto result = RefreshCaption(chord, false);
     if (result) {
         selected_ = chord;
         selecting_ = false;
     }
+
     return result;
 }
 
@@ -102,16 +111,20 @@ bool InputKeySelector::OnPreviewKeyChord(uint32 user, const input::InputEvent& e
     if (!selecting_ || selectingUser_ != user) {
         return false;
     }
+
     if (event.repeat || event.key == input::Key::None || KeyModifierBit(event.key)) {
         return true;
     }
+
     if (event.key == input::Key::Escape) {
         Cancel();
         return true;
     }
+
     if (!allowModifiers_) {
         chord = {event.key};
     }
+
     Select(chord);
     return true;
 }
@@ -128,6 +141,7 @@ PointerReply InputKeySelector::OnPreviewPointerDown(const PointerEvent& event) n
         Select({.mouse = event.button});
         return {.handled = true};
     }
+
     return {};
 }
 
@@ -135,11 +149,13 @@ PointerReply InputKeySelector::OnPointerEvent(const PointerEvent& event) noexcep
     if (selecting_) {
         return {};
     }
+
     if (event.source == PointerSource::Mouse && event.type == PointerEventType::Down &&
         event.button == input::MouseButton::Right && selected_ != KeyChord{}) {
         Select({});
         return {.handled = true};
     }
+
     activationUser_ = event.userId;
     return Button::OnPointerEvent(event);
 }
@@ -149,13 +165,16 @@ bool InputKeySelector::OnGamepadButtonDown(uint32 user, input::GamepadButton but
         if (allowGamepad_) {
             Select({.gamepad = button});
         }
+
         return true;
     }
+
     if (!selecting_ && allowGamepad_ && button == input::GamepadButton::West &&
         selected_ != KeyChord{}) {
         Select({});
         return true;
     }
+
     return false;
 }
 
@@ -163,6 +182,7 @@ bool InputKeySelector::OnKeyEvent(uint32 user, const input::InputEvent& event) n
     if (selecting_) {
         return true;
     }
+
     activationUser_ = user;
     return Button::OnKeyEvent(user, event);
 }

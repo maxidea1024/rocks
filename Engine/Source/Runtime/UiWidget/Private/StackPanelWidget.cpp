@@ -3,6 +3,7 @@
 #include <UiFramework/StackPanel.h>
 
 namespace rocks::ui {
+
 StackPanelWidget::StackPanelWidget(Allocator& allocator) noexcept : PanelWidget(allocator) {
 }
 
@@ -26,6 +27,7 @@ Result<void> StackPanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandle
                    ? PanelWidget::AttachChild(objects, id, panel, child)
                    : Result<void>::Failure(slot.Error());
     }
+
     return static_cast<StackPanel&>(panel).TryAddSlot(child, slot.Value().Get().Value()->Layout());
 }
 } // namespace rocks::ui

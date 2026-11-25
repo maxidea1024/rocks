@@ -15,15 +15,18 @@ Result<void> Screen::BindAction(Guid action, Delegate<bool()>&& callback) noexce
     if (action == Guid{} || !callback) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (const auto& entry : bindings_) {
         if (entry.action == action) {
             return Result<void>::Failure(ErrorCode::AlreadyExists);
         }
     }
+
     auto owned = SharedPtr<Delegate<bool()>>::TryMake(bindings_.GetAllocator(), Move(callback));
     if (!owned) {
         return Result<void>::Failure(owned.Error());
     }
+
     return bindings_.TryPushBack({action, Move(owned.Value())});
 }
 
@@ -33,6 +36,7 @@ bool Screen::UnbindAction(Guid action) noexcept {
             return static_cast<bool>(bindings_.TryRemoveAt(i));
         }
     }
+
     return false;
 }
 
@@ -47,18 +51,22 @@ bool Screen::DispatchBoundAction(Guid action) noexcept {
             break;
         }
     }
+
     return active_ && HandleAction(action);
 }
 
 void Screen::SetActionDomain(Guid domain) noexcept {
     domain_ = domain;
 }
+
 void Screen::SetInputConfig(ScreenInputConfig config) noexcept {
     config_ = config;
 }
+
 void Screen::SetModal(bool modal) noexcept {
     modal_ = modal;
 }
+
 Result<void> Screen::SetFocusTarget(ObjectRegistry& objects, ObjectHandle widget) noexcept {
     return objects.SetReference(objects.OwnerAccess(), Handle(), focusTarget_, widget);
 }
@@ -66,12 +74,15 @@ Result<void> Screen::SetFocusTarget(ObjectRegistry& objects, ObjectHandle widget
 bool Screen::IsActive() const noexcept {
     return active_;
 }
+
 bool Screen::IsModal() const noexcept {
     return modal_;
 }
+
 ScreenInputConfig Screen::InputConfig() const noexcept {
     return config_;
 }
+
 ObjectHandle Screen::FocusTarget() const noexcept {
     return focusTarget_.Handle();
 }
@@ -84,6 +95,7 @@ Result<void> Screen::Dismiss() noexcept {
 Guid Screen::ActionDomain() const noexcept {
     return domain_;
 }
+
 bool Screen::HandleAction(Guid) noexcept {
     return false;
 }
@@ -91,8 +103,10 @@ bool Screen::HandleAction(Guid) noexcept {
 bool Screen::OnBack() noexcept {
     return false;
 }
+
 void Screen::OnActivated() noexcept {
 }
+
 void Screen::OnDeactivated() noexcept {
 }
 

@@ -15,12 +15,14 @@ Result<void> Carousel::AddPage(const SharedPtr<CarouselPage>& page) noexcept {
     if (!page || page->Parent()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (cache_ || ChildCount() == 0) {
         auto ready = page->Materialize();
         if (!ready) {
             return ready;
         }
     }
+
     return Element::TryAddChild(page);
 }
 
@@ -28,6 +30,7 @@ Result<void> Carousel::SetCacheChildren(bool cache) noexcept {
     if (cache == cache_) {
         return Result<void>::Success();
     }
+
     for (usize i = 0; i < ChildCount(); ++i) {
         auto& page = static_cast<CarouselPage&>(*ChildAt(i));
         if (cache) {
@@ -37,12 +40,14 @@ Result<void> Carousel::SetCacheChildren(bool cache) noexcept {
                         static_cast<CarouselPage&>(*ChildAt(j)).ReleaseContent();
                     }
                 }
+
                 return made;
             }
         } else if (&page != ActiveChild() && &page != sliding_[0].Get()) {
             page.ReleaseContent();
         }
     }
+
     cache_ = cache;
     return Result<void>::Success();
 }
@@ -59,6 +64,7 @@ void Carousel::Finish() noexcept {
     if (previous && previous.Get() != ActiveChild() && !cache_) {
         static_cast<CarouselPage&>(*previous).ReleaseContent();
     }
+
     if (previous) {
         InvalidateLayout();
     }
@@ -68,21 +74,26 @@ Result<void> Carousel::Show(usize index, bool forward, float speed) noexcept {
     if (index >= ChildCount() || !math::IsFinite(speed) || speed < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (ActiveChild() != ChildAt(index)) {
         Finish();
     }
+
     auto next = ChildRefAt(index);
     if (auto ready = static_cast<CarouselPage&>(*next).Materialize(); !ready) {
         return ready;
     }
+
     if (ActiveChild() == next.Get()) {
         return Result<void>::Success();
     }
+
     auto previous = FindChild(ActiveChild());
     auto changed = SetActiveIndex(index);
     if (!changed) {
         return changed;
     }
+
     sliding_[0] = Move(previous);
     sliding_[1] = Move(next);
     if (speed > 0 && sliding_[0]) {
@@ -94,6 +105,7 @@ Result<void> Carousel::Show(usize index, bool forward, float speed) noexcept {
     } else {
         Finish();
     }
+
     return Result<void>::Success();
 }
 
@@ -101,6 +113,7 @@ bool Carousel::RemoveChild(Element& page) noexcept {
     if (page.Parent() != this) {
         return false;
     }
+
     const bool removed = Switcher::RemoveChild(page);
     Finish();
     return removed;
@@ -114,11 +127,13 @@ Result<void> Carousel::Arrange(const Geometry& geometry) noexcept {
     if (!sliding_[0]) {
         return Switcher::Arrange(geometry);
     }
+
     const float progress = progress_.Get();
     if (progress >= 1) {
         Finish();
         return Switcher::Arrange(geometry);
     }
+
     SetGeometry(geometry);
     const float distance = direction_ * geometry.size.x;
     for (usize i = 0; i < 2; ++i) {
@@ -129,6 +144,7 @@ Result<void> Carousel::Arrange(const Geometry& geometry) noexcept {
             return result;
         }
     }
+
     return Result<void>::Success();
 }
 

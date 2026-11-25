@@ -1,9 +1,12 @@
 #include <UiScreens/ScreenContainerWidget.h>
+
 namespace rocks::ui {
+
 Result<void> ScreenContainerWidget::BindPlayer(Application& app, uint32 user) noexcept {
     if (auto view = CachedElement(); view && (app_ != &app || user_ != user)) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     app_ = &app;
     user_ = user;
     return Result<void>::Success();

@@ -11,6 +11,7 @@ class TestElement final : public Element {
 public:
     explicit TestElement(Allocator& allocator) noexcept : Element(allocator) {
     }
+
     PointerReply OnPreviewPointerDown(const PointerEvent&) noexcept override {
         ++previewCalls;
         return {.handled = consumePreview};
@@ -21,11 +22,14 @@ public:
         if (removeOnEvent != nullptr) {
             (void)RemoveChild(*removeOnEvent);
         }
+
         if (removeSelf && Parent() != nullptr) {
             (void)Parent()->RemoveChild(*this);
         }
+
         return {.handled = consume};
     }
+
     int calls = 0;
     int previewCalls = 0;
     bool consume = false;

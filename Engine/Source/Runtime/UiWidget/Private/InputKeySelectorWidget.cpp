@@ -17,6 +17,7 @@ Result<void> InputKeySelectorWidget::StoreChord(KeyChord chord) noexcept {
         alt_ = chord.alt;
         super_ = chord.super;
     }
+
     return stored;
 }
 
@@ -24,6 +25,7 @@ Result<void> InputKeySelectorWidget::SetSelectedKey(KeyChord chord) noexcept {
     if (!chord.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto live = CachedElement();
     if (live) {
         auto updated = static_cast<InputKeySelector&>(*live).SetSelectedKey(chord);
@@ -31,10 +33,12 @@ Result<void> InputKeySelectorWidget::SetSelectedKey(KeyChord chord) noexcept {
             return updated;
         }
     }
+
     auto stored = StoreChord(chord);
     if (!stored && live) {
         (void)static_cast<InputKeySelector&>(*live).SetSelectedKey(SelectedKey());
     }
+
     return stored;
 }
 
@@ -72,24 +76,29 @@ Result<SharedPtr<Element>> InputKeySelectorWidget::BuildElement(ObjectRegistry& 
     if (!made) {
         return Result<SharedPtr<Element>>::Failure(made.Error());
     }
+
     auto& selector = *made.Value();
     if (!keyName_.View().IsEmpty() && !KeyChord::FromInputName(keyName_.View())) {
         return Result<SharedPtr<Element>>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto initialized = selector.SetSelectedKey(SelectedKey());
     if (!initialized) {
         return Result<SharedPtr<Element>>::Failure(initialized.Error());
     }
+
     selector.SetAllowModifiers(allowModifiers_);
     selector.SetAllowGamepad(allowGamepad_);
     auto caption = AttachControlCaption(objects, Handle(), selector);
     if (!caption) {
         return Result<SharedPtr<Element>>::Failure(caption.Error());
     }
+
     initialized = selector.SetCaption(Move(caption.Value()));
     if (!initialized) {
         return Result<SharedPtr<Element>>::Failure(initialized.Error());
     }
+
     selector.SetOnSelected(Delegate<void(KeyChord)>::CreateLambda(
         [&objects, owner = Handle(), native = &selector](KeyChord chord) noexcept {
             auto widget =

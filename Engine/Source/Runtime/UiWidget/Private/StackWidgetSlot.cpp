@@ -4,12 +4,14 @@
 #include <UiFramework/StackPanel.h>
 
 namespace rocks::ui {
+
 Result<void> StackWidgetSlot::Configure(const StackSlot& layout) noexcept {
     StackPlacement placement;
     auto valid = ArrangeStack({&layout, 1}, {&placement, 1}, 0);
     if (!valid || layout.alignment > StackAlignment::End) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     rule_ = static_cast<uint8>(layout.rule);
     weight_ = layout.weight;
     minSize_ = layout.minSize;
@@ -27,28 +29,34 @@ Result<void> StackWidgetSlot::SetLayout(ObjectRegistry& objects, const StackSlot
     if (!content) {
         return Result<void>::Failure(content.Error());
     }
+
     auto* widget = content.Value().Get().Value();
     if (widget->Slot() != Handle()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     auto owner = objects.GetOuter(access, Handle());
     if (!owner) {
         return Result<void>::Failure(owner.Error());
     }
+
     auto panel = objects.Resolve<StackPanelWidget>(access, owner.Value());
     if (!panel) {
         return Result<void>::Failure(panel.Error());
     }
+
     if (auto native = panel.Value().Get().Value()->CachedElement()) {
         auto child = widget->CachedElement();
         if (!child) {
             return Result<void>::Failure(ErrorCode::NotReady);
         }
+
         auto updated = static_cast<StackPanel&>(*native).SetSlotLayout(*child, layout);
         if (!updated) {
             return updated;
         }
     }
+
     return Configure(layout);
 }
 

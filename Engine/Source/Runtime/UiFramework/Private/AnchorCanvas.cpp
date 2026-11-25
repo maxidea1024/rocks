@@ -13,11 +13,13 @@ Result<void> AnchorCanvas::Construct(const Args& args) noexcept {
         if (slot.content.error != ErrorCode::None) {
             return Result<void>::Failure(slot.content.error);
         }
+
         auto added = TryAddSlot(slot.content.element, slot.layout);
         if (!added) {
             return added;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -40,6 +42,7 @@ bool AnchorCanvas::RemoveChild(Element& child) noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -53,15 +56,18 @@ Result<void> AnchorCanvas::TryAddSlot(const SharedPtr<Element>& child,
     while (index < slots_.Size() && slots_[index].zOrder <= slot.zOrder) {
         ++index;
     }
+
     auto addedSlot = slots_.TryInsert(slot, index);
     if (!addedSlot) {
         return addedSlot;
     }
+
     auto addedChild = TryInsertChild(index, child);
     if (!addedChild) {
         (void)slots_.TryRemoveAt(index);
         return addedChild;
     }
+
     return Result<void>::Success();
 }
 
@@ -69,13 +75,16 @@ Result<void> AnchorCanvas::SetSlot(Element& child, const CanvasSlot& slot) noexc
     if (!slot.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     usize index = 0;
     while (index < ChildCount() && ChildAt(index) != &child) {
         ++index;
     }
+
     if (index == ChildCount()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     if (slots_[index] == slot) {
         return Result<void>::Success();
     }
@@ -90,8 +99,10 @@ Result<void> AnchorCanvas::SetSlot(Element& child, const CanvasSlot& slot) noexc
             slots_[destination] = slots_[destination - 1];
             --destination;
         }
+
         MoveChildWithin(index, destination);
     }
+
     slots_[destination] = slot;
     InvalidateLayout();
     return Result<void>::Success();
@@ -109,6 +120,7 @@ Result<void> AnchorCanvas::Arrange(const Geometry& geometry) noexcept {
         if (child->GetVisibility() == Visibility::Collapsed) {
             continue;
         }
+
         const CanvasSlot& slot = slots_[i];
         const Vec2 anchorStart = slot.anchorMin * geometry.size;
         const Vec2 anchorEnd = slot.anchorMax * geometry.size;
@@ -124,21 +136,25 @@ Result<void> AnchorCanvas::Arrange(const Geometry& geometry) noexcept {
             extent.x = math::Max(0.0f, size.x);
             position.x -= size.x * slot.alignment.x;
         }
+
         if (slot.anchorMin.y != slot.anchorMax.y) {
             extent.y = math::Max(0.0f, anchorEnd.y - position.y - slot.offset.w);
         } else {
             extent.y = math::Max(0.0f, size.y);
             position.y -= size.y * slot.alignment.y;
         }
+
         if (!position.IsFinite() || !extent.IsFinite()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         const AffineTransform2D offset{1, 0, 0, 1, position.x, position.y};
         auto result = child->ArrangeIfNeeded(GetGeometry().MakeChild(extent, offset, {}, {}));
         if (!result) {
             return result;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -158,6 +174,7 @@ Vec2 AnchorCanvas::ComputeDesiredSize(float) const noexcept {
             desired.y = math::Max(desired.y, size.y + (dockY ? math::Abs(slot.offset.y) : 0.0f));
         }
     }
+
     return desired;
 }
 

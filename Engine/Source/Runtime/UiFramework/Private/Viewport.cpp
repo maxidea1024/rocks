@@ -7,11 +7,13 @@ Result<void> Viewport::Construct(Args&& args) noexcept {
     if (!args.background.value.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto attached = args.content.AttachTo(*this);
     if (attached) {
         scene_.Assign(Move(args.scene));
         background_.Assign(Move(args.background));
     }
+
     return attached;
 }
 
@@ -48,6 +50,7 @@ void Viewport::SetSceneSource(SharedPtr<WidgetSurfaceScene> scene) noexcept {
         InvalidatePaintPlan();
     }
 }
+
 SharedPtr<WidgetSurfaceScene> Viewport::SceneSource() const noexcept {
     return source_;
 }
@@ -60,6 +63,7 @@ Result<void> Viewport::SetBackground(LinearColor color) noexcept {
     if (!color.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     background_.Set(color);
     return Result<void>::Success();
 }
@@ -70,6 +74,7 @@ Result<void> Viewport::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (!filled || texture.IsNull()) {
         return filled;
     }
+
     PaintBox box{GetGeometry(), {1, 1, 1, 1}, layer};
     box.resource = texture;
     return list.TryAddBox(box);

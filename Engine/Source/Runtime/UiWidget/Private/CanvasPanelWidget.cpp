@@ -34,6 +34,7 @@ Result<void> CanvasPanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandl
     if (!slot) {
         return Result<void>::Failure(slot.Error());
     }
+
     const auto layout = slot.Value().Get().Value()->Layout();
     return static_cast<AnchorCanvas&>(panel).TryAddSlot(child, layout);
 }

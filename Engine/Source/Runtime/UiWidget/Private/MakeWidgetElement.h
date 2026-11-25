@@ -11,6 +11,7 @@ Result<SharedPtr<Element>> MakeWidgetElement(Allocator& allocator, Args&&... arg
     if (!value) {
         return Result<SharedPtr<Element>>::Failure(value.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(Move(value.Value()));
 }
 

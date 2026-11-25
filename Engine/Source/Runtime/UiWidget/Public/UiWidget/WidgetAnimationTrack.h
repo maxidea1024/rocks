@@ -24,6 +24,7 @@ struct ROCKS_UIWIDGET_API WidgetAnimationTrack {
     ROCKS_GENERATED_BODY()
     explicit WidgetAnimationTrack(Allocator& allocator) noexcept : curve(allocator) {
     }
+
     ROCKS_PROPERTY() Guid target {};
     ROCKS_PROPERTY() uint8 channel = 0;
     ROCKS_PROPERTY() TangentCurve curve;

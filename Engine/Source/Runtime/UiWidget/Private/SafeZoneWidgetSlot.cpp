@@ -9,14 +9,17 @@ Result<void> SafeZoneWidgetSlot::SetSafety(ObjectRegistry& objects, bool titleSa
     if (!outer) {
         return Result<void>::Failure(outer.Error());
     }
+
     auto owner = objects.ResolveForWrite<SafeZoneWidget>(objects.OwnerAccess(), outer.Value());
     if (!owner) {
         return Result<void>::Failure(owner.Error());
     }
+
     auto applied = owner.Value().Get().Value()->UpdateSafety(Handle(), titleSafe, scale);
     if (!applied) {
         return applied;
     }
+
     titleSafe_ = titleSafe;
     safeAreaScale_ = scale;
     return Result<void>::Success();

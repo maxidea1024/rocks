@@ -13,9 +13,11 @@ Result<void> ListViewWidget::UseObjectItems(ObjectRegistry& objects, Application
     if (CachedElement()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (!create || !bind) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto source = SharedRef<ObjectListRowSource>::TryMake(objects.ObjectAllocator(), objects,
                                                           Handle(), Move(create), Move(bind));
     return source ? SetSource(app, source.Value()) : Result<void>::Failure(source.Error());
@@ -31,6 +33,7 @@ Optional<uint32> ListViewWidget::FindItem(ObjectHandle item) const noexcept {
             return i;
         }
     }
+
     return {};
 }
 
@@ -43,13 +46,16 @@ Result<void> ListViewWidget::InsertItem(ObjectRegistry& objects, usize index,
     if (item.IsNull()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (FindItem(item)) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     auto added = objects.InsertReferenceAt(objects.OwnerAccess(), Handle(), items_, index, item);
     if (added) {
         Refresh();
     }
+
     return added;
 }
 
@@ -58,6 +64,7 @@ Result<void> ListViewWidget::RemoveItem(ObjectRegistry& objects, ObjectHandle it
     if (removed) {
         Refresh();
     }
+
     return removed;
 }
 
@@ -67,6 +74,7 @@ Result<void> ListViewWidget::ClearItems(ObjectRegistry& objects) noexcept {
         Refresh();
         ClearSelection();
     }
+
     return cleared;
 }
 
@@ -90,10 +98,12 @@ Result<void> ListViewWidget::SetRowHeight(float height) noexcept {
     if (!math::IsFinite(height) || height <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     rowHeight_ = height;
     if (auto live = CachedElement()) {
         return static_cast<ListView&>(*live).SetRowHeight(height);
     }
+
     return Result<void>::Success();
 }
 

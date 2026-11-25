@@ -15,11 +15,13 @@ Result<void> ProgressBar::Construct(Args&& args) noexcept {
     if (result) {
         result = SetDirection(args.direction);
     }
+
     if (result) {
         BindValue(Move(args.value));
         SetFillColor(args.fillColor);
         SetMarquee(args.marquee);
     }
+
     return result;
 }
 
@@ -31,10 +33,12 @@ Result<void> ProgressBar::SetDirection(ProgressDirection direction) noexcept {
     if (direction > ProgressDirection::FromCenterVertical) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (direction_ != direction) {
         direction_ = direction;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -42,40 +46,51 @@ Result<void> ProgressBar::SetFillBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (brush != fillBrush_) {
         fillBrush_ = brush;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
+
 Result<void> ProgressBar::SetFillStyle(ProgressFillStyle style) noexcept {
     if (style > ProgressFillStyle::Mask) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (style != fillStyle_) {
         fillStyle_ = style;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
+
 Result<void> ProgressBar::SetBorderPadding(Vec2 padding) noexcept {
     if (!padding.IsFinite() || padding.x < 0 || padding.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (padding != borderPadding_) {
         borderPadding_ = padding;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
+
 void ProgressBar::SetMarquee(bool enabled) noexcept {
     if (marquee_ == enabled) {
         return;
     }
+
     marquee_ = enabled;
     if (enabled) {
         marqueeStart_ = platform::MonotonicNanoseconds();
     }
+
     SetVolatile(enabled);
     InvalidatePaint();
 }
@@ -84,6 +99,7 @@ Result<void> ProgressBar::SetValue(float value) noexcept {
     if (!math::IsFinite(value)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     value_.Set(math::Clamp(value, 0.0f, 1.0f));
     return Result<void>::Success();
 }
@@ -106,12 +122,14 @@ Result<void> ProgressBar::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (!background || (!marquee_ && value <= 0)) {
         return background;
     }
+
     const auto& bounds = GetGeometry();
     const Vec2 usable{math::Max(bounds.size.x - borderPadding_.x * 2, 0.0f),
                       math::Max(bounds.size.y - borderPadding_.y * 2, 0.0f)};
     if (usable.x == 0 || usable.y == 0) {
         return background;
     }
+
     const auto area =
         bounds.MakeChild(usable, {1, 0, 0, 1, borderPadding_.x, borderPadding_.y}, {}, {});
     Vec2 size = area.size;
@@ -153,10 +171,12 @@ Result<void> ProgressBar::OnPaint(PaintList& list, int32 layer) const noexcept {
             break;
         }
     }
+
     const auto part = area.MakeChild(size, {1, 0, 0, 1, offset.x, offset.y}, {}, {});
     if (fillStyle_ == ProgressFillStyle::Scale || marquee_) {
         return list.TryAddBrush(part, fillBrush_, fillColor_, layer);
     }
+
     return list.TryAddBrushRegion(area, fillBrush_, fillColor_, layer, {offset, offset + size});
 }
 

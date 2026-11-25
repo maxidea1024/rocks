@@ -16,6 +16,7 @@ Result<void> TreeView::SetExpanded(uint64 key, bool expanded) noexcept {
     if (expanded == IsExpanded(key)) {
         return Result<void>::Success();
     }
+
     if (expanded) {
         auto added = expanded_.Add(key);
         if (!added) {
@@ -24,6 +25,7 @@ Result<void> TreeView::SetExpanded(uint64 key, bool expanded) noexcept {
     } else {
         expanded_.Erase(key);
     }
+
     Refresh();
     return Result<void>::Success();
 }
@@ -49,6 +51,7 @@ Result<void> TreeView::PrepareItems() noexcept {
     if (!hierarchyDirty_) {
         return Result<void>::Success();
     }
+
     return RebuildHierarchy(false);
 }
 
@@ -57,6 +60,7 @@ Result<void> TreeView::ExpandAll() noexcept {
     if (result) {
         ListView::Refresh();
     }
+
     return result;
 }
 
@@ -79,6 +83,7 @@ Result<void> TreeView::RebuildHierarchy(bool expandAll) noexcept {
     if (!pushed) {
         return pushed;
     }
+
     // 펼친 마디만 전위 순회한다. 순환 또는 중복 키가 있으면 이전에 표시하던 목록을 보존한다.
     while (!stack.IsEmpty()) {
         auto& cursor = stack[stack.Size() - 1];
@@ -86,9 +91,11 @@ Result<void> TreeView::RebuildHierarchy(bool expandAll) noexcept {
             (void)stack.TryRemoveAt(stack.Size() - 1);
             continue;
         }
+
         if (ordered.Size() == NumericLimits<uint32>::Max()) {
             return Result<void>::Failure(ErrorCode::CapacityExceeded);
         }
+
         const auto depth = static_cast<uint32>(stack.Size() - 1);
         const auto index = cursor.next++;
         const uint64 key =
@@ -97,13 +104,16 @@ Result<void> TreeView::RebuildHierarchy(bool expandAll) noexcept {
         if (!inserted) {
             return Result<void>::Failure(inserted.Error());
         }
+
         if (inserted.Value() != InsertOutcome::Inserted) {
             return Result<void>::Failure(ErrorCode::AlreadyExists);
         }
+
         auto stored = ordered.TryPushBack({key, depth});
         if (!stored) {
             return stored;
         }
+
         if (expandAll || expanded_.Contains(key)) {
             const auto children = source_.ChildCount(key);
             if (children) {
@@ -113,6 +123,7 @@ Result<void> TreeView::RebuildHierarchy(bool expandAll) noexcept {
                         return Result<void>::Failure(marked.Error());
                     }
                 }
+
                 auto step = stack.TryPushBack({key, 0, children});
                 if (!step) {
                     return step;
@@ -120,9 +131,11 @@ Result<void> TreeView::RebuildHierarchy(bool expandAll) noexcept {
             }
         }
     }
+
     if (expandAll) {
         expanded_ = Move(allExpanded);
     }
+
     visible_ = Move(ordered);
     hierarchyDirty_ = false;
     return Result<void>::Success();

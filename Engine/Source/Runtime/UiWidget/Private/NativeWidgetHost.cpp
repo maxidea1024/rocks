@@ -8,23 +8,28 @@ Result<void> NativeWidgetHost::SetContent(const SharedPtr<Element>& content) noe
     if (content.Get() == content_.Get()) {
         return Result<void>::Success();
     }
+
     if (content && content->Parent()) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     if (auto host = CachedElement()) {
         if (content_) {
             (void)host->RemoveChild(*content_);
         }
+
         if (content) {
             auto attached = host->TryAddChild(content);
             if (!attached) {
                 if (content_) {
                     (void)host->TryAddChild(content_);
                 }
+
                 return attached;
             }
         }
     }
+
     content_ = content;
     return Result<void>::Success();
 }
@@ -37,6 +42,7 @@ Result<SharedPtr<Element>> NativeWidgetHost::BuildElement(ObjectRegistry& object
             return Result<SharedPtr<Element>>::Failure(attached.Error());
         }
     }
+
     return host;
 }
 
@@ -44,6 +50,7 @@ void NativeWidgetHost::ReleaseElements() noexcept {
     if (auto host = CachedElement(); host && content_) {
         (void)host->RemoveChild(*content_);
     }
+
     Widget::ReleaseElements();
 }
 

@@ -24,9 +24,11 @@ int Run(launch::ApplicationContext& context) noexcept {
         if (argument == "--surface-test") {
             surfaceTest = true;
         }
+
         if (argument == "--self-test") {
             selfTest = true;
         }
+
         if (argument == "--snapshot") {
             snapshot = true;
         }
@@ -44,11 +46,13 @@ int Run(launch::ApplicationContext& context) noexcept {
             return checked;
         }
     }
+
     auto created = graphics::CreateD3D11Device(
         allocator, {.preferSoftware = snapshot || selfTest || surfaceTest});
     if (!created) {
         return 1;
     }
+
     auto& device = *created.Value();
     // 장치의 UI 셰이더 집합이다(UiToolkit 9.1절 UW1a).
     DemoShaderSet shaders(allocator, device);
@@ -61,6 +65,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (!solid) {
         return 2;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(solid.Value());
     };
@@ -70,10 +75,12 @@ int Run(launch::ApplicationContext& context) noexcept {
             return checked;
         }
     }
+
     auto image = DrawBatchRenderer::CreateImagePipeline(device, ActiveShaders(), format);
     if (!image) {
         return 2;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(image.Value());
     };
@@ -81,6 +88,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (!mask) {
         return 2;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(mask.Value());
     };
@@ -89,6 +97,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (!map) {
         return 3;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(map.Value());
     };
@@ -97,6 +106,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (!resource) {
         return 3;
     }
+
     DemoText font(allocator, device, textures, mask.Value(), image.Value());
     if (!font.Initialize()) {
         return 4;
@@ -107,6 +117,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (!RegisterWidgetTypes(modules)) {
         return 5;
     }
+
     ObjectRegistry objects(allocator, types, {0x554944454d4full, 1});
     ObjectAccessScope scope(objects.OwnerAccess());
     OrbitWorkspace workspace(allocator, objects, font);
@@ -122,12 +133,14 @@ int Run(launch::ApplicationContext& context) noexcept {
     if (selfTest) {
         return VerifyWorkspaceInput(allocator, area.Value(), workspace.Commands());
     }
+
     if (snapshot) {
         return CaptureWorkspace(allocator, device, solid.Value(), textures, area.Value(),
                                 desc.width, desc.height)
                    ? 0
                    : 7;
     }
+
     auto window = platform::Window::Create(allocator, desc);
     if (!window) {
         return 8;
@@ -150,15 +163,18 @@ int Run(launch::ApplicationContext& context) noexcept {
             (void)area.Value()->RestoreLegacyLayout(layoutVersion, layoutBytes.View());
         }
     }
+
     {
         DockWindows windows(allocator, device, solid.Value(), textures, workspace.Commands());
         if (!windows.Run(Move(window.Value()), area.Value())) {
             return 9;
         }
     }
+
     if (!area.Value()->SaveLayout(layoutVersion, layoutBytes)) {
         return 10;
     }
+
     return WriteFileAtomically(files, allocator, directory, layoutFile, layoutBytes.View()) ? 0
                                                                                             : 10;
 }

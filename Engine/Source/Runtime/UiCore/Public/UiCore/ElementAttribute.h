@@ -43,6 +43,7 @@ struct Bindable {
     Bindable(T initial, Delegate<T()> binding = {}) noexcept
         : value(Move(initial)), getter(Move(binding)) {
     }
+
     Bindable(Delegate<T()> binding) noexcept : getter(Move(binding)) {
     }
 
@@ -56,6 +57,7 @@ public:
     ElementAttribute(Element& owner, T initial) noexcept
         : AttributeBinding(owner), value_(Move(initial)) {
     }
+
     const T& Get() const noexcept {
         return value_;
     }
@@ -71,6 +73,7 @@ public:
             Set(Move(source.value));
             return;
         }
+
         getter_ = Move(source.getter);
         SetRegistered(true);
     }

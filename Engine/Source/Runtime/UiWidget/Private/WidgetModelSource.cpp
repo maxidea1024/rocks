@@ -26,10 +26,12 @@ Result<void> WidgetModelConnections::Subscribe(const SharedPtr<WidgetFieldBindin
     if (!reserved) {
         return reserved;
     }
+
     auto added = stream->SubscribeField(source, field, target, Move(setter));
     if (!added) {
         return Result<void>::Failure(added.Error());
     }
+
     return handles_.TryPushBack({stream, added.Value()});
 }
 
@@ -45,6 +47,7 @@ struct BindingPair {
         if (updating) {
             return Result<void>::Success();
         }
+
         updating = true;
         ROCKS_ON_SCOPE_EXIT {
             updating = false;
@@ -64,6 +67,7 @@ Result<void> WidgetModelConnections::AddTwoWay(ObjectHandle model, Guid field, O
     if (!pair) {
         return Result<void>::Failure(pair.Error());
     }
+
     pair.Value()->forward = Move(forward);
     if (!reverse.IsBound()) {
         reverse = WidgetFieldBindings::Setter::CreateLambda(
@@ -73,10 +77,12 @@ Result<void> WidgetModelConnections::AddTwoWay(ObjectHandle model, Guid field, O
                 if (!live) {
                     return Result<void>::Failure(ErrorCode::Destroyed);
                 }
+
                 const PathStep step{field};
                 return live->Write(handle, PropertyPath{{&step, 1}}, value);
             });
     }
+
     pair.Value()->reverse = Move(reverse);
     auto connect = [&](bool toSource) noexcept {
         return WidgetFieldBindings::Setter::CreateLambda(
@@ -89,11 +95,13 @@ Result<void> WidgetModelConnections::AddTwoWay(ObjectHandle model, Guid field, O
     if (!first) {
         return first;
     }
+
     auto second = Subscribe(targetChanges, target, targetField, model, connect(true));
     if (!second) {
         auto partial = handles_.TryPopBack();
         partial.Value().stream->Unbind(partial.Value().handle);
     }
+
     return second;
 }
 

@@ -41,6 +41,7 @@ Color MapPixel(float x, float y, uint32 sample) noexcept {
         return {static_cast<uint8>(237 * intensity), static_cast<uint8>(196 * intensity),
                 static_cast<uint8>(144 * intensity)};
     }
+
     if (depth >= 0) {
         const float z = math::Sqrt(depth);
         const float illumination =
@@ -52,13 +53,16 @@ Color MapPixel(float x, float y, uint32 sample) noexcept {
         return {static_cast<uint8>(30 + 225 * light), static_cast<uint8>(20 + 156 * light),
                 static_cast<uint8>(23 + 89 * light)};
     }
+
     if (math::Abs(orbit - 1) < 0.006f) {
         return {85, 141, 146};
     }
+
     if ((sample & 0x7ffu) == 0u) {
         const uint8 value = static_cast<uint8>(65 + ((sample >> 13) & 95u));
         return {value, value, static_cast<uint8>(value + 10)};
     }
+
     return {14, 24, 33};
 }
 
@@ -77,6 +81,7 @@ Result<graphics::TextureHandle> OrbitView::CreateMap(Allocator& allocator,
     if (!allocated) {
         return Result<graphics::TextureHandle>::Failure(allocated.Error());
     }
+
     for (uint32 y = 0; y < size; ++y) {
         for (uint32 x = 0; x < size; ++x) {
             const auto color = MapPixel((float(x) + 0.5f) * 2 / size - 1,
@@ -88,6 +93,7 @@ Result<graphics::TextureHandle> OrbitView::CreateMap(Allocator& allocator,
             pixels[i + 3] = 255;
         }
     }
+
     graphics::TextureDesc desc;
     desc.width = desc.height = size;
     return device.CreateTexture(desc, pixels.View());
@@ -107,6 +113,7 @@ Result<void> OrbitView::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (extent <= 0) {
         return Result<void>::Success();
     }
+
     const Vec2 center = geometry.size * 0.5f;
     const Vec2 offset = center - Vec2(extent, extent) * 0.5f;
     const auto map = geometry.MakeChild({extent, extent}, {1, 0, 0, 1, offset.x, offset.y}, {}, {});
@@ -114,6 +121,7 @@ Result<void> OrbitView::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (!drawn) {
         return drawn;
     }
+
     const Vec2 marker = center + OrbitPoint(progress_) * (extent * 0.5f);
     const auto outer =
         geometry.MakeChild({10, 10}, {1, 0, 0, 1, marker.x - 5, marker.y - 5}, {}, {});
@@ -122,6 +130,7 @@ Result<void> OrbitView::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (!drawn) {
         return drawn;
     }
+
     return list.TryAddBox({inner, LinearColor::FromSRGB({15, 29, 36}), layer});
 }
 

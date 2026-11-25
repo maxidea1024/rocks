@@ -12,6 +12,7 @@ ExpandableAreaWidget::ExpandableAreaWidget(Allocator& allocator) noexcept : Pane
 usize ExpandableAreaWidget::MaxChildren() const noexcept {
     return 2;
 }
+
 TypeId ExpandableAreaWidget::SlotType() const noexcept {
     return GeneratedType<ExpandableAreaSlot>::Id();
 }
@@ -23,10 +24,12 @@ Result<ObjectHandle> ExpandableAreaWidget::AddSection(ObjectRegistry& objects, O
         if (!slot) {
             return Result<ObjectHandle>::Failure(slot.Error());
         }
+
         if (slot.Value().Get().Value()->IsHeader() == header) {
             return Result<ObjectHandle>::Failure(ErrorCode::AlreadyExists);
         }
     }
+
     return AddChildWithSlot(
         objects, child,
         ConfigureSlot::CreateLambda([header](ObjectRegistry& registry, ObjectHandle id) noexcept {
@@ -34,6 +37,7 @@ Result<ObjectHandle> ExpandableAreaWidget::AddSection(ObjectRegistry& objects, O
             if (!slot) {
                 return Result<void>::Failure(slot.Error());
             }
+
             slot.Value().Get().Value()->header_ = header;
             return Result<void>::Success();
         }));
@@ -43,15 +47,18 @@ Result<ObjectHandle> ExpandableAreaWidget::AddHeader(ObjectRegistry& objects,
                                                      ObjectHandle child) noexcept {
     return AddSection(objects, child, true);
 }
+
 Result<ObjectHandle> ExpandableAreaWidget::AddBody(ObjectRegistry& objects,
                                                    ObjectHandle child) noexcept {
     return AddSection(objects, child, false);
 }
+
 Result<ObjectHandle> ExpandableAreaWidget::AddChild(ObjectRegistry& objects,
                                                     ObjectHandle child) noexcept {
     if (ChildCount() == 0) {
         return AddHeader(objects, child);
     }
+
     auto slot = objects.Resolve<ExpandableAreaSlot>(objects.OwnerAccess(), SlotAt(0));
     return slot ? AddSection(objects, child, !slot.Value().Get().Value()->IsHeader())
                 : Result<ObjectHandle>::Failure(slot.Error());
@@ -62,6 +69,7 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::CreatePanel(Allocator& allocato
     if (!body) {
         return Result<SharedPtr<Element>>::Failure(body.Error());
     }
+
     ElementBuildScope scope(allocator);
     const StackPanel::SlotArgs slots[] = {
         {.content = Make<Button>({.style = NoBorderButtonStyle(), .contentPadding = {4, 4, 4, 4}})},
@@ -71,6 +79,7 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::CreatePanel(Allocator& allocato
     if (!root) {
         return Result<SharedPtr<Element>>::Failure(root.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(root.Value().AsSharedPtr());
 }
 
@@ -79,6 +88,7 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::BuildElement(ObjectRegistry& ob
     if (!root) {
         return root;
     }
+
     auto* panel = root.Value().Get();
     auto& header = static_cast<Button&>(*panel->ChildAt(0));
     header.SetOnClicked(Delegate<void()>::CreateLambda([&objects, owner = Handle(),
@@ -110,17 +120,21 @@ void ExpandableAreaWidget::ApplyProperties(Element& element) noexcept {
 bool ExpandableAreaWidget::IsExpanded() const noexcept {
     return expanded_;
 }
+
 void ExpandableAreaWidget::SetExpanded(bool expanded) noexcept {
     if (expanded_ == expanded) {
         return;
     }
+
     expanded_ = expanded;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     NotifyPropertyChanged("expanded");
     changed_.ExecuteIfBound(expanded);
 }
+
 void ExpandableAreaWidget::SetOnExpansionChanged(Delegate<void(bool)>&& callback) noexcept {
     changed_ = Move(callback);
 }

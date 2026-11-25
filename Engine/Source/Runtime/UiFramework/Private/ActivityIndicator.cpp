@@ -4,6 +4,7 @@
 namespace rocks::ui {
 
 namespace {
+
 constexpr double PieceDelay = 0.05;
 }
 
@@ -45,11 +46,13 @@ Result<void> ActivityIndicator::SetPieceCount(uint32 count) noexcept {
     if (count == 0 || count > 64) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (count_ != count) {
         count_ = count;
         InvalidateLayout();
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -57,15 +60,18 @@ Result<void> ActivityIndicator::SetPieceBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (brush_ != brush) {
         const bool resized = brush_.imageSize != brush.imageSize;
         brush_ = brush;
         if (resized) {
             InvalidateLayout();
         }
+
         UpdateVolatility();
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -83,11 +89,13 @@ Result<void> ActivityIndicator::SetRadius(float radius) noexcept {
     if (!math::IsFinite(radius) || radius < 0 || radius > NumericLimits<float>::Max() * 0.5f) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (radius_ != radius) {
         radius_ = radius;
         InvalidateLayout();
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -95,6 +103,7 @@ Result<void> ActivityIndicator::SetPeriod(float seconds) noexcept {
     if (!math::IsFinite(seconds) || seconds <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (period_ != seconds) {
         const uint64 now = clock_();
         const double phase = Elapsed(now) / Cycle();
@@ -103,6 +112,7 @@ Result<void> ActivityIndicator::SetPeriod(float seconds) noexcept {
         origin_ = now;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -120,6 +130,7 @@ Result<void> ActivityIndicator::OnPaint(PaintList& list, int32 layer) const noex
     if (area.size.x <= 0 || area.size.y <= 0 || brush_.mode == BrushMode::None) {
         return Result<void>::Success();
     }
+
     const double elapsed = Elapsed(animating_ ? clock_() : origin_);
     const Vec2 desired = brush_.imageSize;
     for (uint32 i = 0; i < count_; ++i) {
@@ -142,6 +153,7 @@ Result<void> ActivityIndicator::OnPaint(PaintList& list, int32 layer) const noex
             alpha = opacity_ ? math::Max(0.f, wave) : 1;
             center = {desired.x * (i + 0.5f), area.size.y * 0.5f};
         }
+
         const AffineTransform2D transform{scaleX,
                                           0,
                                           0,
@@ -154,6 +166,7 @@ Result<void> ActivityIndicator::OnPaint(PaintList& list, int32 layer) const noex
             return result;
         }
     }
+
     return Result<void>::Success();
 }
 

@@ -1,5 +1,7 @@
 #include <UiScreens/ScreenQueueWidget.h>
+
 namespace rocks::ui {
+
 Result<SharedPtr<Element>> ScreenQueueWidget::CreateContainer(ObjectRegistry& objects,
                                                               Application& app,
                                                               uint32 user) noexcept {

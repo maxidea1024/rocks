@@ -28,6 +28,7 @@ Result<void> UniformGrid::TryAddSlot(const SharedPtr<Element>& child, uint32 row
         (void)slots_.TryRemoveAt(slots_.Size() - 1);
         return added;
     }
+
     return Result<void>::Success();
 }
 
@@ -38,6 +39,7 @@ Result<void> UniformGrid::SetSlot(Element& child, uint32 row, uint32 column,
         column == NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (usize i = 0; i < ChildCount(); ++i) {
         if (ChildAt(i) == &child) {
             slots_[i] = {row, column, horizontal, vertical};
@@ -45,6 +47,7 @@ Result<void> UniformGrid::SetSlot(Element& child, uint32 row, uint32 column,
             return Result<void>::Success();
         }
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -56,6 +59,7 @@ bool UniformGrid::RemoveChild(Element& child) noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -63,10 +67,12 @@ Result<void> UniformGrid::SetCellPadding(Vec4 padding) noexcept {
     if (!padding.IsFinite() || padding.x < 0 || padding.y < 0 || padding.z < 0 || padding.w < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (padding_ != padding) {
         padding_ = padding;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -74,10 +80,12 @@ Result<void> UniformGrid::SetMinimumCellSize(Vec2 size) noexcept {
     if (!size.IsFinite() || size.x < 0 || size.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (minimumCellSize_ != size) {
         minimumCellSize_ = size;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -106,6 +114,7 @@ Vec2 UniformGrid::ComputeDesiredSize(float) const noexcept {
             cell.y = math::Max(cell.y, desired.y + padding_.y + padding_.w);
         }
     }
+
     return Vec2(cell.x * static_cast<float>(columns), cell.y * static_cast<float>(rows));
 }
 
@@ -144,6 +153,7 @@ Result<void> UniformGrid::Arrange(const Geometry& geometry) noexcept {
             return arranged;
         }
     }
+
     return Result<void>::Success();
 }
 

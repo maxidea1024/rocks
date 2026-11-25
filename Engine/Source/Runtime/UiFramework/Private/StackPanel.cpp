@@ -10,6 +10,7 @@ Result<void> StackPanel::Construct(const Args& args) noexcept {
         if (slot.content.error != ErrorCode::None) {
             return Result<void>::Failure(slot.content.error);
         }
+
         StackSlot layout = slot.size;
         layout.before += slot.padding;
         layout.after += slot.padding;
@@ -21,6 +22,7 @@ Result<void> StackPanel::Construct(const Args& args) noexcept {
             return added;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -65,16 +67,20 @@ Result<void> StackPanel::SetSlotLayout(const Element& child, const StackSlot& sl
     if (!valid || slot.alignment > StackAlignment::End) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (usize index = 0; index < slots_.Size(); ++index) {
         if (ChildAt(index) != &child) {
             continue;
         }
+
         if (slots_[index] != slot) {
             slots_[index] = slot;
             InvalidateLayout();
         }
+
         return Result<void>::Success();
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -94,10 +100,12 @@ Result<void> StackPanel::SetSpacing(float spacing) noexcept {
     if (!math::IsFinite(spacing) || spacing < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (spacing_ != spacing) {
         spacing_ = spacing;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -126,6 +134,7 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
     if (slots_.Size() != ChildCount()) {
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
+
     if (!geometry.size.IsFinite() || geometry.size.x < 0 || geometry.size.y < 0 ||
         (direction_ != StackDirection::Horizontal && direction_ != StackDirection::Vertical)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -137,6 +146,7 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
     if (!reservedSlots) {
         return reservedSlots;
     }
+
     auto reservedIndices = visibleIndices.TryReserve(slots_.Size());
     if (!reservedIndices) {
         return reservedIndices;
@@ -168,15 +178,18 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
                 slot.mainAlignment = StackAlignment::Start;
             }
         }
+
         const Vec2 desired = ChildAt(i)->GetDesiredSize();
         if (!visibleSlots.IsEmpty()) {
             slot.before += spacing_;
         }
+
         slot.desired = direction_ == StackDirection::Vertical ? desired.y : desired.x;
         auto addedSlot = visibleSlots.TryPushBack(slot);
         if (!addedSlot) {
             return addedSlot;
         }
+
         auto addedIndex = visibleIndices.TryPushBack(i);
         if (!addedIndex) {
             return addedIndex;
@@ -235,11 +248,13 @@ Vec2 StackPanel::ComputeDesiredSize(float) const noexcept {
         if (hasVisible) {
             along += spacing_;
         }
+
         hasVisible = true;
         along += math::Clamp(childAlong, slots_[i].minSize, slots_[i].maxSize) + slots_[i].before +
                  slots_[i].after;
         across = math::Max(across, childAcross + slots_[i].crossBefore + slots_[i].crossAfter);
     }
+
     return vertical ? Vec2(across, along) : Vec2(along, across);
 }
 

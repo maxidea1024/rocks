@@ -15,6 +15,7 @@ struct MarkupRun {
 struct RichTextMarkup {
     explicit RichTextMarkup(Allocator& allocator) noexcept : plain(allocator), runs(allocator) {
     }
+
     String plain;
     Array<MarkupRun> runs;
 };

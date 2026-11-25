@@ -62,6 +62,7 @@ Result<void> ApplyWidgetSetter(Owner& owner, Return (Owner::*method)(Value) noex
         if (input.kind != ValueKind::Utf8String || !input.present) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
+
         value = input.string.View();
     } else {
         auto decoded = ::rocks::detail::WriteScalarField(value, input, &allocator);
@@ -69,6 +70,7 @@ Result<void> ApplyWidgetSetter(Owner& owner, Return (Owner::*method)(Value) noex
             return decoded;
         }
     }
+
     if constexpr (IsSameV<Return, void>) {
         (owner.*method)(Forward<Value>(value));
         return Result<void>::Success();
@@ -87,14 +89,17 @@ WidgetFieldBindings::Setter WidgetSetter(Return (Owner::*method)(Value) noexcept
             if (!method) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
+
             auto borrowed = objects.ResolveForWrite<Owner>(objects.OwnerAccess(), handle);
             if (!borrowed) {
                 return Result<void>::Failure(borrowed.Error());
             }
+
             auto owner = borrowed.Value().Get();
             if (!owner) {
                 return Result<void>::Failure(owner.Error());
             }
+
             return ApplyWidgetSetter(*owner.Value(), method, input, objects.ObjectAllocator());
         });
 }

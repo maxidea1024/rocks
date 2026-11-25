@@ -3,6 +3,7 @@
 #include <UiRender/UiShaderTypes.h>
 
 namespace rocks::ui {
+
 namespace {
 
 // 평면 그리기 상수(이번·지난 프레임 원점·u·v — UiWorldPlane.rsf UiPlaneConstants)의 Vec4 수다.
@@ -24,16 +25,19 @@ Result<WorldWidgetClipPlane> WorldWidgetClipPlane::Project(Vec3d tl, Vec3d tr, V
     if (!plane.topLeft.IsFinite() || !plane.topRight.IsFinite() || !plane.bottomLeft.IsFinite()) {
         return Result<WorldWidgetClipPlane>::Failure(ErrorCode::InvalidArgument);
     }
+
     return Result<WorldWidgetClipPlane>::Success(plane);
 }
 
 WorldWidgetPlane::WorldWidgetPlane(graphics::Device& device, render::ShaderSet& shaders) noexcept
     : device_(device), shaders_(shaders) {
 }
+
 WorldWidgetPlane::~WorldWidgetPlane() noexcept {
     if (!quad_.IsNull()) {
         device_.Retire(quad_);
     }
+
     if (!pipeline_.IsNull()) {
         device_.Retire(pipeline_);
     }
@@ -67,6 +71,7 @@ Result<void> WorldWidgetPlane::Initialize(graphics::PixelFormat color, graphics:
     if (!pipeline) {
         return Result<void>::Failure(pipeline.Error());
     }
+
     if (quad_.IsNull()) {
         constexpr Vec2 quad[] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
         graphics::BufferDesc buffer;
@@ -78,14 +83,18 @@ Result<void> WorldWidgetPlane::Initialize(graphics::PixelFormat color, graphics:
             device_.Retire(pipeline.Value());
             return Result<void>::Failure(made.Error());
         }
+
         quad_ = made.Value();
     }
+
     if (!pipeline_.IsNull()) {
         device_.Retire(pipeline_);
     }
+
     pipeline_ = pipeline.Value();
     return Result<void>::Success();
 }
+
 Result<void> WorldWidgetPlane::Draw(graphics::CommandContext& commands,
                                     graphics::TextureHandle texture,
                                     const WorldWidgetClipPlane& current,
@@ -93,6 +102,7 @@ Result<void> WorldWidgetPlane::Draw(graphics::CommandContext& commands,
     if (pipeline_.IsNull() || texture.IsNull()) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     const Vec4 values[] = {current.topLeft,
                            current.topRight - current.topLeft,
                            current.bottomLeft - current.topLeft,
@@ -104,11 +114,13 @@ Result<void> WorldWidgetPlane::Draw(graphics::CommandContext& commands,
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
+
     commands.SetPipeline(pipeline_);
     auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(values));
     if (!set) {
         return set;
     }
+
     const graphics::VertexBufferBinding binding[] = {{quad_, 0}};
     commands.SetVertexBuffers(0, binding);
     commands.SetTexture(texture);

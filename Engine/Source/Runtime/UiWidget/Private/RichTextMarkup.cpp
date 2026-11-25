@@ -1,6 +1,7 @@
 #include "RichTextMarkup.h"
 
 namespace rocks::ui::detail {
+
 namespace {
 
 bool Space(char c) noexcept {
@@ -12,10 +13,12 @@ Result<void> Append(RichTextMarkup& output, StringView text, const RichTextStyle
     if (text.IsEmpty()) {
         return Result<void>::Success();
     }
+
     auto appended = output.plain.TryAppend(text);
     if (!appended) {
         return appended;
     }
+
     if (!image && !output.runs.IsEmpty()) {
         auto& last = output.runs[output.runs.Size() - 1];
         if (!last.embedded && last.style == style) {
@@ -23,11 +26,13 @@ Result<void> Append(RichTextMarkup& output, StringView text, const RichTextStyle
             return Result<void>::Success();
         }
     }
+
     MarkupRun run{.end = output.plain.View().ByteCount(), .style = style};
     if (image) {
         run.image = *image;
         run.embedded = true;
     }
+
     return output.runs.TryPushBack(run);
 }
 
@@ -59,12 +64,15 @@ Result<void> ParseRichTextMarkup(StringView input, Span<const RichTextStyle> sty
                     break;
                 }
             }
+
             auto added = Append(output, decoded, active);
             if (!added) {
                 return added;
             }
+
             continue;
         }
+
         if (bytes[i] != '<') {
             do {
                 ++i;
@@ -73,6 +81,7 @@ Result<void> ParseRichTextMarkup(StringView input, Span<const RichTextStyle> sty
             if (!added) {
                 return added;
             }
+
             continue;
         }
 
@@ -89,9 +98,11 @@ Result<void> ParseRichTextMarkup(StringView input, Span<const RichTextStyle> sty
                 break;
             }
         }
+
         if (i == input.ByteCount() || i == begin + 1) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         const usize close = i++;
         if (bytes[begin + 1] == '/') {
             const auto name = input.SliceBytes(begin + 2, close - begin - 2);
@@ -99,15 +110,18 @@ Result<void> ParseRichTextMarkup(StringView input, Span<const RichTextStyle> sty
                 (!name.IsEmpty() && stack[stack.Size() - 1]->name.View() != name)) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
+
             (void)stack.TryPopBack();
             continue;
         }
+
         const bool embedded = bytes[close - 1] == '/';
         const usize end = embedded ? close - 1 : close;
         usize sep = begin + 1;
         while (sep < end && !Space(bytes[sep])) {
             ++sep;
         }
+
         const auto name = input.SliceBytes(begin + 1, sep - begin - 1);
         if (name.IsEmpty()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -115,29 +129,36 @@ Result<void> ParseRichTextMarkup(StringView input, Span<const RichTextStyle> sty
         while (sep < end && Space(bytes[sep])) {
             ++sep;
         }
+
         if (embedded) {
             if (!decorator) {
                 return Result<void>::Failure(ErrorCode::NotReady);
             }
+
             auto icon = decorator->Resolve(name, input.SliceBytes(sep, end - sep), size);
             if (!icon) {
                 return Result<void>::Failure(icon.Error());
             }
+
             const auto& glyph = icon.Value();
             if (glyph.resource.IsNull() || !glyph.position.IsFinite() || !glyph.size.IsFinite() ||
                 glyph.size.x <= 0 || glyph.size.y <= 0 || !glyph.tint.IsFinite() ||
                 !glyph.uv.IsValid()) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
+
             auto added = Append(output, "\xEF\xBF\xBC", active, &glyph);
             if (!added) {
                 return added;
             }
+
             continue;
         }
+
         if (sep != end) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         const RichTextStyle* style = nullptr;
         for (const auto& candidate : styles) {
             if (candidate.name.View() == name) {
@@ -145,14 +166,17 @@ Result<void> ParseRichTextMarkup(StringView input, Span<const RichTextStyle> sty
                 break;
             }
         }
+
         if (!style) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }
+
         auto pushed = stack.TryPushBack(style);
         if (!pushed) {
             return pushed;
         }
     }
+
     return stack.IsEmpty() ? Result<void>::Success()
                            : Result<void>::Failure(ErrorCode::InvalidArgument);
 }

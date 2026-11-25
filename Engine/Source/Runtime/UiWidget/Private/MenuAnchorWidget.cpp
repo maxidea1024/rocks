@@ -40,13 +40,16 @@ Result<SharedPtr<Element>> MenuAnchorWidget::BuildElement(ObjectRegistry& object
             if (!borrowed) {
                 return Result<SharedPtr<Element>>::Failure(borrowed.Error());
             }
+
             auto* widget = borrowed.Value().Get().Value();
             if (!widget->factory_ || widget->CachedElement().Get() != native) {
                 return Result<SharedPtr<Element>>::Failure(ErrorCode::NotReady);
             }
+
             return widget->factory_.Execute();
         }));
     }
+
     return value;
 }
 
@@ -67,6 +70,7 @@ Result<void> MenuAnchorWidget::ToggleOpen() noexcept {
         Close();
         return Result<void>::Success();
     }
+
     return Open();
 }
 
@@ -108,6 +112,7 @@ void MenuAnchorWidget::ReleaseElements() noexcept {
     if (auto live = CachedElement()) {
         static_cast<MenuAnchor&>(*live).DisconnectMenu();
     }
+
     PanelWidget::ReleaseElements();
 }
 

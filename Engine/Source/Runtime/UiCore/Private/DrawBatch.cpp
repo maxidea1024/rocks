@@ -11,6 +11,7 @@ Result<void> AppendVertices(const PaintBox& box, Array<DrawVertex>& vertices) no
         !box.uvStart.IsFinite() || !box.uvEnd.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const Vec2 corners[] = {{0, 0}, {size.x, 0}, {size.x, size.y}, {0, size.y}};
     Vec2 uvs[] = {
         box.uvStart, {box.uvEnd.x, box.uvStart.y}, box.uvEnd, {box.uvStart.x, box.uvEnd.y}};
@@ -19,17 +20,20 @@ Result<void> AppendVertices(const PaintBox& box, Array<DrawVertex>& vertices) no
         if (!math::IsFinite(box.blurRadius) || box.blurRadius < 0) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         // 블러 정점 셰이더는 화면 UV를 위치에서 계산하고 이 채널에서 샘플 간격을 읽는다.
         for (auto& uv : uvs) {
             uv = {box.blurRadius,
                   box.blurKernel < 0 ? box.blurRadius : static_cast<float>(box.blurKernel) * 0.5f};
         }
     }
+
     for (usize i = 0; i < 4; ++i) {
         const Vec2 position = box.geometry.render.Apply(corners[i]);
         if (!position.IsFinite()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         const auto color = (box.operation == PaintOperation::BlurBackdrop ||
                             box.operation == PaintOperation::BlurToBuffer)
                                ? LinearColor{corners[i].x, corners[i].y, size.x, size.y}
@@ -39,6 +43,7 @@ Result<void> AppendVertices(const PaintBox& box, Array<DrawVertex>& vertices) no
             return added;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -69,18 +74,22 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
     if (!mapped) {
         return mapped;
     }
+
     auto orderReserved = order.TryReserve(boxes.Size());
     if (!orderReserved) {
         return orderReserved;
     }
+
     auto vertexReserved = vertices.TryReserve(boxes.Size() * 4);
     if (!vertexReserved) {
         return vertexReserved;
     }
+
     auto indexReserved = indices.TryReserve(boxes.Size() * 6);
     if (!indexReserved) {
         return indexReserved;
     }
+
     auto commandReserved = commands.TryReserve(boxes.Size());
     if (!commandReserved) {
         return commandReserved;
@@ -92,6 +101,7 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
             return added;
         }
     }
+
     algo::Sort(order.View(), [](const PaintOrder& a, const PaintOrder& b) noexcept {
         return a.layer == b.layer ? a.index < b.index : a.layer < b.layer;
     });
@@ -102,17 +112,21 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
         if (box.hasClip && box.emptyClip) {
             continue;
         }
+
         if (box.hasClip && !box.clip.IsValid()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (box.hasClip && (box.clip.min.x == box.clip.max.x || box.clip.min.y == box.clip.max.y)) {
             continue;
         }
+
         const uint32 first = static_cast<uint32>(vertices.Size());
         auto appended = AppendVertices(box, vertices);
         if (!appended) {
             return appended;
         }
+
         scratchFirstVertex_[order[i].index] = first;
 
         const uint32 quadIndices[] = {first, first + 1, first + 2, first, first + 2, first + 3};
@@ -172,6 +186,7 @@ Result<void> DrawBatch::Update(const CacheRoot& cache) noexcept {
     if (cache_ == &cache && revision_ == cache.Revision()) {
         return Result<void>::Success();
     }
+
     if (cache_ != &cache || !cache.CanUpdateVertices(revision_)) {
         auto built = Build(cache.List());
         if (!built) {
@@ -187,10 +202,12 @@ Result<void> DrawBatch::Update(const CacheRoot& cache) noexcept {
                 if (firstVertex_[i] == NumericLimits<uint32>::Max()) {
                     continue;
                 }
+
                 auto added = AppendVertices(boxes[i], scratchVertices_);
                 if (!added) {
                     return added;
                 }
+
                 const uint32 first = firstVertex_[i];
                 if (!scratchRanges_.IsEmpty()) {
                     auto& previous = scratchRanges_[scratchRanges_.Size() - 1];
@@ -199,23 +216,27 @@ Result<void> DrawBatch::Update(const CacheRoot& cache) noexcept {
                         continue;
                     }
                 }
+
                 auto rangeAdded = scratchRanges_.TryPushBack({first, 4});
                 if (!rangeAdded) {
                     return rangeAdded;
                 }
             }
         }
+
         usize read = 0;
         for (const auto range : scratchRanges_) {
             for (uint32 vertex = 0; vertex < range.count; ++vertex) {
                 vertices_[range.first + vertex] = scratchVertices_[read++];
             }
         }
+
         auto previous = Move(changedVertices_);
         changedVertices_ = Move(scratchRanges_);
         scratchRanges_ = Move(previous);
         ++batchRevision_;
     }
+
     cache_ = &cache;
     revision_ = cache.Revision();
     return Result<void>::Success();

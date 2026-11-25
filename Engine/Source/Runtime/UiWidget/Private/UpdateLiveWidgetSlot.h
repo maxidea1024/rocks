@@ -15,18 +15,22 @@ Result<void> UpdateLiveWidgetSlot(ObjectRegistry& objects, const WidgetSlot& slo
     if (!outer) {
         return Result<void>::Failure(outer.Error());
     }
+
     auto owner = objects.Resolve<Panel>(access, outer.Value());
     if (!owner) {
         return Result<void>::Failure(owner.Error());
     }
+
     const auto* panel = owner.Value().Get().Value();
     usize index = 0;
     while (index < panel->ChildCount() && panel->SlotAt(index) != slot.Handle()) {
         ++index;
     }
+
     if (index == panel->ChildCount()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     auto native = panel->CachedElement();
     if (!native) {
         return Result<void>::Success();
@@ -36,10 +40,12 @@ Result<void> UpdateLiveWidgetSlot(ObjectRegistry& objects, const WidgetSlot& slo
     if (!child) {
         return Result<void>::Failure(child.Error());
     }
+
     auto element = child.Value().Get().Value()->CachedElement();
     if (!element || element->Parent() != native.Get()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     return update(static_cast<NativePanel&>(*native), *element);
 }
 

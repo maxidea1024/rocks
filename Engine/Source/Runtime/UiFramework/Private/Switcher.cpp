@@ -14,6 +14,7 @@ Result<void> Switcher::SetActiveIndex(usize index) noexcept {
         activeIndex_ = index;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -27,9 +28,11 @@ bool Switcher::RemoveChild(Element& child) noexcept {
             if (activeIndex_ > 0 && i <= activeIndex_) {
                 --activeIndex_;
             }
+
             return Element::RemoveChild(child);
         }
     }
+
     return false;
 }
 
@@ -50,6 +53,7 @@ Result<void> Switcher::Arrange(const Geometry& geometry) noexcept {
     if (child && child->GetVisibility() != Visibility::Collapsed) {
         return child->ArrangeIfNeeded(GetGeometry());
     }
+
     return Result<void>::Success();
 }
 

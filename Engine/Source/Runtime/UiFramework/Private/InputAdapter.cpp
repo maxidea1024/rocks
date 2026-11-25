@@ -40,6 +40,7 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         if (event.gamepadIndex >= input::MaxGamepads) {
             return Result<bool>::Failure(ErrorCode::InvalidArgument);
         }
+
         auto& previous = gamepadButtons_[event.gamepadIndex];
         const uint32 buttons = event.gamepad.connected ? event.gamepad.buttons : 0;
         const uint32 pressed = buttons & ~previous;
@@ -49,18 +50,21 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
     }
 
     if (event.type == input::InputEventType::MouseLeave) {
-        hasPosition_=false;
+        hasPosition_ = false;
         application_.ClearHover(event.userId);
         return Result<bool>::Success(false);
     }
+
     if (event.type == input::InputEventType::PointerCaptureLost) {
         application_.CancelPointers(PointerSource::Mouse);
         return Result<bool>::Success(false);
     }
+
     if (event.type == input::InputEventType::FocusLost) {
         for (auto& buttons : gamepadButtons_) {
             buttons = 0;
         }
+
         hasPosition_ = false;
         application_.ResetInput();
         return Result<bool>::Success(false);
@@ -74,6 +78,7 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         if (!routed || routed.Value() || event.type != input::InputEventType::KeyDown) {
             return routed;
         }
+
         switch (event.key) {
         case input::Key::Left:
             return application_.Navigate(event.userId, FocusDirection::Left, scope);
@@ -105,6 +110,7 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         position_ = Vec2(event.x, event.y);
         hasPosition_ = true;
     }
+
     if (event.type == input::InputEventType::MouseWheel && hasPosition_) {
         PointerEvent wheel{PointerEventType::Wheel, position_};
         wheel.wheel = event.wheel;
@@ -118,9 +124,11 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
             position_ = Vec2(event.x, event.y);
             hasPosition_ = true;
         }
+
         if (!hasPosition_) {
             return Result<bool>::Success(false);
         }
+
         const PointerEventType type = event.type == input::InputEventType::MouseDown
                                           ? PointerEventType::Down
                                           : PointerEventType::Up;
@@ -135,11 +143,13 @@ Result<void> InputAdapter::RouteBatch(Span<const input::InputEvent> events, Span
     if (events.Size() != consumed.Size()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (droppedCount != droppedCount_) {
         droppedCount_ = droppedCount;
         for (auto& buttons : gamepadButtons_) {
             buttons = 0;
         }
+
         hasPosition_ = false;
         application_.ResetInput();
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
@@ -150,8 +160,10 @@ Result<void> InputAdapter::RouteBatch(Span<const input::InputEvent> events, Span
         if (!routed) {
             return Result<void>::Failure(routed.Error());
         }
+
         consumed[i] = routed.Value() ? 1 : 0;
     }
+
     return Result<void>::Success();
 }
 

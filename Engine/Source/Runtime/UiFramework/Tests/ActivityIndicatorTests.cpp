@@ -3,7 +3,9 @@
 #include <UiFramework/ActivityIndicator.h>
 
 namespace rocks::ui {
+
 namespace {
+
 thread_local uint64 indicatorTime = 0;
 uint64 ReadIndicatorTime() noexcept {
     return indicatorTime;

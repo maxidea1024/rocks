@@ -15,6 +15,7 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
     if (!value.IsValid()) {
         return target.SetShapedText({}, {}, {}, size, false);
     }
+
     if (!shaper_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
@@ -31,6 +32,7 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
         if (!shaped) {
             return shaped;
         }
+
         markup = localized.GetText();
     }
 
@@ -39,19 +41,23 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
     if (!decoded) {
         return decoded;
     }
+
     const auto plain = parsed.plain.View();
     if (plain.IsEmpty()) {
         return target.SetShapedText({}, {}, {}, size, false);
     }
+
     auto invariant = Text::Invariant(allocator_, plain);
     if (!invariant) {
         return Result<void>::Failure(invariant.Error());
     }
+
     TextLabel shaped(allocator_);
     auto ready = shaper_->Shape(shaped, invariant.Value(), size);
     if (!ready) {
         return ready;
     }
+
     if (shaped.GetText() != plain) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -62,6 +68,7 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
     if (!copied) {
         return copied;
     }
+
     Array<LabelDecoration> decorations(allocator_);
     bool hasDecoration = false;
     for (const auto& run : parsed.runs) {
@@ -70,12 +77,14 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
             break;
         }
     }
+
     if (hasDecoration) {
         auto stored = decorations.TryResize(clusters.Size());
         if (!stored) {
             return stored;
         }
     }
+
     const auto original = shaped.ShapedGlyphs();
     usize runIndex = 0;
     usize glyphIndex = 0;
@@ -85,23 +94,27 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
         while (parsed.runs[runIndex].end <= begin) {
             ++runIndex;
         }
+
         auto& cluster = clusters[i];
         const auto& run = parsed.runs[runIndex];
         const auto tint = run.style ? run.style->tint : LinearColor{1, 1, 1, 1};
         if (hasDecoration && run.style) {
             decorations[i] = {tint, run.style->underline, run.style->strikeThrough};
         }
+
         if (run.embedded) {
             const usize start = runIndex == 0 ? 0 : parsed.runs[runIndex - 1].end;
             if (start != begin || run.end != cluster.byteEnd) {
                 return Result<void>::Failure(ErrorCode::Unsupported);
             }
+
             auto glyph = run.image;
             glyph.tint = glyph.tint * tint;
             auto added = glyphs.TryPushBack({i, glyph});
             if (!added) {
                 return added;
             }
+
             cluster.advance = glyph.size.x;
             height = math::Max(height, glyph.size.y + glyph.position.y);
         }
@@ -115,27 +128,33 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
                 }
             }
         }
+
         // 글자와 대체 문자가 하나의 클러스터로 묶인 경우 아이콘 일부만 표시하지 않는다.
         while (parsed.runs[runIndex].end < cluster.byteEnd) {
             if (parsed.runs[++runIndex].embedded) {
                 return Result<void>::Failure(ErrorCode::Unsupported);
             }
         }
+
         begin = cluster.byteEnd;
     }
+
     SharedPtr<TextLabel> marker;
     if (ellipsis_ && shaper_) {
         auto shapedMarker = shaper_->ShapeEllipsis(allocator_, size);
         if (!shapedMarker) {
             return Result<void>::Failure(shapedMarker.Error());
         }
+
         marker = Move(shapedMarker.Value());
     }
+
     auto published = target.SetShapedText(plain, clusters.View(), glyphs.View(), height,
                                           shaped.IsRightToLeft(), decorations.View());
     if (published) {
         target.SetEllipsisMarker(Move(marker));
     }
+
     return published;
 }
 
@@ -145,24 +164,29 @@ Result<SharedPtr<Element>> RichTextBlockWidget::BuildElement(ObjectRegistry& obj
     if (!outer) {
         return Result<SharedPtr<Element>>::Failure(outer.Error());
     }
+
     auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
     if (!tree) {
         return Result<SharedPtr<Element>>::Failure(tree.Error());
     }
+
     auto label = SharedPtr<TextLabel>::TryMake(allocator_, allocator_);
     if (!label) {
         return Result<SharedPtr<Element>>::Failure(label.Error());
     }
+
     auto width = ApplyTextLayout(*label.Value());
     if (!width) {
         return Result<SharedPtr<Element>>::Failure(width.Error());
     }
+
     shaper_ = tree.Value().Get().Value()->TextShaper();
     auto shaped = Shape(*label.Value(), text_, fontSize_, styles_.View(), decorator_.Get());
     if (!shaped) {
         shaper_.Reset();
         return Result<SharedPtr<Element>>::Failure(shaped.Error());
     }
+
     label.Value()->SetColor(tint_);
     return Result<SharedPtr<Element>>::Success(Move(label.Value()));
 }
@@ -176,6 +200,7 @@ Result<void> RichTextBlockWidget::SetText(const Text& value) noexcept {
     if (!copy) {
         return Result<void>::Failure(copy.Error());
     }
+
     if (auto live = CachedElement()) {
         auto shaped = Shape(static_cast<TextLabel&>(*live), value, fontSize_, styles_.View(),
                             decorator_.Get());
@@ -183,6 +208,7 @@ Result<void> RichTextBlockWidget::SetText(const Text& value) noexcept {
             return shaped;
         }
     }
+
     text_ = Move(copy.Value());
     return Result<void>::Success();
 }
@@ -193,23 +219,28 @@ Result<void> RichTextBlockWidget::SetStyles(Span<const RichTextStyle> styles) no
         if (style.name.View().IsEmpty() || !style.tint.IsFinite()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         for (const auto& previous : replacement) {
             if (previous.name.View() == style.name.View()) {
                 return Result<void>::Failure(ErrorCode::AlreadyExists);
             }
         }
+
         auto entry = replacement.TryEmplaceBack(allocator_);
         if (!entry) {
             return Result<void>::Failure(entry.Error());
         }
+
         auto copied = entry.Value()->name.TryAssign(style.name.View());
         if (!copied) {
             return copied;
         }
+
         entry.Value()->tint = style.tint;
         entry.Value()->underline = style.underline;
         entry.Value()->strikeThrough = style.strikeThrough;
     }
+
     if (auto live = CachedElement()) {
         auto shaped = Shape(static_cast<TextLabel&>(*live), text_, fontSize_, replacement.View(),
                             decorator_.Get());
@@ -217,6 +248,7 @@ Result<void> RichTextBlockWidget::SetStyles(Span<const RichTextStyle> styles) no
             return shaped;
         }
     }
+
     styles_ = Move(replacement);
     return Result<void>::Success();
 }
@@ -230,6 +262,7 @@ RichTextBlockWidget::SetDecorator(const SharedPtr<RichTextDecorator>& decorator)
             return shaped;
         }
     }
+
     decorator_ = decorator;
     return Result<void>::Success();
 }
@@ -238,6 +271,7 @@ Result<void> RichTextBlockWidget::SetFontSize(float size) noexcept {
     if (!math::IsFinite(size) || size <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement(); live && size != fontSize_) {
         auto shaped =
             Shape(static_cast<TextLabel&>(*live), text_, size, styles_.View(), decorator_.Get());
@@ -245,6 +279,7 @@ Result<void> RichTextBlockWidget::SetFontSize(float size) noexcept {
             return shaped;
         }
     }
+
     fontSize_ = size;
     return Result<void>::Success();
 }
@@ -253,6 +288,7 @@ Result<void> RichTextBlockWidget::SetEllipsis(bool enabled) noexcept {
     if (enabled == ellipsis_) {
         return Result<void>::Success();
     }
+
     if (auto live = CachedElement()) {
         SharedPtr<TextLabel> marker;
         if (enabled && shaper_) {
@@ -260,10 +296,13 @@ Result<void> RichTextBlockWidget::SetEllipsis(bool enabled) noexcept {
             if (!shaped) {
                 return Result<void>::Failure(shaped.Error());
             }
+
             marker = Move(shaped.Value());
         }
+
         static_cast<TextLabel&>(*live).SetEllipsisMarker(Move(marker));
     }
+
     ellipsis_ = enabled;
     NotifyPropertyChanged("ellipsis");
     return Result<void>::Success();
@@ -273,9 +312,11 @@ Result<void> RichTextBlockWidget::SetTint(LinearColor tint) noexcept {
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         static_cast<TextLabel&>(*live).SetColor(tint);
     }
+
     tint_ = tint;
     return Result<void>::Success();
 }

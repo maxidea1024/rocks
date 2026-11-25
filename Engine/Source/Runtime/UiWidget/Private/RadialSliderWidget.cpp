@@ -8,11 +8,13 @@ Result<void> RadialSliderWidget::SetLimits(float minimum, float maximum, float s
         !math::IsFinite(maximum - minimum) || !math::IsFinite(step) || step <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto& slider = static_cast<RadialSlider&>(*live);
         (void)slider.SetRange(minimum, maximum);
         (void)slider.SetStep(step);
     }
+
     minimum_ = minimum;
     maximum_ = maximum;
     step_ = step;
@@ -24,15 +26,20 @@ Result<void> RadialSliderWidget::SetValue(float value) noexcept {
     if (!math::IsFinite(value)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const float next = math::Clamp(value, minimum_, maximum_);
     if (next == value_) {
         return Result<void>::Success();
     }
+
     value_ = next;
     if (auto live = CachedElement()) {
         auto applied = static_cast<RadialSlider&>(*live).SetValue(value_);
-        if (!applied) { return applied; }
+        if (!applied) {
+            return applied;
+        }
     }
+
     NotifyPropertyChanged("value");
     return Result<void>::Success();
 }
@@ -45,12 +52,14 @@ Result<void> RadialSliderWidget::SetArc(float start, float end, float offset) no
     if (!RadialSlider::IsValidArc(start, end, offset)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     startAngle_ = start;
     endAngle_ = end;
     angularOffset_ = offset;
     if (auto live = CachedElement()) {
         return static_cast<RadialSlider&>(*live).SetArc(start, end, offset);
     }
+
     return Result<void>::Success();
 }
 
@@ -74,6 +83,7 @@ Result<void> RadialSliderWidget::SetColors(LinearColor track, LinearColor progre
     if (!track.IsFinite() || !progress.IsFinite() || !handle.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     trackColor_ = track;
     progressColor_ = progress;
     handleColor_ = handle;
@@ -83,6 +93,7 @@ Result<void> RadialSliderWidget::SetColors(LinearColor track, LinearColor progre
         slider.SetFillColor(progress);
         slider.SetHandleColor(handle);
     }
+
     return Result<void>::Success();
 }
 
@@ -96,6 +107,7 @@ Result<SharedPtr<Element>> RadialSliderWidget::BuildElement(ObjectRegistry& obje
     if (!made) {
         return Result<SharedPtr<Element>>::Failure(made.Error());
     }
+
     auto ready = made.Value()->Construct(
         {.minimum = minimum_,
          .maximum = maximum_,
@@ -125,6 +137,7 @@ Result<SharedPtr<Element>> RadialSliderWidget::BuildElement(ObjectRegistry& obje
     if (!ready) {
         return Result<SharedPtr<Element>>::Failure(ready.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(Move(made.Value()));
 }
 

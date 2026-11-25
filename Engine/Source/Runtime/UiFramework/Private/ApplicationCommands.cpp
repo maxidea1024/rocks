@@ -10,6 +10,7 @@ Result<KeyChord> Application::UpdateChord(uint32 userId, const input::InputEvent
     while (i < modifiers_.Size() && modifiers_[i].userId != userId) {
         ++i;
     }
+
     if (i < modifiers_.Size()) {
         mask = modifiers_[i].mask;
         if (down) {
@@ -17,6 +18,7 @@ Result<KeyChord> Application::UpdateChord(uint32 userId, const input::InputEvent
         } else if (event.type == input::InputEventType::KeyUp) {
             mask &= static_cast<uint8>(~bit);
         }
+
         if (mask) {
             modifiers_[i].mask = mask;
         } else {
@@ -28,6 +30,7 @@ Result<KeyChord> Application::UpdateChord(uint32 userId, const input::InputEvent
             return Result<KeyChord>::Failure(added.Error());
         }
     }
+
     return Result<KeyChord>::Success(ChordFromModifiers(event.key, mask));
 }
 
@@ -37,6 +40,7 @@ bool Application::IsControlDown(uint32 userId) const noexcept {
             return ChordFromModifiers(input::Key::None, user.mask).control;
         }
     }
+
     return false;
 }
 
@@ -46,6 +50,7 @@ bool Application::IsShiftDown(uint32 userId) const noexcept {
             return (user.mask & 3) != 0;
         }
     }
+
     return false;
 }
 
@@ -55,6 +60,7 @@ Result<void> Application::SetCommands(const SharedPtr<Element>& scope,
         globalCommands_ = commands;
         return Result<void>::Success();
     }
+
     for (usize i = 0; i < commandScopes_.Size();) {
         auto target = commandScopes_[i].element.Lock();
         if (target.Get() == scope.Get()) {
@@ -63,14 +69,17 @@ Result<void> Application::SetCommands(const SharedPtr<Element>& scope,
             } else {
                 (void)commandScopes_.TryRemoveAt(i);
             }
+
             return Result<void>::Success();
         }
+
         if (!target) {
             (void)commandScopes_.TryRemoveAt(i);
         } else {
             ++i;
         }
     }
+
     return commands ? commandScopes_.TryPushBack({WeakPtr<Element>(scope), commands})
                     : Result<void>::Success();
 }
@@ -88,6 +97,7 @@ bool Application::ProcessCommands(const Element* scope, KeyChord chord,
             }
         }
     }
+
     return commands && commands->Process(chord, repeat);
 }
 

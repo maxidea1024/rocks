@@ -18,6 +18,7 @@ Result<void> ComboBox::Construct(Args&& args) noexcept {
     if (!limit) {
         return limit;
     }
+
     SetOptionFactory(Move(args.makeOption));
     SetOnSelectionChanged(Move(args.onSelectionChanged));
     SetOnOpening(Move(args.onOpening));
@@ -35,10 +36,12 @@ Result<void> ComboBox::SetMaxListHeight(float height) noexcept {
     if (!math::IsFinite(height) || height <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     maxListHeight_ = height;
     if (auto bounds = menuBounds_.Lock()) {
         return bounds->SetSizeRange({}, {NumericLimits<float>::Max(), height});
     }
+
     return Result<void>::Success();
 }
 
@@ -61,28 +64,35 @@ Result<void> ComboBox::SetDisplay(int32 index) noexcept {
         if (!makeOption_) {
             return Result<void>::Failure(ErrorCode::NotReady);
         }
+
         auto made = makeOption_.Execute(static_cast<usize>(index), true);
         if (!made) {
             return Result<void>::Failure(made.Error());
         }
+
         display = Move(made.Value());
         if (!display || display->Parent() || IsWithin(*display)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         display->SetVisibility(Visibility::HitTestInvisible);
     }
+
     if (old) {
         (void)RemoveChild(*old);
     }
+
     if (display) {
         auto added = TryAddChild(display);
         if (!added) {
             if (old) {
                 (void)TryAddChild(old);
             }
+
             return added;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -90,10 +100,12 @@ Result<void> ComboBox::Refresh(usize count, int32 selected) noexcept {
     if (changing_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (count > static_cast<usize>(NumericLimits<int32>::Max()) || selected < -1 ||
         (selected >= 0 && static_cast<usize>(selected) >= count)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     changing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         changing_ = false;
@@ -105,6 +117,7 @@ Result<void> ComboBox::Refresh(usize count, int32 selected) noexcept {
         count_ = count;
         selected_ = selected;
     }
+
     return updated;
 }
 
@@ -125,10 +138,12 @@ Result<void> ComboBox::Select(int32 index) noexcept {
         Close();
         return Result<void>::Success();
     }
+
     auto changed = Refresh(count_, index);
     if (changed) {
         selectionChanged_.ExecuteIfBound(index);
     }
+
     return changed;
 }
 
@@ -150,6 +165,7 @@ void ComboBox::Highlight(int32 index) noexcept {
             }
         }
     }
+
     for (usize i = 0; i < rows_.Size(); ++i) {
         if (auto row = rows_[i].Lock()) {
             row->SetColor(static_cast<int32>(i) == index ? LinearColor{0.12f, 0.31f, 0.6f, 1}
@@ -163,6 +179,7 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
         return Result<SharedPtr<Element>>::Failure(changing_ ? ErrorCode::Busy
                                                              : ErrorCode::NotReady);
     }
+
     changing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         changing_ = false;
@@ -171,6 +188,7 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
     if (!stack) {
         return Result<SharedPtr<Element>>::Failure(stack.Error());
     }
+
     Array<WeakPtr<Button>> rows(allocator_);
     const auto self = Parent()->FindChild(this);
     for (usize i = 0; i < count_; ++i) {
@@ -179,50 +197,62 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
             return Result<SharedPtr<Element>>::Failure(content ? ErrorCode::InvalidArgument
                                                                : content.Error());
         }
+
         auto row = SharedPtr<Button>::TryMake(allocator_, allocator_);
         if (!row) {
             return Result<SharedPtr<Element>>::Failure(row.Error());
         }
+
         content.Value()->SetVisibility(Visibility::HitTestInvisible);
         row.Value()->SetDesiredSize({0, 24});
         auto added = row.Value()->TryAddChild(content.Value());
         if (added) {
             added = stack.Value()->TryAddChild(row.Value());
         }
+
         if (added) {
             added = rows.TryPushBack(WeakPtr<Button>(row.Value()));
         }
+
         if (!added) {
             return Result<SharedPtr<Element>>::Failure(added.Error());
         }
+
         row.Value()->SetOnClicked(Delegate<void()>::CreateWeakLambda(self, [this, i]() noexcept {
             if (IsOpen()) {
                 (void)Select(static_cast<int32>(i));
             }
         }));
     }
+
     auto scroll = SharedPtr<ScrollView>::TryMake(allocator_, allocator_);
     if (!scroll) {
         return Result<SharedPtr<Element>>::Failure(scroll.Error());
     }
+
     auto attached = scroll.Value()->TryAddChild(stack.Value());
     if (!attached) {
         return Result<SharedPtr<Element>>::Failure(attached.Error());
     }
+
     auto bounds = SharedPtr<SizeBox>::TryMake(allocator_, allocator_);
     if (!bounds) {
         return Result<SharedPtr<Element>>::Failure(bounds.Error());
     }
+
     attached = bounds.Value()->SetSizeRange({}, {NumericLimits<float>::Max(), maxListHeight_});
     if (attached) {
         attached = bounds.Value()->TryAddChild(scroll.Value());
     }
+
     if (!attached) {
         return Result<SharedPtr<Element>>::Failure(attached.Error());
     }
+
     if (selected_ > 0) {
         (void)scroll.Value()->SetScrollOffset(static_cast<float>(selected_) * 24.f);
     }
+
     menuBounds_ = WeakPtr<SizeBox>(bounds.Value());
     scroll_ = WeakPtr<ScrollView>(scroll.Value());
     rows_ = Move(rows);
@@ -243,13 +273,16 @@ bool ComboBox::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
             } else {
                 (void)Select(next);
             }
+
             return true;
         }
+
         if (IsOpen() && event.key == input::Key::Enter) {
             (void)Select(highlighted_);
             return true;
         }
     }
+
     return MenuAnchor::OnKeyEvent(user, event);
 }
 

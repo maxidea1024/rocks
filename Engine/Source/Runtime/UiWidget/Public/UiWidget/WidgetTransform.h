@@ -12,7 +12,7 @@ struct ROCKS_UIWIDGET_API WidgetTransform {
     ROCKS_GENERATED_BODY()
 
     ROCKS_PROPERTY() Vec2 translation {};
-    ROCKS_PROPERTY() Vec2 scale {1,1};
+    ROCKS_PROPERTY() Vec2 scale { 1, 1 };
     ROCKS_PROPERTY() Vec2 shear {};
     ROCKS_PROPERTY() float angle = 0;
 

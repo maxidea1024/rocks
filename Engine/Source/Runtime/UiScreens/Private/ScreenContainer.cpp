@@ -32,6 +32,7 @@ ScreenContainer::~ScreenContainer() noexcept {
                 screen->OnDeactivated();
             }
         }
+
         (void)Switcher::RemoveChild(*page.root);
     }
 }
@@ -40,9 +41,11 @@ usize ScreenContainer::Top() const noexcept {
     if (pages_.IsEmpty()) {
         return 0;
     }
+
     if (order_ == Order::Switcher) {
         return selected_;
     }
+
     return order_ == Order::Queue ? 0 : pages_.Size() - 1;
 }
 
@@ -63,6 +66,7 @@ Result<void> ScreenContainer::ClearScreens() noexcept {
             return removed;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -70,12 +74,15 @@ Result<void> ScreenContainer::ActivateAt(usize index) noexcept {
     if (changing_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (order_ != Order::Switcher || index >= pages_.Size()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (index == selected_) {
         return Result<void>::Success();
     }
+
     changing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         changing_ = false;
@@ -102,6 +109,7 @@ ScreenInputConfig ScreenContainer::InputConfig() const noexcept {
             return screen.Value().Get().Value()->InputConfig();
         }
     }
+
     return {ScreenInputMode::Game, false, false, false, false};
 }
 
@@ -113,10 +121,12 @@ Result<bool> ScreenContainer::DispatchAction(Guid domain, Guid action) noexcept 
     if (pages_.IsEmpty()) {
         return Result<bool>::Success(false);
     }
+
     auto screen = objects_.ResolveForWrite<Screen>(objects_.OwnerAccess(), ActiveScreen());
     if (!screen) {
         return Result<bool>::Failure(screen.Error());
     }
+
     auto* value = screen.Value().Get().Value();
     return Result<bool>::Success((domain == Guid{} || domain == value->ActionDomain()) &&
                                  value->DispatchBoundAction(action));
@@ -126,6 +136,7 @@ bool ScreenContainer::IsModal() const noexcept {
     if (pages_.IsEmpty()) {
         return false;
     }
+
     auto screen = objects_.Resolve<Screen>(objects_.OwnerAccess(), ActiveScreen());
     return screen && screen.Value().Get().Value()->IsModal();
 }
@@ -151,6 +162,7 @@ Result<ObjectHandle> ScreenContainer::AddScreen(ClassRef<Screen> type) noexcept 
     if (changing_) {
         return Result<ObjectHandle>::Failure(ErrorCode::Busy);
     }
+
     changing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         changing_ = false;
@@ -159,6 +171,7 @@ Result<ObjectHandle> ScreenContainer::AddScreen(ClassRef<Screen> type) noexcept 
     if (!valid) {
         return Result<ObjectHandle>::Failure(valid.Error());
     }
+
     WidgetPool* pool = nullptr;
     for (const auto& item : pools_) {
         if (item.type == type.Id()) {
@@ -166,27 +179,32 @@ Result<ObjectHandle> ScreenContainer::AddScreen(ClassRef<Screen> type) noexcept 
             break;
         }
     }
+
     if (!pool) {
         auto made = UniquePtr<WidgetPool>::TryMake(objects_.ObjectAllocator(), objects_, type.Id());
         if (!made) {
             return Result<ObjectHandle>::Failure(made.Error());
         }
+
         pool = made.Value().Get();
         auto added = pools_.TryPushBack({type.Id(), Move(made.Value())});
         if (!added) {
             return Result<ObjectHandle>::Failure(added.Error());
         }
     }
+
     auto entry = pool->Acquire();
     if (!entry) {
         return Result<ObjectHandle>::Failure(entry.Error());
     }
+
     const auto handle = entry.Value().widget;
     auto attached = Attach(handle, pool);
     if (!attached) {
         (void)pool->Release(handle, false);
         return Result<ObjectHandle>::Failure(attached.Error());
     }
+
     return Result<ObjectHandle>::Success(handle);
 }
 
@@ -194,6 +212,7 @@ Result<void> ScreenContainer::AddScreen(ObjectHandle handle) noexcept {
     if (changing_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     changing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         changing_ = false;
@@ -206,22 +225,27 @@ Result<void> ScreenContainer::Attach(ObjectHandle handle, WidgetPool* pool) noex
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
     }
+
     auto* screen = borrowed.Value().Get().Value();
     if (screen->container_) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     auto root = screen->TakeElement(objects_);
     if (!root) {
         return Result<void>::Failure(root.Error());
     }
+
     auto reserved = pages_.TryEnsureCapacity(pages_.Size() + 1);
     if (!reserved) {
         return reserved;
     }
+
     auto attached = Switcher::TryAddChild(root.Value());
     if (!attached) {
         return attached;
     }
+
     const bool first = pages_.IsEmpty();
     if (first) {
         previousFocus_ = WeakPtr<Element>(app_.GetFocus(userId_));
@@ -235,6 +259,7 @@ Result<void> ScreenContainer::Attach(ObjectHandle handle, WidgetPool* pool) noex
         (void)SetActiveIndex(Top());
         Activate(pages_[Top()]);
     }
+
     return Result<void>::Success();
 }
 
@@ -245,6 +270,7 @@ void ScreenContainer::Deactivate(Page& page) noexcept {
         page.focus = WeakPtr<Element>(focus);
         (void)app_.SetFocus(userId_, {});
     }
+
     auto screen = objects_.ResolveForWrite<Screen>(objects_.OwnerAccess(), page.screen);
     if (screen) {
         auto* value = screen.Value().Get().Value();
@@ -258,6 +284,7 @@ void ScreenContainer::Activate(Page& page) noexcept {
     if (!borrowed) {
         return;
     }
+
     auto* screen = borrowed.Value().Get().Value();
     screen->active_ = true;
     screen->OnActivated();
@@ -267,6 +294,7 @@ void ScreenContainer::Activate(Page& page) noexcept {
             return;
         }
     }
+
     if (!screen->FocusTarget().IsNull()) {
         auto widget = objects_.Resolve<Widget>(objects_.OwnerAccess(), screen->FocusTarget());
         if (widget) {
@@ -276,6 +304,7 @@ void ScreenContainer::Activate(Page& page) noexcept {
             }
         }
     }
+
     (void)app_.MoveFocusWithin(userId_, page.root, true, false);
 }
 
@@ -283,6 +312,7 @@ Result<void> ScreenContainer::RemoveScreen(ObjectHandle handle) noexcept {
     if (changing_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     changing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         changing_ = false;
@@ -291,20 +321,24 @@ Result<void> ScreenContainer::RemoveScreen(ObjectHandle handle) noexcept {
         if (pages_[i].screen != handle) {
             continue;
         }
+
         const bool active = i == Top();
         if (active) {
             Deactivate(pages_[i]);
         }
+
         auto screen = objects_.ResolveForWrite<Screen>(objects_.OwnerAccess(), handle);
         if (screen) {
             screen.Value().Get().Value()->container_ = nullptr;
         }
+
         Page removed = Move(pages_[i]);
         (void)Switcher::RemoveChild(*removed.root);
         (void)pages_.TryRemoveAt(i);
         if (order_ == Order::Switcher && i <= selected_ && selected_ > 0) {
             --selected_;
         }
+
         if (!pages_.IsEmpty()) {
             (void)SetActiveIndex(Top());
             if (active) {
@@ -314,10 +348,13 @@ Result<void> ScreenContainer::RemoveScreen(ObjectHandle handle) noexcept {
             if (auto previous = previousFocus_.Lock()) {
                 (void)app_.SetFocus(userId_, previous);
             }
+
             previousFocus_ = {};
         }
+
         return removed.pool ? removed.pool->Release(handle, true) : Result<void>::Success();
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
@@ -325,6 +362,7 @@ Result<bool> ScreenContainer::Back() noexcept {
     if (changing_ || backing_) {
         return Result<bool>::Failure(ErrorCode::Busy);
     }
+
     backing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         backing_ = false;
@@ -333,13 +371,16 @@ Result<bool> ScreenContainer::Back() noexcept {
     if (handle.IsNull()) {
         return Result<bool>::Success(false);
     }
+
     auto screen = objects_.ResolveForWrite<Screen>(objects_.OwnerAccess(), handle);
     if (!screen) {
         return Result<bool>::Failure(screen.Error());
     }
+
     if (screen.Value().Get().Value()->OnBack() || ActiveScreen() != handle) {
         return Result<bool>::Success(true);
     }
+
     auto removed = RemoveScreen(handle);
     return removed ? Result<bool>::Success(true) : Result<bool>::Failure(removed.Error());
 }

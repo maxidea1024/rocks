@@ -9,10 +9,12 @@ Result<ObjectHandle> UserWidget::FindAnimation(ObjectRegistry& objects, Guid id)
         if (!animation) {
             return Result<ObjectHandle>::Failure(animation.Error());
         }
+
         if (animation.Value().Get().Value()->StableId() == id) {
             return Result<ObjectHandle>::Success(handle);
         }
     }
+
     return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
 }
 
@@ -26,10 +28,12 @@ Result<ObjectHandle> UserWidget::FindAnimation(ObjectRegistry& objects,
         if (!read) {
             return Result<ObjectHandle>::Failure(read.Error());
         }
+
         if (EqualsIgnoringAsciiCase(stored.View(), name)) {
             return Result<ObjectHandle>::Success(handle);
         }
     }
+
     return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
 }
 
@@ -40,10 +44,12 @@ UserWidget::PlayAnimation(ObjectRegistry& objects, Application& app, Guid id,
     if (!found) {
         return Result<SharedPtr<UserWidgetAnimation>>::Failure(found.Error());
     }
+
     auto clip = objects.Resolve<WidgetAnimation>(objects.OwnerAccess(), found.Value());
     if (!clip) {
         return Result<SharedPtr<UserWidgetAnimation>>::Failure(clip.Error());
     }
+
     return PlayAnimation(objects, app, *clip.Value().Get().Value(), Move(options));
 }
 

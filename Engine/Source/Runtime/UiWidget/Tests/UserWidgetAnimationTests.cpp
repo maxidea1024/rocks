@@ -34,6 +34,7 @@ TEST(UiWidget_AnimationsSerializeCurvesAndTargetStableWidgetIds) {
         REQUIRE(saved);
         bytes = Move(saved.Value());
     }
+
     {
         const auto access = target.OwnerAccess();
         ObjectAccessScope scope(access);

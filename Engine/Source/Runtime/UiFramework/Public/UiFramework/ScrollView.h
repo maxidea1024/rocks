@@ -5,7 +5,11 @@
 
 namespace rocks::ui {
 
-enum class ConsumeMouseWheel : uint8 { WhenScrolling, Always, Never };
+enum class ConsumeMouseWheel : uint8 {
+    WhenScrolling,
+    Always,
+    Never
+};
 
 // 내용 하나를 주어진 방향으로 스크롤한다. 현재 clip은 창 축에 평행해야 한다.
 class ROCKS_UIFRAMEWORK_API ScrollView : public Element {
@@ -49,7 +53,8 @@ public:
     float GetViewFraction() const noexcept;
     float GetViewOffsetFraction() const noexcept;
     // 자식 배치 좌표를 스크롤 영역으로 변환한 뒤 요청한 위치가 보이도록 이동한다.
-    Result<void> ScrollIntoView(const Element& child,ScrollIntoViewAlignment alignment,float padding=0) noexcept;
+    Result<void> ScrollIntoView(const Element& child, ScrollIntoViewAlignment alignment,
+                                float padding = 0) noexcept;
     void ScrollToEnd() noexcept;
     float GetMaxScrollOffset() const noexcept;
 

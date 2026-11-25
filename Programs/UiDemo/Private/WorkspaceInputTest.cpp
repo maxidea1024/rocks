@@ -19,6 +19,7 @@ bool ShowsFill(const CacheRoot& cache, Vec2 point) noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -28,6 +29,7 @@ bool ShowsPlacement(const CacheRoot& cache, Vec2 point) noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -50,14 +52,17 @@ bool VerifySplitterCursor(Application& app) noexcept {
             !adapter.Route(InputEvent::MouseDown(MouseButton::Left, p.x, p.y))) {
             return false;
         }
+
         auto outside = adapter.Route(InputEvent::MouseMove(-60, -40));
         if (!outside || !outside.Value() || adapter.MouseCursor() != divider.cursor) {
             return false;
         }
+
         // 구분선을 원래 위치에 되돌리고 버튼 해제와 캡처 상실을 각각 확인한다.
         if (!adapter.Route(InputEvent::MouseMove(p.x, p.y))) {
             return false;
         }
+
         if (divider.cursor == MouseCursor::ResizeHorizontal) {
             if (!adapter.Route(InputEvent::MouseUp(MouseButton::Left, p.x, p.y))) {
                 return false;
@@ -65,11 +70,13 @@ bool VerifySplitterCursor(Application& app) noexcept {
         } else if (!adapter.Route(InputEvent::CaptureLost())) {
             return false;
         }
+
         if (!adapter.Route(InputEvent::MouseMove(-60, -40)) ||
             adapter.MouseCursor() != MouseCursor::Arrow) {
             return false;
         }
     }
+
     return true;
 }
 
@@ -80,15 +87,18 @@ bool VerifyOuterDocking(Allocator& allocator, Application& app,
     if (!root->SaveLayout(1, original) || !app.UpdatePaintCache(viewport, 1)) {
         return false;
     }
+
     SharedPtr<Element> timeline;
     for (const auto& element : root->ActiveChildren()) {
         if (element->GetGeometry().Contains({100, 600})) {
             timeline = element;
         }
     }
+
     if (!timeline) {
         return false;
     }
+
     // 분할된 창의 바깥에 놓으면 미리보기와 실제 본문이 반대쪽 끝까지 닿아야 한다.
     struct Placement {
         Vec2 point, first, last, outside;
@@ -104,12 +114,14 @@ bool VerifyOuterDocking(Allocator& allocator, Application& app,
             !app.RoutePointer({PointerEventType::Move, placement.point})) {
             return false;
         }
+
         auto cache = app.UpdatePaintCache(viewport, 1);
         if (!cache || !ShowsPlacement(*cache.Value(), placement.first) ||
             !ShowsPlacement(*cache.Value(), placement.last) ||
             ShowsPlacement(*cache.Value(), placement.outside)) {
             return false;
         }
+
         if (!app.RoutePointer({PointerEventType::Up, placement.point}) ||
             !app.UpdatePaintCache(viewport, 1) ||
             !timeline->GetGeometry().Contains(placement.first) ||
@@ -119,6 +131,7 @@ bool VerifyOuterDocking(Allocator& allocator, Application& app,
             return false;
         }
     }
+
     // 분리 창에서 돌아온 탭도 같은 루트 분할 경로로 배치한다.
     auto floating = SharedPtr<DockManager>::TryMake(allocator, allocator);
     return floating && root->TransferTabTo("Timeline", *floating.Value()) &&
@@ -136,6 +149,7 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
     if (!made || !root->TransferTabTo("Controls", *made.Value())) {
         return 30;
     }
+
     auto floating = Move(made.Value());
     Application second(allocator);
     second.SetRoot(floating);
@@ -144,6 +158,7 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
         !second.UpdatePaintCache(viewport, 1)) {
         return 31;
     }
+
     // 두 번째 창의 왼쪽 위를 첫 번째 창 기준 (1200, 0)으로 둔다.
     root->SetWindowHitTest(DockWindowHitTest::CreateLambda(
         [floating](Vec2 point, Vec2& local) noexcept -> SharedPtr<DockManager> {
@@ -161,6 +176,7 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
             preview.origin != Vec2{1110, 188} || !root->PaintFloatingPreview(image)) {
             return 36;
         }
+
         // 실제 패널의 토성 텍스처가 미리보기 본문에도 들어 있어야 한다.
         bool hasPlanet = false;
         for (const auto& box : image.Boxes()) {
@@ -168,9 +184,11 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
                 hasPlanet = true;
             }
         }
+
         if (!hasPlanet) {
             return 37;
         }
+
         const auto move = main.RoutePointer({PointerEventType::Move, rightGuide});
         auto cache = second.UpdatePaintCache(viewport, 1);
         if (root->GetFloatingPreview(preview) || !down.Value() || !move || !move.Value() ||
@@ -178,6 +196,7 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
             ShowsPlacement(*cache.Value(), {80, 300})) {
             return 32;
         }
+
         const auto end = main.RoutePointer(
             {cancel ? PointerEventType::Cancel : PointerEventType::Up, rightGuide});
         cache = second.UpdatePaintCache(viewport, 1);
@@ -186,6 +205,7 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
             return 33;
         }
     }
+
     root->SetWindowHitTest({});
     floating->CloseWindowTabs();
     if (!floating->ActiveChildren().IsEmpty() || !floating->TransferTabTo("Preview", *root) ||
@@ -193,6 +213,7 @@ int VerifyDockWindows(Allocator& allocator, Application& main,
         root->IsOpen("Controls") || !root->IsOpen("Timeline") || !root->OpenTab("Controls")) {
         return 34;
     }
+
     return 0;
 }
 
@@ -205,6 +226,7 @@ int VerifyWorkspaceInput(Allocator& allocator, const SharedPtr<DockManager>& roo
     if (!app.SetCommands({}, commands)) {
         return 19;
     }
+
     const auto viewport = Geometry::Root({1120, 680}, {});
     auto cache = app.UpdatePaintCache(viewport, 1);
     if (!cache || !ShowsFill(*cache.Value(), {100, 508}) || ShowsFill(*cache.Value(), {650, 508})) {
@@ -216,36 +238,45 @@ int VerifyWorkspaceInput(Allocator& allocator, const SharedPtr<DockManager>& roo
         !ShowsFill(*cache.Value(), {650, 508})) {
         return 21;
     }
+
     if (!Click(app, {850, 325}) || !app.UpdatePaintCache(viewport, 1) ||
         ShowsFill(*cache.Value(), {100, 508})) {
         return 22;
     }
+
     if (!Click(app, {850, 325}) || !app.UpdatePaintCache(viewport, 1) ||
         !ShowsFill(*cache.Value(), {100, 508})) {
         return 23;
     }
+
     if (!Click(app, {830, 389}) || !app.UpdatePaintCache(viewport, 1) ||
         ShowsFill(*cache.Value(), {100, 508})) {
         return 24;
     }
+
     if (!Click(app, {360, 610}) || !app.UpdatePaintCache(viewport, 1) ||
         !ShowsFill(*cache.Value(), {310, 508}) || ShowsFill(*cache.Value(), {600, 508})) {
         return 26;
     }
+
     const auto end = app.RouteKey(0, input::InputEvent::KeyDown(input::Key::End));
     if (!end || !end.Value() || !app.UpdatePaintCache(viewport, 1) ||
         !ShowsFill(*cache.Value(), {650, 508})) {
         return 27;
     }
+
     if (!app.UpdatePaintCache(viewport, 1) || cache.Value()->LastUpdate().paintCalls != 0) {
         return 25;
     }
+
     if (!VerifySplitterCursor(app)) {
         return 35;
     }
+
     if (!VerifyOuterDocking(allocator, app, root)) {
         return 38;
     }
+
     return VerifyDockWindows(allocator, app, root);
 }
 

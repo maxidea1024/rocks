@@ -3,6 +3,7 @@
 #include <UiCore/Element.h>
 
 namespace rocks::ui {
+
 // 여백은 왼쪽·위·오른쪽·아래 순서다. Fill은 남은 영역을 채우고 나머지는 자식 측정 크기를 사용한다.
 struct ROCKS_UIFRAMEWORK_API SlotPlacement {
     Vec4 padding{};

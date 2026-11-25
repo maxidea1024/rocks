@@ -4,6 +4,7 @@
 namespace rocks::ui {
 
 namespace {
+
 uint32 Mask(input::GamepadButton button) noexcept {
     return button < input::GamepadButton::Count ? uint32{1} << static_cast<uint32>(button) : 0;
 }
@@ -18,21 +19,25 @@ Result<void> ScreenInputRouter::AddMapping(ScreenActionMapping mapping) noexcept
     if (routing_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (mapping.action == Guid{} || mapping.key >= input::Key::Count ||
         mapping.button > input::GamepadButton::Count ||
         (mapping.key == input::Key::None && mapping.button == input::GamepadButton::Count)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     usize insertion = mappings_.Size();
     for (usize i = 0; i < mappings_.Size(); ++i) {
         const auto& other = mappings_[i];
         if (other.domain == mapping.domain && other.action == mapping.action) {
             return Result<void>::Failure(ErrorCode::AlreadyExists);
         }
+
         if (insertion == mappings_.Size() && other.priority < mapping.priority) {
             insertion = i;
         }
     }
+
     return mappings_.TryInsert(mapping, insertion);
 }
 
@@ -40,17 +45,20 @@ Result<void> ScreenInputRouter::RemoveMapping(Guid domain, Guid action) noexcept
     if (routing_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     for (usize i = 0; i < mappings_.Size(); ++i) {
         if (mappings_[i].domain == domain && mappings_[i].action == action) {
             return mappings_.TryRemoveAt(i);
         }
     }
+
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
 Span<const ScreenActionMapping> ScreenInputRouter::Mappings() const noexcept {
     return mappings_.View();
 }
+
 Result<SharedPtr<ScreenDeviceState>> ScreenInputRouter::ObserveDevice() noexcept {
     if (!deviceState_) {
         auto state = SharedPtr<ScreenDeviceState>::TryMake(mappings_.GetAllocator(),
@@ -58,14 +66,17 @@ Result<SharedPtr<ScreenDeviceState>> ScreenInputRouter::ObserveDevice() noexcept
         if (!state) {
             return state;
         }
+
         deviceState_ = Move(state.Value());
     }
+
     return Result<SharedPtr<ScreenDeviceState>>::Success(deviceState_);
 }
 
 ScreenInputDevice ScreenInputRouter::Device() const noexcept {
     return device_;
 }
+
 void ScreenInputRouter::SetOnDeviceChanged(Delegate<void(ScreenInputDevice)>&& callback) noexcept {
     deviceChanged_ = Move(callback);
 }
@@ -76,6 +87,7 @@ void ScreenInputRouter::Observe(ScreenInputDevice device) noexcept {
         if (deviceState_) {
             deviceState_->SetDevice(device);
         }
+
         deviceChanged_.ExecuteIfBound(device);
     }
 }
@@ -89,6 +101,7 @@ Result<bool> ScreenInputRouter::Dispatch(input::Key key, uint32 pressed) noexcep
             }
         }
     }
+
     return Result<bool>::Success(false);
 }
 
@@ -97,6 +110,7 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
     if (index >= input::MaxGamepads) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
+
     const auto old = pads_[index];
     const auto& pad = event.gamepad;
     pads_[index] = pad;
@@ -109,9 +123,11 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
             active = true;
         }
     }
+
     if (active) {
         Observe(ScreenInputDevice::Gamepad);
     }
+
     const auto accept = Mask(input::GamepadButton::South);
     if (released & accept) {
         auto target = acceptTargets_[index].Lock();
@@ -124,20 +140,25 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
                                        input::InputEvent::KeyUp(input::Key::Enter), root);
         }
     }
+
     if (!allowUi || !pressed) {
         return Result<bool>::Success(false);
     }
+
     const auto root = screens_.ActiveRoot();
     if (root && app_.RouteGamepadButtons(screens_.UserId(), pressed, root)) {
         return Result<bool>::Success(true);
     }
+
     auto mapped = Dispatch(input::Key::None, pressed);
     if (!mapped || mapped.Value()) {
         return mapped;
     }
+
     if (pressed & Mask(input::GamepadButton::East)) {
         return screens_.Back();
     }
+
     struct DirectionButton {
         input::GamepadButton button;
         FocusDirection direction;
@@ -152,6 +173,7 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
             return app_.Navigate(screens_.UserId(), direction.direction, screens_.ActiveRoot());
         }
     }
+
     if (pressed & accept) {
         auto focus = app_.GetFocus(screens_.UserId());
         auto handled =
@@ -160,8 +182,10 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
         if (handled && handled.Value()) {
             acceptTargets_[index] = WeakPtr<Element>(focus);
         }
+
         return handled;
     }
+
     return Result<bool>::Success(false);
 }
 
@@ -169,6 +193,7 @@ Result<bool> ScreenInputRouter::Route(const input::InputEvent& event) noexcept {
     if (routing_) {
         return Result<bool>::Failure(ErrorCode::Busy);
     }
+
     routing_ = true;
     ROCKS_ON_SCOPE_EXIT {
         routing_ = false;
@@ -182,39 +207,48 @@ Result<bool> ScreenInputRouter::Route(const input::InputEvent& event) noexcept {
             pads_[i] = {};
             acceptTargets_[i] = {};
         }
+
         return adapter_.Route(event);
     }
+
     if (event.type == InputEventType::PointerCaptureLost) {
         return adapter_.Route(event);
     }
+
     if (event.type == InputEventType::GamepadState) {
         auto handled = Gamepad(event, allowUi);
         return handled && block ? Result<bool>::Success(true) : Move(handled);
     }
+
     if (event.type == InputEventType::TouchBegan || event.type == InputEventType::TouchMoved) {
         Observe(ScreenInputDevice::Touch);
     } else if (event.type == InputEventType::MouseDown || event.type == InputEventType::MouseMove ||
                event.type == InputEventType::MouseWheel || event.type == InputEventType::KeyDown) {
         Observe(ScreenInputDevice::KeyboardMouse);
     }
+
     if (!allowUi) {
         return Result<bool>::Success(false);
     }
+
     if (event.type == InputEventType::KeyDown && !event.repeat) {
         auto mapped = Dispatch(event.key, 0);
         if (!mapped || mapped.Value()) {
             return mapped;
         }
     }
+
     auto local = event;
     local.userId = screens_.UserId();
     auto handled = adapter_.RouteWithin(local, screens_.ActiveRoot());
     if (!handled || handled.Value()) {
         return handled;
     }
+
     if (event.type == InputEventType::KeyDown && event.key == input::Key::Escape && !event.repeat) {
         return screens_.Back();
     }
+
     return Result<bool>::Success(block);
 }
 

@@ -22,32 +22,39 @@ UserWidget::StartAnimation(ObjectRegistry& objects, Application& app, const Widg
     if (!CachedElement()) {
         return Result<SharedPtr<UserWidgetAnimation>>::Failure(ErrorCode::NotReady);
     }
+
     auto& allocator = objects.ObjectAllocator();
     if (!animationPlayers_) {
         auto set = SharedPtr<UserWidgetAnimationSet>::TryMake(allocator, allocator);
         if (!set) {
             return Result<SharedPtr<UserWidgetAnimation>>::Failure(set.Error());
         }
+
         animationPlayers_ = Move(set.Value());
     }
+
     auto made = SharedPtr<UserWidgetAnimation>::TryMake(allocator, allocator);
     if (!made) {
         return made;
     }
+
     auto& player = *made.Value();
     auto bound = player.Bind(objects, app, *this, clip, Move(options), made.Value());
     if (!bound) {
         return Result<SharedPtr<UserWidgetAnimation>>::Failure(bound.Error());
     }
+
     bound = player.Schedule();
     if (!bound) {
         return Result<SharedPtr<UserWidgetAnimation>>::Failure(bound.Error());
     }
+
     const auto active = animationPlayers_;
     bound = active->players.TryPushBack(made.Value());
     if (!bound) {
         return Result<SharedPtr<UserWidgetAnimation>>::Failure(bound.Error());
     }
+
     player.set_ = WeakPtr<UserWidgetAnimationSet>(active);
     if (!queued) {
         bound = player.Advance(0);
@@ -56,6 +63,7 @@ UserWidget::StartAnimation(ObjectRegistry& objects, Application& app, const Widg
             return Result<SharedPtr<UserWidgetAnimation>>::Failure(bound.Error());
         }
     }
+
     return made;
 }
 
@@ -94,6 +102,7 @@ bool UserWidget::IsAnyAnimationPlaying() const noexcept {
             }
         }
     }
+
     return false;
 }
 

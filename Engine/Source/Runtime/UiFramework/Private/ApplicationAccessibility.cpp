@@ -1,11 +1,13 @@
 #include <UiFramework/Application.h>
 
 namespace rocks::ui {
+
 Result<Array<AccessibleNode>> Application::AccessibleTree(uint32 user) const noexcept {
     Array<AccessibleNode> nodes(allocator_);
     if (!root_) {
         return Result<Array<AccessibleNode>>::Success(Move(nodes));
     }
+
     struct Pending {
         SharedPtr<Element> element;
         usize parent;
@@ -16,6 +18,7 @@ Result<Array<AccessibleNode>> Application::AccessibleTree(uint32 user) const noe
     if (!start) {
         return Result<Array<AccessibleNode>>::Failure(start.Error());
     }
+
     auto focus = GetFocus(user);
     while (!pending.IsEmpty()) {
         auto current = Move(pending[pending.Size() - 1]);
@@ -25,6 +28,7 @@ Result<Array<AccessibleNode>> Application::AccessibleTree(uint32 user) const noe
             element.GetVisibility() == Visibility::Collapsed) {
             continue;
         }
+
         auto parent = current.parent;
         bool enabled = current.enabled && element.IsEnabled();
         if (element.IsAccessible()) {
@@ -38,22 +42,26 @@ Result<Array<AccessibleNode>> Application::AccessibleTree(uint32 user) const noe
             if (!bounds) {
                 return Result<Array<AccessibleNode>>::Failure(bounds.Error());
             }
+
             node.bounds = bounds.Value();
             node.native = WeakPtr<Element>(current.element);
             auto name = element.GetAccessibleText(node.name);
             if (!name) {
                 return Result<Array<AccessibleNode>>::Failure(name.Error());
             }
+
             auto summary = element.GetAccessibleText(node.summary, true);
             if (!summary) {
                 return Result<Array<AccessibleNode>>::Failure(summary.Error());
             }
+
             parent = nodes.Size();
             auto stored = nodes.TryPushBack(Move(node));
             if (!stored) {
                 return Result<Array<AccessibleNode>>::Failure(stored.Error());
             }
         }
+
         if (element.AllowsAccessibleChildren()) {
             auto children = element.ActiveChildren();
             for (usize i = children.Size(); i > 0; --i) {
@@ -64,6 +72,7 @@ Result<Array<AccessibleNode>> Application::AccessibleTree(uint32 user) const noe
             }
         }
     }
+
     return Result<Array<AccessibleNode>>::Success(Move(nodes));
 }
 } // namespace rocks::ui

@@ -26,6 +26,7 @@ Result<void> GridWidgetSlot::UpdateLayout(ObjectRegistry& objects,
     if (!applied) {
         return applied;
     }
+
     return Configure(layout);
 }
 
@@ -34,6 +35,7 @@ Result<void> GridWidgetSlot::Configure(const GridSlot& layout) noexcept {
     if (!layout.rowSpan || !layout.columnSpan || !placement.IsValid() || !layout.nudge.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     column_ = layout.column;
     row_ = layout.row;
     columnSpan_ = layout.columnSpan;

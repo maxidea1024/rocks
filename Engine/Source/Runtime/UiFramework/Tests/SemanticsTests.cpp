@@ -6,7 +6,9 @@
 #include <UiFramework/Frame.h>
 
 namespace rocks::ui {
+
 namespace {
+
 double tipClock = 0;
 double ReadTipClock() noexcept {
     return tipClock;
@@ -57,6 +59,7 @@ TEST(UiFramework_ToolTipDelayFadeAndAccessibleSummary) {
             CHECK(node.summary.View() == "Open inventory");
         }
     }
+
     CHECK(found);
     REQUIRE(app.RoutePointer({PointerEventType::Down, {8, 4}}));
     CHECK(!app.IsToolTipOpen(0));

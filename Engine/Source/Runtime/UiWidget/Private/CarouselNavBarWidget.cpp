@@ -18,6 +18,7 @@ void CarouselNavBarWidget::Disconnect() noexcept {
             (void)old.Value().Get().Value()->OnPagesChanged().Remove(subscription_);
         }
     }
+
     subscription_.Reset();
     registry_ = nullptr;
 }
@@ -31,8 +32,10 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
         if (!value) {
             return Result<void>::Failure(value.Error());
         }
+
         carousel = value.Value().Get().Value();
     }
+
     const usize count = carousel ? carousel->ChildCount() : 0;
     const usize selected = carousel ? carousel->ActiveIndex() : 0;
     auto old = host.ChildRefAt(0);
@@ -42,6 +45,7 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
             button->SetColor(i == selected ? LinearColor{0.14f, 0.4f, 0.8f, 1}
                                            : LinearColor{0.2f, 0.2f, 0.2f, 1});
         }
+
         return Result<void>::Success();
     }
 
@@ -50,15 +54,18 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
     if (!row) {
         return Result<void>::Failure(row.Error());
     }
+
     for (usize i = 0; i < count; ++i) {
         auto button =
             factory_ ? factory_.Execute(i) : SharedPtr<Button>::TryMake(allocator, allocator);
         if (!button || !button.Value() || button.Value()->Parent()) {
             return Result<void>::Failure(button ? ErrorCode::InvalidArgument : button.Error());
         }
+
         if (!factory_) {
             button.Value()->SetDesiredSize({20, 16});
         }
+
         button.Value()->SetColor(i == selected ? LinearColor{0.14f, 0.4f, 0.8f, 1}
                                                : LinearColor{0.2f, 0.2f, 0.2f, 1});
         button.Value()->SetOnClicked(
@@ -77,21 +84,26 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
         if (!wrapper) {
             return Result<void>::Failure(wrapper.Error());
         }
+
         auto added = wrapper.Value()->TryAddChild(button.Value());
         if (added) {
             added = row.Value()->TryAddChild(wrapper.Value());
         }
+
         if (!added) {
             return added;
         }
     }
+
     if (old) {
         (void)host.RemoveChild(*old);
     }
+
     auto attached = host.TryAddChild(row.Value());
     if (!attached && old) {
         (void)host.TryAddChild(old);
     }
+
     return attached;
 }
 
@@ -101,15 +113,18 @@ Result<void> CarouselNavBarWidget::Connect(ObjectRegistry& objects,
     if (!refreshed) {
         return refreshed;
     }
+
     registry_ = &objects;
     if (LinkedCarousel().IsNull()) {
         return refreshed;
     }
+
     auto carousel =
         objects.ResolveForWrite<CarouselWidget>(objects.OwnerAccess(), LinkedCarousel());
     if (!carousel) {
         return Result<void>::Failure(carousel.Error());
     }
+
     auto added = carousel.Value().Get().Value()->OnPagesChanged().TryAddWeakLambda(
         native, [&objects, owner = Handle()]() noexcept {
             auto widget =
@@ -124,6 +139,7 @@ Result<void> CarouselNavBarWidget::Connect(ObjectRegistry& objects,
     if (!added) {
         return Result<void>::Failure(added.Error());
     }
+
     subscription_ = added.Value();
     return Result<void>::Success();
 }
@@ -136,16 +152,19 @@ Result<void> CarouselNavBarWidget::SetLinkedCarousel(ObjectRegistry& objects,
             return Result<void>::Failure(valid.Error());
         }
     }
+
     auto old = LinkedCarousel();
     if (old == carousel) {
         return Result<void>::Success();
     }
+
     auto live = CachedElement();
     Disconnect();
     auto linked = objects.SetReference(objects.OwnerAccess(), Handle(), linkedCarousel_, carousel);
     if (linked && live) {
         linked = Connect(objects, live);
     }
+
     if (!linked) {
         Disconnect();
         (void)objects.SetReference(objects.OwnerAccess(), Handle(), linkedCarousel_, old);
@@ -153,6 +172,7 @@ Result<void> CarouselNavBarWidget::SetLinkedCarousel(ObjectRegistry& objects,
             (void)Connect(objects, live);
         }
     }
+
     return linked;
 }
 
@@ -160,6 +180,7 @@ Result<void> CarouselNavBarWidget::SetButtonPadding(Vec4 padding) noexcept {
     if (!SlotPlacement{.padding = padding}.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto previous = buttonPadding_;
     buttonPadding_ = padding;
     if (auto live = CachedElement(); live && registry_) {
@@ -167,8 +188,10 @@ Result<void> CarouselNavBarWidget::SetButtonPadding(Vec4 padding) noexcept {
         if (!changed) {
             buttonPadding_ = previous;
         }
+
         return changed;
     }
+
     return Result<void>::Success();
 }
 
@@ -180,8 +203,10 @@ Result<void> CarouselNavBarWidget::SetButtonFactory(ButtonFactory&& factory) noe
         if (!changed) {
             factory_ = Move(previous);
         }
+
         return changed;
     }
+
     return Result<void>::Success();
 }
 
@@ -192,6 +217,7 @@ Result<SharedPtr<Element>> CarouselNavBarWidget::BuildElement(ObjectRegistry& ob
     if (!host) {
         return Result<SharedPtr<Element>>::Failure(host.Error());
     }
+
     auto linked = Connect(objects, host.Value());
     return linked ? Result<SharedPtr<Element>>::Success(Move(host.Value()))
                   : Result<SharedPtr<Element>>::Failure(linked.Error());

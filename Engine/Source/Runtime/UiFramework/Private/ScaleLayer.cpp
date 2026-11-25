@@ -9,6 +9,7 @@ Result<void> ScaleLayer::TryAddChild(const SharedPtr<Element>& child) noexcept {
     if (ChildCount() != 0) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     return Element::TryAddChild(child);
 }
 
@@ -21,6 +22,7 @@ Result<void> ScaleLayer::SetScale(float scale) noexcept {
         scale_ = scale;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -44,6 +46,7 @@ Result<void> ScaleLayer::Arrange(const Geometry& geometry) noexcept {
     if (!size.IsFinite() || size.x < 0 || size.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const AffineTransform2D transform{scale_, 0, 0, scale_, 0, 0};
     return child->ArrangeIfNeeded(GetGeometry().MakeChild(size, transform, {}, {}));
 }

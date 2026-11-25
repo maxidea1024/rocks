@@ -12,10 +12,12 @@ Result<void> CircularThrobberWidget::SetPieceCount(uint32 count) noexcept {
     if (count == 0 || count > 64) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     pieceCount_ = count;
     if (auto live = CachedElement()) {
         return static_cast<ActivityIndicator&>(*live).SetPieceCount(count);
     }
+
     return Result<void>::Success();
 }
 
@@ -30,12 +32,14 @@ Result<void> CircularThrobberWidget::SetPieceBrush(const Brush& brush) noexcept 
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     brush_ = brush;
     pieceSize_ = brush.imageSize;
     pieceTint_ = brush.tint;
     if (auto live = CachedElement()) {
         return static_cast<ActivityIndicator&>(*live).SetPieceBrush(brush);
     }
+
     return Result<void>::Success();
 }
 
@@ -43,22 +47,28 @@ Result<void> CircularThrobberWidget::SetRadius(float radius) noexcept {
     if (!math::IsFinite(radius) || radius < 0 || radius > NumericLimits<float>::Max() * 0.5f) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     radius_ = radius;
     if (auto live = CachedElement()) {
         return static_cast<ActivityIndicator&>(*live).SetRadius(radius);
     }
+
     return Result<void>::Success();
 }
+
 Result<void> CircularThrobberWidget::SetPeriod(float seconds) noexcept {
     if (!math::IsFinite(seconds) || seconds <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     period_ = seconds;
     if (auto live = CachedElement()) {
         return static_cast<ActivityIndicator&>(*live).SetPeriod(seconds);
     }
+
     return Result<void>::Success();
 }
+
 void CircularThrobberWidget::ApplyProperties(Element& element) noexcept {
     auto& indicator = static_cast<ActivityIndicator&>(element);
     (void)indicator.SetPieceCount(pieceCount_);

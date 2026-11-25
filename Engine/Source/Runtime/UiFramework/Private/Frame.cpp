@@ -7,13 +7,16 @@ Result<void> Frame::Construct(Args&& args) noexcept {
     if (status) {
         status = SetBrush(args.brush);
     }
+
     if (status) {
         status = SetPadding(args.padding);
     }
+
     if (status) {
         BindColor(Move(args.color));
         BindDesiredSize(Move(args.desiredSize));
     }
+
     return status;
 }
 
@@ -25,6 +28,7 @@ Result<void> Frame::TryAddChild(const SharedPtr<Element>& child) noexcept {
     if (ChildCount() != 0) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     return Element::TryAddChild(child);
 }
 
@@ -32,10 +36,12 @@ Result<void> Frame::SetBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (brush_ != brush) {
         brush_ = brush;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -72,6 +78,7 @@ Result<void> Frame::SetPadding(Vec4 padding) noexcept {
         padding_ = padding;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -93,6 +100,7 @@ Result<void> Frame::Arrange(const Geometry& geometry) noexcept {
         const AffineTransform2D offset{1, 0, 0, 1, padding_.x, padding_.y};
         return child->ArrangeIfNeeded(GetGeometry().MakeChild(size, offset, {}, {}));
     }
+
     return Result<void>::Success();
 }
 

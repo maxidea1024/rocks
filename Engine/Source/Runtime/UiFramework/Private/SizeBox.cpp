@@ -9,6 +9,7 @@ Result<void> SizeBox::TryAddChild(const SharedPtr<Element>& child) noexcept {
     if (ChildCount() != 0) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     return Element::TryAddChild(child);
 }
 
@@ -17,11 +18,13 @@ Result<void> SizeBox::SetSizeRange(Vec2 minimum, Vec2 maximum) noexcept {
         maximum.x < minimum.x || maximum.y < minimum.y) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (minimum_ != minimum || maximum_ != maximum) {
         minimum_ = minimum;
         maximum_ = maximum;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -29,11 +32,13 @@ Result<void> SizeBox::SetWidthOverride(float width) noexcept {
     if (!math::IsFinite(width) || width < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!widthOverride_ || overrideSize_.x != width) {
         overrideSize_.x = width;
         widthOverride_ = true;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -41,11 +46,13 @@ Result<void> SizeBox::SetHeightOverride(float height) noexcept {
     if (!math::IsFinite(height) || height < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!heightOverride_ || overrideSize_.y != height) {
         overrideSize_.y = height;
         heightOverride_ = true;
         InvalidateLayout();
     }
+
     return Result<void>::Success();
 }
 
@@ -67,15 +74,18 @@ bool SizeBox::IsValidAspectRange(float minimum, float maximum) noexcept {
     return math::IsFinite(minimum) && math::IsFinite(maximum) && minimum >= 0 && maximum >= 0 &&
            (maximum == 0 || minimum <= maximum);
 }
+
 Result<void> SizeBox::SetAspectRatioRange(float minimum, float maximum) noexcept {
     if (!IsValidAspectRange(minimum, maximum)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const Vec2 range{minimum, maximum};
     if (aspectRange_ != range) {
         aspectRange_ = range;
         InvalidateArrangement();
     }
+
     return Result<void>::Success();
 }
 
@@ -100,10 +110,12 @@ Result<void> SizeBox::Arrange(const Geometry& geometry) noexcept {
                 size.x = size.y * aspectRange_.y;
             }
         }
+
         const auto offset = (geometry.size - size) * 0.5f;
         return child->ArrangeIfNeeded(
             GetGeometry().MakeChild(size, {1, 0, 0, 1, offset.x, offset.y}, {}, {}));
     }
+
     return Result<void>::Success();
 }
 

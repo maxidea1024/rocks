@@ -10,6 +10,7 @@ Result<void> WidgetEventCatalog::CheckDescriptor(const Descriptor& value) const 
     if (value.id == Guid{} || value.signature == Guid{} || value.owner == TypeId{}) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const auto conflicts = [&](const Descriptor& other) noexcept {
         return value.signature == other.signature && value.nativeSignature != other.nativeSignature;
     };
@@ -18,11 +19,13 @@ Result<void> WidgetEventCatalog::CheckDescriptor(const Descriptor& value) const 
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
     }
+
     for (const auto& method : methods_) {
         if (conflicts(method.desc)) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -32,6 +35,7 @@ const WidgetEventCatalog::EventEntry* WidgetEventCatalog::FindEvent(Guid id) con
             return &event;
         }
     }
+
     return nullptr;
 }
 
@@ -41,6 +45,7 @@ const WidgetEventCatalog::MethodEntry* WidgetEventCatalog::FindMethod(Guid id) c
             return &method;
         }
     }
+
     return nullptr;
 }
 
@@ -48,10 +53,12 @@ Result<void> WidgetEventCatalog::AddEvent(EventEntry entry) noexcept {
     if (FindEvent(entry.desc.id)) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     auto valid = CheckDescriptor(entry.desc);
     if (!valid) {
         return valid;
     }
+
     return events_.TryPushBack(Move(entry));
 }
 
@@ -59,10 +66,12 @@ Result<void> WidgetEventCatalog::AddMethod(MethodEntry entry) noexcept {
     if (FindMethod(entry.desc.id)) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     auto valid = CheckDescriptor(entry.desc);
     if (!valid) {
         return valid;
     }
+
     return methods_.TryPushBack(Move(entry));
 }
 
@@ -73,11 +82,13 @@ Result<void> WidgetEventCatalog::Validate(const TypeLease& sender, const TypeLea
     if (!event || !method) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     if (!sender.IsA(event->desc.owner) || !controller.IsA(method->desc.owner) ||
         binding.signature != event->desc.signature || binding.signature != method->desc.signature ||
         event->desc.nativeSignature != method->desc.nativeSignature) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+
     return Result<void>::Success();
 }
 
@@ -90,21 +101,25 @@ Result<void> WidgetEventCatalog::Connect(ConstructionContext& stage, ObjectRegis
     if (!source || !target) {
         return Result<void>::Failure(!source ? source.Error() : target.Error());
     }
+
     auto& allocator = objects.ObjectAllocator();
     auto methods = SharedPtr<MethodList>::TryMake(allocator, allocator);
     if (!methods) {
         return Result<void>::Failure(methods.Error());
     }
+
     for (const auto& binding : bindings) {
         auto valid = Validate(source.Value(), target.Value(), binding);
         if (!valid) {
             return valid;
         }
+
         auto stored = methods.Value()->TryPushBack(FindMethod(binding.methodId)->method);
         if (!stored) {
             return stored;
         }
     }
+
     return FindEvent(bindings[0].eventId)
         ->attach.Execute(stage, sender, objects, controller, methods.Value());
 }

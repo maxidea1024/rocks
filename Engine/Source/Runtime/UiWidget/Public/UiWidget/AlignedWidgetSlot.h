@@ -1,7 +1,9 @@
 #pragma once
 #include <UiWidget/WidgetSlot.h>
 #include <UiFramework/SlotPresenter.h>
+
 namespace rocks::ui {
+
 // 단일 내용, 오버레이, 페이지와 스크롤 항목에서 공유하는 여백 및 두 축 정렬이다.
 // 기본 Fill과 여백 0 조합은 자식을 바로 붙여 추가 레이아웃 노드를 만들지 않는다.
 ROCKS_CLASS()

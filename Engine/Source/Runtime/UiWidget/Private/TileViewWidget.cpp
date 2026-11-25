@@ -17,10 +17,12 @@ Result<void> TileViewWidget::SetTileWidth(float width) noexcept {
     if (!math::IsFinite(width) || width <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     tileWidth_ = width;
     if (auto live = CachedElement()) {
         return static_cast<TileView&>(*live).SetTileWidth(width);
     }
+
     return Result<void>::Success();
 }
 

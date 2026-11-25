@@ -14,10 +14,14 @@ public:
     explicit ScrollBoxWidget(Allocator& allocator) noexcept;
     Result<void> SetScrollOffset(float offset) noexcept;
     float ScrollOffset() const noexcept;
-    // 논리 단위로 스크롤한다. 끝으로 이동하는 요청은 다음 배치에서 콘텐츠 길이가 확정된 뒤 적용한다.
+    // 논리 단위로 스크롤한다. 끝으로 이동하는 요청은 다음 배치에서 콘텐츠 길이가 확정된 뒤
+    // 적용한다.
     void ScrollToEnd() noexcept;
     Result<void> ScrollToStart() noexcept;
-    Result<void> ScrollWidgetIntoView(const Widget& child,ScrollIntoViewAlignment alignment=ScrollIntoViewAlignment::Nearest,float padding=0) noexcept;
+    Result<void>
+    ScrollWidgetIntoView(const Widget& child,
+                         ScrollIntoViewAlignment alignment = ScrollIntoViewAlignment::Nearest,
+                         float padding = 0) noexcept;
     float GetViewFraction() const noexcept;
     float GetViewOffsetFraction() const noexcept;
     float GetScrollOffsetOfEnd() const noexcept;
@@ -26,7 +30,7 @@ public:
     Result<void> SetConsumeMouseWheel(ConsumeMouseWheel policy) noexcept;
     Result<void> SetWheelScrollMultiplier(float multiplier) noexcept;
     Result<void> SetScrollbarThickness(float logicalPixels) noexcept;
-    void SetShowScrollbar(bool visible,bool alwaysShow=false) noexcept;
+    void SetShowScrollbar(bool visible, bool alwaysShow = false) noexcept;
     // 여백의 성분은 왼쪽·위·오른쪽·아래 순이다. 화면 축을 바꿔도 의미를 유지한다.
     Result<void> SetScrollbarPadding(Vec4 padding) noexcept;
     Vec4 GetScrollbarPadding() const noexcept;
@@ -51,18 +55,18 @@ private:
     friend class ScrollBoxWidgetSlot;
     Result<void> ApplySlotSize(Element& panel, Element& child, StackSizeRule rule,
                                float weight) noexcept;
-    ROCKS_PROPERTY(ReadOnly, Name="horizontal") bool horizontal_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name="wheelPolicy") uint8 wheelPolicy_ = 0;
-    ROCKS_PROPERTY(ReadOnly, Name="wheelMultiplier") float wheelMultiplier_ = 1;
-    ROCKS_PROPERTY(ReadOnly, Name="scrollbarThickness") float thickness_ = 6;
-    ROCKS_PROPERTY(ReadOnly, Name="showScrollbar") bool showBar_ = true;
-    ROCKS_PROPERTY(ReadOnly, Name="alwaysShowScrollbar") bool alwaysShow_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name="touchScrolling") bool touchScrolling_ = true;
-    ROCKS_PROPERTY(ReadOnly, Name="rightDragScrolling") bool rightDrag_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name="scrollbarPadding") Vec4 barPadding_ {};
-    ROCKS_PROPERTY(ReadOnly, Name="alwaysShowTrack") bool alwaysShowTrack_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name="backPadScrolling") bool padBefore_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name="frontPadScrolling") bool padAfter_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "horizontal") bool horizontal_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "wheelPolicy") uint8 wheelPolicy_ = 0;
+    ROCKS_PROPERTY(ReadOnly, Name = "wheelMultiplier") float wheelMultiplier_ = 1;
+    ROCKS_PROPERTY(ReadOnly, Name = "scrollbarThickness") float thickness_ = 6;
+    ROCKS_PROPERTY(ReadOnly, Name = "showScrollbar") bool showBar_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "alwaysShowScrollbar") bool alwaysShow_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "touchScrolling") bool touchScrolling_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "rightDragScrolling") bool rightDrag_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "scrollbarPadding") Vec4 barPadding_ {};
+    ROCKS_PROPERTY(ReadOnly, Name = "alwaysShowTrack") bool alwaysShowTrack_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "backPadScrolling") bool padBefore_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "frontPadScrolling") bool padAfter_ = false;
     ROCKS_NATIVE() Delegate<void(float)> scrolled_;
     ROCKS_NATIVE() bool endRequested_ = false;
     ROCKS_PROPERTY(Name = "initialOffset") float initialOffset_ = 0;

@@ -19,6 +19,7 @@ Result<void> WrapBoxWidgetSlot::UpdateLayout(ObjectRegistry& objects,
     if (!applied) {
         return applied;
     }
+
     return Configure(layout);
 }
 

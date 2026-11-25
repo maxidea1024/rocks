@@ -1,11 +1,14 @@
 #include <UiFramework/SlotPresenter.h>
 
 namespace rocks::ui {
+
 namespace {
+
 float Offset(StackAlignment alignment, float remaining) noexcept {
     if (alignment == StackAlignment::End) {
         return remaining;
     }
+
     return alignment == StackAlignment::Center ? remaining * 0.5f : 0;
 }
 } // namespace
@@ -23,10 +26,12 @@ SlotPresenter::SlotPresenter(Allocator& allocator, const SlotPlacement& placemen
     : Element(allocator), placement_(placement) {
     SetVisibility(Visibility::SelfHitTestInvisible);
 }
+
 Result<void> SlotPresenter::TryAddChild(const SharedPtr<Element>& child) noexcept {
     return ChildCount() ? Result<void>::Failure(ErrorCode::CapacityExceeded)
                         : Element::TryAddChild(child);
 }
+
 Result<void> SlotPresenter::WrapChild(Allocator& allocator, Element& child,
                                       const SlotPlacement& placement) noexcept {
     auto presenter = SharedPtr<SlotPresenter>::TryMake(allocator, allocator, placement);
@@ -50,14 +55,17 @@ Vec2 SlotPresenter::ComputeDesiredSize(float) const noexcept {
     if (!child || child->GetVisibility() == Visibility::Collapsed) {
         return {};
     }
+
     return placement_.PaddedSize(child->GetDesiredSize());
 }
+
 Result<void> SlotPresenter::Arrange(const Geometry& area) noexcept {
     SetGeometry(area);
     auto* child = ChildAt(0);
     if (!child || child->GetVisibility() == Visibility::Collapsed) {
         return Result<void>::Success();
     }
+
     return placement_.ArrangeChild(*child, area);
 }
 

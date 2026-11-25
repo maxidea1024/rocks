@@ -3,6 +3,7 @@
 #include <Core/Delegate.h>
 
 namespace rocks::ui {
+
 enum class FocusDirection : uint8 {
     Left,
     Right,
@@ -24,4 +25,5 @@ struct NavigationBoundary {
     Guid target{};
 };
 using NavigationHandler = Delegate<Guid(uint32, FocusDirection)>;
+
 } // namespace rocks::ui

@@ -12,10 +12,12 @@ Result<void> ThrobberWidget::SetPieceCount(uint32 count) noexcept {
     if (count == 0 || count > 64) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     pieceCount_ = count;
     if (auto live = CachedElement()) {
         return static_cast<ActivityIndicator&>(*live).SetPieceCount(count);
     }
+
     return Result<void>::Success();
 }
 
@@ -30,12 +32,14 @@ Result<void> ThrobberWidget::SetPieceBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     brush_ = brush;
     pieceSize_ = brush.imageSize;
     pieceTint_ = brush.tint;
     if (auto live = CachedElement()) {
         return static_cast<ActivityIndicator&>(*live).SetPieceBrush(brush);
     }
+
     return Result<void>::Success();
 }
 
@@ -47,6 +51,7 @@ void ThrobberWidget::SetAnimationAxes(bool horizontal, bool vertical, bool opaci
         static_cast<ActivityIndicator&>(*live).SetAnimationAxes(horizontal, vertical, opacity);
     }
 }
+
 void ThrobberWidget::ApplyProperties(Element& element) noexcept {
     auto& indicator = static_cast<ActivityIndicator&>(element);
     (void)indicator.SetPieceCount(pieceCount_);

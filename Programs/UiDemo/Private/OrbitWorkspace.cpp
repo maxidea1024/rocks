@@ -34,6 +34,7 @@ Result<void> AddPanel(AnchorCanvas& canvas, Allocator& allocator, Color color,
     if (!panel) {
         return Result<void>::Failure(panel.Error());
     }
+
     panel.Value()->SetColor(LinearColor::FromSRGB(color));
     panel.Value()->SetVisibility(Visibility::HitTestInvisible);
     return canvas.TryAddSlot(panel.Value(), slot);
@@ -55,21 +56,26 @@ public:
             status_ = canvas_.TryAddSlot(child, slot);
         }
     }
+
     void Add(const Result<SharedPtr<TextLabel>>& label, CanvasSlot slot) noexcept {
         if (!status_) {
             return;
         }
+
         if (!label) {
             status_ = Result<void>::Failure(label.Error());
             return;
         }
+
         Add(label.Value(), slot);
     }
+
     void Fill(Color color, CanvasSlot slot) noexcept {
         if (status_) {
             status_ = AddPanel(canvas_, allocator_, color, slot);
         }
     }
+
     ErrorCode Error() const noexcept {
         return status_.Error();
     }
@@ -97,6 +103,7 @@ Result<void> OrbitWorkspace::BindCommands() noexcept {
     if (!list) {
         return Result<void>::Failure(list.Error());
     }
+
     commands_ = Move(list.Value());
     auto result = definitions_.Add(StartCommand, "출발점", "공전 진행률을 0%로 옮긴다.",
                                    {{input::Key::Home}, {}});
@@ -104,14 +111,17 @@ Result<void> OrbitWorkspace::BindCommands() noexcept {
         result = definitions_.Add(EndCommand, "종료점", "공전 진행률을 100%로 옮긴다.",
                                   {{input::Key::End}, {}});
     }
+
     if (result) {
         result = commands_->Map(
             StartCommand, {.execute = Delegate<void()>::CreateRaw(this, &OrbitWorkspace::Rewind)});
     }
+
     if (result) {
         result = commands_->Map(EndCommand, {.execute = Delegate<void()>::CreateLambda(
                                                  [this]() noexcept { Seek(1); })});
     }
+
     return result;
 }
 
@@ -121,11 +131,13 @@ Result<SharedPtr<TextLabel>> OrbitWorkspace::Label(StringView value, int32 size,
     if (!label) {
         return label;
     }
+
     label.Value()->SetColor(LinearColor::FromSRGB(color));
     auto set = font_.SetText(*label.Value(), value, size);
     if (!set) {
         return Result<SharedPtr<TextLabel>>::Failure(set.Error());
     }
+
     return label;
 }
 
@@ -137,6 +149,7 @@ Result<SharedPtr<Frame>> OrbitWorkspace::Tab(StringView name) noexcept {
     if (!tab) {
         return Result<SharedPtr<Frame>>::Failure(tab.Error());
     }
+
     return Result<SharedPtr<Frame>>::Success(tab.Value().AsSharedPtr());
 }
 
@@ -147,9 +160,11 @@ Result<SharedPtr<Element>> OrbitWorkspace::Preview(SlotHandle map) noexcept {
     if (!canvas) {
         return Result<SharedPtr<Element>>::Failure(canvas.Error());
     }
+
     if (!orbit) {
         return Result<SharedPtr<Element>>::Failure(orbit.Error());
     }
+
     if (!hud) {
         return Result<SharedPtr<Element>>::Failure(hud.Error());
     }
@@ -161,10 +176,12 @@ Result<SharedPtr<Element>> OrbitWorkspace::Preview(SlotHandle map) noexcept {
     if (!progress) {
         return Result<SharedPtr<Element>>::Failure(progress.Error());
     }
+
     auto bar = progress.Value().Get().Value()->CachedElement();
     if (!bar) {
         return Result<SharedPtr<Element>>::Failure(ErrorCode::NotReady);
     }
+
     auto* native = static_cast<ProgressBar*>(bar.Get());
     native->SetColor(LinearColor::FromSRGB(Line));
     native->SetFillColor(LinearColor::FromSRGB(Mint));
@@ -191,6 +208,7 @@ Result<SharedPtr<Element>> OrbitWorkspace::Preview(SlotHandle map) noexcept {
     if (layout.Error() != ErrorCode::None) {
         return Result<SharedPtr<Element>>::Failure(layout.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(canvas.Value());
 }
 
@@ -201,14 +219,17 @@ Result<SharedPtr<Element>> OrbitWorkspace::Inspector() noexcept {
     if (!slider || !check) {
         return Result<SharedPtr<Element>>::Failure(ErrorCode::OutOfMemory);
     }
+
     auto percent = Label("0%", 36, Mint);
     if (!percent) {
         return Result<SharedPtr<Element>>::Failure(percent.Error());
     }
+
     auto display = Label("미리보기에 진행 막대 표시", 15, Paper);
     if (!display) {
         return Result<SharedPtr<Element>>::Failure(display.Error());
     }
+
     slider_ = Move(slider.Value());
     percent_ = Move(percent.Value());
     slider_->SetColor(LinearColor::FromSRGB(Line));
@@ -230,6 +251,7 @@ Result<SharedPtr<Element>> OrbitWorkspace::Inspector() noexcept {
     if (!padded) {
         return Result<SharedPtr<Element>>::Failure(padded.Error());
     }
+
     auto attached = check.Value()->TryAddChild(display.Value());
     if (!attached) {
         return Result<SharedPtr<Element>>::Failure(attached.Error());
@@ -261,6 +283,7 @@ Result<SharedPtr<Element>> OrbitWorkspace::Inspector() noexcept {
     if (!scroll) {
         return Result<SharedPtr<Element>>::Failure(scroll.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(scroll.Value().AsSharedPtr());
 }
 
@@ -273,6 +296,7 @@ Result<SharedPtr<Element>> OrbitWorkspace::BuildTimeline() noexcept {
                                                    : !timeline ? timeline.Error()
                                                                : phase.Error());
     }
+
     timeline_ = Move(timeline.Value());
     phase_ = Move(phase.Value());
     timeline_->SetColor(LinearColor::FromSRGB(Panel));
@@ -281,6 +305,7 @@ Result<SharedPtr<Element>> OrbitWorkspace::BuildTimeline() noexcept {
     if (!styled) {
         return Result<SharedPtr<Element>>::Failure(styled.Error());
     }
+
     timeline_->SetOnChanged(Delegate<void(float)>::CreateRaw(this, &OrbitWorkspace::Seek));
     const TimelineMark marks[] = {{0.25f, LinearColor::FromSRGB({208, 159, 108})},
                                   {0.5f, LinearColor::FromSRGB({208, 159, 108})},
@@ -307,10 +332,12 @@ Result<SharedPtr<Element>> OrbitWorkspace::BuildTimeline() noexcept {
                                                  .offset = {offset, 75, 38, 20},
                                                  .alignment = {anchor, 0}});
     }
+
     panel.Value()->SetClipToBounds(true);
     if (layout.Error() != ErrorCode::None) {
         return Result<SharedPtr<Element>>::Failure(layout.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(panel.Value());
 }
 
@@ -320,6 +347,7 @@ Result<void> OrbitWorkspace::SetProgress(float value) noexcept {
     if (!progress) {
         return Result<void>::Failure(progress.Error());
     }
+
     const auto percent = static_cast<int32>(value * 100 + 0.5f);
     if (percent != displayed_) {
         StringBuilder<> text(allocator_);
@@ -327,17 +355,21 @@ Result<void> OrbitWorkspace::SetProgress(float value) noexcept {
         if (!result) {
             return result;
         }
+
         result = font_.SetText(*percent_, text.View(), 36);
         if (!result) {
             return result;
         }
+
         displayed_ = percent;
     }
+
     if (timeline_ && phase_) {
         auto updated = timeline_->SetValue(value);
         if (!updated) {
             return updated;
         }
+
         const int32 angle = static_cast<int32>(value * 360 + 0.5f);
         if (angle != phaseDegrees_) {
             StringBuilder<> text(allocator_);
@@ -345,12 +377,15 @@ Result<void> OrbitWorkspace::SetProgress(float value) noexcept {
             if (updated) {
                 updated = font_.SetText(*phase_, text.View(), 18);
             }
+
             if (!updated) {
                 return updated;
             }
+
             phaseDegrees_ = angle;
         }
     }
+
     (void)slider_->SetValue(value);
     orbit_->SetProgress(value);
     return progress.Value().Get().Value()->SetValue(value);
@@ -369,24 +404,29 @@ Result<SharedPtr<DockManager>> OrbitWorkspace::Create(SlotHandle map) noexcept {
     if (!area) {
         return area;
     }
+
     auto commands = BindCommands();
     if (!commands) {
         return Result<SharedPtr<DockManager>>::Failure(commands.Error());
     }
+
     auto preview = Preview(map);
     if (!preview) {
         return Result<SharedPtr<DockManager>>::Failure(preview.Error());
     }
+
     auto inspector = Inspector();
     if (!inspector) {
         return Result<SharedPtr<DockManager>>::Failure(inspector.Error());
     }
+
     auto timeline = BuildTimeline();
     auto timelineTab = Tab("타임라인");
     if (!timeline || !timelineTab) {
         return Result<SharedPtr<DockManager>>::Failure(!timeline ? timeline.Error()
                                                                  : timelineTab.Error());
     }
+
     auto previewTab = Tab("궤도 미리보기");
     auto inspectorTab = Tab("속성");
     if (!previewTab || !inspectorTab) {
@@ -405,12 +445,14 @@ Result<SharedPtr<DockManager>> OrbitWorkspace::Create(SlotHandle map) noexcept {
         !area.Value()->Dock("Timeline", "Preview", DockSide::Bottom, 0.22f)) {
         return Result<SharedPtr<DockManager>>::Failure(ErrorCode::InvalidArgument);
     }
+
     constexpr float initial = 0.64f;
     (void)slider_->SetValue(initial);
     auto ready = SetProgress(initial);
     if (!ready) {
         return Result<SharedPtr<DockManager>>::Failure(ready.Error());
     }
+
     return area;
 }
 

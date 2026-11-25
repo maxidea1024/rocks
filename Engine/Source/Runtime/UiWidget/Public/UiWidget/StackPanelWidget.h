@@ -1,7 +1,9 @@
 #pragma once
 #include <UiWidget/PanelWidget.h>
 #include <UiCore/StackLayout.h>
+
 namespace rocks::ui {
+
 // 가로·세로·가변 방향 패널이 같은 슬롯 설정을 애셋과 화면 트리에 적용한다.
 ROCKS_CLASS(Abstract)
 class ROCKS_UIWIDGET_API StackPanelWidget : public PanelWidget {

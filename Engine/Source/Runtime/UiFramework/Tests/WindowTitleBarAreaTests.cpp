@@ -3,7 +3,9 @@
 #include <UiFramework/Application.h>
 #include <UiFramework/Button.h>
 #include <UiFramework/WindowTitleBarArea.h>
+
 namespace rocks::ui {
+
 TEST(UiFramework_TitleBarDistinguishesCaptionAndInteractiveChild) {
     SystemAllocator allocator;
     auto area = SharedPtr<WindowTitleBarArea>::TryMake(allocator, allocator);

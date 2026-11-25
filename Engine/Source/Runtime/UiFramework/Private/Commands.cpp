@@ -37,8 +37,10 @@ Result<input::Key> FindChordKey(StringView name) noexcept {
         chord.Value().gamepad != input::GamepadButton::Count) {
         return Result<input::Key>::Failure(ErrorCode::NotFound);
     }
+
     return Result<input::Key>::Success(chord.Value().key);
 }
+
 namespace {
 
 bool Valid(KeyChord chord) noexcept {
@@ -65,11 +67,13 @@ Result<KeyChord> ReadChord(ByteReader& reader) noexcept {
     if (reader.Failed() || bytes.IsEmpty() || flags > 15) {
         return Result<KeyChord>::Failure(ErrorCode::InvalidArgument);
     }
+
     StringView name(reinterpret_cast<const char*>(bytes.Data()), bytes.Size());
     auto key = FindChordKey(name);
     if (!key) {
         return Result<KeyChord>::Failure(key.Error());
     }
+
     return Result<KeyChord>::Success(
         {key.Value(), (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0, (flags & 8) != 0});
 }
@@ -79,6 +83,7 @@ bool RunAction(const SharedPtr<CommandAction>& action) noexcept {
         (action->canExecute && !action->canExecute.Execute())) {
         return false;
     }
+
     return action->execute.ExecuteIfBound();
 }
 
@@ -93,6 +98,7 @@ const CommandInfo* CommandSet::Find(Guid id) const noexcept {
             return &command;
         }
     }
+
     return nullptr;
 }
 
@@ -101,18 +107,22 @@ Result<void> CommandSet::Add(Guid id, StringView label, StringView description,
     if (id == Guid{} || label.IsEmpty() || !Valid(defaults)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (Find(id)) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     auto& alloc = commands_.GetAllocator();
     CommandInfo command{id, String(alloc), String(alloc), defaults};
     auto stored = command.label.TryAssign(label);
     if (stored) {
         stored = command.description.TryAssign(description);
     }
+
     if (!stored) {
         return stored;
     }
+
     return commands_.TryPushBack(Move(command));
 }
 
@@ -123,15 +133,18 @@ Result<void> BindingManager::Override(Guid id, CommandChords chords) noexcept {
     if (id == Guid{} || !Valid(chords)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     // 저장 순서는 등록 순서와 무관하게 명령 ID 순으로 고정한다.
     usize index = 0;
     while (index < entries_.Size() && GuidLess(entries_[index].id, id)) {
         ++index;
     }
+
     if (index < entries_.Size() && entries_[index].id == id) {
         entries_[index].chords = chords;
         return Result<void>::Success();
     }
+
     return entries_.TryInsert({id, chords}, index);
 }
 
@@ -142,6 +155,7 @@ bool BindingManager::RestoreDefault(Guid id) noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -151,6 +165,7 @@ CommandChords BindingManager::Chords(const CommandInfo& command) const noexcept 
             return entry.chords;
         }
     }
+
     return command.defaults;
 }
 
@@ -165,10 +180,12 @@ Result<void> BindingManager::Save(Array<uint8>& bytes) const noexcept {
         WriteChord(writer, entry.chords.primary);
         WriteChord(writer, entry.chords.secondary);
     }
+
     auto written = writer.Status();
     if (written) {
         bytes = Move(snapshot);
     }
+
     return written;
 }
 
@@ -177,6 +194,7 @@ Result<void> BindingManager::Load(Span<const uint8> bytes) noexcept {
     if (reader.ReadU32LE() != 0x44484352 || reader.ReadU32LE() != 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     Array<Entry> loaded(entries_.GetAllocator());
     while (reader.Remaining()) {
         Guid id{reader.ReadU64LE(), reader.ReadU64LE()};
@@ -186,15 +204,18 @@ Result<void> BindingManager::Load(Span<const uint8> bytes) noexcept {
             (!loaded.IsEmpty() && !GuidLess(loaded[loaded.Size() - 1].id, id))) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         const CommandChords chords{first.Value(), second.Value()};
         if (!Valid(chords)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         auto stored = loaded.TryPushBack({id, chords});
         if (!stored) {
             return stored;
         }
     }
+
     entries_ = Move(loaded);
     return Result<void>::Success();
 }
@@ -210,6 +231,7 @@ SharedPtr<CommandAction> CommandList::Action(Guid id) const noexcept {
             return entry.action;
         }
     }
+
     return {};
 }
 
@@ -217,13 +239,16 @@ Result<void> CommandList::Map(Guid id, CommandAction action) noexcept {
     if (!commands_.Find(id) || !action.execute) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (Action(id)) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
+
     auto stored = SharedPtr<CommandAction>::TryMake(actions_.GetAllocator(), Move(action));
     if (!stored) {
         return Result<void>::Failure(stored.Error());
     }
+
     return actions_.TryPushBack({id, Move(stored.Value())});
 }
 
@@ -234,6 +259,7 @@ bool CommandList::Unmap(Guid id) noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -260,6 +286,7 @@ bool CommandList::Process(KeyChord chord, bool repeat) const noexcept {
     if (chord.key == input::Key::None) {
         return false;
     }
+
     for (const auto& entry : actions_) {
         auto keys = bindings_.Chords(*commands_.Find(entry.id));
         if ((chord == keys.primary || chord == keys.secondary) &&
@@ -268,6 +295,7 @@ bool CommandList::Process(KeyChord chord, bool repeat) const noexcept {
             return RunAction(action);
         }
     }
+
     return false;
 }
 } // namespace rocks::ui

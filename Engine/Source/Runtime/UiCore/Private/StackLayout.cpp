@@ -33,16 +33,20 @@ double AdjustContent(Span<const StackSlot> slots, double space, bool growing) no
                 }
             }
         }
+
         const double delta = space - used;
         if (weights == 0 || (growing ? delta <= 0 : delta >= 0)) {
             break;
         }
+
         const double next = adjustment + delta / weights;
         if (next == adjustment) {
             break;
         }
+
         adjustment = next;
     }
+
     return adjustment;
 }
 
@@ -103,6 +107,7 @@ Result<void> ArrangeStack(Span<const StackSlot> slots, Span<StackPlacement> outp
             }
         }
     }
+
     const bool growing = contentSpace > contentBasis;
     const double adjustment = hasContent && contentSpace != contentBasis
                                   ? AdjustContent(slots, contentSpace, growing)
@@ -118,6 +123,7 @@ Result<void> ArrangeStack(Span<const StackSlot> slots, Span<StackPlacement> outp
             } else if (slot.rule == StackSizeRule::FillContent) {
                 size = ContentSize(slot, growing, adjustment);
             }
+
             position += slot.before;
             if (position > static_cast<double>(NumericLimits<float>::Max()) ||
                 !math::IsFinite(position)) {
@@ -127,6 +133,7 @@ Result<void> ArrangeStack(Span<const StackSlot> slots, Span<StackPlacement> outp
             if (pass == 1) {
                 output[i] = {static_cast<float>(position), static_cast<float>(size)};
             }
+
             position += size + slot.after;
         }
     }

@@ -19,21 +19,25 @@ Result<void> CaptureWorkspace(Allocator& allocator, graphics::Device& device,
     if (!arranged) {
         return arranged;
     }
+
     WidgetSurfaceHost surfaces(allocator, device, ActiveShaders(), textures);
     auto preparedSurfaces = surfaces.Prepare(root, 0, width, height, pipeline);
     if (!preparedSurfaces) {
         return Result<void>::Failure(preparedSurfaces.Error());
     }
+
     auto cache = app.UpdateArrangedPaintCache();
     if (!cache) {
         return Result<void>::Failure(cache.Error());
     }
+
     DrawBatch batch(allocator);
     DrawBatchBuffers buffers(device, ActiveShaders(), batch);
     auto prepared = batch.Update(*cache.Value());
     if (!prepared) {
         return Result<void>::Failure(prepared.Error());
     }
+
     auto uploaded = buffers.Upload();
     if (!uploaded) {
         return uploaded;
@@ -52,21 +56,25 @@ Result<void> CaptureWorkspace(Allocator& allocator, graphics::Device& device,
     if (!formatted) {
         return formatted;
     }
+
     const auto prefix = header.View();
     Array<uint8> ppm(allocator);
     auto allocated = ppm.TryResize(prefix.ByteCount() + static_cast<usize>(width) * height * 3);
     if (!allocated) {
         return allocated;
     }
+
     usize out = 0;
     for (char byte : prefix) {
         ppm[out++] = static_cast<uint8>(byte);
     }
+
     for (usize i = 0; i < rgba.Size(); i += 4) {
         ppm[out++] = rgba[i];
         ppm[out++] = rgba[i + 1];
         ppm[out++] = rgba[i + 2];
     }
+
     auto saved = WriteFileAtomically(platform::PhysicalFileSystem(), allocator, "Saved/UiDemo",
                                      "Orbit.ppm", ppm.View());
     return saved ? Result<void>::Success() : Result<void>::Failure(saved.Error());

@@ -12,6 +12,7 @@
 #include <UiWidget/WidgetSwitcherWidget.generated.h>
 
 namespace rocks::ui {
+
 namespace {
 
 template <class Owner, auto Setter>
@@ -22,6 +23,7 @@ WidgetPropertyAccess MakeAccess(bool notifies = true) noexcept {
                 if (!object) {
                     return Result<void>::Failure(object.Error());
                 }
+
                 return ApplyWidgetSetter(*object.Value(), Setter, value, allocator);
             },
             []() noexcept { return WidgetSetter(Setter); }, notifies};
@@ -39,6 +41,7 @@ Result<WidgetPropertyAccess> ResolveWidgetProperty(const TypeLease& widget, Guid
     if (index == TypeLease::NoField) {
         return Result<WidgetPropertyAccess>::Failure(ErrorCode::NotFound);
     }
+
     const auto& field = widget.Schema().fields[index];
     const auto name = field.toolName.IsEmpty() ? field.name : field.toolName;
     // ID로 찾은 스키마의 선언 타입과 도구 이름을 엔진의 실제 setter에 대응시킨다.
@@ -85,6 +88,7 @@ Result<WidgetPropertyAccess> ResolveWidgetProperty(const TypeLease& widget, Guid
             return Result<WidgetPropertyAccess>::Success(accessor.access);
         }
     }
+
     return Result<WidgetPropertyAccess>::Failure(ErrorCode::Unsupported);
 }
 
@@ -96,22 +100,27 @@ ValidateWidgetPropertyBinding(const TypeLease& source, const TypeLease& target,
     if (from == TypeLease::NoField || to == TypeLease::NoField) {
         return Result<WidgetPropertyAccess>::Failure(ErrorCode::NotFound);
     }
+
     const auto& sourceValue = source.Schema().fields[from].value;
     const auto& targetValue = target.Schema().fields[to].value;
     if (sourceValue.kind != targetValue.kind || sourceValue.type != targetValue.type) {
         return Result<WidgetPropertyAccess>::Failure(ErrorCode::TypeMismatch);
     }
+
     const auto* ops = source.FieldOps(from);
     if (!ops || !ops->read) {
         return Result<WidgetPropertyAccess>::Failure(ErrorCode::Unsupported);
     }
+
     auto forward = ResolveWidgetProperty(target, binding.targetField);
     if (!forward || !binding.twoWay) {
         return forward;
     }
+
     if (binding.once || !forward.Value().notifies) {
         return Result<WidgetPropertyAccess>::Failure(ErrorCode::Unsupported);
     }
+
     if (source.IsNativeA(NativeTypeKey<Widget>())) {
         auto reverse = ResolveWidgetProperty(source, binding.sourceField);
         if (!reverse || !reverse.Value().notifies) {
@@ -120,6 +129,7 @@ ValidateWidgetPropertyBinding(const TypeLease& source, const TypeLease& target,
     } else if (HasFlag(source.Schema().fields[from].flags, FieldFlags::ReadOnly) || !ops->write) {
         return Result<WidgetPropertyAccess>::Failure(ErrorCode::Unsupported);
     }
+
     return forward;
 }
 

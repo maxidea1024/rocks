@@ -12,9 +12,11 @@ Result<void> WidgetTree::ForEachWidget(ObjectRegistry& objects, const Visitor& v
     if (!visitor.IsBound()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (RootWidget().IsNull()) {
         return Result<void>::Success();
     }
+
     struct Edge {
         ObjectHandle widget;
         ObjectHandle slot;
@@ -34,22 +36,27 @@ Result<void> WidgetTree::ForEachWidget(ObjectRegistry& objects, const Visitor& v
         if (!outer || outer.Value() != edge.tree) {
             return Result<void>::Failure(outer ? ErrorCode::WrongContext : outer.Error());
         }
+
         auto borrowed = objects.Resolve<Widget>(access, edge.widget);
         if (!borrowed) {
             return Result<void>::Failure(borrowed.Error());
         }
+
         const auto* widget = borrowed.Value().Get().Value();
         if (widget->Slot() != edge.slot || widget->StableId() == Guid{}) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         auto seen = visited.Add(edge.widget);
         if (!seen || seen.Value() != InsertOutcome::Inserted) {
             return Result<void>::Failure(seen ? ErrorCode::CycleDetected : seen.Error());
         }
+
         auto next = visitor.Execute(edge.widget);
         if (!next || !next.Value()) {
             return next ? Result<void>::Success() : Result<void>::Failure(next.Error());
         }
+
         if (includeNested) {
             auto screen = objects.Resolve<UserWidget>(access, edge.widget);
             if (screen) {
@@ -59,6 +66,7 @@ Result<void> WidgetTree::ForEachWidget(ObjectRegistry& objects, const Visitor& v
                     if (!tree) {
                         return Result<void>::Failure(tree.Error());
                     }
+
                     const auto root = tree.Value().Get().Value()->RootWidget();
                     if (!root.IsNull()) {
                         added = stack.TryPushBack({root, {}, nested});
@@ -71,13 +79,16 @@ Result<void> WidgetTree::ForEachWidget(ObjectRegistry& objects, const Visitor& v
                 return Result<void>::Failure(screen.Error());
             }
         }
+
         auto panel = objects.Resolve<PanelWidget>(access, edge.widget);
         if (!panel) {
             if (panel.Error() == ErrorCode::TypeMismatch) {
                 continue;
             }
+
             return Result<void>::Failure(panel.Error());
         }
+
         const auto* parent = panel.Value().Get().Value();
         for (usize i = parent->ChildCount(); i > 0; --i) {
             const auto slot = parent->SlotAt(i - 1);
@@ -86,16 +97,19 @@ Result<void> WidgetTree::ForEachWidget(ObjectRegistry& objects, const Visitor& v
                 return Result<void>::Failure(slotOuter ? ErrorCode::WrongContext
                                                        : slotOuter.Error());
             }
+
             auto link = objects.Resolve<WidgetSlot>(access, slot);
             if (!link) {
                 return Result<void>::Failure(link.Error());
             }
+
             added = stack.TryPushBack({link.Value().Get().Value()->Content(), slot, edge.tree});
             if (!added) {
                 return added;
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -122,12 +136,14 @@ WidgetTree::IndexWidgets(ObjectRegistry& objects) const noexcept {
                           if (!widget) {
                               return Result<bool>::Failure(widget.Error());
                           }
+
                           auto inserted =
                               index.Insert(widget.Value().Get().Value()->StableId(), handle);
                           if (!inserted || inserted.Value() != InsertOutcome::Inserted) {
                               return Result<bool>::Failure(inserted ? ErrorCode::AlreadyExists
                                                                     : inserted.Error());
                           }
+
                           return Result<bool>::Success(true);
                       }));
     return visited ? Result<Index>::Success(Move(index)) : Result<Index>::Failure(visited.Error());
@@ -138,6 +154,7 @@ Result<ObjectHandle> WidgetTree::FindWidget(ObjectRegistry& objects, Guid stable
     if (!index) {
         return Result<ObjectHandle>::Failure(index.Error());
     }
+
     const auto* handle = index.Value().Find(stableId);
     return handle ? Result<ObjectHandle>::Success(*handle)
                   : Result<ObjectHandle>::Failure(ErrorCode::NotFound);
@@ -155,14 +172,17 @@ Result<ObjectHandle> WidgetTree::FindWidget(ObjectRegistry& objects,
                                      if (!read) {
                                          return Result<bool>::Failure(read.Error());
                                      }
+
                                      if (EqualsIgnoringAsciiCase(candidate.View(), name)) {
                                          found = handle;
                                      }
+
                                      return Result<bool>::Success(found.IsNull());
                                  }));
     if (!visited) {
         return Result<ObjectHandle>::Failure(visited.Error());
     }
+
     return found.IsNull() ? Result<ObjectHandle>::Failure(ErrorCode::NotFound)
                           : Result<ObjectHandle>::Success(found);
 }
@@ -176,14 +196,17 @@ Result<ObjectHandle> WidgetTree::FindWidget(ObjectRegistry& objects,
                           if (!widget) {
                               return Result<bool>::Failure(widget.Error());
                           }
+
                           if (widget.Value().Get().Value()->CachedElement().Get() == &element) {
                               found = handle;
                           }
+
                           return Result<bool>::Success(found.IsNull());
                       }));
     if (!visited) {
         return Result<ObjectHandle>::Failure(visited.Error());
     }
+
     return found.IsNull() ? Result<ObjectHandle>::Failure(ErrorCode::NotFound)
                           : Result<ObjectHandle>::Success(found);
 }
@@ -194,13 +217,16 @@ Result<void> WidgetTree::RemoveWidget(ObjectRegistry& objects, ObjectHandle hand
     if (!outer || outer.Value() != Handle()) {
         return Result<void>::Failure(outer ? ErrorCode::WrongContext : outer.Error());
     }
+
     if (RootWidget() == handle) {
         return SetRoot(objects, {});
     }
+
     auto widget = objects.ResolveForWrite<Widget>(access, handle);
     if (!widget) {
         return Result<void>::Failure(widget.Error());
     }
+
     auto* child = widget.Value().Get().Value();
     return child->Slot().IsNull() ? Result<void>::Failure(ErrorCode::NotFound)
                                   : child->RemoveFromParent(objects);

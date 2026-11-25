@@ -64,6 +64,7 @@ private:
     struct Channel {
         explicit Channel(Allocator& allocator) noexcept : curve(allocator) {
         }
+
         usize target = 0;
         WidgetAnimationChannel property = WidgetAnimationChannel::Opacity;
         TangentCurve curve;

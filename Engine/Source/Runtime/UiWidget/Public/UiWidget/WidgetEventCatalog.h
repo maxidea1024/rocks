@@ -24,6 +24,7 @@ public:
         if (!setter) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         auto attach = Attach::CreateLambda(
             [setter](ConstructionContext& stage, ObjectHandle sender, ObjectRegistry& objects,
                      ObjectHandle controller,
@@ -32,6 +33,7 @@ public:
                 if (!source) {
                     return Result<void>::Failure(source.Error());
                 }
+
                 auto callback = Delegate<void(Args...)>::CreateLambda(
                     [&objects, controller, methods](Args... args) noexcept {
                         for (const auto& erased : *methods) {
@@ -52,10 +54,12 @@ public:
         if (!method) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         auto stored = SharedPtr<TypedMethod<Args...>>::TryMake(allocator_);
         if (!stored) {
             return Result<void>::Failure(stored.Error());
         }
+
         stored.Value()->invoke =
             Delegate<void(ObjectRegistry&, ObjectHandle, Args...)>::CreateLambda(
                 [method](ObjectRegistry& objects, ObjectHandle target, Args... args) noexcept {
@@ -87,6 +91,7 @@ private:
     static constexpr StringView NativeSignature() noexcept {
         return __PRETTY_FUNCTION__;
     }
+
     struct MethodBase {};
     template <class... Args>
     struct TypedMethod : MethodBase {

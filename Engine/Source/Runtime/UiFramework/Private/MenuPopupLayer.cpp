@@ -17,16 +17,19 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
     if (!anchor_ || !menu) {
         return Result<void>::Success();
     }
+
     const auto& anchor = anchor_->GetGeometry();
     AffineTransform2D inverse;
     if (!geometry.render.TryInverse(inverse)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const auto local = inverse.Compose(anchor.render);
     auto bounds = Geometry::Root(anchor.size, local).WindowBounds();
     if (!bounds) {
         return Result<void>::Failure(bounds.Error());
     }
+
     const auto rect = bounds.Value();
     const Vec2 desired = menu->GetDesiredSize();
     const auto placement = anchor_->placement_;
@@ -39,6 +42,7 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
         width = math::Min(width, geometry.size.x);
         height = math::Min(height, geometry.size.y);
     }
+
     const bool side = placement == MenuPlacement::Left || placement == MenuPlacement::Right ||
                       placement == MenuPlacement::RightCenter;
     float x = rect.min.x;
@@ -50,9 +54,11 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
         if (fit && width > (useLeft ? left : right) && (useLeft ? right > left : left > right)) {
             useLeft = !useLeft;
         }
+
         if (fit) {
             width = math::Min(width, useLeft ? left : right);
         }
+
         x = useLeft ? rect.min.x - width : rect.max.x;
         y = placement == MenuPlacement::RightCenter ? (rect.min.y + rect.max.y - height) * 0.5f
                                                     : rect.min.y;
@@ -73,9 +79,11 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
             (useAbove ? below > above : above > below)) {
             useAbove = !useAbove;
         }
+
         if (fit) {
             height = math::Min(height, useAbove ? above : below);
         }
+
         y = useAbove ? rect.min.y - height : rect.max.y;
         if (placement == MenuPlacement::CenteredBelow ||
             placement == MenuPlacement::CenteredAbove) {
@@ -86,10 +94,12 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
             x = rect.max.x - width;
         }
     }
+
     if (fit) {
         x = math::Clamp(x, 0.f, geometry.size.x - width);
         y = math::Clamp(y, 0.f, geometry.size.y - height);
     }
+
     return menu->ArrangeIfNeeded(geometry.MakeChild({width, height}, {1, 0, 0, 1, x, y}, {}, {}));
 }
 
@@ -99,6 +109,7 @@ PointerReply MenuPopupLayer::OnPreviewPointerDown(const PointerEvent& event) noe
         anchor_->Close();
         return {.handled = true};
     }
+
     return {};
 }
 
@@ -107,6 +118,7 @@ bool MenuPopupLayer::OnPreviewKeyDown(uint32, const input::InputEvent& event) no
         anchor_->Close();
         return true;
     }
+
     return false;
 }
 

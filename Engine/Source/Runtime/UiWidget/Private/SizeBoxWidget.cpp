@@ -21,10 +21,12 @@ Result<void> SizeBoxWidget::SetMinimumSize(Vec2 value) noexcept {
         value.y > maximumSize_.y) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     minimumSize_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -32,22 +34,28 @@ Result<void> SizeBoxWidget::SetMaximumSize(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < minimumSize_.x || value.y < minimumSize_.y) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     maximumSize_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
+
 Result<void> SizeBoxWidget::SetWidthOverride(float value) noexcept {
     if (!math::IsFinite(value) || value < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     widthOverride_ = value;
     if (auto live = CachedElement()) {
         return static_cast<SizeBox&>(*live).SetWidthOverride(value);
     }
+
     return Result<void>::Success();
 }
+
 void SizeBoxWidget::ClearWidthOverride() noexcept {
     widthOverride_ = -1;
     if (auto live = CachedElement()) {
@@ -59,12 +67,15 @@ Result<void> SizeBoxWidget::SetHeightOverride(float value) noexcept {
     if (!math::IsFinite(value) || value < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     heightOverride_ = value;
     if (auto live = CachedElement()) {
         return static_cast<SizeBox&>(*live).SetHeightOverride(value);
     }
+
     return Result<void>::Success();
 }
+
 void SizeBoxWidget::ClearHeightOverride() noexcept {
     heightOverride_ = -1;
     if (auto live = CachedElement()) {
@@ -76,10 +87,12 @@ Result<void> SizeBoxWidget::SetAspectRatioRange(float minimum, float maximum) no
     if (!SizeBox::IsValidAspectRange(minimum, maximum)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     aspectRange_ = {minimum, maximum};
     if (auto live = CachedElement()) {
         return static_cast<SizeBox&>(*live).SetAspectRatioRange(minimum, maximum);
     }
+
     return Result<void>::Success();
 }
 
@@ -96,6 +109,7 @@ void SizeBoxWidget::ApplyProperties(Element& element) noexcept {
     } else {
         native.ClearWidthOverride();
     }
+
     if (heightOverride_ >= 0) {
         (void)native.SetHeightOverride(heightOverride_);
     } else {

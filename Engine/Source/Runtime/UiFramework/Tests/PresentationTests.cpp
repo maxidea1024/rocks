@@ -39,47 +39,57 @@ TEST(UiFramework_PartialPaintPreservesInheritedOpacityForVolatileChildren) {
 }
 
 namespace {
+
 class HoverTarget final : public Element {
 public:
-    explicit HoverTarget(Allocator& allocator) noexcept : Element(allocator) {}
+    explicit HoverTarget(Allocator& allocator) noexcept : Element(allocator) {
+    }
+
     void OnMouseEnter(uint32) noexcept override {
         ++entered;
-        if (clearRoot) {clearRoot->SetRoot({});}
+        if (clearRoot) {
+            clearRoot->SetRoot({});
+        }
     }
-    void OnMouseLeave(uint32) noexcept override {++left;}
+
+    void OnMouseLeave(uint32) noexcept override {
+        ++left;
+    }
+
     PointerReply OnPointerEvent(const PointerEvent&) noexcept override {
         ++events;
-        return {.handled=true};
+        return {.handled = true};
     }
-    int entered=0, left=0, events=0;
-    Application* clearRoot=nullptr;
+
+    int entered = 0, left = 0, events = 0;
+    Application* clearRoot = nullptr;
 };
-}
+} // namespace
 
 TEST(UiFramework_HoverPathsTrackUsersAndReentrantRootRemoval) {
     SystemAllocator allocator;
-    auto target=SharedPtr<HoverTarget>::TryMake(allocator,allocator);
+    auto target = SharedPtr<HoverTarget>::TryMake(allocator, allocator);
     REQUIRE(target);
-    auto& item=*target.Value();
-    item.SetGeometry(Geometry::Root({40,20},{}));
+    auto& item = *target.Value();
+    item.SetGeometry(Geometry::Root({40, 20}, {}));
     Application app(allocator);
     app.SetRoot(target.Value());
-    PointerEvent move{PointerEventType::Move,{3,3}};
+    PointerEvent move{PointerEventType::Move, {3, 3}};
     REQUIRE(app.RoutePointer(move));
     REQUIRE(app.RoutePointer(move));
-    move.userId=1;
+    move.userId = 1;
     REQUIRE(app.RoutePointer(move));
-    CHECK(item.entered==2 && item.left==0 && item.events==3);
-    CHECK(app.IsHovered(item,0) && app.IsHovered(item,1));
-    move.position={55,30};
+    CHECK(item.entered == 2 && item.left == 0 && item.events == 3);
+    CHECK(app.IsHovered(item, 0) && app.IsHovered(item, 1));
+    move.position = {55, 30};
     REQUIRE(app.RoutePointer(move));
-    CHECK(item.left==1 && !app.IsHovered(item,1) && app.IsHovered(item,0));
+    CHECK(item.left == 1 && !app.IsHovered(item, 1) && app.IsHovered(item, 0));
 
-    item.clearRoot=&app;
-    move.position={3,3};
-    auto dispatched=app.RoutePointer(move);
+    item.clearRoot = &app;
+    move.position = {3, 3};
+    auto dispatched = app.RoutePointer(move);
     REQUIRE(dispatched);
     CHECK(!dispatched.Value());
-    CHECK(item.events==3);
+    CHECK(item.events == 3);
 }
 } // namespace rocks::ui

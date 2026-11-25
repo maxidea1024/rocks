@@ -5,6 +5,7 @@
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
+
 namespace {
 
 // 테스트 셰이퍼는 ASCII와 인라인 객체만 처리한다. 실제 GPU 없이도 아틀라스 선택과 색을 검증한다.
@@ -16,9 +17,11 @@ public:
         if (!form) {
             return form;
         }
+
         if (view.source != "AB\xEF\xBF\xBC") {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
+
         const text::TextCluster clusters[] = {{.byteEnd = 1, .advance = 4, .breakAfter = true},
                                               {.byteEnd = 2, .advance = 4, .breakAfter = true},
                                               {.byteEnd = 5, .advance = 4, .breakAfter = true}};

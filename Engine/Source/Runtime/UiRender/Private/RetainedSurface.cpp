@@ -12,9 +12,11 @@ RetainedSurface::~RetainedSurface() noexcept {
     if (!resource_.IsNull()) {
         (void)textures_.TryRemove(resource_);
     }
+
     if (!visible_.texture.IsNull()) {
         device_.Retire(visible_.texture);
     }
+
     if (!scratch_.texture.IsNull()) {
         device_.Retire(scratch_.texture);
     }
@@ -30,10 +32,12 @@ Result<void> RetainedSurface::Render(const DrawBatchBuffers& buffers, uint32 wid
     if (width == 0 || height == 0 || solid.IsNull() || composite.IsNull()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     BrushTexture* existing = textures_.Find(resource_);
     if (!resource_.IsNull() && !existing) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
+
     if (scratch_.texture.IsNull() || scratch_.width != width || scratch_.height != height ||
         scratch_.format != format) {
         graphics::TextureDesc desc;
@@ -45,9 +49,11 @@ Result<void> RetainedSurface::Render(const DrawBatchBuffers& buffers, uint32 wid
         if (!created) {
             return Result<void>::Failure(created.Error());
         }
+
         if (!scratch_.texture.IsNull()) {
             device_.Retire(scratch_.texture);
         }
+
         scratch_ = {created.Value(), width, height, format};
     }
 
@@ -55,6 +61,7 @@ Result<void> RetainedSurface::Render(const DrawBatchBuffers& buffers, uint32 wid
     if (!pass) {
         return Result<void>::Failure(pass.Error());
     }
+
     auto drawn = DrawBatchRenderer::Draw(*pass.Value(), solid, buffers,
                                          {static_cast<float>(width), static_cast<float>(height)},
                                          &textures_);
@@ -62,6 +69,7 @@ Result<void> RetainedSurface::Render(const DrawBatchBuffers& buffers, uint32 wid
     if (!drawn) {
         return drawn;
     }
+
     if (!ended) {
         return Result<void>::Failure(ended.Error());
     }
@@ -74,8 +82,10 @@ Result<void> RetainedSurface::Render(const DrawBatchBuffers& buffers, uint32 wid
         if (!registered) {
             return Result<void>::Failure(registered.Error());
         }
+
         resource_ = registered.Value();
     }
+
     const Target previous = visible_;
     visible_ = scratch_;
     scratch_ = previous;

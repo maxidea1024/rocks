@@ -18,6 +18,7 @@ private:
     struct Entry {
         explicit Entry(Allocator& allocator) noexcept : id(allocator) {
         }
+
         String id;
         PaintGlyph image{};
     };

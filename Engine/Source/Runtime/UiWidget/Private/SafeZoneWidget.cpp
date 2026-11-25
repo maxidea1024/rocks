@@ -5,6 +5,7 @@
 namespace rocks::ui {
 
 namespace {
+
 bool ValidInsets(Vec4 insets) noexcept {
     return insets.IsFinite() && insets.x >= 0 && insets.y >= 0 && insets.z >= 0 && insets.w >= 0;
 }
@@ -14,17 +15,21 @@ Result<void> SafeZoneWidget::UpdateSafety(ObjectHandle slot, bool titleSafe, Vec
     if (slot != SlotAt(0)) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     if (!ValidInsets(scale)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!(titleInsets_ * scale).IsFinite() || !(actionInsets_ * scale).IsFinite()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     titleSafe_ = titleSafe;
     scale_ = scale;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -34,16 +39,19 @@ Result<void> SafeZoneWidget::AttachChild(ObjectRegistry& objects, ObjectHandle s
     if (!data && data.Error() != ErrorCode::TypeMismatch) {
         return Result<void>::Failure(data.Error());
     }
+
     const bool titleSafe = !data || data.Value().Get().Value()->IsTitleSafe();
     const Vec4 scale = data ? data.Value().Get().Value()->SafeAreaScale() : Vec4{1, 1, 1, 1};
     if (!ValidInsets(scale) || !(titleInsets_ * scale).IsFinite() ||
         !(actionInsets_ * scale).IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto attached = PanelWidget::AttachChild(objects, slot, panel, child);
     if (!attached) {
         return attached;
     }
+
     titleSafe_ = titleSafe;
     scale_ = scale;
     ApplyProperties(panel);
@@ -63,6 +71,7 @@ Result<SharedPtr<Element>> SafeZoneWidget::CreatePanel(Allocator& allocator) noe
     if (!frame) {
         return Result<SharedPtr<Element>>::Failure(frame.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(frame.Value().AsSharedPtr());
 }
 
@@ -74,14 +83,17 @@ Result<void> SafeZoneWidget::SetSafeInsets(Vec4 titleInsets, Vec4 actionInsets) 
     if (!ValidInsets(titleInsets) || !ValidInsets(actionInsets)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!(titleInsets * scale_).IsFinite() || !(actionInsets * scale_).IsFinite()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     titleInsets_ = titleInsets;
     actionInsets_ = actionInsets;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 

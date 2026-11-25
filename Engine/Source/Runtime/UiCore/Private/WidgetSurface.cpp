@@ -9,9 +9,11 @@ SharedPtr<WidgetSurfaceScene> WidgetSurface::SceneSource() const noexcept {
 uint32 WidgetSurface::RequestedPostBuffers() const noexcept {
     return 0;
 }
+
 SlotHandle WidgetSurface::GetPostBuffer(uint32) const noexcept {
     return {};
 }
+
 void WidgetSurface::SetPostBuffer(uint32, SlotHandle) noexcept {
 }
 

@@ -20,10 +20,12 @@ Result<void> BorderWidget::SetTint(LinearColor value) noexcept {
     if (!value.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     tint_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -31,25 +33,32 @@ Result<void> BorderWidget::SetBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     brush_ = brush;
     if (auto live = CachedElement()) {
         return static_cast<Frame&>(*live).SetBrush(brush);
     }
+
     return Result<void>::Success();
 }
+
 const Brush& BorderWidget::GetBrush() const noexcept {
     return brush_;
 }
+
 Result<void> BorderWidget::SetPadding(Vec4 padding) noexcept {
     if (!SlotPlacement{.padding = padding}.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     padding_ = padding;
     if (auto live = CachedElement()) {
         return static_cast<Frame&>(*live).SetPadding(padding);
     }
+
     return Result<void>::Success();
 }
+
 Vec4 BorderWidget::Padding() const noexcept {
     return padding_;
 }

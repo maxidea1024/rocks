@@ -6,6 +6,7 @@
 #include <UiFramework/TreeView.h>
 
 namespace rocks::ui {
+
 namespace {
 
 class RowSource final : public TableRowSource {
@@ -13,32 +14,40 @@ public:
     uint32 RootCount() const noexcept override {
         return roots;
     }
+
     uint64 RootKey(uint32 index) const noexcept override {
         return index + 1;
     }
+
     uint32 ChildCount(uint64 key) const noexcept override {
         return key == 1 ? 2u : 0u;
     }
+
     uint64 ChildKey(uint64, uint32 index) const noexcept override {
         return cycle ? 1u : index + 100u;
     }
+
     Result<SharedPtr<Element>> CreateRow(Allocator& allocator) noexcept override {
         auto row = SharedPtr<Button>::TryMake(allocator, allocator);
         if (!row) {
             return Result<SharedPtr<Element>>::Failure(row.Error());
         }
+
         ++created;
         return Result<SharedPtr<Element>>::Success(Move(row.Value()));
     }
+
     Result<void> BindRow(Element&, TableItem) noexcept override {
         ++bound;
         return Result<void>::Success();
     }
+
     void SetRowSelected(Element&, TableItem item, bool selected) noexcept override {
         if (selected) {
             lastSelection = item.key;
         }
     }
+
     uint64 lastSelection = 0;
     uint32 roots = 1000000;
     uint32 created = 0;

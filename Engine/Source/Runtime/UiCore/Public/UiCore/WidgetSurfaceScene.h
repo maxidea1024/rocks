@@ -5,8 +5,10 @@
 #include <Core/Result.h>
 
 namespace rocks::graphics {
+
 class Device;
 class CommandContext;
+
 } // namespace rocks::graphics
 
 namespace rocks::ui {

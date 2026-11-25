@@ -9,6 +9,7 @@ Result<void> ScrollBar::Construct(Args&& args) noexcept {
         BindColor(Move(args.color));
         SetOnScrolled(Move(args.onScrolled));
     }
+
     return result;
 }
 
@@ -21,12 +22,14 @@ Result<void> ScrollBar::SetState(float offset, float thumbSize) noexcept {
     if (!math::IsFinite(offset) || !math::IsFinite(thumbSize) || thumbSize < 0 || thumbSize > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     offset = math::Clamp(offset, 0.0f, 1.0f - thumbSize);
     if (offset_ != offset || thumbSize_ != thumbSize) {
         offset_ = offset;
         thumbSize_ = thumbSize;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -70,31 +73,37 @@ PointerReply ScrollBar::OnPointerEvent(const PointerEvent& event) noexcept {
         (event.source != source_ || event.pointerId != pointer_ || event.userId != user_)) {
         return {};
     }
+
     if ((event.type == PointerEventType::Down || event.type == PointerEventType::Up) &&
         event.source == PointerSource::Mouse && event.button != input::MouseButton::Left) {
         return {};
     }
+
     if (dragging_ &&
         (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel)) {
         dragging_ = false;
         return {.handled = true, .releaseCapture = true};
     }
+
     const auto& geometry = GetGeometry();
     const float length = horizontal_ ? geometry.size.x : geometry.size.y;
     AffineTransform2D inverse;
     if (length <= 0 || thumbSize_ >= 1 || !geometry.render.TryInverse(inverse)) {
         return {};
     }
+
     const auto local = inverse.Apply(event.position);
     if (!local.IsFinite()) {
         return {};
     }
+
     const float position = horizontal_ ? local.x : local.y;
     const float thumb = ThumbLength(length);
     const float travel = length - thumb;
     if (travel <= 0) {
         return {};
     }
+
     const float start = ThumbStart(length, thumb);
     const float logicalTravel = 1.0f - thumbSize_;
     if (event.type == PointerEventType::Down && !dragging_) {
@@ -108,12 +117,15 @@ PointerReply ScrollBar::OnPointerEvent(const PointerEvent& event) noexcept {
             grabOffset_ = thumb * 0.5f;
             ScrollTo(((position - grabOffset_) / travel) * logicalTravel);
         }
+
         return {.handled = true, .capture = true};
     }
+
     if (event.type == PointerEventType::Move && dragging_) {
         ScrollTo(((position - grabOffset_) / travel) * logicalTravel);
         return {.handled = true};
     }
+
     return {};
 }
 
@@ -128,6 +140,7 @@ Result<void> ScrollBar::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (!track) {
         return track;
     }
+
     const auto& g = GetGeometry();
     const float trackLength = horizontal_ ? g.size.x : g.size.y;
     const float thumb = ThumbLength(trackLength);

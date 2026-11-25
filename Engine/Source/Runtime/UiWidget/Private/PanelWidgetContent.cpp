@@ -10,24 +10,29 @@ Result<void> PanelWidget::ReplaceSingleContent(ObjectRegistry& objects,
     if (exchanging_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (ChildCount() == 0) {
         if (next.IsNull()) {
             return Result<void>::Success();
         }
+
         auto added = AddChild(objects, next);
         return added ? Result<void>::Success() : Result<void>::Failure(added.Error());
     }
+
     const auto access = objects.OwnerAccess();
     const auto id = SlotAt(0);
     auto slotBorrow = objects.ResolveForWrite<WidgetSlot>(access, id);
     if (!slotBorrow) {
         return Result<void>::Failure(slotBorrow.Error());
     }
+
     auto& slot = *slotBorrow.Value().Get().Value();
     const auto previous = slot.Content();
     if (previous == next) {
         return Result<void>::Success();
     }
+
     if (next.IsNull()) {
         return RemoveChild(objects, previous);
     }
@@ -36,10 +41,12 @@ Result<void> PanelWidget::ReplaceSingleContent(ObjectRegistry& objects,
     if (!before) {
         return Result<void>::Failure(before.Error());
     }
+
     auto after = objects.ResolveForWrite<Widget>(access, next);
     if (!after) {
         return Result<void>::Failure(after.Error());
     }
+
     auto& oldChild = *before.Value().Get().Value();
     auto& newChild = *after.Value().Get().Value();
     auto valid = ValidateNewChild(objects, newChild);
@@ -59,19 +66,25 @@ Result<void> PanelWidget::ReplaceSingleContent(ObjectRegistry& objects,
         if (!oldElement || !oldElement->Parent() || !oldElement->IsWithin(ChildHost(*panel))) {
             return Result<void>::Failure(ErrorCode::WrongContext);
         }
+
         // 정렬 슬롯은 자식 앞에 배치 노드를 둘 수 있다. 같은 노드를 유지해 여백과 정렬을 보존한다.
         auto* contentHost = oldElement->Parent();
         host = contentHost == panel.Get() ? panel : contentHost->Parent()->FindChild(contentHost);
-        if (!host) {return Result<void>::Failure(ErrorCode::WrongContext);}
+        if (!host) {
+            return Result<void>::Failure(ErrorCode::WrongContext);
+        }
+
         auto built = newChild.TakeElement(objects);
         if (!built) {
             return Result<void>::Failure(built.Error());
         }
+
         newElement = Move(built.Value());
         if (panel != CachedElement() || newElement->Parent() ||
             oldElement->Parent() != host.Get() || !host->IsWithin(*panel)) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         valid = ValidateNewChild(objects, newChild);
         if (!valid) {
             return valid;
@@ -83,11 +96,13 @@ Result<void> PanelWidget::ReplaceSingleContent(ObjectRegistry& objects,
     if (!saved) {
         return saved;
     }
+
     saved = objects.SetReference(access, id, slot.content_, next);
     if (!saved) {
         (void)objects.SetReference(access, next, newChild.slot_, {});
         return saved;
     }
+
     saved = objects.SetReference(access, previous, oldChild.slot_, {});
     if (saved && panel) {
         if (host->RemoveChild(*oldElement)) {
@@ -99,15 +114,18 @@ Result<void> PanelWidget::ReplaceSingleContent(ObjectRegistry& objects,
             saved = Result<void>::Failure(ErrorCode::WrongContext);
         }
     }
+
     if (!saved) {
         (void)objects.SetReference(access, previous, oldChild.slot_, id);
         (void)objects.SetReference(access, id, slot.content_, previous);
         (void)objects.SetReference(access, next, newChild.slot_, {});
         return saved;
     }
+
     if (panel) {
         oldChild.ReleaseElements();
     }
+
     return Result<void>::Success();
 }
 

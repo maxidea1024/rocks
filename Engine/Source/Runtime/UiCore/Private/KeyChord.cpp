@@ -1,6 +1,7 @@
 #include <UiCore/KeyChord.h>
 
 namespace rocks::ui {
+
 namespace {
 
 constexpr const char* mouseNames[] = {"MouseLeft", "MouseRight", "MouseMiddle", "MouseX1",
@@ -20,6 +21,7 @@ bool KeyChord::IsValid() const noexcept {
         gamepad > input::GamepadButton::Count) {
         return false;
     }
+
     const int sources = (key != input::Key::None) + (mouse != input::MouseButton::Count) +
                         (gamepad != input::GamepadButton::Count);
     return sources == 1 || *this == KeyChord{};
@@ -29,9 +31,11 @@ const char* KeyChord::InputName() const noexcept {
     if (mouse < input::MouseButton::Count) {
         return mouseNames[static_cast<uint32>(mouse)];
     }
+
     if (gamepad < input::GamepadButton::Count) {
         return gamepadNames[static_cast<uint32>(gamepad)];
     }
+
     return input::KeyName(key);
 }
 
@@ -42,16 +46,19 @@ Result<KeyChord> KeyChord::FromInputName(StringView name) noexcept {
             return Result<KeyChord>::Success({key});
         }
     }
+
     for (uint32 i = 0; i < input::MouseButtonCount; ++i) {
         if (name == mouseNames[i]) {
             return Result<KeyChord>::Success({.mouse = static_cast<input::MouseButton>(i)});
         }
     }
+
     for (uint32 i = 0; i < input::GamepadButtonCount; ++i) {
         if (name == gamepadNames[i]) {
             return Result<KeyChord>::Success({.gamepad = static_cast<input::GamepadButton>(i)});
         }
     }
+
     return Result<KeyChord>::Failure(ErrorCode::NotFound);
 }
 

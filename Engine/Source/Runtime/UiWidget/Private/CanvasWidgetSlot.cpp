@@ -49,6 +49,7 @@ Result<void> CanvasWidgetSlot::UpdateLayout(ObjectRegistry& objects,
     if (!live) {
         return live;
     }
+
     return Configure(layout);
 }
 
@@ -114,6 +115,7 @@ Result<void> CanvasWidgetSlot::Configure(const CanvasSlot& layout) noexcept {
     if (!layout.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     anchorMin_ = layout.anchorMin;
     anchorMax_ = layout.anchorMax;
     offset_ = layout.offset;

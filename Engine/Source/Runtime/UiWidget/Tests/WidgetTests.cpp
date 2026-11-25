@@ -58,6 +58,7 @@ TEST(UiWidget_ScreenKeepsReflectedTreeAliveUntilDetached) {
         REQUIRE(cache.Value()->List().Boxes().Size() == 2);
         CHECK(cache.Value()->List().Boxes()[1].geometry.size.x == 60);
     }
+
     app.SetRoot({});
     REQUIRE(objects.Collect(access));
     CHECK(!objects.Resolve<UserWidget>(access, screenHandle));

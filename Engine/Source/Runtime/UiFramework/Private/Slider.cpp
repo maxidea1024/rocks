@@ -10,6 +10,7 @@ Geometry Slider::TrackGeometry() const noexcept {
     if (!vertical_) {
         return geometry;
     }
+
     return geometry.MakeChild({geometry.size.y, geometry.size.x}, {0, 1, -1, 0, 0, geometry.size.y},
                               {}, {});
 }
@@ -33,6 +34,7 @@ float Slider::Minimum() const noexcept {
 float Slider::Maximum() const noexcept {
     return maximum_;
 }
+
 LinearColor Slider::FillColor() const noexcept {
     return fillColor_;
 }
@@ -51,9 +53,11 @@ Result<void> Slider::SetRange(float minimum, float maximum) noexcept {
         !math::IsFinite(maximum - minimum)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (minimum_ == minimum && maximum_ == maximum) {
         return Result<void>::Success();
     }
+
     InvalidatePaint();
     minimum_ = minimum;
     maximum_ = maximum;
@@ -65,11 +69,13 @@ Result<void> Slider::SetValue(float value) noexcept {
     if (!math::IsFinite(value)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const float next = math::Clamp(value, minimum_, maximum_);
     if (value_ != next) {
         value_ = next;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -77,6 +83,7 @@ Result<void> Slider::SetStep(float step) noexcept {
     if (!math::IsFinite(step) || step <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     step_ = step;
     return Result<void>::Success();
 }
@@ -87,34 +94,41 @@ void Slider::SetLocked(bool locked) noexcept {
         EndControllerCapture();
     }
 }
+
 void Slider::SetRequiresControllerLock(bool required) noexcept {
     requiresControllerLock_ = required;
     if (!required) {
         EndControllerCapture();
     }
 }
+
 void Slider::SetOnControllerCaptureBegin(Delegate<void()>&& callback) noexcept {
     controllerBegin_ = Move(callback);
 }
+
 void Slider::SetOnControllerCaptureEnd(Delegate<void()>&& callback) noexcept {
     controllerEnd_ = Move(callback);
 }
+
 void Slider::EndControllerCapture() noexcept {
     if (controllerCaptured_) {
         controllerCaptured_ = false;
         controllerEnd_.ExecuteIfBound();
     }
 }
+
 void Slider::OnFocusLost(uint32 user) noexcept {
     if (controllerCaptured_ && user == controllerUser_) {
         EndControllerCapture();
     }
 }
+
 bool Slider::OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept {
     using B = input::GamepadButton;
     if (locked_ || (controllerCaptured_ && controllerUser_ != user)) {
         return false;
     }
+
     if (requiresControllerLock_ && button == B::South) {
         if (controllerCaptured_) {
             EndControllerCapture();
@@ -123,23 +137,29 @@ bool Slider::OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexc
             controllerCaptured_ = true;
             controllerBegin_.ExecuteIfBound();
         }
+
         return true;
     }
+
     if (controllerCaptured_ && button == B::East) {
         EndControllerCapture();
         return true;
     }
+
     if (requiresControllerLock_ && !controllerCaptured_) {
         return false;
     }
+
     if (button == (vertical_ ? B::DPadDown : B::DPadLeft)) {
         SetInteractiveValue(value_ - step_);
         return true;
     }
+
     if (button == (vertical_ ? B::DPadUp : B::DPadRight)) {
         SetInteractiveValue(value_ + step_);
         return true;
     }
+
     return false;
 }
 
@@ -149,21 +169,26 @@ void Slider::SetIndentHandle(bool indent) noexcept {
         InvalidatePaint();
     }
 }
+
 void Slider::SetHandleColor(LinearColor color) noexcept {
     if (!handleTint_ || *handleTint_ != color) {
         handleTint_ = color;
         InvalidatePaint();
     }
 }
+
 void Slider::SetOnCaptureBegin(Delegate<void()>&& callback) noexcept {
     captureBegin_ = Move(callback);
 }
+
 void Slider::SetOnCaptureEnd(Delegate<void()>&& callback) noexcept {
     captureEnd_ = Move(callback);
 }
+
 float Slider::GetNormalizedValue() const noexcept {
     return (value_ - minimum_) / (maximum_ - minimum_);
 }
+
 float Slider::GetValue() const noexcept {
     return value_;
 }
@@ -187,14 +212,17 @@ bool Slider::OnKeyEvent(uint32, const input::InputEvent& event) noexcept {
     if (locked_ || event.type != input::InputEventType::KeyDown) {
         return false;
     }
+
     if (event.key == (vertical_ ? input::Key::Down : input::Key::Left)) {
         SetInteractiveValue(value_ - step_);
         return true;
     }
+
     if (event.key == (vertical_ ? input::Key::Up : input::Key::Right)) {
         SetInteractiveValue(value_ + step_);
         return true;
     }
+
     return false;
 }
 
@@ -203,6 +231,7 @@ PointerReply Slider::OnPointerEvent(const PointerEvent& event) noexcept {
         (event.type == PointerEventType::Down || event.type == PointerEventType::Up)) {
         return {};
     }
+
     if (event.type == PointerEventType::Down && !dragging_ && !locked_) {
         dragging_ = true;
         dragSource_ = event.source;
@@ -212,20 +241,25 @@ PointerReply Slider::OnPointerEvent(const PointerEvent& event) noexcept {
         if (!locked_) {
             UpdateFromPointer(event.position, true);
         }
+
         return {.handled = true, .capture = dragging_};
     }
+
     if (!dragging_ || dragSource_ != event.source || dragUser_ != event.userId ||
         dragPointer_ != event.pointerId) {
         return {};
     }
+
     if (!locked_ && (event.type == PointerEventType::Move || event.type == PointerEventType::Up)) {
         UpdateFromPointer(event.position, false);
     }
+
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
         dragging_ = false;
         captureEnd_.ExecuteIfBound();
         return {.handled = true, .releaseCapture = true};
     }
+
     return {.handled = true};
 }
 
@@ -267,10 +301,12 @@ void Slider::UpdateFromPointer(Vec2 position, bool) noexcept {
     if (geometry.size.x <= 0 || !geometry.render.TryInverse(inverse)) {
         return;
     }
+
     const Vec2 local = inverse.Apply(position);
     if (!local.IsFinite()) {
         return;
     }
+
     const float thumb = ThumbExtent(geometry.size);
     const float padding = indentHandle_ ? thumb : 0.0f;
     const float travel = geometry.size.x - padding;
@@ -284,6 +320,7 @@ void Slider::SetInteractiveRatio(float ratio) noexcept {
         SetInteractiveValue(ratio <= 0 ? minimum_ : maximum_);
         return;
     }
+
     const double range = static_cast<double>(maximum_) - minimum_;
     const double offset = ratio * range;
     const double amount = snapToStep_ ? math::Floor(offset / step_ + 0.5) * step_ : offset;

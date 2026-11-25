@@ -23,6 +23,7 @@ int32 ComboBoxWidgetBase::SelectionAfterRemoving(usize index) const noexcept {
     if (selectedIndex_ < 0 || static_cast<usize>(selectedIndex_) < index) {
         return selectedIndex_;
     }
+
     return index == static_cast<usize>(selectedIndex_) ? -1 : selectedIndex_ - 1;
 }
 
@@ -32,6 +33,7 @@ void ComboBoxWidgetBase::OptionsChanged(int32 selection) noexcept {
     if (auto live = CachedElement()) {
         static_cast<ComboBox&>(*live).UpdateOptions(OptionCount(), selection);
     }
+
     if (cleared) {
         selectionChanged_.ExecuteIfBound(-1);
     }
@@ -41,16 +43,20 @@ Result<void> ComboBoxWidgetBase::SetSelectedIndex(int32 index) noexcept {
     if (index < -1 || (index >= 0 && static_cast<usize>(index) >= OptionCount())) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (generating_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (auto live = CachedElement()) {
         return static_cast<ComboBox&>(*live).Select(index);
     }
+
     if (selectedIndex_ != index) {
         selectedIndex_ = index;
         selectionChanged_.ExecuteIfBound(index);
     }
+
     return Result<void>::Success();
 }
 
@@ -68,6 +74,7 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::MakeOption(ObjectRegistry& object
         return Result<SharedPtr<Element>>::Failure(generating_ ? ErrorCode::Busy
                                                                : ErrorCode::InvalidArgument);
     }
+
     generating_ = true;
     ROCKS_ON_SCOPE_EXIT {
         generating_ = false;
@@ -75,29 +82,35 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::MakeOption(ObjectRegistry& object
     if (factory_) {
         return factory_.Execute(index, display);
     }
+
     auto access = objects.OwnerAccess();
     auto outer = objects.GetOuter(access, Handle());
     if (!outer) {
         return Result<SharedPtr<Element>>::Failure(outer.Error());
     }
+
     auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
     if (!tree || !tree.Value().Get().Value()->TextShaper()) {
         return Result<SharedPtr<Element>>::Failure(tree ? ErrorCode::NotReady : tree.Error());
     }
+
     auto& allocator = objects.ObjectAllocator();
     String string(allocator);
     auto name = WriteLabel(objects, index, string);
     if (!name) {
         return Result<SharedPtr<Element>>::Failure(name.Error());
     }
+
     auto text = Text::Invariant(allocator, string.View());
     if (!text) {
         return Result<SharedPtr<Element>>::Failure(text.Error());
     }
+
     auto label = SharedPtr<TextLabel>::TryMake(allocator, allocator);
     if (!label) {
         return Result<SharedPtr<Element>>::Failure(label.Error());
     }
+
     auto shaped = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(), 16);
     return shaped ? Result<SharedPtr<Element>>::Success(Move(label.Value()))
                   : Result<SharedPtr<Element>>::Failure(shaped.Error());
@@ -109,10 +122,12 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::BuildElement(ObjectRegistry& obje
     if (!combo) {
         return Result<SharedPtr<Element>>::Failure(combo.Error());
     }
+
     auto height = combo.Value()->SetMaxListHeight(maxListHeight_);
     if (!height) {
         return Result<SharedPtr<Element>>::Failure(height.Error());
     }
+
     combo.Value()->SetOnOpening(
         Delegate<void()>::CreateLambda([&objects, owner = Handle()]() noexcept {
             auto widget = objects.ResolveForWrite<ComboBoxWidgetBase>(objects.OwnerAccess(), owner);
@@ -171,10 +186,12 @@ Result<void> ComboBoxWidgetBase::SetMaxListHeight(float height) noexcept {
     if (!math::IsFinite(height) || height <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     maxListHeight_ = height;
     if (auto live = CachedElement()) {
         return static_cast<ComboBox&>(*live).SetMaxListHeight(height);
     }
+
     return Result<void>::Success();
 }
 
@@ -187,6 +204,7 @@ void ComboBoxWidgetBase::ReleaseElements() noexcept {
     if (auto live = CachedElement()) {
         static_cast<ComboBox&>(*live).DisconnectModel();
     }
+
     Widget::ReleaseElements();
 }
 

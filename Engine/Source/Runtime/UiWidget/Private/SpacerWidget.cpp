@@ -13,10 +13,12 @@ Result<void> SpacerWidget::SetSize(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < 0 || value.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     size_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 

@@ -37,15 +37,18 @@ Result<void> CheckBoxWidget::SetState(CheckState state) noexcept {
     if (state > CheckState::Indeterminate) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const bool changed = checked_ != (state == CheckState::Checked);
     checked_ = state == CheckState::Checked;
     indeterminate_ = state == CheckState::Indeterminate;
     if (auto element = CachedElement()) {
         ApplyProperties(*element);
     }
+
     if (changed) {
         NotifyPropertyChanged("checked");
     }
+
     return Result<void>::Success();
 }
 
@@ -58,6 +61,7 @@ Result<SharedPtr<Element>> CheckBoxWidget::BuildElement(ObjectRegistry& objects)
     if (!box) {
         return Result<SharedPtr<Element>>::Failure(box.Error());
     }
+
     static_cast<CheckBox&>(*box.Value())
         .SetOnChanged(Delegate<void(CheckState)>::CreateLambda(
             [&objects, owner = Handle(), native = box.Value().Get()](CheckState state) noexcept {
@@ -65,14 +69,19 @@ Result<SharedPtr<Element>> CheckBoxWidget::BuildElement(ObjectRegistry& objects)
                 if (!widget) {
                     return;
                 }
+
                 auto* value = widget.Value().Get().Value();
                 if (value->CachedElement().Get() != native) {
                     return;
                 }
+
                 const bool changed = value->checked_ != (state == CheckState::Checked);
                 value->checked_ = state == CheckState::Checked;
                 value->indeterminate_ = state == CheckState::Indeterminate;
-                if (changed) { value->NotifyPropertyChanged("checked"); }
+                if (changed) {
+                    value->NotifyPropertyChanged("checked");
+                }
+
                 value->changed_.ExecuteIfBound(state == CheckState::Checked);
                 value->stateChanged_.ExecuteIfBound(state);
             }));

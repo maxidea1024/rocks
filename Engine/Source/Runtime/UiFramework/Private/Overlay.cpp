@@ -16,14 +16,17 @@ Result<void> Overlay::TryAddSlot(const SharedPtr<Element>& child, int32 zOrder) 
     while (index < orders_.Size() && orders_[index] <= zOrder) {
         ++index;
     }
+
     auto stored = orders_.TryInsert(zOrder, index);
     if (!stored) {
         return stored;
     }
+
     auto added = TryInsertChild(index, child);
     if (!added) {
         (void)orders_.TryRemoveAt(index);
     }
+
     return added;
 }
 
@@ -31,22 +34,27 @@ Result<void> Overlay::AttachPopupLayer(const PopupRequest& popup) noexcept {
     if (dismissingPopups_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     auto outer = Element::AttachPopupLayer(popup);
     if (outer || outer.Error() != ErrorCode::NotFound) {
         return outer;
     }
+
     if (!popup.layer || !popup.anchor || !popup.close || !popup.anchor->IsWithin(*this)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto stored =
         popups_.TryPushBack({WeakPtr<Element>(popup.anchor), popup.layer.Get(), popup.close});
     if (!stored) {
         return stored;
     }
+
     auto attached = TryAddSlot(popup.layer, NumericLimits<int32>::Max());
     if (!attached) {
         (void)popups_.TryRemoveAt(popups_.Size() - 1);
     }
+
     return attached;
 }
 
@@ -54,6 +62,7 @@ void Overlay::DismissHostedPopups() noexcept {
     if (dismissingPopups_) {
         return;
     }
+
     dismissingPopups_ = true;
     while (!popups_.IsEmpty()) {
         const usize i = popups_.Size() - 1;
@@ -64,6 +73,7 @@ void Overlay::DismissHostedPopups() noexcept {
             close(*anchor);
         }
     }
+
     dismissingPopups_ = false;
 }
 
@@ -91,6 +101,7 @@ bool Overlay::RemoveChild(Element& child) noexcept {
             return Element::RemoveChild(child);
         }
     }
+
     return false;
 }
 
@@ -108,6 +119,7 @@ Vec2 Overlay::ComputeDesiredSize(float) const noexcept {
             size.y = math::Max(size.y, desired.y);
         }
     }
+
     return size;
 }
 
@@ -118,11 +130,13 @@ Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
         if (child->GetVisibility() == Visibility::Collapsed) {
             continue;
         }
+
         auto arranged = child->ArrangeIfNeeded(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
         if (!arranged) {
             return arranged;
         }
     }
+
     return Result<void>::Success();
 }
 

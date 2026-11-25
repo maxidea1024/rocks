@@ -4,6 +4,7 @@
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
+
 namespace {
 
 // 실제 글꼴 서비스 대신 클러스터 하나의 폭을 고정해 재구성과 실패 처리를 검사한다.
@@ -15,14 +16,17 @@ public:
         if (!persisted) {
             return persisted;
         }
+
         if (view.source == "…") {
             const text::TextCluster clusters[] = {{.byteEnd = 3, .advance = size / 2}};
             const LabelGlyph glyphs[] = {{0, {{}, {size / 2, size}, {2, 1}, {{}, {1, 1}}}}};
             return label.SetShapedText(view.source, clusters, glyphs, size, false);
         }
+
         if (view.source != "A") {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
+
         const text::TextCluster clusters[] = {{.byteEnd = 1, .advance = size}};
         return label.SetShapedText(view.source, clusters, {}, size, false);
     }

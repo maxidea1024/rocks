@@ -13,10 +13,12 @@ Result<void> ImageWidget::SetImageSize(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < 0 || value.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     imageSize_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -24,10 +26,12 @@ Result<void> ImageWidget::SetTint(LinearColor tint) noexcept {
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     tint_ = tint;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -41,6 +45,7 @@ Brush ImageWidget::GetBrush() const noexcept {
     result.tint = tint_;
     return result;
 }
+
 LinearColor ImageWidget::Tint() const noexcept {
     return tint_;
 }
@@ -54,6 +59,7 @@ Result<void> ImageWidget::SetBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     brush_ = brush;
     tint_ = brush.tint;
     return SetImageSize(brush.imageSize);

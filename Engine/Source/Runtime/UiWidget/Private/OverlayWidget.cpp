@@ -10,11 +10,13 @@ TypeId OverlayWidget::SlotType() const noexcept {
 
 OverlayWidget::OverlayWidget(Allocator& allocator) noexcept : PanelWidget(allocator) {
 }
+
 Result<SharedPtr<Element>> OverlayWidget::CreatePanel(Allocator& allocator) noexcept {
     auto panel = SharedPtr<Overlay>::TryMake(allocator, allocator);
     if (!panel) {
         return Result<SharedPtr<Element>>::Failure(panel.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(Move(panel.Value()));
 }
 

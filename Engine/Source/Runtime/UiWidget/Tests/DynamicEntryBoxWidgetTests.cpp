@@ -95,6 +95,7 @@ TEST(UiWidget_DynamicEntryLayoutsArrangeTheSameEntriesInSixModes) {
         REQUIRE(spacer.Value().Get().Value()->SetSize({8, 8}));
         REQUIRE(panel->AddChild(objects, entry.Value().Handle()));
     }
+
     const DynamicBoxType modes[] = {DynamicBoxType::Vertical, DynamicBoxType::Horizontal,
                                     DynamicBoxType::Wrap,     DynamicBoxType::VerticalWrap,
                                     DynamicBoxType::Overlay,  DynamicBoxType::Radial};
@@ -112,22 +113,23 @@ TEST(UiWidget_DynamicEntryLayoutsArrangeTheSameEntriesInSixModes) {
             CHECK(offset == Vec2(10, 0));
         } else if (type == DynamicBoxType::Overlay) {
             CHECK(offset == Vec2(2, 3));
-            const Vec2 steps[] = {{1,2},{3,4}};
+            const Vec2 steps[] = {{1, 2}, {3, 4}};
             REQUIRE(panel->SetSpacingPattern(steps));
-            REQUIRE(native.Value()->Arrange(Geometry::Root({12,12},{})));
-            CHECK(native.Value()->ChildAt(1)->GetGeometry().layout.Apply({}) == Vec2(1,2));
+            REQUIRE(native.Value()->Arrange(Geometry::Root({12, 12}, {})));
+            CHECK(native.Value()->ChildAt(1)->GetGeometry().layout.Apply({}) == Vec2(1, 2));
         } else {
             CHECK(offset.x < native.Value()->ChildAt(0)->GetGeometry().layout.tx);
             RadialBoxSettings settings;
-            settings.distributeEvenly=false;
-            settings.clockwise=true;
-            settings.angleBetweenItems=90;
-            settings.margin=1;
+            settings.distributeEvenly = false;
+            settings.clockwise = true;
+            settings.angleBetweenItems = 90;
+            settings.margin = 1;
             REQUIRE(panel->SetRadialSettings(settings));
-            REQUIRE(native.Value()->Arrange(Geometry::Root({20,20},{})));
-            const Vec2 second=native.Value()->ChildAt(1)->GetGeometry().layout.Apply({});
-            CHECK(math::Abs(second.x-6)<0.001f && math::Abs(second.y-11)<0.001f);
+            REQUIRE(native.Value()->Arrange(Geometry::Root({20, 20}, {})));
+            const Vec2 second = native.Value()->ChildAt(1)->GetGeometry().layout.Apply({});
+            CHECK(math::Abs(second.x - 6) < 0.001f && math::Abs(second.y - 11) < 0.001f);
         }
+
         panel->ReleaseElements();
     }
 }

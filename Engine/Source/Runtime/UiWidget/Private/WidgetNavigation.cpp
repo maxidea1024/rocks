@@ -10,19 +10,23 @@ Result<ObjectHandle> Widget::PresentationTree(ObjectRegistry& objects) const noe
     if (!outer) {
         return outer;
     }
+
     if (!outer.Value().IsNull()) {
         auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
         if (tree) {
             return outer;
         }
+
         if (tree.Error() != ErrorCode::TypeMismatch) {
             return Result<ObjectHandle>::Failure(tree.Error());
         }
     }
+
     auto user = objects.Resolve<UserWidget>(access, Handle());
     if (user) {
         return Result<ObjectHandle>::Success(user.Value().Get().Value()->Tree());
     }
+
     return user.Error() == ErrorCode::TypeMismatch ? Result<ObjectHandle>::Success(ObjectHandle{})
                                                    : Result<ObjectHandle>::Failure(user.Error());
 }
@@ -42,13 +46,16 @@ WidgetNavigationRule* Widget::NavigationEntry(FocusDirection direction) noexcept
     case FocusDirection::Previous:
         return &navPrevious_;
     }
+
     return nullptr;
 }
+
 NavigationBoundary Widget::GetNavigationRule(FocusDirection direction) const noexcept {
     const auto* entry = const_cast<Widget*>(this)->NavigationEntry(direction);
     return entry ? NavigationBoundary{static_cast<NavigationRule>(entry->rule), entry->target}
                  : NavigationBoundary{};
 }
+
 Result<void> Widget::SetNavigationRule(FocusDirection direction, NavigationRule rule,
                                        Guid target) noexcept {
     auto* entry = NavigationEntry(direction);
@@ -56,34 +63,41 @@ Result<void> Widget::SetNavigationRule(FocusDirection direction, NavigationRule 
         (rule == NavigationRule::Explicit && target == Guid{})) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (auto live = CachedElement()) {
         auto set = live->SetNavigationRule(direction, {rule, target});
         if (!set) {
             return set;
         }
     }
+
     entry->rule = static_cast<uint8>(rule);
     entry->target = target;
     return Result<void>::Success();
 }
+
 Result<void> Widget::SetAllNavigationRules(NavigationRule rule) noexcept {
     if (rule == NavigationRule::Explicit || rule > NavigationRule::CustomBoundary) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (uint8 i = 0; i <= static_cast<uint8>(FocusDirection::Previous); ++i) {
         auto applied = SetNavigationRule(static_cast<FocusDirection>(i), rule);
         if (!applied) {
             return applied;
         }
     }
+
     return Result<void>::Success();
 }
+
 Result<void> Widget::SetNavigationHandler(ObjectRegistry& objects,
                                           NavigationHandler&& handler) noexcept {
     auto shared = SharedPtr<NavigationHandler>::TryMake(objects.ObjectAllocator(), Move(handler));
     if (!shared) {
         return Result<void>::Failure(shared.Error());
     }
+
     if (auto live = CachedElement()) {
         auto applied = live->SetNavigationHandler(NavigationHandler::CreateLambda(
             [cb = shared.Value()](uint32 user, FocusDirection direction) noexcept {
@@ -93,6 +107,7 @@ Result<void> Widget::SetNavigationHandler(ObjectRegistry& objects,
             return applied;
         }
     }
+
     navigationHandler_ = Move(shared.Value());
     return Result<void>::Success();
 }
@@ -102,6 +117,7 @@ Result<void> Widget::ApplySemantics(ObjectRegistry& objects, Element& element) n
     if (!outer) {
         return Result<void>::Failure(outer.Error());
     }
+
     const auto tree = outer.Value();
     element.SetNavigationIdentity({tree.registry, (uint64(tree.slot) << 32) | tree.generation},
                                   stableId_);
@@ -112,6 +128,7 @@ Result<void> Widget::ApplySemantics(ObjectRegistry& objects, Element& element) n
             return set;
         }
     }
+
     if (navigationHandler_) {
         auto set = element.SetNavigationHandler(NavigationHandler::CreateLambda(
             [cb = navigationHandler_](uint32 user, FocusDirection d) noexcept {
@@ -121,6 +138,7 @@ Result<void> Widget::ApplySemantics(ObjectRegistry& objects, Element& element) n
             return set;
         }
     }
+
     auto accessible = ApplyAccessibility(
         objects, element, accessibleText_, accessibleSummaryText_,
         static_cast<AccessibleBehavior>(accessibleBehavior_),
@@ -128,6 +146,7 @@ Result<void> Widget::ApplySemantics(ObjectRegistry& objects, Element& element) n
     if (!accessible) {
         return accessible;
     }
+
     return ApplyToolTip(objects, element, toolTipText_, toolTipWidget_.Handle());
 }
 

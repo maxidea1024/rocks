@@ -1,6 +1,7 @@
 #include <UiFramework/Application.h>
 
 namespace rocks::ui {
+
 namespace {
 
 struct DirectionalDistance {
@@ -12,9 +13,11 @@ struct DirectionalDistance {
         if (overlaps != other.overlaps) {
             return overlaps;
         }
+
         if (overlaps && forward != other.forward) {
             return forward < other.forward;
         }
+
         const double total = forward * forward + sideways * sideways;
         const double previous = other.forward * other.forward + other.sideways * other.sideways;
         return total < previous;
@@ -28,6 +31,7 @@ Result<bool> Application::Navigate(uint32 userId, FocusDirection direction,
     if (direction > FocusDirection::Previous) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
+
     return NavigateInternal(userId, direction, scope ? scope : root_, false);
 }
 
@@ -36,26 +40,31 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
     if (!root || !IsFocusablePath(root.Get())) {
         return Result<bool>::Success(false);
     }
+
     Array<SharedPtr<Element>> targets(allocator_);
     auto collected = CollectFocusTargets(root, targets);
     if (!collected) {
         return Result<bool>::Failure(collected.Error());
     }
+
     if (targets.IsEmpty()) {
         return Result<bool>::Success(false);
     }
+
     auto focus = GetFocus(userId);
     const bool forward = direction != FocusDirection::Previous;
     auto move = [&](const SharedPtr<Element>& target) noexcept -> Result<bool> {
         if (!target || target == focus) {
             return Result<bool>::Success(false);
         }
+
         auto moved = SetFocus(userId, target);
         return moved ? Result<bool>::Success(true) : Result<bool>::Failure(moved.Error());
     };
     if (!focus || !focus->IsInputPathActive(*root, false)) {
         return move(targets[forward ? 0 : targets.Size() - 1]);
     }
+
     Element* boundary = root.Get();
     NavigationBoundary policy;
     for (auto* node = focus.Get(); node; node = node->Parent()) {
@@ -64,10 +73,12 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
             boundary = node;
             break;
         }
+
         if (node == root.Get()) {
             break;
         }
     }
+
     auto customOrExplicit = [&]() noexcept -> Result<bool> {
         auto domain = boundary->NavigationDomain();
         const Guid id = policy.rule == NavigationRule::Explicit
@@ -76,17 +87,20 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
         if (id == Guid{}) {
             return Result<bool>::Success(false);
         }
+
         for (const auto& target : targets) {
             if (target->NavigationIdentity() == id && target->NavigationDomain() == domain &&
                 target->IsInputPathActive(*root, false)) {
                 return move(target);
             }
         }
+
         return Result<bool>::Success(false);
     };
     if (policy.rule == NavigationRule::Custom) {
         return customOrExplicit();
     }
+
     const bool shouldWrap =
         policy.rule == NavigationRule::Wrap || (policy.rule == NavigationRule::Escape && wrap);
     if (direction == FocusDirection::Next || direction == FocusDirection::Previous) {
@@ -97,26 +111,33 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
             if (!target->IsWithin(*boundary)) {
                 continue;
             }
+
             if (!first) {
                 first = target;
             }
+
             if (seen) {
                 return move(target);
             }
+
             if (target == focus) {
                 seen = true;
             }
         }
+
         if (policy.rule == NavigationRule::Explicit ||
             policy.rule == NavigationRule::CustomBoundary) {
             return customOrExplicit();
         }
+
         return shouldWrap ? move(first) : Result<bool>::Success(false);
     }
+
     auto origin = focus->GetGeometry().WindowBounds();
     if (!origin) {
         return Result<bool>::Failure(origin.Error());
     }
+
     const bool horizontal = direction == FocusDirection::Left || direction == FocusDirection::Right;
     const double sign =
         direction == FocusDirection::Left || direction == FocusDirection::Up ? -1.0 : 1.0;
@@ -137,14 +158,17 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
         if (candidate.Get() == focus.Get() || !candidate->IsWithin(*boundary)) {
             continue;
         }
+
         const Geometry& geometry = candidate->GetGeometry();
         if (geometry.size.x <= 0 || geometry.size.y <= 0) {
             continue;
         }
+
         auto bounds = geometry.WindowBounds();
         if (!bounds) {
             continue;
         }
+
         double main, low, high;
         axes(bounds.Value(), main, low, high);
         DirectionalDistance distance{low < end && high > start, (main - center) * sign,
@@ -159,17 +183,21 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
             opposite = candidate;
             farthest = distance;
         }
+
         if (distance.forward > 0 && (!best || distance.CloserThan(nearest))) {
             best = candidate;
             nearest = distance;
         }
     }
+
     if (best) {
         return move(best);
     }
+
     if (policy.rule == NavigationRule::Explicit || policy.rule == NavigationRule::CustomBoundary) {
         return customOrExplicit();
     }
+
     return shouldWrap ? move(opposite) : Result<bool>::Success(false);
 }
 

@@ -17,20 +17,24 @@ Result<RootRef<WidgetAnimation>> WidgetAsset::CreateAnimation(ObjectRegistry& ob
     if (name.IsEmpty()) {
         return Result<RootRef<WidgetAnimation>>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto id = TryNewGuid();
     if (!id) {
         return Result<RootRef<WidgetAnimation>>::Failure(id.Error());
     }
+
     const auto access = objects.OwnerAccess();
     auto clip = objects.NewObject<WidgetAnimation>(access, GeneratedType<WidgetAnimation>::Id(),
                                                    Handle(), name);
     if (!clip) {
         return clip;
     }
+
     auto borrowed = objects.ResolveForWrite<WidgetAnimation>(access, clip.Value().Handle());
     if (!borrowed) {
         return Result<RootRef<WidgetAnimation>>::Failure(borrowed.Error());
     }
+
     auto* animation = borrowed.Value().Get().Value();
     animation->stableId_ = id.Value();
     auto added = objects.AddReference(access, Handle(), animations_, animation->Handle());
@@ -38,6 +42,7 @@ Result<RootRef<WidgetAnimation>> WidgetAsset::CreateAnimation(ObjectRegistry& ob
         (void)animation->Destroy();
         return Result<RootRef<WidgetAnimation>>::Failure(added.Error());
     }
+
     return clip;
 }
 

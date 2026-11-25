@@ -89,6 +89,7 @@ TEST(UiFramework_DockTransferAndRestorePreserveOpenTabs) {
         REQUIRE(header && panel);
         REQUIRE(main.RegisterTab({id, header.Value(), panel.Value()}));
     }
+
     REQUIRE(main.OpenTab("Scene"));
     REQUIRE(main.Dock("Inspector", "Scene", DockSide::Right));
     REQUIRE(main.Dock("Assets", "Scene", DockSide::Center));
@@ -146,6 +147,7 @@ TEST(UiFramework_DockJsonValidatesBeforeReplacingAndImportsLegacy) {
             3, {reinterpret_cast<const uint8*>(input.Data()), input.ByteCount()}));
         CHECK(manager.IsActive("A"));
     }
+
     constexpr StringView empty = R"({"formatVersion":1,"layoutVersion":3,"root":null})";
     REQUIRE(manager.RestoreLayout(
         3, {reinterpret_cast<const uint8*>(empty.Data()), empty.ByteCount()}));

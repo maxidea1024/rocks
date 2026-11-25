@@ -123,6 +123,7 @@ Result<void> DrawBatchRenderer::Draw(graphics::Device& device, render::ShaderSet
     if (!uploaded) {
         return uploaded;
     }
+
     return Draw(commands, pipeline, buffers, viewportSize, textures);
 }
 
@@ -134,14 +135,17 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
     if (!buffers.ready_ || buffers.revision_ != batch.Revision()) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     if (pipeline.IsNull() || !viewportSize.IsFinite() || viewportSize.x < 1 || viewportSize.y < 1 ||
         static_cast<double>(viewportSize.x) > NumericLimits<uint32>::Max() ||
         static_cast<double>(viewportSize.y) > NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (batch.Indices().IsEmpty()) {
         return Result<void>::Success();
     }
+
     if (batch.Vertices().IsEmpty() || batch.Indices().Size() > NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -152,6 +156,7 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
                 return ready;
             }
         }
+
         if (command.operation == PaintOperation::BlurBackdrop ||
             command.operation == PaintOperation::BlurToBuffer) {
             auto ready = buffers.PrepareBlur(static_cast<uint32>(viewportSize.x),
@@ -160,15 +165,18 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
                 return ready;
             }
         }
+
         if ((command.operation == PaintOperation::CopyBackdrop ||
              command.operation == PaintOperation::BlurToBuffer) &&
             command.resource.IsNull()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (!command.resource.IsNull()) {
             if (!textures) {
                 return Result<void>::Failure(ErrorCode::NotReady);
             }
+
             const auto* texture = textures->Find(command.resource);
             if (!texture || texture->texture.IsNull() ||
                 (command.operation == PaintOperation::Draw && texture->pipeline.IsNull())) {
@@ -206,9 +214,11 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
             right = math::Clamp(math::Ceil(command.clip.max.x), 0.0f, viewportSize.x);
             bottom = math::Clamp(math::Ceil(command.clip.max.y), 0.0f, viewportSize.y);
         }
+
         if (right <= left || bottom <= top) {
             continue;
         }
+
         commands.SetScissor({static_cast<uint32>(left), static_cast<uint32>(top),
                              static_cast<uint32>(right - left), static_cast<uint32>(bottom - top)});
         const BrushTexture* texture =
@@ -223,10 +233,12 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
             if (!copied) {
                 return copied;
             }
+
             if (command.operation == PaintOperation::CopyBackdrop) {
                 continue;
             }
         }
+
         const auto nextPipeline = (command.operation == PaintOperation::BlurBackdrop ||
                                    command.operation == PaintOperation::BlurToBuffer)
                                       ? buffers.blurPipeline_
@@ -236,6 +248,7 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
             commands.SetPipeline(nextPipeline);
             currentPipeline = nextPipeline;
         }
+
         struct BlurConstants {
             ScreenTransform screen;
             Vec4 radii;
@@ -262,6 +275,7 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
                 return set;
             }
         }
+
         if (command.operation == PaintOperation::BlurBackdrop ||
             command.operation == PaintOperation::BlurToBuffer) {
             const BlurConstants blur{transform, command.cornerRadius};
@@ -269,10 +283,12 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
             if (!set) {
                 return set;
             }
+
             commands.SetTexture(buffers.backdrop_);
         } else if (texture) {
             commands.SetTexture(texture->texture);
         }
+
         commands.DrawIndexed(command.indexCount, 1, command.firstIndex);
         if (command.operation == PaintOperation::BlurToBuffer) {
             // 같은 패스에서 필터 결과를 복사한 뒤 변경한 픽셀만 원본으로 복구한다.
@@ -283,12 +299,14 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
             if (!set) {
                 return set;
             }
+
             commands.DrawIndexed(command.indexCount, 1, command.firstIndex);
             if (!captured) {
                 return captured;
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -300,6 +318,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
     if (width == 0 || height == 0 || uint64(width) * height > MaxSize / 4) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     graphics::TextureDesc desc;
     desc.width = width;
     desc.height = height;
@@ -308,6 +327,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
     if (!target) {
         return Result<void>::Failure(target.Error());
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(target.Value());
     };
@@ -315,6 +335,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
     if (!frame) {
         return Result<void>::Failure(frame.Error());
     }
+
     auto drawn =
         DrawBatchRenderer::Draw(*frame.Value(), pipeline, buffers,
                                 {static_cast<float>(width), static_cast<float>(height)}, &textures);
@@ -322,6 +343,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
     if (!drawn) {
         return drawn;
     }
+
     if (!ended) {
         return Result<void>::Failure(ended.Error());
     }
@@ -330,6 +352,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
     if (!allocated) {
         return allocated;
     }
+
     return device.ReadPixels(target.Value(), rgba.View());
 }
 

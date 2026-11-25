@@ -21,16 +21,19 @@ Result<void> GridPanelWidget::SetFill(Array<float>& weights, uint32 index, float
     if (!math::IsFinite(value) || value < 0 || index == NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const usize previous = weights.Size();
     if ((index < previous ? weights[index] : 0) == value) {
         return Result<void>::Success();
     }
+
     if (index >= previous) {
         auto grown = weights.TryResize(static_cast<usize>(index) + 1);
         if (!grown) {
             return grown;
         }
     }
+
     if (auto live = CachedElement()) {
         auto& grid = static_cast<Grid&>(*live);
         auto applied = column ? grid.SetColumnFill(index, value) : grid.SetRowFill(index, value);
@@ -39,6 +42,7 @@ Result<void> GridPanelWidget::SetFill(Array<float>& weights, uint32 index, float
             return applied;
         }
     }
+
     weights[index] = value;
     return Result<void>::Success();
 }
@@ -68,6 +72,7 @@ Result<SharedPtr<Element>> GridPanelWidget::CreatePanel(Allocator& allocator) no
     if (!made) {
         return made;
     }
+
     auto& grid = static_cast<Grid&>(*made.Value());
     for (usize i = 0; i < columnFill_.Size(); ++i) {
         auto applied = grid.SetColumnFill(static_cast<uint32>(i), columnFill_[i]);
@@ -75,12 +80,14 @@ Result<SharedPtr<Element>> GridPanelWidget::CreatePanel(Allocator& allocator) no
             return Result<SharedPtr<Element>>::Failure(applied.Error());
         }
     }
+
     for (usize i = 0; i < rowFill_.Size(); ++i) {
         auto applied = grid.SetRowFill(static_cast<uint32>(i), rowFill_[i]);
         if (!applied) {
             return Result<SharedPtr<Element>>::Failure(applied.Error());
         }
     }
+
     return made;
 }
 
@@ -103,6 +110,7 @@ Result<void> GridPanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandle 
     if (!slot) {
         return Result<void>::Failure(slot.Error());
     }
+
     const auto layout = slot.Value().Get().Value()->Layout();
     return static_cast<Grid&>(panel).TryAddSlot(child, layout);
 }

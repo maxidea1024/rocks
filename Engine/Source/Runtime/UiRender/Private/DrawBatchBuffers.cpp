@@ -24,9 +24,11 @@ DrawBatchBuffers::~DrawBatchBuffers() noexcept {
     if (!backdrop_.IsNull()) {
         device_.Retire(backdrop_);
     }
+
     if (!blurPipeline_.IsNull()) {
         device_.Retire(blurPipeline_);
     }
+
     if (!roundedPipeline_.IsNull()) {
         device_.Retire(roundedPipeline_);
     }
@@ -52,11 +54,14 @@ Result<void> DrawBatchBuffers::PrepareBlur(uint32 width, uint32 height) const no
         if (!pipeline) {
             return Result<void>::Failure(pipeline.Error());
         }
+
         blurPipeline_ = pipeline.Value();
     }
+
     if (!backdrop_.IsNull() && backdropWidth_ == width && backdropHeight_ == height) {
         return Result<void>::Success();
     }
+
     graphics::TextureDesc desc;
     desc.width = width;
     desc.height = height;
@@ -66,9 +71,11 @@ Result<void> DrawBatchBuffers::PrepareBlur(uint32 width, uint32 height) const no
     if (!target) {
         return Result<void>::Failure(target.Error());
     }
+
     if (!backdrop_.IsNull()) {
         device_.Retire(backdrop_);
     }
+
     backdrop_ = target.Value();
     backdropWidth_ = width;
     backdropHeight_ = height;
@@ -80,6 +87,7 @@ void DrawBatchBuffers::Release() noexcept {
         device_.Retire(vertices_);
         vertices_ = {};
     }
+
     if (!indices_.IsNull()) {
         device_.Retire(indices_);
         indices_ = {};
@@ -90,6 +98,7 @@ Result<void> DrawBatchBuffers::Upload() noexcept {
     if (ready_ && revision_ == batch_.Revision()) {
         return Result<void>::Success();
     }
+
     if (batch_.Indices().IsEmpty()) {
         Release();
     } else if (vertices_.IsNull() || topology_ != batch_.TopologyRevision()) {
@@ -100,6 +109,7 @@ Result<void> DrawBatchBuffers::Upload() noexcept {
         if (!vertex) {
             return Result<void>::Failure(vertex.Error());
         }
+
         desc.usage = graphics::BufferUsage::Index;
         desc.size = batch_.Indices().ByteCount();
         auto index = device_.CreateBuffer(desc, AsBytes(batch_.Indices()));
@@ -107,6 +117,7 @@ Result<void> DrawBatchBuffers::Upload() noexcept {
             device_.Retire(vertex.Value());
             return Result<void>::Failure(index.Error());
         }
+
         Release();
         vertices_ = vertex.Value();
         indices_ = index.Value();
@@ -127,6 +138,7 @@ Result<void> DrawBatchBuffers::Upload() noexcept {
             return updated;
         }
     }
+
     revision_ = batch_.Revision();
     topology_ = batch_.TopologyRevision();
     ready_ = true;

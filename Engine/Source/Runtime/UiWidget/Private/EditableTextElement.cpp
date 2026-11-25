@@ -20,15 +20,18 @@ Result<void> EditableTextElement::Initialize(StringView text, float size, bool p
     if (!child) {
         return Result<void>::Failure(child.Error());
     }
+
     label_ = Move(child.Value());
     auto added = TryAddChild(label_);
     if (!added) {
         return added;
     }
+
     auto shaped = Shape(text, size, password);
     if (shaped) {
         MoveCaret(text.ByteCount(), false);
     }
+
     return shaped;
 }
 
@@ -36,6 +39,7 @@ Result<void> EditableTextElement::Shape(StringView text, float size, bool passwo
     if (!text.IsEmpty() && !shaper_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     if (text.IsEmpty()) {
         auto empty = label_->SetShapedText({}, {}, {}, size, false);
         if (!empty) {
@@ -51,18 +55,22 @@ Result<void> EditableTextElement::Shape(StringView text, float size, bool passwo
         if (!value) {
             return Result<void>::Failure(value.Error());
         }
+
         auto shaped = shaper_->Shape(*label_, value.Value(), size);
         if (!shaped) {
             return shaped;
         }
     }
+
     if (password) {
         focusText_.Clear();
         canRevert_ = false;
     }
+
     if (hint_) {
         hint_->SetVisibility(text.IsEmpty() ? Visibility::HitTestInvisible : Visibility::Collapsed);
     }
+
     composing_ = false;
     fontSize_ = size;
     InvalidateLayout();
@@ -79,17 +87,21 @@ Result<void> EditableTextElement::ShapePassword(StringView text, float size) noe
     if (!value) {
         return Result<void>::Failure(value.Error());
     }
+
     auto shaped = shaper_->Shape(bullet, value.Value(), size);
     if (!shaped) {
         return shaped;
     }
+
     if (bullet.ShapedClusters().Size() != 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto points = text.TryCodePoints();
     if (!points) {
         return Result<void>::Failure(points.Error());
     }
+
     Array<text::TextCluster> clusters(allocator);
     Array<LabelGlyph> glyphs(allocator);
     for (auto it = points.Value().begin(); it != points.Value().end();) {
@@ -109,11 +121,13 @@ Result<void> EditableTextElement::ShapePassword(StringView text, float size) noe
                 }
             }
         }
+
         auto added = clusters.TryPushBack(cluster);
         if (!added) {
             return added;
         }
     }
+
     return label_->SetShapedText(text, clusters.View(), glyphs.View(), bullet.LineHeight(), false);
 }
 
@@ -127,6 +141,7 @@ Vec2 EditableTextElement::ComputeDesiredSize(float) const noexcept {
         text.x = math::Max(text.x, hint_->GetDesiredSize().x);
         text.y = math::Max(text.y, hint_->GetDesiredSize().y);
     }
+
     const Vec2 error = error_ ? error_->GetDesiredSize() : Vec2{};
     return {math::Max(text.x + 1, error.x) + padding_ * 2,
             math::Max(fontSize_, text.y) + padding_ * 2 + (error_ ? error.y + 2 : 0)};
@@ -142,6 +157,7 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
         if (!wrappedError) {
             return wrappedError;
         }
+
         errorHeight = math::Min(error_->ComputeDesiredSize(1).y, height);
         auto placed = error_->ArrangeIfNeeded(GetGeometry().MakeChild(
             {width, errorHeight}, {1, 0, 0, 1, padding_, padding_ + height - errorHeight}, {}, {}));
@@ -149,6 +165,7 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
             return placed;
         }
     }
+
     const Vec2 area{width, math::Max(1.0f, height - (error_ ? errorHeight + 2 : 0))};
     if (hint_ && label_->GetText().IsEmpty()) {
         auto placed = label_->CopyParagraphTo(*hint_);
@@ -156,14 +173,17 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
             placed = hint_->ArrangeIfNeeded(
                 GetGeometry().MakeChild(area, {1, 0, 0, 1, padding_, padding_}, {}, {}));
         }
+
         if (!placed) {
             return placed;
         }
     }
+
     auto wrapped = label_->ArrangeForWidth(area.x);
     if (!wrapped) {
         return wrapped;
     }
+
     const auto pos = label_->CaretPosition(composing_ ? compositionCaret_ : caret_, false);
     if (pos) {
         scroll_.x =
@@ -173,11 +193,13 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
             math::Clamp(scroll_.y, pos.Value().y + math::Min(area.y, label_->LineHeight()) - area.y,
                         pos.Value().y));
     }
+
     const AffineTransform2D offset{1, 0, 0, 1, padding_ - scroll_.x, padding_ - scroll_.y};
     auto arranged = label_->ArrangeIfNeeded(GetGeometry().MakeChild(area, offset, {}, {}));
     if (arranged && focused_) {
         PositionCompositionWindow();
     }
+
     return arranged;
 }
 
@@ -185,6 +207,7 @@ void EditableTextElement::PositionCompositionWindow() const noexcept {
     if (!platform_.moveCompositionWindow) {
         return;
     }
+
     auto cursor = label_->CaretPosition(composing_ ? compositionCaret_ : caret_, false);
     if (cursor) {
         auto point = cursor.Value();
@@ -213,10 +236,12 @@ void EditableTextElement::OnFocusReceived(uint32 user) noexcept {
             SelectAll();
         }
     }
+
     if (platform_.setInlineComposition) {
         platform_.setInlineComposition(true);
         PositionCompositionWindow();
     }
+
     chord_ = {};
     InvalidatePaint();
 }
@@ -225,6 +250,7 @@ void EditableTextElement::OnFocusLost(uint32 user) noexcept {
     if (!focused_ || user != focusUser_) {
         return;
     }
+
     focused_ = false;
     canRevert_ = false;
     focusText_.Clear();
@@ -232,6 +258,7 @@ void EditableTextElement::OnFocusLost(uint32 user) noexcept {
     if (platform_.setInlineComposition) {
         platform_.setInlineComposition(false);
     }
+
     chord_ = {};
     dragging_ = false;
     InvalidatePaint();
@@ -255,11 +282,13 @@ void EditableTextElement::MoveCaret(usize pos, bool extend) noexcept {
             }
         }
     }
+
     if (caret_ != pos || (!extend && anchor_ != pos)) {
         caret_ = pos;
         if (!extend) {
             anchor_ = pos;
         }
+
         InvalidateArrangement();
         InvalidatePaint();
     }
@@ -271,11 +300,14 @@ usize EditableTextElement::Adjacent(bool forward) const noexcept {
         if (forward && cluster.byteEnd > caret_) {
             return cluster.byteEnd;
         }
+
         if (!forward && cluster.byteEnd >= caret_) {
             return previous;
         }
+
         previous = cluster.byteEnd;
     }
+
     return previous;
 }
 
@@ -284,38 +316,46 @@ void EditableTextElement::Replace(EditableTextWidget& owner, usize begin, usize 
     if (owner.IsReadOnly() || (begin == end && insertion.IsEmpty())) {
         return;
     }
+
     const StringView before = owner.GetText();
     auto left = before.TryLeftBytes(begin);
     auto right = before.TryMidBytes(end);
     if (!left || !right) {
         return;
     }
+
     StringBuilder<> result(registry_.ObjectAllocator());
     if (!result.TryAppend(left.Value()) || !result.TryAppend(insertion)) {
         return;
     }
+
     const usize pos = result.View().ByteCount();
     if (!result.TryAppend(right.Value())) {
         return;
     }
+
     auto& allocator = registry_.ObjectAllocator();
     String next(allocator);
     if (!next.TryAssign(result.View()) ||
         (!owner.IsPassword() && !undo_.TryEnsureCapacity(undo_.Size() + 1))) {
         return;
     }
+
     const usize previousAnchor = anchor_;
     const usize previousCaret = caret_;
     if (!owner.ExchangeText(next)) {
         return;
     }
+
     if (!owner.IsPassword()) {
         if (undo_.Size() == 64) {
             (void)undo_.TryRemoveAt(0);
         }
+
         (void)undo_.TryPushBack({Move(next), previousAnchor, previousCaret});
         redo_.Reset();
     }
+
     MoveCaret(pos, false);
     // 문자열은 콜백에서 다시 편집될 수 있다. 이 호출이 소유한 스냅샷을 전달한다.
     owner.changed_.ExecuteIfBound(result.View());
@@ -336,14 +376,17 @@ void EditableTextElement::UpdateComposition(EditableTextWidget& owner,
         EndComposition(owner);
         return;
     }
+
     if (event.type == input::InputEventType::TextCompositionCommit) {
         EndComposition(owner);
         Paste(owner, begin, end, text);
         return;
     }
+
     if (event.compositionCaret > text.ByteCount() || !text.TryLeftBytes(event.compositionCaret)) {
         return;
     }
+
     StringBuilder<> preview(registry_.ObjectAllocator());
     const auto original = owner.GetText();
     if (preview.TryAppend(original.SliceBytes(0, begin)) && preview.TryAppend(text) &&
@@ -362,6 +405,7 @@ void EditableTextElement::Paste(EditableTextWidget& owner, usize begin, usize en
     if (!points || text.IsEmpty()) {
         return;
     }
+
     StringBuilder<> clean(registry_.ObjectAllocator());
     bool carriageReturn = false;
     for (auto point : points.Value()) {
@@ -369,14 +413,17 @@ void EditableTextElement::Paste(EditableTextWidget& owner, usize begin, usize en
             carriageReturn = false;
             continue;
         }
+
         carriageReturn = point == '\r';
         if (carriageReturn || point == '\n') {
             point = multiline_ ? '\n' : ' ';
         }
+
         if (!clean.TryAppendCodePoint(point)) {
             return;
         }
     }
+
     Replace(owner, begin, end, clean.View());
 }
 
@@ -392,6 +439,7 @@ void EditableTextElement::RestoreHistory(EditableTextWidget& owner, bool redo) n
         !to.TryEnsureCapacity(to.Size() + 1)) {
         return;
     }
+
     const usize previousAnchor = anchor_;
     const usize previousCaret = caret_;
     auto& state = from[from.Size() - 1];
@@ -399,6 +447,7 @@ void EditableTextElement::RestoreHistory(EditableTextWidget& owner, bool redo) n
     if (!snapshot || !owner.ExchangeText(state.text)) {
         return;
     }
+
     MoveCaret(state.anchor, false);
     MoveCaret(state.caret, true);
     (void)to.TryPushBack({Move(state.text), previousAnchor, previousCaret});
@@ -411,6 +460,7 @@ bool EditableTextElement::OnPreviewKeyChord(uint32 user, const input::InputEvent
     if (focused_ && focusUser_ == user) {
         chord_ = chord;
     }
+
     return false;
 }
 
@@ -418,14 +468,17 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
     if (!focused_ || focusUser_ != user) {
         return false;
     }
+
     auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
     if (!model) {
         return false;
     }
+
     auto* owner = model.Value().Get().Value();
     if (owner->CachedElement().Get() != this) {
         return false;
     }
+
     const usize begin = anchor_ < caret_ ? anchor_ : caret_;
     const usize end = anchor_ < caret_ ? caret_ : anchor_;
     if (event.type == input::InputEventType::TextComposition ||
@@ -433,10 +486,12 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
         UpdateComposition(*owner, event);
         return true;
     }
+
     if (composing_) {
         // 조합 중의 방향키·삭제·Enter는 IME가 처리한다. 확정 문자열은 별도 이벤트로 받는다.
         return true;
     }
+
     if (event.type == input::InputEventType::Text) {
         // 플랫폼은 Enter·Backspace의 제어 문자도 보낼 수 있다. 편집 명령은 KeyDown에서만 처리한다.
         if (event.codePoint >= 32 && event.codePoint != 127) {
@@ -445,12 +500,15 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
                 Replace(*owner, begin, end, value.View());
             }
         }
+
         return true;
     }
+
     using input::Key;
     if (event.type != input::InputEventType::KeyDown) {
         return false;
     }
+
     const bool extend = chord_.shift;
     const bool command = (chord_.control || chord_.super) && !chord_.alt;
     switch (event.key) {
@@ -460,6 +518,7 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
         if (!command) {
             return false;
         }
+
         if (event.key == Key::V) {
             if (!owner->IsReadOnly()) {
                 String clipboard(registry_.ObjectAllocator());
@@ -482,12 +541,14 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
         if (!command) {
             return false;
         }
+
         RestoreHistory(*owner, event.key == Key::Y || extend);
         break;
     case Key::A:
         if (!command) {
             return false;
         }
+
         anchor_ = 0;
         MoveCaret(owner->GetText().ByteCount(), true);
         InvalidatePaint();
@@ -506,16 +567,19 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
         if (!pos) {
             return true;
         }
+
         Vec2 point = pos.Value();
         if (event.key == Key::Up || event.key == Key::Down) {
             if (!multiline_) {
                 return false;
             }
+
             point.y += (event.key == Key::Up ? -0.5f : 1.5f) * label_->LineStride();
         } else {
             point.x = event.key == Key::Home ? -1.0f : NumericLimits<float>::Max();
             point.y += 0.5f * label_->LineStride();
         }
+
         MoveCaret(label_->HitText(point), extend);
         break;
     }
@@ -536,12 +600,14 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
             if (owner->selectAllOnCommit_) {
                 SelectAll();
             }
+
             owner->Commit(TextCommitReason::Enter);
         }
         break;
     default:
         return false;
     }
+
     return true;
 }
 
@@ -555,6 +621,7 @@ PointerReply EditableTextElement::OnPointerEvent(const PointerEvent& event) noex
     if (composing_) {
         return {.handled = true};
     }
+
     if (event.type == PointerEventType::Down && !dragging_ &&
         (event.source != PointerSource::Mouse || event.button == input::MouseButton::Left)) {
         pointerAnchor_ = PointerOffset(event.position);
@@ -566,6 +633,7 @@ PointerReply EditableTextElement::OnPointerEvent(const PointerEvent& event) noex
         dragUser_ = event.userId;
         return {.handled = true, .capture = true};
     }
+
     if (dragging_ && dragSource_ == event.source && dragPointer_ == event.pointerId &&
         dragUser_ == event.userId) {
         if (event.type == PointerEventType::Move || event.type == PointerEventType::Up) {
@@ -575,15 +643,19 @@ PointerReply EditableTextElement::OnPointerEvent(const PointerEvent& event) noex
                     MoveCaret(pointerAnchor_, false);
                     keepPointerSelection_ = false;
                 }
+
                 MoveCaret(offset, true);
             }
         }
+
         if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
             dragging_ = false;
             return {.handled = true, .releaseCapture = true};
         }
+
         return {.handled = true};
     }
+
     return {};
 }
 
@@ -601,9 +673,11 @@ Result<void> EditableTextElement::OnPaint(PaintList& list, int32 layer) const no
             return painted;
         }
     }
+
     if (!focused_ || (!composing_ && caret_ == anchor_)) {
         return Result<void>::Success();
     }
+
     const usize begin = caret_ < anchor_ ? caret_ : anchor_;
     const usize end = composing_ ? compositionEnd_ : (anchor_ > caret_ ? anchor_ : caret_);
     const auto& layout = label_->Layout();
@@ -623,6 +697,7 @@ Result<void> EditableTextElement::OnPaint(PaintList& list, int32 layer) const no
             }
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -630,6 +705,7 @@ Result<void> EditableTextElement::OnPaintOverlay(PaintList& list, int32 layer) c
     if (!focused_) {
         return Result<void>::Success();
     }
+
     const auto pos = label_->CaretPosition(composing_ ? compositionCaret_ : caret_, false);
     const auto point = pos ? pos.Value() : Vec2{};
     const auto caret = label_->GetGeometry().MakeChild({1, label_->LineHeight()},

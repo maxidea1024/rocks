@@ -16,6 +16,7 @@ Result<void> DrawLine(PaintList& list, const Geometry& area, Vec2 from, Vec2 to,
     if (length == 0) {
         return Result<void>::Success();
     }
+
     const Vec2 dir = delta / length;
     const Vec2 normal(-dir.y, dir.x);
     const Vec2 origin = from - normal * (width * 0.5f);
@@ -35,19 +36,24 @@ Result<void> RadialSlider::Construct(Args&& args) noexcept {
     if (!args.track.IsFinite() || !args.progress.IsFinite() || !args.handle.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto ready = SetRange(args.minimum, args.maximum);
     if (ready) {
         ready = SetStep(args.step);
     }
+
     if (ready) {
         ready = SetArc(args.startAngle, args.endAngle, args.angularOffset);
     }
+
     if (ready) {
         ready = SetValue(args.value);
     }
+
     if (!ready) {
         return ready;
     }
+
     SetColor(args.track);
     SetFillColor(args.progress);
     SetHandleColor(args.handle);
@@ -66,6 +72,7 @@ Result<void> RadialSlider::SetArc(float start, float end, float offset) noexcept
     if (!IsValidArc(start, end, offset)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     offset = math::UnwindDegrees(offset);
     if (start_ != start || end_ != end || offset_ != offset) {
         start_ = start;
@@ -74,6 +81,7 @@ Result<void> RadialSlider::SetArc(float start, float end, float offset) noexcept
         hasAngle_ = false;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -98,12 +106,14 @@ bool RadialSlider::OnKeyEvent(uint32 user, const input::InputEvent& event) noexc
             SetInteractiveValue(event.key == input::Key::Home ? Minimum() : Maximum());
             return true;
         }
+
         if (event.key == input::Key::Up || event.key == input::Key::Down) {
             auto mapped = event;
             mapped.key = event.key == input::Key::Up ? input::Key::Right : input::Key::Left;
             return Slider::OnKeyEvent(user, mapped);
         }
     }
+
     return Slider::OnKeyEvent(user, event);
 }
 
@@ -111,20 +121,24 @@ void RadialSlider::UpdateFromPointer(Vec2 position, bool firstPoint) noexcept {
     if (firstPoint) {
         hasAngle_ = false;
     }
+
     const auto& area = GetGeometry();
     AffineTransform2D inverse;
     if (!area.render.TryInverse(inverse)) {
         return;
     }
+
     const Vec2 local = inverse.Apply(position) - area.size * 0.5f;
     if (!local.IsFinite() || local == Vec2{}) {
         return;
     }
+
     float angle =
         math::UnwindDegrees(math::RadiansToDegrees(math::Atan2(-local.x, local.y)) - offset_);
     if (angle < 0) {
         angle += 360;
     }
+
     if (!hasAngle_) {
         const float distanceToStart = math::Abs(math::FindDeltaAngleDegrees(angle, start_));
         const float distanceToEnd = math::Abs(math::FindDeltaAngleDegrees(angle, end_));
@@ -136,11 +150,13 @@ void RadialSlider::UpdateFromPointer(Vec2 position, bool firstPoint) noexcept {
         } else {
             dragAngle_ = angle;
         }
+
         hasAngle_ = true;
     } else {
         dragAngle_ = math::Clamp(dragAngle_ + math::FindDeltaAngleDegrees(previousAngle_, angle),
                                  start_, end_);
     }
+
     previousAngle_ = angle;
     SetInteractiveRatio((dragAngle_ - start_) / (end_ - start_));
 }
@@ -151,6 +167,7 @@ Result<void> RadialSlider::OnPaint(PaintList& list, int32 layer) const noexcept 
     if (size <= 0) {
         return Result<void>::Success();
     }
+
     const Vec2 center = area.size * 0.5f;
     const float thumb = math::Min(9.0f, size * 0.25f);
     const float width = math::Min(4.0f, size * 0.12f);
@@ -171,27 +188,33 @@ Result<void> RadialSlider::OnPaint(PaintList& list, int32 layer) const noexcept 
             if (!filled) {
                 return filled;
             }
+
             from = handle;
         }
+
         auto drawn = DrawLine(list, area, from, to, width,
                               angle <= active ? FillColor() : GetColor(), layer);
         if (!drawn) {
             return drawn;
         }
+
         from = to;
         previous = angle;
     }
+
     if (showHand_) {
         auto drawn = DrawLine(list, area, center, handle, width * 0.6f, handleColor_, layer);
         if (!drawn) {
             return drawn;
         }
     }
+
     if (showHandle_) {
         auto box = area.MakeChild(
             {thumb, thumb}, {1, 0, 0, 1, handle.x - thumb * 0.5f, handle.y - thumb * 0.5f}, {}, {});
         return list.TryAddBox({box, handleColor_, layer});
     }
+
     return Result<void>::Success();
 }
 

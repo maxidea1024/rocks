@@ -88,12 +88,14 @@ TEST(UiScreens_AssetBindsIndependentInstancesAndRestoresFocus) {
                 focusField = field.id;
             }
         }
+
         REQUIRE(focusField != Guid{});
         REQUIRE(design->AddBinding({focusField, targetId, false}));
         auto built = design->Compile(source, allocator);
         REQUIRE(built);
         compiled = Move(built.Value());
     }
+
     {
         const auto access = game.OwnerAccess();
         ObjectAccessScope scope(access);

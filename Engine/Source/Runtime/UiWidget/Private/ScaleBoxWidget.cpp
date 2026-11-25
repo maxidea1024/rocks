@@ -20,10 +20,12 @@ Result<void> ScaleBoxWidget::SetAlignment(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < 0 || value.y < 0 || value.x > 1 || value.y > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     alignment_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -31,21 +33,26 @@ Result<void> ScaleBoxWidget::SetFit(FitMode mode, FitDirection direction) noexce
     if (mode > FitMode::User || direction > FitDirection::GrowOnly) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     fitMode_ = static_cast<uint8>(mode);
     fitDirection_ = static_cast<uint8>(direction);
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
+
 Result<void> ScaleBoxWidget::SetUserScale(float value) noexcept {
     if (!math::IsFinite(value) || value < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     userScale_ = value;
     if (auto live = CachedElement()) {
         return static_cast<FitBox&>(*live).SetUserScale(value);
     }
+
     return Result<void>::Success();
 }
 

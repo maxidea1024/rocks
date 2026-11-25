@@ -14,6 +14,7 @@ Result<ObjectHandle> ComboBoxWidget::OptionAt(usize index) const noexcept {
     if (index >= OptionCount()) {
         return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
     }
+
     return Result<ObjectHandle>::Success(options_.View()[index]);
 }
 
@@ -21,16 +22,20 @@ Result<void> ComboBoxWidget::AddOption(ObjectRegistry& objects, ObjectHandle opt
     if (!CanEditOptions()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (OptionCount() >= static_cast<usize>(NumericLimits<int32>::Max())) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
+
     if (option.IsNull()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto added = objects.AddReference(objects.OwnerAccess(), Handle(), options_, option);
     if (added) {
         OptionsChanged(SelectedIndex());
     }
+
     return added;
 }
 
@@ -38,14 +43,17 @@ Result<void> ComboBoxWidget::RemoveOptionAt(ObjectRegistry& objects, usize index
     if (!CanEditOptions()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (index >= OptionCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const int32 next = SelectionAfterRemoving(index);
     auto removed = objects.RemoveReferenceAt(objects.OwnerAccess(), Handle(), options_, index);
     if (removed) {
         OptionsChanged(next);
     }
+
     return removed;
 }
 
@@ -53,10 +61,12 @@ Result<void> ComboBoxWidget::ClearOptions(ObjectRegistry& objects) noexcept {
     if (!CanEditOptions()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     if (auto cleared = objects.ClearReferences(objects.OwnerAccess(), Handle(), options_);
         !cleared) {
         return cleared;
     }
+
     OptionsChanged(-1);
     return Result<void>::Success();
 }
@@ -67,6 +77,7 @@ Optional<usize> ComboBoxWidget::FindOptionIndex(ObjectHandle option) const noexc
             return index;
         }
     }
+
     return {};
 }
 

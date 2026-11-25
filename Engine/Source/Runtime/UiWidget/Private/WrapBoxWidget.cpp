@@ -31,6 +31,7 @@ Result<void> WrapBoxWidget::AttachChild(ObjectRegistry& objects, ObjectHandle ha
                    ? PanelWidget::AttachChild(objects, handle, panel, child)
                    : Result<void>::Failure(slot.Error());
     }
+
     return static_cast<WrapStack&>(panel).TryAddSlot(child,
                                                      slot.Value().Get().Value()->WrapLayout());
 }
@@ -44,6 +45,7 @@ Result<void> WrapBoxWidget::UpdateAlignedSlot(ObjectRegistry& objects, ObjectHan
                    ? PanelWidget::UpdateAlignedSlot(objects, handle, panel, child, placement)
                    : Result<void>::Failure(slot.Error());
     }
+
     auto layout = slot.Value().Get().Value()->WrapLayout();
     layout.placement = placement;
     return static_cast<WrapStack&>(panel).SetSlot(child, layout);
@@ -57,10 +59,12 @@ Result<void> WrapBoxWidget::SetSpacing(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < 0 || value.y < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     spacing_ = value;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 

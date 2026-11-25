@@ -9,6 +9,7 @@ Result<void> WidgetAnimation::SetDuration(float seconds) noexcept {
     if (!math::IsFinite(seconds) || seconds <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     duration_ = seconds;
     return Result<void>::Success();
 }
@@ -26,12 +27,14 @@ Result<void> WidgetAnimation::SetTrack(Guid target, WidgetAnimationChannel chann
     if (channel > WidgetAnimationChannel::Angle || curve.KeyCount() == 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const auto id = static_cast<uint8>(channel);
     for (auto& track : tracks_) {
         if (track.target == target && track.channel == id) {
             return track.curve.TryCopyFrom(curve);
         }
     }
+
     WidgetAnimationTrack track(tracks_.GetAllocator());
     track.target = target;
     track.channel = id;
@@ -39,6 +42,7 @@ Result<void> WidgetAnimation::SetTrack(Guid target, WidgetAnimationChannel chann
     if (!copied) {
         return copied;
     }
+
     return tracks_.TryPushBack(Move(track));
 }
 

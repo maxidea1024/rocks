@@ -21,18 +21,21 @@ Result<void> Grid::PrepareSlot(const GridSlot& slot) noexcept {
         !slot.nudge.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     // 마지막 칸의 끝 좌표도 저장하므로 경계 하나를 더 확보한다.
     const uint64 rowEnd = static_cast<uint64>(slot.row) + slot.rowSpan;
     const uint64 columnEnd = static_cast<uint64>(slot.column) + slot.columnSpan;
     if (rowEnd >= MaxSize || columnEnd >= MaxSize) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     if (columnEnd >= columns_.Size()) {
         auto resized = columns_.TryResize(static_cast<usize>(columnEnd) + 1);
         if (!resized) {
             return resized;
         }
     }
+
     if (rowEnd >= rows_.Size()) {
         auto resized = rows_.TryResize(static_cast<usize>(rowEnd) + 1);
         if (!resized) {
@@ -47,22 +50,27 @@ Result<void> Grid::TryAddSlot(const SharedPtr<Element>& child, const GridSlot& s
     if (!child) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto ready = PrepareSlot(slot);
     if (!ready) {
         return ready;
     }
+
     usize index = 0;
     while (index < slots_.Size() && slots_[index].layer <= slot.layer) {
         ++index;
     }
+
     auto stored = slots_.TryInsert(slot, index);
     if (!stored) {
         return stored;
     }
+
     auto added = TryInsertChild(index, child);
     if (!added) {
         (void)slots_.TryRemoveAt(index);
     }
+
     return added;
 }
 
@@ -71,9 +79,11 @@ Result<void> Grid::SetSlot(Element& child, const GridSlot& slot) noexcept {
     while (index < slots_.Size() && ChildAt(index) != &child) {
         ++index;
     }
+
     if (index == slots_.Size()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     auto ready = PrepareSlot(slot);
     if (!ready) {
         return ready;
@@ -90,8 +100,10 @@ Result<void> Grid::SetSlot(Element& child, const GridSlot& slot) noexcept {
             slots_[next] = slots_[next - 1];
             --next;
         }
+
         MoveChildWithin(index, next);
     }
+
     slots_[next] = slot;
     InvalidateLayout();
     return Result<void>::Success();
@@ -104,6 +116,7 @@ bool Grid::RemoveChild(Element& child) noexcept {
             return Element::RemoveChild(child);
         }
     }
+
     return false;
 }
 
@@ -111,16 +124,19 @@ Result<void> Grid::SetFill(Array<Track>& tracks, uint32 index, float weight) noe
     if (!math::IsFinite(weight) || weight < 0 || index == NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (index >= tracks.Size()) {
         auto grown = tracks.TryResize(static_cast<usize>(index) + 1);
         if (!grown) {
             return grown;
         }
     }
+
     if (tracks[index].weight != weight) {
         tracks[index].weight = weight;
         InvalidateArrangement();
     }
+
     return Result<void>::Success();
 }
 
@@ -133,6 +149,7 @@ void Grid::ClearFill() noexcept {
             track.weight = 0;
         }
     }
+
     if (changed) {
         InvalidateArrangement();
     }
@@ -152,6 +169,7 @@ Vec2 Grid::ComputeDesiredSize(float) const noexcept {
     for (Track& track : columns_) {
         track.desired = 0;
     }
+
     for (Track& track : rows_) {
         track.desired = 0;
     }
@@ -175,6 +193,7 @@ Vec2 Grid::ComputeDesiredSize(float) const noexcept {
         for (usize x = slot.column; x < endX; ++x) {
             columns_[x].desired = math::Max(columns_[x].desired, width);
         }
+
         for (usize y = slot.row; y < endY; ++y) {
             rows_[y].desired = math::Max(rows_[y].desired, height);
         }
@@ -185,9 +204,11 @@ Vec2 Grid::ComputeDesiredSize(float) const noexcept {
     for (usize x = 0; x < measuredColumns_; ++x) {
         width += columns_[x].desired;
     }
+
     for (usize y = 0; y < measuredRows_; ++y) {
         height += rows_[y].desired;
     }
+
     return Vec2(static_cast<float>(width), static_cast<float>(height));
 }
 
@@ -195,6 +216,7 @@ void Grid::ArrangeTracks(Array<Track>& tracks, usize count, float available) noe
     if (count == 0) {
         return;
     }
+
     double fixed = 0;
     double weights = 0;
     for (usize i = 0; i < count; ++i) {
@@ -204,12 +226,14 @@ void Grid::ArrangeTracks(Array<Track>& tracks, usize count, float available) noe
             weights += tracks[i].weight;
         }
     }
+
     const double unit = weights == 0 ? 0 : math::Max(0.0, available - fixed) / weights;
     double offset = 0;
     for (usize i = 0; i < count; ++i) {
         tracks[i].offset = offset;
         offset += tracks[i].weight == 0 ? tracks[i].desired : unit * tracks[i].weight;
     }
+
     tracks[count].offset = offset;
 }
 
@@ -222,6 +246,7 @@ Result<void> Grid::Arrange(const Geometry& geometry) noexcept {
     if (!measured) {
         return measured;
     }
+
     ArrangeTracks(columns_, measuredColumns_, geometry.size.x);
     ArrangeTracks(rows_, measuredRows_, geometry.size.y);
     SetGeometry(geometry);
@@ -244,6 +269,7 @@ Result<void> Grid::Arrange(const Geometry& geometry) noexcept {
         if (!size.IsFinite() || !position.IsFinite()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         const AffineTransform2D offset{1, 0, 0, 1, position.x, position.y};
         const SlotPlacement placement{slot.padding, slot.horizontal, slot.vertical};
         auto arranged =
@@ -252,6 +278,7 @@ Result<void> Grid::Arrange(const Geometry& geometry) noexcept {
             return arranged;
         }
     }
+
     return Result<void>::Success();
 }
 

@@ -9,12 +9,14 @@ Result<void> SliderWidget::SetRange(float minimum, float maximum) noexcept {
         !math::IsFinite(maximum - minimum) || minimum >= maximum) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     minimum_ = minimum;
     maximum_ = maximum;
     value_ = math::Clamp(value_, minimum, maximum);
     if (auto live = CachedElement()) {
         return static_cast<Slider&>(*live).SetRange(minimum, maximum);
     }
+
     return Result<void>::Success();
 }
 
@@ -22,10 +24,12 @@ Result<void> SliderWidget::SetStep(float step) noexcept {
     if (!math::IsFinite(step) || step <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     step_ = step;
     if (auto live = CachedElement()) {
         return static_cast<Slider&>(*live).SetStep(step);
     }
+
     return Result<void>::Success();
 }
 
@@ -49,16 +53,19 @@ void SliderWidget::SetLocked(bool locked) noexcept {
         static_cast<Slider&>(*live).SetLocked(locked);
     }
 }
+
 void SliderWidget::SetIndentHandle(bool indent) noexcept {
     indentHandle_ = indent;
     if (auto live = CachedElement()) {
         static_cast<Slider&>(*live).SetIndentHandle(indent);
     }
 }
+
 Result<void> SliderWidget::SetTints(LinearColor bar, LinearColor handle) noexcept {
     if (!bar.IsFinite() || !handle.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     barTint_ = bar;
     handleTint_ = handle;
     if (auto live = CachedElement()) {
@@ -66,29 +73,37 @@ Result<void> SliderWidget::SetTints(LinearColor bar, LinearColor handle) noexcep
         slider.SetColor(bar);
         slider.SetHandleColor(handle);
     }
+
     return Result<void>::Success();
 }
+
 float SliderWidget::GetNormalizedValue() const noexcept {
     return (value_ - minimum_) / (maximum_ - minimum_);
 }
+
 void SliderWidget::SetRequiresControllerLock(bool required) noexcept {
     requiresControllerLock_ = required;
     if (auto live = CachedElement()) {
         static_cast<Slider&>(*live).SetRequiresControllerLock(required);
     }
 }
+
 void SliderWidget::SetOnControllerCaptureBegin(Delegate<void()>&& callback) noexcept {
     controllerBegin_ = Move(callback);
 }
+
 void SliderWidget::SetOnControllerCaptureEnd(Delegate<void()>&& callback) noexcept {
     controllerEnd_ = Move(callback);
 }
+
 void SliderWidget::SetOnCaptureBegin(Delegate<void()>&& callback) noexcept {
     captureBegin_ = Move(callback);
 }
+
 void SliderWidget::SetOnCaptureEnd(Delegate<void()>&& callback) noexcept {
     captureEnd_ = Move(callback);
 }
+
 float SliderWidget::Value() const noexcept {
     return value_;
 }
@@ -101,14 +116,17 @@ Result<void> SliderWidget::SetValue(float value) noexcept {
     if (!math::IsFinite(value)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const float next = math::Clamp(value, minimum_, maximum_);
     if (next == value_) {
         return Result<void>::Success();
     }
+
     value_ = next;
     if (auto element = CachedElement()) {
         ApplyProperties(*element);
     }
+
     NotifyPropertyChanged("value");
     return Result<void>::Success();
 }
@@ -123,13 +141,16 @@ Result<SharedPtr<Element>> SliderWidget::BuildElement(ObjectRegistry& objects) n
     if (!slider) {
         return Result<SharedPtr<Element>>::Failure(slider.Error());
     }
+
     auto ready = slider.Value()->SetRange(minimum_, maximum_);
     if (ready) {
         ready = slider.Value()->SetStep(step_);
     }
+
     if (!ready) {
         return Result<SharedPtr<Element>>::Failure(ready.Error());
     }
+
     slider.Value()->SetRequiresControllerLock(requiresControllerLock_);
     slider.Value()->SetOnControllerCaptureBegin(BindLiveWidgetEvent(
         objects, Handle(), slider.Value().Get(), &SliderWidget::controllerBegin_));
@@ -151,10 +172,12 @@ Result<SharedPtr<Element>> SliderWidget::BuildElement(ObjectRegistry& objects) n
             if (!widget) {
                 return;
             }
+
             auto* value = widget.Value().Get().Value();
             if (value->CachedElement().Get() != native) {
                 return;
             }
+
             value->value_ = amount;
             value->NotifyPropertyChanged("value");
             value->changed_.ExecuteIfBound(amount);

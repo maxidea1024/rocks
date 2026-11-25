@@ -3,6 +3,7 @@
 
 // 공개한 이벤트와 인자 목록의 영속 ID다. 에셋 호환성을 위해 기존 항목의 값을 유지한다.
 namespace rocks::ui::widgetEvents {
+
 inline constexpr Guid ButtonClicked{0x25c81f56706c426cULL, 0xa6ea90564a921200ULL};
 inline constexpr Guid CheckBoxChanged{0x25c81f56706c426cULL, 0xa6ea90564a921201ULL};
 inline constexpr Guid CheckBoxStateChanged{0x25c81f56706c426cULL, 0xa6ea90564a921202ULL};
@@ -26,9 +27,11 @@ inline constexpr Guid SpinDragEnd{0x25c81f56706c426cULL, 0xa6ea90564a921213ULL};
 inline constexpr Guid SpinCommitted{0x25c81f56706c426cULL, 0xa6ea90564a921214ULL};
 inline constexpr Guid SliderControllerBegin{0x25c81f56706c426cULL, 0xa6ea90564a921215ULL};
 inline constexpr Guid SliderControllerEnd{0x25c81f56706c426cULL, 0xa6ea90564a921216ULL};
+
 } // namespace rocks::ui::widgetEvents
 
 namespace rocks::ui::widgetSignatures {
+
 inline constexpr Guid NoArguments{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858200ULL};
 inline constexpr Guid Boolean{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858201ULL};
 inline constexpr Guid CheckState{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858202ULL};
@@ -38,4 +41,5 @@ inline constexpr Guid TextCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858205ULL};
 inline constexpr Guid KeyChord{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858206ULL};
 inline constexpr Guid Number{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858207ULL};
 inline constexpr Guid SpinCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858208ULL};
+
 } // namespace rocks::ui::widgetSignatures

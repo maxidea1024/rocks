@@ -4,6 +4,7 @@
 #include <Meta/Annotations.h>
 
 namespace rocks::ui {
+
 // 원호의 각도는 도 단위다. 균등 분배에서는 부채꼴을 항목 수로 나누며,
 // 전체 원보다 작은 부채꼴은 각 구간의 중앙에 항목을 배치한다.
 ROCKS_STRUCT()

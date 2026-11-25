@@ -138,6 +138,7 @@ TEST(UiFramework_ProgressBarDrawsSevenFillDirectionsAndRestoresCache) {
         const auto& fill = list.Boxes()[1].geometry;
         CHECK(fill.size == item.size && fill.render.Apply({}) == item.offset);
     }
+
     REQUIRE(bar.SetValue(0));
     bar.SetMarquee(true);
     CHECK(bar.IsVolatile());

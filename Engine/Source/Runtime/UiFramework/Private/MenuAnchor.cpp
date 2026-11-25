@@ -19,6 +19,7 @@ Result<void> MenuAnchor::Construct(Args&& args) noexcept {
         SetMenuFactory(Move(args.makeMenu));
         SetOnOpening(Move(args.onOpening));
     }
+
     return added;
 }
 
@@ -41,13 +42,16 @@ Result<void> MenuAnchor::Open() noexcept {
     if (IsOpen()) {
         return Result<void>::Success();
     }
+
     if (opening_ || !factory_) {
         return Result<void>::Failure(opening_ ? ErrorCode::Busy : ErrorCode::NotReady);
     }
+
     auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{};
     if (!self) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
     Close();
     opening_ = true;
     ROCKS_ON_SCOPE_EXIT {
@@ -57,30 +61,37 @@ Result<void> MenuAnchor::Open() noexcept {
     if (!factory_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     auto menu = factory_.Execute();
     if (!menu) {
         return Result<void>::Failure(menu.Error());
     }
+
     if (!factory_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
+
     if (!menu.Value() || IsWithin(*menu.Value())) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto layer = SharedPtr<MenuPopupLayer>::TryMake(allocator_, allocator_, *this);
     if (!layer) {
         return Result<void>::Failure(layer.Error());
     }
+
     auto added = layer.Value()->TryAddChild(menu.Value());
     if (added) {
         added = AttachPopupLayer({layer.Value(), self, [](Element& owner) noexcept {
                                       static_cast<MenuAnchor&>(owner).Close();
                                   }});
     }
+
     if (added) {
         layer_ = Move(layer.Value());
         openChanged_.ExecuteIfBound(true);
     }
+
     return added;
 }
 
@@ -90,8 +101,10 @@ Result<WeakPtr<Application*>> Application::WeakContext() noexcept {
         if (!made) {
             return Result<WeakPtr<Application*>>::Failure(made.Error());
         }
+
         context_ = Move(made.Value());
     }
+
     return Result<WeakPtr<Application*>>::Success(WeakPtr<Application*>(context_));
 }
 
@@ -100,25 +113,30 @@ Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user) noexcept {
     if (!context) {
         return Result<void>::Failure(context.Error());
     }
+
     auto previous = app.GetFocus(user);
     if (!previous && Parent()) {
         previous = Parent()->FindChild(this);
     }
+
     auto opened = Open();
     if (!opened || !layer_) {
         return opened;
     }
+
     auto menu = layer_->ChildRefAt(0);
     auto moved = app.MoveFocusWithin(user, menu, true, false);
     if (!moved) {
         Close();
         return Result<void>::Failure(moved.Error());
     }
+
     if (moved.Value() && layer_ && (!previous || !previous->IsWithin(*layer_))) {
         app_ = Move(context.Value());
         restoreFocus_ = WeakPtr<Element>(previous);
         focusUser_ = user;
     }
+
     return Result<void>::Success();
 }
 
@@ -140,6 +158,7 @@ Optional<Vec2> MenuAnchor::MenuPosition() const noexcept {
     if (!IsOpen()) {
         return {};
     }
+
     return layer_->ChildAt(0)->GetGeometry().render.Apply({});
 }
 
@@ -160,10 +179,12 @@ void MenuAnchor::Close() noexcept {
                 (void)(*app)->SetFocus(focusUser_, restore);
             }
         }
+
         layer->Disconnect();
         if (auto* parent = layer->Parent()) {
             (void)parent->RemoveChild(*layer);
         }
+
         openChanged_.ExecuteIfBound(false);
     }
 }
@@ -184,6 +205,7 @@ Result<void> MenuAnchor::Arrange(const Geometry& geometry) noexcept {
     if (layer_ && geometry != GetGeometry()) {
         layer_->InvalidateArrangement();
     }
+
     return Button::Arrange(geometry);
 }
 
@@ -193,6 +215,7 @@ bool MenuAnchor::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcep
         Close();
         return true;
     }
+
     return Button::OnKeyEvent(user, event);
 }
 

@@ -9,10 +9,12 @@ Result<SharedPtr<UiTimer>> Application::StartTimer(const SharedPtr<Element>& own
     if (!owner || !callback || !math::IsFinite(interval) || interval <= 0) {
         return Result<SharedPtr<UiTimer>>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto timer = SharedPtr<UiTimer>::TryMake(allocator_, owner, interval, Move(callback));
     if (!timer) {
         return timer;
     }
+
     auto added = timers_.TryPushBack(WeakPtr<UiTimer>(timer.Value()));
     return added ? Move(timer) : Result<SharedPtr<UiTimer>>::Failure(added.Error());
 }
@@ -22,10 +24,12 @@ Result<SharedPtr<UiTimer>> Application::StartFrameTimer(const SharedPtr<Element>
     if (!owner || !frame) {
         return Result<SharedPtr<UiTimer>>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto timer = SharedPtr<UiTimer>::TryMake(allocator_, owner, Move(frame));
     if (!timer) {
         return timer;
     }
+
     auto stored = timers_.TryPushBack(WeakPtr<UiTimer>(timer.Value()));
     return stored ? Move(timer) : Result<SharedPtr<UiTimer>>::Failure(stored.Error());
 }
@@ -34,6 +38,7 @@ void Application::AdvanceTimers() noexcept {
     if (runningTimers_ || timers_.IsEmpty() || !root_) {
         return;
     }
+
     runningTimers_ = true;
     const auto now = static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9;
     usize limit = timers_.Size();
@@ -44,11 +49,14 @@ void Application::AdvanceTimers() noexcept {
             --limit;
             continue;
         }
+
         if (root_) {
             timer->Advance(now, *root_);
         }
+
         ++i;
     }
+
     runningTimers_ = false;
 }
 
@@ -73,11 +81,14 @@ void UiTimer::Advance(double now, const Element& root) noexcept {
         if (owner && owner->IsWithin(root)) {
             frame_.ExecuteIfBound(elapsed);
         }
+
         return;
     }
+
     if (now < due_) {
         return;
     }
+
     due_ = now + interval_;
     auto owner = owner_.Lock();
     if (owner && owner->IsInputPathActive(root, false)) {

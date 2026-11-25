@@ -9,6 +9,7 @@
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
+
 namespace {
 
 class InputTestShaper final : public WidgetTextShaper {
@@ -22,21 +23,25 @@ public:
         if (!got) {
             return got;
         }
+
         Array<text::TextCluster> clusters(allocator_);
         auto points = view.source.TryCodePoints();
         if (!points) {
             return Result<void>::Failure(points.Error());
         }
+
         usize index = 0;
         for (char32_t point : points.Value()) {
             auto offset = view.source.TryByteOffsetOfCodePoint(++index);
             if (!offset) {
                 return Result<void>::Failure(offset.Error());
             }
+
             if (point == 0x301 && !clusters.IsEmpty()) {
                 clusters[clusters.Size() - 1].byteEnd = offset.Value();
                 continue;
             }
+
             auto added = clusters.TryPushBack({.byteEnd = offset.Value(),
                                                .advance = point == '\n' ? 0.0f : 8.0f,
                                                .hardBreak = point == '\n'});
@@ -44,6 +49,7 @@ public:
                 return added;
             }
         }
+
         return label.SetShapedText(view.source, clusters.View(), {}, size, false);
     }
 

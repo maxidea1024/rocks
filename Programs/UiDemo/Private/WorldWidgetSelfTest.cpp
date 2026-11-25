@@ -10,12 +10,14 @@
 #include <WorldIntegration/WorldWidgetPresenter.h>
 
 namespace rocks::ui {
+
 int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexcept {
     TypeRegistry types(allocator);
     ModuleRegistration registration(types, allocator);
     if (!RegisterWorldIntegrationTypes(registration)) {
         return 141;
     }
+
     WorldDesc options;
     options.name = "WorldUi";
     options.context = {0x575549, 1};
@@ -23,6 +25,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!world.Initialize()) {
         return 142;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         (void)world.Shutdown();
     };
@@ -30,10 +33,12 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!actor) {
         return 143;
     }
+
     auto component = world.AddComponent<WorldWidgetComponent>(actor.Value());
     if (!component) {
         return 144;
     }
+
     auto& objects = world.Objects();
     const auto access = world.Access();
     ObjectAccessScope scope(access);
@@ -41,44 +46,53 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!user) {
         return 145;
     }
+
     auto ui = objects.ResolveForWrite<UserWidget>(access, user.Value().Handle());
     if (!ui || !ui.Value().Get().Value()->Initialize(objects)) {
         return 146;
     }
+
     auto tree = objects.ResolveForWrite<WidgetTree>(access, ui.Value().Get().Value()->Tree());
     if (!tree) {
         return 147;
     }
+
     auto content = tree.Value().Get().Value()->ConstructWidget(
         objects, GeneratedType<BorderWidget>::Id(), "Content");
     if (!content || !tree.Value().Get().Value()->SetRoot(objects, content.Value().Handle())) {
         return 148;
     }
+
     auto border = objects.ResolveForWrite<BorderWidget>(access, content.Value().Handle());
     auto borrowed = objects.ResolveForWrite<WorldWidgetComponent>(access, component.Value());
     if (!border || !borrowed || !border.Value().Get().Value()->SetTint({0, 1, 0, 1})) {
         return 149;
     }
+
     auto& widget = *borrowed.Value().Get().Value();
     if (!widget.SetDrawSize({8, 8}) || !widget.SetWidget(user.Value().Handle())) {
         return 150;
     }
+
     SlotArray<BrushTexture> textures(allocator);
     WorldWidgetPresenter presenter(allocator, device, ActiveShaders(), textures);
     auto initial = presenter.Prepare(widget, 0), idle = presenter.Prepare(widget, 1);
     if (!initial || !initial.Value() || !idle || idle.Value()) {
         return 151;
     }
+
     WorldWidgetPlane plane(device, ActiveShaders());
     using graphics::PixelFormat;
     if (!plane.Initialize(PixelFormat::RGBA8UnormSrgb, PixelFormat::D32Float,
                           PixelFormat::RGBA8Unorm, true)) {
         return 152;
     }
+
     Mat4d projection{};
     for (auto& value : projection.m) {
         value = 0;
     }
+
     projection.m[4] = -0.125;
     projection.m[9] = 0.125;
     projection.m[14] = 0.5;
@@ -91,6 +105,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!color) {
         return 153;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(color.Value());
     };
@@ -99,6 +114,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!velocity) {
         return 154;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(velocity.Value());
     };
@@ -108,6 +124,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!depth) {
         return 155;
     }
+
     ROCKS_ON_SCOPE_EXIT {
         device.Retire(depth.Value());
     };
@@ -124,6 +141,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!previous) {
         return 156;
     }
+
     previous.Value().topLeft.x -= 0.25f;
     previous.Value().topRight.x -= 0.25f;
     previous.Value().bottomLeft.x -= 0.25f;
@@ -131,6 +149,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
     if (!pixels.TryResize(16 * 16 * 4)) {
         return 157;
     }
+
     const usize center = (8 * 16 + 8) * 4;
     for (uint32 i = 0; i < 2; ++i) {
         pass.depth.clearDepth = i == 0 ? 0.f : 0.8f;
@@ -138,6 +157,7 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
         if (!frame) {
             return 158;
         }
+
         frame.Value()->SetViewport({0, 0, 16, 16, 0, 1});
         frame.Value()->SetScissor({0, 0, 16, 16});
         auto drawn = presenter.Submit(*frame.Value(), plane, widget, projection, &previous.Value());
@@ -145,15 +165,18 @@ int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexc
         if (!drawn || !ended || !device.ReadPixels(color.Value(), pixels.View())) {
             return 159;
         }
+
         if (pixels[0] < 245 || pixels[1] > 10 ||
             (i == 0 ? pixels[center + 1] < 245 : pixels[center] < 245)) {
             return 160;
         }
+
         if (!device.ReadPixels(velocity.Value(), pixels.View()) ||
             (i == 0 ? pixels[center] < 30 || pixels[center] > 34 : pixels[center] != 0)) {
             return 161;
         }
     }
+
     return 0;
 }
 } // namespace rocks::ui

@@ -21,10 +21,12 @@ Result<void> BackgroundBlurWidget::SetStrength(float pixels) noexcept {
     if (!math::IsFinite(pixels) || pixels < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     strength_ = pixels;
     if (auto live = CachedElement()) {
         ApplyProperties(*live);
     }
+
     return Result<void>::Success();
 }
 
@@ -32,43 +34,53 @@ Result<void> BackgroundBlurWidget::SetCornerRadius(Vec4 corners) noexcept {
     if (!corners.IsFinite() || corners.x < 0 || corners.y < 0 || corners.z < 0 || corners.w < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     cornerRadius_ = corners;
     if (auto live = CachedElement()) {
         return static_cast<BackgroundBlur&>(*live).SetCornerRadius(corners);
     }
+
     return Result<void>::Success();
 }
+
 Result<void> BackgroundBlurWidget::SetBlurRadius(int32 kernel) noexcept {
     if (kernel < -1 || kernel > 255) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     blurRadius_ = kernel;
     if (auto live = CachedElement()) {
         return static_cast<BackgroundBlur&>(*live).SetBlurRadius(kernel);
     }
+
     return Result<void>::Success();
 }
+
 void BackgroundBlurWidget::SetApplyAlphaToBlur(bool apply) noexcept {
     applyAlphaToBlur_ = apply;
     if (auto live = CachedElement()) {
         static_cast<BackgroundBlur&>(*live).SetApplyAlphaToBlur(apply);
     }
 }
+
 void BackgroundBlurWidget::SetLowQuality(bool enabled) noexcept {
     lowQuality_ = enabled;
     if (auto live = CachedElement()) {
         static_cast<BackgroundBlur&>(*live).SetLowQuality(enabled);
     }
 }
+
 Result<void> BackgroundBlurWidget::SetLowQualityFallbackBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     fallback_ = brush;
     fallbackTint_ = brush.tint;
     if (auto live = CachedElement()) {
         return static_cast<BackgroundBlur&>(*live).SetLowQualityFallbackBrush(brush);
     }
+
     return Result<void>::Success();
 }
 

@@ -8,10 +8,12 @@ Result<void> RetainerBox::Construct(Args&& args) noexcept {
     if (!phase) {
         return phase;
     }
+
     auto tinted = SetEffectTint(args.effectTint);
     if (!tinted) {
         return tinted;
     }
+
     return args.content.AttachTo(*this);
 }
 
@@ -45,6 +47,7 @@ Result<void> RetainerBox::TryAddChild(const SharedPtr<Element>& child) noexcept 
         contentCache_.Reset();
         RequestRender();
     }
+
     return added;
 }
 
@@ -52,6 +55,7 @@ bool RetainerBox::RemoveChild(Element& child) noexcept {
     if (!SizeBox::RemoveChild(child)) {
         return false;
     }
+
     contentCache_.Reset();
     RequestRender();
     return true;
@@ -61,6 +65,7 @@ Result<void> RetainerBox::SetPhase(uint32 phase, uint32 count) noexcept {
     if (count == 0 || phase >= count) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     phase_ = phase;
     phaseCount_ = count;
     return Result<void>::Success();
@@ -74,10 +79,12 @@ Result<void> RetainerBox::SetEffectTint(LinearColor tint) noexcept {
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (effectTint_ != tint) {
         effectTint_ = tint;
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 
@@ -102,14 +109,17 @@ Result<void> RetainerBox::RecordContent(PaintList& output) const noexcept {
     if (!child) {
         return Result<void>::Success();
     }
+
     AffineTransform2D inverse;
     if (!GetGeometry().render.TryInverse(inverse)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto painted = contentCache_.Update(*child, 0);
     if (!painted) {
         return painted;
     }
+
     for (auto box : contentCache_.List().Boxes()) {
         box.geometry.render = inverse.Compose(box.geometry.render);
         box.geometry.layout = inverse.Compose(box.geometry.layout);
@@ -117,6 +127,7 @@ Result<void> RetainerBox::RecordContent(PaintList& output) const noexcept {
             if ((inverse.m01 != 0 || inverse.m10 != 0) && (inverse.m00 != 0 || inverse.m11 != 0)) {
                 return Result<void>::Failure(ErrorCode::Unsupported);
             }
+
             Geometry clip = Geometry::Root(box.clip.max - box.clip.min, {});
             clip.render.tx = box.clip.min.x;
             clip.render.ty = box.clip.min.y;
@@ -125,13 +136,16 @@ Result<void> RetainerBox::RecordContent(PaintList& output) const noexcept {
             if (!bounds) {
                 return Result<void>::Failure(bounds.Error());
             }
+
             box.clip = bounds.Value();
         }
+
         auto result = output.TryAppendRecorded({&box, 1});
         if (!result) {
             return result;
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -139,6 +153,7 @@ Result<void> RetainerBox::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (retained_.IsNull()) {
         return Result<void>::Success();
     }
+
     PaintBox box{GetGeometry(), effectTint_, layer};
     box.resource = retained_;
     return list.TryAddBox(box);

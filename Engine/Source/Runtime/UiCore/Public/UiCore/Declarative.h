@@ -45,11 +45,13 @@ struct ElementChild {
     template <typename T>
     ElementChild(const SharedPtr<T>& child) noexcept : element(child) {
     }
+
     template <typename T>
     ElementChild(const Result<SharedPtr<T>>& result) noexcept
         : element(result ? SharedPtr<Element>(result.Value()) : SharedPtr<Element>{}),
           error(result ? ErrorCode::None : result.Error()) {
     }
+
     template <typename T>
     ElementChild(const Result<SharedRef<T>>& result) noexcept
         : element(result ? SharedPtr<Element>(result.Value().AsSharedPtr()) : SharedPtr<Element>{}),
@@ -62,6 +64,7 @@ struct ElementChild {
 };
 
 namespace detail {
+
 template <typename Callback, typename Owner, typename Method>
 Callback BindMethod(const Owner& owner, Method method) noexcept {
     if constexpr (IsPointerV<Owner>) {
@@ -93,6 +96,7 @@ Delegate<T()> Bind(const Owner& owner, T Class::* member) noexcept {
     if (!owner || !member) {
         return {};
     }
+
     if constexpr (IsPointerV<Owner>) {
         return Delegate<T()>::CreateLambda([owner, member]() noexcept { return owner->*member; });
     } else {
@@ -102,32 +106,39 @@ Delegate<T()> Bind(const Owner& owner, T Class::* member) noexcept {
 }
 
 namespace detail {
+
 template <typename T, typename Args>
 Result<SharedRef<T>> BuildElement(Args&& args) noexcept {
     auto* allocator = ElementBuildScope::Current();
     if (!allocator) {
         return Result<SharedRef<T>>::Failure(ErrorCode::WrongContext);
     }
+
     auto value = SharedRef<T>::TryMake(*allocator, *allocator);
     if (!value) {
         return value;
     }
+
     auto& element = *value.Value();
     if constexpr (requires { args.common; }) {
         element.SetEnabled(args.common.enabled);
         element.SetVisibility(args.common.visibility);
         element.SetClipToBounds(args.common.clipToBounds);
     }
+
     auto result = element.Construct(Forward<Args>(args));
     if (!result) {
         return Result<SharedRef<T>>::Failure(result.Error());
     }
+
     if constexpr (requires { args.common; }) {
         if (args.common.updateAttributes) {
             element.UpdateBoundAttributes();
         }
+
         element.SetForceVolatile(args.common.volatilePaint);
     }
+
     return value;
 }
 } // namespace detail

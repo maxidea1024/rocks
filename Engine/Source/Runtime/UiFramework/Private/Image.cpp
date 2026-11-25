@@ -11,9 +11,11 @@ Result<void> Image::SetBrush(const Brush& brush) noexcept {
     if (!brush.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (brush_ == brush) {
         return Result<void>::Success();
     }
+
     const Vec2 previous = ComputeDesiredSize(1);
     brush_ = brush;
     if (previous != ComputeDesiredSize(1)) {
@@ -21,6 +23,7 @@ Result<void> Image::SetBrush(const Brush& brush) noexcept {
     } else {
         InvalidatePaint();
     }
+
     return Result<void>::Success();
 }
 

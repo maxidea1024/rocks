@@ -33,6 +33,7 @@ void EditableTextWidget::SetReadOnly(bool readOnly) noexcept {
             static_cast<EditableTextElement&>(*live).EndComposition(*this);
         }
     }
+
     if (readOnly_ != readOnly) {
         readOnly_ = readOnly;
         NotifyPropertyChanged("readOnly");
@@ -43,20 +44,24 @@ Result<void> EditableTextWidget::SetText(StringView text) noexcept {
     if (!IsMultiline() && (text.Contains("\n") || text.Contains("\r"))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (text == text_.View()) {
         return Result<void>::Success();
     }
+
     String copy(text_.GetAllocator());
     auto assigned = copy.TryAssign(text);
     if (!assigned) {
         return assigned;
     }
+
     auto result = ExchangeText(copy);
     if (result) {
         if (auto live = CachedElement()) {
             static_cast<EditableTextElement&>(*live).ClearHistory();
         }
     }
+
     return result;
 }
 
@@ -67,13 +72,16 @@ Result<void> EditableTextWidget::ExchangeText(String& copy) noexcept {
         if (!shaped) {
             return shaped;
         }
+
         editor.MoveCaret(copy.ByteCount(), false);
     }
+
     const bool changed = text_.View() != copy.View();
     text_.Swap(copy);
     if (changed) {
         NotifyPropertyChanged("text");
     }
+
     return Result<void>::Success();
 }
 
@@ -89,12 +97,15 @@ Result<void> EditableTextWidget::SetPassword(bool password) noexcept {
             if (!shaped) {
                 return shaped;
             }
+
             editor.MoveCaret(text_.ByteCount(), false);
             editor.ClearHistory();
         }
+
         password_ = password;
         NotifyPropertyChanged("password");
     }
+
     return Result<void>::Success();
 }
 
@@ -102,6 +113,7 @@ Result<void> EditableTextWidget::SetFontSize(float size) noexcept {
     if (!math::IsFinite(size) || size <= 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (fontSize_ != size) {
         if (auto live = CachedElement()) {
             auto shaped = static_cast<EditableTextElement&>(*live).ResizeText(*this, size);
@@ -109,9 +121,11 @@ Result<void> EditableTextWidget::SetFontSize(float size) noexcept {
                 return shaped;
             }
         }
+
         fontSize_ = size;
         NotifyPropertyChanged("fontSize");
     }
+
     return Result<void>::Success();
 }
 
@@ -119,15 +133,18 @@ Result<void> EditableTextWidget::SetCaption(const Text& value, bool error) noexc
     if (error && !HasBox()) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
+
     auto copy = value.IsValid() ? value.DeepClone(text_.GetAllocator()) : Result<Text>::Success({});
     if (!copy) {
         return Result<void>::Failure(copy.Error());
     }
+
     TextPersistentView view;
     if (copy.Value().TryGetPersistentForm(view) && view.form == TextPersistentForm::Invariant &&
         view.source.IsEmpty()) {
         copy.Value() = {};
     }
+
     if (auto live = CachedElement()) {
         auto ready =
             static_cast<EditableTextElement&>(*live).SetCaption(copy.Value(), fontSize_, error);
@@ -135,6 +152,7 @@ Result<void> EditableTextWidget::SetCaption(const Text& value, bool error) noexc
             return ready;
         }
     }
+
     (error ? errorText_ : hintText_) = Move(copy.Value());
     NotifyPropertyChanged(error ? "errorText" : "hintText");
     return Result<void>::Success();
@@ -143,12 +161,15 @@ Result<void> EditableTextWidget::SetCaption(const Text& value, bool error) noexc
 Result<void> EditableTextWidget::SetHintText(const Text& hint) noexcept {
     return SetCaption(hint, false);
 }
+
 const Text& EditableTextWidget::HintText() const noexcept {
     return hintText_;
 }
+
 Result<void> EditableTextWidget::SetError(const Text& value) noexcept {
     return SetCaption(value, true);
 }
+
 bool EditableTextWidget::HasError() const noexcept {
     return errorText_.IsValid();
 }
@@ -173,6 +194,7 @@ void EditableTextWidget::SetRevertTextOnEscape(bool value) noexcept {
         if (auto live = CachedElement()) {
             static_cast<EditableTextElement&>(*live).RememberFocusText(*this);
         }
+
         NotifyPropertyChanged("revertOnEscape");
     }
 }
@@ -202,6 +224,7 @@ void EditableTextWidget::Commit(TextCommitReason reason) noexcept {
     if (!committed_.IsBound()) {
         return;
     }
+
     // 수신자가 SetText를 호출해도 전달한 문자열을 계속 읽을 수 있게 보존한다.
     auto snapshot = text_.TryClone(text_.GetAllocator());
     if (snapshot) {
@@ -215,10 +238,12 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
     if (!outer) {
         return Result<SharedPtr<Element>>::Failure(outer.Error());
     }
+
     auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
     if (!tree) {
         return Result<SharedPtr<Element>>::Failure(tree.Error());
     }
+
     auto& allocator = objects.ObjectAllocator();
     auto made = SharedPtr<EditableTextElement>::TryMake(
         allocator, allocator, objects, Handle(), tree.Value().Get().Value()->TextShaper(),
@@ -226,21 +251,26 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
     if (!made) {
         return Result<SharedPtr<Element>>::Failure(made.Error());
     }
+
     auto init = made.Value()->Initialize(text_.View(), fontSize_, password_);
     if (!init) {
         return Result<SharedPtr<Element>>::Failure(init.Error());
     }
+
     auto layout = ApplyTextLayout(made.Value()->Label());
     if (layout && hintText_.IsValid()) {
         layout = made.Value()->SetCaption(hintText_, fontSize_, false);
     }
+
     if (layout && errorText_.IsValid()) {
         layout = HasBox() ? made.Value()->SetCaption(errorText_, fontSize_, true)
                           : Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!layout) {
         return Result<SharedPtr<Element>>::Failure(layout.Error());
     }
+
     return Result<SharedPtr<Element>>::Success(Move(made.Value()));
 }
 

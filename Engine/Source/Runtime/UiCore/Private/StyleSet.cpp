@@ -12,6 +12,7 @@ Result<void> StyleSet::Set(Allocator& allocator, Array<Entry<T>>& entries, Strin
     if (name.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     for (auto& entry : entries) {
         if (entry.name.View() == name) {
             entry.style = style;
@@ -23,6 +24,7 @@ Result<void> StyleSet::Set(Allocator& allocator, Array<Entry<T>>& entries, Strin
     if (auto assigned = key.TryAssign(name); !assigned) {
         return assigned;
     }
+
     return entries.TryPushBack(Entry<T>{Move(key), style});
 }
 
@@ -33,6 +35,7 @@ const T* StyleSet::Find(const Array<Entry<T>>& entries, StringView name) noexcep
             return &entry.style;
         }
     }
+
     return nullptr;
 }
 
@@ -72,24 +75,31 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
     if (added) {
         added = styles.SetButton("PrimaryButton", PrimaryButtonStyle());
     }
+
     if (added) {
         added = styles.SetButton("SimpleButton", SimpleButtonStyle());
     }
+
     if (added) {
         added = styles.SetButton("NoBorder", NoBorderButtonStyle());
     }
+
     if (added) {
         added = styles.SetText("NormalText", NormalTextStyle());
     }
+
     if (added) {
         added = styles.SetText("SmallText", small);
     }
+
     if (added) {
         added = styles.SetText("PrimaryButtonText", primaryButton);
     }
+
     if (added) {
         added = styles.SetText("Text.Large", large);
     }
+
     return added;
 }
 

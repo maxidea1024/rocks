@@ -19,11 +19,14 @@ uint32 PostBufferUpdate::RequestedPostBuffers() const noexcept {
             mask |= 1u << static_cast<uint32>(item.channel);
         }
     }
+
     return mask;
 }
+
 SlotHandle PostBufferUpdate::GetPostBuffer(uint32 channel) const noexcept {
     return channel < PostBufferChannelCount ? channels_[channel] : SlotHandle{};
 }
+
 void PostBufferUpdate::SetPostBuffer(uint32 channel, SlotHandle texture) noexcept {
     if (channel < PostBufferChannelCount && channels_[channel] != texture) {
         channels_[channel] = texture;
@@ -39,11 +42,13 @@ bool PostBufferUpdate::WantsManagedSurface() const noexcept {
     if (updates_.IsEmpty()) {
         return destination_.Get().IsNull();
     }
+
     for (const auto& item : updates_) {
         if (item.destination.IsNull() && item.channel < 0) {
             return true;
         }
     }
+
     return false;
 }
 
@@ -68,6 +73,7 @@ void PostBufferUpdate::SetDestination(SlotHandle destination) noexcept {
         updates_.Clear();
         InvalidatePaint();
     }
+
     destination_.Set(destination);
 }
 
@@ -79,12 +85,14 @@ Result<void> PostBufferUpdate::SetUpdates(Span<const PostBufferUpdateInfo> updat
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
+
     Array<PostBufferUpdateInfo> next(updates_.GetAllocator());
     auto copied = next.TryAppend(updates);
     if (copied) {
         updates_ = Move(next);
         InvalidatePaint();
     }
+
     return copied;
 }
 
@@ -102,6 +110,7 @@ Result<void> PostBufferUpdate::OnPaint(PaintList& list, int32 layer) const noexc
             if (box.resource.IsNull()) {
                 continue;
             }
+
             box.blurRadius = item.blurStrength;
             box.operation =
                 item.blurStrength > 0 ? PaintOperation::BlurToBuffer : PaintOperation::CopyBackdrop;
@@ -110,12 +119,15 @@ Result<void> PostBufferUpdate::OnPaint(PaintList& list, int32 layer) const noexc
                 return added;
             }
         }
+
         return Result<void>::Success();
     }
+
     const SlotHandle texture = destination_.Get().IsNull() ? managed_ : destination_.Get();
     if (texture.IsNull()) {
         return Result<void>::Success();
     }
+
     PaintBox box{GetGeometry(), {}, layer};
     box.resource = texture;
     box.operation = PaintOperation::CopyBackdrop;

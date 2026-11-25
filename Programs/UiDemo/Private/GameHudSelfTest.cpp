@@ -16,18 +16,21 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
     if (!RegisterWidgetTypes(modules)) {
         return 1;
     }
+
     ObjectRegistry objects(allocator, types, {0x554954455354, 1});
     ObjectAccessScope scope(objects.OwnerAccess());
     auto hud = CreateGameHud(objects);
     if (!hud) {
         return 2;
     }
+
     Application app(allocator);
     app.SetRoot(hud.Value().root);
     auto created = graphics::CreateD3D11Device(allocator, {.preferSoftware = true});
     if (!created) {
         return 3;
     }
+
     auto& device = *created.Value();
     DemoShaderSet shaders(allocator, device);
     if (!shaders.IsReady()) {
@@ -52,6 +55,7 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
     if (!bar) {
         return 5;
     }
+
     const auto viewport = Geometry::Root({64, 16}, {});
     uint8 pixels[64 * 16 * 4]{};
     // 가운데 픽셀은 처음에는 흰 배경, 다음에는 채움색이다. 두 번째 제출은 기존 버퍼를 부분
@@ -61,29 +65,35 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
         if (!bar.Value().Get().Value()->SetValue(fraction)) {
             return 6;
         }
+
         auto cache = app.UpdatePaintCache(viewport, 1);
         if (!cache || !batch.Update(*cache.Value()) || !buffers.Upload()) {
             return 7;
         }
+
         auto frame = device.BeginOffscreen(target.Value(), {0, 0, 0, 1});
         if (!frame) {
             return 8;
         }
+
         auto drawn =
             DrawBatchRenderer::Draw(*frame.Value(), pipeline.Value(), buffers, viewport.size);
         if (!device.EndFrame() || !drawn || !device.ReadPixels(target.Value(), pixels)) {
             return 9;
         }
+
         const usize center = (8 * 64 + 32) * 4;
         if (pixels[center] != (fraction < 0.5f ? 255 : 0) || pixels[center + 3] != 255) {
             return 10;
         }
+
         const uint64 revision = cache.Value()->Revision();
         if (!app.UpdatePaintCache(viewport, 1) || cache.Value()->Revision() != revision ||
             cache.Value()->LastUpdate().paintCalls != 0) {
             return 11;
         }
     }
+
     device.Retire(pipeline.Value());
     device.Retire(target.Value());
     return 0;

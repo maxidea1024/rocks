@@ -90,15 +90,18 @@ TEST(UiWidget_AssetEventSurvivesArchiveAndTargetsEachControllerInstance) {
         if (!runtime) {
             return Result<RootRef<UserWidget>>::Failure(runtime.Error());
         }
+
         auto methods = runtime.Value().RegisterMethod(setEnabled, widgetSignatures::Boolean,
                                                       &Widget::SetEnabled);
         if (methods) {
             methods = runtime.Value().RegisterMethod(setVolatile, widgetSignatures::Boolean,
                                                      &Widget::SetForceVolatile);
         }
+
         if (!methods) {
             return Result<RootRef<UserWidget>>::Failure(methods.Error());
         }
+
         return compiled.Value().Instantiate(game, {}, "Screen", &runtime.Value());
     };
     auto screen = makeScreen();

@@ -1,5 +1,6 @@
 #pragma once
 #include <Core/Delegate.h>
+
 namespace rocks::ui {
 
 enum class ScreenInputDevice : uint8 {
