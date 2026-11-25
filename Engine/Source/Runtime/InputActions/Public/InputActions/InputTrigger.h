@@ -1,9 +1,9 @@
 #pragma once
 
-#include <Base/NumericLimits.h>
 #include <Base/Types.h>
-#include <Core/Containers/Span.h>
+#include <InputActions/InputTriggerState.h>
 #include <InputActions/InputValue.h>
+#include <InputActions/TriggerContext.h>
 #include <InputActions/TriggerTypes.h>
 
 namespace rocks::input {
@@ -71,37 +71,6 @@ ROCKS_INPUTACTIONS_API TriggerKind KindOf(InputTriggerType type) noexcept;
 
 // 매 평가 돌아야 하는지다(RepeatedTap — UE bShouldAlwaysTick).
 ROCKS_INPUTACTIONS_API bool AlwaysTicks(InputTriggerType type) noexcept;
-
-// RepeatedTap의 "다음 탭 마감 없음"이다(어떤 시계 값보다 과거 — UE RepeatTime 0이 늘 과거인 것과
-// 같다).
-inline constexpr double RepeatedTapNoDeadline = NumericLimits<double>::Lowest();
-
-// 트리거 하나의 실행 중 상태다(평가기가 바인딩·액션·주입마다 둔다 — 3절).
-struct InputTriggerState {
-    InputValue lastValue;
-    // 시간 트리거의 누적 시간(초)이다(UE HeldDuration).
-    double heldDuration = 0.0;
-    // Hold: 이미 발사했다(UE bTriggered).
-    bool holdTriggered = false;
-    // RepeatedTap: 누적 시계(초 — UE는 벽시계, Rocks는 dilation 없는 평가 dt 합 — IAD3), 다음 탭
-    // 마감, 진행.
-    double clock = 0.0;
-    double repeatDeadline = RepeatedTapNoDeadline;
-    uint32 tapsSinceTrigger = 0;
-    bool awaitingRepeatTap = false;
-    // Pulse: 발사 수.
-    uint32 pulseCount = 0;
-};
-
-// 트리거 평가 문맥이다. deltaSeconds는 dilation을 뺀 dt, timeDilation은 시간 트리거가
-// affectedByTimeDilation일 때 곱한다(4.5절). chordStates는 액션 번호마다 이번 평가의 바인딩 수준
-// 결합 상태다(3.2절). ChordAction·ChordBlocker는 chordStates[chordAction]을 읽고, 범위 밖이면
-// None이다(UE 대상 instance data 없음과 같다).
-struct TriggerContext {
-    double deltaSeconds = 0.0;
-    double timeDilation = 1.0;
-    Span<const TriggerState> chordStates = {};
-};
 
 // 트리거 하나를 갱신하고 상태를 돌려준다(UE UpdateState). 직전 값은 TriggerCombiner가 갱신한다.
 ROCKS_INPUTACTIONS_API TriggerState UpdateInputTrigger(const InputTrigger& trigger,
