@@ -22,13 +22,15 @@ enum class InputEventType : uint8 {
     MouseWheel,
     // OS가 마우스 capture를 강제로 해제했다.
     PointerCaptureLost,
-    // 터치 접점별 시작·이동·종료·취소다. 좌표는 창 client 픽셀이다.
-    TouchBegin,
-    TouchMove,
-    TouchEnd,
-    TouchCancel,
     // 게임패드 한 개의 전체 상태(backend가 폴링한 값). 연결 해제도 이 이벤트로 알린다.
     GamepadState,
+    // 손가락(또는 펜)이 닿았다·움직였다(위치·압력)·떨어졌다(Docs/Design/TouchInput.ko.md 3.1절).
+    // touchIndex는 backend가 배정한 손가락 번호(0..MaxTouches-1 — TouchIndexAllocator)이고, x·y는
+    // 창 client 영역 픽셀(좌상단 원점)이다. force는 0–1 압력이며 hasForce가 거짓이면 1.0이다.
+    // TouchEnded의 cancelled는 OS 취소(제스처 가로챔·포커스·손실 복구)다.
+    TouchBegan,
+    TouchMoved,
+    TouchEnded,
     // 창이 입력 포커스를 잃음. 눌려 있던 키·버튼을 모두 놓은 것으로 처리한다.
     FocusLost,
     // 조합 중 문자열과 UTF-8 커서 위치다. 빈 문자열은 기존 조합 표시를 취소한다.
@@ -56,7 +58,6 @@ struct InputEvent {
     MouseButton mouseButton = MouseButton::Left;
     uint8 gamepadIndex = 0;
     uint32 codePoint = 0;
-    uint32 pointerId = 0;
     uint32 userId = 0;
     float x = 0.0f;
     float y = 0.0f;
@@ -64,6 +65,10 @@ struct InputEvent {
     GamepadSnapshot gamepad;
     SharedPtr<const String> composition;
     usize compositionCaret = 0;
+    uint8 touchIndex = 0;
+    float force = 1.0f;
+    bool hasForce = false;
+    bool cancelled = false;
 
     static InputEvent KeyDown(Key value, bool isRepeat = false) noexcept {
         InputEvent event;
@@ -157,6 +162,36 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent TouchBegan(uint8 index, float positionX, float positionY,
+                                 float pressure = 1.0f, bool pressureKnown = false) noexcept {
+        InputEvent event;
+        event.type = InputEventType::TouchBegan;
+        event.touchIndex = index;
+        event.x = positionX;
+        event.y = positionY;
+        event.force = pressure;
+        event.hasForce = pressureKnown;
+        return event;
+    }
+
+    static InputEvent TouchMoved(uint8 index, float positionX, float positionY,
+                                 float pressure = 1.0f, bool pressureKnown = false) noexcept {
+        InputEvent event = TouchBegan(index, positionX, positionY, pressure, pressureKnown);
+        event.type = InputEventType::TouchMoved;
+        return event;
+    }
+
+    static InputEvent TouchEnded(uint8 index, float positionX, float positionY,
+                                 bool isCancelled = false) noexcept {
+        InputEvent event;
+        event.type = InputEventType::TouchEnded;
+        event.touchIndex = index;
+        event.x = positionX;
+        event.y = positionY;
+        event.cancelled = isCancelled;
+        return event;
+    }
+
     static InputEvent FocusLost() noexcept {
         InputEvent event;
         event.type = InputEventType::FocusLost;
@@ -166,38 +201,6 @@ struct InputEvent {
     static InputEvent CaptureLost() noexcept {
         InputEvent event;
         event.type = InputEventType::PointerCaptureLost;
-        return event;
-    }
-
-    static InputEvent TouchBegin(uint32 pointer, float positionX, float positionY,
-                                 uint32 user = 0) noexcept {
-        InputEvent event;
-        event.type = InputEventType::TouchBegin;
-        event.pointerId = pointer;
-        event.userId = user;
-        event.x = positionX;
-        event.y = positionY;
-        return event;
-    }
-
-    static InputEvent TouchMove(uint32 pointer, float positionX, float positionY,
-                                uint32 user = 0) noexcept {
-        InputEvent event = TouchBegin(pointer, positionX, positionY, user);
-        event.type = InputEventType::TouchMove;
-        return event;
-    }
-
-    static InputEvent TouchEnd(uint32 pointer, float positionX, float positionY,
-                               uint32 user = 0) noexcept {
-        InputEvent event = TouchBegin(pointer, positionX, positionY, user);
-        event.type = InputEventType::TouchEnd;
-        return event;
-    }
-
-    static InputEvent TouchCancel(uint32 pointer, float positionX, float positionY,
-                                  uint32 user = 0) noexcept {
-        InputEvent event = TouchBegin(pointer, positionX, positionY, user);
-        event.type = InputEventType::TouchCancel;
         return event;
     }
 };

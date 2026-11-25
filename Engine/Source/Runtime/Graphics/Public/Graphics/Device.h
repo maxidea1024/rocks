@@ -2,6 +2,7 @@
 
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
+#include <Graphics/ConstantBuffer.h>
 #include <Graphics/DeviceCaps.h>
 #include <Graphics/DeviceTypes.h>
 #include <Graphics/ResourceAccess.h>
@@ -14,7 +15,7 @@ namespace rocks::graphics {
 //
 // async compute 기록(PassDesc::queue = AsyncCompute, RenderBase 8절 RG4)은 compute 명령만 받는다:
 // SetPipeline(compute 파이프라인)·SetTexture·SetBufferView·SetWritableBufferView·
-// SetWritableTexture·SetDrawConstants·Dispatch·DispatchIndirect·ClearWritableBufferView·CopyBuffer·
+// SetWritableTexture·SetDrawConstants·SetConstantBuffer·SetConstantData·Dispatch·DispatchIndirect·ClearWritableBufferView·CopyBuffer·
 // 전이(IsComputeQueueAccess 상태 사이, 분리 전이 포함)·WriteTimestamp·PushMarker·PopMarker. 그 밖의
 // 호출(그리기·viewport·scissor·스텐실 기준·graphics 파이프라인·그 밖 상태의 전이)은 무시하고
 // IgnoredDraws를 올린다. 값을 돌려주는 CopyTexture·CopyPassTarget은 InvalidArgument다. 장치가
@@ -40,7 +41,7 @@ public:
     virtual void SetIndexBuffer(BufferHandle buffer, IndexFormat format,
                                 uint64 offset = 0) noexcept = 0;
 
-    // 텍스처 슬롯 0에 묶는다(그래픽은 PS t0·s0, compute는 CS t0·s0, GLSL ES는 텍스처 유닛 0). null
+    // 텍스처 slot에 묶는다(파이프라인 이름 표 PipelineBindingNames::texture와 그 짝 샘플러). null
     // handle이면 1x1 흰색 텍스처를 쓴다. Read view(CreateTextureView)면 그 mip·slice 범위만 셰이더
     // 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로 함께 묶을 수 있다).
     // ReadWrite view는 흰 텍스처로 대신한다. 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는
@@ -48,13 +49,13 @@ public:
     // compute pass는 SetPipeline을 먼저 부른다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
 
-    // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 고정 배치, GX2).
+    // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 이름 표, GX2).
     // null handle이면 slot을 비운다. 그리기는 파이프라인이 읽는 slot마다 같은 종류(Typed는 같은 값
     // 계열)의 view가 묶였을 때만 실행하고, 아니면 무시하고 IgnoredDraws를 올린다
     // (DrawBufferSlotsSatisfied). 범위 밖 slot, stale handle, ReadWrite view(그래픽 단계 UAV는
     // 없다)도 그 slot을 비운다. 묶인 view의 버퍼를 Retire해도 view가 자원을 붙든다.
     //
-    // 사용 예(PS가 t1의 Buffer<float4>를 읽는다):
+    // 사용 예(PS가 Buffer<float4> Lights를 읽고 파이프라인 bindings.bufferViews[0] = "Lights"):
     //   commands.SetPipeline(pipeline);
     //   commands.SetBufferView(0, lightsView);
     //   commands.Draw(3);
@@ -73,7 +74,8 @@ public:
     // 그리기·dispatch는 묶인 파이프라인이 선언한 앞 drawConstantBytes byte를 읽는다. 그래서 같은
     // 크기 파이프라인으로 바꿔도 다시 올릴 필요가 없고, 올리지 않은 상수는 0이다.
     //
-    // 사용 예(셰이더 cbuffer DrawConstants { float4x4 transform; float4 color; }):
+    // 사용 예(셰이더 ROCKS_ROOT_CONSTANTS(DrawData, Draw), DrawData { float4x4 transform; float4
+    // color; }):
     //   struct ObjectConstants { float transform[16]; float color[4]; };   // 80 byte
     //   desc.drawConstantBytes = sizeof(ObjectConstants);                  // 파이프라인 생성
     //   ...
@@ -84,6 +86,39 @@ public:
     // 실패: 기록 중 아님·묶인 파이프라인 없음·크기가 선언과 다름 InvalidArgument(LastError에 두
     // 크기). 실패하면 값은 그대로다.
     virtual Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept = 0;
+
+    // --- 상수 버퍼(RenderBase 9.11절 GX6) ---
+    //
+    // slot은 그 단계 셰이더 바인딩 layout(값 1)의 상수 버퍼 slot(backend 위치, 0 –
+    // MaxConstantBufferSlots-1)이다. 형식마다 다르므로 값 1에서 얻는다(RenderBase
+    // ShaderBindingMap의 단계별 자리, 또는 FindConstantBufferSlot). 묶음은 단계마다 따로이고 기록
+    // 안에서 SetPipeline을 넘어 유지되며 기록 시작 때 모두 빈다. 그리기·dispatch는 파이프라인이
+    // 읽는 (단계, slot)마다 셰이더 선언 크기 이상의 버퍼가 묶였을 때만 실행하고, 아니면 무시하고
+    // IgnoredDraws를 올린다 (ConstantBuffersSatisfied). 버퍼는 CPU 가시 메모리이고 GPU가 읽기만
+    // 하므로 전이가 없다.
+
+    // handle을 묶는다. null·stale handle은 slot을 비우고, 범위 밖 stage·slot은 무시한다. handle은
+    // 그리기 때 그 순간의 내용으로 푼다: UpdateConstantBuffer 앞에 기록한 그리기는 옛 내용, 뒤의
+    // 그리기는 새 내용을 읽는다. Retire된 handle은 빈 slot이다(이미 기록한 그리기는 그대로 읽는다).
+    //
+    // 사용 예(PS cbuffer Material):
+    //   auto material = device.CreateConstantBuffer(ConstantBufferLifetime::MultiFrame,
+    //                                                ConstantBufferBytes(values));
+    //   commands.SetConstantBuffer(ShaderStage::Pixel, materialSlot, material.Value());
+    //   commands.Draw(3);
+    virtual void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                                   ConstantBufferHandle buffer) noexcept = 0;
+
+    // bytes를 이 기록의 상수 ring에 복사해 묶는다(UE SingleDraw, handle 없음). 값은 다시 묶거나
+    // 기록이 끝날 때까지 유효하고, 호출 뒤 bytes를 버려도 된다. 그리기마다 바뀌는 작은 cbuffer에
+    // 쓴다(더 작은 값은 SetDrawConstants).
+    //
+    // 실패: 기록 중 아님·범위 밖 stage·slot·크기 규칙 위반(IsValidConstantBufferBytes)
+    // InvalidArgument(그 slot의 앞 묶음은 그대로다), ring이 이 기록만으로 찼으면
+    // CapacityExceeded, 메모리·API 실패는 그 오류다. InvalidArgument가 아닌 실패는 그 slot을
+    // 비운다(뒤 그리기는 무시된다).
+    virtual Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                         Span<const uint8> bytes) noexcept = 0;
 
     // 기본도형을 그린다(파이프라인 topology, 정점 vertexCount개 × 인스턴스 instanceCount개,
     // firstVertex부터). base
@@ -125,14 +160,14 @@ public:
     // Dispatch와 같은 조건에서 buffer[offset]의 DispatchIndirectArguments로 실행한다.
     virtual void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept = 0;
 
-    // compute 쓰기 버퍼 view slot(0 – MaxDrawBufferViews-1, HLSL u0–u3)에 ReadWrite view를 묶는다.
-    // null handle·Read view·stale handle은 slot을 비운다. 그래픽 단계에는 UAV가 없으므로 그리기는
-    // 이 slot을 쓰지 않는다.
+    // compute 쓰기 버퍼 view slot(0 – MaxDrawBufferViews-1, bindings.writableBuffers)에 ReadWrite
+    // view를 묶는다. null handle·Read view·stale handle은 slot을 비운다. 그래픽 단계에는 UAV가
+    // 없으므로 그리기는 이 slot을 쓰지 않는다.
     virtual void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
 
     // compute 쓰기 slot(0 – MaxDrawBufferViews-1)에 ReadWrite 텍스처 view(TextureViewDesc::access,
-    // Storage 텍스처의 mip 하나)를 묶는다. HLSL은 register u0–u3의 RWTexture2D·RWTexture2DArray·
-    // RWTexture3D, GLSL ES는 image unit slot의 image2D·image2DArray·image3D(형식 한정자 필요)다.
+    // Storage 텍스처의 mip 하나)를 묶는다. 셰이더는 bindings.writableTextures 이름의 RWTexture2D·
+    // RWTexture2DArray·RWTexture3D(형식은 ROCKS_IMAGE_FORMAT)다.
     // 쓰기 slot은 SetWritableBufferView와 같은 번호 공간이라 한 slot에는 나중에 묶은 하나만 남는다.
     // view의 범위만 UAV 상태로 바꾼다. null handle·Read view·stale handle은 slot을 비운다.
     // dispatch는 파이프라인이 텍스처로 쓰는 slot마다 텍스처 view가 묶였을 때만 실행한다(아니면
@@ -388,6 +423,25 @@ public:
     virtual Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
                                                       const BufferViewDesc& desc) noexcept = 0;
 
+    // 상수 버퍼를 만들고 contents를 복사한다(RenderBase 9.11절 1항, UE RHICreateUniformBuffer).
+    // contents는 셰이더 cbuffer와 같은 배치(ShaderSystem 7.2절 5항)이고 크기는
+    // IsValidConstantBufferBytes 안이다. 묶을 때 셰이더 선언 크기 이상이어야 그린다. SingleFrame은
+    // 내용을 바꿀 수 없고 쓰는 쪽이 프레임 끝에 Retire한다. MultiFrame은 UpdateConstantBuffer로
+    // 바꾼다. 다른 스레드 생성 규칙은 DeviceInfo::concurrentResourceCreation이다.
+    //
+    // 실패: 모르는 lifetime·크기 규칙 위반 InvalidArgument, 메모리·API 실패는 그 오류다.
+    virtual Result<ConstantBufferHandle>
+    CreateConstantBuffer(ConstantBufferLifetime lifetime, Span<const uint8> contents) noexcept = 0;
+
+    // MultiFrame 상수 버퍼의 내용을 바꾼다(UE RHIUpdateUniformBuffer). 기록 중이면 그 뒤에 기록하는
+    // 그리기부터 새 내용을 읽는다(앞 그리기는 옛 내용 — backend는 새 자리를 받아 옮기고 옛 자리는
+    // 마지막 사용 fence 뒤 돌려준다). 스레드 규칙은 생성과 같다.
+    //
+    // 실패: stale StaleHandle, SingleFrame·크기가 만들 때와 다름 InvalidArgument, 메모리 실패는 그
+    // 오류다.
+    virtual Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                              Span<const uint8> contents) noexcept = 0;
+
     // 버퍼 [offset, offset + out.Size())를 out으로 읽는다. 앞서 쌓인 업로드 뒤에 복사하고 GPU
     // 완료를 기다린다(시험·캡처용, 프레임 경로에서 쓰지 않는다). 실패: stale StaleHandle, 기록 중
     // Busy, 빈 out·범위 밖 InvalidArgument.
@@ -528,14 +582,25 @@ public:
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    // 셰이더를 컴파일하고 파이프라인을 만든다. 셰이더 컴파일 실패는 DependencyFailed다(진단 로그는
-    // LastError로 읽는다). 정점 배치 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는
-    // InvalidArgument, backend가 지원하지 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
+    // 쿠킹된 셰이더 코드로 장치 셰이더를 만든다(ShaderSystem 16.1절 SSD18). 장치는 자기 backend의
+    // 코드 종류(ShaderCodeKindOf(Info().backend))만 받는다. 코드와 layout은 호출 안에서 복사한다.
+    // 돌려준 handle은 PipelineDesc·ComputePipelineDesc가 받고 Retire로 놓는다(파이프라인은 만든 뒤
+    // 셰이더를 붙잡지 않는다 — 셰이더를 Retire해도 이미 만든 파이프라인은 그대로다).
+    // 실패: 다른 backend 코드 종류·빈 코드·layout 단계 불일치·GLES 머리 유무 위반 InvalidArgument,
+    // layout·머리 byte 손상 InvalidArgument(LastError에 이유), 장치가 코드를 거부하면
+    // DependencyFailed(LastError), 할당 실패 OutOfMemory. 생성의 스레드 규칙은 파이프라인 생성과
+    // 같다(DeviceInfo::concurrentResourceCreation).
+    virtual Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept = 0;
+
+    // 장치 셰이더로 파이프라인을 만든다(PipelineDesc). 셰이더 handle·단계·연결·이름 표·정점 배치
+    // 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는 InvalidArgument(LastError), 장치가
+    // 코드를 거부하면 DependencyFailed(OpenGL ES 컴파일·링크 로그는 LastError), backend가 지원하지
+    // 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
     virtual Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept = 0;
 
     // compute 파이프라인을 만든다(ComputePipelineDesc, GX3). 돌려준 handle은 SetPipeline으로 묶고
-    // Dispatch로 실행하며 Retire로 놓는다. 실패: 원문 없음·배치 밖 자원 InvalidArgument, 컴파일
-    // 실패 DependencyFailed(LastError), compute가 없는 장치 Unsupported.
+    // Dispatch로 실행하며 Retire로 놓는다. 실패: 셰이더 handle·단계·이름 표 위반 InvalidArgument,
+    // 장치가 코드를 거부하면 DependencyFailed(LastError), compute가 없는 장치 Unsupported.
     virtual Result<PipelineHandle>
     CreateComputePipeline(const ComputePipelineDesc& desc) noexcept = 0;
 
@@ -596,8 +661,10 @@ public:
     // 자원을 회수 대기로 넘긴다(위 "제출·완료·회수"). 모르는·이미 회수한 handle은 무시한다.
     virtual void Retire(BufferHandle buffer) noexcept = 0;
     virtual void Retire(BufferViewHandle view) noexcept = 0;
+    virtual void Retire(ConstantBufferHandle buffer) noexcept = 0;
     virtual void Retire(TextureHandle texture) noexcept = 0;
     virtual void Retire(PipelineHandle pipeline) noexcept = 0;
+    virtual void Retire(ShaderHandle shader) noexcept = 0;
     virtual void Retire(SwapChainHandle swapChain) noexcept = 0;
 
     // fence가 끝난 회수 대기 자원을 해제하고 끝난 제출의 기록 저장소를 재사용 목록에 돌린다.

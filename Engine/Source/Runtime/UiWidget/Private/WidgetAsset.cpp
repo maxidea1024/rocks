@@ -14,8 +14,8 @@
 namespace rocks::ui {
 
 WidgetAsset::WidgetAsset(Allocator& allocator) noexcept
-    : controller_(ClassRef<UserWidget>::Of<UserWidget>()), bindings_(allocator),
-      propertyBindings_(allocator), eventBindings_(allocator) {
+    : animations_(allocator), controller_(ClassRef<UserWidget>::Of<UserWidget>()),
+      bindings_(allocator), propertyBindings_(allocator), eventBindings_(allocator) {
 }
 
 Result<void> WidgetAsset::Initialize(ObjectRegistry& objects) noexcept {

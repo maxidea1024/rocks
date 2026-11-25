@@ -2,7 +2,7 @@
 
 #include "RenderGraphInternal.h"
 
-// 그래프 병렬 기록의 기록 목록이다(Docs/Design/RenderBase.ko.md 8절 "RG3 병렬 기록 설계"). pass
+// 그래프 병렬 기록의 기록 목록이다(Docs/Design/RenderBase 8절 "RG3 병렬 기록 설계"). pass
 // 기록 함수가 worker에서 이 목록에 명령을 쌓고, 소유 스레드가 선언 순서로 장치 CommandContext에
 // 재생한다(UE FRHICommandList 기록 → RHI 번역 대응).
 namespace rocks::render::detail {
@@ -10,7 +10,8 @@ namespace rocks::render::detail {
 // CommandContext 호출을 프레임 arena의 명령 열로 쌓는다.
 //
 // 계약(설계 "기록 목록의 한계"):
-// - 값을 돌려주는 호출(SetDrawConstants·CopyBuffer·CopyTexture·ClearWritableBufferView·
+// - 값을 돌려주는
+// 호출(SetDrawConstants·SetConstantData·CopyBuffer·CopyTexture·ClearWritableBufferView·
 //   CopyPassTarget)은 기록 때 성공을 돌려주고, 재생 때 실패하면 Replay가 첫 실패를 돌려준다.
 // - WriteTimestamp는 Unsupported, BeginTransitions는 무효 짝을 돌려주고 EndTransitions는 무시한다
 //   (둘 다 기록 오류로 남긴다). GPU 구간·분리 전이는 그래프가 소유 스레드에서 낸다.
@@ -43,6 +44,10 @@ public:
     void SetTexture(graphics::TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
+    void SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
+                           graphics::ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(graphics::ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     void DrawIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
@@ -79,6 +84,8 @@ private:
         SetTexture,
         SetBufferView,
         SetDrawConstants,
+        SetConstantBuffer,
+        SetConstantData,
         Draw,
         DrawIndexed,
         DrawIndirect,

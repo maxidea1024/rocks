@@ -8,7 +8,7 @@ namespace rocks {
 class HostServices;
 class ModuleLoader;
 
-// ModuleImplementation::Startup이 받는 문맥이다(Docs/Design/ModuleLoader.ko.md 3.1절). 전역 접근자
+// ModuleImplementation::Startup이 받는 문맥이다(Docs/Design/ModuleLoader 3.1절). 전역 접근자
 // 대신 이것으로 로더·호스트 서비스·이 모듈의 코드 수명 토큰을 얻는다. 로더만 만든다.
 //
 // 수명: Startup 호출 동안만 유효하다. 참조·포인터를 보관하지 말고, 필요한 서비스 포인터와 lease는

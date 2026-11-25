@@ -11,7 +11,7 @@ namespace {
 
 constexpr LogCategory LogRenderBase{"RenderBase"};
 
-// RenderBase 모듈의 수명 객체다(Docs/Design/ModuleLoader.ko.md 3.12절). 호스트가 실행 중인 trace
+// RenderBase 모듈의 수명 객체다(Docs/Design/ModuleLoader 3.12절). 호스트가 실행 중인 trace
 // 세션을 서비스로 등록했으면 Startup에서 GPU trace 채널 "gpu"와 기록 형을 등록하고 Shutdown에서
 // 푼다. 등록한 동안 모듈 lease를 잡는다(채널·형 객체가 이 모듈의 데이터다). GPU 계측은 진단
 // 기능이라 등록 실패는 Warning이고 시작은 성공한다.
@@ -40,7 +40,7 @@ public:
         }
 
         // 멈춘 세션은 Stop이 등록을 이미 거뒀다. 다른 형이 GPU 채널을 써서 다 풀지 못하면(Busy)
-        // Warning만 남긴다(한계 — Docs/Design/ModuleLoader.ko.md 3.12절).
+        // Warning만 남긴다(한계 — Docs/Design/ModuleLoader 3.12절).
         if (session_->IsRunning()) {
             if (auto unregistered = UnregisterGpuTraceTypes(*session_); !unregistered) {
                 Log::Warning(LogRenderBase, "GPU trace types could not be unregistered: {Error}",

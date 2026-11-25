@@ -1,6 +1,8 @@
-#include "ShaderSourceTestSupport.h"
+#include "ShaderManagerTestSupport.h"
 
 #include <AssetNugget/NuggetCache.h>
+#include <Base/NumericLimits.h>
+#include <Core/FileRead.h>
 #include <Core/Text/String.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
@@ -9,9 +11,13 @@
 #include <Platform/Process.h>
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
+#include <ShaderCompiler/ShaderLibraryCook.h>
 #include <ShaderCompiler/ShaderNugget.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
+#include <ShaderCore/ShaderLibrary.h>
+#include <ShaderCore/ShaderParameterLayout.h>
+#include <ShaderCore/ShaderTypeRegistry.h>
 #include <Task/WorkerScheduler.h>
 #include <Base/InitializerList.h>
 #include <TestSupport/Test.h>
@@ -21,209 +27,19 @@
 // 셰이더 컴파일 관리자와 shader-compile 명령 시험이다(Docs/Design/ShaderSystem 10절, 11.1절
 // SC4·SC11–SC13, SH1d): 너겟 조회 결과 분류, 설정 검사, 다른 PID 작업 디렉터리 정리, 같은 입력의
 // 같은 byte(워커 수·묶음 크기·작업 디렉터리와 무관), 찬 캐시(워커 0개), 값 0 없는 Record의
-// 재컴파일, 실패 묶음 격리, 진행 계수 정산, 명령 출력·종료 코드·출력 파일 이름. 워커가 없거나 도구
-// 저장소가 준비되지 않았으면 그 시험만 SKIP이다.
+// 재컴파일, 실패 묶음 격리, 진행 계수 정산, 명령 출력·종료 코드·출력 파일 이름, 라이브러리
+// 쿠킹(SH2a2 — 거르기·정점 입력 축·개발 전용·코드 중복 제거·파일 이름·다시 쿠킹 Unchanged·같은 이름
+// 다른 byte CorruptEntry·job 실패 시 쓰지 않음). 워커가 없거나 도구 저장소가 준비되지 않았으면 그
+// 시험만 SKIP이다.
 using namespace rocks;
 
 namespace shader_compile_manager_tests_file {
 
 using namespace rocks::shader;
 using namespace rocks::shader_source_test;
-
-// bool을 돌려주는 준비 함수의 REQUIRE다(실패를 기록하고 false).
-#define SHADER_MANAGER_TEST_REQUIRE(expression)                                                    \
-    do {                                                                                           \
-        if (!(expression)) {                                                                       \
-            ::rocks::test::RecordFailure(#expression, __FILE__, __LINE__);                         \
-            return false;                                                                          \
-        }                                                                                          \
-    } while (false)
+using namespace rocks::shader_manager_test;
 
 namespace {
-
-constexpr usize ManagerPathBytes = 4096;
-// 확실히 살아 있지 않은 PID다(Windows PID는 4의 배수, POSIX pid_max보다 크다).
-constexpr char DeadPidName[] = "4294967294";
-// 시험 레지스트리 문맥 id다("SHMT").
-constexpr uint32 TestContextId = 0x53484d54;
-
-constexpr char TestSource[] =
-    "RWStructuredBuffer<uint> Output;\n"
-    "[numthreads(4, 1, 1)]\n"
-    "void CSMain(uint3 id : SV_DispatchThreadID) { Output[id.x] = id.x * SCALE; }\n"
-    "float4 PSMain() : SV_Target { return float4(1.0, 0.0, 0.0, 1.0); }\n";
-constexpr char TestEntry[] = "/Project/Test.rsf";
-constexpr char NuggetSettings[] = "{ \"localPath\": \"Cache/Shader\", \"required\": true, "
-                                  "\"generation\": \"01234567-89ab-cdef-0123-456789abcdef\" }";
-
-// 시험 실행 파일 옆의 워커다.
-bool WorkerExecutable(char (&out)[ManagerPathBytes]) noexcept {
-    usize bytes = 0;
-    if (!platform::GetExecutablePath(out, sizeof(out), bytes)) {
-        return false;
-    }
-
-    while (bytes > 0 && out[bytes - 1] != '/' && out[bytes - 1] != '\\') {
-        --bytes;
-    }
-
-    for (const char* name : {"ShaderCompileWorker.exe", "ShaderCompileWorker"}) {
-        const int written = snprintf(out + bytes, sizeof(out) - bytes, "%s", name);
-        bool exists = false;
-        if (written > 0 && platform::PhysicalFileSystem().FileExists(out, strlen(out), exists) &&
-            exists) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// 도구 저장소가 준비되었는가(워커 도구 조회).
-bool ToolsReady(const char* worker, const Fixture& fixture) noexcept {
-    char directory[ManagerPathBytes];
-    if (!fixture.Child("ToolQuery", directory, sizeof(directory))) {
-        return false;
-    }
-
-    ShaderWorkerChannel channel(TestAllocator());
-    ShaderWorkerLaunch launch;
-    launch.executable = StringView(worker);
-    launch.workDirectory = StringView(directory);
-    if (!channel.Start(launch)) {
-        return false;
-    }
-
-    ShaderWorkerRequest request(TestAllocator());
-    request.kind = ShaderWorkerRequestKind::ToolQuery;
-    Array<uint8> bytes(TestAllocator());
-    ShaderWorkerBatchResult result(TestAllocator());
-    if (!MakeShaderWorkerHeader({}, request.header) || !EncodeShaderWorkerRequest(request, bytes)) {
-        return false;
-    }
-
-    channel.Run(bytes.View(), result);
-    bool ready =
-        result.outcome == ShaderWorkerBatchOutcome::Completed && !result.response.tools.IsEmpty();
-    for (const ShaderWorkerToolCheck& tool : result.response.tools) {
-        ready = ready && tool.state == ShaderWorkerToolState::Ready;
-    }
-
-    return ready;
-}
-
-// 리플렉션 문맥이다(옵션 기록).
-struct KeyEnv {
-    KeyEnv() noexcept
-        : types(TestAllocator()), registration(types, TestAllocator()),
-          objects(TestAllocator(), types, {TestContextId, 1}), access(objects.OwnerAccess()) {
-        registered = static_cast<bool>(RegisterShaderCompilerTypes(registration));
-    }
-
-    ~KeyEnv() noexcept {
-        CHECK(objects.Shutdown(objects.OwnerAccess()));
-        CHECK(registration.Unregister());
-        CHECK(types.Shutdown());
-    }
-
-    ShaderKeyReflection Reflection() noexcept {
-        return ShaderKeyReflection{&objects, access, &types, &TestAllocator()};
-    }
-
-    TypeRegistry types;
-    ModuleRegistration registration;
-    ObjectRegistry objects;
-    ObjectAccessContext access;
-    bool registered = false;
-};
-
-// 워커·도구·원문·형식이 준비된 시험 한 벌이다.
-struct ManagerCase {
-    ManagerCase() noexcept
-        : tree(TestAllocator()), d3d12(TestAllocator()), vulkan(TestAllocator()) {
-    }
-
-    // false면 SKIP(이유는 skip에)이거나 준비 실패(skip은 null — 실패를 기록했다)다.
-    bool Make(const char* tag, const char*& skip) noexcept {
-        if (!WorkerExecutable(worker)) {
-            skip = "ShaderCompileWorker is not next to the test executable";
-            return false;
-        }
-
-        char engine[ManagerPathBytes];
-        char project[ManagerPathBytes];
-        SHADER_MANAGER_TEST_REQUIRE(fixture.Make(tag));
-        SHADER_MANAGER_TEST_REQUIRE(fixture.Write("Project/Shaders/Test.rsf", TestSource));
-        SHADER_MANAGER_TEST_REQUIRE(fixture.Child("Project", project, sizeof(project)));
-        SHADER_MANAGER_TEST_REQUIRE(RepositoryShaderDirectory(engine, sizeof(engine)));
-        SHADER_MANAGER_TEST_REQUIRE(tree.Mount("/Engine", StringView(engine)));
-        char shaders[ManagerPathBytes];
-        snprintf(shaders, sizeof(shaders), "%s/Shaders", project);
-        SHADER_MANAGER_TEST_REQUIRE(tree.Mount("/Project", StringView(shaders)));
-        SHADER_MANAGER_TEST_REQUIRE(
-            LoadShaderFormatSnapshot(ShaderFormatDirectory, "D3D12_SM6", d3d12));
-        SHADER_MANAGER_TEST_REQUIRE(
-            LoadShaderFormatSnapshot(ShaderFormatDirectory, "VULKAN_SM5", vulkan));
-        SHADER_MANAGER_TEST_REQUIRE(env.registered);
-        if (!ToolsReady(worker, fixture)) {
-            skip = "shader tool store is not bootstrapped (dotnet msbuild Rocks.proj "
-                   "/t:ThirdPartyBootstrap)";
-            return false;
-        }
-
-        return true;
-    }
-
-    // 작업 디렉터리 뿌리 하나다(시험마다 다르게 준다).
-    ShaderCompileManagerConfig Config(const char* workRoot) noexcept {
-        snprintf(work, sizeof(work), "%s/%s", fixture.Path(), workRoot);
-        ShaderCompileManagerConfig config;
-        config.allocator = &TestAllocator();
-        config.tree = &tree;
-        config.reflection = env.Reflection();
-        config.profileId = "Engine-Windows";
-        config.workerExecutable = StringView(worker);
-        config.workRoot = StringView(work);
-        return config;
-    }
-
-    // 기본 job 목록: 두 형식 × (compute 두 정의 + pixel).
-    void Jobs(Array<ShaderCompileJob>& jobs) noexcept {
-        for (const ShaderFormatSnapshot* format : {&d3d12, &vulkan}) {
-            for (usize variant = 0; variant < 3; ++variant) {
-                ShaderCompileJob job;
-                job.format = format;
-                job.entryPath = TestEntry;
-                job.entryPoint = variant == 2 ? "PSMain" : "CSMain";
-                job.stage = variant == 2 ? ShaderStagePixel : ShaderStageCompute;
-                job.defines = Span<const ShaderDefine>(&scales[variant], 1);
-                job.options = DefaultShaderCompileOptions(format->definition);
-                REQUIRE(jobs.TryPushBack(job));
-            }
-        }
-    }
-
-    Fixture fixture;
-    ShaderSourceTree tree;
-    ShaderFormatSnapshot d3d12;
-    ShaderFormatSnapshot vulkan;
-    KeyEnv env;
-    char worker[ManagerPathBytes] = {};
-    char work[ManagerPathBytes] = {};
-    const ShaderDefine scales[3] = {{"SCALE", "2"}, {"SCALE", "3"}, {"SCALE", "1"}};
-};
-
-// 성공해야 하는 앞 count개 job의 실패를 찍는다.
-void PrintFailures(const Array<ShaderCompileJobResult>& results, usize count) noexcept {
-    for (usize index = 0; index < count && index < results.Size(); ++index) {
-        if (results[index].status != ShaderCompileStatus::Success) {
-            fprintf(stderr, "job %zu %s: %.*s\n", index,
-                    ShaderCompileStatusName(results[index].status),
-                    static_cast<int>(results[index].diagnostics.ByteCount()),
-                    results[index].diagnostics.Data());
-        }
-    }
-}
 
 bool SameCode(const ShaderCompileJobResult& left, const ShaderCompileJobResult& right) noexcept {
     if (!left.values.Has(ShaderNuggetValue::Code) || !right.values.Has(ShaderNuggetValue::Code)) {
@@ -359,7 +175,6 @@ TEST(ShaderCompileManager_CleansStaleWorkDirectories) {
     config.allocator = &TestAllocator();
     config.tree = &tree;
     config.reflection = env.Reflection();
-    config.profileId = "Engine-Windows";
     // 워커는 첫 묶음에서 띄우므로 Start에는 실행 파일이 없어도 된다.
     config.workerExecutable = "missing-worker";
     config.workRoot = StringView(work);
@@ -696,6 +511,338 @@ TEST(ShaderCompileCommand_ReportsJobsAndWritesOutputs) {
                    {StringView(projectOption), "--format=D3D12_SM6", "--option=bogus=1", compute}));
 }
 
-} // namespace shader_compile_manager_tests_file
+namespace {
 
-#undef SHADER_MANAGER_TEST_REQUIRE
+// 라이브러리 쿠킹 시험 원문이다(SCALE이 없는 퍼뮤테이션도 컴파일되게 기본값을 둔다).
+constexpr char CookSource[] =
+    "#ifndef SCALE\n"
+    "#define SCALE 1\n"
+    "#endif\n"
+    "RWStructuredBuffer<uint> Output;\n"
+    "[numthreads(4, 1, 1)]\n"
+    "void CSMain(uint3 id : SV_DispatchThreadID) { Output[id.x] = id.x * SCALE; }\n"
+    "float4 PSMain() : SV_Target { return float4(1.0, 0.0, 0.0, 1.0); }\n";
+constexpr char CookEntry[] = "/Project/Cook.rsf";
+
+// 라이브러리 쿠킹 시험 타입이다(CookEngine 밖은 Project 소속 — /Project/Cook.rsf).
+ROCKS_SHADER_TYPE_NAME(CookComputeName, "CookCompute");
+ROCKS_SHADER_TYPE_NAME(CookPixelName, "CookPixel");
+ROCKS_SHADER_TYPE_NAME(CookWaveName, "CookWave");
+ROCKS_SHADER_TYPE_NAME(CookEngineName, "CookEngine");
+ROCKS_SHADER_TYPE_NAME(CookBrokenName, "CookBroken");
+ROCKS_SHADER_TYPE_NAME(VertexInputAName, "CookVertexA");
+ROCKS_SHADER_TYPE_NAME(VertexInputBName, "CookVertexB");
+
+constexpr ShaderPermutationDimension CookScale[] = {
+    ShaderPermutationDimension::IntRange("SCALE", 1, 3)};
+constexpr ShaderPermutationDimension CookSingleScale[] = {
+    ShaderPermutationDimension::IntRange("SCALE", 1, 1)};
+constexpr ShaderPermutationDimension CookDebug[] = {
+    ShaderPermutationDimension::Bool("USE_DEBUG", true)};
+constexpr ShaderParameterMember CookPassMembers[] = {{"tint", ShaderParameterType::Float4, 0, 0}};
+constexpr ShaderParameterLayout CookPixelLayouts[] = {
+    {"PassConstants", false, 16, CookPassMembers}};
+
+// Vulkan에서 SCALE = 3(퍼뮤테이션 2)을 뺀다.
+bool CookComputeFilter(VertexInputTypeId, uint32 permutationId,
+                       const ShaderFormatFacts& format) noexcept {
+    return format.backend != ShaderBackend::Vulkan || permutationId != 2;
+}
+
+// 정점 입력 B는 Vulkan에서 뺀다.
+bool CookVertexBFilter(const ShaderTypeDesc&, uint32, const ShaderFormatFacts& format) noexcept {
+    return format.backend != ShaderBackend::Vulkan;
+}
+
+constexpr ShaderTypeDesc MakeCookCompute() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(CookComputeName, CookEntry, "CSMain",
+                                             ShaderStageCompute, ShaderTypeOwner::Project);
+    desc.requiredFeatures = ShaderFeatureCompute;
+    desc.permutation = ShaderPermutationDomain{CookScale};
+    desc.shouldCompile = &CookComputeFilter;
+    return desc;
+}
+
+constexpr ShaderTypeDesc MakeCookPixel() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(CookPixelName, CookEntry, "PSMain", ShaderStagePixel,
+                                             ShaderTypeOwner::Project);
+    desc.requiredFeatures = ShaderFeatureVertexViewportLayerOutput;
+    desc.flags = ShaderTypeVertexInputAxis;
+    desc.permutation = ShaderPermutationDomain{CookDebug};
+    desc.parameterLayouts = CookPixelLayouts;
+    return desc;
+}
+
+constexpr ShaderTypeDesc MakeCookWave() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(CookWaveName, CookEntry, "CSMain", ShaderStageCompute,
+                                             ShaderTypeOwner::Project);
+    desc.requiredFeatures = ShaderFeatureCompute | ShaderFeatureWaveOperations;
+    desc.permutation = ShaderPermutationDomain{CookSingleScale};
+    return desc;
+}
+
+constexpr ShaderTypeDesc MakeCookBroken() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(CookBrokenName, CookEntry, "NoSuchEntry",
+                                             ShaderStageCompute, ShaderTypeOwner::Project);
+    desc.permutation = ShaderPermutationDomain{CookSingleScale};
+    return desc;
+}
+
+constexpr ShaderTypeDesc CookCompute = MakeCookCompute();
+constexpr ShaderTypeDesc CookPixel = MakeCookPixel();
+constexpr ShaderTypeDesc CookWave = MakeCookWave();
+constexpr ShaderTypeDesc CookBroken = MakeCookBroken();
+// Engine 소속은 Project 라이브러리에 들지 않는다(원문이 없어도 열거되지 않으므로 컴파일하지
+// 않는다).
+constexpr ShaderTypeDesc CookEngine =
+    MakeShaderTypeDesc(CookEngineName, "/Engine/Private/NotCooked.rsf", "Main", ShaderStagePixel,
+                       ShaderTypeOwner::Engine);
+
+constexpr ShaderVertexInputType CookVertexInputs[] = {
+    {VertexInputBName.hash, VertexInputBName.name, &CookVertexBFilter},
+    {VertexInputAName.hash, VertexInputAName.name, nullptr}};
+
+// 쿠킹 결과 파일을 연다.
+bool OpenCooked(const ShaderLibraryCookFormat& line, Array<uint8>& bytes,
+                ShaderLibraryView& view) noexcept {
+    bool existed = false;
+    SHADER_MANAGER_TEST_REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), line.path.View(),
+                                              NumericLimits<uint32>::Max(), bytes, existed));
+    SHADER_MANAGER_TEST_REQUIRE(existed);
+    const ShaderReadStatus opened = view.Open(bytes.View());
+    SHADER_MANAGER_TEST_REQUIRE(opened);
+    return true;
+}
+
+// 파일을 bytes로 덮어쓴다(손상 흉내).
+bool OverwriteFile(const String& path, const Array<uint8>& bytes) noexcept {
+    platform::File file;
+    SHADER_MANAGER_TEST_REQUIRE(file.Open(path.CStr(), platform::FileOpenMode::CreateAlways));
+    SHADER_MANAGER_TEST_REQUIRE(file.WriteAll(bytes.Data(), bytes.Size()).status);
+    SHADER_MANAGER_TEST_REQUIRE(file.Close());
+    return true;
+}
+
+bool HasEntry(const ShaderLibraryView& view, const ShaderTypeName& type,
+              VertexInputTypeId vertexInput, uint32 permutation, ShaderLibraryEntry& out) noexcept {
+    return view.Find(ShaderLibraryKey{0, type.hash, vertexInput, permutation}, out);
+}
+
+} // namespace
+
+TEST(ShaderLibraryCook_CooksFiltersAndPublishes) {
+    ManagerCase test;
+    const char* skip = nullptr;
+    if (!test.Make("librarycook", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderLibraryCook_CooksFiltersAndPublishes: %s\n", skip);
+        }
+
+        return;
+    }
+
+    REQUIRE(test.fixture.Write("Project/Shaders/Cook.rsf", CookSource));
+
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderTypeDesc* const types[] = {&CookCompute, &CookPixel, &CookWave, &CookEngine};
+    REQUIRE(registry.Register(types));
+    ShaderCompileManagerConfig config = test.Config("CookWork");
+    ShaderCompileManager manager(config);
+    REQUIRE(manager.Start());
+    char output[ManagerPathBytes];
+    REQUIRE(test.fixture.Child("Cooked/Shaders", output, sizeof(output)));
+    const ShaderFormatSnapshot* const formats[] = {&test.d3d12, &test.vulkan};
+    ShaderLibraryCookDesc desc;
+    desc.allocator = &TestAllocator();
+    desc.registry = &registry;
+    desc.formats = formats;
+    desc.vertexInputTypes = CookVertexInputs;
+    desc.library = ShaderLibraryKind::Project;
+    desc.manager = &manager;
+    desc.outputDirectory = StringView(output);
+    ShaderLibraryCookReport report(TestAllocator());
+    // Freeze 전에는 NotReady다.
+    const Result<void> early = CookShaderLibraries(desc, report);
+    CHECK(!early && early.Error() == ErrorCode::NotReady);
+    REQUIRE(registry.Freeze());
+    // 정점 입력 id가 이름 해시가 아니면 InvalidArgument다.
+    const ShaderVertexInputType badInputs[] = {{1, "CookVertexA", nullptr}};
+    desc.vertexInputTypes = badInputs;
+    const Result<void> invalid = CookShaderLibraries(desc, report);
+    CHECK(!invalid && invalid.Error() == ErrorCode::InvalidArgument);
+    desc.vertexInputTypes = CookVertexInputs;
+
+    const Result<void> cooked = CookShaderLibraries(desc, report);
+    for (const ShaderLibraryCookJobFailure& failure : report.failures) {
+        fprintf(stderr, "cook job %s %s %u: %s\n", failure.formatId, failure.typeName,
+                failure.permutationId, failure.diagnostics.Data());
+    }
+
+    REQUIRE(cooked);
+    REQUIRE(report.formats.Size() == 2);
+    const ShaderLibraryCookFormat& d3d12 = report.formats[0];
+    const ShaderLibraryCookFormat& vulkan = report.formats[1];
+    CHECK(StringView(d3d12.formatId) == "D3D12_SM6" && StringView(vulkan.formatId) == "VULKAN_SM5");
+    CHECK(d3d12.outcome == ShaderLibraryCookOutcome::Written &&
+          vulkan.outcome == ShaderLibraryCookOutcome::Written);
+    // D3D12: Compute 3 + Pixel 2(정점 입력 A·B, 개발 전용 퍼뮤테이션 제외) + Wave 1. Vulkan:
+    // Compute 2 (거르기) + Pixel 1(정점 입력 B 거르기), Wave는 기능이 없어 빠진다.
+    CHECK(d3d12.jobs == 6 && d3d12.entries == 6 && d3d12.failedJobs == 0);
+    CHECK(vulkan.jobs == 3 && vulkan.entries == 3);
+    // 같은 원문·정의는 같은 코드다: Wave = Compute SCALE 1, Pixel A = Pixel B.
+    CHECK(d3d12.codes == 4 && vulkan.codes == 3);
+
+    char hex[Sha256Digest::HexBytes + 1];
+    d3d12.fileSha256.ToHex(hex);
+    char expectedName[ManagerPathBytes];
+    snprintf(expectedName, sizeof(expectedName), "%s/Project-D3D12_SM6-%.16s.rshl", output, hex);
+    CHECK(d3d12.path.View() == StringView(expectedName));
+
+    Array<uint8> bytes(TestAllocator());
+    ShaderLibraryView view;
+    REQUIRE(OpenCooked(d3d12, bytes, view));
+    CHECK(view.Kind() == ShaderLibraryKind::Project && view.FileSha256() == d3d12.fileSha256);
+    CHECK(view.Facts().FormatId() == StringView("D3D12_SM6") &&
+          view.Facts().backend == ShaderBackend::D3D12 &&
+          view.Facts().features == test.d3d12.definition.features);
+    CHECK(view.FormatDefinitionSha256() == test.d3d12.definition.sha256);
+    CHECK(view.TypeSetSha256() == registry.TypeSetDigest());
+    ShaderLibraryEntry entry;
+    for (uint32 permutation = 0; permutation < 3; ++permutation) {
+        CHECK(HasEntry(view, CookComputeName, NoVertexInputType, permutation, entry));
+        CHECK(entry.stage == ShaderStageCompute && !entry.developmentOnly &&
+              entry.layoutSignature == Sha256Digest{} && entry.runtimeFeatures == 0);
+        CHECK(!view.Value(entry, ShaderLibraryValueCode).IsEmpty());
+    }
+
+    ShaderLibraryEntry wave;
+    ShaderLibraryEntry computeOne;
+    REQUIRE(HasEntry(view, CookWaveName, NoVertexInputType, 0, wave));
+    REQUIRE(HasEntry(view, CookComputeName, NoVertexInputType, 0, computeOne));
+    CHECK(wave.codeIndex == computeOne.codeIndex);
+    ShaderLibraryEntry pixelA;
+    ShaderLibraryEntry pixelB;
+    REQUIRE(HasEntry(view, CookPixelName, VertexInputAName.hash, 0, pixelA));
+    REQUIRE(HasEntry(view, CookPixelName, VertexInputBName.hash, 0, pixelB));
+    CHECK(pixelA.codeIndex == pixelB.codeIndex);
+    CHECK(pixelA.runtimeFeatures == ShaderFeatureVertexViewportLayerOutput &&
+          pixelA.layoutSignature == ShaderParameterLayoutSignature(CookPixelLayouts));
+    CHECK(!HasEntry(view, CookPixelName, VertexInputAName.hash, 1, entry));
+    CHECK(!HasEntry(view, CookEngineName, NoVertexInputType, 0, entry));
+    CHECK(view.TypeName(CookPixelName.hash) == StringView("CookPixel"));
+
+    Array<uint8> vulkanBytes(TestAllocator());
+    ShaderLibraryView vulkanView;
+    REQUIRE(OpenCooked(vulkan, vulkanBytes, vulkanView));
+    CHECK(vulkanView.Facts().backend == ShaderBackend::Vulkan);
+    CHECK(!HasEntry(vulkanView, CookComputeName, NoVertexInputType, 2, entry));
+    CHECK(!HasEntry(vulkanView, CookPixelName, VertexInputBName.hash, 0, entry));
+    CHECK(!HasEntry(vulkanView, CookWaveName, NoVertexInputType, 0, entry));
+    CHECK(HasEntry(vulkanView, CookPixelName, VertexInputAName.hash, 0, entry));
+
+    // 다시 쿠킹하면 같은 byte라 그대로 둔다(너겟 적중).
+    ShaderLibraryCookReport again(TestAllocator());
+    REQUIRE(CookShaderLibraries(desc, again));
+    REQUIRE(again.formats.Size() == 2);
+    CHECK(again.formats[0].outcome == ShaderLibraryCookOutcome::Unchanged &&
+          again.formats[1].outcome == ShaderLibraryCookOutcome::Unchanged);
+    CHECK(again.formats[0].path.View() == d3d12.path.View() &&
+          again.formats[0].fileSha256 == d3d12.fileSha256);
+
+    // 같은 이름의 다른 byte는 손대지 않고 CorruptEntry다.
+    bytes[bytes.Size() - 1] ^= 0x01;
+    REQUIRE(OverwriteFile(d3d12.path, bytes));
+    ShaderLibraryCookReport corrupt(TestAllocator());
+    const Result<void> collided = CookShaderLibraries(desc, corrupt);
+    CHECK(!collided && collided.Error() == ErrorCode::AlreadyExists);
+    REQUIRE(corrupt.formats.Size() == 2);
+    CHECK(corrupt.formats[0].outcome == ShaderLibraryCookOutcome::CorruptEntry &&
+          corrupt.formats[1].outcome == ShaderLibraryCookOutcome::Unchanged);
+    Array<uint8> kept(TestAllocator());
+    bool existed = false;
+    REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), d3d12.path.View(), bytes.Size(), kept,
+                          existed));
+    CHECK(kept.Size() == bytes.Size() && memcmp(kept.Data(), bytes.Data(), bytes.Size()) == 0);
+
+    // 개발 전용을 담으면 다른 파일이고 개발 전용 항목이 표시된다.
+    desc.includeDevelopment = true;
+    ShaderLibraryCookReport development(TestAllocator());
+    REQUIRE(CookShaderLibraries(desc, development));
+    CHECK(development.formats[0].outcome == ShaderLibraryCookOutcome::Written &&
+          development.formats[0].entries == 8 && development.formats[1].entries == 4);
+    CHECK(!(development.formats[0].path.View() == d3d12.path.View()));
+    Array<uint8> developmentBytes(TestAllocator());
+    ShaderLibraryView developmentView;
+    REQUIRE(OpenCooked(development.formats[0], developmentBytes, developmentView));
+    REQUIRE(HasEntry(developmentView, CookPixelName, VertexInputAName.hash, 1, entry));
+    CHECK(entry.developmentOnly);
+    REQUIRE(HasEntry(developmentView, CookPixelName, VertexInputAName.hash, 0, entry));
+    CHECK(!entry.developmentOnly);
+    // 공급자 메모리 라이브러리(SSD16)는 같은 입력의 쿠킹 파일과 같은 byte다.
+    const ShaderFormatSnapshot* const onlyD3d12[] = {&test.d3d12};
+    ShaderLibraryCookDesc memoryDesc = desc;
+    memoryDesc.formats = onlyD3d12;
+    memoryDesc.outputDirectory = StringView();
+    ShaderLibraryCookReport memoryReport(TestAllocator());
+    Array<uint8> memory(TestAllocator());
+    REQUIRE(CompileShaderLibrary(memoryDesc, memoryReport, memory));
+    REQUIRE(memoryReport.formats.Size() == 1);
+    CHECK(memoryReport.formats[0].outcome == ShaderLibraryCookOutcome::Built &&
+          memoryReport.formats[0].path.IsEmpty());
+    CHECK(memory.Size() == developmentBytes.Size() &&
+          memcmp(memory.Data(), developmentBytes.Data(), memory.Size()) == 0);
+    CHECK(!CompileShaderLibrary(desc, memoryReport, memory));
+    manager.Shutdown();
+}
+
+TEST(ShaderLibraryCook_JobFailuresKeepTheFormatUnwritten) {
+    ManagerCase test;
+    const char* skip = nullptr;
+    if (!test.Make("librarycookfail", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderLibraryCook_JobFailuresKeepTheFormatUnwritten: %s\n", skip);
+        }
+
+        return;
+    }
+
+    REQUIRE(test.fixture.Write("Project/Shaders/Cook.rsf", CookSource));
+
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderTypeDesc* const types[] = {&CookCompute, &CookBroken};
+    REQUIRE(registry.Register(types));
+    REQUIRE(registry.Freeze());
+    ShaderCompileManager manager(test.Config("CookFailWork"));
+    REQUIRE(manager.Start());
+    char output[ManagerPathBytes];
+    REQUIRE(test.fixture.Child("Cooked/Shaders", output, sizeof(output)));
+    const ShaderFormatSnapshot* const formats[] = {&test.d3d12};
+    ShaderLibraryCookDesc desc;
+    desc.allocator = &TestAllocator();
+    desc.registry = &registry;
+    desc.formats = formats;
+    desc.library = ShaderLibraryKind::Project;
+    desc.manager = &manager;
+    desc.outputDirectory = StringView(output);
+    ShaderLibraryCookReport report(TestAllocator());
+    const Result<void> cooked = CookShaderLibraries(desc, report);
+    CHECK(!cooked && cooked.Error() == ErrorCode::DependencyFailed);
+    REQUIRE(report.formats.Size() == 1);
+    CHECK(report.formats[0].outcome == ShaderLibraryCookOutcome::JobsFailed &&
+          report.formats[0].jobs == 4 && report.formats[0].failedJobs == 1 &&
+          report.formats[0].path.IsEmpty());
+    REQUIRE(report.failures.Size() == 1);
+    CHECK(StringView(report.failures[0].typeName) == "CookBroken" &&
+          StringView(report.failures[0].formatId) == "D3D12_SM6" &&
+          report.failures[0].status == ShaderCompileStatus::CompileError &&
+          !report.failures[0].diagnostics.IsEmpty());
+    // 출력 디렉터리를 만들지도 않았다.
+    bool exists = true;
+    REQUIRE(platform::PhysicalFileSystem().DirectoryExists(output, strlen(output), exists));
+    CHECK(!exists);
+    CHECK(StringView(ShaderLibraryCookOutcomeName(ShaderLibraryCookOutcome::CorruptEntry)) ==
+          "CorruptEntry");
+    manager.Shutdown();
+}
+
+} // namespace shader_compile_manager_tests_file

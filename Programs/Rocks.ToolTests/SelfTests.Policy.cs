@@ -1234,7 +1234,9 @@ internal static partial class SelfTests
             // 항상 정의된 Rocks 매크로를 정의 여부로 묻는 형태와, Compiler.h보다 앞선 사용은 거부한다.
             foreach (string source in new[] { "#include <Base/Compiler.h>\n#ifdef ROCKS_PLATFORM_MAC\n#endif",
                 "#include <Base/Compiler.h>\n#if defined(ROCKS_BUILD_DEBUG)\n#endif", "#include <Base/Compiler.h>\n#if 1 && \\\n defined ROCKS_ARCH_X64\n#endif",
-                "#if ROCKS_ARCH_X64\n#endif\n#include <Base/Compiler.h>", "#include <Base/Types.h>\n#if ROCKS_PLATFORM_ANDROID\n#endif" })
+                "#if ROCKS_ARCH_X64\n#endif\n#include <Base/Compiler.h>", "#include <Base/Types.h>\n#if ROCKS_PLATFORM_ANDROID\n#endif",
+                // 타깃 매크로(BS2a)도 정의 여부로 묻지 않고 Compiler.h 뒤에 쓴다.
+                "#include <Base/Compiler.h>\n#ifdef ROCKS_WITH_EDITOR\n#endif", "#if ROCKS_WITH_EDITOR_DATA\n#endif\n#include <Base/Compiler.h>" })
             {
                 temporary.Write(probe, source + "\n");
                 Verify.Equal(1, PolicyChecks.TargetMacros(temporary.Root).Count, "Rocks target macro misuse accepted: " + source);

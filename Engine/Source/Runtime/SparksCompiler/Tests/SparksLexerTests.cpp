@@ -5,7 +5,7 @@
 #include <SparksCompiler/Source.h>
 #include <TestSupport/Test.h>
 
-// Sparks 어휘 분석 시험이다(Docs/Design/SparksLanguage.ko.md 8.1절 "어휘 분석" 표·"토큰", 3.6절
+// Sparks 어휘 분석 시험이다(Docs/Design/SparksLanguage 8.1절 "어휘 분석" 표·"토큰", 3.6절
 // 어휘): 토큰 종류와 범위, 문자열·보간 분할, 숫자 규칙(SD54), verbatim 문자열(SD55), 주석,
 // S0104–S0114 진단과 같은 줄 중복 억제, 오류 뒤 복구.
 using namespace rocks;

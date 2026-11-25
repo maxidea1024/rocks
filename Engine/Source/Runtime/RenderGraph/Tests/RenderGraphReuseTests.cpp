@@ -3,7 +3,7 @@
 #include <RenderBase/RenderLane.h>
 #include <TestSupport/Test.h>
 
-// RG2 A부 시험이다(Docs/Design/RenderBase.ko.md 8절 RG2, 7.4·7.5절): 같은 그래프 안 풀
+// RG2 A부 시험이다(Docs/Design/RenderBase 8절 RG2, 7.4·7.5절): 같은 그래프 안 풀
 // 재사용(수명이 겹치지 않는 같은 desc 자원이 장치 객체 하나를 쓴다, view 사이 재사용), export
 // 자원의 fence 뒤 풀 반납(결정 R15), 그래프 안 업로드.
 using namespace rocks;

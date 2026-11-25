@@ -8,6 +8,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Text/String.h>
 #include <Graphics/DeviceOwnership.h>
+#include <Graphics/ShaderBindings.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
@@ -25,27 +26,11 @@ namespace rocks::graphics::gles {
 inline constexpr GLuint PixelTextureUnit = 0;
 inline constexpr GLuint VertexTextureUnitBase = 16;
 inline constexpr GLuint UploadTextureUnit = 32;
-// 버퍼 view slot n의 typed view(samplerBuffer)는 PS 유닛 PixelBufferViewUnitBase + n, VS 유닛
-// VertexBufferViewUnitBase + n이다(PS 텍스처 0과 VS 16 뒤, PipelineDesc 고정 배치). 구조화·raw
-// view는 storage block binding n이다.
-inline constexpr GLuint PixelBufferViewUnitBase = PixelTextureUnit + 1;
-inline constexpr GLuint VertexBufferViewUnitBase = VertexTextureUnitBase + 1;
 // 조회 수단이 없는 버퍼 최대 크기의 보수적 값이다(D3D 보장식의 하한 128 MiB, DeviceLimits).
 inline constexpr uint64 ConservativeBufferBytes = uint64{128} << 20;
-// raw view로 읽는 storage block 이름의 접두사다(SPIRV-Cross가
-// ByteAddressBuffer·RWByteAddressBuffer에 붙이는 이름). 그 밖의 storage block은 구조화 view다.
-inline constexpr char RawStorageBlockPrefix[] = "type_ByteAddressBuffer";
-inline constexpr char RawWritableStorageBlockPrefix[] = "type_RWByteAddressBuffer";
-// compute 쓰기 view slot n의 구조화·raw storage block binding은 WritableStorageBindingBase + n이고
-// typed는 image unit n이다(ComputePipelineDesc 고정 배치).
-inline constexpr GLuint WritableStorageBindingBase = MaxDrawBufferViews;
-
-// 그리기별 상수를 담는 루트 상수 에뮬레이션 배열(uniform highp vec4 <이름>[N])의 이름과 vec4 한
-// 칸의 byte 수다(ShaderSystem 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리). N은 셰이더가
-// 정하며 N × 16이 파이프라인의 drawConstantBytes 이하여야 한다.
-inline constexpr char VertexRootConstantsName[] = "vu_h";
-inline constexpr char PixelRootConstantsName[] = "pu_h";
-inline constexpr char ComputeRootConstantsName[] = "cu_h";
+// 루트 상수 에뮬레이션 배열(uniform highp vec4|ivec4|uvec4 <단계>u_<타입>[N])의 vec4 한 칸 byte
+// 수다(ShaderSystem 7.2절 4항, UE `$Globals`의 pu_h 자리). 배열과 그리기별 상수 byte 사이 복사는
+// 쿠킹된 GLES 바인딩 머리(값 2)의 복사 표가 정한다.
 inline constexpr uint32 RootConstantVectorBytes = 4 * sizeof(GLfloat);
 static_assert(MaxDrawConstantBytes % RootConstantVectorBytes == 0,
               "Draw constants must be a whole number of vec4 slots");
@@ -164,16 +149,57 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
            depth * record.slices;
 }
 
+// 루트 상수 복사 하나다: 그리기별 상수 byte[sourceOffset, +vectors × 16)를 location부터 vec4
+// vectors개로 올린다.
+struct GlesRootCopy {
+    GLint location = -1;
+    GLsizei vectors = 0;
+    uint32 sourceOffset = 0;
+    shader::ShaderGlesUniformType type = shader::ShaderGlesUniformType::Float;
+};
+
+// 파이프라인 하나의 루트 상수 복사 수 상한이다(단계 둘 × 타입 셋 구간이면 충분하다).
+inline constexpr uint32 MaxGlesRootCopies = 16;
+
+// 상수 버퍼 복사 하나다(RenderBase 9.11절 4항): 묶인 (stage, slot) 버퍼 byte[sourceOffset, +vectors
+// × 16)를 location부터 vec4 vectors개로 올린다.
+struct GlesConstantCopy {
+    uint32 stage = 0;
+    uint32 slot = 0;
+    GLint location = -1;
+    GLsizei vectors = 0;
+    uint32 sourceOffset = 0;
+    shader::ShaderGlesUniformType type = shader::ShaderGlesUniformType::Float;
+};
+
+// 파이프라인 하나의 상수 버퍼 복사 수 상한이다(단계 둘 × slot 14 × 타입 셋 구간보다 넉넉하다).
+inline constexpr uint32 MaxGlesConstantCopies = 128;
+
+// 상수 버퍼 handle 하나(CPU 사본)다. identity는 장치 안 고유하고 version은 갱신마다 오른다.
+struct ConstantBufferRecord {
+    explicit ConstantBufferRecord(Allocator& allocator) noexcept : bytes(allocator) {
+    }
+
+    ConstantBufferLifetime lifetime = ConstantBufferLifetime::SingleFrame;
+    Array<uint8> bytes;
+    uint64 identity = 0;
+    uint64 version = 0;
+};
+
 struct PipelineRecord {
     GLuint program = 0;
     GLuint vertexArray = 0;
-    // 루트 상수 에뮬레이션 배열 위치(셰이더가 쓰지 않으면 -1)와 active vec4 수다.
-    GLint vertexConstants = -1;
-    GLint pixelConstants = -1;
-    GLint computeConstants = -1;
-    GLsizei vertexConstantVectors = 0;
-    GLsizei pixelConstantVectors = 0;
-    GLsizei computeConstantVectors = 0;
+    // 루트 상수 복사(바인딩 머리의 루트 상수 복사 표를 링크 때 uniform 위치로 바꾼 것)다.
+    GlesRootCopy rootCopies[MaxGlesRootCopies] = {};
+    uint32 rootCopyCount = 0;
+    // 상수 버퍼 복사(값 2 복사 표의 상수 버퍼 부분)와, 이 program에 (단계, slot)마다 마지막으로
+    // 올린 (identity, version)이다(uniform은 program 상태다 — RenderBase 9.4절 업로드 판단).
+    GlesConstantCopy constantCopies[MaxGlesConstantCopies] = {};
+    uint32 constantCopyCount = 0;
+    uint64 uploadedIdentity[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint64 uploadedVersion[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    // 고정 slot 표(셰이더 layout의 유닛·binding)다.
+    PipelineSlots slots;
     // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
     uint32 drawConstantBytes = 0;
     // stream별 stride와 배치가 선언한 stream mask다.
@@ -303,8 +329,26 @@ public:
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override;
     void Retire(BufferHandle handle) noexcept override;
     void Retire(BufferViewHandle handle) noexcept override;
+    // 상수 버퍼(GlesDeviceConstants.cpp)는 CPU 사본이다.
+    Result<ConstantBufferHandle> CreateConstantBuffer(ConstantBufferLifetime lifetime,
+                                                      Span<const uint8> contents) noexcept override;
+    Result<void> UpdateConstantBuffer(ConstantBufferHandle buffer,
+                                      Span<const uint8> contents) noexcept override;
+    void Retire(ConstantBufferHandle buffer) noexcept override;
+
+    // 상수 버퍼 업로드 판단 계수(시험·진단)다: 올린 (program, 단계, slot) 수와 건너뛴 수.
+    uint64 ConstantUploads() const noexcept {
+        return constantUploads_;
+    }
+
+    uint64 ConstantUploadSkips() const noexcept {
+        return constantUploadSkips_;
+    }
     void Retire(TextureHandle handle) noexcept override;
     void Retire(PipelineHandle handle) noexcept override;
+    Result<ShaderHandle> CreateShader(const ShaderCodeDesc& desc) noexcept override;
+    void Retire(ShaderHandle shader) noexcept override;
+
     void Retire(SwapChainHandle handle) noexcept override;
     void ReclaimCompleted() noexcept override;
     Result<void> WaitIdle() noexcept override;
@@ -352,6 +396,10 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle handle) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetConstantBuffer(ShaderStage stage, uint32 slot,
+                           ConstantBufferHandle buffer) noexcept override;
+    Result<void> SetConstantData(ShaderStage stage, uint32 slot,
+                                 Span<const uint8> bytes) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
@@ -473,28 +521,17 @@ private:
     // 깊이·스텐실 읽기용 프로그램·정점 배열·최근접 샘플러를 처음 쓸 때 만든다.
     Result<void> PrepareDepthReads() noexcept;
 
-    Result<void> MatchVertexInputs(GLuint program, const VertexLayout& layout) noexcept;
+    // 쿠킹된 ESSL 단계들을 컴파일·링크하고 루트 상수 복사 표를 uniform 위치로 바꾼다(실패하면
+    // 프로그램을 지운다).
+    Result<void> LinkProgram(Span<const DeviceShaderCode* const> stages,
+                             PipelineRecord& record) noexcept;
     // --- 장치 능력·버퍼 view(GlesDeviceBuffers.cpp) ---
     // 장치 한도·기능과 형식별 MSAA 표본 수를 채운다(생성 때 한 번, debug output을 켜기 전).
     void QueryDeviceCaps(bool desktopContext) noexcept;
-    // 링크한 프로그램의 sampler·image uniform·storage block을 고정 배치와 대조해 slot 배치를
-    // 만든다. writeSlots가 null이면(그래픽) 쓰기 자원(image uniform, binding 4–7 storage block)은
-    // 배치 밖이다. 배치 밖(유닛 0이 아닌 텍스처 sampler, 허용 유닛 밖 samplerBuffer·image, binding
-    // 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의 readonly 여부를
-    // 알려 주지 않으므로 그래픽 단계의 binding 0–3 storage block 쓰기는 거부하지 못한다(셰이더는
-    // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
-    // compute의 image2D·image2DArray·image3D·imageCube·imageCubeArray(SetWritableTexture slot =
-    // image unit)는 writeTextures에 더한다.
-    Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
-                                    DrawBufferSlots* writeSlots,
-                                    uint32* writeTextures = nullptr) noexcept;
-    // 링크한 프로그램의 루트 상수 에뮬레이션 배열(vu_h·pu_h·cu_h) 위치와 active vec4 수를 record에
-    // 채운다. vec4 배열이 아니거나 active 크기 × 16이 record.drawConstantBytes보다 크면
-    // InvalidArgument다.
-    Result<void> ReflectRootConstants(GLuint program, PipelineRecord& record) noexcept;
     bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
-    // 파이프라인이 읽는 slot의 view를 유닛·binding에 묶는다(그리기 직전).
-    void ApplyBufferViews(const PipelineRecord& pipeline) noexcept;
+    // 파이프라인 slot 표의 자원(텍스처·버퍼 view·compute 쓰기)을 layout의 유닛·binding에 묶는다
+    // (그리기·dispatch 직전).
+    void ApplySlots(const PipelineRecord& pipeline) noexcept;
     void ReleaseViewSource(const BufferViewRecord& view) noexcept;
     Result<GLuint> CompileShader(GLenum stage, StringView source) noexcept;
     void StoreLog(GLuint object, bool shader) noexcept;
@@ -502,11 +539,13 @@ private:
     void InitializeTimestamps() noexcept;
     // 기록을 시작하고 pass_의 framebuffer에 load 동작(clear)을 한다(pass_는 호출자가 채운다).
     void StartPass(const PassDesc& pass) noexcept;
-    void BindPassTexture(const TextureRecord& record) noexcept;
+    void BindPassTexture(const TextureRecord& record, GLuint unit) noexcept;
     void ApplyVertexBuffer(uint32 stream) noexcept;
     void ApplyIndexBuffer() noexcept;
     const PipelineRecord* DrawablePipeline() const noexcept;
     void ApplyConstants(const PipelineRecord& pipeline) noexcept;
+    // 파이프라인이 읽는 상수 버퍼를 올린다(바뀐 것만). 하나라도 없거나 작으면 거짓이다.
+    bool ApplyConstantBuffers(SlotHandle pipeline) noexcept;
 
     // 스왑체인 텍스처를 창 표면의 기본 framebuffer에 Y를 뒤집어 blit한다(장치 context를 그
     // 표면에 붙인다). 끝나면 기록 중인 패스 대상과 viewport를 다시 묶는다. 표면에 붙이지 못하면
@@ -522,6 +561,23 @@ private:
     Array<RetiredObject> retired_;
     SlotArray<ReadbackRecord> readbacks_;
     SlotArray<BufferViewRecord> bufferViews_;
+    // 상수 버퍼(9.11절): handle 표, 기록 명령 사본(기록마다 비우는 저장소와 (단계, slot)별 위치),
+    // 묶음, identity 계수, 업로드 판단 계수다.
+    Allocator& allocator_;
+    SlotArray<ConstantBufferRecord> constantBuffers_;
+    Array<uint8> transientConstants_;
+    usize transientOffsets_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint32 transientBytes_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint64 transientIdentity_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    struct BoundConstant {
+        SlotHandle handle;
+        // 참이면 기록 명령 사본이다.
+        bool data = false;
+    };
+    BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
+    uint64 constantIdentity_ = 0;
+    uint64 constantUploads_ = 0;
+    uint64 constantUploadSkips_ = 0;
     Array<OrphanBuffer> orphanBuffers_;
     // 장치 능력(GX1)과 형식별 MSAA 표본 수다(생성 때 정해진다).
     DeviceCaps caps_;
@@ -618,6 +674,10 @@ private:
     DeviceOwnership ownership_;
     // 기록 중 열린 분리 전이 짝이다.
     SplitTransitionTracker splits_;
+    // 장치 셰이더(CreateShader — ESSL과 layout·바인딩 머리의 CPU 사본)다.
+    DeviceShaderTable shaders_;
+    // SetTexture로 묶은 텍스처다(그리기·dispatch 때 파이프라인 텍스처 유닛에 건다, 비면 흰색).
+    SlotHandle boundTexture_;
     bool recording_ = false;
     bool constantsDirty_ = false;
     bool validation_ = false;

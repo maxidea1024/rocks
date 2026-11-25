@@ -1,9 +1,10 @@
 #include "GraphNameRanks.h"
 
+#include <Base/InitializerList.h>
 #include <Core/Algorithms.h>
 #include <NodeGraph/GraphNameOrder.h>
 
-// Name·Guid 정규 순서와 내부 순위표다(Docs/Design/NodeGraph.ko.md 6.1·6.3절).
+// Name·Guid 정규 순서와 내부 순위표다(Docs/Design/NodeGraph 6.1·6.3절).
 namespace rocks::nodegraph {
 
 namespace {
@@ -152,6 +153,19 @@ Result<void> GraphNameRanks::AddDocument(const GraphDocument& document) noexcept
     }
 
     for (const Graph& graph : document.graphs) {
+        // 하위 그래프 경계 핀의 키·타입 이름(10.1절 NG3c).
+        for (const Array<GraphBoundaryPin>* list : {&graph.inputs, &graph.outputs}) {
+            for (const GraphBoundaryPin& pin : *list) {
+                if (auto added = Add(pin.key); !added) {
+                    return added;
+                }
+
+                if (auto added = Add(pin.type); !added) {
+                    return added;
+                }
+            }
+        }
+
         for (const GraphNode& node : graph.nodes) {
             if (auto added = Add(node.type); !added) {
                 return added;

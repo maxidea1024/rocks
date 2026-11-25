@@ -17,11 +17,8 @@ public sealed class CryptoModule : CoreModuleRules
     protected override IReadOnlyList<string> UnityExclude(BuildContext context) =>
         [context.PathInRoot($"{ModuleDirectory}/Private/Aes/AesX64.cpp"), context.PathInRoot($"{ModuleDirectory}/Private/Aes/AesArm64.cpp")];
 
-    protected override string[] PublicDependencies => ["Core", "Task", "Sodium"];
+    protected override string[] PublicDependencies => ["Core", "Task"];
 
-    protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Sodium");
-
-    protected override IReadOnlyList<string> PrivateDefines(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerDefines(context, "Sodium");
+    // libsodium is visible only to this module's sources, and Crypto is its only direct consumer (process-wide state, BD29).
+    protected override string[] PrivateDependencies => ["Sodium"];
 }

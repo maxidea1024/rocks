@@ -1,0 +1,135 @@
+diff --git a/include/freetype/config/ftoption.h b/include/freetype/config/ftoption.h
+index 6d3d7df..f05fa00 100644
+--- a/include/freetype/config/ftoption.h
++++ b/include/freetype/config/ftoption.h
+@@ -109,7 +109,7 @@ FT_BEGIN_HEADER
+    * ```
+    *
+    */
+-#define FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES
++/* #define FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES */
+ 
+ 
+   /**************************************************************************
+@@ -180,7 +180,7 @@ FT_BEGIN_HEADER
+    *
+    *   Define this macro if you want to enable this 'feature'.
+    */
+-#define FT_CONFIG_OPTION_USE_LZW
++/* #define FT_CONFIG_OPTION_USE_LZW */
+ 
+ 
+   /**************************************************************************
+@@ -224,7 +224,7 @@ FT_BEGIN_HEADER
+    *   `configure` script) and you define this macro, you also have to pass
+    *   `SYSTEM_ZLIB=yes` as an argument to make.
+    */
+-/* #define FT_CONFIG_OPTION_SYSTEM_ZLIB */
++#define FT_CONFIG_OPTION_SYSTEM_ZLIB
+ 
+ 
+   /**************************************************************************
+@@ -273,7 +273,7 @@ FT_BEGIN_HEADER
+    *   options set by those programs have precedence, overwriting the value
+    *   here with the configured one.
+    */
+-/* #define FT_CONFIG_OPTION_USE_PNG */
++#define FT_CONFIG_OPTION_USE_PNG
+ 
+ 
+   /**************************************************************************
+@@ -331,7 +331,7 @@ FT_BEGIN_HEADER
+    *   options set by those programs have precedence, overwriting the value
+    *   here with the configured one.
+    */
+-/* #define FT_CONFIG_OPTION_USE_BROTLI */
++#define FT_CONFIG_OPTION_USE_BROTLI
+ 
+ 
+   /**************************************************************************
+@@ -402,7 +402,7 @@ FT_BEGIN_HEADER
+    *
+    *   Note that the 'FOND' resource isn't checked.
+    */
+-#define FT_CONFIG_OPTION_MAC_FONTS
++/* #define FT_CONFIG_OPTION_MAC_FONTS */
+ 
+ 
+   /**************************************************************************
+@@ -422,7 +422,7 @@ FT_BEGIN_HEADER
+    *   the `FT_CONFIG_OPTION_MAC_FONTS` option.
+    */
+ #ifdef FT_CONFIG_OPTION_MAC_FONTS
+-#define FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
++/* #define FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK */
+ #endif
+ 
+ 
+@@ -581,7 +581,7 @@ FT_BEGIN_HEADER
+    *
+    *   More details on the hooks can be found in file `otsvg.h`.
+    */
+-#define FT_CONFIG_OPTION_SVG
++/* #define FT_CONFIG_OPTION_SVG */
+ 
+ 
+   /**************************************************************************
+@@ -594,7 +594,7 @@ FT_BEGIN_HEADER
+    *
+    *   More details can be found in the file `fterrors.h`.
+    */
+-/* #define FT_CONFIG_OPTION_ERROR_STRINGS */
++#define FT_CONFIG_OPTION_ERROR_STRINGS
+ 
+ 
+   /*************************************************************************/
+@@ -835,7 +835,7 @@ FT_BEGIN_HEADER
+    * sophisticated kerning variants.  Use a higher-level library like
+    * HarfBuzz instead for that.
+    */
+-/* #define TT_CONFIG_OPTION_GPOS_KERNING */
++#define TT_CONFIG_OPTION_GPOS_KERNING
+ 
+ 
+   /*************************************************************************/
+diff --git a/include/freetype/config/ftmodule.h b/include/freetype/config/ftmodule.h
+index 028e52c..8af77c8 100644
+--- a/include/freetype/config/ftmodule.h
++++ b/include/freetype/config/ftmodule.h
+@@ -12,23 +12,12 @@
+ 
+ FT_USE_MODULE( FT_Module_Class, autofit_module_class )
+ FT_USE_MODULE( FT_Driver_ClassRec, tt_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, t1_driver_class )
+ FT_USE_MODULE( FT_Driver_ClassRec, cff_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, t1cid_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, hvf_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, pfr_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, t42_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, winfnt_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, pcf_driver_class )
+-FT_USE_MODULE( FT_Driver_ClassRec, bdf_driver_class )
+ FT_USE_MODULE( FT_Module_Class, psaux_module_class )
+ FT_USE_MODULE( FT_Module_Class, psnames_module_class )
+ FT_USE_MODULE( FT_Module_Class, pshinter_module_class )
+ FT_USE_MODULE( FT_Module_Class, sfnt_module_class )
+ FT_USE_MODULE( FT_Renderer_Class, ft_smooth_renderer_class )
+ FT_USE_MODULE( FT_Renderer_Class, ft_raster1_renderer_class )
+-FT_USE_MODULE( FT_Renderer_Class, ft_sdf_renderer_class )
+-FT_USE_MODULE( FT_Renderer_Class, ft_bitmap_sdf_renderer_class )
+-FT_USE_MODULE( FT_Renderer_Class, ft_svg_renderer_class )
+ 
+ /* EOF */
+diff --git a/include/freetype/config/ftstdlib.h b/include/freetype/config/ftstdlib.h
+index 1c63e8d..d9f384d 100644
+--- a/include/freetype/config/ftstdlib.h
++++ b/include/freetype/config/ftstdlib.h
+@@ -94,7 +94,7 @@
+ #define ft_memset   memset
+ #define ft_strcat   strcat
+ #define ft_strcmp   strcmp
+-#define ft_strcpy   strcpy
++#define ft_strcpy( d, s )  ( (char*)ft_memcpy( (d), (s), ft_strlen( s ) + 1 ) )
+ #define ft_strlen   strlen
+ #define ft_strncmp  strncmp
+ #define ft_strncpy  strncpy

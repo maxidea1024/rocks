@@ -10,7 +10,7 @@ namespace rocks {
 class ModuleStartContext;
 
 // 모듈 하나의 수명 객체 기반 클래스다(UE IModuleInterface 대응,
-// Docs/Design/ModuleLoader.ko.md 3.1절). 모든 C++ 모듈은 이 클래스(또는
+// Docs/Design/ModuleLoader 3.1절). 모든 C++ 모듈은 이 클래스(또는
 // DefaultModuleImplementation)를 진입점 매크로 ROCKS_IMPLEMENT_MODULE(Core/Module/ModuleEntry.h)로
 // 등록한다.
 //

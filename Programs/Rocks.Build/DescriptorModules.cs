@@ -30,6 +30,7 @@ public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<P
     public static DescriptorOwner ForProject(ProjectDescriptor project, string targetName, IReadOnlyList<PluginReference> targetPlugins)
     {
         TargetPluginReferences.Validate(targetName, targetPlugins);
+        DescriptorReader.RequireTargetPlatforms(project.FilePath, $"target '{targetName}'", targetPlugins, project.TargetPlatforms);
         PluginReferrer referrer = targetPlugins.Count == 0
             ? PluginReferrer.Of(project)
             : new($"target '{targetName}' or project", project.FilePath);
@@ -53,11 +54,12 @@ public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<P
 /// var project = DescriptorReader.ReadProject(projectFile);
 /// var plugins = PluginCatalog.Discover([Path.Combine(project.RootDirectory, "Plugins")]);
 /// var owner = DescriptorOwner.ForProject(project, target.Name, target.Plugins);
-/// var set = DescriptorModuleSet.Resolve(owner, plugins, platform, configuration, target.Type);
+/// var set = DescriptorModuleSet.Resolve(owner, plugins, platform, configuration, target.Kind);
 /// var modules = set.Apply(ruleModules, target.Modules);   // 빌드할 규칙 모듈만 남는다
 /// </code>
 ///
-/// 켤 플러그인: owner의 참조와, Game 타깃이면 enabledByDefault 플러그인(Program 타깃은 명시한 것만 — BD34), 그리고 그 의존 플러그인.
+/// 켤 플러그인: owner의 참조와, Program이 아닌 타깃이면 enabledByDefault 플러그인(Program 타깃은 명시한 것만 — BD34, UE와 같다), 그리고 그
+/// 의존 플러그인.
 ///
 /// 모듈을 빼는 규칙(BD35):
 /// <list type="bullet">
@@ -108,11 +110,11 @@ public sealed class DescriptorModuleSet
         Modules.Where(module => module.FromPlugin && module.Included).Select(module => module.Name).ToList();
 
     /// <summary>
-    /// owner와 찾은 플러그인(available)으로 targetType 타깃의 모듈 집합을 정한다. available에는 켜지지 않은 플러그인도 넣는다(그
+    /// owner와 찾은 플러그인(available)으로 target 타깃(종류와 Program 속성)의 모듈 집합을 정한다. available에는 켜지지 않은 플러그인도 넣는다(그
     /// 모듈도 규칙과 대조하고, 참조하면 "켜지지 않음"으로 알려 준다).
     /// </summary>
     public static DescriptorModuleSet Resolve(DescriptorOwner owner, IReadOnlyList<PluginDescriptor> available,
-        NativePlatform platform, NativeConfiguration configuration, TargetType targetType)
+        NativePlatform platform, NativeConfiguration configuration, TargetKind target)
     {
         ProjectDescriptor? project = owner.Project;
         if (project is not null && !project.TargetPlatforms.Contains(platform))
@@ -122,13 +124,13 @@ public sealed class DescriptorModuleSet
         }
 
         IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(owner.Plugins, owner.Referrer, available,
-            applyDefaults: targetType == TargetType.Game);
+            applyDefaults: target.Type != TargetType.Program, new PluginContext(target.Type, platform, configuration));
         var enabledNames = enabled.Select(plugin => plugin.Name).ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, DescribedModule>(StringComparer.OrdinalIgnoreCase);
 
         void Add(ModuleDescriptor module, string ownerName, string file, bool fromPlugin, string? pluginNotEnabled)
         {
-            string? reason = pluginNotEnabled ?? ExclusionReason(module, platform, configuration, targetType);
+            string? reason = pluginNotEnabled ?? ExclusionReason(module, platform, configuration, target);
             if (!result.TryAdd(module.Name, new(module, ownerName, file, fromPlugin, reason)))
             {
                 throw new DescriptorException(file,
@@ -160,13 +162,9 @@ public sealed class DescriptorModuleSet
     /// 켠 기술자의 모듈 하나를 이번 문맥에서 빼는 이유다(BD35 표). 들어가면 null이다.
     /// </summary>
     public static string? ExclusionReason(ModuleDescriptor module, NativePlatform platform, NativeConfiguration configuration,
-        TargetType targetType) => module.Type switch
-        {
-            ModuleType.Editor => "Editor modules are not built yet (there is no editor target)",
-            ModuleType.Developer when targetType == TargetType.Game && configuration == NativeConfiguration.Release =>
-                "Developer modules are not built in Release game targets",
-            _ => module.SupportsPlatform(platform) ? null : $"the module does not support {platform}"
-        };
+        TargetKind target) =>
+        ModuleTypeRules.ExclusionReason(target, configuration, module.Type) ??
+        (module.SupportsPlatform(platform) ? null : $"the module does not support {platform}");
 
     /// <summary>
     /// 규칙 모듈(ruleModules)을 기술자와 대조하고 이번 빌드에 넣을 모듈만 돌려준다(입력 순서 유지).
@@ -236,19 +234,27 @@ public sealed class DescriptorModuleSet
 
         foreach (NativeModuleInput rule in included)
         {
-            // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절, BuildTargets BD25).
+            // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader 3.8절, BuildTargets BD25).
             foreach (string dependency in rule.AllDependencies.Concat(rule.DynamicModules))
             {
                 RequireIncluded(dependency, $"module '{rule.Name}'");
             }
         }
 
-        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
-        // 플러그인 모듈에는 플러그인 이름과 플러그인 루트 기준 폴더를 넣는다(Docs/Design/ModuleLoader.ko.md 3.15절 — Modular 공유 라이브러리 폴더).
+        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
+        // 플러그인 모듈에는 플러그인 이름과 플러그인 루트 기준 폴더를 넣는다(Docs/Design/ModuleLoader 3.15절 — Modular 공유 라이브러리 폴더).
+        // 모듈 type도 기술자 값이다(Docs/Design/BuildTargets 3.3절 — 게임 모듈 규칙은 type 칸을 쓰지 않는다).
         return included.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module)
-            ? rule with { LoadingPhase = module.Descriptor.LoadingPhase, Plugin = module.FromPlugin ? PluginOf(module) : null }
+            ? rule with { Type = module.Descriptor.Type, LoadingPhase = module.Descriptor.LoadingPhase, Plugin = module.FromPlugin ? PluginOf(module) : null }
             : rule).ToList();
     }
+
+    /// <summary>
+    /// 규칙 모듈 전부(거르기 전)에 기술자의 type을 넣은 목록이다(기술자가 없는 엔진 모듈은 그대로). 게임 계획이 type 사이 의존 규칙(BD25)을
+    /// 타깃과 무관하게 검사할 때 쓴다(<see cref="ModuleTypeRules.ValidateDependencies"/>).
+    /// </summary>
+    public IReadOnlyList<NativeModuleInput> WithDescriptorTypes(IReadOnlyList<NativeModuleInput> ruleModules) =>
+        [.. ruleModules.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module) ? rule with { Type = module.Descriptor.Type } : rule)];
 
     // 플러그인 모듈의 플러그인 이름과 플러그인 루트(엔진 저장소 Engine/Plugins, 프로젝트 Plugins) 기준 폴더(/ 구분)다.
     private ModulePlugin PluginOf(DescribedModule module)

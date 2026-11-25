@@ -255,14 +255,24 @@ struct PhysicalResource {
     SlotHandle device;
 };
 
-// 그래프 텍스처 view 하나다(CreateTextureView). 장치 view는 처음 쓰는 pass 직전에 만들고 그래프
-// 끝에 Retire한다.
+// 그래프 view 하나다(CreateTextureView·CreateBufferView). 장치 view는 처음 쓰는 pass 직전에 만들고
+// 그래프 끝에 Retire한다.
 struct ViewRecord {
-    uint32 texture = GraphIndexNone;
+    GraphResourceKind kind = GraphResourceKind::Texture;
+    // 원 자원 번호다(텍스처 view면 텍스처, 버퍼 view면 버퍼).
+    uint32 resource = GraphIndexNone;
     graphics::TextureViewDesc desc;
-    // 텍스처에 맞춰 푼 범위다(접근 선언의 subresource 범위).
+    graphics::BufferViewDesc bufferDesc;
+    // 텍스처에 맞춰 푼 범위다(접근 선언의 subresource 범위, 버퍼 view는 쓰지 않는다).
     graphics::ResolvedSubresourceRange range;
     SlotHandle device;
+
+    // 쓰기(UAV) view인지다.
+    bool Writable() const noexcept {
+        return kind == GraphResourceKind::Texture
+                   ? desc.access == graphics::ViewAccess::ReadWrite
+                   : bufferDesc.access == graphics::ViewAccess::ReadWrite;
+    }
 };
 
 class GraphCommandList;
@@ -370,6 +380,15 @@ struct SplitGroup {
     graphics::SplitTransition split;
 };
 
+// 그래프 상수 하나다(RenderGraph::CreateConstants). 내용은 프레임 arena에 있고 device는 장치
+// SingleFrame 상수 버퍼다(만들기 전·Retire 뒤 null).
+struct ConstantRecord {
+    uint8* data = nullptr;
+    uint32 bytes = 0;
+    const char* name = "";
+    SlotHandle device;
+};
+
 // 오류 문구 버퍼 크기다(영어 진단 문구 하나).
 inline constexpr usize GraphErrorMessageBytes = 256;
 
@@ -395,6 +414,7 @@ struct GraphState {
     ArenaArray<PhysicalResource> physicals;
     ArenaArray<BufferUpload> bufferUploads;
     ArenaArray<ViewRecord> views;
+    ArenaArray<ConstantRecord> constants;
     ArenaArray<ScopeRecord> scopes;
     // 선언 중 지금 열린 가장 안쪽 구간이다.
     uint32 currentScope = GraphIndexNone;
@@ -564,5 +584,10 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
 
 // 그래프 끝: 마지막 전이 → 제출 → 풀 반환·export 연결·lease 반환·축출.
 Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noexcept;
+
+// 아직 만들지 않은 그래프 상수의 장치 버퍼를 만든다(Deferred 실행 시작, GraphConstants.cpp).
+Result<void> CreateGraphConstants(GraphState& state) noexcept;
+// 그래프 상수의 장치 버퍼를 Retire한다(FinishGraph).
+void RetireGraphConstants(GraphState& state) noexcept;
 
 } // namespace rocks::render::detail

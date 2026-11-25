@@ -10,6 +10,9 @@ namespace rocks::sparks {
 
 namespace {
 
+// S 코드 표기("S0412")를 담는 builder의 inline 크기다(할당하지 않는다).
+constexpr usize DiagnosticCodeInlineBytes = 16;
+
 // 번호 오름차순이다. 새 코드는 번호 자리에 끼워 넣는다(FindDiagnosticCode가 이분 탐색한다).
 constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::InvalidUtf8, "invalid-utf8"},
@@ -450,32 +453,28 @@ void DiagnosticList::Sort(const SourceSet& sources) noexcept {
     });
 }
 
-Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
-                              const Diagnostic& diagnostic) noexcept {
-    const SourceFile& file = sources.Get(diagnostic.Source());
+Result<void> AppendSourceReport(StringBuilderBase& out, const SourceSet& sources, SourceId source,
+                                bool hasSpan, SourceSpan span, StringView code, StringView message,
+                                StringView explanation, StringView fix) noexcept {
+    const SourceFile& file = sources.Get(source);
     SourceLocation location;
-    if (diagnostic.HasSpan()) {
-        location = file.Locate(diagnostic.Span().begin);
+    if (hasSpan) {
+        location = file.Locate(span.begin);
     }
 
     // 첫 줄: "경로:줄:열: error S코드: 메시지"(파일 전체 진단은 "경로: error S코드: 메시지").
-    if (auto appended = diagnostic.HasSpan() ? out.TryAppendFormat("{}:{}:{}: error ", file.Path(),
-                                                                   location.line, location.column)
-                                             : out.TryAppendFormat("{}: error ", file.Path());
+    if (auto appended = hasSpan ? out.TryAppendFormat("{}:{}:{}: error ", file.Path(),
+                                                      location.line, location.column)
+                                : out.TryAppendFormat("{}: error ", file.Path());
         !appended) {
         return appended;
     }
 
-    if (auto appended = AppendDiagnosticCode(out, CodeNumber(diagnostic.Code())); !appended) {
+    if (auto appended = out.TryAppendFormat("{}: {}\n", code, message); !appended) {
         return appended;
     }
 
-    if (auto appended = out.TryAppendFormat(": {}\n", diagnostic.Message()); !appended) {
-        return appended;
-    }
-
-    if (diagnostic.HasSpan()) {
-        const SourceSpan span = diagnostic.Span();
+    if (hasSpan) {
         // 원문 줄과 밑줄. 밑줄은 범위가 그 줄 안에 있는 code point 수다(최소 1, 줄 끝에서 자름).
         // BOM 안에서 시작하는 범위는 줄 시작(BOM 뒤)부터 센다.
         const uint32 lineBegin = file.LineBegin(location.line);
@@ -517,13 +516,13 @@ Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
         }
     }
 
-    if (!diagnostic.Explanation().IsEmpty()) {
-        if (auto appended = AppendNoteLines(out, diagnostic.Explanation()); !appended) {
+    if (!explanation.IsEmpty()) {
+        if (auto appended = AppendNoteLines(out, explanation); !appended) {
             return appended;
         }
     }
 
-    if (!diagnostic.Fix().IsEmpty()) {
+    if (!fix.IsEmpty()) {
         if (auto appended = out.TryAppendRepeated(' ', NoteIndent); !appended) {
             return appended;
         }
@@ -532,7 +531,7 @@ Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
             return appended;
         }
 
-        if (auto appended = out.TryAppend(diagnostic.Fix()); !appended) {
+        if (auto appended = out.TryAppend(fix); !appended) {
             return appended;
         }
 
@@ -542,6 +541,18 @@ Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
     }
 
     return Result<void>::Success();
+}
+
+Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
+                              const Diagnostic& diagnostic) noexcept {
+    StringBuilder<DiagnosticCodeInlineBytes> code(out.GetAllocator()); // inline에 들어간다
+    if (auto appended = AppendDiagnosticCode(code, CodeNumber(diagnostic.Code())); !appended) {
+        return appended;
+    }
+
+    return AppendSourceReport(out, sources, diagnostic.Source(), diagnostic.HasSpan(),
+                              diagnostic.Span(), code.View(), diagnostic.Message(),
+                              diagnostic.Explanation(), diagnostic.Fix());
 }
 
 Result<void> AppendDiagnostics(StringBuilderBase& out, const SourceSet& sources,

@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.23 · 개정 1.19 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.25 · 개정 1.20 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -16,7 +16,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.8 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다. 이 전환은 개정 1.12에서 사용자 결정으로 되돌렸다(Jolt, 16절·33.17절).
 
-**1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparkc`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
+**1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparkc`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage/README.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
 
 **1.8 Sparks 언어 모호성 교차 검증:** 같은 규격을 읽은 구현자나 사용자가 다른 결론에 이를 수 있는 지점을 6개 관점으로 교차 검증하고, 스크립트 단계와 프레임 순서·인과 깊이 연쇄 상한·전달 순회·Changed 값 기준·격리·종료 경로별 hook·이름 해석·예약 이름·어휘를 확정하였다. 결정 SD11–SD21(재진입 정책 표시, Start 대기 범위, 이벤트 대기 결과, Array 파괴 처리, enum 한정, 범위 `..<`, 정수 나눗셈 오류, 미터·라디안 단위(개정 1.12에서 UE와 같은 cm·도로 번복), 빈 Soft 제거, 종료 경로 hook, NextTick 시계)을 채택하였고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)절과 33.1절 A04의 문구를 개정하고 결과는 33.13절에 기록한다.
 
@@ -36,9 +36,11 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
 
-**1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
+**1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph/README.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
 **1.19 엔진 컴포넌트:** UE 5.8 컴포넌트를 들이는 범위·선행·순서를 [컴포넌트 도입](ComponentCatalog/README.ko.md)에 둔다. 1부는 `Engine/Classes/Components`(필수 58, 선행 CR1–CR26, 묶음 CM0–CM11), 2부는 그 밖의 Engine 폴더·Runtime 모듈(필수 56, 선행 CR27–CR39, 묶음 CM12–CM21), 3부는 엔진 플러그인(필수 31·필수(실험 기반) 25, 선행 CR40–CR54, 묶음 CM22–CM31, 가상 제작·방송 계열은 범위 밖)이다. BSP(`UModelComponent`·`UBrushComponent`)와 폐기 계열은 제외하고 volume 형상은 공용 `VolumeShape`로 대체한다. 20.2절 tick group 문장을 [엔진 런타임](EngineRuntime/08-TickScheduler.ko.md) 8절의 구현된 단계 기준으로 고치고, 옛 그룹 PhysicsSync·AnimationFinalize를 Physics phase 끝의 엔진 단계로 바꾼다(UE 대응은 엔진 런타임 8절). 15.1·16.1·19·20.5·21·24.1·33.2절에 컴포넌트 쪽 링크와 결정(캐릭터 이동 CD15, Chaos 파괴 계열 CD14, VFX 효과 CD16, CameraDirector = 카메라 시스템 정본, 실험 플러그인 CD20, 범위 밖 CD22)을 더한다. 개정 범위는 표지·15.1·16.1·19·20.2·20.5·21·24.1·33.2절이다.
+
+**1.20 Jolt 확인과 반입:** 사용자 결정(2026-11-25)으로 Jolt 스펙 확정과 라이브러리 반입을 계획 순서와 무관하게 앞당긴다. 물리 모듈·어댑터 구현은 M4 순서 그대로다. [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 개정 3이 Jolt v5.7.0 소스로 검증 항목 J1–J21과 UE 소스로 U1·U3을 확인했고, 라이브러리 반입(JL1, 같은 문서 10절)의 판·범위·빌드 설정을 정했다. 16.1·16.4절을 개정한다.
 
 ## 1. 목표와 실행 전략
 
@@ -175,7 +177,7 @@ prefix를 모든 경계에서 금지하거나 강제하는 결론은 보류한�
 
 C language linkage의 동일 이름은 C++ namespace가 달라도 같은 entity를 가리킬 수 있으므로, namespace만으로 C export 충돌을 방지한다고 가정하지 않는다. 정확한 symbol decoration·calling convention은 target toolchain에서 확인한다. [S68](https://timsong-cpp.github.io/cppwp/n4950/dcl.link)
 
-경계 후보 예시는 C++의 `rocks::Object`에 대응하는 C ABI의 `rocks_object_handle`·`rocks_object_create`, namespace를 표현할 수 있는 언어의 `rocks.Object`, 평면 타입 이름이 필요한 바인딩의 `RocksObject`다. 마지막 형태는 해당 바인딩의 편의 선택이며 내부 타입까지 변경하는 근거가 아니다. macro·export와 같이 namespace로 구분할 수 없는 전역 식별자는 ROCKS_/rocks_ 프로젝트 표식을 사용할 수 있다. 중첩 namespace를 모든 언어에 그대로 복제할 필요는 없으며 타입·함수 ID로 원래 선언과 연결한다. 자체 언어 Sparks의 경계는 2026-11-12에 정하였다: 엔진 API는 패키지 `Rocks`에 두고, 타입·함수·이벤트 이름은 C++ 이름을 그대로 사용하며, 리플렉션 필드는 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거해 노출한다. 스크립트에 노출하는 함수의 C++ 오버로드에 서로 다른 `ScriptName`이 없거나 변환한 이름이 중복·예약 이름과 같으면 메타 컴파일 오류다(23절, [Sparks 언어 설계](SparksLanguage.ko.md)).
+경계 후보 예시는 C++의 `rocks::Object`에 대응하는 C ABI의 `rocks_object_handle`·`rocks_object_create`, namespace를 표현할 수 있는 언어의 `rocks.Object`, 평면 타입 이름이 필요한 바인딩의 `RocksObject`다. 마지막 형태는 해당 바인딩의 편의 선택이며 내부 타입까지 변경하는 근거가 아니다. macro·export와 같이 namespace로 구분할 수 없는 전역 식별자는 ROCKS_/rocks_ 프로젝트 표식을 사용할 수 있다. 중첩 namespace를 모든 언어에 그대로 복제할 필요는 없으며 타입·함수 ID로 원래 선언과 연결한다. 자체 언어 Sparks의 경계는 2026-11-12에 정하였다: 엔진 API는 패키지 `Rocks`에 두고, 타입·함수·이벤트 이름은 C++ 이름을 그대로 사용하며, 리플렉션 필드는 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거해 노출한다. 스크립트에 노출하는 함수의 C++ 오버로드에 서로 다른 `ScriptName`이 없거나 변환한 이름이 중복·예약 이름과 같으면 메타 컴파일 오류다(23절, [Sparks 언어 설계](SparksLanguage/README.ko.md)).
 
 C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 사용한다. Result·String·Array·vtable·예외를 경계에 직접 전달하지 않는다. allocator ownership·calling convention·packing·structSize·ABI version은 이름 정책과 독립 검증한다. serialization의 TypeId/FieldId는 namespace나 display name 변경으로 바뀌지 않는다.
 
@@ -289,7 +291,7 @@ Templates/  Samples/VerticalSlice
 
 Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](../Guides/RepositoryLayout.ko.md)을 따른다.
 
-공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase.ko.md) 5.5절, CP6 구현 2026-11-17).
+공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase/05-RenderLane.ko.md) 5.5절, CP6 구현 2026-11-17).
 
 ### 3.3 수학 라이브러리·SIMD·정밀도 정책
 
@@ -722,7 +724,7 @@ Submit admission은 callable을 이동하기 전에 실행 node의 내장 cleanu
 |---|---|---|
 | Game | Object 가변 상태, World, 편집 transaction | 프레임 경계에서 결과 commit. 디스크·GPU 동기 wait 금지 |
 | Worker | 분할된 POD, immutable asset·pose | 자신의 output 범위만 쓰기. continuation 중심 실행 |
-| Render | RenderScene, GPU submission | Game 주소 없음. immutable packet과 resource handle 수신. 전용 스레드 lane(Core `DedicatedLane`) 위의 `RenderLane`이며 작업은 프레임 packet·자원 생성/갱신/Retire·표면·lane 표지 네 종류, 값은 명시 등록한 렌더 전달 가능 타입만 받는다([렌더 기반](RenderBase.ko.md) 5.2절, RB1 구현) |
+| Render | RenderScene, GPU submission | Game 주소 없음. immutable packet과 resource handle 수신. 전용 스레드 lane(Core `DedicatedLane`) 위의 `RenderLane`이며 작업은 프레임 packet·자원 생성/갱신/Retire·표면·lane 표지 네 종류, 값은 명시 등록한 렌더 전달 가능 타입만 받는다([렌더 기반](RenderBase/05-RenderLane.ko.md) 5.2절, RB1 구현) |
 | Physics | 해당 tick의 body state | command 적용 → step → snapshot publication |
 | IO | read request와 completion | 실제 IO는 OS async 경로. worker를 파일 대기로 점유하지 않음 |
 | AudioRT | 고정 voice·DSP 상태 | 동적 할당·lock·IO·일반 scheduler wait 금지 |
@@ -738,7 +740,7 @@ prerequisite 실패·취소는 기본적으로 dependent body를 실행하지 �
 
 입력 수집 → 네트워크 수신 적용 → 게임/AI 의도 → 애니메이션·kinematic 목표 → fixed physics → 결과·이벤트 반영 → transform hierarchy 확정 → render/audio/VFX snapshot 추출 순서를 기본으로 한다. 별도 frame에서 병렬 실행하는 경우에도 tick 번호와 snapshot version으로 동일 선행 관계를 표현한다.
 
-Render는 2–3개 in-flight frame slot을 사용하되 slot 재사용은 해당 slot의 모든 queue fence 완료로 판정한다. 단순히 ‘3프레임 경과’로 회수하지 않는다. 게임이 과도하게 선행하면 bounded queue가 backpressure를 제공한다. 게임 lane이 막히는 곳은 프레임 slot 확보뿐이며 대기 중에도 OS 메시지를 펌프한다. 예외는 표면 소실 handshake와 종료·장치 재생성·시험의 전체 비우기다([렌더 기반](RenderBase.ko.md) 5.3절). streaming, shader compile, GC, AI는 별도 budget과 priority aging을 사용하여 한 종류가 worker 전체를 점유하지 못하게 한다.
+Render는 2–3개 in-flight frame slot을 사용하되 slot 재사용은 해당 slot의 모든 queue fence 완료로 판정한다. 단순히 ‘3프레임 경과’로 회수하지 않는다. 게임이 과도하게 선행하면 bounded queue가 backpressure를 제공한다. 게임 lane이 막히는 곳은 프레임 slot 확보뿐이며 대기 중에도 OS 메시지를 펌프한다. 예외는 표면 소실 handshake와 종료·장치 재생성·시험의 전체 비우기다([렌더 기반](RenderBase/05-RenderLane.ko.md) 5.3절). streaming, shader compile, GC, AI는 별도 budget과 priority aging을 사용하여 한 종류가 worker 전체를 점유하지 못하게 한다.
 
 ### 8.3 가변·고정 tick과 시간 도메인
 
@@ -1142,7 +1144,7 @@ public:
 };
 ~~~
 
-Graphics `Device`가 이 계약을 진다([렌더 기반](RenderBase.ko.md) GX7 구현 2026-11-17): 제출(`EndFrame`)은 `GpuFencePoint`를 돌려주고, `Retire(handle)`는 handle만 받으며 last-use는 장치 내부 집계(기록 중 프레임이면 그 fence, 아니면 그때까지의 마지막 제출)가 정한다. 단일 graphics queue에서는 호출자 하한이 내부 집계보다 늦을 수 없어 받지 않는다. OpenGL도 fence sync로 같은 계약을 따른다. 렌더 lane의 게임 쪽 `Retire`는 `RenderHandle`만 받는 lane 작업이다. graph import/command recording 전에 RenderResourceLease를 원자적으로 획득한다(RB2·RG1에서 둔다). recording packet은 resource·descriptor allocation·upload range·PSO·vendor context·command allocator의 사용 집합을 소유한다. Retire는 신규 lease를 차단하되 이미 승인된 recording을 무효화하지 않는다. Submit 성공은 packet lease를 submission record와 fence retirement로 이관하며 호출자의 임시 Span을 보관하지 않는다. Retire도 fence 목록을 소유 저장소로 복사하되 호출자 목록은 그 시점의 하한이며 RHI 내부 last-use 집계가 최종 기준이다. Retire 이전에 승인된 recording의 늦은 Submit은 새 queue fence 등록과 recording lease 이관을 같은 동기화 경계에서 수행한다. fence 등록 전에 마지막 recording lease가 0이 되는 순간을 허용하지 않는다.
+Graphics `Device`가 이 계약을 진다([렌더 기반](RenderBase/README.ko.md) GX7 구현 2026-11-17): 제출(`EndFrame`)은 `GpuFencePoint`를 돌려주고, `Retire(handle)`는 handle만 받으며 last-use는 장치 내부 집계(기록 중 프레임이면 그 fence, 아니면 그때까지의 마지막 제출)가 정한다. 단일 graphics queue에서는 호출자 하한이 내부 집계보다 늦을 수 없어 받지 않는다. OpenGL도 fence sync로 같은 계약을 따른다. 렌더 lane의 게임 쪽 `Retire`는 `RenderHandle`만 받는 lane 작업이다. graph import/command recording 전에 RenderResourceLease를 원자적으로 획득한다(RB2·RG1에서 둔다). recording packet은 resource·descriptor allocation·upload range·PSO·vendor context·command allocator의 사용 집합을 소유한다. Retire는 신규 lease를 차단하되 이미 승인된 recording을 무효화하지 않는다. Submit 성공은 packet lease를 submission record와 fence retirement로 이관하며 호출자의 임시 Span을 보관하지 않는다. Retire도 fence 목록을 소유 저장소로 복사하되 호출자 목록은 그 시점의 하한이며 RHI 내부 last-use 집계가 최종 기준이다. Retire 이전에 승인된 recording의 늦은 Submit은 새 queue fence 등록과 recording lease 이관을 같은 동기화 경계에서 수행한다. fence 등록 전에 마지막 recording lease가 0이 되는 순간을 허용하지 않는다.
 
 graph compile/Close 실패나 미제출 취소는 recording worker가 종료된 뒤 lease를 해제한다. Submit 실패는 미제출·부분 제출·device lost를 구분하며 이미 제출되었거나 제출 여부가 불확실한 자원은 RHI 내부 recovery record에 보존한다. 오류 반환만으로 정상 pool에 재사용하지 않는다. 자원 재사용은 신규 사용 차단, CPU recording lease 0, 모든 제출 fence 완료를 함께 요구한다. D3D12 command list가 전달 객체의 참조를 유지하지 않는 제약과 별도로 엔진이 이 수명을 보장해야 한다. [S53](https://microsoft.github.io/DirectX-Specs/d3d/CPUEfficiency.html#reference-counting)
 
@@ -1394,7 +1396,7 @@ Unreal의 문서는 live update·node preview·platform stats·generated shader 
 | EditorMaterial: GraphCommands.cpp, PreviewSession.cpp, CompileCoordinator.cpp | EditorBackend transaction·NodeGraph `GraphMutator`·asset bridge·compiler service·renderer preview | async callback에 raw Object/widget 주소 캡처 금지 |
 | EditorMaterial 화면: MaterialGraphView.cpp, InstancePanel.cpp, DiagnosticsPanel.cpp | `GraphView` 모듈(Editor, 노드 그래프 11절)·EditorFramework; 그래프·속성·인스턴스·오류 화면 | 화면 코드에서 별도 shader 의미/validator 구현 금지 |
 
-경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 데이터 모델은 공통 `NodeGraph`, 그래프 canvas는 공통 `GraphView`이고 다른 전문 도구(오디오·애니메이션·VFX·PCG)도 같은 것을 쓴다([노드 그래프](NodeGraph.ko.md)). 다만 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다(노드 그래프 GD20). 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
+경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 데이터 모델은 공통 `NodeGraph`, 그래프 canvas는 공통 `GraphView`이고 다른 전문 도구(오디오·애니메이션·VFX·PCG)도 같은 것을 쓴다([노드 그래프](NodeGraph/README.ko.md)). 다만 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다(노드 그래프 GD20). 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
 
 ~~~cpp
 struct MaterialNodeDescriptor {
@@ -1543,7 +1545,7 @@ M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 �
 
 ### 16.1 통합 구조
 
-물리 middleware는 모든 대상 플랫폼에서 단일 고정 commit의 Jolt Physics를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다(개정 1.12 — 2026-11-17 사용자 결정으로 PhysX 5에서 되돌림). [S10](https://github.com/jrouwe/JoltPhysics) Jolt는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. Rocks(UE 5.8과 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, cm)와 Jolt 사이의 축 사상, 극성·축성 벡터·quaternion·winding·heightfield 변환, 물리량별 단위 변환은 adapter 경계에서만 하며 계약과 검증 항목은 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다. 아래에서 Jolt API의 이름·동작으로 적은 것 중 확인하지 않은 것은 어댑터 경계 문서 8절의 검증 항목이다.
+물리 middleware는 모든 대상 플랫폼에서 단일 고정 commit의 Jolt Physics를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다(개정 1.12 — 2026-11-17 사용자 결정으로 PhysX 5에서 되돌림). [S10](https://github.com/jrouwe/JoltPhysics) Jolt는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. Rocks(UE 5.8과 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, cm)와 Jolt 사이의 축 사상, 극성·축성 벡터·quaternion·winding·heightfield 변환, 물리량별 단위 변환은 adapter 경계에서만 하며 계약과 검증 항목은 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다. Jolt API의 이름·동작은 어댑터 경계 문서 개정 3이 Jolt v5.7.0 소스로 확인했다(8절 결과표).
 
 Collision은 raycast·sweep·overlap·trigger·filter, Dynamics는 rigid body·constraint·sleep·CCD를 담당한다. query-only collider를 지원한다. Sphere·Capsule·Box·Convex·Compound·TriangleMesh·Heightfield를 우선하며 dynamic body는 convex/compound를 기본으로 한다. 고밀도 virtual geometry와 collision mesh·nav geometry는 별도 cook 산출물이다.
 
@@ -1594,23 +1596,23 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 
 ### 16.4 Jolt 버전·빌드·결정성 범위
 
-개정 1.12(2026-11-17 사용자 결정)로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌렸다. 개정 1.6에서 PhysX 5에 대해 정한 계약(O3DE fork·CUDA·`Px*` 수명·`PxSerialization`·NEON 추정 경로)은 33.11절에 이력으로만 남긴다. 아래에서 Jolt의 build 옵션·API 이름·동작으로 적은 것은 S82(개정 1.6 검토 때 확인)를 빼면 이 개정에서 다시 확인하지 않았으며, 착수 전 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 8절 검증 항목(J1–J15)으로 확인한다.
+개정 1.12(2026-11-17 사용자 결정)로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌렸다. 개정 1.6에서 PhysX 5에 대해 정한 계약(O3DE fork·CUDA·`Px*` 수명·`PxSerialization`·NEON 추정 경로)은 33.11절에 이력으로만 남긴다. 아래에서 Jolt의 build 옵션·API 이름·동작으로 적은 것은 개정 1.20에서 Jolt v5.7.0 소스로 확인했다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 8절 J1–J21). 판·반입 범위·build 정의의 정본은 같은 문서 10절(JL1)이다.
 
 **단일 버전.** Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS ARM64, Android ARM64/x86_64는 모두 같은 고정 commit의 Jolt를 source에서 빌드한다. [S10](https://github.com/jrouwe/JoltPhysics) 플랫폼별로 다른 version을 섞지 않는다.
 
 **version manifest.** target별로 version·commit·patch 목록·build flag·physics system 기본 설정(길이 차원 설정값은 cm 설정을 adapter가 변환한 값)·cook parameter·축 사상·license와 NOTICE를 기록하며, gameplay에 영향을 주는 항목은 모든 target에서 같은 값이어야 한다. prebuilt binary와 build 시 package 자동 다운로드는 사용하지 않는다.
 
-**빌드 설정 통일.** Jolt는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. 예외·RTTI는 끈다. 결정성·정밀도에 관한 build 옵션(플랫폼 간 결정성 build, double 위치 build)은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다.
+**빌드 설정 통일.** Jolt는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. 예외·RTTI는 끈다. 결정성·정밀도에 관한 build 옵션(플랫폼 간 결정성 build, double 위치 build)은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다. 반입 기본값은 플랫폼 간 결정성 build 켬, double 위치 build 끔, assert 모든 구성 켬이다(어댑터 경계 10.2절).
 
 **cook.** 너겟 key에 Jolt version·commit·cook parameter·adapter cook schema·축 사상과 단위 변환 version을 포함하고, 불일치는 load 시 거부한다. Jolt 형상 직렬화 결과가 플랫폼·version에 따라 달라지는지 확인하기 전에는 cook 결과를 플랫폼 사이에 공유하지 않는다. runtime cooking은 editor·개발 build에 한정한다. navigation은 Jolt blob이 아니라 중립 collision source에서 생성한다.
 
-**결과 차이의 범위.** Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) 이 build의 채택은 비용과 PC04 결과로 정하며, 채택 전과 Android·iOS hash 확인 전에는 플랫폼 간 결정성으로 표기하지 않는다. 결정성 범위를 넓혀도 플랫폼 간 결과 정합의 기본은 서버 권한과 field별 보정(17.2절)이다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
+**결과 차이의 범위.** Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) 이 build는 반입 기본값으로 켜고(어댑터 경계 10.2절 결정), 비용과 PC04 결과가 정당화하지 못하면 끄며, 채택 전과 Android·iOS hash 확인 전에는 플랫폼 간 결정성으로 표기하지 않는다. 결정성 범위를 넓혀도 플랫폼 간 결과 정합의 기본은 서버 권한과 field별 보정(17.2절)이다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
 
 **수명·callback.** process 공유 자원(할당 연결·형상 등록 등)과 World·Tryout session마다 분리한 physics system을 둔다. 종료는 진행 중 step 완료 → session physics system 해제 → asset lease 종료 후 공유 형상 해제 → process 공유 자원 해제 순서다(대응 Jolt 객체는 J14). 할당 hook은 Physics tag와 정렬 요구로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. 로그·assert hook은 구조화 로그에 연결하며 assert 실패는 시험 실패로 판정한다. 두 hook에서 lock 획득과 게임 코드 실행을 금지한다.
 
 **좌표·단위.** Rocks 값은 UE 5.8과 같은 cm·kg·초, 왼손 +X 전방·+Y 오른쪽·+Z 위다. adapter는 행렬식 +1 축 사상과 물리량별 단위 함수(Core `UnitConversion.h`)로만 바꾸며, 거울 사상을 쓰지 않는다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 2–4절).
 
-**라이선스.** Jolt는 MIT 라이선스다(33.11절 S82 검토 때 확인, 고정 commit에서 다시 확인 — J15). target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
+**라이선스.** Jolt는 MIT 라이선스다(v5.7.0 commit `cf16769b`에서 확인 — J15). target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
 
 | ID | 수용 시험 | 판정 기준(제안) |
 |---|---|---|
@@ -1622,9 +1624,9 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 | PC06 | 수명·job 연결: node pool 포화, Tryout 2 session, 종료 중 실행 작업 | 누수 0건, 작업 유실 0건, 종료 정지 0건 |
 | PC07 | 큰 월드: region 경계 이동·원점 이동·서버 다중 physics system handoff, double 위치 build와의 비용 비교 | 정밀도 허용 오차 충족, epoch 위반 0건, handoff 중 접촉 누락 0건, double build 비용 기록 |
 | PC08 | 혼합 플랫폼 네트워크: Linux 서버와 Windows·macOS·iOS·Android client, B6 network profile | client별 correction 빈도 기록, ARM64 client의 보정 빈도가 x64 client의 1.5배 이하 |
-| PC09 | 좌표·단위 경계: [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 9절 PA01–PA10 | 전부 통과 |
+| PC09 | 좌표·단위 경계: [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 9절 PA01–PA13 | 전부 통과 |
 
-M4 물리 착수 전 gate(PJG)는 어댑터 경계 문서의 검증 항목 J1–J15·U1 확인과 문서 갱신, PC01·PC02·PC05·PC06·PC09 통과, manifest·license 고지다.
+M4 물리 착수 전 gate(PJG)는 어댑터 경계 문서의 검증 항목 J1–J21·U1·U3 확인과 문서 갱신(개정 3에서 완료), 라이브러리 반입 JL1 완료(manifest·license 고지·연결 시험, 같은 문서 10.5절)다. PC01·PC02·PC05·PC06·PC09는 물리 모듈이 있어야 돌릴 수 있으므로 착수 gate가 아니라 M4 물리 단계의 완료 조건이다(개정 1.20에서 순환을 정정). PC01의 Linux 클라이언트·iOS는 그 플랫폼 층이 생기기 전에는 통과할 수 없으므로(빌드 타깃 BS6 보류, iOS 플랫폼 층 없음) M4 판정 때 범위를 다시 정한다.
 
 ### 16.5 큰 월드와 PhysicsRegion
 
@@ -1930,7 +1932,7 @@ M3는 UI 툴킷 위의 Outliner, Inspector, Asset Browser, 3D viewport, transfor
 
 Script Editor는 자체 언어의 문법 강조·자동 완성·정의 이동·진단·breakpoint·call stack·watch를 제공한다. 범용 node graph로 게임 로직을 작성하는 기능은 구현하지 않는다. 컷씬 편집기는 25절의 독립 핵심 제작 도구로 개발한다.
 
-transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset revision을 기록한다. 생성·삭제·reparent·prefab structural override는 graph patch로 저장하고 undo 기간의 snapshot 메모리를 budget으로 제한한다. 삭제 객체를 undo용 root로 무제한 유지하지 않는다. 변환 drag·multi-edit·복합 component 추가는 atomic group으로 취급한다. 이 graph patch는 객체 계층용이다. 노드 그래프 편집(노드 추가·연결·붙여넣기·접기)의 patch는 [노드 그래프](NodeGraph.ko.md) 8절의 `GraphPatch`이며, 같은 Transaction에 들어가고 같은 undo 메모리 budget을 쓴다.
+transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset revision을 기록한다. 생성·삭제·reparent·prefab structural override는 graph patch로 저장하고 undo 기간의 snapshot 메모리를 budget으로 제한한다. 삭제 객체를 undo용 root로 무제한 유지하지 않는다. 변환 drag·multi-edit·복합 component 추가는 atomic group으로 취급한다. 이 graph patch는 객체 계층용이다. 노드 그래프 편집(노드 추가·연결·붙여넣기·접기)의 patch는 [노드 그래프](NodeGraph/08-ChangesUndo.ko.md) 8절의 `GraphPatch`이며, 같은 Transaction에 들어가고 같은 undo 메모리 budget을 쓴다.
 
 저장은 임시 파일→fsync/flush 정책→atomic replace→revision publication으로 수행한다. 외부 파일 변경·저장 충돌·프로세스 강제 종료를 감지하고 journal로 복구한다. source control 연동은 checkout/status/diff/asset lock을 adapter로 제공한다. multi-user editing은 단독 transaction·revision 충돌 해결이 안정화된 P3 이후 과제다.
 
@@ -2024,7 +2026,7 @@ Stop은 비동기 전이로 일반 작업 차단→World 정상 종료(스크립
 
 ### 23.1 언어 범위와 구현 단계
 
-**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** UE Level Blueprint 대응은 Sparks 기반 타입 `LevelScript`이고 노드 시각 편집은 보류 선택지다([레벨 스크립트](LevelScript.ko.md)). 소스는 `.spark`, 컴파일 모듈은 `.sparkc`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD21은 [Sparks 언어 설계](SparksLanguage.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
+**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** UE Level Blueprint 대응은 Sparks 기반 타입 `LevelScript`이고 노드 시각 편집은 보류 선택지다([레벨 스크립트](LevelScript.ko.md)). 소스는 `.spark`, 컴파일 모듈은 `.sparkc`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD21은 [Sparks 언어 설계](SparksLanguage/README.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
 
 설계 목표는 프로그래머가 아닌 사용자도 실수할 여지가 적은 언어다. 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 두며, 실수가 잦은 구조는 lint가 아니라 언어 규칙으로 제거한다. [S93](https://go.dev/doc/faq) 문법은 C 계열이고 수명 hook은 Unity 체계를 따른다(20.2절). Epic이 UE6의 게임플레이 프로그래밍 모델을 Verse로 전환한다고 밝혔으나 [S95](https://www.unrealengine.com/news/the-road-to-ue-6), Sparks는 Verse의 문법을 채택하지 않고 failure context·구조적 동시성·persistable 호환성 검사 등의 의미만 차용한다. [S94](https://verselang.github.io/book/)
 
@@ -3013,11 +3015,11 @@ Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플�
 
 Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프로그래밍 모델의 Verse 전환과 Blueprint의 장기적 deprecate를 밝혔고, UE6 Early Access부터의 즉시 제거는 2차 보도로만 확인되었다. 원문 페이지는 접근이 거부되어 재게재 인용으로 확인하였다. Verse의 투기 실행·rollback은 엔진 C++ 쪽의 transactional 기반이 없어 보류하였다. 누수 검토가 근거로 든 코드 사실(`MulticastDelegate::TryAdd`의 compact 부재, `NamePool`의 Shutdown 전용 해제와 기본 상한 65,536, TypeRegistry Busy)은 저장소 코드와 대조하였다.
 
-결정 SD1–SD10은 2026-11-12에 확정하였다. 런타임 eval의 target별 사용 여부만 마켓 규정 검토 후 정하며, 기본값은 출시 `Off`, 개발 `DevOnly`다. 개정 범위는 표지·2.4·5.2·9.2·20.2·23·29.6(NL09)·31(R03)·33.2·33.12·34절과 신규 [Sparks 언어 설계](SparksLanguage.ko.md), 입력 상세안 22.3절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+결정 SD1–SD10은 2026-11-12에 확정하였다. 런타임 eval의 target별 사용 여부만 마켓 규정 검토 후 정하며, 기본값은 출시 `Off`, 개발 `DevOnly`다. 개정 범위는 표지·2.4·5.2·9.2·20.2·23·29.6(NL09)·31(R03)·33.2·33.12·34절과 신규 [Sparks 언어 설계](SparksLanguage/README.ko.md), 입력 상세안 22.3절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ### 33.13 개정 1.8의 Sparks 언어 모호성 교차 검증
 
-검토 입력은 사용자 요구인 "언어적 모호함이 없는지 다수의 에이전트로 교차 검증"이다. 서브에이전트 6개가 구문, 이름 해석, 타입·값 의미, 실행·이벤트·수명 의미, 용어·서술, 비프로그래머 오독 관점에서 Sparks 설계 초안 1.0을 독립 검토하였다. 원보고 147건을 119개 항목으로 병합하였고, 항목별 조치와 에이전트 간 권고 충돌의 판정은 [Sparks 언어 설계](SparksLanguage.ko.md) §20.1에 기록하였다.
+검토 입력은 사용자 요구인 "언어적 모호함이 없는지 다수의 에이전트로 교차 검증"이다. 서브에이전트 6개가 구문, 이름 해석, 타입·값 의미, 실행·이벤트·수명 의미, 용어·서술, 비프로그래머 오독 관점에서 Sparks 설계 초안 1.0을 독립 검토하였다. 원보고 147건을 119개 항목으로 병합하였고, 항목별 조치와 에이전트 간 권고 충돌의 판정은 [Sparks 언어 설계](SparksLanguage/20-CrossValidation.ko.md) §20.1에 기록하였다.
 
 | 지적 | 조치 |
 |---|---|
@@ -3028,7 +3030,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 | 예시가 cm·도로 적혀 있으나 엔진 규약은 미터·라디안(2.2절) | 단위 통일과 `Math.Radians` 상수식(SD18), 예시 수정(23.1절). 개정 1.12에서 엔진 규약이 UE와 같은 cm·도가 되어 번복(33.17절) |
 | 문서 간 불일치: 오버로드 처리, session의 VM globals·root, 순환 import | 2.4·22.6·23.4절 정정 |
 
-반영 뒤 서브에이전트 2개로 다시 검증하여 상태 반영 위치(Enable), 문 예시의 회전 연출(Tick), 프레임 순서(8.2·20.2절)를 바로잡았고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 개정 범위는 표지·2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)·33.1(A04)·33.13절, [Sparks 언어 설계](SparksLanguage.ko.md) 초안 1.1, 입력 상세안 11.2·22.3·26.1절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+반영 뒤 서브에이전트 2개로 다시 검증하여 상태 반영 위치(Enable), 문 예시의 회전 연출(Tick), 프레임 순서(8.2·20.2절)를 바로잡았고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 개정 범위는 표지·2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)·33.1(A04)·33.13절, [Sparks 언어 설계](SparksLanguage/README.ko.md) 초안 1.1, 입력 상세안 11.2·22.3·26.1절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ### 33.14 개정 1.9의 UI 구조 전환
 
@@ -3056,7 +3058,7 @@ UE 5.8.4의 GC 구조도 대조하였다. 상세는 [GC 대규모 처리 보강 
 - RT GI는 DynamicGI의 하위 옵션이 아닌 독립 방식이다.
 - path tracing은 GI 방식이 아니라 별도 렌더 모드다(14.3·14.4절).
 
-UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바일 Forward의 클러스터 조명을 대조하였다. 렌더 기반 층은 [렌더 기반](RenderBase.ko.md)에 둔다. 개정 범위는 표지·11.1·14.3·14.4·33.16·34절(S97)이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
+UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바일 Forward의 클러스터 조명을 대조하였다. 렌더 기반 층은 [렌더 기반](RenderBase/README.ko.md)에 둔다. 개정 범위는 표지·11.1·14.3·14.4·33.16·34절(S97)이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
 ### 33.17 개정 1.12의 좌표·단위 UE 전환과 물리 Jolt 복귀
 
@@ -3111,7 +3113,7 @@ Core 수학·World의 코드 전환(C1–C5)과 UE 원본 대조 근거는 [수�
 | 물리 | 엔진 Actor 물리 이벤트 `TriggerEntered` 등(20.2절), LevelScript의 물리 hook·Collider 금지(LD9·LD18) |
 | 편집기 | 열기·참조 추가·이벤트 추가 명령, 언어 서버 명령 채널, 템플릿(22.1·22.3절), 배치 Actor에 component 추가(20.2절)(LD14·LD15·LD20) |
 
-UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem/README.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage/README.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem/README.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ## 34. 참고 자료와 설계 근거
 

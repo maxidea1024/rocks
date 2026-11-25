@@ -101,7 +101,7 @@ internal static class ThirdPartyKindTests
             NoFailures(PolicyChecks.ThirdParty(fixture.Root));
         }
 
-        ExpectHeadersFailure("module rule in headers library", fixture => fixture.Write(HeadersLibrary + "/FakeHeaders.Build.cs", "// rule\n"));
+        ExpectHeadersFailure("missing module rule in headers library", fixture => File.Delete(fixture.FilePath(HeadersLibrary + "/FakeHeaders.Build.cs")));
         ExpectHeadersFailure("header digest mismatch", fixture => File.AppendAllText(fixture.FilePath(HeadersUpstream + "/include/fake/fake_core.h"), " "));
         ExpectHeadersFailure("unrecorded pragma", fixture =>
         {
@@ -155,7 +155,7 @@ internal static class ThirdPartyKindTests
         // 정책 음성 대조(파일).
         ExpectBinaryFailure("committed header digest mismatch", fixture =>
             File.AppendAllText(fixture.FilePath(BinaryUpstream + "/include/fake_api.h"), " "));
-        ExpectBinaryFailure("module rule in binary library", fixture => fixture.Write(BinaryLibrary + "/FakeTool.Build.cs", "// rule\n"));
+        ExpectBinaryFailure("missing module rule in binary library", fixture => File.Delete(fixture.FilePath(BinaryLibrary + "/FakeTool.Build.cs")));
         ExpectBinaryFailure("unlisted tool build file", fixture => fixture.Write(BinaryLibrary + "/Build/Extra.ps1", "# x\n"));
         ExpectBinaryFailure("missing tool build script", fixture => File.Delete(fixture.FilePath(BinaryLibrary + "/Build/Build.sh")));
         ExpectBinaryFailure("stray file in binary library", fixture => fixture.Write(BinaryLibrary + "/fake.dll", "x"));
@@ -295,6 +295,8 @@ internal static class ThirdPartyKindTests
             ["notes"] = Array.Empty<string>()
         };
         fixture.Write(HeadersLibrary + "/ThirdParty.json", change(Format(JsonSerializer.SerializeToNode(manifest)!)));
+        // include 디렉터리가 있는 헤더 라이브러리는 모듈 규칙이 있다(소비 모듈이 의존으로 쓴다 — Docs/Design/BuildTargets 3.5절 BS3a).
+        fixture.Write(HeadersLibrary + "/FakeHeaders.Build.cs", "// rule\n");
     }
 
     private static void WriteBinaryFixture(TemporaryDirectory fixture, Action<JsonObject> change)
@@ -351,6 +353,8 @@ internal static class ThirdPartyKindTests
         })!.AsObject();
         change(manifest);
         fixture.Write(BinaryLibrary + "/ThirdParty.json", Format(manifest));
+        // include 디렉터리가 있는 바이너리 라이브러리는 모듈 규칙이 있다(공개 헤더 모듈 — BS3a).
+        fixture.Write(BinaryLibrary + "/FakeTool.Build.cs", "// rule\n");
     }
 
     private static JsonObject SdkManifest() => JsonSerializer.SerializeToNode(new Dictionary<string, object>

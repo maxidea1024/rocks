@@ -2,7 +2,7 @@
 
 #include <NodeGraph/GraphDiagnostic.h>
 
-// NG1 보조 기능 시험이다(Docs/Design/NodeGraph.ko.md 7·8.5·8.6절, GD19·GD24): id 발급기의
+// NG1 보조 기능 시험이다(Docs/Design/NodeGraph 7·8.5·8.6절, GD19·GD24): id 발급기의
 // 결정성·구별·0 회피, 읽기 view 조회, 순환 검사 도우미(재경유 포함), 기본 연결 판정, schema 기본
 // 함수, 진단 변환, 문서 복제.
 using namespace rocks;

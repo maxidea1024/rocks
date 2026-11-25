@@ -8,7 +8,7 @@ Result<void> RegisterScreenTypes(ModuleRegistration& registration) noexcept {
     return generated::UiScreens::RegisterModuleTypes(registration);
 }
 
-Screen::Screen(Allocator& allocator) noexcept : bindings_(allocator) {
+Screen::Screen(Allocator& allocator) noexcept : UserWidget(allocator), bindings_(allocator) {
 }
 
 Result<void> Screen::BindAction(Guid action, Delegate<bool()>&& callback) noexcept {

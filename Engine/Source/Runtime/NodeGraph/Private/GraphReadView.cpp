@@ -3,7 +3,7 @@
 #include <NodeGraph/GraphReadView.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
-// 문서 읽기 view와 순환 검사 도우미다(Docs/Design/NodeGraph.ko.md 7·8.6절).
+// 문서 읽기 view와 순환 검사 도우미다(Docs/Design/NodeGraph 7·8.6절).
 namespace rocks::nodegraph {
 
 namespace {

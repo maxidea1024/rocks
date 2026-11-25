@@ -87,7 +87,9 @@ TEST(UiScreens_NamedTabChangesSwitcherPageAndSkipsDisabledTab) {
     TypeRegistry types(allocator);
     ModuleRegistration modules(types, allocator);
     REQUIRE(RegisterScreenTypes(modules));
-    ObjectRegistry objects(allocator, types, {0x534352, 15}, {.names = &names});
+    RegistryOptions options;
+    options.names = &names;
+    ObjectRegistry objects(allocator, types, {0x534352, 15}, options);
     const auto access = objects.OwnerAccess();
     ObjectAccessScope scope(access);
     auto treeRoot = objects.NewObject<WidgetTree>(access, GeneratedType<WidgetTree>::Id());

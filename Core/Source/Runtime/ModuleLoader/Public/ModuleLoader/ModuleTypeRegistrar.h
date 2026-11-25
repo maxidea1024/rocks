@@ -8,7 +8,7 @@
 namespace rocks {
 
 // 모듈의 리플렉션 타입을 레지스트리에 등록·해제하는 쪽이다(UE ProcessLoadedObjectsCallback 대응,
-// Docs/Design/ModuleLoader.ko.md 3.6·3.10절 MD15). 로더는 타입 시스템을 모르므로 레지스트리
+// Docs/Design/ModuleLoader 3.6·3.10절 MD15). 로더는 타입 시스템을 모르므로 레지스트리
 // 주인(Engine, 레지스트리를 직접 만드는 도구)이 이 interface를 구현해
 // ModuleLoader::AttachTypeRegistrar로 붙인다. 일반 구현은 ObjectRuntime의
 // ModuleTypeRegistrations다.

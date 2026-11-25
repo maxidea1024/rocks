@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Shared node graph model (Docs/Design/NodeGraph.ko.md sections 6 to 10, stage NG0): the reflected document and layout types (GraphDocument,
+// Shared node graph model (Docs/Design/NodeGraph sections 6 to 10, stage NG0): the reflected document and layout types (GraphDocument,
 // GraphDocumentLayout), node type and pin descriptors, the NG0 part of GraphSchema, the NodeTypeRegistry with the common Graph.Reroute type
 // and pin list computation, the canonical Name order, canonicalization and the full invariant check (GI1 to GI14), and the semantic bytes and
 // hash (section 8.4). Engine Runtime module: ObjectRuntime for the generated reflection codec and CoreTypeBindings for the Vec2 and

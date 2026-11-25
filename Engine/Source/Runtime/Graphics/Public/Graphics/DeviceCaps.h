@@ -7,7 +7,7 @@
 // 수명 동안 바꾸지 않는다(Device::Caps, 잠금 없이 여러 스레드가 읽는다). 픽셀 형식별 능력은
 // Device::GetPixelFormatCaps·GetPixelFormatSampleCounts다(PixelFormat.ko.md 7·8절).
 //
-// 값의 출처는 backend마다 다르다(Docs/Design/RenderBase.ko.md 4.4절 GX1 "구현" 표).
+// 값의 출처는 backend마다 다르다(Docs/Design/RenderBase 4.4절 GX1 "구현" 표).
 // - D3D12·D3D11: API 상수(d3d12.h·d3d11.h의 D3D*_REQ_*·COMMONSHADER_*)와 CheckFeatureSupport.
 // - Vulkan: VkPhysicalDeviceLimits·기능 질의(장치가 켠 기능만 참이다).
 // - OpenGL ES: glGetIntegerv 한도와 확장 문자열.
@@ -192,6 +192,10 @@ struct DeviceFeatures {
     // storage 한도가 0보다 클 때). 형식 정의는 UAV를 CS만 쓰므로 판단용으로만 공개한다.
     bool vertexStores = false;
     bool pixelStores = false;
+    // PS 진단 버퍼(ShaderSystem 7.2절 12항 RocksDebugBuffer)를 쓰는 파이프라인을 받는다(RenderBase
+    // 9.11절 6항 — D3D12는 root UAV에 장치 내부 버퍼를 묶는다. Vulkan·Metal 자리는 엔진 셰이더 SL2,
+    // D3D11·GLES 형식에는 진단 퍼뮤테이션이 없다).
+    bool pixelDebugBuffer = false;
     // HDR10(ST.2084·BT.2020) 출력 중인 디스플레이가 이 어댑터에 있다(DXGI IDXGIOutput6 색 공간, UE
     // WindowsD3D12Device.cpp와 같은 판정, 장치를 만들 때 한 번 본다). Vulkan·OpenGL ES는 surface
     // 질의 전에는 알 수 없어 거짓이다(스왑체인 HDR 단계에서 surface별로 판정한다).

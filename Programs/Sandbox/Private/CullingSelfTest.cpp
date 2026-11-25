@@ -1,4 +1,5 @@
 #include "CullingSelfTest.h"
+#include "SandboxShaders.h"
 #include "SelfTestEnvironment.h"
 
 #include <Base/Compiler.h>
@@ -59,27 +60,7 @@ constexpr uint32 WindingVertexCount = sizeof(WindingVertices) / sizeof(WindingVe
 // 앞면 판정 대조 셰이더다. 컬링 없이 그려 셰이더가 본 앞면(SV_IsFrontFace·gl_FrontFacing)을 색으로
 // 낸다: 앞면 초록, 뒤면 빨강. 컬링 결과만으로는 backend가 앞면 정의를 뒤집어 컬도 함께 뒤집은
 // 경우(UE Vulkan 매핑)를 잡지 못한다(VulkanGraphics 11절).
-constexpr char FacingHlsl[] = R"(
-struct VSInput { float3 position : ATTRIBUTE0; };
-float4 VSMain(VSInput input) : SV_Position { return float4(input.position, 1.0); }
-float4 PSMain(float4 position : SV_Position, bool front : SV_IsFrontFace) : SV_Target {
-    return front ? float4(0.0, 1.0, 0.0, 1.0) : float4(1.0, 0.0, 0.0, 1.0);
-}
-)";
-
-constexpr char FacingVertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec3 aPosition;
-void main() {
-    gl_Position = vec4(aPosition, 1.0);
-}
-)";
-
-constexpr char FacingPixelGlsl[] = R"(#version 450 core
-layout(location = 0) out vec4 oColor;
-void main() {
-    oColor = gl_FrontFacing ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
-}
-)";
+// 셰이더는 Culling.rsf다(CullingFacingVS·CullingFacingPS).
 
 // 두 삼각형의 무게중심 픽셀과, 그것을 위아래로 뒤집은 픽셀이다.
 constexpr uint32 CounterClockwiseX = 16;
@@ -179,13 +160,12 @@ struct Bench {
         };
         const VertexStream streams[] = {{sizeof(Vertex), VertexStepRate::Vertex}};
         PipelineDesc desc;
-        desc.vertex = {sample::BuiltinShaderHlsl(), sample::BuiltinVertexGlsl()};
-        desc.pixel = {sample::BuiltinShaderHlsl(), sample::BuiltinPixelGlsl()};
+        desc.bindings.texture = "Albedo";
         desc.layout = {attributes, streams};
         desc.drawConstantBytes = sizeof(sample::ObjectConstants);
         desc.colorFormats[0] = PixelFormat::RGBA8UnormSrgb;
         desc.raster.cullMode = cull;
-        return device->CreatePipeline(desc);
+        return shaders::CreateGraphicsPipeline(*device, shaders::SampleVS, shaders::SamplePS, desc);
     }
 };
 
@@ -276,12 +256,10 @@ void RunFacingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept {
         {0, VertexFormat::Float3, 0, ROCKS_OFFSET_OF(Vertex, position)}};
     const VertexStream streams[] = {{sizeof(Vertex), VertexStepRate::Vertex}};
     PipelineDesc desc;
-    const StringView hlsl(FacingHlsl, sizeof(FacingHlsl) - 1);
-    desc.vertex = {hlsl, StringView(FacingVertexGlsl, sizeof(FacingVertexGlsl) - 1)};
-    desc.pixel = {hlsl, StringView(FacingPixelGlsl, sizeof(FacingPixelGlsl) - 1)};
     desc.layout = {attributes, streams};
     desc.colorFormats[0] = PixelFormat::RGBA8UnormSrgb;
-    auto pipeline = bench.device->CreatePipeline(desc);
+    auto pipeline = shaders::CreateGraphicsPipeline(*bench.device, shaders::CullingFacingVS,
+                                                    shaders::CullingFacingPS, desc);
     Check(pipeline.IsOk(), "facing pipeline creation");
     if (!pipeline) {
         printf("    %.*s\n", static_cast<int>(bench.device->LastError().ByteCount()),

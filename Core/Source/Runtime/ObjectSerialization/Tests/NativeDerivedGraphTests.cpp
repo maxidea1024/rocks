@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/ArrayFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
@@ -140,7 +141,9 @@ TEST(NativeReflectedBase_GraphLoadIsUnsupportedWithoutLayout) {
                     REQUIRE(borrowed);
                     auto pointer = borrowed.Value().Get();
                     REQUIRE(pointer);
+#if ROCKS_WITH_EDITOR_DATA
                     pointer.Value()->note = 5;
+#endif
                 }
 
                 auto saved = SaveObjectGraph(allocator, objects, access, saver.Value().Handle());
@@ -180,7 +183,9 @@ TEST(NativeReflectedBase_GraphLoadIsUnsupportedWithoutLayout) {
                     REQUIRE(borrowed);
                     auto pointer = borrowed.Value().Get();
                     REQUIRE(pointer);
+#if ROCKS_WITH_EDITOR_DATA
                     CHECK(pointer.Value()->note == 5);
+#endif
                 }
 
                 REQUIRE(objects.Shutdown(access));

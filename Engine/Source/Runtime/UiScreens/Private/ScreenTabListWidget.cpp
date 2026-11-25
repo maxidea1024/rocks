@@ -368,13 +368,20 @@ Result<void> ScreenTabListWidget::Rebuild(ObjectRegistry& objects, Element& host
         if (!button || !button.Value() || button.Value()->Parent()) {
             return Result<void>::Failure(button ? ErrorCode::InvalidArgument : button.Error());
         }
-        button.Value()->SetOnClicked(Delegate<void()>::CreateLambda([&objects, owner = Handle(),
-                                                                     id]() noexcept {
-            auto value = objects.ResolveForWrite<ScreenTabListWidget>(objects.OwnerAccess(), owner);
-            if (value) {
-                (void)value.Value().Get().Value()->SelectTab(objects, id);
-            }
-        }));
+        // 캡처(레지스트리·handle·이름)가 inline 저장보다 커서 객체 할당기에 둔다.
+        auto clicked = Delegate<void()>::TryCreateLambda(
+            allocator, [&objects, owner = Handle(), id]() noexcept {
+                auto value =
+                    objects.ResolveForWrite<ScreenTabListWidget>(objects.OwnerAccess(), owner);
+                if (value) {
+                    (void)value.Value().Get().Value()->SelectTab(objects, id);
+                }
+            });
+        if (!clicked) {
+            return Result<void>::Failure(clicked.Error());
+        }
+
+        button.Value()->SetOnClicked(Move(clicked.Value()));
         auto attached = row.Value()->TryAddChild(button.Value());
         if (!attached) {
             return attached;

@@ -3,7 +3,7 @@
 #include <Core/Math/Float16.h>
 #include <Core/Math/Vector3.h>
 
-// 정점 원소 CPU 패킹이다(Docs/Design/RenderBase.ko.md 10.4절 GX3a). 메시 쿠커와 시험이 정점 형식
+// 정점 원소 CPU 패킹이다(Docs/Design/RenderBase 10.4절 GX3a). 메시 쿠커와 시험이 정점 형식
 // (GraphicsTypes/VertexFormat.h)에 맞춰 값을 담을 때 쓴다. half 변환은 Core/Math/Float16.h를 쓴다
 // (IEEE binary16, round-to-nearest-even, 비정규수·무한대·NaN 보존).
 //

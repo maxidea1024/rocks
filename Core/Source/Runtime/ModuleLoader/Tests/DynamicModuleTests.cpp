@@ -13,7 +13,7 @@
 
 using namespace rocks;
 
-// 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절, ML3)을 이 실행 파일의
+// 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader 3.8절, ML3)을 이 실행 파일의
 // 실제 모듈 표로 검사한다. 시험 실행 파일 규칙은 DynamicModuleTestFixture를 DynamicModules로 두고
 // 그 interface 모듈(DynamicModuleTestApi)만 링크 의존으로 둔다. 그래서 빌드는 그 모듈을 링크하고
 // 표에 행을 싣지만, 실행 파일 Load는 그 모듈을 시작하지 않고 시험은 그 헤더를 보지 못한다.

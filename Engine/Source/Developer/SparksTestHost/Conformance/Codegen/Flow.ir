@@ -14,8 +14,8 @@ L0:
     s2 = EQ s0, s1    ; 4:9
     BRANCH s2, L1, L2    ; 4:9
 L1:
-    s3 = LOADINT 2    ; 5:16
-    s4 = LOADINT 3    ; 5:9
+    s3 = LOADINT 0    ; 5:16
+    s4 = LOADINT 1    ; 5:9
     s5 = LOADINT 0    ; 5:9
     s6 = LOADINT 0    ; 5:9
     s7 = LOADINT 0    ; 5:9
@@ -70,8 +70,8 @@ L0:
     s3 = LT s1, s2    ; 25:13
     BRANCH s3, L1, L2    ; 25:13
 L1:
-    s4 = LOADINT 3    ; 26:20
-    s5 = LOADINT 4    ; 26:13
+    s4 = LOADINT 1    ; 26:20
+    s5 = LOADINT 2    ; 26:13
     RETURN s5    ; 26:13
 L2:
     s6 = LOADINT 0    ; 29:9

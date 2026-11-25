@@ -91,7 +91,7 @@ internal static class SingleFileCommand
                 LoadedRules rules = RuleLoader.Load(rulesPath, target.Name, context);
                 GameLayout layout = GamePlanning.Layout(rules, descriptor, plugins, context, toolchain, configuration, sdk, sdkModules, createDirectories: false);
                 IdePlan plan = IdePlanner.Plan(GamePlanning.Request(toolchain, configuration, project, output, layout.Metadata.Modules, layout.Targets, sdk,
-                    engineVersion, 1));
+                    engineVersion, 1, rules.Target.Kind));
                 if (plan.Compiles.Any(compile => string.Equals(Path.GetFullPath(compile.Source), source,
                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
                 {

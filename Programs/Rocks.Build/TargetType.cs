@@ -5,7 +5,7 @@ namespace Rocks.Build.Rules;
 // 쓰는 Rocks.Build.Rules 그대로다.
 
 /// <summary>
-/// 타깃 종류다(UE 5.8 TargetType의 Game·Program 대응, Editor·Client·Server는 아직 없다).
+/// 타깃 종류다(UE 5.8 TargetType과 같은 다섯 값 — Docs/Design/BuildTargets 3.1절, BS2a). 들어갈 수 있는 모듈 type과 플랫폼은 3.1절 표다.
 /// <list type="bullet">
 /// <item>Game: 출시하는 실행 파일과 그것이 링크하는 엔진 모듈 묶음이다. Release 구성에서 셰이더 시스템 Release 배제 정책
 /// (Docs/Design/ShaderSystem 9절)을 받는다: 모듈 도달 집합에 Developer 모듈이 없고 셰이더 컴파일러(d3dcompiler·dxcompiler)를
@@ -13,6 +13,9 @@ namespace Rocks.Build.Rules;
 /// <item>Program: 개발 도구·시험·벤치마크 실행 파일이다(셰이더 워커, 시험 runner, Commandlet). UE처럼 Release에서도 Developer
 /// 모듈을 쓸 수 있다(UE <c>bBuildDeveloperTools</c>는 Program 타깃이면 구성과 관계없이 켜진다). 플러그인은 타깃·프로젝트가 명시한
 /// 것만 켜진다(enabledByDefault를 적용하지 않는다 — Docs/Design/BuildTargets BD34).</item>
+/// <item>Editor: Rocks Studio(프로세스 안 에디터). 기본 링크 방식은 Modular다. Windows·macOS.</item>
+/// <item>Client: 서버 코드를 뺀 출시 실행 파일(<c>ROCKS_WITH_SERVER_CODE=0</c>).</item>
+/// <item>Server: 클라이언트 코드를 뺀 전용 서버 실행 파일(<c>ROCKS_WITH_CLIENT_CODE=0</c>). Windows·macOS(Linux는 BS6).</item>
 /// </list>
 /// </summary>
-public enum TargetType { Game, Program }
+public enum TargetType { Game, Editor, Client, Server, Program }

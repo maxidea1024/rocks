@@ -191,7 +191,7 @@ Result<bool> ScreenInputRouter::Route(const input::InputEvent& event) noexcept {
         auto handled = Gamepad(event, allowUi);
         return handled && block ? Result<bool>::Success(true) : Move(handled);
     }
-    if (event.type == InputEventType::TouchBegin || event.type == InputEventType::TouchMove) {
+    if (event.type == InputEventType::TouchBegan || event.type == InputEventType::TouchMoved) {
         Observe(ScreenInputDevice::Touch);
     } else if (event.type == InputEventType::MouseDown || event.type == InputEventType::MouseMove ||
                event.type == InputEventType::MouseWheel || event.type == InputEventType::KeyDown) {

@@ -24,8 +24,176 @@
     },
     {
       "kind": "field",
+      "name": "rocks::BoxComponent::boxExtent_",
+      "id": "ee5c772194b0417a8854272022dfcf44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::aspectRatio_",
+      "id": "56b30aa61c3b4f81a8b79fd5cac57b4d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::constrainAspectRatio_",
+      "id": "2ae996287bd1448091943860c47b2590",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::fieldOfView_",
+      "id": "e693c383b5d14e819b79ee90eee2f98b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::orthoWidth_",
+      "id": "004a0d0f326e4946829a1a67aafce3f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::projection_",
+      "id": "4365c04519d24abba0a9deb04a749dca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CameraComponent::usePawnControlRotation_",
+      "id": "4fd834321b7843b6a33478a5f3781bd5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CapsuleComponent::capsuleHalfHeight_",
+      "id": "a029742bcfa8449190b22189d3aeb3da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CapsuleComponent::capsuleRadius_",
+      "id": "11c6f88a49ab446a9bc90799e9404dbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Component::enabled_",
       "id": "c5074d28e80b4e6992d165e099cf8ee7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::atmosphereSunDiskColorScale_",
+      "id": "e134187807304d43b22b8cba497c1ba9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::atmosphereSunLightIndex_",
+      "id": "617f7017a94a4b5192e8c3feb4aeedfa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::atmosphereSunLight_",
+      "id": "ceb9ffd7439041c88d84608cddd2f054",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::cascadeDistributionExponent_",
+      "id": "ff37c603e2bd4b26badb2f0e608eaaad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::cascadeTransitionFraction_",
+      "id": "c30f584fcfac487aa7e5d7e75f90912d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::dynamicShadowCascades_",
+      "id": "acb0abe79ec944d78eca2d5128918681",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::dynamicShadowDistanceMovableLight_",
+      "id": "b73057e461994c59bbe0126a7f797901",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::dynamicShadowDistanceStationaryLight_",
+      "id": "653004b9fb084a37b298708dd6cf5e0d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::farShadowCascadeCount_",
+      "id": "f1e0f99b9ede407fa499efca7d803694",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::farShadowDistance_",
+      "id": "44724accee2449fc9baccb1ae2369524",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::forwardShadingPriority_",
+      "id": "608e0d5b99e44b6a878cd26147ed4bdb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::lightSourceAngle_",
+      "id": "50013006e7dc4c049b00387fb1fa0c99",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::lightSourceSoftAngle_",
+      "id": "c8801cfb5f2942fc8d87d0d7e6f44c75",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::shadowAmount_",
+      "id": "56756ad5119f459ebe4ba56382685d58",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::DirectionalLightComponent::shadowDistanceFadeoutFraction_",
+      "id": "f9e87d8173bb4858ae66054d279ea08e",
       "aliases": [],
       "retired": false
     },
@@ -45,8 +213,1212 @@
     },
     {
       "kind": "field",
+      "name": "rocks::LightComponent::castTranslucentShadows_",
+      "id": "cc9564a4001c4299ab1e7585358bcaad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::contactShadowLengthInWorldSpace_",
+      "id": "1db6a14fb52f415395e483fa45bcf3e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::contactShadowLength_",
+      "id": "02dac288e897465abaa0cbbdaa944427",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::diffuseScale_",
+      "id": "fa32f7bd3fe748708be0016157e4cc9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::lightingChannels_",
+      "id": "2e8d81422c8a43aaacf78aafb156a897",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::maxDistanceFadeRange_",
+      "id": "59e2653bf52c47539ea241134a8685f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::maxDrawDistance_",
+      "id": "7ff40b03c885428eb26725c3632fe1a9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::shadowBias_",
+      "id": "606751f9b9bf492dba2988eb3ebb80c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::shadowResolutionScale_",
+      "id": "475e0ad5c12c4c69ba2da5849dd8fe7b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::shadowSharpen_",
+      "id": "12c6698bd5eb4a1f88406a7e84f7a90b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::shadowSlopeBias_",
+      "id": "4b7a2697af3d4d5794de0e17ba689297",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::specularScale_",
+      "id": "4923be606b2444c7b958c2504dc39ff0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::temperature_",
+      "id": "866814b10b3445c289974a1dd9d1f918",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponent::useTemperature_",
+      "id": "c24fb3b411fe4b17b13342916076ef6d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::affectTranslucentLighting_",
+      "id": "39d8fd006a39467187158dfb338a5abb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::affectsWorld_",
+      "id": "c247bc9d5319469b9a8a6ae1c9f192e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::castDynamicShadows_",
+      "id": "251c9af155b44d47b9b9dcac0ce1eb97",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::castShadows_",
+      "id": "ba65f94f8861450cbb3555e8a0d60852",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::castStaticShadows_",
+      "id": "9e54f81de2484f0a9cba24e706fea47b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::castVolumetricShadow_",
+      "id": "2c176c88a9ac478bb5e862e2107dac35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::indirectLightingIntensity_",
+      "id": "ca0ba131c03a43cf9e799005bb782711",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::intensity_",
+      "id": "6ed80a619ae64226b52f35194f59c51d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::lightColor_",
+      "id": "b9077eaff76b45fd86dd4e338ab243b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::transmission_",
+      "id": "4814a7a9f9114801a57f4efc8d39aae0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightComponentBase::volumetricScatteringIntensity_",
+      "id": "1a227a48ea7d466db314f936f88484e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightingChannels::channel0",
+      "id": "87a6a280895945dd9f4401bd9525d755",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightingChannels::channel1",
+      "id": "06b14eac32524314a36dd09bb8e3a464",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LightingChannels::channel2",
+      "id": "3ee0d125e84d40e8a8b0d8b23b28b076",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LocalLightComponent::attenuationRadius_",
+      "id": "9d9b9cf7d4164940a06c28ccdadfb9c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LocalLightComponent::intensityUnits_",
+      "id": "f0862645905e4bb794bab3c724bd6fe6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::LocalLightComponent::inverseExposureBlend_",
+      "id": "b7fb70d8b3754068a64bbfbe106f6d54",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::autoRegisterUpdatedComponent_",
+      "id": "469a5beaf5454e8fad5424697cd76519",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::autoUpdateTickRegistration_",
+      "id": "07df18abcaf0456c88647cbb92cf1c78",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::constrainToPlane_",
+      "id": "ad86c70ad21346cc9a552033ee2cb566",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::planeConstraintAxis_",
+      "id": "aecbcaad0077472c86606d7662739c96",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::planeConstraintNormal_",
+      "id": "398ad09448544d62acf3521d55176eaf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::planeConstraintOrigin_",
+      "id": "03586857b5f24046b2499e7e3ee54851",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::snapToPlaneAtStart_",
+      "id": "7dfe75eb278e45d8a2cd15bb023c3b80",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::tickBeforeOwner_",
+      "id": "c933ffa6ca024207be8082130bec623d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::velocity_",
+      "id": "4f14c6052b7249dfbbfebffd0707d1ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathControlPoint::position",
+      "id": "c9763d9c84954963b5c665c61462d4dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathControlPoint::positionIsRelative",
+      "id": "600fe333746f48a8a213471828e30dce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::behaviour_",
+      "id": "5dda0ef41d774559ae5a14187acf54f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::controlPoints_",
+      "id": "253a4de4c3ed4070b3cd0f1ac9c147ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::duration_",
+      "id": "3008d2e766b44576b8197f749a6edac8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::forceSubStepping_",
+      "id": "c3cd5fb7d53c4690a3ee64038f54bc86",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::maxSimulationIterations_",
+      "id": "2978e5f49f7d4defa12f1cac7aff899b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::maxSimulationTimeStep_",
+      "id": "07a0aeeb21774f6ea376dbb8401826ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::pauseOnImpact_",
+      "id": "399d48dedc4f4ffca31e4a61b8649dc9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::speedMultiplier_",
+      "id": "e6d869ae3ee940c5af206b8ceef551c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::sweep_",
+      "id": "495b2e45369945f9bc0fdcd61d107191",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PointLightComponent::lightFalloffExponent_",
+      "id": "125f3662f3254f54903e337718dfd4fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PointLightComponent::softSourceRadius_",
+      "id": "af43a87ab99c4c94930c630254645122",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PointLightComponent::sourceLength_",
+      "id": "04b85a7ac6614aaaa867dfcbc845c8cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PointLightComponent::sourceRadius_",
+      "id": "b3b28ec25f6648f797d7b98003978963",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PointLightComponent::useInverseSquaredFalloff_",
+      "id": "d729c83d8b27443591b9cff4cec7f9b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::affectDistanceFieldLighting_",
+      "id": "ac52b7f8451b47328b4b76e9d4f16f42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::affectDynamicIndirectLighting_",
+      "id": "248e40d119ac45569a63f530a835c5ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::allowCullDistanceVolume_",
+      "id": "900a1581967f46f695063485db82e988",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::boundsScale_",
+      "id": "8ce354f0861a490b8a343205d4afc53a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::canCharacterStepUpOn_",
+      "id": "240fba52d59f42249902748b4fe5f79b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castCinematicShadow_",
+      "id": "fae9fefcbb3246ae9a61f39185e700c1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castContactShadow_",
+      "id": "35a84f3585d4489e9726480e49471c6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castDynamicShadow_",
+      "id": "9d1db026f2304b8d978ee3b41280a5c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castFarShadow_",
+      "id": "0bd78d2ecfa94e21b734f15857e9e32e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castHiddenShadow_",
+      "id": "423a10cceb3749a5a0fcc9cb87587d76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castInsetShadow_",
+      "id": "9f440e27091f49fc82faeca1ffd0ed44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castShadowAsTwoSided_",
+      "id": "8d1badc0cca34f3cb4453d61ef329fec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castShadow_",
+      "id": "d0f638d070944b0ea6b9dfbd693b4c43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castStaticShadow_",
+      "id": "8c148e88d27c4e5ba6fb2f404637780e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::castVolumetricTranslucentShadow_",
+      "id": "eb206c4ef56244f29231c657c2b1ef0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::collisionProfileName_",
+      "id": "eafa8eafb6a2466ca4e3cf640df6e942",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::customDepthStencilValue_",
+      "id": "b60114d1b64b4747800443869a8c447e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::customDepthStencilWriteMask_",
+      "id": "a10b15b33a7c4272a8c60c9077d0a29c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::desiredMaxDrawDistance_",
+      "id": "52a18e8a74074c07b169b73c331d93da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::generateOverlapEvents_",
+      "id": "fe66f2756dd7462fa13ae353dc287e74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::hiddenInSceneCapture_",
+      "id": "1df677de51c94e71827ca6c393017942",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::holdout_",
+      "id": "adc86527095b449ab696debe65461e48",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::lightingChannels_",
+      "id": "165915b85233497d8d7b9083a5f6a59c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::minDrawDistance_",
+      "id": "0059f80b791c4fb4a0501bbd39b45450",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::neverDistanceCull_",
+      "id": "a04b7ba841e843709c244c795e97e653",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::onlyOwnerSee_",
+      "id": "4ade484315ca4c17b61c74c44cb3b192",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::ownerNoSee_",
+      "id": "3ca9630825c944b28fa4410c4dd0b6aa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::receiveMobileCsmShadows_",
+      "id": "9aed1f2130294451ac5fca01c849d650",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::receivesDecals_",
+      "id": "d11fa597f47c488cbb6131a61d9ffc11",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::renderCustomDepth_",
+      "id": "fa0ed36f01144d6eb6208cc66fc392f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::renderInDepthPass_",
+      "id": "ba8d497949f24ba1bfd148b5f82bd20b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::renderInMainPass_",
+      "id": "d0d1991ca5da4ff7aefd9c1bbd5a01a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::selfShadowOnly_",
+      "id": "b3c64d9fa5714f4399a0eced903b04be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::singleSampleShadowFromStationaryLights_",
+      "id": "728bc4d6bd4f45f4a8f9d8222fb153cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::translucencySortDistanceOffset_",
+      "id": "4d6fe33d6c8345ff90ceacf01b4d5dd3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::translucencySortPriority_",
+      "id": "fc81dacc09ae4b0e8b274980119b4960",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::treatAsBackgroundForOcclusion_",
+      "id": "06a1ad4bede74b0b856e8663417fabd4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::useAsOccluder_",
+      "id": "7b093e8b8f6849debb576cc3a6e75275",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::visibleInRealTimeSkyCaptures_",
+      "id": "47a3761fd4974a97a722e1c83900e3a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::visibleInReflectionCaptures_",
+      "id": "67d2fff53b2e442ab9f99e0eeae2eb8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::visibleInSceneCaptureOnly_",
+      "id": "b5be9aba905049a1b574ee95b8552382",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounceAdditionalIterations_",
+      "id": "738d9d32eb794ee18e5f3fca94fb1239",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounceAngleAffectsFriction_",
+      "id": "f5ce8e23888d4d9a9c751f648bab2a2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounceVelocityStopSimulatingThreshold_",
+      "id": "29164f6cbe17455385fb31add2851900",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounciness_",
+      "id": "a298746a36ea4d138ace10ed80b41489",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::forceSubStepping_",
+      "id": "9177b69f256745fc8a2acff2a1505bde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::friction_",
+      "id": "cd4318976c7c4f83b17ebcc0f91d80d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::homingAccelerationMagnitude_",
+      "id": "66159c15f2d4436986a7b07d321df554",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::homing_",
+      "id": "be0a9c32ec1b4342922100ba8dc1ad9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::initialSpeed_",
+      "id": "6cf97f67d7864b419d57a84fe198607e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::initialVelocityInLocalSpace_",
+      "id": "67124bdf39484b539fbf892fb87807ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::maxSimulationIterations_",
+      "id": "b5db50b5d5834d33b506a282d0449535",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::maxSimulationTimeStep_",
+      "id": "cd66c872769f464f9783da7456c55c39",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::maxSpeed_",
+      "id": "8f7040df385d42f2b4aabd2466396b49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::minFrictionFraction_",
+      "id": "cf6b929bc1bc40b19b0f850a00eab439",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::projectileGravityScale_",
+      "id": "dd1fdf68827e49b4bd8b46ac2e980c30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::rotationFollowsVelocity_",
+      "id": "fddbe009d54546cdb713ef8ae8437550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::rotationRemainsVertical_",
+      "id": "5f2161eefc1541b4aeaddb67b0b1e565",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::shouldBounce_",
+      "id": "7d58b50e4cb34960a236f7fb9ff63fdf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::simulationEnabled_",
+      "id": "0f26d8ae5b43410885a5306ee1af6ab4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::sweepCollision_",
+      "id": "d7cab4303d6f49e287dc35e447c7b0e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RectLightComponent::barnDoorAngle_",
+      "id": "0bfa81c2117146ecae667a2ec07a56a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RectLightComponent::barnDoorLength_",
+      "id": "99464dfd147b494cba5efafb7b1f70b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RectLightComponent::sourceHeight_",
+      "id": "f18c6eddbd544d91b3c0c03d6f3579f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RectLightComponent::sourceWidth_",
+      "id": "0d8f2aede46d4e7a987999e0c86ac217",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RotatingMovementComponent::pivotTranslation_",
+      "id": "cd009e05c36b4ed4883dcda732708cb4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RotatingMovementComponent::rotationInLocalSpace_",
+      "id": "3d22504f561c4ef6927fec589d603220",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RotatingMovementComponent::rotationRate_",
+      "id": "930e5cc713074539a5f70ac14229fe0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::absoluteLocation_",
+      "id": "1e2dbcde54bc4d2893cfa884f2c202c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::absoluteRotation_",
+      "id": "7525cf051bc142fcb0dcab013912c765",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::absoluteScale_",
+      "id": "d3b2462b63b7417f933cd986f975b970",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::attachParent_",
+      "id": "bc8fa700ff094e77ae01c8803bda9dea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::attachSocket_",
+      "id": "b1e18d8cea574eaba9a317876949dc4b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::hiddenInGame_",
+      "id": "5a0725af1c844c0bb2aba58e24c10362",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::mobility_",
+      "id": "8c3f4acf94524eca95dc04e83f5a25e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SceneComponent::relative_",
       "id": "1713d9606fad4c06b1796784725b290c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::visible_",
+      "id": "a529060c44bd4a96bc497d955c488a44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ShapeComponent::dynamicObstacle_",
+      "id": "15da756fde0949e49c8bf767c9367e0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ShapeComponent::lineThickness_",
+      "id": "8342cf668e1a49a6999572c25f4a105c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ShapeComponent::shapeColor_",
+      "id": "650d1038c19549bf885bbf40ccdfd312",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::captureEmissiveOnly_",
+      "id": "86ccae9893f74b0c93fea491cad7727d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::cubemapResolution_",
+      "id": "58fb54b0539347c48a826acc3ab3f832",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::lowerHemisphereColor_",
+      "id": "3afb579a62ea494ba58e97f8f78c6d24",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::lowerHemisphereIsBlack_",
+      "id": "c69aa15eb24242ccb7904c437ce69255",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::realTimeCapture_",
+      "id": "8bc2867583ad4be884ea2506a7194e78",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::skyDistanceThreshold_",
+      "id": "195170ff93a140f79cd2f447f74c6e3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::sourceCubemapAngle_",
+      "id": "8b3a800fc44244b2b019fb7e28be7fe1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkyLightComponent::sourceType_",
+      "id": "74daf50d947a4aff85b884fab407607f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SphereComponent::sphereRadius_",
+      "id": "cfd3211c564443eb807ffb5dd5ef85ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::closedLoop_",
+      "id": "e22e3f5dd45342e082fd1f4f938bc70f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::defaultUpVector_",
+      "id": "97e1768f7c624fcc8bc1b69800269c3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::duration_",
+      "id": "568db81151a441f6b897d38dbf223123",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::loopPositionOverride_",
+      "id": "b4dc659970134a02b0dff9228b85f08d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::loopPosition_",
+      "id": "3bbbd153a5304fb1af4c8326cd9501d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::position_",
+      "id": "20ab1a65dba640a5a0d693e2483ae5a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::reparamStepsPerSegment_",
+      "id": "649d748eb5c448daabdc7d84b2539651",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::rotation_",
+      "id": "c7bab9913d0945d0b2903758d5117d9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::scale_",
+      "id": "0d9f514bc04d4f74b6a878111e1a2284",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SplineComponent::stationaryEndpoints_",
+      "id": "53905d30cd8445eab4c30fac9ef019ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpotLightComponent::innerConeAngle_",
+      "id": "c5bdf3b106c1401cbde4e2e8beedde61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpotLightComponent::outerConeAngle_",
+      "id": "ef8da9f15f0d4c418d127955fa608e8f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraLagMaxDistance_",
+      "id": "f3e3caf859d04559b90f4e87502db54f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraLagMaxTimeStep_",
+      "id": "0f4cc508bbdf4423b5c796299cb2db55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraLagSpeed_",
+      "id": "d4206b5c15474d6abaf7af5cc48b2c12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraRotationLagSpeed_",
+      "id": "c9fc76aade7145dabd2bcfd9008966c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::doCollisionTest_",
+      "id": "bf540a34cb06422fa7db9eb4d1e65ece",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::enableCameraLag_",
+      "id": "c6418f2bdfee423c85477c0f4dc4083c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::enableCameraRotationLag_",
+      "id": "19479087c0a64adaa69a9d0007ef00d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::inheritPitch_",
+      "id": "621232ecfc7e4738959baa94acd47809",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::inheritRoll_",
+      "id": "a86abb81a09a4e7ebdab0c7000a4f769",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::inheritYaw_",
+      "id": "d476b76e64fd4b08ab53b6ed57a756a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::probeSize_",
+      "id": "de466dd2f055482f98bab29a2a6b42ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::socketOffset_",
+      "id": "11e0f247994c440ab7256f71ef9f420f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::targetArmLength_",
+      "id": "7ad2097813754e29932ecbd40151a2b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::targetOffset_",
+      "id": "8bd37243162a4e76b5070481c6b3f2ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::useCameraLagSubstepping_",
+      "id": "2e7d3d377b634b8cbe08431f3719bf44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::usePawnControlRotation_",
+      "id": "2a7add39bf6743fb8a804b6640604725",
       "aliases": [],
       "retired": false
     },
@@ -59,8 +1431,64 @@
     },
     {
       "kind": "type",
+      "name": "rocks::BoxComponent",
+      "id": "deb5da638ae349c7aaf671c170d6679a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CameraComponent",
+      "id": "fc5c14c217674f1ba2f77cdc74d591d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CameraProjection",
+      "id": "1fcc7761e5fa4ca2b4095aa29d3a2b26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CanBeCharacterBase",
+      "id": "638932133a734c46a01f3647f8c0a59f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CapsuleComponent",
+      "id": "a9de7850236242b1bd23c0cab62edc8a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::Component",
       "id": "7fc3644ef61c4d0883a9a76cd1893955",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ComponentMobility",
+      "id": "0a5cbc1ea18e46acaf7eab49af171151",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::DirectionalLight",
+      "id": "7aca3f9895184f3580506f564e06a475",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::DirectionalLightComponent",
+      "id": "f2bebc0087ff4f01a4cc1e897e85ddb3",
       "aliases": [],
       "retired": false
     },
@@ -73,8 +1501,246 @@
     },
     {
       "kind": "type",
+      "name": "rocks::Light",
+      "id": "9204e67ef89047a2ba6f7457eddc0116",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::LightComponent",
+      "id": "93a5fa5557e848b091a8c3c1f05f17b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::LightComponentBase",
+      "id": "729d4fc2c6554842a9255519f2448dc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::LightUnits",
+      "id": "ca95f3cf891345f9b77df44fdee3895c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::LightingChannels",
+      "id": "0138ba673eb140a59e23cdd8dfb1c7bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::LocalLightComponent",
+      "id": "099164303bff428ab81bd8e7faf3c062",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MovementComponent",
+      "id": "d1a0b0a6b7b8445ea5e60d6b76401353",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PathControlPoint",
+      "id": "9aec311501d24cdf85a6240568383550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PathMoverBehaviour",
+      "id": "47e03978194c44e0a0497e94779860d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PathMoverComponent",
+      "id": "4e410d65cabb4ea48da8854b7760bc34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlaneConstraintAxis",
+      "id": "df464b085f3d4b4abca8ca8e26ec50e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PointLight",
+      "id": "9d1c961ca9164d74b66d62f6dc470de6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PointLightComponent",
+      "id": "794e6bacc14240bf9bad36e3ce4ad140",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PrimitiveComponent",
+      "id": "2d42900e5f19486798e9c7ea993e5179",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ProjectileMovementComponent",
+      "id": "6d10c67ed1da42f0b39243ae193eb54e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RectLight",
+      "id": "c08929e2a39845efba1c3c15c2f9a46d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RectLightComponent",
+      "id": "865f255eecd64b26b1417d92aae066da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RendererStencilMask",
+      "id": "bbe4015df93a46128a63a879cd172283",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RotatingMovementComponent",
+      "id": "5ef6c0b2501548da94804da2553d3cef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::SceneComponent",
       "id": "15541c1170f742ab9e8beacde7ab7926",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ShapeComponent",
+      "id": "188d293d9e53478198d77bdf8e1f82f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkyLight",
+      "id": "163d83ffc3fa42e99efb7dee905a8987",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkyLightComponent",
+      "id": "4b976f386d364c6ba5476b988293d2be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkyLightSourceType",
+      "id": "09d0bf86b8674425b7a1312b3cc66acb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SphereComponent",
+      "id": "e044c78cc3ec4a7681171711856baf2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SplineComponent",
+      "id": "262c9a119fb94f91b084b55b4458c999",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SplineCoordinateSpace",
+      "id": "582d1248aa434c31a0b5190d024801c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SplinePointType",
+      "id": "5b159010027b435397aec2f4a916eb26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SpotLight",
+      "id": "0c0f6672fe77410cbeabda3fadd71457",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SpotLightComponent",
+      "id": "a57a8972a5484855b44e499b280bd39e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SpringArmComponent",
+      "id": "93f053473fe24bdfa89873e9a8c45c41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerBase",
+      "id": "2eaaddbceccc4e0c85f379fd49f0858d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerBox",
+      "id": "b04b5a2460b14e4885adc7338ebb78b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerCapsule",
+      "id": "44fd5af7801e45409e0a2f10b63e78b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TriggerSphere",
+      "id": "6ebfb23671bf45fa9c112a60e4e21d16",
       "aliases": [],
       "retired": false
     }

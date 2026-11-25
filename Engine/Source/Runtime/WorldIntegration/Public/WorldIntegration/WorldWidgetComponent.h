@@ -39,7 +39,7 @@ public:
     // 좌상·우상·좌하 순서다. 역변환 hit와 같은 피벗·크기·WorldMatrix를 쓴다.
     void PlaneCorners(Vec3d& topLeft, Vec3d& topRight, Vec3d& bottomLeft) const noexcept;
     void OnDisable() noexcept override;
-    void OnDestroy() noexcept override;
+    void OnDestroy(EndPlayReason reason) noexcept override;
 
 private:
     Result<void> EnsureRoot() noexcept;

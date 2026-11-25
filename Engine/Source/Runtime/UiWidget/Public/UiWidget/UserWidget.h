@@ -13,6 +13,8 @@ class ROCKS_UIWIDGET_API UserWidget : public Widget {
     ROCKS_GENERATED_BODY()
 
 public:
+    explicit UserWidget(Allocator& allocator) noexcept;
+
     Result<void> Initialize(ObjectRegistry& objects) noexcept;
     ObjectHandle Tree() const noexcept;
     ObjectHandle ViewModel() const noexcept;

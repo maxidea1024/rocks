@@ -1,0 +1,26 @@
+// 형식 self-test 셰이더다(float·int·uint 색 출력과 깊이·스텐실 plane 읽기).
+float4 FloatColorPS(float4 position : SV_Position) : SV_Target0 {
+    return float4(0.25, 0.5, 0.75, 1.0);
+}
+
+int4 IntColorPS(float4 position : SV_Position) : SV_Target0 {
+    return int4(1, 2, 3, 4);
+}
+
+uint4 UintColorPS(float4 position : SV_Position) : SV_Target0 {
+    return uint4(1, 2, 3, 4);
+}
+
+Texture2D<float4> Depth;
+
+float4 LoadFloatPS(float4 position : SV_Position) : SV_Target0 {
+    float4 value = Depth.Load(int3(uint2(position.xy) % 4, 0));
+    return float4(value.rgb, 1.0);
+}
+
+Texture2D<uint4> Stencil;
+
+float4 LoadStencilPS(float4 position : SV_Position) : SV_Target0 {
+    uint4 value = Stencil.Load(int3(uint2(position.xy) % 4, 0));
+    return float4(0.0, value.g / 255.0, 0.0, 1.0);
+}

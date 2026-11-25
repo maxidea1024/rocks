@@ -24,7 +24,8 @@ namespace rocks::graphics {
 // - 스왑체인은 flip-model(R8G8B8A8_UNORM 버퍼, RGBA8UnormSrgb RTV)이다.
 // - 정점 버퍼는 upload heap에 두고(정적 소량 데이터), 텍스처는 default heap에 복사 후 GPU 완료를
 // 기다린다.
-// - 셰이더는 HLSL을 실행 시 SM 5.1로 컴파일한다. 정점 속성은 TEXCOORD{location} 의미 체계를 쓴다.
+// - 셰이더는 쿠킹된 DXIL(D3D12_SM6, CreateShader)이다. 정점 입력 시맨틱은 ATTRIBUTE{location},
+//   그리기 상수는 root 32-bit 상수(b0 space3)이고 root signature는 셰이더 layout으로 만든다.
 Result<UniquePtr<Device>> CreateD3D12Device(Allocator& allocator, const DeviceDesc& desc,
                                             DeviceCreateReport* report = nullptr) noexcept;
 

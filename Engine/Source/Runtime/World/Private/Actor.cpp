@@ -26,6 +26,30 @@ ActorState Actor::GetState() const noexcept {
     return state ? state.Value() : ActorState::PendingDestroy;
 }
 
+Result<void> Actor::SetOwner(ObjectHandle owner) noexcept {
+    if (world_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return world_->SetActorOwner(Handle(), owner);
+}
+
+Result<void> Actor::SetInstigator(ObjectHandle instigator) noexcept {
+    if (world_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return world_->SetActorInstigator(Handle(), instigator);
+}
+
+Result<void> Actor::SetLifeSpan(double seconds) noexcept {
+    if (world_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return world_->SetActorLifeSpan(Handle(), seconds);
+}
+
 Result<void> Actor::SetEnabled(bool enabled) noexcept {
     enabled_ = enabled;
     if (world_ == nullptr) {

@@ -1,0 +1,97 @@
+## 19. 개정 이력
+
+- 개정 1(2026-11-16): 초안. UE 5.8.4 RenderCore 다섯 갈래 조사(렌더 스레드·자원 수명, 렌더 그래프, 셰이더 런타임, 정점 입력·공용 자원·계측, RHI·Core 선행 조건)를 종합했다. 사용자 지시 "용어들은 우리 rocks에 맞춰야함"에 따라 UE 이름은 대응표와 근거 열에만 둔다. 사용자 지시 "기존에 언리얼에서 레거시로 하위호환을 해놓은 코드들은 고려할 필요가 없음"에 따라 UE 레거시·버전 이력을 뺐다.
+- 개정 2(2026-11-16): 교차 검증 2건(UE 5.8.4 근거 약 160곳·Rocks 근거 약 35곳 사실 확인, 정합성·반례·완결성 검토: 차단 3·중요 15·사소 9)을 반영했다.
+  - 차단:
+    - 장치 한 스레드 계약과 지연 생성·병렬 기록·handle 예약의 모순 → 장치 스레드 모델 GX11(5.4절)을 두었다. `RenderHandle` 예약 표를 RenderBase에 두고, GLES 생성은 lane 작업으로 넘기며, 지연 생성 기준을 "게시 1회"로 바꿨다.
+    - 엔진 셰이더 완결성 검사가 `GLES31_PC`·개발 트리에서 늘 실패하는 문제 → 셰이더 공급자 interface와 "공급 대기" 상태를 두었다(9.2절, SX14).
+    - 종료 순서가 계획 3.2절과 맞지 않음 → 렌더 lane이 closure 확인까지 산다. Drain을 소유권 반납 앞에 두고, 스왑체인 → 창 순서를 정했다(5.5절).
+  - 중요:
+    - 대기 중 메시지 펌프·표면 작업·표면 소실 예외(5.3절)
+    - 인라인 모드 trampoline과 실행 중 표지(CP1)
+    - GLES 업로드 판단을 (program, 순번)별 identity·version으로(9.4절)
+    - 셰이더 집합 lease·epoch·교체 규칙(9.2·9.7·9.8절)
+    - 그래프 import·export·풀 축출(7.4절)
+    - 샘플러 위치와 비교 샘플러(결정 R12, SX13, A0-G 전 기한)
+    - 정점 입력 셋 구분과 맵 키(10.2절, SX4)
+    - 셰이더 집합 → 팩 → `BuiltinReady` 순서와 BR01 범위(5.5·6.3절)
+    - MetaSchema 의존·ObjectRuntime 비의존·완료 통지 큐(5.2·9.3절)
+    - 전달 가능 타입 등록으로 강제 범위를 좁힘
+    - fence 완료 이벤트·descriptor 회수(GX7)
+    - 의존 표와 18절 일치, GX12·GX13·CP8·RB7 추가
+    - SX11·R8 정리
+    - 빠진 개정 대상(EngineRuntime 6·11·12·13절, 계획 3.2·8.1·11.2절, ShaderSystem 12.3절, RepositoryLayout)
+  - 사소:
+    - 절 참조 정정
+    - 본문 UE 이름을 근거 `파일:줄`로 대체
+    - `KeepAlive`(Rockpile과 충돌) → `HasSideEffects`, `ConstantBuffer`(HLSL과 혼동) → `ConstantBlock`
+    - 레거시·버전 표기 제거
+    - 상태 `Failed` 추가, 소멸 처리 통일
+    - backend white 역할 정리, `Core/Hash.h` 명시, GL debug output 포함, GX7 상태 정정
+  - 사실 정정:
+    - 보조 pipe 사용처(플러그인 Niagara·Cable·Groom 포함)
+    - 풀 축출 조건(렌더 타깃 풀은 하한 초과 시 3프레임, 버퍼 풀은 30프레임)
+    - UE clear의 load 동작 조건
+    - 엔진 셰이더 맵 부재 처리(창 지원 플랫폼은 종료 요청, `ShaderCompiler.cpp:5715–5724`)
+    - 기능 수준 변경 재초기화 범위
+    - 그래프 설정 변수 31개
+    - 모바일 명령 큐 모드
+    - breadcrumb 빌드 조건
+    - 정점 원소 타입 20종
+    - UE 기본 법선 텍스처 값(128,128,128,255)
+    - 줄 번호 11건
+  - 미확인 해소:
+    - D3D12 split barrier(native 미사용, 표시 기본 false)
+    - CPU·GPU calibration API
+    - GLES 정적 UB 처리(UE도 slot별 저장 뒤 바뀐 것만 복사)
+    - Rocks backend 스레드 검사 없음
+    - 정점 속성 최소 16(Vulkan·GLES 사양)
+- 개정 3(2026-11-16): 6.5절 텍스처 플랫폼 데이터 입력 계약을 더했다. 사용자 결정 "화면 마일스톤과 텍스처 스트리밍 … 이것도 니가해"로 렌더 세션이 GPU 업로드·스트리밍을 맡고, 압축·색 보정은 에셋 세션이 맡는다. 배치·스트리밍 단위·정렬·직렬화는 에셋 세션과 합의했다. UE 5.8 근거는 플랫폼 데이터·mip 구조·cube face 배치·쿠킹 mip 분할이다. 15절 AssetSystem 행에 A5 착수 전 요구를 더했다.
+- 개정 4(2026-11-16): 18.1절 화면 마일스톤 범위를 정의했다. 사용자 결정은 다음과 같다: "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음", 쿠킹 셰이더 위에서(셰이더 시스템 결정 11 (나)), 렌더 기반 구조 포함, A5 텍스처 전부, 검증 backend는 셰이더 경로를 따름. 결정 R10을 이에 맞췄다.
+- 개정 5(2026-11-17): GX7·GX10·GX11·CP6·RB1·GX3a 구현을 반영했다. 4.2절 상태 열과 RB1 행, 4.3·4.4·5.7·10.4절 구현 메모를 더했다. 스펙과 다르게 정한 것: 작업 함수를 캡처 없는 함수 포인터로 제한, `Retire`는 handle만 받음(호출자 last-use 하한 없음), D3D12 스레드 안전 생성은 GX8로 미룸, 장치 손실·미지원 능력은 기존 오류 코드(`Destroyed`·`Unsupported`), 정리 drain·closure·실행기 hook은 실행 파일 hook에만. 같은 날 사용자 결정으로 최소 렌더러(내장 메시·원문 셰이더)를 엔진 모듈에서 Sandbox 시험 샘플로 옮겼다.
+- 개정 6(2026-11-17): GX8·GX9 구현을 반영했다(4.2절 상태 열, 4.4절 구현 메모, 13.2절 GLES 시간 대응 결정). GX11 상태에서 "D3D12 스레드 안전 생성은 GX8과 함께"를 지웠다(GX8에서 열었다). 스펙과 다르게 정한 것: 업로드 ring은 프레임 slot별 고정 구간 대신 fence로 닫는 묶음의 원형 할당, timestamp 끊김은 `ErrorCode::Cancelled`로 통지, `GpuScope`는 RB7로 남김.
+- 개정 8(2026-11-17): RB7 `GpuTrace`·`GpuScope` 구현과 RB1 설정 snapshot 연결을 반영했다(4.2절 CP4·CP5·CP8·GX9·RB1 상태, 5.7·12·13.3절 구현 메모, 캡처 도구 수동 확인 절차). 스펙과 다르게 정한 것: GPU 구간을 두 tick을 가진 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, calibration은 세션 첫 프레임과 일정 프레임 간격의 정의 기록으로, 작업·fence 사건과 그래프 자동 구간은 뒤로, 설정 snapshot 참조는 타입 표지를 가진 공유 참조(`RenderSettingsRef`)로 둠.
+- 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.
+- 개정 9(2026-11-17): [픽셀 형식](../PixelFormat.ko.md) 설계(개정 1)와 교차 참조를 넣었다(4.2절 GX1 행, 4.4절 GX1·GX2, 6.5절 후속). 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원"에 따라 형식 부분은 A0-G에서 분리하여 PF1–PF3으로 먼저 한다.
+- 개정 10(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로. 픽셀 형식 PF1 병합 뒤 그래프 텍스처 desc는 `PixelFormat`이고, 풀 byte 추정은 `MipChainBytes(format, w, h, 1, mips)`(PixelFormatInfo), `CreateTexture`는 번호표 밖·블록 압축 형식을 거부한다.
+- 개정 11(2026-11-17): Vulkan GX5 전이 구현을 반영했다(4.4절 GX5 구현 메모, RG1 완료 기준 (g)에 Vulkan 하드웨어·lavapipe). 처리는 [렌더 기반 구현](../../Implementation/RenderBase.ko.md) 8절과 [VulkanGraphics](../VulkanGraphics.ko.md) 8절.
+- 개정 12(2026-11-18): GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 부분(버퍼 용도·버퍼 view·`ReadBuffer`·그리기 slot) 1단계 구현을 반영했다(4.2절 GX1·GX2 상태, 4.4절 구현 메모와 장치 측정 표). 스펙과 다르게 정한 것: 버퍼 view 묶기는 GX6 전 개발 경로 고정 배치(slot 0–3 = `t1–t4`)이고, Vulkan 그리기 descriptor는 파이프라인별 layout과 기록 단위 pool로 바꿨다.
+- 개정 13(2026-11-18): [CVar·치트 명령 설계](../CVarSystem.ko.md) 개정 2를 반영했다(4.2절 CP4 행, 12절 CVar 이관 메모). RB1의 설정 snapshot 연결은 CVar 구현 때 `Acquire()`·모든 CVar 포함·렌더 lane `SnapshotBinding`으로 바뀐다.
+- 개정 14(2026-11-18): CP7(엔진 전역 `Name` pool)을 권장안으로 정했다: 전역 pool 없음, 렌더 이름은 정적 문자열 리터럴 + 64 bit 해시 조회, 등록 때 충돌·중복은 실패, 쿠킹 형식은 이름 정렬·SHA-256 그대로(4.3절, CP 표).
+- 개정 15(2026-11-18): [렌더러](../Renderer.ko.md) 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17을 설계로 반영했다(구현은 화면 마일스톤 뒤 렌더러 단계).
+  - RQ7: 9.5절에 렌더러 공유 상수 slot 여섯(`View`·`Scene`·`ForwardLight`·`Shadow`·`Fog`·`PrecomputedLighting`)과 상수 버퍼 예산, 9.6절에 자원 묶음 규칙(펼쳐 넣기·이름·쓰는 멤버만 의존·view마다).
+  - RQ8: 10.5절 인스턴스 데이터 읽기(GPU Scene typed buffer, 인스턴스 번호 목록 + `SV_InstanceID`, 루트 상수 `MeshDrawConstants`, 행렬식 부호별 그리기, 결정 R13).
+  - RQ15: 7.5절 렌더러 사용 요구(`GraphSharedData`와 `SceneTextureSet`, history export 성공 조건과 무효 표시, mip view와 GLES view 기준 mip, view 여럿의 한 그래프와 pass 묶음 구간). 렌더 그래프 별도 문서가 없어 이 문서에 두었다.
+  - RQ16: 11.2절 MSAA resolve(색 휘도 가중, 깊이 전경 최댓값, 같은 표본 velocity, coverage 선택 출력), 14절 MSAA resolve 행.
+  - RQ17: 11.1절 빈 light grid·빈 그림자 depth(깊이 1)·검은 cube·기본 BRDF LUT(결정 R14).
+  - 2절 용어에 `GraphTextureView`·자원 묶음을 더하고, 9.9절 SX4에 셰이더 시스템 개정 16 반영을 적었다.
+- 개정 16(2026-11-18): 개정 15 교차 검증 반영.
+  - 7.4·7.5절: packet 하나에 `ViewSet`이 여럿인 경우 `SceneTextureTable`을 (ViewSet, view) 키 표 하나로, 선언 순서 A 공통 → A view들 → B 공통 …, history export를 풀 반납으로(결정 R15), GLES mip view의 크기 조회도 기준 mip 명시, 그래프 구간 `GraphScope`의 번호는 trace 표지로.
+  - 9.2절: 런타임 확인 기능 비트 대조와 `Unsupported`. 9.3절: 그리기별 바인딩. 9.5절: `PrecomputedLighting`을 slot에서 그리기별 바인딩으로 옮겨 공유 slot 다섯, `Scene`은 `ViewSet` 단위, 상수 버퍼 예산 최대 10(머티리얼 파라미터 컬렉션 2 포함), GLES `vec4`는 합으로 검사. 9.6절: 이름 `<포함 멤버 이름>_<자원 멤버 이름>`(UE 중첩 구조체 규칙), `SharedResourceStruct`·`DrawResourceStruct` 용어.
+  - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
+  - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
+  - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 40(2026-11-25): RB3–RB6 남은 항목 대조와 설계(18.3절 표 RR1–RR19, 4.2절 RB2–RB7 행). GX13 검토 결정(4.4절): 후속 확정 — UE 5.8은 subpass를 그래프 자동 기능이 아니라 모바일 렌더러의 `ESubpassHint` 선언으로 쓰고, 그래프 병합은 같은 렌더 타깃 연속 pass 병합(subpass 없음)이므로 RG3 병합에서 GX13 의존을 지웠다(7·8·18절). RB5 정점 입력 타입 등록 설계(10.6절: 셰이더 타입 등록부에 함께, 생성 include 연결, 엔진 기본 정점 입력 타입 — 셰이더 시스템 개정 48). RB6 설계(11.4절: 상태 프리셋, 엔진 셰이더 타입 넷, 전체화면 pass 도우미, `NullTextureBindings`, 내장 자원 팩 1차, typed 대체 선택과 `ResolveTexture`). RB4 셰이더 교체 구현 설계(9.8절 `ShaderSetSlot`). 버린 것: RB3 로드 때 일괄 생성(장치 셰이더가 CPU 사본이 되어 이득 없음).
+- 개정 39(2026-11-25): GX6 상수 버퍼 묶기 구현(9.11절 "구현", 4.2절 GX6 행). 스펙과 다르게 정한 것: D3D11 handle은 `IMMUTABLE`·`DEFAULT`(deferred context의 `DYNAMIC` 규칙), D3D12 Sampler table은 영구 descriptor, `DeviceFeatures::pixelDebugBuffer`, Sandbox 공급자 개발 전용 타입. 시험 결과(EngineTests·여덟 장치 self-test).
+- 개정 38(2026-11-25): GX6 상수 버퍼 묶기 설계(9.11절, 4.2절 GX6 행): 수명 `SingleFrame`·`MultiFrame` handle과 기록 명령 `SetConstantData`(UE `SingleDraw`), 256 byte 정렬·queue별 ring·page 할당·rename 갱신(기록 순서), 값 1 상수 버퍼 slot 묶기(`SetConstantBuffer`, 단계별, 선언 크기 이상 조건), backend 매핑(D3D12 root CBV·넘친 CBV table, D3D11 `DYNAMIC`, Vulkan 동적 UBO, GLES 복사 표), D3D12 root 배치(단계별 SRV·Sampler·UAV·CBV table, 보장 root CBV 13·진단 12·CS 14 — 셰이더 시스템 개정 47), PS 진단 버퍼 자리(D3D12), RenderBase `ConstantBlock::Commit`·`ApplyConstantBlock`, RenderGraph `CreateConstants`·`GraphConstantBuffer`.
+- 개정 37(2026-11-25): GX3·GX4 compute 연결 구현(4.4절 "구현(2026-11-25, 개정 37)", 4.2절 GX3·GX4 행을 구현으로). 설계와 다르게 정한 것은 없다. 기록 장치에 compute·버퍼 view·dispatch 기록을 더했다. Sandbox self-test는 여덟 장치(lavapipe 포함)에서 결과가 같다.
+- 개정 36(2026-11-25): GX3·GX4 compute 연결 설계(4.4절 "GX3·GX4 compute 연결 설계", 4.2절 GX3·GX4 행, 7.5·9.7절 한 줄씩). 장치 쪽 compute는 2026-11-18에 구현되어 있으므로 렌더 쪽 빈자리만 정했다: 파이프라인 캐시의 compute 항목(같은 캐시·종류 표지 키), 그룹 수 도우미 `RenderBase/ComputeDispatch.h`(UE `FComputeShaderUtils` 대응, 한도 밖은 명시 실패), 그래프 버퍼 view `GraphBufferView`, 그래프 compute pass 도우미 `AddComputePass`(직접·간접, 간접 인자 `IndirectArgs` 자동 선언, 캐시 판은 선언 때 파이프라인을 정한다 — RG3 병렬 기록 때문에 UE의 실행 때 찾기는 버림). 후속: 접는 그룹 수, 그룹 수 콜백.
+- 개정 35(2026-11-25): 셰이더 시스템 SH2e2 반영. 장치 셰이더(`CreateShader`)와 slot 이름 표, 값 1·값 2에서 얻는 slot 배치·정점 입력·루트 상수 위치를 4.4절 GX2·GX3·GX4 구현 메모와 10.4·18.1절에 적고, 없앤 고정 register·런타임 리플렉션·원문 컴파일 서술을 고쳤다. 문서를 장별 폴더로 나눴다(5043a327, 내용 불변).
+- 개정 34(2026-11-22): RB1 설정 snapshot의 타입 표지를 Core `TypeKeyOf<T>()`로 바꾼 것(BuildTargets BS8e, 6e2553e0)을 12절 구현 메모에 반영했다. 변수 템플릿 주소 표지는 Modular에서 DLL마다 달라 버렸다.
+- 개정 33(2026-11-20): GX12·RG5 transient aliasing 설계(8절): 장치 transient heap(`Buffers`·`Textures`·`Targets`)·placed 자원·aliasing 획득(`ResourceTransition::acquire`, attachment `acquire`), 그래프 UE first fit 할당기(UE의 세 fence 대신 RG4로 넓힌 pass 구간), heap 캐시(두 queue 마지막 사용이 끝난 heap만 다시 씀, 16 프레임 GC, 128 MiB), 설정 `transientAliasing`(기본 켬)·`asyncComputeAliasing`(기본 끔), 진단 `transientBytes`·`transientPeakBytes`. RG4 남은 것: compute queue GPU 구간(`GpuTraceSettings::queue`, `RenderNotice` queue, `RenderGraphDesc::computeTrace`). 버린 대안: 종류 통합 heap, GPU 완료 없는 heap 재사용, 풀만. 같은 날 구현(D3D12·Vulkan·그래프·기록 장치 겹침 검출·Sandbox 시험)과 계측, D3D12 GPU 기반 검증 확인(`DeviceDesc::enableGpuValidation`, `Sandbox --self-test --gpu-validation`, 메시지 없음)을 적었다.
+- 개정 32(2026-11-20): RG4 async compute 설계(8절 "RG4 async compute 설계"): 장치 `QueueKind::AsyncCompute`·`DeviceFeatures::asyncCompute`·`efficientAsyncCompute`(UE 효율 판단)·`PassDesc::queue`·`Device::QueueWait`·queue별 `LastSubmittedFence`·`CalibrateClocks`·`TimestampSample::queue`, queue별 마지막 사용과 기록 저장소, Vulkan은 UE 5.8과 같은 조건(maintenance9 등)·공유 방식(2026-11-20 사용자 결정, 처음 넣은 concurrent 안은 버린 대안으로 옮김)이고 compute queue 경로는 maintenance9 장치 검증과 함께 후속. 그래프 `GraphAsyncCompute`(Auto·Always·Disabled), UE와 같은 fork·join·수명 연장, 다른 pipe 전이는 graphics queue에서(fork pass epilogue·prologue 기록, 소비 pass prologue), 그래프는 늘 graphics 제출로 끝남(epilogue join), 병합과 배타 계약. 결정 R6 확정(그래프 밖). 버린 대안: Vulkan concurrent 공유, binary semaphore, 동시 기록 둘, compute queue 전이, async pass 바로 앞 fork. 같은 날 구현(8절 "구현(2026-11-20, RG4)"): D3D12 compute queue·그래프 fork·join·기록 장치 경쟁 검출과 시험.
+- 개정 31(2026-11-20): RG3 병렬 기록 설계(8절 "RG3 병렬 기록 설계"): 기록 목록 `GraphCommandList`에 pass 기록 함수를 worker에서 기록하고 소유 스레드가 선언 순서로 재생(장치 호출 열이 직렬과 같음), 장치 쪽 스레드별 기록 객체는 버림, render pass 병합은 GX13 뒤로.
+- 개정 30(2026-11-20): 메시 에셋 단계(MA2) 전 결정을 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). R18 skinned 본 행렬과 섹션(UE 5.8처럼 섹션 분할 없음·LOD 통합 bone map·256 기준 번호 폭·typed buffer 본 행렬), R19 고정밀 형식은 stream 형식 차이, R20 `IndexFormat`을 GraphicsTypes로 옮기고 고정 번호표. 10.4절 끝과 16절 결정 표에 적었다.
+- 개정 29(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)의 요구 MR1·MR2·MR7을 10.4절 끝 "메시 에셋 요구"로 받았다. 정적·skinned 메시 stream 집합과 형식, 속성 수, 고정밀 형식은 stream 형식 차이로(기본안), 섹션 본 palette 한도는 RB5·RS12에서, `IndexFormat`을 GraphicsTypes로 옮김(MA2 착수 전). 10.2절 (3)과 15절 메시 에셋 행에 연결을 더했다.
+- 개정 28(2026-11-19): RG1 남은 것 설계 2(8절): 장치 resolve 뒤 상태 계약(`ResolveDestination`, 원본은 `RenderTarget` 그대로, 4.4절 GX2 B부 resolve 규칙 대체), 그래프 attachment resolve, 그래프 구간 `GraphScope`(CPU·GPU 구간·debug marker·trace 표지, 기록 경계의 marker 재push).
+- 개정 27(2026-11-19): 텍스처 GX2 나머지 설계와 구현(4.4절 "텍스처 GX2 나머지 설계"·부분별 구현 메모, 4.2절 GX2 행. 구현 중 정한 것: 2D view는 첫 slice만·cube view는 첫 cube만(D3D 제약), 초기 픽셀이 있는 다중 plane 깊이의 2D 밖 차원은 그대로 `Unsupported`, NVIDIA ES context의 `GL_OES_texture_view` 확인): A부 용도 비트 묶음(`RenderTarget | Storage`)·cube Storage(면 2D 배열 쓰기 view), B부 view 차원 바꾸기(UE `SetDimension` 규칙)·OpenGL ES `OES_texture_view`·`EXT_texture_view` 범위 view(없으면 `Unsupported`, 셰이더 slice 기준은 버림), C부 다중 plane 깊이의 2D 배열·cube와 MSAA 2D 배열, 3D 깊이 면 resolve는 계속 거부.
+- 개정 26(2026-11-19): RG1 남은 것 설계와 구현(8절 "RG1 남은 것 설계"·"구현(2026-11-19, RG1 남은 것 A–C부)", 4.2절 RG1 행, 8절 "남은 것(RG1)", 4.4절 GX2 메모의 그래프 쪽 항목): A부 attachment 기록(`BeginPass`·MRT·깊이·load·mip·slice)·렌더 타깃 없는 Compute·Copy 기록·풀 desc 확장(깊이·Storage·MSAA 키), B부 `GraphTextureView`(장치 view 낮추기·subresource 상충·view 기준 mip, 모든 backend HZB 픽셀 대조), C부 `GraphSharedData`·`GraphViewTable`(`SceneTextureTable`)·검증 실패 그래프의 history export 시험. 그래프 resolve는 장치 resolve 뒤 상태 계약과 함께로 미룬다.
+- 개정 24(2026-11-19): 텍스처 GX2 C부(slice·mip attachment) 설계와 구현(4.4절 "구현(2026-11-19, C부)"·시험 결과·"텍스처 GX2 뒤에 남은 것", 4.2절 GX2 행, A부 Vulkan descriptor pool 결함 수정)을 적었다: 2D 밖 차원·mip 사슬 렌더 타깃·깊이(3D 깊이 제외, 다중 plane 깊이는 그대로 `Unsupported`), attachment `mipLevel`·`slice`, resolve 대상 mip·slice, subresource 단위 attachment 전이, 그래프 쪽은 RG1 남은 것으로.
+- 개정 25(2026-11-19): 5.2절 완료 통지 큐에 텍스처 스트리밍의 보임 신호와 mip 전송 완료를 더했다([텍스처 스트리밍](../TextureStreaming.ko.md) 결정 T3 확정, 그 문서 개정 4).
+- 개정 23(2026-11-19): 텍스처 GX2 B부(MSAA 텍스처·attachment resolve) 설계와 구현(4.4절 "구현(2026-11-19, B부)"·시험 결과, 4.2절 GX2 행)을 4.4절에 적었다: `TextureDesc`·`PipelineDesc::sampleCount`, `ColorAttachment::resolveTarget`(결정 R17의 attachment resolve, 박스 평균), `Texture2DMS` 읽기, MSAA 텍스처의 readback·복사 거부, Vulkan은 render pass 밖 `vkCmdResolveImage`(subpass resolve는 RG3·GX13).
+- 개정 22(2026-11-19): 텍스처 GX2 A부 구현(4.4절 "구현(2026-11-19, A부)" 메모·backend 표·시험, GLES 일부 slice view `Unsupported`)과 텍스처 GX2 설계(4.4절 GX2 "텍스처 GX2 설계": A부 view 범위·`TextureUsage::Storage`·compute 텍스처 묶기·`textureViewRanges`, B부 MSAA·resolve, C부 slice attachment)를 적었다. 4.2절 GX2 행 상태를 고쳤다.
+- 개정 21(2026-11-18): SX2를 구현하며 결정 R7을 권장안(선언 명시)으로 확정했다(16절 R7 행, 9.4절 "그리기별 상수": 구조·한계·근거·버린 대안 크기 기준 자동, 9.9절 SX2 행). Graphics 고정 구조체 `DrawConstants`·`SetConstants`를 없애고 `PipelineDesc`·`ComputePipelineDesc::drawConstantBytes`(0–128, 16 배수)와 `CommandContext::SetDrawConstants(Span<const uint8>)`(크기 불일치·파이프라인 없음 `InvalidArgument`)로 바꿨다(4.4절 GX4 구현 메모). 기록마다 값은 0으로 시작하고 `SetPipeline`이 값을 바꾸지 않는다("그리기 전 설정 필수" 규칙은 버림). backend는 128 byte 자리 하나를 공유하는 장치 전역 layout을 유지했다(크기별 root signature·pipeline layout은 descriptor 재설정 비용 때문에 버림, SH2·RB4 생성 layout에서 다시 정함). 4.4절 대조표의 Rocks 열을 고쳤다.
+- 개정 20(2026-11-18): A0-G 리뷰·사용자 결정 반영. AnisotropicPoint는 하드웨어 대응이 없는 backend(D3D11, OPTIONS19 없는 D3D12)에서 UE처럼 AnisotropicLinear로 만든다(지원 표). Vulkan swizzle 렌더 타깃의 항등 attachment view, GLES 깊이 readback 전 swizzle 초기화, 비교 샘플러는 깊이 형식만, 텍스처 크기 계산의 넘침 검사, `Device::GetTextureSubresources`와 그래프 import 대조, Vulkan layer 구간 barrier.
+- 개정 19(2026-11-18): A0-G(텍스처 차원·view swizzle·샘플러 W축·필터 5종·깊이 비교 샘플러) 구현을 반영했다(4.2절 GX2 행, 4.4절 GX2 "구현(A0-G)" 메모와 backend 지원 표, 9.9절 SX13). 스펙과 다르게 정한 것은 AssetSystem A0-G 행에 적었다: 오류는 `Unsupported`, 데이터 배치는 mip 우선, view swizzle은 원 텍스처 swizzle을 이어받지 않음, D3D11 swizzle·AnisotropicPoint와 OPTIONS19 없는 D3D12 AnisotropicPoint는 `Unsupported`, 비교 샘플러는 `CompareFunction` 전체, 2D 아닌 attachment·다중 plane은 `Unsupported`. `CompareFunction`은 GraphicsTypes로 옮겼다(렌더 세션 동의).
+- 개정 18(2026-11-18): RG2 B부(분리 전이) 구현을 반영했다(4.2절 GX5·RG2 행, 4.4절 GX5 구현 메모, 8절 RG2 B부 기록). Graphics `BeginTransitions`·`EndTransitions`·`SplitTransition`·`SplitTransitionTracker`·`DeviceFeatures::splitTransitions`, D3D12는 end에서 낮춤(native split 미사용), Vulkan은 synchronization2 event(기록별 event·기록 끝 reset·fence 뒤 재사용), D3D11·OpenGL ES는 begin 무동작, 그래프는 생산 pass epilogue begin·소비 pass prologue end(같은 기록, 사이 pass 하나 이상). 프레임 안 재사용에서 렌더 타깃 객체는 다음 Raster pass부터 넘긴다.
+- 개정 17(2026-11-18): RG2 A부 구현을 반영했다(4.2절 RG2 행, 7.4절 export 소유자, 8절 RG1 남은 것 정리와 RG2 구현 메모). 프레임 안 풀 재사용(Deferred 컴파일의 장치 객체 자리 계획, 이어 받은 자원의 첫 전이 `Discard`), 결정 R15(RenderBase `RenderRetireSink`·`ReleaseRetiredResource`, 풀 export·반납 대기·fence 뒤 반납), 그래프 안 업로드(`UploadBuffer`·`UploadTexture`, Deferred는 첫 기록 앞, 텍스처는 새 용도 `Sampled` 그래프 텍스처만). 스펙과 다르게 정한 것: 업로드는 그래프 상태에 복사 대상을 두지 않는다(장치 업로드가 상태 중립이어서), Immediate 모드는 프레임 안 재사용을 하지 않는다, 렌더 타깃 텍스처 업로드는 `Unsupported`(버퍼 → 텍스처 복사 명령 없음). B부 분리 전이는 남았다.

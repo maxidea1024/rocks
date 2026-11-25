@@ -34,6 +34,23 @@ const char* BackendName(Backend backend) noexcept {
     return "Unknown";
 }
 
+const char* ShaderCodeKindName(ShaderCodeKind kind) noexcept {
+    switch (kind) {
+    case ShaderCodeKind::Dxil:
+        return "Dxil";
+    case ShaderCodeKind::Dxbc:
+        return "Dxbc";
+    case ShaderCodeKind::Spirv:
+        return "Spirv";
+    case ShaderCodeKind::Essl:
+        return "Essl";
+    case ShaderCodeKind::Metallib:
+        return "Metallib";
+    }
+
+    return "Unknown";
+}
+
 Result<void> ValidateVertexLayout(const VertexLayout& layout) noexcept {
     if (layout.attributes.Size() > MaxVertexAttributes ||
         layout.streams.Size() > MaxVertexStreams) {

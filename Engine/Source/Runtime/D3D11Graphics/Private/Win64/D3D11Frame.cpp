@@ -69,6 +69,11 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
     }
 
     boundTexture_ = white_.slot;
+    for (auto& stage : boundConstants_) {
+        for (BoundConstant& bound : stage) {
+            bound = {};
+        }
+    }
 
     stencilReference_ = 0;
     inputsDirty_ = false;
@@ -115,15 +120,10 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
 
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ID3D11Buffer* constants = constants_.Get();
-    context->VSSetConstantBuffers(0, 1, &constants);
-    context->PSSetConstantBuffers(0, 1, &constants);
-    context->CSSetConstantBuffers(0, 1, &constants);
-    const TextureRecord* white = textures_.Find(white_.slot);
-    if (white != nullptr) {
-        ID3D11ShaderResourceView* view = white->srv.Get();
-        context->PSSetShaderResources(0, 1, &view);
-        context->PSSetSamplers(0, 1, &white->sampler);
-    }
+    // 그리기별 상수는 루트 상수 register b13이다(ShaderSystem 7.2절 2항 D3D11 전개, SSD32).
+    context->VSSetConstantBuffers(RootConstantsRegister, 1, &constants);
+    context->PSSetConstantBuffers(RootConstantsRegister, 1, &constants);
+    context->CSSetConstantBuffers(RootConstantsRegister, 1, &constants);
 
     // deferred context의 동적 버퍼 내용은 그 기록 안에서 DISCARD로 쓰기 전까지 정해지지 않는다.
     // 그리기별 상수는 기록마다 0으로 시작한다(CommandContext::SetDrawConstants).
@@ -301,11 +301,8 @@ void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     }
 
     if (record != nullptr) {
-        // compute는 dispatch 때 같은 텍스처를 CS t0·s0에 건다.
+        // 그리기·dispatch 직전에 파이프라인 slot 표대로 건다(ApplySlots).
         boundTexture_ = slot;
-        ID3D11ShaderResourceView* view = record->srv.Get();
-        deferred_->PSSetShaderResources(0, 1, &view);
-        deferred_->PSSetSamplers(0, 1, &record->sampler);
     }
 }
 

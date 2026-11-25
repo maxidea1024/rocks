@@ -1,7 +1,7 @@
 #include "CompilationChecker.h"
 #include "TypeChecker.h"
 
-// 대입·변경 경로의 쓰기 가능 여부다(Docs/Design/SparksLanguage.ko.md 3.11절 "대입 경로",
+// 대입·변경 경로의 쓰기 가능 여부다(Docs/Design/SparksLanguage 3.11절 "대입 경로",
 // S0701–S0706· S0731, SD73). 경로는 뿌리(이름, `this`를 생략한 자기 필드) 뒤에 멤버·원소가 이어진
 // 것이며 뿌리에서 끝으로 보아 처음 어긋난 곳의 진단 하나를 낸다. 참조 타입 값을 지나면 그 뒤는 객체
 // 속성 쓰기다.

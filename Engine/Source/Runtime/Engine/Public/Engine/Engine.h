@@ -76,7 +76,7 @@ using EngineSubsystemType = SubsystemType<EngineSubsystem>;
 // 실행 파일이 엔진 루프에 끼워 넣는 확장 지점이다. 창 이벤트 펌프·입력 수집·렌더 추출과 제출처럼
 // Engine이 직접 의존하지 않는 시스템을 연결한다. 헤드리스 실행은 hook 없이 돈다.
 //
-// 종료 단계 hook(CP6, Docs/Design/RenderBase.ko.md 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
+// 종료 단계 hook(CP6, Docs/Design/RenderBase 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
 // lane처럼 Engine이 모르는 실행기가 엔진 종료 순서에 끼어드는 자리다. Engine::Shutdown이 다음
 // 순서로 부른다(각 hook은 종료 중 한 번, DrainShutdownCleanup만 반복):
 //   BeginShutdown → client 종료·World 파괴 → CompleteInFlightWork → Subsystem 정리 → [최종 GC →
@@ -154,12 +154,32 @@ public:
         return Result<void>::Success();
     }
 
+    // 엔진이 Running이 되고 PostEngineInit 단계 모듈이 시작된 뒤 첫 프레임 전에 한 번 불린다(UE
+    // UGameEngine::Start 자리 — 기본 맵 열기처럼 CreateWorld가 필요한 시작 일). 실패하면 Engine이
+    // 정상 종료 순서(OnEngineShutdown부터)로 정리한 뒤 Failed가 되고 Initialize가 그 오류를
+    // 돌려준다(Docs/Design/EngineRuntime 18.2절).
+    virtual Result<void> OnEngineReady(Engine&) noexcept {
+        return Result<void>::Success();
+    }
+
     // 매 프레임 World Tick 전에 호출된다.
     virtual void OnEngineTick(Engine&) noexcept {
     }
 
     // 엔진 종료의 첫 단계다(World 파괴 전).
     virtual void OnEngineShutdown(Engine&) noexcept {
+    }
+
+    // World가 정리(EndPlay·Shutdown)를 마치고 저장소를 놓기 직전이다(UE
+    // FWorldDelegates::OnPreWorldFinishDestroy 자리 — 누가 DestroyWorld를 불렀든, 엔진 종료
+    // 포함). World 포인터를 든 쪽이 여기서 비운다. 이 안의 DestroyWorld는 5단계로 미뤄진다.
+    virtual void OnWorldDestroyed(Engine&, World&) noexcept {
+    }
+
+    // 진단 DumpSubsystems가 Engine 계층 다음에 부른다(Docs/Design/EngineRuntime 22.1절 — Engine이
+    // 모르는 계층, 예: GameInstance·LocalPlayer). out 끝에 붙인다. 오류: 할당 실패.
+    virtual Result<void> DescribeSubsystems(Engine&, String&) noexcept {
+        return Result<void>::Success();
     }
 
 protected:
@@ -186,7 +206,7 @@ struct EngineConfig {
     double fixedFrameDeltaSeconds = 0.0;
     // 0이 아니면 Run이 이 프레임 수를 실행한 뒤 스스로 종료 요청한다.
     uint64 maxFrames = 0;
-    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader.ko.md 3.11절 — 보통
+    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader 3.11절 — 보통
     // launch::ApplicationContext::Modules(), 시험은 test::ProcessModules()). Initialize가 엔진
     // TypeRegistry의 타입 등록기(ModuleTypeRegistrations)를 이 로더에 붙여 이미 시작한 모듈의
     // 리플렉션 타입을 시작 순서로 등록하고(로더가 발급한 모듈 lease로), 엔진 묶음
@@ -240,6 +260,11 @@ struct WorldCreateDesc {
     // 쓴다(EngineConfig::gcWorkers가 0이면 직렬).
     WorkerScheduler* gcScheduler = nullptr;
     Span<const WorldSubsystemType> subsystems;
+    // World 종류다(WorldDesc::kind — Subsystem 기본 생성 판정).
+    WorldKind kind = WorldKind::Game;
+    // 바깥 계층 Subsystem 조회 창이다. 비우면 엔진이 EngineSubsystem 조회 창을
+    // 넣는다(GameInstance는 자기 Subsystem을 먼저 보고 엔진으로 넘기는 창을 넣는다 — 18절).
+    OuterSubsystemLookup outerSubsystems;
     // 만든 뒤 바로 BeginPlay한다. 에디터·미리보기 World는 false로 둔다.
     bool beginPlay = true;
 };
@@ -282,9 +307,10 @@ struct EngineStats {
 // - 초기화 순서: TypeRegistry·ModuleRegistration -> 타입 등록(로더의 모듈 타입 — 타입 등록기를
 //   붙여 시작한 모듈의 타입을 시작 순서로, 그다음 엔진 묶음 모듈을 Startup 직전 등록하며 시작 ->
 //   EngineConfig.registerModuleTypes -> EngineConfig.registerTypes(native, 마지막)) -> 엔진
-//   Registry -> EngineSubsystem -> EngineClient -> PostEngineInit 단계 모듈. 어느 단계든 실패하면
-//   이미 한 단계를 역순으로 정리하고 Failed가 된다(PostEngineInit 실패는 client.OnEngineShutdown
-//   뒤).
+//   Registry -> EngineSubsystem -> EngineClient -> PostEngineInit 단계 모듈 -> Running ->
+//   client.OnEngineReady. 어느 단계든 실패하면 이미 한 단계를 역순으로 정리하고 Failed가
+//   된다(PostEngineInit 실패는 client.OnEngineShutdown 뒤, OnEngineReady 실패는 Shutdown과 같은
+//   정상 종료 순서).
 // - 종료 순서(계획 3.2절): BeginShutdown(Subsystem 역순 → hooks) -> client.OnEngineShutdown -> 모든
 //   World Shutdown·파괴 -> CompleteInFlightWork(Subsystem 역순 → hooks) -> Subsystem 역순 정리 ->
 //   [엔진 Registry 최종 GC -> hooks.DrainShutdownCleanup]을 둘 다 0이 될 때까지 반복(최대
@@ -295,7 +321,8 @@ struct EngineStats {
 //   남아 Unregister가 Busy로 멈추기 때문이다. Shutdown은 남은 lease만 검사하고 dependent 순서로
 //   레코드를 반납한다. 초기화 실패 경로는 hook 단계 없이 같은 정리 순서다. 프레임 실행 중(hook
 //   안)에는 Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
-// - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서 파괴된다.
+// - World는 Engine이 소유한다. World Tick 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서
+//   파괴된다(그 밖에서는 즉시).
 //
 // 로그(Docs/Design/LoggingSystem.ko.md 13절, 카테고리 LogEngine): 초기화 성공·단계별 실패, Run
 // 종료 사유, 종료 시작·완료·실패, World 생성 실패·Tick 실패(연속 실패는 첫 번째와 요약 한 번)·지연
@@ -371,9 +398,12 @@ public:
     // 포인터는 DestroyWorld·Shutdown까지 유효하다.
     Result<World*> CreateWorld(const WorldCreateDesc& desc) noexcept;
 
-    // World 파괴를 요청한다. 프레임 밖이면 즉시, 프레임 안이면 5단계(지연 작업)에서 파괴한다.
+    // World 파괴를 요청한다. World Tick(4단계) 안이나 다른 World를 파괴하는 중(그 정리 hook이 부른
+    // 경우)이면 5단계(지연 작업)로 미루고, 그 밖(client hook·loop hook·프레임 밖)이면 즉시 파괴한다
+    // (Docs/Design/EngineRuntime 18.5절 — 새 World를 만들기 전에 이전 World 정리가 끝나야 한다).
     // 모르는 World는 NotFound다. 파괴가 Busy로 실패하면(외부 Borrow) 다음 프레임에 다시 시도한다.
-    Result<void> DestroyWorld(World* world) noexcept;
+    // reason은 World EndPlay의 정리 이유다(17.6절 — 기본 Quit).
+    Result<void> DestroyWorld(World* world, EndPlayReason reason = EndPlayReason::Quit) noexcept;
 
     usize WorldCount() const noexcept {
         return worlds_.Size();
@@ -416,17 +446,47 @@ public:
         return subsystems_.template Get<T>();
     }
 
+    // 마지막 초기화에서 생략한 EngineSubsystem이다(진단용 — 필수 의존 누락은 Warning도 남긴다).
+    Span<const SkippedSubsystem> SkippedSubsystems() const noexcept {
+        return subsystems_.Skipped();
+    }
+
+    // 키로 EngineSubsystem을 찾는다(바깥 계층 조회 창 — 16.3절). 없으면 nullptr이다.
+    EngineSubsystem* FindSubsystem(SubsystemKey key) const noexcept {
+        return subsystems_.Find(key);
+    }
+
+    // 엔진이 World에 넣는 기본 바깥 조회 창이다(EngineSubsystem만).
+    OuterSubsystemLookup SubsystemLookup() const noexcept;
+
+    // --- 진단(Docs/Design/EngineRuntime 22.1절) ---
+
+    // Subsystem 계층(Engine → client가 붙이는 계층(GameInstance·LocalPlayer) → World마다)의 초기화
+    // 순서와 생략 이유를 out 끝에 붙인다. 콘솔 명령 engine.dumpsubsystems가 쓴다. 오류: 할당 실패.
+    Result<void> DumpSubsystems(String& out) noexcept;
+
+    // World의 Tick 그래프를 out 끝에 붙인다(World::DumpTickGraph). world가 비면 모든 World, 아니면
+    // 이름이 같은 World만이다. 콘솔 명령 world.dumpticks [이름]이 쓴다. 오류: 이름이 없으면
+    // NotFound, 할당 실패.
+    Result<void> DumpTickGraphs(String& out, StringView world = {}) noexcept;
+
     EngineStats Stats() const noexcept;
 
 private:
+    // 파괴를 아직 시도하지 않은 WorldContext의 destroyAttemptFrame이다.
+    static constexpr uint64 NoDestroyAttempt = NumericLimits<uint64>::Max();
+
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
+        EndPlayReason endReason = EndPlayReason::Quit;
         // 파괴 시도가 실패해 미뤄진 상태다. 첫 실패 프레임부터 센다(WorldDestroyWarnFrames).
         bool destroyDeferred = false;
         bool destroyWarned = false;
         ErrorCode destroyError = ErrorCode::None;
         uint64 destroyDeferredFrame = 0;
+        // 5단계에서 마지막으로 파괴를 시도한 프레임이다(한 프레임에 한 번만 시도한다).
+        uint64 destroyAttemptFrame = NoDestroyAttempt;
         // 연속 Tick 실패다. 첫 실패만 Error로 남기고 뒤따른 실패는 세어 두었다가 회복·파괴 때 한 번
         // 요약한다.
         bool tickFailing = false;
@@ -442,6 +502,8 @@ private:
     Result<void> CloseAfterSubsystems(const char*& failedStage) noexcept;
     Result<void> DestroyWorldNow(usize index) noexcept;
     void ProcessDeferred() noexcept;
+    // 미룬 파괴가 WorldDestroyWarnFrames를 넘도록 남으면 한 번 경고한다.
+    void WarnLongDeferredDestroy(WorldContext& context) noexcept;
     // World Tick 결과를 반영한다. 연속 실패는 첫 번째만 Error로 남긴다.
     void NoteWorldTick(WorldContext& context, const Result<void>& ticked) noexcept;
     // 연속 Tick 실패를 끝낸다. 첫 실패 뒤 더 실패한 것이 있으면 한 번 요약한다.
@@ -456,6 +518,10 @@ private:
     Result<void> StartPostEngineInitModules() noexcept;
     // 엔진 묶음을 놓고 타입 등록기를 떼어 모듈 기록을 놓는다(TypeRegistry 종료 전).
     void DetachModuleTypes() noexcept;
+    // 진단 콘솔 명령(engine.dumpsubsystems·world.dumpticks)을 설정 문맥에 올리고 이 Engine에 묶는다
+    // (설정 문맥이 없으면 아무것도 하지 않는다). 실패는 Warning 하나다(진단이 없어도 엔진은 돈다).
+    void BindConsoleCommands() noexcept;
+    void UnbindConsoleCommands() noexcept;
 
     Allocator& allocator_;
     EngineConfig config_;
@@ -486,6 +552,9 @@ private:
     // 전체 수집 요청 표지다(0·1, platform atomic — 다른 스레드가 세우고 프레임이 소비한다).
     uint32 fullCollectionRequested_ = 0;
     bool inFrame_ = false;
+    // 4단계(World Tick) 동안과 World 파괴(DestroyWorldNow) 동안 참이다. 이때 DestroyWorld는 5단계로
+    // 미룬다(World 배열을 도는 중이거나 정리 hook 안이다).
+    bool deferWorldDestroy_ = false;
     // RunFrame 전체 동안 참이다(IsInFrame — inFrame_은 5단계에서 잠시 거짓이다).
     bool frameRunning_ = false;
     // Shutdown이 도는 동안 참이다(재진입 Busy).
@@ -498,6 +567,17 @@ private:
     bool maxFramesReached_ = false;
     // 설정 Sync가 실패하고 있는지다(연속 실패는 첫 번째만 Error로 남긴다).
     bool settingsSyncFailing_ = false;
+    // 진단 콘솔 명령을 이 Engine에 묶었다(BindConsoleCommands).
+    bool consoleBound_ = false;
 };
+
+// World 안(WorldSubsystem 등)에서 EngineSubsystem을 찾는다(World의 바깥 조회 창 — 16.3절 ERD10).
+// 조회 창이 닫힌 뒤(PreDeinitialize·Deinitialize)나 없으면 nullptr이다.
+template <class T>
+T* GetEngineSubsystem(const World& world) noexcept {
+    static_assert(IsBaseOfV<EngineSubsystem, T>);
+    return static_cast<T*>(
+        static_cast<EngineSubsystem*>(world.FindOuterSubsystem(SubsystemKeyOf<T>())));
+}
 
 } // namespace rocks

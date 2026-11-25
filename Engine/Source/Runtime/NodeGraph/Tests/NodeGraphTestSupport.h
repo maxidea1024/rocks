@@ -11,7 +11,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
 
-// NodeGraph 시험 공용 도우미다(Docs/Design/NodeGraph.ko.md 13절): 시험 도메인 "Test"의 schema·노드
+// NodeGraph 시험 공용 도우미다(Docs/Design/NodeGraph 13절): 시험 도메인 "Test"의 schema·노드
 // 종류, 표본 문서(모든 핀 종류·재경유·순번 출력·동적 핀·고아 핀·알 수 없는 종류·하위 그래프·배치),
 // 속성 Record 바이트 도우미.
 //
@@ -60,6 +60,10 @@ inline constexpr uint32 TestDynamicDuplicateVersion = 12;
 inline constexpr uint32 TestDynamicBadTypeVersion = 13;
 // MaxPinsPerNode를 넘도록 동적 핀을 더한다.
 inline constexpr uint32 TestDynamicOverflowVersion = 14;
+// Item_0 입력과 출력 Item_1을 더한다(재결합 방향 충돌 — 10.1절).
+inline constexpr uint32 TestDynamicOutputVersion = 15;
+// Item_0 입력과 값 정책 Hidden인 입력 Item_1을 더한다.
+inline constexpr uint32 TestDynamicHiddenVersion = 16;
 
 // Test.Multi 입력 Items의 간선 상한이다.
 inline constexpr uint16 TestMultiMaxEdges = 2;
@@ -219,6 +223,13 @@ inline Result<void> AddTestItemPin(const DynamicPinsInput& input, PinList& out, 
     return out.Add(InputPin(key.Value(), type, "Item"));
 }
 
+// Test.Param의 migration 함수다(버전이 1보다 크면 등록에 필요하다 — 10.1절). 버전만 올린다.
+inline Result<void> TestParamMigrate(const NodeMigrationInput& input,
+                                     NodeMigrationResult& out) noexcept {
+    out.schemaVersion = input.fromVersion + 1;
+    return Result<void>::Success();
+}
+
 // Test.Dynamic의 동적 핀 함수다.
 inline Result<void> TestDynamicPins(const DynamicPinsInput& input, PinList& out) noexcept {
     auto header = ReadRecordHeader(input.node.properties.bytes.View());
@@ -240,6 +251,25 @@ inline Result<void> TestDynamicPins(const DynamicPinsInput& input, PinList& out)
     }
     case TestDynamicBadTypeVersion:
         return AddTestItemPin(input, out, 0, TestPinTypeCount);
+    case TestDynamicOutputVersion:
+    case TestDynamicHiddenVersion: {
+        if (auto added = AddTestItemPin(input, out, 0, TestFloatType); !added) {
+            return added;
+        }
+
+        auto key = input.names.TryIntern("Item_1");
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (version == TestDynamicOutputVersion) {
+            return out.Add(OutputPin(key.Value(), TestFloatType, "Item"));
+        }
+
+        PinDescriptor hidden = InputPin(key.Value(), TestFloatType, "Item");
+        hidden.valuePolicy = PinValuePolicy::Hidden;
+        return out.Add(hidden);
+    }
     case TestDynamicOverflowVersion:
         for (uint32 index = 0; index < MaxPinsPerNode; ++index) {
             if (auto added = AddTestItemPin(input, out, index, TestFloatType); !added) {
@@ -335,6 +365,7 @@ struct TestEnv {
         param.schemaVersion = TestParamVersion;
         param.propertiesStruct = TestParamStruct;
         param.staticPins = paramPins;
+        param.migrate = &TestParamMigrate;
 
         PinDescriptor then = OutputPin(pinThen, TestFlowType, "Then", PinKind::Flow);
         then.ordered = true;
@@ -452,6 +483,10 @@ inline constexpr Guid SampleDefaults = Id(18);
 inline constexpr Guid SampleDynamic = Id(19);
 inline constexpr Guid SampleUnknown = Id(20);
 inline constexpr Guid SampleInner = Id(30);
+// 하위 그래프 SampleCollapsed의 부모 Graph.Collapsed(주 그래프)와 경계 노드다(GI15·GI16, 10.1절).
+inline constexpr Guid SampleCollapsedNode = Id(21);
+inline constexpr Guid SampleInnerInput = Id(31);
+inline constexpr Guid SampleInnerOutput = Id(32);
 inline constexpr Guid SampleComment = Id(40);
 
 // 표본 문서와 배치다(정규 순서로 맞춘 뒤 돌려준다). 주 그래프:
@@ -498,7 +533,9 @@ struct Sample {
              main.nodes.TryPushBack(MakeNode(env, SampleStepB, env.typeSequence)) &&
              main.nodes.TryPushBack(Move(toggle)) && main.nodes.TryPushBack(Move(defaults)) &&
              main.nodes.TryPushBack(Move(dynamic)) &&
-             main.nodes.TryPushBack(MakeNode(env, SampleUnknown, env.typeUnknown));
+             main.nodes.TryPushBack(MakeNode(env, SampleUnknown, env.typeUnknown)) &&
+             main.nodes.TryPushBack(
+                 MakeNode(env, SampleCollapsedNode, env.registry.CollapsedType()));
         ok =
             ok &&
             main.edges.TryPushBack(MakeEdge(SampleParamA, env.pinValue, SampleAdd, env.pinA)) &&
@@ -517,7 +554,12 @@ struct Sample {
         Graph inner(env.allocator);
         inner.id = SampleCollapsed;
         inner.role = GraphRole::Collapsed;
-        ok = ok && inner.nodes.TryPushBack(MakeNode(env, SampleInner, env.typeAdd));
+        inner.ownerNode = SampleCollapsedNode;
+        ok = ok && inner.nodes.TryPushBack(MakeNode(env, SampleInner, env.typeAdd)) &&
+             inner.nodes.TryPushBack(
+                 MakeNode(env, SampleInnerInput, env.registry.GraphInputType())) &&
+             inner.nodes.TryPushBack(
+                 MakeNode(env, SampleInnerOutput, env.registry.GraphOutputType()));
         ok = ok && document.graphs.TryPushBack(Move(main)) &&
              document.graphs.TryPushBack(Move(inner));
 

@@ -9,13 +9,13 @@ public sealed class Vorbis : ThirdPartyModuleRules
 {
     protected override string ModuleName => "Vorbis";
 
-    // libvorbis includes ogg/ogg.h, so the library itself also compiles against the Ogg headers. Consumers take both libraries.
+    // libvorbis and its public headers include ogg/ogg.h, so Ogg is a public dependency (consumers see it through Vorbis).
     public override NativeModuleInput Configure(BuildContext context)
     {
         NativeModuleInput input = base.Configure(context);
         return input with
         {
-            PrivateIncludeDirectories = [.. input.PrivateIncludeDirectories, .. ConsumerIncludeDirectories(context, "Ogg")],
+            PublicDependencies = ["Ogg"],
         };
     }
 }

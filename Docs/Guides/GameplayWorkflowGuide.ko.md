@@ -19,7 +19,7 @@
 
 "스펙"으로 표시한 이름은 구현할 때 바뀔 수 있다. 근거 문서는 다음과 같다.
 
-- [Sparks 언어](../Design/SparksLanguage.ko.md) 초안 1.4
+- [Sparks 언어](../Design/SparksLanguage/README.ko.md) 초안 1.4
 - [Prefab](../Design/Prefab.ko.md) 개정 5
 - [레벨 스크립트](../Design/LevelScript.ko.md) 개정 1
 - [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) 20·22·23절

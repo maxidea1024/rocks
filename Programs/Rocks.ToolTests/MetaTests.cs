@@ -90,6 +90,7 @@ internal static partial class MetaTests
         RegisterTextFields(context);
         RegisterBitfields(context);
         RegisterFieldFlags(context);
+        RegisterEditorOnlyBlocks(context);
         RegisterClassFlags(context);
         RegisterStructs(context);
         RegisterValidateHooks(context);

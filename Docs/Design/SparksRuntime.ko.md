@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 21(2026-11-23): 2.8절 최상위 진입 `CallFunction`·`Delivery::child`(LC8d — SparksTools 9.4절).
 - 개정 20(2026-11-22): LC6e 리뷰 반영(2.7절).
 - 개정 19(2026-11-22): LC6e 시나리오·Gate G1/G3/G4(2.7절), LC6 완료.
 - 개정 18(2026-11-22): LC6d5 리뷰 반영(2.6절).
@@ -180,6 +181,12 @@
 - **시나리오:** corpus `Scenario/Door`는 SL §2.2 DoorLogic을 파일 사례로 옮긴 것이다(다른 패키지 import 대신 같은 파일의 Switch 이벤트·Bag): 열쇠 검사, Opening 쓰기와 Changed, 여는 동안 `@skipWhileBusy`, Tick 연출, 재개 뒤 Open과 Changed → Opened 전달 순서, 여는 도중 Disable의 취소와 되돌림(Disable 문맥 쓰기는 Changed 없음). SL §2.1 플레이어 캐릭터는 입력 action·component 생성·`Find<T>`가 엔진 연동(EI)에 있어 연동 단계에서 시나리오로 더한다.
 - **LC6e 리뷰 반영(개정 20):** G4는 주입이 실제로 일어났는지(fault를 냈거나 취소를 실행했는지 — `InjectionFired`)를 단언한다(헛도는 행렬 방지). 취소 표시는 그 조각이 정지하지 못하면 조각 끝에 지우고(다른 정지로 새지 않게), 취소 대상은 슬롯 번호와 대기 handle로 대조한다(같은 조각의 슬롯 재사용). G1·G4는 강제 정리(`CloseSession`) 전에 모두 Detach한 뒤 정지 실행·대기·연결이 0인지 보고, 가짜 host는 held가 아니거나 이미 멈춘 handle에 온 `ReleaseHeld`를 이상으로 센다(과다·이중 해제 — 0이어야 한다). 가짜 host 장부는 기록 할당보다 먼저 바꾼다. 범위 메모: G4는 corpus에서 **실행된** await만 다룬다(정적 위치 대비 보고는 없다). G1은 VM ledger·유지 자원·정지 실행·대기·연결까지이고 revision lease·이름 pool·연결 참조계수는 엔진 연동(ModuleHost·NamePool)에서 본다. 할당 실패 N번째 주입은 할당 실패 전수 시험이 allocator live 수로 보고, host 획득 거부·재연결 실패 주입은 연동 단계다. G3 음성 대조는 수동이다(자동 고정 사례는 후속).
 - **완료:** LC6(실행 모델)은 LC6a–LC6e로 끝났다. 남은 연동 몫은 각 절의 "남은 것"에 적었다.
+
+### 2.8 최상위 진입(LC8d — SparksTools 9.4절)
+
+- `VmSession::CallFunction(module, function, scalars, refs, buffers)` — instance 없이(this 없음) 최상위 함수를 부르는 session 진입이다(`@test` 실행기). 진입 규칙은 `Call`과 같고(발행 전달, 반환 값 보관, fault 위치 기록) 정지 실행의 instance는 `NoBytecodeIndex`다: 동시 실행 상한·격리 계수가 없고 `Detach`가 건드리지 않으며 `CloseSession`이 취소한다. 함수가 this를 받거나(Ref 매개변수 수가 refs보다 많다) 인자 모양이 다르면 InvalidArgument.
+- `Delivery::child`: 재개 기록이 하위 실행(CALLW)의 것인지다(최상위 진입의 끝을 찾는 데 쓴다 — 하위 fault로 끝난 부모의 기록은 부모의 표시를 따른다).
+- `Detach`의 this frame 판정(`CancelExecutions`)은 클래스 메서드 frame만 본다 — 최상위 함수·struct 메서드 frame의 Ref 0번은 this가 아니다. `CallFunction`은 메서드(이름 `Owner.Name`)를 거부한다.
 
 ## 3. 순서
 

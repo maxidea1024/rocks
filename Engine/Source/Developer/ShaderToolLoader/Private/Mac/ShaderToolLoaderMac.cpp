@@ -1,4 +1,5 @@
 #include <Platform/Path.h>
+#include <ShaderToolLoader/ShaderToolCalls.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 #include <string.h>
 
@@ -57,6 +58,15 @@ ShaderToolLoadStatus CompileWithDxc(const DxcFunctions&, const DxcCompileRequest
     status.code = ShaderToolLoadCode::UnsupportedHost;
     status.tool = DxcToolName;
     return status;
+}
+
+// FXC는 Windows 도구다(Windows 밖에는 구현이 없다 — 11.1절 SH1e E3).
+ShaderToolOutcome CompileWithFxc(const FxcFunctions&, const FxcCompileRequest&,
+                                 Array<uint8>& object, String& diagnostics) noexcept {
+    object.Clear();
+    diagnostics.Clear();
+    (void)diagnostics.TryAppend("FXC runs only on Windows");
+    return ShaderToolOutcome::UnsupportedHost;
 }
 
 } // namespace rocks::shader

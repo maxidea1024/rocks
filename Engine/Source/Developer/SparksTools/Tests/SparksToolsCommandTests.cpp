@@ -96,6 +96,14 @@ TEST(SparksTools_UsageErrors) {
     const StringView twoOuts[] = {"build", "--out", "o", "--out", "p", "x"};
     const StringView outValue[] = {"build", "x", "--out"};
     const StringView unknownWithOut[] = {"frob", "--out", "o", "x"};
+    const StringView checkFrames[] = {"check", "--max-frames", "5", "x"};
+    const StringView twoFrames[] = {"test", "--max-frames", "5", "--max-frames", "6", "x"};
+    const StringView zeroFrames[] = {"test", "--max-frames", "0", "x"};
+    const StringView wordFrames[] = {"test", "--max-frames", "ten", "x"};
+    const StringView signFrames[] = {"test", "--max-frames", "+5", "x"};
+    const StringView manyFrames[] = {"test", "--max-frames", "1000001", "x"};
+    const StringView longFrames[] = {"test", "--max-frames", "99999999999", "x"};
+    const StringView noFrames[] = {"test", "x", "--max-frames"};
     const Case cases[] = {
         {{}, "sparks: no command given\n"},
         {none, "sparks: no path given\n"},
@@ -110,6 +118,14 @@ TEST(SparksTools_UsageErrors) {
         {twoOuts, "sparks: 'build' takes one --out\n"},
         {outValue, "sparks: '--out' needs a folder\n"},
         {unknownWithOut, "sparks: unknown command\n"},
+        {checkFrames, "sparks: '--max-frames' is only for 'test'\n"},
+        {twoFrames, "sparks: 'test' takes one --max-frames\n"},
+        {zeroFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {wordFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {signFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {manyFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {longFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
+        {noFrames, "sparks: '--max-frames' needs a number from 1 to 1000000\n"},
     };
     for (const Case& entry : cases) {
         BufferOutput output(allocator);

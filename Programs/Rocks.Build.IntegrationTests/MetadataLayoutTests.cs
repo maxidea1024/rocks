@@ -157,7 +157,7 @@ internal static class MetadataLayoutTests
         Require(plan.Modules.Single(module => module.Name == "B").ReflectionSources.Count == 0, "a module without Metadata got a reflection source");
         // 모듈 표 제공 모듈에 닿지 않으면 진입점 모듈이 아니므로 진입점 TU가 없다(빌드가 ROCKS_MODULE_NAME을 정의하지 않는다).
         Require(updated.GeneratedSources.Count == 0, "a metadata module outside the module table got an entry point source");
-        // 모듈 표 제공 모듈에 닿고 손으로 쓴 소스가 없는 메타데이터 모듈은 진입점 TU를 받는다(Docs/Design/ModuleLoader.ko.md 3.10절).
+        // 모듈 표 제공 모듈에 닿고 손으로 쓴 소스가 없는 메타데이터 모듈은 진입점 TU를 받는다(Docs/Design/ModuleLoader 3.10절).
         // 손으로 쓴 소스가 있는 메타데이터 모듈은 자기 소스에 진입점을 둔다.
         NativeModuleInput provider = new() { Name = "Core", ProvidesModuleTable = true };
         NativeModuleInput withSources = fixture.Module("A", dependencies: ["Core"]) with { Sources = [fixture.Path("A/a.cpp")] };

@@ -20,10 +20,4 @@ public sealed class AudioTools : EngineModuleRules
     // Their headers stay private to this module. The Ogg users come
     // before Ogg (and OpusFile before Opus) so that a left-to-right static linker resolves their references.
     protected override string[] PrivateDependencies => ["Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg", "SampleRate"];
-
-    protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg", "SampleRate");
-
-    protected override IReadOnlyList<string> PrivateDefines(BuildContext context) =>
-        ThirdPartyModuleRules.ConsumerDefines(context, "Minimp3", "Flac", "Vorbis", "OpusFile", "Opus", "Ogg", "SampleRate");
 }

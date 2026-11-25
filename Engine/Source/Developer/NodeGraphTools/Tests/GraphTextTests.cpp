@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 
-// 그래프 텍스트 codec 시험이다(Docs/Design/NodeGraph.ko.md 9.4절): 문서 왕복(바이트·텍스트 결정성),
+// 그래프 텍스트 codec 시험이다(Docs/Design/NodeGraph 9.4절): 문서 왕복(바이트·텍스트 결정성),
 // 레코드 값 텍스트·바이트 형식, semanticOnly, Json5 입력, 조각 왕복과 미해석 노드, 읽기 오류의 진단
 // 위치.
 using namespace rocks;
@@ -34,9 +34,22 @@ TEST(GraphText_DocumentRoundTrip) {
     Sample sample(tools.env);
     REQUIRE(sample.ok);
     REQUIRE(AddReflectedRecords(tools, sample));
+    // 하위 그래프 인터페이스(10.1절 NG3c)도 왕복한다.
+    GraphBoundaryPin in;
+    in.key = tools.env.pinA;
+    in.type = tools.env.Intern("Float");
+    in.maxEdges = 2;
+    GraphBoundaryPin out;
+    out.key = tools.env.pinResult;
+    out.kind = PinKind::Flow;
+    out.type = tools.env.Intern("Flow");
+    REQUIRE(sample.document.graphs[1].inputs.TryPushBack(in));
+    REQUIRE(sample.document.graphs[1].outputs.TryPushBack(out));
     auto text = tools.WriteDocument(sample.document, &sample.layout);
     REQUIRE(!text.IsEmpty());
     CHECK(Contains(TextOf(text), "\"format\": \"rocks.graph-document\""));
+    CHECK(Contains(TextOf(text), "\"ownerNode\""));
+    CHECK(Contains(TextOf(text), "\"kind\": \"Flow\""));
     CHECK(Contains(TextOf(text), "\"label\": \"seven\""));
     CHECK(Contains(TextOf(text), "\"record\": \""));
     CHECK(Contains(TextOf(text), "\"bookmarks\""));

@@ -31,6 +31,9 @@ public static partial class PolicyChecks
             "#\\s*include\\s*<utility>|\\bstd\\s*::\\s*(?:tuple_size|tuple_element)\\b"),
         // 중괄호 목록 추론이 찾는 std::initializer_list를 여는 래퍼다(Docs/CodingStyle.md "중괄호 목록 추론").
         ["Core/Source/Runtime/Base/Public/Base/InitializerList.h"] = Pattern("\\bstd\\s*::\\s*initializer_list(?![A-Za-z0-9_])"),
+        // msdfgen 원본 브랜치에서 옮긴 approximateSDF glue다. 원본 알고리즘의 우선순위 큐만 허용한다(msdfgen 자체가
+        // std::vector를 쓰는 C++ 서드파티 — Docs/Design/Font/08-ThirdParty.ko.md 8.2절).
+        ["Engine/Source/ThirdParty/Msdfgen/RocksApproximateSdf.cpp"] = Pattern("\\bstd\\s*::\\s*priority_queue\\b"),
     };
 
     // OS별 전처리기 분기다(C++23 #elifdef·#elifndef 포함). Base/Compiler.h만 ROCKS_PLATFORM_* 정의·검증을 위해 쓸 수 있다.
@@ -283,7 +286,6 @@ public static partial class PolicyChecks
     /// 내용 전체를 <c>#if ROCKS_PLATFORM_WINDOWS</c>로 감싸 다른 플랫폼에서는 비고(공개 헤더 단독 컴파일 검사), native backend 소스만
     /// 포함한다. PlatformBoundary가 감쌈·위치·포함 범위를 검사한다.</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
-    /// <item>Programs/ShaderToolSpike/Private/Win64/: SH0 도구 스파이크의 DXC COM·D3D12·WGL 측정 코드.</item>
     /// <item>Programs/LaunchTests/Private/{Win64,Posix}/: Launch 내장 모드 시험 호스트(호스트 진입점·처리되지 않은 예외 처리).</item>
     /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
     /// backend처럼 OS SDK를 직접 쓰는 엔진 모듈 구현. 공개 헤더(Public/)와 공통 구현은 여전히 금지다.</item>
@@ -292,7 +294,7 @@ public static partial class PolicyChecks
     public static bool IsNativeBackend(string relative)
     {
         string[] parts = relative.Replace('\\', '/').Split('/');
-        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] is "Commandlet" or "ShaderToolSpike" && parts[2] == "Private")
+        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private")
         {
             return parts[3] == "Win64";
         }

@@ -173,6 +173,8 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     // VS UAV는 FL 11.1 이상이다(FL 11.0은 PS·CS만).
     features.vertexStores = featureLevel >= D3D_FEATURE_LEVEL_11_1;
     features.pixelStores = true;
+    // PS 진단 버퍼 자리(root UAV u0 space999, RenderBase 9.11절 6항)다.
+    features.pixelDebugBuffer = true;
     // transient heap·placed 자원(GX12)은 D3D12 core 기능이다(CreateHeap·CreatePlacedResource,
     // heap은 종류마다 나눠 resource heap tier 1에서도 된다).
     features.transientHeaps = true;

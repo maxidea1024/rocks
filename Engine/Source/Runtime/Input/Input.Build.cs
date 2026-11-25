@@ -11,4 +11,7 @@ public sealed class Input : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["Core"];
+
+    // input.* settings (Docs/Design/TouchInput.ko.md sections 3.4 and 5.1) are console variables of the Config module.
+    protected override string[] PrivateDependencies => ["Config"];
 }

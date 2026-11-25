@@ -6,6 +6,9 @@
 
 namespace rocks::ui {
 
+UserWidget::UserWidget(Allocator& allocator) noexcept : animations_(allocator) {
+}
+
 namespace {
 
 // 화면 트리가 UserWidget을 붙잡고, UserWidget은 이 루트를 약하게 참조한다.

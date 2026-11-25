@@ -3,6 +3,7 @@
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogContext.h>
 #include <Core/Math/MathUtility.h>
 #include <Platform/Fatal.h>
 #include <World/Actor.generated.h>
@@ -39,6 +40,51 @@ bool IsValidTickSettings(const TickSettings& settings) noexcept {
 
     return true;
 }
+
+const char* EndPlayReasonName(EndPlayReason reason) noexcept {
+    switch (reason) {
+    case EndPlayReason::Destroyed:
+        return "Destroyed";
+    case EndPlayReason::LevelTransition:
+        return "LevelTransition";
+    case EndPlayReason::RemovedFromWorld:
+        return "RemovedFromWorld";
+    case EndPlayReason::Quit:
+        return "Quit";
+    case EndPlayReason::TryoutEnded:
+        return "TryoutEnded";
+    }
+
+    return "Unknown";
+}
+
+const char* WorldKindName(WorldKind kind) noexcept {
+    switch (kind) {
+    case WorldKind::Game:
+        return "Game";
+    case WorldKind::Editor:
+        return "Editor";
+    case WorldKind::Tryout:
+        return "Tryout";
+    case WorldKind::Preview:
+        return "Preview";
+    case WorldKind::Inactive:
+        return "Inactive";
+    }
+
+    return "Unknown";
+}
+
+namespace {
+
+// WorldSubsystem 기본 생성 판정이다: Game·Editor·Tryout World(UE DoesSupportWorldType 기본 — Game·
+// Editor·PIE).
+bool DefaultWorldSubsystemWanted(const World& world) noexcept {
+    const WorldKind kind = world.Kind();
+    return kind == WorldKind::Game || kind == WorldKind::Editor || kind == WorldKind::Tryout;
+}
+
+} // namespace
 
 const char* ActorStateName(ActorState state) noexcept {
     switch (state) {
@@ -84,6 +130,8 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
       gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings),
       gcSchedule_(desc.gcSchedule) {
+    kind_ = desc.kind;
+    outer_ = desc.outerSubsystems;
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -119,7 +167,8 @@ void World::ReleaseCVarScope() noexcept {
 }
 
 bool World::CanMutate() const noexcept {
-    return state_ == WorldState::Initialized || state_ == WorldState::Playing;
+    return state_ == WorldState::Initialized || state_ == WorldState::Playing ||
+           state_ == WorldState::EndingPlay;
 }
 
 // --- 초기화·시작 ---
@@ -160,14 +209,18 @@ Result<void> World::Initialize() noexcept {
     // Subsystem Initialize가 Actor를 Spawn할 수 있도록 먼저 Initialized로 둔다.
     state_ = WorldState::Initialized;
     Result<void> initialized = Result<void>::Success();
+    outerOpen_ = true;
     {
         HookScope hooks(*this);
-        initialized = subsystems_.Initialize(subsystemTypes_, *this);
+        // 되돌림(이미 초기화한 것의 Deinitialize)에서도 Deinitialize 계약대로 조회 창을 먼저
+        // 닫는다.
+        initialized = subsystems_.Initialize(subsystemTypes_, *this, &DefaultWorldSubsystemWanted,
+                                             &CloseOuterSubsystems);
     }
 
     if (!initialized) {
         // 그동안 Spawn된 Actor와 Level을 정리하고 Created로 되돌린다.
-        DestroyAllActors();
+        DestroyAllActors(EndPlayReason::Quit);
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
         while (levels_.Size() != 0) {
@@ -176,16 +229,52 @@ Result<void> World::Initialize() noexcept {
 
         persistentLevel_ = {};
         ReleaseCVarScope();
+        outerOpen_ = false;
         state_ = WorldState::Created;
         return initialized;
+    }
+
+    // 생략은 오류가 아니다. 필수 의존 누락만 Warning으로 알린다(조건 거짓은 정상 구성).
+    for (const SkippedSubsystem& skipped : subsystems_.Skipped()) {
+        if (skipped.reason == SubsystemSkipReason::MissingDependency) {
+            LogContextScope context("World", Name());
+            Log::Warning(
+                LogWorld,
+                "Skipped world subsystem {Subsystem}: dependency {Dependency} was not created "
+                "({Code})",
+                skipped.name, skipped.missing, DiagSubsystemSkippedMissingDependency);
+        }
+    }
+
+    {
+        HookScope hooks(*this);
+        for (usize index = 0; index < subsystems_.Count(); ++index) {
+            subsystems_.At(index)->PostInitialize(*this);
+        }
+    }
+
+    // 용량 확보 실패는 tickable이 Tick을 받지 못할 뿐이다(진단은 S14 덤프).
+    for (usize index = 0; index < subsystems_.Count(); ++index) {
+        WorldSubsystem* subsystem = subsystems_.At(index);
+        if (subsystem->IsTickable()) {
+            auto added = tickables_.TryPushBack(subsystem);
+            (void)added;
+        }
     }
 
     subsystemTypes_ = {};
     return Result<void>::Success();
 }
 
+void World::CloseOuterSubsystems(World& world) noexcept {
+    world.outerOpen_ = false;
+}
+
 Result<void> World::BeginPlay() noexcept {
-    if (state_ != WorldState::Initialized) {
+    // 편집·비활성 World는 게임을 진행하지 않는다(16.4절). EndPlay로 끝난 World는 다시 시작하지
+    // 않는다(UE도 EndPlay 뒤 World를 다시 BeginPlay하지 않는다 — 새 World를 만든다).
+    if (state_ != WorldState::Initialized || kind_ == WorldKind::Editor ||
+        kind_ == WorldKind::Inactive || endedPlay_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -195,12 +284,107 @@ Result<void> World::BeginPlay() noexcept {
 
     ObjectAccessScope scope(Access());
     HookScope hooks(*this);
-    state_ = WorldState::Playing;
+    // UE UWorld::BeginPlay: Subsystem OnWorldBeginPlay → GameMode StartPlay(→ Actor BeginPlay).
     for (usize index = 0; index < subsystems_.Count(); ++index) {
         subsystems_.At(index)->OnWorldBeginPlay(*this);
     }
 
+    if (beginPlayDispatcher_ == nullptr) {
+        dispatchingBeginPlay_ = true;
+        auto dispatched = DispatchBeginPlay();
+        dispatchingBeginPlay_ = false;
+        return dispatched;
+    }
+
+    dispatchingBeginPlay_ = true;
+    beginPlayDispatched_ = false;
+    auto started = beginPlayDispatcher_->StartPlay(*this);
+    dispatchingBeginPlay_ = false;
+    if (beginPlayDispatched_) {
+        // 시작은 했다(Playing). StartPlay가 그 뒤 실패했으면 그 오류를 돌려주고, 정리는 EndPlay·
+        // Shutdown이 Playing 경로로 한다.
+        return started;
+    }
+
+    // 시작하지 못했다: OnWorldBeginPlay를 받은 Subsystem이 짝을 잃지 않게 OnWorldEndPlay(역순)로
+    // 되돌린다. World는 Initialized에 남고 다시 BeginPlay할 수 있다.
+    for (usize index = subsystems_.Count(); index > 0; --index) {
+        subsystems_.At(index - 1)->OnWorldEndPlay(*this);
+    }
+
+    if (!started) {
+        return started;
+    }
+
+    LogContextScope context("World", Name());
+    Log::Error(LogWorld,
+               "BeginPlay dispatch contract violated: StartPlay returned without calling "
+               "DispatchBeginPlay ({Code})",
+               DiagBeginPlayDispatchContractViolated);
+    return Result<void>::Failure(ErrorCode::NotReady);
+}
+
+Result<void> World::DispatchBeginPlay() noexcept {
+    if (!dispatchingBeginPlay_ || beginPlayDispatched_ || state_ != WorldState::Initialized) {
+        LogContextScope context("World", Name());
+        Log::Warning(LogWorld,
+                     "BeginPlay dispatch contract violated: DispatchBeginPlay called {Where} "
+                     "({Code})",
+                     beginPlayDispatched_ ? "twice" : "outside StartPlay",
+                     DiagBeginPlayDispatchContractViolated);
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    beginPlayDispatched_ = true;
+    state_ = WorldState::Playing;
     ProcessStarts();
+    return Result<void>::Success();
+}
+
+Result<void> World::SetBeginPlayDispatcher(BeginPlayDispatcher* dispatcher) noexcept {
+    if (state_ != WorldState::Initialized && state_ != WorldState::Created) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    beginPlayDispatcher_ = dispatcher;
+    return Result<void>::Success();
+}
+
+Result<void> World::EndPlay(EndPlayReason reason) noexcept {
+    if (state_ != WorldState::Playing) {
+        return Result<void>::Success();
+    }
+
+    if (inTick_ || hookDepth_ != 0) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    ObjectAccessScope scope(Access());
+    state_ = WorldState::EndingPlay;
+    // 모든 Actor를 그 이유로 정리 대기에 넣고 바로 정리한다(프레임 밖이므로 안전 지점을 기다리지
+    // 않는다). LevelScript가 생기면 Level마다 LevelScript를 먼저 넣는다(LD8 — DestroyLevel과 같은
+    // 규칙).
+    for (const ActorRecord& record : actors_) {
+        if (record.state != ActorState::PendingDestroy) {
+            auto destroyed = DestroyActorFor(record.handle, reason);
+            (void)destroyed;
+        }
+    }
+
+    FlushDestroys();
+    {
+        HookScope hooks(*this);
+        for (usize index = subsystems_.Count(); index > 0; --index) {
+            subsystems_.At(index - 1)->OnWorldEndPlay(*this);
+        }
+    }
+
+    // OnWorldEndPlay가 요청한 파괴도 여기서 끝낸다. 정리 hook·OnWorldEndPlay가 Spawn한 Actor는 남아
+    // Initialized로 기다리다 Shutdown에서 정리된다(다시 BeginPlay하지 않으므로 시작하지 않는다).
+    FlushDestroys();
+    outerOpen_ = false;
+    endedPlay_ = true;
+    state_ = WorldState::Initialized;
     return Result<void>::Success();
 }
 
@@ -268,6 +452,15 @@ Result<ActorState> World::GetActorState(ObjectHandle actor) const noexcept {
     return Result<ActorState>::Success(record->state);
 }
 
+Result<uint64> World::GetSpawnOrder(ObjectHandle actor) const noexcept {
+    const ActorRecord* record = FindActorRecord(actor);
+    if (record == nullptr) {
+        return Result<uint64>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<uint64>::Success(record->spawnOrder);
+}
+
 Result<ObjectHandle> World::GetActorLevel(ObjectHandle actor) const noexcept {
     const ActorRecord* record = FindActorRecord(actor);
     if (record == nullptr) {
@@ -296,7 +489,7 @@ Result<uint32> World::GetComponents(ObjectHandle actor, Span<ObjectHandle> out) 
     });
 }
 
-Result<void> World::Shutdown() noexcept {
+Result<void> World::Shutdown(EndPlayReason reason) noexcept {
     if (state_ == WorldState::Destroyed) {
         return Result<void>::Success();
     }
@@ -306,17 +499,41 @@ Result<void> World::Shutdown() noexcept {
     }
 
     ObjectAccessScope scope(Access());
+    // 게임 진행 중이면 먼저 끝낸다(OnWorldEndPlay는 EndPlay가 부른다).
+    if (state_ == WorldState::Playing) {
+        auto ended = EndPlay(reason);
+        if (!ended) {
+            return ended;
+        }
+    }
+
     if (state_ != WorldState::TearingDown) {
         const bool initialized = state_ != WorldState::Created;
         state_ = WorldState::TearingDown;
         ticks_.Close();
-        DestroyAllActors();
+        // 엔진 단계 콜백을 건 모듈이 World보다 먼저 내려가도 포인터가 남지 않게 비운다.
+        for (EngineStageSlot& stage : engineStages_) {
+            stage = {};
+        }
+        // 남은 Actor(EndPlay 뒤 Spawn·Play하지 않은 World)도 종료 이유로 정리한다.
+        DestroyAllActors(reason);
         pendingStart_.Clear();
         pendingComponentStart_.Clear();
+        tickables_.Clear();
+        lifeSpans_.Clear();
         if (initialized) {
             HookScope hooks(*this);
+            // 게임 진행은 EndPlay가 끝냈다(OnWorldEndPlay). 바깥 조회 창 닫기 →
+            // PreDeinitialize(역순) → Deinitialize(역순)(16.5절).
+            outerOpen_ = false;
+            for (usize index = subsystems_.Count(); index > 0; --index) {
+                subsystems_.At(index - 1)->PreDeinitialize(*this);
+            }
+
             subsystems_.Deinitialize(*this);
         }
+
+        outerOpen_ = false;
 
         // 모든 Actor가 정리됐으므로 영구 Level을 포함한 모든 Level 루트를 반환한다.
         while (levels_.Size() != 0) {
@@ -380,6 +597,16 @@ WorldStats World::Stats() const noexcept {
     stats.spawnedTotal = spawnedTotal_;
     stats.destroyedTotal = destroyedTotal_;
     stats.ticks = ticks_.Stats();
+    stats.engineStageFailures = engineStageFailures_;
+    for (uint32 index = 0; index < EngineStageCount; ++index) {
+        stats.engineStageNanoseconds[index] = engineStageNanoseconds_[index];
+    }
+
+    for (const ActorRecord& record : actors_) {
+        if (record.lifeSpanSequence != 0 || record.pendingLifeSpan > 0.0) {
+            ++stats.pendingLifeSpans;
+        }
+    }
     for (uint32 index = 0; index < TickPhaseCount; ++index) {
         stats.phaseNanoseconds[index] = phaseNanoseconds_[index];
     }

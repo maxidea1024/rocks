@@ -10,8 +10,8 @@ namespace rocks::graphics {
 // 고른다(preferSoftware인데 CPU 장치가 없으면 Unsupported). desc.enableValidation이면
 // VK_LAYER_KHRONOS_validation을 켠다(설치되지 않았으면 켜지 않고 계속한다).
 //
-// 셰이더: 실행 중 컴파일러가 없으므로 desc.shaderCompiler(개발용 컴파일 훅)가 HLSL 원문을
-// SPIR-V로 바꾼다. 없으면 CreatePipeline이 Unsupported다(쿠킹된 셰이더는 ShaderSystem SH2).
+// 셰이더: 쿠킹된 SPIR-V(VULKAN_SM5 — set = 단계, binding = layout slot)를 CreateShader로 받는다
+// (ShaderSystem 16.1절 SSD18). 실행 중 컴파일러는 없다.
 //
 // 실패: 로더·Vulkan 1.1·GRAPHICS queue가 없으면 Unsupported, Vulkan 호출 실패는
 // DependencyFailed·OutOfMemory, 할당 실패는 그 오류다. report가 null이 아니면 실패 단계·원본

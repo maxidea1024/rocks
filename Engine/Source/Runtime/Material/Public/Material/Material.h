@@ -18,7 +18,7 @@ namespace rocks {
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드 전용이다.
 ROCKS_CLASS(Abstract)
-class MaterialBase : public Asset {
+class ROCKS_MATERIAL_API MaterialBase : public Asset {
     ROCKS_GENERATED_BODY()
 };
 

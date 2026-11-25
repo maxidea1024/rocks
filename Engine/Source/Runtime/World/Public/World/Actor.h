@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Math/Rotator.h>
 #include <Meta/Annotations.h>
 #include <Object/NativeClass.h>
 #include <Object/ObjectRefArray.h>
@@ -118,6 +119,30 @@ public:
     // 장부 밖 객체는 InvalidArgument다.
     Result<void> Destroy() noexcept;
 
+    // 소유 Actor다(UE AActor::Owner — 게임 논리 참조이며 수명 소유가 아니다. 17.3절 ERD15). 없거나
+    // 파괴됐으면 null·stale handle이다.
+    ObjectHandle Owner() const noexcept {
+        return owner_;
+    }
+
+    // 소유 Actor를 바꾼다. null은 소유자 없음이다. 이 World의 살아 있는 Actor가 아니면 StaleHandle,
+    // 소유 고리(자기 자신 포함)는 InvalidArgument(Error 로그)다. World 장부 밖 객체는
+    // InvalidArgument다.
+    Result<void> SetOwner(ObjectHandle owner) noexcept;
+
+    // 이 Actor를 만든 원인(보통 Pawn — UE Instigator)이다. 게임 논리 참조다.
+    ObjectHandle Instigator() const noexcept {
+        return instigator_;
+    }
+
+    Result<void> SetInstigator(ObjectHandle instigator) noexcept;
+
+    // seconds 게임 시간 뒤 파괴한다(UE SetLifeSpan — 17.5절 ERD16, 사유 Destroyed). 0 이하는 해제,
+    // 다시 부르면 새 값으로 바꾼다. 만료는 LateUpdate 시작 엔진 단계 Timers에서 판정한다(pause
+    // 중에는 게임 시계가 멈춰 흐르지 않는다). 비유한 값은 InvalidArgument, World 장부 밖은
+    // InvalidArgument다.
+    Result<void> SetLifeSpan(double seconds) noexcept;
+
     // 대표 SceneComponent다. 없으면 null handle이다.
     ObjectHandle RootComponent() const noexcept {
         return rootComponent_.Handle();
@@ -145,6 +170,14 @@ public:
         return true;
     }
 
+    // 바라보는 회전(도)을 줄 수 있으면 out에 채우고 참이다(UE APawn::GetViewRotation의 자리 —
+    // Docs/Design/EngineRuntime 26.2절). 기본은 거짓이다. Gameplay Pawn이 control rotation으로
+    // 재정의하고, SpringArm의 usePawnControlRotation이 쓴다(World는 Pawn을 모른다).
+    virtual bool TryGetViewRotation(Rotator<double>& out) noexcept {
+        (void)out;
+        return false;
+    }
+
     // 초기화 hook이다. 실패를 반환하면 Spawn이 실패하고 Actor는 OnDestroy 없이 정리된다.
     virtual Result<void> OnAwake() noexcept {
         return Result<void>::Success();
@@ -169,7 +202,8 @@ public:
     }
 
     // 정리 hook이다. 다른 Actor 파괴·Spawn 요청은 허용한다(같은 프레임 정리 단계에서 처리된다).
-    virtual void OnDestroy() noexcept {
+    // reason은 정리 이유다(17.2절). OnStart를 받지 못했어도 OnAwake가 성공했으면 받는다.
+    virtual void OnDestroy(EndPlayReason) noexcept {
     }
 
 protected:
@@ -181,6 +215,29 @@ protected:
 private:
     friend class World;
 
+protected:
+    // --- 프레임워크 내부 hook(Docs/Design/EngineRuntime 17.8절 ERD19) ---
+    // Gameplay 모듈의 프레임워크 클래스(GameDirector·GameState·PlayerState·Controller·Pawn·
+    // CameraDirector)와 엔진 Actor 클래스(광원 Actor 등 — 24.2.5절)만 재정의하고 final로 닫는다.
+    // 게임 코드는 OnAwake·OnDestroy를 쓴다.
+
+    // Component OnRegister 뒤, Actor OnAwake 전(UE PreInitializeComponents). 실패는 OnAwake 실패와
+    // 같다(Spawn 실패, OnDestroy 없음).
+    virtual Result<void> OnFrameworkPreAwake() noexcept {
+        return Result<void>::Success();
+    }
+
+    // 모든 Component OnAwake 뒤, OnEnable 전(UE PostInitializeComponents). 실패하면 Spawn이
+    // 실패하고 OnAwake가 성공했으므로 정리에서 OnDestroy를 받는다.
+    virtual Result<void> OnFrameworkPostAwake() noexcept {
+        return Result<void>::Success();
+    }
+
+    // 정리의 OnDisable 전(UE Destroyed·EndPlay의 엔진 부분). OnAwake가 성공한 Actor만 받는다.
+    virtual void OnFrameworkEndPlay(EndPlayReason) noexcept {
+    }
+
+private:
     ROCKS_NATIVE() World* world_ = nullptr;
     // actors 포함 관계에서 유도되는 값이다(편입이 다시 채운다).
     ROCKS_NATIVE() ObjectHandle level_;
@@ -195,6 +252,9 @@ private:
     ROCKS_NATIVE() TickSettings tickSettings_;
     ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;
+    // 게임 논리 참조다(17.3절). 저장 여부는 Prefab·저장 단계가 정한다(지금은 실행 중 값).
+    ROCKS_NATIVE() ObjectHandle owner_;
+    ROCKS_NATIVE() ObjectHandle instigator_;
 };
 
 } // namespace rocks

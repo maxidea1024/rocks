@@ -88,6 +88,29 @@ Result<void> GraphCommandList::SetDrawConstants(Span<const uint8> bytes) noexcep
     return Result<void>::Success();
 }
 
+void GraphCommandList::SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
+                                         graphics::ConstantBufferHandle buffer) noexcept {
+    Command command;
+    command.op = Op::SetConstantBuffer;
+    command.a = static_cast<uint32>(stage);
+    command.b = slot;
+    command.first = buffer.slot;
+    Push(command);
+}
+
+// byte는 arena에 복사하고 재생 때 장치 ring에 올린다(RenderBase 9.11절 8항).
+Result<void> GraphCommandList::SetConstantData(graphics::ShaderStage stage, uint32 slot,
+                                               Span<const uint8> bytes) noexcept {
+    Command command;
+    command.op = Op::SetConstantData;
+    command.a = static_cast<uint32>(stage);
+    command.b = slot;
+    command.count = bytes.Size();
+    command.data = Copy(bytes.Data(), bytes.Size(), alignof(uint32));
+    Push(command);
+    return Result<void>::Success();
+}
+
 void GraphCommandList::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     Command command;
     command.op = Op::Draw;
@@ -294,6 +317,15 @@ Result<void> GraphCommandList::Replay(graphics::CommandContext& target) const no
             break;
         case Op::SetDrawConstants:
             keep(target.SetDrawConstants(
+                Span<const uint8>(static_cast<const uint8*>(command.data), command.count)));
+            break;
+        case Op::SetConstantBuffer:
+            target.SetConstantBuffer(static_cast<graphics::ShaderStage>(command.a), command.b,
+                                     graphics::ConstantBufferHandle{command.first});
+            break;
+        case Op::SetConstantData:
+            keep(target.SetConstantData(
+                static_cast<graphics::ShaderStage>(command.a), command.b,
                 Span<const uint8>(static_cast<const uint8*>(command.data), command.count)));
             break;
         case Op::Draw:

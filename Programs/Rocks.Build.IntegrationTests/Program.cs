@@ -153,6 +153,7 @@ try
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
     TestProgramsTests.Run();
+    TargetKindRulesTests.Run();
     await ProjectFilesWriterTests.RunAsync(root, toolchain);
     await IdeScriptsTests.RunAsync(root);
     await GameProjectTests.RunAsync();
@@ -175,10 +176,10 @@ try
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
         // manifest 버전 10: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
-        // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 8은 리플렉션 전용
+        // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader 3.9절), 8은 리플렉션 전용
         // 라이브러리 표지를 없앴다(메타데이터 모듈도 진입점 모듈이다 — 3.10절). 9는 타입별 본문이 생성 헤더가 아니라 SDK 라이브러리에 있고
         // (Docs/Design/ReflectionGeneratedSources.ko.md 5절) 공유 PCH 제공 모듈의 SharedPchHeader를 싣는다(Docs/Design/UnityBuildPch.ko.md 8.4절).
-        // 10은 모듈마다 실행 중 적재 모듈 목록 DynamicModules를 싣는다(Docs/Design/ModuleLoader.ko.md 3.8절 — 엔진 모듈은 아직 쓰지 않아 비어 있다).
+        // 10은 모듈마다 실행 중 적재 모듈 목록 DynamicModules를 싣는다(Docs/Design/ModuleLoader 3.8절 — 엔진 모듈은 아직 쓰지 않아 비어 있다).
         // 11은 모듈마다 로딩 단계 LoadingPhase(이름)와 부트 표지 ProvidesLaunch를 싣는다(3.11절 — 부트 모듈 Core·ModuleLoader·Launch는
         // EarliestPossible, 다른 Core 층 모듈은 PostConfigInit — 층별 기본 단계).
         var sdkModules = engineManifest.RootElement.GetProperty("Configurations").GetProperty("Debug").GetProperty("Modules").EnumerateArray().ToArray();
@@ -201,10 +202,14 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesLaunch").GetBoolean(),
             "Engine SDK manifest does not carry the loading phases and the boot marker");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 14 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 15 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 14 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 15 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+        // 모듈 type(Docs/Design/BuildTargets 3.3절 BS2b)을 싣는다. 게임 빌드가 SDK 모듈도 타깃·구성의 type 검사를 받는다.
+        Require(sdkModules.All(module => module.GetProperty("Type").GetString() is "Runtime" or "Developer" or "Editor" or "ServerOnly" or "ClientOnly") &&
+            sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("Type").GetString() == "Runtime",
+            "Engine SDK manifest does not carry module types");
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -338,7 +343,7 @@ try
         string.Join(", ", initial.Actions.Where(action => action.Kind == "Pch").Select(action => action.Module + " " + action.OutputPath)));
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
-    // 모듈 표(Docs/Design/ModuleLoader.ko.md 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
+    // 모듈 표(Docs/Design/ModuleLoader 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
     // 진입점과 게임 모듈 자신(템플릿의 SampleGameModule.cpp)을 참조하고 서드파티 모듈은 싣지 않는다. 링크가 성공했으므로 모든 진입점이 있다.
     // 리플렉션 생성 소스만으로 된 SDK 라이브러리(CoreTypeBindings)는 진입점이 없으므로 표에 들지 않는다.
     var gameTable = File.ReadAllText(Path.Combine(output, "GeneratedSources/SampleGame/SampleGame.ModuleTable.cpp"));
@@ -388,6 +393,9 @@ try
     var gameBuildInfo = Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.txt");
     Require(File.Exists(gameBuildInfo) && File.Exists(Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.cpp")),
         "Game build did not generate the SampleGame BuildInfo files");
+    // SDK 게임 빌드도 타깃 규칙의 종류를 요청에 싣는다: 빌드 정보 TU가 Game을 돌려준다(Docs/Design/BuildTargets 3.2절 BS2a).
+    Require(File.ReadAllText(Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.cpp")).Contains("return TargetType::Game;", StringComparison.Ordinal),
+        "The SDK game build information must report the Game target type");
     var gameManifest = File.ReadAllText(gameBuildInfo);
     Require(gameManifest.Contains("\ninput: sdk:Headers/", StringComparison.Ordinal) && gameManifest.Contains("\narg: sdk:Configurations/Debug/Libraries/", StringComparison.Ordinal) &&
         gameManifest.Contains("\nhost-dependent: no\n", StringComparison.Ordinal), "Game BuildInfo manifest lacks sdk: keys:\n" + gameManifest);
@@ -524,8 +532,10 @@ try
     var reflectionProjectText = File.ReadAllText(reflectionProject);
     const string sampleModuleEntry = "{ \"name\": \"SampleGame\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }";
     Require(reflectionProjectText.Contains(sampleModuleEntry, StringComparison.Ordinal), "Game template descriptor changed; update the SDK descriptor fixture");
+    // GameCore는 SDK의 시험 fixture 모듈(ReflectionTestFixtures — Developer)에 의존하므로 Developer다(Docs/Design/BuildTargets 3.3절 BD25 — Runtime
+    // 모듈은 Developer 모듈에 의존할 수 없다). 이 게임 빌드는 Debug라 Developer 모듈이 들어간다.
     File.WriteAllText(reflectionProject, reflectionProjectText.Replace(sampleModuleEntry,
-        sampleModuleEntry + ",\n    { \"name\": \"GameCore\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }", StringComparison.Ordinal));
+        sampleModuleEntry + ",\n    { \"name\": \"GameCore\", \"type\": \"Developer\", \"loadingPhase\": \"Default\" }", StringComparison.Ordinal));
     var coreRules = Path.Combine(reflectionGame, "GameCore.Build.cs");
     const string coreRulesText = """
         using Rocks.Build;
@@ -923,7 +933,7 @@ try
     Require(reflectionResult.ModuleOutputs.ContainsKey("GameCore") &&
         reflectionResult.Actions.Any(action => action.Module == "GameCore" && action.Kind == "Archive" && action.Executed),
         "A game module with only reflection headers was not built into an archive");
-    // 리플렉션 헤더만 가진 모듈도 진입점 모듈이다(Docs/Design/ModuleLoader.ko.md 3.10절): 게임 모듈 GameCore는 빌드가 만든 진입점 TU를
+    // 리플렉션 헤더만 가진 모듈도 진입점 모듈이다(Docs/Design/ModuleLoader 3.10절): 게임 모듈 GameCore는 빌드가 만든 진입점 TU를
     // 받고, SDK의 두 메타데이터 모듈은 SDK 라이브러리에 든 진입점으로 모듈 표에 든다.
     string reflectionTable = File.ReadAllText(Path.Combine(reflectionOutput, "GeneratedSources/SampleGame/SampleGame.ModuleTable.cpp"));
     Require(File.Exists(Path.Combine(reflectionOutput, "GeneratedSources/GameCore/GameCore.ModuleEntry.cpp")) &&
@@ -1144,7 +1154,7 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 14,", StringComparison.Ordinal), "SDK manifest is not version 14:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 15,", StringComparison.Ordinal), "SDK manifest is not version 15:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
@@ -1179,7 +1189,7 @@ try
                 rejected.StdErr.Contains("Re-export", StringComparison.Ordinal), $"An SDK manifest with {name} was not rejected: " + rejected.StdErr);
         }
 
-        // 실행 중 적재 모듈 목록(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 SDK 안의 모듈 이름이어야 하고 칸이 있어야 한다.
+        // 실행 중 적재 모듈 목록(DynamicModules — Docs/Design/ModuleLoader 3.8절)도 SDK 안의 모듈 이름이어야 하고 칸이 있어야 한다.
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit, string expected) in
                  new (string, Action<System.Text.Json.Nodes.JsonObject>, string)[]
                  {
@@ -1193,6 +1203,13 @@ try
                      ("a numeric LoadingPhase", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["LoadingPhase"] = "3",
                          "unknown loading phase '3'"),
                      ("no LoadingPhase", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!.AsObject().Remove("LoadingPhase"),
+                         "has incomplete declarations"),
+                     // 모듈 type(Docs/Design/BuildTargets 3.3절 BS2b)도 이름이어야 하고 칸이 있어야 한다.
+                     ("an unknown module Type", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["Type"] = "Tool",
+                         "unknown module type 'Tool'"),
+                     ("a numeric module Type", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["Type"] = "1",
+                         "unknown module type '1'"),
+                     ("no module Type", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!.AsObject().Remove("Type"),
                          "has incomplete declarations"),
                      // 구성별 파일 목록(Docs/Design/ProjectFiles.ko.md 10.3절)은 Configurations/<구성>/ 아래 실제 파일과 같아야 한다.
                      ("a configuration file list without one of its files", manifestJson =>
@@ -1344,7 +1361,7 @@ try
             {
                 public override NativeModuleInput Configure(BuildContext context) => new()
                 {
-                    Name = "Extras", Sources = context.Sources("Plugins/Extras/Source/Extras/Private")
+                    Name = "Extras", ModuleDirectory = "Plugins/Extras/Source/Extras", Sources = context.Sources("Plugins/Extras/Source/Extras/Private")
                 };
             }
 
@@ -1352,7 +1369,7 @@ try
             {
                 public override NativeModuleInput Configure(BuildContext context) => new()
                 {
-                    Name = "ExtrasEditor", Sources = context.Sources("Plugins/Extras/Source/ExtrasEditor/Private")
+                    Name = "ExtrasEditor", ModuleDirectory = "Plugins/Extras/Source/ExtrasEditor", Sources = context.Sources("Plugins/Extras/Source/ExtrasEditor/Private")
                 };
             }
             """);

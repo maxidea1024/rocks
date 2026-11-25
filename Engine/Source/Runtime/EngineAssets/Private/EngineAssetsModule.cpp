@@ -5,7 +5,7 @@ namespace rocks {
 
 namespace {
 
-// EngineAssets 모듈의 수명 객체다(Docs/Design/ModuleLoader.ko.md 3.1·3.10절). 시작할 일은 없고,
+// EngineAssets 모듈의 수명 객체다(Docs/Design/ModuleLoader 3.1·3.10절). 시작할 일은 없고,
 // `asset.*` CVar는 HostSettings가 설정 파일을 읽기 전에 모든 모듈의 RegisterSettings를 부를 때
 // 등록한다(Docs/Design/AssetSystem 11.8절 3).
 class EngineAssetsModule final : public DefaultModuleImplementation {

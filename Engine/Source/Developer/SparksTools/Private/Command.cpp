@@ -1,8 +1,10 @@
 #include <Core/Algorithms.h>
 #include <SparksCompiler/SyntaxTree.h>
+#include <SparksTestHost/TestRunner.h>
 #include "CommandInternal.h"
 
-// `sparks` 명령 실행이다(Docs/Design/SparksTools.ko.md 2절·7절 — check·dump·build·ids).
+// `sparks` 명령 실행이다(Docs/Design/SparksTools.ko.md 2절·7절·8절·9절 — check·dump·build·ids·fmt·
+// test).
 namespace rocks::sparks::tools {
 
 namespace detail {
@@ -62,13 +64,42 @@ commands:
   build    write each module's bytecode to --out <folder>/<package>/<module>.sparkc
   ids      issue the pending stable IDs into each package's .rocksids.json
   fmt      rewrite each module in the official format (--check: only list the files that differ)
+  test     run the @test functions of the modules on the headless test host
 options:
   --schema <folder>   engine binding schemas (*.sparkbind.json); may repeat
   --out <folder>      the output folder of 'build'
   --check             'fmt' writes nothing and fails when a file is not formatted
+  --max-frames <N>    'test' lets a waiting test run N frames (1 to 1000000, default 600)
 a path is a folder (every package below it, or the package it is in) or a .spark file (its package;
-dump and fmt use that module only).
+dump, fmt and test use the modules below the path only).
 )";
+
+// 사용법·오류 문장의 "1 to 1000000"은 이 상한이다.
+static_assert(testing::MaxTestFrames == 1000000, "update the --max-frames usage text");
+
+// `--max-frames` 값(10진수 1–MaxTestFrames — 앞의 0은 된다)이다. 틀리면 0.
+uint32 ParseFrames(StringView text) noexcept {
+    // 10진 자리 하나의 기수다.
+    constexpr uint32 DecimalBase = 10;
+    if (text.IsEmpty()) {
+        return 0;
+    }
+
+    uint32 value = 0;
+    for (usize at = 0; at < text.ByteCount(); ++at) {
+        const char digit = text.Data()[at];
+        if (digit < '0' || digit > '9') {
+            return 0;
+        }
+
+        value = value * DecimalBase + static_cast<uint32>(digit - '0');
+        if (value > testing::MaxTestFrames) {
+            return 0; // 넘치기 전에 멈춘다
+        }
+    }
+
+    return value;
+}
 
 // 사용법 오류: 문장과 사용법을 오류 스트림에 쓴다.
 int32 UsageError(CommandOutput& output, Allocator& allocator, StringView message) noexcept {
@@ -89,7 +120,7 @@ bool Parse(Span<const StringView> input, CommandArguments& out, StringView& mess
     out.command = input[0];
     // 명령 이름을 먼저 본다(옵션 오류보다 앞 — `sparks frob --out o`는 알 수 없는 명령).
     if (out.command != "check" && out.command != "dump" && out.command != "build" &&
-        out.command != "ids" && out.command != "fmt") {
+        out.command != "ids" && out.command != "fmt" && out.command != "test") {
         message = "unknown command";
         return false;
     }
@@ -118,6 +149,22 @@ bool Parse(Span<const StringView> input, CommandArguments& out, StringView& mess
             }
 
             out.check = true;
+            continue;
+        }
+
+        if (argument == "--max-frames") {
+            if (out.command != "test" || out.maxFrames != 0) {
+                message = out.command != "test" ? "'--max-frames' is only for 'test'"
+                                                : "'test' takes one --max-frames";
+                return false;
+            }
+
+            out.maxFrames = at + 1 < input.Size() ? ParseFrames(input[++at]) : 0;
+            if (out.maxFrames == 0) {
+                message = "'--max-frames' needs a number from 1 to 1000000";
+                return false;
+            }
+
             continue;
         }
 
@@ -315,6 +362,8 @@ int32 RunCommand(Allocator& allocator, platform::FileSystem& files,
         code = detail::RunBuild(context, text);
     } else if (parsed.command == "ids") {
         code = detail::RunIds(context, text);
+    } else if (parsed.command == "test") {
+        code = detail::RunTest(context, text);
     } else {
         detail::AppendSummary(text, context);
     }

@@ -149,7 +149,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 | 지정자 | 플래그 | 의미·검증 |
 |---|---|---|
 | `Transient`·`ReadOnly`·`Category`·`DisplayName` | 1·2·— | 지금과 같다 |
-| `EditorOnly` | 4 | 항상 컴파일되고 플래그만 단다. graph v2(A0-O)가 쿠킹 데이터에서 뺀다. 중첩 struct·배열 안의 값에도 효력이 전파된다(6.1절 유효 플래그). 쿠킹 데이터 로드에서 EditorOnly 필드 누락은 `NotFound`가 아니고(누락 = 기준), EditorOnly 필드·멤버·원소가 있으면 InvalidArgument다(로드 정책 `excludedFlags` — A0-O, ObjectFoundations 4절). A0-B의 graph v1은 보통 필드처럼 저장한다. **[빌드 타깃](BuildTargets/README.ko.md) BD6 구현 뒤에는** `#if ROCKS_WITH_EDITOR_DATA` 블록 안에 선언하고(블록 안 필드와 `EditorOnly`는 양방향 일치), `ROCKS_WITH_EDITOR_DATA=0` 빌드에서는 메모리 배치에서 빠진다 |
+| `EditorOnly` | 4 | `#if ROCKS_WITH_EDITOR_DATA` 블록 안에 선언하고(블록 안 필드와 `EditorOnly`는 양방향 일치 — [빌드 타깃](BuildTargets/03-Design/03.04-EditorOnlyData.ko.md) 3.4절 BD6·BS2c, RMC2501–2503), `ROCKS_WITH_EDITOR_DATA=0` 빌드에서는 메모리 배치와 스키마 필드에서 빠지고 ID만 `TypeSchema::editorOnlyFieldIds`에 남는다. descriptor·안정 ID 명세는 두 조합의 합집합이다. graph v2(A0-O)가 쿠킹 데이터에서 뺀다. 중첩 struct·배열 안의 값에도 효력이 전파된다(6.1절 유효 플래그). 쿠킹 데이터 로드에서 EditorOnly 필드 누락은 `NotFound`가 아니고(누락 = 기준), EditorOnly 필드·멤버·원소가 있으면 InvalidArgument다(로드 정책 `excludedFlags` — A0-O, ObjectFoundations 4절). A0-B의 graph v1은 보통 필드처럼 저장한다 |
 | `Required` | 8 | ObjectRef·SoftObjectRef 필드와 그 배열(`ObjectRefArray`·`Array<SoftObjectRef>` — 원소마다 non-null, 5.6절)에만 쓸 수 있다(그 밖은 RMC2202). **패키지 저장·쿠킹에서** null이면 거부한다 — graph 저장 옵션 `rejectMissingRequired`(패키지 저장·쿠킹이 켠다, 스냅샷·복제 같은 다른 저장은 끈다)이 켜져 있으면 InvalidArgument, Soft 대상의 존재 확인은 패키지 저장·쿠킹(A1). **로드는 거부하지 않고** 진단(`RequiredMissing`)만 낸다 — 기존 필드에 `Required`를 붙여도 null을 가진 에셋을 열어 고칠 수 있어야 한다 |
 | `Name="…"` | — | 도구·명령행 이름(`toolName`). ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`), 없으면 C++ 필드 이름. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID라 이름과 무관하다 |
 | `AssetBundles="a,b"` | — | 에셋 bundle 이름 목록(UE `meta=(AssetBundles=…)` — 에셋 A4e2a). 값(컨테이너 원소·Map 키·값 포함)이 SoftObjectRef·struct·InstancedStruct인 필드만, EditorOnly 필드(유효 플래그)와 AssetId 값 필드는 아니다(RMC2202). 이름은 ASCII 식별자 1–64 byte, 1–16개, 중복 금지(RMC2212). 소프트 참조의 실효 bundle은 경로에 있는 목록들의 교집합이다(struct 필드의 목록은 사슬 제한). `FieldSchema::assetBundles`(정규 텍스트) — 저장 때 bundle 태그가 쓴다([AssetSystem](AssetSystem/10-Cooker.ko.md) 10.2절) |
@@ -1076,6 +1076,6 @@ EngineVersion CurrentEngineVersion() noexcept {
 
 - AS 1절 A0-B 행·리플렉션 한계 행·5.6절(이 문서로 연결, `-fno-math-errno`·llvm-nm 서술 정정)·14절 시나리오 13·25(구성 사이 쿠킹 byte 비교): 이 초안과 함께 반영했다.
 - `ReflectionMetadata.ko.md`: 타깃 소유 서술은 B1에서 모듈 소유로 바꿨다. 버전 비노출·모든 비정적 필드 리플렉션 필수 서술은 B2 결과로 바꾼다.
-- `SparksLanguage.ko.md`의 `Soft<T>`(AssetId만) → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
+- `SparksLanguage`의 `Soft<T>`(AssetId만) → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
 - `EngineImplementationPlan.ko.md` 7.1절 예시 매크로(`ROCKS_REFLECT`·`ROCKS_FIELD(FieldId=…)`)와 `GcArray` 용어 → 현재 문법·`ObjectRefArray`.
 - `EngineRuntime.ko.md`(당시 한 파일, 지금 `EngineRuntime/` 폴더) 68·80·105행: `ROCKS_NATIVE_CLASS` → `ROCKS_NATIVE_TYPE`, B8 이전 계획.

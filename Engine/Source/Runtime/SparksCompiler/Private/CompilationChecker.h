@@ -6,7 +6,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <SparksCompiler/Compilation.h>
 
-// Compilation::Check의 내부다(Docs/Design/SparksLanguage.ko.md 3.4절, 10.2절, 18.2절 LC2a). 기능별
+// Compilation::Check의 내부다(Docs/Design/SparksLanguage 3.4절, 10.2절, 18.2절 LC2a). 기능별
 // 파일로 나뉜다:
 //   Compilation.cpp     입력 API·결과 접근·Check 진입
 //   CheckPackages.cpp   binding schema·manifest·패키지 이름·모듈 경로·의존·순환

@@ -176,7 +176,7 @@ internal static class ActionGraph
             Visit(target);
         }
 
-        // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
+        // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
         // 관계는 순환 검사의 참조 사슬이 아니다. 그 모듈을 링크하는 실행 파일은 그 archive 뒤에 계획해야 하므로 실행 파일을 끝으로 옮긴다
         // (실행 파일은 누구의 의존도 아니다). 동적 모듈이 없으면 순서가 바뀌지 않는다. 실행 파일에 링크하는 켠 플러그인 모듈
         // (PluginModules — Docs/Design/BuildTargets 3.9절 BD36)도 같은 방식으로 빌드하고 실행 파일 앞에 계획한다.
@@ -220,7 +220,7 @@ internal static class ActionGraph
         // 생성 TU 디렉터리는 header 디렉터리 목록에 넣지 않는다 — 공용 디렉터리의 header 확장자 파일 하나가 모든 실행 파일 TU를
         // 다시 컴파일하게 만들지 않는다(생성 TU의 key는 cpp 내용이다).
         string buildInfo = Path.TrimEndingDirectorySeparator(BuildInfoGenerator.DirectoryOf(output));
-        // 진입점 모듈(모듈 표에 드는 C++ 모듈)은 소스에 ROCKS_MODULE_NAME=<이름>을 받는다(Docs/Design/ModuleLoader.ko.md 3.2절). 진입점 매크로가
+        // 진입점 모듈(모듈 표에 드는 C++ 모듈)은 소스에 ROCKS_MODULE_NAME=<이름>을 받는다(Docs/Design/ModuleLoader 3.2절). 진입점 매크로가
         // 이 값과 매크로 인자를 static_assert로 대조한다. 모듈 표 제공 모듈이 없는 빌드(시험 fixture 등)에서는 아무 모듈도 받지 않는다.
         HashSet<string> entryModules = ModuleTables.EntryModules(modules);
         foreach (var module in ordered)
@@ -314,6 +314,11 @@ internal static class ActionGraph
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
                 arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language, request.LinkType));
+                // RTTI를 켜는 서드파티(NativeModuleInput.RuntimeTypeInformation)는 프로필의 RTTI 끔 뒤에 켬을 둔다(마지막 인자가 이긴다).
+                if (module.RuntimeTypeInformation && language == NativeLanguage.Cpp)
+                {
+                    arguments.Add(request.Toolchain.Platform == NativePlatform.Windows ? "/GR" : "-frtti");
+                }
                 // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
                 // Release에서도 일반 object로 남는다.
                 if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))
@@ -342,9 +347,11 @@ internal static class ActionGraph
             string[] Forced(string? file) => file is null ? [] : windows ? ["/FI" + file] : ["-include", file];
             // macOS·Android의 compiler는 clang++ driver라서 C 소스에는 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가
             // 된다).
+            // Objective-C++(.mm)는 Apple 대상만 받는다(입력 검증) — UE AppleToolChain과 같이 -x objective-c++로 언어를 명시한다.
             string[] TranslationUnit(string file, NativeLanguage language) =>
                 windows ? ["/c", language == NativeLanguage.C ? "/TC" : "/TP", file, "/Fo{OUTPUT0}"]
                 : language == NativeLanguage.C ? ["-c", "-x", "c", file, "-o", "{OUTPUT0}"]
+                : language == NativeLanguage.ObjectiveCpp ? ["-c", "-x", "objective-c++", file, "-o", "{OUTPUT0}"]
                 : ["-c", file, "-o", "{OUTPUT0}"];
             // 물리 action은 depfile을 쓰게 한다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절). 논리 명령(compile DB·
             // BuildInfo)에는 넣지 않는다. clang-cl은 -MD·-MF를 /clang:로만 받는다(실측).
@@ -523,7 +530,7 @@ internal static class ActionGraph
             // Modular(Docs/Design/BuildTargets 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
             // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 두고, 플러그인 모듈은 플러그인
             // binaries 폴더에 둔다(LinkTypes.SharedLibraryDirectory — ModuleLoader 3.15절). Windows import 라이브러리는 lib 폴더다. 모듈 표 제공 모듈에 닿는 Modular 실행 파일의 모듈은 호스트 모듈이다 — 공유 라이브러리로 링크하고, 실행 파일은
-            // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b).
+            // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader 3.14절 ML4b).
             bool entryModule = entryModules.Contains(module.Name);
             bool host = LinkTypes.IsHostModule(module, request.LinkType, entryModule);
             bool sharedLibrary = LinkTypes.CompilesAsSharedLibrary(module, request.LinkType, entryModule);
@@ -533,7 +540,10 @@ internal static class ActionGraph
                 ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
                 : "";
             string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
-            string executablePath = Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
+            // Android APK 실행 파일은 NativeActivity가 싣는 공유 라이브러리다(Docs/Design/AndroidPlatform.ko.md 3절).
+            string executablePath = module.AndroidPackage is not null
+                ? Path.Combine(output, "bin", AndroidPackage.LibraryFileName(module.Name))
+                : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
                 : sharedLibrary ? Path.Combine(LinkTypes.SharedLibraryDirectory(output, module, request.Toolchain.Platform), sharedFile)
                 : executablePath;
@@ -726,6 +736,14 @@ internal static class ActionGraph
                             }
                         }
 
+                        if (module.AndroidPackage is not null)
+                        {
+                            // APK 실행 파일: 공유 라이브러리로 링크하고 액티비티 진입 기호를 강제 참조한다(Launch Private/Android가 정의). 16 KB
+                            // 페이지 기기(Android 15)에서 .so를 APK에서 바로 mmap하려고 페이지 정렬을 16 KB로 둔다.
+                            finalArguments.AddRange(["-shared", "-Wl,-soname," + Path.GetFileName(finalPath),
+                                "-Wl,-u," + AndroidPackage.EntrySymbol, "-Wl,-z,max-page-size=16384"]);
+                        }
+
                         if (request.LinkType == NativeLinkType.Modular)
                         {
                             // 같은 폴더의 공유 라이브러리를 찾는다(UE MacToolChain.cs:578-584 — @loader_path·@executable_path 둘 다).
@@ -818,6 +836,7 @@ internal static class ActionGraph
     /// 타깃의 모든 compile action이 같은 값으로 받는 인자다(Docs/Design/LoggingSystem.ko.md 6.4절).
     /// <list type="bullet">
     /// <item><c>ROCKS_LOG_COMPILED_MINIMUM=n</c>: 로그 컴파일 하한(<see cref="LogCompiledMinimums"/>). 타깃 재정의가 없으면 구성 기본값.</item>
+    /// <item><c>ROCKS_WITH_EDITOR</c>·<c>_EDITOR_DATA</c>·<c>_SERVER_CODE</c>·<c>_CLIENT_CODE</c>: 타깃 매크로(<see cref="TargetKind"/>).</item>
     /// <item><c>-fmacro-prefix-map=&lt;루트&gt;&lt;구분자&gt;=</c>: <c>__FILE__</c>·<c>__builtin_FILE()</c>을 루트 기준 상대 경로로 남긴다
     /// (로그 호출 위치·assert 위치가 빌드 장소를 담지 않는다). 루트는 소스 루트와, 설치 SDK 게임 빌드면 SDK 루트다. 디버그 정보 경로는
     /// 바꾸지 않으므로 <c>-ffile-prefix-map</c>이 아니다. clang-cl은 이 옵션을 직접 받지 않아 <c>/clang:</c>로 넘긴다. clang은
@@ -828,6 +847,12 @@ internal static class ActionGraph
     {
         bool windows = request.Toolchain.Platform == NativePlatform.Windows;
         yield return (windows ? "/D" : "-D") + LogCompiledMinimums.Macro(request.Configuration, request.LogCompiledMinimum);
+        // 타깃 매크로 넷(Docs/Design/BuildTargets 3.2절 BS2a — 타깃 전체에 같은 값, Base/Compiler.h가 검사한다).
+        foreach (string define in request.Target.Defines)
+        {
+            yield return (windows ? "/D" : "-D") + define;
+        }
+
         var prefixes = new List<string> { root };
         if (request.SdkDirectory is not null)
         {
@@ -849,9 +874,16 @@ internal static class ActionGraph
     internal static bool UsesThinLto(NativeConfiguration configuration, CodeOptimization optimization) =>
         configuration == NativeConfiguration.Release && Optimizes(configuration, optimization);
 
-    /// <summary>확장자가 정확히 소문자 <c>.c</c>인 소스만 C다. 대문자 <c>.C</c>는 관례상 C++이므로 C로 보지 않는다.</summary>
-    internal static NativeLanguage LanguageOf(string source) =>
-        Path.GetExtension(source).Equals(".c", StringComparison.Ordinal) ? NativeLanguage.C : NativeLanguage.Cpp;
+    /// <summary>
+    /// 확장자가 정확히 소문자 <c>.c</c>인 소스만 C이고 소문자 <c>.mm</c>은 Objective-C++다. 대문자 <c>.C</c>는 관례상 C++이므로 C로 보지
+    /// 않는다.
+    /// </summary>
+    internal static NativeLanguage LanguageOf(string source) => Path.GetExtension(source) switch
+    {
+        ".c" => NativeLanguage.C,
+        ".mm" => NativeLanguage.ObjectiveCpp,
+        _ => NativeLanguage.Cpp,
+    };
 
     internal static IEnumerable<string> CompileFlags(NativeToolchain toolchain, NativeConfiguration configuration,
         CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp,
@@ -919,6 +951,12 @@ internal static class ActionGraph
             foreach (string flag in languageFlags)
             {
                 yield return flag;
+            }
+
+            if (language == NativeLanguage.ObjectiveCpp)
+            {
+                // 수동 참조 계수(MRC)다. UE 모듈 규칙의 기본(bEnableObjCAutomaticReferenceCounting = false)과 같다(MacPlatform MD4).
+                yield return "-fno-objc-arc";
             }
 
             if (toolchain.Platform == NativePlatform.Android)

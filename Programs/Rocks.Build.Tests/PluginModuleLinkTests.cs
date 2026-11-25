@@ -100,7 +100,7 @@ internal static class PluginModuleLinkTests
         IReadOnlyList<PluginDescriptor> available = PluginCatalog.Discover([Path.Combine(fixture, "Engine", "Plugins")]);
         string[] targetModules = ["Tool", "Probe"];
         var set = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Tool", [new("Importer", true)], fixture), available,
-            request.Toolchain.Platform, NativeConfiguration.Release, TargetType.Program);
+            request.Toolchain.Platform, NativeConfiguration.Release, new TargetKind(TargetType.Program));
         IReadOnlyList<NativeModuleInput> modules = set.LinkIntoPrimary(set.Apply(rules, targetModules), targetModules);
         Check(modules.Single(module => module.Name == "Tool").PluginModules.SequenceEqual(["Importer"]) &&
             modules.Single(module => module.Name == "Probe").PluginModules.Count == 0, "only the primary executable links plugin modules");

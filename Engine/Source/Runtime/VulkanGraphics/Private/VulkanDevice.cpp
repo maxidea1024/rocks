@@ -109,10 +109,11 @@ VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
       readbacks_(allocator), bufferViews_(allocator), heaps_(allocator), orphanBuffers_(allocator),
       retired_(allocator), renderPasses_(allocator), framebuffers_(allocator),
       attachmentViews_(allocator), volumeAttachmentImages_(allocator),
-      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), constantBuffers_(allocator),
+      constantPages_(allocator), constantRing_(allocator), touchedTextures_(allocator),
       splits_(allocator), pendingSplits_(allocator), splitImageBarriers_(allocator),
       splitMemoryBarriers_(allocator), acquireSemaphores_(allocator), orphanSemaphores_(allocator),
-      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator) {
+      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator), shaders_(allocator) {
     stagingSource_.owner = this;
     timestampSource_.owner = this;
 }
@@ -265,6 +266,7 @@ VulkanDevice::~VulkanDevice() {
         }
 
         FreeMemoryLocked(ringMemory_);
+        DestroyConstants();
         DestroySubmissionObjects();
         {
             platform::LockGuard memoryLock(memoryGate_);
@@ -337,7 +339,6 @@ void VulkanDevice::DetectLost(VkResult result) noexcept {
 
 Result<void> VulkanDevice::Initialize(const DeviceDesc& desc, DeviceCreateReport* report) noexcept {
     report_ = report;
-    shaderCompiler_ = desc.shaderCompiler;
     const char* missing = nullptr;
     const platform::FileStatus opened = loader_.Load(functions_, missing);
     if (!opened) {
@@ -788,6 +789,11 @@ Result<void> VulkanDevice::CreateSharedObjects(const DeviceDesc& desc) noexcept 
         auto ring = CreateUploadRing(desc);
         if (!ring) {
             return ring;
+        }
+
+        auto constants = InitializeConstants();
+        if (!constants) {
+            return constants;
         }
 
         const uint64 stagingBudget =

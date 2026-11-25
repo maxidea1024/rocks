@@ -20,20 +20,20 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         value.userId = event.userId;
         return application_.RoutePointerWithin(value, scope);
     };
-    if (event.type == input::InputEventType::TouchBegin ||
-        event.type == input::InputEventType::TouchMove ||
-        event.type == input::InputEventType::TouchEnd ||
-        event.type == input::InputEventType::TouchCancel) {
-        PointerEventType type = PointerEventType::Cancel;
-        if (event.type == input::InputEventType::TouchBegin) {
+    // 터치는 Input의 손가락 번호(touchIndex)를 pointer 번호로 쓴다. OS 취소(cancelled)는 Cancel이다
+    // (Docs/Design/TouchInput.ko.md 3.1절).
+    if (event.type == input::InputEventType::TouchBegan ||
+        event.type == input::InputEventType::TouchMoved ||
+        event.type == input::InputEventType::TouchEnded) {
+        PointerEventType type = PointerEventType::Move;
+        if (event.type == input::InputEventType::TouchBegan) {
             type = PointerEventType::Down;
-        } else if (event.type == input::InputEventType::TouchMove) {
-            type = PointerEventType::Move;
-        } else if (event.type == input::InputEventType::TouchEnd) {
-            type = PointerEventType::Up;
+        } else if (event.type == input::InputEventType::TouchEnded) {
+            type = event.cancelled ? PointerEventType::Cancel : PointerEventType::Up;
         }
+
         return pointer(
-            {type, Vec2(event.x, event.y), event.pointerId, event.userId, PointerSource::Touch});
+            {type, Vec2(event.x, event.y), event.touchIndex, event.userId, PointerSource::Touch});
     }
 
     if (event.type == input::InputEventType::GamepadState) {

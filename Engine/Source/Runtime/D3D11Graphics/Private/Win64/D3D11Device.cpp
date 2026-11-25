@@ -43,8 +43,9 @@ D3D11Device::D3D11Device(Allocator& allocator) noexcept
     : allocator_(allocator), adapterName_(allocator), lastError_(allocator), buffers_(allocator),
       textures_(allocator), pipelines_(allocator), swapChains_(allocator), readbacks_(allocator),
       bufferViews_(allocator), retired_(allocator), dedicated_(allocator), uploadOps_(allocator),
-      messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-      ring_(allocator), timestamps_(allocator), splits_(allocator) {
+      constantBuffers_(allocator), messageScratch_(allocator),
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), ring_(allocator),
+      timestamps_(allocator), splits_(allocator), shaders_(allocator) {
 }
 
 D3D11Device::~D3D11Device() {
@@ -586,7 +587,8 @@ void D3D11Device::KeepUntilDestruction(ComRef<IUnknown>&& object) noexcept {
 
 Result<void> D3D11Device::ReserveRetireCapacity(usize extra) noexcept {
     const usize live = buffers_.Size() + bufferViews_.Size() + textures_.Size() +
-                       pipelines_.Size() + readbacks_.Size() + swapChains_.Size();
+                       pipelines_.Size() + readbacks_.Size() + swapChains_.Size() +
+                       constantBuffers_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 

@@ -35,7 +35,9 @@ public sealed class PlatformBase : CoreModuleRules
                 : [],
             PublicDependencies = PublicDependencies,
             // macOS directory watching (FSEvents) uses the CoreServices framework.
-            Frameworks = context.Platform == NativePlatform.MacOS ? ["CoreServices"] : []
+            Frameworks = context.Platform == NativePlatform.MacOS ? ["CoreServices"] : [],
+            // Android writes the system log (logcat) through liblog (Platform/SystemLog.h).
+            SystemLibraries = context.Platform == NativePlatform.Android ? ["log"] : []
         };
     }
 }

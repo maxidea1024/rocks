@@ -6,7 +6,7 @@
 #include <NodeGraph/NodeTypeRegistry.h>
 #include <NodeGraphTools/GraphText.h>
 
-// 복사·붙여넣기다(Docs/Design/NodeGraph.ko.md 9.2·9.4절). 복사는 문서의 노드·주석 선택을 조각으로
+// 복사·붙여넣기다(Docs/Design/NodeGraph 9.2·9.4절). 복사는 문서의 노드·주석 선택을 조각으로
 // 담고, 붙여넣기는 조각을 대상 문서의 명령 목록 하나(undo 1개)로 바꾼다. 명령 실행은 호출자가
 // GraphMutator로 한다.
 //
@@ -27,7 +27,8 @@ namespace rocks::nodegraph {
 enum class GraphPasteCode : uint32 {
     // 텍스트 속성의 type이 등록되어 있지 않아 바이트로 바꾸지 못했다.
     UnresolvedProperties = 1,
-    // 노드 종류 버전이 지금 서술과 다르다(옛 버전 migration은 NG3).
+    // 노드 종류 버전이 지금 서술과 다르다(옛·새 버전 모두 — 붙여넣기는 migration하지
+    // 않는다, 10.1절).
     TypeVersion,
     // 속성 Record schema가 서술과 다르다.
     PropertiesSchema,

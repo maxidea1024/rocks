@@ -129,7 +129,7 @@ void WorldWidgetComponent::ResetWindow() noexcept {
 void WorldWidgetComponent::OnDisable() noexcept {
     ResetWindow();
 }
-void WorldWidgetComponent::OnDestroy() noexcept {
+void WorldWidgetComponent::OnDestroy(EndPlayReason) noexcept {
     ResetWindow();
 }
 

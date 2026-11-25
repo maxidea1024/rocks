@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <ReflectionTestFixtures/PathFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
@@ -102,8 +103,8 @@ private:
     PropertyPathBuffer buffer_;
 };
 
-StringView ReadText(ObjectRegistry& objects, const PathTarget& target, PropertyPath path,
-                    FieldValue& out) noexcept {
+[[maybe_unused]] StringView ReadText(ObjectRegistry& objects, const PathTarget& target,
+                                     PropertyPath path, FieldValue& out) noexcept {
     CHECK(PathRead(objects, objects.OwnerAccess(), target, path, out));
     return out.string.View();
 }
@@ -144,6 +145,9 @@ struct World {
 // 상자의 첫 단계는 상자에 담은 필드 자신이다(중첩 경로에서 분리하면 그 단계부터). 상자를 고쳐도
 // 원본은 그대로이고, 강한 참조 쓰기·복사할 수 없는 값의 분리·찬 상자로의 분리·다른 첫 필드는
 // 거부한다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(DetachedPath_ReadWriteOnStructValueAndBox) {
     SystemAllocator allocator;
     Modules modules;
@@ -220,11 +224,15 @@ TEST(DetachedPath_ReadWriteOnStructValueAndBox) {
 
     CHECK(true);
 }
+#endif
 
 // Detach → 상자 편집 → Attach 왕복이다: 게시된 객체는 변경 표지를 읽은 뒤 준비하고(Detach·
 // PathPrepareAttach는 표지를 올리지 않는다) 묶음 게시 구간 안에서 할당·반환 없이 맞바꾸며, End가
 // 표지를 올린다. 옛 값은 상자가 받는다. 최상위 단일 값(Soft·정수) 필드도 경로 thunk로 같은 길을
 // 간다. ReadOnly 필드와 다른 필드의 상자는 Attach하지 못한다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(DetachedPath_DetachEditAttachRoundTrip) {
     SystemAllocator system;
     Modules modules;
@@ -281,8 +289,11 @@ TEST(DetachedPath_DetachEditAttachRoundTrip) {
             CHECK(!prepared.IsReady());
             batch.Value().End();
             StructOwner* object = borrowed.Value().Get().Value();
+            CHECK(object->plain == 11);
+#if ROCKS_WITH_EDITOR_DATA
             CHECK(object->extra.label.View() == edited.string.View());
-            CHECK(object->extra.count == 9 && object->plain == 11);
+            CHECK(object->extra.count == 9);
+#endif
         }
 
         CHECK(objects.MutationStamp(access, handle).Value() > stamp.Value());
@@ -352,9 +363,13 @@ TEST(DetachedPath_DetachEditAttachRoundTrip) {
 
     CHECK(counting.allocations >= counting.frees);
 }
+#endif
 
 // Detach의 할당 실패(상자 저장소·깊은 복사의 String)는 원본과 상자를 그대로 두고 만든 것을 모두
 // 반환한다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(DetachedPath_DetachFailureLeavesSourceUnchanged) {
     SystemAllocator system;
     Modules modules;
@@ -390,10 +405,14 @@ TEST(DetachedPath_DetachFailureLeavesSourceUnchanged) {
 
     CHECK(true);
 }
+#endif
 
 // staged 객체의 중첩 경로다: 트랜잭션의 공개 전 객체에 중첩 멤버·최상위 단일 값(경로 thunk)·참조
 // 멤버(staged 간선)를 경로로 쓰고 읽으며, Detach → 편집 → PreparedAttach::Publish()로 게시한 뒤
 // Commit한 객체에서 그 값을 본다. 다른 Registry의 트랜잭션은 WrongContext다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(DetachedPath_StagedNestedPaths) {
     SystemAllocator system;
     Modules modules;
@@ -458,7 +477,9 @@ TEST(DetachedPath_StagedNestedPaths) {
         REQUIRE(borrowed);
         StructOwner* object = borrowed.Value().Get().Value();
         CHECK(object->holder.middle.leaf.label.View() == StringView("staged 잎"));
+#if ROCKS_WITH_EDITOR_DATA
         CHECK(object->plain == 5 && object->extra.count == 12);
+#endif
         CHECK(object->holder.target.Handle() == created);
         borrowed.Value().Reset();
         root.Reset();
@@ -467,6 +488,7 @@ TEST(DetachedPath_StagedNestedPaths) {
 
     CHECK(true);
 }
+#endif
 
 namespace {
 
@@ -481,7 +503,7 @@ struct Reentry {
 };
 
 // Detach 복사의 할당 콜백이 원본을 바꾸려 한다(고정 중이라 Busy여야 한다).
-void WriteDuringDetach(void* context) noexcept {
+[[maybe_unused]] void WriteDuringDetach(void* context) noexcept {
     Reentry& reentry = *static_cast<Reentry*>(context);
     SystemAllocator local;
     FieldValue value = StringValue(local, "재진입");
@@ -490,7 +512,7 @@ void WriteDuringDetach(void* context) noexcept {
 }
 
 // Attach 뒤 옛 값의 해제 콜백이 owner를 읽고 쓴다(구간을 나온 뒤라 된다).
-void TouchAfterAttach(void* context) noexcept {
+[[maybe_unused]] void TouchAfterAttach(void* context) noexcept {
     Reentry& reentry = *static_cast<Reentry*>(context);
     SystemAllocator local;
     FieldValue read(local);
@@ -509,6 +531,9 @@ void TouchAfterAttach(void* context) noexcept {
 // 재진입이다: Detach의 깊은 복사 중 할당 콜백이 원본을 쓰면 Busy(encode 고정)이고 원본·상자가
 // 일관되며, Attach 게시 뒤 상자를 비울 때 옛 값의 해제 콜백은 구간 밖에서 돌아 게시된 새 값을
 // 보고 owner를 쓸 수 있다.
+// EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
+// 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
+#if ROCKS_WITH_EDITOR_DATA
 TEST(DetachedPath_ReentryDuringDetachAndAfterAttach) {
     SystemAllocator system;
     Modules modules;
@@ -568,4 +593,5 @@ TEST(DetachedPath_ReentryDuringDetachAndAfterAttach) {
 
     CHECK(true);
 }
+#endif
 } // namespace detached_path_tests_file
