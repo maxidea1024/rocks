@@ -15,6 +15,7 @@
 //   LspSemanticTokens.cpp 의미 강조(T12)
 //   LspQueries.cpp        커서의 이름·hover·정의 이동(11.2–11.4절)
 //   LspCompletion.cpp     자동완성 후보(11.6절)
+//   LspCodeActions.cpp    빠른 수정 편집(11.7절)
 namespace rocks::sparks::tools::detail {
 
 // 의미 강조 legend다(10.7절 — 순서가 번호다).
@@ -101,6 +102,23 @@ struct LspCompletionItem {
 Result<bool> LspCollectCompletions(Allocator& allocator, const Compilation& compilation,
                                    const SourceSet& sources, uint32 module, uint32 hole,
                                    StringView prefix, Array<LspCompletionItem>& items) noexcept;
+
+// 빠른 수정 하나다(11.7절 — 편집 하나: 원문 byte 범위 [begin, end)를 text로 바꾼다).
+struct LspFix {
+    explicit LspFix(Allocator& allocator) noexcept : title(allocator), text(allocator) {
+    }
+
+    String title; // 영어(실행 중 문구)
+    uint32 begin = 0;
+    uint32 end = 0;
+    String text;
+};
+
+// compilation의 module 진단 하나에 대한 빠른 수정을 fixes 뒤에 붙인다(11.7절 표 Q1–Q10 — 없으면
+// 붙이지 않는다). 실패: 할당.
+Result<void> LspCollectFixes(Allocator& allocator, const Compilation& compilation,
+                             const SourceSet& sources, uint32 module, const Diagnostic& diagnostic,
+                             Array<LspFix>& fixes) noexcept;
 
 // 식별자 글자(ASCII 영문·숫자·`_`)인지다(자동완성 접두).
 constexpr bool LspIsNameByte(char value) noexcept {

@@ -1,5 +1,4 @@
 #include <Core/Algorithms.h>
-#include <Core/Text/EditDistance.h>
 #include <SparksCompiler/LanguageCatalog.h>
 
 #include "CompilationChecker.h"
@@ -128,9 +127,6 @@ constexpr AttributeRule AttributeRules[] = {
 constexpr StringView TickPhaseNames[] = {"PrePhysics", "PostPhysics", "LateUpdate"};
 constexpr StringView RpcTargets[] = {"Server", "AllClients", "OwnerClient"};
 constexpr StringView RpcReliability[] = {"Reliable", "Unreliable"};
-
-// attribute 이름 제안의 편집 거리 상한이다.
-constexpr usize MaxAttributeSuggestionDistance = 2;
 
 } // namespace
 
@@ -440,17 +436,7 @@ void TypeChecker::CheckAttributeList(const CheckContext& context, uint32 declara
         }
 
         if (rule == nullptr) {
-            StringView best;
-            usize bestDistance = MaxAttributeSuggestionDistance + 1;
-            for (const AttributeRule& candidate : AttributeRules) {
-                const usize distance =
-                    EditDistance(name, candidate.name, MaxAttributeSuggestionDistance,
-                                 EditDistanceCase::AsciiInsensitive);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    best = candidate.name;
-                }
-            }
+            const StringView best = SimilarAttribute(name);
 
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.AppendFormat("Unknown attribute '@{}'.", name);

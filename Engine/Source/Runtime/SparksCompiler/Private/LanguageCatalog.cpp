@@ -1,8 +1,11 @@
 #include <SparksCompiler/LanguageCatalog.h>
 
+#include <Core/Text/EditDistance.h>
+
 #include "LanguageNames.h"
 
-// 언어 단어 목록 중 hook·Unity 이름·언어 이름 판정이다(Docs/Design/SparksTools.ko.md 11.6절).
+// 언어 단어 목록 중 hook·Unity 이름·언어 이름 판정과 hook·attribute 이름 제안이다
+// (Docs/Design/SparksTools.ko.md 11.6절·11.7절).
 // attribute 목록은 CheckContexts.cpp, 키워드 목록은 Lexer.cpp에 있다(검사가 쓰는 표 옆).
 
 namespace rocks::sparks {
@@ -43,6 +46,9 @@ constexpr UnityAlias Aliases[] = {
     {"GetComponent", "Find", false},
 };
 
+// 이름 제안의 편집 거리 상한이다.
+constexpr usize MaxSuggestionDistance = 2;
+
 } // namespace
 
 Span<const LanguageHook> LanguageHooks() noexcept {
@@ -62,6 +68,37 @@ StringView HookParameterText(HookParameters parameters) noexcept {
     }
 
     return "()";
+}
+
+StringView SimilarHook(StringView name) noexcept {
+    StringView best;
+    usize bestDistance = MaxSuggestionDistance + 1;
+    for (const LanguageHook& hook : Hooks) {
+        const usize distance = EditDistance(name, hook.name, MaxSuggestionDistance,
+                                            EditDistanceCase::AsciiInsensitive);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = hook.name;
+        }
+    }
+
+    return best;
+}
+
+StringView SimilarAttribute(StringView name) noexcept {
+    StringView best;
+    usize bestDistance = MaxSuggestionDistance + 1;
+    for (uint32 at = 0; at < LanguageAttributeCount(); ++at) {
+        const StringView candidate = LanguageAttributeAt(at).name;
+        const usize distance = EditDistance(name, candidate, MaxSuggestionDistance,
+                                            EditDistanceCase::AsciiInsensitive);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = candidate;
+        }
+    }
+
+    return best;
 }
 
 Span<const UnityAlias> UnityAliases() noexcept {
