@@ -15,7 +15,7 @@
 - [7. AssetIndex(에셋 레지스트리)](07-AssetIndex.ko.md)
 - [8. 동시성](08-Concurrency.ko.md)
 - [9. 에셋 너겟](09-AssetNuggets.ko.md)
-- [10. Cooker](10-Cooker.ko.md)
+- [10. Cooker](10-Cooker/README.ko.md)
 - [11. 런타임 로딩과 수명(계획 §9.2 계약)](11-RuntimeLoading.ko.md)
 - [12. 텍스처](12-Textures/README.ko.md)
 - [13. 명령행(Programs/Commandlet)](13-CommandLine.ko.md)
