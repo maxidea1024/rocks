@@ -6,7 +6,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
 
-// 오디오 디코더 인터페이스와 codec별 디코더 표다(Docs/Design/AudioSystem.ko.md 3.30.2절).
+// 오디오 디코더 인터페이스와 codec별 디코더 표다(Docs/Design/AudioSystem 3.30.2절).
 // Audio(Runtime)는 codec 구현 모듈(AudioOpus 등)을 링크하지 않고 이 표로만 찾는다. 내장
 // PCM16·ADPCM은 RegisterBuiltInAudioDecoders가 넣고, codec 모듈은 시작 때 HostServices에 factory를
 // 등록해 표를 만드는 쪽이 넣는다.

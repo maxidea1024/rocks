@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// 믹서가 다루는 채널 레이아웃·채널 순서·샘플률 한계다(Docs/Design/AudioSystem.ko.md 3.3절,
+// 믹서가 다루는 채널 레이아웃·채널 순서·샘플률 한계다(Docs/Design/AudioSystem 3.3절,
 // 3.20.1절).
 //
 // 내부 채널 순서는 FL, FR, FC, LFE, SL, SR, BL, BR이고 레이아웃의 i번째 채널은 이 순서의 앞

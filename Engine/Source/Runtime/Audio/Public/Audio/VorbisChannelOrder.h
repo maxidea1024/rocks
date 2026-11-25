@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// Vorbis 채널 순서(Opus mapping family 0·1도 같다)와 내부 순서(Docs/Design/AudioSystem.ko.md 3.3절:
+// Vorbis 채널 순서(Opus mapping family 0·1도 같다)와 내부 순서(Docs/Design/AudioSystem 3.3절:
 // FL, FR, FC, LFE, SL, SR, BL, BR, BC) 사이 변환이다. 원본 디코드(AudioTools, 3.28·3.29절), 쿠킹
 // Opus 인코더(AudioTools)와 런타임 Opus 디코더(AudioOpus, 3.32절)가 같이 쓴다.
 //

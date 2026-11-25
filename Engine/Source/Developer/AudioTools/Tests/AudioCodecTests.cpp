@@ -22,7 +22,7 @@ namespace audio_codec_tests_file {
 
 using namespace rocks::audio;
 
-// 코덱 계층 C1 시험이다(Docs/Design/AudioSystem.ko.md 3.30.4절): 플랫폼 데이터 쓰기·검증·디코드,
+// 코덱 계층 C1 시험이다(Docs/Design/AudioSystem 3.30.4절): 플랫폼 데이터 쓰기·검증·디코드,
 // 청크 나누기·pre-roll, 디코더 표·계약.
 
 namespace {

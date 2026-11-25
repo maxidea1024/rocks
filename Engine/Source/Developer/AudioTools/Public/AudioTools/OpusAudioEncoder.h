@@ -2,7 +2,7 @@
 
 #include <AudioTools/AudioEncoder.h>
 
-// 쿠킹용 Opus 인코더다(Docs/Design/AudioSystem.ko.md 3.32.3절). UE AudioFormatOpus와 같이 20 ms
+// 쿠킹용 Opus 인코더다(Docs/Design/AudioSystem 3.32.3절). UE AudioFormatOpus와 같이 20 ms
 // 패킷, 품질 1–100 → 채널당 16–96 kbps를 쓰고, libopus multistream surround 인코더(mapping
 // family 1)로 채널 1–8을 한 경로로 인코드한다. 입력은 48 kHz만 받는다(다른 rate는
 // ResampleForCooking으로 먼저 바꾼다).

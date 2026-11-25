@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Audio cooking and import tools (Docs/Design/AudioSystem.ko.md sections 3.10-3.11, 3.24-3.32): the source decoders (WAV, AIFF,
+// Audio cooking and import tools (Docs/Design/AudioSystem sections 3.10-3.11, 3.24-3.32): the source decoders (WAV, AIFF,
 // MP3, FLAC, Vorbis, Opus), the platform data encoders (PCM16, ADPCM, Opus) and the cook resampler; importers follow. Developer module:
 // editor, cooker and tool programs link it, shipping runtime targets do not.
 public sealed class AudioTools : EngineModuleRules

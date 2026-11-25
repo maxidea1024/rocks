@@ -5,7 +5,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Result.h>
 
-// 쿠킹 쪽 인코더 인터페이스와 PCM16·ADPCM 인코더다(Docs/Design/AudioSystem.ko.md 3.30.3절).
+// 쿠킹 쪽 인코더 인터페이스와 PCM16·ADPCM 인코더다(Docs/Design/AudioSystem 3.30.3절).
 // 인코더는 codec 단위(패킷·블록 묶음) 목록을 내고,
 // WriteAudioPlatformData(AudioPlatformDataWriter.h)가 청크로 나눠 플랫폼 데이터 byte를 만든다.
 //

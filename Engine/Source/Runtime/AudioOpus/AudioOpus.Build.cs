@@ -2,7 +2,7 @@ using Rocks.Build;
 using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
-// Runtime Opus decoder for cooked audio platform data (Docs/Design/AudioSystem.ko.md section 3.32.4): an AudioDecoder for codec
+// Runtime Opus decoder for cooked audio platform data (Docs/Design/AudioSystem section 3.32.4): an AudioDecoder for codec
 // Opus that the decoder table owners register with RegisterOpusAudioDecoder. ClientOnly (AD24, Docs/Design/BuildTargets section 3.3):
 // dedicated servers do not decode audio, so Server targets leave it out and Runtime modules must not depend on it.
 public sealed class AudioOpus : EngineModuleRules

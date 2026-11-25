@@ -4,7 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
 
-// Opus 플랫폼 데이터의 bitstream 상수와 codec 머리다(Docs/Design/AudioSystem.ko.md 3.32.2절). 쿠킹
+// Opus 플랫폼 데이터의 bitstream 상수와 codec 머리다(Docs/Design/AudioSystem 3.32.2절). 쿠킹
 // 인코더(AudioTools)와 런타임 디코더(AudioOpus)가 같이 쓴다. libopus에 기대지 않는다.
 //
 // 사용 예:

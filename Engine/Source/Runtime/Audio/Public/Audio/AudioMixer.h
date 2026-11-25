@@ -9,7 +9,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 
-// 믹서 코어다(Docs/Design/AudioSystem.ko.md 3.22–3.23절, UE FMixerDevice·FMixerSourceManager 대응).
+// 믹서 코어다(Docs/Design/AudioSystem 3.22–3.23절, UE FMixerDevice·FMixerSourceManager 대응).
 //
 // 두 면이 있고 서로 다른 스레드에서 불러도 된다(3.23절 스레드 경계).
 // - 제어 쪽(제어 스레드 하나): AcquireVoice·PreparePlay·Make*·PublishParams·RequestStop·StopAll·

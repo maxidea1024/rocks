@@ -2,7 +2,7 @@
 
 #include <Audio/AudioDecoder.h>
 
-// 쿠킹된 Opus 플랫폼 데이터의 런타임 디코더다(Docs/Design/AudioSystem.ko.md 3.32.4절). Audio는 이
+// 쿠킹된 Opus 플랫폼 데이터의 런타임 디코더다(Docs/Design/AudioSystem 3.32.4절). Audio는 이
 // 모듈을 링크하지 않고, 디코더 표를 만드는 쪽(AU3 AudioEngineSubsystem, 도구, 시험)이 등록한다.
 //
 // 사용 예:

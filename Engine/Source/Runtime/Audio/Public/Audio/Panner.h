@@ -5,7 +5,7 @@
 #include <Core/Math/Vector3.h>
 #include <Core/Result.h>
 
-// 방위각 equal-power 패너다(Docs/Design/AudioSystem.ko.md 3.13.2절, 3.20.6절). UE 기본 패너
+// 방위각 equal-power 패너다(Docs/Design/AudioSystem 3.13.2절, 3.20.6절). UE 기본 패너
 // FMixerDevice::Get3DChannelMap(AudioMixer/Private/AudioMixerDevice.cpp)의 OmniDirectional 모드와
 // 같다.
 //

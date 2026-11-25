@@ -1,4 +1,4 @@
-/* Rocks glue for libsamplerate (Docs/Design/AudioSystem.ko.md section 3.31). Upstream samplerate.c
+/* Rocks glue for libsamplerate (Docs/Design/AudioSystem section 3.31). Upstream samplerate.c
    builds its version string from the PACKAGE and VERSION macros that configure writes into
    config.h. Rocks builds without config.h (the other settings are manifest defines), so this unit
    defines the two string literals and compiles the upstream file. */

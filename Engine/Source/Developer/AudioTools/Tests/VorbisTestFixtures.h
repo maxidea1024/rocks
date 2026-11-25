@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// Vorbis 디코더 시험 입력이다(Docs/Design/AudioSystem.ko.md 3.28.3절). ffmpeg lavfi sine(s16le)을
+// Vorbis 디코더 시험 입력이다(Docs/Design/AudioSystem 3.28.3절). ffmpeg lavfi sine(s16le)을
 // libvorbis 1.3.7 reference 인코더(vorbis_encode_init_vbr, header는 따로 flush, serial 1001–1004)로
 // 만들었다. 연결(chained) stream은 시험이 파일을 이어 붙여 만든다. <이름>PageOffsets는 page 시작
 // 위치다.

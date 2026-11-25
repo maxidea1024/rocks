@@ -13,7 +13,7 @@ namespace flac_tests_file {
 using namespace rocks::audio;
 using namespace rocks::audio::flacfixtures;
 
-// FLAC 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.27.3절). 무손실이므로 디코드 결과가
+// FLAC 원본 디코드 시험이다(Docs/Design/AudioSystem 3.27.3절). 무손실이므로 디코드 결과가
 // 원본 정수 패턴과 정확히 같아야 한다.
 
 namespace {

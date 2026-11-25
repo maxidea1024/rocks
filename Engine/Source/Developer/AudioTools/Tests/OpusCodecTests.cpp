@@ -22,7 +22,7 @@ namespace opus_codec_tests_file {
 
 using namespace rocks::audio;
 
-// 코덱 계층 C3 시험이다(Docs/Design/AudioSystem.ko.md 3.32.5절): Opus 인코더(AudioTools)와 런타임
+// 코덱 계층 C3 시험이다(Docs/Design/AudioSystem 3.32.5절): Opus 인코더(AudioTools)와 런타임
 // 디코더(AudioOpus)의 왕복, 머리, 청크 가운데 시작, 거부.
 
 namespace {

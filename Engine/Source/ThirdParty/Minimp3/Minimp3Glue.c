@@ -1,4 +1,4 @@
-/* Rocks glue for minimp3 (Docs/Design/AudioSystem.ko.md section 3.26). It compiles the header-only
+/* Rocks glue for minimp3 (Docs/Design/AudioSystem section 3.26). It compiles the header-only
    implementation once and exposes the static tag helpers of minimp3_ex.h under Rocks names, so
    AudioTools can decode frame by frame without the allocating minimp3_ex load functions. */
 #define MINIMP3_IMPLEMENTATION

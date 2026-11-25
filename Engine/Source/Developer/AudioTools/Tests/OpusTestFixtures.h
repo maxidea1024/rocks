@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// Opus 디코더 시험 입력이다(Docs/Design/AudioSystem.ko.md 3.29.3절). ffmpeg 9.1 libopus
+// Opus 디코더 시험 입력이다(Docs/Design/AudioSystem 3.29.3절). ffmpeg 9.1 libopus
 // 인코더(-fflags +bitexact)로 lavfi sine·pink noise(anoisesrc)에서 만들었다. ffmpeg Ogg Opus는
 // OpusHead·OpusTags가 각각 page 하나이고 granule이 pre-skip 312를 포함한다. 연결 stream은 시험이
 // 이어 붙인다. <이름>PageOffsets는 page 시작 위치다.

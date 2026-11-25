@@ -3,7 +3,7 @@
 #include <Audio/VorbisChannelOrder.h>
 #include <AudioTools/SourceAudio.h>
 
-// WAV·AIFF 디코더가 함께 쓰는 byte 읽기와 표본 변환이다(Docs/Design/AudioSystem.ko.md 3.25절).
+// WAV·AIFF 디코더가 함께 쓰는 byte 읽기와 표본 변환이다(Docs/Design/AudioSystem 3.25절).
 namespace rocks::audio::sourcedetail {
 
 // 정수 표본을 [−1, 1)로 바꾸는 배율이다(2^(bits−1)).
