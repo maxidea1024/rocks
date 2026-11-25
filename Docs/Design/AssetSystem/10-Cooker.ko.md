@@ -347,34 +347,43 @@ v1은 A4f에서 v2(backend 표·비에셋 산출물 표 — 10.3절 4항)로 바
 
 **시험(A4f — 14.1절 대조표는 구현 때)**: TargetProfile 구조 검증 각 위반·상한·Replace 병합(프로젝트가 한 backend만 적어도 Map 전체 교체)·SHA 변화·호스트 프로필(`TargetProfiles` 모듈 단독 — AssetCooker 없이), CookSettings `cookDevelopmentShaders` SHA, 단계 표 등록(시작 hook·중복 `AlreadyExists`)·미등록 `UnsupportedCapability`·셰이더 없는 프로필, 시험 단계(가짜 `CookArtifactStage`)로 게시·크기·SHA-256 직접 계산·`CorruptEntry`·전체 쿠킹 정리·부분 쿠킹 재사용(cookKey·파일 대조·불일치 시 다시 만들기)·job 실패 시 게시 안 함, 매니페스트 v2 왕복·golden·각 칸 손상·판정 순서 표·상한·v1 `UnsupportedVersion`·병합·`AppendCookedArtifactPath`, `--engine`(프로젝트 없음·잠금 위치·잠금 순서·`Engine` 항목만 — 쿠커 불변식·`--project` 함께 사용 오류·엔진 CookSettings), 로더 `FindArtifact`·`CheckCookedArtifactFile` 불일치 `CorruptPackage`.
 
-#### 10.3.1 A4f 구현 세부(2026-11-25 — 착수 때 정함)
+#### 10.3.1 A4f 구현 세부(2026-11-25 — 착수 때 정함, 교차 검증 1차 반영)
 
 **나눔**: 넷으로 나누고 차례로 구현한다.
 - **A4f1** 필드 플래그 `TextMapMergeByKey`, 새 모듈 `TargetProfiles`(TargetProfile 옮기기·셰이더 칸·구조 검증·`Mac`·호스트 프로필).
-- **A4f2** 매니페스트 v2(backend 표·artifact 표·`AppendCookedArtifactPath`·판정 순서), 로더 `Backends`·`Artifacts`·`FindArtifact`·`CheckCookedArtifactFile`.
+- **A4f2** 매니페스트 v2(backend 표·artifact 표·`AppendCookedArtifactPath`·판정 순서·`CheckCookedManifestMerge`의 artifact 표 병합), 로더 `Backends`·`Artifacts`·`FindArtifact`·`CheckCookedArtifactFile`.
 - **A4f3** 비에셋 산출물 단계(`CookArtifactStage`·표·요청·sink), 게시·정리·부분 쿠킹 재사용, `cookDevelopmentShaders`, 미등록 `UnsupportedCapability`.
-- **A4f4** `asset-cook --engine`, 쿠킹 루트 잠금.
+- **A4f4** `asset-cook --engine`, 쿠킹 루트 잠금, 엔진 전용 실행의 `asset.cooked_root` 기본값(11.8절). 완료 조건에 렌더 세션(rocks-6b) 알림을 넣는다(10.3절 "구현 시점").
+- 후속: 10.3절 5항의 패키징 규칙(매니페스트가 가리키는 파일만 복사)은 패키징 도구가 생길 때 한다.
 
 **A4f1 결정**:
 1. **Map 병합 필드 플래그**(1항의 "리플렉션 필드 지정자" — 기존 지정자가 없어 새로 둔다):
    - `FieldFlags::TextMapMergeByKey`(새 비트 256)와 지정자 `ROCKS_PROPERTY(TextMapMergeByKey)`다. Map 필드에만 쓴다(그 밖은 MetaCompiler `RMC2202` — AssetBundles와 같은 필드 종류 진단).
-   - 의미: JSON import가 그 Map을 키별로 병합한다(`options.mapMerge`가 Replace여도). 옵션이 MergeByKey면 모든 Map이 키별이다(지금 그대로). 플래그는 바깥 필드로 전파하지 않는다(자기 Map만 — 안쪽 struct의 Map은 자기 플래그를 본다).
+   - 의미: 그 필드의 JSON import 기본 병합이 키별이다(`options.mapMerge`가 Replace여도). 옵션 MergeByKey는 지금처럼 모든 Map을 덮는다. 플래그를 끄는 옵션은 두지 않는다 — 플래그 단 Map은 어느 ImportJson 경로에서도 키별이다(Config 런타임 변경 import가 일부러 Replace로 부르는 경로 — ConfigRuntimeChanges.cpp 359 — 에서도. 그 경로에 플래그 단 Map을 쓰는 Config 타입이 생기면 그 타입의 뜻으로 키별이 맞다).
+   - 플래그는 바깥 필드로 전파하지 않는다(`PropagateFieldFlags`의 inherited에 넣지 않는다 — 자기 Map만, 안쪽 struct의 Map은 자기 플래그를 본다).
+   - 닿는 곳(`TextExportTransient` 경로와 같다): TypeSchema.h `FieldFlags`, ObjectRuntime TypeRegistryRegister.cpp `KnownFieldFlags`(빠뜨리면 등록 InvalidArgument), MetaCompiler `Specifiers.cs`(이름 목록·파싱)·`SchemaModel.cs`(비트)·`SchemaValidator.cs`(RMC2202 — Map이 아니면 거부)·`ModuleDescriptor.cs`(descriptor 쓰기·받는 이름·읽기 — 빠뜨리면 다른 모듈이 import할 때 플래그를 잃는다), ReflectionText `TextJsonImport.cpp`(merge = 옵션 MergeByKey 또는 플래그), 문서 ReflectionFoundations 6.4절 플래그 표·ReflectionExtensions 10.4절 import 의미와 Map 행.
    - TargetProfile 읽기는 기본 옵션(Replace)으로 바꾸고 `textureLodGroups`에 플래그를 단다. `shaderFormats`는 플래그 없이 Replace다(1항). 12.14절의 "한계: 옵션이 import 전체에 걸린다"는 이것으로 풀린다.
-   - UE 대응: UE ini의 배열 `+`·`-`·`!` 접두가 항목 단위 병합을 쓰고 struct 배열은 통째 교체가 기본이다. 필드마다 병합 의미를 고르는 것은 Rocks 리플렉션 지정자로 한다.
+   - UE 대응: UE는 배열 하나의 키 병합을 ini에서 선언한다 — `BaseDeviceProfiles.ini` 3–4행 `[DeviceProfile]` `*TextureLODGroups=Group`(ConfigCacheIni ArrayOfStructKeys, ConfigCacheIni.cpp 911·966 — 같은 Group 항목은 덮고 새 항목은 더한다). 필드마다 병합 의미를 고르는 같은 구조를 Rocks는 리플렉션 지정자로 둔다.
+   - 버린 대안: `shaderFormats`를 struct 배열(`[{backend, formats}]`)로 두기 — 배열은 늘 통째 교체라 플래그가 필요 없고 "목록에 없는 backend 키" 검증도 사라지지만, 렌더 세션과 합의한 칸 모양(SSD10 `graphicsBackends` + `shaderFormats` Map)을 바꾼다. 합의 비용이 더 커서 플래그 안을 택한다.
 2. **TargetProfiles 모듈**(1항 모듈 분리):
    - 위치: `Engine/Source/Developer/TargetProfiles`.
    - 의존: Core·ObjectRuntime·ReflectionText·AssetRuntime(매니페스트 상한 상수), 그리고 Texture(A5j의 `textureLodGroups`가 Texture enum을 쓴다)·HostConfig(4번)를 더한다(1항 목록에 더한다).
    - 옮기는 것:
      - `TargetProfile`·`TextureLodGroup`·`TextureLodMinMagFilter`·`TextureLodMipFilter`·`CookBulkCodec`, `FindTextureLodGroup`.
      - `ReadTargetProfile`(새 문맥 `TargetProfileContext{allocator, files, registry, access, types, engineConfigDirectory, projectConfigDirectory(비면 없음)}`).
-     - `TargetProfileFailure`·`TargetProfileField`. AssetCooker `CookConfigFailure`가 code·error·file·field·index·line·column을 옮겨 담는다(필드 enum은 TargetProfiles 것을 AssetCooker가 그대로 쓴다).
+     - `TargetProfileFailure`·`TargetProfileField`·`TargetProfileFile`(None·EngineProfile·ProjectProfile).
+     - JSON 층 읽기 도우미(크기 상한·JSON 문법·대입 진단·층 — 지금 AssetCooker `ApplyJsonFile`)를 공개 도우미 `ApplyConfigJsonFile`로 옮기고 AssetCooker `ReadCookSettings`가 다시 쓴다(두 모듈에 같은 도우미를 두지 않는다).
+   - 실패 진단: `CookConfigField`·`CookConfigFile`은 AssetCooker에 남는다(CookSettings 칸 — AlwaysCook·NeverCook·PrimaryAsset·CookSettings 파일 — 이 섞여 있다). `TargetProfileField`·`TargetProfileFile`은 같은 이름의 `CookConfigField`·`CookConfigFile` 값과 1:1로 대응하고, AssetCooker가 `CookConfigFailure`로 변환해 담는다(대응은 static_assert 표로 묶는다). `AssetCookCommandlet` `AppendConfigField`에 새 칸(GraphicsBackends·ShaderFormats) 문구를 더한다.
    - 리플렉션 안정 id는 AssetCooker.rocksids.json의 항목을 TargetProfiles.rocksids.json으로 **옮긴다**(같은 Guid — 새로 만들지 않는다).
-   - AssetCooker는 TargetProfiles에 public 의존하고 `HashTargetProfile`·CookSettings를 둔다.
+   - AssetCooker는 TargetProfiles에 public 의존하고 `HashTargetProfile`·CookSettings를 둔다. A5j1에서 더한 AssetCooker의 직접 Texture 의존은 TargetProfiles public 의존으로 대체한다.
+   - 비용: `shader-compile`·SSD16 공급자도 TargetProfiles를 거쳐 Texture 런타임 모듈을 링크한다(엔진 실행 파일은 이미 가진다 — 비용은 셰이더 도구 쪽뿐). `TargetProfileContext`가 Registry·TypeRegistry를 요구하므로 셰이더 도구는 프로필을 읽으려고 ObjectRegistry 하나를 만든다(ReflectionText import 때문 — 피할 수 없다).
+   - rocksids 이동은 한 커밋에서 한다(두 파일에 같은 Guid가 동시에 있지 않게). 같은 Guid라 TypeId와 `HashTargetProfile`의 필드 기록이 그대로이고, 프로필 SHA는 새 칸만큼만 바뀐다.
 3. **셰이더 칸**: `graphicsBackend`를 지우고(하위호환 없음) `graphicsBackends`·`shaderFormats`를 둔다. 1항 구조 검증의 위반은 새 칸 `TargetProfileField::GraphicsBackends`(index = 번호)·`ShaderFormats`(index = backend 번호, 형식 id 위반은 그 backend 번호)다.
-4. **호스트 프로필** `ReadHostTargetProfile(context, out, diagnostics, failure)`: HostConfig `HostPlatformName()`(Windows·Mac·Android — 플랫폼 층 폴더 이름)으로 `ReadTargetProfile`을 부른다. 그래서 의존에 HostConfig를 더한다(가벼운 Core 모듈). Linux 호스트는 BS6 보류라 이름이 아직 없다.
+4. **호스트 프로필** `ReadHostTargetProfile(context, platform, out, diagnostics, failure)`: platform은 호출자가 넘긴 HostSettings 플랫폼 이름 재정의다(HostSettings.h 57 — 비면 HostConfig `HostPlatformName()`, Windows·Mac·Android). 그 이름으로 `ReadTargetProfile`을 부른다. 그래서 의존에 HostConfig를 더한다(가벼운 Core 모듈). Linux 호스트(BS6 보류)는 엔진 프로필 파일이 없어 엔진 파일 없음 진단(`InvalidSetting`·NotFound)이다.
 5. 엔진 파일 `Mac.json`(1항 값 — LOD 그룹 27행은 Windows와 같고, norm16 true), Windows·Android의 셰이더 칸(1항 값).
 
 **A4f1 시험**:
 - 플래그: MetaCompiler 수용·Map 아닌 필드 `RMC2202`, 키별 병합·플래그 없는 Map의 Replace·옵션 MergeByKey 전체 적용.
 - TargetProfiles 단독(AssetCooker 없이): 프로필 병합·구조 검증 위반마다(어휘·중복·형식 목록 없음·키 남음·형식 id 문법·전역 중복·상한 8·16)·Replace(프로젝트가 한 backend만 적으면 Map 전체 교체)·셰이더 없는 프로필(형식 Map도 빔), 호스트 프로필, 엔진 파일 셋(Windows·Android·Mac).
-- AssetCooker: SHA-256이 새 칸을 포함, `CookConfigFailure` 옮겨 담기.
+- AssetCooker: SHA-256이 새 칸을 포함, `CookConfigFailure` 변환(대응 표 전부), `ReadCookSettings`가 공개 도우미로 읽기, 명령 문구(GraphicsBackends·ShaderFormats).
+- 호스트 프로필: HostSettings 재정의 이름을 따름, 빈 재정의는 HostPlatformName().
