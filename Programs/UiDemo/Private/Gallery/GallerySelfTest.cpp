@@ -43,11 +43,16 @@ bool Click(Application& app, Vec2 point) noexcept {
 }
 
 bool Drag(Application& app, Vec2 from, Vec2 to) noexcept {
+    // 누름이 처리되지 않으면 끌기가 시작되지 않은 것이다.
     auto down = app.RoutePointer({PointerEventType::Down, from});
+    if (!down || !down.Value()) {
+        return false;
+    }
+
     auto step = app.RoutePointer({PointerEventType::Move, from + Vec2{DragStep, DragStep}});
     auto move = app.RoutePointer({PointerEventType::Move, to});
     auto up = app.RoutePointer({PointerEventType::Up, to});
-    return down && step && move && up;
+    return step && move && up && up.Value();
 }
 
 // bounds 안에 color(알파까지 같은) 상자가 있는지 본다.
@@ -129,11 +134,8 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
         return HoverForegroundMissing;
     }
 
-    // 탭 머리를 실제 위치로 눌러 배치 탭으로 간다. 머리는 탭 묶음 순서대로 앞에 있다.
-    const Span<const SharedPtr<Element>> heads = area->ActiveChildren();
-    constexpr usize LayoutHeader = 3;
-    const auto layoutTab =
-        Center(heads.Size() > LayoutHeader ? heads[LayoutHeader].Get() : nullptr);
+    // 탭 머리를 실제 위치로 눌러 배치 탭으로 간다.
+    const auto layoutTab = Center(area->TabHeader(GalleryWindow::LayoutTab));
     if (!layoutTab || !Click(app, *layoutTab) || !app.UpdatePaintCache(viewport, 1) ||
         !area->IsActive(GalleryWindow::LayoutTab)) {
         return TabSwitchFailed;
@@ -145,20 +147,8 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
         return DockingMissing;
     }
 
-    const Element* outliner = nullptr;
-    const Element* viewportTab = nullptr;
-    for (const SharedPtr<Element>& child : docking->ActiveChildren()) {
-        const Element* label = child->ChildAt(0);
-        const auto* text = label ? static_cast<const TextLabel*>(label) : nullptr;
-        if (text && text->GetText() == "Outliner") {
-            outliner = child.Get();
-        } else if (text && text->GetText() == "Viewport") {
-            viewportTab = child.Get();
-        }
-    }
-
-    const auto from = Center(outliner);
-    const auto to = Center(viewportTab);
+    const auto from = Center(docking->TabHeader("Outliner"));
+    const auto to = Center(docking->TabHeader("Viewport"));
     if (!from || !to || !Drag(app, *from, *to) || !app.UpdatePaintCache(viewport, 1)) {
         return TabDragFailed;
     }

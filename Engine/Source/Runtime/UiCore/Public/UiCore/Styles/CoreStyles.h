@@ -3,6 +3,9 @@
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
 #include <UiCore/Styles/DockTabStyle.h>
+#include <UiCore/Styles/ProgressBarStyle.h>
+#include <UiCore/Styles/ScrollBarStyle.h>
+#include <UiCore/Styles/SliderStyle.h>
 #include <UiCore/Styles/TextStyle.h>
 
 namespace rocks::ui {
@@ -59,6 +62,18 @@ ROCKS_UICORE_API const DockTabStyle& DefaultDockTabStyle() noexcept;
 // 보이지 않는 버튼 스타일이다(UE "NoBorder" — 232–240행, 252행: brush 없음, 전경 ForegroundHover,
 // 여백 0). 펼침 영역 머리처럼 내용만 보이는 클릭 영역에 쓴다.
 ROCKS_UICORE_API const ButtonStyle& NoBorderButtonStyle() noexcept;
+
+// 기본 슬라이더 스타일이다(UE "Slider" — StarshipCoreStyle.cpp 589–609행: 막대 RB(Input, 2, Input,
+// 1) 두께 4, 비활성 막대 외곽선 Recessed, 손잡이 8x8 원 Foreground·올림 ForegroundHover).
+ROCKS_UICORE_API const SliderStyle& DefaultSliderStyle() noexcept;
+
+// 기본 진행 막대 스타일이다(UE "ProgressBar" — 561–569행: 바탕 Color(Foldout), 채움·marquee
+// PrimaryHover).
+ROCKS_UICORE_API const ProgressBarStyle& DefaultProgressBarStyle() noexcept;
+
+// 기본 스크롤 막대 스타일이다(UE "Scrollbar" — 186–195행: 손잡이 RB(Hover, 4), 올림·끌기 RB(Hover2,
+// 4), 트랙 없음, 두께 8).
+ROCKS_UICORE_API const ScrollBarStyle& DefaultScrollBarStyle() noexcept;
 
 // 보통 텍스트 스타일이다(UE "NormalText" — 1252–1258행: Regular 10, 상속 전경색).
 ROCKS_UICORE_API const TextStyle& NormalTextStyle() noexcept;

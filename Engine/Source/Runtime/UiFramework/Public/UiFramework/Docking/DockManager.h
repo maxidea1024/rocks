@@ -86,6 +86,9 @@ public:
     Result<void> PaintFloatingPreview(PaintList& list) const noexcept;
     bool IsOpen(StringView id) const noexcept;
     bool IsActive(StringView id) const noexcept;
+    // 열린 탭의 머리 요소(탭 여백·brush를 맡는 감싼 요소 — 그 첫 자식이 등록한 머리)다. 없거나 닫혀
+    // 있으면 nullptr다. 탭 위치를 찾거나(시험·튜토리얼 강조) 머리 둘레에 표시를 그릴 때 쓴다.
+    const Element* TabHeader(StringView id) const noexcept;
 
     // 이 창의 도킹 트리를 들여쓰기한 UTF-8 JSON으로 쓴다. 탭은 등록 ID로 식별하며
     // 묶음 안의 순서와 활성 탭, 분할 방향과 첫 영역의 비율을 보존한다. 빈 창은 root가 null이다.

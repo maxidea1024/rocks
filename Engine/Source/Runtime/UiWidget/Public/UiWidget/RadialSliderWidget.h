@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Delegate.h>
+#include <UiCore/ThemeColors.h>
 #include <UiWidget/Widget.h>
 
 namespace rocks::ui {
@@ -37,10 +38,11 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "showHandle") bool showHandle_ = true;
     ROCKS_PROPERTY(ReadOnly, Name = "showHand") bool showHand_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "trackColor")
-    LinearColor trackColor_{0.18f, 0.18f, 0.18f, 1};
+    LinearColor trackColor_ = DefaultThemeColors().Get(ThemeSlot::Input);
     ROCKS_PROPERTY(ReadOnly, Name = "progressColor")
-    LinearColor progressColor_{0, 0.45f, 0.85f, 1};
-    ROCKS_PROPERTY(ReadOnly, Name = "handleColor") LinearColor handleColor_ { 1, 1, 1, 1 };
+    LinearColor progressColor_ = DefaultThemeColors().Get(ThemeSlot::Primary);
+    ROCKS_PROPERTY(ReadOnly, Name = "handleColor")
+    LinearColor handleColor_ = DefaultThemeColors().Get(ThemeSlot::Foreground);
     ROCKS_NATIVE() Delegate<void(float)> changed_;
 };
 

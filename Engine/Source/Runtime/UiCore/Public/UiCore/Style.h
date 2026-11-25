@@ -15,6 +15,9 @@
 #include <UiCore/Styles/CoreStyles.h>
 #include <UiCore/Styles/DockTabStyle.h>
 #include <UiCore/Styles/FontStyle.h>
+#include <UiCore/Styles/ProgressBarStyle.h>
+#include <UiCore/Styles/ScrollBarStyle.h>
+#include <UiCore/Styles/SliderStyle.h>
 #include <UiCore/Styles/StyleBrush.h>
 #include <UiCore/Styles/TextStyle.h>
 #include <UiCore/Styles/Typeface.h>

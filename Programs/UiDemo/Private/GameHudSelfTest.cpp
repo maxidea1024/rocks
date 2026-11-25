@@ -1,6 +1,7 @@
 #include "DemoShaders.h"
 #include "GameHud.h"
 
+#include <Core/Diagnostics/Log.h>
 #include <D3D11Graphics/D3D11Device.h>
 #include <UiFramework/Application.h>
 #include <UiRender/DrawBatchBuffers.h>
@@ -9,6 +10,12 @@
 #include <UiWidget/ProgressBarWidget.generated.h>
 
 namespace rocks::ui {
+
+namespace {
+
+inline constexpr LogCategory LogHudSelfTest{"UiDemo.HudSelfTest"};
+
+} // namespace
 
 int RunGameHudSelfTest(Allocator& allocator) noexcept {
     TypeRegistry types(allocator);
@@ -58,8 +65,9 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
 
     const auto viewport = Geometry::Root({64, 16}, {});
     uint8 pixels[64 * 16 * 4]{};
-    // 가운데 픽셀은 처음에는 흰 배경, 다음에는 채움색이다. 두 번째 제출은 기존 버퍼를 부분
-    // 갱신한다.
+    // 가운데 픽셀은 처음에는 바탕(UE "ProgressBar" Foldout — 회색), 다음에는 채움(PrimaryHover —
+    // 파랑)이다. 두 번째 제출은 기존 버퍼를 부분 갱신한다.
+    uint8 background[4]{};
     constexpr float fractions[] = {0.25f, 0.75f};
     for (const float fraction : fractions) {
         if (!bar.Value().Get().Value()->SetValue(fraction)) {
@@ -83,8 +91,28 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
         }
 
         const usize center = (8 * 64 + 32) * 4;
-        if (pixels[center] != (fraction < 0.5f ? 255 : 0) || pixels[center + 3] != 255) {
+        const uint8* pixel = pixels + center;
+        const auto mismatch = [&]() noexcept {
+            Log::Error(LogHudSelfTest, "Progress {Fraction} center pixel mismatch: {R} {G} {B} {A}",
+                       fraction, pixel[0], pixel[1], pixel[2], pixel[3]);
             return 10;
+        };
+        if (pixel[3] != 255) {
+            return mismatch();
+        }
+
+        if (fraction < 0.5f) {
+            // 바탕은 무채색이다.
+            if (pixel[0] != pixel[1] || pixel[1] != pixel[2]) {
+                return mismatch();
+            }
+
+            for (usize channel = 0; channel < 4; ++channel) {
+                background[channel] = pixel[channel];
+            }
+        } else if (pixel[2] <= pixel[0] || pixel[2] == background[2]) {
+            // 채움은 바탕과 다르고 파란 쪽이다.
+            return mismatch();
         }
 
         const uint64 revision = cache.Value()->Revision();

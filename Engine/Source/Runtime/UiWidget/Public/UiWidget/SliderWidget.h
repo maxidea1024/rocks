@@ -41,7 +41,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "locked") bool locked_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "indentHandle") bool indentHandle_ = true;
     ROCKS_PROPERTY(ReadOnly, Name = "barTint") LinearColor barTint_ { 1, 1, 1, 1 };
-    ROCKS_PROPERTY(ReadOnly, Name = "handleTint") LinearColor handleTint_ { 0, 0.45f, 0.85f, 1 };
+    ROCKS_PROPERTY(ReadOnly, Name = "handleTint") LinearColor handleTint_ { 1, 1, 1, 1 };
     ROCKS_PROPERTY(ReadOnly, Name = "requiresControllerLock") bool requiresControllerLock_ = true;
     ROCKS_NATIVE() Delegate<void()> controllerBegin_;
     ROCKS_NATIVE() Delegate<void()> controllerEnd_;

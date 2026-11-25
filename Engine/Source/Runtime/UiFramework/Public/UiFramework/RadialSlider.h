@@ -19,9 +19,10 @@ public:
         bool snapToStep = false;
         bool showHandle = true;
         bool showHand = false;
-        LinearColor track{0.18f, 0.18f, 0.18f, 1};
-        LinearColor progress{0, 0.45f, 0.85f, 1};
-        LinearColor handle{1, 1, 1, 1};
+        // 기본은 슬라이더 스타일과 같은 테마 색이다(트랙 Input, 진행 Primary, 손잡이 Foreground).
+        LinearColor track = DefaultThemeColors().Get(ThemeSlot::Input);
+        LinearColor progress = DefaultThemeColors().Get(ThemeSlot::Primary);
+        LinearColor handle = DefaultThemeColors().Get(ThemeSlot::Foreground);
         Delegate<void(float)> onChanged{};
         ElementArgs common{};
     };

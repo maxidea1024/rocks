@@ -19,7 +19,7 @@ Result<SharedPtr<Element>> ProgressBarWidget::BuildElement(ObjectRegistry& objec
         initialized = made.Value()->SetBorderPadding(borderPadding_);
     }
 
-    if (initialized) {
+    if (initialized && customFill_) {
         initialized = made.Value()->SetFillBrush(fillBrush_);
     }
 
@@ -61,6 +61,7 @@ Result<void> ProgressBarWidget::SetFillBrush(const Brush& brush) noexcept {
     }
 
     fillBrush_ = brush;
+    customFill_ = true;
     return bar_ ? bar_->SetFillBrush(brush) : Result<void>::Success();
 }
 

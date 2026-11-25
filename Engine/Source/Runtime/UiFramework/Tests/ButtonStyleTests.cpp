@@ -92,6 +92,20 @@ TEST(UiFramework_ButtonPaddingFollowsPressedState) {
     CHECK(button.Value()->GetStyle() == DefaultButtonStyle());
 }
 
+// Construct가 기본 스타일(생성자와 같은 값)을 받아도 스타일 여백을 넣는다. Frame::Construct가
+// 여백을 0으로 덮은 뒤 SetStyle이 같은 값이라 건너뛰어, 기본 스타일 버튼이 여백 없이 그려지던
+// 회귀다.
+TEST(UiFramework_ButtonConstructKeepsDefaultStylePadding) {
+    SystemAllocator allocator;
+    auto button = SharedPtr<Button>::TryMake(allocator, allocator);
+    auto content = SharedPtr<ForegroundProbe>::TryMake(allocator, allocator);
+    REQUIRE(button && content);
+    REQUIRE(button.Value()->Construct({.content = content.Value(), .style = DefaultButtonStyle()}));
+    REQUIRE(button.Value()->Arrange(Geometry::Root({80, 24}, {})));
+    CHECK(content.Value()->GetGeometry().WindowBounds().Value().min == Vec2(12, 1.5f));
+    CHECK(content.Value()->GetGeometry().size == Vec2(80 - 24, 24 - 3));
+}
+
 TEST(UiFramework_ButtonForegroundFollowsStateAndOverride) {
     SystemAllocator allocator;
     Button button(allocator);

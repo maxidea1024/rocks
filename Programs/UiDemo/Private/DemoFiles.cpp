@@ -48,7 +48,8 @@ Result<void> ReadEngineFile(StringView relative, Array<uint8>& out) noexcept {
     }
 
     const bool closed = static_cast<bool>(file.Close());
-    return ok && closed ? Result<void>::Success() : Result<void>::Failure(ErrorCode::DependencyFailed);
+    return ok && closed ? Result<void>::Success()
+                        : Result<void>::Failure(ErrorCode::DependencyFailed);
 }
 
 } // namespace rocks::ui

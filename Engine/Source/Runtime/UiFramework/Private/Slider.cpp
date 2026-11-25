@@ -39,13 +39,41 @@ LinearColor Slider::FillColor() const noexcept {
     return fillColor_;
 }
 
-float Slider::ThumbExtent(Vec2 size) noexcept {
-    return math::Min(12.0f, math::Min(size.x, size.y));
+float Slider::TrackStart(float handle, bool indent) noexcept {
+    return (indent ? handle : 0.0f) * 0.5f + handle * 0.5f;
 }
 
-float Slider::TrackPosition(float value, float minimum, float maximum, Vec2 size) noexcept {
-    const float thumb = ThumbExtent(size);
-    return thumb * 0.5f + (size.x - thumb) * ((value - minimum) / (maximum - minimum));
+float Slider::TrackPosition(float value, float minimum, float maximum, float width, float handle,
+                            bool indent) noexcept {
+    const float travel = math::Max(0.0f, width - (indent ? handle : 0.0f) - handle);
+    const float ratio = math::Clamp((value - minimum) / (maximum - minimum), 0.0f, 1.0f);
+    return TrackStart(handle, indent) + ratio * travel;
+}
+
+float Slider::HandleWidth() const noexcept {
+    return style_.thumbSize.x;
+}
+
+bool Slider::IsHandleIndented() const noexcept {
+    return indentHandle_;
+}
+
+void Slider::SetDragging(bool dragging) noexcept {
+    if (dragging_ != dragging) {
+        dragging_ = dragging;
+        InvalidatePaint();
+    }
+}
+
+Vec2 Slider::ComputeDesiredSize(float scale) const noexcept {
+    const Vec2 framed = Frame::ComputeDesiredSize(scale);
+    if (framed.x > 0 || framed.y > 0) {
+        return framed;
+    }
+
+    constexpr float DefaultLength = 16.0f;
+    const float thickness = math::Max(style_.barThickness, style_.thumbSize.y);
+    return vertical_ ? Vec2{thickness, DefaultLength} : Vec2{DefaultLength, thickness};
 }
 
 Result<void> Slider::SetRange(float minimum, float maximum) noexcept {
@@ -89,6 +117,11 @@ Result<void> Slider::SetStep(float step) noexcept {
 }
 
 void Slider::SetLocked(bool locked) noexcept {
+    if (locked_ != locked) {
+        // 잠금은 비활성 모양으로 그린다(UE GetBarImage·GetThumbImage 485·501행).
+        InvalidatePaint();
+    }
+
     locked_ = locked;
     if (locked) {
         EndControllerCapture();
@@ -233,7 +266,7 @@ PointerReply Slider::OnPointerEvent(const PointerEvent& event) noexcept {
     }
 
     if (event.type == PointerEventType::Down && !dragging_ && !locked_) {
-        dragging_ = true;
+        SetDragging(true);
         dragSource_ = event.source;
         dragUser_ = event.userId;
         dragPointer_ = event.pointerId;
@@ -255,7 +288,7 @@ PointerReply Slider::OnPointerEvent(const PointerEvent& event) noexcept {
     }
 
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
-        dragging_ = false;
+        SetDragging(false);
         captureEnd_.ExecuteIfBound();
         return {.handled = true, .releaseCapture = true};
     }
@@ -265,34 +298,98 @@ PointerReply Slider::OnPointerEvent(const PointerEvent& event) noexcept {
 
 void Slider::OnPointerCaptureLost(PointerSource source, uint32 userId, uint32 pointerId) noexcept {
     if (dragging_ && dragSource_ == source && dragUser_ == userId && dragPointer_ == pointerId) {
-        dragging_ = false;
+        SetDragging(false);
         captureEnd_.ExecuteIfBound();
     }
 }
 
 Result<void> Slider::OnPaint(PaintList& list, int32 layer) const noexcept {
+    // UE SSlider::OnPaint(81-135행): 막대는 손잡이 폭 절반씩 들여 그리고, 손잡이는 값 위치 가운데에
+    // 스타일 크기로 둔다. 잠금은 비활성 모양이다. 끌기 중은 포인터를 잡고 있어 올림으로 본다(UE도
+    // capture 중인 위젯은 hover 경로에 남는다).
     const auto& geometry = TrackGeometry();
-    const float height = math::Min(4.0f, geometry.size.y);
-    const float thumb = ThumbExtent(geometry.size);
-    const float y = (geometry.size.y - height) * 0.5f;
-    const float center = indentHandle_ ? TrackPosition(value_, minimum_, maximum_, geometry.size)
-                                       : geometry.size.x * GetNormalizedValue();
-    const float x = center - thumb * 0.5f;
-    const auto track = geometry.MakeChild({geometry.size.x, height}, {1, 0, 0, 1, 0, y}, {}, {});
-    auto drawn = list.TryAddBrush(track, GetBrush(), GetColor(), layer);
-    if (!drawn) {
-        return drawn;
+    const bool disabled = !IsEnabled() || list.IsDisabled() || locked_;
+    const bool hovered = hoverCount_ != 0 || dragging_;
+    const StyleBrush& bar = disabled  ? style_.barDisabled
+                            : hovered ? style_.barHovered
+                                      : style_.bar;
+    const StyleBrush& thumbBrush = disabled  ? style_.thumbDisabled
+                                   : hovered ? style_.thumbHovered
+                                             : style_.thumb;
+    const StyleColorContext context = list.ColorContext();
+    const float handle = HandleWidth();
+    const float thickness = math::Min(style_.barThickness, geometry.size.y);
+    const float y = (geometry.size.y - thickness) * 0.5f;
+    const float start = handle * 0.5f;
+    const float length = math::Max(0.0f, geometry.size.x - handle);
+    const float center =
+        TrackPosition(value_, minimum_, maximum_, geometry.size.x, handle, indentHandle_);
+    if (bar.mode != BrushMode::None && length > 0) {
+        const auto track = geometry.MakeChild({length, thickness}, {1, 0, 0, 1, start, y}, {}, {});
+        auto drawn = list.TryAddBrush(track, bar.Resolve(list.Theme(), context), GetColor(), layer);
+        if (!drawn) {
+            return drawn;
+        }
     }
 
-    const auto filled = geometry.MakeChild({x + thumb * 0.5f, height}, {1, 0, 0, 1, 0, y}, {}, {});
-    drawn = list.TryAddBox({filled, fillColor_, layer});
-    if (!drawn) {
-        return drawn;
+    // 채움은 색을 정한 경우에만 그린다(UE 기본 슬라이더에는 없다 - 원형 슬라이더·타임라인용).
+    if (fillColor_.a > 0 && center > start) {
+        const auto filled =
+            geometry.MakeChild({center - start, thickness}, {1, 0, 0, 1, start, y}, {}, {});
+        auto drawn = list.TryAddBox({filled, fillColor_, layer});
+        if (!drawn) {
+            return drawn;
+        }
     }
 
-    const auto handle = geometry.MakeChild(
-        {thumb, thumb}, {1, 0, 0, 1, x, (geometry.size.y - thumb) * 0.5f}, {}, {});
-    return list.TryAddBox({handle, handleTint_ ? *handleTint_ : fillColor_, layer});
+    if (thumbBrush.mode == BrushMode::None) {
+        return Result<void>::Success();
+    }
+
+    const Vec2 size = style_.thumbSize;
+    const auto thumb = geometry.MakeChild(
+        size, {1, 0, 0, 1, center - size.x * 0.5f, (geometry.size.y - size.y) * 0.5f}, {}, {});
+    return list.TryAddBrush(thumb, thumbBrush.Resolve(list.Theme(), context),
+                            handleTint_ ? *handleTint_ : LinearColor{1, 1, 1, 1}, layer);
+}
+
+Result<void> Slider::SetStyle(const SliderStyle& style) noexcept {
+    const ThemeColors& theme = DefaultThemeColors();
+    const StyleBrush* brushes[] = {&style.bar,   &style.barHovered,   &style.barDisabled,
+                                   &style.thumb, &style.thumbHovered, &style.thumbDisabled};
+    for (const StyleBrush* brush : brushes) {
+        if (!brush->Resolve(theme, {}).IsValid()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (!math::IsFinite(style.barThickness) || style.barThickness < 0 ||
+        !style.thumbSize.IsFinite() || style.thumbSize.x < 0 || style.thumbSize.y < 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (style_ != style) {
+        style_ = style;
+        InvalidatePaint();
+    }
+
+    return Result<void>::Success();
+}
+
+const SliderStyle& Slider::GetStyle() const noexcept {
+    return style_;
+}
+
+void Slider::OnMouseEnter(uint32) noexcept {
+    if (++hoverCount_ == 1) {
+        InvalidatePaint();
+    }
+}
+
+void Slider::OnMouseLeave(uint32) noexcept {
+    if (hoverCount_ && --hoverCount_ == 0) {
+        InvalidatePaint();
+    }
 }
 
 void Slider::UpdateFromPointer(Vec2 position, bool) noexcept {
@@ -307,11 +404,12 @@ void Slider::UpdateFromPointer(Vec2 position, bool) noexcept {
         return;
     }
 
-    const float thumb = ThumbExtent(geometry.size);
-    const float padding = indentHandle_ ? thumb : 0.0f;
-    const float travel = geometry.size.x - padding;
+    // UE PositionToValue(439-445행): (x - 시작) / (폭 - 들여쓰기 - 손잡이 폭).
+    const float handle = HandleWidth();
+    const float travel = geometry.size.x - (indentHandle_ ? handle : 0.0f) - handle;
     const float ratio =
-        travel > 0 ? math::Clamp((local.x - padding * 0.5f) / travel, 0.0f, 1.0f) : 0.0f;
+        travel > 0 ? math::Clamp((local.x - TrackStart(handle, indentHandle_)) / travel, 0.0f, 1.0f)
+                   : 0.0f;
     SetInteractiveRatio(ratio);
 }
 

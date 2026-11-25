@@ -259,6 +259,15 @@ bool DockManager::IsActive(StringView id) const noexcept {
     return node && node->tabs[node->selected] == i;
 }
 
+const Element* DockManager::TabHeader(StringView id) const noexcept {
+    const usize i = FindTab(id);
+    if (i == MaxSize || tabs_[i].stack.IsNull() || !tabs_[i].header) {
+        return nullptr;
+    }
+
+    return tabs_[i].header.Get();
+}
+
 void DockManager::RebuildChildren() noexcept {
     visible_.Clear();
     for (const auto& node : nodes_) {

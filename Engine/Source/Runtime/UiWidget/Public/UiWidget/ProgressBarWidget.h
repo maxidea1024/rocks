@@ -32,10 +32,12 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "value") float value_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "direction") uint8 direction_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "marquee") bool marquee_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "fillColor") LinearColor fillColor_ { 0, 0.45f, 0.85f, 1 };
+    ROCKS_PROPERTY(ReadOnly, Name = "fillColor") LinearColor fillColor_ { 1, 1, 1, 1 };
     ROCKS_PROPERTY(ReadOnly, Name = "borderPadding") Vec2 borderPadding_ {};
     ROCKS_PROPERTY(ReadOnly, Name = "fillStyle") uint8 fillStyle_ = 0;
     ROCKS_NATIVE() Brush fillBrush_ {};
+    // SetFillBrush를 불렀는지다. 부르지 않았으면 Element가 스타일 채움(UE "ProgressBar")을 쓴다.
+    ROCKS_NATIVE() bool customFill_ = false;
     ROCKS_NATIVE() SharedPtr<ProgressBar> bar_;
 };
 

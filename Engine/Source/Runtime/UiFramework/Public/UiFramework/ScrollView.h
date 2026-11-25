@@ -1,9 +1,13 @@
 #pragma once
 
+#include <UiCore/Styles/CoreStyles.h>
 #include <UiFramework/StackPanel.h>
 #include <UiFramework/ScrollAlignment.h>
 
 namespace rocks::ui {
+
+// 스크롤 막대 둘레 여백 기본값(UI 단위)이다(UE SScrollBox ScrollBarPadding 2).
+inline constexpr float ScrollBarPaddingDefault = 2.0f;
 
 enum class ConsumeMouseWheel : uint8 {
     WhenScrolling,
@@ -34,6 +38,7 @@ public:
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     void OnPointerCaptureLost(PointerSource source, uint32 userId,
                               uint32 pointerId) noexcept override;
+    void OnMouseLeave(uint32 user) noexcept override;
     Result<void> OnPaintOverlay(PaintList& list, int32 layer) const noexcept override;
 
     Result<void> SetScrollOffset(float offset) noexcept;
@@ -70,9 +75,12 @@ private:
     bool endRequested_ = false;
     ConsumeMouseWheel wheelPolicy_ = ConsumeMouseWheel::WhenScrolling;
     float wheelMultiplier_ = 1;
-    float thickness_ = 6;
+    // 막대 두께다(UE "Scrollbar" 두께 8 — DefaultScrollBarStyle).
+    float thickness_ = DefaultScrollBarStyle().thickness;
     bool showBar_ = true;
-    Vec4 barPadding_{};
+    // 막대 둘레 여백이다(UE SScrollBox ScrollBarPadding 기본 2, SScrollBox.h 164행).
+    Vec4 barPadding_{ScrollBarPaddingDefault, ScrollBarPaddingDefault, ScrollBarPaddingDefault,
+                     ScrollBarPaddingDefault};
     bool alwaysShowTrack_ = false;
     bool padBefore_ = false;
     bool padAfter_ = false;
@@ -89,6 +97,10 @@ private:
     uint32 dragUser_ = 0;
     uint32 dragPointer_ = 0;
     bool dragging_ = false;
+    // 마우스가 손잡이 위에 있는지다(올림 모양).
+    bool thumbHovered_ = false;
+    void SetDragging(bool dragging, bool content) noexcept;
+    void UpdateThumbHover(Vec2 position) noexcept;
 };
 
 } // namespace rocks::ui

@@ -9,7 +9,6 @@ ProgressBar::ProgressBar(Allocator& allocator) noexcept : Frame(allocator), valu
 Result<void> ProgressBar::Construct(Args&& args) noexcept {
     auto result = Frame::Construct({.content = args.content,
                                     .color = Move(args.color),
-                                    .brush = args.brush,
                                     .padding = args.padding,
                                     .desiredSize = Move(args.desiredSize)});
     if (result) {
@@ -47,12 +46,21 @@ Result<void> ProgressBar::SetFillBrush(const Brush& brush) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    customFill_ = true;
     if (brush != fillBrush_) {
         fillBrush_ = brush;
         InvalidatePaint();
     }
 
     return Result<void>::Success();
+}
+
+void ProgressBar::ClearFillBrush() noexcept {
+    if (customFill_) {
+        customFill_ = false;
+        fillBrush_ = {};
+        InvalidatePaint();
+    }
 }
 
 Result<void> ProgressBar::SetFillStyle(ProgressFillStyle style) noexcept {
@@ -116,8 +124,35 @@ void ProgressBar::SetFillColor(LinearColor color) noexcept {
     }
 }
 
+Result<void> ProgressBar::SetStyle(const ProgressBarStyle& style) noexcept {
+    const ThemeColors& theme = DefaultThemeColors();
+    const StyleBrush* brushes[] = {&style.background, &style.fill, &style.marquee};
+    for (const StyleBrush* brush : brushes) {
+        if (!brush->Resolve(theme, {}).IsValid()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (style_ != style) {
+        style_ = style;
+        InvalidatePaint();
+    }
+
+    return Result<void>::Success();
+}
+
+const ProgressBarStyle& ProgressBar::GetStyle() const noexcept {
+    return style_;
+}
+
 Result<void> ProgressBar::OnPaint(PaintList& list, int32 layer) const noexcept {
-    auto background = Frame::OnPaint(list, layer);
+    const StyleColorContext context = list.ColorContext();
+    Result<void> background = Result<void>::Success();
+    if (style_.background.mode != BrushMode::None) {
+        background = list.TryAddBrush(
+            GetGeometry(), style_.background.Resolve(list.Theme(), context), GetColor(), layer);
+    }
+
     const float value = GetValue();
     if (!background || (!marquee_ && value <= 0)) {
         return background;
@@ -173,11 +208,14 @@ Result<void> ProgressBar::OnPaint(PaintList& list, int32 layer) const noexcept {
     }
 
     const auto part = area.MakeChild(size, {1, 0, 0, 1, offset.x, offset.y}, {}, {});
+    const Brush fill = marquee_      ? style_.marquee.Resolve(list.Theme(), context)
+                       : customFill_ ? fillBrush_
+                                     : style_.fill.Resolve(list.Theme(), context);
     if (fillStyle_ == ProgressFillStyle::Scale || marquee_) {
-        return list.TryAddBrush(part, fillBrush_, fillColor_, layer);
+        return list.TryAddBrush(part, fill, fillColor_, layer);
     }
 
-    return list.TryAddBrushRegion(area, fillBrush_, fillColor_, layer, {offset, offset + size});
+    return list.TryAddBrushRegion(area, fill, fillColor_, layer, {offset, offset + size});
 }
 
 AccessibleRole ProgressBar::GetAccessibleRole() const noexcept {

@@ -30,6 +30,12 @@ StyleBrush StyleBrush::Color(ThemeSlot fill) noexcept {
     return brush;
 }
 
+StyleBrush StyleBrush::Pill(ThemeSlot fill) noexcept {
+    StyleBrush brush = RoundedBox(fill, 0.0f);
+    brush.rounding = BrushRounding::HalfHeight;
+    return brush;
+}
+
 Brush StyleBrush::Resolve(const ThemeColors& theme,
                           const StyleColorContext& context) const noexcept {
     Brush brush;

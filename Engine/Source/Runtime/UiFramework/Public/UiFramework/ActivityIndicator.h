@@ -28,7 +28,12 @@ private:
     uint64 origin_ = 0;
     double elapsed_ = 0;
     Clock clock_;
-    Brush brush_{.imageSize = {8, 8}};
+    // 조각은 8x8 원이다(UE "Throbber.CircleChunk" 이미지의 모양 — 이미지 경로 전까지 알약 brush).
+    Brush brush_ = [] {
+        Brush piece = Brush::PillBox({1, 1, 1, 1});
+        piece.imageSize = {8, 8};
+        return piece;
+    }();
     float radius_ = 16;
     float period_;
     bool horizontal_ = true;

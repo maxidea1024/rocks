@@ -1,4 +1,5 @@
 #include <UiFramework/ScrollView.h>
+#include <UiFramework/ScrollBar.h>
 #include "TouchPan.h"
 
 namespace rocks::ui {
@@ -72,8 +73,7 @@ PointerReply ScrollView::OnPreviewPointerDown(const PointerEvent& event) noexcep
         return {};
     }
 
-    dragging_ = true;
-    draggingContent_ = false;
+    SetDragging(true, false);
     dragButton_ = event.button;
     dragSource_ = event.source;
     dragUser_ = event.userId;
@@ -95,8 +95,7 @@ PointerReply ScrollView::OnTouchPan(const PointerEvent& move, Vec2 origin) noexc
         return {};
     }
 
-    dragging_ = true;
-    draggingContent_ = true;
+    SetDragging(true, true);
     dragSource_ = move.source;
     dragUser_ = move.userId;
     dragPointer_ = move.pointerId;
@@ -107,7 +106,41 @@ PointerReply ScrollView::OnTouchPan(const PointerEvent& move, Vec2 origin) noexc
     return {.handled = true, .capture = true};
 }
 
+void ScrollView::SetDragging(bool dragging, bool content) noexcept {
+    if (dragging_ != dragging || draggingContent_ != content) {
+        dragging_ = dragging;
+        draggingContent_ = content;
+        InvalidatePaint();
+    }
+}
+
+void ScrollView::UpdateThumbHover(Vec2 position) noexcept {
+    Vec2 thumbPosition;
+    Vec2 size;
+    Vec2 local;
+    const bool over = GetThumb(thumbPosition, size) && ToLocal(position, local) &&
+                      local.x >= thumbPosition.x && local.y >= thumbPosition.y &&
+                      local.x < thumbPosition.x + size.x && local.y < thumbPosition.y + size.y;
+    if (thumbHovered_ != over) {
+        thumbHovered_ = over;
+        InvalidatePaint();
+    }
+}
+
+void ScrollView::OnMouseLeave(uint32 user) noexcept {
+    Super::OnMouseLeave(user);
+    if (thumbHovered_) {
+        thumbHovered_ = false;
+        InvalidatePaint();
+    }
+}
+
 PointerReply ScrollView::OnPointerEvent(const PointerEvent& event) noexcept {
+    // 손잡이 위 올림(UE SScrollBar IsHovered → HoveredThumbImage, 319-327행)은 이동마다 갱신한다.
+    if (event.type == PointerEventType::Move && event.source == PointerSource::Mouse) {
+        UpdateThumbHover(event.position);
+    }
+
     if (!dragging_ && event.type == PointerEventType::Down &&
         event.source == PointerSource::Touch) {
         if (touchScrolling_ && maxOffset_ > 0) {
@@ -130,8 +163,7 @@ PointerReply ScrollView::OnPointerEvent(const PointerEvent& event) noexcept {
             return {};
         }
 
-        dragging_ = true;
-        draggingContent_ = true;
+        SetDragging(true, true);
         dragSource_ = event.source;
         dragUser_ = event.userId;
         dragPointer_ = event.pointerId;
@@ -163,7 +195,7 @@ PointerReply ScrollView::OnPointerEvent(const PointerEvent& event) noexcept {
         }
 
         if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
-            dragging_ = false;
+            SetDragging(false, false);
             return {.handled = true, .releaseCapture = true};
         }
 
@@ -188,7 +220,7 @@ PointerReply ScrollView::OnPointerEvent(const PointerEvent& event) noexcept {
 void ScrollView::OnPointerCaptureLost(PointerSource source, uint32 userId,
                                       uint32 pointerId) noexcept {
     if (dragging_ && dragSource_ == source && dragUser_ == userId && dragPointer_ == pointerId) {
-        dragging_ = false;
+        SetDragging(false, false);
     }
 }
 
@@ -198,9 +230,16 @@ Result<void> ScrollView::OnPaintOverlay(PaintList& list, int32 layer) const noex
     if (alwaysShowTrack_ && GetTrack(position, size)) {
         const auto geometry =
             GetGeometry().MakeChild(size, {1, 0, 0, 1, position.x, position.y}, {}, {});
-        auto track = list.TryAddBox({geometry, {0.12f, 0.12f, 0.12f, 0.8f}, layer});
-        if (!track) {
-            return track;
+        // 항상 보이는 트랙은 스타일 트랙이다(UE AlwaysShowScrollbarTrack — Starship 트랙은 None이라
+        // 기본 스타일에서는 그리지 않는다).
+        const StyleBrush& trackBrush = DefaultScrollBarStyle().track;
+        if (trackBrush.mode != BrushMode::None) {
+            auto track =
+                list.TryAddBrush(geometry, trackBrush.Resolve(list.Theme(), list.ColorContext()),
+                                 {1, 1, 1, 1}, layer);
+            if (!track) {
+                return track;
+            }
         }
     }
 
@@ -208,9 +247,15 @@ Result<void> ScrollView::OnPaintOverlay(PaintList& list, int32 layer) const noex
         return Result<void>::Success();
     }
 
+    // 손잡이는 스크롤 막대 스타일이다(UE "Scrollbar"). 손잡이를 끄는 동안 끌기, 손잡이 위면 올림
+    // 모양이다. 내용 끌기·터치 팬은 손잡이 끌기가 아니다(UE bDraggingThumb).
+    const ScrollBarStyle& style = DefaultScrollBarStyle();
+    const StyleBrush& thumb = dragging_ && !draggingContent_ ? style.thumbDragged
+                              : thumbHovered_                ? style.thumbHovered
+                                                             : style.thumb;
     const AffineTransform2D translation{1, 0, 0, 1, position.x, position.y};
-    return list.TryAddBox({GetGeometry().MakeChild(size, translation, {}, {}),
-                           LinearColor(0.5f, 0.5f, 0.5f, 0.8f), layer});
+    return list.TryAddBrush(GetGeometry().MakeChild(size, translation, {}, {}),
+                            thumb.Resolve(list.Theme(), list.ColorContext()), {1, 1, 1, 1}, layer);
 }
 
 bool ScrollView::GetTrack(Vec2& position, Vec2& size) const noexcept {
@@ -251,7 +296,7 @@ bool ScrollView::GetThumb(Vec2& position, Vec2& size) const noexcept {
     }
 
     const float proportional = length * GetViewFraction();
-    const float thumbLength = math::Min(length, math::Max(16.0f, proportional));
+    const float thumbLength = math::Min(length, math::Max(MinScrollThumbLength, proportional));
     const float thickness = math::Min(thickness_, cross);
     const float start = maxOffset_ > 0 ? (length - thumbLength) * offset_ / maxOffset_ : 0;
     position = trackPosition + (vertical ? Vec2(0, start) : Vec2(start, 0));

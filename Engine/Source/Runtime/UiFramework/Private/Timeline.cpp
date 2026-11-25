@@ -26,8 +26,9 @@ public:
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override {
         const auto& geometry = GetGeometry();
         const auto divisions = major_ * minor_;
-        const float start = ThumbExtent(geometry.size) * 0.5f;
-        const float width = geometry.size.x - 2 * start;
+        const float start = TrackStart(handle_, indent_);
+        const float width =
+            TrackPosition(maximum_, minimum_, maximum_, geometry.size.x, handle_, indent_) - start;
         const float baseline = geometry.size.y * 0.62f;
         auto result = Rectangle(list, geometry, start, baseline, width, 1, color_, layer);
         for (uint32 i = 0; result && i <= divisions; ++i) {
@@ -41,9 +42,10 @@ public:
                 continue;
             }
 
-            result = Rectangle(list, geometry,
-                               TrackPosition(mark.time, minimum_, maximum_, geometry.size) - 2,
-                               baseline + 3, 4, 6, mark.color, layer);
+            result = Rectangle(
+                list, geometry,
+                TrackPosition(mark.time, minimum_, maximum_, geometry.size.x, handle_, indent_) - 2,
+                baseline + 3, 4, 6, mark.color, layer);
         }
 
         return result;
@@ -52,14 +54,20 @@ public:
     Array<TimelineMark> marks_;
     float minimum_;
     float maximum_;
-    LinearColor color_{0.4f, 0.4f, 0.4f, 1};
+    // 눈금 색이다(테마 Hover2 — UE 시간 막대 눈금처럼 바탕보다 밝은 회색).
+    LinearColor color_ = DefaultThemeColors().Get(ThemeSlot::Hover2);
     uint32 major_ = 4;
     uint32 minor_ = 8;
+    // 값 위치 계산에 쓰는 손잡이 폭·들여쓰기다(Timeline이 배치 때 넘긴다).
+    float handle_ = 0;
+    bool indent_ = true;
 };
 
 Timeline::Timeline(Allocator& allocator) noexcept : Slider(allocator), allocator_(allocator) {
     SetDesiredSize({160, 38});
     SetClipToBounds(true);
+    // 재생 헤드는 Primary다(채움 색 — 기본 슬라이더의 채움은 투명이다).
+    SetFillColor(DefaultThemeColors().Get(ThemeSlot::Primary));
 }
 
 Result<void> Timeline::EnsureRuler() noexcept {
@@ -151,16 +159,27 @@ Result<void> Timeline::Arrange(const Geometry& geometry) noexcept {
     }
 
     SetGeometry(geometry);
+    if (ruler_->handle_ != HandleWidth() || ruler_->indent_ != IsHandleIndented()) {
+        ruler_->handle_ = HandleWidth();
+        ruler_->indent_ = IsHandleIndented();
+        ruler_->InvalidatePaint();
+    }
+
     return ruler_->ArrangeIfNeeded(TrackGeometry());
 }
 
 Result<void> Timeline::OnPaint(PaintList& list, int32 layer) const noexcept {
-    return Frame::OnPaint(list, layer);
+    // 바탕은 Recessed 둥근 상자다(UE 시간 막대 바탕처럼 패널보다 어둡다). Frame 색을 tint로 곱한다.
+    constexpr float BackgroundRadius = 2.0f;
+    const StyleBrush background = StyleBrush::RoundedBox(ThemeSlot::Recessed, BackgroundRadius);
+    return list.TryAddBrush(GetGeometry(), background.Resolve(list.Theme(), list.ColorContext()),
+                            GetColor(), layer);
 }
 
 Result<void> Timeline::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
     const auto geometry = TrackGeometry();
-    const float x = TrackPosition(GetValue(), Minimum(), Maximum(), geometry.size);
+    const float x = TrackPosition(GetValue(), Minimum(), Maximum(), geometry.size.x, HandleWidth(),
+                                  IsHandleIndented());
     auto drawn = Rectangle(list, geometry, x - 1, 2, 2, geometry.size.y - 2, FillColor(), layer);
     if (!drawn) {
         return drawn;

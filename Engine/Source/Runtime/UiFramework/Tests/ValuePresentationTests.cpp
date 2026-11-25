@@ -46,8 +46,10 @@ TEST(UiFramework_SliderLockPreservesProgrammaticChangesAndFinishesCapture) {
     uint32 starts = 0, ends = 0;
     slider.SetOnCaptureBegin(Delegate<void()>::CreateLambda([&]() noexcept { ++starts; }));
     slider.SetOnCaptureEnd(Delegate<void()>::CreateLambda([&]() noexcept { ++ends; }));
-    CHECK(slider.OnPointerEvent({PointerEventType::Down, {10, 6}}).capture);
-    CHECK(slider.GetNormalizedValue() == 0.1f);
+    // 들여쓰기 없음: 값 범위 = 손잡이 폭 절반(4) .. 96, 길이 92(UE PositionToValue 439-445행).
+    // 4 + 0.25 x 92 = 27이다.
+    CHECK(slider.OnPointerEvent({PointerEventType::Down, {27, 6}}).capture);
+    CHECK(slider.GetNormalizedValue() == 0.25f);
     slider.SetLocked(true);
     CHECK(!slider.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Right)));
     REQUIRE(slider.SetValue(0.5f));

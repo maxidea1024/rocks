@@ -29,7 +29,9 @@ Result<void> DrawLine(PaintList& list, const Geometry& area, Vec2 from, Vec2 to,
 
 RadialSlider::RadialSlider(Allocator& allocator) noexcept : Slider(allocator) {
     SetDesiredSize({48, 48});
-    SetColor({0.18f, 0.18f, 0.18f, 1});
+    SetColor(DefaultThemeColors().Get(ThemeSlot::Input));
+    SetFillColor(DefaultThemeColors().Get(ThemeSlot::Primary));
+    SetHandleColor(DefaultThemeColors().Get(ThemeSlot::Foreground));
 }
 
 Result<void> RadialSlider::Construct(Args&& args) noexcept {

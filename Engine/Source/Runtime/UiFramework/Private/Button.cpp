@@ -12,6 +12,12 @@ Result<void> Button::Construct(Args&& args) noexcept {
         status = SetContentPadding(args.contentPadding);
     }
 
+    // Frame::Construct가 여백을 Args 기본값(0)으로 덮으므로, 스타일·내용 여백이 이전과 같아
+    // 위 setter가 건너뛰어도 스타일 여백을 다시 넣는다.
+    if (status) {
+        UpdatePadding();
+    }
+
     if (status && args.foregroundColor) {
         status = SetForegroundColor(*args.foregroundColor);
     }

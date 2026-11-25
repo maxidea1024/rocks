@@ -2,11 +2,13 @@
 
 #include <Core/Delegate.h>
 #include <Core/Optional.h>
+#include <UiCore/Styles/CoreStyles.h>
 #include <UiFramework/Frame.h>
 
 namespace rocks::ui {
 
-// 마우스·터치 drag와 좌우 키로 값을 조절하는 수평 슬라이더다.
+// 마우스·터치 drag와 좌우 키로 값을 조절하는 수평 슬라이더다. 모양은 SliderStyle(UE "Slider")이고,
+// Frame 색은 막대 tint(UE SliderBarColor), 손잡이 색은 손잡이 tint(UE SliderHandleColor)다.
 class ROCKS_UIFRAMEWORK_API Slider : public Frame {
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
@@ -28,10 +30,20 @@ public:
     void OnFocusLost(uint32 user) noexcept override;
     void SetIndentHandle(bool indent) noexcept;
     void SetHandleColor(LinearColor color) noexcept;
+    // 원하는 크기는 UE SSlider::ComputeDesiredSize(143-160행)처럼 (16, max(막대 두께, 손잡이
+    // 높이))다 (세로면 뒤집는다). Frame 원하는 크기를 정했으면 그것을 쓴다.
+    Vec2 ComputeDesiredSize(float scale) const noexcept override;
+    // 막대·손잡이 brush가 그릴 수 없는 값이거나 두께·크기가 음수·비유한이면 InvalidArgument다.
+    Result<void> SetStyle(const SliderStyle& style) noexcept;
+    const SliderStyle& GetStyle() const noexcept;
+    void OnMouseEnter(uint32 user) noexcept override;
+    void OnMouseLeave(uint32 user) noexcept override;
     void SetOnCaptureBegin(Delegate<void()>&& callback) noexcept;
     void SetOnCaptureEnd(Delegate<void()>&& callback) noexcept;
     float GetNormalizedValue() const noexcept;
     float GetValue() const noexcept;
+    // 손잡이 앞쪽을 채우는 색이다. UE 기본 슬라이더에는 채움이 없어 기본은 투명이다(원형 슬라이더의
+    // 진행 표시·타임라인 재생 헤드가 쓴다).
     void SetFillColor(LinearColor color) noexcept;
     void SetOnChanged(Delegate<void(float)>&& callback) noexcept;
 
@@ -51,12 +63,24 @@ protected:
     float Minimum() const noexcept;
     float Maximum() const noexcept;
     LinearColor FillColor() const noexcept;
-    static float ThumbExtent(Vec2 size) noexcept;
-    static float TrackPosition(float value, float minimum, float maximum, Vec2 size) noexcept;
+    // 값 범위의 시작 위치(값 최소일 때 손잡이 가운데)다. UE SSlider(OnPaint 81-92행)처럼 손잡이 폭
+    // handle과 들여쓰기(indent면 handle)로 정한다: 들여쓰기 / 2 + handle / 2.
+    static float TrackStart(float handle, bool indent) noexcept;
+    // 값 위치(손잡이 가운데)다: 시작 + 비율 x (폭 - 들여쓰기 - handle). 포인터 해석(UE
+    // PositionToValue 439-445행)도 같은 식을 거꾸로 쓴다.
+    static float TrackPosition(float value, float minimum, float maximum, float width, float handle,
+                               bool indent) noexcept;
+    // 지금 스타일의 손잡이 폭과 들여쓰기 여부다.
+    float HandleWidth() const noexcept;
+    bool IsHandleIndented() const noexcept;
+    // 끌기 상태를 바꾸고, 바뀌면 다시 그린다(올림·끌기 모양이 끌기에 달려 있다).
+    void SetDragging(bool dragging) noexcept;
 
 private:
     Delegate<void(float)> onChanged_;
-    LinearColor fillColor_{0.0f, 0.45f, 0.85f, 1};
+    LinearColor fillColor_{0, 0, 0, 0};
+    SliderStyle style_ = DefaultSliderStyle();
+    uint32 hoverCount_ = 0;
     float minimum_ = 0;
     float maximum_ = 1;
     float value_ = 0;

@@ -13,16 +13,18 @@ namespace rocks::ui {
 TEST(UiFramework_ScrollBarKeepsGrabPointAndClampsToContentEnd) {
     SystemAllocator allocator;
     ScrollBar bar(allocator);
-    REQUIRE(bar.Arrange(Geometry::Root({12, 100}, {})));
+    // 길이 200, 손잡이 50(최소 35보다 길다), 이동 150, 손잡이 시작 150 x (0.25 / 0.75) = 50.
+    REQUIRE(bar.Arrange(Geometry::Root({12, 200}, {})));
     REQUIRE(bar.SetState(0.25f, 0.25f));
     float position = -1;
     bar.SetOnScrolled(
         Delegate<void(float)>::CreateLambda([&](float value) noexcept { position = value; }));
-    CHECK(bar.OnPointerEvent({PointerEventType::Down, {6, 30}}).capture);
+    // 손잡이 안(60)을 잡으면 잡은 점(10)을 유지한다: (130 - 10) / 150 x 0.75 = 0.6.
+    CHECK(bar.OnPointerEvent({PointerEventType::Down, {6, 60}}).capture);
     CHECK(position == -1);
-    CHECK(bar.OnPointerEvent({PointerEventType::Move, {6, 65}}).handled);
+    CHECK(bar.OnPointerEvent({PointerEventType::Move, {6, 130}}).handled);
     CHECK(math::Abs(position - 0.60f) < 0.0001f);
-    CHECK(bar.OnPointerEvent({PointerEventType::Move, {6, 140}}).handled);
+    CHECK(bar.OnPointerEvent({PointerEventType::Move, {6, 280}}).handled);
     CHECK(position == 0.75f);
     CHECK(bar.OnPointerEvent({PointerEventType::Cancel, {}}).releaseCapture);
     CHECK(!bar.OnPointerEvent({PointerEventType::Move, {0, 0}}).handled);
@@ -156,18 +158,24 @@ TEST(UiFramework_VerticalSliderUsesTheSameTrackForPickingAndPaint) {
     REQUIRE(slider.SetStep(2));
     slider.SetVertical(true);
     slider.SetSnapToStep(true);
-    REQUIRE(slider.Arrange(Geometry::Root({12, 92}, {})));
-    CHECK(slider.OnPointerEvent({PointerEventType::Down, {6, 62}}).capture);
-    CHECK(slider.GetValue() == 0);
-    CHECK(slider.OnPointerEvent({PointerEventType::Up, {6, 6}}).releaseCapture);
+    // 길이 96, 손잡이 폭 8, 들여쓰기: 값 위치 = 8 + 비율 x 80(UE SSlider 81-92·439-445행).
+    REQUIRE(slider.Arrange(Geometry::Root({12, 96}, {})));
+    // 아래에서 48(위에서 48) = 비율 0.5 = 값 2. 단계 2로 맞춘다.
+    CHECK(slider.OnPointerEvent({PointerEventType::Down, {6, 48}}).capture);
+    CHECK(slider.GetValue() == 2);
+    // 위 끝 근처(아래에서 92)는 범위 밖이라 최대값이다.
+    CHECK(slider.OnPointerEvent({PointerEventType::Up, {6, 4}}).releaseCapture);
     CHECK(slider.GetValue() == 6);
     CHECK(slider.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Down)));
     CHECK(slider.GetValue() == 4);
     PaintList list(allocator);
     REQUIRE(slider.OnPaint(list, 0));
-    REQUIRE(list.Boxes().Size() == 3);
-    const auto& handle = list.Boxes()[2].geometry;
-    CHECK(handle.render.Apply({6, 6}) == Vec2(6, 26));
+    // 막대와 손잡이다(기본 슬라이더에는 채움이 없다).
+    REQUIRE(list.Boxes().Size() == 2);
+    const auto& handle = list.Boxes()[1].geometry;
+    CHECK(handle.size == Vec2(8, 8));
+    // 값 4 = 비율 0.75 → 아래에서 8 + 60 = 68, 위에서 28이 손잡이 가운데다.
+    CHECK(handle.render.Apply({4, 4}) == Vec2(6, 28));
 }
 
 } // namespace rocks::ui

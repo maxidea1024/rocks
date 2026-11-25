@@ -120,6 +120,38 @@ const ButtonStyle& NoBorderButtonStyle() noexcept {
     return style;
 }
 
+const SliderStyle& DefaultSliderStyle() noexcept {
+    constexpr float BarRadius = 2.0f;
+    static const SliderStyle style = [] {
+        SliderStyle slider;
+        slider.bar = StyleBrush::RoundedBox(ThemeSlot::Input, BarRadius, ThemeSlot::Input,
+                                            ControlOutlineThickness);
+        slider.barHovered = slider.bar;
+        slider.barDisabled = StyleBrush::RoundedBox(ThemeSlot::Input, BarRadius,
+                                                    ThemeSlot::Recessed, ControlOutlineThickness);
+        slider.thumb = StyleBrush::Pill(ThemeSlot::Foreground);
+        slider.thumbHovered = StyleBrush::Pill(ThemeSlot::ForegroundHover);
+        slider.thumbDisabled = slider.thumb;
+        return slider;
+    }();
+    return style;
+}
+
+const ProgressBarStyle& DefaultProgressBarStyle() noexcept {
+    static const ProgressBarStyle style{StyleBrush::Color(ThemeSlot::Foldout),
+                                        StyleBrush::Color(ThemeSlot::PrimaryHover),
+                                        StyleBrush::Color(ThemeSlot::PrimaryHover)};
+    return style;
+}
+
+const ScrollBarStyle& DefaultScrollBarStyle() noexcept {
+    static const ScrollBarStyle style{
+        StyleBrush::None(), StyleBrush::RoundedBox(ThemeSlot::Hover, ButtonCornerRadius),
+        StyleBrush::RoundedBox(ThemeSlot::Hover2, ButtonCornerRadius),
+        StyleBrush::RoundedBox(ThemeSlot::Hover2, ButtonCornerRadius)};
+    return style;
+}
+
 const TextStyle& NormalTextStyle() noexcept {
     static const TextStyle style{{Typeface::Regular, NormalFontSize}, {ColorSource::Foreground}};
     return style;

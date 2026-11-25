@@ -8,6 +8,7 @@
 #include "SurfaceSelfTest.h"
 
 #include <AssetDatabase/AtomicFileWrite.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/FileRead.h>
 #include <Core/ScopeExit.h>
 #include <D3D11Graphics/D3D11Device.h>
@@ -18,6 +19,8 @@ namespace {
 using namespace rocks;
 using namespace rocks::ui;
 
+inline constexpr LogCategory LogUiDemo{"UiDemo"};
+
 // UI 갤러리 창 크기다(Docs/Design/UiToolkit 16장).
 constexpr uint32 GalleryWidth = 1280;
 constexpr uint32 GalleryHeight = 800;
@@ -27,12 +30,14 @@ constexpr StringView LayoutDirectory = "Saved/UiDemo";
 constexpr StringView LayoutFile = "Gallery.v1.json";
 constexpr StringView LayoutPath = "Saved/UiDemo/Gallery.v1.json";
 constexpr usize LayoutFileLimit = 1024 * 1024;
+constexpr StringView TabArgument = "--tab=";
 
 int Run(launch::ApplicationContext& context) noexcept {
     auto& allocator = context.DefaultAllocator();
     bool snapshot = false;
     bool selfTest = false;
     bool surfaceTest = false;
+    StringView startTab;
     for (StringView argument : context.Arguments()) {
         if (argument == "--surface-test") {
             surfaceTest = true;
@@ -40,6 +45,12 @@ int Run(launch::ApplicationContext& context) noexcept {
 
         if (argument == "--self-test") {
             selfTest = true;
+        }
+
+        // --tab=<탭 ID>는 창을 그 탭으로 연다(사람 확인·화면 캡처용).
+        if (argument.StartsWith(TabArgument)) {
+            startTab = argument.SliceBytes(TabArgument.ByteCount(),
+                                           argument.ByteCount() - TabArgument.ByteCount());
         }
 
         if (argument == "--snapshot") {
@@ -153,6 +164,14 @@ int Run(launch::ApplicationContext& context) noexcept {
     bool exists = false;
     if (ReadWholeFile(files, LayoutPath, LayoutFileLimit, layoutBytes, exists) && exists) {
         (void)area.Value()->RestoreLayout(LayoutVersion, layoutBytes.View());
+    }
+
+    if (!startTab.IsEmpty()) {
+        if (auto activated = area.Value()->ActivateTab(startTab); !activated) {
+            Log::Warning(LogUiDemo,
+                         "Unknown gallery tab '{Tab}' ({Error}); opening the default tab", startTab,
+                         activated.Error());
+        }
     }
 
     {
