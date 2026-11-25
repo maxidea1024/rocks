@@ -212,7 +212,7 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
     }
 
     NuggetKeyWriter writer;
-    WriteNuggetKeyHeader(writer, TextureCookProcessorId, context.nuggets->ProjectGeneration());
+    WriteNuggetKeyHeader(writer, TextureNuggetProcessorId, context.nuggets->ProjectGeneration());
     writer.WriteGuid(type);
     writer.WriteU32(TextureBuildVersion);
     const TextureSource& source = facts.source;

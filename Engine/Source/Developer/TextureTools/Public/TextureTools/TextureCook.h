@@ -35,6 +35,12 @@ inline constexpr NuggetProcessorId TextureCookProcessorId{
     Guid{0x524f434b54455843ull, 0x0000000000000001ull},
     Guid{0x524f434b54455856ull, 0x0000000000000002ull}};
 
+// 너겟 키 머리의 정체성이다(쿠킹 처리기 정체성과 나눈다 — 플랫폼 데이터 배치만 바뀌면 처리기 버전만
+// 올리고 너겟 값은 그대로 다시 쓴다, R-0). 너겟 값(머리·mip byte)의 뜻이 바뀌면 이 버전을 올린다.
+inline constexpr NuggetProcessorId TextureNuggetProcessorId{
+    Guid{0x524f434b54455843ull, 0x0000000000000001ull},
+    Guid{0x524f434b5445584eull, 0x0000000000000001ull}};
+
 // 쿠킹 mip 하나의 크기와 byte다(너겟 머리 부호화·플랫폼 데이터 채우기가 쓴다 — byte는 빌림).
 struct TextureCookMip {
     uint32 sizeX = 0;
