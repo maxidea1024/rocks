@@ -10,7 +10,7 @@
 
 ### 4.1 컨텍스트
 
-API: `AddContext(context, priority, ContextOptions)` / `RemoveContext(context, options)` / `ClearContexts()` / `HasContext(context)`.
+API: `AddContext(bundle, priority, ContextOptions)` / `UpdateContext(bundle, forceImmediately)` / `RemoveContext(contextId, options)` / `ClearContexts()` / `HasContext(contextId)`. 컨텍스트는 `InputContextBundle` 사본으로 넣고 id로 가리킨다(2.7절). `AddContext`는 bundle을 검증하고(실패면 `InvalidArgument`, 상태는 그대로) 옮겨 온다(실패면 `OutOfMemory`, 상태·bundle은 그대로). bundle의 allocator는 컨텍스트가 빠질 때까지 살아 있어야 한다.
 
 `ContextOptions`(UE `EnhancedInputSubsystemInterface.h:47-100`):
 
@@ -23,14 +23,20 @@ API: `AddContext(context, priority, ContextOptions)` / `RemoveContext(context, o
 동작:
 - 추가·제거는 다시 만들기를 **예약**하고, 다음 평가 처음에 한 번 한다(UE 모듈 Tick — `EnhancedInputModule.cpp:298-328`).
 - 예약된 요청들의 `ignorePressedKeysUntilRelease`는 AND로 합친다. 다시 만든 뒤 참으로 되돌린다(UE cpp:433·1201).
-- 이미 있는 컨텍스트를 다시 추가할 때:
+- `UpdateContext`는 있는 id의 사본만 바꾸고 다시 만들기를 예약한다(우선순위·등록 횟수 그대로, 없는 id면 `NotFound` — 2.7절).
+- 이미 있는 컨텍스트(같은 id)를 다시 추가할 때 데이터는 건드리지 않는다(UE와 같다):
   - `Untracked`면 우선순위를 바꾸고 다시 만든다.
   - `CountRegistrations`면 횟수만 늘린다(우선순위 변경·다시 만들기 없음 — UE cpp:273-285). 제거는 횟수가 0이 될 때 빠진다.
+- `RemoveContext`는 없는 id면 `NotFound`다(UE는 조용히 넘어간다 — 호출자가 무시할 수 있다). `ClearContexts()`는 모두 빼고 다시 만들기를 예약한다(UE `ClearAllMappings` — 기본 옵션).
+- `SetKeyProfile(profileId)`: 활성 키 프로필이다(빈 값 = 프로필 없음 — UE `GetActiveKeyProfile`이 null). 바꾸면 다시 만들기를 예약한다. 사용자 설정(5.2절)이 부른다.
+- 다시 만들기 시점: `ApplyPendingChanges(const InputState&, gamepad)`가 예약된 다시 만들기를 한다. `Evaluate`가 처음에 부르고, 시험·도구도 직접 부를 수 있다. `forceImmediately`는 그 자리(`AddContext`·`RemoveContext`·`UpdateContext` 안)에서 다시 만든다. 이때는 입력 스냅숏이 없으므로 "지금 눌려 있음"(4.2절 6)은 마지막 평가에서 눌려 있던 키로 본다(UE는 PlayerInput의 키 상태 — 마지막 입력 처리 결과와 같다). 그 기록은 모든 키(묶이지 않은 키 포함)의 고정 비트 집합이다(`InputKeySlot` — 할당 없음). `HasPendingRebuild()`로 예약 여부를 본다.
+- 다시 만들기 실패(할당)면 이전 목록을 그대로 두고 예약을 남긴다(다음 `ApplyPendingChanges`에서 다시 시도하고 그 결과로 실패를 알린다). `forceImmediately` 호출은 등록·제거가 반영되었으므로 그 다시 만들기가 실패해도 성공을 돌려준다(호출자가 다시 시도하면 등록 횟수가 늘거나 `NotFound`가 되므로).
+- 결과 보기(진단·시험): `BindingCount()`·`Binding(index)`는 다시 만든 바인딩 하나(액션 id, 컨텍스트 id, 키, 트리거·모디파이어 — 복제된 chord·넣은 Down·ChordBlocker 포함, 무시 중 여부)를 돌려준다. `ActionCount()`·`ActionId(index)`는 액션 표다.
 
 ### 4.2 다시 만들기(UE `EnhancedInputSubsystemInterface.cpp:886-1203`)
 
 1. **정렬**: 우선순위 내림차순, 같은 우선순위는 추가한 순서다. UE는 불안정 정렬(`ValueSort`)이라 순서가 정해져 있지 않다. Rocks의 안정 순서는 UE와 다른 점이다(7.3절).
-2. **바인딩 모음**: 컨텍스트마다 활성 프로필의 바인딩을 쓴다(`profileOverrides` → 기본). 리바인딩 가능한 바인딩은 키를 사용자 키로 바꾼다(5.2절).
+2. **바인딩 모음**: 컨텍스트마다 활성 프로필의 바인딩을 쓴다(`profileOverrides`에 활성 프로필 이름이 있으면 그것, 없으면 기본). 바인딩의 매핑 설정(`settingBehavior` — InheritFromAction은 액션의 것, Override는 바인딩의 것, Ignore는 없음)이 `supportedProfiles`를 가지고 활성 프로필이 거기 없으면 그 바인딩은 넣지 않는다(UE :986-990 — 활성 프로필이 없으면 거르지 않는다). 키 이름을 `ParseInputKey`로 읽는다. 빈 키는 그 바인딩을 조용히 건너뛰고, 모르는 이름은 Warning `InputBindingKeyUnknown`(컨텍스트 id·바인딩 번호·이름)과 함께 건너뛴다(2.7절). 리바인딩 가능한 바인딩은 키를 사용자 키로 바꾼다(5.2절).
    - 3단으로 다시 정렬한다: chord 대상 액션의 바인딩 → chord 바인딩 → 나머지(UE `ReorderMappings` :776-884).
    - Rocks는 원래 순서를 지키는 안정 분할이다. UE는 `RemoveAtSwap`이다.
 3. **소비는 이 시점에 정한다.**
@@ -43,11 +49,12 @@ API: `AddContext(context, priority, ContextOptions)` / `RemoveContext(context, o
    - 그 바인딩과 그 액션에 Explicit 트리거가 하나도 없으면, 임계 1e-8 Down도 함께 넣는다(UE :596).
 6. **상태 보존**(UE :1113-1192):
    - 새 바인딩마다 이전 목록에서 액션·키·트리거 종류 열·모디파이어 종류 열이 같은 **첫** 바인딩을 찾아 1:1로 짝짓는다(쓴 것은 뺀다).
-   - 짝이 있으면 트리거·모디파이어 실행 상태를 넘긴다. 매개변수는 새 값을 쓴다.
-   - 액션 수준 상태(값·트리거 상태·시간)는 액션이 남아 있는 한 그대로다.
+   - 짝이 있으면 실행 상태를 넘긴다. 매개변수는 새 값을 쓴다. 넘기는 칸은 UE `OnTriggerReinstanced`·`OnModifierReinstanced`와 같다: 트리거는 직전 값·누름 시간·Hold 발사 여부·Pulse 횟수(RepeatedTap의 탭 진행은 새로 — UE도 새 instance), 모디파이어는 Smooth·SmoothDelta 상태 전부(`InputTriggers.cpp:68-80·133-139·199-207·336-344`, `InputModifiers.cpp:67-74·335-344`). 무시 중 표지도 넘긴다(UE는 옛 매핑을 옮겨 쓴다).
+   - 액션 수준 상태(값·트리거 상태·시간)는 액션이 남아 있는 한 그대로다. 액션 트리거·모디파이어 실행 상태는 바인딩과 같은 규칙으로 넘긴다: 종류 열이 같으면 상태를 넘기고 매개변수는 새 값, 다르면 초기화한다(UE는 instance를 만들 때 복제해서 다시 생길 때까지 옛 트리거를 쓴다 — 7.3절).
    - 새로 생긴 Boolean 바인딩의 키가 지금 눌려 있고 `ignorePressedKeysUntilRelease`면, 놓을 때까지 무시한다.
    - 다시 만든 뒤 모든 바인딩에 dt 0으로 모디파이어를 한 번 돌려 상태를 맞춘다(UE :1188-1192).
-7. **사라진 액션**: 바인딩에서 사라진 액션은 다음 평가에서 값 0으로 한 번 평가해 Canceled·Completed를 낸 뒤 지운다(UE `EnhancedPlayerInput.cpp:1171-1200`).
+7. **사라진 액션**: 바인딩에서 사라진 액션(진행 중 — 상태가 None이 아니거나 이벤트가 있던 것)은 값을 0으로 두고 표에 남긴다. 다음 평가에서 이벤트 없는 액션으로 마무리되어(상태 None) Canceled·Completed를 낸 뒤 지운다(UE `EnhancedPlayerInput.cpp:1171-1200`). 평가 전에 다시 만들기가 또 오면 다시 남긴다(UE도 매번 다시 모은다).
+8. **액션 표**: 설정 원천은 정렬 순 bundle의 `actions`에서 처음 나온 사본이다(키 소비·필터와 무관 — 2.7절). 표 순서는 바인딩이 가리키는 액션(바인딩에 처음 나온 순) → 사라진 액션 → 주입 전용 액션(4.3절 3)이다. chord 색인은 앞쪽만 가리킨다(사라진 액션은 chord 대상이 아니다). 표 색인은 다시 만들 때와 평가 끝 정리(사라진 액션·놓인 주입 전용 액션을 지움)에서 바뀐다. chord 상태 작업 배열(앞쪽 칸 수)은 다시 만들 때 할당한다(평가 무할당 — 4.6절).
 
 ### 4.3 평가 한 번(`Evaluate(const InputState&, const ActionEvalContext&)`)
 
@@ -73,7 +80,7 @@ UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
         - `Cumulative`: 합이다.
      4. 바인딩 트리거 결합 결과는 액션마다 **가장 진전된 하나**를 남긴다. 기준은 상태(None < Ongoing < Triggered)이고, 같으면 트리거를 평가한 바인딩이다(UE :281).
 3. **주입 입력**: 바인딩 루프 뒤다(UE :619-667).
-   - `InjectValue(action, value, triggers, modifiers)` — UE `InjectInputForAction`.
+   - `InjectValue(const InputActionData& action, value, triggers, modifiers)` — UE `InjectInputForAction`. 액션 표에 그 id가 있으면 표의 설정을, 없으면 넘긴 설정을 쓴다(주입 전용 항목 — 놓은 뒤 Completed·Canceled를 내면 지운다).
    - 한 평가에 여러 번 주입하면 각각 처리한다.
    - 직전 평가에도 주입되었으면 Held, 아니면 Actuated다. 이번에 다시 주입하지 않은 액션은 값 0으로 한 번 평가한다(놓기).
    - 연속 주입(`StartContinuousInjection`·`UpdateContinuousInjection`·`StopContinuousInjection`)은 평가마다 다시 주입한다.
@@ -86,8 +93,8 @@ UE `EnhancedPlayerInput.cpp:488-717` 순서와 같다.
    5. 일시정지 중이고 `!triggerWhenPaused`면 None이다.
    6. 전이표(3.4절)로 이벤트를 만든다. 경과 시간·Triggered 시간을 누적한다.
 5. **결과**:
-   - `ActionState(action)`: 값·트리거 상태·이번 이벤트·경과/Triggered 시간이다.
-   - `Events()`: 이번 평가 이벤트 목록 (액션, ActionEvent, 값, 시간)이다. 바인딩 목록 순 → 주입 순으로 처음 나타난 액션 순서다.
+   - `ActionState(actionId)`: 값·트리거 상태·이번 이벤트·경과/Triggered 시간이다. 표에 없는 액션은 빈 상태다.
+   - `Events()`: 이번 평가 이벤트 목록 (액션 id, ActionEvent, 값, 시간)이다. 바인딩 목록 순 → 주입 순으로 처음 나타난 액션 순서다.
 6. **전달 뒤**: Completed·Canceled가 난 액션의 경과·Triggered 시간을 0으로 둔다. 전달이 끝난 뒤에 한다(UE :455-466).
 
 `Flush()`(UE `FlushPressedKeys` :1021-1066):
