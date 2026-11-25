@@ -83,7 +83,7 @@ UE `C/PostProcessComponent.cpp:16–24`. 필드: `settings`(`PostProcessSettings
 - 렌즈 flare `lensFlareIntensity` 1, vignette `vignetteIntensity` 0.4, grain `filmGrainIntensity` 0, AO `ambientOcclusionIntensity` 0.5·`ambientOcclusionRadius` 200, DOF `depthOfFieldFocalDistance` 0(끔)·`depthOfFieldFstop` 4·`depthOfFieldSensorWidth` 24.576 mm, motion blur `motionBlurAmount` 0.5·`motionBlurMax` 5·`motionBlurTargetFps` 30·`motionBlurPerObjectSize` 0.
 - 범위는 UE `ClampMin`·`ClampMax`(예: AO intensity [0, 1], bloom intensity ≥ 0, exposure percent [0, 100], motion blur amount [0, 1])다. 넘으면 `SetSettings`가 거부한다. `UIMin`뿐인 색 수차·렌즈 flare·vignette·grain 세기는 유한이기만 하면 된다.
 
-계산(**끝까지 동작**): `OverridePostProcessSettings(destination, source, weight)`(UE `FSceneView::OverridePostProcessSettings` — `SceneView.cpp:1622`): override 플래그가 켜진 값만, 연속 값은 `Lerp(dest, src, weight)`, 이산 값(enum·불·정수)은 weight > 0이면 그대로 쓴다(UE `SET_PP`). 초점 거리는 dest나 src가 0("DOF 끔")이면 보간하지 않고 src를 쓴다(UE `:1780`). weight > 1은 1로 자르고(+inf 포함 — UE `:1638`), 0 이하면 아무것도 하지 않는다. NaN은 값을 망가뜨리므로 무시한다(UE에 없는 방어). 볼륨 모으기(카메라 위치·우선순위 정렬·bounded 볼륨의 거리 가중 — UE `World.cpp:10422–10744`)는 카메라·렌더(RS6)와 함께 넣는다. bounded 판정이 물리 shape 거리를 쓰기 때문이다.
+계산(**끝까지 동작**): `OverridePostProcessSettings(destination, source, weight)`(UE `FSceneView::OverridePostProcessSettings` — `SceneView.cpp:1622`): override 플래그가 켜진 값만, 연속 값은 `Lerp(dest, src, weight)`, 이산 값(enum·불·정수)은 weight > 0이면 그대로 쓴다(UE `SET_PP`). 초점 거리는 dest나 src가 0("DOF 끔")이면 보간하지 않고 src를 쓴다(UE `:1780`). weight > 1은 1로 자르고(+inf 포함 — UE `:1638`), 0 이하면 아무것도 하지 않는다. NaN은 값을 망가뜨리므로 무시한다(UE에 없는 방어). 볼륨 모으기·정렬·거리 가중(UE `World.cpp:10422–10764`)은 [28장](28-VolumeShape.ko.md)(CR17 영역 형상)이다. view 위치 공급은 RS6이다.
 
 Mobility: UE setter는 보지 않는다.
 
@@ -121,6 +121,6 @@ Actor: `SphereReflectionCapture`(root Sphere), `BoxReflectionCapture`(root 상�
 |---|---|---|---|
 | ERD51 | 설정 구조체 | 대기·안개·후처리는 리플렉션 구조체 하나 + `SetSettings` 전체 검증 | 필드가 많다, UE도 구조체(`FPostProcessSettings`) |
 | ERD52 | decal 수명 | 컴포넌트 OnTick이 남은 시간을 센다 | World 타이머 없음, 결정적 |
-| ERD53 | 후처리 혼합 | 덮어쓰기 함수만 지금, 볼륨 모으기는 RS6 | bounded 판정이 물리 shape 거리 |
+| ERD53 | 후처리 혼합 | 덮어쓰기 함수는 D5, 볼륨 모으기·가중은 28장(CR17 — 물리 없는 형상 거리), view 위치 공급은 RS6 | bounded 판정을 영역 형상이 물리 없이 정확히 한다 |
 
 시험 `World/Tests/WorldEnvironmentComponentTests.cpp`(`Environment_` 접두): 기본값(UE 값) 전부, `SetSettings` 범위 거부·값 유지, 대기 Static 거부·안개 허용, 행성 중심 세 모드, 안개 보임·높이, decal bounds·수명(파괴 시점·소유 Actor 파괴·취소·fade in/out), 후처리 덮어쓰기(Lerp·SET·플래그 꺼짐·weight clamp), 반사 캡처 반경(Sphere·Box·Plane)·Static, Actor root(회전·scale)·켜고 끄기, 리플렉션·저장 왕복.

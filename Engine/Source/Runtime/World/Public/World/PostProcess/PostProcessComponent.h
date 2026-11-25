@@ -2,13 +2,15 @@
 
 #include <Meta/Annotations.h>
 #include <World/PostProcess/PostProcessSettings.h>
+#include <World/PostProcess/PostProcessVolumeTypes.h>
 #include <World/SceneComponent.h>
 
 namespace rocks {
 
-// 후처리 볼륨 컴포넌트다(UE UPostProcessComponent — Docs/Design/EngineRuntime 27.5절). 기본은 경계
-// 없음(unbound)이다. 데이터와 덮어쓰기 계산(PostProcessBlending.h)만 있다: 카메라 위치로 볼륨을
-// 모으는 일은 렌더(RS6)와 함께다.
+// 후처리 볼륨 컴포넌트다(UE UPostProcessComponent — Docs/Design/EngineRuntime 27.5·28.4절). 기본은
+// 경계 없음(unbound)이다. 경계가 있으면 부착 부모 PrimitiveComponent의 bounds·형상이
+// 영역이다(부모가 Shape면 정확한 형상 거리). 볼륨 모으기·혼합은 PostProcessVolumeBlending.h다. view
+// 위치 공급(카메라)은 렌더(RS6)와 함께다.
 //
 // 스레드: World의 게임 스레드 전용이다.
 ROCKS_CLASS()
@@ -68,6 +70,23 @@ public:
     void SetUnbound(bool unbound) noexcept {
         unbound_ = unbound;
     }
+
+    // 영역 경계다(UE GetPostProcessBounds): unbound가 아니고 부착 부모가 PrimitiveComponent면 부모
+    // Bounds()를 bounds에 쓰고 참이다. 그 밖에는 거짓이다(경계 없음 — 어디서나 적용).
+    bool TryPostProcessBounds(ComponentBounds& bounds) const noexcept;
+
+    // 점이 영역 안인지와 형상까지 거리다(UE EncompassesPoint — 28.4절 순서):
+    // - 경계가 없으면 {참, 0}.
+    // - 경계 상자를 blendRadius + sphereRadius만큼 넓혀 밖이면 {거짓, PostProcessOutsideDistance}.
+    // - 부모가 Shape면 형상 거리 d로 {d ≤ sphereRadius, d}(형상 거리를 못 재면 밖 —
+    //   {거짓, PostProcessOutsideDistance}).
+    // - 그 밖의 primitive면 {참, 0}(UE 마지막 분기).
+    PostProcessEncompass EncompassesPoint(const Vec3d& point,
+                                          float sphereRadius = 0.0f) const noexcept;
+
+    // 정렬·가중 속성이다(UE GetProperties): enabled = postProcessEnabled이고 보인다(IsVisible),
+    // unbound = unbound이거나 경계 없음, size = 경계 상자 부피(경계 없으면 PostProcessUnboundSize).
+    PostProcessVolumeProperties VolumeProperties() const noexcept;
 
 private:
     ROCKS_PROPERTY(ReadOnly, Name = "settings") PostProcessSettings settings_;

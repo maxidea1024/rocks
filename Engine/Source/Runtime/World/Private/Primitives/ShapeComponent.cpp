@@ -26,4 +26,13 @@ ComponentBounds ShapeComponent::CalcBounds(const Transform& world) const noexcep
     return TransformComponentBounds(local, world.ToMatrix());
 }
 
+Result<double> ShapeComponent::TryDistanceToShape(const Vec3d& point) const noexcept {
+    auto shape = TryWorldVolumeShape();
+    if (!shape) {
+        return Result<double>::Failure(shape.Error());
+    }
+
+    return TryDistanceToVolume(shape.Value(), point);
+}
+
 } // namespace rocks
