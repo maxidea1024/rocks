@@ -31,7 +31,7 @@ API: `AddContext(bundle, priority, ContextOptions)` / `UpdateContext(bundle, for
 ### 4.2 다시 만들기(UE `EnhancedInputSubsystemInterface.cpp:886-1203`)
 
 1. **정렬**: 우선순위 내림차순, 같은 우선순위는 추가한 순서다. UE는 불안정 정렬(`ValueSort`)이라 순서가 정해져 있지 않다. Rocks의 안정 순서는 UE와 다른 점이다(7.3절).
-2. **바인딩 모음**: 컨텍스트마다 활성 프로필의 바인딩을 쓴다(`profileOverrides` → 기본). 리바인딩 가능한 바인딩은 키를 사용자 키로 바꾼다(5.2절).
+2. **바인딩 모음**: 컨텍스트마다 활성 프로필의 바인딩을 쓴다(`profileOverrides` → 기본). 키 이름을 `ParseInputKey`로 읽는다. 빈 키는 그 바인딩을 조용히 건너뛰고, 모르는 이름은 Warning `InputBindingKeyUnknown`(컨텍스트 id·바인딩 번호·이름)과 함께 건너뛴다(2.7절). 리바인딩 가능한 바인딩은 키를 사용자 키로 바꾼다(5.2절).
    - 3단으로 다시 정렬한다: chord 대상 액션의 바인딩 → chord 바인딩 → 나머지(UE `ReorderMappings` :776-884).
    - Rocks는 원래 순서를 지키는 안정 분할이다. UE는 `RemoveAtSwap`이다.
 3. **소비는 이 시점에 정한다.**

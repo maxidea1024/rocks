@@ -55,7 +55,7 @@ UE는 `UInputModifier`·`UInputTrigger` 파생 객체(Instanced)다. Rocks는 **
 | `Pressed` | — | 작동이고 직전이 비작동이면 Triggered |
 | `Released` | — | 작동 중 Ongoing, 놓는 평가에 Triggered |
 | `Hold` | holdTime 1.0, oneShot 거짓 | 누적 ≥ holdTime이면 Triggered. oneShot이면 첫 한 번만이고 그 뒤 None |
-| `HoldAndRelease` | holdTime 0.5 | 놓는 평가에서 직전 누적 ≥ holdTime이면 Triggered |
+| `HoldAndRelease` | holdAndReleaseTime 0.5 | 놓는 평가에서 이번 dt를 더한 누적 ≥ holdAndReleaseTime이면 Triggered. Hold와 필드를 나눈 것은 UE에서 두 클래스의 기본값이 달라서다(Hold 1.0) |
 | `Tap` | releaseTime 0.2 | 직전 작동·지금 비작동·직전 누적 < releaseTime이면 Triggered. 누적 ≥ releaseTime이면 None |
 | `RepeatedTap` | repeatDelay 0.5, taps 2, releaseTime 0.2 | 탭 사이 Ongoing, N번째 탭에 Triggered. alwaysTick이다 |
 | `Pulse` | triggerOnStart 참, interval 1.0, limit 0(무제한) | 누적 > interval · (start ? n : n+1)이면 Triggered이고 n++. 한도에 닿으면 None |

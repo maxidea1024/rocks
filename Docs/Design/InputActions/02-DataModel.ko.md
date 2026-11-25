@@ -64,6 +64,7 @@
 | `consumeInput` | 참 | :96 — 하위 우선순위 컨텍스트의 같은 키 바인딩을 막는다 |
 | `reserveAllMappings` | 거짓 | :108 — 표시만 한다(UE도 강제하지 않는다) |
 | `accumulation` | TakeHighestAbsoluteValue | :127 |
+| `description`(Text — 편집기 설명) | 빈 값 | :87 |
 | `triggers`·`modifiers` | 빈 배열 | :135·:145 |
 | `mappingSettings`(`PlayerMappingSettings`, 선택) | 없음 | :153 |
 
@@ -74,7 +75,7 @@
 - `actions: ObjectRefArray<InputAction>`(Required — null 원소 없음): 바인딩이 가리키는 액션의 GC 간선이자 패키지 Hard 의존이다(함께 로드·쿠킹 — [에셋 시스템](../AssetSystem/06-AssetTypes.ko.md) 6장 참조 표). chord 트리거의 대상은 넣어도 되고 안 넣어도 된다(2.7절).
 - `data: InputContextData`(리플렉션 struct — 평가기가 그대로 복사한다):
   - `bindings: Array<InputBinding>`
-  - `profileOverrides: Array<InputProfileBindings{ profile(Name), bindings }>`: 그 프로필이 활성이면 기본 bindings를 통째로 대신한다(UE `MappingProfileOverrides` — `InputMappingContext.cpp:113-121`).
+  - `profileOverrides: Array<InputProfileBindings{ profile(String — UE FString), bindings }>`: 그 프로필이 활성이면 기본 bindings를 통째로 대신한다(UE `MappingProfileOverrides` — `InputMappingContext.cpp:113-121`).
   - `registrationTracking { Untracked, CountRegistrations }`(UE :47-64)
 
 `InputBinding`(리플렉션 struct):
@@ -118,8 +119,12 @@ Rocks 객체 규칙 때문에 UE처럼 평가기가 액션·컨텍스트 객체 
 그래서 다음과 같이 나눈다.
 - **바인딩은 액션을 `id`(Guid)로 가리킨다.** chord 트리거의 대상도 액션 id다(`InputTrigger::chordActionId`). 컨텍스트 객체는 가리키는 액션을 `actions`(ObjectRefArray)로 붙잡는다(GC 간선 — 액션이 컨텍스트보다 먼저 회수되지 않는다). NodeGraph 문서가 노드를 Guid로 잇는 것과 비슷하다. 다만 NodeGraph는 한 문서 안의 닫힌 참조이고, 이쪽은 객체 사이 참조라 무결성은 검증이 맡는다.
 - **평가기는 데이터 사본만 갖는다.** `InputContextBundle`(리플렉션 타입이 아닌 C++ 값 — 이동만)은 컨텍스트 id, `InputContextData` 사본, `actions` 전체의 `InputActionData{ id, settings }` 사본 목록이다. 평가기는 객체도 Registry도 모른다(시험이 객체 없이 결정적이다).
-- **모으기**: `CollectInputContext(registry, access, ObjectHandle context, bundle)`가 컨텍스트와 `actions`를 Borrow해 사본을 만든다. `registry`·`access`는 호출자가 그 객체를 읽을 수 있는 문맥이다(에셋이면 `AssetManager::With` 범위 — 5.1절). 실패: 객체 접근 실패는 그 오류, null·파괴된 `actions` 원소는 `InvalidArgument`, 할당 실패는 `OutOfMemory`(bundle은 그대로)다.
-- **검증**: `ValidateInputContextBundle`(평가기 `AddContext`·`UpdateContext`도 부른다)이 다음을 거부한다(`InvalidArgument` + 진단에 바인딩·트리거 위치). 0 id, 같은 id 액션 둘, 바인딩 액션이 목록에 없음, 키 이름을 읽을 수 없음(`ParseInputKey` 실패), 범위 밖 enum, 비유한 매개변수, DeadZone lower ≥ upper. chord 대상이 목록에 없는 것은 허용한다(다른 컨텍스트의 액션일 수 있다 — 평가 때 표에 없으면 None, 3.2절).
+- **모으기**: `CollectInputContext(registry, access, ObjectHandle context, bundle)`가 컨텍스트와 `actions`를 Borrow해 사본을 만든다. `registry`·`access`는 호출자가 그 객체를 읽을 수 있는 문맥이다(에셋이면 `AssetManager::With` 범위 — 5.1절). 같은 액션 객체가 `actions`에 여러 번 있으면 한 번만 복사한다(ObjectRefArray는 중복을 담을 수 있다). 실패: 객체 접근 실패(파괴된 액션 포함)는 그 오류, null `actions` 원소는 `InvalidArgument`, 할당 실패는 `OutOfMemory`(bundle은 그대로)다.
+- **검증**: `ValidateInputContextBundle`(평가기 `AddContext`·`UpdateContext`도 부른다)이 다음을 거부한다(`InvalidArgument`, 진단은 `InputDataDiagnostic` — 거부 까닭 `InputDataIssue`와 액션·프로필·바인딩·트리거/모디파이어 위치).
+  - 0 id(컨텍스트·액션), 같은 id 액션 둘(다른 객체가 같은 id), 바인딩 액션이 목록에 없음, 범위 밖 enum, 비유한 매개변수
+  - UE `IsDataValid`와 같은 것: DeadZone lower ≥ upper, ChordAction·ChordBlocker의 대상 id 0, `PlayerMappingSettings.name`이 빔(액션·바인딩에 값이 있을 때), Boolean 액션의 액션 수준 Scalar 모디파이어(UE `InputModifiers.cpp:82-95`)
+  - 프로필 override 이름이 비거나 겹침(UE는 프로필 이름이 키인 Map이라 생길 수 없다)
+  - 허용하는 것: chord 대상이 목록에 없음(다른 컨텍스트의 액션일 수 있다 — 평가 때 표에 없으면 None, 3.2절). 키 이름은 검증하지 않는다. 빈 키(UE `EKeys::Invalid` — 아직 고르지 않은 줄)는 다시 만들 때 그 바인딩을 조용히 건너뛰고, 모르는 이름(`Gamepad_LeftTrigger`처럼 Rocks 키 집합에 없는 UE 키 — 7.4절)은 Warning 진단과 함께 건너뛴다(4.2절 — UE도 빈 키 매핑을 받고 `bCheckForEmptyKeyMappingsDuringValidation` 기본 거짓). ChordBlocker를 데이터에 직접 넣는 것도 UE처럼 막지 않는다(UE는 편집기에서 숨길 뿐이다).
 - **데이터를 바꾸면** 다시 모아 `UpdateContext(bundle, forceImmediately)`로 사본만 바꾼다(UE `RequestRebuildControlMappingsUsingContext` — 4.1절). 우선순위·등록 횟수는 그대로다. `AddContext`는 이미 있는 id면 UE처럼 데이터를 건드리지 않는다. 실행 중 편집(키 추가·제거)을 그 컨텍스트를 쓰는 모든 플레이어에 퍼뜨리는 것은 Gameplay 도우미다(5.1절 — UE `MapKey`·`UnmapKey`는 그 컨텍스트를 가진 모든 플레이어를 다시 만든다).
 - **같은 id 액션을 여러 컨텍스트가 넣으면** 평가기는 액션 표에 하나만 둔다. 다시 만들 때마다 남은 bundle들에서 정렬 순(4.2절 1 — 높은 우선순위, 같으면 먼저 추가한 것)으로 처음 나온 사본을 쓴다(넣은 순서·제거에 따라 결과가 흔들리지 않는다). 같은 id인데 설정이 다르면 Warning 진단 `InputActionSettingsConflict`를 낸다(다른 객체가 같은 id를 가진 경우 — 에셋 복제는 id를 새로 만든다, IA6).
 - `ActionState`·"사라진 액션"(4.2절 7)은 액션 표에 있는지가 아니라 바인딩·주입이 있는지로 판정한다. 액션 수준 chord(`settings.triggers`의 ChordAction)는 대상 액션의 GC 간선이 없다(id만 — 대상이 어느 컨텍스트에도 없으면 None, 3.2절).

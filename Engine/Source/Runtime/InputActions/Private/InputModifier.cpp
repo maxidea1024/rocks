@@ -1,7 +1,9 @@
 #include <Core/Math/Easing.h>
 #include <Core/Math/InterpTo.h>
 #include <Core/Math/MathUtility.h>
+#include <InputActions/InputModifier.generated.h>
 #include <InputActions/InputModifier.h>
+#include <Object/ValueCopy.h>
 #include <Platform/PlatformMath.h>
 
 // 모디파이어다(Docs/Design/InputActions 3.1절 — UE InputModifiers.cpp).
@@ -213,41 +215,8 @@ Vec3d ApplySmoothDelta(const InputModifier& modifier, InputModifierState& state,
 } // namespace
 
 Result<void> InputModifier::TryCopyFrom(const InputModifier& other) noexcept {
-    // 커브 셋을 임시본에 먼저 복사하고 모두 성공하면 옮긴다(실패면 이것은 그대로다).
-    TangentCurve x(responseX.GetAllocator());
-    TangentCurve y(responseY.GetAllocator());
-    TangentCurve z(responseZ.GetAllocator());
-    if (auto copied = x.TryCopyFrom(other.responseX); !copied) {
-        return copied;
-    }
-
-    if (auto copied = y.TryCopyFrom(other.responseY); !copied) {
-        return copied;
-    }
-
-    if (auto copied = z.TryCopyFrom(other.responseZ); !copied) {
-        return copied;
-    }
-
-    responseX = static_cast<TangentCurve&&>(x);
-    responseY = static_cast<TangentCurve&&>(y);
-    responseZ = static_cast<TangentCurve&&>(z);
-
-    kind = other.kind;
-    lowerThreshold = other.lowerThreshold;
-    upperThreshold = other.upperThreshold;
-    deadZoneType = other.deadZoneType;
-    scalar = other.scalar;
-    negateX = other.negateX;
-    negateY = other.negateY;
-    negateZ = other.negateZ;
-    swizzle = other.swizzle;
-    curveExponent = other.curveExponent;
-    fovScale = other.fovScale;
-    smoothMethod = other.smoothMethod;
-    smoothSpeed = other.smoothSpeed;
-    easingExponent = other.easingExponent;
-    return Result<void>::Success();
+    // 생성 깊은 복사다(실패면 이것은 그대로다 — Object/ValueCopy.h).
+    return detail::TryCopyValue(*this, other, responseX.GetAllocator());
 }
 
 InputValue ApplyInputModifier(const InputModifier& modifier, InputModifierState& state,

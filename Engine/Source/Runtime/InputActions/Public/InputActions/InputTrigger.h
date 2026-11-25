@@ -1,14 +1,18 @@
 #pragma once
 
+#include <Base/Guid.h>
+#include <Base/NumericLimits.h>
 #include <Base/Types.h>
 #include <InputActions/InputTriggerState.h>
 #include <InputActions/InputValue.h>
 #include <InputActions/TriggerContext.h>
 #include <InputActions/TriggerTypes.h>
+#include <Meta/Annotations.h>
 
 namespace rocks::input {
 
 // 트리거 종류다(UE UInputTrigger 파생 — 3.2절, Combo는 5.8 deprecated라 없다).
+ROCKS_ENUM()
 enum class InputTriggerType : uint8 {
     Down,
     Pressed,
@@ -34,36 +38,39 @@ inline constexpr uint32 DefaultRepeatedTapCount = 2;
 inline constexpr float DefaultPulseInterval = 1.0f;
 // 평가기가 Explicit 트리거 없는 바인딩에 ChordBlocker와 함께 넣는 Down의 임계(UE SMALL_NUMBER)다.
 inline constexpr float ChordBlockerDownThreshold = 1.0e-8f;
+// chord 대상 색인 "없음"이다(액션 표 밖 — 대상 상태 None).
+inline constexpr uint32 NoChordAction = NumericLimits<uint32>::Max();
 
-// 트리거 하나다(종류 + 매개변수). chordAction은 ChordAction·ChordBlocker의 대상 액션
-// 번호다(평가기가 액션 표의 색인으로 쓴다 — IA2).
+// 트리거 하나다(종류 + 매개변수 — 3.2절). 매개변수는 그 종류에만 쓰인다. 리플렉션
+// struct다(바인딩·액션 데이터 — 2.4절). chordActionId는 ChordAction·ChordBlocker의 대상 액션
+// id(데이터)이고, chordAction은 평가기가 다시 만들 때 쓰는 액션 표 색인(실행 중 — 저장하지
+// 않는다)이다.
+ROCKS_STRUCT()
 struct InputTrigger {
-    InputTriggerType type = InputTriggerType::Down;
-    float actuationThreshold = DefaultActuationThreshold;
-    // 시간 트리거(Hold·HoldAndRelease·Tap·RepeatedTap·Pulse).
-    bool affectedByTimeDilation = false;
-    // Hold·HoldAndRelease.
-    float holdTime = DefaultHoldTime;
-    bool oneShot = false;
-    // Tap·RepeatedTap.
-    float tapReleaseTime = DefaultTapReleaseTime;
-    // RepeatedTap.
-    float repeatDelay = DefaultRepeatDelay;
-    uint32 tapCount = DefaultRepeatedTapCount;
-    // Pulse.
-    bool triggerOnStart = true;
-    float pulseInterval = DefaultPulseInterval;
-    uint32 triggerLimit = 0;
-    // ChordAction·ChordBlocker: 대상 액션 번호(TriggerContext::chordStates 색인).
-    uint32 chordAction = 0;
+    ROCKS_GENERATED_BODY()
 
-    // HoldAndRelease의 UE 기본 holdTime(0.5)으로 만든다.
-    static InputTrigger HoldAndReleaseDefault() noexcept {
-        InputTrigger trigger;
-        trigger.type = InputTriggerType::HoldAndRelease;
-        trigger.holdTime = DefaultHoldAndReleaseTime;
-        return trigger;
-    }
+    ROCKS_PROPERTY() InputTriggerType type = InputTriggerType::Down;
+    ROCKS_PROPERTY() float actuationThreshold = DefaultActuationThreshold;
+    // 시간 트리거(Hold·HoldAndRelease·Tap·RepeatedTap·Pulse).
+    ROCKS_PROPERTY() bool affectedByTimeDilation = false;
+    // Hold.
+    ROCKS_PROPERTY() float holdTime = DefaultHoldTime;
+    ROCKS_PROPERTY() bool oneShot = false;
+    // HoldAndRelease(UE는 Hold와 다른 클래스라 기본값이 다르다 — 0.5).
+    ROCKS_PROPERTY() float holdAndReleaseTime = DefaultHoldAndReleaseTime;
+    // Tap·RepeatedTap.
+    ROCKS_PROPERTY() float tapReleaseTime = DefaultTapReleaseTime;
+    // RepeatedTap.
+    ROCKS_PROPERTY() float repeatDelay = DefaultRepeatDelay;
+    ROCKS_PROPERTY() uint32 tapCount = DefaultRepeatedTapCount;
+    // Pulse.
+    ROCKS_PROPERTY() bool triggerOnStart = true;
+    ROCKS_PROPERTY() float pulseInterval = DefaultPulseInterval;
+    ROCKS_PROPERTY() uint32 triggerLimit = 0;
+    // ChordAction·ChordBlocker.
+    ROCKS_PROPERTY() Guid chordActionId;
+    // TriggerContext::chordStates 색인이다(평가기가 쓴다).
+    ROCKS_NATIVE() uint32 chordAction = NoChordAction;
 };
 
 // 결합 역할이다(ChordAction은 Implicit, ChordBlocker는 Blocker, 나머지 Explicit — UE).
