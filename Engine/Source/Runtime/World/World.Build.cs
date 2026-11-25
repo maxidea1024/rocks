@@ -16,5 +16,5 @@ public sealed class World : EngineModuleRules
 
     // CoreTypeBindings: SceneComponent's Transform field imports that module's Binds mirror.
     // Config: a World owns a CVar scope in the host config context (Docs/Design/CVarSystem.ko.md section 14.2).
-    protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "Config"];
+    protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "Config", "Collision"];
 }
