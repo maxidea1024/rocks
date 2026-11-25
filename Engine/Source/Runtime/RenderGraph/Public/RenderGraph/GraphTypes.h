@@ -74,6 +74,19 @@ struct GraphBufferView {
     bool operator==(const GraphBufferView&) const noexcept = default;
 };
 
+// 그래프 상수 handle이다(RenderGraph::CreateConstants, Docs/Design/RenderBase 9.11절 8항 — UE
+// FRDGBuilder::CreateUniformBuffer 대응). 만든 그래프 안에서만 의미가 있다.
+struct GraphConstantBuffer {
+    uint32 index = GraphIndexNone;
+    uint32 graph = 0;
+
+    bool IsNull() const noexcept {
+        return index == GraphIndexNone;
+    }
+
+    bool operator==(const GraphConstantBuffer&) const noexcept = default;
+};
+
 // 그래프에 넣은 pass handle이다. index는 선언 순서(0부터)이며 진단(culling·수명·전이)에 쓴다.
 struct GraphPass {
     uint32 index = GraphIndexNone;

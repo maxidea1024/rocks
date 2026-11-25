@@ -1,6 +1,7 @@
 #include <RenderBase/ShaderParameters.h>
 
 #include <Platform/Atomics.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 #include <string.h>
 
 // 바인딩 지도·상수 블록(Docs/Design/RenderBase 9.3·9.4절)이다. 규칙은 공개 헤더 주석을
@@ -143,6 +144,100 @@ Result<void> ConstantBlock::Set(StringView member, Span<const uint8> bytes) noex
 
     memcpy(bytes_.Data() + found->offset, bytes.Data(), bytes.Size());
     ++version_;
+    return Result<void>::Success();
+}
+
+graphics::ShaderStage ShaderStageOfBit(uint32 stage) noexcept {
+    switch (stage) {
+    case shader::ShaderStageVertex:
+        return graphics::ShaderStage::Vertex;
+    case shader::ShaderStagePixel:
+        return graphics::ShaderStage::Pixel;
+    default:
+        break;
+    }
+
+    return graphics::ShaderStage::Compute;
+}
+
+Result<void> ConstantBlock::Commit(graphics::Device& device) noexcept {
+    if (bytes_.Size() == 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (IsCommitted()) {
+        return Result<void>::Success();
+    }
+
+    if (lifetime_ == ConstantBlockLifetime::Persistent && !buffer_.IsNull()) {
+        auto updated = device.UpdateConstantBuffer(buffer_, bytes_.View());
+        if (!updated) {
+            return updated;
+        }
+
+        committedVersion_ = version_;
+        return Result<void>::Success();
+    }
+
+    const graphics::ConstantBufferLifetime lifetime =
+        lifetime_ == ConstantBlockLifetime::Persistent
+            ? graphics::ConstantBufferLifetime::MultiFrame
+            : graphics::ConstantBufferLifetime::SingleFrame;
+    auto created = device.CreateConstantBuffer(lifetime, bytes_.View());
+    if (!created) {
+        return Result<void>::Failure(created.Error());
+    }
+
+    // SingleFrame은 바꿀 수 없으므로 값이 바뀌면 새 버퍼를 쓰고 옛것은 마지막 사용 fence 뒤 놓는다.
+    if (!buffer_.IsNull()) {
+        device.Retire(buffer_);
+    }
+
+    buffer_ = created.Value();
+    committedVersion_ = version_;
+    return Result<void>::Success();
+}
+
+void ConstantBlock::Release(graphics::Device& device) noexcept {
+    if (!buffer_.IsNull()) {
+        device.Retire(buffer_);
+        buffer_ = {};
+    }
+
+    committedVersion_ = 0;
+}
+
+Result<void> ApplyConstantBlock(graphics::CommandContext& commands, const ShaderBindingMap& map,
+                                const ConstantBlock& block) noexcept {
+    if (map.Layout().rootConstants || &block.Layout() != &map.Layout() || !block.IsCommitted()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (block.Lifetime() != ConstantBlockLifetime::PerDraw) {
+        return ApplyConstantBuffer(commands, map, block.Buffer());
+    }
+
+    for (const ShaderConstantPlacement& placement : map.Placements()) {
+        auto set = commands.SetConstantData(ShaderStageOfBit(placement.stage), placement.slot,
+                                            block.Bytes());
+        if (!set) {
+            return set;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ApplyConstantBuffer(graphics::CommandContext& commands, const ShaderBindingMap& map,
+                                 graphics::ConstantBufferHandle buffer) noexcept {
+    if (map.Layout().rootConstants) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (const ShaderConstantPlacement& placement : map.Placements()) {
+        commands.SetConstantBuffer(ShaderStageOfBit(placement.stage), placement.slot, buffer);
+    }
+
     return Result<void>::Success();
 }
 

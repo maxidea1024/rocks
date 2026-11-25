@@ -1117,7 +1117,8 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
         outcome = Move(closed);
     }
 
-    // 장치 view를 놓는다(장치 Retire는 마지막 사용 fence 뒤 해제다).
+    // 장치 view와 그래프 상수를 놓는다(장치 Retire는 마지막 사용 fence 뒤 해제다).
+    RetireGraphConstants(state);
     for (ViewRecord& view : state.views) {
         if (!view.device.IsNull()) {
             if (view.kind == GraphResourceKind::Texture) {
