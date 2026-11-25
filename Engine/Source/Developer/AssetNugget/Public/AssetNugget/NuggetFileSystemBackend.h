@@ -182,7 +182,9 @@ public:
     // 항목을 지운다(관리·ReportCorrupt). 없었으면 false다. 오류: IO 오류.
     Result<bool> Remove(const Sha256Digest& key) noexcept;
 
-    // GC다(지난 임시 파일 정리 포함). 오류: 루트 열거 실패, 할당 실패.
+    // GC다(지난 임시 파일 정리 포함). unusedDays가 tick으로 넘치는 값(약 1천만 일 초과)이면 나이
+    // 제한 없음이다. 오류: Open 전 InvalidArgument, 읽기 전용 Unsupported(Put과 대칭), 루트 열거
+    // 실패, 할당 실패.
     Result<NuggetCollectResult> Collect(const NuggetCollectOptions& options) noexcept;
 
     void SetHooks(const NuggetBackendHooks& hooks) noexcept {

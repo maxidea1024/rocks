@@ -85,9 +85,15 @@ struct CookRunResult {
     explicit CookRunResult(Allocator& allocator) noexcept : diagnostics(allocator) {
     }
 
-    // 실행 진단은 모두 오류다.
+    // 경고가 아닌 진단이 있는지다(처리기 경고는 warning = true — 12.14절 10번).
     bool HasErrors() const noexcept {
-        return !diagnostics.IsEmpty();
+        for (const CookDiagnostic& diagnostic : diagnostics) {
+            if (!diagnostic.warning) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // 진단(CookDiagnosticBefore 순)이다.

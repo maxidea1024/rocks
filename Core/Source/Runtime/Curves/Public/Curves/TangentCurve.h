@@ -55,6 +55,11 @@ public:
 
     // ---- 읽기 ----
 
+    // 키 배열이 쓰는 allocator다(같은 allocator의 임시 커브를 만들 때 — 예: 원자적 복사).
+    Allocator& GetAllocator() const noexcept {
+        return keys_.GetAllocator();
+    }
+
     // 시간 오름차순 키다. 다음 편집 연산까지 유효하다.
     Span<const TangentCurveKey> Keys() const noexcept {
         return keys_.View();

@@ -38,7 +38,8 @@ constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::DuplicateTransient) |
     static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient) |
     static_cast<uint32>(FieldFlags::SaveGame) |
-    static_cast<uint32>(FieldFlags::TextExportTransient);
+    static_cast<uint32>(FieldFlags::TextExportTransient) |
+    static_cast<uint32>(FieldFlags::TextMapMergeByKey);
 
 // 복제 제외 플래그다. Required와 함께 쓰면 InvalidArgument다(리플렉션 B9h1 — 복제본이 늘 null을
 // 가져 패키지 저장의 rejectMissingRequired가 실패한다).

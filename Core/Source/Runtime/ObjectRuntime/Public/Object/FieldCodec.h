@@ -41,7 +41,7 @@ public:
     // 값을 검증한 뒤 한 번 부른다(객체 Record는 직렬화기, struct 멤버는 DecodeStructRecord).
     // 기록하지 않는 단계(복원 2단계)나 위치 밖에서는 아무것도 하지 않는다. A5 override 집합("파일에
     // 있는 값 경로 = 집합" — Docs/Design/RuntimeClassMetadata.ko.md '클래스 기본값 결정')의
-    // 자리이며 지금은 NotePresent의 기본 구현이 아무것도 하지 않는다. 실패를 돌려주면 그 복원이
+    // 자리다(NotePresent — hook이 있으면 FieldCodecHooks::NotePresent). 실패를 돌려주면 그 복원이
     // 실패한다.
     Result<void> MarkPresent() noexcept {
         if (!Recording() || !Current()) {
@@ -307,11 +307,21 @@ protected:
     }
 
     // MarkPresent가 부르는 present 판정 hook이다(frame = 파일에 있는 필드·멤버의 위치, 호출 동안만
-    // 유효). 기본은 아무것도 하지 않는다 — A5가 override 집합을 채울 때 직렬화기 문맥이 구현한다
-    // (Docs/Design/ObjectFoundations.ko.md 4절, 공개 hook 여부는 A5가 정한다).
+    // 유효). 기본은 hook이 있으면 FieldCodecHooks::NotePresent에 노드 위치·경로를
+    // 넘긴다(Docs/Design/ RuntimeClassMetadata.ko.md 'A5b' — 차이 형식 로드의 override 집합).
     virtual Result<void> NotePresent(const FieldCodecFrame& frame) noexcept {
         (void)frame;
-        return Result<void>::Success();
+        FieldCodecHooks* hooks = Hooks();
+        if (!hooks || !hooks->WantsPresent()) {
+            return Result<void>::Success();
+        }
+
+        PathStep steps[MaxPropertyPathSteps];
+        PresentInfo info;
+        info.objectType = ObjectType();
+        info.objectIndex = ObjectIndex();
+        info.path = BuildPath(steps);
+        return hooks->NotePresent(info);
     }
 
 private:

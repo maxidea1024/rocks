@@ -17,9 +17,16 @@ namespace detail {
 // RequiredMissing만 소유 스레드(CheckRequired)에서 온다 — 한 번에 한 스레드만 쓴다.
 class ROCKS_ASSETRUNTIME_API PackageLoadHooks final : public FieldCodecHooks {
 public:
-    PackageLoadHooks(Allocator& allocator, bool cooked) noexcept;
+    PackageLoadHooks(Allocator& allocator, bool cooked, bool collectPresent = false) noexcept;
 
     Result<void> Report(const FieldDiagnostic& diagnostic) noexcept override;
+    // 파일에 있는 필드·멤버 경로를 모은다(collectPresent일 때만 — 차이 형식 로드의 override 집합,
+    // Docs/Design/RuntimeClassMetadata.ko.md 'A5b').
+    Result<void> NotePresent(const PresentInfo& info) noexcept override;
+
+    bool WantsPresent() const noexcept override {
+        return collectPresent_;
+    }
     Result<void> CollectSoftReference(const SoftReferenceInfo& info) noexcept override;
     Span<const TypeId> ObservedStructs() noexcept override;
     Result<void> ObserveStruct(const FieldCodecFrame& frame, TypeId type, const void* nativeKey,
@@ -45,9 +52,16 @@ public:
     bool sawNewer = false;
     // Required 실효 값 누락 수다.
     uint32 missingRequired = 0;
+    // 모은 present 경로다: i번째는 노드 위치 presentObjects[i]와 필드 ID
+    // presentIds[presentStarts[i] .. + presentLengths[i]).
+    Array<uint32> presentObjects;
+    Array<uint32> presentStarts;
+    Array<uint32> presentLengths;
+    Array<Guid> presentIds;
 
 private:
     bool cooked_ = true;
+    bool collectPresent_ = false;
     TypeId observed_[1] = {};
 };
 
@@ -70,6 +84,9 @@ struct PackageLoadOptions {
     uint64 maxBulkRawBytes = uint64{16} * 1024 * 1024 * 1024;
     // 그래프 한도다(기본은 AS 5.1절 상한과 같다).
     ObjectGraphLimits limits;
+    // 파일에 있는 필드·멤버 경로를 모을지다(편집기 패키지 집합 — override 집합,
+    // RuntimeClassMetadata 'A5b'). 모은 것은 PackageLoadState::PresentCount·PresentAt.
+    bool collectPresent = false;
 };
 
 // 패키지 하나의 로드 상태다(Docs/Design/AssetSystem 11.2절 단계): 소유 스레드에서 만들고 →
@@ -160,6 +177,21 @@ public:
     // 그래프 Stage다(InstantiatePackages가 쓴다).
     ObjectGraphStage& Stage() noexcept {
         return stage_;
+    }
+
+    // 모은 present 경로 수와 index번째(노드 위치·필드 ID 사슬 — Prepare가 성공한 뒤, collectPresent
+    // 일 때만)다. 노드 handle은 InstantiatePackages 뒤 Stage().Nodes()[objectIndex]다.
+    usize PresentCount() const noexcept {
+        return hooks_.presentObjects.Size();
+    }
+
+    uint32 PresentObject(usize index) const noexcept {
+        return hooks_.presentObjects[index];
+    }
+
+    Span<const Guid> PresentPath(usize index) const noexcept {
+        return Span<const Guid>(hooks_.presentIds.Data() + hooks_.presentStarts[index],
+                                hooks_.presentLengths[index]);
     }
 
 private:

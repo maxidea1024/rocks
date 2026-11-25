@@ -2,7 +2,7 @@
 
 #include <Audio/AudioBuffer.h>
 
-// 런타임 선형 리샘플러다(Docs/Design/AudioSystem.ko.md 3.20.5절). UE FRuntimeResampler
+// 런타임 선형 리샘플러다(Docs/Design/AudioSystem 3.20.5절). UE FRuntimeResampler
 // (SignalProcessing/Public/DSP/RuntimeResampler.h)와 같은 선형 보간이고, 고품질 리샘플은 쿠킹이
 // 맡는다.
 //
@@ -51,7 +51,7 @@ public:
 
     // 출력 위치가 inputFrame(소비하지 않은 입력의 첫 frame 기준, 음수 가능) 이상이 되기 전까지의
     // 출력 frame 수다. 비율 보간 경로를 따라 MaxBlockFrames까지 센다(그 이상이면 MaxBlockFrames).
-    // 믹서가 clip 끝 판정에 쓴다(Docs/Design/AudioSystem.ko.md 3.22.5절).
+    // 믹서가 clip 끝 판정에 쓴다(Docs/Design/AudioSystem 3.22.5절).
     uint32 OutputFramesBefore(int64 inputFrame) const noexcept;
 
     // output.frameCount frame을 만들고 소비한 입력 frame 수를 돌려준다.

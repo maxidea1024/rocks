@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetRuntime/PackageReader.h>
+#include <AssetRuntime/PackageTags.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Encoding/Sha256.h>
@@ -20,12 +21,15 @@
 //   - 참조 기록(owner ≠ 자기): 소유 패키지만 가리킨다. 그 패키지의 Dependencies에 owner를 가리키는
 //     ImportOwner 항목이 하나 있어 소유자 삭제를 막는다(CheckImportOwner).
 //
-// 배치(스키마 버전 1, 필드 id = Guid{0, n}, 문자열·byte payload는 길이 접두 없는 내용):
+// 배치(스키마 버전 2 — 1은 읽지 않는다, 필드 id = Guid{0, n}, 문자열·byte payload는 길이 접두 없는
+// 내용):
 //   Record(ImportRecordSchema){ 1 importerId Guid, 2 importerName String, 3 importerVersion U32,
 //     4 sources RecordList[Record(ImportSourceSchema){ 1 role String, 2 root String,
 //       3 relativePath String, 4 sha256 Bytes(32), 5 bytes U64 }],
 //     5 options Record(임포터 스키마), 6 outputs RecordList[Record(ImportOutputSchema){
-//       1 outputKey String, 2 assetId Guid, 3 typeId Guid }], 7 ownerAssetId Guid }
+//       1 outputKey String, 2 assetId Guid, 3 typeId Guid }], 7 ownerAssetId Guid,
+//     8 tags RecordList[Record(ImportTagSchema){ 1 key String, 2 value String }] (소유 기록, 태그가
+//     있을 때만 — A2f3a UXR8) }
 //
 // 사용 예(텍스처 하나를 임포트한 소유 기록):
 //   const ImportSourceInput sources[] = {{"source", "Raw", "Textures/Rock.png", digest, size}};
@@ -44,7 +48,9 @@ namespace rocks {
 inline constexpr Guid ImportRecordSchema{0x52494d5052454344ull, 0x0000000000000001ull};
 inline constexpr Guid ImportSourceSchema{0x52494d5052454344ull, 0x0000000000000002ull};
 inline constexpr Guid ImportOutputSchema{0x52494d5052454344ull, 0x0000000000000003ull};
-inline constexpr uint32 ImportRecordVersion = 1;
+inline constexpr Guid ImportTagSchema{0x52494d5052454344ull, 0x0000000000000004ull};
+// 기록 스키마 버전이다(2: 필드 8 tags — Docs/Design/AssetSystem 7.1절 19 A2f3a, 하위호환 없음).
+inline constexpr uint32 ImportRecordVersion = 2;
 
 inline constexpr Guid ImportRecordImporterIdField{0, 1};
 inline constexpr Guid ImportRecordImporterNameField{0, 2};
@@ -53,6 +59,9 @@ inline constexpr Guid ImportRecordSourcesField{0, 4};
 inline constexpr Guid ImportRecordOptionsField{0, 5};
 inline constexpr Guid ImportRecordOutputsField{0, 6};
 inline constexpr Guid ImportRecordOwnerField{0, 7};
+inline constexpr Guid ImportRecordTagsField{0, 8};
+inline constexpr Guid ImportTagKeyField{0, 1};
+inline constexpr Guid ImportTagValueField{0, 2};
 
 inline constexpr Guid ImportSourceRoleField{0, 1};
 inline constexpr Guid ImportSourceRootField{0, 2};
@@ -66,13 +75,16 @@ inline constexpr Guid ImportOutputTypeField{0, 3};
 
 // 문자열 byte 상한이다(하한: 임포터 이름·role·relativePath는 1, root·outputKey는 0).
 inline constexpr usize MaxImporterNameBytes = 256;
-inline constexpr usize MaxImportRoleBytes = 64;
+// 역할은 128 byte다(교환 역할 `blob:<sha256 hex>`이 69 byte — A2f3b).
+inline constexpr usize MaxImportRoleBytes = 128;
 inline constexpr usize MaxImportRootBytes = 256;
 inline constexpr usize MaxImportRelativePathBytes = 1024;
 inline constexpr usize MaxImportOutputKeyBytes = 64;
 // 소유 기록의 원본·출력 개수 상한이다(하한은 둘 다 1).
 inline constexpr usize MaxImportSources = 256;
 inline constexpr usize MaxImportOutputs = 1024;
+// 소유 기록의 임포터 태그 개수 상한이다(하한 0 — A2f3a UXR8).
+inline constexpr usize MaxImportTags = 256;
 
 // 쓰기 입력의 원본 하나다(호출 동안만 빌린다). role은 원본의 역할(2D "source", Cube 면 "px" 등 —
 // 5.4절), root는 원본 루트 이름(빈 값은 루트 없음), relativePath는 그 루트 기준 `/` 상대 경로,
@@ -92,8 +104,17 @@ struct ImportOutputInput {
     TypeId type{};
 };
 
+// 쓰기 입력의 임포터 태그 하나다(A2f3a UXR8). key는 `<importerName>.`으로 시작하고 그 뒤가 비지
+// 않는다(전체 1–MaxPackageTagKeyBytes), value는 0–PackageMaxStringBytes byte다(둘 다 UTF-8·NUL
+// 없음 — 패키지 Tags 규칙). 저장이 이 태그를 패키지 Tags에 그대로 낸다.
+struct ImportTagInput {
+    StringView key;
+    StringView value;
+};
+
 // 쓰기 입력이다. 참조 기록은 owner만 채운다(나머지는 기본값). options는 임포터 스키마로 만든
-// Record byte(빈 값은 옵션 없음)다.
+// Record byte(빈 값은 옵션 없음)다. tags는 소유 기록만(0–MaxImportTags, (key, value) 쌍 유일 —
+// 쓰기가 byte 순으로 정렬한다).
 struct ImportRecordInput {
     AssetId owner{};
     Guid importerId{};
@@ -102,6 +123,7 @@ struct ImportRecordInput {
     Span<const ImportSourceInput> sources{};
     Span<const uint8> options{};
     Span<const ImportOutputInput> outputs{};
+    Span<const ImportTagInput> tags{};
 };
 
 // 읽은 원본 하나다(소유).
@@ -127,11 +149,21 @@ struct ImportOutput {
     TypeId type{};
 };
 
+// 읽은 임포터 태그 하나다(소유).
+struct ImportTag {
+    explicit ImportTag(Allocator& allocator) noexcept : key(allocator), value(allocator) {
+    }
+
+    String key;
+    String value;
+};
+
 // 읽은 기록이다(소유 — 입력 byte를 빌리지 않는다). 참조 기록은 owner만 의미가 있고 나머지는
-// 기본값·빈 목록이다. outputs는 outputKey byte 순이다.
+// 기본값·빈 목록이다. outputs는 outputKey byte 순, tags는 (key, value) byte 순이다.
 struct ImportRecord {
     explicit ImportRecord(Allocator& allocator) noexcept
-        : importerName(allocator), sources(allocator), options(allocator), outputs(allocator) {
+        : importerName(allocator), sources(allocator), options(allocator), outputs(allocator),
+          tags(allocator) {
     }
 
     ImportRecord(ImportRecord&&) noexcept = default;
@@ -146,6 +178,7 @@ struct ImportRecord {
     Array<ImportSource> sources;
     Array<uint8> options;
     Array<ImportOutput> outputs;
+    Array<ImportTag> tags;
 
     // 패키지 self의 기록이 소유 기록인지다(owner == self).
     bool OwnedBy(AssetId self) const noexcept {
@@ -160,13 +193,20 @@ struct ImportRecord {
 ROCKS_ASSETDATABASE_API bool IsValidImportSourceLocation(StringView root,
                                                          StringView relativePath) noexcept;
 
+// 임포터 태그 한 쌍이 기록 규칙에 맞는지다(쓰기·읽기·임포트 문맥 AddTag와 같은 판정 — AS 7.1절
+// 19 A2f3a): key는 `<importerName>.` 다음이 비지 않고 전체 1–MaxPackageTagKeyBytes byte, value는
+// 0–PackageMaxStringBytes byte, 둘 다 유효 UTF-8·NUL 없음.
+ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView importerName, StringView key,
+                                              StringView value) noexcept;
+
 // self 패키지의 ImportRecord byte를 쓴다(PackageWriteOptions::importRecord에 넘긴다). outputs는
 // outputKey byte 순으로 정렬해 쓰고 sources는 준 순서대로 쓴다.
 // 오류: self·owner가 null이거나 스펙 규칙(AS 7.1절 15 — 소유 기록: importerId·importerName 있음,
 // 원본 1–256개·role 유일, 출력 1–1024개·outputKey 유일·asset 유일·null 아님·type null 아님·self
 // 포함, 문자열 상한·UTF-8·NUL 없음, relativePath 형태(IsValidImportSourceLocation), root에 `/`·`\`
-// 없음, options는 Record envelope. 참조 기록: importerId null·이름 빈 값·버전 0·원본·옵션·출력
-// 없음)을 어기면 InvalidArgument, 전체가 Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
+// 없음, options는 Record envelope, 태그 0–256개·(key, value) 쌍 유일·IsValidImportTag. 참조 기록:
+// importerId null·이름 빈 값·버전 0·원본·옵션·출력·태그 없음)을 어기면 InvalidArgument, 전체가
+// Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
 ROCKS_ASSETDATABASE_API Result<Array<uint8>>
 WriteImportRecord(Allocator& allocator, AssetId self, const ImportRecordInput& input) noexcept;
 

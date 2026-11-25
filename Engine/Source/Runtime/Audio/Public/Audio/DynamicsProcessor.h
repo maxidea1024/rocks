@@ -2,7 +2,7 @@
 
 #include <Audio/AudioBuffer.h>
 
-// compressor·limiter·expander·gate dynamics 처리기다(Docs/Design/AudioSystem.ko.md 3.21절). UE
+// compressor·limiter·expander·gate dynamics 처리기다(Docs/Design/AudioSystem 3.21절). UE
 // Audio::FDynamicsProcessor의 블록 경로(ProcessAudioDeinterleaveInternal)와
 // FInlineEnvelopeFollower에 해당한다. 마스터 limiter(AU1)와 compressor 효과(AU7)가 쓴다.
 //

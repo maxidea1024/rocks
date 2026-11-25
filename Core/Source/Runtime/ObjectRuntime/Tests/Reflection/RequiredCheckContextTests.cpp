@@ -156,7 +156,7 @@ RuntimeFieldOps CodecField(Guid id, const void* valueNative = nullptr) noexcept 
     RuntimeFieldOps ops;
     ops.fieldId = id;
     ops.encode =
-        +[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access,
+        +[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access,
             ObjectHandle object, ArchiveWriter& out, FieldEncodeContext& context) noexcept {
             return detail::EncodeGeneratedField<O>(registry, access, object, Member, out, context);
         };
@@ -642,7 +642,7 @@ TEST(RequiredCheck_MarkMakesStagedWritesBusyUntilTheCheckEnds) {
                 REQUIRE(ops);
                 {
                     FieldScope scope(check, lease.Value().Schema().fields[linkIndex], LinkedId);
-                    auto wire = ops->encode(*ops, objects, objects.OwnerAccess(), first.Value(),
+                    auto wire = ops->encode(*ops, &objects, objects.OwnerAccess(), first.Value(),
                                             writer, check);
                     REQUIRE(wire);
                     CHECK(wire.Value() == static_cast<uint32>(WireType::U64));

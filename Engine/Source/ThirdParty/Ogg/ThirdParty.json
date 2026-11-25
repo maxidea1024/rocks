@@ -41,7 +41,7 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "Ogg container library for the Vorbis and Opus source decoders of the audio importer (Docs/Design/AudioSystem.ko.md section 3.28). Developer only: AudioTools links it, runtime targets do not.",
+    "Ogg container library for the Vorbis and Opus source decoders of the audio importer (Docs/Design/AudioSystem section 3.28). Developer only: AudioTools links it, runtime targets do not.",
     "os_types.h defines the integer types itself on Windows (MSVC and clang-cl) and macOS; on Linux and Android it includes ogg/config_types.h, which is an added file here (the configure output for stdint.h — modifications)."
   ],
   "patch": "Rocks.patch",

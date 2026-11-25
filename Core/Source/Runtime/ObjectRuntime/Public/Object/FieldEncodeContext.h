@@ -8,6 +8,8 @@
 // Admit 질의가 있다. Object/FieldCodec.h로 받는다.
 namespace rocks {
 
+class Object;
+
 // 저장 문맥이다(그래프 저장이 구현한다). 그래프 로드의 Required 실효 값 검사(Docs/Design/
 // ObjectFoundations.ko.md 4절)도 이 문맥의 검사 모드로 같은 encode 경로를 쓴다.
 class FieldEncodeContext : public FieldCodecContext {
@@ -42,6 +44,44 @@ public:
     // RuntimeFieldOps::readStaged로 읽는다(encode 고정을 쥐지 않는다 — 검사 중 표시가 대신한다).
     ConstructionContext* StagedSource() const noexcept {
         return staged_;
+    }
+
+    // Registry 밖 원본 객체를 읽는 문맥이면 그 객체다(아니면 nullptr — 클래스 기본값 레코드의 임시
+    // 인스턴스, Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드'). 생성 encode thunk
+    // (detail::EncodeGeneratedField·EncodeBitfieldField)는 이것이 있으면 Registry·staged 대신 이
+    // 객체에서 멤버를 읽고(같은 EncodeMemberValue — 같은 byte), 수동 함수표의 범용 encode는
+    // Unsupported다. 이때 thunk가 받는 registry는 null이다.
+    virtual const Object* RawSource() const noexcept {
+        return nullptr;
+    }
+
+    // 차이 쓰기(Docs/Design/RuntimeClassMetadata.ko.md 'A5b')의 기준 비교 자리다. 기본 문맥은 전부
+    // 쓴다(모두 거짓·0). 그래프 저장 문맥이 기준 구성이 있을 때 구현한다.
+    //
+    // 지금 위치(단일 struct 값 — 원소 index 없음)를 기준 멤버 비교로 쓸지 정하고 시작한다. 참이면
+    // EncodeStructRecord가 멤버마다 OmitCurrent를 묻고 끝에 EndStructBaseline을 부른다.
+    virtual Result<bool> BeginStructBaseline() noexcept {
+        return Result<bool>::Success(false);
+    }
+
+    virtual void EndStructBaseline() noexcept {
+    }
+
+    // 지금 위치(필드·멤버)에 방금 쓴 값(wire, payload)을 생략할지다: 기준과 byte가 같고, override
+    // 단위가 아니고, 그 값을 쓰는 동안 참조 표지(ReferenceMark)가 그대로일 때 참이다. 멤버 비교로
+    // 쓴 struct 값은 남은 멤버가 없을 때 참이다. referenceMark는 그 값을 쓰기 전의 ReferenceMark다.
+    virtual Result<bool> OmitCurrent(uint32 wire, Span<const uint8> payload,
+                                     usize referenceMark) noexcept {
+        (void)wire;
+        (void)payload;
+        (void)referenceMark;
+        return Result<bool>::Success(false);
+    }
+
+    // 외부 참조 위치·weak 지연 항목의 누계다(생략 판정 — 그 값을 쓰는 동안 늘었으면 생략하지
+    // 않는다).
+    virtual usize ReferenceMark() const noexcept {
+        return 0;
     }
 
     // 지금 위치가 Required이고 값이 null일 때: 검사 모드면 RequiredMissing을 보고한 뒤 성공(hook

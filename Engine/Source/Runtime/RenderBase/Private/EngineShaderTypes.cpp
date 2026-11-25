@@ -72,9 +72,9 @@ constexpr shader::ShaderParameterLayout TextureInspectorLayouts[] = {
 
 constexpr shader::ShaderTypeDesc MakeTextureInspector(shader::ShaderTypeName name,
                                                       StringView entry) noexcept {
-    shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
-        name, "/Engine/Private/Debug/TextureInspector.rsf", entry, shader::ShaderStagePixel,
-        shader::ShaderTypeOwner::Engine);
+    shader::ShaderTypeDesc desc =
+        shader::MakeShaderTypeDesc(name, "/Engine/Private/Debug/TextureInspector.rsf", entry,
+                                   shader::ShaderStagePixel, shader::ShaderTypeOwner::Engine);
     desc.parameterLayouts = TextureInspectorLayouts;
     return desc;
 }
@@ -95,9 +95,9 @@ constexpr shader::ShaderTypeDesc BuiltinMeshPixelDesc = MakeBuiltinMeshPixel();
 constexpr shader::ShaderTypeDesc TonemapPixelDesc = MakeTonemapPixel();
 
 constexpr const shader::ShaderTypeDesc* Types[] = {
-    &FullscreenTriangleVertexDesc, &CopyTexturePixelDesc, &BuiltinMeshVertexDesc,
-    &BuiltinMeshPixelDesc, &TonemapPixelDesc, &TextureInspector2DDesc,
-    &TextureInspector2DArrayDesc, &TextureInspectorCubeDesc, &TextureInspectorCubeArrayDesc,
+    &FullscreenTriangleVertexDesc, &CopyTexturePixelDesc,     &BuiltinMeshVertexDesc,
+    &BuiltinMeshPixelDesc,         &TonemapPixelDesc,         &TextureInspector2DDesc,
+    &TextureInspector2DArrayDesc,  &TextureInspectorCubeDesc, &TextureInspectorCubeArrayDesc,
     &TextureInspectorVolumeDesc};
 
 constexpr shader::ShaderVertexInputType VertexInputs[] = {shader::MakeShaderVertexInputType(

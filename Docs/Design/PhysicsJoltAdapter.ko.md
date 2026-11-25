@@ -1,6 +1,6 @@
 # Rocks 물리 어댑터 경계: Jolt 좌표·단위 변환 계약
 
-기준일: 2026-11-25, 개정 3. 개정 3: Jolt v5.7.0 소스로 검증 항목 J1–J21을 확인하고 UE 5.8.4 소스로 U1·U3을 확인해 1–6절을 확정·정정했다(8절 결과표). 라이브러리 반입 설계(10절, JL1)를 더했다. 같은 개정 안에서 리뷰어 1명의 원본 대조(치명 0, 중요 5, 경미 8)를 반영했다: 조향·궤도 입력 부호, compound 자식 scale, heightfield 양자화·재질 전치, 연결 시험의 할당 판정과 호출 순서, PJG 범위, 행 번호·단위 정정. 개정 2: 근거에 컴포넌트 쪽 물리 요구(컴포넌트 도입 CR16) 링크를 더했다. 개정 1: 4절에 에셋 단순 충돌 형상 대응(메시 에셋 스펙 MR5)과 8절 J20·J21을 더했다.
+기준일: 2026-11-25, 개정 4. 개정 4: UE용 Jolt 공개 플러그인 UnrealJolt와 대조한 결과(11절)를 더하고 PA02·PA05에 되읽기·크기 판정을 더했다. 개정 3: Jolt v5.7.0 소스로 검증 항목 J1–J21을 확인하고 UE 5.8.4 소스로 U1·U3을 확인해 1–6절을 확정·정정했다(8절 결과표). 라이브러리 반입 설계(10절, JL1)를 더했다. 같은 개정 안에서 리뷰어 1명의 원본 대조(치명 0, 중요 5, 경미 8)를 반영했다: 조향·궤도 입력 부호, compound 자식 scale, heightfield 양자화·재질 전치, 연결 시험의 할당 판정과 호출 순서, PJG 범위, 행 번호·단위 정정. 개정 2: 근거에 컴포넌트 쪽 물리 요구(컴포넌트 도입 CR16) 링크를 더했다. 개정 1: 4절에 에셋 단순 충돌 형상 대응(메시 에셋 스펙 MR5)과 8절 J20·J21을 더했다.
 
 이 문서는 Rocks 물리 모듈이 Jolt Physics와 주고받는 값의 좌표·방향·단위 변환 계약과 Jolt 라이브러리 반입 방식을 정한다. 물리 모듈(CR16)과 어댑터는 구현되지 않았다. 상태 표기는 **설계**(이 문서가 정한 계약, 코드 없음), **확인**(고정 판 소스·문서로 확인함, 근거 경로·행은 8절), **미확인**(남은 검증 항목)이다. Jolt 경로는 `Jolt/`(원본 저장소의 라이브러리 폴더) 기준, UE 경로는 `Engine/Source/Runtime/` 기준이다.
 
@@ -166,10 +166,10 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 | ID | 시험 | 기대 |
 |---|---|---|
 | PA01 | 방향 상수 사상 | `Forward`·`Right`·`Up`·반대 방향 6개가 A의 결과와 정확히 같고 A⁻¹로 정확히 돌아온다 |
-| PA02 | 각속도·quaternion | Rocks +Z 축 각속도 +ω(rad/s, yaw +)로 t초 적분한 body의 전방이 Rocks `Quaternion::FromUnitAxisAngle(Up, ω·t)`의 전방과 같다(+X → +Y 쪽으로 돈다) |
+| PA02 | 각속도·quaternion | Rocks +Z 축 각속도 +ω(rad/s, yaw +)로 t초 적분한 body의 전방이 Rocks `Quaternion::FromUnitAxisAngle(Up, ω·t)`의 전방과 같다(+X → +Y 쪽으로 돈다). 되읽은 각속도가 (0, 0, ω) rad/s 그대로다(cm 배율이 붙지 않는다 — 11.2절) |
 | PA03 | 중력 | 기본 중력에서 자유 낙하 1초 뒤 속도 (0, 0, −980) cm/s, 변위 −490 cm(적분 오차 허용) |
 | PA04 | 힘·충격량 | 질량 2 kg body에 충격량 (0, 0, 200) kg·cm/s → 속도 변화 (0, 0, 100) cm/s. 힘 (0, 0, 1960) kg·cm/s²로 중력 상쇄 |
-| PA05 | 토크·관성 | 주축 관성 I(kg·cm²) body에 토크 τ(kg·cm²/s²) → 각가속도 τ/I rad/s², 비대칭 관성 텐서가 A·I·Aᵀ로 같은 운동을 낸다 |
+| PA05 | 토크·관성 | 주축 관성 I(kg·cm²) body에 토크 τ(kg·cm²/s²) → 각가속도 τ/I rad/s², 비대칭 관성 텐서가 A·I·Aᵀ로 같은 운동을 낸다. 크기 판정: τ = 10⁴ kg·cm²/s²가 Jolt에 1 N·m로 들어간다(배율 10⁻⁴ — 11.2절) |
 | PA06 | 메시 앞면 | 수학 구현 2.1절의 렌더 메시 삼각형 A(100,0,0)·B(100,10,0)·C(100,0,10) cm를 쿠킹하고 (0, 2, 2) cm에서 +X로 ray(꼭짓점·모서리를 피한 내부 점): 앞면 hit, 거리 100 cm, `ImpactNormal` (−1, 0, 0) |
 | PA07 | heightfield | 서로 다른 높이 표본 격자에서 알려진 (x, y) cm 위치 ray의 hit 높이가 Rocks 쪽 삼각 분할 기대값과 같다(대각선 포함, 비대칭 표본으로 전치 오류를 드러냄) |
 | PA08 | 접촉 법선 부호 | 평면 위에 놓인 구의 접촉·sweep 결과 `ImpactNormal`이 +Z |
@@ -246,3 +246,43 @@ PC09(전체 구현 계획 16.4절)는 이 표의 통과를 뜻한다.
 4. 고지: MIT 고지(`binaryNoticeRequired` 참)가 배포 고지 묶음에 들어간다.
 
 **JL1 구현 결과(2026-11-25).** Windows x64 Debug(Clang 22.1.8)에서 번역 단위 124개가 엔진 경고 규칙으로 경고 0이고, 추적 가능한 수정이 필요 없었다(C++23에서도 원본 그대로). 연결 시험 2개(`ThirdParty_JoltSimulatesQueriesAndReleasesHookedMemory`, `ThirdParty_JoltTriangleFrontFaceFollowsRightHandCross`)가 통과했다: 자유 낙하가 반암시 Euler 식과 1e-3 안에서 같고, 구가 y = 0.5 m에서 잠들며, 두 번 돌린 상태 byte가 같고, ray·cylinder cast의 fraction·법선 부호(J11·J13·J16)와 삼각형 앞면(J5)이 기대대로이며, hook 할당 잔여가 0이다. format·policy·`third-party` 검사도 통과했다. Android(2026-11-25, NDK 29.0.13113456 Clang 20, API 26): arm64·x86_64 교차 빌드에서 Jolt 124개 번역 단위가 경고 0이고(arm64는 NEON 경로·결정성 build의 FMA 끔 그대로 컴파일), x86_64 에뮬레이터(API 35)에서 연결 시험 2개가 통과했다. arm64 실행은 기기가 없어 확인하지 못했다. Android 빌드를 막던 다른 서드파티 넷(Minimp3·Ogg·HarfBuzz·ICU — Windows에서는 나지 않던 경고·누락 헤더)은 추적 가능한 수정으로 고쳤다(d927b021). macOS는 CI에서 확인한다. 시험을 쓰다 확인한 사용 주의: `ObjectVsBroadPhaseLayerFilterTable`은 생성할 때 레이어 표를 읽어 자기 표를 만들므로 표를 먼저 채워야 한다(늦게 채우면 충돌 쌍이 하나도 없어 물체가 바닥을 통과한다). Physics 모듈의 레이어 설정도 같은 순서를 지킨다.
+
+## 11. 다른 구현 대조: UnrealJolt
+
+UE 플러그인으로 Jolt를 붙인 공개 구현 UnrealJolt(commit `369ef176e166383ec2ac1659e4419243b0fa2922`, MIT, 약 4,200줄, 2026-11-25)를 이 문서와 [물리 모듈](PhysicsModule/README.ko.md) 설계에 대조했다. 소스를 읽어 확인했고 실행하지 않았다. 코드는 가져오지 않는다. 근거로만 쓰고, 우리 쪽 판정은 9절 수용 시험과 물리 모듈 시험으로 한다. 경로는 플러그인의 `Source/UnrealJolt/` 기준이다.
+
+### 11.1 좌표 사상 — 거울 사상(행렬식 −1)
+
+UnrealJolt는 2절에서 버린 거울 사상을 쓴다: 위치·벡터 `j = (x, z, y) · 0.01`(`Helpers.h:49`·`:71`), 회전 `(−qx, −qz, −qy, qw)`(`:81`).
+
+- 극성 벡터(위치·선속도·힘·충격량)는 맞다. 회전 quaternion도 맞다(거울 사상에서 회전축은 축성 벡터라 `−M·a`로 바뀐다).
+- 삼각형 winding을 뒤집는다(`Private/JoltSubsystem.cpp:694`·`:1793`·`:1885`). heightfield는 표본을 `y·N + x`로 전치 없이 넣는다(`:1555–1670`). 둘 다 거울 사상에서는 맞다(UE X → Jolt X, UE Y → Jolt Z이므로 행·열이 그대로다).
+- 고정 원점 이동(`ToJoltPos`의 `WorldOrigin`)이 있다. 큰 월드 판단(6절)과 같은 방향이다.
+
+### 11.2 거울 사상에서 난 오류
+
+축성 벡터를 따로 다루지 않아 아래가 틀렸다(읽어서 본 것 — UnrealJolt의 실행 확인은 아니다). 2절 결정(행렬식 +1만 써서 부호 처리를 없앤다)의 근거다.
+
+| 값 | UnrealJolt | 맞는 변환(거울 사상) | Rocks(A) |
+|---|---|---|---|
+| 각속도 설정·읽기 | 벡터 변환 그대로 → cm 배율 0.01·100이 붙고 부호가 안 바뀜(`Private/JoltSubsystem.cpp:1969`·`:1974`·`:1982`) | 배율 없음, `−M·ω` | 배율 없음, 부호 그대로 재배치(3절) |
+| 토크 | 벡터 변환 그대로 → 배율 0.01, 부호 그대로(`:2241`) | 배율 10⁻⁴(kg·cm²/s² → N·m), `−M·τ` | 배율 10⁻⁴, 재배치만(3절·K1) |
+
+단위 배율 오류는 사상 종류와 무관하다. PA02(되읽기 포함)·PA05(크기 판정)로 막는다.
+
+### 11.3 층·필터
+
+- UnrealJolt는 사용자가 이름 붙인 object 층과 broadphase 층을 설정에 두고, 층마다 `CollidesWith` 목록으로 대칭 표를 만든다(양방향 OR — `Private/JoltLayerTable.cpp:25–70`). 필터 셋은 이 표만 본다(`Public/JoltFilters.h`).
+- UE 채널·응답(Block·Overlap·Ignore, 컴포넌트마다 다른 응답, 양쪽 최소)은 쓰지 않는다. 그래서 같은 층 쌍이 컴포넌트에 따라 다르게 반응할 수 없다.
+- Rocks는 UE 모델을 그대로 둔다: object 층 bit에 채널·운동 묶음·참여 표지·응답 묶음 색인을 넣고 필터가 응답 묶음을 읽어 최소를 낸다(물리 모듈 6.1·6.2절). 표 기반 필터가 Jolt에서 문제없이 돈다는 점만 같다.
+
+### 11.4 접촉 충격량(PMU2)
+
+- `OnContactAdded`에서 `EstimateCollisionResponse`로 접촉점마다 충격량을 추정하고 ×100(N·s → kg·cm/s)해 MPSC 큐에 넣는다(`Private/JoltContactListener.cpp:30–60`). `OnContactPersisted`는 미끄러짐 효과용 접선 속도만 본다(`:63–`).
+- 물리 모듈 PMD14(추정값을 `normalImpulse`에 넣는다)·listener는 값만 복사한다는 규칙(물리 모듈 3.2절)과 같은 방법이다. solver가 누적한 실제 충격량을 읽는 구현은 없다. 그래서 PMU2는 닫지 않는다.
+
+### 11.5 kinematic 이동과 결과 반영
+
+- kinematic body를 `SetPositionAndRotation`(teleport)으로만 옮기고 `MoveKinematic`을 쓰지 않는다(`Private/JoltSubsystem.cpp:2289–2297`). 이러면 kinematic body의 속도가 바뀌지 않아(기본 0) 밀린 dynamic body가 이동 속도를 받지 못하고 위치 보정으로만 밀려난다. Rocks는 UE처럼 `MoveKinematic`을 쓰고 목표 없는 스텝은 속도 0으로 둔다(물리 모듈 3.3절).
+- 결과 반영은 60 Hz 누적기 뒤 body마다 직전·현재 transform을 기록하고, 남은 비율로 보간한 값을 Actor에 `TeleportPhysics`로 쓴다(`:370–445`). 그래서 게임 코드가 보는 transform은 물리 값보다 최대 한 스텝 늦다. Rocks는 결과 반영에 마지막 스텝 값을 그대로 쓰고 보간은 렌더 단계에서 따로 한다(물리 모듈 3.4절·3.2절 보간 — UE 기본 동기 모드와 같다).
+- step은 subsystem Tick 안에서 동기로 돈다(`Private/JoltSubsystem.cpp:374–380` → `Private/JoltWorker.cpp:37–46`). Rocks도 동기 step이다(물리 모듈 3.2절). job은 Jolt 예제 `JobSystemThreadPool`을 쓰고 UE task 연결은 TODO로 남겨 두었다(`Private/JoltWorker.cpp` 생성자 주석). Rocks는 반입에서 그 파일을 빼고 Task 모듈에 연결한다(10.1절, 물리 모듈 6.7절).

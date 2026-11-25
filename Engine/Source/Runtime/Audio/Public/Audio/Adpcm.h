@@ -3,7 +3,7 @@
 #include <Audio/AudioBuffer.h>
 #include <Core/Containers/Span.h>
 
-// MS ADPCM 블록 코덱의 형식 상수와 디코더다(Docs/Design/AudioSystem.ko.md 3.24절). UE
+// MS ADPCM 블록 코덱의 형식 상수와 디코더다(Docs/Design/AudioSystem 3.24절). UE
 // AdpcmAudioDecoder (Runtime/AdpcmAudioDecoder/Module/Private/Adpcm.cpp)와 같은 형식·식이다.
 // 인코더는 AudioTools에 있다.
 //

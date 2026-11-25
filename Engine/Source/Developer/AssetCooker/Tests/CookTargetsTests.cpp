@@ -245,6 +245,76 @@ TEST(CookTargets_NeverCook) {
     CHECK(!out.HasErrors());
 }
 
+// EditorOnly 에셋(대표 타입이 EditorOnly 클래스 — 결정 4, A4e2b)은 NeverCook과 같은 규칙이다:
+// alwaysCook이 직접 가리키면 경고 NeverCookReferenced(디렉터리 아래 둘 모두), Hard·bundle 참조는
+// 오류, Soft 설정에서 Soft로만 닿으면 제외 목록, PrimaryAsset 규칙으로만 닿으면 진단 없이 뺀다.
+// 대표 타입이 요청 TypeRegistry에 없으면(로드되지 않은 모듈) EditorOnly로 판정하지 않고 대상에
+// 둔다(키 단계가 UnsupportedVersion을 낸다), 그 밖의 조회 오류(ShuttingDown)는 함수 오류다.
+TEST(CookTargets_EditorOnlyAssets) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene scene(env);
+    const uint64 textIds[] = {70};
+    IdTexts ids(env.allocator, textIds);
+    REQUIRE(ids.ready);
+    const Dep hardTool[] = {{70, K::Hard}};
+    const Dep softTool[] = {{70, K::Soft}, {71, K::Soft}};
+    const PackageTagInput bundleTool[] = {{"Bundle.X", ids(70)}};
+    const Node nodes[] = {{"Editor/E.rasset", 70, NodeType::EditorTool},
+                          {"Editor/E2.rasset", 71, NodeType::EditorTool},
+                          {"Refs/H.rasset", 90, NodeType::Test, hardTool},
+                          {"Refs/SoftE.rasset", 91, NodeType::Test, softTool},
+                          {"Bundles/BE.rasset", 92, NodeType::Test, {}, bundleTool},
+                          {"Maps/Level.rasset", LevelId}};
+    REQUIRE(scene.Build(nodes));
+    const StringView always[] = {"/Game/Editor/E", "/Game/Refs/", "/Game/Editor/"};
+    for (StringView path : always) {
+        REQUIRE(Push(scene.settings.alwaysCook, path));
+    }
+
+    const StringView bundles[] = {"/Game/Bundles/"};
+    REQUIRE(AddRule(scene.settings, "TestAsset", bundles));
+    CookTargetSet out(env.allocator);
+    REQUIRE(ComputeCookTargets(env.allocator, scene.Request(), out));
+    const uint64 expected[] = {90, 91, 92};
+    CHECK(SameTargets(out, expected));
+    const ExpectedDiagnostic diagnostics[] = {{C::NeverCookReferenced, true, 70, 0, 0},
+                                              {C::NeverCookReferenced, true, 70, 0, 2},
+                                              {C::NeverCookReferenced, true, 71, 0, 2},
+                                              {C::NeverCookReferenced, false, 90, 70, 0},
+                                              {C::NeverCookReferenced, false, 92, 70, 0}};
+    CHECK(SameDiagnostics(out.diagnostics, diagnostics));
+    scene.settings.cookSoftReferences = true;
+    REQUIRE(ComputeCookTargets(env.allocator, scene.Request(), out));
+    const uint64 excluded[] = {70, 71};
+    CHECK(SameIds(out.excluded, excluded));
+
+    // PrimaryAsset 규칙으로만 닿은 EditorOnly 에셋은 진단 없이 빠진다.
+    scene.ResetSettings();
+    const StringView editor[] = {"/Game/Editor/"};
+    REQUIRE(AddRule(scene.settings, "EditorToolAsset", editor));
+    REQUIRE(ComputeCookTargets(env.allocator, scene.Request(), out));
+    CHECK(out.targets.IsEmpty() && out.diagnostics.IsEmpty());
+
+    // 요청 TypeRegistry에 대표 타입이 없으면 판정하지 않고 대상에 둔다.
+    scene.ResetSettings();
+    REQUIRE(Push(scene.settings.alwaysCook, "/Game/Editor/E"));
+    SystemAllocator allocator;
+    TypeRegistry runtimeOnly(allocator);
+    ModuleRegistration modules(runtimeOnly, allocator);
+    REQUIRE(RegisterAssetRuntimeTypes(modules));
+    CookTargetRequest missing = scene.Request();
+    missing.types = &runtimeOnly;
+    REQUIRE(ComputeCookTargets(env.allocator, missing, out));
+    const uint64 unjudged[] = {70};
+    CHECK(SameTargets(out, unjudged) && out.diagnostics.IsEmpty());
+
+    // 닫힌 TypeRegistry의 조회 오류는 함수 오류다.
+    REQUIRE(modules.Unregister());
+    REQUIRE(runtimeOnly.Shutdown());
+    CHECK(ComputeCookTargets(env.allocator, missing, out).Error() == ErrorCode::ShuttingDown);
+}
+
 // 누락·같은 id 의존과 bundle 태그: Hard·bundle 누락은 오류·Soft 누락은 경고 MissingDependency(같은
 // 의존의 Hard·Soft 누락은 둘 다 — 오류가 먼저), 같은
 // id 의존(Hard·Soft·bundle)은 오류 DuplicateAssetId, bundle 태그 값이 AssetId가 아니면(문자열·빈

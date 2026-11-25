@@ -123,7 +123,7 @@ RuntimeFieldOps ClassStructField(Guid id) noexcept {
         nullptr,
         {},
         nullptr,
-        +[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access,
+        +[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access,
             ObjectHandle object, ArchiveWriter& out, FieldEncodeContext& context) noexcept {
             return detail::EncodeGeneratedField<O>(registry, access, object, Member, out, context);
         },
@@ -152,7 +152,7 @@ RuntimeFieldOps ClassScalarField(Guid id) noexcept {
            const FieldValue& value) noexcept {
             return detail::WriteGeneratedStagedField<O>(transaction, object, Member, value);
         },
-        +[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access,
+        +[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access,
             ObjectHandle object, ArchiveWriter& out, FieldEncodeContext& context) noexcept {
             return detail::EncodeGeneratedField<O>(registry, access, object, Member, out, context);
         },

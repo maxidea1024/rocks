@@ -9,6 +9,10 @@
 
 namespace rocks {
 
+namespace detail {
+struct LevelGraphTestAccess;
+}
+
 // 부착할 때 Transform 성분 하나를 다루는 규칙이다(UE EAttachmentRule — Docs/Design/EngineRuntime
 // 23.3절).
 enum class AttachmentRule : uint8 {
@@ -105,8 +109,9 @@ TransformComponentBounds(const ComponentBounds& local, const Mat4d& localToWorld
 // 리플렉션 클래스다. 영속 필드는 relativeTransform(Core 값 타입 Transform — CoreTypeBindings 미러
 // 경유)이고 ReadOnly다: 경로·리플렉션 쓰기는 MarkDirty·검증을 거치지 않으므로
 // SetRelativeTransform만 쓴다(CU5 setter hook 전에는 에디터에서 경로로 편집할 수 없다 — UE
-// EditAnywhere와 다른 제약). 월드 행렬 캐시·부모·자식은 ROCKS_NATIVE다 — 부착 계층은 저장하지
-// 않는다(추적하지 않는 참조 WeakObjectRef가 생긴 뒤 레벨·prefab 저장 전에 영속한다, children은
+// EditAnywhere와 다른 제약). 월드 행렬 캐시·부모·자식은 ROCKS_NATIVE다. 부착 부모는 영속
+// attachParent(WeakObjectRef — 같은 그래프 안 대상만 보존)·attachSocket으로 저장하고, 레벨 편입
+// (World::AdoptLevel — Docs/Design/EngineRuntime 29절)이 부모·자식 목록을 다시 만든다(children은
 // parent에서 유도되는 값이다).
 //
 // 규약:
@@ -131,6 +136,9 @@ class ROCKS_WORLD_API SceneComponent : public Component {
     ROCKS_GENERATED_BODY()
 
 public:
+    // 부모 사슬 탐색 상한이다. 정상 계층은 이보다 훨씬 얕다(순환 검사의 안전장치 — 부착·편입).
+    static constexpr uint32 MaxHierarchyDepth = 4096;
+
     explicit SceneComponent(Allocator& allocator) noexcept
         : children_(allocator), attachSocket_(allocator) {
     }
@@ -285,6 +293,8 @@ public:
 
 private:
     friend class World;
+    // 편입 시험이 장부 밖 그래프를 손상시킨다(Private/LevelGraphTestAccess.h — Tests/ 전용).
+    friend struct detail::LevelGraphTestAccess;
 
     // 파괴 직전에 World가 부른다(등록 여부·파생 재정의와 무관). 부모에서 떼고 자식들을 루트로
     // 만든다(자식의 상대 Transform 유지, 월드 행렬은 다시 계산).

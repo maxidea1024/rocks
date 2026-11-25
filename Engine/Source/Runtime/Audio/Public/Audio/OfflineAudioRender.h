@@ -2,7 +2,7 @@
 
 #include <Audio/AudioMixer.h>
 
-// Inline(결정적) 렌더러다(Docs/Design/AudioSystem.ko.md 3.22.9절, UE FMixerPlatformNonRealtime
+// Inline(결정적) 렌더러다(Docs/Design/AudioSystem 3.22.9절, UE FMixerPlatformNonRealtime
 // 대응). AudioRT 스레드 대신 호출 스레드에서 믹서 블록을 렌더한다. 모든 믹서 시험과 오프라인 캡처가
 // 쓴다.
 //

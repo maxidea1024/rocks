@@ -480,6 +480,12 @@ TEST(NuggetBackend_TouchRemoveAndCollect) {
           subInfo.type == platform::FileType::Directory);
     holder.Release();
 
+    // 일수 포화: u32 최댓값은 나이 제한 없음이다(tick 곱이 넘치지 않는다 — 9.1절 9, A6).
+    auto saturated =
+        backend.Collect(NuggetCollectOptions{~uint64{0}, NumericLimits<uint32>::Max()});
+    REQUIRE(saturated);
+    CHECK(saturated.Value().removed == 0 && saturated.Value().kept == 3);
+
     // maxBytes: 남은 셋 중 오래된 4부터, 그다음 같은 시각 1·2 중 경로 순 앞의 것.
     const uint64 entryBytes = first.Value().keptBytes / 3;
     auto second = backend.Collect(NuggetCollectOptions{entryBytes, 365});
@@ -543,6 +549,9 @@ TEST(NuggetBackend_OpenAndReadOnly) {
     const NuggetPutResult dropped =
         reader.Put(NuggetBackendPut{NuggetBucketTexture, Key(2), value});
     CHECK(dropped.status == NuggetStatus::Dropped && dropped.error == ErrorCode::Unsupported);
+    // 읽기 전용 루트는 GC도 하지 않는다(Put과 대칭 — 9.1절 9, A6).
+    CHECK(reader.Collect(NuggetCollectOptions{0, 0}).Error() == ErrorCode::Unsupported);
+    CHECK(reader.Get(NuggetBackendGet{NuggetBucketTexture, Key(1)}).status == NuggetStatus::Hit);
 }
 
 // 시스템 시계는 지금 시각(파일 시각 범위 안)이다. 기록의 RawHash가 틀린 파일(해시가 맞는 머리·

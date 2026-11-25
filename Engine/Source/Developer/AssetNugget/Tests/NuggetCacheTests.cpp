@@ -525,6 +525,71 @@ TEST(NuggetCache_PinsAndRegeneration) {
           plain.Get(Key(3)).source == NuggetSource::Memory);
 }
 
+// 소비자 거부(9절 A3c1 — 2026-11-25): 적중한 Record를 Reject하면 Memory·고정·디스크 항목이 사라지고
+// (true·통계), 다음 Get은 Miss·다른 값 Put은 Stored(Conflict 아님)다. 다른 digest·없는 키·다시
+// 만든(Regenerated) 키는 false로 두고, off·Open 전도 false다.
+TEST(NuggetCache_Reject) {
+    CacheScene scene("nugget-cache-reject");
+    REQUIRE(scene.ready);
+    const ValueSpec first[] = {{0, 300, 1}};
+    const ValueSpec second[] = {{0, 300, 2}};
+    NuggetCachePutResult stored = scene.Put(Key(1), first);
+    REQUIRE(stored.status == NuggetStatus::Stored);
+    NuggetCacheGetResult hit = scene.Get(Key(1));
+    REQUIRE(hit.status == NuggetStatus::Hit && hit.digest == stored.digest);
+    // 다른 digest·다른 bucket은 건드리지 않는다.
+    auto wrong = scene.cache.Reject(NuggetBucketTexture, Key(1), Key(9));
+    CHECK(wrong && !wrong.Value() && scene.HasEntry(Key(1)));
+    auto bucket = scene.cache.Reject(NuggetBucketShader, Key(1), stored.digest);
+    CHECK(bucket && !bucket.Value() && scene.HasEntry(Key(1)));
+    auto rejected = scene.cache.Reject(NuggetBucketTexture, Key(1), stored.digest);
+    CHECK(rejected && rejected.Value() && !scene.HasEntry(Key(1)) &&
+          scene.cache.Stats().rejected == 1);
+    CHECK(scene.Get(Key(1)).status == NuggetStatus::Miss);
+    // 고정이 지워져 다른 값의 Put이 Conflict 없이 저장되고 적중한다.
+    NuggetCachePutResult rebuilt = scene.Put(Key(1), second);
+    CHECK(rebuilt.status == NuggetStatus::Stored);
+    NuggetCacheGetResult again = scene.Get(Key(1));
+    CHECK(again.status == NuggetStatus::Hit && again.digest == rebuilt.digest &&
+          Matches(scene.allocator, again.values[0], second[0]));
+    // 없는 키는 false다(디스크에도 없다).
+    auto missing = scene.cache.Reject(NuggetBucketTexture, Key(2), Key(2));
+    CHECK(missing && !missing.Value());
+
+    // 다시 만든(Regenerated) 키는 이 세션의 값이라 두지 않는다. 디스크 판 변경을 Memory가 가리지
+    // 않게 Memory를 끈 장면이다(NuggetCache_Pins와 같다).
+    {
+        NuggetCacheLimits limits;
+        limits.memoryBytes = 0;
+        limits.memoryValueBytes = 16;
+        limits.pinnedBytes = 4000;
+        CacheScene pins("nugget-cache-reject-pins", limits);
+        REQUIRE(pins.ready);
+        const ValueSpec third[] = {{0, 300, 3}};
+        REQUIRE(pins.Put(Key(1), first).status == NuggetStatus::Stored);
+        REQUIRE(pins.RemoveEntry(Key(1)));
+        REQUIRE(pins.Publish(Key(1), second) == NuggetStatus::Stored);
+        REQUIRE(pins.Get(Key(1)).status == NuggetStatus::DigestChanged);
+        NuggetCachePutResult regenerated = pins.Put(Key(1), third);
+        REQUIRE(regenerated.status == NuggetStatus::Conflict);
+        auto kept = pins.cache.Reject(NuggetBucketTexture, Key(1), regenerated.digest);
+        CHECK(kept && !kept.Value() && pins.HasEntry(Key(1)) &&
+              pins.Get(Key(1)).status == NuggetStatus::Hit && pins.cache.Stats().rejected == 0);
+    }
+
+    // off·Open 전.
+    SystemAllocator allocator;
+    ManualClock clock;
+    NuggetCache closed(allocator, platform::PhysicalFileSystem(), clock);
+    auto before = closed.Reject(NuggetBucketTexture, Key(1), Key(1));
+    CHECK(before && !before.Value());
+    NuggetCacheSettings off(allocator);
+    off.backend = NuggetBackendKind::Off;
+    REQUIRE(closed.Open(off, scene.project.Root()));
+    auto disabled = closed.Reject(NuggetBucketTexture, Key(1), Key(1));
+    CHECK(disabled && !disabled.Value());
+}
+
 // 소비 입력 대조: 고정된 키를 다른 digest로 소비한 Record는 Miss(InputMismatch — 고정하지 않는다),
 // 같은 digest로 소비하면 적중하고 고정한다, 고정 없는 입력은 그 digest로 고정한다(이후 그 키의 다른
 // 판은 DigestChanged), Memory 적중도 대조한다.

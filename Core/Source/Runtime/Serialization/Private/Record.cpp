@@ -267,9 +267,30 @@ Result<void> RecordWriter::EndField(uint32 wireType) noexcept {
         return patched;
     }
 
+    last_ = field_;
+    lastEnd_ = out_->ByteCount();
     field_ = NoField;
     ++count_;
     return Result<void>::Success();
+}
+
+Result<void> RecordWriter::CancelField() noexcept {
+    if (field_ != NoField || last_ == NoField || out_->ByteCount() != lastEnd_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto truncated = out_->Truncate(last_); !truncated) {
+        return truncated;
+    }
+
+    --count_;
+    last_ = NoField;
+    lastEnd_ = NoField;
+    return Result<void>::Success();
+}
+
+usize RecordWriter::LastFieldPayloadOffset() const noexcept {
+    return last_ == NoField ? NoField : last_ + FieldHeaderBytes;
 }
 
 Result<void> RecordWriter::End() noexcept {

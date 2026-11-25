@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// MP3 디코더 시험 입력이다(Docs/Design/AudioSystem.ko.md 3.26.3절). LAME 4.0과
+// MP3 디코더 시험 입력이다(Docs/Design/AudioSystem 3.26.3절). LAME 4.0과
 // ffmpeg 9.1(libmp3lame·mp2, -fflags +bitexact)로 lavfi sine에서 만들었다. 만든 명령은 3.26.3절에
 // 있다.
 namespace rocks::audio::mp3fixtures {
