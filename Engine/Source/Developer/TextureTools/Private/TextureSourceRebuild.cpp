@@ -332,8 +332,12 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
             return appended;
         }
 
-        const TextureSourceImage image{source.format, facts[index].gamma, source.sizeX,
-                                       source.sizeY,  slicesPerElement,   raw.View()};
+        // 형식이 같고 크기만 다르면 원소를 배열 감마로 재해석한다 — 같은 크기 원소의 byte 그대로와
+        // 같은 뜻이다(Pow22 원소 — UE는 Pow22 대상 재표본이 check에 걸려 정한 동작이 없다, 12.14절
+        // A5j2b 3번).
+        const TextureSourceGamma gamma = source.format == format ? target : facts[index].gamma;
+        const TextureSourceImage image{source.format,    gamma,     source.sizeX, source.sizeY,
+                                       slicesPerElement, raw.View()};
         if (auto converted =
                 ConvertTextureSource(allocator, image, format, target, sizeX, sizeY, bytes);
             !converted) {

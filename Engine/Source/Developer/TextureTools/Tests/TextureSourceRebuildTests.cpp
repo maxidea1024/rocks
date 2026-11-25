@@ -514,6 +514,44 @@ TEST(TextureSourceRebuild_ArrayConversion) {
               bytes.Size() == 8 && bytes[0] == 20 && bytes[3] == 23 && bytes[4] == 30);
     }
 
+    // 크기만 다른 Pow22 원소는 배열 감마(선형)로 재해석해 재표본한다(같은 크기 Pow22 원소의 byte
+    // 그대로와 같은 뜻 — 12.14절 A5j2b 3번): 균일 값 20의 2×2 Pow22 원소를 4×2 선형 원소와 묶으면
+    // 20 그대로다.
+    const ObjectHandle uniform =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 0, true);
+    REQUIRE(scene.Edit(uniform, [&](Texture& texture) noexcept {
+        texture.useLegacyGamma = 1;
+        return true;
+    }));
+    {
+        Array<uint8> flat(scene.env.allocator);
+        REQUIRE(flat.TryResize(4));
+        for (uint8& value : flat) {
+            value = 20;
+        }
+
+        auto ref = sink.bulk.Add(Move(flat));
+        REQUIRE(ref);
+        REQUIRE(scene.Edit(uniform, [&](Texture& texture) noexcept {
+            texture.source.bulk = ref.Value();
+            return true;
+        }));
+        const ObjectHandle wideLinear =
+            scene.Element(sink, plane, TextureSourceFormat::G8, 4, 2, 1, 70);
+        const ObjectHandle list[] = {uniform, wideLinear};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::G8 && made->srgb == 0 &&
+              bytes.Size() == 16);
+        bool kept = true;
+        for (usize index = 0; index < 8; ++index) {
+            kept = kept && bytes[index] == 20;
+        }
+
+        CHECK(kept);
+    }
+
     // G16 선형 + RGBA8 sRGB → RGBA32F.
     const ObjectHandle wide16 = scene.Element(sink, plane, TextureSourceFormat::G16, 2, 2, 1, 40);
     {

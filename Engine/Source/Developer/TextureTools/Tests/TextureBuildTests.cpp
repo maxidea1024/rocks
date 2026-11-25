@@ -612,6 +612,38 @@ TEST(TextureBuild_Quantization) {
     CHECK(built.result.mips[0].bytes[0] == 0);
 }
 
+// 1채널 float 원본의 풀기(12.13절 — UE CopyImage, 2026-11-25 A5j2b에서 고침): R32F·R16F 원본은
+// (v, 0, 0, 1)이라 RGBA16F 출력(HDR)의 G·B는 0, A는 1이다(회색 원본처럼 복제하지 않는다).
+TEST(TextureBuild_SingleChannelFloatDecode) {
+    SystemAllocator allocator;
+    constexpr uint16 HalfHalf = 0x3800;
+    constexpr uint16 HalfOne = 0x3C00;
+    const auto load16 = [](const uint8* data) noexcept {
+        return static_cast<uint16>(data[0] | (data[1] << 8));
+    };
+    TextureBuildSettings settings = Gray(1, 1);
+    settings.format = TextureSourceFormat::R32F;
+    settings.compression = TextureCompressionSettings::HDR;
+    settings.srgb = false;
+    const float value = 0.5f;
+    uint8 single[4];
+    platform::MemoryCopy(single, &value, sizeof(value));
+    Built built(allocator);
+    REQUIRE(Build(allocator, settings, single, built));
+    REQUIRE(built.result.pixelFormat == PixelFormat::RGBA16Float &&
+            built.result.mips[0].bytes.Size() == 8);
+    const uint8* out = built.result.mips[0].bytes.Data();
+    CHECK(load16(out) == HalfHalf && load16(out + 2) == 0 && load16(out + 4) == 0 &&
+          load16(out + 6) == HalfOne);
+
+    settings.format = TextureSourceFormat::R16F;
+    const uint8 half[2] = {0x00, 0x38};
+    REQUIRE(Build(allocator, settings, half, built));
+    out = built.result.mips[0].bytes.Data();
+    CHECK(load16(out) == HalfHalf && load16(out + 2) == 0 && load16(out + 4) == 0 &&
+          load16(out + 6) == HalfOne);
+}
+
 // PreserveBorder(UE GenerateMipBorder — 테두리 texel을 직전 mip 2×2 발자국의 원본 테두리 평균으로,
 // Wrap이면 경고)와 NormalizeNormals(UE NormalizeMip — 사슬 뒤 mip 0 포함 후처리, 길이 0은 (0, 0,
 // 1)).

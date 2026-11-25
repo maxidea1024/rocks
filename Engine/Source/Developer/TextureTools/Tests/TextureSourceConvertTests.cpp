@@ -1,5 +1,3 @@
-#include <Base/NumericLimits.h>
-#include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Memory.h>
 #include <TestSupport/NFailAllocator.h>
