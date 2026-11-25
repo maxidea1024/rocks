@@ -410,11 +410,11 @@ TEST(StaticMeshValidation_ExtendedBounds) {
     StaticMesh mesh(allocator);
     mesh.renderData.box = Box<double>(Vec3d(-1.0, -2.0, -3.0), Vec3d(1.0, 2.0, 3.0));
     mesh.renderData.sphereRadius = 2.5;
-    StaticMeshBounds same = StaticMeshExtendedBounds(mesh);
+    MeshBounds same = StaticMeshExtendedBounds(mesh);
     CHECK(same.sphereRadius == 2.5 && same.box.min.y == -2.0 && same.box.max.z == 3.0);
     mesh.positiveBoundsExtension = Vec3d(1.0, 0.0, 0.0);
     mesh.negativeBoundsExtension = Vec3d(0.0, 0.0, 1.0);
-    StaticMeshBounds extended = StaticMeshExtendedBounds(mesh);
+    MeshBounds extended = StaticMeshExtendedBounds(mesh);
     CHECK(extended.box.min.x == -1.0 && extended.box.max.x == 2.0 && extended.box.min.z == -4.0 &&
           extended.box.max.z == 3.0);
     // 반 크기 (1.5, 2, 3.5) → √(2.25 + 4 + 12.25) = √18.5.

@@ -163,7 +163,18 @@ enum class MeshIssue : uint8 {
     RenderTexCoordLayout, // UV stream 수 초과·정밀도 섞임·2성분 stream이 마지막이 아님
     RenderIndexCount,     // index 수가 3의 배수가 아님(byteSize가 폭의 배수가 아님 포함)
     RenderIndexValue,     // index 값 >= 정점 수(count = index 위치)
-    RenderSectionRange    // 섹션 index 구간이 index 수 밖이거나 정점 범위가 정점 수 밖
+    RenderSectionRange,   // 섹션 index 구간이 index 수 밖이거나 정점 범위가 정점 수 밖
+    // 스킨 메시 쿠킹 렌더 데이터(Mesh ValidateSkeletalMeshRenderData·ValidateSkinnedRenderLodBulk —
+    // Docs/Design/MeshAnimationAssets 6.7.1절 7). 모두 CorruptPackage, index = LOD.
+    RenderInfluenceLayout, // 영향 칸 수가 4·8이 아니거나 번호·가중치 형식이 bone map 크기·정밀도
+                           // 규칙 밖
+    RenderBoneMap,         // bone map·필요 본이 엄격 증가가 아니거나 메시 본 수 이상(count = 위치)
+    RenderMorphTarget,     // morph target 항목 stream의 형식·크기가 항목 수와 다름(count = target)
+    RenderSkinWeightProfile, // 가중치 프로필 stream의 형식·크기가 기본 영향과 다름(count = 프로필)
+    RenderBoneIndexValue,    // 영향 번호 >= bone map 크기(count = 영향 위치)
+    RenderSkinWeightSum,     // 정점 영향 가중치 합이 255·65535가 아님(count = 정점)
+    RenderMorphVertex, // morph 항목 정점 번호가 정점 수 이상이거나 엄격 증가가 아님(count = 항목)
+    RenderInverseBind  // inverse-bind 행렬 bulk 크기가 본 수 × 64 byte가 아님
 };
 
 // name이 prefix(엔진 접두 이름 — MeshAttributeName::SkinWeightsPrefix·MorphPrefix·

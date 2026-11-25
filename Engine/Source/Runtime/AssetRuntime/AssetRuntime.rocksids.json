@@ -38,6 +38,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PerPlatformBool::defaultValue",
+      "id": "9d3c0406d8284a69a50ac758e76bad02",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PerPlatformBool::perPlatform",
+      "id": "e8f5195618ff401996d8e464cbf17840",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PerPlatformFloat::defaultValue",
       "id": "ecaa210e815e4bc6bd2073cacbf372e3",
       "aliases": [],
@@ -103,6 +117,13 @@
       "kind": "type",
       "name": "rocks::Package",
       "id": "cecd2aaca3c146f6a2d1321087c7cdeb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PerPlatformBool",
+      "id": "51f4d96c6a3c4d7faaa6956e5dac8381",
       "aliases": [],
       "retired": false
     },

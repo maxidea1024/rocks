@@ -1,20 +1,13 @@
 #pragma once
 
 #include <Animation/BoneHierarchy.h>
+#include <Mesh/SkeletalMesh/SkinnedRenderLod.h>
 #include <Core/Math/Matrix4.h>
 #include <MeshTools/StaticMeshBuilder.h>
 
 // 스킨 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets 6.3·6.5절, UE BuildSkeletalMesh·
 // FSkeletalMeshBuilder 대응).
 namespace rocks {
-
-// 쿠킹 정점당 영향 칸 수다(6.3절 — 렌더 정점 영향 수 최댓값이 4 이하면 Low, 아니면 High. UE
-// MAX_INFLUENCES_PER_STREAM·EXTRA_BONE_INFLUENCES).
-inline constexpr uint32 MeshCookedInfluencesLow = 4;
-inline constexpr uint32 MeshCookedInfluencesHigh = 8;
-
-// 8비트 쿠킹 가중치의 합이다(UByte4Unorm — 6.3절 잔차 규칙).
-inline constexpr uint16 SkinWeightTotal8 = 255;
 
 // 법선을 추적할 때 morph 법선 변화량 길이²가 이 값보다 크면 위치 변화가 작아도 그 렌더 정점을
 // 담는다(UE ComputeMorphDeltas의 0.01f).

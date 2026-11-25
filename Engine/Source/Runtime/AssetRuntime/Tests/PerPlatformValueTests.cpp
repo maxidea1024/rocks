@@ -1,3 +1,4 @@
+#include <AssetRuntime/PerPlatformBool.h>
 #include <AssetRuntime/PerPlatformFloat.h>
 #include <AssetRuntime/PerPlatformInt32.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -29,6 +30,21 @@ TEST(PerPlatform_ResolveUsesOverrideOrDefault) {
     lod.defaultValue = -1;
     REQUIRE(lod.perPlatform.Insert(windows, 3));
     CHECK(lod.Resolve(windows) == 3 && lod.Resolve(android) == -1 && lod.Resolve(Name{}) == -1);
+}
+
+// PerPlatformBool(UE FPerPlatformBool — 기본 거짓, 맵 EditorOnly): 기본값, 덮어쓰기, None 프로파일.
+TEST(PerPlatform_BoolResolves) {
+    SystemAllocator allocator;
+    NamePool names(allocator);
+    REQUIRE(names.Initialize());
+    PerPlatformBool value(allocator);
+    const Name android = names.TryIntern("Android").Value();
+    CHECK(!value.defaultValue && !value.Resolve(android));
+    REQUIRE(value.perPlatform.Insert(android, true));
+    CHECK(value.Resolve(android) && !value.Resolve(names.TryIntern("Windows").Value()) &&
+          !value.Resolve(Name{}));
+    value.perPlatform.Clear();
+    CHECK(names.Shutdown());
 }
 
 } // namespace per_platform_value_tests_file

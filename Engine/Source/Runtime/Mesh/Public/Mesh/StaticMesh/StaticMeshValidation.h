@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
+#include <Mesh/Common/MeshBounds.h>
 #include <Mesh/StaticMesh/StaticMesh.h>
 #include <MeshSource/MeshSourceTypes.h>
 
@@ -61,22 +62,16 @@ ValidateStaticMesh(const StaticMesh& mesh, const Package& package, Allocator& sc
                    MeshDiagnostic* meshFailure = nullptr,
                    CollisionDiagnostic* collisionFailure = nullptr) noexcept;
 
-// 상자 + 구 bounds다(구 중심 = 상자 중심, cm — StaticMeshExtendedBounds의 결과).
-struct StaticMeshBounds {
-    Box<double> box{};
-    double sphereRadius = 0.0;
-};
-
 // 확장 bounds다(UE ExtendedBounds — StaticMesh.cpp CalculateExtendedBounds). 두 확장이 모두 0이면
 // renderData의 상자·반지름 그대로이고, 아니면 상자 최소에서 negativeBoundsExtension을 빼고 최대에
 // positiveBoundsExtension을 더한 상자와 그 반 대각선 길이 반지름이다(UE FBoxSphereBounds(FBox)).
 // 컬링·스트리밍 화면 크기처럼 메시가 차지하는 공간이 필요한 소비자가 쓴다.
 //
 // 사용 예:
-//   const StaticMeshBounds bounds = StaticMeshExtendedBounds(mesh);
+//   const MeshBounds bounds = StaticMeshExtendedBounds(mesh);
 //   if (bounds.sphereRadius > 0.0) { ... }
 //
 // 스레드: mesh를 읽기만 한다.
-ROCKS_MESH_API StaticMeshBounds StaticMeshExtendedBounds(const StaticMesh& mesh) noexcept;
+ROCKS_MESH_API MeshBounds StaticMeshExtendedBounds(const StaticMesh& mesh) noexcept;
 
 } // namespace rocks

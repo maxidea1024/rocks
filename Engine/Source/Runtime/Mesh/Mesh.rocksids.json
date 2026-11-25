@@ -871,6 +871,419 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SkeletalMesh::bones",
+      "id": "75d96a8a573b4e4bbe5fa137d4b94b21",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::materialSlots",
+      "id": "35295cccd6c84aa2848a362e740ba23a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::minLod",
+      "id": "cb0018b3171d4ce69586afb189627285",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::negativeBoundsExtension",
+      "id": "8b1f3e9238394cf8aeac8089bb1bdb58",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::positiveBoundsExtension",
+      "id": "92ef3cb97829409f9999b4d9dcb08964",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::renderData",
+      "id": "c35a247af71e4bb8805fbacc6debced1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::sectionInfo",
+      "id": "7654de5370de4c01a03b824d6ff161fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::skeleton",
+      "id": "08d9509b65ee43188286ff7103315a57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::skinWeightProfiles",
+      "id": "4328eb360f97420381cc237af05ef574",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::sockets",
+      "id": "260d09674ebc4742b874ef0642d33597",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::sourceLods",
+      "id": "1b624501d29643e6be85d6ee3f8351b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMesh::virtualGeometry",
+      "id": "0ea59c9d728145aaac3e5671f414b9e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::baseLod",
+      "id": "161b547fdd724227ab7a7a33a58e5824",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::enforceBoneBoundaries",
+      "id": "a480b68511ed45e9bd85e40972024e48",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::improveTrianglesForCloth",
+      "id": "7c91a33b3fbd40e393d29d72b4a55b0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::lockColorBoundaries",
+      "id": "eea4a23490f349fb81e01c9a3fe1d513",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::lockEdges",
+      "id": "6f733f4ed448422ca97d0c2824aaa7c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::maxBonesPerVertex",
+      "id": "2029b97d77324270904d436ec2b2872e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::maxDeviationPercent",
+      "id": "4eeeea105392420da87f90072528948b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::maxTriangles",
+      "id": "2a800410d54c4f37adfc879173756b37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::maxTrianglesFromPercent",
+      "id": "14496826f6c84e3c8960281663b866d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::maxVertices",
+      "id": "953c73fe12254fce853ab6fb9567b1d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::maxVerticesFromPercent",
+      "id": "4c5e6881f66740e699f8b30395895137",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::mergeCoincidentVertexBones",
+      "id": "7861dbd6fbde43c48a184be00fd2e926",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::normalsThreshold",
+      "id": "4cbe24ceb3c243c9a2e0c76695a1d302",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::percentTriangles",
+      "id": "8f33a82e90a749a2b6403bc4e55af18e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::percentVertices",
+      "id": "ef46423e202e48eca8e92b251bfbfdfb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::recalculateNormals",
+      "id": "bdcaa980904c44dfb3cceba54cae1b90",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::reductionMethod",
+      "id": "27745a0e024c493f84740d8ce8d3a58e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::remapMorphTargets",
+      "id": "75f174643ec54ef0b71ed2da255750f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::shadingImportance",
+      "id": "f1323e150a0c4da79f75199e21eff706",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::silhouetteImportance",
+      "id": "807904550ffe4881818f672911ba4ae8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::skinningImportance",
+      "id": "d93e6ba53941461d945730dbc6fed4ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::terminationCriterion",
+      "id": "ee312bb7b7aa438786ac3ee0459ed923",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::textureImportance",
+      "id": "98e0bb2c71a64807b82a138e92881a45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::volumeImportance",
+      "id": "1e046207203249d2aad0593727c0ad9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshReductionSettings::weldingThreshold",
+      "id": "a653ebe7671549e987da96bac666d4bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshRenderData::box",
+      "id": "0fbe2d95a0904e0eae5cc81732d003ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshRenderData::inverseBindMatrices",
+      "id": "5f8098204cc24dbabc0c6cf7335701c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshRenderData::lods",
+      "id": "a1966b1f11e44cedb90278695a3c5fe6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshRenderData::sphereRadius",
+      "id": "ade0f1ce754a41b9b12f8f258423592f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::bakedSource",
+      "id": "4bac8bd1082e4cf8a790ca575eea8d3a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::bonesToPrioritize",
+      "id": "60a92b002a4c4fc1bb87813d654079a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::bonesToRemove",
+      "id": "e82d512bac814e7abd713c6d8f6c0ec8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::build",
+      "id": "bfd85b5f466f4b10acd53d7d9f5f19d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::hasBakedSource",
+      "id": "7788e3e08b24444383c5ad718da56a49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::hasSource",
+      "id": "0e2dc0ec905346eba5a75f970c47e27b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::lodHysteresis",
+      "id": "1de68273c5674384b46b27e19aed2e26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::lodMaterialMap",
+      "id": "d8bab286a194407ab52ff107d7c936b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::reduction",
+      "id": "e04f319459d746d99bf50634d9d13041",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::screenSize",
+      "id": "9bbe420daddd4b8fa05a96229798544e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::source",
+      "id": "79a67620e91c457299ecc7cd910ee1af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletalMeshSourceLod::weightOfPrioritization",
+      "id": "5b635c20539949b48209c1d69c79872a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinWeightProfileInfo::defaultProfile",
+      "id": "8d685ca7999247dba21770fd57142236",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinWeightProfileInfo::defaultProfileFromLod",
+      "id": "df32d68a6d794abebd416da85376eb84",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinWeightProfileInfo::name",
+      "id": "3be14d9fc23948cb8cee927f09dbe789",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinWeightProfileRenderLod::boneIndices",
+      "id": "b79ab1574d47488a84f574273ac872e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinWeightProfileRenderLod::boneWeights",
+      "id": "c6058a0585064f93a6ae2f7bb930accc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinWeightProfileRenderLod::name",
+      "id": "fecbdab99da04d70a3db202005cf9b4b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SkinnedMeshBuildSettings::boneInfluenceLimit",
       "id": "bf5399a89531429fb51f4b8348807418",
       "aliases": [],
@@ -908,6 +1321,153 @@
       "kind": "field",
       "name": "rocks::SkinnedMeshBuildSettings::useHighPrecisionSkinWeights",
       "id": "5267afbf6f7740fcaa0b77fdff82ca74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMorphTarget::deltaCount",
+      "id": "886f40119f1e4397bd19e2df9ce2f924",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMorphTarget::deltas",
+      "id": "c9768b452053478183e6dc40a4918a10",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMorphTarget::name",
+      "id": "ef3ab77cb4744081b15fc5cab1b04d8a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::boneIndices",
+      "id": "714f443dcfb044b48b25e947964eeb63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::boneMap",
+      "id": "e6e0e43e6c774b45b457a5fe748097ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::boneWeights",
+      "id": "703502ff596240699a79cd7d2ebe5d7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::colors",
+      "id": "0ba4c6d0e5a1452c8dbe52ece92cbd1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::data",
+      "id": "2bd9fb9a0093458d963ada46a7b66c1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::indexFormat",
+      "id": "c3a92545c440439b908121c197f1a979",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::indices",
+      "id": "a8a516c020454408906352c5b28b71d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::influencesPerVertex",
+      "id": "7ed0d81d09de4febb9635515405b4748",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::lodHysteresis",
+      "id": "768ca8e3a0d84fbe989803bd74b58203",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::morphTargets",
+      "id": "35dc4de04ce846d08a64e455cefdbb56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::positions",
+      "id": "55174aa1a267438cac5cc43a61f40470",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::requiredBones",
+      "id": "c5210e2ebcb1473cbd84fe60a00055ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::screenSize",
+      "id": "e4afce002dc641e8bee9b82646315ba5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::sections",
+      "id": "4304244bc1914aa0bf4a4a2dbd49b00b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::skinWeightProfiles",
+      "id": "f21b1d018d854e70bcccc188798ece5a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::tangentBasis",
+      "id": "9f80428d809c4ce28905fd776c17ca1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::texCoords",
+      "id": "da755aba0f274f288998099a82a91c85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedRenderLod::vertexCount",
+      "id": "a7b9db561aec48eaacbbaa0d094982a1",
       "aliases": [],
       "retired": false
     },
@@ -1487,8 +2047,85 @@
     },
     {
       "kind": "type",
+      "name": "rocks::SkeletalMesh",
+      "id": "060fe7f68e3740bdb00585820246b9f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkeletalMeshReductionMethod",
+      "id": "9866b0c9cfa74810aacdfe8f1205125d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkeletalMeshReductionSettings",
+      "id": "91034e05a0d1481e8ed94b8acb3a65c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkeletalMeshReductionTermination",
+      "id": "dd831d36cf094bbdb47b8bc3f9b12e5c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkeletalMeshRenderData",
+      "id": "cd86e814c4a74bd98704d2f805873274",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkeletalMeshSourceLod",
+      "id": "15aa3dcb953149b7883530cd7ae6b5ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinWeightProfileInfo",
+      "id": "7f823dd28d6246449e84b586334f4a90",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinWeightProfileRenderLod",
+      "id": "584b61395746403d91661a1686a2cd0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinnedAsset",
+      "id": "d73dac8651544216b0302c7309941198",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::SkinnedMeshBuildSettings",
       "id": "aa7f91f544414a35a12c42342829cf8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinnedMorphTarget",
+      "id": "86d079da9b974652a414c2ae1a29b450",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinnedRenderLod",
+      "id": "3f08f80222a64e5a9ce46fd5fd33d965",
       "aliases": [],
       "retired": false
     },

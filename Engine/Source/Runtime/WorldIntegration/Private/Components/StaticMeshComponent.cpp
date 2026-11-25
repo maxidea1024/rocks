@@ -46,7 +46,7 @@ Result<void> StaticMeshComponent::ApplyLoadedMeshInfo(const SoftObjectRef<Static
         return component_checks::Invalid();
     }
 
-    const StaticMeshBounds bounds = StaticMeshExtendedBounds(mesh);
+    const MeshBounds bounds = StaticMeshExtendedBounds(mesh);
     loadedMeshBounds_ = ComponentBounds{};
     loadedMeshBounds_.origin = (bounds.box.min + bounds.box.max) * 0.5;
     loadedMeshBounds_.boxExtent = (bounds.box.max - bounds.box.min) * 0.5;
