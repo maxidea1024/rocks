@@ -1,6 +1,7 @@
 #include "GlesDevice.h"
 
 #include <Platform/Memory.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 
 // 장치 능력(RenderBase 4.4절 GX1)과 버퍼 view·ReadBuffer(GX2)다. typed view는 버퍼 텍스처
 // (GL_TEXTURE_BUFFER, ES 3.2 core)라 텍스처 유닛을 차지하고(ShaderSystem 7.2절 4항 RQ10),
@@ -122,7 +123,20 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     features.resourceBindingTier = 0;
     features.shaderModel = 0;
     apiVersion_ = Query(gl_, GL_MAJOR_VERSION) * 100 + Query(gl_, GL_MINOR_VERSION) * 10;
-    (void)desktopContext;
+    // 형식 장치 요구 비트다(DeviceFeatures::shaderDeviceRequirements). 데스크톱 core context는
+    // ARB_ES3_2_compatibility·ARB_clip_control이 있어야 만들어진다(WglPlatform).
+    constexpr uint32 DesktopGl4_3 = 430;
+    constexpr uint32 Es3_2 = 320;
+    uint32 requirements = 0;
+    if (desktopContext) {
+        requirements = shader::DeviceRequiresGlArbEs32Compatibility |
+                       shader::DeviceRequiresGlArbClipControl |
+                       (apiVersion_ >= DesktopGl4_3 ? shader::DeviceRequiresOpenGL4_3 : 0u);
+    } else if (apiVersion_ >= Es3_2) {
+        requirements = shader::DeviceRequiresOpenGLES3_2;
+    }
+
+    features.shaderDeviceRequirements = requirements;
 
     // MSAA 표본 수는 렌더 타깃·깊이 형식마다 glGetInternalformativ(GL_TEXTURE_2D_MULTISAMPLE)다
     // (ES 3.1 core, 정수 형식의 한도는 구현이 반영한다).

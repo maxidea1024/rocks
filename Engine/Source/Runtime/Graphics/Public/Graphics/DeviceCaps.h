@@ -221,6 +221,13 @@ struct DeviceFeatures {
     // D3D12_FEATURE_SHADER_MODEL, D3D11은 FL 11.0의 50이다. Vulkan·OpenGL ES는 0이다(SPIR-V·ESSL
     // 버전은 형식 정의가 정한다).
     uint8 shaderModel = 0;
+    // 장치가 채우는 셰이더 형식 장치 요구 비트다(ShaderCore ShaderDeviceRequirementBits — 형식 정의
+    // `deviceRequirements`, ShaderSystem 12.3.1절 SSD15·16.1절 SSD47). 쿠킹 라이브러리 형식 선택이
+    // 형식의 요구 ⊆ 이 값인지 본다. D3D12는 FL 11.0(장치 생성 조건)·SM 6.6(shaderModel ≥ 66)·
+    // OPTIONS TypedUAVLoadAdditionalFormats, D3D11은 FL 11.0, Vulkan은 장치 apiVersion ≥ 1.1,
+    // OpenGL은 데스크톱 core context면 GL ≥ 4.3·GL_ARB_ES3_2_compatibility·GL_ARB_clip_control(생성
+    // 조건), ES context면 ES ≥ 3.2다.
+    uint32 shaderDeviceRequirements = 0;
 };
 
 // 장치 능력 전체다(Device::Caps).
