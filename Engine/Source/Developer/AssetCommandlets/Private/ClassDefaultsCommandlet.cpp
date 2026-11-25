@@ -68,6 +68,11 @@ Result<int32> RunClassDefaultsDumpCommand(void* context, Span<const StringView> 
 
     AssetCommandTypes types(allocator, *command.modules, command.typeModule);
     if (auto started = types.Start(); !started) {
+        // 할당 실패는 줄로 바꾸지 않는다(다른 명령과 같다 — 호스트가 쓴다).
+        if (started.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(started.Error());
+        }
+
         return Fail(output, allocator, DumpName, 1, "cannot start the asset type module ({})",
                     ErrorCodeName(started.Error()));
     }

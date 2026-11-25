@@ -33,6 +33,9 @@ public:
     // 오류: 음수·비유한.
     Result<void> SetSphereRadius(float radius) noexcept;
 
+    // 반지름 sphereRadius의 구다(Docs/Design/PhysicsModule 2.4절 — scale은 Physics가 굽는다).
+    bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;
+
     // 반지름 ScaledSphereRadius의 구다(28.3절).
     Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
 

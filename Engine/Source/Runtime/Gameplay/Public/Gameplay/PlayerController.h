@@ -5,6 +5,8 @@
 #include <World/Camera/CameraComponent.h>
 #include <Input/InputState.h>
 #include <Input/TouchGestureRecognizer.h>
+#include <InputActions/InputActionBindings.h>
+#include <InputActions/PlayerActionInput.h>
 
 namespace rocks {
 
@@ -73,8 +75,10 @@ private:
 
 // 로컬 플레이어의 Controller다(UE APlayerController, 20.5절). GameDirector Login이 만들고
 // LocalPlayer와 양방향으로 잇는다(SetPlayer). PlayerState·CameraDirector를 만들고 Spectating으로
-// 시작하며 Possess하면 Playing이 된다. OnTick은 엔진이 닫고 입력 스냅숏 → OnPlayerTick(pause 중
-// 생략) → OnControllerTick 순으로 부른다(UE PlayerTick·Tick). pause 중에도 Tick한다.
+// 시작하며 Possess하면 Playing이 된다. OnTick은 엔진이 닫고 입력 스냅숏 → 제스처 → 입력 액션
+// 평가·전달(ActionInput·ActionBindings — Docs/Design/InputActions 5.1절) → OnPlayerTick(pause 중
+// 생략) → OnControllerTick 순으로 부른다(UE PlayerTick·Tick). pause 중에도 Tick하고 입력 액션도
+// 전달한다.
 //
 // 사용 예(파생):
 //   void OnPlayerTick(const TickContext&) noexcept override {
@@ -106,8 +110,33 @@ public:
     }
 
     // LocalPlayer와 잇는다(UE SetPlayer — GameInstance Login이 부른다). source는 그 LocalPlayer의
-    // 입력 원천이다(null이면 입력 없음). 스냅숏을 비운다.
-    void SetPlayer(ObjectHandle localPlayer, const input::InputState* source) noexcept;
+    // 입력 원천이다(null이면 입력 없음). gamepad는 그 LocalPlayer의 패드 번호(ControllerId)다.
+    // 스냅숏을 비운다.
+    void SetPlayer(ObjectHandle localPlayer, const input::InputState* source,
+                   uint32 gamepad) noexcept;
+
+    // 이 플레이어의 입력 액션 평가기다(컨텍스트 추가·주입 — Docs/Design/InputActions 4절). OnTick이
+    // 평가한다.
+    //
+    // 사용 예:
+    //   (void)controller.ActionInput().AddContext(Move(bundle), 0);
+    input::PlayerActionInput& ActionInput() noexcept {
+        return actionInput_;
+    }
+
+    const input::PlayerActionInput& ActionInput() const noexcept {
+        return actionInput_;
+    }
+
+    // 이 플레이어의 액션 바인딩이다(UE UEnhancedInputComponent — 5.1절). OnTick이 평가 뒤 전달한다.
+    input::InputActionBindings& ActionBindings() noexcept {
+        return actionBindings_;
+    }
+
+    // 입력 액션 평가에 쓰는 패드 번호다.
+    uint32 InputGamepad() const noexcept {
+        return gamepad_;
+    }
 
     // 입력 원천만 바꾼다(GameInstance::SetLocalPlayerInput).
     void SetInputSource(const input::InputState* source) noexcept {
@@ -154,6 +183,7 @@ public:
     void ClearPlayer() noexcept {
         localPlayer_ = {};
         inputSource_ = nullptr;
+        gamepad_ = 0;
     }
 
 protected:
@@ -187,6 +217,11 @@ private:
     ROCKS_NATIVE() input::TouchGestureRecognizer gestures_;
     ROCKS_NATIVE() bool gestureRecognizerEnabled_ = false;
     ROCKS_NATIVE() bool gestureRecognizerExplicit_ = false;
+    ROCKS_NATIVE() input::PlayerActionInput actionInput_;
+    ROCKS_NATIVE() input::InputActionBindings actionBindings_;
+    ROCKS_NATIVE() uint32 gamepad_ = 0;
+    // 입력 액션 평가가 실패하고 있다(경고를 실패가 이어지는 동안 한 번만 남긴다).
+    ROCKS_NATIVE() bool inputEvaluationFailing_ = false;
     ROCKS_NATIVE() ObjectHandle localPlayer_;
     ROCKS_NATIVE() ObjectHandle cameraDirector_;
 };

@@ -546,6 +546,89 @@ TEST(TextureImport_TranslateArguments) {
     CHECK(plain.importer.IsEmpty() && plain.sources.IsEmpty() && plain.options.IsEmpty());
 }
 
+namespace {
+
+bool SameTranslation(const AssetImportTranslation& a, const AssetImportTranslation& b) noexcept {
+    if (a.importer != b.importer || a.sources.Size() != b.sources.Size() ||
+        a.options.Size() != b.options.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < a.sources.Size(); ++index) {
+        if (a.sources[index].role != b.sources[index].role ||
+            a.sources[index].path != b.sources[index].path) {
+            return false;
+        }
+    }
+
+    for (usize index = 0; index < a.options.Size(); ++index) {
+        if (a.options[index].path != b.options[index].path ||
+            a.options[index].value != b.options[index].value) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace
+
+// 번역 할당 실패 전수(14.1.119 후속 1번): 번역기의 작업 Allocator와 결과(원본·옵션·소유 문자열)의
+// n번째 할당이 실패하면 OutOfMemory이고, 실패가 없으면(시도가 다 쓰이면) 기준과 같은 임포터·원본·
+// 옵션이다. 사용법 위반은 할당 실패가 아니면 그대로 false다. 구성: Cube(이스케이프), Array,
+// CubeArray, Volume, 한 파일 Cube 배치, Volume 타일, 사용법 위반 하나.
+TEST(TextureImport_TranslateAllocationFailures) {
+    SystemAllocator allocator;
+    const AssetImportSourceInput single[] = {{DefaultImportSourceRole, "cross.png"}};
+    struct Case {
+        AssetImportReservedArgument reserved;
+        bool withSource;
+        bool valid;
+    };
+    const Case cases[] = {
+        {{"cube", "nz:f.png,px:a.png,nx:b.png,py:c.png,ny:d\\,x.png,pz:e.png"}, false, true},
+        {{"array", "s0.png,s1.png,s2.png"}, false, true},
+        {{"cube-array", "px:a,nx:b,py:c,ny:d,pz:e,nz:f;px:g,nx:h,py:i,ny:j,pz:k,nz:l"},
+         false,
+         true},
+        {{"volume", "v0.png,v1.png"}, false, true},
+        {{"cube-layout", "Strip6"}, true, true},
+        {{"volume-tile", "16x32"}, true, true},
+        {{"cube", "px:a,px:b,py:c,ny:d,pz:e,nz:f"}, false, false},
+    };
+    for (const Case& item : cases) {
+        const AssetImportReservedArgument reserved[] = {item.reserved};
+        const Span<const AssetImportSourceInput> sources =
+            item.withSource ? Span<const AssetImportSourceInput>(single)
+                            : Span<const AssetImportSourceInput>();
+        AssetImportTranslation reference(allocator);
+        auto translated = Translate(allocator, reserved, sources, {}, reference);
+        REQUIRE(translated && translated.Value() == item.valid);
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(allocator);
+            AssetImportTranslation out(failing);
+            failing.FailOnAttempt(attempt);
+            auto result = Translate(failing, reserved, sources, {}, out);
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (result) {
+                CHECK(result.Value() == item.valid);
+                CHECK(!item.valid || SameTranslation(out, reference));
+            } else {
+                ++failures;
+                CHECK(result.Error() == ErrorCode::OutOfMemory && !exhausted);
+            }
+
+            if (exhausted) {
+                break;
+            }
+        }
+
+        CHECK(failures > 0);
+    }
+}
+
 // DDS 차원 선택: 원본 하나가 .dds이면 머리의 차원으로 임포터를 고른다(2D는 그대로, `--importer=`가
 // 있거나 읽지 못하면 바꾸지 않는다).
 TEST(TextureImport_TranslateDdsDimension) {

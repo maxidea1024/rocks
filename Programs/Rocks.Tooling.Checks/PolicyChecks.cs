@@ -571,7 +571,7 @@ public static partial class PolicyChecks
         };
         return folders.Select(folder => Path.Combine(root, folder)).Where(Directory.Exists)
             .SelectMany(folder => Directory.EnumerateFiles(folder, "*", options))
-            .Where(path => !Relative(root, path).Split('/').Any(part => part is "bin" or "obj" or "__pycache__"))
+            .Where(path => !Relative(root, path).Split('/').Any(part => part is "bin" or "obj" or "__pycache__" or "node_modules"))
             .OrderBy(path => Relative(root, path), StringComparer.Ordinal).ToArray();
     }
 
@@ -614,7 +614,11 @@ public static partial class PolicyChecks
     // 보지 않는다.
     internal static string WithoutComments(string text) => Blanked(text, keepLiterals: true);
 
-    private static string Blanked(string text, bool keepLiterals)
+    // TypeScript 소스의 주석을 지운다. C 계열 규칙에 백틱 템플릿 문자열(여러 줄, `${}` 안도 리터럴로 근사)을 더한다. 정규식
+    // 리터럴(/.../)은 알아보지 않는다(그 안의 따옴표가 줄 끝까지 리터럴로 읽힌다 — 근사).
+    internal static string WithoutTypeScriptComments(string text) => Blanked(text, keepLiterals: true, templateLiterals: true);
+
+    private static string Blanked(string text, bool keepLiterals, bool templateLiterals = false)
     {
         StringBuilder result = new(text.Length);
         int index = 0;
@@ -654,6 +658,24 @@ public static partial class PolicyChecks
                 string delimiter = open < 0 ? "" : text[(index + 2)..open];
                 int end = open < 0 ? -1 : text.IndexOf(")" + delimiter + "\"", open, StringComparison.Ordinal);
                 int stop = end < 0 ? text.Length : end + delimiter.Length + 2;
+                if (keepLiterals)
+                {
+                    Keep(stop);
+                }
+                else
+                {
+                    Blank(stop);
+                }
+            }
+            else if (templateLiterals && c == '`')
+            {
+                int end = index + 1;
+                while (end < text.Length && text[end] != '`')
+                {
+                    end += text[end] == '\\' ? 2 : 1;
+                }
+
+                int stop = Math.Min(end + 1, text.Length);
                 if (keepLiterals)
                 {
                     Keep(stop);

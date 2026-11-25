@@ -495,6 +495,106 @@ TEST(ControllerPawn_PlayerTickReadsInjectedInputAndSkipsPlayerTickWhilePaused) {
     CHECK(removed.IsOk());
 }
 
+// 입력 액션(Docs/Design/InputActions 5.1절 — IA3): PlayerController가 OnTick에서
+// 평가·전달·정리하고, pause 중에도 전달한다(이벤트는 triggerWhenPaused 액션만). 패드 번호는
+// LocalPlayer ControllerId다.
+TEST(ControllerPawn_InputActionsDispatchFromPlayerTick) {
+    // 콜백·bundle의 allocator는 PlayerController보다 오래 살아야 한다(Fixture보다 먼저 만든다).
+    SystemAllocator allocator;
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    World& world = fixture.Current();
+    input::InputState keyboard;
+    const ObjectHandle player = fixture.Player(0);
+    REQUIRE(fixture.client->WithInstance([&](GameInstance& instance) noexcept {
+        return instance.SetLocalPlayerInput(player, &keyboard);
+    }));
+    const ObjectHandle controller = fixture.PlayerControllerOf(0);
+    REQUIRE(!controller.IsNull());
+    constexpr Guid JumpId{0x4941, 1};
+    constexpr Guid MenuId{0x4941, 2};
+    input::InputContextBundle bundle(allocator);
+    bundle.id = Guid{0x4941, 100};
+    for (const Guid id : {JumpId, MenuId}) {
+        input::InputActionData action(allocator);
+        action.id = id;
+        action.settings.triggerWhenPaused = id == MenuId;
+        REQUIRE(bundle.actions.TryPushBack(Move(action)));
+    }
+
+    for (const char* key : {"SpaceBar", "Escape"}) {
+        input::InputBinding binding(allocator);
+        binding.action = key[0] == 'S' ? JumpId : MenuId;
+        REQUIRE(binding.key.TryAssign(key));
+        REQUIRE(bundle.data.bindings.TryPushBack(Move(binding)));
+    }
+
+    uint32 jumps = 0;
+    uint32 menus = 0;
+    auto jump = input::InputActionBindings::Callback::TryCreate(
+        allocator, [&jumps](const input::ActionEventData&) noexcept {
+            ++jumps;
+            Record("action.jump");
+        });
+    auto menu = input::InputActionBindings::Callback::TryCreate(
+        allocator, [&menus](const input::ActionEventData&) noexcept { ++menus; });
+    REQUIRE(jump && menu);
+    REQUIRE(world.With<PlayerController>(controller, [&](PlayerController& value) noexcept {
+        CHECK(value.InputGamepad() == 0);
+        CHECK(value.ActionInput().AddContext(Move(bundle), 0).IsOk());
+        CHECK(value.ActionBindings()
+                  .BindAction(JumpId, input::ActionEvent::Started, Move(jump.Value()))
+                  .IsOk());
+        CHECK(value.ActionBindings()
+                  .BindAction(MenuId, input::ActionEvent::Started, Move(menu.Value()))
+                  .IsOk());
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    const input::InputEvent space[] = {input::InputEvent::KeyDown(input::Key::Space)};
+    keyboard.BeginFrame(Span<const input::InputEvent>(space, 1));
+    ResetEvents();
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(jumps == 1 && menus == 0);
+    // 전달이 OnPlayerTick보다 먼저다.
+    const char* const order[] = {"action.jump", "pc.player:space", "pc.controller", "pawn.tick"};
+    CHECK(EventsAre(order));
+
+    // pause: 전달은 하고 triggerWhenPaused인 Menu만 이벤트가 난다.
+    world.SetPaused(true);
+    const input::InputEvent escape[] = {input::InputEvent::KeyUp(input::Key::Space),
+                                        input::InputEvent::KeyDown(input::Key::Escape)};
+    keyboard.BeginFrame(Span<const input::InputEvent>(escape, 2));
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(jumps == 1 && menus == 1);
+    // pause 중 Space를 다시 눌러도 Jump(triggerWhenPaused 아님)는 이벤트가 없다.
+    keyboard.BeginFrame(Span<const input::InputEvent>(space, 1));
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(jumps == 1);
+    world.SetPaused(false);
+    REQUIRE(world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+        value.ActionBindings().ClearBindings();
+    }));
+    CHECK(fixture.client
+              ->WithInstance([&](GameInstance& instance) noexcept {
+                  return instance.SetLocalPlayerInput(player, nullptr);
+              })
+              .IsOk());
+
+    // 패드 번호: ControllerId 2 → 2, 음수 → 0.
+    uint32 index = 1;
+    for (const int32 id : {2, -3}) {
+        auto created = fixture.client->WithInstance(
+            [id](GameInstance& instance) noexcept { return instance.CreateLocalPlayer(id); });
+        REQUIRE(created);
+        const ObjectHandle pc = fixture.PlayerControllerOf(index++);
+        REQUIRE(!pc.IsNull());
+        uint32 gamepad = 99;
+        REQUIRE(world.With<PlayerController>(
+            pc, [&gamepad](PlayerController& value) noexcept { gamepad = value.InputGamepad(); }));
+        CHECK(gamepad == (id > 0 ? static_cast<uint32>(id) : 0));
+    }
+}
+
 // 20.6절: CameraDirector는 LateUpdate 시작(CameraUpdate)에 view target(Possess 뒤 Pawn — 위치는
 // root, 회전은 controlRotation)으로 갱신한다. UnPossess 뒤에는 PlayerController로 돌아간다. pause
 // 중에는 갱신하지 않고 단일 스텝 프레임은 갱신한다.

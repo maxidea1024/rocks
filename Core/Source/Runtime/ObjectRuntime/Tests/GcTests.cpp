@@ -259,4 +259,65 @@ TEST(ObjectGcAllocationFailureCannotSweepFromIncompleteMark) {
         CHECK(allocator.Stats().liveAllocations == 0);
     }
 }
+
+// root를 다 놓은 Registry의 Shutdown은 할당하지 않는다(Docs/Implementation/FoundationStatus 7번 —
+// 표식 씨앗이 없어 STW 큐를 확보하지 않는다). 파괴자의 Shutdown이 큐 할당 실패로 Busy가 되어
+// Fatal이던 결함(asset-cook 할당 실패 전수가 찾음)의 회귀 시험이다. 고리 간선, 놓은 pin, 파괴
+// 요청을 섞는다.
+TEST(ObjectShutdownWithoutRootsDoesNotAllocate) {
+    SystemAllocator allocator;
+
+    {
+        TypeRegistry types(allocator);
+        auto registered =
+            types.Register(TypeSchema{GraphType, 1, {}, {}}, MakeRuntimeTypeOps<GraphNode>());
+        REQUIRE(registered.IsOk());
+        rocks::test::NFailAllocator fault(allocator);
+        ObjectRegistry registry(fault, types, Guid{75, 1});
+        auto access = registry.OwnerAccess();
+        graphDestructions = 0;
+        constexpr uint32 Count = 4;
+        ObjectHandle handles[Count]{};
+        ConstructionContext construction(registry, access);
+        for (ObjectHandle& handle : handles) {
+            auto created = construction.Create<GraphNode>(GraphType);
+            REQUIRE(created.IsOk());
+            handle = created.Value();
+        }
+
+        for (uint32 index = 0; index < Count; ++index) {
+            auto node = construction.Get<GraphNode>(handles[index]);
+            REQUIRE(node.IsOk());
+            REQUIRE(
+                construction
+                    .SetReference(handles[index], node.Value()->first, handles[(index + 1) % Count])
+                    .IsOk());
+        }
+
+        auto root = construction.Commit();
+        REQUIRE(root.IsOk());
+        auto pinned = registry.TryPin<GraphNode>(access, handles[2]);
+        REQUIRE(pinned.IsOk());
+        REQUIRE(registry.RequestDestroy(access, handles[3]).IsOk());
+        root.Value().Reset();
+        pinned.Value().Reset();
+        CHECK(registry.Stats().roots == 0);
+        fault.FailOnAttempt(1);
+        const bool shut = registry.Shutdown(access).IsOk();
+        CHECK(shut);
+        CHECK(fault.Attempts() == 0);
+        fault.DisableFailure();
+        if (!shut) {
+            // 실패해도 파괴자가 Fatal로 끝내지 않게 정리한다(시험 실패는 위 CHECK가 보고했다).
+            REQUIRE(registry.Shutdown(access).IsOk());
+        }
+
+        CHECK(graphDestructions == Count);
+        REQUIRE(types.Unregister(registered.Value()).IsOk());
+        REQUIRE(types.Shutdown().IsOk());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace gc_tests_file

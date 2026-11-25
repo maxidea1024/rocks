@@ -65,7 +65,9 @@ constexpr shader::ShaderParameterMember TextureInspectorMembers[] = {
     {"exposure", shader::ShaderParameterType::Float4, 0, 0},
     {"film", shader::ShaderParameterType::Float4, 16, 0},
     {"filmWhite", shader::ShaderParameterType::Float4, 32, 0},
-    {"selection", shader::ShaderParameterType::Float4, 48, 0}};
+    {"selection", shader::ShaderParameterType::Float4, 48, 0},
+    {"swizzle", shader::ShaderParameterType::Float4, 64, 0},
+    {"integer", shader::ShaderParameterType::Float4, 80, 0}};
 constexpr shader::ShaderParameterLayout TextureInspectorLayouts[] = {
     {"TextureInspectorConstants", true, sizeof(TextureInspectorConstants),
      TextureInspectorMembers}};
@@ -90,15 +92,30 @@ constexpr shader::ShaderTypeDesc TextureInspectorCubeArrayDesc =
 constexpr shader::ShaderTypeDesc TextureInspectorVolumeDesc =
     MakeTextureInspector(TextureInspectorVolumePixelType, "TextureInspectorVolumePixel");
 
+constexpr shader::ShaderTypeDesc TextureInspector2DUintDesc =
+    MakeTextureInspector(TextureInspector2DUintPixelType, "TextureInspector2DUintPixel");
+constexpr shader::ShaderTypeDesc TextureInspector2DArrayUintDesc =
+    MakeTextureInspector(TextureInspector2DArrayUintPixelType, "TextureInspector2DArrayUintPixel");
+constexpr shader::ShaderTypeDesc TextureInspectorVolumeUintDesc =
+    MakeTextureInspector(TextureInspectorVolumeUintPixelType, "TextureInspectorVolumeUintPixel");
+constexpr shader::ShaderTypeDesc TextureInspector2DIntDesc =
+    MakeTextureInspector(TextureInspector2DIntPixelType, "TextureInspector2DIntPixel");
+constexpr shader::ShaderTypeDesc TextureInspector2DArrayIntDesc =
+    MakeTextureInspector(TextureInspector2DArrayIntPixelType, "TextureInspector2DArrayIntPixel");
+constexpr shader::ShaderTypeDesc TextureInspectorVolumeIntDesc =
+    MakeTextureInspector(TextureInspectorVolumeIntPixelType, "TextureInspectorVolumeIntPixel");
+
 constexpr shader::ShaderTypeDesc BuiltinMeshVertexDesc = MakeBuiltinMeshVertex();
 constexpr shader::ShaderTypeDesc BuiltinMeshPixelDesc = MakeBuiltinMeshPixel();
 constexpr shader::ShaderTypeDesc TonemapPixelDesc = MakeTonemapPixel();
 
 constexpr const shader::ShaderTypeDesc* Types[] = {
-    &FullscreenTriangleVertexDesc, &CopyTexturePixelDesc,     &BuiltinMeshVertexDesc,
-    &BuiltinMeshPixelDesc,         &TonemapPixelDesc,         &TextureInspector2DDesc,
-    &TextureInspector2DArrayDesc,  &TextureInspectorCubeDesc, &TextureInspectorCubeArrayDesc,
-    &TextureInspectorVolumeDesc};
+    &FullscreenTriangleVertexDesc,   &CopyTexturePixelDesc,       &BuiltinMeshVertexDesc,
+    &BuiltinMeshPixelDesc,           &TonemapPixelDesc,           &TextureInspector2DDesc,
+    &TextureInspector2DArrayDesc,    &TextureInspectorCubeDesc,   &TextureInspectorCubeArrayDesc,
+    &TextureInspectorVolumeDesc,     &TextureInspector2DUintDesc, &TextureInspector2DArrayUintDesc,
+    &TextureInspectorVolumeUintDesc, &TextureInspector2DIntDesc,  &TextureInspector2DArrayIntDesc,
+    &TextureInspectorVolumeIntDesc};
 
 constexpr shader::ShaderVertexInputType VertexInputs[] = {shader::MakeShaderVertexInputType(
     BuiltinVertexInputName, "/Engine/Private/VertexInput/BuiltinVertexInput.rsh",

@@ -538,7 +538,7 @@ TEST(AssetLoader_StaleDependencyTypeFailsInstantiate) {
 
 // 할당 실패(11.6절 13): 로더 allocator의 모든 할당 지점에서 실패시켜도(Initialize·Request·합류·
 // 허가·경로(긴 쿠킹 루트 — 경로 builder가 자란다)·완료 처리·Prepare·공개·상태 조회) 결과는 그
-// 단계의 OutOfMemory이고(진단 None — 요청이 받았으면 Failed, 의존이면 DependencyFailed), 같은
+// 단계의 OutOfMemory이고(진단 None — 의존 단위가 할당 실패로 끝나도 OutOfMemory, 11.6절 6번), 같은
 // 로더에서 실패를 끄고 다시 요청하면 성공한다(상태가 일관되다). 장면: 1 → 2(bulk)·3, 3 ↔ 4.
 TEST(AssetLoader_AllocationFailures) {
     AssetEnv env;
@@ -643,8 +643,8 @@ TEST(AssetLoader_AllocationFailures) {
                 } else if (status.Value().state != AssetLoadState::Succeeded) {
                     oneFailed = true;
                     CHECK(status.Value().state == AssetLoadState::Failed);
-                    CHECK(status.Value().error == ErrorCode::OutOfMemory ||
-                          status.Value().error == ErrorCode::DependencyFailed);
+                    CHECK(status.Value().error == ErrorCode::OutOfMemory &&
+                          status.Value().diagnostic.code == AssetDiagnosticCode::None);
                     ++loadFailures;
                 }
             }

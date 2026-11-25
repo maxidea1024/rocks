@@ -34,6 +34,15 @@ internal static partial class SelfTests
             "string text = $\"{value} // English\"; // 한국어",
             "char quote = '\"'; // 한국어",
             ""));
+        // 편집기 연동(Tools/)의 TypeScript도 주석은 한국어로 둘 수 있다. npm이 받은 node_modules는 외부 원본이라 보지 않는다.
+        temporary.Write("Tools/VSCode/probe/src/probe.ts", string.Join('\n',
+            "// 한국어 주석",
+            "const path = \"a//b\"; /* 한국어 */",
+            "const url = `see http://x ${value}`; // 한국어",
+            "const lines = `first",
+            "second // still text`; // 한국어",
+            ""));
+        temporary.Write("Tools/VSCode/probe/node_modules/dep/index.ts", "const text = \"한국어\";\n");
 
         // 시험 소스·C# 시험 프로젝트·시험 fixture 모듈은 유니코드 처리를 시험하려고 한글 문자열을 쓸 수 있다. 빌드 규칙·생성 파일은
         // 파일 전체 규칙(build-file-english)이 따로 본다.
@@ -59,7 +68,9 @@ internal static partial class SelfTests
         foreach ((string file, string[] sources) in new[] {
             ("Core/Source/Runtime/Core/Private/Probe.cpp", nativeSources), ("Core/Source/Runtime/Core/Private/Tests/Probe.cpp", nativeSources),
             ("Engine/Source/Developer/Probe/Public/Probe.h", nativeSources), ("Programs/Sandbox/Private/Probe.cpp", nativeSources),
-            ("Programs/Rocks.Build/Probe.cs", csharpSources), ("Programs/Rocks.MetaCompiler/Probe.cs", csharpSources) })
+            ("Programs/Rocks.Build/Probe.cs", csharpSources), ("Programs/Rocks.MetaCompiler/Probe.cs", csharpSources),
+            ("Tools/VSCode/probe/src/probe.ts", new[] { "const text = \"한국어 메시지\";", "const text = 'a//b' + '한국어';", "const text = `see http://x 한국어`;",
+                "const text = `${name} 한국어`;" }) })
         {
             foreach (string source in sources)
             {
@@ -84,7 +95,8 @@ internal static partial class SelfTests
         // 문서·외부 원본·빌드 출력 디렉터리의 주석은 허용한다. 시험 소스의 문자열은 파일 전체 규칙 대상이 아니다.
         foreach (string file in new[] { "Docs/Design/Probe.ko.md", "Build/README.md", "Templates/Game/Foundation/README.ko.md",
             "Core/Source/ThirdParty/Fake/README.md", "Docs/Design/Probe.json", "Build/Artifacts/Probe.ps1", "Build/Cache/Probe.sh",
-            "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Programs/Rocks.ToolTests/Probe.cs" })
+            "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Programs/Rocks.ToolTests/Probe.cs", "Tools/VSCode/probe/src/probe.ts",
+            "Tools/VSCode/probe/README.md", "Tools/VSCode/probe/node_modules/dep/package.json" })
         {
             temporary.Write(file, "// 한국어 주석\n");
         }
@@ -102,7 +114,8 @@ internal static partial class SelfTests
             "Engine/Source/ThirdParty/Probe/ThirdParty.json", "Engine/Source/ThirdParty/Probe/Build/Build.ps1",
             "Templates/Game/Foundation/FoundationTemplate.rocksproject", "Templates/Game/Foundation/Source/Main.cpp",
             "Programs/Scaffold/Templates/module/Module.h.in", "Engine/Config/ShaderFormats/Probe.json",
-            "Core/Source/Runtime/Core/Private/Text/Probe.generated.h", "Core/Source/Runtime/Probe/Tests/Probe.generated.h" })
+            "Core/Source/Runtime/Core/Private/Text/Probe.generated.h", "Core/Source/Runtime/Probe/Tests/Probe.generated.h",
+            "Tools/VSCode/probe/package.json", "Tools/VSCode/probe/syntaxes/probe.tmLanguage.json" })
         {
             string? original = File.Exists(temporary.FilePath(file)) ? File.ReadAllText(temporary.FilePath(file)) : null;
             temporary.Write(file, "# first line\n# 한국어 주석\n");

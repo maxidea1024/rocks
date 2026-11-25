@@ -195,7 +195,7 @@ int64 NuggetSystemClock::NowTicks() noexcept {
 NuggetFileSystemBackend::NuggetFileSystemBackend(Allocator& allocator, platform::FileSystem& files,
                                                  StringView root, NuggetClock& clock) noexcept
     : allocator_(&allocator), files_(&files), root_(allocator), clock_(&clock) {
-    (void)root_.TryAssign(root);
+    rootStored_ = static_cast<bool>(root_.TryAssign(root));
 }
 
 Result<void> NuggetFileSystemBackend::EntryPath(const Sha256Digest& key,
@@ -228,6 +228,12 @@ Result<void> NuggetFileSystemBackend::EntryPath(const Sha256Digest& key,
 }
 
 Result<void> NuggetFileSystemBackend::Open() noexcept {
+    // 생성자의 root 복사 실패는 할당 실패다(빈 루트로 보면 InvalidArgument로 잘못 보고한다 —
+    // 14.1.119 할당 실패 전수가 찾음).
+    if (!rootStored_) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
     if (root_.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }

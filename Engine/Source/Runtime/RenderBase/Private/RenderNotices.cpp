@@ -90,4 +90,22 @@ Result<RenderBlob> RenderBlob::TryCopy(Allocator& allocator, Span<const uint8> b
     return Result<RenderBlob>::Success(Move(blob));
 }
 
+Result<RenderBlob> RenderBlob::TryAllocate(Allocator& allocator, usize size) noexcept {
+    RenderBlob blob;
+    if (size == 0) {
+        return Result<RenderBlob>::Success(Move(blob));
+    }
+
+    auto memory = allocator.Allocate(size, 16);
+    if (!memory) {
+        return Result<RenderBlob>::Failure(memory.Error());
+    }
+
+    blob.allocator_ = &allocator;
+    blob.data_ = static_cast<uint8*>(memory.Value());
+    blob.size_ = size;
+    platform::MemorySet(blob.data_, 0, size);
+    return Result<RenderBlob>::Success(Move(blob));
+}
+
 } // namespace rocks::render

@@ -10,7 +10,7 @@
 |---|---|---|---|
 | PH0 | 이 문서 | JL1·CD1·CD2 | 리뷰어 1명 반영 |
 | PH1 | `Physics` 모듈 골격: 수명 객체(할당·로그·assert hook, `VerifyJoltVersionID`, `Factory`·`RegisterTypes`), `TaskJobSystem`, `PhysicsSettings`, `PhysicsWorldSubsystem`·`JoltPhysicsScene`(빈 장면), World 접점(2.2절), PhysicsSimulate 자리 연결(7.4절), Jolt `JPH_OBJECT_LAYER_BITS` 32(6.1절 — JL1 manifest·어댑터 경계 10.2절 갱신) | 7.4절 ER 개정 | 장면 생성·파괴·빈 step, job 풀 포화·종료 중 job(PC06), FP 상태, 할당 잔여 0, Editor·Preview World는 step 없음 |
-| PH2 | 어댑터 변환 함수(어댑터 경계 7절)와 PA01–PA13, Box·Sphere·Capsule·Cylinder body, 운동 종류, step, 결과 반영(3.4절 — 스텝별 활성·잠든 body 합), Kinematic 이동·teleport·목표 없는 스텝 정지(3.3절), 재생성 표(2.3.1절 — simulate 켤 때 떼기) | PH1, CM3 형상 컴포넌트(CR16 데이터) | PA01–PA13(PC09), 수명 시험, 결정성(같은 binary 상태 hash — PC03), 한 프레임 여러 스텝의 Kinematic 정지·프레임 안에서 잠든 body 반영 |
+| PH2 | (하위 단계 PH2a–PH2d — 7.1.2절) 어댑터 변환 함수(어댑터 경계 7절)와 PA 시험(7.1.2절 배정), Box·Sphere·Capsule·Cylinder body, 운동 종류, step, 결과 반영(3.4절 — 스텝별 활성·잠든 body 합), Kinematic 이동·teleport·목표 없는 스텝 정지(3.3절), 재생성 표(2.3.1절 — simulate 켤 때 떼기) | PH1, CM3 형상 컴포넌트(CR16 데이터) | 7.1.2절 PH2 배정 PA, 수명 시험, 결정성(같은 binary 상태 hash — PC03), 한 프레임 여러 스텝의 Kinematic 정지·프레임 안에서 잠든 body 반영 |
 | PH3 | 질의(4장)와 필터 사상(6.1–6.3절 — CD3), `HitResult`·`OverlapResult` | PH2 | 4.4–4.5절 규칙 표 시험(채널·ObjectTypes·profile, 무시 목록, mobility, 시작 겹침, 정렬·자르기), PC02 |
 | PH4 | `MoveComponent` sweep·침투 해소(5.1–5.2절), overlap(5.3절), hit(5.4절, sweep·시뮬레이션), probe(6.4절) | PH3, CR7(구독형 이벤트 — 없으면 가상 hook만) | UE 순서 시험(발행 순서·대칭 장부·재진입), pullback 수치 |
 | PH5 | 힘·속도·질량·잠듦 API(2.6–2.7절), DOF·CCD·body 값 사상(6.5절), 기본 물리 재질·결합 방식(6.6절) | PH2 | PA04·PA05와 API 왕복, 잠듦 이벤트 |
@@ -49,6 +49,91 @@
 **World 접점 규칙.** `SetPhysicsScene`은 World가 `Initialized`(Subsystem 초기화가 이 상태에서 돈다 — `Initialize`가 끝난 뒤 `BeginPlay` 전도 이 상태다) 또는 `TearingDown`(정리)일 때만 받고, 다른 상태는 `InvalidArgument`다. 같은 World에 장면이 이미 있는데 null 아닌 다른 장면을 넣으면 `AlreadyExists`다. body가 있는 동안 바꾸지 못하게 하는 검사는 body가 생기는 PH2에서 더한다.
 
 **step.** `JoltPhysicsScene::Step(seconds)`는 `PhysicsSystem::Update(seconds, collisionSteps 1, 임시 할당기, job 시스템)`이다. 중력은 `defaultGravityZ`(cm/s²)를 m/s²로 바꿔 Jolt +Y 축에 둔다(축 A — Rocks Z → Jolt Y, 어댑터 경계 2절. 변환 함수 묶음은 PH2). `PhysicsWorldSubsystem`은 Game·Tryout World에서만 엔진 자리 `EngineStage::PhysicsSimulate`(엔진 런타임 15.4절 — rocks-f5 a438860b)에 `SimulateStep(문맥 delta = 고정 스텝 길이)`을 걸고 정리 때 뗀다(3.1절, PMD16 — World는 종류로 거르지 않는다). 자리가 이미 쓰였으면 초기화가 `AlreadyExists`로 실패한다. 호스트 Sandbox가 GameInstance의 World Subsystem 목록에 넣고 Physics 설정 타입을 설정 문맥에 등록한다(1.2절 — Sandbox 화면 자체 시험의 Game World도 장면을 만든다, 설정 문맥이 없으면 기본 설정). 확인은 Windows(EngineTests·Sandbox)뿐이다 — Android·Mac Sandbox 링크에 Physics·Jolt가 처음 들어가므로 그 빌드는 CI·다음 Android 확인 때 본다(미확인).
+
+### 7.1.2 PH2 하위 단계와 PA 시험 배정(2026-11-26)
+
+PH2는 크기가 커서 넷으로 나눈다(사용자 지시 "순서대로" — PH1 바로 뒤). 각 하위 단계는 설계 갱신 → 구현 → 리뷰어 1명 → 커밋이다.
+
+| 하위 단계 | 내용 | 선행 |
+|---|---|---|
+| PH2a | 어댑터 변환 함수(어댑터 경계 3·7절)와 그것만으로 고정되는 수용 시험 | PH1 |
+| PH2b | `PhysicsScene` body 접점(`CreateBody`·`DestroyBody`·`SetBodyTransform`·`ReadKinematics` — 2.2절), 운동 종류(2.5절), Box·Sphere·Capsule 형상(어댑터 경계 4절 scale 규칙), `PrimitiveComponent` 물리 시스템 상태(2.3절). Cylinder body는 `CylinderComponent`(CM3)가 생기는 때(CY2) | PH2a, World 코드는 이 세션이 넣는다(2026-11-26 runtime 세션 동의) |
+| PH2c | step 결과 반영(3.4절), Kinematic 이동·teleport·목표 없는 스텝 정지(3.3절), 결정성(PC03) | PH2b |
+| PH2d | 재생성 표(2.3.1절 — simulate 켤 때 떼기) | PH2c, 엔진 런타임 `RecreateSystemStateNow`(7.4절) |
+
+**PH2a 변환 함수.** Physics private `JoltConversions.h`(inline). 물리량마다 이름 있는 함수 하나(어댑터 경계 7절): 위치(지역 원점 o를 double에서 먼저 뺀 뒤 m로 — 6절)·변위·box 반폭·길이·선속도·선가속도·각속도·힘·선형 충격량·토크·각충격량·회전·법선·관성(주축 값 + 주축 회전 → Jolt `Mat44` = R'·D'·R'ᵀ, 곧 A·I·Aᵀ)·밀도. 축 사상 A(j = (r.y, r.z, r.x))는 한 곳의 두 함수(`AxisToJolt`·`AxisFromJolt`)만 쓰고, 크기 변환은 Core `UnitConversion.h` 함수만 쓴다. 크기 변환은 double에서 한 뒤 float로 한 번 반올림한다(Jolt float build).
+
+**PA 시험 배정.** 어댑터 경계 9절의 PA01–PA13은 필요한 기능이 들어오는 단계에서 고정한다(PC09는 모두 통과한 시점이다).
+
+| 시험 | 단계 | 이유 |
+|---|---|---|
+| PA01 방향 상수, PA02 각속도·quaternion, PA03 중력, PA04 힘·충격량, PA05 토크·관성, PA10 캡슐 축, PA13 테이퍼드 캡슐 | PH2a | 변환 함수와 Jolt body·형상을 시험이 직접 만들어 고정한다. 형상 변환 코드(컴포넌트·에셋 → Jolt 형상)는 고정하지 못하므로 PA10은 PH2b에서 `CapsuleComponent` 경로로, PA13은 PH6에서 단순 충돌 `CollisionTaperedCapsule` 경로로 다시 돌린다 |
+| PA09 큰 월드 | PH2a(PA03 부분)·PH6(PA06 부분) | 지역 원점 변환은 PH2a, 메시는 PH6 |
+| PA08 접촉 법선 부호 | PH3(sweep)·PH4(시뮬레이션 접촉) | 질의 결과 변환은 PH3, 접촉 hit 변환은 PH4(5.4절) |
+| PA06 메시 앞면, PA11 거울 인스턴스 | PH6 | 렌더 메시 쿠킹 교환(어댑터 경계 4절) |
+| PA07 heightfield | 지형(CM18) | heightfield 쿠킹 |
+| PA12 좌우 바퀴·조향 | 차량 단계(개별 모듈) | 차량 constraint |
+
+### 7.1.3 PH2b 구현 세부(2026-11-26)
+
+runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는다. Actor.h는 건드리지 않는다.
+
+**World 쪽 타입**(`World/Physics/`, Jolt 없음 — 파일마다 타입 하나):
+
+| 파일 | 내용 |
+|---|---|
+| `PhysicsBodyHandle.h` | `PhysicsBodyHandle { uint32 index; uint32 generation; }`(0 세대 = 없음 — 계획 16.1절) |
+| `BodyGeometryKind.h`·`BodyGeometry.h` | `BodyGeometryKind { None, Box, Sphere, Capsule }`와 `BodyGeometry`(scale 전 값 cm: box 반폭, 구 반경, 캡슐 반경·반높이 **반구 포함**(UE `CapsuleHalfHeight`)) |
+| `BodyMotion.h` | `BodyMotion { Static, Kinematic, Dynamic }`(2.5절) |
+| `TeleportMode.h` | `TeleportMode { None, TeleportPhysics, ResetPhysics }`(1.3절) |
+| `BodyCreateDesc.h` | 형상, 월드 `Transform`(scale 포함), 운동 종류, 실효 충돌(`ResolvedCollision`), `const BodySettings*`, 깨어서 시작할지 |
+| `BodyKinematics.h` | 위치(body 원점 cm)·회전·선속도(cm/s)·각속도(rad/s)·깨어 있음 |
+
+`PhysicsScene`에 `CreateBody(const BodyCreateDesc&) → Result<PhysicsBodyHandle>`, `DestroyBody(handle)`, `SetBodyTransform(handle, const Transform&, TeleportMode)`, `ReadKinematics(handle) → Result<BodyKinematics>`를 더한다(2.2절의 이름 그대로). 없는 handle·옛 세대는 `StaleHandle`(Destroy는 무시)이다.
+
+**형상**: `PrimitiveComponent`의 가상 `BuildBodyGeometry(BodyGeometry&) const`(기본 거짓 — 형상 없음)를 Box·Sphere·Capsule 컴포넌트가 채운다(2.4절의 `BuildCollisionGeometry`를 PH2b는 형상 하나로 줄인 것 — compound는 PH6 메시 단순 충돌 때 넓힌다). Physics가 scale을 UE 규칙으로 형상 크기에 굽는다(어댑터 경계 4절): box 반폭 × |scale| 축별·구 반경 × min |scale|(둘 다 최소 `KindaSmallNumber`), 캡슐은 반높이 = 반높이 × |Z|(최소 0.1 cm)·반경 = 반경 × max(|X|, |Y|)를 [0.1, 반높이]로 clamp·원통 길이 = 2·(반높이 − 반경)(최소 0.1 cm — UE `FKSphylElem`과 같다). 0인 scale 축은 `KindaSmallNumber`로 바꾼다(2.3절). 크기 0은 거부하지 않는다(UE도 body를 만든다). body transform은 행렬 분해 없이 월드 위치·회전·scale을 따로 쓴다(0 scale·shear·반사에서도 값이 있다 — UE `GetComponentTransform`). 컴포넌트 캡슐 반높이는 반경 이상으로 올린다. 형상 공유 캐시는 PH6에서(지금은 body마다 만든다).
+
+**body 값**(PH2b 몫 — 나머지 6.5절 표는 PH5): 운동 종류, object 층(채널 = object type, 운동 묶음 = Static·Moving, 실효 충돌 켬이 QueryOnly면 QueryOnly 묶음, 참여 표지 physics·query·probe는 실효 충돌 켬에서, 응답 묶음 색인 0 — 표는 PH3), `enableGravity`(중력 배율 1·0), `linearDamping`·`angularDamping`(값 그대로 — Jolt 기본 0.05에 맡기지 않는다), 질량은 형상 밀도(UE 기본 물리 재질 밀도 1 g/cm³ — Jolt 기본 1000 kg/m³와 같다). 질량 덮어쓰기·배율·질량 중심·관성 배율은 PH5.
+
+**컴포넌트 수명**(2.3절): `PrimitiveComponent::WantsSystemState(Physics)` = World에 장면이 있음 && 형상이 있음 && 실효 충돌 켬 ≠ `NoCollision`(2.3절의 `alwaysCreatePhysicsState`는 `BodySettings`에 아직 없다 — 그 필드가 생기는 PH5). `CreateSystemState(Physics)`가 실효 충돌을 해석하고(`TryResolveCollision`) `BodyCreateDesc`를 채워 `CreateBody`, handle은 NATIVE 필드다. 시작 잠듦: `startAwake`가 거짓이고 소유 Actor가 시작(OnStart) 전이면 잠든 채 넣는다. `DestroySystemState(Physics)`가 `DestroyBody`. Static mobility에 `simulatePhysics`면 Warning `SimulateOnStaticBody`(2.5절)와 Static.
+
+**setter**: `SetSimulatePhysics(bool)`(UE 이름 — 2.6절)를 PH2b에 미리 둔다. 지금은 값만 바꾸고, body가 있을 때의 즉시 전환은 PH2d다. `startAwake` 등 다른 body 값 setter는 PH5다(시작 잠듦 시험도 PH5로 옮긴다).
+
+**transform**: `PrimitiveComponent::OnTransformUpdated`가 body가 있으면 `SetBodyTransform(월드 transform, TeleportMode::None)`을 부른다(3.3절). PH2b의 `SetBodyTransform`은 모든 운동 종류를 즉시 옮기고(`SetPositionAndRotation`, Dynamic 속도 유지) 잠든 Dynamic을 깨운다(UE `SetGlobalPose`). Kinematic의 `MoveKinematic` 경로·결과 반영의 skip 표지는 PH2c, scale 변화의 형상 갱신은 PH2d(재생성 표)다.
+
+**시험**(World·컴포넌트 공개 API만 — Modular에서도 돈다): 등록·파괴의 body 수, NoCollision·장면 없는 World는 body 없음, mobility·simulate → 운동 종류(Static에 simulate면 경고 뒤 Static), 떨어지는 구의 `ReadKinematics`, PA10을 `CapsuleComponent` 경로로(반구 포함 반높이 의미), box scale을 바닥 위 구의 정지 높이로 확인, 컴포넌트 이동이 Kinematic body를 옮김, 옮긴 잠든 Dynamic이 깨어남, 크기·scale 0 형상과 비균일 scale 부모 아래 회전한 자식도 body가 생김. 한계: World 물리 장면 교체(`SetPhysicsScene` null → 새 장면) 뒤 남은 컴포넌트 handle은 새 장면의 같은 칸을 가리킬 수 있다 — 교체는 지금 Subsystem 수명 안에서만 일어나 남은 컴포넌트가 없다. 등록된 body가 있으면 교체를 거부하는 검사는 PH2d(재생성)에서 더한다. 등록 실패 되돌림 시험(용량 초과)은 PH5(설정 문맥 시험 기반)에서.
+
+### 7.1.4 PH2c 구현 세부(2026-11-26)
+
+**결과 반영(3.4절).**
+- body 칸이 컴포넌트 handle(`BodyCreateDesc::component`)과 운동 종류를 기억하고, Jolt body user data에 칸 번호·세대를 넣는다.
+- step마다 `Update` 뒤에 Jolt 활성 Dynamic body(`GetActiveBodies`)와 그 step에 잠든 body(`BodyActivationListener::OnBodyDeactivated` — job thread에서 불리므로 잠금 아래 칸 번호만 쌓는다)를 결과 목록에 더한다(칸마다 표지로 중복 없이).
+- `PhysicsWorldSubsystem`이 엔진 자리 `PhysicsResults`(Game·Tryout만)에서 목록을 칸 번호 순으로 정렬해 꺼내고, 살아 있는 칸의 위치·회전을 컴포넌트 `PrimitiveComponent::ApplyPhysicsTransform(위치, 회전)`으로 쓴다.
+- `ApplyPhysicsTransform`은 skip 표지를 세운 채 `SetWorldLocationAndRotation`을 불러 자기 body로 되돌려 보내지 않는다(UE `MOVECOMP_SkipPhysicsMove`). 부착된 자식은 부착 전파로 따라가고 자기 body를 옮긴다.
+- sweep 없는 이동이고, overlap 갱신이 붙는 `MoveComponent` 경로는 PH4다.
+
+**Kinematic(3.3절).** 장면이 step하는 World(Game·Tryout — `JoltPhysicsScene::SetSimulates`)에서 `SetBodyTransform(None)`은 Kinematic body를 다음처럼 다룬다.
+- 그 자리에서 목표로 옮긴다. 질의가 바로 보게 하려는 것이다.
+- 첫 요청일 때 원래 자세를 시작 자세로 기록하고, 목표를 갱신한다.
+- 다음 step 직전에 시작 자세로 되돌린 뒤 `MoveKinematic(목표, dt)`로 움직인다. 이때 속도는 위치 차이를 dt로 나눈 값이다.
+- 목표가 없는 다음 step에서는 선·각속도를 0으로 둔다. Jolt 속도가 남기 때문이다.
+- `TeleportPhysics`·`ResetPhysics`는 즉시 옮기고 속도를 0으로 두며, 대기 목표를 지운다.
+- 장면이 step하지 않는 World(Editor·Preview)는 언제나 teleport다(PMD16).
+- 한 프레임의 고정 스텝 여러 번 가운데 목표는 첫 step이 쓰고, 나머지 step은 정지다(3.3절).
+
+**리뷰 반영(2026-11-26).** 잠든 body 통지는 Jolt 활성 목록 잠금 아래에서 오므로 할당하지 않는다(용량은 `CreateBody`가 칸 수 × 2로 미리 잡고, 넘치면 세어 step 뒤 Warning). 결과 목록은 handle(세대)로 쥐어 칸 재사용을 거르고, Core `algo::Sort`로 정렬하며, 꺼낼 용량을 먼저 잡는다(실패하면 목록을 그대로 둔다). 반영 중 사라진 컴포넌트는 오류가 아니라 건너뛴다. Kinematic 목표 적용은 step과 같은 결정적 FP 환경에서 한다. 한계: 부모에 붙은 채 시뮬레이션하는 Dynamic 컴포넌트는 떼기(PH2d) 전까지 반영 순서·부착 전파에 따라 결과가 달라질 수 있다.
+
+**결정성(PC03).** 같은 설정·같은 호출 순서의 World 두 개에서 떨어지는 body들의 결과(위치·속도 byte)가 같다. 반영 순서는 칸 번호 순이다(Jolt 활성 목록 순서에 기대지 않는다).
+
+**시험.**
+- 떨어지는 구 컴포넌트의 월드 위치가 body 위치와 byte까지 같다(매 Tick, 여러 step 프레임 포함). 바닥에서 잠든 뒤에도 같다.
+- Kinematic 상자를 한 프레임에 옮긴다.
+  - 옮긴 직후 body 위치가 목표다.
+  - 다음 step에서 속도는 이동량/dt이고, 그다음 step에서 0이다.
+  - 3 step 프레임에서는 끝 속도가 0이고 위치가 목표다.
+- `TeleportPhysics`는 속도 0이다.
+- Editor World Kinematic은 즉시 이동이다.
+- 결정성을 시험한다.
 
 ## 7.2 시험 원칙
 
@@ -99,6 +184,9 @@
 
 ## 7.6 개정 이력
 
+- 개정 9(2026-11-26): PH2b 완료(6ba9c214 — 리뷰 반영: 크기 0·shear에서도 body, 옮긴 잠든 body 깨움), PH2c 구현 세부(7.1.4절).
+- 개정 8(2026-11-26): PH2a 완료(fcfe9ad4), PH2b 구현 세부(7.1.3절).
+- 개정 7(2026-11-26): PH1 완료(PhysicsSimulate 연결·Sandbox 등록), PH2 하위 단계와 PA 시험 배정(7.1.2절).
 - 개정 6(2026-11-25): PH1 착수 — 구현 세부(7.1.1절), PMD20–PMD22.
 - 개정 5(2026-11-25): PMU3·PMU4를 UE 원본으로 닫았다. `maxLinearVelocity` 기본은 사실상 없음(PMD18), DOF 잠금 기준은 월드 축·생성 시점(PMD19, 한계 둘). 미확인 항목이 없다.
 - 개정 4(2026-11-25): PMU2를 닫았다. Jolt 접촉 캐시의 solver 충격량을 읽는 추적 가능한 수정과 시험(어댑터 경계 10.6절)으로 `normalImpulse`를 UE처럼 solver 값으로 바꿨다(6.4절, PMD14).

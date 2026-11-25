@@ -1,7 +1,9 @@
 #pragma once
 
+#include "PlatformTextureSource.h"
 #include "ScreenRenderer.h"
 
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Matrix4.h>
 #include <Core/Memory/UniquePtr.h>
@@ -105,6 +107,33 @@ inline constexpr double SceneRightOffset = 250.0;
 // 배경(clear) 색이다(선형 HDR).
 inline constexpr float SceneClearColor[3] = {0.05f, 0.08f, 0.12f};
 
+// 표시 목록 항목 이름의 byte 상한이다(넘으면 자른다).
+inline constexpr usize MaxInspectorNameBytes = 96;
+
+// 표시 목록 항목의 업로드 상태다(렌더 lane 통지로 바뀐다).
+enum class InspectorEntryState : uint8 {
+    // 업로드를 게시했고 통지를 기다린다(그리면 typed 대체다).
+    Pending,
+    Ready,
+    // 장치 생성이 실패했다(ResourceFailed).
+    Failed,
+    // CPU Availability — 올리지 않고 검정으로 대체한다.
+    Placeholder
+};
+
+// 표시 목록 항목 하나다(18.5절 7항).
+struct InspectorEntry {
+    char name[MaxInspectorNameBytes] = {};
+    InspectorTexture texture;
+    InspectorEntryState state = InspectorEntryState::Pending;
+    // 실패면 그 오류다.
+    ErrorCode error = ErrorCode::None;
+};
+
+// 형식의 표시 방식·성분 계열·정수 배율이다(float는 HDR이면 노출 + filmic, unorm·snorm은 그대로,
+// 정수는 형식 최대값으로 나눈다 — R8Uint 1/255).
+void DescribeInspectorFormat(graphics::PixelFormat format, InspectorTexture& out) noexcept;
+
 class ScreenHost {
 public:
     // device·host는 이 객체보다 오래 산다.
@@ -137,20 +166,57 @@ public:
     // 다음 SubmitFrame부터 tone map 결과를 capture 텍스처에도 그린다(self-test). 크기는 창 크기다.
     Result<void> RequestCapture(uint32 width, uint32 height) noexcept;
 
-    // 텍스처 표시 view를 고른다(18.5절 6항). 층·mip은 그 텍스처 범위로 자른다.
+    // 엔진 절차 텍스처 표시를 고른다(18.5절 6항 — None은 장면). 층·mip은 그 텍스처 범위로
+    // 자른다. 장치가 못 만든 텍스처(cube 배열 능력 없음)면 장면이다.
     void SetInspector(InspectorView view, uint32 layer, uint32 mip) noexcept;
 
-    InspectorView Inspector() const noexcept {
-        return inspector_;
+    // 표시 목록 항목을 고른다(index가 범위 밖이면 장면). 층·mip은 그 텍스처 범위로 자른다.
+    void SetInspectorEntry(uint32 index, uint32 layer, uint32 mip) noexcept;
+
+    // 고른 항목 index다(장면이면 NoInspectorEntry).
+    uint32 SelectedEntry() const noexcept {
+        return selected_;
     }
+
+    static constexpr uint32 NoInspectorEntry = NumericLimits<uint32>::Max();
+
+    // 쿠킹 텍스처 데이터를 올리고 표시 목록 끝에 더한다(18.5절 7항 — 패키지 공개 뒤 게임 lane).
+    // cpuPlaceholder면 올리지 않고 검정 대체 항목만 더한다(CPU Availability). 오류: lane 시작 전
+    // NotReady, 변환(MakePlatformTextureSource)·검사(CheckCookedTexture)의 오류 — issue가 원인,
+    // handle 예약·게시 실패. 실패하면 목록을 바꾸지 않는다.
+    Result<uint32> AddTexture(StringView name, const TexturePlatformData& data,
+                              PlatformBulkReader reader, void* context, bool cpuPlaceholder,
+                              render::CookedTextureIssue* issue = nullptr) noexcept;
+
+    // 검사를 거치지 않은 업로드 값을 그대로 게시하고 항목을 더한다(self-test 음성 — 장치 생성
+    // 실패의 ResourceFailed 경로). upload.handle은 이 함수가 예약해 채운다.
+    Result<uint32> AddUnchecked(StringView name, render::CookedTextureUpload&& upload,
+                                const InspectorTexture& texture) noexcept;
+
+    uint32 InspectorEntryCount() const noexcept {
+        return static_cast<uint32>(inspectors_.Size());
+    }
+
+    const InspectorEntry& InspectorEntryAt(uint32 index) const noexcept {
+        return inspectors_[index];
+    }
+
+    // 엔진 절차 텍스처의 항목 index다(만들지 않았으면 NoInspectorEntry).
+    uint32 EngineEntry(InspectorView view) const noexcept;
+
+    // 아직 통지를 기다리는 업로드 수다(ProcessNotices가 줄인다).
+    uint32 PendingUploads() const noexcept;
+
+    // 렌더 lane 통지를 거둬 항목 상태를 바꾼다(SubmitFrame이 프레임마다 부른다).
+    void ProcessNotices() noexcept;
 
     // 다음 프레임부터 capture를 남길 자리다(0–MaxCaptureSlots−1, self-test).
     void SetCaptureSlot(uint32 slot) noexcept {
         captureSlot_ = slot < MaxCaptureSlots ? slot : 0;
     }
 
-    // 호스트 입력으로 표시 view를 바꾼다(숫자 0 장면, 1–6 view, `[`·`]`·패드 어깨 버튼 층,
-    // `-`·`=` mip).
+    // 호스트 입력으로 표시를 바꾼다(숫자 0 장면, 1–6 엔진 절차 텍스처, `,`·`.`·패드 D-pad 좌우
+    // 목록 이전·다음, `[`·`]`·패드 어깨 버튼 층, `-`·`=` mip).
     void HandleInspectorInput(const input::InputState& input) noexcept;
 
     // 노출 배율이다(tone map, 기본 1).
@@ -183,9 +249,18 @@ private:
     render::RenderLane lane_;
     platform::Window* window_ = nullptr;
     render::TonemapConstants tonemap_;
+    // 엔진 절차 텍스처를 만들어 목록 앞에 둔다(Start).
+    void AddEngineTextures() noexcept;
+    Result<uint32> AppendEntry(StringView name, const InspectorTexture& texture,
+                               InspectorEntryState state) noexcept;
+
+    Allocator& allocator_;
     render::RenderHandle pending_;
     render::RenderHandle capture_;
-    InspectorView inspector_ = InspectorView::None;
+    Array<InspectorEntry> inspectors_;
+    Array<render::RenderNotice> notices_;
+    uint32 engineEntries_[InspectorViewCount];
+    uint32 selected_ = NoInspectorEntry;
     uint32 inspectorLayer_ = 0;
     uint32 inspectorMip_ = 0;
     uint32 captureSlot_ = 0;
@@ -196,6 +271,7 @@ private:
     bool failed_ = false;
     bool surfaceLost_ = false;
     bool pendingRetired_ = false;
+    bool inspectorsRetired_ = false;
 };
 
 } // namespace sandbox::screen

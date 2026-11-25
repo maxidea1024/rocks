@@ -167,7 +167,7 @@ public:
 
     // 루트와 tmp를 만들고(tmp를 만들 수 없으면 읽기 전용 — Get만, Put은 Dropped) 지난 임시 파일을
     // 지운다. 오류: 빈 루트 InvalidArgument, 루트를 만들 수 없음(자리가 파일 등) 그 오류, 할당
-    // 실패.
+    // 실패(생성자가 root를 복사하지 못한 경우 포함 — OutOfMemory).
     Result<void> Open() noexcept;
 
     bool IsReadOnly() const noexcept {
@@ -215,6 +215,8 @@ private:
     NuggetClock* clock_;
     NuggetBackendHooks hooks_{};
     uint32 replaceLockMs_ = NuggetReplaceLockMs;
+    // 생성자가 root를 복사했는가(아니면 Open이 OutOfMemory — 빈 루트 InvalidArgument와 가른다).
+    bool rootStored_ = false;
     bool opened_ = false;
     bool readOnly_ = false;
 };
