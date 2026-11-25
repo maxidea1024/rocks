@@ -329,7 +329,7 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
 }
 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
-// 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(PixelFormat.ko.md 8.3절).
+// 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(Docs/Design/PixelFormat 8.3절).
 Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
     return CreateTextureIn(desc, pixels, nullptr);
@@ -754,7 +754,7 @@ PixelFormatCaps D3D12Device::GetPixelFormatCaps(PixelFormat format) const noexce
     return FormatCaps(format);
 }
 
-// 원 텍스처의 자원을 공유하는 SRV view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수
+// 원 텍스처의 자원을 공유하는 SRV view다(Docs/Design/PixelFormat 9–11절). 다른 스레드에서도 부를 수
 // 있다.
 Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
                                                      const TextureViewDesc& desc) noexcept {

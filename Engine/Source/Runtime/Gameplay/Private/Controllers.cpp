@@ -10,7 +10,7 @@
 #include <Gameplay/PlayerController.generated.h>
 #include <Gameplay/PlayerController.h>
 #include <World/Actor.generated.h>
-#include <World/CameraComponent.generated.h>
+#include <World/Camera/CameraComponent.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 

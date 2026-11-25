@@ -717,7 +717,8 @@ private:
     }
 
     // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로 실패하고
-    // LastError에 형식 이름을 남긴다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
+    // LastError에 형식 이름을 남긴다(Docs/Design/PixelFormat 8.3절). 호출자는 gate_를 잡고 있어야
+    // 한다.
     template <class T>
     Result<T> UnsupportedFormat(PixelFormat format) noexcept {
         auto failed = FailCode("pixel format", ErrorCode::Unsupported, PixelFormatName(format));
@@ -991,8 +992,8 @@ private:
     VkDebugUtilsMessengerEXT messenger_ = VK_NULL_HANDLE;
     VkPhysicalDevice physical_ = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties properties_ = {};
-    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다, PixelFormat.ko.md
-    // 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
+    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다,
+    // Docs/Design/PixelFormat 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
     PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue queue_ = VK_NULL_HANDLE;

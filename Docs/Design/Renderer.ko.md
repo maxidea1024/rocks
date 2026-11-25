@@ -567,7 +567,7 @@ ForwardOpaquePS
 
 ## 13. backend 지원표
 
-**근거 종류.** "형식 정의"는 `Engine/Config/ShaderFormats/<id>.json`의 값(셰이더 시스템 12.1절), "사양"은 API 사양 최소 보장, "PixelFormat"은 [픽셀 형식](PixelFormat.ko.md)의 backend 표다. 표의 ○는 그 근거로 가능, △는 장치 능력(GX1)에 따라, ×는 불가, "미확인"은 확인하지 못함이다. 지원하지 않는 칸은 13.2절 처리 규칙을 따른다.
+**근거 종류.** "형식 정의"는 `Engine/Config/ShaderFormats/<id>.json`의 값(셰이더 시스템 12.1절), "사양"은 API 사양 최소 보장, "PixelFormat"은 [픽셀 형식](PixelFormat/08-BackendMapping.ko.md)의 backend 표다. 표의 ○는 그 근거로 가능, △는 장치 능력(GX1)에 따라, ×는 불가, "미확인"은 확인하지 못함이다. 지원하지 않는 칸은 13.2절 처리 규칙을 따른다.
 
 ### 13.1 기능별 표
 
@@ -966,7 +966,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | 기기별 typed buffer 원소 상한(`GL_MAX_TEXTURE_BUFFER_SIZE`·`maxTexelBufferElements`) | 8.1절, 결정 RN9, RenderBase 10.5절 | GX1 조회(`DeviceCaps.limits.texelBufferElements`)를 GX1 측정 표에 더하고 Android 대상 기기 표본을 잰다 |
 | GLES의 on-tile MSAA 색 resolve 수단 | 8.2절, RenderBase 결정 R17 | RS8 측정(확장 유무) |
 | UE path tracing에서 depth prepass·velocity 유지 여부 | 12.3절 | `DSR` path tracing 분기 전후 조사 |
-| GLES texel buffer 형식(`R32Uint`·`RGBA32Float`) | 8.1절, RQ9 | **확인(2026-11-18)**: Table 8.18(Khronos glTexBuffer ES3 refpage)에 둘 다 있고 image 형식이라 typed SRV·UAV 모두 된다. GTX 1060 ES context에서 SRV 생성·VS·PS 읽기 픽셀 대조(PixelFormat.ko.md 14.3절) |
+| GLES texel buffer 형식(`R32Uint`·`RGBA32Float`) | 8.1절, RQ9 | **확인(2026-11-18)**: Table 8.18(Khronos glTexBuffer ES3 refpage)에 둘 다 있고 image 형식이라 typed SRV·UAV 모두 된다. GTX 1060 ES context에서 SRV 생성·VS·PS 읽기 픽셀 대조([PixelFormat](PixelFormat/14-ImplementationStages.ko.md) 14.3절) |
 | SPIRV-Cross의 HLSL `Buffer<T>` → ESSL `samplerBuffer` 변환 | RQ10 | SH0 측정 |
 | 데스크톱 Vulkan 장치의 `maxColorAttachments` 분포 | 결정 RN3 | GX1 조회·장치 표본. 측정(2026-11-18): GTX 1060·lavapipe 모두 8(RenderBase 4.4절 GX1 표). 장치 표본을 넓히는 것은 남음 |
 | 데스크톱 Vulkan 장치의 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 분포 | 결정 RN13, RQ22 | GX1 조회·장치 표본. 측정(2026-11-18): GTX 1060 단계당 1048576·1048576, set 1048576, `maxPerStageResources` 4294967295 / lavapipe 모두 1015808(RenderBase 4.4절 GX1 표). 장치 표본을 넓히는 것은 남음 |

@@ -269,7 +269,7 @@ void GlesDevice::BindPassTexture(const TextureRecord& record, GLuint unit) noexc
     // 깊이·스텐실 텍스처는 읽을 plane이 텍스처 객체 상태(ES 3.1 core)이므로 묶을 때 정한다. 한
     // 그리기에 텍스처 하나만 묶으므로 깊이 view와 스텐실 view가 서로 덮지 않는다.
     // 스텐실 plane은 다른 backend와 같이 값을 G 채널에서 읽는다(성분 대응 (R, R, 0, 1),
-    // PixelFormat.ko.md 10절).
+    // Docs/Design/PixelFormat 10절).
     const bool stencil = record.depthStencilTexture && record.plane == 1;
     if (record.depthStencilTexture) {
         gl_.TexParameteri(record.target, GL_DEPTH_STENCIL_TEXTURE_MODE,

@@ -566,7 +566,7 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     }
 
     // ASTC HDR 형식(VK_FORMAT_ASTC_*_SFLOAT_BLOCK)은 확장 형식이다. 확장과 기능을 켜지 않으면 그
-    // 형식을 묻거나 쓸 수 없다(PixelFormat.ko.md 14.2절).
+    // 형식을 묻거나 쓸 수 없다(Docs/Design/PixelFormat 14.2절).
     const bool astcHdrExtension = HasExtension(extensions, extensionCount,
                                                VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
     // multi-planar 이미지(NV12·P010)를 만들려면 samplerYcbcrConversion 기능을 켜야 한다(Vulkan 1.1
