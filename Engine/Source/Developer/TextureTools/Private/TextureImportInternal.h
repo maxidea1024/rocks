@@ -8,7 +8,8 @@
 #include <Texture/TextureImportOptions.h>
 
 // TextureTools 내부 이미지 처리다(Docs/Design/AssetSystem 12.12절 — 회색 자동 감지, PNG infill,
-// 한 파일 Cube 배치·Volume 타일 나누기, TGA 머리 판정). 시험도 쓴다(내부 헤더).
+// 한 파일 Cube 배치·Volume 타일 나누기, TGA 머리 판정). 시험도 쓴다(내부 헤더) — 시험이 부르는
+// 함수는 ROCKS_TEXTURETOOLS_API로 내보낸다(EngineModular에서 시험 실행 파일이 모듈 DLL 밖이다).
 namespace rocks::texture_import {
 
 // UE TPNGDataFill의 이웃 반지름이다(NearNeighborRadius).

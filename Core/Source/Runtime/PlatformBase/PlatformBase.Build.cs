@@ -36,8 +36,14 @@ public sealed class PlatformBase : CoreModuleRules
             PublicDependencies = PublicDependencies,
             // macOS directory watching (FSEvents) uses the CoreServices framework.
             Frameworks = context.Platform == NativePlatform.MacOS ? ["CoreServices"] : [],
-            // Android writes the system log (logcat) through liblog (Platform/SystemLog.h).
-            SystemLibraries = context.Platform == NativePlatform.Android ? ["log"] : []
+            // Android writes the system log (logcat) through liblog (Platform/SystemLog.h). Windows waits on addresses
+            // (WaitOnAddress, WakeByAddressSingle) from Synchronization.lib for WaiterSignal (Docs/Design/Synchronization section 7.3).
+            SystemLibraries = context.Platform switch
+            {
+                NativePlatform.Android => ["log"],
+                NativePlatform.Windows => ["Synchronization"],
+                _ => []
+            }
         };
     }
 }

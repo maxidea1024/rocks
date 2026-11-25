@@ -18,29 +18,28 @@ using platform::MemoryOrder;
 
 namespace {
 
-// deadline(MonotonicTicks)까지 잠금을 시도한다. 제한 시간 0이면 한 번만 시도한다. 스냅샷은 드물고
-// 짧게 기다리므로 양보하며 다시 시도한다.
-bool TryLockUntil(platform::Mutex& mutex, uint64 deadline) noexcept {
-    for (;;) {
-        if (mutex.TryLock()) {
-            return true;
-        }
-
-        if (platform::MonotonicTicks() >= deadline) {
-            return false;
-        }
-
-        platform::YieldThread();
-    }
+// deadline(MonotonicTicks)까지 잠금을 시도한다. deadline이 지났으면 한 번만 시도한다. 시한 잠금은
+// Mutex::TryLockFor다(잠든 채 기다리고 풀리면 깬다 — Docs/Design/Synchronization 8.1절, 4.5절 2번).
+bool TryLockUntil(platform::Mutex& mutex, uint64 deadline, uint64 tickFrequency) noexcept
+    ROCKS_TRY_ACQUIRE(true, mutex) {
+    constexpr uint64 MillisecondsPerSecond = 1000;
+    const uint64 now = platform::MonotonicTicks();
+    const uint64 remainingTicks = deadline > now ? deadline - now : 0;
+    const uint64 milliseconds =
+        (remainingTicks * MillisecondsPerSecond + tickFrequency - 1) / tickFrequency;
+    // InfiniteTimeout은 무한 대기라 유한 시한은 그보다 작게 둔다.
+    return mutex.TryLockFor(milliseconds < platform::InfiniteTimeout
+                                ? static_cast<uint32>(milliseconds)
+                                : platform::InfiniteTimeout - 1);
 }
 
-// 잠금을 얻은 뒤 범위를 벗어날 때 푼다.
-class AdoptedLock {
+// TryLockUntil로 얻은 잠금을 넘겨받아 범위를 벗어날 때 푼다.
+class ROCKS_SCOPED_CAPABILITY AdoptedLock {
 public:
-    explicit AdoptedLock(platform::Mutex& mutex) noexcept : mutex_(mutex) {
+    explicit AdoptedLock(platform::Mutex& mutex) noexcept ROCKS_REQUIRES(mutex) : mutex_(mutex) {
     }
 
-    ~AdoptedLock() noexcept {
+    ~AdoptedLock() noexcept ROCKS_RELEASE() {
         mutex_.Unlock();
     }
 
@@ -185,7 +184,7 @@ Result<TraceSnapshotInfo> BuildIncomplete(TraceSessionState& state, Array<uint8>
         return Result<TraceSnapshotInfo>::Failure(header.Error());
     }
 
-    if (TryLockUntil(state.registryMutex, deadline)) {
+    if (TryLockUntil(state.registryMutex, deadline, state.tickFrequency)) {
         AdoptedLock lock(state.registryMutex);
         if (auto schemas = AppendSchemas(state, out, state.types.Size()); !schemas) {
             return Result<TraceSnapshotInfo>::Failure(schemas.Error());
@@ -204,7 +203,7 @@ Result<TraceSnapshotInfo> BuildSnapshot(TraceSessionState& state, Array<uint8>& 
     constexpr uint64 MillisecondsPerSecond = 1000;
     const uint64 deadline =
         platform::MonotonicTicks() + lockTimeoutMs * state.tickFrequency / MillisecondsPerSecond;
-    if (TryLockUntil(state.writerMutex, deadline)) {
+    if (TryLockUntil(state.writerMutex, deadline, state.tickFrequency)) {
         AdoptedLock lock(state.writerMutex);
         return BuildComplete(state, out);
     }

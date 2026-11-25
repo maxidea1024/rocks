@@ -75,7 +75,7 @@
     "libtiff/tif_color.c": "4e5183a58f908ad6d2fa1805d657fbde67fde90a66b3e431005221bf190983ac",
     "libtiff/tif_compress.c": "0309ee0f6a10dbdf035f09dc90bb99a5bba9715c615668a9c06e5c91d6737b89",
     "libtiff/tif_config.h": "bdbfc8bb877b7e66d92fde93a8f830ee42e35cd4f621e3740e15b12cd28f2d3a",
-    "libtiff/tif_dir.c": "633bede16c3b1829d8ded69c97be9dd16d976121eed99ab8ccacf707d14625db",
+    "libtiff/tif_dir.c": "bf0e5f3a7f2b60e82f7925c1e7a68d39d7bae834edacd0ee3783e266ec23c5c2",
     "libtiff/tif_dir.h": "2d9c36a036f169b8521e0e3f0de968576136b5b43f38d8b9904791a6137d342f",
     "libtiff/tif_dirinfo.c": "356878e81e964dec90c062f480b9aefc6490c6a0718e7e09c0ca65c6d1f621b9",
     "libtiff/tif_dirread.c": "b9f28e1b9a780fb01363c709bbac2b228c2622452d06833ce3367d0bbc8d89a5",
@@ -240,6 +240,11 @@
       "file": "libtiff/tif_config.h",
       "upstreamSha256": null,
       "reason": "Hand-written configuration header in place of the file the libtiff CMake build generates from tif_config.h.cmake.in (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "libtiff/tif_dir.c",
+      "upstreamSha256": "633bede16c3b1829d8ded69c97be9dd16d976121eed99ab8ccacf707d14625db",
+      "reason": "_TIFFVSetField: when copying the ColorMap, TransferFunction, ReferenceBlackWhite, ExtraSamples or Matteing values fails (allocation failure), free the partial copies, clear the field bit and fail the set instead of keeping a set tag with null arrays that the directory writer reads (the encoder allocation failure test found the crash); behavior on success is unchanged."
     },
     {
       "file": "libtiff/tif_dirinfo.c",

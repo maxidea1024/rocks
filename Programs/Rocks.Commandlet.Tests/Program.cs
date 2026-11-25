@@ -1887,9 +1887,10 @@ finally
 
 // asset-cook(AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1): 제품 실행 파일이 쿠커 모듈을 시작해 설정·보고서 타입을
 // 등록하고 엔진 프로파일(실행 파일 위쪽 Engine/Config)로 쿠킹한다. 전체 쿠킹 게시·두 번째는 전부 재사용·--json·사용법·도움말. 진단 줄·
-// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다. 제품 실행 파일에는 셰이더 산출물 단계가 아직
-// 없으므로(SH2d 전 — 10.3절 1항: backend가 있는 프로필은 UnsupportedCapability) 실행 파일을 임시 배치에 복사하고 그 위쪽
-// Engine/Config의 Windows 프로필을 셰이더 없는 프로필(graphicsBackends·shaderFormats 비움)로 둔다.
+// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다. 셰이더 산출물(SH2d 셰이더 라이브러리 단계)은
+// 아래 asset-cook --engine 시험이 보므로, 여기서는 실행 파일을 임시 배치에 복사하고 그 위쪽 Engine/Config의 Windows 프로필을
+// 셰이더 없는 프로필(graphicsBackends·shaderFormats 비움)로 둔다 — 프로젝트 에셋 쿠킹 시험이 셰이더 컴파일(시간·DXC 호스트)과
+// 저장소 Engine/Saved에 기대지 않게 한다.
 string cookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-{Environment.ProcessId}");
 try
 {

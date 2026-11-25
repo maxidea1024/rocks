@@ -45,6 +45,8 @@ constexpr StringView LspEmptyList = "[]";
 constexpr StringView LspSourceExtension = ".spark";
 constexpr StringView LspUriMessage = "the request needs 'textDocument.uri'";
 constexpr StringView LspPositionMessage = "the request needs 'textDocument.uri' and 'position'";
+constexpr StringView LspRangeMessage = "the request needs 'textDocument.uri' and 'range'";
+constexpr StringView LspQuickFixKind = "quickfix";
 constexpr StringView LspUsage = "usage: sparks-lsp [--stdio] [--schema <folder>]...\n";
 constexpr char LspSortDigitBase = '0';
 
@@ -192,6 +194,10 @@ private:
     Result<void> Definition(JsonValue id, JsonValue params) noexcept;
     Result<void> Formatting(JsonValue id, JsonValue params) noexcept;
     Result<void> Completion(JsonValue id, JsonValue params) noexcept;
+    Result<void> CodeAction(JsonValue id, JsonValue params) noexcept;
+    static bool PositionOf(JsonValue place, LspPosition& position) noexcept;
+    Result<void> AppendDiagnostic(LspOut& out, const SourceFile& file,
+                                  const Diagnostic& diagnostic) noexcept;
     Result<bool> Build(LspAnalysis& analysis, const LspDocument* replaced, StringView replacement,
                        CompilationStage stage, StringBuilderBase& problem) noexcept;
     static uint32 ModuleOfKey(const LspAnalysis& analysis, StringView key) noexcept;
@@ -397,6 +403,8 @@ Result<void> LspServer::Initialize(JsonValue id, JsonValue params) noexcept {
         out.Key("documentFormattingProvider").Flag(true);
         out.Key("completionProvider").Object().Key("triggerCharacters").Array();
         out.Text(".").Text("@").EndArray().End();
+        out.Key("codeActionProvider").Object().Key("codeActionKinds").Array();
+        out.Text(LspQuickFixKind).EndArray().End();
         out.Key("semanticTokensProvider").Object().Key("legend").Object();
         out.Key("tokenTypes").Array();
         for (const StringView type : LspTokenTypes) {
@@ -645,39 +653,49 @@ Result<void> LspServer::AppendDiagnostics(LspOut& out, uint32 source) noexcept {
             continue;
         }
 
-        LspPosition begin;
-        LspPosition end;
-        if (diagnostic.HasSpan()) {
-            begin = LspPositionOf(file, diagnostic.Span().begin);
-            end = LspPositionOf(file, diagnostic.Span().end);
-        }
-
-        StringBuilder<DiagnosticCodeDigits + 2> code(allocator_);
-        StringBuilder<LspJsonInlineBytes> message(allocator_);
-        message.Append(diagnostic.Message());
-        if (!diagnostic.Explanation().IsEmpty()) {
-            message.Append("\n").Append(diagnostic.Explanation());
-        }
-
-        if (!diagnostic.Fix().IsEmpty()) {
-            message.Append(LspFixPrefix).Append(diagnostic.Fix());
-        }
-
-        if (auto appended = AppendDiagnosticCode(code, static_cast<uint32>(diagnostic.Code()));
-            !appended) {
+        if (auto appended = AppendDiagnostic(out, file, diagnostic); !appended) {
             return appended;
         }
-
-        if (message.HasFailed()) {
-            return Result<void>::Failure(message.Status().Error());
-        }
-
-        out.Object().Key("range").Object().Key("start").Position(begin).Key("end").Position(end);
-        out.End().Key("severity").Number(LspSeverityError).Key("code").Text(code.View());
-        out.Key("source").Text(LspSource).Key("message").Text(message.View()).End();
     }
 
     out.EndArray();
+    return Result<void>::Success();
+}
+
+// 진단 하나의 LSP Diagnostic 객체다(발행과 빠른 수정이 같은 모양을 쓴다).
+Result<void> LspServer::AppendDiagnostic(LspOut& out, const SourceFile& file,
+                                         const Diagnostic& diagnostic) noexcept {
+    LspPosition begin;
+    LspPosition end;
+    if (diagnostic.HasSpan()) {
+        begin = LspPositionOf(file, diagnostic.Span().begin);
+        end = LspPositionOf(file, diagnostic.Span().end);
+    }
+
+    StringBuilder<DiagnosticCodeDigits + 2> code(allocator_);
+    StringBuilder<LspJsonInlineBytes> message(allocator_);
+    message.Append(diagnostic.Message());
+    if (!diagnostic.Explanation().IsEmpty()) {
+        message.Append("\n").Append(diagnostic.Explanation());
+    }
+
+    if (!diagnostic.Fix().IsEmpty()) {
+        message.Append(LspFixPrefix).Append(diagnostic.Fix());
+    }
+
+    if (auto appended = AppendDiagnosticCode(code, static_cast<uint32>(diagnostic.Code()));
+        !appended) {
+        return appended;
+    }
+
+    if (message.HasFailed()) {
+        return Result<void>::Failure(message.Status().Error());
+    }
+
+    out.Object().Key("range").Object().Key("start").Position(begin).Key("end").Position(end);
+    out.End().Key("severity").Number(LspSeverityError).Key("code").Text(code.View());
+    out.Key("source").Text(LspSource).Key("message").Text(message.View()).End();
+
     return Result<void>::Success();
 }
 
@@ -968,7 +986,17 @@ bool LspServer::PositionParams(JsonValue params, StringView& uri, LspPosition& p
     const JsonValue text =
         document.IsValid() && document.IsObject() ? document.Find("uri") : JsonValue();
     const JsonValue place = params.IsObject() ? params.Find("position") : JsonValue();
-    if (!text.IsValid() || !text.IsString() || !place.IsValid() || !place.IsObject()) {
+    if (!text.IsValid() || !text.IsString() || !PositionOf(place, position)) {
+        return false;
+    }
+
+    uri = text.GetString();
+    return true;
+}
+
+// LSP Position 객체(0 이상 uint32 범위 정수 line·character)다.
+bool LspServer::PositionOf(JsonValue place, LspPosition& position) noexcept {
+    if (!place.IsValid() || !place.IsObject()) {
         return false;
     }
 
@@ -985,7 +1013,6 @@ bool LspServer::PositionParams(JsonValue params, StringView& uri, LspPosition& p
         return false;
     }
 
-    uri = text.GetString();
     position.line = static_cast<uint32>(lineNumber.Value());
     position.character = static_cast<uint32>(characterNumber.Value());
     return true;
@@ -1259,6 +1286,114 @@ Result<void> LspServer::Completion(JsonValue id, JsonValue params) noexcept {
     });
 }
 
+Result<void> LspServer::CodeAction(JsonValue id, JsonValue params) noexcept {
+    const JsonValue document = params.IsObject() ? params.Find("textDocument") : JsonValue();
+    const JsonValue uri =
+        document.IsValid() && document.IsObject() ? document.Find("uri") : JsonValue();
+    const JsonValue range = params.IsObject() ? params.Find("range") : JsonValue();
+    LspPosition start;
+    LspPosition end;
+    if (!uri.IsValid() || !uri.IsString() || !range.IsValid() || !range.IsObject() ||
+        !PositionOf(range.Find("start"), start) || !PositionOf(range.Find("end"), end)) {
+        return Fail(id, LspInvalidParams, LspRangeMessage);
+    }
+
+    // `context.only`가 quickfix를 담지 않으면 빈 목록(11.7절). kind는 `.`으로 나뉜 계층이라
+    // `quickfix`·그 앞 계층(빈 글자 — 모든 kind)이 담는다.
+    const JsonValue context = params.Find("context");
+    const JsonValue only =
+        context.IsValid() && context.IsObject() ? context.Find("only") : JsonValue();
+    bool wanted = true;
+    if (only.IsValid() && only.IsArray()) {
+        wanted = false;
+        for (usize at = 0; at < only.Size(); ++at) {
+            const StringView kind = only.At(at).IsString() ? only.At(at).GetString() : "-";
+            wanted = wanted || kind.IsEmpty() || kind == LspQuickFixKind;
+        }
+    }
+
+    // 열린 `.spark` 문서의 마지막 분석 진단 중 범위와 겹치는 것(빈 범위면 그 자리를 담는 것).
+    const LspDocument* open = FindDocument(uri.GetString());
+    auto module = ModuleOfUri(uri.GetString());
+    if (!module) {
+        return Result<void>::Failure(module.Error());
+    }
+
+    struct Entry {
+        const Diagnostic* diagnostic = nullptr;
+        usize firstFix = 0;
+        usize fixCount = 0;
+    };
+
+    Array<Entry> entries(allocator_);
+    Array<LspFix> fixes(allocator_);
+    const SourceFile* file = nullptr;
+    if (wanted && open != nullptr && module.Value() != NoModule &&
+        open->key.View().EndsWith(LspSourceExtension, StringComparison::CaseSensitive)) {
+        const LspAnalysis& analysis = *analysis_;
+        const SourceId source = analysis.compilation.ModuleSource(module.Value());
+        file = &analysis.sources.Get(source);
+        uint32 begin = LspOffsetOf(*file, start);
+        uint32 last = LspOffsetOf(*file, end);
+        if (begin > last) {
+            const uint32 swap = begin;
+            begin = last;
+            last = swap;
+        }
+
+        for (const Diagnostic& diagnostic : analysis.diagnostics.View()) {
+            // 빈 범위는 그 자리를 담거나 경계에 닿는 진단, 아닌 범위는 반열린 구간으로 겹치는 진단.
+            const SourceSpan span = diagnostic.Span();
+            const bool overlaps = begin == last ? span.begin <= begin && begin <= span.end
+                                                : span.begin < last && begin < span.end;
+            if (diagnostic.Source().index != source.index || !diagnostic.HasSpan() || !overlaps) {
+                continue;
+            }
+
+            Entry entry;
+            entry.diagnostic = &diagnostic;
+            entry.firstFix = fixes.Size();
+            if (auto collected = LspCollectFixes(allocator_, analysis.compilation, analysis.sources,
+                                                 module.Value(), diagnostic, fixes);
+                !collected) {
+                return collected;
+            }
+
+            entry.fixCount = fixes.Size() - entry.firstFix;
+            if (entry.fixCount != 0) {
+                if (auto pushed = entries.TryPushBack(entry); !pushed) {
+                    return pushed;
+                }
+            }
+        }
+    }
+
+    return Send([&](LspOut& out) noexcept {
+        out.Key("id").Value(id).Key("result").Array();
+        for (const Entry& entry : entries) {
+            for (usize at = entry.firstFix; at < entry.firstFix + entry.fixCount; ++at) {
+                const LspFix& fix = fixes[at];
+                out.Object().Key("title").Text(fix.title.View()).Key("kind").Text(LspQuickFixKind);
+                out.Key("diagnostics").Array();
+                if (auto appended = AppendDiagnostic(out, *file, *entry.diagnostic); !appended) {
+                    return appended;
+                }
+
+                out.EndArray().Key("isPreferred").Flag(entry.fixCount == 1);
+                out.Key("edit").Object().Key("changes").Object().Key(uri.GetString()).Array();
+                out.Object().Key("range").Object();
+                out.Key("start").Position(LspPositionOf(*file, fix.begin));
+                out.Key("end").Position(LspPositionOf(*file, fix.end)).End();
+                out.Key("newText").Text(fix.text.View()).End();
+                out.EndArray().End().End().End();
+            }
+        }
+
+        out.EndArray();
+        return Result<void>::Success();
+    });
+}
+
 Result<bool> LspServer::Handle(StringView body) noexcept {
     JsonDocument document(allocator_);
     const JsonError error = document.Parse(body);
@@ -1353,6 +1488,10 @@ Result<bool> LspServer::Handle(StringView body) noexcept {
 
     if (name == "textDocument/completion") {
         return done(Completion(id, params));
+    }
+
+    if (name == "textDocument/codeAction") {
+        return done(CodeAction(id, params));
     }
 
     return done(Fail(id, LspMethodNotFound, "the method is not supported"));

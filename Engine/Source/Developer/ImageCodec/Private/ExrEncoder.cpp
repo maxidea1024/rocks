@@ -24,16 +24,18 @@ struct ExrWriteMemory {
     }
 
     Array<uint8>& data;
-    bool failed = false;
+    // 출력 버퍼를 늘리지 못한 오류다(None이면 실패 없음).
+    ErrorCode error = ErrorCode::None;
 };
 
 int64_t ExrWriteStream(exr_const_context_t, void* userData, const void* buffer, uint64_t size,
                        uint64_t offset, exr_stream_error_func_ptr_t) noexcept {
     auto* file = static_cast<ExrWriteMemory*>(userData);
-    if (offset + size > file->data.Size() &&
-        !file->data.TryResize(static_cast<usize>(offset + size))) {
-        file->failed = true;
-        return -1;
+    if (offset + size > file->data.Size()) {
+        if (auto resized = file->data.TryResize(static_cast<usize>(offset + size)); !resized) {
+            file->error = resized.Error();
+            return -1;
+        }
     }
 
     platform::MemoryCopy(file->data.Data() + offset, buffer, static_cast<usize>(size));
@@ -180,16 +182,22 @@ Result<void> EncodeExr(Allocator& allocator, const ExrWriteImage& image,
     }
 
     ExternalAllocationScope scope(allocator);
-    const auto failed = [&](exr_context_t& context) noexcept {
+    ExrWriteMemory file(out);
+    // 오류는 할당 실패를 앞세운다: OpenEXRCore 할당(묶음 표지), 출력 버퍼, 그다음 error(0 버퍼 할당
+    // 실패나 OpenEXRCore 거부 InvalidArgument). 할당 실패 뒤의 OpenEXRCore 실패는 거부가 아니다.
+    const auto failed = [&](exr_context_t& context,
+                            ErrorCode error = ErrorCode::InvalidArgument) noexcept {
         if (context != nullptr) {
             exr_finish(&context);
         }
 
         out.Clear();
-        return Result<void>::Failure(scope.AllocationFailed() ? ErrorCode::OutOfMemory
-                                                              : ErrorCode::InvalidArgument);
+        if (scope.AllocationFailed()) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return Result<void>::Failure(file.error != ErrorCode::None ? file.error : error);
     };
-    ExrWriteMemory file(out);
     exr_context_initializer_t initializer = EXR_DEFAULT_CONTEXT_INITIALIZER;
     initializer.error_handler_fn = ExrWriteMessage;
     initializer.alloc_fn = ExternalAllocate;
@@ -247,9 +255,10 @@ Result<void> EncodeExr(Allocator& allocator, const ExrWriteImage& image,
     // deep은 머리만 쓴다(디코더 거부 시험용).
     if (image.storage == ExrStorage::Scanline || image.storage == ExrStorage::Tiled) {
         Array<uint8> zeros(allocator);
-        if (!zeros.TryResize(static_cast<usize>(image.width) * static_cast<usize>(image.height) *
-                             4)) {
-            return failed(context);
+        if (auto resized = zeros.TryResize(static_cast<usize>(image.width) *
+                                           static_cast<usize>(image.height) * 4);
+            !resized) {
+            return failed(context, resized.Error());
         }
 
         platform::MemoryZero(zeros.Data(), zeros.Size());
@@ -260,10 +269,9 @@ Result<void> EncodeExr(Allocator& allocator, const ExrWriteImage& image,
         }
     }
 
-    if (exr_finish(&context) != EXR_ERR_SUCCESS || file.failed || scope.AllocationFailed()) {
-        out.Clear();
-        return Result<void>::Failure(scope.AllocationFailed() ? ErrorCode::OutOfMemory
-                                                              : ErrorCode::InvalidArgument);
+    const bool finished = exr_finish(&context) == EXR_ERR_SUCCESS;
+    if (!finished || file.error != ErrorCode::None || scope.AllocationFailed()) {
+        return failed(context);
     }
 
     return Result<void>::Success();

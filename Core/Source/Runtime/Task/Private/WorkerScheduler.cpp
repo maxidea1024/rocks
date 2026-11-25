@@ -81,7 +81,9 @@ void ReleaseState(WorkerState* state) noexcept {
     if (last) {
         ROCKS_ASSERT(state->workers == nullptr && state->records == nullptr);
         Allocator* allocator = state->allocator;
-        DestroyAt(state);
+        // 잠금·조건 변수는 파괴자가 없어(Docs/Design/Synchronization 8.1절) 상태는 trivially
+        // destructible이다. 저장소를 돌려주면 수명이 끝난다.
+        static_assert(IsTriviallyDestructibleV<WorkerState>);
         ROCKS_ASSERT(allocator->Deallocate(state));
     }
 }
