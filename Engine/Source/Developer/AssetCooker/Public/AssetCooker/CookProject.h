@@ -92,6 +92,8 @@ struct CookReport {
     ROCKS_PROPERTY() uint32 targets = 0;
     ROCKS_PROPERTY() uint32 cooked = 0;
     ROCKS_PROPERTY() uint32 reused = 0;
+    // 이번 실행이 새로 쓴 패키지·artifact byte다(게시 여부와 무관 — 게시하지 않은 실행의 파일은
+    // 다음 전체 쿠킹이 지운다).
     ROCKS_PROPERTY() uint64 bytesWritten = 0;
     ROCKS_PROPERTY() Array<CookReportDiagnostic> diagnostics;
     ROCKS_PROPERTY() Array<CookReportArtifact> artifacts;
