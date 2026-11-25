@@ -106,3 +106,4 @@
 - 개정 46(2026-11-25): SH2g 구현 메모(16.1절 — `RWTextureCube`·`RWTextureCubeArray`, GLES 처리기 cube storage image 고쳐 쓰기·처리기 버전 OpenGL 4, 값 1 storage image cube 모양, GLES cube 쓰기 slot 묶기).
 - 개정 47(2026-11-25): RenderBase GX6(9.11절) 반영. 7.2절 4항 D3D12: 진단 root UAV 자리, 루트 상수 DWORD는 파이프라인의 그리기별 상수 크기, 예산식에 진단 root UAV와 넘친 CBV 테이블, 보장 root CBV를 그래픽 13·진단 12·CS 14로 고침(UAV 테이블은 CS만 — 개정 32의 12·11은 VS·PS UAV 테이블을 센 값). 12항·7.3절 (k)의 진단 경계 11 → 12. 16.1절 SH2e2 메모에 단계별 테이블 전환을 적음.
 - 개정 48(2026-11-25): RenderBase RB5(10.6절) 반영. 정점 입력 타입 등록부를 셰이더 타입 등록부에 함께 둔다(SSD5 — desc에 `.rsh` 원문 경로·소속, 같은 `Freeze`, 쿠커·공급자·셰이더 집합은 등록부 목록), 정점 입력 축 job의 생성 include 연결 `/Engine/Generated/VertexInput.rsh`(SSD6, 전처리기 생성 include 표), SSD28 입력. 같은 날 구현(RenderBase 개정 42, 10.6절 "구현").
+- 개정 49(2026-11-25): RenderBase 개정 46(18.4절) 반영. P7·SH3·SH4를 화면 마일스톤 밖(렌더러 RS0 전)으로 옮겼다(16절 표). 마일스톤 셰이더는 루트 상수와 텍스처 하나라 손으로 쓴 레이아웃 표로 충분하고, 감시 재컴파일은 화면 완료 기준에 들지 않는다. 6절 4항 순서는 그대로다.

@@ -1585,6 +1585,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PrimitiveComponent::bodySettings_",
+      "id": "0875419e3dc7407bb19af38f79b75c72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PrimitiveComponent::boundsScale_",
       "id": "8ce354f0861a490b8a343205d4afc53a",
       "aliases": [],

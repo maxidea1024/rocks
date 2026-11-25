@@ -17,3 +17,4 @@
   - 컴포넌트 표: 충돌 형상(CM3)·Spline(CM5)·ZoneShape(CM30) 편집 표시, `InteractiveFoliageComponent`(CM18), `BudgetedSkeletalMeshComponent`(CM22)를 더하고, light shaft(A25)·거리장 그림자·capsule 그림자(A27)를 5.2절로 옮겨 `Unsupported` 진단을 적었다. RS11에 SL 단계가 없음을 6장에 적었다.
   - 허용 오차를 사양 기반 표(GLSL ES 3.20 4.7.1·Vulkan 정밀도 표·D3D11 규칙)로 바꿨다(8.3절). 결정성: GPU 메시지는 정렬 다중집합 비교, 노출 적응은 고정 dt, 큰 표본은 2D 배치(폭 ≤ 16,384).
   - 내부 불일치: `ShaderPrelude` include 목록(네 파일)과 A01 → A02 include 예외, `ShadingTestKernels` 위치(시험 루트), 11장의 `LightingDebugCounters`·`Occlusion` 파일, `BlockCompression*` 이름 통일, PixelFormat 이름(`RG11B10Ufloat`·`RGB9E5Ufloat`). SS·CC 절 인용을 장 파일 링크로 바꿨다.
+- 개정 2(2026-11-25): RB 개정 46(18.4·18.5절) 반영. 화면 마일스톤의 HDR 표시가 tone map을 요구하므로 A03 `FilmicToneCurve.rsh`(SL0)와 A17 `TonemapPass.rsf`의 노출 배율 + filmic 곡선 부분을 SL1에서 먼저 넣는다. LUT·자동 노출·bloom·vignette·grain은 SL8 그대로다. 단계 순서는 바꾸지 않는다(SL0 몫을 마일스톤이 먼저 쓴다).

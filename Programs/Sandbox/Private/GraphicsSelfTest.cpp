@@ -7,6 +7,7 @@
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
 #include "RenderUtilitySelfTest.h"
+#include "ScreenSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
 #include "FormatSelfTest.h"
@@ -780,6 +781,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     }
     // 렌더 lane(RB1): 장치를 lane으로 넘겨 엔진 루프 프레임을 그리고 되돌려 받는다.
     failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+    // 엔진 창 렌더 경로(RenderBase 18.5절 SM1–SM5): 엔진 장면 → tone map → 스왑체인, CPU 기준 대조.
+    failures += RunScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
 }
@@ -901,6 +904,12 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     setvbuf(stdout, nullptr, _IONBF, 0);
     printf("Graphics self-test\n");
     failures = 0;
+    // 엔진 셰이더 호스트(RenderBase 9.12절): Sandbox 타입·원문 디렉터리를 넣어 서비스로 올리고 엔진
+    // 묶음(RenderBase 엔진 타입·Development 공급자 모듈)을 시작한 뒤 Freeze한다. 모든 backend
+    // 검사가 끝날 때까지 산다.
+    shaders::SelfTestShaderHost shaderHost(modules);
+    Check(shaderHost.IsReady(), "Sandbox",
+          "the engine shader host registers, starts the engine modules and freezes");
     graphics::DeviceDesc desc;
     desc.enableValidation = true;
     // D3D12만 쓰고 다른 backend는 무시한다.
@@ -942,6 +951,8 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
            "executables\n");
 #endif
     RunVulkan(allocator, desc, vulkan, vulkanSoftware);
+    // 카메라 입력(RenderBase 18.5절 4항): 헤드리스 엔진에 W·오른쪽 화살표를 넣는다.
+    failures += RunPawnInputChecks(allocator, modules);
     Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");
     Compare(d3d12, glesDesktop, "D3D12 vs OpenGL ES on GL core");
     Compare(d3d12, warp, "D3D12 vs WARP");
@@ -957,7 +968,6 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
                    "No graphics backend could create a device (D3D12, D3D11, OpenGL ES, Vulkan and "
                    "their software fallbacks all failed); see the warnings above for each stage");
     }
-    shaders::ShutdownProvider();
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");

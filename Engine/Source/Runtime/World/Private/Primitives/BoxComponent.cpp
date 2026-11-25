@@ -40,4 +40,11 @@ bool BoxComponent::TryLocalBounds(ComponentBounds& local) const noexcept {
     return true;
 }
 
+Result<VolumeShape> BoxComponent::TryWorldVolumeShape() const noexcept {
+    const Vec3d extent = ScaledBoxExtent();
+    return VolumeShape::TryBox(
+        WorldLocation(), WorldQuaternion(),
+        Vec3d(math::Abs(extent.x), math::Abs(extent.y), math::Abs(extent.z)));
+}
+
 } // namespace rocks

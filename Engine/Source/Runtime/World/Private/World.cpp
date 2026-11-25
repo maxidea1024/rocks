@@ -1,5 +1,7 @@
 #include "WorldInternal.h"
 
+#include <Collision/CollisionSettings.generated.h>
+#include <Collision/CollisionSettings.h>
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -129,12 +131,46 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       levelSlots_(allocator), componentRecords_(allocator), pendingStart_(allocator),
       pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
       gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings),
-      gcSchedule_(desc.gcSchedule) {
+      collisionProfiles_(allocator), gcSchedule_(desc.gcSchedule) {
     kind_ = desc.kind;
     outer_ = desc.outerSubsystems;
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
+}
+
+Result<void> World::BuildWorldCollisionProfiles() noexcept {
+    if (settings_ == nullptr) {
+        collisionProfiles_ = CollisionProfileTable(allocator_);
+        return Result<void>::Success();
+    }
+
+    const void* registered = settings_->FindSettings(GeneratedType<CollisionSettings>::Id());
+    if (registered == nullptr) {
+        collisionProfiles_ = CollisionProfileTable(allocator_);
+        return Result<void>::Success();
+    }
+
+    auto built =
+        BuildCollisionProfileTable(*static_cast<const CollisionSettings*>(registered), allocator_);
+    if (!built) {
+        return Result<void>::Failure(built.Error());
+    }
+
+    collisionProfiles_ = Move(built.Value());
+    // 의미 오류로 빠진 항목은 UE처럼 경고로 남긴다(표 생성은 실패하지 않는다).
+    if (!collisionProfiles_.Diagnostics().IsEmpty()) {
+        LogContextScope context("World", Name());
+        for (const CollisionProfileDiagnostic& diagnostic : collisionProfiles_.Diagnostics()) {
+            Log::Warning(LogWorld,
+                         "Collision profile settings entry dropped: kind {Kind}, '{Subject}', "
+                         "'{Detail}' ({Code})",
+                         static_cast<uint32>(diagnostic.kind), diagnostic.subject.View(),
+                         diagnostic.detail.View(), DiagCollisionProfileEntryDropped);
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 World::~World() {
@@ -195,6 +231,12 @@ Result<void> World::Initialize() noexcept {
         }
 
         cvarScope_ = created.Value();
+    }
+
+    // 충돌 profile 표다(CollisionData 9절 CD2). 설정 struct가 등록되지 않은 문맥은 빈 표로 둔다.
+    if (auto built = BuildWorldCollisionProfiles(); !built) {
+        ReleaseCVarScope();
+        return built;
     }
 
     ObjectAccessScope scope(Access());

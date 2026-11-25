@@ -627,20 +627,16 @@ uint32 RunRenderUtilityChecks(const char* name, Device& device, Allocator& alloc
         RunDirectCopy(device, pipeline.Value(), source.Value(), target.Value(), pixels);
         RunGraphCopy(device, cache, request.Value(), source.Value(), target.Value(), pixels,
                      allocator);
-        render::BuiltinResources pack;
-        auto created = pack.Create(device, *set);
-        if (!created) {
-            printf("    builtin resources: %s (%s)\n", pack.LastFailure(),
-                   ErrorCodeName(created.Error()));
+        // 팩은 엔진 렌더 자원이 집합과 함께 만든 것이다(RenderBase 9.12절 2항).
+        const render::BuiltinResources* pack = shaders::ActiveBuiltins();
+        Check(pack != nullptr && pack->IsReady(),
+              "the engine render resources opened the builtin resource pack");
+        if (pack != nullptr && pack->IsReady()) {
+            CheckPackValues(device, *pack, allocator);
+            CheckBlendPresets(device, cache, request.Value(), target.Value(), pixels);
+            CheckBuiltinMeshes(device, cache, *set, *pack, target.Value(), pixels);
         }
 
-        Check(created.IsOk(), "the builtin resource pack is created");
-        if (created) {
-            CheckPackValues(device, pack, allocator);
-            CheckBlendPresets(device, cache, request.Value(), target.Value(), pixels);
-            CheckBuiltinMeshes(device, cache, *set, pack, target.Value(), pixels);
-            pack.Retire(device);
-        }
         Check(device.ValidationErrorCount() == validationBefore,
               "fullscreen draws raise no validation errors");
     }

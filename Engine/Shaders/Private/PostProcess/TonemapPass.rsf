@@ -1,0 +1,34 @@
+// 최소 tone map pass다(Docs/Design/RenderBase 18.5절 3항, 엔진 셰이더 A17 TonemapPass의 노출 +
+// filmic 부분). FullscreenTriangleVertex와 짝을 이루어 HDR 장면 색 SceneColor를 노출 배율로 곱하고
+// UE Filmic 색 경로(Color/FilmicToneCurve.rsh)로 표시 색을 낸다. 출력은 선형 값이고 sRGB 부호화는
+// 대상 view(스왑체인 RGBA8UnormSrgb)가 한다. 음수 입력은 0으로 본다(UE도 검정으로 보인다).
+#include "/Engine/Private/Color/FilmicToneCurve.rsh"
+
+// C++ 구조체는 RenderBase/EngineShaderTypes.h TonemapConstants다(48 byte).
+struct TonemapConstants {
+    // x 노출 배율, y blue correction, z 색역 확장, w 곡선 양
+    float4 exposure;
+    // x 기울기, y toe, z shoulder, w black clip
+    float4 film;
+    // x white clip(yzw는 쓰지 않는다)
+    float4 filmWhite;
+};
+
+ROCKS_ROOT_CONSTANTS(TonemapConstants, Tonemap);
+
+Texture2D SceneColor;
+SamplerState SceneColorSampler;
+
+float4 TonemapPixel(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
+    RocksFilmicParameters film;
+    film.slope = Tonemap.film.x;
+    film.toe = Tonemap.film.y;
+    film.shoulder = Tonemap.film.z;
+    film.blackClip = Tonemap.film.w;
+    film.whiteClip = Tonemap.filmWhite.x;
+    film.blueCorrection = Tonemap.exposure.y;
+    film.expandGamut = Tonemap.exposure.z;
+    film.toneCurveAmount = Tonemap.exposure.w;
+    const float3 scene = max(SceneColor.Sample(SceneColorSampler, uv).rgb * Tonemap.exposure.x, 0.0);
+    return float4(RocksFilmicDisplayColor(scene, film), 1.0);
+}

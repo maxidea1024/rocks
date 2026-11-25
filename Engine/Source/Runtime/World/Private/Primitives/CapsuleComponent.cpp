@@ -49,4 +49,17 @@ bool CapsuleComponent::TryLocalBounds(ComponentBounds& local) const noexcept {
     return true;
 }
 
+Result<VolumeShape> CapsuleComponent::TryWorldVolumeShape() const noexcept {
+    // UE 물리 형상(FKSphylElem::GetScaledHalfLength·GetScaledRadius — BodySetup.cpp:2167–2181)과
+    // 같다: 반 높이 max(h × |sz|, 0.1), 반지름 clamp(r × max(|sx|, |sy|), 0.1, 반 높이). 컴포넌트
+    // bounds(min scale)와 다르다(UE와 같다).
+    const Vec3d scale = WorldScale3D();
+    const double halfHeight = math::Max(
+        static_cast<double>(capsuleHalfHeight_) * math::Abs(scale.z), CapsuleMinimumPhysicsSize);
+    const double radius = math::Clamp(static_cast<double>(capsuleRadius_) *
+                                          math::Max(math::Abs(scale.x), math::Abs(scale.y)),
+                                      CapsuleMinimumPhysicsSize, halfHeight);
+    return VolumeShape::TryCapsule(WorldLocation(), WorldQuaternion(), radius, halfHeight);
+}
+
 } // namespace rocks
