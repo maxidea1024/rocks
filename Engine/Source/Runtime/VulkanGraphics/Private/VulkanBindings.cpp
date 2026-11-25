@@ -351,9 +351,10 @@ Result<VkDescriptorSet> VulkanDevice::AllocateFrameSet(VkDescriptorSetLayout lay
                 {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 2},
                 // compute 쓰기 텍스처 slot(SetWritableTexture, 텍스처 GX2 A부)이다.
                 {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, sets},
-                // 상수 버퍼(RenderBase 9.11절)다.
-                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, sets * 4},
-                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sets * 4}};
+                // 상수 버퍼(RenderBase 9.11절)다. set 하나가 단계의 상수 버퍼 전부(최대
+                // MaxConstantBufferSlots)를 담는다.
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, sets * MaxConstantBufferSlots},
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sets * MaxConstantBufferSlots}};
             VkDescriptorPoolCreateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             info.maxSets = sets;

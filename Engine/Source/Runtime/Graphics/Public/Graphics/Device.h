@@ -114,8 +114,9 @@ public:
     // 쓴다(더 작은 값은 SetDrawConstants).
     //
     // 실패: 기록 중 아님·범위 밖 stage·slot·크기 규칙 위반(IsValidConstantBufferBytes)
-    // InvalidArgument, ring이 이 기록만으로 찼으면 CapacityExceeded(그 slot은 빈다). 실패하면
-    // 그 slot의 앞 묶음은 그대로다(CapacityExceeded만 비운다).
+    // InvalidArgument(그 slot의 앞 묶음은 그대로다), ring이 이 기록만으로 찼으면
+    // CapacityExceeded, 메모리·API 실패는 그 오류다. InvalidArgument가 아닌 실패는 그 slot을
+    // 비운다(뒤 그리기는 무시된다).
     virtual Result<void> SetConstantData(ShaderStage stage, uint32 slot,
                                          Span<const uint8> bytes) noexcept = 0;
 

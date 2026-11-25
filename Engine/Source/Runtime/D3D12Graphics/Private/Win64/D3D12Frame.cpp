@@ -254,6 +254,10 @@ void D3D12Device::ResetBindings() noexcept {
         }
     }
 
+    for (CbvTableCache& cache : cbvTableCache_) {
+        cache.valid = false;
+    }
+
     onlineExhaustedLogged_ = false;
     bufferStates_.Clear();
     platform::MemoryZero(constants_, sizeof(constants_));

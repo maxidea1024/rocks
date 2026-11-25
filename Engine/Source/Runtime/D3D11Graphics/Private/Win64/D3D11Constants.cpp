@@ -49,7 +49,7 @@ D3D11Device::CreateConstantBuffer(ConstantBufferLifetime lifetime,
 Result<void> D3D11Device::UpdateConstantBuffer(ConstantBufferHandle buffer,
                                                Span<const uint8> contents) noexcept {
     platform::LockGuard lock(gate_);
-    const ConstantBufferRecord* record = constantBuffers_.Find(buffer.slot);
+    ConstantBufferRecord* record = constantBuffers_.Find(buffer.slot);
     if (record == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -62,14 +62,37 @@ Result<void> D3D11Device::UpdateConstantBuffer(ConstantBufferHandle buffer,
     }
 
     // 기록 중인 소유 스레드는 기록 context에 갱신을 넣어 기록 순서를 지킨다(앞 그리기는 옛 내용).
-    // 기록 밖이거나 다른 스레드면 다음 제출 앞의 업로드 기록에 쌓는다(다른 스레드가 기록 중에
-    // 바꾸면 그 기록 전체가 새 내용을 본다).
+    // 기록 밖이면 다음 제출 앞의 업로드 기록에 쌓는다(앞 기록은 이미 제출했다).
     if (recording_ && ownership_.IsOwner()) {
         deferred_->UpdateSubresource(record->buffer.Get(), 0, nullptr, contents.Data(), 0, 0);
         return Result<void>::Success();
     }
 
-    return RecordBufferUpload(record->buffer.Get(), 0, contents);
+    if (!recording_) {
+        return RecordBufferUpload(record->buffer.Get(), 0, contents);
+    }
+
+    // 다른 스레드가 기록 중에 바꾸면 새 버퍼로 옮긴다(rename — 업로드 기록은 지금 기록보다 먼저
+    // 실행되므로 그 앞 그리기가 새 내용을 보게 된다). 옛 버퍼는 이 기록의 fence 뒤 놓는다.
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return reserved;
+    }
+
+    D3D11_BUFFER_DESC desc = {};
+    desc.ByteWidth = static_cast<UINT>(contents.Size());
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    const D3D11_SUBRESOURCE_DATA initial = {contents.Data(), 0, 0};
+    ComRef<ID3D11Buffer> renamed;
+    const HRESULT result = device_->CreateBuffer(&desc, &initial, renamed.Out());
+    if (FAILED(result)) {
+        return Fail("CreateBuffer (renamed constant buffer)", result);
+    }
+
+    Defer(Move(record->buffer));
+    record->buffer = Move(renamed);
+    return Result<void>::Success();
 }
 
 void D3D11Device::Retire(ConstantBufferHandle buffer) noexcept {

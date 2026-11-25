@@ -11,6 +11,12 @@ namespace rocks::graphics::gles {
 
 Result<ConstantBufferHandle> GlesDevice::CreateConstantBuffer(ConstantBufferLifetime lifetime,
                                                               Span<const uint8> contents) noexcept {
+    // OpenGL ES 장치는 생성도 소유 스레드 전용이다(concurrentResourceCreation 거짓).
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<ConstantBufferHandle>::Failure(owner.Error());
+    }
+
     if ((lifetime != ConstantBufferLifetime::SingleFrame &&
          lifetime != ConstantBufferLifetime::MultiFrame) ||
         !IsValidConstantBufferBytes(contents.Size())) {
@@ -37,6 +43,11 @@ Result<ConstantBufferHandle> GlesDevice::CreateConstantBuffer(ConstantBufferLife
 
 Result<void> GlesDevice::UpdateConstantBuffer(ConstantBufferHandle buffer,
                                               Span<const uint8> contents) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return owner;
+    }
+
     ConstantBufferRecord* record = constantBuffers_.Find(buffer.slot);
     if (record == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);

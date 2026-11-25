@@ -640,25 +640,47 @@ bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
         }
 
         if (tables.cbvParam >= 0) {
-            D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
-            if (!AllocateOnline(tables.cbvCount, cpu, handle)) {
-                return false;
-            }
-
-            // 셰이더가 읽지 않는 사이 slot은 0 구간을 가리킨다.
+            // 셰이더가 읽지 않는 사이 slot은 0 구간을 가리킨다. 바로 앞 table과 주소 목록이 같으면
+            // 그 구간을 다시 쓴다(그리기마다 ring을 쓰지 않게).
             const uint32 overflow = root.plan.tableMask[stage];
+            D3D12_CONSTANT_BUFFER_VIEW_DESC views[MaxConstantBufferSlots] = {};
+            CbvTableCache& cache = cbvTableCache_[stageIndex];
+            bool same =
+                cache.valid && cache.first == tables.cbvFirst && cache.count == tables.cbvCount;
             for (uint32 entry = 0; entry < tables.cbvCount; ++entry) {
                 const uint32 slot = tables.cbvFirst + entry;
-                D3D12_CONSTANT_BUFFER_VIEW_DESC view = {zeroConstants_, ConstantBufferAlignment};
+                views[entry] = {zeroConstants_, ConstantBufferAlignment};
                 if ((overflow & (1u << slot)) != 0) {
                     uint32 bytes = 0;
-                    view.BufferLocation = BoundConstantAddress(stageIndex, slot, bytes);
-                    view.SizeInBytes = static_cast<UINT>(AlignConstantBufferBytes(bytes));
+                    views[entry].BufferLocation = BoundConstantAddress(stageIndex, slot, bytes);
+                    views[entry].SizeInBytes = static_cast<UINT>(AlignConstantBufferBytes(bytes));
                 }
 
-                D3D12_CPU_DESCRIPTOR_HANDLE destination = cpu;
-                destination.ptr += static_cast<SIZE_T>(entry) * onlineIncrement_;
-                device_->CreateConstantBufferView(&view, destination);
+                same = same && cache.addresses[entry] == views[entry].BufferLocation &&
+                       cache.sizes[entry] == views[entry].SizeInBytes;
+            }
+
+            if (same) {
+                handle = cache.gpu;
+            } else {
+                D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
+                if (!AllocateOnline(tables.cbvCount, cpu, handle)) {
+                    cache.valid = false;
+                    return false;
+                }
+
+                for (uint32 entry = 0; entry < tables.cbvCount; ++entry) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE destination = cpu;
+                    destination.ptr += static_cast<SIZE_T>(entry) * onlineIncrement_;
+                    device_->CreateConstantBufferView(&views[entry], destination);
+                    cache.addresses[entry] = views[entry].BufferLocation;
+                    cache.sizes[entry] = views[entry].SizeInBytes;
+                }
+
+                cache.valid = true;
+                cache.first = tables.cbvFirst;
+                cache.count = tables.cbvCount;
+                cache.gpu = handle;
             }
 
             setTable(tables.cbvParam, handle);

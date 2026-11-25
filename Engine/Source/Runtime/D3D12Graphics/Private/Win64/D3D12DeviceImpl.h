@@ -71,7 +71,7 @@ constexpr uint64 TexturePlacementAlignment = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNM
 constexpr uint64 BufferUploadAlignment = 16;
 // 기록 하나가 그리기 때 table을 복사해 넣는 shader-visible descriptor ring의 칸 수다(queue마다,
 // RenderBase 9.11절 5항). 같은 원본 목록은 다시 복사하지 않는다.
-constexpr uint32 OnlineDescriptorsPerQueue = 32'768;
+constexpr uint32 OnlineDescriptorsPerQueue = 131'072;
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
 // 소멸 때까지 놓지 않을 retire 항목의 fence 값이다. 정상 동작 중의 완료 값은 이 값에 닿지
@@ -1432,6 +1432,16 @@ private:
         D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
     };
     TableCache tableCache_[ConstantBufferStageCount][2] = {};
+    // 단계마다 바로 앞에 만든 넘친 CBV table(range 첫 slot·칸 수·주소 목록)과 그 구간이다.
+    struct CbvTableCache {
+        bool valid = false;
+        uint32 first = 0;
+        uint32 count = 0;
+        D3D12_GPU_VIRTUAL_ADDRESS addresses[MaxConstantBufferSlots] = {};
+        UINT sizes[MaxConstantBufferSlots] = {};
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
+    };
+    CbvTableCache cbvTableCache_[ConstantBufferStageCount] = {};
     bool onlineExhaustedLogged_ = false;
     // 지금 기록에 건 root signature다(기록·패스마다 비운다).
     ID3D12RootSignature* appliedGraphicsRoot_ = nullptr;
