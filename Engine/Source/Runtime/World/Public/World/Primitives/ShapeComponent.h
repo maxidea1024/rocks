@@ -2,6 +2,7 @@
 
 #include <Core/Math/Color.h>
 #include <Core/Math/Vector3.h>
+#include <Core/Math/VolumeShape.h>
 #include <Meta/Annotations.h>
 #include <World/Primitives/PrimitiveTypes.h>
 #include <World/Primitives/PrimitiveComponent.h>
@@ -61,6 +62,19 @@ public:
     void SetDynamicObstacle(bool obstacle) noexcept {
         Change(dynamicObstacle_, obstacle);
     }
+
+    // 월드에 놓인 영역 형상이다(Docs/Design/EngineRuntime 28.3절): 중심 WorldLocation, 회전
+    // WorldQuaternion, 크기는 scale을 적용한 값의 절댓값(24.3.6절 규칙). 오류: 월드 변환이
+    // 비유한(InvalidArgument).
+    virtual Result<VolumeShape> TryWorldVolumeShape() const noexcept = 0;
+
+    // 점에서 형상 표면까지의 거리(cm)다. 안이면 0이다(UE GetSquaredDistanceToCollision의 물리 없는
+    // 대응). 오류: 비유한 점·잘못된 월드 변환(InvalidArgument).
+    //
+    // 사용 예:
+    //   auto distance = box.TryDistanceToShape(listenerLocation);
+    //   if (distance && distance.Value() == 0.0) { ... }   // 영역 안
+    Result<double> TryDistanceToShape(const Vec3d& point) const noexcept;
 
 protected:
     // 지역 bounds다(파생이 채운다 — Shape는 boundsScale을 곱하지 않는다, UE와 같다).
