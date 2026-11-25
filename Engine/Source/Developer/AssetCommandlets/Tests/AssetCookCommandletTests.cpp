@@ -690,7 +690,8 @@ TEST(AssetLoadCookedCommand_LoadsAndRejects) {
     StringBuilder<512> packagePath(env.allocator);
     REQUIRE(packagePath.TryAppendFormat("{}/{}", cook.scene.root.Root(), package.View()));
     Array<uint8> packageBytes(env.allocator);
-    REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), packagePath.View(), 64 * 1024 * 1024,
+    constexpr uint64 PackageReadMaxBytes = 64ull * 1024 * 1024;
+    REQUIRE(ReadWholeFile(platform::PhysicalFileSystem(), packagePath.View(), PackageReadMaxBytes,
                           packageBytes, existed) &&
             existed && packageBytes.Size() > 100);
     packageBytes[100] ^= 1;
@@ -706,6 +707,12 @@ TEST(AssetLoadCookedCommand_LoadsAndRejects) {
     CHECK(usage({"--profile=Windows"}));
     CHECK(usage({"--profile=Windows", "/Game/A", "/Game/B"}));
     CHECK(usage({"--profile=Windows", "1234"}));
+    // AssetId는 36자 소문자 표기만 받는다(구분자 없는 32자·대문자는 사용법 오류 — 다른 명령과
+    // 같다).
+    CHECK(usage({"--profile=Windows", "0123456789abcdef0123456789abcdef"}));
+    CHECK(usage({"--profile=Windows", "01234567-89AB-CDEF-0123-456789ABCDEF"}));
+    // 프로필 id 문법(경로 조각 — Saved/Cooked 밖을 가리키지 못한다).
+    CHECK(usage({"--profile=../Windows", "/Game/Rock"}));
     CHECK(usage({"/Game/Rock"}));
     CHECK(usage({"--profile=Windows", "--profile=Windows", "/Game/Rock"}));
 }

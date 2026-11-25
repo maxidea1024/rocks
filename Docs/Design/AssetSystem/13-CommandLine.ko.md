@@ -57,7 +57,8 @@ A6은 남은 명령 둘(`asset-load-cooked`·`nugget-gc`)과 문서다. 검증 �
    - 실행 프로파일은 `--profile` 값이다(매니페스트와 다르면 `IncompatibleCook`).
 4. 대상:
    - `/`로 시작하면 경로 힌트다(로더 `FindByPath` — caseless). 없으면 `asset-load-cooked: NotFound: <대상>: error NotFound` 줄, 종료 코드 1이다.
-   - 그 밖은 36자 AssetId다(`TryParseGuid`). 문법 위반은 사용법 오류 2다.
+   - 그 밖은 36자 소문자 AssetId다(`AssetId::TryParse` — 다른 명령과 같다). 문법 위반은 사용법 오류 2다.
+   - `--profile`은 TargetProfiles id 문법(`[A-Za-z0-9_]`, 1–64 byte)이다 — 쿠킹 루트 경로 조각이라 위반은 사용법 오류 2다(코드 리뷰).
 5. `LoadBlocking`(site `"asset-load-cooked"`):
    - 성공하면 `asset-load-cooked: <id> loaded <AssetId> (<경로 힌트>) packages <공개 패키지 수>` 한 줄, 종료 코드 0이다. 공개 패키지 수는 로더 상태(`AssetManager::Describe` → `loader.loadedPackages`)다 — 대상과 그 Hard 의존 폐포의 패키지다(요청이 하나뿐이라 그 둘이 같다).
    - 실패하면 `<진단 코드 또는 오류 이름>: <대상>: error <원인 오류>`(related가 있으면 `(related <AssetId>)`), 종료 코드 1이다.

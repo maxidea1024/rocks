@@ -110,13 +110,16 @@ Result<int32> RunNuggetGcCommand(void* context, Span<const StringView> args,
     }
 
     platform::FileSystem& files = platform::PhysicalFileSystem();
-    auto settings = ReadNuggetCacheSettings(allocator, files, layout.Root(), nullptr);
+    NuggetSettingsFailure settingsFailure;
+    auto settings = ReadNuggetCacheSettings(allocator, files, layout.Root(), &settingsFailure);
     if (!settings) {
         if (settings.Error() == ErrorCode::OutOfMemory) {
             return Result<int32>::Failure(settings.Error());
         }
 
-        const char* code = settings.Error() == ErrorCode::InvalidArgument
+        // 거부 칸이 있으면 InvalidSetting(상한 넘은 파일 포함 — asset-cook과 같은 판정), 없으면
+        // 읽기 오류 이름이다.
+        const char* code = settingsFailure.field != NuggetSettingsField::None
                                ? AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting)
                                : ErrorCodeName(settings.Error());
         return Fail(output, allocator, NuggetGcName, 1,

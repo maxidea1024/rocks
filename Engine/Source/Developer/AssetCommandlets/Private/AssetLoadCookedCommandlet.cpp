@@ -5,7 +5,8 @@
 #include <AssetRuntime/CookedPackageIo.h>
 #include <Core/FileError.h>
 #include <Core/FileRead.h>
-#include <Core/Guid.h>
+#include <Object/AssetId.h>
+#include <TargetProfiles/TargetProfile.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Platform/AsyncFile.h>
 #include <Platform/File.h>
@@ -35,6 +36,24 @@ struct LoadCookedArgs {
     StringView target;
     bool help = false;
 };
+
+// 프로필 id 문법(`[A-Za-z0-9_]`, 1–TargetProfileIdMaxBytes byte — TargetProfiles와 같다)이다. 값이
+// 쿠킹 루트 경로 조각이라 `..`·구분자가 Saved/Cooked 밖을 가리키지 못하게 한다.
+bool IsProfileIdText(StringView id) noexcept {
+    if (id.IsEmpty() || id.ByteCount() > TargetProfileIdMaxBytes) {
+        return false;
+    }
+
+    for (usize index = 0; index < id.ByteCount(); ++index) {
+        const char c = id.Data()[index];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_')) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // 인자를 읽는다. 사용법 위반은 false다.
 bool ParseLoadCooked(Span<const StringView> args, LoadCookedArgs& out) noexcept {
@@ -74,13 +93,14 @@ bool ParseLoadCooked(Span<const StringView> args, LoadCookedArgs& out) noexcept 
         }
     }
 
-    // 경로 힌트가 아니면 36자 AssetId여야 한다(문법 위반은 사용법 오류).
-    if (out.profile.IsEmpty() || out.target.IsEmpty()) {
+    // 경로 힌트가 아니면 36자 소문자 AssetId여야 한다(다른 명령과 같은 AssetId::TryParse — 문법
+    // 위반은 사용법 오류).
+    if (!IsProfileIdText(out.profile) || out.target.IsEmpty()) {
         return false;
     }
 
     return out.target.StartsWith("/", StringComparison::CaseSensitive) ||
-           TryParseGuid(out.target).IsOk();
+           AssetId::TryParse(out.target).IsOk();
 }
 
 // 로드 실패 줄이다(`<진단 코드 또는 오류>: <대상>: error <원인>` + related).
@@ -215,6 +235,8 @@ Result<int32> RunAssetLoadCookedCommand(void* context, Span<const StringView> ar
         }
     } managerScope{manager};
 
+    // 단계마다 진단을 비운다(앞 단계의 칸이 섞이지 않게).
+    diagnostic = AssetDiagnostic{};
     if (auto initialized = manager.Initialize(&diagnostic); !initialized) {
         return initialized.Error() == ErrorCode::OutOfMemory
                    ? Result<int32>::Failure(initialized.Error())
@@ -236,13 +258,14 @@ Result<int32> RunAssetLoadCookedCommand(void* context, Span<const StringView> ar
 
         id = found.Value();
     } else {
-        id = AssetId{TryParseGuid(parsed.target).Value()};
+        id = AssetId::TryParse(parsed.target).Value();
     }
 
     AssetRequest request;
     request.id = id;
     uint32 packages = 0;
     {
+        diagnostic = AssetDiagnostic{};
         auto lease = manager.LoadBlocking(request, LoadCookedSite, &diagnostic);
         if (!lease) {
             return lease.Error() == ErrorCode::OutOfMemory
