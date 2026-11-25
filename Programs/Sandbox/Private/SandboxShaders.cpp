@@ -66,8 +66,9 @@ shader::ShaderTypeRegistry* Registry() noexcept {
     static shader::ShaderTypeRegistry registry(ProcessAllocator());
     // 엔진 셰이더 타입(RenderBase 11.4절 2항)도 함께 등록한다(엔진 호스트에서는 RenderBase 모듈이
     // 호스트 등록부에 넣는다).
-    static bool ready = registry.Register(Types) &&
-                        registry.Register(render::EngineShaderTypes()) && registry.Freeze();
+    static bool ready =
+        registry.Register(Types) && registry.Register(render::EngineShaderTypes()) &&
+        registry.RegisterVertexInputTypes(render::EngineVertexInputTypes()) && registry.Freeze();
     if (!ready) {
         Log::Error(graphics::LogGraphics,
                    "Sandbox shader types failed to register: {Type}: {Reason}",
