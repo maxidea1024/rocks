@@ -1,0 +1,523 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::angularDamping",
+      "id": "d77d845f961e411f803cd289792d57fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::autoWeld",
+      "id": "f18c4972b7a144339ba297a0f20f3c12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::centerOfMassOffset",
+      "id": "bc31aecc4bee46bb88fe13fa2854ea3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::collisionEnabled",
+      "id": "6053b9c1bc654f05a2bee15b8215ebc3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::continuousCollision",
+      "id": "ad1a6fd322804b729e42cb65b72d6ab3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::customDofPlaneNormal",
+      "id": "e620402eb4d143e78a1fc0f92fb5ada7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::customResponses",
+      "id": "8a1b62de331045028d3d6ef6479c693e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::dofMode",
+      "id": "eaae892fa83940f58324c581a8637b12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::enableGravity",
+      "id": "37c45bee0857490eaf91d7238320ca7c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::generateWakeEvents",
+      "id": "dc76aa5638164e8281a32f4a0b6e8a58",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::gyroscopicTorque",
+      "id": "c0ee08438d64466b97a4837c68b19eff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::inertiaTensorScale",
+      "id": "47b680354bde4910ad4bc567f419e5d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::linearDamping",
+      "id": "dc8f436483bd4a21ac9f31d0167873cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockRotation",
+      "id": "e6056de64e2c4fcca276e4ef0788f527",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockTranslation",
+      "id": "e843fafe9bac406d887286d4d53c75b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockXRotation",
+      "id": "ca3fb12e4a7e4b1aa9cf3f47e6d5dc9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockXTranslation",
+      "id": "a8fad6478c424e0a8b79ae63dac01a7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockYRotation",
+      "id": "1779fa7b9804407c8ae3e45d750b032a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockYTranslation",
+      "id": "05cf6b99b8ba4f2faa5ad5f57c074cc3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockZRotation",
+      "id": "23b0eb96a4544c76bdb8617612365638",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::lockZTranslation",
+      "id": "13cba745e1f645d6bc2d84d8828fc34f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::massInKgOverride",
+      "id": "3eb2205dede1407382b6ff0a9d45702a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::massScale",
+      "id": "bb9dca093f2e479b85e0784281d3c60c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::maxAngularVelocity",
+      "id": "4a1da2f9eb844443bbf3d987506fb9ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::notifyRigidBodyCollision",
+      "id": "3565ed1cbedf4397b8a5a99540a1cc81",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::objectType",
+      "id": "b0cb2b83b5c049249375ea3a703301df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::overrideMass",
+      "id": "fddee887bcff4cc8a108733c7139dd0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::overrideMaxAngularVelocity",
+      "id": "709aa47c5743460cb3f1ac47e7e86973",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::overrideSolverIterations",
+      "id": "af9f6a1298f24137babeacb34e928f73",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::overrideWalkableSlope",
+      "id": "03c85092c47144a5a233e5dc9c8eafc5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::positionIterations",
+      "id": "7cdb100bea164ac7af61b22ef4503ca7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::simulatePhysics",
+      "id": "447a6757964e4f598b7cfbbb2c76e1f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::smoothEdgeCollisions",
+      "id": "4cb62c33c568426aaebebb0886d80c12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::startAwake",
+      "id": "d89d666426394362987432d5e1d0b26e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::updateMassWhenScaleChanges",
+      "id": "3bccd79343004280a559d2d2d1d47bcf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::velocityIterations",
+      "id": "67e514ecec43446da08ee8b17eb4346f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BodySettings::walkableSlope",
+      "id": "ed67b49d5044470997e6372e240fc0c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ChannelResponse::channel",
+      "id": "3b197ac4f84d423aa52a4c75bf188a24",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ChannelResponse::response",
+      "id": "6f9d70b26a5f4a3e92b4105ec60c019a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionChannelSetup::channel",
+      "id": "70cf2ace47e44231b07ba2836288a56a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionChannelSetup::defaultResponse",
+      "id": "cc1efd4c305040d080f7c8f27181e49c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionChannelSetup::name",
+      "id": "d2750f88c7b1423ca28854f7b86af917",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionChannelSetup::staticObject",
+      "id": "32adcf38edb94a63bc7596e12af8664a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionChannelSetup::traceType",
+      "id": "a2344dbb8ed2416f974392119b6b8062",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionNameRedirect::newName",
+      "id": "8b9d6b2a5349414495352a470a0e9c62",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionNameRedirect::oldName",
+      "id": "fb759064871648cfae9b4645048f71ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileEdit::customResponses",
+      "id": "1791582aab71410a82ce14c391be4057",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileEdit::name",
+      "id": "7e364caf30544d06838da73e289ebcbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileSetup::canModify",
+      "id": "12e524705d174852b84eebefe2bfad3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileSetup::collisionEnabled",
+      "id": "020e11ce6fd64421baf0a9889222d147",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileSetup::customResponses",
+      "id": "bd8a2cfdcaf94df6b845621c482164ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileSetup::helpMessage",
+      "id": "776f195b1fe94c31bb4c1691dee3c2a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileSetup::name",
+      "id": "15e268af38a8429fae0d1f2729c77a94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionProfileSetup::objectTypeName",
+      "id": "036d1268bd4f4fb2bce000c01926da17",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSettings::channelRedirects",
+      "id": "6c4ef044c5304a4887ee2457865ad183",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSettings::channels",
+      "id": "ff30964d7372426cb87b7cc34ea79a61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSettings::profileEdits",
+      "id": "190c0d57a0ee4d2da6979cddd8e29f8f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSettings::profileRedirects",
+      "id": "e7df70f5a9a34fb58aa22c489e8289cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSettings::profiles",
+      "id": "cac825ea1bf04442bf2583bcf0552f44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::WalkableSlope::angleDegrees",
+      "id": "d85683df1e3e4b9fb1510ddea75c03cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::WalkableSlope::behavior",
+      "id": "3f1d1c793ab149e1a2c08938f58c5758",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::BodySettings",
+      "id": "4dffcc3d1ed543fba2ef8a3fda50bf94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ChannelResponse",
+      "id": "3418ca5dbc1340c89bb2c995e0f777f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionChannel",
+      "id": "276a6158a5ad44df949fba4ea65c1f79",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionChannelSetup",
+      "id": "49257648b6864581b728b29ba40f4a9f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionEnabled",
+      "id": "041328a687324cb897f0163b32d7a286",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionNameRedirect",
+      "id": "386f950a1c7548bd9a9fa5891efa3e4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionProfileEdit",
+      "id": "34c4b05f836441eeac911286caab9423",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionProfileSetup",
+      "id": "2565b67763a74166b1fe1514e55ba6a1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionResponse",
+      "id": "a45c317e2ff54e0db06282a72010b4d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionSettings",
+      "id": "26b569189a53487992c0215db7dc302c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::DofMode",
+      "id": "19f7645b67c64af7a8ead5e099f5dc5f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::WalkableSlope",
+      "id": "ac0267acc5034f9e8fff61a96f2c8a6a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::WalkableSlopeBehavior",
+      "id": "c5a99bc1e8564f9cb24c9d06a3fcc9c5",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}
