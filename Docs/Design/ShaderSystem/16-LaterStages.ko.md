@@ -53,6 +53,8 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 
 **SH2g(SL0) 완료 기준(선택, SLR3).** 엔진 셰이더 7.7절 1–3·5(SL0 컴파일 행렬·CPU 대조·정수 golden·coverage 사유). SH2 완료 기준에 들지 않는다. 컴파일 행렬 형식은 형식 정의 전부(`Engine/Config/ShaderFormats` — 호스트 TargetProfile 형식과 `GLES31_PC`·Android 형식을 모두 덮는다, 도구 없는 Metal은 SKIP)이고 EngineTests가 실제 워커로 컴파일한다. GPU probe는 Sandbox self-test가 공급자 셰이더로 돌린다(엔진 셰이더 7.6절·결정 SLD19, 개정 50). 시험 루트 `/Plugin/EngineShaderTests`는 `Programs/Sandbox/EngineShaderTests`이고 Sandbox 호스트 원문 디렉터리로 들어가 공급자 라이브러리에 들어간다(쿠킹하지 않는다 — SSD17).
 
+**SH2g(SL0) 구현 메모(개정 51, 2026-11-25).** 엔진 셰이더 7.8절이 상세다. 완료 기준 충족: 컴파일 행렬(EngineTests `EngineShaders_CompileMatrix` — `D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`GLES31_PC`·`GLES31_ANDROID` 통과, `METAL_SM5` SKIP, 자리표시 형식 `VULKAN_ANDROID`·`METAL_IOS` SKIP), Sandbox self-test 8 장치 CPU 대조·정수 golden 56개 bit 일치, coverage 사유 출력. 이 문서에 걸린 사실: (1) FXC가 이른 `return`이 있는 함수를 분기 안에 펼치면 X4000 경고(오류 처리)를 내는데, FXC가 HRESULT 실패로 돌려 워커가 `CompileError`가 아닌 도구 실패로 분류하므로 대체 경로(DXC → SPIRV-Cross → FXC)를 타지 않는다 — 엔진 셰이더는 단일 출구로 피했다(엔진 셰이더 7.1절). 분류가 맞는지는 SS 쪽 후속 확인 항목이다. (2) HLSL 2018 DXC에는 `static_assert`가 없다. (3) 시험 루트의 `Shared/*.h`(probe 함수 번호)를 Sandbox C++가 include 디렉터리로 함께 쓴다.
+
 **결정.**
 
 - **SSD18 Graphics API 모양.** 장치 셰이더를 파이프라인과 따로 만든다(UE `RHICreateVertexShader`·`RHICreatePixelShader` 뒤 PSO 초기화자가 handle을 받는 구조, `Runtime/RHI/Public/RHIResources.h:4440`). 셰이더 집합의 첫 사용 생성(RenderBase 9.2절)이 이 단위를 요구하기 때문이다. 버린 대안: `PipelineDesc`가 코드 byte를 직접 받기(같은 셰이더를 쓰는 파이프라인마다 장치 셰이더를 다시 만든다).
