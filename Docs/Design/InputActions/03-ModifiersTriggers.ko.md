@@ -29,7 +29,7 @@ UE는 `UInputModifier`·`UInputTrigger` 파생 객체(Instanced)다. Rocks는 **
 | `Swizzle` | `YXZ` | YXZ: x↔y<br>ZYX: x↔z<br>XZY: y↔z<br>YZX: (y, z, x)<br>ZXY: (z, x, y) (cpp:473-495) |
 | `ResponseCurveExponential` | (1, 1, 1) | 타입의 축마다 sign(a) · \|a\|^e (cpp:350-366) |
 | `ResponseCurveUser` | 축마다 커브 | curve(a). 커브는 Curves 모듈 `TangentCurve`(UE `UCurveFloat` = FRichCurve)다. 커브가 없으면 그 축은 0이다 (cpp:368-385) |
-| `FovScaling` | scale 1, type `Standard` | scale · tan(fov/2) / tan(40°)(기준 FOV 80 — cpp:405-419). fov는 평가 문맥의 카메라 FOV다. `UE4BackCompat`은 레거시라 넣지 않는다 |
+| `FovScaling` | scale 1, type `Standard` | scale · tan(fov/2) / tan(40°)(기준 FOV 80 — cpp:405-419). 평가 문맥(`ModifierContext`)에 플레이어 여부와 카메라 FOV가 있다. 플레이어가 없으면 그대로, 카메라가 없으면(fov 0) scale만 곱한다(UE cpp:393-400). `UE4BackCompat`은 레거시라 넣지 않는다 |
 | `ToWorldSpace` | — | 2D (y, x), 3D (z, x, y) (cpp:435-454) |
 | `Smooth` | 표본 시간 0.0083 s | UE 마우스 평활 식(cpp:270-333). dt ≥ 0.25 s면 초기화한다 |
 | `SmoothDelta` | method Lerp, speed 0.5, exponent 2 | 출력은 **정규화한 변화 방향**이다. 이전 값을 normalize(새 값 − 이전 값) 쪽으로 정한 보간식으로 옮긴다(cpp:32-65). 보간식은 UE 15종 전부다: Lerp, InterpTo, InterpConstantTo, Circular In·Out·InOut, Ease In·Out·InOut(exponent), Expo In·Out·InOut, Sin In·Out·InOut. Boolean은 지원하지 않는다(그대로 둔다) |
@@ -59,11 +59,14 @@ UE는 `UInputModifier`·`UInputTrigger` 파생 객체(Instanced)다. Rocks는 **
 | `Tap` | releaseTime 0.2 | 직전 작동·지금 비작동·직전 누적 < releaseTime이면 Triggered. 누적 ≥ releaseTime이면 None |
 | `RepeatedTap` | repeatDelay 0.5, taps 2, releaseTime 0.2 | 탭 사이 Ongoing, N번째 탭에 Triggered. alwaysTick이다 |
 | `Pulse` | triggerOnStart 참, interval 1.0, limit 0(무제한) | 누적 > interval · (start ? n : n+1)이면 Triggered이고 n++. 한도에 닿으면 None |
-| `ChordAction` | chordAction(InputAction) | Implicit. 대상 액션의 **이번 평가 바인딩 수준 결합 상태**(4.3절 2 뒤, 액션 트리거 전)를 따른다. Triggered가 아니면 막는다(UE `InputAction.cpp:68-71`) |
+| `ChordAction` | chordAction(InputAction) | Implicit. 대상 액션의 **이번 평가 바인딩 수준 결합 상태**(4.3절 2 뒤, 액션 트리거 전)를 따른다. Triggered가 아니면 막는다(UE `InputAction.cpp:68-71`). 평가기는 액션 번호마다 상태를 표(`TriggerContext::chordStates`)로 넘기고, 트리거마다 자기 대상 번호를 읽는다(UE `FindActionInstanceData(ChordAction)` — 대상이 여럿인 Ctrl+Shift+S). 표 밖이면 None이다 |
 | `ChordBlocker` | chordAction(평가기가 넣는다) | Blocker. 대상 chord가 Triggered면 막는다 |
 
 시간 기준:
-- UE `RepeatedTap`은 벽시계(`FPlatformTime::Seconds()` — cpp:270)를 쓴다. Rocks는 평가 dt 누적을 쓴다(결정적 시험 — IAD3).
+- UE `RepeatedTap`은 벽시계(`FPlatformTime::Seconds()` — cpp:270)를 쓴다. Rocks는 평가 dt 누적을 쓴다(결정적 시험 — IAD3). 벽시계처럼 dilation을 받지 않는다(`affectedByTimeDilation`은 누름 시간에만). 다음 탭 마감의 처음 값은 "없음"(어떤 시계 값보다 과거)이라 첫 탭은 세지 않는다(UE `RepeatTime` 0이 늘 과거인 것과 같다). Triggered 직후 마감 안의 탭 하나가 다시 Triggered인 UE 동작도 그대로다.
+- 누적 시간은 double이다(UE는 float `HeldDuration`). 누적 시간이 임계와 정확히 같은 경계(dt 0.1 두 번 = Tap 0.2)는 반올림 방향이 UE와 다를 수 있다. 시험은 경계를 피해 값을 고른다.
+- `DeadZone`의 lower ≥ upper는 검증기가 거부한다(2.6절). 검증을 거치지 않은 값이 적용에 오면 값을 그대로 둔다(UE 식은 0/0 NaN이고, NaN이 SmoothDelta 상태에 남는다).
+- `Smooth`는 UE와 같이 평균을 갱신하지 않는 경로를 그대로 옮긴다: 표본 수 0·평균 0에서 시작하므로 값을 그대로 낸다(UE `UInputModifierSmooth` 동작). 고치지 않는다(UE 결과와 맞춤 — 애매하면 UE).
 - UE `Combo`는 5.8에서 deprecated라 넣지 않는다(h:571).
 
 ### 3.3 트리거 결합(UE `InputAction.cpp:73-129` `FTriggerStateTracker`)

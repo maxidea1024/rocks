@@ -23,6 +23,7 @@
 - 값은 `Vec3d`(double)다. UE `FVector`도 double이다.
 - 모디파이어·트리거 매개변수는 UE처럼 float다.
 - 계산은 double로 하고, 커브 평가(float) 결과는 double로 바꾼다.
+- 예외: DeadZone 식·FovScaling 배율·SmoothDelta 감속 비율은 UE와 같은 결과를 내도록 UE처럼 float로 계산한다.
 
 ### 2.2 키
 
@@ -46,6 +47,9 @@
 - 패드 축은 UE처럼 원시 값이다. UE는 게임패드에 암묵 dead zone을 걸지 않는다. 플랫폼 dead zone은 이벤트를 보낼지만 정한다(`XInputInterface.cpp:110-115·316-327`, `EnhancedInputSubsystemInterface.cpp:630-635`). dead zone은 DeadZone 모디파이어로 건다.
 - InputState의 dead zone 적용 값(`GamepadAxisValue`)을 쓰면 이중 적용이 된다(IAD8).
 - 키 이름(`InputKeyName`·`ParseInputKey`)은 저장·리바인딩용이다. UE `EKeys` 이름과 같다(`SpaceBar`, `Gamepad_FaceButton_Bottom`, `Mouse2D`). 업계 공용 식별자라 Rocks 고유 이름 원칙의 예외다(IAD4).
+- Rocks `Key` 이름과 UE 이름이 다른 키는 UE 이름을 쓴다. 예: `Key::Space` → `SpaceBar`, `Key::Digit0` → `Zero`, `Key::Grave` → `Tilde`, `Key::Minus` → `Hyphen`, `Key::LeftSuper` → `LeftCommand`, `Key::Numpad0` → `NumPadZero`, `Key::NumpadAdd` → `Add`, `Key::Back` → `Android_Back`. 전체 대응은 키 이름표(`InputKey.cpp`)와 그 기대표 시험이다. 비교는 대소문자를 무시한다.
+- UE는 숫자패드 Enter를 따로 두지 않는다(`EKeys::Enter` 하나). 그래서 `Enter` 키는 Enter와 숫자패드 Enter를 함께 읽는다(둘 중 하나라도 눌려 있으면 눌림, 놓임은 둘 다 놓였을 때). `Key::NumpadEnter`는 Rocks에만 있는 키이고 이름은 `NumPadEnter`다(UE 이름 규칙을 따른 Rocks 이름 — 7.3절). 숫자패드 Enter 키는 Enter를 읽지 않는다.
+- 터치 키의 원시값은 화면 좌표다. Boolean 액션은 원시값 대신 `down || pressed`로 1·0을 만든다(x = 0 열의 터치도 작동, 한 프레임 탭 포함 — 4절 평가기).
 - Rocks 키 집합에 없는 UE 키는 7.4절에 적는다. 그 키 이름은 `ParseInputKey`가 `NotFound`를 내고, 설정 읽기는 건너뛰고 진단한다. 해당 키는 디지털 트리거 버튼(`Gamepad_LeftTrigger`), 스틱 방향 버튼, `AnyKey`다.
 
 ### 2.3 InputAction
@@ -93,9 +97,9 @@ UE의 GameplayTag 입력 모드 필터는 7.4절이다.
 
 | 경우 | 코드 |
 |---|---|
-| null 액션·컨텍스트, 범위 밖 enum, 비유한 매개변수 | `InvalidArgument` |
+| null 액션·컨텍스트, 범위 밖 enum, 비유한 매개변수, DeadZone lower ≥ upper(UE `IsDataValid`와 같다) | `InvalidArgument` |
 | `ParseInputKey`가 모르는 이름 | `NotFound` |
-| 할당 실패 | `OutOfMemory`(상태는 그대로) |
+| 할당 실패 | `OutOfMemory`(상태는 그대로 — 모디파이어 복사도 커브 셋을 임시본에 먼저 복사한다) |
 | 사용자 설정 JSON 파손 | `CorruptData`. 모르는 이름은 진단만 하고 건너뛴다 |
 
 스레드: 모든 타입은 게임 스레드 전용이다. 데이터(액션·컨텍스트)는 평가 중 바꾸지 않는다(바꾸면 다음 다시 만들기에서 반영 — 4.2절).

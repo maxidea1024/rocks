@@ -35,7 +35,9 @@
 
 | 항목 | UE | Rocks | 이유 |
 |---|---|---|---|
-| RepeatedTap 시간 | 벽시계 | Tick 시간 | IAD3 |
+| RepeatedTap 시간 | 벽시계 | Tick 시간(dilation 없음) | IAD3 |
+| 숫자패드 Enter | `EKeys::Enter` 하나 | `Key::NumpadEnter`(이름 `NumPadEnter`)가 따로 있고, `Enter` 키가 둘을 함께 읽는다 | Input 모듈 키 집합. UE 바인딩 "Enter"는 같은 동작 |
+| 시간 누적 | float `HeldDuration` | double | 임계와 정확히 같은 경계의 반올림만 다를 수 있다 |
 | 같은 우선순위 순서 | 정해지지 않음(불안정 `ValueSort`) | 추가 순서 | 결정성 |
 | 바인딩 3단 재정렬 | `RemoveAtSwap`(순서 바뀜) | 안정 분할 | 결정성 |
 | 모디파이어·트리거 | UObject 파생 | 내장 enum | IAD2 |

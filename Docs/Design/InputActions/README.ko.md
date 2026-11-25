@@ -1,6 +1,6 @@
 # 입력 액션 계층 설계(CR21)
 
-기준일: 2026-11-25, 개정 2(UE 원본 대조 리뷰 반영 — 값 변환·패드 원시 축·시간 dt·키 이벤트·정렬·chord·전달 순서·slot·커브·동적 진동·자원·오류). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR21의 설계다.
+기준일: 2026-11-25, 개정 3(IA1 구현 리뷰 반영 — float 계산 예외·Enter와 숫자패드 Enter·DeadZone 임계 검증·FOV 문맥·chord 대상 표·RepeatedTap 시계). 개정 2(UE 원본 대조 리뷰 반영 — 값 변환·패드 원시 축·시간 dt·키 이벤트·정렬·chord·전달 순서·slot·커브·동적 진동·자원·오류). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR21의 설계다.
 
 범위:
 - 입력 액션·매핑 컨텍스트·리바인딩·햅틱 출력(게임패드 진동)이다.
