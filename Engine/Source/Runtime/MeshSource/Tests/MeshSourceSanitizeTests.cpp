@@ -239,7 +239,7 @@ TEST(MeshSource_SanitizeWarningAllocation) {
 // 진단 이름표: 모든 MeshIssue가 고유한 이름을 갖고 열거 밖 값은 "Unknown"이다. 메시 진단 코드는
 // AssetSystem 4.6절 이름표에 등록되어 있다.
 TEST(MeshSource_DiagnosticNames) {
-    constexpr uint32 last = static_cast<uint32>(MeshIssue::SingularBindPose);
+    constexpr uint32 last = static_cast<uint32>(MeshIssue::RenderSectionRange);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(MeshIssueName(static_cast<MeshIssue>(index)));
         CHECK(name != StringView("Unknown"));

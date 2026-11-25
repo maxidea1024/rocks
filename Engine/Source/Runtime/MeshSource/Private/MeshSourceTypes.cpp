@@ -278,6 +278,24 @@ const char* MeshIssueName(MeshIssue issue) noexcept {
         return "EmptyBoneHierarchy";
     case MeshIssue::SingularBindPose:
         return "SingularBindPose";
+    case MeshIssue::RenderLodCount:
+        return "RenderLodCount";
+    case MeshIssue::RenderBounds:
+        return "RenderBounds";
+    case MeshIssue::RenderStreamFormat:
+        return "RenderStreamFormat";
+    case MeshIssue::RenderStreamRange:
+        return "RenderStreamRange";
+    case MeshIssue::RenderStreamSize:
+        return "RenderStreamSize";
+    case MeshIssue::RenderTexCoordLayout:
+        return "RenderTexCoordLayout";
+    case MeshIssue::RenderIndexCount:
+        return "RenderIndexCount";
+    case MeshIssue::RenderIndexValue:
+        return "RenderIndexValue";
+    case MeshIssue::RenderSectionRange:
+        return "RenderSectionRange";
     }
 
     return "Unknown";

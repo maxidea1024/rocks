@@ -137,8 +137,8 @@ enum class MeshIssue : uint8 {
     NonFiniteColor,       // NonFiniteAttribute: 색 비유한값을 (1, 1, 1, 1)로 고침
     UvOutOfRange,         // UvOutOfRange: |UV 성분| > MeshUvRangeWarning
     NonNormalizedWeights, // NonNormalizedWeights: 가중치 합 != BoneWeightTotal을 정규화함
-    // 빌드(MeshTools BuildStaticMeshLod — Docs/Design/MeshAnimationAssets 5.2·5.4절). 진단 code는 같은
-    // 이름이고 InvalidBuildScale만 InvalidSetting이다. index는 차례로 묶음·없음·필드·축이다.
+    // 빌드(MeshTools BuildStaticMeshLod — Docs/Design/MeshAnimationAssets 5.2·5.4절). 진단 code는
+    // 같은 이름이고 InvalidBuildScale만 InvalidSetting이다. index는 차례로 묶음·없음·필드·축이다.
     MaterialSlotFallback, // 묶음의 슬롯 이름과 맞는 슬롯이 없음
     NegativeBuildScale,   // buildScale 음수 성분이 홀수 개(count = 그 수)
     UnsupportedSetting,   // 보존 설정(MeshBuildSettingField)이 기본값이 아님
@@ -151,7 +151,19 @@ enum class MeshIssue : uint8 {
     InvalidSettingValue,  // 스킨 임계값이 음수·비유한이거나 boneInfluenceLimit이 음수(index = 필드)
     InvalidBoneHierarchy, // 메시 본 계층이 ValidateBoneHierarchy를 통과하지 못함(index = 본)
     EmptyBoneHierarchy,   // 메시 본 계층에 본이 없음
-    SingularBindPose      // 본의 component 공간 기준 pose 행렬에 역이 없음(index = 본)
+    SingularBindPose,     // 본의 component 공간 기준 pose 행렬에 역이 없음(index = 본)
+    // 정적 메시 쿠킹 렌더 데이터(Mesh ValidateStaticMeshRenderData·ValidateStaticMeshIndices —
+    // Docs/Design/MeshAnimationAssets 5.5.1절 9). 모두 CorruptPackage, index = LOD(LOD 수·bounds는
+    // MeshNoIndex), count = 섹션 또는 UV stream 번호다.
+    RenderLodCount,       // LOD 수 > StaticMeshMaxLods
+    RenderBounds,         // bounds 비유한·상자 최소 > 최대·반지름 음수
+    RenderStreamFormat,   // stream 형식 번호가 그 stream이 받는 집합 밖(index 형식 포함)
+    RenderStreamRange,    // 구간 정렬·끝이 data 밖·넘침·배치 순서 겹침, data 없는데 구간 있음
+    RenderStreamSize,     // 구간 크기 != 정점 수 × 원소 byte × 원소 수
+    RenderTexCoordLayout, // UV stream 수 초과·정밀도 섞임·2성분 stream이 마지막이 아님
+    RenderIndexCount,     // index 수가 3의 배수가 아님(byteSize가 폭의 배수가 아님 포함)
+    RenderIndexValue,     // index 값 >= 정점 수(count = index 위치)
+    RenderSectionRange    // 섹션 index 구간이 index 수 밖이거나 정점 범위가 정점 수 밖
 };
 
 // name이 prefix(엔진 접두 이름 — MeshAttributeName::SkinWeightsPrefix·MorphPrefix·

@@ -55,8 +55,8 @@ enum class AssetDiagnosticCode : uint16 {
     // MissingInfluences.
     InfluencesTrimmed,
     MissingInfluences,
-    // 단순 충돌(Docs/Design/MeshAnimationAssets 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터 경고
-    // UnsupportedCollisionShape.
+    // 단순 충돌(Docs/Design/MeshAnimationAssets 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터
+    // 경고 UnsupportedCollisionShape.
     InvalidCollisionData,
     UnsupportedCollisionShape,
     // 임포트·설정(4.6절 — MA2a 메시 빌드가 처음 낸다)
@@ -65,8 +65,8 @@ enum class AssetDiagnosticCode : uint16 {
     // 애니메이션(Docs/Design/MeshAnimationAssets 6.4·11절 — MA4a 스켈레톤이 내는 것)
     InvalidSkeletonData,
     SkeletonMismatch,
-    // 클립(Docs/Design/MeshAnimationAssets 7.5절 — MA6a): 오류 InvalidClipData, 경고 UnknownBoneTrack,
-    // 임포터 경고 EventPropertiesDropped.
+    // 클립(Docs/Design/MeshAnimationAssets 7.5절 — MA6a): 오류 InvalidClipData, 경고
+    // UnknownBoneTrack, 임포터 경고 EventPropertiesDropped.
     InvalidClipData,
     UnknownBoneTrack,
     EventPropertiesDropped,

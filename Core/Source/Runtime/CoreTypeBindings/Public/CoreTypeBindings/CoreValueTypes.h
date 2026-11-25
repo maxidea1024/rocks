@@ -3,6 +3,7 @@
 #include <Core/Math/Color.h>
 #include <Core/Math/IntVector.h>
 #include <Core/Math/Rotator.h>
+#include <Core/Math/Shapes.h>
 #include <Core/Math/Transform.h>
 #include <Core/Math/Vector2.h>
 #include <Core/Math/Vector4.h>
@@ -18,7 +19,7 @@
 // 있으면 생성 헤더가 컴파일되지 않는다. 스키마 이름은 미러 이름이다. 저장은 다른 struct와 같은
 // 태그형 중첩 Record다(4.4절).
 //
-// 미러 17종 중 혼합 정밀도 Transform을 뺀 16종은 Atomic(통째 단위 — TypeFlags::Atomic,
+// 미러 19종 중 혼합 정밀도 Transform을 뺀 18종은 Atomic(통째 단위 — TypeFlags::Atomic,
 // Docs/Design/ReflectionExtensions.ko.md 3.1·3.2절)이다: 차이 저장은 성분 하나라도 기준과
 // 다르면 모든 성분을 쓰고, override 집합·되돌리기의 단위가 그 값 필드 경로다(차이 쓰기 구현은
 // A5). UE가 수학 타입을 native Serializer나 Immutable 이진 직렬화로 통째 쓰는 결과를 따른다.
@@ -146,6 +147,14 @@ struct IntVec3Binding {
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
     ROCKS_PROPERTY() int32 z = 0;
+};
+
+// 축 정렬 상자(rocks::Box<double> — UE FBox의 Min·Max, IsValid 플래그는 두지 않는다 — Shapes.h)다.
+// 메시 쿠킹 bounds가 쓴다(Docs/Design/MeshAnimationAssets 5.5.1절 7). 길이는 cm다.
+ROCKS_STRUCT(Binds = "rocks::Box<double>", Atomic, Version = 1)
+struct BoxdBinding {
+    ROCKS_PROPERTY() Vec3d min;
+    ROCKS_PROPERTY() Vec3d max;
 };
 
 // 회전·이동·축별 scale이 모두 double인 TRS(rocks::Transform — UE FTransform)다. 멤버 순서는 UE
