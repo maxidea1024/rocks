@@ -106,6 +106,20 @@ public:
     using RegionHitTest = Delegate<input::WindowRegion(IntVec2)>;
     // 클라이언트 좌표를 UI의 영역으로 바꾼다. 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
     virtual void SetRegionHitTest(RegionHitTest&& hitTest) noexcept;
+    // 창 테두리를 끄는 동안(Windows 크기·이동 modal 루프 — 그동안 호스트 프레임 루프가 멈춘다)
+    // 크기가 바뀌면 PumpEvents 안에서 동기로 부른다(UE FSlateApplication::OnSizeChanged가 그
+    // 자리에서 그리는 것과 같다, Docs/Design/UiToolkit 9.1절 UW7a). 호스트는 ConsumeResize로 새
+    // 크기를 받아 스왑 체인을 바꾸고 한 프레임을 그린다. 콜백 안에서 PumpEvents를 다시 부르지
+    // 않는다. 창은 콜백을 겹쳐 부르지 않는다. 최소화와 modal 루프 밖의 크기 변경은 부르지
+    // 않는다(다음 프레임에 처리). 크기 조절 중에도 프레임 루프가 도는 플랫폼은 부르지 않는다.
+    // 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
+    //
+    // 사용 예:
+    //   window->SetLiveResizeHandler(Delegate<void()>::CreateLambda([&]() noexcept {
+    //       (void)RenderFrame(*window);   // 펌프 없이 크기 반영·배치·그리기·present
+    //   }));
+    using LiveResizeHandler = Delegate<void()>;
+    virtual void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept;
     virtual void SetMouseCursor(input::MouseCursor cursor) noexcept;
     // 입력 구동 호스트가 다른 창을 포함한 스레드 메시지 또는 제한 시간까지 대기한다.
     virtual void WaitForEvents(uint32 milliseconds) noexcept;

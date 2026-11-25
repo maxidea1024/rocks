@@ -9,6 +9,9 @@ bool Window::ConsumeRepaint() noexcept {
 void Window::WaitForEvents(uint32) noexcept {
 }
 
+void Window::SetLiveResizeHandler(LiveResizeHandler&&) noexcept {
+}
+
 void Window::SetRegionHitTest(RegionHitTest&&) noexcept {
 }
 

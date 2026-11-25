@@ -39,10 +39,14 @@ private:
         IntVec2 previewPosition{};
         uint64 batchRevision = 0;
         bool presented = false;
+        // 크기 조절 modal 루프 안의 실시간 그리기가 실패한 원인이다(Run이 다음 차례에 돌려준다).
+        ErrorCode liveResizeError = ErrorCode::None;
     };
     Result<SlotHandle> Add(UniquePtr<platform::Window> window,
                            const SharedPtr<DockManager>& area) noexcept;
     Result<bool> Update(Surface& surface) noexcept;
+    // 펌프 없이 크기 반영·배치·그리기·present를 한다. 크기 조절 콜백(UiToolkit 9.1절 UW7a)도 쓴다.
+    Result<bool> Render(Surface& surface, bool refreshCursor) noexcept;
     Result<void> UpdateDragImage(Surface& surface) noexcept;
     Result<void> ReturnTabs(Surface& surface) noexcept;
     SharedPtr<DockManager> FindArea(Surface& source, Vec2 point, Vec2& clientPoint) noexcept;

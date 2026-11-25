@@ -253,7 +253,8 @@ bool ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
 
 class Win64Window final : public Window {
 public:
-    explicit Win64Window(Allocator& allocator) noexcept : allocator_(allocator), deferred_(allocator) {
+    explicit Win64Window(Allocator& allocator) noexcept
+        : allocator_(allocator), deferred_(allocator) {
     }
 
     ~Win64Window() override {
@@ -381,6 +382,10 @@ public:
         regionHitTest_ = Move(callback);
     }
 
+    void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept override {
+        liveResize_ = Move(handler);
+    }
+
     void SetMouseCursor(input::MouseCursor shape) noexcept override {
         if (shape == cursorShape_) {
             return;
@@ -391,16 +396,33 @@ public:
         } else if (shape == input::MouseCursor::ResizeVertical) {
             resource = reinterpret_cast<LPCWSTR>(IDC_SIZENS);
         }
-        switch(shape) {
-        case input::MouseCursor::Text: resource=reinterpret_cast<LPCWSTR>(IDC_IBEAM);break;
-        case input::MouseCursor::Hand: resource=reinterpret_cast<LPCWSTR>(IDC_HAND);break;
-        case input::MouseCursor::Crosshair: resource=reinterpret_cast<LPCWSTR>(IDC_CROSS);break;
-        case input::MouseCursor::Move: resource=reinterpret_cast<LPCWSTR>(IDC_SIZEALL);break;
-        case input::MouseCursor::ResizeNorthWestSouthEast: resource=reinterpret_cast<LPCWSTR>(IDC_SIZENWSE);break;
-        case input::MouseCursor::ResizeNorthEastSouthWest: resource=reinterpret_cast<LPCWSTR>(IDC_SIZENESW);break;
-        case input::MouseCursor::Unavailable: resource=reinterpret_cast<LPCWSTR>(IDC_NO);break;
-        case input::MouseCursor::Wait: resource=reinterpret_cast<LPCWSTR>(IDC_WAIT);break;
-        default: break;
+        switch (shape) {
+        case input::MouseCursor::Text:
+            resource = reinterpret_cast<LPCWSTR>(IDC_IBEAM);
+            break;
+        case input::MouseCursor::Hand:
+            resource = reinterpret_cast<LPCWSTR>(IDC_HAND);
+            break;
+        case input::MouseCursor::Crosshair:
+            resource = reinterpret_cast<LPCWSTR>(IDC_CROSS);
+            break;
+        case input::MouseCursor::Move:
+            resource = reinterpret_cast<LPCWSTR>(IDC_SIZEALL);
+            break;
+        case input::MouseCursor::ResizeNorthWestSouthEast:
+            resource = reinterpret_cast<LPCWSTR>(IDC_SIZENWSE);
+            break;
+        case input::MouseCursor::ResizeNorthEastSouthWest:
+            resource = reinterpret_cast<LPCWSTR>(IDC_SIZENESW);
+            break;
+        case input::MouseCursor::Unavailable:
+            resource = reinterpret_cast<LPCWSTR>(IDC_NO);
+            break;
+        case input::MouseCursor::Wait:
+            resource = reinterpret_cast<LPCWSTR>(IDC_WAIT);
+            break;
+        default:
+            break;
         }
         HCURSOR cursor = LoadCursorW(nullptr, resource);
         if (!cursor) {
@@ -584,12 +606,24 @@ private:
         case WM_PAINT:
             repaint_ = true;
             break;
+        case WM_ENTERSIZEMOVE:
+            sizeMoveLoop_ = true;
+            return 0;
+        case WM_EXITSIZEMOVE:
+            sizeMoveLoop_ = false;
+            return 0;
         case WM_SIZE:
             repaint_ = true;
             minimized_ = wParam == SIZE_MINIMIZED;
             width_ = LOWORD(lParam);
             height_ = HIWORD(lParam);
             resized_ = true;
+            // modal 루프 안에서는 호스트 루프가 멈춰 있으므로 여기서 바로 그리게 한다(UW7a).
+            if (sizeMoveLoop_ && !minimized_ && !liveResizing_ && liveResize_.IsBound()) {
+                liveResizing_ = true;
+                liveResize_.Execute();
+                liveResizing_ = false;
+            }
             return 0;
         case WM_SETFOCUS:
             focused_ = true;
@@ -608,9 +642,9 @@ private:
             return 0;
         }
         case WM_CAPTURECHANGED:
-            // 다른 창·시스템이 버튼을 누른 채인 capture를 가져갔다. 뗌이 오지 않으므로 취소를 보낸다
-            // (UE OnMouseCaptureLost — 클릭으로 처리하지 않는다). 마지막 버튼을 놓아 스스로 해제할
-            // 때는 이미 0이라 보내지 않는다.
+            // 다른 창·시스템이 버튼을 누른 채인 capture를 가져갔다. 뗌이 오지 않으므로 취소를
+            // 보낸다 (UE OnMouseCaptureLost — 클릭으로 처리하지 않는다). 마지막 버튼을 놓아 스스로
+            // 해제할 때는 이미 0이라 보내지 않는다.
             if (capturedButtons_ != 0) {
                 capturedButtons_ = 0;
                 Push(input::InputEvent::CaptureLost());
@@ -833,6 +867,11 @@ private:
     uint32 capturedButtons_ = 0;
     bool closeRequested_ = false;
     bool resized_ = false;
+    // WM_ENTERSIZEMOVE와 WM_EXITSIZEMOVE 사이(크기·이동 modal 루프)인지, 실시간 그리기 콜백
+    // 중인지다.
+    bool sizeMoveLoop_ = false;
+    bool liveResizing_ = false;
+    LiveResizeHandler liveResize_{};
     bool repaint_ = true;
     bool focused_ = false;
     bool minimized_ = false;

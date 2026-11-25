@@ -29,7 +29,8 @@ DockWindows::Surface::Surface(Allocator& allocator, graphics::Device& graphicsDe
                               const SharedPtr<DockManager>& manager,
                               SlotArray<BrushTexture>& textures) noexcept
     : device(graphicsDevice), window(Move(native)), area(manager), app(allocator), adapter(app),
-      queue(allocator), consumed(allocator), batch(allocator), buffers(device, ActiveShaders(), batch),
+      queue(allocator), consumed(allocator), batch(allocator),
+      buffers(device, ActiveShaders(), batch),
       surfaces(allocator, device, ActiveShaders(), textures) {
     app.SetRoot(area);
     window->SetRegionHitTest(
@@ -81,6 +82,17 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
         return Result<SlotHandle>::Failure(created.Error());
     }
     host.chain = created.Value();
+    // 창 테두리를 끄는 동안 호스트 루프가 멈추므로 창이 이 콜백으로 그 창만 다시 그리게 한다.
+    host.window->SetLiveResizeHandler(
+        platform::Window::LiveResizeHandler::CreateLambda([this, source = &host]() noexcept {
+            if (source->liveResizeError != ErrorCode::None) {
+                return;
+            }
+            auto rendered = Render(*source, false);
+            if (!rendered) {
+                source->liveResizeError = rendered.Error();
+            }
+        }));
     auto slot = windows_.TryAdd(Move(surface.Value()));
     if (!slot) {
         return slot;
@@ -228,7 +240,13 @@ Result<bool> DockWindows::Update(Surface& host) noexcept {
     if (!routed && routed.Error() != ErrorCode::CapacityExceeded) {
         return Result<bool>::Failure(routed.Error());
     }
+    if (host.liveResizeError != ErrorCode::None) {
+        return Result<bool>::Failure(host.liveResizeError);
+    }
+    return Render(host, hadInput || !routed);
+}
 
+Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
     uint32 width = 0, height = 0;
     bool repaint = host.window->ConsumeRepaint();
     if (host.window->ConsumeResize(width, height) && width && height) {
@@ -263,7 +281,7 @@ Result<bool> DockWindows::Update(Surface& host) noexcept {
     // 미리보기 표시에 실패해도 원래 탭과 드롭 처리는 유지한다.
     (void)UpdateDragImage(host);
     const bool changed = !host.presented || cache.Value()->Revision() != host.batchRevision;
-    if (hadInput || changed || !routed) {
+    if (refreshCursor || changed) {
         host.window->SetMouseCursor(host.adapter.MouseCursor());
     }
     if (changed) {
