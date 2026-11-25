@@ -660,6 +660,12 @@ internal static class ModuleDescriptor
                     throw Invalid("Required on a field that is not an object, soft object or class reference or an array of them");
                 }
 
+                // TextMapMergeByKey는 Map 필드에만 쓴다(원본 선언의 RMC2202와 같은 규칙 — AssetSystem 10.3.1절).
+                if (fieldFlags.Contains("TextMapMergeByKey", StringComparer.Ordinal) && kind != "Map")
+                {
+                    throw Invalid("TextMapMergeByKey on a field that is not a map");
+                }
+
                 // Required와 복제 제외 플래그의 조합은 원본 선언의 RMC2202와 같이 거부한다(리플렉션 B9h1).
                 if (fieldFlags.Contains("Required", StringComparer.Ordinal) &&
                     (fieldFlags.Contains("DuplicateTransient", StringComparer.Ordinal) || fieldFlags.Contains("NonTryoutDuplicateTransient", StringComparer.Ordinal)))

@@ -195,8 +195,9 @@ enum class TargetProfileField : uint8 {
     TextureLodGroup,
     // graphicsBackends(index = 번호 — 어휘 밖·중복·상한 초과는 상한 번호).
     GraphicsBackends,
-    // shaderFormats(index = backend 번호 — 형식 목록 없음·빔·키가 목록에 없음·형식 id 문법·전역
-    // 중복·형식 수 상한, 셰이더 없는 프로파일의 빈 Map 아님은 0).
+    // shaderFormats(index = backend 번호 — 형식 목록 없음·빔·형식 수 상한·형식 id 문법·전역 중복,
+    // 단 목록에 없는 키는 Map 순서 번호, 셰이더 없는 프로파일의 빈 Map 아님은 0 — 판정
+    // 순서는 10.3.1절).
     ShaderFormats
 };
 
