@@ -169,6 +169,15 @@ constexpr bool HasNodeFlag(MaterialNodeFlags set, MaterialNodeFlags flag) noexce
 // 정의된 노드 표지 비트 전체다.
 inline constexpr uint8 MaterialNodeFlagMask = (1u << 3) - 1;
 
+// 새 노드의 String·Name 속성 기본값 하나다(Docs/Design/MaterialSystem 19.13.2절). UE 생성자 기본값
+// 중 C++ 초기값으로 줄 수 없는 것(String은 allocator, Name은 NamePool이 필요하다 — 예: Custom 노드
+// Code "1")을 정적 data로 둔다. 노드를 새로 만드는 쪽(에디터 노드 추가)이 속성 struct 기본 생성
+// 값에 이 값을 넣은 뒤 Record를 쓴다. field는 propertiesSchema의 최상위 String·Name 필드다.
+struct MaterialPropertyTextDefault {
+    StringView field;
+    StringView text;
+};
+
 // 속성 struct의 생성 스키마를 돌려준다(GeneratedType<T>::Schema). 속성이 없는 노드는 nullptr이다.
 using MaterialPropertiesSchemaFn = const TypeSchema& (*)() noexcept;
 
@@ -182,6 +191,8 @@ struct MaterialNodeDefinition {
     // 의미 바이트에서 빼는 속성 필드 이름이다(파라미터 기본값 — 5.5절). 원소는 propertiesSchema의
     // 필드 이름이어야 한다(등록 검사).
     Span<const StringView> nonSemanticFields;
+    // 새 노드의 String·Name 속성 기본값이다(등록 검사가 필드 이름·종류를 본다).
+    Span<const MaterialPropertyTextDefault> textDefaults;
     Span<const MaterialPinDefinition> pins;
     // 선택이다(개수가 속성으로 정해지는 핀 — 임의 HLSL·함수 호출·Switch).
     nodegraph::DynamicPinsFn dynamicPins = nullptr;
@@ -212,6 +223,13 @@ struct MaterialNodeDefinition {
         MaterialNodeDefinition copy = *this;
         copy.propertiesSchema = value;
         copy.nonSemanticFields = nonSemantic;
+        return copy;
+    }
+
+    constexpr MaterialNodeDefinition
+    TextDefaults(Span<const MaterialPropertyTextDefault> value) const noexcept {
+        MaterialNodeDefinition copy = *this;
+        copy.textDefaults = value;
         return copy;
     }
 

@@ -40,6 +40,9 @@
 | `StaticBool`·`StaticInt`·`StaticEnum` | 번역 때 정해지는 값 | static switch·component mask·preset 선택 |
 | `Surface` | BSDF 트리(10절) | 출력 노드의 표면 입력 |
 | `MaterialAttributes` | 속성 집합(표면 입력 + 등록된 custom attribute) | 레이어·혼합 함수의 입출력 |
+| `ShadingModel` | shading model 번호 | UE `MCT_ShadingModel`. `ShadingModel` 노드 출력과 속성 집합의 shading model 칸 |
+| `Numeric` | 폭이 정해지지 않은 수 | UE `MCT_Float`(폭 미정 float). 입력은 수 군을 받고, 출력 폭은 번역이 입력 폭으로 정한다 |
+| `Any` | 무엇이든 통과 | UE `MCT_Unknown`. static switch·reroute·조건 스위치의 값 입출력이다. 연결 때 막지 않고 번역이 연결된 값의 타입으로 정한다(UE `GetRealInputValueType`과 같다). 노드 정의 코드 규칙은 19.13.3절 |
 
 **암묵 변환.**
 - scalar → 벡터 복제는 허용한다.

@@ -4,12 +4,14 @@
 #include <MaterialSchema/MaterialGraphSchema.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <MaterialSchema/MaterialSchemaModule.h>
+#include <MaterialSchema/NodePropertyReader.h>
 #include <Meta/TypeSchema.h>
 #include <NodeGraph/GraphCommand.h>
 #include <NodeGraph/GraphIdSource.h>
 #include <NodeGraph/GraphReadView.h>
 #include <NodeGraph/GraphSemantic.h>
 #include <NodeGraph/NodeTypeRegistry.h>
+#include <Serialization/Archive.h>
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
 
@@ -219,6 +221,22 @@ TEST(MaterialSchema_PinTypeConnectRules) {
         CanConnectMaterialPinTypes(nodegraph::UnresolvedPinType, Pin(MaterialPinType::Texture2D)));
     CHECK(CanConnectMaterialPinTypes(Pin(MaterialPinType::Surface), nodegraph::UnresolvedPinType));
     CHECK(!CanConnectMaterialPinTypes(MaterialPinTypeCount, Pin(MaterialPinType::Numeric)));
+
+    // 통과 핀(Any — UE MCT_Unknown)은 어느 쪽이든 무엇과도 잇는다(5.3절).
+    const MaterialPinType every[] = {
+        MaterialPinType::Float3,       MaterialPinType::Texture2D,
+        MaterialPinType::TextureAny,   MaterialPinType::Surface,
+        MaterialPinType::StaticBool,   MaterialPinType::MaterialAttributes,
+        MaterialPinType::ShadingModel, MaterialPinType::TextureExternal,
+        MaterialPinType::Any,
+    };
+    for (MaterialPinType type : every) {
+        CHECK(CanConnectMaterialPinTypes(Pin(type), Pin(MaterialPinType::Any)));
+        CHECK(CanConnectMaterialPinTypes(Pin(MaterialPinType::Any), Pin(type)));
+    }
+
+    CHECK(MaterialPinTypeName(MaterialPinType::Any) == StringView("Any"));
+    CHECK(ClassifyMaterialPinType(MaterialPinType::Any) == MaterialPinTypeClass::Any);
 }
 
 // 엔진 노드 묶음: 두 도메인에 등록되고, 출력 노드는 머티리얼 도메인에만 있다.
@@ -829,6 +847,167 @@ TEST(MaterialSchema_AttributeTable) {
     CHECK(table.Unregister(customGroup.Value()).Error() == ErrorCode::NotFound);
     CHECK(table.Unregister(builtins.Value()));
     CHECK(builtinLease.count == 0);
+}
+
+namespace {
+
+// 속성 읽기 시험 schema다: 정수·bool·float·문자열 필드 넷.
+constexpr Guid ReaderStructId{0x4d41545245414445ull, 1};
+constexpr Guid ReaderCountField{0x4d41545245414445ull, 2};
+constexpr Guid ReaderFlagField{0x4d41545245414445ull, 3};
+constexpr Guid ReaderScaleField{0x4d41545245414445ull, 4};
+constexpr Guid ReaderLabelField{0x4d41545245414445ull, 5};
+constexpr char ReaderCountText[] = {'c', 'o', 'u', 'n', 't'};
+constexpr char ReaderFlagText[] = {'f', 'l', 'a', 'g'};
+constexpr char ReaderScaleText[] = {'s', 'c', 'a', 'l', 'e'};
+constexpr char ReaderLabelText[] = {'l', 'a', 'b', 'e', 'l'};
+constexpr char ReaderStructText[] = {'R', 'e', 'a', 'd', 'e', 'r'};
+
+FieldSchema MakeTypedField(Guid id, Span<const char> name, ValueKind kind) noexcept {
+    FieldSchema field = MakeField(id, name);
+    field.value.kind = kind;
+    return field;
+}
+
+TypeSchema MakeReaderSchema() noexcept {
+    static const FieldSchema fields[] = {
+        MakeTypedField(ReaderCountField, Span<const char>(ReaderCountText), ValueKind::Int32),
+        MakeTypedField(ReaderFlagField, Span<const char>(ReaderFlagText), ValueKind::Bool),
+        MakeTypedField(ReaderScaleField, Span<const char>(ReaderScaleText), ValueKind::Float32),
+        MakeTypedField(ReaderLabelField, Span<const char>(ReaderLabelText), ValueKind::Utf8String),
+    };
+    TypeSchema schema;
+    schema.id = ReaderStructId;
+    schema.version = 2;
+    schema.fields = fields;
+    schema.name = Span<const char>(ReaderStructText);
+    return schema;
+}
+
+const TypeSchema& ReaderSchema() noexcept {
+    static const TypeSchema schema = MakeReaderSchema();
+    return schema;
+}
+
+// count(I64)·flag·scale·label을 쓴 Record다. withLabel이 거짓이면 label을 쓰지 않는다.
+Array<uint8> ReaderRecord(Allocator& allocator, Guid schema, bool withLabel) noexcept {
+    ArchiveWriter writer(allocator);
+    auto record = RecordWriter::Begin(writer, schema, 1);
+    if (!record) {
+        return Array<uint8>(allocator);
+    }
+
+    RecordWriter& out = record.Value();
+    const bool counted =
+        out.BeginField(ReaderCountField) && writer.WriteI64(-7) && out.EndField(WireType::I64);
+    const bool flagged =
+        out.BeginField(ReaderFlagField) && writer.WriteBool(true) && out.EndField(WireType::Bool);
+    const bool scaled =
+        out.BeginField(ReaderScaleField) && writer.WriteF32(2.5f) && out.EndField(WireType::F32);
+    const bool labeled =
+        !withLabel || (out.BeginField(ReaderLabelField) && writer.WriteString("Moss") &&
+                       out.EndField(WireType::String));
+    if (!counted || !flagged || !scaled || !labeled || !out.End()) {
+        return Array<uint8>(allocator);
+    }
+
+    return writer.TakeBytes();
+}
+
+} // namespace
+
+// 속성 읽기(19.13.3절 — 동적 핀 함수): 기록된 필드는 wire대로 읽고, 기록되지 않은 필드와 빈 속성은
+// 기본값이며, schema에 없는 이름·다른 schema·wire 불일치는 오류다.
+TEST(MaterialSchema_NodePropertyReaderReadsFields) {
+    SystemAllocator allocator;
+    const Array<uint8> full = ReaderRecord(allocator, ReaderStructId, true);
+    REQUIRE(!full.IsEmpty());
+    auto reader = NodePropertyReader::Open(allocator, full.View(), ReaderSchema());
+    REQUIRE(reader);
+    NodePropertyReader& value = reader.Value();
+    auto count = value.ReadInteger("count", 0);
+    REQUIRE(count);
+    CHECK(count.Value() == -7);
+    auto flag = value.ReadBool("flag", false);
+    REQUIRE(flag);
+    CHECK(flag.Value());
+    auto scale = value.ReadFloat("scale", 0.0f);
+    REQUIRE(scale);
+    CHECK(scale.Value() == 2.5f);
+    auto label = value.ReadText("label");
+    REQUIRE(label);
+    CHECK(label.Value() == StringView("Moss"));
+    CHECK(value.ReadInteger("missing", 0).Error() == ErrorCode::NotFound);
+    // wire 불일치: 정수 필드를 bool로, bool 필드를 정수로, float 필드를 문자열로 읽는다.
+    CHECK(value.ReadBool("count", false).Error() == ErrorCode::TypeMismatch);
+    CHECK(value.ReadInteger("flag", 0).Error() == ErrorCode::TypeMismatch);
+    CHECK(value.ReadText("scale").Error() == ErrorCode::TypeMismatch);
+
+    // 기록되지 않은 필드는 기본값이다.
+    const Array<uint8> partial = ReaderRecord(allocator, ReaderStructId, false);
+    REQUIRE(!partial.IsEmpty());
+    auto partialReader = NodePropertyReader::Open(allocator, partial.View(), ReaderSchema());
+    REQUIRE(partialReader);
+    auto missingLabel = partialReader.Value().ReadText("label");
+    REQUIRE(missingLabel);
+    CHECK(missingLabel.Value().IsEmpty());
+
+    // 빈 속성은 모든 필드가 기본값이다.
+    auto empty = NodePropertyReader::Open(allocator, Span<const uint8>(), ReaderSchema());
+    REQUIRE(empty);
+    auto fallback = empty.Value().ReadInteger("count", 42);
+    REQUIRE(fallback);
+    CHECK(fallback.Value() == 42);
+    auto list = empty.Value().OpenStructArray("label", ReaderSchema());
+    REQUIRE(list);
+    CHECK(list.Value().Count() == 0);
+    CHECK(list.Value().Element(0).Error() == ErrorCode::InvalidArgument);
+
+    // 다른 schema의 Record는 TypeMismatch다.
+    const Array<uint8> foreign = ReaderRecord(allocator, Guid{0x4f54484552ull, 9}, true);
+    REQUIRE(!foreign.IsEmpty());
+    CHECK(NodePropertyReader::Open(allocator, foreign.View(), ReaderSchema()).Error() ==
+          ErrorCode::TypeMismatch);
+}
+
+// 새 노드 문자열 기본값(19.13.2절): 대상은 속성 schema의 최상위 String·Name 필드여야 한다.
+TEST(MaterialSchema_CatalogChecksTextDefaults) {
+    SchemaEnv env;
+    REQUIRE(env.ready);
+    static constexpr MaterialPinDefinition pins[] = {
+        MaterialOutput("Value", MaterialPinType::Float1, "Value"),
+    };
+    static constexpr MaterialPropertyTextDefault label[] = {{"label", "Moss"}};
+    static constexpr MaterialPropertyTextDefault notText[] = {{"count", "1"}};
+    static constexpr MaterialPropertyTextDefault unknown[] = {{"missing", "x"}};
+    static constexpr MaterialNodeDefinition valid[] = {
+        MaterialNode("Material.TestText").Properties(&ReaderSchema).TextDefaults(label).Pins(pins),
+    };
+    static constexpr MaterialNodeDefinition invalid[] = {
+        MaterialNode("Material.TestTextInt")
+            .Properties(&ReaderSchema)
+            .TextDefaults(notText)
+            .Pins(pins),
+        MaterialNode("Material.TestTextUnknown")
+            .Properties(&ReaderSchema)
+            .TextDefaults(unknown)
+            .Pins(pins),
+        MaterialNode("Material.TestTextNoSchema").TextDefaults(label).Pins(pins),
+    };
+    for (const MaterialNodeDefinition& definition : invalid) {
+        CHECK(env.catalog
+                  .Register(env.registry, env.material,
+                            Span<const MaterialNodeDefinition>(&definition, 1), ModuleLease())
+                  .Error() == ErrorCode::InvalidArgument);
+    }
+
+    auto group = env.catalog.Register(env.registry, env.material, valid, ModuleLease());
+    REQUIRE(group);
+    const MaterialNodeDefinition* found = env.catalog.Find(env.Intern("Material.TestText"));
+    REQUIRE(found != nullptr);
+    REQUIRE(found->textDefaults.Size() == 1);
+    CHECK(found->textDefaults[0].text == StringView("Moss"));
+    CHECK(env.catalog.Unregister(env.registry, group.Value()));
 }
 
 } // namespace material_schema_tests_file

@@ -281,3 +281,7 @@ UE도 Landscape·MaterialX·Paper2D 노드는 엔진 머티리얼 모듈 밖에 
 - `UMaterialInterface`·`UMaterialInstance`·base property override 속성 → `MaterialBase`·`MaterialInstance` 필드
 - custom attribute 등록
 - 플랫폼 품질 override와 조명 굽기 설정
+
+### 19.13 노드 정의 코드(MS1b)
+
+[노드 정의 코드](NodeDefinitionCode.ko.md)다: 파일 배치, UE 속성·핀·메뉴 변환 규칙, 동적 핀의 속성 읽기, 문맥 값 표 형식, MS-T12 (a) 시험.

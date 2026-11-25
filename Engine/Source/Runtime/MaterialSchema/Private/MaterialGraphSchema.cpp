@@ -72,6 +72,11 @@ bool CanConnectMaterialPinTypes(nodegraph::PinTypeId from, nodegraph::PinTypeId 
     const MaterialPinTypeClass fromClass =
         ClassifyMaterialPinType(static_cast<MaterialPinType>(from));
     const MaterialPinTypeClass toClass = ClassifyMaterialPinType(static_cast<MaterialPinType>(to));
+    // 통과 핀은 무엇과도 잇는다(UE MCT_Unknown). 타입 오류는 번역의 V1이 낸다.
+    if (fromClass == MaterialPinTypeClass::Any || toClass == MaterialPinTypeClass::Any) {
+        return true;
+    }
+
     switch (toClass) {
     case MaterialPinTypeClass::Numeric:
     case MaterialPinTypeClass::Static:
@@ -86,6 +91,8 @@ bool CanConnectMaterialPinTypes(nodegraph::PinTypeId from, nodegraph::PinTypeId 
     case MaterialPinTypeClass::ShadingModel:
     case MaterialPinTypeClass::Pending:
         return from == to;
+    case MaterialPinTypeClass::Any:
+        return true;
     }
 
     return false;

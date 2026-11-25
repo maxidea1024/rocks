@@ -10,7 +10,8 @@
 //
 // 연결 규칙(MaterialGraphSchema::CanConnect)은 타입 군으로 판정한다: 수 군(Numeric·Float1–4·
 // Int1–4·UInt1–4·Bool·Double1–4·행렬)끼리는 잇고 폭·변환 오류는 번역의 V1이 낸다(5.3절 암묵
-// 변환). 자원·표면·속성 군은 같은 타입끼리만 잇는다. TextureAny는 텍스처 타입 전부를 받는다.
+// 변환). 자원·표면·속성 군은 같은 타입끼리만 잇는다. TextureAny는 텍스처 타입 전부를 받는다. Any
+// 핀은 무엇과도 잇고 타입은 번역이 연결된 값으로 정한다.
 //
 // 사용 예:
 //   const nodegraph::PinTypeTable& table = MaterialPinTypes();
@@ -64,11 +65,14 @@ enum class MaterialPinType : uint32 {
     // shading model 번호(UE MCT_ShadingModel).
     ShadingModel = 36,
     // 번역 때 정해지는 열거 값(5.3절 — preset 선택 등).
-    StaticEnum = 37
+    StaticEnum = 37,
+    // 무엇이든 받는 통과 핀(UE MCT_Unknown — static switch·reroute·조건 스위치의 값 입력과 출력).
+    // 연결은 막지 않고 번역이 연결된 값의 타입으로 정한다(5.3절).
+    Any = 38
 };
 
 // 표의 타입 수다(마지막 값 + 1).
-inline constexpr uint32 MaterialPinTypeCount = 38;
+inline constexpr uint32 MaterialPinTypeCount = 39;
 
 // 타입 군이다(연결 판정).
 enum class MaterialPinTypeClass : uint8 {
@@ -80,7 +84,9 @@ enum class MaterialPinTypeClass : uint8 {
     Attributes,
     ShadingModel,
     // 자원 종류가 아직 없는 타입(같은 타입끼리만).
-    Pending
+    Pending,
+    // 통과 핀(무엇과도 잇는다).
+    Any
 };
 
 // 도메인 핀 타입 표다(MaterialGraphSchema::PinTypes가 돌려준다). 수명: 정적이다.

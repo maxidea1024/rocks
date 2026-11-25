@@ -45,6 +45,7 @@ constexpr nodegraph::PinTypeInfo PinTypeInfos[MaterialPinTypeCount] = {
     {"MaterialAttributes"},
     {"ShadingModel"},
     {"StaticEnum"},
+    {"Any"},
 };
 
 constexpr MaterialPinTypeClass PinTypeClasses[MaterialPinTypeCount] = {
@@ -67,11 +68,12 @@ constexpr MaterialPinTypeClass PinTypeClasses[MaterialPinTypeCount] = {
     MaterialPinTypeClass::Static,       MaterialPinTypeClass::Static,
     MaterialPinTypeClass::Surface,      MaterialPinTypeClass::Attributes,
     MaterialPinTypeClass::ShadingModel, MaterialPinTypeClass::Static,
+    MaterialPinTypeClass::Any,
 };
 
 constexpr nodegraph::PinTypeTable PinTypeTableValue{PinTypeInfos};
 
-static_assert(static_cast<uint32>(MaterialPinType::StaticEnum) + 1 == MaterialPinTypeCount,
+static_assert(static_cast<uint32>(MaterialPinType::Any) + 1 == MaterialPinTypeCount,
               "MaterialPinTypeCount must follow the last MaterialPinType value");
 
 } // namespace

@@ -51,6 +51,17 @@ bool SchemaHasField(const TypeSchema& schema, StringView name) noexcept {
     return false;
 }
 
+// 새 노드 문자열 기본값의 대상 필드인가: 최상위 String·Name 필드다.
+bool IsTextField(const TypeSchema& schema, StringView name) noexcept {
+    for (const FieldSchema& field : schema.fields) {
+        if (SameText(field.name, name)) {
+            return field.value.kind == ValueKind::Utf8String || field.value.kind == ValueKind::Name;
+        }
+    }
+
+    return false;
+}
+
 bool HasPin(Span<const MaterialPinDefinition> pins, StringView key,
             nodegraph::PinDirection direction) noexcept {
     for (const MaterialPinDefinition& pin : pins) {
@@ -125,6 +136,19 @@ Result<void> ValidateDefinition(const MaterialNodeDefinition& definition) noexce
         }
     }
 
+    if (!definition.textDefaults.IsEmpty()) {
+        if (definition.propertiesSchema == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const TypeSchema& schema = definition.propertiesSchema();
+        for (const MaterialPropertyTextDefault& entry : definition.textDefaults) {
+            if (!IsTextField(schema, entry.field)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
     for (const MaterialPassThrough& pair : definition.passThrough) {
         if (!HasPin(definition.pins, pair.input, nodegraph::PinDirection::Input) ||
             !HasPin(definition.pins, pair.output, nodegraph::PinDirection::Output)) {
@@ -168,6 +192,19 @@ Result<void> BuildDescriptorArrays(NamePool& names, const MaterialNodeDefinition
         descriptor.valuePolicy = ValuePolicyOf(pin);
         // 용량을 미리 잡았으므로 실패하지 않는다.
         (void)pins.TryPushBack(descriptor);
+    }
+
+    if (!definition.textDefaults.IsEmpty()) {
+        if (definition.propertiesSchema == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const TypeSchema& schema = definition.propertiesSchema();
+        for (const MaterialPropertyTextDefault& entry : definition.textDefaults) {
+            if (!IsTextField(schema, entry.field)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
     }
 
     for (const MaterialPassThrough& pair : definition.passThrough) {

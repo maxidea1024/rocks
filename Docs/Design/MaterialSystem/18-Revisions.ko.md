@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 13(초안) | 2026-11-26 | 19.13절(노드 정의 코드 — MS1b 파일 배치·UE 변환 규칙·동적 핀 속성 읽기 `NodePropertyReader`·새 노드 문자열 기본값 `textDefaults`·문맥 값 표 형식)을 더했다. 5.3절에 `Numeric`·`Any`·`ShadingModel` 행을 더했다(`Any`는 UE `MCT_Unknown` 통과 핀) |
 | 12(초안) | 2026-11-26 | MS3b 재리뷰 반영(4.6.2절): Build hook이 outermost로 패키지를 찾고 패키지 없는 대상은 `InvalidArgument`, 자기 판정은 객체 소속, 함수 인스턴스 필드 전부 EditorOnly, 인스턴스 물리 재질 mask·map은 UE처럼 자기 값(상속 없음), 4.2·4.3·4.6절 표 이름 정정, 19.4.1절 표 순서를 enum과 맞춤, 시험 보강 |
 | 11(초안) | 2026-11-26 | MS3b 코드 리뷰 반영(4.6.1절): `MaterialFunctionBase`와 EditorOnly 함수 참조 + Build hook, Static Enum·Font page override, 사용 대상 added/removed, Optional null 덮기, `MPQ-LightBake`·조명 굽기 override, 함수 인스턴스 override, 컬렉션 상속, `ShadingModelPreset`, 컬렉션 Hard 참조, `PhysicalMaterialMap`, sampling scale 기본값, 레이어 EditorOnly 칸. 19.9·19.11절 이름을 코드에 맞춤 |
 | 10(초안) | 2026-11-25 | 문서를 장별 파일로 나눴다(내용 변경 없음, 앞 커밋). 사용자 지시로 범위를 UE 5.8 전체로 넓혔다: 19장(노드 365클래스 대응·상태 구현/TODO/플러그인/추상/공통/제외·속성 TODO·단일 원본 json·문맥 공급 기능과 문맥 값 표·대표 노멀·스위치 해석 시점·이전 프레임 문맥·머티리얼 층 선행 MPQ 15개·원본 공급 interface·에셋 참조 형식·이름 규칙·플러그인 등록·출력 속성, `UMaterial` 속성 167개·사용 플래그·인스턴스·custom attribute·플랫폼 품질 설정 대응), 교차 검증 2명(범위·정확성) 반영, 2·4·5.3·6.2·10.3절 이름·타입(Double1–4, 선언만 하는 텍스처 타입)·표면 노드 정리, 15.1절 선행(MSR14·MSR15), 16절 MRD13·MRD14·MRB9·MSR14·MSR15, 17절 MD10–MD16, 5.6절 출력 핀(Refraction·SurfaceThickness·Displacement·Attributes)과 Volume·RVT, 5.7절을 19장 참조로, 9.3절 종류 상태, 15.2절 MS1→MS1a·MS1b, MS2→MS2a–MS2f, 15.3절 MS-T12·MS-T13, 16절 MRD13, 17절 MD10–MD14 |
