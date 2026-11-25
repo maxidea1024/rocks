@@ -147,6 +147,13 @@ UE 5.8 원본과의 차이(원본 확인 — `Math/Sphere.h`·`CapsuleShape.h`·
 
 검증: 13개 도형 테스트와 33개 판정 테스트(리뷰 회귀 5개 포함)가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. Cylinder·Capsule 보강은 `IntersectionCylinderTests.cpp`의 18개 테스트(float·double)가 확인한다(정확 산술은 `TestSupport/ExactArithmetic.h`, 황금분할·SDF ray oracle은 `TestSupport/GeometryOracles.h`로 공용화해 `IntersectionTests.cpp`도 같은 것을 쓴다): 경계 포함은 표본 점이 아니라 정확 산술 oracle(모든 double을 공통 2의 거듭제곱으로 정수화해 간격 g ≥ 0, g²·|D|² ≥ r²·(D_j² + D_k²)를 큰 정수로 판정)로 고정 사례(리뷰 반례 start (0, 0, 0)·end (1000, 1e−6, 0)·r 1e4, 원점 10⁹ cm, 큰 반경, 축 비율이 비정규인 (1, 1e−310, 0)·r 1e30, 최소 비정규 반경)와 무작위 dyadic 1,500건×2를 판정하고 꽉 맞는 경계보다 상대 32ε와 몇 ulp 이상 넓지 않음도 본다. 점 포함·최근접·거리·구 겹침은 외적 기반 독립 SDF oracle과 3,000건×2, 광선·선분은 SDF 근 찾기 oracle과 2,000건×2, 평면·볼록 영역 분류는 중심 ± √ 꼴 support oracle과 3,000건×2를 대조하며, 고정 사례로 거의 평행한 normal(support 1e−5)·비단위 normal·긴 축(H 1e9, r 1)의 수직 거리·축 평행·끝면 평면 안 스침·시작점 안/경계·maxDistance가 정확히 진입 거리·모서리 동률 끝면 법선·radius 0·퇴화 거부·모든 겹침 쌍 대칭을 고정한다. 리뷰 반영 시험은 경계 근처 점 4,000건×2(좌표 double 1e9·float 1e4 cm, 축 평행·거의 평행 축, radius 0 포함)에서 위 판정 일치를, 접선 ray 3,000건×2에서 hit point의 표면 거리·normal 근사와 maxDistance = 정확한 진입 거리(Hit, 한 ulp 짧으면 Miss)를 확인하고, 리뷰 반례 두 건과 underflow 진입을 고정한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle, Cylinder 대 Box·OrientedBox·Capsule·Cylinder·Triangle 겹침·구 sweep·선분 거리(설계 결정 1).
 
+## 2.2 이동·카메라 보조 함수
+
+2026-11-25 추가([엔진 런타임](../Design/EngineRuntime/26-MovementComponents.ko.md) 26.2절 — 이동 컴포넌트·SpringArm). UE 식을 그대로 옮기고 `Core/Tests/MotionMathTests.cpp`에서 대조한다.
+
+- `Core/Math/InterpTo.h`: `math::VInterpTo`(UE `FMath::VInterpTo` — speed ≤ 0이거나 거리² < 1e-4면 target, 아니면 비율 clamp(dt·speed, 0, 1)), `math::QInterpTo`(UE `QInterpTo` — speed ≤ 0이거나 부호 무시 성분 차 ≤ 1e-4면 target, 아니면 `CurveSlerp` = UE `FQuat::Slerp`). 스칼라 `math::InterpTo`(MathUtility.h)와 달리 UE의 "도착" 판정이 있다.
+- `Core/Math/VectorUtility.h`: `ClampedToMaxSize`(UE `GetClampedToMaxSize` — max < 1e-4면 0), `VectorPlaneProject`·`PointPlaneProject`(단위 법선 전제), `ToOrientationRotator`(yaw = atan2(y, x), pitch = atan2(z, √(x² + y²)), roll 0)·`ToOrientationQuat`(UE 반각 식 — 같은 회전).
+
 ## 3. 색
 
 `Color`는 채널당 UNorm8, `LinearColor`는 선형 sRGB 원색·D65·straight alpha이며 HDR 값을 허용한다. sRGB 변환은 IEC 61966-2-1 식을 double로 정확히 계산하고 alpha에는 적용하지 않는다. 256개 byte 모두 왕복한다. 저장 양자화는 NaN·음수→0, 1 이상·+Inf→255(D3D float→UNORM 규칙과 같은 방향)이며, `GetClamped`는 NaN을 숨기지 않는다. 16진 문자열은 `#` 선택, 3/4/6/8자리를 받고 잘못된 입력에서는 false와 함께 출력값을 바꾸지 않는다. 휘도는 Rec.709 가중치(0.2126, 0.7152, 0.0722)다.

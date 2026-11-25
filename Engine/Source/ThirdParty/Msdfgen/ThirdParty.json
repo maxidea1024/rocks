@@ -36,7 +36,8 @@
     "msdfgen-1.13.1/core/Scanline.cpp",
     "msdfgen-1.13.1/core/sdf-error-estimation.cpp",
     "msdfgen-1.13.1/core/Shape.cpp",
-    "msdfgen-1.13.1/ext/import-font.cpp"
+    "msdfgen-1.13.1/ext/import-font.cpp",
+    "RocksApproximateSdf.cpp"
   ],
   "includeDirectories": [
     "msdfgen-1.13.1"
@@ -200,7 +201,8 @@
   ],
   "notes": [
     "Multi-channel and single-channel signed distance field generation for the font backend (Docs/Design/Font/06-TextLayoutCore.ko.md section 6.5, 08-ThirdParty.ko.md section 8.2). ext/import-font reads FreeType outlines into msdfgen::Shape (the same path as UE 5.8 SlateSdfGenerator, MSDFGEN_USE_FREETYPE); the other ext helpers (SVG import, PNG saving, geometry resolution through Skia) are not imported.",
-    "msdfgen::Shape holds std::vector, so only the engine adapter translation unit that builds shapes is a narrow exception to the STL policy (registered with the adapter in FT2). No RTTI and no exceptions."
+    "msdfgen::Shape holds std::vector; the engine adapter (TextLayoutBackend) uses it through msdfgen members only and writes no std names, so the engine STL policy needs no exception. No RTTI and no exceptions.",
+    "RocksApproximateSdf.cpp (glue) adds approximateSDF, the fast distance field approximation UE 5.8 SlateSdfGenerator uses for placeholders and the SdfApproximation mode. It is adapted from upstream branch performance-optimization, commit 3af96cda22c2eee039a41ccef67adfdb2188d469, core/approximate-sdf.cpp (same author and MIT license); 1.13.1 lacks verticalScanlineIntersections, so the vertical pass runs scanlineIntersections on a transposed shape copy. Glue has no header; TextLayoutBackend declares the function. Docs/Design/Font/08-ThirdParty.ko.md section 8.2."
   ],
   "modifications": [
     {

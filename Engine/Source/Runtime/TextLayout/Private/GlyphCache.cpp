@@ -5,6 +5,7 @@
 
 #include <Core/Diagnostics/Log.h>
 #include <Core/Hash.h>
+#include <Core/Math/MathUtility.h>
 #include <Platform/Memory.h>
 #include <string.h>
 
@@ -34,13 +35,31 @@ uint64 GlyphCache::KeyHash::operator()(const GlyphKey& key) const noexcept {
     hash = HashCombine(hash, MixHash(FloatBits(key.outline.size)));
     const uint64 flags =
         (key.outline.mitered ? 1u : 0u) | (key.outline.separateFillAlpha ? 2u : 0u);
-    return HashCombine(hash, MixHash(flags));
+    hash = HashCombine(hash, MixHash(flags));
+    hash = HashCombine(hash, MixHash(static_cast<uint64>(key.mode)));
+    return HashCombine(hash, MixHash(key.distanceFieldPpem));
 }
 
-GlyphCache::GlyphCache(Allocator& allocator, const GlyphCacheSettings& settings) noexcept
-    : allocator_(allocator), settings_(settings), glyphs_(allocator), textures_(allocator),
-      alphaPages_(allocator), colorPages_(allocator), distanceFieldPages_(allocator),
-      nonAtlasTextures_(allocator) {
+uint64 GlyphCache::DistanceFieldKeyHash::operator()(const DistanceFieldKey& key) const noexcept {
+    uint64 hash = MixHash(static_cast<uint64>(reinterpret_cast<uptr>(key.face)));
+    hash = HashCombine(hash, MixHash(key.glyphIndex));
+    hash = HashCombine(hash, MixHash(key.multichannel ? 1u : 0u));
+    hash = HashCombine(hash, MixHash(key.ppem));
+    hash = HashCombine(hash, MixHash(FloatBits(key.emOuterSpread)));
+    return HashCombine(hash, MixHash(FloatBits(key.emInnerSpread)));
+}
+
+uint64 GlyphCache::GeometryKeyHash::operator()(const GeometryKey& key) const noexcept {
+    const uint64 hash = MixHash(static_cast<uint64>(reinterpret_cast<uptr>(key.face)));
+    return HashCombine(hash, MixHash(key.glyphIndex));
+}
+
+GlyphCache::GlyphCache(Allocator& allocator, const GlyphCacheSettings& settings,
+                       const TextBackend* backend) noexcept
+    : allocator_(allocator), settings_(settings), backend_(backend), glyphs_(allocator),
+      distanceFields_(allocator), geometries_(allocator), pendingJobs_(allocator),
+      textures_(allocator), alphaPages_(allocator), colorPages_(allocator),
+      distanceFieldPages_(allocator), nonAtlasTextures_(allocator) {
     settings_.alphaAtlasSize = ClampAtlasSize(settings.alphaAtlasSize);
     settings_.colorAtlasSize = ClampAtlasSize(settings.colorAtlasSize);
     settings_.distanceFieldAtlasSize = ClampAtlasSize(settings.distanceFieldAtlasSize);
@@ -49,8 +68,9 @@ GlyphCache::GlyphCache(Allocator& allocator, const GlyphCacheSettings& settings)
 }
 
 Result<UniquePtr<GlyphCache>> GlyphCache::TryCreate(Allocator& allocator,
-                                                    const GlyphCacheSettings& settings) noexcept {
-    return UniquePtr<GlyphCache>::TryMake(allocator, allocator, settings);
+                                                    const GlyphCacheSettings& settings,
+                                                    const TextBackend* backend) noexcept {
+    return UniquePtr<GlyphCache>::TryMake(allocator, allocator, settings, backend);
 }
 
 Result<CachedGlyph> GlyphCache::FindOrAdd(const GlyphKey& key) noexcept {
@@ -59,7 +79,19 @@ Result<CachedGlyph> GlyphCache::FindOrAdd(const GlyphKey& key) noexcept {
     }
 
     platform::LockGuard guard(mutex_);
-    if (const CachedGlyph* found = glyphs_.Find(key)) {
+    if (key.mode != FontRasterMode::Bitmap && backend_ != nullptr && key.distanceFieldPpem > 0) {
+        return FindOrAddDistanceField(key);
+    }
+
+    return FindOrAddBitmap(key);
+}
+
+Result<CachedGlyph> GlyphCache::FindOrAddBitmap(const GlyphKey& key) noexcept {
+    // 비트맵은 거리장 설정과 무관하다.
+    GlyphKey bitmapKey = key;
+    bitmapKey.mode = FontRasterMode::Bitmap;
+    bitmapKey.distanceFieldPpem = 0;
+    if (const CachedGlyph* found = glyphs_.Find(bitmapKey)) {
         return Result<CachedGlyph>::Success(*found);
     }
 
@@ -84,11 +116,226 @@ Result<CachedGlyph> GlyphCache::FindOrAdd(const GlyphKey& key) noexcept {
         return Result<CachedGlyph>::Failure(ErrorCode::OutOfMemory);
     }
 
-    if (auto inserted = glyphs_.Insert(GlyphKey(key), CachedGlyph(entry)); !inserted) {
+    if (auto inserted = glyphs_.Insert(GlyphKey(bitmapKey), CachedGlyph(entry)); !inserted) {
         return Result<CachedGlyph>::Failure(inserted.Error());
     }
 
     return Result<CachedGlyph>::Success(entry);
+}
+
+Result<SharedPtr<const GlyphGeometry>> GlyphCache::GeometryOf(BackendFace& face,
+                                                              uint32 glyphIndex) noexcept {
+    const GeometryKey key{&face, glyphIndex};
+    if (const SharedPtr<const GlyphGeometry>* found = geometries_.Find(key)) {
+        return Result<SharedPtr<const GlyphGeometry>>::Success(*found);
+    }
+
+    auto made = SharedPtr<GlyphGeometry>::TryMake(allocator_, allocator_);
+    if (!made) {
+        return Result<SharedPtr<const GlyphGeometry>>::Failure(made.Error());
+    }
+
+    SharedPtr<const GlyphGeometry> geometry;
+    if (auto extracted = face.ExtractGeometry(glyphIndex, *made.Value()); extracted) {
+        geometry = SharedPtr<const GlyphGeometry>(Move(made.Value()));
+    } else if (extracted.Error() == ErrorCode::OutOfMemory) {
+        return Result<SharedPtr<const GlyphGeometry>>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    if (auto inserted =
+            geometries_.Insert(GeometryKey(key), SharedPtr<const GlyphGeometry>(geometry));
+        !inserted) {
+        return Result<SharedPtr<const GlyphGeometry>>::Failure(inserted.Error());
+    }
+
+    return Result<SharedPtr<const GlyphGeometry>>::Success(Move(geometry));
+}
+
+Result<CachedGlyph> GlyphCache::FindOrAddDistanceField(const GlyphKey& key) noexcept {
+    // 목표 ppem·spread다(UE GetSdfGlyphFontAtlasData 1339–1349·1420–1421행).
+    const float targetPpem = static_cast<float>(ComputeFontPixelSize(key.size, key.scale)) > 1.0f
+                                 ? static_cast<float>(ComputeFontPixelSize(key.size, key.scale))
+                                 : 1.0f;
+    const float sdfPpem = static_cast<float>(key.distanceFieldPpem);
+    const float scale = targetPpem / sdfPpem;
+    const float emOutline = math::Floor(key.outline.size * key.scale + 0.5f) / targetPpem;
+    float emInner = DistanceFieldInnerSpreadPixels / targetPpem;
+    emInner = emInner < MinDistanceFieldInnerSpread
+                  ? MinDistanceFieldInnerSpread
+                  : (emInner > MaxDistanceFieldInnerSpread ? MaxDistanceFieldInnerSpread : emInner);
+    float emOuter = emInner + emOutline;
+    emOuter = emOuter > MaxDistanceFieldOuterSpread ? MaxDistanceFieldOuterSpread : emOuter;
+    const auto ceilHalfSpread = [sdfPpem](float emSpread) noexcept {
+        float pixels = MinDistanceFieldHalfSpreadPixels;
+        while (pixels < sdfPpem * emSpread) {
+            pixels *= 2.0f;
+        }
+
+        return pixels / sdfPpem;
+    };
+
+    const bool multichannel = key.mode == FontRasterMode::Msdf;
+    const DistanceFieldKey fieldKey{key.face,
+                                    key.glyphIndex,
+                                    multichannel,
+                                    key.distanceFieldPpem,
+                                    ceilHalfSpread(emOuter),
+                                    ceilHalfSpread(emInner)};
+
+    const auto finalize = [scale](const CachedGlyph& stored) noexcept {
+        // 가장자리 반 화소를 뺀 사각형이다(UE FinalizeEntry).
+        CachedGlyph glyph = stored;
+        glyph.quadBearingX = scale * (static_cast<float>(stored.bearingX) + 0.5f);
+        glyph.quadBearingY = scale * (static_cast<float>(stored.bearingY) - 0.5f);
+        glyph.quadWidth = scale * static_cast<float>(stored.rect.width - 1);
+        glyph.quadHeight = scale * static_cast<float>(stored.rect.height - 1);
+        return glyph;
+    };
+
+    if (const DistanceFieldEntry* found = distanceFields_.Find(fieldKey)) {
+        if (!found->supported) {
+            return FindOrAddBitmap(key);
+        }
+
+        return Result<CachedGlyph>::Success(found->glyph.valid ? finalize(found->glyph)
+                                                               : found->glyph);
+    }
+
+    auto geometry = GeometryOf(*key.face, key.glyphIndex);
+    if (!geometry) {
+        return Result<CachedGlyph>::Failure(geometry.Error());
+    }
+
+    DistanceFieldRequest request;
+    request.multichannel = multichannel;
+    request.approximate = true;
+    request.ppem = key.distanceFieldPpem;
+    request.emOuterSpread = fieldKey.emOuterSpread;
+    request.emInnerSpread = fieldKey.emInnerSpread;
+    GlyphBitmap placeholder(allocator_);
+    DistanceFieldEntry entry;
+    if (geometry.Value().Get() != nullptr) {
+        if (auto made = backend_->GenerateDistanceField(*geometry.Value(), request, placeholder);
+            made) {
+            entry.supported = true;
+        } else if (made.Error() == ErrorCode::OutOfMemory) {
+            return Result<CachedGlyph>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    if (!entry.supported) {
+        if (auto inserted =
+                distanceFields_.Insert(DistanceFieldKey(fieldKey), DistanceFieldEntry(entry));
+            !inserted) {
+            return Result<CachedGlyph>::Failure(inserted.Error());
+        }
+
+        return FindOrAddBitmap(key);
+    }
+
+    auto placed = Place(placeholder);
+    if (!placed) {
+        return placed;
+    }
+
+    CachedGlyph glyph = placed.Value();
+    glyph.distanceField = true;
+    glyph.supportsOutline = true;
+    glyph.emOuterSpread = fieldKey.emOuterSpread;
+    glyph.emInnerSpread = fieldKey.emInnerSpread;
+    if (glyph.valid && glyph.texture < textures_.Size() &&
+        textures_[glyph.texture].page.Get() != nullptr) {
+        // 거리장은 여백을 뺀 칸과 거리장 bearing을 쓴다(UE TryAddToAtlas).
+        glyph.rect = {glyph.rect.x + FontAtlasPadding, glyph.rect.y + FontAtlasPadding,
+                      glyph.rect.width - FontAtlasPadding * 2,
+                      glyph.rect.height - FontAtlasPadding * 2};
+    }
+
+    glyph.bearingX = placeholder.bearingX;
+    glyph.bearingY = placeholder.bearingY;
+    // SdfApproximation은 자리표시만 쓴다(UE bPlaceholderOnly).
+    glyph.pending = glyph.valid && key.mode != FontRasterMode::SdfApproximation;
+    if (glyph.pending) {
+        DistanceFieldJob job;
+        job.key = fieldKey;
+        job.geometry = geometry.Value();
+        job.request = request;
+        job.request.approximate = false;
+        job.texture = glyph.texture;
+        job.inner = glyph.rect;
+        job.generation = flushGeneration_;
+        if (auto queued = pendingJobs_.TryPushBack(Move(job)); !queued) {
+            return Result<CachedGlyph>::Failure(queued.Error());
+        }
+    }
+
+    entry.glyph = glyph;
+    if (auto inserted =
+            distanceFields_.Insert(DistanceFieldKey(fieldKey), DistanceFieldEntry(entry));
+        !inserted) {
+        if (glyph.pending) {
+            (void)pendingJobs_.TryPopBack();
+        }
+
+        return Result<CachedGlyph>::Failure(inserted.Error());
+    }
+
+    return Result<CachedGlyph>::Success(glyph.valid ? finalize(glyph) : glyph);
+}
+
+Result<uint32> GlyphCache::RunPendingDistanceFields(uint32 maxJobs) noexcept {
+    uint32 done = 0;
+    while (done < maxJobs) {
+        DistanceFieldJob job;
+        {
+            platform::LockGuard guard(mutex_);
+            if (pendingJobs_.Size() == 0) {
+                break;
+            }
+
+            job = Move(pendingJobs_[0]);
+            (void)pendingJobs_.TryRemoveAt(0);
+        }
+
+        // 생성은 잠금 밖에서 한다(geometry는 불변, backend 생성은 스레드 안전 — 6.7절).
+        GlyphBitmap field(allocator_);
+        const Result<void> generated =
+            backend_->GenerateDistanceField(*job.geometry, job.request, field);
+        if (!generated && generated.Error() == ErrorCode::OutOfMemory) {
+            return Result<uint32>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        platform::LockGuard guard(mutex_);
+        ++done;
+        if (job.generation != flushGeneration_) {
+            continue;
+        }
+
+        DistanceFieldEntry* entry = distanceFields_.Find(job.key);
+        if (entry == nullptr) {
+            continue;
+        }
+
+        if (generated && static_cast<uint32>(field.width) == job.inner.width &&
+            static_cast<uint32>(field.height) == job.inner.height &&
+            job.texture < textures_.Size() && textures_[job.texture].page.Get() != nullptr) {
+            if (auto replaced =
+                    textures_[job.texture].page->Replace(job.inner, field.pixels.View());
+                !replaced) {
+                Log::Warning(LogTextLayout, "Cannot replace a distance field placeholder");
+            }
+        }
+
+        // 실패해도 자리표시를 그대로 쓴다(UE와 같이 다시 시도하지 않는다).
+        entry->glyph.pending = false;
+    }
+
+    return Result<uint32>::Success(done);
+}
+
+uint32 GlyphCache::PendingDistanceFieldCount() const noexcept {
+    platform::LockGuard guard(mutex_);
+    return static_cast<uint32>(pendingJobs_.Size());
 }
 
 Result<CachedGlyph> GlyphCache::Place(const GlyphBitmap& bitmap) noexcept {
@@ -362,6 +609,10 @@ bool GlyphCache::AdvanceFrame() noexcept {
 
 void GlyphCache::Flush() noexcept {
     glyphs_.Clear();
+    distanceFields_.Clear();
+    geometries_.Clear();
+    pendingJobs_.Clear();
+    ++flushGeneration_;
     textures_.Clear();
     alphaPages_.Clear();
     colorPages_.Clear();
@@ -372,7 +623,7 @@ void GlyphCache::Flush() noexcept {
 GlyphCacheStats GlyphCache::Stats() const noexcept {
     platform::LockGuard guard(mutex_);
     GlyphCacheStats stats;
-    stats.glyphs = glyphs_.Count();
+    stats.glyphs = glyphs_.Count() + distanceFields_.Count();
     stats.alphaPages = static_cast<uint32>(alphaPages_.Size());
     stats.colorPages = static_cast<uint32>(colorPages_.Size());
     stats.distanceFieldPages = static_cast<uint32>(distanceFieldPages_.Size());

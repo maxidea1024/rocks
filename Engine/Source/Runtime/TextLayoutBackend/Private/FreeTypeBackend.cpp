@@ -1,6 +1,7 @@
 // FreeType backend의 face 열기·정보·metric이다(Docs/Design/Font 6.2·6.8절, FT2a). metric 계산은 UE
 // FFreeTypeFace·FreeTypeUtils(FontCacheFreeType.cpp 142–297행, FontCacheFreeType.h 269–293행)와
 // 같다.
+#include "FontDistanceField.h"
 #include "FontRaster.h"
 #include "FontShaping.h"
 #include "IcuText.h"
@@ -179,6 +180,10 @@ public:
         return detail::RasterizeGlyph(library_, face_, desc_.hinting, request, out);
     }
 
+    Result<void> ExtractGeometry(uint32 glyphIndex, GlyphGeometry& out) noexcept override {
+        return detail::ExtractGlyphGeometry(face_, glyphIndex, out);
+    }
+
 private:
     // UE ApplySizeAndScale과 같다: scalable은 픽셀 크기를 정하고, 비트맵 글꼴은 가장 알맞은
     // strike를 골라 그 strike에서 요청 크기로의 배율을 x_scale·y_scale에 둔다.
@@ -318,6 +323,12 @@ public:
     Result<void> ResolveBidi(StringView utf8, TextBaseDirection base,
                              Array<BidiRun>& out) noexcept override {
         return detail::ResolveBidi(utf8, base, out);
+    }
+
+    Result<void> GenerateDistanceField(const GlyphGeometry& geometry,
+                                       const DistanceFieldRequest& request,
+                                       GlyphBitmap& out) const noexcept override {
+        return detail::GenerateGlyphDistanceField(geometry, request, out);
     }
 
 private:

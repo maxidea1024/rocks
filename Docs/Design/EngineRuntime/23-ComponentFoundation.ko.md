@@ -100,7 +100,7 @@ Result<void> Detach(AttachmentRule rule = AttachmentRule::KeepWorld) noexcept;  
 **socket.**
 - `virtual bool HasSocket(Name) const`(기본 거짓)와 `virtual Result<Transform> GetSocketTransform(Name socket, TransformSpace space) const`가 있다. `space`는 `World`·`Component`(socket의 부모 Component 기준)다. 이름이 비면 Component 자신이다. 기본 구현은 비거나 없는 이름에 자신의 Transform을 돌려준다(UE `GetSocketTransform`도 없는 socket이면 Component Transform이다).
 - 메시 계열이 재정의한다(CM1a 정적 메시 socket, CM10 skeletal bone).
-- 부착 socket 이름은 `AttachSocketName()`이다. 월드 행렬 = 상대 × 부모의 socket Transform(Component 공간) × 부모 월드다.
+- 부착 socket 이름은 `AttachSocketName()`이다. 월드 행렬 = 상대 × 부모의 socket Transform(Component 공간) × 부모 월드다. socket 이름이 비어도 부모의 `GetSocketTransform(빈 이름)`을 쓴다(UE와 같다 — 기본 구현은 단위라 결과가 같고, SpringArm처럼 이름 없는 자식을 옮기는 부모가 재정의한다, [26장](26-MovementComponents.ko.md) 26.2절).
 
 **절대 Transform(UE `bAbsoluteLocation`·`Rotation`·`Scale`).** `SetAbsolute(location, rotation, scale)`. 켜진 성분은 부모를 무시하고 상대 값을 월드 값으로 쓴다. 월드 행렬은 TRS로 합성한다: 위치는 절대면 상대 위치, 아니면 부모로 변환한 위치. 회전·scale도 같다. 셋 다 꺼져 있으면 지금처럼 행렬 곱 그대로다(shear 보존). 곱이 TRS로 분해되지 않으면(shear) 부모 TRS와 성분별로 합성한 뒤(UE `ComposeTransforms`) 켜진 성분을 덮어쓴다. `SetAbsolute`도 Mobility 검사를 거친다.
 

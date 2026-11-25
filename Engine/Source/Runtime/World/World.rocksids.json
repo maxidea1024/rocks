@@ -430,6 +430,146 @@
     },
     {
       "kind": "field",
+      "name": "rocks::MovementComponent::autoRegisterUpdatedComponent_",
+      "id": "469a5beaf5454e8fad5424697cd76519",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::autoUpdateTickRegistration_",
+      "id": "07df18abcaf0456c88647cbb92cf1c78",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::constrainToPlane_",
+      "id": "ad86c70ad21346cc9a552033ee2cb566",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::planeConstraintAxis_",
+      "id": "aecbcaad0077472c86606d7662739c96",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::planeConstraintNormal_",
+      "id": "398ad09448544d62acf3521d55176eaf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::planeConstraintOrigin_",
+      "id": "03586857b5f24046b2499e7e3ee54851",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::snapToPlaneAtStart_",
+      "id": "7dfe75eb278e45d8a2cd15bb023c3b80",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::tickBeforeOwner_",
+      "id": "c933ffa6ca024207be8082130bec623d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MovementComponent::velocity_",
+      "id": "4f14c6052b7249dfbbfebffd0707d1ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathControlPoint::position",
+      "id": "c9763d9c84954963b5c665c61462d4dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathControlPoint::positionIsRelative",
+      "id": "600fe333746f48a8a213471828e30dce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::behaviour_",
+      "id": "5dda0ef41d774559ae5a14187acf54f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::controlPoints_",
+      "id": "253a4de4c3ed4070b3cd0f1ac9c147ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::duration_",
+      "id": "3008d2e766b44576b8197f749a6edac8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::forceSubStepping_",
+      "id": "c3cd5fb7d53c4690a3ee64038f54bc86",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::maxSimulationIterations_",
+      "id": "2978e5f49f7d4defa12f1cac7aff899b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::maxSimulationTimeStep_",
+      "id": "07a0aeeb21774f6ea376dbb8401826ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::pauseOnImpact_",
+      "id": "399d48dedc4f4ffca31e4a61b8649dc9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::speedMultiplier_",
+      "id": "e6d869ae3ee940c5af206b8ceef551c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::sweep_",
+      "id": "495b2e45369945f9bc0fdcd61d107191",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PointLightComponent::lightFalloffExponent_",
       "id": "125f3662f3254f54903e337718dfd4fe",
       "aliases": [],
@@ -752,6 +892,146 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounceAdditionalIterations_",
+      "id": "738d9d32eb794ee18e5f3fca94fb1239",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounceAngleAffectsFriction_",
+      "id": "f5ce8e23888d4d9a9c751f648bab2a2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounceVelocityStopSimulatingThreshold_",
+      "id": "29164f6cbe17455385fb31add2851900",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::bounciness_",
+      "id": "a298746a36ea4d138ace10ed80b41489",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::forceSubStepping_",
+      "id": "9177b69f256745fc8a2acff2a1505bde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::friction_",
+      "id": "cd4318976c7c4f83b17ebcc0f91d80d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::homingAccelerationMagnitude_",
+      "id": "66159c15f2d4436986a7b07d321df554",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::homing_",
+      "id": "be0a9c32ec1b4342922100ba8dc1ad9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::initialSpeed_",
+      "id": "6cf97f67d7864b419d57a84fe198607e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::initialVelocityInLocalSpace_",
+      "id": "67124bdf39484b539fbf892fb87807ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::maxSimulationIterations_",
+      "id": "b5db50b5d5834d33b506a282d0449535",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::maxSimulationTimeStep_",
+      "id": "cd66c872769f464f9783da7456c55c39",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::maxSpeed_",
+      "id": "8f7040df385d42f2b4aabd2466396b49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::minFrictionFraction_",
+      "id": "cf6b929bc1bc40b19b0f850a00eab439",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::projectileGravityScale_",
+      "id": "dd1fdf68827e49b4bd8b46ac2e980c30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::rotationFollowsVelocity_",
+      "id": "fddbe009d54546cdb713ef8ae8437550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::rotationRemainsVertical_",
+      "id": "5f2161eefc1541b4aeaddb67b0b1e565",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::shouldBounce_",
+      "id": "7d58b50e4cb34960a236f7fb9ff63fdf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::simulationEnabled_",
+      "id": "0f26d8ae5b43410885a5306ee1af6ab4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::sweepCollision_",
+      "id": "d7cab4303d6f49e287dc35e447c7b0e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::RectLightComponent::barnDoorAngle_",
       "id": "0bfa81c2117146ecae667a2ec07a56a2",
       "aliases": [],
@@ -775,6 +1055,27 @@
       "kind": "field",
       "name": "rocks::RectLightComponent::sourceWidth_",
       "id": "0d8f2aede46d4e7a987999e0c86ac217",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RotatingMovementComponent::pivotTranslation_",
+      "id": "cd009e05c36b4ed4883dcda732708cb4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RotatingMovementComponent::rotationInLocalSpace_",
+      "id": "3d22504f561c4ef6927fec589d603220",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RotatingMovementComponent::rotationRate_",
+      "id": "930e5cc713074539a5f70ac14229fe0c",
       "aliases": [],
       "retired": false
     },
@@ -1010,6 +1311,118 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraLagMaxDistance_",
+      "id": "f3e3caf859d04559b90f4e87502db54f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraLagMaxTimeStep_",
+      "id": "0f4cc508bbdf4423b5c796299cb2db55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraLagSpeed_",
+      "id": "d4206b5c15474d6abaf7af5cc48b2c12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::cameraRotationLagSpeed_",
+      "id": "c9fc76aade7145dabd2bcfd9008966c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::doCollisionTest_",
+      "id": "bf540a34cb06422fa7db9eb4d1e65ece",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::enableCameraLag_",
+      "id": "c6418f2bdfee423c85477c0f4dc4083c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::enableCameraRotationLag_",
+      "id": "19479087c0a64adaa69a9d0007ef00d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::inheritPitch_",
+      "id": "621232ecfc7e4738959baa94acd47809",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::inheritRoll_",
+      "id": "a86abb81a09a4e7ebdab0c7000a4f769",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::inheritYaw_",
+      "id": "d476b76e64fd4b08ab53b6ed57a756a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::probeSize_",
+      "id": "de466dd2f055482f98bab29a2a6b42ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::socketOffset_",
+      "id": "11e0f247994c440ab7256f71ef9f420f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::targetArmLength_",
+      "id": "7ad2097813754e29932ecbd40151a2b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::targetOffset_",
+      "id": "8bd37243162a4e76b5070481c6b3f2ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::useCameraLagSubstepping_",
+      "id": "2e7d3d377b634b8cbe08431f3719bf44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SpringArmComponent::usePawnControlRotation_",
+      "id": "2a7add39bf6743fb8a804b6640604725",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::Actor",
       "id": "390b007f97694694a6348a88ff0afe0f",
@@ -1130,6 +1543,41 @@
     },
     {
       "kind": "type",
+      "name": "rocks::MovementComponent",
+      "id": "d1a0b0a6b7b8445ea5e60d6b76401353",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PathControlPoint",
+      "id": "9aec311501d24cdf85a6240568383550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PathMoverBehaviour",
+      "id": "47e03978194c44e0a0497e94779860d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PathMoverComponent",
+      "id": "4e410d65cabb4ea48da8854b7760bc34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlaneConstraintAxis",
+      "id": "df464b085f3d4b4abca8ca8e26ec50e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::PointLight",
       "id": "9d1c961ca9164d74b66d62f6dc470de6",
       "aliases": [],
@@ -1151,6 +1599,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ProjectileMovementComponent",
+      "id": "6d10c67ed1da42f0b39243ae193eb54e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::RectLight",
       "id": "c08929e2a39845efba1c3c15c2f9a46d",
       "aliases": [],
@@ -1167,6 +1622,13 @@
       "kind": "type",
       "name": "rocks::RendererStencilMask",
       "id": "bbe4015df93a46128a63a879cd172283",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RotatingMovementComponent",
+      "id": "5ef6c0b2501548da94804da2553d3cef",
       "aliases": [],
       "retired": false
     },
@@ -1244,6 +1706,13 @@
       "kind": "type",
       "name": "rocks::SpotLightComponent",
       "id": "a57a8972a5484855b44e499b280bd39e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SpringArmComponent",
+      "id": "93f053473fe24bdfa89873e9a8c45c41",
       "aliases": [],
       "retired": false
     },
