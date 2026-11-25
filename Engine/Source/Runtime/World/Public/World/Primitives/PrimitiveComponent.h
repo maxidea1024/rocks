@@ -414,6 +414,12 @@ public:
         bodySettings_.simulatePhysics = simulate;
     }
 
+    // 물리 결과를 컴포넌트에 쓴다(Docs/Design/PhysicsModule 3.4절 — Physics의 PhysicsResults만
+    // 부른다). 월드 위치(cm)·회전으로 옮기되 자기 body로 되돌려 보내지 않는다(UE
+    // MOVECOMP_SkipPhysicsMove). 부착된 자식은 따라가고 자기 body를 옮긴다. 오류: 이동 실패(그대로
+    // 돌려준다 — SetWorldLocationAndRotation).
+    Result<void> ApplyPhysicsTransform(const Vec3d& location, const Quatd& rotation) noexcept;
+
     // 실효 충돌 값이다(CollisionData 5절 ResolveCollision — World의 profile 표, 이름은
     // CollisionProfileName). profileName은 World 표가 살아 있는 동안 유효하다. 오류: World 장부 밖
     // 객체(HasWorld 거짓 — InvalidArgument).
@@ -534,6 +540,8 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "bodySettings") BodySettings bodySettings_;
     // 물리 body다(실행 상태 — 저장하지 않는다).
     ROCKS_NATIVE() PhysicsBodyHandle bodyHandle_;
+    // ApplyPhysicsTransform 안이다(OnTransformUpdated가 body로 되돌려 보내지 않는다).
+    ROCKS_NATIVE() bool applyingPhysicsResult_ = false;
 };
 
 } // namespace rocks

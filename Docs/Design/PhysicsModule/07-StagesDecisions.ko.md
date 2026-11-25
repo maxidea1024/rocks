@@ -103,6 +103,38 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 
 **시험**(World·컴포넌트 공개 API만 — Modular에서도 돈다): 등록·파괴의 body 수, NoCollision·장면 없는 World는 body 없음, mobility·simulate → 운동 종류(Static에 simulate면 경고 뒤 Static), 떨어지는 구의 `ReadKinematics`, PA10을 `CapsuleComponent` 경로로(반구 포함 반높이 의미), box scale을 바닥 위 구의 정지 높이로 확인, 컴포넌트 이동이 Kinematic body를 옮김, 옮긴 잠든 Dynamic이 깨어남, 크기·scale 0 형상과 비균일 scale 부모 아래 회전한 자식도 body가 생김. 한계: World 물리 장면 교체(`SetPhysicsScene` null → 새 장면) 뒤 남은 컴포넌트 handle은 새 장면의 같은 칸을 가리킬 수 있다 — 교체는 지금 Subsystem 수명 안에서만 일어나 남은 컴포넌트가 없다. 등록된 body가 있으면 교체를 거부하는 검사는 PH2d(재생성)에서 더한다. 등록 실패 되돌림 시험(용량 초과)은 PH5(설정 문맥 시험 기반)에서.
 
+### 7.1.4 PH2c 구현 세부(2026-11-26)
+
+**결과 반영(3.4절).**
+- body 칸이 컴포넌트 handle(`BodyCreateDesc::component`)과 운동 종류를 기억하고, Jolt body user data에 칸 번호·세대를 넣는다.
+- step마다 `Update` 뒤에 Jolt 활성 Dynamic body(`GetActiveBodies`)와 그 step에 잠든 body(`BodyActivationListener::OnBodyDeactivated` — job thread에서 불리므로 잠금 아래 칸 번호만 쌓는다)를 결과 목록에 더한다(칸마다 표지로 중복 없이).
+- `PhysicsWorldSubsystem`이 엔진 자리 `PhysicsResults`(Game·Tryout만)에서 목록을 칸 번호 순으로 정렬해 꺼내고, 살아 있는 칸의 위치·회전을 컴포넌트 `PrimitiveComponent::ApplyPhysicsTransform(위치, 회전)`으로 쓴다.
+- `ApplyPhysicsTransform`은 skip 표지를 세운 채 `SetWorldLocationAndRotation`을 불러 자기 body로 되돌려 보내지 않는다(UE `MOVECOMP_SkipPhysicsMove`). 부착된 자식은 부착 전파로 따라가고 자기 body를 옮긴다.
+- sweep 없는 이동이고, overlap 갱신이 붙는 `MoveComponent` 경로는 PH4다.
+
+**Kinematic(3.3절).** 장면이 step하는 World(Game·Tryout — `JoltPhysicsScene::SetSimulates`)에서 `SetBodyTransform(None)`은 Kinematic body를 다음처럼 다룬다.
+- 그 자리에서 목표로 옮긴다. 질의가 바로 보게 하려는 것이다.
+- 첫 요청일 때 원래 자세를 시작 자세로 기록하고, 목표를 갱신한다.
+- 다음 step 직전에 시작 자세로 되돌린 뒤 `MoveKinematic(목표, dt)`로 움직인다. 이때 속도는 위치 차이를 dt로 나눈 값이다.
+- 목표가 없는 다음 step에서는 선·각속도를 0으로 둔다. Jolt 속도가 남기 때문이다.
+- `TeleportPhysics`·`ResetPhysics`는 즉시 옮기고 속도를 0으로 두며, 대기 목표를 지운다.
+- 장면이 step하지 않는 World(Editor·Preview)는 언제나 teleport다(PMD16).
+- 한 프레임의 고정 스텝 여러 번 가운데 목표는 첫 step이 쓰고, 나머지 step은 정지다(3.3절).
+
+**리뷰 반영(2026-11-26).** 잠든 body 통지는 Jolt 활성 목록 잠금 아래에서 오므로 할당하지 않는다(용량은 `CreateBody`가 칸 수 × 2로 미리 잡고, 넘치면 세어 step 뒤 Warning). 결과 목록은 handle(세대)로 쥐어 칸 재사용을 거르고, Core `algo::Sort`로 정렬하며, 꺼낼 용량을 먼저 잡는다(실패하면 목록을 그대로 둔다). 반영 중 사라진 컴포넌트는 오류가 아니라 건너뛴다. Kinematic 목표 적용은 step과 같은 결정적 FP 환경에서 한다. 한계: 부모에 붙은 채 시뮬레이션하는 Dynamic 컴포넌트는 떼기(PH2d) 전까지 반영 순서·부착 전파에 따라 결과가 달라질 수 있다.
+
+**결정성(PC03).** 같은 설정·같은 호출 순서의 World 두 개에서 떨어지는 body들의 결과(위치·속도 byte)가 같다. 반영 순서는 칸 번호 순이다(Jolt 활성 목록 순서에 기대지 않는다).
+
+**시험.**
+- 떨어지는 구 컴포넌트의 월드 위치가 body 위치와 byte까지 같다(매 Tick, 여러 step 프레임 포함). 바닥에서 잠든 뒤에도 같다.
+- Kinematic 상자를 한 프레임에 옮긴다.
+  - 옮긴 직후 body 위치가 목표다.
+  - 다음 step에서 속도는 이동량/dt이고, 그다음 step에서 0이다.
+  - 3 step 프레임에서는 끝 속도가 0이고 위치가 목표다.
+- `TeleportPhysics`는 속도 0이다.
+- Editor World Kinematic은 즉시 이동이다.
+- 결정성을 시험한다.
+
 ## 7.2 시험 원칙
 
 - 각 단계 시험은 UE 원본 동작을 기대값으로 둔다(행 인용). 수치 적분은 step 크기에서 유도한 허용 오차, 방향·단위 사상은 정확 일치(어댑터 경계 9절).
@@ -152,6 +184,7 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 
 ## 7.6 개정 이력
 
+- 개정 9(2026-11-26): PH2b 완료(6ba9c214 — 리뷰 반영: 크기 0·shear에서도 body, 옮긴 잠든 body 깨움), PH2c 구현 세부(7.1.4절).
 - 개정 8(2026-11-26): PH2a 완료(fcfe9ad4), PH2b 구현 세부(7.1.3절).
 - 개정 7(2026-11-26): PH1 완료(PhysicsSimulate 연결·Sandbox 등록), PH2 하위 단계와 PA 시험 배정(7.1.2절).
 - 개정 6(2026-11-25): PH1 착수 — 구현 세부(7.1.1절), PMD20–PMD22.

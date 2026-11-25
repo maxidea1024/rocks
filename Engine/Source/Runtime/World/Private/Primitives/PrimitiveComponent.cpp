@@ -286,6 +286,7 @@ Result<void> PrimitiveComponent::CreateSystemState(SystemStateKind kind) noexcep
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    desc.component = Handle();
     desc.worldTransform = BodyWorldTransform();
     desc.collision = resolved.Value();
     desc.settings = &bodySettings_;
@@ -326,9 +327,17 @@ void PrimitiveComponent::DestroySystemState(SystemStateKind kind) noexcept {
     }
 }
 
+Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,
+                                                       const Quatd& rotation) noexcept {
+    applyingPhysicsResult_ = true;
+    auto moved = SetWorldLocationAndRotation(location, rotation);
+    applyingPhysicsResult_ = false;
+    return moved;
+}
+
 void PrimitiveComponent::OnTransformUpdated() noexcept {
     SceneComponent::OnTransformUpdated();
-    if (bodyHandle_.IsNull()) {
+    if (bodyHandle_.IsNull() || applyingPhysicsResult_) {
         return;
     }
 

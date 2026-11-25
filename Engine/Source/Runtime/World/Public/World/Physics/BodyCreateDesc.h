@@ -3,6 +3,7 @@
 #include <Collision/BodySettings.h>
 #include <Collision/CollisionProfileTable.h>
 #include <Core/Math/Transform.h>
+#include <Object/ObjectHandle.h>
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
 
@@ -11,6 +12,8 @@ namespace rocks {
 // body 하나를 만드는 값이다(Docs/Design/PhysicsModule 2.3절, 7.1.3절). PrimitiveComponent가
 // CreateSystemState(Physics)에서 채운다. 포인터(settings)는 CreateBody 호출 동안만 읽는다.
 struct BodyCreateDesc {
+    // body를 가진 컴포넌트다(결과 반영이 이 컴포넌트에 쓴다 — 3.4절).
+    ObjectHandle component;
     // scale 전 형상(cm)이다.
     BodyGeometry geometry;
     // 월드 transform(cm·scale 포함)이다. scale은 형상 크기에 굽는다.
