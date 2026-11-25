@@ -25,7 +25,9 @@ struct TextureEnv {
           objects(allocator, types, ContextId{0x54584954ull, 1}) {
     }
 
+    // 객체가 남아 있으면 타입 해제가 Busy이므로 객체 Registry를 먼저 닫는다.
     ~TextureEnv() noexcept {
+        CHECK(objects.Shutdown(objects.OwnerAccess()));
         CHECK(registration.Unregister());
     }
 
@@ -47,8 +49,9 @@ class FakeImportContext final : public AssetImportContext {
 public:
     FakeImportContext(TextureEnv& env, Span<const AssetImportSource> sources, const void* options,
                       ObjectHandle existing = {}) noexcept
-        : env_(&env), access_(env.objects.OwnerAccess()), sources_(sources), options_(options),
-          existing_(existing), roots_(env.allocator), bulk(env.allocator), warnings(env.allocator) {
+        : bulk(env.allocator), warnings(env.allocator), env_(&env),
+          access_(env.objects.OwnerAccess()), sources_(sources), options_(options),
+          existing_(existing), roots_(env.allocator) {
     }
 
     Span<const AssetImportSource> Sources() const noexcept override {

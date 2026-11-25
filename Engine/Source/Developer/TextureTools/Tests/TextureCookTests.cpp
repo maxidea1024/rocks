@@ -109,7 +109,7 @@ struct CookScene {
         CHECK(registration.Unregister());
     }
 
-    const ObjectAccessContext& EditorAccess() const noexcept {
+    ObjectAccessContext EditorAccess() const noexcept {
         return editor->OwnerAccess();
     }
 
@@ -401,7 +401,7 @@ bool HasWarning(const Array<CookDiagnostic>& warnings, AssetDiagnosticCode code)
 TEST(TextureCook_NuggetHeader) {
     SystemAllocator allocator;
     TextureBuildOutputInfo info;
-    info.pixelFormat = PixelFormat::RGBA8Unorm;
+    info.pixelFormat = graphics::PixelFormat::RGBA8Unorm;
     info.srgb = true;
     info.swizzle[3] = TextureSwizzle::One;
     const uint8 bytes[16] = {};
@@ -412,7 +412,7 @@ TEST(TextureCook_NuggetHeader) {
     CHECK(header.Size() == 21 + 2 * 20);
     TextureNuggetHeader read(allocator);
     REQUIRE(ReadTextureNuggetHeader(header.View(), read));
-    CHECK(read.output.pixelFormat == PixelFormat::RGBA8Unorm && read.output.srgb &&
+    CHECK(read.output.pixelFormat == graphics::PixelFormat::RGBA8Unorm && read.output.srgb &&
           read.output.swizzle[0] == TextureSwizzle::R &&
           read.output.swizzle[3] == TextureSwizzle::One && read.numSlices == 6);
     REQUIRE(read.mips.Size() == 2);
@@ -541,8 +541,9 @@ TEST(TextureCook_Dimensions) {
         const TexturePlatformData* data = CookAndLoad(scene, processor, out, loaded);
         REQUIRE(data != nullptr);
         CHECK(data->dimension == item.dimension &&
-              data->pixelFormat == static_cast<uint8>(PixelFormat::R8Unorm) && !data->srgb &&
-              data->swizzleG == TextureSwizzle::R && data->swizzleA == TextureSwizzle::One);
+              data->pixelFormat == static_cast<uint8>(graphics::PixelFormat::R8Unorm) &&
+              !data->srgb && data->swizzleG == TextureSwizzle::R &&
+              data->swizzleA == TextureSwizzle::One);
         CHECK(data->sizeX == item.x && data->sizeY == item.y && data->sizeZ == item.sizeZ &&
               data->numMips == item.numMips && data->numSlices == item.numSlices &&
               data->residentTailMips == item.numMips && data->mips.Size() == item.numMips);
@@ -798,13 +799,16 @@ TEST(TextureCook_SamplerAndNorm16) {
     struct Norm16 {
         TextureSourceFormat format;
         uint32 channels;
-        PixelFormat supported;
-        PixelFormat fallback;
+        graphics::PixelFormat supported;
+        graphics::PixelFormat fallback;
     };
     const Norm16 formats[] = {
-        {TextureSourceFormat::G16, 1, PixelFormat::R16Unorm, PixelFormat::R16Float},
-        {TextureSourceFormat::GA16, 2, PixelFormat::RG16Unorm, PixelFormat::RG16Float},
-        {TextureSourceFormat::RGBA16, 4, PixelFormat::RGBA16Unorm, PixelFormat::RGBA16Float},
+        {TextureSourceFormat::G16, 1, graphics::PixelFormat::R16Unorm,
+         graphics::PixelFormat::R16Float},
+        {TextureSourceFormat::GA16, 2, graphics::PixelFormat::RG16Unorm,
+         graphics::PixelFormat::RG16Float},
+        {TextureSourceFormat::RGBA16, 4, graphics::PixelFormat::RGBA16Unorm,
+         graphics::PixelFormat::RGBA16Float},
     };
     uint64 id = 20;
     for (const Norm16& item : formats) {
@@ -910,7 +914,8 @@ TEST(TextureCook_FailuresKeepEditorObject) {
         REQUIRE(scene.Load(windows.sink.Bytes(), first));
         const Texture* texture = scene.LoadedTexture(first);
         REQUIRE(texture != nullptr);
-        CHECK(texture->platformData.pixelFormat == static_cast<uint8>(PixelFormat::R16Unorm));
+        CHECK(texture->platformData.pixelFormat ==
+              static_cast<uint8>(graphics::PixelFormat::R16Unorm));
         first.root.Reset();
         CHECK(!(windows.sink.Bytes().Size() == android.sink.Bytes().Size() &&
                 platform::MemoryEquals(windows.sink.Bytes().Data(), android.sink.Bytes().Data(),
@@ -1174,7 +1179,7 @@ TEST(TextureCook_Nuggets) {
             REQUIRE(header.TryResize(header.Size() - 20));
             break;
         case Broken::Format:
-            header[4] = static_cast<uint8>(PixelFormat::R16Unorm);
+            header[4] = static_cast<uint8>(graphics::PixelFormat::R16Unorm);
             break;
         }
 

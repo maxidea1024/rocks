@@ -171,7 +171,7 @@ Array<uint8> WriteExr(Allocator& allocator, const ExrSpec& spec) noexcept {
     CHECK(zeros.TryResize(static_cast<usize>(spec.width) * spec.height * 4));
     platform::MemoryZero(zeros.Data(), zeros.Size());
     for (int part = 0; part < spec.parts; ++part) {
-        exr_encode_pipeline_t pipeline = EXR_ENCODE_PIPELINE_INITIALIZER;
+        exr_encode_pipeline_t pipeline{};
         bool initialized = false;
         if (spec.tiled) {
             int32_t levelsX = 1;

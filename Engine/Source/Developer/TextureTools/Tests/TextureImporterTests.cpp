@@ -1,6 +1,7 @@
 #include "TextureImportTestSupport.h"
 
 #include <Base/InitializerList.h>
+#include <Texture/TextureImportOptions.generated.h>
 
 // 텍스처 임포터 시험이다(Docs/Design/AssetSystem 12.12절 — 14.1.97절 대조표): 임포터
 // 정보(이름·역할· 접두·옵션·확장자·표지), 9개 구성의 성공 경로(크기·형식·slice 순서·bulk), 구성

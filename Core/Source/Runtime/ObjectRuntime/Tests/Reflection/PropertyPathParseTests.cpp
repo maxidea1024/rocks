@@ -141,7 +141,7 @@ template <class Owner, auto Member, ValueKind Target>
 RuntimeFieldOps PathField(Guid id, const void* valueNative = nullptr) noexcept {
     RuntimeFieldOps ops;
     ops.fieldId = id;
-    ops.encode = +[](const RuntimeFieldOps&, ObjectRegistry& registry,
+    ops.encode = +[](const RuntimeFieldOps&, ObjectRegistry* registry,
                      const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& out,
                      FieldEncodeContext& context) noexcept {
         return detail::EncodeGeneratedField<Owner>(registry, access, object, Member, out, context);

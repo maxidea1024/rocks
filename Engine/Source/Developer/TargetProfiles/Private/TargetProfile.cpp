@@ -232,7 +232,12 @@ Result<void> ApplyConfigJsonFile(Allocator& allocator, platform::FileSystem& fil
         return Result<void>::Failure(prepared.Error());
     }
 
-    return prepared.Value().Publish();
+    auto published = prepared.Value().Publish();
+    if (!published) {
+        return Result<void>::Failure(published.Error());
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> ReadTargetProfile(const TargetProfileContext& context, StringView id,

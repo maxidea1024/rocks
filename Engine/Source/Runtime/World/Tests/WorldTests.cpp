@@ -1537,13 +1537,13 @@ TEST(World_NativeDerivedTypesInheritReflectedBase) {
     };
 
     const Expected expected[] = {
-        {NativeTypeIdOf<LoggingComponent>(), ObjectTypeIdOf<Component>(), 1},
-        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 3},
-        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 3},
-        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 3},
-        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 3},
-        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 3},
-        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 2},
+        {NativeTypeIdOf<LoggingComponent>(), ObjectTypeIdOf<Component>(), 2},
+        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 4},
+        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 4},
+        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 4},
+        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 4},
+        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 4},
+        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 3},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

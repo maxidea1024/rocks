@@ -698,8 +698,8 @@ TEST(CookedManifest_StructureTampering) {
         CHECK(expect(Copy(allocator, valid.View().Slice(0, length)), F::File, Head));
     }
 
-    // 상한 + 1·남은 byte로 담을 수 없는 수는 개수 칸, 실제보다 작으면 남는 byte, 실제보다 크면 없는
-    // 항목을 읽다 잘린다(그 칸).
+    // 상한 + 1·남은 byte로 담을 수 없는 수는 개수 칸, 실제보다 작으면 artifact 개수 칸(v2),
+    // 실제보다 크면 없는 항목을 읽다 잘린다(그 칸).
     const uint32 counts[] = {CookedManifestMaxEntries + 1, 1000};
     for (uint32 count : counts) {
         CHECK(expect(withRaw([&](ManifestRaw& raw) {
@@ -709,11 +709,13 @@ TEST(CookedManifest_StructureTampering) {
                      F::EntryCount, Head));
     }
 
+    // 실제보다 작으면 다음 항목 앞 byte를 artifact 개수 칸으로 읽는다(v2 — 항목 표 뒤가 artifact
+    // 표).
     CHECK(expect(withRaw([&](ManifestRaw& raw) {
                      raw.overrideCount = true;
                      raw.entryCount = 2;
                  }),
-                 F::File, Head));
+                 F::ArtifactCount, CookedManifestNoEntry));
     {
         AssetDiagnostic failure;
         CHECK(!ReadCookedManifest(allocator, withRaw([&](ManifestRaw& raw) {

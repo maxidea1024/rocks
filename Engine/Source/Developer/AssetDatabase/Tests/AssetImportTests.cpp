@@ -305,7 +305,7 @@ TEST(AssetImport_ImporterTags) {
         auto entry = service.Index().FindById(id);
         usize count = 0;
         for (const PackageTag& tag :
-             entry ? entry.Value()->tags : Array<PackageTag>(env.allocator)) {
+             entry ? entry.Value()->tags.View() : Span<const PackageTag>()) {
             count +=
                 tag.key.View() == key && (value.IsEmpty() || tag.value.View() == value) ? 1 : 0;
         }
@@ -382,7 +382,7 @@ TEST(AssetImport_OpenAsset) {
     REQUIRE(MakeSources(env, sources));
     ImportScene scene(env, sources, "import-open");
     REQUIRE(scene.ready);
-    REQUIRE(scene.files.AddFile("Content/Leaf.rasset", sources.leaf.View()));
+    // Leaf.rasset은 장면이 이미 넣었다.
     const String source = scene.Absolute(env.allocator, RockSource);
     const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
     TextDiagnostics diagnostics(env.allocator);
@@ -915,9 +915,13 @@ TEST(AssetImport_VariableSourcesOnly) {
     REQUIRE(service.Import(scene.lock, "/Game/Slices", inputs, "SliceImporter", {}, diagnostics,
                            result));
     CHECK(slices.LastRoles() == "slice:0,slice:1,");
+    // 임포트는 연 패키지를 닫으므로 Info로 다시 연다.
+    String text(env.allocator);
+    REQUIRE(service.Info("/Game/Slices", AssetInfoOptions{}, text));
     TestAsset* imported = Representative(service.Packages(), result.id);
     REQUIRE(imported != nullptr);
     CHECK(imported->value == 6);
+    REQUIRE(service.Packages().Close(result.id));
 
     AssetImportResult empty(env.allocator);
     AssetDiagnostic emptyFailure;
@@ -925,8 +929,10 @@ TEST(AssetImport_VariableSourcesOnly) {
               .Import(scene.lock, "/Game/Empty", {}, "SliceImporter", {}, diagnostics, empty,
                       nullptr, &emptyFailure)
               .Error() == ErrorCode::InvalidArgument);
-    CHECK(emptyFailure.code == AssetDiagnosticCode::InvalidImportOption &&
-          emptyFailure.detail == 0);
+    // 원본 0개는 역할 규칙 전에 거부된다(AssetService::Import — 원본 없음 InvalidArgument, 진단
+    // None).
+    CHECK(emptyFailure.code == AssetDiagnosticCode::None &&
+          emptyFailure.error == ErrorCode::InvalidArgument);
 
     AssetImportResult again(env.allocator);
     REQUIRE(service.Reimport(scene.lock, "/Game/Slices", {}, {}, diagnostics, again));
@@ -1017,6 +1023,9 @@ TEST(AssetImport_NormalizeSettingsHook) {
     REQUIRE(service.Import(scene.lock, "/Game/Rock", inputs, {}, assignments.list.View(),
                            diagnostics, result));
     CHECK(normalizeCalls == 1 && NormalizedFields() == "note,label,");
+    // 임포트는 연 패키지를 닫으므로 Info로 다시 연다.
+    String text(env.allocator);
+    REQUIRE(service.Info("/Game/Rock", AssetInfoOptions{}, text));
     TestAsset* imported = Representative(service.Packages(), result.id);
     REQUIRE(imported != nullptr);
     CHECK(imported->value == 1010);
@@ -1147,8 +1156,8 @@ TEST(AssetImport_RebuildSourceHook) {
     AssetImportResult rock(env.allocator);
     rebuild = RebuildRecord{};
     REQUIRE(service.Import(scene.lock, "/Game/Rock", inputs, {}, {}, diagnostics, rock));
-    CHECK(rebuild.calls == 0);
-    REQUIRE(service.Packages().Close(rock.id));
+    // 임포트는 연 패키지를 닫는다.
+    CHECK(rebuild.calls == 0 && service.Packages().Find(rock.id) == nullptr);
 
     // asset-new: New 까닭, 대입 필드, 저장 전 적용(value 0 + 1).
     Assignments bundle(env.allocator);
@@ -1203,6 +1212,8 @@ TEST(AssetImport_RebuildSourceHook) {
     // 원소 재임포트 전파: Bundle(editorRef → Rock)을 Propagate·바뀐 원소 Rock으로 부르고 저장한다.
     const usize calls = rebuild.calls;
     AssetImportResult again(env.allocator);
+    // Bundle을 열 때 의존으로 함께 연 Rock도 닫는다(재임포트는 열린 출력이 Busy — AssetService).
+    REQUIRE(service.Packages().Close(rock.id));
     REQUIRE(service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, again));
     CHECK(rebuild.calls == calls + 1 && rebuild.cause == AssetSourceRebuildCause::Propagate &&
           rebuild.changed == rock.id && rebuild.Fields().IsEmpty());
@@ -1220,7 +1231,9 @@ TEST(AssetImport_RebuildSourceHook) {
         rebuild.mark = true;
     }
 
-    // 일 전부터 열려 있고 저장하지 않은 편집이 있는 참조자는 Busy(아무것도 저장하지 않는다).
+    // 일 전부터 열려 있고 저장하지 않은 편집이 있는 참조자를 두면 Busy다(아무것도 저장하지 않는다).
+    // 참조자를 열면 Hard 의존(editorRef)인 Rock도 함께 열리므로, 먼저 걸리는 것은 "출력이 열려
+    // 있음" Busy(asset = Rock)다.
     {
         Array<uint8> rockBytes(env.allocator);
         REQUIRE(rockBytes.TryAppend(scene.files.Bytes("Content/Rock.rasset")));
@@ -1233,9 +1246,10 @@ TEST(AssetImport_RebuildSourceHook) {
                   .Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, busy, nullptr,
                             &busyFailure)
                   .Error() == ErrorCode::Busy);
-        CHECK(busyFailure.asset == made.Value() &&
+        CHECK(busyFailure.asset == rock.id &&
               SameBytes(scene.files.Bytes("Content/Rock.rasset"), rockBytes.View()));
         REQUIRE(service.Packages().Close(made.Value()));
+        REQUIRE(service.Packages().Close(rock.id));
     }
 
     // 전파 hook 실패: 재임포트 실패, 원소·묶음 모두 저장하지 않는다.
@@ -2984,14 +2998,14 @@ TEST(AssetImportStatus_Rejects) {
     scene.files.Remove("Content/LEAF.rasset");
     // 읽지 못하는 기록: 더 새 스키마 버전·필드 빠진 형식 위반.
     {
-        RecordBuilder newer(env.allocator, ImportRecordSchema, 2);
+        RecordBuilder newer(env.allocator, ImportRecordSchema, ImportRecordVersion + 1);
         auto newerBytes = newer.Build();
         REQUIRE(newerBytes);
         CraftedRecord unreadable;
         unreadable.rawLeafRecord = newerBytes.Value().View();
         REQUIRE(PutCrafted(env, sources, scene, unreadable));
         CHECK(rejects("/Game/Leaf", ErrorCode::Unsupported, AssetDiagnosticCode::NewerVersion));
-        RecordBuilder broken(env.allocator, ImportRecordSchema, 1);
+        RecordBuilder broken(env.allocator, ImportRecordSchema, ImportRecordVersion);
         auto brokenBytes = broken.Build();
         REQUIRE(brokenBytes);
         CraftedRecord corrupt;
@@ -3038,7 +3052,7 @@ TEST(AssetImportStatus_Rejects) {
 
     // 형식 위반 기록·별칭 대상이 색인에 없음, 진단 인자 없이도.
     {
-        RecordBuilder broken(env.allocator, ImportRecordSchema, 1);
+        RecordBuilder broken(env.allocator, ImportRecordSchema, ImportRecordVersion);
         auto brokenBytes = broken.Build();
         REQUIRE(brokenBytes);
         CraftedRecord corrupt;

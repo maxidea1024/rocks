@@ -16,7 +16,8 @@ using asset_fixture::EditorNote;
 
 namespace {
 
-// 대표 TestAsset(hard → Note), EditorOnly 하위 객체 Note, 그 자식 TestPart Inner를 담은 패키지다.
+// 대표 TestAsset(hardList[0] → Note — hard는 Asset 참조라 Object를 받지 않는다), EditorOnly 하위
+// 객체 Note, 그 자식 TestPart Inner를 담은 패키지다.
 struct EditorOnlyScene {
     explicit EditorOnlyScene(AssetEnv& env) noexcept {
         ObjectRegistry& registry = *env.source;
@@ -29,10 +30,12 @@ struct EditorOnlyScene {
         asset = Make<TestAsset>(registry, TestAssetType(), package.Handle(), "");
         note = Make<EditorNote>(registry, GeneratedType<EditorNote>::Id(), asset, "Note");
         const ObjectHandle inner = Make<TestPart>(registry, TestPartType(), note, "Inner");
-        TestAsset* value = Pointer<TestAsset>(registry, asset);
-        ready = !asset.IsNull() && !note.IsNull() && !inner.IsNull() && value != nullptr &&
-                static_cast<bool>(
-                    registry.SetReference(registry.OwnerAccess(), asset, value->hard, note));
+        ready =
+            !asset.IsNull() && !note.IsNull() && !inner.IsNull() &&
+            WithBorrow<TestAsset>(registry, asset, [&](TestAsset& owner) noexcept {
+                return registry.AddReference(registry.OwnerAccess(), asset, owner.hardList, note)
+                    .IsOk();
+            });
     }
 
     RootRef<Package> package;
@@ -55,6 +58,7 @@ TEST(AssetPackage_CookedWriteDropsEditorOnlyObjects) {
     REQUIRE(!editor.IsEmpty());
     PackageReadOptions editorRead;
     editorRead.engineVersion = TestEngineVersion;
+    editorRead.expectedKind = PackageKind::Editor;
     auto editorContents = ReadPackage(env.allocator, editor.View(), editorRead, nullptr);
     REQUIRE(editorContents);
     CHECK(editorContents.Value().exports.Size() == 3);
@@ -66,7 +70,7 @@ TEST(AssetPackage_CookedWriteDropsEditorOnlyObjects) {
     REQUIRE(cookedContents);
     CHECK(cookedContents.Value().exports.Size() == 1);
 
-    // 쿠킹 패키지를 로드하면 대표의 hard는 null이다.
+    // 쿠킹 패키지를 로드하면 대표의 hardList 원소는 null이다.
     Array<uint8> files[1] = {Move(cooked)};
     RootRef<Object> roots[1];
     ObjectHandle handles[1];
@@ -75,7 +79,7 @@ TEST(AssetPackage_CookedWriteDropsEditorOnlyObjects) {
     REQUIRE(loaded);
     TestAsset* value = Pointer<TestAsset>(*env.target, loaded.Value());
     REQUIRE(value != nullptr);
-    CHECK(value->hard.Handle().IsNull());
+    CHECK(value->hardList.Size() == 1 && value->hardList[0].IsNull());
 }
 
 } // namespace package_editor_only_tests_file

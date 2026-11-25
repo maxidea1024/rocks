@@ -341,9 +341,11 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
         if (auto converted =
                 ConvertTextureSource(allocator, image, format, target, sizeX, sizeY, bytes);
             !converted) {
-            return converted.Error() == ErrorCode::OutOfMemory
-                       ? converted
-                       : sink.Fail(AssetDiagnosticCode::InvalidSetting, converted.Error(), index);
+            if (converted.Error() == ErrorCode::OutOfMemory) {
+                return Result<void>::Failure(converted.Error());
+            }
+
+            return sink.Fail(AssetDiagnosticCode::InvalidSetting, converted.Error(), index);
         }
     }
 

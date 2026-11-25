@@ -475,7 +475,7 @@ Result<void> ReadTextureNuggetHeader(Span<const uint8> bytes, TextureNuggetHeade
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto format = PixelFormatFromNumber(reader.ReadU32LE());
+    auto format = graphics::PixelFormatFromNumber(reader.ReadU32LE());
     const uint8 srgb = reader.ReadU8();
     if (!format || !IsValidPixelFormat(format.Value()) || srgb > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -792,15 +792,11 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
                                       resident, facts.sampler, bulk, tail);
     }
 
-    Result<void> cooked = filled;
-    if (filled) {
-        CookContext write = context;
-        write.bulkSource = &bulk;
-        // bulk 정렬은 max(프로파일, 4 KiB)다(렌더 요구 — 12.14절 A5j3).
-        cooked = WriteCookedPackage(write, TextureStreamingBulkAlignment);
-    } else {
-        cooked = CookFail(context, AssetDiagnosticCode::None, filled.Error());
-    }
+    CookContext write = context;
+    write.bulkSource = &bulk;
+    // bulk 정렬은 max(프로파일, 4 KiB)다(렌더 요구 — 12.14절 A5j3).
+    Result<void> cooked = filled ? WriteCookedPackage(write, TextureStreamingBulkAlignment)
+                                 : CookFail(context, AssetDiagnosticCode::None, filled.Error());
 
     Result<void> restored = CookResetPlatformData(registry, access, asset.Value());
     if (!cooked) {

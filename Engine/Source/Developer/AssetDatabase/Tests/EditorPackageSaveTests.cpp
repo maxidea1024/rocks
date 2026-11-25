@@ -991,7 +991,9 @@ TEST(EditorPackageSave_IoFailures) {
         CHECK(warnings.IsEmpty() && !HasTemporary(files));
     }
 
-    CHECK(overwritten == 1);
+    // 나중에 덮어쓰는 자리는 둘이다: 헤더(끝에 다시 쓴다)와 Zstd 블록 bulk의 블록 색인(블록을 다
+    // 넣은 뒤 다시 쓴다 — 에디터 bulk Zstd, AssetSystem 12.12절 A5h).
+    CHECK(overwritten == 2);
 
     // NotDurable: 교체는 보이므로 성공 + 경고.
     AssetEnv env;

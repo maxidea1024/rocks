@@ -68,15 +68,9 @@ struct RevertFixture {
     ModuleRegistration registration;
 };
 
-// 노드 하나짜리 그래프(NodeTable 없음)의 노드 Record다: header 24 byte 뒤 u64 길이 + Record.
+// 노드 하나짜리 저장 그래프의 노드 Record다(NodeTable을 건너뛴다 — GraphTestSupport.h).
 Span<const uint8> NodeRecord(Span<const uint8> graph) noexcept {
-    constexpr usize LengthBytes = 8;
-    uint64 length = 0;
-    for (usize index = 0; index < LengthBytes; ++index) {
-        length |= static_cast<uint64>(graph[test::graph::HeaderBytes + index]) << (8 * index);
-    }
-
-    return graph.Slice(test::graph::HeaderBytes + LengthBytes, static_cast<usize>(length));
+    return test::graph::NodeRecordAt(graph, 0);
 }
 
 // 객체 하나를 기본 정책(전부 — 기준 없음)으로 저장한 그래프다.
@@ -86,7 +80,7 @@ Array<uint8> SaveAll(Allocator& allocator, ObjectRegistry& objects, ObjectHandle
         platform::Fatal("test graph save failed");
     }
 
-    return saved.Value().TakeBytes();
+    return Move(saved.Value());
 }
 
 // 객체의 네이티브 값을 바로 읽고 고친다(edit에 T&).
@@ -321,7 +315,7 @@ TEST(ClassDefaultsRevert_Rejections) {
         CHECK(holderRefused("fixed[1]", ErrorCode::Unsupported));
         CHECK(holderRefused("pair.u", ErrorCode::InvalidArgument));
         CHECK(holderRefused("scratch", ErrorCode::NotFound));
-        const PropertyPathBuffer empty;
+        const PropertyPathBuffer empty{};
         auto none = RevertToDefault(objects, objects.OwnerAccess(), holderHandle, empty, allocator);
         CHECK(!none && none.Error() == ErrorCode::InvalidArgument);
         holder.Value().Reset();

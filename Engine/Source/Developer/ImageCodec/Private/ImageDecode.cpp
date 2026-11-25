@@ -121,7 +121,9 @@ ImageFileFormat DetectImageFileFormat(Span<const uint8> file, StringView pathHin
         return ImageFileFormat::Dds;
     }
 
-    if (StartsWith(file, "II*\0", 4) || StartsWith(file, "MM\0*", 4)) {
+    // 고전 TIFF(42)와 BigTIFF(43)다 — UE는 고전 서명만 보지만 BigTIFF도 libtiff로 읽는다(12.10절).
+    if (StartsWith(file, "II*\0", 4) || StartsWith(file, "MM\0*", 4) ||
+        StartsWith(file, "II+\0", 4) || StartsWith(file, "MM\0+", 4)) {
         return ImageFileFormat::Tiff;
     }
 

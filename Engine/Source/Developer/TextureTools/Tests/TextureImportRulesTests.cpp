@@ -308,14 +308,17 @@ TEST(TextureImport_NormalizeSettings) {
     CHECK(texture.srgb == 0 && texture.maxTextureSize == 512);
 }
 
-// hook 등록: Texture 타입에 정규화 hook 하나, 표를 거쳐 파생 클래스(Texture2D)에서도 불린다.
+// hook 등록: Texture 타입에 정규화 hook 하나(+ 원본 묶음 재구성 셋), 표를 거쳐 파생
+// 클래스(Texture2D)에서도 불린다.
 TEST(TextureImport_NormalizeHook) {
     TextureEnv env;
     REQUIRE(env.ready);
     AssetTypeHookTable table(env.allocator, env.types);
     Array<AssetTypeHookRegistration> tokens(env.allocator);
     REQUIRE(RegisterTextureTypeHooks(nullptr, table, tokens));
-    CHECK(table.Count() == 1 && tokens.Size() == 1);
+    // 정규화 hook(Texture) 하나 + 원본 묶음 재구성 hook 셋(Texture2DArray·TextureCubeArray·
+    // VolumeTexture — 12.14절 A5j2).
+    CHECK(table.Count() == 4 && tokens.Size() == 4);
     auto created = env.objects.NewObject<Texture>(env.objects.OwnerAccess(), TypeIdOf<Texture2D>());
     REQUIRE(created);
     const ObjectHandle handle = created.Value().Handle();

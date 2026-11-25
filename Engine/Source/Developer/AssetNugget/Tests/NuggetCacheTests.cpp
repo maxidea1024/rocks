@@ -556,15 +556,26 @@ TEST(NuggetCache_Reject) {
     auto missing = scene.cache.Reject(NuggetBucketTexture, Key(2), Key(2));
     CHECK(missing && !missing.Value());
 
-    // 다시 만든(Regenerated) 키는 이 세션의 값이라 두지 않는다.
-    REQUIRE(scene.RemoveEntry(Key(1)));
-    REQUIRE(scene.Publish(Key(1), first) == NuggetStatus::Stored);
-    REQUIRE(scene.Get(Key(1)).status == NuggetStatus::DigestChanged);
-    NuggetCachePutResult regenerated = scene.Put(Key(1), second);
-    REQUIRE(regenerated.status == NuggetStatus::Conflict);
-    auto kept = scene.cache.Reject(NuggetBucketTexture, Key(1), regenerated.digest);
-    CHECK(kept && !kept.Value() && scene.HasEntry(Key(1)) &&
-          scene.Get(Key(1)).status == NuggetStatus::Hit && scene.cache.Stats().rejected == 1);
+    // 다시 만든(Regenerated) 키는 이 세션의 값이라 두지 않는다. 디스크 판 변경을 Memory가 가리지
+    // 않게 Memory를 끈 장면이다(NuggetCache_Pins와 같다).
+    {
+        NuggetCacheLimits limits;
+        limits.memoryBytes = 0;
+        limits.memoryValueBytes = 16;
+        limits.pinnedBytes = 4000;
+        CacheScene pins("nugget-cache-reject-pins", limits);
+        REQUIRE(pins.ready);
+        const ValueSpec third[] = {{0, 300, 3}};
+        REQUIRE(pins.Put(Key(1), first).status == NuggetStatus::Stored);
+        REQUIRE(pins.RemoveEntry(Key(1)));
+        REQUIRE(pins.Publish(Key(1), second) == NuggetStatus::Stored);
+        REQUIRE(pins.Get(Key(1)).status == NuggetStatus::DigestChanged);
+        NuggetCachePutResult regenerated = pins.Put(Key(1), third);
+        REQUIRE(regenerated.status == NuggetStatus::Conflict);
+        auto kept = pins.cache.Reject(NuggetBucketTexture, Key(1), regenerated.digest);
+        CHECK(kept && !kept.Value() && pins.HasEntry(Key(1)) &&
+              pins.Get(Key(1)).status == NuggetStatus::Hit && pins.cache.Stats().rejected == 0);
+    }
 
     // off·Open 전.
     SystemAllocator allocator;

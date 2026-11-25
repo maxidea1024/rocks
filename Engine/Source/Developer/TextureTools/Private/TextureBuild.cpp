@@ -202,26 +202,26 @@ bool OutputSrgb(const TextureBuildSettings& settings, const OutputFormat& format
     return settings.srgb && !ignored && format.kind == OutputKind::Unorm8;
 }
 
-PixelFormat PixelFormatOf(OutputKind kind, uint32 channels, bool srgb) noexcept {
+graphics::PixelFormat PixelFormatOf(OutputKind kind, uint32 channels, bool srgb) noexcept {
     switch (kind) {
     case OutputKind::Unorm8:
-        return channels == 1   ? PixelFormat::R8Unorm
-               : channels == 2 ? PixelFormat::RG8Unorm
-               : srgb          ? PixelFormat::RGBA8UnormSrgb
-                               : PixelFormat::RGBA8Unorm;
+        return channels == 1   ? graphics::PixelFormat::R8Unorm
+               : channels == 2 ? graphics::PixelFormat::RG8Unorm
+               : srgb          ? graphics::PixelFormat::RGBA8UnormSrgb
+                               : graphics::PixelFormat::RGBA8Unorm;
     case OutputKind::Unorm16:
-        return channels == 1   ? PixelFormat::R16Unorm
-               : channels == 2 ? PixelFormat::RG16Unorm
-                               : PixelFormat::RGBA16Unorm;
+        return channels == 1   ? graphics::PixelFormat::R16Unorm
+               : channels == 2 ? graphics::PixelFormat::RG16Unorm
+                               : graphics::PixelFormat::RGBA16Unorm;
     case OutputKind::Half:
-        return channels == 1   ? PixelFormat::R16Float
-               : channels == 2 ? PixelFormat::RG16Float
-                               : PixelFormat::RGBA16Float;
+        return channels == 1   ? graphics::PixelFormat::R16Float
+               : channels == 2 ? graphics::PixelFormat::RG16Float
+                               : graphics::PixelFormat::RGBA16Float;
     case OutputKind::Single:
-        return channels == 1 ? PixelFormat::R32Float : PixelFormat::RGBA32Float;
+        return channels == 1 ? graphics::PixelFormat::R32Float : graphics::PixelFormat::RGBA32Float;
     }
 
-    return PixelFormat::Unknown;
+    return graphics::PixelFormat::Unknown;
 }
 
 usize OutputTexelBytes(OutputKind kind, uint32 channels) noexcept {
@@ -1183,7 +1183,7 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     out.mips.Clear();
     out.warnings.Clear();
     out.failure = TextureBuildFailure{};
-    out.pixelFormat = PixelFormat::Unknown;
+    out.pixelFormat = graphics::PixelFormat::Unknown;
     out.srgb = false;
     const bool volume = settings.dimension == TextureDimension::Volume;
     const bool cube = settings.dimension == TextureDimension::TextureCube ||

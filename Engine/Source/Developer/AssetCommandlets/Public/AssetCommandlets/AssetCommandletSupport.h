@@ -159,7 +159,7 @@ inline constexpr StringView AssetTypeModules[] = {"Animation", "Texture"};
 // (HiddenEnumerator — 저장 값으로만 유효한 값)은 에셋 설정 진단 InvalidSetting으로 낸다
 // (Docs/Design/AssetSystem 12.8절, ReflectionExtensions "A5가 InvalidSetting으로 바꾼다"). 그 밖은
 // ReflectionText 이름 그대로다.
-ROCKS_ASSETCOMMANDLETS_API const char*
+ROCKS_ASSETCOMMANDLETS_API StringView
 AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept;
 
 // 공통 옵션 --wait=<초>의 상한이다(하루 — 밖이면 사용법 오류).

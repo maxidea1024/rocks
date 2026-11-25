@@ -2,6 +2,7 @@
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
+#include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
@@ -18,6 +19,14 @@
 using namespace rocks;
 using namespace rocks::image;
 namespace tiff_decode_tests_file {
+
+// tiff.h가 전역에 deprecated uint8·uint16·uint32·uint64를 두므로 Rocks 정수 타입을 이 이름 공간에서
+// 먼저 찾게 한다(전역 이름을 쓰면 -Wdeprecated-declarations).
+using rocks::int64;
+using rocks::uint16;
+using rocks::uint32;
+using rocks::uint64;
+using rocks::uint8;
 
 namespace {
 
@@ -957,6 +966,50 @@ TEST(TiffDecode_Jpeg) {
 
 namespace {
 
+// 살아 있는 블록 수를 세는 Allocator다(디코딩이 실패 경로에서도 받은 블록을 전부 돌려주는지 본다).
+class LiveCountingAllocator final : public Allocator {
+public:
+    explicit LiveCountingAllocator(Allocator& inner) noexcept : inner_(inner) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        auto allocated = inner_.Allocate(bytes, alignment, tag);
+        if (allocated) {
+            ++live_;
+        }
+
+        return allocated;
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        if (address != nullptr) {
+            --live_;
+        }
+
+        return inner_.Deallocate(address);
+    }
+
+    void TrimMemory() noexcept override {
+        inner_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        inner_.MarkThreadIdle();
+    }
+
+    void MarkThreadActive() noexcept override {
+        inner_.MarkThreadActive();
+    }
+
+    int64 Live() const noexcept {
+        return live_;
+    }
+
+private:
+    Allocator& inner_;
+    int64 live_ = 0;
+};
+
 struct ThreadJob {
     Span<const uint8> file;
     test::NFailAllocator* allocator = nullptr;
@@ -987,43 +1040,64 @@ TEST(TiffDecode_AllocationAndThreads) {
     const Decoded reference = Decode(allocator, file.View());
     CHECK(reference.ok);
     uint32 failures = 0;
+    uint64 firstLeak = 0;
     for (uint64 attempt = 1;; ++attempt) {
-        test::NFailAllocator failing(allocator);
+        LiveCountingAllocator counted(allocator);
+        test::NFailAllocator failing(counted);
         failing.FailOnAttempt(attempt);
-        ImageDecodeResult result(failing);
-        auto decoded = DecodeImage(failing, file.View(), ImageFileFormat::Tiff, {}, result);
-        const bool exhausted = failing.Attempts() < attempt;
-        failing.DisableFailure();
+        bool exhausted = false;
+        bool ok = false;
+        bool same = true;
+        bool outOfMemory = true;
+        {
+            ImageDecodeResult result(failing);
+            auto decoded = DecodeImage(failing, file.View(), ImageFileFormat::Tiff, {}, result);
+            exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            ok = decoded.IsOk();
+            if (ok && !exhausted) {
+                same = platform::MemoryEquals(result.image.pixels.Data(),
+                                              reference.result.image.pixels.Data(),
+                                              reference.result.image.pixels.Size());
+            } else if (!ok) {
+                outOfMemory = decoded.Error() == ErrorCode::OutOfMemory &&
+                              result.failure.code == AssetDiagnosticCode::None;
+            }
+        }
+
+        // 결과를 버리면 받은 블록이 모두 돌아와 있다(실패 경로도).
+        if (counted.Live() != 0 && firstLeak == 0) {
+            firstLeak = attempt;
+        }
+
         if (exhausted) {
-            CHECK(decoded);
+            CHECK(ok);
             break;
         }
 
-        if (decoded) {
-            CHECK(platform::MemoryEquals(result.image.pixels.Data(),
-                                         reference.result.image.pixels.Data(),
-                                         reference.result.image.pixels.Size()));
-            continue;
+        CHECK(same && outOfMemory);
+        if (!ok) {
+            ++failures;
         }
-
-        CHECK(decoded.Error() == ErrorCode::OutOfMemory &&
-              result.failure.code == AssetDiagnosticCode::None);
-        ++failures;
     }
 
+    CHECK(firstLeak == 0);
     CHECK(failures > 0);
 
     // 단독 실행의 할당 횟수와, 두 스레드가 각자 Allocator로 동시에 디코딩한 횟수가 같다.
     TiffImage other = image;
     other.compression = COMPRESSION_ADOBE_DEFLATE;
     const Array<uint8> second = WriteTiff(allocator, other);
-    test::NFailAllocator soloFirst(allocator);
-    test::NFailAllocator soloSecond(allocator);
+    // 스레드마다 따로 센다(같은 시각에 두 스레드가 한 세기를 바꾸지 않게).
+    LiveCountingAllocator firstCount(allocator);
+    LiveCountingAllocator secondCount(allocator);
+    test::NFailAllocator soloFirst(firstCount);
+    test::NFailAllocator soloSecond(secondCount);
     ThreadJob solo[2] = {{file.View(), &soloFirst}, {second.View(), &soloSecond}};
     DecodeOnThread(&solo[0]);
     DecodeOnThread(&solo[1]);
-    test::NFailAllocator sharedFirst(allocator);
-    test::NFailAllocator sharedSecond(allocator);
+    test::NFailAllocator sharedFirst(firstCount);
+    test::NFailAllocator sharedSecond(secondCount);
     ThreadJob jobs[2] = {{file.View(), &sharedFirst}, {second.View(), &sharedSecond}};
     platform::Thread threads[2];
     for (uint32 index = 0; index < 2; ++index) {
@@ -1038,6 +1112,7 @@ TEST(TiffDecode_AllocationAndThreads) {
     CHECK(solo[0].ok && solo[1].ok && jobs[0].ok && jobs[1].ok);
     CHECK(sharedFirst.Attempts() == soloFirst.Attempts() &&
           sharedSecond.Attempts() == soloSecond.Attempts());
+    CHECK(firstCount.Live() == 0 && secondCount.Live() == 0);
 }
 
 } // namespace tiff_decode_tests_file

@@ -221,6 +221,10 @@ void WriteEntry(ByteWriter& writer, const EntrySpec& spec) noexcept {
         writer.WriteU8(spec.required);
     }
 
+    // export 타입 목록(A5c — schemaVersion 4): 대표 타입 하나.
+    writer.WriteU32LE(1);
+    writer.WriteU64LE(spec.type.high);
+    writer.WriteU64LE(spec.type.low);
     writer.WriteU32LE(spec.tagCount);
     for (uint32 index = 0; index < spec.tagCount && index < 2; ++index) {
         WriteSpecText(writer, spec.tagKeys[index]);

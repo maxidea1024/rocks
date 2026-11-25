@@ -223,9 +223,9 @@ TEST(Texture_ValidationHooks) {
     SystemAllocator allocator;
     TexturePlatformData data(allocator);
     CHECK(TexturePlatformData::Validate(data));
-    data.pixelFormat = static_cast<uint8>(PixelFormat::RGBA8Unorm);
+    data.pixelFormat = static_cast<uint8>(graphics::PixelFormat::RGBA8Unorm);
     CHECK(TexturePlatformData::Validate(data));
-    data.pixelFormat = static_cast<uint8>(PixelFormat::BC7Unorm);
+    data.pixelFormat = static_cast<uint8>(graphics::PixelFormat::BC7Unorm);
     CHECK(!TexturePlatformData::Validate(data));
     data.pixelFormat = 0xFF;
     CHECK(!TexturePlatformData::Validate(data));
@@ -256,8 +256,10 @@ TEST(Texture_FindChangedFields) {
         REQUIRE(FindChangedFields(objects, access, handle, allocator, changed));
         auto lease = fixture.types.Acquire(TypeIdOf<Texture2D>());
         REQUIRE(lease);
-        const StringView expected[] = {"chromaKeyColor", "compositeTexture", "layerFormatSettings",
-                                       "sourceColorSettings.colorSpace", "lodBias"};
+        // 스키마 필드 순이다(선언 순이 아니다 — TypeSchema fields 배열 순).
+        const StringView expected[] = {"lodBias", "chromaKeyColor",
+                                       "sourceColorSettings.colorSpace", "compositeTexture",
+                                       "layerFormatSettings"};
         REQUIRE(changed.Size() == sizeof(expected) / sizeof(expected[0]));
         for (usize index = 0; index < changed.Size(); ++index) {
             CHECK(PathIs(lease.Value(), changed[index], expected[index]));
@@ -311,9 +313,10 @@ TEST(Texture_CheckSettings) {
                                        other.Value().Handle()));
         });
         REQUIRE(CheckTextureSettings(objects, access, handle, allocator, issues));
+        // 스키마 필드 순이다(선언 순이 아니다 — TypeSchema fields 배열 순).
         const StringView conditioned[] = {
-            "doScaleMipsForAlphaCoverage", "alphaCoverageThresholds", "chromaKeyTexture",
-            "chromaKeyThreshold",          "compositeTexture",        "compositeTextureMode"};
+            "doScaleMipsForAlphaCoverage", "compositeTextureMode", "compositeTexture",
+            "chromaKeyThreshold",          "chromaKeyTexture",     "alphaCoverageThresholds"};
         REQUIRE(issues.Size() == sizeof(conditioned) / sizeof(conditioned[0]));
         for (usize index = 0; index < issues.Size(); ++index) {
             CHECK(issues[index].code == AssetDiagnosticCode::UnsupportedSetting);
@@ -331,13 +334,14 @@ TEST(Texture_CheckSettings) {
             texture.compressionSettings = TextureCompressionSettings::LQ;
         });
         REQUIRE(CheckTextureSettings(objects, access, values.Value().Handle(), allocator, issues));
-        const StringView valued[] = {"mipGenSettings", "sourceColorSettings.encodingOverride",
-                                     "sourceColorSettings.colorSpace", "compressionSettings",
-                                     "mipLoadOptions"};
+        // 스키마 필드 순이다. compressionSettings(LQ)만 InvalidSetting이다.
+        const StringView valued[] = {"compressionSettings", "sourceColorSettings.encodingOverride",
+                                     "sourceColorSettings.colorSpace", "mipLoadOptions",
+                                     "mipGenSettings"};
         REQUIRE(issues.Size() == sizeof(valued) / sizeof(valued[0]));
         for (usize index = 0; index < issues.Size(); ++index) {
             CHECK(PathIs(lease.Value(), issues[index].path, valued[index]));
-            CHECK(issues[index].code == (index == 3 ? AssetDiagnosticCode::InvalidSetting
+            CHECK(issues[index].code == (index == 0 ? AssetDiagnosticCode::InvalidSetting
                                                     : AssetDiagnosticCode::UnsupportedSetting));
         }
 
@@ -389,7 +393,7 @@ TEST(Texture_GraphRoundTrip) {
             auto saved =
                 SaveObjectGraph(allocator, source, access, created.Value().Handle(), options);
             REQUIRE(saved);
-            const Array<uint8> bytes = saved.Value().TakeBytes();
+            const Array<uint8> bytes = Move(saved.Value());
             ObjectRegistry target(allocator, fixture.types, {0x5458, 5});
             auto loaded = LoadObjectGraph(allocator, target, fixture.types, target.OwnerAccess(),
                                           bytes.View());

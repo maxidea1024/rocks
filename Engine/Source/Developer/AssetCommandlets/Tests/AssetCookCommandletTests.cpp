@@ -309,9 +309,9 @@ TEST(AssetCookCommand_ArtifactStage) {
     CookScene cook(env.allocator, "cook-command-stage");
     REQUIRE(cook.ready);
     CHECK(cook.Cook({"--json"}) == 0);
-    CHECK(cook.run.Out("asset-cook: Windows published") && cook.run.Out("\"ShaderLibrary\"") &&
+    CHECK(cook.run.Out("\"published\": true") && cook.run.Out("\"ShaderLibrary\"") &&
           cook.run.Out("\"format\": \"D3D12_SM6\"") &&
-          cook.scene.Exists("Saved/Cooked/Windows/Shaders"));
+          cook.scene.DirectoryExists("Saved/Cooked/Windows/Shaders"));
 
     REQUIRE(CookArtifactStages().Unregister(cook.stage));
     cook.registration.ok = false;
@@ -391,7 +391,7 @@ TEST(AssetCookCommand_EngineCook) {
     CHECK(cook.run.Cook(args) == 0);
     CHECK(cook.run.Out("asset-cook: Windows published targets 0 cooked 0 reused 0 bytes ") &&
           engine.Exists("Saved/Cooked/Windows/CookedManifest.rman") &&
-          engine.Exists("Saved/Cooked/Windows/Shaders") &&
+          engine.DirectoryExists("Saved/Cooked/Windows/Shaders") &&
           !cook.scene.Exists("Saved/Cooked/Windows/CookedManifest.rman"));
 
     REQUIRE(engine.WriteFile("Config/CookSettings.json", "{"));

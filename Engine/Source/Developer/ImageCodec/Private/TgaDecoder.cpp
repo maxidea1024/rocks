@@ -160,9 +160,8 @@ Result<void> DecodeTga(Allocator&, Span<const uint8> file, const ImageDecodeLimi
         if (premultiplied && alphaBits != 0) {
             const uint32 alpha = rgba[3];
             for (usize channel = 0; channel < 3; ++channel) {
-                rgba[channel] = alpha == 0 ? 0
-                                           : static_cast<uint8>(math::Min<uint32>(
-                                                 255, (rgba[channel] * 255u + alpha / 2) / alpha));
+                const uint32 restored = alpha == 0 ? 0 : (rgba[channel] * 255u + alpha / 2) / alpha;
+                rgba[channel] = static_cast<uint8>(restored < 255 ? restored : 255);
             }
         }
 

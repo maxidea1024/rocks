@@ -55,9 +55,6 @@ ROCKS_ENGINEASSETS_API StringView ResolveRuntimeProfile(StringView configured) n
 // 실행 파일 경로에서 디렉터리 부분이다('/'·'\\' 마지막 구분자 앞, 없으면 빈 값).
 ROCKS_ENGINEASSETS_API StringView ExecutableDirectoryOf(StringView executablePath) noexcept;
 
-// 서명하지 않은 쿠킹 매니페스트 파일 이름이다(11.4절 — 서명 봉투는 ContentEnvelopeFileName).
-inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
-
 // 관측 값이다(시험·도구 — 11.8절 5).
 struct EngineAssetsStats {
     // 이번 실행에서 끝난 에셋 Registry GC cycle 수다.

@@ -57,8 +57,9 @@ Result<void> TexturePlatformData::Validate(const TexturePlatformData& data) noex
 
     // 번호는 쿠킹 데이터의 저장 형식이다 — 모르는 번호·비압축 색이 아닌 형식은 거부한다(블록 압축은
     // 압축 단계에서 받는다).
-    auto format = PixelFormatFromNumber(data.pixelFormat);
-    if (!format || GetPixelFormatInfo(format.Value()).kind != PixelFormatKind::Color) {
+    auto format = graphics::PixelFormatFromNumber(data.pixelFormat);
+    if (!format ||
+        graphics::GetPixelFormatInfo(format.Value()).kind != graphics::PixelFormatKind::Color) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -15,7 +15,9 @@ namespace text_json_tests_file {
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
+using reflection_fixture::AssignKeyedShelf;
 using reflection_fixture::AssignPoint;
+using reflection_fixture::AssignShelf;
 using reflection_fixture::TextHolder;
 
 namespace {

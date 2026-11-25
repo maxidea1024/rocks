@@ -4,6 +4,7 @@
 #include <AssetCooker/CookRun.h>
 #include <AssetDatabase/AssetDatabaseLock.h>
 #include <AssetDatabase/ProjectLayout.h>
+#include <AssetRuntime/CookedManifest.h>
 #include <Core/Text/StringBuilder.h>
 
 // 쿠킹 게시와 재사용 판정이다(Docs/Design/AssetSystem 10절 1–3, 10.2절 결정 8·10, "A4d 구현
@@ -20,7 +21,6 @@
 namespace rocks {
 
 inline constexpr StringView CookedDirectoryName = "Cooked";
-inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
 inline constexpr StringView CookStagingDirectoryName = ".staging";
 inline constexpr StringView CookPackagesDirectoryName = "Packages";
 // 비에셋 산출물(셰이더 라이브러리) 디렉터리다(AssetSystem 10.3절 4항 — AppendCookedArtifactPath).

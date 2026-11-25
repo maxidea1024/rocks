@@ -177,7 +177,8 @@ Result<void> DecodePsd(Allocator& allocator, Span<const uint8> file,
             }
 
             if (id == PsdResourceIndexedCount && size >= 2) {
-                indexedCount = math::Min<uint32>(LoadBe16(data), PsdIndexedEntries);
+                const uint32 listed = LoadBe16(data);
+                indexedCount = listed < PsdIndexedEntries ? listed : PsdIndexedEntries;
             }
 
             if (id == PsdResourceTransparentIndex && size >= 2) {

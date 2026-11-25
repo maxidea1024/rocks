@@ -73,7 +73,9 @@ public:
     ExrDecoding(const ExrDecoding&) = delete;
     ExrDecoding& operator=(const ExrDecoding&) = delete;
 
-    exr_decode_pipeline_t pipeline = EXR_DECODE_PIPELINE_INITIALIZER;
+    // EXR_DECODE_PIPELINE_INITIALIZER({크기, 0})는 C++에서 -Wmissing-field-initializers라 값
+    // 초기화한다 (pipe_size는 OpenEXR이 읽지 않는다).
+    exr_decode_pipeline_t pipeline{};
     bool initialized = false;
 
 private:

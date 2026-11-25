@@ -136,12 +136,53 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
     }
 
     const uint32 baseline = env.target->Stats().liveObjects;
+    // 받아들인 byte를 로드해 읽은 설정 그대로 다시 쓴다(실패하면 빈 배열).
+    auto resaveFile = [&](Span<const uint8> file, PackageKind kind) noexcept {
+        Array<uint8> out(env.allocator);
+        PackageReadOptions read;
+        read.expectedKind = kind;
+        read.engineVersion = TestEngineVersion;
+        read.types = &env.types;
+        auto contents = ReadPackage(env.allocator, file, read);
+        if (!contents) {
+            return out;
+        }
+
+        PackageLoadOptions loadOptions = LoadOptions(kind);
+        PackageLoadState state(env.allocator, *env.target, env.types, env.target->OwnerAccess(),
+                               loadOptions);
+        auto prepared = state.Prepare(Copy(env.allocator, file));
+        if (!prepared) {
+            return out;
+        }
+
+        ObjectHandle handles[1];
+        RootRef<Object> roots[1];
+        {
+            ConstructionContext transaction(*env.target, env.target->OwnerAccess());
+            PackageLoadState* states[] = {&state};
+            prepared = InstantiatePackages(transaction, states, &resolver, handles);
+            if (prepared) {
+                prepared = transaction.Commit(handles, roots);
+            }
+        }
+
+        if (prepared) {
+            out = ResaveAsRead(env.allocator, *env.target, handles[0], contents.Value());
+            (void)env.target->Discard(env.target->OwnerAccess(), handles[0]);
+            roots[0].Reset();
+            (void)env.target->Collect(env.target->OwnerAccess());
+        }
+
+        return out;
+    };
     auto fuzz = [&](const Array<uint8>& valid, PackageKind kind, uint64 seed) noexcept {
         XorShift random{seed};
         uint32 readFailures = 0;
         uint32 loadFailures = 0;
         uint32 accepted = 0;
         uint32 resaved = 0;
+        uint32 normalized = 0;
         constexpr uint32 Iterations = 4000;
         for (uint32 iteration = 0; iteration < Iterations; ++iteration) {
             Array<uint8> bytes = Copy(env.allocator, valid.View());
@@ -194,19 +235,27 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
                     }
                 }
 
-                // 받아들인 입력은 정준이다: 읽기 전용이 아니면 같은 옵션으로 다시 쓴 byte가 입력과
-                // 같다(규칙 구멍 — 같은 객체로 풀리는 다른 byte — 이 있으면 여기서 드러난다).
+                // 받아들인 입력은 한 번 다시 쓰면 정준이다: 읽기 전용이 아니면 같은 옵션으로 다시
+                // 쓴 byte가 입력과 같거나, 다르면 그 byte를 다시 쓴 결과가 그대로다(차이 형식 —
+                // 변조가 값을 클래스 기본값과 같게 만들면 다시 쓸 때 그 필드가 빠진다, UE delta
+                // 직렬화와 같다; AssetSystem 14.1.83절). 그 밖의 규칙 구멍(같은 객체로 풀리는 다른
+                // byte가 다시 쓸 때마다 바뀜)은 여기서 드러난다.
                 if (prepared) {
+                    Array<uint8> again(env.allocator);
                     if (!state.IsReadOnly()) {
                         ++resaved;
-                        const Array<uint8> again =
+                        again =
                             ResaveAsRead(env.allocator, *env.target, handles[0], contents.Value());
-                        CHECK(SameBytes(again.View(), input.View()));
                     }
 
                     CHECK(env.target->Discard(env.target->OwnerAccess(), handles[0]));
                     roots[0].Reset();
                     CHECK(env.target->Collect(env.target->OwnerAccess()));
+                    if (!state.IsReadOnly() && !SameBytes(again.View(), input.View())) {
+                        ++normalized;
+                        const Array<uint8> twice = resaveFile(again.View(), kind);
+                        CHECK(!twice.IsEmpty() && SameBytes(twice.View(), again.View()));
+                    }
                 }
             }
 
@@ -228,7 +277,7 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
         CHECK(readFailures > Iterations / 2);
         CHECK(loadFailures > 0);
         CHECK(accepted > 0);
-        CHECK(resaved > 0);
+        CHECK(resaved > 0 && normalized < resaved);
         CHECK(env.target->Stats().liveObjects == baseline);
     };
 
