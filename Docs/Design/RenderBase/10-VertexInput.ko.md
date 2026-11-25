@@ -173,3 +173,20 @@
 - **앞면(개정 16).** 컬 방향은 파이프라인 상태라 한 그리기 안에서 인스턴스마다 바꿀 수 없다. 그래서 local-to-world 행렬식 부호는 인스턴스마다 보고, 부호가 다른 인스턴스는 한 그리기에 묶지 않는다(렌더러 상태 묶음 키에 부호를 넣는다, 셰이더 시스템 7.2절 8항 음수 행렬식). 변환 갱신으로 부호가 바뀐 인스턴스는 그 그리기 항목을 다시 분류한다(재질 교체와 같은 캐시 무효화, Renderer 4.2절).
 - 엔진 기본 정점 입력 타입과 정점 입력 없음(10.2절 (1)·(2))은 이 규약 밖이다. 내장 메시는 지금처럼 그리기별 상수의 변환을 쓴다.
 - **완료 기준(Renderer RS0에서).** (`instanceListOffset`, `SV_InstanceID`) → 인스턴스 변환이 CPU 참조와 같은지 픽셀 대조(D3D12·Vulkan·GLES 미리보기, GLES는 VS texel buffer 경로), offset이 0이 아닌 그리기, 행렬식이 음수인 인스턴스의 별도 그리기와 컬링 픽셀.
+
+### 10.6 정점 입력 타입 등록 구현 설계(개정 40, RB5)
+
+18.3절 RR4–RR6이다. 결정은 권장안으로 확정했다.
+
+1. **등록부 자리 — 셰이더 타입 등록부에 함께 둔다.** ShaderCore `ShaderTypeRegistry`(셰이더 시스템 12.2.1절 SSD3)가 정점 입력 타입도 받고 같은 `Freeze`로 닫는다. 셰이더 시스템 SSD5의 "정점 입력 타입 등록부는 RenderBase 10절 몫"을 고친다(셰이더 시스템 개정 48).
+   - 근거: 쿠커(Developer ShaderCompiler)·Development 공급자·셰이더 집합이 장치 없이 같은 목록을 써야 하고, 10.2절대로 셰이더 타입 등록과 같은 시점에 닫혀야 한다. UE도 정점 입력 타입(vertex factory type)과 셰이더 타입을 같은 모듈의 같은 초기화 단계에서 다루고, 셰이더 타입 초기화 뒤에 생긴 타입은 check 실패다(`RC/Private/VertexFactory.cpp:102–161`).
+   - desc `ShaderVertexInputType`(정적 수명): `name`·`id`(= `ShaderTypeNameHash(name)`), `sourcePath`(`.rsh` 가상 경로 — 2항의 연결 대상), `owner`(셰이더 타입과 같은 소속 규칙: 경로 루트와 맞아야 한다), `shouldCompile`(기존 서명).
+   - API: `RegisterVertexInputTypes(Span<const ShaderVertexInputType* const>)`·`UnregisterVertexInputTypes`, `VertexInputTypes()`(Freeze 뒤 id 순 — 등록 순서와 무관), `FindVertexInputType(id)`. 검사(위반은 목록 전체 거부, `InvalidArgument`): 이름 문법·길이(셰이더 타입 이름과 같은 규칙), id = 이름 해시, 정점 입력 타입끼리 이름·해시 중복, 경로 문법·`.rsh` 확장자·소속 루트, `NoVertexInputType` 금지. Freeze 뒤 등록은 `ScopeClosed`(늦은 등록 거부). `ShaderTypeModuleRegistration`이 셰이더 타입과 정점 입력 타입 목록을 함께 받는다.
+   - 쓰는 쪽(하위호환 없음): `ShaderSetDesc::vertexInputTypes`·`ShaderProvisionRequest::vertexInputTypes`·`ShaderLibraryCookDesc::vertexInputTypes`를 지우고 등록부 목록을 쓴다.
+   - 타입 집합 digest(SSD3)는 셰이더 타입만이다. 정점 입력 타입이 실행 파일과 라이브러리 사이에 다르면 완결성 검사(`MissingEntry`)가 잡는다. 버린 대안: digest에 정점 입력 타입을 넣기 — 축 있는 셰이더가 쓰지 않는 정점 입력 타입을 더하기만 해도 맞는 라이브러리가 거부된다.
+2. **include 연결(`/Engine/Generated/VertexInput.rsh`).** 정점 입력 축 job(셰이더 시스템 SSD6)은 그 정점 입력 타입의 `sourcePath`를 받는다(`ShaderCompileJob::vertexInputSource`). 전처리기는 생성 include 표(`ShaderGeneratedInclude{가상 경로, 실제 가상 경로}`)를 받아, 그 가상 경로를 include하면 실제 경로 파일을 읽는다. include 폐포(키 5행)에는 실제 경로가 들어가므로 정점 입력 타입마다 키가 다르다. 연결이 없는 job(축 없는 타입)이 이 경로를 include하면 지금처럼 `GeneratedSource` 오류다(소스 트리 규칙 — `Generated`는 실제 파일이 아니다). UE 대응: 공용 메시 셰이더가 고정 가상 경로를 include하고 컴파일 환경이 그 타입의 원문으로 잇는다(`RC/Public/VertexFactory.h:457–476`). SSD6의 "정점 입력 타입이 주는 정의"는 지금 없다(include 연결로 충분하다 — 필요하면 desc에 정의 목록을 더한다).
+3. **엔진 기본 정점 입력 타입 `BuiltinVertexInput`.** 이름 `BuiltinVertexInput`, 원문 `/Engine/Private/VertexInput/BuiltinVertexInput.rsh`(엔진 셰이더 A05), 소속 Engine, RenderBase가 등록한다(11.4절 2항의 엔진 셰이더 타입과 함께).
+   - 배치(RenderBase 상수 `BuiltinVertexLayout()`·`BuiltinVertex`): stream 0 하나, stride 36 byte — 위치 `Float3`(ATTRIBUTE0, 0)·UV `Float2`(ATTRIBUTE1, 12)·색 `Float4`(ATTRIBUTE2, 20). 지금 Sandbox 샘플 렌더러 정점 형식과 같다(10.2절 (2)).
+   - `.rsh` 인터페이스(이 타입만 — 메시 정점 입력 인터페이스는 RR16): 입력 구조체 `VertexInputAttributes`, `GetVertexInputLocalPosition`·`GetVertexInputTexCoord`·`GetVertexInputColor`.
+   - 정적 정점 배치를 등록 desc에 넣지 않는다(ShaderCore는 Graphics 타입을 모른다). 일반 정적 배치 표는 PSO 미리 준비와 함께 RR15다.
+4. **완료 기준(10.3절 중 이 개정 몫).** EngineTests: 등록 결정성(두 순서로 등록해 같은 목록·같은 라이브러리 byte), 늦은 등록 `ScopeClosed`, 검사 음성 대조(이름·해시·경로·확장자·소속·중복), 생성 include 연결(같은 셰이더 타입·퍼뮤테이션의 두 정점 입력 타입이 다른 코드·다른 키, 연결 없는 include의 `GeneratedSource`), 등록부 목록으로 쿠킹·셰이더 집합 열기 왕복. Sandbox: 기본 정점 입력 타입으로 그린 내장 메시 픽셀(11.4절 7항).

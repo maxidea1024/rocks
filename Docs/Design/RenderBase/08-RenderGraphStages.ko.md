@@ -6,7 +6,7 @@
 |---|---|---|---|
 | RG1 | 최소 그래프: 단일 graphics queue, aliasing·병합 끔, 단일 스레드 기록. 자원 생성·import·export, 파라미터 구조체 의존, 점진 culling, 참조 수 수명, 프레임 간 desc 풀과 축출, subresource 상태 추적과 읽기 상태 병합, prologue 즉시 전이, 즉시 실행 모드, 검증, 이벤트 구간 | RB4·RB7·GX1·GX2·GX4·GX5·CP3 | (a) 미사용 체인 제거와 `HasSideEffects`·외부 출력·export 보존 (b) 기대 전이 열 일치, 읽기→읽기 전이 0, UAV→UAV는 생략 표시가 없을 때만 (c) 할당·해제 pass 번호 (d) 즉시·지연 모드 명령 열 동치 (e) 음성 검증: 생산 전 읽기, 한 pass 안 상충 접근, Raster pass의 UAV, `Retire`된 자원 import (f) 풀 축출이 fence 완료 전에는 일어나지 않음(fence gate) (g) D3D12·Vulkan·GLES 미리보기 픽셀 대조 |
 | RG2 | 프레임 안 풀 재사용(수명이 겹치지 않는 같은 desc), begin·end 분리 전이, 그래프 안 업로드 | RG1·GX8 | 겹치지 않는 수명의 같은 desc 자원이 실제 객체 하나를 공유, 분리 전이의 begin·end 위치가 기대 열과 일치(native split 없는 backend는 end 하나로 낮춘 열과 일치), 분리 전후 픽셀 동일 |
-| RG3 | 병렬 기록, render pass 병합(tiled GPU 형식만) | RG2·CP2·GX11·GX13(병합) | 병렬·직렬 결과 동일, 병합 구간 전이 0, GLES에서 병합 켬·끔 픽셀 동일 |
+| RG3 | 병렬 기록, render pass 병합(같은 attachment 연속 raster pass, UE `r.RDG.MergeRenderPasses` — subpass 없음, 개정 40) | RG2·CP2·GX11 | 병렬·직렬 결과 동일, 병합 구간 전이 0, GLES에서 병합 켬·끔 픽셀 동일 |
 | RG4 | async compute overlap(fork/join, 수명 연장, 병합과 배타) | RG3·GX1(async compute 표시) | 계획 API06 직렬·비동기 결과 일치, 실제 queue 겹침 계측. 설계·구현: 아래 "RG4 async compute 설계(개정 32)"(D3D12·그래프 구현, Vulkan compute queue 경로는 maintenance9 장치에서 후속) |
 | RG5 | transient aliasing. 지원하지 않는 backend는 풀 | RG4·GX12 | alias 켬·끔 픽셀 동일, transient 최대 사용량 감소 계측, 검증 오류 0. 설계·구현: 아래 "GX12·RG5 transient aliasing 설계(개정 33)"(D3D12·Vulkan, async 자원 aliasing은 설정으로만) |
 | (결정 R6) | copy queue | — | 확정(개정 32): 그래프 밖 업로드·스트리밍 계층. 그래프 단계 없음 |
@@ -69,7 +69,7 @@
 - **구현(2026-11-19, 설계 2).** 위 설계 그대로다. Graphics: `ResourceAccess::ResolveDestination`(쓰기 전용 배타 mask에 넣음). D3D12는 `RESOLVE_DEST`로 낮추고 resolve 뒤 원본을 `RENDER_TARGET`으로 되돌리며 대상은 `RESOLVE_DEST`로 둔다(셰이더 읽기 되돌림을 없앴다). Vulkan은 `ResolveDestination`을 `TRANSFER_DST_OPTIMAL`·transfer 쓰기로 낮추고 resolve 뒤 원본을 `RenderTarget`으로 되돌린다. 기록 장치는 `BeginPass`의 resolve 대상을 기억했다가 `EndFrame`에서 그 subresource를 `ResolveDestination`으로 둔다. RenderBase: `GpuTrace::BeginSpan`·`EndSpan`·`DropSpan`(기록 실패 뒤 무효로 닫음)·`MarkersEnabled`. RenderGraph: `GraphColorTarget::resolveTarget`·`resolveMipLevel`·`resolveSlice`(대상 접근 `ResolveDestination`, attachment 표시, 선언 접근으로는 거부), `RenderGraph::PushScope`·`PopScope`와 `GraphScope`, pass마다 가장 안쪽 구간 번호, 실행 중 열린 구간 사슬(`LeaveScopes`·`EnterScopes`, 기록을 닫을 때 marker pop·열 때 재push), 번호 구간의 `ROCKS_TRACE_MARK("Graph scope {} {}")`.
 - 시험 결과: EngineTests `RenderGraphResolveScopeTests`(`RenderGraph_ResolveTargetsAreDeviceTransitions`·`RejectsInvalidResolveTargets`·`ScopesFollowRecordingsAndSkipCulledPasses`·`ScopeImbalanceIsAValidationError`·`ImmediateModeOpensScopesAtAddPass`). Sandbox `--self-test`의 `RunResolveGraph`(Programs/Sandbox/Private/RenderGraphSelfTest.cpp): 4x MSAA 그래프 텍스처를 마젠타로 clear해 1표본 그래프 텍스처로 resolve하고 다음 pass가 합성한 출력 중심이 마젠타, 두 pass는 marker를 켠 그래프 구간 안, 기존 MSAA·slice resolve 시험도 새 상태 계약으로 통과, 검증 오류 0 — D3D12·D3D12 WARP·D3D11·D3D11 WARP·GLES·GLES on GL core·Vulkan(GTX 1060·lavapipe).
 
-**RG3 병렬 기록 설계(개정 31).** RG3의 두 일 가운데 병렬 기록만 먼저 넣는다. render pass 병합(tiled GPU의 load·store 생략)은 GX13(subpass·framebuffer fetch) 뒤로 남는다.
+**RG3 병렬 기록 설계(개정 31).** RG3의 두 일 가운데 병렬 기록만 먼저 넣는다. render pass 병합(같은 attachment 연속 pass의 load·store 생략)은 RG3 후속으로 남는다(개정 40에서 GX13 의존을 지웠다 — 4.4절 GX13 결정).
 - **UE 방식.** RDG는 pass 묶음마다 `FRHICommandList`를 task에서 기록하고(`RenderCore/Private/RenderGraphBuilder.cpp:2093, 2995`), RHI가 그 목록들을 제출 순서대로 번역한다(`RHI/Public/RHICommandList.h:4440–4458`). 기록(pass 람다 실행)과 번역(장치 명령)이 나뉘어 있어 기록만 병렬이어도 결과 순서가 정해진다.
 - **Rocks 구조.** 같은 두 단계로 나눈다.
   - 기록 목록 `GraphCommandList`(RenderGraph 내부): `graphics::CommandContext`를 구현해 pass 기록 함수의 호출을 프레임 arena의 명령 열(종류 표지 + 인자, Span 인자는 복사)로 쌓는다. worker마다 `FrameArenaWriter`로 잠금 없이 할당한다.
@@ -106,7 +106,7 @@
     - timestamp: compute 기록의 `WriteTimestamp`도 된다. `TimestampSample::queue`가 queue를 알리고 번호는 queue마다 따로다. `CalibrateClocks(QueueKind)`가 queue마다 GPU tick과 CPU 시각 쌍을 준다(D3D12는 queue마다 clock calibration, Vulkan은 device 시간축 하나라 같은 값).
     - Vulkan 공유 방식(UE 5.8과 같다, 2026-11-20 사용자 결정): image는 `VK_SHARING_MODE_EXCLUSIVE`이고 다른 queue family 사이 전이에 소유권 이전(원본 queue release, 대상 queue acquire)을 둔다. 다만 두 family가 서로 `VkQueueFamilyOwnershipTransferPropertiesKHR::optimalImageTransferToQueueFamilies`에 들면 이전을 생략한다(`VulkanDevice.cpp:472–510`). 버퍼는 maintenance9 덕에 이전이 없다(`VulkanBarriers.cpp:1438, 1522–1530`). 이전이 필요 없을 때 다른 queue 사이 barrier는 graphics queue에서 한 번만 낸다(`VulkanBarriers.cpp:1500–1508`).
   - **그래프.**
-    - 설정 `RenderGraphDesc::asyncCompute`(`GraphAsyncCompute`): `Auto`(기본, 장치 `efficientAsyncCompute`일 때 compute queue), `Always`(장치에 `asyncCompute`가 있으면 늘, 시험·측정용. UE의 명령줄 강제와 같은 자리), `Disabled`. 즉시 실행 모드와 render pass 병합(GX13 뒤)은 늘 끈다. 끄면 AsyncCompute pass는 graphics pipe의 Compute pass와 똑같이 실행한다(UE와 같은 낮추기).
+    - 설정 `RenderGraphDesc::asyncCompute`(`GraphAsyncCompute`): `Auto`(기본, 장치 `efficientAsyncCompute`일 때 compute queue), `Always`(장치에 `asyncCompute`가 있으면 늘, 시험·측정용. UE의 명령줄 강제와 같은 자리), `Disabled`. 즉시 실행 모드와 render pass 병합(RG3 후속)은 늘 끈다. 끄면 AsyncCompute pass는 graphics pipe의 Compute pass와 똑같이 실행한다(UE와 같은 낮추기).
     - pipe 간선: subresource마다 마지막으로 접근한 pass를 따라, 다른 pipe의 앞 접근이 있으면 의존이다(읽기 → 읽기도 넣는다. UE보다 보수적이지만 다른 pipe의 읽기 상태를 합치지 않으므로 그 사이 전이 자리가 필요하다). 다른 pipe 사이에는 읽기 상태를 합치지 않는다.
     - fork·join은 UE와 같은 식이다. prologue는 "그래프 시작", epilogue는 "그래프 끝"이다.
     - 수명 연장: async pass가 쓰는 자원의 첫 사용을 fork pass(prologue면 첫 실행 pass)로, 마지막 사용을 join pass(epilogue면 그래프 끝)로 넓힌다. 같은 그래프 안 재사용(RG2)과 `GraphLifetime`이 이 넓힌 값을 쓴다.
@@ -114,7 +114,7 @@
     - 다른 pipe 전이의 자리(UE D3D12와 같다): graphics → async 전이는 fork pass의 epilogue(graphics 기록, 닫기 직전)에서 내고, prologue fork면 그래프 시작에 그 전이만 담은 graphics 기록 하나(UE prologue pass)를 열어 낸다. async → graphics 전이는 소비 pass의 prologue(join 뒤 graphics 기록)에서 낸다. async → async 전이만 compute 기록에서 낸다. 다른 pipe 전이는 나누지 않는다(begin·end가 다른 기록·queue다).
     - GPU 계측: compute 기록에는 debug marker(그래프 구간·pass 이름)만 남기고 `GpuTrace` GPU 구간은 두지 않는다(GPU 구간은 graphics queue 하나의 장부다. compute queue 구간은 후속). CPU 구간은 그대로다.
     - 진단: `GraphStats::asyncComputePasses`(compute queue에서 실행한 pass)·`computeRecordings`·`queueWaits`(fork·join 대기 수). `RenderGraph::PassPipe(pass)`가 실행 pipe를 알린다.
-  - **render pass 병합과 배타(계약).** 병합(GX13 뒤 RG3)을 켠 그래프는 async compute를 끈다. 병합 구간 안에 fork·join 전이가 들어갈 수 없기 때문이다(UE와 같다). 병합이 아직 없으므로 지금은 계약만 둔다.
+  - **render pass 병합과 배타(계약).** 병합(RG3 후속)을 켠 그래프는 async compute를 끈다. 병합 구간 안에 fork·join 전이가 들어갈 수 없기 때문이다(UE와 같다). 병합이 아직 없으므로 지금은 계약만 둔다.
 - **결정 R6 확정(권장안, 개정 32).** copy queue는 그래프 밖, 업로드·스트리밍 계층에 둔다. 그래프 pipe는 graphics·async compute 둘뿐이고 Copy pass는 graphics pipe다(UE와 같다).
 - **버린 대안.**
   - (가) Vulkan concurrent 공유로 maintenance9 없는 장치에서도 compute queue 쓰기(개정 32 초안): 버퍼·텍스처를 `VK_SHARING_MODE_CONCURRENT`로 만들면 소유권 이전이 없어 개발 기계(GTX 1060)에서도 compute queue를 시험할 수 있었다. 2026-11-20 사용자 결정으로 버렸다: UE 5.8과 같게 한다(maintenance9가 없으면 끄고, image는 exclusive와 이전). 근거는 UE 동작과 맞추는 것(UE는 concurrent를 설정 예외로만 두고 기본은 exclusive), concurrent가 image 압축을 막을 수 있는 장치의 비용, maintenance9가 버퍼 이전을 없애 exclusive의 부담이 image에 한정된다는 점이다. 대가로 이 기계에서는 Vulkan compute queue 실행 시험을 할 수 없다(실기 경로 시험은 D3D12).
@@ -140,7 +140,7 @@
   - 기록 장치: `SetAsyncCompute`, compute queue timeline, queue 사이 경쟁 검출(자원마다 마지막 접근 (queue, 값)과 queue별 대기 값), compute 기록의 graphics 상태 전이·그리기 검증 오류, `Op::BeginCompute`·`EndCompute`·`QueueWait`.
   - 시험 결과: EngineTests `RenderGraphAsyncTests`(`RenderGraph_AsyncComputeForksAndJoinsAcrossQueues`: G0 → G1 → A0 → A1 → G2 → G3에서 fork pass G0 뒤 제출 값 1을 compute가 기다리고, compute 기록 하나, join G3 앞 graphics가 compute 값 1을 기다림, fork 전이 셋이 G0 기록에, async → async 전이가 compute 기록에, async → graphics 전이가 G3 기록에, 넓힌 수명 0–5; `AsyncComputeLowersToGraphicsCompute`: 장치 없음·`Disabled`·`Auto`+비효율·즉시 실행이 Compute pass 그래프와 장치 호출 열이 같음; `AsyncComputePrologueEpilogueAndLifetimeExtension`: prologue 기록·그래프 끝 join 기록·마지막 제출 graphics·넓힌 수명 때문에 재사용 없음(끄면 재사용); `AsyncComputeRecordingDeviceDetectsMissingWaits`: 경쟁 검출 대조). Sandbox `--self-test`의 `RunAsyncComputeGraph`(장면·합성 Raster + async HZB fill·reduce + pyramid를 읽는 probe Raster, `Disabled`·`Always`): 합성 출력·probe 픽셀이 같고 HZB mip이 CPU 기댓값과 같으며 검증 오류 0. D3D12 하드웨어·WARP는 async pass 4·compute 기록 1·대기 2, D3D11·D3D11 WARP·GLES 두 context·Vulkan(GTX 1060·lavapipe)은 graphics pipe(Vulkan 로그: compute family 있음·synchronization2 있음·maintenance9 없음).
   - 스펙과 다르게 정한 것: 겹침 계측은 compute 구간이 graphics pass 구간(장면·합성)과 겹친 시간의 합이다(graphics pipe 실행은 compute가 두 pass 사이라 0에 가깝다). 그래프의 compute 대기는 같은 fork·join 값을 두 번 기다리지 않는다.
-  - 남은 것: Vulkan compute queue 경로(maintenance9 장치에서 실행 검증과 함께), compute queue GPU 구간의 `GpuTrace` 장부, render pass 병합(GX13 뒤)과의 배타 실제 적용.
+  - 남은 것: Vulkan compute queue 경로(maintenance9 장치에서 실행 검증과 함께), compute queue GPU 구간의 `GpuTrace` 장부, render pass 병합(RG3 후속)과의 배타 실제 적용.
 
 **GX12·RG5 transient aliasing 설계(개정 33).** 수명이 겹치지 않는 그래프 자원이 같은 장치 메모리를 나눠 쓰게 한다(transient heap 위의 placed 자원과 aliasing barrier). RG2의 "같은 desc 객체 이어 쓰기"와 달리 desc가 달라도 메모리를 나눈다. 함께 RG4에서 남은 compute queue GPU 구간을 `GpuTrace`에 넣는다.
 - **UE 방식.**

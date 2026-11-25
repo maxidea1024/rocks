@@ -122,6 +122,12 @@
 - 새 셰이더는 새 셰이더 집합(새 epoch)으로 연다. 완결성·서명 검사를 통과해야 교체 후보가 된다.
 - 교체는 프레임 경계의 lane 작업이다. 이전 집합은 `Retire`되고, 진행 중 프레임은 이전 집합 lease로 끝까지 그린다. 파이프라인 캐시 항목은 epoch 키 때문에 섞이지 않는다.
 - 검사가 실패하면 이전 집합을 유지하고 진단을 낸다.
+- **구현 설계(개정 40, 18.3절 RR8).** RenderBase `ShaderSetSlot`(`RenderBase/ShaderSetSlot.h`)이 한 종류(엔진·묶음)의 현재 집합과 교체 후보를 가진다. UE는 셰이더 맵을 새로 만들어 끼우고 옛 맵은 참조가 사라질 때 지운다(재컴파일 뒤 `FShaderMapBase` 교체). Rocks는 그 시점을 lease와 프레임 경계로 명시한다.
+  - `Install(set)`: 첫 집합. `Ready`가 아니면 거부(`DependencyFailed`)하고 비어 있다.
+  - `Propose(set)`: 후보를 받는다(어느 스레드에서나 — SH4 감시 재컴파일이 부른다). 이미 후보가 있으면 옛 후보를 버린다(마지막 것이 이긴다). `Failed`면 바로 거부하고 현재를 유지한다(거부 수·영어 진단).
+  - `ApplyPending(cache)`: 프레임 경계의 렌더 lane 작업에서 부른다(프레임 packet 작업 맨 앞). 후보가 `WaitingForProvider`면 다음 경계로 미룬다. `Ready`면 교체한다: 옛 집합의 캐시 항목을 `PipelineCache::RetireSet`, 옛 집합 `Retire`, 새 집합이 현재가 된다(epoch가 다르므로 캐시 항목이 섞이지 않는다). `Failed`면 버리고 현재를 유지한다. 돌려주는 값은 교체했는지다.
+  - `CollectRetired()`: Retire한 옛 집합 가운데 lease가 0인 것을 파괴한다(진행 중 프레임의 기록 packet·그래프가 잡은 lease가 풀린 뒤). 종료 4단계(5.5절)는 `Shutdown`이 현재 집합까지 Retire하고 lease가 남으면 `Busy`다(closure 실패 — 강제 해제하지 않는다).
+  - 통계: 교체 수·거부 수·대기 중인 옛 집합 수.
 
 ### 9.9 셰이더 시스템 문서 개정(SX)
 
