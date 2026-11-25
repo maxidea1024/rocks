@@ -9,7 +9,7 @@
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
 
-// 픽셀 형식의 D3D12(DXGI) 대응 표와 장치 능력 질의다(Docs/Design/PixelFormat.ko.md 8.4절 PF2,
+// 픽셀 형식의 D3D12(DXGI) 대응 표와 장치 능력 질의다(Docs/Design/PixelFormat 8.4절 PF2,
 // 7·8.2절 PF3). 형식을 다른 형식으로 바꾸지 않는다. 표에 없는 형식(ETC2·EAC·ASTC·RGB8·R8/RG8 sRGB·
 // R64)은 resource가 UNKNOWN이고 능력이 None이다.
 namespace rocks::graphics::d3d12 {

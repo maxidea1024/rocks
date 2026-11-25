@@ -89,10 +89,8 @@ struct ShaderSetDesc {
     Allocator* allocator = nullptr;
     // 장치 셰이더를 만들 장치다. 집합보다 오래 산다.
     graphics::Device* device = nullptr;
-    // Freeze된 등록부다. 집합보다 오래 산다.
+    // Freeze된 등록부다(셰이더 타입과 정점 입력 타입 — 10.6절 1항). 집합보다 오래 산다.
     const shader::ShaderTypeRegistry* registry = nullptr;
-    // 정점 입력 타입이다(RenderBase 10절 등록부 전에는 호출자가 준다). 집합보다 오래 산다.
-    Span<const shader::ShaderVertexInputType> vertexInputTypes;
     shader::ShaderLibraryKind library = shader::ShaderLibraryKind::Engine;
     // 기대하는 셰이더 형식 id(예: "D3D12_SM6")다. 라이브러리 형식 id와 같아야 하고 그 형식의
     // backend 코드 종류가 장치 코드 종류와 같아야 한다.
@@ -103,8 +101,8 @@ struct ShaderSetDesc {
 struct ShaderProvisionRequest {
     StringView formatId;
     shader::ShaderLibraryKind library = shader::ShaderLibraryKind::Engine;
+    // 셰이더 타입과 정점 입력 타입의 등록부다(Freeze됨).
     const shader::ShaderTypeRegistry* registry = nullptr;
-    Span<const shader::ShaderVertexInputType> vertexInputTypes;
 };
 
 // 필요 시 컴파일 형식의 라이브러리 공급자 interface다(SX14). Development 실행 파일이 Developer

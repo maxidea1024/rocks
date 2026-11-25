@@ -2,6 +2,7 @@
 
 #include "GraphicsDeviceTraits.h"
 #include "SandboxGame.h"
+#include "SandboxShaders.h"
 
 #include <Base/PlacementNew.h>
 #include <Core/Containers/Array.h>
@@ -301,6 +302,13 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     config.registerTypes = &RegisterSandboxTypes;
     Engine engine(allocator);
     if (!engine.Initialize(config)) {
+        return 1;
+    }
+
+    // 엔진 묶음·PostEngineInit 모듈이 셰이더 타입을 등록했다. 렌더 lane 시작 전 자리에서 등록부를
+    // 닫는다(Docs/Design/RenderBase 9.12절 1항 — 장치가 아직 없어 lane은 화면 마일스톤에서 잇는다).
+    if (!shaders::Host().Freeze()) {
+        (void)engine.Shutdown();
         return 1;
     }
 
@@ -694,6 +702,11 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
                 RegisterHostService(services, trace);
             }
 
+            // 엔진 셰이더 호스트(Docs/Design/RenderBase 9.12절): Sandbox 타입·원문 디렉터리를 넣고
+            // 등록부와 함께 서비스로 올린다. 모듈이 Startup에서 엔진 셰이더 타입·공급자를 넣는다.
+            // 실패하면 Error를 남기고 모듈은 등록부 없이 시작한다.
+            (void)shaders::AttachHost(modules);
+
             const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
             if (hostModules.IsOk()) {
                 exitCode = RunEngine(allocator, options, settings.Context(), modules);
@@ -706,6 +719,7 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
             }
 
             modules.ShutdownGroup(ModuleGroup::Host);
+            shaders::DetachHost(modules);
             (void)services.Unregister(trace);
             (void)services.Unregister(settings.Context());
             (void)services.Unregister(host.System());
@@ -742,6 +756,7 @@ uint32 RunEngineHostSelfTest() noexcept {
     const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
     const char* const expected[] = {
         "[Info][Engine] Engine initialized with ",
+        "[Info][RenderBase] Engine shader types are frozen: ",
         "[Info][Gameplay] Opened world Main",
         "[Info][Sandbox.Game] Pawn possessed by the local player",
         "[Info][Engine] Engine run finished after 3 frames: MaxFrames",

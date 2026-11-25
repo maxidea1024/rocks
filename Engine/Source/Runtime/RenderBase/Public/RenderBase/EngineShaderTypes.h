@@ -26,7 +26,25 @@ ROCKS_SHADER_TYPE_NAME(CopyTexturePixelType, "CopyTexturePixel");
 // CopyTexturePixel의 텍스처 이름이다(PipelineBindingNames::texture).
 inline constexpr char CopyTextureSourceName[] = "Source";
 
+// fallback 메시 VS다(/Engine/Private/Utility/BuiltinMesh.rsf, 정점 입력 축 — 정점 입력 타입은
+// BuiltinVertexInput만). 그리기별 상수는 BuiltinMeshConstants(80 byte,
+// RenderBase/BuiltinResources.h)다.
+ROCKS_SHADER_TYPE_NAME(BuiltinMeshVertexType, "BuiltinMeshVertex");
+
+// fallback 메시 PS다(Albedo 표본 × 정점 색 × 그리기 색). 텍스처 이름은 BuiltinMeshAlbedoName이다.
+ROCKS_SHADER_TYPE_NAME(BuiltinMeshPixelType, "BuiltinMeshPixel");
+
+// BuiltinMeshPixel의 텍스처 이름이다(PipelineBindingNames::texture).
+inline constexpr char BuiltinMeshAlbedoName[] = "Albedo";
+
+// 엔진 기본 정점 입력 타입이다(Docs/Design/RenderBase 10.6절 3항,
+// /Engine/Private/VertexInput/BuiltinVertexInput.rsh — 위치·UV·색, 배치는 BuiltinVertexLayout).
+ROCKS_SHADER_TYPE_NAME(BuiltinVertexInputName, "BuiltinVertexInput");
+
 // RenderBase가 등록하는 엔진 셰이더 타입 목록이다(정적 수명).
 ROCKS_RENDERBASE_API Span<const shader::ShaderTypeDesc* const> EngineShaderTypes() noexcept;
+
+// RenderBase가 등록하는 정점 입력 타입 목록이다(정적 수명, BuiltinVertexInput).
+ROCKS_RENDERBASE_API Span<const shader::ShaderVertexInputType> EngineVertexInputTypes() noexcept;
 
 } // namespace rocks::render

@@ -13,13 +13,56 @@ constexpr shader::ShaderTypeDesc CopyTexturePixelDesc = shader::MakeShaderTypeDe
     CopyTexturePixelType, "/Engine/Private/Utility/CopyTexture.rsf", "CopyTexturePixel",
     shader::ShaderStagePixel, shader::ShaderTypeOwner::Engine);
 
+// BuiltinMeshVertex의 정점 입력 타입 거르기다(BuiltinVertexInput만).
+constexpr bool BuiltinVertexInputOnly(shader::VertexInputTypeId vertexInputType, uint32,
+                                      const shader::ShaderFormatFacts&) noexcept {
+    return vertexInputType == BuiltinVertexInputName.hash;
+}
+
+// BuiltinMeshConstants의 손으로 쓴 레이아웃 표다(ShaderSystem 7.2절 5항 — C++ 구조체는
+// RenderBase/BuiltinResources.h BuiltinMeshConstants).
+constexpr shader::ShaderParameterMember BuiltinMeshMembers[] = {
+    {"localToClip", shader::ShaderParameterType::Float4x4, 0, 0},
+    {"color", shader::ShaderParameterType::Float4, 64, 0}};
+constexpr shader::ShaderParameterLayout BuiltinMeshLayouts[] = {
+    {"BuiltinMeshConstants", true, 80, BuiltinMeshMembers}};
+
+constexpr shader::ShaderTypeDesc MakeBuiltinMeshVertex() noexcept {
+    shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
+        BuiltinMeshVertexType, "/Engine/Private/Utility/BuiltinMesh.rsf", "BuiltinMeshVertex",
+        shader::ShaderStageVertex, shader::ShaderTypeOwner::Engine);
+    desc.flags = shader::ShaderTypeVertexInputAxis;
+    desc.shouldCompile = &BuiltinVertexInputOnly;
+    desc.parameterLayouts = BuiltinMeshLayouts;
+    return desc;
+}
+
+constexpr shader::ShaderTypeDesc MakeBuiltinMeshPixel() noexcept {
+    shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
+        BuiltinMeshPixelType, "/Engine/Private/Utility/BuiltinMesh.rsf", "BuiltinMeshPixel",
+        shader::ShaderStagePixel, shader::ShaderTypeOwner::Engine);
+    return desc;
+}
+
+constexpr shader::ShaderTypeDesc BuiltinMeshVertexDesc = MakeBuiltinMeshVertex();
+constexpr shader::ShaderTypeDesc BuiltinMeshPixelDesc = MakeBuiltinMeshPixel();
+
 constexpr const shader::ShaderTypeDesc* Types[] = {&FullscreenTriangleVertexDesc,
-                                                   &CopyTexturePixelDesc};
+                                                   &CopyTexturePixelDesc, &BuiltinMeshVertexDesc,
+                                                   &BuiltinMeshPixelDesc};
+
+constexpr shader::ShaderVertexInputType VertexInputs[] = {shader::MakeShaderVertexInputType(
+    BuiltinVertexInputName, "/Engine/Private/VertexInput/BuiltinVertexInput.rsh",
+    shader::ShaderTypeOwner::Engine)};
 
 } // namespace
 
 Span<const shader::ShaderTypeDesc* const> EngineShaderTypes() noexcept {
     return Span<const shader::ShaderTypeDesc* const>(Types);
+}
+
+Span<const shader::ShaderVertexInputType> EngineVertexInputTypes() noexcept {
+    return Span<const shader::ShaderVertexInputType>(VertexInputs);
 }
 
 } // namespace rocks::render

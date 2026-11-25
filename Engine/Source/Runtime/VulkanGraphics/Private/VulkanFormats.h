@@ -3,13 +3,13 @@
 #include <Graphics/DeviceTypes.h>
 #include <vulkan/vulkan_core.h>
 
-// Rocks 형식 → Vulkan 형식 대응이다(Docs/Design/VulkanGraphics.ko.md 6·7절, PixelFormat.ko.md).
-// 형식마다 한 곳(switch 한 행)에서 정하므로 대응 형식을 늘릴 때 행만 더한다. 대응이 없는 형식은
-// VK_FORMAT_UNDEFINED이고 호출자가 Unsupported·InvalidArgument로 공개한다(다른 형식으로 대체하지
-// 않는다).
+// Rocks 형식 → Vulkan 형식 대응이다(Docs/Design/VulkanGraphics.ko.md 6·7절,
+// Docs/Design/PixelFormat). 형식마다 한 곳(switch 한 행)에서 정하므로 대응 형식을 늘릴 때 행만
+// 더한다. 대응이 없는 형식은 VK_FORMAT_UNDEFINED이고 호출자가 Unsupported·InvalidArgument로
+// 공개한다(다른 형식으로 대체하지 않는다).
 namespace rocks::graphics::vulkan {
 
-// 텍스처 형식 대응이다(PixelFormat.ko.md 8.5절). 형식 기능 bit는 장치가
+// 텍스처 형식 대응이다(Docs/Design/PixelFormat 8.5절). 형식 기능 bit는 장치가
 // vkGetPhysicalDeviceFormatProperties로 확인한다(VulkanDevice::QueryFormatCaps).
 struct TextureFormatInfo {
     // 이미지 형식이다.
@@ -38,7 +38,7 @@ struct ViewFormatInfo {
 };
 
 // texture 형식의 plane을 viewFormat으로 읽는 view다(viewFormat은 ResolveTextureViewFormat이 확인한
-// 값). 스텐실 plane은 값을 G 채널에서 읽도록 (R, R, 0, 1)로 대응한다(PixelFormat.ko.md 10절).
+// 값). 스텐실 plane은 값을 G 채널에서 읽도록 (R, R, 0, 1)로 대응한다(Docs/Design/PixelFormat 10절).
 // 만들 수 없으면 format이 UNDEFINED다.
 ViewFormatInfo ViewFormat(PixelFormat texture, uint32 plane, PixelFormat viewFormat) noexcept;
 

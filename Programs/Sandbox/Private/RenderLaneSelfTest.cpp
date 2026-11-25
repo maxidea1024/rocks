@@ -3,8 +3,10 @@
 #include <Core/Containers/Array.h>
 #include <Engine/Engine.h>
 #include <PlatformWindow/Window.h>
+#include <RenderBase/EngineShaderHost.h>
 #include <RenderBase/RenderLane.h>
 #include "SampleRenderer.h"
+#include "SandboxShaders.h"
 #include "SelfTestEnvironment.h"
 #include <stdio.h>
 
@@ -74,7 +76,8 @@ Mat4 FillClip() noexcept {
 // 렌더 lane 쪽 처리기다. Renderer·offscreen 대상·스왑체인을 lane에서 만들고 lane에서 정리한다.
 class SandboxProcessor final : public render::RenderLaneProcessor {
 public:
-    explicit SandboxProcessor(Allocator& allocator) noexcept : pixels(allocator) {
+    explicit SandboxProcessor(Allocator& allocator) noexcept
+        : resources(allocator), pixels(allocator) {
     }
 
     Result<void> OnLaneStart(render::RenderLaneContext& context) noexcept override {
@@ -90,6 +93,13 @@ public:
         }
 
         swapChain = createdSwapChain.Value();
+        // 엔진 셰이더 집합과 내장 자원 팩(Docs/Design/RenderBase 9.12절 2항, 5.5절 시작 순서 —
+        // 스왑체인 뒤). 반환 뒤 lane이 fence를 기다려 준비 완료를 게시한다.
+        if (auto opened = resources.Open(device, shaders::Host()); !opened) {
+            return opened;
+        }
+
+        resourcesOpened = resources.IsReady() && resources.Builtins().IsReady();
         auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
         if (!initialized) {
             return initialized;
@@ -110,11 +120,14 @@ public:
 
     void OnLaneStop(render::RenderLaneContext& context) noexcept override {
         renderer.Shutdown();
+        resources.Retire(context.Device());
         context.Device().Retire(target);
         context.Device().Retire(swapChain);
     }
 
     graphics::NativeSurface surface;
+    render::EngineRenderResources resources;
+    bool resourcesOpened = false;
     sample::Renderer renderer;
     graphics::TextureHandle target;
     graphics::SwapChainHandle swapChain;
@@ -410,6 +423,11 @@ void RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
         LaneCheck(stats.ownershipReturned, name, modeName, "ownership came back from the lane");
     }
 
+    // lane이 끝났으므로(Join) lane 쪽 처리기 칸을 읽어도 된다.
+    LaneCheck(processor.resourcesOpened, name, modeName,
+              "lane start opens the engine shader set and the builtin resource pack");
+    LaneCheck(!processor.resources.IsReady() && !processor.resources.Builtins().IsReady(), name,
+              modeName, "lane stop retires the engine render resources");
     LaneCheck(processor.captured, name, modeName, "last frame captured on the lane");
     if (processor.captured) {
         // 텍스처 사각형의 네 귀퉁이(텍스처가 Ready였다)와 가운데 삼각형(빨강 꼭짓점 쪽)이다.

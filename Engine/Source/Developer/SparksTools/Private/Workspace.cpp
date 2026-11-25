@@ -71,12 +71,25 @@ Result<void> Display(StringView path, String& out) noexcept {
         --count;
     }
 
+    // `\` 사이 구간을 통째로 붙인다(String은 UTF-8 sequence를 쪼개 붙일 수 없다 — 한글 경로).
     out.Clear();
-    for (usize at = 0; at < count; ++at) {
-        const char c = path.Data()[at] == '\\' ? '/' : path.Data()[at];
-        if (auto appended = out.TryAppend(StringView(&c, 1)); !appended) {
+    usize run = 0;
+    for (usize at = 0; at <= count; ++at) {
+        if (at < count && path.Data()[at] != '\\') {
+            continue;
+        }
+
+        if (auto appended = out.TryAppend(StringView(path.Data() + run, at - run)); !appended) {
             return appended;
         }
+
+        if (at < count) {
+            if (auto appended = out.TryAppend("/"); !appended) {
+                return appended;
+            }
+        }
+
+        run = at + 1;
     }
 
     return Result<void>::Success();
@@ -375,9 +388,9 @@ Result<bool> Workspace::LoadPath(platform::FileSystem& files, StringView path,
         for (WorkspaceFile& entry : files_) {
             const StringView path = entry.path.View();
             if (entry.kind == WorkspaceFileKind::Module &&
-                (prefix.IsEmpty() ||
-                 (path.StartsWith(prefix) && path.ByteCount() > prefix.ByteCount() &&
-                  path.Data()[prefix.ByteCount()] == '/'))) {
+                (prefix.IsEmpty() || (path.StartsWith(prefix, StringComparison::CaseSensitive) &&
+                                      path.ByteCount() > prefix.ByteCount() &&
+                                      path.Data()[prefix.ByteCount()] == '/'))) {
                 entry.selected = true;
             }
         }
@@ -473,6 +486,25 @@ Result<bool> Workspace::Load(platform::FileSystem& files, Span<const StringView>
                 return Result<bool>::Failure(pushed.Error());
             }
         }
+    }
+
+    return Result<bool>::Success(true);
+}
+
+Result<bool> Workspace::AddOverlayModule(uint32 package, StringView relative, StringView full,
+                                         StringView text) noexcept {
+    WorkspaceFile file(*allocator_);
+    file.kind = WorkspaceFileKind::Module;
+    file.package = package;
+    const StringView display = rootDisplays_[package].View();
+    if (!file.full.TryAssign(full) || !file.modulePath.TryAssign(relative) ||
+        !Join(display, relative, file.path) ||
+        !file.text.TryAppend(Span<const char>(text.Data(), text.ByteCount()))) {
+        return Result<bool>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    if (auto pushed = files_.TryPushBack(Move(file)); !pushed) {
+        return Result<bool>::Failure(pushed.Error());
     }
 
     return Result<bool>::Success(true);

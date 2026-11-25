@@ -30,6 +30,13 @@
 // - 파라미터 레이아웃 표 목록이 ValidateShaderParameterLayouts를 통과한다(7.2절 5항, SSD27).
 // Freeze 뒤 등록은 ScopeClosed다(등록 창이 닫혔다).
 //
+// 정점 입력 타입(ShaderVertexInputType — RenderBase 10.6절 1항)도 이 등록부가 받고 같은 Freeze로
+// 닫는다(UE도 vertex factory 타입과 셰이더 타입을 같은 초기화 단계에서 다룬다). 검사(실패하면 목록
+// 전체 거부, InvalidArgument): 이름이 셰이더 타입 이름과 같은 문법, id = ShaderTypeNameHash(name),
+// 정점 입력 타입끼리 이름·해시 중복 없음, 원문이 가상 경로 규칙을 지키는 .rsh이고 <루트>/Generated
+// 아래가 아니며 루트가 소속과 맞음. Freeze 뒤에는 id 순이다. 쿠커·공급자·셰이더 집합은
+// VertexInputTypes()를 쓴다.
+//
 // 사용 예(호스트):
 //   ShaderTypeRegistry registry(allocator);
 //   (void)loader.Services().Register(registry);
@@ -90,8 +97,24 @@ public:
     }
 
     // 등록된 타입 해시 목록(정렬)의 SHA-256이다(SSD3 — 쿠킹한 모듈 집합과 런타임 모듈 집합의 대조).
-    // Freeze 뒤에만 의미가 있다.
+    // Freeze 뒤에만 의미가 있다. 정점 입력 타입은 넣지 않는다(완결성 검사가 잡는다 — RenderBase
+    // 10.6절 1항).
     Sha256Digest TypeSetDigest() const noexcept;
+
+    // 정점 입력 타입을 등록한다(위 검사). 문자열은 등록한 동안 살아 있어야 한다(보통 정적 수명).
+    // 오류: 검사 위반 InvalidArgument, Freeze 뒤 ScopeClosed, 표 할당 실패.
+    Result<void> RegisterVertexInputTypes(Span<const ShaderVertexInputType> inputs) noexcept;
+
+    // 정점 입력 타입을 거둔다(id와 이름이 같은 항목). 없는 항목은 건너뛴다.
+    void UnregisterVertexInputTypes(Span<const ShaderVertexInputType> inputs) noexcept;
+
+    // 등록된 정점 입력 타입이다(Freeze 뒤에는 id 순 — EnumerateShaderLibraryCombinations의 입력).
+    Span<const ShaderVertexInputType> VertexInputTypes() const noexcept {
+        return vertexInputs_.View();
+    }
+
+    // id의 정점 입력 타입이다. 없으면 null이다.
+    const ShaderVertexInputType* FindVertexInputType(VertexInputTypeId id) const noexcept;
 
     const ShaderTypeRegistrationFailure& LastFailure() const noexcept {
         return failure_;
@@ -100,9 +123,12 @@ public:
 private:
     bool Check(const ShaderTypeDesc* desc, Span<const ShaderTypeDesc* const> batch,
                usize index) noexcept;
+    bool CheckVertexInput(const ShaderVertexInputType& input,
+                          Span<const ShaderVertexInputType> batch, usize index) noexcept;
     void Fail(ErrorCode code, StringView typeName, const char* reason) noexcept;
 
     Array<const ShaderTypeDesc*> types_;
+    Array<ShaderVertexInputType> vertexInputs_;
     ShaderTypeRegistrationFailure failure_;
     bool frozen_ = false;
 };
@@ -113,6 +139,7 @@ private:
 // 등록부를 올리지 않았으면(셰이더를 쓰지 않는 도구) 아무 일도 하지 않는다.
 //
 // 사용 예(모듈 cpp):
+//   (정점 입력 타입도 등록하면 ShaderTypeModuleRegistration shaders_{Types, VertexInputs})
 //   class RendererModule final : public ModuleImplementation {
 //   public:
 //       Result<void> Startup(ModuleStartContext& context) noexcept override {
@@ -124,8 +151,10 @@ private:
 //   };
 class ROCKS_SHADERCORE_API ShaderTypeModuleRegistration final {
 public:
-    explicit ShaderTypeModuleRegistration(Span<const ShaderTypeDesc* const> types) noexcept
-        : types_(types) {
+    explicit ShaderTypeModuleRegistration(
+        Span<const ShaderTypeDesc* const> types,
+        Span<const ShaderVertexInputType> vertexInputs = {}) noexcept
+        : types_(types), vertexInputs_(vertexInputs) {
     }
 
     ~ShaderTypeModuleRegistration() noexcept {
@@ -138,8 +167,9 @@ public:
     // context의 호스트 서비스로 Attach한다.
     Result<void> Startup(ModuleStartContext& context) noexcept;
 
-    // services에 등록부가 있으면 types를 등록하고 lease를 잡는다. 등록 실패(등록부의 오류)는 그대로
-    // 돌려준다(모듈 시작 실패). 이미 붙어 있으면 InvalidArgument다.
+    // services에 등록부가 있으면 types와 정점 입력 타입을 등록하고 lease를 잡는다. 등록
+    // 실패(등록부의 오류)는 그대로 돌려준다(모듈 시작 실패 — 앞서 등록한 셰이더 타입은 거둔다).
+    // 이미 붙어 있으면 InvalidArgument다.
     Result<void> Attach(HostServices& services, ModuleLease lease) noexcept;
 
     // 등록을 거두고 lease를 놓는다. 붙어 있지 않으면 아무 일도 하지 않는다.
@@ -152,6 +182,7 @@ public:
 
 private:
     Span<const ShaderTypeDesc* const> types_;
+    Span<const ShaderVertexInputType> vertexInputs_;
     ShaderTypeRegistry* registry_ = nullptr;
     ModuleLease lease_;
 };

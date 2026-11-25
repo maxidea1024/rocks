@@ -13,6 +13,7 @@ namespace rocks::shader {
 namespace type_registry_detail {
 
 constexpr StringView EntryExtension("rsf");
+constexpr StringView IncludeExtension("rsh");
 // 엔트리 함수 이름의 최대 byte 수(NUL 제외)다.
 constexpr usize MaxShaderEntryPointBytes = 64;
 // 단계 비트 전체다.
@@ -43,6 +44,28 @@ bool OwnerMatchesRoot(ShaderTypeOwner owner, ShaderVirtualRoot root) noexcept {
     return false;
 }
 
+// 경로가 <루트>/Generated/ 아래인가(생성 원문 자리 — 실제 파일이 아니다).
+bool IsGeneratedPath(StringView path, const ShaderVirtualPathInfo& info) noexcept {
+    usize rootBytes = 0;
+    switch (info.root) {
+    case ShaderVirtualRoot::Engine:
+        rootBytes = sizeof(EngineShaderVirtualRoot) - 1;
+        break;
+    case ShaderVirtualRoot::Project:
+        rootBytes = sizeof(ProjectShaderVirtualRoot) - 1;
+        break;
+    case ShaderVirtualRoot::Plugin:
+        rootBytes = sizeof(PluginShaderVirtualPrefix) - 1 + info.pluginName.ByteCount();
+        break;
+    }
+
+    const StringView generated(GeneratedShaderDirectoryName);
+    const usize start = rootBytes + 1;
+    return path.ByteCount() > start + generated.ByteCount() &&
+           StringView(path.Data() + start, generated.ByteCount()) == generated &&
+           path.Data()[start + generated.ByteCount()] == '/';
+}
+
 bool IsKnownOwner(ShaderTypeOwner owner) noexcept {
     return static_cast<usize>(owner) < ShaderTypeOwnerCount;
 }
@@ -59,7 +82,8 @@ const char* ShaderTypeOwnerName(ShaderTypeOwner owner) noexcept {
     return IsKnownOwner(owner) ? OwnerNames[static_cast<usize>(owner)] : "unknown";
 }
 
-ShaderTypeRegistry::ShaderTypeRegistry(Allocator& allocator) noexcept : types_(allocator) {
+ShaderTypeRegistry::ShaderTypeRegistry(Allocator& allocator) noexcept
+    : types_(allocator), vertexInputs_(allocator) {
 }
 
 void ShaderTypeRegistry::Fail(ErrorCode code, StringView typeName, const char* reason) noexcept {
@@ -172,6 +196,125 @@ bool ShaderTypeRegistry::Check(const ShaderTypeDesc* desc, Span<const ShaderType
     return true;
 }
 
+bool ShaderTypeRegistry::CheckVertexInput(const ShaderVertexInputType& input,
+                                          Span<const ShaderVertexInputType> batch,
+                                          usize index) noexcept {
+    using namespace type_registry_detail;
+    const StringView name = input.name;
+    if (!core_detail::IsShaderIdentifier(name, MaxShaderTypeNameBytes)) {
+        Fail(ErrorCode::InvalidArgument, name,
+             "vertex input type name must be an ASCII identifier of at most 64 bytes");
+        return false;
+    }
+
+    if (input.id == NoVertexInputType || input.id != ShaderTypeNameHash(name)) {
+        Fail(ErrorCode::InvalidArgument, name,
+             "vertex input type id does not match ShaderTypeNameHash(name)");
+        return false;
+    }
+
+    const auto collides = [&](const ShaderVertexInputType& other) noexcept {
+        if (other.id != input.id) {
+            return false;
+        }
+
+        Fail(ErrorCode::InvalidArgument, name,
+             other.name == name ? "vertex input type name is already registered"
+                                : "vertex input type name hash collides with another vertex "
+                                  "input type (names that differ only in letter case also "
+                                  "collide)");
+        return true;
+    };
+    for (const ShaderVertexInputType& registered : vertexInputs_) {
+        if (collides(registered)) {
+            return false;
+        }
+    }
+
+    for (usize other = 0; other < index; ++other) {
+        if (collides(batch[other])) {
+            return false;
+        }
+    }
+
+    ShaderVirtualPathInfo info;
+    if (const ShaderVirtualPathCheck checked = CheckShaderVirtualPath(input.sourcePath, info);
+        !checked) {
+        Fail(ErrorCode::InvalidArgument, name, checked.reason);
+        return false;
+    }
+
+    if (info.extension != IncludeExtension || info.shared) {
+        Fail(ErrorCode::InvalidArgument, name,
+             "vertex input type source must be a .rsh include file outside Shared");
+        return false;
+    }
+
+    if (IsGeneratedPath(input.sourcePath, info)) {
+        Fail(ErrorCode::InvalidArgument, name,
+             "vertex input type source cannot be a Generated path (it is the include target)");
+        return false;
+    }
+
+    if (!IsKnownOwner(input.owner) || !OwnerMatchesRoot(input.owner, info.root)) {
+        Fail(ErrorCode::InvalidArgument, name,
+             "vertex input type owner does not match the source root (Engine: /Engine, plugins: "
+             "/Plugin/<name>, Project: /Project)");
+        return false;
+    }
+
+    return true;
+}
+
+Result<void>
+ShaderTypeRegistry::RegisterVertexInputTypes(Span<const ShaderVertexInputType> inputs) noexcept {
+    if (frozen_) {
+        Fail(ErrorCode::ScopeClosed, StringView(), "the shader type registry is frozen");
+        return Result<void>::Failure(ErrorCode::ScopeClosed);
+    }
+
+    for (usize index = 0; index < inputs.Size(); ++index) {
+        if (!CheckVertexInput(inputs[index], inputs, index)) {
+            return Result<void>::Failure(failure_.code);
+        }
+    }
+
+    if (!vertexInputs_.TryReserve(vertexInputs_.Size() + inputs.Size())) {
+        Fail(ErrorCode::OutOfMemory, StringView(), "out of memory");
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (const ShaderVertexInputType& input : inputs) {
+        (void)vertexInputs_.TryPushBack(input);
+    }
+
+    return Result<void>::Success();
+}
+
+void ShaderTypeRegistry::UnregisterVertexInputTypes(
+    Span<const ShaderVertexInputType> inputs) noexcept {
+    for (const ShaderVertexInputType& input : inputs) {
+        for (usize index = 0; index < vertexInputs_.Size(); ++index) {
+            if (vertexInputs_[index].id == input.id && vertexInputs_[index].name == input.name) {
+                // 순서를 지킨다(Freeze 뒤 정렬이 깨지지 않게).
+                (void)vertexInputs_.TryRemoveAt(index);
+                break;
+            }
+        }
+    }
+}
+
+const ShaderVertexInputType*
+ShaderTypeRegistry::FindVertexInputType(VertexInputTypeId id) const noexcept {
+    for (const ShaderVertexInputType& input : vertexInputs_) {
+        if (input.id == id) {
+            return &input;
+        }
+    }
+
+    return nullptr;
+}
+
 Result<void> ShaderTypeRegistry::Register(Span<const ShaderTypeDesc* const> types) noexcept {
     if (frozen_) {
         Fail(ErrorCode::ScopeClosed, StringView(), "the shader type registry is frozen");
@@ -216,6 +359,10 @@ Result<void> ShaderTypeRegistry::Freeze() noexcept {
     types_.Sort([](const ShaderTypeDesc* left, const ShaderTypeDesc* right) noexcept {
         return left->nameHash < right->nameHash;
     });
+    vertexInputs_.Sort(
+        [](const ShaderVertexInputType& left, const ShaderVertexInputType& right) noexcept {
+            return left.id < right.id;
+        });
     frozen_ = true;
     return Result<void>::Success();
 }
@@ -279,6 +426,11 @@ Result<void> ShaderTypeModuleRegistration::Attach(HostServices& services,
         return registered;
     }
 
+    if (auto registered = registry->RegisterVertexInputTypes(vertexInputs_); !registered) {
+        registry->Unregister(types_);
+        return registered;
+    }
+
     registry_ = registry;
     lease_ = Move(lease);
     return Result<void>::Success();
@@ -289,6 +441,7 @@ void ShaderTypeModuleRegistration::Shutdown() noexcept {
         return;
     }
 
+    registry_->UnregisterVertexInputTypes(vertexInputs_);
     registry_->Unregister(types_);
     registry_ = nullptr;
     lease_.Reset();

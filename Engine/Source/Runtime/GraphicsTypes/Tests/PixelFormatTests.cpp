@@ -9,7 +9,7 @@ using namespace rocks::graphics;
 
 namespace {
 
-// Docs/Design/PixelFormat.ko.md 5.2절 번호표 그대로다(번호·이름·종류·블록·바이트·채널 수). 블록
+// Docs/Design/PixelFormat 5.2절 번호표 그대로다(번호·이름·종류·블록·바이트·채널 수). 블록
 // 크기·바이트는 UE 5.8 GPixelFormats(Core/Private/Misc/PixelFormat.cpp:31–150)와 같다(깊이·
 // 스텐실·비디오는 Rocks 정의).
 struct Row {

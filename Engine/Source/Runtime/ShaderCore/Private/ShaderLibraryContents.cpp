@@ -1,37 +1,10 @@
 #include <ShaderCore/ShaderLibraryContents.h>
 
-#include <Core/Algorithms.h>
 #include <ShaderCore/ShaderPermutation.h>
 
 // 라이브러리 조합 열거(Docs/Design/ShaderSystem 12.2.1절 SSD5·SSD6)다. 규칙은 공개 헤더 주석을
 // 따른다.
 namespace rocks::shader {
-
-Result<void> SortShaderVertexInputTypes(Span<const ShaderVertexInputType> inputs,
-                                        Array<ShaderVertexInputType>& out) noexcept {
-    out.Clear();
-    if (!out.TryReserve(inputs.Size())) {
-        return Result<void>::Failure(ErrorCode::OutOfMemory);
-    }
-
-    for (const ShaderVertexInputType& input : inputs) {
-        if (input.id == NoVertexInputType || input.id != ShaderTypeNameHash(input.name)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        for (const ShaderVertexInputType& other : out) {
-            if (other.id == input.id) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-        }
-
-        (void)out.TryPushBack(input);
-    }
-
-    algo::Sort(out.View(), [](const ShaderVertexInputType& a,
-                              const ShaderVertexInputType& b) noexcept { return a.id < b.id; });
-    return Result<void>::Success();
-}
 
 Result<void> EnumerateShaderLibraryCombinations(Span<const ShaderTypeDesc* const> types,
                                                 Span<const ShaderVertexInputType> inputs,

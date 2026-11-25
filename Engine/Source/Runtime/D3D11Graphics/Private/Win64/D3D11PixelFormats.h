@@ -9,7 +9,7 @@
 
 #include <Platform/Win64/WindowsHeadersEnd.h>
 
-// 픽셀 형식의 D3D11(DXGI) 대응 표와 장치 능력 질의다(Docs/Design/PixelFormat.ko.md 8.4절, PF4).
+// 픽셀 형식의 D3D11(DXGI) 대응 표와 장치 능력 질의다(Docs/Design/PixelFormat 8.4절, PF4).
 // DXGI 형식은 D3D12와 같다(D3D12Graphics/Private/Win64/D3D12PixelFormats.cpp와 같은 표, D3D 공용
 // 도우미 모듈로 합치는 것은 후속). 형식을 다른 형식으로 바꾸지 않는다.
 namespace rocks::graphics::d3d11 {
@@ -35,7 +35,7 @@ FormatMapping MappingOf(PixelFormat format) noexcept;
 DXGI_FORMAT ViewSrvFormat(PixelFormat texture, uint32 plane, PixelFormat viewFormat) noexcept;
 
 // mip 하나의 D3D11 메모리 배치다(staging 텍스처의 행 바이트·행 수). Rocks 배치(plane 순서,
-// PixelFormat.ko.md 6절)와 다른 곳:
+// Docs/Design/PixelFormat 6절)와 다른 곳:
 // - D24S8은 texel 하나에 깊이 24비트와 스텐실 8비트(상위 byte), D32FS8은 8바이트(float 깊이, 스텐실
 //   byte, 빈 3바이트)로 섞여 있다.
 // - 비디오는 plane 0 행들 뒤에 같은 행 간격의 plane 1 행들이 온다(행 수 = 높이 + 높이 / 2).
