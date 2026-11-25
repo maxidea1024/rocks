@@ -48,6 +48,7 @@ public static partial class PolicyChecks
         "Core/Source/Runtime/PlatformBase/Private/Win64/CrashHelper.h",
         "Core/Source/Runtime/ReflectionText/Private/TextAssignInternal.h",
         "Engine/Source/Runtime/AssetRuntime/Private/PackageInternal.h",
+        "Engine/Source/Runtime/AudioMiniaudio/Private/MiniaudioSupport.h",
         "Engine/Source/Runtime/EngineAssets/Private/EngineAssetsInternal.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadMotorMapping.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/PointerTouchMapping.h",

@@ -16,6 +16,8 @@ using Rocks.Build.Rules;
 // Programs/Sandbox/TestContent) into RenderBase cooked texture uploads (Docs/Design/RenderBase section 18.5 item 7 — SM7).
 // The OpenGL ES backend is the GLES31_PC preview on Windows and is kept out of Release Windows executables (ShaderSystem section 9, UE keeps the
 // ES preview out of shipping Windows builds as well); Android always links it (GLES31_ANDROID).
+// --audio-tone plays a test tone through Audio's output device; it links AudioMiniaudio, whose module lifetime object registers the
+// miniaudio backend factory in the AudioOutputBackendRegistry host service (Docs/Design/AudioSystem section 3.34.5 — the host code never calls it).
 public sealed class SandboxProgram : ModuleRules
 {
     public override NativeModuleInput Configure(BuildContext context)
@@ -40,7 +42,7 @@ public sealed class SandboxProgram : ModuleRules
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
             PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
-                "D3D11Graphics", "VulkanGraphics",
+                "D3D11Graphics", "VulkanGraphics", "Audio", "AudioMiniaudio",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>()),
                 .. (traceAnalysis ? ["TraceAnalysis"] : Array.Empty<string>())]
