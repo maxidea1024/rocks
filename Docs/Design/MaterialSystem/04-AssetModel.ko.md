@@ -63,3 +63,33 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 | cookKey | AssetSystem 10절 그대로. 처리기 build key에 번역 키와 job 키 목록이 들어가고, 유도 사용 대상(8.4절)이 지역 입력으로 들어간다 |
 
 **파라미터 기본값**(scalar·vector·텍스처·dynamic bool)은 번역 키에 넣지 않는다. 기본값은 uniform 빈도라 접히지 않으므로 원문을 바꾸지 않는다(6.5절). 텍스처는 종류(2D·Cube 등)와 샘플 종류만 원문을 바꾼다. 쿠킹 처리기는 기본값과 기본 텍스처를 그래프에서 직접 읽어 쿠킹 데이터에 넣고, 기본값 변경은 cookKey(에디터 패키지 콘텐츠 해시)로만 다시 쿠킹된다. static 파라미터 기본값은 원문을 바꾸므로 키에 들어간다. UE는 텍스처 참조 hash를 셰이더 맵 키에 넣는다(`RE/Public/MaterialShared.h:1370–1379` `TextureReferencesHash`). Rocks는 기본값 교체로 셰이더를 다시 만들지 않는다.
+
+### 4.6 클래스·타입 배치(단계 MS3b)
+
+사용자 지시(2026-11-25): "타입만 임시로 선행해서 작업해놓은건데, 이젠 제대로 해놔야함. 그리고 MaterialBase, Material(MaterialInstance)는 각각 다른 파일로". 클래스당 파일 하나 규칙에 따라 다음과 같이 둔다. MS3a 골격을 파일로 나누는 일은 동작이 같은 이동 커밋으로 먼저 한다.
+
+**모듈 `Material`(에셋, `Engine/Source/Runtime/Material/Public/Material/`)**
+
+| 파일 | 클래스 | 필드 |
+|---|---|---|
+| `MaterialBase.h` | `MaterialBase`(Abstract) | `subsurfaceProfiles`·`specularProfiles`·`toonProfiles`(TODO)·`neuralProfile`(TODO)·`lightBakeSettings`(TODO)·`textureSamplingScales`(19.11절) |
+| `Material.h` | `Material` | `graph : MaterialGraph`(EditorOnly)·`layout : GraphDocumentLayout`(EditorOnly)·`traits : MaterialTraitsDesc`·`usage : VertexInputUsage`·`physicalMaterial`·`physicalMaterialMask`·`renderTracePhysicalMaterials`(TODO)·`virtualizedGeometryOverride`(TODO)·`preview : MaterialPreviewSettings`(EditorOnly) |
+| `MaterialInstance.h` | `MaterialInstance` | `parent`·종류별 override 배열·`staticOverrides`·`traitOverrides : MaterialTraitOverrides`·`layerStackOverrides`·물리 재질·profile override(19.11절) |
+| `MaterialFunction.h` | `MaterialFunction` | `graph`·`layout`(EditorOnly)·`usage : MaterialFunctionUsage {General, Layer, LayerBlend}`·`exposeToLibrary`(EditorOnly)·`libraryCategories`(EditorOnly)·`description`(EditorOnly) |
+| `MaterialFunctionInstance.h` | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunction>`·파라미터 override 배열 |
+| `ParameterCollection.h` | `ParameterCollection` | `scalars`·`vectors : Array<CollectionParameter>` |
+
+**모듈 `MaterialSchema`(장치·객체 없는 값 타입 — 번역·쿠킹·런타임이 함께 쓴다)**
+
+| 파일 | 타입 | 내용 |
+|---|---|---|
+| `MaterialTraitsDesc.h` | `MaterialTraitsDesc` | 19.9절 "필드" 행 전부. 렌더러 묶음은 하위 struct `MaterialTranslucencyTraits`·`MaterialForwardTraits`·`MaterialPostProcessTraits`(각 파일) |
+| `MaterialTraitOverrides.h` | `MaterialTraitOverrides` | 19.11절 base property override 16개(`Optional<값>`) |
+| `MaterialTraitEnums.h` | `DecalResponse`·`TranslucencyPass`·`TranslucencyLightingMode`·`RefractionMethod`·`RefractionCoverageMode`·`PixelDepthOffsetMode`·`MaterialShadingRate`·`BlendableLocation`·`StencilCompare`·`MaterialFunctionUsage` | 값은 UE enum과 같은 순서·같은 뜻이다(UE `EMaterialDecalResponse` 등, 근거는 각 enum 주석). UE의 숨은 별칭·deprecated 값(예: `BL_BeforeTranslucency`)은 넣지 않는다 |
+| `ParameterKey.h` | `ParameterKey`·`ParameterScope` | 9.2절 |
+| `ParameterOverride*.h` | `ScalarParameterOverride`·`VectorParameterOverride`·`DoubleVectorParameterOverride`·`TextureParameterOverride`·`StaticSwitchOverride`·`StaticComponentMaskOverride` 등 | `{ key, value }`. 텍스처 값은 4.3절대로 Material 모듈 쪽 `ObjectRef<Texture>` 멤버 struct |
+| `MaterialAssetReference.h` | `MaterialAssetReference` | 19.4.3절(노드 속성 안 에셋 참조) |
+| `VertexInputUsage.h` | `VertexInputUsage` | 사용 대상 정점 입력 타입 이름 집합(8.4절, 19.10절) |
+
+- **번호표.** 영역·블렌드 모드·shading model 열거는 Renderer 스펙이 정의 권한을 가지며 C++ 정의는 `RenderData` 모듈에 둔다(Renderer 3.2·14.2절, 결정 RN5). `RenderData`가 아직 없으므로 MS3b에서 번호표 세 열거만 가진 `RenderData` 모듈을 만든다. 장면 기술 값 타입 등 나머지는 Renderer RS0이 더한다. 리플렉션 열거라 ObjectRuntime에 의존한다(16절 MRD15). `TranslucentColoredTransmittance`는 Renderer 14.2절이 넣지 않기로 했지만, 머티리얼 쪽은 UE 값 전부를 받는 사용자 지시에 따라 TODO 값으로 끝에 둔다(`MPQ-ColoredTransmittance`, 16절 MRD15).
+- **TODO 필드.** 대상 에셋 클래스가 없는 참조 필드는 `MaterialAssetReference`(19.4.3절)로 두어, 클래스가 생겨도 migration이 없다. 기본값이 아닌 값이 있으면 쿠킹 진단 `PrerequisiteMissing`이다(19.9절).

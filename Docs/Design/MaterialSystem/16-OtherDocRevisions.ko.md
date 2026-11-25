@@ -56,6 +56,7 @@
 | MRD12 | DeferredDecal이 쓰는 속성, 반투명 scene color·depth 입력, PostProcess 위치(5.6절) | 자리 반영(Renderer 14.7절): decal 속성은 RS7, 반투명 입력은 RS5, PostProcess 위치는 계획 26절 스펙 |
 | MRD13 | (개정 10) pass 셰이더 타입이 채우는 문맥 공급 기능 집합(previous 부분 포함)과 기능별 렌더러 자원 수를 선언한다. pass는 자기가 부르는 진입점의 `MATERIAL_<진입점>_USES_*` 합집합으로 `MATERIAL_CONTEXT_<기능>`을 정의하고 그 필드를 채운다. 공급하지 않는 기능은 문맥 값 표의 UE 기본값을 쓴다(19.3.1절, 결정 MD15) | 미처리(Renderer 담당) |
 | MRD14 | (개정 10) Toon shading model(UE `SubstrateToonBSDF`·`UToonProfile`)을 14.2절 목록에 둘지와 GBuffer 배치. 정해지면 `MPQ-ToonShading`을 푼다 | 미처리(Renderer 담당) |
+| MRD15 | (개정 10) MS3b가 `RenderData` 모듈을 번호표 세 열거(`MaterialDomain`·`BlendMode`·`ShadingModel`)만으로 먼저 만든다(4.6절). 리플렉션 열거라 의존이 Core·MetaSchema에 ObjectRuntime이 더해진다. `BlendMode`에 `TranslucentColoredTransmittance`를 TODO 값으로 끝에 둔다(UE 값 전부 — 사용자 지시). Renderer 3.2절 의존과 14.2절 목록을 이에 맞춰 고친다 | 미처리(Renderer 담당) |
 
 **에셋 시스템(AssetSystem)**
 
