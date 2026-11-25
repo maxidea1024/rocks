@@ -235,7 +235,8 @@ Result<usize> FindEngineDirectory(Span<char> out) noexcept {
 }
 
 HostSettings::HostSettings(Allocator& allocator) noexcept
-    : allocator_(allocator), types_(allocator), modules_(types_, allocator), names_(allocator),
+    : allocator_(allocator), types_(allocator), modules_(types_, allocator),
+      settingsModuleTypes_(types_, allocator), settingsTypeModules_(allocator), names_(allocator),
       objects_(allocator, types_, HostSettingsContext, MakeOptions(names_)), traits_(allocator),
       profile_(allocator), profileArgument_(allocator) {
 }
@@ -244,6 +245,11 @@ HostSettings::~HostSettings() noexcept {
     reloader_ = nullptr;
     context_ = nullptr;
     (void)objects_.Shutdown(objects_.OwnerAccess());
+    // 모듈별 설정 타입은 명시 등록(Config·TraceControl과 그 의존)에 기대므로 먼저, 역순으로 놓는다.
+    for (usize index = settingsTypeModules_.Size(); index > 0; --index) {
+        settingsModuleTypes_.Unregister(settingsTypeModules_[index - 1]);
+    }
+
     (void)modules_.Unregister();
     if (namesReady_) {
         (void)names_.Shutdown();
@@ -362,7 +368,72 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     return step;
 }
 
+Result<void> HostSettings::RegisterSettingsModuleTypes(ModuleLoader& modules) noexcept {
+    const ModuleTable table = modules.Table();
+    Array<bool> needed(allocator_);
+    if (auto sized = needed.TryResize(table.Size()); !sized) {
+        return sized;
+    }
+
+    for (usize index = 0; index < table.Size(); ++index) {
+        const ModuleEntry& entry = modules.EntryAt(index);
+        needed[index] = entry.registerSettings != nullptr && entry.registerTypes != nullptr;
+    }
+
+    // 표는 의존 순서다(의존 모듈이 앞 행) — 뒤에서부터 직접 의존을 표시하면 closure가 된다.
+    for (usize index = table.Size(); index > 0; --index) {
+        const ModuleTableRow& row = table[index - 1];
+        if (!needed[index - 1]) {
+            continue;
+        }
+
+        for (usize dependency = 0; dependency < row.dependencyCount; ++dependency) {
+            const StringView name(row.dependencies[dependency]);
+            for (usize other = 0; other + 1 < index; ++other) {
+                if (StringView(table[other].name) == name) {
+                    needed[other] = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    for (usize index = 0; index < table.Size(); ++index) {
+        const ModuleEntry& entry = modules.EntryAt(index);
+        if (!needed[index] || entry.registerTypes == nullptr) {
+            continue;
+        }
+
+        const StringView name(table[index].name);
+        auto lease = modules.AcquireLease(name);
+        if (!lease) {
+            return Result<void>::Failure(lease.Error());
+        }
+
+        if (auto added = settingsTypeModules_.TryReserve(settingsTypeModules_.Size() + 1); !added) {
+            return added;
+        }
+
+        if (auto registered =
+                settingsModuleTypes_.Register(name, entry.registerTypes, lease.Value());
+            !registered) {
+            Log::Error(LogHostConfig,
+                       "Types of module {Module} could not be registered for its settings: {Error}",
+                       name, ErrorCodeName(registered.Error()));
+            return registered;
+        }
+
+        (void)settingsTypeModules_.TryPushBack(name);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> HostSettings::RegisterModuleSettings(ModuleLoader& modules) noexcept {
+    if (auto registered = RegisterSettingsModuleTypes(modules); !registered) {
+        return registered;
+    }
+
     const ModuleTable table = modules.Table();
     for (usize index = 0; index < table.Size(); ++index) {
         const ModuleTableRow& row = table[index];

@@ -81,7 +81,7 @@ index c2f95c5..237de89 100644
  
  
 diff --git a/source/common/putil.cpp b/source/common/putil.cpp
-index a1fb0c9..b59904e 100644
+index a1fb0c9..a191860 100644
 --- a/source/common/putil.cpp
 +++ b/source/common/putil.cpp
 @@ -642,7 +642,14 @@ U_CAPI int32_t U_EXPORT2
@@ -99,6 +99,17 @@ index a1fb0c9..b59904e 100644
  #else
      time_t t, t1, t2;
      struct tm tmrec;
+@@ -1081,8 +1088,8 @@ typedef int(system_property_get)(const char*, char*);
+ 
+ static char gAndroidTimeZone[PROP_VALUE_MAX] = { '\0' };
+ 
+-static void u_property_read(void* cookie, const char* name, const char* value,
+-                            uint32_t serial) {
++static void u_property_read(void* cookie, const char* /*name*/, const char* value,
++                            uint32_t /*serial*/) {
+     uprv_strcpy((char* )cookie, value);
+ }
+ #endif
 @@ -1248,7 +1255,13 @@ uprv_tzname(int n)
  #if U_PLATFORM_USES_ONLY_WIN32_API
      /* The return value is free'd in timezone.cpp on Windows because

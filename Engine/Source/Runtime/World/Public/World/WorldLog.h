@@ -37,6 +37,12 @@ inline constexpr char DiagStaticComponentDataChanged[] = "StaticComponentDataCha
 // - ComponentDataLockedInGame: 게임 World에서 초기화 뒤에는 바꿀 수 없는 데이터(광원
 //   affectsWorld)를 바꾸려 해 거부했다(Warning — 24.2.3절).
 inline constexpr char DiagComponentDataLockedInGame[] = "ComponentDataLockedInGame";
+// - CollisionProfileEntryDropped: 충돌 profile 설정의 의미 오류 항목을 빼고 표를 만들었다(Warning —
+//   CollisionData 4절, UE도 로그 뒤 지운다).
+inline constexpr char DiagCollisionProfileEntryDropped[] = "CollisionProfileEntryDropped";
+// - CollisionProfileMissing: PrimitiveComponent의 충돌 profile 이름이 표에 없어 사용자 지정 값으로
+//   해석했다(Warning — 등록 때 한 번, CollisionData 5절).
+inline constexpr char DiagCollisionProfileMissing[] = "CollisionProfileMissing";
 inline constexpr char DiagAutoTickPrerequisiteCycleSkipped[] = "AutoTickPrerequisiteCycleSkipped";
 inline constexpr char DiagBeginPlayDispatchContractViolated[] = "BeginPlayDispatchContractViolated";
 

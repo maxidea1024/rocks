@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
+#include <Collision/CollisionProfileTable.h>
 #include <Config/CVarDefinition.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Math/Transform.h>
@@ -361,6 +362,14 @@ public:
 
     WorldState State() const noexcept {
         return state_;
+    }
+
+    // 충돌 profile 표다(Docs/Design/CollisionData.ko.md 9절 CD2): Initialize가 설정 문맥의
+    // CollisionSettings로 만든다. 문맥이 없거나 CollisionSettings가 등록되지 않았으면 빈 표다(모든
+    // 이름이 profileMissing — PrimitiveComponent가 사용자 지정 값으로 해석한다). 참조는 World 수명
+    // 동안 유효하고, Initialize가 표를 바꾸므로 그 전에 얻은 profile 포인터는 쓰지 않는다.
+    const CollisionProfileTable& CollisionProfiles() const noexcept {
+        return collisionProfiles_;
     }
 
     StringView Name() const noexcept {
@@ -818,6 +827,8 @@ private:
     Result<void> SetComponentEnabled(ObjectHandle component, bool enabled) noexcept;
     Result<void> SetActorTickEnabled(ObjectHandle actor, bool enabled) noexcept;
     Result<void> SetComponentTickEnabled(ObjectHandle component, bool enabled) noexcept;
+    // Initialize: 설정 문맥에서 충돌 profile 표를 만든다(없으면 빈 표). 오류: 할당 실패.
+    Result<void> BuildWorldCollisionProfiles() noexcept;
     void RegisterTicks(ObjectHandle object, uint8 kind, const TickSettings& settings, bool enabled,
                        TickHandle (&handles)[detail::TickHookCount]) noexcept;
     void UnregisterTicks(TickHandle (&handles)[detail::TickHookCount]) noexcept;
@@ -988,6 +999,7 @@ private:
     // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
     config::ConfigContext* settings_ = nullptr;
     cvar::CVarScopeId cvarScope_{};
+    CollisionProfileTable collisionProfiles_;
     StepPlan lastStep_;
     WorldState state_ = WorldState::Created;
     uint32 hookDepth_ = 0;
