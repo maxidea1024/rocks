@@ -1,5 +1,7 @@
 #include "LanguageNames.h"
+#include "PreludeMembers.h"
 #include "TypeChecker.h"
+#include "TypeFacts.h"
 
 // 타입 관계다: 숫자 분류, 대입 가능(3.10절 "대입 가능"), 파생, `==`·`<`를 쓸 수 있는 타입(3.3절
 // "비교"), 기본값이 있는 타입(3.2절), 보간할 수 있는 타입, 제네릭 치환.
@@ -38,6 +40,238 @@ TypeChecker::TypeChecker(NameBinder& binder) noexcept
       dispatchFirst_(binder.allocator_), dispatchBodies_(binder.allocator_) {
 }
 
+uint32 TypeFacts::SymbolOf(uint32 type) const noexcept {
+    return type == NoType || type >= compilation_.Types().Size()
+               ? NoSymbol
+               : compilation_.Types()[type].symbol;
+}
+
+uint32 TypeFacts::Argument(uint32 type, uint32 index) const noexcept {
+    const TypeEntry& entry = compilation_.Types()[type];
+    return index < entry.argumentCount ? compilation_.TypeArguments()[entry.firstArgument + index]
+                                       : NoType;
+}
+
+bool TypeFacts::IsOptional(uint32 type) const noexcept {
+    return type != NoType && compilation_.Types()[type].optional;
+}
+
+NumericInfo TypeFacts::Numeric(uint32 type) const noexcept {
+    const uint32 symbol = SymbolOf(type);
+    if (symbol == NoSymbol || IsOptional(type)) {
+        return NumericInfo{};
+    }
+
+    const Symbol& entry = compilation_.Symbols()[symbol];
+    if (entry.kind != SymbolKind::BuiltinType) {
+        return NumericInfo{};
+    }
+
+    for (const NumericName& name : NumericNames) {
+        if (name.name == entry.name) {
+            return NumericInfo{name.kind, name.bits};
+        }
+    }
+
+    return NumericInfo{};
+}
+
+bool TypeFacts::IsLanguage(uint32 type, StringView name) const noexcept {
+    const uint32 symbol = SymbolOf(type);
+    if (symbol == NoSymbol) {
+        return false;
+    }
+
+    const Symbol& entry = compilation_.Symbols()[symbol];
+    return (entry.kind == SymbolKind::BuiltinType || entry.kind == SymbolKind::PreludeType) &&
+           entry.name == name;
+}
+
+bool TypeFacts::IsReference(uint32 type) const noexcept {
+    const uint32 symbol = SymbolOf(type);
+    if (symbol == NoSymbol) {
+        return false;
+    }
+
+    const Symbol& entry = compilation_.Symbols()[symbol];
+    if (entry.kind == SymbolKind::Class || entry.kind == SymbolKind::Interface) {
+        return true;
+    }
+
+    if (entry.kind != SymbolKind::EngineType) {
+        return false;
+    }
+
+    const SchemaTypeKind kind = compilation_.Schema(entry.index).Types()[entry.item].kind;
+    return kind == SchemaTypeKind::Object || kind == SchemaTypeKind::Asset ||
+           kind == SchemaTypeKind::Interface;
+}
+
+bool TypeFacts::IsAssetType(uint32 type) const noexcept {
+    uint32 at = SymbolOf(type);
+    for (uint32 step = 0; at != NoSymbol && step < compilation_.Symbols().Size(); ++step) {
+        const Symbol& entry = compilation_.Symbols()[at];
+        if (entry.kind == SymbolKind::EngineType) {
+            return compilation_.Schema(entry.index).Types()[entry.item].kind ==
+                   SchemaTypeKind::Asset;
+        }
+
+        if (entry.kind != SymbolKind::Class) {
+            return false;
+        }
+
+        at = entry.base;
+    }
+
+    return false;
+}
+
+bool TypeFacts::IsEnumType(uint32 type) const noexcept {
+    const uint32 symbol = SymbolOf(type);
+    if (symbol == NoSymbol || IsOptional(type)) {
+        return false;
+    }
+
+    const Symbol& entry = compilation_.Symbols()[symbol];
+    if (entry.kind == SymbolKind::Enum) {
+        return true;
+    }
+
+    if (entry.kind == SymbolKind::EngineType) {
+        return compilation_.Schema(entry.index).Types()[entry.item].kind == SchemaTypeKind::Enum;
+    }
+
+    return entry.kind == SymbolKind::PreludeType && entry.name == "Clock";
+}
+
+bool TypeFacts::IsEquatable(uint32 type) const noexcept {
+    const uint32 symbol = SymbolOf(type);
+    if (symbol == NoSymbol) {
+        return false;
+    }
+
+    const TypeEntry& entry = compilation_.Types()[type];
+    const Symbol& target = compilation_.Symbols()[symbol];
+    const NumericInfo numeric = [&]() noexcept {
+        for (const NumericName& name : NumericNames) {
+            if (target.kind == SymbolKind::BuiltinType && name.name == target.name) {
+                return NumericInfo{name.kind, name.bits};
+            }
+        }
+
+        return NumericInfo{};
+    }();
+    if (numeric.kind == NumericKind::Signed || numeric.kind == NumericKind::Unsigned) {
+        return true;
+    }
+
+    if (target.kind == SymbolKind::BuiltinType) {
+        return target.name == "bool" || target.name == "string";
+    }
+
+    if (target.kind == SymbolKind::PreludeType) {
+        return target.name == "Tag" || target.name == "InputAction" || target.name == "Soft" ||
+               target.name == "Row" || target.name == "Clock";
+    }
+
+    if (target.kind == SymbolKind::Enum) {
+        return true;
+    }
+
+    if (target.kind == SymbolKind::EngineType) {
+        const SchemaTypeKind kind = compilation_.Schema(target.index).Types()[target.item].kind;
+        return kind == SchemaTypeKind::Enum || kind == SchemaTypeKind::Object ||
+               kind == SchemaTypeKind::Interface;
+    }
+
+    static_cast<void>(entry);
+    return target.kind == SymbolKind::Class || target.kind == SymbolKind::Interface;
+}
+
+bool TypeFacts::IsOrdered(uint32 type) const noexcept {
+    if (IsOptional(type)) {
+        return false;
+    }
+
+    return Numeric(type).kind != NumericKind::None || IsLanguage(type, "string") ||
+           IsEnumType(type);
+}
+
+bool TypeFacts::MemberAvailable(uint32 member, uint32 receiver) const noexcept {
+    const Symbol& entry = compilation_.Symbols()[member];
+    if (entry.kind != SymbolKind::LanguageField && entry.kind != SymbolKind::LanguageFunction) {
+        return true;
+    }
+
+    const uint32 element = receiver == NoType ? NoType : Argument(receiver, 0);
+    switch (static_cast<PreludeCondition>(entry.index)) {
+    case PreludeCondition::Equatable:
+        return IsEquatable(element);
+    case PreludeCondition::Ordered:
+        return IsOrdered(element);
+    case PreludeCondition::ValueElement:
+        return !IsObjectType(element);
+    case PreludeCondition::ObjectElement:
+        return IsObjectType(element);
+    case PreludeCondition::NotVoid:
+        return !IsLanguage(element, "void") || IsOptional(element);
+    default:
+        return true;
+    }
+}
+
+bool TypeFacts::IsObjectType(uint32 type) const noexcept {
+    return type != NoType && IsReference(type) && !IsAssetType(type);
+}
+
+uint32 TypeChecker::SymbolOf(uint32 type) const noexcept {
+    return TypeFacts(compilation_).SymbolOf(type);
+}
+
+uint32 TypeChecker::Argument(uint32 type, uint32 index) const noexcept {
+    return TypeFacts(compilation_).Argument(type, index);
+}
+
+bool TypeChecker::IsOptional(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsOptional(type);
+}
+
+NumericInfo TypeChecker::Numeric(uint32 type) const noexcept {
+    return TypeFacts(compilation_).Numeric(type);
+}
+
+bool TypeChecker::IsLanguage(uint32 type, StringView name) const noexcept {
+    return TypeFacts(compilation_).IsLanguage(type, name);
+}
+
+bool TypeChecker::IsReference(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsReference(type);
+}
+
+bool TypeChecker::IsAssetType(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsAssetType(type);
+}
+
+bool TypeChecker::IsEnumType(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsEnumType(type);
+}
+
+bool TypeChecker::IsEquatable(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsEquatable(type);
+}
+
+bool TypeChecker::IsOrdered(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsOrdered(type);
+}
+
+bool TypeChecker::MemberAvailable(uint32 member, uint32 receiver) const noexcept {
+    return TypeFacts(compilation_).MemberAvailable(member, receiver);
+}
+
+bool TypeChecker::IsObjectType(uint32 type) const noexcept {
+    return TypeFacts(compilation_).IsObjectType(type);
+}
+
 void TypeChecker::AppendDisplayType(StringBuilderBase& out, uint32 type) const noexcept {
     if (type == NoType || type >= compilation_.types_.Size()) {
         out.Append("?");
@@ -71,21 +305,6 @@ void TypeChecker::AppendDisplayType(StringBuilderBase& out, uint32 type) const n
     }
 }
 
-uint32 TypeChecker::SymbolOf(uint32 type) const noexcept {
-    return type == NoType || type >= compilation_.types_.Size() ? NoSymbol
-                                                                : compilation_.types_[type].symbol;
-}
-
-uint32 TypeChecker::Argument(uint32 type, uint32 index) const noexcept {
-    const TypeEntry& entry = compilation_.types_[type];
-    return index < entry.argumentCount ? compilation_.typeArguments_[entry.firstArgument + index]
-                                       : NoType;
-}
-
-bool TypeChecker::IsOptional(uint32 type) const noexcept {
-    return type != NoType && compilation_.types_[type].optional;
-}
-
 uint32 TypeChecker::NonOptional(uint32 type) noexcept {
     if (!IsOptional(type)) {
         return type;
@@ -116,37 +335,6 @@ uint32 TypeChecker::TypeOfSymbol(uint32 symbol) noexcept {
     return binder_.InternType(symbol, Span<const uint32>(), false);
 }
 
-NumericInfo TypeChecker::Numeric(uint32 type) const noexcept {
-    const uint32 symbol = SymbolOf(type);
-    if (symbol == NoSymbol || IsOptional(type)) {
-        return NumericInfo{};
-    }
-
-    const Symbol& entry = compilation_.symbols_[symbol];
-    if (entry.kind != SymbolKind::BuiltinType) {
-        return NumericInfo{};
-    }
-
-    for (const NumericName& name : NumericNames) {
-        if (name.name == entry.name) {
-            return NumericInfo{name.kind, name.bits};
-        }
-    }
-
-    return NumericInfo{};
-}
-
-bool TypeChecker::IsLanguage(uint32 type, StringView name) const noexcept {
-    const uint32 symbol = SymbolOf(type);
-    if (symbol == NoSymbol) {
-        return false;
-    }
-
-    const Symbol& entry = compilation_.symbols_[symbol];
-    return (entry.kind == SymbolKind::BuiltinType || entry.kind == SymbolKind::PreludeType) &&
-           entry.name == name;
-}
-
 bool TypeChecker::IsVector(uint32 type) const noexcept {
     for (const StringView name : VectorNames) {
         if (IsLanguage(type, name) && !IsOptional(type)) {
@@ -155,64 +343,6 @@ bool TypeChecker::IsVector(uint32 type) const noexcept {
     }
 
     return false;
-}
-
-bool TypeChecker::IsReference(uint32 type) const noexcept {
-    const uint32 symbol = SymbolOf(type);
-    if (symbol == NoSymbol) {
-        return false;
-    }
-
-    const Symbol& entry = compilation_.symbols_[symbol];
-    if (entry.kind == SymbolKind::Class || entry.kind == SymbolKind::Interface) {
-        return true;
-    }
-
-    if (entry.kind != SymbolKind::EngineType) {
-        return false;
-    }
-
-    const SchemaTypeKind kind = compilation_.schemas_[entry.index].schema.Types()[entry.item].kind;
-    return kind == SchemaTypeKind::Object || kind == SchemaTypeKind::Asset ||
-           kind == SchemaTypeKind::Interface;
-}
-
-bool TypeChecker::IsAssetType(uint32 type) const noexcept {
-    uint32 at = SymbolOf(type);
-    for (uint32 step = 0; at != NoSymbol && step < compilation_.symbols_.Size(); ++step) {
-        const Symbol& entry = compilation_.symbols_[at];
-        if (entry.kind == SymbolKind::EngineType) {
-            return compilation_.schemas_[entry.index].schema.Types()[entry.item].kind ==
-                   SchemaTypeKind::Asset;
-        }
-
-        if (entry.kind != SymbolKind::Class) {
-            return false;
-        }
-
-        at = entry.base;
-    }
-
-    return false;
-}
-
-bool TypeChecker::IsEnumType(uint32 type) const noexcept {
-    const uint32 symbol = SymbolOf(type);
-    if (symbol == NoSymbol || IsOptional(type)) {
-        return false;
-    }
-
-    const Symbol& entry = compilation_.symbols_[symbol];
-    if (entry.kind == SymbolKind::Enum) {
-        return true;
-    }
-
-    if (entry.kind == SymbolKind::EngineType) {
-        return compilation_.schemas_[entry.index].schema.Types()[entry.item].kind ==
-               SchemaTypeKind::Enum;
-    }
-
-    return entry.kind == SymbolKind::PreludeType && entry.name == "Clock";
 }
 
 // type이 base의 파생(자기 포함 — class 기반 체인·Sparks interface·schema `base`)인지다.
@@ -265,60 +395,6 @@ bool TypeChecker::IsAssignable(uint32 from, uint32 to) noexcept {
     return IsReference(source) && IsReference(target) &&
            compilation_.types_[source].argumentCount == 0 &&
            compilation_.types_[target].argumentCount == 0 && IsDerived(source, target);
-}
-
-bool TypeChecker::IsEquatable(uint32 type) const noexcept {
-    const uint32 symbol = SymbolOf(type);
-    if (symbol == NoSymbol) {
-        return false;
-    }
-
-    const TypeEntry& entry = compilation_.types_[type];
-    const Symbol& target = compilation_.symbols_[symbol];
-    const NumericInfo numeric = [&]() noexcept {
-        for (const NumericName& name : NumericNames) {
-            if (target.kind == SymbolKind::BuiltinType && name.name == target.name) {
-                return NumericInfo{name.kind, name.bits};
-            }
-        }
-
-        return NumericInfo{};
-    }();
-    if (numeric.kind == NumericKind::Signed || numeric.kind == NumericKind::Unsigned) {
-        return true;
-    }
-
-    if (target.kind == SymbolKind::BuiltinType) {
-        return target.name == "bool" || target.name == "string";
-    }
-
-    if (target.kind == SymbolKind::PreludeType) {
-        return target.name == "Tag" || target.name == "InputAction" || target.name == "Soft" ||
-               target.name == "Row" || target.name == "Clock";
-    }
-
-    if (target.kind == SymbolKind::Enum) {
-        return true;
-    }
-
-    if (target.kind == SymbolKind::EngineType) {
-        const SchemaTypeKind kind =
-            compilation_.schemas_[target.index].schema.Types()[target.item].kind;
-        return kind == SchemaTypeKind::Enum || kind == SchemaTypeKind::Object ||
-               kind == SchemaTypeKind::Interface;
-    }
-
-    static_cast<void>(entry);
-    return target.kind == SymbolKind::Class || target.kind == SymbolKind::Interface;
-}
-
-bool TypeChecker::IsOrdered(uint32 type) const noexcept {
-    if (IsOptional(type)) {
-        return false;
-    }
-
-    return Numeric(type).kind != NumericKind::None || IsLanguage(type, "string") ||
-           IsEnumType(type);
 }
 
 bool TypeChecker::HasDefault(uint32 type) const noexcept {

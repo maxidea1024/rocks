@@ -4,6 +4,7 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
+#include "TypeFacts.h"
 
 // 컴파일 단위의 입력 API와 결과 접근이다(검사는 CompilationChecker.h의 파일들).
 
@@ -112,6 +113,14 @@ uint32 Compilation::ExpressionType(uint32 module, uint32 node) const noexcept {
 
     const uint32 type = exprTypes_[nodeBase_[module] + node];
     return type == detail::NotRecorded ? NoType : type;
+}
+
+bool Compilation::MemberAvailable(uint32 member, uint32 receiver) const noexcept {
+    if (member >= symbols_.Size() || receiver >= types_.Size()) {
+        return false;
+    }
+
+    return detail::TypeFacts(*this).MemberAvailable(member, receiver);
 }
 
 uint32 Compilation::NodeType(uint32 module, uint32 node) const noexcept {
