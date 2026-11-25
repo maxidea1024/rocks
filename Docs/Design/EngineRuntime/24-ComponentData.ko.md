@@ -294,7 +294,7 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
   - `collisionProfileName`은 영속 `String`이다. 빈 값이면 클래스 기본 이름(virtual `DefaultCollisionProfileName()`)을 쓴다.
   - `CollisionProfileName()`은 실효 이름을 돌려준다.
   - 생성자에서 할당하지 않으려고 빈 값을 기본으로 둔다. 할당 실패를 알릴 길이 없기 때문이다.
-- `SetCollisionProfileName(name)`: 이름이 클래스 기본과 같으면(ASCII 대소문자 무시 — UE `FName` 비교) 빈 값으로 둔다. 다른 이름은 철자 그대로 둔다. 오류는 할당 실패·잘못된 UTF-8이다(값 유지). UE처럼 Mobility를 보지 않는다. profile은 물리 데이터라 Render 다시 보내기를 표시하지 않는다.
+- `SetCollisionProfileName(name)`: 성공하면 파생 hook `OnCollisionProfileNameSet()`(protected virtual, 기본 무동작)을 부른다(StaticMeshComponent가 `useDefaultCollision`을 끈다 — [30장](30-MeshComponents.ko.md) 30.3절, D2b에서 더함). 이름이 클래스 기본과 같으면(ASCII 대소문자 무시 — UE `FName` 비교) 빈 값으로 둔다. 다른 이름은 철자 그대로 둔다. 오류는 할당 실패·잘못된 UTF-8이다(값 유지). UE처럼 Mobility를 보지 않는다. profile은 물리 데이터라 Render 다시 보내기를 표시하지 않는다.
 - 이름 상수: `PrimitiveComponent::PrimitiveCollisionProfileName`("BlockAll"), `ShapeComponent::ShapeCollisionProfileName`("OverlapAllDynamic"), `TriggerBase::TriggerCollisionProfileName`("Trigger").
 - **CD2 연결(2026-11-25 — [충돌 데이터](../CollisionData.ko.md) 9절, 표는 CD1 `Collision` 모듈):**
   - World가 Initialize 때 설정 문맥(`WorldDesc::settings`)의 `CollisionSettings`로 `CollisionProfileTable`을 만들어 갖는다(`World::CollisionProfiles()`).

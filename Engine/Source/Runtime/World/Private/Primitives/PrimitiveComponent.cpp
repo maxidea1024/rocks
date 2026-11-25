@@ -130,6 +130,7 @@ Result<void> PrimitiveComponent::SetCollisionProfileName(StringView name) noexce
     }
 
     if (!HasWorld()) {
+        OnCollisionProfileNameSet();
         return Result<void>::Success();
     }
 
@@ -142,6 +143,7 @@ Result<void> PrimitiveComponent::SetCollisionProfileName(StringView name) noexce
         return copied;
     }
 
+    OnCollisionProfileNameSet();
     return Result<void>::Success();
 }
 
