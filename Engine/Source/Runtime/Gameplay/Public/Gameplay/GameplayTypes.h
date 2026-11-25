@@ -18,7 +18,11 @@ inline constexpr LogCategory LogGameplay{"Gameplay"};
 // 진단 코드다(Docs/Design/EngineRuntime 22.1절 — 로그 {Code} 속성).
 // - InvalidDirectorType: OpenWorld가 고른 GameDirector 타입이 GameDirector 파생이 아니다(Error).
 // - PossessDeniedNoAuthority: 권한 없는(Client) World에서 Possess를 거부했다(Warning).
+// - InputEvaluationFailed: PlayerController의 입력 액션 평가가 실패했다(다시 만들기 할당 실패 —
+//   이전 목록으로 평가했다 — 또는 이벤트 기록 실패, Warning, 실패가 이어지는 동안 한 번 —
+//   Docs/Design/InputActions 5.1절).
 inline constexpr char DiagInvalidDirectorType[] = "InvalidDirectorType";
+inline constexpr char DiagInputEvaluationFailed[] = "InputEvaluationFailed";
 inline constexpr char DiagPossessDeniedNoAuthority[] = "PossessDeniedNoAuthority";
 
 // 게임플레이 프레임워크 통계다(22.1절). 호출 시점의 World 하나 기준 값이다.

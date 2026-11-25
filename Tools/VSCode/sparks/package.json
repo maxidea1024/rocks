@@ -1,0 +1,95 @@
+{
+  "name": "sparks",
+  "displayName": "Sparks",
+  "description": "Sparks language support for Rocks: syntax highlighting and the sparks-lsp language server.",
+  "version": "0.1.0",
+  "publisher": "rocks",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:sparks",
+    "workspaceContains:**/SparksPackage.json5"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "sparks",
+        "aliases": [
+          "Sparks"
+        ],
+        "extensions": [
+          ".spark"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sparks",
+        "scopeName": "source.sparks",
+        "path": "./syntaxes/sparks.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Sparks",
+      "properties": {
+        "sparks.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `SparksLsp` executable. Relative paths are resolved against the first workspace folder. When empty, the newest build under the Rocks output folder (`out/dotnet-<platform>-sparkslsp-<configuration>/bin`) is used."
+        },
+        "sparks.server.schemas": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Engine binding schema folders (`*.sparkbind.json`) passed to the server as `initializationOptions.schemas`. Relative paths are resolved against the first workspace folder."
+        },
+        "sparks.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Sparks language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "sparks.restartServer",
+        "title": "Restart Language Server",
+        "category": "Sparks"
+      }
+    ],
+    "configurationDefaults": {
+      "[sparks]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4,
+        "editor.semanticHighlighting.enabled": true
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p ."
+  },
+  "dependencies": {
+    "vscode-languageclient": "11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/vscode": "1.91.0",
+    "typescript": "6.0.3"
+  }
+}

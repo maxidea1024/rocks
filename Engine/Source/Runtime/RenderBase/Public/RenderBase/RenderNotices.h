@@ -96,8 +96,17 @@ public:
     // bytes를 복사한다. 빈 입력은 빈 묶음이다. 실패: 할당 실패는 그 오류다.
     static Result<RenderBlob> TryCopy(Allocator& allocator, Span<const uint8> bytes) noexcept;
 
+    // size byte를 0으로 채워 만든다(여러 조각을 이어 채울 때 — MutableView). 0이면 빈 묶음이다.
+    // 실패: 할당 실패는 그 오류다.
+    static Result<RenderBlob> TryAllocate(Allocator& allocator, usize size) noexcept;
+
     Span<const uint8> View() const noexcept {
         return Span<const uint8>(data_, size_);
+    }
+
+    // 채우는 쪽(게임 lane — 넘기기 전)이 쓴다.
+    Span<uint8> MutableView() noexcept {
+        return Span<uint8>(data_, size_);
     }
 
     usize Size() const noexcept {
