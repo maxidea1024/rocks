@@ -26,6 +26,11 @@ physics::JoltPhysicsScene& JoltScene(PhysicsScene& scene) noexcept {
     return static_cast<physics::JoltPhysicsScene&>(scene);
 }
 
+// 엔진 자리 PhysicsSimulate 콜백이다(고정 스텝마다 — 문맥의 delta가 고정 스텝 길이다, 3.1절).
+Result<void> SimulateFixedStep(World&, const TickContext& context, void* user) noexcept {
+    return static_cast<PhysicsWorldSubsystem*>(user)->SimulateStep(context.deltaSeconds);
+}
+
 } // namespace
 
 PhysicsWorldSubsystem::PhysicsWorldSubsystem(Allocator& allocator) noexcept
@@ -73,10 +78,26 @@ Result<void> PhysicsWorldSubsystem::Initialize(World& world) noexcept {
 
     scene_ = UniquePtr<PhysicsScene>(Move(created.Value()));
     simulates_ = SimulatesKind(world.Kind());
+    // step은 Game·Tryout World만 건다(World는 종류로 거르지 않는다 — 3.1절 PMD16).
+    if (simulates_) {
+        if (auto staged =
+                world.SetEngineStage(EngineStage::PhysicsSimulate, &SimulateFixedStep, this);
+            !staged) {
+            (void)world.SetPhysicsScene(nullptr);
+            scene_.Reset();
+            simulates_ = false;
+            return staged;
+        }
+    }
+
     return Result<void>::Success();
 }
 
 void PhysicsWorldSubsystem::Deinitialize(World& world) noexcept {
+    if (simulates_) {
+        world.ClearEngineStage(EngineStage::PhysicsSimulate);
+    }
+
     if (scene_) {
         // 자기 장면이 꽂혀 있을 때만 뗀다.
         if (world.GetPhysicsScene() == scene_.Get()) {
