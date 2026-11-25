@@ -140,6 +140,7 @@ Result<uint32> CookedTextureLibrary::RequestAll() noexcept {
                 Entry& ready = entries_[slot];
                 if (!lease) {
                     ready.state = State::Failed;
+                    ready.error = lease.Error();
                     ++failed_;
                     Log::Warning(LogSandboxTextures, "Texture {Path} could not be loaded: {Error}",
                                  ready.path.View(), ErrorCodeName(lease.Error()));
@@ -175,6 +176,7 @@ void CookedTextureLibrary::Upload(Entry& entry, screen::ScreenHost& screen) noex
     });
     if (!opened || !added) {
         entry.state = State::Failed;
+        entry.error = !opened ? opened.Error() : added.Error();
         ++failed_;
         Log::Warning(LogSandboxTextures, "Texture {Path} could not be uploaded: {Error} ({Issue})",
                      entry.path.View(), ErrorCodeName(!opened ? opened.Error() : added.Error()),
@@ -212,6 +214,10 @@ void CookedTextureLibrary::Release() noexcept {
 uint32 CookedTextureLibrary::EntryOf(uint32 request) const noexcept {
     return request < entries_.Size() ? entries_[request].inspector
                                      : screen::ScreenHost::NoInspectorEntry;
+}
+
+ErrorCode CookedTextureLibrary::FailureOf(uint32 request) const noexcept {
+    return request < entries_.Size() ? entries_[request].error : ErrorCode::None;
 }
 
 StringView CookedTextureLibrary::PathOf(uint32 request) const noexcept {
