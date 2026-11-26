@@ -15,7 +15,7 @@
 //   BytecodeModule loaded(allocator);
 //   BytecodeRejection rejection;
 //   auto read = ReadBytecodeFile(bytes.View(), loaded, rejection);
-//   if (!read && read.Error() == ErrorCode::InvalidArgument) {
+//   if (!read && read.Error() == ErrorCode::CorruptData) {
 //       Log(BytecodeLoadErrorName(rejection.error), rejection.function, rejection.address);
 //   }
 
@@ -53,8 +53,9 @@ struct BytecodeRejection {
 ROCKS_SPARKSVM_API Result<void> WriteBytecodeFile(const BytecodeModule& module,
                                                   Array<uint8>& out) noexcept;
 
-// bytes를 읽어 out(빈 모듈)을 채우고 verifier를 돌린다. 실패: 형식·verifier 거부는 InvalidArgument
-// (사유는 rejection), 할당 실패는 OutOfMemory. 실패하면 out의 내용은 정해지지 않는다.
+// bytes를 읽어 out(빈 모듈)을 채우고 verifier를 돌린다. 실패: 형식·verifier 거부는 CorruptData
+// (읽은 byte의 손상 — 사유는 rejection), 할당 실패는 OutOfMemory. 실패하면 out의 내용은 정해지지
+// 않는다.
 ROCKS_SPARKSVM_API Result<void> ReadBytecodeFile(Span<const uint8> bytes, BytecodeModule& out,
                                                  BytecodeRejection& rejection) noexcept;
 
