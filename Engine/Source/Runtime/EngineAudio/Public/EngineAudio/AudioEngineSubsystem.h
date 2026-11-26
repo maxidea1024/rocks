@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Audio/AudioDecoder.h>
 #include <Audio/AudioOutputDevice.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/BoundedSpscQueue.h>
@@ -131,6 +132,13 @@ public:
         foreground_ = foreground;
     }
 
+    // 엔진 디코더 표다(Docs/Design/AudioSystem 3.37.1절). Initialize가 내장 PCM16·ADPCM에 호스트
+    // 디코더 등록부(AudioDecoderRegistry — codec 모듈이 Startup에서 채운다)의 factory를 더해 만든다.
+    // 장치가 없는 실행에서도 만든다. 쿠킹 데이터 디코드(SoundClip::LoadCookedPcm)에 넘긴다.
+    const audio::AudioDecoderTable& DecoderTable() const noexcept {
+        return decoders_;
+    }
+
     // 초기화 때 정한 실행 판정이다.
     const AudioRunTraits& RunTraits() const noexcept {
         return traits_;
@@ -212,6 +220,7 @@ private:
     Allocator& allocator_;
     AudioRunTraits traits_;
     AudioEngineHostOptions options_;
+    audio::AudioDecoderTable decoders_;
     UniquePtr<audio::AudioOutputDevice> device_;
     UniquePtr<AudioDeviceContext> context_;
     // DedicatedLane은 Task 모듈(Private 의존)이라 불투명하게 둔다.
