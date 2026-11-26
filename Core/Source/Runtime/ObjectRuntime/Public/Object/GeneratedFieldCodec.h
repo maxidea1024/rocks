@@ -164,7 +164,7 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
         // 1단계는 등록 enum 스키마로 판정하므로 정적 enum(직접 쓰기의 기준)으로도 확인한다.
         if constexpr (ReflectedEnumField<Member>::Supported) {
             if (!GeneratedType<Member>::IsDeclared(value.signedInteger)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
 
@@ -405,7 +405,7 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
         }
 
         if (!GeneratedType<Member>::IsDeclared(value.signedInteger)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (!construction) {

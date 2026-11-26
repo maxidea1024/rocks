@@ -713,13 +713,13 @@ TEST(RequiredCheckGraph_ExcludedFlagsRejectPresenceAndSkipRequired) {
             CHECK(before == constructed + 6);
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   editor.Value().View(), cookedLoad)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   memberBytes.Value().View(), cookedLoad)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   elementBytes.Value().View(), cookedLoad)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             // 같은 원소 멤버 데이터도 쿠킹이 아닌 로드는 받는다(거부 사유가 excludedFlags다).
             ObjectGraphLoadOptions editorLoad;
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),

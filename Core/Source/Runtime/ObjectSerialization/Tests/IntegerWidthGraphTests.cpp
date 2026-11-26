@@ -291,15 +291,15 @@ TEST(IntegerWidthGraph_LoadRejectsOutOfRangeValues) {
             {"tiny", NumericLimits<int64>::Max(), ErrorCode::Overflow},
             {"narrow", int64{NumericLimits<int16>::Max()} + 1, ErrorCode::Overflow},
             {"narrow", int64{NumericLimits<int16>::Min()} - 1, ErrorCode::Overflow},
-            {"byteOffset", int64{NumericLimits<int8>::Max()} + 1, ErrorCode::InvalidArgument},
-            {"shortOffset", 1, ErrorCode::InvalidArgument},
-            {"wideOffset", 1, ErrorCode::InvalidArgument},
-            {"countLimit", int64{NumericLimits<uint32>::Max()} + 1, ErrorCode::InvalidArgument},
-            {"countLimit", -1, ErrorCode::InvalidArgument},
-            {"hugeIndex", -1, ErrorCode::InvalidArgument},
-            {"hugeIndex", NumericLimits<int64>::Min(), ErrorCode::InvalidArgument},
-            {"hugeMask", 2, ErrorCode::InvalidArgument},
-            {"hugeMask", -1, ErrorCode::InvalidArgument},
+            {"byteOffset", int64{NumericLimits<int8>::Max()} + 1, ErrorCode::CorruptData},
+            {"shortOffset", 1, ErrorCode::CorruptData},
+            {"wideOffset", 1, ErrorCode::CorruptData},
+            {"countLimit", int64{NumericLimits<uint32>::Max()} + 1, ErrorCode::CorruptData},
+            {"countLimit", -1, ErrorCode::CorruptData},
+            {"hugeIndex", -1, ErrorCode::CorruptData},
+            {"hugeIndex", NumericLimits<int64>::Min(), ErrorCode::CorruptData},
+            {"hugeMask", 2, ErrorCode::CorruptData},
+            {"hugeMask", -1, ErrorCode::CorruptData},
             {"tiny", NumericLimits<int8>::Min(), ErrorCode::None},
             {"narrow", NumericLimits<int16>::Max(), ErrorCode::None},
             {"wideOffset", NumericLimits<int64>::Min(), ErrorCode::None},
@@ -333,7 +333,7 @@ TEST(IntegerWidthGraph_LoadRejectsOutOfRangeValues) {
         const int64 wideElements[] = {NumericLimits<int64>::Min(), 1};
         auto wideArray = I64ArrayPayload(allocator, Span<const int64>(wideElements, 2));
         CHECK(LoadSingleField(allocator, types, target, "wideOffsets", WireType::ValueArray,
-                              wideArray.View()) == ErrorCode::InvalidArgument);
+                              wideArray.View()) == ErrorCode::CorruptData);
 
         // struct 멤버(중첩 Record).
         auto member = I64Payload(allocator, int64{NumericLimits<int8>::Max()} + 1);

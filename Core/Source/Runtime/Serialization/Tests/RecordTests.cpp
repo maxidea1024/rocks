@@ -226,17 +226,17 @@ TEST(RecordMalformedEnvelopeVersionCountLengthAndTagHaveExplicitErrors) {
     };
 
     const Mutation mutations[] = {
-        {0, 'X', ErrorCode::InvalidArgument},
+        {0, 'X', ErrorCode::CorruptData},
         {8, 2, ErrorCode::Unsupported},
         // schema version 0은 쓰지 않는 잘못된 값이라 범위 밖(Unsupported)과 구분한다.
         {12, 9, ErrorCode::TypeMismatch},
-        {28, 0, ErrorCode::InvalidArgument},
+        {28, 0, ErrorCode::CorruptData},
         {28, 2, ErrorCode::Unsupported},
-        {32, 0, ErrorCode::InvalidArgument},
-        {32, 2, ErrorCode::InvalidArgument},
-        {36, 31, ErrorCode::InvalidArgument},
-        {60, 0, ErrorCode::InvalidArgument},
-        {64, 5, ErrorCode::InvalidArgument}};
+        {32, 0, ErrorCode::CorruptData},
+        {32, 2, ErrorCode::CorruptData},
+        {36, 31, ErrorCode::CorruptData},
+        {60, 0, ErrorCode::CorruptData},
+        {64, 5, ErrorCode::CorruptData}};
     for (const Mutation& mutation : mutations) {
         uint8 bytes[sizeof(OneFieldGolden)];
         for (usize index = 0; index < sizeof(bytes); ++index) {
@@ -268,7 +268,7 @@ TEST(RecordDuplicateWireIdsAreRejectedBeforeReaderPublication) {
 
     auto reader = RecordReader::Open(allocator, bytes.Value().View(), Schema, 1, 1);
     CHECK(!reader);
-    CHECK(reader.Error() == ErrorCode::AlreadyExists);
+    CHECK(reader.Error() == ErrorCode::CorruptData);
 }
 
 TEST(RecordManyFieldsUseSortedIndexForDuplicatesAndFind) {
@@ -321,7 +321,7 @@ TEST(RecordManyFieldsUseSortedIndexForDuplicatesAndFind) {
     }
 
     auto duplicate = RecordReader::Open(allocator, bytes.Value().View(), Schema, 1, 1);
-    CHECK(!duplicate && duplicate.Error() == ErrorCode::AlreadyExists);
+    CHECK(!duplicate && duplicate.Error() == ErrorCode::CorruptData);
 }
 
 TEST(RecordBuilderAllocationFailuresPreservePriorFieldsAndBuildIsReusable) {
@@ -657,10 +657,10 @@ TEST(RecordOpenRecordFieldValidatesInnerEnvelope) {
 
     // 0..43 header, 44.. 첫 TLV(28 + 4), 76.. 둘째 TLV.
     const Mutation mutations[] = {
-        {28, 0, ErrorCode::InvalidArgument},        // schema version 0
-        {44 + 20, 200, ErrorCode::InvalidArgument}, // 첫 TLV 길이가 남은 byte보다 크다
-        {76 + 8, 4, ErrorCode::AlreadyExists},      // 둘째 ID의 low를 첫 ID와 같게
-        {36, 70, ErrorCode::InvalidArgument}};      // payloadBytes 불일치
+        {28, 0, ErrorCode::CorruptData},        // schema version 0
+        {44 + 20, 200, ErrorCode::CorruptData}, // 첫 TLV 길이가 남은 byte보다 크다
+        {76 + 8, 4, ErrorCode::CorruptData},    // 둘째 ID의 low를 첫 ID와 같게
+        {36, 70, ErrorCode::CorruptData}};      // payloadBytes 불일치
     for (const Mutation& mutation : mutations) {
         Array<uint8> bytes(allocator);
         REQUIRE(bytes.TryReserve(valid.Value().Size()));
@@ -698,7 +698,7 @@ TEST(RecordOpenRecordFieldValidatesInnerEnvelope) {
     auto field = reader.Value().Next();
     REQUIRE(field);
     CHECK(reader.Value().OpenRecordField(allocator, field.Value(), Inner, 1, 1, 16).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // 이동된 reader는 InvalidArgument다.
     RecordReader moved = Move(reader.Value());
@@ -786,11 +786,11 @@ TEST(RecordReadHeaderChecksEnvelopeOnly) {
     };
 
     const Mutation mutations[] = {
-        {0, 'X', ErrorCode::InvalidArgument}, // magic
-        {8, 2, ErrorCode::Unsupported},       // envelope version
-        {28, 0, ErrorCode::InvalidArgument},  // schema version 0
-        {36, 33, ErrorCode::InvalidArgument}, // payloadBytes ≠ 크기 − 44
-        {32, 2, ErrorCode::InvalidArgument}}; // fieldCount × 28 > payloadBytes
+        {0, 'X', ErrorCode::CorruptData}, // magic
+        {8, 2, ErrorCode::Unsupported},   // envelope version
+        {28, 0, ErrorCode::CorruptData},  // schema version 0
+        {36, 33, ErrorCode::CorruptData}, // payloadBytes ≠ 크기 − 44
+        {32, 2, ErrorCode::CorruptData}}; // fieldCount × 28 > payloadBytes
     for (const Mutation& mutation : mutations) {
         const uint8 original = bytes[mutation.offset];
         bytes[mutation.offset] = mutation.value;
@@ -803,12 +803,12 @@ TEST(RecordReadHeaderChecksEnvelopeOnly) {
         bytes[index] = 0;
     }
 
-    CHECK(ReadRecordHeader(bytes).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadRecordHeader(bytes).Error() == ErrorCode::CorruptData);
 
     // 44 byte보다 짧은 모든 접두.
     for (usize length = 0; length < 44; ++length) {
         CHECK(ReadRecordHeader(Span<const uint8>(OneFieldGolden, length)).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // 뒤에 byte가 붙으면 payloadBytes가 맞지 않는다.
@@ -817,7 +817,7 @@ TEST(RecordReadHeaderChecksEnvelopeOnly) {
         trailing[index] = OneFieldGolden[index];
     }
 
-    CHECK(ReadRecordHeader(trailing).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadRecordHeader(trailing).Error() == ErrorCode::CorruptData);
 }
 
 // OpenNestedRecord는 이 Record 입력 안의 범위만 받고, 같은 예산으로 열되 그 byte를 다시 청구하지
@@ -879,7 +879,7 @@ TEST(RecordOpenNestedRecordRequiresContainedRangeAndSharesBudget) {
     // 범위 안이지만 Record가 아닌 곳(머리 4 byte부터)은 envelope 검사가 거부한다.
     CHECK(reader.Value()
               .OpenNestedRecord(allocator, field.Value().payload, Inner, 1, 1, 16)
-              .Error() == ErrorCode::InvalidArgument);
+              .Error() == ErrorCode::CorruptData);
     RecordReader moved = Move(reader.Value());
     CHECK(reader.Value().OpenNestedRecord(allocator, nested, Inner, 1, 1, 16).Error() ==
           ErrorCode::InvalidArgument);

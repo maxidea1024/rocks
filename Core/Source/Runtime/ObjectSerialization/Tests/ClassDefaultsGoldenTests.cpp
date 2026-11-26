@@ -230,6 +230,9 @@ constexpr const char* GoldenLines[] = {
     "eaebb41c-f48d-42d8-8cea-62952cf7b8bb present "
     "e7f16b0f5cd569d483cdd36bc00995f785769be1c9a0171fca4b6c2469da1f40 "
     "b7eeb9390a6a0dee2a344a89a68a63b6760c411f902e9fbaea3a73ad678290f3",
+    "ee3a89e6-f29d-47bd-99d9-3ef9fa2f4982 present "
+    "8607f6be1a70638e028255866a749c6e382b3939fb6031bbe7eee23ad135c361 "
+    "6f8639b89267e973ac61a67d22d4e1f4598b8017c07c5ffbbd5a6d508c69adce",
     "f51103ef-6007-4fa4-9ebc-af462cc6d8a3 present "
     "78bd511a987db639ad791cbc7b022e45d4f65c0e1f7dc979e4ef6662dd4e2c2d "
     "279394fae3cda937f4bfa7fb1516d2020849c828da43b18e4785ec288e28efec",

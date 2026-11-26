@@ -1158,7 +1158,7 @@ TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
             const uint32 constructed = Node::Constructed;
             CHECK(LoadObjectGraph(allocator, target, fixture.types, target.OwnerAccess(),
                                   bytes.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(Node::Constructed == constructed);
             ArrayHooks enumHooks(allocator);
             ObjectGraphLoadOptions report;
@@ -2163,11 +2163,11 @@ TEST(ArrayGraph_TargetTypeMismatchAndReachability) {
             Write32(bytes.Value(), payload + 8 + 4, 9);
             CHECK(LoadObjectGraph(allocator, loose, looseTypes, loose.OwnerAccess(),
                                   bytes.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             Write32(bytes.Value(), payload + 8 + 4, 0);
             CHECK(LoadObjectGraph(allocator, loose, looseTypes, loose.OwnerAccess(),
                                   bytes.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
         }
 
         REQUIRE(loose.Shutdown(loose.OwnerAccess()));
@@ -2501,7 +2501,7 @@ TEST(ArrayGraph_UndeclaredEnumElementInsideStructElement) {
             const uint32 constructed = Node::Constructed;
             CHECK(LoadObjectGraph(allocator, target, fixture.types, target.OwnerAccess(),
                                   bytes.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(Node::Constructed == constructed);
             ArrayHooks hooks(allocator);
             ObjectGraphLoadOptions report;

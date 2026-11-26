@@ -386,18 +386,16 @@ TEST(ValueKinds_MalformedStoredValuesAreRejected) {
             {source, WireType::Bytes, assetAsBytesPayload.View(), ErrorCode::TypeMismatch},
             {hash, WireType::Guid, digestAsGuidPayload.View(), ErrorCode::TypeMismatch},
             {icon, WireType::String, softAsStringPayload.View(), ErrorCode::TypeMismatch},
-            {hash, WireType::Bytes, shortDigestPayload.View(), ErrorCode::InvalidArgument},
-            {hash, WireType::Bytes, longDigestPayload.View(), ErrorCode::InvalidArgument},
-            {hash, WireType::Bytes, trailingDigestPayload.View(), ErrorCode::InvalidArgument},
-            {icon, WireType::SoftObjectReference, orphanPayload.View(), ErrorCode::InvalidArgument},
+            {hash, WireType::Bytes, shortDigestPayload.View(), ErrorCode::CorruptData},
+            {hash, WireType::Bytes, longDigestPayload.View(), ErrorCode::CorruptData},
+            {hash, WireType::Bytes, trailingDigestPayload.View(), ErrorCode::CorruptData},
+            {icon, WireType::SoftObjectReference, orphanPayload.View(), ErrorCode::CorruptData},
             {icon, WireType::SoftObjectReference, trailingSoftPayload.View(),
-             ErrorCode::InvalidArgument},
-            {icon, WireType::SoftObjectReference, badUtf8Payload.View(),
-             ErrorCode::InvalidArgument},
+             ErrorCode::CorruptData},
+            {icon, WireType::SoftObjectReference, badUtf8Payload.View(), ErrorCode::CorruptData},
             {icon, WireType::SoftObjectReference, truncatedSoftPayload.View(),
-             ErrorCode::InvalidArgument},
-            {icon, WireType::SoftObjectReference, longSoftPayload.View(),
-             ErrorCode::InvalidArgument}};
+             ErrorCode::CorruptData},
+            {icon, WireType::SoftObjectReference, longSoftPayload.View(), ErrorCode::CorruptData}};
         for (const Case& example : cases) {
             RecordBuilder record(allocator, TypeIdOf<AssetFields>(), 1);
             REQUIRE(

@@ -470,7 +470,7 @@ TEST(ClassFlagGraph_WithinOuterRule) {
         CHECK(validate(good) == ErrorCode::None);
         Array<uint8> bad =
             WithinGraph(allocator, objects, derived.Handle(), graphInner.Value().Handle(), true);
-        CHECK(validate(bad) == ErrorCode::InvalidArgument);
+        CHECK(validate(bad) == ErrorCode::CorruptData);
 
         // 기준 Outer(outer 0 노드의 Outer)는 실제 객체 타입으로 판정한다.
         Array<uint8> record = RecordOf(allocator, TypeIdOf<WithinInner>(), 1, {});

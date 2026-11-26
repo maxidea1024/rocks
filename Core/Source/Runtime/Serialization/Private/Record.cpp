@@ -41,13 +41,13 @@ uint64 BitWidth(uint64 value) noexcept {
 
 Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept {
     if (record.Size() < RecordLocalHeaderBytes) {
-        return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordHeader>::Failure(ErrorCode::CorruptData);
     }
 
     const uint8* bytes = record.Data();
     for (usize index = 0; index < sizeof(Magic); ++index) {
         if (bytes[index] != Magic[index]) {
-            return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
+            return Result<RecordHeader>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -64,7 +64,7 @@ Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept {
     if (IsZero(header.schema) || header.schemaVersion == 0 ||
         payloadBytes != static_cast<uint64>(record.Size() - RecordLocalHeaderBytes) ||
         static_cast<uint64>(header.fieldCount) * FieldHeaderBytes > payloadBytes) {
-        return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordHeader>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<RecordHeader>::Success(header);
@@ -392,7 +392,7 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
 
     for (usize index = 0; index < sizeof(Magic); ++index) {
         if (magic.Value()[index] != Magic[index]) {
-            return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+            return Result<RecordReader>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -422,7 +422,7 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
 
     // 버전 0은 어떤 스키마에서도 쓰지 않는 잘못된 값이다(범위 밖 Unsupported와 구분한다).
     if (version.Value() == 0) {
-        return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordReader>::Failure(ErrorCode::CorruptData);
     }
 
     if (version.Value() < minimum || version.Value() > maximum) {
@@ -445,7 +445,7 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
 
     if (payloadBytes.Value() != archive.Remaining() ||
         static_cast<uint64>(fieldCount.Value()) * FieldHeaderBytes > payloadBytes.Value()) {
-        return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordReader>::Failure(ErrorCode::CorruptData);
     }
 
     // 외부 count만 믿고 큰 index를 먼저 할당하지 않는다. 최소 header bytes와 작업 한도를 확인한다.
@@ -482,7 +482,7 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
         }
 
         if (IsZero(id.Value()) || type.Value() == 0) {
-            return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+            return Result<RecordReader>::Failure(ErrorCode::CorruptData);
         }
 
         if (byteCount.Value() > limits.archive.maxValueBytes) {
@@ -499,7 +499,7 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
 
             const auto count = static_cast<usize>(byteCount.Value());
             if (count > result.archive_.Remaining()) {
-                return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+                return Result<RecordReader>::Failure(ErrorCode::CorruptData);
             }
 
             payload = Span<const uint8>(result.archive_.source_.Data() + result.archive_.position_,
@@ -521,7 +521,7 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
     }
 
     if (!result.archive_.AtEnd()) {
-        return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordReader>::Failure(ErrorCode::CorruptData);
     }
 
     // 중복 id: id 순으로 정렬한 index에서 이웃만 비교한다(O(n log n)). heap 정렬 비교 횟수의 상한
@@ -538,7 +538,9 @@ Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uin
     });
     for (usize index = 1; index < result.byId_.Size(); ++index) {
         if (fields[result.byId_[index - 1]].id == fields[result.byId_[index]].id) {
-            return Result<RecordReader>::Failure(ErrorCode::AlreadyExists);
+            // 읽은 Record의 중복 id는 형식 위반이다(AssetSystem 19장 — builder의 중복은
+            // AlreadyExists).
+            return Result<RecordReader>::Failure(ErrorCode::CorruptData);
         }
     }
 

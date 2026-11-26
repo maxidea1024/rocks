@@ -69,9 +69,9 @@ TEST(WeakObjectRefGraphLoad_RejectsExternalAndOutOfRangeNumbers) {
             ErrorCode expected;
         };
 
-        const Case singles[] = {{"target", external, 1, ErrorCode::InvalidArgument},
+        const Case singles[] = {{"target", external, 1, ErrorCode::CorruptData},
                                 {"strong", external, 1, ErrorCode::None},
-                                {"target", 2, 0, ErrorCode::InvalidArgument},
+                                {"target", 2, 0, ErrorCode::CorruptData},
                                 {"target", 1, 0, ErrorCode::None},
                                 {"target", 0, 0, ErrorCode::None}};
         for (const Case& item : singles) {
@@ -91,7 +91,7 @@ TEST(WeakObjectRefGraphLoad_RejectsExternalAndOutOfRangeNumbers) {
         const Span<const uint32> arrays[] = {Span<const uint32>(externalElement, 2),
                                              Span<const uint32>(rangeElement, 2),
                                              Span<const uint32>(validElement, 3)};
-        const ErrorCode expected[] = {ErrorCode::InvalidArgument, ErrorCode::InvalidArgument,
+        const ErrorCode expected[] = {ErrorCode::CorruptData, ErrorCode::CorruptData,
                                       ErrorCode::None};
         for (usize index = 0; index < 3; ++index) {
             Array<uint8> payload = U32ArrayPayload(allocator, arrays[index]);
@@ -191,7 +191,7 @@ TEST(WeakObjectRefGraphLoad_WeakEdgesAreNotReachabilityOrGcEdges) {
             const auto before = target.Stats().liveObjects;
             auto rejected =
                 LoadObjectGraph(allocator, target, types, access, weakOnly.Value().Bytes());
-            CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+            CHECK(!rejected && rejected.Error() == ErrorCode::CorruptData);
             CHECK(target.Stats().liveObjects == before && target.Stats().reservedObjects == 0);
             CHECK(Validate(allocator, target, types, weakOnly.Value().Bytes()) == ErrorCode::None);
 

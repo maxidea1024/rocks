@@ -303,7 +303,7 @@ public:
         const bool inRange = isExternal ? !weak && external != 0 && external <= externalUses_.Size()
                                         : local.Value() <= objectCount_;
         if (!inRange) {
-            return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+            return Result<DecodedReference>::Failure(ErrorCode::CorruptData);
         }
 
         DecodedReference decoded;
@@ -528,9 +528,8 @@ Result<RecordReader> OpenStoredRecord(Allocator& allocator, LoadNode& node,
         RecordReader::Open(allocator, node.source, node.type, 1, NumericLimits<uint32>::Max(),
                            budget.Record(), budget.Shared());
     if (!record) {
-        return Result<RecordReader>::Failure(record.Error() == ErrorCode::TypeMismatch
-                                                 ? ErrorCode::InvalidArgument
-                                                 : record.Error());
+        return Result<RecordReader>::Failure(
+            record.Error() == ErrorCode::TypeMismatch ? ErrorCode::CorruptData : record.Error());
     }
 
     auto fields = budget.AddFields(record.Value().FieldCount());
@@ -629,7 +628,7 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     // 노드 표의 outer는 0(그래프 밖) 또는 자기보다 앞의 노드(1..자기 번호 − 1)다 — index는 0부터라
     // outer ≤ index다.
     if (node.outer > index) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // 노드 표의 이름·정책·대표 자식·경로 규칙과 형제 유일성을 생성 전에 판정한다(Registry 정책
@@ -737,7 +736,7 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         if (context.IsExcluded(schema.fields[schemaIndex].flags) ||
             (context.Policy().includeFlags != 0 &&
              (schema.fields[schemaIndex].flags & context.Policy().includeFlags) == 0)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         auto accessor = FindOps(node.lease, field.Value().id, budget);

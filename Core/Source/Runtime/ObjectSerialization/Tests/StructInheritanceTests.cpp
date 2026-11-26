@@ -391,7 +391,7 @@ TEST(StructInheritanceGraph_InstancedBaseDecode) {
         auto rejected = ShapeGraph(allocator, other.View());
         auto failed =
             LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(), rejected.View());
-        CHECK(!failed && failed.Error() == ErrorCode::InvalidArgument);
+        CHECK(!failed && failed.Error() == ErrorCode::CorruptData);
         REQUIRE(objects.Shutdown(objects.OwnerAccess()));
     }
 

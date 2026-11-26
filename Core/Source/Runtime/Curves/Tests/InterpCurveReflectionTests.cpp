@@ -342,7 +342,7 @@ TEST(InterpCurveReflection_DecodeRejectsBrokenCurves) {
             ObjectRegistry target(fixture.system, fixture.types, {0x4943, 3});
             auto loaded = LoadObjectGraph(fixture.system, target, fixture.types,
                                           target.OwnerAccess(), bytes.View());
-            CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+            CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
             CHECK(target.Stats().liveObjects == 0);
             REQUIRE(target.Shutdown(target.OwnerAccess()));
         }
@@ -354,7 +354,7 @@ TEST(InterpCurveReflection_DecodeRejectsBrokenCurves) {
     ObjectRegistry target(fixture.system, fixture.types, {0x4943, 4});
     auto loaded =
         LoadObjectGraph(fixture.system, target, fixture.types, target.OwnerAccess(), bytes.View());
-    CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+    CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
     REQUIRE(target.Shutdown(target.OwnerAccess()));
 }
 

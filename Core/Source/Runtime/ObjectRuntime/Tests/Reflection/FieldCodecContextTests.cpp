@@ -267,7 +267,7 @@ TEST(FieldCodec_ReportAndDefaultNeedsAReceiver) {
         FieldScope scope(context, channels, Guid{0x4f424a, 1}, &FlagsEnum);
         CHECK(!context.CanReport());
         CHECK(detail::ParseFieldValue(view, context, nullptr, nullptr).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         CHECK(context.spent == FlagsEnum.values.Size());
 
         // 2단계(기록하지 않음)는 같은 입력에서 대체 값을 쓴다.
@@ -326,10 +326,10 @@ TEST(FieldCodec_IntegerWidthOrder) {
         {ValueKind::Int32, WireType::U64, true, 1, false, ErrorCode::TypeMismatch},
         {ValueKind::Int32, WireType::I64, true, 2147483648ll, true, ErrorCode::Overflow},
         {ValueKind::Int32, WireType::I64, true, -2147483649ll, false, ErrorCode::Overflow},
-        {ValueKind::Int32, WireType::I64, true, -2147483648ll, true, ErrorCode::InvalidArgument},
+        {ValueKind::Int32, WireType::I64, true, -2147483648ll, true, ErrorCode::CorruptData},
         {ValueKind::Int32, WireType::I64, true, -2147483648ll, false, ErrorCode::None},
         {ValueKind::UInt16, WireType::U32, false, 65536, true, ErrorCode::Overflow},
-        {ValueKind::UInt16, WireType::U32, false, 65535, true, ErrorCode::InvalidArgument},
+        {ValueKind::UInt16, WireType::U32, false, 65535, true, ErrorCode::CorruptData},
         {ValueKind::UInt16, WireType::U32, false, 65535, false, ErrorCode::None},
         {ValueKind::UInt8, WireType::U32, false, 256, false, ErrorCode::Overflow},
     };

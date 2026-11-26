@@ -25,3 +25,4 @@
 - [16. 임포트·빌드 의존](16-ImportBuildDependencies.ko.md)
 - [17. 계획 문서 개정 사항](17-PlanRevisions.ko.md)
 - [18. 범위 밖과 후속](18-OutOfScope.ko.md)
+- [19. 손상 데이터 오류 CorruptData 이전](19-CorruptData.ko.md)

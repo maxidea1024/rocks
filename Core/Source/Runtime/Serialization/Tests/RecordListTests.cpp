@@ -232,23 +232,23 @@ TEST(RecordList_MalformedPayloads) {
     AppendU32(countTooLarge, 1000);
     AppendU64(countTooLarge, record.Size());
     AppendBytes(countTooLarge, record);
-    CHECK(openPayload(countTooLarge) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(countTooLarge) == ErrorCode::CorruptData);
 
     // 잘린 count·length·항목.
     Array<uint8> truncated(allocator);
     AppendU32(truncated, 1);
     AppendU64(truncated, record.Size());
     AppendBytes(truncated, Span<const uint8>(record.Data(), record.Size() - 1));
-    CHECK(openPayload(truncated) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(truncated) == ErrorCode::CorruptData);
     Array<uint8> shortCount(allocator);
     AppendBytes(shortCount, Span<const uint8>(valid.Data(), 3));
-    CHECK(openPayload(shortCount) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(shortCount) == ErrorCode::CorruptData);
 
     // 남은 byte.
     Array<uint8> trailing(allocator);
     AppendBytes(trailing, valid.View());
     static_cast<void>(trailing.TryPushBack(0));
-    CHECK(openPayload(trailing) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(trailing) == ErrorCode::CorruptData);
 
     // length가 중첩 Record 길이와 다르다(뒤에 여분 byte를 붙이고 length에 포함).
     Array<uint8> lengthMismatch(allocator);
@@ -256,7 +256,7 @@ TEST(RecordList_MalformedPayloads) {
     AppendU64(lengthMismatch, record.Size() + 1);
     AppendBytes(lengthMismatch, record);
     static_cast<void>(lengthMismatch.TryPushBack(0));
-    CHECK(openPayload(lengthMismatch) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(lengthMismatch) == ErrorCode::CorruptData);
 
     // 헤더보다 짧은 항목·잘못된 magic.
     Array<uint8> tiny(allocator);
@@ -264,11 +264,11 @@ TEST(RecordList_MalformedPayloads) {
     AppendU64(tiny, 40);
     AppendBytes(tiny, Span<const uint8>(record.Data(), 40));
     AppendBytes(tiny, Span<const uint8>(record.Data(), 12)); // 최소 크기 검사를 통과할 만큼 채운다
-    CHECK(openPayload(tiny) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(tiny) == ErrorCode::CorruptData);
     Array<uint8> badMagic(allocator);
     AppendBytes(badMagic, valid.View());
     badMagic[12] = 'X';
-    CHECK(openPayload(badMagic) == ErrorCode::InvalidArgument);
+    CHECK(openPayload(badMagic) == ErrorCode::CorruptData);
 
     // builder도 envelope가 아닌 입력을 거부한다.
     RecordListBuilder builder(allocator);
@@ -486,7 +486,7 @@ TEST(RecordList_CountPrechecksRunBeforeAllocationAndParsing) {
     counting.DisableFailure();
     auto opened = RecordListReader::Open(counting, huge.View(), ItemSchema, 1, 1, unlimitedBudget,
                                          unlimitedCount);
-    CHECK(!opened && opened.Error() == ErrorCode::InvalidArgument);
+    CHECK(!opened && opened.Error() == ErrorCode::CorruptData);
     CHECK(counting.Attempts() == 1);
 
     // count만큼의 work를 항목 index 할당·파싱 전에 청구한다: 0으로 채운 1000 × 52 byte는 첫
@@ -497,7 +497,7 @@ TEST(RecordList_CountPrechecksRunBeforeAllocationAndParsing) {
     REQUIRE(junk.TryAppendUninitialized(1000 * 52));
     platform::MemorySet(junk.Data() + 4, 0, 1000 * 52);
     CHECK(RecordListReader::Open(backing, junk.View(), ItemSchema, 1, 1).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     RecordLimits smallWork;
     smallWork.archive.maxWork = 500;
     counting.DisableFailure();
