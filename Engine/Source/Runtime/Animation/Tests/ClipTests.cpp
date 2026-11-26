@@ -1,6 +1,6 @@
 #include "ClipTestSupport.h"
 
-// 애니메이션 클립 시험이다(Docs/Design/MeshAnimationAssets.ko.md 7절·7.5절, 12절 "클립"): 샘플링
+// 애니메이션 클립 시험이다(Docs/Design/MeshAnimationAssets 7절·7.5절, 12절 "클립"): 샘플링
 // 규칙, 원본·클립 검증, 정렬, 쿠킹 변환(같은 비율의 키 보존·재샘플링·상수 접기·트랙 대응).
 using namespace rocks;
 namespace clip_tests_file {
@@ -466,7 +466,7 @@ TEST(Clip_BuildResamples) {
 // 진단 이름표: 모든 ClipIssue가 고유한 이름이고 열거 밖은 "Unknown"이다. 새 코드는 4.6절 이름표에
 // 있고 ToAssetDiagnostic은 위치를 detail로 옮긴다.
 TEST(Clip_DiagnosticNames) {
-    constexpr uint32 last = static_cast<uint32>(ClipIssue::UnknownBoneTrack);
+    constexpr uint32 last = static_cast<uint32>(ClipIssue::DuplicateTrackBone);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(ClipIssueName(static_cast<ClipIssue>(index)));
         CHECK(name != StringView("Unknown"));

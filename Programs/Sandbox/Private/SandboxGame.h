@@ -9,10 +9,11 @@ namespace sandbox {
 // 기본 GameDirector가 첫 LocalPlayer를 Login시켜 SandboxPawn을 준다. SandboxPawn은 Controller의
 // 입력 스냅숏에서 새로 눌린 키·마우스 버튼을 로그로 남긴다(엔진 1차 목표 입력 확인 — 창 입력은
 // 호스트가 SetLocalPlayerInput으로 넘긴다). 게임 World에는 물리 장면이 있다(PhysicsWorldSubsystem —
-// Docs/Design/PhysicsModule 1.2절: Gameplay는 Physics에 의존하지 않으므로 호스트가 넣는다).
+// Docs/Design/PhysicsModule 1.2절: Gameplay는 Physics에 의존하지 않으므로 호스트가 넣는다)과 오디오
+// scene(AudioWorldSubsystem — 키 1–3 오디오 확인, Docs/Design/AudioSystem 3.35.11절)이 있다.
 struct SandboxGame {
-    // 게임 World Subsystem 수(PhysicsWorldSubsystem)다.
-    static constexpr rocks::usize WorldSubsystemCount = 1;
+    // 게임 World Subsystem 수(PhysicsWorldSubsystem·AudioWorldSubsystem)다.
+    static constexpr rocks::usize WorldSubsystemCount = 2;
 
     SandboxGame() noexcept;
 

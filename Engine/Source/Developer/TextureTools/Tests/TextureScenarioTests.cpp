@@ -31,6 +31,8 @@
 using namespace rocks;
 namespace texture_scenario_tests_file {
 
+using graphics::PixelFormat;
+
 using rocks::asset_database_test::ManualAssetClock;
 using rocks::asset_database_test::MemoryFileSystem;
 using rocks::asset_database_test::TempProject;

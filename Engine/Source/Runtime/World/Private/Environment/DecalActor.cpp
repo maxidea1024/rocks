@@ -6,7 +6,7 @@
 #include <World/Environment/DecalComponent.generated.h>
 #include <World/Environment/DecalComponent.h>
 #include <World/SceneComponent.generated.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 
 // 환경 Actor DecalActor다(Docs/Design/EngineRuntime 27.1절, D5).
 namespace rocks {

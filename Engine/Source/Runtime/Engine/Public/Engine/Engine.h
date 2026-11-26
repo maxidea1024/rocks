@@ -392,6 +392,12 @@ public:
         return config_.settings;
     }
 
+    // 호스트가 넘긴 프로세스 모듈 로더다(EngineConfig::modules — 초기화 뒤 null이 아니다).
+    // Subsystem이 호스트 서비스(HostServices)를 찾는 길이다. 게임 스레드에서 쓴다.
+    ModuleLoader* Modules() const noexcept {
+        return config_.modules;
+    }
+
     // --- World ---
 
     // World를 만들어 초기화한다(desc.beginPlay면 BeginPlay까지). Running에서만 가능하다. 반환

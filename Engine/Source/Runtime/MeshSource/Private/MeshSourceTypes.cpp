@@ -278,6 +278,40 @@ const char* MeshIssueName(MeshIssue issue) noexcept {
         return "EmptyBoneHierarchy";
     case MeshIssue::SingularBindPose:
         return "SingularBindPose";
+    case MeshIssue::RenderLodCount:
+        return "RenderLodCount";
+    case MeshIssue::RenderBounds:
+        return "RenderBounds";
+    case MeshIssue::RenderStreamFormat:
+        return "RenderStreamFormat";
+    case MeshIssue::RenderStreamRange:
+        return "RenderStreamRange";
+    case MeshIssue::RenderStreamSize:
+        return "RenderStreamSize";
+    case MeshIssue::RenderTexCoordLayout:
+        return "RenderTexCoordLayout";
+    case MeshIssue::RenderIndexCount:
+        return "RenderIndexCount";
+    case MeshIssue::RenderIndexValue:
+        return "RenderIndexValue";
+    case MeshIssue::RenderSectionRange:
+        return "RenderSectionRange";
+    case MeshIssue::RenderInfluenceLayout:
+        return "RenderInfluenceLayout";
+    case MeshIssue::RenderBoneMap:
+        return "RenderBoneMap";
+    case MeshIssue::RenderMorphTarget:
+        return "RenderMorphTarget";
+    case MeshIssue::RenderSkinWeightProfile:
+        return "RenderSkinWeightProfile";
+    case MeshIssue::RenderBoneIndexValue:
+        return "RenderBoneIndexValue";
+    case MeshIssue::RenderSkinWeightSum:
+        return "RenderSkinWeightSum";
+    case MeshIssue::RenderMorphVertex:
+        return "RenderMorphVertex";
+    case MeshIssue::RenderInverseBind:
+        return "RenderInverseBind";
     }
 
     return "Unknown";

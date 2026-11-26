@@ -2,7 +2,7 @@
 
 #include <MeshSource/Tests/MeshSourceTestSupport.h>
 
-// 정적 메시 빌드의 기하 시험이다(Docs/Design/MeshAnimationAssets.ko.md 5.2절 3·5·8·12단계, 12절
+// 정적 메시 빌드의 기하 시험이다(Docs/Design/MeshAnimationAssets 5.2절 3·5·8·12단계, 12절
 // "빌드"): 기본 사각형의 정점·index·기저 부호(UE 관례), 0 벡터 코너만 재계산, 가중 법선, hard edge,
 // n-gon 대각선, 빈 메시, buildScale(음수 성분·비균일 역전치), bounds와 확장, UV 없는 tangent.
 using namespace rocks;

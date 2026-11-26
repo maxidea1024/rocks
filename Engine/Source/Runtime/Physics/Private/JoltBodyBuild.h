@@ -29,10 +29,11 @@ inline constexpr double MinCapsuleCylinderLength = 0.1;
 Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(const BodyGeometry& geometry,
                                                 const Vec3d& scale) noexcept;
 
-// 실효 충돌과 운동 종류로 object 층을 만든다(6.1절 bit 배치, 7.1.3절): 채널 = object type, 운동
-// 묶음 = Static·Moving(실효 충돌 켬이 시뮬레이션을 안 하면 QueryOnly), 참여 표지는 실효 충돌
-// 켬에서, 응답 묶음 색인 0(표는 PH3).
-JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion) noexcept;
+// 실효 충돌과 운동 종류로 object 층을 만든다(6.1절 bit 배치, 7.1.3·7.1.6절): 채널 = object type,
+// 운동 묶음 = Static·Moving(실효 충돌 켬이 시뮬레이션을 안 하면 QueryOnly), 참여 표지는 실효 충돌
+// 켬에서, 응답 묶음 색인은 responseSet(ResponseSetTable::Acquire가 준 값).
+JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion,
+                                uint32 responseSet) noexcept;
 
 // 운동 종류를 Jolt로 바꾼다.
 JPH::EMotionType ToJoltMotion(BodyMotion motion) noexcept;

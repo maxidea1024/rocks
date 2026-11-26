@@ -4,7 +4,7 @@
 #include <World/Environment/SkyAtmosphereComponent.h>
 #include <World/Environment/SkyAtmosphereSettings.generated.h>
 #include <World/SceneComponent.generated.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 대기 컴포넌트다(Docs/Design/EngineRuntime 27.2절, D5).
 namespace rocks {

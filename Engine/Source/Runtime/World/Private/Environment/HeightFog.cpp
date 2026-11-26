@@ -7,7 +7,7 @@
 #include <World/Environment/HeightFogSettings.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 
 // 환경 Actor HeightFog다(Docs/Design/EngineRuntime 27.1절, D5).
 namespace rocks {

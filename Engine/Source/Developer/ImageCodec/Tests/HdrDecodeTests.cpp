@@ -1,3 +1,5 @@
+#include "ImageFuzz.h"
+
 #include <Base/NumericLimits.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
@@ -330,6 +332,45 @@ TEST(HdrDecode_NewRle) {
     for (usize length = 0; length < full.Size(); ++length) {
         CHECK(!Decode(allocator, full.View().Slice(0, length)).ok);
     }
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): Radiance HDR(평
+// RGBE, 옛 RLE, 새 RLE 폭 8) 씨앗. 변조한 파일은 결과가 서로 맞는 성공이거나 다섯 분류의 실패이고,
+// 할당 블록을 다 돌려준다.
+TEST(HdrDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    Bytes flat(allocator);
+    Header(flat, 3, 2);
+    for (uint32 texel = 0; texel < 6; ++texel) {
+        flat.Rgbe(10 * texel, 64, 200, 129 + texel);
+    }
+
+    Bytes old(allocator);
+    Header(old, 4, 1);
+    old.Rgbe(100, 50, 25, 130);
+    old.Rgbe(1, 1, 1, 3);
+    Bytes rle(allocator);
+    Header(rle, 8, 1);
+    rle.U8(2);
+    rle.U8(2);
+    rle.U8(0);
+    rle.U8(8);
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        rle.U8(128 + 4);
+        rle.U8(10 + channel);
+        rle.U8(4);
+        for (uint32 x = 0; x < 4; ++x) {
+            rle.U8(x * 20 + channel);
+        }
+    }
+
+    const Span<const uint8> seeds[] = {flat.data.View(), old.data.View(), rle.data.View()};
+    FuzzStats stats;
+    CHECK(FuzzDecode(allocator, seeds, ImageFileFormat::Hdr, 0x5EED04D2ull, 4000, stats));
+    CHECK(stats.Clean() && stats.rejected > 0);
 }
 
 } // namespace hdr_decode_tests_file

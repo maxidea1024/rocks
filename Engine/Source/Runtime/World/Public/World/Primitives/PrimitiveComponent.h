@@ -515,6 +515,12 @@ protected:
     rocks::CanBeCharacterBase canCharacterStepUpOn_ = rocks::CanBeCharacterBase::Yes;
 
 protected:
+    // SetCollisionProfileName이 성공한 뒤 부른다(파생이 profile에 딸린 자기 상태를 고친다 — UE
+    // UStaticMeshComponent::SetCollisionProfileName이 bUseDefaultCollision을 끄는 것, EngineRuntime
+    // 30.3절). 기본은 아무것도 하지 않는다.
+    virtual void OnCollisionProfileNameSet() noexcept {
+    }
+
     // 등록 때 이름을 해석한다: profile 값이면 body에 옮기고, 표에 없으면 경고를 한 번 남긴다
     // (CollisionProfileMissing — CollisionData 9절 CD2). 파생이 재정의하면 이것을 먼저 부른다.
     Result<void> OnRegister() noexcept override;

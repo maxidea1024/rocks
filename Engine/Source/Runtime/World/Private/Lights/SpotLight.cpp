@@ -8,7 +8,7 @@
 #include <World/Lights/SpotLight.h>
 #include <World/Lights/SpotLightComponent.generated.h>
 #include <World/Lights/SpotLightComponent.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
 

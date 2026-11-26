@@ -3,7 +3,7 @@
 #include <Core/Algorithms.h>
 #include <DeterministicMath/DeterministicMath.h>
 
-// 삼각형·코너 법선과 tangent다(Docs/Design/MeshAnimationAssets.ko.md 5.2절 3·5단계). 식과 임계값은
+// 삼각형·코너 법선과 tangent다(Docs/Design/MeshAnimationAssets 5.2절 3·5단계). 식과 임계값은
 // UE StaticMeshOperations.cpp의
 // GetTriangleTangentsAndNormalsWithUV·WithNoUVs·ComputeTangentsAndNormals와 같다. 합산 순서는
 // 삼각형 번호 오름차순으로 고정한다(UE는 해시 표 순서라 bit 일치는 보장하지 않는다 — 5.2절 결정성).

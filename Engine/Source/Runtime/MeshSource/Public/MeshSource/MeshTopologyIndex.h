@@ -4,7 +4,7 @@
 
 namespace rocks {
 
-// 검증을 통과한 원본 메시의 이웃 조회 표다(Docs/Design/MeshAnimationAssets.ko.md 3.7절 11, UE
+// 검증을 통과한 원본 메시의 이웃 조회 표다(Docs/Design/MeshAnimationAssets 3.7절 11, UE
 // FMeshDescription의 Get*Connected*·GetVertexPairEdge 대응). 빌드(법선·tangent·용접·hard edge)가
 // 쓰는 기본 조회를 한 번 만든 CSR 표로 준다. 표는 Build 때의 mesh 내용을 담으므로 mesh를 고치면
 // 다시 만든다. 조회 결과의 번호 순서는 오름차순이다(결정적). FindEdge·PolygonSideEdge는 mesh의

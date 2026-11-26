@@ -12,7 +12,7 @@
 |---|---|---|
 | D1 | 광원 컴포넌트(Point·Spot·Rect·Directional·Sky)와 광원 Actor | 렌더 장면 등록(CR12 SceneChangeList·RS1·RS3) |
 | D2 | `PrimitiveComponent`, Shape(`BoxComponent`·`SphereComponent`·`CapsuleComponent`)와 Trigger Actor | 렌더 proxy(RS1), 충돌·overlap(CR16) |
-| D2b | `MeshComponent`·`StaticMeshComponent`와 `StaticMeshActor`(24.3.1절 — StaticMesh 에셋 MA2b 뒤) | 렌더 proxy(RS1), 충돌(CR16) |
+| D2b | `MeshComponent`·`StaticMeshComponent`와 `StaticMeshActor`(24.3.1절 — StaticMesh 에셋 MA2b 뒤, 설계 [30장](30-MeshComponents.ko.md)) | 렌더 proxy(RS1), 충돌(CR16) |
 | D3 | `SplineComponent`(끝까지 동작) | 없음 |
 | D4 | 이동(Movement·Rotating·Projectile·SpringArm·PathMover), sweep 없이 끝까지 동작 | sweep·충돌 응답(CR16) |
 | D5 | 대기·높이 안개·decal·후처리 볼륨·반사 캡처 데이터 | RS6·RS9 등 |
@@ -23,7 +23,7 @@
 - **시스템 연결**은 하지 않는다. 시스템 상태(23.2절 `WantsSystemState`)를 요청하지 않으므로 아무것도 그리지 않는다. setter는 Render 시스템 상태가 있을 때만 다시 보내기를 표시한다(`MarkSystemStateDirty(Render)` — 상태가 없으면 아무것도 하지 않는다). 그래서 RS 단계가 상태를 붙이면 setter를 고치지 않아도 된다.
 - 모듈은 World다(CameraComponent와 같은 자리 — 23.4절). 에셋 참조(텍스처·머티리얼)가 필요한 속성은 그 참조 필드 체계가 World에 들어올 때 넣는다(24.2.8절).
 
-파일 배치(2026-11-25 사용자 지시 — [코드 스타일](../../CodingStyle.md) "파일 배치"): 클래스마다 헤더·cpp 하나, 범주 폴더 `Lights/`·`Primitives/`·`Spline/`·`Movement/`·`Camera/`(D5는 `Environment/`·`PostProcess/`)를 `Public/World/`와 `Private/`에 같이 둔다. 같이 쓰는 타입은 `LightingChannels.h`·`LightUnits.h`·`PrimitiveTypes.h`·`SplineTypes.h`다. private 공용은 `Private/ComponentValueChecks.h`(setter 값 검사 — `rocks::component_checks`), `Private/ActorRootSetup.h`(24.2.5절 root 준비 — `rocks::actor_root_setup::PrepareRoot<T>`), `Private/Lights/LightUnitMath.h`(24.2.4절 단위 변환 — `rocks::light_math`)다.
+파일 배치(2026-11-25 사용자 지시 — [코드 스타일](../../CodingStyle.md) "파일 배치"): 클래스마다 헤더·cpp 하나, 범주 폴더 `Lights/`·`Primitives/`·`Spline/`·`Movement/`·`Camera/`(D5는 `Environment/`·`PostProcess/`)를 `Public/World/`와 `Private/`에 같이 둔다. 같이 쓰는 타입은 `LightingChannels.h`·`LightUnits.h`·`PrimitiveTypes.h`·`SplineTypes.h`다. 공용 도우미는 `World/ComponentValueChecks.h`(setter 값 검사 — `rocks::component_checks`), `World/ActorRootSetup.h`(24.2.5절 root 준비 — `rocks::actor_root_setup::PrepareRoot<T>`)이고 World 밖 컴포넌트 모듈(`WorldIntegration` — 30.1절)도 쓰므로 공개 헤더다(2026-11-25 D2b에서 Private에서 옮김). private은 `Private/Lights/LightUnitMath.h`(24.2.4절 단위 변환 — `rocks::light_math`)다.
 
 묶음마다 설계 → 구현 → 리뷰어 1명 → 커밋으로 간다. D2는 24.3절이다. 이 장이 길어져 D3부터는 장을 나눈다: D3 [25장](25-SplineComponent.ko.md), D4 [26장](26-MovementComponents.ko.md), D5 [27장](27-EnvironmentComponents.ko.md).
 
@@ -230,10 +230,10 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
 
 - 원래 D2는 `PrimitiveComponent`·`MeshComponent`·`StaticMeshComponent`·`StaticMeshActor`였다.
 - 메시 쪽 셋은 **D2b**로 미룬다.
-  - `StaticMeshComponent`의 핵심 필드는 StaticMesh 에셋 참조인데, `StaticMesh` 에셋 클래스는 아직 없다([메시·애니메이션 에셋](../MeshAnimationAssets.ko.md) MA2b — 에셋 세션 작업).
+  - `StaticMeshComponent`의 핵심 필드는 StaticMesh 에셋 참조인데, `StaticMesh` 에셋 클래스는 아직 없다([메시·애니메이션 에셋](../MeshAnimationAssets/13-Stages.ko.md) MA2b — 에셋 세션 작업).
   - `MeshComponent`의 데이터는 머티리얼 override 배열(`MaterialBase` 참조)뿐이다.
   - World는 에셋을 참조하지 않는다(3절 `World` 행). 그래서 둘 다 World와 에셋 모듈 위의 `WorldIntegration`(3절 — 렌더 컴포넌트 자리) 몫이다.
-  - D2b는 MA2b 뒤에 `WorldIntegration`을 만들며 넣는다. UE 값(조사 완료)은 그때 이 절에 더한다.
+  - D2b는 MA2b 뒤에 `WorldIntegration`을 만들며 넣는다. 설계는 [30장](30-MeshComponents.ko.md)이다(2026-11-25 — World → 에셋 참조는 `SoftObjectRef`, ERD60).
 - 대신 에셋 없이 완결되는 Primitive 파생을 넣는다: UE `UShapeComponent`(Box·Sphere·Capsule)와 Trigger Actor(`ATriggerBox`·`ATriggerSphere`·`ATriggerCapsule`)다.
   - 기하 데이터와 bounds는 지금 끝까지 동작한다.
   - overlap 이벤트·충돌은 물리(CR16) 때 붙는다.
@@ -294,7 +294,7 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
   - `collisionProfileName`은 영속 `String`이다. 빈 값이면 클래스 기본 이름(virtual `DefaultCollisionProfileName()`)을 쓴다.
   - `CollisionProfileName()`은 실효 이름을 돌려준다.
   - 생성자에서 할당하지 않으려고 빈 값을 기본으로 둔다. 할당 실패를 알릴 길이 없기 때문이다.
-- `SetCollisionProfileName(name)`: 이름이 클래스 기본과 같으면(ASCII 대소문자 무시 — UE `FName` 비교) 빈 값으로 둔다. 다른 이름은 철자 그대로 둔다. 오류는 할당 실패·잘못된 UTF-8이다(값 유지). UE처럼 Mobility를 보지 않는다. profile은 물리 데이터라 Render 다시 보내기를 표시하지 않는다.
+- `SetCollisionProfileName(name)`: 성공하면 파생 hook `OnCollisionProfileNameSet()`(protected virtual, 기본 무동작)을 부른다(StaticMeshComponent가 `useDefaultCollision`을 끈다 — [30장](30-MeshComponents.ko.md) 30.3절, D2b에서 더함). 이름이 클래스 기본과 같으면(ASCII 대소문자 무시 — UE `FName` 비교) 빈 값으로 둔다. 다른 이름은 철자 그대로 둔다. 오류는 할당 실패·잘못된 UTF-8이다(값 유지). UE처럼 Mobility를 보지 않는다. profile은 물리 데이터라 Render 다시 보내기를 표시하지 않는다.
 - 이름 상수: `PrimitiveComponent::PrimitiveCollisionProfileName`("BlockAll"), `ShapeComponent::ShapeCollisionProfileName`("OverlapAllDynamic"), `TriggerBase::TriggerCollisionProfileName`("Trigger").
 - **CD2 연결(2026-11-25 — [충돌 데이터](../CollisionData.ko.md) 9절, 표는 CD1 `Collision` 모듈):**
   - World가 Initialize 때 설정 문맥(`WorldDesc::settings`)의 `CollisionSettings`로 `CollisionProfileTable`을 만들어 갖는다(`World::CollisionProfiles()`).

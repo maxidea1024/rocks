@@ -489,6 +489,378 @@ TEST(AssetImport_OpenAsset) {
     }
 }
 
+// 다른 에셋 고치기(7.1절 20 A2f4): EditAsset으로 연 Leaf를 고쳐 출력과 함께 저장한다(결과 edited,
+// 기록은 그대로, 참조는 걸지 않는다 — OpenAsset을 함께 부르면 건다, 같은 id 두 번은 한 번 저장).
+// 끝나면 연 패키지는 닫히고 원래 열려 있던 깨끗한 대상은 열린 채 깨끗하다. 거부(아무것도 쓰지
+// 않는다): 자기 주 출력·null·묶음 구성원(InvalidArgument), 색인에 없음(NotFound —
+// MissingDependency, related = id), 전부터 열려 있고 dirty(Busy), 읽기 전용(Unsupported —
+// NewerVersion), 같은 id 파일 둘(AlreadyExists — DuplicateAssetId). 고친 뒤 임포터가 실패하면 연
+// 대상은 버리고 원래 열려 있던 대상은 dirty로 둔다. 저장 순서: 새 주 출력 → 고친 에셋 → 기존 주
+// 출력(고친 에셋 저장 실패면 새 파일을 지우고 대상은 옛 내용, 기존 출력 저장 실패면 고친 에셋은 새
+// 내용). 묶음 두 구성원이 같은 대상을 고치면 한 번 저장하고 두 결과에 나온다.
+TEST(AssetImport_EditAsset) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-edit");
+    REQUIRE(scene.ready);
+    auto registration =
+        scene.hooks.Register(IdOf<TestAsset>(), AssetTypeHooks{&CountingTags, nullptr, nullptr});
+    REQUIRE(registration);
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    const AssetId leaf = FixedId(LeafId);
+    const auto put = [&](StringView extra) noexcept {
+        StringBuilder<256> text(env.allocator);
+        return text.TryAppendFormat("value=1\n{}", extra) &&
+               scene.PutSource(RockSource, text.View());
+    };
+    const auto putEdit = [&](StringView extra, AssetId id) noexcept {
+        StringBuilder<256> text(env.allocator);
+        return text.TryAppendFormat("{}edit={}", extra, id) && put(text.View());
+    };
+    const auto copyOf = [&](StringView file) noexcept {
+        Array<uint8> copy(env.allocator);
+        CHECK(copy.TryAppend(scene.files.Bytes(file)));
+        return copy;
+    };
+    const auto hardOn = [&](StringView file, AssetId target) noexcept {
+        auto read = ReadFile(env, scene, file);
+        if (!read) {
+            return false;
+        }
+
+        bool hard = false;
+        for (const PackageDependencyEntry& entry : read.Value().dependencies) {
+            hard = hard || (entry.kind == PackageDependencyKind::Hard && entry.asset == target);
+        }
+
+        return hard;
+    };
+    // Leaf 파일의 TestAsset value다(열려 있지 않으면 열고 닫는다).
+    const auto leafValue = [&](AssetService& service) noexcept {
+        const bool open = service.Packages().Find(leaf) != nullptr;
+        if (!open && !service.Packages().Open(leaf)) {
+            return -1;
+        }
+
+        const TestAsset* asset = Representative(service.Packages(), leaf);
+        const int32 value = asset != nullptr ? asset->value : -1;
+        if (!open) {
+            CHECK(service.Packages().Close(leaf));
+        }
+
+        return value;
+    };
+    const auto refuses = [&](AssetService& service, StringView path, bool reimport, ErrorCode error,
+                             AssetDiagnosticCode code, AssetId related) noexcept {
+        AssetImportResult refused(env.allocator);
+        AssetDiagnostic failure;
+        auto done = reimport ? service.Reimport(scene.lock, path, {}, {}, diagnostics, refused,
+                                                nullptr, &failure)
+                             : service.Import(scene.lock, path, inputs, {}, {}, diagnostics,
+                                              refused, nullptr, &failure);
+        return !done && done.Error() == error && failure.code == code &&
+               (related.IsNull() || failure.related == related) && refused.edited.IsEmpty();
+    };
+
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    const int32 base = leafValue(service);
+    REQUIRE(base >= 0);
+    REQUIRE(putEdit({}, leaf));
+    AssetImportResult result(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/User", inputs, {}, {}, diagnostics, result));
+    const AssetId user = result.id;
+    REQUIRE(result.edited.Size() == 1);
+    CHECK(result.edited[0].id == leaf && result.edited[0].path.View() == "/Game/Leaf" &&
+          result.edited[0].key.IsEmpty() && result.outputs.IsEmpty());
+    CHECK(leafValue(service) == base + 1 && service.Packages().Count() == 0 &&
+          !hardOn("Content/User.rasset", leaf) && Matches(env, scene, service.Index()));
+    auto leafRead = ReadFile(env, scene, "Content/Leaf.rasset");
+    REQUIRE(leafRead);
+    CHECK(leafRead.Value().importRecord.IsEmpty());
+
+    // 같은 id 두 번 + OpenAsset: 두 번 고치고 한 번 저장, Hard로 건다.
+    {
+        StringBuilder<128> text(env.allocator);
+        REQUIRE(text.TryAppendFormat("value=1\nopen={}\nedit={},{}", leaf, leaf, leaf) &&
+                scene.PutSource(RockSource, text.View()));
+    }
+    tagCalls = 0;
+    AssetImportResult twice(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/User", {}, {}, diagnostics, twice));
+    CHECK(twice.edited.Size() == 1 && tagCalls == 2 && leafValue(service) == base + 3 &&
+          hardOn("Content/User.rasset", leaf));
+
+    // 원래 열려 있던 깨끗한 대상: 고쳐 저장하고 열린 채 깨끗하다.
+    REQUIRE(service.Packages().Open(leaf));
+    REQUIRE(putEdit({}, leaf));
+    AssetImportResult openClean(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/User", {}, {}, diagnostics, openClean));
+    CHECK(service.Packages().Find(leaf) != nullptr && !service.Packages().Find(leaf)->dirty &&
+          service.Packages().Count() == 1 && leafValue(service) == base + 4);
+
+    // 고친 뒤 임포터 실패(warn=0 — 경고가 아닌 코드): 열려 있던 대상은 dirty, 파일은 그대로.
+    const Array<uint8> leafBefore = copyOf("Content/Leaf.rasset");
+    REQUIRE(putEdit("warn=0\n", leaf));
+    CHECK(refuses(service, "/Game/User", true, ErrorCode::InvalidArgument,
+                  AssetDiagnosticCode::None, AssetId{}));
+    CHECK(service.Packages().Find(leaf)->dirty && leafValue(service) == base + 5 &&
+          SameBytes(scene.files.Bytes("Content/Leaf.rasset"), leafBefore.View()));
+
+    // 전부터 열려 있고 dirty면 Busy다(파일·메모리 그대로).
+    REQUIRE(putEdit({}, leaf));
+    CHECK(refuses(service, "/Game/User", true, ErrorCode::Busy, AssetDiagnosticCode::None, leaf));
+    CHECK(leafValue(service) == base + 5 &&
+          SameBytes(scene.files.Bytes("Content/Leaf.rasset"), leafBefore.View()));
+    REQUIRE(service.Packages().Close(leaf));
+
+    // 열려 있지 않은 대상을 고친 뒤 실패하면 버린다(닫힘, 파일 그대로).
+    REQUIRE(putEdit("warn=0\n", leaf));
+    CHECK(refuses(service, "/Game/User", true, ErrorCode::InvalidArgument,
+                  AssetDiagnosticCode::None, AssetId{}));
+    CHECK(service.Packages().Count() == 0 && leafValue(service) == base + 4);
+
+    // 거부: 자기 주 출력·null·색인에 없음.
+    REQUIRE(putEdit({}, user));
+    CHECK(refuses(service, "/Game/User", true, ErrorCode::InvalidArgument,
+                  AssetDiagnosticCode::None, user));
+    REQUIRE(putEdit({}, AssetId{}));
+    CHECK(refuses(service, "/Game/Null", false, ErrorCode::InvalidArgument,
+                  AssetDiagnosticCode::None, AssetId{}));
+    CHECK(!scene.files.Has("Content/Null.rasset"));
+    const AssetId missing = FixedId(990002);
+    REQUIRE(putEdit({}, missing));
+    CHECK(refuses(service, "/Game/Missing", false, ErrorCode::NotFound,
+                  AssetDiagnosticCode::MissingDependency, missing));
+    CHECK(!scene.files.Has("Content/Missing.rasset") && service.Packages().Count() == 0);
+
+    // 저장 순서 1: 새 주 출력(Tags 1) → 고친 Leaf(Tags 2) — Leaf에서 실패하면 새 파일을 지운다.
+    REQUIRE(putEdit({}, leaf));
+    const Array<uint8> leafSaved = copyOf("Content/Leaf.rasset");
+    tagCalls = 0;
+    failTagsOn = 2;
+    CHECK(refuses(service, "/Game/Fresh", false, ErrorCode::Busy, AssetDiagnosticCode::None,
+                  AssetId{}));
+    failTagsOn = 0;
+    CHECK(!scene.files.Has("Content/Fresh.rasset") &&
+          SameBytes(scene.files.Bytes("Content/Leaf.rasset"), leafSaved.View()) &&
+          Matches(env, scene, service.Index()));
+
+    // 저장 순서 2: 고친 Leaf(Tags 1) → 기존 주 출력 User(Tags 2) — User에서 실패하면 Leaf는 새
+    // 내용, User는 옛 내용이다.
+    const Array<uint8> userBefore = copyOf("Content/User.rasset");
+    tagCalls = 0;
+    failTagsOn = 2;
+    CHECK(refuses(service, "/Game/User", true, ErrorCode::Busy, AssetDiagnosticCode::None,
+                  AssetId{}));
+    failTagsOn = 0;
+    CHECK(!SameBytes(scene.files.Bytes("Content/Leaf.rasset"), leafSaved.View()) &&
+          SameBytes(scene.files.Bytes("Content/User.rasset"), userBefore.View()) &&
+          leafValue(service) == base + 5);
+    // 같은 실패에서 원래 열려 있던 깨끗한 Leaf는 저장을 마쳤으므로 dirty가 아니다(디스크와 같다).
+    REQUIRE(service.Packages().Open(leaf));
+    tagCalls = 0;
+    failTagsOn = 2;
+    CHECK(refuses(service, "/Game/User", true, ErrorCode::Busy, AssetDiagnosticCode::None,
+                  AssetId{}));
+    failTagsOn = 0;
+    CHECK(service.Packages().Find(leaf) != nullptr && !service.Packages().Find(leaf)->dirty &&
+          leafValue(service) == base + 6);
+    REQUIRE(service.Packages().Close(leaf));
+
+    // 서로 다른 대상 둘(Leaf, 임포트한 Other — 기록은 그대로): 부른 순서로 저장·결과에 나온다. 둘째
+    // 저장이 실패하면 새 주 출력은 남고(기존 파일 Leaf를 교체한 뒤) 결과에는 저장한 Leaf만 남는다.
+    REQUIRE(put({}));
+    AssetImportResult otherResult(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/Other", inputs, {}, {}, diagnostics, otherResult));
+    const AssetId other = otherResult.id;
+    const Array<uint8> otherRecord = [&]() noexcept {
+        Array<uint8> copy(env.allocator);
+        auto read = ReadFile(env, scene, "Content/Other.rasset");
+        CHECK(read && copy.TryAppend(read.Value().importRecord));
+        return copy;
+    }();
+    {
+        StringBuilder<256> text(env.allocator);
+        REQUIRE(text.TryAppendFormat("value=1\nedit={},{}", leaf, other) &&
+                scene.PutSource(RockSource, text.View()));
+    }
+    AssetImportResult two(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/Two", inputs, {}, {}, diagnostics, two));
+    REQUIRE(two.edited.Size() == 2);
+    CHECK(two.edited[0].id == leaf && two.edited[1].id == other &&
+          two.edited[1].path.View() == "/Game/Other" && leafValue(service) == base + 7);
+    auto otherRead = ReadFile(env, scene, "Content/Other.rasset");
+    REQUIRE(otherRead);
+    CHECK(SameBytes(otherRead.Value().importRecord, otherRecord.View()));
+    tagCalls = 0;
+    failTagsOn = 3;
+    AssetImportResult partial(env.allocator);
+    AssetDiagnostic partialFailure;
+    auto partialDone = service.Import(scene.lock, "/Game/Three", inputs, {}, {}, diagnostics,
+                                      partial, nullptr, &partialFailure);
+    failTagsOn = 0;
+    CHECK(!partialDone && partialDone.Error() == ErrorCode::Busy &&
+          scene.files.Has("Content/Three.rasset") && partial.edited.Size() == 1 &&
+          partial.edited[0].id == leaf);
+
+    // 재임포트의 기록 출력(자기 출력)은 고치지 않는다.
+    REQUIRE(put("outputs=extra\n"));
+    AssetImportResult multi(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/Multi", inputs, {}, {}, diagnostics, multi));
+    REQUIRE(multi.outputs.Size() == 1);
+    REQUIRE(putEdit("outputs=extra\n", multi.outputs[0].id));
+    CHECK(refuses(service, "/Game/Multi", true, ErrorCode::InvalidArgument,
+                  AssetDiagnosticCode::None, multi.outputs[0].id));
+
+    // 상한: 서로 다른 대상 65개는 CapacityExceeded다(아무것도 쓰지 않는다).
+    {
+        StringBuilder<4096> text(env.allocator);
+        REQUIRE(text.TryAppend("value=1\nedit="));
+        for (usize index = 0; index <= MaxImportEditedAssets; ++index) {
+            REQUIRE(put({}));
+            StringBuilder<64> path(env.allocator);
+            REQUIRE(path.TryAppendFormat("/Game/Cap{}", index));
+            AssetImportResult made(env.allocator);
+            REQUIRE(service.Import(scene.lock, path.View(), inputs, {}, {}, diagnostics, made));
+            REQUIRE((index == 0 || text.TryAppend(",")) && text.TryAppendFormat("{}", made.id));
+        }
+
+        REQUIRE(scene.PutSource(RockSource, text.View()));
+        CHECK(refuses(service, "/Game/TooMany", false, ErrorCode::CapacityExceeded,
+                      AssetDiagnosticCode::None, AssetId{}));
+        CHECK(!scene.files.Has("Content/TooMany.rasset") && service.Packages().Count() == 0);
+    }
+
+    // 묶음: 두 새 구성원이 같은 Leaf를 고친다(한 번 저장 — Tags 3번, 두 결과에 나온다). 구성원을
+    // 고치려 하면 InvalidArgument다.
+    {
+        StringBuilder<128> text(env.allocator);
+        REQUIRE(text.TryAppendFormat("value=1\nedit={}", leaf) &&
+                scene.PutSource("SourceArt/A.trock", text.View()) &&
+                scene.PutSource("SourceArt/B.trock", text.View()));
+    }
+    const String aFile = scene.Absolute(env.allocator, "SourceArt/A.trock");
+    const String bFile = scene.Absolute(env.allocator, "SourceArt/B.trock");
+    const AssetImportSourceInput aInputs[] = {{DefaultImportSourceRole, aFile.View()}};
+    const AssetImportSourceInput bInputs[] = {{DefaultImportSourceRole, bFile.View()}};
+    AssetImportGroupMember members[2];
+    members[0].path = "/Game/GroupA";
+    members[0].sources = aInputs;
+    members[1].path = "/Game/GroupB";
+    members[1].sources = bInputs;
+    AssetImportResult results[] = {AssetImportResult(env.allocator),
+                                   AssetImportResult(env.allocator)};
+    tagCalls = 0;
+    REQUIRE(service.ImportGroup(scene.lock, members, diagnostics, results));
+    CHECK(tagCalls == 3 && results[0].edited.Size() == 1 && results[1].edited.Size() == 1 &&
+          results[1].edited[0].id == leaf && leafValue(service) == base + 10);
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=1\neditmember=1"));
+    members[0].path = "/Game/GroupC";
+    members[1].path = "/Game/GroupD";
+    AssetDiagnostic groupFailure;
+    auto refusedGroup =
+        service.ImportGroup(scene.lock, members, diagnostics, results, nullptr, &groupFailure);
+    CHECK(!refusedGroup && refusedGroup.Error() == ErrorCode::InvalidArgument &&
+          groupFailure.detail == 0 && scene.test.lastEditError == ErrorCode::InvalidArgument);
+    CHECK(!scene.files.Has("Content/GroupC.rasset") && !scene.files.Has("Content/GroupD.rasset"));
+
+    // 다른 구성원의 기록 출력도 고치지 않는다(그 구성원의 출력 단계가 저장한다).
+    REQUIRE(scene.PutSource("SourceArt/A.trock", "value=1\noutputs=x"));
+    AssetImportResult owner(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/GroupE", aInputs, {}, {}, diagnostics, owner));
+    REQUIRE(owner.outputs.Size() == 1);
+    {
+        StringBuilder<128> text(env.allocator);
+        REQUIRE(text.TryAppendFormat("value=1\nedit={}", owner.outputs[0].id) &&
+                scene.PutSource("SourceArt/B.trock", text.View()));
+    }
+    AssetImportGroupMember mixed[2];
+    mixed[0].path = "/Game/GroupE";
+    mixed[0].reimport = true;
+    mixed[1].path = "/Game/GroupF";
+    mixed[1].sources = bInputs;
+    groupFailure = AssetDiagnostic{};
+    auto refusedOwned =
+        service.ImportGroup(scene.lock, mixed, diagnostics, results, nullptr, &groupFailure);
+    CHECK(!refusedOwned && refusedOwned.Error() == ErrorCode::InvalidArgument &&
+          groupFailure.detail == 1 && !scene.files.Has("Content/GroupF.rasset"));
+}
+
+// EditAsset 거부(파일 상태가 필요한 셋): 읽기 전용 대상 Unsupported(NewerVersion), 미해결 import가
+// 있는 대상 InvalidArgument(MissingDependency), 같은 id 파일 둘 AlreadyExists(DuplicateAssetId).
+// 아무것도 쓰지 않는다. 전파 대상과 겹치는 고친 에셋의 한 번 저장은 시험하지 않는다(텍스처 원소
+// 전파 장면이 필요하다 — 코드는 고친 에셋 단계에서 저장한 id를 전파 저장에서 건너뛴다).
+TEST(AssetImport_EditAssetRejectsFiles) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-edit-files");
+    REQUIRE(scene.ready);
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    const AssetId leaf = FixedId(LeafId);
+    StringBuilder<128> text(env.allocator);
+    REQUIRE(text.TryAppendFormat("value=1\nedit={}", leaf) &&
+            scene.PutSource(RockSource, text.View()));
+    PackageWriteOptions readOnly = EditorOptions();
+    readOnly.customVersions = UnknownCustomVersions;
+    const Array<uint8> readOnlyLeaf =
+        Write(env.allocator, *env.source, sources.packages[4].Handle(), readOnly);
+    REQUIRE(!readOnlyLeaf.IsEmpty());
+    scene.files.Remove("Content/Leaf.rasset");
+    REQUIRE(scene.files.AddFile("Content/Leaf.rasset", readOnlyLeaf.View()));
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        AssetImportResult refused(env.allocator);
+        AssetDiagnostic failure;
+        auto done = service.Import(scene.lock, "/Game/ReadOnlyUser", inputs, {}, {}, diagnostics,
+                                   refused, nullptr, &failure);
+        CHECK(!done && done.Error() == ErrorCode::Unsupported &&
+              failure.code == AssetDiagnosticCode::NewerVersion && failure.related == leaf &&
+              service.Packages().Count() == 0 && !scene.files.Has("Content/ReadOnlyUser.rasset"));
+    }
+
+    // 미해결 import가 있는 대상(Hero — Base 파일 없이)은 MissingDependency다(related = 첫 대상).
+    REQUIRE(scene.files.AddDirectory("Content/Dir") &&
+            scene.files.AddFile("Content/Dir/Hero.rasset", sources.hero.View()));
+    {
+        StringBuilder<128> heroText(env.allocator);
+        REQUIRE(heroText.TryAppendFormat("value=1\nedit={}", FixedId(HeroId)) &&
+                scene.PutSource(RockSource, heroText.View()));
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        AssetImportResult refused(env.allocator);
+        AssetDiagnostic failure;
+        auto done = service.Import(scene.lock, "/Game/HeroUser", inputs, {}, {}, diagnostics,
+                                   refused, nullptr, &failure);
+        CHECK(!done && done.Error() == ErrorCode::InvalidArgument &&
+              failure.code == AssetDiagnosticCode::MissingDependency && !failure.related.IsNull() &&
+              service.Packages().Count() == 0 && !scene.files.Has("Content/HeroUser.rasset"));
+        REQUIRE(scene.PutSource(RockSource, text.View()));
+    }
+
+    REQUIRE(scene.files.AddFile("Content/Leaf2.rasset", scene.files.Bytes("Content/Leaf.rasset")));
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        AssetImportResult refused(env.allocator);
+        AssetDiagnostic failure;
+        auto done = service.Import(scene.lock, "/Game/Twice", inputs, {}, {}, diagnostics, refused,
+                                   nullptr, &failure);
+        CHECK(!done && done.Error() == ErrorCode::AlreadyExists &&
+              failure.code == AssetDiagnosticCode::DuplicateAssetId && failure.related == leaf &&
+              !scene.files.Has("Content/Twice.rasset"));
+    }
+}
+
 // 묶음 임포트(7.1절 19 A2f3d UXR11): 새 구성원 둘이 서로를 Hard로 건다(MemberAsset·OpenAsset —
 // 주 출력을 임포터 호출 전에 만든다), 재임포트 묶음(앞 구성원이 의존으로 연 다른 구성원은 Busy가
 // 아니다), 순환 구성원 하나만 단일 재임포트(open=), 새 구성원과 재임포트 구성원 섞기. 거부(detail =
@@ -1925,6 +2297,64 @@ TEST(AssetImport_AllocationFailures) {
         CHECK(!imported && imported.Error() == ErrorCode::OutOfMemory);
         CHECK(PackageFiles(scene) == packages && service.Packages().Count() == open &&
               Matches(env, scene, service.Index()));
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+}
+
+// EditAsset 할당 실패: 다른 에셋을 고치는 새 임포트의 모든 할당 실패가 OutOfMemory이고 파일(새 주
+// 출력 없음·Leaf 옛 내용)·색인·열린 패키지가 그대로다(삼킨 실패 — GC 표·성공 뒤 닫기 — 는 성공).
+TEST(AssetImport_EditAssetAllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-edit-oom");
+    REQUIRE(scene.ready);
+    StringBuilder<128> text(env.allocator);
+    REQUIRE(text.TryAppendFormat("value=2\nedit={}", FixedId(LeafId)));
+    REQUIRE(scene.PutSource(RockSource, text.View()));
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    Array<uint8> leafBefore(env.allocator);
+    REQUIRE(leafBefore.TryAppend(scene.files.Bytes("Content/Leaf.rasset")));
+    TaggedFailAllocator failing(env.allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        AssetService service(failing, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        const usize open = service.Packages().Count();
+        const usize packages = PackageFiles(scene);
+        TextDiagnostics diagnostics(env.allocator);
+        AssetImportResult result(failing);
+        failing.FailOnAttempt(attempt);
+        auto imported =
+            service.Import(scene.lock, "/Game/EditRock", inputs, {}, {}, diagnostics, result);
+        const bool failed = failing.Failed();
+        const uint32 tag = failing.FailedTag();
+        failing.DisableFailure();
+        if (!failed || imported) {
+            REQUIRE(imported);
+            CHECK(scene.files.Has("Content/EditRock.rasset") && result.edited.Size() == 1 &&
+                  !SameBytes(scene.files.Bytes("Content/Leaf.rasset"), leafBefore.View()) &&
+                  Matches(env, scene, service.Index()));
+            if (!failed) {
+                CHECK(service.Packages().Count() == open);
+                break;
+            }
+
+            CHECK(tag == GcReferenceTableTag || service.Packages().Count() > open);
+            scene.files.Remove("Content/EditRock.rasset");
+            scene.files.Remove("Content/Leaf.rasset");
+            REQUIRE(scene.files.AddFile("Content/Leaf.rasset", leafBefore.View()));
+            continue;
+        }
+
+        CHECK(!imported && imported.Error() == ErrorCode::OutOfMemory);
+        CHECK(PackageFiles(scene) == packages && service.Packages().Count() == open &&
+              SameBytes(scene.files.Bytes("Content/Leaf.rasset"), leafBefore.View()) &&
+              result.edited.IsEmpty() && Matches(env, scene, service.Index()));
         ++failures;
     }
 
