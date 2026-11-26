@@ -61,10 +61,10 @@ struct AssetImporterInfo {
     // 접두 역할 하나 이상이다(0개는 InvalidImportOption). 재임포트의 역할 없는 원본 하나
     // (`--source=`)는 받지 않는다(InvalidImportOption).
     bool variableSourcesOnly = false;
-    // 태그 키 접두다(Docs/Design/AssetSystem 7.1절 21 A2f5 — AddTag 키는 `<tagPrefix>.`로 시작한다).
-    // 비면 name이다. 여러 임포터가 같은 접두를 쓸 수 있다(한 기능 묶음 — Unreal 교환 임포터들이
-    // `UnrealExchange`). 규칙은 name과 같다(1–MaxImporterNameBytes byte의 `[A-Za-z0-9_]`, `Bundle`
-    // 금지 — 어기면 등록 InvalidArgument).
+    // 태그 키 접두다(Docs/Design/AssetSystem 7.1절 21 A2f5 — AddTag 키는 `<tagPrefix>.`로
+    // 시작한다). 비면 name이다. 여러 임포터가 같은 접두를 쓸 수 있다(한 기능 묶음 — Unreal 교환
+    // 임포터들이 `UnrealExchange`). 규칙은 name과 같다(1–MaxImporterNameBytes byte의
+    // `[A-Za-z0-9_]`, `Bundle` 금지 — 어기면 등록 InvalidArgument).
     StringView tagPrefix{};
     // 옵션 struct(등록 ROCKS_STRUCT)다. 0이면 옵션 없음. 필드 이름은 outputType의 노출 속성
     // 이름·ImportReservedNames와 겹칠 수 없다(대소문자 무시 — 옵션과 설정을 첫 이름으로 나눈다).
@@ -113,9 +113,9 @@ public:
                               uint64 detail = 0) noexcept = 0;
     // 주 출력 기록에 임포터 태그 한 쌍을 더한다(Docs/Design/AssetSystem 7.1절 19 A2f3a UXR8 —
     // 저장이 패키지 Tags로 낸다, 색인 항목 태그에 나온다). key는 `<Info().tagPrefix>.`(비면
-    // `<Info().name>.`)으로 시작한다(IsValidImportTag — 7.1절 21 A2f5). 같은 쌍은 한 번만 남는다. 이번 기록에는 이번에 더한 것만
-    // 남는다(재임포트도 — 옛 값은 PreviousTags로 읽어 다시 더한다). 오류: 규칙 위반·MaxImportTags
-    // 초과 InvalidArgument, 할당 실패.
+    // `<Info().name>.`)으로 시작한다(IsValidImportTag — 7.1절 21 A2f5). 같은 쌍은 한 번만 남는다.
+    // 이번 기록에는 이번에 더한 것만 남는다(재임포트도 — 옛 값은 PreviousTags로 읽어 다시 더한다).
+    // 오류: 규칙 위반·MaxImportTags 초과 InvalidArgument, 할당 실패.
     virtual Result<void> AddTag(StringView key, StringView value) noexcept = 0;
     // 재임포트면 옛 소유 기록의 태그((key, value) byte 순), 새 임포트는 빈 목록이다. 수명은 Import
     // 호출 동안이다.

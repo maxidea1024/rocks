@@ -4,15 +4,6 @@
 
 namespace rocks {
 
-namespace unreal_texture_importer_set {
-
-// 등록 순서(4.6절 1번 표 순서)다.
-constexpr ExchangeClass TextureClasses[UnrealTextureImporterCount] = {
-    ExchangeClass::Texture2D, ExchangeClass::TextureCube, ExchangeClass::Texture2DArray,
-    ExchangeClass::TextureCubeArray, ExchangeClass::VolumeTexture};
-
-} // namespace unreal_texture_importer_set
-
 UnrealTextureImporterSet::UnrealTextureImporterSet() noexcept
     : importers_{UnrealTextureImporter(ExchangeClass::Texture2D),
                  UnrealTextureImporter(ExchangeClass::TextureCube),
@@ -23,7 +14,6 @@ UnrealTextureImporterSet::UnrealTextureImporterSet() noexcept
 
 Result<void> RegisterUnrealTextureImporters(void* state, AssetImporterTable& table,
                                             Array<AssetImporterRegistration>& tokens) noexcept {
-    using namespace unreal_texture_importer_set;
     if (state == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -33,7 +23,7 @@ Result<void> RegisterUnrealTextureImporters(void* state, AssetImporterTable& tab
         return reserved;
     }
 
-    for (const ExchangeClass type : TextureClasses) {
+    for (const ExchangeClass type : UnrealTextureClasses) {
         auto registered = table.Register(importers.At(type));
         if (!registered) {
             return Result<void>::Failure(registered.Error());

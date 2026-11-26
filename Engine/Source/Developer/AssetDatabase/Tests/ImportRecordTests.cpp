@@ -296,8 +296,8 @@ StringView LongValue(usize count) noexcept {
 } // namespace
 
 // 태그 접두(7.1절 21 A2f5): 접두가 이름과 다르면 필드 9에 쓰고 읽기가 그 접두로 태그를 대조한다.
-// 이름과 같은 접두는 쓰지 않는다(한 꼴). 접두 길이·참조 기록 위반은 쓰기 InvalidArgument이고, 읽기는
-// 이름과 같은 접두·형식 위반·접두가 다른 태그 키를 거부한다.
+// 이름과 같은 접두는 쓰지 않는다(한 꼴). 접두 길이·참조 기록 위반은 쓰기 InvalidArgument이고,
+// 읽기는 이름과 같은 접두·형식 위반·접두가 다른 태그 키를 거부한다.
 TEST(ImportRecord_TagPrefix) {
     SystemAllocator allocator;
     WriteScene scene(allocator);
@@ -337,7 +337,14 @@ TEST(ImportRecord_TagPrefix) {
     scene.input.tagPrefix = StringView(longPrefix, sizeof(longPrefix));
     CHECK(WriteImportRecord(allocator, Self, scene.input).Error() == ErrorCode::InvalidArgument);
     scene.input.tagPrefix = StringView(longPrefix, MaxImporterNameBytes);
-    CHECK(WriteImportRecord(allocator, Self, scene.input));
+    auto longest = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(longest);
+
+    // 태그 없이 접두만 있는 기록도 왕복한다(필드 9만).
+    auto longestRead = ReadImportRecord(allocator, Self, longest.Value().View());
+    REQUIRE(longestRead);
+    CHECK(longestRead.Value().tagPrefix.ByteCount() == MaxImporterNameBytes &&
+          longestRead.Value().tags.IsEmpty());
 
     // 참조 기록은 접두가 없다.
     ImportRecordInput reference;
@@ -348,9 +355,9 @@ TEST(ImportRecord_TagPrefix) {
     // 읽기 거부: 이름과 같은 접두, 빈 접두, wire 종류, 접두와 다른 태그 키.
     const auto readRejects = [&](StringView prefix, WireType wire, StringView key) noexcept {
         RawScene raw(allocator);
-        raw.top.Set(ImportRecordTagPrefixField, wire,
-                    Span<const uint8>(reinterpret_cast<const uint8*>(prefix.Data()),
-                                      prefix.ByteCount()));
+        raw.top.Set(
+            ImportRecordTagPrefixField, wire,
+            Span<const uint8>(reinterpret_cast<const uint8*>(prefix.Data()), prefix.ByteCount()));
         Array<RawRecord> items(allocator);
         CHECK(items.TryPushBack(TagItem(allocator, key, "1")));
         const Array<uint8> list = ListPayload(allocator, items);
@@ -359,10 +366,18 @@ TEST(ImportRecord_TagPrefix) {
                ErrorCode::InvalidArgument;
     };
     CHECK(readRejects("TextureImporter", WireType::String, "TextureImporter.A"));
-    CHECK(readRejects("", WireType::String, "Shared.A"));
+    CHECK(readRejects("", WireType::String, "TextureImporter.A"));
     CHECK(readRejects("Shared", WireType::Bytes, "Shared.A"));
     CHECK(readRejects("Shared", WireType::String, "TextureImporter.A"));
     CHECK(!readRejects("Shared", WireType::String, "Shared.A"));
+
+    // 참조 기록에는 필드 9가 없어야 한다.
+    RawScene raw(allocator);
+    raw.MakeReference();
+    raw.top.Set(ImportRecordTagPrefixField, WireType::String,
+                Span<const uint8>(reinterpret_cast<const uint8*>("Shared"), 6));
+    CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 // 임포터 태그(7.1절 19 A2f3a UXR8): 쓰기는 (key, value) byte 순으로 정렬해 필드 8에 쓰고 읽기가 그

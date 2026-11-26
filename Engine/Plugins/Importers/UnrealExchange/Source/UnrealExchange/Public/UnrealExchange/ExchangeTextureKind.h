@@ -22,7 +22,7 @@ public:
 
 // state(ExchangeTextureKind*)를 텍스처 다섯 클래스에 등록한다(ExchangeKindSetup 모양). 오류: null
 // state InvalidArgument, 표 등록 오류.
-ROCKS_UNREALEXCHANGE_API Result<void> RegisterExchangeTextureKinds(void* state,
-                                                                   ExchangeKindTable& table) noexcept;
+ROCKS_UNREALEXCHANGE_API Result<void>
+RegisterExchangeTextureKinds(void* state, ExchangeKindTable& table) noexcept;
 
 } // namespace rocks

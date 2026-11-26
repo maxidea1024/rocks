@@ -206,8 +206,9 @@ ROCKS_ASSETDATABASE_API bool IsValidImportSourceLocation(StringView root,
 
 // 임포터 태그 한 쌍이 기록 규칙에 맞는지다(쓰기·읽기·임포트 문맥 AddTag와 같은 판정 — AS 7.1절
 // 19 A2f3a): key는 `<importerName>.` 다음이 비지 않고 전체 1–MaxPackageTagKeyBytes byte, value는
-// 0–PackageMaxStringBytes byte, 둘 다 유효 UTF-8·NUL 없음.
-ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView importerName, StringView key,
+// 0–PackageMaxStringBytes byte, 둘 다 유효 UTF-8·NUL 없음. prefix는 태그 접두다(기록·임포터의
+// tagPrefix, 비면 importerName — 7.1절 21 A2f5).
+ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView prefix, StringView key,
                                               StringView value) noexcept;
 
 // self 패키지의 ImportRecord byte를 쓴다(PackageWriteOptions::importRecord에 넘긴다). outputs는
@@ -215,8 +216,10 @@ ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView importerName, StringVie
 // 오류: self·owner가 null이거나 스펙 규칙(AS 7.1절 15 — 소유 기록: importerId·importerName 있음,
 // 원본 1–256개·role 유일, 출력 1–1024개·outputKey 유일·asset 유일·null 아님·type null 아님·self
 // 포함, 문자열 상한·UTF-8·NUL 없음, relativePath 형태(IsValidImportSourceLocation), root에 `/`·`\`
-// 없음, options는 Record envelope, 태그 0–256개·(key, value) 쌍 유일·IsValidImportTag. 참조 기록:
-// importerId null·이름 빈 값·버전 0·원본·옵션·출력·태그 없음)을 어기면 InvalidArgument, 전체가
+// 없음, options는 Record envelope, 태그 0–256개·(key, value) 쌍 유일·IsValidImportTag(접두는
+// tagPrefix, 비면 importerName), tagPrefix는 비거나 1–MaxImporterNameBytes byte·UTF-8. 참조 기록:
+// importerId null·이름 빈 값·tagPrefix 빈 값·버전 0·원본·옵션·출력·태그 없음)을 어기면
+// InvalidArgument, 전체가
 // Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
 ROCKS_ASSETDATABASE_API Result<Array<uint8>>
 WriteImportRecord(Allocator& allocator, AssetId self, const ImportRecordInput& input) noexcept;

@@ -379,8 +379,7 @@ TEST(AssetImport_ImporterTags) {
     TestImporter sharedImporter(shared);
     auto sharedToken = scene.importers.Register(sharedImporter);
     REQUIRE(sharedToken);
-    REQUIRE(scene.PutSource("SourceArt/Shared.trock", "value=1
-tags=Shared.Path|/Game/S"));
+    REQUIRE(scene.PutSource("SourceArt/Shared.trock", "value=1\ntags=Shared.Path|/Game/S"));
     const String sharedSource = scene.Absolute(env.allocator, "SourceArt/Shared.trock");
     const AssetImportSourceInput sharedInputs[] = {{DefaultImportSourceRole, sharedSource.View()}};
     AssetImportResult sharedResult(env.allocator);
@@ -393,6 +392,21 @@ tags=Shared.Path|/Game/S"));
         ReadImportRecord(env.allocator, sharedResult.id, sharedFile.Value().importRecord);
     REQUIRE(sharedRecord);
     CHECK(sharedRecord.Value().tagPrefix.View() == "Shared");
+    // 접두 임포터의 재임포트도 접두를 남긴다(기록 필드 9).
+    AssetImportResult sharedAgain(env.allocator);
+    AssetDiagnostic againFailure;
+    auto reimported = service.Reimport(scene.lock, "/Game/SharedTag", {}, {}, diagnostics,
+                                       sharedAgain, nullptr, &againFailure);
+    CHECK(againFailure.code == AssetDiagnosticCode::None);
+    REQUIRE(reimported);
+    auto againFile = ReadFile(env, scene, "Content/SharedTag.rasset");
+    REQUIRE(againFile);
+    auto againRecord =
+        ReadImportRecord(env.allocator, sharedResult.id, againFile.Value().importRecord);
+    REQUIRE(againRecord);
+    CHECK(againRecord.Value().tagPrefix.View() == "Shared" &&
+          tagCount(sharedResult.id, "Shared.Path", "/Game/S") == 1);
+
     AssetDuplicateResult sharedCopy(env.allocator);
     REQUIRE(service.Duplicate(scene.lock, "/Game/SharedTag", "/Game/SharedCopy", sharedCopy));
     CHECK(tagCount(sharedCopy.id, "Shared.Path", "/Game/S") == 1);
@@ -402,13 +416,20 @@ tags=Shared.Path|/Game/S"));
     REQUIRE(copyRecord);
     CHECK(copyRecord.Value().tagPrefix.View() == "Shared");
 
-    REQUIRE(scene.PutSource("SourceArt/Named.trock", "value=1
-tags=SharedImporter.Path|x"));
+    // 두 임포터가 같은 접두를 쓸 수 있다.
+    AssetImporterInfo sibling = shared;
+    sibling.id = Guid{0x494d50540001ull, 13};
+    sibling.name = "SiblingImporter";
+    TestImporter siblingImporter(sibling);
+    CHECK(scene.importers.Register(siblingImporter));
+
+    REQUIRE(scene.PutSource("SourceArt/Named.trock", "value=1\ntags=SharedImporter.Path|x"));
     const String named = scene.Absolute(env.allocator, "SourceArt/Named.trock");
     const AssetImportSourceInput namedInputs[] = {{DefaultImportSourceRole, named.View()}};
     AssetImportResult namedResult(env.allocator);
-    CHECK(service.Import(scene.lock, "/Game/NamedTag", namedInputs, "SharedImporter", {},
-                         diagnostics, namedResult)
+    CHECK(service
+              .Import(scene.lock, "/Game/NamedTag", namedInputs, "SharedImporter", {}, diagnostics,
+                      namedResult)
               .Error() == ErrorCode::InvalidArgument);
     CHECK(!scene.files.Has("Content/NamedTag.rasset"));
 

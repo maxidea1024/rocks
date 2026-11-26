@@ -42,8 +42,8 @@ inline constexpr uint32 UnrealExchangeMaxDiagnostics = 4096;
 inline constexpr usize UnrealExchangeBlobChunkBytes = 64 * 1024;
 
 // 임포트한 에셋의 색인 태그 키다(9.2절 — 지금 UE objectPath와 묶음 redirect로 알게 된 옛 경로들,
-// 기존 에셋 조회가 찾는다, 10.5절 4번). 키 접두는 교환 임포터들의 태그 접두 UnrealExchangeTagPrefix다
-// (AssetSystem 7.1절 21 A2f5).
+// 기존 에셋 조회가 찾는다, 10.5절 4번). 키 접두는 교환 임포터들의 태그 접두(AssetSystem 7.1절
+// 21 A2f5) UnrealExchangeTagPrefix다.
 inline constexpr StringView UnrealExchangeObjectPathTag = "UnrealExchange.ObjectPath";
 inline constexpr StringView UnrealExchangeFormerPathsTag = "UnrealExchange.FormerPaths";
 

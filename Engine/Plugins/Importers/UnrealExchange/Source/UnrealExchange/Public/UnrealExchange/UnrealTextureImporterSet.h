@@ -12,6 +12,9 @@ namespace rocks {
 
 // 교환 텍스처 클래스 수다(Texture2D·TextureCube·Texture2DArray·TextureCubeArray·VolumeTexture).
 inline constexpr usize UnrealTextureImporterCount = 5;
+inline constexpr ExchangeClass UnrealTextureClasses[UnrealTextureImporterCount] = {
+    ExchangeClass::Texture2D, ExchangeClass::TextureCube, ExchangeClass::Texture2DArray,
+    ExchangeClass::TextureCubeArray, ExchangeClass::VolumeTexture};
 
 class ROCKS_UNREALEXCHANGE_API UnrealTextureImporterSet {
 public:

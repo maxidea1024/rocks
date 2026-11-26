@@ -346,8 +346,20 @@ Result<int32> RunAssetImportUnrealCommand(void* context, Span<const StringView> 
 
     ExchangeBundle bundle(allocator);
     ExchangeDiagnostics diagnostics(allocator);
-    if (auto read = ReadExchangeBundle(platform::PhysicalFileSystem(), parsed.bundle, {}, bundle,
-                                       diagnostics);
+    // 상대 묶음 경로는 작업 디렉터리 기준이다(서비스 임포트는 절대 원본 경로를 받는다 — 10.6절
+    // 2번).
+    auto directory = commandlet_host::AbsoluteCommandPath(allocator, parsed.bundle);
+    if (!directory) {
+        if (directory.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(directory.Error());
+        }
+
+        return StageFailure(output, allocator, bundle, diagnostics, directory.Error(),
+                            "failed to read the bundle", parsed.bundle);
+    }
+
+    if (auto read = ReadExchangeBundle(platform::PhysicalFileSystem(), directory.Value().View(), {},
+                                       bundle, diagnostics);
         !read) {
         return StageFailure(output, allocator, bundle, diagnostics, read.Error(),
                             "failed to read the bundle", parsed.bundle);

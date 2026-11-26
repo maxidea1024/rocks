@@ -323,7 +323,8 @@ Result<bool> ImportOwnerInputValid(Allocator& allocator, AssetId self,
         input.sources.Size() > MaxImportSources || input.outputs.IsEmpty() ||
         input.outputs.Size() > MaxImportOutputs || input.tags.Size() > MaxImportTags ||
         (!input.options.IsEmpty() && !ReadRecordHeader(input.options)) ||
-        (!input.tagPrefix.IsEmpty() && !ImportValidText(input.tagPrefix, 1, MaxImporterNameBytes))) {
+        (!input.tagPrefix.IsEmpty() &&
+         !ImportValidText(input.tagPrefix, 1, MaxImporterNameBytes))) {
         return Result<bool>::Success(false);
     }
 
@@ -644,11 +645,11 @@ bool IsValidImportSourceLocation(StringView root, StringView relativePath) noexc
     return ImportValidRoot(root) && ImportValidSourcePath(root, relativePath);
 }
 
-bool IsValidImportTag(StringView importerName, StringView key, StringView value) noexcept {
-    // 접두 `<importerName>.` 뒤에 한 byte 이상이 있어야 한다.
-    if (importerName.IsEmpty() || key.ByteCount() <= importerName.ByteCount() + 1 ||
-        !key.StartsWith(importerName, StringComparison::CaseSensitive) ||
-        key.Data()[importerName.ByteCount()] != '.') {
+bool IsValidImportTag(StringView prefix, StringView key, StringView value) noexcept {
+    // 접두 `<prefix>.` 뒤에 한 byte 이상이 있어야 한다.
+    if (prefix.IsEmpty() || key.ByteCount() <= prefix.ByteCount() + 1 ||
+        !key.StartsWith(prefix, StringComparison::CaseSensitive) ||
+        key.Data()[prefix.ByteCount()] != '.') {
         return false;
     }
 

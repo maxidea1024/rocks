@@ -26,7 +26,8 @@ struct ImporterEntry {
 };
 
 constexpr ImporterEntry Importers[] = {
-    {ExchangeClass::Texture2D, "unreal_texture_2d", Guid{0x337d13db1df44802ull, 0xba4755da35a5b39dull}},
+    {ExchangeClass::Texture2D, "unreal_texture_2d",
+     Guid{0x337d13db1df44802ull, 0xba4755da35a5b39dull}},
     {ExchangeClass::TextureCube, "unreal_texture_cube",
      Guid{0x93f7e0e111764305ull, 0xa63e6497472c9260ull}},
     {ExchangeClass::Texture2DArray, "unreal_texture_2d_array",
@@ -104,7 +105,8 @@ public:
         return Result<void>::Success();
     }
 
-    Result<void> Format(TextReferenceKind, const FieldValue&, StringBuilderBase&) noexcept override {
+    Result<void> Format(TextReferenceKind, const FieldValue&,
+                        StringBuilderBase&) noexcept override {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
@@ -299,16 +301,20 @@ Result<void> AddTags(AssetImportContext& context,
     }
 
     for (const String& former : options.formerPaths) {
+        if (former.View() == objectPath) {
+            continue;
+        }
+
         if (auto added = context.AddTag(UnrealExchangeFormerPathsTag, former.View()); !added) {
             return added;
         }
     }
 
     for (const ImportTag& tag : context.PreviousTags()) {
-        const bool former = tag.key.View() == UnrealExchangeFormerPathsTag;
-        const bool renamed =
-            tag.key.View() == UnrealExchangeObjectPathTag && tag.value.View() != objectPath;
-        if (former || renamed) {
+        // 지금 objectPath는 옛 경로가 아니다(이름을 되돌린 경우 — 10.6절 7번).
+        const bool kept = tag.key.View() == UnrealExchangeFormerPathsTag ||
+                          tag.key.View() == UnrealExchangeObjectPathTag;
+        if (kept && tag.value.View() != objectPath) {
             if (auto added = context.AddTag(UnrealExchangeFormerPathsTag, tag.value.View());
                 !added) {
                 return added;
@@ -361,9 +367,12 @@ Result<void> UnrealTextureImporter::Import(AssetImportContext& context) noexcept
     ExchangeDiagnostics diagnostics(allocator);
     if (auto read = ReadExchangeAssetDocument(document->bytes, allocator, asset, diagnostics);
         !read) {
-        const AssetDiagnosticCode code = diagnostics.Items().IsEmpty()
-                                             ? AssetDiagnosticCode::CorruptBundle
-                                             : diagnostics.Items()[diagnostics.Items().Size() - 1].code;
+        // 마지막 error 진단의 코드다(플러그인 error 진단은 InvalidSource — 없으면 CorruptBundle).
+        AssetDiagnosticCode code = AssetDiagnosticCode::CorruptBundle;
+        for (const ExchangeDiagnostic& item : diagnostics.Items()) {
+            code = item.severity == ExchangeSeverity::Error ? item.code : code;
+        }
+
         return Fail(context, code, read.Error());
     }
 
@@ -387,9 +396,8 @@ Result<void> UnrealTextureImporter::Import(AssetImportContext& context) noexcept
     ExchangeTextureSource converted(allocator);
     ExchangeTextureFailure failure;
     if (auto made = ConvertExchangeTextureSource(asset, blobs.View(), converted, failure); !made) {
-        return failure.code == AssetDiagnosticCode::None
-                   ? Result<void>::Failure(made.Error())
-                   : context.Fail(failure.code, made.Error());
+        return failure.code == AssetDiagnosticCode::None ? Result<void>::Failure(made.Error())
+                                                         : context.Fail(failure.code, made.Error());
     }
 
     auto output = context.Output({}, info_.outputType);

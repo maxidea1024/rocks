@@ -110,9 +110,8 @@ Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& 
                                      !IsReservedImporterName(info.tagPrefix));
     if (info.id == Guid{} || !IsToken(info.name, MaxImporterNameBytes, true, false) ||
         IsReservedImporterName(info.name) || !tagPrefixValid ||
-        info.extensions.Size() > MaxImporterExtensions ||
-        info.roles.Size() > MaxImportSources || HasDuplicate(info.extensions) ||
-        HasDuplicate(info.roles)) {
+        info.extensions.Size() > MaxImporterExtensions || info.roles.Size() > MaxImportSources ||
+        HasDuplicate(info.extensions) || HasDuplicate(info.roles)) {
         return invalid();
     }
 
