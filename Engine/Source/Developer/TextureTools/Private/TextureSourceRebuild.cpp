@@ -116,6 +116,11 @@ Result<void> AppendMip0(AssetSourceRebuildSink& sink, ObjectHandle element,
                         Array<uint8>& out) noexcept {
     auto read = sink.ReadBulk(element, source.bulk);
     if (!read) {
+        // 할당 실패(저장소 해제 버퍼)는 내용 결함이 아니다 — 진단 없이 돌려준다(12.14절).
+        if (read.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(read.Error());
+        }
+
         return sink.Fail(AssetDiagnosticCode::InvalidSource, read.Error(), index);
     }
 

@@ -68,6 +68,11 @@ struct CookOut {
     explicit CookOut(Allocator& allocator) noexcept : sink(allocator), warnings(allocator) {
     }
 
+    // 경고 모음만 다른 Allocator로 둔다(경고 기록 실패 시험).
+    CookOut(Allocator& allocator, Allocator& warningAllocator) noexcept
+        : sink(allocator), warnings(warningAllocator) {
+    }
+
     MemoryPackageSink sink;
     AssetDiagnostic failure;
     Array<CookDiagnostic> warnings;
@@ -1013,6 +1018,46 @@ TEST(TextureCook_Warnings) {
     }
 
     CHECK(processor.Builds() == 1);
+}
+
+// 경고 기록 실패(14.1.119 후속 2번): 경고 모음(호출자 Allocator)의 n번째 할당이 실패하면 쿠킹은
+// OutOfMemory이고 실패 진단은 None이다. 너겟 미적중·적중이 같다. 실패가 없으면 경고 둘이다.
+TEST(TextureCook_WarningAllocationFailures) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "texture-cook-warning-failures");
+    REQUIRE(nuggets.ready);
+    TextureCookProcessor processor;
+    const Array<uint8> pixels = Pattern(scene.allocator, 8 * 8 * 4, 2);
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 8, 8, 1, pixels.View()));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.srgb = 1;
+        texture.compressionSettings = TextureCompressionSettings::Masks;
+        texture.preserveBorder = 1;
+        return true;
+    }));
+    for (int round = 0; round < 2; ++round) {
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(scene.allocator);
+            failing.FailOnAttempt(attempt);
+            CookOut out(scene.allocator, failing);
+            auto cooked = scene.Cook(processor, out, nuggets.cache.Get());
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (exhausted) {
+                CHECK(cooked && out.warnings.Size() == 2);
+                break;
+            }
+
+            ++failures;
+            CHECK(!cooked && cooked.Error() == ErrorCode::OutOfMemory &&
+                  out.failure.code == AssetDiagnosticCode::None);
+        }
+
+        CHECK(failures > 0);
+    }
 }
 
 // 너겟(12.14절 5·6번): 미적중 → Put(SCC meta 구성원 0·ValueId 0..N) → 같은 키 적중(빌드 없음·같은
