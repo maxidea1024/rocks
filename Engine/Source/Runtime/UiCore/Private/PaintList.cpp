@@ -59,12 +59,23 @@ Result<void> PaintList::TryAddGlyphRun(const Geometry& geometry, Span<const Pain
         return reserved;
     }
 
+    // 축 정렬 변환(회전·기울임 없음)이면 글리프 왼쪽 위를 창 픽셀에 맞춘다(UE 글자 픽셀 맞춤).
+    // 가운데 정렬 등으로 0.5 px에 놓인 글리프는 두 픽셀에 걸쳐 보간되어 뿌옇게 보인다.
+    const AffineTransform2D& render = geometry.render;
+    const bool snap = render.m01 == 0 && render.m10 == 0 && render.m00 > 0 && render.m11 > 0;
     for (const PaintGlyph& glyph : glyphs) {
         if (glyph.size.x == 0 || glyph.size.y == 0) {
             continue;
         }
 
-        const AffineTransform2D offset{1, 0, 0, 1, glyph.position.x, glyph.position.y};
+        Vec2 position = glyph.position;
+        if (snap) {
+            const Vec2 window = render.Apply(position);
+            position.x += (math::Round(window.x) - window.x) / render.m00;
+            position.y += (math::Round(window.y) - window.y) / render.m11;
+        }
+
+        const AffineTransform2D offset{1, 0, 0, 1, position.x, position.y};
         PaintBox box{geometry.MakeChild(glyph.size, offset, {}, {}), tint(glyph.tint), layer};
         box.resource = glyph.resource;
         box.uvStart = glyph.uv.min;

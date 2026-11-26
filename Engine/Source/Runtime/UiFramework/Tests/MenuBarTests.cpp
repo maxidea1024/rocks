@@ -193,6 +193,11 @@ TEST(UiFramework_MenuBuilderLaysOutEntriesSeparatorsAndSections) {
     REQUIRE(
         FormatKeyChord({.key = input::Key::S, .shift = true, .control = true, .alt = true}, chord));
     CHECK(chord.View() == "Ctrl+Alt+Shift+S");
+    // 단축키 없는 항목은 단축키 칸이 없고("None"을 쓰지 않는다), 빈 단축키는 글자가 없다.
+    CHECK(RowAt(*panel, 3)->ChildCount() == 1);
+    String empty(bench.allocator);
+    REQUIRE(FormatKeyChord({}, empty));
+    CHECK(empty.IsEmpty());
 }
 
 TEST(UiFramework_MenuBarOpensSwitchesAndClosesOnExecute) {

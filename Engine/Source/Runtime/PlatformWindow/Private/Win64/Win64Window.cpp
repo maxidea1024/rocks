@@ -1381,6 +1381,10 @@ private:
 
 } // namespace
 
+bool Window::SupportsFrame(WindowFrame frame) noexcept {
+    return frame == WindowFrame::System || frame == WindowFrame::Custom;
+}
+
 Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc,
                                          WindowCreateReport* report) noexcept {
     auto fail = [report](ErrorCode error, const char* call, DWORD osError) noexcept {

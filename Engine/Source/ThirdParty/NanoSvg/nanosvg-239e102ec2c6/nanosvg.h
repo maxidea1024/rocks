@@ -213,6 +213,7 @@ void nsvgDelete(NSVGimage* image);
 #define NSVG_RGB(r, g, b) (((unsigned int)r) | ((unsigned int)g << 8) | ((unsigned int)b << 16))
 
 #ifdef _MSC_VER
+	#pragma warning (push) /* Rocks modification: see ThirdParty.json modifications. */
 	#pragma warning (disable: 4996) // Switch off security warnings
 	#pragma warning (disable: 4100) // Switch off unreferenced formal parameter warnings
 	#ifdef __cplusplus
@@ -3272,6 +3273,10 @@ void nsvgDelete(NSVGimage* image)
 	}
 	free(image);
 }
+
+#ifdef _MSC_VER
+	#pragma warning (pop) /* Rocks modification: see ThirdParty.json modifications. */
+#endif
 
 #endif // NANOSVG_IMPLEMENTATION
 

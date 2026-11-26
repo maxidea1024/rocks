@@ -40,7 +40,8 @@ const char* KeyChord::InputName() const noexcept {
 }
 
 Result<void> FormatKeyChord(const KeyChord& chord, String& out) noexcept {
-    if (!chord.IsValid()) {
+    // 빈 단축키(KeyChord{})도 IsValid지만 쓸 글자가 없다("None"을 쓰지 않는다).
+    if (!chord.IsValid() || chord == KeyChord{}) {
         return Result<void>::Success();
     }
 

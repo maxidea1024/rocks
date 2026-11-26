@@ -43,7 +43,8 @@ Result<void> MenuBuilder::AddRow(StringView label, MenuAction&& action, KeyChord
     }
 
     SharedPtr<TextLabel> keys;
-    if (shortcut.IsValid()) {
+    // 단축키가 없으면(빈 KeyChord) 칸을 비운다.
+    if (shortcut.IsValid() && shortcut != KeyChord{}) {
         String chord(context_->GetAllocator());
         auto formatted = FormatKeyChord(shortcut, chord);
         auto made = formatted ? context_->MakeLabel(chord.View(), style.keybinding.font)

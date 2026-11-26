@@ -1,4 +1,3 @@
-#include <Base/Compiler.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <PlatformWindow/Window.h>
 #include <TestSupport/Test.h>
@@ -47,9 +46,12 @@ Result<UniquePtr<Window>> CreateCustom(Allocator& allocator, bool resizable) noe
 
 } // namespace
 
-#if ROCKS_PLATFORM_WINDOWS
-
 TEST(PlatformWindow_CustomFrameHitZones) {
+    // 직접 그린 테두리가 없는 플랫폼은 아래 Unsupported 시험이 맡는다.
+    if (!Window::SupportsFrame(WindowFrame::Custom)) {
+        return;
+    }
+
     SystemAllocator allocator;
     auto window = CreateCustom(allocator, true);
     REQUIRE(window);
@@ -84,6 +86,11 @@ TEST(PlatformWindow_CustomFrameHitZones) {
 }
 
 TEST(PlatformWindow_CustomFrameFixedSizeHasNoEdgesOrMaximize) {
+    // 직접 그린 테두리가 없는 플랫폼은 아래 Unsupported 시험이 맡는다.
+    if (!Window::SupportsFrame(WindowFrame::Custom)) {
+        return;
+    }
+
     SystemAllocator allocator;
     auto window = CreateCustom(allocator, false);
     REQUIRE(window);
@@ -99,6 +106,11 @@ TEST(PlatformWindow_CustomFrameFixedSizeHasNoEdgesOrMaximize) {
 }
 
 TEST(PlatformWindow_CustomFrameCloseRequestAndSystemFrameZones) {
+    // 직접 그린 테두리가 없는 플랫폼은 아래 Unsupported 시험이 맡는다.
+    if (!Window::SupportsFrame(WindowFrame::Custom)) {
+        return;
+    }
+
     SystemAllocator allocator;
     auto custom = CreateCustom(allocator, true);
     auto system = Window::Create(
@@ -122,14 +134,14 @@ TEST(PlatformWindow_CustomFrameCloseRequestAndSystemFrameZones) {
     system.Value()->SetRegionHitTest({});
 }
 
-#else
-
 TEST(PlatformWindow_CustomFrameRejectedOnUnsupportedPlatforms) {
+    if (Window::SupportsFrame(WindowFrame::Custom)) {
+        return;
+    }
+
     SystemAllocator allocator;
     auto window = CreateCustom(allocator, true);
     CHECK(!window && window.Error() == ErrorCode::Unsupported);
 }
-
-#endif
 
 } // namespace rocks::platform

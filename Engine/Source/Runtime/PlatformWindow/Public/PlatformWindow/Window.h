@@ -121,6 +121,10 @@ public:
     // 결과를 채운다(OS 실패면 실패한 호출과 GetLastError). 실패 로그는 호출자가 남긴다.
     static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc,
                                             WindowCreateReport* report = nullptr) noexcept;
+    // 이 플랫폼 backend가 frame 방식의 창을 만들 수 있는지다(직접 그린 테두리는 데스크톱
+    // Windows만). 지원하지 않는 방식으로 Create하면 Unsupported다. 호출자는 이것으로 System
+    // 테두리로 물러날지 미리 정한다.
+    static bool SupportsFrame(WindowFrame frame) noexcept;
 
     virtual ~Window() = default;
 

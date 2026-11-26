@@ -122,7 +122,7 @@ void CarouselWidget::AdvanceAutoPage() noexcept {
 }
 
 void CarouselWidget::EndAutoScrolling() noexcept {
-    autoTimer_ = {};
+    autoTimer_.Reset();
 }
 
 Result<ObjectHandle> CarouselWidget::AddChild(ObjectRegistry& objects, ObjectHandle page) noexcept {

@@ -907,6 +907,11 @@ private:
     AInputQueue* queue_ = nullptr;
 };
 
+bool Window::SupportsFrame(WindowFrame frame) noexcept {
+    // 직접 그린 창 테두리는 데스크톱 Windows만 지원한다.
+    return frame == WindowFrame::System;
+}
+
 Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc,
                                          WindowCreateReport* report) noexcept {
     auto fail = [report](ErrorCode error) noexcept {
@@ -922,8 +927,7 @@ Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc&
         return fail(ErrorCode::InvalidArgument);
     }
 
-    // 직접 그린 창 테두리는 데스크톱 Windows만 지원한다.
-    if (desc.frame != WindowFrame::System) {
+    if (!SupportsFrame(desc.frame)) {
         return fail(ErrorCode::Unsupported);
     }
 

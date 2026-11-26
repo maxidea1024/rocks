@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// 창과 Graphics에 의존하지 않는 UI 좌표 및 배치 기반이다.
+// UI coordinate and layout foundation with no dependency on windows or Graphics.
 public sealed class UiCore : EngineModuleRules
 {
     protected override string ModuleName => "UiCore";

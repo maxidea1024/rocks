@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// 월드 컴포넌트와 UI 입력·렌더 타깃을 게임 뷰포트에 연결한다.
+// Connects world components and UI input/render targets to the game viewport.
 public sealed class WorldIntegration : EngineModuleRules
 {
     protected override string ModuleName => "WorldIntegration";
