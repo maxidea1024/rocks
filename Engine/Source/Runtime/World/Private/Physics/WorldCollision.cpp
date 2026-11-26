@@ -49,6 +49,16 @@ QueryFilter ResolveFilter(const World& world, const QueryFilter& filter) noexcep
     return QueryFilter::ByChannel(CollisionChannel::WorldStatic);
 }
 
+// 질의할 형상 trace다: 끝점·형상 값이 유한하고 회전을 정규화할 수 있다(0·비유한 quaternion은 hit
+// 없음 — 장면이 정규화한다). 길이 0은 질의한다(UE SceneQuery.cpp:515). Cylinder는 CY2 전이라 hit
+// 없음이다.
+bool IsTraceableShape(const Vec3d& start, const Vec3d& end, const Quatd& rotation,
+                      const CollisionShape& shape) noexcept {
+    return shape.kind != CollisionShapeKind::Cylinder && IsFinite(start) && IsFinite(end) &&
+           rotation.TryNormalize().IsOk() && IsFinite(shape.halfExtent) &&
+           math::IsFinite(shape.radius) && math::IsFinite(shape.halfHeight);
+}
+
 // 질의 결과가 없을 때의 First hit다(UE ResetOutHits — TraceStart·TraceEnd만).
 HitResult EmptyHit(const Vec3d& start, const Vec3d& end) noexcept {
     HitResult hit;
@@ -128,6 +138,69 @@ Result<bool> LineTraceAll(const World& world, const Vec3d& start, const Vec3d& e
 
     auto traced = scene->TraceLine(start, end, ResolveFilter(world, filter), params, TraceMode::All,
                                    nullptr, &hits);
+    if (!traced) {
+        hits.Clear();
+    }
+
+    return traced;
+}
+
+bool ShapeTraceTest(const World& world, const Vec3d& start, const Vec3d& end, const Quatd& rotation,
+                    const CollisionShape& shape, const QueryFilter& filter,
+                    const QueryParams& params) noexcept {
+    if (shape.IsNearlyZero()) {
+        return LineTraceTest(world, start, end, filter, params);
+    }
+
+    const PhysicsScene* scene = world.GetPhysicsScene();
+    if (scene == nullptr || !IsTraceableShape(start, end, rotation, shape)) {
+        return false;
+    }
+
+    auto traced = scene->TraceShape(start, end, rotation, shape, ResolveFilter(world, filter),
+                                    params, TraceMode::Test, nullptr, nullptr);
+    return traced && traced.Value();
+}
+
+bool ShapeTraceFirst(const World& world, const Vec3d& start, const Vec3d& end,
+                     const Quatd& rotation, const CollisionShape& shape, const QueryFilter& filter,
+                     const QueryParams& params, HitResult& hit) noexcept {
+    if (shape.IsNearlyZero()) {
+        return LineTraceFirst(world, start, end, filter, params, hit);
+    }
+
+    hit = EmptyHit(start, end);
+    const PhysicsScene* scene = world.GetPhysicsScene();
+    if (scene == nullptr || !IsTraceableShape(start, end, rotation, shape)) {
+        return false;
+    }
+
+    auto traced = scene->TraceShape(start, end, rotation, shape, ResolveFilter(world, filter),
+                                    params, TraceMode::First, &hit, nullptr);
+    if (!traced || !traced.Value()) {
+        hit = EmptyHit(start, end);
+        return false;
+    }
+
+    return true;
+}
+
+Result<bool> ShapeTraceAll(const World& world, const Vec3d& start, const Vec3d& end,
+                           const Quatd& rotation, const CollisionShape& shape,
+                           const QueryFilter& filter, const QueryParams& params,
+                           Array<HitResult>& hits) noexcept {
+    if (shape.IsNearlyZero()) {
+        return LineTraceAll(world, start, end, filter, params, hits);
+    }
+
+    hits.Clear();
+    const PhysicsScene* scene = world.GetPhysicsScene();
+    if (scene == nullptr || !IsTraceableShape(start, end, rotation, shape)) {
+        return Result<bool>::Success(false);
+    }
+
+    auto traced = scene->TraceShape(start, end, rotation, shape, ResolveFilter(world, filter),
+                                    params, TraceMode::All, nullptr, &hits);
     if (!traced) {
         hits.Clear();
     }
