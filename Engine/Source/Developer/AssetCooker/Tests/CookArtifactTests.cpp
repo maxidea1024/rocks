@@ -399,8 +399,15 @@ TEST(CookArtifact_StageTable) {
     REQUIRE(CookArtifactStages().Register(stage));
     CHECK(CookArtifactStages().Find(CookArtifactKind::ShaderLibrary) == &stage);
     REQUIRE(CookArtifactStages().Unregister(stage));
-    CHECK(CookArtifactCallName(CookArtifactCall::Produce) == "Produce" &&
-          CookArtifactCallName(CookArtifactCall::Run) == "Run");
+    CHECK(CookArtifactCallName(CookArtifactCall::None) == "None" &&
+          CookArtifactCallName(CookArtifactCall::Run) == "Run" &&
+          CookArtifactCallName(CookArtifactCall::NewStagingPath) == "NewStagingPath" &&
+          CookArtifactCallName(CookArtifactCall::Produce) == "Produce" &&
+          CookArtifactCallName(CookArtifactCall::Reuse) == "Reuse" &&
+          CookArtifactCallName(CookArtifactCall::Report) == "Report" &&
+          CookArtifactCallName(CookArtifactCall::ReportStat) == "ReportStat");
+    // 범위 밖 값은 None이다(계약 밖 — 진단 문자열이 비지 않게).
+    CHECK(CookArtifactCallName(static_cast<CookArtifactCall>(0xFF)) == "None");
 }
 
 // 게시와 재사용(10.3.1절 A4f3 3·4번): 전체 쿠킹은 형식 둘 × 이름 둘을 게시하고 매니페스트 항목의
