@@ -15,7 +15,7 @@ namespace rocks::physics {
 //   bit 0–5   object type(충돌 채널 0–63)
 //   bit 6–7   운동 묶음(LayerMotion)
 //   bit 8–10  참여 표지(LayerParticipation*)
-//   bit 11–31 응답 묶음 색인(장면의 응답 묶음 표 — PH3)
+//   bit 11–31 응답 묶음 색인(장면의 응답 묶음 표 ResponseSetTable — 7.1.6절)
 inline constexpr uint32 LayerChannelBits = 6;
 inline constexpr uint32 LayerChannelMask = (1u << LayerChannelBits) - 1u;
 inline constexpr uint32 LayerMotionShift = 6;
@@ -61,6 +61,16 @@ constexpr uint32 ObjectLayerParticipation(JPH::ObjectLayer layer) noexcept {
     return (static_cast<uint32>(layer) >> LayerParticipationShift) & LayerParticipationMask;
 }
 
+constexpr uint32 ObjectLayerChannel(JPH::ObjectLayer layer) noexcept {
+    return static_cast<uint32>(layer) & LayerChannelMask;
+}
+
+constexpr uint32 ObjectLayerResponseSet(JPH::ObjectLayer layer) noexcept {
+    return (static_cast<uint32>(layer) >> LayerResponseSetShift) & LayerResponseSetMask;
+}
+
+class ResponseSetTable;
+
 // object 층 → broadphase 층(운동 묶음 bit — 6.1절).
 class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface {
 public:
@@ -76,11 +86,19 @@ public:
     bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broadPhase) const override;
 };
 
-// 시뮬레이션 쌍 필터다. PH1은 6.2절 1단계(둘 다 Static, QueryOnly, physics·probe 표지 없음 →
-// 거짓)까지이고, 응답 묶음 판정은 PH3에서 더한다(7.1.1절).
+// 시뮬레이션 쌍 필터다(6.2절): 둘 다 Static·QueryOnly·physics·probe 표지 없음이면 거짓, 그 밖은 두
+// 응답 묶음에서 서로의 object type 응답을 꺼내 최소가 Block일 때만 참이다(UE 컴포넌트 대 컴포넌트
+// 응답). 표는 빌리고 step 안의 job thread에서 읽는다(7.1.6절).
 class ObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
 public:
+    explicit ObjectLayerPairFilter(const ResponseSetTable& responseSets) noexcept
+        : responseSets_(responseSets) {
+    }
+
     bool ShouldCollide(JPH::ObjectLayer first, JPH::ObjectLayer second) const override;
+
+private:
+    const ResponseSetTable& responseSets_;
 };
 
 } // namespace rocks::physics

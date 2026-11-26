@@ -44,20 +44,26 @@ bool TypeChecker::EngineStructHasDefault(uint32 symbol) noexcept {
     }
 
     structDefault_[symbol] = StructDefaultComputing;
-    const Symbol& entry = c.symbols_[symbol];
-    const BindingSchema& schema = c.schemas_[entry.index].schema;
-    const SchemaType& source = schema.Types()[entry.item];
     bool all = true;
-    for (uint32 at = source.firstField; all && at < source.firstField + source.fieldCount; ++at) {
-        const uint32 field = binder_.FindName(SpaceKey(NameSpaceKind::Members, symbol),
-                                              schema.Text(schema.Fields()[at].name));
-        const uint32 type = field == NoSymbol ? NoType : c.symbols_[field].type;
-        if (type == NoType || IsOptional(type)) {
-            continue;
-        }
+    // 기반 struct의 필드도 값의 일부다(SL 10.2절 struct `base` — EI1a). 기반 순환은 이름 해석이
+    // 끊었다.
+    for (uint32 owner = symbol, step = 0; all && IsEngineStruct(owner) && step < c.symbols_.Size();
+         owner = c.symbols_[owner].base, ++step) {
+        const Symbol& entry = c.symbols_[owner];
+        const BindingSchema& schema = c.schemas_[entry.index].schema;
+        const SchemaType& source = schema.Types()[entry.item];
+        for (uint32 at = source.firstField; all && at < source.firstField + source.fieldCount;
+             ++at) {
+            const uint32 field = binder_.FindName(SpaceKey(NameSpaceKind::Members, owner),
+                                                  schema.Text(schema.Fields()[at].name));
+            const uint32 type = field == NoSymbol ? NoType : c.symbols_[field].type;
+            if (type == NoType || IsOptional(type)) {
+                continue;
+            }
 
-        const uint32 target = SymbolOf(type);
-        all = IsEngineStruct(target) ? EngineStructHasDefault(target) : HasDefault(type);
+            const uint32 target = SymbolOf(type);
+            all = IsEngineStruct(target) ? EngineStructHasDefault(target) : HasDefault(type);
+        }
     }
 
     structDefault_[symbol] = all ? StructDefaultPresent : StructDefaultMissing;

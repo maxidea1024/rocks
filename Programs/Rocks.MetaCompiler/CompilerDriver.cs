@@ -186,6 +186,9 @@ internal static class CompilerDriver
                 "Use the supported Clang/toolchain and metadata subset; add a reviewed parser case before accepting a new AST shape.");
         }
 
+        // Sparks 노출(상속·끊기)과 노출 규칙이다(Docs/Design/SparksBinding.ko.md — descriptor가 실효 노출 flag를 싣는다). AST 모양 예외 변환
+        // 밖에서 부른다(이름 표 적재 실패가 RMC2001로 바뀌지 않게).
+        SparksBinding.Resolve(schema, SparksNames.Load());
         foreach (ClassModel type in schema.Ordered)
         {
             // 의존 모듈이 이미 리플렉션한 이름을 이 모듈이 다시 정의하면(헤더를 include하지 않은 재정의) 한 프로그램에서
@@ -374,6 +377,7 @@ internal static class CompilerDriver
         }
 
         byte[] descriptor = ModuleDescriptor.Write(options.Module, schema.Ordered);
+        byte[]? bindingSchema = options.BindingSchema is null ? null : SparksBinding.Write(options.Module, schema);
         beforeManifestVerification?.Invoke();
         // 외부 편집은 파일 잠금을 따르지 않을 수 있다. 이 비교는 확인 시점의 변경을 감지하지만
         // 검사 이후 게시 사이에 다른 프로세스가 바꾸는 것까지 OS 원자 CAS로 막지는 않는다.
@@ -391,6 +395,11 @@ internal static class CompilerDriver
             if (!File.Exists(options.Descriptor) || !File.ReadAllBytes(options.Descriptor).AsSpan().SequenceEqual(descriptor))
             {
                 throw new MetadataException($"generated descriptor is stale: {options.Descriptor}", "RMC4000", "Regenerate with the same command without --check, then rebuild.");
+            }
+
+            if (options.BindingSchema is not null && (!File.Exists(options.BindingSchema) || !File.ReadAllBytes(options.BindingSchema).AsSpan().SequenceEqual(bindingSchema)))
+            {
+                throw new MetadataException($"generated binding schema is stale: {options.BindingSchema}", "RMC4000", "Regenerate with the same command without --check, then rebuild.");
             }
 
             HashSet<string> expected = formattedOutputs.Select(output => Path.GetFullPath(output.Path)).ToHashSet(
@@ -441,6 +450,10 @@ internal static class CompilerDriver
             }
 
             AtomicFile.WriteIfChanged(options.Descriptor, descriptor);
+            if (options.BindingSchema is not null)
+            {
+                AtomicFile.WriteIfChanged(options.BindingSchema, bindingSchema!);
+            }
         }
 
         Console.WriteLine($"Rocks metadata: module {options.Module}: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");

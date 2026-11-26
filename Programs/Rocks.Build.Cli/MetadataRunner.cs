@@ -86,7 +86,8 @@ public static class MetadataRunner
         string tag = Guid.NewGuid().ToString("N");
         string stage = Path.Combine(context.OutputDirectory, ".metadata-stage", tag);
         string StageRoot(string module) => Path.Combine(stage, module);
-        string StageDescriptor(string module) => Path.Combine(stage, module + ".rocksmeta.json");
+        string StageDescriptor(string module) => Path.Combine(stage, module + MetadataModule.DescriptorSuffix);
+        string StageBindingSchema(string module) => Path.Combine(stage, module + MetadataModule.BindingSchemaSuffix);
         string Inventory(string module) => Path.Combine(stage, module + ".inventory.json");
 
         // 생성 include 루트(자기 모듈 포함)를 이번 실행의 stage 루트로 바꾼다.
@@ -129,7 +130,7 @@ public static class MetadataRunner
                     }
                 }
 
-                arguments.AddRange(["--output-root", StageRoot(run.Name), "--descriptor", StageDescriptor(run.Name),
+                arguments.AddRange(["--output-root", StageRoot(run.Name), "--descriptor", StageDescriptor(run.Name), "--binding-schema", StageBindingSchema(run.Name),
                     "--identity-manifest", run.Manifest, "--identity-inventory", Inventory(run.Name), "--compiler", toolchain.CompilerPath]);
                 foreach (NativeModuleInput dependency in importScope)
                 {
@@ -202,6 +203,12 @@ public static class MetadataRunner
                             $"'{relative.Replace('\\', '/')}'. Rebuild the host tools so that Rocks.Build.Cli and Rocks.MetaCompiler match.");
                     }
                 }
+
+                if (!File.Exists(StageBindingSchema(run.Name)))
+                {
+                    throw new InvalidOperationException($"Module '{run.Name}': Rocks.MetaCompiler did not produce the Sparks binding schema. " +
+                        "Rebuild the host tools so that Rocks.Build.Cli and Rocks.MetaCompiler match.");
+                }
             }
 
             // 명세별 inventory 검증, 그 뒤 명세 사이 ID 중복 검증(SDK 동봉 명세 포함).
@@ -232,7 +239,7 @@ public static class MetadataRunner
             }
 
             // 백업은 생성 include 디렉터리 밖에 둔다(복구에 실패해 남은 백업이 다음 게시의 잉여 파일로 지워지지 않게).
-            MetadataOutputTransaction.Publish(PublishItems(runs, StageRoot, StageDescriptor), manifests, cancellationToken,
+            MetadataOutputTransaction.Publish(PublishItems(runs, StageRoot, StageDescriptor, StageBindingSchema), manifests, cancellationToken,
                 backupDirectory: Path.Combine(context.OutputDirectory, ".metadata-backup", tag));
             return 0;
         }
@@ -267,7 +274,7 @@ public static class MetadataRunner
     // 그 볼륨이 대소문자를 무시할 때만 삭제하지 않는다 — 같은 파일이라 쓰기 항목이 이미 덮어쓴다(macOS 기본·Windows).
     // 대소문자를 구분하는 볼륨에서는 다른 파일이므로 지운다.
     private static List<(string? Staged, string Final)> PublishItems(IReadOnlyList<MetadataModule> runs,
-        Func<string, string> stageRoot, Func<string, string> stageDescriptor)
+        Func<string, string> stageRoot, Func<string, string> stageDescriptor, Func<string, string> stageBindingSchema)
     {
         var items = new List<(string? Staged, string Final)>();
         foreach (MetadataModule run in runs)
@@ -301,6 +308,7 @@ public static class MetadataRunner
             }
 
             items.Add((stageDescriptor(run.Name), run.Descriptor));
+            items.Add((stageBindingSchema(run.Name), run.BindingSchema));
         }
 
         return items;
