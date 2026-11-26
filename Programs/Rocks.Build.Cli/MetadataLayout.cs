@@ -61,7 +61,21 @@ public sealed record MetadataModule(string Name, string Manifest, IReadOnlyList<
 /// 은퇴 항목만 남은 명세(ID 예약 — 명세 집합 검증에 넣는다)다.
 /// </summary>
 public sealed record MetadataPlan(IReadOnlyList<NativeModuleInput> Modules, IReadOnlyList<MetadataModule> Generated,
-    IReadOnlyList<string> ReservedManifests);
+    IReadOnlyList<string> ReservedManifests)
+{
+    /// <summary>셰이더 파라미터 구조체를 생성하는 모듈이다(Docs/Design/ShaderSystem 16.2절 SSD49 — 리플렉션 메타 단계와 따로 돈다).</summary>
+    public IReadOnlyList<ShaderParameterModule> ShaderParameters { get; init; } = [];
+}
+
+/// <summary>
+/// 셰이더 파라미터 구조체 헤더를 가진 모듈 하나다. OutputRoot(&lt;out&gt;/Generated/&lt;모듈&gt;/ShaderParameters)의 Include가 생성 C++
+/// 헤더의 include 루트이고 Shaders가 생성 HLSL 사본이다(16.2절 SSD51).
+/// </summary>
+public sealed record ShaderParameterModule(string Name, IReadOnlyList<MetadataHeader> Headers, string OutputRoot)
+{
+    /// <summary>생성 C++ 헤더의 include 루트다.</summary>
+    public string Include => Path.Combine(OutputRoot, "Include");
+}
 
 /// <summary>
 /// 모듈 소유 메타데이터의 배치를 정하는 단일 지점이다(Docs/Design/ReflectionFoundations.ko.md 1.1–1.2절). RuleLoader
@@ -182,11 +196,57 @@ public static class MetadataLayout
             });
         }
 
+        List<ShaderParameterModule> shaderParameters = AddShaderParameterModules(context, updated, reachable, createDirectories);
         CheckGeneratedSpellings(generated);
         AddModuleEntrySources(updated, generated);
-        var plan = new MetadataPlan(updated, generated, reserved);
+        var plan = new MetadataPlan(updated, generated, reserved) { ShaderParameters = shaderParameters };
         CheckShadowing(plan, reachable);
         return plan;
+    }
+
+    // 도달 모듈 가운데 셰이더 파라미터 구조체 헤더(ROCKS_SHADER_PARAMETERS 표지)를 가진 모듈을 찾고, 그 생성 C++ 헤더의 include 루트를 모듈
+    // include 디렉터리에 더한다(원본이 public이면 public — Docs/Design/ShaderSystem 16.2절 SSD51).
+    private static List<ShaderParameterModule> AddShaderParameterModules(BuildContext context, List<NativeModuleInput> updated,
+        HashSet<string> reachable, bool createDirectories)
+    {
+        var found = new List<ShaderParameterModule>();
+        for (int index = 0; index < updated.Count; ++index)
+        {
+            NativeModuleInput module = updated[index];
+            if (!reachable.Contains(module.Name) || string.IsNullOrWhiteSpace(module.ModuleDirectory))
+            {
+                continue;
+            }
+
+            string directory = context.PathInRoot(module.ModuleDirectory!);
+            IReadOnlyList<ReflectionHeader> headers = ReflectionHeaderScan.DiscoverShaderParameters(directory, module.PublicIncludeDirectories,
+                module.PrivateIncludeDirectories);
+            if (headers.Count == 0)
+            {
+                continue;
+            }
+
+            var layout = new ShaderParameterModule(module.Name,
+                [.. headers.Select(header => new MetadataHeader(Path.GetFullPath(header.Path), header.Include, header.Private))],
+                Path.Combine(context.OutputDirectory, "Generated", module.Name, "ShaderParameters"));
+            if (createDirectories)
+            {
+                Directory.CreateDirectory(layout.Include);
+            }
+
+            found.Add(layout);
+            updated[index] = module with
+            {
+                PublicIncludeDirectories = headers.Any(header => !header.Private)
+                    ? [.. module.PublicIncludeDirectories, layout.Include]
+                    : module.PublicIncludeDirectories,
+                PrivateIncludeDirectories = headers.Any(header => header.Private)
+                    ? [.. module.PrivateIncludeDirectories, layout.Include]
+                    : module.PrivateIncludeDirectories
+            };
+        }
+
+        return found;
     }
 
     /// <summary>build·test·sdk·game 명령의 옵션 이름이다: on이면 MetaCompiler가 게시 전에 생성 소스도 컴파일한다(--verify-sources).</summary>

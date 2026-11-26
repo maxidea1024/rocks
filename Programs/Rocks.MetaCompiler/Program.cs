@@ -16,6 +16,12 @@ internal static class Program
                 return IdentityCommands.Run(arguments[1..]);
             }
 
+            // 셰이더 파라미터 구조체 생성 모드다(Docs/Design/ShaderSystem 16.2절 SSD49).
+            if (arguments.Length != 0 && arguments[0] == "shader-parameters")
+            {
+                return await ShaderParameterGenerator.RunAsync(arguments[1..]);
+            }
+
             CompilerOptions options = CompilerOptions.Parse(arguments);
             input = options.Inputs[0].Path;
             await CompilerDriver.RunAsync(options);

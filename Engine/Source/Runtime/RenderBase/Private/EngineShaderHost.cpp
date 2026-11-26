@@ -118,6 +118,7 @@ Result<void> EngineShaderHost::Freeze() noexcept {
         return frozen;
     }
 
+    sharedConstantSlots_.Freeze();
     Log::Info(LogEngineShaderHost,
               "Engine shader types are frozen: {Types} shader types, {VertexInputs} vertex input "
               "types",

@@ -3,7 +3,7 @@
   "id": "VULKAN_SM5",
   "status": "supported",
   "backend": "Vulkan",
-  "processor": { "module": "ShaderFormatVulkan", "version": 4 },
+  "processor": { "module": "ShaderFormatVulkan", "version": 5 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler", "SpirvTools"],
   "language": { "hlsl2021": true },

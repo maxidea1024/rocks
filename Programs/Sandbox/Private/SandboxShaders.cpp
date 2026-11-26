@@ -27,7 +27,8 @@ namespace {
 #define SANDBOX_PIXEL_DEV_IF(Variable, File, Entry, Filter) &Variable,
 const ShaderTypeDesc* const Types[] = {
 #include "SandboxShaderTypes.inl"
-    &MathFloatProbe, &MathUintProbe, &ColorFloatProbe, &ShadingFloatProbe};
+    &MathFloatProbe,    &MathUintProbe,         &ColorFloatProbe,
+    &ShadingFloatProbe, &GeneratedParametersVS, &GeneratedParametersPS};
 #undef SANDBOX_VERTEX
 #undef SANDBOX_PIXEL
 #undef SANDBOX_COMPUTE
