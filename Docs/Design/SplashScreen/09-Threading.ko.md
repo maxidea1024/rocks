@@ -39,7 +39,7 @@
 2. 주 창을 보이고 **보인 뒤 한 프레임을 더 present한다**(숨긴 창에 그린 present가 보이는 순간 화면에 남는다는 보장이 flip model·DWM에 없다).
 3. 주 창을 앞으로 가져온다(2·3은 `platform::Window::ShowAndActivate` 하나 — 개정 2에서 PlatformWindow에 더함, Windows는 `ShowWindow` + `SetForegroundWindow`). 같은 프로세스의 스플래시가 전경이면 허용된다. 사용자가 시작 중에 다른 앱으로 옮겼으면 실패하는데, 이때는 강제하지 않는다(OS가 작업 표시줄 단추를 깜빡인다).
 4. `StartupProgress::Finish()` → `SplashScreen::Hide()`.
-- Sandbox(SP1)는 프레임 수로 정한다: 엔진 프레임 1이 끝나면 `ShowAndActivate`, 프레임 2가 끝나면 Hide(호스트 루프 다리의 `EndFrame`).
+- Sandbox(SP1)는 프레임 수와 최소 표시 시간으로 정한다: 엔진 프레임 1 이상이 끝났고 `CanHide()`가 참인 첫 프레임 끝에 `ShowAndActivate`, 그다음 프레임 끝에 Hide(호스트 루프 다리의 `EndFrame` — 9.7절).
 - 주 창을 먼저 보이므로 UE의 guard 창(1.4절)이 필요 없고 빈 화면 틈도 없다. 시작 중 Fatal이나 정상 종료 요청으로 주 창 없이 끝나면 `SplashScreen` 소멸이 Hide한다.
 
 ### 9.5 대화상자
@@ -56,3 +56,11 @@
 
 - 스플래시 스레드는 `platform::Thread`로 만드므로 다른 스레드와 같이 크래시 보고 대상이다(CrashHandlingAndLaunch 8.6절 `RunWithCrashGuard`). 스플래시는 종료 콜백을 걸지 않는다(OS가 창을 치운다).
 - `RequestExitWithoutStaticTeardown` 경로는 Hide 없이 끝나도 된다.
+
+### 9.7 최소 표시 시간(개정 4)
+
+- 시작이 빨리 끝나도 스플래시는 `ui.splash.min_seconds`(기본 2초, 10.1절) 동안은 보인다(사용자 요구 — 깜빡이듯 사라지지 않게). UE 로딩 화면의 `FLoadingScreenAttributes::MinimumLoadingScreenDisplayTime`(`Runtime/MoviePlayer/Public/MoviePlayer.h` 150행)과 같은 뜻이다.
+- 시간은 스플래시 창이 실제로 뜬 순간(상태가 `Shown`이 된 때, 스플래시 시계)부터 잰다. 창을 만들지 못했으면(`Failed`) 기다리지 않는다.
+- `SplashScreen::CanHide()`가 최소 시간이 지났는지 알려 준다(`Shown`이고 경과 ≥ 최소, 또는 `Failed`·`Hidden`이면 참, `Starting`이면 거짓). `Hide()`는 지금처럼 바로 닫는다 — 오류·종료 경로가 막히면 안 되기 때문이다. 최소 시간을 지키는 것은 넘기기를 하는 호스트다.
+- 9.4절 넘기기는 "첫 프레임을 낸 뒤이고 `CanHide()`가 참일 때" 주 창을 보이고, 그다음 프레임 끝에 Hide한다. 그동안 호스트는 자지 않고 엔진 프레임을 계속 돈다(주 창은 숨긴 채) — UE 로딩 화면도 최소 시간 동안 엔진을 계속 돈다. 기다리며 재우면 시작 뒤의 일(에셋 요청·셰이더 준비)이 멈춘다.
+- 진행 막대(SP2)는 최소 시간과 무관하게 실제 진행을 보인다. 시작이 끝났으면 100%로 남는다.

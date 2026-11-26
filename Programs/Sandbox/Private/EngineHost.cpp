@@ -135,9 +135,9 @@ constexpr uint64 WindowFramesPerSecond = 60;
 constexpr uint64 WindowFrameNanoseconds = NanosecondsPerSecond / WindowFramesPerSecond;
 
 // 스플래시에서 주 창으로 넘기는 프레임이다(Docs/Design/SplashScreen 9.4절): 첫 프레임을 낸 뒤 주
-// 창을 보이고, 보인 뒤 한 프레임을 더 낸 다음 스플래시를 숨긴다.
+// 창을 보이고(최소 표시 시간 ui.splash.min_seconds도 지나야 한다 — 9.7절), 보인 뒤 한 프레임을 더
+// 낸 다음 스플래시를 숨긴다.
 constexpr uint64 ShowWindowAfterFrames = 1;
-constexpr uint64 HideSplashAfterFrames = 2;
 
 // 창 크기다(client 영역 픽셀).
 constexpr uint32 WindowWidth = 1280;
@@ -299,18 +299,23 @@ public:
 
     // 스플래시에서 주 창으로 넘긴다(Docs/Design/SplashScreen 9.4절): 첫 프레임을 낸 뒤 숨겨 둔 주
     // 창을 보이고 앞으로 가져오고, 보인 뒤 한 프레임을 더 낸 다음 스플래시를 숨긴다(숨긴 창에 낸
-    // 프레임이 보이는 순간 화면에 남는다는 보장이 없어서다). 순서는 프레임 수로 정한다.
+    // 프레임이 보이는 순간 화면에 남는다는 보장이 없어서다). 최소 표시 시간(9.7절)이 지날 때까지는
+    // 주 창을 숨긴 채 엔진 프레임을 계속 돈다.
     void HandOffFromSplash() noexcept {
         if (options_.splash == nullptr) {
             return;
         }
 
         ++handOffFrames_;
-        if (handOffFrames_ == ShowWindowAfterFrames && options_.window != nullptr) {
-            options_.window->ShowAndActivate();
-        } else if (handOffFrames_ == HideSplashAfterFrames) {
+        if (windowShown_) {
             options_.splash->Hide();
             options_.splash = nullptr;
+        } else if (handOffFrames_ >= ShowWindowAfterFrames && options_.splash->CanHide()) {
+            if (options_.window != nullptr) {
+                options_.window->ShowAndActivate();
+            }
+
+            windowShown_ = true;
         }
     }
 
@@ -351,8 +356,10 @@ private:
 
     input::InputQueue& queue_;
     Options options_;
-    // 스플래시 넘기기에서 끝난 프레임 수다.
+    // 스플래시 넘기기에서 끝난 프레임 수와 주 창을 보였는지다(보인 다음 프레임에 스플래시를
+    // 숨긴다).
     uint64 handOffFrames_ = 0;
+    bool windowShown_ = false;
     screen::ScreenHost* screen_ = nullptr;
     CookedTextureLibrary* textures_ = nullptr;
     input::InputState input_;
@@ -990,6 +997,7 @@ Result<splash::SplashScreen> ShowSandboxSplash(Allocator& allocator,
     desc.showTitle = values.gameShowTitle;
     desc.showProgressText = values.gameShowProgressText;
     desc.showProgressBar = values.gameShowProgressBar;
+    desc.minimumDisplaySeconds = values.minimumSeconds;
     auto shown = splash::SplashScreen::Show(allocator, desc);
     if (!shown) {
         Log::Warning(LogSandboxHost, "The splash screen could not be shown: {Error}",

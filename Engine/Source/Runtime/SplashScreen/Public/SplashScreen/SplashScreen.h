@@ -21,6 +21,11 @@
 //   shown.Value().Hide();
 namespace rocks::splash {
 
+// 최소 표시 시간의 기본값과 상한(초)이다(Docs/Design/SplashScreen 9.7절 — 설정
+// ui.splash.min_seconds).
+inline constexpr double DefaultSplashMinimumDisplaySeconds = 2.0;
+inline constexpr double MaxSplashMinimumDisplaySeconds = 10.0;
+
 // 처음 칸 글자 하나다(UTF-8, Show가 복사한다).
 struct SplashTextValue {
     SplashTextSlot slot = SplashTextSlot::Title;
@@ -46,6 +51,10 @@ struct SplashShowDesc {
     // 진행 원천이다. 비어도 된다(막대는 불확정 표시). Show가 소유를 넘겨받는다(성공·실패 모두 —
     // release는 Hide·소멸 때, Show가 스레드를 띄우기 전에 실패하면 Show 안에서 부른다).
     SplashStatusSource source;
+    // 최소 표시 시간(초)이다. 창이 뜬 뒤 이 시간이 지나야 CanHide가 참이다(9.7절). 0이면 기다리지
+    // 않는다. 음수·NaN·무한이면 Show가 InvalidArgument, MaxSplashMinimumDisplaySeconds를 넘으면 그
+    // 값으로 줄인다.
+    double minimumDisplaySeconds = DefaultSplashMinimumDisplaySeconds;
     // 시계다(나노초). nullptr이면 단조 시계다. 시험이 주입한다.
     uint64 (*nowNanoseconds)(void* context) noexcept = nullptr;
     void* clockContext = nullptr;
@@ -76,6 +85,15 @@ public:
 
     // 상태다. 호스트 스레드에서 부른다.
     SplashState State() const noexcept;
+
+    // 최소 표시 시간이 지나 닫아도 되는지다(9.7절): 창이 뜬 뒤(Shown) 최소 시간이 지났거나, 창을
+    // 만들지 못했거나(Failed) 이미 닫혔으면(Hidden) 참이고, 아직 만드는 중(Starting)이면 거짓이다.
+    // 호스트가 주 창으로 넘기기 전에 프레임마다 본다. Hide 자체는 이 값과 무관하게 바로 닫는다.
+    // 호스트 스레드에서 부른다.
+    //
+    // 사용 예(프레임 끝):
+    //   if (firstFrameDone && splash.CanHide()) { window.ShowAndActivate(); hideNextFrame = true; }
+    bool CanHide() const noexcept;
 
     // 창을 잠시 숨기고 다시 보인다(호스트가 띄우는 모달 UI 앞뒤 — 9.5절). 갱신은 계속한다. 호스트
     // 스레드에서 부른다.
