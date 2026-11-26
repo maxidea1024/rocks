@@ -394,7 +394,10 @@ TEST(GpuTrace_SettingsAndDisjointSamples) {
         desc.usage = graphics::TextureUsage::RenderTarget;
         auto target = device.CreateTexture(desc, {});
         REQUIRE(target);
-        GpuTrace trace(allocator);
+        // Release 기본값은 timestamp를 끄므로(13.2절) 이 흐름은 설정으로 켠다.
+        GpuTraceSettings timed;
+        timed.timestamps = true;
+        GpuTrace trace(allocator, timed);
         auto frame = device.BeginOffscreen(target.Value(), {});
         REQUIRE(frame);
         trace.BeginFrame(device, *frame.Value(), 1);
