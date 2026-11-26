@@ -1023,6 +1023,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnrealPathCollision";
     case AssetDiagnosticCode::MissingUnrealDependency:
         return "MissingUnrealDependency";
+    case AssetDiagnosticCode::UnsupportedSourceLayout:
+        return "UnsupportedSourceLayout";
+    case AssetDiagnosticCode::GammaMismatch:
+        return "GammaMismatch";
     case AssetDiagnosticCode::RootLost:
         return "RootLost";
     case AssetDiagnosticCode::AliasResolved:
@@ -1075,6 +1079,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "NuggetConflict";
     case AssetDiagnosticCode::SourceCleared:
         return "SourceCleared";
+    case AssetDiagnosticCode::IgnoredSourceChunks:
+        return "IgnoredSourceChunks";
     }
 
     return "Unknown";
@@ -1090,6 +1096,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::PreserveBorderWithWrap:
     case AssetDiagnosticCode::NuggetConflict:
     case AssetDiagnosticCode::SourceCleared:
+    case AssetDiagnosticCode::IgnoredSourceChunks:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:
@@ -1106,6 +1113,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnsupportedAsset:
     case AssetDiagnosticCode::UnrealPathRenamed:
     case AssetDiagnosticCode::MissingUnrealDependency:
+    case AssetDiagnosticCode::GammaMismatch:
     case AssetDiagnosticCode::AliasResolved:
     case AssetDiagnosticCode::AliasInUse:
     case AssetDiagnosticCode::AliasSearchTruncated:

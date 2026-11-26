@@ -99,6 +99,7 @@ internal static partial class ModuleMetaTests
         RegisterArrays(suite, options, environment);
         RegisterBitfields(suite, options, environment);
         RegisterSparksBinding(suite, options, environment);
+        RegisterFunctions(suite, options, environment);
     }
 
     // 공백을 모두 지운 텍스트다(clang-format 줄바꿈과 무관하게 생성 코드 조각을 찾는다).
@@ -329,7 +330,7 @@ internal static partial class ModuleMetaTests
 
         public string Source(string relative) => temporary.FilePath(relative);
 
-        public void Manifest(string module, string[] types, string[] fields)
+        public void Manifest(string module, string[] types, string[] fields, string[]? functions = null)
         {
             StableIdManifest.Update(Source(module + "/" + module + ".rocksids.json"), true, manifest =>
             {
@@ -341,6 +342,11 @@ internal static partial class ModuleMetaTests
                 foreach (string field in fields)
                 {
                     manifest.Register("field", field);
+                }
+
+                foreach (string function in functions ?? [])
+                {
+                    manifest.Register("function", function);
                 }
 
                 return 0;

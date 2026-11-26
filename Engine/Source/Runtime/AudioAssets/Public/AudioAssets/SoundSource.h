@@ -1,8 +1,8 @@
 #pragma once
 
 #include <AssetRuntime/Package.h>
-#include <EngineAudio/AttenuationSettings.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/AttenuationSettings.h>
+#include <AudioAssets/SoundSourceRef.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/ObjectRefs.h>
 
@@ -15,7 +15,7 @@ namespace rocks {
 class ObjectRegistry;
 
 ROCKS_CLASS(Abstract)
-class ROCKS_ENGINEAUDIO_API SoundSource : public Asset {
+class ROCKS_AUDIOASSETS_API SoundSource : public Asset {
     ROCKS_GENERATED_BODY()
 
 public:

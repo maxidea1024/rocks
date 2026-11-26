@@ -1028,6 +1028,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     });
                 }
 
+                // 리플렉션 함수(ROCKS_FUNCTION — Docs/Design/FunctionReflection.ko.md)다.
+                ParseFunctions(model, members, qualified, isStruct, Text(node, "tagUsed") == "class" ? "private" : "public", generatedBody);
                 classes.Add(qualified, model);
             }
 

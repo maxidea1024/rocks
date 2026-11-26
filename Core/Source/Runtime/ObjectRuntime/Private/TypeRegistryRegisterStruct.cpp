@@ -179,9 +179,10 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     }
 
     if (schema.id == Guid{} || schema.version == 0 || schema.baseType == schema.id ||
-        schema.withinType != TypeId{} || (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 ||
-        ops.alignment == 0 || (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType ||
-        !ops.construct || !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
+        schema.functions.Size() != 0 || schema.withinType != TypeId{} ||
+        (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 || ops.alignment == 0 ||
+        (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType || !ops.construct ||
+        !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
         !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8() ||
         (schema.toolName.Size() != 0 && !IsTypeToolName(schema.toolName))) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);

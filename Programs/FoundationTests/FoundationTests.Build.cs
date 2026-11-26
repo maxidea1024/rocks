@@ -158,7 +158,10 @@ public abstract class TestsModule : ModuleRules
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
         // The World collision tests build the profile table from a Config test fixture context (Docs/Design/CollisionData.ko.md CD2).
-        ["World"] = ["ConfigTestFixtures", "ObjectSerialization", "Task", "WorldTestFixtures"]
+        ["World"] = ["ConfigTestFixtures", "ObjectSerialization", "Task", "WorldTestFixtures"],
+        // The texture render cache tests load cooked texture packages through the AssetRuntime loader test rig (Docs/Design/RenderBase section
+        // 18.5 item 8).
+        ["WorldIntegration"] = ["AssetTestFixtures"]
     };
 
     // Modules whose private headers (test access headers) the tests of a module include (Docs/Design/BuildTargets section 3.5 BS1b). Each entry is
@@ -169,6 +172,7 @@ public abstract class TestsModule : ModuleRules
         ["AssetCooker"] = ["AssetRuntime"],
         ["AssetDatabase"] = ["AssetRuntime"],
         ["EngineAssets"] = ["AssetRuntime"],
+        ["WorldIntegration"] = ["AssetRuntime"],
         // VirtualMemoryTestAccess.h: the access overlap checker tests drive the virtual memory backend.
         ["Core"] = ["PlatformBase"]
     };

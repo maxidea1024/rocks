@@ -77,7 +77,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 차원·형식 조합을 장치가 지원하는지(`DeviceCaps`, GX1). 지원하지 않으면 `UnsupportedCapability`다.
 - 상주 꼬리만으로 GPU 자원을 만들 수 있는지(가장 큰 상주 mip 기준으로 만들고, 스트리밍 mip은 상주가 늘 때 채운다). 텍스처 스트리밍 전(화면 마일스톤)에는 상주 꼬리와 스트리밍 mip bulk를 모두 읽어 한 번에 올린다.
 
-**업로드(SM7, 개정 48 — 18.5절 7항).** 엔진 층은 RenderBase `CookedTexture.h` 하나다. 에셋 타입(Texture 모듈)을 모르는 중립 입력을 받는다. `TexturePlatformData`와 패키지 bulk를 이 입력으로 바꾸는 일은 텍스처 에셋을 아는 층이 한다. 지금은 Sandbox이고, SM8 WorldIntegration 텍스처 컴포넌트가 생기면 그리로 옮긴다. UE도 장치 자원 만들기는 Engine 모듈의 텍스처 자원 클래스가 하고 RenderCore는 텍스처 에셋을 모른다.
+**업로드(SM7, 개정 48 — 18.5절 7항).** RenderBase 쪽은 `CookedTexture.h` 하나다. 에셋 타입(Texture 모듈)을 모르는 중립 입력을 받는다. `TexturePlatformData`와 패키지 bulk를 이 입력으로 바꾸는 일은 텍스처 에셋을 아는 층이 한다. 그 층은 WorldIntegration이다(SM8, 개정 54 — 18.5절 8항): 변환 `PlatformTextureSource.h`와, 텍스처 에셋마다 handle을 예약하고 lease·Retire 순서를 지키는 `TextureRenderCache`다. UE도 장치 자원 만들기는 Engine 모듈의 텍스처 자원 클래스가 하고 RenderCore는 텍스처 에셋을 모른다.
 - 입력 `CookedTextureSource`: 차원·형식·sRGB·기준 크기(폭·높이·depth·slice 수)·상주 꼬리 mip 수·샘플러·mip 목록(크기·패딩 제외 byte 수, 스트리밍 mip은 그 bulk byte, 상주 mip은 꼬리 덩어리 안 오프셋)·꼬리 덩어리 byte다. byte는 빌린다.
 - 검사 `CheckCookedTexture`(장치 능력 값과 그 형식의 `PixelFormatCaps`를 받는다 — 장치 없이 시험한다) → `graphics::TextureDesc`. 오류는 두 갈래이고, 원인은 `CookedTextureIssue` 칸으로 따로 돌려준다.
   - 데이터가 계약과 다름(`CorruptEntry`)은 `ErrorCode::InvalidArgument`다. 원인: 모르는 차원·형식, 깊이·다중 plane 형식, 형식의 sRGB와 sRGB 칸이 다름(PX1 (가) — sRGB는 형식에 들어 있다), 0 크기, 차원별 크기 규칙(cube 정사각·slice 6 배수·volume slice 1), mip 수 0·전체 mip 수 초과, mip 크기 사슬, mip byte 수 ≠ 공식, 상주 꼬리 수 0·mip 수 초과, 스트리밍 mip bulk 크기 ≠ byte 수(잘린 bulk), 꼬리 오프셋이 16 byte 정렬 아님·앞 mip과 겹침·덩어리 밖(잘린 꼬리), BC 최상위 블록 배수 아님, 샘플러 값 범위 밖.
@@ -85,7 +85,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 바이트: 장치 초기 픽셀 배치(`TextureDesc` 주석)가 이 절의 mip-major 배치와 같다. 그래서 mip을 큰 것부터 잇기만 한다(꼬리의 16 byte 정렬 패딩은 뺀다). 블록 압축 형식 크기는 PixelFormat 블록 정보로 계산한다(`PixelFormatImageBytes` — ASTC처럼 블록 배수가 아닌 크기는 블록 수를 올림한다). 장치 행 pitch·정렬은 장치 업로드(GX8)가 맞춘다.
 - 샘플러: 쿠킹 값 그대로다(필터·세 축 주소·border 색). `maxAnisotropy` 0은 "전역 값"이고 `CookedTextureDefaultMaxAnisotropy`(4 — UE `r.MaxAnisotropy` 기본값, `Core/Private/HAL/ConsoleManager.cpp:4360`, 적용은 `RHI/Public/RHIUtilities.h:699` `ComputeAnisotropyRT`)로 바꾸고 1–16으로 자른다. 전역 값 CVar(`r.MaxAnisotropy`)는 렌더러 설정 단계에서 더한다.
 - 생성: `PrepareCookedTexture`가 검사·묶기를 게임 lane에서 하고(바이트를 `RenderBlob`으로 복사 — 패키지 bulk는 게임 스레드 전용이다), 렌더 lane 작업 `CreateCookedTextureOnLane`이 장치 텍스처를 만들어 `RenderHandle`에 잇고 `ResourceReady`·`ResourceFailed`를 통지한다(6.2절 장치 자원 소유자). 게시 전에 그린 handle은 typed 대체로 그린다(6.2절 "준비 전 사용").
-- 패키지 게시에서 시작한다: 쿠킹 텍스처에는 PostLoad hook이 없고(AssetSystem 12.15절 A5k), 샘플러도 쿠킹 때 정해진다. 그래서 업로드는 AssetManager 준비 callback(패키지 공개) 뒤 게임 lane이 낸다. 상주 수명은 그 lease가 정한다(lease를 놓기 전에 handle을 `Retire`한다).
+- 패키지 게시에서 시작한다: 쿠킹 텍스처에는 PostLoad hook이 없고(AssetSystem 12.15절 A5k), 샘플러도 쿠킹 때 정해진다. 그래서 업로드는 AssetManager 준비 callback(패키지 공개) 뒤 게임 lane이 낸다(`TextureRenderCache::Update`). 상주 수명은 그 lease가 정한다(lease를 놓기 전에 handle을 `Retire`한다).
 - CPU Availability 텍스처(AssetSystem 12.4.1절)는 쿠킹 mip을 올리지 않는다. 그리는 쪽이 내장 검정 2D(`BuiltinTexture::Black2D`)로 대체한다(UE는 쿠킹 때 작은 검정 placeholder를 GPU에 둔다 — `Engine/Private/Texture.cpp:4477–4481`). Availability는 에셋 칸이라 변환 층이 본다.
 
 **후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 압축 단계 착수 전에 에셋 세션과 함께 확정한다. 형식 정의·블록 크기·고정 번호표·backend 가용성은 [픽셀 형식](../PixelFormat/05-FormatList.ko.md) 5·6·8·12절이 정하고, 프로필별 형식 선택과 인코더가 에셋 세션 몫으로 남는다. 메타의 "sRGB" 항목은 픽셀 형식 결정 PX1에 따라 형식에 포함되거나 따로 남는다.

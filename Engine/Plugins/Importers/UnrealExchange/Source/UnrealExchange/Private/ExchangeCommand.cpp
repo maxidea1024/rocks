@@ -4,7 +4,7 @@
 #include <Platform/File.h>
 #include <UnrealExchange/ExchangeIndexLookup.h>
 
-// asset-import-unreal 명령이다(Docs/Design/UnrealExchange.ko.md 10.2절, 10.5절 9번): 인자 해석,
+// asset-import-unreal 명령이다(Docs/Design/UnrealExchange 10.2절, 10.5절 9번): 인자 해석,
 // 세션·종류별 임포터, 묶음 읽기, --only 닫힘, 계획, 실행, 진단·결과 줄.
 
 namespace rocks {

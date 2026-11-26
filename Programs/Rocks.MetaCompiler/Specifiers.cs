@@ -108,6 +108,9 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
         (DevelopmentOnly ? 16u : 0u);
 }
 
+// FUNCTION 지정자 결과다(Docs/Design/FunctionReflection.ko.md FD12). ToolName은 Name="…"의 값이고 함수 이름과 같거나 없으면 ""다.
+internal sealed record FunctionSpec(bool Pure, bool EditorOnly, string ToolName);
+
 // ENUM 지정자 결과다. ToolPrefix는 도구 이름 조회가 앞에 붙어 있어도 받는 접두([A-Za-z0-9_]+, 없으면 "")이고,
 // Flags는 비트 플래그 enum(값은 선언 값의 OR)이다.
 // Binds는 Core enum 미러가 결합하는 실제 enum의 C++ 철자다(CoreTypeBindings만 — 없으면 "", CurveData CV9).
@@ -340,6 +343,32 @@ internal static class Specifiers
             ScriptWritable = scriptWritable,
             ScriptName = scriptName
         };
+    }
+
+    // ROCKS_FUNCTION 지정자다(Pure·EditorOnly·Name — 그 밖은 뒤 단계가 받는다: DisplayName·Category·Help(FR2)·ScriptOverridable(FR3)·
+    // Cheat·Authority(CVR8)·Sparks 함수 지정자(EI1b) — 지금은 모르는 지정자 RMC2000).
+    public static FunctionSpec Function(string text, string symbol, string functionName)
+    {
+        Dictionary<string, Value?> values = Parse(text, symbol);
+        foreach ((string key, Value? value) in values)
+        {
+            bool flag = key is "Pure" or "EditorOnly";
+            bool label = key is "Name";
+            if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
+            {
+                throw new MetadataException($"{symbol}: unsupported FUNCTION specifier/value {key}",
+                    hint: "ROCKS_FUNCTION takes Pure, EditorOnly and Name=\"<tool name>\" (display metadata, script overrides and cheat specifiers come with later stages).");
+            }
+        }
+
+        string toolName = values.GetValueOrDefault("Name")?.Text ?? "";
+        if (values.ContainsKey("Name") && !IsAsciiIdentifier(toolName))
+        {
+            throw new MetadataException($"{symbol}: Name specifier must be a non-empty ASCII identifier ([A-Za-z_][A-Za-z0-9_]*): \"{toolName}\"", "RMC2703",
+                "Use an ASCII identifier for the function tool name, or omit Name to use the C++ name.");
+        }
+
+        return new(values.ContainsKey("Pure"), values.ContainsKey("EditorOnly"), toolName == functionName ? "" : toolName);
     }
 
     // ROCKS_NATIVE는 지정자를 받지 않는다.

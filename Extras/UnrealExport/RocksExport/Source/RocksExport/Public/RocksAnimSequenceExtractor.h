@@ -8,7 +8,7 @@ class UAnimSequence;
 struct FRichCurve;
 struct FRocksAssetBody;
 
-// 애니메이션 클립 추출이다(UnrealExchange.ko.md 7절, 7.1절 — 11.6절 FRocksAnimSequenceExtractor).
+// 애니메이션 클립 추출이다(UnrealExchange 7절, 7.1절 — 11.6절 FRocksAnimSequenceExtractor).
 //
 // - settings: UAnimSequence UPROPERTY 덤프(additive·root motion·interpolation·RateScale·bLoop·PlatformTargetFrameRate·
 //   RetargetSource·RefPoseSeq·notify 등). 데이터 모델(DataModelInterface·DataModel)은 data에 풀어 쓰므로 뺀다.

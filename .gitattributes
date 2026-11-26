@@ -21,7 +21,7 @@ Engine/Source/ThirdParty/*/Build/** text eol=lf
 *.pdf binary
 *.png binary
 *.zip binary
-# Unreal exchange bundle blobs are named by the SHA-256 of their bytes (Docs/Design/UnrealExchange.ko.md section 3.1), so they are kept byte for byte.
+# Unreal exchange bundle blobs are named by the SHA-256 of their bytes (Docs/Design/UnrealExchange section 3.1), so they are kept byte for byte.
 **/*.rxbundle/blobs/** binary
 # Golden Visual Studio files (Docs/Design/ProjectFiles.ko.md section 16 V5) are compared byte for byte, CRLF included.
 Programs/Rocks.Build.IntegrationTests/ProjectFiles/Golden/** -text

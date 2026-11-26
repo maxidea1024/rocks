@@ -763,6 +763,43 @@ TEST(ImageDecode_DetectionLimitsAndFailures) {
                 AssetDiagnosticCode::UnsupportedSourceFormat));
     CHECK(Fails(Decode(allocator, webp("VP8X").View()),
                 AssetDiagnosticCode::UnsupportedSourceFormat));
+    // 애니메이션(ANMF)은 프레임 머리 16 byte 뒤 첫 이미지 chunk로 가른다. 이미지 chunk가 없으면
+    // InvalidSource다.
+    const auto frames = [&](const char* inner) noexcept {
+        Bytes file(allocator);
+        file.Text("RIFF");
+        file.Le32(42);
+        file.Text("WEBP");
+        file.Text("ANMF");
+        file.Le32(26);
+        for (uint32 index = 0; index < 16; ++index) {
+            file.U8(0);
+        }
+
+        file.Text(inner);
+        file.Le32(2);
+        file.U8(0);
+        file.U8(0);
+        return Move(file.data);
+    };
+    CHECK(Fails(Decode(allocator, frames("VP8 ").View()), AssetDiagnosticCode::LossySource));
+    CHECK(Fails(Decode(allocator, frames("VP8L").View()),
+                AssetDiagnosticCode::UnsupportedSourceFormat));
+    CHECK(Fails(Decode(allocator, webp("ICCP").View()), AssetDiagnosticCode::InvalidSource));
+    const struct {
+        ImageFileFormat format;
+        const char* name;
+    } names[] = {{ImageFileFormat::Unknown, "Unknown"}, {ImageFileFormat::Bmp, "Bmp"},
+                 {ImageFileFormat::Tga, "Tga"},         {ImageFileFormat::Png, "Png"},
+                 {ImageFileFormat::Psd, "Psd"},         {ImageFileFormat::Dds, "Dds"},
+                 {ImageFileFormat::Tiff, "Tiff"},       {ImageFileFormat::Hdr, "Hdr"},
+                 {ImageFileFormat::Exr, "Exr"},         {ImageFileFormat::Jpeg, "Jpeg"},
+                 {ImageFileFormat::WebP, "WebP"}};
+    for (const auto& item : names) {
+        CHECK(StringView(ImageFileFormatName(item.format)) == item.name);
+    }
+
+    CHECK(StringView(ImageFileFormatName(static_cast<ImageFileFormat>(0xFF))) == "Unknown");
 
     // 한도: 한 변 1보다 큰 그림.
     const uint8 rows[] = {0, 0, 255, 0, 255, 0, 0, 0};

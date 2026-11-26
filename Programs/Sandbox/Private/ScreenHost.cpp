@@ -583,6 +583,10 @@ void ScreenHost::ProcessNotices() noexcept {
         return;
     }
 
+    if (cache_ != nullptr) {
+        (void)cache_->HandleNotices(notices_.View());
+    }
+
     for (const render::RenderNotice& notice : notices_) {
         if (notice.kind != render::RenderNoticeKind::ResourceReady &&
             notice.kind != render::RenderNoticeKind::ResourceFailed) {
@@ -678,6 +682,57 @@ Result<uint32> ScreenHost::AddTexture(StringView name, const TexturePlatformData
         (void)inspectors_.TryPopBack();
         (void)lane_.Retire(handle.Value());
         return Result<uint32>::Failure(posted.Error());
+    }
+
+    return appended;
+}
+
+Result<uint32> ScreenHost::AddCachedTexture(StringView name,
+                                            const TextureRenderInfo& info) noexcept {
+    if (!started_) {
+        return Result<uint32>::Failure(ErrorCode::NotReady);
+    }
+
+    InspectorTexture texture;
+    InspectorEntryState state = InspectorEntryState::Pending;
+    switch (info.state) {
+    case TextureRenderState::CpuPlaceholder:
+        texture.cpuPlaceholder = true;
+        return AppendEntry(name, texture, InspectorEntryState::Placeholder);
+    case TextureRenderState::Uploading:
+        state = InspectorEntryState::Pending;
+        break;
+    case TextureRenderState::Ready:
+        state = InspectorEntryState::Ready;
+        break;
+    case TextureRenderState::Failed:
+        state = InspectorEntryState::Failed;
+        break;
+    case TextureRenderState::Loading:
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (info.handle.IsNull()) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    texture.handle = info.handle;
+    texture.dimension = info.dimension;
+    texture.swizzle = info.swizzle;
+    texture.width = info.width;
+    texture.height = info.height;
+    texture.depth = info.depth;
+    texture.layers =
+        info.dimension == graphics::TextureDimension::TextureCubeArray
+            ? info.slices / graphics::CubeFaceCount
+            : (info.dimension == graphics::TextureDimension::Texture2DArray ? info.slices : 1u);
+    texture.mips = info.mips;
+    DescribeInspectorFormat(info.format, texture);
+    auto appended = AppendEntry(name, texture, state);
+    if (appended) {
+        InspectorEntry& entry = inspectors_[appended.Value()];
+        entry.cacheOwned = true;
+        entry.error = info.error;
     }
 
     return appended;
@@ -887,7 +942,8 @@ Result<uint64> ScreenHost::DrainRetires() noexcept {
     if (!inspectorsRetired_) {
         inspectorsRetired_ = true;
         for (const InspectorEntry& entry : inspectors_) {
-            if (!entry.texture.handle.IsNull()) {
+            // 캐시 handle은 캐시 Shutdown(엔진 종료 hook BeginShutdown)이 Retire했다.
+            if (!entry.texture.handle.IsNull() && !entry.cacheOwned) {
                 (void)lane_.Retire(entry.texture.handle);
             }
         }

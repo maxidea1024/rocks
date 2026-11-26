@@ -1,8 +1,9 @@
 #include "AudioEngineTestSupport.h"
 
 #include <Core/Module/ModuleEntry.h>
-#include <EngineAudio/EngineAudioTypes.h>
-#include <EngineAudio/SoundClip.generated.h>
+#include <AudioAssets/AudioAssetsTypes.h>
+#include <AudioAssets/SoundClip.generated.h>
+#include <AssetRuntime/MemoryBulkSource.h>
 #include <Object/ObjectRegistry.h>
 
 #include <Core/Math/MathUtility.h>
@@ -574,7 +575,7 @@ TEST(EngineAudioWorld_PlaybackOutlivesCollectedSoundAsset) {
         // 에셋 객체 Registry에 SoundClip을 만들어 스냅숏을 떠서 재생한 뒤, Registry째 수거한다.
         TypeRegistry types(fixture.allocator);
         ModuleRegistration registration(types, fixture.allocator);
-        REQUIRE(RegisterEngineAudioTypes(registration));
+        REQUIRE(RegisterAudioAssetsTypes(registration));
         {
             ObjectRegistry objects(fixture.allocator, types, {0x45415544474331ull, 1});
             auto clip = objects.NewObject<SoundClip>(objects.OwnerAccess(), TypeIdOf<SoundClip>());
@@ -689,6 +690,68 @@ TEST(EngineAudioWorld_WorldCommandsTouchOnlyItsOwnPlaybacks) {
     REQUIRE(fixture.Frames(3));
     CHECK(first.audio->Status(mine.Value()) == PlaybackStatus::Playing);
     CHECK(fixture.audio->Status(engineOwned.Value()) == PlaybackStatus::Playing);
+}
+
+TEST(EngineAudioWorld_ReimportPlaysNewPcmOnlyForNewPlays) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    TypeRegistry types(fixture.allocator);
+    ModuleRegistration registration(types, fixture.allocator);
+    REQUIRE(RegisterAudioAssetsTypes(registration));
+    {
+        ObjectRegistry objects(fixture.allocator, types, {0x45415552494d31ull, 1});
+        MemoryBulkSource bulkSource(fixture.allocator);
+        auto made = objects.NewObject<SoundClip>(objects.OwnerAccess(), TypeIdOf<SoundClip>());
+        REQUIRE(made);
+        auto borrow = objects.Resolve<SoundClip>(objects.OwnerAccess(), made.Value().Handle());
+        REQUIRE(borrow);
+        SoundClip& clip = *borrow.Value().Get().Value();
+        // 원본 bulk(Int16 mono 480 frame, 값 v)를 넣는 것이 임포트·재임포트가 하는 일이다.
+        const auto setSource = [&](int16 value) {
+            Array<uint8> bytes(fixture.allocator);
+            for (uint32 frame = 0; frame < 480; ++frame) {
+                (void)bytes.TryPushBack(static_cast<uint8>(static_cast<uint16>(value)));
+                (void)bytes.TryPushBack(static_cast<uint8>(static_cast<uint16>(value) >> 8));
+            }
+
+            auto ref = bulkSource.Add(Move(bytes));
+            REQUIRE(ref);
+            clip.channelCount = 1;
+            clip.sampleRate = TestRate;
+            clip.frameCount = 480;
+            clip.source.format = SoundSourceStorage::Int16;
+            clip.source.bulk = ref.Value();
+        };
+        clip.looping = true;
+        setSource(4096);
+        REQUIRE(clip.LoadEditorPcm(fixture.allocator, bulkSource));
+        const uint64 firstRevision = clip.PcmRevision();
+        auto first = clip.MakePlayable(fixture.allocator, objects, objects.OwnerAccess());
+        REQUIRE(first);
+        auto oldPlay = fixture.audio->Play2D(first.Value());
+        REQUIRE(oldPlay);
+        REQUIRE(fixture.Frames(3));
+        // 재임포트(원본이 바뀜) → 다시 올리면 revision이 오르고 새 재생부터 새 PCM이다.
+        setSource(12288);
+        REQUIRE(clip.LoadEditorPcm(fixture.allocator, bulkSource));
+        CHECK(clip.PcmRevision() == firstRevision + 1);
+        auto second = clip.MakePlayable(fixture.allocator, objects, objects.OwnerAccess());
+        REQUIRE(second);
+        CHECK(second.Value().Get()->revision != first.Value().Get()->revision);
+        REQUIRE(fixture.audio->Play2D(second.Value()));
+        REQUIRE(fixture.Frames(3));
+        Array<float> chunk(fixture.allocator);
+        REQUIRE(chunk.TryResize(PumpFrames * 2));
+        // 옛 재생(0.125)과 새 재생(0.375)이 함께 돈다: mono Direct 0.5배 합 = 0.25.
+        StereoPeak peak = CapturePeak(fixture, chunk);
+        CHECK(math::Abs(peak.left - 0.25f) < 1.0e-4f);
+        REQUIRE(fixture.audio->Stop(oldPlay.Value(), 0));
+        REQUIRE(fixture.Frames(3));
+        peak = CapturePeak(fixture, chunk);
+        CHECK(math::Abs(peak.left - 0.1875f) < 1.0e-4f);
+    }
+
+    CHECK(registration.Unregister());
 }
 
 } // namespace audio_world_tests_file

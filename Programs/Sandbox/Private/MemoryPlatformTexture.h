@@ -7,9 +7,9 @@
 
 // 쿠킹과 같은 배치의 TexturePlatformData를 메모리에 만든다(Docs/Design/RenderBase 6.5절
 // 배치, 18.5절 7항). 엔진 절차 텍스처와 self-test 메모리 장면이 쿠킹 텍스처와 같은 업로드
-// 경로(PlatformTextureSource → RenderBase CookedTexture)를 거치게 한다. 스트리밍 mip은 mip마다 bulk
-// 하나, 상주 꼬리는 큰 mip부터 16 byte 정렬로 이은 덩어리 하나다(쿠킹 처리기 CookFillPlatformData와
-// 같다). bulk id는 1부터다.
+// 경로(WorldIntegration PlatformTextureSource → RenderBase CookedTexture)를 거치게 한다. 스트리밍
+// mip은 mip마다 bulk 하나, 상주 꼬리는 큰 mip부터 16 byte 정렬로 이은 덩어리 하나다(쿠킹 처리기
+// CookFillPlatformData와 같다). bulk id는 1부터다.
 //
 // 사용 예:
 //   MemoryTextureSpec spec;

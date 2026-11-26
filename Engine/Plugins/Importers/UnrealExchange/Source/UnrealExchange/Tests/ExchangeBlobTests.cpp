@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 blob 시험이다(Docs/Design/UnrealExchange.ko.md 3.3절, 10.4절 11·12번): fixture blob
+// Unreal 교환 blob 시험이다(Docs/Design/UnrealExchange 3.3절, 10.4절 11·12번): fixture blob
 // 파일 변조(없음·잘림·SHA 불일치·같은 hex 다른 bytes·파일 실패), 가변 배치(names·boneInfluences·
 // sparseVec3) 규칙, 64 KiB 조각 경계, 흘려 읽기(읽기 중 검증)와 메모리 읽기(LoadExchangeBlob)의
 // 판정 일치 퍼징.

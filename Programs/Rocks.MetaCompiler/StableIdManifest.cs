@@ -465,8 +465,8 @@ internal sealed class StableIdManifest
         }
     }
 
-    // 멤버 kind(이름의 주인 type이 같은 명세에 있어야 하는 것)다. C++은 field뿐이고 Sparks는 subobject·function·
-    // rpc·enumCase를 더 쓴다(Docs/Design/SparksBytecode.ko.md 6.1절, SE-R8).
+    // 멤버 kind(이름의 주인 type이 같은 명세에 있어야 하는 것)다. C++은 field·function(리플렉션 함수 — Docs/Design/
+    // FunctionReflection.ko.md FD3)이고 Sparks는 subobject·function·rpc·enumCase를 쓴다(Docs/Design/SparksBytecode.ko.md 6.1절, SE-R8).
     internal static bool IsMember(string kind) => kind is "field" or "subobject" or "function" or "rpc" or "enumCase";
 
     private static bool IsIdentifier(string part) => part.Length > 0 && (char.IsAsciiLetter(part[0]) || part[0] == '_') &&
@@ -486,9 +486,10 @@ internal sealed class StableIdManifest
             return;
         }
 
-        // C++ 정규 이름(`a::b::Type`, 멤버는 `::member`)은 type·field만 쓴다.
+        // C++ 정규 이름(`a::b::Type`, 멤버는 `::member`)은 type·field·function(리플렉션 함수 `<클래스>::<함수>`)만 쓴다.
         string[] parts = name.Split("::", StringSplitOptions.None);
-        if (kind is not ("type" or "field") || (kind == "field" && parts.Length < 2) || parts.Any(part => !IsIdentifier(part)))
+        if (kind is not ("type" or "field" or "function") || (kind is "field" or "function" && parts.Length < 2) ||
+            parts.Any(part => !IsIdentifier(part)))
         {
             throw new InvalidDataException("Invalid qualified declaration name: " + name);
         }

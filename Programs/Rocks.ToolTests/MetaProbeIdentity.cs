@@ -23,6 +23,17 @@ internal static class MetaProbeIdentity
             "probe::Thing::wide", "probe::Thing::big", "probe::Thing::huge", "probe::Thing::byMood", "probe::Thing::sounds", "probe::Thing::maybeMood",
             "probe::Thing::leaves", "probe::Thing::key", "probe::Thing::grid", "probe::Tool::count"];
 
+    // 리플렉션 함수 시험(MetaTests.Functions)의 함수다.
+    private static readonly string[] FunctionNames =
+        ["probe::Value::Touch", "probe::Value::Count", "probe::Value::Build", "probe::Value::Apply", "probe::Value::Inspect", "probe::Value::Secret",
+            "probe::Value::touch", "probe::Child::touch", "probe::Value::Place", "probe::Value::Settle", "probe::Value::Label", "probe::Value::Rest",
+            "probe::Value::Guess"];
+
+    // 리플렉션 함수 시험의 타입·필드다(base가 있고 접근 수준이 섞인 struct 매개변수).
+    private static readonly string[] FunctionTypes = ["probe::Root", "probe::Mixed"];
+
+    private static readonly string[] FunctionFields = ["probe::Root::a", "probe::Mixed::b", "probe::Mixed::c"];
+
     public static void Create(string path)
     {
         StableIdManifest.Update(path, true, manifest =>
@@ -39,7 +50,7 @@ internal static class MetaProbeIdentity
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
                 "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Hollow", "probe::Cell",
                 "probe::ViaAliasTemplate", "probe::ViaMemberTypedef", "probe::ViaDecltype", "probe::TwoTags", "probe::Tool" }
-                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes))
+                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes).Concat(FunctionTypes))
             {
                 manifest.Register("type", name);
             }
@@ -99,9 +110,14 @@ internal static class MetaProbeIdentity
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
                 "probe::Holder::set", "probe::Holder::maybe", "probe::Cell::cell" }
-                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields))
+                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields))
             {
                 manifest.Register("field", name);
+            }
+
+            foreach (string name in FunctionNames)
+            {
+                manifest.Register("function", name);
             }
 
             return 0;

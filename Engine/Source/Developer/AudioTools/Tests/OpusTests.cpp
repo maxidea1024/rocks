@@ -1,4 +1,5 @@
 #include "OpusTestFixtures.h"
+#include "SourceAudioReference.h"
 #include "SourceAudioTestSupport.h"
 #include "VorbisTestFixtures.h"
 
@@ -39,8 +40,7 @@ constexpr uint8 DiscreteFamily = 255;
 constexpr uint8 NineChannels = 9;
 
 // x86-64 Windows(UCRT libm)에서 OpusStereo 디코드 결과(모든 채널 planar float32)의 SHA-256이다.
-constexpr const char* StereoDigestX64 =
-    "d7786b91f08292f101f372a4a37449cfe967c3fcfe117fadbb6dedf02695d518";
+constexpr const char* StereoDigestX64 = sourcereference::OpusStereoDigestX64;
 
 // 표본 위치가 맞을 때 기대하는 최소 신호 대 잡음 에너지 비(15 dB)다. pre-skip 312를 덜 자르거나 더
 // 자르면 440 Hz 위상이 크게 어긋나 0 dB 근처로 떨어진다.
@@ -51,7 +51,7 @@ constexpr double MaximumMidToLeft = 0.01;
 
 // 시험 입력의 형식과 길이(마지막 granule − pre-skip)다.
 constexpr uint32 OpusRate = 48000;
-constexpr uint64 StereoFrames = 12000;
+constexpr uint64 StereoFrames = sourcereference::OpusStereoFrames;
 constexpr uint64 NoiseAFrames = 72000;
 constexpr uint64 NoiseBFrames = 48000;
 constexpr uint64 SurroundFrames = 2400;

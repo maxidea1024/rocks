@@ -12,7 +12,7 @@
 #include <EngineAudio/AudioEngineHostOptions.h>
 #include <EngineAudio/AudioPlayback.h>
 #include <EngineAudio/AudioRunTraits.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 
 // 엔진에 오디오 장치를 붙이는 Subsystem이다(Docs/Design/AudioSystem 3.8·3.35절, UE FAudioDevice·
 // FAudioDeviceManager의 엔진 쪽 대응). 장치(실 backend 또는 Null)와 제어 pipe(AudioControl lane)를
