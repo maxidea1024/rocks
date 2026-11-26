@@ -47,6 +47,11 @@ inline constexpr StringView RpcPrefixes[] = {"Server", "AllClients", "OwnerClien
 // 제공하는 prelude 타입, 문맥 이름, RPC 접두, `Changed`). 철자가 정확히 같을 때만 참이다.
 bool IsReservedName(StringView name) noexcept;
 
+// IsReservedName 중 언어 소유 이름 밖의 것(핵심 엔진 타입·문맥 이름·RPC 접두·`Changed`)을 그
+// 순서로, 겹침 없이 센다. index가 범위 밖이면 빈 이름이다.
+uint32 ReservedNameCount() noexcept;
+StringView ReservedNameAt(uint32 index) noexcept;
+
 // 수명 클래스의 멤버 이름으로 쓸 수 없는 hook 계열 이름이면 대신 쓸 hook 이름(`Update` → `Tick`,
 // `OnStart` → `Start`)을, 아니면 빈 문자열을 돌려준다.
 StringView HookForMemberName(StringView name) noexcept;

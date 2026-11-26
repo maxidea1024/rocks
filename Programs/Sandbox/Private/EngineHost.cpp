@@ -16,6 +16,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <AssetRuntime/CookedManifest.h>
 #include <Engine/Engine.h>
+#include <Engine/SplashSettings.h>
 #include <EngineAssets/EngineAssetsSubsystem.h>
 #include <EngineAudio/AudioEngineSubsystem.h>
 #include <Gameplay/GameInstance.generated.h>
@@ -40,6 +41,7 @@
 #include <Platform/Thread.h>
 #include <PlatformWindow/Window.h>
 #include <RenderBase/CookedManifestShaderLibraries.h>
+#include <SplashScreen/SplashScreen.h>
 #if SANDBOX_TRACE_ANALYSIS
 #include <TraceAnalysis/TraceModel.h>
 #endif
@@ -132,6 +134,11 @@ constexpr uint64 NanosecondsPerMillisecond = 1000000ull;
 constexpr uint64 WindowFramesPerSecond = 60;
 constexpr uint64 WindowFrameNanoseconds = NanosecondsPerSecond / WindowFramesPerSecond;
 
+// 스플래시에서 주 창으로 넘기는 프레임이다(Docs/Design/SplashScreen 9.4절): 첫 프레임을 낸 뒤 주
+// 창을 보이고, 보인 뒤 한 프레임을 더 낸 다음 스플래시를 숨긴다.
+constexpr uint64 ShowWindowAfterFrames = 1;
+constexpr uint64 HideSplashAfterFrames = 2;
+
 // 창 크기다(client 영역 픽셀).
 constexpr uint32 WindowWidth = 1280;
 constexpr uint32 WindowHeight = 720;
@@ -154,6 +161,9 @@ public:
         platform::GamepadBackend* gamepads = nullptr;
         // 엔진 카메라를 읽을 게임 세션이다(렌더 view). hook보다 오래 산다.
         GameInstanceClient* client = nullptr;
+        // 시작 화면(선택)이다. 주 창은 숨긴 채 만들어져 있고, 첫 프레임이 끝나면 보이고 한 프레임을
+        // 더 그린 뒤 스플래시를 숨긴다(Docs/Design/SplashScreen 9.4절). hook보다 오래 산다.
+        splash::SplashScreen* splash = nullptr;
     };
 
     HostLoopBridge(input::InputQueue& queue, const Options& options) noexcept
@@ -271,6 +281,7 @@ public:
             screen_->SubmitFrame(options_.client);
         }
 
+        HandOffFromSplash();
         if (options_.window == nullptr) {
             return;
         }
@@ -283,6 +294,23 @@ public:
         deadline_ += WindowFrameNanoseconds;
         if (now < deadline_) {
             platform::SleepFor(static_cast<uint32>((deadline_ - now) / NanosecondsPerMillisecond));
+        }
+    }
+
+    // 스플래시에서 주 창으로 넘긴다(Docs/Design/SplashScreen 9.4절): 첫 프레임을 낸 뒤 숨겨 둔 주
+    // 창을 보이고 앞으로 가져오고, 보인 뒤 한 프레임을 더 낸 다음 스플래시를 숨긴다(숨긴 창에 낸
+    // 프레임이 보이는 순간 화면에 남는다는 보장이 없어서다). 순서는 프레임 수로 정한다.
+    void HandOffFromSplash() noexcept {
+        if (options_.splash == nullptr) {
+            return;
+        }
+
+        ++handOffFrames_;
+        if (handOffFrames_ == ShowWindowAfterFrames && options_.window != nullptr) {
+            options_.window->ShowAndActivate();
+        } else if (handOffFrames_ == HideSplashAfterFrames) {
+            options_.splash->Hide();
+            options_.splash = nullptr;
         }
     }
 
@@ -323,6 +351,8 @@ private:
 
     input::InputQueue& queue_;
     Options options_;
+    // 스플래시 넘기기에서 끝난 프레임 수다.
+    uint64 handOffFrames_ = 0;
     screen::ScreenHost* screen_ = nullptr;
     CookedTextureLibrary* textures_ = nullptr;
     input::InputState input_;
@@ -335,12 +365,15 @@ private:
     uint64 deadline_ = 0;
 };
 
-// 창 모드의 창을 만든다. 실패는 Error를 남기고 그대로 돌려준다(호스트는 실패 코드로 끝난다).
-Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator) noexcept {
+// 창 모드의 창을 만든다. 스플래시가 떠 있으면 숨긴 채 만든다(첫 프레임 뒤 보인다 — HostLoopBridge).
+// 실패는 Error를 남기고 그대로 돌려준다(호스트는 실패 코드로 끝난다).
+Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator,
+                                                        bool visible) noexcept {
     platform::WindowDesc desc;
     desc.title = "Rocks Sandbox";
     desc.width = WindowWidth;
     desc.height = WindowHeight;
+    desc.visible = visible;
     platform::WindowCreateReport report;
     auto window = platform::Window::Create(allocator, desc, &report);
     if (!window) {
@@ -518,8 +551,8 @@ private:
 // 시간으로 창이 닫히거나 frames(0이면 상한 없음)까지 돈다. 프레임 입력 상태를 첫 LocalPlayer의 입력
 // 원천으로 건다. 엔진 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지 않는다).
 int RunEngine(Allocator& allocator, const EngineHostOptions& options,
-              config::ConfigContext& settings, ModuleLoader& modules,
-              StringView engineDirectory) noexcept {
+              config::ConfigContext& settings, ModuleLoader& modules, StringView engineDirectory,
+              splash::SplashScreen* splash) noexcept {
     LogApkProbe();
     // 엔진 전용 실행의 쿠킹 루트(SSD48 — EngineAssets 10.3.1절 A4f4 5번)다. 엔진 쿠킹 매니페스트가
     // 있을 때만 EngineAssets Subsystem을 넣는다(없으면 그 초기화가 NotFound로 엔진 시작을 막는다 —
@@ -542,7 +575,7 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     // 먼저 선언해 뒤에 파괴한다.
     UniquePtr<CookedTextureLibrary> textures;
     if (options.window) {
-        auto created = CreateSandboxWindow(allocator);
+        auto created = CreateSandboxWindow(allocator, splash == nullptr);
         if (!created) {
             return 1;
         }
@@ -566,6 +599,7 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     hookOptions.window = window.Get();
     hookOptions.gamepads = gamepads.Get();
     hookOptions.client = &client;
+    hookOptions.splash = window ? splash : nullptr;
     HostLoopBridge bridge(queue, hookOptions);
     EngineConfig config;
     config.hooks = &bridge;
@@ -923,6 +957,48 @@ Result<void> RegisterSandboxSettingsTypes(ModuleRegistration& registration) noex
     return RegisterPhysicsTypes(registration);
 }
 
+// 창 모드의 시작 화면을 띄운다(Docs/Design/SplashScreen 4·10절). 띄우지 않기로 했으면
+// Unsupported(사유는 Debug 로그), 띄우지 못했으면 Warning을 남기고 그 오류를 돌려준다. 설정은 부팅
+// 값(ui.splash.*)이고, 제목이 비면 "Rocks Sandbox"다.
+Result<splash::SplashScreen> ShowSandboxSplash(Allocator& allocator,
+                                               const EngineHostOptions& options,
+                                               StringView engineDirectory) noexcept {
+    const SplashSettingValues values = ReadSplashSettings();
+    splash::SplashVisibilityInput input = splash::MakeSplashVisibilityInput();
+    input.interactiveHost = true;
+    input.opensMainWindow = options.window;
+    input.noSplashOption = options.noSplash;
+    input.settingsEnabled = values.enabled;
+    input.desktop = platform::QueryDesktopSessionState();
+    const splash::SplashSkipReason reason = splash::DecideSplashVisibility(input);
+    if (reason != splash::SplashSkipReason::None) {
+        Log::Debug(LogSandboxHost, "The splash screen is not shown ({Reason})",
+                   splash::SplashSkipReasonName(reason));
+        return Result<splash::SplashScreen>::Failure(ErrorCode::Unsupported);
+    }
+
+    const splash::SplashTextValue texts[] = {
+        {splash::SplashTextSlot::Title,
+         values.gameTitle.IsEmpty() ? StringView("Rocks Sandbox") : values.gameTitle},
+        {splash::SplashTextSlot::Copyright, values.gameCopyright},
+    };
+    splash::SplashShowDesc desc;
+    desc.kind = splash::SplashKind::Game;
+    desc.configuredImage = values.gameImage;
+    desc.engineDirectory = engineDirectory;
+    desc.texts = texts;
+    desc.showTitle = values.gameShowTitle;
+    desc.showProgressText = values.gameShowProgressText;
+    desc.showProgressBar = values.gameShowProgressBar;
+    auto shown = splash::SplashScreen::Show(allocator, desc);
+    if (!shown) {
+        Log::Warning(LogSandboxHost, "The splash screen could not be shown: {Error}",
+                     ErrorCodeName(shown.Error()));
+    }
+
+    return shown;
+}
+
 } // namespace
 
 // 엔진 호스트 본문이다(Docs/Design/ModuleLoader 3.11절). Launch가 소유한 프로세스 모듈
@@ -1002,6 +1078,11 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
         // 개발 빌드는 설정 파일을 감시해 프레임 sync 지점에서 다시 읽는다(출시 규칙이면 Unsupported
         // — 기록하지 않는다).
         (void)settings.StartHotReload();
+        // 시작 화면(Docs/Design/SplashScreen 10.3절): 설정·로그 뒤, trace·호스트 단계 모듈·엔진
+        // 전에 띄우고 주 창 첫 프레임 뒤 숨긴다(HostLoopBridge). 띄우지 못해도 시작은 계속한다.
+        // 엔진이 일찍 끝나면 이 범위가 끝날 때 숨긴다.
+        Result<splash::SplashScreen> shownSplash =
+            ShowSandboxSplash(allocator, options, boot.engineDir);
         // 7) trace 세션(trace.* 설정 — 5)에서 고정됐다)·콘솔 명령·--trace. 세션을 열지 못해도
         // 엔진은 돈다.
         TraceSession trace;
@@ -1050,8 +1131,8 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
 
             const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
             if (hostModules.IsOk()) {
-                exitCode =
-                    RunEngine(allocator, options, settings.Context(), modules, boot.engineDir);
+                exitCode = RunEngine(allocator, options, settings.Context(), modules,
+                                     boot.engineDir, shownSplash ? &shownSplash.Value() : nullptr);
             } else {
                 Log::Error(LogSandboxHost,
                            "Host module {Module} failed to start ({Code}) at {Stage}: {Message}",

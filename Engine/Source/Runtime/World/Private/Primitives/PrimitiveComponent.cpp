@@ -291,6 +291,7 @@ Result<void> PrimitiveComponent::CreateSystemState(SystemStateKind kind) noexcep
     }
 
     desc.component = Handle();
+    desc.actor = GetOwner();
     desc.worldTransform = BodyWorldTransform();
     desc.collision = resolved.Value();
     desc.settings = &bodySettings_;

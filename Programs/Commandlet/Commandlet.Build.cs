@@ -42,9 +42,12 @@ public sealed class CommandletHost : ModuleRules
         // 3.36.3). Audio, AudioMiniaudio, AudioOpus and EngineAudio come from the Sandbox audio modes (sections 3.34.5, 3.35.11 and 3.37.1);
         // without the AudioOutputBackendRegistry and AudioDecoderRegistry host services their module lifetime objects stay idle in the cooker. WorldIntegration (with Mesh
         // and Material) comes from the Sandbox texture render cache (Docs/Design/RenderBase section 18.5 item 8).
+        // SplashScreen comes from the Sandbox window mode (Docs/Design/SplashScreen); it registers no shader types and only shows a window when a
+        // host calls SplashScreen::Show, which the cooker never does.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
             "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "MeshTools", "AnimationTools", "Collision",
             "Engine", "Gameplay", "Physics", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
-            "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio", "AudioAssets", "AudioTools", "WorldIntegration"]
+            "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio", "AudioAssets", "AudioTools", "WorldIntegration",
+            "SplashScreen"]
     };
 }

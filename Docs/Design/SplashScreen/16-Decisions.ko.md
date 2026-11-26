@@ -18,5 +18,5 @@
 | SPD10 | 끄기: `--no-splash`·`Splash.enabled`(프로젝트·사용자 층)·무인·headless·주 창 없는 실행·비게임 호스트 자동 | UE `-NOSPLASH`·CVar·`IsUnattended`와 같은 뜻 |
 | SPD11 | 모듈 로더에 `PostSplashScreen` 계열 단계를 더하지 않는다 | Slate 기반 화면용, OS 스플래시와 무관 |
 | SPD12 | 스플래시 이미지는 낱개 파일로 배포 | 에셋 시스템 전에 필요(UE `EngineExtraStageFiles`) |
-| SPD13 | `SplashSettings`는 `Engine` 모듈(모든 대상)에 정의, 동작은 ClientOnly 모듈 | 서버에서 프로젝트 설정 섹션이 `UnknownSection`이 되지 않게 |
+| SPD13 | 설정은 `Engine` 모듈(모든 대상)이 등록하는 `ui.splash.*` 부팅 CVar, 동작은 ClientOnly 모듈 | 서버도 같은 설정 파일을 읽는다. 설정 struct와 달리 호스트마다 리플렉션 타입 등록이 필요 없다(개정 2) |
 | SPD14 | Windows Show는 스레드만 띄우고 돌아온다 | UE와 같다. 디코딩이 시작 경로에 들어가지 않는다 |

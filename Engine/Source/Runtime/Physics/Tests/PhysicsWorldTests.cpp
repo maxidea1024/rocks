@@ -159,6 +159,11 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
         Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle) const noexcept override {
             return Result<BodyKinematics>::Failure(ErrorCode::StaleHandle);
         }
+
+        Result<bool> TraceLine(const Vec3d&, const Vec3d&, const QueryFilter&, const QueryParams&,
+                               TraceMode, HitResult*, Array<HitResult>*) const noexcept override {
+            return Result<bool>::Success(false);
+        }
     };
 
     NullScene first;
