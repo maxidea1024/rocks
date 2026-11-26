@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/PlacementNew.h>
 #include <Core/Memory/Allocator.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/NameField.h>
@@ -7,6 +8,7 @@
 #include <Object/RuntimeTypeOps.h>
 #include <Object/TypeLease.h>
 #include <Object/ValueCopy.h>
+#include <Platform/Memory.h>
 
 // 리플렉션 함수의 범용 호출이다(ROCKS_FUNCTION — Docs/Design/FunctionReflection.ko.md FD7–FD9, UE
 // UObject::ProcessEvent·CallFunctionByNameWithArguments 대응). TypeRegistry::FindFunction이 돌려준
@@ -204,6 +206,40 @@ Result<void> ReadParameter(const void* slot, FieldValue& value) noexcept {
     } else {
         return CopyFieldValue(source, value);
     }
+}
+
+// 생성 호출 frame의 칸 하나다. 값을 정렬된 byte 저장소 맨 앞에 두므로 값 형식이 표준 배치가
+// 아니어도(base가 있는 struct, 접근 수준이 섞인 struct) frame은 표준 배치라 offsetof로 칸 위치를
+// 정한다. Construct·Destroy는 frame의 생성자·소멸자만 부른다(한 번씩).
+template <class T>
+struct alignas(T) FrameSlot {
+    void Construct(Allocator& allocator) noexcept {
+        ::new (static_cast<void*>(bytes)) T(MakeAllocatedValue<T>(allocator));
+    }
+
+    void Destroy() noexcept {
+        Get().~T();
+    }
+
+    T& Get() noexcept {
+        return *platform::Launder(reinterpret_cast<T*>(bytes));
+    }
+
+    unsigned char bytes[sizeof(T)];
+};
+
+// 생성 호출 frame Frame(allocator를 받는 생성자 — 칸마다 FrameSlot::Construct)을 빈 저장소에
+// 만든다(RuntimeFunctionOps::construct).
+template <class Frame>
+Result<void> ConstructFunctionFrame(void* frame, Allocator& allocator) noexcept {
+    ::new (frame) Frame(allocator);
+    return Result<void>::Success();
+}
+
+// 생성 호출 frame을 소멸한다(RuntimeFunctionOps::destroy).
+template <class Frame>
+void DestroyFunctionFrame(void* frame) noexcept {
+    static_cast<Frame*>(frame)->~Frame();
 }
 
 // 칸 형식 T가 FieldValue로 통째 읽고 쓰지 않는 형식(struct·컨테이너)인지다.

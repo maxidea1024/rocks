@@ -13,12 +13,14 @@ internal static class ModuleDescriptor
     // 3: 필드 assetBundles(에셋 A4e2a)를 더했다.
     // 4: 타입 flags ScriptType·ScriptExtensible(실효 — 상속 포함), 필드 flags ScriptReadOnly·ScriptWritable과 필드 scriptName(Sparks binding —
     // Docs/Design/SparksBinding.ko.md B2).
-    private const int DescriptorSchema = 4;
+    // 5: 클래스 functions(리플렉션 함수 — 이름·ID·도구 이름·flags·매개변수·반환, Docs/Design/FunctionReflection.ko.md FD10). 다른 모듈의 상속 함수
+    // 이름 겹침 검사(RMC2703)와 Sparks binding이 쓴다.
+    private const int DescriptorSchema = 5;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
     private static readonly string[] TypeKeys =
-        ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields"];
+        ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields", "functions"];
 
     // struct 항목: base(리플렉션 base struct의 정규 이름, 없으면 "" — 리플렉션 B9k, ReflectionExtensions.ko.md 12절), flags(선언
     // 플래그 Atomic(base에서 상속된 것 포함) 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference → RequiresWorldOnlyOwner →
@@ -36,6 +38,15 @@ internal static class ModuleDescriptor
     private static readonly string[] FieldKeys =
         ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield", "assetBundles",
             "scriptName"];
+
+    // 클래스의 자기 리플렉션 함수 항목이다(상속 함수는 기반 클래스 항목에 있다). flags는 Static → Const → Pure → EditorOnly → ReturnsResult
+    // 순서다.
+    private static readonly string[] FunctionKeys = ["name", "id", "toolName", "flags", "parameters", "result"];
+
+    // 함수 매개변수 칸(name과 필드와 같은 형식 칸 넷)과 반환 칸(형식 칸 넷)이다.
+    private static readonly string[] ParameterKeys = ["name", "value", "element", "key", "maxElements"];
+
+    private static readonly string[] ResultKeys = ["value", "element", "key", "maxElements"];
 
     public static byte[] Write(string module, IEnumerable<ClassModel> types)
     {
@@ -118,6 +129,7 @@ internal static class ModuleDescriptor
                 json.WriteString("visibility", type.Private ? "private" : "public");
                 json.WriteString("toolName", type.EffectiveToolName);
                 WriteFields(json, type);
+                WriteFunctions(json, type);
                 json.WriteEndObject();
             }
 
@@ -186,46 +198,7 @@ internal static class ModuleDescriptor
             json.WriteString("name", field.Name);
             json.WriteString("id", field.Id);
             json.WriteString("fieldKind", field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value");
-            json.WriteStartObject("value");
-            json.WriteString("kind", field.Kind);
-            if (!field.HasElement && field.HasTargetType)
-            {
-                json.WriteString("type", field.ReferenceId ?? "");
-            }
-
-            json.WriteEndObject();
-            if (field.HasElement)
-            {
-                json.WriteStartObject("element");
-                json.WriteString("kind", field.ElementKind);
-                if (field.HasTargetType)
-                {
-                    json.WriteString("type", field.ReferenceId ?? "");
-                }
-
-                json.WriteEndObject();
-            }
-            else
-            {
-                json.WriteNull("element");
-            }
-
-            if (field.IsMap)
-            {
-                json.WriteStartObject("key");
-                json.WriteString("kind", field.KeyKind);
-                if (field.KeyHasTargetType)
-                {
-                    json.WriteString("type", field.KeyReferenceId ?? "");
-                }
-
-                json.WriteEndObject();
-            }
-            else
-            {
-                json.WriteNull("key");
-            }
-
+            WriteSlotType(json, field);
             json.WriteStartArray("flags");
             if (field.Spec.Transient)
             {
@@ -270,6 +243,100 @@ internal static class ModuleDescriptor
             json.WriteString("assetBundles", field.Spec.AssetBundles);
             // Sparks 스크립트 이름 지정(ScriptName — 없으면 "")이다. 파생 모듈이 상속 필드의 Sparks 이름 겹침을 본다(SparksBinding B5).
             json.WriteString("scriptName", field.Spec.ScriptName);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+    }
+
+    // 필드·함수 칸의 형식 칸 value·element·key다(maxElements는 부르는 쪽이 적는다).
+    private static void WriteSlotType(Utf8JsonWriter json, FieldModel field)
+    {
+        json.WriteStartObject("value");
+        json.WriteString("kind", field.Kind);
+        if (!field.HasElement && field.HasTargetType)
+        {
+            json.WriteString("type", field.ReferenceId ?? "");
+        }
+
+        json.WriteEndObject();
+        if (field.HasElement)
+        {
+            json.WriteStartObject("element");
+            json.WriteString("kind", field.ElementKind);
+            if (field.HasTargetType)
+            {
+                json.WriteString("type", field.ReferenceId ?? "");
+            }
+
+            json.WriteEndObject();
+        }
+        else
+        {
+            json.WriteNull("element");
+        }
+
+        if (field.IsMap)
+        {
+            json.WriteStartObject("key");
+            json.WriteString("kind", field.KeyKind);
+            if (field.KeyHasTargetType)
+            {
+                json.WriteString("type", field.KeyReferenceId ?? "");
+            }
+
+            json.WriteEndObject();
+        }
+        else
+        {
+            json.WriteNull("key");
+        }
+    }
+
+    // 클래스의 자기 리플렉션 함수 배열이다(선언 순서 그대로).
+    private static void WriteFunctions(Utf8JsonWriter json, ClassModel type)
+    {
+        json.WriteStartArray("functions");
+        foreach (FunctionModel function in type.Functions)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", function.Name);
+            json.WriteString("id", function.Id);
+            json.WriteString("toolName", function.EffectiveToolName);
+            json.WriteStartArray("flags");
+            foreach ((bool set, string flag) in new[] { (function.IsStatic, "Static"), (function.IsConst, "Const"), (function.Spec.Pure, "Pure"),
+                (function.Spec.EditorOnly, "EditorOnly"), (function.ReturnsResult, "ReturnsResult") })
+            {
+                if (set)
+                {
+                    json.WriteStringValue(flag);
+                }
+            }
+
+            json.WriteEndArray();
+            json.WriteStartArray("parameters");
+            foreach (FieldModel slot in function.Parameters)
+            {
+                json.WriteStartObject();
+                json.WriteString("name", slot.Name);
+                WriteSlotType(json, slot);
+                json.WriteNumber("maxElements", slot.IsCounted ? slot.MaxElements : 0);
+                json.WriteEndObject();
+            }
+
+            json.WriteEndArray();
+            if (function.Result is FieldModel result)
+            {
+                json.WriteStartObject("result");
+                WriteSlotType(json, result);
+                json.WriteNumber("maxElements", result.IsCounted ? result.MaxElements : 0);
+                json.WriteEndObject();
+            }
+            else
+            {
+                json.WriteNull("result");
+            }
+
             json.WriteEndObject();
         }
 
@@ -513,161 +580,12 @@ internal static class ModuleDescriptor
                     "Value" => false,
                     _ => throw Invalid("fieldKind")
                 };
-                JsonElement value = field.GetProperty("value");
-                if (value.ValueKind != JsonValueKind.Object)
-                {
-                    throw Invalid("field value");
-                }
-
-                // 값 종류는 성질 표(ValueKindTable — Docs/Design/ReflectionExtensions.ko.md 1.3·1.8절)가 그 자리(클래스 필드·struct
-                // 멤버)에 허용하는 종류만 받는다(그 밖은 생성 코드가 컴파일되어도 런타임 등록에서 실패한다).
-                string kind = Name(value.GetProperty("kind"), Identifier, "field value kind");
-                if (!ValueKindTable.Has(kind, isStruct ? ValueKindProperty.StructMember : ValueKindProperty.Field))
-                {
-                    throw Invalid("field value kind " + kind);
-                }
-
-                // 배열 필드는 value에 대상이 없고(value.type 0) element가 원소 형식이다. Optional 필드(리플렉션 B9e)도 value에 대상이
-                // 없고 element가 내부 형식(성질 표의 Optional 내부 종류)이며 maxElements가 0이다. 그 밖의 필드는 element가 null이고
-                // maxElements가 0이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor).
-                bool array = kind == ArrayRules.Array;
-                bool optional = kind == OptionalRules.Optional;
-                bool map = kind == MapRules.Map;
-                bool set = kind == MapRules.Set;
+                SlotType slotType = ReadSlotType(field, isStruct ? ValueKindProperty.StructMember : ValueKindProperty.Field, Invalid);
+                string kind = slotType.Kind;
+                string? elementKind = slotType.ElementKind;
+                string? keyKind = slotType.KeyKind;
+                uint maxElements = slotType.MaxElements;
                 bool fixedArray = kind == StaticArrayRules.StaticArray;
-                RequireKeys(value, !array && !optional && !map && !set && !fixedArray && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
-                JsonElement element = field.GetProperty("element");
-                JsonElement keyElement = field.GetProperty("key");
-                if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
-                {
-                    throw Invalid("maxElements");
-                }
-
-                string? elementKind = null;
-                JsonElement targetHolder = value;
-                if (array)
-                {
-                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement elementKindValue))
-                    {
-                        throw Invalid("element of an array field");
-                    }
-
-                    elementKind = Name(elementKindValue, Identifier, "element kind");
-                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.ArrayElement))
-                    {
-                        throw Invalid("element kind " + elementKind);
-                    }
-
-                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
-                    if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
-                    {
-                        throw Invalid($"maxElements {maxElements} of an array field");
-                    }
-
-                    targetHolder = element;
-                }
-                else if (fixedArray)
-                {
-                    // 정적 배열(리플렉션 B9g)은 element가 원소 형식(성질 표의 정적 배열 원소 종류)이고 maxElements가 정확한 원소 수 N이다.
-                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement fixedKindValue))
-                    {
-                        throw Invalid("element of a static array field");
-                    }
-
-                    elementKind = Name(fixedKindValue, Identifier, "static array element kind");
-                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.StaticArrayElement))
-                    {
-                        throw Invalid("static array element kind " + elementKind);
-                    }
-
-                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
-                    if (maxElements < 1 || maxElements > StaticArrayRules.MaxStaticArrayElements)
-                    {
-                        throw Invalid($"maxElements {maxElements} of a static array field");
-                    }
-
-                    targetHolder = element;
-                }
-                else if (optional)
-                {
-                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement innerKindValue))
-                    {
-                        throw Invalid("element of an Optional field");
-                    }
-
-                    elementKind = Name(innerKindValue, Identifier, "Optional inner kind");
-                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.OptionalInner))
-                    {
-                        throw Invalid("Optional inner kind " + elementKind);
-                    }
-
-                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
-                    if (maxElements != 0)
-                    {
-                        throw Invalid($"maxElements {maxElements} of an Optional field");
-                    }
-
-                    targetHolder = element;
-                }
-                else if (map || set)
-                {
-                    // Map 값은 성질 표의 Map 값 종류(강한 참조 값은 ObjectRefMap — 리플렉션 B9f4), Set 원소는 Set 원소 종류다(리플렉션 B9f2).
-                    string what = map ? "map value" : "set element";
-                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement mapElementKind))
-                    {
-                        throw Invalid("element of a map or set field");
-                    }
-
-                    elementKind = Name(mapElementKind, Identifier, what + " kind");
-                    if (!ValueKindTable.Has(elementKind, map ? ValueKindProperty.MapValue : ValueKindProperty.SetElement))
-                    {
-                        throw Invalid(what + " kind " + elementKind);
-                    }
-
-                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
-                    if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
-                    {
-                        throw Invalid($"maxElements {maxElements} of a map or set field");
-                    }
-
-                    targetHolder = element;
-                }
-                else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
-                {
-                    throw Invalid("element or maxElements on a field that is not an array, static array, Optional, map or set");
-                }
-
-                // Map 키는 성질 표의 Map 키 종류이고 대상 종류(Enum·ClassReference·SoftObjectReference)면 type을 싣는다. Map이 아닌 필드의
-                // key는 null이다.
-                string? keyKind = null;
-                string? keyReferenceId = null;
-                if (map)
-                {
-                    if (keyElement.ValueKind != JsonValueKind.Object || !keyElement.TryGetProperty("kind", out JsonElement keyKindValue))
-                    {
-                        throw Invalid("key of a map field");
-                    }
-
-                    keyKind = Name(keyKindValue, Identifier, "map key kind");
-                    if (!ValueKindTable.Has(keyKind, ValueKindProperty.MapKey))
-                    {
-                        throw Invalid("map key kind " + keyKind);
-                    }
-
-                    bool keyTarget = ValueKindTable.Has(keyKind, ValueKindProperty.HasTargetType);
-                    RequireKeys(keyElement, keyTarget ? ["kind", "type"] : ["kind"], Invalid);
-                    if (keyTarget)
-                    {
-                        string keyTargetText = keyElement.GetProperty("type").GetString() ?? throw Invalid("map key target");
-                        keyReferenceId = keyTargetText.Length == 0 && !ValueKindTable.Has(keyKind, ValueKindProperty.RequiresTargetId)
-                            ? null : Hex(keyElement.GetProperty("type"), Invalid);
-                    }
-                }
-                else if (keyElement.ValueKind != JsonValueKind.Null)
-                {
-                    throw Invalid("key on a field that is not a map");
-                }
-
                 // 대상 종류는 배열이면 원소, Optional이면 내부 종류, Map이면 값 종류다. FieldKind::ObjectReference ⇔ 대상이
                 // ObjectReference(ObjectRefArray·ObjectRefMap 포함).
                 string targetKind = elementKind ?? kind;
@@ -702,14 +620,6 @@ internal static class ModuleDescriptor
                     (fieldFlags.Contains("DuplicateTransient", StringComparer.Ordinal) || fieldFlags.Contains("NonTryoutDuplicateTransient", StringComparer.Ordinal)))
                 {
                     throw Invalid("Required combined with DuplicateTransient or NonTryoutDuplicateTransient");
-                }
-
-                string? referenceId = null;
-                if (ValueKindTable.Has(targetKind, ValueKindProperty.HasTargetType))
-                {
-                    string target = targetHolder.GetProperty("type").GetString() ?? throw Invalid("reference target");
-                    // 대상 ID 필수 종류(Enum·Struct)는 ID가 있어야 한다(참조의 ""는 Object다).
-                    referenceId = target.Length == 0 && !ValueKindTable.Has(targetKind, ValueKindProperty.RequiresTargetId) ? null : Hex(targetHolder.GetProperty("type"), Invalid);
                 }
 
                 // bundle 목록은 정규 텍스트(""이거나 같은 목록으로 되돌아오는 텍스트)이고 원본 선언의 RMC2202와 같이 종류·EditorOnly를 본다.
@@ -761,17 +671,315 @@ internal static class ModuleDescriptor
                     Kind = kind,
                     ElementKind = elementKind,
                     KeyKind = keyKind,
-                    KeyReferenceId = keyReferenceId,
+                    KeyReferenceId = slotType.KeyReferenceId,
                     MaxElements = maxElements,
-                    ReferenceId = referenceId
+                    ReferenceId = slotType.ReferenceId
                 });
             }
 
             model.Fields = fields;
+            if (!isStruct)
+            {
+                model.Functions.AddRange(ReadFunctions(type, name, descriptorPath, Invalid));
+            }
+
             types.Add(model);
         }
 
         return (module, types);
+    }
+
+    // 필드·함수 칸의 형식 칸 value·element·key·maxElements를 읽는다. place는 값 종류가 놓이는 자리(클래스 필드·struct 멤버)의 성질이다.
+    private sealed record SlotType(string Kind, string? ElementKind, string? KeyKind, string? KeyReferenceId, uint MaxElements, string? ReferenceId)
+    {
+        // 대상 종류다(배열이면 원소, Optional이면 내부 종류, Map이면 값 종류).
+        public string TargetKind => ElementKind ?? Kind;
+    }
+
+    private static SlotType ReadSlotType(JsonElement field, ValueKindProperty place, Func<string, MetadataException> Invalid)
+    {
+        string Name(JsonElement element, Regex pattern, string what)
+        {
+            string text = element.GetString() ?? "";
+            return pattern.IsMatch(text) ? text : throw Invalid($"invalid {what}: {text}");
+        }
+
+        JsonElement value = field.GetProperty("value");
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw Invalid("field value");
+        }
+
+        // 값 종류는 성질 표(ValueKindTable — Docs/Design/ReflectionExtensions.ko.md 1.3·1.8절)가 그 자리(클래스 필드·struct
+        // 멤버)에 허용하는 종류만 받는다(그 밖은 생성 코드가 컴파일되어도 런타임 등록에서 실패한다).
+        string kind = Name(value.GetProperty("kind"), Identifier, "field value kind");
+        if (!ValueKindTable.Has(kind, place))
+        {
+            throw Invalid("field value kind " + kind);
+        }
+
+        // 배열 필드는 value에 대상이 없고(value.type 0) element가 원소 형식이다. Optional 필드(리플렉션 B9e)도 value에 대상이
+        // 없고 element가 내부 형식(성질 표의 Optional 내부 종류)이며 maxElements가 0이다. 그 밖의 필드는 element가 null이고
+        // maxElements가 0이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor).
+        bool array = kind == ArrayRules.Array;
+        bool optional = kind == OptionalRules.Optional;
+        bool map = kind == MapRules.Map;
+        bool set = kind == MapRules.Set;
+        bool fixedArray = kind == StaticArrayRules.StaticArray;
+        RequireKeys(value, !array && !optional && !map && !set && !fixedArray && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+        JsonElement element = field.GetProperty("element");
+        JsonElement keyElement = field.GetProperty("key");
+        if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
+        {
+            throw Invalid("maxElements");
+        }
+
+        string? elementKind = null;
+        JsonElement targetHolder = value;
+        if (array)
+        {
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement elementKindValue))
+            {
+                throw Invalid("element of an array field");
+            }
+
+            elementKind = Name(elementKindValue, Identifier, "element kind");
+            if (!ValueKindTable.Has(elementKind, ValueKindProperty.ArrayElement))
+            {
+                throw Invalid("element kind " + elementKind);
+            }
+
+            RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+            if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
+            {
+                throw Invalid($"maxElements {maxElements} of an array field");
+            }
+
+            targetHolder = element;
+        }
+        else if (fixedArray)
+        {
+            // 정적 배열(리플렉션 B9g)은 element가 원소 형식(성질 표의 정적 배열 원소 종류)이고 maxElements가 정확한 원소 수 N이다.
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement fixedKindValue))
+            {
+                throw Invalid("element of a static array field");
+            }
+
+            elementKind = Name(fixedKindValue, Identifier, "static array element kind");
+            if (!ValueKindTable.Has(elementKind, ValueKindProperty.StaticArrayElement))
+            {
+                throw Invalid("static array element kind " + elementKind);
+            }
+
+            RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+            if (maxElements < 1 || maxElements > StaticArrayRules.MaxStaticArrayElements)
+            {
+                throw Invalid($"maxElements {maxElements} of a static array field");
+            }
+
+            targetHolder = element;
+        }
+        else if (optional)
+        {
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement innerKindValue))
+            {
+                throw Invalid("element of an Optional field");
+            }
+
+            elementKind = Name(innerKindValue, Identifier, "Optional inner kind");
+            if (!ValueKindTable.Has(elementKind, ValueKindProperty.OptionalInner))
+            {
+                throw Invalid("Optional inner kind " + elementKind);
+            }
+
+            RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+            if (maxElements != 0)
+            {
+                throw Invalid($"maxElements {maxElements} of an Optional field");
+            }
+
+            targetHolder = element;
+        }
+        else if (map || set)
+        {
+            // Map 값은 성질 표의 Map 값 종류(강한 참조 값은 ObjectRefMap — 리플렉션 B9f4), Set 원소는 Set 원소 종류다(리플렉션 B9f2).
+            string what = map ? "map value" : "set element";
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement mapElementKind))
+            {
+                throw Invalid("element of a map or set field");
+            }
+
+            elementKind = Name(mapElementKind, Identifier, what + " kind");
+            if (!ValueKindTable.Has(elementKind, map ? ValueKindProperty.MapValue : ValueKindProperty.SetElement))
+            {
+                throw Invalid(what + " kind " + elementKind);
+            }
+
+            RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+            if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
+            {
+                throw Invalid($"maxElements {maxElements} of a map or set field");
+            }
+
+            targetHolder = element;
+        }
+        else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
+        {
+            throw Invalid("element or maxElements on a field that is not an array, static array, Optional, map or set");
+        }
+
+        // Map 키는 성질 표의 Map 키 종류이고 대상 종류(Enum·ClassReference·SoftObjectReference)면 type을 싣는다. Map이 아닌 필드의
+        // key는 null이다.
+        string? keyKind = null;
+        string? keyReferenceId = null;
+        if (map)
+        {
+            if (keyElement.ValueKind != JsonValueKind.Object || !keyElement.TryGetProperty("kind", out JsonElement keyKindValue))
+            {
+                throw Invalid("key of a map field");
+            }
+
+            keyKind = Name(keyKindValue, Identifier, "map key kind");
+            if (!ValueKindTable.Has(keyKind, ValueKindProperty.MapKey))
+            {
+                throw Invalid("map key kind " + keyKind);
+            }
+
+            bool keyTarget = ValueKindTable.Has(keyKind, ValueKindProperty.HasTargetType);
+            RequireKeys(keyElement, keyTarget ? ["kind", "type"] : ["kind"], Invalid);
+            if (keyTarget)
+            {
+                string keyTargetText = keyElement.GetProperty("type").GetString() ?? throw Invalid("map key target");
+                keyReferenceId = keyTargetText.Length == 0 && !ValueKindTable.Has(keyKind, ValueKindProperty.RequiresTargetId)
+                    ? null : Hex(keyElement.GetProperty("type"), Invalid);
+            }
+        }
+        else if (keyElement.ValueKind != JsonValueKind.Null)
+        {
+            throw Invalid("key on a field that is not a map");
+        }
+
+        string targetKind = elementKind ?? kind;
+        string? referenceId = null;
+        if (ValueKindTable.Has(targetKind, ValueKindProperty.HasTargetType))
+        {
+            string target = targetHolder.GetProperty("type").GetString() ?? throw Invalid("reference target");
+            // 대상 ID 필수 종류(Enum·Struct)는 ID가 있어야 한다(참조의 ""는 Object다).
+            referenceId = target.Length == 0 && !ValueKindTable.Has(targetKind, ValueKindProperty.RequiresTargetId) ? null : Hex(targetHolder.GetProperty("type"), Invalid);
+        }
+
+        return new(kind, elementKind, keyKind, keyReferenceId, maxElements, referenceId);
+    }
+
+    // 클래스의 functions 배열을 읽는다(Docs/Design/FunctionReflection.ko.md FD10). 칸 형식은 필드와 같은 규칙에 호출 frame에 둘 수 없는 종류
+    // (정적 배열·InstancedStruct·강한 참조와 그것을 담는 컨테이너 — 원본 선언의 RMC2704)를 더 거부한다.
+    private static List<FunctionModel> ReadFunctions(JsonElement type, string owner, string descriptorPath, Func<string, MetadataException> Invalid)
+    {
+        List<FunctionModel> functions = [];
+        // C++ 이름은 오버로드가 없어 정확히 유일하고, 실효 도구 이름은 대소문자 무시로 유일하다(원본 선언의 RMC2702·RMC2703과 같다).
+        HashSet<string> names = new(StringComparer.Ordinal);
+        HashSet<string> toolNames = new(StringComparer.OrdinalIgnoreCase);
+        if (type.GetProperty("functions").GetArrayLength() > FunctionRules.MaxFunctions)
+        {
+            throw Invalid("too many functions in " + owner);
+        }
+
+        foreach (JsonElement function in type.GetProperty("functions").EnumerateArray())
+        {
+            RequireKeys(function, FunctionKeys, Invalid);
+            string name = function.GetProperty("name").GetString() ?? "";
+            string toolName = function.GetProperty("toolName").GetString() ?? "";
+            if (!Identifier.IsMatch(name) || !Identifier.IsMatch(toolName) || !names.Add(name) || !toolNames.Add(toolName))
+            {
+                throw Invalid($"function name of {owner}: {name}");
+            }
+
+            string[] flags = function.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
+            if (flags.Any(flag => flag is not ("Static" or "Const" or "Pure" or "EditorOnly" or "ReturnsResult")) ||
+                flags.Distinct(StringComparer.Ordinal).Count() != flags.Length || (flags.Contains("Static") && flags.Contains("Const")))
+            {
+                throw Invalid($"unknown, duplicate or conflicting function flag in {owner}::{name}");
+            }
+
+            SourceSite site = new(descriptorPath, 1);
+            FieldModel Slot(JsonElement slot, string slotName)
+            {
+                SlotType slotType = ReadSlotType(slot, ValueKindProperty.Field, Invalid);
+                if (slotType.Kind is StaticArrayRules.StaticArray or "InstancedStruct" or "ObjectReference" ||
+                    slotType.TargetKind is "InstancedStruct" or "ObjectReference" || slotType.KeyKind == "ObjectReference")
+                {
+                    throw Invalid($"function slot kind {slotType.Kind} in {owner}::{name}");
+                }
+
+                return new FieldModel
+                {
+                    Id = "",
+                    Site = site,
+                    Name = slotName,
+                    Owner = owner,
+                    NativeSpelling = "",
+                    Spec = new(false, false, "", "") { MaxElements = slotType.MaxElements },
+                    Kind = slotType.Kind,
+                    ElementKind = slotType.ElementKind,
+                    KeyKind = slotType.KeyKind,
+                    KeyReferenceId = slotType.KeyReferenceId,
+                    MaxElements = slotType.MaxElements,
+                    ReferenceId = slotType.ReferenceId
+                };
+            }
+
+            FunctionModel model = new()
+            {
+                Id = Hex(function.GetProperty("id"), Invalid),
+                Site = site,
+                Name = name,
+                Owner = owner,
+                Spec = new(flags.Contains("Pure"), flags.Contains("EditorOnly"), toolName == name ? "" : toolName),
+                IsStatic = flags.Contains("Static"),
+                IsConst = flags.Contains("Const"),
+                ReturnsResult = flags.Contains("ReturnsResult"),
+                Imported = true
+            };
+            JsonElement parameters = function.GetProperty("parameters");
+            if (parameters.GetArrayLength() > FunctionRules.MaxParameters)
+            {
+                throw Invalid($"too many parameters in {owner}::{name}");
+            }
+
+            HashSet<string> parameterNames = new(StringComparer.Ordinal);
+            foreach (JsonElement parameter in parameters.EnumerateArray())
+            {
+                RequireKeys(parameter, ParameterKeys, Invalid);
+                string parameterName = parameter.GetProperty("name").GetString() ?? "";
+                if (!Identifier.IsMatch(parameterName) || !parameterNames.Add(parameterName))
+                {
+                    throw Invalid($"parameter name in {owner}::{name}: {parameterName}");
+                }
+
+                model.Parameters.Add(Slot(parameter, parameterName));
+            }
+
+            JsonElement result = function.GetProperty("result");
+            if (result.ValueKind == JsonValueKind.Object)
+            {
+                RequireKeys(result, ResultKeys, Invalid);
+                model.Result = Slot(result, "");
+            }
+            else if (result.ValueKind != JsonValueKind.Null)
+            {
+                throw Invalid($"result of {owner}::{name}");
+            }
+
+            // Pure는 반환 값이 있어야 한다(원본 선언의 RMC2705).
+            if (model.Spec.Pure && model.Result is null)
+            {
+                throw Invalid($"Pure function without a result: {owner}::{name}");
+            }
+
+            functions.Add(model);
+        }
+
+        return functions;
     }
 
     // 필드 scriptName(Sparks 이름 지정 — 없으면 "")이다. 지정은 Sparks 노출 필드에만 있고 PascalCase ASCII다(원본 선언의 RMC2603·RMC2604와

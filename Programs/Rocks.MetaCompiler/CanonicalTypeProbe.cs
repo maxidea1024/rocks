@@ -42,6 +42,31 @@ internal static class CanonicalTypeProbe
         struct RocksStaticBase<RocksCanonE[RocksCanonN]> : RocksStaticBase<RocksCanonE> {};
         template <class RocksCanonE>
         struct RocksStaticBase<RocksCanonE[]> : RocksStaticBase<RocksCanonE> {};
+        template <decltype(sizeof(0)) RocksCanonI, class... RocksCanonA>
+        struct RocksCanonPack;
+        template <class RocksCanonH, class... RocksCanonA>
+        struct RocksCanonPack<0, RocksCanonH, RocksCanonA...> {
+            using type = RocksCanonH;
+        };
+        template <decltype(sizeof(0)) RocksCanonI, class RocksCanonH, class... RocksCanonA>
+        struct RocksCanonPack<RocksCanonI, RocksCanonH, RocksCanonA...> : RocksCanonPack<RocksCanonI - 1, RocksCanonA...> {};
+        template <class RocksCanonF>
+        struct RocksFunctionShape;
+        template <class RocksCanonR, class RocksCanonC, class... RocksCanonA>
+        struct RocksFunctionShape<RocksCanonR (RocksCanonC::*)(RocksCanonA...) noexcept> {
+            using rocksResult = RocksCanonR;
+            template <decltype(sizeof(0)) RocksCanonI>
+            using rocksParameter = typename RocksCanonPack<RocksCanonI, RocksCanonA...>::type;
+        };
+        template <class RocksCanonR, class RocksCanonC, class... RocksCanonA>
+        struct RocksFunctionShape<RocksCanonR (RocksCanonC::*)(RocksCanonA...) const noexcept>
+            : RocksFunctionShape<RocksCanonR (RocksCanonC::*)(RocksCanonA...) noexcept> {};
+        template <class RocksCanonR, class... RocksCanonA>
+        struct RocksFunctionShape<RocksCanonR (*)(RocksCanonA...) noexcept> {
+            using rocksResult = RocksCanonR;
+            template <decltype(sizeof(0)) RocksCanonI>
+            using rocksParameter = typename RocksCanonPack<RocksCanonI, RocksCanonA...>::type;
+        };
         }
 
         """;
