@@ -4,7 +4,7 @@
 
 class FRocksJsonWriter;
 
-// UPROPERTY 덤프 writer다(UnrealExchange.ko.md 11.5절, 11.7절). FJsonObjectConverter를 쓰지 않는다(키 첫 글자
+// UPROPERTY 덤프 writer다(UnrealExchange 11.5절, 11.7절). FJsonObjectConverter를 쓰지 않는다(키 첫 글자
 // 변환과 숫자 서식 때문).
 //
 // 규칙:

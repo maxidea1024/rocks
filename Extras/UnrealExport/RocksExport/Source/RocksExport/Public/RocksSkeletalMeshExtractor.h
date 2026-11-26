@@ -6,7 +6,7 @@ class FRocksBundleWriter;
 class USkeletalMesh;
 struct FRocksAssetBody;
 
-// 스킨 메시 추출이다(UnrealExchange.ko.md 6.2절, 6.3절 — 11.6절 FRocksSkeletalMeshExtractor).
+// 스킨 메시 추출이다(UnrealExchange 6.2절, 6.3절 — 11.6절 FRocksSkeletalMeshExtractor).
 //
 // - settings: USkeletalMesh UPROPERTY 덤프(LOD 정보·빌드 설정·머티리얼·스켈레톤 참조·소켓·가중치 프로필·morph target
 //   객체 등).

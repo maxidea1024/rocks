@@ -46,7 +46,7 @@ LOD마다 원본 사본에 다음 순서로 적용한다. UE `FStaticMeshBuilder
 12. bounds 계산(상자 + 구, 경계 확장 적용).
 13. 쿠킹 형식으로 패킹(5.3절).
 
-결정성: 같은 입력·설정·도구 버전·프로필이면 결과 bytes가 같아야 한다(AssetSystem 9·10절). 부동소수점 계산은 쿠킹 결정성 환경(`RunWithDeterministicFloatingPoint`) 안에서 하고, 초월 함수는 Core 결정적 수학만 쓴다(MikkTSpace 패치 포함 — 결정 MA-D5). UE와의 결과 일치는 비트 단위로 보장하지 않는다. 노멀·tangent를 UE와 같게 받아야 하는 시험 콘텐츠는 교환 형식의 "UE 준비 원본" 모드를 쓴다([Unreal 교환 형식](../UnrealExchange.ko.md) 5.3절).
+결정성: 같은 입력·설정·도구 버전·프로필이면 결과 bytes가 같아야 한다(AssetSystem 9·10절). 부동소수점 계산은 쿠킹 결정성 환경(`RunWithDeterministicFloatingPoint`) 안에서 하고, 초월 함수는 Core 결정적 수학만 쓴다(MikkTSpace 패치 포함 — 결정 MA-D5). UE와의 결과 일치는 비트 단위로 보장하지 않는다. 노멀·tangent를 UE와 같게 받아야 하는 시험 콘텐츠는 교환 형식의 "UE 준비 원본" 모드를 쓴다([Unreal 교환 형식](../UnrealExchange/05-StaticMesh.ko.md) 5.3절).
 
 ### 5.3 쿠킹 렌더 데이터
 

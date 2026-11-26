@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::UnrealExchangeImportOptions::formerPaths",
+      "id": "db5b393299474fa39b3d2638c4d80349",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::UnrealExchangeImportOptions::objectPath",
+      "id": "d5981cf64616476ab8ddde09e43365e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::UnrealExchangeImportOptions::references",
+      "id": "196c3f7d417844cc8668e263226040e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::UnrealExchangeImportOptions",
+      "id": "4babc834a3ec48049cc1f1ff2d70f09d",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

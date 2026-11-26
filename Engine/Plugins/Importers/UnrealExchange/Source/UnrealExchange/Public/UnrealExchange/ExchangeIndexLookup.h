@@ -3,7 +3,7 @@
 #include <AssetDatabase/AssetIndex.h>
 #include <UnrealExchange/ExchangeImportOrder.h>
 
-// AssetIndex 태그로 UE objectPath의 기존 Rocks 에셋을 찾는 조회다(Docs/Design/UnrealExchange.ko.md
+// AssetIndex 태그로 UE objectPath의 기존 Rocks 에셋을 찾는 조회다(Docs/Design/UnrealExchange
 // 9.2절, 10.5절 4번). 임포트가 남긴 태그 UnrealExchange.ObjectPath(지금 UE 경로)·FormerPaths(묶음
 // redirect로 알게 된 옛 경로)를 본다. 처음 조회할 때 두 태그의 (키, 값) 정렬 표를 한 번 만들고
 // 조회마다 이진 검색한다(묶음 에셋마다 색인 전체를 훑지 않는다).

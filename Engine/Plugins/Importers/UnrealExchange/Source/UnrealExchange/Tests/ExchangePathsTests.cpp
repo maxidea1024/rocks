@@ -8,7 +8,7 @@
 #include <UnrealExchange/ExchangePaths.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// UE 객체 경로 → Rocks 논리 경로 대응 시험이다(Docs/Design/UnrealExchange.ko.md 9.1절, 10.4절
+// UE 객체 경로 → Rocks 논리 경로 대응 시험이다(Docs/Design/UnrealExchange 9.1절, 10.4절
 // 7·13번): objectPath 문법, root 검사, 구성 요소 정리 규칙(받지 않는 문자·첫 문자·예약
 // 이름·NFC·길이·해시 접미), 전체 길이, 할당 실패, 퍼징(결과는 언제나 논리 경로 규칙을 지킨다).
 using namespace rocks;
