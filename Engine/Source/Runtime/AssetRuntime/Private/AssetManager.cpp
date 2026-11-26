@@ -13,9 +13,10 @@ AssetManager::Impl::Impl(AssetManager& owner, const AssetManagerConfig& config) 
       loaderConfig(config.loader), tickets(allocator), deferred(allocator), scopes(allocator),
       primaries(allocator), packages(allocator), entryPackage(allocator), packageOf(allocator),
       units(allocator), edges(allocator), edgeNodeOf(allocator), edgeNodes(allocator),
-      freeEdgeNodes(allocator), published(allocator), changes(allocator), workStack(allocator),
-      mergeSet(allocator), cycleOwners(allocator), cycleTargets(allocator),
-      scratchAssets(allocator), scratchSlots(allocator), deliver(allocator) {
+      freeEdgeNodes(allocator), emptiedEdgeNodes(allocator), published(allocator),
+      changes(allocator), workStack(allocator), mergeSet(allocator), cycleOwners(allocator),
+      cycleTargets(allocator), scratchAssets(allocator), scratchSlots(allocator),
+      deliver(allocator) {
 }
 
 AssetManager::Impl::~Impl() {

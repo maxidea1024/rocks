@@ -294,7 +294,7 @@ Result<void> CollectInputContext(ObjectRegistry& registry, const ObjectAccessCon
     Allocator& allocator = bundle.actions.GetAllocator();
     // 사본을 따로 다 만든 뒤 옮긴다(실패면 bundle은 그대로다).
     InputContextBundle staged(allocator);
-    staged.id = source.id;
+    staged.id = source.EffectiveId();
     if (auto copied = detail::TryCopyValue(staged.data, source.data, allocator); !copied) {
         return copied;
     }
@@ -331,7 +331,7 @@ Result<void> CollectInputContext(ObjectRegistry& registry, const ObjectAccessCon
         }
 
         InputActionData data(allocator);
-        data.id = actionPointer.Value()->id;
+        data.id = actionPointer.Value()->EffectiveId();
         if (auto copied =
                 detail::TryCopyValue(data.settings, actionPointer.Value()->settings, allocator);
             !copied) {

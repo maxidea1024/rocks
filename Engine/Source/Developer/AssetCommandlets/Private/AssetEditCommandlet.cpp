@@ -919,29 +919,16 @@ Result<int32> RunImportCommand(void* context, Span<const StringView> args, Comma
                 continue;
             }
 
-            Array<char> working(allocator);
-            if (auto sized = working.TryResize(MaxNativePathBytes() + 1); !sized) {
-                failed = Result<int32>::Failure(sized.Error());
-                return false;
-            }
-
-            usize bytes = 0;
-            if (auto got = platform::GetStandardDirectory(platform::StandardDirectory::Working,
-                                                          working.Data(), working.Size(), bytes);
-                !got) {
-                failed =
-                    Fail(output, allocator, name, 1, "{}: {}: cannot read the working directory",
-                         ErrorCodeName(FileErrorCode(got)), source.path);
-                return false;
-            }
-
-            auto made =
-                Path::MakeAbsolute(allocator, StringView(working.Data(), bytes), source.path);
+            bool workingFailed = false;
+            auto made = AbsoluteCommandPath(allocator, source.path, &workingFailed);
             if (!made) {
                 failed = made.Error() == ErrorCode::OutOfMemory
                              ? Result<int32>::Failure(made.Error())
-                             : Fail(output, allocator, name, 1, "InvalidSource: {}: {}",
-                                    source.path, ErrorCodeName(made.Error()));
+                         : workingFailed ? Fail(output, allocator, name, 1,
+                                                "{}: {}: cannot read the working directory",
+                                                ErrorCodeName(made.Error()), source.path)
+                                         : Fail(output, allocator, name, 1, "InvalidSource: {}: {}",
+                                                source.path, ErrorCodeName(made.Error()));
                 return false;
             }
 

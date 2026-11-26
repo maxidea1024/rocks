@@ -52,6 +52,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::HapticEffectAsset::effect",
+      "id": "01b52baefbac4baa9bec79808379e014",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::InputAction::id",
       "id": "8518726a6f0d4ab29bdd89ac8d0e533d",
       "aliases": [],
@@ -509,6 +516,13 @@
       "kind": "type",
       "name": "rocks::input::HapticEffect",
       "id": "5f6a6e01b28e4e43b6cca9447a586a35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::HapticEffectAsset",
+      "id": "6f1cf60ecdad45a2b67604167840af15",
       "aliases": [],
       "retired": false
     },

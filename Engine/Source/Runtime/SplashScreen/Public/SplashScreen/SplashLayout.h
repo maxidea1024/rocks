@@ -82,7 +82,7 @@ struct SplashLayout {
 // 논리 크기와 배율로 기본 배치를 창 px로 계산한다. 칸 사각형은 창 안으로 잘린다.
 //
 // 사용 예:
-//   const splash::SplashLayout layout = splash::ComputeSplashLayout({768, 432}, 1.5);
+//   const splash::SplashLayout layout = splash::ComputeSplashLayout({768, 384}, 1.5);
 //   const splash::SplashRect title = layout.text[0];   // SplashTextSlot::Title
 ROCKS_SPLASHSCREEN_API SplashLayout ComputeSplashLayout(SplashSize logical, double scale) noexcept;
 
