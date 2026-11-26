@@ -4192,6 +4192,41 @@
     },
     {
       "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Choose",
+      "id": "379e31ea430e4d7a91e86a1983c64619",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Mark",
+      "id": "e09df3c84279476697da706be7b877df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Note",
+      "id": "c9c3953a811b4058b32f40080f6caf70",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Place",
+      "id": "954edd00c1cc4937b03ea96b2a14dccb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Remember",
+      "id": "dc2759aeea4a4f26bdda7bdd57e2e392",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
       "name": "rocks::reflection_fixture::CallTarget::Reset",
       "id": "c7507dc6377448b3a5a8df492b600572",
       "aliases": [],
@@ -4483,6 +4518,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::CallTarget",
       "id": "ee3a89e6f29d47bd99d93ef9fa2f4982",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::CallTargetChild",
+      "id": "21cfc71f30ef4d88bf27fe507f6f0b54",
       "aliases": [],
       "retired": false
     },

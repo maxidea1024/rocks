@@ -67,6 +67,39 @@ public:
         return other == Handle() && weak.Handle() == Handle();
     }
 
+    // 바인딩 시험용 반환 없는 함수다(EventReflection EV1a — 약한 참조·const String&·struct 인자).
+    // other가 비지 않았으면 total에 1000을 더한다.
+    ROCKS_FUNCTION() void Remember(WeakObjectRef<CallTarget> other) noexcept {
+        if (!other.Handle().IsNull()) {
+            total += 1000;
+        }
+    }
+
+    // text의 byte 수를 total에 더한다.
+    ROCKS_FUNCTION() void Note(const String& text) noexcept {
+        total += static_cast<int32>(text.View().ByteCount());
+    }
+
+    // mode가 Doubled면 total을 두 배로 한다(enum 인자).
+    ROCKS_FUNCTION() void Choose(CallMode mode) noexcept {
+        if (mode == CallMode::Doubled) {
+            total *= 2;
+        }
+    }
+
+    // other가 비지 않았으면 total에 1을 더한다(ObjectHandle 인자 — WeakObjectRef<Object>와 형식
+    // flag로 갈린다).
+    ROCKS_FUNCTION() void Mark(ObjectHandle other) noexcept {
+        if (!other.IsNull()) {
+            total += 1;
+        }
+    }
+
+    // point.x * 10 + point.y를 total에 더한다.
+    ROCKS_FUNCTION() void Place(const CallPoint& point) noexcept {
+        total += point.x * 10 + point.y;
+    }
+
 #if ROCKS_WITH_EDITOR
     ROCKS_FUNCTION(EditorOnly) void Reset() noexcept {
         total = 0;
@@ -77,6 +110,15 @@ private:
     ROCKS_FUNCTION() void Bump() noexcept {
         total += 100;
     }
+};
+
+// 기반의 리플렉션 함수를 물려받는 파생이다(바인딩이 기반 레코드의 연산표를 캐시하는 경로 — EV1a).
+ROCKS_CLASS()
+class CallTargetChild : public CallTarget {
+    ROCKS_GENERATED_BODY()
+
+public:
+    using CallTarget::CallTarget;
 };
 
 inline Result<void> CallTarget::SetLabel(StringView text) noexcept {
