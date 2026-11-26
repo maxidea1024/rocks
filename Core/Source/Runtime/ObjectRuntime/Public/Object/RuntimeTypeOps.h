@@ -609,6 +609,42 @@ struct RuntimeValueOps {
     Result<void> (*validateTree)(const void* value) noexcept = nullptr;
 };
 
+// 함수 매개변수·반환 칸 하나의 연산이다(Docs/Design/FunctionReflection.ko.md FD9). value는 칸
+// C++ 형식의 값 ops(생성·소멸·복사 — detail::ValueOpsOf<T>())다. write는 FieldValue를 칸에
+// 쓰고(필드 쓰기와 같은 변환·검사 — weak 대상 생존·기대 타입, Name 토큰 pool, ClassRef 등록, 정수
+// 폭), read는 칸을 FieldValue로 읽는다. struct·컨테이너 칸(FieldValue로 통째 읽고 쓰지 않는 형식)은
+// 둘 다 null이고 같은 C++ 형식의 값을 value.copy로 넣고 꺼낸다(FunctionCall::SetArgumentValue).
+struct RuntimeParameterOps {
+    const RuntimeValueOps* value = nullptr;
+    Result<void> (*write)(ObjectRegistry& registry, const ObjectAccessContext& access, void* slot,
+                          const FieldValue& value, Allocator& valueAllocator) noexcept = nullptr;
+    Result<void> (*read)(const void* slot, FieldValue& value) noexcept = nullptr;
+};
+
+// 리플렉션 함수 하나의 생성 연산이다(UE 생성 exec thunk·Parms 대응 — Docs/Design/
+// FunctionReflection.ko.md FD7). construct는 호출 frame(FunctionSchema::frameSize·frameAlignment의
+// 빈 저장소)에 모든 칸을 기본값으로 만들고(할당 실패면 만든 칸을 되돌린다), destroy는 소멸한다.
+// invoke는 대상 handle을 해석해(Const면 읽기 — Resolve, 그 밖은 쓰기 — ResolveForWrite, static은
+// VerifyAccess만) frame의 인자로 함수를 부르고 반환값·함수의 실패 코드를 frame에 쓴다. 대상 해석
+// 실패(WrongThread·WrongContext·StaleHandle·Destroyed·TypeMismatch·Busy·ShuttingDown)만 그
+// 오류이고, 함수 자신의 실패(ReturnsResult)는 성공으로 돌아와 errorOffset의 ErrorCode에 남는다.
+// invokeBase는 스크립트 재정의(FR3)의 비가상 호출 칸이다(지금은 null). parameters는 schema 매개변수
+// 순서다.
+struct RuntimeFunctionOps {
+    Guid functionId{};
+    Result<void> (*construct)(void* frame, Allocator& allocator) noexcept = nullptr;
+    void (*destroy)(void* frame) noexcept = nullptr;
+    Result<void> (*invoke)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                           ObjectHandle self, void* frame) noexcept = nullptr;
+    Result<void> (*invokeBase)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle self, void* frame) noexcept = nullptr;
+    Span<const RuntimeParameterOps> parameters{};
+    RuntimeParameterOps result{};
+    // frame 안 함수 실패 코드(ErrorCode)의 위치다(ReturnsResult 함수만 — 그 밖은 0이고 읽지
+    // 않는다).
+    uint32 errorOffset = 0;
+};
+
 // 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.
 // Trace는 읽기만 수행한다. 콜백 중 생성·간선 변경·수집 재진입은 Busy로 거부한다.
 // lease 반환과 통계 조회는 허용한다. 활성 ConstructionContext의 롤백/소멸 재진입은 금지한다.
@@ -658,6 +694,10 @@ struct RuntimeTypeOps {
     // 코드가 만들고(리플렉션 클래스), 표로 나타낼 수 없는 필드가 있으면 builder.Unsupported()로
     // trace에 남는다.
     void (*referenceLayout)(const Object&, detail::ReferenceLayoutBuilder&) noexcept = nullptr;
+    // 리플렉션 함수 연산이다(TypeSchema::functions와 같은 수·순서 — Docs/Design/
+    // FunctionReflection.ko.md FD10). 등록이 배열을 깊게 복사한다(함수 포인터·값 ops 표는 module이
+    // 수명을 보존한다).
+    Span<const RuntimeFunctionOps> functions{};
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.
